@@ -24,6 +24,12 @@ const char *regs[] = {
 };
 
 void isa_reg_display() {
+  printf(" pc: 0x%08llx\n", cpu.pc);
+  for (int i = 0; i < 32; i++) {
+    if (i>0 && i % 4 == 0) printf("\n");
+    printf("%3s: 0x%08llx\t", regs[i], cpu.gpr[i]);
+  }
+  printf("\n");
 }
 
 word_t isa_reg_str2val(const char *s, bool *success) {

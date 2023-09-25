@@ -17,6 +17,7 @@
 #define __SDB_H__
 
 #include <common.h>
+#include <ctype.h>
 
 word_t expr(char *e, bool *success);
 
