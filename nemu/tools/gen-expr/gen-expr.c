@@ -22,7 +22,9 @@
 
 // this should be enough
 static char buf[65536] = {};
+static uint32_t buf_pointer = 0;
 static char code_buf[65536 + 128] = {}; // a little larger than `buf`
+static char ops[] = "+-*/";
 static char *code_format =
 "#include <stdio.h>\n"
 "int main() { "
@@ -31,8 +33,53 @@ static char *code_format =
 "  return 0; "
 "}";
 
+uint32_t choose(uint32_t n) {
+  return rand() % n;
+}
+
+void gen(char c){
+  buf[buf_pointer] = c;
+  buf_pointer++;
+}
+
+void gen_num() {
+  gen('1' + choose(9));
+  int len = choose(4);
+  for (size_t i = 0; i < len; i++)
+  {
+    gen('0' + choose(10));
+  }
+  gen('u');
+}
+
+void gen_space() {
+  int len = choose(5);
+  for (size_t i = 0; i < len; i++)
+  {
+    gen(' ');
+  }
+}
+
+void gen_rand_op() {
+  gen(ops[choose(sizeof(ops)-1)]);
+}
+
 static void gen_rand_expr() {
-  buf[0] = '\0';
+  if (buf_pointer > 16){
+    return gen_num();
+  }
+  switch (choose(3))
+  {
+  case 0:
+    gen_num();
+    break;
+  case 1:
+    gen('('); gen_space(); gen_rand_expr();gen_space() ; gen(')');
+    break;
+  default:
+    gen_rand_expr(); gen_space() ;gen_rand_op(); gen_space() ;gen_rand_expr();
+    break;
+  }
 }
 
 int main(int argc, char *argv[]) {
@@ -44,7 +91,9 @@ int main(int argc, char *argv[]) {
   }
   int i;
   for (i = 0; i < loop; i ++) {
+    buf_pointer = 0;
     gen_rand_expr();
+    buf[buf_pointer] = '\0';
 
     sprintf(code_buf, code_format, buf);
 
@@ -56,14 +105,24 @@ int main(int argc, char *argv[]) {
     int ret = system("gcc /tmp/.code.c -o /tmp/.expr");
     if (ret != 0) continue;
 
-    fp = popen("/tmp/.expr", "r");
-    assert(fp != NULL);
+    unsigned results[3];
+    for (size_t j = 0; j < 3; j++)
+    {
+      fp = popen("/tmp/.expr", "r");
+      assert(fp != NULL);
 
-    int result;
-    ret = fscanf(fp, "%d", &result);
-    pclose(fp);
-
-    printf("%u %s\n", result, buf);
+      int result;
+      ret = fscanf(fp, "%d", &result);
+      results[j] = result;
+      pclose(fp);
+    }
+    if (results[0] != results[1] || results[1] != results [2]) {
+      continue;
+    }
+    printf("%u %s\n", results[0], buf);
+    if (i % 100 == 0){
+      fflush(stdout);
+    }
   }
   return 0;
 }

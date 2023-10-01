@@ -128,6 +128,19 @@ static int cmd_x(char *args) {
 }
 
 static int cmd_p(char *args) {
+  printf("%s\n", args);
+  if (args == NULL){
+    printf("No argument given.\n");
+    return 0;
+  }
+  bool success = true;
+  word_t data = expr(args, &success);
+  if (success) {
+    printf("0x%08llx\n", data);
+  }
+  else {
+    printf("Invalid arg: %s, expr: %llx\n", args, data);
+  }
   return 0;
 }
 

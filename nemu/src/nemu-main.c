@@ -14,11 +14,14 @@
 ***************************************************************************************/
 
 #include <common.h>
+#include "monitor/sdb/sdb.h"
 
 void init_monitor(int, char *[]);
 void am_init_monitor();
 void engine_start();
 int is_exit_status_bad();
+
+void test_expr();
 
 int main(int argc, char *argv[]) {
   /* Initialize the monitor. */
