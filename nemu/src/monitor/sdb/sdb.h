@@ -21,4 +21,14 @@
 
 word_t expr(char *e, bool *success);
 
+void expr_tests();
+
+void wp_add(const char *e, bool *success);
+
+void wp_del(int id, bool *success);
+
+void wp_show();
+
+bool wp_check_changed();
+
 #endif

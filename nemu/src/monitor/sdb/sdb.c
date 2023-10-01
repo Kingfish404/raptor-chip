@@ -55,29 +55,27 @@ static int cmd_q(char *args) {
 }
 
 static int cmd_si(char *args) {
-  char *arg = strtok(args, " ");
   int n = 1;
-  if (arg != NULL) {
-    sscanf(arg, "%d", &n);
+  if (args != NULL) {
+    sscanf(args, "%d", &n);
   }
   cpu_exec(n);
   return 0;
 }
 
 static int cmd_info(char *args) {
-  char *arg = strtok(args, " ");
-  if (arg == NULL) {
+  if (args == NULL) {
     printf("No argument given.\n");
     return 0;
   }
-  if (strcmp(arg, "r") == 0) {
+  if (strcmp(args, "r") == 0) {
     isa_reg_display();
   }
-  else if (strcmp(arg, "w") == 0) {
-
+  else if (strcmp(args, "w") == 0) {
+    wp_show();
   }
   else {
-    printf("Unknown argument '%s'.\n", arg);
+    printf("Unknown argument '%s'.\n", args);
   }
   return 0;
 }
@@ -88,16 +86,21 @@ static int cmd_x(char *args) {
     printf("No argument given.\n");
     return 0;
   }
-  char *expr = strtok(NULL, " ");
-  if (expr == NULL){
+  char *e = strtok(NULL, " ");
+  if (e == NULL){
     printf("Require second argument.\n");
     return 0;
   }
 
   int n;
   long long addr;
+  bool success = true;
   sscanf(arg, "%d", &n);
-  addr = strtoll(expr, NULL , 0);
+  addr = expr(e, &success);
+  if (!success) {
+    printf("Invalid arg: %s, expr: %llx\n", args, addr);
+    return 0;
+  }
 
   word_t data;
   size_t word_size = sizeof(word_t);
@@ -108,7 +111,7 @@ static int cmd_x(char *args) {
         printf("| ");
         for (size_t j = 0; j < 4; j++)
         {
-          data = vaddr_read(addr + i - (3 - j) - 1, 4);
+          data = vaddr_read(addr + (i - (3 - j) - 1) * 4, 4);
           for (size_t k = 0; k < word_size / 2; k++)
           {
             uint8_t c = (data >> (((word_size / 2) - 1 - k )* 8)) & 0xff;
@@ -120,7 +123,7 @@ static int cmd_x(char *args) {
       }
       printf("%.16llx: ", addr + i);
     }
-    data = vaddr_read(addr + i, 4);
+    data = vaddr_read(addr + i * 4, 4);
     printf("%08llx ", data);
   }
   printf("\n");
@@ -128,7 +131,6 @@ static int cmd_x(char *args) {
 }
 
 static int cmd_p(char *args) {
-  printf("%s\n", args);
   if (args == NULL){
     printf("No argument given.\n");
     return 0;
@@ -136,7 +138,7 @@ static int cmd_p(char *args) {
   bool success = true;
   word_t data = expr(args, &success);
   if (success) {
-    printf("0x%08llx\n", data);
+    printf("0x%016llx, %020lluull\n", data, data);
   }
   else {
     printf("Invalid arg: %s, expr: %llx\n", args, data);
@@ -145,10 +147,30 @@ static int cmd_p(char *args) {
 }
 
 static int cmd_w(char *args) {
+  if (args == NULL){
+    printf("No argument given.\n");
+    return 0;
+  }
+  bool success = true;
+  wp_add(args, &success);
+  if (!success) {
+    printf("Invalid arg: %s\n", args);
+  }
   return 0;
 }
 
 static int cmd_d(char *args) {
+  if (args == NULL){
+    printf("No argument given.\n");
+    return 0;
+  }
+  int n;
+  sscanf(args, "%d", &n);
+  bool success = true;
+  wp_del(n, &success);
+  if (!success) {
+    printf("Invalid arg: %d\n", n);
+  }
   return 0;
 }
 
@@ -163,14 +185,11 @@ static struct {
   { "c", "Continue the execution of the program", cmd_c },
   { "q", "Exit NEMU", cmd_q },
   { "si", "Usage: si [N]\t\tExecute 'N' instructions step by step. When N is not given, the default is 1.", cmd_si },
-  { "info", "Usage: info [SUBCMD]\tPrint register state by 'info r'. Print watchpoint information by 'info w'.", cmd_info },
-  { "x", "Usage: x [N] [EXPR]\tScan 'N' continue 4 bytes, using 'EXPR' as start address.", cmd_x},
-  { "p", "Usage: p [EXPR]\tProcess and show the result of 'EXPR'.", cmd_p},
-  { "w", "Usage: w [EXPR]\tPause program when the result of 'EXPR changed.", cmd_w},
-  { "d", "Usage: d [N]\t\tDelete watchpoint which's id is 'N'.", cmd_d},
-
-  /* TODO: Add more commands */
-
+  { "info", "Usage: info SUBCMD\tPrint register state by 'info r'. Print watchpoint information by 'info w'.", cmd_info },
+  { "x", "Usage: x N EXPR\tScan 'N' continue 4 bytes, using 'EXPR' as start address.", cmd_x},
+  { "p", "Usage: p EXPR\tProcess and show the result of 'EXPR'.", cmd_p},
+  { "w", "Usage: w EXPR\tPause program when the result of 'EXPR changed.", cmd_w},
+  { "d", "Usage: d N\t\tDelete watchpoint which's id is 'N'.", cmd_d},
 };
 
 #define NR_CMD ARRLEN(cmd_table)

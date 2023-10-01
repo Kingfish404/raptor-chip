@@ -1,9 +1,9 @@
 #include <common.h>
-#include "monitor/sdb/sdb.h"
+#include "sdb.h"
 
 void init_regex();
 
-void test_expr() {
+void expr_tests() {
   init_regex();
   bool success = true;
   FILE *fp = fopen("./input-advance", "r");
