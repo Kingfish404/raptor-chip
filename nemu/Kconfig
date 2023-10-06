@@ -109,6 +109,9 @@ config CC_OPT
   default "-O3" if CC_O3
   default "none"
 
+config WATCHPOINT
+  bool "Enable cycle level watchpoint"
+
 config CC_LTO
   depends on !TARGET_AM
   bool "Enable link-time optimization"

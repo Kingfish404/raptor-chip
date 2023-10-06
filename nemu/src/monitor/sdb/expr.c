@@ -14,17 +14,18 @@
 ***************************************************************************************/
 
 #include <isa.h>
+#include <memory/vaddr.h>
 
 /* We use the POSIX regex functions to process regular expressions.
  * Type 'man regex' for more information about POSIX regex functions.
  */
 #include <regex.h>
+#include <string.h>
+#include <debug.h>
 
 enum {
-  TK_NOTYPE = 256, TK_EQ,
-
-  /* TODO: Add more token types */
-
+  TK_NOTYPE = 256, TK_EQ, TK_NEQ, TK_AND,
+  TK_NUM, TK_REG, TK_DEREF,
 };
 
 static struct rule {
@@ -32,13 +33,18 @@ static struct rule {
   int token_type;
 } rules[] = {
 
-  /* TODO: Add more rules.
-   * Pay attention to the precedence level of different rules.
-   */
-
-  {" +", TK_NOTYPE},    // spaces
-  {"\\+", '+'},         // plus
+  {"\\$[a-zA-Z]+", TK_REG},     // regs name
+  {"\\(", '('},
+  {"\\)", ')'},
+  {"\\*", '*'},         // mul  | op
+  {"/", '/'},           // div  | op
+  {" ", TK_NOTYPE},     // spaces
+  {"\\+", '+'},         // plus | op
+  {"-", '-'},           // sub  | op
   {"==", TK_EQ},        // equal
+  {"!=", TK_NEQ},       // not equal
+  {"&&", TK_AND},       // not equal
+  {"(0x)?[0-9]+[uU]?", TK_NUM},       // number
 };
 
 #define NR_REGEX ARRLEN(rules)
@@ -67,7 +73,7 @@ typedef struct token {
   char str[32];
 } Token;
 
-static Token tokens[32] __attribute__((used)) = {};
+static Token tokens[128] __attribute__((used)) = {};
 static int nr_token __attribute__((used))  = 0;
 
 static bool make_token(char *e) {
@@ -84,18 +90,33 @@ static bool make_token(char *e) {
         char *substr_start = e + position;
         int substr_len = pmatch.rm_eo;
 
-        Log("match rules[%d] = \"%s\" at position %d with len %d: %.*s",
-            i, rules[i].regex, position, substr_len, substr_len, substr_start);
+        // Log("match rules[%d] = \"%s\" at position %d with len %d: %.*s",
+        //     i, rules[i].regex, position, substr_len, substr_len, substr_start);
 
         position += substr_len;
 
-        /* TODO: Now a new token is recognized with rules[i]. Add codes
-         * to record the token in the array `tokens'. For certain types
-         * of tokens, some extra actions should be performed.
-         */
+        tokens[nr_token].type = rules[i].token_type;
 
         switch (rules[i].token_type) {
-          default: TODO();
+          case TK_EQ:
+          case TK_NEQ:
+          case TK_AND:
+            strncpy(tokens[nr_token].str, substr_start, substr_len);
+            tokens[nr_token].str[substr_len] = '\0';
+            nr_token++;
+            break;
+          case TK_NUM:
+          case TK_REG:
+            Assert(substr_len <= 32, "token str is longer than 32: %s", substr_start);
+            strncpy(tokens[nr_token].str, substr_start, substr_len);
+            tokens[nr_token].str[substr_len] = '\0';
+            nr_token++;
+            break;
+          case TK_NOTYPE:
+            break;
+          default: 
+            nr_token++;
+            break;
         }
 
         break;
@@ -112,14 +133,143 @@ static bool make_token(char *e) {
 }
 
 
+int get_priority(Token *op){
+  switch (op->type)
+  {
+  case '*':
+  case '/':
+    return -3;
+  case '+':
+  case '-':
+    return -4;
+  default: Assert(0, "Unexpected token: %d %c\n", op->type, op->type);
+  }
+}
+
+bool check_parentheses(Token *p, Token *q) {
+  if (p->type != '(' || q->type != ')') {
+    return false;
+  }
+  p++; q--;
+  for (int i = 0; p < q; )
+  {
+  if(p->type == '(') {
+      i++;
+    } 
+    else if(p->type == ')') {
+      i--;
+    }
+    if (i < 0) {
+      return false;
+    }
+    p++;
+  }
+  return true;
+}
+
+bool is_op(Token *i){
+  return (
+    i->type == '*' || i->type == '/' || i->type == '+' || i->type == '-' ||
+    i->type == TK_EQ || i->type == TK_NEQ || i->type == TK_AND || i->type == TK_DEREF
+    );
+}
+
+word_t eval(Token *p, Token *q, bool *success) {
+  if (p > q) {
+    *success = false;
+    return 0;
+  }
+  else if (p == q) {
+    switch (p->type)
+    {
+    case TK_NUM: return strtoull(p->str, NULL, 0);
+    case TK_REG: return isa_reg_str2val(p->str + 1, success);
+    default: *success = 0; return 0;
+    }
+  }
+  else if (check_parentheses(p, q) == true) {
+    return eval(p + 1, q - 1, success);
+  }
+  else {
+    Token *op = NULL;
+    int b = 0;
+    // backward to find op
+    for (Token *it = p; it < q; it++)
+    {
+      if (it->type == '(') {
+        b++;
+      } 
+      else if (it->type == ')') {
+        b--;
+      }
+      if (b < 0){
+        *success = false;
+        return 0;
+      }
+      else if (
+        (b == 0 && is_op(it)) &&
+        (op == NULL || get_priority(op) >= get_priority(it))) {
+        op = it;
+      }
+    }
+    if (op == NULL) {
+      *success = false;
+      return 0;
+    }
+    // forward to find op
+    int count = 0;
+    while (op - (count + 1) >= p && is_op(op - (count + 1)))
+    {
+      count++;
+    }
+    op = op - count;
+    Log("%d %c %s", op->type, op->type, op->str);
+    if (op > p) {
+      // two variate operator
+      uint32_t val1 = eval(p, op - 1, success);
+      uint32_t val2 = eval(op + 1, q, success);
+      // Log("%u %c %u", val1, op->type, val2);
+      if (!success){
+        return 0;
+      }
+      switch (op->type)
+      {
+      case '+': return (uint32_t)(val1 + val2);
+      case '-': return (uint32_t)(val1 - val2);
+      case '*': return (uint32_t)(val1 * val2);
+      case '/': return (uint32_t)(val1 / val2);
+      case TK_EQ: return val1 == val2;
+      case TK_NEQ: return val1 != val2;
+      case TK_AND: return val1 && val2;
+      default: *success = 0; return 0;
+      }
+    }
+    else {
+      // one variate operator. a.k.a Unary.
+      switch (op->type)
+      {
+      case '-': return -eval(op + 1, q, success);
+      case TK_DEREF: return vaddr_read(eval(op+1, q, success), sizeof(word_t));
+      default: *success = 0; return 0;
+      }
+    }
+    return 0;
+   
+  }
+}
+
 word_t expr(char *e, bool *success) {
   if (!make_token(e)) {
     *success = false;
     return 0;
   }
 
-  /* TODO: Insert codes to evaluate the expression. */
-  TODO();
+  for (size_t i = 0; i < nr_token; i ++) {
+    if (tokens[i].type == '*' && (i == 0 || is_op(&tokens[i - 1])) ) {
+      tokens[i].type = TK_DEREF;
+    }
+  }
 
-  return 0;
+  word_t v = eval(&tokens[0], &tokens[nr_token - 1], success);
+  return v;
 }
