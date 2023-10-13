@@ -184,12 +184,12 @@ static struct {
   { "help", "Display information about all supported commands", cmd_help },
   { "c", "Continue the execution of the program", cmd_c },
   { "q", "Exit NEMU", cmd_q },
-  { "si", "Usage: si [N]\t\tExecute 'N' instructions step by step. When N is not given, the default is 1.", cmd_si },
-  { "info", "Usage: info SUBCMD\tPrint register state by 'info r'. Print watchpoint information by 'info w'.", cmd_info },
-  { "x", "Usage: x N EXPR\tScan 'N' continue 4 bytes, using 'EXPR' as start address.", cmd_x},
-  { "p", "Usage: p EXPR\tProcess and show the result of 'EXPR'.", cmd_p},
-  { "w", "Usage: w EXPR\tPause program when the result of 'EXPR changed.", cmd_w},
-  { "d", "Usage: d N\t\tDelete watchpoint which's id is 'N'.", cmd_d},
+  { "si", "si [N]\tExecute 'N' instructions step by step. When N is not given, the default is 1.", cmd_si },
+  { "info", "info SUBCMD\tPrint register state by 'info r'. Print watchpoint information by 'info w'.", cmd_info },
+  { "x", "x N EXPR\tScan 'N' continue 4 bytes, using 'EXPR' as start address.", cmd_x},
+  { "p", "p EXPR\tProcess and show the result of 'EXPR'.", cmd_p},
+  { "w", "w EXPR\tPause program when the result of 'EXPR changed.", cmd_w},
+  { "d", "d N\t\tDelete watchpoint which's id is 'N'.", cmd_d},
 };
 
 #define NR_CMD ARRLEN(cmd_table)

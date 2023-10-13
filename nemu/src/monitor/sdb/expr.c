@@ -33,18 +33,18 @@ static struct rule {
   int token_type;
 } rules[] = {
 
-  {"\\$[a-zA-Z]+", TK_REG},     // regs name
+  {"\\$[a-zA-Z0-9]+", TK_REG},     // regs name
   {"\\(", '('},
   {"\\)", ')'},
   {"\\*", '*'},         // mul  | op
   {"/", '/'},           // div  | op
-  {" ", TK_NOTYPE},     // spaces
+  {" +", TK_NOTYPE},     // spaces
   {"\\+", '+'},         // plus | op
   {"-", '-'},           // sub  | op
   {"==", TK_EQ},        // equal
   {"!=", TK_NEQ},       // not equal
   {"&&", TK_AND},       // not equal
-  {"(0x)?[0-9]+[uU]?", TK_NUM},       // number
+  {"((0x[0-9abcdef]+)|[0-9]+)[lL]?[lL]?[uU]?", TK_NUM},       // number
 };
 
 #define NR_REGEX ARRLEN(rules)
@@ -223,21 +223,21 @@ word_t eval(Token *p, Token *q, bool *success) {
       count++;
     }
     op = op - count;
-    Log("%d %c %s", op->type, op->type, op->str);
+    // Log("%d %c %s", op->type, op->type, op->str);
     if (op > p) {
       // two variate operator
-      uint32_t val1 = eval(p, op - 1, success);
-      uint32_t val2 = eval(op + 1, q, success);
+      word_t val1 = eval(p, op - 1, success);
+      word_t val2 = eval(op + 1, q, success);
       // Log("%u %c %u", val1, op->type, val2);
       if (!success){
         return 0;
       }
       switch (op->type)
       {
-      case '+': return (uint32_t)(val1 + val2);
-      case '-': return (uint32_t)(val1 - val2);
-      case '*': return (uint32_t)(val1 * val2);
-      case '/': return (uint32_t)(val1 / val2);
+      case '+': return (word_t)(val1 + val2);
+      case '-': return (word_t)(val1 - val2);
+      case '*': return (word_t)(val1 * val2);
+      case '/': return (word_t)(val1 / val2);
       case TK_EQ: return val1 == val2;
       case TK_NEQ: return val1 != val2;
       case TK_AND: return val1 && val2;

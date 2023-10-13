@@ -3,10 +3,16 @@
 
 void init_regex();
 
-void expr_tests() {
+void expr_tests()
+{
   init_regex();
   bool success = true;
-  FILE *fp = fopen("./input-advance", "r");
+  FILE *fp = fopen("./input64", "r");
+  if (fp == NULL)
+  {
+    printf("Error: file not found!\n");
+    exit(1);
+  }
   fseek(fp, 0, SEEK_END);
   long size = ftell(fp);
   char *test_data = malloc(size);
@@ -16,19 +22,17 @@ void expr_tests() {
   assert(ret == 1);
   fclose(fp);
 
-  char *line=NULL, *context=NULL;
+  char *line = NULL, *context = NULL;
   for (
-    line = strtok_r(test_data, "\n", &context);
-    line;
-    line = strtok_r(NULL, "\n", &context)) {
+      line = strtok_r(test_data, "\n", &context);
+      line;
+      line = strtok_r(NULL, "\n", &context))
+  {
     char *idx = strchr(line, ' ');
-    word_t gt = strtoll(line, &idx, 0);
+    word_t gt = strtoull(line, &idx, 0);
     success = true;
     word_t data = expr(idx + 1, &success);
-    if (success) {
-      printf("0x%08llx\n", data);
-    }
-    printf("%llu, %llu\n", gt, data);
+    printf("gt: 0x%016llx, %llu, data: 0x%016llx, %llu\n", gt, gt, data, data);
     assert(gt == data);
   }
   exit(0);
