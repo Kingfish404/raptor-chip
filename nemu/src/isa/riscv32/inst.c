@@ -67,6 +67,15 @@ static void decode_operand(Decode *s, int *rd, word_t *src1, word_t *src2, word_
   // printf("id: %2d, type: %d, rs1: %s, rs2: %s, rd: %s, imm: %llu\n", count++, type, regs[rs1], regs[rs2], regs[*rd], *imm);
 }
 
+/*
+    31     27   26 25 24    20 19    15  14  12 11     7 6      0
+    |  funct7       |   rs2   |   rs1   |funct3|  rd    | opcode | R-type
+    |  imm[11:0]              |   rs1   |funct3|  rd    | opcode | I-type
+    |  imm[11:5]    |   rs2   |   rs1   |funct3|imm[4:0]| opcode | S-type
+    |  imm[12|10:5] |   rs2   |   rs1|funct3|imm[4:1|11]| opcode | B-type
+    |  imm[31:12]                              |   rd   | opcode | U-type
+    |  imm[20|10:1|11|19:12]                   |   rd   | opcode | J-type
+ */
 static int decode_exec(Decode *s) {
   int rd = 0;
   word_t src1 = 0, src2 = 0, imm = 0;
