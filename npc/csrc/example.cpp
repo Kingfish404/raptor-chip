@@ -55,46 +55,6 @@ void light(int argc, char **argv)
   delete contextp;
 }
 
-#ifdef DUAL_CONTROL
-int dual_control(int argc, char **argv)
-{
-  VerilatedContext *contextp = new VerilatedContext;
-  contextp->commandArgs(argc, argv);
-  Vtop *top = new Vtop{contextp};
-  Verilated::traceEverOn(true);
-  VerilatedVcdC *tfp = new VerilatedVcdC;
-  top->trace(tfp, 99);
-  tfp->open("main.vcd");
-
-  nvboard_init();
-  nvboard_bind_pin(&top->a, BIND_RATE_RT, BIND_DIR_OUT, 1, LD0);
-  nvboard_bind_pin(&top->b, BIND_RATE_RT, BIND_DIR_OUT, 1, LD1);
-  nvboard_bind_pin(&top->f, BIND_RATE_RT, BIND_DIR_OUT, 1, LD2);
-  while (!contextp->gotFinish())
-  {
-    int a = rand() & 1;
-    int b = rand() & 1;
-    top->a = a;
-    top->b = b;
-    contextp->timeInc(1);
-    top->eval();
-    tfp->dump(contextp->time());
-    printf("a = %d, b = %d, f = %d\n", a, b, top->f);
-    assert(top->f == (a ^ b));
-    nvboard_update();
-    if (contextp->time() > 100)
-    {
-      // break;
-    }
-  }
-  nvboard_quit();
-  tfp->close();
-  delete tfp;
-  delete top;
-  delete contextp;
-}
-#endif
-
 int main(int argc, char **argv)
 {
   light(argc, argv);
