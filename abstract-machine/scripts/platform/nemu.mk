@@ -17,6 +17,11 @@ CFLAGS += -DMAINARGS=\"$(mainargs)\"
 CFLAGS += -I$(AM_HOME)/am/src/platform/nemu/include
 .PHONY: $(AM_HOME)/am/src/platform/nemu/trm.c
 
+# if MODE == batch, add -b to NEMUFLAGS
+ifeq ($(MODE), batch)
+  NEMUFLAGS += -b
+endif
+
 image: $(IMAGE).elf
 	@$(OBJDUMP) -d $(IMAGE).elf > $(IMAGE).txt
 	@echo + OBJCOPY "->" $(IMAGE_REL).bin
