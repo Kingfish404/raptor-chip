@@ -17,10 +17,29 @@
 #include <cpu/cpu.h>
 #include <cpu/ifetch.h>
 #include <cpu/decode.h>
+#include <elf.h>
 
 #define R(i) gpr(i)
 #define Mr vaddr_read
 #define Mw vaddr_write
+#define MAX_FTRACE_SIZE 1024
+#define MAX_ELF_SIZE 32 * 1024
+
+typedef struct Ftrace
+{
+  word_t pc;
+  word_t npc;
+  uint64_t depth;
+  bool ret;
+} Ftrace;
+
+
+Ftrace ftracebuf[MAX_FTRACE_SIZE];
+uint64_t ftracehead = 0;
+uint64_t ftracedepth = 0;
+char elfbuf[MAX_ELF_SIZE];
+Elf64_Ehdr elfhdr;
+Elf64_Shdr *elfshdr_symtab = NULL, *elfshdr_strtab = NULL;
 
 enum {
   TYPE_R, TYPE_I, TYPE_S,
@@ -183,10 +202,98 @@ static int decode_exec(Decode *s) {
 
   R(0) = 0; // reset $zero to 0
 
+  uint32_t opcode = BITS(s->isa.inst.val, 6, 0);
+  if (opcode == 0b1100111 || opcode == 0b1101111) {
+    ftracebuf[ftracehead].pc = s->pc;
+    ftracebuf[ftracehead].npc = s->dnpc;
+    if (s->isa.inst.val == 0x00008067) {
+      ftracebuf[ftracehead].ret = true;
+      ftracedepth--;
+      ftracebuf[ftracehead].depth = ftracedepth;
+    } else {
+      ftracebuf[ftracehead].ret = false;
+      ftracebuf[ftracehead].depth = ftracedepth;
+      ftracedepth++;
+    }
+    ftracehead = (ftracehead + 1) % MAX_FTRACE_SIZE;
+  }
   return 0;
 }
 
 int isa_exec_once(Decode *s) {
   s->isa.inst.val = inst_fetch(&s->snpc, 4);
   return decode_exec(s);
+}
+
+void isa_parser_elf(char *filename) {
+  FILE *fp = fopen(filename, "rb");
+  Assert(fp, "Can not open '%s'", filename);
+  fseek(fp, 0, SEEK_END);
+  long size = ftell(fp);
+  Assert(size < MAX_ELF_SIZE, "elf file is too large");
+
+  fseek(fp, 0, SEEK_SET);
+  int ret = fread(&elfhdr, sizeof(elfhdr), 1, fp);
+  assert(ret == 1);
+  assert(memcmp(elfhdr.e_ident, ELFMAG, SELFMAG) == 0);
+  fseek(fp, 0, SEEK_SET);
+  ret = fread(elfbuf, size, 1, fp);
+  assert(ret == 1);
+  fclose(fp);
+
+  printf("e_ident: ");
+  for (size_t i = 0; i < SELFMAG; i++) {
+    printf("%02x ", elfhdr.e_ident[i]);
+  }
+  printf("\n");
+  printf("e_type: %d\t", elfhdr.e_type);
+  printf("e_machine: %d\t", elfhdr.e_machine);
+  printf("e_version: %d\n", elfhdr.e_version);
+  printf("e_entry: 0x%016llx\t", elfhdr.e_entry);
+  printf("e_phoff: 0x%016llx\n", elfhdr.e_phoff);
+  printf("e_shoff: 0x%016llx\t", elfhdr.e_shoff);
+  printf("e_flags: 0x%016x\n", elfhdr.e_flags);
+  printf("e_ehsize: %d\t", elfhdr.e_ehsize);
+  printf("e_phentsize: %d\t", elfhdr.e_phentsize);
+  printf("e_phnum: %d\n", elfhdr.e_phnum);
+  printf("e_shentsize: %d\t", elfhdr.e_shentsize);
+  printf("e_shnum: %d\t", elfhdr.e_shnum);
+  printf("e_shstrndx: %d\n", elfhdr.e_shstrndx);
+
+  for (size_t i = 0; i < elfhdr.e_shnum; i++) {
+    Elf64_Shdr *shdr = (Elf64_Shdr *)(elfbuf + elfhdr.e_shoff + i * elfhdr.e_shentsize);
+    if (shdr->sh_type == SHT_SYMTAB) {
+      elfshdr_strtab = (Elf64_Shdr *)(elfbuf + elfhdr.e_shoff + shdr->sh_link * elfhdr.e_shentsize);
+      elfshdr_symtab = shdr;
+      break;
+      for (size_t j = 0; j < elfshdr_symtab->sh_size / sizeof(Elf64_Sym); j++) {
+        Elf64_Sym *sym = (Elf64_Sym *)(elfbuf + elfshdr_symtab->sh_offset + j * sizeof(Elf64_Sym));
+        printf("0x%016llx: %s\n", sym->st_value, elfbuf + elfshdr_strtab->sh_offset + sym->st_name);
+      }
+      break;
+    }
+  }
+}
+
+void cpu_show_ftrace() {
+  Elf64_Sym *sym = NULL;
+  Ftrace *ftrace = NULL;
+  for (size_t i = 0; i < ftracehead; i++) {
+    ftrace = ftracebuf + i;
+    printf("0x%016llx: ", ftrace->pc);
+    for (size_t j = 0; j < ftrace->depth; j++) {
+      printf("  ");
+    }
+    for (int j = elfshdr_symtab->sh_size / sizeof(Elf64_Sym) - 1; j >= 0; j--) {
+      sym = (Elf64_Sym *)(elfbuf + elfshdr_symtab->sh_offset + j * sizeof(Elf64_Sym));
+      if (sym->st_value == ftrace->npc) {
+        break;
+      }
+    }
+    printf(
+      "%s [%s@0x%016llx]\n",
+      ftrace->ret ? "ret" : "call",
+      elfbuf + elfshdr_strtab->sh_offset + sym->st_name,
+      ftrace->npc);
+  }
 }

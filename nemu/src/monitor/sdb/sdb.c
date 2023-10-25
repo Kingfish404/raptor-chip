@@ -68,14 +68,29 @@ static int cmd_info(char *args) {
     printf("No argument given.\n");
     return 0;
   }
-  if (strcmp(args, "r") == 0) {
+  while (args[0] == ' ') {
+    args++;
+  }
+  switch (args[0])    
+  {
+  case 'r':
     isa_reg_display();
-  }
-  else if (strcmp(args, "w") == 0) {
+    break;
+  case 'w':
     wp_show();
-  }
-  else {
+    break;
+  case 'i':
+    #ifdef CONFIG_ITRACE
+      cpu_show_itrace();
+    #else
+      printf("ITRACE is not enabled.\n");
+    #endif
+  case 'f':
+    cpu_show_ftrace();
+    break;
+  default:
     printf("Unknown argument '%s'.\n", args);
+    break;
   }
   return 0;
 }
@@ -184,8 +199,8 @@ static struct {
   { "help", "Display information about all supported commands", cmd_help },
   { "c", "Continue the execution of the program", cmd_c },
   { "q", "Exit NEMU", cmd_q },
-  { "si", "si [N]\tExecute 'N' instructions step by step. When N is not given, the default is 1.", cmd_si },
-  { "info", "info SUBCMD\tPrint register state by 'info r'. Print watchpoint information by 'info w'.", cmd_info },
+  { "si", "si/s [N]\tExecute 'N' instructions step by step. When N is not given, the default is 1.", cmd_si },
+  { "info", "info/i SUBCMD\tPrint: register state by 'i r'. watchpoint information by 'i w'. instruction flow by 'i i'. function flow by 'i f", cmd_info },
   { "x", "x N EXPR\tScan 'N' continue 4 bytes, using 'EXPR' as start address.", cmd_x},
   { "p", "p EXPR\tProcess and show the result of 'EXPR'.", cmd_p},
   { "w", "w EXPR\tPause program when the result of 'EXPR changed.", cmd_w},
