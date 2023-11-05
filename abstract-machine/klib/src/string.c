@@ -92,21 +92,6 @@ void *memset(void *s, int c, size_t n)
   return s;
 }
 
-void *memmove(void *dst, const void *src, size_t n)
-{
-  char *mem = malloc(n);
-  for (size_t i = 0; i < n; i++)
-  {
-    mem[i] = ((char *)src)[i];
-  }
-  for (size_t i = 0; i < n; i++)
-  {
-    ((char *)dst)[i] = ((char *)mem)[i];
-  }
-  free(mem);
-  return dst;
-}
-
 void *memcpy(void *out, const void *in, size_t n)
 {
   for (size_t i = 0; i < n; i++)
@@ -114,6 +99,22 @@ void *memcpy(void *out, const void *in, size_t n)
     ((char *)out)[i] = ((char *)in)[i];
   }
   return out;
+}
+
+void *memmove(void *dst, const void *src, size_t n)
+{
+  if (dst < src)
+  {
+    memcpy(dst, src, n);
+  }
+  else if (dst > src)
+  {
+    for (int i = n - 1; i >= 0; i--)
+    {
+      ((char *)dst)[i] = ((char *)src)[i];
+    }
+  }
+  return dst;
 }
 
 int memcmp(const void *s1, const void *s2, size_t n)

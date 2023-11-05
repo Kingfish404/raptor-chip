@@ -30,21 +30,28 @@ int sprintf(char *out, const char *fmt, ...)
       {
       case 'd':
         d = va_arg(ap, int);
-        char cs[8] = {'0'};
-        p = cs;
-        while (d != 0)
+        if (d < 0)
         {
-          *p = d % 10 + '0';
-          d /= 10;
-          p++;
-        }
-        while (p != cs)
-        {
-          p--;
-          *pout = *p;
+          *pout = '-';
           pout++;
         }
-        *(pout + 1) = '\0';
+        char *s_p = pout;
+        do
+        {
+          int td = d % 10;
+          *pout = '0' + (td >= 0 ? td : -td);
+          pout++;
+          d /= 10;
+        } while (d != 0);
+        char *e_p = pout - 1;
+        while (s_p < e_p)
+        {
+          char tmp = *s_p;
+          *s_p = *e_p;
+          *e_p = tmp;
+          s_p++;
+          e_p--;
+        }
         break;
       case 's':
         p = va_arg(ap, char *);
@@ -58,8 +65,10 @@ int sprintf(char *out, const char *fmt, ...)
       pout++;
       break;
     }
+    (*pout) = '\0';
   }
   va_end(ap);
+  return 0;
 }
 
 int snprintf(char *out, size_t n, const char *fmt, ...)
