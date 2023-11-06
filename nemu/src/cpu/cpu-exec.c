@@ -82,6 +82,7 @@ static void exec_once(Decode *s, vaddr_t pc) {
 #endif
   iringbuf[iringhead] = *s;
   iringhead = (iringhead + 1) % MAX_IRING_SIZE;
+  iringbuf[iringhead].logbuf[0] = '\0';
 #endif
 }
 
@@ -147,9 +148,12 @@ void cpu_exec(uint64_t n) {
 void cpu_show_itrace() {
   for (size_t i = 0; i < MAX_IRING_SIZE; i++)
   {
+    if (iringbuf[i].logbuf[0] == '\0') {
+      break;
+    }
     if ((cpu.pc - (iringbuf[i].snpc - iringbuf[i].pc)) == iringbuf[i].pc) {
       printf("--> %-76s\n", iringbuf[i].logbuf);
-    }else if(iringbuf[i].logbuf[0] != '\0') {
+    } else {
       printf("    %-76s\n", iringbuf[i].logbuf);
     }
   }

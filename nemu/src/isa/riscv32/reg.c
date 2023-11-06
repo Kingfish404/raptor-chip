@@ -48,12 +48,12 @@ const char *regs[] = {
 
 void isa_reg_display()
 {
-  printf(" pc: 0x%016llx\n", cpu.pc);
+  printf(" pc: " FMT_WORD "\n", cpu.pc);
   for (int i = 0; i < sizeof(regs) / sizeof(char *); i++)
   {
     if (i > 0 && i % 4 == 0)
       printf("\n");
-    printf("%3s: 0x%016llx\t", regs[i], cpu.gpr[i]);
+    printf("%3s: " FMT_WORD "\t", regs[i], cpu.gpr[i]);
   }
   printf("\n");
 }

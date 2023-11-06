@@ -85,6 +85,7 @@ static int cmd_info(char *args) {
     #else
       printf("ITRACE is not enabled.\n");
     #endif
+    break;
   case 'f':
     cpu_show_ftrace();
     break;
@@ -139,7 +140,7 @@ static int cmd_x(char *args) {
       printf("%.16llx: ", addr + i);
     }
     data = vaddr_read(addr + i * 4, 4);
-    printf("%08llx ", data);
+    printf("" FMT_WORD " ", data);
   }
   printf("\n");
   return 0;
@@ -153,10 +154,10 @@ static int cmd_p(char *args) {
   bool success = true;
   word_t data = expr(args, &success);
   if (success) {
-    printf("0x%016llx, %020lluull\n", data, data);
+    printf(FMT_WORD "\n", data);
   }
   else {
-    printf("Invalid arg: %s, expr: %llx\n", args, data);
+    printf("Invalid arg: %s, expr: " FMT_WORD "\n", args, data);
   }
   return 0;
 }

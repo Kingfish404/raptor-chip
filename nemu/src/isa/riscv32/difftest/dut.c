@@ -19,20 +19,21 @@
 
 bool isa_difftest_checkregs(CPU_state *ref_r, vaddr_t pc)
 {
+  bool is_same = true;
   if (cpu.pc != ref_r->pc)
   {
-    printf("pc = %llx, ref = %llx\n", cpu.pc, ref_r->pc);
-    return false;
+    printf("Difftest: pc = " FMT_WORD ", ref = " FMT_WORD "\n", cpu.pc, ref_r->pc);
+    is_same = false;
   }
   for (int i = 0; i < 32; i++)
   {
     if (gpr(i) != ref_r->gpr[i])
     {
-      printf("reg[%s] = %llx, ref = %llx\n", reg_name(i), gpr(i), ref_r->gpr[i]);
-      return false;
+      printf("Difftest: reg[%02d|%s] = " FMT_WORD ", ref = " FMT_WORD "\n", i, reg_name(i), gpr(i), ref_r->gpr[i]);
+      is_same = false;
     }
   }
-  return true;
+  return is_same;
 }
 
 void isa_difftest_attach()

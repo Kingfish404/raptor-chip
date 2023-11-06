@@ -38,8 +38,14 @@ Ftrace ftracebuf[MAX_FTRACE_SIZE];
 uint64_t ftracehead = 0;
 uint64_t ftracedepth = 0;
 char elfbuf[MAX_ELF_SIZE];
+
+#ifdef CONFIG_ISA64
 Elf64_Ehdr elfhdr;
 Elf64_Shdr *elfshdr_symtab = NULL, *elfshdr_strtab = NULL;
+#else
+Elf32_Ehdr elfhdr;
+Elf32_Shdr *elfshdr_symtab = NULL, *elfshdr_strtab = NULL;
+#endif
 
 enum {
   TYPE_R, TYPE_I, TYPE_S,
@@ -133,7 +139,7 @@ static int decode_exec(Decode *s) {
 
   INSTPAT("??????? ????? ????? 000 ????? 00100 11", addi    , I, R(rd) = (sword_t)src1 + imm);
   INSTPAT("??????? ????? ????? 010 ????? 00100 11", slti    , I, R(rd) = (sword_t)src1 < (sword_t)imm ? 1 : 0);
-  INSTPAT("??????? ????? ????? 011 ????? 00100 11", sltiu   , I, R(rd) = (((word_t)src1 < (word_t)imm) || src1 == 0) ? 1 : 0);
+  INSTPAT("??????? ????? ????? 011 ????? 00100 11", sltiu   , I, R(rd) = ((word_t)src1 < (word_t)imm));
   INSTPAT("??????? ????? ????? 100 ????? 00100 11", xori    , I, R(rd) = src1 ^ imm);
   INSTPAT("??????? ????? ????? 110 ????? 00100 11", ori     , I, R(rd) = src1 | imm);
   INSTPAT("??????? ????? ????? 111 ????? 00100 11", andi    , I, R(rd) = src1 & imm);
@@ -144,12 +150,12 @@ static int decode_exec(Decode *s) {
 
   INSTPAT("0000000 ????? ????? 000 ????? 01100 11", add     , R, R(rd) = src1 + src2);
   INSTPAT("0100000 ????? ????? 000 ????? 01100 11", sub     , R, R(rd) = src1 - src2);
-  // INSTPAT("0000000 ????? ????? 001 ????? 01100 11", sll     , R, R(rd) = src1 << (src2 & 0x3f));
-  // INSTPAT("0000000 ????? ????? 010 ????? 01100 11", slt     , R, R(rd) = (sword_t)src1 < (sword_t)src2);
-  INSTPAT("0000000 ????? ????? 011 ????? 01100 11", sltu    , R, R(rd) = ((word_t)src1 < (word_t)src2) || src2 != 0 ? 1 : 0);
+  INSTPAT("0000000 ????? ????? 001 ????? 01100 11", sll     , R, R(rd) = src1 << (src2 & 0x3f));
+  INSTPAT("0000000 ????? ????? 010 ????? 01100 11", slt     , R, R(rd) = (sword_t)src1 < (sword_t)src2);
+  INSTPAT("0000000 ????? ????? 011 ????? 01100 11", sltu    , R, R(rd) = ((word_t)src1 < (word_t)src2) ? 1 : 0);
   INSTPAT("0000000 ????? ????? 100 ????? 01100 11", xor     , R, R(rd) = src1 ^ src2);
-  // INSTPAT("0000000 ????? ????? 101 ????? 01100 11", srl     , R, R(rd) = src1 >> (src2 & 0x3f));
-  // INSTPAT("0100000 ????? ????? 101 ????? 01100 11", sra     , R, R(rd) = SEXT(src1, 64) >> (src2 & 0x3f));
+  INSTPAT("0000000 ????? ????? 101 ????? 01100 11", srl     , R, R(rd) = src1 >> (src2 & 0x3f));
+  INSTPAT("0100000 ????? ????? 101 ????? 01100 11", sra     , R, R(rd) = SEXT(src1, sizeof(word_t) * 8) >> (src2 & 0x3f));
   INSTPAT("0000000 ????? ????? 110 ????? 01100 11", or      , R, R(rd) = src1 | src2);
   INSTPAT("0000000 ????? ????? 111 ????? 01100 11", and     , R, R(rd) = src1 & src2);
 
@@ -182,9 +188,12 @@ static int decode_exec(Decode *s) {
 
   // RV32M Standard Extension
   INSTPAT("0000001 ????? ????? 000 ????? 01100 11", mul     , R, R(rd) = src1 * src2);
-  INSTPAT("0000001 ????? ????? 001 ????? 01100 11", mulh    , R, R(rd) = ((sword_t)src1 * (sword_t)src2) >> 32);
-  INSTPAT("0000001 ????? ????? 010 ????? 01100 11", mulhsu  , R, R(rd) = ((sword_t)src1 * (word_t)src2) >> 32);
-  INSTPAT("0000001 ????? ????? 011 ????? 01100 11", mulhu   , R, R(rd) = ((word_t)src1 * (word_t)src2) >> 31);
+  #ifdef CONFIG_ISA64
+  #else
+  INSTPAT("0000001 ????? ????? 001 ????? 01100 11", mulh    , R, R(rd) = ((int64_t)(sword_t)src1 * (int64_t)(sword_t)src2) >> 32);
+  INSTPAT("0000001 ????? ????? 010 ????? 01100 11", mulhsu  , R, R(rd) = ((int64_t)(sword_t)src1 *  (int64_t)(word_t)src2) >> 32);
+  INSTPAT("0000001 ????? ????? 011 ????? 01100 11", mulhu   , R, R(rd) = ( (int64_t)(word_t)src1 *  (int64_t)(word_t)src2) >> 32);
+  #endif
   INSTPAT("0000001 ????? ????? 100 ????? 01100 11", div     , R, R(rd) = (sword_t)src1 / (sword_t)src2);
   INSTPAT("0000001 ????? ????? 101 ????? 01100 11", divu    , R, R(rd) = (word_t)src1 / (word_t)src2);
   INSTPAT("0000001 ????? ????? 110 ????? 01100 11", rem     , R, R(rd) = (sword_t)src1 % (sword_t)src2);
@@ -245,13 +254,14 @@ void isa_parser_elf(char *filename) {
   for (size_t i = 0; i < SELFMAG; i++) {
     printf("%02x ", elfhdr.e_ident[i]);
   }
+#ifdef CONFIG_ISA64
   printf("\n");
   printf("e_type: %d\t", elfhdr.e_type);
   printf("e_machine: %d\t", elfhdr.e_machine);
   printf("e_version: %d\n", elfhdr.e_version);
-  printf("e_entry: 0x%016llx\t", elfhdr.e_entry);
-  printf("e_phoff: 0x%016llx\n", elfhdr.e_phoff);
-  printf("e_shoff: 0x%016llx\t", elfhdr.e_shoff);
+  printf("e_entry: " FMT_WORD "\t", elfhdr.e_entry);
+  printf("e_phoff: " FMT_WORD "\n", elfhdr.e_phoff);
+  printf("e_shoff: " FMT_WORD "\t", elfhdr.e_shoff);
   printf("e_flags: 0x%016x\n", elfhdr.e_flags);
   printf("e_ehsize: %d\t", elfhdr.e_ehsize);
   printf("e_phentsize: %d\t", elfhdr.e_phentsize);
@@ -268,21 +278,28 @@ void isa_parser_elf(char *filename) {
       break;
       for (size_t j = 0; j < elfshdr_symtab->sh_size / sizeof(Elf64_Sym); j++) {
         Elf64_Sym *sym = (Elf64_Sym *)(elfbuf + elfshdr_symtab->sh_offset + j * sizeof(Elf64_Sym));
-        printf("0x%016llx: %s\n", sym->st_value, elfbuf + elfshdr_strtab->sh_offset + sym->st_name);
+        printf("" FMT_WORD ": %s\n", sym->st_value, elfbuf + elfshdr_strtab->sh_offset + sym->st_name);
       }
       break;
     }
   }
+#endif
 }
 
 void cpu_show_ftrace() {
+#ifdef CONFIG_ISA64
   Elf64_Sym *sym = NULL;
   Ftrace *ftrace = NULL;
   for (size_t i = 0; i < ftracehead; i++) {
     ftrace = ftracebuf + i;
-    printf("0x%016llx: ", ftrace->pc);
+    printf("" FMT_WORD ": ", ftrace->pc);
     for (size_t j = 0; j < ftrace->depth; j++) {
       printf("  ");
+    }
+    printf("%s ", ftrace->ret ? "ret" : "call");
+    if (elfshdr_symtab == NULL) {
+      printf("\n");
+      continue;
     }
     for (int j = elfshdr_symtab->sh_size / sizeof(Elf64_Sym) - 1; j >= 0; j--) {
       sym = (Elf64_Sym *)(elfbuf + elfshdr_symtab->sh_offset + j * sizeof(Elf64_Sym));
@@ -291,9 +308,10 @@ void cpu_show_ftrace() {
       }
     }
     printf(
-      "%s [%s@0x%016llx]\n",
-      ftrace->ret ? "ret" : "call",
+      "[%s@" FMT_WORD "]\n",
       elfbuf + elfshdr_strtab->sh_offset + sym->st_name,
       ftrace->npc);
   }
+#else
+#endif
 }

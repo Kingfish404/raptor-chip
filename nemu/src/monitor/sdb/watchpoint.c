@@ -104,7 +104,7 @@ void wp_show()
   {
     word_t v = expr(p->str, &success);
     p->v = v;
-    printf("%02d\t\"%s\"\t: 0x%016llx, %020llu\n", p->NO, p->str, v, v);
+    printf("%02d\t\"%s\"\t: " FMT_WORD "\n", p->NO, p->str, v);
   }
 }
 
@@ -127,7 +127,7 @@ bool wp_check_changed()
     word_t v = expr(p->str, &success);
     if (p->v != v)
     {
-      printf("%02d\t\"%s\"\t: old 0x%016llx, new 0x%016llx\n", p->NO, p->str, p->v, v);
+      printf("%02d\t\"%s\"\t: old " FMT_WORD ", new " FMT_WORD "\n", p->NO, p->str, p->v, v);
       p->v = v;
       return true;
     }

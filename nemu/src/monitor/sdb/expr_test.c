@@ -32,7 +32,7 @@ void expr_tests()
     word_t gt = strtoull(line, &idx, 0);
     success = true;
     word_t data = expr(idx + 1, &success);
-    printf("gt: 0x%016llx, %llu, data: 0x%016llx, %llu\n", gt, gt, data, data);
+    printf("gt: " FMT_WORD ", " FMT_WORD ", data: " FMT_WORD ", " FMT_WORD "\n", gt, gt, data, data);
     assert(gt == data);
   }
   exit(0);
