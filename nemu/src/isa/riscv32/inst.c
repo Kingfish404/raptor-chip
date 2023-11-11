@@ -29,23 +29,21 @@ typedef struct Ftrace
 {
   word_t pc;
   word_t npc;
-  uint64_t depth;
+  word_t depth;
   bool ret;
 } Ftrace;
 
 
 Ftrace ftracebuf[MAX_FTRACE_SIZE];
-uint64_t ftracehead = 0;
-uint64_t ftracedepth = 0;
+word_t ftracehead = 0;
+word_t ftracedepth = 0;
 char elfbuf[MAX_ELF_SIZE];
 
-#ifdef CONFIG_ISA64
-Elf64_Ehdr elfhdr;
-Elf64_Shdr *elfshdr_symtab = NULL, *elfshdr_strtab = NULL;
-#else
-Elf32_Ehdr elfhdr;
-Elf32_Shdr *elfshdr_symtab = NULL, *elfshdr_strtab = NULL;
-#endif
+typedef MUXDEF(CONFIG_ISA64, Elf64_Ehdr, Elf32_Ehdr) Elf_Ehdr;
+typedef MUXDEF(CONFIG_ISA64, Elf64_Shdr, Elf32_Shdr) Elf_Shdr;
+typedef MUXDEF(CONFIG_ISA64, Elf64_Sym, Elf32_Sym) Elf_Sym;
+Elf_Ehdr elfhdr;
+Elf_Shdr *elfshdr_symtab = NULL, *elfshdr_strtab = NULL;
 
 enum {
   TYPE_R, TYPE_I, TYPE_S,
@@ -254,7 +252,6 @@ void isa_parser_elf(char *filename) {
   for (size_t i = 0; i < SELFMAG; i++) {
     printf("%02x ", elfhdr.e_ident[i]);
   }
-#ifdef CONFIG_ISA64
   printf("\n");
   printf("e_type: %d\t", elfhdr.e_type);
   printf("e_machine: %d\t", elfhdr.e_machine);
@@ -271,24 +268,25 @@ void isa_parser_elf(char *filename) {
   printf("e_shstrndx: %d\n", elfhdr.e_shstrndx);
 
   for (size_t i = 0; i < elfhdr.e_shnum; i++) {
-    Elf64_Shdr *shdr = (Elf64_Shdr *)(elfbuf + elfhdr.e_shoff + i * elfhdr.e_shentsize);
+    Elf_Shdr *shdr = (Elf_Shdr *)(elfbuf + elfhdr.e_shoff + i * elfhdr.e_shentsize);
     if (shdr->sh_type == SHT_SYMTAB) {
-      elfshdr_strtab = (Elf64_Shdr *)(elfbuf + elfhdr.e_shoff + shdr->sh_link * elfhdr.e_shentsize);
       elfshdr_symtab = shdr;
+    } else if (shdr->sh_type == SHT_STRTAB) {
+      elfshdr_strtab = shdr;
+    }
+    if (elfshdr_symtab != NULL && elfshdr_strtab != NULL) {
       break;
-      for (size_t j = 0; j < elfshdr_symtab->sh_size / sizeof(Elf64_Sym); j++) {
-        Elf64_Sym *sym = (Elf64_Sym *)(elfbuf + elfshdr_symtab->sh_offset + j * sizeof(Elf64_Sym));
+      for (size_t j = 0; j < elfshdr_symtab->sh_size / sizeof(Elf_Sym); j++) {
+        Elf_Sym *sym = (Elf_Sym *)(elfbuf + elfshdr_symtab->sh_offset + j * sizeof(Elf_Sym));
         printf("" FMT_WORD ": %s\n", sym->st_value, elfbuf + elfshdr_strtab->sh_offset + sym->st_name);
       }
       break;
     }
   }
-#endif
 }
 
 void cpu_show_ftrace() {
-#ifdef CONFIG_ISA64
-  Elf64_Sym *sym = NULL;
+  Elf_Sym *sym = NULL;
   Ftrace *ftrace = NULL;
   for (size_t i = 0; i < ftracehead; i++) {
     ftrace = ftracebuf + i;
@@ -301,8 +299,8 @@ void cpu_show_ftrace() {
       printf("\n");
       continue;
     }
-    for (int j = elfshdr_symtab->sh_size / sizeof(Elf64_Sym) - 1; j >= 0; j--) {
-      sym = (Elf64_Sym *)(elfbuf + elfshdr_symtab->sh_offset + j * sizeof(Elf64_Sym));
+    for (int j = elfshdr_symtab->sh_size / sizeof(Elf_Sym) - 1; j >= 0; j--) {
+      sym = (Elf_Sym *)(elfbuf + elfshdr_symtab->sh_offset + j * sizeof(Elf_Sym));
       if (sym->st_value == ftrace->npc) {
         break;
       }
@@ -312,6 +310,4 @@ void cpu_show_ftrace() {
       elfbuf + elfshdr_strtab->sh_offset + sym->st_name,
       ftrace->npc);
   }
-#else
-#endif
 }
