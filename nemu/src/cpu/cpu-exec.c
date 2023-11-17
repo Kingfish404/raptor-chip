@@ -146,6 +146,7 @@ void cpu_exec(uint64_t n) {
 }
 
 void cpu_show_itrace() {
+#ifdef CONFIG_ITRACE
   for (size_t i = 0; i < MAX_IRING_SIZE; i++)
   {
     if (iringbuf[i].logbuf[0] == '\0') {
@@ -157,4 +158,5 @@ void cpu_show_itrace() {
       printf("    %-76s\n", iringbuf[i].logbuf);
     }
   }
+#endif
 }

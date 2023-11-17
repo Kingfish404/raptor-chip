@@ -12,6 +12,10 @@ config HAS_PORT_IO
   default y if ISA_x86
   default n
 
+config DTRACE
+  bool "Enable device tracer"
+  default n
+
 menuconfig HAS_SERIAL
   bool "Enable serial"
   default y
