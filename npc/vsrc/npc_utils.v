@@ -1,5 +1,5 @@
 // 触发器模板
-module Reg #(WIDTH = 1, RESET_VAL = 0) (
+module ysyx_23060087_Reg #(WIDTH = 1, RESET_VAL = 0) (
   input clk,
   input rst,
   input [WIDTH-1:0] din,

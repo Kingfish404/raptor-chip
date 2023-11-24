@@ -9,16 +9,18 @@ export VERILATOR_ROOT
 VERILATOR = $(VERILATOR_ROOT)/bin/verilator
 endif
 
-VTARGET=example
+VTARGET=npc
 BUILD_DIR = ./build
 OBJ_DIR = $(BUILD_DIR)/obj_dir
 BIN = $(BUILD_DIR)/$(VTARGET)
-INC_PATH ?=
+INC_PATH ?= $(abspath ./csrc/include) $(abspath ./vsrc/include)
+CXXFLAGS = -Wall -Werror
+LDFLAGS =
 
 $(shell mkdir -p $(BUILD_DIR))
 
-VSRCS = $(shell find $(abspath ./vsrc) -name "$(VTARGET)*.v")
-CSRCS = $(shell find $(abspath ./csrc) -name "$(VTARGET)*.c" -or -name "$(VTARGET)*.cc" -or -name "$(VTARGET)*.cpp")
+VSRCS = $(shell find $(abspath ./vsrc) -name "*.v")
+CSRCS = $(shell find $(abspath ./csrc) -name "*.c" -or -name "*.cc" -or -name "*.cpp")
 
 # rules for NVBoard
 include $(NVBOARD_HOME)/scripts/nvboard.mk
@@ -30,10 +32,14 @@ $(BIN): $(VSRCS) $(CSRCS) $(NVBOARD_ARCHIVE)
 	$(VERILATOR) --trace -cc --exe --build -j $^ \
 		--top-module top \
 		$(addprefix -CFLAGS , $(CXXFLAGS)) $(addprefix -LDFLAGS , $(LDFLAGS)) \
+		$(addprefix -I, $(INC_PATH)) \
 		--Mdir $(OBJ_DIR) --exe -o $(abspath $(BIN))
 
-all:
-	@echo "Write this Makefile by your self."
+IMG ?=
+NPC_EXEC := $(BIN) $(ARGS) $(IMG)
+
+run: $(BIN)
+	$(NPC_EXEC)
 
 sim: $(BIN)
 	$(call git_commit, "sim RTL") # DO NOT REMOVE THIS LINE!!!

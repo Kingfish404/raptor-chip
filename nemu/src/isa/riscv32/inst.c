@@ -91,7 +91,7 @@ static void decode_operand(Decode *s, int *rd, word_t *src1, word_t *src2, word_
 }
 
 /*
-    31     27   26 25 24    20 19    15  14  12 11     7 6      0
+    31       27   25 24     20 19     15 14  12 11     7 6      0
     |  funct7       |   rs2   |   rs1   |funct3|  rd    | opcode | R-type
     |  imm[11:0]              |   rs1   |funct3|  rd    | opcode | I-type
     |  imm[11:5]    |   rs2   |   rs1   |funct3|imm[4:0]| opcode | S-type
