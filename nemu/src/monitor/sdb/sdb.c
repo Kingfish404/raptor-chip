@@ -29,6 +29,7 @@ void init_wp_pool();
 static char* rl_gets() {
   static char *line_read = NULL;
 
+// #ifndef CONFIG_TARGET_SHARE
   if (line_read) {
     free(line_read);
     line_read = NULL;
@@ -39,6 +40,7 @@ static char* rl_gets() {
   if (line_read && *line_read) {
     add_history(line_read);
   }
+// #endif
 
   return line_read;
 }
@@ -118,31 +120,7 @@ static int cmd_x(char *args) {
     return 0;
   }
 
-  word_t data;
-  size_t word_size = sizeof(word_t);
-  for (size_t i = 0; i < n; i++)
-  {
-    if( i % 4 ==0){
-      if (i != 0 ){
-        printf("| ");
-        for (size_t j = 0; j < 4; j++)
-        {
-          data = vaddr_read(addr + (i - (3 - j) - 1) * 4, 4);
-          for (size_t k = 0; k < word_size / 2; k++)
-          {
-            uint8_t c = (data >> (((word_size / 2) - 1 - k )* 8)) & 0xff;
-            printf("%02x ", c);
-          }
-          printf(" ");
-        }
-        printf("\n");
-      }
-      printf("%.16llx: ", addr + i);
-    }
-    data = vaddr_read(addr + i * 4, 4);
-    printf("" FMT_WORD " ", data);
-  }
-  printf("\n");
+  vaddr_show(addr, n);
   return 0;
 }
 
