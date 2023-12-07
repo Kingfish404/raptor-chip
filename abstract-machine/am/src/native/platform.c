@@ -1,11 +1,14 @@
 #define _GNU_SOURCE
 #include <sys/mman.h>
+#ifdef __linux__
 #include <sys/auxv.h>
+#endif
 #include <dlfcn.h>
 #include <elf.h>
 #include <stdlib.h>
-#include <stdio.h>
+#include <klib.h>
 #include "platform.h"
+#include <stdio.h>
 
 #define MAX_CPU 16
 #define TRAP_PAGE_START (void *)0x100000
@@ -31,8 +34,8 @@ static void save_example_context() {
   // registers. So we save the example context during signal handling
   // to get a context with everything valid.
   struct sigaction s;
-  void *(*memset_libc)(void *, int, size_t) = dlsym(RTLD_NEXT, "memset");
-  memset_libc(&s, 0, sizeof(s));
+  // void *(*memset_libc)(void *, int, size_t) = dlsym(RTLD_NEXT, "memset");
+  // memset_libc(&s, 0, sizeof(s));
   s.sa_sigaction = save_context_handler;
   s.sa_flags = SA_SIGINFO;
   int ret = sigaction(SIGUSR1, &s, NULL);
@@ -47,7 +50,7 @@ static void save_example_context() {
 }
 
 static void setup_sigaltstack() {
-  assert(sizeof(thiscpu->sigstack) >= SIGSTKSZ);
+  // assert(sizeof(thiscpu->sigstack) >= SIGSTKSZ);
   stack_t ss;
   ss.ss_sp = thiscpu->sigstack;
   ss.ss_size = sizeof(thiscpu->sigstack);
@@ -61,17 +64,17 @@ int main(const char *args);
 static void init_platform() __attribute__((constructor));
 static void init_platform() {
   // create memory object and set up mapping to simulate the physical memory
-  pmem_fd = memfd_create("pmem", 0);
-  assert(pmem_fd != -1);
-  // use dynamic linking to avoid linking to the same function in RT-Thread
-  int (*ftruncate_libc)(int, off_t) = dlsym(RTLD_NEXT, "ftruncate");
-  assert(ftruncate_libc != NULL);
-  int ret2 = ftruncate_libc(pmem_fd, PMEM_SIZE);
-  assert(ret2 == 0);
+  // pmem_fd = memfd_create("pmem", 0);
+//   assert(pmem_fd != -1);
+//   // use dynamic linking to avoid linking to the same function in RT-Thread
+//   int (*ftruncate_libc)(int, off_t) = dlsym(RTLD_NEXT, "ftruncate");
+//   assert(ftruncate_libc != NULL);
+//   int ret2 = ftruncate_libc(pmem_fd, PMEM_SIZE);
+//   assert(ret2 == 0);
 
-  pmem = mmap(PMEM_START, PMEM_SIZE, PROT_READ | PROT_WRITE | PROT_EXEC,
-      MAP_SHARED | MAP_FIXED, pmem_fd, 0);
-  assert(pmem != (void *)-1);
+//   pmem = mmap(PMEM_START, PMEM_SIZE, PROT_READ | PROT_WRITE | PROT_EXEC,
+//       MAP_SHARED | MAP_FIXED, pmem_fd, 0);
+//   assert(pmem != (void *)-1);
 
   // allocate private per-cpu structure
   thiscpu = mmap(NULL, sizeof(*thiscpu), PROT_READ | PROT_WRITE,
@@ -82,63 +85,63 @@ static void init_platform() {
 
   // create trap page to receive syscall and yield by SIGSEGV
   int sys_pgsz = sysconf(_SC_PAGESIZE);
-  void *ret = mmap(TRAP_PAGE_START, sys_pgsz, PROT_NONE,
-      MAP_SHARED | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
-  assert(ret != (void *)-1);
+  // void *ret = mmap(TRAP_PAGE_START, sys_pgsz, PROT_NONE,
+  //     MAP_SHARED | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
+  // assert(ret != (void *)-1);
 
   // save the address of memcpy() in glibc, since it may be linked with klib
   memcpy_libc = dlsym(RTLD_NEXT, "memcpy");
   assert(memcpy_libc != NULL);
 
   // remap writable sections as MAP_SHARED
-  Elf64_Phdr *phdr = (void *)getauxval(AT_PHDR);
-  int phnum = (int)getauxval(AT_PHNUM);
-  int i;
-  for (i = 0; i < phnum; i ++) {
-    if (phdr[i].p_type == PT_LOAD && (phdr[i].p_flags & PF_W)) {
-      // allocate temporary memory
-      extern char end;
-      void *vaddr = (void *)&end - phdr[i].p_memsz;
-      uintptr_t pad = (uintptr_t)vaddr & 0xfff;
-      void *vaddr_align = vaddr - pad;
-      uintptr_t size = phdr[i].p_memsz + pad;
-      void *temp_mem = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-      assert(temp_mem != (void *)-1);
+  // Elf64_Phdr *phdr = (void *)getauxval(AT_PHDR);
+  // int phnum = (int)getauxval(AT_PHNUM);
+  // int i;
+  // for (i = 0; i < phnum; i ++) {
+  //   if (phdr[i].p_type == PT_LOAD && (phdr[i].p_flags & PF_W)) {
+  //     // allocate temporary memory
+  //     extern char end;
+  //     void *vaddr = (void *)&end - phdr[i].p_memsz;
+  //     uintptr_t pad = (uintptr_t)vaddr & 0xfff;
+  //     void *vaddr_align = vaddr - pad;
+  //     uintptr_t size = phdr[i].p_memsz + pad;
+  //     void *temp_mem = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  //     assert(temp_mem != (void *)-1);
 
-      // save data and bss sections
-      memcpy_libc(temp_mem, vaddr_align, size);
+  //     // save data and bss sections
+  //     memcpy_libc(temp_mem, vaddr_align, size);
 
-      // save the address of mmap() which will be used after munamp(),
-      // since calling the library functions requires accessing GOT, which will be unmapped
-      void *(*mmap_libc)(void *, size_t, int, int, int, off_t) = dlsym(RTLD_NEXT, "mmap");
-      assert(mmap_libc != NULL);
-      // load the address of memcpy() on stack, which can still be accessed
-      // after the data section is unmapped
-      void *(*volatile memcpy_libc_temp)(void *, const void *, size_t) = memcpy_libc;
+  //     // save the address of mmap() which will be used after munamp(),
+  //     // since calling the library functions requires accessing GOT, which will be unmapped
+  //     void *(*mmap_libc)(void *, size_t, int, int, int, off_t) = dlsym(RTLD_NEXT, "mmap");
+  //     assert(mmap_libc != NULL);
+  //     // load the address of memcpy() on stack, which can still be accessed
+  //     // after the data section is unmapped
+  //     void *(*volatile memcpy_libc_temp)(void *, const void *, size_t) = memcpy_libc;
 
-      // unmap the data and bss sections
-      ret2 = munmap(vaddr_align, size);
-      assert(ret2 == 0);
+  //     // unmap the data and bss sections
+  //     ret2 = munmap(vaddr_align, size);
+  //     assert(ret2 == 0);
 
-      // map the sections again with MAP_SHARED, which will be shared across fork()
-      ret = mmap_libc(vaddr_align, size, PROT_READ | PROT_WRITE | PROT_EXEC,
-          MAP_SHARED | MAP_FIXED | MAP_ANONYMOUS, -1, 0);
-      assert(ret == vaddr_align);
+  //     // map the sections again with MAP_SHARED, which will be shared across fork()
+  //     ret = mmap_libc(vaddr_align, size, PROT_READ | PROT_WRITE | PROT_EXEC,
+  //         MAP_SHARED | MAP_FIXED | MAP_ANONYMOUS, -1, 0);
+  //     assert(ret == vaddr_align);
 
-      // restore the data in the sections
-      memcpy_libc_temp(vaddr_align, temp_mem, size);
+  //     // restore the data in the sections
+  //     memcpy_libc_temp(vaddr_align, temp_mem, size);
 
-      // unmap the temporary memory
-      ret2 = munmap(temp_mem, size);
-      assert(ret2 == 0);
-    }
-  }
+  //     // unmap the temporary memory
+  //     ret2 = munmap(temp_mem, size);
+  //     assert(ret2 == 0);
+  //   }
+  // }
 
-  // set up the AM heap
-  heap = RANGE(pmem, pmem + PMEM_SIZE);
+//   // set up the AM heap
+//   heap = RANGE(pmem, pmem + PMEM_SIZE);
 
   // initialize sigmask for interrupts
-  ret2 = sigemptyset(&__am_intr_sigmask);
+  int ret2 = sigemptyset(&__am_intr_sigmask);
   assert(ret2 == 0);
   ret2 = sigaddset(&__am_intr_sigmask, SIGVTALRM);
   assert(ret2 == 0);
@@ -150,7 +153,9 @@ static void init_platform() {
 
   // save the context template
   save_example_context();
+#ifdef __x86_64__
   uc_example.uc_mcontext.fpregs = NULL; // clear the FPU context
+#endif
   __am_get_intr_sigmask(&uc_example.uc_sigmask);
 
   // disable interrupts by default

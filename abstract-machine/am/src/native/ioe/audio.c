@@ -2,17 +2,17 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <klib.h>
-#include <SDL2/SDL.h>
+#include <SDL.h>
 
 static int rfd = -1, wfd = -1;
 static volatile int count = 0;
 
 void __am_audio_init() {
-  int fds[2];
-  int ret = pipe2(fds, O_NONBLOCK);
-  assert(ret == 0);
-  rfd = fds[0];
-  wfd = fds[1];
+  // int fds[2];
+  // int ret = pipe2(fds, O_NONBLOCK);
+  // assert(ret == 0);
+  // rfd = fds[0];
+  // wfd = fds[1];
 }
 
 static void audio_play(void *userdata, uint8_t *stream, int len) {
@@ -68,5 +68,5 @@ void __am_audio_play(AM_AUDIO_PLAY_T *ctl) {
 
 void __am_audio_config(AM_AUDIO_CONFIG_T *cfg) {
   cfg->present = true;
-  cfg->bufsize = fcntl(rfd, F_GETPIPE_SZ);
+  // cfg->bufsize = fcntl(rfd, F_GETPIPE_SZ);
 }

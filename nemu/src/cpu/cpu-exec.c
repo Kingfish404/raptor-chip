@@ -150,7 +150,7 @@ void cpu_show_itrace() {
   for (size_t i = 0; i < MAX_IRING_SIZE; i++)
   {
     if (iringbuf[i].logbuf[0] == '\0') {
-      break;
+      continue;
     }
     if ((cpu.pc - (iringbuf[i].snpc - iringbuf[i].pc)) == iringbuf[i].pc) {
       printf("--> %-76s\n", iringbuf[i].logbuf);
