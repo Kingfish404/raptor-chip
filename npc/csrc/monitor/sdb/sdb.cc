@@ -1,37 +1,44 @@
 #include <common.h>
+#include <cpu.h>
+#include <readline/readline.h>
+#include <readline/history.h>
 #include "Vtop.h"
 #include "Vtop___024root.h"
 #include "Vtop__Dpi.h"
 #include "verilated.h"
 #include "verilated_vcd_c.h"
 
-uint8_t pmem[MSIZE];
-struct CPU
-{
-  word_t *gpr;
-  uint32_t *pc;
-} cpu;
+extern char *regs[];
+extern uint64_t g_timer;
+extern uint64_t g_nr_guest_inst;
 
-const char *regs[] = {
-    "$0", "ra", "sp", "gp", "tp", "t0", "t1", "t2",
-    "s0", "s1", "a0", "a1", "a2", "a3", "a4", "a5",
-    "a6", "a7", "s2", "s3", "s4", "s5", "s6", "s7",
-    "s8", "s9", "s10", "s11", "t3", "t4", "t5", "t6"};
-
-void sdb_set_batch_mode()
-{
-}
+NPCState npc = {NPC_RUNNING, NULL, NULL, NULL};
 
 VerilatedContext *contextp = NULL;
 Vtop *top = NULL;
 VerilatedVcdC *tfp = NULL;
 
-void single_cycle(Vtop *top)
+static bool is_batch_mode = false;
+
+/* We use the `readline' library to provide more flexibility to read from stdin. */
+static char *rl_gets()
 {
-  top->clk = 0;
-  top->eval();
-  top->clk = 1;
-  top->eval();
+  static char *line_read = NULL;
+
+  if (line_read)
+  {
+    free(line_read);
+    line_read = NULL;
+  }
+
+  line_read = readline("(npc) ");
+
+  if (line_read && *line_read)
+  {
+    add_history(line_read);
+  }
+
+  return line_read;
 }
 
 void reset(Vtop *top, int n)
@@ -39,67 +46,134 @@ void reset(Vtop *top, int n)
   top->rst = 1;
   while (n-- > 0)
   {
-    single_cycle(top);
+    top->clk = 0;
+    top->eval();
+    top->clk = 1;
+    top->eval();
   }
   top->rst = 0;
 }
 
-static inline word_t host_read(void *addr, int len)
+extern "C" void npc_exu_ebreak()
 {
-  switch (len)
-  {
-  case 1:
-    return *(uint8_t *)addr;
-  case 2:
-    return *(uint16_t *)addr;
-  case 4:
-    return *(uint32_t *)addr;
-  case 8:
-    return *(uint64_t *)addr;
-  default:
-    assert(0);
-  }
+  contextp->gotFinish(true);
+  npc.state = NPC_END;
 }
 
-uint32_t pmem_read(uint64_t addr)
+extern "C" void npc_illegal_inst()
 {
-  if (addr >= MBASE && addr < MBASE + MSIZE)
+  contextp->gotFinish(true);
+  if (npc.state == NPC_ABORT)
   {
-    return host_read(pmem + addr - MBASE, 4);
+    return;
+  }
+  npc.state = NPC_ABORT;
+}
+
+void sdb_set_batch_mode()
+{
+  is_batch_mode = true;
+}
+
+int cmd_c(char *args)
+{
+  cpu_exec(-1);
+  return 0;
+}
+
+int cmd_info(char *args)
+{
+  reg_display(GPR_SIZE);
+  return 0;
+}
+
+int cmd_q(char *args)
+{
+  npc.state = NPC_QUIT;
+  return -1;
+}
+
+int cmd_si(char *args)
+{
+  int n = 1;
+  if (args != NULL)
+  {
+    sscanf(args, "%d", &n);
+  }
+  cpu_exec(n);
+  return 0;
+}
+
+int cmd_help(char *args);
+
+static struct
+{
+  const char *name;
+  const char *description;
+  int (*handler)(char *);
+} cmd_table[] = {
+    {"help", "Display information about all supported commands", cmd_help},
+    {"c", "Continue the execution of the program", cmd_c},
+    {"si", "Execute N instructions step by step", cmd_si},
+    {"info", "Generic command for showing things about the program being debugged", cmd_info},
+    {"q", "Exit NPC", cmd_q},
+};
+
+int cmd_help(char *args)
+{
+  printf("The following commands are supported:\n");
+  for (int i = 0; i < ARRLEN(cmd_table); i++)
+  {
+    printf("%s - %s\n", cmd_table[i].name, cmd_table[i].description);
   }
   return 0;
 }
 
-void npc_exu_ebreak()
+void sdb_mainloop()
 {
-  contextp->gotFinish(true);
-  printf("npc_exu_ebreak\n");
-}
-
-void reg_show(Vtop *top, int n = 4)
-{
-  printf(" pc: " FMT_GREEN(FMT_WORD) " inst: " FMT_GREEN(FMT_WORD) "\n",
-         *(cpu.pc), top->inst);
-  for (size_t i = 0; i < n; i++)
+  if (is_batch_mode)
   {
-    if (i != 0 && i % 4 == 0)
-      printf("\n");
-    printf("%3s: " FMT_WORD " ", regs[i], cpu.gpr[i]);
+    cmd_c(NULL);
+    return;
   }
-  printf("\n");
-}
 
-int reg_str2idx(const char *reg)
-{
-  for (size_t i = 0; i < GPR_SIZE; i++)
+  for (char *str; (str = rl_gets()) != NULL;)
   {
-    if (strcmp(reg, regs[i]) == 0)
-      return i;
+    char *str_end = str + strlen(str);
+    char *cmd = strtok(str, " ");
+    if (cmd == NULL)
+    {
+      continue;
+    }
+
+    char *args = cmd + strlen(cmd) + 1;
+    if (args >= str_end)
+    {
+      args = NULL;
+    }
+
+    int i;
+    for (i = 0; i < ARRLEN(cmd_table); i++)
+    {
+      if (
+          (strcmp(cmd, cmd_table[i].name) == 0) ||
+          (strlen(cmd) == 1 && cmd[0] == cmd_table[i].name[0]))
+      {
+        if (cmd_table[i].handler(args) < 0)
+        {
+          return;
+        }
+        break;
+      }
+    }
+    if (i == ARRLEN(cmd_table))
+    {
+      printf("Unknown command '%s'\n", cmd);
+    }
   }
-  return -1;
 }
 
-void sim(int argc, char **argv)
+void sdb_sim_init(int argc, char **argv)
 {
   contextp = new VerilatedContext;
   contextp->commandArgs(argc, argv);
@@ -108,30 +182,41 @@ void sim(int argc, char **argv)
   tfp = new VerilatedVcdC;
   top->trace(tfp, 99);
   tfp->open("npc.vcd");
+  npc.gpr = (word_t *)&(top->rootp->top__DOT__regs__DOT__rf);
+  npc.pc = (uint32_t *)&(top->rootp->top__DOT__pc);
+  npc.ret = npc.gpr + reg_str2idx("a0");
+  npc.state = NPC_RUNNING;
 
-  cpu.gpr = (word_t *)&(top->rootp->top__DOT__regs__DOT__rf);
-  cpu.pc = (uint32_t *)&(top->rootp->top__DOT__pc);
-
+  top->inst = 0x37; // lui x0, 0x0
   reset(top, 1);
-  while (!contextp->gotFinish())
-  {
-    top->clk = 0;
-    top->inst = pmem_read(*(cpu.pc));
-    top->eval();
-    tfp->dump(contextp->time());
-    contextp->timeInc(1);
+}
 
-    top->clk = 1;
-    top->eval();
-    tfp->dump(contextp->time());
-    contextp->timeInc(1);
-    reg_show(top, 8);
-    tfp->flush();
-  }
-  printf("Simulation ends\n");
-  reg_show(top, GPR_SIZE);
+void sdb_sim_end()
+{
   tfp->close();
+
   delete tfp;
   delete top;
   delete contextp;
+}
+
+void engine_start()
+{
+  sdb_mainloop();
+  if (*npc.ret != 0)
+  {
+    printf("a0 = " FMT_RED(FMT_WORD) "\n", *npc.ret);
+  }
+  if (npc.state == NPC_ABORT)
+  {
+    cpu_show_itrace();
+    reg_display(GPR_SIZE);
+  }
+  Log(FMT_BLUE("nr_inst = %llu, time = %llu (ns)"), g_nr_guest_inst, g_timer);
+  Log("%s at pc = " FMT_WORD_NO_PREFIX ", inst: " FMT_WORD_NO_PREFIX,
+      ((*npc.ret) == 0 && npc.state != NPC_ABORT
+           ? FMT_GREEN("HIT GOOD TRAP")
+           : FMT_RED("HIT BAD TRAP")),
+      (*npc.pc), top->inst);
+  sdb_sim_end();
 }

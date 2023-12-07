@@ -15,21 +15,26 @@ OBJ_DIR = $(BUILD_DIR)/obj_dir
 BIN = $(BUILD_DIR)/$(VTARGET)
 INC_PATH ?= $(abspath ./csrc/include) $(abspath ./vsrc/include)
 CXXFLAGS = -Wall -Werror
-LDFLAGS =
+LDFLAGS = -lreadline
+
+FILELIST_MK = $(shell find -L ./csrc -name "filelist.mk")
+include $(FILELIST_MK)
 
 $(shell mkdir -p $(BUILD_DIR))
 
 VSRCS = $(shell find $(abspath ./vsrc) -name "*.v")
 CSRCS = $(shell find $(abspath ./csrc) -name "*.c" -or -name "*.cc" -or -name "*.cpp")
 
+all: $(BIN)
+
 # rules for NVBoard
 include $(NVBOARD_HOME)/scripts/nvboard.mk
 INCFLAGS = $(addprefix -I, $(INC_PATH))
-CXXFLAGS += $(INCFLAGS) -DTOP_NAME="\"V$(VTARGET)\""
+CXXFLAGS += $(INCFLAGS) -DTOP_NAME="\"V$(VTARGET)\"" 
 
 $(BIN): $(VSRCS) $(CSRCS) $(NVBOARD_ARCHIVE)
 	$(call git_commit, "build RTL")
-	$(VERILATOR) --trace -cc --exe --build -j $^ \
+	$(VERILATOR) --trace -cc --exe --build -j $(shell nproc) $^ \
 		--top-module top \
 		$(addprefix -CFLAGS , $(CXXFLAGS)) $(addprefix -LDFLAGS , $(LDFLAGS)) \
 		$(addprefix -I, $(INC_PATH)) \
