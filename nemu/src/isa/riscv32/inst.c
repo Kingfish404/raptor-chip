@@ -17,14 +17,38 @@
 #include <cpu/cpu.h>
 #include <cpu/ifetch.h>
 #include <cpu/decode.h>
+#include <elf.h>
 
 #define R(i) gpr(i)
 #define Mr vaddr_read
 #define Mw vaddr_write
+#define MAX_FTRACE_SIZE 1024
+#define MAX_ELF_SIZE 32 * 1024
+
+typedef struct Ftrace
+{
+  word_t pc;
+  word_t npc;
+  word_t depth;
+  bool ret;
+} Ftrace;
+
+
+Ftrace ftracebuf[MAX_FTRACE_SIZE];
+word_t ftracehead = 0;
+word_t ftracedepth = 0;
+char elfbuf[MAX_ELF_SIZE];
+
+typedef MUXDEF(CONFIG_ISA64, Elf64_Ehdr, Elf32_Ehdr) Elf_Ehdr;
+typedef MUXDEF(CONFIG_ISA64, Elf64_Shdr, Elf32_Shdr) Elf_Shdr;
+typedef MUXDEF(CONFIG_ISA64, Elf64_Sym, Elf32_Sym) Elf_Sym;
+Elf_Ehdr elfhdr;
+Elf_Shdr *elfshdr_symtab = NULL, *elfshdr_strtab = NULL;
 
 enum {
-  TYPE_I, TYPE_U, TYPE_S,
-  TYPE_N, // none
+  TYPE_R, TYPE_I, TYPE_S,
+  TYPE_B, TYPE_U, TYPE_J,
+  TYPE_N,
 };
 
 #define src1R() do { *src1 = R(rs1); } while (0)
@@ -32,6 +56,19 @@ enum {
 #define immI() do { *imm = SEXT(BITS(i, 31, 20), 12); } while(0)
 #define immU() do { *imm = SEXT(BITS(i, 31, 12), 20) << 12; } while(0)
 #define immS() do { *imm = (SEXT(BITS(i, 31, 25), 7) << 5) | BITS(i, 11, 7); } while(0)
+#define immB() do { *imm = ( \
+  (SEXT(BITS(i, 31, 31), 1) << 12) | \
+  (BITS(i, 7, 7) << 11)   | \
+  (BITS(i, 30, 25) << 5)  | \
+  (BITS(i, 11, 8) << 1) \
+) & ~1 ;} while(0)
+#define immJ() do { *imm = ( \
+  (SEXT(BITS(i, 31, 31), 1) << 20) | \
+  (BITS(i, 19, 12) << 12) | \
+  (BITS(i, 20, 20) << 11) | \
+  (BITS(i, 30, 25) << 5)  | \
+  (BITS(i, 24, 21) << 1) \
+) & ~1 ;} while(0)
 
 static void decode_operand(Decode *s, int *rd, word_t *src1, word_t *src2, word_t *imm, int type) {
   uint32_t i = s->isa.inst.val;
@@ -39,12 +76,29 @@ static void decode_operand(Decode *s, int *rd, word_t *src1, word_t *src2, word_
   int rs2 = BITS(i, 24, 20);
   *rd     = BITS(i, 11, 7);
   switch (type) {
+    case TYPE_R: src1R(); src2R()        ; break;
     case TYPE_I: src1R();          immI(); break;
-    case TYPE_U:                   immU(); break;
     case TYPE_S: src1R(); src2R(); immS(); break;
+    case TYPE_B: src1R(); src2R(); immB(); break;
+    case TYPE_U:                   immU(); break;
+    case TYPE_J:                   immJ(); break;
   }
+  // static int count = 0;
+  // static const char *regs[] = {
+  //   "$0", "ra", "sp", "gp", "tp", "t0", "t1", "t2", "s0", "s1", "a0", "a1", "a2", "a3", "a4", "a5",
+  //   "a6", "a7", "s2", "s3", "s4", "s5", "s6", "s7", "s8", "s9", "s10", "s11", "t3", "t4", "t5", "t6"};
+  // printf("id: %2d, type: %d, rs1: %s, rs2: %s, rd: %s, imm: %llu\n", count++, type, regs[rs1], regs[rs2], regs[*rd], *imm);
 }
 
+/*
+    31       27   25 24     20 19     15 14  12 11     7 6      0
+    |  funct7       |   rs2   |   rs1   |funct3|  rd    | opcode | R-type
+    |  imm[11:0]              |   rs1   |funct3|  rd    | opcode | I-type
+    |  imm[11:5]    |   rs2   |   rs1   |funct3|imm[4:0]| opcode | S-type
+    |  imm[12|10:5] |   rs2   |   rs1|funct3|imm[4:1|11]| opcode | B-type
+    |  imm[31:12]                              |   rd   | opcode | U-type
+    |  imm[20|10:1|11|19:12]                   |   rd   | opcode | J-type
+ */
 static int decode_exec(Decode *s) {
   int rd = 0;
   word_t src1 = 0, src2 = 0, imm = 0;
@@ -57,20 +111,203 @@ static int decode_exec(Decode *s) {
 }
 
   INSTPAT_START();
+  //      |31      24    19    14  11    6     1 |
+  INSTPAT("??????? ????? ????? ??? ????? 01101 11", lui    , U, R(rd) = imm);
   INSTPAT("??????? ????? ????? ??? ????? 00101 11", auipc  , U, R(rd) = s->pc + imm);
-  INSTPAT("??????? ????? ????? 100 ????? 00000 11", lbu    , I, R(rd) = Mr(src1 + imm, 1));
-  INSTPAT("??????? ????? ????? 000 ????? 01000 11", sb     , S, Mw(src1 + imm, 1, src2));
+  INSTPAT("??????? ????? ????? ??? ????? 11011 11", jal    , J, R(rd) = s->pc + 4; s->dnpc = s->pc + imm);
+  INSTPAT("??????? ????? ????? 000 ????? 11001 11", jalr   , I, R(rd) = s->pc + 4; s->dnpc = src1 + imm);
 
-  INSTPAT("0000000 00001 00000 000 00000 11100 11", ebreak , N, NEMUTRAP(s->pc, R(10))); // R(10) is $a0
+  INSTPAT("??????? ????? ????? 000 ????? 11000 11", beq    , B, if (src1 == src2) s->dnpc = s->pc + imm);
+  INSTPAT("??????? ????? ????? 001 ????? 11000 11", bne    , B, if (src1 != src2) s->dnpc = s->pc + imm);
+  INSTPAT("??????? ????? ????? 100 ????? 11000 11", blt    , B, if ((sword_t)src1 < (sword_t)src2) s->dnpc = s->pc + imm);
+  INSTPAT("??????? ????? ????? 101 ????? 11000 11", bge    , B, if ((sword_t)src1 >= (sword_t)src2) s->dnpc = s->pc + imm);
+  INSTPAT("??????? ????? ????? 110 ????? 11000 11", bltu   , B, if ((word_t)src1 <  (word_t)src2) s->dnpc = s->pc + imm);
+  INSTPAT("??????? ????? ????? 111 ????? 11000 11", bgeu   , B, if ((word_t)src1 >= (word_t)src2) s->dnpc = s->pc + imm);
+
+  INSTPAT("??????? ????? ????? 000 ????? 00000 11", lb     , I, R(rd) = SEXT(Mr(src1 + imm, 1), 8));
+  INSTPAT("??????? ????? ????? 001 ????? 00000 11", lh     , I, R(rd) = SEXT(Mr(src1 + imm, 2), 16));
+  INSTPAT("??????? ????? ????? 010 ????? 00000 11", lw     , I, R(rd) = SEXT(Mr(src1 + imm, 4), 32));
+
+  INSTPAT("??????? ????? ????? 100 ????? 00000 11", lbu    , I, R(rd) = Mr(src1 + imm, 1));
+  INSTPAT("??????? ????? ????? 101 ????? 00000 11", lhu    , I, R(rd) = Mr(src1 + imm, 2));
+
+  INSTPAT("??????? ????? ????? 000 ????? 01000 11", sb     , S, Mw(src1 + imm, 1, src2));
+  INSTPAT("??????? ????? ????? 001 ????? 01000 11", sh     , S, Mw(src1 + imm, 2, src2));
+  INSTPAT("??????? ????? ????? 010 ????? 01000 11", sw     , S, Mw(src1 + imm, 4, src2));
+
+  INSTPAT("??????? ????? ????? 000 ????? 00100 11", addi    , I, R(rd) = (sword_t)src1 + imm);
+  INSTPAT("??????? ????? ????? 010 ????? 00100 11", slti    , I, R(rd) = ((sword_t)src1 < (sword_t)imm) ? 1 : 0);
+  INSTPAT("??????? ????? ????? 011 ????? 00100 11", sltiu   , I, R(rd) = ((word_t) src1 < (word_t) imm) ? 1 : 0);
+  INSTPAT("??????? ????? ????? 100 ????? 00100 11", xori    , I, R(rd) = src1 ^ imm);
+  INSTPAT("??????? ????? ????? 110 ????? 00100 11", ori     , I, R(rd) = src1 | imm);
+  INSTPAT("??????? ????? ????? 111 ????? 00100 11", andi    , I, R(rd) = src1 & imm);
+
+  INSTPAT("0000000 ????? ????? 001 ????? 00100 11", slli    , I, R(rd) = src1 << (imm & 0x1f));
+  INSTPAT("0000000 ????? ????? 101 ????? 00100 11", srli    , I, R(rd) = ((word_t) src1) >> (imm));
+  INSTPAT("0100000 ????? ????? 101 ????? 00100 11", srai    , I, R(rd) = ((sword_t)src1) >> (imm));
+
+  INSTPAT("0000000 ????? ????? 000 ????? 01100 11", add     , R, R(rd) = src1 + src2);
+  INSTPAT("0100000 ????? ????? 000 ????? 01100 11", sub     , R, R(rd) = src1 - src2);
+  INSTPAT("0000000 ????? ????? 001 ????? 01100 11", sll     , R, R(rd) = src1 << (src2 & 0x3f));
+  INSTPAT("0000000 ????? ????? 010 ????? 01100 11", slt     , R, R(rd) = (sword_t)src1 < (sword_t)src2);
+  INSTPAT("0000000 ????? ????? 011 ????? 01100 11", sltu    , R, R(rd) = ((word_t)src1 < (word_t)src2) ? 1 : 0);
+  INSTPAT("0000000 ????? ????? 100 ????? 01100 11", xor     , R, R(rd) = src1 ^ src2);
+  INSTPAT("0000000 ????? ????? 101 ????? 01100 11", srl     , R, R(rd) = src1 >> (src2 & 0x1f));
+  INSTPAT("0100000 ????? ????? 101 ????? 01100 11", sra     , R, R(rd) = SEXT(src1, sizeof(word_t) * 8) >> (src2 & 0x1f));
+  INSTPAT("0000000 ????? ????? 110 ????? 01100 11", or      , R, R(rd) = src1 | src2);
+  INSTPAT("0000000 ????? ????? 111 ????? 01100 11", and     , R, R(rd) = src1 & src2);
+
+  INSTPAT("0000??? ????? 00000 000 00000 00011 11", fence   , N, {}); 
+  INSTPAT("0000000 00000 00000 001 00000 00011 11", fence_i , N, {});
+  INSTPAT("0000000 00000 00000 000 00000 11100 11", ecall   , N, NEMUTRAP(s->pc, 0));
+  INSTPAT("0000000 00001 00000 000 00000 11100 11", ebreak  , N, NEMUTRAP(s->pc, R(10))); // R(10) is $a0
+
+  // TODO: implement csr instructions
+
+  // RV64I Base Instruction Set 
+  // INSTPAT("??????? ????? ????? 110 ????? 00000 11", lwu    , I, R(rd) = Mr(src1 + imm, 4));
+  INSTPAT("??????? ????? ????? 011 ????? 00000 11", ld     , I, R(rd) = Mr(src1 + imm, 8));
+  INSTPAT("??????? ????? ????? 011 ????? 01000 11", sd     , S, Mw(src1 + imm, 8, src2));
+
+  INSTPAT("000000? ????? ????? 001 ????? 00100 11", slli   , I, R(rd) = src1 << (imm & 0x3f));
+  INSTPAT("000000? ????? ????? 101 ????? 00100 11", srli   , I, R(rd) = (word_t)src1 >> (imm & 0x3f));
+  INSTPAT("010000? ????? ????? 101 ????? 00100 11", srai   , I, R(rd) = (sword_t)src1 >> (imm & 0x3f));
+
+  INSTPAT("??????? ????? ????? 000 ????? 00110 11", addiw  , I, R(rd) = SEXT((uint32_t)src1 + imm, 32));
+
+  INSTPAT("0000000 ????? ????? 001 ????? 00110 11", slliw  , I, R(rd) = SEXT((uint32_t)src1 << (imm & 0x1f), 32));
+  INSTPAT("0000000 ????? ????? 101 ????? 00110 11", srliw  , I, R(rd) = SEXT((uint32_t)src1 >> (imm & 0x1f), 32));
+  INSTPAT("0100000 ????? ????? 101 ????? 00110 11", sraiw  , I, R(rd) = SEXT((int32_t) src1 >> (imm & 0x1f), 32));
+  INSTPAT("0000000 ????? ????? 000 ????? 01110 11", addw   , R, R(rd) = SEXT((int32_t)src1 + (int32_t)src2, 32));
+  INSTPAT("0100000 ????? ????? 000 ????? 01110 11", subw   , R, R(rd) = SEXT((int32_t)src1 - (int32_t)src2, 32));
+  INSTPAT("0000000 ????? ????? 001 ????? 01110 11", sllw   , R, R(rd) = SEXT((uint32_t)src1 << ((uint32_t)src2), 32));
+  INSTPAT("0000000 ????? ????? 101 ????? 01110 11", srlw   , R, R(rd) = SEXT((uint32_t)src1 >> ((uint32_t)src2), 32));
+  INSTPAT("0100000 ????? ????? 101 ????? 01110 11", sraw   , R, R(rd) = SEXT((int32_t)src1 >> ((int32_t)src2), 32));
+
+  // RV32M Standard Extension
+  INSTPAT("0000001 ????? ????? 000 ????? 01100 11", mul     , R, R(rd) = src1 * src2);
+  #ifdef CONFIG_ISA64
+  #else
+  INSTPAT("0000001 ????? ????? 001 ????? 01100 11", mulh    , R, R(rd) = ((int64_t)(sword_t)src1 * (int64_t)(sword_t)src2) >> 32);
+  INSTPAT("0000001 ????? ????? 010 ????? 01100 11", mulhsu  , R, R(rd) = ((int64_t)(sword_t)src1 *  (int64_t)(word_t)src2) >> 32);
+  INSTPAT("0000001 ????? ????? 011 ????? 01100 11", mulhu   , R, R(rd) = ( (int64_t)(word_t)src1 *  (int64_t)(word_t)src2) >> 32);
+  #endif
+  INSTPAT("0000001 ????? ????? 100 ????? 01100 11", div     , R, R(rd) = (sword_t)src1 / (sword_t)src2);
+  INSTPAT("0000001 ????? ????? 101 ????? 01100 11", divu    , R, R(rd) = (word_t)src1 / (word_t)src2);
+  INSTPAT("0000001 ????? ????? 110 ????? 01100 11", rem     , R, R(rd) = (sword_t)src1 % (sword_t)src2);
+  INSTPAT("0000001 ????? ????? 111 ????? 01100 11", remu    , R, R(rd) = (word_t)src1 % (word_t)src2);
+
+  // // RV64M Standard Extension
+  INSTPAT("0000001 ????? ????? 000 ????? 01110 11", mulw    , R, R(rd) = SEXT((int32_t)src1 * (int32_t)src2, 32));
+  INSTPAT("0000001 ????? ????? 100 ????? 01110 11", divw    , R, R(rd) = SEXT((int32_t)src1 / (int32_t)src2, 32));
+  INSTPAT("0000001 ????? ????? 101 ????? 01110 11", divuw   , R, R(rd) = SEXT((uint32_t)src1 / (uint32_t)src2, 32));
+  INSTPAT("0000001 ????? ????? 110 ????? 01110 11", remw    , R, R(rd) = SEXT((int32_t)src1 % (int32_t)src2, 32));
+  INSTPAT("0000001 ????? ????? 111 ????? 01110 11", remuw   , R, R(rd) = SEXT((uint32_t)src1 % (uint32_t)src2, 32));
+
   INSTPAT("??????? ????? ????? ??? ????? ????? ??", inv    , N, INV(s->pc));
   INSTPAT_END();
 
   R(0) = 0; // reset $zero to 0
 
+  uint32_t opcode = BITS(s->isa.inst.val, 6, 0);
+  if (opcode == 0b1100111 || opcode == 0b1101111) {
+    ftracebuf[ftracehead].pc = s->pc;
+    ftracebuf[ftracehead].npc = s->dnpc;
+    if (s->isa.inst.val == 0x00008067) {
+      ftracebuf[ftracehead].ret = true;
+      ftracedepth--;
+      ftracebuf[ftracehead].depth = ftracedepth;
+    } else {
+      ftracebuf[ftracehead].ret = false;
+      ftracebuf[ftracehead].depth = ftracedepth;
+      ftracedepth++;
+    }
+    ftracehead = (ftracehead + 1) % MAX_FTRACE_SIZE;
+  }
   return 0;
 }
 
 int isa_exec_once(Decode *s) {
   s->isa.inst.val = inst_fetch(&s->snpc, 4);
   return decode_exec(s);
+}
+
+void isa_parser_elf(char *filename) {
+  FILE *fp = fopen(filename, "rb");
+  Assert(fp, "Can not open '%s'", filename);
+  fseek(fp, 0, SEEK_END);
+  long size = ftell(fp);
+  Assert(size < MAX_ELF_SIZE, "elf file is too large");
+
+  fseek(fp, 0, SEEK_SET);
+  int ret = fread(&elfhdr, sizeof(elfhdr), 1, fp);
+  assert(ret == 1);
+  assert(memcmp(elfhdr.e_ident, ELFMAG, SELFMAG) == 0);
+  fseek(fp, 0, SEEK_SET);
+  ret = fread(elfbuf, size, 1, fp);
+  assert(ret == 1);
+  fclose(fp);
+
+  printf("e_ident: ");
+  for (size_t i = 0; i < SELFMAG; i++) {
+    printf("%02x ", elfhdr.e_ident[i]);
+  }
+  printf("\n");
+  printf("e_type: %d\t", elfhdr.e_type);
+  printf("e_machine: %d\t", elfhdr.e_machine);
+  printf("e_version: %d\n", elfhdr.e_version);
+  printf("e_entry: " FMT_WORD "\t", elfhdr.e_entry);
+  printf("e_phoff: " FMT_WORD "\n", elfhdr.e_phoff);
+  printf("e_shoff: " FMT_WORD "\t", elfhdr.e_shoff);
+  printf("e_flags: 0x%016x\n", elfhdr.e_flags);
+  printf("e_ehsize: %d\t", elfhdr.e_ehsize);
+  printf("e_phentsize: %d\t", elfhdr.e_phentsize);
+  printf("e_phnum: %d\n", elfhdr.e_phnum);
+  printf("e_shentsize: %d\t", elfhdr.e_shentsize);
+  printf("e_shnum: %d\t", elfhdr.e_shnum);
+  printf("e_shstrndx: %d\n", elfhdr.e_shstrndx);
+
+  for (size_t i = 0; i < elfhdr.e_shnum; i++) {
+    Elf_Shdr *shdr = (Elf_Shdr *)(elfbuf + elfhdr.e_shoff + i * elfhdr.e_shentsize);
+    if (shdr->sh_type == SHT_SYMTAB) {
+      elfshdr_symtab = shdr;
+    } else if (shdr->sh_type == SHT_STRTAB) {
+      elfshdr_strtab = shdr;
+    }
+    if (elfshdr_symtab != NULL && elfshdr_strtab != NULL) {
+      break;
+      for (size_t j = 0; j < elfshdr_symtab->sh_size / sizeof(Elf_Sym); j++) {
+        Elf_Sym *sym = (Elf_Sym *)(elfbuf + elfshdr_symtab->sh_offset + j * sizeof(Elf_Sym));
+        printf("" FMT_WORD ": %s\n", sym->st_value, elfbuf + elfshdr_strtab->sh_offset + sym->st_name);
+      }
+      break;
+    }
+  }
+}
+
+void cpu_show_ftrace() {
+  Elf_Sym *sym = NULL;
+  Ftrace *ftrace = NULL;
+  for (size_t i = 0; i < ftracehead; i++) {
+    ftrace = ftracebuf + i;
+    printf("" FMT_WORD ": ", ftrace->pc);
+    for (size_t j = 0; j < ftrace->depth; j++) {
+      printf("  ");
+    }
+    printf("%s ", ftrace->ret ? "ret" : "call");
+    if (elfshdr_symtab == NULL) {
+      printf("\n");
+      continue;
+    }
+    for (int j = elfshdr_symtab->sh_size / sizeof(Elf_Sym) - 1; j >= 0; j--) {
+      sym = (Elf_Sym *)(elfbuf + elfshdr_symtab->sh_offset + j * sizeof(Elf_Sym));
+      if (sym->st_value == ftrace->npc) {
+        break;
+      }
+    }
+    printf(
+      "[%s@" FMT_WORD "]\n",
+      elfbuf + elfshdr_strtab->sh_offset + sym->st_name,
+      ftrace->npc);
+  }
 }

@@ -20,6 +20,10 @@
 
 void cpu_exec(uint64_t n);
 
+void cpu_show_itrace();
+
+void cpu_show_ftrace();
+
 void set_nemu_state(int state, vaddr_t pc, int halt_ret);
 void invalid_inst(vaddr_t thispc);
 

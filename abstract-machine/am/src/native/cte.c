@@ -1,5 +1,5 @@
 #include <sys/time.h>
-#include <string.h>
+// #include <string.h>
 #include "platform.h"
 
 #define TIMER_HZ 100
@@ -8,6 +8,10 @@
 static Context* (*user_handler)(Event, Context*) = NULL;
 
 void __am_kcontext_start();
+#if defined(__APPLE__)
+void __am_kcontext_start(){};
+#endif
+
 void __am_switch(Context *c);
 int __am_in_userspace(void *addr);
 void __am_pmem_protect();
@@ -20,9 +24,19 @@ static void irq_handle(Context *c) {
   c->ksp = thiscpu->ksp;
 
   if (thiscpu->ev.event == EVENT_ERROR) {
+#if defined(__x86_64__)
     uintptr_t rip = c->uc.uc_mcontext.gregs[REG_RIP];
     printf("Unhandle signal '%s' at rip = %p, badaddr = %p, cause = 0x%x\n",
-        thiscpu->ev.msg, rip, thiscpu->ev.ref, thiscpu->ev.cause);
+      thiscpu->ev.msg, rip, thiscpu->ev.ref, thiscpu->ev.cause);
+#elif defined(__aarch64__) && !defined(__APPLE__)
+    uintptr_t rip = c->uc.uc_mcontext.pc;
+    printf("Unhandle signal '%s' at pc = %p, badaddr = %p, cause = 0x%x\n",
+      thiscpu->ev.msg, rip, thiscpu->ev.ref, thiscpu->ev.cause);
+#elif defined(__APPLE__)
+    uintptr_t rip = c->uc.uc_mcontext->__ss.__pc;
+    printf("Unhandle signal '%s' at pc = %p, badaddr = %p, cause = 0x%x\n",
+      thiscpu->ev.msg, rip, thiscpu->ev.ref, thiscpu->ev.cause);
+#endif
     assert(0);
   }
   c = user_handler(thiscpu->ev, c);
@@ -36,8 +50,18 @@ static void irq_handle(Context *c) {
   __am_panic_on_return();
 }
 
+#if defined(__APPLE__)
+uint8_t _start, _etext;
+#endif
+
 static void setup_stack(uintptr_t event, ucontext_t *uc) {
+#if defined(__x86_64__)
   void *rip = (void *)uc->uc_mcontext.gregs[REG_RIP];
+#elif defined(__aarch64__) && !defined(__APPLE__)
+  void *rip = (void *)uc->uc_mcontext.pc;
+#elif defined(__APPLE__)
+  void *rip = (void *)uc->uc_mcontext->__ss.__pc;
+#endif
   extern uint8_t _start, _etext;
   int trap_from_user = __am_in_userspace(rip);
   int signal_safe = IN_RANGE(rip, RANGE(&_start, &_etext)) || trap_from_user ||
@@ -60,10 +84,24 @@ static void setup_stack(uintptr_t event, ucontext_t *uc) {
 
   // skip the instructions causing SIGSEGV for syscall
   if (event == EVENT_SYSCALL) { rip += SYSCALL_INSTR_LEN; }
+#if defined(__x86_64__)
   uc->uc_mcontext.gregs[REG_RIP] = (uintptr_t)rip;
 
   // switch to kernel stack if we were previously in user space
   uintptr_t rsp = trap_from_user ? thiscpu->ksp : uc->uc_mcontext.gregs[REG_RSP];
+#elif defined(__aarch64__) && !defined(__APPLE__)
+  uc->uc_mcontext.pc = (uintptr_t)rip;
+
+  uintptr_t rsp = trap_from_user ? thiscpu->ksp : uc->uc_mcontext.sp;
+#elif defined(__APPLE__)
+  uc->uc_mcontext->__ss.__pc = (uintptr_t)rip;
+
+  uintptr_t rsp = trap_from_user ? thiscpu->ksp : uc->uc_mcontext->__ss.__sp;
+#elif __APPLE__
+  uc->uc_mcontext->__ss.__pc = (uintptr_t)rip;
+
+  uintptr_t rsp = trap_from_user ? thiscpu->ksp : uc->uc_mcontext->__ss.__sp;
+#endif
   rsp -= sizeof(Context);
   // keep (rsp + 8) % 16 == 0 to support SSE
   if ((rsp + 8) % 16 != 0) rsp -= 8;
@@ -76,17 +114,39 @@ static void setup_stack(uintptr_t event, ucontext_t *uc) {
   __am_get_intr_sigmask(&uc->uc_sigmask);
 
   // call irq_handle after returning from the signal handler
+#if defined(__x86_64__)
   uc->uc_mcontext.gregs[REG_RDI] = (uintptr_t)c;
   uc->uc_mcontext.gregs[REG_RIP] = (uintptr_t)irq_handle;
   uc->uc_mcontext.gregs[REG_RSP] = (uintptr_t)c;
+#elif defined(__aarch64__) && !defined(__APPLE__)
+  uc->uc_mcontext.regs[REG_X0] = (uintptr_t)c;
+  uc->uc_mcontext.pc = (uintptr_t)irq_handle;
+  uc->uc_mcontext.sp = (uintptr_t)c;
+#elif defined(__APPLE__)
+  uc->uc_mcontext->__ss.__x[0] = (uintptr_t)c;
+  uc->uc_mcontext->__ss.__pc = (uintptr_t)irq_handle;
+  uc->uc_mcontext->__ss.__sp = (uintptr_t)c;
+#endif
 }
 
 static void iret(ucontext_t *uc) {
+#if defined(__x86_64__)
   Context *c = (void *)uc->uc_mcontext.gregs[REG_RDI];
+#elif defined(__aarch64__) && !defined(__APPLE__)
+  Context *c = (void *)uc->uc_mcontext.regs[REG_X0];
+#elif defined(__APPLE__)
+  Context *c = (void *)uc->uc_mcontext->__ss.__x[0];
+#endif
   // restore the context
   *uc = c->uc;
   thiscpu->ksp = c->ksp;
+#if defined(__x86_64__)
   if (__am_in_userspace((void *)uc->uc_mcontext.gregs[REG_RIP])) __am_pmem_protect();
+#elif defined(__aarch64__) && !defined(__APPLE__)
+  if (__am_in_userspace((void *)uc->uc_mcontext.pc)) __am_pmem_protect();
+#elif defined(__APPLE__)
+  if (__am_in_userspace((void *)uc->uc_mcontext->__ss.__pc)) __am_pmem_protect();
+#endif
 }
 
 static void sig_handler(int sig, siginfo_t *info, void *ucontext) {
@@ -120,7 +180,7 @@ static void sig_handler(int sig, siginfo_t *info, void *ucontext) {
   if (thiscpu->ev.event == EVENT_ERROR) {
     thiscpu->ev.ref = (uintptr_t)info->si_addr;
     thiscpu->ev.cause = (uintptr_t)info->si_code;
-    thiscpu->ev.msg = strsignal(sig);
+    // thiscpu->ev.msg = strsignal(sig);
   }
   setup_stack(thiscpu->ev.event, ucontext);
 }
@@ -167,16 +227,24 @@ Context* kcontext(Area kstack, void (*entry)(void *), void *arg) {
   Context *c = (Context*)kstack.end - 1;
 
   __am_get_example_uc(c);
+#if defined(__x86_64__)
   c->uc.uc_mcontext.gregs[REG_RIP] = (uintptr_t)__am_kcontext_start;
   c->uc.uc_mcontext.gregs[REG_RSP] = (uintptr_t)kstack.end;
+#elif defined(__aarch64__) && !defined(__APPLE__)
+  c->uc.uc_mcontext.pc = (uintptr_t)__am_kcontext_start;
+  c->uc.uc_mcontext.sp = (uintptr_t)kstack.end;
+#elif defined(__APPLE__)
+  c->uc.uc_mcontext->__ss.__pc = (uintptr_t)__am_kcontext_start;
+  c->uc.uc_mcontext->__ss.__sp = (uintptr_t)kstack.end;
+#endif
 
   int ret = sigemptyset(&(c->uc.uc_sigmask)); // enable interrupt
   assert(ret == 0);
 
   c->vm_head = NULL;
 
-  c->GPR1 = (uintptr_t)arg;
-  c->GPR2 = (uintptr_t)entry;
+  // c->GPR1 = (uintptr_t)arg;
+  // c->GPR2 = (uintptr_t)entry;
   return c;
 }
 

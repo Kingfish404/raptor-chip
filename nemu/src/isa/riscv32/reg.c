@@ -16,6 +16,30 @@
 #include <isa.h>
 #include "local-include/reg.h"
 
+/*
+    | Register | ABI Name | Description                      | Saver  |
+    |----------|----------|----------------------------------|--------|
+    | x0       | zero     | Hard-wired zero                  | --     |
+    | x1       | ra       | Return address                   | Caller |
+    | x2       | sp       | Stack pointer                    | Callee |
+    | x3       | gp       | Global pointer                   | --     |
+    | x4       | tp       | Thread pointer                   | --     |
+    | x5       | t0       | Temporaries/alternate link reg   | Caller |
+    | x6-7     | t1-2     | Temporaries                      | Caller |
+    | x8       | s0/fp    | Saved register/frame pointer     | Callee |
+    | x9       | s1       | Saved register                   | Callee |
+    | x10-11   | a0-1     | Function arguments/return values | Caller |
+    | x12-17   | a2-7     | Function arguments               | Caller |
+    | x18-27   | s2-11    | Saved registers                  | Callee |
+    | x28-31   | t3-6     | Temporaries                      | Caller |
+    |----------|----------|----------------------------------|--------|
+    | f0-7     | ft0-7    | FP temporaries                   | Caller |
+    | f8-9     | fs0-1    | FP saved registers               | Callee |
+    | f10-11   | fa0-1    | FP arguments/return values       | Caller |
+    | f12-17   | fa2-7    | FP arguments                     | Caller |
+    | f18-27   | fs2-11   | FP saved registers               | Callee |
+    | f28-31   | ft8-11   | FP temporaries                   | Caller |
+ */
 const char *regs[] = {
     "$0", "ra", "sp", "gp", "tp", "t0", "t1", "t2",
     "s0", "s1", "a0", "a1", "a2", "a3", "a4", "a5",
@@ -24,19 +48,20 @@ const char *regs[] = {
 
 void isa_reg_display()
 {
-  printf(" pc: 0x%08llx\n", cpu.pc);
+  printf(" pc: " FMT_WORD "\n", cpu.pc);
   for (int i = 0; i < sizeof(regs) / sizeof(char *); i++)
   {
     if (i > 0 && i % 4 == 0)
       printf("\n");
-    printf("%3s: 0x%08llx\t", regs[i], cpu.gpr[i]);
+    printf("%3s: " FMT_WORD "\t", regs[i], cpu.gpr[i]);
   }
   printf("\n");
 }
 
 word_t isa_reg_str2val(const char *s, bool *success)
 {
-  if (strcmp(s, "pc") == 0) {
+  if (strcmp(s, "pc") == 0)
+  {
     *success = true;
     return cpu.pc;
   }

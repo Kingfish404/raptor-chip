@@ -23,11 +23,10 @@ typedef struct watchpoint
   int NO;
   struct watchpoint *next;
 
-  /* TODO: Add more members if necessary */
   struct watchpoint *next_alloc;
   struct watchpoint *prev_alloc;
   bool alloc;
-  char str[32];
+  char str[33];
   word_t v;
 
 } WP;
@@ -49,8 +48,6 @@ void init_wp_pool()
   head = NULL;
   free_ = wp_pool;
 }
-
-/* TODO: Implement the functionality of watchpoint */
 
 WP *new_wp()
 {
@@ -107,7 +104,7 @@ void wp_show()
   {
     word_t v = expr(p->str, &success);
     p->v = v;
-    printf("%02d\t\"%s\"\t: 0x%016llx, %020llu\n", p->NO, p->str, v, v);
+    printf("%02d\t\"%s\"\t: " FMT_WORD "\n", p->NO, p->str, v);
   }
 }
 
@@ -130,7 +127,7 @@ bool wp_check_changed()
     word_t v = expr(p->str, &success);
     if (p->v != v)
     {
-      printf("%02d\t\"%s\"\t: old 0x%016llx, new 0x%016llx\n", p->NO, p->str, p->v, v);
+      printf("%02d\t\"%s\"\t: old " FMT_WORD ", new " FMT_WORD "\n", p->NO, p->str, p->v, v);
       p->v = v;
       return true;
     }

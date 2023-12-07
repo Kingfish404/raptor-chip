@@ -29,6 +29,7 @@ void init_wp_pool();
 static char* rl_gets() {
   static char *line_read = NULL;
 
+// #ifndef CONFIG_TARGET_SHARE
   if (line_read) {
     free(line_read);
     line_read = NULL;
@@ -39,6 +40,7 @@ static char* rl_gets() {
   if (line_read && *line_read) {
     add_history(line_read);
   }
+// #endif
 
   return line_read;
 }
@@ -68,14 +70,30 @@ static int cmd_info(char *args) {
     printf("No argument given.\n");
     return 0;
   }
-  if (strcmp(args, "r") == 0) {
+  while (args[0] == ' ') {
+    args++;
+  }
+  switch (args[0])    
+  {
+  case 'r':
     isa_reg_display();
-  }
-  else if (strcmp(args, "w") == 0) {
+    break;
+  case 'w':
     wp_show();
-  }
-  else {
+    break;
+  case 'i':
+    #ifdef CONFIG_ITRACE
+      cpu_show_itrace();
+    #else
+      printf("ITRACE is not enabled.\n");
+    #endif
+    break;
+  case 'f':
+    cpu_show_ftrace();
+    break;
+  default:
     printf("Unknown argument '%s'.\n", args);
+    break;
   }
   return 0;
 }
@@ -102,31 +120,7 @@ static int cmd_x(char *args) {
     return 0;
   }
 
-  word_t data;
-  size_t word_size = sizeof(word_t);
-  for (size_t i = 0; i < n; i++)
-  {
-    if( i % 4 ==0){
-      if (i != 0 ){
-        printf("| ");
-        for (size_t j = 0; j < 4; j++)
-        {
-          data = vaddr_read(addr + (i - (3 - j) - 1) * 4, 4);
-          for (size_t k = 0; k < word_size / 2; k++)
-          {
-            uint8_t c = (data >> (((word_size / 2) - 1 - k )* 8)) & 0xff;
-            printf("%02x ", c);
-          }
-          printf(" ");
-        }
-        printf("\n");
-      }
-      printf("%.16llx: ", addr + i);
-    }
-    data = vaddr_read(addr + i * 4, 4);
-    printf("%08llx ", data);
-  }
-  printf("\n");
+  vaddr_show(addr, n);
   return 0;
 }
 
@@ -138,10 +132,10 @@ static int cmd_p(char *args) {
   bool success = true;
   word_t data = expr(args, &success);
   if (success) {
-    printf("0x%016llx, %020lluull\n", data, data);
+    printf(FMT_WORD "\n", data);
   }
   else {
-    printf("Invalid arg: %s, expr: %llx\n", args, data);
+    printf("Invalid arg: %s, expr: " FMT_WORD "\n", args, data);
   }
   return 0;
 }
@@ -184,12 +178,12 @@ static struct {
   { "help", "Display information about all supported commands", cmd_help },
   { "c", "Continue the execution of the program", cmd_c },
   { "q", "Exit NEMU", cmd_q },
-  { "si", "Usage: si [N]\t\tExecute 'N' instructions step by step. When N is not given, the default is 1.", cmd_si },
-  { "info", "Usage: info SUBCMD\tPrint register state by 'info r'. Print watchpoint information by 'info w'.", cmd_info },
-  { "x", "Usage: x N EXPR\tScan 'N' continue 4 bytes, using 'EXPR' as start address.", cmd_x},
-  { "p", "Usage: p EXPR\tProcess and show the result of 'EXPR'.", cmd_p},
-  { "w", "Usage: w EXPR\tPause program when the result of 'EXPR changed.", cmd_w},
-  { "d", "Usage: d N\t\tDelete watchpoint which's id is 'N'.", cmd_d},
+  { "si", "si/s [N]\tExecute 'N' instructions step by step. When N is not given, the default is 1.", cmd_si },
+  { "info", "info/i SUBCMD\tPrint: register state by 'i r'. watchpoint information by 'i w'. instruction flow by 'i i'. function flow by 'i f", cmd_info },
+  { "x", "x N EXPR\tScan 'N' continue 4 bytes, using 'EXPR' as start address.", cmd_x},
+  { "p", "p EXPR\tProcess and show the result of 'EXPR'.", cmd_p},
+  { "w", "w EXPR\tPause program when the result of 'EXPR changed.", cmd_w},
+  { "d", "d N\t\tDelete watchpoint which's id is 'N'.", cmd_d},
 };
 
 #define NR_CMD ARRLEN(cmd_table)

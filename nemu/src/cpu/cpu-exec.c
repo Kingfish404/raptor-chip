@@ -25,11 +25,14 @@
  * You can modify this value as you want.
  */
 #define MAX_INST_TO_PRINT 10
+#define MAX_IRING_SIZE 16
 
 CPU_state cpu = {};
 uint64_t g_nr_guest_inst = 0;
 static uint64_t g_timer = 0; // unit: us
 static bool g_print_step = false;
+Decode iringbuf[MAX_IRING_SIZE];
+uint64_t iringhead = 0;
 
 void device_update();
 
@@ -77,6 +80,9 @@ static void exec_once(Decode *s, vaddr_t pc) {
 #else
   p[0] = '\0'; // the upstream llvm does not support loongarch32r
 #endif
+  iringbuf[iringhead] = *s;
+  iringhead = (iringhead + 1) % MAX_IRING_SIZE;
+  iringbuf[iringhead].logbuf[0] = '\0';
 #endif
 }
 
@@ -126,6 +132,9 @@ void cpu_exec(uint64_t n) {
     case NEMU_RUNNING: nemu_state.state = NEMU_STOP; break;
 
     case NEMU_END: case NEMU_ABORT:
+      if (nemu_state.state == NEMU_ABORT) {
+        cpu_show_itrace();
+      }
       Log("nemu: %s at pc = " FMT_WORD,
           (nemu_state.state == NEMU_ABORT ? ANSI_FMT("ABORT", ANSI_FG_RED) :
            (nemu_state.halt_ret == 0 ? ANSI_FMT("HIT GOOD TRAP", ANSI_FG_GREEN) :
@@ -134,4 +143,20 @@ void cpu_exec(uint64_t n) {
       // fall through
     case NEMU_QUIT: statistic();
   }
+}
+
+void cpu_show_itrace() {
+#ifdef CONFIG_ITRACE
+  for (size_t i = 0; i < MAX_IRING_SIZE; i++)
+  {
+    if (iringbuf[i].logbuf[0] == '\0') {
+      continue;
+    }
+    if ((cpu.pc - (iringbuf[i].snpc - iringbuf[i].pc)) == iringbuf[i].pc) {
+      printf("--> %-76s\n", iringbuf[i].logbuf);
+    } else {
+      printf("    %-76s\n", iringbuf[i].logbuf);
+    }
+  }
+#endif
 }

@@ -1,7 +1,7 @@
 menuconfig DEVICE
   depends on !TARGET_SHARE
   bool "Devices"
-  default n
+  default y
   help
     Provide device support for NEMU.
 
@@ -10,6 +10,10 @@ if DEVICE
 config HAS_PORT_IO
   bool
   default y if ISA_x86
+  default n
+
+config DTRACE
+  bool "Enable device tracer"
   default n
 
 menuconfig HAS_SERIAL

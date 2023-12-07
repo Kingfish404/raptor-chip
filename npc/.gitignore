@@ -1,5 +1,7 @@
 *.*
 *
+*.dot
+*.vcd
 !*/
 !Makefile
 !*.mk

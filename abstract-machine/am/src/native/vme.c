@@ -13,6 +13,13 @@ typedef struct PageMap {
   char key[32];  // used for hsearch_r()
 } PageMap;
 
+#if defined(__APPLE__)
+typedef struct hsearch_data {
+  struct PageMap *head;
+  int nr_page;
+} hsearch_data;
+#endif
+
 typedef struct VMHead {
   PageMap *head;
   struct hsearch_data hash;
@@ -39,9 +46,9 @@ void protect(AddrSpace *as) {
   VMHead *h = pgalloc(__am_pgsize); // used as head of the list
   assert(h != NULL);
   memset(h, 0, sizeof(*h));
-  int max_pg = (USER_SPACE.end - USER_SPACE.start) / __am_pgsize;
-  int ret = hcreate_r(max_pg, &h->hash);
-  assert(ret != 0);
+  // int max_pg = (USER_SPACE.end - USER_SPACE.start) / __am_pgsize;
+  // int ret = hcreate_r(max_pg, &h->hash);
+  // assert(ret != 0);
 
   as->ptr = h;
   as->pgsize = __am_pgsize;
@@ -92,16 +99,16 @@ void map(AddrSpace *as, void *va, void *pa, int prot) {
   assert(vm_head != NULL);
   char buf[32];
   snprintf(buf, 32, "%x", va);
-  ENTRY item = { .key = buf };
-  ENTRY *item_find;
-  hsearch_r(item, FIND, &item_find, &vm_head->hash);
+  // ENTRY item = { .key = buf };
+  ENTRY *item_find = NULL;
+  // hsearch_r(item, FIND, &item_find, &vm_head->hash);
   if (item_find == NULL) {
     pp = pgalloc(__am_pgsize); // this will waste memory, any better idea?
     snprintf(pp->key, 32, "%x", va);
-    item.key = pp->key;
-    item.data = pp;
-    int ret = hsearch_r(item, ENTER, &item_find, &vm_head->hash);
-    assert(ret != 0);
+    // item.key = pp->key;
+    // item.data = pp;
+    // int ret = hsearch_r(item, ENTER, &item_find, &vm_head->hash);
+    // assert(ret != 0);
     vm_head->nr_page ++;
   } else {
     pp = item_find->data;
@@ -124,8 +131,16 @@ Context* ucontext(AddrSpace *as, Area kstack, void *entry) {
   Context *c = (Context*)kstack.end - 1;
 
   __am_get_example_uc(c);
+#ifdef __x86_64__
   c->uc.uc_mcontext.gregs[REG_RIP] = (uintptr_t)entry;
   c->uc.uc_mcontext.gregs[REG_RSP] = (uintptr_t)USER_SPACE.end;
+#elif __aarch64__ && !defined(__APPLE__)
+  c->uc.uc_mcontext.pc = (uintptr_t)entry;
+  c->uc.uc_mcontext.sp = (uintptr_t)USER_SPACE.end;
+#elif __APPLE__
+  c->uc.uc_mcontext->__ss.__pc = (uintptr_t)entry;
+  c->uc.uc_mcontext->__ss.__sp = (uintptr_t)USER_SPACE.end;
+#endif
 
   int ret = sigemptyset(&(c->uc.uc_sigmask)); // enable interrupt
   assert(ret == 0);
