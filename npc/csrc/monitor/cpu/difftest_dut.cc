@@ -3,6 +3,7 @@
 #include <dlfcn.h>
 
 extern NPCState npc;
+extern char *regs[];
 
 uint8_t pmem_ref[MSIZE] = {};
 
@@ -70,8 +71,8 @@ static void checkregs(NPCState *ref, vaddr_t pc)
   {
     if (ref->gpr[i] != npc.gpr[i])
     {
-      printf(FMT_RED("[ERROR]") " reg[%d] is different! ref = " FMT_WORD_NO_PREFIX ", dut = " FMT_WORD_NO_PREFIX "\n",
-             i, ref->gpr[i], npc.gpr[i]);
+      printf(FMT_RED("[ERROR]") " reg[%s] is different! ref = " FMT_WORD_NO_PREFIX ", dut = " FMT_WORD_NO_PREFIX "\n",
+             regs[i], ref->gpr[i], npc.gpr[i]);
       diff = true;
     }
   }

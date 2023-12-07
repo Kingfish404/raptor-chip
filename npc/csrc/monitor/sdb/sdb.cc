@@ -83,7 +83,27 @@ int cmd_c(char *args)
 
 int cmd_info(char *args)
 {
-  reg_display(GPR_SIZE);
+  if (args == NULL)
+  {
+    reg_display(GPR_SIZE);
+    return 0;
+  }
+  while (args[0] == ' ')
+  {
+    args++;
+  }
+  switch (args[0])
+  {
+  case 'r':
+    reg_display();
+    break;
+  case 'i':
+    cpu_show_itrace();
+    break;
+  default:
+    printf("Unknown argument '%s'.\n", args);
+    break;
+  }
   return 0;
 }
 
@@ -112,11 +132,11 @@ static struct
   const char *description;
   int (*handler)(char *);
 } cmd_table[] = {
-    {"help", "Display information about all supported commands", cmd_help},
-    {"c", "Continue the execution of the program", cmd_c},
-    {"si", "Execute N instructions step by step", cmd_si},
-    {"info", "Generic command for showing things about the program being debugged", cmd_info},
-    {"q", "Exit NPC", cmd_q},
+    {"help", "h\tDisplay information about all supported commands", cmd_help},
+    {"c", "c\tContinue the execution of the program", cmd_c},
+    {"si", "si/s [N] \tExecute N instructions step by step", cmd_si},
+    {"info", "info/i [ARG]\tGeneric command for showing things about regs (r), instruction trace (i)", cmd_info},
+    {"q", "q\tExit NPC", cmd_q},
 };
 
 int cmd_help(char *args)
@@ -124,7 +144,7 @@ int cmd_help(char *args)
   printf("The following commands are supported:\n");
   for (int i = 0; i < ARRLEN(cmd_table); i++)
   {
-    printf("%s - %s\n", cmd_table[i].name, cmd_table[i].description);
+    printf("%s\t- %s\n", cmd_table[i].name, cmd_table[i].description);
   }
   return 0;
 }
