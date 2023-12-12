@@ -2,6 +2,7 @@
 #include <klib.h>
 #include <klib-macros.h>
 #include <stdarg.h>
+#include <stdint.h>
 
 #if !defined(__ISA_NATIVE__) || defined(__NATIVE_USE_KLIB__)
 
@@ -47,6 +48,29 @@ int vsprintf(char *out, const char *fmt, va_list ap)
           pout++;
           buf_count++;
           d /= 10;
+        } while (d != 0);
+        char *e_p = pout - 1;
+        while (s_p < e_p)
+        {
+          char tmp = *s_p;
+          *s_p = *e_p;
+          *e_p = tmp;
+          s_p++;
+          e_p--;
+        }
+      }
+      break;
+      case 'x':
+      {
+        uint32_t d = va_arg(ap, uint32_t);
+        char *s_p = pout;
+        do
+        {
+          int td = d % 16;
+          *pout = (td >= 0 && td <= 9) ? '0' + td : 'a' + td - 10;
+          pout++;
+          buf_count++;
+          d /= 16;
         } while (d != 0);
         char *e_p = pout - 1;
         while (s_p < e_p)

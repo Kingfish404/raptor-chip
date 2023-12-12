@@ -18,7 +18,34 @@
 
 #include <common.h>
 
+// Machine Trap Settup
+#define CSR_MSTATUS 0x300
+#define CSR_MTVEC   0x305
+
+// Machine Trap Handling
+#define CSR_MEPC    0x341
+#define CSR_MCAUSE  0x342
+
+// CSR_MSTATUS FLAGS
+#define CSR_MSTATUS_MPP   0x1800
+#define CSR_MSTATUS_MPIE  0x80
+#define CSR_MSTATUS_MIE  0x8
+
+#define CSR_SET(REG, BIT_MASK) {cpu.sr[REG] |= ~BIT_MASK;}
+
+#define CSR_CLEAR(REG, BIT_MASK) {cpu.sr[REG] &= ~BIT_MASK;}
+
+
+#define CSR_BIT_COND_SET(REG, COND, BIT_MASK) \
+{do { \
+  CSR_CLEAR(REG, BIT_MASK) \
+  if ((cpu.sr[REG] & COND) > 0) { \
+    CSR_SET(REG, BIT_MASK) \
+  } \
+} while (0);}
+
 typedef struct {
+  word_t sr[4096];
   word_t gpr[MUXDEF(CONFIG_RVE, 16, 32)];
   vaddr_t pc;
 } MUXDEF(CONFIG_RV64, riscv64_CPU_state, riscv32_CPU_state);

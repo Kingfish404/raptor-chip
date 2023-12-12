@@ -14,13 +14,22 @@
 ***************************************************************************************/
 
 #include <isa.h>
+#include <isa-def.h>
+#include <stdio.h>
 
 word_t isa_raise_intr(word_t NO, vaddr_t epc) {
-  /* TODO: Trigger an interrupt/exception with ``NO''.
-   * Then return the address of the interrupt/exception vector.
-   */
+#ifdef CONFIG_ETRACE
+  printf("ETRACE | NO: %d at epc: " FMT_WORD " trap-handler base address: " FMT_WORD,
+   NO, epc, cpu.sr[CSR_MTVEC]);
+#endif
+  cpu.sr[CSR_MEPC] = epc;
+  cpu.sr[CSR_MCAUSE] = NO;
+  
+  // csr.mstatus.m.MPIE = csr.mstatus.m.MIE;
+  CSR_BIT_COND_SET(CSR_MSTATUS, CSR_MSTATUS_MIE, CSR_MSTATUS_MPIE) 
+  CSR_CLEAR(CSR_MSTATUS, CSR_MSTATUS_MIE) // csr.mstatus.m.MIE  = 0;
 
-  return 0;
+  return cpu.sr[CSR_MTVEC];
 }
 
 word_t isa_query_intr() {

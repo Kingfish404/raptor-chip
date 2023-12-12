@@ -41,7 +41,7 @@ void *malloc(size_t size) {
     addr = heap.start;
   }
   uint8_t *p = addr;
-  size = (size + (sizeof(size_t) - 1)) & ~(sizeof(size_t));
+  size = (size + 0xff - 1) & ~0xff;
   addr += size;
   return p;
 }

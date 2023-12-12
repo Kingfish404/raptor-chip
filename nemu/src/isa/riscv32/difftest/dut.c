@@ -17,6 +17,14 @@
 #include <cpu/difftest.h>
 #include "../local-include/reg.h"
 
+#define CHECK_CSR(name)                                              \
+  if (cpu.sr[name] != ref_r->sr[name])                               \
+  {                                                                  \
+    printf("Difftest: csr[%s] = " FMT_WORD ", ref = " FMT_WORD "\n", \
+           #name, cpu.sr[name], ref_r->sr[name]);                    \
+    is_same = false;                                                 \
+  }
+
 bool isa_difftest_checkregs(CPU_state *ref_r, vaddr_t pc)
 {
   bool is_same = true;
@@ -25,14 +33,23 @@ bool isa_difftest_checkregs(CPU_state *ref_r, vaddr_t pc)
     printf("Difftest: pc = " FMT_WORD ", ref = " FMT_WORD "\n", cpu.pc, ref_r->pc);
     is_same = false;
   }
-  for (int i = 0; i < 32; i++)
+  for (int i = 0; i < MUXDEF(CONFIG_RVE, 16, 32); i++)
   {
     if (gpr(i) != ref_r->gpr[i])
     {
-      printf("Difftest: reg[%02d|%s] = " FMT_WORD ", ref = " FMT_WORD "\n", i, reg_name(i), gpr(i), ref_r->gpr[i]);
+      printf("Difftest: reg[%s] = " FMT_WORD ", ref = " FMT_WORD "\n", reg_name(i), gpr(i), ref_r->gpr[i]);
       is_same = false;
     }
   }
+  CHECK_CSR(CSR_MSTATUS);
+  if (cpu.sr[CSR_MSTATUS] != ref_r->sr[CSR_MSTATUS])
+  {
+    printf("Difftest: csr[%s] = " FMT_WORD ", ref = " FMT_WORD "\n",
+           "CSR_MSTATUS", cpu.sr[CSR_MSTATUS], ref_r->sr[CSR_MSTATUS]);
+  }
+  CHECK_CSR(CSR_MEPC);
+  CHECK_CSR(CSR_MTVEC);
+  CHECK_CSR(CSR_MCAUSE);
   return is_same;
 }
 

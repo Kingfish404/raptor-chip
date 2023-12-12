@@ -1,4 +1,5 @@
 #include <common.h>
+#include <difftest.h>
 #include <mem.h>
 #include <getopt.h>
 #include <stdio.h>
@@ -22,8 +23,6 @@ void sdb_set_batch_mode();
 void sdb_sim_init(int argc, char **argv);
 
 void init_disasm(const char *triple);
-
-void init_difftest(char *ref_so_file, long img_size, int port);
 
 static char *log_file = NULL;
 static char *diff_so_file = NULL;

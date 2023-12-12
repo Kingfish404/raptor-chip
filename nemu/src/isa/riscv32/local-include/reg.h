@@ -23,7 +23,14 @@ static inline int check_reg_idx(int idx) {
   return idx;
 }
 
+static inline int check_sr_idx(int idx) {
+  IFDEF(CONFIG_RT_CHECK, assert(idx >= 0 && idx < 4096));
+  return idx;
+}
+
 #define gpr(idx) (cpu.gpr[check_reg_idx(idx)])
+
+#define sr(idx) (cpu.sr[check_sr_idx(idx)])
 
 static inline const char* reg_name(int idx) {
   extern const char* regs[];

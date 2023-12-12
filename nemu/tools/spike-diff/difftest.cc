@@ -17,6 +17,7 @@
 #include "sim.h"
 #include "../../include/common.h"
 #include <difftest-def.h>
+#include <isa-def.h>
 
 #define NR_GPR MUXDEF(CONFIG_RVE, 16, 32)
 
@@ -37,6 +38,7 @@ static debug_module_config_t difftest_dm_config = {
 };
 
 struct diff_context_t {
+  word_t sr[4096];
   word_t gpr[MUXDEF(CONFIG_RVE, 16, 32)];
   word_t pc;
 };
@@ -60,6 +62,10 @@ void sim_t::diff_get_regs(void* diff_context) {
     ctx->gpr[i] = state->XPR[i];
   }
   ctx->pc = state->pc;
+  ctx->sr[ISA_CSR_MEPC] = state->mepc->read();
+  ctx->sr[ISA_CSR_MSTATUS] = state->mstatus->read();
+  ctx->sr[ISA_CSR_MCAUSE] = state->mcause->read();
+  ctx->sr[ISA_CSR_MTVEC] = state->mtvec->read();
 }
 
 void sim_t::diff_set_regs(void* diff_context) {
@@ -68,6 +74,10 @@ void sim_t::diff_set_regs(void* diff_context) {
     state->XPR.write(i, (sword_t)ctx->gpr[i]);
   }
   state->pc = ctx->pc;
+  state->mepc->write(ctx->sr[ISA_CSR_MEPC]);
+  state->mstatus->write(ctx->sr[ISA_CSR_MSTATUS]);
+  state->mcause->write(ctx->sr[ISA_CSR_MCAUSE]);
+  state->mtvec->write(ctx->sr[ISA_CSR_MTVEC]);
 }
 
 void sim_t::diff_memcpy(reg_t dest, void* src, size_t n) {
