@@ -10,6 +10,7 @@ Context* __am_irq_handle(Context *c) {
     switch (c->mcause) {
       case 0xbul:
       case 0x0ul: 
+        c->mepc +=4;
         ev.event = EVENT_YIELD;
         break;
       case 0x3ul: 
@@ -46,7 +47,17 @@ bool cte_init(Context*(*handler)(Event, Context*)) {
 }
 
 Context *kcontext(Area kstack, void (*entry)(void *), void *arg) {
-  return NULL;
+  Context *p = (Context *)(kstack.end - sizeof(Context));
+
+  p->mepc = (uintptr_t) entry;
+  p->gpr[a0] = (int)arg;
+
+  #ifdef CONFIG_ISA64
+  p->mstatus = 0xa00001800;
+  #else // __risv32
+  p->mstatus = 0x1800;
+  #endif
+  return p;
 }
 
 void yield() {

@@ -47,5 +47,5 @@ int cpu_current() {
 }
 
 int atomic_xchg(int *addr, int newval) {
-  return atomic_exchange((int *)addr, newval);
+  return atomic_exchange((atomic_int *)addr, newval);
 }

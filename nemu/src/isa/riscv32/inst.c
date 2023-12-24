@@ -74,11 +74,12 @@ enum {
   (BITS(i, 24, 21) << 1) \
 ) & ~1 ;} while(0)
 
-static void decode_operand(Decode *s, int *rd, word_t *src1, word_t *src2, word_t *imm, int type) {
+static void decode_operand(Decode *s, int *rd, int *rs, word_t *src1, word_t *src2, word_t *imm, int type) {
   uint32_t i = s->isa.inst.val;
   uint32_t rs1 = BITS(i, 19, 15);
   uint32_t rs2 = BITS(i, 24, 20);
   *rd     = BITS(i, 11, 7);
+  *rs     = rs1;
   switch (type) {
     case TYPE_R: src1R(); src2R()        ; break;
     case TYPE_I: src1R();          immI(); break;
@@ -105,13 +106,13 @@ static void decode_operand(Decode *s, int *rd, word_t *src1, word_t *src2, word_
     |  imm[20|10:1|11|19:12]                   |   rd   | opcode | J-type
  */
 static int decode_exec(Decode *s) {
-  int rd = 0;
+  int rd = 0, rs1 = 0;
   word_t src1 = 0, src2 = 0, imm = 0;
   s->dnpc = s->snpc;
 
 #define INSTPAT_INST(s) ((s)->isa.inst.val)
 #define INSTPAT_MATCH(s, name, type, ... /* execute body */ ) { \
-  decode_operand(s, &rd, &src1, &src2, &imm, concat(TYPE_, type)); \
+  decode_operand(s, &rd, &rs1, &src1, &src2, &imm, concat(TYPE_, type)); \
   __VA_ARGS__ ; \
 }
 
@@ -197,11 +198,11 @@ static int decode_exec(Decode *s) {
 
   // RV32/RV64 Zicsr Standard Extension
   INSTPAT("??????? ????? ????? 001 ????? 11100 11", csrrw  , I,   R(rd) = CSR(imm); CSR(imm) = src1;);
-  INSTPAT("??????? ????? ????? 010 ????? 11100 11", csrrs  , I,   R(rd) = CSR(imm); CSR(imm) = CSR(imm) | src1;);
-  INSTPAT("??????? ????? ????? 011 ????? 11100 11", csrrc  , I,   R(rd) = CSR(imm); CSR(imm) = CSR(imm) & ~src1;);
+  INSTPAT("??????? ????? ????? 010 ????? 11100 11", csrrs  , I,   R(rd) = CSR(imm); if(rs1 != 0) { CSR(imm) = CSR(imm) | src1; };);
+  INSTPAT("??????? ????? ????? 011 ????? 11100 11", csrrc  , I,   R(rd) = CSR(imm); if(rs1 != 0) { CSR(imm) = CSR(imm) & ~src1; };);
   INSTPAT("??????? ????? ????? 101 ????? 11100 11", csrrwi , I_I, R(rd) = CSR(imm); CSR(imm) = src1;);
-  INSTPAT("??????? ????? ????? 110 ????? 11100 11", csrrsi , I_I, R(rd) = CSR(imm); CSR(imm) = CSR(imm) | src1;);
-  INSTPAT("??????? ????? ????? 111 ????? 11100 11", csrrci , I_I, R(rd) = CSR(imm); CSR(imm) = CSR(imm) & ~src1;);
+  INSTPAT("??????? ????? ????? 110 ????? 11100 11", csrrsi , I_I, R(rd) = CSR(imm); if(rs1 != 0) { CSR(imm) = CSR(imm) | src1; };);
+  INSTPAT("??????? ????? ????? 111 ????? 11100 11", csrrci , I_I, R(rd) = CSR(imm); if(rs1 != 0) { CSR(imm) = CSR(imm) & ~src1; };);
 
   // RV32M Standard Extension
   INSTPAT("0000001 ????? ????? 000 ????? 01100 11", mul     , R, R(rd) = src1 * src2);
@@ -223,6 +224,9 @@ static int decode_exec(Decode *s) {
   // Trap-Return Instructions
   INSTPAT("0011000 00010 00000 000 00000 11100 11", mret    , N, s->dnpc = CSR(CSR_MEPC); 
     // csr.mstatus.m.MIE = csr.mstatus.m.MPIE;
+#ifdef CONFIG_DIFFTEST
+    difftest_skip_ref();
+#endif
     CSR_BIT_COND_SET(CSR_MSTATUS, CSR_MSTATUS_MPIE, CSR_MSTATUS_MIE)
     CSR_SET(CSR_MSTATUS, CSR_MSTATUS_MPIE) // csr.mstatus.m.MPIE= 1;
     );

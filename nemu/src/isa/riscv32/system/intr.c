@@ -24,7 +24,7 @@ word_t isa_raise_intr(word_t NO, vaddr_t epc) {
 #endif
   cpu.sr[CSR_MEPC] = epc;
   cpu.sr[CSR_MCAUSE] = NO;
-  
+
   // csr.mstatus.m.MPIE = csr.mstatus.m.MIE;
   CSR_BIT_COND_SET(CSR_MSTATUS, CSR_MSTATUS_MIE, CSR_MSTATUS_MPIE) 
   CSR_CLEAR(CSR_MSTATUS, CSR_MSTATUS_MIE) // csr.mstatus.m.MIE  = 0;

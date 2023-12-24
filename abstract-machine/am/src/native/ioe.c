@@ -7,6 +7,7 @@ static bool ioe_init_done = false;
 void __am_timer_init();
 void __am_gpu_init();
 void __am_input_init();
+void __am_input_update();
 void __am_audio_init();
 void __am_disk_init();
 void __am_input_config(AM_INPUT_CONFIG_T *);
@@ -72,6 +73,7 @@ static void do_io(int reg, void *buf) {
   if (!ioe_init_done) {
     __am_ioe_init();
   }
+  __am_input_update();
   ((handler_t)lut[reg])(buf);
 }
 

@@ -9,6 +9,8 @@
 #include <klib.h>
 #include "platform.h"
 #include <stdio.h>
+#include <fcntl.h>
+#include <unistd.h>
 
 #define MAX_CPU 16
 #define TRAP_PAGE_START (void *)0x100000
@@ -18,7 +20,7 @@ static int pmem_fd = 0;
 static void *pmem = NULL;
 static ucontext_t uc_example = {};
 static void *(*memcpy_libc)(void *, const void *, size_t) = NULL;
-sigset_t __am_intr_sigmask = {};
+sigset_t __am_intr_sigmask;
 __am_cpu_t *__am_cpu_struct = NULL;
 int __am_ncpu = 0;
 int __am_pgsize = 0;
@@ -64,17 +66,22 @@ int main(const char *args);
 static void init_platform() __attribute__((constructor));
 static void init_platform() {
   // create memory object and set up mapping to simulate the physical memory
-  // pmem_fd = memfd_create("pmem", 0);
-//   assert(pmem_fd != -1);
-//   // use dynamic linking to avoid linking to the same function in RT-Thread
-//   int (*ftruncate_libc)(int, off_t) = dlsym(RTLD_NEXT, "ftruncate");
-//   assert(ftruncate_libc != NULL);
-//   int ret2 = ftruncate_libc(pmem_fd, PMEM_SIZE);
-//   assert(ret2 == 0);
+  (shm_unlink("/pmem"));
+  pmem_fd = shm_open("/pmem", O_RDWR | O_CREAT, 0666);
+  assert(pmem_fd != -1);
+  // use dynamic linking to avoid linking to the same function in RT-Thread
+  // int (*ftruncate_libc)(int, off_t) = dlsym(RTLD_NEXT, "ftruncate");
+  // assert(ftruncate_libc != NULL);
+  int ret2;
+  ret2 = ftruncate(pmem_fd, PMEM_SIZE);
+  // ret2 = ftruncate_libc(pmem_fd, PMEM_SIZE);
+  assert(ret2 == 0);
 
-//   pmem = mmap(PMEM_START, PMEM_SIZE, PROT_READ | PROT_WRITE | PROT_EXEC,
-//       MAP_SHARED | MAP_FIXED, pmem_fd, 0);
-//   assert(pmem != (void *)-1);
+  // pmem = mmap(PMEM_START, PMEM_SIZE, PROT_READ | PROT_WRITE | PROT_EXEC,
+  //     MAP_SHARED | MAP_FIXED, pmem_fd, 0);
+  pmem = mmap(PMEM_START, PMEM_SIZE, PROT_READ | PROT_WRITE ,
+         MAP_SHARED, pmem_fd, 0);
+  assert(pmem != MAP_FAILED);
 
   // allocate private per-cpu structure
   thiscpu = mmap(NULL, sizeof(*thiscpu), PROT_READ | PROT_WRITE,
@@ -87,6 +94,7 @@ static void init_platform() {
   int sys_pgsz = sysconf(_SC_PAGESIZE);
   // void *ret = mmap(TRAP_PAGE_START, sys_pgsz, PROT_NONE,
   //     MAP_SHARED | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
+  // void *ret = mmap(TRAP_PAGE_START, sys_pgsz, PROT_NONE, MAP_SHARED, -1, 0);
   // assert(ret != (void *)-1);
 
   // save the address of memcpy() in glibc, since it may be linked with klib
@@ -137,11 +145,11 @@ static void init_platform() {
   //   }
   // }
 
-//   // set up the AM heap
-//   heap = RANGE(pmem, pmem + PMEM_SIZE);
+  // set up the AM heap
+  heap = RANGE(pmem, pmem + PMEM_SIZE);
 
   // initialize sigmask for interrupts
-  int ret2 = sigemptyset(&__am_intr_sigmask);
+  ret2 = sigemptyset(&__am_intr_sigmask);
   assert(ret2 == 0);
   ret2 = sigaddset(&__am_intr_sigmask, SIGVTALRM);
   assert(ret2 == 0);
@@ -175,7 +183,9 @@ static void init_platform() {
   setbuf(stdout, NULL);
 
   const char *args = getenv("mainargs");
-  halt(main(args ? args : "")); // call main here!
+  ret2 = main(args ? args : "");
+  (shm_unlink("/pmem"));
+  halt(ret2); // call main here!
 }
 
 void __am_exit_platform(int code) {

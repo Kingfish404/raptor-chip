@@ -19,12 +19,12 @@ LDFLAGS_CXX = $(addprefix -Wl$(comma), $(LDFLAGS))
 FFLAGS := -Wl,--whole-archive
 SFLAGS := -Wl,-no-whole-archive
 ifeq ($(shell uname), Darwin)
-AS 	   := gcc-13
-CC     := gcc-13
-CXX     := g++-13
+AS 	   := gcc
+CC     := gcc
+CXX     := g++
 LDFLAGS  := $(shell sdl2-config --libs)
 
-FFLAGS  := -W --whole-file
+FFLAGS  := -W
 SFLAGS := ""
 ifeq ($(wildcard $(shell which $(CC))),)
   $(info #  $(CC) not found; Please install $(CC) via Homebrew `brew install gcc@13`)

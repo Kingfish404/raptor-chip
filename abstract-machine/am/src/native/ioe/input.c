@@ -13,35 +13,40 @@ static int keymap[256] = {
   AM_KEYS(XX)
 };
 
-static int event_thread(void *args) {
+// static int event_thread(void *args) {
+//   SDL_Event event;
+//   while (1) {
+    
+//   }
+// }
+
+void __am_input_update() {
   SDL_Event event;
-  while (1) {
-    SDL_WaitEvent(&event);
-    switch (event.type) {
-      case SDL_QUIT: halt(0);
-      case SDL_KEYDOWN:
-      case SDL_KEYUP: {
-        SDL_Keysym k = event.key.keysym;
-        int keydown = event.key.type == SDL_KEYDOWN;
-        int scancode = k.scancode;
-        if (keymap[scancode] != 0) {
-          int am_code = keymap[scancode] | (keydown ? KEYDOWN_MASK : 0);
-          SDL_LockMutex(key_queue_lock);
-          key_queue[key_r] = am_code;
-          key_r = (key_r + 1) % KEY_QUEUE_LEN;
-          SDL_UnlockMutex(key_queue_lock);
-          void __am_send_kbd_intr();
-          __am_send_kbd_intr();
-        }
-        break;
+  SDL_WaitEvent(&event);
+  switch (event.type) {
+    case SDL_QUIT: halt(0);
+    case SDL_KEYDOWN:
+    case SDL_KEYUP: {
+      SDL_Keysym k = event.key.keysym;
+      int keydown = event.key.type == SDL_KEYDOWN;
+      int scancode = k.scancode;
+      if (keymap[scancode] != 0) {
+        int am_code = keymap[scancode] | (keydown ? KEYDOWN_MASK : 0);
+        SDL_LockMutex(key_queue_lock);
+        key_queue[key_r] = am_code;
+        key_r = (key_r + 1) % KEY_QUEUE_LEN;
+        SDL_UnlockMutex(key_queue_lock);
+        void __am_send_kbd_intr();
+        __am_send_kbd_intr();
       }
+      break;
     }
   }
 }
 
 void __am_input_init() {
   key_queue_lock = SDL_CreateMutex();
-  SDL_CreateThread(event_thread, "event thread", NULL);
+  // SDL_CreateThread(event_thread, "event thread", NULL);
 }
 
 void __am_input_config(AM_INPUT_CONFIG_T *cfg) {
