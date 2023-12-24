@@ -50,7 +50,7 @@ __EXPORT void difftest_regcpy(void *dut, bool direction)
       cpu.gpr[i] = npc->gpr[i];
     }
   }
-  else
+  else if (direction == DIFFTEST_TO_DUT)
   {
     npc->pc = &cpu.pc;
     npc->gpr = cpu.gpr;

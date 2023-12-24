@@ -14,7 +14,7 @@ typedef word_t vaddr_t;
 #define MBASE 0x80000000
 #define MSIZE 0x8000000
 
-#define GPR_SIZE 32
+#define GPR_SIZE 16
 
 #define FMT_WORD "0x%08x"
 #define FMT_WORD_NO_PREFIX "%08x"
