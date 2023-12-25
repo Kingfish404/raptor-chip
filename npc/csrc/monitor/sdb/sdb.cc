@@ -199,9 +199,11 @@ void sdb_sim_init(int argc, char **argv)
   contextp->commandArgs(argc, argv);
   top = new Vtop{contextp};
   Verilated::traceEverOn(true);
+#ifdef CONFIG_WTRACE
   tfp = new VerilatedVcdC;
   top->trace(tfp, 99);
   tfp->open("npc.vcd");
+#endif
   npc.gpr = (word_t *)&(top->rootp->top__DOT__regs__DOT__rf);
   npc.pc = (uint32_t *)&(top->rootp->top__DOT__pc);
   npc.ret = npc.gpr + reg_str2idx("a0");
@@ -213,9 +215,12 @@ void sdb_sim_init(int argc, char **argv)
 
 void sdb_sim_end()
 {
-  tfp->close();
+  if (tfp)
+  {
+    tfp->close();
+    delete tfp;
+  }
 
-  delete tfp;
   delete top;
   delete contextp;
 }
@@ -232,7 +237,11 @@ void engine_start()
     cpu_show_itrace();
     reg_display(GPR_SIZE);
   }
+  double time_s = g_timer / 1e6;
+  double frequency = contextp->time() / 2 / time_s;
   Log(FMT_BLUE("nr_inst = %llu, time = %llu (ns)"), g_nr_guest_inst, g_timer);
+  Log(FMT_BLUE("Freq = %.3f Hz"), frequency);
+  Log(FMT_BLUE("Inst = %.3f inst/s"), g_nr_guest_inst / time_s);
   Log("%s at pc = " FMT_WORD_NO_PREFIX ", inst: " FMT_WORD_NO_PREFIX,
       ((*npc.ret) == 0 && npc.state != NPC_ABORT
            ? FMT_GREEN("HIT GOOD TRAP")

@@ -9,12 +9,16 @@ export VERILATOR_ROOT
 VERILATOR = $(VERILATOR_ROOT)/bin/verilator
 endif
 
+-include ./include/config/auto.conf
+-include ./include/config/auto.conf.cmd
+
 VTARGET=npc
 BUILD_DIR = ./build
 OBJ_DIR = $(BUILD_DIR)/obj_dir
 BIN = $(BUILD_DIR)/$(VTARGET)
-INC_PATH ?= $(abspath ./csrc/include) $(abspath ./vsrc/include)
-CXXFLAGS = -Wall -Werror
+INC_PATH ?= $(abspath ./include) $(abspath ./vsrc/include)
+VERILATOR_FLAG =--prof-c --prof-cfuncs --prof-exec
+CXXFLAGS = -Wall -Werror $(call remove_quote,$(CONFIG_CC_OPT))
 LDFLAGS = -lreadline
 
 FILELIST_MK = $(shell find -L ./csrc -name "filelist.mk")
@@ -34,14 +38,14 @@ CXXFLAGS += $(INCFLAGS) -DTOP_NAME="\"V$(VTARGET)\""
 
 $(BIN): $(VSRCS) $(CSRCS) $(NVBOARD_ARCHIVE)
 	$(call git_commit, "build RTL")
-	$(VERILATOR) --trace -cc --exe --build -j $(shell nproc) $^ \
+	$(VERILATOR) --trace -cc --exe --build -j $(shell nproc) --debug $(VERILATOR_FLAG) $^ \
 		--top-module top \
 		$(addprefix -CFLAGS , $(CXXFLAGS)) $(addprefix -LDFLAGS , $(LDFLAGS)) \
 		$(addprefix -I, $(INC_PATH)) \
 		--Mdir $(OBJ_DIR) --exe -o $(abspath $(BIN))
 
 IMG ?=
-NPC_EXEC := $(BIN) $(ARGS) $(IMG)
+NPC_EXEC := $(BIN) $(NPCFLAGS) $(IMG)
 
 run: $(BIN)
 	$(NPC_EXEC)
@@ -58,3 +62,5 @@ include ../Makefile
 maintainer-copy::
 clean mostlyclean distclean maintainer-clean::
 	-rm -rf obj_dir *.log *.dmp *.vpd core $(BUILD_DIR)
+
+include ./scripts/config.mk

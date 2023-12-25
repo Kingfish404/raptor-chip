@@ -13,3 +13,5 @@
 !README.md
 build/
 /obj_dir
+/include/config
+/include/generated

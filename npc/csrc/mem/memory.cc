@@ -1,6 +1,10 @@
+#include <stdint.h>
 #include "common.h"
 
+void difftest_skip_ref();
+
 static uint8_t pmem[MSIZE] = {};
+static uint32_t rtc_port_base[2] = {0x0, 0x0};
 
 uint8_t *guest_to_host(paddr_t addr)
 {
@@ -50,18 +54,41 @@ static inline void host_write(void *addr, word_t data, int len)
     }
 }
 
-extern "C" void pmem_read(word_t addr, word_t *data)
+extern "C" void pmem_read(word_t raddr, word_t *data)
 {
-    if (addr >= MBASE && addr < MBASE + MSIZE)
+    if (raddr == RTC_ADDR + 4)
     {
-        *data = host_read(pmem + addr - MBASE, 4);
+        uint64_t t = get_time();
+        rtc_port_base[0] = (uint32_t)(t >> 32);
+        *data = rtc_port_base[0];
+        difftest_skip_ref();
+        return;
     }
-    // printf("pmem_read addr: " FMT_WORD_NO_PREFIX ", ", addr);
+    else if (raddr == RTC_ADDR)
+    {
+        uint64_t t = get_time();
+        rtc_port_base[1] = (uint32_t)(t);
+        *data = rtc_port_base[1];
+        difftest_skip_ref();
+        return;
+    }
+    if (raddr >= MBASE && raddr < MBASE + MSIZE)
+    {
+        *data = host_read(pmem + raddr - MBASE, 4);
+    }
+    // printf("raddr: " FMT_WORD_NO_PREFIX ", ", raddr);
     // printf("data: " FMT_WORD_NO_PREFIX "\n", *data);
 }
 
 extern "C" void pmem_write(word_t waddr, word_t wdata, char wmask)
 {
+    // SERIAL_MMIO: hex "MMIO address of the serial controller"
+    if (waddr == SERIAL_PORT)
+    {
+        putchar(wdata);
+        difftest_skip_ref();
+        return;
+    }
     switch (wmask)
     {
     case 0x1:
@@ -79,6 +106,6 @@ extern "C" void pmem_write(word_t waddr, word_t wdata, char wmask)
     default:
         break;
     }
-    // printf("pmem_write: waddr = 0x%x, wdata = 0x%x, wmask = 0x%x\n",
+    // printf("waddr: 0x%x, wdata: 0x%x, wmask = 0x%x\n",
     //        waddr, wdata, wmask);
 }

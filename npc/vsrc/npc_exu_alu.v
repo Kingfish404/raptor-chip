@@ -9,7 +9,7 @@ module ysyx_ALU (
   parameter BIT_W = `ysyx_W_WIDTH;
     
   always @(*) begin
-    // $display("alu_op1: %h, alu_op2: %h, alu_op: %h", alu_op1, alu_op2, alu_op);
+    // $display("alu_op: %h, alu_op1: %h, alu_op2: %h", alu_op, alu_op1, alu_op2);
     unique case (alu_op)
       `ysyx_ALU_OP_ADD:  begin alu_res_o = alu_op1 + alu_op2;  end
       `ysyx_ALU_OP_SUB:  begin alu_res_o = alu_op1 - alu_op2;  end
@@ -20,11 +20,12 @@ module ysyx_ALU (
       `ysyx_ALU_OP_XOR:  begin alu_res_o = alu_op1 ^ alu_op2;  end
       `ysyx_ALU_OP_OR:   begin alu_res_o = alu_op1 | alu_op2;  end
       `ysyx_ALU_OP_AND:  begin alu_res_o = alu_op1 & alu_op2;  end
-      `ysyx_ALU_OP_SLL:  begin alu_res_o = alu_op1 << alu_op2; end
-      `ysyx_ALU_OP_SRL:  begin alu_res_o = alu_op1 >> alu_op2; end
+      `ysyx_ALU_OP_SLL:  begin alu_res_o = alu_op1 << (alu_op2 & 'h1f); end
+      `ysyx_ALU_OP_SRL:  begin alu_res_o = (unsigned'(alu_op1)) >> (alu_op2 & 'h1f); end
       `ysyx_ALU_OP_SRA:  begin alu_res_o = (signed'(alu_op1)) >>> (alu_op2 & 'h1f); end
       default: begin  alu_res_o = alu_op2;
       end
     endcase
+    // $display("alu_res_o: %h", alu_res_o);
   end
 endmodule // ysyx_ALU
