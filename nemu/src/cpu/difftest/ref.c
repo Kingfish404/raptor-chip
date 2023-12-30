@@ -14,6 +14,7 @@
  ***************************************************************************************/
 
 #include <isa.h>
+#include <isa-def.h>
 #include <cpu/cpu.h>
 #include <difftest-def.h>
 #include <memory/paddr.h>
@@ -25,6 +26,12 @@ typedef struct
   word_t *gpr;
   word_t *ret;
   word_t *pc;
+
+  // csr
+  word_t *mcause;
+  word_t *mtvec;
+  word_t *mepc;
+  word_t *mstatus;
 } NPCState;
 
 __EXPORT void difftest_memcpy(paddr_t addr, void *buf, size_t n, bool direction)
@@ -49,11 +56,19 @@ __EXPORT void difftest_regcpy(void *dut, bool direction)
     {
       cpu.gpr[i] = npc->gpr[i];
     }
+    cpu.sr[CSR_MCAUSE] = *npc->mcause;
+    cpu.sr[CSR_MEPC] = *npc->mepc;
+    cpu.sr[CSR_MTVEC] = *npc->mtvec;
+    cpu.sr[CSR_MSTATUS] = *npc->mstatus;
   }
   else if (direction == DIFFTEST_TO_DUT)
   {
     npc->pc = &cpu.pc;
     npc->gpr = cpu.gpr;
+    npc->mcause = &cpu.sr[CSR_MCAUSE];
+    npc->mepc = &cpu.sr[CSR_MEPC];
+    npc->mtvec = &cpu.sr[CSR_MTVEC];
+    npc->mstatus = &cpu.sr[CSR_MSTATUS];
   }
   // isa_reg_display();
   // vaddr_show(cpu.pc, 0x2c);

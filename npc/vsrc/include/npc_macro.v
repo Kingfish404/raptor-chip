@@ -6,7 +6,19 @@
 `define ysyx_OP_JAL           7'b1101111
 `define ysyx_OP_JALR          7'b1100111
 `define ysyx_OP_SYSTEM        7'b1110011
-`define ysyx_OP_SYSTEM_EBREAK 7'b1110011
+
+`define ysyx_OP_SYSTEM_FUNC3  4'b0000
+`define ysyx_OP_SYSTEM_ECALL  12'b0000000_00000
+`define ysyx_OP_SYSTEM_EBREAK 12'b0000000_00001
+`define ysyx_OP_SYSTEM_MRET   12'b0011000_00010
+
+`define ysyx_OP_SYSTEM_CSRRW  4'b0001
+`define ysyx_OP_SYSTEM_CSRRS  4'b0010
+`define ysyx_OP_SYSTEM_CSRRC  4'b0011
+
+`define ysyx_OP_SYSTEM_CSRRWI 4'b0101
+`define ysyx_OP_SYSTEM_CSRRSI 4'b0110
+`define ysyx_OP_SYSTEM_CSRRCI 4'b0111
 
 `define ysyx_OP_R_TYPE  7'b0110011
 `define ysyx_OP_I_TYPE  7'b0010011

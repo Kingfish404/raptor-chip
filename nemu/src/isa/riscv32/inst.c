@@ -223,11 +223,10 @@ static int decode_exec(Decode *s) {
 
   // Trap-Return Instructions
   INSTPAT("0011000 00010 00000 000 00000 11100 11", mret    , N, s->dnpc = CSR(CSR_MEPC); 
-    // csr.mstatus.m.MIE = csr.mstatus.m.MPIE;
 #ifdef CONFIG_DIFFTEST
     difftest_skip_ref();
 #endif
-    CSR_BIT_COND_SET(CSR_MSTATUS, CSR_MSTATUS_MPIE, CSR_MSTATUS_MIE)
+    CSR_BIT_COND_SET(CSR_MSTATUS, CSR_MSTATUS_MPIE, CSR_MSTATUS_MIE) // csr.mstatus.m.MIE = csr.mstatus.m.MPIE;
     CSR_SET(CSR_MSTATUS, CSR_MSTATUS_MPIE) // csr.mstatus.m.MPIE= 1;
     );
 

@@ -1,4 +1,5 @@
 #include <common.h>
+#include <cpu.h>
 #include <mem.h>
 #include <dlfcn.h>
 
@@ -58,14 +59,22 @@ void init_difftest(char *ref_so_file, long img_size, int port)
   ref_difftest_regcpy(&npc, DIFFTEST_TO_REF);
 }
 
+#define CHECK_NPC_CSR(name)                                                                                             \
+  if (*(ref->m##name) != *(npc.m##name))                                                                                \
+  {                                                                                                                     \
+    printf(FMT_RED("[ERROR]") " m" #name " is different! ref = " FMT_WORD_NO_PREFIX ", dut = " FMT_WORD_NO_PREFIX "\n", \
+           *(ref->m##name), *(npc.m##name));                                                                            \
+    is_same = false;                                                                                                    \
+  }
+
 static void checkregs(NPCState *ref, vaddr_t pc)
 {
-  bool diff = false;
+  bool is_same = true;
   if ((vaddr_t)(*(ref->pc)) != pc)
   {
     printf(FMT_RED("[ERROR]") " pc is different! ref = " FMT_GREEN(FMT_WORD) ", dut = " FMT_RED(FMT_WORD) "\n",
            (vaddr_t)(*(ref->pc)), pc);
-    diff = true;
+    is_same = false;
   }
   for (int i = 0; i < GPR_SIZE; i++)
   {
@@ -73,10 +82,15 @@ static void checkregs(NPCState *ref, vaddr_t pc)
     {
       printf(FMT_RED("[ERROR]") " reg[%s] is different! ref = " FMT_WORD_NO_PREFIX ", dut = " FMT_WORD_NO_PREFIX "\n",
              regs[i], ref->gpr[i], npc.gpr[i]);
-      diff = true;
+      is_same = false;
     }
   }
-  if (diff)
+  CHECK_NPC_CSR(cause);
+  CHECK_NPC_CSR(tvec);
+  CHECK_NPC_CSR(epc);
+  CHECK_NPC_CSR(status);
+
+  if (!is_same)
   {
     npc.state = NPC_ABORT;
   }

@@ -1,4 +1,4 @@
-`include "npc_common.v"
+`include "npc_macro.v"
 
 module ysyx_IFU (
   input clk,

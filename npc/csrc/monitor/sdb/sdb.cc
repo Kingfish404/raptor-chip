@@ -9,8 +9,6 @@
 #include "verilated_vcd_c.h"
 
 extern char *regs[];
-extern uint64_t g_timer;
-extern uint64_t g_nr_guest_inst;
 
 NPCState npc = {NPC_RUNNING, NULL, NULL, NULL};
 
@@ -208,6 +206,11 @@ void sdb_sim_init(int argc, char **argv)
   npc.pc = (uint32_t *)&(top->rootp->top__DOT__pc);
   npc.ret = npc.gpr + reg_str2idx("a0");
   npc.state = NPC_RUNNING;
+  word_t *csr = (word_t *)&(top->rootp->top__DOT__exu__DOT__csr__DOT__csr);
+  npc.mstatus = csr + CSR_MSTATUS;
+  npc.mcause = csr + CSR_MCAUSE;
+  npc.mepc = csr + CSR_MEPC;
+  npc.mtvec = csr + CSR_MTVEC;
 
   top->inst = 0x37; // lui x0, 0x0
   reset(top, 1);
@@ -228,24 +231,5 @@ void sdb_sim_end()
 void engine_start()
 {
   sdb_mainloop();
-  if (*npc.ret != 0)
-  {
-    printf("a0 = " FMT_RED(FMT_WORD) "\n", *npc.ret);
-  }
-  if (npc.state == NPC_ABORT)
-  {
-    cpu_show_itrace();
-    reg_display(GPR_SIZE);
-  }
-  double time_s = g_timer / 1e6;
-  double frequency = contextp->time() / 2 / time_s;
-  Log(FMT_BLUE("nr_inst = %llu, time = %llu (ns)"), g_nr_guest_inst, g_timer);
-  Log(FMT_BLUE("Freq = %.3f Hz"), frequency);
-  Log(FMT_BLUE("Inst = %.3f inst/s"), g_nr_guest_inst / time_s);
-  Log("%s at pc = " FMT_WORD_NO_PREFIX ", inst: " FMT_WORD_NO_PREFIX,
-      ((*npc.ret) == 0 && npc.state != NPC_ABORT
-           ? FMT_GREEN("HIT GOOD TRAP")
-           : FMT_RED("HIT BAD TRAP")),
-      (*npc.pc), top->inst);
   sdb_sim_end();
 }

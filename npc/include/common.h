@@ -32,9 +32,9 @@ typedef word_t vaddr_t;
 
 #define FMT_WORD "0x%08x"
 #define FMT_WORD_NO_PREFIX "%08x"
-#define FMT_GREEN(x) "\033[1;32m" x "\033[0m"
-#define FMT_RED(x) "\033[1;31m" x "\033[0m"
-#define FMT_BLUE(x) "\033[1;34m" x "\033[0m"
+#define FMT_RED(x) "\33[1;31m" x "\33[0m"
+#define FMT_GREEN(x) "\33[1;32m" x "\33[0m"
+#define FMT_BLUE(x) "\33[1;34m" x "\33[0m"
 
 #define ARRLEN(arr) (int)(sizeof(arr) / sizeof(arr[0]))
 
@@ -71,6 +71,12 @@ typedef struct
   word_t *gpr;
   word_t *ret;
   uint32_t *pc;
+
+  // csr
+  word_t *mcause;
+  word_t *mtvec;
+  word_t *mepc;
+  word_t *mstatus;
 } NPCState;
 
 extern NPCState npc;

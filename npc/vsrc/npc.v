@@ -1,4 +1,4 @@
-`include "npc_common.v"
+`include "npc_macro.v"
 
 module ysyx_PC (
   input clk,
@@ -23,12 +23,13 @@ module ysyx_PC (
 endmodule //ysyx_PC
 
 module ysyx_RegisterFile (
-  input wire clk,
-  input wire reg_write,
-  input wire [ADDR_WIDTH-1:0] waddr,
-  input wire [DATA_WIDTH-1:0] wdata,
-  input wire [ADDR_WIDTH-1:0] s1addr,
-  input wire [ADDR_WIDTH-1:0] s2addr,
+  input clk,
+  input rst,
+  input reg_write,
+  input [ADDR_WIDTH-1:0] waddr,
+  input [DATA_WIDTH-1:0] wdata,
+  input [ADDR_WIDTH-1:0] s1addr,
+  input [ADDR_WIDTH-1:0] s2addr,
   output reg [DATA_WIDTH-1:0] src1_o,
   output reg [DATA_WIDTH-1:0] src2_o
 );
@@ -40,6 +41,16 @@ module ysyx_RegisterFile (
   assign src2_o = rf[s2addr];
 
   always @(posedge clk) begin
+    if (rst) begin
+      rf[0] <= 0;  rf[1] <= 0;  rf[2] <= 0;  rf[3] <= 0;
+      rf[4] <= 0;  rf[5] <= 0;  rf[6] <= 0;  rf[7] <= 0;
+      rf[8] <= 0;  rf[9] <= 0;  rf[10] <= 0; rf[11] <= 0;
+      rf[12] <= 0; rf[13] <= 0; rf[14] <= 0; rf[15] <= 0;
+      rf[16] <= 0; rf[17] <= 0; rf[18] <= 0; rf[19] <= 0;
+      rf[20] <= 0; rf[21] <= 0; rf[22] <= 0; rf[23] <= 0;
+      rf[24] <= 0; rf[25] <= 0; rf[26] <= 0; rf[27] <= 0;
+      rf[28] <= 0; rf[29] <= 0; rf[30] <= 0; rf[31] <= 0;
+    end
     if (reg_write) begin
       rf[waddr] = wdata;
     end
@@ -80,7 +91,7 @@ module top (
   );
 
   ysyx_RegisterFile #(5, BIT_W) regs(
-    .clk(clk), .reg_write(en_wb),
+    .clk(clk), .rst(rst), .reg_write(en_wb),
     .waddr(rd), .wdata(reg_wdata),
     .s1addr(rs1), .s2addr(rs2),
     .src1_o(reg_rdata1), .src2_o(reg_rdata2)
@@ -108,7 +119,7 @@ module top (
 
   // EXU(EXecution Unit): 负责根据控制信号对数据进行执行操作, 并将执行结果写回寄存器或存储器
   ysyx_EXU exu(
-    .clk(clk),
+    .clk(clk), .rst(rst),
     .imm(imm),
     .op1(op1), .op2(op2), .op_j(op_j),
     .alu_op(alu_op), .funct7(funct7), .opcode(opcode),

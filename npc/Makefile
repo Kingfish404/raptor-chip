@@ -64,3 +64,6 @@ clean mostlyclean distclean maintainer-clean::
 	-rm -rf obj_dir *.log *.dmp *.vpd core $(BUILD_DIR)
 
 include ./scripts/config.mk
+
+all: $(BINARY)
+.DEFAULT_GOAL = all
