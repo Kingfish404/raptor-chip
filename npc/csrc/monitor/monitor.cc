@@ -101,8 +101,6 @@ static int parse_args(int argc, char *argv[])
   return 0;
 }
 
-char so_file[] = "/Users/jinyu/Developer/c-project/ysyx-workbench/nemu/build/riscv32-nemu-interpreter-so";
-
 void init_monitor(int argc, char *argv[])
 {
   parse_args(argc, argv);
@@ -110,8 +108,6 @@ void init_monitor(int argc, char *argv[])
   sdb_sim_init(argc, argv);
 
   long img_size = load_img();
-
-  diff_so_file = so_file;
 
   init_difftest(diff_so_file, img_size, difftest_port);
 

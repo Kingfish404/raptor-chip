@@ -33,6 +33,7 @@ void difftest_skip_dut(int nr_ref, int nr_dut)
 
 void init_difftest(char *ref_so_file, long img_size, int port)
 {
+#ifdef CONFIG_DIFFTEST
   assert(ref_so_file != NULL);
 
   void *handle;
@@ -57,6 +58,7 @@ void init_difftest(char *ref_so_file, long img_size, int port)
   ref_difftest_init(port);
   ref_difftest_memcpy(MBASE, guest_to_host(MBASE), img_size, DIFFTEST_TO_REF);
   ref_difftest_regcpy(&npc, DIFFTEST_TO_REF);
+#endif
 }
 
 #define CHECK_NPC_CSR(name)                                                                                             \

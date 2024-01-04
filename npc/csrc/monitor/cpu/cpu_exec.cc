@@ -16,8 +16,8 @@ extern Vtop *top;
 extern VerilatedVcdC *tfp;
 
 word_t prev_pc = 0;
-uint64_t g_timer = 0;
-uint64_t g_nr_guest_inst = 0;
+word_t g_timer = 0;
+word_t g_nr_guest_inst = 0;
 
 #ifdef CONFIG_ITRACE
 static char iringbuf[MAX_IRING_SIZE][128] = {};
@@ -28,7 +28,9 @@ static void statistic()
 {
   double time_s = g_timer / 1e6;
   double frequency = contextp->time() / 2 / time_s;
-  Log(FMT_BLUE("nr_inst = %llu, time = %llu (ns)"), g_nr_guest_inst, g_timer);
+  Log(FMT_BLUE(
+    "nr_inst = " FMT_WORD_NO_PREFIX ", time = " FMT_WORD_NO_PREFIX " (ns)"),
+    g_nr_guest_inst, g_timer);
   Log(FMT_BLUE("Freq = %.3f Hz"), frequency);
   Log(FMT_BLUE("Inst = %.3f inst/s"), g_nr_guest_inst / time_s);
   Log("%s at pc = " FMT_WORD_NO_PREFIX ", inst: " FMT_WORD_NO_PREFIX,

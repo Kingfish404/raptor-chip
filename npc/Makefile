@@ -19,7 +19,7 @@ BIN = $(BUILD_DIR)/$(VTARGET)
 INC_PATH ?= $(abspath ./include) $(abspath ./vsrc/include)
 VERILATOR_FLAG =--prof-c --prof-cfuncs --prof-exec
 CXXFLAGS = -Wall -Werror $(call remove_quote,$(CONFIG_CC_OPT))
-LDFLAGS = -lreadline
+LDFLAGS = -lreadline -ldl
 
 FILELIST_MK = $(shell find -L ./csrc -name "filelist.mk")
 include $(FILELIST_MK)
@@ -32,7 +32,6 @@ CSRCS = $(shell find $(abspath ./csrc) -name "*.c" -or -name "*.cc" -or -name "*
 all: $(BIN)
 
 # rules for NVBoard
-include $(NVBOARD_HOME)/scripts/nvboard.mk
 INCFLAGS = $(addprefix -I, $(INC_PATH))
 CXXFLAGS += $(INCFLAGS) -DTOP_NAME="\"V$(VTARGET)\"" 
 
@@ -44,8 +43,9 @@ $(BIN): $(VSRCS) $(CSRCS) $(NVBOARD_ARCHIVE)
 		$(addprefix -I, $(INC_PATH)) \
 		--Mdir $(OBJ_DIR) --exe -o $(abspath $(BIN))
 
+DIFF_REF_SO = -d $(abspath $(NEMU_HOME)/build/riscv32-nemu-interpreter-so)
 IMG ?=
-NPC_EXEC := $(BIN) $(NPCFLAGS) $(IMG)
+NPC_EXEC := $(BIN) $(NPCFLAGS) $(DIFF_REF_SO) $(IMG)
 
 run: $(BIN)
 	$(NPC_EXEC)

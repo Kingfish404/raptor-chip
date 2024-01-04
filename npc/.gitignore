@@ -11,6 +11,7 @@
 !*.cpp
 !.gitignore
 !README.md
+!Kconfig
 build/
 /obj_dir
 /include/config
