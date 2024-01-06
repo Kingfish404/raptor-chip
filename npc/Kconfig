@@ -38,4 +38,12 @@ config DIFFTEST
       Enable differential testing with a reference design.
       Note that this will significantly reduce the performance of NPC.
 
+config MEM_DIFFTEST
+    bool "Enable memory differential testing"
+    default n
+    depends on DIFFTEST
+    help
+      Enable memory differential testing with a reference design.
+      Note that this will significantly reduce the performance of NPC.
+
 endmenu

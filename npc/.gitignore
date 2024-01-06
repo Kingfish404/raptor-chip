@@ -13,6 +13,7 @@
 !README.md
 !Kconfig
 build/
+tmp/
 /obj_dir
 /include/config
 /include/generated

@@ -98,6 +98,7 @@ static void checkregs(NPCState *ref, vaddr_t pc)
   }
 }
 
+#ifdef CONFIG_MEM_DIFFTEST
 static void checkmem(uint8_t *ref, uint8_t *dut, size_t n)
 {
   for (size_t i = 0; i < n; i++)
@@ -124,6 +125,7 @@ static void checkmem(uint8_t *ref, uint8_t *dut, size_t n)
     }
   }
 }
+#endif
 
 void difftest_step(vaddr_t pc)
 {
@@ -146,9 +148,8 @@ void difftest_step(vaddr_t pc)
   ref_difftest_regcpy(&ref_r, DIFFTEST_TO_DUT);
   checkregs(&ref_r, pc);
 
-  if (0)
-  {
-    ref_difftest_memcpy(MBASE, pmem_ref, MSIZE, DIFFTEST_TO_DUT);
-    checkmem(pmem_ref, guest_to_host(MBASE), MSIZE);
-  }
+#ifdef CONFIG_MEM_DIFFTEST
+  ref_difftest_memcpy(MBASE, pmem_ref, MSIZE, DIFFTEST_TO_DUT);
+  checkmem(pmem_ref, guest_to_host(MBASE), MSIZE);
+#endif
 }

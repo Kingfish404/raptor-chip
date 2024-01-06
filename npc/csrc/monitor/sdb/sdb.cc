@@ -10,7 +10,19 @@
 
 extern char *regs[];
 
-NPCState npc = {NPC_RUNNING, NULL, NULL, NULL};
+NPCState npc = {
+    .state = NPC_RUNNING,
+    .gpr = NULL,
+    .ret = NULL,
+    .pc = NULL,
+
+    .mcause = NULL,
+    .mtvec = NULL,
+    .mepc = NULL,
+    .mstatus = NULL,
+
+    .inst = NULL,
+};
 
 VerilatedContext *contextp = NULL;
 Vtop *top = NULL;
@@ -55,12 +67,14 @@ void reset(Vtop *top, int n)
 extern "C" void npc_exu_ebreak()
 {
   contextp->gotFinish(true);
+  printf("EBREAK at pc = " FMT_WORD_NO_PREFIX "\n", *npc.pc);
   npc.state = NPC_END;
 }
 
 extern "C" void npc_illegal_inst()
 {
   contextp->gotFinish(true);
+  printf("Illegal instruction at pc = " FMT_WORD_NO_PREFIX "\n", *npc.pc);
   if (npc.state == NPC_ABORT)
   {
     return;
@@ -212,12 +226,22 @@ void sdb_sim_init(int argc, char **argv)
   npc.mepc = csr + CSR_MEPC;
   npc.mtvec = csr + CSR_MTVEC;
 
-  top->inst = 0x37; // lui x0, 0x0
+  // for difftest
+  npc.inst = (uint32_t *)&(top->rootp->top__DOT__inst);
+
+  // top->inst = 0x37; // lui x0, 0x0
   reset(top, 1);
+  if (tfp)
+  {
+    tfp->dump(contextp->time());
+  }
+  contextp->timeInc(1);
 }
 
-void sdb_sim_end()
+void engine_start()
 {
+  sdb_mainloop();
+
   if (tfp)
   {
     tfp->close();
@@ -226,10 +250,4 @@ void sdb_sim_end()
 
   delete top;
   delete contextp;
-}
-
-void engine_start()
-{
-  sdb_mainloop();
-  sdb_sim_end();
 }

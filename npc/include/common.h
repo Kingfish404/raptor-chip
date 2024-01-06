@@ -77,6 +77,9 @@ typedef struct
   word_t *mtvec;
   word_t *mepc;
   word_t *mstatus;
+
+  // for itrace
+  uint32_t *inst;
 } NPCState;
 
 extern NPCState npc;

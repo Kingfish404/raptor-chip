@@ -18,6 +18,7 @@ extern VerilatedVcdC *tfp;
 word_t prev_pc = 0;
 word_t g_timer = 0;
 word_t g_nr_guest_inst = 0;
+word_t g_nr_guest_cycle = 0;
 
 #ifdef CONFIG_ITRACE
 static char iringbuf[MAX_IRING_SIZE][128] = {};
@@ -27,22 +28,22 @@ static uint64_t iringhead = 0;
 static void statistic()
 {
   double time_s = g_timer / 1e6;
-  double frequency = contextp->time() / 2 / time_s;
+  double frequency = g_nr_guest_cycle / time_s;
   Log(FMT_BLUE(
-    "nr_inst = " FMT_WORD_NO_PREFIX ", time = " FMT_WORD_NO_PREFIX " (ns)"),
-    g_nr_guest_inst, g_timer);
+          "nr_inst = " FMT_WORD_NO_PREFIX ", time = " FMT_WORD_NO_PREFIX " (ns)"),
+      g_nr_guest_inst, g_timer);
   Log(FMT_BLUE("Freq = %.3f Hz"), frequency);
   Log(FMT_BLUE("Inst = %.3f inst/s"), g_nr_guest_inst / time_s);
   Log("%s at pc = " FMT_WORD_NO_PREFIX ", inst: " FMT_WORD_NO_PREFIX,
       ((*npc.ret) == 0 && npc.state != NPC_ABORT
            ? FMT_GREEN("HIT GOOD TRAP")
            : FMT_RED("HIT BAD TRAP")),
-      (*npc.pc), top->inst);
+      (*npc.pc), *(npc.inst));
 }
 
 static void cpu_exec_one_cycle()
 {
-  pmem_read(*(npc.pc), (word_t *)&(top->inst));
+  // pmem_read(*(npc.pc), (word_t *)&(top->inst));
 
   top->clk = (top->clk == 0) ? 1 : 0;
   top->eval();
@@ -101,27 +102,31 @@ void cpu_exec(uint64_t n)
   }
 
   uint64_t now = get_time();
+  prev_pc = *(npc.pc);
   while (!contextp->gotFinish() && npc.state == NPC_RUNNING && n-- > 0)
   {
-    prev_pc = *(npc.pc);
     cpu_exec_one_cycle();
-    g_nr_guest_inst++;
+    g_nr_guest_cycle++;
     fflush(stdout);
-
+    if (prev_pc != *(npc.pc))
+    {
+      prev_pc = *(npc.pc);
+      g_nr_guest_inst++;
 #ifdef CONFIG_ITRACE
-    snprintf(
-        iringbuf[iringhead], sizeof(iringbuf[0]),
-        FMT_WORD_NO_PREFIX ": " FMT_WORD_NO_PREFIX "\t",
-        prev_pc, top->inst);
-    int len = strlen(iringbuf[iringhead]);
-    disassemble(
-        iringbuf[iringhead] + len, sizeof(iringbuf[0]), *npc.pc, (uint8_t *)&top->inst, 4);
-    iringhead = (iringhead + 1) % MAX_IRING_SIZE;
+      snprintf(
+          iringbuf[iringhead], sizeof(iringbuf[0]),
+          FMT_WORD_NO_PREFIX ": " FMT_WORD_NO_PREFIX "\t",
+          prev_pc, *(npc.inst));
+      int len = strlen(iringbuf[iringhead]);
+      disassemble(
+          iringbuf[iringhead] + len, sizeof(iringbuf[0]), *npc.pc, (uint8_t *)(npc.inst), 4);
+      iringhead = (iringhead + 1) % MAX_IRING_SIZE;
 #endif
 
 #ifdef CONFIG_DIFFTEST
-    difftest_step(*npc.pc);
+      difftest_step(*npc.pc);
 #endif
+    }
   }
   g_timer += get_time() - now;
 

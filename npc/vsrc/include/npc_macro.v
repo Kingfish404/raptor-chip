@@ -1,6 +1,9 @@
 `define ysyx_W_WIDTH 32
 `define ysyx_PC_INIT `ysyx_W_WIDTH'h80000000
 
+`define ysyx_IDLE       0
+`define ysyx_WAIT_READY 1
+
 `define ysyx_OP_LUI           7'b0110111
 `define ysyx_OP_AUIPC         7'b0010111
 `define ysyx_OP_JAL           7'b1101111
@@ -63,3 +66,20 @@
 `define ysyx_ALU_OP_SLL   4'b0001
 `define ysyx_ALU_OP_SRL   4'b0101
 `define ysyx_ALU_OP_SRA   4'b1101
+
+`define ysyx_BUS_FSM() \
+always @(*) begin \
+  state = 0; \
+  case (state) \
+    `ysyx_IDLE:       begin state = ((valid_o ? `ysyx_WAIT_READY : state)); end \
+    `ysyx_WAIT_READY: begin state = ((ready_o ? `ysyx_IDLE : state));       end \
+  endcase \
+end
+
+`define ysyx_BUS() \
+if (state == `ysyx_IDLE) begin \
+  if (prev_valid == 1) begin valid_o <= 1; ready_o <= 0; end \
+end \
+else if (state == `ysyx_WAIT_READY) begin \
+  if (next_ready == 1) begin ready_o <= 1; valid_o <= 0; end \
+end 
