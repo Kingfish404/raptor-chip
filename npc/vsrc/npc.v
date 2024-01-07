@@ -67,7 +67,7 @@ module top (
     .prev_valid(ifu_valid), .next_ready(exu_ready),
     .valid_o(idu_valid), .ready_o(idu_ready),
 
-    .inst(inst),
+    .inst_in(inst),
     .reg_rdata1(reg_rdata1), .reg_rdata2(reg_rdata2),
     .pc(pc),
     .en_wb_o(en_wb), .en_j_o(en_j), .ren_o(ren), .wen_o(wen),

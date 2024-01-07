@@ -7,7 +7,7 @@ module ysyx_IDU (
   input wire prev_valid, next_ready,
   output reg valid_o, ready_o,
 
-  input wire [31:0] inst,
+  input wire [31:0] inst_in,
   input wire [BIT_W-1:0] reg_rdata1, reg_rdata2,
   input wire [BIT_W-1:0] pc,
   output reg en_wb_o, en_j_o, ren_o, wen_o,
@@ -29,13 +29,19 @@ module ysyx_IDU (
   wire [20:0] imm_J = {inst[31], inst[19:12], inst[20], inst[30:25], inst[24:21], 1'b0};
   assign opcode_o = inst[6:0];
 
+  reg [31:0] inst;
   reg state;
   `ysyx_BUS_FSM();
   always @(posedge clk) begin
     if (rst) begin
       valid_o <= 0; ready_o <= 1;
     end
-    else begin `ysyx_BUS(); end
+    else begin 
+      `ysyx_BUS();
+      if (state == `ysyx_IDLE) begin
+        if (prev_valid == 1) begin inst <= inst_in; valid_o <= 1; ready_o <= 0; end
+      end
+    end
   end
 
   always @(*) begin
@@ -57,7 +63,7 @@ module ysyx_IDU (
       `ysyx_OP_R_TYPE:  begin `ysyx_R_TYPE(reg_rdata1, {funct7[5], funct3}, reg_rdata2);                end
       `ysyx_OP_SYSTEM:  begin `ysyx_I_SYS_TYPE(reg_rdata1, {1'b0, funct3}, 0)                           end
       default: begin
-        if (rst != 1'b1 && state != `ysyx_IDLE) begin
+        if (valid_o == 1) begin
           npc_illegal_inst();
         end
       end

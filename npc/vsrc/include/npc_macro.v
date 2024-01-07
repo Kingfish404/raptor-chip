@@ -72,7 +72,7 @@ always @(*) begin \
   state = 0; \
   case (state) \
     `ysyx_IDLE:       begin state = ((valid_o ? `ysyx_WAIT_READY : state)); end \
-    `ysyx_WAIT_READY: begin state = ((ready_o ? `ysyx_IDLE : state));       end \
+    `ysyx_WAIT_READY: begin state = ((next_ready ? `ysyx_IDLE : state));       end \
   endcase \
 end
 

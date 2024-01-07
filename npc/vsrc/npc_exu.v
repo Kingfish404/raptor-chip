@@ -50,6 +50,7 @@ module ysyx_EXU (
     else begin `ysyx_BUS(); end
   end
 
+  wire rvalid_o;
   wire arready, awready, rready, wready, bvalid, bready;
   wire [1:0] rresp, bresp;
   ysyx_EXU_LSU lsu(
@@ -62,7 +63,7 @@ module ysyx_EXU (
 
     .rdata_o(mem_rdata),
     .rresp_o(rresp),
-    .rvalid_o(valid_o),
+    .rvalid_o(rvalid_o),
     .rready(rready),
 
     .awaddr(addr_data),
@@ -201,14 +202,14 @@ module ysyx_EXU_LSU(
     );
 
   // load/store unit
-  always @(posedge clk ) begin
-    wmask <= 0;
+  always @(*) begin
+    wmask = 0;
     case (opcode)
       `ysyx_OP_S_TYPE: begin
         case (alu_op)
-          `ysyx_ALU_OP_SB: begin wmask <= 8'h1; end
-          `ysyx_ALU_OP_SH: begin wmask <= 8'h3; end
-          `ysyx_ALU_OP_SW: begin wmask <= 8'hf; end
+          `ysyx_ALU_OP_SB: begin wmask = 8'h1; end
+          `ysyx_ALU_OP_SH: begin wmask = 8'h3; end
+          `ysyx_ALU_OP_SW: begin wmask = 8'hf; end
           default:         begin npc_illegal_inst(); end
         endcase
       end
@@ -216,25 +217,25 @@ module ysyx_EXU_LSU(
         case (alu_op)
           `ysyx_ALU_OP_LB: begin
             if (rdata[7] == 1 && alu_op == `ysyx_ALU_OP_LB) begin
-              rdata_o <= rdata | 'hffffff00;
+              rdata_o = rdata | 'hffffff00;
             end else begin
-              rdata_o <= rdata & 'hff;
+              rdata_o = rdata & 'hff;
             end
           end
           `ysyx_ALU_OP_LBU:  begin 
-            rdata_o <= rdata & 'hff;
+            rdata_o = rdata & 'hff;
           end
           `ysyx_ALU_OP_LH: begin
             if (rdata[15] == 1 && alu_op == `ysyx_ALU_OP_LH) begin
-              rdata_o <= rdata | 'hffff0000;
+              rdata_o = rdata | 'hffff0000;
             end else begin
-              rdata_o <= rdata & 'hffff;
+              rdata_o = rdata & 'hffff;
             end
           end
           `ysyx_ALU_OP_LHU:  begin
-            rdata_o <= rdata & 'hffff;
+            rdata_o = rdata & 'hffff;
            end
-          `ysyx_ALU_OP_LW:  begin rdata_o <= rdata; end
+          `ysyx_ALU_OP_LW:  begin rdata_o = rdata; end
           default: begin end
         endcase
       end
@@ -273,7 +274,8 @@ module ysyx_EXU_LSU_SRAM(
 
   always @(posedge clk) begin
     if (arvalid) begin
-      pmem_read(araddr, rdata_o);
+      pmem_read(araddr, mem_rdata_buf[0]);
+      rdata_o <= mem_rdata_buf[0];
       rvalid_o <= 1;
     end else begin
       rvalid_o <= 0;

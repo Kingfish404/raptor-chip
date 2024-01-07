@@ -110,7 +110,6 @@ void cpu_exec(uint64_t n)
     fflush(stdout);
     if (prev_pc != *(npc.pc))
     {
-      prev_pc = *(npc.pc);
       g_nr_guest_inst++;
 #ifdef CONFIG_ITRACE
       snprintf(
@@ -119,13 +118,14 @@ void cpu_exec(uint64_t n)
           prev_pc, *(npc.inst));
       int len = strlen(iringbuf[iringhead]);
       disassemble(
-          iringbuf[iringhead] + len, sizeof(iringbuf[0]), *npc.pc, (uint8_t *)(npc.inst), 4);
+          iringbuf[iringhead] + len, sizeof(iringbuf[0]), prev_pc, (uint8_t *)(npc.inst), 4);
       iringhead = (iringhead + 1) % MAX_IRING_SIZE;
 #endif
 
 #ifdef CONFIG_DIFFTEST
       difftest_step(*npc.pc);
 #endif
+      prev_pc = *(npc.pc);
     }
   }
   g_timer += get_time() - now;
