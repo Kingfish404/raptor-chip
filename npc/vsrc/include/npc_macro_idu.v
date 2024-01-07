@@ -1,7 +1,7 @@
 `include "npc_macro.v"
 
 `define ysyx_R_TYPE(op1, alu_op, op2)  begin \
-  en_wb_o = 1; \
+  rwen_o = 1; \
   op1_o = op1; \
   op2_o = op2; \
   alu_op_o = alu_op; \
@@ -9,7 +9,7 @@
 end
 
 `define ysyx_I_TYPE(op1, alu_op, op2)  begin \
-  en_wb_o = 1; \
+  rwen_o = 1; \
   imm_o = `ysyx_SIGN_EXTEND(imm_I, 12, `ysyx_W_WIDTH); \
   op1_o = op1; \
   op2_o = op2; \
@@ -18,6 +18,7 @@ end
 end
 
 `define ysyx_S_TYPE(op1, alu_op, op2) begin \
+  wen_o = 1; \
   imm_o = `ysyx_SIGN_EXTEND(imm_S, 12, `ysyx_W_WIDTH); \
   op1_o = op1; \
   op2_o = op2; \
@@ -40,7 +41,7 @@ end
 end
 
 `define ysyx_U_TYPE(op1, alu_op)  begin \
-  en_wb_o = 1;    \
+  rwen_o = 1;    \
   imm_o = `ysyx_SIGN_EXTEND(imm_U, 32, `ysyx_W_WIDTH); \
   op1_o = op1;    \
   op2_o = imm_o;  \
@@ -50,7 +51,7 @@ end
 
 `define ysyx_J_TYPE(op1, alu_op, op2)  begin \
   en_j_o = 1;  \
-  en_wb_o = 1; \
+  rwen_o = 1; \
   imm_o = `ysyx_SIGN_EXTEND(imm_J, 21, `ysyx_W_WIDTH); \
   op1_o = op1; \
   op2_o = op2; \
@@ -60,7 +61,7 @@ end
 
 `define ysyx_I_SYS_TYPE(op1, alu_op, op2)  begin \
   en_j_o = 1;  \
-  en_wb_o = 1; \
+  rwen_o = 1; \
   imm_o = `ysyx_SIGN_EXTEND({imm_I, alu_op}, 16, `ysyx_W_WIDTH); \
   op1_o = op1; \
   op2_o = op2; \

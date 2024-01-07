@@ -7,10 +7,10 @@ module ysyx_IDU (
   input wire prev_valid, next_ready,
   output reg valid_o, ready_o,
 
-  input wire [31:0] inst_in,
+  input wire [31:0] inst,
   input wire [BIT_W-1:0] reg_rdata1, reg_rdata2,
   input wire [BIT_W-1:0] pc,
-  output reg en_wb_o, en_j_o, ren_o, wen_o,
+  output reg rwen_o, en_j_o, ren_o, wen_o,
   output reg [BIT_W-1:0] op1_o, op2_o, op_j_o,
   output reg [31:0] imm_o,
   output reg [4:0] rs1_o, rs2_o, rd_o,
@@ -29,7 +29,6 @@ module ysyx_IDU (
   wire [20:0] imm_J = {inst[31], inst[19:12], inst[20], inst[30:25], inst[24:21], 1'b0};
   assign opcode_o = inst[6:0];
 
-  reg [31:0] inst;
   reg state;
   `ysyx_BUS_FSM();
   always @(posedge clk) begin
@@ -39,13 +38,13 @@ module ysyx_IDU (
     else begin 
       `ysyx_BUS();
       if (state == `ysyx_IDLE) begin
-        if (prev_valid == 1) begin inst <= inst_in; valid_o <= 1; ready_o <= 0; end
+        if (prev_valid == 1) begin  valid_o <= 1; ready_o <= 0; end
       end
     end
   end
 
   always @(*) begin
-    en_wb_o = 0; en_j_o = 0; ren_o = 0; wen_o = 0;
+    rwen_o = 0; en_j_o = 0; ren_o = 0; wen_o = 0;
     alu_op_o = 0;
     rs1_o = rs1; rs2_o = rs2; rd_o = 0;
     imm_o = 0;
@@ -58,8 +57,8 @@ module ysyx_IDU (
       `ysyx_OP_JALR:    begin `ysyx_I_TYPE(pc, `ysyx_ALU_OP_ADD, 4); en_j_o = 1; op_j_o = reg_rdata1;   end
       `ysyx_OP_B_TYPE:  begin `ysyx_B_TYPE(reg_rdata1, {1'b0, funct3}, reg_rdata2); en_j_o = 1; op_j_o = pc;    end
       `ysyx_OP_I_TYPE:  begin `ysyx_I_TYPE(reg_rdata1, {(funct3 == 3'b101) ? funct7[5]: 1'b0, funct3}, imm_o);  end
-      `ysyx_OP_IL_TYPE: begin `ysyx_I_TYPE(reg_rdata1, {1'b0, funct3}, imm_o); op_j_o = reg_rdata1; ren_o = 1;      end
-      `ysyx_OP_S_TYPE:  begin `ysyx_S_TYPE(reg_rdata1, {1'b0, funct3}, reg_rdata2); op_j_o = reg_rdata1; wen_o = 1; end
+      `ysyx_OP_IL_TYPE: begin `ysyx_I_TYPE(reg_rdata1, {1'b0, funct3}, imm_o); op_j_o = reg_rdata1; ren_o = 1;  end
+      `ysyx_OP_S_TYPE:  begin `ysyx_S_TYPE(reg_rdata1, {1'b0, funct3}, reg_rdata2); op_j_o = reg_rdata1;end
       `ysyx_OP_R_TYPE:  begin `ysyx_R_TYPE(reg_rdata1, {funct7[5], funct3}, reg_rdata2);                end
       `ysyx_OP_SYSTEM:  begin `ysyx_I_SYS_TYPE(reg_rdata1, {1'b0, funct3}, 0)                           end
       default: begin

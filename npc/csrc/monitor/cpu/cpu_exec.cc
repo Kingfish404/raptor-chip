@@ -45,7 +45,7 @@ static void cpu_exec_one_cycle()
 {
   // pmem_read(*(npc.pc), (word_t *)&(top->inst));
 
-  top->clk = (top->clk == 0) ? 1 : 0;
+  top->clock = (top->clock == 0) ? 1 : 0;
   top->eval();
   if (tfp)
   {
@@ -53,7 +53,7 @@ static void cpu_exec_one_cycle()
   }
   contextp->timeInc(1);
 
-  top->clk = (top->clk == 0) ? 1 : 0;
+  top->clock = (top->clock == 0) ? 1 : 0;
   top->eval();
   if (tfp)
   {

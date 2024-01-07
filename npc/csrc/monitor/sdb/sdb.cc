@@ -53,15 +53,15 @@ static char *rl_gets()
 
 void reset(Vtop *top, int n)
 {
-  top->rst = 1;
+  top->reset = 1;
   while (n-- > 0)
   {
-    top->clk = 0;
+    top->clock = 0;
     top->eval();
-    top->clk = 1;
+    top->clock = 1;
     top->eval();
   }
-  top->rst = 0;
+  top->reset = 0;
 }
 
 extern "C" void npc_exu_ebreak()

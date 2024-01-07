@@ -12,8 +12,9 @@ module ysyx_EXU (
   input [BIT_W-1:0] op1, op2, op_j,
   input [3:0] alu_op,
   input [6:0] funct7, opcode,
-  input [BIT_W-1:0] pc, npc,
-  output reg [BIT_W-1:0] reg_wdata_o, npc_wdata_o
+  input [BIT_W-1:0] pc,
+  output reg [BIT_W-1:0] reg_wdata_o, npc_wdata_o,
+  output reg wben_o
 );
   parameter BIT_W = `ysyx_W_WIDTH;
 
@@ -47,7 +48,11 @@ module ysyx_EXU (
     if (rst) begin
       valid_o <= 0; ready_o <= 1;
     end
-    else begin `ysyx_BUS(); end
+    else begin
+      `ysyx_BUS();
+      if (state == `ysyx_IDLE & valid_o) begin wben_o <= 1; end
+      else if (state == `ysyx_WAIT_READY) begin wben_o <= 0; end
+    end
   end
 
   wire rvalid_o;
@@ -86,14 +91,11 @@ module ysyx_EXU (
     );
   
   // alu unit for addr_data
-  ysyx_ALU #(BIT_W) alu_j(
-    .alu_op1(op_j), .alu_op2(imm), .alu_op(`ysyx_ALU_OP_ADD),
-    .alu_res_o(addr_data)
-    );
+  assign addr_data = op_j + imm;
 
   // branch/system unit
   always @(*) begin
-    npc_wdata_o = npc;
+    npc_wdata_o = pc + 4;
     csr_wdata = 'h0; csr_wen = 0; csr_ecallen = 0;
     csr_wdata_add1 = 'h0;
     case (opcode)
@@ -130,12 +132,12 @@ module ysyx_EXU (
       `ysyx_OP_B_TYPE: begin
         // $display("reg_wdata: %h, npc_wdata: %h, npc: %h", reg_wdata, npc_wdata, npc);
         case (alu_op)
-          `ysyx_ALU_OP_SUB:  begin npc_wdata_o = (~|reg_wdata) ? addr_data : npc; end
-          `ysyx_ALU_OP_XOR:  begin npc_wdata_o = (|reg_wdata) ? addr_data : npc; end
-          `ysyx_ALU_OP_SLT:  begin npc_wdata_o = (|reg_wdata) ? addr_data : npc; end
-          `ysyx_ALU_OP_SLTU: begin npc_wdata_o = (|reg_wdata) ? addr_data : npc; end
-          `ysyx_ALU_OP_SLE:  begin npc_wdata_o = (|reg_wdata) ? addr_data : npc; end
-          `ysyx_ALU_OP_SLEU: begin npc_wdata_o = (|reg_wdata) ? addr_data : npc; end
+          `ysyx_ALU_OP_SUB:  begin npc_wdata_o = (~|reg_wdata)? addr_data : pc + 4; end
+          `ysyx_ALU_OP_XOR:  begin npc_wdata_o = (|reg_wdata) ? addr_data : pc + 4; end
+          `ysyx_ALU_OP_SLT:  begin npc_wdata_o = (|reg_wdata) ? addr_data : pc + 4; end
+          `ysyx_ALU_OP_SLTU: begin npc_wdata_o = (|reg_wdata) ? addr_data : pc + 4; end
+          `ysyx_ALU_OP_SLE:  begin npc_wdata_o = (|reg_wdata) ? addr_data : pc + 4; end
+          `ysyx_ALU_OP_SLEU: begin npc_wdata_o = (|reg_wdata) ? addr_data : pc + 4; end
           default:           begin npc_wdata_o = 0 ; end
         endcase
       end
