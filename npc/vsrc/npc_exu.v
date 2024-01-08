@@ -19,6 +19,7 @@ module ysyx_EXU (
   parameter BIT_W = `ysyx_W_WIDTH;
 
   wire [BIT_W-1:0] addr_data, reg_wdata, mepc, mtvec;
+  wire [BIT_W-1:0] mem_wdata = op2;
   reg [BIT_W-1:0] mem_rdata;
   reg [12-1:0]    csr_addr, csr_addr_add1;
   reg [BIT_W-1:0] csr_wdata, csr_wdata_add1, csr_rdata;
@@ -41,6 +42,7 @@ module ysyx_EXU (
   assign csr_addr_add1 = (
     (imm[3:0] == `ysyx_OP_SYSTEM_FUNC3) && imm[15:4] == `ysyx_OP_SYSTEM_ECALL ? `ysyx_CSR_MEPC :
     (0));
+  assign addr_data = op_j + imm;
 
   reg state;
   `ysyx_BUS_FSM();
@@ -55,33 +57,13 @@ module ysyx_EXU (
     end
   end
 
-  wire rvalid_o;
-  wire arready, awready, rready, wready, bvalid, bready;
-  wire [1:0] rresp, bresp;
+  wire rwready;
   ysyx_EXU_LSU lsu(
     .clk(clk),
-    .alu_op(alu_op), .funct7(funct7), .opcode(opcode),
+    .ren(ren), .wen(wen), .prev_valid(prev_valid), .alu_op(alu_op), 
+    .addr(addr_data), .wdata(mem_wdata),
 
-    .araddr(addr_data),
-    .arvalid(ren & prev_valid),
-    .arready_o(arready),
-
-    .rdata_o(mem_rdata),
-    .rresp_o(rresp),
-    .rvalid_o(rvalid_o),
-    .rready(rready),
-
-    .awaddr(addr_data),
-    .awvalid(wen & valid_o),
-    .awready_o(awready),
-
-    .wdata(op2),
-    .wvalid(wen & valid_o),
-    .wready_o(wready),
-
-    .bresp_o(bresp),
-    .bvalid_o(bvalid),
-    .bready(bready)
+    .rdata_o(mem_rdata), .ready_o(rwready)
     );
 
   // alu unit for reg_wdata
@@ -90,9 +72,6 @@ module ysyx_EXU (
     .alu_res_o(reg_wdata)
     );
   
-  // alu unit for addr_data
-  assign addr_data = op_j + imm;
-
   // branch/system unit
   always @(*) begin
     npc_wdata_o = pc + 4;
@@ -149,53 +128,42 @@ endmodule // ysyx_EXU
 
 module ysyx_EXU_LSU(
   input clk,
+  input ren, wen, prev_valid,
   input [3:0] alu_op,
-  input [6:0] funct7, opcode,
-
-  input [ADDR_W-1:0] araddr,
-  input arvalid,
-  output reg arready_o,
+  input [ADDR_W-1:0] addr,
+  input [DATA_W-1:0] wdata,
 
   output reg [DATA_W-1:0] rdata_o,
-  output reg [1:0] rresp_o,
-  output reg rvalid_o,
-  input rready,
-
-  input [ADDR_W-1:0] awaddr,
-  input awvalid,
-  output reg awready_o,
-  input [DATA_W-1:0] wdata,
-  input wvalid,
-  output reg wready_o,
-  output reg [1:0] bresp_o,
-  output reg bvalid_o,
-  input bready
+  output ready_o
 );
   parameter ADDR_W = 32, DATA_W = 32;
-  reg [DATA_W-1:0] rdata;
-  reg [7:0] wmask;
+  wire [DATA_W-1:0] rdata;
+  reg [7:0] wstrb;
+  assign ready_o = wready | rready;
 
-  wire arready, awready, wready, bvalid;
+  wire rvalid, wvalid;
+  wire arready, awready, rready, wready, bvalid;
   wire [1:0] rresp, bresp;
+  reg bready = 1;
   ysyx_EXU_LSU_SRAM lsu_sram(
     .clk(clk), 
 
-    .araddr(araddr),
-    .arvalid(arvalid),
+    .araddr(addr),
+    .arvalid(ren & prev_valid),
     .arready_o(arready),
 
     .rdata_o(rdata),
     .rresp_o(rresp),
-    .rvalid_o(rvalid_o),
+    .rvalid_o(rvalid),
     .rready(rready),
 
-    .awaddr(awaddr),
-    .awvalid(awvalid),
+    .awaddr(addr),
+    .awvalid(wen & prev_valid),
     .awready_o(awready),
 
     .wdata(wdata),
-    .wmask(wmask),
-    .wvalid(wvalid),
+    .wstrb(wstrb),
+    .wvalid(wen & prev_valid),
     .wready_o(wready),
 
     .bresp_o(bresp),
@@ -205,44 +173,41 @@ module ysyx_EXU_LSU(
 
   // load/store unit
   always @(*) begin
-    wmask = 0;
-    case (opcode)
-      `ysyx_OP_S_TYPE: begin
-        case (alu_op)
-          `ysyx_ALU_OP_SB: begin wmask = 8'h1; end
-          `ysyx_ALU_OP_SH: begin wmask = 8'h3; end
-          `ysyx_ALU_OP_SW: begin wmask = 8'hf; end
-          default:         begin npc_illegal_inst(); end
-        endcase
-      end
-      `ysyx_OP_IL_TYPE: begin
-        case (alu_op)
-          `ysyx_ALU_OP_LB: begin
-            if (rdata[7] == 1 && alu_op == `ysyx_ALU_OP_LB) begin
-              rdata_o = rdata | 'hffffff00;
-            end else begin
-              rdata_o = rdata & 'hff;
-            end
-          end
-          `ysyx_ALU_OP_LBU:  begin 
+    wstrb = 0; rdata_o = 0;
+    if (wen) begin
+      case (alu_op)
+        `ysyx_ALU_OP_SB: begin wstrb = 8'h1; end
+        `ysyx_ALU_OP_SH: begin wstrb = 8'h3; end
+        `ysyx_ALU_OP_SW: begin wstrb = 8'hf; end
+        default:         begin npc_illegal_inst(); end
+      endcase
+    end
+    if (ren) begin
+      case (alu_op)
+        `ysyx_ALU_OP_LB: begin
+          if (rdata[7] == 1 && alu_op == `ysyx_ALU_OP_LB) begin
+            rdata_o = rdata | 'hffffff00;
+          end else begin
             rdata_o = rdata & 'hff;
           end
-          `ysyx_ALU_OP_LH: begin
-            if (rdata[15] == 1 && alu_op == `ysyx_ALU_OP_LH) begin
-              rdata_o = rdata | 'hffff0000;
-            end else begin
-              rdata_o = rdata & 'hffff;
-            end
-          end
-          `ysyx_ALU_OP_LHU:  begin
+        end
+        `ysyx_ALU_OP_LBU:  begin 
+          rdata_o = rdata & 'hff;
+        end
+        `ysyx_ALU_OP_LH: begin
+          if (rdata[15] == 1 && alu_op == `ysyx_ALU_OP_LH) begin
+            rdata_o = rdata | 'hffff0000;
+          end else begin
             rdata_o = rdata & 'hffff;
-           end
-          `ysyx_ALU_OP_LW:  begin rdata_o = rdata; end
-          default: begin end
-        endcase
-      end
-      default: begin end
-    endcase
+          end
+        end
+        `ysyx_ALU_OP_LHU:  begin
+          rdata_o = rdata & 'hffff;
+          end
+        `ysyx_ALU_OP_LW:  begin rdata_o = rdata; end
+        default:         begin npc_illegal_inst(); end
+      endcase
+    end
   end
 
 endmodule
@@ -263,7 +228,7 @@ module ysyx_EXU_LSU_SRAM(
   input awvalid,
   output reg awready_o,
   input [DATA_W-1:0] wdata,
-  input [7:0] wmask,
+  input [7:0] wstrb,
   input wvalid,
   output reg wready_o,
   output reg [1:0] bresp_o,
@@ -275,6 +240,7 @@ module ysyx_EXU_LSU_SRAM(
   reg [31:0] mem_rdata_buf [0:1];
 
   always @(posedge clk) begin
+    mem_rdata_buf = {0, 0};
     if (arvalid) begin
       pmem_read(araddr, mem_rdata_buf[0]);
       rdata_o <= mem_rdata_buf[0];
@@ -283,7 +249,7 @@ module ysyx_EXU_LSU_SRAM(
       rvalid_o <= 0;
     end
     if (wvalid) begin
-      pmem_write(awaddr, wdata, wmask);
+      pmem_write(awaddr, wdata, wstrb);
       wready_o <= 1;
     end else begin
       wready_o <= 0;
