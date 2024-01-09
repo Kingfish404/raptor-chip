@@ -17,32 +17,40 @@ module ysyx_IFU (
   `ysyx_BUS_FSM();
   always @(posedge clk) begin
     if (rst) begin
-      valid_o <= 0; ready_o = 1; arvalid <= 1;
+      valid_o <= 0; pvalid <= 1;
       araddr <= `ysyx_PC_INIT;
     end
     else begin
       if (state == `ysyx_IDLE & prev_valid) begin
-        arvalid <= prev_valid;
+        pvalid <= prev_valid;
         araddr <= npc;
       end
       else if (state == `ysyx_WAIT_READY) begin
-        arvalid <= 0;
+        pvalid <= 0;
         if (next_ready == 1) begin valid_o <= 0; end
       end
     end
   end
   assign ready_o = !valid_o;
 
-  reg arvalid;
+  reg [19:0] lfsr = 1;
+  wire ifsr_ready = lfsr[19];
+  always @(posedge clk ) begin lfsr <= {lfsr[18:0], lfsr[19] ^ lfsr[18]}; end
+  reg arvalid, pvalid;
+  assign arvalid = ifsr_ready & (prev_valid | pvalid);
   wire arready, awready, rready, wready, bvalid;
   wire [1:0] rresp, bresp;
   ysyx_IFU_LU_SRAM #(.ADDR_W(ADDR_W), .DATA_W(DATA_W)) ifu_sram(
     .clk(clk),
-    .araddr(araddr), .arvalid(prev_valid | arvalid), .arready_o(arready),
-    .rdata_o(inst_o), .rresp_o(rresp), .rvalid_o(valid_o), .rready(1'b1),
+
+    .araddr(prev_valid ? npc : araddr), .arvalid(arvalid), .arready_o(arready),
+
+    .rdata_o(inst_o), .rresp_o(rresp), .rvalid_o(valid_o), .rready(ifsr_ready),
 
     .awaddr(0), .awvalid(0), .awready_o(awready),
-    .wdata(0), .wmask(0), .wvalid(0), .wready_o(wready),
+  
+    .wdata(0), .wstrb(0), .wvalid(0), .wready_o(wready),
+
     .bresp_o(bresp), .bvalid_o(bvalid), .bready(0)
   );
 endmodule // ysyx_IFU
@@ -63,7 +71,7 @@ module ysyx_IFU_LU_SRAM(
   input awvalid,
   output reg awready_o,
   input [DATA_W-1:0] wdata,
-  input [7:0] wmask,
+  input [7:0] wstrb,
   input wvalid,
   output reg wready_o,
   output reg [1:0] bresp_o,
@@ -73,11 +81,12 @@ module ysyx_IFU_LU_SRAM(
   parameter ADDR_W = 32, DATA_W = 32;
 
   reg [DATA_W-1:0] inst_mem = 0;
-  reg [20:0] delay = 1;
+  reg [19:0] lfsr = 101101;
+  wire ifsr_ready = lfsr[19];
+  always @(posedge clk ) begin lfsr <= {lfsr[18:0], lfsr[19] ^ lfsr[18]}; end
   always @(posedge clk) begin
-    if (arvalid) begin
-      delay <= {delay[19:0], delay[20]};
-      // if (delay[5] == 1)
+    if (arvalid & rready) begin
+      if (ifsr_ready)
       begin
         pmem_read(araddr, inst_mem);
         rdata_o <= inst_mem;
@@ -85,7 +94,6 @@ module ysyx_IFU_LU_SRAM(
       end
     end else begin
       rvalid_o <= 0;
-      delay <= 1;
     end
   end
 endmodule

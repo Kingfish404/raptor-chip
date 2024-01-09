@@ -107,10 +107,10 @@ module ysyx_PC (
   always @(posedge clk) begin
     if (rst) begin
       pc_o <= `ysyx_PC_INIT;
-      npc_o = `ysyx_PC_INIT;
+      npc_o <= `ysyx_PC_INIT;
     end
     else begin
-      npc_o = npc_wdata;
+      npc_o <= npc_wdata;
       if (exu_valid) begin
         pc_o <= npc_o;
       end
