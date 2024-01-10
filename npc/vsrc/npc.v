@@ -13,6 +13,12 @@ module top (
   // IFU output
   wire [31:0] inst;
   wire ifu_valid, ifu_ready;
+  // IFU bus wire
+  wire [BIT_W-1:0] ifu_araddr_o;
+  wire ifu_arvalid_o, ifu_rready_o;
+  wire [1:0] ifu_rresp;
+  wire ifu_arready, ifu_rvalid;
+  wire [BIT_W-1:0] ifu_rdata;
 
   // IDU output
   wire [BIT_W-1:0] op1, op2, imm, op_j;
@@ -47,12 +53,28 @@ module top (
     .src1_o(reg_rdata1), .src2_o(reg_rdata2)
     );
 
+  ysyx_BUS_ARBITER bus(
+    .clk(clock), .rst(reset),
+
+    .ifu_araddr(ifu_araddr_o),
+    .ifu_arvalid(ifu_arvalid_o), .ifu_rready(ifu_rready_o),
+    .ifu_rresp_o(ifu_rresp),
+    .ifu_arready_o(ifu_arready), .ifu_rvalid_o(ifu_rvalid),
+    .ifu_rdata_o(ifu_rdata)
+  );
+
   // IFU(Instruction Fetch Unit): 负责根据当前PC从存储器中取出一条指令
   ysyx_IFU #(.ADDR_W(BIT_W), .DATA_W(32)) ifu(
     .clk(clock), .rst(reset),
 
     .prev_valid(exu_valid), .next_ready(idu_ready),
     .valid_o(ifu_valid), .ready_o(ifu_ready),
+
+    .ifu_araddr_o(ifu_araddr_o),
+    .ifu_arvalid_o(ifu_arvalid_o), .ifu_rready_o(ifu_rready_o),
+    .ifu_rresp(ifu_rresp),
+    .ifu_arready(ifu_arready), .ifu_rvalid(ifu_rvalid),
+    .ifu_rdata(ifu_rdata),
 
     .pc(pc), .npc(npc),
     .inst_o(inst)
@@ -92,6 +114,9 @@ module top (
     .npc_wdata_o(npc_wdata),
     .wben_o(wben)
     );
+
+  
+
 endmodule // top
 
 module ysyx_PC (
