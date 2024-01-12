@@ -18,7 +18,6 @@ end
 end
 
 `define ysyx_S_TYPE(op1, alu_op, op2) begin \
-  wen_o = 1; \
   imm_o = `ysyx_SIGN_EXTEND(imm_S, 12, `ysyx_W_WIDTH); \
   op1_o = op1; \
   op2_o = op2; \

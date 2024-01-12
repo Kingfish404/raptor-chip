@@ -7,6 +7,12 @@ module ysyx_EXU (
   input prev_valid, next_ready,
   output reg valid_o, ready_o,
 
+  // for bus
+  output exu_lsu_valid_o,
+  output [BIT_W-1:0] exu_lsu_addr_data_o, exu_lsu_mem_wdata_o,
+  input [BIT_W-1:0] mem_rdata,
+  input rvalid_wready,
+
   input ren, wen,
   input [BIT_W-1:0] imm,
   input [BIT_W-1:0] op1, op2, op_j,
@@ -20,7 +26,7 @@ module ysyx_EXU (
 
   wire [BIT_W-1:0] addr_data, reg_wdata, mepc, mtvec;
   wire [BIT_W-1:0] mem_wdata = op2;
-  reg [BIT_W-1:0] mem_rdata;
+  // reg [BIT_W-1:0] mem_rdata;
   reg [12-1:0]    csr_addr, csr_addr_add1;
   reg [BIT_W-1:0] csr_wdata, csr_wdata_add1, csr_rdata;
   reg csr_wen = 0, csr_ecallen = 0;
@@ -45,8 +51,9 @@ module ysyx_EXU (
   assign addr_data = op_j + imm;
 
   reg state, alu_valid, avalid;
-  wire lsu_valid;
-  assign valid_o = (wen | ren) ? lsu_valid : alu_valid;
+  reg just_valid;
+  assign valid_o = rvalid_wready & alu_valid;
+  assign wben_o = valid_o & just_valid;
   assign ready_o = !valid_o;
   `ysyx_BUS_FSM();
   always @(posedge clk) begin
@@ -62,18 +69,23 @@ module ysyx_EXU (
         avalid <= 0;
         if (next_ready == 1) begin alu_valid <= 0; end
       end
-      if (state == `ysyx_IDLE & valid_o) begin wben_o <= 1; end
-      else if (state == `ysyx_WAIT_READY) begin wben_o <= 0; end
+      if (valid_o) begin
+        just_valid <= 0;
+      end else begin 
+        just_valid <= 1;
+      end
     end
   end
 
-  ysyx_EXU_LSU lsu(
-    .clk(clk),
-    .ren(ren), .wen(wen), .avalid(avalid), .alu_op(alu_op), 
-    .addr(addr_data), .wdata(mem_wdata),
-
-    .rdata_o(mem_rdata), .rvalid_wready_o(lsu_valid)
-    );
+  assign exu_lsu_valid_o = avalid;
+  assign exu_lsu_addr_data_o = addr_data;
+  assign exu_lsu_mem_wdata_o = mem_wdata;
+  // ysyx_EXU_LSU lsu(
+  //   .clk(clk),
+  //   .ren(ren), .wen(wen), .avalid(avalid), .alu_op(alu_op), 
+  //   .addr(addr_data), .wdata(mem_wdata),
+  //   .rdata_o(mem_rdata), .rvalid_wready_o(lsu_valid)
+  //   );
 
   // alu unit for reg_wdata
   ysyx_ALU #(BIT_W) alu(

@@ -36,9 +36,11 @@ module ysyx_IDU (
       valid_o <= 0; ready_o <= 1;
     end
     else begin 
-      `ysyx_BUS();
       if (state == `ysyx_IDLE) begin
-        if (prev_valid == 1) begin  valid_o <= 1; ready_o <= 0; end
+        if (prev_valid == 1) begin valid_o <= 1; ready_o <= 0; end
+      end
+      else if (state == `ysyx_WAIT_READY) begin
+        if (next_ready == 1) begin ready_o <= 1; valid_o <= 0; end
       end
     end
   end
@@ -57,12 +59,13 @@ module ysyx_IDU (
       `ysyx_OP_JALR:    begin `ysyx_I_TYPE(pc, `ysyx_ALU_OP_ADD, 4); en_j_o = 1; op_j_o = reg_rdata1;   end
       `ysyx_OP_B_TYPE:  begin `ysyx_B_TYPE(reg_rdata1, {1'b0, funct3}, reg_rdata2); en_j_o = 1; op_j_o = pc;    end
       `ysyx_OP_I_TYPE:  begin `ysyx_I_TYPE(reg_rdata1, {(funct3 == 3'b101) ? funct7[5]: 1'b0, funct3}, imm_o);  end
-      `ysyx_OP_IL_TYPE: begin `ysyx_I_TYPE(reg_rdata1, {1'b0, funct3}, imm_o); op_j_o = reg_rdata1; ren_o = 1;  end
-      `ysyx_OP_S_TYPE:  begin `ysyx_S_TYPE(reg_rdata1, {1'b0, funct3}, reg_rdata2); op_j_o = reg_rdata1;end
+      `ysyx_OP_IL_TYPE: begin `ysyx_I_TYPE(reg_rdata1, {1'b0, funct3}, imm_o); op_j_o = reg_rdata1; ren_o = 1;    end
+      `ysyx_OP_S_TYPE:  begin `ysyx_S_TYPE(reg_rdata1, {1'b0, funct3}, reg_rdata2); op_j_o = reg_rdata1; wen_o = 1; end
       `ysyx_OP_R_TYPE:  begin `ysyx_R_TYPE(reg_rdata1, {funct7[5], funct3}, reg_rdata2);                end
       `ysyx_OP_SYSTEM:  begin `ysyx_I_SYS_TYPE(reg_rdata1, {1'b0, funct3}, 0)                           end
       default: begin
-        if (valid_o == 1) begin
+        if (prev_valid == 1) begin
+          $display("Illegal instruction: %h at %h", inst, pc);
           npc_illegal_inst();
         end
       end

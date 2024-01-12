@@ -4,47 +4,62 @@ module ysyx_BUS_ARBITER(
   input clk, rst,
 
   // ifu
-  input [DATA_W-1:0] ifu_araddr,
-  input ifu_arvalid,
-  output ifu_arready_o,
+  input reg [DATA_W-1:0] ifu_araddr,
+  input reg ifu_arvalid,
+  output reg ifu_arready_o,
 
-  output [DATA_W-1:0] ifu_rdata_o,
-  output [1:0] ifu_rresp_o,
-  output ifu_rvalid_o,
+  output reg [DATA_W-1:0] ifu_rdata_o,
+  output reg [1:0] ifu_rresp_o,
+  output reg ifu_rvalid_o,
   input ifu_rready
 
   // lsu
 );
   parameter ADDR_W = 32, DATA_W = 32;
 
-  wire [ADDR_W-1:0] araddr;
-  wire arvalid, arready_o;
+  reg [ADDR_W-1:0] araddr;
+  reg arvalid;
+  wire arready_o;
   wire [DATA_W-1:0] rdata_o;
 
   wire [1:0] rresp_o;
   wire rvalid_o;
-  wire rready;
+  reg rready;
 
-  wire [ADDR_W-1:0] awaddr;
-  wire awvalid, awready_o;
+  reg [ADDR_W-1:0] awaddr;
+  reg awvalid;
+  wire awready_o;
 
-  wire [DATA_W-1:0] wdata;
-  wire [7:0] wstrb;
-  wire wvalid, wready_o;
+  reg [DATA_W-1:0] wdata;
+  reg [7:0] wstrb;
+  reg wvalid;
+  wire wready_o;
 
   wire [1:0] bresp_o;
-  wire bvalid_o, bready;
+  reg bvalid_o, bready;
 
-  if (1) begin
-    assign araddr = ifu_araddr;
-    assign arvalid = ifu_arvalid;
-    assign ifu_arready_o = arready_o;
+  assign arvalid = ifu_arvalid;
 
-    assign ifu_rdata_o  = rdata_o;
-    assign ifu_rresp_o = rresp_o;
-    assign ifu_rvalid_o = rvalid_o;
-    assign rready = ifu_rready;
-    assign awvalid = 0, wvalid = 0;
+  assign awvalid = 0;
+  assign wvalid = 0;
+
+  always @(*) begin
+    araddr = 0;
+    ifu_arready_o = 0;
+
+    ifu_rdata_o = 0;
+    ifu_rresp_o = 0;
+    ifu_rvalid_o = 0;
+    rready = 0;
+    if (ifu_arvalid) begin
+      araddr = ifu_araddr;
+      ifu_arready_o = arready_o;
+
+      ifu_rdata_o = rdata_o;
+      ifu_rresp_o = rresp_o;
+      ifu_rvalid_o = rvalid_o;
+      rready = ifu_rready;
+    end
   end
 
   reg [19:0] lfsr = 1;

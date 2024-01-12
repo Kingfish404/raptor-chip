@@ -29,15 +29,22 @@ module top (
   wire ebreak;
   wire idu_valid, idu_ready;
 
+  // EXU_LSU output
+  wire [BIT_W-1:0] lsu_mem_rdata;
+  wire lsu_rvalid_wready;
+
   // EXU output
   wire [BIT_W-1:0] reg_wdata;
   wire [BIT_W-1:0] npc_wdata;
   wire exu_valid, exu_ready;
   wire wben;
+  // EXU bus wire
+  wire exu_lsu_valid;
+  wire [BIT_W-1:0] exu_lsu_addr_data, exu_lsu_mem_wdata;
 
   ysyx_PC pc_unit(
     .clk(clock), .rst(reset), 
-    .exu_valid(exu_valid),
+    .exu_valid(wben),
 
     .en_j_o(en_j), 
     .npc_wdata(npc_wdata), .pc_o(pc), .npc_o(npc)
@@ -45,8 +52,8 @@ module top (
 
   ysyx_RegisterFile #(5, BIT_W) regs(
     .clk(clock), .rst(reset),
-    .exu_valid(exu_valid),
-    
+    .exu_valid(wben),
+
     .reg_write_en(rwen),
     .waddr(rd), .wdata(reg_wdata),
     .s1addr(rs1), .s2addr(rs2),
@@ -98,13 +105,26 @@ module top (
     .opcode_o(opcode)
     );
 
+  // LSU(Load/Store Unit): 负责对存储器进行读写操作
+  ysyx_EXU_LSU lsu(
+    .clk(clock),
+    .ren(ren), .wen(wen), .avalid(exu_lsu_valid), .alu_op(alu_op),
+    .addr(exu_lsu_addr_data), .wdata(exu_lsu_mem_wdata),
+    .rdata_o(lsu_mem_rdata), .rvalid_wready_o(lsu_rvalid_wready)
+  );
+
   // EXU(EXecution Unit): 负责根据控制信号对数据进行执行操作, 并将执行结果写回寄存器或存储器
   ysyx_EXU exu(
     .clk(clock), .rst(reset),
 
     .prev_valid(idu_valid), .next_ready(ifu_ready),
     .valid_o(exu_valid), .ready_o(exu_ready),
-  
+
+    .exu_lsu_valid_o(exu_lsu_valid),
+    .exu_lsu_addr_data_o(exu_lsu_addr_data), .exu_lsu_mem_wdata_o(exu_lsu_mem_wdata),
+
+    .mem_rdata(lsu_mem_rdata), .rvalid_wready(lsu_rvalid_wready),
+
     .ren(ren), .wen(wen),
     .imm(imm),
     .op1(op1), .op2(op2), .op_j(op_j),
@@ -114,8 +134,6 @@ module top (
     .npc_wdata_o(npc_wdata),
     .wben_o(wben)
     );
-
-  
 
 endmodule // top
 

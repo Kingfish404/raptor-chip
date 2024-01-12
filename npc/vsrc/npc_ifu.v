@@ -20,7 +20,7 @@ module ysyx_IFU (
   parameter DATA_W = 32;
 
   reg [ADDR_W-1:0] araddr;
-  reg [DATA_W-1:0] inst, inst_debug;
+  reg [DATA_W-1:0] inst, inst_ifu;
   reg state, start = 0, valid;
   `ysyx_BUS_FSM();
   always @(posedge clk) begin
@@ -29,10 +29,14 @@ module ysyx_IFU (
       araddr <= `ysyx_PC_INIT;
     end
     else begin
-      inst_debug <= inst;
-      if (state == `ysyx_IDLE & prev_valid) begin
-        pvalid <= prev_valid;
-        araddr <= npc;
+      if (ifu_rvalid) begin
+        inst_ifu <= ifu_rdata;
+      end
+      if (state == `ysyx_IDLE) begin
+        if (prev_valid) begin
+          pvalid <= prev_valid;
+          araddr <= npc;
+        end
       end
       else if (state == `ysyx_WAIT_READY) begin
         pvalid <= 0;
@@ -54,7 +58,7 @@ module ysyx_IFU (
   assign ifu_araddr_o = prev_valid ? npc : araddr;
   assign ifu_arvalid_o = arvalid;
   assign arready = ifu_arready;
-  assign inst = ifu_rdata;
+  assign inst = ifu_rvalid ? ifu_rdata : inst_ifu;
   assign rresp = ifu_rresp;
   assign valid_o = valid | ifu_rvalid;
   assign ifu_rready_o = ifsr_ready;
