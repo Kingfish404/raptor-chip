@@ -13,16 +13,16 @@ module ysyx_ALU (
     unique case (alu_op)
       `ysyx_ALU_OP_ADD:  begin alu_res_o = alu_op1 + alu_op2;  end
       `ysyx_ALU_OP_SUB:  begin alu_res_o = alu_op1 - alu_op2;  end
-      `ysyx_ALU_OP_SLT:  begin alu_res_o = ((signed'(alu_op1)) <  (signed'(alu_op2))) ? 1 : 0;  end
-      `ysyx_ALU_OP_SLE:  begin alu_res_o = ((signed'(alu_op1)) <= (signed'(alu_op2))) ? 1 : 0; end
+      `ysyx_ALU_OP_SLT:  begin alu_res_o = (($signed(alu_op1)) <  ($signed(alu_op2))) ? 1 : 0;  end
+      `ysyx_ALU_OP_SLE:  begin alu_res_o = (($signed(alu_op1)) <= ($signed(alu_op2))) ? 1 : 0; end
       `ysyx_ALU_OP_SLTU: begin alu_res_o = (alu_op1 < alu_op2) ? 1 : 0;  end
       `ysyx_ALU_OP_SLEU: begin alu_res_o = (alu_op1 <= alu_op2) ? 1 : 0; end
       `ysyx_ALU_OP_XOR:  begin alu_res_o = alu_op1 ^ alu_op2;  end
       `ysyx_ALU_OP_OR:   begin alu_res_o = alu_op1 | alu_op2;  end
       `ysyx_ALU_OP_AND:  begin alu_res_o = alu_op1 & alu_op2;  end
       `ysyx_ALU_OP_SLL:  begin alu_res_o = alu_op1 << (alu_op2 & 'h1f); end
-      `ysyx_ALU_OP_SRL:  begin alu_res_o = (unsigned'(alu_op1)) >> (alu_op2 & 'h1f); end
-      `ysyx_ALU_OP_SRA:  begin alu_res_o = (signed'(alu_op1)) >>> (alu_op2 & 'h1f); end
+      `ysyx_ALU_OP_SRL:  begin alu_res_o = ($unsigned(alu_op1)) >> (alu_op2 & 'h1f); end
+      `ysyx_ALU_OP_SRA:  begin alu_res_o = ($signed(alu_op1)) >>> (alu_op2 & 'h1f); end
       default: begin  alu_res_o = alu_op2;
       end
     endcase

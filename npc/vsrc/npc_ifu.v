@@ -27,7 +27,7 @@ module ysyx_IFU (
   reg [ADDR_W-1:0] araddr;
   reg [DATA_W-1:0] inst, inst_ifu;
   reg state, start = 0, valid;
-  `ysyx_BUS_FSM();
+  `ysyx_BUS_FSM()
   always @(posedge clk) begin
     if (rst) begin
       valid <= 0; pvalid <= 1;

@@ -55,7 +55,7 @@ module ysyx_EXU (
   assign valid_o = rvalid_wready & alu_valid;
   assign wben_o = valid_o & valid_once;
   assign ready_o = !valid_o;
-  `ysyx_BUS_FSM();
+  `ysyx_BUS_FSM()
   always @(posedge clk) begin
     if (rst) begin
       alu_valid <= 0; lsu_avalid <= 0;

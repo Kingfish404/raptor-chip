@@ -61,7 +61,7 @@ end
 `define ysyx_I_SYS_TYPE(op1, alu_op, op2)  begin \
   en_j_o = 1;  \
   rwen_o = 1; \
-  imm_o = `ysyx_SIGN_EXTEND({imm_I, alu_op}, 16, `ysyx_W_WIDTH); \
+  imm_o = `ysyx_SIGN_EXTEND(imm_SYS, 16, `ysyx_W_WIDTH); \
   op1_o = op1; \
   op2_o = op2; \
   alu_op_o = alu_op; \

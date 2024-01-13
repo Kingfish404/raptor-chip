@@ -27,10 +27,11 @@ module ysyx_IDU (
   wire [12:0] imm_B = {inst[31], inst[7], inst[30:25], inst[11:8], 1'b0};
   wire [31:0] imm_U = {inst[31:12], 12'b0};
   wire [20:0] imm_J = {inst[31], inst[19:12], inst[20], inst[30:25], inst[24:21], 1'b0};
+  wire [15:0] imm_SYS = {{imm_I}, {1'b0, funct3}};
   assign opcode_o = inst[6:0];
 
   reg state;
-  `ysyx_BUS_FSM();
+  `ysyx_BUS_FSM()
   always @(posedge clk) begin
     if (rst) begin
       valid_o <= 0; ready_o <= 1;
