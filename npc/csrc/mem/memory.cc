@@ -4,7 +4,9 @@
 void difftest_skip_ref();
 
 static uint8_t pmem[MSIZE] = {};
+#ifdef CONFIG_SOFT_MMIO
 static uint32_t rtc_port_base[2] = {0x0, 0x0};
+#endif
 
 uint8_t *guest_to_host(paddr_t addr)
 {
@@ -56,6 +58,7 @@ static inline void host_write(void *addr, word_t data, int len)
 
 extern "C" void pmem_read(word_t raddr, word_t *data)
 {
+#ifdef CONFIG_SOFT_MMIO
     if (raddr == RTC_ADDR + 4)
     {
         uint64_t t = get_time();
@@ -72,6 +75,7 @@ extern "C" void pmem_read(word_t raddr, word_t *data)
         difftest_skip_ref();
         return;
     }
+#endif
     if (raddr >= MBASE && raddr < MBASE + MSIZE)
     {
         *data = host_read(pmem + raddr - MBASE, 4);
@@ -82,6 +86,7 @@ extern "C" void pmem_read(word_t raddr, word_t *data)
 
 extern "C" void pmem_write(word_t waddr, word_t wdata, char wmask)
 {
+#ifdef CONFIG_SOFT_MMIO
     // SERIAL_MMIO: hex "MMIO address of the serial controller"
     if (waddr == SERIAL_PORT)
     {
@@ -89,6 +94,7 @@ extern "C" void pmem_write(word_t waddr, word_t wdata, char wmask)
         difftest_skip_ref();
         return;
     }
+#endif
     switch (wmask)
     {
     case 0x1:

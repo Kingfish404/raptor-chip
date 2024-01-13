@@ -80,6 +80,9 @@ typedef struct
 
   // for itrace
   uint32_t *inst;
+
+  // for bus
+  uint32_t *bus_freq;
 } NPCState;
 
 extern NPCState npc;

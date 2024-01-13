@@ -101,8 +101,8 @@ void cpu_exec(uint64_t n)
     break;
   }
 
-  uint64_t now = get_time();
   prev_pc = *(npc.pc);
+  uint64_t now = get_time();
   while (!contextp->gotFinish() && npc.state == NPC_RUNNING && n-- > 0)
   {
     cpu_exec_one_cycle();
@@ -111,6 +111,10 @@ void cpu_exec(uint64_t n)
     if (prev_pc != *(npc.pc))
     {
       g_nr_guest_inst++;
+      if (g_nr_guest_inst == 10000)
+      {
+        *npc.bus_freq = g_nr_guest_cycle / (get_time() - now);
+      }
 #ifdef CONFIG_ITRACE
       snprintf(
           iringbuf[iringhead], sizeof(iringbuf[0]),

@@ -7,6 +7,11 @@
 `define ysyx_IDLE       0
 `define ysyx_WAIT_READY 1
 
+`define ysyx_BUS_SERIAL_PORT    'ha00003f8
+`define ysyx_BUS_RTC_ADDR       'ha0000048
+`define ysyx_BUS_RTC_ADDR_UP    `ysyx_BUS_RTC_ADDR + 4
+`define ysyx_BUS_FREQ_ADDR      `ysyx_BUS_RTC_ADDR + 8
+
 `define ysyx_OP_LUI           7'b0110111
 `define ysyx_OP_AUIPC         7'b0010111
 `define ysyx_OP_JAL           7'b1101111

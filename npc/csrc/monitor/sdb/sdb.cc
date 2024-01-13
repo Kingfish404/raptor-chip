@@ -9,6 +9,7 @@
 #include "verilated_vcd_c.h"
 
 extern char *regs[];
+void difftest_skip_ref();
 
 NPCState npc = {
     .state = NPC_RUNNING,
@@ -22,6 +23,8 @@ NPCState npc = {
     .mstatus = NULL,
 
     .inst = NULL,
+
+    .bus_freq = NULL,
 };
 
 VerilatedContext *contextp = NULL;
@@ -69,6 +72,11 @@ extern "C" void npc_exu_ebreak()
   contextp->gotFinish(true);
   printf("EBREAK at pc = " FMT_WORD_NO_PREFIX "\n", *npc.pc);
   npc.state = NPC_END;
+}
+
+void npc_difftest_skip_ref()
+{
+  difftest_skip_ref();
 }
 
 extern "C" void npc_illegal_inst()
@@ -228,6 +236,9 @@ void sdb_sim_init(int argc, char **argv)
 
   // for difftest
   npc.inst = (uint32_t *)&(top->rootp->top__DOT__ifu__DOT__inst_ifu);
+
+  // for bus
+  npc.bus_freq = (uint32_t *)&(top->rootp->top__DOT__bus__DOT__clint__DOT__frequency);
 
   // top->inst = 0x37; // lui x0, 0x0
   reset(top, 1);
