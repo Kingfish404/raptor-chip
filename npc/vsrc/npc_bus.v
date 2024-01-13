@@ -6,14 +6,36 @@ module ysyx_BUS_ARBITER(
   // ifu
   input reg [DATA_W-1:0] ifu_araddr,
   input reg ifu_arvalid,
-  output reg ifu_arready_o,
+  output ifu_arready_o,
 
-  output reg [DATA_W-1:0] ifu_rdata_o,
-  output reg [1:0] ifu_rresp_o,
-  output reg ifu_rvalid_o,
-  input ifu_rready
+  output [DATA_W-1:0] ifu_rdata_o,
+  output [1:0] ifu_rresp_o,
+  output ifu_rvalid_o,
+  input ifu_rready,
 
-  // lsu
+  // lsu:load
+  input reg [DATA_W-1:0] lsu_araddr,
+  input reg lsu_arvalid,
+  output lsu_arready_o,
+
+  output [DATA_W-1:0] lsu_rdata_o,
+  output [1:0] lsu_rresp_o,
+  output lsu_rvalid_o,
+  input lsu_rready,
+
+  // lsu:store
+  input reg [DATA_W-1:0] lsu_awaddr,
+  input reg lsu_awvalid,
+  output lsu_awready_o,
+
+  input reg [DATA_W-1:0] lsu_wdata,
+  input reg [7:0] lsu_wstrb,
+  input reg lsu_wvalid,
+  output lsu_wready_o,
+
+  output [1:0] lsu_bresp_o,
+  output lsu_bvalid_o,
+  input lsu_bready
 );
   parameter ADDR_W = 32, DATA_W = 32;
 
@@ -33,24 +55,28 @@ module ysyx_BUS_ARBITER(
   reg [DATA_W-1:0] wdata;
   reg [7:0] wstrb;
   reg wvalid;
-  wire wready_o;
+  reg wready_o;
 
   wire [1:0] bresp_o;
   reg bvalid_o, bready;
 
-  assign arvalid = ifu_arvalid;
-
-  assign awvalid = 0;
-  assign wvalid = 0;
+  assign arvalid = ifu_arvalid | lsu_arvalid | lsu_awvalid;
 
   always @(*) begin
     araddr = 0;
     ifu_arready_o = 0;
+    lsu_arready_o = 0;
 
-    ifu_rdata_o = 0;
-    ifu_rresp_o = 0;
-    ifu_rvalid_o = 0;
-    rready = 0;
+    ifu_rdata_o = 0; ifu_rresp_o = 0; ifu_rvalid_o = 0;
+    lsu_rdata_o = 0; lsu_rresp_o = 0; 
+    rready = 0; awaddr = 0; awvalid = 0; wvalid = 0;
+    lsu_awready_o = 0;
+    lsu_bresp_o = 0; lsu_bvalid_o = 0; bready = 0;
+
+    lsu_wready_o = wready_o;
+    lsu_rvalid_o = rvalid_o;
+
+    wstrb = 0; wdata = 0;
     if (ifu_arvalid) begin
       araddr = ifu_araddr;
       ifu_arready_o = arready_o;
@@ -59,6 +85,24 @@ module ysyx_BUS_ARBITER(
       ifu_rresp_o = rresp_o;
       ifu_rvalid_o = rvalid_o;
       rready = ifu_rready;
+    end else if (lsu_arvalid) begin
+      araddr = lsu_araddr;
+      lsu_arready_o = arready_o;
+
+      lsu_rdata_o = rdata_o;
+      lsu_rresp_o = rresp_o;
+      rready = lsu_rready;
+    end else if (lsu_awvalid) begin
+      awaddr = lsu_awaddr;
+      lsu_awready_o = awready_o;
+
+      wdata = lsu_wdata;
+      wstrb = lsu_wstrb;
+      wvalid = lsu_wvalid;
+
+      lsu_bresp_o = bresp_o;
+      lsu_bvalid_o = bvalid_o;
+      bready = lsu_bready;
     end
   end
 
@@ -108,6 +152,7 @@ module ysyx_MEM_SRAM(
   always @(posedge clk ) begin lfsr <= {lfsr[18:0], lfsr[19] ^ lfsr[18]}; end
   always @(posedge clk) begin
     mem_rdata_buf <= {0, 0};
+    rdata_o <= 0; rvalid_o <= 0; wready_o <= 0;
     if (arvalid & !rvalid_o & rready) begin
       if (ifsr_ready)
       begin
@@ -115,15 +160,13 @@ module ysyx_MEM_SRAM(
         rdata_o <= mem_rdata_buf[0];
         rvalid_o <= 1;
       end
-    end else if (wvalid & !wready_o & bready) begin
+    end
+    if (wvalid & !wready_o & bready) begin
       if (ifsr_ready)
       begin
         pmem_write(awaddr, wdata, wstrb);
         wready_o <= 1;
       end
-    end else begin
-      rvalid_o <= 0;
-      wready_o <= 0;
     end
   end
 endmodule //ysyx_EXU_LSU_SRAM

@@ -19,6 +19,9 @@ module top (
   wire [1:0] ifu_rresp;
   wire ifu_arready, ifu_rvalid;
   wire [BIT_W-1:0] ifu_rdata;
+  wire lsu_arready, lsu_rvalid, lsu_awready, lsu_bvalid;
+  wire [1:0] lsu_rresp, lsu_bresp;
+  wire [BIT_W-1:0] lsu_rdata;
 
   // IDU output
   wire [BIT_W-1:0] op1, op2, imm, op_j;
@@ -32,6 +35,10 @@ module top (
   // EXU_LSU output
   wire [BIT_W-1:0] lsu_mem_rdata;
   wire lsu_rvalid_wready;
+  wire [BIT_W-1:0] lsu_araddr, lsu_wdata, lsu_awaddr;
+  wire lsu_arvalid, lsu_wready;
+  wire [7:0] lsu_wstrb;
+  wire lsu_rready, lsu_awvalid, lsu_wvalid, lsu_bready;
 
   // EXU output
   wire [BIT_W-1:0] reg_wdata;
@@ -67,7 +74,13 @@ module top (
     .ifu_arvalid(ifu_arvalid_o), .ifu_rready(ifu_rready_o),
     .ifu_rresp_o(ifu_rresp),
     .ifu_arready_o(ifu_arready), .ifu_rvalid_o(ifu_rvalid),
-    .ifu_rdata_o(ifu_rdata)
+    .ifu_rdata_o(ifu_rdata),
+
+    .lsu_araddr(lsu_araddr), .lsu_arvalid(lsu_arvalid), .lsu_arready_o(lsu_arready),
+    .lsu_rdata_o(lsu_rdata), .lsu_rresp_o(lsu_rresp), .lsu_rvalid_o(lsu_rvalid), .lsu_rready(lsu_rready),
+    .lsu_awaddr(lsu_awaddr), .lsu_awvalid(lsu_awvalid), .lsu_awready_o(lsu_awready),
+    .lsu_wdata(lsu_wdata), .lsu_wstrb(lsu_wstrb), .lsu_wvalid(lsu_wvalid), .lsu_wready_o(lsu_wready),
+    .lsu_bresp_o(lsu_bresp), .lsu_bvalid_o(lsu_bvalid), .lsu_bready(lsu_bready)
   );
 
   // IFU(Instruction Fetch Unit): 负责根据当前PC从存储器中取出一条指令
@@ -76,6 +89,8 @@ module top (
 
     .prev_valid(exu_valid), .next_ready(idu_ready),
     .valid_o(ifu_valid), .ready_o(ifu_ready),
+
+    .exu_lsu_valid(exu_lsu_valid),
 
     .ifu_araddr_o(ifu_araddr_o),
     .ifu_arvalid_o(ifu_arvalid_o), .ifu_rready_o(ifu_rready_o),
@@ -110,6 +125,15 @@ module top (
     .clk(clock),
     .ren(ren), .wen(wen), .avalid(exu_lsu_valid), .alu_op(alu_op),
     .addr(exu_lsu_addr_data), .wdata(exu_lsu_mem_wdata),
+
+    .lsu_araddr_o(lsu_araddr), .lsu_arvalid_o(lsu_arvalid), .lsu_arready(lsu_arready),
+    .lsu_rdata(lsu_rdata), .lsu_rresp(lsu_rresp), .lsu_rvalid(lsu_rvalid), .lsu_rready_o(lsu_rready),
+
+    .lsu_awaddr_o(lsu_awaddr), .lsu_awvalid_o(lsu_awvalid), .lsu_awready(lsu_awready),
+    .lsu_wdata_o(lsu_wdata), .lsu_wstrb_o(lsu_wstrb), .lsu_wvalid_o(lsu_wvalid), .lsu_wready_o(lsu_wready),
+
+    .lsu_bresp(lsu_bresp), .lsu_bvalid(lsu_bvalid), .lsu_bready_o(lsu_bready),
+
     .rdata_o(lsu_mem_rdata), .rvalid_wready_o(lsu_rvalid_wready)
   );
 

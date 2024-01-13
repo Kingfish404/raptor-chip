@@ -50,42 +50,35 @@ module ysyx_EXU (
     (0));
   assign addr_data = op_j + imm;
 
-  reg state, alu_valid, avalid;
-  reg just_valid;
+  reg state, alu_valid, lsu_avalid;
+  reg valid_once;
   assign valid_o = rvalid_wready & alu_valid;
-  assign wben_o = valid_o & just_valid;
+  assign wben_o = valid_o & valid_once;
   assign ready_o = !valid_o;
   `ysyx_BUS_FSM();
   always @(posedge clk) begin
     if (rst) begin
-      alu_valid <= 0; avalid <= 0;
+      alu_valid <= 0; lsu_avalid <= 0;
     end
     else begin
       if (state == `ysyx_IDLE & prev_valid) begin
         alu_valid <= 1;
-        if (wen | ren) begin avalid <= 1; end
+        if (wen | ren) begin lsu_avalid <= 1; end
       end
       else if (state == `ysyx_WAIT_READY) begin
-        avalid <= 0;
-        if (next_ready == 1) begin alu_valid <= 0; end
+        if (next_ready == 1) begin lsu_avalid <= 0; alu_valid <= 0; end
       end
       if (valid_o) begin
-        just_valid <= 0;
+        valid_once <= 0;
       end else begin 
-        just_valid <= 1;
+        valid_once <= 1;
       end
     end
   end
 
-  assign exu_lsu_valid_o = avalid;
+  assign exu_lsu_valid_o = lsu_avalid;
   assign exu_lsu_addr_data_o = addr_data;
   assign exu_lsu_mem_wdata_o = mem_wdata;
-  // ysyx_EXU_LSU lsu(
-  //   .clk(clk),
-  //   .ren(ren), .wen(wen), .avalid(avalid), .alu_op(alu_op), 
-  //   .addr(addr_data), .wdata(mem_wdata),
-  //   .rdata_o(mem_rdata), .rvalid_wready_o(lsu_valid)
-  //   );
 
   // alu unit for reg_wdata
   ysyx_ALU #(BIT_W) alu(
