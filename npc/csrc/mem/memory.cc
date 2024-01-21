@@ -2,6 +2,7 @@
 #include "common.h"
 
 void difftest_skip_ref();
+void npc_abort();
 
 static uint8_t pmem[MSIZE] = {};
 #ifdef CONFIG_SOFT_MMIO
@@ -58,6 +59,8 @@ static inline void host_write(void *addr, word_t data, int len)
 
 extern "C" void pmem_read(word_t raddr, word_t *data)
 {
+    // printf("raddr: " FMT_WORD_NO_PREFIX ", ", raddr);
+    // printf("data: " FMT_WORD_NO_PREFIX "\n", *data);
 #ifdef CONFIG_SOFT_MMIO
     if (raddr == RTC_ADDR + 4)
     {
@@ -79,13 +82,16 @@ extern "C" void pmem_read(word_t raddr, word_t *data)
     if (raddr >= MBASE && raddr < MBASE + MSIZE)
     {
         *data = host_read(pmem + raddr - MBASE, 4);
+        return;
     }
-    // printf("raddr: " FMT_WORD_NO_PREFIX ", ", raddr);
-    // printf("data: " FMT_WORD_NO_PREFIX "\n", *data);
+    npc_abort();
+    assert(0);
 }
 
 extern "C" void pmem_write(word_t waddr, word_t wdata, char wmask)
 {
+    // printf("waddr: 0x%x, wdata: 0x%x, wmask = 0x%x\n",
+    //        waddr, wdata, wmask);
 #ifdef CONFIG_SOFT_MMIO
     // SERIAL_MMIO: hex "MMIO address of the serial controller"
     if (waddr == SERIAL_PORT)
@@ -95,6 +101,13 @@ extern "C" void pmem_write(word_t waddr, word_t wdata, char wmask)
         return;
     }
 #endif
+    if (waddr < MBASE || waddr > MBASE + MSIZE)
+    {
+        Log("Invalid write: addr = " FMT_WORD ", data = " FMT_WORD ", mask = %x",
+            waddr, wdata, wmask);
+        npc_abort();
+        return;
+    }
     switch (wmask)
     {
     case 0x1:
@@ -112,6 +125,4 @@ extern "C" void pmem_write(word_t waddr, word_t wdata, char wmask)
     default:
         break;
     }
-    // printf("waddr: 0x%x, wdata: 0x%x, wmask = 0x%x\n",
-    //        waddr, wdata, wmask);
 }

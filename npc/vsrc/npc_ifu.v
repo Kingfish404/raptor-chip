@@ -19,7 +19,8 @@ module ysyx_IFU (
   output ifu_rready_o,
 
   input [ADDR_W-1:0] pc, npc,
-  output [DATA_W-1:0] inst_o
+  output [DATA_W-1:0] inst_o,
+  output reg [DATA_W-1:0] pc_o
 );
   parameter ADDR_W = 32;
   parameter DATA_W = 32;
@@ -32,6 +33,7 @@ module ysyx_IFU (
       valid <= 0; pvalid <= 1; inst_ifu <= 0;
     end
     else begin
+      pc_o <= pc;
       if (ifu_rvalid) begin inst_ifu <= ifu_rdata; end
       if (state == `ysyx_IDLE) begin
         if (prev_valid) begin pvalid <= prev_valid; end

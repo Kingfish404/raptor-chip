@@ -67,6 +67,16 @@ void reset(Vtop *top, int n)
   top->reset = 0;
 }
 
+void npc_abort()
+{
+  contextp->gotFinish(true);
+  if (npc.state == NPC_ABORT)
+  {
+    return;
+  }
+  npc.state = NPC_ABORT;
+}
+
 extern "C" void npc_exu_ebreak()
 {
   contextp->gotFinish(true);
@@ -83,11 +93,7 @@ extern "C" void npc_illegal_inst()
 {
   contextp->gotFinish(true);
   printf("Illegal instruction at pc = " FMT_WORD_NO_PREFIX "\n", *npc.pc);
-  if (npc.state == NPC_ABORT)
-  {
-    return;
-  }
-  npc.state = NPC_ABORT;
+  npc_abort();
 }
 
 void sdb_set_batch_mode()

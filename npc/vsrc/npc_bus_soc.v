@@ -32,7 +32,7 @@ module ysyx_UART(
   wire ifsr_ready = `ysyx_IFSR_ENABLE ? lfsr[19] : 1;
   always @(posedge clk ) begin lfsr <= {lfsr[18:0], lfsr[19] ^ lfsr[18]}; end
   always @(posedge clk) begin
-    rdata_o <= 0; rvalid_o <= 0;
+    rdata_o <= 0; rvalid_o <= 0; wready_o <= 0;
     if (arvalid & !rvalid_o & rready) begin
       if (ifsr_ready)
       begin
@@ -47,8 +47,6 @@ module ysyx_UART(
         npc_difftest_skip_ref();
         wready_o <= 1;
       end
-    end else begin
-      wready_o <= 0;
     end
   end
 endmodule //ysyx_UART

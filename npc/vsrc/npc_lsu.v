@@ -35,22 +35,17 @@ module ysyx_LSU(
   output reg rvalid_wready_o
 );
   parameter ADDR_W = 32, DATA_W = 32;
-  reg [DATA_W-1:0] rdata;
-  reg [7:0] wstrb;
+  wire [DATA_W-1:0] rdata;
+  wire [7:0] wstrb;
   assign rvalid_wready_o = (rvalid | wready) | (!avalid);
 
   reg [19:0] lfsr = 1;
-  reg ifsr_ready; 
-  always @(posedge clk ) begin 
-    lfsr <= {lfsr[18:0], lfsr[19] ^ lfsr[18]}; 
-    if (`ysyx_IFSR_ENABLE) begin
-      if ((!avalid)) begin
-        ifsr_ready <= 0;
-      end else if (!ifsr_ready) begin
-        ifsr_ready <= lfsr[19];
-      end
+  wire ifsr_ready = `ysyx_IFSR_ENABLE ? lfsr[19] : 1;
+  always @(posedge clk ) begin
+    if ((ren | wen)) begin
+      if (!lfsr[19]) begin lfsr <= {lfsr[18:0], lfsr[19] ^ lfsr[18]}; end
     end else begin
-      ifsr_ready <= 1;
+      lfsr <= {lfsr[18:0], lfsr[19] ^ lfsr[18]};
     end
   end
 
@@ -89,42 +84,17 @@ module ysyx_LSU(
   //   );
 
   // load/store unit
-  always @(*) begin
-    wstrb = 0; rdata_o = 0;
-    if (wen) begin
-      case (alu_op)
-        `ysyx_ALU_OP_SB: begin wstrb = 8'h1; end
-        `ysyx_ALU_OP_SH: begin wstrb = 8'h3; end
-        `ysyx_ALU_OP_SW: begin wstrb = 8'hf; end
-        default:         begin end
-      endcase
-    end
-    if (ren) begin
-      case (alu_op)
-        `ysyx_ALU_OP_LB: begin
-          if (rdata[7] == 1 && alu_op == `ysyx_ALU_OP_LB) begin
-            rdata_o = rdata | 'hffffff00;
-          end else begin
-            rdata_o = rdata & 'hff;
-          end
-        end
-        `ysyx_ALU_OP_LBU:  begin 
-          rdata_o = rdata & 'hff;
-        end
-        `ysyx_ALU_OP_LH: begin
-          if (rdata[15] == 1 && alu_op == `ysyx_ALU_OP_LH) begin
-            rdata_o = rdata | 'hffff0000;
-          end else begin
-            rdata_o = rdata & 'hffff;
-          end
-        end
-        `ysyx_ALU_OP_LHU:  begin
-          rdata_o = rdata & 'hffff;
-          end
-        `ysyx_ALU_OP_LW:  begin rdata_o = rdata; end
-        default:         begin end
-      endcase
-    end
-  end
+  assign wstrb = (
+    ({8{alu_op == `ysyx_ALU_OP_SB}} & 8'h1) | 
+    ({8{alu_op == `ysyx_ALU_OP_SH}} & 8'h3) | 
+    ({8{alu_op == `ysyx_ALU_OP_SW}} & 8'hf)
+  );
+  assign rdata_o = (
+    ({DATA_W{alu_op == `ysyx_ALU_OP_LB}} & (rdata[7] ? rdata | 'hffffff00 : rdata & 'hff)) | 
+    ({DATA_W{alu_op == `ysyx_ALU_OP_LBU}} & rdata & 'hff) | 
+    ({DATA_W{alu_op == `ysyx_ALU_OP_LH}} & (rdata[15] ? rdata | 'hffff0000 : rdata & 'hffff)) | 
+    ({DATA_W{alu_op == `ysyx_ALU_OP_LHU}} & rdata & 'hffff) | 
+    ({DATA_W{alu_op == `ysyx_ALU_OP_LW}} & rdata)
+  );
 
 endmodule

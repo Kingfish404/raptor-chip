@@ -1,7 +1,8 @@
 `include "npc_macro.v"
 
 module top (
-  input clock, reset
+  input clock, reset,
+  output ebreak
 );
   parameter BIT_W = `ysyx_W_WIDTH;
   // PC unit output
@@ -13,6 +14,7 @@ module top (
   // IFU output
   wire [31:0] inst;
   wire ifu_valid, ifu_ready;
+  wire [BIT_W-1:0] pc_ifu;
   // IFU bus wire
   wire [BIT_W-1:0] ifu_araddr_o;
   wire ifu_arvalid_o, ifu_rready_o;
@@ -24,15 +26,14 @@ module top (
   wire [BIT_W-1:0] lsu_rdata;
 
   // IDU output
-  wire [BIT_W-1:0] op1, op2, imm, op_j;
+  wire [BIT_W-1:0] op1, op2, imm, op_j, pc_idu, rwaddr;
   wire [4:0] rs1, rs2, rd;
   wire [3:0] alu_op;
   wire [6:0] opcode, funct7;
   wire rwen, en_j, ren, wen;
-  wire ebreak;
   wire idu_valid, idu_ready;
 
-  // lsu output
+  // LSU output
   wire [BIT_W-1:0] lsu_mem_rdata;
   wire lsu_rvalid_wready;
   wire [BIT_W-1:0] lsu_araddr, lsu_wdata, lsu_awaddr;
@@ -47,7 +48,7 @@ module top (
   wire wben;
   // EXU bus wire
   wire lsu_avalid;
-  wire [BIT_W-1:0] lsu_addr_data, lsu_mem_wdata;
+  wire [BIT_W-1:0] lsu_mem_wdata;
 
   ysyx_PC pc_unit(
     .clk(clock), .rst(reset), 
@@ -99,7 +100,7 @@ module top (
     .ifu_rdata(ifu_rdata),
 
     .pc(pc), .npc(npc_wdata),
-    .inst_o(inst)
+    .inst_o(inst), .pc_o(pc_ifu)
   );
 
   // IDU(Instruction Decode Unit): 负责对当前指令进行译码, 准备执行阶段需要使用的数据和控制信号
@@ -113,18 +114,18 @@ module top (
     .reg_rdata1(reg_rdata1), .reg_rdata2(reg_rdata2),
     .pc(pc),
     .rwen_o(rwen), .en_j_o(en_j), .ren_o(ren), .wen_o(wen),
-    .op1_o(op1), .op2_o(op2), .op_j_o(op_j),
+    .op1_o(op1), .op2_o(op2), .op_j_o(op_j), .rwaddr_o(rwaddr),
     .imm_o(imm),
     .rs1_o(rs1), .rs2_o(rs2), .rd_o(rd),
-    .alu_op_o(alu_op), .funct7_o(funct7),
-    .opcode_o(opcode)
+    .alu_op_o(alu_op), // .funct7_o(funct7),
+    .opcode_o(opcode), .pc_o(pc_idu)
     );
 
   // LSU(Load/Store Unit): 负责对存储器进行读写操作
   ysyx_LSU lsu(
     .clk(clock),
     .ren(ren), .wen(wen), .avalid(lsu_avalid), .alu_op(alu_op),
-    .addr(lsu_addr_data), .wdata(lsu_mem_wdata),
+    .addr(rwaddr), .wdata(lsu_mem_wdata),
 
     .lsu_araddr_o(lsu_araddr), .lsu_arvalid_o(lsu_arvalid), .lsu_arready(lsu_arready),
     .lsu_rdata(lsu_rdata), .lsu_rresp(lsu_rresp), .lsu_rvalid(lsu_rvalid), .lsu_rready_o(lsu_rready),
@@ -145,18 +146,18 @@ module top (
     .valid_o(exu_valid), .ready_o(exu_ready),
 
     .lsu_avalid_o(lsu_avalid),
-    .lsu_addr_data_o(lsu_addr_data), .lsu_mem_wdata_o(lsu_mem_wdata),
+    .lsu_mem_wdata_o(lsu_mem_wdata),
 
     .mem_rdata(lsu_mem_rdata), .rvalid_wready(lsu_rvalid_wready),
 
     .ren(ren), .wen(wen),
     .imm(imm),
-    .op1(op1), .op2(op2), .op_j(op_j),
-    .alu_op(alu_op), .funct7(funct7), .opcode(opcode),
-    .pc(pc),
+    .op1(op1), .op2(op2), .op_j(op_j), .rwaddr(rwaddr),
+    .alu_op(alu_op), .opcode(opcode),
+    .pc(pc_idu),
     .reg_wdata_o(reg_wdata),
     .npc_wdata_o(npc_wdata),
-    .wben_o(wben)
+    .wben_o(wben), .ebreak_o(ebreak)
     );
 
 endmodule // top
@@ -173,10 +174,8 @@ module ysyx_PC (
     if (rst) begin
       pc_o <= `ysyx_PC_INIT;
     end
-    else begin
-      if (exu_valid) begin
+    else if (exu_valid) begin
         pc_o <= npc_wdata;
-      end
     end
   end
 endmodule //ysyx_PC
@@ -199,22 +198,18 @@ module ysyx_RegisterFile (
   assign src1_o = rf[s1addr];
   assign src2_o = rf[s2addr];
 
+  genvar i;
+  generate for(i = 1 ; i < 31; i = i + 1) begin : U
+    always @(posedge clk) begin
+      if (rst) begin rf[i] <= 0; end
+    end
+  end
+  endgenerate
+
   always @(posedge clk) begin
-    if (rst) begin
-      rf[0] <= 0;  rf[1] <= 0;  rf[2] <= 0;  rf[3] <= 0;
-      rf[4] <= 0;  rf[5] <= 0;  rf[6] <= 0;  rf[7] <= 0;
-      rf[8] <= 0;  rf[9] <= 0;  rf[10] <= 0; rf[11] <= 0;
-      rf[12] <= 0; rf[13] <= 0; rf[14] <= 0; rf[15] <= 0;
-      rf[16] <= 0; rf[17] <= 0; rf[18] <= 0; rf[19] <= 0;
-      rf[20] <= 0; rf[21] <= 0; rf[22] <= 0; rf[23] <= 0;
-      rf[24] <= 0; rf[25] <= 0; rf[26] <= 0; rf[27] <= 0;
-      rf[28] <= 0; rf[29] <= 0; rf[30] <= 0; rf[31] <= 0;
+    if (!rst && reg_write_en && exu_valid) begin
+      rf[waddr] <= wdata;
     end
-    else begin
-      if (reg_write_en && exu_valid) begin
-        rf[waddr] <= wdata;
-      end
-      rf[0] <= 0;
-    end
+    rf[0] <= 0;
   end
 endmodule // ysyx_RegisterFile
