@@ -1,6 +1,6 @@
 `include "npc_macro.v"
 
-module ysyx_EXU_LSU(
+module ysyx_LSU(
   input clk,
   input ren, wen, avalid,
   input [3:0] alu_op,
@@ -25,7 +25,7 @@ module ysyx_EXU_LSU(
   output [DATA_W-1:0] lsu_wdata_o,
   output [7:0] lsu_wstrb_o,
   output lsu_wvalid_o,
-  input reg lsu_wready_o,
+  input reg lsu_wready,
 
   input reg [1:0] lsu_bresp,
   input reg lsu_bvalid,
@@ -55,7 +55,7 @@ module ysyx_EXU_LSU(
   end
 
   assign lsu_araddr_o = addr;
-  assign lsu_arvalid_o = ifsr_ready & ren & avalid;
+  assign lsu_arvalid_o = ifsr_ready & ren;
   assign arready = lsu_arready;
 
   assign rdata = lsu_rdata;
@@ -64,13 +64,13 @@ module ysyx_EXU_LSU(
   assign lsu_rready_o = ifsr_ready;
 
   assign lsu_awaddr_o = addr;
-  assign lsu_awvalid_o = ifsr_ready & wen & avalid;
+  assign lsu_awvalid_o = ifsr_ready & wen;
   assign awready = lsu_awready;
 
   assign lsu_wdata_o = wdata;
   assign lsu_wstrb_o = wstrb;
-  assign lsu_wvalid_o = ifsr_ready & wen & avalid;
-  assign wready = lsu_wready_o;
+  assign lsu_wvalid_o = ifsr_ready & wen;
+  assign wready = lsu_wready;
 
   assign bresp = lsu_bresp;
   assign bvalid = lsu_bvalid;

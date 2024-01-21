@@ -111,10 +111,6 @@ void cpu_exec(uint64_t n)
     if (prev_pc != *(npc.pc))
     {
       g_nr_guest_inst++;
-      if (g_nr_guest_inst == 10000)
-      {
-        *npc.bus_freq = g_nr_guest_cycle / (get_time() - now);
-      }
 #ifdef CONFIG_ITRACE
       snprintf(
           iringbuf[iringhead], sizeof(iringbuf[0]),

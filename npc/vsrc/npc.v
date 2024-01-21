@@ -32,7 +32,7 @@ module top (
   wire ebreak;
   wire idu_valid, idu_ready;
 
-  // EXU_LSU output
+  // lsu output
   wire [BIT_W-1:0] lsu_mem_rdata;
   wire lsu_rvalid_wready;
   wire [BIT_W-1:0] lsu_araddr, lsu_wdata, lsu_awaddr;
@@ -46,15 +46,15 @@ module top (
   wire exu_valid, exu_ready;
   wire wben;
   // EXU bus wire
-  wire exu_lsu_valid;
-  wire [BIT_W-1:0] exu_lsu_addr_data, exu_lsu_mem_wdata;
+  wire lsu_avalid;
+  wire [BIT_W-1:0] lsu_addr_data, lsu_mem_wdata;
 
   ysyx_PC pc_unit(
     .clk(clock), .rst(reset), 
     .exu_valid(wben),
 
-    .en_j_o(en_j), 
-    .npc_wdata(npc_wdata), .pc_o(pc), .npc_o(npc)
+    .npc_wdata(npc_wdata), 
+    .pc_o(pc)
   );
 
   ysyx_RegisterFile #(5, BIT_W) regs(
@@ -90,7 +90,7 @@ module top (
     .prev_valid(exu_valid), .next_ready(idu_ready),
     .valid_o(ifu_valid), .ready_o(ifu_ready),
 
-    .exu_lsu_valid(exu_lsu_valid),
+    .lsu_valid(lsu_avalid),
 
     .ifu_araddr_o(ifu_araddr_o),
     .ifu_arvalid_o(ifu_arvalid_o), .ifu_rready_o(ifu_rready_o),
@@ -98,7 +98,7 @@ module top (
     .ifu_arready(ifu_arready), .ifu_rvalid(ifu_rvalid),
     .ifu_rdata(ifu_rdata),
 
-    .pc(pc), .npc(npc),
+    .pc(pc), .npc(npc_wdata),
     .inst_o(inst)
   );
 
@@ -121,16 +121,16 @@ module top (
     );
 
   // LSU(Load/Store Unit): 负责对存储器进行读写操作
-  ysyx_EXU_LSU lsu(
+  ysyx_LSU lsu(
     .clk(clock),
-    .ren(ren), .wen(wen), .avalid(exu_lsu_valid), .alu_op(alu_op),
-    .addr(exu_lsu_addr_data), .wdata(exu_lsu_mem_wdata),
+    .ren(ren), .wen(wen), .avalid(lsu_avalid), .alu_op(alu_op),
+    .addr(lsu_addr_data), .wdata(lsu_mem_wdata),
 
     .lsu_araddr_o(lsu_araddr), .lsu_arvalid_o(lsu_arvalid), .lsu_arready(lsu_arready),
     .lsu_rdata(lsu_rdata), .lsu_rresp(lsu_rresp), .lsu_rvalid(lsu_rvalid), .lsu_rready_o(lsu_rready),
 
     .lsu_awaddr_o(lsu_awaddr), .lsu_awvalid_o(lsu_awvalid), .lsu_awready(lsu_awready),
-    .lsu_wdata_o(lsu_wdata), .lsu_wstrb_o(lsu_wstrb), .lsu_wvalid_o(lsu_wvalid), .lsu_wready_o(lsu_wready),
+    .lsu_wdata_o(lsu_wdata), .lsu_wstrb_o(lsu_wstrb), .lsu_wvalid_o(lsu_wvalid), .lsu_wready(lsu_wready),
 
     .lsu_bresp(lsu_bresp), .lsu_bvalid(lsu_bvalid), .lsu_bready_o(lsu_bready),
 
@@ -144,8 +144,8 @@ module top (
     .prev_valid(idu_valid), .next_ready(ifu_ready),
     .valid_o(exu_valid), .ready_o(exu_ready),
 
-    .exu_lsu_valid_o(exu_lsu_valid),
-    .exu_lsu_addr_data_o(exu_lsu_addr_data), .exu_lsu_mem_wdata_o(exu_lsu_mem_wdata),
+    .lsu_avalid_o(lsu_avalid),
+    .lsu_addr_data_o(lsu_addr_data), .lsu_mem_wdata_o(lsu_mem_wdata),
 
     .mem_rdata(lsu_mem_rdata), .rvalid_wready(lsu_rvalid_wready),
 
@@ -164,22 +164,18 @@ endmodule // top
 module ysyx_PC (
   input clk, rst,
   input exu_valid,
-  input en_j_o,
   input [BIT_W-1:0] npc_wdata,
-  output reg [BIT_W-1:0] pc_o, npc_o
+  output reg [BIT_W-1:0] pc_o
 );
   parameter BIT_W = `ysyx_W_WIDTH;
-  // assign npc_o = npc_wdata;
 
   always @(posedge clk) begin
     if (rst) begin
       pc_o <= `ysyx_PC_INIT;
-      npc_o <= `ysyx_PC_INIT;
     end
     else begin
-      npc_o <= npc_wdata;
       if (exu_valid) begin
-        pc_o <= npc_o;
+        pc_o <= npc_wdata;
       end
     end
   end

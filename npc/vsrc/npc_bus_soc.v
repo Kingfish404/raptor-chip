@@ -32,7 +32,7 @@ module ysyx_UART(
   wire ifsr_ready = `ysyx_IFSR_ENABLE ? lfsr[19] : 1;
   always @(posedge clk ) begin lfsr <= {lfsr[18:0], lfsr[19] ^ lfsr[18]}; end
   always @(posedge clk) begin
-    rdata_o <= 0; rvalid_o <= 0; wready_o <= 0;
+    rdata_o <= 0; rvalid_o <= 0;
     if (arvalid & !rvalid_o & rready) begin
       if (ifsr_ready)
       begin
@@ -40,13 +40,15 @@ module ysyx_UART(
         rvalid_o <= 1;
       end
     end
-    if (wvalid & !wready_o & bready) begin
-      if (ifsr_ready)
+    if (wvalid & bready) begin
+      if (ifsr_ready & !wready_o)
       begin
         $write("%c", wdata[7:0]);
         npc_difftest_skip_ref();
         wready_o <= 1;
       end
+    end else begin
+      wready_o <= 0;
     end
   end
 endmodule //ysyx_UART
@@ -80,12 +82,11 @@ module ysyx_CLINT(
   parameter ADDR_W = 32, DATA_W = 32;
 
   reg [63:0] mtime;
-  reg [31:0] frequency;
-  reg [19:0] lfsr = 101;
+  reg [19:0] lfsr;
   wire ifsr_ready = `ysyx_IFSR_ENABLE ? lfsr[19] : 1;
   always @(posedge clk ) begin lfsr <= {lfsr[18:0], lfsr[19] ^ lfsr[18]}; end
   always @(posedge clk) begin
-    if (rst) begin mtime <= 0; frequency <= 1; end
+    if (rst) begin mtime <= 0; lfsr <= 101; end
     else begin mtime <= mtime + 1; end
     rdata_o <= 0; rvalid_o <= 0; wready_o <= 0;
     if (arvalid & !rvalid_o & rready) begin
@@ -94,7 +95,6 @@ module ysyx_CLINT(
         case (araddr)
           `ysyx_BUS_RTC_ADDR:     rdata_o <= mtime[31:0];
           `ysyx_BUS_RTC_ADDR_UP:  rdata_o <= mtime[63:32];
-          `ysyx_BUS_FREQ_ADDR:    rdata_o <= frequency;
         endcase
         npc_difftest_skip_ref();
         rvalid_o <= 1;
@@ -140,7 +140,6 @@ module ysyx_MEM_SRAM(
   always @(posedge clk ) begin lfsr <= {lfsr[18:0], lfsr[19] ^ lfsr[18]}; end
   always @(posedge clk) begin
     mem_rdata_buf[0] <= 0;
-    rdata_o <= 0; rvalid_o <= 0; wready_o <= 0;
     if (arvalid & !rvalid_o & rready) begin
       if (ifsr_ready)
       begin
@@ -148,6 +147,8 @@ module ysyx_MEM_SRAM(
         rdata_o <= mem_rdata_buf[0];
         rvalid_o <= 1;
       end
+    end else begin
+      rvalid_o <= 0; rdata_o <= 0;
     end
     if (wvalid & !wready_o & bready) begin
       if (ifsr_ready)
@@ -155,6 +156,8 @@ module ysyx_MEM_SRAM(
         pmem_write(awaddr, wdata, wstrb);
         wready_o <= 1;
       end
+    end else begin
+      wready_o <= 0;
     end
   end
-endmodule //ysyx_EXU_LSU_SRAM
+endmodule //ysyx_MEM_SRAM

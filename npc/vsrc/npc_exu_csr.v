@@ -8,8 +8,8 @@ module ysyx_CSR_Reg(
   input [R_W-1:0] waddr, waddr_add1,
   input [BIT_W-1:0] wdata, wdata_add1,
   output reg [BIT_W-1:0] rdata_o,
-  output wire [BIT_W-1:0] mtvec_o,
-  output wire [BIT_W-1:0] mepc_o
+  output reg [BIT_W-1:0] mtvec_o,
+  output reg [BIT_W-1:0] mepc_o
 );
   parameter MNONE        = 'h0;
   parameter MCAUSE_IDX  = 'h1;
@@ -20,30 +20,25 @@ module ysyx_CSR_Reg(
   parameter R_W = 12;
   parameter BIT_W = `ysyx_W_WIDTH;
   parameter RESET_VAL = 0;
-  reg [2:0] csr_addr;
-  reg [2:0] csr_addr_add1;
-  reg [BIT_W-1:0] csr[0:7];
+  wire [2:0] csr_addr;
+  wire [2:0] csr_addr_add1;
   assign rdata_o = csr[csr_addr];
   assign mepc_o  = csr[MEPC_IDX];
   assign mtvec_o = csr[MTVEC_IDX];
+  assign csr_addr = (
+    ({3{waddr==`ysyx_CSR_MCAUSE}}) & (MCAUSE_IDX) |
+    ({3{waddr==`ysyx_CSR_MEPC}})   & (MEPC_IDX)   |
+    ({3{waddr==`ysyx_CSR_MTVEC}})  & (MTVEC_IDX)  |
+    ({3{waddr==`ysyx_CSR_MSTATUS}})& (MSTATUS_IDX)
+  );
+  assign csr_addr_add1 = (
+    ({3{waddr_add1==`ysyx_CSR_MCAUSE}}) & (MCAUSE_IDX) |
+    ({3{waddr_add1==`ysyx_CSR_MEPC}})   & (MEPC_IDX)   |
+    ({3{waddr_add1==`ysyx_CSR_MTVEC}})  & (MTVEC_IDX)  |
+    ({3{waddr_add1==`ysyx_CSR_MSTATUS}})& (MSTATUS_IDX)
+  );
 
-  always @(*) begin
-    case (waddr)
-      `ysyx_CSR_MCAUSE:   begin csr_addr = MCAUSE_IDX;  end
-      `ysyx_CSR_MEPC:     begin csr_addr = MEPC_IDX;    end
-      `ysyx_CSR_MTVEC:    begin csr_addr = MTVEC_IDX;   end
-      `ysyx_CSR_MSTATUS:  begin csr_addr = MSTATUS_IDX; end
-      default: begin  csr_addr = MNONE; end
-    endcase
-    case (waddr_add1)
-      `ysyx_CSR_MCAUSE:   begin csr_addr_add1 = MCAUSE_IDX;  end
-      `ysyx_CSR_MEPC:     begin csr_addr_add1 = MEPC_IDX;    end
-      `ysyx_CSR_MTVEC:    begin csr_addr_add1 = MTVEC_IDX;   end
-      `ysyx_CSR_MSTATUS:  begin csr_addr_add1 = MSTATUS_IDX; end
-      default: begin  csr_addr_add1 = MNONE; end
-    endcase
-  end
-
+  reg [BIT_W-1:0] csr[0:7];
   always @(posedge clk) begin
     if (rst) begin
       csr[MCAUSE_IDX]   <= RESET_VAL;

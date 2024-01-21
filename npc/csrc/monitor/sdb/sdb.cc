@@ -237,10 +237,6 @@ void sdb_sim_init(int argc, char **argv)
   // for difftest
   npc.inst = (uint32_t *)&(top->rootp->top__DOT__ifu__DOT__inst_ifu);
 
-  // for bus
-  npc.bus_freq = (uint32_t *)&(top->rootp->top__DOT__bus__DOT__clint__DOT__frequency);
-
-  // top->inst = 0x37; // lui x0, 0x0
   reset(top, 1);
   if (tfp)
   {

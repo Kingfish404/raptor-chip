@@ -3,10 +3,10 @@
 module ysyx_IFU (
   input clk, rst,
 
-  input wire prev_valid, next_ready,
-  output reg valid_o, ready_o,
+  input prev_valid, next_ready,
+  output valid_o, ready_o,
 
-  input exu_lsu_valid,
+  input lsu_valid,
 
   // for bus
   output [DATA_W-1:0] ifu_araddr_o,
@@ -24,47 +24,38 @@ module ysyx_IFU (
   parameter ADDR_W = 32;
   parameter DATA_W = 32;
 
-  reg [ADDR_W-1:0] araddr;
-  reg [DATA_W-1:0] inst, inst_ifu;
-  reg state, start = 0, valid;
+  reg [DATA_W-1:0] inst_ifu = 0;
+  reg state, valid;
   `ysyx_BUS_FSM()
   always @(posedge clk) begin
     if (rst) begin
-      valid <= 0; pvalid <= 1;
-      araddr <= `ysyx_PC_INIT;
+      valid <= 0; pvalid <= 1; inst_ifu <= 0;
     end
     else begin
-      if (ifu_rvalid) begin
-        inst_ifu <= ifu_rdata;
-      end
+      if (ifu_rvalid) begin inst_ifu <= ifu_rdata; end
       if (state == `ysyx_IDLE) begin
-        if (prev_valid) begin
-          pvalid <= prev_valid;
-          araddr <= npc;
-        end
+        if (prev_valid) begin pvalid <= prev_valid; end
         if (ifu_rvalid) begin valid <= 1; end
-      end
-      else if (state == `ysyx_WAIT_READY) begin
-        pvalid <= 0;
-        if (next_ready == 1) begin valid <= 0; end
+      end else if (state == `ysyx_WAIT_READY) begin
+        if (next_ready == 1) begin pvalid <= 0; valid <= 0; end
       end
     end
   end
   assign ready_o = !valid_o;
-  assign inst_o = inst;
 
   reg [19:0] lfsr = 1;
   wire ifsr_ready = `ysyx_IFSR_ENABLE ? lfsr[19] : 1;
   always @(posedge clk ) begin lfsr <= {lfsr[18:0], lfsr[19] ^ lfsr[18]}; end
-  reg arvalid, pvalid;
-  assign arvalid = ifsr_ready & (prev_valid & !exu_lsu_valid) ? 1 :pvalid;
+  wire arvalid;
+  reg pvalid;
+  assign arvalid = ifsr_ready & (prev_valid) ? !lsu_valid : (pvalid);
   wire arready, awready, rready, wready, bvalid;
   wire [1:0] rresp, bresp;
 
-  assign ifu_araddr_o = prev_valid ? npc : araddr;
+  assign ifu_araddr_o = prev_valid ? npc : pc;
   assign ifu_arvalid_o = arvalid;
   assign arready = ifu_arready;
-  assign inst = ifu_rvalid ? ifu_rdata : inst_ifu;
+  assign inst_o = ifu_rvalid ? ifu_rdata : inst_ifu;
   assign rresp = ifu_rresp;
   assign valid_o = ifu_rvalid | valid;
   assign ifu_rready_o = ifsr_ready;

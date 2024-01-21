@@ -4,8 +4,8 @@ module ysyx_BUS_ARBITER(
   input clk, rst,
 
   // ifu
-  input reg [DATA_W-1:0] ifu_araddr,
-  input reg ifu_arvalid,
+  input [DATA_W-1:0] ifu_araddr,
+  input ifu_arvalid,
   output ifu_arready_o,
 
   output [DATA_W-1:0] ifu_rdata_o,
@@ -14,8 +14,8 @@ module ysyx_BUS_ARBITER(
   input ifu_rready,
 
   // lsu:load
-  input reg [DATA_W-1:0] lsu_araddr,
-  input reg lsu_arvalid,
+  input [DATA_W-1:0] lsu_araddr,
+  input lsu_arvalid,
   output lsu_arready_o,
 
   output [DATA_W-1:0] lsu_rdata_o,
@@ -24,13 +24,13 @@ module ysyx_BUS_ARBITER(
   input lsu_rready,
 
   // lsu:store
-  input reg [DATA_W-1:0] lsu_awaddr,
-  input reg lsu_awvalid,
+  input [DATA_W-1:0] lsu_awaddr,
+  input lsu_awvalid,
   output lsu_awready_o,
 
-  input reg [DATA_W-1:0] lsu_wdata,
-  input reg [7:0] lsu_wstrb,
-  input reg lsu_wvalid,
+  input [DATA_W-1:0] lsu_wdata,
+  input [7:0] lsu_wstrb,
+  input lsu_wvalid,
   output lsu_wready_o,
 
   output [1:0] lsu_bresp_o,
@@ -39,120 +39,79 @@ module ysyx_BUS_ARBITER(
 );
   parameter ADDR_W = 32, DATA_W = 32;
 
-  reg [ADDR_W-1:0] araddr;
-  reg arvalid;
   wire arready_o;
   wire [DATA_W-1:0] rdata_o;
 
   wire [1:0] rresp_o;
   wire rvalid_o;
-  reg rready;
 
-  reg [ADDR_W-1:0] awaddr;
-  reg awvalid;
   wire awready_o;
 
-  reg [DATA_W-1:0] wdata;
-  reg [7:0] wstrb;
-  reg wvalid;
-  reg wready_o;
+  wire wready_o;
 
-  wire [1:0] bresp_o;
-  reg bvalid_o, bready;
+  wire [1:0] sram_bresp_o;
+  wire sram_bvalid_o;
 
-  // assign arvalid = ifu_arvalid | lsu_arvalid;
+  wire sram_arvalid = (ifu_arvalid | (lsu_arvalid & !clint_en));
 
-  always @(*) begin
-    araddr = 0; arvalid = 0;
-    ifu_arready_o = 0;
-    lsu_arready_o = 0;
+  // read
+  wire [ADDR_W-1:0] araddr = (ifu_arvalid) ? ifu_araddr : 
+                  (lsu_arvalid) ? lsu_araddr : 0;
+  wire rready = (ifu_arvalid) ? ifu_rready : 
+                  (lsu_arvalid) ? lsu_rready : 0;
 
-    ifu_rdata_o = 0; ifu_rresp_o = 0; ifu_rvalid_o = 0;
-    lsu_rdata_o = 0; lsu_rresp_o = 0; 
-    rready = 0; awaddr = 0; awvalid = 0; wvalid = 0;
-    lsu_awready_o = 0;
-    lsu_bresp_o = 0; lsu_bvalid_o = 0; bready = 0;
+  // ifu read
+  assign ifu_arready_o = (ifu_arvalid & (arready_o));
+  assign ifu_rdata_o = ({DATA_W{ifu_arvalid}} & (rdata_o));
+  assign ifu_rresp_o = ({2{ifu_arvalid}} & (rresp_o));
+  assign ifu_rvalid_o = (ifu_arvalid & (rvalid_o));
+  
+  // lsu read
+  wire clint_en = (lsu_araddr == `ysyx_BUS_RTC_ADDR) | (lsu_araddr == `ysyx_BUS_RTC_ADDR_UP);
+  assign lsu_arready_o = (lsu_arvalid & (clint_arready_o | lsu_arvalid));
+  assign lsu_rdata_o = ({DATA_W{lsu_arvalid}} & (
+    ({DATA_W{clint_en}} & clint_rdata_o) | 
+    ({DATA_W{!clint_en}} & rdata_o)
+  ));
+  assign lsu_rresp_o = clint_rresp_o | rresp_o;
 
-    lsu_wready_o = wready_o | uart_wready_o;
-    lsu_rvalid_o = rvalid_o | clint_rvalid_o;
-
-    wstrb = 0; wdata = 0;
-
-    clint_arvalid = 0;
-    uart_wvalid = 0;
-    if (ifu_arvalid) begin
-      arvalid = ifu_arvalid;
-      araddr = ifu_araddr;
-      ifu_arready_o = arready_o;
-
-      ifu_rdata_o = rdata_o;
-      ifu_rresp_o = rresp_o;
-      ifu_rvalid_o = rvalid_o;
-      rready = ifu_rready;
-    end else if (lsu_arvalid) begin
-      araddr = lsu_araddr; rready = lsu_rready;
-
-      case (lsu_araddr)
-        `ysyx_BUS_RTC_ADDR: begin
-          clint_arvalid = lsu_arvalid;
-          lsu_arready_o = clint_arready_o; lsu_rdata_o = clint_rdata_o; lsu_rresp_o = clint_rresp_o;
-        end
-        `ysyx_BUS_RTC_ADDR_UP: begin
-          clint_arvalid = lsu_arvalid;
-          lsu_arready_o = clint_arready_o; lsu_rdata_o = clint_rdata_o; lsu_rresp_o = clint_rresp_o;
-        end
-        `ysyx_BUS_FREQ_ADDR: begin
-          clint_arvalid = lsu_arvalid;
-          lsu_arready_o = clint_arready_o; lsu_rdata_o = clint_rdata_o; lsu_rresp_o = clint_rresp_o;
-        end
-        default: begin
-          arvalid = lsu_arvalid;
-
-          lsu_arready_o = arready_o;
-          lsu_rdata_o = rdata_o;
-          lsu_rresp_o = rresp_o;
-        end
-      endcase
-    end else if (lsu_awvalid) begin
-      awaddr = lsu_awaddr;
-
-      wdata = lsu_wdata;
-      wstrb = lsu_wstrb;
-      bready = lsu_bready;
-      uart_wvalid = 0;
-      wvalid = 0;
-      case (lsu_awaddr)
-        `ysyx_BUS_SERIAL_PORT: begin
-          lsu_awready_o = uart_awready_o;
-          uart_wvalid = lsu_wvalid;
-
-          lsu_bresp_o = uart_bresp_o;
-          lsu_bvalid_o = uart_bvalid_o;
-        end
-        default: begin
-          lsu_awready_o = awready_o;
-          wvalid = lsu_wvalid;
-
-          lsu_bresp_o = bresp_o;
-          lsu_bvalid_o = bvalid_o;
-        end
-      endcase
-    end
-  end
+  // lsu write
+  wire uart_en = (lsu_awaddr == `ysyx_BUS_SERIAL_PORT);
+  wire sram_en = (lsu_awaddr != `ysyx_BUS_SERIAL_PORT);
+  wire uart_wvalid = (lsu_awvalid & (uart_en));
+  wire sram_wvalid = (lsu_wvalid & (sram_en));
+  wire awvalid = sram_wvalid;
+  wire [ADDR_W-1:0] awaddr = lsu_awaddr;
+  wire [DATA_W-1:0] wdata = lsu_wdata;
+  wire [7:0] wstrb = lsu_wstrb;
+  wire bready = lsu_bready;
+  assign lsu_awready_o = (
+    (uart_en & uart_awready_o) | 
+    (sram_en & awready_o)
+  );
+  assign lsu_wready_o = wready_o | uart_wready_o;
+  assign lsu_rvalid_o = rvalid_o | clint_rvalid_o;
+  assign lsu_bvalid_o = (
+    (uart_en & uart_bvalid_o) | 
+    (sram_en & sram_bvalid_o)
+  );
+  assign lsu_bresp_o = (
+    ({2{uart_en}} & uart_bresp_o) | 
+    ({2{sram_en}} & sram_bresp_o)
+  );
 
   reg [19:0] lfsr = 1;
   wire ifsr_ready = `ysyx_IFSR_ENABLE ? lfsr[19] : 1;
   always @(posedge clk ) begin lfsr <= {lfsr[18:0], lfsr[19] ^ lfsr[18]}; end
-  ysyx_MEM_SRAM #(.ADDR_W(ADDR_W), .DATA_W(DATA_W)) ifu_sram(
+  ysyx_MEM_SRAM #(.ADDR_W(ADDR_W), .DATA_W(DATA_W)) sram(
     .clk(clk),
-    .araddr(araddr), .arvalid(arvalid), .arready_o(arready_o),
+    .araddr(araddr), .arvalid(sram_arvalid), .arready_o(arready_o),
     .rdata_o(rdata_o), .rresp_o(rresp_o), .rvalid_o(rvalid_o), .rready(rready),
     .awaddr(awaddr), .awvalid(awvalid), .awready_o(awready_o),
-    .wdata(wdata), .wstrb(wstrb), .wvalid(wvalid), .wready_o(wready_o),
-    .bresp_o(bresp_o), .bvalid_o(bvalid_o), .bready(bready)
+    .wdata(wdata), .wstrb(wstrb), .wvalid(sram_wvalid), .wready_o(wready_o),
+    .bresp_o(sram_bresp_o), .bvalid_o(sram_bvalid_o), .bready(bready)
   );
 
-  reg uart_wvalid;
   wire [DATA_W-1:0] uart_rdata_o;
   wire [1:0] uart_rresp_o, uart_bresp_o;
   wire uart_arready_o, uart_rvalid_o, uart_awready_o, uart_wready_o, uart_bvalid_o;
@@ -165,7 +124,7 @@ module ysyx_BUS_ARBITER(
     .bresp_o(uart_bresp_o), .bvalid_o(uart_bvalid_o), .bready(bready)
   );
 
-  reg clint_arvalid;
+  wire clint_arvalid = (lsu_arvalid & clint_en);
   wire clint_arready_o;
   wire [DATA_W-1:0] clint_rdata_o;
   wire [1:0] clint_rresp_o, clint_bresp_o;

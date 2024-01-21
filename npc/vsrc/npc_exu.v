@@ -8,8 +8,8 @@ module ysyx_EXU (
   output reg valid_o, ready_o,
 
   // for bus
-  output exu_lsu_valid_o,
-  output [BIT_W-1:0] exu_lsu_addr_data_o, exu_lsu_mem_wdata_o,
+  output lsu_avalid_o,
+  output [BIT_W-1:0] lsu_addr_data_o, lsu_mem_wdata_o,
   input [BIT_W-1:0] mem_rdata,
   input rvalid_wready,
 
@@ -26,10 +26,11 @@ module ysyx_EXU (
 
   wire [BIT_W-1:0] addr_data, reg_wdata, mepc, mtvec;
   wire [BIT_W-1:0] mem_wdata = op2;
-  // reg [BIT_W-1:0] mem_rdata;
-  reg [12-1:0]    csr_addr, csr_addr_add1;
-  reg [BIT_W-1:0] csr_wdata, csr_wdata_add1, csr_rdata;
-  reg csr_wen = 0, csr_ecallen = 0;
+  wire [12-1:0] csr_addr, csr_addr_add1;
+  wire [BIT_W-1:0] csr_wdata_add1, csr_rdata;
+  reg [BIT_W-1:0] csr_wdata;
+  reg csr_wen = 0;
+  reg csr_ecallen = 0;
 
   ysyx_CSR_Reg csr(
     .clk(clk), .rst(rst), .wen(csr_wen), .exu_valid(valid_o), .ecallen(csr_ecallen),
@@ -76,9 +77,9 @@ module ysyx_EXU (
     end
   end
 
-  assign exu_lsu_valid_o = lsu_avalid;
-  assign exu_lsu_addr_data_o = addr_data;
-  assign exu_lsu_mem_wdata_o = mem_wdata;
+  assign lsu_avalid_o = lsu_avalid;
+  assign lsu_addr_data_o = addr_data;
+  assign lsu_mem_wdata_o = mem_wdata;
 
   // alu unit for reg_wdata
   ysyx_ALU #(BIT_W) alu(
@@ -87,10 +88,21 @@ module ysyx_EXU (
     );
   
   // branch/system unit
+  assign csr_wdata_add1 = (
+    imm[3:0] == `ysyx_OP_SYSTEM_FUNC3 && imm[15:4] == `ysyx_OP_SYSTEM_ECALL) ? pc : 'h0;
+  assign csr_ecallen = ((opcode == `ysyx_OP_SYSTEM) && imm[3:0] == `ysyx_OP_SYSTEM_FUNC3 && imm[15:4] == `ysyx_OP_SYSTEM_ECALL);
+  assign csr_wen = (opcode == `ysyx_OP_SYSTEM) && (
+    ((imm[3:0] == `ysyx_OP_SYSTEM_FUNC3) && (imm[15:4] == `ysyx_OP_SYSTEM_ECALL)) |
+    ((imm[3:0] == `ysyx_OP_SYSTEM_FUNC3) && (imm[15:4] == `ysyx_OP_SYSTEM_MRET)) |
+    ((imm[3:0] == `ysyx_OP_SYSTEM_CSRRW)) |
+    ((imm[3:0] == `ysyx_OP_SYSTEM_CSRRS)) |
+    ((imm[3:0] == `ysyx_OP_SYSTEM_CSRRC)) |
+    ((imm[3:0] == `ysyx_OP_SYSTEM_CSRRWI)) |
+    ((imm[3:0] == `ysyx_OP_SYSTEM_CSRRSI)) |
+    ((imm[3:0] == `ysyx_OP_SYSTEM_CSRRCI)) 
+  );
   always @(*) begin
-    npc_wdata_o = pc + 4;
-    csr_wdata = 'h0; csr_wen = 0; csr_ecallen = 0;
-    csr_wdata_add1 = 'h0;
+    npc_wdata_o = pc + 4; csr_wdata = 'h0;
     case (opcode)
       `ysyx_OP_SYSTEM: begin
         // $display("sys imm: %h, op1: %h, csr_addr: %h, npc: %h, mtvec: %h",
@@ -98,26 +110,22 @@ module ysyx_EXU (
         case (imm[3:0])
           `ysyx_OP_SYSTEM_FUNC3: begin
             case (imm[15:4])
-              `ysyx_OP_SYSTEM_ECALL:  begin 
-                csr_wen = 1; csr_wdata = 'hb; csr_wdata_add1 = pc; 
-                npc_wdata_o = mtvec; csr_ecallen = 1;
-                end
+              `ysyx_OP_SYSTEM_ECALL:  begin  csr_wdata = 'hb; npc_wdata_o = mtvec; end
               `ysyx_OP_SYSTEM_EBREAK: begin npc_exu_ebreak(); end
               `ysyx_OP_SYSTEM_MRET:   begin 
-                csr_wen = 1; csr_wdata = csr_rdata;
+                csr_wdata = csr_rdata; npc_wdata_o = mepc;
                 csr_wdata[`ysyx_CSR_MSTATUS_MIE_IDX] = csr_rdata[`ysyx_CSR_MSTATUS_MPIE_IDX];
                 csr_wdata[`ysyx_CSR_MSTATUS_MPIE_IDX] = 1'b1;
-                npc_wdata_o = mepc;
                 end
               default: begin end
             endcase
           end
-          `ysyx_OP_SYSTEM_CSRRW:  begin csr_wen = 1; csr_wdata = op1; end
-          `ysyx_OP_SYSTEM_CSRRS:  begin csr_wen = 1; csr_wdata = csr_rdata | op1;   end
-          `ysyx_OP_SYSTEM_CSRRC:  begin csr_wen = 1; csr_wdata = csr_rdata & ~op1;  end
-          `ysyx_OP_SYSTEM_CSRRWI: begin csr_wen = 1; csr_wdata = op1; end
-          `ysyx_OP_SYSTEM_CSRRSI: begin csr_wen = 1; csr_wdata = csr_rdata | op1;   end
-          `ysyx_OP_SYSTEM_CSRRCI: begin csr_wen = 1; csr_wdata = csr_rdata & ~op1;  end
+          `ysyx_OP_SYSTEM_CSRRW:  begin csr_wdata = op1; end
+          `ysyx_OP_SYSTEM_CSRRS:  begin csr_wdata = csr_rdata | op1;   end
+          `ysyx_OP_SYSTEM_CSRRC:  begin csr_wdata = csr_rdata & ~op1;  end
+          `ysyx_OP_SYSTEM_CSRRWI: begin csr_wdata = op1; end
+          `ysyx_OP_SYSTEM_CSRRSI: begin csr_wdata = csr_rdata | op1;   end
+          `ysyx_OP_SYSTEM_CSRRCI: begin csr_wdata = csr_rdata & ~op1;  end
           default: begin ; end
         endcase
       end
