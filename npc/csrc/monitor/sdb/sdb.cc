@@ -70,10 +70,6 @@ void reset(Vtop *top, int n)
 void npc_abort()
 {
   contextp->gotFinish(true);
-  if (npc.state == NPC_ABORT)
-  {
-    return;
-  }
   npc.state = NPC_ABORT;
 }
 
@@ -92,7 +88,7 @@ void npc_difftest_skip_ref()
 extern "C" void npc_illegal_inst()
 {
   contextp->gotFinish(true);
-  printf("Illegal instruction at pc = " FMT_WORD_NO_PREFIX "\n", *npc.pc);
+  Error("Illegal instruction at pc = " FMT_WORD_NO_PREFIX, *npc.pc);
   npc_abort();
 }
 

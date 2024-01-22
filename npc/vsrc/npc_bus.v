@@ -54,6 +54,18 @@ module ysyx_BUS_ARBITER(
 
   wire sram_arvalid = (ifu_arvalid | (lsu_arvalid & !clint_en));
 
+  reg lsu_loading = 0;
+  always @(posedge clk) begin
+    if (rst) begin lsu_loading <= 0;
+    end else begin
+      if (lsu_arvalid & !lsu_loading) begin
+        lsu_loading <= 1;
+      end else if (lsu_rvalid_o & lsu_loading) begin
+        lsu_loading <= 0;
+      end
+    end
+  end
+
   // read
   wire [ADDR_W-1:0] araddr = (ifu_arvalid) ? ifu_araddr : 
                   (lsu_arvalid) ? lsu_araddr : 0;
@@ -61,10 +73,10 @@ module ysyx_BUS_ARBITER(
                   (lsu_arvalid) ? lsu_rready : 0;
 
   // ifu read
-  assign ifu_arready_o = (ifu_arvalid & (arready_o));
+  assign ifu_arready_o = !lsu_loading & (ifu_arvalid & (arready_o));
   assign ifu_rdata_o = ({DATA_W{ifu_arvalid}} & (rdata_o));
   assign ifu_rresp_o = ({2{ifu_arvalid}} & (rresp_o));
-  assign ifu_rvalid_o = (ifu_arvalid & (rvalid_o));
+  assign ifu_rvalid_o = !lsu_loading & (ifu_arvalid & (rvalid_o));
   
   // lsu read
   wire clint_en = (lsu_araddr == `ysyx_BUS_RTC_ADDR) | (lsu_araddr == `ysyx_BUS_RTC_ADDR_UP);

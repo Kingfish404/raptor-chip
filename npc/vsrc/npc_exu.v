@@ -13,14 +13,18 @@ module ysyx_EXU (
   input [BIT_W-1:0] mem_rdata,
   input rvalid_wready,
 
-  input ren, wen,
+  input ren, wen, rwen,
+  input [4:0] rd,
   input [BIT_W-1:0] imm,
   input [BIT_W-1:0] op1, op2, op_j, rwaddr,
   input [3:0] alu_op,
   input [6:0] opcode,
   input [BIT_W-1:0] pc,
   output reg [BIT_W-1:0] reg_wdata_o, npc_wdata_o,
-  output reg wben_o, ebreak_o
+  output reg [4:0] rd_o,
+  output [3:0] alu_op_o,
+  output reg rwen_o, wben_o, ebreak_o,
+  output reg ren_o, wen_o
 );
   parameter BIT_W = `ysyx_W_WIDTH;
 
@@ -53,6 +57,7 @@ module ysyx_EXU (
     (imm_exu[3:0] == `ysyx_OP_SYSTEM_FUNC3) && imm_exu[15:4] == `ysyx_OP_SYSTEM_ECALL ? `ysyx_CSR_MEPC :
     (0));
   assign addr_data = addr_exu;
+  assign alu_op_o = alu_op_exu;
 
   reg state, alu_valid, lsu_avalid;
   reg valid_once;
@@ -70,7 +75,9 @@ module ysyx_EXU (
           imm_exu <= imm; pc_exu <= pc;
           src1 <= op1; src2 <= op2;
           alu_op_exu <= alu_op; opcode_exu <= opcode;
-          addr_exu <= op_j + imm;
+          addr_exu <= op_j + imm; 
+          rd_o <= rd; rwen_o <= rwen;
+          ren_o <= ren; wen_o <= wen;
         end
         alu_valid <= 1;
         if (wen | ren) begin lsu_avalid <= 1; end

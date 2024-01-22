@@ -4,6 +4,7 @@ module ysyx_LSU(
   input clk,
   input ren, wen, avalid,
   input [3:0] alu_op,
+  input idu_valid,
   input [ADDR_W-1:0] addr,
   input [DATA_W-1:0] wdata,
 
@@ -49,8 +50,15 @@ module ysyx_LSU(
     end
   end
 
-  assign lsu_araddr_o = addr;
-  assign lsu_arvalid_o = ifsr_ready & ren;
+  reg [ADDR_W-1:0] lsu_araddr;
+  always @(posedge clk) begin
+    if (idu_valid) begin
+      lsu_araddr <= addr;
+    end
+  end
+
+  assign lsu_araddr_o = idu_valid ? addr : lsu_araddr;
+  assign lsu_arvalid_o = ifsr_ready & ren & avalid;
   assign arready = lsu_arready;
 
   assign rdata = lsu_rdata;
@@ -58,13 +66,13 @@ module ysyx_LSU(
   assign rvalid = lsu_rvalid;
   assign lsu_rready_o = ifsr_ready;
 
-  assign lsu_awaddr_o = addr;
-  assign lsu_awvalid_o = ifsr_ready & wen;
+  assign lsu_awaddr_o = idu_valid ? addr : lsu_araddr;
+  assign lsu_awvalid_o = ifsr_ready & wen & avalid;
   assign awready = lsu_awready;
 
   assign lsu_wdata_o = wdata;
   assign lsu_wstrb_o = wstrb;
-  assign lsu_wvalid_o = ifsr_ready & wen;
+  assign lsu_wvalid_o = ifsr_ready & wen & avalid;
   assign wready = lsu_wready;
 
   assign bresp = lsu_bresp;
