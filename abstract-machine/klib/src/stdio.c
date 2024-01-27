@@ -31,6 +31,29 @@ int vsprintf(char *out, const char *fmt, va_list ap)
     case '%':
       switch (fmt[++i])
       {
+      case 'u':
+      {
+        uint32_t d = va_arg(ap, int);
+        char *s_p = pout;
+        do
+        {
+          int td = d % 10;
+          *pout = '0' + (td >= 0 ? td : -td);
+          pout++;
+          buf_count++;
+          d /= 10;
+        } while (d != 0);
+        char *e_p = pout - 1;
+        while (s_p < e_p)
+        {
+          char tmp = *s_p;
+          *s_p = *e_p;
+          *e_p = tmp;
+          s_p++;
+          e_p--;
+        }
+        break;
+      }
       case 'd':
       {
         int d = va_arg(ap, int);
@@ -60,6 +83,7 @@ int vsprintf(char *out, const char *fmt, va_list ap)
         }
       }
       break;
+      case 'p':
       case 'x':
       {
         uint32_t d = va_arg(ap, uint32_t);

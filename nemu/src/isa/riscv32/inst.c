@@ -46,7 +46,7 @@ char elfbuf[MAX_ELF_SIZE];
 typedef MUXDEF(CONFIG_ISA64, Elf64_Ehdr, Elf32_Ehdr) Elf_Ehdr;
 typedef MUXDEF(CONFIG_ISA64, Elf64_Shdr, Elf32_Shdr) Elf_Shdr;
 typedef MUXDEF(CONFIG_ISA64, Elf64_Sym, Elf32_Sym) Elf_Sym;
-Elf_Ehdr elfhdr;
+Elf_Ehdr elf_ehdr;
 Elf_Shdr *elfshdr_symtab = NULL, *elfshdr_strtab = NULL;
 
 enum {
@@ -266,9 +266,9 @@ void isa_parser_elf(char *filename) {
   Assert(size < MAX_ELF_SIZE, "elf file is too large");
 
   fseek(fp, 0, SEEK_SET);
-  int ret = fread(&elfhdr, sizeof(elfhdr), 1, fp);
+  int ret = fread(&elf_ehdr, sizeof(elf_ehdr), 1, fp);
   assert(ret == 1);
-  assert(memcmp(elfhdr.e_ident, ELFMAG, SELFMAG) == 0);
+  assert(memcmp(elf_ehdr.e_ident, ELFMAG, SELFMAG) == 0);
   fseek(fp, 0, SEEK_SET);
   ret = fread(elfbuf, size, 1, fp);
   assert(ret == 1);
@@ -276,25 +276,25 @@ void isa_parser_elf(char *filename) {
 
   printf("e_ident: ");
   for (size_t i = 0; i < SELFMAG; i++) {
-    printf("%02x ", elfhdr.e_ident[i]);
+    printf("%02x ", elf_ehdr.e_ident[i]);
   }
   printf("\n");
-  printf("e_type: %d\t", elfhdr.e_type);
-  printf("e_machine: %d\t", elfhdr.e_machine);
-  printf("e_version: %d\n", elfhdr.e_version);
-  printf("e_entry: " FMT_WORD "\t", elfhdr.e_entry);
-  printf("e_phoff: " FMT_WORD "\n", elfhdr.e_phoff);
-  printf("e_shoff: " FMT_WORD "\t", elfhdr.e_shoff);
-  printf("e_flags: 0x%016x\n", elfhdr.e_flags);
-  printf("e_ehsize: %d\t", elfhdr.e_ehsize);
-  printf("e_phentsize: %d\t", elfhdr.e_phentsize);
-  printf("e_phnum: %d\n", elfhdr.e_phnum);
-  printf("e_shentsize: %d\t", elfhdr.e_shentsize);
-  printf("e_shnum: %d\t", elfhdr.e_shnum);
-  printf("e_shstrndx: %d\n", elfhdr.e_shstrndx);
+  printf("e_type: %d\t", elf_ehdr.e_type);
+  printf("e_machine: %d\t", elf_ehdr.e_machine);
+  printf("e_version: %d\n", elf_ehdr.e_version);
+  printf("e_entry: " FMT_WORD "\t", elf_ehdr.e_entry);
+  printf("e_phoff: " FMT_WORD "\n", elf_ehdr.e_phoff);
+  printf("e_shoff: " FMT_WORD "\t", elf_ehdr.e_shoff);
+  printf("e_flags: 0x%016x\n", elf_ehdr.e_flags);
+  printf("e_ehsize: %d\t", elf_ehdr.e_ehsize);
+  printf("e_phentsize: %d\t", elf_ehdr.e_phentsize);
+  printf("e_phnum: %d\n", elf_ehdr.e_phnum);
+  printf("e_shentsize: %d\t", elf_ehdr.e_shentsize);
+  printf("e_shnum: %d\t", elf_ehdr.e_shnum);
+  printf("e_shstrndx: %d\n", elf_ehdr.e_shstrndx);
 
-  for (size_t i = 0; i < elfhdr.e_shnum; i++) {
-    Elf_Shdr *shdr = (Elf_Shdr *)(elfbuf + elfhdr.e_shoff + i * elfhdr.e_shentsize);
+  for (size_t i = 0; i < elf_ehdr.e_shnum; i++) {
+    Elf_Shdr *shdr = (Elf_Shdr *)(elfbuf + elf_ehdr.e_shoff + i * elf_ehdr.e_shentsize);
     if (shdr->sh_type == SHT_SYMTAB) {
       elfshdr_symtab = shdr;
     } else if (shdr->sh_type == SHT_STRTAB) {

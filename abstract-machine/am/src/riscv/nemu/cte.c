@@ -11,7 +11,11 @@ Context* __am_irq_handle(Context *c) {
       case 0xbul:
       case 0x0ul: 
         c->mepc +=4;
-        ev.event = EVENT_YIELD;
+        if (c->GPR1 == -1) {
+          ev.event = EVENT_YIELD;
+        } else {
+          ev.event = EVENT_SYSCALL;
+        }
         break;
       case 0x3ul: 
         ev.event = EVENT_IRQ_TIMER; 
