@@ -97,8 +97,12 @@ size_t fs_read(int fd, void *buf, size_t len)
 {
   assert(fd >= 0 && fd < sizeof(file_table) / sizeof(file_table[0]));
   Finfo *f = &file_table[fd];
-  int ret = f->read(buf, f->disk_offset + f->open_offset, len);
-  f->open_offset += len;
+  size_t usable_len = len;
+  if (f->size != 0) {
+    usable_len = f->open_offset + len <= f->size ? len : f->size - f->open_offset;
+  }
+  int ret = f->read(buf, f->disk_offset + f->open_offset, usable_len);
+  f->open_offset += ret;
   return ret;
 }
 
@@ -106,9 +110,13 @@ size_t fs_write(int fd, const void *buf, size_t len)
 {
   assert(fd >= 0 && fd < sizeof(file_table) / sizeof(file_table[0]));
   Finfo *f = &file_table[fd];
-  f->write(buf, f->disk_offset + f->open_offset, len);
-  f->open_offset += len;
-  return len;
+  size_t usable_len = len;
+  if (f->size != 0) {
+    usable_len = f->open_offset + len <= f->size ? len : f->size - f->open_offset;
+  }
+  int ret = f->write(buf, f->disk_offset + f->open_offset, usable_len);
+  f->open_offset += ret;
+  return ret;
 }
 
 size_t fs_lseek(int fd, size_t offset, int whence)

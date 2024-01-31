@@ -1,7 +1,7 @@
 ifeq ($(ISA), native)
 build/native.so: src/native.cpp
 	mkdir -p build/
-	g++ -std=c++11 -O1 -fPIC -shared -o build/native.so src/native.cpp -ldl -lSDL2
+	g++ $(shell sdl2-config --cflags) -std=c++11 -O1 -fPIC -shared -o build/native.so src/native.cpp -ldl $(shell sdl2-config --cflags)
 
 else
 NAME = libos

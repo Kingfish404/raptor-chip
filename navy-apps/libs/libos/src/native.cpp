@@ -11,7 +11,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-#include <SDL2/SDL.h>
+#include <SDL.h>
 #include <sys/mman.h>
 #include <sys/ioctl.h>
 
@@ -43,6 +43,14 @@ static int sb_fifo[2] = {-1, -1};
 static int sbctl_fd = -1;
 static uint32_t *fb = NULL;
 static char fsimg_path[512] = "";
+
+int memfd_create(const char *name, int size) {
+  int fd = shm_open(name, O_RDWR | O_CREAT, 0777);
+  assert(fd != -1);
+  int ret = ftruncate(fd, size);
+  assert(ret == 0);
+  return fd;
+}
 
 static inline void get_fsimg_path(char *newpath, const char *path) {
   sprintf(newpath, "%s%s", fsimg_path, path);

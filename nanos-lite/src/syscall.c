@@ -1,7 +1,10 @@
 #include <common.h>
 #include <fs.h>
+#include <proc.h>
 #include <sys/time.h>
 #include "syscall.h"
+
+void naive_uload(PCB *pcb, const char *filename);
 
 // #define CONFIG_STRACE
 
@@ -13,7 +16,8 @@ void sys_yield(Context *c)
 
 void sys_exit(Context *c)
 {
-  halt(c->GPR1);
+  naive_uload(NULL, "/bin/nterm");
+  c->GPRx = 0;
 }
 
 void sys_open(Context *c)
@@ -56,6 +60,13 @@ void sys_gettimeofday(Context *c)
   size_t time = io_read(AM_TIMER_UPTIME).us;
   tv->tv_usec = (size_t)((size_t)time % 1000000);
   tv->tv_sec = (size_t)((size_t)time / 1000000);
+  c->GPRx = 0;
+}
+
+void sys_execve(Context *c)
+{
+  const char *fname = (const char *)c->GPR2;
+  naive_uload(NULL, fname);
   c->GPRx = 0;
 }
 
@@ -106,6 +117,9 @@ void do_syscall(Context *c)
     break;
   case SYS_gettimeofday:
     sys_gettimeofday(c);
+    break;
+  case SYS_execve:
+    sys_execve(c);
     break;
   default:
     panic("Unhandled syscall ID = %d", a[0]);
