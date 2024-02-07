@@ -82,14 +82,6 @@ module ysyx_LSU(
   wire rvalid, wvalid;
   wire arready, awready, wready, bvalid;
   wire [1:0] rresp, bresp;
-  // ysyx_MEM_SRAM lsu_sram(
-  //   .clk(clk), 
-  //   .araddr(addr), .arvalid(ifsr_ready & ren & avalid), .arready_o(arready),
-  //   .rdata_o(rdata), .rresp_o(rresp), .rvalid_o(rvalid), .rready(ifsr_ready),
-  //   .awaddr(addr), .awvalid(ifsr_ready & wen & avalid), .awready_o(awready),
-  //   .wdata(wdata), .wstrb(wstrb), .wvalid(ifsr_ready & wen & avalid), .wready_o(wready),
-  //   .bresp_o(bresp), .bvalid_o(bvalid), .bready(ifsr_ready)
-  //   );
 
   // load/store unit
   assign wstrb = (

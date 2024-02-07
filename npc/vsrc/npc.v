@@ -1,7 +1,7 @@
 `include "npc_macro.v"
 
 module top (
-  input clock, reset,
+  input clock, reset, io_interrupt,
   output ebreak
 );
   parameter BIT_W = `ysyx_W_WIDTH;

@@ -61,13 +61,4 @@ module ysyx_IFU (
   assign rresp = ifu_rresp;
   assign valid_o = ifu_rvalid | valid;
   assign ifu_rready_o = ifsr_ready;
-
-  // ysyx_MEM_SRAM #(.ADDR_W(ADDR_W), .DATA_W(DATA_W)) ifu_sram(
-  //   .clk(clk),
-  //   .araddr(prev_valid ? npc : araddr), .arvalid(arvalid), .arready_o(arready),
-  //   .rdata_o(inst_o), .rresp_o(rresp), .rvalid_o(valid_o), .rready(ifsr_ready),
-  //   .awaddr(0), .awvalid(0), .awready_o(awready),
-  //   .wdata(0), .wstrb(0), .wvalid(0), .wready_o(wready),
-  //   .bresp_o(bresp), .bvalid_o(bvalid), .bready(0)
-  // );
 endmodule // ysyx_IFU

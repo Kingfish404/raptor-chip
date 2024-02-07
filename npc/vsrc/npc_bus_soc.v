@@ -2,26 +2,38 @@
 
 // Universal Asynchronous Receiver-Transmitter
 module ysyx_UART(
-    input clk,
+  input clk,
 
+  input [1:0] arburst,
+  input [2:0] arsize,
+  input [7:0] arlen,
+  input [3:0] arid,
   input [ADDR_W-1:0] araddr,
   input arvalid,
   output reg arready_o,
 
+  output reg [3:0] rid,
+  output reg rlast_o,
   output reg [DATA_W-1:0] rdata_o,
   output reg [1:0] rresp_o,
   output reg rvalid_o,
   input rready,
 
+  input [1:0] awburst,
+  input [2:0] awsize,
+  input [7:0] awlen,
+  input [3:0] awid,
   input [ADDR_W-1:0] awaddr,
   input awvalid,
   output reg awready_o,
 
+  input [7:0] wlast,
   input [DATA_W-1:0] wdata,
   input [7:0] wstrb,
   input wvalid,
   output reg wready_o,
 
+  output reg [3:0] bid,
   output reg [1:0] bresp_o,
   output reg bvalid_o,
   input bready
@@ -55,24 +67,36 @@ endmodule //ysyx_UART
 module ysyx_CLINT(
   input clk, rst,
 
+  input [1:0] arburst,
+  input [2:0] arsize,
+  input [7:0] arlen,
+  input [3:0] arid,
   input [ADDR_W-1:0] araddr,
   input arvalid,
   output reg arready_o,
 
+  output reg [3:0] rid,
+  output reg rlast_o,
   output reg [DATA_W-1:0] rdata_o,
   output reg [1:0] rresp_o,
   output reg rvalid_o,
   input rready,
 
+  input [1:0] awburst,
+  input [2:0] awsize,
+  input [7:0] awlen,
+  input [3:0] awid,
   input [ADDR_W-1:0] awaddr,
   input awvalid,
   output reg awready_o,
 
+  input [7:0] wlast,
   input [DATA_W-1:0] wdata,
   input [7:0] wstrb,
   input wvalid,
   output reg wready_o,
 
+  output reg [3:0] bid,
   output reg [1:0] bresp_o,
   output reg bvalid_o,
   input bready
@@ -108,24 +132,36 @@ endmodule //ysyx_CLINT
 module ysyx_MEM_SRAM(
   input clk,
 
+  input [1:0] arburst,
+  input [2:0] arsize,
+  input [7:0] arlen,
+  input [3:0] arid,
   input [ADDR_W-1:0] araddr,
   input arvalid,
   output reg arready_o,
 
+  output reg [3:0] rid,
+  output reg rlast_o,
   output reg [DATA_W-1:0] rdata_o,
   output reg [1:0] rresp_o,
   output reg rvalid_o,
   input rready,
 
+  input [1:0] awburst,
+  input [2:0] awsize,
+  input [7:0] awlen,
+  input [3:0] awid,
   input [ADDR_W-1:0] awaddr,
   input awvalid,
   output reg awready_o,
 
+  input [7:0] wlast,
   input [DATA_W-1:0] wdata,
   input [7:0] wstrb,
   input wvalid,
   output reg wready_o,
 
+  output reg [3:0] bid,
   output reg [1:0] bresp_o,
   output reg bvalid_o,
   input bready
