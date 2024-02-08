@@ -28,8 +28,8 @@ include $(FILELIST_MK)
 
 $(shell mkdir -p $(BUILD_DIR))
 
-VSRCS = $(shell find $(abspath ./vsrc) -name "*.v")
-	# $(shell find $(abspath $(SOC_HOME)/perip) -name "*.v")
+VSRCS = $(shell find $(abspath ./vsrc) -name "*.v") \
+	$(shell find $(abspath $(SOC_HOME)/perip) -name "*.v")
 CSRCS = $(shell find $(abspath ./csrc) -name "*.c" -or -name "*.cc" -or -name "*.cpp")
 
 all: $(BIN)
