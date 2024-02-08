@@ -41,12 +41,8 @@ module ysyx_BUS_ARBITER(
   // ifu
   input [DATA_W-1:0] ifu_araddr,
   input ifu_arvalid,
-  output ifu_arready_o,
-
   output [DATA_W-1:0] ifu_rdata_o,
-  output [1:0] ifu_rresp_o,
   output ifu_rvalid_o,
-  input ifu_rready,
 
   // lsu:load
   input [DATA_W-1:0] lsu_araddr,

@@ -9,12 +9,8 @@ module ysyx_IFU (
   // for bus
   output [DATA_W-1:0] ifu_araddr_o,
   output ifu_arvalid_o,
-  input ifu_arready,
-
   input [DATA_W-1:0] ifu_rdata,
-  input [1:0] ifu_rresp,
   input ifu_rvalid,
-  output ifu_rready_o,
 
   input [ADDR_W-1:0] pc, npc,
   output [DATA_W-1:0] inst_o,

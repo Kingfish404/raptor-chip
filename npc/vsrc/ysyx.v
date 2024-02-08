@@ -89,12 +89,9 @@ module ysyx (
   wire [BIT_W-1:0] pc_ifu;
   // IFU bus wire
   wire [BIT_W-1:0] ifu_araddr_o;
-  wire ifu_arvalid_o, ifu_rready_o;
-  wire [1:0] ifu_rresp;
-  wire ifu_arready, ifu_rvalid;
+  wire ifu_arvalid_o;
   wire [BIT_W-1:0] ifu_rdata;
-  wire lsu_arready, lsu_rvalid, lsu_awready, lsu_bvalid;
-  wire [1:0] lsu_rresp, lsu_bresp;
+  wire ifu_rvalid;
 
   // IDU output
   wire [BIT_W-1:0] op1, op2, imm, op_j, pc_idu, rwaddr;
@@ -127,6 +124,7 @@ module ysyx (
   wire [BIT_W-1:0] bus_lsu_rdata;
   wire lsu_avalid;
   wire [BIT_W-1:0] lsu_mem_wdata;
+  wire lsu_rvalid;
   wire lsu_wready;
 
   ysyx_PC pc_unit(
@@ -167,11 +165,8 @@ module ysyx (
     .io_master_bid(io_master_bid), .io_master_bresp(io_master_bresp), .io_master_bvalid(io_master_bvalid),
     .io_master_bready(io_master_bready),
 
-    .ifu_araddr(ifu_araddr_o),
-    .ifu_arvalid(ifu_arvalid_o), .ifu_rready(ifu_rready_o),
-    .ifu_rresp_o(ifu_rresp),
-    .ifu_arready_o(ifu_arready), .ifu_rvalid_o(ifu_rvalid),
-    .ifu_rdata_o(ifu_rdata),
+    .ifu_araddr(ifu_araddr_o), .ifu_arvalid(ifu_arvalid_o),
+    .ifu_rdata_o(ifu_rdata), .ifu_rvalid_o(ifu_rvalid),
 
     .lsu_araddr(lsu_araddr), .lsu_arvalid(lsu_arvalid),
     .lsu_rdata_o(bus_lsu_rdata), .lsu_rvalid_o(lsu_rvalid),
@@ -189,10 +184,9 @@ module ysyx (
     .valid_o(ifu_valid), .ready_o(ifu_ready),
 
     .ifu_araddr_o(ifu_araddr_o),
-    .ifu_arvalid_o(ifu_arvalid_o), .ifu_rready_o(ifu_rready_o),
-    .ifu_rresp(ifu_rresp),
-    .ifu_arready(ifu_arready), .ifu_rvalid(ifu_rvalid),
+    .ifu_arvalid_o(ifu_arvalid_o),
     .ifu_rdata(ifu_rdata),
+    .ifu_rvalid(ifu_rvalid),
 
     .pc(pc), .npc(npc_wdata),
     .inst_o(inst), .pc_o(pc_ifu)
