@@ -150,19 +150,30 @@ module ysyx_BUS_ARBITER(
   reg [19:0] lfsr = 1;
   wire ifsr_ready = `ysyx_IFSR_ENABLE ? lfsr[19] : 1;
   always @(posedge clk ) begin lfsr <= {lfsr[18:0], lfsr[19] ^ lfsr[18]}; end
-  ysyx_MEM_SRAM #(.ADDR_W(ADDR_W), .DATA_W(DATA_W)) sram(
-    .clk(clk),
-    .arburst(2'b00), .arsize(3'b000), .arlen(8'b00000000), .arid(4'b0000),
-    .araddr(araddr), .arvalid(sram_arvalid), .arready_o(arready_o),
-    .rid(), .rlast_o(),
-    .rdata_o(rdata_o), .rresp_o(rresp_o), .rvalid_o(rvalid_o), .rready(rready),
-    .awburst(2'b00), .awsize(3'b000), .awlen(8'b00000000), .awid(4'b0000),
-    .awaddr(awaddr), .awvalid(awvalid), .awready_o(awready_o),
-    .wlast(1'b0),
-    .wdata(wdata), .wstrb(wstrb), .wvalid(sram_wvalid), .wready_o(wready_o),
-    .bid(),
-    .bresp_o(sram_bresp_o), .bvalid_o(sram_bvalid_o), .bready(bready)
-  );
+
+  assign io_master_araddr = araddr;
+  assign io_master_arvalid = sram_arvalid;
+  assign arready_o = io_master_arready;
+
+  assign rdata_o = io_master_rdata;
+  assign rresp_o = io_master_rresp;
+  assign rvalid_o = io_master_rvalid;
+  assign io_master_rready = rready;
+
+
+  // ysyx_MEM_SRAM #(.ADDR_W(ADDR_W), .DATA_W(DATA_W)) sram(
+  //   .clk(clk),
+  //   .arburst(2'b00), .arsize(3'b000), .arlen(8'b00000000), .arid(4'b0000),
+  //   .araddr(araddr), .arvalid(sram_arvalid), .arready_o(arready_o),
+  //   .rid(), .rlast_o(),
+  //   .rdata_o(rdata_o), .rresp_o(rresp_o), .rvalid_o(rvalid_o), .rready(rready),
+  //   .awburst(2'b00), .awsize(3'b000), .awlen(8'b00000000), .awid(4'b0000),
+  //   .awaddr(awaddr), .awvalid(awvalid), .awready_o(awready_o),
+  //   .wlast(1'b0),
+  //   .wdata(wdata), .wstrb(wstrb), .wvalid(sram_wvalid), .wready_o(wready_o),
+  //   .bid(),
+  //   .bresp_o(sram_bresp_o), .bvalid_o(sram_bvalid_o), .bready(bready)
+  // );
 
   wire [DATA_W-1:0] uart_rdata_o;
   wire [1:0] uart_rresp_o, uart_bresp_o;
