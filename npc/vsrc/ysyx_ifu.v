@@ -45,12 +45,11 @@ module ysyx_IFU (
   wire arvalid;
   reg pvalid;
   assign arvalid = pvalid;
-  wire arready, awready, rready, wready, bvalid;
+  wire awready, rready, wready, bvalid;
   wire [1:0] rresp, bresp;
 
   assign ifu_araddr_o = prev_valid ? npc : pc;
   assign ifu_arvalid_o = arvalid;
-  assign arready = ifu_arready;
   assign inst_o = ifu_rvalid ? ifu_rdata : inst_ifu;
   assign rresp = ifu_rresp;
   assign valid_o = ifu_rvalid | valid;
