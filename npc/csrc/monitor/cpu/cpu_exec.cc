@@ -31,7 +31,7 @@ static void statistic()
   Log(FMT_BLUE(
           "nr_inst = " FMT_WORD_NO_PREFIX ", time = " FMT_WORD_NO_PREFIX " (ns)"),
       g_nr_guest_inst, g_timer);
-  Log(FMT_BLUE("Cycle = 0x" FMT_WORD_NO_PREFIX), g_nr_guest_cycle);
+  Log(FMT_BLUE("Cycle = %lu"), g_nr_guest_cycle);
   Log(FMT_BLUE("Freq = %.3f Hz"), frequency);
   Log(FMT_BLUE("Inst = %.3f inst/s"), g_nr_guest_inst / time_s);
   Log("%s at pc = " FMT_WORD_NO_PREFIX ", inst: " FMT_WORD_NO_PREFIX,
