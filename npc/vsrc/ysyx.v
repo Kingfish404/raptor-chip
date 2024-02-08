@@ -106,12 +106,15 @@ module ysyx (
   wire idu_valid, idu_ready;
 
   // LSU output
-  wire [BIT_W-1:0] lsu_mem_rdata;
-  wire [BIT_W-1:0] lsu_araddr, lsu_wdata, lsu_awaddr;
-  wire lsu_arvalid, lsu_wready;
-  wire [7:0] lsu_wstrb;
-  wire lsu_rready, lsu_awvalid, lsu_wvalid, lsu_bready;
+  wire [BIT_W-1:0] lsu_rdata;
   wire lsu_exu_rvalid, lsu_exu_wready;
+  wire [BIT_W-1:0] lsu_araddr;
+  wire lsu_arvalid;
+  wire [BIT_W-1:0] lsu_awaddr;
+  wire lsu_awvalid;
+  wire [BIT_W-1:0] lsu_wdata;
+  wire [7:0] lsu_wstrb;
+  wire lsu_wvalid;
 
   // EXU output
   wire [BIT_W-1:0] reg_wdata;
@@ -120,9 +123,11 @@ module ysyx (
   wire exu_valid, exu_ready;
   wire [3:0] alu_op_exu;
   wire rwen_exu, wben, ren_exu, wen_exu;
-  // EXU bus wire
+
+  // BUS output
   wire lsu_avalid;
   wire [BIT_W-1:0] lsu_mem_wdata;
+  wire lsu_wready;
 
   ysyx_PC pc_unit(
     .clk(clock), .rst(reset), 
@@ -168,11 +173,12 @@ module ysyx (
     .ifu_arready_o(ifu_arready), .ifu_rvalid_o(ifu_rvalid),
     .ifu_rdata_o(ifu_rdata),
 
-    .lsu_araddr(lsu_araddr), .lsu_arvalid(lsu_arvalid), .lsu_arready_o(lsu_arready),
-    .lsu_rdata_o(lsu_rdata), .lsu_rresp_o(lsu_rresp), .lsu_rvalid_o(lsu_rvalid), .lsu_rready(lsu_rready),
-    .lsu_awaddr(lsu_awaddr), .lsu_awvalid(lsu_awvalid), .lsu_awready_o(lsu_awready),
-    .lsu_wdata(lsu_wdata), .lsu_wstrb(lsu_wstrb), .lsu_wvalid(lsu_wvalid), .lsu_wready_o(lsu_wready),
-    .lsu_bresp_o(lsu_bresp), .lsu_bvalid_o(lsu_bvalid), .lsu_bready(lsu_bready)
+    .lsu_araddr(lsu_araddr), .lsu_arvalid(lsu_arvalid),
+    .lsu_rdata_o(lsu_rdata), .lsu_rvalid_o(lsu_rvalid),
+  
+    .lsu_awaddr(lsu_awaddr), .lsu_awvalid(lsu_awvalid),
+    .lsu_wdata(lsu_wdata), .lsu_wstrb(lsu_wstrb), .lsu_wvalid(lsu_wvalid),
+    .lsu_wready_o(lsu_wready),
   );
 
   // IFU(Instruction Fetch Unit): 负责根据当前PC从存储器中取出一条指令
@@ -234,7 +240,7 @@ module ysyx (
     .lsu_mem_wdata_o(lsu_mem_wdata),
 
     // from lsu
-    .mem_rdata(lsu_mem_rdata),
+    .mem_rdata(lsu_rdata),
     .lsu_exu_rvalid(lsu_exu_rvalid), .lsu_exu_wready(lsu_exu_wready)
     );
 
@@ -246,19 +252,17 @@ module ysyx (
     .addr(rwaddr),
     .ren(ren_exu), .wen(wen_exu), .avalid(lsu_avalid), .alu_op(alu_op_exu),
     .wdata(lsu_mem_wdata),
-
     // to exu
-    .rdata_o(lsu_mem_rdata),
-    .rvalid_o(lsu_exu_rvalid), .wready_o(lsu_exu_wready),
+    .rdata_o(lsu_rdata), .rvalid_o(lsu_exu_rvalid), .wready_o(lsu_exu_wready),
 
-    // to-from bus
-    .lsu_araddr_o(lsu_araddr), .lsu_arvalid_o(lsu_arvalid), .lsu_arready(lsu_arready),
-    .lsu_rdata(lsu_rdata), .lsu_rresp(lsu_rresp), .lsu_rvalid(lsu_rvalid), .lsu_rready_o(lsu_rready),
+    // to-from bus load
+    .lsu_araddr_o(lsu_araddr), .lsu_arvalid_o(lsu_arvalid),
+    .lsu_rdata(lsu_rdata), .lsu_rvalid(lsu_rvalid),
 
-    .lsu_awaddr_o(lsu_awaddr), .lsu_awvalid_o(lsu_awvalid), .lsu_awready(lsu_awready),
-    .lsu_wdata_o(lsu_wdata), .lsu_wstrb_o(lsu_wstrb), .lsu_wvalid_o(lsu_wvalid), .lsu_wready(lsu_wready),
-
-    .lsu_bresp(lsu_bresp), .lsu_bvalid(lsu_bvalid), .lsu_bready_o(lsu_bready)
+    // to-from bus store
+    .lsu_awaddr_o(lsu_awaddr), .lsu_awvalid_o(lsu_awvalid),
+    .lsu_wdata_o(lsu_wdata), .lsu_wstrb_o(lsu_wstrb), .lsu_wvalid_o(lsu_wvalid),
+    .lsu_wready(lsu_wready),
   );
 
 endmodule // top

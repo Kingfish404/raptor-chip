@@ -2,45 +2,38 @@
 
 module ysyx_LSU(
   input clk,
+  input idu_valid,
+  // from exu
+  input [ADDR_W-1:0] addr,
   input ren, wen, avalid,
   input [3:0] alu_op,
-  input idu_valid,
-  input [ADDR_W-1:0] addr,
   input [DATA_W-1:0] wdata,
+  // to exu
+  output [DATA_W-1:0] rdata_o,
+  output reg rvalid_o,
+  output reg wready_o,
 
-  // for bus load
+  // to bus load
   output [DATA_W-1:0] lsu_araddr_o,
   output lsu_arvalid_o,
-  input lsu_arready,
-
+  // from bus load
   input [DATA_W-1:0] lsu_rdata,
-  input [1:0] lsu_rresp,
   input lsu_rvalid,
-  output lsu_rready_o,
 
-  // for bus store
+  // to bus store
   output [DATA_W-1:0] lsu_awaddr_o,
   output lsu_awvalid_o,
-  input reg lsu_awready,
-
   output [DATA_W-1:0] lsu_wdata_o,
   output [7:0] lsu_wstrb_o,
   output lsu_wvalid_o,
-  input reg lsu_wready,
-
-  input reg [1:0] lsu_bresp,
-  input reg lsu_bvalid,
-  output lsu_bready_o,
-
-  output [DATA_W-1:0] rdata_o,
-  output reg rvalid_o,
-  output reg wready_o
+  // from bus store
+  input reg lsu_wready
 );
   parameter ADDR_W = 32, DATA_W = 32;
   wire [DATA_W-1:0] rdata;
   wire [7:0] wstrb;
-  assign rvalid_o = rvalid;
-  assign wready_o = wready;
+  assign rvalid_o = lsu_rvalid;
+  assign wready_o = lsu_wready;
 
   reg [19:0] lfsr = 1;
   wire ifsr_ready = `ysyx_IFSR_ENABLE ? lfsr[19] : 1;
@@ -61,29 +54,16 @@ module ysyx_LSU(
 
   assign lsu_araddr_o = idu_valid ? addr : lsu_araddr;
   assign lsu_arvalid_o = ifsr_ready & ren & avalid;
-  assign arready = lsu_arready;
 
   assign rdata = lsu_rdata;
-  assign rresp = lsu_rresp;
   assign rvalid = lsu_rvalid;
-  assign lsu_rready_o = ifsr_ready;
 
   assign lsu_awaddr_o = idu_valid ? addr : lsu_araddr;
   assign lsu_awvalid_o = ifsr_ready & wen & avalid;
-  assign awready = lsu_awready;
 
   assign lsu_wdata_o = wdata;
   assign lsu_wstrb_o = wstrb;
   assign lsu_wvalid_o = ifsr_ready & wen & avalid;
-  assign wready = lsu_wready;
-
-  assign bresp = lsu_bresp;
-  assign bvalid = lsu_bvalid;
-  assign lsu_bready_o = ifsr_ready;
-
-  wire rvalid, wvalid;
-  wire arready, awready, wready, bvalid;
-  wire [1:0] rresp, bresp;
 
   // load/store unit
   assign wstrb = (
