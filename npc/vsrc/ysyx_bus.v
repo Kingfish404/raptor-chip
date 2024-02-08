@@ -164,7 +164,7 @@ module ysyx_BUS_ARBITER(
   // assign io_master_awvalid = awvalid;
   // assign awready_o = io_master_awready;
 
-  assign io_master_wdata[31:0] = wdata;
+  // assign io_master_wdata[31:0] = wdata;
   assign io_master_wstrb = wstrb;
   // assign io_master_wvalid = sram_wvalid;
   assign wready_o = io_master_wready;
