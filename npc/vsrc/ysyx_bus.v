@@ -157,7 +157,7 @@ module ysyx_BUS_ARBITER(
 
   assign rdata_o = io_master_rdata;
   assign rresp_o = io_master_rresp;
-  assign rvalid_o = io_master_rvalid;
+  // assign rvalid_o = io_master_rvalid;
   assign io_master_rready = rready;
 
 
