@@ -103,10 +103,12 @@ module ysyx_BUS_ARBITER(
   reg lsu_loading = (lsu_arvalid & !lsu_rvalid_o) | (lsu_awvalid & !lsu_wready_o);
 
   // read
-  wire [ADDR_W-1:0] araddr = (lsu_arvalid) ? lsu_araddr : 
-                  (ifu_arvalid) ? ifu_araddr : 0;
-  wire rready = (lsu_arvalid) ? lsu_rready : 
-                  (ifu_arvalid) ? ifu_rready : 0;
+  wire [ADDR_W-1:0] araddr = (
+    (lsu_arvalid) ? lsu_araddr : 
+    (ifu_arvalid) ? ifu_araddr : 0);
+  wire rready = (
+    (lsu_arvalid) ? lsu_rready : 
+    (ifu_arvalid) ? ifu_rready : 0);
 
   // ifu read
   assign ifu_arready_o = !lsu_loading & (ifu_arvalid & (arready_o));
