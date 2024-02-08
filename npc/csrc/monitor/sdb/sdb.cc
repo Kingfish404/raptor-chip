@@ -252,6 +252,8 @@ void engine_start()
 
   if (tfp)
   {
+    tfp->dump(contextp->time());
+    tfp->flush();
     tfp->close();
     delete tfp;
   }
