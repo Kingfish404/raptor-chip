@@ -38,7 +38,7 @@ CXXFLAGS += $(INCFLAGS) -DTOP_NAME="\"V$(VTARGET)\""
 $(BIN): $(VSRCS) $(CSRCS) $(NVBOARD_ARCHIVE)
 	$(call git_commit, "build RTL")
 	$(VERILATOR) --trace -cc --exe --build -j $(shell nproc) --debug $(VERILATOR_FLAG) $^ \
-		--top-module top \
+		--top-module $(VTARGET) \
 		$(addprefix -CFLAGS , $(CXXFLAGS)) $(addprefix -LDFLAGS , $(LDFLAGS)) \
 		$(addprefix -I, $(INC_PATH)) \
 		--Mdir $(OBJ_DIR) --exe -o $(abspath $(BIN))
