@@ -84,7 +84,7 @@ module ysyx_EXU (
         if (wen | ren) begin lsu_avalid <= 1; end
       end
       else if (state == `ysyx_WAIT_READY) begin
-        if (next_ready == 1) begin lsu_avalid <= 0; alu_valid <= 0; end
+        if (next_ready == 1) begin lsu_avalid <= 0; alu_valid <= 0; lsu_valid <= 0; end
       end
       if (valid_o) begin valid_once <= 0;
       end else begin  valid_once <= 1; end
