@@ -26,7 +26,7 @@ NPCState npc = {
 };
 
 VerilatedContext *contextp = NULL;
-Vtop *top = NULL;
+TOP_NAME *top = NULL;
 VerilatedVcdC *tfp = NULL;
 
 static bool is_batch_mode = false;
@@ -224,15 +224,15 @@ void sdb_sim_init(int argc, char **argv)
   top->trace(tfp, 99);
   tfp->open("npc.vcd");
 #endif
-  npc.gpr = (word_t *)&(top->rootp->top__DOT__regs__DOT__rf);
-  npc.pc = (uint32_t *)&(top->rootp->top__DOT__pc);
-  npc.ret = npc.gpr + reg_str2idx("a0");
-  npc.state = NPC_RUNNING;
-  word_t *csr = (word_t *)&(top->rootp->top__DOT__exu__DOT__csr__DOT__csr);
-  npc.mstatus = csr + CSR_MSTATUS;
-  npc.mcause = csr + CSR_MCAUSE;
-  npc.mepc = csr + CSR_MEPC;
-  npc.mtvec = csr + CSR_MTVEC;
+  // npc.gpr = (word_t *)&(top->rootp->top__DOT__regs__DOT__rf);
+  // npc.pc = (uint32_t *)&(top->rootp->top__DOT__pc);
+  // npc.ret = npc.gpr + reg_str2idx("a0");
+  // npc.state = NPC_RUNNING;
+  // word_t *csr = (word_t *)&(top->rootp->top__DOT__exu__DOT__csr__DOT__csr);
+  // npc.mstatus = csr + CSR_MSTATUS;
+  // npc.mcause = csr + CSR_MCAUSE;
+  // npc.mepc = csr + CSR_MEPC;
+  // npc.mtvec = csr + CSR_MTVEC;
 
   // for difftest
   npc.inst = (uint32_t *)&(top->rootp->top__DOT__ifu__DOT__inst_ifu);

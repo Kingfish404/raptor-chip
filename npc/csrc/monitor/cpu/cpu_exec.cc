@@ -11,7 +11,7 @@
 extern NPCState npc;
 
 extern VerilatedContext *contextp;
-extern Vtop *top;
+extern TOP_NAME *top;
 extern VerilatedVcdC *tfp;
 
 word_t prev_pc = 0;
