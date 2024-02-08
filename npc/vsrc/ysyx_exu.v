@@ -72,8 +72,8 @@ module ysyx_EXU (
       alu_valid <= 0; lsu_avalid <= 0;
     end
     else begin
-      // if (wen_o) begin lsu_valid <= lsu_exu_wready; end
-      // if (ren_o) begin lsu_valid <= lsu_exu_rvalid; end
+      if (wen_o) begin lsu_valid <= lsu_exu_wready; end
+      if (ren_o) begin lsu_valid <= lsu_exu_rvalid; end
       if (state == `ysyx_IDLE & prev_valid) begin
         imm_exu <= imm; pc_exu <= pc;
         src1 <= op1; src2 <= op2;
