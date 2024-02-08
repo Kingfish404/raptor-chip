@@ -226,8 +226,9 @@ module ysyx (
     .npc_wdata_o(npc_wdata),
     .rd_o(rd_exu), 
 
-    // to lsu
     .rwen_o(rwen_exu), .wben_o(wben), .ebreak_o(),
+  
+    // to lsu
     .ren_o(ren_exu), .wen_o(wen_exu),
     .lsu_avalid_o(lsu_avalid), .alu_op_o(alu_op_exu),
     .lsu_mem_wdata_o(lsu_mem_wdata),
@@ -242,14 +243,15 @@ module ysyx (
     .clk(clock),
     .idu_valid(idu_valid),
     // from exu
-    .ren(ren_exu), .wen(wen_exu), .avalid(lsu_avalid), .alu_op(alu_op_exu),
     .addr(rwaddr),
+    .ren(ren_exu), .wen(wen_exu), .avalid(lsu_avalid), .alu_op(alu_op_exu),
     .wdata(lsu_mem_wdata),
 
     // to exu
-    .rdata_o(lsu_mem_rdata), .rvalid_o(lsu_exu_rvalid), .wready_o(lsu_exu_wready),
+    .rdata_o(lsu_mem_rdata),
+    .rvalid_o(lsu_exu_rvalid), .wready_o(lsu_exu_wready),
 
-    // to bus
+    // to-from bus
     .lsu_araddr_o(lsu_araddr), .lsu_arvalid_o(lsu_arvalid), .lsu_arready(lsu_arready),
     .lsu_rdata(lsu_rdata), .lsu_rresp(lsu_rresp), .lsu_rvalid(lsu_rvalid), .lsu_rready_o(lsu_rready),
 
