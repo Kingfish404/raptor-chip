@@ -1,6 +1,6 @@
 `include "ysyx_macro.v"
 
-module ysyx_00000000 (
+module ysyx (
   input clock, reset, 
 
   // AXI4 Slave
