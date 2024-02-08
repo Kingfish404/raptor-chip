@@ -70,7 +70,7 @@ module ysyx_EXU (
       alu_valid <= 0; lsu_avalid <= 0;
     end
     else begin
-      if (!valid_o) begin
+      if (state == `ysyx_IDLE) begin
         if (rvalid_wready & alu_valid) begin valid_o <= 1; end
       end
       if (next_ready) begin valid_o <= 0; end
