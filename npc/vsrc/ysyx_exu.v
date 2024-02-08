@@ -61,8 +61,7 @@ module ysyx_EXU (
 
   reg state, alu_valid, lsu_avalid;
   reg valid_once;
-  reg exu_rvalid_wready;
-  assign valid_o = exu_rvalid_wready & alu_valid;
+  // assign valid_o = exu_rvalid_wready & alu_valid;
   assign wben_o = valid_o & valid_once;
   assign ready_o = !valid_o;
   `ysyx_BUS_FSM()
@@ -71,6 +70,9 @@ module ysyx_EXU (
       alu_valid <= 0; lsu_avalid <= 0;
     end
     else begin
+      if (exu_rvalid_wready & alu_valid) begin
+        valid_o <= 1;
+      end
       if (state == `ysyx_IDLE & prev_valid) begin
         if (prev_valid) begin 
           imm_exu <= imm; pc_exu <= pc;
@@ -85,7 +87,6 @@ module ysyx_EXU (
       end
       else if (state == `ysyx_WAIT_READY) begin
         if (next_ready == 1) begin lsu_avalid <= 0; alu_valid <= 0; end
-        exu_rvalid_wready <= rvalid_wready;
       end
       if (valid_o) begin valid_once <= 0;
       end else begin  valid_once <= 1; end
