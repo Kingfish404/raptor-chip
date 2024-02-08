@@ -216,12 +216,7 @@ module ysyx (
 
     .prev_valid(idu_valid), .next_ready(ifu_ready),
     .valid_o(exu_valid), .ready_o(exu_ready),
-
-    .lsu_avalid_o(lsu_avalid),
-    .lsu_mem_wdata_o(lsu_mem_wdata),
-    .mem_rdata(lsu_mem_rdata),
-    .lsu_exu_rvalid(lsu_exu_rvalid), .lsu_exu_wready(lsu_exu_wready),
-
+  
     .ren(ren), .wen(wen), .rwen(rwen),
     .rd(rd), .imm(imm),
     .op1(op1), .op2(op2), .op_j(op_j), .rwaddr(rwaddr),
@@ -229,18 +224,32 @@ module ysyx (
     .pc(pc_idu),
     .reg_wdata_o(reg_wdata),
     .npc_wdata_o(npc_wdata),
-    .rd_o(rd_exu), .alu_op_o(alu_op_exu),
+    .rd_o(rd_exu), 
+
+    // to lsu
     .rwen_o(rwen_exu), .wben_o(wben), .ebreak_o(),
-    .ren_o(ren_exu), .wen_o(wen_exu)
+    .ren_o(ren_exu), .wen_o(wen_exu),
+    .lsu_avalid_o(lsu_avalid), .alu_op_o(alu_op_exu)
+    .lsu_mem_wdata_o(lsu_mem_wdata),
+
+    // from lsu
+    .mem_rdata(lsu_mem_rdata),
+    .lsu_exu_rvalid(lsu_exu_rvalid), .lsu_exu_wready(lsu_exu_wready)
     );
 
   // LSU(Load/Store Unit): 负责对存储器进行读写操作
   ysyx_LSU lsu(
     .clk(clock),
+    .idu_valid(idu_valid),
+    // from exu
     .ren(ren_exu), .wen(wen_exu), .avalid(lsu_avalid), .alu_op(alu_op_exu),
-    .idu_valid(idu_valid), .addr(rwaddr),
+    .addr(rwaddr),
     .wdata(lsu_mem_wdata),
 
+    // to exu
+    .rdata_o(lsu_mem_rdata), .rvalid_o(lsu_exu_rvalid), .wready_o(lsu_exu_wready)
+
+    // to bus
     .lsu_araddr_o(lsu_araddr), .lsu_arvalid_o(lsu_arvalid), .lsu_arready(lsu_arready),
     .lsu_rdata(lsu_rdata), .lsu_rresp(lsu_rresp), .lsu_rvalid(lsu_rvalid), .lsu_rready_o(lsu_rready),
 
@@ -248,8 +257,6 @@ module ysyx (
     .lsu_wdata_o(lsu_wdata), .lsu_wstrb_o(lsu_wstrb), .lsu_wvalid_o(lsu_wvalid), .lsu_wready(lsu_wready),
 
     .lsu_bresp(lsu_bresp), .lsu_bvalid(lsu_bvalid), .lsu_bready_o(lsu_bready),
-
-    .rdata_o(lsu_mem_rdata), .rvalid_o(lsu_exu_rvalid), .wready_o(lsu_exu_wready)
   );
 
 endmodule // top
