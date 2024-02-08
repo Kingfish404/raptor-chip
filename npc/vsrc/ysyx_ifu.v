@@ -6,8 +6,6 @@ module ysyx_IFU (
   input prev_valid, next_ready,
   output valid_o, ready_o,
 
-  input lsu_valid,
-
   // for bus
   output [DATA_W-1:0] ifu_araddr_o,
   output ifu_arvalid_o,

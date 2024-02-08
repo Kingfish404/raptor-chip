@@ -11,7 +11,7 @@ module ysyx_EXU (
   output lsu_avalid_o,
   output [BIT_W-1:0] lsu_mem_wdata_o,
   input [BIT_W-1:0] mem_rdata,
-  input rvalid_wready,
+  input lsu_exu_rvalid, lsu_exu_wready,
 
   input ren, wen, rwen,
   input [4:0] rd,
@@ -71,7 +71,7 @@ module ysyx_EXU (
       alu_valid <= 0; lsu_avalid <= 0;
     end
     else begin
-      lsu_valid <= rvalid_wready;
+      lsu_valid <= lsu_exu_rvalid | lsu_exu_wready;
       if (state == `ysyx_IDLE & prev_valid) begin
         imm_exu <= imm; pc_exu <= pc;
         src1 <= op1; src2 <= op2;

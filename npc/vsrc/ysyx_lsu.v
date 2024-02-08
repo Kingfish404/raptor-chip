@@ -33,12 +33,14 @@ module ysyx_LSU(
   output lsu_bready_o,
 
   output [DATA_W-1:0] rdata_o,
-  output reg rvalid_wready_o
+  output reg rvalid_o,
+  output reg wready_o
 );
   parameter ADDR_W = 32, DATA_W = 32;
   wire [DATA_W-1:0] rdata;
   wire [7:0] wstrb;
-  assign rvalid_wready_o = (rvalid | wready);
+  assign rvalid_o = rvalid;
+  assign wready_o = wready;
 
   reg [19:0] lfsr = 1;
   wire ifsr_ready = `ysyx_IFSR_ENABLE ? lfsr[19] : 1;

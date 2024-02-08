@@ -107,11 +107,11 @@ module ysyx (
 
   // LSU output
   wire [BIT_W-1:0] lsu_mem_rdata;
-  wire lsu_rvalid_wready;
   wire [BIT_W-1:0] lsu_araddr, lsu_wdata, lsu_awaddr;
   wire lsu_arvalid, lsu_wready;
   wire [7:0] lsu_wstrb;
   wire lsu_rready, lsu_awvalid, lsu_wvalid, lsu_bready;
+  wire lsu_exu_rvalid, lsu_exu_wready;
 
   // EXU output
   wire [BIT_W-1:0] reg_wdata;
@@ -182,8 +182,6 @@ module ysyx (
     .prev_valid(exu_valid), .next_ready(idu_ready),
     .valid_o(ifu_valid), .ready_o(ifu_ready),
 
-    .lsu_valid(lsu_rvalid),
-
     .ifu_araddr_o(ifu_araddr_o),
     .ifu_arvalid_o(ifu_arvalid_o), .ifu_rready_o(ifu_rready_o),
     .ifu_rresp(ifu_rresp),
@@ -221,8 +219,8 @@ module ysyx (
 
     .lsu_avalid_o(lsu_avalid),
     .lsu_mem_wdata_o(lsu_mem_wdata),
-
-    .mem_rdata(lsu_mem_rdata), .rvalid_wready(lsu_rvalid_wready),
+    .mem_rdata(lsu_mem_rdata),
+    .lsu_exu_rvalid(lsu_exu_rvalid), .lsu_exu_wready(lsu_exu_wready),
 
     .ren(ren), .wen(wen), .rwen(rwen),
     .rd(rd), .imm(imm),
@@ -251,7 +249,7 @@ module ysyx (
 
     .lsu_bresp(lsu_bresp), .lsu_bvalid(lsu_bvalid), .lsu_bready_o(lsu_bready),
 
-    .rdata_o(lsu_mem_rdata), .rvalid_wready_o(lsu_rvalid_wready)
+    .rdata_o(lsu_mem_rdata), .rvalid_o(lsu_exu_rvalid), .wready_o(lsu_exu_wready)
   );
 
 endmodule // top
