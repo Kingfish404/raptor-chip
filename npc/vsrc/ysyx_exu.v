@@ -71,7 +71,8 @@ module ysyx_EXU (
     end
     else begin
       if (alu_valid) begin
-        if (rvalid_wready) begin valid_o <= 1; end
+        // if (rvalid_wready) begin valid_o <= 1; end
+        valid_o <= rvalid_wready;
       end
       // if (next_ready) begin valid_o <= 0; end
       if (state == `ysyx_IDLE & prev_valid) begin
