@@ -92,9 +92,7 @@ module ysyx_BUS_ARBITER(
     (ifu_arvalid) ? ifu_araddr : 0);
 
   // ifu read
-  assign ifu_arready_o = !lsu_loading & (ifu_arvalid & (arready_o));
   assign ifu_rdata_o = ({DATA_W{ifu_arvalid}} & (rdata_o));
-  assign ifu_rresp_o = ({2{ifu_arvalid}} & (rresp_o));
   assign ifu_rvalid_o = !lsu_loading & (ifu_arvalid & (rvalid_o));
   
   // lsu read
