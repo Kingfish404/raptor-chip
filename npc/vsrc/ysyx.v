@@ -262,7 +262,7 @@ module ysyx (
     // to-from bus store
     .lsu_awaddr_o(lsu_awaddr), .lsu_awvalid_o(lsu_awvalid),
     .lsu_wdata_o(lsu_wdata), .lsu_wstrb_o(lsu_wstrb), .lsu_wvalid_o(lsu_wvalid),
-    .lsu_wready(lsu_wready),
+    .lsu_wready(lsu_wready)
   );
 
 endmodule // top
