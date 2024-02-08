@@ -235,7 +235,7 @@ void sdb_sim_init(int argc, char **argv)
   // npc.mtvec = csr + CSR_MTVEC;
 
   // for difftest
-  npc.inst = (uint32_t *)&(top->rootp->top__DOT__ifu__DOT__inst_ifu);
+  // npc.inst = (uint32_t *)&(top->rootp->top__DOT__ifu__DOT__inst_ifu);
 
   reset(top, 1);
   if (tfp)
