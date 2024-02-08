@@ -18,7 +18,7 @@ OBJ_DIR = $(BUILD_DIR)/obj_dir
 BIN = $(BUILD_DIR)/$(VTARGET)
 SOC_HOME = $(abspath ./../ysyxSOC)
 INC_PATH ?= $(abspath ./include) $(abspath ./vsrc/include)
-	# $(abspath $(SOC_HOME)/perip/uart16550/rtl) $(abspath $(SOC_HOME)/ysyxSoC/perip/spi/rtl)
+# $(abspath $(SOC_HOME)/perip/uart16550/rtl) $(abspath $(SOC_HOME)/ysyxSoC/perip/spi/rtl)
 VERILATOR_FLAG =--prof-c --prof-cfuncs --prof-exec --timescale "1ns/1ns" --no-timing
 CXXFLAGS = -Wall -Werror $(call remove_quote,$(CONFIG_CC_OPT))
 LDFLAGS = -lreadline -ldl
