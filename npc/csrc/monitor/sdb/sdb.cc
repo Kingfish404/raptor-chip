@@ -52,7 +52,7 @@ static char *rl_gets()
   return line_read;
 }
 
-void reset(Vtop *top, int n)
+void reset(TOP_NAME *top, int n)
 {
   top->reset = 1;
   while (n-- > 0)
