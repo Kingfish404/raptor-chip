@@ -14,7 +14,7 @@ module ysyx (
 
   output reg [3:0] io_slave_rid,
   output reg io_slave_rlast_o,
-  output reg [DATA_W-1:0] io_slave_rdata_o,
+  output reg [63:0] io_slave_rdata_o,
   output reg [1:0] io_slave_rresp_o,
   output reg io_slave_rvalid_o,
   input io_slave_rready,
@@ -28,7 +28,7 @@ module ysyx (
   output reg io_slave_awready_o,
 
   input io_slave_wlast,
-  input [DATA_W-1:0] io_slave_wdata,
+  input [63:0] io_slave_wdata,
   input [7:0] io_slave_wstrb,
   input io_slave_wvalid,
   output reg io_slave_wready_o,
@@ -49,7 +49,7 @@ module ysyx (
 
   input reg [3:0] io_master_rid,
   input reg io_master_rlast_o,
-  input reg [DATA_W-1:0] io_master_rdata_o,
+  input reg [63:0] io_master_rdata_o,
   input reg [1:0] io_master_rresp_o,
   input reg io_master_rvalid_o,
   output io_master_rready,
@@ -63,7 +63,7 @@ module ysyx (
   input reg io_master_awready_o,
 
   output io_master_wlast,
-  output [DATA_W-1:0] io_master_wdata,
+  output [63:0] io_master_wdata,
   output [7:0] io_master_wstrb,
   output io_master_wvalid,
   input reg io_master_wready_o,
@@ -76,6 +76,7 @@ module ysyx (
   input io_interrupt
 );
   parameter BIT_W = `ysyx_W_WIDTH;
+  parameter ADDR_W = `ysyx_ADDR_WIDTH;
   // PC unit output
   wire [BIT_W-1:0] pc, npc;
 
