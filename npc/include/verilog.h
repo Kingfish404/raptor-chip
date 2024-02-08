@@ -9,7 +9,7 @@
 // #include "Vysyx___024root.h"
 // #include "Vysyx__Dpi.h"
 
-#define CONCAT_HEAD(TOP_NAME)
+#define CONCAT_HEAD(CONCAT(TOP_NAME,))
 #define CONCAT_HEAD(CONCAT(TOP_NAME, ___024root))
 #define CONCAT_HEAD(CONCAT(TOP_NAME, __Dpi))
 
