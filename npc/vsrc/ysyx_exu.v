@@ -71,6 +71,7 @@ module ysyx_EXU (
     end
     else begin
       if (rvalid_wready & alu_valid) begin valid_o <= 1; end
+      if (state == `ysyx_IDLE) begin valid_o <= 0; end
       if (state == `ysyx_IDLE & prev_valid) begin
         imm_exu <= imm; pc_exu <= pc;
         src1 <= op1; src2 <= op2;
@@ -79,7 +80,6 @@ module ysyx_EXU (
         rd_o <= rd; rwen_o <= rwen;
         ren_o <= ren; wen_o <= wen;
         alu_valid <= 1;
-        valid_o <= 0;
         if (wen | ren) begin lsu_avalid <= 1; end
       end
       else if (state == `ysyx_WAIT_READY) begin
