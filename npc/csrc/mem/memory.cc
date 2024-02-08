@@ -57,7 +57,7 @@ static inline void host_write(void *addr, word_t data, int len)
     }
 }
 
-extern "C" void pmem_read(word_t raddr, word_t *data)
+extern "C" void pmem_read(word_t araddr, word_t *data)
 {
     printf("raddr: " FMT_WORD_NO_PREFIX ", data: " FMT_WORD_NO_PREFIX "\n",
            raddr, *data);
@@ -79,9 +79,9 @@ extern "C" void pmem_read(word_t raddr, word_t *data)
         return;
     }
 #endif
-    if (raddr >= MBASE && raddr < MBASE + MSIZE)
+    if (araddr >= MBASE && araddr < MBASE + MSIZE)
     {
-        *data = host_read(pmem + raddr - MBASE, 4);
+        *data = host_read(pmem + araddr - MBASE, 4);
         return;
     }
     npc_abort();
