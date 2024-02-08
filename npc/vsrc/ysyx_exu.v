@@ -66,27 +66,27 @@ module ysyx_EXU (
   assign valid_o = (wen_o | ren_o) ? lsu_valid & valid_once : alu_valid;
   // assign valid_o = lsu_exu_wready & lsu_exu_rvalid & alu_valid;
   assign wben_o = valid_o & valid_once;
-  assign ready_o = !valid_o;
-  // assign ready_o = (state != `ysyx_WAIT_READY);
+  // assign ready_o = !valid_o;
+  assign ready_o = (state != `ysyx_WAIT_READY);
   `ysyx_BUS_FSM()
   always @(posedge clk) begin
     if (rst) begin
       alu_valid <= 0; lsu_avalid <= 0;
     end
     else begin
-      if (wen_o) begin lsu_valid <= lsu_exu_wready; end
-      if (ren_o) begin 
-        mem_rdata <= lsu_rdata;
-        lsu_valid <= lsu_exu_rvalid; end
-      if (state == `ysyx_IDLE & prev_valid) begin
-        imm_exu <= imm; pc_exu <= pc;
-        src1 <= op1; src2 <= op2;
-        alu_op_exu <= alu_op; opcode_exu <= opcode;
-        addr_exu <= op_j + imm; 
-        rd_o <= rd; rwen_o <= rwen;
-        ren_o <= ren; wen_o <= wen;
-        alu_valid <= 1;
-        if (wen | ren) begin lsu_avalid <= 1; end
+      if (state == `ysyx_IDLE) begin
+        if (wen_o) begin lsu_valid <= lsu_exu_wready; end
+        if (ren_o) begin mem_rdata <= lsu_rdata; lsu_valid <= lsu_exu_rvalid; end
+        if (prev_valid) begin
+          imm_exu <= imm; pc_exu <= pc;
+          src1 <= op1; src2 <= op2;
+          alu_op_exu <= alu_op; opcode_exu <= opcode;
+          addr_exu <= op_j + imm; 
+          rd_o <= rd; rwen_o <= rwen;
+          ren_o <= ren; wen_o <= wen;
+          alu_valid <= 1;
+          if (wen | ren) begin lsu_avalid <= 1; end
+        end
       end
       else if (state == `ysyx_WAIT_READY) begin
         if (next_ready == 1) begin lsu_avalid <= 0; alu_valid <= 0; end
