@@ -160,7 +160,7 @@ module ysyx_BUS_ARBITER(
   // assign rvalid_o = io_master_rvalid;
   assign io_master_rready = rready;
 
-  assign io_master_awaddr = awaddr;
+  // assign io_master_awaddr = awaddr;
   // assign io_master_awvalid = awvalid;
   assign awready_o = io_master_awready;
 
