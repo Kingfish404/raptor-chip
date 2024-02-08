@@ -59,8 +59,8 @@ static inline void host_write(void *addr, word_t data, int len)
 
 extern "C" void pmem_read(word_t raddr, word_t *data)
 {
-    printf("raddr: " FMT_WORD_NO_PREFIX ", ", raddr);
-    printf("data: " FMT_WORD_NO_PREFIX "\n", *data);
+    printf("raddr: " FMT_WORD_NO_PREFIX ", data: " FMT_WORD_NO_PREFIX "\n",
+           raddr, *data);
 #ifdef CONFIG_SOFT_MMIO
     if (raddr == RTC_ADDR + 4)
     {
