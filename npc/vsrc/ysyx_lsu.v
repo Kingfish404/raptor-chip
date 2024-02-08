@@ -38,7 +38,7 @@ module ysyx_LSU(
   parameter ADDR_W = 32, DATA_W = 32;
   wire [DATA_W-1:0] rdata;
   wire [7:0] wstrb;
-  assign rvalid_wready_o = (rvalid | wready) | (!avalid);
+  assign rvalid_wready_o = (rvalid | wready);
 
   reg [19:0] lfsr = 1;
   wire ifsr_ready = `ysyx_IFSR_ENABLE ? lfsr[19] : 1;
