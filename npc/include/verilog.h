@@ -14,7 +14,7 @@
 static inline void verilog_connect(TOP_NAME *top, NPCState *npc)
 {
   // for difftest
-  npc->inst = (uint32_t *)&(top->rootp->VERILOG_PREFIX#__DOT__ifu__DOT__inst_ifu);
+  npc->inst = (uint32_t *)&(top->rootp->VERILOG_PREFIX##__DOT__ifu__DOT__inst_ifu);
 
   npc->gpr = (word_t *)&(top->rootp->ysyx__DOT__regs__DOT__rf);
   npc->pc = (uint32_t *)&(top->rootp->ysyx__DOT__pc);
