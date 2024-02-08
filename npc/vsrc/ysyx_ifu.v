@@ -44,8 +44,8 @@ module ysyx_IFU (
   always @(posedge clk ) begin lfsr <= {lfsr[18:0], lfsr[19] ^ lfsr[18]}; end
   wire arvalid;
   reg pvalid;
-  // assign arvalid = pvalid;
-  assign arvalid = (ifsr_ready & (prev_valid)) | pvalid;
+  assign arvalid = pvalid;
+  // assign arvalid = (ifsr_ready & (prev_valid)) | pvalid;
 
   assign ifu_araddr_o = prev_valid ? npc : pc;
   assign ifu_arvalid_o = arvalid;
