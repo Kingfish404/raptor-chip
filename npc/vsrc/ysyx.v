@@ -10,13 +10,13 @@ module ysyx (
   input [3:0] io_slave_arid,
   input [ADDR_W-1:0] io_slave_araddr,
   input io_slave_arvalid,
-  output reg io_slave_arready_o,
+  output reg io_slave_arready,
 
   output reg [3:0] io_slave_rid,
-  output reg io_slave_rlast_o,
-  output reg [63:0] io_slave_rdata_o,
-  output reg [1:0] io_slave_rresp_o,
-  output reg io_slave_rvalid_o,
+  output reg io_slave_rlast,
+  output reg [63:0] io_slave_rdata,
+  output reg [1:0] io_slave_rresp,
+  output reg io_slave_rvalid,
   input io_slave_rready,
 
   input [1:0] io_slave_awburst,
@@ -25,17 +25,17 @@ module ysyx (
   input [3:0] io_slave_awid,
   input [ADDR_W-1:0] io_slave_awaddr,
   input io_slave_awvalid,
-  output reg io_slave_awready_o,
+  output reg io_slave_awready,
 
   input io_slave_wlast,
   input [63:0] io_slave_wdata,
   input [7:0] io_slave_wstrb,
   input io_slave_wvalid,
-  output reg io_slave_wready_o,
+  output reg io_slave_wready,
 
   output reg [3:0] io_slave_bid,
-  output reg [1:0] io_slave_bresp_o,
-  output reg io_slave_bvalid_o,
+  output reg [1:0] io_slave_bresp,
+  output reg io_slave_bvalid,
   input io_slave_bready,
 
   // AXI4 Master
@@ -45,13 +45,13 @@ module ysyx (
   output [3:0] io_master_arid,
   output [ADDR_W-1:0] io_master_araddr,
   output io_master_arvalid,
-  input reg io_master_arready_o,
+  input reg io_master_arready,
 
   input reg [3:0] io_master_rid,
-  input reg io_master_rlast_o,
-  input reg [63:0] io_master_rdata_o,
-  input reg [1:0] io_master_rresp_o,
-  input reg io_master_rvalid_o,
+  input reg io_master_rlast,
+  input reg [63:0] io_master_rdata,
+  input reg [1:0] io_master_rresp,
+  input reg io_master_rvalid,
   output io_master_rready,
 
   output [1:0] io_master_awburst,
@@ -60,17 +60,17 @@ module ysyx (
   output [3:0] io_master_awid,
   output [ADDR_W-1:0] io_master_awaddr,
   output io_master_awvalid,
-  input reg io_master_awready_o,
+  input reg io_master_awready,
 
   output io_master_wlast,
   output [63:0] io_master_wdata,
   output [7:0] io_master_wstrb,
   output io_master_wvalid,
-  input reg io_master_wready_o,
+  input reg io_master_wready,
 
   input reg [3:0] io_master_bid,
-  input reg [1:0] io_master_bresp_o,
-  input reg io_master_bvalid_o,
+  input reg [1:0] io_master_bresp,
+  input reg io_master_bvalid,
   output io_master_bready,
 
   input io_interrupt
