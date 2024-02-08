@@ -80,8 +80,8 @@ extern "C" void pmem_read(word_t raddr, word_t *data)
     if (raddr >= MBASE && raddr < MBASE + MSIZE)
     {
         *data = host_read(pmem + raddr - MBASE, 4);
-        printf("raddr: " FMT_WORD_NO_PREFIX ", data: " FMT_WORD_NO_PREFIX "\n",
-               raddr, *data);
+        // printf("raddr: " FMT_WORD_NO_PREFIX ", data: " FMT_WORD_NO_PREFIX "\n",
+        //        raddr, *data);
         return;
     }
     npc_abort();
