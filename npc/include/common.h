@@ -38,6 +38,10 @@ typedef word_t vaddr_t;
 
 #define ARRLEN(arr) (int)(sizeof(arr) / sizeof(arr[0]))
 
+#define _CONCAT(x, y) x##y
+#define CONCAT(x, y) _CONCAT(x, y)
+#define CONCAT_HEAD(x, y) <CONCAT(x, y)>
+
 #define _Log(...)        \
   do                     \
   {                      \
@@ -50,7 +54,7 @@ typedef word_t vaddr_t;
   _Log(FMT_BLUE("[npc %s:%d %s] ") format "\n", \
        __FILENAME__, __LINE__, __func__, ##__VA_ARGS__)
 
-#define Error(format, ...)                        \
+#define Error(format, ...)                     \
   _Log(FMT_RED("[npc %s:%d %s] ") format "\n", \
        __FILENAME__, __LINE__, __func__, ##__VA_ARGS__)
 

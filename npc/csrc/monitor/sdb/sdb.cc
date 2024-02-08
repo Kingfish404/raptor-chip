@@ -2,11 +2,9 @@
 #include <cpu.h>
 #include <readline/readline.h>
 #include <readline/history.h>
-#include "Vtop.h"
-#include "Vtop___024root.h"
-#include "Vtop__Dpi.h"
-#include "verilated.h"
-#include "verilated_vcd_c.h"
+#include <verilog.h>
+#include <verilated.h>
+#include <verilated_vcd_c.h>
 
 extern char *regs[];
 void difftest_skip_ref();
