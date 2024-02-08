@@ -1,6 +1,6 @@
 `include "ysyx_macro.v"
 
-module top (
+module ysyx (
   input clock, reset, io_interrupt,
   output ebreak
 );
