@@ -1,5 +1,5 @@
-`include "npc_macro.v"
-`include "npc_macro_idu.v"
+`include "ysyx_macro.v"
+`include "ysyx_macro_idu.v"
 
 module ysyx_IDU (
   input clk, rst,

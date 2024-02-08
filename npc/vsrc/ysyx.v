@@ -1,8 +1,9 @@
-`include "npc_macro.v"
+`include "ysyx_macro.v"
 
-module top (
-  input clock, reset, io_interrupt,
-  output ebreak
+module ysyx (
+  input clock, reset, 
+
+  input io_interrupt
 );
   parameter BIT_W = `ysyx_W_WIDTH;
   // PC unit output
@@ -143,7 +144,7 @@ module top (
     .reg_wdata_o(reg_wdata),
     .npc_wdata_o(npc_wdata),
     .rd_o(rd_exu), .alu_op_o(alu_op_exu),
-    .rwen_o(rwen_exu), .wben_o(wben), .ebreak_o(ebreak),
+    .rwen_o(rwen_exu), .wben_o(wben), .ebreak_o(),
     .ren_o(ren_exu), .wen_o(wen_exu)
     );
 

@@ -1,5 +1,5 @@
-`include "npc_macro.v"
-`include "npc_macro_csr.v"
+`include "ysyx_macro.v"
+`include "ysyx_macro_csr.v"
 
 module ysyx_CSR_Reg(
   input clk, rst,

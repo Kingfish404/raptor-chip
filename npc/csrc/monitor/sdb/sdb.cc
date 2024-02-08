@@ -2,11 +2,9 @@
 #include <cpu.h>
 #include <readline/readline.h>
 #include <readline/history.h>
-#include "Vtop.h"
-#include "Vtop___024root.h"
-#include "Vtop__Dpi.h"
-#include "verilated.h"
-#include "verilated_vcd_c.h"
+#include <verilog.h>
+#include <verilated.h>
+#include <verilated_vcd_c.h>
 
 extern char *regs[];
 void difftest_skip_ref();
@@ -28,7 +26,7 @@ NPCState npc = {
 };
 
 VerilatedContext *contextp = NULL;
-Vtop *top = NULL;
+TOP_NAME *top = NULL;
 VerilatedVcdC *tfp = NULL;
 
 static bool is_batch_mode = false;
@@ -54,7 +52,7 @@ static char *rl_gets()
   return line_read;
 }
 
-void reset(Vtop *top, int n)
+void reset(TOP_NAME *top, int n)
 {
   top->reset = 1;
   while (n-- > 0)
@@ -219,25 +217,26 @@ void sdb_sim_init(int argc, char **argv)
 {
   contextp = new VerilatedContext;
   contextp->commandArgs(argc, argv);
-  top = new Vtop{contextp};
+  top = new TOP_NAME{contextp};
   Verilated::traceEverOn(true);
 #ifdef CONFIG_WTRACE
   tfp = new VerilatedVcdC;
   top->trace(tfp, 99);
   tfp->open("npc.vcd");
 #endif
-  npc.gpr = (word_t *)&(top->rootp->top__DOT__regs__DOT__rf);
-  npc.pc = (uint32_t *)&(top->rootp->top__DOT__pc);
-  npc.ret = npc.gpr + reg_str2idx("a0");
-  npc.state = NPC_RUNNING;
-  word_t *csr = (word_t *)&(top->rootp->top__DOT__exu__DOT__csr__DOT__csr);
-  npc.mstatus = csr + CSR_MSTATUS;
-  npc.mcause = csr + CSR_MCAUSE;
-  npc.mepc = csr + CSR_MEPC;
-  npc.mtvec = csr + CSR_MTVEC;
+  verilog_connect(top, &npc);
+  // npc.gpr = (word_t *)&(top->rootp->top__DOT__regs__DOT__rf);
+  // npc.pc = (uint32_t *)&(top->rootp->top__DOT__pc);
+  // npc.ret = npc.gpr + reg_str2idx("a0");
+  // npc.state = NPC_RUNNING;
+  // word_t *csr = (word_t *)&(top->rootp->top__DOT__exu__DOT__csr__DOT__csr);
+  // npc.mstatus = csr + CSR_MSTATUS;
+  // npc.mcause = csr + CSR_MCAUSE;
+  // npc.mepc = csr + CSR_MEPC;
+  // npc.mtvec = csr + CSR_MTVEC;
 
   // for difftest
-  npc.inst = (uint32_t *)&(top->rootp->top__DOT__ifu__DOT__inst_ifu);
+  // npc.inst = (uint32_t *)&(top->rootp->top__DOT__ifu__DOT__inst_ifu);
 
   reset(top, 1);
   if (tfp)

@@ -1,9 +1,8 @@
 #include <common.h>
 #include <difftest.h>
-#include <mem.h>
 #include <readline/readline.h>
 #include <readline/history.h>
-#include "Vtop.h"
+#include <verilog.h>
 #include "verilated_vcd_c.h"
 
 #define MAX_INST_TO_PRINT 10
@@ -12,7 +11,7 @@
 extern NPCState npc;
 
 extern VerilatedContext *contextp;
-extern Vtop *top;
+extern TOP_NAME *top;
 extern VerilatedVcdC *tfp;
 
 word_t prev_pc = 0;

@@ -1,4 +1,4 @@
-`include "npc_macro.v"
+`include "ysyx_macro.v"
 
 // Universal Asynchronous Receiver-Transmitter
 module ysyx_UART(
@@ -27,7 +27,7 @@ module ysyx_UART(
   input awvalid,
   output reg awready_o,
 
-  input [7:0] wlast,
+  input wlast,
   input [DATA_W-1:0] wdata,
   input [7:0] wstrb,
   input wvalid,
@@ -90,7 +90,7 @@ module ysyx_CLINT(
   input awvalid,
   output reg awready_o,
 
-  input [7:0] wlast,
+  input wlast,
   input [DATA_W-1:0] wdata,
   input [7:0] wstrb,
   input wvalid,
@@ -155,7 +155,7 @@ module ysyx_MEM_SRAM(
   input awvalid,
   output reg awready_o,
 
-  input [7:0] wlast,
+  input wlast,
   input [DATA_W-1:0] wdata,
   input [7:0] wstrb,
   input wvalid,
