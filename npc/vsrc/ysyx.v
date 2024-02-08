@@ -145,6 +145,23 @@ module ysyx (
   ysyx_BUS_ARBITER bus(
     .clk(clock), .rst(reset),
 
+    .io_master_arburst(io_master_arburst), .io_master_arsize(io_master_arsize), .io_master_arlen(io_master_arlen),
+    .io_master_arid(io_master_arid), .io_master_araddr(io_master_araddr), .io_master_arvalid(io_master_arvalid),
+    .io_master_arready(io_master_arready),
+
+    .io_master_rid(io_master_rid), .io_master_rlast(io_master_rlast), .io_master_rdata(io_master_rdata),
+    .io_master_rresp(io_master_rresp), .io_master_rvalid(io_master_rvalid), .io_master_rready(io_master_rready),
+    
+    .io_master_awburst(io_master_awburst), .io_master_awsize(io_master_awsize), .io_master_awlen(io_master_awlen),
+    .io_master_awid(io_master_awid), .io_master_awaddr(io_master_awaddr), .io_master_awvalid(io_master_awvalid),
+    .io_master_awready(io_master_awready),
+
+    .io_master_wlast(io_master_wlast), .io_master_wdata(io_master_wdata), .io_master_wstrb(io_master_wstrb),
+    .io_master_wvalid(io_master_wvalid), .io_master_wready(io_master_wready),
+
+    .io_master_bid(io_master_bid), .io_master_bresp(io_master_bresp), .io_master_bvalid(io_master_bvalid),
+    .io_master_bready(io_master_bready),
+
     .ifu_araddr(ifu_araddr_o),
     .ifu_arvalid(ifu_arvalid_o), .ifu_rready(ifu_rready_o),
     .ifu_rresp_o(ifu_rresp),

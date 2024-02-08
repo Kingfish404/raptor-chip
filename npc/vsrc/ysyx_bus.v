@@ -3,6 +3,41 @@
 module ysyx_BUS_ARBITER(
   input clk, rst,
 
+  // AXI4 Master bus
+  output [1:0] io_master_arburst,
+  output [2:0] io_master_arsize,
+  output [7:0] io_master_arlen,
+  output [3:0] io_master_arid,
+  output [ADDR_W-1:0] io_master_araddr,
+  output io_master_arvalid,
+  input reg io_master_arready,
+
+  input reg [3:0] io_master_rid,
+  input reg io_master_rlast,
+  input reg [63:0] io_master_rdata,
+  input reg [1:0] io_master_rresp,
+  input reg io_master_rvalid,
+  output io_master_rready,
+
+  output [1:0] io_master_awburst,
+  output [2:0] io_master_awsize,
+  output [7:0] io_master_awlen,
+  output [3:0] io_master_awid,
+  output [ADDR_W-1:0] io_master_awaddr,
+  output io_master_awvalid,
+  input reg io_master_awready,
+
+  output io_master_wlast,
+  output [63:0] io_master_wdata,
+  output [7:0] io_master_wstrb,
+  output io_master_wvalid,
+  input reg io_master_wready,
+
+  input reg [3:0] io_master_bid,
+  input reg [1:0] io_master_bresp,
+  input reg io_master_bvalid,
+  output io_master_bready,
+
   // ifu
   input [DATA_W-1:0] ifu_araddr,
   input ifu_arvalid,
