@@ -120,7 +120,6 @@ module ysyx_BUS_ARBITER(
   wire [ADDR_W-1:0] awaddr = lsu_awaddr;
   wire [DATA_W-1:0] wdata = lsu_wdata;
   wire [7:0] wstrb = lsu_wstrb;
-  wire bready = lsu_bready;
   assign lsu_wready_o = (
     (uart_en & uart_awready_o) | 
     (sram_en & awready_o)
