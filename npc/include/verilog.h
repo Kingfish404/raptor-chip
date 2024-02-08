@@ -16,7 +16,7 @@ static inline void verilog_connect(TOP_NAME *top, NPCState *npc)
 
   npc->gpr = (word_t *)&(top->rootp->ysyx__DOT__regs__DOT__rf);
   npc->pc = (uint32_t *)&(top->rootp->ysyx__DOT__pc);
-  npc->ret = npc.gpr + reg_str2idx("a0");
+  npc->ret = npc->gpr + reg_str2idx("a0");
   word_t *csr = (word_t *)&(top->rootp->ysyx__DOT__exu__DOT__csr__DOT__csr);
 
   npc->state = NPC_RUNNING;
