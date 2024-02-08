@@ -229,7 +229,7 @@ module ysyx (
     // to lsu
     .rwen_o(rwen_exu), .wben_o(wben), .ebreak_o(),
     .ren_o(ren_exu), .wen_o(wen_exu),
-    .lsu_avalid_o(lsu_avalid), .alu_op_o(alu_op_exu)
+    .lsu_avalid_o(lsu_avalid), .alu_op_o(alu_op_exu),
     .lsu_mem_wdata_o(lsu_mem_wdata),
 
     // from lsu
