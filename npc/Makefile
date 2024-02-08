@@ -12,7 +12,7 @@ endif
 -include ./include/config/auto.conf
 -include ./include/config/auto.conf.cmd
 
-VTARGET=ysyxSoCFull
+VTARGET=ysyx
 BUILD_DIR = ./build
 OBJ_DIR = $(BUILD_DIR)/obj_dir
 BIN = $(BUILD_DIR)/$(VTARGET)
