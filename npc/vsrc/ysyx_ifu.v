@@ -45,8 +45,7 @@ module ysyx_IFU (
   wire arvalid;
   reg pvalid;
   assign arvalid = pvalid;
-  wire awready, rready, wready, bvalid;
-  wire [1:0] rresp, bresp;
+  // assign arvalid = (ifsr_ready & (prev_valid)) | pvalid;
 
   assign ifu_araddr_o = prev_valid ? npc : pc;
   assign ifu_arvalid_o = arvalid;
