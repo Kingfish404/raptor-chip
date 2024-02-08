@@ -103,10 +103,10 @@ module ysyx_BUS_ARBITER(
   reg lsu_loading = (lsu_arvalid & !lsu_rvalid_o) | (lsu_awvalid & !lsu_wready_o);
 
   // read
-  wire [ADDR_W-1:0] araddr = (ifu_arvalid) ? ifu_araddr : 
-                  (lsu_arvalid) ? lsu_araddr : 0;
-  wire rready = (ifu_arvalid) ? ifu_rready : 
-                  (lsu_arvalid) ? lsu_rready : 0;
+  wire [ADDR_W-1:0] araddr = (lsu_arvalid) ? lsu_araddr : 
+                  (ifu_arvalid) ? ifu_araddr : 0;
+  wire rready = (lsu_arvalid) ? lsu_rready : 
+                  (ifu_arvalid) ? ifu_rready : 0;
 
   // ifu read
   assign ifu_arready_o = !lsu_loading & (ifu_arvalid & (arready_o));
@@ -174,7 +174,9 @@ module ysyx_BUS_ARBITER(
   // assign sram_bvalid_o = io_master_bvalid;
   // assign io_master_bready = bready;
 
-  ysyx_MEM_SRAM #(.ADDR_W(ADDR_W), .DATA_W(DATA_W)) sram(
+  ysyx_MEM_SRAM 
+    #(.ADDR_W(ADDR_W), .DATA_W(DATA_W)) 
+    sram(
     .clk(clk),
     .arburst(2'b00), .arsize(3'b000), .arlen(8'b00000000), .arid(4'b0000),
     .araddr(araddr), .arvalid(sram_arvalid), .arready_o(arready_o),
