@@ -174,10 +174,10 @@ module ysyx_MEM_SRAM(
   always @(posedge clk ) begin lfsr <= {lfsr[18:0], lfsr[19] ^ lfsr[18]}; end
   always @(posedge clk) begin
     mem_rdata_buf[0] <= 0;
+    pmem_read(araddr, mem_rdata_buf[0]);
     if (arvalid & !rvalid_o & rready) begin
       if (ifsr_ready)
       begin
-        pmem_read(araddr, mem_rdata_buf[0]);
         rdata_o <= mem_rdata_buf[0];
         rvalid_o <= 1;
       end
