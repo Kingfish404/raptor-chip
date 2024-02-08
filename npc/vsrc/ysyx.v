@@ -178,7 +178,7 @@ module ysyx (
   
     .lsu_awaddr(lsu_awaddr), .lsu_awvalid(lsu_awvalid),
     .lsu_wdata(lsu_wdata), .lsu_wstrb(lsu_wstrb), .lsu_wvalid(lsu_wvalid),
-    .lsu_wready_o(lsu_wready),
+    .lsu_wready_o(lsu_wready)
   );
 
   // IFU(Instruction Fetch Unit): 负责根据当前PC从存储器中取出一条指令
