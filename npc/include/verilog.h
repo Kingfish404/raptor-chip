@@ -9,8 +9,11 @@
 #include CONCAT_HEAD(CONCAT(TOP_NAME, ___024root))
 #include CONCAT_HEAD(CONCAT(TOP_NAME, __Dpi))
 
+#ifdef YSYX_SOC
+#define VERILOG_PREFIX top->rootp->ysyxSoCFull__DOT__asic__DOT__cpu__DOT__cpu
+#else
 #define VERILOG_PREFIX top->rootp->ysyx
-// #define VERILOG_PREFIX top->rootp->ysyxSoCFull__DOT__asic__DOT__cpu__DOT__cpu
+#endif
 
 static inline void verilog_connect(TOP_NAME *top, NPCState *npc)
 {

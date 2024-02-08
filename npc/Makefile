@@ -12,7 +12,12 @@ endif
 -include ./include/config/auto.conf
 -include ./include/config/auto.conf.cmd
 
+ifeq ($(Mode), "soc")
+VTARGET=ysyxSoCFull
+SOC_DEFINE=-DYSYX_SOC
+else
 VTARGET=ysyx
+endif
 BUILD_DIR = ./build
 OBJ_DIR = $(BUILD_DIR)/obj_dir
 BIN = $(BUILD_DIR)/$(VTARGET)
@@ -37,7 +42,7 @@ all: $(BIN)
 
 # rules for NVBoard
 INCFLAGS = $(addprefix -I, $(INC_PATH))
-CXXFLAGS += $(INCFLAGS) -DTOP_NAME="\"V$(VTARGET)\"" 
+CXXFLAGS += $(INCFLAGS) -DTOP_NAME="\"V$(VTARGET)\"" $(SOC_DEFINE)
 
 $(BIN): $(VSRCS) $(CSRCS) $(NVBOARD_ARCHIVE)
 	$(call git_commit, "build RTL")
