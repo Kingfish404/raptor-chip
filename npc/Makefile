@@ -12,12 +12,14 @@ endif
 -include ./include/config/auto.conf
 -include ./include/config/auto.conf.cmd
 
-VTARGET=ysyx
+VTARGET=ysyxSoCFull
 BUILD_DIR = ./build
 OBJ_DIR = $(BUILD_DIR)/obj_dir
 BIN = $(BUILD_DIR)/$(VTARGET)
-INC_PATH ?= $(abspath ./include) $(abspath ./vsrc/include)
-VERILATOR_FLAG =--prof-c --prof-cfuncs --prof-exec
+SOC_HOME = $(abspath ./../ysyxSOC)
+INC_PATH ?= $(abspath ./include) $(abspath ./vsrc/include) \
+	$(abspath $(SOC_HOME)/perip/uart16550/rtl) $(abspath $(SOC_HOME)/ysyxSoC/perip/spi/rtl) \
+VERILATOR_FLAG =--prof-c --prof-cfuncs --prof-exec --timescale "1ns/1ns" --no-timing
 CXXFLAGS = -Wall -Werror $(call remove_quote,$(CONFIG_CC_OPT))
 LDFLAGS = -lreadline -ldl
 
@@ -26,7 +28,9 @@ include $(FILELIST_MK)
 
 $(shell mkdir -p $(BUILD_DIR))
 
-VSRCS = $(shell find $(abspath ./vsrc) -name "*.v")
+VSRCS = $(shell find $(abspath ./vsrc) -name "*.v") \
+	$(shell find $(abspath $(SOC_HOME)/perip) -name "*.v") \
+	$(SOC_HOME)/generated/ysyxSoCFull.v
 CSRCS = $(shell find $(abspath ./csrc) -name "*.c" -or -name "*.cc" -or -name "*.cpp")
 
 all: $(BIN)

@@ -3,6 +3,76 @@
 module ysyx (
   input clock, reset, 
 
+  // AXI4 Slave
+  input [1:0] io_slave_arburst,
+  input [2:0] io_slave_arsize,
+  input [7:0] io_slave_arlen,
+  input [3:0] io_slave_arid,
+  input [ADDR_W-1:0] io_slave_araddr,
+  input io_slave_arvalid,
+  output reg io_slave_arready_o,
+
+  output reg [3:0] io_slave_rid,
+  output reg io_slave_rlast_o,
+  output reg [DATA_W-1:0] io_slave_rdata_o,
+  output reg [1:0] io_slave_rresp_o,
+  output reg io_slave_rvalid_o,
+  input io_slave_rready,
+
+  input [1:0] io_slave_awburst,
+  input [2:0] io_slave_awsize,
+  input [7:0] io_slave_awlen,
+  input [3:0] io_slave_awid,
+  input [ADDR_W-1:0] io_slave_awaddr,
+  input io_slave_awvalid,
+  output reg io_slave_awready_o,
+
+  input io_slave_wlast,
+  input [DATA_W-1:0] io_slave_wdata,
+  input [7:0] io_slave_wstrb,
+  input io_slave_wvalid,
+  output reg io_slave_wready_o,
+
+  output reg [3:0] io_slave_bid,
+  output reg [1:0] io_slave_bresp_o,
+  output reg io_slave_bvalid_o,
+  input io_slave_bready,
+
+  // AXI4 Master
+  output [1:0] io_master_arburst,
+  output [2:0] io_master_arsize,
+  output [7:0] io_master_arlen,
+  output [3:0] io_master_arid,
+  output [ADDR_W-1:0] io_master_araddr,
+  output io_master_arvalid,
+  input reg io_master_arready_o,
+
+  input reg [3:0] io_master_rid,
+  input reg io_master_rlast_o,
+  input reg [DATA_W-1:0] io_master_rdata_o,
+  input reg [1:0] io_master_rresp_o,
+  input reg io_master_rvalid_o,
+  output io_master_rready,
+
+  output [1:0] io_master_awburst,
+  output [2:0] io_master_awsize,
+  output [7:0] io_master_awlen,
+  output [3:0] io_master_awid,
+  output [ADDR_W-1:0] io_master_awaddr,
+  output io_master_awvalid,
+  input reg io_master_awready_o,
+
+  output io_master_wlast,
+  output [DATA_W-1:0] io_master_wdata,
+  output [7:0] io_master_wstrb,
+  output io_master_wvalid,
+  input reg io_master_wready_o,
+
+  input reg [3:0] io_master_bid,
+  input reg [1:0] io_master_bresp_o,
+  input reg io_master_bvalid_o,
+  output io_master_bready,
+
   input io_interrupt
 );
   parameter BIT_W = `ysyx_W_WIDTH;
