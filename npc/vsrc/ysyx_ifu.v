@@ -51,7 +51,6 @@ module ysyx_IFU (
   assign ifu_araddr_o = prev_valid ? npc : pc;
   assign ifu_arvalid_o = arvalid;
   assign inst_o = ifu_rvalid ? ifu_rdata : inst_ifu;
-  assign rresp = ifu_rresp;
   assign valid_o = ifu_rvalid | valid;
   assign ifu_rready_o = ifsr_ready;
 endmodule // ysyx_IFU
