@@ -96,9 +96,6 @@ module ysyx_BUS_ARBITER(
   wire [ADDR_W-1:0] sram_araddr = (
     (lsu_arvalid) ? lsu_araddr : 
     (ifu_arvalid) ? ifu_araddr : 0);
-  wire rready = (
-    (lsu_arvalid) ? lsu_rready : 
-    (ifu_arvalid) ? ifu_rready : 0);
 
   // ifu read
   assign ifu_arready_o = !lsu_loading & (ifu_arvalid & (arready_o));

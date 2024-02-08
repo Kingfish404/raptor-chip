@@ -56,7 +56,6 @@ module ysyx_LSU(
   assign lsu_arvalid_o = ifsr_ready & ren & avalid;
 
   assign rdata = lsu_rdata;
-  assign rvalid = lsu_rvalid;
 
   assign lsu_awaddr_o = idu_valid ? addr : lsu_araddr;
   assign lsu_awvalid_o = ifsr_ready & wen & avalid;
