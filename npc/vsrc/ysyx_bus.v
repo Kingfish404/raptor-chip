@@ -103,7 +103,7 @@ module ysyx_BUS_ARBITER(
   reg lsu_loading = (lsu_arvalid & !lsu_rvalid_o) | (lsu_awvalid & !lsu_wready_o);
 
   // read
-  wire [ADDR_W-1:0] araddr = (
+  wire [ADDR_W-1:0] sram_araddr = (
     (lsu_arvalid) ? lsu_araddr : 
     (ifu_arvalid) ? ifu_araddr : 0);
   wire rready = (
@@ -181,7 +181,7 @@ module ysyx_BUS_ARBITER(
     sram(
     .clk(clk),
     .arburst(2'b00), .arsize(3'b000), .arlen(8'b00000000), .arid(4'b0000),
-    .araddr(araddr), .arvalid(sram_arvalid), .arready_o(arready_o),
+    .araddr(sram_araddr), .arvalid(sram_arvalid), .arready_o(arready_o),
     .rid(), .rlast_o(),
     .rdata_o(rdata_o), .rresp_o(rresp_o), .rvalid_o(rvalid_o), .rready(rready),
     .awburst(2'b00), .awsize(3'b000), .awlen(8'b00000000), .awid(4'b0000),
@@ -218,7 +218,7 @@ module ysyx_BUS_ARBITER(
   ysyx_CLINT #(.ADDR_W(ADDR_W), .DATA_W(DATA_W)) clint(
     .clk(clk), .rst(rst),
     .arburst(2'b00), .arsize(3'b000), .arlen(8'b00000000), .arid(4'b0000),
-    .araddr(araddr), .arvalid(clint_arvalid), .arready_o(clint_arready_o),
+    .araddr(sram_araddr), .arvalid(clint_arvalid), .arready_o(clint_arready_o),
     .rid(), .rlast_o(),
     .rdata_o(clint_rdata_o), .rresp_o(clint_rresp_o), .rvalid_o(clint_rvalid_o), .rready(rready),
     .awburst(2'b00), .awsize(3'b000), .awlen(8'b00000000), .awid(4'b0000),
