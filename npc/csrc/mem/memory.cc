@@ -57,10 +57,8 @@ static inline void host_write(void *addr, word_t data, int len)
     }
 }
 
-extern "C" void pmem_read(word_t araddr, word_t *data)
+extern "C" void pmem_read(word_t raddr, word_t *data)
 {
-    printf("raddr: " FMT_WORD_NO_PREFIX ", data: " FMT_WORD_NO_PREFIX "\n",
-           araddr, *data);
 #ifdef CONFIG_SOFT_MMIO
     if (raddr == RTC_ADDR + 4)
     {
@@ -79,9 +77,11 @@ extern "C" void pmem_read(word_t araddr, word_t *data)
         return;
     }
 #endif
-    if (araddr >= MBASE && araddr < MBASE + MSIZE)
+    if (raddr >= MBASE && raddr < MBASE + MSIZE)
     {
-        *data = host_read(pmem + araddr - MBASE, 4);
+        *data = host_read(pmem + raddr - MBASE, 4);
+        printf("raddr: " FMT_WORD_NO_PREFIX ", data: " FMT_WORD_NO_PREFIX "\n",
+               raddr, *data);
         return;
     }
     npc_abort();
