@@ -178,8 +178,8 @@ module ysyx_MEM_SRAM(
       if (ifsr_ready)
       begin
         pmem_read(araddr, mem_rdata_buf[0]);
-        rvalid_o = 1;
         rdata_o <= mem_rdata_buf[0];
+        rvalid_o <= 1;
       end
     end else begin
       rvalid_o <= 0; rdata_o <= 0;
