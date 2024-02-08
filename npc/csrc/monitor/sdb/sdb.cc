@@ -224,6 +224,7 @@ void sdb_sim_init(int argc, char **argv)
   top->trace(tfp, 99);
   tfp->open("npc.vcd");
 #endif
+  verilog_connect(top, &npc);
   // npc.gpr = (word_t *)&(top->rootp->top__DOT__regs__DOT__rf);
   // npc.pc = (uint32_t *)&(top->rootp->top__DOT__pc);
   // npc.ret = npc.gpr + reg_str2idx("a0");
