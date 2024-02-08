@@ -51,26 +51,16 @@ module ysyx_BUS_ARBITER(
   // lsu:load
   input [DATA_W-1:0] lsu_araddr,
   input lsu_arvalid,
-  output lsu_arready_o,
-
   output [DATA_W-1:0] lsu_rdata_o,
-  output [1:0] lsu_rresp_o,
   output lsu_rvalid_o,
-  input lsu_rready,
 
   // lsu:store
   input [DATA_W-1:0] lsu_awaddr,
   input lsu_awvalid,
-  output lsu_awready_o,
-
   input [DATA_W-1:0] lsu_wdata,
   input [7:0] lsu_wstrb,
   input lsu_wvalid,
-  output lsu_wready_o,
-
-  output [1:0] lsu_bresp_o,
-  output lsu_bvalid_o,
-  input lsu_bready
+  output lsu_wready_o
 );
   parameter ADDR_W = 32, DATA_W = 32;
 
@@ -118,12 +108,11 @@ module ysyx_BUS_ARBITER(
   
   // lsu read
   wire clint_en = (lsu_araddr == `ysyx_BUS_RTC_ADDR) | (lsu_araddr == `ysyx_BUS_RTC_ADDR_UP);
-  assign lsu_arready_o = (lsu_arvalid & (clint_arready_o | lsu_arvalid));
   assign lsu_rdata_o = ({DATA_W{lsu_arvalid}} & (
     ({DATA_W{clint_en}} & clint_rdata_o) | 
     ({DATA_W{!clint_en}} & rdata_o)
   ));
-  assign lsu_rresp_o = clint_rresp_o | rresp_o;
+  assign lsu_rvalid_o = rvalid_o | clint_rvalid_o;
 
   // lsu write
   wire uart_en = (lsu_awaddr == `ysyx_BUS_SERIAL_PORT);
@@ -135,19 +124,9 @@ module ysyx_BUS_ARBITER(
   wire [DATA_W-1:0] wdata = lsu_wdata;
   wire [7:0] wstrb = lsu_wstrb;
   wire bready = lsu_bready;
-  assign lsu_awready_o = (
+  assign lsu_wready_o = (
     (uart_en & uart_awready_o) | 
     (sram_en & awready_o)
-  );
-  assign lsu_wready_o = wready_o | uart_wready_o;
-  assign lsu_rvalid_o = rvalid_o | clint_rvalid_o;
-  assign lsu_bvalid_o = (
-    (uart_en & uart_bvalid_o) | 
-    (sram_en & sram_bvalid_o)
-  );
-  assign lsu_bresp_o = (
-    ({2{uart_en}} & uart_bresp_o) | 
-    ({2{sram_en}} & sram_bresp_o)
   );
 
   reg [19:0] lfsr = 1;
