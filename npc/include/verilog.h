@@ -9,9 +9,9 @@
 #include "Vysyx___024root.h"
 #include "Vysyx__Dpi.h"
 
-#define CONCAT_HEAD(TOP_NAME)
-// #define CONCAT_HEAD(CONCAT(TOP_NAME, ___024root))
-// #define CONCAT_HEAD(CONCAT(TOP_NAME, __Dpi))
+#include CONCAT_HEAD(TOP_NAME)
+#include CONCAT_HEAD(CONCAT(TOP_NAME, ___024root))
+#include CONCAT_HEAD(CONCAT(TOP_NAME, __Dpi))
 
 static inline void verilog_connect(TOP_NAME *top, NPCState *npc)
 {
