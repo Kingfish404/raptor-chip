@@ -181,7 +181,7 @@ module ysyx_BUS_ARBITER(
     .wlast(1'b0),
     .wdata(wdata), .wstrb(wstrb), .wvalid(uart_wvalid), .wready_o(uart_wready_o),
     .bid(),
-    .bresp_o(uart_bresp_o), .bvalid_o(uart_bvalid_o), .bready(bready)
+    .bresp_o(uart_bresp_o), .bvalid_o(uart_bvalid_o), .bready(1)
   );
 
   wire clint_arvalid = (lsu_arvalid & clint_en);
@@ -195,7 +195,7 @@ module ysyx_BUS_ARBITER(
     .arburst(2'b00), .arsize(3'b000), .arlen(8'b00000000), .arid(4'b0000),
     .araddr(sram_araddr), .arvalid(clint_arvalid), .arready_o(clint_arready_o),
     .rid(), .rlast_o(),
-    .rdata_o(clint_rdata_o), .rresp_o(clint_rresp_o), .rvalid_o(clint_rvalid_o), .rready(rready),
+    .rdata_o(clint_rdata_o), .rresp_o(clint_rresp_o), .rvalid_o(clint_rvalid_o), .rready(1),
     .awburst(2'b00), .awsize(3'b000), .awlen(8'b00000000), .awid(4'b0000),
     .awaddr(0), .awvalid(0), .awready_o(clint_awready_o),
     .wlast(1'b0),
