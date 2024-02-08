@@ -3,6 +3,7 @@
 #define __NPC_VERILOG_H__
 
 #include <common.h>
+#include <cpu.h>
 
 #include "Vysyx.h"
 #include "Vysyx___024root.h"
