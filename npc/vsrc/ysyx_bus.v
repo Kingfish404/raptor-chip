@@ -77,11 +77,7 @@ module ysyx_BUS_ARBITER(
   always @(posedge clk) begin
     if (rst) begin lsu_loading <= 0;
     end else begin
-      if (lsu_arvalid) begin
-        lsu_loading <= 1;
-      end else if (lsu_rvalid_o) begin
-        lsu_loading <= 0;
-      end
+      lsu_loading <= lsu_arvalid;
     end
   end
   // reg lsu_loading = (lsu_arvalid & !lsu_rvalid_o) | (lsu_awvalid & !lsu_wready_o);
