@@ -71,7 +71,7 @@ module ysyx_EXU (
     end
     else begin
       if (rvalid_wready & alu_valid) begin valid_o <= 1; end
-      if (state == `ysyx_IDLE) begin valid_o <= 0; end
+      if (next_ready) begin valid_o <= 0; end
       if (state == `ysyx_IDLE & prev_valid) begin
         imm_exu <= imm; pc_exu <= pc;
         src1 <= op1; src2 <= op2;
