@@ -1,4 +1,4 @@
-`include "npc_macro.v"
+`include "ysyx_macro.v"
 
 module ysyx_ALU (
   input wire [BIT_W-1:0] alu_src1,

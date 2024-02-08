@@ -1,4 +1,4 @@
-`include "npc_macro.v"
+`include "ysyx_macro.v"
 
 module ysyx_BUS_ARBITER(
   input clk, rst,

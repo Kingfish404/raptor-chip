@@ -1,4 +1,4 @@
-`include "npc_macro.v"
+`include "ysyx_macro.v"
 
 module top (
   input clock, reset, io_interrupt,

@@ -1,8 +1,9 @@
 import circt.stage._
-import gcd.GCD
+import npc._
 
 object Elaborate extends App {
-  def top = new GCD()
-  val generator = Seq(chisel3.stage.ChiselGeneratorAnnotation(() => top))
-  (new ChiselStage).execute(args, generator :+ CIRCTTargetAnnotation(CIRCTTarget.Verilog))
+  def ysyx = new NPC()
+  val generator = Seq(chisel3.stage.ChiselGeneratorAnnotation(() => ysyx))
+  (new ChiselStage)
+    .execute(args, generator :+ CIRCTTargetAnnotation(CIRCTTarget.Verilog))
 }

@@ -1,4 +1,4 @@
-`include "npc_macro.v"
+`include "ysyx_macro.v"
 
 // Universal Asynchronous Receiver-Transmitter
 module ysyx_UART(
