@@ -234,7 +234,7 @@ module ysyx (
     .lsu_mem_wdata_o(lsu_mem_wdata),
 
     // from lsu
-    .mem_rdata(lsu_rdata),
+    .lsu_rdata(lsu_rdata),
     .lsu_exu_rvalid(lsu_exu_rvalid), .lsu_exu_wready(lsu_exu_wready)
     );
 

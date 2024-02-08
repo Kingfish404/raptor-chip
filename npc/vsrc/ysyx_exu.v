@@ -10,7 +10,7 @@ module ysyx_EXU (
   // for bus
   output lsu_avalid_o,
   output [BIT_W-1:0] lsu_mem_wdata_o,
-  input [BIT_W-1:0] mem_rdata,
+  input [BIT_W-1:0] lsu_rdata,
   input lsu_exu_rvalid, lsu_exu_wready,
 
   input ren, wen, rwen,
@@ -38,6 +38,7 @@ module ysyx_EXU (
   reg [6:0] opcode_exu;
   reg csr_wen = 0;
   reg csr_ecallen = 0;
+  reg [BIT_W-1:0] mem_rdata;
 
   ysyx_CSR_Reg csr(
     .clk(clk), .rst(rst), .wen(csr_wen), .exu_valid(valid_o), .ecallen(csr_ecallen),
@@ -74,7 +75,9 @@ module ysyx_EXU (
     end
     else begin
       if (wen_o) begin lsu_valid <= lsu_exu_wready; end
-      if (ren_o) begin lsu_valid <= lsu_exu_rvalid; end
+      if (ren_o) begin 
+        mem_rdata <= lsu_rdata;
+        lsu_valid <= lsu_exu_rvalid; end
       if (state == `ysyx_IDLE & prev_valid) begin
         imm_exu <= imm; pc_exu <= pc;
         src1 <= op1; src2 <= op2;
