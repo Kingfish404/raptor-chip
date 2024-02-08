@@ -144,7 +144,7 @@ module ysyx (
     .reg_wdata_o(reg_wdata),
     .npc_wdata_o(npc_wdata),
     .rd_o(rd_exu), .alu_op_o(alu_op_exu),
-    .rwen_o(rwen_exu), .wben_o(wben), .ebreak_o(ebreak),
+    .rwen_o(rwen_exu), .wben_o(wben), .ebreak_o(),
     .ren_o(ren_exu), .wen_o(wen_exu)
     );
 
