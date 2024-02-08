@@ -66,6 +66,7 @@ module ysyx_EXU (
   // assign valid_o = lsu_exu_wready & lsu_exu_rvalid & alu_valid;
   assign wben_o = valid_o & valid_once;
   assign ready_o = !valid_o;
+  // assign ready_o = (state != `ysyx_WAIT_READY);
   `ysyx_BUS_FSM()
   always @(posedge clk) begin
     if (rst) begin
