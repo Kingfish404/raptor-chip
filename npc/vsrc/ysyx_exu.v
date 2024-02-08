@@ -80,7 +80,7 @@ module ysyx_EXU (
         end
         if (ren_o & lsu_exu_rvalid) begin
           lsu_valid <= lsu_exu_rvalid;
-          reg_wdata <= lsu_rdata; ren_o <= 0;
+          mem_rdata <= lsu_rdata; ren_o <= 0;
         end
         if (prev_valid) begin
           imm_exu <= imm; pc_exu <= pc;
