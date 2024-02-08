@@ -95,7 +95,6 @@ module ysyx (
   wire [BIT_W-1:0] ifu_rdata;
   wire lsu_arready, lsu_rvalid, lsu_awready, lsu_bvalid;
   wire [1:0] lsu_rresp, lsu_bresp;
-  wire [BIT_W-1:0] lsu_rdata;
 
   // IDU output
   wire [BIT_W-1:0] op1, op2, imm, op_j, pc_idu, rwaddr;
@@ -125,6 +124,7 @@ module ysyx (
   wire rwen_exu, wben, ren_exu, wen_exu;
 
   // BUS output
+  wire [BIT_W-1:0] bus_lsu_rdata;
   wire lsu_avalid;
   wire [BIT_W-1:0] lsu_mem_wdata;
   wire lsu_wready;
@@ -174,7 +174,7 @@ module ysyx (
     .ifu_rdata_o(ifu_rdata),
 
     .lsu_araddr(lsu_araddr), .lsu_arvalid(lsu_arvalid),
-    .lsu_rdata_o(lsu_rdata), .lsu_rvalid_o(lsu_rvalid),
+    .lsu_rdata_o(bus_lsu_rdata), .lsu_rvalid_o(lsu_rvalid),
   
     .lsu_awaddr(lsu_awaddr), .lsu_awvalid(lsu_awvalid),
     .lsu_wdata(lsu_wdata), .lsu_wstrb(lsu_wstrb), .lsu_wvalid(lsu_wvalid),
