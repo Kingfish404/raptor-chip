@@ -212,7 +212,7 @@ module ysyx (
     .op1_o(op1), .op2_o(op2), .op_j_o(op_j), .rwaddr_o(rwaddr),
     .imm_o(imm),
     .rs1_o(rs1), .rs2_o(rs2), .rd_o(rd),
-    .alu_op_o(alu_op), // .funct7_o(funct7),
+    .alu_op_o(alu_op),
     .opcode_o(opcode), .pc_o(pc_idu)
     );
 
