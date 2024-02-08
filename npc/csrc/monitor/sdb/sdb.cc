@@ -217,7 +217,7 @@ void sdb_sim_init(int argc, char **argv)
 {
   contextp = new VerilatedContext;
   contextp->commandArgs(argc, argv);
-  top = new Vtop{contextp};
+  top = new TOP_NAME{contextp};
   Verilated::traceEverOn(true);
 #ifdef CONFIG_WTRACE
   tfp = new VerilatedVcdC;
