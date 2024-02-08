@@ -257,7 +257,7 @@ module ysyx (
 
     // to-from bus load
     .lsu_araddr_o(lsu_araddr), .lsu_arvalid_o(lsu_arvalid),
-    .lsu_rdata(lsu_rdata), .lsu_rvalid(lsu_rvalid),
+    .lsu_rdata(bus_lsu_rdata), .lsu_rvalid(lsu_rvalid),
 
     // to-from bus store
     .lsu_awaddr_o(lsu_awaddr), .lsu_awvalid_o(lsu_awvalid),

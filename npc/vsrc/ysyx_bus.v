@@ -164,7 +164,7 @@ module ysyx_BUS_ARBITER(
     .wlast(1'b0),
     .wdata(wdata), .wstrb(wstrb), .wvalid(sram_wvalid), .wready_o(wready_o),
     .bid(),
-    .bresp_o(sram_bresp_o), .bvalid_o(sram_bvalid_o), .bready(bready)
+    .bresp_o(sram_bresp_o), .bvalid_o(sram_bvalid_o), .bready(1)
   );
 
   wire [DATA_W-1:0] uart_rdata_o;
