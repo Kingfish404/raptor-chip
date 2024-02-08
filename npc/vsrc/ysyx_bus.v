@@ -158,7 +158,7 @@ module ysyx_BUS_ARBITER(
     .arburst(2'b00), .arsize(3'b000), .arlen(8'b00000000), .arid(4'b0000),
     .araddr(sram_araddr), .arvalid(sram_arvalid), .arready_o(arready_o),
     .rid(), .rlast_o(),
-    .rdata_o(rdata_o), .rresp_o(rresp_o), .rvalid_o(rvalid_o), .rready(rready),
+    .rdata_o(rdata_o), .rresp_o(rresp_o), .rvalid_o(rvalid_o), .rready(1),
     .awburst(2'b00), .awsize(3'b000), .awlen(8'b00000000), .awid(4'b0000),
     .awaddr(awaddr), .awvalid(awvalid), .awready_o(awready_o),
     .wlast(1'b0),
