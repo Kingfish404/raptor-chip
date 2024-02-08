@@ -1,8 +1,9 @@
 `include "ysyx_macro.v"
 
 module ysyx (
-  input clock, reset, io_interrupt,
-  output ebreak
+  input clock, reset, 
+
+  input io_interrupt
 );
   parameter BIT_W = `ysyx_W_WIDTH;
   // PC unit output
