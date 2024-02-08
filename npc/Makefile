@@ -12,7 +12,7 @@ endif
 -include ./include/config/auto.conf
 -include ./include/config/auto.conf.cmd
 
-ifeq ($(MODE), "soc")
+ifeq ($(MODE), soc)
 VTARGET=ysyxSoCFull
 SOC_DEFINE=-DYSYX_SOC
 else
