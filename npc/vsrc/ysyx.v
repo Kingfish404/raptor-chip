@@ -247,7 +247,7 @@ module ysyx (
     .wdata(lsu_mem_wdata),
 
     // to exu
-    .rdata_o(lsu_mem_rdata), .rvalid_o(lsu_exu_rvalid), .wready_o(lsu_exu_wready)
+    .rdata_o(lsu_mem_rdata), .rvalid_o(lsu_exu_rvalid), .wready_o(lsu_exu_wready),
 
     // to bus
     .lsu_araddr_o(lsu_araddr), .lsu_arvalid_o(lsu_arvalid), .lsu_arready(lsu_arready),
@@ -256,7 +256,7 @@ module ysyx (
     .lsu_awaddr_o(lsu_awaddr), .lsu_awvalid_o(lsu_awvalid), .lsu_awready(lsu_awready),
     .lsu_wdata_o(lsu_wdata), .lsu_wstrb_o(lsu_wstrb), .lsu_wvalid_o(lsu_wvalid), .lsu_wready(lsu_wready),
 
-    .lsu_bresp(lsu_bresp), .lsu_bvalid(lsu_bvalid), .lsu_bready_o(lsu_bready),
+    .lsu_bresp(lsu_bresp), .lsu_bvalid(lsu_bvalid), .lsu_bready_o(lsu_bready)
   );
 
 endmodule // top
