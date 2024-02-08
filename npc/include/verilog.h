@@ -5,10 +5,6 @@
 #include <common.h>
 #include <cpu.h>
 
-// #include "Vysyx.h"
-// #include "Vysyx___024root.h"
-// #include "Vysyx__Dpi.h"
-
 #include CONCAT_HEAD(TOP_NAME)
 #include CONCAT_HEAD(CONCAT(TOP_NAME, ___024root))
 #include CONCAT_HEAD(CONCAT(TOP_NAME, __Dpi))
