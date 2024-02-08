@@ -67,7 +67,7 @@ module ysyx_EXU (
   `ysyx_BUS_FSM()
   always @(posedge clk) begin
     if (rst) begin
-      alu_valid <= 0; lsu_avalid <= 0;
+      alu_valid <= 0; lsu_avalid <= 0; valid_o <= 0;
     end
     else begin
       if (rvalid_wready & alu_valid) begin valid_o <= 1; end
