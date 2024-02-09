@@ -163,40 +163,40 @@ module ysyx_BUS_ARBITER(
   //   .bresp_o(sram_bresp_o), .bvalid_o(sram_bvalid_o), .bready(1)
   // );
 
-  // wire [DATA_W-1:0] uart_rdata_o;
-  // wire [1:0] uart_rresp_o, uart_bresp_o;
-  // wire uart_arready_o, uart_rvalid_o, uart_awready_o, uart_wready_o, uart_bvalid_o;
-  // ysyx_UART #(.ADDR_W(ADDR_W), .DATA_W(DATA_W)) uart(
-  //             .clk(clk),
-  //             .arburst(2'b00), .arsize(3'b000), .arlen(8'b00000000), .arid(4'b0000),
-  //             .araddr(0), .arvalid(0), .arready_o(uart_arready_o),
-  //             .rid(), .rlast_o(),
-  //             .rdata_o(uart_rdata_o), .rresp_o(uart_rresp_o), .rvalid_o(uart_rvalid_o), .rready(0),
-  //             .awburst(2'b00), .awsize(3'b000), .awlen(8'b00000000), .awid(4'b0000),
-  //             .awaddr(awaddr), .awvalid(sram_awvalid), .awready_o(uart_awready_o),
-  //             .wlast(1'b0),
-  //             .wdata(wdata), .wstrb(wstrb), .wvalid(uart_wvalid), .wready_o(uart_wready_o),
-  //             .bid(),
-  //             .bresp_o(uart_bresp_o), .bvalid_o(uart_bvalid_o), .bready(1)
-  //           );
+  wire [DATA_W-1:0] uart_rdata_o;
+  wire [1:0] uart_rresp_o, uart_bresp_o;
+  wire uart_arready_o, uart_rvalid_o, uart_awready_o, uart_wready_o, uart_bvalid_o;
+  ysyx_UART #(.ADDR_W(ADDR_W), .DATA_W(DATA_W)) uart(
+              .clk(clk),
+              .arburst(2'b00), .arsize(3'b000), .arlen(8'b00000000), .arid(4'b0000),
+              .araddr(0), .arvalid(0), .arready_o(uart_arready_o),
+              .rid(), .rlast_o(),
+              .rdata_o(uart_rdata_o), .rresp_o(uart_rresp_o), .rvalid_o(uart_rvalid_o), .rready(0),
+              .awburst(2'b00), .awsize(3'b000), .awlen(8'b00000000), .awid(4'b0000),
+              .awaddr(awaddr), .awvalid(sram_awvalid), .awready_o(uart_awready_o),
+              .wlast(1'b0),
+              .wdata(wdata), .wstrb(wstrb), .wvalid(uart_wvalid), .wready_o(uart_wready_o),
+              .bid(),
+              .bresp_o(uart_bresp_o), .bvalid_o(uart_bvalid_o), .bready(1)
+            );
 
-  // wire clint_arvalid = (lsu_arvalid & clint_en);
-  // wire clint_arready_o;
-  // wire [DATA_W-1:0] clint_rdata_o;
-  // wire [1:0] clint_rresp_o, clint_bresp_o;
-  // wire clint_rvalid_o;
-  // wire clint_awready_o, clint_wready_o, clint_bvalid_o;
-  // ysyx_CLINT #(.ADDR_W(ADDR_W), .DATA_W(DATA_W)) clint(
-  //              .clk(clk), .rst(rst),
-  //              .arburst(2'b00), .arsize(3'b000), .arlen(8'b00000000), .arid(4'b0000),
-  //              .araddr(sram_araddr), .arvalid(clint_arvalid), .arready_o(clint_arready_o),
-  //              .rid(), .rlast_o(),
-  //              .rdata_o(clint_rdata_o), .rresp_o(clint_rresp_o), .rvalid_o(clint_rvalid_o), .rready(1),
-  //              .awburst(2'b00), .awsize(3'b000), .awlen(8'b00000000), .awid(4'b0000),
-  //              .awaddr(0), .awvalid(0), .awready_o(clint_awready_o),
-  //              .wlast(1'b0),
-  //              .wdata(0), .wstrb(0), .wvalid(0), .wready_o(clint_wready_o),
-  //              .bid(),
-  //              .bresp_o(clint_bresp_o), .bvalid_o(clint_bvalid_o), .bready(0)
-  //            );
+  wire clint_arvalid = (lsu_arvalid & clint_en);
+  wire clint_arready_o;
+  wire [DATA_W-1:0] clint_rdata_o;
+  wire [1:0] clint_rresp_o, clint_bresp_o;
+  wire clint_rvalid_o;
+  wire clint_awready_o, clint_wready_o, clint_bvalid_o;
+  ysyx_CLINT #(.ADDR_W(ADDR_W), .DATA_W(DATA_W)) clint(
+               .clk(clk), .rst(rst),
+               .arburst(2'b00), .arsize(3'b000), .arlen(8'b00000000), .arid(4'b0000),
+               .araddr(sram_araddr), .arvalid(clint_arvalid), .arready_o(clint_arready_o),
+               .rid(), .rlast_o(),
+               .rdata_o(clint_rdata_o), .rresp_o(clint_rresp_o), .rvalid_o(clint_rvalid_o), .rready(1),
+               .awburst(2'b00), .awsize(3'b000), .awlen(8'b00000000), .awid(4'b0000),
+               .awaddr(0), .awvalid(0), .awready_o(clint_awready_o),
+               .wlast(1'b0),
+               .wdata(0), .wstrb(0), .wvalid(0), .wready_o(clint_wready_o),
+               .bid(),
+               .bresp_o(clint_bresp_o), .bvalid_o(clint_bvalid_o), .bready(0)
+             );
 endmodule
