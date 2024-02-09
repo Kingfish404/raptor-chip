@@ -132,10 +132,40 @@ extern "C" void flash_read(uint32_t addr, uint32_t *data)
     *data = 0b00000000000100000000000001110011; // ebreak
 }
 
-extern uint8_t ramdisk_start, ramdisk_end;
+#include <stdint.h>
+
+#define STR2(x) #x
+#define STR(x) STR2(x)
+
+#ifdef __APPLE__
+#define USTR(x) "_" STR(x)
+#else
+#define USTR(x) STR(x)
+#endif
+
+#ifdef _WIN32
+#define INCBIN_SECTION ".rdata, \"dr\""
+#elif defined __APPLE__
+#define INCBIN_SECTION "__TEXT,__const"
+#else
+#define INCBIN_SECTION ".rodata"
+#endif
+
+#define INCBIN(prefix, name, file)                                            \
+    asm(".section " INCBIN_SECTION "\n");                                     \
+    asm(".global " USTR(prefix) "_" STR(name) "_start\n");                    \
+    asm(".balign 16\n" USTR(prefix) "_" STR(name) "_start:\n");               \
+    asm(".incbin \"" file "\"\n");                                            \
+    asm(".global " STR(prefix) "_" STR(name) "_end\n");                       \
+    asm(".balign 1\n" USTR(prefix) "_" STR(name) "_end:\n");                  \
+    asm(".byte 0\n");                                                         \
+    extern __attribute__((aligned(16))) const char prefix##_##name##_start[]; \
+    extern const uint8_t prefix##_##name##_end[];
+
+INCBIN(ramdisk, mrom, "/Users/jinyu/Developer/c-project/ysyx-workbench/npc/csrc/mem/mrom-data/build/mrom-data.bin");
 
 extern "C" void mrom_read(uint32_t addr, uint32_t *data)
 {
-    printf("ramdisk_start = 0x%x, ramdisk_end = 0x%x\n", ramdisk_start, ramdisk_end);
+    printf("ramdisk_start = 0x%x, ramdisk_end = 0x%x\n", ramdisk_mrom_start, ramdisk_mrom_end);
     *data = 0b00000000000100000000000001110011; // ebreak
 }
