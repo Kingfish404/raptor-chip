@@ -21,9 +21,11 @@ image: $(IMAGE).elf
 	@echo + OBJCOPY "->" $(IMAGE_REL).bin
 	@$(OBJCOPY) -S --set-section-flags .bss=alloc,contents -O binary $(IMAGE).elf $(IMAGE).bin
 
-# run1:
-# 	echo $(IMAGE)
+run:
+	echo $(IMAGE).bin
+	make -C $(NPC_HOME) clean
+	make -C $(NPC_HOME) ISA=$(ISA) MROM_PATH=$(IMAGE).bin
 
-run: image
-	echo $(IMAGE)
-	make -C $(NPC_HOME) ISA=$(ISA) run NPCFLAGS="$(NPCFLAGS)" IMG=$(IMAGE).bin
+# run: image
+# 	echo $(IMAGE)
+# 	make -C $(NPC_HOME) ISA=$(ISA) run NPCFLAGS="$(NPCFLAGS)" IMG=$(IMAGE).bin
