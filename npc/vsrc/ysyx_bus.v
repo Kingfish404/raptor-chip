@@ -123,8 +123,8 @@ module ysyx_BUS_ARBITER(
 
   assign rdata_o = io_master_rdata[31:0];
   assign rresp_o = io_master_rresp;
-  // assign rvalid_o = io_master_rvalid;
-  assign io_master_rready = rready;
+  assign rvalid_o = io_master_rvalid;
+  assign io_master_rready = 1;
 
   assign io_master_awaddr = awaddr;
   assign io_master_awvalid = sram_awvalid;
@@ -133,11 +133,11 @@ module ysyx_BUS_ARBITER(
   assign io_master_wdata[31:0] = wdata;
   assign io_master_wstrb = wstrb;
   assign io_master_wvalid = sram_wvalid;
-  // assign wready_o = io_master_wready;
+  assign wready_o = io_master_wready;
 
   assign sram_bresp_o = io_master_bresp;
   assign sram_bvalid_o = io_master_bvalid;
-  assign io_master_bready = bready;
+  assign io_master_bready = 1;
 
   // ysyx_MEM_SRAM 
   //   #(.ADDR_W(ADDR_W), .DATA_W(DATA_W)) 
