@@ -134,5 +134,5 @@ extern "C" void flash_read(uint32_t addr, uint32_t *data)
 
 extern "C" void mrom_read(uint32_t addr, uint32_t *data)
 {
-    assert(0);
+    *data = 0b00000000000100000000000001110011; // ebreak
 }
