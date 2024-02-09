@@ -43,7 +43,7 @@ all: $(BIN)
 
 # rules for NVBoard
 INCFLAGS = $(addprefix -I, $(INC_PATH))
-CXXFLAGS += $(INCFLAGS) -DTOP_NAME="\"V$(VTARGET)\"" $(SOC_DEFINE)
+CXXFLAGS += $(INCFLAGS) -DTOP_NAME="\"V$(VTARGET)\"" $(SOC_DEFINE) -DNPC_HOME=$(NPC_HOME)
 
 $(BIN): $(VSRCS) $(CCSRCS) $(NVBOARD_ARCHIVE)
 	$(call git_commit, "build RTL")
@@ -66,7 +66,7 @@ sim: $(BIN)
 	@$^
 
 test:
-	echo $(VTARGET)
+	echo $(CXXFLAGS)
 
 include ../Makefile
 
