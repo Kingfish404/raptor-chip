@@ -36,7 +36,7 @@ $(shell mkdir -p $(BUILD_DIR))
 VSRCS = $(shell find $(abspath ./vsrc) -name "*.v") \
 	$(shell find $(abspath $(SOC_HOME)/perip) -name "*.v") \
 	$(SOC_HOME)/generated/ysyxSoCFull.v
-SSRC = $(shell find $(abspath ./ssrc) -name "*.s")
+SSRC = $(shell find $(abspath ./csrc) -name "*.s")
 CSRCS = $(shell find $(abspath ./csrc) -name "*.c")
 CCSRCS = $(shell find $(abspath ./csrc) -name "*.cc" -or -name "*.cpp")
 
