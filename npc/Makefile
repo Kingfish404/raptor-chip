@@ -36,7 +36,8 @@ $(shell mkdir -p $(BUILD_DIR))
 VSRCS = $(shell find $(abspath ./vsrc) -name "*.v") \
 	$(shell find $(abspath $(SOC_HOME)/perip) -name "*.v") \
 	$(SOC_HOME)/generated/ysyxSoCFull.v
-CSRCS = $(shell find $(abspath ./csrc) -name "*.c" -or -name "*.cc" -or -name "*.cpp")
+CSRCS = $(shell find $(abspath ./csrc) -name "*.c")
+CCSRCS = $(shell find $(abspath ./csrc) -name "*.cc" -or -name "*.cpp")
 
 all: $(BIN)
 
@@ -44,7 +45,7 @@ all: $(BIN)
 INCFLAGS = $(addprefix -I, $(INC_PATH))
 CXXFLAGS += $(INCFLAGS) -DTOP_NAME="\"V$(VTARGET)\"" $(SOC_DEFINE)
 
-$(BIN): $(VSRCS) $(CSRCS) $(NVBOARD_ARCHIVE)
+$(BIN): $(VSRCS) $(CCSRCS) $(NVBOARD_ARCHIVE)
 	$(call git_commit, "build RTL")
 	$(VERILATOR) --trace -cc --exe --build -j $(shell nproc) --debug $(VERILATOR_FLAG) $^ \
 		--top-module $(VTARGET) \
