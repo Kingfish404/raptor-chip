@@ -6,17 +6,11 @@ module ysyx_IFU (
   input prev_valid, next_ready,
   output valid_o, ready_o,
 
-  input lsu_valid,
-
   // for bus
   output [DATA_W-1:0] ifu_araddr_o,
   output ifu_arvalid_o,
-  input ifu_arready,
-
   input [DATA_W-1:0] ifu_rdata,
-  input [1:0] ifu_rresp,
   input ifu_rvalid,
-  output ifu_rready_o,
 
   input [ADDR_W-1:0] pc, npc,
   output [DATA_W-1:0] inst_o,
@@ -50,15 +44,11 @@ module ysyx_IFU (
   always @(posedge clk ) begin lfsr <= {lfsr[18:0], lfsr[19] ^ lfsr[18]}; end
   wire arvalid;
   reg pvalid;
-  assign arvalid = (ifsr_ready & (prev_valid)) | pvalid;
-  wire arready, awready, rready, wready, bvalid;
-  wire [1:0] rresp, bresp;
+  assign arvalid = pvalid;
+  // assign arvalid = (ifsr_ready & (prev_valid)) | pvalid;
 
   assign ifu_araddr_o = prev_valid ? npc : pc;
   assign ifu_arvalid_o = arvalid;
-  assign arready = ifu_arready;
   assign inst_o = ifu_rvalid ? ifu_rdata : inst_ifu;
-  assign rresp = ifu_rresp;
   assign valid_o = ifu_rvalid | valid;
-  assign ifu_rready_o = ifsr_ready;
 endmodule // ysyx_IFU

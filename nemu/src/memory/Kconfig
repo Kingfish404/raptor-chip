@@ -31,7 +31,7 @@ endchoice
 config MEM_RANDOM
   depends on MODE_SYSTEM && !DIFFTEST && !TARGET_AM
   bool "Initialize the memory with random values"
-  default y
+  default n
   help
     This may help to find undefined behaviors.
 

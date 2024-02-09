@@ -10,8 +10,8 @@ module ysyx_EXU (
   // for bus
   output lsu_avalid_o,
   output [BIT_W-1:0] lsu_mem_wdata_o,
-  input [BIT_W-1:0] mem_rdata,
-  input rvalid_wready,
+  input [BIT_W-1:0] lsu_rdata,
+  input lsu_exu_rvalid, lsu_exu_wready,
 
   input ren, wen, rwen,
   input [4:0] rd,
@@ -38,6 +38,7 @@ module ysyx_EXU (
   reg [6:0] opcode_exu;
   reg csr_wen = 0;
   reg csr_ecallen = 0;
+  reg [BIT_W-1:0] mem_rdata;
 
   ysyx_CSR_Reg csr(
     .clk(clk), .rst(rst), .wen(csr_wen), .exu_valid(valid_o), .ecallen(csr_ecallen),
@@ -61,31 +62,41 @@ module ysyx_EXU (
 
   reg state, alu_valid, lsu_avalid;
   reg valid_once;
-  assign valid_o = rvalid_wready & alu_valid;
+  reg lsu_valid;
+  assign valid_o = (wen_o | ren_o) ? lsu_valid & valid_once : alu_valid;
+  // assign valid_o = lsu_exu_wready & lsu_exu_rvalid & alu_valid;
   assign wben_o = valid_o & valid_once;
-  assign ready_o = !valid_o;
+  // assign ready_o = !valid_o;
+  assign ready_o = (state != `ysyx_WAIT_READY);
   `ysyx_BUS_FSM()
   always @(posedge clk) begin
     if (rst) begin
       alu_valid <= 0; lsu_avalid <= 0;
     end
     else begin
-      if (state == `ysyx_IDLE & prev_valid) begin
-        if (prev_valid) begin 
+      if (state == `ysyx_IDLE) begin
+        if (wen_o) begin 
+          lsu_valid <= lsu_exu_wready;
+        end
+        if (ren_o) begin
+          lsu_valid <= lsu_exu_rvalid;
+          mem_rdata <= lsu_rdata;
+        end
+        if (prev_valid) begin
           imm_exu <= imm; pc_exu <= pc;
           src1 <= op1; src2 <= op2;
           alu_op_exu <= alu_op; opcode_exu <= opcode;
           addr_exu <= op_j + imm; 
           rd_o <= rd; rwen_o <= rwen;
           ren_o <= ren; wen_o <= wen;
+          alu_valid <= 1;
+          if (wen | ren) begin lsu_avalid <= 1; end
         end
-        alu_valid <= 1;
-        if (wen | ren) begin lsu_avalid <= 1; end
       end
       else if (state == `ysyx_WAIT_READY) begin
         if (next_ready == 1) begin lsu_avalid <= 0; alu_valid <= 0; end
       end
-      if (valid_o) begin valid_once <= 0;
+      if (lsu_valid) begin valid_once <= 0;
       end else begin  valid_once <= 1; end
     end
   end

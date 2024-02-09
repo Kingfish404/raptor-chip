@@ -12,13 +12,20 @@ endif
 -include ./include/config/auto.conf
 -include ./include/config/auto.conf.cmd
 
+ifeq ($(MODE), soc)
+VTARGET=ysyxSoCFull
+SOC_DEFINE=-DYSYX_SOC
+else
 VTARGET=ysyx
+endif
 BUILD_DIR = ./build
 OBJ_DIR = $(BUILD_DIR)/obj_dir
 BIN = $(BUILD_DIR)/$(VTARGET)
-INC_PATH ?= $(abspath ./include) $(abspath ./vsrc/include)
-VERILATOR_FLAG =--prof-c --prof-cfuncs --prof-exec
-CXXFLAGS = -Wall -Werror $(call remove_quote,$(CONFIG_CC_OPT))
+SOC_HOME = $(abspath ./../ysyxSOC)
+INC_PATH ?= $(abspath ./include) $(abspath ./vsrc/include) \
+	$(abspath $(SOC_HOME)/perip/uart16550/rtl) $(abspath $(SOC_HOME)/perip/spi/rtl)
+VERILATOR_FLAG =--prof-c --prof-cfuncs --prof-exec --timescale "1ns/1ns" --no-timing
+CXXFLAGS = -Wall -Werror -Wno-bool-operation $(call remove_quote,$(CONFIG_CC_OPT))
 LDFLAGS = -lreadline -ldl
 
 FILELIST_MK = $(shell find -L ./csrc -name "filelist.mk")
@@ -26,14 +33,16 @@ include $(FILELIST_MK)
 
 $(shell mkdir -p $(BUILD_DIR))
 
-VSRCS = $(shell find $(abspath ./vsrc) -name "*.v")
+VSRCS = $(shell find $(abspath ./vsrc) -name "*.v") \
+	$(shell find $(abspath $(SOC_HOME)/perip) -name "*.v") \
+	$(SOC_HOME)/generated/ysyxSoCFull.v
 CSRCS = $(shell find $(abspath ./csrc) -name "*.c" -or -name "*.cc" -or -name "*.cpp")
 
 all: $(BIN)
 
 # rules for NVBoard
 INCFLAGS = $(addprefix -I, $(INC_PATH))
-CXXFLAGS += $(INCFLAGS) -DTOP_NAME="\"V$(VTARGET)\"" 
+CXXFLAGS += $(INCFLAGS) -DTOP_NAME="\"V$(VTARGET)\"" $(SOC_DEFINE)
 
 $(BIN): $(VSRCS) $(CSRCS) $(NVBOARD_ARCHIVE)
 	$(call git_commit, "build RTL")
