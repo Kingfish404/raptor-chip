@@ -44,6 +44,9 @@ typedef word_t vaddr_t;
 #define CONCAT(x, y) _CONCAT(x, y)
 #define CONCAT_HEAD(x) <x.h>
 
+#define STRINGIZE_NX(A) #A
+#define STRINGIZE(A) STRINGIZE_NX(A)
+
 #define _Log(...)        \
   do                     \
   {                      \

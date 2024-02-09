@@ -1,5 +1,6 @@
 #include <stdint.h>
-#include "common.h"
+#include <common.h>
+#include <mem.h>
 
 void difftest_skip_ref();
 void npc_abort();
@@ -127,43 +128,9 @@ extern "C" void pmem_write(word_t waddr, word_t wdata, char wmask)
     }
 }
 
-extern "C" void flash_read(uint32_t addr, uint32_t *data)
-{
-    *data = 0b00000000000100000000000001110011; // ebreak
-}
+extern "C" void flash_read(uint32_t addr, uint32_t *data) { assert(0); }
 
-#define STRINGIZE_NX(A) #A
-#define STRINGIZE(A) STRINGIZE_NX(A)
 
-#include <stdint.h>
-
-#define STR2(x) #x
-#define STR(x) STR2(x)
-
-#ifdef __APPLE__
-#define USTR(x) "_" STR(x)
-#else
-#define USTR(x) STR(x)
-#endif
-
-#ifdef _WIN32
-#define INCBIN_SECTION ".rdata, \"dr\""
-#elif defined __APPLE__
-#define INCBIN_SECTION "__TEXT,__const"
-#else
-#define INCBIN_SECTION ".rodata"
-#endif
-
-#define INCBIN(prefix, name, file)                                            \
-    asm(".section " INCBIN_SECTION "\n");                                     \
-    asm(".global " USTR(prefix) "_" STR(name) "_start\n");                    \
-    asm(".balign 16\n" USTR(prefix) "_" STR(name) "_start:\n");               \
-    asm(".incbin \"" file "\"\n");                                            \
-    asm(".global " STR(prefix) "_" STR(name) "_end\n");                       \
-    asm(".balign 1\n" USTR(prefix) "_" STR(name) "_end:\n");                  \
-    asm(".byte 0\n");                                                         \
-    extern __attribute__((aligned(16))) const char prefix##_##name##_start[]; \
-    extern const uint8_t prefix##_##name##_end[];
 INCBIN(ramdisk, mrom, STRINGIZE(MROM_PATH));
 
 extern "C" void mrom_read(uint32_t addr, uint32_t *data)
