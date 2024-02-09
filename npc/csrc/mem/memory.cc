@@ -164,7 +164,7 @@ extern "C" void flash_read(uint32_t addr, uint32_t *data)
     asm(".byte 0\n");                                                         \
     extern __attribute__((aligned(16))) const char prefix##_##name##_start[]; \
     extern const uint8_t prefix##_##name##_end[];
-INCBIN(ramdisk, mrom, MROM_PATH);
+INCBIN(ramdisk, mrom, STRINGIZE(MROM_PATH));
 // INCBIN(ramdisk, mrom, "/Users/jinyu/Developer/c-project/ysyx-workbench/npc/csrc/mem/mrom-data/build/mrom-data.bin");
 
 extern "C" void mrom_read(uint32_t addr, uint32_t *data)
