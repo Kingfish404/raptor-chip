@@ -117,7 +117,7 @@ module ysyx_BUS_ARBITER(
   wire ifsr_ready = `ysyx_IFSR_ENABLE ? lfsr[19] : 1;
   always @(posedge clk ) begin lfsr <= {lfsr[18:0], lfsr[19] ^ lfsr[18]}; end
 
-  assign io_master_araddr = sram_arvalid;
+  assign io_master_araddr = sram_araddr;
   assign io_master_arvalid = sram_arvalid;
   assign arready_o = io_master_arready;
 
@@ -128,12 +128,12 @@ module ysyx_BUS_ARBITER(
 
   assign io_master_awaddr = awaddr;
   assign io_master_awvalid = sram_awvalid;
-  assign awready_o = io_master_awready;
+  wire awready_o = io_master_awready;
 
   assign io_master_wdata[31:0] = wdata;
   assign io_master_wstrb = wstrb;
   assign io_master_wvalid = sram_wvalid;
-  assign wready_o = io_master_wready;
+  wire wready_o = io_master_wready;
 
   assign sram_bresp_o = io_master_bresp;
   assign sram_bvalid_o = io_master_bvalid;
