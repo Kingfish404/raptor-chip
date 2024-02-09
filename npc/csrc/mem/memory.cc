@@ -1,5 +1,6 @@
 #include <stdint.h>
-#include "common.h"
+#include <common.h>
+#include <utils.h>
 
 void difftest_skip_ref();
 void npc_abort();
@@ -129,4 +130,13 @@ extern "C" void pmem_write(word_t waddr, word_t wdata, char wmask)
 
 extern "C" void flash_read(uint32_t addr, uint32_t *data) { assert(0); }
 
-extern "C" void mrom_read(uint32_t addr, uint32_t *data) { assert(0); }
+INCBIN(ramdisk, mrom, STRINGIZE(MROM_PATH));
+
+extern "C" void mrom_read(uint32_t addr, uint32_t *data)
+{
+    uint32_t offset = addr - MROM_BASE;
+    uint32_t *mrom = (uint32_t *)(ramdisk_mrom_start + offset);
+    *data = *mrom;
+    // printf("raddr: " FMT_WORD_NO_PREFIX ", data: " FMT_WORD_NO_PREFIX "\n",
+    //        addr, *data);
+}

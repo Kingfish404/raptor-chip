@@ -15,6 +15,8 @@ typedef word_t vaddr_t;
 #define MBASE 0x80000000
 #define MSIZE 0x8000000
 
+#define MROM_BASE 0x20000000
+
 #define GPR_SIZE 16
 
 #define DEVICE_BASE 0xa0000000
@@ -41,6 +43,9 @@ typedef word_t vaddr_t;
 #define _CONCAT(x, y) x##y
 #define CONCAT(x, y) _CONCAT(x, y)
 #define CONCAT_HEAD(x) <x.h>
+
+#define STRINGIZE_NX(A) #A
+#define STRINGIZE(A) STRINGIZE_NX(A)
 
 #define _Log(...)        \
   do                     \
