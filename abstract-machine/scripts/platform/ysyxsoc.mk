@@ -8,9 +8,9 @@ AM_SRCS := riscv/ysyxsoc/start.S \
            platform/dummy/vme.c \
            platform/dummy/mpe.c
 
-CFLAGS    += -fdata-sections -ffunction-sections
+CFLAGS    += -fdata-sections -ffunction-sections -pie
 LDFLAGS   += -T $(AM_HOME)/scripts/linker.ld \
-						 --defsym=_pmem_start=0x0f000000 --defsym=_entry_offset=0x0
+						 --defsym=_pmem_start=0x20000000 --defsym=_entry_offset=0x0
 LDFLAGS   += --gc-sections -e _start
 CFLAGS += -DMAINARGS=\"$(mainargs)\"
 CFLAGS += -I$(AM_HOME)/am/src/riscv/ysyxsoc/include
