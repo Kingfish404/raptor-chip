@@ -2,7 +2,7 @@
 `define ysyx_PC_INIT `ysyx_W_WIDTH'h80000000
 
 // random test setting
-`define ysyx_IFSR_ENABLE 0
+`define ysyx_IFSR_ENABLE 1
 
 `define ysyx_IDLE       0
 `define ysyx_WAIT_READY 1
