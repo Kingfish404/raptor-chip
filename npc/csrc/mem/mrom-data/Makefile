@@ -13,7 +13,9 @@ COMMON_CFLAGS = -march=rv32e_zicsr -mabi=ilp32e  # overwrite
 IMAGE = ./build/mrom-data
 SOURCE = $(wildcard *.c)
 
-CFLAGS = -nostartfiles $(COMMON_CFLAGS) 
+CFLAGS = -g -O2 -MMD -Wall \
+	-fno-asynchronous-unwind-tables -fno-builtin -fno-stack-protector \
+	-nostartfiles -ffreestanding $(COMMON_CFLAGS) 
 
 all: $(IMAGE).elf $(IMAGE).bin
 
