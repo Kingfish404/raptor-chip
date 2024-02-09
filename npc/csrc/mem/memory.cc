@@ -132,6 +132,9 @@ extern "C" void flash_read(uint32_t addr, uint32_t *data)
     *data = 0b00000000000100000000000001110011; // ebreak
 }
 
+#define STRINGIZE_NX(A) #A
+#define STRINGIZE(A) STRINGIZE_NX(A)
+
 #include <stdint.h>
 
 #define STR2(x) #x
@@ -162,7 +165,7 @@ extern "C" void flash_read(uint32_t addr, uint32_t *data)
     extern __attribute__((aligned(16))) const char prefix##_##name##_start[]; \
     extern const uint8_t prefix##_##name##_end[];
 // #define NPC_HOME "/Users/jinyu/Developer/c-project/ysyx-workbench/npc"
-INCBIN(ramdisk, mrom, CONCAT(NPC_HOME, "/csrc/mem/mrom-data/build/mrom-data.bin"));
+INCBIN(ramdisk, mrom, STRINGIZE(CONCAT(NPC_HOME, "/csrc/mem/mrom-data/build/mrom-data.bin")));
 
 extern "C" void mrom_read(uint32_t addr, uint32_t *data)
 {
