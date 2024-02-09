@@ -173,7 +173,7 @@ extern "C" void mrom_read(uint32_t addr, uint32_t *data)
     // printf("size = %zu\t", (char *)&ramdisk_mrom_end - (char *)&ramdisk_mrom_start);
     // printf("first byte = 0x%x\n", ramdisk_mrom_start[0]);
     // *data = 0b00000000000100000000000001110011; // ebreak
-    uint32_t *mrom = (uint32_t *)&ramdisk_mrom_start;
+    uint32_t *mrom = (uint32_t *)(ramdisk_mrom_start + offset);
     *data = mrom[offset];
     printf("raddr: " FMT_WORD_NO_PREFIX ", data: " FMT_WORD_NO_PREFIX "\n",
            addr, *data);
