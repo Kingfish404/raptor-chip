@@ -167,5 +167,7 @@ INCBIN(ramdisk, mrom, "/Users/jinyu/Developer/c-project/ysyx-workbench/npc/csrc/
 extern "C" void mrom_read(uint32_t addr, uint32_t *data)
 {
     printf("ramdisk_start = 0x%p, ramdisk_end = 0x%p\n", &ramdisk_mrom_start, &ramdisk_mrom_end);
+    printf("size = %zu\n", &ramdisk_mrom_end - &ramdisk_mrom_start);
+    printf("first byte = 0x%x\n", ramdisk_mrom_start[0]);
     *data = 0b00000000000100000000000001110011; // ebreak
 }
