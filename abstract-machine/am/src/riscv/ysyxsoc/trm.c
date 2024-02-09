@@ -29,6 +29,13 @@ void halt(int code)
 
 void _trm_init()
 {
-    // int ret = main(mainargs);
-    halt(0);
+    int ret;
+    asm volatile(
+        "li a0, 0\n\t"
+        "mv a0, %1\n\t"
+        "jal main\n\t"
+        "mv %0, a0\n\t"
+        : "=r"(ret)
+        : "r"(mainargs));
+    halt(ret);
 }
