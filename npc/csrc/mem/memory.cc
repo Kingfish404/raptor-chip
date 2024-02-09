@@ -127,6 +127,13 @@ extern "C" void pmem_write(word_t waddr, word_t wdata, char wmask)
     }
 }
 
-extern "C" void flash_read(uint32_t addr, uint32_t *data) { assert(0); }
+extern "C" void flash_read(uint32_t addr, uint32_t *data)
+{
+    // assert(0);
+    *data = 0b00000000000100000000000001110011; // ebreak
+}
 
-extern "C" void mrom_read(uint32_t addr, uint32_t *data) { assert(0); }
+extern "C" void mrom_read(uint32_t addr, uint32_t *data)
+{
+    assert(0);
+}
