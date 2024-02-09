@@ -24,7 +24,7 @@ module ysyx_IFU (
   `ysyx_BUS_FSM()
   always @(posedge clk) begin
     if (rst) begin
-      valid <= 0; pvalid <= 0; inst_ifu <= 0;
+      valid <= 0; pvalid <= 1; inst_ifu <= 0;
     end
     else begin
       pc_o <= pc;
