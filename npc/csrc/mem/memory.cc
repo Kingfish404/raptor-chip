@@ -1,6 +1,6 @@
 #include <stdint.h>
 #include <common.h>
-#include <mem.h>
+#include <utils.h>
 
 void difftest_skip_ref();
 void npc_abort();
@@ -129,7 +129,6 @@ extern "C" void pmem_write(word_t waddr, word_t wdata, char wmask)
 }
 
 extern "C" void flash_read(uint32_t addr, uint32_t *data) { assert(0); }
-
 
 INCBIN(ramdisk, mrom, STRINGIZE(MROM_PATH));
 
