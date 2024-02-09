@@ -136,12 +136,12 @@ module ysyx_BUS_ARBITER(
 
   assign io_master_awaddr = awaddr;
   assign io_master_awvalid = sram_awvalid;
-  wire sram_awready_o = io_master_awready;
+  wire awready_o = io_master_awready;
 
   assign io_master_wdata[31:0] = wdata;
   assign io_master_wstrb = wstrb;
   assign io_master_wvalid = sram_wvalid;
-  assign sram_wready_o = io_master_wready | sram_awready_o;
+  assign sram_wready_o = io_master_wready;
 
   assign sram_bresp_o = io_master_bresp;
   assign sram_bvalid_o = io_master_bvalid;
