@@ -24,7 +24,7 @@ image: $(IMAGE).elf
 run:
 	echo $(IMAGE).bin
 	make -C $(NPC_HOME) clean
-	make -C $(NPC_HOME) ISA=$(ISA) MROM_PATH=$(IMAGE).bin run
+	make -C $(NPC_HOME) ISA=$(ISA) MROM_PATH=$(IMAGE).bin run NPCFLAGS="$(NPCFLAGS)"
 
 # run: image
 # 	echo $(IMAGE)
