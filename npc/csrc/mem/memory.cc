@@ -163,13 +163,15 @@ extern "C" void flash_read(uint32_t addr, uint32_t *data)
     asm(".balign 1\n" USTR(prefix) "_" STR(name) "_end:\n");                  \
     asm(".byte 0\n");                                                         \
     extern __attribute__((aligned(16))) const char prefix##_##name##_start[]; \
-    extern const uint8_t prefix##_##name##_end[];
+    extern const uint32_t prefix##_##name##_end[];
 INCBIN(ramdisk, mrom, STRINGIZE(MROM_PATH));
 
 extern "C" void mrom_read(uint32_t addr, uint32_t *data)
 {
+    uint32_t offset = addr - MROM_BASE;
     printf("ramdisk_start = 0x%p, ramdisk_end = 0x%p\n", &ramdisk_mrom_start, &ramdisk_mrom_end);
     printf("size = %zu\n", (char *)&ramdisk_mrom_end - (char *)&ramdisk_mrom_start);
     printf("first byte = 0x%x\n", ramdisk_mrom_start[0]);
-    *data = 0b00000000000100000000000001110011; // ebreak
+    // *data = 0b00000000000100000000000001110011; // ebreak
+    *data = ramdisk_mrom_start[offset];
 }
