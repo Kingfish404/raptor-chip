@@ -132,7 +132,7 @@ extern "C" void flash_read(uint32_t addr, uint32_t *data)
     *data = 0b00000000000100000000000001110011; // ebreak
 }
 
-extern uint32_t ramdisk_start, ramdisk_end;
+extern uint8_t ramdisk_start, ramdisk_end;
 
 extern "C" void mrom_read(uint32_t addr, uint32_t *data)
 {
