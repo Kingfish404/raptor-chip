@@ -29,8 +29,8 @@ void halt(int code)
 
 void _trm_init()
 {
-    int ret = main(mainargs);
-    // int ret;
+    // int ret = main(mainargs);
+    int ret;
     // asm volatile(
     //     "li a0, 0\n\t"
     //     "mv a0, %1\n\t"
