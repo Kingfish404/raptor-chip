@@ -107,9 +107,9 @@ void cpu_exec(uint64_t n)
   {
     cpu_exec_one_cycle();
     g_nr_guest_cycle++;
-    fflush(stdout);
     if (prev_pc != *(npc.pc))
     {
+      fflush(stdout);
       g_nr_guest_inst++;
 #ifdef CONFIG_ITRACE
       snprintf(
