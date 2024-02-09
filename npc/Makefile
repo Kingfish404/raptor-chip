@@ -44,7 +44,7 @@ all: $(BIN)
 # rules for NVBoard
 INCFLAGS = $(addprefix -I, $(INC_PATH))
 CXXFLAGS += $(INCFLAGS) -DTOP_NAME="\"V$(VTARGET)\"" $(SOC_DEFINE) \
-	-DMROM_PATH="\""$(NPC_HOME)/csrc/mem/mrom-data/build/mrom-data.bin"\""
+	-DMROM_PATH="""$(NPC_HOME)/csrc/mem/mrom-data/build/mrom-data.bin"""
 
 $(BIN): $(VSRCS) $(CCSRCS) $(NVBOARD_ARCHIVE)
 	$(call git_commit, "build RTL")
