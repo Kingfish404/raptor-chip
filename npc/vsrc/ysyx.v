@@ -127,8 +127,7 @@ module ysyx (
   wire lsu_rvalid;
   wire lsu_wready;
 
-  ysyx_PC 
-    pc_unit(
+  ysyx_PC pc_unit(
     .clk(clock), .rst(reset), 
     .exu_valid(wben),
 
@@ -136,9 +135,7 @@ module ysyx (
     .pc_o(pc)
   );
 
-  ysyx_RegisterFile 
-    #(5, BIT_W) 
-    regs(
+  ysyx_RegisterFile #(5, BIT_W) regs(
     .clk(clock), .rst(reset),
     .exu_valid(wben),
 
@@ -148,8 +145,7 @@ module ysyx (
     .src1_o(reg_rdata1), .src2_o(reg_rdata2)
     );
 
-  ysyx_BUS_ARBITER 
-    bus(
+  ysyx_BUS_ARBITER bus(
     .clk(clock), .rst(reset),
 
     .io_master_arburst(io_master_arburst), .io_master_arsize(io_master_arsize), .io_master_arlen(io_master_arlen),
