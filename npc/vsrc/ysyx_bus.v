@@ -23,20 +23,20 @@ module ysyx_BUS_ARBITER(
     output [2:0] io_master_awsize,
     output [7:0] io_master_awlen,
     output [3:0] io_master_awid,
-    output [ADDR_W-1:0] io_master_awaddr,
-    output io_master_awvalid,
-    input reg io_master_awready,
+    output [ADDR_W-1:0] io_master_awaddr, // reqired
+    output io_master_awvalid,             // reqired
+    input reg io_master_awready,          // reqired
 
-    output io_master_wlast,
-    output [63:0] io_master_wdata,
+    output io_master_wlast,               // reqired
+    output [63:0] io_master_wdata,        // reqired
     output [7:0] io_master_wstrb,
-    output io_master_wvalid,
-    input reg io_master_wready,
+    output io_master_wvalid,              // reqired
+    input reg io_master_wready,           // reqired
 
     input reg [3:0] io_master_bid,
     input reg [1:0] io_master_bresp,
-    input reg io_master_bvalid,
-    output io_master_bready,
+    input reg io_master_bvalid,           // reqired
+    output io_master_bready,              // reqired
 
     // ifu
     input [DATA_W-1:0] ifu_araddr,
@@ -138,6 +138,7 @@ module ysyx_BUS_ARBITER(
   assign io_master_awvalid = sram_awvalid;
   wire sram_awready_o = io_master_awready;
 
+  assign io_master_wlast = 1'b1;
   assign io_master_wdata[31:0] = wdata;
   assign io_master_wstrb = wstrb;
   assign io_master_wvalid = sram_wvalid;
