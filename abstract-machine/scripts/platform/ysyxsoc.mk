@@ -23,5 +23,6 @@ image: $(IMAGE).elf
 
 run: image
 	make -C $(NPC_HOME) clean
+	make -C $(NPC_HOME) MROM_IMG=$(IMAGE).bin
 	echo $(IMAGE).bin
 	make -C $(NPC_HOME) ISA=$(ISA) run NPCFLAGS="$(NPCFLAGS)" IMG=$(IMAGE).bin

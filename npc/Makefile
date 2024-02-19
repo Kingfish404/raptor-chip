@@ -41,12 +41,14 @@ VSRCS = $(shell find $(abspath ./vsrc) -name "*.v") \
 CSRCS = $(shell find $(abspath ./csrc) -name "*.c")
 CCSRCS = $(shell find $(abspath ./csrc) -name "*.cc" -or -name "*.cpp")
 
+MROM_IMG ?= $(NPC_HOME)/csrc/mem/mrom-data/build/mrom-data.bin
+
 all: $(BIN)
 
 # rules for NVBoard
 INCFLAGS = $(addprefix -I, $(INC_PATH))
 CXXFLAGS += $(INCFLAGS) -DTOP_NAME="\"V$(VTARGET)\"" $(SOC_DEFINE) \
-	-DMROM_PATH=$(NPC_HOME)/csrc/mem/mrom-data/build/mrom-data.bin
+	-DMROM_PATH=$(MROM_IMG)
 
 $(BIN): $(VSRCS) $(CCSRCS) $(NVBOARD_ARCHIVE)
 	$(call git_commit, "build RTL")
