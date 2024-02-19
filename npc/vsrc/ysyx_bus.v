@@ -136,7 +136,7 @@ module ysyx_BUS_ARBITER(
 
   assign io_master_awburst = 2'b00;
   assign io_master_awsize = 3'b101;
-  assign io_master_awlen = 8'hff;
+  assign io_master_awlen = 8'h0;
   assign io_master_awid = 0;
   assign io_master_awaddr = awaddr;
   assign io_master_awvalid = sram_awvalid;
