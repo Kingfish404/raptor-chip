@@ -146,7 +146,7 @@ module ysyx_BUS_ARBITER(
 
   assign sram_bresp_o = io_master_bresp;
   assign sram_bvalid_o = io_master_bvalid;
-  assign io_master_bready = 1;
+  assign io_master_bready = 0;
 
   // ysyx_MEM_SRAM
   //   #(.ADDR_W(ADDR_W), .DATA_W(DATA_W))
