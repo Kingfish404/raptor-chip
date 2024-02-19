@@ -1,5 +1,5 @@
 #include <am.h>
-#include <npc.h>
+#include <ysyxsoc.h>
 #include <klib-macros.h>
 
 extern char _heap_start;
