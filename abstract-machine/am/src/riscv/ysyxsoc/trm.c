@@ -25,6 +25,7 @@ void halt(int code) {
 }
 
 void _trm_init() {
+  char c = *(char *)(0x0f000000);
   int ret = main(mainargs);
   halt(ret);
 }

@@ -134,7 +134,7 @@ module ysyx_BUS_ARBITER(
   assign rvalid_o = io_master_rvalid;
   assign io_master_rready = 1;
 
-  assign io_master_arburst = 2'b00;
+  assign io_master_awburst = 2'b00;
   assign io_master_awsize = 3'b000;
   assign io_master_awlen = 8'hff;
   assign io_master_awid = 0;
