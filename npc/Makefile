@@ -12,6 +12,8 @@ endif
 -include ./include/config/auto.conf
 -include ./include/config/auto.conf.cmd
 
+CC = ccache $(CC)
+
 ifeq ($(MODE), soc)
 VTARGET=ysyxSoCFull
 SOC_DEFINE=-DYSYX_SOC
