@@ -134,7 +134,12 @@ module ysyx_BUS_ARBITER(
   assign rvalid_o = io_master_rvalid;
   assign io_master_rready = 1;
 
-  assign io_master_awsize = 3'b101;
+  assign io_master_awsize = (
+    ({3{lsu_wstrb == 8'h1}} & 3'b011) |
+    ({3{lsu_wstrb == 8'h3}} & 3'b100) |
+    ({3{lsu_wstrb == 8'hf}} & 3'b101) |
+    3'b000
+  );
   assign io_master_awaddr = awaddr;
   assign io_master_awvalid = sram_awvalid;
   wire sram_awready_o = io_master_awready;
@@ -160,7 +165,7 @@ module ysyx_BUS_ARBITER(
   //   .awburst(2'b00), .awsize(3'b000), .awlen(8'b00000000), .awid(4'b0000),
   //   .awaddr(awaddr), .awvalid(sram_awvalid), .awready_o(),
   //   .wlast(1'b0),
-  //   .wdata(wdata), .wstrb(wstrb), .wvalid(sram_wvalid), .wready_o(sram_wready_o),
+  //   .wdata(wdata), .wstrb(lsu_wstrb), .wvalid(sram_wvalid), .wready_o(sram_wready_o),
   //   .bid(),
   //   .bresp_o(sram_bresp_o), .bvalid_o(sram_bvalid_o), .bready(1)
   // );
@@ -177,7 +182,7 @@ module ysyx_BUS_ARBITER(
               .awburst(2'b00), .awsize(3'b000), .awlen(8'b00000000), .awid(4'b0000),
               .awaddr(awaddr), .awvalid(sram_awvalid), .awready_o(uart_awready_o),
               .wlast(1'b0),
-              .wdata(wdata), .wstrb(wstrb), .wvalid(uart_wvalid), .wready_o(uart_wready_o),
+              .wdata(wdata), .wstrb(lsu_wstrb), .wvalid(uart_wvalid), .wready_o(uart_wready_o),
               .bid(),
               .bresp_o(uart_bresp_o), .bvalid_o(uart_bvalid_o), .bready(1)
             );
