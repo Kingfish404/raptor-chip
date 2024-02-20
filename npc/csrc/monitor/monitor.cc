@@ -59,6 +59,7 @@ static long load_img()
 {
   if (img_file == NULL)
   {
+    printf("No image is given, use default image.\n");
     memcpy(guest_to_host(MBASE), img, sizeof(img));
     return sizeof(img);
   }
