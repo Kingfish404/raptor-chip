@@ -157,8 +157,9 @@ extern "C" void mrom_read(uint32_t addr, uint32_t *data)
     uint32_t offset = addr - MROM_BASE;
     uint32_t *mrom = (uint32_t *)(ramdisk_mrom_start + offset);
     *data = *mrom;
-    // uint32_t offset = addr - MROM_BASE;
-    // *data = *((uint32_t *)(mrom + offset));
+    uint32_t offset = addr - MROM_BASE;
+    uint32_t datat = *((uint32_t *)(mrom + offset));
+    Log("datat: " FMT_WORD_NO_PREFIX, datat);
     Log("raddr: " FMT_WORD_NO_PREFIX ", data: " FMT_WORD_NO_PREFIX,
         addr, *data);
 }
