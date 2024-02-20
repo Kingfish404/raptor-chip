@@ -41,10 +41,9 @@ CCSRCS = $(shell find $(abspath ./csrc) -name "*.cc" -or -name "*.cpp")
 
 ifeq ($(MROM_IMG),)
 MROM_IMG ?= $(NPC_HOME)/csrc/mem/mrom-data/build/mrom-data.bin
-MROM = default_rom
 endif
 
-default_rom:
+$(NPC_HOME)/csrc/mem/mrom-data/build/mrom-data.bin:
 	$(MAKE) -C $(NPC_HOME)/csrc/mem/mrom-data
 
 all: $(BIN)
@@ -66,7 +65,7 @@ DIFF_REF_SO = -d $(abspath $(NEMU_HOME)/build/riscv32-nemu-interpreter-so)
 IMG ?=
 NPC_EXEC := $(BIN) $(NPCFLAGS) $(DIFF_REF_SO) -m $(MROM_IMG) $(IMG)
 
-run: $(BIN) $(MROM)
+run: $(BIN) $(MROM_IMG)
 	$(call git_commit, "sim RTL") # DO NOT REMOVE THIS LINE!!!
 	$(NPC_EXEC)
 
