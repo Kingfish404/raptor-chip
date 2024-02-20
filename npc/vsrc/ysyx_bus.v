@@ -135,11 +135,11 @@ module ysyx_BUS_ARBITER(
   assign io_master_rready = 1;
 
   assign io_master_awsize = (
-    ({3{lsu_wstrb == 8'h1}} & 3'b000) |
-    ({3{lsu_wstrb == 8'h3}} & 3'b010) |
-    ({3{lsu_wstrb == 8'hf}} & 3'b011) |
-    3'b000
-  );
+           ({3{lsu_wstrb == 8'h1}} & 3'b000) |
+           ({3{lsu_wstrb == 8'h3}} & 3'b010) |
+           ({3{lsu_wstrb == 8'hf}} & 3'b011) |
+           3'b000
+         );
   assign io_master_awaddr = awaddr;
   assign io_master_awvalid = sram_awvalid;
   wire sram_awready_o = io_master_awready;
@@ -169,6 +169,16 @@ module ysyx_BUS_ARBITER(
   //   .bid(),
   //   .bresp_o(sram_bresp_o), .bvalid_o(sram_bvalid_o), .bready(1)
   // );
+
+  // For difftest
+  always @(posedge clk)
+    begin
+      if (io_master_awvalid) begin
+        if (io_master_awaddr == 'h0f000000) begin
+          $display("UART write: %h", io_master_wdata);
+        end
+      end
+    end
 
   wire [DATA_W-1:0] uart_rdata_o;
   wire [1:0] uart_rresp_o, uart_bresp_o;
