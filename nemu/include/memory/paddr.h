@@ -33,15 +33,15 @@ uint8_t *guest_to_host(paddr_t paddr);
 /* convert the host virtual address in NEMU to guest physical address in the guest program */
 paddr_t host_to_guest(uint8_t *haddr);
 
-uint8_t* guest_to_sram(paddr_t paddr);
+uint8_t *guest_to_sram(paddr_t paddr);
 paddr_t sram_to_guest(uint8_t *haddr);
 
-uint8_t* guest_to_mrom(paddr_t paddr);
+uint8_t *guest_to_mrom(paddr_t paddr);
 paddr_t mrom_to_guest(uint8_t *haddr);
 
 static inline bool in_pmem(paddr_t addr)
 {
-  return addr > PMEM_LEFT && addr <= PMEM_RIGHT;
+  return addr >= PMEM_LEFT && addr <= PMEM_RIGHT;
 }
 
 static inline bool in_sram(paddr_t addr)
