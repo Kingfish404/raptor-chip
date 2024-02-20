@@ -5,5 +5,4 @@
 _start:
   mv s0, zero
   la sp, _stack_pointer
-  lbu a0, 0(sp)
   jal _trm_init
