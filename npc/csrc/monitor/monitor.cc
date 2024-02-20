@@ -37,7 +37,7 @@ static char *img_file = NULL;
 static char *mrom_img_file = NULL;
 static int difftest_port = 1234;
 
-void load_file(const char *filename, void *buf)
+long load_file(const char *filename, void *buf)
 {
   FILE *fp = fopen(filename, "rb");
   assert(fp != NULL);
@@ -52,6 +52,7 @@ void load_file(const char *filename, void *buf)
   assert(ret == 1);
 
   fclose(fp);
+  return size;
 }
 
 static long load_img()

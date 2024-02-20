@@ -57,7 +57,7 @@ void init_difftest(char *ref_so_file, long img_size, int port)
 
   ref_difftest_init(port);
   ref_difftest_memcpy(MBASE, guest_to_host(MBASE), img_size, DIFFTEST_TO_REF);
-  ref_difftest_memcpy(MROM_BASE, guest_to_host)
+  // ref_difftest_memcpy(MROM_BASE, guest_to_host);
   ref_difftest_regcpy(&npc, DIFFTEST_TO_REF);
 #endif
 }
