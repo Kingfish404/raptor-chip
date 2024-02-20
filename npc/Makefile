@@ -44,6 +44,9 @@ ifeq ($(MROM_IMG),)
 MROM_IMG ?= $(NPC_HOME)/csrc/mem/mrom-data/build/mrom-data.bin
 endif
 
+default_rom:
+	$(MAKE) -C $(NPC_HOME)/csrc/mem/mrom-data
+
 all: $(BIN)
 
 # rules for NVBoard
