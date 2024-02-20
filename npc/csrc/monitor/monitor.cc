@@ -45,7 +45,7 @@ long load_file(const char *filename, void *buf)
   fseek(fp, 0, SEEK_END);
   long size = ftell(fp);
 
-  printf("image: %s, size: %ld\n", filename, size);
+  Log("image: %s, size: %ld", filename, size);
 
   fseek(fp, 0, SEEK_SET);
   int ret = fread(buf, size, 1, fp);
