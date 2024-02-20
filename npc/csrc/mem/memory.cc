@@ -14,7 +14,19 @@ INCBIN(ramdisk, mrom, STRINGIZE(MROM_PATH));
 
 uint8_t *guest_to_host(paddr_t addr)
 {
-    return pmem + addr - MBASE;
+    if (addr >= MBASE && addr <= MBASE + MSIZE)
+    {
+        return pmem + addr - MBASE;
+    }
+    if (addr >= MROM_BASE && addr < MROM_BASE + MROM_SIZE)
+    {
+        return ramdisk_mrom_start + addr - MROM_BASE;
+    }
+    if (addr >= SRAM_BASE && addr < SRAM_BASE + SRAM_SIZE)
+    {
+        return pmem + addr - SRAM_BASE;
+    }
+    Assert(0, "Invalid guest address: " FMT_WORD, addr);
 }
 
 paddr_t host_to_guest(uint8_t *addr)

@@ -15,10 +15,13 @@ typedef word_t vaddr_t;
 #define GPR_SIZE 16
 
 #define MBASE 0x80000000
-#define MSIZE 0x8000000
+#define MSIZE 0x08000000
 
 #define SRAM_BASE 0x0f000000
+#define SRAM_SIZE 0x00002000
+
 #define MROM_BASE 0x20000000
+#define MROM_SIZE 0x00001000
 
 #ifdef CONFIG_SOFT_MMIO
 #define DEVICE_BASE 0xa0000000
@@ -65,6 +68,20 @@ typedef word_t vaddr_t;
 #define Error(format, ...)                     \
   _Log(FMT_RED("[npc %s:%d %s] ") format "\n", \
        __FILENAME__, __LINE__, __func__, ##__VA_ARGS__)
+
+#define Assert(cond, format, ...)                                                                   \
+  do                                                                                                \
+  {                                                                                                 \
+    if (!(cond))                                                                                    \
+    {                                                                                               \
+      MUXDEF(CONFIG_TARGET_AM, printf(ANSI_FMT(format, ANSI_FG_RED) "\n", ##__VA_ARGS__),           \
+             (fflush(stdout), fprintf(stderr, ANSI_FMT(format, ANSI_FG_RED) "\n", ##__VA_ARGS__))); \
+      IFNDEF(CONFIG_TARGET_AM, extern FILE *log_fp; fflush(log_fp));                                \
+      extern void assert_fail_msg();                                                                \
+      assert_fail_msg();                                                                            \
+      assert(cond);                                                                                 \
+    }                                                                                               \
+  } while (0)
 
 enum
 {

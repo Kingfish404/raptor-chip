@@ -34,7 +34,7 @@ void init_disasm(const char *triple);
 static char *log_file = NULL;
 static char *diff_so_file = NULL;
 static char *img_file = NULL;
-// static char *mrom_img_file = NULL;
+static char *mrom_img_file = NULL;
 static int difftest_port = 1234;
 
 long load_file(const char *filename, void *buf)
@@ -57,34 +57,29 @@ long load_file(const char *filename, void *buf)
 
 static long load_img()
 {
+  long size;
   if (img_file == NULL)
   {
     printf("No image is given, use default image.\n");
     memcpy(guest_to_host(MBASE), img, sizeof(img));
-    return sizeof(img);
+    size = sizeof(img);
+  }
+  else
+  {
+    size = load_file(img_file, guest_to_host(MBASE));
   }
 
-  long size = load_file(img_file, guest_to_host(MBASE));
-
-  // FILE *fp = fopen(img_file, "rb");
-  // assert(fp != NULL);
-
-  // fseek(fp, 0, SEEK_END);
-  // long size = ftell(fp);
-
-  // printf("image: %s, size: %ld\n", img_file, size);
-
-  // fseek(fp, 0, SEEK_SET);
-  // int ret = fread(guest_to_host(MBASE), size, 1, fp);
-  // assert(ret == 1);
-
-  // fclose(fp);
+  if (mrom_img_file != NULL)
+  {
+    load_file(mrom_img_file, guest_to_host(MROM_BASE));
+  }
   return size;
 }
 
 static int parse_args(int argc, char *argv[])
 {
   const struct option table[] = {
+      {"mrom", required_argument, NULL, 'm'},
       {"batch", no_argument, NULL, 'b'},
       {"log", required_argument, NULL, 'l'},
       {"diff", required_argument, NULL, 'd'},
@@ -98,6 +93,9 @@ static int parse_args(int argc, char *argv[])
   {
     switch (o)
     {
+    case 'm':
+      mrom_img_file = optarg;
+      break;
     case 'b':
       sdb_set_batch_mode();
       break;
