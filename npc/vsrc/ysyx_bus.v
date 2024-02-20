@@ -176,7 +176,7 @@ module ysyx_BUS_ARBITER(
       if (io_master_awvalid) begin
         if (io_master_awaddr == 'h10000000) begin
           $display("UART write: %h", io_master_wdata);
-          npc_difftest_skip_ref()
+          npc_difftest_skip_ref();
         end
       end
     end
