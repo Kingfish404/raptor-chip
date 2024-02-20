@@ -144,7 +144,7 @@ module ysyx_BUS_ARBITER(
 
   assign io_master_wlast = sram_awvalid;
   assign io_master_wdata[31:0] = wdata;
-  assign io_master_wstrb = 8'hff;
+  assign io_master_wstrb = lsu_wstrb;
   assign io_master_wvalid = sram_wvalid;
   assign sram_wready_o = io_master_wready;
 
