@@ -151,7 +151,7 @@ extern "C" void mrom_read(uint32_t addr, uint32_t *data)
 {
     for (int i = 0; i < 32; i++)
     {
-        printf("%02x ", mrom[i]);
+        printf("%02x", mrom[i]);
     }
     uint32_t offset = addr - MROM_BASE;
     uint32_t *mrom = (uint32_t *)(ramdisk_mrom_start + offset);
