@@ -1,12 +1,6 @@
 AM_SRCS := riscv/ysyxsoc/start.S \
            riscv/ysyxsoc/trm.c \
-           riscv/ysyxsoc/ioe.c \
-           riscv/ysyxsoc/timer.c \
-           riscv/ysyxsoc/input.c \
-           riscv/ysyxsoc/cte.c \
-           riscv/ysyxsoc/trap.S \
-           platform/dummy/vme.c \
-           platform/dummy/mpe.c
+           riscv/ysyxsoc/trap.S
 
 CFLAGS    += -fdata-sections -ffunction-sections
 LDFLAGS   += -T $(AM_HOME)/scripts/linker.ld \
@@ -25,5 +19,4 @@ image: $(IMAGE).elf
 run: image
 	make -C $(NPC_HOME) clean
 	make -C $(NPC_HOME) MROM_IMG=$(IMAGE).bin
-	echo $(IMAGE).bin
 	make -C $(NPC_HOME) ISA=$(ISA) run NPCFLAGS="$(NPCFLAGS)" IMG=$(IMAGE).bin
