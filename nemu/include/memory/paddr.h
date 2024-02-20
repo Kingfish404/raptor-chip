@@ -22,10 +22,11 @@
 #define PMEM_RIGHT ((paddr_t)CONFIG_MBASE + CONFIG_MSIZE - 1)
 #define RESET_VECTOR (PMEM_LEFT + CONFIG_PC_RESET_OFFSET)
 
-const uint64_t CONFIG_SRAM_BASE = 0x0f000000;
-const uint64_t CONFIG_SRAM_SIZE = 0x00002000;
-const uint64_t CONFIG_MROM_BASE = 0x20000000;
-const uint64_t CONFIG_MROM_SIZE = 0x00000fff;
+static const uint64_t CONFIG_SRAM_BASE = 0x0f000000;
+static const uint64_t CONFIG_SRAM_SIZE = 0x00002000;
+
+static const uint64_t CONFIG_MROM_BASE = 0x20000000;
+static const uint64_t CONFIG_MROM_SIZE = 0x00000fff;
 
 /* convert the guest physical address in the guest program to host virtual address in NEMU */
 uint8_t* guest_to_host(paddr_t paddr);

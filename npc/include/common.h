@@ -17,6 +17,7 @@ typedef word_t vaddr_t;
 #define MBASE 0x80000000
 #define MSIZE 0x8000000
 
+#define SRAM_BASE 0x0f000000
 #define MROM_BASE 0x20000000
 
 #ifdef CONFIG_SOFT_MMIO
