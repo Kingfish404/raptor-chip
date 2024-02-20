@@ -15,10 +15,11 @@ typedef word_t vaddr_t;
 #define MBASE 0x80000000
 #define MSIZE 0x8000000
 
+#define GPR_SIZE 16
+
 #ifdef CONFIG_SOFT_MMIO
 #define MROM_BASE 0x20000000
 
-#define GPR_SIZE 16
 
 #define DEVICE_BASE 0xa0000000
 
