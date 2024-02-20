@@ -72,7 +72,7 @@ static long load_img()
   if (mrom_img_file != NULL)
   {
     printf("Load MROM image: %s\n", mrom_img_file);
-    printf("MROM_BASE: %lx\n", MROM_BASE);
+    printf("MROM_BASE: %x\n", MROM_BASE);
     load_file(mrom_img_file, guest_to_host(MROM_BASE));
   }
   return size;
