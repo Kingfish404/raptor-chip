@@ -53,7 +53,7 @@ __EXPORT void difftest_memcpy(paddr_t addr, void *buf, size_t n, bool direction)
       memcpy(guest_to_mrom(addr), buf, n);
       return;
     }
-    Assert(0, "DIFFTEST_TO_REF invalid address: 0x%x", addr);
+    Assert(0, "DIFFTEST_TO_REF invalid address: " FMT_PADDR, addr);
   }
   else
   {
@@ -72,7 +72,7 @@ __EXPORT void difftest_memcpy(paddr_t addr, void *buf, size_t n, bool direction)
       memcpy(buf, guest_to_mrom(addr), n);
       return;
     }
-    Assert(0, "DIFFTEST_TO_DUT invalid address: 0x%x", addr);
+    Assert(0, "DIFFTEST_TO_DUT invalid address: " FMT_PADDR, addr);
   }
 }
 
