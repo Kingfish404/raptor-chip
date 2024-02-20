@@ -5,12 +5,13 @@
 void difftest_skip_ref();
 void npc_abort();
 
+static uint8_t sram[SRAM_SIZE] = {};
+static uint8_t mrom[MROM_SIZE] = {};
 static uint8_t pmem[MSIZE] = {};
+
 #ifdef CONFIG_SOFT_MMIO
 static uint32_t rtc_port_base[2] = {0x0, 0x0};
 #endif
-
-INCBIN(ramdisk, mrom, STRINGIZE(MROM_PATH));
 
 uint8_t *guest_to_host(paddr_t addr)
 {
@@ -20,11 +21,11 @@ uint8_t *guest_to_host(paddr_t addr)
     }
     if (addr >= MROM_BASE && addr < MROM_BASE + MROM_SIZE)
     {
-        return ramdisk_mrom_start + addr - MROM_BASE;
+        return mrom + addr - MROM_BASE;
     }
     if (addr >= SRAM_BASE && addr < SRAM_BASE + SRAM_SIZE)
     {
-        return pmem + addr - SRAM_BASE;
+        return sram + addr - SRAM_BASE;
     }
     Assert(0, "Invalid guest address: " FMT_WORD, addr);
 }
@@ -147,7 +148,7 @@ extern "C" void flash_read(uint32_t addr, uint32_t *data) { assert(0); }
 extern "C" void mrom_read(uint32_t addr, uint32_t *data)
 {
     uint32_t offset = addr - MROM_BASE;
-    uint32_t *mrom = (uint32_t *)(ramdisk_mrom_start + offset);
+    uint32_t *mrom = (uint32_t *)(mrom + offset);
     *data = *mrom;
     // printf("raddr: " FMT_WORD_NO_PREFIX ", data: " FMT_WORD_NO_PREFIX "\n",
     //        addr, *data);

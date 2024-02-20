@@ -39,14 +39,16 @@ VSRCS = $(shell find $(abspath ./vsrc) -name "*.v") \
 CSRCS = $(shell find $(abspath ./csrc) -name "*.c")
 CCSRCS = $(shell find $(abspath ./csrc) -name "*.cc" -or -name "*.cpp")
 
+ifeq ($(MROM_IMG),)
+# $(shell make -C $(NPC_HOME)/csrc/mem/mrom-data)
 MROM_IMG ?= $(NPC_HOME)/csrc/mem/mrom-data/build/mrom-data.bin
+endif
 
 all: $(BIN)
 
 # rules for NVBoard
 INCFLAGS = $(addprefix -I, $(INC_PATH))
-CXXFLAGS += $(INCFLAGS) -DTOP_NAME="\"V$(VTARGET)\"" $(SOC_DEFINE) \
-	-DMROM_PATH=$(MROM_IMG)
+CXXFLAGS += $(INCFLAGS) -DTOP_NAME="\"V$(VTARGET)\"" $(SOC_DEFINE)
 
 $(BIN): $(VSRCS) $(CCSRCS) $(NVBOARD_ARCHIVE)
 	$(call git_commit, "build RTL")
@@ -58,7 +60,7 @@ $(BIN): $(VSRCS) $(CCSRCS) $(NVBOARD_ARCHIVE)
 
 DIFF_REF_SO = -d $(abspath $(NEMU_HOME)/build/riscv32-nemu-interpreter-so)
 IMG ?=
-NPC_EXEC := $(BIN) $(NPCFLAGS) $(DIFF_REF_SO) $(IMG)
+NPC_EXEC := $(BIN) $(NPCFLAGS) $(DIFF_REF_SO) -m $(MROM_IMG) $(IMG)
 
 run: $(BIN)
 	$(call git_commit, "sim RTL") # DO NOT REMOVE THIS LINE!!!
