@@ -85,6 +85,6 @@ end
 
 `define Assert(signal, value) \
   if (signal !== value) begin \
-    $display("ASSERTION FAILED in %m: signal != value"); \
+    $error("ASSERTION FAILED in %m: signal != value"); \
     $finish; \
   end
