@@ -33,9 +33,7 @@ uint8_t* guest_to_host(paddr_t paddr) {
   Assert(0, "invalid guest physical address = " FMT_PADDR, paddr);
 }
 paddr_t host_to_guest(uint8_t *haddr) { 
-  if (in_pmem(haddr)) return haddr - pmem + CONFIG_MBASE;
-  if (in_sram(haddr)) return haddr - sram + CONFIG_SRAM_BASE;
-  if (in_mrom(haddr)) return haddr - mrom + CONFIG_MROM_BASE;
+  return haddr - pmem + CONFIG_MBASE;
   Assert(0, "invalid host virtual address = %p", haddr);
 }
 
@@ -74,8 +72,6 @@ word_t paddr_read(paddr_t addr, int len) {
     in_sram(addr) ||
     in_mrom(addr)
     )) return pmem_read(addr, len);
-  if (in_sram(addr)) return sram_read(addr, len);
-  if (in_mrom(addr)) return mrom_read(addr, len);
   IFDEF(CONFIG_DEVICE, return mmio_read(addr, len));
   out_of_bound(addr);
   return 0;
