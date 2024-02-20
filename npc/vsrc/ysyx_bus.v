@@ -170,15 +170,15 @@ module ysyx_BUS_ARBITER(
   //   .bresp_o(sram_bresp_o), .bvalid_o(sram_bvalid_o), .bready(1)
   // );
 
-  // For difftest
   always @(posedge clk)
     begin
-      if (io_master_awvalid) begin
-        if (io_master_awaddr == 'h10000000) begin
-          $display("UART write: %h", io_master_wdata);
-          npc_difftest_skip_ref();
+      if (io_master_awvalid)
+        begin
+          if (io_master_awaddr == 'h10000000)
+            begin
+              npc_difftest_skip_ref();
+            end
         end
-      end
     end
 
   wire [DATA_W-1:0] uart_rdata_o;
