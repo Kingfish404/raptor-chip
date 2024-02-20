@@ -21,7 +21,6 @@ uint8_t *guest_to_host(paddr_t addr)
     }
     if (addr >= MROM_BASE && addr < MROM_BASE + MROM_SIZE)
     {
-        printf("addr: " FMT_WORD_NO_PREFIX "\n", addr);
         return mrom + addr - MROM_BASE;
     }
     if (addr >= SRAM_BASE && addr < SRAM_BASE + SRAM_SIZE)
