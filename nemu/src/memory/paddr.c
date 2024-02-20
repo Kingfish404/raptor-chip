@@ -26,40 +26,26 @@ static uint8_t pmem[CONFIG_MSIZE] PG_ALIGN = {};
 static uint8_t sram[CONFIG_SRAM_SIZE] PG_ALIGN = {};
 static uint8_t mrom[CONFIG_MROM_BASE] PG_ALIGN = {};
 
-uint8_t* guest_to_host(paddr_t paddr) { return pmem + paddr - CONFIG_MBASE; }
-paddr_t host_to_guest(uint8_t *haddr) { return haddr - pmem + CONFIG_MBASE; }
-
-uint8_t* guest_to_sram(paddr_t paddr) { return sram + paddr - CONFIG_SRAM_BASE; }
-paddr_t sram_to_guest(uint8_t *haddr) { return haddr - sram + CONFIG_SRAM_BASE; }
-
-uint8_t* guest_to_mrom(paddr_t paddr) { return mrom + paddr - CONFIG_MROM_BASE; }
-paddr_t mrom_to_guest(uint8_t *haddr) { return haddr - mrom + CONFIG_MROM_BASE; }
+uint8_t* guest_to_host(paddr_t paddr) { 
+  if (in_pmem(paddr)) return pmem + paddr - CONFIG_MBASE;
+  if (in_sram(paddr)) return sram + paddr - CONFIG_SRAM_BASE;
+  if (in_mrom(paddr)) return mrom + paddr - CONFIG_MROM_BASE;
+  Assert(0, "invalid guest physical address = " FMT_PADDR, paddr);
+}
+paddr_t host_to_guest(uint8_t *haddr) { 
+  if (in_pmem(haddr)) return haddr - pmem + CONFIG_MBASE;
+  if (in_sram(haddr)) return haddr - sram + CONFIG_SRAM_BASE;
+  if (in_mrom(haddr)) return haddr - mrom + CONFIG_MROM_BASE;
+  Assert(0, "invalid host virtual address = %p", haddr);
+}
 
 static word_t pmem_read(paddr_t addr, int len) {
   word_t ret = host_read(guest_to_host(addr), len);
   return ret;
 }
 
-static word_t sram_read(paddr_t addr, int len) {
-  word_t ret = host_read(guest_to_sram(addr), len);
-  return ret;
-}
-
-static word_t mrom_read(paddr_t addr, int len) {
-  word_t ret = host_read(guest_to_mrom(addr), len);
-  return ret;
-}
-
 static void pmem_write(paddr_t addr, int len, word_t data) {
   host_write(guest_to_host(addr), len, data);
-}
-
-static void sram_write(paddr_t addr, int len, word_t data) {
-  host_write(guest_to_sram(addr), len, data);
-}
-
-static void mrom_write(paddr_t addr, int len, word_t data) {
-  host_write(guest_to_mrom(addr), len, data);
 }
 
 static void out_of_bound(paddr_t addr) {
@@ -83,7 +69,11 @@ word_t paddr_read(paddr_t addr, int len) {
   printf("paddr_r: " FMT_PADDR ", size: %d\n", addr, len);
 #endif
 
-  if (likely(in_pmem(addr))) return pmem_read(addr, len);
+  if (likely(
+    in_pmem(addr) ||
+    in_sram(addr) ||
+    in_mrom(addr)
+    )) return pmem_read(addr, len);
   if (in_sram(addr)) return sram_read(addr, len);
   if (in_mrom(addr)) return mrom_read(addr, len);
   IFDEF(CONFIG_DEVICE, return mmio_read(addr, len));
@@ -96,9 +86,11 @@ void paddr_write(paddr_t addr, int len, word_t data) {
   printf("paddr_w: " FMT_PADDR ", size: %d, data: " FMT_WORD "\n", addr, len, data);
 #endif
 
-  if (likely(in_pmem(addr))) { pmem_write(addr, len, data); return; }
-  if (in_sram(addr)) { sram_write(addr, len, data); return; }
-  if (in_mrom(addr)) { mrom_write(addr, len, data); return; }
+  if (likely(
+    in_pmem(addr) || 
+    in_sram(addr) || 
+    in_mrom(addr)
+    )) { pmem_write(addr, len, data); return; }
   IFDEF(CONFIG_DEVICE, mmio_write(addr, len, data); return);
   out_of_bound(addr);
 }
