@@ -173,6 +173,7 @@ module ysyx_BUS_ARBITER(
   always @(posedge clk)
     begin
       `Assert(io_master_rresp, 2'b00);
+      `Assert(io_master_bresp, 2'b00);
       if (io_master_awvalid)
         begin
           if (io_master_awaddr == 'h10000000)
