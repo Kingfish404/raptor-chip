@@ -135,9 +135,9 @@ module ysyx_BUS_ARBITER(
   assign io_master_rready = 1;
 
   assign io_master_awsize = (
-    ({3{lsu_wstrb == 8'h1}} & 3'b011) |
-    ({3{lsu_wstrb == 8'h3}} & 3'b100) |
-    ({3{lsu_wstrb == 8'hf}} & 3'b101) |
+    ({3{lsu_wstrb == 8'h1}} & 3'b000) |
+    ({3{lsu_wstrb == 8'h3}} & 3'b010) |
+    ({3{lsu_wstrb == 8'hf}} & 3'b011) |
     3'b000
   );
   assign io_master_awaddr = awaddr;
