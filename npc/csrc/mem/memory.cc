@@ -149,16 +149,8 @@ INCBIN(ramdisk, mrom, STRINGIZE(MROM_PATH));
 
 extern "C" void mrom_read(uint32_t addr, uint32_t *data)
 {
-    for (int i = 0; i < 32; i++)
-    {
-        printf("%02x", mrom[i]);
-    }
-    printf("\n");
     uint32_t offset = addr - MROM_BASE;
-    uint32_t *mrom_ptr = (uint32_t *)(ramdisk_mrom_start + offset);
-    *data = *mrom_ptr;
-    uint32_t datat = *((uint32_t *)(mrom + offset));
-    Log("datat: " FMT_WORD_NO_PREFIX, datat);
-    Log("raddr: " FMT_WORD_NO_PREFIX ", data: " FMT_WORD_NO_PREFIX,
-        addr, *data);
+    // uint32_t *mrom_ptr = (uint32_t *)(ramdisk_mrom_start + offset);
+    // *data = *mrom_ptr;
+    *data = *((uint32_t *)(mrom + offset));
 }
