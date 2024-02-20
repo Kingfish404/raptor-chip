@@ -174,7 +174,6 @@ module ysyx_BUS_ARBITER(
   always @(posedge clk)
     begin
       if (io_master_awvalid) begin
-        $display("UART write: %h", io_master_awaddr);
         if (io_master_awaddr == 'h0f000000) begin
           $display("UART write: %h", io_master_wdata);
         end
