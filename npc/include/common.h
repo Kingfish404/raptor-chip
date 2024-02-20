@@ -12,13 +12,14 @@ typedef uint32_t word_t;
 typedef word_t paddr_t;
 typedef word_t vaddr_t;
 
+#define GPR_SIZE 16
+
 #define MBASE 0x80000000
 #define MSIZE 0x8000000
 
-#define GPR_SIZE 16
+#define MROM_BASE 0x20000000
 
 #ifdef CONFIG_SOFT_MMIO
-#define MROM_BASE 0x20000000
 
 
 #define DEVICE_BASE 0xa0000000
