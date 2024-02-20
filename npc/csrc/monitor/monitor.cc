@@ -62,7 +62,7 @@ static long load_img()
     return sizeof(img);
   }
 
-  load_file(img_file, guest_to_host(MBASE));
+  long size = load_file(img_file, guest_to_host(MBASE));
 
   // FILE *fp = fopen(img_file, "rb");
   // assert(fp != NULL);
