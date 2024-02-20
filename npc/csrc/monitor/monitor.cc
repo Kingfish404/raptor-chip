@@ -57,6 +57,8 @@ long load_file(const char *filename, void *buf)
 
 static long load_img()
 {
+  printf("Loading image from %s\n", img_file);
+  printf("Loading MROM from %s\n", mrom_img_file);
   long size;
   if (img_file == NULL)
   {
@@ -71,8 +73,6 @@ static long load_img()
 
   if (mrom_img_file != NULL)
   {
-    printf("Load MROM image: %s\n", mrom_img_file);
-    printf("MROM_BASE: %x\n", MROM_BASE);
     load_file(mrom_img_file, guest_to_host(MROM_BASE));
   }
   return size;
@@ -118,6 +118,8 @@ static int parse_args(int argc, char *argv[])
       return 0;
     default:
       printf("Usage: %s [OPTION...] IMAGE [args]\n\n", argv[0]);
+      printf("Options:\n");
+      printf("\t-m,--mrom=FILE          load MROM image from FILE\n");
       printf("\t-b,--batch              run with batch mode\n");
       printf("\t-l,--log=FILE           output log to FILE\n");
       printf("\t-d,--diff=REF_SO        run DiffTest with reference REF_SO\n");
