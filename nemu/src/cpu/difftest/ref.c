@@ -38,11 +38,41 @@ __EXPORT void difftest_memcpy(paddr_t addr, void *buf, size_t n, bool direction)
 {
   if (direction == DIFFTEST_TO_REF)
   {
-    memcpy(guest_to_host(addr), buf, n);
+    if (in_pmem(addr))
+    {
+      memcpy(guest_to_host(addr), buf, n);
+      return;
+    }
+    if (in_sram(addr))
+    {
+      memcpy(guest_to_sram(addr), buf, n);
+      return;
+    }
+    if (in_mrom(addr))
+    {
+      memcpy(guest_to_mrom(addr), buf, n);
+      return;
+    }
+    Assert(0, "DIFFTEST_TO_REF invalid address: 0x%x", addr);
   }
   else
   {
-    memcpy(buf, guest_to_host(addr), n);
+    if (in_pmem(addr))
+    {
+      memcpy(buf, guest_to_host(addr), n);
+      return;
+    }
+    if (in_sram(addr))
+    {
+      memcpy(buf, guest_to_sram(addr), n);
+      return;
+    }
+    if (in_mrom(addr))
+    {
+      memcpy(buf, guest_to_mrom(addr), n);
+      return;
+    }
+    Assert(0, "DIFFTEST_TO_DUT invalid address: 0x%x", addr);
   }
 }
 
