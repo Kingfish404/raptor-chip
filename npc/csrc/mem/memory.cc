@@ -148,8 +148,7 @@ extern "C" void flash_read(uint32_t addr, uint32_t *data) { assert(0); }
 extern "C" void mrom_read(uint32_t addr, uint32_t *data)
 {
     uint32_t offset = addr - MROM_BASE;
-    uint32_t *mrom = (uint32_t *)(mrom + offset);
-    *data = *mrom;
+    *data = *((uint32_t *)(mrom + offset));
     // printf("raddr: " FMT_WORD_NO_PREFIX ", data: " FMT_WORD_NO_PREFIX "\n",
     //        addr, *data);
 }
