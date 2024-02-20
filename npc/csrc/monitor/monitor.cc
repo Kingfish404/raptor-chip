@@ -34,7 +34,25 @@ void init_disasm(const char *triple);
 static char *log_file = NULL;
 static char *diff_so_file = NULL;
 static char *img_file = NULL;
+static char *mrom_img_file = NULL;
 static int difftest_port = 1234;
+
+void load_file(const char *filename, void *buf)
+{
+  FILE *fp = fopen(filename, "rb");
+  assert(fp != NULL);
+
+  fseek(fp, 0, SEEK_END);
+  long size = ftell(fp);
+
+  printf("image: %s, size: %ld\n", filename, size);
+
+  fseek(fp, 0, SEEK_SET);
+  int ret = fread(buf, size, 1, fp);
+  assert(ret == 1);
+
+  fclose(fp);
+}
 
 static long load_img()
 {
@@ -44,19 +62,21 @@ static long load_img()
     return sizeof(img);
   }
 
-  FILE *fp = fopen(img_file, "rb");
-  assert(fp != NULL);
+  load_file(img_file, guest_to_host(MBASE));
 
-  fseek(fp, 0, SEEK_END);
-  long size = ftell(fp);
+  // FILE *fp = fopen(img_file, "rb");
+  // assert(fp != NULL);
 
-  printf("image: %s, size: %ld\n", img_file, size);
+  // fseek(fp, 0, SEEK_END);
+  // long size = ftell(fp);
 
-  fseek(fp, 0, SEEK_SET);
-  int ret = fread(guest_to_host(MBASE), size, 1, fp);
-  assert(ret == 1);
+  // printf("image: %s, size: %ld\n", img_file, size);
 
-  fclose(fp);
+  // fseek(fp, 0, SEEK_SET);
+  // int ret = fread(guest_to_host(MBASE), size, 1, fp);
+  // assert(ret == 1);
+
+  // fclose(fp);
   return size;
 }
 

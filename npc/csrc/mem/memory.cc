@@ -10,6 +10,8 @@ static uint8_t pmem[MSIZE] = {};
 static uint32_t rtc_port_base[2] = {0x0, 0x0};
 #endif
 
+INCBIN(ramdisk, mrom, STRINGIZE(MROM_PATH));
+
 uint8_t *guest_to_host(paddr_t addr)
 {
     return pmem + addr - MBASE;
@@ -129,8 +131,6 @@ extern "C" void pmem_write(word_t waddr, word_t wdata, char wmask)
 }
 
 extern "C" void flash_read(uint32_t addr, uint32_t *data) { assert(0); }
-
-INCBIN(ramdisk, mrom, STRINGIZE(MROM_PATH));
 
 extern "C" void mrom_read(uint32_t addr, uint32_t *data)
 {
