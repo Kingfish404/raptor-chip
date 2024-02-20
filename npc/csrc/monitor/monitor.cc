@@ -60,7 +60,7 @@ static long load_img()
   long size;
   if (img_file == NULL)
   {
-    printf("No image is given, use default image.\n");
+    Log("No image is given, use default image.");
     memcpy(guest_to_host(MBASE), img, sizeof(img));
     size = sizeof(img);
   }
@@ -71,7 +71,7 @@ static long load_img()
 
   if (mrom_img_file != NULL)
   {
-    printf("Load MROM image from %s\n", mrom_img_file);
+    Log("Load MROM image from %s", mrom_img_file);
     load_file(mrom_img_file, guest_to_host(MROM_BASE));
   }
   return size;
