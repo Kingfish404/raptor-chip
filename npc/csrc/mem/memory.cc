@@ -5,6 +5,8 @@
 void difftest_skip_ref();
 void npc_abort();
 
+static uint8_t sram[SRAM_SIZE] = {};
+static uint8_t mrom[MROM_SIZE] = {};
 static uint8_t pmem[MSIZE] = {};
 #ifdef CONFIG_SOFT_MMIO
 static uint32_t rtc_port_base[2] = {0x0, 0x0};
@@ -12,7 +14,19 @@ static uint32_t rtc_port_base[2] = {0x0, 0x0};
 
 uint8_t *guest_to_host(paddr_t addr)
 {
-    return pmem + addr - MBASE;
+    if (addr >= MBASE && addr <= MBASE + MSIZE)
+    {
+        return pmem + addr - MBASE;
+    }
+    if (addr >= MROM_BASE && addr < MROM_BASE + MROM_SIZE)
+    {
+        return mrom + addr - MROM_BASE;
+    }
+    if (addr >= SRAM_BASE && addr < SRAM_BASE + SRAM_SIZE)
+    {
+        return sram + addr - SRAM_BASE;
+    }
+    Assert(0, "Invalid guest address: " FMT_WORD, addr);
 }
 
 paddr_t host_to_guest(uint8_t *addr)
@@ -81,7 +95,7 @@ extern "C" void pmem_read(word_t raddr, word_t *data)
     if (raddr >= MBASE && raddr < MBASE + MSIZE)
     {
         *data = host_read(pmem + raddr - MBASE, 4);
-        // printf("raddr: " FMT_WORD_NO_PREFIX ", data: " FMT_WORD_NO_PREFIX "\n",
+        // Log("raddr: " FMT_WORD_NO_PREFIX ", data: " FMT_WORD_NO_PREFIX,
         //        raddr, *data);
         return;
     }
@@ -91,7 +105,7 @@ extern "C" void pmem_read(word_t raddr, word_t *data)
 
 extern "C" void pmem_write(word_t waddr, word_t wdata, char wmask)
 {
-    // printf("waddr: 0x%x, wdata: 0x%x, wmask = 0x%x\n",
+    // Log("waddr: 0x%x, wdata: 0x%x, wmask = 0x%x",
     //        waddr, wdata, wmask);
 #ifdef CONFIG_SOFT_MMIO
     // SERIAL_MMIO: hex "MMIO address of the serial controller"
@@ -130,13 +144,8 @@ extern "C" void pmem_write(word_t waddr, word_t wdata, char wmask)
 
 extern "C" void flash_read(uint32_t addr, uint32_t *data) { assert(0); }
 
-INCBIN(ramdisk, mrom, STRINGIZE(MROM_PATH));
-
 extern "C" void mrom_read(uint32_t addr, uint32_t *data)
 {
     uint32_t offset = addr - MROM_BASE;
-    uint32_t *mrom = (uint32_t *)(ramdisk_mrom_start + offset);
-    *data = *mrom;
-    // printf("raddr: " FMT_WORD_NO_PREFIX ", data: " FMT_WORD_NO_PREFIX "\n",
-    //        addr, *data);
+    *data = *((uint32_t *)(mrom + offset));
 }

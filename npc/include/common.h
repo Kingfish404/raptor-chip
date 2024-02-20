@@ -12,13 +12,18 @@ typedef uint32_t word_t;
 typedef word_t paddr_t;
 typedef word_t vaddr_t;
 
-#define MBASE 0x80000000
-#define MSIZE 0x8000000
-
-#define MROM_BASE 0x20000000
-
 #define GPR_SIZE 16
 
+#define MBASE 0x80000000
+#define MSIZE 0x08000000
+
+#define SRAM_BASE 0x0f000000
+#define SRAM_SIZE 0x00002000
+
+#define MROM_BASE 0x20000000
+#define MROM_SIZE 0x00001000
+
+#ifdef CONFIG_SOFT_MMIO
 #define DEVICE_BASE 0xa0000000
 
 #define MMIO_BASE 0xa0000000
@@ -31,6 +36,7 @@ typedef word_t vaddr_t;
 #define DISK_ADDR (DEVICE_BASE + 0x0000300)
 #define FB_ADDR (MMIO_BASE + 0x1000000)
 #define AUDIO_SBUF_ADDR (MMIO_BASE + 0x1200000)
+#endif
 
 #define FMT_WORD "0x%08x"
 #define FMT_WORD_NO_PREFIX "%08x"
@@ -62,6 +68,10 @@ typedef word_t vaddr_t;
 #define Error(format, ...)                     \
   _Log(FMT_RED("[npc %s:%d %s] ") format "\n", \
        __FILENAME__, __LINE__, __func__, ##__VA_ARGS__)
+
+#define Assert(cond, format, ...) \
+  Error(format, ##__VA_ARGS__);   \
+  assert(cond)
 
 enum
 {

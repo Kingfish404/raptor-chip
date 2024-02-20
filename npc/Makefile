@@ -39,7 +39,12 @@ VSRCS = $(shell find $(abspath ./vsrc) -name "*.v") \
 CSRCS = $(shell find $(abspath ./csrc) -name "*.c")
 CCSRCS = $(shell find $(abspath ./csrc) -name "*.cc" -or -name "*.cpp")
 
+ifeq ($(MROM_IMG),)
 MROM_IMG ?= $(NPC_HOME)/csrc/mem/mrom-data/build/mrom-data.bin
+endif
+
+$(NPC_HOME)/csrc/mem/mrom-data/build/mrom-data.bin:
+	$(MAKE) -C $(NPC_HOME)/csrc/mem/mrom-data
 
 all: $(BIN)
 
@@ -58,9 +63,9 @@ $(BIN): $(VSRCS) $(CCSRCS) $(NVBOARD_ARCHIVE)
 
 DIFF_REF_SO = -d $(abspath $(NEMU_HOME)/build/riscv32-nemu-interpreter-so)
 IMG ?=
-NPC_EXEC := $(BIN) $(NPCFLAGS) $(DIFF_REF_SO) $(IMG)
+NPC_EXEC := $(BIN) $(NPCFLAGS) $(DIFF_REF_SO) -m $(MROM_IMG) $(IMG)
 
-run: $(BIN)
+run: $(BIN) $(MROM_IMG)
 	$(call git_commit, "sim RTL") # DO NOT REMOVE THIS LINE!!!
 	$(NPC_EXEC)
 

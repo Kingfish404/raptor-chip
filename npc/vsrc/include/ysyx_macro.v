@@ -82,3 +82,9 @@ always @(*) begin \
     `ysyx_WAIT_READY: begin state = ((next_ready ? `ysyx_IDLE : state));       end \
   endcase \
 end
+
+`define Assert(signal, value) \
+  if (signal !== value) begin \
+    $error("ASSERTION FAILED in %m: signal != value"); \
+    $finish; \
+  end
