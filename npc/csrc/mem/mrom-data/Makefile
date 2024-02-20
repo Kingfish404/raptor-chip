@@ -8,7 +8,7 @@ OBJCOPY   = $(CROSS_COMPILE)objcopy
 READELF   = $(CROSS_COMPILE)readelf
 
 COMMON_CFLAGS = -march=rv32e_zicsr -mabi=ilp32e  # overwrite
-# LDFLAGS       = -melf32lriscv                    # overwrite
+LDFLAGS       =
 
 IMAGE = ./build/mrom-data
 SOURCE = $(wildcard *.c)
