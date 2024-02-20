@@ -15,6 +15,7 @@ typedef word_t vaddr_t;
 #define MBASE 0x80000000
 #define MSIZE 0x8000000
 
+#ifdef CONFIG_SOFT_MMIO
 #define MROM_BASE 0x20000000
 
 #define GPR_SIZE 16
@@ -31,6 +32,7 @@ typedef word_t vaddr_t;
 #define DISK_ADDR (DEVICE_BASE + 0x0000300)
 #define FB_ADDR (MMIO_BASE + 0x1000000)
 #define AUDIO_SBUF_ADDR (MMIO_BASE + 0x1200000)
+#endif
 
 #define FMT_WORD "0x%08x"
 #define FMT_WORD_NO_PREFIX "%08x"

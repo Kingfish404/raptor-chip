@@ -12,8 +12,6 @@ endif
 -include ./include/config/auto.conf
 -include ./include/config/auto.conf.cmd
 
-CC = ccache $(CC)
-
 ifeq ($(MODE), soc)
 VTARGET=ysyxSoCFull
 SOC_DEFINE=-DYSYX_SOC
@@ -63,7 +61,7 @@ IMG ?=
 NPC_EXEC := $(BIN) $(NPCFLAGS) $(DIFF_REF_SO) $(IMG)
 
 run: $(BIN)
-	# $(call git_commit, "sim RTL") # DO NOT REMOVE THIS LINE!!!
+	$(call git_commit, "sim RTL") # DO NOT REMOVE THIS LINE!!!
 	$(NPC_EXEC)
 
 sim: $(BIN)
