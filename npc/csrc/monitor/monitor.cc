@@ -34,7 +34,7 @@ void init_disasm(const char *triple);
 static char *log_file = NULL;
 static char *diff_so_file = NULL;
 static char *img_file = NULL;
-static char *mrom_img_file = NULL;
+// static char *mrom_img_file = NULL;
 static int difftest_port = 1234;
 
 long load_file(const char *filename, void *buf)
