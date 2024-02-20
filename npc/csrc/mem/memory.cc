@@ -145,12 +145,8 @@ extern "C" void pmem_write(word_t waddr, word_t wdata, char wmask)
 
 extern "C" void flash_read(uint32_t addr, uint32_t *data) { assert(0); }
 
-INCBIN(ramdisk, mrom, STRINGIZE(MROM_PATH));
-
 extern "C" void mrom_read(uint32_t addr, uint32_t *data)
 {
     uint32_t offset = addr - MROM_BASE;
-    // uint32_t *mrom_ptr = (uint32_t *)(ramdisk_mrom_start + offset);
-    // *data = *mrom_ptr;
     *data = *((uint32_t *)(mrom + offset));
 }
