@@ -127,8 +127,8 @@ module ysyx_BUS_ARBITER(
   // io lsu read
   assign io_master_arsize = (
            ({3{lsu_rstrb == 8'h1}} & 3'b000) |
-           ({3{lsu_rstrb == 8'h3}} & 3'b010) |
-           ({3{lsu_rstrb == 8'hf}} & 3'b011) |
+           ({3{lsu_rstrb == 8'h3}} & 3'b001) |
+           ({3{lsu_rstrb == 8'hf}} & 3'b010) |
            3'b000
          );
   assign io_master_araddr = sram_araddr;
