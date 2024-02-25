@@ -5,6 +5,7 @@
 #include <verilog.h>
 #include "verilated_vcd_c.h"
 
+
 #define MAX_INST_TO_PRINT 10
 #define MAX_IRING_SIZE 16
 
