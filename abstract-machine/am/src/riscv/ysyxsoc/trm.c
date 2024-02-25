@@ -2,7 +2,7 @@
 #include <ysyxsoc.h>
 #include <klib-macros.h>
 
-char _heap_start = 0x0f000000;
+extern char _heap_start;
 int main(const char *args);
 
 extern char _pmem_start;
