@@ -47,6 +47,7 @@ module ysyx_BUS_ARBITER(
     // lsu:load
     input [DATA_W-1:0] lsu_araddr,
     input lsu_arvalid,
+    input [7:0] lsu_rstrb,
     output [DATA_W-1:0] lsu_rdata_o,
     output lsu_rvalid_o,
 
@@ -111,7 +112,6 @@ module ysyx_BUS_ARBITER(
   wire sram_awvalid = sram_wvalid;
   wire [ADDR_W-1:0] awaddr = lsu_awaddr;
   wire [DATA_W-1:0] wdata = lsu_wdata;
-  wire [7:0] wstrb = lsu_wstrb;
   assign lsu_wready_o = (
            (uart_en & uart_wready_o) |
            (sram_en & sram_wready_o)
@@ -124,6 +124,13 @@ module ysyx_BUS_ARBITER(
       lfsr <= {lfsr[18:0], lfsr[19] ^ lfsr[18]};
     end
 
+  // io lsu read
+  assign io_master_arsize = (
+           ({3{lsu_rstrb == 8'h1}} & 3'b000) |
+           ({3{lsu_rstrb == 8'h3}} & 3'b010) |
+           ({3{lsu_rstrb == 8'hf}} & 3'b011) |
+           3'b000
+         );
   assign io_master_araddr = sram_araddr;
   assign io_master_arvalid = sram_arvalid;
   assign arready_o = io_master_arready;
@@ -133,6 +140,7 @@ module ysyx_BUS_ARBITER(
   assign rvalid_o = io_master_rvalid;
   assign io_master_rready = 1;
 
+  // io lsu write
   assign io_master_awsize = (
            ({3{lsu_wstrb == 8'h1}} & 3'b000) |
            ({3{lsu_wstrb == 8'h3}} & 3'b010) |

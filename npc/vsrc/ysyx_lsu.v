@@ -16,6 +16,7 @@ module ysyx_LSU(
   // to bus load
   output [DATA_W-1:0] lsu_araddr_o,
   output lsu_arvalid_o,
+  output [7:0] lsu_rstrb_o,
   // from bus load
   input [DATA_W-1:0] lsu_rdata,
   input lsu_rvalid,
@@ -31,7 +32,7 @@ module ysyx_LSU(
 );
   parameter ADDR_W = 32, DATA_W = 32;
   wire [DATA_W-1:0] rdata;
-  wire [7:0] wstrb;
+  wire [7:0] wstrb, rstrb;
   assign rvalid_o = lsu_rvalid;
   assign wready_o = lsu_wready;
 
@@ -56,6 +57,7 @@ module ysyx_LSU(
   assign lsu_arvalid_o = ifsr_ready & ren & avalid;
 
   assign rdata = lsu_rdata;
+  assign lsu_rstrb_o = rstrb;
 
   assign lsu_awaddr_o = idu_valid ? addr : lsu_araddr;
   assign lsu_awvalid_o = ifsr_ready & wen & avalid;
@@ -69,6 +71,13 @@ module ysyx_LSU(
     ({8{alu_op == `ysyx_ALU_OP_SB}} & 8'h1) | 
     ({8{alu_op == `ysyx_ALU_OP_SH}} & 8'h3) | 
     ({8{alu_op == `ysyx_ALU_OP_SW}} & 8'hf)
+  );
+  assign rstrb = (
+    ({8{alu_op == `ysyx_ALU_OP_LB}} & 8'h1) | 
+    ({8{alu_op == `ysyx_ALU_OP_LBU}} & 8'h1) | 
+    ({8{alu_op == `ysyx_ALU_OP_LH}} & 8'h3) | 
+    ({8{alu_op == `ysyx_ALU_OP_LHU}} & 8'h3) | 
+    ({8{alu_op == `ysyx_ALU_OP_LW}} & 8'hf)
   );
   assign rdata_o = (
     ({DATA_W{alu_op == `ysyx_ALU_OP_LB}} & (rdata[7] ? rdata | 'hffffff00 : rdata & 'hff)) | 

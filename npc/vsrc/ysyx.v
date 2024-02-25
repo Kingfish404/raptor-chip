@@ -109,7 +109,7 @@ module ysyx (
   wire [BIT_W-1:0] lsu_awaddr;
   wire lsu_awvalid;
   wire [BIT_W-1:0] lsu_wdata;
-  wire [7:0] lsu_wstrb;
+  wire [7:0] lsu_rstrb, lsu_wstrb;
   wire lsu_wvalid;
 
   // EXU output
@@ -168,7 +168,7 @@ module ysyx (
     .ifu_araddr(ifu_araddr_o), .ifu_arvalid(ifu_arvalid_o),
     .ifu_rdata_o(ifu_rdata), .ifu_rvalid_o(ifu_rvalid),
 
-    .lsu_araddr(lsu_araddr), .lsu_arvalid(lsu_arvalid),
+    .lsu_araddr(lsu_araddr), .lsu_arvalid(lsu_arvalid), .lsu_rstrb(lsu_rstrb),
     .lsu_rdata_o(bus_lsu_rdata), .lsu_rvalid_o(lsu_rvalid),
   
     .lsu_awaddr(lsu_awaddr), .lsu_awvalid(lsu_awvalid),
@@ -250,7 +250,7 @@ module ysyx (
     .rdata_o(lsu_rdata), .rvalid_o(lsu_exu_rvalid), .wready_o(lsu_exu_wready),
 
     // to-from bus load
-    .lsu_araddr_o(lsu_araddr), .lsu_arvalid_o(lsu_arvalid),
+    .lsu_araddr_o(lsu_araddr), .lsu_arvalid_o(lsu_arvalid), .lsu_rstrb_o(lsu_rstrb)
     .lsu_rdata(bus_lsu_rdata), .lsu_rvalid(lsu_rvalid),
 
     // to-from bus store
