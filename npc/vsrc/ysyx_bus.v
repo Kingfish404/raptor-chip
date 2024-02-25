@@ -156,7 +156,11 @@ module ysyx_BUS_ARBITER(
   // assign io_master_wdata[31:0] = wdata;
   assign io_master_wdata[31:0] = (io_master_awaddr[2:2] == 1 & io_master_arsize == 3'b010) ? 0 : wdata;
   assign io_master_wdata[63:32] = (io_master_awaddr[2:2] == 1 & io_master_arsize == 3'b010) ? wdata : 0;
-  assign io_master_wstrb = (io_master_awaddr[2:2] == 1 & io_master_arsize == 3'b010) ? 8'hf0 : lsu_wstrb;
+  assign io_master_wstrb = (
+           io_master_awaddr[2:2] == 1 & io_master_arsize == 3'b010)
+         ?
+         {lsu_wstrb[3:0], 3'{0}}
+         lsu_wstrb;
   assign io_master_wvalid = sram_wvalid;
   assign sram_wready_o = io_master_wready;
 
