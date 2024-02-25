@@ -129,13 +129,13 @@ module ysyx_BUS_ARBITER(
            ({3{lsu_rstrb == 8'h1}} & 3'b000) |
            ({3{lsu_rstrb == 8'h3}} & 3'b001) |
            ({3{lsu_rstrb == 8'hf}} & 3'b010) |
-           3'b000
+           (3'b000)
          );
   assign io_master_araddr = sram_araddr;
   assign io_master_arvalid = sram_arvalid;
   assign arready_o = io_master_arready;
 
-  assign rdata_o = io_master_rdata[31:0];
+  assign rdata_o = sram_araddr[4:4] == 1 ? io_master_rdata[61:32] : io_master_rdata[31:0];
   assign rresp_o = io_master_rresp;
   assign rvalid_o = io_master_rvalid;
   assign io_master_rready = 1;
@@ -145,7 +145,7 @@ module ysyx_BUS_ARBITER(
            ({3{lsu_wstrb == 8'h1}} & 3'b000) |
            ({3{lsu_wstrb == 8'h3}} & 3'b010) |
            ({3{lsu_wstrb == 8'hf}} & 3'b011) |
-           3'b000
+           (3'b000)
          );
   assign io_master_awaddr = awaddr;
   assign io_master_awvalid = sram_awvalid;
