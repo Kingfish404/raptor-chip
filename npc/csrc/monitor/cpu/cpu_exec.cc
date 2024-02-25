@@ -136,7 +136,6 @@ void cpu_exec(uint64_t n)
     npc.state = NPC_STOP;
     break;
   case NPC_END:
-  case NPC_QUIT:
     if (*npc.ret != 0)
     {
       Log("a0 = " FMT_RED(FMT_WORD), *npc.ret);
@@ -148,6 +147,7 @@ void cpu_exec(uint64_t n)
       cpu_show_itrace();
       reg_display(GPR_SIZE);
     }
+  case NPC_QUIT:
     statistic();
     break;
   default:
