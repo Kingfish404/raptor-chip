@@ -159,7 +159,7 @@ module ysyx_BUS_ARBITER(
   assign io_master_wstrb = (
            io_master_awaddr[2:2] == 1 & io_master_arsize == 3'b010)
          ?
-         {{lsu_wstrb[3:0]}, 4{0}}
+         {{lsu_wstrb[3:0]}, {4'b0}}
          lsu_wstrb;
   assign io_master_wvalid = sram_wvalid;
   assign sram_wready_o = io_master_wready;
