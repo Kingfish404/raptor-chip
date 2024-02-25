@@ -2,7 +2,7 @@
 #include <difftest.h>
 #include <readline/readline.h>
 #include <readline/history.h>
-#include <verilog.h>
+#include <npc_verilog.h>
 #include "verilated_vcd_c.h"
 
 #define MAX_INST_TO_PRINT 10
