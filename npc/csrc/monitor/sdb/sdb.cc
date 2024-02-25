@@ -8,6 +8,7 @@
 
 extern char *regs[];
 void difftest_skip_ref();
+void difftest_should_diff_mem();
 
 NPCState npc = {
     .state = NPC_RUNNING,
@@ -81,6 +82,11 @@ extern "C" void npc_exu_ebreak()
 void npc_difftest_skip_ref()
 {
   difftest_skip_ref();
+}
+
+void npc_difftest_mem_diff()
+{
+  difftest_should_diff_mem();
 }
 
 extern "C" void npc_illegal_inst()

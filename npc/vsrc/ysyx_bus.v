@@ -190,6 +190,7 @@ module ysyx_BUS_ARBITER(
       `Assert(io_master_bresp, 2'b00);
       if (io_master_awvalid)
         begin
+          npc_difftest_mem_diff();
           if (io_master_awaddr == 'h10000000)
             begin
               npc_difftest_skip_ref();
