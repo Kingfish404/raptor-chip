@@ -136,7 +136,7 @@ module ysyx_BUS_ARBITER(
   assign arready_o = io_master_arready;
 
   // assign rdata_o = io_master_rdata[31:0];
-  assign rdata_o = (io_master_araddr[2:2] == 1) ? io_master_rdata[63:32] : io_master_rdata[31:0];
+  assign rdata_o = (io_master_araddr[2:2] == 1 & io_master_arsize == 3'b010) ? io_master_rdata[63:32] : io_master_rdata[31:0];
   assign rresp_o = io_master_rresp;
   assign rvalid_o = io_master_rvalid;
   assign io_master_rready = 1;
