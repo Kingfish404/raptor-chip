@@ -85,7 +85,6 @@ module ysyx_BUS_ARBITER(
           lsu_loading <= lsu_arvalid;
         end
     end
-  // reg lsu_loading = (lsu_arvalid & !lsu_rvalid_o) | (lsu_awvalid & !lsu_wready_o);
 
   // read
   wire [ADDR_W-1:0] sram_araddr = (
