@@ -21,7 +21,7 @@ SECTIONS {
         *(.rodata*)
         rodata_end = .;
     } > mrom
-  .data : AT(ADDR(.rodata))
+  .data : AT(rodata_end)
     {
         *(.data)
     }  : data
