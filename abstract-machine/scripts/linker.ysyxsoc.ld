@@ -20,11 +20,11 @@ SECTIONS {
     {
         *(.rodata*)
         rodata_end = .;
-    }
-  .data : AT(mrom)
+    } > mrom
+  .data : AT (rodata_end)
     {
         *(.data)
-    } > rodata_end : data
+    } > sram : data
   edata = .;
   _data = .;
   .bss : 
