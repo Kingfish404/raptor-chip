@@ -19,7 +19,7 @@ SECTIONS {
     *(.rodata*)
     rodata_end = .;
   }
-  .data : {
+  .data : AT (rodata_end) {
     data_start = .;
     *(.data)
   } > sram : data
