@@ -111,7 +111,6 @@ module ysyx_BUS_ARBITER(
   wire sram_wvalid = (lsu_wvalid & (sram_en));
   wire sram_awvalid = sram_wvalid;
   wire [ADDR_W-1:0] awaddr = lsu_awaddr;
-  wire [DATA_W-1:0] wdata = lsu_wdata;
   assign lsu_wready_o = (
            //  (uart_en & uart_wready_o) |
            (sram_en & sram_wready_o)
@@ -170,6 +169,14 @@ module ysyx_BUS_ARBITER(
   wire sram_awready_o = io_master_awready;
 
   assign io_master_wlast = sram_awvalid;
+  // wire [DATA_W-1:0] wdata = lsu_wdata;
+  wire [1:0] awaddr_lo = io_master_awaddr[1:0];
+  wire [DATA_W-1:0] wdata = {
+         ({DATA_W{awaddr_lo == 2'b00}} & lsu_wdata) |
+         ({DATA_W{awaddr_lo == 2'b01}} & {{lsu_wdata[31:8]}, {8'b0}}) |
+         ({DATA_W{awaddr_lo == 2'b10}} & {{lsu_wdata[31:16]}, {16'b0}}) |
+         ({DATA_W{awaddr_lo == 2'b11}} & {{lsu_wdata[31:24]}, {24'b0}}) |
+       };
   assign io_master_wdata[31:0] = wdata;
   assign io_master_wdata[63:32] = wdata;
   assign io_master_wstrb = (io_master_awaddr[2:2] == 1) ?
