@@ -12,6 +12,10 @@ extern char data_start[];
 extern char data_size[];
 extern char data_load_start[];
 
+extern char _bss_start[];
+extern char _bss_size[];
+extern char _bss_load_start[];
+
 #define PMEM_SIZE (128 * 1024 * 1024)
 #define PMEM_END ((uintptr_t) & _pmem_start + PMEM_SIZE)
 
@@ -26,6 +30,10 @@ void copy_data(void)
   if (data_start != data_load_start)
   {
     memcpy(data_start, data_load_start, (size_t)data_size);
+  }
+  if (_bss_start != _bss_load_start)
+  {
+    memcpy(_bss_start, _bss_load_start, (size_t)_bss_size);
   }
 }
 
