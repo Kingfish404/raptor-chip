@@ -11,29 +11,32 @@ SECTIONS {
   . = ORIGIN(mrom);
   .text : 
     {
-        *(entry)
-        *(.text*)
-        text_end = .;
+      *(entry)
+      *(.text*)
+      text_end = .;
     } > mrom AT> mrom : text
   etext = .;
   _etext = .;
   .rodata : 
     {
-        *(.rodata*)
-        rodata_end = .;
+      *(.rodata*)
+      rodata_end = .;
     } > mrom
   .data :
     {
-        *(.data)
+      data_start = .;
+      *(.data)
     } > sram AT> mrom : data
+  data_size = SIZEOF(.data);
+  data_load_start = LOADADDR(.data);
   edata = .;
   _data = .;
   .bss : 
     {
-        _bss_start = .;
-        *(.bss*)
-        *(.sbss*)
-        *(.scommon)
+      _bss_start = .;
+      *(.bss*)
+      *(.sbss*)
+      *(.scommon)
     } > sram AT> mrom : data
   _stack_top = ALIGN(0x1000);
   . = _stack_top + 0x8000;
