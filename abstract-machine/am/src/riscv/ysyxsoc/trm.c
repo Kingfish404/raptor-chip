@@ -8,9 +8,9 @@ int main(const char *args);
 
 extern char _pmem_start;
 
-extern char data_start[];
-extern char data_size[];
-extern char data_load_start[];
+extern char _data_start[];
+extern char _data_size[];
+extern char _data_load_start[];
 
 extern char _bss_start[];
 extern char _bss_size[];
@@ -39,11 +39,11 @@ void halt(int code)
 
 void copy_data(void)
 {
-  if (data_start != data_load_start)
+  if (_data_start != _data_load_start)
   {
     putch('D');
     putch('\n');
-    memcpy(data_start, data_load_start, (size_t)data_size);
+    memcpy(_data_start, _data_load_start, (size_t)_data_size);
   }
   if (_bss_start != _bss_load_start)
   {

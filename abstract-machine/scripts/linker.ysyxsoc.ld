@@ -24,11 +24,11 @@ SECTIONS {
     } > mrom AT> mrom
   .data :
     {
-      data_start = .;
+      _data_start = .;
       *(.data)
     } > sram AT> mrom : data
-  data_size = SIZEOF(.data);
-  data_load_start = LOADADDR(.data);
+  _data_size = SIZEOF(.data);
+  _data_load_start = LOADADDR(.data);
   edata = .;
   _data = .;
   .bss : 
