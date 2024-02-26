@@ -12,9 +12,9 @@ extern char *_data_start;
 extern char *_data_size;
 extern char *_data_load_start;
 
-extern char *_bss_start;
-extern char *_bss_size;
-extern char *_bss_load_start;
+// extern char *_bss_start;
+// extern char *_bss_size;
+// extern char *_bss_load_start;
 
 #define PMEM_SIZE (128 * 1024 * 1024)
 #define PMEM_END ((uintptr_t) & _pmem_start + PMEM_SIZE)
