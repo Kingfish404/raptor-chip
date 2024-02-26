@@ -82,7 +82,7 @@ __EXPORT void difftest_regcpy(void *dut, bool direction)
   }
   // isa_reg_display();
   // vaddr_show(cpu.pc, 0x2c);
-  vaddr_show(0x2000035E, 0x2c);
+  vaddr_show(0x20000350, 0x2c);
 }
 
 __EXPORT void difftest_exec(uint64_t n)
