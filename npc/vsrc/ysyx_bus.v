@@ -211,7 +211,7 @@ module ysyx_BUS_ARBITER(
           npc_difftest_mem_diff();
           if (io_master_awaddr == 'h10000000)
             begin
-              npc_difftest_skip_ref();
+              // npc_difftest_skip_ref();
             end
         end
     end
