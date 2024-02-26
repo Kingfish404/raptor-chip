@@ -45,12 +45,6 @@ void copy_data(void)
     putch('\n');
     memcpy(_data_start, _data_load_start, (size_t)_data_size);
   }
-  if (_bss_start != _bss_load_start)
-  {
-    putch('B');
-    putch('\n');
-    memcpy(_bss_start, _bss_load_start, (size_t)_bss_size);
-  }
 }
 
 void _trm_init()
