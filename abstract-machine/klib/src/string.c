@@ -94,9 +94,10 @@ void *memset(void *s, int c, size_t n)
 
 void *memcpy(void *out, const void *in, size_t n)
 {
+  return 0;
   for (size_t i = 0; i < n; i++)
   {
-    // ((uint8_t *)out)[i] = ((uint8_t *)in)[i];
+    ((char *)out)[i] = ((char *)in)[i];
   }
   return out;
 }
