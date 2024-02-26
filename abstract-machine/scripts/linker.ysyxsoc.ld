@@ -13,7 +13,7 @@ SECTIONS {
     {
         *(entry)
         *(.text*)
-    } > mrom AT> mram : text
+    } > mrom AT> mrom : text
   etext = .;
   _etext = .;
   .rodata : 
