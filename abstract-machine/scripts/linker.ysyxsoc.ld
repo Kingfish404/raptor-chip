@@ -17,10 +17,11 @@ SECTIONS {
   _etext = .;
   .rodata : {
     *(.rodata*)
+    rodata_end = .;
   }
   .data : {
     *(.data)
-  } : data
+  } > rodata_end AT> rodata_end : data
   edata = .;
   _data = .;
   .bss : {
