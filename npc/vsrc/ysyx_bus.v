@@ -47,6 +47,7 @@ module ysyx_BUS_ARBITER(
     // lsu:load
     input [DATA_W-1:0] lsu_araddr,
     input lsu_arvalid,
+    input [7:0] lsu_rstrb,
     output [DATA_W-1:0] lsu_rdata_o,
     output lsu_rvalid_o,
 
@@ -85,7 +86,6 @@ module ysyx_BUS_ARBITER(
           lsu_loading <= lsu_arvalid;
         end
     end
-  // reg lsu_loading = (lsu_arvalid & !lsu_rvalid_o) | (lsu_awvalid & !lsu_wready_o);
 
   // read
   wire [ADDR_W-1:0] sram_araddr = (
@@ -112,7 +112,6 @@ module ysyx_BUS_ARBITER(
   wire sram_awvalid = sram_wvalid;
   wire [ADDR_W-1:0] awaddr = lsu_awaddr;
   wire [DATA_W-1:0] wdata = lsu_wdata;
-  wire [7:0] wstrb = lsu_wstrb;
   assign lsu_wready_o = (
            (uart_en & uart_wready_o) |
            (sram_en & sram_wready_o)
@@ -125,20 +124,31 @@ module ysyx_BUS_ARBITER(
       lfsr <= {lfsr[18:0], lfsr[19] ^ lfsr[18]};
     end
 
+  // io lsu read
+  assign io_master_arsize = (
+           ({3{lsu_rstrb == 8'h1}} & 3'b000) |
+           ({3{lsu_rstrb == 8'h3}} & 3'b001) |
+           ({3{lsu_rstrb == 8'hf}} & 3'b010) |
+           (3'b000)
+         );
   assign io_master_araddr = sram_araddr;
   assign io_master_arvalid = sram_arvalid;
   assign arready_o = io_master_arready;
 
-  assign rdata_o = io_master_rdata[31:0];
+  // assign rdata_o = io_master_rdata[31:0];
+  assign rdata_o = (io_master_araddr[2:2] == 1) ?
+         io_master_rdata[63:32]:
+         io_master_rdata[31:00];
   assign rresp_o = io_master_rresp;
   assign rvalid_o = io_master_rvalid;
   assign io_master_rready = 1;
 
+  // io lsu write
   assign io_master_awsize = (
            ({3{lsu_wstrb == 8'h1}} & 3'b000) |
            ({3{lsu_wstrb == 8'h3}} & 3'b010) |
            ({3{lsu_wstrb == 8'hf}} & 3'b011) |
-           3'b000
+           (3'b000)
          );
   assign io_master_awaddr = awaddr;
   assign io_master_awvalid = sram_awvalid;
@@ -146,7 +156,10 @@ module ysyx_BUS_ARBITER(
 
   assign io_master_wlast = sram_awvalid;
   assign io_master_wdata[31:0] = wdata;
-  assign io_master_wstrb = lsu_wstrb;
+  assign io_master_wdata[63:32] = wdata;
+  assign io_master_wstrb = (io_master_awaddr[2:2] == 1) ?
+         {{lsu_wstrb[3:0]}, {4'b0}}:
+         {{4'b0}, {lsu_wstrb[3:0]}};
   assign io_master_wvalid = sram_wvalid;
   assign sram_wready_o = io_master_wready;
 
@@ -176,6 +189,7 @@ module ysyx_BUS_ARBITER(
       `Assert(io_master_bresp, 2'b00);
       if (io_master_awvalid)
         begin
+          npc_difftest_mem_diff();
           if (io_master_awaddr == 'h10000000)
             begin
               npc_difftest_skip_ref();

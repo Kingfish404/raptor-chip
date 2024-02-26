@@ -14,7 +14,13 @@ void (*ref_difftest_exec)(uint64_t n) = NULL;
 void (*ref_difftest_raise_intr)(uint64_t NO) = NULL;
 
 static bool is_skip_ref = false;
+static bool should_diff_mem = false;
 static int skip_dut_nr_inst = 0;
+
+void difftest_should_diff_mem()
+{
+  should_diff_mem = true;
+}
 
 void difftest_skip_ref()
 {
@@ -150,7 +156,11 @@ void difftest_step(vaddr_t pc)
   checkregs(&ref_r, pc);
 
 #ifdef CONFIG_MEM_DIFFTEST
-  ref_difftest_memcpy(MBASE, pmem_ref, MSIZE, DIFFTEST_TO_DUT);
-  checkmem(pmem_ref, guest_to_host(MBASE), MSIZE);
+  if (should_diff_mem)
+  {
+    ref_difftest_memcpy(MBASE, pmem_ref, MSIZE, DIFFTEST_TO_DUT);
+    checkmem(pmem_ref, guest_to_host(MBASE), MSIZE);
+    should_diff_mem = false;
+  }
 #endif
 }

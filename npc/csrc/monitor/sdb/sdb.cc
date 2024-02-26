@@ -2,12 +2,13 @@
 #include <cpu.h>
 #include <readline/readline.h>
 #include <readline/history.h>
-#include <verilog.h>
+#include <npc_verilog.h>
 #include <verilated.h>
 #include <verilated_vcd_c.h>
 
 extern char *regs[];
 void difftest_skip_ref();
+void difftest_should_diff_mem();
 
 NPCState npc = {
     .state = NPC_RUNNING,
@@ -81,6 +82,11 @@ extern "C" void npc_exu_ebreak()
 void npc_difftest_skip_ref()
 {
   difftest_skip_ref();
+}
+
+void npc_difftest_mem_diff()
+{
+  difftest_should_diff_mem();
 }
 
 extern "C" void npc_illegal_inst()
@@ -225,18 +231,6 @@ void sdb_sim_init(int argc, char **argv)
   tfp->open("npc.vcd");
 #endif
   verilog_connect(top, &npc);
-  // npc.gpr = (word_t *)&(top->rootp->top__DOT__regs__DOT__rf);
-  // npc.pc = (uint32_t *)&(top->rootp->top__DOT__pc);
-  // npc.ret = npc.gpr + reg_str2idx("a0");
-  // npc.state = NPC_RUNNING;
-  // word_t *csr = (word_t *)&(top->rootp->top__DOT__exu__DOT__csr__DOT__csr);
-  // npc.mstatus = csr + CSR_MSTATUS;
-  // npc.mcause = csr + CSR_MCAUSE;
-  // npc.mepc = csr + CSR_MEPC;
-  // npc.mtvec = csr + CSR_MTVEC;
-
-  // for difftest
-  // npc.inst = (uint32_t *)&(top->rootp->top__DOT__ifu__DOT__inst_ifu);
 
   reset(top, 1);
   if (tfp)
