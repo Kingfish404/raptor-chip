@@ -23,7 +23,7 @@ SECTIONS {
   } > sram AT> sram : data
   edata = .;
   _data = .;
-  . = . + 0x1000;
+  . = .;
   .bss : {
 	_bss_start = .;
     *(.bss*)
