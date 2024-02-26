@@ -19,6 +19,7 @@ SECTIONS {
     *(.rodata*)
     rodata_end = .;
   }
+  . = ORIGIN(rodata_end);
   .data : {
     *(.data)
   } : data
