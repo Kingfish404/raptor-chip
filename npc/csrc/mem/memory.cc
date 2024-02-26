@@ -148,5 +148,5 @@ extern "C" void mrom_read(uint32_t addr, uint32_t *data)
 {
     uint32_t offset = (addr - MROM_BASE) & (0xfffffffc);
     *data = *((uint32_t *)(mrom + offset));
-    // Log("mrom raddr: 0x%x, rdata: 0x%x", addr, *data);
+    Log("mrom raddr: 0x%x, rdata: 0x%x", addr, *data);
 }
