@@ -46,7 +46,7 @@ void vaddr_show(vaddr_t addr, int n)
         for (size_t j = 0; j < wsize; j++)
         {
           data = vaddr_read(addr + (i - (3 - j) - 1) * wsize, 4);
-          for (size_t k = 0; k < word_size / 2; k++)
+          for (size_t k = 0; k < word_size; k++)
           {
             uint8_t c = (data >> (((word_size / 2) - 1 - k) * 8)) & 0xff;
             printf("%02x ", c);
