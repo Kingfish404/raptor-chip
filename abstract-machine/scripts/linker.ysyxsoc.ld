@@ -17,7 +17,7 @@ SECTIONS {
     } > mrom AT> mrom : text
   etext = .;
   _etext = .;
-  .rodata : 
+  .rodata : ALIGN(4)
     {
       *(.rodata*)
       rodata_end = .;
