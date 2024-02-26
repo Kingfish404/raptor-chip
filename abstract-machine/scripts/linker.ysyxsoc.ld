@@ -21,7 +21,7 @@ SECTIONS {
         *(.rodata*)
         rodata_end = .;
     }
-  .data :
+  .data : AT(mrom)
     {
         *(.data)
     } : data
