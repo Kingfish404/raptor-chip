@@ -24,7 +24,7 @@ SECTIONS {
   .data : AT (rodata_end)
     {
         *(.data)
-    } : data
+    } > sram : data
   edata = .;
   _data = .;
   .bss : 
