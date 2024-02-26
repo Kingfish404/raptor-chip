@@ -17,7 +17,7 @@ CFLAGS += -I$(AM_HOME)/am/src/riscv/ysyxsoc/include
 image: $(IMAGE).elf
 	@$(OBJDUMP) -d $(IMAGE).elf > $(IMAGE).txt
 	@echo + OBJCOPY "->" $(IMAGE_REL).bin
-	echo $(READELF) -a $(IMAGE).elf
+	@$(READELF) -a $(IMAGE).elf > $(IMAGE).elf.txt
 	@$(OBJCOPY) -S --set-section-flags .bss=alloc,contents -O binary $(IMAGE).elf $(IMAGE).bin
 
 run: image
