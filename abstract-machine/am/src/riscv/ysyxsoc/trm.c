@@ -47,7 +47,6 @@ void copy_data(void)
 
 void _trm_init()
 {
-  // copy_data();
   int ret = main(mainargs);
   halt(ret);
 }
