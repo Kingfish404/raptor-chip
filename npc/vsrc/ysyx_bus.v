@@ -197,22 +197,22 @@ module ysyx_BUS_ARBITER(
         end
     end
 
-  wire [DATA_W-1:0] uart_rdata_o;
-  wire [1:0] uart_rresp_o, uart_bresp_o;
-  wire uart_arready_o, uart_rvalid_o, uart_awready_o, uart_wready_o, uart_bvalid_o;
-  ysyx_UART #(.ADDR_W(ADDR_W), .DATA_W(DATA_W)) uart(
-              .clk(clk),
-              .arburst(2'b00), .arsize(3'b000), .arlen(8'b00000000), .arid(4'b0000),
-              .araddr(0), .arvalid(0), .arready_o(uart_arready_o),
-              .rid(), .rlast_o(),
-              .rdata_o(uart_rdata_o), .rresp_o(uart_rresp_o), .rvalid_o(uart_rvalid_o), .rready(0),
-              .awburst(2'b00), .awsize(3'b000), .awlen(8'b00000000), .awid(4'b0000),
-              .awaddr(awaddr), .awvalid(sram_awvalid), .awready_o(uart_awready_o),
-              .wlast(1'b0),
-              .wdata(wdata), .wstrb(lsu_wstrb), .wvalid(uart_wvalid), .wready_o(uart_wready_o),
-              .bid(),
-              .bresp_o(uart_bresp_o), .bvalid_o(uart_bvalid_o), .bready(1)
-            );
+  // wire [DATA_W-1:0] uart_rdata_o;
+  // wire [1:0] uart_rresp_o, uart_bresp_o;
+  // wire uart_arready_o, uart_rvalid_o, uart_awready_o, uart_wready_o, uart_bvalid_o;
+  // ysyx_UART #(.ADDR_W(ADDR_W), .DATA_W(DATA_W)) uart(
+  //             .clk(clk),
+  //             .arburst(2'b00), .arsize(3'b000), .arlen(8'b00000000), .arid(4'b0000),
+  //             .araddr(0), .arvalid(0), .arready_o(uart_arready_o),
+  //             .rid(), .rlast_o(),
+  //             .rdata_o(uart_rdata_o), .rresp_o(uart_rresp_o), .rvalid_o(uart_rvalid_o), .rready(0),
+  //             .awburst(2'b00), .awsize(3'b000), .awlen(8'b00000000), .awid(4'b0000),
+  //             .awaddr(awaddr), .awvalid(sram_awvalid), .awready_o(uart_awready_o),
+  //             .wlast(1'b0),
+  //             .wdata(wdata), .wstrb(lsu_wstrb), .wvalid(uart_wvalid), .wready_o(uart_wready_o),
+  //             .bid(),
+  //             .bresp_o(uart_bresp_o), .bvalid_o(uart_bvalid_o), .bready(1)
+  //           );
 
   wire clint_arvalid = (lsu_arvalid & clint_en);
   wire clint_arready_o;
