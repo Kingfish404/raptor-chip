@@ -24,7 +24,7 @@ SECTIONS {
   .data : AT(mrom)
     {
         *(.data)
-    } : data
+    } > rodata_end : data
   edata = .;
   _data = .;
   .bss : 
