@@ -22,7 +22,7 @@ SECTIONS {
   .data : AT (rodata_end) {
     data_start = .;
     *(.data)
-  } > sram : data
+  } : data
   data_size = SIZEOF(.data);
   data_load_start = LOADADDR(.data);
   edata = .;
