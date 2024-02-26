@@ -9,8 +9,6 @@ export VERILATOR_ROOT
 VERILATOR = $(VERILATOR_ROOT)/bin/verilator
 endif
 
-CC = ccache $(CC)
-
 -include ./include/config/auto.conf
 -include ./include/config/auto.conf.cmd
 
