@@ -139,11 +139,12 @@ module ysyx_BUS_ARBITER(
   wire [DATA_W-1:0] io_rdata = (io_master_araddr[2:2] == 1) ?
        io_master_rdata[63:32]:
        io_master_rdata[31:00];
+  wire [1:0] araddr_lo = io_master_araddr[1:0];
   assign rdata_o = (
-           ({DATA_W{io_master_araddr[1:0] == 2'b00}} & io_rdata) |
-           ({DATA_W{io_master_araddr[1:0] == 2'b01}} & {{8'0}, {io_rdata[DATA_W-1:8]}}) |
-           ({DATA_W{io_master_araddr[1:0] == 2'b10}} & {{16'0}, {io_rdata[DATA_W-1:16]}}) |
-           ({DATA_W{io_master_araddr[1:0] == 2'b11}} & {{24'0}, {io_rdata[DATA_W-1:24]}}) |
+           ({DATA_W{araddr_lo == 2'b00}} & io_rdata) |
+           ({DATA_W{araddr_lo == 2'b01}} & {{8'0}, {io_rdata[DATA_W-1:8]}}) |
+           ({DATA_W{araddr_lo == 2'b10}} & {{16'0}, {io_rdata[DATA_W-1:16]}}) |
+           ({DATA_W{araddr_lo == 2'b11}} & {{24'0}, {io_rdata[DATA_W-1:24]}}) |
          );
   // assign rdata_o = (io_master_araddr[2:2] == 1) ?
   //        io_master_rdata[63:32]:
