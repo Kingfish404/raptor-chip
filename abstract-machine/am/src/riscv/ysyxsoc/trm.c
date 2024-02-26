@@ -50,8 +50,7 @@ void copy_data(void)
 void _trm_init()
 {
   // copy_data();
-    memcpy(_data_start, _data_load_start, (size_t)_data_size);
-
+  memcpy(_data_start, _data_load_start, (size_t)_data_size);
   int ret = main(mainargs);
   halt(ret);
 }
