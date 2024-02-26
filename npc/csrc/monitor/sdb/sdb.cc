@@ -140,6 +140,7 @@ int cmd_info(char *args)
     break;
   case 's':
     soc_show_sram();
+    break;
   default:
     printf("Unknown argument '%s'.\n", args);
     break;
