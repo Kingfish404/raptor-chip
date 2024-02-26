@@ -11,13 +11,13 @@ SECTIONS {
   .text : {
     *(entry)
     *(.text*)
-  } > mrom AT> mrom : text
+  } > mrom : text
   etext = .;
   _etext = .;
   .rodata : {
     *(.rodata*)
     rodata_end = .;
-  }
+  } > mrom
   .data : AT (rodata_end) {
     *(.data)
   } > srom : data
