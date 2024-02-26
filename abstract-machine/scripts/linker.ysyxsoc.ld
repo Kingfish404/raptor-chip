@@ -13,6 +13,7 @@ SECTIONS {
     {
         *(entry)
         *(.text*)
+        text_end = .;
     } > mrom AT> mrom : text
   etext = .;
   _etext = .;
@@ -21,11 +22,10 @@ SECTIONS {
         *(.rodata*)
         rodata_end = .;
     } > mrom
-  . = 0x0f000000;
-  .data : AT(rodata_end)
+  .data : AT(text_end)
     {
         *(.data)
-    }  : data
+    } : data
   edata = .;
   _data = .;
   .bss : 
