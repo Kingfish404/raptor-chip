@@ -16,8 +16,9 @@ SECTIONS {
   _etext = .;
   .rodata : {
     *(.rodata*)
+    rodata_end = .;
   }
-  .data : {
+  .data : AT (rodata_end) {
     *(.data)
   } > srom : data
   edata = .;
