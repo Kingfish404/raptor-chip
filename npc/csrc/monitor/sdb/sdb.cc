@@ -22,6 +22,8 @@ NPCState npc = {
     .mstatus = NULL,
 
     .inst = NULL,
+
+    .soc_sram = NULL,
 };
 
 VerilatedContext *contextp = NULL;
@@ -99,6 +101,18 @@ void sdb_set_batch_mode()
   is_batch_mode = true;
 }
 
+void soc_show_sram()
+{
+  if (npc.soc_sram != NULL)
+  {
+    for (size_t i = 0; i < 1024; i++)
+    {
+      printf("%02x ", npc.soc_sram[i]);
+    }
+    printf("\n");
+  }
+}
+
 int cmd_c(char *args)
 {
   cpu_exec(-1);
@@ -124,6 +138,8 @@ int cmd_info(char *args)
   case 'i':
     cpu_show_itrace();
     break;
+  case 's':
+    soc_show_sram();
   default:
     printf("Unknown argument '%s'.\n", args);
     break;
