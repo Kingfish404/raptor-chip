@@ -21,7 +21,7 @@ SECTIONS {
         *(.rodata*)
         rodata_end = .;
     }
-  .data : AT (rodata_end)
+  .data :
     {
         *(.data)
     } : data
