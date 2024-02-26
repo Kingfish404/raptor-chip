@@ -19,9 +19,9 @@ SECTIONS {
     *(.rodata*)
     rodata_end = .;
   }
-  .data : AT(rodata_end) {
+  .data : {
     *(.data)
-  } > sram
+  } : data
   data_size = SIZEOF(.data);
   data_load_start = LOADADDR(.data);
   edata = .;
