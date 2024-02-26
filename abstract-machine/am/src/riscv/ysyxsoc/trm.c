@@ -43,14 +43,11 @@ void copy_data(void)
   {
     memcpy(_data_start, _data_load_start, (size_t)_data_size);
   }
-    memcpy(_data_start, _data_load_start, (size_t)_data_size);
-
 }
 
 void _trm_init()
 {
-  // copy_data();
-  memcpy(_data_start, _data_load_start, (size_t)_data_size);
+  copy_data();
   int ret = main(mainargs);
   halt(ret);
 }
