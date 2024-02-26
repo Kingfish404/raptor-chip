@@ -9,27 +9,31 @@ SECTIONS {
   /* _pmem_start and _entry_offset are defined in LDFLAGS */
   . = _pmem_start + _entry_offset;
   . = ORIGIN(mrom);
-  .text : {
-    *(entry)
-    *(.text*)
-  } > mrom AT> mrom : text
+  .text : 
+    {
+        *(entry)
+        *(.text*)
+    } > mrom AT> mrom : text
   etext = .;
   _etext = .;
-  .rodata : {
-    *(.rodata*)
-    rodata_end = .;
-  }
-  .data : {
-    *(.data)
-  } AT> rodata_end : data
+  .rodata : 
+    {
+        *(.rodata*)
+        rodata_end = .;
+    }
+  .data : AT (rodata_end)
+    {
+        *(.data)
+    } : data
   edata = .;
   _data = .;
-  .bss : {
-	_bss_start = .;
-    *(.bss*)
-    *(.sbss*)
-    *(.scommon)
-  }
+  .bss : 
+    {
+        _bss_start = .;
+        *(.bss*)
+        *(.sbss*)
+        *(.scommon)
+    }
   _stack_top = ALIGN(0x1000);
   . = _stack_top + 0x8000;
   _stack_pointer = .;
