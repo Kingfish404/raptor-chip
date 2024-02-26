@@ -41,14 +41,14 @@ void copy_data(void)
 {
   if (_data_start != _data_load_start)
   {
-    // putch('D');
-    // putch('\n');
+    putch('D');
+    putch('\n');
     memcpy(_data_start, _data_load_start, (size_t)_data_size);
   }
   if (_bss_start != _bss_load_start)
   {
-    // putch('B');
-    // putch('\n');
+    putch('B');
+    putch('\n');
     memcpy(_bss_start, _bss_load_start, (size_t)_bss_size);
   }
 }
