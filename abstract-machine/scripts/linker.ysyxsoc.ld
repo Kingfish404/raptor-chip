@@ -1,8 +1,8 @@
 PHDRS { text PT_LOAD; data PT_LOAD; }
 
 MEMORY {
-  mrom : ORIGIN = 0x20000000, LENGTH = 40K
-  sram : ORIGIN = 0x0f000000, LENGTH = 800K
+  mrom : ORIGIN = 0x20000000, LENGTH = 4K
+  sram : ORIGIN = 0x0f000000, LENGTH = 8K
 }
 
 SECTIONS {
