@@ -32,7 +32,7 @@ static inline void verilog_connect(TOP_NAME *top, NPCState *npc)
   npc->mtvec = csr + CSR_MTVEC;
 
 #ifdef YSYX_SOC
-  npc->soc_sram = (uint8_t *)(top->rootp->ysyxSoCFull__DOT__asic__DOT__axi4ram__DOT__mem_ext__DOT__Memory);
+  npc->soc_sram = (uint8_t *)(top->rootp->ysyxSoCFull__DOT__asic__DOT__axi4ram__DOT__mem_ext__DOT__Memory[0]);
 #endif
 }
 
