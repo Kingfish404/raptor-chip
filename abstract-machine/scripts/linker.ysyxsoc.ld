@@ -22,7 +22,7 @@ SECTIONS {
       *(.rodata*)
       rodata_end = .;
     } > mrom AT> mrom
-  .data : ALIGN(0x10)
+  .data : ALIGN(4)
     {
       _data_start = .;
       *(.data)
@@ -31,7 +31,7 @@ SECTIONS {
   _data_load_start = LOADADDR(.data);
   edata = .;
   _data = .;
-  .bss : ALIGN(0)
+  .bss : ALIGN(4)
     {
       _bss_start = .;
       *(.bss*)
