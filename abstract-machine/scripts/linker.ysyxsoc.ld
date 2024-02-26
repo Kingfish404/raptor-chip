@@ -17,7 +17,7 @@ SECTIONS {
   .rodata : {
     *(.rodata*)
   }
-  . = 0x0f000000;
+  . = 0x21000000;
   .data : {
     *(.data)
   } : data
