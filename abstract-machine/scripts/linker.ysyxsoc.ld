@@ -11,19 +11,15 @@ SECTIONS {
   .text : {
     *(entry)
     *(.text*)
-  } > mrom : text
+  } : text
   etext = .;
   _etext = .;
   .rodata : {
     *(.rodata*)
-    rodata_end = .;
-  } > mrom
-  .data : AT (rodata_end) {
-    data_start = .;
+  }
+  .data : {
     *(.data)
-  } > srom : data
-  data_size = SIZEOF(.data);
-  data_load_start = LOADADDR(.data);
+  } : data
   edata = .;
   _data = .;
   .bss : {
@@ -31,7 +27,7 @@ SECTIONS {
     *(.bss*)
     *(.sbss*)
     *(.scommon)
-  } > srom AT>mrom
+  }
   _stack_top = ALIGN(0x1000);
   . = _stack_top + 0x8000;
   _stack_pointer = .;
