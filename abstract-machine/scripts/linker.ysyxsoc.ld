@@ -20,6 +20,7 @@ SECTIONS {
     rodata_end = .;
   }
   .data : {
+    data_start = .;
     *(.data)
   } : data
   data_size = SIZEOF(.data);
