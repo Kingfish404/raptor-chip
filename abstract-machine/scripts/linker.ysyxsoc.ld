@@ -21,7 +21,7 @@ SECTIONS {
   }
   .data : {
     *(.data)
-  } > rodata_end AT> rodata_end : data
+  } AT> rodata_end : data
   edata = .;
   _data = .;
   .bss : {
