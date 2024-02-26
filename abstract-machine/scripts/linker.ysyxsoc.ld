@@ -24,7 +24,7 @@ SECTIONS {
   .data :
     {
         *(.data)
-    } > sram AT > mrom : data
+    } > sram AT> mrom : data
   edata = .;
   _data = .;
   .bss : 
