@@ -21,6 +21,7 @@ SECTIONS {
         *(.rodata*)
         rodata_end = .;
     } > mrom
+  . = 0x0f000000;
   .data : AT(rodata_end)
     {
         *(.data)
