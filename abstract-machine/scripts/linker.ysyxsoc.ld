@@ -5,7 +5,6 @@ MEMORY {
   sram : ORIGIN = 0x0f000000, LENGTH = 8K
 }
 
-
 SECTIONS {
   /* _pmem_start and _entry_offset are defined in LDFLAGS */
   . = _pmem_start + _entry_offset;
@@ -20,7 +19,7 @@ SECTIONS {
   }
   .data : {
     *(.data)
-  } : data
+  } > mrom AT>mrom : data
   edata = .;
   _data = .;
   .bss : {
