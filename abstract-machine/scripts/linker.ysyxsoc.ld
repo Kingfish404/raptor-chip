@@ -8,23 +8,18 @@ MEMORY {
 SECTIONS {
   /* _pmem_start and _entry_offset are defined in LDFLAGS */
   . = _pmem_start + _entry_offset;
-  . = ORIGIN(mrom);
   .text : {
     *(entry)
     *(.text*)
-  }: text
+  } > mrom AT> mrom : text
   etext = .;
   _etext = .;
   .rodata : {
     *(.rodata*)
-    rodata_end = .;
   }
   .data : {
-    data_start = .;
     *(.data)
-  } > sram AT> rodata_end : data
-  data_size = SIZEOF(.data);
-  data_load_start = LOADADDR(.data);
+  } : data
   edata = .;
   _data = .;
   .bss : {
