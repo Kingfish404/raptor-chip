@@ -157,7 +157,7 @@ module ysyx_BUS_ARBITER(
   assign io_master_wdata[31:0] = wdata;
   assign io_master_wdata[63:32] = wdata;
   assign io_master_wstrb = (
-           io_master_awaddr[2:2] == 1 & io_master_arsize == 3'b010)
+           io_master_awaddr[2:2] == 1)
          ?
          {{lsu_wstrb[3:0]}, {4'b0}}:
          {{4'b0}, {lsu_wstrb[3:0]}};
