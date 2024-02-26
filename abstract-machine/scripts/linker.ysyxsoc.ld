@@ -22,7 +22,7 @@ SECTIONS {
       *(.rodata*)
       rodata_end = .;
     } > mrom AT> mrom
-  .data : ALIGN(0x100)
+  .data : ALIGN(0x10)
     {
       _data_start = .;
       *(.data)
