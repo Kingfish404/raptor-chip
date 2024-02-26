@@ -144,10 +144,6 @@ module ysyx_BUS_ARBITER(
            ({DATA_W{araddr_lo == 2'b01}} & {{8'b0}, {io_rdata[31:8]}}) |
            ({DATA_W{araddr_lo == 2'b10}} & {{16'b0}, {io_rdata[31:16]}}) |
            ({DATA_W{araddr_lo == 2'b11}} & {{24'b0}, {io_rdata[31:24]}}) |
-           //  ({DATA_W{araddr_lo == 2'b11}} & {{24'0}, {io_rdata[DATA_W-1:24]}}) |
-           //  ({DATA_W{araddr_lo == 2'b01}} & {{8'0}, {io_rdata[DATA_W-1:8]}}) |
-           //  ({DATA_W{araddr_lo == 2'b10}} & {{16'0}, {io_rdata[DATA_W-1:16]}}) |
-           //  ({DATA_W{araddr_lo == 2'b11}} & {{24'0}, {io_rdata[DATA_W-1:24]}}) |
            (0)
          );
   // assign rdata_o = (io_master_araddr[2:2] == 1) ?
@@ -176,7 +172,7 @@ module ysyx_BUS_ARBITER(
          ({DATA_W{awaddr_lo == 2'b01}} & {{lsu_wdata[31:8]}, {8'b0}}) |
          ({DATA_W{awaddr_lo == 2'b10}} & {{lsu_wdata[31:16]}, {16'b0}}) |
          ({DATA_W{awaddr_lo == 2'b11}} & {{lsu_wdata[31:24]}, {24'b0}}) |
-         (3'b000)
+         (0)
        };
   assign io_master_wdata[31:0] = wdata;
   assign io_master_wdata[63:32] = wdata;
