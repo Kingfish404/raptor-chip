@@ -41,12 +41,8 @@ void copy_data(void)
 {
   if (_data_start != _data_load_start)
   {
-    putch('D');
-    putch('\n');
     memcpy(_data_start, _data_load_start, (size_t)_data_size);
   }
-  putch('O');
-  putch('\n');
 }
 
 void _trm_init()
