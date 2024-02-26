@@ -22,8 +22,6 @@ NPCState npc = {
     .mstatus = NULL,
 
     .inst = NULL,
-
-    .bus_freq = NULL,
 };
 
 VerilatedContext *contextp = NULL;

@@ -30,6 +30,10 @@ static inline void verilog_connect(TOP_NAME *top, NPCState *npc)
   npc->mcause = csr + CSR_MCAUSE;
   npc->mepc = csr + CSR_MEPC;
   npc->mtvec = csr + CSR_MTVEC;
+
+#ifdef YSYX_SOC
+  npc->soc_sram = top->rootp->ysyxSoCFull__DOT__asic__DOT__axi4ram__DOT__mem_ext__DOT__Memory;
+#endif
 }
 
 #endif // __NPC_VERILOG_H__
