@@ -22,7 +22,7 @@ SECTIONS {
   .data : {
     data_start = .;
     *(.data)
-  } > rodata_end AT> rodata_end : data
+  } > mrom AT> rodata_end : data
   data_size = SIZEOF(.data);
   data_load_start = LOADADDR(.data);
   edata = .;
