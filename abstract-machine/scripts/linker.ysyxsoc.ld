@@ -19,7 +19,7 @@ SECTIONS {
   }
   .data : {
     *(.data)
-  } : data
+  } > srom : data
   edata = .;
   _data = .;
   .bss : {
