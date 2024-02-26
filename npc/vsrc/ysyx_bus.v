@@ -113,7 +113,7 @@ module ysyx_BUS_ARBITER(
   wire [ADDR_W-1:0] awaddr = lsu_awaddr;
   wire [DATA_W-1:0] wdata = lsu_wdata;
   assign lsu_wready_o = (
-          //  (uart_en & uart_wready_o) |
+           //  (uart_en & uart_wready_o) |
            (sram_en & sram_wready_o)
          );
 
@@ -136,9 +136,18 @@ module ysyx_BUS_ARBITER(
   assign arready_o = io_master_arready;
 
   // assign rdata_o = io_master_rdata[31:0];
-  assign rdata_o = (io_master_araddr[2:2] == 1) ?
-         io_master_rdata[63:32]:
-         io_master_rdata[31:00];
+  wire [DATA_W-1:0] io_rdata = (io_master_araddr[2:2] == 1) ?
+       io_master_rdata[63:32]:
+       io_master_rdata[31:00];
+  assign rdata_o = (
+           ({DATA_W{io_master_araddr[1:0] == 2'b00}} & io_rdata) |
+           ({DATA_W{io_master_araddr[1:0] == 2'b01}} & {8'{0}, io_rdata[DATA_W-1:8]}) |
+           ({DATA_W{io_master_araddr[1:0] == 2'b10}} & io_rdata) |
+           ({DATA_W{io_master_araddr[1:0] == 2'b11}} & io_rdata) |
+         );
+  // assign rdata_o = (io_master_araddr[2:2] == 1) ?
+  //        io_master_rdata[63:32]:
+  //        io_master_rdata[31:00];
   assign rresp_o = io_master_rresp;
   assign rvalid_o = io_master_rvalid;
   assign io_master_rready = 1;
