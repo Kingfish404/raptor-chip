@@ -26,5 +26,4 @@ SECTIONS {
     {
         *(.data)
     } > sram : data
-  edata = .;
 }
