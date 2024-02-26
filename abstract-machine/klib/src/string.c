@@ -96,7 +96,7 @@ void *memcpy(void *out, const void *in, size_t n)
 {
   for (size_t i = 0; i < n; i++)
   {
-    ((uint8_t *)out)[i] = ((uint8_t *)in)[i];
+    // ((uint8_t *)out)[i] = ((uint8_t *)in)[i];
   }
   return out;
 }
