@@ -22,11 +22,13 @@ SECTIONS {
       *(.rodata*)
       rodata_end = .;
     } > mrom AT> mrom
+  _real_data_start = .;
   .data : ALIGN(4)
     {
       _data_start = .;
       *(.data)
     } > sram AT> mrom : data
+  _real_data_end = .;
   _data_size = SIZEOF(.data);
   _data_load_start = LOADADDR(.data);
   edata = .;
