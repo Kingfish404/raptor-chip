@@ -40,6 +40,7 @@ void copy_data(void)
   {
     // putch(&_data_size);
     putch('A');
+    putch('\n');
     size_t data_size = _data_end - _data_start;
     memcpy(_data_start, _data_load_start, (size_t)data_size);
   }
