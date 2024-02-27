@@ -38,7 +38,7 @@ void copy_data(void)
 {
   if (_data_start != _data_load_start)
   {
-    putch(_data_size);
+    putch(&_data_size);
     size_t data_size = _data_end - _data_start;
     memcpy(_data_start, _data_load_start, (size_t)data_size);
   }
