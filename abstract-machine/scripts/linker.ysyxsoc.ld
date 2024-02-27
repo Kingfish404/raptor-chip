@@ -31,7 +31,7 @@ SECTIONS {
   _data_load_start = LOADADDR(.data);
   edata = .;
   _data = .;
-  .bss :
+  .bss : ALIGN(10)
     {
       _bss_start = .;
       *(.bss*)
