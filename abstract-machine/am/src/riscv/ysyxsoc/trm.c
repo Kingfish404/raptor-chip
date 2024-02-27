@@ -8,10 +8,10 @@ int main(const char *args);
 
 extern char _pmem_start;
 
-extern char *_data_start;
-extern char *_data_end;
+extern char _data_start[];
+extern char _data_end[];
 // extern char *_data_size;
-extern char *_data_load_start;
+extern char _data_load_start[];
 
 #define PMEM_SIZE (128 * 1024 * 1024)
 #define PMEM_END ((uintptr_t) & _pmem_start + PMEM_SIZE)
@@ -36,7 +36,7 @@ void halt(int code)
 
 void copy_data(void)
 {
-  if (&_data_start != &_data_load_start)
+  if (_data_start != _data_load_start)
   {
     asm volatile("ebreak");
     size_t _data_size = _data_end - _data_start;
