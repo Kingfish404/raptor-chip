@@ -29,7 +29,7 @@ SECTIONS {
       *(.data)
     } > sram AT> mrom : data
   _real_data_end = .;
-  _data_size = ADDR(.data);
+  _data_size = ADDR(.bss);
   _data_load_start = LOADADDR(.data);
   edata = .;
   _data = .;
