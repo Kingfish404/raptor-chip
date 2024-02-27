@@ -32,7 +32,7 @@ SECTIONS {
   _data_load_start = LOADADDR(.data);
   edata = .;
   _data = .;
-  .bss 0x0f000024:
+  .bss :
     {
       _bss_start = .;
       *(.bss*)
