@@ -38,10 +38,9 @@ void copy_data(void)
 {
   if (_data_start != _data_load_start)
   {
-    asm volatile("ebreak");
     size_t _data_size = _data_end - _data_start;
     memcpy(_data_start, _data_load_start, (size_t)_data_size);
-    asm volatile("ebreak");
+    // asm volatile("ebreak");
   }
 }
 
