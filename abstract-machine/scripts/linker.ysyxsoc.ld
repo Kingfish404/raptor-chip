@@ -27,6 +27,7 @@ SECTIONS {
     {
       _data_start = .;
       *(.data)
+      _data_end = .;
     } > sram AT> mrom : data
   _real_data_end = .;
   _data_size = SIZEOF(.data);
