@@ -34,7 +34,7 @@ void vaddr_write(vaddr_t addr, int len, word_t data)
 void vaddr_show(vaddr_t addr, int n)
 {
   word_t data;
-  size_t word_size = sizeof(word_t);
+  // size_t word_size = sizeof(word_t);
   word_t wsize = 4;
   for (word_t i = 0; i < (n / 4 + 1); i++)
   {
