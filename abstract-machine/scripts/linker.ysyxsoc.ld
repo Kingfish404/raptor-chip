@@ -1,4 +1,4 @@
-PHDRS { text PT_LOAD; data PT_LOAD; bss PT_LOAD; }
+PHDRS { text PT_LOAD; data PT_LOAD; }
 
 MEMORY {
   mrom : ORIGIN = 0x20000000, LENGTH = 4K
@@ -32,13 +32,13 @@ SECTIONS {
   _data_load_start = LOADADDR(.data);
   edata = .;
   _data = .;
-  .bss :
+  .bss (NOLOAD):
     {
       _bss_start = .;
       *(.bss*)
       *(.sbss*)
       *(.scommon)
-    } > sram AT> mrom : bss
+    } > sram AT> mrom
   _stack_top = ALIGN(0x1000);
   . = _stack_top + 0x8000;
   _stack_pointer = .;
