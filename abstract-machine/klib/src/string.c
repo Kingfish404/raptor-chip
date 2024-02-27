@@ -94,7 +94,6 @@ void *memset(void *s, int c, size_t n)
 
 void *memcpy(void *out, const void *in, size_t n)
 {
-  asm volatile("ebreak");
   for (size_t i = 0; i < n; i++)
   {
     ((char *)out)[i] = ((char *)in)[i];
