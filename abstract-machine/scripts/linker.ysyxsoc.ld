@@ -2,7 +2,7 @@ PHDRS { text PT_LOAD; data PT_LOAD; }
 
 MEMORY {
   mrom : ORIGIN = 0x20000000, LENGTH = 4K
-  sram : ORIGIN = 0x0f000000, LENGTH = 80K
+  sram : ORIGIN = 0x0f000000, LENGTH = 8K
 }
 
 SECTIONS {
@@ -37,7 +37,7 @@ SECTIONS {
       *(.bss*)
       *(.sbss*)
       *(.scommon)
-    } > sram AT> mrom : data
+    } > sram AT> mrom
   _stack_top = ALIGN(0x1000);
   . = _stack_top + 0x8000;
   _stack_pointer = .;
