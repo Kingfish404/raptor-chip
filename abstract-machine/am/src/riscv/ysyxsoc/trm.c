@@ -46,6 +46,8 @@ void copy_data(void)
 void init_uart(void)
 {
   outb(UART16550_LCR, 0x40);
+  outb(UART16550_LSB, 3);
+  outb(UART16550_LCR, 0x00);
 }
 
 void _trm_init()
