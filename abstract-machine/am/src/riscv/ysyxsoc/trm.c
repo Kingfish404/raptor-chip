@@ -45,13 +45,13 @@ void copy_data(void)
 
 void init_uart(void)
 {
-  uint8_t d = inb(UART16550_LCR);
-  putch('0' + (d & 0x7));
-  putch('\n');
-  // outb(UART16550_LCR, 0xff);
-  // outb(UART16550_DL1, 16);
+  uint8_t lcr = inb(UART16550_LCR);
+  lcr |= 0x80;
+  outb(UART16550_LCR, 0xff);
+  outb(UART16550_DL1, 16);
   // outb(UART16550_DL2, 16);
-  // outb(UART16550_LCR, 0x00);
+  lcr &= ~0x80;
+  outb(UART16550_LCR, 0x00);
 }
 
 void _trm_init()
