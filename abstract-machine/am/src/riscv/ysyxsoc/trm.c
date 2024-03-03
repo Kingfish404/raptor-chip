@@ -53,8 +53,8 @@ void init_uart(void)
   outb(COM1 + 1, 0);
   outb(COM1 + 3, 0x03); // Lock divisor, 8 data bits.
 
-  outb(COM1 + 4, 0);
-  outb(COM1 + 1, 0x01); // Enable receive interrupts.
+  // outb(COM1 + 4, 0);
+  // outb(COM1 + 1, 0x01); // Enable receive interrupts.
 
   // uint8_t lcr = inb(UART16550_LCR);
   // lcr |= 0x80;
