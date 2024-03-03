@@ -43,6 +43,11 @@ void copy_data(void)
   }
 }
 
+void init_uart(void)
+{
+  
+}
+
 void _trm_init()
 {
   copy_data();
