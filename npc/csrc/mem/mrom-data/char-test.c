@@ -3,39 +3,8 @@
 void _start()
 {
     *(volatile char *)(UART_BASE + UART_TX) = 'A';
-    *(volatile char *)(UART_BASE + UART_TX) = 'A';
-    *(volatile char *)(UART_BASE + UART_TX) = 'A';
-    *(volatile char *)(UART_BASE + UART_TX) = 'A';
-    *(volatile char *)(UART_BASE + UART_TX) = 'A';
-    *(volatile char *)(UART_BASE + UART_TX) = 'A';
-    *(volatile char *)(UART_BASE + UART_TX) = 'A';
-    *(volatile char *)(UART_BASE + UART_TX) = 'A';
-    *(volatile char *)(UART_BASE + UART_TX) = 'A';
-    *(volatile char *)(UART_BASE + UART_TX) = 'A';
-    *(volatile char *)(UART_BASE + UART_TX) = 'A';
-    *(volatile char *)(UART_BASE + UART_TX) = 'A';
-    *(volatile char *)(UART_BASE + UART_TX) = 'A';
-    *(volatile char *)(UART_BASE + UART_TX) = 'A';
-    *(volatile char *)(UART_BASE + UART_TX) = 'A';
-    *(volatile char *)(UART_BASE + UART_TX) = 'A';
-    *(volatile char *)(UART_BASE + UART_TX) = 'A';
-    *(volatile char *)(UART_BASE + UART_TX) = 'A';
-    *(volatile char *)(UART_BASE + UART_TX) = 'A';
-    *(volatile char *)(UART_BASE + UART_TX) = 'A';
-    *(volatile char *)(UART_BASE + UART_TX) = 'A';
-    *(volatile char *)(UART_BASE + UART_TX) = 'A';
-    *(volatile char *)(UART_BASE + UART_TX) = 'A';
-    *(volatile char *)(UART_BASE + UART_TX) = 'A';
-    *(volatile char *)(UART_BASE + UART_TX) = 'A';
-    *(volatile char *)(UART_BASE + UART_TX) = 'A';
-    *(volatile char *)(UART_BASE + UART_TX) = 'A';
-    *(volatile char *)(UART_BASE + UART_TX) = 'A';
-    *(volatile char *)(UART_BASE + UART_TX) = 'A';
-    *(volatile char *)(UART_BASE + UART_TX) = 'A';
-    *(volatile char *)(UART_BASE + UART_TX) = 'A';
-    *(volatile char *)(UART_BASE + UART_TX) = 'A';
-    *(volatile char *)(UART_BASE + UART_TX) = 'A';
     *(volatile char *)(UART_BASE + UART_TX) = '\n';
+    asm volatile("ebreak");
     while (1)
         ;
 }
