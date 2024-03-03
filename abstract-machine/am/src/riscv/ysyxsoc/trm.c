@@ -47,6 +47,7 @@ void init_uart(void)
 {
   uint8_t d = inb(UART16550_LCR);
   putch(d);
+  putch('\n');
   // outb(UART16550_LCR, 0xff);
   // outb(UART16550_DL1, 16);
   // outb(UART16550_DL2, 16);
