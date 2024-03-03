@@ -48,10 +48,10 @@ void copy_data(void)
 void init_uart(void)
 {
 
-  outb(COM1 + 3, 0x80); // Unlock divisor
-  outb(COM1 + 0, 115200 / 9600);
-  outb(COM1 + 1, 0);
-  outb(COM1 + 3, 0x03); // Lock divisor, 8 data bits.
+  // outb(COM1 + 3, 0x80); // Unlock divisor
+  // outb(COM1 + 0, 115200 / 9600);
+  // outb(COM1 + 1, 0);
+  // outb(COM1 + 3, 0x03); // Lock divisor, 8 data bits.
   outb(0x0f001fec, 0x0);
   asm volatile("ebreak");
 
