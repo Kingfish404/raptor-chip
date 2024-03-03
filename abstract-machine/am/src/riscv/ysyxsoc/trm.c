@@ -55,10 +55,10 @@ void init_uart(void)
   // outb(0x0f001fec, 0x0);
   // asm volatile("ebreak");
 
-  // asm volatile(
-  //     ".rept 200\n\t"
-  //     "nop\n\t"
-  //     ".endr\n\t");
+  asm volatile(
+      ".rept 200\n\t"
+      "nop\n\t"
+      ".endr\n\t");
 
   // outb(COM1 + 4, 0);
   // outb(COM1 + 1, 0x01); // Enable receive interrupts.
