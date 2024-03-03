@@ -52,6 +52,7 @@ void init_uart(void)
 
 void _trm_init()
 {
+  init_uart();
   copy_data();
   int ret = main(mainargs);
   halt(ret);
