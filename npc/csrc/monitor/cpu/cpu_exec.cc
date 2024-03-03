@@ -103,13 +103,21 @@ void cpu_exec(uint64_t n)
 
   prev_pc = *(npc.pc);
   uint64_t now = get_time();
+  uint64_t cur_inst_cycle = 0;
   while (!contextp->gotFinish() && npc.state == NPC_RUNNING && n-- > 0)
   {
     cpu_exec_one_cycle();
     g_nr_guest_cycle++;
+    cur_inst_cycle++;
+    if (cur_inst_cycle > 0xff)
+    {
+      Log("Too many cycles for one instruction, maybe a bug.");
+      break;
+    }
     if (prev_pc != *(npc.pc))
     {
       g_nr_guest_inst++;
+      cur_inst_cycle = 0;
       fflush(stdout);
 #ifdef CONFIG_ITRACE
       snprintf(
