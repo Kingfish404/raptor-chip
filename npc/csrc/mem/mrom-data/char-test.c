@@ -20,6 +20,10 @@ void _start()
     outb(COM1 + 3, 0x03); // Lock divisor, 8 data bits.
 
     *(volatile char *)(UART_BASE + UART_TX) = 'A';
+    *(volatile char *)(UART_BASE + UART_TX) = 'A';
+    *(volatile char *)(UART_BASE + UART_TX) = 'A';
+    *(volatile char *)(UART_BASE + UART_TX) = 'A';
+    *(volatile char *)(UART_BASE + UART_TX) = 'A';
     *(volatile char *)(UART_BASE + UART_TX) = '\n';
     asm volatile("ebreak");
     while (1)
