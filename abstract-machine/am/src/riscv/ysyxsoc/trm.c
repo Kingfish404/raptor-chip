@@ -24,7 +24,7 @@ static const char mainargs[] = MAINARGS;
 
 void putch(char ch)
 {
-  outb(UART16550_TX + 1, ch);
+  outb(UART16550_TX, ch);
 }
 
 void halt(int code)
