@@ -206,13 +206,13 @@ module ysyx_BUS_ARBITER(
     begin
       `Assert(io_master_rresp, 2'b00);
       `Assert(io_master_bresp, 2'b00);
-      if (io_master_awvalid)
+      if (io_master_awvalid || io_master_arvalid)
         begin
           npc_difftest_mem_diff();
           if (
-            io_master_awaddr == 'h10000000 ||
-            io_master_awaddr == 'h10000001 ||
-            io_master_awaddr == 'h10000003
+            io_master_awaddr == 'h10000000 || io_master_araddr == 'h10000000 ||
+            io_master_awaddr == 'h10000001 || io_master_araddr == 'h10000001 ||
+            io_master_awaddr == 'h10000003 || io_master_araddr == 'h10000003
           )
             begin
               npc_difftest_skip_ref();
