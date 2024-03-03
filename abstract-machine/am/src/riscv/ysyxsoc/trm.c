@@ -48,10 +48,10 @@ void init_uart(void)
   uint8_t lcr = inb(UART16550_LCR);
   lcr |= 0x80;
   outb(UART16550_LCR, 0xff);
-  outb(UART16550_DL1, 16);
+  // outb(UART16550_DL1, 16);
   // outb(UART16550_DL2, 16);
   lcr &= ~0x80;
-  outb(UART16550_LCR, lcr);
+  // outb(UART16550_LCR, lcr);
 }
 
 void _trm_init()
