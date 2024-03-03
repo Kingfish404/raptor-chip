@@ -51,7 +51,7 @@ void init_uart(void)
   outb(UART16550_DL1, 16);
   // outb(UART16550_DL2, 16);
   lcr &= ~0x80;
-  outb(UART16550_LCR, 0x00);
+  outb(UART16550_LCR, lcr);
 }
 
 void _trm_init()
