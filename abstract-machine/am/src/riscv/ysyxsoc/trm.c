@@ -50,7 +50,7 @@ void init_uart(void)
   outb(UART16550_LCR, lcr);
   outb(UART16550_DL1, 16);
   outb(UART16550_DL2, 16);
-  lcr &= ~0x80;
+  lcr &= 0xbf;
   outb(UART16550_LCR, lcr);
 }
 
