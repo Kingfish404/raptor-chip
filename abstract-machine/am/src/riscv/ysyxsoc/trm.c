@@ -54,7 +54,7 @@ void init_uart(void)
   // outb(COM1 + 3, 0x03); // Lock divisor, 8 data bits.
 
   asm volatile(
-      ".rept 100\n\t"
+      ".rept 200\n\t"
       "nop\n\t"
       ".endr\n\t");
 
