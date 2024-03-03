@@ -46,7 +46,7 @@ void copy_data(void)
 void init_uart(void)
 {
   uint8_t d = inb(UART16550_LCR);
-  putch('0' + d & 0x1);
+  putch('0');
   putch('\n');
   // outb(UART16550_LCR, 0xff);
   // outb(UART16550_DL1, 16);
