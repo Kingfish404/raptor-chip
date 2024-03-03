@@ -58,8 +58,7 @@ void init_uart(void)
   // outb(COM1 + 4, 0);
   // outb(COM1 + 1, 0x01); // Enable receive interrupts.
 
-  uint8_t lcr = inb(UART16550_LCR);
-  // lcr |= 0x80;
+  volatile uint8_t lcr = inb(UART16550_LCR);
   // outb(UART16550_LCR, lcr);
   // outb(UART16550_DL2, 0x0);
   // outb(UART16550_DL1, 0x1);
