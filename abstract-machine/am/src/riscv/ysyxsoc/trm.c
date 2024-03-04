@@ -29,6 +29,10 @@ void putch(char ch)
   inb(UART16550_LSR);
   outb(UART16550_TX, ch);
   inb(UART16550_LSR);
+  for (size_t i = 0; i < 100; i++)
+  {
+    asm volatile("nop");
+  }
 }
 
 void halt(int code)
@@ -59,7 +63,7 @@ void init_uart(void)
   inb(UART16550_LSR);
   inb(UART16550_LSR);
   inb(UART16550_LSR);
-  // putch('S');
+  putch('S');
   inb(UART16550_LSR);
   inb(UART16550_LSR);
   inb(UART16550_LSR);
