@@ -73,9 +73,11 @@ void init_uart(void)
   putch('0' + ch);
   putch('0' + ch);
   putch('0' + ch);
+  putch('\n');
   putch('0' + ch);
   putch('0' + ch);
   putch('0' + ch);
+  putch('\n');
   asm volatile("ebreak");
 }
 
