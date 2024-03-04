@@ -73,7 +73,7 @@ void init_uart(void)
     asm volatile("nop");
   }
 
-  asm volatile("ebreak");
+  // asm volatile("ebreak");
 }
 
 void _trm_init()
