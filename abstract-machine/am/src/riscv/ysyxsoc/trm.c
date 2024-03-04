@@ -51,12 +51,6 @@ void init_uart(void)
   outb(UART16550_DL2, 0);
   outb(UART16550_DL1, 1);
   outb(UART16550_LCR, 0x03);
-  inb(UART16550_LSR);
-  uint8_t ch = inb(UART16550_LSR);
-  for (size_t i = 0; i < 100; i++)
-  {
-    asm volatile("nop");
-  }
   // asm volatile("ebreak");
 }
 
