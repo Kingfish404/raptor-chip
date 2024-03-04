@@ -59,7 +59,7 @@ void init_uart(void)
   inb(UART16550_LSR);
   inb(UART16550_LSR);
   inb(UART16550_LSR);
-  putch('S');
+  // putch('S');
   inb(UART16550_LSR);
   inb(UART16550_LSR);
   inb(UART16550_LSR);
