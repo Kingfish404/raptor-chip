@@ -29,7 +29,7 @@ void putch(char ch)
   inb(UART16550_LSR);
   outb(UART16550_TX, ch);
   inb(UART16550_LSR);
-  for (size_t i = 0; i < 100; i++)
+  for (size_t i = 0; i < 1000; i++)
   {
     asm volatile("nop");
   }
