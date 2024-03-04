@@ -72,7 +72,7 @@ void init_uart(void)
   putch('0' + ch);
   putch('0' + ch);
   putch('0' + ch);
-  putch('0' + ch);
+  putch('A' + ch);
   putch('\n');
   putch('0' + ch);
   putch('0' + ch);
