@@ -74,8 +74,8 @@ void init_uart(void)
 
 void _trm_init()
 {
-  copy_data();
   init_uart();
+  copy_data();
   int ret = main(mainargs);
   halt(ret);
 }
