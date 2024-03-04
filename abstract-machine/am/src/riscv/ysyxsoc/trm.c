@@ -66,13 +66,6 @@ void init_uart(void)
   inb(UART16550_LSR);
   uint8_t ch = inb(UART16550_LSR);
   putch('0' + ch);
-  putch('0' + ch);
-  putch('0' + ch);
-  putch('A' + ch);
-  putch('\n');
-  putch('0' + ch);
-  putch('0' + ch);
-  putch('0' + ch);
   putch('\n');
   for (size_t i = 0; i < 100; i++)
   {
