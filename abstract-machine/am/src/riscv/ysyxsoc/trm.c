@@ -55,6 +55,7 @@ void init_uart(void)
   // putch(inb(UART16550_LCR));
   // putch(inb(UART16550_LSR));
   // asm volatile("ebreak");
+  putch('H');
   for (size_t i = 0; i < 1000; i++)
   {
     asm volatile("nop");
