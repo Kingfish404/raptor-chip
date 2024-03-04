@@ -65,7 +65,7 @@ void init_uart(void)
   // outb(UART16550_LCR, 0x3);
   // outb(UART16550_LCR, 0x3);
 
-  volatile uint8_t lcr = inb(UART16550_LCR);
+  // volatile uint8_t lcr = inb(UART16550_LCR);
   // outb(UART16550_DL2, 0x0);
   // outb(UART16550_DL1, 0x1);
   // lcr &= 0x7f;
