@@ -68,6 +68,7 @@ void init_uart(void)
     putch('N');
     putch('O');
   }
+  asm volatile("ebreak");
 }
 
 void _trm_init()
