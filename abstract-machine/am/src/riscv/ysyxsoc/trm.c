@@ -28,6 +28,7 @@ void putch(char ch)
   //   ;
   inb(UART16550_LSR);
   outb(UART16550_TX, ch);
+  inb(UART16550_LSR);
 }
 
 void halt(int code)
