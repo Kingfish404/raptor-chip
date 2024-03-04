@@ -74,16 +74,18 @@ module ysyx_BUS_ARBITER(
 
   wire sram_arvalid = (ifu_arvalid | (lsu_arvalid & !clint_en));
 
-  reg lsu_loading = 0;
+  reg lsu_loading = 0, awvalid_record;
   always @(posedge clk)
     begin
       if (rst)
         begin
           lsu_loading <= 0;
+          awvalid_record <= 0;
         end
       else
         begin
           lsu_loading <= lsu_arvalid;
+          awvalid_record <= io_master_awready;
         end
     end
 
@@ -105,11 +107,11 @@ module ysyx_BUS_ARBITER(
   assign lsu_rvalid_o = lsu_loading & (rvalid_o | clint_rvalid_o);
 
   // lsu write
-  wire uart_en = (lsu_awaddr == `ysyx_BUS_SERIAL_PORT);
+  // wire uart_en = (lsu_awaddr == `ysyx_BUS_SERIAL_PORT);
+  // wire uart_wvalid = (lsu_awvalid & (uart_en));
   wire sram_en = (lsu_awaddr != `ysyx_BUS_SERIAL_PORT);
-  wire uart_wvalid = (lsu_awvalid & (uart_en));
   wire sram_wvalid = (lsu_wvalid & (sram_en));
-  wire sram_awvalid = sram_wvalid;
+  wire sram_awvalid = (lsu_wvalid & (sram_en)) & !io_master_awready;
   wire [ADDR_W-1:0] awaddr = lsu_awaddr;
   assign lsu_wready_o = (
            //  (uart_en & uart_wready_o) |
@@ -131,7 +133,7 @@ module ysyx_BUS_ARBITER(
            (3'b000)
          );
   assign io_master_araddr = sram_araddr;
-  assign io_master_arvalid = sram_arvalid & !io_master_bvalid;
+  assign io_master_arvalid = sram_arvalid;
   assign arready_o = io_master_arready & io_master_bvalid;
 
   // assign rdata_o = io_master_rdata[31:0];
