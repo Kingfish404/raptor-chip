@@ -68,6 +68,11 @@ void init_uart(void)
     putch('N');
     putch('O');
   }
+  for (size_t i = 0; i < 100; i++)
+  {
+    asm volatile("nop");
+  }
+
   asm volatile("ebreak");
 }
 
