@@ -60,6 +60,16 @@ void init_uart(void)
   // {
   //   asm volatile("nop");
   // }
+  if (inb(UART16550_LSR) == 0x60)
+  {
+    putch('O');
+    putch('K');
+  }
+  else
+  {
+    putch('N');
+    putch('O');
+  }
 }
 
 void _trm_init()
