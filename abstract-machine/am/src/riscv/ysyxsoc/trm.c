@@ -26,6 +26,7 @@ void putch(char ch)
 {
   // while ((inb(UART16550_LSR) & 0x6) == 0x0)
   //   ;
+  inb(UART16550_LSR);
   outb(UART16550_TX, ch);
 }
 
