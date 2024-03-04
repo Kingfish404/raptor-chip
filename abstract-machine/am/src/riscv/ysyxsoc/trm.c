@@ -24,12 +24,9 @@ static const char mainargs[] = MAINARGS;
 
 void putch(char ch)
 {
-  while ((inb(UART16550_LSR) & 0x60) == 0x0)
+  while ((inb(UART16550_LSR) & (0x1 << 5)) == 0x0)
     ;
-  outb(UART16550_TX, inb(UART16550_LSR));
-  inb(UART16550_LSR);
   outb(UART16550_TX, ch);
-  inb(UART16550_LSR);
 }
 
 void halt(int code)
