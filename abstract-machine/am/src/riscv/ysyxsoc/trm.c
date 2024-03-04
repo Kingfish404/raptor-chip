@@ -26,7 +26,7 @@ void putch(char ch)
   while ((inb(UART16550_LSR) & (0x1 << 5)) == 0x0)
     ;
   outb(UART16550_TX, ch);
-  for (size_t i = 0; i < 100; i++)
+  for (size_t i = 0; i < 10; i++)
   {
     asm volatile("nop");
   }
