@@ -10,7 +10,6 @@ extern char _pmem_start;
 
 extern char _data_start[];
 extern char _data_end[];
-extern char _data_size[];
 extern char _data_load_start[];
 
 #define PMEM_SIZE (128 * 1024 * 1024)
