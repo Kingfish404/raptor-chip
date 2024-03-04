@@ -68,6 +68,8 @@ void init_uart(void)
   inb(UART16550_LSR);
   inb(UART16550_LSR);
   inb(UART16550_LSR);
+  while ((inb(UART16550_LSR) & 0x6) == 0x0)
+    ;
   asm volatile("ebreak");
 }
 
