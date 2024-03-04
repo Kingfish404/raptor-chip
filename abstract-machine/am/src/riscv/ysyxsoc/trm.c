@@ -52,13 +52,14 @@ void init_uart(void)
   outb(UART16550_DL2, 1);
   outb(UART16550_DL1, 1);
   outb(UART16550_LCR, 0x03);
+  outb(UART16550_BASE + 4, 0);
   // putch(inb(UART16550_LCR));
   // putch(inb(UART16550_LSR));
   // asm volatile("ebreak");
-  for (size_t i = 0; i < 1000; i++)
-  {
-    asm volatile("nop");
-  }
+  // for (size_t i = 0; i < 1000; i++)
+  // {
+  //   asm volatile("nop");
+  // }
 }
 
 void _trm_init()
