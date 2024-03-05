@@ -1,6 +1,6 @@
 #include <common.h>
 #include <cpu.h>
-#include <mem.h>
+#include <memory.h>
 #include <dlfcn.h>
 
 extern NPCState npc;

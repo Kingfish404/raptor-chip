@@ -1,6 +1,6 @@
 #include <common.h>
 #include <difftest.h>
-#include <mem.h>
+#include <memory.h>
 #include <getopt.h>
 #include <stdio.h>
 #include <string.h>
