@@ -72,18 +72,20 @@ module ysyx_BUS_ARBITER(
   wire [1:0] sram_bresp_o;
   wire sram_bvalid_o;
 
-  wire sram_arvalid = (ifu_arvalid | (lsu_arvalid & !clint_en));
-
-  reg lsu_loading = 0;
+  reg lsu_loading = 0, awvalid_record, arvalid_record;
   always @(posedge clk)
     begin
       if (rst)
         begin
           lsu_loading <= 0;
+          arvalid_record <= 0;
+          awvalid_record <= 0;
         end
       else
         begin
           lsu_loading <= lsu_arvalid;
+          arvalid_record <= io_master_arvalid;
+          awvalid_record <= io_master_awready;
         end
     end
 
@@ -103,17 +105,17 @@ module ysyx_BUS_ARBITER(
                           ({DATA_W{!clint_en}} & rdata_o)
                         ));
   assign lsu_rvalid_o = lsu_loading & (rvalid_o | clint_rvalid_o);
+  wire sram_arvalid = (ifu_arvalid | (lsu_arvalid & !clint_en)) & !arvalid_record;
 
   // lsu write
-  wire uart_en = (lsu_awaddr == `ysyx_BUS_SERIAL_PORT);
+  // wire uart_en = (lsu_awaddr == `ysyx_BUS_SERIAL_PORT);
+  // wire uart_wvalid = (lsu_awvalid & (uart_en));
   wire sram_en = (lsu_awaddr != `ysyx_BUS_SERIAL_PORT);
-  wire uart_wvalid = (lsu_awvalid & (uart_en));
   wire sram_wvalid = (lsu_wvalid & (sram_en));
-  wire sram_awvalid = sram_wvalid;
+  wire sram_awvalid = (lsu_wvalid & (sram_en)) & !awvalid_record;
   wire [ADDR_W-1:0] awaddr = lsu_awaddr;
-  wire [DATA_W-1:0] wdata = lsu_wdata;
   assign lsu_wready_o = (
-           (uart_en & uart_wready_o) |
+           //  (uart_en & uart_wready_o) |
            (sram_en & sram_wready_o)
          );
 
@@ -133,12 +135,23 @@ module ysyx_BUS_ARBITER(
          );
   assign io_master_araddr = sram_araddr;
   assign io_master_arvalid = sram_arvalid;
-  assign arready_o = io_master_arready;
+  assign arready_o = io_master_arready & io_master_bvalid;
 
   // assign rdata_o = io_master_rdata[31:0];
-  assign rdata_o = (io_master_araddr[2:2] == 1) ?
-         io_master_rdata[63:32]:
-         io_master_rdata[31:00];
+  wire [DATA_W-1:0] io_rdata = (io_master_araddr[2:2] == 1) ?
+       io_master_rdata[63:32]:
+       io_master_rdata[31:00];
+  wire [1:0] araddr_lo = io_master_araddr[1:0];
+  assign rdata_o = (
+           ({DATA_W{araddr_lo == 2'b00}} & io_rdata) |
+           ({DATA_W{araddr_lo == 2'b01}} & {{8'b0}, {io_rdata[31:8]}}) |
+           ({DATA_W{araddr_lo == 2'b10}} & {{16'b0}, {io_rdata[31:16]}}) |
+           ({DATA_W{araddr_lo == 2'b11}} & {{24'b0}, {io_rdata[31:24]}}) |
+           (0)
+         );
+  // assign rdata_o = (io_master_araddr[2:2] == 1) ?
+  //        io_master_rdata[63:32]:
+  //        io_master_rdata[31:00];
   assign rresp_o = io_master_rresp;
   assign rvalid_o = io_master_rvalid;
   assign io_master_rready = 1;
@@ -155,11 +168,20 @@ module ysyx_BUS_ARBITER(
   wire sram_awready_o = io_master_awready;
 
   assign io_master_wlast = sram_awvalid;
+  // wire [DATA_W-1:0] wdata = lsu_wdata;
+  wire [1:0] awaddr_lo = io_master_awaddr[1:0];
+  wire [DATA_W-1:0] wdata = {
+         ({DATA_W{awaddr_lo == 2'b00}} & lsu_wdata) |
+         ({DATA_W{awaddr_lo == 2'b01}} & {{lsu_wdata[23:0]}, {8'b0}}) |
+         ({DATA_W{awaddr_lo == 2'b10}} & {{lsu_wdata[15:0]}, {16'b0}}) |
+         ({DATA_W{awaddr_lo == 2'b11}} & {{lsu_wdata[7:0]}, {24'b0}}) |
+         (0)
+       };
   assign io_master_wdata[31:0] = wdata;
   assign io_master_wdata[63:32] = wdata;
   assign io_master_wstrb = (io_master_awaddr[2:2] == 1) ?
-         {{lsu_wstrb[3:0]}, {4'b0}}:
-         {{4'b0}, {lsu_wstrb[3:0]}};
+         {{lsu_wstrb[3:0] << awaddr_lo}, {4'b0}}:
+         {{4'b0}, {lsu_wstrb[3:0] << awaddr_lo}};
   assign io_master_wvalid = sram_wvalid;
   assign sram_wready_o = io_master_wready;
 
@@ -187,32 +209,35 @@ module ysyx_BUS_ARBITER(
     begin
       `Assert(io_master_rresp, 2'b00);
       `Assert(io_master_bresp, 2'b00);
-      if (io_master_awvalid)
+      if (io_master_awvalid || io_master_arvalid)
         begin
           npc_difftest_mem_diff();
-          if (io_master_awaddr == 'h10000000)
+          if (
+            (io_master_awaddr >= 'h10000000 && io_master_awaddr <= 'h10000005) ||
+            (io_master_araddr >= 'h10000001 && io_master_araddr <= 'h10000005)
+          )
             begin
               npc_difftest_skip_ref();
             end
         end
     end
 
-  wire [DATA_W-1:0] uart_rdata_o;
-  wire [1:0] uart_rresp_o, uart_bresp_o;
-  wire uart_arready_o, uart_rvalid_o, uart_awready_o, uart_wready_o, uart_bvalid_o;
-  ysyx_UART #(.ADDR_W(ADDR_W), .DATA_W(DATA_W)) uart(
-              .clk(clk),
-              .arburst(2'b00), .arsize(3'b000), .arlen(8'b00000000), .arid(4'b0000),
-              .araddr(0), .arvalid(0), .arready_o(uart_arready_o),
-              .rid(), .rlast_o(),
-              .rdata_o(uart_rdata_o), .rresp_o(uart_rresp_o), .rvalid_o(uart_rvalid_o), .rready(0),
-              .awburst(2'b00), .awsize(3'b000), .awlen(8'b00000000), .awid(4'b0000),
-              .awaddr(awaddr), .awvalid(sram_awvalid), .awready_o(uart_awready_o),
-              .wlast(1'b0),
-              .wdata(wdata), .wstrb(lsu_wstrb), .wvalid(uart_wvalid), .wready_o(uart_wready_o),
-              .bid(),
-              .bresp_o(uart_bresp_o), .bvalid_o(uart_bvalid_o), .bready(1)
-            );
+  // wire [DATA_W-1:0] uart_rdata_o;
+  // wire [1:0] uart_rresp_o, uart_bresp_o;
+  // wire uart_arready_o, uart_rvalid_o, uart_awready_o, uart_wready_o, uart_bvalid_o;
+  // ysyx_UART #(.ADDR_W(ADDR_W), .DATA_W(DATA_W)) uart(
+  //             .clk(clk),
+  //             .arburst(2'b00), .arsize(3'b000), .arlen(8'b00000000), .arid(4'b0000),
+  //             .araddr(0), .arvalid(0), .arready_o(uart_arready_o),
+  //             .rid(), .rlast_o(),
+  //             .rdata_o(uart_rdata_o), .rresp_o(uart_rresp_o), .rvalid_o(uart_rvalid_o), .rready(0),
+  //             .awburst(2'b00), .awsize(3'b000), .awlen(8'b00000000), .awid(4'b0000),
+  //             .awaddr(awaddr), .awvalid(sram_awvalid), .awready_o(uart_awready_o),
+  //             .wlast(1'b0),
+  //             .wdata(wdata), .wstrb(lsu_wstrb), .wvalid(uart_wvalid), .wready_o(uart_wready_o),
+  //             .bid(),
+  //             .bresp_o(uart_bresp_o), .bvalid_o(uart_bvalid_o), .bready(1)
+  //           );
 
   wire clint_arvalid = (lsu_arvalid & clint_en);
   wire clint_arready_o;

@@ -4,7 +4,13 @@
 #include <klib-macros.h>
 #include <riscv/riscv.h>
 
-#define SERIAL_PORT 0x10000000
+#define UART16550_BASE 0x10000000
+
+#define UART16550_TX UART16550_BASE + 0x00
+#define UART16550_LCR UART16550_BASE + 0x03
+#define UART16550_DL1 UART16550_BASE + 0x00
+#define UART16550_DL2 UART16550_BASE + 0x01
+#define UART16550_LSR UART16550_BASE + 0x05
 
 typedef uintptr_t PTE;
 
