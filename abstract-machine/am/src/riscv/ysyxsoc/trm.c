@@ -50,16 +50,6 @@ void init_uart(void)
   outb(UART16550_DL2, 0);
   outb(UART16550_DL1, 1);
   outb(UART16550_LCR, 0x03);
-  if (inb(UART16550_LSR) == 0x60)
-  {
-    putch('O');
-    putch('K');
-  }
-  else
-  {
-    putch('N');
-    putch('O');
-  }
 }
 
 void _trm_init()
