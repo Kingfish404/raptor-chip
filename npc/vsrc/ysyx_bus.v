@@ -214,7 +214,9 @@ module ysyx_BUS_ARBITER(
           npc_difftest_mem_diff();
           if (
             (io_master_awaddr >= 'h10000000 && io_master_awaddr <= 'h10000005) ||
-            (io_master_araddr >= 'h10000001 && io_master_araddr <= 'h10000005)
+            (io_master_araddr >= 'h10000001 && io_master_araddr <= 'h10000005) ||
+            (io_master_awaddr >= 'h30000000 && io_master_awaddr <= 'h40000000) ||
+            (0)
           )
             begin
               npc_difftest_skip_ref();
