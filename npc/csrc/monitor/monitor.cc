@@ -58,6 +58,7 @@ long load_file(const char *filename, void *buf)
 static long load_img()
 {
   long size;
+  // Load image to memory
   if (img_file == NULL)
   {
     Log("No image is given, use default image.");
@@ -69,10 +70,18 @@ static long load_img()
     size = load_file(img_file, guest_to_host(MBASE));
   }
 
+  // Load MROM image
   if (mrom_img_file != NULL)
   {
     Log("Load MROM image from %s", mrom_img_file);
     load_file(mrom_img_file, guest_to_host(MROM_BASE));
+  }
+
+  // Initialize the flash
+  for (int i = 0; i < 0x1000; i++)
+  {
+    uint8_t *p = guest_to_host(FLASH_BASE + i);
+    p[0] = i & 0xff;
   }
   return size;
 }
