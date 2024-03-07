@@ -35,7 +35,7 @@ void halt(int code)
     ;
 }
 
-void copy_data(void)
+void bootloader(void)
 {
   if (_data_start != _data_load_start)
   {
@@ -55,7 +55,7 @@ void init_uart(void)
 void _trm_init()
 {
   init_uart();
-  copy_data();
+  bootloader();
   int ret = main(mainargs);
   halt(ret);
 }
