@@ -31,6 +31,10 @@
 #define CSR_MSTATUS_MPIE  0x80
 #define CSR_MSTATUS_MIE  0x8
 
+// Machine Information Registers
+#define CSR_MVENDORID 0xf11
+#define CSR_MARCHID 0xf12
+
 #define CSR_SET(REG, BIT_MASK) {cpu.sr[REG] |= BIT_MASK;}
 
 #define CSR_CLEAR(REG, BIT_MASK) {cpu.sr[REG] &= ~BIT_MASK;}

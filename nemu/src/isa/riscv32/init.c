@@ -33,6 +33,10 @@ static void restart() {
 
   /* The zero register is always 0. */
   cpu.gpr[0] = 0;
+
+  /* Setting the machine information */
+  cpu.sr[CSR_MVENDORID] = 0x79737978;
+  cpu.sr[CSR_MARCHID] = 0x0150be98;
 }
 
 void init_isa() {
