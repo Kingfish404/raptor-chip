@@ -24,7 +24,7 @@ static inline int check_reg_idx(int idx) {
 }
 
 static inline int check_sr_idx(int idx) {
-  printf("idx: %x\n", idx);
+  idx = idx & 0xfff;
   IFDEF(CONFIG_RT_CHECK, assert(idx >= 0 && idx < 4096));
   return idx;
 }
