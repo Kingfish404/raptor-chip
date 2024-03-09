@@ -58,8 +58,8 @@ void _trm_init()
   bootloader();
   uint32_t mvendorid, marchid;
   asm volatile(
-      "csrr t0, mvendorid\n\t"
-      "csrr t1, marchid\n\t"
+      "csrr %0, mvendorid\n\t"
+      "csrr %1, marchid\n\t"
       : "=r"(mvendorid), "=r"(marchid) :);
 
   int ret = main(mainargs);
