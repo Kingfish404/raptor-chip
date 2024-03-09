@@ -75,14 +75,15 @@ static long load_img()
   {
     Log("Load MROM image from %s", mrom_img_file);
     load_file(mrom_img_file, guest_to_host(MROM_BASE));
+    load_file(mrom_img_file, guest_to_host(FLASH_BASE));
   }
 
-  // Initialize the flash
-  for (int i = 0; i < 0x1000; i++)
-  {
-    uint8_t *p = guest_to_host(FLASH_BASE + i);
-    p[0] = i & 0xff;
-  }
+  // // Initialize the flash
+  // for (int i = 0; i < 0x1000; i++)
+  // {
+  //   uint8_t *p = guest_to_host(FLASH_BASE + i);
+  //   p[0] = i & 0xff;
+  // }
   return size;
 }
 
