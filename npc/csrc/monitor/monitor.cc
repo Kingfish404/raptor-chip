@@ -30,10 +30,9 @@ static const uint32_t img_char_test[] = {
     0x00a00713,
     0x00e78023,
     0x00100073,
-}
+};
 
-void
-isa_parser_elf(char *filename);
+void isa_parser_elf(char *filename);
 
 void sdb_set_batch_mode();
 
