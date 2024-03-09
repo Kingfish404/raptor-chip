@@ -61,6 +61,7 @@ void _trm_init()
       "csrr %0, mvendorid\n\t"
       "csrr %1, marchid\n\t"
       : "=r"(mvendorid), "=r"(marchid) :);
+  printf("mvendorid: %x, marchid: %x\n", mvendorid, marchid);
 
   int ret = main(mainargs);
   halt(ret);
