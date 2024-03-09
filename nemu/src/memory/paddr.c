@@ -66,6 +66,7 @@ word_t paddr_read(paddr_t addr, int len) {
 #ifdef CONFIG_MTRACE
   printf("paddr_r: " FMT_PADDR ", size: %d\n", addr, len);
 #endif
+  printf("paddr_r: " FMT_PADDR ", size: %d\n", addr, len);
 
   if (likely(
     in_pmem(addr) ||
