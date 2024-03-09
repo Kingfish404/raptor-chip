@@ -56,6 +56,13 @@ void _trm_init()
 {
   init_uart();
   bootloader();
+  uint32_t mvendorid, marchid;
+  asm volatile(
+      "csrr t0, mvendorid\n\t"
+      "csrr t1, marchid\n\t" :
+      :
+      :);
+
   int ret = main(mainargs);
   halt(ret);
 }
