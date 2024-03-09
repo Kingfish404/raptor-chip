@@ -23,7 +23,17 @@ static const uint32_t img[] = {
     0b00000000000100000000000001110011,
 };
 
-void isa_parser_elf(char *filename);
+static const uint32_t img_char_test[] = {
+    0x100007b7,
+    0x04100713,
+    0x00e78023,
+    0x00a00713,
+    0x00e78023,
+    0x00100073,
+}
+
+void
+isa_parser_elf(char *filename);
 
 void sdb_set_batch_mode();
 
@@ -75,10 +85,10 @@ static long load_img()
   {
     Log("Load MROM image from %s", mrom_img_file);
     load_file(mrom_img_file, guest_to_host(MROM_BASE));
-    load_file(mrom_img_file, guest_to_host(FLASH_BASE));
   }
 
-  // // Initialize the flash
+  // Initialize the flash
+  memccpy(guest_to_host(FLASH_BASE), img_char_test, sizeof(img_char_test));
   // for (int i = 0; i < 0x1000; i++)
   // {
   //   uint8_t *p = guest_to_host(FLASH_BASE + i);
