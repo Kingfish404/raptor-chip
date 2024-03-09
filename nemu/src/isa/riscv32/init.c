@@ -36,7 +36,7 @@ static void restart() {
 
   /* Setting the machine information */
   cpu.sr[CSR_MVENDORID] = 0x79737978;
-  cpu.sr[CSR_MARCHID] = 0x0150be98;
+  cpu.sr[CSR_MARCHID] = 0x015fde77;
 }
 
 void init_isa() {
