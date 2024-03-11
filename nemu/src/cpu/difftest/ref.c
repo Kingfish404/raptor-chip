@@ -38,7 +38,7 @@ __EXPORT void difftest_memcpy(paddr_t addr, void *buf, size_t n, bool direction)
 {
   if (direction == DIFFTEST_TO_REF)
   {
-    if (in_pmem(addr) || in_sram(addr) || in_mrom(addr))
+    if (in_pmem(addr) || in_sram(addr) || in_mrom(addr) || in_flash(addr))
     {
       memcpy(guest_to_host(addr), buf, n);
       return;
@@ -47,7 +47,7 @@ __EXPORT void difftest_memcpy(paddr_t addr, void *buf, size_t n, bool direction)
   }
   else
   {
-    if (in_pmem(addr) || in_sram(addr) || in_mrom(addr))
+    if (in_pmem(addr) || in_sram(addr) || in_mrom(addr) || in_flash(addr))
     {
       memcpy(buf, guest_to_host(addr), n);
       return;

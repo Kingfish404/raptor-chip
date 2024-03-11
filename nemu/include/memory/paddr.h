@@ -26,7 +26,10 @@ static const uint64_t CONFIG_SRAM_BASE = 0x0f000000;
 static const uint64_t CONFIG_SRAM_SIZE = 0x00002000;
 
 static const uint64_t CONFIG_MROM_BASE = 0x20000000;
-static const uint64_t CONFIG_MROM_SIZE = 0x00000fff;
+static const uint64_t CONFIG_MROM_SIZE = 0x00001000;
+
+static const uint64_t CONFIG_FLASH_BASE = 0x30000000;
+static const uint64_t CONFIG_FLASH_SIZE = 0x40000000;
 
 /* convert the guest physical address in the guest program to host virtual address in NEMU */
 uint8_t *guest_to_host(paddr_t paddr);
@@ -52,6 +55,11 @@ static inline bool in_sram(paddr_t addr)
 static inline bool in_mrom(paddr_t addr)
 {
   return addr >= CONFIG_MROM_BASE && addr < CONFIG_MROM_BASE + CONFIG_MROM_SIZE;
+}
+
+static inline bool in_flash(paddr_t addr)
+{
+  return addr >= CONFIG_FLASH_BASE && addr < CONFIG_FLASH_BASE + CONFIG_FLASH_SIZE;
 }
 
 word_t paddr_read(paddr_t addr, int len);
