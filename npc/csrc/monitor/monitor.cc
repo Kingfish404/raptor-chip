@@ -77,6 +77,7 @@ static long load_img()
   else
   {
     size = load_file(img_file, guest_to_host(MBASE));
+    load_file(img_file, guest_to_host(FLASH_BASE));
   }
 
   // Load MROM image
@@ -87,7 +88,7 @@ static long load_img()
   }
 
   // Initialize the flash
-  memcpy(guest_to_host(FLASH_BASE), img_char_test, sizeof(img_char_test));
+  // memcpy(guest_to_host(FLASH_BASE), img_char_test, sizeof(img_char_test));
   // for (int i = 0; i < 0x1000; i++)
   // {
   //   uint8_t *p = guest_to_host(FLASH_BASE + i);
