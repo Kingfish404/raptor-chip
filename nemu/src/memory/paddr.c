@@ -25,11 +25,13 @@ static uint8_t pmem[CONFIG_MSIZE] PG_ALIGN = {};
 #endif
 static uint8_t sram[CONFIG_SRAM_SIZE] PG_ALIGN = {};
 static uint8_t mrom[CONFIG_MROM_BASE] PG_ALIGN = {};
+static uint8_t flash[CONFIG_FLASH_SIZE] PG_ALIGN = {};
 
 uint8_t* guest_to_host(paddr_t paddr) { 
   if (in_pmem(paddr)) return pmem + paddr - CONFIG_MBASE;
   if (in_sram(paddr)) return sram + paddr - CONFIG_SRAM_BASE;
   if (in_mrom(paddr)) return mrom + paddr - CONFIG_MROM_BASE;
+  if (in_flash(paddr)) return flash + paddr - CONFIG_FLASH_BASE;
   Assert(0, "invalid guest physical address = " FMT_PADDR, paddr);
 }
 paddr_t host_to_guest(uint8_t *haddr) { 
@@ -70,7 +72,8 @@ word_t paddr_read(paddr_t addr, int len) {
   if (likely(
     in_pmem(addr) ||
     in_sram(addr) ||
-    in_mrom(addr)
+    in_mrom(addr) ||
+    in_flash(addr)
     )) return pmem_read(addr, len);
   IFDEF(CONFIG_DEVICE, return mmio_read(addr, len));
   out_of_bound(addr);

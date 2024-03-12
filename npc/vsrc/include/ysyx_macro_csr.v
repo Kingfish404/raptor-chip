@@ -10,3 +10,7 @@
 // CSR_MSTATUS FLAGS
 `define ysyx_CSR_MSTATUS_MPIE_IDX  'h7
 `define ysyx_CSR_MSTATUS_MIE_IDX   'h3
+
+// Machine Information Registers
+`define ysyx_CSR_MVENDORID 'hf11
+`define ysyx_CSR_MARCHID   'hf12

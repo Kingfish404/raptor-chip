@@ -8,6 +8,7 @@ void npc_abort();
 static uint8_t sram[SRAM_SIZE] = {};
 static uint8_t mrom[MROM_SIZE] = {};
 static uint8_t pmem[MSIZE] = {};
+static uint8_t flash[FLASH_SIZE] = {};
 #ifdef CONFIG_SOFT_MMIO
 static uint32_t rtc_port_base[2] = {0x0, 0x0};
 #endif
@@ -25,6 +26,10 @@ uint8_t *guest_to_host(paddr_t addr)
     if (addr >= SRAM_BASE && addr < SRAM_BASE + SRAM_SIZE)
     {
         return sram + addr - SRAM_BASE;
+    }
+    if (addr >= FLASH_BASE && addr < FLASH_BASE + FLASH_SIZE)
+    {
+        return flash + addr - FLASH_BASE;
     }
     Assert(0, "Invalid guest address: " FMT_WORD, addr);
 }
@@ -142,7 +147,12 @@ extern "C" void pmem_write(word_t waddr, word_t wdata, char wmask)
     }
 }
 
-extern "C" void flash_read(uint32_t addr, uint32_t *data) { assert(0); }
+extern "C" void flash_read(uint32_t addr, uint32_t *data)
+{
+    uint32_t offset = (addr & 0xfffffffc - FLASH_BASE);
+    *data = *((uint32_t *)(flash + offset));
+    // Log("flash raddr: 0x%x, rdata: 0x%x, offest: 0x%x", addr, *data, offset);
+}
 
 extern "C" void mrom_read(uint32_t addr, uint32_t *data)
 {

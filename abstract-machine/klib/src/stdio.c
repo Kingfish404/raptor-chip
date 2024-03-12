@@ -29,8 +29,13 @@ int vsprintf(char *out, const char *fmt, va_list ap)
     switch (fmt[i])
     {
     case '%':
+    type:
       switch (fmt[++i])
       {
+      case 'l':
+      {
+        goto type;
+      }
       case 'u':
       {
         uint32_t d = va_arg(ap, int);

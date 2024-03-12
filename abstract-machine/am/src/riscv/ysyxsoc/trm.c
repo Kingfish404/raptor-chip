@@ -2,6 +2,7 @@
 #include <ysyxsoc.h>
 #include <klib-macros.h>
 #include <string.h>
+#include <stdio.h>
 
 extern char _heap_start;
 int main(const char *args);
@@ -35,9 +36,9 @@ void halt(int code)
     ;
 }
 
-void copy_data(void)
+void bootloader(void)
 {
-  if (_data_start != _data_load_start)
+  if ((size_t)_data_start != (size_t)_data_load_start)
   {
     size_t data_size = _data_end - _data_start;
     memcpy(_data_start, _data_load_start, (size_t)data_size);
@@ -55,7 +56,14 @@ void init_uart(void)
 void _trm_init()
 {
   init_uart();
-  copy_data();
+  bootloader();
+  uint32_t mvendorid, marchid;
+  asm volatile(
+      "csrr %0, mvendorid\n\t"
+      "csrr %1, marchid\n\t"
+      : "=r"(mvendorid), "=r"(marchid) :);
+  printf("mvendorid: 0x%lx, marchid: %ld\n", mvendorid, marchid);
+
   int ret = main(mainargs);
   halt(ret);
 }

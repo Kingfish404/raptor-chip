@@ -159,8 +159,8 @@ module ysyx_BUS_ARBITER(
   // io lsu write
   assign io_master_awsize = (
            ({3{lsu_wstrb == 8'h1}} & 3'b000) |
-           ({3{lsu_wstrb == 8'h3}} & 3'b010) |
-           ({3{lsu_wstrb == 8'hf}} & 3'b011) |
+           ({3{lsu_wstrb == 8'h3}} & 3'b001) |
+           ({3{lsu_wstrb == 8'hf}} & 3'b010) |
            (3'b000)
          );
   assign io_master_awaddr = awaddr;
@@ -214,7 +214,11 @@ module ysyx_BUS_ARBITER(
           npc_difftest_mem_diff();
           if (
             (io_master_awaddr >= 'h10000000 && io_master_awaddr <= 'h10000005) ||
-            (io_master_araddr >= 'h10000001 && io_master_araddr <= 'h10000005)
+            (io_master_araddr >= 'h10000001 && io_master_araddr <= 'h10000005) ||
+            (io_master_awaddr >= 'h10001000 && io_master_awaddr <= 'h10001fff) ||
+            (io_master_araddr >= 'h10001000 && io_master_araddr <= 'h10001fff) ||
+            (io_master_awaddr >= 'h30000000 && io_master_awaddr <= 'h40000000) ||
+            (0)
           )
             begin
               npc_difftest_skip_ref();

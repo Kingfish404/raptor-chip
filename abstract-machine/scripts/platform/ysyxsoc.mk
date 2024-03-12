@@ -4,7 +4,7 @@ AM_SRCS := riscv/ysyxsoc/start.S \
 
 CFLAGS    += -fdata-sections -ffunction-sections
 LDFLAGS   += -T $(AM_HOME)/scripts/linker.ysyxsoc.ld \
-						 --defsym=_pmem_start=0x20000000 \
+						 --defsym=_pmem_start=0x80000000 \
 						 --defsym=_entry_offset=0x0 \
 						 --defsym=_stack_pointer=0x0f002000 \
 						 --defsym=_heap_start=0x0f000000 \
@@ -21,4 +21,5 @@ image: $(IMAGE).elf
 	@$(OBJCOPY) -S --set-section-flags .bss=alloc,contents -O binary $(IMAGE).elf $(IMAGE).bin
 
 run: image
-	make -C $(NPC_HOME) ISA=$(ISA) run NPCFLAGS="$(NPCFLAGS)" IMG=$(IMAGE).bin MROM_IMG=$(IMAGE).bin
+	make -C $(NPC_HOME) ISA=$(ISA) run NPCFLAGS="$(NPCFLAGS)" IMG=$(IMAGE).bin
+	# make -C $(NPC_HOME) ISA=$(ISA) run NPCFLAGS="$(NPCFLAGS)" IMG=$(IMAGE).bin MROM_IMG=$(IMAGE).bin

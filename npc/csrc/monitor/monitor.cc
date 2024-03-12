@@ -1,6 +1,6 @@
 #include <common.h>
 #include <difftest.h>
-#include <mem.h>
+#include <memory.h>
 #include <getopt.h>
 #include <stdio.h>
 #include <string.h>
@@ -21,6 +21,15 @@ static const uint32_t img[] = {
     0x00000513, // 80000030: addi 0, zero, 0
     // ebreak;          0b0000000 00001 00000 000 00000 11100 11;
     0b00000000000100000000000001110011,
+};
+
+static const uint32_t img_char_test[] = {
+    0x100007b7, // 0x80000000: lui a5, 0x10000
+    0x04100713, // 0x80000004: addi a4, zero, 0x41
+    0x00e78023, // 0x80000008: sw a4, 0(a5)
+    0x00a00713, // 0x8000000c: addi a4, zero, 0x0a
+    0x00e78023, // 0x80000010: sw a4, 0(a5)
+    0x00100073, // 0x80000014: ebreak
 };
 
 void isa_parser_elf(char *filename);
@@ -58,22 +67,35 @@ long load_file(const char *filename, void *buf)
 static long load_img()
 {
   long size;
+  // Load image to memory
   if (img_file == NULL)
   {
     Log("No image is given, use default image.");
     memcpy(guest_to_host(MBASE), img, sizeof(img));
+    memcpy(guest_to_host(FLASH_BASE), img_char_test, sizeof(img_char_test));
     size = sizeof(img);
   }
   else
   {
     size = load_file(img_file, guest_to_host(MBASE));
+    // load_file(img_file, guest_to_host(FLASH_BASE));
+    memcpy(guest_to_host(FLASH_BASE), guest_to_host(MBASE), size);
   }
 
+  // Load MROM image
   if (mrom_img_file != NULL)
   {
     Log("Load MROM image from %s", mrom_img_file);
     load_file(mrom_img_file, guest_to_host(MROM_BASE));
   }
+
+  // Initialize the flash
+  // memcpy(guest_to_host(FLASH_BASE), img_char_test, sizeof(img_char_test));
+  // for (int i = 0; i < 0x1000; i++)
+  // {
+  //   uint8_t *p = guest_to_host(FLASH_BASE + i);
+  //   p[0] = i & 0xff;
+  // }
   return size;
 }
 
