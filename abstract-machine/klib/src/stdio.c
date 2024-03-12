@@ -35,7 +35,6 @@ int vsprintf(char *out, const char *fmt, va_list ap)
       case 'l':
       {
         goto type;
-        break;
       }
       case 'u':
       {
