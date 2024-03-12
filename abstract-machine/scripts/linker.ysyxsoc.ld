@@ -7,7 +7,7 @@ MEMORY {
 
 SECTIONS {
   /* _pmem_start and _entry_offset are defined in LDFLAGS */
-  /* . = _pmem_start + _entry_offset; */
+  . = 0x3000000;
   . = ORIGIN(mrom);
   .text : 
     {
