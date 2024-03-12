@@ -29,10 +29,12 @@ int vsprintf(char *out, const char *fmt, va_list ap)
     switch (fmt[i])
     {
     case '%':
+    type:
       switch (fmt[++i])
       {
       case 'l':
       {
+        goto type;
         break;
       }
       case 'u':
