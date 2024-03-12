@@ -31,6 +31,10 @@ int vsprintf(char *out, const char *fmt, va_list ap)
     case '%':
       switch (fmt[++i])
       {
+      case 'l':
+      {
+        break;
+      }
       case 'u':
       {
         uint32_t d = va_arg(ap, int);
