@@ -38,7 +38,7 @@ void halt(int code)
 
 void bootloader(void)
 {
-  if (_data_start != _data_load_start)
+  if ((size_t)_data_start != (size_t)_data_load_start)
   {
     size_t data_size = _data_end - _data_start;
     memcpy(_data_start, _data_load_start, (size_t)data_size);
@@ -62,7 +62,7 @@ void _trm_init()
       "csrr %0, mvendorid\n\t"
       "csrr %1, marchid\n\t"
       : "=r"(mvendorid), "=r"(marchid) :);
-  printf("mvendorid: 0x%x, marchid: %d\n", mvendorid, marchid);
+  printf("mvendorid: 0x%lx, marchid: %ld\n", mvendorid, marchid);
 
   int ret = main(mainargs);
   halt(ret);
