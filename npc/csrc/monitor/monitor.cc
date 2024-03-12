@@ -24,12 +24,12 @@ static const uint32_t img[] = {
 };
 
 static const uint32_t img_char_test[] = {
-    0x100007b7,
-    0x04100713,
-    0x00e78023,
-    0x00a00713,
-    0x00e78023,
-    0x00100073,
+    0x100007b7, // 0x80000000: lui a5, 0x10000
+    0x04100713, // 0x80000004: addi a4, zero, 0x41
+    0x00e78023, // 0x80000008: sw a4, 0(a5)
+    0x00a00713, // 0x8000000c: addi a4, zero, 0x0a
+    0x00e78023, // 0x80000010: sw a4, 0(a5)
+    0x00100073, // 0x80000014: ebreak
 };
 
 void isa_parser_elf(char *filename);
@@ -72,6 +72,7 @@ static long load_img()
   {
     Log("No image is given, use default image.");
     memcpy(guest_to_host(MBASE), img, sizeof(img));
+    memcpy(guest_to_host(FLASH_BASE), img_char_test, sizeof(img_char_test));
     size = sizeof(img);
   }
   else
