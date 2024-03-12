@@ -4,8 +4,8 @@ AM_SRCS := riscv/ysyxsoc/start.S \
 
 CFLAGS    += -fdata-sections -ffunction-sections
 LDFLAGS   += -T $(AM_HOME)/scripts/linker.ysyxsoc.ld \
-						 --defsym=_pmem_start=0x30000000 \
-						 --defsym=_entry_offset=0x0 \
+						 --defsym=_pmem_start=0x20000000 \
+						 --defsym=_entry_offset=0x10 \
 						 --defsym=_stack_pointer=0x0f002000 \
 						 --defsym=_heap_start=0x0f000000 \
 						 #--print-map
