@@ -53,7 +53,7 @@ void init_uart(void)
   outb(UART16550_LCR, 0x03);
 }
 
-void _trm_init()
+void __attribute__((section(".flash_text"))) _trm_init()
 {
   init_uart();
   bootloader();
