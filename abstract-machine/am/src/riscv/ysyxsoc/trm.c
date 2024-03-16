@@ -78,10 +78,6 @@ __attribute__((section(".flash_text"))) void _trm_init()
 {
   bootloader();
   init_uart();
-  asm volatile(
-      "li t0, 0x801fffc8\n\t"
-      "sw t0, 0(t0)\n\t"
-      "lw t1, 0(t0)\n\t");
   uint32_t mvendorid, marchid;
   asm volatile(
       "csrr %0, mvendorid\n\t"
