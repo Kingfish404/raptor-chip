@@ -12,17 +12,21 @@ SECTIONS {
   . = ORIGIN(flash);
   .text : 
     {
+      _text_start = .;
       *(entry)
       *(.text*)
       text_end = .;
-    } > flash AT> flash : text
+    } > sram AT> flash : text
+  _text_size = SIZEOF(.text);
   etext = .;
   _etext = .;
   .rodata :
     {
+      _rodata_start = .;
       *(.rodata*)
       rodata_end = .;
-    } > flash AT> flash
+    } > sram AT> flash
+  _rodata_size = SIZEOF(.rodata);
   .data :
     {
       _data_start = .;
