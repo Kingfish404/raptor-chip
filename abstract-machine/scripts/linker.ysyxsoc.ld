@@ -14,8 +14,8 @@ SECTIONS {
   .flash_text : 
     {
       _flash_text_start = .;
-      *(.flash_text*)
       *(entry)
+      *(.flash_text*)
     } > flash : flash_text
   .text : 
     {
