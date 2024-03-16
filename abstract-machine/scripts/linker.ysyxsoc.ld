@@ -33,7 +33,9 @@ SECTIONS {
       *(.rodata*)
       rodata_end = .;
     } > sram AT> flash
-  _rodata_size = SIZEOF(.rodata);
+  /* _rodata_size = SIZEOF(.rodata); */
+  _rodata_end = ADDR(.data);
+  _rodata_load_start = LOADADDR(.rodata);
   .data :
     {
       _data_start = .;

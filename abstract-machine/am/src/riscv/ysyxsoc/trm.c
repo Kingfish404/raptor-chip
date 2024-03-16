@@ -13,6 +13,10 @@ extern char _text_start[];
 extern char _text_end[];
 extern char _text_load_start[];
 
+extern char _rodata_start[];
+extern char _rodata_end[];
+extern char _rodata_load_start[];
+
 extern char _data_start[];
 extern char _data_end[];
 extern char _data_load_start[];
@@ -51,6 +55,16 @@ void __attribute__((section(".flash_text"))) bootloader(void)
     }
     // memcpy(_text_start, _text_load_start, (size_t)text_size);
   }
+  if ((size_t)_rodata_start != (size_t)_rodata_load_start)
+  {
+    size_t rodata_size = _rodata_end - _rodata_start;
+    for (size_t i = 0; i < rodata_size; i++)
+    {
+      _rodata_start[i] = _rodata_load_start[i];
+    }
+    // memcpy(_rodata_start, _rodata_load_start, (size_t)rodata_size);
+  }
+
   if ((size_t)_data_start != (size_t)_data_load_start)
   {
     size_t data_size = _data_end - _data_start;
