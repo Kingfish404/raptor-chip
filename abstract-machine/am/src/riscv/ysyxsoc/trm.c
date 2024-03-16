@@ -44,7 +44,7 @@ void halt(int code)
     ;
 }
 
-void __attribute__((section(".flash_text"))) bootloader(void)
+__attribute__((section(".flash_text"))) void bootloader(void)
 {
   if ((size_t)_text_start != (size_t)_text_load_start)
   {
