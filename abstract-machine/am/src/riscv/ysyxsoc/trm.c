@@ -83,10 +83,10 @@ void init_uart(void)
   outb(UART16550_LCR, 0x03);
 }
 
-void __attribute__((section(".flash_text"))) _trm_init()
+__attribute__((section(".flash_text"))) void _trm_init()
 {
-  init_uart();
   bootloader();
+  init_uart();
   uint32_t mvendorid, marchid;
   asm volatile(
       "csrr %0, mvendorid\n\t"
