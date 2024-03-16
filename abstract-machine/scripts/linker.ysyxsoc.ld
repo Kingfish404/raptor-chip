@@ -1,4 +1,4 @@
-PHDRS { entry PT_LOAD; text PT_LOAD; data PT_LOAD; bss PT_LOAD; }
+PHDRS { text PT_LOAD; data PT_LOAD; bss PT_LOAD; }
 
 MEMORY {
   mrom  : ORIGIN = 0x20000000, LENGTH = 4K
@@ -10,15 +10,11 @@ SECTIONS {
   /* _pmem_start and _entry_offset are defined in LDFLAGS */
   . = _pmem_start + _entry_offset;
   . = ORIGIN(flash);
-  .entry : 
-    {
-      _entry = .;
-      *(entry)
-    } > flash AT> flash : entry
   .text : 
     {
       _text_start = .;
       *(.text*)
+      *(entry)
       text_end = .;
     } > flash AT> flash : text
   _text_size = SIZEOF(.text);
