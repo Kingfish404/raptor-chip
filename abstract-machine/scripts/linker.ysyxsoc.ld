@@ -16,6 +16,7 @@ SECTIONS {
       _text_start = .;
       *(entry)
       *(.text*)
+      *(_trm_init)
       text_end = .;
     } > flash AT> flash : text
   _text_size = SIZEOF(.text);
