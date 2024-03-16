@@ -16,7 +16,7 @@ SECTIONS {
       _flash_text_start = .;
       *(entry)
       *(.flash_text*)
-    } > flash : flash_text
+    } > flash AT>flash : flash_text
   .text :
     {
       _text_start = .;
