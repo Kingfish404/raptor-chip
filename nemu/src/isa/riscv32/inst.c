@@ -21,7 +21,7 @@
 #include <elf.h>
 
 #define R(i) gpr(i)
-#define CSR(i) sr(i & 0xfff)
+#define CSR(i) sr(i)
 #define Mr vaddr_read
 #define Mw vaddr_write
 #define MAX_FTRACE_SIZE 1024

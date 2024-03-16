@@ -29,7 +29,7 @@ static void statistic()
   double time_s = g_timer / 1e6;
   double frequency = g_nr_guest_cycle / time_s;
   Log(FMT_BLUE(
-          "Instructions = " FMT_WORD_NO_PREFIX ", Timecost = " FMT_WORD_NO_PREFIX " (ns)"),
+          "nr_inst = " FMT_WORD_NO_PREFIX ", time = " FMT_WORD_NO_PREFIX " (ns)"),
       g_nr_guest_inst, g_timer);
   Log(FMT_BLUE("Cycle = %u"), g_nr_guest_cycle);
   Log(FMT_BLUE("Freq = %.3f Hz"), frequency);
@@ -109,7 +109,7 @@ void cpu_exec(uint64_t n)
     cpu_exec_one_cycle();
     g_nr_guest_cycle++;
     cur_inst_cycle++;
-    if (cur_inst_cycle > 0xfff)
+    if (cur_inst_cycle > 0x1ff)
     {
       Log("Too many cycles for one instruction, maybe a bug.");
       npc.state = NPC_ABORT;
