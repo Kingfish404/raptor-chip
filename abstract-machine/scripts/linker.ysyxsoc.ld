@@ -17,7 +17,7 @@ SECTIONS {
       *(entry)
       *(.text*)
       text_end = .;
-    } > sram AT> flash : text
+    } > flash AT> flash : text
   _text_size = SIZEOF(.text);
   etext = .;
   _etext = .;
