@@ -16,7 +16,6 @@ SECTIONS {
       _flash_text_start = .;
       *(.flash_text*)
       *(entry)
-      *(_trm_init)
     } > flash : flash_text
   .text : 
     {
