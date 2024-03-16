@@ -54,7 +54,7 @@ void bootloader(void)
   if ((size_t)_data_start != (size_t)_data_load_start)
   {
     size_t data_size = _data_end - _data_start;
-    // memcpy(_data_start, _data_load_start, (size_t)data_size);
+    memcpy(_data_start, _data_load_start, (size_t)data_size);
   }
 }
 
