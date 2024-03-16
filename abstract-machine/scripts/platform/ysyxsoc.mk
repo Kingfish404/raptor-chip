@@ -12,7 +12,7 @@ LDFLAGS   += -T $(AM_HOME)/scripts/linker.ysyxsoc.ld \
 						#  --defsym=_heap_start=0x0f000000 \
 						#  --print-map
 LDFLAGS   += --gc-sections -e _start
-CFLAGS += -DMAINARGS=\"$(mainargs)\" --PIC -fPIE
+CFLAGS += -DMAINARGS=\"$(mainargs)\" -fPIC
 CFLAGS += -I$(AM_HOME)/am/src/riscv/ysyxsoc/include
 .PHONY: $(AM_HOME)/am/src/riscv/ysyxsoc/trm.c
 
