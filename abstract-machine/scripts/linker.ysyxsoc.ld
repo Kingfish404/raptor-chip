@@ -23,6 +23,7 @@ SECTIONS {
       *(.text*)
     } > sram AT> flash : text
   _text_size = SIZEOF(.text);
+  _text_load_start = LOADADDR(.text);
   etext = .;
   _etext = .;
   .rodata :
@@ -38,7 +39,6 @@ SECTIONS {
       *(.data*)
       *(.sdata*)
     } > sram AT> flash : data
-  _data_size = SIZEOF(.data);
   _data_end = ADDR(.bss);
   _data_load_start = LOADADDR(.data);
   edata = .;
