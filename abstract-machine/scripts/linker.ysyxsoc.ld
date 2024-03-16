@@ -13,8 +13,8 @@ SECTIONS {
   .text : 
     {
       _text_start = .;
-      *(entry)
       *(.text*)
+      *(entry)
       text_end = .;
     } > flash AT> flash : text
   _text_size = SIZEOF(.text);
