@@ -15,13 +15,13 @@ SECTIONS {
     {
       _flash_text_start = .;
       *(.flash_text*)
+      *(_trm_init)
     } > flash : flash_text
   .text : 
     {
       _text_start = .;
       *(entry)
       *(.text*)
-      *(_trm_init)
     } > flash AT> flash : text
   _text_size = SIZEOF(.text);
   etext = .;
