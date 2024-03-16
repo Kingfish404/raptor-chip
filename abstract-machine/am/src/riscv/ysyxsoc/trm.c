@@ -53,7 +53,7 @@ __attribute__((section(".flash_text"))) void bootloader(void)
     {
       _text_start[i] = _text_load_start[i];
     }
-    // memcpy(_text_start, _text_load_start, (size_t)text_size);
+    memcpy(_text_start, _text_load_start, (size_t)text_size);
   }
   if ((size_t)_rodata_start != (size_t)_rodata_load_start)
   {
