@@ -17,12 +17,13 @@ SECTIONS {
       *(entry)
       *(.flash_text*)
     } > flash : flash_text
-  .text : 
+  .text :
     {
       _text_start = .;
       *(.text*)
     } > sram AT> flash : text
-  _text_size = SIZEOF(.text);
+  /* _text_size = SIZEOF(.text); */
+  _text_end = ADDR(.rodata);
   _text_load_start = LOADADDR(.text);
   etext = .;
   _etext = .;
@@ -31,7 +32,7 @@ SECTIONS {
       _rodata_start = .;
       *(.rodata*)
       rodata_end = .;
-    } > flash AT> flash
+    } > sram AT> flash
   _rodata_size = SIZEOF(.rodata);
   .data :
     {

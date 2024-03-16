@@ -9,6 +9,10 @@ int main(const char *args);
 
 extern char _pmem_start;
 
+extern char _text_start[];
+extern char _text_end[];
+extern char _text_load_start[];
+
 extern char _data_start[];
 extern char _data_end[];
 extern char _data_load_start[];
@@ -38,10 +42,19 @@ void halt(int code)
 
 void bootloader(void)
 {
+  if ((size_t)_text_start != (size_t)_text_load_start)
+  {
+    size_t text_size = _text_end - _text_start;
+    for (size_t i = 0; i < text_size; i++)
+    {
+      _text_start[i] = _text_load_start[i];
+    }
+    // memcpy(_text_start, _text_load_start, (size_t)text_size);
+  }
   if ((size_t)_data_start != (size_t)_data_load_start)
   {
     size_t data_size = _data_end - _data_start;
-    memcpy(_data_start, _data_load_start, (size_t)data_size);
+    // memcpy(_data_start, _data_load_start, (size_t)data_size);
   }
 }
 
