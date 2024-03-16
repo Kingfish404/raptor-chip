@@ -21,7 +21,7 @@ SECTIONS {
     {
       _text_start = .;
       *(.text*)
-    } > flash AT> flash : text
+    } > sram AT> flash : text
   _text_end = ADDR(.rodata);
   _text_load_start = LOADADDR(.text);
   etext = .;
