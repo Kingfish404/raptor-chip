@@ -29,7 +29,7 @@ SECTIONS {
       _rodata_start = .;
       *(.rodata*)
       rodata_end = .;
-    } > sram AT> flash
+    } > flash AT> flash
   _rodata_size = SIZEOF(.rodata);
   .data :
     {
