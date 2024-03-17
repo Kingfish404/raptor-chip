@@ -81,7 +81,7 @@ module ysyx_BUS_ARBITER(
           // lsu_loading <= 0;
           // arvalid_record <= 0;
           // awvalid_record <= 0;
-          t1 = 0;
+          t1 <= 0;
         end
       else
         begin
