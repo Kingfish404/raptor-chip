@@ -76,11 +76,17 @@ module ysyx_EXU (
     else begin
       if (state == `ysyx_IDLE) begin
         if (wen_o) begin 
-          lsu_valid <= lsu_exu_wready;
+          if (lsu_exu_wready) begin
+            lsu_valid <= lsu_exu_wready;
+            lsu_avalid <= 0;
+          end
         end
         if (ren_o) begin
-          lsu_valid <= lsu_exu_rvalid;
-          mem_rdata <= lsu_rdata;
+          if (lsu_exu_rvalid) begin
+            lsu_valid <= lsu_exu_rvalid;
+            mem_rdata <= lsu_rdata;
+            lsu_avalid <= 0;
+          end
         end
         if (prev_valid) begin
           imm_exu <= imm; pc_exu <= pc;

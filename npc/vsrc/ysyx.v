@@ -244,7 +244,7 @@ module ysyx (
     .idu_valid(idu_valid),
     // from exu
     .addr(rwaddr),
-    .ren(ren_exu), .wen(wen_exu), .avalid(lsu_avalid), .alu_op(alu_op_exu),
+    .ren(ren_exu), .wen(wen_exu), .lsu_avalid(lsu_avalid), .alu_op(alu_op_exu),
     .wdata(lsu_mem_wdata),
     // to exu
     .rdata_o(lsu_rdata), .rvalid_o(lsu_exu_rvalid), .wready_o(lsu_exu_wready),
