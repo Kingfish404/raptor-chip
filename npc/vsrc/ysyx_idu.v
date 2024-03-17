@@ -55,6 +55,7 @@ module ysyx_IDU (
     imm_o = 0;
     op1_o = 0; op2_o = 0; op_j_o = 0; rwaddr_o = 0;
     if (valid_o) begin
+      $display("inst_idu: %h", inst_idu);
       case (opcode_o)
         `ysyx_OP_LUI:     begin `ysyx_U_TYPE(0,  `ysyx_ALU_OP_ADD);                                       end
         `ysyx_OP_AUIPC:   begin `ysyx_U_TYPE(pc, `ysyx_ALU_OP_ADD);                                       end
