@@ -85,7 +85,7 @@ module ysyx_BUS_ARBITER(
         end
       else
         begin
-          if (arvalid) begin
+          if (lsu_arvalid) begin
             t1 <= 1;
           end
           if (io_master_arready) begin
