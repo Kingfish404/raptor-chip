@@ -21,7 +21,7 @@ extern char _data_start[];
 extern char _data_end[];
 extern char _data_load_start[];
 
-#define PMEM_SIZE (128 * 1024 * 1024)
+#define PMEM_SIZE (4 * 1024 * 1024)
 #define PMEM_END ((uintptr_t) & _pmem_start + PMEM_SIZE)
 
 Area heap = RANGE(&_heap_start, PMEM_END);
