@@ -46,7 +46,7 @@ void halt(int code)
 
 __attribute__((section(".flash_text"))) void bootloader(void)
 {
-  if ((size_t)_text_start != (size_t)_text_load_start)
+  if ((size_t)_text_start != 0 && (size_t)_text_start != (size_t)_text_load_start)
   {
     size_t text_size = _text_end - _text_start;
     for (size_t i = 0; i < text_size; i++)
@@ -54,7 +54,7 @@ __attribute__((section(".flash_text"))) void bootloader(void)
       _text_start[i] = _text_load_start[i];
     }
   }
-  if ((size_t)_rodata_start != (size_t)_rodata_load_start)
+  if ((size_t)_rodata_start != 0 && (size_t)_rodata_start != (size_t)_rodata_load_start)
   {
     size_t rodata_size = _rodata_end - _rodata_start;
     memcpy(_rodata_start, _rodata_load_start, (size_t)rodata_size);
