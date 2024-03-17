@@ -95,7 +95,7 @@ module ysyx_BUS_ARBITER(
             t1 <= 1;
           end
           if (io_master_awready) begin
-            t2 <= 1;
+            t2 <= 0;
           end else if (io_master_wready) begin
             t2 <= 1;
           end
@@ -150,7 +150,7 @@ module ysyx_BUS_ARBITER(
            (3'b000)
          );
   assign io_master_araddr = sram_araddr;
-  assign io_master_arvalid = sram_arvalid & t2;
+  assign io_master_arvalid = sram_arvalid;
   assign arready_o = io_master_arready & io_master_bvalid;
 
   // assign rdata_o = io_master_rdata[31:0];
@@ -180,7 +180,7 @@ module ysyx_BUS_ARBITER(
            (3'b000)
          );
   assign io_master_awaddr = awaddr;
-  assign io_master_awvalid = sram_awvalid;
+  assign io_master_awvalid = sram_awvalid & t2;
   wire sram_awready_o = io_master_awready;
 
   assign io_master_wlast = sram_awvalid;
