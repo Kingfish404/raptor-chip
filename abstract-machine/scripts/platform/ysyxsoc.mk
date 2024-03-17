@@ -17,7 +17,7 @@ CFLAGS += -Os -I$(AM_HOME)/am/src/riscv/ysyxsoc/include
 .PHONY: $(AM_HOME)/am/src/riscv/ysyxsoc/trm.c
 
 image: $(IMAGE).elf
-	@$(OBJDUMP) -d $(IMAGE).elf > $(IMAGE).txt
+	@$(OBJDUMP) -ld $(IMAGE).elf > $(IMAGE).txt
 	@echo + OBJCOPY "->" $(IMAGE_REL).bin
 	@$(READELF) -a $(IMAGE).elf > $(IMAGE).elf.txt
 	@$(OBJCOPY) -S --set-section-flags .bss=alloc,contents -O binary $(IMAGE).elf $(IMAGE).bin
