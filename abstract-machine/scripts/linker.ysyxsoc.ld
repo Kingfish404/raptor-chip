@@ -39,7 +39,7 @@ SECTIONS {
       _data_start = .;
       *(.data*)
       *(.sdata*)
-    } > sram AT> flash : data
+    } > psram AT> flash : data
   _data_end = ADDR(.bss);
   _data_load_start = LOADADDR(.data);
   edata = .;
