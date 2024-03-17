@@ -73,7 +73,7 @@ module ysyx_BUS_ARBITER(
   wire sram_bvalid_o;
 
   // reg lsu_loading = 0, awvalid_record = 0, arvalid_record = 0;
-  reg t1;
+  reg t1, t2;
   always @(posedge clk)
     begin
       if (rst)
@@ -82,6 +82,7 @@ module ysyx_BUS_ARBITER(
           // arvalid_record <= 0;
           // awvalid_record <= 0;
           t1 <= 1;
+          t2 <= 1;
         end
       else
         begin
@@ -92,6 +93,11 @@ module ysyx_BUS_ARBITER(
             t1 <= 0;
           end else if (io_master_rvalid) begin
             t1 <= 1;
+          end
+          if (io_master_awready) begin
+            t2 <= 0;
+          end else if (io_master_wready) begin
+            t2 <= 1;
           end
           // lsu_loading <= lsu_arvalid;
           // arvalid_record <= io_master_arvalid;
@@ -144,7 +150,7 @@ module ysyx_BUS_ARBITER(
            (3'b000)
          );
   assign io_master_araddr = sram_araddr;
-  assign io_master_arvalid = sram_arvalid;
+  assign io_master_arvalid = sram_arvalid & t2;
   assign arready_o = io_master_arready & io_master_bvalid;
 
   // assign rdata_o = io_master_rdata[31:0];
