@@ -84,7 +84,12 @@ module ysyx_BUS_ARBITER(
       else
         begin
           lsu_loading <= lsu_arvalid;
-          arvalid_record <= io_master_arvalid;
+          if (io_master_arvalid) begin
+            arvalid_record <= io_master_arvalid;
+          end
+          else if (io_master_arready) begin
+            arvalid_record <= 0;
+          end
           awvalid_record <= io_master_awready;
         end
     end
