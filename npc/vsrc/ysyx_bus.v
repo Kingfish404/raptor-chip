@@ -72,7 +72,7 @@ module ysyx_BUS_ARBITER(
   wire [1:0] sram_bresp_o;
   wire sram_bvalid_o;
 
-  reg lsu_loading = 0, awvalid_record, arvalid_record;
+  reg lsu_loading = 0, awvalid_record = 0, arvalid_record = 0;
   always @(posedge clk)
     begin
       if (rst)
@@ -104,7 +104,7 @@ module ysyx_BUS_ARBITER(
                           ({DATA_W{clint_en}} & clint_rdata_o) |
                           ({DATA_W{!clint_en}} & rdata_o)
                         ));
-  assign lsu_rvalid_o = lsu_loading & (rvalid_o | clint_rvalid_o);
+  assign lsu_rvalid_o = lsu_arvalid & (rvalid_o | clint_rvalid_o);
   wire sram_arvalid = (ifu_arvalid | (lsu_arvalid & !clint_en)) & !arvalid_record;
 
   // lsu write
