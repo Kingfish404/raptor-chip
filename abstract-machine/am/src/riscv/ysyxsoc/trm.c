@@ -58,7 +58,7 @@ __attribute__((section(".flash_text"))) void bootloader(void)
   {
     asm volatile("auipc x0, 0x10043\n\t");
     size_t rodata_size = _rodata_end - _rodata_start;
-    memcpy(_rodata_start, _rodata_load_start, (size_t)rodata_size);
+    // memcpy(_rodata_start, _rodata_load_start, (size_t)rodata_size);
   }
   if ((size_t)_data_start != 0 && (size_t)_data_start != (size_t)_data_load_start)
   {
