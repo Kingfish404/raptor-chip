@@ -62,7 +62,7 @@ __attribute__((section(".flash_text"))) void bootloader(void)
   if ((size_t)_data_start != 0 && (size_t)_data_start != (size_t)_data_load_start)
   {
     size_t data_size = _data_end - _data_start;
-    asm volatile("li x0, 0\n\t");
+    asm volatile("auipc x0, 0x0\n\t");
     memcpy(_data_start, _data_load_start, (size_t)data_size);
   }
 }
