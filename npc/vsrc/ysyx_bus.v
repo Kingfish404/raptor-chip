@@ -84,12 +84,7 @@ module ysyx_BUS_ARBITER(
       else
         begin
           lsu_loading <= lsu_arvalid;
-          if (io_master_arvalid) begin
-            arvalid_record <= io_master_arvalid;
-          end
-          else if (io_master_arready) begin
-            arvalid_record <= 0;
-          end
+          arvalid_record <= io_master_arvalid;
           awvalid_record <= io_master_awready;
         end
     end
@@ -110,7 +105,7 @@ module ysyx_BUS_ARBITER(
                           ({DATA_W{!clint_en}} & rdata_o)
                         ));
   assign lsu_rvalid_o = lsu_loading & (rvalid_o | clint_rvalid_o);
-  wire sram_arvalid = (ifu_arvalid | (lsu_arvalid & !clint_en));
+  wire sram_arvalid = (ifu_arvalid | (lsu_arvalid & !clint_en)) & !arvalid_record;
 
   // lsu write
   // wire uart_en = (lsu_awaddr == `ysyx_BUS_SERIAL_PORT);
