@@ -36,6 +36,8 @@ void isa_parser_elf(char *filename);
 
 void sdb_set_batch_mode();
 
+void sdb_set_vcd(bool status);
+
 void sdb_sim_init(int argc, char **argv);
 
 void init_disasm(const char *triple);
@@ -104,6 +106,7 @@ static int parse_args(int argc, char *argv[])
   const struct option table[] = {
       {"mrom", required_argument, NULL, 'm'},
       {"batch", no_argument, NULL, 'b'},
+      {"no-vcd", no_argument, NULL, 'n'},
       {"log", required_argument, NULL, 'l'},
       {"diff", required_argument, NULL, 'd'},
       {"port", required_argument, NULL, 'p'},
@@ -112,7 +115,7 @@ static int parse_args(int argc, char *argv[])
       {0, 0, NULL, 0},
   };
   int o;
-  while ((o = getopt_long(argc, argv, "-bhm:l:d:p:e:", table, NULL)) != -1)
+  while ((o = getopt_long(argc, argv, "-bhnm:l:d:p:e:", table, NULL)) != -1)
   {
     switch (o)
     {
@@ -121,6 +124,9 @@ static int parse_args(int argc, char *argv[])
       break;
     case 'b':
       sdb_set_batch_mode();
+      break;
+    case 'n':
+      sdb_set_vcd(false);
       break;
     case 'p':
       sscanf(optarg, "%d", &difftest_port);
@@ -142,6 +148,7 @@ static int parse_args(int argc, char *argv[])
       printf("Options:\n");
       printf("\t-m,--mrom=FILE          load MROM image from FILE\n");
       printf("\t-b,--batch              run with batch mode\n");
+      printf("\t-n,--no-vcd             disable VCD output\n");
       printf("\t-l,--log=FILE           output log to FILE\n");
       printf("\t-d,--diff=REF_SO        run DiffTest with reference REF_SO\n");
       printf("\t-p,--port=PORT          run DiffTest with port PORT\n");
