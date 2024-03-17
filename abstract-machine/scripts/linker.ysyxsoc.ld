@@ -37,6 +37,8 @@ SECTIONS {
   .data :
     {
     _data_start = .;
+      *(.data*)
+      *(.sdata*)
 
     /* section information for finsh shell */
     __fsymtab_start = .;
@@ -59,8 +61,6 @@ SECTIONS {
     KEEP(*(UtestTcTab))
     __rt_utest_tc_tab_end = .;
 
-      *(.data*)
-      *(.sdata*)
     } > psram AT> flash : data
   _data_end = ADDR(.bss);
   _data_load_start = LOADADDR(.data);
