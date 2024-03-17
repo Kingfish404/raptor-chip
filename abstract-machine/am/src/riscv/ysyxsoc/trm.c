@@ -56,13 +56,13 @@ __attribute__((section(".flash_text"))) void bootloader(void)
   }
   if ((size_t)_rodata_start != 0 && (size_t)_rodata_start != (size_t)_rodata_load_start)
   {
+    asm volatile("auipc x0, 0x0\n\t");
     size_t rodata_size = _rodata_end - _rodata_start;
     memcpy(_rodata_start, _rodata_load_start, (size_t)rodata_size);
   }
   if ((size_t)_data_start != 0 && (size_t)_data_start != (size_t)_data_load_start)
   {
     size_t data_size = _data_end - _data_start;
-    asm volatile("auipc x0, 0x0\n\t");
     memcpy(_data_start, _data_load_start, (size_t)data_size);
   }
 }
