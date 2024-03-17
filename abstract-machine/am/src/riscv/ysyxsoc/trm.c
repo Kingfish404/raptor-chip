@@ -76,7 +76,7 @@ void init_uart(void)
 
 __attribute__((section(".flash_text"))) void _trm_init()
 {
-  // bootloader();
+  bootloader();
   init_uart();
   uint32_t mvendorid, marchid;
   asm volatile(
