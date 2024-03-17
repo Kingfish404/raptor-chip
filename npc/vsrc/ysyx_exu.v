@@ -63,7 +63,7 @@ module ysyx_EXU (
   reg state, alu_valid, lsu_avalid;
   reg valid_once;
   reg lsu_valid;
-  assign valid_o = (wen_o | ren_o) ? lsu_valid & valid_once : alu_valid;
+  assign valid_o = (wen_o | ren_o) ? lsu_valid : alu_valid;
   // assign valid_o = lsu_exu_wready & lsu_exu_rvalid & alu_valid;
   assign wben_o = valid_o & valid_once;
   // assign ready_o = !valid_o;
@@ -93,15 +93,15 @@ module ysyx_EXU (
       end else begin  valid_once <= 1; end
       if (wen_o) begin 
         if (lsu_exu_wready) begin
-          lsu_valid <= lsu_exu_wready;
+          lsu_valid <= 1;
           lsu_avalid <= 0;
         end
       end
       if (ren_o) begin
         if (lsu_exu_rvalid) begin
-          lsu_valid <= lsu_exu_rvalid;
-          mem_rdata <= lsu_rdata;
+          lsu_valid <= 1;
           lsu_avalid <= 0;
+          mem_rdata <= lsu_rdata;
         end
       end
     end
