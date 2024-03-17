@@ -31,7 +31,7 @@ SECTIONS {
       _rodata_start = .;
       *(.rodata*)
       rodata_end = .;
-    } > psram AT> flash
+    } > sram AT> flash
   _rodata_end = ADDR(.data);
   _rodata_load_start = LOADADDR(.rodata);
   .data :
@@ -39,7 +39,7 @@ SECTIONS {
     _data_start = .;
       *(.data*)
       *(.sdata*)
-    } > psram AT> flash : data
+    } > sram AT> flash : data
   _data_end = ADDR(.bss);
   _data_load_start = LOADADDR(.data);
   edata = .;
