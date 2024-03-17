@@ -4,7 +4,7 @@ MEMORY {
   mrom  : ORIGIN = 0x20000000, LENGTH = 4K
   flash : ORIGIN = 0x30000000, LENGTH = 10M
   sram  : ORIGIN = 0x0f000000, LENGTH = 8K
-  psmem  : ORIGIN = 0x80000000, LENGTH = 4M
+  psram  : ORIGIN = 0x80000000, LENGTH = 4M
 }
 
 SECTIONS {
@@ -21,7 +21,7 @@ SECTIONS {
     {
       _text_start = .;
       *(.text*)
-    } > psmem AT> flash : text
+    } > psram AT> flash : text
   _text_end = ADDR(.rodata);
   _text_load_start = LOADADDR(.text);
   etext = .;
@@ -31,7 +31,7 @@ SECTIONS {
       _rodata_start = .;
       *(.rodata*)
       rodata_end = .;
-    } > psmem AT> flash
+    } > psram AT> flash
   _rodata_end = ADDR(.data);
   _rodata_load_start = LOADADDR(.rodata);
   .data :
