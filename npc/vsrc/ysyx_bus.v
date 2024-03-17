@@ -90,8 +90,7 @@ module ysyx_BUS_ARBITER(
           // end
           if (io_master_arready) begin
             t1 <= 0;
-          end
-          if (io_master_arvalid) begin
+          end else if (io_master_arvalid) begin
             t1 <= 1;
           end
           // lsu_loading <= lsu_arvalid;
