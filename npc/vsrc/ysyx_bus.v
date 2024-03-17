@@ -105,14 +105,14 @@ module ysyx_BUS_ARBITER(
                           ({DATA_W{!clint_en}} & rdata_o)
                         ));
   assign lsu_rvalid_o = lsu_arvalid & (rvalid_o | clint_rvalid_o);
-  wire sram_arvalid = (ifu_arvalid | (lsu_arvalid & !clint_en)) & !arvalid_record;
+  wire sram_arvalid = (ifu_arvalid | (lsu_arvalid & !clint_en));
 
   // lsu write
   // wire uart_en = (lsu_awaddr == `ysyx_BUS_SERIAL_PORT);
   // wire uart_wvalid = (lsu_awvalid & (uart_en));
   wire sram_en = (lsu_awaddr != `ysyx_BUS_SERIAL_PORT);
   wire sram_wvalid = (lsu_wvalid & (sram_en));
-  wire sram_awvalid = (lsu_wvalid & (sram_en)) & !awvalid_record;
+  wire sram_awvalid = (lsu_wvalid & (sram_en));
   wire [ADDR_W-1:0] awaddr = lsu_awaddr;
   assign lsu_wready_o = (
            //  (uart_en & uart_wready_o) |
