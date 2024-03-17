@@ -36,7 +36,10 @@ SECTIONS {
   _rodata_load_start = LOADADDR(.rodata);
   .data :
     {
-       __fsymtab_start = .;
+    _data_start = .;
+
+    /* section information for finsh shell */
+    __fsymtab_start = .;
     KEEP(*(FSymTab))
     __fsymtab_end = .;
     . = ALIGN(8);
@@ -55,7 +58,7 @@ SECTIONS {
     __rt_utest_tc_tab_start = .;
     KEEP(*(UtestTcTab))
     __rt_utest_tc_tab_end = .;
-      _data_start = .;
+
       *(.data*)
       *(.sdata*)
     } > psram AT> flash : data
