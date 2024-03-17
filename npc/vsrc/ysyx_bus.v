@@ -72,22 +72,22 @@ module ysyx_BUS_ARBITER(
   wire [1:0] sram_bresp_o;
   wire sram_bvalid_o;
 
-  reg lsu_loading = 0, awvalid_record = 0, arvalid_record = 0;
-  always @(posedge clk)
-    begin
-      if (rst)
-        begin
-          lsu_loading <= 0;
-          arvalid_record <= 0;
-          awvalid_record <= 0;
-        end
-      else
-        begin
-          lsu_loading <= lsu_arvalid;
-          arvalid_record <= io_master_arvalid;
-          awvalid_record <= io_master_awready;
-        end
-    end
+  // reg lsu_loading = 0, awvalid_record = 0, arvalid_record = 0;
+  // always @(posedge clk)
+  //   begin
+  //     if (rst)
+  //       begin
+  //         lsu_loading <= 0;
+  //         arvalid_record <= 0;
+  //         awvalid_record <= 0;
+  //       end
+  //     else
+  //       begin
+  //         lsu_loading <= lsu_arvalid;
+  //         arvalid_record <= io_master_arvalid;
+  //         awvalid_record <= io_master_awready;
+  //       end
+  //   end
 
   // read
   wire [ADDR_W-1:0] sram_araddr = (
