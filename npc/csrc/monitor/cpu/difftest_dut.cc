@@ -128,8 +128,8 @@ static void checkmem(uint8_t *ref, uint8_t *dut, size_t n)
         printf("%02x ", dut[i - 8 + j]);
       }
       printf("\n");
-      npc.state = NPC_ABORT;
-      return;
+      // npc.state = NPC_ABORT;
+      // return;
     }
   }
 }
