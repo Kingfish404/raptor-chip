@@ -30,6 +30,14 @@ Area heap = RANGE(&_heap_start, PMEM_END);
 #endif
 static const char mainargs[] = MAINARGS;
 
+void init_uart(void)
+{
+  outb(UART16550_LCR, 0x80);
+  outb(UART16550_DL2, 0);
+  outb(UART16550_DL1, 1);
+  outb(UART16550_LCR, 0x03);
+}
+
 void putch(char ch)
 {
   while ((inb(UART16550_LSR) & (0x1 << 5)) == 0x0)
@@ -64,14 +72,6 @@ __attribute__((section(".flash_text"))) void bootloader(void)
     size_t data_size = _data_end - _data_start;
     memcpy(_data_start, _data_load_start, (size_t)data_size);
   }
-}
-
-void init_uart(void)
-{
-  outb(UART16550_LCR, 0x80);
-  outb(UART16550_DL2, 0);
-  outb(UART16550_DL1, 1);
-  outb(UART16550_LCR, 0x03);
 }
 
 __attribute__((section(".flash_text"))) void _trm_init()
