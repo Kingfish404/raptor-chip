@@ -21,7 +21,7 @@ SECTIONS {
     {
       _second_text_start = .;
       *(.second_text*)
-    } > flash AT> flash : boot_text
+    } > sram AT> flash : boot_text
   _second_text_end = ADDR(.text);
   _second_text_load_start = LOADADDR(.second_text);
   .text :
