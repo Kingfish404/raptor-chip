@@ -68,7 +68,7 @@ SECTIONS {
     __rt_utest_tc_tab_start = .;
     KEEP(*(UtestTcTab))
     __rt_utest_tc_tab_end = .;
-  } > psram AT> flash : extra
+  } > psram AT> flash : data
   .data :
     {
     _data_start = .;
