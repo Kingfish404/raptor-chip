@@ -77,9 +77,10 @@ void _second_stage_bootloader()
     size_t data_size = _data_end - _data_start;
     memcpy(_data_start, _data_load_start, (size_t)data_size);
   }
+  _trm_init();
 }
 
-__attribute__((section(".flash_text"))) void _trm_init()
+void _trm_init()
 {
   init_uart();
   uint32_t mvendorid, marchid;
