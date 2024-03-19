@@ -53,7 +53,7 @@ SECTIONS {
       *(.sdata*)
 
     /* for rt-thread */
-    /* __fsymtab_start = .;
+    __fsymtab_start = .;
     KEEP(*(FSymTab))
     __fsymtab_end = .;
     . = ALIGN(8);
@@ -70,7 +70,7 @@ SECTIONS {
 
     __rt_utest_tc_tab_start = .;
     KEEP(*(UtestTcTab))
-    __rt_utest_tc_tab_end = .; */
+    __rt_utest_tc_tab_end = .;
     /* end for rt-thread */
       
     } > psram AT> flash : data
