@@ -102,7 +102,6 @@ void _trm_init()
       : "=r"(mvendorid), "=r"(marchid) :);
   printf("mvendorid: 0x%lx, marchid: %ld\n", mvendorid, marchid);
 
-  asm volatile("ebreak");
   int ret = main(mainargs);
   halt(ret);
 }
