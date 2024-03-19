@@ -1,4 +1,4 @@
-PHDRS { first_boot PT_LOAD; second_boot PT_LOAD; text PT_LOAD; data PT_LOAD; bss PT_LOAD; }
+PHDRS { first_boot PT_LOAD; text PT_LOAD; data PT_LOAD; bss PT_LOAD; }
 
 MEMORY {
   mrom  : ORIGIN = 0x20000000, LENGTH = 4K
