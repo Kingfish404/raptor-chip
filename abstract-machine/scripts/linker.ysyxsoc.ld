@@ -1,4 +1,4 @@
-PHDRS { flash_text PT_LOAD; boot_text PT_LOAD; text PT_LOAD; data PT_LOAD; bss PT_LOAD; }
+PHDRS { flash_text PT_LOAD; second_text PT_LOAD; text PT_LOAD; data PT_LOAD; bss PT_LOAD; }
 
 MEMORY {
   mrom  : ORIGIN = 0x20000000, LENGTH = 4K
@@ -11,17 +11,17 @@ SECTIONS {
   /* _pmem_start and _entry_offset are defined in LDFLAGS */
   . = _pmem_start + _entry_offset;
   . = ORIGIN(flash);
-  .first_text : 
+  .flash_text : 
     {
-      _first_text_start = .;
+      _flash_text_start = .;
       *(entry)
-      *(.first_text*)
+      *(.flash_text*)
     } > flash AT> flash : flash_text
   .second_text : 
     {
       _second_text_start = .;
       *(.second_text*)
-    } > sram AT> flash : boot_text
+    } > flash AT> flash : flash_text
   _second_text_end = ADDR(.text);
   _second_text_load_start = LOADADDR(.second_text);
   .text :
