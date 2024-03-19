@@ -52,7 +52,7 @@ SECTIONS {
     _data_start = .;
       *(.data*)
       *(.sdata*)
-      *(.data.extra)
+      *(.data.extra*)
 
     /* __fsymtab_start = .;
     KEEP(*(FSymTab))
