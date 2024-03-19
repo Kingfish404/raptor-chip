@@ -1,4 +1,4 @@
-PHDRS { first_boot PT_LOAD; text PT_LOAD; data PT_LOAD; bss PT_LOAD; }
+PHDRS { first_boot PT_LOAD; second_boot PT_LOAD; text PT_LOAD; data PT_LOAD; bss PT_LOAD; }
 
 MEMORY {
   mrom  : ORIGIN = 0x20000000, LENGTH = 4K
@@ -19,8 +19,8 @@ SECTIONS {
   .second_boot_text : 
     {
       _second_boot_text_start = .;
-      *(.second_boot_text*)
-    } > psram AT> flash : text
+      *(.second_boot*)
+    } > psram AT> flash : second_boot
   _second_boot_text_end = ADDR(.text);
   _second_boot_text_load_start = LOADADDR(.second_boot_text);
   .text :
