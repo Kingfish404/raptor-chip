@@ -11,18 +11,18 @@ SECTIONS {
   /* _pmem_start and _entry_offset are defined in LDFLAGS */
   . = _pmem_start + _entry_offset;
   . = ORIGIN(flash);
-  .flash_text : 
+  .first_boot_text : 
     {
       *(entry)
       *(.first_boot*)
     } > flash AT> flash : first_boot
-  .second_text : 
+  .second_boot_text : 
     {
-      _second_text_start = .;
+      _second_boot_text_start = .;
       *(.second_boot*)
     } > psram AT> flash : second_boot
-  _second_text_end = ADDR(.text);
-  _second_text_load_start = LOADADDR(.second_text);
+  _second_boot_text_end = ADDR(.text);
+  _second_boot_text_load_start = LOADADDR(.second_boot_text);
   .text :
     {
       _text_start = .;
