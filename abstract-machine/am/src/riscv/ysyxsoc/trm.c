@@ -56,7 +56,7 @@ void halt(int code)
     ;
 }
 
-__attribute__((section(".flash_text"))) void _first_stage_bootloader(void)
+__attribute__((section(".first_text"))) void _first_stage_bootloader(void)
 {
   if ((size_t)_second_text_start != (size_t)_second_text_load_start)
   {
@@ -69,7 +69,7 @@ __attribute__((section(".flash_text"))) void _first_stage_bootloader(void)
   _second_stage_bootloader();
 }
 
-__attribute__((section(".second_text"))) void _second_stage_bootloader()
+__attribute__((section(".boot_text"))) void _second_stage_bootloader()
 {
   if ((size_t)_text_start != (size_t)_text_load_start)
   {
