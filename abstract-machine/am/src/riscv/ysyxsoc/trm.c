@@ -6,6 +6,8 @@
 
 extern char _heap_start;
 int main(const char *args);
+void _second_stage_bootloader();
+void _trm_init();
 
 extern char _pmem_start;
 
