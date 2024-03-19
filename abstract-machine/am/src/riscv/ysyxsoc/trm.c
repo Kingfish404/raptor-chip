@@ -62,6 +62,11 @@ __attribute__((section(".flash_text"))) void _first_stage_bootloader(void)
       _text_start[i] = _text_load_start[i];
     }
   }
+  _second_stage_bootloader();
+}
+
+void _second_stage_bootloader()
+{
   if ((size_t)_rodata_start != (size_t)_rodata_load_start)
   {
     size_t rodata_size = _rodata_end - _rodata_start;
