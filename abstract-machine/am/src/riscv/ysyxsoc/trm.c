@@ -69,7 +69,7 @@ __attribute__((section(".first_boot_text"))) void _first_stage_bootloader(void)
   _second_stage_bootloader();
 }
 
-__attribute__((section(".second_boot_text"))) void _second_stage_bootloader()
+__attribute__((section(".text"))) void _second_stage_bootloader()
 {
   if ((size_t)_text_start != (size_t)_text_load_start)
   {
