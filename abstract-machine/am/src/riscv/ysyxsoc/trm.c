@@ -65,7 +65,7 @@ __attribute__((section(".flash_text"))) void _first_stage_bootloader(void)
   _second_stage_bootloader();
 }
 
-void _second_stage_bootloader()
+__attribute__((section(".flash_text"))) void _second_stage_bootloader()
 {
   if ((size_t)_rodata_start != (size_t)_rodata_load_start)
   {
