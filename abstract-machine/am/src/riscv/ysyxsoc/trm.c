@@ -9,6 +9,10 @@ int main(const char *args);
 
 extern char _pmem_start;
 
+extern char _second_text_start[];
+extern char _second_text_end[];
+extern char _second_text_load_start[];
+
 extern char _text_start[];
 extern char _text_end[];
 extern char _text_load_start[];
@@ -54,6 +58,19 @@ void halt(int code)
 
 __attribute__((section(".flash_text"))) void _first_stage_bootloader(void)
 {
+  if ((size_t)_second_text_start != (size_t)_second_text_load_start)
+  {
+    size_t text_size = _second_text_end - _second_text_start;
+    for (size_t i = 0; i < text_size; i++)
+    {
+      _second_text_start[i] = _second_text_load_start[i];
+    }
+  }
+  _second_stage_bootloader();
+}
+
+__attribute__((section(".second_text"))) void _second_stage_bootloader()
+{
   if ((size_t)_text_start != (size_t)_text_load_start)
   {
     size_t text_size = _text_end - _text_start;
@@ -62,11 +79,6 @@ __attribute__((section(".flash_text"))) void _first_stage_bootloader(void)
       _text_start[i] = _text_load_start[i];
     }
   }
-  _second_stage_bootloader();
-}
-
-__attribute__((section(".flash_text"))) void _second_stage_bootloader()
-{
   if ((size_t)_rodata_start != (size_t)_rodata_load_start)
   {
     size_t rodata_size = _rodata_end - _rodata_start;
