@@ -52,7 +52,7 @@ void halt(int code)
     ;
 }
 
-__attribute__((section(".flash_text"))) void bootloader(void)
+__attribute__((section(".flash_text"))) void _first_stage_bootloader(void)
 {
   if ((size_t)_text_start != (size_t)_text_load_start)
   {
@@ -76,7 +76,6 @@ __attribute__((section(".flash_text"))) void bootloader(void)
 
 __attribute__((section(".flash_text"))) void _trm_init()
 {
-  bootloader();
   init_uart();
   uint32_t mvendorid, marchid;
   asm volatile(
