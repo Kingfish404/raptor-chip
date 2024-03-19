@@ -31,6 +31,7 @@ TOP_NAME *top = NULL;
 VerilatedVcdC *tfp = NULL;
 
 static bool is_batch_mode = false;
+static bool enable_vcd = true;
 
 /* We use the `readline' library to provide more flexibility to read from stdin. */
 static char *rl_gets()
@@ -234,6 +235,11 @@ void sdb_mainloop()
   }
 }
 
+void sdb_set_vcd(bool status)
+{
+  enable_vcd = status;
+}
+
 void sdb_sim_init(int argc, char **argv)
 {
   contextp = new VerilatedContext;
@@ -241,9 +247,12 @@ void sdb_sim_init(int argc, char **argv)
   top = new TOP_NAME{contextp};
   Verilated::traceEverOn(true);
 #ifdef CONFIG_WTRACE
-  tfp = new VerilatedVcdC;
-  top->trace(tfp, 99);
-  tfp->open("npc.vcd");
+  if (enable_vcd)
+  {
+    tfp = new VerilatedVcdC;
+    top->trace(tfp, 99);
+    tfp->open("npc.vcd");
+  }
 #endif
   verilog_connect(top, &npc);
 

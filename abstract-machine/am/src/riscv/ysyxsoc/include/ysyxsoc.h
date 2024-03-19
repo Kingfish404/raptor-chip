@@ -12,6 +12,8 @@
 #define UART16550_DL2 UART16550_BASE + 0x01
 #define UART16550_LSR UART16550_BASE + 0x05
 
+#define RTC_ADDR 0xa0000048
+
 typedef uintptr_t PTE;
 
 #define PGSIZE 4096
