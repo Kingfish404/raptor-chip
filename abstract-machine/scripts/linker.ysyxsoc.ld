@@ -16,14 +16,14 @@ MEMORY {
 
 SECTIONS {
   /* _pmem_start and _entry_offset are defined in LDFLAGS */
-  . = _pmem_start + _entry_offset;
   . = ORIGIN(flash);
   .first_boot :
     {
       *(entry)
       *(.first_boot*)
     } > flash AT> flash : first_boot
-  .second_boot : 
+  . = _pmem_start + _entry_offset;
+  .second_boot :
     {
       _second_boot_start = .;
       *(.second_boot*)
