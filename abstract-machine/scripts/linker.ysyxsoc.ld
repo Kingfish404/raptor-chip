@@ -1,4 +1,4 @@
-PHDRS { flash_text PT_LOAD; text PT_LOAD; data PT_LOAD; bss PT_LOAD; }
+PHDRS { flash_text PT_LOAD; second_text PT_LOAD; text PT_LOAD; data PT_LOAD; bss PT_LOAD; }
 
 MEMORY {
   mrom  : ORIGIN = 0x20000000, LENGTH = 4K
@@ -21,7 +21,7 @@ SECTIONS {
     {
       _second_text_start = .;
       *(.second_text*)
-    } > flash AT> flash : flash_text
+    } > flash AT> flash : second_text
   _second_text_end = ADDR(.text);
   _second_text_load_start = LOADADDR(.second_text);
   .text :
