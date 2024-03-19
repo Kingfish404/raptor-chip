@@ -52,7 +52,7 @@ SECTIONS {
       *(.data*)
       *(.sdata*)
 
-    /* __fsymtab_start = .;
+    __fsymtab_start = .;
     KEEP(*(FSymTab))
     __fsymtab_end = .;
     . = ALIGN(8);
@@ -69,7 +69,7 @@ SECTIONS {
 
     __rt_utest_tc_tab_start = .;
     KEEP(*(UtestTcTab))
-    __rt_utest_tc_tab_end = .; */
+    __rt_utest_tc_tab_end = .;
       
     } > psram AT> flash : data
   _data_end = ADDR(.bss);
