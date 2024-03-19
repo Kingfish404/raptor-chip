@@ -13,7 +13,6 @@ SECTIONS {
   . = ORIGIN(flash);
   .flash_text : 
     {
-      _flash_text_start = .;
       *(entry)
       *(.flash_text*)
     } > flash AT> flash : flash_text
