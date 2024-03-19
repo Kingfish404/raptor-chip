@@ -17,6 +17,11 @@ SECTIONS {
       *(entry)
       *(.flash_text*)
     } > flash AT> flash : flash_text
+  .second_text : 
+    {
+      _second_text_start = .;
+      *(.second_text*)
+    } > sram AT> flash : flash_text
   .text :
     {
       _text_start = .;
