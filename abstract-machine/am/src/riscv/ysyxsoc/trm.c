@@ -97,6 +97,20 @@ __attribute__((section(".second_boot"))) void _second_stage_bootloader()
 void _trm_init()
 {
   init_uart();
+  // volatile uint32_t *sdram = (uint32_t *)0xa00003f8;
+  volatile uint8_t *sdram_u8 = (uint8_t *)0xa00003f8;
+  putch('\n');
+  // *sdram = 0x12345678;
+  // for (int i = 0; i < 0xf; i++)
+  // {
+  //   asm volatile("nop");
+  // }
+  *sdram_u8 = 0x12;
+  // volatile uint32_t data;
+  // data = *sdram;
+  asm volatile(
+      "li a0, 0\n\t"
+      "ebreak");
   uint32_t mvendorid, marchid;
   asm volatile(
       "csrr %0, mvendorid\n\t"
