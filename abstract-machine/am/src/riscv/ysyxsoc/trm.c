@@ -36,7 +36,7 @@ Area heap = RANGE(&_heap_start, PMEM_END);
 #endif
 static const char mainargs[] = MAINARGS;
 
-void init_uart(void)
+__attribute__((section(".second_boot"))) void init_uart(void)
 {
   outb(UART16550_LCR, 0x80);
   outb(UART16550_DL2, 0);
