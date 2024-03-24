@@ -98,7 +98,7 @@ void _trm_init()
 {
   init_uart();
   volatile uint32_t *sdram = (uint32_t *)0xa1fffffc;
-  volatile uint8_t *sdram_u8 = (uint8_t *)0xa1fffff1;
+  volatile uint8_t *sdram_u8 = (uint8_t *)0xa1fffff0;
   putch('\n');
   // *sdram = 0x12345678;
   // for (int i = 0; i < 0xf; i++)
