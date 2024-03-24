@@ -22,6 +22,9 @@
 #define PMEM_RIGHT ((paddr_t)CONFIG_MBASE + CONFIG_MSIZE - 1)
 #define RESET_VECTOR (PMEM_LEFT + CONFIG_PC_RESET_OFFSET)
 
+static const uint64_t CONFIG_SDRAM_BASE = 0xa0000000;
+static const uint64_t CONFIG_SDRAM_SIZE = 0x20000000;
+
 static const uint64_t CONFIG_SRAM_BASE = 0x0f000000;
 static const uint64_t CONFIG_SRAM_SIZE = 0x00002000;
 
@@ -45,6 +48,11 @@ paddr_t mrom_to_guest(uint8_t *haddr);
 static inline bool in_pmem(paddr_t addr)
 {
   return addr >= PMEM_LEFT && addr <= PMEM_RIGHT;
+}
+
+static inline bool in_sdram(paddr_t addr)
+{
+  return addr >= CONFIG_SDRAM_BASE && addr < CONFIG_SDRAM_BASE + CONFIG_SDRAM_SIZE;
 }
 
 static inline bool in_sram(paddr_t addr)
