@@ -101,10 +101,10 @@ void _trm_init()
   volatile uint8_t *sdram_u8 = (uint8_t *)0xa1fffffc;
   putch('\n');
   *sdram = 0x12345678;
-  for (int i = 0; i < 0xf; i++)
-  {
-    asm volatile("nop");
-  }
+  // for (int i = 0; i < 0xf; i++)
+  // {
+  //   asm volatile("nop");
+  // }
   *sdram_u8 = 0x12;
   // volatile uint32_t data;
   // data = *sdram;
