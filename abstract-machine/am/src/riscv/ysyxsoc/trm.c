@@ -71,7 +71,7 @@ __attribute__((section(".first_boot"))) void _first_stage_bootloader(void)
   volatile uint32_t *sdram = (uint32_t *)0xa0000000;
   volatile uint32_t data;
   *sdram = 0x12345678;
-  for (int i = 0; i < 0xf; i++)
+  for (int i = 0; i < 0x1f; i++)
   {
     asm volatile("nop");
   }
