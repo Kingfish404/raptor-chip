@@ -98,13 +98,13 @@ void _trm_init()
 {
   init_uart();
   volatile uint32_t *sdram = (uint32_t *)0xa0000000;
-  volatile uint32_t data;
   putch('\n');
   *sdram = 0x12345678;
   // for (int i = 0; i < 0xf; i++)
   // {
   //   asm volatile("nop");
   // }
+  // volatile uint32_t data;
   // data = *sdram;
   asm volatile(
       "li a0, 0\n\t"
