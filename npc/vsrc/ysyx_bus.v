@@ -89,16 +89,22 @@ module ysyx_BUS_ARBITER(
           // if (lsu_arvalid) begin
           //   t1 <= 1;
           // end
-          if (io_master_arready) begin
-            t1 <= 0;
-          end else if (io_master_rvalid) begin
-            t1 <= 1;
-          end
-          if (io_master_awready) begin
-            t2 <= 0;
-          end else if (io_master_bvalid) begin
-            t2 <= 1;
-          end
+          if (io_master_arready)
+            begin
+              t1 <= 0;
+            end
+          else if (io_master_rvalid)
+            begin
+              t1 <= 1;
+            end
+          if (io_master_awready)
+            begin
+              t2 <= 0;
+            end
+          else if (io_master_bvalid)
+            begin
+              t2 <= 1;
+            end
           // lsu_loading <= lsu_arvalid;
           // arvalid_record <= io_master_arvalid;
           // awvalid_record <= io_master_awready;
@@ -126,7 +132,7 @@ module ysyx_BUS_ARBITER(
   // lsu write
   // wire uart_en = (lsu_awaddr == `ysyx_BUS_SERIAL_PORT);
   // wire uart_wvalid = (lsu_awvalid & (uart_en));
-  wire sram_en = (lsu_awaddr != `ysyx_BUS_SERIAL_PORT);
+  wire sram_en = 1;
   wire sram_wvalid = (lsu_wvalid & (sram_en));
   wire sram_awvalid = (lsu_wvalid & (sram_en));
   wire [ADDR_W-1:0] awaddr = lsu_awaddr;
