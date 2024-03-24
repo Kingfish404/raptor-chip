@@ -101,10 +101,10 @@ void _trm_init()
   volatile uint32_t data;
   putch('\n');
   *sdram = 0x12345678;
-  for (int i = 0; i < 0xf; i++)
-  {
-    asm volatile("nop");
-  }
+  // for (int i = 0; i < 0xf; i++)
+  // {
+  //   asm volatile("nop");
+  // }
   // data = *sdram;
   asm volatile(
       "li a0, 0\n\t"
