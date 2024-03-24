@@ -106,8 +106,8 @@ void _trm_init()
   //   asm volatile("nop");
   // }
   // *sdram_u8 = 0x12;
-  // volatile uint32_t data;
-  // data = *sdram;
+  volatile uint32_t data;
+  data = *sdram;
   asm volatile(
       "li a0, 0\n\t"
       "ebreak");
