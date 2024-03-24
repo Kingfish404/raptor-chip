@@ -71,7 +71,9 @@ __attribute__((section(".first_boot"))) void _first_stage_bootloader(void)
   volatile uint32_t *sdram = (uint32_t *)0xa0000000;
   volatile uint32_t data;
   data = *sdram;
-  asm volatile("ebreak");
+  asm volatile(
+      "li a0, 0\n\t"
+      "ebreak");
   _second_stage_bootloader();
 }
 
