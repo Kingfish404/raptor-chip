@@ -97,7 +97,7 @@ __attribute__((section(".second_boot"))) void _second_stage_bootloader()
 void _trm_init()
 {
   init_uart();
-  volatile uint32_t *sdram = (uint32_t *)0xa654321c;
+  volatile uint32_t *sdram = (uint32_t *)0xaffffffc;
   putch('\n');
   *sdram = 0x12345678;
   for (int i = 0; i < 0xf; i++)
