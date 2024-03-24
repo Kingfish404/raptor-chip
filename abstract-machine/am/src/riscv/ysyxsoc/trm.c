@@ -60,6 +60,10 @@ void halt(int code)
 
 __attribute__((section(".first_boot"))) void _first_stage_bootloader(void)
 {
+  volatile uint32_t *sdram = (uint32_t *)0xa0000000;
+  volatile uint32_t data;
+  // data = *sdram;
+  asm volatile("ebreak");
   if ((size_t)_second_boot_start != (size_t)_second_boot_load_start)
   {
     size_t text_size = _second_boot_end - _second_boot_start;
@@ -73,24 +77,24 @@ __attribute__((section(".first_boot"))) void _first_stage_bootloader(void)
 
 __attribute__((section(".second_boot"))) void _second_stage_bootloader()
 {
-  // if ((size_t)_text_start != (size_t)_text_load_start)
-  // {
-  //   size_t text_size = _text_end - _text_start;
-  //   for (size_t i = 0; i < text_size; i++)
-  //   {
-  //     _text_start[i] = _text_load_start[i];
-  //   }
-  // }
-  // if ((size_t)_rodata_start != (size_t)_rodata_load_start)
-  // {
-  //   size_t rodata_size = _rodata_end - _rodata_start;
-  //   memcpy(_rodata_start, _rodata_load_start, (size_t)rodata_size);
-  // }
-  // if ((size_t)_data_start != (size_t)_data_load_start)
-  // {
-  //   size_t data_size = _data_end - _data_start;
-  //   memcpy(_data_start, _data_load_start, (size_t)data_size);
-  // }
+  if ((size_t)_text_start != (size_t)_text_load_start)
+  {
+    size_t text_size = _text_end - _text_start;
+    for (size_t i = 0; i < text_size; i++)
+    {
+      _text_start[i] = _text_load_start[i];
+    }
+  }
+  if ((size_t)_rodata_start != (size_t)_rodata_load_start)
+  {
+    size_t rodata_size = _rodata_end - _rodata_start;
+    memcpy(_rodata_start, _rodata_load_start, (size_t)rodata_size);
+  }
+  if ((size_t)_data_start != (size_t)_data_load_start)
+  {
+    size_t data_size = _data_end - _data_start;
+    memcpy(_data_start, _data_load_start, (size_t)data_size);
+  }
   _trm_init();
 }
 
