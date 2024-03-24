@@ -73,14 +73,14 @@ __attribute__((section(".first_boot"))) void _first_stage_bootloader(void)
 
 __attribute__((section(".second_boot"))) void _second_stage_bootloader()
 {
-  if ((size_t)_text_start != (size_t)_text_load_start)
-  {
-    size_t text_size = _text_end - _text_start;
-    for (size_t i = 0; i < text_size; i++)
-    {
-      _text_start[i] = _text_load_start[i];
-    }
-  }
+  // if ((size_t)_text_start != (size_t)_text_load_start)
+  // {
+  //   size_t text_size = _text_end - _text_start;
+  //   for (size_t i = 0; i < text_size; i++)
+  //   {
+  //     _text_start[i] = _text_load_start[i];
+  //   }
+  // }
   // if ((size_t)_rodata_start != (size_t)_rodata_load_start)
   // {
   //   size_t rodata_size = _rodata_end - _rodata_start;
