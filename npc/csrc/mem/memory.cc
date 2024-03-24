@@ -5,9 +5,10 @@
 void difftest_skip_ref();
 void npc_abort();
 
+static uint8_t pmem[MSIZE] = {};
+static uint8_t sdram[SDRAM_SIZE] = {};
 static uint8_t sram[SRAM_SIZE] = {};
 static uint8_t mrom[MROM_SIZE] = {};
-static uint8_t pmem[MSIZE] = {};
 static uint8_t flash[FLASH_SIZE] = {};
 #ifdef CONFIG_SOFT_MMIO
 static uint32_t rtc_port_base[2] = {0x0, 0x0};
@@ -75,6 +76,20 @@ static inline void host_write(void *addr, word_t data, int len)
     default:
         assert(0);
     }
+}
+
+extern "C" void sdram_read(uint32_t addr, uint32_t *data)
+{
+    uint32_t offset = (addr & 0xfffffffc - SDRAM_BASE);
+    *data = *((uint32_t *)(sdram + offset));
+    // Log("sdram raddr: 0x%x, rdata: 0x%x, offest: 0x%x", addr, *data, offset);
+}
+
+extern "C" void sdram_write(uint32_t addr, uint32_t data)
+{
+    uint32_t offset = (addr & 0xfffffffc - SDRAM_BASE);
+    *((uint32_t *)(sdram + offset)) = data;
+    // Log("sdram waddr: 0x%x, wdata: 0x%x, offest: 0x%x", addr, data, offset);
 }
 
 extern "C" void pmem_read(word_t raddr, word_t *data)

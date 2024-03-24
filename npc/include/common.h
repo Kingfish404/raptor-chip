@@ -17,6 +17,12 @@ typedef word_t vaddr_t;
 #define MBASE 0x80000000
 #define MSIZE 0x08000000
 
+#define PSRAM_BASE 0x80000000
+#define PSRAM_SIZE 0x00400000
+
+#define SDRAM_BASE 0xa0000000
+#define SDRAM_SIZE 0x20000000
+
 #define SRAM_BASE 0x0f000000
 #define SRAM_SIZE 0x00002000
 
@@ -25,9 +31,6 @@ typedef word_t vaddr_t;
 
 #define FLASH_BASE 0x30000000
 #define FLASH_SIZE 0x10000000
-
-#define PSRAM_BASE 0x80000000
-#define PSRAM_SIZE 0x00400000
 
 #ifdef CONFIG_SOFT_MMIO
 #define DEVICE_BASE 0xa0000000
