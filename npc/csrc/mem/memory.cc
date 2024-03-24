@@ -78,17 +78,17 @@ static inline void host_write(void *addr, word_t data, int len)
     }
 }
 
-extern "C" void sdram_read(uint32_t addr, uint32_t *data)
+extern "C" void sdram_read(uint32_t addr, uint8_t *data)
 {
     uint32_t offset = (addr & 0xfffffffc - SDRAM_BASE);
-    *data = *((uint32_t *)(sdram + offset));
+    *data = sram[offset];
     Log("sdram raddr: 0x%x, rdata: 0x%x, offest: 0x%x", addr, *data, offset);
 }
 
-extern "C" void sdram_write(uint32_t addr, uint32_t data)
+extern "C" void sdram_write(uint32_t addr, uint8_t data)
 {
     uint32_t offset = (addr & 0xfffffffc - SDRAM_BASE);
-    *((uint32_t *)(sdram + offset)) = data;
+    sram[offset] = data;
     Log("sdram waddr: 0x%x, wdata: 0x%x, offest: 0x%x", addr, data, offset);
 }
 
