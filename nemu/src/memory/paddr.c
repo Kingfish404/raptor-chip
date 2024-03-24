@@ -23,12 +23,14 @@ static uint8_t *pmem = NULL;
 #else // CONFIG_PMEM_GARRAY
 static uint8_t pmem[CONFIG_MSIZE] PG_ALIGN = {};
 #endif
+static uint8_t sdram[CONFIG_SDRAM_SIZE] PG_ALIGN = {};
 static uint8_t sram[CONFIG_SRAM_SIZE] PG_ALIGN = {};
 static uint8_t mrom[CONFIG_MROM_BASE] PG_ALIGN = {};
 static uint8_t flash[CONFIG_FLASH_SIZE] PG_ALIGN = {};
 
 uint8_t* guest_to_host(paddr_t paddr) { 
   if (in_pmem(paddr)) return pmem + paddr - CONFIG_MBASE;
+  if (in_sdram(paddr)) return sdram + paddr - CONFIG_SDRAM_BASE;
   if (in_sram(paddr)) return sram + paddr - CONFIG_SRAM_BASE;
   if (in_mrom(paddr)) return mrom + paddr - CONFIG_MROM_BASE;
   if (in_flash(paddr)) return flash + paddr - CONFIG_FLASH_BASE;
