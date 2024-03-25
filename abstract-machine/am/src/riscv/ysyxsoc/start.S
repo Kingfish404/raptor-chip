@@ -3,6 +3,9 @@
 .type _start, @function
 
 _start:
+  li t0, 0xa000004c
+  lbu t1, (t0)
+
   mv s0, zero
   la sp, _stack_pointer
   jal _first_stage_bootloader
