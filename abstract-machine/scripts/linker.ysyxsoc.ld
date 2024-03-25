@@ -74,7 +74,7 @@ SECTIONS {
     __rt_utest_tc_tab_end = .;
     /* end for rt-thread */
       
-    } > sdram AT> flash : data
+    } > psram AT> flash : data
   _data_end = ADDR(.bss);
   _data_load_start = LOADADDR(.data);
   edata = .;
