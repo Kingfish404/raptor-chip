@@ -180,7 +180,7 @@ extern "C" void mrom_read(uint32_t addr, uint32_t *data)
     // Log("mrom raddr: 0x%x, rdata: 0x%x, offest: 0x%x", addr, *data, offset);
 }
 
-void addr_show(vaddr_t addr, int n)
+void vaddr_show(vaddr_t addr, int n)
 {
     word_t data;
     word_t wsize = 4;
