@@ -231,27 +231,29 @@ module ysyx_BUS_ARBITER(
     begin
       `Assert(io_master_rresp, 2'b00);
       `Assert(io_master_bresp, 2'b00);
-      if (io_master_awvalid || io_master_arvalid)
+      if (io_master_awvalid)
         begin
           npc_difftest_mem_diff();
           if (
             (io_master_awaddr >= 'h10000000 && io_master_awaddr <= 'h10000005) ||
-            (io_master_araddr >= 'h10000001 && io_master_araddr <= 'h10000005) ||
             (io_master_awaddr >= 'h10001000 && io_master_awaddr <= 'h10001fff) ||
-            (io_master_araddr >= 'h10001000 && io_master_araddr <= 'h10001fff) ||
-            // (io_master_awaddr >= 'h30000000 && io_master_awaddr <= 'h40000000) ||
             (0)
           )
             begin
               npc_difftest_skip_ref();
-              if (io_master_awvalid)
-                begin
-                  $display("DIFFTEST: skip ref at aw: %h", io_master_awaddr);
-                end
-              if (io_master_arvalid)
-                begin
-                  $display("DIFFTEST: skip ref at ar: %h", io_master_araddr);
-                end
+              $display("DIFFTEST: skip ref at aw: %h", io_master_awaddr);
+            end
+        end
+      if (io_master_arvalid)
+        begin
+          if (
+            (io_master_araddr >= 'h10000001 && io_master_araddr <= 'h10000005) ||
+            (io_master_araddr >= 'h10001000 && io_master_araddr <= 'h10001fff) ||
+            (0)
+          )
+            begin
+              npc_difftest_skip_ref();
+              $display("DIFFTEST: skip ref at ar: %h", io_master_araddr);
             end
         end
     end
