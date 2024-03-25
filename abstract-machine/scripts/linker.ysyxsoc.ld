@@ -10,7 +10,7 @@ MEMORY {
   mrom  : ORIGIN = 0x20000000, LENGTH = 4K
   flash : ORIGIN = 0x30000000, LENGTH = 10M
   sram  : ORIGIN = 0x0f000000, LENGTH = 8K
-  psram : ORIGIN = 0xa0000000, LENGTH = 2M
+  psram : ORIGIN = 0xa0000000, LENGTH = 4M
   /* sdram : ORIGIN = 0xa0000000, LENGTH = 2M */
 }
 
