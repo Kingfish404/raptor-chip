@@ -22,7 +22,6 @@ SECTIONS {
       *(entry)
       *(.first_boot*)
     } > flash AT> flash : first_boot
-  . = _pmem_start + _entry_offset;
   .second_boot :
     {
       _second_boot_start = .;
