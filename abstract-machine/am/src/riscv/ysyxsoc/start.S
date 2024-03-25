@@ -5,7 +5,7 @@
 _start:
   li t0, 0xa000004c
   li t1, 0x00000001
-  sw t1, 0(t0)
+  sb t1, 0(t0)
   lbu ra, (t0)
   ebreak
 
