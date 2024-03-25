@@ -132,6 +132,7 @@ module ysyx_BUS_ARBITER(
   // lsu write
   // wire uart_en = (lsu_awaddr == `ysyx_BUS_SERIAL_PORT);
   // wire uart_wvalid = (lsu_awvalid & (uart_en));
+  // wire sram_en = (lsu_awaddr != `ysyx_BUS_SERIAL_PORT);
   wire sram_en = 1;
   wire sram_wvalid = (lsu_wvalid & (sram_en));
   wire sram_awvalid = (lsu_wvalid & (sram_en));
