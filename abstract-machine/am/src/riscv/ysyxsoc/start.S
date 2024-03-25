@@ -13,10 +13,6 @@ _start:
   nop
   nop
   nop
-  nop
-  nop
-  nop
-  nop
   li t0, 0xa000004c
   li t1, 0x00000001
   sb t1, 0(t0)
