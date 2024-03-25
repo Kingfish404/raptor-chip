@@ -11,6 +11,7 @@ MEMORY {
   flash : ORIGIN = 0x30000000, LENGTH = 10M
   sram  : ORIGIN = 0x0f000000, LENGTH = 8K
   psram  : ORIGIN = 0x80000000, LENGTH = 4M
+  sdram : ORIGIN = 0xa0000000, LENGTH = 2M
 }
 
 SECTIONS {
@@ -26,14 +27,14 @@ SECTIONS {
     {
       _second_boot_start = .;
       *(.second_boot*)
-    } > psram AT> flash : second_boot
+    } > sdram AT> flash : second_boot
   _second_boot_end = ADDR(.text);
   _second_boot_load_start = LOADADDR(.second_boot);
   .text :
     {
       _text_start = .;
       *(.text*)
-    } > psram AT> flash : text
+    } > sdram AT> flash : text
   _text_end = ADDR(.rodata);
   _text_load_start = LOADADDR(.text);
   etext = .;
@@ -43,7 +44,7 @@ SECTIONS {
       _rodata_start = .;
       *(.rodata*)
       rodata_end = .;
-    } > psram AT> flash
+    } > sdram AT> flash
   _rodata_end = ADDR(.data);
   _rodata_load_start = LOADADDR(.rodata);
   .data :
@@ -73,7 +74,7 @@ SECTIONS {
     __rt_utest_tc_tab_end = .;
     /* end for rt-thread */
       
-    } > psram AT> flash : data
+    } > sdram AT> flash : data
   _data_end = ADDR(.bss);
   _data_load_start = LOADADDR(.data);
   edata = .;
@@ -84,7 +85,7 @@ SECTIONS {
       *(.bss*)
       *(.sbss*)
       *(.scommon)
-    } > psram AT> flash : bss
+    } > sdram AT> flash : bss
   _stack_top = ALIGN(0x1000);
   . = _stack_top + 0x8000;
   _stack_pointer = .;
