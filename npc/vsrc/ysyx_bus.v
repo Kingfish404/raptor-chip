@@ -243,7 +243,7 @@ module ysyx_BUS_ARBITER(
             (0)
           )
             begin
-              npc_difftest_skip_ref();
+              // npc_difftest_skip_ref();
             end
         end
     end
