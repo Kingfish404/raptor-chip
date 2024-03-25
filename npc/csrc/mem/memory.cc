@@ -32,6 +32,10 @@ uint8_t *guest_to_host(paddr_t addr)
     {
         return flash + addr - FLASH_BASE;
     }
+    if (addr >= SDRAM_BASE && addr < SDRAM_BASE + SDRAM_SIZE)
+    {
+        return sdram + addr - SDRAM_BASE;
+    }
     Assert(0, "Invalid guest address: " FMT_WORD, addr);
 }
 
