@@ -17,7 +17,7 @@ _start:
   li t0, 0xa000004c
   li t1, 0x00000042
   sb t1, 0(t0)
-  lbu ra, (t0)
+  lbu a0, (t0)
   ebreak
 
   mv s0, zero
