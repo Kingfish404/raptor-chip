@@ -4,7 +4,8 @@
 
 _start:
   li t0, 0xa000004c
-  lbu t1, (t0)
+  lbu ra, (t0)
+  ebreak
 
   mv s0, zero
   la sp, _stack_pointer
