@@ -85,7 +85,7 @@ SECTIONS {
       *(.bss*)
       *(.sbss*)
       *(.scommon)
-    } > sdram AT> flash : bss
+    } > psram AT> flash : bss
   _stack_top = ALIGN(0x1000);
   . = _stack_top + 0x8000;
   _stack_pointer = .;
