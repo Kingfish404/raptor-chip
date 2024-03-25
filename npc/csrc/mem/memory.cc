@@ -175,3 +175,34 @@ extern "C" void mrom_read(uint32_t addr, uint32_t *data)
     *data = *((uint32_t *)(mrom + offset));
     // Log("mrom raddr: 0x%x, rdata: 0x%x, offest: 0x%x", addr, *data, offset);
 }
+
+void addr_show(vaddr_t addr, int n)
+{
+    word_t data;
+    word_t wsize = 4;
+    for (word_t i = 0; i < (n / 4 + 1); i++)
+    {
+        if (i % 4 == 0)
+        {
+            if (i != 0)
+            {
+                printf("| ");
+                for (size_t j = 0; j < wsize; j++)
+                {
+                    data = host_read(guest_to_host(addr + (i - (3 - j) - 1) * wsize), 4);
+                    for (size_t k = 0; k < wsize; k++)
+                    {
+                        uint8_t c = (data >> (((wsize)-1 - k) * 8)) & 0xff;
+                        printf("%02x ", c);
+                    }
+                    printf(" ");
+                }
+                printf("\n");
+            }
+            printf("" FMT_WORD ": ", addr + i * wsize);
+        }
+        data = host_read(guest_to_host(addr + i * wsize), 4);
+        printf("" FMT_WORD " ", data);
+    }
+    printf("\n");
+}
