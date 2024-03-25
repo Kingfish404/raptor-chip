@@ -44,7 +44,7 @@ SECTIONS {
       _rodata_start = .;
       *(.rodata*)
       rodata_end = .;
-    } > sdram AT> flash
+    } > psram AT> flash
   _rodata_end = ADDR(.data);
   _rodata_load_start = LOADADDR(.rodata);
   .data :
@@ -74,7 +74,7 @@ SECTIONS {
     __rt_utest_tc_tab_end = .;
     /* end for rt-thread */
       
-    } > sdram AT> flash : data
+    } > psram AT> flash : data
   _data_end = ADDR(.bss);
   _data_load_start = LOADADDR(.data);
   edata = .;
@@ -85,7 +85,7 @@ SECTIONS {
       *(.bss*)
       *(.sbss*)
       *(.scommon)
-    } > sdram AT> flash : bss
+    } > psram AT> flash : bss
   _stack_top = ALIGN(0x1000);
   . = _stack_top + 0x8000;
   _stack_pointer = .;
