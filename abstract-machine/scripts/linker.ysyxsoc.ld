@@ -34,7 +34,7 @@ SECTIONS {
     {
       _text_start = .;
       *(.text*)
-    } > sdram AT> flash : text
+    } > psram AT> flash : text
   _text_end = ADDR(.rodata);
   _text_load_start = LOADADDR(.text);
   etext = .;
