@@ -10,7 +10,7 @@ MEMORY {
   mrom  : ORIGIN = 0x20000000, LENGTH = 4K
   flash : ORIGIN = 0x30000000, LENGTH = 10M
   sram  : ORIGIN = 0x0f000000, LENGTH = 8K
-  psram  : ORIGIN = 0x80000000, LENGTH = 4M
+  psram : ORIGIN = 0x80000000, LENGTH = 4M
   sdram : ORIGIN = 0xa0000000, LENGTH = 2M
 }
 
@@ -27,7 +27,7 @@ SECTIONS {
     {
       _second_boot_start = .;
       *(.second_boot*)
-    } > sdram AT> flash : second_boot
+    } > psram AT> flash : second_boot
   _second_boot_end = ADDR(.text);
   _second_boot_load_start = LOADADDR(.second_boot);
   .text :
