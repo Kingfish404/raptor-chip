@@ -27,7 +27,7 @@ SECTIONS {
     {
       _second_boot_start = .;
       *(.second_boot*)
-    } > psram AT> flash : second_boot
+    } > sdram AT> flash : second_boot
   _second_boot_end = ADDR(.text);
   _second_boot_load_start = LOADADDR(.second_boot);
   .text :
