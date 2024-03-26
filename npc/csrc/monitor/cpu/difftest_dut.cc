@@ -30,7 +30,6 @@ void difftest_skip_ref()
 void difftest_skip_dut(int nr_ref, int nr_dut)
 {
   skip_dut_nr_inst += nr_dut;
-  printf("skip %d instructions in dut\n", nr_dut);
 
   while (nr_ref-- > 0)
   {
@@ -156,7 +155,6 @@ void difftest_step(vaddr_t pc)
   ref_difftest_exec(1);
   ref_difftest_regcpy(&ref_r, DIFFTEST_TO_DUT);
   checkregs(&ref_r, pc);
-  // vaddr_show(pc, 12);
 
 #ifdef CONFIG_MEM_DIFFTEST
   if (should_diff_mem)
