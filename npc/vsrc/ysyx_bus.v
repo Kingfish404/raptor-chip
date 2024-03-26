@@ -89,16 +89,22 @@ module ysyx_BUS_ARBITER(
           // if (lsu_arvalid) begin
           //   t1 <= 1;
           // end
-          if (io_master_arready) begin
-            t1 <= 0;
-          end else if (io_master_rvalid) begin
-            t1 <= 1;
-          end
-          if (io_master_awready) begin
-            t2 <= 0;
-          end else if (io_master_bvalid) begin
-            t2 <= 1;
-          end
+          if (io_master_arready)
+            begin
+              t1 <= 0;
+            end
+          else if (io_master_rvalid)
+            begin
+              t1 <= 1;
+            end
+          if (io_master_awready)
+            begin
+              t2 <= 0;
+            end
+          else if (io_master_bvalid)
+            begin
+              t2 <= 1;
+            end
           // lsu_loading <= lsu_arvalid;
           // arvalid_record <= io_master_arvalid;
           // awvalid_record <= io_master_awready;
@@ -126,7 +132,8 @@ module ysyx_BUS_ARBITER(
   // lsu write
   // wire uart_en = (lsu_awaddr == `ysyx_BUS_SERIAL_PORT);
   // wire uart_wvalid = (lsu_awvalid & (uart_en));
-  wire sram_en = (lsu_awaddr != `ysyx_BUS_SERIAL_PORT);
+  // wire sram_en = (lsu_awaddr != `ysyx_BUS_SERIAL_PORT);
+  wire sram_en = 1;
   wire sram_wvalid = (lsu_wvalid & (sram_en));
   wire sram_awvalid = (lsu_wvalid & (sram_en));
   wire [ADDR_W-1:0] awaddr = lsu_awaddr;
@@ -225,19 +232,29 @@ module ysyx_BUS_ARBITER(
     begin
       `Assert(io_master_rresp, 2'b00);
       `Assert(io_master_bresp, 2'b00);
-      if (io_master_awvalid || io_master_arvalid)
+      if (io_master_awvalid)
         begin
           npc_difftest_mem_diff();
           if (
             (io_master_awaddr >= 'h10000000 && io_master_awaddr <= 'h10000005) ||
-            (io_master_araddr >= 'h10000001 && io_master_araddr <= 'h10000005) ||
             (io_master_awaddr >= 'h10001000 && io_master_awaddr <= 'h10001fff) ||
-            (io_master_araddr >= 'h10001000 && io_master_araddr <= 'h10001fff) ||
-            // (io_master_awaddr >= 'h30000000 && io_master_awaddr <= 'h40000000) ||
             (0)
           )
             begin
               npc_difftest_skip_ref();
+              // $display("DIFFTEST: skip ref at aw: %h", io_master_awaddr);
+            end
+        end
+      if (io_master_arvalid)
+        begin
+          if (
+            (io_master_araddr >= 'h10000001 && io_master_araddr <= 'h10000005) ||
+            (io_master_araddr >= 'h10001000 && io_master_araddr <= 'h10001fff) ||
+            (0)
+          )
+            begin
+              npc_difftest_skip_ref();
+              // $display("DIFFTEST: skip ref at ar: %h", io_master_araddr);
             end
         end
     end
