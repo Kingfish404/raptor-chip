@@ -168,7 +168,7 @@ extern "C" void pmem_write(word_t waddr, word_t wdata, char wmask)
 
 extern "C" void flash_read(uint32_t addr, uint32_t *data)
 {
-    uint32_t offset = ((addr & 0xfffffffc) - FLASH_BASE);
+    uint32_t offset = (addr & 0xfffffffc - FLASH_BASE);
     *data = *((uint32_t *)(flash + offset));
     // Log("flash raddr: 0x%x, rdata: 0x%x, offest: 0x%x", addr, *data, offset);
 }
