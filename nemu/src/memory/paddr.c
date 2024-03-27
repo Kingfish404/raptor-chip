@@ -25,7 +25,7 @@ static uint8_t pmem[CONFIG_MSIZE] PG_ALIGN = {};
 #endif
 static uint8_t sdram[CONFIG_SDRAM_SIZE] PG_ALIGN = {};
 static uint8_t sram[CONFIG_SRAM_SIZE] PG_ALIGN = {};
-static uint8_t mrom[CONFIG_MROM_BASE] PG_ALIGN = {};
+static uint8_t mrom[CONFIG_MROM_SIZE] PG_ALIGN = {};
 static uint8_t flash[CONFIG_FLASH_SIZE] PG_ALIGN = {};
 
 uint8_t* guest_to_host(paddr_t paddr) { 

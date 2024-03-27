@@ -35,7 +35,7 @@ void vaddr_show(vaddr_t addr, int n)
 {
   word_t data;
   word_t wsize = 4;
-  for (word_t i = 0; i < (n / 4 + 1); i++)
+  for (int i = 0; i < (n / 4 + 1); i++)
   {
     if (i % 4 == 0)
     {
