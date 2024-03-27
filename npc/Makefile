@@ -15,8 +15,11 @@ endif
 ifeq ($(MODE), soc)
 VTARGET=ysyxSoCFull
 SOC_DEFINE=-DYSYX_SOC
+SOC_SOURCE=$(shell find $(abspath $(SOC_HOME)/perip) -name "*.v") \
+    $(SOC_HOME)/generated/ysyxSoCFull.v
 else
 VTARGET=ysyx
+SOC_SOURCE=
 endif
 BUILD_DIR = ./build
 OBJ_DIR = $(BUILD_DIR)/obj_dir
@@ -25,7 +28,7 @@ SOC_HOME = $(abspath ./../ysyxSOC)
 INC_PATH ?= $(abspath ./include) $(abspath ./vsrc/include) \
 	$(abspath $(SOC_HOME)/perip/uart16550/rtl) $(abspath $(SOC_HOME)/perip/spi/rtl)
 VERILATOR_FLAG =--prof-c --prof-cfuncs --prof-exec --autoflush --timescale "1ns/1ns" --no-timing
-CXXFLAGS = -Wall -Werror -Wno-bool-operation $(call remove_quote,$(CONFIG_CC_OPT))
+CXXFLAGS = -Wall -Werror -Wno-bool-operation -Wno-implicit-fallthrough $(call remove_quote,$(CONFIG_CC_OPT))
 LDFLAGS = -lreadline -ldl
 
 FILELIST_MK = $(shell find -L ./csrc -name "filelist.mk")
@@ -33,9 +36,7 @@ include $(FILELIST_MK)
 
 $(shell mkdir -p $(BUILD_DIR))
 
-VSRCS = $(shell find $(abspath ./vsrc) -name "*.v") \
-	$(shell find $(abspath $(SOC_HOME)/perip) -name "*.v") \
-	$(SOC_HOME)/generated/ysyxSoCFull.v
+VSRCS = $(shell find $(abspath ./vsrc) -name "*.v") $(SOC_SOURCE)
 CSRCS = $(shell find $(abspath ./csrc) -name "*.c")
 CCSRCS = $(shell find $(abspath ./csrc) -name "*.cc" -or -name "*.cpp")
 

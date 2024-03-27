@@ -7,6 +7,7 @@
 #include <assert.h>
 #include <pthread.h>
 #include <string.h>
+#include <stdint.h>
 
 typedef uint32_t word_t;
 typedef word_t paddr_t;
