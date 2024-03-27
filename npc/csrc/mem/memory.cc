@@ -175,7 +175,7 @@ extern "C" void flash_read(uint32_t addr, uint32_t *data)
 
 extern "C" void mrom_read(uint32_t addr, uint32_t *data)
 {
-    uint32_t offset = (addr & ( - MROM_BASE));
+    uint32_t offset = ((addr & 0xfffffffc) - MROM_BASE);
     *data = *((uint32_t *)(mrom + offset));
     // Log("mrom raddr: 0x%x, rdata: 0x%x, offest: 0x%x", addr, *data, offset);
 }
