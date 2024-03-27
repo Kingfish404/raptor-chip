@@ -158,9 +158,9 @@ extern "C" void pmem_write(word_t waddr, word_t wdata, char wmask)
     case 0xf:
         host_write(pmem + waddr - MBASE, wdata, 4);
         break;
-    case 0xff:
-        host_write(pmem + waddr - MBASE, wdata, 8);
-        break;
+    // case 0xff:
+    //     host_write(pmem + waddr - MBASE, wdata, 8);
+    //     break;
     default:
         break;
     }
@@ -168,14 +168,14 @@ extern "C" void pmem_write(word_t waddr, word_t wdata, char wmask)
 
 extern "C" void flash_read(uint32_t addr, uint32_t *data)
 {
-    uint32_t offset = (addr & 0xfffffffc - FLASH_BASE);
+    uint32_t offset = ((addr & 0xfffffffc) - FLASH_BASE);
     *data = *((uint32_t *)(flash + offset));
     // Log("flash raddr: 0x%x, rdata: 0x%x, offest: 0x%x", addr, *data, offset);
 }
 
 extern "C" void mrom_read(uint32_t addr, uint32_t *data)
 {
-    uint32_t offset = (addr & 0xfffffffc - MROM_BASE);
+    uint32_t offset = ((addr & 0xfffffffc) - MROM_BASE);
     *data = *((uint32_t *)(mrom + offset));
     // Log("mrom raddr: 0x%x, rdata: 0x%x, offest: 0x%x", addr, *data, offset);
 }

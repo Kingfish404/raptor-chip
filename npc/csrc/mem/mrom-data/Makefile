@@ -7,7 +7,7 @@ OBJDUMP   = $(CROSS_COMPILE)objdump
 OBJCOPY   = $(CROSS_COMPILE)objcopy
 READELF   = $(CROSS_COMPILE)readelf
 
-COMMON_CFLAGS = -march=rv32e_zicsr -mabi=ilp32e  # overwrite
+COMMON_CFLAGS = -march=rv32e -mabi=ilp32e  # overwrite
 LDFLAGS       =
 
 IMAGE = ./build/mrom-data
@@ -15,7 +15,7 @@ SOURCE = $(wildcard *.c)
 
 CFLAGS = -g -O2 -MMD -Wall \
 	-fno-asynchronous-unwind-tables -fno-builtin -fno-stack-protector \
-	-nostartfiles -ffreestanding $(COMMON_CFLAGS) 
+	-nostartfiles -ffreestanding $(COMMON_CFLAGS) -nostdlib
 
 all: $(IMAGE).elf $(IMAGE).bin
 

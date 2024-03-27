@@ -16,4 +16,5 @@ brew install verilator sdl2 sdl2_image sdl2_ttf flex
 
 # debian/ubuntu
 apt-get install verilator libsdl2-dev flex
+apt-get install gcc-riscv64-linux-gnu
 ```
