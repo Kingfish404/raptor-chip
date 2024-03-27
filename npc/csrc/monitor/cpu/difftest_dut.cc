@@ -155,7 +155,6 @@ void difftest_step(vaddr_t pc)
   ref_difftest_exec(1);
   ref_difftest_regcpy(&ref_r, DIFFTEST_TO_DUT);
   checkregs(&ref_r, pc);
-  vaddr_show(0xa2000000, 12);
 
 #ifdef CONFIG_MEM_DIFFTEST
   if (should_diff_mem)
