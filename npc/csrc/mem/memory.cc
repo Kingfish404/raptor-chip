@@ -86,14 +86,14 @@ extern "C" void sdram_read(uint32_t addr, uint8_t *data)
 {
     uint32_t offset = (addr - SDRAM_BASE);
     *data = sdram[offset];
-    Log("sdram raddr: 0x%x, rdata: 0x%x, offest: 0x%x", addr, *data, offset);
+    // Log("sdram raddr: 0x%x, rdata: 0x%x, offest: 0x%x", addr, *data, offset);
 }
 
 extern "C" void sdram_write(uint32_t addr, uint8_t data)
 {
     uint32_t offset = (addr - SDRAM_BASE);
     sdram[offset] = data;
-    Log("sdram waddr: 0x%x, wdata: 0x%x, offest: 0x%x", addr, data, offset);
+    // Log("sdram waddr: 0x%x, wdata: 0x%x, offest: 0x%x", addr, data, offset);
 }
 
 extern "C" void pmem_read(word_t raddr, word_t *data)
