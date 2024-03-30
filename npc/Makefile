@@ -12,7 +12,7 @@ endif
 -include ./include/config/auto.conf
 -include ./include/config/auto.conf.cmd
 
-ifeq ($(CONFIG_MODE), "soc")
+ifeq ($(CONFIG_MODE), soc)
 VTARGET=ysyxSoCFull
 SOC_DEFINE=-DYSYX_SOC
 SOC_SOURCE=$(shell find $(abspath $(SOC_HOME)/perip) -name "*.v") \
