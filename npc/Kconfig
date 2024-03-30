@@ -47,3 +47,9 @@ config MEM_DIFFTEST
       Note that this will significantly reduce the performance of NPC.
 
 endmenu
+
+menuconfig NVBoard
+    bool "Enable NVBoard"
+    default n
+    help
+      Enable NVBoard for IO.

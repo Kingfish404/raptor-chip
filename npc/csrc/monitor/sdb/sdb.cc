@@ -5,7 +5,9 @@
 #include <npc_verilog.h>
 #include <verilated.h>
 #include <verilated_vcd_c.h>
+#ifdef CONFIG_NVBoard
 #include <nvboard.h>
+#endif
 
 extern char *regs[];
 void difftest_skip_ref();
@@ -264,7 +266,11 @@ void sdb_sim_init(int argc, char **argv)
   }
   contextp->timeInc(1);
 
+#ifdef CONFIG_NVBoard
+  // nvboard_bind_pin(&CONCAT(VERILOG_PREFIX, __DOT__regs__DOT__rf));
+
   nvboard_init();
+#endif
 }
 
 void engine_start()
