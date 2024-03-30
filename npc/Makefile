@@ -50,6 +50,8 @@ $(NPC_HOME)/csrc/mem/mrom-data/build/mrom-data.bin:
 all: $(BIN)
 
 # rules for NVBoard
+include $(NVBOARD_HOME)/scripts/nvboard.mk
+
 INCFLAGS = $(addprefix -I, $(INC_PATH))
 CXXFLAGS += $(INCFLAGS) -DTOP_NAME="\"V$(VTARGET)\"" $(SOC_DEFINE) \
 	-DMROM_PATH=$(MROM_IMG)
