@@ -48,7 +48,17 @@ config MEM_DIFFTEST
 
 endmenu
 
+menuconfig ysyxSoC
+    bool "Enable ysyxSoC"
+    default y
+
+config MODE
+    string
+    default "soc" if ysyxSoC
+    default "none"
+
 menuconfig NVBoard
+    depends on ysyxSoC
     bool "Enable NVBoard"
     default n
     help
