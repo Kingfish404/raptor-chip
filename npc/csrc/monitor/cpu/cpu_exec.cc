@@ -3,7 +3,8 @@
 #include <readline/readline.h>
 #include <readline/history.h>
 #include <npc_verilog.h>
-#include "verilated_vcd_c.h"
+#include <verilated_vcd_c.h>
+#include <nvboard.h>
 
 #define MAX_INST_TO_PRINT 10
 #define MAX_IRING_SIZE 16
@@ -43,6 +44,7 @@ static void statistic()
 
 static void cpu_exec_one_cycle()
 {
+  nvboard_update();
   // pmem_read(*(npc.pc), (word_t *)&(top->inst));
 
   top->clock = (top->clock == 0) ? 1 : 0;

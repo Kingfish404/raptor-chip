@@ -5,6 +5,7 @@
 #include <npc_verilog.h>
 #include <verilated.h>
 #include <verilated_vcd_c.h>
+#include <nvboard.h>
 
 extern char *regs[];
 void difftest_skip_ref();
@@ -262,6 +263,8 @@ void sdb_sim_init(int argc, char **argv)
     tfp->dump(contextp->time());
   }
   contextp->timeInc(1);
+
+  nvboard_init();
 }
 
 void engine_start()
