@@ -84,7 +84,6 @@ SECTIONS {
     } > sdram AT> flash : data
   _data_end = ADDR(.bss);
   _data_load_start = LOADADDR(.data);
-  edata = .;
   .bss :
     {
       _bss_start = .;
