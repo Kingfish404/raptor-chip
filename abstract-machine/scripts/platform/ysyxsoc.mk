@@ -4,7 +4,9 @@ AM_SRCS := riscv/ysyxsoc/start.S \
            riscv/ysyxsoc/input.c \
 		   riscv/ysyxsoc/cte.c \
 		   riscv/ysyxsoc/timer.c \
-           riscv/ysyxsoc/trap.S
+           riscv/ysyxsoc/trap.S \
+           platform/dummy/vme.c \
+           platform/dummy/mpe.c
 
 CFLAGS    += -fdata-sections -ffunction-sections
 LDFLAGS   += -T $(AM_HOME)/scripts/linker.ysyxsoc.ld \
