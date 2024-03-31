@@ -249,7 +249,7 @@ module ysyx_BUS_ARBITER(
       if (io_master_arvalid)
         begin
           if (
-            (io_master_araddr >= 'h10000001 && io_master_araddr <= 'h10000005) ||
+            (io_master_araddr >= 'h10000000 && io_master_araddr <= 'h10000005) ||
             (io_master_araddr >= 'h10001000 && io_master_araddr <= 'h10001fff) ||
             (io_master_araddr >= 'h10002000 && io_master_araddr <= 'h1000200f) ||
             (0)
