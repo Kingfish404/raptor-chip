@@ -49,7 +49,6 @@ static void cpu_exec_one_cycle()
 #ifdef CONFIG_NVBoard
   nvboard_update();
 #endif
-  // pmem_read(*(npc.pc), (word_t *)&(top->inst));
 
   top->clock = (top->clock == 0) ? 1 : 0;
   top->eval();
