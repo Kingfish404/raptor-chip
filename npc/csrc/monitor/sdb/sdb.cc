@@ -267,8 +267,9 @@ void sdb_sim_init(int argc, char **argv)
   contextp->timeInc(1);
 
 #ifdef CONFIG_NVBoard
+#define VERILOG_PREFIX_PERIPHERAL top->rootp->ysyxSoCFull__DOT__asic__DOT__
   nvboard_bind_pin(
-      &top->rootp->ysyxSoCFull__DOT__asic__DOT__lgpio__DOT__mgpio__DOT__gpio,
+      &VERILOG_PREFIX_PERIPHERALlgpio__DOT__mgpio__DOT__gpio,
       16, LD15, LD14, LD13, LD12, LD11, LD10, LD9, LD8, LD7, LD6, LD5, LD4, LD3, LD2, LD1, LD0);
 
   nvboard_bind_pin(
@@ -285,6 +286,7 @@ void sdb_sim_init(int argc, char **argv)
   nvboard_bind_pin(&top->rootp->ysyxSoCFull__DOT__asic__DOT__lgpio__DOT__mgpio__DOT__seg7, 8, SEG7A, SEG7B, SEG7C, SEG7D, SEG7E, SEG7F, SEG7G, DEC7P);
 
   nvboard_bind_pin(&top->rootp->ysyxSoCFull__DOT__asic__DOT__luart__DOT__muart__DOT__Uregs__DOT__transmitter__DOT__stx_o_tmp, 1, UART_TX);
+  nvboard_bind_pin(&top->rootp->ysyxSoCFull__DOT__asic__DOT__luart__DOT__muart__DOT__Uregs__DOT__srx_pad, 1, UART_RX);
 
   nvboard_init();
 #endif
