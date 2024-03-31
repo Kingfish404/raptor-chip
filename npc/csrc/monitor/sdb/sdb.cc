@@ -289,6 +289,7 @@ void sdb_sim_init(int argc, char **argv)
       &CONCAT(VERILOG_PREFIX_PERIP, luart__DOT__muart__DOT__Uregs__DOT__transmitter__DOT__stx_o_tmp),
       1, UART_TX);
   nvboard_bind_pin(
+    
       &CONCAT(VERILOG_PREFIX_PERIP, luart__DOT__muart__DOT__Uregs__DOT__receiver__DOT__rf_push),
       1, UART_RX);
 
