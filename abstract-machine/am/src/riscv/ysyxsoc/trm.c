@@ -98,6 +98,10 @@ void _trm_init()
 {
   init_uart();
   putch('U');
+  for (int i = 0; i < 0xff; i++)
+  {
+    asm volatile("nop");
+  }
   asm volatile("ebreak\n\t");
   uint32_t mvendorid, marchid;
   asm volatile(
