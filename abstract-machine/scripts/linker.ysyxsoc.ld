@@ -63,7 +63,7 @@ SECTIONS {
     __vsymtab_end = .;
     . = ALIGN(8);
 
-    /* . = ALIGN(8);
+    . = ALIGN(8);
     __rt_init_start = .;
     KEEP(*(SORT(.rti_fn*)))
     __rt_init_end = .;
@@ -78,14 +78,13 @@ SECTIONS {
     *(__am_apps.sdata*)
     __am_apps_data_end = .;
     . = ALIGN(8);
-    __rt_utest_tc_tab_end = .; */
+    __rt_utest_tc_tab_end = .;
     /* end for rt-thread */
       
     } > sdram AT> flash : data
   _data_end = ADDR(.bss);
   _data_load_start = LOADADDR(.data);
   edata = .;
-  _data = .;
   .bss :
     {
       _bss_start = .;
