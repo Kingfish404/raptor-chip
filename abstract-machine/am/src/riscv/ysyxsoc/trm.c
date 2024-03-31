@@ -97,9 +97,7 @@ __attribute__((section(".second_boot"))) void _second_stage_bootloader()
 void _trm_init()
 {
   init_uart();
-  putch('U');
-  putch('^');
-  putch('N');
+  putch(0b00111110);
   for (int i = 0; i < 0x1f; i++)
   {
     asm volatile("nop");
