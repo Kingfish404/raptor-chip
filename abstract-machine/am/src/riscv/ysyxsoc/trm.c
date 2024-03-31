@@ -98,6 +98,8 @@ void _trm_init()
 {
   init_uart();
   putch('U');
+  putch('^');
+  putch('N');
   for (int i = 0; i < 0xff; i++)
   {
     asm volatile("nop");
