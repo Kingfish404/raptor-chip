@@ -288,8 +288,8 @@ void sdb_sim_init(int argc, char **argv)
   nvboard_bind_pin(
       &top->rootp->ysyxSoCFull__DOT__asic__DOT__luart__DOT__muart__DOT__Uregs__DOT__serial_out,
       1, UART_TX);
-  nvboard_bind_pin(
 
+  nvboard_bind_pin(
       &top->rootp->ysyxSoCFull__DOT__asic__DOT__luart__DOT__muart__DOT__Uregs__DOT__i_uart_sync_flops__DOT__flop_0,
       1, UART_RX);
 
