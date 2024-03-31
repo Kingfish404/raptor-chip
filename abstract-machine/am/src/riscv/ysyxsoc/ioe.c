@@ -17,7 +17,7 @@ static void __am_uart_tx(AM_UART_TX_T *send)
 
 static void __am_uart_rx(AM_UART_RX_T *recv)
 {
-    recv->data = (inb(UART16550_LSR) & (0x1 << 0)) ? inb(UART16550_RX) : -1;
+    recv->data = (inb(UART16550_LSR) & (0x1 << 0)) ? inb(UART16550_RX) : 0xff;
 }
 
 static void __am_timer_config(AM_TIMER_CONFIG_T *cfg)
