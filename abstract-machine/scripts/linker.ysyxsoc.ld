@@ -71,6 +71,13 @@ SECTIONS {
 
     __rt_utest_tc_tab_start = .;
     KEEP(*(UtestTcTab))
+
+    . = ALIGN(8);
+    __am_apps_data_start = .;
+    *(__am_apps.data*)
+    *(__am_apps.sdata*)
+    __am_apps_data_end = .;
+    . = ALIGN(8);
     __rt_utest_tc_tab_end = .;
     /* end for rt-thread */
       
