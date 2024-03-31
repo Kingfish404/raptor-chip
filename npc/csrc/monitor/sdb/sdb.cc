@@ -286,7 +286,7 @@ void sdb_sim_init(int argc, char **argv)
   nvboard_bind_pin(&CONCAT(VERILOG_PREFIX_PERIP, lgpio__DOT__mgpio__DOT__seg7), 8, SEG7A, SEG7B, SEG7C, SEG7D, SEG7E, SEG7F, SEG7G, DEC7P);
 
   nvboard_bind_pin(
-      &CONCAT(VERILOG_PREFIX_PERIP, luart__DOT__muart__DOT__Uregs__DOT__transmitter__DOT__stx_o_tmp),
+      &top->rootp->ysyxSoCFull__DOT__asic__DOT__luart__DOT__muart__DOT__Uregs__DOT__serial_out,
       1, UART_TX);
   nvboard_bind_pin(
 
