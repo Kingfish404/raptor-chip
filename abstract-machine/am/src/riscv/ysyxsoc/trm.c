@@ -97,8 +97,6 @@ __attribute__((section(".second_boot"))) void _second_stage_bootloader()
 void _trm_init()
 {
   init_uart();
-  putch(0b00111110);
-  // asm volatile("ebreak\n\t");
   uint32_t mvendorid, marchid;
   asm volatile(
       "csrr %0, mvendorid\n\t"
