@@ -289,7 +289,7 @@ void sdb_sim_init(int argc, char **argv)
       &CONCAT(VERILOG_PREFIX_PERIP, luart__DOT__muart__DOT__Uregs__DOT__transmitter__DOT__stx_o_tmp),
       1, UART_TX);
   nvboard_bind_pin(
-      &CONCAT(VERILOG_PREFIX_PERIP, ysyxSoCFull__DOT__asic__DOT__luart__DOT__muart__DOT__Uregs__DOT__i_uart_sync_flops__DOT__flop_0),
+      &CONCAT(VERILOG_PREFIX_PERIP, luart__DOT__muart__DOT__Uregs__DOT__i_uart_sync_flops__DOT__flop_0),
       1, UART_RX);
 
   nvboard_init();
