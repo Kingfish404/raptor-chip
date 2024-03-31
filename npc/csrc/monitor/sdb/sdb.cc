@@ -284,7 +284,8 @@ void sdb_sim_init(int argc, char **argv)
   nvboard_bind_pin(&top->rootp->ysyxSoCFull__DOT__asic__DOT__lgpio__DOT__mgpio__DOT__seg6, 8, SEG6A, SEG6B, SEG6C, SEG6D, SEG6E, SEG6F, SEG6G, DEC6P);
   nvboard_bind_pin(&top->rootp->ysyxSoCFull__DOT__asic__DOT__lgpio__DOT__mgpio__DOT__seg7, 8, SEG7A, SEG7B, SEG7C, SEG7D, SEG7E, SEG7F, SEG7G, DEC7P);
 
-  nvboard_bind_pin(&top->rootp->ysyxSoCFull__DOT__asic__DOT__luart__DOT__muart__DOT__reg_dat8_w, 1, UART_TX);
+  nvboard_bind_pin(&top->rootp->ysyxSoCFull__DOT__asic__DOT__luart__DOT__muart__DOT__Uregs__DOT__i_uart_sync_flops__DOT__flop_0, 1, UART_TX);
+  nvboard_bind_pin(&top->rootp->ysyxSoCFull__DOT__asic__DOT__luart__DOT__muart__DOT__Uregs__DOT__i_uart_sync_flops__DOT__flop_0, 1, UART_RX);
 
   nvboard_init();
 #endif
