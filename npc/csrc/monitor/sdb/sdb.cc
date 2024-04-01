@@ -267,13 +267,12 @@ void sdb_sim_init(int argc, char **argv)
   contextp->timeInc(1);
 
 #ifdef CONFIG_NVBoard
-#define VERILOG_PREFIX_PERIP top->rootp->ysyxSoCFull__DOT__asic__DOT__
   nvboard_bind_pin(
       &top->externalPins_gpio_out,
       16, LD15, LD14, LD13, LD12, LD11, LD10, LD9, LD8, LD7, LD6, LD5, LD4, LD3, LD2, LD1, LD0);
 
   nvboard_bind_pin(
-      &CONCAT(VERILOG_PREFIX_PERIP, lgpio__DOT__mgpio__DOT__switch),
+      &top->externalPins_gpio_in,
       16, SW15, SW14, SW13, SW12, SW11, SW10, SW9, SW8, SW7, SW6, SW5, SW4, SW3, SW2, SW1, SW0);
 
   nvboard_bind_pin(&top->externalPins_gpio_seg_0, 8, SEG0A, SEG0B, SEG0C, SEG0D, SEG0E, SEG0F, SEG0G, DEC0P);
