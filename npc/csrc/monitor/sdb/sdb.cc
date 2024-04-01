@@ -288,6 +288,7 @@ void sdb_sim_init(int argc, char **argv)
   nvboard_bind_pin(&top->externalPins_uart_rx, 1, UART_RX);
 
   nvboard_bind_pin(&top->externalPins_ps2_clk, 1, PS2_CLK);
+  nvboard_bind_pin(&top->externalPins_ps2_data, 1, PS2_DAT);
 
   nvboard_init();
 #endif
