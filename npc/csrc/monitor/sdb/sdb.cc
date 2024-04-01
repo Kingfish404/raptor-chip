@@ -294,10 +294,10 @@ void sdb_sim_init(int argc, char **argv)
   // nvboard_bind_pin(&CONCAT(VERILOG_PREFIX_PERIP, lgpio__DOT__mgpio__DOT__seg6), 8, SEG6A, SEG6B, SEG6C, SEG6D, SEG6E, SEG6F, SEG6G, DEC6P);
   // nvboard_bind_pin(&CONCAT(VERILOG_PREFIX_PERIP, lgpio__DOT__mgpio__DOT__seg7), 8, SEG7A, SEG7B, SEG7C, SEG7D, SEG7E, SEG7F, SEG7G, DEC7P);
 
-  nvboard_bind_pin(&top->rootp->externalPins_uart_tx, 1, UART_TX);
-  nvboard_bind_pin(&top->rootp->externalPins_uart_rx, 1, UART_RX);
+  nvboard_bind_pin(&top->externalPins_uart_tx, 1, UART_TX);
+  nvboard_bind_pin(&top->externalPins_uart_rx, 1, UART_RX);
 
-  nvboard_bind_pin(&top->rootp->externalPins_ps2_clk, 1, PS2_CLK);
+  nvboard_bind_pin(&top->externalPins_ps2_clk, 1, PS2_CLK);
 
   nvboard_init();
 #endif
