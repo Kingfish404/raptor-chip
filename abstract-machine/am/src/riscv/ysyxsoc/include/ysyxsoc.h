@@ -13,6 +13,8 @@
 #define UART16550_DL2 UART16550_BASE + 0x01
 #define UART16550_LSR UART16550_BASE + 0x05
 
+#define KBD_ADDR 0x10011000
+
 #define RTC_ADDR 0x02000048
 
 typedef uintptr_t PTE;
