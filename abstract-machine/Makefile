@@ -108,6 +108,7 @@ endif
 $(DST_DIR)/%.o: %.c
 	@mkdir -p $(dir $@) && echo + CC $<
 	@$(CC) -std=gnu11 -Wno-main $(CFLAGS) -c -o $@ $(realpath $<)
+	echo $(CC) -std=gnu11 -Wno-main $(CFLAGS) -c -o $@ $(realpath $<)
 
 ### Rule (compile): a single `.cc` -> `.o` (g++)
 $(DST_DIR)/%.o: %.cc
