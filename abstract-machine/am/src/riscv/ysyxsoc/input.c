@@ -48,7 +48,7 @@ void __am_input_keybrd(AM_INPUT_KEYBRD_T *kbd)
   if (keycode != 0)
   {
     kbd->keydown = 1;
-    keycode = ps2_keymap[keycode];
+    // keycode = ps2_keymap[keycode];
   }
   kbd->keycode = keycode;
 }
