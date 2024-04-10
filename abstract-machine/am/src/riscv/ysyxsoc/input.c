@@ -49,7 +49,7 @@ uint8_t ps2_keymap[256] = {
     [0x4d] = AM_KEY_P,
     [0x54] = AM_KEY_LEFTBRACKET,
     [0x5b] = AM_KEY_RIGHTBRACKET,
-    [0x5a] = AM_KEY_BACKSLASH,
+    [0x5d] = AM_KEY_BACKSLASH,
 
     [0x14] = AM_KEY_CAPSLOCK,
     [0x1c] = AM_KEY_A,
