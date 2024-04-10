@@ -39,6 +39,12 @@ uint8_t ps2_keymap[256] = {
     [0x3d] = AM_KEY_7,
     [0x3e] = AM_KEY_8,
     [0x46] = AM_KEY_9,
+    [0x0e] = AM_KEY_BACKSPACE,
+    [0x4e] = AM_KEY_DELETE,
+    [0x5a] = AM_KEY_RETURN,
+    [0x76] = AM_KEY_ESCAPE,
+    [0x7d] = AM_KEY_PAGEUP,
+    [0x7a] = AM_KEY_PAGEDOWN,
 };
 
 void __am_input_keybrd(AM_INPUT_KEYBRD_T *kbd)
@@ -48,7 +54,7 @@ void __am_input_keybrd(AM_INPUT_KEYBRD_T *kbd)
   if (keycode != 0)
   {
     kbd->keydown = 1;
-    // keycode = ps2_keymap[keycode];
+    keycode = ps2_keymap[keycode];
   }
   kbd->keycode = keycode;
 }
