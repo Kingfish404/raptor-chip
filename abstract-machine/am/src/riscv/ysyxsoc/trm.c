@@ -75,9 +75,9 @@ __attribute__((section(".first_boot"))) void _first_stage_bootloader(void)
 
 __attribute__((section(".second_boot"))) void _second_stage_bootloader()
 {
+  size_t start_time = io_read(AM_TIMER_UPTIME).us;
   if ((size_t)_text_start != (size_t)_text_load_start)
   {
-    size_t start_time = io_read(AM_TIMER_UPTIME).us;
     size_t text_size = _text_end - _text_start;
     size_t text_size_u32_fix = text_size / 4;
     for (size_t i = 0; i < text_size_u32_fix; i++)
@@ -92,9 +92,8 @@ __attribute__((section(".second_boot"))) void _second_stage_bootloader()
     // {
     //   _text_start[i] = _text_load_start[i];
     // }
-    size_t end_time = io_read(AM_TIMER_UPTIME).us;
-    printf("copy text section time: %ld us\n", end_time - start_time);
   }
+  size_t end_time = io_read(AM_TIMER_UPTIME).us;
   if ((size_t)_rodata_start != (size_t)_rodata_load_start)
   {
     size_t rodata_size = _rodata_end - _rodata_start;
@@ -105,6 +104,7 @@ __attribute__((section(".second_boot"))) void _second_stage_bootloader()
     size_t data_size = _data_end - _data_start;
     memcpy(_data_start, _data_load_start, (size_t)data_size);
   }
+  printf("copy text section time: %ld us\n", end_time - start_time);
   _trm_init();
 }
 
