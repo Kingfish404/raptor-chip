@@ -56,9 +56,6 @@ SECTIONS {
     _data_start = .;
       *(.data*)
       *(.sdata*)
-      *(.symtab)
-      *(.strtab)
-      *(.shstrtab)
 
     /* for rt-thread */
     __fsymtab_start = .;
