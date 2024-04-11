@@ -61,12 +61,10 @@ void halt(int code)
     ;
 }
 
-size_t fsb_start_time, fsb_end_time;
 size_t ssb_start_time, ssb_end_time;
 
 __attribute__((section(".first_boot"))) void _first_stage_bootloader(void)
 {
-  fsb_start_time = ((*((uint32_t *)RTC_ADDR + 4)) << 32) + *((uint32_t *)RTC_ADDR);
   if ((size_t)_second_boot_start != (size_t)_second_boot_load_start)
   {
     size_t text_size = _second_boot_end - _second_boot_start;
@@ -75,7 +73,6 @@ __attribute__((section(".first_boot"))) void _first_stage_bootloader(void)
       _second_boot_start[i] = _second_boot_load_start[i];
     }
   }
-  fsb_end_time = ((*((uint32_t *)RTC_ADDR + 4)) << 32) + *((uint32_t *)RTC_ADDR);
   _second_stage_bootloader();
 }
 
@@ -113,6 +110,7 @@ void _trm_init()
 {
   init_uart();
   ioe_init();
+  printf("first boot time: %ld us\n", ssb_start_time);
   printf("second boot time: %ld us\n", ssb_end_time - ssb_start_time);
   asm volatile("ebreak");
   uint32_t mvendorid, marchid;
