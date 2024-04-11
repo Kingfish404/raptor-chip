@@ -95,10 +95,10 @@ void *memset(void *s, int c, size_t n)
 void *memcpy(void *out, const void *in, size_t n)
 {
   size_t n_u32 = n / 4;
-  // for (size_t i = 0; i < n_u32; i++)
-  // {
-  //   ((uint32_t *)out)[i] = ((uint32_t *)in)[i];
-  // }
+  for (size_t i = 0; i < n_u32; i++)
+  {
+    ((uint32_t *)out)[i] = ((uint32_t *)in)[i];
+  }
   for (size_t i = n_u32 * 4; i < n; i++)
   {
     ((char *)out)[i] = ((char *)in)[i];
