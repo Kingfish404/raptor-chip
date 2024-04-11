@@ -48,6 +48,7 @@ SECTIONS {
       *(.comment)
       *(.symtab)
       *(.strtab)
+      *(.shstrtab)
       rodata_end = .;
     } > sdram AT> flash
   _rodata_end = ADDR(.data);
