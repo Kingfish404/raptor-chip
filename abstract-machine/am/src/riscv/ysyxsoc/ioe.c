@@ -61,6 +61,7 @@ bool ioe_init()
         if (!lut[i])
             lut[i] = fail;
     __am_timer_init();
+    __am_gpu_init();
     return true;
 }
 
