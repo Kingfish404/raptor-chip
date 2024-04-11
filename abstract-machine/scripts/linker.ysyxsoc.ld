@@ -46,6 +46,7 @@ SECTIONS {
       *(.srodata*)
       *(.debug*)
       *(.comment)
+      *(.riscv.attributes)
       *(.symtab)
       *(.strtab)
       *(.shstrtab)
