@@ -43,6 +43,7 @@ SECTIONS {
     {
       _rodata_start = .;
       *(.rodata*)
+      *(.srodata*)
       rodata_end = .;
     } > sdram AT> flash
   _rodata_end = ADDR(.data);
@@ -52,7 +53,6 @@ SECTIONS {
     _data_start = .;
       *(.data*)
       *(.sdata*)
-      *(.srodata*)
 
     /* for rt-thread */
     __fsymtab_start = .;
