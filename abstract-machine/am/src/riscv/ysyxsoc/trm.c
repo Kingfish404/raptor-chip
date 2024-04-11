@@ -123,7 +123,7 @@ void _trm_init()
       "csrr %1, marchid\n\t"
       : "=r"(mvendorid), "=r"(marchid) :);
   size_t ready_time = ((*((uint32_t *)RTC_ADDR + 4)) << 32) + *((uint32_t *)RTC_ADDR);
-  printf("[%d\t] trm init finish, mvendorid: 0x%lx, marchid: %ld\n", ready_time, mvendorid, marchid);
+  printf("[%d] trm init finish, mvendorid: 0x%lx, marchid: %ld\n", ready_time, mvendorid, marchid);
 
   int ret = main(mainargs);
   halt(ret);
