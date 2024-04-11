@@ -73,9 +73,11 @@ __attribute__((section(".first_boot"))) void _first_stage_bootloader(void)
   _second_stage_bootloader();
 }
 
+size_t boot_text_time_s, boot_text_time_e;
+
 __attribute__((section(".second_boot"))) void _second_stage_bootloader()
 {
-  size_t start_time = *((uint32_t *)RTC_ADDR);
+  boot_text_time_s = *((uint32_t *)RTC_ADDR);
   if ((size_t)_text_start != (size_t)_text_load_start)
   {
     size_t text_size = _text_end - _text_start;
@@ -93,7 +95,7 @@ __attribute__((section(".second_boot"))) void _second_stage_bootloader()
     //   _text_start[i] = _text_load_start[i];
     // }
   }
-  size_t end_time = *((uint32_t *)RTC_ADDR);
+  boot_text_time_e = *((uint32_t *)RTC_ADDR);
   if ((size_t)_rodata_start != (size_t)_rodata_load_start)
   {
     size_t rodata_size = _rodata_end - _rodata_start;
@@ -104,7 +106,6 @@ __attribute__((section(".second_boot"))) void _second_stage_bootloader()
     size_t data_size = _data_end - _data_start;
     memcpy(_data_start, _data_load_start, (size_t)data_size);
   }
-  // printf("copy text section time: %ld us\n", end_time - start_time);
   _trm_init();
 }
 
@@ -112,6 +113,7 @@ void _trm_init()
 {
   init_uart();
   ioe_init();
+  printf("copy text section time: %ld us\n", boot_text_time_e - boot_text_time_s);
   uint32_t mvendorid, marchid;
   asm volatile(
       "csrr %0, mvendorid\n\t"
