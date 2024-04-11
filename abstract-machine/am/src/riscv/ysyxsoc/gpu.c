@@ -9,10 +9,10 @@ void __am_gpu_init()
     uint32_t *fb = (uint32_t *)(uintptr_t)FB_ADDR;
     for (int j = 0; j < h; j++)
     {
-        uint32_t h_addr = (j << 9);
+        uint32_t v_addr = (j << 9);
         for (int i = 0; i < w; i++)
         {
-            fb[(h_addr) + i] = i * j;
+            fb[(v_addr) + i] = i * j;
             break;
         }
     }
