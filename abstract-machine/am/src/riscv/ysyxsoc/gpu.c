@@ -28,8 +28,8 @@ void __am_gpu_fbdraw(AM_GPU_FBDRAW_T *ctl)
 {
     int x = ctl->x, y = ctl->y, w = ctl->w, h = ctl->h;
     uint32_t *pixels = ctl->pixels;
-    int H = VGACTL_WIDTH;
-    int W = VGACTL_HEIGHT;
+    int H = VGACTL_HEIGHT;
+    int W = VGACTL_WIDTH;
     uint32_t *fb = (uint32_t *)(uintptr_t)FB_ADDR;
     for (int j = 0; j < h && y + j < H; j++)
     {
