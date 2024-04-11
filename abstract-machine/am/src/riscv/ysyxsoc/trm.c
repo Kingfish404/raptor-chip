@@ -114,7 +114,7 @@ void _trm_init()
   init_uart();
   ioe_init();
   printf("copy text section time: %ld us\n", boot_text_time_e - boot_text_time_s);
-  return;
+  asm volatile("ebreak");
   uint32_t mvendorid, marchid;
   asm volatile(
       "csrr %0, mvendorid\n\t"
