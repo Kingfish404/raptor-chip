@@ -117,7 +117,6 @@ void _trm_init()
   ioe_init();
   printf("[%d] first stage boot loader finish\n", ssb_start_time);
   printf("[%d] second stage boot loader finish\n", ssb_end_time - ssb_start_time);
-  asm volatile("ebreak");
   uint32_t mvendorid, marchid;
   asm volatile(
       "csrr %0, mvendorid\n\t"
