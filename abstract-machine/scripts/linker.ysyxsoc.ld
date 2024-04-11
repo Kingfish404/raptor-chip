@@ -44,7 +44,6 @@ SECTIONS {
     {
       _rodata_start = .;
       *(.rodata*)
-      *(.srodata*)
 
       rodata_end = .;
     } > sdram AT> flash : rodata
