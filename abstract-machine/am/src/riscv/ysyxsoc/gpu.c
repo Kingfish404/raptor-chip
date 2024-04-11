@@ -13,7 +13,6 @@ void __am_gpu_init()
         for (int i = 0; i < w; i++)
         {
             fb[(i << 9) + j] = i * j;
-            break;
         }
     }
 }
