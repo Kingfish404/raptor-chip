@@ -45,6 +45,9 @@ SECTIONS {
       *(.rodata*)
       *(.srodata*)
       *(.debug*)
+      *(.comment)
+      *(.symtab)
+      *(.strtab)
       rodata_end = .;
     } > sdram AT> flash
   _rodata_end = ADDR(.data);
