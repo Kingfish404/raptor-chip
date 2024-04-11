@@ -43,6 +43,8 @@ SECTIONS {
     {
       _rodata_start = .;
       *(.rodata*)
+      *(.srodata*)
+
       rodata_end = .;
     } > sdram AT> flash
   _rodata_end = ADDR(.data);
