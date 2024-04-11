@@ -8,6 +8,7 @@ extern char _heap_start;
 int main(const char *args);
 void _second_stage_bootloader();
 void _trm_init();
+bool ioe_init();
 
 extern char _pmem_start;
 
@@ -97,6 +98,7 @@ __attribute__((section(".second_boot"))) void _second_stage_bootloader()
 void _trm_init()
 {
   init_uart();
+  ioe_init();
   uint32_t mvendorid, marchid;
   asm volatile(
       "csrr %0, mvendorid\n\t"
