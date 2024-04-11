@@ -1,6 +1,7 @@
 PHDRS { 
   first_boot PT_LOAD;
   second_boot PT_LOAD;
+  rodata PT_LOAD;
   text PT_LOAD;
   data PT_LOAD;
   bss PT_LOAD;
@@ -46,7 +47,7 @@ SECTIONS {
       *(.srodata*)
 
       rodata_end = .;
-    } > sdram AT> flash : text
+    } > sdram AT> flash : rodata
   _rodata_end = ADDR(.data);
   _rodata_load_start = LOADADDR(.rodata);
   .data :
