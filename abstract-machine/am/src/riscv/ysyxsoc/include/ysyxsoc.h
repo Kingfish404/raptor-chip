@@ -17,6 +17,10 @@
 
 #define RTC_ADDR 0x02000048
 
+#define VGACTL_ADDR 0x21000000
+
+#define FB_ADDR 0x21000000
+
 typedef uintptr_t PTE;
 
 #define PGSIZE 4096
