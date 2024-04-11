@@ -5,7 +5,6 @@
 
 void __am_gpu_init()
 {
-    return;
     int i;
     int w = inl(VGACTL_ADDR) >> 16;
     int h = inl(VGACTL_ADDR) & 0xffff;
