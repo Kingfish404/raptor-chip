@@ -14,7 +14,6 @@ void __am_gpu_init()
         {
             fb[(i << 9) + j] = i * j;
         }
-        break;
     }
 }
 
