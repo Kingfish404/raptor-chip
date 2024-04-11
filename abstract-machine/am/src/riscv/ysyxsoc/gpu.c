@@ -12,7 +12,7 @@ void __am_gpu_init()
         uint32_t v_addr = (j << 9);
         for (int i = 0; i < w; i++)
         {
-            fb[(i << 9) + j] = i * j;
+            fb[(i << 9) + j] = i;
         }
     }
 }
