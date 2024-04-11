@@ -110,8 +110,8 @@ void _trm_init()
 {
   init_uart();
   ioe_init();
-  printf("first boot time: %ld us\n", ssb_start_time);
-  printf("second boot time: %ld us\n", ssb_end_time - ssb_start_time);
+  printf("[%lx] first boot\n", ssb_start_time);
+  printf("[%lx] second boot\n", ssb_end_time - ssb_start_time);
   asm volatile("ebreak");
   uint32_t mvendorid, marchid;
   asm volatile(
