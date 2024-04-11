@@ -77,6 +77,7 @@ __attribute__((section(".second_boot"))) void _second_stage_bootloader()
   if ((size_t)_text_start != (size_t)_text_load_start)
   {
     size_t text_size = _text_end - _text_start;
+    size_t text_size_u32_fix = text_size / 4;
     for (size_t i = 0; i < text_size; i++)
     {
       _text_start[i] = _text_load_start[i];
