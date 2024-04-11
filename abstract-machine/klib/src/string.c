@@ -94,6 +94,17 @@ void *memset(void *s, int c, size_t n)
 
 void *memcpy(void *out, const void *in, size_t n)
 {
+  size_t n_u32 = n & ~0x3;
+  size_t n_u8 = n & 0x3;
+  for (size_t i = 0; i < n_u32; i += 4)
+  {
+    ((uint32_t *)out)[i / 4] = ((uint32_t *)in)[i / 4];
+  }
+  for (size_t i = n_u32; i < n; i++)
+  {
+    ((char *)out)[i] = ((char *)in)[i];
+  }
+
   for (size_t i = 0; i < n; i++)
   {
     ((char *)out)[i] = ((char *)in)[i];
@@ -119,21 +130,6 @@ void *memmove(void *dst, const void *src, size_t n)
 
 int memcmp(const void *s1, const void *s2, size_t n)
 {
-  // size_t n_u64 = n / 8;
-  // for (size_t i = 0; i < n_u64; i++)
-  // {
-  //   if (((uint64_t *)s1)[i] != ((uint64_t *)s2)[i])
-  //   {
-  //     return ((uint64_t *)s1)[i] - ((uint64_t *)s2)[i];
-  //   }
-  // }
-  // for (size_t i = n_u64 * 8; i < n; i++)
-  // {
-  //   if (((char *)s1)[i] != ((char *)s2)[i])
-  //   {
-  //     return ((char *)s1)[i] - ((char *)s2)[i];
-  //   }
-  // }
   for (size_t i = 0; i < n; i++)
   {
     if (((char *)s1)[i] != ((char *)s2)[i])
