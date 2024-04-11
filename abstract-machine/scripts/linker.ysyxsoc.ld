@@ -47,9 +47,6 @@ SECTIONS {
       *(.debug*)
       *(.comment)
       *(.riscv.attributes)
-      *(.symtab)
-      *(.strtab)
-      *(.shstrtab)
       rodata_end = .;
     } > sdram AT> flash
   _rodata_end = ADDR(.data);
@@ -59,6 +56,9 @@ SECTIONS {
     _data_start = .;
       *(.data*)
       *(.sdata*)
+      *(.symtab)
+      *(.strtab)
+      *(.shstrtab)
 
     /* for rt-thread */
     __fsymtab_start = .;
