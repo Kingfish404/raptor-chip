@@ -31,11 +31,12 @@ void __am_gpu_fbdraw(AM_GPU_FBDRAW_T *ctl)
     int H = VGACTL_HEIGHT;
     int W = VGACTL_WIDTH;
     uint32_t *fb = (uint32_t *)(uintptr_t)FB_ADDR;
-    for (int j = 0; j < h && y + j < H; j++)
+    for (int i = 0; i < w && x + i < W; i++)
     {
-        for (int i = 0; i < w && x + i < W; i++)
+        uint32_t h_addr = (x + i) << 9;
+        for (int j = 0; j < h && y + j < H; j++)
         {
-            fb[((x + i) << 9) + (y + j)] = pixels[i];
+            fb[h_addr + (y + j)] = pixels[i];
         }
         pixels += w;
     }
