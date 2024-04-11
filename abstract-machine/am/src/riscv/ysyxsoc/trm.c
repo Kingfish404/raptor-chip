@@ -77,7 +77,7 @@ size_t boot_text_time_s, boot_text_time_e;
 
 __attribute__((section(".second_boot"))) void _second_stage_bootloader()
 {
-  boot_text_time_s = *((uint32_t *)RTC_ADDR);
+  boot_text_time_s = ((*((uint32_t *)RTC_ADDR + 4)) << 32) + *((uint32_t *)RTC_ADDR);
   if ((size_t)_text_start != (size_t)_text_load_start)
   {
     size_t text_size = _text_end - _text_start;
@@ -95,7 +95,7 @@ __attribute__((section(".second_boot"))) void _second_stage_bootloader()
     //   _text_start[i] = _text_load_start[i];
     // }
   }
-  boot_text_time_e = *((uint32_t *)RTC_ADDR);
+  boot_text_time_e = ((*((uint32_t *)RTC_ADDR + 4)) << 32) + *((uint32_t *)RTC_ADDR);
   if ((size_t)_rodata_start != (size_t)_rodata_load_start)
   {
     size_t rodata_size = _rodata_end - _rodata_start;
