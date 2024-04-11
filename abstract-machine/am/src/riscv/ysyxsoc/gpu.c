@@ -3,12 +3,16 @@
 
 void __am_gpu_init()
 {
-    int i;
     int w = VGACTL_WIDTH;
     int h = VGACTL_HEIGHT;
     uint32_t *fb = (uint32_t *)(uintptr_t)FB_ADDR;
-    for (i = 0; i < w * h; i++)
-        fb[i] = i;
+    for (int i = 0; i < w; i++)
+    {
+        for (int j = 0; j < h; j++)
+        {
+            fb[(i << 8) + j] = i * j;
+        }
+    }
 }
 
 void __am_gpu_config(AM_GPU_CONFIG_T *cfg)
