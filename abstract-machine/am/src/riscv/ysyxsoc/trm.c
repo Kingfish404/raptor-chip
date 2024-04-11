@@ -1,8 +1,9 @@
+#include <string.h>
+#include <stdio.h>
+
 #include <am.h>
 #include <ysyxsoc.h>
 #include <klib-macros.h>
-#include <string.h>
-#include <stdio.h>
 
 extern char _heap_start;
 int main(const char *args);
@@ -76,6 +77,7 @@ __attribute__((section(".second_boot"))) void _second_stage_bootloader()
 {
   if ((size_t)_text_start != (size_t)_text_load_start)
   {
+    size_t start_time = io_read(AM_TIMER_UPTIME).us;
     size_t text_size = _text_end - _text_start;
     size_t text_size_u32_fix = text_size / 4;
     for (size_t i = 0; i < text_size_u32_fix; i++)
@@ -90,6 +92,8 @@ __attribute__((section(".second_boot"))) void _second_stage_bootloader()
     // {
     //   _text_start[i] = _text_load_start[i];
     // }
+    size_t end_time = io_read(AM_TIMER_UPTIME).us;
+    printf("copy text section time: %ld us\n", end_time - start_time);
   }
   if ((size_t)_rodata_start != (size_t)_rodata_load_start)
   {
