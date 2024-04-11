@@ -98,7 +98,7 @@ void *memcpy(void *out, const void *in, size_t n)
   size_t n_u8 = n & 0x3;
   for (size_t i = 0; i < n_u32; i += 4)
   {
-    ((uint32_t *)out)[i / 4] = ((uint32_t *)in)[i / 4];
+    ((uint32_t *)out)[i] = ((uint32_t *)in)[i];
   }
   for (size_t i = n_u32; i < n; i++)
   {
