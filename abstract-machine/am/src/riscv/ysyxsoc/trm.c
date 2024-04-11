@@ -114,18 +114,17 @@ __attribute__((section(".second_boot"))) void _second_stage_bootloader()
 void _trm_init()
 {
   init_uart();
-  ioe_init();
   printf("[%d] \tfirst stage boot loader finish\n", ssb_start_time);
   printf("[%d] \tsecond stage boot loader finish\n", ssb_end_time);
+  ioe_init();
   uint32_t mvendorid, marchid;
   asm volatile(
       "csrr %0, mvendorid\n\t"
       "csrr %1, marchid\n\t"
       : "=r"(mvendorid), "=r"(marchid) :);
-  printf("mvendorid: 0x%lx, marchid: %ld\n", mvendorid, marchid);
-
   size_t ready_time = ((*((uint32_t *)RTC_ADDR + 4)) << 32) + *((uint32_t *)RTC_ADDR);
-  printf("[%d] trm init finish\n", ready_time - ssb_end_time);
+  printf("[%d] trm init finish, mvendorid: 0x%lx, marchid: %ld\n", ready_time, mvendorid, marchid);
+
   int ret = main(mainargs);
   halt(ret);
 }
