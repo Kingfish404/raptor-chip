@@ -114,8 +114,8 @@ __attribute__((section(".second_boot"))) void _second_stage_bootloader()
 void _trm_init()
 {
   init_uart();
-  printf("[%d\t\t] first stage boot loader finish\n", ssb_start_time);
-  printf("[%d\t\t] second stage boot loader finish\n", ssb_end_time);
+  printf("[%d\t] first stage boot loader finish\n", ssb_start_time);
+  printf("[%d\t] second stage boot loader finish\n", ssb_end_time);
   ioe_init();
   uint32_t mvendorid, marchid;
   asm volatile(
