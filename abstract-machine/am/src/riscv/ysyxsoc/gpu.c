@@ -7,7 +7,7 @@ void __am_gpu_init()
     int w = VGACTL_WIDTH;
     int h = VGACTL_HEIGHT;
     uint32_t *fb = (uint32_t *)(uintptr_t)FB_ADDR;
-    for (i = 0; i < w; i++)
+    for (i = 0; i < w * h; i++)
         fb[i] = i;
 }
 
