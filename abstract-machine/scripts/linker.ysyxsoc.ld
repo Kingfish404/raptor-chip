@@ -52,6 +52,7 @@ SECTIONS {
     _data_start = .;
       *(.data*)
       *(.sdata*)
+      *(.srodata*)
 
     /* for rt-thread */
     __fsymtab_start = .;
