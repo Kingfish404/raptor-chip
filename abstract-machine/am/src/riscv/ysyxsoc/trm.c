@@ -104,7 +104,7 @@ __attribute__((section(".second_boot"))) void _second_stage_bootloader()
     size_t data_size = _data_end - _data_start;
     memcpy(_data_start, _data_load_start, (size_t)data_size);
   }
-  printf("copy text section time: %ld us\n", end_time - start_time);
+  // printf("copy text section time: %ld us\n", end_time - start_time);
   _trm_init();
 }
 
