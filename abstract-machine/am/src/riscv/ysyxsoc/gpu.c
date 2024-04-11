@@ -10,7 +10,7 @@ void __am_gpu_init()
     {
         for (int i = 0; i < w; i++)
         {
-            fb[(j << 10) + i] = i * j;
+            fb[(j << 9) + i] = i * j;
         }
     }
 }
