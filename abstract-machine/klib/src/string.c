@@ -99,10 +99,10 @@ void *memcpy(void *out, const void *in, size_t n)
   {
     ((uint64_t *)out)[i] = ((uint64_t *)in)[i];
   }
-  for (size_t i = n_u64 * 8; i < n; i++)
-  {
-    ((char *)out)[i] = ((char *)in)[i];
-  }
+  // for (size_t i = n_u64 * 8; i < n; i++)
+  // {
+  //   ((char *)out)[i] = ((char *)in)[i];
+  // }
   // for (size_t i = 0; i < n; i++)
   // {
   //   ((char *)out)[i] = ((char *)in)[i];
