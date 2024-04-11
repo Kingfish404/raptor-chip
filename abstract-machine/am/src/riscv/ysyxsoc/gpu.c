@@ -1,4 +1,5 @@
 #include <am.h>
+#include <stdint.h>
 #include <ysyxsoc.h>
 
 void __am_gpu_init()
@@ -8,9 +9,10 @@ void __am_gpu_init()
     uint32_t *fb = (uint32_t *)(uintptr_t)FB_ADDR;
     for (int j = 0; j < h; j++)
     {
+        uint32_t h_addr = (j << 9);
         for (int i = 0; i < w; i++)
         {
-            fb[(j << 9) + i] = i * j;
+            fb[(h_addr) + i] = i * j;
         }
     }
 }
