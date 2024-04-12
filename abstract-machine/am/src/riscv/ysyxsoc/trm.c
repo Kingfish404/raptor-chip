@@ -76,7 +76,7 @@ __attribute__((section(".first_boot"))) void _first_stage_bootloader(void)
         "nop\n"
         "nop\n"
         "nop\n"
-        "mv %0, t0\n"
+        // "mv %0, t0\n"
         : "=r"(data)
         : "r"(&p[i]), "r"(&p_sdram[i])
         :);
