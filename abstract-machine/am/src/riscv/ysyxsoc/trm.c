@@ -80,6 +80,7 @@ __attribute__((section(".first_boot"))) void _first_stage_bootloader(void)
         : "=r"(data)
         : "r"(&p[i]), "r"(&p_sdram[i])
         :);
+    break;
   }
   asm volatile("ebreak");
   return;
