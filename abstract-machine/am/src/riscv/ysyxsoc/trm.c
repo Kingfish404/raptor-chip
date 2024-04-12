@@ -71,9 +71,6 @@ __attribute__((section(".first_boot"))) void _first_stage_bootloader(void)
     asm volatile(
         "sb	a5,3(sp)\n"
         "lbu t0, 0(%1)\n"
-        // "lbu t1, 0(%2)\n"
-        "nop\n"
-        // "mv %0, t0\n"
         : "=r"(data)
         : "r"(&p[i]), "r"(&p_sdram[i])
         :);
