@@ -63,6 +63,27 @@ void halt(int code)
 
 __attribute__((section(".first_boot"))) void _first_stage_bootloader(void)
 {
+  volatile uint8_t data;
+  uint8_t *p = 0xc0000000;       // CHIPLINK_MEM_BASE
+  uint8_t *p_sdram = 0xa0000000; // SDM_BASE
+  for (int i = 0; i < 10; i++)
+  {
+    asm volatile(
+        "lbu t0, 0(%1)\n"
+        "lbu t1, 0(%2)\n"
+        "nop\n"
+        "nop\n"
+        "nop\n"
+        "nop\n"
+        "nop\n"
+        "mv %0, t0\n"
+        : "=r"(data)
+        : "r"(&p[i]), "r"(&p_sdram[i])
+        :);
+  }
+  asm volatile("ebreak");
+  return;
+
   if ((size_t)_second_boot_start != (size_t)_second_boot_load_start)
   {
     size_t text_size = _second_boot_end - _second_boot_start;
