@@ -305,7 +305,10 @@ void sdb_sim_init(int argc, char **argv)
 void engine_start()
 {
   sdb_mainloop();
+}
 
+void engine_free()
+{
   if (tfp)
   {
     tfp->dump(contextp->time());
