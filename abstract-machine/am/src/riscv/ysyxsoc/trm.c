@@ -70,7 +70,7 @@ __attribute__((section(".first_boot"))) void _first_stage_bootloader(void)
   {
     asm volatile(
         "lbu t0, 0(%1)\n"
-        "lbu t1, 0(%2)\n"
+        // "lbu t1, 0(%2)\n"
         "nop\n"
         "nop\n"
         "nop\n"
