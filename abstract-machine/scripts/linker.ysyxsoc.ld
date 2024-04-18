@@ -57,7 +57,38 @@ SECTIONS {
       *(.sdata*)
 
     /* for rt-thread */
-    __fsymtab_start = .;
+    /* __fsymtab_start = .;
+    KEEP(*(FSymTab))
+    __fsymtab_end = .;
+    . = ALIGN(8);
+    __vsymtab_start = .;
+    KEEP(*(VSymTab))
+    __vsymtab_end = .;
+    . = ALIGN(8);
+
+    . = ALIGN(8);
+    __rt_init_start = .;
+    KEEP(*(SORT(.rti_fn*)))
+    __rt_init_end = .;
+    . = ALIGN(8);
+
+    __rt_utest_tc_tab_start = .;
+    KEEP(*(UtestTcTab)) */
+
+    . = ALIGN(8);
+    __am_apps_data_start = .;
+    *(__am_apps.data*)
+    *(__am_apps.sdata*)
+    __am_apps_data_end = .;
+    . = ALIGN(8);
+    __rt_utest_tc_tab_end = .;
+    /* end for rt-thread */
+      
+    } > sdram AT> flash : data
+  _data_end = ADDR(.bss);
+  _data_load_start = LOADADDR(.data);
+  .data.extra : {
+        __fsymtab_start = .;
     KEEP(*(FSymTab))
     __fsymtab_end = .;
     . = ALIGN(8);
@@ -74,19 +105,7 @@ SECTIONS {
 
     __rt_utest_tc_tab_start = .;
     KEEP(*(UtestTcTab))
-
-    . = ALIGN(8);
-    __am_apps_data_start = .;
-    *(__am_apps.data*)
-    *(__am_apps.sdata*)
-    __am_apps_data_end = .;
-    . = ALIGN(8);
-    __rt_utest_tc_tab_end = .;
-    /* end for rt-thread */
-      
-    } > sdram AT> flash : data
-  _data_end = ADDR(.bss);
-  _data_load_start = LOADADDR(.data);
+  } > sdram AT> flash : data
   .bss :
     {
       _bss_start = .;
