@@ -259,7 +259,7 @@ void sdb_sim_init(int argc, char **argv)
 #endif
   verilog_connect(top, &npc);
 
-  reset(top, 10);
+  reset(top, 32);
   if (tfp)
   {
     tfp->dump(contextp->time());
