@@ -132,7 +132,7 @@ void _trm_init()
 {
   init_uart();
   printf("[%d] first stage boot loader finish\n", ssb_start_time);
-  printf("[%d|%d] second stage boot loader finish\n", ssb_end_time - ssb_start_time);
+  printf("[%d|%d] second stage boot loader finish\n", ssb_end_time, ssb_end_time - ssb_start_time);
   ioe_init();
   uint32_t mvendorid, marchid;
   asm volatile(
