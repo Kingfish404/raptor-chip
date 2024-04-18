@@ -63,21 +63,6 @@ void halt(int code)
 
 __attribute__((section(".first_boot"))) void _first_stage_bootloader(void)
 {
-  volatile uint8_t data;
-  // uint8_t *p = 0xc0000000;       // CHIPLINK_MEM_BASE
-  // uint8_t *p_sdram = 0xa0000000; // SDM_BASE
-  // for (int i = 0; i < 10; i++)
-  // {
-  //   asm volatile(
-  //       "sb	a5,3(sp)\n"
-  //       "lbu t0, 0(%1)\n"
-  //       : "=r"(data)
-  //       : "r"(&p[i]), "r"(&p_sdram[i])
-  //       :);
-  // }
-  // asm volatile("ebreak");
-  // return;
-
   if ((size_t)_second_boot_start != (size_t)_second_boot_load_start)
   {
     size_t text_size = _second_boot_end - _second_boot_start;
@@ -131,8 +116,8 @@ __attribute__((section(".second_boot"))) void _second_stage_bootloader()
 void _trm_init()
 {
   init_uart();
-  printf("[%d] first stage boot loader finish\n", ssb_start_time);
-  printf("[%d|%d] second stage boot loader finish\n", ssb_end_time, ssb_end_time - ssb_start_time);
+  printf("[%d] first stage boot loader done\n", ssb_start_time);
+  printf("[%d|%d] second stage boot loader done\n", ssb_end_time, ssb_end_time - ssb_start_time);
   ioe_init();
   uint32_t mvendorid, marchid;
   asm volatile(
@@ -140,7 +125,7 @@ void _trm_init()
       "csrr %1, marchid\n\t"
       : "=r"(mvendorid), "=r"(marchid) :);
   size_t ready_time = ((*((uint32_t *)RTC_ADDR + 4)) << 32) + *((uint32_t *)RTC_ADDR);
-  printf("[%d|%d] trm init finish, mvendorid: 0x%lx, marchid: %ld\n", ready_time, ready_time - ssb_end_time, mvendorid, marchid);
+  printf("[%d|%d] trm init, mvendorid: 0x%lx, marchid: %ld\n", ready_time, ready_time - ssb_end_time, mvendorid, marchid);
 
   int ret = main(mainargs);
   halt(ret);
