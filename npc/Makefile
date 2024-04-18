@@ -16,7 +16,7 @@ ifeq ($(CONFIG_MODE), "soc")
 VTARGET=ysyxSoCFull
 SOC_DEFINE=-DYSYX_SOC
 SOC_SOURCE=$(shell find $(abspath $(SOC_HOME)/perip) -name "*.v") \
-    $(SOC_HOME)/generated/ysyxSoCFull-ChipLink.v
+    $(SOC_HOME)/generated/ysyxSoCFull.v
     # $(SOC_HOME)/generated/ysyxSoCFull-ChipLink.v
 else
 VTARGET=ysyx
