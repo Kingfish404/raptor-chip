@@ -63,6 +63,20 @@ void halt(int code)
 
 __attribute__((section(".first_boot"))) void _first_stage_bootloader(void)
 {
+  volatile uint32_t *psram = (uint32_t *)0x8000221f;
+  volatile uint32_t data;
+  data = *psram;
+  psram = (uint32_t *)0x80000000;
+  data = *psram;
+  psram = (uint32_t *)0x80082210;
+  *((uint32_t *)psram) = 0x12345678;
+  asm volatile(
+      "li t0, 0x80082210\n"
+      "li t1, 0x12345678\n"
+      "sw t1, 0(t0)\n");
+  data = *psram;
+  asm volatile("ebreak");
+  return 0;
   if ((size_t)_second_boot_start != (size_t)_second_boot_load_start)
   {
     size_t text_size = _second_boot_end - _second_boot_start;
