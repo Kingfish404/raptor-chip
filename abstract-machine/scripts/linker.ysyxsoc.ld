@@ -4,6 +4,7 @@ PHDRS {
   rodata PT_LOAD;
   text PT_LOAD;
   data PT_LOAD;
+  data_extra PT_LOAD;
   bss PT_LOAD;
 }
 
@@ -68,7 +69,7 @@ SECTIONS {
 
     __rt_utest_tc_tab_start = .;
     KEEP(*(UtestTcTab))
-  }
+  } > sdram AT> flash : data_extra
   .data :
     {
     _data_start = .;
