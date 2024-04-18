@@ -94,6 +94,15 @@ SECTIONS {
       *(.sbss*)
       *(.scommon)
     } > sdram AT> flash : bss
+   .bss.extra : {
+    . = ALIGN(8);
+    __am_apps_bss_start = .;
+    *(__am_apps.bss*)
+    *(__am_apps.sbss*)
+    *(__am_apps.scommon*)
+    __am_apps_bss_end = .;
+    . = ALIGN(8);
+  } > sdram AT> flash : bss 
   _stack_top = ALIGN(0x1000);
   . = _stack_top + 0x8000;
   _stack_pointer = .;
