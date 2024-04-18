@@ -81,13 +81,13 @@ __attribute__((section(".first_boot"))) void _first_stage_bootloader(void)
   if ((size_t)_second_boot_start != (size_t)_second_boot_load_start)
   {
     size_t text_size = _second_boot_end - _second_boot_start;
-    // size_t text_size_u64_fix = text_size / 8;
-    // for (size_t i = 0; i < text_size_u64_fix; i++)
-    // {
-    //   ((uint64_t *)_second_boot_start)[i] = ((uint64_t *)_second_boot_load_start)[i];
-    // }
-    // for (size_t i = text_size_u64_fix * 8; i < text_size; i++)
-    for (size_t i = 0; i < text_size; i++)
+    size_t text_size_u64_fix = text_size / 8;
+    for (size_t i = 0; i < text_size_u64_fix; i++)
+    {
+      ((uint64_t *)_second_boot_start)[i] = ((uint64_t *)_second_boot_load_start)[i];
+    }
+    for (size_t i = text_size_u64_fix * 8; i < text_size; i++)
+    // for (size_t i = 0; i < text_size; i++)
     {
       _second_boot_start[i] = _second_boot_load_start[i];
     }
@@ -132,7 +132,7 @@ void _trm_init()
 {
   init_uart();
   printf("[%d] first stage boot loader finish\n", ssb_start_time);
-  printf("[%d] second stage boot loader finish\n", ssb_end_time);
+  printf("[%d|%d] second stage boot loader finish\n", ssb_end_time - ssb_start_time);
   ioe_init();
   uint32_t mvendorid, marchid;
   asm volatile(
@@ -140,7 +140,7 @@ void _trm_init()
       "csrr %1, marchid\n\t"
       : "=r"(mvendorid), "=r"(marchid) :);
   size_t ready_time = ((*((uint32_t *)RTC_ADDR + 4)) << 32) + *((uint32_t *)RTC_ADDR);
-  printf("[%d] trm init finish, mvendorid: 0x%lx, marchid: %ld\n", ready_time, mvendorid, marchid);
+  printf("[%d|%d] trm init finish, mvendorid: 0x%lx, marchid: %ld\n", ready_time, ready_time - ssb_end_time, mvendorid, marchid);
 
   int ret = main(mainargs);
   halt(ret);
