@@ -4,7 +4,6 @@ PHDRS {
   rodata PT_LOAD;
   text PT_LOAD;
   data PT_LOAD;
-  data_extra PT_LOAD;
   bss PT_LOAD;
 }
 
@@ -51,25 +50,6 @@ SECTIONS {
     } > sdram AT> flash : rodata
   _rodata_end = ADDR(.data);
   _rodata_load_start = LOADADDR(.rodata);
-  .data.extra : {
-        __fsymtab_start = .;
-    KEEP(*(FSymTab))
-    __fsymtab_end = .;
-    . = ALIGN(8);
-    __vsymtab_start = .;
-    KEEP(*(VSymTab))
-    __vsymtab_end = .;
-    . = ALIGN(8);
-
-    . = ALIGN(8);
-    __rt_init_start = .;
-    KEEP(*(SORT(.rti_fn*)))
-    __rt_init_end = .;
-    . = ALIGN(8);
-
-    __rt_utest_tc_tab_start = .;
-    KEEP(*(UtestTcTab))
-  } > sdram AT> flash : data_extra
   .data :
     {
     _data_start = .;
