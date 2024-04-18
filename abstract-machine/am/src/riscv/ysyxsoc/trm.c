@@ -81,13 +81,13 @@ __attribute__((section(".first_boot"))) void _first_stage_bootloader(void)
   if ((size_t)_second_boot_start != (size_t)_second_boot_load_start)
   {
     size_t text_size = _second_boot_end - _second_boot_start;
-    size_t text_size_u64_fix = text_size / 8;
-    for (size_t i = 0; i < text_size_u64_fix; i++)
-    {
-      ((uint64_t *)_second_boot_start)[i] = ((uint64_t *)_second_boot_load_start)[i];
-    }
-    for (size_t i = text_size_u64_fix * 8; i < text_size; i++)
-    // for (size_t i = 0; i < text_size; i++)
+    // size_t text_size_u64_fix = text_size / 8;
+    // for (size_t i = 0; i < text_size_u64_fix; i++)
+    // {
+    //   ((uint64_t *)_second_boot_start)[i] = ((uint64_t *)_second_boot_load_start)[i];
+    // }
+    // for (size_t i = text_size_u64_fix * 8; i < text_size; i++)
+    for (size_t i = 0; i < text_size; i++)
     {
       _second_boot_start[i] = _second_boot_load_start[i];
     }
