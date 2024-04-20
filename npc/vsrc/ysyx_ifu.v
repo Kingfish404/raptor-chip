@@ -44,7 +44,7 @@ module ysyx_IFU (
 
   // using l1 cache
   assign inst_o = ifu_rvalid ? ifu_rdata : l1_icache[addr_idx];
-  assign valid_o = ifu_rvalid | valid | l1_cache_hit;
+  assign valid_o = ifu_rvalid | valid;
 
   `ysyx_BUS_FSM();
   always @(posedge clk)
@@ -91,7 +91,7 @@ module ysyx_IFU (
                 begin
                   pvalid <= prev_valid;
                 end
-              if (ifu_rvalid)
+              if (ifu_rvalid | l1_cache_hit)
                 begin
                   valid <= 1;
                 end
