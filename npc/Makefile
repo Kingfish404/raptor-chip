@@ -28,7 +28,7 @@ SOC_HOME = $(abspath ./../ysyxSOC)
 INC_PATH ?= $(abspath ./include) $(abspath ./vsrc/include) \
 	$(abspath $(SOC_HOME)/perip/uart16550/rtl) $(abspath $(SOC_HOME)/perip/spi/rtl)
 VERILATOR_FLAG =--prof-c --prof-cfuncs --prof-exec --autoflush --timescale "1ns/1ns" --no-timing
-CXXFLAGS = -Wall -Werror -Wno-bool-operation -Wno-implicit-fallthrough -Wno-macro-redefined $(call remove_quote,$(CONFIG_CC_OPT))
+CXXFLAGS = -Wall -Werror -Wno-bool-operation -Wno-implicit-fallthrough $(call remove_quote,$(CONFIG_CC_OPT))
 LDFLAGS = -lreadline -ldl
 
 FILELIST_MK = $(shell find -L ./csrc -name "filelist.mk")
@@ -67,7 +67,7 @@ IMG ?=
 NPC_EXEC := $(BIN) $(NPCFLAGS) $(DIFF_REF_SO) -m $(MROM_IMG) $(IMG)
 
 run: $(BIN) $(MROM_IMG)
-	$(call git_commit, "sim RTL") # DO NOT REMOVE THIS LINE!!!
+	# $(call git_commit, "sim RTL") # DO NOT REMOVE THIS LINE!!!
 	$(NPC_EXEC)
 
 sim: $(BIN)
