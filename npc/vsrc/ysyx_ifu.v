@@ -69,6 +69,8 @@ module ysyx_IFU (
             begin
               l1_icache_valid[addr_idx] <= 0;
               l1_icache[addr_idx] <= 0;
+            end else begin
+              $display("l1 icache hit");
             end
           if (state == `ysyx_IDLE)
             begin
