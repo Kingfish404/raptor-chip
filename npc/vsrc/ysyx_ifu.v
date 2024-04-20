@@ -20,17 +20,18 @@ module ysyx_IFU (
   parameter DATA_W = 32;
 
   parameter L1_ICACHE_SIZE = 256;
+  parameter L1_ICACHE_LEN = 8;
 
   reg [DATA_W-1:0] inst_ifu = 0;
   reg state, valid;
   reg pvalid;
   reg [32-1:0] l1_icache[L1_ICACHE_SIZE-1:0];
   reg [L1_ICACHE_SIZE-1:0] l1_icache_valid = 0;
-  reg [22-1:0] l1_icache_tag[L1_ICACHE_SIZE-1:0];
+  reg [32-L1_ICACHE_LEN-2-1:0] l1_icache_tag[L1_ICACHE_SIZE-1:0];
 
   wire arvalid;
   wire [22-1:0] addr_tag = ifu_araddr_o[ADDR_W-1:10];
-  wire [8-1:0] addr_idx = ifu_araddr_o[10-1:2];
+  wire [L1_ICACHE_LEN-1:0] addr_idx = ifu_araddr_o[L1_ICACHE_LEN+2-1:0+2];
   wire l1_cache_hit = (
          (pvalid) &
          l1_icache_valid[addr_idx] == 1'b1) & (l1_icache_tag[addr_idx] == addr_tag);
