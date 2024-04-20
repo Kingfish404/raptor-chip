@@ -70,10 +70,11 @@ module ysyx_IFU (
                        l1_icache_valid[addr_idx],
                        l1_icache[addr_idx]);
             end
-          if (!l1_cache_hit)
+          if (!l1_cache_hit
+)
             begin
               // l1_icache_valid[addr_idx] <= 0;
-              l1_icache[addr_idx] <= 0;
+              // l1_icache[addr_idx] <= 0;
             end
           else
             begin
