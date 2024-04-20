@@ -19,7 +19,7 @@ module ysyx_IFU (
   parameter ADDR_W = 32;
   parameter DATA_W = 32;
 
-  parameter L1_ICACHE_SIZE = 512;
+  parameter L1_ICACHE_SIZE = 256;
   parameter L1_ICACHE_WAY = 1;
 
   reg [DATA_W-1:0] inst_ifu = 0;
