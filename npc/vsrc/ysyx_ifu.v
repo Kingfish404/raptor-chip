@@ -68,10 +68,6 @@ module ysyx_IFU (
               l1_icache[addr_idx] <= ifu_rdata;
               l1_icache_tag[addr_idx] <= addr_tag;
               l1_icache_valid[addr_idx] <= 1'b1;
-              // $display("[mis] pc: %h, tag: %h, idx: %h, data: %h, tag[idx]: %h, valid[idx]: %h, data[idx]: %h",
-              //          pc, addr_tag, addr_idx, ifu_rdata,
-              //          l1_icache_tag[addr_idx], l1_icache_valid[addr_idx],
-              //          l1_icache[addr_idx]);
             end
           else
             begin
@@ -79,20 +75,6 @@ module ysyx_IFU (
                 begin
                   inst_ifu <= l1_icache[addr_idx];
                 end
-              //   if (!l1_cache_hit)
-              //     begin
-              //       // l1_icache_valid[addr_idx] <= 0;
-              //       // l1_icache[addr_idx] <= 0;
-              //     end
-              //   else
-              //     begin
-              //       $display("[hit] pc: %h, tag: %h, idx: %h, data: %h, tag[idx]: %h, valid[idx]: %h, data[idx]: %h",
-              //                pc,
-              //                addr_tag, addr_idx, ifu_rdata,
-              //                l1_icache_tag[addr_idx],
-              //                l1_icache_valid[addr_idx],
-              //                l1_icache[addr_idx]);
-              //     end
             end
           if (state == `ysyx_IDLE)
             begin
