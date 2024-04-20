@@ -30,7 +30,7 @@ module ysyx_IFU (
   reg [32-L1_ICACHE_LEN-2-1:0] l1_icache_tag[L1_ICACHE_SIZE-1:0];
 
   wire arvalid;
-  wire [22-1:0] addr_tag = ifu_araddr_o[ADDR_W-1:10];
+  wire [32-L1_ICACHE_LEN-2-1:0] addr_tag = ifu_araddr_o[ADDR_W-1:10];
   wire [L1_ICACHE_LEN-1:0] addr_idx = ifu_araddr_o[L1_ICACHE_LEN+2-1:0+2];
   wire l1_cache_hit = (
          (pvalid) &
