@@ -78,7 +78,8 @@ module ysyx_IFU (
             end
           else
             begin
-              $display("l1i hit: tag: %h, idx: %h, data: %h, tag[idx]: %h, valid[idx]: %h, data[idx]: %h",
+              $display("l1i hit: pc: %h, tag: %h, idx: %h, data: %h, tag[idx]: %h, valid[idx]: %h, data[idx]: %h",
+                       pc,
                        addr_tag, addr_idx, ifu_rdata,
                        l1_icache_tag[addr_idx],
                        l1_icache_valid[addr_idx],
