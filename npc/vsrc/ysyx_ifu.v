@@ -28,13 +28,14 @@ module ysyx_IFU (
 
   wire arvalid;
   wire [24-1:0] addr_tag = ifu_araddr_o[ADDR_W-1:8];
+  wire [8-1:0] addr_idx = ifu_araddr_o[7:0];
 
   assign ready_o = !valid_o;
 
   assign arvalid = pvalid;
 
   assign ifu_araddr_o = prev_valid ? npc : pc;
-  assign ifu_arvalid_o = arvalid & (l1_icache_valid[addr_tag] == 0);
+  assign ifu_arvalid_o = arvalid & (l1_icache_valid[addr_idx] == 0);
   assign inst_o = ifu_rvalid ? ifu_rdata : inst_ifu;
   assign valid_o = ifu_rvalid | valid;
 
