@@ -29,7 +29,8 @@ module ysyx_IFU (
   wire arvalid;
   wire [24-1:0] addr_tag = ifu_araddr_o[ADDR_W-1:8];
   wire [8-1:0] addr_idx = ifu_araddr_o[7:0];
-  wire l1_cache_miss = (l1_icache_valid[addr_idx] == 0) & (l1_icache_tag[addr_idx] != addr_tag);
+  wire l1_cache_miss = (
+         l1_icache_valid[addr_idx] == 0) & (l1_icache_tag[addr_idx] != addr_tag);
 
   assign ready_o = !valid_o;
 
@@ -41,7 +42,7 @@ module ysyx_IFU (
            l1_cache_miss
            ? (ifu_rvalid ? ifu_rdata : inst_ifu)
            : (l1_icache[addr_idx]));
-  assign valid_o = ifu_rvalid | valid | !l1_cache_miss;
+  assign valid_o = ifu_rvalid | valid;
 
   `ysyx_BUS_FSM();
   always @(posedge clk)
@@ -61,6 +62,7 @@ module ysyx_IFU (
               l1_icache[addr_idx] <= ifu_rdata;
               l1_icache_tag[addr_idx] <= addr_tag;
               l1_icache_valid[addr_idx] <= 1;
+              valid <= 1;
             end
           if (state == `ysyx_IDLE)
             begin
