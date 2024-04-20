@@ -64,7 +64,7 @@ void halt(int code)
 __attribute__((section(".first_boot"))) void _first_stage_bootloader(void)
 {
   volatile int sum = 0;
-  for (int i = 0; i < 10; i++)
+  for (int i = 0; i < 3; i++)
   {
     sum += i;
   }
