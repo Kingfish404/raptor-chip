@@ -39,12 +39,12 @@ module ysyx_IFU (
   assign ifu_araddr_o = prev_valid ? npc : pc;
   assign ifu_arvalid_o = arvalid & l1_cache_miss;
   // not using l1 cache
-  assign inst_o = ifu_rvalid ? ifu_rdata : inst_ifu;
-  assign valid_o = ifu_rvalid | valid;
+  // assign inst_o = ifu_rvalid ? ifu_rdata : inst_ifu;
+  // assign valid_o = ifu_rvalid | valid;
 
   // using l1 cache
-  // assign inst_o = ifu_rvalid ? ifu_rdata : l1_icache[addr_idx];
-  // assign valid_o = ifu_rvalid | valid | !l1_cache_miss;
+  assign inst_o = ifu_rvalid ? ifu_rdata : l1_icache[addr_idx];
+  assign valid_o = ifu_rvalid | valid | !l1_cache_miss;
 
   `ysyx_BUS_FSM();
   always @(posedge clk)
