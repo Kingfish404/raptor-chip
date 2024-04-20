@@ -45,7 +45,7 @@ module ysyx_IFU (
   // using l1 cache
   assign inst_o = (ifu_rvalid) ? ifu_rdata : l1_icache[addr_idx];
   // assign inst_o = (ifu_rvalid & !l1_cache_hit) ? ifu_rdata : l1_icache[addr_idx];
-  assign valid_o = ifu_rvalid | valid;
+  assign valid_o = ifu_rvalid | valid | l1_cache_hit;
 
   `ysyx_BUS_FSM();
   always @(posedge clk)
@@ -66,10 +66,8 @@ module ysyx_IFU (
               l1_icache_tag[addr_idx] <= addr_tag;
               l1_icache_valid[addr_idx] <= 1'b1;
               $display("[mis] pc: %h, tag: %h, idx: %h, data: %h, tag[idx]: %h, valid[idx]: %h, data[idx]: %h",
-                       pc,
-                       addr_tag, addr_idx, ifu_rdata,
-                       l1_icache_tag[addr_idx],
-                       l1_icache_valid[addr_idx],
+                       pc, addr_tag, addr_idx, ifu_rdata,
+                       l1_icache_tag[addr_idx], l1_icache_valid[addr_idx],
                        l1_icache[addr_idx]);
             end
           else
