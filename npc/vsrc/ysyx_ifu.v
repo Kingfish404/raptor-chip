@@ -24,10 +24,19 @@ module ysyx_IFU (
   reg pvalid;
   reg [32-1:0] l1_icache[256-1:0];
   reg [24-1:0] l1_icache_tag[256-1:0];
-  reg [256-1:0] l1_icache_valid;
+  reg [256-1:0] l1_icache_valid = 0;
 
   wire arvalid;
   wire [24-1:0] addr_tag = ifu_araddr_o[ADDR_W-1:9];
+
+  assign ready_o = !valid_o;
+
+  assign arvalid = pvalid;
+
+  assign ifu_araddr_o = prev_valid ? npc : pc;
+  assign ifu_arvalid_o = arvalid & (l1_icache_valid[addr_tag] == 0);
+  assign inst_o = ifu_rvalid ? ifu_rdata : inst_ifu;
+  assign valid_o = ifu_rvalid | valid;
 
   `ysyx_BUS_FSM();
   always @(posedge clk)
@@ -37,14 +46,6 @@ module ysyx_IFU (
           valid <= 0;
           pvalid <= 1;
           inst_ifu <= 0;
-          // define i
-          integer i;
-          for (i = 0; i < 256; i = i + 1)
-            begin
-              l1_icache[i] <= 0;
-              l1_icache_tag[i] <= 0;
-              l1_icache_valid[i] <= 0;
-            end
         end
       else
         begin
@@ -74,12 +75,4 @@ module ysyx_IFU (
             end
         end
     end
-  assign ready_o = !valid_o;
-
-  assign arvalid = pvalid;
-
-  assign ifu_araddr_o = prev_valid ? npc : pc;
-  assign ifu_arvalid_o = arvalid;
-  assign inst_o = ifu_rvalid ? ifu_rdata : inst_ifu;
-  assign valid_o = ifu_rvalid | valid;
 endmodule // ysyx_IFU
