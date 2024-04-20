@@ -97,7 +97,7 @@ module ysyx_BUS_ARBITER(
             begin
               t1 <= 1;
             end
-          if (io_master_awready)
+          if (io_master_awvalid & io_master_awready)
             begin
               t2 <= 0;
             end
@@ -238,6 +238,10 @@ module ysyx_BUS_ARBITER(
           if (
             (io_master_awaddr >= 'h10000000 && io_master_awaddr <= 'h10000005) ||
             (io_master_awaddr >= 'h10001000 && io_master_awaddr <= 'h10001fff) ||
+            (io_master_awaddr >= 'h10002000 && io_master_awaddr <= 'h1000200f) ||
+            (io_master_awaddr >= 'h10011000 && io_master_awaddr <= 'h10011007) ||
+            (io_master_awaddr >= 'h21000000 && io_master_awaddr <= 'h211fffff) ||
+            (io_master_awaddr >= 'hc0000000) ||
             (0)
           )
             begin
@@ -248,8 +252,12 @@ module ysyx_BUS_ARBITER(
       if (io_master_arvalid)
         begin
           if (
-            (io_master_araddr >= 'h10000001 && io_master_araddr <= 'h10000005) ||
+            (io_master_araddr >= 'h10000000 && io_master_araddr <= 'h10000005) ||
             (io_master_araddr >= 'h10001000 && io_master_araddr <= 'h10001fff) ||
+            (io_master_araddr >= 'h10002000 && io_master_araddr <= 'h1000200f) ||
+            (io_master_araddr >= 'h10011000 && io_master_araddr <= 'h10011007) ||
+            (io_master_araddr >= 'h21000000 && io_master_araddr <= 'h211fffff) ||
+            (io_master_araddr >= 'hc0000000) ||
             (0)
           )
             begin

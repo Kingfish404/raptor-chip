@@ -47,3 +47,19 @@ config MEM_DIFFTEST
       Note that this will significantly reduce the performance of NPC.
 
 endmenu
+
+menuconfig ysyxSoC
+    bool "Enable ysyxSoC"
+    default y
+
+config MODE
+    string
+    default "soc" if ysyxSoC
+    default "none"
+
+menuconfig NVBoard
+    depends on ysyxSoC
+    bool "Enable NVBoard"
+    default n
+    help
+      Enable NVBoard for IO.
