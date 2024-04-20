@@ -55,6 +55,8 @@ module ysyx_IFU (
           if (ifu_rvalid)
             begin
               inst_ifu <= ifu_rdata;
+              l1_icache[addr_idx] <= ifu_rdata;
+              l1_icache_tag[addr_idx] <= addr_tag;
             end
           if (state == `ysyx_IDLE)
             begin
