@@ -30,7 +30,7 @@ module ysyx_IFU (
 
   wire arvalid;
   wire [22-1:0] addr_tag = ifu_araddr_o[ADDR_W-1:10];
-  wire [8-1:0] addr_idx = ifu_araddr_o[9:2];
+  wire [8-1:0] addr_idx = ifu_araddr_o[10-1:2];
   wire l1_cache_hit = (
          (pvalid) &
          l1_icache_valid[addr_idx] == 1'b1) & (l1_icache_tag[addr_idx] == addr_tag);
