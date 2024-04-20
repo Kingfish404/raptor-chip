@@ -30,7 +30,7 @@ module ysyx_IFU (
   wire [22-1:0] addr_tag = ifu_araddr_o[ADDR_W-1:10];
   wire [8-1:0] addr_idx = ifu_araddr_o[9:2];
   wire l1_cache_miss = (
-         l1_icache_valid[addr_idx] == 0) | (l1_icache_tag[addr_idx] != addr_tag);
+         l1_icache_valid[addr_idx] == 1'b1) | (l1_icache_tag[addr_idx] != addr_tag);
 
   assign ready_o = !valid_o;
 
@@ -63,13 +63,15 @@ module ysyx_IFU (
               inst_ifu <= ifu_rdata;
               l1_icache[addr_idx] <= ifu_rdata;
               l1_icache_tag[addr_idx] <= addr_tag;
-              l1_icache_valid[addr_idx] <= 1;
+              l1_icache_valid[addr_idx] <= 1'b1;
             end
           if (l1_cache_miss)
             begin
               l1_icache_valid[addr_idx] <= 0;
               l1_icache[addr_idx] <= 0;
-            end else begin
+            end
+          else
+            begin
               $display("l1 icache hit");
             end
           if (state == `ysyx_IDLE)
