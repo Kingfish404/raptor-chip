@@ -64,7 +64,8 @@ module ysyx_IFU (
               l1_icache[addr_idx] <= ifu_rdata;
               l1_icache_tag[addr_idx] <= addr_tag;
               l1_icache_valid[addr_idx] <= 1'b1;
-              $display("tag: %h, idx: %h, data: %h, tag[idx]: %h, valid[idx]: %h, data[idx]: %h",
+              $display("pc: %h, tag: %h, idx: %h, data: %h, tag[idx]: %h, valid[idx]: %h, data[idx]: %h",
+                       pc,
                        addr_tag, addr_idx, ifu_rdata,
                        l1_icache_tag[addr_idx],
                        l1_icache_valid[addr_idx],
