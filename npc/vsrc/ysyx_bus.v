@@ -105,6 +105,10 @@ module ysyx_BUS_ARBITER(
             begin
               t2 <= 1;
             end
+          else if (!ifu_arvalid)
+            begin
+              t1 <= 1;
+            end
           // lsu_loading <= lsu_arvalid;
           // arvalid_record <= io_master_arvalid;
           // awvalid_record <= io_master_awready;
