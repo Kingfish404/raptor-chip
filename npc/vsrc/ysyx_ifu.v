@@ -72,10 +72,6 @@ module ysyx_IFU (
               if (prev_valid)
                 begin
                   pvalid <= prev_valid;
-                  if (!l1_cache_miss)
-                    begin
-                      l1_icache_hit <= 1;
-                    end
                 end
               if (ifu_rvalid)
                 begin
@@ -88,7 +84,6 @@ module ysyx_IFU (
                 begin
                   pvalid <= 0;
                   valid <= 0;
-                  l1_icache_hit <= 0;
                 end
             end
         end
