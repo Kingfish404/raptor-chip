@@ -72,45 +72,45 @@ module ysyx_IFU (
                        l1_icache[addr_idx]);
             end
           else
-            if (l1_cache_hit)
-              begin
-                inst_ifu <= l1_icache[addr_idx];
-              end
-          // begin
-          //   if (!l1_cache_hit)
-          //     begin
-          //       // l1_icache_valid[addr_idx] <= 0;
-          //       // l1_icache[addr_idx] <= 0;
-          //     end
-          //   else
-          //     begin
-          //       $display("[hit] pc: %h, tag: %h, idx: %h, data: %h, tag[idx]: %h, valid[idx]: %h, data[idx]: %h",
-          //                pc,
-          //                addr_tag, addr_idx, ifu_rdata,
-          //                l1_icache_tag[addr_idx],
-          //                l1_icache_valid[addr_idx],
-          //                l1_icache[addr_idx]);
-          //     end
-        end
-      if (state == `ysyx_IDLE)
-        begin
-          if (prev_valid)
             begin
-              pvalid <= prev_valid;
+              if (l1_cache_hit)
+                begin
+                  inst_ifu <= l1_icache[addr_idx];
+                end
+              //   if (!l1_cache_hit)
+              //     begin
+              //       // l1_icache_valid[addr_idx] <= 0;
+              //       // l1_icache[addr_idx] <= 0;
+              //     end
+              //   else
+              //     begin
+              //       $display("[hit] pc: %h, tag: %h, idx: %h, data: %h, tag[idx]: %h, valid[idx]: %h, data[idx]: %h",
+              //                pc,
+              //                addr_tag, addr_idx, ifu_rdata,
+              //                l1_icache_tag[addr_idx],
+              //                l1_icache_valid[addr_idx],
+              //                l1_icache[addr_idx]);
+              //     end
             end
-          if (ifu_rvalid | l1_cache_hit)
+          if (state == `ysyx_IDLE)
             begin
-              valid <= 1;
+              if (prev_valid)
+                begin
+                  pvalid <= prev_valid;
+                end
+              if (ifu_rvalid | l1_cache_hit)
+                begin
+                  valid <= 1;
+                end
             end
-        end
-      else if (state == `ysyx_WAIT_READY)
-        begin
-          if (next_ready == 1)
+          else if (state == `ysyx_WAIT_READY)
             begin
-              pvalid <= 0;
-              valid <= 0;
+              if (next_ready == 1)
+                begin
+                  pvalid <= 0;
+                  valid <= 0;
+                end
             end
         end
     end
-end
 endmodule // ysyx_IFU
