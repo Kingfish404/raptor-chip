@@ -28,6 +28,8 @@ module ysyx_IFU (
 
   wire arvalid;
   wire [24-1:0] addr_tag = ifu_araddr_o[ADDR_W-1:9];
+  // define i
+  integer i;
 
   `ysyx_BUS_FSM();
   always @(posedge clk)
