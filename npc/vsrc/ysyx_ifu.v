@@ -60,7 +60,6 @@ module ysyx_IFU (
               l1_icache[addr_idx] <= ifu_rdata;
               l1_icache_tag[addr_idx] <= addr_tag;
               l1_icache_valid[addr_idx] <= 1;
-              valid <= 1;
             end
           if (state == `ysyx_IDLE)
             begin
