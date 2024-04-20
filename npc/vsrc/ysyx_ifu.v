@@ -27,7 +27,7 @@ module ysyx_IFU (
   reg [256-1:0] l1_icache_valid = 0;
 
   wire arvalid;
-  wire [24-1:0] addr_tag = ifu_araddr_o[ADDR_W-1:9];
+  wire [24-1:0] addr_tag = ifu_araddr_o[ADDR_W-1:8];
 
   assign ready_o = !valid_o;
 
