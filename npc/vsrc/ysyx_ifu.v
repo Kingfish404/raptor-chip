@@ -98,7 +98,7 @@ module ysyx_IFU (
                 begin
                   pvalid <= prev_valid;
                 end
-              if (ifu_rvalid | (l1_cache_hit & next_ready))
+              if (ifu_rvalid | (l1_cache_hit))
                 begin
                   valid <= 1;
                 end
