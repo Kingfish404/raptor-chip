@@ -28,8 +28,6 @@ module ysyx_IFU (
 
   wire arvalid;
   wire [24-1:0] addr_tag = ifu_araddr_o[ADDR_W-1:9];
-  // define i
-  integer i;
 
   `ysyx_BUS_FSM();
   always @(posedge clk)
@@ -39,6 +37,8 @@ module ysyx_IFU (
           valid <= 0;
           pvalid <= 1;
           inst_ifu <= 0;
+          // define i
+          integer i;
           for (i = 0; i < 256; i = i + 1)
             begin
               l1_icache[i] <= 0;
