@@ -23,12 +23,12 @@ module ysyx_IFU (
   reg state, valid;
   reg pvalid;
   reg [32-1:0] l1_icache[256-1:0];
-  reg [24-1:0] l1_icache_tag[256-1:0];
+  reg [22-1:0] l1_icache_tag[256-1:0];
   reg [256-1:0] l1_icache_valid = 0;
 
   wire arvalid;
-  wire [24-1:0] addr_tag = ifu_araddr_o[ADDR_W-1:8];
-  wire [8-1:0] addr_idx = ifu_araddr_o[7:0];
+  wire [22-1:0] addr_tag = ifu_araddr_o[ADDR_W-1:10];
+  wire [8-1:0] addr_idx = ifu_araddr_o[9:2];
   wire l1_cache_miss = (
          l1_icache_valid[addr_idx] == 0) | (l1_icache_tag[addr_idx] != addr_tag);
 
