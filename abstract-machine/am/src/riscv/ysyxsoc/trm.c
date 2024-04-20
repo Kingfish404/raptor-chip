@@ -1,16 +1,13 @@
-#include <stdio.h>
-#include <stdint.h>
-#include <string.h>
-
 #include <am.h>
 #include <ysyxsoc.h>
 #include <klib-macros.h>
+#include <string.h>
+#include <stdio.h>
 
 extern char _heap_start;
 int main(const char *args);
 void _second_stage_bootloader();
 void _trm_init();
-bool ioe_init();
 
 extern char _pmem_start;
 
@@ -66,13 +63,7 @@ __attribute__((section(".first_boot"))) void _first_stage_bootloader(void)
   if ((size_t)_second_boot_start != (size_t)_second_boot_load_start)
   {
     size_t text_size = _second_boot_end - _second_boot_start;
-    size_t text_size_u64_fix = text_size / 8;
-    for (size_t i = 0; i < text_size_u64_fix; i++)
-    {
-      ((uint64_t *)_second_boot_start)[i] = ((uint64_t *)_second_boot_load_start)[i];
-    }
-    for (size_t i = text_size_u64_fix * 8; i < text_size; i++)
-    // for (size_t i = 0; i < text_size; i++)
+    for (size_t i = 0; i < text_size; i++)
     {
       _second_boot_start[i] = _second_boot_load_start[i];
     }
@@ -80,21 +71,12 @@ __attribute__((section(".first_boot"))) void _first_stage_bootloader(void)
   _second_stage_bootloader();
 }
 
-size_t ssb_start_time, ssb_end_time;
-
 __attribute__((section(".second_boot"))) void _second_stage_bootloader()
 {
-  ssb_start_time = ((*((uint32_t *)RTC_ADDR + 4)) << 32) + *((uint32_t *)RTC_ADDR);
   if ((size_t)_text_start != (size_t)_text_load_start)
   {
     size_t text_size = _text_end - _text_start;
-    size_t text_size_u64_fix = text_size / 8;
-    for (size_t i = 0; i < text_size_u64_fix; i++)
-    {
-      ((uint64_t *)_text_start)[i] = ((uint64_t *)_text_load_start)[i];
-    }
-    for (size_t i = text_size_u64_fix * 8; i < text_size; i++)
-    // for (size_t i = 0; i < text_size; i++)
+    for (size_t i = 0; i < text_size; i++)
     {
       _text_start[i] = _text_load_start[i];
     }
@@ -109,23 +91,18 @@ __attribute__((section(".second_boot"))) void _second_stage_bootloader()
     size_t data_size = _data_end - _data_start;
     memcpy(_data_start, _data_load_start, (size_t)data_size);
   }
-  ssb_end_time = ((*((uint32_t *)RTC_ADDR + 4)) << 32) + *((uint32_t *)RTC_ADDR);
   _trm_init();
 }
 
 void _trm_init()
 {
   init_uart();
-  printf("[%d] first stage boot loader done\n", ssb_start_time);
-  printf("[%d|%d] second stage boot loader done\n", ssb_end_time, ssb_end_time - ssb_start_time);
-  ioe_init();
   uint32_t mvendorid, marchid;
   asm volatile(
       "csrr %0, mvendorid\n\t"
       "csrr %1, marchid\n\t"
       : "=r"(mvendorid), "=r"(marchid) :);
-  size_t ready_time = ((*((uint32_t *)RTC_ADDR + 4)) << 32) + *((uint32_t *)RTC_ADDR);
-  printf("[%d|%d] trm init, mvendorid: 0x%lx, marchid: %ld\n", ready_time, ready_time - ssb_end_time, mvendorid, marchid);
+  printf("mvendorid: 0x%lx, marchid: %ld\n", mvendorid, marchid);
 
   int ret = main(mainargs);
   halt(ret);

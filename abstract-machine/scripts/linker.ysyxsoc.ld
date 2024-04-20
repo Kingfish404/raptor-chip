@@ -1,7 +1,6 @@
 PHDRS { 
   first_boot PT_LOAD;
   second_boot PT_LOAD;
-  rodata PT_LOAD;
   text PT_LOAD;
   data PT_LOAD;
   bss PT_LOAD;
@@ -12,7 +11,7 @@ MEMORY {
   flash : ORIGIN = 0x30000000, LENGTH = 10M
   sram  : ORIGIN = 0x0f000000, LENGTH = 8K
   psram : ORIGIN = 0x80000000, LENGTH = 4M
-  sdram : ORIGIN = 0xa0000000, LENGTH = 8M
+  sdram : ORIGIN = 0xa0000000, LENGTH = 2M
 }
 
 SECTIONS {
@@ -44,10 +43,8 @@ SECTIONS {
     {
       _rodata_start = .;
       *(.rodata*)
-      *(.srodata*)
-
       rodata_end = .;
-    } > sdram AT> flash : rodata
+    } > sdram AT> flash
   _rodata_end = ADDR(.data);
   _rodata_load_start = LOADADDR(.rodata);
   .data :
@@ -74,19 +71,14 @@ SECTIONS {
 
     __rt_utest_tc_tab_start = .;
     KEEP(*(UtestTcTab))
-
-    . = ALIGN(8);
-    __am_apps_data_start = .;
-    *(__am_apps.data*)
-    *(__am_apps.sdata*)
-    __am_apps_data_end = .;
-    . = ALIGN(8);
     __rt_utest_tc_tab_end = .;
     /* end for rt-thread */
       
     } > sdram AT> flash : data
   _data_end = ADDR(.bss);
   _data_load_start = LOADADDR(.data);
+  edata = .;
+  _data = .;
   .bss :
     {
       _bss_start = .;
@@ -94,15 +86,6 @@ SECTIONS {
       *(.sbss*)
       *(.scommon)
     } > sdram AT> flash : bss
-   .bss.extra : {
-    . = ALIGN(8);
-    __am_apps_bss_start = .;
-    *(__am_apps.bss*)
-    *(__am_apps.sbss*)
-    *(__am_apps.scommon*)
-    __am_apps_bss_end = .;
-    . = ALIGN(8);
-  } > sdram AT> flash : bss 
   _stack_top = ALIGN(0x1000);
   . = _stack_top + 0x8000;
   _stack_pointer = .;
