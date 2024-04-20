@@ -22,8 +22,9 @@ module ysyx_IFU (
   reg [DATA_W-1:0] inst_ifu = 0;
   reg state, valid;
   reg pvalid;
-  reg [256-1:0] l1_icache[32-1:0];
-  reg [256-1:0] l1_icache_tag[24-1:0];
+  reg [32-1:0] l1_icache[256-1:0];
+  reg [24-1:0] l1_icache_tag[256-1:0];
+  reg [256-1:0] l1_icache_valid;
 
   wire arvalid;
   wire [24-1:0] addr_tag = ifu_araddr_o[ADDR_W-1:9];
@@ -36,6 +37,12 @@ module ysyx_IFU (
           valid <= 0;
           pvalid <= 1;
           inst_ifu <= 0;
+          for (i = 0; i < 256; i = i + 1)
+            begin
+              l1_icache[i] <= 0;
+              l1_icache_tag[i] <= 0;
+              l1_icache_valid[i] <= 0;
+            end
         end
       else
         begin
