@@ -76,6 +76,7 @@ module ysyx_IFU (
               if (l1_cache_hit)
                 begin
                   inst_ifu <= l1_icache[addr_idx];
+                  valid <= 1;
                 end
               //   if (!l1_cache_hit)
               //     begin
