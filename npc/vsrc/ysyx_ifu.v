@@ -21,7 +21,11 @@ module ysyx_IFU (
 
   reg [DATA_W-1:0] inst_ifu = 0;
   reg state, valid;
-  `ysyx_BUS_FSM()
+  reg pvalid;
+  reg [256-1:0] l1_icache [32+24-1:0];
+  wire arvalid;
+
+  `ysyx_BUS_FSM();
   always @(posedge clk) begin
     if (rst) begin
       valid <= 0; pvalid <= 1; inst_ifu <= 0;
@@ -38,12 +42,6 @@ module ysyx_IFU (
     end
   end
   assign ready_o = !valid_o;
-
-  reg [19:0] lfsr = 1;
-  wire ifsr_ready = `ysyx_IFSR_ENABLE ? lfsr[19] : 1;
-  always @(posedge clk ) begin lfsr <= {lfsr[18:0], lfsr[19] ^ lfsr[18]}; end
-  wire arvalid;
-  reg pvalid;
   assign arvalid = pvalid;
   // assign arvalid = (ifsr_ready & (prev_valid)) | pvalid;
 
