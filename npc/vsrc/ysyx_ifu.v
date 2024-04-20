@@ -65,6 +65,7 @@ module ysyx_IFU (
           if (l1_cache_miss)
             begin
               l1_icache_valid[addr_idx] <= 0;
+              l1_icache[addr_idx] <= 0;
             end
           if (state == `ysyx_IDLE)
             begin
