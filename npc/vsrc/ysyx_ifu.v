@@ -66,15 +66,15 @@ module ysyx_IFU (
             begin
               l1_icache_valid[addr_idx] <= 0;
             end
-          else
-            begin
-              l1_icache_hit <= 1;
-            end
           if (state == `ysyx_IDLE)
             begin
               if (prev_valid)
                 begin
                   pvalid <= prev_valid;
+                  if (!l1_cache_miss)
+                    begin
+                      l1_icache_hit <= 1;
+                    end
                 end
               if (ifu_rvalid)
                 begin
