@@ -12,11 +12,12 @@ endif
 -include ./include/config/auto.conf
 -include ./include/config/auto.conf.cmd
 
-ifeq ($(MODE), soc)
+ifeq ($(CONFIG_MODE), "soc")
 VTARGET=ysyxSoCFull
 SOC_DEFINE=-DYSYX_SOC
 SOC_SOURCE=$(shell find $(abspath $(SOC_HOME)/perip) -name "*.v") \
     $(SOC_HOME)/generated/ysyxSoCFull.v
+    # $(SOC_HOME)/generated/ysyxSoCFull-ChipLink.v
 else
 VTARGET=ysyx
 SOC_SOURCE=
@@ -28,7 +29,7 @@ SOC_HOME = $(abspath ./../ysyxSOC)
 INC_PATH ?= $(abspath ./include) $(abspath ./vsrc/include) \
 	$(abspath $(SOC_HOME)/perip/uart16550/rtl) $(abspath $(SOC_HOME)/perip/spi/rtl)
 VERILATOR_FLAG =--prof-c --prof-cfuncs --prof-exec --autoflush --timescale "1ns/1ns" --no-timing
-CXXFLAGS = -Wall -Werror -Wno-bool-operation -Wno-implicit-fallthrough $(call remove_quote,$(CONFIG_CC_OPT))
+CXXFLAGS = -Wall -Werror -Wno-bool-operation -Wno-implicit-fallthrough -Wno-macro-redefined $(call remove_quote,$(CONFIG_CC_OPT))
 LDFLAGS = -lreadline -ldl
 
 FILELIST_MK = $(shell find -L ./csrc -name "filelist.mk")
@@ -50,6 +51,8 @@ $(NPC_HOME)/csrc/mem/mrom-data/build/mrom-data.bin:
 all: $(BIN)
 
 # rules for NVBoard
+include $(NVBOARD_HOME)/scripts/nvboard.mk
+
 INCFLAGS = $(addprefix -I, $(INC_PATH))
 CXXFLAGS += $(INCFLAGS) -DTOP_NAME="\"V$(VTARGET)\"" $(SOC_DEFINE) \
 	-DMROM_PATH=$(MROM_IMG)
@@ -67,7 +70,7 @@ IMG ?=
 NPC_EXEC := $(BIN) $(NPCFLAGS) $(DIFF_REF_SO) -m $(MROM_IMG) $(IMG)
 
 run: $(BIN) $(MROM_IMG)
-	# $(call git_commit, "sim RTL") # DO NOT REMOVE THIS LINE!!!
+	$(call git_commit, "sim RTL") # DO NOT REMOVE THIS LINE!!!
 	$(NPC_EXEC)
 
 sim: $(BIN)
