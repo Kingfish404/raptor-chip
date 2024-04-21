@@ -114,7 +114,7 @@ module ysyx_LSU(
         begin
           l1_enable <= 1;
         end
-      if (!lsu_avalid)
+      if (rvalid_o)
         begin
           l1_enable <= 0;
         end
