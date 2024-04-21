@@ -44,17 +44,17 @@ module ysyx_LSU(
   end
 
   assign lsu_araddr_o = idu_valid ? addr : lsu_araddr;
-  assign lsu_arvalid_o = ifsr_ready & ren & lsu_avalid;
+  assign lsu_arvalid_o = ren & lsu_avalid;
 
   assign rdata = lsu_rdata;
   assign lsu_rstrb_o = rstrb;
 
   assign lsu_awaddr_o = idu_valid ? addr : lsu_araddr;
-  assign lsu_awvalid_o = ifsr_ready & wen & lsu_avalid;
+  assign lsu_awvalid_o = wen & lsu_avalid;
 
   assign lsu_wdata_o = wdata;
   assign lsu_wstrb_o = wstrb;
-  assign lsu_wvalid_o = ifsr_ready & wen & lsu_avalid;
+  assign lsu_wvalid_o = wen & lsu_avalid;
 
   // load/store unit
   assign wstrb = (
