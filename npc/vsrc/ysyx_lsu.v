@@ -71,6 +71,12 @@ module ysyx_LSU(
          idu_valid &
          l1d_valid[addr_idx] == 1'b1) & (l1d_tag[addr_idx] == addr_tag);
 
+  wire [32-L1D_LEN-2-1:0] waddr_tag = lsu_awaddr_o[ADDR_W-1:L1D_LEN+2];
+  wire [L1D_LEN-1:0] waddr_idx = lsu_awaddr_o[L1D_LEN+2-1:0+2];
+  wire l1d_cache_hit_w = (
+         idu_valid &
+         l1d_valid[waddr_idx] == 1'b1) & (l1d_tag[waddr_idx] == waddr_tag);
+
   // load/store unit
   assign wstrb = (
            ({8{alu_op == `ysyx_ALU_OP_SB}} & 8'h1) |
@@ -102,11 +108,15 @@ module ysyx_LSU(
         begin
           lsu_araddr <= addr;
         end
-      if (lsu_rvalid)
+      if (ren & lsu_rvalid)
         begin
           l1d[addr_idx] <= lsu_rdata;
           l1d_tag[addr_idx] <= addr_tag;
           l1d_valid[addr_idx] <= 1'b1;
+        end
+      if (wen & lsu_avalid & l1d_cache_hit_w)
+        begin
+          l1d_valid[waddr_idx] <= 1'b0;
         end
     end
 endmodule
