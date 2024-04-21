@@ -71,6 +71,10 @@ module ysyx_LSU(
   wire l1d_cache_hit = (
          ren & lsu_avalid &
          l1d_valid[addr_idx] == 1'b1) & (l1d_tag[addr_idx] == addr_tag);
+  wire l1d_cache_within = (
+         (lsu_araddr_o >= '80000000 && lsu_araddr_o < '00400000) ||
+         (0)
+       );
 
   wire [32-L1D_LEN-2-1:0] waddr_tag = lsu_awaddr_o[ADDR_W-1:L1D_LEN+2];
   wire [L1D_LEN-1:0] waddr_idx = lsu_awaddr_o[L1D_LEN+2-1:0+2];
@@ -120,7 +124,7 @@ module ysyx_LSU(
         begin
           lsu_araddr <= addr;
         end
-      if (ren & lsu_rvalid)
+      if (ren & lsu_rvalid & l1d_cache_within)
         begin
           l1d[addr_idx] <= lsu_rdata;
           l1d_tag[addr_idx] <= addr_tag;
