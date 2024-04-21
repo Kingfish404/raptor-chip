@@ -81,7 +81,7 @@ module ysyx_LSU(
   wire [32-L1D_LEN-2-1:0] waddr_tag = lsu_awaddr_o[ADDR_W-1:L1D_LEN+2];
   wire [L1D_LEN-1:0] waddr_idx = lsu_awaddr_o[L1D_LEN+2-1:0+2];
   wire l1d_cache_hit_w = (
-         idu_valid &
+         wen & lsu_avalid &
          l1d_valid[waddr_idx] == 1'b1) & (l1d_tag[waddr_idx] == waddr_tag);
 
   // load/store unit
@@ -131,7 +131,7 @@ module ysyx_LSU(
           l1d_tag[addr_idx] <= addr_tag;
           l1d_valid[addr_idx] <= 1'b1;
         end
-      if (lsu_awvalid_o)
+      if (lsu_awvalid_o & l1d_cache_hit_w)
         begin
           // $display("l1d_cache_hit_w");
           l1d_valid[waddr_idx] <= 1'b0;
