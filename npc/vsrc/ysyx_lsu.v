@@ -91,6 +91,15 @@ module ysyx_LSU(
            ({8{alu_op == `ysyx_ALU_OP_LHU}} & 8'h3) |
            ({8{alu_op == `ysyx_ALU_OP_LW}} & 8'hf)
          );
+
+  wire [1:0] araddr_lo = lsu_araddr_o[1:0];
+  assign rdata = (
+           ({DATA_W{araddr_lo == 2'b00}} & rdata_unalign) |
+           ({DATA_W{araddr_lo == 2'b01}} & {{8'b0}, {rdata_unalign[31:8]}}) |
+           ({DATA_W{araddr_lo == 2'b10}} & {{16'b0}, {rdata_unalign[31:16]}}) |
+           ({DATA_W{araddr_lo == 2'b11}} & {{24'b0}, {rdata_unalign[31:24]}}) |
+           (0)
+         );
   assign rdata_o = (
            ({DATA_W{alu_op == `ysyx_ALU_OP_LB}} & (rdata[7] ? rdata | 'hffffff00 : rdata & 'hff)) |
            ({DATA_W{alu_op == `ysyx_ALU_OP_LBU}} & rdata & 'hff) |
