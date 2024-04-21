@@ -34,7 +34,7 @@ module ysyx_LSU(
 
   reg [ADDR_W-1:0] lsu_araddr;
 
-  wire [DATA_W-1:0] rdata;
+  wire [DATA_W-1:0] rdata, rdata_unalign;
   wire [7:0] wstrb, rstrb;
 
   assign lsu_araddr_o = idu_valid ? addr : lsu_araddr;
@@ -47,7 +47,7 @@ module ysyx_LSU(
   // assign rvalid_o = lsu_rvalid;
 
   // with l1d cache
-  assign rdata = (lsu_rvalid) ? lsu_rdata : l1d[addr_idx];
+  assign rdata_unalign = (lsu_rvalid) ? lsu_rdata : l1d[addr_idx];
   assign rvalid_o = lsu_rvalid | l1d_cache_hit;
 
   assign lsu_awaddr_o = idu_valid ? addr : lsu_araddr;
