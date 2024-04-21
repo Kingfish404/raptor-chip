@@ -102,7 +102,7 @@ module ysyx_LSU(
     begin
       if (l1d_cache_hit)
         begin
-          $display("l1d_cache_hit");
+          // $display("l1d_cache_hit");
         end
       if (idu_valid)
         begin
