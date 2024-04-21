@@ -36,14 +36,18 @@ module ysyx_LSU(
 
   wire [DATA_W-1:0] rdata;
   wire [7:0] wstrb, rstrb;
-  assign rvalid_o = lsu_rvalid;
-  assign wready_o = lsu_wready;
 
   assign lsu_araddr_o = idu_valid ? addr : lsu_araddr;
   assign lsu_arvalid_o = ren & lsu_avalid;
-
-  assign rdata = lsu_rdata;
   assign lsu_rstrb_o = rstrb;
+
+  // without l1d cache
+  // assign rdata = lsu_rdata;
+  // assign rvalid_o = lsu_rvalid;
+
+  // with l1d cache
+  assign rdata = (lsu_rvalid) ? lsu_rdata : l1d[addr_idx];
+  assign rvalid_o = lsu_rvalid | l1d_cache_hit;
 
   assign lsu_awaddr_o = idu_valid ? addr : lsu_araddr;
   assign lsu_awvalid_o = wen & lsu_avalid;
@@ -51,6 +55,8 @@ module ysyx_LSU(
   assign lsu_wdata_o = wdata;
   assign lsu_wstrb_o = wstrb;
   assign lsu_wvalid_o = wen & lsu_avalid;
+
+  assign wready_o = lsu_wready;
 
   parameter L1D_SIZE = 64;
   parameter L1D_LEN = 6;
@@ -88,9 +94,10 @@ module ysyx_LSU(
 
   always @(posedge clk)
     begin
-      if (l1d_cache_hit) begin
-        $display("l1d_cache_hit");
-      end
+      if (l1d_cache_hit)
+        begin
+          $display("l1d_cache_hit");
+        end
       if (idu_valid)
         begin
           lsu_araddr <= addr;
