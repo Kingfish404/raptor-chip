@@ -88,9 +88,18 @@ module ysyx_LSU(
 
   always @(posedge clk)
     begin
+      if (l1d_cache_hit) begin
+        $display("l1d_cache_hit");
+      end
       if (idu_valid)
         begin
           lsu_araddr <= addr;
+        end
+      if (lsu_rvalid)
+        begin
+          l1d[addr_idx] <= lsu_rdata;
+          l1d_tag[addr_idx] <= addr_tag;
+          l1d_valid[addr_idx] <= 1'b1;
         end
     end
 endmodule
