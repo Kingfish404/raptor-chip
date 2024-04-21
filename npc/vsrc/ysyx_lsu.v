@@ -31,17 +31,13 @@ module ysyx_LSU(
   input reg lsu_wready
 );
   parameter ADDR_W = 32, DATA_W = 32;
+
+  reg [ADDR_W-1:0] lsu_araddr;
+
   wire [DATA_W-1:0] rdata;
   wire [7:0] wstrb, rstrb;
   assign rvalid_o = lsu_rvalid;
   assign wready_o = lsu_wready;
-
-  reg [ADDR_W-1:0] lsu_araddr;
-  always @(posedge clk) begin
-    if (idu_valid) begin
-      lsu_araddr <= addr;
-    end
-  end
 
   assign lsu_araddr_o = idu_valid ? addr : lsu_araddr;
   assign lsu_arvalid_o = ren & lsu_avalid;
@@ -55,6 +51,22 @@ module ysyx_LSU(
   assign lsu_wdata_o = wdata;
   assign lsu_wstrb_o = wstrb;
   assign lsu_wvalid_o = wen & lsu_avalid;
+
+  parameter L1D_SIZE = 64;
+  parameter L1D_LEN = 6;
+  reg [32-1:0] l1d[L1D_SIZE-1:0];
+  reg [L1D_SIZE-1:0] l1d_valid = 0;
+  reg [32-L1D_LEN-2-1:0] l1d_tag[L1D_SIZE-1:0];
+
+  wire arvalid;
+  wire [32-L1D_LEN-2-1:0] addr_tag = ifu_araddr_o[ADDR_W-1:L1D_LEN+2];
+  wire [L1D_LEN-1:0] addr_idx = ifu_araddr_o[L1D_LEN+2-1:0+2];
+  wire l1d_cache_hit = (
+         (pvalid) &
+         l1d_valid[addr_idx] == 1'b1) & (l1d_tag[addr_idx] == addr_tag);
+
+  assign ifu_araddr_o = prev_valid ? npc : pc;
+  assign ifu_arvalid_o = arvalid & !l1d_cache_hit;
 
   // load/store unit
   assign wstrb = (
@@ -77,4 +89,9 @@ module ysyx_LSU(
     ({DATA_W{alu_op == `ysyx_ALU_OP_LW}} & rdata)
   );
 
+  always @(posedge clk) begin
+    if (idu_valid) begin
+      lsu_araddr <= addr;
+    end
+  end
 endmodule

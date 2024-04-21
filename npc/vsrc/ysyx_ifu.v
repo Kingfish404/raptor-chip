@@ -19,36 +19,35 @@ module ysyx_IFU (
   parameter ADDR_W = 32;
   parameter DATA_W = 32;
 
-  parameter L1_ICACHE_SIZE = 64;
-  parameter L1_ICACHE_LEN = 6;
-
   reg [DATA_W-1:0] inst_ifu = 0;
   reg state, valid;
   reg pvalid;
-  reg [32-1:0] l1_icache[L1_ICACHE_SIZE-1:0];
-  reg [L1_ICACHE_SIZE-1:0] l1_icache_valid = 0;
-  reg [32-L1_ICACHE_LEN-2-1:0] l1_icache_tag[L1_ICACHE_SIZE-1:0];
-
-  wire arvalid;
-  wire [32-L1_ICACHE_LEN-2-1:0] addr_tag = ifu_araddr_o[ADDR_W-1:L1_ICACHE_LEN+2];
-  wire [L1_ICACHE_LEN-1:0] addr_idx = ifu_araddr_o[L1_ICACHE_LEN+2-1:0+2];
-  wire l1_cache_hit = (
-         (pvalid) &
-         l1_icache_valid[addr_idx] == 1'b1) & (l1_icache_tag[addr_idx] == addr_tag);
 
   assign ready_o = !valid_o;
-
   assign arvalid = pvalid;
 
+  parameter L1I_SIZE = 64;
+  parameter L1I_LEN = 6;
+  reg [32-1:0] l1i[L1I_SIZE-1:0];
+  reg [L1I_SIZE-1:0] l1i_valid = 0;
+  reg [32-L1I_LEN-2-1:0] l1i_tag[L1I_SIZE-1:0];
+
+  wire arvalid;
+  wire [32-L1I_LEN-2-1:0] addr_tag = ifu_araddr_o[ADDR_W-1:L1I_LEN+2];
+  wire [L1I_LEN-1:0] addr_idx = ifu_araddr_o[L1I_LEN+2-1:0+2];
+  wire l1i_cache_hit = (
+         (pvalid) &
+         l1i_valid[addr_idx] == 1'b1) & (l1i_tag[addr_idx] == addr_tag);
+
   assign ifu_araddr_o = prev_valid ? npc : pc;
-  assign ifu_arvalid_o = arvalid & !l1_cache_hit;
-  // not using l1 cache
+  assign ifu_arvalid_o = arvalid & !l1i_cache_hit;
+  // without l1i cache
   // assign inst_o = ifu_rvalid ? ifu_rdata : inst_ifu;
   // assign valid_o = ifu_rvalid | valid;
 
-  // using l1 cache
-  assign inst_o = (ifu_rvalid) ? ifu_rdata : l1_icache[addr_idx];
-  assign valid_o = ifu_rvalid | valid | l1_cache_hit;
+  // with l1i cache
+  assign inst_o = (ifu_rvalid) ? ifu_rdata : l1i[addr_idx];
+  assign valid_o = ifu_rvalid | valid | l1i_cache_hit;
 
   `ysyx_BUS_FSM();
   always @(posedge clk)
@@ -65,9 +64,9 @@ module ysyx_IFU (
           if (ifu_rvalid)
             begin
               inst_ifu <= ifu_rdata;
-              l1_icache[addr_idx] <= ifu_rdata;
-              l1_icache_tag[addr_idx] <= addr_tag;
-              l1_icache_valid[addr_idx] <= 1'b1;
+              l1i[addr_idx] <= ifu_rdata;
+              l1i_tag[addr_idx] <= addr_tag;
+              l1i_valid[addr_idx] <= 1'b1;
             end
           if (state == `ysyx_IDLE)
             begin
@@ -75,7 +74,7 @@ module ysyx_IFU (
                 begin
                   pvalid <= prev_valid;
                 end
-              if (ifu_rvalid | (l1_cache_hit))
+              if (ifu_rvalid | (l1i_cache_hit))
                 begin
                   valid <= 1;
                 end
