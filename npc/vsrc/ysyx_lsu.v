@@ -112,9 +112,9 @@ module ysyx_LSU(
         begin
           l1d[addr_idx] <= lsu_rdata;
           l1d_tag[addr_idx] <= addr_tag;
-          l1d_valid[addr_idx] <= 1'b1;
+          // l1d_valid[addr_idx] <= 1'b1;
         end
-      if (wen & lsu_avalid & l1d_cache_hit_w)
+      if (lsu_awvalid_o & l1d_cache_hit_w)
         begin
           l1d_valid[waddr_idx] <= 1'b0;
         end
