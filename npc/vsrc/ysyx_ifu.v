@@ -26,8 +26,8 @@ module ysyx_IFU (
   assign ready_o = !valid_o;
   assign arvalid = pvalid;
 
-  parameter L1I_SIZE = 256;
-  parameter L1I_LEN = 8;
+  parameter L1I_SIZE = 64;
+  parameter L1I_LEN = 6;
   reg [32-1:0] l1i[L1I_SIZE-1:0];
   reg [L1I_SIZE-1:0] l1i_valid = 0;
   reg [32-L1I_LEN-2-1:0] l1i_tag[L1I_SIZE-1:0];
