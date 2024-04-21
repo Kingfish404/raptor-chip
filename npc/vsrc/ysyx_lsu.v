@@ -38,7 +38,8 @@ module ysyx_LSU(
   wire [7:0] wstrb, rstrb;
 
   assign lsu_araddr_o = idu_valid ? addr : lsu_araddr;
-  assign lsu_arvalid_o = ren & lsu_avalid;
+  // assign lsu_arvalid_o = ren & lsu_avalid;
+  assign lsu_arvalid_o = ren & lsu_avalid & !l1d_cache_hit;
   assign lsu_rstrb_o = rstrb;
 
   // without l1d cache
