@@ -114,7 +114,7 @@ module ysyx_LSU(
           l1d_tag[addr_idx] <= addr_tag;
           l1d_valid[addr_idx] <= 1'b1;
         end
-      if (lsu_awvalid_o & l1d_cache_hit_w)
+      if (lsu_awvalid_o)
         begin
           $display("l1d_cache_hit_w");
           l1d_valid[waddr_idx] <= 1'b0;
