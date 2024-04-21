@@ -124,7 +124,7 @@ module ysyx_LSU(
         begin
           lsu_araddr <= addr;
         end
-      if (ren & lsu_rvalid)
+      if (ren & lsu_rvalid & l1d_cache_within)
         begin
           l1d[addr_idx] <= lsu_rdata;
           l1d_tag[addr_idx] <= addr_tag;
