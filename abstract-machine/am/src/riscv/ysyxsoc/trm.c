@@ -69,6 +69,7 @@ __attribute__((section(".first_boot"))) void _first_stage_bootloader(void)
     sum[0] = 0;
     volatile int data = sum[0];
     data = sum[0];
+    sum[0] = 0;
     data = sum[0];
     data = sum[0];
   }
