@@ -63,6 +63,13 @@ void halt(int code)
 
 __attribute__((section(".first_boot"))) void _first_stage_bootloader(void)
 {
+  volatile int *sum = 0x80000000;
+  for (volatile int i = 0; i < 3; i++)
+  {
+    volatile int data = sum[0];
+  }
+  asm volatile("ebreak");
+  return;
   if ((size_t)_second_boot_start != (size_t)_second_boot_load_start)
   {
     size_t text_size = _second_boot_end - _second_boot_start;
