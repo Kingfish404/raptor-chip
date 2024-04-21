@@ -36,7 +36,7 @@ module ysyx_IFU (
   wire [32-L1I_LEN-2-1:0] addr_tag = ifu_araddr_o[ADDR_W-1:L1I_LEN+2];
   wire [L1I_LEN-1:0] addr_idx = ifu_araddr_o[L1I_LEN+2-1:0+2];
   wire l1i_cache_hit = (
-         (pvalid) &
+         (pvalid) & 0 &
          l1i_valid[addr_idx] == 1'b1) & (l1i_tag[addr_idx] == addr_tag);
 
   assign ifu_araddr_o = prev_valid ? npc : pc;
