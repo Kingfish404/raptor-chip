@@ -109,9 +109,12 @@ module ysyx_LSU(
       if (idu_valid)
         begin
           lsu_araddr <= addr;
+        end
+      if (lsu_avalid)
+        begin
           l1_enable <= 1;
         end
-      if (!idu_valid)
+      if (!lsu_avalid)
         begin
           l1_enable <= 0;
         end
