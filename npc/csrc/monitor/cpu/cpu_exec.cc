@@ -36,7 +36,8 @@ static void statistic()
       g_nr_guest_inst, g_timer);
   Log(FMT_BLUE("Cycle = %u"), g_nr_guest_cycle);
   Log(FMT_BLUE("Freq = %.3f Hz, %.3d MHz"), frequency, (int)(frequency / 1e3));
-  Log(FMT_BLUE("Inst = %.3f inst/s"), g_nr_guest_inst / time_s);
+  Log(FMT_BLUE("Inst = %.3f Inst/s, %.1f KInst/s"),
+      g_nr_guest_inst / time_s, g_nr_guest_inst / time_s / 1e3);
   Log("%s at pc = " FMT_WORD_NO_PREFIX ", inst: " FMT_WORD_NO_PREFIX,
       ((*npc.ret) == 0 && npc.state != NPC_ABORT
            ? FMT_GREEN("HIT GOOD TRAP")
