@@ -39,7 +39,7 @@ module ysyx_LSU(
 
   assign lsu_araddr_o = idu_valid ? addr : lsu_araddr;
   // assign lsu_arvalid_o = ren & lsu_avalid;
-  assign lsu_arvalid_o = ren & lsu_avalid & !l1d_cache_hit & l1_enable;
+  assign lsu_arvalid_o = ren & lsu_avalid & !l1d_cache_hit;
   assign lsu_rstrb_o = rstrb;
 
   // without l1d cache
@@ -111,7 +111,7 @@ module ysyx_LSU(
           lsu_araddr <= addr;
           l1_enable <= 1;
         end
-      if (rvalid_o)
+      if (!lsu_avalid)
         begin
           l1_enable <= 0;
         end
