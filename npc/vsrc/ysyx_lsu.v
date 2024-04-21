@@ -36,16 +36,6 @@ module ysyx_LSU(
   assign rvalid_o = lsu_rvalid;
   assign wready_o = lsu_wready;
 
-  reg [19:0] lfsr = 1;
-  wire ifsr_ready = `ysyx_IFSR_ENABLE ? lfsr[19] : 1;
-  always @(posedge clk ) begin
-    if ((ren | wen)) begin
-      if (!lfsr[19]) begin lfsr <= {lfsr[18:0], lfsr[19] ^ lfsr[18]}; end
-    end else begin
-      lfsr <= {lfsr[18:0], lfsr[19] ^ lfsr[18]};
-    end
-  end
-
   reg [ADDR_W-1:0] lsu_araddr;
   always @(posedge clk) begin
     if (idu_valid) begin
