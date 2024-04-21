@@ -32,13 +32,13 @@ static void statistic()
   double time_s = g_timer / 1e6;
   double frequency = g_nr_guest_cycle / time_s;
   Log(FMT_BLUE(
-          "nr_inst = " FMT_WORD_NO_PREFIX ", time = %d (ns), %d (ms)"),
+          "#Inst: " FMT_WORD_NO_PREFIX ", time: %d (ns), %d (ms)"),
       g_nr_guest_inst, g_timer, (int)(g_timer / 1e3));
-  Log(FMT_BLUE("Cycle = %u, IPC = %.3f"), g_nr_guest_cycle, (1.0 * g_nr_guest_inst / g_nr_guest_cycle));
-  Log(FMT_BLUE("Freq = %.3f Hz, %.3d MHz"), frequency, (int)(frequency / 1e3));
-  Log(FMT_BLUE("Inst = %.3f Inst/s, %.1f KInst/s"),
+  Log(FMT_BLUE("Cycle: %u, IPC: %.3f"), g_nr_guest_cycle, (1.0 * g_nr_guest_inst / g_nr_guest_cycle));
+  Log(FMT_BLUE("Simulate Freq: %.3f Hz, %.3d MHz"), frequency, (int)(frequency / 1e3));
+  Log(FMT_BLUE("Inst: %.3f Inst/s, %.1f KInst/s"),
       g_nr_guest_inst / time_s, g_nr_guest_inst / time_s / 1e3);
-  Log("%s at pc = " FMT_WORD_NO_PREFIX ", inst: " FMT_WORD_NO_PREFIX,
+  Log("%s at pc: " FMT_WORD_NO_PREFIX ", inst: " FMT_WORD_NO_PREFIX,
       ((*npc.ret) == 0 && npc.state != NPC_ABORT
            ? FMT_GREEN("HIT GOOD TRAP")
            : FMT_RED("HIT BAD TRAP")),
