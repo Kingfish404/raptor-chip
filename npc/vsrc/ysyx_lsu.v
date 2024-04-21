@@ -116,12 +116,11 @@ module ysyx_LSU(
 
   always @(posedge clk)
     begin
-      if (l1d_cache_hit)
-        begin
-          $display("[hit] addr: %h, l1d data: %h, tag: %h, idx: %h",
-                   lsu_araddr_o,
-                   l1d[addr_idx], l1d_tag[addr_idx], addr_idx);
-        end
+      // if (l1d_cache_hit)
+      //   begin
+      //     $display("[hit] addr: %h, l1d data: %h, tag: %h, idx: %h",
+      //              lsu_araddr_o, l1d[addr_idx], l1d_tag[addr_idx], addr_idx);
+      //   end
       if (idu_valid)
         begin
           lsu_araddr <= addr;
