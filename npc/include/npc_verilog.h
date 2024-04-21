@@ -5,9 +5,9 @@
 #include <common.h>
 #include <cpu.h>
 
-#define CONCAT_HEAD(TOP_NAME)
-#define CONCAT_HEAD(CONCAT(TOP_NAME, ___024root))
-#define CONCAT_HEAD(CONCAT(TOP_NAME, __Dpi))
+#include CONCAT_HEAD(TOP_NAME)
+#include CONCAT_HEAD(CONCAT(TOP_NAME, ___024root))
+#include CONCAT_HEAD(CONCAT(TOP_NAME, __Dpi))
 
 #ifdef YSYX_SOC
 #define VERILOG_PREFIX top->rootp->ysyxSoCFull__DOT__asic__DOT__cpu__DOT__cpu
