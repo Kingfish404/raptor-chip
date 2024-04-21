@@ -72,7 +72,7 @@ module ysyx_LSU(
          ren & lsu_avalid & l1d_cache_within &
          l1d_valid[addr_idx] == 1'b1) & (l1d_tag[addr_idx] == addr_tag);
   wire l1d_cache_within = (
-         (lsu_araddr_o >= 'h80000000 && lsu_araddr_o < 'h00400000) ||
+         (lsu_araddr_o >= 'h80000000 && lsu_araddr_o < 'h80400000) ||
          (0)
        );
 
