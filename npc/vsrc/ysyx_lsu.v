@@ -59,14 +59,11 @@ module ysyx_LSU(
   reg [32-L1D_LEN-2-1:0] l1d_tag[L1D_SIZE-1:0];
 
   wire arvalid;
-  wire [32-L1D_LEN-2-1:0] addr_tag = ifu_araddr_o[ADDR_W-1:L1D_LEN+2];
-  wire [L1D_LEN-1:0] addr_idx = ifu_araddr_o[L1D_LEN+2-1:0+2];
+  wire [32-L1D_LEN-2-1:0] addr_tag = lsu_araddr_o[ADDR_W-1:L1D_LEN+2];
+  wire [L1D_LEN-1:0] addr_idx = lsu_araddr_o[L1D_LEN+2-1:0+2];
   wire l1d_cache_hit = (
          (pvalid) &
          l1d_valid[addr_idx] == 1'b1) & (l1d_tag[addr_idx] == addr_tag);
-
-  assign ifu_araddr_o = prev_valid ? npc : pc;
-  assign ifu_arvalid_o = arvalid & !l1d_cache_hit;
 
   // load/store unit
   assign wstrb = (
