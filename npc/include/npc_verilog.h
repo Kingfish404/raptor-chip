@@ -5,9 +5,9 @@
 #include <common.h>
 #include <cpu.h>
 
-#include CONCAT_HEAD(TOP_NAME)
-#include CONCAT_HEAD(CONCAT(TOP_NAME, ___024root))
-#include CONCAT_HEAD(CONCAT(TOP_NAME, __Dpi))
+#define CONCAT_HEAD(TOP_NAME)
+#define CONCAT_HEAD(CONCAT(TOP_NAME, ___024root))
+#define CONCAT_HEAD(CONCAT(TOP_NAME, __Dpi))
 
 #ifdef YSYX_SOC
 #define VERILOG_PREFIX top->rootp->ysyxSoCFull__DOT__asic__DOT__cpu__DOT__cpu
@@ -18,7 +18,7 @@
 static inline void verilog_connect(TOP_NAME *top, NPCState *npc)
 {
   // for difftest
-  npc->inst = (uint32_t *)&(CONCAT(VERILOG_PREFIX, __DOT__ifu__DOT__inst_idu));
+  npc->inst = (uint32_t *)&(CONCAT(VERILOG_PREFIX, __DOT__ifu__DOT__inst_ifu));
 
   npc->gpr = (word_t *)&CONCAT(VERILOG_PREFIX, __DOT__regs__DOT__rf);
   npc->pc = (uint32_t *)&CONCAT(VERILOG_PREFIX, __DOT__pc);
