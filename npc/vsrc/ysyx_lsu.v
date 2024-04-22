@@ -135,7 +135,6 @@ module ysyx_LSU(
         begin
           // $display("l1d_cache_hit_w");
           l1d_valid[waddr_idx] <= 1'b0;
-          l1d[waddr_idx] <= 'h0;
         end
     end
 endmodule
