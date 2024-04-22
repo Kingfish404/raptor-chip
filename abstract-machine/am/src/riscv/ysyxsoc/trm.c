@@ -84,7 +84,7 @@ size_t ssb_start_time, ssb_end_time;
 
 __attribute__((section(".second_boot"))) void _second_stage_bootloader()
 {
-  ssb_start_time = ((*((uint32_t *)RTC_ADDR + 4)) << 32) + *((uint32_t *)RTC_ADDR);
+  ssb_start_time = *((uint32_t *)RTC_ADDR);
   if ((size_t)_text_start != (size_t)_text_load_start)
   {
     size_t text_size = _text_end - _text_start;
@@ -109,7 +109,7 @@ __attribute__((section(".second_boot"))) void _second_stage_bootloader()
     size_t data_size = _data_end - _data_start;
     memcpy(_data_start, _data_load_start, (size_t)data_size);
   }
-  ssb_end_time = ((*((uint32_t *)RTC_ADDR + 4)) << 32) + *((uint32_t *)RTC_ADDR);
+  ssb_end_time = *((uint32_t *)RTC_ADDR);
   _trm_init();
 }
 
@@ -124,7 +124,7 @@ void _trm_init()
       "csrr %0, mvendorid\n\t"
       "csrr %1, marchid\n\t"
       : "=r"(mvendorid), "=r"(marchid) :);
-  size_t ready_time = ((*((uint32_t *)RTC_ADDR + 4)) << 32) + *((uint32_t *)RTC_ADDR);
+  size_t ready_time = *((uint32_t *)RTC_ADDR);
   printf("[%d|%d] trm init, mvendorid: 0x%lx, marchid: %ld\n", ready_time, ready_time - ssb_end_time, mvendorid, marchid);
 
   int ret = main(mainargs);

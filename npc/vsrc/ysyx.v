@@ -78,7 +78,7 @@ module ysyx (
   parameter BIT_W = `ysyx_W_WIDTH;
   parameter ADDR_W = `ysyx_W_WIDTH;
   // PC unit output
-  wire [BIT_W-1:0] pc, npc;
+  wire [BIT_W-1:0] pc;
 
   // REGS output
   wire [BIT_W-1:0] reg_rdata1, reg_rdata2;
