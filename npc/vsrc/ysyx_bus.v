@@ -117,7 +117,7 @@ module ysyx_BUS_ARBITER(
               end
             ls_a:
               begin
-                if ((io_master_awvalid & io_master_awready))
+                if (io_master_awvalid & io_master_awready)
                   begin
                     state <= ls_d_r;
                   end
