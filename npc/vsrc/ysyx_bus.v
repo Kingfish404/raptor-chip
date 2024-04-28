@@ -81,13 +81,14 @@ module ysyx_BUS_ARBITER(
         begin
           t1 <= 1;
           t2 <= 1;
-          state <= if_d;
+          state <= if_a;
         end
       else
         begin
           case (state)
             if_a:
               begin
+                $display("if_a: %d", io_master_arready);
                 if (io_master_arready)
                   begin
                     state <= if_d;
