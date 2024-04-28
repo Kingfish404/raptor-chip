@@ -122,7 +122,7 @@ module ysyx_BUS_ARBITER(
 
   // ifu read
   assign ifu_rdata_o = ({DATA_W{ifu_arvalid}} & (rdata_o));
-  assign ifu_rvalid_o = !lsu_arvalid & (ifu_arvalid & (rvalid_o));
+  assign ifu_rvalid_o = !io_master_arready & !lsu_arvalid & (ifu_arvalid & (rvalid_o));
 
   // lsu read
   wire clint_en = (lsu_araddr == `ysyx_BUS_RTC_ADDR) | (lsu_araddr == `ysyx_BUS_RTC_ADDR_UP);
