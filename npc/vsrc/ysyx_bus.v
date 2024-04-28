@@ -160,7 +160,6 @@ module ysyx_BUS_ARBITER(
   // wire uart_wvalid = (lsu_awvalid & (uart_en));
   // wire sram_en = (lsu_awaddr != `ysyx_BUS_SERIAL_PORT);
   wire sram_en = 1;
-  wire sram_wvalid = ;
   wire sram_awvalid = (lsu_wvalid & (sram_en));
   wire [ADDR_W-1:0] awaddr = lsu_awaddr;
   assign lsu_wready_o = (
