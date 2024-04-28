@@ -131,7 +131,7 @@ module ysyx_BUS_ARBITER(
               begin
                 if (io_master_bvalid)
                   begin
-                    state <= ls_a;
+                    state <= if_a;
                   end
               end
           endcase
