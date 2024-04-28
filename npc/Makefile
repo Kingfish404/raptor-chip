@@ -16,7 +16,7 @@ ifeq ($(CONFIG_MODE), "soc")
 VTARGET=ysyxSoCFull
 SOC_DEFINE=-DYSYX_SOC
 SOC_SOURCE=$(shell find $(abspath $(SOC_HOME)/perip) -name "*.v") \
-    $(SOC_HOME)/generated/ysyxSoCFull.v
+    $(SOC_HOME)/build/ysyxSoCFull.v
     # $(SOC_HOME)/generated/ysyxSoCFull-ChipLink.v
 else
 VTARGET=ysyx
@@ -29,7 +29,10 @@ SOC_HOME = $(abspath ./../ysyxSOC)
 INC_PATH ?= $(abspath ./include) $(abspath ./vsrc/include) \
 	$(abspath $(SOC_HOME)/perip/uart16550/rtl) $(abspath $(SOC_HOME)/perip/spi/rtl)
 VERILATOR_FLAG =--prof-c --prof-cfuncs --prof-exec --autoflush --timescale "1ns/1ns" --no-timing
-CXXFLAGS = -Wall -Werror -Wno-bool-operation -Wno-implicit-fallthrough -Wno-macro-redefined $(call remove_quote,$(CONFIG_CC_OPT))
+CXXFLAGS = -Wall -Werror \
+	-Wno-bool-operation -Wno-implicit-fallthrough -Wno-macro-redefined \
+	-Wno-unused-variable \
+	$(call remove_quote,$(CONFIG_CC_OPT))
 LDFLAGS = -lreadline -ldl
 
 FILELIST_MK = $(shell find -L ./csrc -name "filelist.mk")
