@@ -72,8 +72,8 @@ module ysyx_BUS_ARBITER(
   wire [1:0] sram_bresp_o;
   wire sram_bvalid_o;
 
-  typedef enum [1:0] {if_a, if_d, ls_a, ls_d} state_t;
-  reg [1:0] state;
+  typedef enum [1:0] {if_a, if_d, ls_a, ls_d_r, ls_d_w} state_t;
+  reg [2:0] state;
   reg first = 1;
   always @(posedge clk)
     begin
@@ -117,17 +117,25 @@ module ysyx_BUS_ARBITER(
               end
             ls_a:
               begin
-                if (
-                  (io_master_awvalid & io_master_awready) |
-                  (io_master_arvalid & io_master_arready)
-                )
+                if ((io_master_awvalid & io_master_awready))
                   begin
-                    state <= ls_d;
+                    state <= ls_d_r;
+                  end
+                else if (io_master_arvalid & io_master_arready)
+                  begin
+                    state <= ls_w_w;
                   end
               end
-            ls_d:
+            ls_d_r:
               begin
-                if (io_master_bvalid | io_master_rvalid)
+                if (io_master_rvalid)
+                  begin
+                    state <= if_a;
+                  end
+              end
+            ls_w_w:
+              begin
+                if (io_master_bvalid)
                   begin
                     state <= if_a;
                   end
