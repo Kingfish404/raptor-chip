@@ -94,7 +94,7 @@ module ysyx_BUS_ARBITER(
                     state <= if_d;
                     first <= 0;
                   end
-                if (io_master_arready)
+                if (ifu_arvalid & io_master_arready)
                   begin
                     state <= if_d;
                   end
