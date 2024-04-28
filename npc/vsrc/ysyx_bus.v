@@ -252,7 +252,7 @@ module ysyx_BUS_ARBITER(
           )
             begin
               npc_difftest_skip_ref();
-              $display("DIFFTEST: skip ref at aw: %h", io_master_awaddr);
+              // $display("DIFFTEST: skip ref at aw: %h", io_master_awaddr);
             end
         end
       if (io_master_arvalid)
@@ -268,7 +268,7 @@ module ysyx_BUS_ARBITER(
           )
             begin
               npc_difftest_skip_ref();
-              $display("DIFFTEST: skip ref at ar: %h", io_master_araddr);
+              // $display("DIFFTEST: skip ref at ar: %h", io_master_araddr);
             end
         end
     end
