@@ -85,6 +85,10 @@ module ysyx_BUS_ARBITER(
         end
       else
         begin
+          $display(
+              "state: %d, arready: %d",
+              state, io_master_arready
+            );
           case (state)
             if_a:
               begin
