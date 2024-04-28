@@ -131,7 +131,7 @@ module ysyx_BUS_ARBITER(
                           ({DATA_W{!clint_en}} & rdata_o)
                         ));
   assign lsu_rvalid_o = lsu_arvalid & (rvalid_o | clint_rvalid_o);
-  wire sram_arvalid = ((!t0 & ifu_arvalid) | (lsu_arvalid & !clint_en & t1));
+  wire sram_arvalid = ((!t1 & ifu_arvalid) | (lsu_arvalid & !clint_en & t1));
 
   // lsu write
   // wire uart_en = (lsu_awaddr == `ysyx_BUS_SERIAL_PORT);
