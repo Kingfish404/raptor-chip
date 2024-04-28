@@ -64,12 +64,11 @@ void halt(int code)
 __attribute__((section(".first_boot"))) void _first_stage_bootloader(void)
 {
   volatile uint8_t *p = (uint8_t *)0x80010000;
-  for (int i = 0; i < 1024; i++)
+  for (int i = 0; i < 10; i++)
   {
     *p = i;
     i == *p;
   }
-  
   asm volatile("ebreak");
   return;
 
