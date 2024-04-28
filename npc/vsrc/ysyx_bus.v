@@ -234,7 +234,7 @@ module ysyx_BUS_ARBITER(
   assign io_master_wstrb = (io_master_awaddr[2:2] == 1) ?
          {{lsu_wstrb[3:0] << awaddr_lo}, {4'b0}}:
          {{4'b0}, {lsu_wstrb[3:0] << awaddr_lo}};
-  assign io_master_wvalid = (lsu_wvalid & (sram_en));
+  assign io_master_wvalid = (state == ls_d) & (lsu_wvalid & (sram_en));
   assign sram_wready_o = io_master_wready;
 
   assign sram_bresp_o = io_master_bresp;
