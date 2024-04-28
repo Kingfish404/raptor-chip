@@ -73,8 +73,7 @@ module ysyx_BUS_ARBITER(
   wire sram_bvalid_o;
 
   reg t1, t2;
-  typedef enum [1:0] {if_a, if_d, ls_a, ls_d};
-  reg [1:0] state;
+  typedef enum [1:0] {if_a, if_d, ls_a, ls_d} state_t;
   always @(posedge clk)
     begin
       if (rst)
