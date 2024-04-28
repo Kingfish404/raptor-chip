@@ -112,7 +112,7 @@ module ysyx_BUS_ARBITER(
                 else
                   if (io_master_rvalid)
                     begin
-                      state <= ls_a;
+                      state <= if_a;
                     end
               end
             ls_a:
