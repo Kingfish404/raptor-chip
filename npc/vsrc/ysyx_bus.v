@@ -75,6 +75,7 @@ module ysyx_BUS_ARBITER(
   reg t1, t2;
   typedef enum [1:0] {if_a, if_d, ls_a, ls_d} state_t;
   reg [1:0] state;
+  reg first = 1;
   always @(posedge clk)
     begin
       if (rst)
@@ -82,6 +83,7 @@ module ysyx_BUS_ARBITER(
           t1 <= 1;
           t2 <= 1;
           state <= if_a;
+          first <= 1;
         end
       else
         begin
@@ -92,6 +94,9 @@ module ysyx_BUS_ARBITER(
           case (state)
             if_a:
               begin
+                if (first) begin
+                  state <= if_d;
+                end
                 if (io_master_arready)
                   begin
                     state <= if_d;
