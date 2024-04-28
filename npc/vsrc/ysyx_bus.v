@@ -140,6 +140,8 @@ module ysyx_BUS_ARBITER(
                     state <= if_a;
                   end
               end
+            default:
+              state <= if_a;
           endcase
         end
     end
