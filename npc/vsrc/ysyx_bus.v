@@ -72,7 +72,6 @@ module ysyx_BUS_ARBITER(
   wire [1:0] sram_bresp_o;
   wire sram_bvalid_o;
 
-  reg t1, t2;
   typedef enum [1:0] {if_a, if_d, ls_a, ls_d} state_t;
   reg [1:0] state;
   reg first = 1;
@@ -80,24 +79,21 @@ module ysyx_BUS_ARBITER(
     begin
       if (rst)
         begin
-          t1 <= 1;
-          t2 <= 1;
           state <= if_a;
           first <= 1;
         end
       else
         begin
-          $display(
-              "state: %d, arready: %d",
-              state, io_master_arready
-            );
+          $display("state: %d, arready: %d",
+                   state, io_master_arready,);
           case (state)
             if_a:
               begin
-                if (first) begin
-                  state <= if_d;
-                  first <= 0;
-                end
+                if (first)
+                  begin
+                    state <= if_d;
+                    first <= 0;
+                  end
                 if (io_master_arready)
                   begin
                     state <= if_d;
@@ -135,31 +131,6 @@ module ysyx_BUS_ARBITER(
                   end
               end
           endcase
-
-          // if (io_master_arready)
-          //   begin
-          //     t1 <= 0;
-          //   end
-          // else if (io_master_rvalid)
-          //   begin
-          //     t1 <= 1;
-          //   end
-
-          // if (io_master_awvalid & io_master_awready)
-          //   begin
-          //     t2 <= 0;
-          //   end
-          // else if (io_master_bvalid)
-          //   begin
-          //     t2 <= 1;
-          //   end
-          // else if (!ifu_arvalid)
-          //   begin
-          //     t1 <= 1;
-          //   end
-          // lsu_loading <= lsu_arvalid;
-          // arvalid_record <= io_master_arvalid;
-          // awvalid_record <= io_master_awready;
         end
     end
 
@@ -208,7 +179,7 @@ module ysyx_BUS_ARBITER(
            (3'b000)
          );
   assign io_master_araddr = sram_araddr;
-  assign io_master_arvalid = (
+  assign io_master_arvalid = !rst & (
            ((state == if_a) & ifu_arvalid) |
            ((state == ls_a) & lsu_arvalid & !clint_en)
          );
