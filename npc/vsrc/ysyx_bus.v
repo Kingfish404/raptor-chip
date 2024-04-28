@@ -169,7 +169,6 @@ module ysyx_BUS_ARBITER(
                           ({DATA_W{!clint_en}} & rdata_o)
                         ));
   assign lsu_rvalid_o = lsu_arvalid & (rvalid_o | clint_rvalid_o);
-  wire sram_arvalid = (((state == if_a) & ifu_arvalid) | (lsu_arvalid & !clint_en & (state == ls_a)));
 
   // lsu write
   // wire uart_en = (lsu_awaddr == `ysyx_BUS_SERIAL_PORT);
@@ -199,7 +198,10 @@ module ysyx_BUS_ARBITER(
            (3'b000)
          );
   assign io_master_araddr = sram_araddr;
-  assign io_master_arvalid = sram_arvalid;
+  assign io_master_arvalid = (
+           ((state == if_a) & ifu_arvalid) |
+           ((state == ls_a) & lsu_arvalid & !clint_en)
+         );
   assign arready_o = io_master_arready & io_master_bvalid;
 
   // assign rdata_o = io_master_rdata[31:0];
@@ -254,22 +256,6 @@ module ysyx_BUS_ARBITER(
   assign sram_bresp_o = io_master_bresp;
   assign sram_bvalid_o = io_master_bvalid;
   assign io_master_bready = 1;
-
-  // ysyx_MEM_SRAM
-  //   #(.ADDR_W(ADDR_W), .DATA_W(DATA_W))
-  //   sram(
-  //   .clk(clk),
-  //   .arburst(2'b00), .arsize(3'b000), .arlen(8'b00000000), .arid(4'b0000),
-  //   .araddr(sram_araddr), .arvalid(sram_arvalid), .arready_o(arready_o),
-  //   .rid(), .rlast_o(),
-  //   .rdata_o(rdata_o), .rresp_o(rresp_o), .rvalid_o(rvalid_o), .rready(1),
-  //   .awburst(2'b00), .awsize(3'b000), .awlen(8'b00000000), .awid(4'b0000),
-  //   .awaddr(awaddr), .awvalid(sram_awvalid), .awready_o(),
-  //   .wlast(1'b0),
-  //   .wdata(wdata), .wstrb(lsu_wstrb), .wvalid(sram_wvalid), .wready_o(sram_wready_o),
-  //   .bid(),
-  //   .bresp_o(sram_bresp_o), .bvalid_o(sram_bvalid_o), .bready(1)
-  // );
 
   always @(posedge clk)
     begin
