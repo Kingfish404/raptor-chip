@@ -133,7 +133,7 @@ module ysyx_BUS_ARBITER(
                     state <= if_a;
                   end
               end
-            ls_w_w:
+            ls_d_w:
               begin
                 if (io_master_bvalid)
                   begin
