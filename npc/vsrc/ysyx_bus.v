@@ -160,7 +160,7 @@ module ysyx_BUS_ARBITER(
   // wire uart_wvalid = (lsu_awvalid & (uart_en));
   // wire sram_en = (lsu_awaddr != `ysyx_BUS_SERIAL_PORT);
   wire [ADDR_W-1:0] awaddr = lsu_awaddr;
-  assign lsu_wready_o = io_master_wready;
+  assign lsu_wready_o = io_master_bvalid;
 
   reg [19:0] lfsr = 1;
   wire ifsr_ready = `ysyx_IFSR_ENABLE ? lfsr[19] : 1;
@@ -212,7 +212,6 @@ module ysyx_BUS_ARBITER(
          );
   assign io_master_awaddr = awaddr;
   assign io_master_awvalid = (state == ls_a) & (lsu_wvalid);
-  wire sram_awready_o = io_master_awready;
 
   assign io_master_wlast = (lsu_wvalid);
   // wire [DATA_W-1:0] wdata = lsu_wdata;
