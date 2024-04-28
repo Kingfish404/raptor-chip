@@ -123,7 +123,7 @@ module ysyx_BUS_ARBITER(
                   end
                 else if (io_master_arvalid & io_master_arready)
                   begin
-                    state <= ls_w_w;
+                    state <= ls_d_w;
                   end
               end
             ls_d_r:
