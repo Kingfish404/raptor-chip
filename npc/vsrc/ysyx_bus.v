@@ -240,7 +240,7 @@ module ysyx_BUS_ARBITER(
     begin
       `Assert(io_master_rresp, 2'b00);
       `Assert(io_master_bresp, 2'b00);
-      if (io_master_wvalid)
+      if (io_master_awvalid)
         begin
           npc_difftest_mem_diff();
           if (
