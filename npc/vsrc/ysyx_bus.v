@@ -85,27 +85,68 @@ module ysyx_BUS_ARBITER(
         end
       else
         begin
-          if (io_master_arready)
-            begin
-              t1 <= 0;
-            end
-          else if (io_master_rvalid)
-            begin
-              t1 <= 1;
-            end
+          case (state)
+            if_a:
+              begin
+                if (io_master_arready)
+                  begin
+                    state <= if_d;
+                  end
+              end
+            if_d:
+              begin
+                if (lsu_arvalid)
+                  begin
+                    state <= ls_a;
+                  end
+                else
+                  if (io_master_rvalid)
+                    begin
+                      state <= if_a;
+                    end
+              end
+            ls_a:
+              begin
+                if (io_master_awvalid & io_master_awready)
+                  begin
+                    state <= ls_d;
+                  end
+                else
+                  if (ifu_arvalid)
+                    begin
+                      state <= if_a;
+                    end
+              end
+            ls_d:
+              begin
+                if (io_master_bvalid)
+                  begin
+                    state <= ls_a;
+                  end
+              end
+          endcase
 
-          if (io_master_awvalid & io_master_awready)
-            begin
-              t2 <= 0;
-            end
-          else if (io_master_bvalid)
-            begin
-              t2 <= 1;
-            end
-          else if (!ifu_arvalid)
-            begin
-              t1 <= 1;
-            end
+          // if (io_master_arready)
+          //   begin
+          //     t1 <= 0;
+          //   end
+          // else if (io_master_rvalid)
+          //   begin
+          //     t1 <= 1;
+          //   end
+
+          // if (io_master_awvalid & io_master_awready)
+          //   begin
+          //     t2 <= 0;
+          //   end
+          // else if (io_master_bvalid)
+          //   begin
+          //     t2 <= 1;
+          //   end
+          // else if (!ifu_arvalid)
+          //   begin
+          //     t1 <= 1;
+          //   end
           // lsu_loading <= lsu_arvalid;
           // arvalid_record <= io_master_arvalid;
           // awvalid_record <= io_master_awready;
@@ -128,7 +169,7 @@ module ysyx_BUS_ARBITER(
                           ({DATA_W{!clint_en}} & rdata_o)
                         ));
   assign lsu_rvalid_o = lsu_arvalid & (rvalid_o | clint_rvalid_o);
-  wire sram_arvalid = ((t1 & ifu_arvalid) | (lsu_arvalid & !clint_en & t1));
+  wire sram_arvalid = (((state == if_a) & ifu_arvalid) | (lsu_arvalid & !clint_en & (state == ls_a)));
 
   // lsu write
   // wire uart_en = (lsu_awaddr == `ysyx_BUS_SERIAL_PORT);
@@ -189,7 +230,7 @@ module ysyx_BUS_ARBITER(
            (3'b000)
          );
   assign io_master_awaddr = awaddr;
-  assign io_master_awvalid = sram_awvalid & t2;
+  assign io_master_awvalid = sram_awvalid & (state == ls_a);
   wire sram_awready_o = io_master_awready;
 
   assign io_master_wlast = sram_awvalid;
