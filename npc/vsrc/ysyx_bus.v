@@ -95,7 +95,7 @@ module ysyx_BUS_ARBITER(
             end
           else if (io_master_rvalid)
             begin
-              t1 <= 1;
+              // t1 <= 1;
             end
           if (io_master_awvalid & io_master_awready)
             begin
