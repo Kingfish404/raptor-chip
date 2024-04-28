@@ -81,7 +81,7 @@ module ysyx_BUS_ARBITER(
         begin
           t1 <= 1;
           t2 <= 1;
-          state <= if_a;
+          state <= if_d;
         end
       else
         begin
