@@ -170,7 +170,7 @@ extern "C" void flash_read(uint32_t addr, uint32_t *data)
 {
     uint32_t offset = addr;
     *data = *((uint32_t *)(flash + offset));
-    Log("flash raddr: 0x%08x, rdata: 0x%08x, offest: 0x%08x", addr, *data, offset);
+    // Log("flash raddr: 0x%08x, rdata: 0x%08x, offest: 0x%08x", addr, *data, offset);
 }
 
 extern "C" void mrom_read(uint32_t addr, uint32_t *data)
