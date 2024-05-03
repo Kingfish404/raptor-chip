@@ -72,78 +72,46 @@ module ysyx_BUS_ARBITER(
   wire [1:0] sram_bresp_o;
   wire sram_bvalid_o;
 
-  typedef enum [2:0] {if_a, if_d, ls_a, ls_d_r, ls_d_w} state_t;
-  //                   000,  001,  010,    011,    100,
-  reg [2:0] state;
-  reg first = 1;
+  // reg lsu_loading = 0, awvalid_record = 0, arvalid_record = 0;
+  reg t1, t2;
   always @(posedge clk)
     begin
       if (rst)
         begin
-          state <= if_a;
-          first <= 1;
+          // lsu_loading <= 0;
+          // arvalid_record <= 0;
+          // awvalid_record <= 0;
+          t1 <= 1;
+          t2 <= 1;
         end
       else
         begin
-          // $display("state: %d, arready: %d",
-          //          state, io_master_arready,);
-          case (state)
-            if_a:
-              begin
-                if (first)
-                  begin
-                    state <= if_d;
-                    first <= 0;
-                  end
-                if (ifu_arvalid & io_master_arready)
-                  begin
-                    state <= if_d;
-                  end
-                if (lsu_arvalid | lsu_awvalid)
-                  begin
-                    state <= ls_a;
-                  end
-              end
-            if_d:
-              begin
-                if (lsu_arvalid | lsu_awvalid)
-                  begin
-                    state <= ls_a;
-                  end
-                else
-                  if (io_master_rvalid)
-                    begin
-                      state <= if_a;
-                    end
-              end
-            ls_a:
-              begin
-                if (io_master_awvalid & io_master_awready)
-                  begin
-                    state <= ls_d_w;
-                  end
-                else if (io_master_arvalid & io_master_arready)
-                  begin
-                    state <= ls_d_r;
-                  end
-              end
-            ls_d_r:
-              begin
-                if (io_master_rvalid)
-                  begin
-                    state <= if_a;
-                  end
-              end
-            ls_d_w:
-              begin
-                if (io_master_bvalid)
-                  begin
-                    state <= if_a;
-                  end
-              end
-            default:
-              state <= if_a;
-          endcase
+          // if (lsu_arvalid) begin
+          //   t1 <= 1;
+          // end
+          if (io_master_arready)
+            begin
+              t1 <= 0;
+            end
+          else if (io_master_rvalid)
+            begin
+              t1 <= 1;
+            end
+          if (io_master_awvalid & io_master_awready)
+            begin
+              t2 <= 0;
+            end
+          else if (io_master_bvalid)
+            begin
+              t2 <= 1;
+            end
+          else if (!ifu_arvalid)
+            begin
+              t1 <= 1;
+            end
+          // lsu_loading <= lsu_arvalid;
+          // arvalid_record <= io_master_arvalid;
+          // awvalid_record <= io_master_awready;
         end
     end
 
@@ -163,13 +131,20 @@ module ysyx_BUS_ARBITER(
                           ({DATA_W{!clint_en}} & rdata_o)
                         ));
   assign lsu_rvalid_o = lsu_arvalid & (rvalid_o | clint_rvalid_o);
+  wire sram_arvalid = (ifu_arvalid | (lsu_arvalid & !clint_en & t1));
 
   // lsu write
   // wire uart_en = (lsu_awaddr == `ysyx_BUS_SERIAL_PORT);
   // wire uart_wvalid = (lsu_awvalid & (uart_en));
   // wire sram_en = (lsu_awaddr != `ysyx_BUS_SERIAL_PORT);
+  wire sram_en = 1;
+  wire sram_wvalid = (lsu_wvalid & (sram_en));
+  wire sram_awvalid = (lsu_wvalid & (sram_en));
   wire [ADDR_W-1:0] awaddr = lsu_awaddr;
-  assign lsu_wready_o = io_master_bvalid;
+  assign lsu_wready_o = (
+           //  (uart_en & uart_wready_o) |
+           (sram_en & sram_wready_o)
+         );
 
   reg [19:0] lfsr = 1;
   wire ifsr_ready = `ysyx_IFSR_ENABLE ? lfsr[19] : 1;
@@ -186,10 +161,7 @@ module ysyx_BUS_ARBITER(
            (3'b000)
          );
   assign io_master_araddr = sram_araddr;
-  assign io_master_arvalid = !rst & (
-           ((state == if_a) & ifu_arvalid) |
-           ((state == ls_a) & lsu_arvalid & !clint_en)
-         );
+  assign io_master_arvalid = sram_arvalid;
   assign arready_o = io_master_arready & io_master_bvalid;
 
   // assign rdata_o = io_master_rdata[31:0];
@@ -220,9 +192,11 @@ module ysyx_BUS_ARBITER(
            (3'b000)
          );
   assign io_master_awaddr = awaddr;
-  assign io_master_awvalid = (state == ls_a) & (lsu_wvalid);
+  assign io_master_awvalid = sram_awvalid & t2;
+  wire sram_awready_o = io_master_awready;
 
-  assign io_master_wlast = 1;
+  assign io_master_wlast = sram_awvalid;
+  // wire [DATA_W-1:0] wdata = lsu_wdata;
   wire [1:0] awaddr_lo = io_master_awaddr[1:0];
   wire [DATA_W-1:0] wdata = {
          ({DATA_W{awaddr_lo == 2'b00}} & lsu_wdata) |
@@ -236,9 +210,28 @@ module ysyx_BUS_ARBITER(
   assign io_master_wstrb = (io_master_awaddr[2:2] == 1) ?
          {{lsu_wstrb[3:0] << awaddr_lo}, {4'b0}}:
          {{4'b0}, {lsu_wstrb[3:0] << awaddr_lo}};
-  assign io_master_wvalid = (state == ls_d_w) & (lsu_wvalid);
+  assign io_master_wvalid = sram_wvalid;
+  assign sram_wready_o = io_master_wready;
 
+  assign sram_bresp_o = io_master_bresp;
+  assign sram_bvalid_o = io_master_bvalid;
   assign io_master_bready = 1;
+
+  // ysyx_MEM_SRAM
+  //   #(.ADDR_W(ADDR_W), .DATA_W(DATA_W))
+  //   sram(
+  //   .clk(clk),
+  //   .arburst(2'b00), .arsize(3'b000), .arlen(8'b00000000), .arid(4'b0000),
+  //   .araddr(sram_araddr), .arvalid(sram_arvalid), .arready_o(arready_o),
+  //   .rid(), .rlast_o(),
+  //   .rdata_o(rdata_o), .rresp_o(rresp_o), .rvalid_o(rvalid_o), .rready(1),
+  //   .awburst(2'b00), .awsize(3'b000), .awlen(8'b00000000), .awid(4'b0000),
+  //   .awaddr(awaddr), .awvalid(sram_awvalid), .awready_o(),
+  //   .wlast(1'b0),
+  //   .wdata(wdata), .wstrb(lsu_wstrb), .wvalid(sram_wvalid), .wready_o(sram_wready_o),
+  //   .bid(),
+  //   .bresp_o(sram_bresp_o), .bvalid_o(sram_bvalid_o), .bready(1)
+  // );
 
   always @(posedge clk)
     begin
@@ -278,6 +271,23 @@ module ysyx_BUS_ARBITER(
             end
         end
     end
+
+  // wire [DATA_W-1:0] uart_rdata_o;
+  // wire [1:0] uart_rresp_o, uart_bresp_o;
+  // wire uart_arready_o, uart_rvalid_o, uart_awready_o, uart_wready_o, uart_bvalid_o;
+  // ysyx_UART #(.ADDR_W(ADDR_W), .DATA_W(DATA_W)) uart(
+  //             .clk(clk),
+  //             .arburst(2'b00), .arsize(3'b000), .arlen(8'b00000000), .arid(4'b0000),
+  //             .araddr(0), .arvalid(0), .arready_o(uart_arready_o),
+  //             .rid(), .rlast_o(),
+  //             .rdata_o(uart_rdata_o), .rresp_o(uart_rresp_o), .rvalid_o(uart_rvalid_o), .rready(0),
+  //             .awburst(2'b00), .awsize(3'b000), .awlen(8'b00000000), .awid(4'b0000),
+  //             .awaddr(awaddr), .awvalid(sram_awvalid), .awready_o(uart_awready_o),
+  //             .wlast(1'b0),
+  //             .wdata(wdata), .wstrb(lsu_wstrb), .wvalid(uart_wvalid), .wready_o(uart_wready_o),
+  //             .bid(),
+  //             .bresp_o(uart_bresp_o), .bvalid_o(uart_bvalid_o), .bready(1)
+  //           );
 
   wire clint_arvalid = (lsu_arvalid & clint_en);
   wire clint_arready_o;
