@@ -220,7 +220,7 @@ module ysyx_BUS_ARBITER(
            (3'b000)
          );
   assign io_master_awaddr = awaddr;
-  assign io_master_awvalid = (1 || state == ls_a) & (lsu_wvalid);
+  assign io_master_awvalid = (1 | state == ls_a) & (lsu_wvalid);
 
   assign io_master_wlast = 1;
   // wire [DATA_W-1:0] wdata = lsu_wdata;
