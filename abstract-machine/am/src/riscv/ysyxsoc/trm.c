@@ -66,7 +66,7 @@ __attribute__((section(".first_boot"))) void _first_stage_bootloader(void)
   volatile uint8_t *p = (uint8_t *)0x80000000;
   for (int i = 1; i < 3; i++)
   {
-    *p = i;
+    *p = i + 41;
     i == *p;
   }
   asm volatile("ebreak");
