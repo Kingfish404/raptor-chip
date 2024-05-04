@@ -181,8 +181,8 @@ module ysyx_BUS_ARBITER(
   assign io_master_araddr = sram_araddr;
   assign io_master_arvalid = !rst & (
            ((state == if_a) & ifu_arvalid) |
-           ((state == ls_a) & lsu_arvalid & !clint_en)
-           //  ((state == ls_a || state == ls_d_r) & lsu_arvalid & !clint_en) // for old soc
+          //  ((state == ls_a) & lsu_arvalid & !clint_en)
+            ((state == ls_a || state == ls_d_r) & lsu_arvalid & !clint_en) // for old soc
          );
   assign arready_o = io_master_arready & io_master_bvalid;
 
@@ -220,8 +220,8 @@ module ysyx_BUS_ARBITER(
          {{lsu_wstrb[3:0] << awaddr_lo}, {4'b0}}:
          {{4'b0}, {lsu_wstrb[3:0] << awaddr_lo}};
   assign io_master_wvalid = (
-           (state == ls_d_w ) & (lsu_wvalid)
-           //  (state == ls_a || state == ls_d_w) & (lsu_wvalid) // for old soc
+          //  (state == ls_d_w ) & (lsu_wvalid)
+            (state == ls_a || state == ls_d_w) & (lsu_wvalid) // for old soc
          );
 
   assign io_master_bready = 1;
