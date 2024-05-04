@@ -71,6 +71,10 @@ __attribute__((section(".first_boot"))) void _first_stage_bootloader(void)
   // }
   // asm volatile("ebreak");
   // return;
+  for (int i = 0; i < 100; i++)
+  {
+    asm volatile("nop");
+  }
 
   if ((size_t)_second_boot_start != (size_t)_second_boot_load_start)
   {
