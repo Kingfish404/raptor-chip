@@ -126,6 +126,10 @@ module ysyx_BUS_ARBITER(
                   begin
                     state <= ls_d_r;
                   end
+                else if (clint_arvalid & clint_arready_o)
+                  begin
+                    state <= if_a;
+                  end
               end
             ls_d_r:
               begin
