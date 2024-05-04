@@ -70,7 +70,7 @@ __attribute__((section(".first_boot"))) void _first_stage_bootloader(void)
   {
     *(p + i) = i + 41;
     asm volatile("nop\n\t");
-    i == *(p + i);
+    // i == *(p + i);
     // data = *(p + i);
   }
   asm volatile("ebreak");
