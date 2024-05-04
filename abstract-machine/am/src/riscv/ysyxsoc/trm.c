@@ -63,14 +63,15 @@ void halt(int code)
 
 __attribute__((section(".first_boot"))) void _first_stage_bootloader(void)
 {
+  volatile register size_t t = *((uint32_t *)RTC_ADDR);
   volatile uint8_t *p = (uint8_t *)0x80000000;
   for (int i = 1; i < 30; i++)
   {
     *p = i + 41;
     i == *p;
   }
-  // asm volatile("ebreak");
-  // return;
+  asm volatile("ebreak");
+  return;
 
   if ((size_t)_second_boot_start != (size_t)_second_boot_load_start)
   {
@@ -93,7 +94,7 @@ size_t ssb_start_time, ssb_end_time;
 
 __attribute__((section(".second_boot"))) void _second_stage_bootloader()
 {
-  // ssb_start_time = *((uint32_t *)RTC_ADDR);
+  ssb_start_time = *((uint32_t *)RTC_ADDR);
   if ((size_t)_text_start != (size_t)_text_load_start)
   {
     size_t text_size = _text_end - _text_start;
