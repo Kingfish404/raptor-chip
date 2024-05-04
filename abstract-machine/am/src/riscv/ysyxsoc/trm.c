@@ -66,12 +66,12 @@ __attribute__((section(".first_boot"))) void _first_stage_bootloader(void)
   volatile uint8_t *p = (uint8_t *)0x30000000;
   volatile register uint8_t data = *p;
   // asm volatile("ebreak");
-  for (int i = 1; i < 1024; i++)
+  for (int i = 1; i < 4; i++)
   {
-    // *(p + i) = i + 41;
-    // asm volatile("nop\n\t");
-    // i == *(p + i);
-    data = *(p + i);
+    *(p + i) = i + 41;
+    asm volatile("nop\n\t");
+    i == *(p + i);
+    // data = *(p + i);
   }
   asm volatile("ebreak");
   return;
