@@ -67,7 +67,7 @@ __attribute__((section(".first_boot"))) void _first_stage_bootloader(void)
   for (int i = 1; i < 20; i++)
   {
     asm volatile("nop\n\t");
-    *p = i + 41;
+    *(p + i) = i + 41;
     // i == *p;
   }
   asm volatile("ebreak");
