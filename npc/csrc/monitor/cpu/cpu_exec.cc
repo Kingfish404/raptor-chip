@@ -115,7 +115,7 @@ void cpu_exec(uint64_t n)
     cpu_exec_one_cycle();
     g_nr_guest_cycle++;
     cur_inst_cycle++;
-    if (cur_inst_cycle > 0x1fff)
+    if (cur_inst_cycle > 0x2fff)
     {
       Log("Too many cycles for one instruction, maybe a bug.");
       npc.state = NPC_ABORT;
