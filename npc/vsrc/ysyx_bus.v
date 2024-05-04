@@ -177,11 +177,10 @@ module ysyx_BUS_ARBITER(
   assign io_master_araddr = sram_araddr;
   assign io_master_arvalid = !rst & (
            ((state == if_a) & ifu_arvalid) |
-           ((state == ls_a) & lsu_arvalid & !clint_en)
+           ((state == ls_a || state == ls_d_r) & lsu_arvalid & !clint_en)
          );
   assign arready_o = io_master_arready & io_master_bvalid;
 
-  // assign rdata_o = io_master_rdata[31:0];
   wire [DATA_W-1:0] io_rdata = (io_master_araddr[2:2] == 1) ?
        io_master_rdata[63:32]:
        io_master_rdata[31:00];
