@@ -70,8 +70,8 @@ __attribute__((section(".first_boot"))) void _first_stage_bootloader(void)
     *p = i + 41;
     i == *p;
   }
-  asm volatile("ebreak");
-  return;
+  // asm volatile("ebreak");
+  // return;
 
   if ((size_t)_second_boot_start != (size_t)_second_boot_load_start)
   {
