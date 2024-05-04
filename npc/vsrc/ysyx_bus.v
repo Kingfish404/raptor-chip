@@ -181,7 +181,7 @@ module ysyx_BUS_ARBITER(
   assign io_master_araddr = sram_araddr;
   assign io_master_arvalid = !rst & (
            ((state == if_a) & ifu_arvalid) |
-           ((state == ls_a || state == ls_d_r) & lsu_arvalid & !clint_en)
+           ((state == ls_a) & lsu_arvalid & !clint_en)
          );
   assign arready_o = io_master_arready & io_master_bvalid;
 
