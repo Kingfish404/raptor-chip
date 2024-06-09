@@ -229,7 +229,7 @@ module ysyx_BUS_ARBITER(
   assign io_master_wvalid = (
           //  (state == ls_d_w ) & (lsu_wvalid)
             // (state == ls_a || state == ls_d_w) & (lsu_wvalid) // for old soc
-            (state == ls_a || ((state == ls_d_w) & write_valid)) & (lsu_wvalid) // for new soc
+            (((state == ls_d_w) & write_valid)) & (lsu_wvalid) // for new soc
          );
 
   assign io_master_bready = 1;
