@@ -119,8 +119,8 @@ extern "C" void pmem_read(word_t raddr, word_t *data)
     if (raddr >= MBASE && raddr < MBASE + MSIZE)
     {
         *data = host_read(pmem + raddr - MBASE, 4);
-        Log("raddr: " FMT_WORD_NO_PREFIX ", data: " FMT_WORD_NO_PREFIX,
-            raddr, *data);
+        // Log("raddr: " FMT_WORD_NO_PREFIX ", data: " FMT_WORD_NO_PREFIX,
+        //     raddr, *data);
         return;
     }
     npc_abort();
@@ -129,8 +129,8 @@ extern "C" void pmem_read(word_t raddr, word_t *data)
 
 extern "C" void pmem_write(word_t waddr, word_t wdata, char wmask)
 {
-    Log("waddr: 0x%08x, wdata: 0x%08x, wmask = 0x%08x",
-        waddr, wdata, wmask);
+    // Log("waddr: 0x%08x, wdata: 0x%08x, wmask = 0x%08x",
+    //     waddr, wdata, wmask);
 #ifdef CONFIG_SOFT_MMIO
     // SERIAL_MMIO: hex "MMIO address of the serial controller"
     if (waddr == SERIAL_PORT)
