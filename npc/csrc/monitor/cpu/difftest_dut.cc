@@ -89,7 +89,7 @@ static void checkregs(NPCState *ref, vaddr_t pc)
   if ((uint32_t)(*(ref->inst)) != *(npc.inst))
   {
     printf(FMT_RED("[ERROR]") " inst is different! ref = " FMT_WORD_NO_PREFIX ", dut = " FMT_WORD_NO_PREFIX "\n",
-           *(ref->inst), npc.inst);
+           *(ref->inst), *(npc.inst));
     is_same = false;
   }
   for (int i = 0; i < GPR_SIZE; i++)
