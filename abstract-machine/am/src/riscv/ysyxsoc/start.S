@@ -8,5 +8,8 @@ _start:
   lui	a5,0x80001
   li	a4,66
   sb	a4,0(a5)
-  lbu	a5,0(a5)
+  lbu	a4,0(a5)
+
+  sb	a4,0(a5)
+  lbu	a4,0(a5)
   jal _first_stage_bootloader
