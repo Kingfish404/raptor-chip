@@ -21,7 +21,7 @@ static inline void verilog_connect(TOP_NAME *top, NPCState *npc)
   npc->inst = (uint32_t *)&(CONCAT(VERILOG_PREFIX, __DOT__idu__DOT__inst_idu));
 
   npc->gpr = (word_t *)&CONCAT(VERILOG_PREFIX, __DOT__regs__DOT__rf);
-  npc->pc = (uint32_t *)&CONCAT(VERILOG_PREFIX, __DOT__pc);
+  npc->pc = (uint32_t *)&CONCAT(VERILOG_PREFIX, __DOT__pc_idu);
   npc->ret = npc->gpr + reg_str2idx("a0");
   word_t *csr = (word_t *)&CONCAT(VERILOG_PREFIX, __DOT__exu__DOT__csr__DOT__csr);
 
