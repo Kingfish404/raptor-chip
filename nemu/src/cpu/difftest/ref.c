@@ -35,6 +35,9 @@ typedef struct
 
   // for itrace
   uint32_t *inst;
+
+  // for soc
+  uint8_t *soc_sram;
 } NPCState;
 
 __EXPORT void difftest_memcpy(paddr_t addr, void *buf, size_t n, bool direction)
