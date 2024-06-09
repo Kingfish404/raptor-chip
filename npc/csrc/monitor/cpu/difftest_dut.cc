@@ -88,7 +88,7 @@ static void checkregs(NPCState *ref, vaddr_t pc)
   }
   if ((uint32_t)(*(ref->inst)) != npc.last_inst)
   {
-    printf(FMT_RED("[ERROR]") " npc inst is different! ref = " FMT_WORD_NO_PREFIX ", dut = " FMT_WORD_NO_PREFIX "\n",
+    printf(FMT_RED("[ERROR]") "    inst is different! ref = " FMT_WORD_NO_PREFIX ", dut = " FMT_WORD_NO_PREFIX "\n",
            *(ref->inst), npc.last_inst);
     is_same = false;
   }
