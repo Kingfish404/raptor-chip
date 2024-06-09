@@ -120,7 +120,7 @@ extern "C" void pmem_read(word_t raddr, word_t *data)
     {
         *data = host_read(pmem + raddr - MBASE, 4);
         // Log("raddr: " FMT_WORD_NO_PREFIX ", data: " FMT_WORD_NO_PREFIX,
-        //        raddr, *data);
+        //     raddr, *data);
         return;
     }
     npc_abort();
@@ -129,8 +129,8 @@ extern "C" void pmem_read(word_t raddr, word_t *data)
 
 extern "C" void pmem_write(word_t waddr, word_t wdata, char wmask)
 {
-    // Log("waddr: 0x%x, wdata: 0x%x, wmask = 0x%x",
-    //        waddr, wdata, wmask);
+    // Log("waddr: 0x%08x, wdata: 0x%08x, wmask = 0x%08x",
+    //     waddr, wdata, wmask);
 #ifdef CONFIG_SOFT_MMIO
     // SERIAL_MMIO: hex "MMIO address of the serial controller"
     if (waddr == SERIAL_PORT)
@@ -170,7 +170,7 @@ extern "C" void flash_read(uint32_t addr, uint32_t *data)
 {
     uint32_t offset = addr;
     *data = *((uint32_t *)(flash + offset));
-    // Log("flash raddr: 0x%x, rdata: 0x%x, offest: 0x%x", addr, *data, offset);
+    // Log("flash raddr: 0x%08x, rdata: 0x%08x, offest: 0x%08x", addr, *data, offset);
 }
 
 extern "C" void mrom_read(uint32_t addr, uint32_t *data)
