@@ -76,6 +76,7 @@ module ysyx_BUS_ARBITER(
   //                   000,  001,  010,    011,    100,
   reg [2:0] state;
   reg first = 1;
+  reg write_valid = 0;
   always @(posedge clk)
     begin
       if (rst)
@@ -121,6 +122,7 @@ module ysyx_BUS_ARBITER(
                 if (io_master_awvalid & io_master_awready)
                   begin
                     state <= ls_d_w;
+                    write_valid <= 1;
                   end
                 else if (io_master_arvalid & io_master_arready)
                   begin
@@ -140,6 +142,10 @@ module ysyx_BUS_ARBITER(
               end
             ls_d_w:
               begin
+                if (io_master_wready)
+                  begin
+                    write_valid <= 0;
+                  end
                 if (io_master_bvalid)
                   begin
                     state <= if_a;
@@ -222,7 +228,8 @@ module ysyx_BUS_ARBITER(
          {{4'b0}, {lsu_wstrb[3:0] << awaddr_lo}};
   assign io_master_wvalid = (
           //  (state == ls_d_w ) & (lsu_wvalid)
-            (state == ls_a || state == ls_d_w) & (lsu_wvalid) // for old soc
+            // (state == ls_a || state == ls_d_w) & (lsu_wvalid) // for old soc
+            (state == ls_a || ((state == ls_d_w) & write_valid)) & (lsu_wvalid) // for new soc
          );
 
   assign io_master_bready = 1;
