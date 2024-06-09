@@ -11,4 +11,5 @@ _start:
   lbu	a4,0(a5)
   sb	a4,0(a5)
   lbu	a4,0(a5)
+  ebreak
   jal _first_stage_bootloader
