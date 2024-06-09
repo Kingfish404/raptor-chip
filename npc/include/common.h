@@ -113,9 +113,6 @@ typedef struct
 
   // for itrace
   uint32_t *inst;
-
-  // for soc
-  uint8_t *soc_sram;
 } NPCState;
 
 extern NPCState npc;

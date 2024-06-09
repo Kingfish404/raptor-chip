@@ -32,6 +32,9 @@ typedef struct
   word_t *mtvec;
   word_t *mepc;
   word_t *mstatus;
+
+  // for itrace
+  uint32_t *inst;
 } NPCState;
 
 __EXPORT void difftest_memcpy(paddr_t addr, void *buf, size_t n, bool direction)
@@ -74,6 +77,7 @@ __EXPORT void difftest_regcpy(void *dut, bool direction)
   else if (direction == DIFFTEST_TO_DUT)
   {
     npc->pc = &cpu.pc;
+    npc->inst = &cpu.inst;
     npc->gpr = cpu.gpr;
     npc->mcause = &cpu.sr[CSR_MCAUSE];
     npc->mepc = &cpu.sr[CSR_MEPC];
