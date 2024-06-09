@@ -69,16 +69,12 @@ __attribute__((section(".first_boot"))) void _first_stage_bootloader(void)
   data = *p;
   // *p = 0x43;
   // data = *p;
-  asm volatile("ebreak");
-  return;
   for (int i = 1; i < 0xf; i++)
   {
     *(p + i) = i;
     asm volatile("nop\n\t");
     i == *(p + i);
   }
-  asm volatile("ebreak");
-  return;
 
   if ((size_t)_second_boot_start != (size_t)_second_boot_load_start)
   {
