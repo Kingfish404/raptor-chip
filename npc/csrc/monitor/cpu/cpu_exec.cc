@@ -141,6 +141,7 @@ void cpu_exec(uint64_t n)
       difftest_step(*npc.pc);
 #endif
       prev_pc = *(npc.pc);
+      npc.last_inst = *(npc.inst);
     }
   }
   g_timer += get_time() - now;
