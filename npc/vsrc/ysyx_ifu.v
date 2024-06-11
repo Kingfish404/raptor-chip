@@ -49,7 +49,7 @@ module ysyx_IFU (
   assign inst_o = (ifu_rvalid) ? ifu_rdata : l1i[addr_idx];
   assign valid_o = ifu_rvalid | valid | l1i_cache_hit;
 
-  `ysyx_BUS_FSM();
+  `ysyx_BUS_FSM()
   always @(posedge clk)
     begin
       if (rst)
