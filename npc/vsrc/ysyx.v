@@ -303,10 +303,7 @@ module ysyx_RegisterFile (
           begin
             if (rst)
               begin
-                for(i = 1 ; i < 31; i = i + 1)
-      begin
-                rf[i] <= 0;
-      end
+                rf <= 0;
               end
             else if (reg_write_en && exu_valid)
               begin
