@@ -26,6 +26,11 @@ static char iringbuf[MAX_IRING_SIZE][128] = {};
 static uint64_t iringhead = 0;
 #endif
 
+float percentage(int a, int b)
+{
+  return (b == 0) ? 0 : (100.0 * a / b);
+}
+
 static void perf()
 {
   Log(FMT_BLUE("#Inst: %lld, Cycle: %llu, IPC: %.3f"), pmu.instr_cnt, pmu.active_cycle, (1.0 * pmu.instr_cnt / pmu.active_cycle));
@@ -33,13 +38,15 @@ static void perf()
   Log(FMT_BLUE("IFU Fetch: %lld, LSU Load: %lld, EXU ALU: %lld"),
       pmu.ifu_fetch_cnt, pmu.lsu_load_cnt, pmu.exu_alu_cnt);
   Log(FMT_BLUE("LD  Inst: %lld (%2.1f%%), ST Inst: %lld, (%2.1f%%)"),
-      pmu.ld_inst_cnt, 100.0 * pmu.ld_inst_cnt / pmu.instr_cnt,
-      pmu.st_inst_cnt, 100.0 * pmu.st_inst_cnt / pmu.instr_cnt);
+      pmu.ld_inst_cnt, percentage(pmu.ld_inst_cnt, pmu.instr_cnt),
+      pmu.st_inst_cnt, percentage(pmu.st_inst_cnt, pmu.instr_cnt));
   Log(FMT_BLUE("ALU Inst: %lld (%2.1f%%), BR Inst: %lld, (%2.1f%%)"),
-      pmu.alu_inst_cnt, 100.0 * pmu.alu_inst_cnt / pmu.instr_cnt,
-      pmu.b_inst_cnt, 100.0 * pmu.b_inst_cnt / pmu.instr_cnt);
+      pmu.alu_inst_cnt, percentage(pmu.alu_inst_cnt, pmu.instr_cnt),
+      pmu.b_inst_cnt, percentage(pmu.b_inst_cnt, pmu.instr_cnt));
+  Log(FMT_BLUE("CSR Inst: %lld (%2.1f%%)"),
+      pmu.csr_inst_cnt, percentage(pmu.csr_inst_cnt, pmu.instr_cnt));
   Log(FMT_BLUE("Other Inst: %lld (%2.1f%%)"),
-      pmu.other_inst_cnt, 100.0 * pmu.other_inst_cnt / pmu.instr_cnt);
+      pmu.other_inst_cnt, percentage(pmu.other_inst_cnt, pmu.instr_cnt));
   assert(
       pmu.instr_cnt ==
       (pmu.ld_inst_cnt + pmu.st_inst_cnt +
@@ -81,6 +88,9 @@ static void perf_sample_per_inst()
     break;
   case 0b1100011:
     pmu.b_inst_cnt++;
+    break;
+  case 0b1110011:
+    pmu.csr_inst_cnt++;
     break;
   default:
     pmu.other_inst_cnt++;
