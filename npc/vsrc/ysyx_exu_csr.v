@@ -27,7 +27,7 @@ module ysyx_CSR_Reg(
   assign rdata_o = (
     ({32{waddr_add1==`ysyx_CSR_MVENDORID}})& (32'h79737978) |
     ({32{waddr_add1==`ysyx_CSR_MARCHID}})& (32'h15fde77) |
-    ({32{1}} & csr[csr_addr])
+    (csr[csr_addr])
   );
   assign mepc_o  = csr[MEPC_IDX];
   assign mtvec_o = csr[MTVEC_IDX];
