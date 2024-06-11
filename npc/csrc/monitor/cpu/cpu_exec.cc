@@ -38,6 +38,13 @@ static void perf()
   Log(FMT_BLUE("ALU Inst: %lld (%2.1f%%), B Inst: %lld, (%2.1f%%)"),
       pmu.alu_inst_cnt, 100.0 * pmu.alu_inst_cnt / pmu.instr_cnt,
       pmu.b_inst_cnt, 100.0 * pmu.b_inst_cnt / pmu.instr_cnt);
+  Log(FMT_BLUE("Other Inst: %lld (%2.1f%%)"),
+      pmu.other_inst_cnt, 100.0 * pmu.other_inst_cnt / pmu.instr_cnt);
+  assert(
+      pmu.instr_cnt ==
+      (pmu.ld_inst_cnt + pmu.st_inst_cnt +
+       pmu.alu_inst_cnt + pmu.b_inst_cnt +
+       pmu.other_inst_cnt));
 }
 
 static void perf_sample_per_cycle()
