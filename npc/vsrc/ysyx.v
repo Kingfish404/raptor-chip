@@ -303,7 +303,7 @@ module ysyx_RegisterFile (
           begin
             if (rst)
               begin
-                rf <= 0;
+                rf[0:31] <= 0;
               end
             else if (reg_write_en && exu_valid)
               begin
