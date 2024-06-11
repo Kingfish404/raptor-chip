@@ -26,14 +26,14 @@ static char iringbuf[MAX_IRING_SIZE][128] = {};
 static uint64_t iringhead = 0;
 #endif
 
-static void statistic_pmu()
+static void perf()
 {
   Log(FMT_BLUE("#Inst: %lld, Cycle: %llu, IPC: %.3f"), pmu.instr_cnt, pmu.active_cycle, (1.0 * pmu.instr_cnt / pmu.active_cycle));
 }
 
 static void statistic()
 {
-  statistic_pmu();
+  perf();
   double time_s = g_timer / 1e6;
   double frequency = pmu.active_cycle / time_s;
   Log(FMT_BLUE(
