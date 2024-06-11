@@ -51,7 +51,7 @@ module ysyx_CSR_Reg(
   // assign csr[MVENDORID_IDX] = 32'h79737978;
   // assign csr[MARCHID_IDX]   = 32'h15fde77;
 
-  reg [BIT_W-1:0] csr[0:2];
+  reg [BIT_W-1:0] csr[0:3];
   always @(posedge clk) begin
     if (rst) begin
       csr[MCAUSE_IDX]   <= RESET_VAL;
