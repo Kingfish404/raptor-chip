@@ -12,6 +12,7 @@
 #define MAX_IRING_SIZE 16
 
 extern NPCState npc;
+extern PMUState pmu;
 
 extern VerilatedContext *contextp;
 extern TOP_NAME *top;

@@ -119,7 +119,14 @@ typedef struct
   uint8_t *soc_sram;
 } NPCState;
 
-extern NPCState npc;
+typedef struct
+{
+  uint64_t cycle_cnt;
+  uint64_t instr_cnt;
+  uint64_t ifu_fetch_cnt;
+  uint64_t lsu_load_cnt;
+  uint64_t exu_alu_cnt;
+} PMUState;
 
 #define panic(format, ...) Assert(0, format, ##__VA_ARGS__)
 

@@ -29,6 +29,14 @@ NPCState npc = {
     .soc_sram = NULL,
 };
 
+PMUState pmu = {
+    .cycle_cnt = 0,
+    .instr_cnt = 0,
+    .ifu_fetch_cnt = 0,
+    .lsu_load_cnt = 0,
+    .exu_alu_cnt = 0,
+};
+
 VerilatedContext *contextp = NULL;
 TOP_NAME *top = NULL;
 VerilatedVcdC *tfp = NULL;
