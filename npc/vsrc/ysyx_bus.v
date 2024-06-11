@@ -187,9 +187,9 @@ module ysyx_BUS_ARBITER(
   assign io_master_araddr = sram_araddr;
   assign io_master_arvalid = !rst & (
            ((state == if_a) & ifu_arvalid) |
-          //  ((state == ls_a) & lsu_arvalid & !clint_en)
-            // ((state == ls_a || state == ls_d_r) & lsu_arvalid & !clint_en) // for old soc
-            ((state == ls_a) & lsu_arvalid & !clint_en) // for new soc
+           //  ((state == ls_a) & lsu_arvalid & !clint_en)
+           // ((state == ls_a || state == ls_d_r) & lsu_arvalid & !clint_en) // for old soc
+           ((state == ls_a) & lsu_arvalid & !clint_en) // for new soc
          );
   assign arready_o = io_master_arready & io_master_bvalid;
 
@@ -227,9 +227,9 @@ module ysyx_BUS_ARBITER(
          {{lsu_wstrb[3:0] << awaddr_lo}, {4'b0}}:
          {{4'b0}, {lsu_wstrb[3:0] << awaddr_lo}};
   assign io_master_wvalid = (
-          //  (state == ls_d_w ) & (lsu_wvalid)
-            // (state == ls_a || state == ls_d_w) & (lsu_wvalid) // for old soc
-            (((state == ls_d_w) & write_valid)) & (lsu_wvalid) // for new soc
+           //  (state == ls_d_w ) & (lsu_wvalid)
+           // (state == ls_a || state == ls_d_w) & (lsu_wvalid) // for old soc
+           (((state == ls_d_w) & write_valid)) & (lsu_wvalid) // for new soc
          );
 
   assign io_master_bready = 1;
@@ -293,3 +293,88 @@ module ysyx_BUS_ARBITER(
                .bresp_o(clint_bresp_o), .bvalid_o(clint_bvalid_o), .bready(0)
              );
 endmodule
+
+// Core Local INTerrupt controller
+module ysyx_CLINT(
+    input clk, rst,
+
+    input [1:0] arburst,
+    input [2:0] arsize,
+    input [7:0] arlen,
+    input [3:0] arid,
+    input [ADDR_W-1:0] araddr,
+    input arvalid,
+    output reg arready_o,
+
+    output reg [3:0] rid,
+    output reg rlast_o,
+    output reg [DATA_W-1:0] rdata_o,
+    output reg [1:0] rresp_o,
+    output reg rvalid_o,
+    input rready,
+
+    input [1:0] awburst,
+    input [2:0] awsize,
+    input [7:0] awlen,
+    input [3:0] awid,
+    input [ADDR_W-1:0] awaddr,
+    input awvalid,
+    output reg awready_o,
+
+    input wlast,
+    input [DATA_W-1:0] wdata,
+    input [7:0] wstrb,
+    input wvalid,
+    output reg wready_o,
+
+    output reg [3:0] bid,
+    output reg [1:0] bresp_o,
+    output reg bvalid_o,
+    input bready
+  );
+  parameter ADDR_W = 32, DATA_W = 32;
+
+  reg [63:0] mtime;
+  reg [19:0] lfsr;
+  wire ifsr_ready = `ysyx_IFSR_ENABLE ? lfsr[19] : 1;
+  always @(posedge clk )
+    begin
+      lfsr <= {lfsr[18:0], lfsr[19] ^ lfsr[18]};
+    end
+  always @(posedge clk)
+    begin
+      if (rst)
+        begin
+          mtime <= 0;
+          lfsr <= 101;
+        end
+      else
+        begin
+          mtime <= mtime + 1;
+        end
+      rdata_o <= 0;
+      rvalid_o <= 0;
+      wready_o <= 0;
+      if (arvalid & !rvalid_o & rready)
+        begin
+          if (ifsr_ready)
+            begin
+              case (araddr)
+                `ysyx_BUS_RTC_ADDR:
+                  rdata_o <= mtime[31:0];
+                `ysyx_BUS_RTC_ADDR_UP:
+                  rdata_o <= mtime[63:32];
+              endcase
+              npc_difftest_skip_ref();
+              rvalid_o <= 1;
+            end
+        end
+      if (wvalid & !wready_o & bready)
+        begin
+          if (ifsr_ready)
+            begin
+              wready_o <= 1;
+            end
+        end
+    end
+endmodule //ysyx_CLINT
