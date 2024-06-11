@@ -20,20 +20,21 @@ module ysyx_CSR_Reg(
   parameter R_W = 12;
   parameter BIT_W = `ysyx_W_WIDTH;
   parameter RESET_VAL = 0;
-  wire [2:0] csr_addr;
-  wire [2:0] csr_addr_add1;
+
+  reg [BIT_W-1:0] csr[0:4];
+
   assign rdata_o = (
-           ({32{waddr==`ysyx_CSR_MVENDORID}}) & (32'h79737978) |
-           ({32{waddr==`ysyx_CSR_MARCHID}}) & (32'h15fde77) |
-           ({32{waddr==`ysyx_CSR_MSTATUS}}) & (csr[MSTATUS_IDX]) |
-           ({32{waddr==`ysyx_CSR_MCAUSE}}) & (csr[MCAUSE_IDX]) |
-           ({32{waddr==`ysyx_CSR_MEPC}}) & (csr[MEPC_IDX]) |
-           ({32{waddr==`ysyx_CSR_MTVEC}}) & (csr[MTVEC_IDX])
+           ({BIT_W{waddr==`ysyx_CSR_MVENDORID}}) & (32'h79737978) |
+           ({BIT_W{waddr==`ysyx_CSR_MARCHID}}) & (32'h15fde77) |
+           ({BIT_W{waddr==`ysyx_CSR_MSTATUS}}) & (csr[MSTATUS_IDX]) |
+           ({BIT_W{waddr==`ysyx_CSR_MCAUSE}}) & (csr[MCAUSE_IDX]) |
+           ({BIT_W{waddr==`ysyx_CSR_MEPC}}) & (csr[MEPC_IDX]) |
+           ({BIT_W{waddr==`ysyx_CSR_MTVEC}}) & (csr[MTVEC_IDX])
          );
+
   assign mepc_o  = csr[MEPC_IDX];
   assign mtvec_o = csr[MTVEC_IDX];
 
-  reg [BIT_W-1:0] csr[0:4];
   always @(posedge clk)
     begin
       if (rst)
