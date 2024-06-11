@@ -25,8 +25,8 @@ module ysyx_CSR_Reg(
   wire [2:0] csr_addr;
   wire [2:0] csr_addr_add1;
   assign rdata_o = (
-    ({32{waddr_add1==`ysyx_CSR_MVENDORID}})& (32'h79737978) |
-    ({32{waddr_add1==`ysyx_CSR_MARCHID}})& (32'h15fde77) |
+    ({32{waddr==`ysyx_CSR_MVENDORID}})& (32'h79737978) |
+    ({32{waddr==`ysyx_CSR_MARCHID}})& (32'h15fde77) |
     (csr[csr_addr])
   );
   assign mepc_o  = csr[MEPC_IDX];
