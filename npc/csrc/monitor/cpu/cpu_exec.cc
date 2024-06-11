@@ -47,6 +47,10 @@ static void perf()
       pmu.csr_inst_cnt, percentage(pmu.csr_inst_cnt, pmu.instr_cnt));
   Log(FMT_BLUE("Other Inst: %lld (%2.1f%%)"),
       pmu.other_inst_cnt, percentage(pmu.other_inst_cnt, pmu.instr_cnt));
+  printf("======== TOP DOWN Analysis ========\n");
+  Log(FMT_BLUE("IFU Stall: %lld (%2.1f%%), LSU Stall: %lld (%2.1f%%)"),
+      pmu.ifu_stall_cycle, percentage(pmu.ifu_stall_cycle, pmu.active_cycle),
+      pmu.lsu_stall_cycle, percentage(pmu.lsu_stall_cycle, pmu.active_cycle));
   assert(
       pmu.ifu_fetch_cnt == pmu.instr_cnt);
   assert(
