@@ -32,7 +32,7 @@ static void perf()
 
   Log(FMT_BLUE("IFU Fetch: %lld, LSU Load: %lld, EXU ALU: %lld"),
       pmu.ifu_fetch_cnt, pmu.lsu_load_cnt, pmu.exu_alu_cnt);
-  Log(FMT_BLUE("LD Inst: %lld (%2.1f%), ST Inst: %lld, (%2.1f%)"),
+  Log(FMT_BLUE("LD Inst: %lld (%2.1f\%), ST Inst: %lld, (%2.1f\%)"),
       pmu.ld_inst_cnt, 100.0 * pmu.ld_inst_cnt / pmu.instr_cnt,
       pmu.st_inst_cnt, 100.0 * pmu.st_inst_cnt / pmu.instr_cnt);
 }
