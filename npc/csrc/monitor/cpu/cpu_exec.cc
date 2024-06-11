@@ -12,7 +12,14 @@
 #define MAX_IRING_SIZE 16
 
 extern NPCState npc;
-extern PMUState pmu;
+
+PMUState pmu = {
+    .active_cycle = 0,
+    .instr_cnt = 0,
+    .ifu_fetch_cnt = 0,
+    .lsu_load_cnt = 0,
+    .exu_alu_cnt = 0,
+};
 
 extern VerilatedContext *contextp;
 extern TOP_NAME *top;
