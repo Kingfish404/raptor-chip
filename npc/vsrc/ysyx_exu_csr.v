@@ -55,11 +55,12 @@ module ysyx_CSR_Reg(
     else begin
       if (exu_valid && wen) begin
         // csr[csr_addr] <= wdata;
-        csr[csr_addr_add1] <= wdata_add1;
+        // csr[csr_addr_add1] <= wdata_add1;
         case (waddr)
           `ysyx_CSR_MSTATUS: begin
-            csr[MSTATUS_IDX][`ysyx_CSR_MSTATUS_MIE_IDX] <= wdata[`ysyx_CSR_MSTATUS_MIE_IDX];
-            csr[MSTATUS_IDX][`ysyx_CSR_MSTATUS_MPIE_IDX] <= wdata[`ysyx_CSR_MSTATUS_MPIE_IDX];
+            csr[MSTATUS_IDX] <= wdata;
+            // csr[MSTATUS_IDX][`ysyx_CSR_MSTATUS_MIE_IDX] <= wdata[`ysyx_CSR_MSTATUS_MIE_IDX];
+            // csr[MSTATUS_IDX][`ysyx_CSR_MSTATUS_MPIE_IDX] <= wdata[`ysyx_CSR_MSTATUS_MPIE_IDX];
           end
           `ysyx_CSR_MEPC: begin
             csr[MEPC_IDX] <= wdata;
@@ -69,6 +70,22 @@ module ysyx_CSR_Reg(
           end
           `ysyx_CSR_MCAUSE: begin
             csr[MCAUSE_IDX] <= wdata;
+          end
+        endcase
+        case (waddr_add1)
+          `ysyx_CSR_MSTATUS: begin
+            csr[MSTATUS_IDX] <= wdata_add1;
+            // csr[MSTATUS_IDX][`ysyx_CSR_MSTATUS_MIE_IDX] <= wdata_add1[`ysyx_CSR_MSTATUS_MIE_IDX];
+            // csr[MSTATUS_IDX][`ysyx_CSR_MSTATUS_MPIE_IDX] <= wdata_add1[`ysyx_CSR_MSTATUS_MPIE_IDX];
+          end
+          `ysyx_CSR_MEPC: begin
+            csr[MEPC_IDX] <= wdata_add1;
+          end
+          `ysyx_CSR_MTVEC: begin
+            csr[MTVEC_IDX] <= wdata_add1;
+          end
+          `ysyx_CSR_MCAUSE: begin
+            csr[MCAUSE_IDX] <= wdata_add1;
           end
         endcase
       end
