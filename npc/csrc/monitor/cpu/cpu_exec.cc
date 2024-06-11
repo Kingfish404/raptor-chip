@@ -32,6 +32,34 @@ static void perf()
 
   Log(FMT_BLUE("IFU Fetch: %lld, LSU Load: %lld, EXU ALU: %lld"),
       pmu.ifu_fetch_cnt, pmu.lsu_load_cnt, pmu.exu_alu_cnt);
+  Log(FMT_BLUE("LD Inst: %lld, ST Inst: %lld"),
+      pmu.ld_inst_cnt, pmu.st_inst_cnt);
+}
+
+static void perf_sample_per_cycle()
+{
+  pmu.active_cycle++;
+  if (*(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__ifu_valid)))
+  {
+    pmu.ifu_fetch_cnt++;
+  }
+  if (*(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__exu__DOT__lsu_valid)))
+  {
+    pmu.lsu_load_cnt++;
+  }
+  if (*(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__exu_valid)))
+  {
+    pmu.exu_alu_cnt++;
+  }
+  switch (*(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__exu__DOT__opcode_exu)))
+  {
+  case 0b0000011:
+    pmu.ld_inst_cnt++;
+    break;
+  case 0b0100011:
+    pmu.st_inst_cnt++;
+    break;
+  }
 }
 
 static void statistic()
@@ -121,19 +149,7 @@ void cpu_exec(uint64_t n)
   {
     cpu_exec_one_cycle();
     // Simulate the performance monitor unit
-    pmu.active_cycle++;
-    if (*(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__ifu_valid)))
-    {
-      pmu.ifu_fetch_cnt++;
-    }
-    if (*(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__exu__DOT__lsu_valid)))
-    {
-      pmu.lsu_load_cnt++;
-    }
-    if (*(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__exu_valid)))
-    {
-      pmu.exu_alu_cnt++;
-    }
+    perf_sample_per_cycle();
     cur_inst_cycle++;
     if (cur_inst_cycle > 0x2fff)
     {

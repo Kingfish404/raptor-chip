@@ -121,11 +121,17 @@ typedef struct
 
 typedef struct
 {
+  // for microarch
   uint64_t active_cycle;
   uint64_t instr_cnt;
   uint64_t ifu_fetch_cnt;
   uint64_t lsu_load_cnt;
   uint64_t exu_alu_cnt;
+
+  // for inst
+  uint32_t ld_inst_cnt;
+  uint32_t st_inst_cnt;
+
 } PMUState;
 
 #define panic(format, ...) Assert(0, format, ##__VA_ARGS__)
