@@ -129,8 +129,8 @@ typedef struct
   uint64_t exu_alu_cnt;
 
   // for inst
-  uint32_t ld_inst_cnt;
-  uint32_t st_inst_cnt;
+  uint64_t ld_inst_cnt;
+  uint64_t st_inst_cnt;
 
 } PMUState;
 
