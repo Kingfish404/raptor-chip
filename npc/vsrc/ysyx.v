@@ -288,28 +288,32 @@ module ysyx_RegisterFile (
   input [DATA_WIDTH-1:0] wdata,
   input [ADDR_WIDTH-1:0] s1addr,
   input [ADDR_WIDTH-1:0] s2addr,
-  output reg [DATA_WIDTH-1:0] src1_o,
-  output reg [DATA_WIDTH-1:0] src2_o
+  output [DATA_WIDTH-1:0] src1_o,
+  output [DATA_WIDTH-1:0] src2_o
 );
-  parameter ADDR_WIDTH = 1;
-  parameter DATA_WIDTH = 1;
+  parameter ADDR_WIDTH = 5;
+  parameter DATA_WIDTH = 32;
   reg [DATA_WIDTH-1:0] rf [31:0];
 
+  // Reading ports (synchronous read)
   assign src1_o = rf[s1addr];
   assign src2_o = rf[s2addr];
 
-  genvar i;
-  generate for(i = 1 ; i < 31; i = i + 1) begin : U
-    always @(posedge clk) begin
-      if (rst) begin rf[i] <= 0; end
+  integer i;
+  always @(posedge clk or posedge rst) begin
+    if (rst) begin
+      for (i = 1; i < 31; i = i + 1) begin
+        rf[i] <= 0;
+      end
+    end else if (reg_write_en && exu_valid) begin
+      if (waddr != 0) begin
+        rf[waddr] <= wdata;
+      end
     end
   end
-  endgenerate
 
+  // Constantly zero the register 0
   always @(posedge clk) begin
-    if (!rst && reg_write_en && exu_valid) begin
-      rf[waddr] <= wdata;
-    end
     rf[0] <= 0;
   end
-endmodule // ysyx_RegisterFile
+endmodule
