@@ -76,7 +76,7 @@ static void perf_sample_per_cycle()
     pmu.lsu_load_cnt++;
   }
   if (!lsu_valid &&
-      *(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__exu__DOT__lsu__DOT__avalid)))
+      *(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__exu__DOT__lsu_avalid)))
   {
     pmu.lsu_stall_cycle++;
   }
