@@ -121,7 +121,7 @@ typedef struct
 
 typedef struct
 {
-  uint64_t cycle_cnt;
+  uint64_t active_cycle;
   uint64_t instr_cnt;
   uint64_t ifu_fetch_cnt;
   uint64_t lsu_load_cnt;

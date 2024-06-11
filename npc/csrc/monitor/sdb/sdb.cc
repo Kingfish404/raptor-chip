@@ -30,7 +30,7 @@ NPCState npc = {
 };
 
 PMUState pmu = {
-    .cycle_cnt = 0,
+    .active_cycle = 0,
     .instr_cnt = 0,
     .ifu_fetch_cnt = 0,
     .lsu_load_cnt = 0,

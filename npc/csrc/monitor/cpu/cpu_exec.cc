@@ -20,8 +20,6 @@ extern VerilatedVcdC *tfp;
 
 word_t prev_pc = 0;
 word_t g_timer = 0;
-word_t g_nr_guest_inst = 0;
-word_t g_nr_guest_cycle = 0;
 
 #ifdef CONFIG_ITRACE
 static char iringbuf[MAX_IRING_SIZE][128] = {};
@@ -31,14 +29,14 @@ static uint64_t iringhead = 0;
 static void statistic()
 {
   double time_s = g_timer / 1e6;
-  double frequency = g_nr_guest_cycle / time_s;
+  double frequency = pmu.pmu.active_cycle / time_s;
   Log(FMT_BLUE(
           "#Inst: " FMT_WORD_NO_PREFIX ", time: %d (ns), %d (ms)"),
-      g_nr_guest_inst, g_timer, (int)(g_timer / 1e3));
-  Log(FMT_BLUE("Cycle: %u, IPC: %.3f"), g_nr_guest_cycle, (1.0 * g_nr_guest_inst / g_nr_guest_cycle));
+      pmu.instr_cnt, g_timer, (int)(g_timer / 1e3));
+  Log(FMT_BLUE("Cycle: %u, IPC: %.3f"), pmu.pmu.active_cycle, (1.0 * pmu.instr_cnt / pmu.pmu.active_cycle));
   Log(FMT_BLUE("Simulate Freq: %.3f Hz, %.3d MHz"), frequency, (int)(frequency / 1e3));
   Log(FMT_BLUE("Inst: %.3f Inst/s, %.1f KInst/s"),
-      g_nr_guest_inst / time_s, g_nr_guest_inst / time_s / 1e3);
+      pmu.instr_cnt / time_s, pmu.instr_cnt / time_s / 1e3);
   Log("%s at pc: " FMT_WORD_NO_PREFIX ", inst: " FMT_WORD_NO_PREFIX,
       ((*npc.ret) == 0 && npc.state != NPC_ABORT
            ? FMT_GREEN("HIT GOOD TRAP")
@@ -114,7 +112,7 @@ void cpu_exec(uint64_t n)
   while (!contextp->gotFinish() && npc.state == NPC_RUNNING && n-- > 0)
   {
     cpu_exec_one_cycle();
-    g_nr_guest_cycle++;
+    pmu.pmu.active_cycle++;
     cur_inst_cycle++;
     if (cur_inst_cycle > 0x2fff)
     {
@@ -124,7 +122,7 @@ void cpu_exec(uint64_t n)
     }
     if (prev_pc != *(npc.pc))
     {
-      g_nr_guest_inst++;
+      pmu.instr_cnt++;
       cur_inst_cycle = 0;
       fflush(stdout);
 #ifdef CONFIG_ITRACE
