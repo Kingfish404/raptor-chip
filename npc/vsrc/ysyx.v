@@ -299,12 +299,12 @@ module ysyx_RegisterFile (
   assign src2_o = rf[s2addr];
 
   genvar i;
-  generate for(i = 1 ; i < 31; i = i + 1)
       begin
         always @(posedge clk)
           begin
             if (rst)
               begin
+  generate for(i = 1 ; i < 31; i = i + 1)
                 rf[i] <= 0;
               end
             else if (reg_write_en && exu_valid)
