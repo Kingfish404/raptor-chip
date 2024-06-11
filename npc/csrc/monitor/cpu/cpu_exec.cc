@@ -35,7 +35,7 @@ static void perf()
 {
   printf("======== Instruction Analysis ========\n");
   Log(FMT_BLUE("#Inst: %lld, Cycle: %llu, IPC: %.3f"), pmu.instr_cnt, pmu.active_cycle, (1.0 * pmu.instr_cnt / pmu.active_cycle));
-  Log(FMT_BLUE("IFU Fetch: %8lld, LSU Load: %8lld, EXU ALU: %lld"),
+  Log(FMT_BLUE("IFU Fetch: %8lld, LSU Load: %8lld, EXU ALU: %lld\n"),
       pmu.ifu_fetch_cnt, pmu.lsu_load_cnt, pmu.exu_alu_cnt);
   Log(FMT_BLUE("LD  Inst: %8lld (%4.1f%%), ST Inst: %8lld, (%4.1f%%)"),
       pmu.ld_inst_cnt, percentage(pmu.ld_inst_cnt, pmu.instr_cnt),
