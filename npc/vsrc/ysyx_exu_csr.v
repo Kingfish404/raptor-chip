@@ -35,17 +35,13 @@ module ysyx_CSR_Reg(
     ({3{waddr==`ysyx_CSR_MCAUSE}}) & (MCAUSE_IDX) |
     ({3{waddr==`ysyx_CSR_MEPC}})   & (MEPC_IDX)   |
     ({3{waddr==`ysyx_CSR_MTVEC}})  & (MTVEC_IDX)  |
-    ({3{waddr==`ysyx_CSR_MSTATUS}})& (MSTATUS_IDX) |
-    ({3{waddr==`ysyx_CSR_MVENDORID}})& (MVENDORID_IDX) |
-    ({3{waddr==`ysyx_CSR_MARCHID}})& (MARCHID_IDX)
+    ({3{waddr==`ysyx_CSR_MSTATUS}})& (MSTATUS_IDX)
   );
   assign csr_addr_add1 = (
     ({3{waddr_add1==`ysyx_CSR_MCAUSE}}) & (MCAUSE_IDX) |
     ({3{waddr_add1==`ysyx_CSR_MEPC}})   & (MEPC_IDX)   |
     ({3{waddr_add1==`ysyx_CSR_MTVEC}})  & (MTVEC_IDX)  |
-    ({3{waddr_add1==`ysyx_CSR_MSTATUS}})& (MSTATUS_IDX) |
-    ({3{waddr_add1==`ysyx_CSR_MVENDORID}})& (MVENDORID_IDX) |
-    ({3{waddr_add1==`ysyx_CSR_MARCHID}})& (MARCHID_IDX)
+    ({3{waddr_add1==`ysyx_CSR_MSTATUS}})& (MSTATUS_IDX)
   );
 
   reg [BIT_W-1:0] csr[0:6];
