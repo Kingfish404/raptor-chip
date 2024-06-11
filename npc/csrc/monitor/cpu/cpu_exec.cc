@@ -33,7 +33,7 @@ static void statistic()
   Log(FMT_BLUE(
           "#Inst: " FMT_WORD_NO_PREFIX ", time: %d (ns), %d (ms)"),
       pmu.instr_cnt, g_timer, (int)(g_timer / 1e3));
-  Log(FMT_BLUE("Cycle: %u, IPC: %.3f"), pmu.active_cycle, (1.0 * pmu.instr_cnt / pmu.active_cycle));
+  Log(FMT_BLUE("Cycle: %llu, IPC: %.3f"), pmu.active_cycle, (1.0 * pmu.instr_cnt / pmu.active_cycle));
   Log(FMT_BLUE("Simulate Freq: %.3f Hz, %.3d MHz"), frequency, (int)(frequency / 1e3));
   Log(FMT_BLUE("Inst: %.3f Inst/s, %.1f KInst/s"),
       pmu.instr_cnt / time_s, pmu.instr_cnt / time_s / 1e3);
