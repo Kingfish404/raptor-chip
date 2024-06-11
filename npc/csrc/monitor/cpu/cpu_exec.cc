@@ -117,7 +117,20 @@ void cpu_exec(uint64_t n)
   while (!contextp->gotFinish() && npc.state == NPC_RUNNING && n-- > 0)
   {
     cpu_exec_one_cycle();
+    // Simulate the performance monitor unit
     pmu.active_cycle++;
+    if ((uint32_t *)&(CONCAT(VERILOG_PREFIX, __DOT__ifu_valid)))
+    {
+      pmu.ifu_fetch_cnt++;
+    }
+    if ((uint32_t *)&(CONCAT(VERILOG_PREFIX, __DOT__lsu_valid)))
+    {
+      pmu.lsu_load_cnt++;
+    }
+    if ((uint32_t *)&(CONCAT(VERILOG_PREFIX, __DOT__exu_valid)))
+    {
+      pmu.exu_alu_cnt++;
+    }
     cur_inst_cycle++;
     if (cur_inst_cycle > 0x2fff)
     {
