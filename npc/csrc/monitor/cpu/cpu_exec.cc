@@ -122,15 +122,15 @@ void cpu_exec(uint64_t n)
     cpu_exec_one_cycle();
     // Simulate the performance monitor unit
     pmu.active_cycle++;
-    if ((uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__ifu_valid)))
+    if (*(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__ifu_valid)))
     {
-      // pmu.ifu_fetch_cnt++;
+      pmu.ifu_fetch_cnt++;
     }
-    if ((uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__exu__DOT__lsu_valid)))
+    if (*(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__exu__DOT__lsu_valid)))
     {
       pmu.lsu_load_cnt++;
     }
-    if ((uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__exu_valid)))
+    if (*(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__exu_valid)))
     {
       pmu.exu_alu_cnt++;
     }
