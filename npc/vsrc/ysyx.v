@@ -320,4 +320,3 @@ module ysyx_RegisterFile (
       rf[0] <= 0;
     end
 endmodule // ysyx_RegisterFile
-
