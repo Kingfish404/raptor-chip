@@ -16,14 +16,12 @@ module ysyx_CSR_Reg(
   parameter MEPC_IDX    = 'h2;
   parameter MTVEC_IDX   = 'h3;
   parameter MSTATUS_IDX = 'h4;
-  parameter MVENDORID_IDX = 'h5;
-  parameter MARCHID_IDX = 'h6;
 
   parameter R_W = 12;
   parameter BIT_W = `ysyx_W_WIDTH;
   parameter RESET_VAL = 0;
-  wire [2:0] csr_addr;
-  wire [2:0] csr_addr_add1;
+  wire [1:0] csr_addr;
+  wire [1:0] csr_addr_add1;
   assign rdata_o = (
     ({32{waddr==`ysyx_CSR_MVENDORID}})& (32'h79737978) |
     ({32{waddr==`ysyx_CSR_MARCHID}})& (32'h15fde77) |
