@@ -29,11 +29,11 @@ static uint64_t iringhead = 0;
 static void statistic()
 {
   double time_s = g_timer / 1e6;
-  double frequency = pmu.pmu.active_cycle / time_s;
+  double frequency = pmu.active_cycle / time_s;
   Log(FMT_BLUE(
           "#Inst: " FMT_WORD_NO_PREFIX ", time: %d (ns), %d (ms)"),
       pmu.instr_cnt, g_timer, (int)(g_timer / 1e3));
-  Log(FMT_BLUE("Cycle: %u, IPC: %.3f"), pmu.pmu.active_cycle, (1.0 * pmu.instr_cnt / pmu.pmu.active_cycle));
+  Log(FMT_BLUE("Cycle: %u, IPC: %.3f"), pmu.active_cycle, (1.0 * pmu.instr_cnt / pmu.active_cycle));
   Log(FMT_BLUE("Simulate Freq: %.3f Hz, %.3d MHz"), frequency, (int)(frequency / 1e3));
   Log(FMT_BLUE("Inst: %.3f Inst/s, %.1f KInst/s"),
       pmu.instr_cnt / time_s, pmu.instr_cnt / time_s / 1e3);
@@ -112,7 +112,7 @@ void cpu_exec(uint64_t n)
   while (!contextp->gotFinish() && npc.state == NPC_RUNNING && n-- > 0)
   {
     cpu_exec_one_cycle();
-    pmu.pmu.active_cycle++;
+    pmu.active_cycle++;
     cur_inst_cycle++;
     if (cur_inst_cycle > 0x2fff)
     {
