@@ -51,6 +51,10 @@ static void perf()
   Log(FMT_BLUE("IFU Stall: %lld (%2.1f%%), LSU Stall: %lld (%2.1f%%)"),
       pmu.ifu_stall_cycle, percentage(pmu.ifu_stall_cycle, pmu.active_cycle),
       pmu.lsu_stall_cycle, percentage(pmu.lsu_stall_cycle, pmu.active_cycle));
+  // show average IF cycle and LS cycle
+  Log(FMT_BLUE("IFU Avg Cycle: %.3f, LSU Avg Cycle: %.3f"),
+      (1.0 * pmu.ifu_stall_cycle + 1) / pmu.ifu_fetch_cnt,
+      (1.0 * pmu.lsu_stall_cycle + 1) / pmu.lsu_load_cnt);
   assert(
       pmu.ifu_fetch_cnt == pmu.instr_cnt);
   assert(
