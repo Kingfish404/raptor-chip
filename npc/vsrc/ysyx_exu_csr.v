@@ -44,7 +44,7 @@ module ysyx_CSR_Reg(
     ({3{waddr_add1==`ysyx_CSR_MSTATUS}})& (MSTATUS_IDX)
   );
 
-  reg [BIT_W-1:0] csr[0:6];
+  reg [BIT_W-1:0] csr[0:3];
   always @(posedge clk) begin
     if (rst) begin
       csr[MCAUSE_IDX]   <= RESET_VAL;
