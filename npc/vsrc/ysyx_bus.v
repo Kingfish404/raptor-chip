@@ -241,7 +241,7 @@ module ysyx_BUS_ARBITER(
       `Assert(io_master_bresp, 2'b00);
       if (io_master_awvalid)
         begin
-          npc_difftest_mem_diff();
+          `ysyx_DPI_C_npc_difftest_mem_diff
           if (
             (io_master_awaddr >= 'h10000000 && io_master_awaddr <= 'h10000005) ||
             (io_master_awaddr >= 'h10001000 && io_master_awaddr <= 'h10001fff) ||
