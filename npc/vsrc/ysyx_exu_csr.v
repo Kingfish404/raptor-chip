@@ -22,8 +22,8 @@ module ysyx_CSR_Reg(
   parameter R_W = 12;
   parameter BIT_W = `ysyx_W_WIDTH;
   parameter RESET_VAL = 0;
-  wire [1:0] csr_addr;
-  wire [1:0] csr_addr_add1;
+  wire [2:0] csr_addr;
+  wire [2:0] csr_addr_add1;
   assign rdata_o = (
     ({32{waddr==`ysyx_CSR_MVENDORID}})& (32'h79737978) |
     ({32{waddr==`ysyx_CSR_MARCHID}})& (32'h15fde77) |
@@ -44,10 +44,7 @@ module ysyx_CSR_Reg(
     ({3{waddr_add1==`ysyx_CSR_MSTATUS}})& (MSTATUS_IDX)
   );
 
-  assign csr[MVENDORID_IDX] = 32'h79737978;
-  assign csr[MARCHID_IDX]   = 32'h15fde77;
-
-  reg [BIT_W-1:0] csr[0:7];
+  reg [BIT_W-1:0] csr[0:6];
   always @(posedge clk) begin
     if (rst) begin
       csr[MCAUSE_IDX]   <= RESET_VAL;
