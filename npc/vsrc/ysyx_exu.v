@@ -1,5 +1,6 @@
 `include "ysyx_macro.v"
 `include "ysyx_macro_csr.v"
+`include "ysyx_macro_dpi_c.v"
 
 module ysyx_EXU (
   input clk, rst,
