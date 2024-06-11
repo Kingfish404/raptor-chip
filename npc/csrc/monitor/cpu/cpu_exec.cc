@@ -123,7 +123,7 @@ void cpu_exec(uint64_t n)
     {
       pmu.ifu_fetch_cnt++;
     }
-    if ((uint32_t *)&(CONCAT(VERILOG_PREFIX, __DOT__lsu_valid)))
+    if ((uint32_t *)&(CONCAT(VERILOG_PREFIX, __DOT__exu__DOT__lsu_valid)))
     {
       pmu.lsu_load_cnt++;
     }
