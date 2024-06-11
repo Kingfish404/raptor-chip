@@ -32,9 +32,12 @@ static void perf()
 
   Log(FMT_BLUE("IFU Fetch: %lld, LSU Load: %lld, EXU ALU: %lld"),
       pmu.ifu_fetch_cnt, pmu.lsu_load_cnt, pmu.exu_alu_cnt);
-  Log(FMT_BLUE("LD Inst: %lld (%2.1f), ST Inst: %lld, (%2.1f%%)"),
+  Log(FMT_BLUE("LD Inst: %lld (%2.1f%%), ST Inst: %lld, (%2.1f%%)"),
       pmu.ld_inst_cnt, 100.0 * pmu.ld_inst_cnt / pmu.instr_cnt,
       pmu.st_inst_cnt, 100.0 * pmu.st_inst_cnt / pmu.instr_cnt);
+  Log(FMT_BLUE("ALU Inst: %lld (%2.1f%%), B Inst: %lld, (%2.1f%%)"),
+      pmu.alu_inst_cnt, 100.0 * pmu.alu_inst_cnt / pmu.instr_cnt,
+      pmu.b_inst_cnt, 100.0 * pmu.b_inst_cnt / pmu.instr_cnt);
 }
 
 static void perf_sample_per_cycle()
@@ -64,6 +67,16 @@ static void perf_sample_per_inst()
     break;
   case 0b0100011:
     pmu.st_inst_cnt++;
+    break;
+  case 0b0110011:
+  case 0b0010011:
+    pmu.alu_inst_cnt++;
+    break;
+  case 0b1100011:
+    pmu.b_inst_cnt++;
+    break;
+  default:
+    pmu.other_inst_cnt++;
     break;
   }
 }

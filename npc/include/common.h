@@ -131,6 +131,8 @@ typedef struct
   // for inst
   uint64_t ld_inst_cnt;
   uint64_t st_inst_cnt;
+  u_int64_t alu_inst_cnt;
+  u_int64_t b_inst_cnt;
 
 } PMUState;
 
