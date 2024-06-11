@@ -244,39 +244,39 @@ module ysyx_BUS_ARBITER(
       if (io_master_awvalid)
         begin
           `ysyx_DPI_C_npc_difftest_mem_diff
-          if (
-            (io_master_awaddr >= 'h10000000 && io_master_awaddr <= 'h10000005) ||
-            (io_master_awaddr >= 'h10001000 && io_master_awaddr <= 'h10001fff) ||
-            (io_master_awaddr >= 'h10002000 && io_master_awaddr <= 'h1000200f) ||
-            (io_master_awaddr >= 'h10011000 && io_master_awaddr <= 'h10011007) ||
-            (io_master_awaddr >= 'h21000000 && io_master_awaddr <= 'h211fffff) ||
-            (io_master_awaddr >= 'hc0000000) ||
-            (0)
-          )
-            begin
-              `ysyx_DPI_C_npc_difftest_skip_ref
-              // $display("DIFFTEST: skip ref at aw: %h", io_master_awaddr);
+            if (
+              (io_master_awaddr >= 'h10000000 && io_master_awaddr <= 'h10000005) ||
+              (io_master_awaddr >= 'h10001000 && io_master_awaddr <= 'h10001fff) ||
+              (io_master_awaddr >= 'h10002000 && io_master_awaddr <= 'h1000200f) ||
+              (io_master_awaddr >= 'h10011000 && io_master_awaddr <= 'h10011007) ||
+              (io_master_awaddr >= 'h21000000 && io_master_awaddr <= 'h211fffff) ||
+              (io_master_awaddr >= 'hc0000000) ||
+              (0)
+            )
+              begin
+                `ysyx_DPI_C_npc_difftest_skip_ref
+                  // $display("DIFFTEST: skip ref at aw: %h", io_master_awaddr);
+                end
             end
-        end
-      if (io_master_arvalid)
-        begin
-          if (
-            (io_master_araddr >= 'h10000000 && io_master_araddr <= 'h10000005) ||
-            (io_master_araddr >= 'h10001000 && io_master_araddr <= 'h10001fff) ||
-            (io_master_araddr >= 'h10002000 && io_master_araddr <= 'h1000200f) ||
-            (io_master_araddr >= 'h10011000 && io_master_araddr <= 'h10011007) ||
-            (io_master_araddr >= 'h21000000 && io_master_araddr <= 'h211fffff) ||
-            (io_master_araddr >= 'hc0000000) ||
-            (0)
-          )
+          if (io_master_arvalid)
             begin
-              `ysyx_DPI_C_npc_difftest_skip_ref
-              // $display("DIFFTEST: skip ref at ar: %h", io_master_araddr);
-            end
-        end
-    end
+              if (
+                (io_master_araddr >= 'h10000000 && io_master_araddr <= 'h10000005) ||
+                (io_master_araddr >= 'h10001000 && io_master_araddr <= 'h10001fff) ||
+                (io_master_araddr >= 'h10002000 && io_master_araddr <= 'h1000200f) ||
+                (io_master_araddr >= 'h10011000 && io_master_araddr <= 'h10011007) ||
+                (io_master_araddr >= 'h21000000 && io_master_araddr <= 'h211fffff) ||
+                (io_master_araddr >= 'hc0000000) ||
+                (0)
+              )
+                begin
+                  `ysyx_DPI_C_npc_difftest_skip_ref
+                    // $display("DIFFTEST: skip ref at ar: %h", io_master_araddr);
+                  end
+              end
+          end
 
-  wire clint_arvalid = (lsu_arvalid & clint_en);
+        wire clint_arvalid = (lsu_arvalid & clint_en);
   wire clint_arready_o;
   wire [DATA_W-1:0] clint_rdata_o;
   wire [1:0] clint_rresp_o, clint_bresp_o;
@@ -369,7 +369,7 @@ module ysyx_CLINT(
                   rdata_o <= mtime[63:32];
               endcase
               `ysyx_DPI_C_npc_difftest_skip_ref
-              rvalid_o <= 1;
+                rvalid_o <= 1;
             end
         end
       if (wvalid & !wready_o & bready)
