@@ -119,7 +119,26 @@ typedef struct
   uint8_t *soc_sram;
 } NPCState;
 
-extern NPCState npc;
+typedef struct
+{
+  // for microarch
+  uint64_t active_cycle;
+  uint64_t instr_cnt;
+  uint64_t ifu_fetch_cnt;
+  uint64_t ifu_stall_cycle;
+  uint64_t lsu_load_cnt;
+  uint64_t lsu_stall_cycle;
+  uint64_t exu_alu_cnt;
+
+  // for inst
+  uint64_t ld_inst_cnt;
+  uint64_t st_inst_cnt;
+  u_int64_t alu_inst_cnt;
+  u_int64_t b_inst_cnt;
+  u_int64_t csr_inst_cnt;
+  u_int64_t other_inst_cnt;
+
+} PMUState;
 
 #define panic(format, ...) Assert(0, format, ##__VA_ARGS__)
 

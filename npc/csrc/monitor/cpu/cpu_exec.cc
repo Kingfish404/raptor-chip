@@ -13,31 +13,132 @@
 
 extern NPCState npc;
 
+PMUState pmu = {
+    .active_cycle = 0,
+    .instr_cnt = 0,
+    .ifu_fetch_cnt = 0,
+    .lsu_load_cnt = 0,
+    .exu_alu_cnt = 0,
+};
+
 extern VerilatedContext *contextp;
 extern TOP_NAME *top;
 extern VerilatedVcdC *tfp;
 
 word_t prev_pc = 0;
 word_t g_timer = 0;
-word_t g_nr_guest_inst = 0;
-word_t g_nr_guest_cycle = 0;
 
 #ifdef CONFIG_ITRACE
 static char iringbuf[MAX_IRING_SIZE][128] = {};
 static uint64_t iringhead = 0;
 #endif
 
+float percentage(int a, int b)
+{
+  return (b == 0) ? 0 : (100.0 * a / b);
+}
+
+static void perf()
+{
+  printf("======== Instruction Analysis ========\n");
+  Log(FMT_BLUE("#Inst: %lld, Cycle: %llu, IPC: %.3f"), pmu.instr_cnt, pmu.active_cycle, (1.0 * pmu.instr_cnt / pmu.active_cycle));
+  Log(FMT_BLUE("IFU Fetch: %8lld, LSU Load: %8lld, EXU ALU: %lld"),
+      pmu.ifu_fetch_cnt, pmu.lsu_load_cnt, pmu.exu_alu_cnt);
+  Log(FMT_BLUE("LD  Inst: %8lld (%4.1f%%), ST Inst: %8lld, (%4.1f%%)"),
+      pmu.ld_inst_cnt, percentage(pmu.ld_inst_cnt, pmu.instr_cnt),
+      pmu.st_inst_cnt, percentage(pmu.st_inst_cnt, pmu.instr_cnt));
+  Log(FMT_BLUE("ALU Inst: %8lld (%4.1f%%), BR Inst: %8lld, (%4.1f%%)"),
+      pmu.alu_inst_cnt, percentage(pmu.alu_inst_cnt, pmu.instr_cnt),
+      pmu.b_inst_cnt, percentage(pmu.b_inst_cnt, pmu.instr_cnt));
+  Log(FMT_BLUE("CSR Inst: %8lld (%4.1f%%)"),
+      pmu.csr_inst_cnt, percentage(pmu.csr_inst_cnt, pmu.instr_cnt));
+  Log(FMT_BLUE("Oth Inst: %8lld (%4.1f%%)"),
+      pmu.other_inst_cnt, percentage(pmu.other_inst_cnt, pmu.instr_cnt));
+  printf("======== TOP DOWN Analysis ========\n");
+  Log(FMT_BLUE("IFU Stall: %8lld (%4.1f%%), LSU Stall: %8lld (%4.1f%%)"),
+      pmu.ifu_stall_cycle, percentage(pmu.ifu_stall_cycle, pmu.active_cycle),
+      pmu.lsu_stall_cycle, percentage(pmu.lsu_stall_cycle, pmu.active_cycle));
+  // show average IF cycle and LS cycle
+  Log(FMT_BLUE("IFU Avg Cycle: %2.3f, LSU Avg Cycle: %2.3f"),
+      (1.0 * pmu.ifu_stall_cycle + 1) / pmu.ifu_fetch_cnt,
+      (1.0 * pmu.lsu_stall_cycle + 1) / pmu.lsu_load_cnt);
+  assert(
+      pmu.ifu_fetch_cnt == pmu.instr_cnt);
+  assert(
+      pmu.instr_cnt ==
+      (pmu.ld_inst_cnt + pmu.st_inst_cnt +
+       pmu.alu_inst_cnt + pmu.b_inst_cnt +
+       pmu.csr_inst_cnt +
+       pmu.other_inst_cnt));
+}
+
+static void perf_sample_per_cycle()
+{
+  pmu.active_cycle++;
+  bool ifu_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__ifu_valid));
+  bool lsu_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__exu__DOT__lsu_valid));
+  if (ifu_valid)
+  {
+    pmu.ifu_fetch_cnt++;
+  }
+  if (!ifu_valid &&
+      *(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__ifu__DOT__pvalid)))
+  {
+    pmu.ifu_stall_cycle++;
+  }
+  if (lsu_valid)
+  {
+    pmu.lsu_load_cnt++;
+  }
+  if (!lsu_valid &&
+      *(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__exu__DOT__lsu_avalid)))
+  {
+    pmu.lsu_stall_cycle++;
+  }
+  if (*(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__exu_valid)))
+  {
+    pmu.exu_alu_cnt++;
+  }
+}
+
+static void perf_sample_per_inst()
+{
+  pmu.instr_cnt++;
+  switch (*(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__exu__DOT__opcode_exu)))
+  {
+  case 0b0000011:
+    pmu.ld_inst_cnt++;
+    break;
+  case 0b0100011:
+    pmu.st_inst_cnt++;
+    break;
+  case 0b0110011:
+  case 0b0010011:
+    pmu.alu_inst_cnt++;
+    break;
+  case 0b1100011:
+    pmu.b_inst_cnt++;
+    break;
+  case 0b1110011:
+    pmu.csr_inst_cnt++;
+    break;
+  default:
+    pmu.other_inst_cnt++;
+    break;
+  }
+}
+
 static void statistic()
 {
+  perf();
   double time_s = g_timer / 1e6;
-  double frequency = g_nr_guest_cycle / time_s;
+  double frequency = pmu.active_cycle / time_s;
   Log(FMT_BLUE(
-          "#Inst: " FMT_WORD_NO_PREFIX ", time: %d (ns), %d (ms)"),
-      g_nr_guest_inst, g_timer, (int)(g_timer / 1e3));
-  Log(FMT_BLUE("Cycle: %u, IPC: %.3f"), g_nr_guest_cycle, (1.0 * g_nr_guest_inst / g_nr_guest_cycle));
+          "time: %d (ns), %d (ms)"),
+      g_timer, (int)(g_timer / 1e3));
   Log(FMT_BLUE("Simulate Freq: %.3f Hz, %.3d MHz"), frequency, (int)(frequency / 1e3));
   Log(FMT_BLUE("Inst: %.3f Inst/s, %.1f KInst/s"),
-      g_nr_guest_inst / time_s, g_nr_guest_inst / time_s / 1e3);
+      pmu.instr_cnt / time_s, pmu.instr_cnt / time_s / 1e3);
   Log("%s at pc: " FMT_WORD_NO_PREFIX ", inst: " FMT_WORD_NO_PREFIX,
       ((*npc.ret) == 0 && npc.state != NPC_ABORT
            ? FMT_GREEN("HIT GOOD TRAP")
@@ -113,7 +214,8 @@ void cpu_exec(uint64_t n)
   while (!contextp->gotFinish() && npc.state == NPC_RUNNING && n-- > 0)
   {
     cpu_exec_one_cycle();
-    g_nr_guest_cycle++;
+    // Simulate the performance monitor unit
+    perf_sample_per_cycle();
     cur_inst_cycle++;
     if (cur_inst_cycle > 0x2fff)
     {
@@ -123,7 +225,7 @@ void cpu_exec(uint64_t n)
     }
     if (prev_pc != *(npc.pc))
     {
-      g_nr_guest_inst++;
+      perf_sample_per_inst();
       cur_inst_cycle = 0;
       fflush(stdout);
 #ifdef CONFIG_ITRACE
