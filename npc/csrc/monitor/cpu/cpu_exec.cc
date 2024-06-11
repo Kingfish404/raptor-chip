@@ -52,6 +52,11 @@ static void perf_sample_per_cycle()
   {
     pmu.exu_alu_cnt++;
   }
+}
+
+static void perf_sample_per_inst()
+{
+  pmu.instr_cnt++;
   switch (*(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__exu__DOT__opcode_exu)))
   {
   case 0b0000011:
@@ -160,7 +165,7 @@ void cpu_exec(uint64_t n)
     }
     if (prev_pc != *(npc.pc))
     {
-      pmu.instr_cnt++;
+      perf_sample_per_inst();
       cur_inst_cycle = 0;
       fflush(stdout);
 #ifdef CONFIG_ITRACE
