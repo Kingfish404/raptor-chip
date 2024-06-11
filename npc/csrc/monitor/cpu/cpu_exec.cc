@@ -35,24 +35,24 @@ static void perf()
 {
   printf("======== Instruction Analysis ========\n");
   Log(FMT_BLUE("#Inst: %lld, Cycle: %llu, IPC: %.3f"), pmu.instr_cnt, pmu.active_cycle, (1.0 * pmu.instr_cnt / pmu.active_cycle));
-  Log(FMT_BLUE("IFU Fetch: %lld, LSU Load: %lld, EXU ALU: %lld"),
+  Log(FMT_BLUE("IFU Fetch: %8lld, LSU Load: %8lld, EXU ALU: %lld"),
       pmu.ifu_fetch_cnt, pmu.lsu_load_cnt, pmu.exu_alu_cnt);
-  Log(FMT_BLUE("LD  Inst: %lld (%2.1f%%), ST Inst: %lld, (%2.1f%%)"),
+  Log(FMT_BLUE("LD  Inst: %8lld (%2.1f%%), ST Inst: %8lld, (%2.1f%%)"),
       pmu.ld_inst_cnt, percentage(pmu.ld_inst_cnt, pmu.instr_cnt),
       pmu.st_inst_cnt, percentage(pmu.st_inst_cnt, pmu.instr_cnt));
-  Log(FMT_BLUE("ALU Inst: %lld (%2.1f%%), BR Inst: %lld, (%2.1f%%)"),
+  Log(FMT_BLUE("ALU Inst: %8lld (%2.1f%%), BR Inst: %8lld, (%2.1f%%)"),
       pmu.alu_inst_cnt, percentage(pmu.alu_inst_cnt, pmu.instr_cnt),
       pmu.b_inst_cnt, percentage(pmu.b_inst_cnt, pmu.instr_cnt));
-  Log(FMT_BLUE("CSR Inst: %lld (%2.1f%%)"),
+  Log(FMT_BLUE("CSR Inst: %8lld (%2.1f%%)"),
       pmu.csr_inst_cnt, percentage(pmu.csr_inst_cnt, pmu.instr_cnt));
-  Log(FMT_BLUE("Other Inst: %lld (%2.1f%%)"),
+  Log(FMT_BLUE("Other Inst: %8lld (%2.1f%%)"),
       pmu.other_inst_cnt, percentage(pmu.other_inst_cnt, pmu.instr_cnt));
   printf("======== TOP DOWN Analysis ========\n");
-  Log(FMT_BLUE("IFU Stall: %lld (%2.1f%%), LSU Stall: %lld (%2.1f%%)"),
+  Log(FMT_BLUE("IFU Stall: %8lld (%2.1f%%), LSU Stall: %8lld (%2.1f%%)"),
       pmu.ifu_stall_cycle, percentage(pmu.ifu_stall_cycle, pmu.active_cycle),
       pmu.lsu_stall_cycle, percentage(pmu.lsu_stall_cycle, pmu.active_cycle));
   // show average IF cycle and LS cycle
-  Log(FMT_BLUE("IFU Avg Cycle: %.3f, LSU Avg Cycle: %.3f"),
+  Log(FMT_BLUE("IFU Avg Cycle: %2.3f, LSU Avg Cycle: %2.3f"),
       (1.0 * pmu.ifu_stall_cycle + 1) / pmu.ifu_fetch_cnt,
       (1.0 * pmu.lsu_stall_cycle + 1) / pmu.lsu_load_cnt);
   assert(
