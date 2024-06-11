@@ -272,7 +272,7 @@ module ysyx_PC (
   always @(posedge clk) begin
     if (rst) begin
       pc_o <= `ysyx_PC_INIT;
-      npc_difftest_skip_ref();
+      `ysyx_DPI_C_npc_difftest_skip_ref
     end
     else if (exu_valid) begin
         pc_o <= npc_wdata;

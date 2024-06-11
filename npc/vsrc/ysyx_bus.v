@@ -1,4 +1,5 @@
 `include "ysyx_macro.v"
+`include "ysyx_macro_dpi_c.v"
 
 module ysyx_BUS_ARBITER(
     input clk, rst,
@@ -251,7 +252,7 @@ module ysyx_BUS_ARBITER(
             (0)
           )
             begin
-              npc_difftest_skip_ref();
+              `ysyx_DPI_C_npc_difftest_skip_ref
               // $display("DIFFTEST: skip ref at aw: %h", io_master_awaddr);
             end
         end
@@ -267,7 +268,7 @@ module ysyx_BUS_ARBITER(
             (0)
           )
             begin
-              npc_difftest_skip_ref();
+              `ysyx_DPI_C_npc_difftest_skip_ref
               // $display("DIFFTEST: skip ref at ar: %h", io_master_araddr);
             end
         end
@@ -365,7 +366,7 @@ module ysyx_CLINT(
                 `ysyx_BUS_RTC_ADDR_UP:
                   rdata_o <= mtime[63:32];
               endcase
-              npc_difftest_skip_ref();
+              `ysyx_DPI_C_npc_difftest_skip_ref
               rvalid_o <= 1;
             end
         end
