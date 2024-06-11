@@ -16,8 +16,6 @@ module ysyx_CSR_Reg(
   parameter MEPC_IDX    = 'h2;
   parameter MTVEC_IDX   = 'h3;
   parameter MSTATUS_IDX = 'h4;
-  parameter MVENDORID_IDX = 'h5;
-  parameter MARCHID_IDX = 'h6;
 
   parameter R_W = 12;
   parameter BIT_W = `ysyx_W_WIDTH;
@@ -47,7 +45,7 @@ module ysyx_CSR_Reg(
   //   ({3{waddr_add1==`ysyx_CSR_MSTATUS}})& (MSTATUS_IDX)
   // );
 
-  reg [BIT_W-1:0] csr[0:6];
+  reg [BIT_W-1:0] csr[0:4];
   always @(posedge clk) begin
     if (rst) begin
       csr[MCAUSE_IDX]   <= RESET_VAL;
