@@ -303,7 +303,7 @@ module ysyx_RegisterFile (
           begin
             if (rst)
               begin
-                generate for(i = 1 ; i < 31; i = i + 1)
+                for(i = 1 ; i < 31; i = i + 1)
       begin
                 rf[i] <= 0;
       end
