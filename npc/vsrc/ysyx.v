@@ -300,7 +300,7 @@ module ysyx_RegisterFile (
 
   genvar i;
   generate for(i = 1 ; i < 31; i = i + 1)
-      begin :
+      begin
         always @(posedge clk)
           begin
             if (rst)
