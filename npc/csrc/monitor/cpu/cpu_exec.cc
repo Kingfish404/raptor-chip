@@ -60,13 +60,25 @@ static void perf()
 static void perf_sample_per_cycle()
 {
   pmu.active_cycle++;
-  if (*(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__ifu_valid)))
+  bool ifu_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__ifu_valid));
+  bool lsu_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__exu__DOT__lsu_valid));
+  if (ifu_valid)
   {
     pmu.ifu_fetch_cnt++;
   }
-  if (*(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__exu__DOT__lsu_valid)))
+  if (!ifu_valid &&
+      *(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__ifu__DOT__pvalid)))
+  {
+    pmu.ifu_stall_cycle++;
+  }
+  if (lsu_valid)
   {
     pmu.lsu_load_cnt++;
+  }
+  if (!lsu_valid &&
+      *(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__exu__DOT__lsu__DOT__avalid)))
+  {
+    pmu.lsu_stall_cycle++;
   }
   if (*(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__exu_valid)))
   {
