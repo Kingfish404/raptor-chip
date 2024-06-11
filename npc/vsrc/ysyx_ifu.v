@@ -27,7 +27,7 @@ module ysyx_IFU (
   assign arvalid = pvalid;
 
   parameter L1I_SIZE = 8;
-  parameter L1I_LEN = 4;
+  parameter L1I_LEN = 2;
   reg [32-1:0] l1i[L1I_SIZE-1:0];
   reg [L1I_SIZE-1:0] l1i_valid = 0;
   reg [32-L1I_LEN-2-1:0] l1i_tag[L1I_SIZE-1:0];
