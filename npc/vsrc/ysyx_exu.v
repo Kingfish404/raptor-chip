@@ -1,5 +1,6 @@
 `include "ysyx_macro.v"
 `include "ysyx_macro_csr.v"
+`include "ysyx_macro_dpi_c.v"
 
 module ysyx_EXU (
   input clk, rst,
@@ -149,7 +150,7 @@ module ysyx_EXU (
           `ysyx_OP_SYSTEM_FUNC3: begin
             case (imm_exu[15:4])
               `ysyx_OP_SYSTEM_ECALL:  begin npc_wdata_o = mtvec; end
-              `ysyx_OP_SYSTEM_EBREAK: begin npc_exu_ebreak(); end
+              `ysyx_OP_SYSTEM_EBREAK: begin `ysyx_DPI_C_npc_exu_ebreak end
               `ysyx_OP_SYSTEM_MRET:   begin npc_wdata_o = mepc; end
               default: begin ; end
             endcase

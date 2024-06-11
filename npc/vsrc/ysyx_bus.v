@@ -1,4 +1,5 @@
 `include "ysyx_macro.v"
+`include "ysyx_macro_dpi_c.v"
 
 module ysyx_BUS_ARBITER(
     input clk, rst,
@@ -72,8 +73,10 @@ module ysyx_BUS_ARBITER(
   wire [1:0] sram_bresp_o;
   wire sram_bvalid_o;
 
-  typedef enum [2:0] {if_a, if_d, ls_a, ls_d_r, ls_d_w} state_t;
+  // typedef enum [2:0] {if_a, if_d, ls_a, ls_d_r, ls_d_w} state_t;
   //                   000,  001,  010,    011,    100,
+  parameter if_a = 3'b000, if_d = 3'b001, ls_a = 3'b010, ls_d_r = 3'b011, ls_d_w = 3'b100;
+
   reg [2:0] state;
   reg first = 1;
   reg write_valid = 0;
@@ -187,9 +190,9 @@ module ysyx_BUS_ARBITER(
   assign io_master_araddr = sram_araddr;
   assign io_master_arvalid = !rst & (
            ((state == if_a) & ifu_arvalid) |
-          //  ((state == ls_a) & lsu_arvalid & !clint_en)
-            // ((state == ls_a || state == ls_d_r) & lsu_arvalid & !clint_en) // for old soc
-            ((state == ls_a) & lsu_arvalid & !clint_en) // for new soc
+           //  ((state == ls_a) & lsu_arvalid & !clint_en)
+           // ((state == ls_a || state == ls_d_r) & lsu_arvalid & !clint_en) // for old soc
+           ((state == ls_a) & lsu_arvalid & !clint_en) // for new soc
          );
   assign arready_o = io_master_arready & io_master_bvalid;
 
@@ -227,53 +230,53 @@ module ysyx_BUS_ARBITER(
          {{lsu_wstrb[3:0] << awaddr_lo}, {4'b0}}:
          {{4'b0}, {lsu_wstrb[3:0] << awaddr_lo}};
   assign io_master_wvalid = (
-          //  (state == ls_d_w ) & (lsu_wvalid)
-            // (state == ls_a || state == ls_d_w) & (lsu_wvalid) // for old soc
-            (((state == ls_d_w) & write_valid)) & (lsu_wvalid) // for new soc
+           //  (state == ls_d_w ) & (lsu_wvalid)
+           // (state == ls_a || state == ls_d_w) & (lsu_wvalid) // for old soc
+           (((state == ls_d_w) & write_valid)) & (lsu_wvalid) // for new soc
          );
 
   assign io_master_bready = 1;
 
   always @(posedge clk)
     begin
-      `Assert(io_master_rresp, 2'b00);
-      `Assert(io_master_bresp, 2'b00);
+      `ysyx_Assert(io_master_rresp, 2'b00);
+      `ysyx_Assert(io_master_bresp, 2'b00);
       if (io_master_awvalid)
         begin
-          npc_difftest_mem_diff();
-          if (
-            (io_master_awaddr >= 'h10000000 && io_master_awaddr <= 'h10000005) ||
-            (io_master_awaddr >= 'h10001000 && io_master_awaddr <= 'h10001fff) ||
-            (io_master_awaddr >= 'h10002000 && io_master_awaddr <= 'h1000200f) ||
-            (io_master_awaddr >= 'h10011000 && io_master_awaddr <= 'h10011007) ||
-            (io_master_awaddr >= 'h21000000 && io_master_awaddr <= 'h211fffff) ||
-            (io_master_awaddr >= 'hc0000000) ||
-            (0)
-          )
-            begin
-              npc_difftest_skip_ref();
-              // $display("DIFFTEST: skip ref at aw: %h", io_master_awaddr);
+          `ysyx_DPI_C_npc_difftest_mem_diff
+            if (
+              (io_master_awaddr >= 'h10000000 && io_master_awaddr <= 'h10000005) ||
+              (io_master_awaddr >= 'h10001000 && io_master_awaddr <= 'h10001fff) ||
+              (io_master_awaddr >= 'h10002000 && io_master_awaddr <= 'h1000200f) ||
+              (io_master_awaddr >= 'h10011000 && io_master_awaddr <= 'h10011007) ||
+              (io_master_awaddr >= 'h21000000 && io_master_awaddr <= 'h211fffff) ||
+              (io_master_awaddr >= 'hc0000000) ||
+              (0)
+            )
+              begin
+                `ysyx_DPI_C_npc_difftest_skip_ref
+                  // $display("DIFFTEST: skip ref at aw: %h", io_master_awaddr);
+                end
             end
-        end
-      if (io_master_arvalid)
-        begin
-          if (
-            (io_master_araddr >= 'h10000000 && io_master_araddr <= 'h10000005) ||
-            (io_master_araddr >= 'h10001000 && io_master_araddr <= 'h10001fff) ||
-            (io_master_araddr >= 'h10002000 && io_master_araddr <= 'h1000200f) ||
-            (io_master_araddr >= 'h10011000 && io_master_araddr <= 'h10011007) ||
-            (io_master_araddr >= 'h21000000 && io_master_araddr <= 'h211fffff) ||
-            (io_master_araddr >= 'hc0000000) ||
-            (0)
-          )
+          if (io_master_arvalid)
             begin
-              npc_difftest_skip_ref();
-              // $display("DIFFTEST: skip ref at ar: %h", io_master_araddr);
-            end
-        end
-    end
+              if (
+                (io_master_araddr >= 'h10000000 && io_master_araddr <= 'h10000005) ||
+                (io_master_araddr >= 'h10001000 && io_master_araddr <= 'h10001fff) ||
+                (io_master_araddr >= 'h10002000 && io_master_araddr <= 'h1000200f) ||
+                (io_master_araddr >= 'h10011000 && io_master_araddr <= 'h10011007) ||
+                (io_master_araddr >= 'h21000000 && io_master_araddr <= 'h211fffff) ||
+                (io_master_araddr >= 'hc0000000) ||
+                (0)
+              )
+                begin
+                  `ysyx_DPI_C_npc_difftest_skip_ref
+                    // $display("DIFFTEST: skip ref at ar: %h", io_master_araddr);
+                  end
+              end
+          end
 
-  wire clint_arvalid = (lsu_arvalid & clint_en);
+        wire clint_arvalid = (lsu_arvalid & clint_en);
   wire clint_arready_o;
   wire [DATA_W-1:0] clint_rdata_o;
   wire [1:0] clint_rresp_o, clint_bresp_o;
@@ -293,3 +296,88 @@ module ysyx_BUS_ARBITER(
                .bresp_o(clint_bresp_o), .bvalid_o(clint_bvalid_o), .bready(0)
              );
 endmodule
+
+// Core Local INTerrupt controller
+module ysyx_CLINT(
+    input clk, rst,
+
+    input [1:0] arburst,
+    input [2:0] arsize,
+    input [7:0] arlen,
+    input [3:0] arid,
+    input [ADDR_W-1:0] araddr,
+    input arvalid,
+    output reg arready_o,
+
+    output reg [3:0] rid,
+    output reg rlast_o,
+    output reg [DATA_W-1:0] rdata_o,
+    output reg [1:0] rresp_o,
+    output reg rvalid_o,
+    input rready,
+
+    input [1:0] awburst,
+    input [2:0] awsize,
+    input [7:0] awlen,
+    input [3:0] awid,
+    input [ADDR_W-1:0] awaddr,
+    input awvalid,
+    output reg awready_o,
+
+    input wlast,
+    input [DATA_W-1:0] wdata,
+    input [7:0] wstrb,
+    input wvalid,
+    output reg wready_o,
+
+    output reg [3:0] bid,
+    output reg [1:0] bresp_o,
+    output reg bvalid_o,
+    input bready
+  );
+  parameter ADDR_W = 32, DATA_W = 32;
+
+  reg [63:0] mtime;
+  reg [19:0] lfsr;
+  wire ifsr_ready = `ysyx_IFSR_ENABLE ? lfsr[19] : 1;
+  always @(posedge clk )
+    begin
+      lfsr <= {lfsr[18:0], lfsr[19] ^ lfsr[18]};
+    end
+  always @(posedge clk)
+    begin
+      if (rst)
+        begin
+          mtime <= 0;
+          lfsr <= 101;
+        end
+      else
+        begin
+          mtime <= mtime + 1;
+        end
+      rdata_o <= 0;
+      rvalid_o <= 0;
+      wready_o <= 0;
+      if (arvalid & !rvalid_o & rready)
+        begin
+          if (ifsr_ready)
+            begin
+              case (araddr)
+                `ysyx_BUS_RTC_ADDR:
+                  rdata_o <= mtime[31:0];
+                `ysyx_BUS_RTC_ADDR_UP:
+                  rdata_o <= mtime[63:32];
+              endcase
+              `ysyx_DPI_C_npc_difftest_skip_ref
+                rvalid_o <= 1;
+            end
+        end
+      if (wvalid & !wready_o & bready)
+        begin
+          if (ifsr_ready)
+            begin
+              wready_o <= 1;
+            end
+        end
+    end
+endmodule //ysyx_CLINT

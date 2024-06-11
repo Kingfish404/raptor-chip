@@ -1,5 +1,6 @@
 `include "ysyx_macro.v"
 `include "ysyx_macro_idu.v"
+`include "ysyx_macro_dpi_c.v"
 
 module ysyx_IDU (
   input clk, rst,
@@ -68,7 +69,7 @@ module ysyx_IDU (
         `ysyx_OP_SYSTEM:  begin `ysyx_I_SYS_TYPE(reg_rdata1, {1'b0, funct3}, 0)                           end
         default: begin
           $display("Illegal instruction: %h at %h", inst_idu, pc);
-          npc_illegal_inst();
+          `ysyx_DPI_C_npc_illegal_inst
         end
       endcase
     end

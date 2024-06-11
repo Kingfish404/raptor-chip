@@ -1,4 +1,5 @@
 `include "ysyx_macro.v"
+`include "ysyx_macro_dpi_c.v"
 
 module ysyx (
   input clock, reset, 
@@ -272,9 +273,8 @@ module ysyx_PC (
   always @(posedge clk) begin
     if (rst) begin
       pc_o <= `ysyx_PC_INIT;
-      npc_difftest_skip_ref();
-    end
-    else if (exu_valid) begin
+      `ysyx_DPI_C_npc_difftest_skip_ref
+    end else if (exu_valid) begin
         pc_o <= npc_wdata;
     end
   end
@@ -299,17 +299,24 @@ module ysyx_RegisterFile (
   assign src2_o = rf[s2addr];
 
   genvar i;
-  generate for(i = 1 ; i < 31; i = i + 1) begin : U
-    always @(posedge clk) begin
-      if (rst) begin rf[i] <= 0; end
-    end
-  end
+  generate for(i = 1 ; i < 31; i = i + 1)
+      begin
+        always @(posedge clk)
+          begin
+            if (rst)
+              begin
+                rf[i] <= 0;
+              end
+            else if (reg_write_en && exu_valid)
+              begin
+                rf[waddr] <= wdata;
+              end
+          end
+      end
   endgenerate
 
-  always @(posedge clk) begin
-    if (!rst && reg_write_en && exu_valid) begin
-      rf[waddr] <= wdata;
+  always @(posedge clk)
+    begin
+      rf[0] <= 0;
     end
-    rf[0] <= 0;
-  end
 endmodule // ysyx_RegisterFile
