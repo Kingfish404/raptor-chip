@@ -73,8 +73,10 @@ module ysyx_BUS_ARBITER(
   wire [1:0] sram_bresp_o;
   wire sram_bvalid_o;
 
-  typedef enum [2:0] {if_a, if_d, ls_a, ls_d_r, ls_d_w} state_t;
+  // typedef enum [2:0] {if_a, if_d, ls_a, ls_d_r, ls_d_w} state_t;
   //                   000,  001,  010,    011,    100,
+  parameter if_a = 3'b000, if_d = 3'b001, ls_a = 3'b010, ls_d_r = 3'b011, ls_d_w = 3'b100;
+
   reg [2:0] state;
   reg first = 1;
   reg write_valid = 0;
@@ -237,8 +239,8 @@ module ysyx_BUS_ARBITER(
 
   always @(posedge clk)
     begin
-      `Assert(io_master_rresp, 2'b00);
-      `Assert(io_master_bresp, 2'b00);
+      `ysyx_Assert(io_master_rresp, 2'b00);
+      `ysyx_Assert(io_master_bresp, 2'b00);
       if (io_master_awvalid)
         begin
           `ysyx_DPI_C_npc_difftest_mem_diff
