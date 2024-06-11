@@ -27,7 +27,7 @@ module ysyx_CSR_Reg(
   assign rdata_o = (
     ({32{waddr_add1==`ysyx_CSR_MVENDORID}})& (32'h79737978) |
     ({32{waddr_add1==`ysyx_CSR_MARCHID}})& (32'h15fde77) |
-    csr[csr_addr]
+    ({32{1}} & csr[csr_addr])
   );
   assign mepc_o  = csr[MEPC_IDX];
   assign mtvec_o = csr[MTVEC_IDX];
@@ -51,7 +51,7 @@ module ysyx_CSR_Reg(
   // assign csr[MVENDORID_IDX] = 32'h79737978;
   // assign csr[MARCHID_IDX]   = 32'h15fde77;
 
-  reg [BIT_W-1:0] csr[0:3];
+  reg [BIT_W-1:0] csr[0:2];
   always @(posedge clk) begin
     if (rst) begin
       csr[MCAUSE_IDX]   <= RESET_VAL;
