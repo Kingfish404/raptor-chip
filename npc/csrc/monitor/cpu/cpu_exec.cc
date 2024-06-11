@@ -124,7 +124,7 @@ void cpu_exec(uint64_t n)
     pmu.active_cycle++;
     if ((uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__ifu_valid)))
     {
-      pmu.ifu_fetch_cnt++;
+      // pmu.ifu_fetch_cnt++;
     }
     if ((uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__exu__DOT__lsu_valid)))
     {
