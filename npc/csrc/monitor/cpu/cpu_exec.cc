@@ -48,6 +48,8 @@ static void perf()
   Log(FMT_BLUE("Other Inst: %lld (%2.1f%%)"),
       pmu.other_inst_cnt, percentage(pmu.other_inst_cnt, pmu.instr_cnt));
   assert(
+      pmu.ifu_fetch_cnt == pmu.instr_cnt);
+  assert(
       pmu.instr_cnt ==
       (pmu.ld_inst_cnt + pmu.st_inst_cnt +
        pmu.alu_inst_cnt + pmu.b_inst_cnt +
