@@ -51,6 +51,7 @@ static void perf()
       pmu.instr_cnt ==
       (pmu.ld_inst_cnt + pmu.st_inst_cnt +
        pmu.alu_inst_cnt + pmu.b_inst_cnt +
+       pmu.csr_inst_cnt +
        pmu.other_inst_cnt));
 }
 
