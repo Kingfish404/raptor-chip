@@ -8,8 +8,8 @@ module ysyx_CSR_Reg(
     input [R_W-1:0] waddr, waddr_add1,
     input [BIT_W-1:0] wdata, wdata_add1,
     output reg [BIT_W-1:0] rdata_o,
-    output reg [BIT_W-1:0] mtvec_o,
-    output reg [BIT_W-1:0] mepc_o
+    output [BIT_W-1:0] mtvec_o,
+    output [BIT_W-1:0] mepc_o
   );
   parameter MNONE        = 'h0;
   parameter MCAUSE_IDX  = 'h1;
