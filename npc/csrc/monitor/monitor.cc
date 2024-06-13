@@ -176,7 +176,7 @@ void init_monitor(int argc, char *argv[])
   char arg5[10] = "-m";
   char arg6[100] = "/Users/jinyu/Developer/c-project/ysyx-workbench/npc/csrc/mem/mrom-data/build/mrom-data.bin";
   char arg7[120] = "/Users/jinyu/Developer/c-project/ysyx-workbench/am-kernels/benchmarks/microbench/build/microbench-riscv32e-ysyxsoc.bin";
-  char *argv[] = {
+  char *_argv[] = {
       arg1,
       arg2,
       arg3,
