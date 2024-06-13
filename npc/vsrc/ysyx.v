@@ -291,8 +291,8 @@ module ysyx_RegisterFile (
   output [DATA_WIDTH-1:0] src1_o,
   output [DATA_WIDTH-1:0] src2_o
 );
-  parameter ADDR_WIDTH = 1;
-  parameter DATA_WIDTH = 1;
+  parameter ADDR_WIDTH = 4;
+  parameter DATA_WIDTH = 32;
   parameter REG_NUM = 16;
   reg [DATA_WIDTH-1:0] rf[REG_NUM-1:0];
 
