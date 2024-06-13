@@ -136,7 +136,7 @@ module ysyx (
     .pc_o(pc)
   );
 
-  ysyx_RegisterFile #(4, BIT_W) regs(
+  ysyx_RegisterFile #(5, BIT_W) regs(
     .clk(clock), .rst(reset),
     .exu_valid(wben),
 
