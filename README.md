@@ -18,3 +18,7 @@ brew install verilator sdl2 sdl2_image sdl2_ttf flex
 apt-get install verilator libsdl2-dev flex
 apt-get install gcc-riscv64-linux-gnu
 ```
+
+## Architecture
+
+![](./npc/assets/npc-rv32e-ysyxsoc.svg)

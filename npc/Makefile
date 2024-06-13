@@ -73,7 +73,7 @@ NPC_EXEC := $(BIN) $(NPCFLAGS) $(DIFF_REF_SO) -m $(MROM_IMG) $(IMG)
 
 run: $(BIN) $(MROM_IMG)
 	$(call git_commit, "sim RTL") # DO NOT REMOVE THIS LINE!!!
-	$(NPC_EXEC)
+	echo $(NPC_EXEC)
 
 sim: $(BIN)
 	$(call git_commit, "sim RTL") # DO NOT REMOVE THIS LINE!!!
