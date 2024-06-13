@@ -288,12 +288,12 @@ module ysyx_RegisterFile (
   input [DATA_WIDTH-1:0] wdata,
   input [ADDR_WIDTH-1:0] s1addr,
   input [ADDR_WIDTH-1:0] s2addr,
-  output reg [DATA_WIDTH-1:0] src1_o,
-  output reg [DATA_WIDTH-1:0] src2_o
+  output [DATA_WIDTH-1:0] src1_o,
+  output [DATA_WIDTH-1:0] src2_o
 );
   parameter ADDR_WIDTH = 1;
   parameter DATA_WIDTH = 1;
-  reg [DATA_WIDTH-1:0] rf [31:0];
+  reg [DATA_WIDTH-1:0] rf[31:0];
 
   assign src1_o = rf[s1addr];
   assign src2_o = rf[s2addr];

@@ -68,7 +68,7 @@ module ysyx_IDU (
         `ysyx_OP_R_TYPE:  begin `ysyx_R_TYPE(reg_rdata1, {funct7[5], funct3}, reg_rdata2);                end
         `ysyx_OP_SYSTEM:  begin `ysyx_I_SYS_TYPE(reg_rdata1, {1'b0, funct3}, 0)                           end
         default: begin
-          $display("Illegal instruction: %h at %h", inst_idu, pc);
+          // $display("Illegal instruction: %h at %h", inst_idu, pc);
           `ysyx_DPI_C_npc_illegal_inst
         end
       endcase
