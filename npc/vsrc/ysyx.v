@@ -296,8 +296,8 @@ module ysyx_RegisterFile (
   parameter REG_NUM = 16;
   reg [DATA_WIDTH-1:0] rf[REG_NUM-1:0];
 
-  assign src1_o = rf[s1addr];
-  assign src2_o = rf[s2addr];
+  assign src1_o = rf[s1addr[3:0]];
+  assign src2_o = rf[s2addr[3:0]];
 
   genvar i;
   generate for(i = 1 ; i < REG_NUM; i = i + 1)
@@ -310,7 +310,7 @@ module ysyx_RegisterFile (
               end
             else if (reg_write_en && exu_valid)
               begin
-                rf[waddr] <= wdata;
+                rf[waddr[3:0]] <= wdata;
               end
           end
       end
