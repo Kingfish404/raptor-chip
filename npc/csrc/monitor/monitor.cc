@@ -169,8 +169,7 @@ void init_monitor(int argc, char *argv[])
   }
   //  -b -n -d /Users/jinyu/Developer/c-project/ysyx-workbench/nemu/build/riscv32-nemu-interpreter-so -m /Users/jinyu/Developer/c-project/ysyx-workbench/npc/csrc/mem/mrom-data/build/mrom-data.bin /Users/jinyu/Developer/c-project/ysyx-workbench/am-kernels/benchmarks/microbench/build/microbench-riscv32e-ysyxsoc.bin
   int _argc = 9;
-  std::string _argv[] = {
-      argv[0],
+  char *argv[] = {
       "-b",
       "-n",
       "-d",
@@ -179,12 +178,11 @@ void init_monitor(int argc, char *argv[])
       "/Users/jinyu/Developer/c-project/ysyx-workbench/npc/csrc/mem/mrom-data/build/mrom-data.bin",
       "/Users/jinyu/Developer/c-project/ysyx-workbench/am-kernels/benchmarks/microbench/build/microbench-riscv32e-ysyxsoc.bin",
   };
-  char **_argv = new char *[_argc];
-  parse_args(_argc, (char **)_argv);
+  parse_args(_argc, _argv);
 
   long img_size = load_img();
 
-  sdb_sim_init(_argc, (char **)_argv);
+  sdb_sim_init(_argc, _argv);
 
   init_difftest(diff_so_file, img_size, difftest_port);
 
