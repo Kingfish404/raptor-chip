@@ -168,7 +168,7 @@ void init_monitor(int argc, char *argv[])
     Log("argv[%d] = %s", i, argv[i]);
   }
   //  -b -n -d /Users/jinyu/Developer/c-project/ysyx-workbench/nemu/build/riscv32-nemu-interpreter-so -m /Users/jinyu/Developer/c-project/ysyx-workbench/npc/csrc/mem/mrom-data/build/mrom-data.bin /Users/jinyu/Developer/c-project/ysyx-workbench/am-kernels/benchmarks/microbench/build/microbench-riscv32e-ysyxsoc.bin
-  int _argc = 7;
+  int _argc = 8;
   char arg1[10] = "-b";
   char arg2[10] = "-n";
   char arg3[10] = "-d";
@@ -177,6 +177,7 @@ void init_monitor(int argc, char *argv[])
   char arg6[100] = "/Users/jinyu/Developer/c-project/ysyx-workbench/npc/csrc/mem/mrom-data/build/mrom-data.bin";
   char arg7[120] = "/Users/jinyu/Developer/c-project/ysyx-workbench/am-kernels/benchmarks/microbench/build/microbench-riscv32e-ysyxsoc.bin";
   char *_argv[] = {
+      argv[0],
       arg1,
       arg2,
       arg3,
