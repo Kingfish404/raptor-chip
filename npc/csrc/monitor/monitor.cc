@@ -4,6 +4,7 @@
 #include <getopt.h>
 #include <stdio.h>
 #include <string.h>
+#include <string>
 
 static const uint32_t img[] = {
     0x00108093, // 80000000: addi ra, ra, 1
@@ -168,7 +169,7 @@ void init_monitor(int argc, char *argv[])
   }
   //  -b -n -d /Users/jinyu/Developer/c-project/ysyx-workbench/nemu/build/riscv32-nemu-interpreter-so -m /Users/jinyu/Developer/c-project/ysyx-workbench/npc/csrc/mem/mrom-data/build/mrom-data.bin /Users/jinyu/Developer/c-project/ysyx-workbench/am-kernels/benchmarks/microbench/build/microbench-riscv32e-ysyxsoc.bin
   int _argc = 9;
-  char *_argv[1024] = {
+  std::string _argv[] = {
       argv[0],
       "-b",
       "-n",
@@ -178,11 +179,11 @@ void init_monitor(int argc, char *argv[])
       "/Users/jinyu/Developer/c-project/ysyx-workbench/npc/csrc/mem/mrom-data/build/mrom-data.bin",
       "/Users/jinyu/Developer/c-project/ysyx-workbench/am-kernels/benchmarks/microbench/build/microbench-riscv32e-ysyxsoc.bin",
   };
-  parse_args(_argc, _argv);
+  parse_args(_argc, (char **)_argv);
 
   long img_size = load_img();
 
-  sdb_sim_init(_argc, _argv);
+  sdb_sim_init(_argc, (char **)_argv);
 
   init_difftest(diff_so_file, img_size, difftest_port);
 
