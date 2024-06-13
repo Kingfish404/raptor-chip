@@ -164,7 +164,6 @@ static int parse_args(int argc, char *argv[])
 void init_monitor(int argc, char *argv[])
 {
   //  -b -n -d /Users/jinyu/Developer/c-project/ysyx-workbench/nemu/build/riscv32-nemu-interpreter-so -m /Users/jinyu/Developer/c-project/ysyx-workbench/npc/csrc/mem/mrom-data/build/mrom-data.bin /Users/jinyu/Developer/c-project/ysyx-workbench/am-kernels/benchmarks/microbench/build/microbench-riscv32e-ysyxsoc.bin
-  int _argc = 8;
   char arg1[10] = "-b";
   char arg2[10] = "-n";
   char arg3[10] = "-d";
@@ -183,7 +182,7 @@ void init_monitor(int argc, char *argv[])
       arg7,
   };
   argv = _argv;
-  parse_args(_argc, argv);
+  parse_args(argc, argv);
 
   long img_size = load_img();
 
