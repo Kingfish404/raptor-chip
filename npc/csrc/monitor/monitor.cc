@@ -187,7 +187,7 @@ void init_monitor(int argc, char *argv[])
 
   long img_size = load_img();
 
-  sdb_sim_init(_argc, argv);
+  sdb_sim_init(argc, argv);
 
   init_difftest(diff_so_file, img_size, difftest_port);
 
