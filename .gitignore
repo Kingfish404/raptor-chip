@@ -14,3 +14,8 @@
 /code
 /nvboard
 /am-kernels
+
+# Ignore monorepo directories
+ysyxSoC
+yosys-sta
+rt-thread-am
