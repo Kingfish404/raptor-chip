@@ -293,13 +293,14 @@ module ysyx_RegisterFile (
 );
   parameter ADDR_WIDTH = 1;
   parameter DATA_WIDTH = 1;
-  reg [DATA_WIDTH-1:0] rf[31:0];
+  parameter REG_NUM = 16;
+  reg [DATA_WIDTH-1:0] rf[REG_NUM-1:0];
 
   assign src1_o = rf[s1addr];
   assign src2_o = rf[s2addr];
 
   genvar i;
-  generate for(i = 1 ; i < 31; i = i + 1)
+  generate for(i = 1 ; i < REG_NUM; i = i + 1)
       begin
         always @(posedge clk)
           begin
