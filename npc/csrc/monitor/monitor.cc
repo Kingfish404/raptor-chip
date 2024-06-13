@@ -169,14 +169,21 @@ void init_monitor(int argc, char *argv[])
   }
   //  -b -n -d /Users/jinyu/Developer/c-project/ysyx-workbench/nemu/build/riscv32-nemu-interpreter-so -m /Users/jinyu/Developer/c-project/ysyx-workbench/npc/csrc/mem/mrom-data/build/mrom-data.bin /Users/jinyu/Developer/c-project/ysyx-workbench/am-kernels/benchmarks/microbench/build/microbench-riscv32e-ysyxsoc.bin
   int _argc = 9;
+  char arg1[10] = "-b";
+  char arg2[10] = "-n";
+  char arg3[10] = "-d";
+  char arg4[100] = "/Users/jinyu/Developer/c-project/ysyx-workbench/nemu/build/riscv32-nemu-interpreter-so";
+  char arg5[10] = "-m";
+  char arg6[100] = "/Users/jinyu/Developer/c-project/ysyx-workbench/npc/csrc/mem/mrom-data/build/mrom-data.bin";
+  char arg7[120] = "/Users/jinyu/Developer/c-project/ysyx-workbench/am-kernels/benchmarks/microbench/build/microbench-riscv32e-ysyxsoc.bin";
   char *argv[] = {
-      "-b",
-      "-n",
-      "-d",
-      "/Users/jinyu/Developer/c-project/ysyx-workbench/nemu/build/riscv32-nemu-interpreter-so",
-      "-m",
-      "/Users/jinyu/Developer/c-project/ysyx-workbench/npc/csrc/mem/mrom-data/build/mrom-data.bin",
-      "/Users/jinyu/Developer/c-project/ysyx-workbench/am-kernels/benchmarks/microbench/build/microbench-riscv32e-ysyxsoc.bin",
+      arg1,
+      arg2,
+      arg3,
+      arg4,
+      arg5,
+      arg6,
+      arg7,
   };
   parse_args(_argc, _argv);
 
