@@ -179,6 +179,7 @@ void init_monitor(int argc, char *argv[])
       "/Users/jinyu/Developer/c-project/ysyx-workbench/npc/csrc/mem/mrom-data/build/mrom-data.bin",
       "/Users/jinyu/Developer/c-project/ysyx-workbench/am-kernels/benchmarks/microbench/build/microbench-riscv32e-ysyxsoc.bin",
   };
+  char **_argv = new char *[_argc];
   parse_args(_argc, (char **)_argv);
 
   long img_size = load_img();
