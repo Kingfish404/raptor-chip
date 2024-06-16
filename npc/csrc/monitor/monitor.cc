@@ -4,7 +4,6 @@
 #include <getopt.h>
 #include <stdio.h>
 #include <string.h>
-#include <string>
 
 static const uint32_t img[] = {
     0x00108093, // 80000000: addi ra, ra, 1
