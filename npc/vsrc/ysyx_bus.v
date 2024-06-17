@@ -363,7 +363,7 @@ module ysyx_CLINT(
           if (ifsr_ready)
             begin
               case (araddr)
-                `ysyx_BUS_RTC_ADDR:
+                unique `ysyx_BUS_RTC_ADDR:
                   rdata_o <= mtime[31:0];
                 `ysyx_BUS_RTC_ADDR_UP:
                   rdata_o <= mtime[63:32];
