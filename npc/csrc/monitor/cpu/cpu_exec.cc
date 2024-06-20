@@ -217,7 +217,7 @@ void cpu_exec(uint64_t n)
     // Simulate the performance monitor unit
     perf_sample_per_cycle();
     cur_inst_cycle++;
-    if (cur_inst_cycle > 0x2fff)
+    if (cur_inst_cycle > 0xffff)
     {
       Log("Too many cycles for one instruction, maybe a bug.");
       npc.state = NPC_ABORT;
