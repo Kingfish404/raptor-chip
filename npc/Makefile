@@ -79,6 +79,15 @@ sim: $(BIN)
 	$(call git_commit, "sim RTL") # DO NOT REMOVE THIS LINE!!!
 	@$^
 
+AM_KERNEL = $(YSYX_HOME)/am-kernels
+
+AM_KERNEL:
+	git clone https://github.com/kingfish404/am-kernels $(YSYX_HOME)/am-kernels
+
+perf:
+	if [ ! -d $(AM_KERNEL) ]; then make AM_KERNEL; fi
+	make -s -C $(AM_KERNEL)/benchmarks/microbench/ ARCH=riscv32e-ysyxsoc NPCFLAGS='-b -n' mainargs=test run
+
 test:
 	echo $(CXXFLAGS)
 

@@ -41,7 +41,7 @@ float percentage(int a, int b)
 static void perf()
 {
   printf("======== Instruction Analysis ========\n");
-  Log(FMT_BLUE("#Inst: %lld, Cycle: %llu, IPC: %.3f"), pmu.instr_cnt, pmu.active_cycle, (1.0 * pmu.instr_cnt / pmu.active_cycle));
+  Log(FMT_BLUE("Cycle: %llu, #Inst: %lld, IPC: %.3f"), pmu.active_cycle, pmu.instr_cnt, (1.0 * pmu.instr_cnt / pmu.active_cycle));
   Log("IFU Fetch: %8lld, LSU Load: %8lld, EXU ALU: %lld",
       pmu.ifu_fetch_cnt, pmu.lsu_load_cnt, pmu.exu_alu_cnt);
   Log("LD  Inst: %8lld (%4.1f%%), ST Inst: %8lld, (%4.1f%%)",
