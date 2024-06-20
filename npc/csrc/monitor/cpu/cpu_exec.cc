@@ -219,7 +219,7 @@ void cpu_exec(uint64_t n)
     cur_inst_cycle++;
     if (cur_inst_cycle > 0xfffff)
     {
-      Log("Too many cycles for one instruction (%llx), maybe a bug.", cur_inst_cycle);
+      Log("Too many cycles for one instruction (0x%llx), maybe a bug.", cur_inst_cycle);
       npc.state = NPC_ABORT;
       break;
     }
