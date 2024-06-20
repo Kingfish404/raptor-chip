@@ -18,3 +18,21 @@ brew install verilator sdl2 sdl2_image sdl2_ttf flex
 apt-get install verilator libsdl2-dev flex
 apt-get install gcc-riscv64-linux-gnu
 ```
+
+## Architecture
+
+![](./npc/assets/npc-rv32e-ysyxsoc.svg)
+
+## Prepare
+
+```shell
+# debian/ubuntu
+sudo apt-get install libreadline-dev 
+sudo apt-get install libsdl2-dev libsdl2-image-dev libsdl2-ttf-dev
+sudo apt-get install llvm
+
+# macOS
+brew install readline
+brew install sdl2 sdl2_image sdl2_ttf
+brew install llvm
+```

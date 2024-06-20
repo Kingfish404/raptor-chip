@@ -2,7 +2,7 @@
 `include "ysyx_macro_dpi_c.v"
 
 module ysyx (
-  input clock, reset, 
+  input clock, reset,
 
   // AXI4 Slave
   input [1:0] io_slave_arburst,
@@ -129,10 +129,10 @@ module ysyx (
   wire lsu_wready;
 
   ysyx_PC pc_unit(
-    .clk(clock), .rst(reset), 
+    .clk(clock), .rst(reset),
     .exu_valid(wben),
 
-    .npc_wdata(npc_wdata), 
+    .npc_wdata(npc_wdata),
     .pc_o(pc)
   );
 
@@ -149,21 +149,29 @@ module ysyx (
   ysyx_BUS_ARBITER bus(
     .clk(clock), .rst(reset),
 
-    .io_master_arburst(io_master_arburst), .io_master_arsize(io_master_arsize), .io_master_arlen(io_master_arlen),
-    .io_master_arid(io_master_arid), .io_master_araddr(io_master_araddr), .io_master_arvalid(io_master_arvalid),
+    .io_master_arburst(io_master_arburst), .io_master_arsize(io_master_arsize),
+    .io_master_arlen(io_master_arlen),
+    .io_master_arid(io_master_arid), .io_master_araddr(io_master_araddr),
+    .io_master_arvalid(io_master_arvalid),
     .io_master_arready(io_master_arready),
 
-    .io_master_rid(io_master_rid), .io_master_rlast(io_master_rlast), .io_master_rdata(io_master_rdata),
-    .io_master_rresp(io_master_rresp), .io_master_rvalid(io_master_rvalid), .io_master_rready(io_master_rready),
-    
-    .io_master_awburst(io_master_awburst), .io_master_awsize(io_master_awsize), .io_master_awlen(io_master_awlen),
-    .io_master_awid(io_master_awid), .io_master_awaddr(io_master_awaddr), .io_master_awvalid(io_master_awvalid),
+    .io_master_rid(io_master_rid), .io_master_rlast(io_master_rlast),
+    .io_master_rdata(io_master_rdata),
+    .io_master_rresp(io_master_rresp), .io_master_rvalid(io_master_rvalid),
+    .io_master_rready(io_master_rready),
+
+    .io_master_awburst(io_master_awburst), .io_master_awsize(io_master_awsize),
+    .io_master_awlen(io_master_awlen),
+    .io_master_awid(io_master_awid), .io_master_awaddr(io_master_awaddr),
+    .io_master_awvalid(io_master_awvalid),
     .io_master_awready(io_master_awready),
 
-    .io_master_wlast(io_master_wlast), .io_master_wdata(io_master_wdata), .io_master_wstrb(io_master_wstrb),
+    .io_master_wlast(io_master_wlast), .io_master_wdata(io_master_wdata),
+    .io_master_wstrb(io_master_wstrb),
     .io_master_wvalid(io_master_wvalid), .io_master_wready(io_master_wready),
 
-    .io_master_bid(io_master_bid), .io_master_bresp(io_master_bresp), .io_master_bvalid(io_master_bvalid),
+    .io_master_bid(io_master_bid), .io_master_bresp(io_master_bresp),
+    .io_master_bvalid(io_master_bvalid),
     .io_master_bready(io_master_bready),
 
     .ifu_araddr(ifu_araddr_o), .ifu_arvalid(ifu_arvalid_o),
@@ -171,7 +179,7 @@ module ysyx (
 
     .lsu_araddr(lsu_araddr), .lsu_arvalid(lsu_arvalid), .lsu_rstrb(lsu_rstrb),
     .lsu_rdata_o(bus_lsu_rdata), .lsu_rvalid_o(lsu_rvalid),
-  
+
     .lsu_awaddr(lsu_awaddr), .lsu_awvalid(lsu_awvalid),
     .lsu_wdata(lsu_wdata), .lsu_wstrb(lsu_wstrb), .lsu_wvalid(lsu_wvalid),
     .lsu_wready_o(lsu_wready)
@@ -217,7 +225,7 @@ module ysyx (
 
     .prev_valid(idu_valid), .next_ready(ifu_ready),
     .valid_o(exu_valid), .ready_o(exu_ready),
-  
+
     .ren(ren), .wen(wen), .rwen(rwen),
     .rd(rd), .imm(imm),
     .op1(op1), .op2(op2), .op_j(op_j), .rwaddr(rwaddr),
@@ -225,10 +233,10 @@ module ysyx (
     .pc(pc_idu),
     .reg_wdata_o(reg_wdata),
     .npc_wdata_o(npc_wdata),
-    .rd_o(rd_exu), 
+    .rd_o(rd_exu),
 
     .rwen_o(rwen_exu), .wben_o(wben), .ebreak_o(),
-  
+
     // to lsu
     .ren_o(ren_exu), .wen_o(wen_exu),
     .lsu_avalid_o(lsu_avalid), .alu_op_o(alu_op_exu),
@@ -288,18 +296,19 @@ module ysyx_RegisterFile (
   input [DATA_WIDTH-1:0] wdata,
   input [ADDR_WIDTH-1:0] s1addr,
   input [ADDR_WIDTH-1:0] s2addr,
-  output reg [DATA_WIDTH-1:0] src1_o,
-  output reg [DATA_WIDTH-1:0] src2_o
+  output [DATA_WIDTH-1:0] src1_o,
+  output [DATA_WIDTH-1:0] src2_o
 );
-  parameter ADDR_WIDTH = 1;
-  parameter DATA_WIDTH = 1;
-  reg [DATA_WIDTH-1:0] rf [31:0];
+  parameter ADDR_WIDTH = 4;
+  parameter DATA_WIDTH = 32;
+  parameter REG_NUM = 16;
+  reg [DATA_WIDTH-1:0] rf[REG_NUM-1:0];
 
-  assign src1_o = rf[s1addr];
-  assign src2_o = rf[s2addr];
+  assign src1_o = rf[s1addr[3:0]];
+  assign src2_o = rf[s2addr[3:0]];
 
   genvar i;
-  generate for(i = 1 ; i < 31; i = i + 1)
+  generate for(i = 1 ; i < REG_NUM; i = i + 1)
       begin
         always @(posedge clk)
           begin
@@ -309,7 +318,7 @@ module ysyx_RegisterFile (
               end
             else if (reg_write_en && exu_valid)
               begin
-                rf[waddr] <= wdata;
+                rf[waddr[3:0]] <= wdata;
               end
           end
       end

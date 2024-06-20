@@ -11,13 +11,13 @@ module ysyx_IDU (
   input [31:0] inst,
   input [BIT_W-1:0] reg_rdata1, reg_rdata2,
   input [BIT_W-1:0] pc,
-  output reg rwen_o, en_j_o, ren_o, wen_o,
-  output reg [BIT_W-1:0] op1_o, op2_o, op_j_o, rwaddr_o,
-  output reg [31:0] imm_o,
-  output reg [4:0] rs1_o, rs2_o, rd_o,
-  output reg [3:0] alu_op_o,
-  output reg [6:0] opcode_o,
-  output reg [BIT_W-1:0] pc_o
+  output rwen_o, en_j_o, ren_o, wen_o,
+  output [BIT_W-1:0] op1_o, op2_o, op_j_o, rwaddr_o,
+  output [31:0] imm_o,
+  output [4:0] rs1_o, rs2_o, rd_o,
+  output [3:0] alu_op_o,
+  output [6:0] opcode_o,
+  output [BIT_W-1:0] pc_o
 );
   parameter BIT_W = `ysyx_W_WIDTH;
 
@@ -55,7 +55,6 @@ module ysyx_IDU (
     rs1_o = rs1; rs2_o = rs2; rd_o = 0;
     imm_o = 0;
     op1_o = 0; op2_o = 0; op_j_o = 0; rwaddr_o = 0;
-    if (valid_o) begin
       case (opcode_o)
         `ysyx_OP_LUI:     begin `ysyx_U_TYPE(0,  `ysyx_ALU_OP_ADD);                                       end
         `ysyx_OP_AUIPC:   begin `ysyx_U_TYPE(pc, `ysyx_ALU_OP_ADD);                                       end
@@ -67,11 +66,7 @@ module ysyx_IDU (
         `ysyx_OP_S_TYPE:  begin `ysyx_S_TYPE(reg_rdata1, {1'b0, funct3}, reg_rdata2); op_j_o = reg_rdata1; rwaddr_o = reg_rdata1 + imm_o; wen_o = 1; end
         `ysyx_OP_R_TYPE:  begin `ysyx_R_TYPE(reg_rdata1, {funct7[5], funct3}, reg_rdata2);                end
         `ysyx_OP_SYSTEM:  begin `ysyx_I_SYS_TYPE(reg_rdata1, {1'b0, funct3}, 0)                           end
-        default: begin
-          $display("Illegal instruction: %h at %h", inst_idu, pc);
-          `ysyx_DPI_C_npc_illegal_inst
-        end
+        default:          begin if (valid_o) begin `ysyx_DPI_C_npc_illegal_inst end                       end
       endcase
-    end
   end
 endmodule // ysyx_IDU
