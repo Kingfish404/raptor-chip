@@ -42,17 +42,17 @@ static void perf()
 {
   printf("======== Instruction Analysis ========\n");
   Log(FMT_BLUE("#Inst: %lld, Cycle: %llu, IPC: %.3f"), pmu.instr_cnt, pmu.active_cycle, (1.0 * pmu.instr_cnt / pmu.active_cycle));
-  Log(FMT_BLUE("IFU Fetch: %8lld, LSU Load: %8lld, EXU ALU: %lld"),
+  Log(("IFU Fetch: %8lld, LSU Load: %8lld, EXU ALU: %lld"),
       pmu.ifu_fetch_cnt, pmu.lsu_load_cnt, pmu.exu_alu_cnt);
-  Log(FMT_BLUE("LD  Inst: %8lld (%4.1f%%), ST Inst: %8lld, (%4.1f%%)"),
+  Log(("LD  Inst: %8lld (%4.1f%%), ST Inst: %8lld, (%4.1f%%)"),
       pmu.ld_inst_cnt, percentage(pmu.ld_inst_cnt, pmu.instr_cnt),
       pmu.st_inst_cnt, percentage(pmu.st_inst_cnt, pmu.instr_cnt));
-  Log(FMT_BLUE("ALU Inst: %8lld (%4.1f%%), BR Inst: %8lld, (%4.1f%%)"),
+  Log(("ALU Inst: %8lld (%4.1f%%), BR Inst: %8lld, (%4.1f%%)"),
       pmu.alu_inst_cnt, percentage(pmu.alu_inst_cnt, pmu.instr_cnt),
       pmu.b_inst_cnt, percentage(pmu.b_inst_cnt, pmu.instr_cnt));
-  Log(FMT_BLUE("CSR Inst: %8lld (%4.1f%%)"),
+  Log(("CSR Inst: %8lld (%4.1f%%)"),
       pmu.csr_inst_cnt, percentage(pmu.csr_inst_cnt, pmu.instr_cnt));
-  Log(FMT_BLUE("Oth Inst: %8lld (%4.1f%%)"),
+  Log(("Oth Inst: %8lld (%4.1f%%)"),
       pmu.other_inst_cnt, percentage(pmu.other_inst_cnt, pmu.instr_cnt));
   printf("======== TOP DOWN Analysis ========\n");
   Log(FMT_BLUE("IFU Stall: %8lld (%4.1f%%), LSU Stall: %8lld (%4.1f%%)"),
@@ -133,11 +133,11 @@ static void statistic()
   perf();
   double time_s = g_timer / 1e6;
   double frequency = pmu.active_cycle / time_s;
-  Log(FMT_BLUE(
+  Log((
           "time: %d (ns), %d (ms)"),
       g_timer, (int)(g_timer / 1e3));
   Log(FMT_BLUE("Simulate Freq: %.3f Hz, %.3d MHz"), frequency, (int)(frequency / 1e3));
-  Log(FMT_BLUE("Inst: %.3f Inst/s, %.1f KInst/s"),
+  Log(FMT_BLUE("Inst: %.1f Inst/s, %.1f KInst/s"),
       pmu.instr_cnt / time_s, pmu.instr_cnt / time_s / 1e3);
   Log("%s at pc: " FMT_WORD_NO_PREFIX ", inst: " FMT_WORD_NO_PREFIX,
       ((*npc.ret) == 0 && npc.state != NPC_ABORT
