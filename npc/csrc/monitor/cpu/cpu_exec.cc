@@ -59,7 +59,7 @@ static void perf()
       pmu.ifu_stall_cycle, percentage(pmu.ifu_stall_cycle, pmu.active_cycle),
       pmu.lsu_stall_cycle, percentage(pmu.lsu_stall_cycle, pmu.active_cycle));
   // show average IF cycle and LS cycle
-  Log(FMT_BLUE("IFU Avg Cycle: %2.3f, LSU Avg Cycle: %2.3f"),
+  Log(FMT_BLUE("IFU Avg Cycle: %2.1f, LSU Avg Cycle: %2.1f"),
       (1.0 * pmu.ifu_stall_cycle + 1) / pmu.ifu_fetch_cnt,
       (1.0 * pmu.lsu_stall_cycle + 1) / pmu.lsu_load_cnt);
   assert(
@@ -135,7 +135,7 @@ static void statistic()
   double frequency = pmu.active_cycle / time_s;
   Log("time: %d (ns), %d (ms)", g_timer, (int)(g_timer / 1e3));
   Log(FMT_BLUE("Simulate Freq: %.3f Hz, %.3d MHz"), frequency, (int)(frequency / 1e3));
-  Log(FMT_BLUE("Inst: %.3f Inst/s, %.1f KInst/s"),
+  Log(FMT_BLUE("Inst: %9.1f Inst/s, %6.1f KInst/s"),
       pmu.instr_cnt / time_s, pmu.instr_cnt / time_s / 1e3);
   Log("%s at pc: " FMT_WORD_NO_PREFIX ", inst: " FMT_WORD_NO_PREFIX,
       ((*npc.ret) == 0 && npc.state != NPC_ABORT
