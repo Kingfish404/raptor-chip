@@ -45,7 +45,6 @@ static void perf()
   Log(FMT_BLUE("Cycle: %llu, #Inst: %lld, IPC: %.3f"), pmu.active_cycle, pmu.instr_cnt, (1.0 * pmu.instr_cnt / pmu.active_cycle));
   printf("| %8s, %% | %8s, %% | %8s, %% | %6s, %% | %6s, %% | %6s, %% | %6s, %% | %3s, %% | %5s, %% |\n",
          "IFU", "LSU", "EXU", "LD", "ST", "ALU", "BR", "CSR", "OTH");
-  printf("| -------- | -------- | -------- | ------ | ------ | ------ | ------ | --- | ----- |\n");
   printf("| %8lld,%2.0f | %8lld,%2.0f | %8lld,%2.0f | %6lld,%2.0f | %6lld,%2.0f | %6lld,%2.0f | %6lld,%2.0f | %3lld,%2.0f | %5lld,%2.0f |\n",
          pmu.ifu_stall_cycle, percentage(pmu.ifu_stall_cycle, pmu.active_cycle),
          pmu.lsu_stall_cycle, percentage(pmu.lsu_stall_cycle, pmu.active_cycle),
