@@ -55,20 +55,15 @@ static void perf()
          pmu.b_inst_cnt, percentage(pmu.b_inst_cnt, pmu.instr_cnt),
          pmu.csr_inst_cnt, percentage(pmu.csr_inst_cnt, pmu.instr_cnt),
          pmu.other_inst_cnt, percentage(pmu.other_inst_cnt, pmu.instr_cnt));
-
-  Log("IFU Fetch: %8lld, LSU Load: %8lld, EXU ALU: %lld",
-      pmu.ifu_fetch_cnt, pmu.lsu_load_cnt, pmu.exu_alu_cnt);
-  Log("LD  Inst: %8lld (%4.1f), ST Inst: %8lld, (%4.1f)",
-      pmu.ld_inst_cnt, percentage(pmu.ld_inst_cnt, pmu.instr_cnt),
-      pmu.st_inst_cnt, percentage(pmu.st_inst_cnt, pmu.instr_cnt));
-  Log("ALU Inst: %8lld (%4.1f), BR Inst: %8lld, (%4.1f)",
-      pmu.alu_inst_cnt, percentage(pmu.alu_inst_cnt, pmu.instr_cnt),
-      pmu.b_inst_cnt, percentage(pmu.b_inst_cnt, pmu.instr_cnt));
-  Log("CSR Inst: %8lld (%4.1f)",
-      pmu.csr_inst_cnt, percentage(pmu.csr_inst_cnt, pmu.instr_cnt));
-  Log("Oth Inst: %8lld (%4.1f)",
-      pmu.other_inst_cnt, percentage(pmu.other_inst_cnt, pmu.instr_cnt));
   printf("======== TOP DOWN Analysis ========\n");
+  printf("| %8s, %% | %8s, %% | %8s, %% | %8s, %% | %8s, %% |\n",
+         "IFU", "LSU", "EXU", "LD", "ST");
+  printf("| %8lld,%2.0f | %8lld,%2.0f | %8lld,%2.0f | %8lld,%2.0f | %8lld,%2.0f |\n",
+         pmu.ifu_stall_cycle, percentage(pmu.ifu_stall_cycle, pmu.active_cycle),
+         pmu.lsu_stall_cycle, percentage(pmu.lsu_stall_cycle, pmu.active_cycle),
+         pmu.exu_alu_cnt, percentage(pmu.exu_alu_cnt, pmu.instr_cnt),
+         pmu.ld_inst_cnt, percentage(pmu.ld_inst_cnt, pmu.instr_cnt),
+         pmu.st_inst_cnt, percentage(pmu.st_inst_cnt, pmu.instr_cnt));
   Log(FMT_BLUE("IFU Stall: %8lld (%4.1f), LSU Stall: %8lld (%4.1f)"),
       pmu.ifu_stall_cycle, percentage(pmu.ifu_stall_cycle, pmu.active_cycle),
       pmu.lsu_stall_cycle, percentage(pmu.lsu_stall_cycle, pmu.active_cycle));
