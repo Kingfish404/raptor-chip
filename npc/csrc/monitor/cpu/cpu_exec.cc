@@ -48,7 +48,7 @@ static void perf()
          pmu.ifu_fetch_cnt, pmu.lsu_load_cnt, pmu.exu_alu_cnt,
          pmu.ld_inst_cnt, pmu.st_inst_cnt, pmu.alu_inst_cnt,
          pmu.b_inst_cnt, pmu.csr_inst_cnt, pmu.other_inst_cnt);
-  printf("| %7lld, %4.1f%% |  %7lld, %4.1f%% |  %7lld, %4.1f%% |  %7lld, %4.1f%% |  %7lld, %4.1f%% |  %7lld, %4.1f%% |  %7lld, %4.1f%% |  %7lld, %4.1f%% |  %7lld, %4.1f%% |"
+  printf("| %7lld, %4.1f%% |  %7lld, %4.1f%% |  %7lld, %4.1f%% |  %7lld, %4.1f%% |  %7lld, %4.1f%% |  %7lld, %4.1f%% |  %7lld, %4.1f%% |  %7lld, %4.1f%% |  %7lld, %4.1f%% |",
          pmu.ifu_stall_cycle, percentage(pmu.ifu_stall_cycle, pmu.active_cycle),
          pmu.lsu_stall_cycle, percentage(pmu.lsu_stall_cycle, pmu.active_cycle),
          (pmu.ifu_stall_cycle + 1) / pmu.ifu_fetch_cnt,
