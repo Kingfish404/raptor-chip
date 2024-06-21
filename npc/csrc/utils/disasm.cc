@@ -13,6 +13,9 @@
  * See the Mulan PSL v2 for more details.
  ***************************************************************************************/
 
+#include <common.h>
+
+#ifdef CONFIG_ITRACE
 #if defined(__GNUC__) && !defined(__clang__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
@@ -45,9 +48,11 @@ using namespace llvm;
 static llvm::MCDisassembler *gDisassembler = nullptr;
 static llvm::MCSubtargetInfo *gSTI = nullptr;
 static llvm::MCInstPrinter *gIP = nullptr;
+#endif
 
 void init_disasm(const char *triple)
 {
+#ifdef CONFIG_ITRACE
   llvm::InitializeAllTargetInfos();
   llvm::InitializeAllTargetMCs();
   llvm::InitializeAllAsmParsers();
@@ -93,10 +98,12 @@ void init_disasm(const char *triple)
   gIP->setPrintBranchImmAsAddress(true);
   if (isa == "riscv32" || isa == "riscv64")
     gIP->applyTargetSpecificCLOption("no-aliases");
+#endif
 }
 
 void disassemble(char *str, int size, uint64_t pc, uint8_t *code, int nbyte)
 {
+#ifdef CONFIG_ITRACE
   MCInst inst;
   llvm::ArrayRef<uint8_t> arr(code, nbyte);
   uint64_t dummy_size = 0;
@@ -110,4 +117,5 @@ void disassemble(char *str, int size, uint64_t pc, uint8_t *code, int nbyte)
   const char *p = s.c_str() + skip;
   assert((int)s.length() - skip < size);
   strcpy(str, p);
+#endif
 }

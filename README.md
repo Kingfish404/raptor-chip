@@ -8,6 +8,8 @@ bash init.sh subproject-name
 
 [lecture note]: https://ysyx.oscc.cc/docs/
 
+设计的处理器暂称为 **New Processor Core (NPC)** , 采用了`RISC-V`指令集架构, 使用`Verilog`语言进行描述.
+
 ## Preparation
 
 ```shell
@@ -17,6 +19,10 @@ brew install verilator sdl2 sdl2_image sdl2_ttf flex
 # debian/ubuntu
 apt-get install verilator libsdl2-dev flex
 apt-get install gcc-riscv64-linux-gnu
+
+# clone mono repository
+git clone https://github.com/Kingfish404/ysyxSoC
+git clone https://github.com/NJU-ProjectN/nvboard
 ```
 
 ## Architecture
