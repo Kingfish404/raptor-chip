@@ -15,12 +15,12 @@
 #include <stdint.h>
 #include <generated/autoconf.h>
 
+#ifdef CONFIG_ITRACE
 #if defined(__GNUC__) && !defined(__clang__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
 #endif
 
-#ifdef CONFIG_ITRACE
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCDisassembler/MCDisassembler.h"
