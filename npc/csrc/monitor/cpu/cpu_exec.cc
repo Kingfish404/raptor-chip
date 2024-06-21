@@ -42,11 +42,12 @@ static void perf()
 {
   printf("======== Instruction Analysis ========\n");
   Log(FMT_BLUE("Cycle: %llu, #Inst: %lld, IPC: %.3f"), pmu.active_cycle, pmu.instr_cnt, (1.0 * pmu.instr_cnt / pmu.active_cycle));
-  printf("| %-10s | %-10s | %-10s | %-10s | %-10s | %-10s |\n",
-         "IFU Fetch", "LSU Load", "EXU ALU", "LD Inst", "ST Inst", "ALU Inst");
-  printf("| %-10lld | %-10lld | %-10lld | %-10lld | %-10lld | %-10lld |\n",
+  printf("| %8s | %8s | %8s | %8s | %8s | %8s | %8s | %8s | %8s |\n",
+         "IFU", "LSU", "EXU", "LD", "ST", "ALU", "BR", "CSR", "OTH");
+  printf("| %8lld | %8lld | %8lld | %8lld | %8lld | %8lld | %8lld | %8lld | %8lld |\n",
          pmu.ifu_fetch_cnt, pmu.lsu_load_cnt, pmu.exu_alu_cnt,
-         pmu.ld_inst_cnt, pmu.st_inst_cnt, pmu.alu_inst_cnt);
+         pmu.ld_inst_cnt, pmu.st_inst_cnt, pmu.alu_inst_cnt,
+         pmu.b_inst_cnt, pmu.csr_inst_cnt, pmu.other_inst_cnt);
   Log("IFU Fetch: %8lld, LSU Load: %8lld, EXU ALU: %lld",
       pmu.ifu_fetch_cnt, pmu.lsu_load_cnt, pmu.exu_alu_cnt);
   Log("LD  Inst: %8lld (%4.1f%%), ST Inst: %8lld, (%4.1f%%)",
