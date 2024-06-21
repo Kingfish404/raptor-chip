@@ -35,7 +35,8 @@ static uint64_t iringhead = 0;
 
 float percentage(int a, int b)
 {
-  return (b == 0) ? 0 : (100.0 * a / b);
+  float ret = (b == 0) ? 0 : (100.0 * a / b);
+  return ret == 100.0 ? 99.0 : ret;
 }
 
 static void perf()
