@@ -12,7 +12,6 @@
  *
  * See the Mulan PSL v2 for more details.
  ***************************************************************************************/
-#include <common.h>
 
 #if defined(__GNUC__) && !defined(__clang__)
 #pragma GCC diagnostic push
