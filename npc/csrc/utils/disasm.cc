@@ -12,6 +12,7 @@
  *
  * See the Mulan PSL v2 for more details.
  ***************************************************************************************/
+#pragma GCC diagnostic ignored "-Werror"
 
 #include <common.h>
 
