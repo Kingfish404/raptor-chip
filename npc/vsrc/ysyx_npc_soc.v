@@ -306,26 +306,5 @@ module ysyx_MEM_SRAM (
         end
       endcase
     end
-
-    // mem_rdata_buf[0] <= 0;
-    // if (arvalid & !rvalid & rready) begin
-    //   if (ifsr_ready) begin
-    //     pmem_read(araddr, mem_rdata_buf);
-    //     rdata_o  <= mem_rdata_buf;
-    //     rvalid <= 1;
-    //     arready_o <= 1;
-    //   end
-    // end else begin
-    //   rvalid <= 0;
-    //   rdata_o  <= 0;
-    //   arready_o <= 0;
-    // end
-    // if (wvalid & !wready_o & bready) begin
-    //   if (ifsr_ready) begin
-    //     pmem_write(awaddr, wdata, wstrb);
-    //     wready_o <= 1;
-    //   end
-    // end else begin
-    //   wready_o <= 0;
   end
 endmodule  //ysyx_MEM_SRAM
