@@ -222,7 +222,7 @@ module ysyx_MEM_SRAM_UART (
           if (is_writing) begin
             if (awaddr == `ysyx_BUS_SERIAL_PORT) begin
               $write("%c", wdata[7:0]);
-              `ysyx_DPI_C_npc_difftest_skip_ref();
+              `ysyx_DPI_C_npc_difftest_skip_ref;
             end else if ((awaddr & 'b100) == 0) begin
               `ysyx_DPI_C_pmem_write(awaddr, wdata[31:0], {{4'b0}, {wstrb[3:0]}});
             end else begin
