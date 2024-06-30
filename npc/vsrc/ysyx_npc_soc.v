@@ -243,7 +243,7 @@ module ysyx_MEM_SRAM (
   reg [19:0] lfsr = 101;
   wire ifsr_ready = `ysyx_IFSR_ENABLE ? lfsr[19] : 1;
 
-  assign awready_o = (state == 1 & arvalid);
+  assign arready_o = (state == 1 & arvalid);
   assign rdata_o   = (mem_rdata_buf);
   assign rvalid_o  = (state == 2);
 
