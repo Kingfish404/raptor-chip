@@ -291,9 +291,10 @@ module ysyx_MEM_SRAM (
         end
         'b11: begin
           // wait for rready
-          if (rready | (is_writing & bready)) begin
+          if (rready) begin
             state <= 0;
-            is_writing <= 0;
+          end else if (is_writing) begin
+            state <= 'b100;
           end
         end
         'b100: begin
