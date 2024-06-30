@@ -235,9 +235,11 @@ module ysyx_MEM_SRAM (
     output reg bvalid_o,
     input bready
 );
-  parameter ADDR_W = 32, DATA_W = 32;
-  reg [31:0] mem_rdata_buf[0:1];
-  reg rvalid;
+  parameter integer ADDR_W = 32, DATA_W = 32;
+
+  reg [31:0] mem_rdata_buf;
+  reg [1:0] state = 0;
+
   reg [19:0] lfsr = 101;
   wire ifsr_ready = `ysyx_IFSR_ENABLE ? lfsr[19] : 1;
 
@@ -247,26 +249,42 @@ module ysyx_MEM_SRAM (
     lfsr <= {lfsr[18:0], lfsr[19] ^ lfsr[18]};
   end
   always @(posedge clk) begin
-    mem_rdata_buf[0] <= 0;
-    if (arvalid & !rvalid & rready) begin
-      if (ifsr_ready) begin
-        pmem_read(araddr, mem_rdata_buf[0]);
-        rdata_o  <= mem_rdata_buf[0];
-        rvalid <= 1;
+    case (state)
+      0: begin
+        if (arvalid & ifsr_ready) begin
+          state <= 1;
+          arready_o <= 1;
+          pmem_read(araddr, mem_rdata_buf);
+        end
+      end
+      1: begin
+        rdata_o  <= mem_rdata_buf;
+        rvalid_o <= 1;
         arready_o <= 1;
+        state <= 0;
       end
-    end else begin
-      rvalid <= 0;
-      rdata_o  <= 0;
-      arready_o <= 0;
-    end
-    if (wvalid & !wready_o & bready) begin
-      if (ifsr_ready) begin
-        pmem_write(awaddr, wdata, wstrb);
-        wready_o <= 1;
-      end
-    end else begin
-      wready_o <= 0;
-    end
+    endcase
+
+    // mem_rdata_buf[0] <= 0;
+    // if (arvalid & !rvalid & rready) begin
+    //   if (ifsr_ready) begin
+    //     pmem_read(araddr, mem_rdata_buf);
+    //     rdata_o  <= mem_rdata_buf;
+    //     rvalid <= 1;
+    //     arready_o <= 1;
+    //   end
+    // end else begin
+    //   rvalid <= 0;
+    //   rdata_o  <= 0;
+    //   arready_o <= 0;
+    // end
+    // if (wvalid & !wready_o & bready) begin
+    //   if (ifsr_ready) begin
+    //     pmem_write(awaddr, wdata, wstrb);
+    //     wready_o <= 1;
+    //   end
+    // end else begin
+    //   wready_o <= 0;
+    // end
   end
 endmodule  //ysyx_MEM_SRAM
