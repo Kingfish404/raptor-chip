@@ -249,7 +249,7 @@ module ysyx_MEM_SRAM (
     mem_rdata_buf[0] <= 0;
     if (arvalid & !rvalid_o & rready) begin
       if (ifsr_ready) begin
-        pmem_read(araddr, mem_rdata_buf[0]);
+        // pmem_read(araddr, mem_rdata_buf[0]);
         rdata_o  <= mem_rdata_buf[0];
         rvalid_o <= 1;
       end
@@ -259,7 +259,7 @@ module ysyx_MEM_SRAM (
     end
     if (wvalid & !wready_o & bready) begin
       if (ifsr_ready) begin
-        pmem_write(awaddr, wdata, wstrb);
+        // pmem_write(awaddr, wdata, wstrb);
         wready_o <= 1;
       end
     end else begin
