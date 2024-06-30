@@ -267,7 +267,7 @@ module ysyx_MEM_SRAM (
             state <= 1;
           end
           if (arvalid) begin
-            if (araddr & 'h4 == 0) begin
+            if ((araddr & 'h4) == 0) begin
               pmem_read(araddr, mem_rdata_buf[0]);
             end else begin
               pmem_read(araddr, mem_rdata_buf[1]);
