@@ -245,7 +245,7 @@ module ysyx_MEM_SRAM (
 
   assign arready_o = (state == 1 & arvalid);
   assign rdata_o[31:0]   = mem_rdata_buf[0];
-  assign rdata_o[32:63]  = mem_rdata_buf[1];
+  assign rdata_o[63:32]  = mem_rdata_buf[1];
   assign rvalid_o  = (state == 2);
 
   always @(posedge clk) begin
