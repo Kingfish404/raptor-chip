@@ -80,6 +80,10 @@ static void perf()
 
 static void perf_sample_per_cycle()
 {
+  if (top->reset)
+  {
+    return;
+  }
   pmu.active_cycle++;
   bool ifu_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__ifu_valid));
   bool lsu_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__exu__DOT__lsu_valid));
@@ -109,6 +113,10 @@ static void perf_sample_per_cycle()
 
 static void perf_sample_per_inst()
 {
+  if (top->reset)
+  {
+    return;
+  }
   pmu.instr_cnt++;
   switch (*(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__exu__DOT__opcode_exu)))
   {
@@ -223,7 +231,7 @@ void cpu_exec(uint64_t n)
     cur_inst_cycle++;
     if (cur_inst_cycle > 0xfffff)
     {
-      Log("Too many cycles for one instruction (0x%llx), maybe a bug.", cur_inst_cycle);
+      Log(FMT_RED("Too many cycles for one instruction (0x%llx cycle), maybe a bug."), cur_inst_cycle);
       npc.state = NPC_ABORT;
       break;
     }
