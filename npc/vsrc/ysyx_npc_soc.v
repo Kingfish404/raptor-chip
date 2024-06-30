@@ -210,9 +210,9 @@ module ysyx_MEM_SRAM_UART (
           end
           if (arvalid) begin
             if ((araddr & 'b100) == 0) begin
-              `ysyx_DPI_C_pmem_read(araddr, mem_rdata_buf[0]);
+              `ysyx_DPI_C_pmem_read((awaddr & ~'h3), mem_rdata_buf[0]);
             end else begin
-              `ysyx_DPI_C_pmem_read(araddr, mem_rdata_buf[1]);
+              `ysyx_DPI_C_pmem_read((awaddr & ~'h3), mem_rdata_buf[1]);
             end
           end
           if (awvalid) begin
