@@ -239,6 +239,7 @@ module ysyx_MEM_SRAM (
 
   reg [31:0] mem_rdata_buf[2];
   reg [1:0] state = 0;
+  reg is_writing = 0;
 
   reg [19:0] lfsr = 101;
   wire ifsr_ready = `ysyx_IFSR_ENABLE ? lfsr[19] : 1;
@@ -256,10 +257,15 @@ module ysyx_MEM_SRAM (
       case (state)
         0: begin
           // wait for arvalid
-          if (arvalid) begin
+          if (arvalid | awvalid) begin
             state <= 1;
+          end
+          if (arvalid) begin
             pmem_read(araddr & ~'h4, mem_rdata_buf[0]);
             pmem_read(araddr & ~'h4 + 4, mem_rdata_buf[1]);
+          end
+          if (awvalid) begin
+            is_writing <= 1;
           end
         end
         1: begin
@@ -267,13 +273,21 @@ module ysyx_MEM_SRAM (
           state <= 2;
         end
         2: begin
-          // send rready
-          state <= 3;
+          // send rready or wait for wlast
+          if (is_writing) begin
+            pmem_write(awaddr, wdata, wstrb);
+            if (wlast) begin
+              state <= 3;
+            end
+          end else begin
+            istate <= 3;
+          end
         end
         3: begin
           // wait for rready
-          if (rready) begin
+          if (rready | (is_writing & bready)) begin
             state <= 0;
+            is_writing <= 0;
           end
         end
       endcase
