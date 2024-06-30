@@ -260,7 +260,7 @@ module ysyx_MEM_SRAM (
   always @(posedge clk) begin
     if (ifsr_ready) begin
       case (state)
-        'b0: begin
+        'b00: begin
           // wait for arvalid
           if (arvalid | awvalid) begin
             state <= 1;
@@ -273,11 +273,11 @@ module ysyx_MEM_SRAM (
             is_writing <= 1;
           end
         end
-        1: begin
+        'b01: begin
           // send rvalid
           state <= 2;
         end
-        2: begin
+        'b10: begin
           // send rready or wait for wlast
           if (is_writing) begin
             pmem_write(awaddr, wdata[31:0], wstrb);
@@ -288,7 +288,7 @@ module ysyx_MEM_SRAM (
             state <= 3;
           end
         end
-        3: begin
+        'b11: begin
           // wait for rready
           if (rready | (is_writing & bready)) begin
             state <= 0;
