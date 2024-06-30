@@ -285,6 +285,5 @@ module ysyx_MEM_SRAM (
     //   end
     // end else begin
     //   wready_o <= 0;
-    // end
   end
 endmodule  //ysyx_MEM_SRAM
