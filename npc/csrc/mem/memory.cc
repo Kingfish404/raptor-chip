@@ -98,6 +98,7 @@ extern "C" void sdram_write(uint32_t addr, uint8_t data)
 
 extern "C" void pmem_read(word_t raddr, word_t *data)
 {
+    Log("raddr: " FMT_WORD_NO_PREFIX, raddr);
 #ifdef CONFIG_SOFT_MMIO
     if (raddr == RTC_ADDR + 4)
     {
