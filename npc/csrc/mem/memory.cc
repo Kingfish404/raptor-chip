@@ -129,8 +129,8 @@ extern "C" void pmem_read(word_t raddr, word_t *data)
 
 extern "C" void pmem_write(word_t waddr, word_t wdata, char wmask)
 {
-    Log("waddr: 0x%08x, wdata: 0x%08x, wmask = 0x%02x",
-        waddr, wdata, wmask & 0xff);
+    // Log("waddr: 0x%08x, wdata: 0x%08x, wmask = 0x%02x",
+    //     waddr, wdata, wmask & 0xff);
 #ifdef CONFIG_SOFT_MMIO
     // SERIAL_MMIO: hex "MMIO address of the serial controller"
     if (waddr == SERIAL_PORT)
