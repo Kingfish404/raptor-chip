@@ -6,8 +6,8 @@
 #include <string.h>
 
 static const uint32_t img[] = {
-    0x00108093, // 80000000: addi ra, ra, 1
     0b00000000000100000000000001110011,
+    0x00108093, // 80000000: addi ra, ra, 1
     0x00108093, // 80000004: addi ra, ra, 1
     0x00108093, // 80000008: addi ra, ra, 1
     0x00108093, // 8000000c: addi ra, ra, 1
