@@ -231,7 +231,7 @@ module ysyx_MEM_SRAM_UART (
               `ysyx_DPI_C_npc_difftest_skip_ref;
             end else begin
               `ysyx_DPI_C_pmem_write(awaddr, wdata[31:0],
-                                     (awaddr[2:0] & b'100) == 0 ? wstrb : wstrb >> 4);
+                                     (awaddr[2:0] & 'b100) == 0 ? wstrb : wstrb >> 4);
             end
             if (wlast) begin
               state <= 3;
