@@ -236,7 +236,6 @@ module ysyx_MEM_SRAM (
     input bready
 );
   parameter ADDR_W = 32, DATA_W = 32;
-  assign arready_o = arvalid;
 
   reg [31:0] mem_rdata_buf[0:1];
   reg [19:0] lfsr = 101;
@@ -251,10 +250,12 @@ module ysyx_MEM_SRAM (
         pmem_read(araddr, mem_rdata_buf[0]);
         rdata_o  <= mem_rdata_buf[0];
         rvalid_o <= 1;
+        arready_o <= 1;
       end
     end else begin
       rvalid_o <= 0;
       rdata_o  <= 0;
+      arready_o <= 0;
     end
     if (wvalid & !wready_o & bready) begin
       if (ifsr_ready) begin
