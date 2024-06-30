@@ -301,6 +301,7 @@ module ysyx_MEM_SRAM (
           // wait for bready
           if (bready) begin
             state <= 0;
+            is_writing <= 0;
           end
         end
       endcase
