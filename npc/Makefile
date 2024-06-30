@@ -24,11 +24,11 @@ endif
 BUILD_DIR = ./build
 OBJ_DIR = $(BUILD_DIR)/obj_dir
 BIN = $(BUILD_DIR)/$(VTARGET)
-SOC_HOME = $(abspath ./../ysyxSOC)
+SOC_HOME = $(abspath ./../ysyxSoC)
 INC_PATH ?= $(abspath ./include) $(abspath ./vsrc/include) \
 	$(abspath $(SOC_HOME)/perip/uart16550/rtl) $(abspath $(SOC_HOME)/perip/spi/rtl)
 VERILATOR_FLAG =--prof-c --prof-cfuncs --prof-exec --autoflush --timescale "1ns/1ns" --no-timing
-CXXFLAGS = -Wall -Werror \
+CXXFLAGS = -Wall\
 	-Wno-bool-operation -Wno-implicit-fallthrough -Wno-macro-redefined \
 	-Wno-unused-variable \
 	$(call remove_quote,$(CONFIG_CC_OPT))
@@ -52,8 +52,9 @@ $(NPC_HOME)/csrc/mem/mrom-data/build/mrom-data.bin:
 
 all: $(BIN)
 
-# rules for NVBoard
+ifeq ($(CONFIG_NVBoard),y) # rules for NVBoard
 include $(NVBOARD_HOME)/scripts/nvboard.mk
+endif
 
 INCFLAGS = $(addprefix -I, $(INC_PATH))
 CXXFLAGS += $(INCFLAGS) -DTOP_NAME="\"V$(VTARGET)\"" $(SOC_DEFINE) \
