@@ -130,7 +130,7 @@ extern "C" void pmem_read(word_t raddr, word_t *data)
 extern "C" void pmem_write(word_t waddr, word_t wdata, char wmask)
 {
     Log("waddr: 0x%08x, wdata: 0x%08x, wmask = 0x%02x",
-        waddr, wdata, wmask);
+        waddr, wdata, wmask & 0xff);
 #ifdef CONFIG_SOFT_MMIO
     // SERIAL_MMIO: hex "MMIO address of the serial controller"
     if (waddr == SERIAL_PORT)
@@ -143,7 +143,7 @@ extern "C" void pmem_write(word_t waddr, word_t wdata, char wmask)
     if (waddr < MBASE || waddr > MBASE + MSIZE)
     {
         Log("Invalid write: addr = " FMT_WORD ", data = " FMT_WORD ", mask = %02x",
-            waddr, wdata, wmask);
+            waddr, wdata, wmask & 0xff);
         npc_abort();
         return;
     }
@@ -163,7 +163,7 @@ extern "C" void pmem_write(word_t waddr, word_t wdata, char wmask)
     //     break;
     default:
         Log(FMT_RED("Invalid write: addr = " FMT_WORD ", data = " FMT_WORD ", mask = %02x"),
-            waddr, wdata, wmask);
+            waddr, wdata, wmask & 0xff);
         break;
     }
 }
