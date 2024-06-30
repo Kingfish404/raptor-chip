@@ -1,4 +1,5 @@
 `include "ysyx_macro.v"
+`include "ysyx_macro_soc.v"
 `include "ysyx_macro_dpi_c.v"
 
 module ysyx (
@@ -76,26 +77,27 @@ module ysyx (
 
   input io_interrupt
 );
-  parameter BIT_W = `ysyx_W_WIDTH;
-  parameter ADDR_W = `ysyx_W_WIDTH;
+  parameter integer DATA_W = `ysyx_W_WIDTH;
+  parameter integer ADDR_W = `ysyx_W_WIDTH;
+  parameter integer REG_ADDR_W = 5;
   // PC unit output
-  wire [BIT_W-1:0] pc;
+  wire [DATA_W-1:0] pc;
 
   // REGS output
-  wire [BIT_W-1:0] reg_rdata1, reg_rdata2;
+  wire [DATA_W-1:0] reg_rdata1, reg_rdata2;
 
   // IFU output
   wire [31:0] inst;
   wire ifu_valid, ifu_ready;
-  wire [BIT_W-1:0] pc_ifu;
+  wire [DATA_W-1:0] pc_ifu;
   // IFU bus wire
-  wire [BIT_W-1:0] ifu_araddr_o;
+  wire [DATA_W-1:0] ifu_araddr_o;
   wire ifu_arvalid_o;
-  wire [BIT_W-1:0] ifu_rdata;
+  wire [DATA_W-1:0] ifu_rdata;
   wire ifu_rvalid;
 
   // IDU output
-  wire [BIT_W-1:0] op1, op2, imm, op_j, pc_idu, rwaddr;
+  wire [DATA_W-1:0] op1, op2, imm, op_j, pc_idu, rwaddr;
   wire [4:0] rs1, rs2, rd;
   wire [3:0] alu_op;
   wire [6:0] opcode, funct7;
@@ -103,28 +105,28 @@ module ysyx (
   wire idu_valid, idu_ready;
 
   // LSU output
-  wire [BIT_W-1:0] lsu_rdata;
+  wire [DATA_W-1:0] lsu_rdata;
   wire lsu_exu_rvalid, lsu_exu_wready;
-  wire [BIT_W-1:0] lsu_araddr;
+  wire [DATA_W-1:0] lsu_araddr;
   wire lsu_arvalid;
-  wire [BIT_W-1:0] lsu_awaddr;
+  wire [DATA_W-1:0] lsu_awaddr;
   wire lsu_awvalid;
-  wire [BIT_W-1:0] lsu_wdata;
+  wire [DATA_W-1:0] lsu_wdata;
   wire [7:0] lsu_rstrb, lsu_wstrb;
   wire lsu_wvalid;
 
   // EXU output
-  wire [BIT_W-1:0] reg_wdata;
-  wire [BIT_W-1:0] npc_wdata;
+  wire [DATA_W-1:0] reg_wdata;
+  wire [DATA_W-1:0] npc_wdata;
   wire [4:0] rd_exu;
   wire exu_valid, exu_ready;
   wire [3:0] alu_op_exu;
   wire rwen_exu, wben, ren_exu, wen_exu;
 
   // BUS output
-  wire [BIT_W-1:0] bus_lsu_rdata;
+  wire [DATA_W-1:0] bus_lsu_rdata;
   wire lsu_avalid;
-  wire [BIT_W-1:0] lsu_mem_wdata;
+  wire [DATA_W-1:0] lsu_mem_wdata;
   wire lsu_rvalid;
   wire lsu_wready;
 
@@ -136,7 +138,7 @@ module ysyx (
     .pc_o(pc)
   );
 
-  ysyx_RegisterFile #(5, BIT_W) regs(
+  ysyx_RegisterFile #(REG_ADDR_W, DATA_W) regs(
     .clk(clock), .rst(reset),
     .exu_valid(wben),
 
@@ -186,7 +188,7 @@ module ysyx (
   );
 
   // IFU(Instruction Fetch Unit): 负责根据当前PC从存储器中取出一条指令
-  ysyx_IFU #(.ADDR_W(BIT_W), .DATA_W(32)) ifu(
+  ysyx_IFU #(.ADDR_W(DATA_W), .DATA_W(32)) ifu(
     .clk(clock), .rst(reset),
 
     .prev_valid(exu_valid), .next_ready(idu_ready),
@@ -273,10 +275,10 @@ endmodule // top
 module ysyx_PC (
   input clk, rst,
   input exu_valid,
-  input [BIT_W-1:0] npc_wdata,
-  output reg [BIT_W-1:0] pc_o
+  input [DATA_W-1:0] npc_wdata,
+  output reg [DATA_W-1:0] pc_o
 );
-  parameter BIT_W = `ysyx_W_WIDTH;
+  parameter integer DATA_W = `ysyx_W_WIDTH;
 
   always @(posedge clk) begin
     if (rst) begin
@@ -292,17 +294,17 @@ module ysyx_RegisterFile (
   input clk, rst,
   input exu_valid,
   input reg_write_en,
-  input [ADDR_WIDTH-1:0] waddr,
-  input [DATA_WIDTH-1:0] wdata,
-  input [ADDR_WIDTH-1:0] s1addr,
-  input [ADDR_WIDTH-1:0] s2addr,
-  output [DATA_WIDTH-1:0] src1_o,
-  output [DATA_WIDTH-1:0] src2_o
+  input [REG_ADDR_W-1:0] waddr,
+  input [DATA_W-1:0] wdata,
+  input [REG_ADDR_W-1:0] s1addr,
+  input [REG_ADDR_W-1:0] s2addr,
+  output [DATA_W-1:0] src1_o,
+  output [DATA_W-1:0] src2_o
 );
-  parameter ADDR_WIDTH = 4;
-  parameter DATA_WIDTH = 32;
-  parameter REG_NUM = 16;
-  reg [DATA_WIDTH-1:0] rf[REG_NUM-1:0];
+  parameter integer REG_ADDR_W = 4;
+  parameter integer DATA_W = 32;
+  parameter integer REG_NUM = 16;
+  reg [DATA_W-1:0] rf[0:REG_NUM-1];
 
   assign src1_o = rf[s1addr[3:0]];
   assign src2_o = rf[s2addr[3:0]];

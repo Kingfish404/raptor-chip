@@ -12,21 +12,24 @@ endif
 -include ./include/config/auto.conf
 -include ./include/config/auto.conf.cmd
 
+INC_PATH ?= $(abspath ./include) $(abspath ./vsrc/include)
+
 ifeq ($(CONFIG_MODE), "soc")
+SOC_HOME  = $(abspath ./../ysyxSoC)
+INC_PATH += $(abspath $(SOC_HOME)/perip/uart16550/rtl) $(abspath $(SOC_HOME)/perip/spi/rtl)
 VTARGET=ysyxSoCFull
 SOC_DEFINE=-DYSYX_SOC
 SOC_SOURCE=$(shell find $(abspath $(SOC_HOME)/perip) -name "*.v") \
     $(SOC_HOME)/build/ysyxSoCFull.v
+INC_PATH +=	$(NPC_HOME)/vinclude/ysyxsoc
 else
-VTARGET=ysyx
+VTARGET=ysyxSoC
 SOC_SOURCE=
+INC_PATH +=	$(NPC_HOME)/vinclude/npc
 endif
 BUILD_DIR = ./build
 OBJ_DIR = $(BUILD_DIR)/obj_dir
 BIN = $(BUILD_DIR)/$(VTARGET)
-SOC_HOME = $(abspath ./../ysyxSoC)
-INC_PATH ?= $(abspath ./include) $(abspath ./vsrc/include) \
-	$(abspath $(SOC_HOME)/perip/uart16550/rtl) $(abspath $(SOC_HOME)/perip/spi/rtl)
 VERILATOR_FLAG =--prof-c --prof-cfuncs --prof-exec --autoflush --timescale "1ns/1ns" --no-timing
 CXXFLAGS = -Wall\
 	-Wno-bool-operation -Wno-implicit-fallthrough -Wno-macro-redefined \
