@@ -1,6 +1,6 @@
 `include "ysyx_macro.v"
 
-module ysyxSoCNPC (
+module ysyxSoC (
   input clock, reset
 );
   wire auto_master_out_awready;

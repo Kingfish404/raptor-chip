@@ -23,7 +23,7 @@ SOC_SOURCE=$(shell find $(abspath $(SOC_HOME)/perip) -name "*.v") \
     $(SOC_HOME)/build/ysyxSoCFull.v \
 INC_PATH +=	$(NPC_HOME)/vinclude/ysyxsoc
 else
-VTARGET=ysyx
+VTARGET=ysyxSoC
 SOC_SOURCE=
 INC_PATH +=	$(NPC_HOME)/vinclude/npc
 endif
