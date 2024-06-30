@@ -309,7 +309,7 @@ module ysyx_RegisterFile (
   assign src2_o = rf[s2addr[3:0]];
 
   genvar i;
-  generate for(i = 1 ; i < REG_NUM; i = i + 1) generate_label
+  generate for(i = 1 ; i < REG_NUM; i = i + 1)
       begin
         always @(posedge clk)
           begin
