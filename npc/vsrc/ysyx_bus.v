@@ -339,18 +339,11 @@ module ysyx_CLINT(
   parameter ADDR_W = 32, DATA_W = 32;
 
   reg [63:0] mtime;
-  reg [19:0] lfsr;
-  wire ifsr_ready = `ysyx_IFSR_ENABLE ? lfsr[19] : 1;
-  always @(posedge clk )
-    begin
-      lfsr <= {lfsr[18:0], lfsr[19] ^ lfsr[18]};
-    end
   always @(posedge clk)
     begin
       if (rst)
         begin
           mtime <= 0;
-          lfsr <= 101;
         end
       else
         begin
