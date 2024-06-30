@@ -1,8 +1,10 @@
 `include "ysyx_macro.v"
 
 module ysyxSoC (
-  input clock, reset
+    input clock,
+    reset
 );
+  parameter ADDR_W = 32, DATA_W = 32;
   wire auto_master_out_awready;
   wire auto_master_out_awvalid;
   wire [3:0] auto_master_out_awid;
@@ -99,7 +101,7 @@ module ysyxSoC (
       .io_slave_rlast   (  /* unused */)
   );
 
-  ysyx_MEM_SRAM sram(
+  ysyx_MEM_SRAM sram (
       .clk(clock),
       .arburst(auto_master_out_arburst),
       .arsize(auto_master_out_arsize),
