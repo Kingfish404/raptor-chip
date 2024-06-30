@@ -50,7 +50,7 @@ module ysyxSoC (
       .io_master_awburst(auto_master_out_awburst),
       .io_master_wready (auto_master_out_wready),
       .io_master_wvalid (auto_master_out_wvalid),
-      .io_master_wdata  (auto_master_out_wdata[DATA_W-1:0]),
+      .io_master_wdata  (auto_master_out_wdata),
       .io_master_wstrb  (auto_master_out_wstrb),
       .io_master_wlast  (auto_master_out_wlast),
       .io_master_bready (auto_master_out_bready),
