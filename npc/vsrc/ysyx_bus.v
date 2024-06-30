@@ -1,4 +1,5 @@
 `include "ysyx_macro.v"
+`include "ysyx_soc_macro.v"
 `include "ysyx_macro_dpi_c.v"
 
 module ysyx_BUS_ARBITER(
