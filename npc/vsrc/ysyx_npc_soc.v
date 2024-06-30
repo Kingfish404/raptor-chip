@@ -252,6 +252,7 @@ module ysyx_MEM_SRAM (
 
   // write transaction
   assign awready_o = (state == 1 & awvalid);
+  assign wready_o = (state == 2 & wvalid);
 
   always @(posedge clk) begin
     lfsr <= {lfsr[18:0], lfsr[19] ^ lfsr[18]};
@@ -259,7 +260,7 @@ module ysyx_MEM_SRAM (
   always @(posedge clk) begin
     if (ifsr_ready) begin
       case (state)
-        0: begin
+        'b0: begin
           // wait for arvalid
           if (arvalid | awvalid) begin
             state <= 1;
