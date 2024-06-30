@@ -190,6 +190,12 @@ module ysyx_MEM_SRAM_UART (
   assign awready_o = (state == 'b01 & awvalid);
   assign wready_o = (state == 'b11 & wvalid);
   assign bvalid_o = (state == 'b100);
+  wire wmask = (
+    ({{8{awsize == 3'b000}} & 8'h1 }) |
+    ({{4{awsize == 3'b001}} & 8'h3 }) |
+    ({{2{awsize == 3'b010}} & 8'hf }) |
+    (8'h00)
+  );
 
   always @(posedge clk) begin
     lfsr <= {lfsr[18:0], lfsr[19] ^ lfsr[18]};
@@ -223,10 +229,8 @@ module ysyx_MEM_SRAM_UART (
             if (awaddr == `ysyx_BUS_SERIAL_PORT) begin
               $write("%c", wdata[7:0]);
               `ysyx_DPI_C_npc_difftest_skip_ref;
-            end else if ((awaddr & 'b100) == 0) begin
-              `ysyx_DPI_C_pmem_write(awaddr, wdata[31:0], {{4'b0}, {wstrb[3:0]}});
             end else begin
-              `ysyx_DPI_C_pmem_write(awaddr, wdata[31:0], {{4'b0}, {wstrb[7:4]}});
+              `ysyx_DPI_C_pmem_write(awaddr, wdata[31:0], wmask);
             end
             if (wlast) begin
               state <= 3;
