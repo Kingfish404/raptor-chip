@@ -35,8 +35,6 @@ module ysyxSoC (
   wire [1:0] auto_master_out_rresp;
   wire auto_master_out_rlast;
 
-
-
   ysyx cpu (  // src/CPU.scala:38:21
       .clock            (clock),
       .reset            (reset),
@@ -238,6 +236,7 @@ module ysyx_MEM_SRAM (
     input bready
 );
   parameter ADDR_W = 32, DATA_W = 32;
+  arready_o = 1;
 
   reg [31:0] mem_rdata_buf[0:1];
   reg [19:0] lfsr = 101;
