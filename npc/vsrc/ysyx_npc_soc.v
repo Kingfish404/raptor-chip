@@ -280,7 +280,7 @@ module ysyx_MEM_SRAM (
               state <= 3;
             end
           end else begin
-            istate <= 3;
+            state <= 3;
           end
         end
         3: begin
