@@ -243,8 +243,6 @@ module ysyx_MEM_SRAM (
   reg [19:0] lfsr = 101;
   wire ifsr_ready = `ysyx_IFSR_ENABLE ? lfsr[19] : 1;
 
-  assign rvalid_o = rvalid & !arready_o;
-
   always @(posedge clk) begin
     lfsr <= {lfsr[18:0], lfsr[19] ^ lfsr[18]};
   end
