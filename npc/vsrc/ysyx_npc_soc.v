@@ -238,7 +238,7 @@ module ysyx_MEM_SRAM (
   parameter integer ADDR_W = 32, DATA_W = 64;
 
   reg [31:0] mem_rdata_buf[2];
-  reg [1:0] state = 0;
+  reg [2:0] state = 0;
   reg is_writing = 0;
 
   reg [19:0] lfsr = 101;
@@ -253,7 +253,7 @@ module ysyx_MEM_SRAM (
   // write transaction
   assign awready_o = (state == 'b01 & awvalid);
   assign wready_o = (state == 'b11 & wvalid);
-  assign bvalid_o = (state == 'b00);
+  assign bvalid_o = (state == 'b100);
 
   always @(posedge clk) begin
     lfsr <= {lfsr[18:0], lfsr[19] ^ lfsr[18]};
@@ -294,6 +294,12 @@ module ysyx_MEM_SRAM (
           if (rready | (is_writing & bready)) begin
             state <= 0;
             is_writing <= 0;
+          end
+        end
+        'b100: begin
+          // wait for bready
+          if (bready) begin
+            state <= 0;
           end
         end
       endcase
