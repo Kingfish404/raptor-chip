@@ -245,14 +245,14 @@ module ysyx_MEM_SRAM (
   wire ifsr_ready = `ysyx_IFSR_ENABLE ? lfsr[19] : 1;
 
   // read transaction
-  assign arready_o = (state == 1 & arvalid);
+  assign arready_o = (state == 'b01 & arvalid);
   assign rdata_o[31:0] = mem_rdata_buf[0];
   assign rdata_o[63:32] = mem_rdata_buf[1];
-  assign rvalid_o = (state == 2);
+  assign rvalid_o = (state == 'b10);
 
   // write transaction
-  assign awready_o = (state == 1 & awvalid);
-  assign wready_o = (state == 2 & wvalid);
+  assign awready_o = (state == 'b01 & awvalid);
+  assign wready_o = (state == 'b11 & wvalid);
 
   always @(posedge clk) begin
     lfsr <= {lfsr[18:0], lfsr[19] ^ lfsr[18]};
