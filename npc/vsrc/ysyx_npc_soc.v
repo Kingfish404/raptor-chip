@@ -267,7 +267,7 @@ module ysyx_MEM_SRAM (
             state <= 1;
           end
           if (arvalid) begin
-            if ((araddr & 'h4) == 0) begin
+            if ((araddr & 'b100) == 0) begin
               pmem_read(araddr, mem_rdata_buf[0]);
             end else begin
               pmem_read(araddr, mem_rdata_buf[1]);
@@ -286,7 +286,11 @@ module ysyx_MEM_SRAM (
         'b10: begin
           // send rready or wait for wlast
           if (is_writing) begin
-            pmem_write(awaddr, wdata[31:0], wstrb);
+            if ((araddr & 'b100) == 0) begin
+              pmem_write(awaddr, wdata[31:0], wstrb[3:0]);
+            end else begin
+              pmem_write(awaddr, wdata[31:0], wstrb[7:4]);
+            end
             if (wlast) begin
               state <= 3;
             end
