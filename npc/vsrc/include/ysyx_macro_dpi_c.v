@@ -10,4 +10,4 @@
 `define ysyx_DPI_C_sdram_read(sd_raddr, sd_rdata) sdram_read(sd_raddr, sd_rdata)
 `define ysyx_DPI_C_sdram_write(sd_waddr, sd_wdata, sd_wmask) sdram_write(sd_waddr, sd_wdata, sd_wmask)
 
-`define ysyx_Assert(cond, msg) `Assert(cond, msg)
+`define ysyx_Assert(cond, msg) `ASSERT(cond, msg)
