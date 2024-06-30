@@ -277,7 +277,7 @@ module ysyx_PC (
   input [DATA_W-1:0] npc_wdata,
   output reg [DATA_W-1:0] pc_o
 );
-  parameter DATA_W = `ysyx_W_WIDTH;
+  parameter integer DATA_W = `ysyx_W_WIDTH;
 
   always @(posedge clk) begin
     if (rst) begin
@@ -300,16 +300,16 @@ module ysyx_RegisterFile (
   output [DATA_W-1:0] src1_o,
   output [DATA_W-1:0] src2_o
 );
-  parameter REG_ADDR_W = 4;
-  parameter DATA_W = 32;
-  parameter REG_NUM = 16;
-  reg [DATA_W-1:0] rf[REG_NUM-1:0];
+  parameter integer REG_ADDR_W = 4;
+  parameter integer DATA_W = 32;
+  parameter integer REG_NUM = 16;
+  reg [DATA_W-1:0] rf[0:REG_NUM-1];
 
   assign src1_o = rf[s1addr[3:0]];
   assign src2_o = rf[s2addr[3:0]];
 
   genvar i;
-  generate for(i = 1 ; i < REG_NUM; i = i + 1)
+  generate for(i = 1 ; i < REG_NUM; i = i + 1) generate_label
       begin
         always @(posedge clk)
           begin
