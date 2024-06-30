@@ -232,14 +232,14 @@ module ysyx_MEM_SRAM_UART (
             end else begin
               // `ysyx_DPI_C_pmem_write(awaddr, wdata[31:0],
               //                        (awaddr[2:0] & 'b100) == 0 ? wstrb : wstrb >> 4);
-              if (wstrb[0]) begin `ysyx_DPI_C_pmem_write(awaddr & ~'h7, wdata >> 0, 1); end
-              if (wstrb[1]) begin `ysyx_DPI_C_pmem_write(awaddr & ~'h7, wdata >> 8, 1); end
-              if (wstrb[2]) begin `ysyx_DPI_C_pmem_write(awaddr & ~'h7, wdata >> 16, 1); end
-              if (wstrb[3]) begin `ysyx_DPI_C_pmem_write(awaddr & ~'h7, wdata >> 24, 1); end
-              if (wstrb[4]) begin `ysyx_DPI_C_pmem_write(awaddr & ~'h7, wdata >> 32, 1); end
-              if (wstrb[5]) begin `ysyx_DPI_C_pmem_write(awaddr & ~'h7, wdata >> 40, 1); end
-              if (wstrb[6]) begin `ysyx_DPI_C_pmem_write(awaddr & ~'h7, wdata >> 48, 1); end
-              if (wstrb[7]) begin `ysyx_DPI_C_pmem_write(awaddr & ~'h7, wdata >> 56, 1); end
+              if (wstrb[0]) begin `ysyx_DPI_C_pmem_write(awaddr & ~'h7, (wdata >>  0)[31:0], 1); end
+              if (wstrb[1]) begin `ysyx_DPI_C_pmem_write(awaddr & ~'h7, (wdata >>  8)[31:0], 1); end
+              if (wstrb[2]) begin `ysyx_DPI_C_pmem_write(awaddr & ~'h7, (wdata >> 16)[31:0], 1); end
+              if (wstrb[3]) begin `ysyx_DPI_C_pmem_write(awaddr & ~'h7, (wdata >> 24)[31:0], 1); end
+              if (wstrb[4]) begin `ysyx_DPI_C_pmem_write(awaddr & ~'h7, (wdata >> 32)[31:0], 1); end
+              if (wstrb[5]) begin `ysyx_DPI_C_pmem_write(awaddr & ~'h7, (wdata >> 40)[31:0], 1); end
+              if (wstrb[6]) begin `ysyx_DPI_C_pmem_write(awaddr & ~'h7, (wdata >> 48)[31:0], 1); end
+              if (wstrb[7]) begin `ysyx_DPI_C_pmem_write(awaddr & ~'h7, (wdata >> 56)[31:0], 1); end
             end
             if (wlast) begin
               state <= 3;
