@@ -76,7 +76,7 @@ module ysyx (
 
   input io_interrupt
 );
-  parameter BIT_W = `ysyx_W_WIDTH;
+  parameter integer BIT_W = `ysyx_W_WIDTH;
   parameter ADDR_W = `ysyx_W_WIDTH;
   // PC unit output
   wire [BIT_W-1:0] pc;

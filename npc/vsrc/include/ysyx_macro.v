@@ -83,7 +83,7 @@ always @(*) begin \
   endcase \
 end
 
-`define Assert(signal, value) \
+`define ASSERT(signal, value) \
   if (signal !== value) begin \
     $error("ASSERTION FAILED in %m: signal != value"); \
     $finish; \
