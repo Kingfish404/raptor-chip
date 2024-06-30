@@ -1,7 +1,15 @@
 `define ysyx_W_WIDTH 32
+`define ysyx_PC_INIT `ysyx_W_WIDTH'h30000000
+
+// random test setting
+`define ysyx_IFSR_ENABLE 0
 
 `define ysyx_IDLE       0
 `define ysyx_WAIT_READY 1
+
+`define ysyx_BUS_SERIAL_PORT    'h10000000
+`define ysyx_BUS_RTC_ADDR       'h02000048
+`define ysyx_BUS_RTC_ADDR_UP    `ysyx_BUS_RTC_ADDR + 4
 
 `define ysyx_OP_LUI           7'b0110111
 `define ysyx_OP_AUIPC         7'b0010111
@@ -75,7 +83,7 @@ always @(*) begin \
   endcase \
 end
 
-`define ASSERT(signal, value) \
+`define Assert(signal, value) \
   if (signal !== value) begin \
     $error("ASSERTION FAILED in %m: signal != value"); \
     $finish; \
