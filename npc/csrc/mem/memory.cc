@@ -162,6 +162,8 @@ extern "C" void pmem_write(word_t waddr, word_t wdata, char wmask)
     //     host_write(pmem + waddr - MBASE, wdata, 8);
     //     break;
     default:
+        Log("Invalid write: addr = " FMT_WORD ", data = " FMT_WORD ", mask = %x",
+            waddr, wdata, wmask);
         break;
     }
 }
