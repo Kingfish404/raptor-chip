@@ -254,11 +254,6 @@ void sdb_sim_init(int argc, char **argv)
   verilog_connect(top, &npc);
 
   reset(top, 32);
-  if (tfp)
-  {
-    tfp->dump(contextp->time());
-  }
-  contextp->timeInc(1);
 
 #ifdef CONFIG_NVBoard
   nvboard_bind_pin(
