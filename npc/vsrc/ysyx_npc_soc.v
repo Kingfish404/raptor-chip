@@ -190,7 +190,7 @@ module ysyx_MEM_SRAM_UART (
   assign awready_o = (state == 'b01 & awvalid);
   assign wready_o = (state == 'b11 & wvalid);
   assign bvalid_o = (state == 'b100);
-  wire wmask = (
+  wire [7:0] wmask = (
     ({{8{awsize == 3'b000}} & 8'h1 }) |
     ({{8{awsize == 3'b001}} & 8'h3 }) |
     ({{8{awsize == 3'b010}} & 8'hf }) |
