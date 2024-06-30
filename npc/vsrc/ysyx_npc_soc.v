@@ -260,7 +260,7 @@ module ysyx_MEM_SRAM (
   end
   always @(posedge clk) begin
     if (ifsr_ready) begin
-      unique case (state)
+      case (state)
         'b000: begin
           // wait for arvalid
           if (arvalid | awvalid) begin
@@ -272,8 +272,6 @@ module ysyx_MEM_SRAM (
             end else begin
               pmem_read(araddr, mem_rdata_buf[1]);
             end
-            // pmem_read(araddr & ~'h4, mem_rdata_buf[0]);
-            // pmem_read(araddr & ~'h4 + 4, mem_rdata_buf[1]);
           end
           if (awvalid) begin
             is_writing <= 1;
