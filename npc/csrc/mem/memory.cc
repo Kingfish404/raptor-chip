@@ -142,7 +142,7 @@ extern "C" void pmem_write(word_t waddr, word_t wdata, char wmask)
 #endif
     if (waddr < MBASE || waddr > MBASE + MSIZE)
     {
-        Log("Invalid write: addr = " FMT_WORD ", data = " FMT_WORD ", mask = %x",
+        Log("Invalid write: addr = " FMT_WORD ", data = " FMT_WORD ", mask = %02x",
             waddr, wdata, wmask);
         npc_abort();
         return;
