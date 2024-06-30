@@ -275,7 +275,7 @@ module ysyx_MEM_SRAM (
         2: begin
           // send rready or wait for wlast
           if (is_writing) begin
-            pmem_write(awaddr, wdata, wstrb);
+            pmem_write(awaddr, wdata[31:0], wstrb);
             if (wlast) begin
               state <= 3;
             end
