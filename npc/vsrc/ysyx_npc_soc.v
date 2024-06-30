@@ -236,24 +236,27 @@ module ysyx_MEM_SRAM (
     input bready
 );
   parameter ADDR_W = 32, DATA_W = 32;
-
   reg [31:0] mem_rdata_buf[0:1];
+  reg rvalid;
   reg [19:0] lfsr = 101;
   wire ifsr_ready = `ysyx_IFSR_ENABLE ? lfsr[19] : 1;
+
+  assign rvalid_o = rvalid & !arready_o;
+
   always @(posedge clk) begin
     lfsr <= {lfsr[18:0], lfsr[19] ^ lfsr[18]};
   end
   always @(posedge clk) begin
     mem_rdata_buf[0] <= 0;
-    if (arvalid & !rvalid_o & rready) begin
+    if (arvalid & !rvalid & rready) begin
       if (ifsr_ready) begin
         pmem_read(araddr, mem_rdata_buf[0]);
         rdata_o  <= mem_rdata_buf[0];
-        rvalid_o <= 1;
+        rvalid <= 1;
         arready_o <= 1;
       end
     end else begin
-      rvalid_o <= 0;
+      rvalid <= 0;
       rdata_o  <= 0;
       arready_o <= 0;
     end
