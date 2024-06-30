@@ -253,6 +253,7 @@ module ysyx_MEM_SRAM (
   // write transaction
   assign awready_o = (state == 'b01 & awvalid);
   assign wready_o = (state == 'b11 & wvalid);
+  assign bvalid_o = (state == 'b11);
 
   always @(posedge clk) begin
     lfsr <= {lfsr[18:0], lfsr[19] ^ lfsr[18]};
