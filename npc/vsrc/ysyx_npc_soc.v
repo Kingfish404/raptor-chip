@@ -3,6 +3,37 @@
 module ysyxSoCNPC (
   input clock, reset
 );
+  wire auto_master_out_awready;
+  wire auto_master_out_awvalid;
+  wire [3:0] auto_master_out_awid;
+  wire [ADDR_W-1:0] auto_master_out_awaddr;
+  wire [7:0] auto_master_out_awlen;
+  wire [2:0] auto_master_out_awsize;
+  wire [1:0] auto_master_out_awburst;
+  wire auto_master_out_wready;
+  wire auto_master_out_wvalid;
+  wire [63:0] auto_master_out_wdata;
+  wire [7:0] auto_master_out_wstrb;
+  wire auto_master_out_wlast;
+  wire auto_master_out_bready;
+  wire auto_master_out_bvalid;
+  wire [3:0] auto_master_out_bid;
+  wire [1:0] auto_master_out_bresp;
+  wire auto_master_out_arready;
+  wire auto_master_out_arvalid;
+  wire [3:0] auto_master_out_arid;
+  wire [ADDR_W-1:0] auto_master_out_araddr;
+  wire [7:0] auto_master_out_arlen;
+  wire [2:0] auto_master_out_arsize;
+  wire [1:0] auto_master_out_arburst;
+  wire auto_master_out_rready;
+  wire auto_master_out_rvalid;
+  wire [3:0] auto_master_out_rid;
+  wire [63:0] auto_master_out_rdata;
+  wire [1:0] auto_master_out_rresp;
+  wire auto_master_out_rlast;
+
+
 
   ysyx cpu (  // src/CPU.scala:38:21
       .clock            (clock),
@@ -66,6 +97,39 @@ module ysyxSoCNPC (
       .io_slave_rdata   (  /* unused */),
       .io_slave_rresp   (  /* unused */),
       .io_slave_rlast   (  /* unused */)
+  );
+
+  ysyx_MEM_SRAM sram(
+      .clk(clock),
+      .arburst(auto_master_out_arburst),
+      .arsize(auto_master_out_arsize),
+      .arlen(auto_master_out_arlen),
+      .arid(auto_master_out_arid),
+      .araddr(auto_master_out_araddr),
+      .arvalid(auto_master_out_arvalid),
+      .arready_o(auto_master_out_arready),
+      .rid(auto_master_out_rid),
+      .rlast_o(auto_master_out_rlast),
+      .rdata_o(auto_master_out_rdata),
+      .rresp_o(auto_master_out_rresp),
+      .rvalid_o(auto_master_out_rvalid),
+      .rready(auto_master_out_rready),
+      .awburst(auto_master_out_awburst),
+      .awsize(auto_master_out_awsize),
+      .awlen(auto_master_out_awlen),
+      .awid(auto_master_out_awid),
+      .awaddr(auto_master_out_awaddr),
+      .awvalid(auto_master_out_awvalid),
+      .awready_o(auto_master_out_awready),
+      .wlast(auto_master_out_wlast),
+      .wdata(auto_master_out_wdata),
+      .wstrb(auto_master_out_wstrb),
+      .wvalid(auto_master_out_wvalid),
+      .wready_o(auto_master_out_wready),
+      .bid(auto_master_out_bid),
+      .bresp_o(auto_master_out_bresp),
+      .bvalid_o(auto_master_out_bvalid),
+      .bready(auto_master_out_bready)
   );
 endmodule  //ysyxSoCNPC
 
