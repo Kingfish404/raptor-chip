@@ -41,19 +41,14 @@ module ysyx_UART(
   parameter ADDR_W = 32, DATA_W = 32;
 
   reg [19:0] lfsr = 101;
-  wire ifsr_ready = `ysyx_IFSR_ENABLE ? lfsr[19] : 1;
-  always @(posedge clk ) begin lfsr <= {lfsr[18:0], lfsr[19] ^ lfsr[18]}; end
   always @(posedge clk) begin
     rdata_o <= 0; rvalid_o <= 0; wready_o <= 0;
     if (arvalid & !rvalid_o & rready) begin
-      if (ifsr_ready)
-      begin
-        rdata_o <= 0;
-        rvalid_o <= 1;
-      end
+      rdata_o <= 0;
+      rvalid_o <= 1;
     end
     if (wvalid & bready) begin
-      if (ifsr_ready & !wready_o)
+      if (!wready_o)
       begin
         $write("%c", wdata[7:0]);
         npc_difftest_skip_ref();
@@ -103,27 +98,18 @@ module ysyx_MEM_SRAM(
   parameter ADDR_W = 32, DATA_W = 32;
 
   reg [31:0] mem_rdata_buf [0:1];
-  reg [19:0] lfsr = 101;
-  wire ifsr_ready = `ysyx_IFSR_ENABLE ? lfsr[19] : 1;
-  always @(posedge clk ) begin lfsr <= {lfsr[18:0], lfsr[19] ^ lfsr[18]}; end
   always @(posedge clk) begin
     mem_rdata_buf[0] <= 0;
     if (arvalid & !rvalid_o & rready) begin
-      if (ifsr_ready)
-      begin
-        pmem_read(araddr, mem_rdata_buf[0]);
-        rdata_o <= mem_rdata_buf[0];
-        rvalid_o <= 1;
-      end
+      pmem_read(araddr, mem_rdata_buf[0]);
+      rdata_o <= mem_rdata_buf[0];
+      rvalid_o <= 1;
     end else begin
       rvalid_o <= 0; rdata_o <= 0;
     end
     if (wvalid & !wready_o & bready) begin
-      if (ifsr_ready)
-      begin
-        pmem_write(awaddr, wdata, wstrb);
-        wready_o <= 1;
-      end
+      pmem_write(awaddr, wdata, wstrb);
+      wready_o <= 1;
     end else begin
       wready_o <= 0;
     end
