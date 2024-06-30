@@ -20,10 +20,12 @@ INC_PATH += $(abspath $(SOC_HOME)/perip/uart16550/rtl) $(abspath $(SOC_HOME)/per
 VTARGET=ysyxSoCFull
 SOC_DEFINE=-DYSYX_SOC
 SOC_SOURCE=$(shell find $(abspath $(SOC_HOME)/perip) -name "*.v") \
-    $(SOC_HOME)/build/ysyxSoCFull.v
+    $(SOC_HOME)/build/ysyxSoCFull.v \
+INC_PATH +=	$(abspath ../vinclude/ysyxsoc)
 else
 VTARGET=ysyx
 SOC_SOURCE=
+INC_PATH +=	$(abspath ../vinclude/npc)
 endif
 BUILD_DIR = ./build
 OBJ_DIR = $(BUILD_DIR)/obj_dir
