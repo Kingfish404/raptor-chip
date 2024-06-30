@@ -17,6 +17,8 @@
 #define FB_ADDR (MMIO_BASE + 0x1000000)
 #define AUDIO_SBUF_ADDR (MMIO_BASE + 0x1200000)
 
+#define RTC_ADDR (0x02000048)
+
 typedef uintptr_t PTE;
 
 #define PGSIZE 4096
