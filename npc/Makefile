@@ -63,7 +63,7 @@ INCFLAGS = $(addprefix -I, $(INC_PATH))
 CXXFLAGS += $(INCFLAGS) -DTOP_NAME="\"V$(VTARGET)\"" $(SOC_DEFINE) \
 	-DMROM_PATH=$(MROM_IMG)
 
-$(BIN): $(VSRCS) $(CCSRCS) $(NVBOARD_ARCHIVE)
+$(BIN):
 	$(call git_commit, "build RTL")
 	$(VERILATOR) --trace -cc --exe --build -j $(shell nproc) --debug $(VERILATOR_FLAG) $^ \
 		--top-module $(VTARGET) \
@@ -75,7 +75,7 @@ DIFF_REF_SO = -d $(abspath $(NEMU_HOME)/build/riscv32-nemu-interpreter-so)
 IMG ?=
 NPC_EXEC := $(BIN) $(NPCFLAGS) $(DIFF_REF_SO) -m $(MROM_IMG) $(IMG)
 
-run: 
+run: $(BIN) $(MROM_IMG)
 	$(call git_commit, "sim RTL") # DO NOT REMOVE THIS LINE!!!
 	$(NPC_EXEC)
 
