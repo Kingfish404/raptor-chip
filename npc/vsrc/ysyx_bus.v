@@ -365,10 +365,7 @@ module ysyx_CLINT(
         end
       if (wvalid & !wready_o & bready)
         begin
-          if (ifsr_ready)
-            begin
-              wready_o <= 1;
-            end
+          wready_o <= 1;
         end
     end
 endmodule //ysyx_CLINT
