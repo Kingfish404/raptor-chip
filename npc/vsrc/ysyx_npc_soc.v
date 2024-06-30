@@ -14,7 +14,7 @@ module ysyxSoC (
   wire [1:0] auto_master_out_awburst;
   wire auto_master_out_wready;
   wire auto_master_out_wvalid;
-  wire [DATA_W:0] auto_master_out_wdata;
+  wire [63:0] auto_master_out_wdata;
   wire [7:0] auto_master_out_wstrb;
   wire auto_master_out_wlast;
   wire auto_master_out_bready;
@@ -31,7 +31,7 @@ module ysyxSoC (
   wire auto_master_out_rready;
   wire auto_master_out_rvalid;
   wire [3:0] auto_master_out_rid;
-  wire [DATA_W:0] auto_master_out_rdata;
+  wire [63:0] auto_master_out_rdata;
   wire [1:0] auto_master_out_rresp;
   wire auto_master_out_rlast;
 
@@ -50,7 +50,7 @@ module ysyxSoC (
       .io_master_awburst(auto_master_out_awburst),
       .io_master_wready (auto_master_out_wready),
       .io_master_wvalid (auto_master_out_wvalid),
-      .io_master_wdata  (auto_master_out_wdata),
+      .io_master_wdata  (auto_master_out_wdata[DATA_W-1:0]),
       .io_master_wstrb  (auto_master_out_wstrb),
       .io_master_wlast  (auto_master_out_wlast),
       .io_master_bready (auto_master_out_bready),
@@ -67,7 +67,7 @@ module ysyxSoC (
       .io_master_rready (auto_master_out_rready),
       .io_master_rvalid (auto_master_out_rvalid),
       .io_master_rid    (auto_master_out_rid),
-      .io_master_rdata  (auto_master_out_rdata),
+      .io_master_rdata  (auto_master_out_rdata[DATA_W-1:0]),
       .io_master_rresp  (auto_master_out_rresp),
       .io_master_rlast  (auto_master_out_rlast),
       .io_slave_awready (  /* unused */),
