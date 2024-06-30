@@ -254,10 +254,7 @@ void sdb_sim_init(int argc, char **argv)
   verilog_connect(top, &npc);
 
   reset(top, 32);
-  if (tfp)
-  {
-    tfp->dump(contextp->time());
-  }
+
 #ifdef CONFIG_NVBoard
   nvboard_bind_pin(
       &top->externalPins_gpio_out,
