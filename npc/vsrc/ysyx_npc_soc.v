@@ -267,8 +267,13 @@ module ysyx_MEM_SRAM (
             state <= 1;
           end
           if (arvalid) begin
-            pmem_read(araddr & ~'h4, mem_rdata_buf[0]);
-            pmem_read(araddr & ~'h4 + 4, mem_rdata_buf[1]);
+            if (araddr & 'h4 == 0) begin
+              pmem_read(araddr, mem_rdata_buf[0]);
+            end else begin
+              pmem_read(araddr, mem_rdata_buf[1]);
+            end
+            // pmem_read(araddr & ~'h4, mem_rdata_buf[0]);
+            // pmem_read(araddr & ~'h4 + 4, mem_rdata_buf[1]);
           end
           if (awvalid) begin
             is_writing <= 1;
