@@ -192,8 +192,8 @@ module ysyx_MEM_SRAM_UART (
   assign bvalid_o = (state == 'b100);
   wire wmask = (
     ({{8{awsize == 3'b000}} & 8'h1 }) |
-    ({{4{awsize == 3'b001}} & 8'h3 }) |
-    ({{2{awsize == 3'b010}} & 8'hf }) |
+    ({{8{awsize == 3'b001}} & 8'h3 }) |
+    ({{8{awsize == 3'b010}} & 8'hf }) |
     (8'h00)
   );
 
