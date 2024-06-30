@@ -289,7 +289,8 @@ module ysyx_MEM_SRAM (
             if ((araddr & 'b100) == 0) begin
               pmem_write(awaddr, wdata[31:0], {{4'b0}, {wstrb[3:0]}});
             end else begin
-              pmem_write(awaddr, wdata[31:0], {{4'b0}, {wstrb[7:4]}});
+              // pmem_write(awaddr, wdata[31:0], {{4'b0}, {wstrb[7:4]}});
+              pmem_write(awaddr, wdata[31:0], wstrb);
             end
             if (wlast) begin
               state <= 3;
