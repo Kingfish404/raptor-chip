@@ -230,7 +230,7 @@ module ysyx_MEM_SRAM_UART (
               $write("%c", wdata[7:0]);
               `ysyx_DPI_C_npc_difftest_skip_ref;
             end else begin
-              `ysyx_DPI_C_pmem_write(awaddr, wdata[31:0], wmask);
+              `ysyx_DPI_C_pmem_write(awaddr, wdata[31:0], wstrb);
             end
             if (wlast) begin
               state <= 3;
