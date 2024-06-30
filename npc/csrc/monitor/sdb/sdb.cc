@@ -60,23 +60,24 @@ static char *rl_gets()
 void reset(TOP_NAME *top, int n)
 {
   top->reset = 1;
-  while (n-- > 0)
-  {
-    top->clock = 0;
-    top->eval();
-    if (tfp)
-    {
-      tfp->dump(contextp->time());
-    }
-    contextp->timeInc(1);
-    top->clock = 1;
-    top->eval();
-    if (tfp)
-    {
-      tfp->dump(contextp->time());
-    }
-    contextp->timeInc(1);
-  }
+  cpu_exec(n);
+  // while (n-- > 0)
+  // {
+  //   top->clock = 0;
+  //   top->eval();
+  //   if (tfp)
+  //   {
+  //     tfp->dump(contextp->time());
+  //   }
+  //   contextp->timeInc(1);
+  //   top->clock = 1;
+  //   top->eval();
+  //   if (tfp)
+  //   {
+  //     tfp->dump(contextp->time());
+  //   }
+  //   contextp->timeInc(1);
+  // }
   top->reset = 0;
 }
 
