@@ -222,7 +222,7 @@ module ysyx_MEM_SRAM (
     input [3:0] awid,
     input [ADDR_W-1:0] awaddr,
     input awvalid,
-    output reg awready_o,
+    output awready_o,
 
     input wlast,
     input [DATA_W-1:0] wdata,
@@ -243,25 +243,35 @@ module ysyx_MEM_SRAM (
   reg [19:0] lfsr = 101;
   wire ifsr_ready = `ysyx_IFSR_ENABLE ? lfsr[19] : 1;
 
+  assign awready_o = (state == 1 & arvalid);
+  assign rdata_o   = (mem_rdata_buf);
+  assign rvalid_o  = (state == 2);
+
   always @(posedge clk) begin
     lfsr <= {lfsr[18:0], lfsr[19] ^ lfsr[18]};
   end
   always @(posedge clk) begin
-    case (state)
-      0: begin
-        if (arvalid & ifsr_ready) begin
-          state <= 1;
-          arready_o <= 1;
-          pmem_read(araddr, mem_rdata_buf);
+    if (ifsr_ready) begin
+      case (state)
+        0: begin
+          if (arvalid) begin
+            state <= 1;
+            pmem_read(araddr, mem_rdata_buf);
+          end
         end
-      end
-      1: begin
-        rdata_o  <= mem_rdata_buf;
-        rvalid_o <= 1;
-        arready_o <= 1;
-        state <= 0;
-      end
-    endcase
+        1: begin
+          state <= 2;
+        end
+        2: begin
+          state <= 3;
+        end
+        3: begin
+          if (rready) begin
+            state <= 0;
+          end
+        end
+      endcase
+    end
 
     // mem_rdata_buf[0] <= 0;
     // if (arvalid & !rvalid & rready) begin
