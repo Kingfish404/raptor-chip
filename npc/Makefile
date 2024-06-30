@@ -24,7 +24,7 @@ SOC_SOURCE=$(shell find $(abspath $(SOC_HOME)/perip) -name "*.v") \
 INC_PATH +=	$(NPC_HOME)/vinclude/ysyxsoc
 else
 VTARGET=ysyxSoC
-SOC_SOURCE=
+SOC_SOURCE= 
 INC_PATH +=	$(NPC_HOME)/vinclude/npc
 endif
 BUILD_DIR = ./build
@@ -63,7 +63,7 @@ INCFLAGS = $(addprefix -I, $(INC_PATH))
 CXXFLAGS += $(INCFLAGS) -DTOP_NAME="\"V$(VTARGET)\"" $(SOC_DEFINE) \
 	-DMROM_PATH=$(MROM_IMG)
 
-$(BIN):
+$(BIN): $(VSRCS) $(CCSRCS) $(NVBOARD_ARCHIVE)
 	$(call git_commit, "build RTL")
 	$(VERILATOR) --trace -cc --exe --build -j $(shell nproc) --debug $(VERILATOR_FLAG) $^ \
 		--top-module $(VTARGET) \
