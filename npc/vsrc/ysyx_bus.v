@@ -1,4 +1,5 @@
 `include "ysyx_macro.v"
+`include "ysyx_macro_soc.v"
 `include "ysyx_macro_dpi_c.v"
 
 module ysyx_BUS_ARBITER(
@@ -190,7 +191,7 @@ module ysyx_BUS_ARBITER(
   assign io_master_araddr = sram_araddr;
   assign io_master_arvalid = !rst & (
            ((state == if_a) & ifu_arvalid) |
-           //  ((state == ls_a) & lsu_arvalid & !clint_en)
+           // ((state == ls_a) & lsu_arvalid & !clint_en)
            // ((state == ls_a || state == ls_d_r) & lsu_arvalid & !clint_en) // for old soc
            ((state == ls_a) & lsu_arvalid & !clint_en) // for new soc
          );
@@ -230,7 +231,7 @@ module ysyx_BUS_ARBITER(
          {{lsu_wstrb[3:0] << awaddr_lo}, {4'b0}}:
          {{4'b0}, {lsu_wstrb[3:0] << awaddr_lo}};
   assign io_master_wvalid = (
-           //  (state == ls_d_w ) & (lsu_wvalid)
+           // (state == ls_d_w ) & (lsu_wvalid)
            // (state == ls_a || state == ls_d_w) & (lsu_wvalid) // for old soc
            (((state == ls_d_w) & write_valid)) & (lsu_wvalid) // for new soc
          );
@@ -338,18 +339,11 @@ module ysyx_CLINT(
   parameter ADDR_W = 32, DATA_W = 32;
 
   reg [63:0] mtime;
-  reg [19:0] lfsr;
-  wire ifsr_ready = `ysyx_IFSR_ENABLE ? lfsr[19] : 1;
-  always @(posedge clk )
-    begin
-      lfsr <= {lfsr[18:0], lfsr[19] ^ lfsr[18]};
-    end
   always @(posedge clk)
     begin
       if (rst)
         begin
           mtime <= 0;
-          lfsr <= 101;
         end
       else
         begin
@@ -360,24 +354,18 @@ module ysyx_CLINT(
       wready_o <= 0;
       if (arvalid & !rvalid_o & rready)
         begin
-          if (ifsr_ready)
-            begin
-              case (araddr)
-                `ysyx_BUS_RTC_ADDR:
-                  rdata_o <= mtime[31:0];
-                `ysyx_BUS_RTC_ADDR_UP:
-                  rdata_o <= mtime[63:32];
-              endcase
-              `ysyx_DPI_C_npc_difftest_skip_ref
-                rvalid_o <= 1;
-            end
+          case (araddr)
+            `ysyx_BUS_RTC_ADDR:
+              rdata_o <= mtime[31:0];
+            `ysyx_BUS_RTC_ADDR_UP:
+              rdata_o <= mtime[63:32];
+          endcase
+          `ysyx_DPI_C_npc_difftest_skip_ref
+            rvalid_o <= 1;
         end
       if (wvalid & !wready_o & bready)
         begin
-          if (ifsr_ready)
-            begin
-              wready_o <= 1;
-            end
+          wready_o <= 1;
         end
     end
 endmodule //ysyx_CLINT
