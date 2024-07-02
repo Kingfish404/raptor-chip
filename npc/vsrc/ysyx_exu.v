@@ -38,7 +38,7 @@ module ysyx_EXU (
   reg [BIT_W-1:0] imm_exu, pc_exu, src1, src2, addr_exu;
   reg [3:0] alu_op_exu;
   reg [6:0] opcode_exu;
-  reg csr_wen = 0;
+  wire csr_wen = 0;
   wire csr_ecallen = 0;
   reg [BIT_W-1:0] mem_rdata;
 
