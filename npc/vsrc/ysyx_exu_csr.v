@@ -31,16 +31,24 @@ module ysyx_CSR_Reg (
     ({REG_W{waddr==`ysyx_CSR_MSTATUS}}) & (MSTATUS_IDX) |
     ({REG_W{waddr==`ysyx_CSR_MCAUSE}}) & (MCAUSE_IDX) |
     ({REG_W{waddr==`ysyx_CSR_MEPC}}) & (MEPC_IDX) |
-    ({REG_W{waddr==`ysyx_CSR_MTVEC}}) & (MTVEC_IDX) |
-    (MNONE)
+    ({REG_W{waddr==`ysyx_CSR_MTVEC}}) & (MTVEC_IDX)
   );
   wire [REG_W-1:0] waddr_reg2 = (
     ({REG_W{waddr_add1==`ysyx_CSR_MSTATUS}}) & (MSTATUS_IDX) |
     ({REG_W{waddr_add1==`ysyx_CSR_MCAUSE}}) & (MCAUSE_IDX) |
     ({REG_W{waddr_add1==`ysyx_CSR_MEPC}}) & (MEPC_IDX) |
-    ({REG_W{waddr_add1==`ysyx_CSR_MTVEC}}) & (MTVEC_IDX) |
-    (MNONE)
+    ({REG_W{waddr_add1==`ysyx_CSR_MTVEC}}) & (MTVEC_IDX)
   );
+  wire waddr_reg2_valid = (
+    (waddr_add1 == `ysyx_CSR_MSTATUS) |
+     (waddr_add1 == `ysyx_CSR_MCAUSE) |
+      (waddr_add1 == `ysyx_CSR_MEPC) |
+       (waddr_add1 == `ysyx_CSR_MTVEC));
+  wire waddr_reg1_valid = (
+    (waddr == `ysyx_CSR_MSTATUS) |
+     (waddr == `ysyx_CSR_MCAUSE) |
+      (waddr == `ysyx_CSR_MEPC) |
+       (waddr == `ysyx_CSR_MTVEC));
 
   assign rdata_o = (
            ({BIT_W{waddr==`ysyx_CSR_MVENDORID}}) & (32'h79737978) |
@@ -62,10 +70,10 @@ module ysyx_CSR_Reg (
       csr[MSTATUS_IDX] <= RESET_VAL;
     end else if (exu_valid) begin
       if (wen) begin
-        if (waddr_reg1 != MNONE) begin
+        if (waddr_reg1_valid) begin
           csr[waddr_reg1] <= wdata;
         end
-        if (waddr_reg2 != MNONE) begin
+        if (waddr_reg2_valid) begin
           csr[waddr_reg2] <= wdata_add1;
         end
       end
