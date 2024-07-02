@@ -354,22 +354,12 @@ module ysyx_CLINT(
         begin
           mtime <= mtime + 1;
         end
-      rvalid_o <= 0;
-      wready_o <= 0;
       if (arvalid & !rvalid_o & rready)
         begin
-          // case (araddr)
-          //   `ysyx_BUS_RTC_ADDR:
-          //     rdata_o <= mtime[31:0];
-          //   `ysyx_BUS_RTC_ADDR_UP:
-          //     rdata_o <= mtime[63:32];
-          // endcase
           `ysyx_DPI_C_npc_difftest_skip_ref
             rvalid_o <= 1;
-        end
-      if (wvalid & !wready_o & bready)
-        begin
-          wready_o <= 1;
+        end else begin
+           rvalid_o <= 0;
         end
     end
 endmodule //ysyx_CLINT
