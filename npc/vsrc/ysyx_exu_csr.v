@@ -1,20 +1,24 @@
 `include "ysyx_macro.v"
 `include "ysyx_macro_csr.v"
 
-module ysyx_CSR_Reg(
-    input clk, rst,
-    input wen, exu_valid,
+module ysyx_CSR_Reg (
+    input clk,
+    rst,
+    input wen,
+    exu_valid,
     input ecallen,
-    input [R_W-1:0] waddr, waddr_add1,
-    input [BIT_W-1:0] wdata, wdata_add1,
+    input [R_W-1:0] waddr,
+    waddr_add1,
+    input [BIT_W-1:0] wdata,
+    wdata_add1,
     output reg [BIT_W-1:0] rdata_o,
     output [BIT_W-1:0] mtvec_o,
     output [BIT_W-1:0] mepc_o
-  );
-  parameter MNONE        = 'h0;
-  parameter MCAUSE_IDX  = 'h1;
-  parameter MEPC_IDX    = 'h2;
-  parameter MTVEC_IDX   = 'h3;
+);
+  parameter MNONE = 'h0;
+  parameter MCAUSE_IDX = 'h1;
+  parameter MEPC_IDX = 'h2;
+  parameter MTVEC_IDX = 'h3;
   parameter MSTATUS_IDX = 'h4;
 
   parameter R_W = 12;
@@ -47,31 +51,25 @@ module ysyx_CSR_Reg(
            ({BIT_W{waddr==`ysyx_CSR_MTVEC}}) & (csr[MTVEC_IDX])
          );
 
-  assign mepc_o  = csr[MEPC_IDX];
+  assign mepc_o = csr[MEPC_IDX];
   assign mtvec_o = csr[MTVEC_IDX];
 
-  always @(posedge clk)
-    begin
-      if (rst)
-        begin
-          csr[MNONE]        <= RESET_VAL;
-          csr[MCAUSE_IDX]   <= RESET_VAL;
-          csr[MEPC_IDX]     <= RESET_VAL;
-          csr[MTVEC_IDX]    <= RESET_VAL;
-          csr[MSTATUS_IDX]  <= RESET_VAL;
-        end
-      else if (exu_valid)
-        begin
-          if (wen)
-            begin
-              csr[waddr_reg_1] <= wdata;
-              csr[waddr_reg_2] <= wdata_add1;
-            end
-          if (ecallen)
-            begin
-              csr[MSTATUS_IDX][`ysyx_CSR_MSTATUS_MPIE_IDX] <= csr[MSTATUS_IDX][`ysyx_CSR_MSTATUS_MIE_IDX];
-              csr[MSTATUS_IDX][`ysyx_CSR_MSTATUS_MIE_IDX] <= 1'b0;
-            end
-        end
+  always @(posedge clk) begin
+    if (rst) begin
+      csr[MNONE]       <= RESET_VAL;
+      csr[MCAUSE_IDX]  <= RESET_VAL;
+      csr[MEPC_IDX]    <= RESET_VAL;
+      csr[MTVEC_IDX]   <= RESET_VAL;
+      csr[MSTATUS_IDX] <= RESET_VAL;
+    end else if (exu_valid) begin
+      if (wen) begin
+        csr[waddr_reg_1] <= wdata;
+        csr[waddr_reg_2] <= wdata_add1;
+      end
+      if (ecallen) begin
+        csr[MSTATUS_IDX][`ysyx_CSR_MSTATUS_MPIE_IDX] <= csr[MSTATUS_IDX][`ysyx_CSR_MSTATUS_MIE_IDX];
+        csr[MSTATUS_IDX][`ysyx_CSR_MSTATUS_MIE_IDX] <= 1'b0;
+      end
     end
-endmodule //ysyx_CSR_Reg
+  end
+endmodule  //ysyx_CSR_Reg
