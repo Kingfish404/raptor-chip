@@ -8,7 +8,7 @@
 `define ysyx_OP_JAL           7'b1101111
 `define ysyx_OP_JALR          7'b1100111
 `define ysyx_OP_SYSTEM        7'b1110011
-`define ysyx_OP_FENCE_I       7'b000100f
+`define ysyx_OP_FENCE_I       7'b0001111
 
 `define ysyx_OP_SYSTEM_FUNC3  4'b0000
 `define ysyx_OP_SYSTEM_ECALL  12'b0000000_00000
