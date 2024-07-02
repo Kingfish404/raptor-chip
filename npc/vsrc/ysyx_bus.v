@@ -310,7 +310,6 @@ module ysyx_CLINT(
     (araddr == `ysyx_BUS_RTC_ADDR_UP) ? mtime[63:32] :
     (0)
   );
-  assign rlast_o = 1;
   always @(posedge clk)
     begin
       if (rst)
