@@ -46,15 +46,15 @@ static void perf()
   printf("| %8s, %% | %8s, %% | %8s, %% | %6s, %% | %6s, %% | %6s, %% | %6s, %% | %3s, %% | %5s, %% |\n",
          "IFU", "LSU", "EXU", "LD", "ST", "ALU", "BR", "CSR", "OTH");
   printf("| %8lld,%2.0f | %8lld,%2.0f | %8lld,%2.0f | %6lld,%2.0f | %6lld,%2.0f | %6lld,%2.0f | %6lld,%2.0f | %3lld,%2.0f | %5lld,%2.0f |\n",
-         (long long) pmu.ifu_stall_cycle, percentage(pmu.ifu_stall_cycle, pmu.active_cycle),
-         (long long) pmu.lsu_stall_cycle, percentage(pmu.lsu_stall_cycle, pmu.active_cycle),
-         (long long) pmu.exu_alu_cnt, percentage(pmu.exu_alu_cnt, pmu.instr_cnt),
-         (long long) pmu.ld_inst_cnt, percentage(pmu.ld_inst_cnt, pmu.instr_cnt),
-         (long long) pmu.st_inst_cnt, percentage(pmu.st_inst_cnt, pmu.instr_cnt),
-         (long long) pmu.alu_inst_cnt, percentage(pmu.alu_inst_cnt, pmu.instr_cnt),
-         (long long) pmu.b_inst_cnt, percentage(pmu.b_inst_cnt, pmu.instr_cnt),
-         (long long) pmu.csr_inst_cnt, percentage(pmu.csr_inst_cnt, pmu.instr_cnt),
-         (long long) pmu.other_inst_cnt, percentage(pmu.other_inst_cnt, pmu.instr_cnt));
+         (long long)pmu.ifu_stall_cycle, percentage(pmu.ifu_stall_cycle, pmu.active_cycle),
+         (long long)pmu.lsu_stall_cycle, percentage(pmu.lsu_stall_cycle, pmu.active_cycle),
+         (long long)pmu.exu_alu_cnt, percentage(pmu.exu_alu_cnt, pmu.instr_cnt),
+         (long long)pmu.ld_inst_cnt, percentage(pmu.ld_inst_cnt, pmu.instr_cnt),
+         (long long)pmu.st_inst_cnt, percentage(pmu.st_inst_cnt, pmu.instr_cnt),
+         (long long)pmu.alu_inst_cnt, percentage(pmu.alu_inst_cnt, pmu.instr_cnt),
+         (long long)pmu.b_inst_cnt, percentage(pmu.b_inst_cnt, pmu.instr_cnt),
+         (long long)pmu.csr_inst_cnt, percentage(pmu.csr_inst_cnt, pmu.instr_cnt),
+         (long long)pmu.other_inst_cnt, percentage(pmu.other_inst_cnt, pmu.instr_cnt));
   printf("======== TOP DOWN Analysis ========\n");
   printf("| %8s, %% | %8s, %% | %8s, %% | %8s, %% | %8s, %% |\n",
          "IFU", "LSU", "EXU", "LD", "ST");
