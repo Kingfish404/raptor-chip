@@ -342,7 +342,7 @@ module ysyx_CLINT(
   assign rdata_o = (
     (araddr == `ysyx_BUS_RTC_ADDR) ? mtime[31:0] :
     (araddr == `ysyx_BUS_RTC_ADDR_UP) ? mtime[63:32] :
-    0
+    (0)
   );
   always @(posedge clk)
     begin
@@ -357,9 +357,9 @@ module ysyx_CLINT(
       if (arvalid & !rvalid_o & rready)
         begin
           `ysyx_DPI_C_npc_difftest_skip_ref
-            rvalid_o <= 1;
+          rvalid_o <= 1;
         end else begin
-           rvalid_o <= 0;
+          rvalid_o <= 0;
         end
     end
 endmodule //ysyx_CLINT
