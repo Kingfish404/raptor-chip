@@ -148,7 +148,7 @@ static void statistic()
   double time_s = g_timer / 1e6;
   double frequency = pmu.active_cycle / time_s;
   Log("time: %d (ns), %d (ms)", g_timer, (int)(g_timer / 1e3));
-  Log(FMT_BLUE("Simulate Freq: %9.1f Hz, %6.3f GHz"), frequency, (double)(frequency * 1.0 / 1e6));
+  Log(FMT_BLUE("Simulate Freq: %9.1f Hz, %6.3f MHz"), frequency, (double)(frequency * 1.0 / 1e6));
   Log(FMT_BLUE("Simulate Inst: %9.1f I/s, %3.0f KInst/s"),
       pmu.instr_cnt / time_s, pmu.instr_cnt / time_s / 1e3);
   Log("%s at pc: " FMT_WORD_NO_PREFIX ", inst: " FMT_WORD_NO_PREFIX,
