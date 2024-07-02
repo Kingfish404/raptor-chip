@@ -21,7 +21,7 @@ module ysyx_CSR_Reg(
   parameter BIT_W = `ysyx_W_WIDTH;
   parameter RESET_VAL = 0;
 
-  reg [BIT_W-1:0] csr[0:4];
+  reg [BIT_W-1:0] csr[5];
 
   assign rdata_o = (
            ({BIT_W{waddr==`ysyx_CSR_MVENDORID}}) & (32'h79737978) |
@@ -35,61 +35,61 @@ module ysyx_CSR_Reg(
   assign mepc_o  = csr[MEPC_IDX];
   assign mtvec_o = csr[MTVEC_IDX];
 
-  always @(posedge clk)
-    begin
-      if (rst)
-        begin
-          csr[MCAUSE_IDX]   <= RESET_VAL;
-          csr[MEPC_IDX]     <= RESET_VAL;
-          csr[MTVEC_IDX]    <= RESET_VAL;
-          csr[MSTATUS_IDX]  <= RESET_VAL;
-        end
-      else if (exu_valid)
-        begin
-          if (wen)
-            begin
-              case (waddr)
-                `ysyx_CSR_MSTATUS:
-                  begin
-                    csr[MSTATUS_IDX] <= wdata;
-                  end
-                `ysyx_CSR_MEPC:
-                  begin
-                    csr[MEPC_IDX] <= wdata;
-                  end
-                `ysyx_CSR_MTVEC:
-                  begin
-                    csr[MTVEC_IDX] <= wdata;
-                  end
-                `ysyx_CSR_MCAUSE:
-                  begin
-                    csr[MCAUSE_IDX] <= wdata;
-                  end
-              endcase
-              case (waddr_add1)
-                `ysyx_CSR_MSTATUS:
-                  begin
-                    csr[MSTATUS_IDX] <= wdata_add1;
-                  end
-                `ysyx_CSR_MEPC:
-                  begin
-                    csr[MEPC_IDX] <= wdata_add1;
-                  end
-                `ysyx_CSR_MTVEC:
-                  begin
-                    csr[MTVEC_IDX] <= wdata_add1;
-                  end
-                `ysyx_CSR_MCAUSE:
-                  begin
-                    csr[MCAUSE_IDX] <= wdata_add1;
-                  end
-              endcase
-            end
-          if (ecallen)
-            begin
-              csr[MSTATUS_IDX][`ysyx_CSR_MSTATUS_MPIE_IDX] <= csr[MSTATUS_IDX][`ysyx_CSR_MSTATUS_MIE_IDX];
-              csr[MSTATUS_IDX][`ysyx_CSR_MSTATUS_MIE_IDX] <= 1'b0;
-            end
-        end
-    end
+  // always @(posedge clk)
+  //   begin
+  //     if (rst)
+  //       begin
+  //         csr[MCAUSE_IDX]   <= RESET_VAL;
+  //         csr[MEPC_IDX]     <= RESET_VAL;
+  //         csr[MTVEC_IDX]    <= RESET_VAL;
+  //         csr[MSTATUS_IDX]  <= RESET_VAL;
+  //       end
+  //     else if (exu_valid)
+  //       begin
+  //         if (wen)
+  //           begin
+  //             case (waddr)
+  //               `ysyx_CSR_MSTATUS:
+  //                 begin
+  //                   csr[MSTATUS_IDX] <= wdata;
+  //                 end
+  //               `ysyx_CSR_MEPC:
+  //                 begin
+  //                   csr[MEPC_IDX] <= wdata;
+  //                 end
+  //               `ysyx_CSR_MTVEC:
+  //                 begin
+  //                   csr[MTVEC_IDX] <= wdata;
+  //                 end
+  //               `ysyx_CSR_MCAUSE:
+  //                 begin
+  //                   csr[MCAUSE_IDX] <= wdata;
+  //                 end
+  //             endcase
+  //             case (waddr_add1)
+  //               `ysyx_CSR_MSTATUS:
+  //                 begin
+  //                   csr[MSTATUS_IDX] <= wdata_add1;
+  //                 end
+  //               `ysyx_CSR_MEPC:
+  //                 begin
+  //                   csr[MEPC_IDX] <= wdata_add1;
+  //                 end
+  //               `ysyx_CSR_MTVEC:
+  //                 begin
+  //                   csr[MTVEC_IDX] <= wdata_add1;
+  //                 end
+  //               `ysyx_CSR_MCAUSE:
+  //                 begin
+  //                   csr[MCAUSE_IDX] <= wdata_add1;
+  //                 end
+  //             endcase
+  //           end
+  //         if (ecallen)
+  //           begin
+  //             csr[MSTATUS_IDX][`ysyx_CSR_MSTATUS_MPIE_IDX] <= csr[MSTATUS_IDX][`ysyx_CSR_MSTATUS_MIE_IDX];
+  //             csr[MSTATUS_IDX][`ysyx_CSR_MSTATUS_MIE_IDX] <= 1'b0;
+  //           end
+  //       end
+  //   end
 endmodule //ysyx_CSR_Reg
