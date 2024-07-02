@@ -10,8 +10,8 @@ module ysyx_LSU(
     input [DATA_W-1:0] wdata,
     // to exu
     output [DATA_W-1:0] rdata_o,
-    output reg rvalid_o,
-    output reg wready_o,
+    output rvalid_o,
+    output wready_o,
 
     // to bus load
     output [DATA_W-1:0] lsu_araddr_o,
