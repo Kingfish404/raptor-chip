@@ -1,4 +1,6 @@
 `include "ysyx_macro.v"
+`include "ysyx_macro_soc.v"
+`include "ysyx_macro_dpi_c.v"
 
 module ysyxSoC (
     input clock,

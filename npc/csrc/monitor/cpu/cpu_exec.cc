@@ -46,15 +46,15 @@ static void perf()
   printf("| %8s, %% | %8s, %% | %8s, %% | %6s, %% | %6s, %% | %6s, %% | %6s, %% | %3s, %% | %5s, %% |\n",
          "IFU", "LSU", "EXU", "LD", "ST", "ALU", "BR", "CSR", "OTH");
   printf("| %8lld,%2.0f | %8lld,%2.0f | %8lld,%2.0f | %6lld,%2.0f | %6lld,%2.0f | %6lld,%2.0f | %6lld,%2.0f | %3lld,%2.0f | %5lld,%2.0f |\n",
-         pmu.ifu_stall_cycle, percentage(pmu.ifu_stall_cycle, pmu.active_cycle),
-         pmu.lsu_stall_cycle, percentage(pmu.lsu_stall_cycle, pmu.active_cycle),
-         pmu.exu_alu_cnt, percentage(pmu.exu_alu_cnt, pmu.instr_cnt),
-         pmu.ld_inst_cnt, percentage(pmu.ld_inst_cnt, pmu.instr_cnt),
-         pmu.st_inst_cnt, percentage(pmu.st_inst_cnt, pmu.instr_cnt),
-         pmu.alu_inst_cnt, percentage(pmu.alu_inst_cnt, pmu.instr_cnt),
-         pmu.b_inst_cnt, percentage(pmu.b_inst_cnt, pmu.instr_cnt),
-         pmu.csr_inst_cnt, percentage(pmu.csr_inst_cnt, pmu.instr_cnt),
-         pmu.other_inst_cnt, percentage(pmu.other_inst_cnt, pmu.instr_cnt));
+         (long long)pmu.ifu_stall_cycle, percentage(pmu.ifu_stall_cycle, pmu.active_cycle),
+         (long long)pmu.lsu_stall_cycle, percentage(pmu.lsu_stall_cycle, pmu.active_cycle),
+         (long long)pmu.exu_alu_cnt, percentage(pmu.exu_alu_cnt, pmu.instr_cnt),
+         (long long)pmu.ld_inst_cnt, percentage(pmu.ld_inst_cnt, pmu.instr_cnt),
+         (long long)pmu.st_inst_cnt, percentage(pmu.st_inst_cnt, pmu.instr_cnt),
+         (long long)pmu.alu_inst_cnt, percentage(pmu.alu_inst_cnt, pmu.instr_cnt),
+         (long long)pmu.b_inst_cnt, percentage(pmu.b_inst_cnt, pmu.instr_cnt),
+         (long long)pmu.csr_inst_cnt, percentage(pmu.csr_inst_cnt, pmu.instr_cnt),
+         (long long)pmu.other_inst_cnt, percentage(pmu.other_inst_cnt, pmu.instr_cnt));
   printf("======== TOP DOWN Analysis ========\n");
   printf("| %8s, %% | %8s, %% | %8s, %% | %8s, %% | %8s, %% |\n",
          "IFU", "LSU", "EXU", "LD", "ST");
@@ -148,7 +148,7 @@ static void statistic()
   double time_s = g_timer / 1e6;
   double frequency = pmu.active_cycle / time_s;
   Log("time: %d (ns), %d (ms)", g_timer, (int)(g_timer / 1e3));
-  Log(FMT_BLUE("Simulate Freq: %9.1f Hz, %4d MHz"), frequency, (int)(frequency / 1e3));
+  Log(FMT_BLUE("Simulate Freq: %9.1f Hz, %6.3f MHz"), frequency, (double)(frequency * 1.0 / 1e6));
   Log(FMT_BLUE("Simulate Inst: %9.1f I/s, %3.0f KInst/s"),
       pmu.instr_cnt / time_s, pmu.instr_cnt / time_s / 1e3);
   Log("%s at pc: " FMT_WORD_NO_PREFIX ", inst: " FMT_WORD_NO_PREFIX,
