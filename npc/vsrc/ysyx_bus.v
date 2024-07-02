@@ -308,12 +308,12 @@ module ysyx_CLINT(
     input [3:0] arid,
     input [ADDR_W-1:0] araddr,
     input arvalid,
-    output reg arready_o,
+    output arready_o,
 
-    output reg [3:0] rid,
-    output reg rlast_o,
+    output [3:0] rid,
+    output rlast_o,
     output [DATA_W-1:0] rdata_o,
-    output reg [1:0] rresp_o,
+    output [1:0] rresp_o,
     output reg rvalid_o,
     input rready,
 
@@ -329,7 +329,7 @@ module ysyx_CLINT(
     input [DATA_W-1:0] wdata,
     input [7:0] wstrb,
     input wvalid,
-    output reg wready_o,
+    output wready_o,
 
     output [3:0] bid,
     output [1:0] bresp_o,
@@ -344,6 +344,7 @@ module ysyx_CLINT(
     (araddr == `ysyx_BUS_RTC_ADDR_UP) ? mtime[63:32] :
     (0)
   );
+  assign rlast_o = 1;
   always @(posedge clk)
     begin
       if (rst)
