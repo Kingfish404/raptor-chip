@@ -28,9 +28,9 @@ module ysyx_IFU (
 
   parameter L1I_SIZE = 4;
   parameter L1I_LEN = 2;
-  reg [32-1:0] l1i[L1I_SIZE-1:0];
+  reg [32-1:0] l1i[L1I_SIZE];
   reg [L1I_SIZE-1:0] l1i_valid = 0;
-  reg [32-L1I_LEN-2-1:0] l1i_tag[L1I_SIZE-1:0];
+  reg [32-L1I_LEN-2-1:0] l1i_tag[L1I_SIZE];
 
   wire arvalid;
   wire [32-L1I_LEN-2-1:0] addr_tag = ifu_araddr_o[ADDR_W-1:L1I_LEN+2];
