@@ -314,6 +314,7 @@ module ysyx_RegisterFile (
       begin
         always @(posedge clk)
           begin
+            rf[0] <= 0;
             if (rst)
               begin
                 rf[i] <= 0;
@@ -326,8 +327,8 @@ module ysyx_RegisterFile (
       end
   endgenerate
 
-  always @(posedge clk)
-    begin
-      rf[0] <= 0;
-    end
+  // always @(posedge clk)
+  //   begin
+  //     rf[0] <= 0;
+  //   end
 endmodule // ysyx_RegisterFile
