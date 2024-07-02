@@ -138,7 +138,7 @@ module ysyx (
     .pc_o(pc)
   );
 
-  ysyx_RegisterFile #(REG_ADDR_W, DATA_W) regs(
+  ysyx_RegisterFile #(.REG_ADDR_W(REG_ADDR_W), .DATA_W(DATA_W)) regs(
     .clk(clock), .rst(reset),
     .exu_valid(wben),
 
@@ -304,7 +304,7 @@ module ysyx_RegisterFile (
   parameter integer REG_ADDR_W = 4;
   parameter integer DATA_W = 32;
   parameter integer REG_NUM = 16;
-  reg [DATA_W-1:0] rf[0:REG_NUM-1];
+  reg [DATA_W-1:0] rf[REG_NUM];
 
   assign src1_o = rf[s1addr[3:0]];
   assign src2_o = rf[s2addr[3:0]];
