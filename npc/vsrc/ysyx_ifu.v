@@ -19,7 +19,6 @@ module ysyx_IFU (
   parameter integer ADDR_W = 32;
   parameter integer DATA_W = 32;
 
-  reg [DATA_W-1:0] inst_ifu = 0;
   reg state, valid;
   reg pvalid;
 
@@ -57,14 +56,12 @@ module ysyx_IFU (
         begin
           valid <= 0;
           pvalid <= 1;
-          inst_ifu <= 0;
         end
       else
         begin
           // pc_o <= pc;
           if (ifu_rvalid)
             begin
-              inst_ifu <= ifu_rdata;
               l1i[addr_idx] <= ifu_rdata;
               l1i_tag[addr_idx] <= addr_tag;
               l1i_valid[addr_idx] <= 1'b1;
