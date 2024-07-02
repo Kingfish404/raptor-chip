@@ -15,41 +15,31 @@ module ysyx_CSR_Reg (
     output [BIT_W-1:0] mtvec_o,
     output [BIT_W-1:0] mepc_o
 );
-  parameter MCAUSE_IDX = 'h0;
-  parameter MEPC_IDX = 'h1;
-  parameter MTVEC_IDX = 'h2;
-  parameter MSTATUS_IDX = 'h3;
-  parameter MNONE = 'h4;
+  parameter MNONE = 'h0;
+  parameter MCAUSE_IDX = 'h1;
+  parameter MEPC_IDX = 'h2;
+  parameter MTVEC_IDX = 'h3;
+  parameter MSTATUS_IDX = 'h4;
 
   parameter R_W = 12;
-  parameter REG_W = 2;
+  parameter REG_W = 3;
   parameter BIT_W = `ysyx_W_WIDTH;
   parameter RESET_VAL = 0;
 
   reg [BIT_W-1:0] csr[4];
-  wire [REG_W-1:0] waddr_reg1 = (
+  wire [REG_W-1:0] waddr_reg_1 = (
     ({REG_W{waddr==`ysyx_CSR_MSTATUS}}) & (MSTATUS_IDX) |
     ({REG_W{waddr==`ysyx_CSR_MCAUSE}}) & (MCAUSE_IDX) |
     ({REG_W{waddr==`ysyx_CSR_MEPC}}) & (MEPC_IDX) |
-    ({REG_W{waddr==`ysyx_CSR_MTVEC}}) & (MTVEC_IDX)
+    ({REG_W{waddr==`ysyx_CSR_MTVEC}}) & (MTVEC_IDX) |
+    (MNONE)
   );
-  wire [REG_W-1:0] waddr_reg2 = (
+  wire [REG_W-1:0] waddr_reg_2 = (
     ({REG_W{waddr_add1==`ysyx_CSR_MSTATUS}}) & (MSTATUS_IDX) |
     ({REG_W{waddr_add1==`ysyx_CSR_MCAUSE}}) & (MCAUSE_IDX) |
     ({REG_W{waddr_add1==`ysyx_CSR_MEPC}}) & (MEPC_IDX) |
-    ({REG_W{waddr_add1==`ysyx_CSR_MTVEC}}) & (MTVEC_IDX)
-  );
-  wire waddr_reg1_valid = (
-    (waddr == `ysyx_CSR_MSTATUS) |
-    (waddr == `ysyx_CSR_MCAUSE) |
-    (waddr == `ysyx_CSR_MEPC) |
-    (waddr == `ysyx_CSR_MTVEC)
-  );
-  wire waddr_reg2_valid = (
-    (waddr_add1 == `ysyx_CSR_MSTATUS) |
-    (waddr_add1 == `ysyx_CSR_MCAUSE) |
-    (waddr_add1 == `ysyx_CSR_MEPC) |
-    (waddr_add1 == `ysyx_CSR_MTVEC)
+    ({REG_W{waddr_add1==`ysyx_CSR_MTVEC}}) & (MTVEC_IDX) |
+    (MNONE)
   );
 
   assign rdata_o = (
@@ -72,12 +62,8 @@ module ysyx_CSR_Reg (
       csr[MSTATUS_IDX] <= RESET_VAL;
     end else if (exu_valid) begin
       if (wen) begin
-        if (waddr_reg1_valid) begin
-          csr[waddr_reg1] <= wdata;
-        end
-        if (waddr_reg2_valid) begin
-          csr[waddr_reg2] <= wdata_add1;
-        end
+        csr[waddr_reg_1] <= wdata;
+        csr[waddr_reg_2] <= wdata_add1;
       end
       if (ecallen) begin
         csr[MSTATUS_IDX][`ysyx_CSR_MSTATUS_MPIE_IDX] <= csr[MSTATUS_IDX][`ysyx_CSR_MSTATUS_MIE_IDX];
