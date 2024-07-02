@@ -21,10 +21,11 @@ module ysyx_EXU (
   input [3:0] alu_op,
   input [6:0] opcode,
   input [BIT_W-1:0] pc,
-  output reg [BIT_W-1:0] reg_wdata_o, npc_wdata_o,
+  output [BIT_W-1:0] reg_wdata_o, npc_wdata_o,
   output reg [4:0] rd_o,
   output [3:0] alu_op_o,
-  output reg rwen_o, wben_o, ebreak_o,
+  output reg rwen_o, wben_o,
+  output ebreak_o,
   output reg ren_o, wen_o
 );
   parameter integer BIT_W = 64;
