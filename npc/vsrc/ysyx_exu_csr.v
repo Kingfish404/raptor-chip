@@ -39,16 +39,18 @@ module ysyx_CSR_Reg (
     ({REG_W{waddr_add1==`ysyx_CSR_MEPC}}) & (MEPC_IDX) |
     ({REG_W{waddr_add1==`ysyx_CSR_MTVEC}}) & (MTVEC_IDX)
   );
-  wire waddr_reg2_valid = (
-    (waddr_add1 == `ysyx_CSR_MSTATUS) |
-     (waddr_add1 == `ysyx_CSR_MCAUSE) |
-      (waddr_add1 == `ysyx_CSR_MEPC) |
-       (waddr_add1 == `ysyx_CSR_MTVEC));
   wire waddr_reg1_valid = (
     (waddr == `ysyx_CSR_MSTATUS) |
-     (waddr == `ysyx_CSR_MCAUSE) |
-      (waddr == `ysyx_CSR_MEPC) |
-       (waddr == `ysyx_CSR_MTVEC));
+    (waddr == `ysyx_CSR_MCAUSE) |
+    (waddr == `ysyx_CSR_MEPC) |
+    (waddr == `ysyx_CSR_MTVEC)
+  );
+  wire waddr_reg2_valid = (
+    (waddr_add1 == `ysyx_CSR_MSTATUS) |
+    (waddr_add1 == `ysyx_CSR_MCAUSE) |
+    (waddr_add1 == `ysyx_CSR_MEPC) |
+    (waddr_add1 == `ysyx_CSR_MTVEC)
+  );
 
   assign rdata_o = (
            ({BIT_W{waddr==`ysyx_CSR_MVENDORID}}) & (32'h79737978) |
