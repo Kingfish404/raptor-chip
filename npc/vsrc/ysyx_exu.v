@@ -143,7 +143,7 @@ module ysyx_EXU (
   );
   assign ebreak_o = (opcode_exu == `ysyx_OP_SYSTEM) && (imm_exu[3:0] == `ysyx_OP_SYSTEM_FUNC3) && (imm_exu[15:4] == `ysyx_OP_SYSTEM_EBREAK);
   always @(*) begin
-    npc_wdata_o = pc_exu + 4;
+    npc_wdata_o = npc_default;
     case (opcode)
       `ysyx_OP_SYSTEM: begin
         case (imm_exu[3:0])
