@@ -319,13 +319,13 @@ module ysyx_CLINT(
       else
         begin
           mtime <= mtime + 1;
-        end
-      if (arvalid)
-        begin
-          `ysyx_DPI_C_npc_difftest_skip_ref
-          rvalid_o <= 1;
-        end else begin
-          rvalid_o <= 0;
+          if (arvalid)
+          begin
+            `ysyx_DPI_C_npc_difftest_skip_ref
+            rvalid_o <= 1;
+          end else begin
+            rvalid_o <= 0;
+          end
         end
     end
 endmodule //ysyx_CLINT
