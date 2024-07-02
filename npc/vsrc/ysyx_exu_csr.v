@@ -62,6 +62,8 @@ module ysyx_CSR_Reg (
       csr[MSTATUS_IDX] <= RESET_VAL;
     end else if (exu_valid) begin
       if (wen) begin
+        if (waddr_reg1 != MNONE) begin
+        end
         csr[waddr_reg_1] <= wdata;
         csr[waddr_reg_2] <= wdata_add1;
       end
