@@ -17,7 +17,7 @@ module ysyx_IDU (
   output [4:0] rs1_o, rs2_o, rd_o,
   output [3:0] alu_op_o,
   output [6:0] opcode_o,
-  output [BIT_W-1:0] pc_o
+  output reg [BIT_W-1:0] pc_o
 );
   parameter BIT_W = `ysyx_W_WIDTH;
 
@@ -38,7 +38,7 @@ module ysyx_IDU (
     if (rst) begin
       valid_o <= 0; ready_o <= 1;
     end
-    else begin 
+    else begin
       if (prev_valid) begin inst_idu <= inst; pc_o <= pc; end
       if (state == `ysyx_IDLE) begin
         if (prev_valid == 1) begin valid_o <= 1; ready_o <= 0; end
