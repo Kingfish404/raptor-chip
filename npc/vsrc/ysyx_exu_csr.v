@@ -26,7 +26,7 @@ module ysyx_CSR_Reg (
   parameter BIT_W = `ysyx_W_WIDTH;
   parameter RESET_VAL = 0;
 
-  reg [BIT_W-1:0] csr[4];
+  reg [BIT_W-1:0] csr[5];
   wire [REG_W-1:0] waddr_reg_1 = (
     ({REG_W{waddr==`ysyx_CSR_MSTATUS}}) & (MSTATUS_IDX) |
     ({REG_W{waddr==`ysyx_CSR_MCAUSE}}) & (MCAUSE_IDX) |
