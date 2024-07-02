@@ -22,19 +22,19 @@ module ysyx_CSR_Reg (
   parameter MNONE = 'h4;
 
   parameter R_W = 12;
-  parameter REG_W = 3;
+  parameter REG_W = 2;
   parameter BIT_W = `ysyx_W_WIDTH;
   parameter RESET_VAL = 0;
 
   reg [BIT_W-1:0] csr[4];
-  wire [REG_W-1:0] waddr_reg_1 = (
+  wire [REG_W-1:0] waddr_reg1 = (
     ({REG_W{waddr==`ysyx_CSR_MSTATUS}}) & (MSTATUS_IDX) |
     ({REG_W{waddr==`ysyx_CSR_MCAUSE}}) & (MCAUSE_IDX) |
     ({REG_W{waddr==`ysyx_CSR_MEPC}}) & (MEPC_IDX) |
     ({REG_W{waddr==`ysyx_CSR_MTVEC}}) & (MTVEC_IDX) |
     (MNONE)
   );
-  wire [REG_W-1:0] waddr_reg_2 = (
+  wire [REG_W-1:0] waddr_reg2 = (
     ({REG_W{waddr_add1==`ysyx_CSR_MSTATUS}}) & (MSTATUS_IDX) |
     ({REG_W{waddr_add1==`ysyx_CSR_MCAUSE}}) & (MCAUSE_IDX) |
     ({REG_W{waddr_add1==`ysyx_CSR_MEPC}}) & (MEPC_IDX) |
@@ -63,9 +63,11 @@ module ysyx_CSR_Reg (
     end else if (exu_valid) begin
       if (wen) begin
         if (waddr_reg1 != MNONE) begin
+          csr[waddr_reg1] <= wdata;
         end
-        csr[waddr_reg_1] <= wdata;
-        csr[waddr_reg_2] <= wdata_add1;
+        if (waddr_reg2 != MNONE) begin
+          csr[waddr_reg2] <= wdata_add1;
+        end
       end
       if (ecallen) begin
         csr[MSTATUS_IDX][`ysyx_CSR_MSTATUS_MPIE_IDX] <= csr[MSTATUS_IDX][`ysyx_CSR_MSTATUS_MIE_IDX];
