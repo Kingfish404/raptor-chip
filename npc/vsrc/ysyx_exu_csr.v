@@ -66,42 +66,6 @@ module ysyx_CSR_Reg(
             begin
               csr[waddr_reg_1] <= wdata;
               csr[waddr_reg_2] <= wdata_add1;
-              // case (waddr)
-              //   `ysyx_CSR_MSTATUS:
-              //     begin
-              //       csr[MSTATUS_IDX] <= wdata;
-              //     end
-              //   `ysyx_CSR_MEPC:
-              //     begin
-              //       csr[MEPC_IDX] <= wdata;
-              //     end
-              //   `ysyx_CSR_MTVEC:
-              //     begin
-              //       csr[MTVEC_IDX] <= wdata;
-              //     end
-              //   `ysyx_CSR_MCAUSE:
-              //     begin
-              //       csr[MCAUSE_IDX] <= wdata;
-              //     end
-              // endcase
-              // case (waddr_add1)
-              //   `ysyx_CSR_MSTATUS:
-              //     begin
-              //       csr[MSTATUS_IDX] <= wdata_add1;
-              //     end
-              //   `ysyx_CSR_MEPC:
-              //     begin
-              //       csr[MEPC_IDX] <= wdata_add1;
-              //     end
-              //   `ysyx_CSR_MTVEC:
-              //     begin
-              //       csr[MTVEC_IDX] <= wdata_add1;
-              //     end
-              //   `ysyx_CSR_MCAUSE:
-              //     begin
-              //       csr[MCAUSE_IDX] <= wdata_add1;
-              //     end
-              // endcase
             end
           if (ecallen)
             begin
