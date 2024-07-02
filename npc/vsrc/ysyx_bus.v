@@ -315,7 +315,7 @@ module ysyx_CLINT(
     output [DATA_W-1:0] rdata_o,
     output [1:0] rresp_o,
     output reg rvalid_o,
-    input rready,
+    input rready
 
     // input [1:0] awburst,
     // input [2:0] awsize,
