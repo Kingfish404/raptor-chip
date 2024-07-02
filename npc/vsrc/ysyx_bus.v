@@ -285,16 +285,8 @@ module ysyx_BUS_ARBITER(
   wire clint_awready_o, clint_wready_o, clint_bvalid_o;
   ysyx_CLINT #(.ADDR_W(ADDR_W), .DATA_W(DATA_W)) clint(
                .clk(clk), .rst(rst),
-               .arburst(2'b00), .arsize(3'b000), .arlen(8'b00000000), .arid(4'b0000),
                .araddr(sram_araddr), .arvalid(clint_arvalid), .arready_o(clint_arready_o),
-               .rid(), .rlast_o(),
-               .rdata_o(clint_rdata_o), .rresp_o(clint_rresp_o), .rvalid_o(clint_rvalid_o), .rready(1)
-              //  .awburst(2'b00), .awsize(3'b000), .awlen(8'b00000000), .awid(4'b0000),
-              //  .awaddr(0), .awvalid(0), .awready_o(clint_awready_o),
-              //  .wlast(1'b0),
-              //  .wdata(0), .wstrb(0), .wvalid(0), .wready_o(clint_wready_o),
-              //  .bid(),
-              //  .bresp_o(clint_bresp_o), .bvalid_o(clint_bvalid_o), .bready(0)
+               .rdata_o(clint_rdata_o), .rresp_o(clint_rresp_o), .rvalid_o(clint_rvalid_o)
              );
 endmodule
 
@@ -302,39 +294,13 @@ endmodule
 module ysyx_CLINT(
     input clk, rst,
 
-    input [1:0] arburst,
-    input [2:0] arsize,
-    input [7:0] arlen,
-    input [3:0] arid,
     input [ADDR_W-1:0] araddr,
     input arvalid,
     output arready_o,
 
-    output [3:0] rid,
-    output rlast_o,
     output [DATA_W-1:0] rdata_o,
     output [1:0] rresp_o,
-    output reg rvalid_o,
-    input rready
-
-    // input [1:0] awburst,
-    // input [2:0] awsize,
-    // input [7:0] awlen,
-    // input [3:0] awid,
-    // input [ADDR_W-1:0] awaddr,
-    // input awvalid,
-    // output awready_o,
-
-    // input wlast,
-    // input [DATA_W-1:0] wdata,
-    // input [7:0] wstrb,
-    // input wvalid,
-    // output wready_o,
-
-    // output [3:0] bid,
-    // output [1:0] bresp_o,
-    // output bvalid_o,
-    // input bready
+    output reg rvalid_o
   );
   parameter integer ADDR_W = 32, DATA_W = 32;
 
@@ -355,7 +321,7 @@ module ysyx_CLINT(
         begin
           mtime <= mtime + 1;
         end
-      if (arvalid & !rvalid_o & rready)
+      if (arvalid)
         begin
           `ysyx_DPI_C_npc_difftest_skip_ref
           rvalid_o <= 1;
