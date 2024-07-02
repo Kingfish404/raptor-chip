@@ -354,7 +354,6 @@ module ysyx_CLINT(
         begin
           mtime <= mtime + 1;
         end
-      rdata_o <= 0;
       rvalid_o <= 0;
       wready_o <= 0;
       if (arvalid & !rvalid_o & rready)
