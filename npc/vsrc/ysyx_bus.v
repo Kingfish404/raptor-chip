@@ -304,7 +304,7 @@ module ysyx_CLINT(
   );
   parameter integer ADDR_W = 32, DATA_W = 32;
 
-  reg [63:0] mtime;
+  reg [63:0] mtime = 0;
   assign rdata_o = (
     (araddr == `ysyx_BUS_RTC_ADDR) ? mtime[31:0] :
     (araddr == `ysyx_BUS_RTC_ADDR_UP) ? mtime[63:32] :
