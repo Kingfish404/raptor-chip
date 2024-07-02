@@ -49,14 +49,9 @@ module ysyx_EXU (
     .rdata_o(csr_rdata), .mepc_o(mepc), .mtvec_o(mtvec)
   );
 
-  // assign reg_wdata_o = (
-  //   (opcode_exu == `ysyx_OP_IL_TYPE) ? mem_rdata : 
-  //   (opcode_exu == `ysyx_OP_SYSTEM) ? csr_rdata : reg_wdata);
   assign reg_wdata_o = (
-   ({BIT_W{opcode_exu == `ysyx_OP_IL_TYPE}}) & mem_rdata |
-    ({BIT_W{opcode_exu == `ysyx_OP_SYSTEM}}) & csr_rdata |
-    reg_wdata
-  );
+    (opcode_exu == `ysyx_OP_IL_TYPE) ? mem_rdata : 
+    (opcode_exu == `ysyx_OP_SYSTEM) ? csr_rdata : reg_wdata);
   assign csr_addr = (
     (imm_exu[3:0] == `ysyx_OP_SYSTEM_FUNC3) && imm_exu[15:4] == `ysyx_OP_SYSTEM_ECALL ? `ysyx_CSR_MCAUSE :
     (imm_exu[3:0] == `ysyx_OP_SYSTEM_FUNC3) && imm_exu[15:4] == `ysyx_OP_SYSTEM_MRET  ? `ysyx_CSR_MSTATUS :
@@ -71,9 +66,7 @@ module ysyx_EXU (
   reg valid_once;
   reg lsu_valid;
   assign valid_o = (wen_o | ren_o) ? lsu_valid : alu_valid;
-  // assign valid_o = lsu_exu_wready & lsu_exu_rvalid & alu_valid;
   assign wben_o = valid_o & valid_once;
-  // assign ready_o = !valid_o;
   assign ready_o = (state != `ysyx_WAIT_READY);
   `ysyx_BUS_FSM()
   always @(posedge clk) begin
@@ -122,7 +115,7 @@ module ysyx_EXU (
     .alu_src1(src1), .alu_src2(src2), .alu_op(alu_op_exu),
     .alu_res_o(reg_wdata)
     );
-  
+
   // branch/system unit
   assign csr_wdata1 = (imm_exu[3:0] == `ysyx_OP_SYSTEM_FUNC3 && imm_exu[15:4] == `ysyx_OP_SYSTEM_ECALL) ? pc_exu : 'h0;
   assign csr_ecallen = ((opcode_exu == `ysyx_OP_SYSTEM) && imm_exu[3:0] == `ysyx_OP_SYSTEM_FUNC3 && imm_exu[15:4] == `ysyx_OP_SYSTEM_ECALL);
@@ -134,7 +127,7 @@ module ysyx_EXU (
     ((imm_exu[3:0] == `ysyx_OP_SYSTEM_CSRRC)) |
     ((imm_exu[3:0] == `ysyx_OP_SYSTEM_CSRRWI)) |
     ((imm_exu[3:0] == `ysyx_OP_SYSTEM_CSRRSI)) |
-    ((imm_exu[3:0] == `ysyx_OP_SYSTEM_CSRRCI)) 
+    ((imm_exu[3:0] == `ysyx_OP_SYSTEM_CSRRCI))
   );
   assign csr_wdata = {BIT_W{(opcode_exu == `ysyx_OP_SYSTEM)}} & (
     ({BIT_W{((imm_exu[3:0] == `ysyx_OP_SYSTEM_FUNC3) && (imm_exu[15:4] == `ysyx_OP_SYSTEM_ECALL))}} & 'hb) |
