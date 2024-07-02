@@ -323,7 +323,7 @@ module ysyx_CLINT(
     input [3:0] awid,
     input [ADDR_W-1:0] awaddr,
     input awvalid,
-    output reg awready_o,
+    output awready_o,
 
     input wlast,
     input [DATA_W-1:0] wdata,
