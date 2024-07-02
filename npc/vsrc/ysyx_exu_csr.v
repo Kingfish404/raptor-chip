@@ -15,11 +15,11 @@ module ysyx_CSR_Reg (
     output [BIT_W-1:0] mtvec_o,
     output [BIT_W-1:0] mepc_o
 );
-  parameter MNONE = 'h4;
   parameter MCAUSE_IDX = 'h0;
   parameter MEPC_IDX = 'h1;
   parameter MTVEC_IDX = 'h2;
   parameter MSTATUS_IDX = 'h3;
+  parameter MNONE = 'h4;
 
   parameter R_W = 12;
   parameter REG_W = 3;
@@ -56,7 +56,6 @@ module ysyx_CSR_Reg (
 
   always @(posedge clk) begin
     if (rst) begin
-      csr[MNONE]       <= RESET_VAL;
       csr[MCAUSE_IDX]  <= RESET_VAL;
       csr[MEPC_IDX]    <= RESET_VAL;
       csr[MTVEC_IDX]   <= RESET_VAL;
