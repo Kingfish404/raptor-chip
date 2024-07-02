@@ -14,7 +14,7 @@ module ysyx_IFU (
 
     input [ADDR_W-1:0] pc, npc,
     output [DATA_W-1:0] inst_o,
-    output reg [DATA_W-1:0] pc_o
+    output [DATA_W-1:0] pc_o
   );
   parameter integer ADDR_W = 32;
   parameter integer DATA_W = 32;
@@ -50,6 +50,7 @@ module ysyx_IFU (
   assign valid_o = ifu_rvalid | valid | l1i_cache_hit;
 
   `ysyx_BUS_FSM()
+  assign pc_o = pc;
   always @(posedge clk)
     begin
       if (rst)
@@ -60,7 +61,7 @@ module ysyx_IFU (
         end
       else
         begin
-          pc_o <= pc;
+          // pc_o <= pc;
           if (ifu_rvalid)
             begin
               inst_ifu <= ifu_rdata;
