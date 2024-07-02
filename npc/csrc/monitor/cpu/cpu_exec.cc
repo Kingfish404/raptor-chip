@@ -33,32 +33,32 @@ static char iringbuf[MAX_IRING_SIZE][128] = {};
 static uint64_t iringhead = 0;
 #endif
 
-double percentage(int a, int b)
+float percentage(int a, int b)
 {
-  double ret = (b == 0) ? 0 : (100.0 * a / b);
+  float ret = (b == 0) ? 0 : (100.0 * a / b);
   return ret == 100.0 ? 99.0 : ret;
 }
 
 static void perf()
 {
   printf("======== Instruction Analysis ========\n");
-  Log(FMT_BLUE("Cycle: %lu, #Inst: %ld, IPC: %.3f"), pmu.active_cycle, pmu.instr_cnt, (1.0 * pmu.instr_cnt / pmu.active_cycle));
+  Log(FMT_BLUE("Cycle: %llu, #Inst: %lld, IPC: %.3f"), pmu.active_cycle, pmu.instr_cnt, (1.0 * pmu.instr_cnt / pmu.active_cycle));
   printf("| %8s, %% | %8s, %% | %8s, %% | %6s, %% | %6s, %% | %6s, %% | %6s, %% | %3s, %% | %5s, %% |\n",
          "IFU", "LSU", "EXU", "LD", "ST", "ALU", "BR", "CSR", "OTH");
-  printf("| %8ld,%2.0f | %8ld,%2.0f | %8ld,%2.0f | %6ld,%2.0f | %6ld,%2.0f | %6ld,%2.0f | %6ld,%2.0f | %3ld,%2.0f | %5ld,%2.0f |\n",
-         pmu.ifu_stall_cycle, percentage(pmu.ifu_stall_cycle, pmu.active_cycle),
-         pmu.lsu_stall_cycle, percentage(pmu.lsu_stall_cycle, pmu.active_cycle),
-         pmu.exu_alu_cnt, percentage(pmu.exu_alu_cnt, pmu.instr_cnt),
-         pmu.ld_inst_cnt, percentage(pmu.ld_inst_cnt, pmu.instr_cnt),
-         pmu.st_inst_cnt, percentage(pmu.st_inst_cnt, pmu.instr_cnt),
-         pmu.alu_inst_cnt, percentage(pmu.alu_inst_cnt, pmu.instr_cnt),
-         pmu.b_inst_cnt, percentage(pmu.b_inst_cnt, pmu.instr_cnt),
-         pmu.csr_inst_cnt, percentage(pmu.csr_inst_cnt, pmu.instr_cnt),
-         pmu.other_inst_cnt, percentage(pmu.other_inst_cnt, pmu.instr_cnt));
+  printf("| %8lld,%2.0f | %8lld,%2.0f | %8lld,%2.0f | %6lld,%2.0f | %6lld,%2.0f | %6lld,%2.0f | %6lld,%2.0f | %3lld,%2.0f | %5lld,%2.0f |\n",
+         (long long) pmu.ifu_stall_cycle, percentage(pmu.ifu_stall_cycle, pmu.active_cycle),
+         (long long) pmu.lsu_stall_cycle, percentage(pmu.lsu_stall_cycle, pmu.active_cycle),
+         (long long) pmu.exu_alu_cnt, percentage(pmu.exu_alu_cnt, pmu.instr_cnt),
+         (long long) pmu.ld_inst_cnt, percentage(pmu.ld_inst_cnt, pmu.instr_cnt),
+         (long long) pmu.st_inst_cnt, percentage(pmu.st_inst_cnt, pmu.instr_cnt),
+         (long long) pmu.alu_inst_cnt, percentage(pmu.alu_inst_cnt, pmu.instr_cnt),
+         (long long) pmu.b_inst_cnt, percentage(pmu.b_inst_cnt, pmu.instr_cnt),
+         (long long) pmu.csr_inst_cnt, percentage(pmu.csr_inst_cnt, pmu.instr_cnt),
+         (long long) pmu.other_inst_cnt, percentage(pmu.other_inst_cnt, pmu.instr_cnt));
   printf("======== TOP DOWN Analysis ========\n");
   printf("| %8s, %% | %8s, %% | %8s, %% | %8s, %% | %8s, %% |\n",
          "IFU", "LSU", "EXU", "LD", "ST");
-  printf("| %8ld,%2.0f | %8ld,%2.0f | %8ld,%2.0f | %8ld,%2.0f | %8ld,%2.0f |\n",
+  printf("| %8lld,%2.0f | %8lld,%2.0f | %8lld,%2.0f | %8lld,%2.0f | %8lld,%2.0f |\n",
          pmu.ifu_stall_cycle, percentage(pmu.ifu_stall_cycle, pmu.active_cycle),
          pmu.lsu_stall_cycle, percentage(pmu.lsu_stall_cycle, pmu.active_cycle),
          pmu.exu_alu_cnt, percentage(pmu.exu_alu_cnt, pmu.instr_cnt),
@@ -231,7 +231,7 @@ void cpu_exec(uint64_t n)
     cur_inst_cycle++;
     if (cur_inst_cycle > 0xfffff)
     {
-      Log(FMT_RED("Too many cycles for one instruction (0x%lx cycle), maybe a bug."), cur_inst_cycle);
+      Log(FMT_RED("Too many cycles for one instruction (0x%llx cycle), maybe a bug."), cur_inst_cycle);
       npc.state = NPC_ABORT;
       break;
     }
