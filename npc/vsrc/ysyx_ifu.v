@@ -40,9 +40,6 @@ module ysyx_IFU (
 
   assign ifu_araddr_o = prev_valid ? npc : pc;
   assign ifu_arvalid_o = arvalid & !l1i_cache_hit;
-  // without l1i cache
-  // assign inst_o = ifu_rvalid ? ifu_rdata : inst_ifu;
-  // assign valid_o = ifu_rvalid | valid;
 
   // with l1i cache
   assign inst_o = (ifu_rvalid) ? ifu_rdata : l1i[addr_idx];
@@ -59,7 +56,6 @@ module ysyx_IFU (
         end
       else
         begin
-          // pc_o <= pc;
           if (ifu_rvalid)
             begin
               l1i[addr_idx] <= ifu_rdata;
