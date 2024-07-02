@@ -16,8 +16,8 @@ module ysyx_IFU (
     output [DATA_W-1:0] inst_o,
     output reg [DATA_W-1:0] pc_o
   );
-  parameter ADDR_W = 32;
-  parameter DATA_W = 32;
+  parameter integer ADDR_W = 32;
+  parameter integer DATA_W = 32;
 
   reg [DATA_W-1:0] inst_ifu = 0;
   reg state, valid;
@@ -26,8 +26,8 @@ module ysyx_IFU (
   assign ready_o = !valid_o;
   assign arvalid = pvalid;
 
-  parameter integer L1I_SIZE = 16;
-  parameter integer L1I_LEN = 4;
+  parameter integer L1I_SIZE = 8;
+  parameter integer L1I_LEN = 3;
   reg [32-1:0] l1i[L1I_SIZE];
   reg [L1I_SIZE-1:0] l1i_valid = 0;
   reg [32-L1I_LEN-2-1:0] l1i_tag[L1I_SIZE];

@@ -312,7 +312,7 @@ module ysyx_CLINT(
 
     output reg [3:0] rid,
     output reg rlast_o,
-    output reg [DATA_W-1:0] rdata_o,
+    output [DATA_W-1:0] rdata_o,
     output reg [1:0] rresp_o,
     output reg rvalid_o,
     input rready,
@@ -331,14 +331,19 @@ module ysyx_CLINT(
     input wvalid,
     output reg wready_o,
 
-    output reg [3:0] bid,
-    output reg [1:0] bresp_o,
-    output reg bvalid_o,
+    output [3:0] bid,
+    output [1:0] bresp_o,
+    output bvalid_o,
     input bready
   );
-  parameter ADDR_W = 32, DATA_W = 32;
+  parameter integer ADDR_W = 32, DATA_W = 32;
 
   reg [63:0] mtime;
+  assign rdata_o = (
+    (araddr == `ysyx_BUS_RTC_ADDR) ? mtime[31:0] :
+    (araddr == `ysyx_BUS_RTC_ADDR_UP) ? mtime[63:32] :
+    0
+  );
   always @(posedge clk)
     begin
       if (rst)
@@ -354,12 +359,12 @@ module ysyx_CLINT(
       wready_o <= 0;
       if (arvalid & !rvalid_o & rready)
         begin
-          case (araddr)
-            `ysyx_BUS_RTC_ADDR:
-              rdata_o <= mtime[31:0];
-            `ysyx_BUS_RTC_ADDR_UP:
-              rdata_o <= mtime[63:32];
-          endcase
+          // case (araddr)
+          //   `ysyx_BUS_RTC_ADDR:
+          //     rdata_o <= mtime[31:0];
+          //   `ysyx_BUS_RTC_ADDR_UP:
+          //     rdata_o <= mtime[63:32];
+          // endcase
           `ysyx_DPI_C_npc_difftest_skip_ref
             rvalid_o <= 1;
         end

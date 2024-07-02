@@ -51,7 +51,7 @@ module ysyx_EXU (
   );
 
   assign reg_wdata_o = (
-    (opcode_exu == `ysyx_OP_IL_TYPE) ? mem_rdata : 
+    (opcode_exu == `ysyx_OP_IL_TYPE) ? mem_rdata :
     (opcode_exu == `ysyx_OP_SYSTEM) ? csr_rdata : reg_wdata);
   assign csr_addr = (
     (imm_exu[3:0] == `ysyx_OP_SYSTEM_FUNC3) && imm_exu[15:4] == `ysyx_OP_SYSTEM_ECALL ? `ysyx_CSR_MCAUSE:
