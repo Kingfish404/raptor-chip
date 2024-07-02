@@ -27,7 +27,7 @@ module ysyx_EXU (
   output reg rwen_o, wben_o, ebreak_o,
   output reg ren_o, wen_o
 );
-  parameter BIT_W = `ysyx_W_WIDTH;
+  parameter integer BIT_W = 64;
 
   wire [BIT_W-1:0] addr_data, reg_wdata, mepc, mtvec;
   wire [BIT_W-1:0] mem_wdata = src2;

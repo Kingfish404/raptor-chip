@@ -222,7 +222,7 @@ module ysyx (
     );
 
   // EXU(EXecution Unit): 负责根据控制信号对数据进行执行操作, 并将执行结果写回寄存器或存储器
-  ysyx_EXU exu(
+  ysyx_EXU #(.BIT_W(DATA_W)) exu(
     .clk(clock), .rst(reset),
 
     .prev_valid(idu_valid), .next_ready(ifu_ready),
