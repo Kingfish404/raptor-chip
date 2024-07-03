@@ -73,12 +73,10 @@ word_t paddr_read(paddr_t addr, int len) {
 
   if (likely(
     in_pmem(addr)
-#ifdef CONFIG_TARGET_SHARE
     || in_sdram(addr)
     || in_sram(addr)
     || in_mrom(addr)
     || in_flash(addr)
-#endif
     )) return pmem_read(addr, len);
   IFDEF(CONFIG_DEVICE, return mmio_read(addr, len));
   out_of_bound(addr);
@@ -92,10 +90,8 @@ void paddr_write(paddr_t addr, int len, word_t data) {
 
   if (likely(
     in_pmem(addr)
-#ifdef CONFIG_TARGET_SHARE
     || in_sdram(addr)
     || in_sram(addr)
-#endif
     )) { pmem_write(addr, len, data); return; }
   IFDEF(CONFIG_DEVICE, mmio_write(addr, len, data); return);
   out_of_bound(addr);
