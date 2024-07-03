@@ -133,11 +133,16 @@ typedef struct
   // for inst
   uint64_t ld_inst_cnt;
   uint64_t st_inst_cnt;
-  u_int64_t alu_inst_cnt;
-  u_int64_t b_inst_cnt;
-  u_int64_t csr_inst_cnt;
-  u_int64_t other_inst_cnt;
+  uint64_t alu_inst_cnt;
+  uint64_t b_inst_cnt;
+  uint64_t csr_inst_cnt;
+  uint64_t other_inst_cnt;
 
+  // for cache
+  uint64_t l1i_cache_hit_cnt;
+  uint64_t l1i_cache_hit_cycle;
+  uint64_t l1i_cache_miss_cnt;
+  uint64_t l1i_cache_miss_cycle;
 } PMUState;
 
 #define panic(format, ...) Assert(0, format, ##__VA_ARGS__)

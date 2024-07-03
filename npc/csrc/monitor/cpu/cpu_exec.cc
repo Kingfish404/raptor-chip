@@ -19,6 +19,18 @@ PMUState pmu = {
     .ifu_fetch_cnt = 0,
     .lsu_load_cnt = 0,
     .exu_alu_cnt = 0,
+
+    .ld_inst_cnt = 0,
+    .st_inst_cnt = 0,
+    .alu_inst_cnt = 0,
+    .b_inst_cnt = 0,
+    .csr_inst_cnt = 0,
+    .other_inst_cnt = 0,
+
+    .l1i_cache_hit_cnt = 0,
+    .l1i_cache_hit_cycle = 0,
+    .l1i_cache_miss_cnt = 0,
+    .l1i_cache_miss_cycle = 0,
 };
 
 extern VerilatedContext *contextp;
@@ -76,8 +88,25 @@ static void perf()
        pmu.alu_inst_cnt + pmu.b_inst_cnt +
        pmu.csr_inst_cnt +
        pmu.other_inst_cnt));
+  printf("======== Cache Analysis ========\n");
+  // AMAT: Average Memory Access Time
+  printf("| %8s, %% | %8s, %% | %8s, %% | %8s, %% | %13s | %13s | %8s |\n",
+         "HIT", "MISS", "HIT CYC", "MISS CYC", "HIT Cost AVG", "MISS Cost AVG", "AMAT");
+  double l1i_hit_rate = percentage(pmu.l1i_cache_hit_cnt, pmu.l1i_cache_hit_cnt + pmu.l1i_cache_miss_cnt);
+  double l1i_access_time = pmu.l1i_cache_hit_cycle / (pmu.l1i_cache_hit_cnt + 1);
+  double l1i_miss_penalty = pmu.l1i_cache_miss_cycle / (pmu.l1i_cache_miss_cnt + 1);
+  printf("| %8lld,%2.0f | %8lld,%2.0f | %8lld,%2.0f | %8lld,%2.0f | %13lld | %13lld | %8.1f |\n",
+         pmu.l1i_cache_hit_cnt, l1i_hit_rate,
+         pmu.l1i_cache_miss_cnt, 100 - l1i_hit_rate,
+         pmu.l1i_cache_hit_cycle, percentage(pmu.l1i_cache_hit_cycle, pmu.l1i_cache_hit_cycle + pmu.l1i_cache_miss_cycle),
+         pmu.l1i_cache_miss_cycle, percentage(pmu.l1i_cache_miss_cycle, pmu.l1i_cache_hit_cycle + pmu.l1i_cache_miss_cycle),
+         (long long)l1i_access_time, (long long)l1i_miss_penalty,
+         l1i_access_time + (100 - l1i_hit_rate) / 100.0 * l1i_miss_penalty);
+  assert(
+      (pmu.l1i_cache_hit_cnt + pmu.l1i_cache_miss_cnt) == pmu.ifu_fetch_cnt);
 }
 
+bool i_fetching = false;
 static void perf_sample_per_cycle()
 {
   if (top->reset)
@@ -86,13 +115,14 @@ static void perf_sample_per_cycle()
   }
   pmu.active_cycle++;
   bool ifu_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__ifu_valid));
+  bool ifu_pvalid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__ifu__DOT__pvalid));
+  bool l1i_cache_hit = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__ifu__DOT__l1i_cache_hit));
   bool lsu_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__exu__DOT__lsu_valid));
   if (ifu_valid)
   {
     pmu.ifu_fetch_cnt++;
   }
-  if (!ifu_valid &&
-      *(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__ifu__DOT__pvalid)))
+  if (!ifu_valid && ifu_pvalid)
   {
     pmu.ifu_stall_cycle++;
   }
@@ -108,6 +138,35 @@ static void perf_sample_per_cycle()
   if (*(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__exu_valid)))
   {
     pmu.exu_alu_cnt++;
+  }
+  // cache sample
+  if (ifu_pvalid)
+  {
+    if (i_fetching == false)
+    {
+      if (l1i_cache_hit)
+      {
+        pmu.l1i_cache_hit_cnt++;
+        pmu.l1i_cache_hit_cycle++;
+      }
+      else
+      {
+        i_fetching = true;
+        pmu.l1i_cache_miss_cnt++;
+        pmu.l1i_cache_miss_cycle++;
+      }
+    }
+    else
+    {
+      if (ifu_valid)
+      {
+        i_fetching = false;
+      }
+      else
+      {
+        pmu.l1i_cache_miss_cycle++;
+      }
+    }
   }
 }
 
@@ -149,8 +208,8 @@ static void statistic()
   double frequency = pmu.active_cycle / time_s;
   Log("time: %d (ns), %d (ms)", g_timer, (int)(g_timer / 1e3));
   Log(FMT_BLUE("Simulate Freq: %9.1f Hz, %6.3f MHz"), frequency, (double)(frequency * 1.0 / 1e6));
-  Log(FMT_BLUE("Simulate Inst: %9.1f I/s, %3.0f KInst/s"),
-      pmu.instr_cnt / time_s, pmu.instr_cnt / time_s / 1e3);
+  Log(FMT_BLUE("Simulate Inst: %9.1f I/s, %5.3f MIPS"),
+      pmu.instr_cnt / time_s, pmu.instr_cnt / time_s / 1e6);
   Log("%s at pc: " FMT_WORD_NO_PREFIX ", inst: " FMT_WORD_NO_PREFIX,
       ((*npc.ret) == 0 && npc.state != NPC_ABORT
            ? FMT_GREEN("HIT GOOD TRAP")
