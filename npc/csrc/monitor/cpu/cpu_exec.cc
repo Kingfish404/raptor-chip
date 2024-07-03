@@ -19,6 +19,18 @@ PMUState pmu = {
     .ifu_fetch_cnt = 0,
     .lsu_load_cnt = 0,
     .exu_alu_cnt = 0,
+
+    .ld_inst_cnt = 0,
+    .st_inst_cnt = 0,
+    .alu_inst_cnt = 0,
+    .b_inst_cnt = 0,
+    .csr_inst_cnt = 0,
+    .other_inst_cnt = 0,
+
+    .l1i_cache_hit_cnt = 0,
+    .l1i_cache_hit_cycle = 0,
+    .l1i_cache_miss_cnt = 0,
+    .l1i_cache_miss_cycle = 0,
 };
 
 extern VerilatedContext *contextp;
@@ -76,6 +88,14 @@ static void perf()
        pmu.alu_inst_cnt + pmu.b_inst_cnt +
        pmu.csr_inst_cnt +
        pmu.other_inst_cnt));
+  printf("======== Cache Analysis ========\n");
+  printf("| %8s, %% | %8s, %% | %8s, %% | %8s, %% |\n",
+         "HIT", "MISS", "HIT CYC", "MISS CYC");
+  printf("| %8lld,%2.0f | %8lld,%2.0f | %8lld,%2.0f | %8lld,%2.0f |\n",
+         pmu.l1i_cache_hit_cnt, percentage(pmu.l1i_cache_hit_cnt, pmu.l1i_cache_hit_cnt + pmu.l1i_cache_miss_cnt),
+         pmu.l1i_cache_miss_cnt, percentage(pmu.l1i_cache_miss_cnt, pmu.l1i_cache_hit_cnt + pmu.l1i_cache_miss_cnt),
+         pmu.l1i_cache_hit_cycle, percentage(pmu.l1i_cache_hit_cycle, pmu.l1i_cache_hit_cycle + pmu.l1i_cache_miss_cycle),
+         pmu.l1i_cache_miss_cycle, percentage(pmu.l1i_cache_miss_cycle, pmu.l1i_cache_hit_cycle + pmu.l1i_cache_miss_cycle));
 }
 
 static void perf_sample_per_cycle()
@@ -86,13 +106,14 @@ static void perf_sample_per_cycle()
   }
   pmu.active_cycle++;
   bool ifu_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__ifu_valid));
+  bool ifu_pvalid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__ifu__DOT__pvalid));
+  bool l1i_cache_hit = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, __ifu__DOT__l1i_cache_hit));
   bool lsu_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__exu__DOT__lsu_valid));
   if (ifu_valid)
   {
     pmu.ifu_fetch_cnt++;
   }
-  if (!ifu_valid &&
-      *(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__ifu__DOT__pvalid)))
+  if (!ifu_valid && ifu_pvalid)
   {
     pmu.ifu_stall_cycle++;
   }
@@ -108,6 +129,36 @@ static void perf_sample_per_cycle()
   if (*(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__exu_valid)))
   {
     pmu.exu_alu_cnt++;
+  }
+  // cache sample
+  if (ifu_pvalid)
+  {
+    static bool i_fetch_start = false;
+    if (i_fetch_start == false)
+    {
+      i_fetch_start = true;
+      if (l1i_cache_hit)
+      {
+        pmu.l1i_cache_hit_cnt++;
+        pmu.l1i_cache_hit_cycle++;
+      }
+      else
+      {
+        pmu.l1i_cache_miss_cnt++;
+        pmu.l1i_cache_miss_cycle++;
+      }
+    }
+    if (i_fetch_start == true)
+    {
+      if (l1i_cache_hit)
+      {
+        i_fetch_start = false;
+      }
+      else
+      {
+        pmu.l1i_cache_miss_cycle++;
+      }
+    }
   }
 }
 
