@@ -91,7 +91,7 @@ static void perf()
   printf("======== Cache Analysis ========\n");
   printf("| %8s, %% | %8s, %% | %8s, %% | %8s, %% | %8s | %8s |\n",
          "HIT", "MISS", "HIT CYC", "MISS CYC", "HIT Cost AVG", "MISS Cost AVG");
-  printf("| %8lld,%2.0f | %8lld,%2.0f | %8lld,%2.0f | %8lld,%2.0f | %8lld | %8lld |\n",
+  printf("| %8lld,%2.0f | %8lld,%2.0f | %8lld,%2.0f | %8lld,%2.0f | %12lld | %12lld |\n",
          pmu.l1i_cache_hit_cnt, percentage(pmu.l1i_cache_hit_cnt, pmu.l1i_cache_hit_cnt + pmu.l1i_cache_miss_cnt),
          pmu.l1i_cache_miss_cnt, percentage(pmu.l1i_cache_miss_cnt, pmu.l1i_cache_hit_cnt + pmu.l1i_cache_miss_cnt),
          pmu.l1i_cache_hit_cycle, percentage(pmu.l1i_cache_hit_cycle, pmu.l1i_cache_hit_cycle + pmu.l1i_cache_miss_cycle),
