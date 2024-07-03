@@ -61,7 +61,6 @@ module ysyx_CSR_Reg (
       csr[MTVEC_IDX]   <= RESET_VAL;
       csr[MSTATUS_IDX] <= RESET_VAL;
     end else if (exu_valid) begin
-      $display("waddr_reg_1: %d", waddr_reg_1, " waddr_reg_2: %d", waddr_reg_2, " wdata: %h", wdata, " wdata_add1: %h", wdata_add1);
       if (wen) begin
         csr[waddr_reg_1] <= wdata;
         csr[waddr_reg_2] <= wdata_add1;
