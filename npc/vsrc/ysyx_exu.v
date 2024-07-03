@@ -22,6 +22,7 @@ module ysyx_EXU (
   input [6:0] opcode,
   input [BIT_W-1:0] pc,
   output [BIT_W-1:0] reg_wdata_o, npc_wdata_o,
+  output use_exu_npc_o,
   output reg [4:0] rd_o,
   output [3:0] alu_op_o,
   output reg rwen_o, wben_o,

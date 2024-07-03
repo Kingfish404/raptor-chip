@@ -118,6 +118,7 @@ module ysyx (
   // EXU output
   wire [DATA_W-1:0] reg_wdata;
   wire [DATA_W-1:0] npc_wdata;
+  wire use_exu_npc;
   wire [4:0] rd_exu;
   wire exu_valid, exu_ready;
   wire [3:0] alu_op_exu;
@@ -234,7 +235,7 @@ module ysyx (
     .alu_op(alu_op), .opcode(opcode),
     .pc(pc_idu),
     .reg_wdata_o(reg_wdata),
-    .npc_wdata_o(npc_wdata),
+    .npc_wdata_o(npc_wdata), .use_exu_npc_o(use_exu_npc),
     .rd_o(rd_exu),
 
     .rwen_o(rwen_exu), .wben_o(wben), .ebreak_o(),
@@ -274,7 +275,7 @@ endmodule // top
 
 module ysyx_PC (
   input clk, rst,
-  input exu_valid,
+  input exu_valid, use_exu_npc,
   input [DATA_W-1:0] npc_wdata,
   output reg [DATA_W-1:0] pc_o
 );
