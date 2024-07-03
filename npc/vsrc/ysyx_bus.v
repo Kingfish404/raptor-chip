@@ -76,7 +76,7 @@ module ysyx_BUS_ARBITER(
 
   // typedef enum [2:0] {if_a, if_d, ls_a, ls_d_r, ls_d_w} state_t;
   //                   000,  001,  010,    011,    100,
-  parameter if_a = 3'b000, if_d = 3'b001, ls_a = 3'b010, ls_d_r = 3'b011, ls_d_w = 3'b100;
+  parameter integer if_a = 3'b000, if_d = 3'b001, ls_a = 3'b010, ls_d_r = 3'b011, ls_d_w = 3'b100;
 
   reg [2:0] state;
   reg first = 1;
@@ -191,8 +191,6 @@ module ysyx_BUS_ARBITER(
   assign io_master_araddr = sram_araddr;
   assign io_master_arvalid = !rst & (
            ((state == if_a) & ifu_arvalid) |
-           // ((state == ls_a) & lsu_arvalid & !clint_en)
-           // ((state == ls_a || state == ls_d_r) & lsu_arvalid & !clint_en) // for old soc
            ((state == ls_a) & lsu_arvalid & !clint_en) // for new soc
          );
   assign arready_o = io_master_arready & io_master_bvalid;
@@ -231,8 +229,6 @@ module ysyx_BUS_ARBITER(
          {{lsu_wstrb[3:0] << awaddr_lo}, {4'b0}}:
          {{4'b0}, {lsu_wstrb[3:0] << awaddr_lo}};
   assign io_master_wvalid = (
-           // (state == ls_d_w ) & (lsu_wvalid)
-           // (state == ls_a || state == ls_d_w) & (lsu_wvalid) // for old soc
            (((state == ls_d_w) & write_valid)) & (lsu_wvalid) // for new soc
          );
 
@@ -277,12 +273,11 @@ module ysyx_BUS_ARBITER(
               end
           end
 
-        wire clint_arvalid = (lsu_arvalid & clint_en);
+  wire clint_arvalid = (lsu_arvalid & clint_en);
   wire clint_arready_o;
   wire [DATA_W-1:0] clint_rdata_o;
-  wire [1:0] clint_rresp_o, clint_bresp_o;
+  wire [1:0] clint_rresp_o;
   wire clint_rvalid_o;
-  wire clint_awready_o, clint_wready_o, clint_bvalid_o;
   ysyx_CLINT #(.ADDR_W(ADDR_W), .DATA_W(DATA_W)) clint(
                .clk(clk), .rst(rst),
                .araddr(sram_araddr), .arvalid(clint_arvalid), .arready_o(clint_arready_o),
