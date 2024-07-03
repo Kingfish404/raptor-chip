@@ -97,11 +97,11 @@ static void perf()
   double l1i_miss_penalty = pmu.l1i_cache_miss_cycle / (pmu.l1i_cache_miss_cnt + 1);
   printf("| %8lld,%2.0f | %8lld,%2.0f | %8lld,%2.0f | %8lld,%2.0f | %13lld | %13lld | %8.1f |\n",
          pmu.l1i_cache_hit_cnt, l1i_hit_rate,
-         pmu.l1i_cache_miss_cnt, 1 - l1i_hit_rate,
+         pmu.l1i_cache_miss_cnt, 100 - l1i_hit_rate,
          pmu.l1i_cache_hit_cycle, percentage(pmu.l1i_cache_hit_cycle, pmu.l1i_cache_hit_cycle + pmu.l1i_cache_miss_cycle),
          pmu.l1i_cache_miss_cycle, percentage(pmu.l1i_cache_miss_cycle, pmu.l1i_cache_hit_cycle + pmu.l1i_cache_miss_cycle),
          (long long)l1i_access_time, (long long)l1i_miss_penalty,
-         l1i_access_time + (1 - l1i_hit_rate) * l1i_miss_penalty);
+         l1i_access_time + (100 - l1i_hit_rate) * l1i_miss_penalty);
   assert(
       (pmu.l1i_cache_hit_cnt + pmu.l1i_cache_miss_cnt) == pmu.ifu_fetch_cnt);
 }
