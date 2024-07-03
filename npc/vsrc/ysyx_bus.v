@@ -76,7 +76,7 @@ module ysyx_BUS_ARBITER(
 
   // typedef enum [2:0] {if_a, if_d, ls_a, ls_d_r, ls_d_w} state_t;
   //                   000,  001,  010,    011,    100,
-  parameter integer if_a = 3'b000, if_d = 3'b001, ls_a = 3'b010, ls_d_r = 3'b011, ls_d_w = 3'b100;
+  parameter logic [2:0] if_a = 3'b000, if_d = 3'b001, ls_a = 3'b010, ls_d_r = 3'b011, ls_d_w = 3'b100;
 
   reg [2:0] state;
   reg first = 1;
