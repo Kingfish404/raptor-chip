@@ -200,7 +200,7 @@ module ysyx (
     .ifu_rdata(ifu_rdata),
     .ifu_rvalid(ifu_rvalid),
 
-    .pc(pc), .npc(npc_wdata),
+    .pc(pc),
     .inst_o(inst), .pc_o(pc_ifu)
   );
 
