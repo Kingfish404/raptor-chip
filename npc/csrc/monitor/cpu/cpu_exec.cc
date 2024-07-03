@@ -96,7 +96,7 @@ static void perf()
          pmu.l1i_cache_miss_cnt, percentage(pmu.l1i_cache_miss_cnt, pmu.l1i_cache_hit_cnt + pmu.l1i_cache_miss_cnt),
          pmu.l1i_cache_hit_cycle, percentage(pmu.l1i_cache_hit_cycle, pmu.l1i_cache_hit_cycle + pmu.l1i_cache_miss_cycle),
          pmu.l1i_cache_miss_cycle, percentage(pmu.l1i_cache_miss_cycle, pmu.l1i_cache_hit_cycle + pmu.l1i_cache_miss_cycle));
-  printf("%d, %d, %d\n",
+  printf("%lld, %lld, %d\n",
          (pmu.l1i_cache_hit_cnt + pmu.l1i_cache_miss_cnt),
          (pmu.ifu_fetch_cnt),
          (pmu.l1i_cache_hit_cnt + pmu.l1i_cache_miss_cnt) == pmu.ifu_fetch_cnt);
