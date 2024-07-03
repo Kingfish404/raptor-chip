@@ -93,6 +93,7 @@ void paddr_write(paddr_t addr, int len, word_t data) {
     in_sdram(addr)||
     in_sram(addr)
     )) { pmem_write(addr, len, data); return; }
+  printf("MMIO lookup: addr = " FMT_PADDR "\n", addr);
   IFDEF(CONFIG_DEVICE, mmio_write(addr, len, data); return);
   out_of_bound(addr);
 }
