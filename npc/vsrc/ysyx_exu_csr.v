@@ -28,17 +28,17 @@ module ysyx_CSR_Reg (
 
   reg [BIT_W-1:0] csr[5];
   wire [REG_W-1:0] waddr_reg_1 = (
-    ({REG_W{waddr==`ysyx_CSR_MSTATUS}}) & (MSTATUS_IDX) |
     ({REG_W{waddr==`ysyx_CSR_MCAUSE}}) & (MCAUSE_IDX) |
     ({REG_W{waddr==`ysyx_CSR_MEPC}}) & (MEPC_IDX) |
     ({REG_W{waddr==`ysyx_CSR_MTVEC}}) & (MTVEC_IDX) |
+    ({REG_W{waddr==`ysyx_CSR_MSTATUS}}) & (MSTATUS_IDX) |
     (MNONE)
   );
   wire [REG_W-1:0] waddr_reg_2 = (
-    ({REG_W{waddr_add1==`ysyx_CSR_MSTATUS}}) & (MSTATUS_IDX) |
     ({REG_W{waddr_add1==`ysyx_CSR_MCAUSE}}) & (MCAUSE_IDX) |
     ({REG_W{waddr_add1==`ysyx_CSR_MEPC}}) & (MEPC_IDX) |
     ({REG_W{waddr_add1==`ysyx_CSR_MTVEC}}) & (MTVEC_IDX) |
+    ({REG_W{waddr_add1==`ysyx_CSR_MSTATUS}}) & (MSTATUS_IDX) |
     (MNONE)
   );
 
@@ -62,6 +62,7 @@ module ysyx_CSR_Reg (
       csr[MSTATUS_IDX] <= RESET_VAL;
     end else if (exu_valid) begin
       if (wen) begin
+        $display("waddr_reg_1: %d", waddr_reg_1, " waddr_reg_2: %d", waddr_reg_2, " wdata: %h", wdata, " wdata_add1: %h", wdata_add1);
         csr[waddr_reg_1] <= wdata;
         csr[waddr_reg_2] <= wdata_add1;
       end
