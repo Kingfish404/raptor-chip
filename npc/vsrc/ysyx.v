@@ -286,7 +286,11 @@ module ysyx_PC (
       pc_o <= `ysyx_PC_INIT;
       `ysyx_DPI_C_npc_difftest_skip_ref
     end else if (exu_valid) begin
+      if (use_exu_npc) begin
         pc_o <= npc_wdata;
+      end else begin
+        pc_o <= pc_o + 4;
+      end
     end
   end
 endmodule //ysyx_PC

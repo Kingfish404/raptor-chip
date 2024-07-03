@@ -144,7 +144,9 @@ module ysyx_EXU (
   );
   assign ebreak_o = (opcode_exu == `ysyx_OP_SYSTEM) && (imm_exu[3:0] == `ysyx_OP_SYSTEM_FUNC3) && (imm_exu[15:4] == `ysyx_OP_SYSTEM_EBREAK);
   always @(*) begin
-    npc_wdata_o = npc_default;
+    // npc_wdata_o = npc_default;
+    use_exu_npc_o = 0;
+    npc_wdata_o = addr_data;
     case (opcode)
       `ysyx_OP_SYSTEM: begin
         case (imm_exu[3:0])
@@ -163,12 +165,18 @@ module ysyx_EXU (
       `ysyx_OP_B_TYPE: begin
         // $display("reg_wdata: %h, npc_wdata: %h, npc: %h", reg_wdata, npc_wdata, npc);
         case (alu_op_exu)
-          `ysyx_ALU_OP_SUB:  begin npc_wdata_o = (~|reg_wdata)? addr_data : npc_default; end
-          `ysyx_ALU_OP_XOR:  begin npc_wdata_o = (|reg_wdata) ? addr_data : npc_default; end
-          `ysyx_ALU_OP_SLT:  begin npc_wdata_o = (|reg_wdata) ? addr_data : npc_default; end
-          `ysyx_ALU_OP_SLTU: begin npc_wdata_o = (|reg_wdata) ? addr_data : npc_default; end
-          `ysyx_ALU_OP_SLE:  begin npc_wdata_o = (|reg_wdata) ? addr_data : npc_default; end
-          `ysyx_ALU_OP_SLEU: begin npc_wdata_o = (|reg_wdata) ? addr_data : npc_default; end
+          // `ysyx_ALU_OP_SUB:  begin npc_wdata_o = (~|reg_wdata)? addr_data : npc_default; end
+          // `ysyx_ALU_OP_XOR:  begin npc_wdata_o = (|reg_wdata) ? addr_data : npc_default; end
+          // `ysyx_ALU_OP_SLT:  begin npc_wdata_o = (|reg_wdata) ? addr_data : npc_default; end
+          // `ysyx_ALU_OP_SLTU: begin npc_wdata_o = (|reg_wdata) ? addr_data : npc_default; end
+          // `ysyx_ALU_OP_SLE:  begin npc_wdata_o = (|reg_wdata) ? addr_data : npc_default; end
+          // `ysyx_ALU_OP_SLEU: begin npc_wdata_o = (|reg_wdata) ? addr_data : npc_default; end
+          `ysyx_ALU_OP_SUB:  begin use_exu_npc_o =(~|reg_wdata); end
+          `ysyx_ALU_OP_XOR:  begin use_exu_npc_o = (|reg_wdata); end
+          `ysyx_ALU_OP_SLT:  begin use_exu_npc_o = (|reg_wdata); end
+          `ysyx_ALU_OP_SLTU: begin use_exu_npc_o = (|reg_wdata); end
+          `ysyx_ALU_OP_SLE:  begin use_exu_npc_o = (|reg_wdata); end
+          `ysyx_ALU_OP_SLEU: begin use_exu_npc_o = (|reg_wdata); end
           default:           begin ; end
         endcase
       end
