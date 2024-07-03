@@ -189,7 +189,7 @@ module ysyx (
   );
 
   // IFU(Instruction Fetch Unit): 负责根据当前PC从存储器中取出一条指令
-  ysyx_IFU #(.ADDR_W(DATA_W), .DATA_W(32)) ifu(
+  ysyx_IFU #(.ADDR_W(DATA_W), .DATA_W(DATA_W)) ifu(
     .clk(clock), .rst(reset),
 
     .prev_valid(exu_valid), .next_ready(idu_ready),
@@ -331,9 +331,4 @@ module ysyx_RegisterFile (
           end
       end
   endgenerate
-
-  // always @(posedge clk)
-  //   begin
-  //     rf[0] <= 0;
-  //   end
 endmodule // ysyx_RegisterFile
