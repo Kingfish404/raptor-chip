@@ -140,7 +140,6 @@ static void perf_sample_per_cycle()
   {
     if (i_fetching == false)
     {
-      i_fetching = true;
       if (l1i_cache_hit)
       {
         pmu.l1i_cache_hit_cnt++;
@@ -148,6 +147,7 @@ static void perf_sample_per_cycle()
       }
       else
       {
+        i_fetching = true;
         pmu.l1i_cache_miss_cnt++;
         pmu.l1i_cache_miss_cycle++;
       }
