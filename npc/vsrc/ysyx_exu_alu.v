@@ -20,7 +20,7 @@ module ysyx_ALU (
       `ysyx_ALU_OP_XOR:  begin alu_res_o = alu_src1 ^ alu_src2;  end
       `ysyx_ALU_OP_OR:   begin alu_res_o = alu_src1 | alu_src2;  end
       `ysyx_ALU_OP_AND:  begin alu_res_o = alu_src1 & alu_src2;  end
-      `ysyx_ALU_OP_SLL:  begin alu_res_o = alu_src1 << (alu_src2 & 'h1f); end
+      `ysyx_ALU_OP_SLL:  begin alu_res_o = alu_src1 << (alu_src2[4:0]); end
       `ysyx_ALU_OP_SRL:  begin alu_res_o = ($unsigned(alu_src1)) >> (alu_src2 & 'h1f); end
       `ysyx_ALU_OP_SRA:  begin alu_res_o = ($signed(alu_src1)) >>> (alu_src2 & 'h1f); end
       default: begin  alu_res_o = alu_src2;
