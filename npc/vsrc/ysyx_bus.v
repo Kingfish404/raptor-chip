@@ -12,13 +12,13 @@ module ysyx_BUS_ARBITER(
     output [3:0] io_master_arid,
     output [ADDR_W-1:0] io_master_araddr,
     output io_master_arvalid,
-    input reg io_master_arready,
+    input io_master_arready,
 
-    input reg [3:0] io_master_rid,
-    input reg io_master_rlast,
-    input reg [63:0] io_master_rdata,
-    input reg [1:0] io_master_rresp,
-    input reg io_master_rvalid,
+    input [3:0] io_master_rid,
+    input io_master_rlast,
+    input [63:0] io_master_rdata,
+    input [1:0] io_master_rresp,
+    input io_master_rvalid,
     output io_master_rready,
 
     output [1:0] io_master_awburst,
@@ -27,17 +27,17 @@ module ysyx_BUS_ARBITER(
     output [3:0] io_master_awid,
     output [ADDR_W-1:0] io_master_awaddr, // reqired
     output io_master_awvalid,             // reqired
-    input reg io_master_awready,          // reqired
+    input io_master_awready,          // reqired
 
     output io_master_wlast,               // reqired
     output [63:0] io_master_wdata,        // reqired
     output [7:0] io_master_wstrb,
     output io_master_wvalid,              // reqired
-    input reg io_master_wready,           // reqired
+    input io_master_wready,           // reqired
 
-    input reg [3:0] io_master_bid,
-    input reg [1:0] io_master_bresp,
-    input reg io_master_bvalid,           // reqired
+    input [3:0] io_master_bid,
+    input [1:0] io_master_bresp,
+    input io_master_bvalid,           // reqired
     output io_master_bready,              // reqired
 
     // ifu
@@ -61,7 +61,7 @@ module ysyx_BUS_ARBITER(
     input lsu_wvalid,
     output lsu_wready_o
   );
-  parameter ADDR_W = 32, DATA_W = 32;
+  parameter integer ADDR_W = 32, DATA_W = 32;
 
   wire arready_o;
   wire [DATA_W-1:0] rdata_o;
