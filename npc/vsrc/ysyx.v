@@ -138,7 +138,7 @@ module ysyx (
     .pc_o(pc)
   );
 
-  ysyx_RegisterFile #(REG_ADDR_W, DATA_W) regs(
+  ysyx_RegisterFile #(.REG_ADDR_W(REG_ADDR_W), .DATA_W(DATA_W)) regs(
     .clk(clock), .rst(reset),
     .exu_valid(wben),
 
@@ -222,7 +222,7 @@ module ysyx (
     );
 
   // EXU(EXecution Unit): 负责根据控制信号对数据进行执行操作, 并将执行结果写回寄存器或存储器
-  ysyx_EXU exu(
+  ysyx_EXU #(.BIT_W(DATA_W)) exu(
     .clk(clock), .rst(reset),
 
     .prev_valid(idu_valid), .next_ready(ifu_ready),
@@ -304,7 +304,7 @@ module ysyx_RegisterFile (
   parameter integer REG_ADDR_W = 4;
   parameter integer DATA_W = 32;
   parameter integer REG_NUM = 16;
-  reg [DATA_W-1:0] rf[0:REG_NUM-1];
+  reg [DATA_W-1:0] rf[REG_NUM];
 
   assign src1_o = rf[s1addr[3:0]];
   assign src2_o = rf[s2addr[3:0]];
@@ -314,6 +314,7 @@ module ysyx_RegisterFile (
       begin
         always @(posedge clk)
           begin
+            rf[0] <= 0;
             if (rst)
               begin
                 rf[i] <= 0;
@@ -326,8 +327,8 @@ module ysyx_RegisterFile (
       end
   endgenerate
 
-  always @(posedge clk)
-    begin
-      rf[0] <= 0;
-    end
+  // always @(posedge clk)
+  //   begin
+  //     rf[0] <= 0;
+  //   end
 endmodule // ysyx_RegisterFile

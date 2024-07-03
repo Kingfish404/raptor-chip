@@ -10,8 +10,8 @@ module ysyx_LSU(
     input [DATA_W-1:0] wdata,
     // to exu
     output [DATA_W-1:0] rdata_o,
-    output reg rvalid_o,
-    output reg wready_o,
+    output rvalid_o,
+    output wready_o,
 
     // to bus load
     output [DATA_W-1:0] lsu_araddr_o,
@@ -30,7 +30,7 @@ module ysyx_LSU(
     // from bus store
     input reg lsu_wready
   );
-  parameter ADDR_W = 32, DATA_W = 32;
+  parameter integer ADDR_W = 32, DATA_W = 32;
 
   reg [ADDR_W-1:0] lsu_araddr;
 
@@ -59,8 +59,8 @@ module ysyx_LSU(
 
   assign wready_o = lsu_wready;
 
-  parameter L1D_SIZE = 4;
-  parameter L1D_LEN = 2;
+  parameter L1D_SIZE = 2;
+  parameter L1D_LEN = 1;
   reg [32-1:0] l1d[L1D_SIZE-1:0];
   reg [L1D_SIZE-1:0] l1d_valid = 0;
   reg [32-L1D_LEN-2-1:0] l1d_tag[L1D_SIZE-1:0];

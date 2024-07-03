@@ -285,16 +285,8 @@ module ysyx_BUS_ARBITER(
   wire clint_awready_o, clint_wready_o, clint_bvalid_o;
   ysyx_CLINT #(.ADDR_W(ADDR_W), .DATA_W(DATA_W)) clint(
                .clk(clk), .rst(rst),
-               .arburst(2'b00), .arsize(3'b000), .arlen(8'b00000000), .arid(4'b0000),
                .araddr(sram_araddr), .arvalid(clint_arvalid), .arready_o(clint_arready_o),
-               .rid(), .rlast_o(),
-               .rdata_o(clint_rdata_o), .rresp_o(clint_rresp_o), .rvalid_o(clint_rvalid_o), .rready(1),
-               .awburst(2'b00), .awsize(3'b000), .awlen(8'b00000000), .awid(4'b0000),
-               .awaddr(0), .awvalid(0), .awready_o(clint_awready_o),
-               .wlast(1'b0),
-               .wdata(0), .wstrb(0), .wvalid(0), .wready_o(clint_wready_o),
-               .bid(),
-               .bresp_o(clint_bresp_o), .bvalid_o(clint_bvalid_o), .bready(0)
+               .rdata_o(clint_rdata_o), .rresp_o(clint_rresp_o), .rvalid_o(clint_rvalid_o)
              );
 endmodule
 
@@ -302,43 +294,22 @@ endmodule
 module ysyx_CLINT(
     input clk, rst,
 
-    input [1:0] arburst,
-    input [2:0] arsize,
-    input [7:0] arlen,
-    input [3:0] arid,
     input [ADDR_W-1:0] araddr,
     input arvalid,
-    output reg arready_o,
+    output arready_o,
 
-    output reg [3:0] rid,
-    output reg rlast_o,
-    output reg [DATA_W-1:0] rdata_o,
-    output reg [1:0] rresp_o,
-    output reg rvalid_o,
-    input rready,
-
-    input [1:0] awburst,
-    input [2:0] awsize,
-    input [7:0] awlen,
-    input [3:0] awid,
-    input [ADDR_W-1:0] awaddr,
-    input awvalid,
-    output reg awready_o,
-
-    input wlast,
-    input [DATA_W-1:0] wdata,
-    input [7:0] wstrb,
-    input wvalid,
-    output reg wready_o,
-
-    output reg [3:0] bid,
-    output reg [1:0] bresp_o,
-    output reg bvalid_o,
-    input bready
+    output [DATA_W-1:0] rdata_o,
+    output [1:0] rresp_o,
+    output reg rvalid_o
   );
-  parameter ADDR_W = 32, DATA_W = 32;
+  parameter integer ADDR_W = 32, DATA_W = 32;
 
-  reg [63:0] mtime;
+  reg [63:0] mtime = 0;
+  assign rdata_o = (
+    (araddr == `ysyx_BUS_RTC_ADDR) ? mtime[31:0] :
+    (araddr == `ysyx_BUS_RTC_ADDR_UP) ? mtime[63:32] :
+    (0)
+  );
   always @(posedge clk)
     begin
       if (rst)
@@ -348,24 +319,13 @@ module ysyx_CLINT(
       else
         begin
           mtime <= mtime + 1;
-        end
-      rdata_o <= 0;
-      rvalid_o <= 0;
-      wready_o <= 0;
-      if (arvalid & !rvalid_o & rready)
-        begin
-          case (araddr)
-            `ysyx_BUS_RTC_ADDR:
-              rdata_o <= mtime[31:0];
-            `ysyx_BUS_RTC_ADDR_UP:
-              rdata_o <= mtime[63:32];
-          endcase
-          `ysyx_DPI_C_npc_difftest_skip_ref
+          if (arvalid)
+          begin
+            `ysyx_DPI_C_npc_difftest_skip_ref
             rvalid_o <= 1;
-        end
-      if (wvalid & !wready_o & bready)
-        begin
-          wready_o <= 1;
+          end else begin
+            rvalid_o <= 0;
+          end
         end
     end
 endmodule //ysyx_CLINT
