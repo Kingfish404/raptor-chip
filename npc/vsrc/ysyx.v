@@ -118,6 +118,7 @@ module ysyx (
   // EXU output
   wire [DATA_W-1:0] reg_wdata;
   wire [DATA_W-1:0] npc_wdata;
+  wire use_exu_npc;
   wire [4:0] rd_exu;
   wire exu_valid, exu_ready;
   wire [3:0] alu_op_exu;
@@ -134,7 +135,7 @@ module ysyx (
     .clk(clock), .rst(reset),
     .exu_valid(wben),
 
-    .npc_wdata(npc_wdata),
+    .npc_wdata(npc_wdata), .use_exu_npc(use_exu_npc),
     .pc_o(pc)
   );
 
@@ -188,7 +189,7 @@ module ysyx (
   );
 
   // IFU(Instruction Fetch Unit): 负责根据当前PC从存储器中取出一条指令
-  ysyx_IFU #(.ADDR_W(DATA_W), .DATA_W(32)) ifu(
+  ysyx_IFU #(.ADDR_W(DATA_W), .DATA_W(DATA_W)) ifu(
     .clk(clock), .rst(reset),
 
     .prev_valid(exu_valid), .next_ready(idu_ready),
@@ -199,7 +200,7 @@ module ysyx (
     .ifu_rdata(ifu_rdata),
     .ifu_rvalid(ifu_rvalid),
 
-    .pc(pc), .npc(npc_wdata),
+    .pc(pc),
     .inst_o(inst), .pc_o(pc_ifu)
   );
 
@@ -234,7 +235,7 @@ module ysyx (
     .alu_op(alu_op), .opcode(opcode),
     .pc(pc_idu),
     .reg_wdata_o(reg_wdata),
-    .npc_wdata_o(npc_wdata),
+    .npc_wdata_o(npc_wdata), .use_exu_npc_o(use_exu_npc),
     .rd_o(rd_exu),
 
     .rwen_o(rwen_exu), .wben_o(wben), .ebreak_o(),
@@ -274,7 +275,7 @@ endmodule // top
 
 module ysyx_PC (
   input clk, rst,
-  input exu_valid,
+  input exu_valid, use_exu_npc,
   input [DATA_W-1:0] npc_wdata,
   output reg [DATA_W-1:0] pc_o
 );
@@ -285,7 +286,11 @@ module ysyx_PC (
       pc_o <= `ysyx_PC_INIT;
       `ysyx_DPI_C_npc_difftest_skip_ref
     end else if (exu_valid) begin
+      if (use_exu_npc) begin
         pc_o <= npc_wdata;
+      end else begin
+        pc_o <= pc_o + 4;
+      end
     end
   end
 endmodule //ysyx_PC
@@ -326,9 +331,4 @@ module ysyx_RegisterFile (
           end
       end
   endgenerate
-
-  // always @(posedge clk)
-  //   begin
-  //     rf[0] <= 0;
-  //   end
 endmodule // ysyx_RegisterFile

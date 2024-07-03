@@ -37,7 +37,7 @@ module ysyx_LSU(
   wire [DATA_W-1:0] rdata, rdata_unalign;
   wire [7:0] wstrb, rstrb;
 
-  assign lsu_araddr_o = idu_valid ? addr : lsu_araddr;
+  assign lsu_araddr_o = lsu_araddr;
   // assign lsu_arvalid_o = ren & lsu_avalid;
   assign lsu_arvalid_o = ren & lsu_avalid & !l1d_cache_hit;
   assign lsu_rstrb_o = rstrb;
@@ -50,7 +50,7 @@ module ysyx_LSU(
   assign rdata_unalign = (lsu_rvalid) ? lsu_rdata : l1d[addr_idx];
   assign rvalid_o = lsu_rvalid | l1d_cache_hit;
 
-  assign lsu_awaddr_o = idu_valid ? addr : lsu_araddr;
+  assign lsu_awaddr_o = lsu_araddr;
   assign lsu_awvalid_o = wen & lsu_avalid;
 
   assign lsu_wdata_o = wdata;
@@ -59,11 +59,11 @@ module ysyx_LSU(
 
   assign wready_o = lsu_wready;
 
-  parameter L1D_SIZE = 2;
-  parameter L1D_LEN = 1;
-  reg [32-1:0] l1d[L1D_SIZE-1:0];
+  parameter integer L1D_SIZE = 2;
+  parameter integer L1D_LEN = 1;
+  reg [32-1:0] l1d[L1D_SIZE];
   reg [L1D_SIZE-1:0] l1d_valid = 0;
-  reg [32-L1D_LEN-2-1:0] l1d_tag[L1D_SIZE-1:0];
+  reg [32-L1D_LEN-2-1:0] l1d_tag[L1D_SIZE];
 
   wire arvalid;
   wire [32-L1D_LEN-2-1:0] addr_tag = lsu_araddr_o[ADDR_W-1:L1D_LEN+2];

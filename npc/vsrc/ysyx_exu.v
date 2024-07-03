@@ -22,6 +22,7 @@ module ysyx_EXU (
   input [6:0] opcode,
   input [BIT_W-1:0] pc,
   output [BIT_W-1:0] reg_wdata_o, npc_wdata_o,
+  output use_exu_npc_o,
   output reg [4:0] rd_o,
   output [3:0] alu_op_o,
   output reg rwen_o, wben_o,
@@ -35,7 +36,6 @@ module ysyx_EXU (
   wire [12-1:0] csr_addr, csr_addr_add1;
   wire [BIT_W-1:0] csr_wdata1, csr_rdata;
   wire [BIT_W-1:0] csr_wdata;
-  wire [BIT_W-1:0] npc_default = pc + 4;
   reg [BIT_W-1:0] imm_exu, pc_exu, src1, src2, addr_exu;
   reg [3:0] alu_op_exu;
   reg [6:0] opcode_exu;
@@ -143,31 +143,32 @@ module ysyx_EXU (
   );
   assign ebreak_o = (opcode_exu == `ysyx_OP_SYSTEM) && (imm_exu[3:0] == `ysyx_OP_SYSTEM_FUNC3) && (imm_exu[15:4] == `ysyx_OP_SYSTEM_EBREAK);
   always @(*) begin
-    npc_wdata_o = npc_default;
+    use_exu_npc_o = 0;
+    npc_wdata_o = addr_data;
     case (opcode)
       `ysyx_OP_SYSTEM: begin
         case (imm_exu[3:0])
           `ysyx_OP_SYSTEM_FUNC3: begin
             case (imm_exu[15:4])
-              `ysyx_OP_SYSTEM_ECALL:  begin npc_wdata_o = mtvec; end
-              `ysyx_OP_SYSTEM_EBREAK: begin `ysyx_DPI_C_npc_exu_ebreak end
-              `ysyx_OP_SYSTEM_MRET:   begin npc_wdata_o = mepc; end
+              `ysyx_OP_SYSTEM_ECALL:  begin use_exu_npc_o = 1; npc_wdata_o = mtvec; end
+              `ysyx_OP_SYSTEM_EBREAK: begin use_exu_npc_o = 1; `ysyx_DPI_C_npc_exu_ebreak end
+              `ysyx_OP_SYSTEM_MRET:   begin use_exu_npc_o = 1; npc_wdata_o = mepc; end
               default: begin ; end
             endcase
           end
           default: begin ; end
         endcase
       end
-      `ysyx_OP_JAL, `ysyx_OP_JALR: begin npc_wdata_o = addr_data; end
+      `ysyx_OP_JAL, `ysyx_OP_JALR: begin use_exu_npc_o = 1; npc_wdata_o = addr_data; end
       `ysyx_OP_B_TYPE: begin
         // $display("reg_wdata: %h, npc_wdata: %h, npc: %h", reg_wdata, npc_wdata, npc);
         case (alu_op_exu)
-          `ysyx_ALU_OP_SUB:  begin npc_wdata_o = (~|reg_wdata)? addr_data : npc_default; end
-          `ysyx_ALU_OP_XOR:  begin npc_wdata_o = (|reg_wdata) ? addr_data : npc_default; end
-          `ysyx_ALU_OP_SLT:  begin npc_wdata_o = (|reg_wdata) ? addr_data : npc_default; end
-          `ysyx_ALU_OP_SLTU: begin npc_wdata_o = (|reg_wdata) ? addr_data : npc_default; end
-          `ysyx_ALU_OP_SLE:  begin npc_wdata_o = (|reg_wdata) ? addr_data : npc_default; end
-          `ysyx_ALU_OP_SLEU: begin npc_wdata_o = (|reg_wdata) ? addr_data : npc_default; end
+          `ysyx_ALU_OP_SUB:  begin use_exu_npc_o =(~|reg_wdata); end
+          `ysyx_ALU_OP_XOR:  begin use_exu_npc_o = (|reg_wdata); end
+          `ysyx_ALU_OP_SLT:  begin use_exu_npc_o = (|reg_wdata); end
+          `ysyx_ALU_OP_SLTU: begin use_exu_npc_o = (|reg_wdata); end
+          `ysyx_ALU_OP_SLE:  begin use_exu_npc_o = (|reg_wdata); end
+          `ysyx_ALU_OP_SLEU: begin use_exu_npc_o = (|reg_wdata); end
           default:           begin ; end
         endcase
       end

@@ -12,7 +12,7 @@ module ysyx_IFU (
     input [DATA_W-1:0] ifu_rdata,
     input ifu_rvalid,
 
-    input [ADDR_W-1:0] pc, npc,
+    input [ADDR_W-1:0] pc,
     output [DATA_W-1:0] inst_o,
     output [DATA_W-1:0] pc_o
   );
@@ -38,7 +38,7 @@ module ysyx_IFU (
          (pvalid) & 1 &
          l1i_valid[addr_idx] == 1'b1) & (l1i_tag[addr_idx] == addr_tag);
 
-  assign ifu_araddr_o = prev_valid ? npc : pc;
+  assign ifu_araddr_o = pc;
   assign ifu_arvalid_o = arvalid & !l1i_cache_hit;
 
   // with l1i cache
