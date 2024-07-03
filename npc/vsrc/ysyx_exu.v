@@ -152,9 +152,9 @@ module ysyx_EXU (
         case (imm_exu[3:0])
           `ysyx_OP_SYSTEM_FUNC3: begin
             case (imm_exu[15:4])
-              `ysyx_OP_SYSTEM_ECALL:  begin npc_wdata_o = mtvec; end
-              `ysyx_OP_SYSTEM_EBREAK: begin `ysyx_DPI_C_npc_exu_ebreak end
-              `ysyx_OP_SYSTEM_MRET:   begin npc_wdata_o = mepc; end
+              `ysyx_OP_SYSTEM_ECALL:  begin use_exu_npc_o = 1; npc_wdata_o = mtvec; end
+              `ysyx_OP_SYSTEM_EBREAK: begin use_exu_npc_o = 1; `ysyx_DPI_C_npc_exu_ebreak end
+              `ysyx_OP_SYSTEM_MRET:   begin use_exu_npc_o = 1; npc_wdata_o = mepc; end
               default: begin ; end
             endcase
           end
