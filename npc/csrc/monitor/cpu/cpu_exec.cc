@@ -99,7 +99,7 @@ static void perf()
   printf("%lld, %lld, %d\n",
          (pmu.l1i_cache_hit_cnt + pmu.l1i_cache_miss_cnt),
          (pmu.ifu_fetch_cnt),
-         (pmu.l1i_cache_hit_cnt + pmu.l1i_cache_miss_cnt) == pmu.ifu_fetch_cnt);
+         (pmu.l1i_cache_hit_cnt + pmu.l1i_cache_miss_cnt) - pmu.ifu_fetch_cnt);
 }
 
 bool i_fetching = false;
