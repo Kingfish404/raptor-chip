@@ -1,13 +1,13 @@
 `include "ysyx_macro.v"
 
 module ysyx_ALU (
-  input wire [BIT_W-1:0] alu_src1,
-  input wire [BIT_W-1:0] alu_src2,
-  input wire [3:0] alu_op,
-  output reg [BIT_W-1:0] alu_res_o
+  input [BIT_W-1:0] alu_src1,
+  input [BIT_W-1:0] alu_src2,
+  input [3:0] alu_op,
+  output [BIT_W-1:0] alu_res_o
 );
-  parameter BIT_W = `ysyx_W_WIDTH;
-    
+  parameter integer BIT_W = `ysyx_W_WIDTH;
+
   always @(*) begin
     // $display("alu_op: %h, alu_src1: %h, alu_src2: %h", alu_op, alu_src1, alu_src2);
     unique case (alu_op)
