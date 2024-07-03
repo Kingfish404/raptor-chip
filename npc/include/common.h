@@ -139,10 +139,10 @@ typedef struct
   uint64_t other_inst_cnt;
 
   // for cache
-  uint16_t l1i_cache_hit_cnt;
-  uint16_t l1i_cache_hit_cycle;
-  uint16_t l1i_cache_miss_cnt;
-  uint16_t l1i_cache_miss_cycle;
+  uint64_t l1i_cache_hit_cnt;
+  uint64_t l1i_cache_hit_cycle;
+  uint64_t l1i_cache_miss_cnt;
+  uint64_t l1i_cache_miss_cycle;
 } PMUState;
 
 #define panic(format, ...) Assert(0, format, ##__VA_ARGS__)
