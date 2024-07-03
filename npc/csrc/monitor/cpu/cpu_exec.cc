@@ -102,7 +102,7 @@ static void perf()
          (pmu.l1i_cache_hit_cnt + pmu.l1i_cache_miss_cnt) == pmu.ifu_fetch_cnt);
 }
 
-bool i_fetch_start = false;
+bool i_fetching = false;
 static void perf_sample_per_cycle()
 {
   if (top->reset)
@@ -138,9 +138,9 @@ static void perf_sample_per_cycle()
   // cache sample
   if (ifu_pvalid)
   {
-    if (i_fetch_start == false)
+    if (i_fetching == false)
     {
-      i_fetch_start = true;
+      i_fetching = true;
       if (l1i_cache_hit)
       {
         pmu.l1i_cache_hit_cnt++;
@@ -152,11 +152,11 @@ static void perf_sample_per_cycle()
         pmu.l1i_cache_miss_cycle++;
       }
     }
-    if (i_fetch_start == true)
+    else
     {
-      if (l1i_cache_hit)
+      if (ifu_valid)
       {
-        i_fetch_start = false;
+        i_fetching = false;
       }
       else
       {
