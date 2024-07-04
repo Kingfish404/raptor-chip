@@ -20,6 +20,7 @@
 // NOTE: this is compatible to 16550
 
 #define CH_OFFSET 0
+#define SOC_DL2_OFFSET 1
 #define SOC_LCR_OFFSET 3
 #define SOC_LSR_OFFSET 5
 
@@ -38,6 +39,7 @@ static void serial_io_handler(uint32_t offset, int len, bool is_write) {
       if (is_write) serial_putc(serial_base[0]);
       else panic("do not support read");
       break;
+    case SOC_DL2_OFFSET:
     case SOC_LCR_OFFSET:
     case SOC_LSR_OFFSET:
       break;
