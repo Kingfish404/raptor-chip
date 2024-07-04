@@ -27,6 +27,10 @@
 #define MAX_INST_TO_PRINT 10
 #define MAX_IRING_SIZE 16
 
+extern int boot_from_flash;
+FILE *pc_trace = NULL;
+uint64_t pc_continue_cnt = 1;
+
 CPU_state cpu = {};
 uint64_t g_nr_guest_inst = 0;
 static uint64_t g_timer = 0; // unit: us
@@ -56,6 +60,22 @@ static void exec_once(Decode *s, vaddr_t pc) {
   s->pc = pc;
   s->snpc = pc;
   isa_exec_once(s);
+  if (boot_from_flash)
+  {
+    if (pc_trace == NULL)
+    {
+      pc_trace = fopen("./pc-trace.txt", "w");
+      fprintf(pc_trace, FMT_WORD "-", s->pc);
+    }
+    if (s->dnpc == s->pc + 4)
+    {
+      pc_continue_cnt++;
+    } else {
+      fprintf(pc_trace, "%llu\n", pc_continue_cnt);
+      pc_continue_cnt = 1;
+      fprintf(pc_trace, FMT_WORD "-", s->pc);
+    }
+  }
   cpu.pc = s->dnpc;
   cpu.inst = s->isa.inst.val;
 #ifdef CONFIG_ITRACE

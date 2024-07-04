@@ -41,6 +41,8 @@ static void welcome() {
 
 void sdb_set_batch_mode();
 
+int boot_from_flash = 0;
+
 static char *log_file = NULL;
 static char *diff_so_file = NULL;
 static char *img_file = NULL;
@@ -63,6 +65,10 @@ static long load_img() {
   fseek(fp, 0, SEEK_SET);
   int ret = fread(guest_to_host(RESET_VECTOR), size, 1, fp);
   assert(ret == 1);
+  if (boot_from_flash) {
+    Log("Boot from flash");
+    memcpy(guest_to_host(CONFIG_FLASH_BASE), guest_to_host(RESET_VECTOR), size);
+  }
 
   fclose(fp);
   return size;
@@ -71,6 +77,7 @@ static long load_img() {
 static int parse_args(int argc, char *argv[]) {
   const struct option table[] = {
     {"batch"    , no_argument      , NULL, 'b'},
+    {"flash"    , no_argument      , NULL, 'f'},
     {"log"      , required_argument, NULL, 'l'},
     {"diff"     , required_argument, NULL, 'd'},
     {"port"     , required_argument, NULL, 'p'},
@@ -79,9 +86,10 @@ static int parse_args(int argc, char *argv[]) {
     {0          , 0                , NULL,  0 },
   };
   int o;
-  while ( (o = getopt_long(argc, argv, "-bhl:d:p:e:", table, NULL)) != -1) {
+  while ( (o = getopt_long(argc, argv, "-bfhl:d:p:e:", table, NULL)) != -1) {
     switch (o) {
       case 'b': sdb_set_batch_mode(); break;
+      case 'f': boot_from_flash = 1; break;
       case 'p': sscanf(optarg, "%d", &difftest_port); break;
       case 'l': log_file = optarg; break;
       case 'd': diff_so_file = optarg; break;
