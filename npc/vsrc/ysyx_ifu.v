@@ -31,7 +31,7 @@ module ysyx_IFU (
   parameter integer L1I_LEN = 3;
   reg [32-1:0] l1i[L1I_SIZE][L1I_LINE_SIZE];
   reg [L1I_SIZE-1:0] l1i_valid = 0;
-  reg [32-L1I_LEN-2-1:0] l1i_tag[L1I_SIZE];
+  reg [32-L1I_LEN-L1I_LINE_LEN-2-1:0] l1i_tag[L1I_SIZE];
   reg [1:0] l1i_state = 0;
 
   wire arvalid;
