@@ -33,6 +33,7 @@ static void restart() {
   /* Set the initial program counter. */
   cpu.pc = RESET_VECTOR;
   if (boot_from_flash) {
+    printf("Booting from flash...\n");
     cpu.pc = CONFIG_FLASH_BASE;
   }
 
