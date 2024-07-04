@@ -59,7 +59,7 @@ static void exec_once(Decode *s, vaddr_t pc) {
   s->snpc = pc;
   isa_exec_once(s);
   if (boot_from_flash) {
-    
+    printf("pc: " FMT_WORD " npc: " FMT_WORD "\n", s->pc, s->snpc);
   }
   cpu.pc = s->dnpc;
   cpu.inst = s->isa.inst.val;
