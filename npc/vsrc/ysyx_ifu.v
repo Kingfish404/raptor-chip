@@ -65,6 +65,7 @@ module ysyx_IFU (
             'b01:
                if (ifu_rvalid)
                 begin
+                  l1i_state <= 'b10;
                   l1i[addr_idx] <= ifu_rdata;
                   l1i_tag[addr_idx] <= addr_tag;
                   // l1i_valid[addr_idx] <= 1'b1;
@@ -75,6 +76,7 @@ module ysyx_IFU (
             'b10:
                if (ifu_rvalid)
                 begin
+                  l1i_state <= 'b00;
                   l1i[addr_idx] <= ifu_rdata;
                   l1i_tag[addr_idx] <= addr_tag;
                   l1i_valid[addr_idx] <= 1'b1;
