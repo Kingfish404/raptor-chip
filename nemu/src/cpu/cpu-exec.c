@@ -73,6 +73,7 @@ static void exec_once(Decode *s, vaddr_t pc) {
     } else {
       fprintf(pc_trace, "%llu\n", pc_continue_cnt);
       pc_continue_cnt = 0;
+      fprintf(pc_trace, FMT_WORD "-", s->pc);
     }
   }
   cpu.pc = s->dnpc;
