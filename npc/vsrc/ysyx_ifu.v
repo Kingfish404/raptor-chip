@@ -104,17 +104,12 @@ module ysyx_IFU (
                 begin
                   pvalid <= prev_valid;
                 end
-              if (ifu_rvalid | (l1i_cache_hit))
-                begin
-                  valid <= 1;
-                end
             end
           else if (state == `ysyx_WAIT_READY)
             begin
               if (next_ready == 1)
                 begin
                   pvalid <= 0;
-                  valid <= 0;
                 end
             end
         end
