@@ -56,7 +56,6 @@ module ysyx_IFU (
     begin
       if (rst)
         begin
-          valid <= 0;
           pvalid <= 1;
           l1i_state <= 0;
         end
