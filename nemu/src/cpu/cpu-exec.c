@@ -64,7 +64,7 @@ static void exec_once(Decode *s, vaddr_t pc) {
   {
     if (pc_trace == NULL)
     {
-      pc_trace = fopen("./pc_sequence.txt", "w");
+      pc_trace = fopen("./pc-trace.txt", "w");
       fprintf(pc_trace, FMT_WORD "-", s->pc);
     }
     if (s->dnpc == s->pc + 4)
