@@ -36,8 +36,8 @@ module ysyx_IFU (
 
   wire arvalid;
 
-  wire [32-L1I_LEN-2-1:0] addr_tag = ifu_araddr_o[ADDR_W-1:L1I_LEN+L1I_LINE_LEN+2];
-  wire [L1I_LEN-1:0] addr_idx = ifu_araddr_o[L1I_LEN+L1I_LINE_LEN+2-1:L1I_LINE_LEN+2];
+  wire [32-L1I_LEN-2-1:0] addr_tag = ifu_araddr_o[ADDR_W-1:L1I_LEN+2];
+  wire [L1I_LEN-L1I_LINE_LEN-1:0] addr_idx = ifu_araddr_o[L1I_LEN+2-1:L1I_LINE_LEN+2];
   wire [L1I_LINE_LEN-1:0]addr_offset = ifu_araddr_o[L1I_LINE_LEN+2-1:2];
   wire l1i_cache_hit = (
          (pvalid) & 1 &
