@@ -43,7 +43,7 @@ module ysyx_IFU (
   assign ifu_arvalid_o = arvalid & !l1i_cache_hit;
 
   // with l1i cache
-  assign inst_o = l1i[addr_idx][2];
+  assign inst_o = l1i[addr_idx][0];
   assign valid_o = l1i_cache_hit;
 
   `ysyx_BUS_FSM()
