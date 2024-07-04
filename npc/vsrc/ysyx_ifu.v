@@ -25,7 +25,7 @@ module ysyx_IFU (
   assign ready_o = !valid_o;
   assign arvalid = pvalid;
 
-  parameter integer L1I_LINE_SIZE = 2 * 4 * 8;
+  parameter integer L1I_LINE_SIZE = 1 * 4 * 8;
   parameter integer L1I_LINE_LEN = 0;
   parameter integer L1I_SIZE = 8;
   parameter integer L1I_LEN = 3;
