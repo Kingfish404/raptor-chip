@@ -33,8 +33,8 @@ module ysyx_IFU (
   reg [1:0] l1i_state = 0;
 
   wire arvalid;
-  wire [32-L1I_LEN-2-1:0] addr_tag = ifu_araddr_o[ADDR_W-1:L1I_LEN+2];
-  wire [L1I_LEN-1:0] addr_idx = ifu_araddr_o[L1I_LEN+2-1:0+2];
+  wire [32-L1I_LEN-2-1:0] addr_tag = pc[ADDR_W-1:L1I_LEN+2];
+  wire [L1I_LEN-1:0] addr_idx = pc[L1I_LEN+2-1:0+2];
   wire l1i_cache_hit = (
          (pvalid) & 1 & l1i_state == 'b00 &
          l1i_valid[addr_idx] == 1'b1) & (l1i_tag[addr_idx] == addr_tag);
@@ -63,7 +63,7 @@ module ysyx_IFU (
                   l1i_state <= 'b01;
                 end
             'b01:
-               if (ifu_rvalid)
+               if (ifu_rvalid & !l1i_cache_hit)
                 begin
                   l1i_state <= 'b10;
                   l1i[addr_idx][0] <= ifu_rdata;
