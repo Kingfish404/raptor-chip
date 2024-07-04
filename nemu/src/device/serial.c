@@ -42,6 +42,7 @@ static void serial_io_handler(uint32_t offset, int len, bool is_write) {
     case SOC_DL2_OFFSET:
     case SOC_LCR_OFFSET:
     case SOC_LSR_OFFSET:
+      if (!is_write) serial_base[5] = (0x1 << 5);
       break;
     default: panic("do not support offset = %d", offset);
   }
