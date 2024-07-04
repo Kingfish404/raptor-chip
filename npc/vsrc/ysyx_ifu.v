@@ -27,7 +27,7 @@ module ysyx_IFU (
 
   parameter integer L1I_SIZE = 8;
   parameter integer L1I_LEN = 3;
-  reg [32-1:0] l1i[L1I_SIZE][2];
+  reg [32-1:0] l1i[L1I_SIZE];
   reg [L1I_SIZE-1:0] l1i_valid = 0;
   reg [32-L1I_LEN-2-1:0] l1i_tag[L1I_SIZE];
   reg [1:0] l1i_state = 0;
@@ -43,7 +43,7 @@ module ysyx_IFU (
   assign ifu_arvalid_o = arvalid & !l1i_cache_hit;
 
   // with l1i cache
-  assign inst_o = l1i[addr_idx][0];
+  assign inst_o = l1i[addr_idx];
   assign valid_o = l1i_cache_hit;
 
   `ysyx_BUS_FSM()
@@ -66,7 +66,7 @@ module ysyx_IFU (
                if (ifu_rvalid)
                 begin
                   l1i_state <= 'b10;
-                  l1i[addr_idx][0] <= ifu_rdata;
+                  l1i[addr_idx] <= ifu_rdata;
                   l1i_tag[addr_idx] <= addr_tag;
                   // l1i_valid[addr_idx] <= 1'b1;
                   if (ifu_rdata == 'h0000100f) begin
@@ -77,7 +77,7 @@ module ysyx_IFU (
                if (ifu_rvalid)
                 begin
                   l1i_state <= 'b00;
-                  l1i[addr_idx][1] <= ifu_rdata;
+                  l1i[addr_idx] <= ifu_rdata;
                   l1i_tag[addr_idx] <= addr_tag;
                   l1i_valid[addr_idx] <= 1'b1;
                   if (ifu_rdata == 'h0000100f) begin
