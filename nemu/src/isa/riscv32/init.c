@@ -17,6 +17,8 @@
 #include <isa-def.h>
 #include <memory/paddr.h>
 
+extern int boot_from_flash;
+
 // this is not consistent with uint8_t
 // but it is ok since we do not access the array directly
 static const uint32_t img [] = {
@@ -30,6 +32,9 @@ static const uint32_t img [] = {
 static void restart() {
   /* Set the initial program counter. */
   cpu.pc = RESET_VECTOR;
+  if (boot_from_flash) {
+    cpu.pc = CONFIG_FLASH_BASE;
+  }
 
   /* The zero register is always 0. */
   cpu.gpr[0] = 0;
