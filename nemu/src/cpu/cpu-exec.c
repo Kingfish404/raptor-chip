@@ -41,23 +41,26 @@ void device_update();
 bool wp_check_changed();
 
 static void trace_and_difftest(Decode *_this, vaddr_t dnpc) {
-// #ifdef CONFIG_ITRACE_COND
-//   if (ITRACE_COND) { log_write("%s\n", _this->logbuf); }
-// #endif
-//   if (g_print_step) { IFDEF(CONFIG_ITRACE, puts(_this->logbuf)); }
-//   IFDEF(CONFIG_DIFFTEST, difftest_step(_this->pc, dnpc));
-// #ifdef CONFIG_WATCHPOINT
-//   if (wp_check_changed()) {
-//     set_nemu_state(NEMU_STOP, cpu.pc, -1);
-//     printf("inpect watchpoint changed!\n");
-//   }
-// #endif
+#ifdef CONFIG_ITRACE_COND
+  if (ITRACE_COND) { log_write("%s\n", _this->logbuf); }
+#endif
+  if (g_print_step) { IFDEF(CONFIG_ITRACE, puts(_this->logbuf)); }
+  IFDEF(CONFIG_DIFFTEST, difftest_step(_this->pc, dnpc));
+#ifdef CONFIG_WATCHPOINT
+  if (wp_check_changed()) {
+    set_nemu_state(NEMU_STOP, cpu.pc, -1);
+    printf("inpect watchpoint changed!\n");
+  }
+#endif
 }
 
 static void exec_once(Decode *s, vaddr_t pc) {
   s->pc = pc;
   s->snpc = pc;
   isa_exec_once(s);
+  if (boot_from_flash) {
+    
+  }
   cpu.pc = s->dnpc;
   cpu.inst = s->isa.inst.val;
 #ifdef CONFIG_ITRACE
