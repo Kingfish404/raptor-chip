@@ -114,60 +114,60 @@ static void perf_sample_per_cycle()
     return;
   }
   pmu.active_cycle++;
-  // bool ifu_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__ifu__DOT__l1i_cache_hit));
-  // bool ifu_pvalid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__ifu__DOT__pvalid));
-  // bool l1i_cache_hit = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__ifu__DOT__l1i_cache_hit));
-  // bool lsu_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__exu__DOT__lsu_valid));
-  // if (ifu_valid)
-  // {
-  //   pmu.ifu_fetch_cnt++;
-  // }
-  // if (!ifu_valid && ifu_pvalid)
-  // {
-  //   pmu.ifu_stall_cycle++;
-  // }
-  // if (lsu_valid)
-  // {
-  //   pmu.lsu_load_cnt++;
-  // }
-  // if (!lsu_valid &&
-  //     *(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__exu__DOT__lsu_avalid)))
-  // {
-  //   pmu.lsu_stall_cycle++;
-  // }
-  // if (*(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__exu_valid)))
-  // {
-  //   pmu.exu_alu_cnt++;
-  // }
-  // // cache sample
-  // if (ifu_pvalid)
-  // {
-  //   if (i_fetching == false)
-  //   {
-  //     if (l1i_cache_hit)
-  //     {
-  //       pmu.l1i_cache_hit_cnt++;
-  //       pmu.l1i_cache_hit_cycle++;
-  //     }
-  //     else
-  //     {
-  //       i_fetching = true;
-  //       pmu.l1i_cache_miss_cnt++;
-  //       pmu.l1i_cache_miss_cycle++;
-  //     }
-  //   }
-  //   else
-  //   {
-  //     if (ifu_valid)
-  //     {
-  //       i_fetching = false;
-  //     }
-  //     else
-  //     {
-  //       pmu.l1i_cache_miss_cycle++;
-  //     }
-  //   }
-  // }
+  bool ifu_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__ifu_valid));
+  bool ifu_pvalid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__ifu__DOT__pvalid));
+  bool l1i_cache_hit = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__ifu_valid));
+  bool lsu_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__exu__DOT__lsu_valid));
+  if (ifu_valid)
+  {
+    pmu.ifu_fetch_cnt++;
+  }
+  if (!ifu_valid && ifu_pvalid)
+  {
+    pmu.ifu_stall_cycle++;
+  }
+  if (lsu_valid)
+  {
+    pmu.lsu_load_cnt++;
+  }
+  if (!lsu_valid &&
+      *(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__exu__DOT__lsu_avalid)))
+  {
+    pmu.lsu_stall_cycle++;
+  }
+  if (*(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__exu_valid)))
+  {
+    pmu.exu_alu_cnt++;
+  }
+  // cache sample
+  if (ifu_pvalid)
+  {
+    if (i_fetching == false)
+    {
+      if (l1i_cache_hit)
+      {
+        pmu.l1i_cache_hit_cnt++;
+        pmu.l1i_cache_hit_cycle++;
+      }
+      else
+      {
+        i_fetching = true;
+        pmu.l1i_cache_miss_cnt++;
+        pmu.l1i_cache_miss_cycle++;
+      }
+    }
+    else
+    {
+      if (ifu_valid)
+      {
+        i_fetching = false;
+      }
+      else
+      {
+        pmu.l1i_cache_miss_cycle++;
+      }
+    }
+  }
 }
 
 static void perf_sample_per_inst()
