@@ -25,15 +25,17 @@ module ysyx_IFU (
   assign ready_o = !valid_o;
   assign arvalid = pvalid;
 
+  parameter integer L1I_LINE_SIZE = 32;
   parameter integer L1I_SIZE = 8;
   parameter integer L1I_LEN = 3;
-  reg [32-1:0] l1i[L1I_SIZE];
+  reg [L1I_LINE_SIZE-1:0] l1i[L1I_SIZE];
   reg [L1I_SIZE-1:0] l1i_valid = 0;
   reg [32-L1I_LEN-2-1:0] l1i_tag[L1I_SIZE];
 
   wire arvalid;
   wire [32-L1I_LEN-2-1:0] addr_tag = ifu_araddr_o[ADDR_W-1:L1I_LEN+2];
   wire [L1I_LEN-1:0] addr_idx = ifu_araddr_o[L1I_LEN+2-1:0+2];
+  wire addr_offset = ifu_araddr_o[1:0];
   wire l1i_cache_hit = (
          (pvalid) & 1 &
          l1i_valid[addr_idx] == 1'b1) & (l1i_tag[addr_idx] == addr_tag);
