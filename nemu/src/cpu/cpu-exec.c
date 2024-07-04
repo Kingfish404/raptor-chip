@@ -28,6 +28,7 @@
 #define MAX_IRING_SIZE 16
 
 extern int boot_from_flash;
+FILE *pc_trace = NULL;
 
 CPU_state cpu = {};
 uint64_t g_nr_guest_inst = 0;
@@ -58,8 +59,17 @@ static void exec_once(Decode *s, vaddr_t pc) {
   s->pc = pc;
   s->snpc = pc;
   isa_exec_once(s);
-  if (boot_from_flash) {
-    printf("pc: " FMT_WORD " npc - pc: " FMT_WORD "\n", s->pc, s->snpc - s->pc);
+  if (boot_from_flash)
+  {
+    if (pc_trace == NULL)
+    {
+      pc_trace = fopen("./pc_trace.log", "w");
+      fprintf(pc_trace, FMT_WORD "\n", s->pc);
+    }
+    if (s->dnpc != s->pc + 4)
+    {
+      fprintf(pc_trace, FMT_WORD "\n", s->pc);
+    }
   }
   cpu.pc = s->dnpc;
   cpu.inst = s->isa.inst.val;
