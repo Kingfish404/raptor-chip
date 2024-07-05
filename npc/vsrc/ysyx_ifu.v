@@ -54,7 +54,7 @@ module ysyx_IFU (
          (pvalid) & 1 & l1i_state == 'b00 &
          l1i_valid[addr_idx] == 1'b1) & (l1i_tag[addr_idx] == addr_tag);
 
-  assign ifu_araddr_o = (l1i_state == 'b00 | l1i_state == 'b01) ? (pc) : (pc | 'h4);
+  assign ifu_araddr_o = (l1i_state == 'b00 | l1i_state == 'b01) ? (pc & ~'h4) : (pc | 'h4);
   assign ifu_arvalid_o = arvalid & !l1i_cache_hit & l1i_state != 'b10;
 
   // with l1i cache
