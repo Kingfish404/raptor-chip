@@ -27,8 +27,8 @@ module ysyx_IFU (
 
   parameter integer L1I_LINE_SIZE = 2;
   parameter integer L1I_LINE_LEN = 1;
-  parameter integer L1I_SIZE = 4;
-  parameter integer L1I_LEN = 2;
+  parameter integer L1I_SIZE = 8;
+  parameter integer L1I_LEN = 3;
   reg [32-1:0] l1i[L1I_SIZE][L1I_LINE_SIZE];
   reg [L1I_SIZE-1:0] l1i_valid = 0;
   reg [32-L1I_LEN-L1I_LINE_LEN-2-1:0] l1i_tag[L1I_SIZE];
@@ -70,6 +70,9 @@ module ysyx_IFU (
           pvalid <= 1;
         end
       else
+        if (inst_o == 'h0000100f) begin
+          l1i_valid <= 0;
+        end
         begin
           case (l1i_state)
             'b00:
@@ -83,10 +86,6 @@ module ysyx_IFU (
                   l1i_state <= 'b10;
                   l1i[addr_idx][0] <= ifu_rdata;
                   l1i_tag[addr_idx] <= addr_tag;
-                  // l1i_valid[addr_idx] <= 1'b1;
-                  if (ifu_rdata == 'h0000100f) begin
-                    l1i_valid <= 0;
-                  end
                 end
             'b10:
                l1i_state <= 'b11;
@@ -98,9 +97,6 @@ module ysyx_IFU (
                   l1i[addr_idx][1] <= ifu_rdata;
                   l1i_tag[addr_idx] <= addr_tag;
                   l1i_valid[addr_idx] <= 1'b1;
-                  if (ifu_rdata == 'h0000100f) begin
-                    l1i_valid <= 0;
-                  end
                 end
               end
           endcase
