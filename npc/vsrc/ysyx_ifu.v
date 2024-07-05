@@ -72,7 +72,7 @@ module ysyx_IFU (
       else
         begin
           if (inst_o == 'h0000100f) begin
-            l1i_valid <= 0;
+            // l1i_valid <= 0;
           end
           case (l1i_state)
             'b00:
