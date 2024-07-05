@@ -55,7 +55,7 @@ module ysyx_IFU (
          l1i_valid[addr_idx] == 1'b1) & (l1i_tag[addr_idx] == addr_tag);
 
   assign ifu_araddr_o = (l1i_state == 'b00 | l1i_state == 'b01) ? (pc) : (pc | 'h4);
-  assign ifu_arvalid_o = arvalid & !l1i_cache_hit;
+  assign ifu_arvalid_o = arvalid & !l1i_cache_hit & l1i_state != 'b10;
 
   // with l1i cache
   assign inst_o = l1i[addr_idx][addr_offset];
@@ -89,7 +89,10 @@ module ysyx_IFU (
                   end
                 end
             'b10:
-               if (ifu_rvalid)
+               l1i_state <= 'b11;
+            'b11:
+              begin
+                if (ifu_rvalid)
                 begin
                   l1i_state <= 'b00;
                   l1i[addr_idx][1] <= ifu_rdata;
@@ -99,8 +102,6 @@ module ysyx_IFU (
                     l1i_valid <= 0;
                   end
                 end
-            'b11:
-              begin
               end
           endcase
           // if (ifu_rvalid)
