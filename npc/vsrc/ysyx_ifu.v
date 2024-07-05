@@ -86,6 +86,9 @@ module ysyx_IFU (
                   l1i_state <= 'b10;
                   l1i[addr_idx][0] <= ifu_rdata;
                   l1i_tag[addr_idx] <= addr_tag;
+                  if (ifu_rdata == 'h0000100f) begin
+                    l1i_valid <= 0;
+                  end
                 end
             'b10:
                l1i_state <= 'b11;
@@ -97,6 +100,9 @@ module ysyx_IFU (
                   l1i[addr_idx][1] <= ifu_rdata;
                   l1i_tag[addr_idx] <= addr_tag;
                   l1i_valid[addr_idx] <= 1'b1;
+                  if (ifu_rdata == 'h0000100f) begin
+                    l1i_valid <= 0;
+                  end
                 end
               end
           endcase
