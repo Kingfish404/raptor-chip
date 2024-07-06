@@ -133,6 +133,7 @@ module ysyx_BUS_ARBITER(
                     end
                     if (io_master_wready)
                     begin
+                      state <= LS_D_W;
                       write_valid <= 0;
                     end
                     // if (io_master_wready) begin
