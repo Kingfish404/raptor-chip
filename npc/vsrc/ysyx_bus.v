@@ -132,7 +132,7 @@ module ysyx_BUS_ARBITER(
                       awrite_valid <= 1;
                     end
                     if (io_master_wready) begin
-                      awrite_valid <= 1;
+                      write_valid <= 0;
                     end
                   end
                 else if (io_master_arvalid & io_master_arready)
