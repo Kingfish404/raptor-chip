@@ -184,7 +184,8 @@ module ysyx_BUS_ARBITER(
   assign lsu_wready_o = io_master_bvalid;
 
   // io lsu read
-  assign io_master_arburst = ifu_arvalid ? 2'b01 : 2'b00;
+  // assign io_master_arburst = ifu_arvalid ? 2'b01 : 2'b00;
+  assign io_master_arburst = 2'b01;
   assign io_master_arsize = (
            ({3{lsu_rstrb == 8'h1}} & 3'b000) |
            ({3{lsu_rstrb == 8'h3}} & 3'b001) |
