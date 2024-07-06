@@ -128,12 +128,15 @@ module ysyx_BUS_ARBITER(
                 if (io_master_awvalid)
                   begin
                     if (io_master_awready) begin
-                      state <= LS_D_W;
                       awrite_valid <= 1;
                     end
                     // if (io_master_wready) begin
                     //   awrite_valid <= 1;
                     // end
+                    if (awrite_valid)
+                      begin
+                        state <= LS_D_W;
+                      end
                   end
                 else if (io_master_arvalid & io_master_arready)
                   begin
@@ -156,7 +159,6 @@ module ysyx_BUS_ARBITER(
                 if (io_master_wready)
                   begin
                     write_valid <= 0;
-                    awrite_valid <= 0;
                   end
                 if (io_master_bvalid)
                   begin
