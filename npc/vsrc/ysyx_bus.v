@@ -169,6 +169,7 @@ module ysyx_BUS_ARBITER(
                   begin
                     state <= IF_A;
                     awrite_done <= 0;
+                    write_done <= 0;
                   end
               end
             default:
