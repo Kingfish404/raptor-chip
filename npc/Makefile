@@ -15,7 +15,7 @@ endif
 INC_PATH ?= $(abspath ./include) $(abspath ./vsrc/include)
 
 ifeq ($(CONFIG_MODE), "soc")
-SOC_HOME  = $(abspath ./../ysyxSoC.ref)
+SOC_HOME  = $(abspath ./../ysyxSoC)
 INC_PATH += $(abspath $(SOC_HOME)/perip/uart16550/rtl) $(abspath $(SOC_HOME)/perip/spi/rtl)
 VTARGET=ysyxSoCFull
 SOC_DEFINE=-DYSYX_SOC
