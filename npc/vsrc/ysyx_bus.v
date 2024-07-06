@@ -230,7 +230,7 @@ module ysyx_BUS_ARBITER(
          {{lsu_wstrb[3:0] << awaddr_lo}, {4'b0}}:
          {{4'b0}, {lsu_wstrb[3:0] << awaddr_lo}};
   assign io_master_wvalid = (
-           (((state == LS_A | state == LS_D_W))) & write_valid & (lsu_wvalid) // for new soc
+           (((state == LS_D_W))) & write_valid & (lsu_wvalid) // for new soc
          );
 
   assign io_master_bready = 1;
