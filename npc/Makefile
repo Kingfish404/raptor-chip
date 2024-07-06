@@ -15,7 +15,7 @@ endif
 INC_PATH ?= $(abspath ./include) $(abspath ./vsrc/include)
 
 ifeq ($(CONFIG_MODE), "soc")
-SOC_HOME  = $(abspath ./../ysyxSoC)
+SOC_HOME  = $(abspath ./../ysyxSoC.ref)
 INC_PATH += $(abspath $(SOC_HOME)/perip/uart16550/rtl) $(abspath $(SOC_HOME)/perip/spi/rtl)
 VTARGET=ysyxSoCFull
 SOC_DEFINE=-DYSYX_SOC
@@ -76,11 +76,11 @@ IMG ?=
 NPC_EXEC := $(BIN) $(NPCFLAGS) $(DIFF_REF_SO) -m $(MROM_IMG) $(IMG)
 
 run: $(BIN) $(MROM_IMG)
-	$(call git_commit, "sim RTL") # DO NOT REMOVE THIS LINE!!!
+	# $(call git_commit, "sim RTL") # DO NOT REMOVE THIS LINE!!!
 	$(NPC_EXEC)
 
 sim: $(BIN)
-	$(call git_commit, "sim RTL") # DO NOT REMOVE THIS LINE!!!
+	# $(call git_commit, "sim RTL") # DO NOT REMOVE THIS LINE!!!
 	@$^
 
 AM_KERNEL = $(YSYX_HOME)/am-kernels
