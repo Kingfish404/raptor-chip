@@ -108,6 +108,8 @@ module ysyx_BUS_ARBITER(
                 if (lsu_arvalid | lsu_awvalid)
                   begin
                     state <= LS_A;
+                    awrite_done <= 0;
+                    write_done <= 0;
                   end
               end
             IF_D:
@@ -115,6 +117,8 @@ module ysyx_BUS_ARBITER(
                 if (lsu_arvalid | lsu_awvalid)
                   begin
                     state <= LS_A;
+                    awrite_done <= 0;
+                    write_done <= 0;
                   end
                 else
                   if (io_master_rvalid)
@@ -162,8 +166,6 @@ module ysyx_BUS_ARBITER(
                 if (io_master_bvalid)
                   begin
                     state <= IF_A;
-                    awrite_done <= 0;
-                    write_done <= 0;
                   end
               end
             default:
@@ -223,7 +225,7 @@ module ysyx_BUS_ARBITER(
            (3'b000)
          );
   assign io_master_awaddr = lsu_awaddr;
-  assign io_master_awvalid = (lsu_wvalid) & !awrite_done;
+  assign io_master_awvalid = (state == LS_A) & (lsu_wvalid) & !awrite_done;
 
   assign io_master_wlast = io_master_wvalid;
   wire [1:0] awaddr_lo = io_master_awaddr[1:0];
