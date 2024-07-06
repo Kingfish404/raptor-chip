@@ -191,7 +191,7 @@ module ysyx_BUS_ARBITER(
            ({3{lsu_rstrb == 8'hf}} & 3'b010) |
            (3'b000)
          );
-  assign io_master_arlen = ifu_arvalid ? 8'h0 : 8'h0;
+  assign io_master_arlen = ifu_arvalid ? 8'h1 : 8'h0;
   assign io_master_araddr = sram_araddr;
   assign io_master_arvalid = !rst & (
            ((state == IF_A) & ifu_arvalid) |
