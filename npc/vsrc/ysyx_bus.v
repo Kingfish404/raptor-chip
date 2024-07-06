@@ -160,6 +160,7 @@ module ysyx_BUS_ARBITER(
                 if (io_master_bvalid)
                   begin
                     state <= IF_A;
+                    awrite_valid <= 0;
                   end
               end
             default:
