@@ -169,7 +169,7 @@ module ysyx_BUS_ARBITER(
          (ifu_arvalid) ? ifu_araddr : 0);
 
   // ifu read
-  assign ifu_rdata_o = ({DATA_W{ifu_arvalid}} & (rdata_o));
+  assign ifu_rdata_o = ({DATA_W{ifu_rvalid_o}} & (rdata_o));
   assign ifu_rvalid_o = !lsu_arvalid & ((rvalid_o));
 
   // lsu read
