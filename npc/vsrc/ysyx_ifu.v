@@ -79,7 +79,7 @@ module ysyx_IFU (
                 end
             'b10:
                begin
-                // l1i_state <= 'b11;
+                l1i_state <= 'b11;
                end
             'b11:
               begin
