@@ -63,16 +63,6 @@ void halt(int code)
 
 __attribute__((section(".first_boot"))) void _first_stage_bootloader(void)
 {
-  volatile uint8_t *p = 0xa0000000;
-  *(p) = 0;
-  asm volatile("nop");
-  *(p+4) = 0;
-  asm volatile("nop");
-  *(p+8) = 0;
-  *p;
-  *p;
-  *p;
-  // asm volatile("ebreak");
   if ((size_t)_second_boot_start != (size_t)_second_boot_load_start)
   {
     size_t text_size = _second_boot_end - _second_boot_start;

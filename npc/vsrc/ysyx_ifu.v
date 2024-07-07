@@ -78,9 +78,7 @@ module ysyx_IFU (
                   l1i_tag[addr_idx] <= addr_tag;
                 end
             'b10:
-               begin
-                l1i_state <= 'b11;
-               end
+               l1i_state <= 'b11;
             'b11:
               begin
                 if (ifu_rvalid)
