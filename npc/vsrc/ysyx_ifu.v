@@ -73,7 +73,7 @@ module ysyx_IFU (
             'b01:
                if (ifu_rvalid & !l1i_cache_hit)
                 begin
-                  l1i_state <= 'b10;
+                  l1i_state <= 'b11;
                   l1i[addr_idx][0] <= ifu_rdata;
                   l1i_tag[addr_idx] <= addr_tag;
                 end
