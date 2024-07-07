@@ -52,7 +52,7 @@ module ysyx_IFU (
   // with l1i cache
   assign inst_o = l1i[addr_idx][addr_offset];
   assign valid_o = l1i_cache_hit;
-  wire ifu_sdram_arburst = (pc >= 'ha0000000) & (pc <= 'hc0000000);
+  wire ifu_sdram_arburst = `ysyx_I_SDRAM_ARBURST & (pc >= 'ha0000000) & (pc <= 'hc0000000);
 
   `ysyx_BUS_FSM()
   assign pc_o = pc;
