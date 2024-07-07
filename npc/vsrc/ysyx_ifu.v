@@ -50,6 +50,7 @@ module ysyx_IFU (
   // with l1i cache
   assign inst_o = l1i[addr_idx][addr_offset];
   assign valid_o = l1i_cache_hit;
+  wire pc_sdram = (pc >= 'ha0000000) & (pc <= 'hc0000000);
 
   `ysyx_BUS_FSM()
   assign pc_o = pc;
@@ -73,7 +74,11 @@ module ysyx_IFU (
             'b01:
                if (ifu_rvalid & !l1i_cache_hit)
                 begin
-                  l1i_state <= 'b11;
+                  if (pc_sdram) begin
+                    l1i_state <= 'b11;
+                  end else begin
+                    l1i_state <= 'b10;
+                  end
                   l1i[addr_idx][0] <= ifu_rdata;
                   l1i_tag[addr_idx] <= addr_tag;
                 end
