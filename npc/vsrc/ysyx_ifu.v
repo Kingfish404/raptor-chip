@@ -1,4 +1,5 @@
 `include "ysyx_macro.v"
+`include "ysyx_macro_soc.v"
 
 module ysyx_IFU (
     input clk, rst,
