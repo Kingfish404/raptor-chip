@@ -1,4 +1,5 @@
 `include "ysyx_macro.v"
+`include "ysyx_macro_soc.v"
 
 module ysyx_IFU (
     input clk, rst,
@@ -45,11 +46,14 @@ module ysyx_IFU (
          l1i_valid[addr_idx] == 1'b1) & (l1i_tag[addr_idx] == addr_tag);
 
   assign ifu_araddr_o = (l1i_state == 'b00 | l1i_state == 'b01) ? (pc & ~'h4) : (pc | 'h4);
-  assign ifu_arvalid_o = arvalid & !l1i_cache_hit & l1i_state != 'b10;
+  assign ifu_arvalid_o = ifu_sdram_arburst ?
+    arvalid & !l1i_cache_hit & (l1i_state == 'b00 | l1i_state == 'b01) :
+    arvalid & !l1i_cache_hit & l1i_state != 'b10;
 
   // with l1i cache
   assign inst_o = l1i[addr_idx][addr_offset];
   assign valid_o = l1i_cache_hit;
+  wire ifu_sdram_arburst = `ysyx_I_SDRAM_ARBURST & (pc >= 'ha0000000) & (pc <= 'hc0000000);
 
   `ysyx_BUS_FSM()
   assign pc_o = pc;
@@ -73,12 +77,18 @@ module ysyx_IFU (
             'b01:
                if (ifu_rvalid & !l1i_cache_hit)
                 begin
-                  l1i_state <= 'b10;
+                  if (ifu_sdram_arburst) begin
+                    l1i_state <= 'b11;
+                  end else begin
+                    l1i_state <= 'b10;
+                  end
                   l1i[addr_idx][0] <= ifu_rdata;
                   l1i_tag[addr_idx] <= addr_tag;
                 end
             'b10:
-               l1i_state <= 'b11;
+               begin
+                l1i_state <= 'b11;
+               end
             'b11:
               begin
                 if (ifu_rvalid)

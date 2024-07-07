@@ -81,7 +81,7 @@ module ysyx_BUS_ARBITER(
 
   reg [2:0] state;
   reg first = 1;
-  reg write_valid = 0;
+  reg write_done = 0, awrite_done = 0;
   always @(posedge clk)
     begin
       if (rst)
@@ -108,6 +108,8 @@ module ysyx_BUS_ARBITER(
                 if (lsu_arvalid | lsu_awvalid)
                   begin
                     state <= LS_A;
+                    awrite_done <= 0;
+                    write_done <= 0;
                   end
               end
             IF_D:
@@ -115,6 +117,8 @@ module ysyx_BUS_ARBITER(
                 if (lsu_arvalid | lsu_awvalid)
                   begin
                     state <= LS_A;
+                    awrite_done <= 0;
+                    write_done <= 0;
                   end
                 else
                   if (io_master_rvalid)
@@ -124,10 +128,18 @@ module ysyx_BUS_ARBITER(
               end
             LS_A:
               begin
-                if (io_master_awvalid & io_master_awready)
+                if (lsu_wvalid)
                   begin
-                    state <= LS_D_W;
-                    write_valid <= 1;
+                    if (io_master_awready) begin
+                      awrite_done <= 1;
+                    end
+                    if (io_master_wready) begin
+                      write_done <= 1;
+                    end
+                    if (io_master_bvalid)
+                    begin
+                      state <= IF_A;
+                    end
                   end
                 else if (io_master_arvalid & io_master_arready)
                   begin
@@ -145,17 +157,6 @@ module ysyx_BUS_ARBITER(
                     state <= IF_A;
                   end
               end
-            LS_D_W:
-              begin
-                if (io_master_wready)
-                  begin
-                    write_valid <= 0;
-                  end
-                if (io_master_bvalid)
-                  begin
-                    state <= IF_A;
-                  end
-              end
             default:
               state <= IF_A;
           endcase
@@ -168,8 +169,8 @@ module ysyx_BUS_ARBITER(
          (ifu_arvalid) ? ifu_araddr : 0);
 
   // ifu read
-  assign ifu_rdata_o = ({DATA_W{ifu_arvalid}} & (rdata_o));
-  assign ifu_rvalid_o = !lsu_arvalid & (ifu_arvalid & (rvalid_o));
+  assign ifu_rdata_o = ({DATA_W{ifu_rvalid_o}} & (rdata_o));
+  assign ifu_rvalid_o = !lsu_arvalid & ((rvalid_o));
 
   // lsu read
   wire clint_en = (lsu_araddr == `ysyx_BUS_RTC_ADDR) | (lsu_araddr == `ysyx_BUS_RTC_ADDR_UP);
@@ -183,12 +184,15 @@ module ysyx_BUS_ARBITER(
   assign lsu_wready_o = io_master_bvalid;
 
   // io lsu read
+  wire ifu_sdram_arburst = `ysyx_I_SDRAM_ARBURST & ifu_arvalid & (ifu_araddr >= 'ha0000000) & (ifu_araddr <= 'hc0000000);
+  assign io_master_arburst = ifu_sdram_arburst ? 2'b01 : 2'b00;
   assign io_master_arsize = (
            ({3{lsu_rstrb == 8'h1}} & 3'b000) |
            ({3{lsu_rstrb == 8'h3}} & 3'b001) |
-           ({3{lsu_rstrb == 8'hf}} & 3'b010) |
+           ({3{lsu_rstrb == 8'hf | ifu_arvalid}} & 3'b010) |
            (3'b000)
          );
+  assign io_master_arlen = ifu_sdram_arburst ? 8'h1 : 8'h0;
   assign io_master_araddr = sram_araddr;
   assign io_master_arvalid = !rst & (
            ((state == IF_A) & ifu_arvalid) |
@@ -213,9 +217,9 @@ module ysyx_BUS_ARBITER(
            (3'b000)
          );
   assign io_master_awaddr = lsu_awaddr;
-  assign io_master_awvalid = (state == LS_A) & (lsu_wvalid);
+  assign io_master_awvalid = (state == LS_A) & (lsu_wvalid) & !awrite_done;
 
-  assign io_master_wlast = ((state == LS_D_W) & write_valid);
+  assign io_master_wlast = io_master_wvalid;
   wire [1:0] awaddr_lo = io_master_awaddr[1:0];
   wire [DATA_W-1:0] wdata = {
          ({DATA_W{awaddr_lo == 2'b00}} & lsu_wdata) |
@@ -229,9 +233,7 @@ module ysyx_BUS_ARBITER(
   assign io_master_wstrb = (io_master_awaddr[2:2] == 1) ?
          {{lsu_wstrb[3:0] << awaddr_lo}, {4'b0}}:
          {{4'b0}, {lsu_wstrb[3:0] << awaddr_lo}};
-  assign io_master_wvalid = (
-           (((state == LS_D_W) & write_valid)) & (lsu_wvalid) // for new soc
-         );
+  assign io_master_wvalid = (state == LS_A) & (lsu_wvalid) & !write_done;
 
   assign io_master_bready = 1;
 
