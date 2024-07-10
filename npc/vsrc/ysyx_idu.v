@@ -58,7 +58,7 @@ module ysyx_IDU (
   );
   assign rwaddr_o = (
     {BIT_W{opcode_o == `ysyx_OP_IL_TYPE | opcode_o == `ysyx_OP_S_TYPE}} & reg_rdata1 + imm_o |
-    0
+    (0)
   );
   always @(*) begin
     rwen_o = 0; ren_o = 0; wen_o = 0;
