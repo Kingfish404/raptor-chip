@@ -199,16 +199,16 @@ module ysyx (
   ysyx_IFU #(.ADDR_W(DATA_W), .DATA_W(DATA_W)) ifu(
     .clk(clock), .rst(reset),
 
-    .prev_valid(wbu_valid), .next_ready(idu_ready),
-    .valid_o(ifu_valid), .ready_o(ifu_ready),
-
     .ifu_araddr_o(ifu_araddr_o),
     .ifu_arvalid_o(ifu_arvalid_o),
     .ifu_rdata(ifu_rdata),
     .ifu_rvalid(ifu_rvalid),
 
     .pc(pc),
-    .inst_o(inst), .pc_o(pc_ifu)
+    .inst_o(inst), .pc_o(pc_ifu),
+
+    .prev_valid(wbu_valid), .next_ready(idu_ready),
+    .valid_o(ifu_valid), .ready_o(ifu_ready)
   );
 
   // IDU(Instruction Decode Unit): 负责对当前指令进行译码, 准备执行阶段需要使用的数据和控制信号
