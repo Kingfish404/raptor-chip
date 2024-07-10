@@ -215,6 +215,9 @@ module ysyx (
   ysyx_IDU idu(
     .clk(clock), .rst(reset),
 
+    .prev_valid(ifu_valid), .next_ready(exu_ready),
+    .valid_o(idu_valid), .ready_o(idu_ready),
+
     .inst(inst),
     .reg_rdata1(reg_rdata1), .reg_rdata2(reg_rdata2),
     .pc(pc),
@@ -223,10 +226,7 @@ module ysyx (
     .imm_o(imm),
     .rs1_o(rs1), .rs2_o(rs2), .rd_o(rd),
     .alu_op_o(alu_op),
-    .opcode_o(opcode), .pc_o(pc_idu),
-
-    .prev_valid(ifu_valid), .next_ready(exu_ready),
-    .valid_o(idu_valid), .ready_o(idu_ready)
+    .opcode_o(opcode), .pc_o(pc_idu)
     );
 
   // EXU(EXecution Unit): 负责根据控制信号对数据进行执行操作, 并将执行结果写回寄存器或存储器
