@@ -10,8 +10,8 @@ module ysyx_IDU (
   input [BIT_W-1:0] pc,
   output en_j_o,
   output reg rwen_o, ren_o, wen_o,
-  output reg [BIT_W-1:0] op1_o, op2_o, op_j_o,
-  output wire [BIT_W-1:0] rwaddr_o,
+  output reg [BIT_W-1:0] op1_o, op2_o,
+  output wire [BIT_W-1:0] rwaddr_o, op_j_o,
   output reg [31:0] imm_o,
   output reg [4:0] rs1_o, rs2_o, rd_o,
   output reg [3:0] alu_op_o,
@@ -62,10 +62,8 @@ module ysyx_IDU (
   );
   assign op_j_o = (
     {BIT_W{opcode_o == `ysyx_OP_JAL | opcode_o == `ysyx_OP_B_TYPE}} & pc |
-    {BIT_W{
-      opcode_o == `ysyx_OP_JALR
-      | opcode_o == `ysyx_OP_IL_TYPE
-      | opcode_o == `ysyx_OP_S_TYPE}} & reg_rdata1 |
+    {BIT_W{opcode_o == `ysyx_OP_JALR | opcode_o == `ysyx_OP_IL_TYPE | opcode_o == `ysyx_OP_S_TYPE}}
+      & reg_rdata1 |
     (0)
   );
   assign wen_o = (opcode_o == `ysyx_OP_S_TYPE);
