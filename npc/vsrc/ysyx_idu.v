@@ -5,7 +5,6 @@
 module ysyx_IDU (
   input clk, rst,
 
-
   input [31:0] inst,
   input [BIT_W-1:0] reg_rdata1, reg_rdata2,
   input [BIT_W-1:0] pc,
