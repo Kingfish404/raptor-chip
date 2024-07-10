@@ -148,10 +148,10 @@ module ysyx (
 
   ysyx_RegisterFile #(.REG_ADDR_W(REG_ADDR_W), .DATA_W(DATA_W)) regs(
     .clk(clock), .rst(reset),
-    .exu_valid(wbu_valid),
 
     .reg_write_en(wbu_valid),
     .waddr(rd_wbu), .wdata(reg_wdata_wbu),
+
     .s1addr(rs1), .s2addr(rs2),
     .src1_o(reg_rdata1), .src2_o(reg_rdata2)
     );
@@ -323,7 +323,6 @@ endmodule //ysyx_PC
 
 module ysyx_RegisterFile (
   input clk, rst,
-  input exu_valid,
   input reg_write_en,
   input [REG_ADDR_W-1:0] waddr,
   input [DATA_W-1:0] wdata,
@@ -350,7 +349,7 @@ module ysyx_RegisterFile (
               begin
                 rf[i] <= 0;
               end
-            else if (reg_write_en && exu_valid)
+            else if (reg_write_en)
               begin
                 rf[waddr[3:0]] <= wdata;
               end
