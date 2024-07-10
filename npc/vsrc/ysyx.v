@@ -88,13 +88,13 @@ module ysyx (
 
   // IFU output
   wire [31:0] inst;
-  wire ifu_valid, ifu_ready;
   wire [DATA_W-1:0] pc_ifu;
   // IFU bus wire
   wire [DATA_W-1:0] ifu_araddr_o;
   wire ifu_arvalid_o;
   wire [DATA_W-1:0] ifu_rdata;
   wire ifu_rvalid;
+  wire ifu_valid, ifu_ready;
 
   // IDU output
   wire [DATA_W-1:0] op1, op2, imm, op_j, pc_idu, rwaddr;
@@ -120,9 +120,16 @@ module ysyx (
   wire [DATA_W-1:0] npc_wdata;
   wire use_exu_npc;
   wire [4:0] rd_exu;
-  wire exu_valid, exu_ready;
   wire [3:0] alu_op_exu;
-  wire rwen_exu, wben, ren_exu, wen_exu;
+  wire rwen_exu, ren_exu, wen_exu;
+  wire exu_valid, exu_ready;
+
+  // WBU output
+  wire [DATA_W-1:0] reg_wdata_wbu;
+  wire [4:0] rd_wbu;
+  wire [DATA_W-1:0] npc_wbu;
+  wire use_exu_npc_wbu;
+  wire wbu_valid, wbu_ready;
 
   // BUS output
   wire [DATA_W-1:0] bus_lsu_rdata;
@@ -131,20 +138,20 @@ module ysyx (
   wire lsu_rvalid;
   wire lsu_wready;
 
-  ysyx_PC pc_unit(
+  ysyx_pc pc_unit(
     .clk(clock), .rst(reset),
-    .exu_valid(wben),
+    .exu_valid(wbu_valid),
 
-    .npc_wdata(npc_wdata), .use_exu_npc(use_exu_npc),
+    .npc_wdata(npc_wbu), .use_exu_npc(use_exu_npc_wbu),
     .pc_o(pc)
   );
 
-  ysyx_RegisterFile #(.REG_ADDR_W(REG_ADDR_W), .DATA_W(DATA_W)) regs(
+  ysyx_reg #(.REG_ADDR_W(REG_ADDR_W), .DATA_W(DATA_W)) regs(
     .clk(clock), .rst(reset),
-    .exu_valid(wben),
 
-    .reg_write_en(rwen_exu),
-    .waddr(rd_exu), .wdata(reg_wdata),
+    .reg_write_en(wbu_valid),
+    .waddr(rd_wbu), .wdata(reg_wdata_wbu),
+
     .s1addr(rs1), .s2addr(rs2),
     .src1_o(reg_rdata1), .src2_o(reg_rdata2)
     );
@@ -192,24 +199,21 @@ module ysyx (
   ysyx_IFU #(.ADDR_W(DATA_W), .DATA_W(DATA_W)) ifu(
     .clk(clock), .rst(reset),
 
-    .prev_valid(exu_valid), .next_ready(idu_ready),
-    .valid_o(ifu_valid), .ready_o(ifu_ready),
-
     .ifu_araddr_o(ifu_araddr_o),
     .ifu_arvalid_o(ifu_arvalid_o),
     .ifu_rdata(ifu_rdata),
     .ifu_rvalid(ifu_rvalid),
 
     .pc(pc),
-    .inst_o(inst), .pc_o(pc_ifu)
+    .inst_o(inst), .pc_o(pc_ifu),
+
+    .prev_valid(wbu_valid), .next_ready(idu_ready),
+    .valid_o(ifu_valid), .ready_o(ifu_ready)
   );
 
   // IDU(Instruction Decode Unit): 负责对当前指令进行译码, 准备执行阶段需要使用的数据和控制信号
-  ysyx_IDU idu(
+  ysyx_IDU #(.BIT_W(DATA_W)) idu(
     .clk(clock), .rst(reset),
-
-    .prev_valid(ifu_valid), .next_ready(exu_ready),
-    .valid_o(idu_valid), .ready_o(idu_ready),
 
     .inst(inst),
     .reg_rdata1(reg_rdata1), .reg_rdata2(reg_rdata2),
@@ -219,7 +223,10 @@ module ysyx (
     .imm_o(imm),
     .rs1_o(rs1), .rs2_o(rs2), .rd_o(rd),
     .alu_op_o(alu_op),
-    .opcode_o(opcode), .pc_o(pc_idu)
+    .opcode_o(opcode), .pc_o(pc_idu),
+
+    .prev_valid(ifu_valid), .next_ready(exu_ready),
+    .valid_o(idu_valid), .ready_o(idu_ready)
     );
 
   // EXU(EXecution Unit): 负责根据控制信号对数据进行执行操作, 并将执行结果写回寄存器或存储器
@@ -238,7 +245,7 @@ module ysyx (
     .npc_wdata_o(npc_wdata), .use_exu_npc_o(use_exu_npc),
     .rd_o(rd_exu),
 
-    .rwen_o(rwen_exu), .wben_o(wben), .ebreak_o(),
+    .rwen_o(rwen_exu),
 
     // to lsu
     .ren_o(ren_exu), .wen_o(wen_exu),
@@ -271,64 +278,24 @@ module ysyx (
     .lsu_wready(lsu_wready)
   );
 
+  ysyx_wbu wbu(
+    .clk(clock), .rst(reset),
+
+    .reg_wdata(reg_wdata),
+    .rd(rd_exu),
+    .npc_wdata(npc_wdata),
+    .use_exu_npc(use_exu_npc),
+
+    .reg_wdata_o(reg_wdata_wbu),
+    .rd_o(rd_wbu),
+    .npc_wdata_o(npc_wbu),
+    .use_exu_npc_o(use_exu_npc_wbu),
+
+    .prev_valid(exu_valid),
+    .next_ready(ifu_ready),
+    .valid_o(wbu_valid),
+    .ready_o(wbu_ready)
+  );
+
 endmodule // top
 
-module ysyx_PC (
-  input clk, rst,
-  input exu_valid, use_exu_npc,
-  input [DATA_W-1:0] npc_wdata,
-  output reg [DATA_W-1:0] pc_o
-);
-  parameter integer DATA_W = `ysyx_W_WIDTH;
-
-  always @(posedge clk) begin
-    if (rst) begin
-      pc_o <= `ysyx_PC_INIT;
-      `ysyx_DPI_C_npc_difftest_skip_ref
-    end else if (exu_valid) begin
-      if (use_exu_npc) begin
-        pc_o <= npc_wdata;
-      end else begin
-        pc_o <= pc_o + 4;
-      end
-    end
-  end
-endmodule //ysyx_PC
-
-module ysyx_RegisterFile (
-  input clk, rst,
-  input exu_valid,
-  input reg_write_en,
-  input [REG_ADDR_W-1:0] waddr,
-  input [DATA_W-1:0] wdata,
-  input [REG_ADDR_W-1:0] s1addr,
-  input [REG_ADDR_W-1:0] s2addr,
-  output [DATA_W-1:0] src1_o,
-  output [DATA_W-1:0] src2_o
-);
-  parameter integer REG_ADDR_W = 4;
-  parameter integer DATA_W = 32;
-  parameter integer REG_NUM = 16;
-  reg [DATA_W-1:0] rf[REG_NUM];
-
-  assign src1_o = rf[s1addr[3:0]];
-  assign src2_o = rf[s2addr[3:0]];
-
-  genvar i;
-  generate for(i = 1 ; i < REG_NUM; i = i + 1)
-      begin
-        always @(posedge clk)
-          begin
-            rf[0] <= 0;
-            if (rst)
-              begin
-                rf[i] <= 0;
-              end
-            else if (reg_write_en && exu_valid)
-              begin
-                rf[waddr[3:0]] <= wdata;
-              end
-          end
-      end
-  endgenerate
-endmodule // ysyx_RegisterFile

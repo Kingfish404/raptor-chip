@@ -5,21 +5,23 @@
 module ysyx_IDU (
   input clk, rst,
 
-  input prev_valid, next_ready,
-  output reg valid_o, ready_o,
-
   input [31:0] inst,
   input [BIT_W-1:0] reg_rdata1, reg_rdata2,
   input [BIT_W-1:0] pc,
-  output rwen_o, en_j_o, ren_o, wen_o,
-  output [BIT_W-1:0] op1_o, op2_o, op_j_o, rwaddr_o,
-  output [31:0] imm_o,
-  output [4:0] rs1_o, rs2_o, rd_o,
-  output [3:0] alu_op_o,
+  output en_j_o,
+  output reg rwen_o, ren_o, wen_o,
+  output reg [BIT_W-1:0] op1_o, op2_o,
+  output wire [BIT_W-1:0] rwaddr_o, op_j_o,
+  output reg [31:0] imm_o,
+  output reg [4:0] rs1_o, rs2_o, rd_o,
+  output reg [3:0] alu_op_o,
   output [6:0] opcode_o,
-  output reg [BIT_W-1:0] pc_o
+  output reg [BIT_W-1:0] pc_o,
+
+  input prev_valid, next_ready,
+  output reg valid_o, ready_o
 );
-  parameter BIT_W = `ysyx_W_WIDTH;
+  parameter integer BIT_W = 32;
 
   reg [31:0] inst_idu;
   wire [4:0] rs1 = inst_idu[19:15], rs2 = inst_idu[24:20], rd = inst_idu[11:7];
@@ -49,25 +51,41 @@ module ysyx_IDU (
     end
   end
 
+  assign en_j_o = (
+    (opcode_o == `ysyx_OP_JAL) | (opcode_o == `ysyx_OP_JALR) |
+    (opcode_o == `ysyx_OP_B_TYPE) | (opcode_o == `ysyx_OP_SYSTEM) |
+    (0)
+  );
+  assign rwaddr_o = (
+    {BIT_W{opcode_o == `ysyx_OP_IL_TYPE | opcode_o == `ysyx_OP_S_TYPE}} & reg_rdata1 + imm_o |
+    (0)
+  );
+  assign op_j_o = (
+    {BIT_W{opcode_o == `ysyx_OP_JAL | opcode_o == `ysyx_OP_B_TYPE}} & pc |
+    {BIT_W{opcode_o == `ysyx_OP_JALR | opcode_o == `ysyx_OP_IL_TYPE | opcode_o == `ysyx_OP_S_TYPE}}
+      & reg_rdata1 |
+    (0)
+  );
+  assign wen_o = (opcode_o == `ysyx_OP_S_TYPE);
+  assign ren_o = (opcode_o == `ysyx_OP_IL_TYPE);
   always @(*) begin
-    rwen_o = 0; en_j_o = 0; ren_o = 0; wen_o = 0;
+    rwen_o = 0;
     alu_op_o = 0;
     rs1_o = rs1; rs2_o = rs2; rd_o = 0;
-    imm_o = 0;
-    op1_o = 0; op2_o = 0; op_j_o = 0; rwaddr_o = 0;
+    imm_o = 0; op1_o = 0; op2_o = 0;
       case (opcode_o)
-        `ysyx_OP_LUI:     begin `ysyx_U_TYPE(0,  `ysyx_ALU_OP_ADD);                                       end
-        `ysyx_OP_AUIPC:   begin `ysyx_U_TYPE(pc, `ysyx_ALU_OP_ADD);                                       end
-        `ysyx_OP_JAL:     begin `ysyx_J_TYPE(pc, `ysyx_ALU_OP_ADD, 4); op_j_o = pc;                       end
-        `ysyx_OP_JALR:    begin `ysyx_I_TYPE(pc, `ysyx_ALU_OP_ADD, 4); en_j_o = 1; op_j_o = reg_rdata1;   end
-        `ysyx_OP_B_TYPE:  begin `ysyx_B_TYPE(reg_rdata1, {1'b0, funct3}, reg_rdata2); en_j_o = 1; op_j_o = pc;    end
+        `ysyx_OP_LUI:     begin `ysyx_U_TYPE(0,  `ysyx_ALU_OP_ADD);                              end
+        `ysyx_OP_AUIPC:   begin `ysyx_U_TYPE(pc, `ysyx_ALU_OP_ADD);                              end
+        `ysyx_OP_JAL:     begin `ysyx_J_TYPE(pc, `ysyx_ALU_OP_ADD, 4);              end
+        `ysyx_OP_JALR:    begin `ysyx_I_TYPE(pc, `ysyx_ALU_OP_ADD, 4);           end
+        `ysyx_OP_B_TYPE:  begin `ysyx_B_TYPE(reg_rdata1, {1'b0, funct3}, reg_rdata2);   end
         `ysyx_OP_I_TYPE:  begin `ysyx_I_TYPE(reg_rdata1, {(funct3 == 3'b101) ? funct7[5]: 1'b0, funct3}, imm_o);  end
-        `ysyx_OP_IL_TYPE: begin `ysyx_I_TYPE(reg_rdata1, {1'b0, funct3}, imm_o); op_j_o = reg_rdata1; rwaddr_o = reg_rdata1 + imm_o; ren_o = 1;    end
-        `ysyx_OP_S_TYPE:  begin `ysyx_S_TYPE(reg_rdata1, {1'b0, funct3}, reg_rdata2); op_j_o = reg_rdata1; rwaddr_o = reg_rdata1 + imm_o; wen_o = 1; end
-        `ysyx_OP_R_TYPE:  begin `ysyx_R_TYPE(reg_rdata1, {funct7[5], funct3}, reg_rdata2);                end
-        `ysyx_OP_SYSTEM:  begin `ysyx_I_SYS_TYPE(reg_rdata1, {1'b0, funct3}, 0)                           end
-        `ysyx_OP_FENCE_I: begin                                                                           end
-        default:          begin if (valid_o) begin `ysyx_DPI_C_npc_illegal_inst end                       end
+        `ysyx_OP_IL_TYPE: begin `ysyx_I_TYPE(reg_rdata1, {1'b0, funct3}, imm_o);                 end
+        `ysyx_OP_S_TYPE:  begin `ysyx_S_TYPE(reg_rdata1, {1'b0, funct3}, reg_rdata2);            end
+        `ysyx_OP_R_TYPE:  begin `ysyx_R_TYPE(reg_rdata1, {funct7[5], funct3}, reg_rdata2);       end
+        `ysyx_OP_SYSTEM:  begin `ysyx_I_SYS_TYPE(reg_rdata1, {1'b0, funct3}, 0)                  end
+        `ysyx_OP_FENCE_I: begin                                                                  end
+        default:          begin if (valid_o) begin `ysyx_DPI_C_npc_illegal_inst end              end
       endcase
   end
 endmodule // ysyx_IDU

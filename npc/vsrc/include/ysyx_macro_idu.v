@@ -29,12 +29,12 @@ end
   op1_o = (alu_op == `ysyx_ALU_OP_BGE || alu_op == `ysyx_ALU_OP_BGEU) ? op2 : op1; \
   op2_o = (alu_op == `ysyx_ALU_OP_BGE || alu_op == `ysyx_ALU_OP_BGEU) ? op1 : op2; \
   alu_op_o = ( \
-    (alu_op == `ysyx_ALU_OP_BEQ)  ? `ysyx_ALU_OP_SUB :   \
-    (alu_op == `ysyx_ALU_OP_BNE)  ? `ysyx_ALU_OP_XOR :  \
-    (alu_op == `ysyx_ALU_OP_BLT)  ? `ysyx_ALU_OP_SLT :   \
-    (alu_op == `ysyx_ALU_OP_BLTU) ? `ysyx_ALU_OP_SLTU :  \
-    (alu_op == `ysyx_ALU_OP_BGE)  ? `ysyx_ALU_OP_SLE :   \
-    (alu_op == `ysyx_ALU_OP_BGEU) ? `ysyx_ALU_OP_SLEU :  \
+    ({4{(alu_op == `ysyx_ALU_OP_BEQ)}} & `ysyx_ALU_OP_SUB) | \
+    ({4{(alu_op == `ysyx_ALU_OP_BNE)}} & `ysyx_ALU_OP_XOR) | \
+    ({4{(alu_op == `ysyx_ALU_OP_BLT)}} & `ysyx_ALU_OP_SLT) | \
+    ({4{(alu_op == `ysyx_ALU_OP_BLTU)}} & `ysyx_ALU_OP_SLTU) | \
+    ({4{(alu_op == `ysyx_ALU_OP_BGE)}} & `ysyx_ALU_OP_SLE) | \
+    ({4{(alu_op == `ysyx_ALU_OP_BGEU)}} & `ysyx_ALU_OP_SLEU) | \
     `ysyx_ALU_OP_ADD \
   ); \
 end
@@ -49,7 +49,6 @@ end
 end
 
 `define ysyx_J_TYPE(op1, alu_op, op2)  begin \
-  en_j_o = 1;  \
   rwen_o = 1; \
   imm_o = `ysyx_SIGN_EXTEND(imm_J, 21, `ysyx_W_WIDTH); \
   op1_o = op1; \
@@ -59,7 +58,6 @@ end
 end
 
 `define ysyx_I_SYS_TYPE(op1, alu_op, op2)  begin \
-  en_j_o = 1;  \
   rwen_o = 1; \
   imm_o = `ysyx_SIGN_EXTEND(imm_SYS, 16, `ysyx_W_WIDTH); \
   op1_o = op1; \

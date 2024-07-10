@@ -25,8 +25,7 @@ module ysyx_EXU (
   output use_exu_npc_o,
   output reg [4:0] rd_o,
   output [3:0] alu_op_o,
-  output reg rwen_o, wben_o,
-  output ebreak_o,
+  output reg rwen_o,
   output reg ren_o, wen_o
 );
   parameter integer BIT_W = 64;
@@ -67,7 +66,6 @@ module ysyx_EXU (
   reg valid_once;
   reg lsu_valid;
   assign valid_o = (wen_o | ren_o) ? lsu_valid : alu_valid;
-  assign wben_o = valid_o & valid_once;
   assign ready_o = (state != `ysyx_WAIT_READY);
   `ysyx_BUS_FSM()
   always @(posedge clk) begin
@@ -141,7 +139,6 @@ module ysyx_EXU (
     ({BIT_W{((imm_exu[3:0] == `ysyx_OP_SYSTEM_CSRRSI))}} & (csr_rdata | src1)) |
     ({BIT_W{((imm_exu[3:0] == `ysyx_OP_SYSTEM_CSRRCI))}} & (csr_rdata & ~src1))
   );
-  assign ebreak_o = (opcode_exu == `ysyx_OP_SYSTEM) && (imm_exu[3:0] == `ysyx_OP_SYSTEM_FUNC3) && (imm_exu[15:4] == `ysyx_OP_SYSTEM_EBREAK);
   always @(*) begin
     use_exu_npc_o = 0;
     npc_wdata_o = addr_data;

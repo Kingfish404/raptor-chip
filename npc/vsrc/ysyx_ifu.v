@@ -4,9 +4,6 @@
 module ysyx_IFU (
     input clk, rst,
 
-    input prev_valid, next_ready,
-    output valid_o, ready_o,
-
     // for bus
     output [DATA_W-1:0] ifu_araddr_o,
     output ifu_arvalid_o,
@@ -15,7 +12,10 @@ module ysyx_IFU (
 
     input [ADDR_W-1:0] pc,
     output [DATA_W-1:0] inst_o,
-    output [DATA_W-1:0] pc_o
+    output [DATA_W-1:0] pc_o,
+
+    input prev_valid, next_ready,
+    output valid_o, ready_o
   );
   parameter integer ADDR_W = 32;
   parameter integer DATA_W = 32;
