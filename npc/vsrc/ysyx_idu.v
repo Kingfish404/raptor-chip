@@ -13,7 +13,7 @@ module ysyx_IDU (
   output reg [BIT_W-1:0] op1_o, op2_o, op_j_o,
   output wire [BIT_W-1:0] rwaddr_o,
   output reg [31:0] imm_o,
-  output wire [4:0] rs1_o, rs2_o, rd_o,
+  output reg [4:0] rs1_o, rs2_o, rd_o,
   output reg [3:0] alu_op_o,
   output [6:0] opcode_o,
   output reg [BIT_W-1:0] pc_o,
@@ -24,8 +24,7 @@ module ysyx_IDU (
   parameter integer BIT_W = 32;
 
   reg [31:0] inst_idu;
-  wire [4:0] rs1 = inst_idu[19:15], rs2 = inst_idu[24:20];
-  assign rd_o = inst_idu[11:7];
+  wire [4:0] rs1 = inst_idu[19:15], rs2 = inst_idu[24:20], rd = inst_idu[11:7];
   wire [2:0] funct3 = inst_idu[14:12];
   wire [6:0] funct7 = inst_idu[31:25];
   wire [11:0] imm_I = inst_idu[31:20], imm_S = {inst_idu[31:25], inst_idu[11:7]};
@@ -63,11 +62,11 @@ module ysyx_IDU (
   );
   assign wen_o = (opcode_o == `ysyx_OP_S_TYPE);
   assign ren_o = (opcode_o == `ysyx_OP_IL_TYPE);
-  assign rs1_o = rs1;
-  assign rs2_o = rs2;
+  assign rs1_o = rs1; rs2_o = rs2;
   always @(*) begin
     rwen_o = 0;
     alu_op_o = 0;
+    rs1_o = rs1; rs2_o = rs2; rd_o = 0;
     imm_o = 0;
     op1_o = 0; op2_o = 0; op_j_o = 0;
       case (opcode_o)
