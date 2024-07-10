@@ -121,7 +121,7 @@ module ysyx (
   wire use_exu_npc;
   wire [4:0] rd_exu;
   wire [3:0] alu_op_exu;
-  wire rwen_exu, wben, ren_exu, wen_exu;
+  wire rwen_exu, ren_exu, wen_exu;
   wire exu_valid, exu_ready;
 
   // WBU output
@@ -245,7 +245,7 @@ module ysyx (
     .npc_wdata_o(npc_wdata), .use_exu_npc_o(use_exu_npc),
     .rd_o(rd_exu),
 
-    .rwen_o(rwen_exu), .wben_o(wben), .ebreak_o(),
+    .rwen_o(rwen_exu), .ebreak_o(),
 
     // to lsu
     .ren_o(ren_exu), .wen_o(wen_exu),

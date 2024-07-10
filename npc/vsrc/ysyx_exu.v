@@ -25,7 +25,7 @@ module ysyx_EXU (
   output use_exu_npc_o,
   output reg [4:0] rd_o,
   output [3:0] alu_op_o,
-  output reg rwen_o, wben_o,
+  output reg rwen_o,
   output ebreak_o,
   output reg ren_o, wen_o
 );
@@ -67,7 +67,6 @@ module ysyx_EXU (
   reg valid_once;
   reg lsu_valid;
   assign valid_o = (wen_o | ren_o) ? lsu_valid : alu_valid;
-  assign wben_o = valid_o & valid_once;
   assign ready_o = (state != `ysyx_WAIT_READY);
   `ysyx_BUS_FSM()
   always @(posedge clk) begin
