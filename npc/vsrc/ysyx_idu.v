@@ -62,6 +62,7 @@ module ysyx_IDU (
   );
   assign wen_o = (opcode_o == `ysyx_OP_S_TYPE);
   assign ren_o = (opcode_o == `ysyx_OP_IL_TYPE);
+  assign rd_o = rd;
   always @(*) begin
     rwen_o = 0;
     alu_op_o = 0;
