@@ -88,13 +88,13 @@ module ysyx (
 
   // IFU output
   wire [31:0] inst;
-  wire ifu_valid, ifu_ready;
   wire [DATA_W-1:0] pc_ifu;
   // IFU bus wire
   wire [DATA_W-1:0] ifu_araddr_o;
   wire ifu_arvalid_o;
   wire [DATA_W-1:0] ifu_rdata;
   wire ifu_rvalid;
+  wire ifu_valid, ifu_ready;
 
   // IDU output
   wire [DATA_W-1:0] op1, op2, imm, op_j, pc_idu, rwaddr;
@@ -120,9 +120,16 @@ module ysyx (
   wire [DATA_W-1:0] npc_wdata;
   wire use_exu_npc;
   wire [4:0] rd_exu;
-  wire exu_valid, exu_ready;
   wire [3:0] alu_op_exu;
   wire rwen_exu, wben, ren_exu, wen_exu;
+  wire exu_valid, exu_ready;
+
+  // WBU output
+  wire [DATA_W-1:0] reg_wdata_wbu;
+  wire [4:0] rd_wbu;
+  wire [DATA_W-1:0] npc_wbu;
+  wire use_exu_npc_wbu;
+  wire wbu_valid, wbu_ready;
 
   // BUS output
   wire [DATA_W-1:0] bus_lsu_rdata;
@@ -192,7 +199,7 @@ module ysyx (
   ysyx_IFU #(.ADDR_W(DATA_W), .DATA_W(DATA_W)) ifu(
     .clk(clock), .rst(reset),
 
-    .prev_valid(exu_valid), .next_ready(idu_ready),
+    .prev_valid(wbu_valid), .next_ready(idu_ready),
     .valid_o(ifu_valid), .ready_o(ifu_ready),
 
     .ifu_araddr_o(ifu_araddr_o),
@@ -269,6 +276,25 @@ module ysyx (
     .lsu_awaddr_o(lsu_awaddr), .lsu_awvalid_o(lsu_awvalid),
     .lsu_wdata_o(lsu_wdata), .lsu_wstrb_o(lsu_wstrb), .lsu_wvalid_o(lsu_wvalid),
     .lsu_wready(lsu_wready)
+  );
+
+  ysyx_wbu wbu(
+    .clk(clock), .rst(reset),
+
+    .reg_wdata(reg_wdata),
+    .rd(rd_exu),
+    .npc_wdata(npc_wdata),
+    .use_exu_npc(use_exu_npc),
+
+    .reg_wdata_o(reg_wdata),
+    .rd_o(rd_wbu),
+    .npc_wdata_o(npc_wbu),
+    .use_exu_npc_o(use_exu_npc_wbu),
+
+    .prev_valid(exu_valid),
+    .next_ready(ifu_ready),
+    .valid_o(wbu_valid),
+    .ready_o(wbu_ready)
   );
 
 endmodule // top
