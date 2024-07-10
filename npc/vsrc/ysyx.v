@@ -138,7 +138,7 @@ module ysyx (
   wire lsu_rvalid;
   wire lsu_wready;
 
-  ysyx_PC pc_unit(
+  ysyx_pc pc_unit(
     .clk(clock), .rst(reset),
     .exu_valid(wbu_valid),
 
@@ -146,7 +146,7 @@ module ysyx (
     .pc_o(pc)
   );
 
-  ysyx_RegisterFile #(.REG_ADDR_W(REG_ADDR_W), .DATA_W(DATA_W)) regs(
+  ysyx_reg #(.REG_ADDR_W(REG_ADDR_W), .DATA_W(DATA_W)) regs(
     .clk(clock), .rst(reset),
 
     .reg_write_en(wbu_valid),
@@ -299,61 +299,3 @@ module ysyx (
 
 endmodule // top
 
-module ysyx_PC (
-  input clk, rst,
-  input exu_valid, use_exu_npc,
-  input [DATA_W-1:0] npc_wdata,
-  output reg [DATA_W-1:0] pc_o
-);
-  parameter integer DATA_W = `ysyx_W_WIDTH;
-
-  always @(posedge clk) begin
-    if (rst) begin
-      pc_o <= `ysyx_PC_INIT;
-      `ysyx_DPI_C_npc_difftest_skip_ref
-    end else if (exu_valid) begin
-      if (use_exu_npc) begin
-        pc_o <= npc_wdata;
-      end else begin
-        pc_o <= pc_o + 4;
-      end
-    end
-  end
-endmodule //ysyx_PC
-
-module ysyx_RegisterFile (
-  input clk, rst,
-  input reg_write_en,
-  input [REG_ADDR_W-1:0] waddr,
-  input [DATA_W-1:0] wdata,
-  input [REG_ADDR_W-1:0] s1addr,
-  input [REG_ADDR_W-1:0] s2addr,
-  output [DATA_W-1:0] src1_o,
-  output [DATA_W-1:0] src2_o
-);
-  parameter integer REG_ADDR_W = 4;
-  parameter integer DATA_W = 32;
-  parameter integer REG_NUM = 16;
-  reg [DATA_W-1:0] rf[REG_NUM];
-
-  assign src1_o = rf[s1addr[3:0]];
-  assign src2_o = rf[s2addr[3:0]];
-
-  genvar i;
-  generate for(i = 1 ; i < REG_NUM; i = i + 1)
-      begin
-        always @(posedge clk)
-          begin
-            rf[0] <= 0;
-            if (rst)
-              begin
-                rf[i] <= 0;
-              end
-            else if (reg_write_en)
-              begin
-                rf[waddr[3:0]] <= wdata;
-              end
-          end
-      end
-  endgenerate
-endmodule // ysyx_RegisterFile
