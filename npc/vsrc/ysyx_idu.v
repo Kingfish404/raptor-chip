@@ -17,10 +17,10 @@ module ysyx_IDU (
   output [6:0] opcode_o,
   output reg [BIT_W-1:0] pc_o,
 
-  input wire prev_valid, next_ready,
+  input prev_valid, next_ready,
   output reg valid_o, ready_o
 );
-  parameter BIT_W = `ysyx_W_WIDTH;
+  parameter integer BIT_W = 32;
 
   reg [31:0] inst_idu;
   wire [4:0] rs1 = inst_idu[19:15], rs2 = inst_idu[24:20], rd = inst_idu[11:7];
@@ -51,10 +51,8 @@ module ysyx_IDU (
   end
 
   assign en_j_o = (
-    (opcode_o == `ysyx_OP_JAL) |
-    (opcode_o == `ysyx_OP_JALR) |
-    (opcode_o == `ysyx_OP_B_TYPE) |
-    (opcode_o == `ysyx_OP_SYSTEM) |
+    (opcode_o == `ysyx_OP_JAL) | (opcode_o == `ysyx_OP_JALR) |
+    (opcode_o == `ysyx_OP_B_TYPE) | (opcode_o == `ysyx_OP_SYSTEM) |
     (0)
   );
   always @(*) begin

@@ -212,7 +212,7 @@ module ysyx (
   );
 
   // IDU(Instruction Decode Unit): 负责对当前指令进行译码, 准备执行阶段需要使用的数据和控制信号
-  ysyx_IDU idu(
+  ysyx_IDU #(.BIT_W(DATA_W)) idu(
     .clk(clock), .rst(reset),
 
     .inst(inst),
