@@ -9,7 +9,7 @@ module ysyx_IDU (
   input [BIT_W-1:0] reg_rdata1, reg_rdata2,
   input [BIT_W-1:0] pc,
   output en_j_o,
-  output reg rwen_o, ren_o, wen_o,
+  output rwen_o, ren_o, wen_o,
   output reg [BIT_W-1:0] op1_o, op2_o,
   output wire [BIT_W-1:0] rwaddr_o, op_j_o,
   output reg [31:0] imm_o,
@@ -72,8 +72,7 @@ module ysyx_IDU (
     rwen_o = 0;
     alu_op_o = 0;
     rs1_o = rs1; rs2_o = rs2; rd_o = 0;
-    imm_o = 0;
-    op1_o = 0; op2_o = 0;
+    imm_o = 0; op1_o = 0; op2_o = 0;
       case (opcode_o)
         `ysyx_OP_LUI:     begin `ysyx_U_TYPE(0,  `ysyx_ALU_OP_ADD);                              end
         `ysyx_OP_AUIPC:   begin `ysyx_U_TYPE(pc, `ysyx_ALU_OP_ADD);                              end
