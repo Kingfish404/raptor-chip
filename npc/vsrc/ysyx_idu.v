@@ -73,7 +73,7 @@ module ysyx_IDU (
     alu_op_o = 0;
     rs1_o = rs1; rs2_o = rs2; rd_o = 0;
     imm_o = 0;
-    op1_o = 0; op2_o = 0; op_j_o = 0;
+    op1_o = 0; op2_o = 0;
       case (opcode_o)
         `ysyx_OP_LUI:     begin `ysyx_U_TYPE(0,  `ysyx_ALU_OP_ADD);                              end
         `ysyx_OP_AUIPC:   begin `ysyx_U_TYPE(pc, `ysyx_ALU_OP_ADD);                              end
