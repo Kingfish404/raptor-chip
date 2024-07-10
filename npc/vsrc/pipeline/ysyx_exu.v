@@ -5,8 +5,6 @@
 module ysyx_EXU (
   input clk, rst,
 
-  input prev_valid, next_ready,
-  output reg valid_o, ready_o,
 
   // for bus
   output lsu_avalid_o,
@@ -26,7 +24,10 @@ module ysyx_EXU (
   output reg [4:0] rd_o,
   output [3:0] alu_op_o,
   output reg rwen_o,
-  output reg ren_o, wen_o
+  output reg ren_o, wen_o,
+
+  input prev_valid, next_ready,
+  output reg valid_o, ready_o
 );
   parameter integer BIT_W = 64;
 
