@@ -17,7 +17,8 @@ module ysyx_IDU (
   output reg [BIT_W-1:0] pc_o,
 
   input prev_valid, next_ready,
-  output reg valid_o, ready_o
+  output reg valid_o,
+  output ready_o
 );
   parameter BIT_W = `ysyx_W_WIDTH;
 
