@@ -20,7 +20,7 @@ module ysyx_IDU (
   input prev_valid, next_ready,
   output reg valid_o, ready_o
 );
-  parameter integer BIT_W = 32;
+  parameter BIT_W = `ysyx_W_WIDTH;
 
   reg [31:0] inst_idu;
   wire [4:0] rs1 = inst_idu[19:15], rs2 = inst_idu[24:20], rd = inst_idu[11:7];
