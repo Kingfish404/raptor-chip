@@ -148,10 +148,10 @@ module ysyx (
 
   ysyx_RegisterFile #(.REG_ADDR_W(REG_ADDR_W), .DATA_W(DATA_W)) regs(
     .clk(clock), .rst(reset),
-    .exu_valid(wben),
+    .exu_valid(wbu_valid),
 
-    .reg_write_en(rwen_exu),
-    .waddr(rd_exu), .wdata(reg_wdata),
+    .reg_write_en(wbu_valid),
+    .waddr(rd_wbu), .wdata(reg_wdata_wbu),
     .s1addr(rs1), .s2addr(rs2),
     .src1_o(reg_rdata1), .src2_o(reg_rdata2)
     );
