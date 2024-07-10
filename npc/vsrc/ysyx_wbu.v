@@ -9,14 +9,14 @@ module ysyx_wbu (
     input [BIT_W-1:0] npc_wdata,
     input use_exu_npc,
 
-    output [BIT_W-1:0] reg_wdata_o,
-    output [4:0] rd_o,
-    output [BIT_W-1:0] npc_wdata_o,
-    output use_exu_npc_o,
+    output reg [BIT_W-1:0] reg_wdata_o,
+    output reg [4:0] rd_o,
+    output reg [BIT_W-1:0] npc_wdata_o,
+    output reg use_exu_npc_o,
 
-    input  prev_valid,
-    input  next_ready,
-    output valid_o,
+    input prev_valid,
+    input next_ready,
+    output reg valid_o,
     output ready_o
 );
   parameter integer BIT_W = `ysyx_W_WIDTH;
