@@ -1,5 +1,3 @@
-`include "ysyx_macro.v"
-
 module ysyx_reg (
     input clk,
     input rst,
