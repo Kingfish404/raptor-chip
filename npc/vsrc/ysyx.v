@@ -286,7 +286,7 @@ module ysyx (
     .npc_wdata(npc_wdata),
     .use_exu_npc(use_exu_npc),
 
-    .reg_wdata_o(reg_wdata),
+    .reg_wdata_o(reg_wdata_wbu),
     .rd_o(rd_wbu),
     .npc_wdata_o(npc_wbu),
     .use_exu_npc_o(use_exu_npc_wbu),
