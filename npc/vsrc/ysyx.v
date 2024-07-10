@@ -245,7 +245,7 @@ module ysyx (
     .npc_wdata_o(npc_wdata), .use_exu_npc_o(use_exu_npc),
     .rd_o(rd_exu),
 
-    .rwen_o(rwen_exu), .ebreak_o(),
+    .rwen_o(rwen_exu),
 
     // to lsu
     .ren_o(ren_exu), .wen_o(wen_exu),
