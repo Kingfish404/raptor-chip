@@ -66,7 +66,7 @@ module ysyx_IDU (
   always @(*) begin
     rwen_o = 0;
     alu_op_o = 0;
-    rs1_o = rs1; rs2_o = rs2;
+    rs1_o = rs1; rs2_o = rs2; rd_o = 0;
     imm_o = 0;
     op1_o = 0; op2_o = 0; op_j_o = 0;
       case (opcode_o)
