@@ -5,7 +5,6 @@
   op1_o = op1; \
   op2_o = op2; \
   alu_op_o = alu_op; \
-  rd_o = rd; \
 end
 
 `define ysyx_I_TYPE(op1, alu_op, op2)  begin \
@@ -14,7 +13,6 @@ end
   op1_o = op1; \
   op2_o = op2; \
   alu_op_o = alu_op; \
-  rd_o = rd; \
 end
 
 `define ysyx_S_TYPE(op1, alu_op, op2) begin \
@@ -45,7 +43,6 @@ end
   op1_o = op1;    \
   op2_o = imm_o;  \
   alu_op_o = alu_op; \
-  rd_o = rd;      \
 end
 
 `define ysyx_J_TYPE(op1, alu_op, op2)  begin \
@@ -54,7 +51,6 @@ end
   op1_o = op1; \
   op2_o = op2; \
   alu_op_o = alu_op; \
-  rd_o = rd; \
 end
 
 `define ysyx_I_SYS_TYPE(op1, alu_op, op2)  begin \
@@ -63,5 +59,4 @@ end
   op1_o = op1; \
   op2_o = op2; \
   alu_op_o = alu_op; \
-  rd_o = rd; \
 end
