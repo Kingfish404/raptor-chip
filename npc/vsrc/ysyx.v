@@ -140,9 +140,9 @@ module ysyx (
 
   ysyx_PC pc_unit(
     .clk(clock), .rst(reset),
-    .exu_valid(wben),
+    .exu_valid(wbu_valid),
 
-    .npc_wdata(npc_wdata), .use_exu_npc(use_exu_npc),
+    .npc_wdata(npc_wbu), .use_exu_npc(use_exu_npc_wbu),
     .pc_o(pc)
   );
 
