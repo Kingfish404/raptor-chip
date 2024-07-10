@@ -6,7 +6,7 @@ module ysyx_IDU (
   input clk, rst,
 
   input prev_valid, next_ready,
-  output reg valid_o, ready_o
+  output reg valid_o, ready_o,
 
   input [31:0] inst,
   input [BIT_W-1:0] reg_rdata1, reg_rdata2,
