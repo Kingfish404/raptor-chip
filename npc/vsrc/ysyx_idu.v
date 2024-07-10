@@ -13,7 +13,7 @@ module ysyx_IDU (
   output reg [BIT_W-1:0] op1_o, op2_o, op_j_o,
   output wire [BIT_W-1:0] rwaddr_o,
   output reg [31:0] imm_o,
-  output reg [4:0] rs1_o, rs2_o, rd_o,
+  output wire [4:0] rs1_o, rs2_o, rd_o,
   output reg [3:0] alu_op_o,
   output [6:0] opcode_o,
   output reg [BIT_W-1:0] pc_o,
@@ -62,17 +62,17 @@ module ysyx_IDU (
   );
   assign wen_o = (opcode_o == `ysyx_OP_S_TYPE);
   assign ren_o = (opcode_o == `ysyx_OP_IL_TYPE);
+  assign rs1_o = rs1;
+  assign rs2_o = rs2;
+  assign rd_o = rd;
   always @(*) begin
-    rwen_o = 0;
-    alu_op_o = 0;
-    rs1_o = rs1; rs2_o = rs2; rd_o = 0;
-    imm_o = 0;
-    op1_o = 0; op2_o = 0; op_j_o = 0;
+    rwen_o = 0; alu_op_o = 0;
+    imm_o = 0; op1_o = 0; op2_o = 0; op_j_o = 0;
       case (opcode_o)
         `ysyx_OP_LUI:     begin `ysyx_U_TYPE(0,  `ysyx_ALU_OP_ADD);                              end
         `ysyx_OP_AUIPC:   begin `ysyx_U_TYPE(pc, `ysyx_ALU_OP_ADD);                              end
         `ysyx_OP_JAL:     begin `ysyx_J_TYPE(pc, `ysyx_ALU_OP_ADD, 4); op_j_o = pc;              end
-        `ysyx_OP_JALR:    begin `ysyx_I_TYPE(pc, `ysyx_ALU_OP_ADD, 4); op_j_o = reg_rdata1;   end
+        `ysyx_OP_JALR:    begin `ysyx_I_TYPE(pc, `ysyx_ALU_OP_ADD, 4); op_j_o = reg_rdata1;      end
         `ysyx_OP_B_TYPE:  begin `ysyx_B_TYPE(reg_rdata1, {1'b0, funct3}, reg_rdata2); op_j_o = pc;    end
         `ysyx_OP_I_TYPE:  begin `ysyx_I_TYPE(reg_rdata1, {(funct3 == 3'b101) ? funct7[5]: 1'b0, funct3}, imm_o);  end
         `ysyx_OP_IL_TYPE: begin `ysyx_I_TYPE(reg_rdata1, {1'b0, funct3}, imm_o); op_j_o = reg_rdata1; end
