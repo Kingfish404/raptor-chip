@@ -59,8 +59,8 @@ module ysyx_LSU(
 
   assign wready_o = lsu_wready;
 
-  parameter integer L1D_SIZE = 2;
-  parameter integer L1D_LEN = 1;
+  parameter integer L1D_SIZE = 8;
+  parameter integer L1D_LEN = 3;
   reg [32-1:0] l1d[L1D_SIZE];
   reg [L1D_SIZE-1:0] l1d_valid = 0;
   reg [32-L1D_LEN-2-1:0] l1d_tag[L1D_SIZE];
