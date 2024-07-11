@@ -213,7 +213,7 @@ static void statistic()
       ((*npc.ret) == 0 && npc.state != NPC_ABORT
            ? FMT_GREEN("HIT GOOD TRAP")
            : FMT_RED("HIT BAD TRAP")),
-      (*npc.pc), *(npc.inst));
+      (npc.pc), *(npc.inst));
 }
 
 static void cpu_exec_one_cycle()
@@ -311,7 +311,7 @@ void cpu_exec(uint64_t n)
 #endif
 
 #ifdef CONFIG_DIFFTEST
-      difftest_step(*npc.pc);
+      difftest_step(npc.pc);
 #endif
       prev_pc = *(npc.npc);
       npc.last_inst = *(npc.inst);
