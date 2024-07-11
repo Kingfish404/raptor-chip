@@ -9,12 +9,13 @@ module ysyx_pc (
     input use_exu_npc,
     input [DATA_W-1:0] npc_wdata,
     output wire [DATA_W-1:0] npc_o,
-    output reg [DATA_W-1:0] pc_o
+    output [DATA_W-1:0] pc_o
 );
   parameter integer DATA_W = `ysyx_W_WIDTH;
+  wire [DATA_W-1:0] npc = pc + 4;
   reg  [DATA_W-1:0] pc;
-  wire [DATA_W-1:0] npc = pc_o + 4;
-  assign pc_o = pc;
+  assign npc_o = npc;
+  assign pc_o  = pc;
 
   always @(posedge clk) begin
     if (rst) begin
