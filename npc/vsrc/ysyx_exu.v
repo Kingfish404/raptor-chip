@@ -83,6 +83,7 @@ module ysyx_exu (
           ren_o <= ren; wen_o <= wen;
           alu_valid <= 1;
           if (wen | ren) begin lsu_avalid <= 1; end
+          state <= `ysyx_WAIT_READY;
         end
       end
       else if (state == `ysyx_WAIT_READY) begin
