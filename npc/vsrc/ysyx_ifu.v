@@ -120,11 +120,13 @@ module ysyx_IFU (
             begin
               if (next_ready == 1)
                 begin
-                  pvalid <= 0;
                   if (!is_bench)
                     begin
                       pc_ifu <= npc;
                     end
+                  else begin
+                    pvalid <= 0;
+                  end
                 end
             end
         end
