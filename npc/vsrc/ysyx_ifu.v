@@ -30,7 +30,7 @@ module ysyx_IFU (
   parameter integer L1I_LINE_LEN = 1;
   parameter integer L1I_SIZE = 4;
   parameter integer L1I_LEN = 2;
-  reg [DATA_W-1:0] pc_ifu;
+  reg [DATA_W-1:0] pc_ifu = pc;
   reg [32-1:0] l1i[L1I_SIZE][L1I_LINE_SIZE];
   reg [L1I_SIZE-1:0] l1i_valid = 0;
   reg [32-L1I_LEN-L1I_LINE_LEN-2-1:0] l1i_tag[L1I_SIZE];
