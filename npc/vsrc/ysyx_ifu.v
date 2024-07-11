@@ -120,7 +120,7 @@ module ysyx_IFU (
             begin
               if (next_ready == 1)
                 begin
-                  if (!is_bench)
+                  if (!is_bench & pc_ifu != pc + 4)
                     begin
                       pc_ifu <= pc + 4;
                       // pvalid <= 0;
