@@ -30,6 +30,7 @@ module ysyx_IFU (
   parameter integer L1I_LINE_LEN = 1;
   parameter integer L1I_SIZE = 4;
   parameter integer L1I_LEN = 2;
+  reg [DATA_W-1:0] pc_ifu;
   reg [32-1:0] l1i[L1I_SIZE][L1I_LINE_SIZE];
   reg [L1I_SIZE-1:0] l1i_valid = 0;
   reg [32-L1I_LEN-L1I_LINE_LEN-2-1:0] l1i_tag[L1I_SIZE];
@@ -37,14 +38,14 @@ module ysyx_IFU (
 
   wire arvalid;
 
-  wire [32-L1I_LEN-L1I_LINE_LEN-2-1:0] addr_tag = pc[ADDR_W-1:L1I_LEN+L1I_LINE_LEN+2];
-  wire [L1I_LEN-1:0] addr_idx = pc[L1I_LEN+L1I_LINE_LEN+2-1:L1I_LINE_LEN+2];
-  wire [L1I_LINE_LEN-1:0]addr_offset = pc[L1I_LINE_LEN+2-1:2];
+  wire [32-L1I_LEN-L1I_LINE_LEN-2-1:0] addr_tag = pc_ifu[ADDR_W-1:L1I_LEN+L1I_LINE_LEN+2];
+  wire [L1I_LEN-1:0] addr_idx = pc_ifu[L1I_LEN+L1I_LINE_LEN+2-1:L1I_LINE_LEN+2];
+  wire [L1I_LINE_LEN-1:0]addr_offset = pc_ifu[L1I_LINE_LEN+2-1:2];
 
   wire l1i_cache_hit = (
          (pvalid) & 1 & l1i_state == 'b00 &
          l1i_valid[addr_idx] == 1'b1) & (l1i_tag[addr_idx] == addr_tag);
-  wire ifu_sdram_arburst = `ysyx_I_SDRAM_ARBURST & (pc >= 'ha0000000) & (pc <= 'hc0000000);
+  wire ifu_sdram_arburst = `ysyx_I_SDRAM_ARBURST & (pc_ifu >= 'ha0000000) & (pc_ifu <= 'hc0000000);
   wire [6:0] opcode_o = inst_o[6:0];
   wire is_bench = (
     (opcode_o == `ysyx_OP_JAL) | (opcode_o == `ysyx_OP_JALR) |
@@ -52,7 +53,7 @@ module ysyx_IFU (
     (0)
   );
 
-  assign ifu_araddr_o = (l1i_state == 'b00 | l1i_state == 'b01) ? (pc & ~'h4) : (pc | 'h4);
+  assign ifu_araddr_o = (l1i_state == 'b00 | l1i_state == 'b01) ? (pc_ifu & ~'h4) : (pc_ifu | 'h4);
   assign ifu_arvalid_o = ifu_sdram_arburst ?
     arvalid & !l1i_cache_hit & (l1i_state == 'b00 | l1i_state == 'b01) :
     arvalid & !l1i_cache_hit & l1i_state != 'b10;
@@ -62,7 +63,7 @@ module ysyx_IFU (
   assign valid_o = l1i_cache_hit;
 
   `ysyx_BUS_FSM()
-  assign pc_o = pc;
+  assign pc_o = pc_ifu;
   always @(posedge clk)
     begin
       if (rst)
@@ -111,6 +112,7 @@ module ysyx_IFU (
               if (prev_valid)
                 begin
                   pvalid <= prev_valid;
+                  pc_ifu <= pc;
                 end
             end
           else if (state == `ysyx_WAIT_READY)
