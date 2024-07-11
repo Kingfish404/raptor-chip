@@ -159,8 +159,9 @@ void difftest_step(vaddr_t pc)
     is_skip_ref = false;
     return;
   }
-  printf("Execute instruction at pc = %x\n", pc);
+  printf("Start Execute instruction at pc = %x\n", pc);
   ref_difftest_exec(1);
+  printf("Finish Execute instruction at pc = %x\n", pc);
   ref_difftest_regcpy(&ref_r, DIFFTEST_TO_DUT);
   checkregs(&ref_r, pc);
 
