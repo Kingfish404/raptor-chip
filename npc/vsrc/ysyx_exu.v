@@ -1,6 +1,5 @@
 `include "ysyx_macro.v"
 `include "ysyx_macro_csr.v"
-`include "ysyx_macro_dpi_c.v"
 
 module ysyx_EXU (
   input clk, rst,
@@ -23,6 +22,7 @@ module ysyx_EXU (
   input [BIT_W-1:0] pc,
   output [BIT_W-1:0] reg_wdata_o, npc_wdata_o,
   output use_exu_npc_o,
+  output ebreak_o,
   output reg [4:0] rd_o,
   output [3:0] alu_op_o,
   output reg rwen_o,
@@ -140,7 +140,7 @@ module ysyx_EXU (
     ({BIT_W{((imm_exu[3:0] == `ysyx_OP_SYSTEM_CSRRCI))}} & (csr_rdata & ~src1))
   );
   always @(*) begin
-    use_exu_npc_o = 0;
+    use_exu_npc_o = 0; ebreak_o = 0;
     npc_wdata_o = addr_data;
     case (opcode)
       `ysyx_OP_SYSTEM: begin
@@ -148,7 +148,7 @@ module ysyx_EXU (
           `ysyx_OP_SYSTEM_FUNC3: begin
             case (imm_exu[15:4])
               `ysyx_OP_SYSTEM_ECALL:  begin use_exu_npc_o = 1; npc_wdata_o = mtvec; end
-              `ysyx_OP_SYSTEM_EBREAK: begin use_exu_npc_o = 1; `ysyx_DPI_C_npc_exu_ebreak end
+              `ysyx_OP_SYSTEM_EBREAK: begin use_exu_npc_o = 1; ebreak_o = 1; end
               `ysyx_OP_SYSTEM_MRET:   begin use_exu_npc_o = 1; npc_wdata_o = mepc; end
               default: begin ; end
             endcase
