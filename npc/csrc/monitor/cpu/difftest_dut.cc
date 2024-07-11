@@ -142,6 +142,8 @@ static void checkmem(uint8_t *ref, uint8_t *dut, size_t n)
 }
 #endif
 
+int delay = 0;
+
 void difftest_step(vaddr_t pc)
 {
   NPCState ref_r;
@@ -151,11 +153,7 @@ void difftest_step(vaddr_t pc)
     skip_dut_nr_inst--;
     return;
   }
-  printf("Start Execute instruction at pc = %x\n", pc);
-  ref_difftest_exec(1);
-  printf("Finish Execute instruction at pc = %x\n", pc);
-  ref_difftest_regcpy(&ref_r, DIFFTEST_TO_DUT);
-  checkregs(&ref_r, pc);
+
   if (is_skip_ref)
   {
     printf("Hit Skip ref at pc = %x\n", pc);
@@ -163,9 +161,19 @@ void difftest_step(vaddr_t pc)
     ref_difftest_regcpy(&ref_r, DIFFTEST_TO_DUT);
     printf("ref_r.pc = %x\n", *(ref_r.pc));
     is_skip_ref = false;
+    delay = 1;
     return;
   }
-
+  if (delay > 0)
+  {
+    delay--;
+    return;
+  }
+  printf("Start Execute instruction at pc = %x\n", pc);
+  ref_difftest_exec(1);
+  printf("Finish Execute instruction at pc = %x\n", pc);
+  ref_difftest_regcpy(&ref_r, DIFFTEST_TO_DUT);
+  checkregs(&ref_r, pc);
 
 #ifdef CONFIG_MEM_DIFFTEST
   if (should_diff_mem)
