@@ -294,7 +294,8 @@ void cpu_exec(uint64_t n)
       npc.state = NPC_ABORT;
       break;
     }
-    if (prev_pc != *(npc.pc))
+    // if (prev_pc != *(npc.pc))
+    if (*(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__wbu_valid)))
     {
       perf_sample_per_inst();
       cur_inst_cycle = 0;
