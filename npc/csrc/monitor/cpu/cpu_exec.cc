@@ -314,7 +314,7 @@ void cpu_exec(uint64_t n)
 #ifdef CONFIG_DIFFTEST
       difftest_step(npc.pc);
 #endif
-      prev_pc = *(npc.npc);
+      // prev_pc = *(npc.npc);
       npc.last_inst = *(npc.inst);
     }
   }
