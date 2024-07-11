@@ -143,7 +143,7 @@ module ysyx (
     .exu_valid(wbu_valid),
 
     .npc_wdata(npc_wbu), .use_exu_npc(use_exu_npc_wbu),
-    .npc(npc),
+    .npc_o(npc),
     .pc_o(pc)
   );
 
