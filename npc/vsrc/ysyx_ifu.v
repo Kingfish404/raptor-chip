@@ -45,6 +45,11 @@ module ysyx_IFU (
          (pvalid) & 1 & l1i_state == 'b00 &
          l1i_valid[addr_idx] == 1'b1) & (l1i_tag[addr_idx] == addr_tag);
   wire ifu_sdram_arburst = `ysyx_I_SDRAM_ARBURST & (pc >= 'ha0000000) & (pc <= 'hc0000000);
+  wire is_bench = (
+    (opcode_o == `ysyx_OP_JAL) | (opcode_o == `ysyx_OP_JALR) |
+    (opcode_o == `ysyx_OP_B_TYPE) | (opcode_o == `ysyx_OP_SYSTEM) |
+    (0)
+  );
 
   assign ifu_araddr_o = (l1i_state == 'b00 | l1i_state == 'b01) ? (pc & ~'h4) : (pc | 'h4);
   assign ifu_arvalid_o = ifu_sdram_arburst ?
