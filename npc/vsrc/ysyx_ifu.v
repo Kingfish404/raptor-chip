@@ -127,7 +127,7 @@ module ysyx_IFU (
                     end
                   else if (pc_ifu == pc + 4)
                     begin
-                      pvalid <= 1;
+                      pvalid <= 0;
                     end
                   else begin
                     pvalid <= 0;
