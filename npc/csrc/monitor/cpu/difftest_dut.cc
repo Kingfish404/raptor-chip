@@ -151,7 +151,11 @@ void difftest_step(vaddr_t pc)
     skip_dut_nr_inst--;
     return;
   }
-
+  printf("Start Execute instruction at pc = %x\n", pc);
+  ref_difftest_exec(1);
+  printf("Finish Execute instruction at pc = %x\n", pc);
+  ref_difftest_regcpy(&ref_r, DIFFTEST_TO_DUT);
+  checkregs(&ref_r, pc);
   if (is_skip_ref)
   {
     printf("Hit Skip ref at pc = %x\n", pc);
@@ -161,11 +165,7 @@ void difftest_step(vaddr_t pc)
     is_skip_ref = false;
     return;
   }
-  printf("Start Execute instruction at pc = %x\n", pc);
-  ref_difftest_exec(1);
-  printf("Finish Execute instruction at pc = %x\n", pc);
-  ref_difftest_regcpy(&ref_r, DIFFTEST_TO_DUT);
-  checkregs(&ref_r, pc);
+
 
 #ifdef CONFIG_MEM_DIFFTEST
   if (should_diff_mem)
