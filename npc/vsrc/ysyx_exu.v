@@ -76,7 +76,7 @@ module ysyx_exu (
     end
     else begin
       if (state == `ysyx_IDLE) begin
-        if (prev_valid) begin
+        if (prev_valid & !busy) begin
           imm_exu <= imm; pc_exu <= pc;
           src1 <= op1; src2 <= op2;
           alu_op_exu <= alu_op; opcode_exu <= opcode;
