@@ -80,6 +80,7 @@ static void perf()
   Log(FMT_BLUE("IFU Avg Cycle: %2.1f, LSU Avg Cycle: %2.1f"),
       (1.0 * pmu.ifu_stall_cycle) / (pmu.ifu_fetch_cnt + 1),
       (1.0 * pmu.lsu_stall_cycle) / (pmu.lsu_load_cnt + 1));
+  Log(FMT_BLUE("ifu_fetch_cnt: %lld, instr_cnt: %lld"), pmu.ifu_fetch_cnt, pmu.instr_cnt);
   assert(pmu.ifu_fetch_cnt == pmu.instr_cnt);
   assert(
       pmu.instr_cnt ==
