@@ -44,6 +44,7 @@ module ysyx_IFU (
   wire l1i_cache_hit = (
          (pvalid) & 1 & l1i_state == 'b00 &
          l1i_valid[addr_idx] == 1'b1) & (l1i_tag[addr_idx] == addr_tag);
+  wire ifu_sdram_arburst = `ysyx_I_SDRAM_ARBURST & (pc >= 'ha0000000) & (pc <= 'hc0000000);
 
   assign ifu_araddr_o = (l1i_state == 'b00 | l1i_state == 'b01) ? (pc & ~'h4) : (pc | 'h4);
   assign ifu_arvalid_o = ifu_sdram_arburst ?
@@ -53,7 +54,6 @@ module ysyx_IFU (
   // with l1i cache
   assign inst_o = l1i[addr_idx][addr_offset];
   assign valid_o = l1i_cache_hit;
-  wire ifu_sdram_arburst = `ysyx_I_SDRAM_ARBURST & (pc >= 'ha0000000) & (pc <= 'hc0000000);
 
   `ysyx_BUS_FSM()
   assign pc_o = pc;
@@ -65,7 +65,7 @@ module ysyx_IFU (
         end
       else
         begin
-          if (inst_o == 'h0000100f) begin
+          if (inst_o == `ysyx_INST_FENCE_I) begin
             l1i_valid <= 0;
           end
           case (l1i_state)
