@@ -22,7 +22,7 @@ int reg_str2idx(const char *reg)
 void reg_display(int n)
 {
     printf(" pc: " FMT_GREEN(FMT_WORD_NO_PREFIX) "\n",
-           *(npc.pc));
+           (npc.pc));
     for (size_t i = 0; i < n; i++)
     {
         if (i != 0 && i % 4 == 0)
