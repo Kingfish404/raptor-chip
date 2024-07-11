@@ -154,6 +154,7 @@ void difftest_step(vaddr_t pc)
 
   if (is_skip_ref)
   {
+    printf("Skip ref at pc = %x\n", pc);
     ref_difftest_regcpy(&npc, DIFFTEST_TO_REF);
     is_skip_ref = false;
     return;
