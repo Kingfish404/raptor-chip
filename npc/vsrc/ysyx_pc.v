@@ -8,7 +8,7 @@ module ysyx_pc (
     input exu_valid,
     input use_exu_npc,
     input [DATA_W-1:0] npc_wdata,
-    output wire [DATA_W-1:0] npc,
+    output wire [DATA_W-1:0] npc_o,
     output reg [DATA_W-1:0] pc_o
 );
   parameter integer DATA_W = `ysyx_W_WIDTH;
