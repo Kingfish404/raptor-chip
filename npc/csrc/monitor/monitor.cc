@@ -77,7 +77,7 @@ static long load_img()
   {
     Log("No image is given, use default image.");
     memcpy(guest_to_host(MBASE), img, sizeof(img));
-    memcpy(guest_to_host(FLASH_BASE), img, sizeof(img));
+    memcpy(guest_to_host(FLASH_BASE), img_char_test, sizeof(img_char_test));
     size = sizeof(img);
   }
   else
