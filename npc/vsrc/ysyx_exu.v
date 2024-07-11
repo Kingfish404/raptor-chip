@@ -65,12 +65,14 @@ module ysyx_exu (
   reg state, alu_valid, lsu_avalid;
   reg valid_once;
   reg lsu_valid;
+  reg busy;
   assign valid_o = (wen_o | ren_o) ? lsu_valid : alu_valid;
   assign ready_o = (state != `ysyx_WAIT_READY);
   `ysyx_BUS_FSM()
   always @(posedge clk) begin
     if (rst) begin
       alu_valid <= 0; lsu_avalid <= 0;
+      busy <= 0;
     end
     else begin
       if (state == `ysyx_IDLE) begin
@@ -82,12 +84,12 @@ module ysyx_exu (
           rd_o <= rd; rwen_o <= rwen;
           ren_o <= ren; wen_o <= wen;
           alu_valid <= 1;
+          busy <= 1;
           if (wen | ren) begin lsu_avalid <= 1; end
-          state <= `ysyx_WAIT_READY;
         end
       end
       else if (state == `ysyx_WAIT_READY) begin
-        if (next_ready == 1) begin lsu_valid <= 0; alu_valid <= 0; end
+        if (next_ready == 1) begin lsu_valid <= 0; alu_valid <= 0; busy <= 0; end
       end
       if (lsu_valid) begin valid_once <= 0;
       end else begin  valid_once <= 1; end
