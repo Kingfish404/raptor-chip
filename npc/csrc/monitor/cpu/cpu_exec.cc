@@ -278,11 +278,11 @@ void cpu_exec(uint64_t n)
     break;
   }
 
+  prev_pc = *(npc.npc);
   uint64_t now = get_time();
   uint64_t cur_inst_cycle = 0;
   while (!contextp->gotFinish() && npc.state == NPC_RUNNING && n-- > 0)
   {
-    prev_pc = *(npc.npc);
     cpu_exec_one_cycle();
     // Simulate the performance monitor unit
     perf_sample_per_cycle();
@@ -314,7 +314,7 @@ void cpu_exec(uint64_t n)
 #ifdef CONFIG_DIFFTEST
       difftest_step(npc.pc);
 #endif
-      // prev_pc = *(npc.npc);
+      prev_pc = *(npc.npc);
       npc.last_inst = *(npc.inst);
     }
   }
