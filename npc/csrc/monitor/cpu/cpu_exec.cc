@@ -213,7 +213,7 @@ static void statistic()
       ((*npc.ret) == 0 && npc.state != NPC_ABORT
            ? FMT_GREEN("HIT GOOD TRAP")
            : FMT_RED("HIT BAD TRAP")),
-      (npc.pc), *(npc.inst));
+      *(npc.pc), *(npc.inst));
 }
 
 static void cpu_exec_one_cycle()
