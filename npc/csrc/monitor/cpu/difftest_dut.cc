@@ -24,7 +24,7 @@ void difftest_should_diff_mem()
 
 void difftest_skip_ref()
 {
-  printf("Skip ref at pc = %x\n", *npc.pc);
+  printf("Emit Skip ref at pc = %x\n", *npc.pc);
   is_skip_ref = true;
 }
 
