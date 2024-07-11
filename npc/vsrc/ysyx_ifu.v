@@ -69,7 +69,7 @@ module ysyx_IFU (
       if (rst)
         begin
           pvalid <= 1;
-          pc_ifu <= pc;
+          pc_ifu <= `ysyx_PC_INIT;
         end
       else
         begin
@@ -122,12 +122,8 @@ module ysyx_IFU (
                 begin
                   if (!is_bench & pc_ifu != pc + 4)
                     begin
-                      pc_ifu <= pc + 4;
+                      pc_ifu <= pc_ifu + 4;
                       // pvalid <= 0;
-                    end
-                  else if (pc_ifu == pc + 4)
-                    begin
-                      pvalid <= 0;
                     end
                   else begin
                     pvalid <= 0;
