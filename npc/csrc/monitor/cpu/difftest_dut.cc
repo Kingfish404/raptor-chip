@@ -24,7 +24,7 @@ void difftest_should_diff_mem()
 
 void difftest_skip_ref()
 {
-  printf("skip ref DUT\n");
+  printf("Skip ref at pc = " FMT_WORD "\n", npc.pc);
   is_skip_ref = true;
 }
 
@@ -145,6 +145,7 @@ static void checkmem(uint8_t *ref, uint8_t *dut, size_t n)
 void difftest_step(vaddr_t pc)
 {
   NPCState ref_r;
+
   if (skip_dut_nr_inst > 0)
   {
     skip_dut_nr_inst--;
