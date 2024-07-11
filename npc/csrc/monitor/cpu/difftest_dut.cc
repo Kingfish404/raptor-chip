@@ -141,8 +141,6 @@ static void checkmem(uint8_t *ref, uint8_t *dut, size_t n)
 }
 #endif
 
-int delay = 0;
-
 void difftest_step(vaddr_t pc)
 {
   NPCState ref_r;
@@ -157,6 +155,8 @@ void difftest_step(vaddr_t pc)
   if (is_skip_ref)
   {
     ref_difftest_regcpy(&npc, DIFFTEST_TO_REF);
+    ref_difftest_regcpy(&ref_r, DIFFTEST_TO_DUT);
+    printf("ref pc: " FMT_WORD_NO_PREFIX "\n", *(ref_r.pc));
     is_skip_ref = false;
     return;
   }
