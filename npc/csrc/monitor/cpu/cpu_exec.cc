@@ -289,7 +289,6 @@ void cpu_exec(uint64_t n)
     total_cycle++;
     if (total_cycle > 0x100)
     {
-      Log(FMT_RED("Too many cycles (0x%llx cycle), maybe a bug."), total_cycle);
       npc.state = NPC_ABORT;
       break;
     }
