@@ -122,7 +122,7 @@ module ysyx_IFU (
                 begin
                   if (!is_bench)
                     begin
-                      pc_ifu <= npc;
+                      pc_ifu <= pc_ifu + 4;
                     end
                   else begin
                     pvalid <= 0;
