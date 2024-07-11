@@ -283,7 +283,6 @@ void cpu_exec(uint64_t n)
   while (!contextp->gotFinish() && npc.state == NPC_RUNNING && n-- > 0)
   {
     prev_pc = *(npc.npc);
-    printf("prev_pc: " FMT_WORD_NO_PREFIX "\n", prev_pc);
     cpu_exec_one_cycle();
     // Simulate the performance monitor unit
     perf_sample_per_cycle();
