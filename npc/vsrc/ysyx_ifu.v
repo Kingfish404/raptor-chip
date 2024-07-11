@@ -115,10 +115,6 @@ module ysyx_IFU (
                   pvalid <= prev_valid;
                   pc_ifu <= pc;
                 end
-              // if (next_ready & !is_bench & (pc_ifu == pc)) begin
-              //   // pvalid <= 1;
-              //   pc_ifu <= npc;
-              // end
             end
           else if (state == `ysyx_WAIT_READY)
             begin
