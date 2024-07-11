@@ -157,7 +157,7 @@ void difftest_step(vaddr_t pc)
   {
     ref_difftest_regcpy(&npc, DIFFTEST_TO_REF);
     is_skip_ref = false;
-    delay = 1;
+    // delay = 1;
     return;
   }
 
