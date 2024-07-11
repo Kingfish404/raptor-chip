@@ -103,8 +103,8 @@ typedef struct
   NPC_STATE_CODE state;
   word_t *gpr;
   word_t *ret;
-  uint32_t *pc;
-  uint32_t lpc;
+  uint32_t pc;
+  uint32_t *npc;
 
   // csr
   word_t *mcause;

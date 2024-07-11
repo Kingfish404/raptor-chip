@@ -25,8 +25,8 @@ typedef struct
   int state;
   word_t *gpr;
   word_t *ret;
-  word_t *pc;
-  word_t lpc;
+  word_t pc;
+  word_t *npc;
 
   // csr
   word_t *mcause;
@@ -68,7 +68,7 @@ __EXPORT void difftest_regcpy(void *dut, bool direction)
   NPCState *npc = (NPCState *)dut;
   if (direction == DIFFTEST_TO_REF)
   {
-    cpu.pc = *npc->pc;
+    cpu.pc = npc->pc;
     for (int i = 0; i < RISCV_GPR_NUM; i++)
     {
       cpu.gpr[i] = npc->gpr[i];
@@ -80,7 +80,7 @@ __EXPORT void difftest_regcpy(void *dut, bool direction)
   }
   else if (direction == DIFFTEST_TO_DUT)
   {
-    npc->pc = &cpu.pc;
+    npc->pc = cpu.pc;
     npc->inst = &cpu.inst;
     npc->gpr = cpu.gpr;
     npc->mcause = &cpu.sr[CSR_MCAUSE];
