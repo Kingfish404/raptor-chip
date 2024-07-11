@@ -11,7 +11,7 @@ module ysyx_pc (
     output reg [DATA_W-1:0] pc_o
 );
   parameter integer DATA_W = `ysyx_W_WIDTH;
-
+  wire [DATA_W-1:0] npc = pc_o + 4;
   always @(posedge clk) begin
     if (rst) begin
       pc_o <= `ysyx_PC_INIT;
@@ -20,7 +20,7 @@ module ysyx_pc (
       if (use_exu_npc) begin
         pc_o <= npc_wdata;
       end else begin
-        pc_o <= pc_o + 4;
+        pc_o <= npc;
       end
     end
   end
