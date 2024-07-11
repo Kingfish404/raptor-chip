@@ -234,7 +234,7 @@ module ysyx (
   ysyx_exu #(.BIT_W(DATA_W)) exu(
     .clk(clock), .rst(reset),
 
-    .prev_valid(idu_valid), .next_ready(ifu_ready),
+    .prev_valid(idu_valid), .next_ready(wbu_ready),
     .valid_o(exu_valid), .ready_o(exu_ready),
 
     .ren(ren), .wen(wen), .rwen(rwen),
