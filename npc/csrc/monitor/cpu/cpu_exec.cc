@@ -278,7 +278,7 @@ void cpu_exec(uint64_t n)
     break;
   }
 
-  prev_pc = *(npc.npc);
+  prev_pc = *(npc.pc);
   uint64_t now = get_time();
   uint64_t cur_inst_cycle = 0;
   while (!contextp->gotFinish() && npc.state == NPC_RUNNING && n-- > 0)
@@ -296,7 +296,6 @@ void cpu_exec(uint64_t n)
     // if (prev_pc != *(npc.pc))
     if (*(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__wbu_valid)))
     {
-      npc.pc = prev_pc;
       perf_sample_per_inst();
       cur_inst_cycle = 0;
       fflush(stdout);
@@ -312,9 +311,9 @@ void cpu_exec(uint64_t n)
 #endif
 
 #ifdef CONFIG_DIFFTEST
-      difftest_step(npc.pc);
+      difftest_step(*npc.pc);
 #endif
-      prev_pc = *(npc.npc);
+      prev_pc = *(npc.pc);
       npc.last_inst = *(npc.inst);
     }
   }
