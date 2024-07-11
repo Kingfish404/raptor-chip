@@ -26,6 +26,7 @@ typedef struct
   word_t *gpr;
   word_t *ret;
   word_t *pc;
+  word_t lpc;
 
   // csr
   word_t *mcause;
