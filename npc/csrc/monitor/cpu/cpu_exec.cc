@@ -266,6 +266,7 @@ void cpu_show_itrace()
 
 void disassemble(char *str, int size, uint64_t pc, uint8_t *code, int nbyte);
 
+int total_cycle = 0;
 void cpu_exec(uint64_t n)
 {
   switch (npc.state)
@@ -285,6 +286,13 @@ void cpu_exec(uint64_t n)
   while (!contextp->gotFinish() && npc.state == NPC_RUNNING && n-- > 0)
   {
     cpu_exec_one_cycle();
+    total_cycle++;
+    if (total_cycle > 0x100)
+    {
+      Log(FMT_RED("Too many cycles (0x%llx cycle), maybe a bug."), total_cycle);
+      npc.state = NPC_ABORT;
+      break;
+    }
     // Simulate the performance monitor unit
     perf_sample_per_cycle();
     cur_inst_cycle++;
