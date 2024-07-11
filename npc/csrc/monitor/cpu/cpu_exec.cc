@@ -287,7 +287,7 @@ void cpu_exec(uint64_t n)
   {
     cpu_exec_one_cycle();
     total_cycle++;
-    if (total_cycle > 0xfff)
+    if (total_cycle > 0xffff)
     {
       npc.state = NPC_ABORT;
       break;
