@@ -80,10 +80,10 @@ void init_difftest(char *ref_so_file, long img_size, int port)
 static void checkregs(NPCState *ref, vaddr_t pc)
 {
   bool is_same = true;
-  if ((vaddr_t)(*(ref->pc)) != pc)
+  if ((vaddr_t)((ref->lpc)) != pc)
   {
     printf(FMT_RED("[ERROR]") " pc is different! ref = " FMT_GREEN(FMT_WORD) ", dut = " FMT_RED(FMT_WORD) "\n",
-           (vaddr_t)(*(ref->pc)), pc);
+           (vaddr_t)((ref->lpc)), pc);
     is_same = false;
   }
   if ((uint32_t)(*(ref->inst)) != npc.last_inst)
@@ -156,11 +156,11 @@ void difftest_step(vaddr_t pc)
   if (is_skip_ref)
   {
     ref_difftest_regcpy(&npc, DIFFTEST_TO_REF);
-    ref_difftest_regcpy(&ref_r, DIFFTEST_TO_DUT);
     is_skip_ref = false;
     delay = 1;
     return;
   }
+
   if (delay > 0)
   {
     delay--;
