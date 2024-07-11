@@ -145,7 +145,6 @@ static void checkmem(uint8_t *ref, uint8_t *dut, size_t n)
 void difftest_step(vaddr_t pc)
 {
   NPCState ref_r;
-  printf("diff at pc: " FMT_WORD_NO_PREFIX "\n", pc);
 
   if (skip_dut_nr_inst > 0)
   {
