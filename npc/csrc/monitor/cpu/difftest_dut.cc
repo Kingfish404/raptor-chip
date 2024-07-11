@@ -157,7 +157,6 @@ void difftest_step(vaddr_t pc)
   {
     ref_difftest_regcpy(&npc, DIFFTEST_TO_REF);
     ref_difftest_regcpy(&ref_r, DIFFTEST_TO_DUT);
-    printf("ref pc: " FMT_WORD_NO_PREFIX "\n", *(ref_r.pc));
     is_skip_ref = false;
     return;
   }
