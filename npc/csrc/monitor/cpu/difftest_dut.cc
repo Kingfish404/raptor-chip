@@ -156,10 +156,8 @@ void difftest_step(vaddr_t pc)
 
   if (is_skip_ref)
   {
-    printf("Hit Skip ref at pc = %x\n", pc);
     ref_difftest_regcpy(&npc, DIFFTEST_TO_REF);
     ref_difftest_regcpy(&ref_r, DIFFTEST_TO_DUT);
-    printf("ref_r.pc = %x\n", *(ref_r.pc));
     is_skip_ref = false;
     delay = 1;
     return;
@@ -169,9 +167,7 @@ void difftest_step(vaddr_t pc)
     delay--;
     return;
   }
-  printf("Start Execute instruction at pc = %x\n", pc);
   ref_difftest_exec(1);
-  printf("Finish Execute instruction at pc = %x\n", pc);
   ref_difftest_regcpy(&ref_r, DIFFTEST_TO_DUT);
   checkregs(&ref_r, pc);
 
