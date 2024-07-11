@@ -17,8 +17,7 @@ NPCState npc = {
     .state = NPC_RUNNING,
     .gpr = NULL,
     .ret = NULL,
-    .pc = 0,
-    .npc = NULL,
+    .pc = NULL,
 
     .mcause = NULL,
     .mtvec = NULL,
@@ -74,7 +73,7 @@ void npc_abort()
 extern "C" void npc_exu_ebreak()
 {
   contextp->gotFinish(true);
-  printf("EBREAK at pc = " FMT_WORD_NO_PREFIX "\n", npc.pc);
+  printf("EBREAK at pc = " FMT_WORD_NO_PREFIX "\n", *npc.pc);
   npc.state = NPC_END;
 }
 
@@ -91,7 +90,7 @@ void npc_difftest_mem_diff()
 extern "C" void npc_illegal_inst()
 {
   contextp->gotFinish(true);
-  Error("Illegal instruction at pc = " FMT_WORD_NO_PREFIX, npc.pc);
+  Error("Illegal instruction at pc = " FMT_WORD_NO_PREFIX, *npc.pc);
   npc_abort();
 }
 
