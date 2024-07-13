@@ -11,6 +11,7 @@ PCB *current = NULL;
 void switch_boot_pcb()
 {
   current = &pcb_boot;
+  yield();
 }
 
 void hello_fun(void *arg)
