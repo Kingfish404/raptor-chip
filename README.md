@@ -52,6 +52,7 @@ export CROSS_COMPILE=riscv64-unknown-elf-
 ```shell
 # 1. build and run NEMU
 cd $NEMU_HOME && make menuconfig && make && make run
+cd $NEMU_HOME && make menuconfig && make && make run
 
 # 2. build and run NPC
 cd $NPC_HOME && make menuconfig && make ARCH=riscv32e-npc run
