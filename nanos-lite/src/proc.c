@@ -3,6 +3,7 @@
 #define MAX_NR_PROC 4
 
 void naive_uload(PCB *pcb, const char *filename);
+uintptr_t ucontext_load(PCB *pcb, const char *filename);
 
 static PCB pcb[MAX_NR_PROC] __attribute__((used)) = {};
 static PCB pcb_boot = {};
@@ -32,7 +33,7 @@ void context_kload(PCB *pcb, void *entry, void *arg)
 
 void context_uload(PCB *pcb, const char *filename)
 {
-  uintptr_t entry = loader(pcb, filename);
+  uintptr_t entry = ucontext_load(pcb, filename);
   pcb->cp = ucontext(NULL, (Area){pcb->stack, pcb->stack + STACK_SIZE}, entry);
 }
 
@@ -40,9 +41,8 @@ void init_proc()
 {
   context_kload(&pcb[0], hello_fun, "pcb[0]");
   context_kload(&pcb[1], hello_fun, "pcb[1]");
-  context_kload(&pcb[2], hello_fun, "pcb[2]");
-  context_kload(&pcb[3], hello_fun, "pcb[3]");
-  last = &pcb[3];
+  context_uload(&pcb[2], "/bin/pal");
+  last = &pcb[2];
   switch_boot_pcb();
 
   Log("Initializing processes...");
@@ -54,7 +54,6 @@ void init_proc()
 Context *schedule(Context *prev)
 {
   current->cp = prev;
-  // current = (current == &pcb[0] ? &pcb[1] : &pcb[0]);
   if (current == last)
   {
     current = &pcb[0];

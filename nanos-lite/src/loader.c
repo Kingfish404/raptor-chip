@@ -45,6 +45,11 @@ static uintptr_t loader(PCB *pcb, const char *filename)
   return entry;
 }
 
+uintptr_t ucontext_load(PCB *pcb, const char *filename)
+{
+  return loader(pcb, filename);
+}
+
 void naive_uload(PCB *pcb, const char *filename)
 {
   uintptr_t entry = loader(pcb, filename);
