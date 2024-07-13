@@ -19,8 +19,7 @@ void hello_fun(void *arg)
   int j = 1;
   while (1)
   {
-    Log("Hello World from Nanos-lite with arg '%p' for the %dth time!", 1, j);
-    // Log("Hello World from Nanos-lite with arg '%p' for the %dth time!", (uintptr_t)arg, j);
+    Log("Hello World from Nanos-lite with arg '%p' for the %dth time!", (uintptr_t)arg, j);
     j++;
     yield();
   }
@@ -35,7 +34,7 @@ void context_kload(PCB *pcb, void *entry, void *arg)
 void init_proc()
 {
   context_kload(&pcb[0], hello_fun, "111");
-  context_kload(&pcb[1], hello_fun, "123");
+  context_kload(&pcb[1], hello_fun, "222");
 
   switch_boot_pcb();
 
@@ -45,8 +44,7 @@ void init_proc()
   // naive_uload(NULL, "/bin/nterm");
 }
 
-Context *schedule(Context *prev)
-{
+Context* schedule(Context *prev) {
   // save the context pointer
   current->cp = prev;
 
