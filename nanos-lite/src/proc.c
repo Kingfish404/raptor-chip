@@ -10,7 +10,7 @@ PCB *current = NULL;
 
 void switch_boot_pcb()
 {
-  // current = &pcb_boot;
+  current = &pcb_boot;
 }
 
 void hello_fun(void *arg)
@@ -44,10 +44,6 @@ void init_proc()
 Context *schedule(Context *prev)
 {
   current->cp = prev;
-  if (current == NULL)
-  {
-    current = &pcb[0];
-  }
   current = (current == &pcb[0] ? &pcb[1] : &pcb[0]);
   return current->cp;
 }
