@@ -14,6 +14,10 @@ install: install-file
 init:;
 
 install-file:
-	ln -sf -T $(abspath $(REPO_PATH)/data) $(NAVY_HOME)/fsimg/share/games/pal
+	if [ `uname` = "Darwin" ]; then \
+	  gln -sf -T $(abspath $(REPO_PATH)/data) $(NAVY_HOME)/fsimg/share/games/pal; \
+	else \
+	  ln -sf -T $(abspath $(REPO_PATH)/data) $(NAVY_HOME)/fsimg/share/games/pal; \
+  fi
 
 .PHONY: install-file init
