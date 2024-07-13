@@ -31,7 +31,7 @@ void init_proc()
   Log("Initializing processes...");
 
   // load program here
-  naive_uload(NULL, "/bin/pal");
+  naive_uload(NULL, "/bin/nterm-riscv32");
 }
 
 Context *schedule(Context *prev)
