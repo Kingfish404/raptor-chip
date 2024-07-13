@@ -31,6 +31,39 @@ git clone https://github.com/Kingfish404/ysyxSoC
 git clone https://github.com/NJU-ProjectN/nvboard
 ```
 
+## Environment Variables
+
+```shell 
+export YSYX_HOME=[path to ysyx-workbench]
+
+export NEMU_HOME=$YSYX_HOME/nemu
+
+export AM_HOME=$YSYX_HOME/abstract-machine
+export NPC_HOME=$YSYX_HOME/npc
+export NVBOARD_HOME=$YSYX_HOME/nvboard
+export NAVY_HOME=$YSYX_HOME/navy-apps
+
+export ISA=riscv32e
+export CROSS_COMPILE=riscv64-unknown-elf-
+```
+
+## Build and Run
+
+```shell
+# 1. build and run NEMU
+cd $NEMU_HOME && make menuconfig && make && make run
+
+# 2. build and run NPC
+cd $NPC_HOME && make menuconfig && make ARCH=riscv32e-npc run
+
+# 3. build and run the program you want
+
+## n. nanos-lite
+cd $NAVY_HOME && make ISA=$ISA fsimg
+cd $YSYX_HOME/nanos-lite && make ARCH=$ISA-nemu run
+
+```
+
 ## Architecture
 
 ![](./npc/assets/npc-rv32e-ysyxsoc.svg)
