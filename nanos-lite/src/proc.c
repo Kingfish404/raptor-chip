@@ -45,5 +45,6 @@ void init_proc()
 
 Context *schedule(Context *prev)
 {
-  return NULL;
+  current = (current == &pcb[0] ? &pcb[1] : &pcb[0]);
+  return current->cp;
 }
