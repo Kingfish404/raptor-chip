@@ -47,7 +47,7 @@ void init_proc()
   // context_uload(&pcb[2], "/bin/dummy");
   last = &pcb[1];
   switch_boot_pcb();
-
+  yield();
   Log("Initializing processes...");
 
   // load program here
