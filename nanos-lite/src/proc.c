@@ -44,13 +44,11 @@ void init_proc()
   // naive_uload(NULL, "/bin/nterm");
 }
 
-Context* schedule(Context *prev) {
-  // save the context pointer
+Context *schedule(Context *prev)
+{
   current->cp = prev;
 
-  // always select pcb[0] as the new process
-  current = &pcb[0];
+  current = (current == &pcb[0] ? &pcb[1] : &pcb[0]);
 
-  // then return the new context
   return current->cp;
 }
