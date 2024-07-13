@@ -35,8 +35,8 @@ void context_kload(PCB *pcb, void *entry, void *arg)
 
 void init_proc()
 {
-  context_kload(&pcb[0], hello_fun, NULL);
-  context_kload(&pcb[1], hello_fun, NULL);
+  context_kload(&pcb[0], hello_fun, "111");
+  context_kload(&pcb[1], hello_fun, "123");
 
   switch_boot_pcb();
 
