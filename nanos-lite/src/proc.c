@@ -3,6 +3,7 @@
 #define MAX_NR_PROC 4
 
 void naive_uload(PCB *pcb, const char *filename);
+void context_kload(PCB *pcb, void *entry, void *arg);
 void context_uload(PCB *pcb, const char *filename);
 
 static PCB pcb[MAX_NR_PROC] __attribute__((used)) = {};
@@ -25,15 +26,6 @@ void hello_fun(void *arg)
     yield();
   }
 }
-
-void context_kload(PCB *pcb, void *entry, void *arg)
-{
-  Area heap = {pcb->stack, pcb->stack + STACK_SIZE};
-  pcb->cp = kcontext(heap, entry, arg);
-  // pcb->cp->GPRx = (uintptr_t)pcb->stack + STACK_SIZE;
-}
-
-
 
 void init_proc()
 {

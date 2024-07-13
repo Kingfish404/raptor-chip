@@ -45,6 +45,12 @@ static uintptr_t loader(PCB *pcb, const char *filename)
   return entry;
 }
 
+void context_kload(PCB *pcb, void *entry, void *arg)
+{
+  Area heap = {pcb->stack, pcb->stack + STACK_SIZE};
+  pcb->cp = kcontext(heap, entry, arg);
+}
+
 void context_uload(PCB *pcb, const char *filename)
 {
   void *entry = loader(pcb, filename);
