@@ -24,9 +24,9 @@ int main()
   init_irq();
 #endif
 
-  // init_fs();
+  init_fs();
 
-  // init_proc();
+  init_proc();
 
   Log("Finish initialization");
 
