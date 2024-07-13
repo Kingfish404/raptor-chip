@@ -62,6 +62,7 @@ cd $NPC_HOME && make menuconfig && make ARCH=riscv32e-npc run
 cd $NAVY_HOME && make ISA=$ISA fsimg
 cd $NAVY_HOME/apps/nterm && make ISA=$ISA clean install
 cd $YSYX_HOME/nanos-lite && make ARCH=$ISA-nemu update run
+cd $YSYX_HOME/nanos-lite && make ARCH=$ISA-nemu run
 ```
 
 ## Architecture
