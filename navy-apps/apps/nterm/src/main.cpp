@@ -12,7 +12,6 @@ void extern_app_run(const char *app_path);
 
 int main(int argc, char *argv[]) {
   SDL_Init(0);
-  return 0;
   font = new BDF_Font(font_fname);
 
   // setup display
