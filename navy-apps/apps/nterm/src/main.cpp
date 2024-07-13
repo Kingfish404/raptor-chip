@@ -11,6 +11,7 @@ void builtin_sh_run();
 void extern_app_run(const char *app_path);
 
 int main(int argc, char *argv[]) {
+  return 0;
   SDL_Init(0);
   font = new BDF_Font(font_fname);
 
