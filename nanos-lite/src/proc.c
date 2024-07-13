@@ -3,6 +3,7 @@
 #define MAX_NR_PROC 4
 
 void naive_uload(PCB *pcb, const char *filename);
+Context *schedule(Context *prev);
 
 static PCB pcb[MAX_NR_PROC] __attribute__((used)) = {};
 static PCB pcb_boot = {};
@@ -11,6 +12,7 @@ PCB *current = NULL;
 void switch_boot_pcb()
 {
   current = &pcb_boot;
+  cte_init(schedule);
   yield();
 }
 
@@ -38,10 +40,10 @@ void init_proc()
 
   switch_boot_pcb();
 
-  Log("Initializing processes...");
+  // Log("Initializing processes...");
 
-  // load program here
-  naive_uload(NULL, "/bin/nterm");
+  // // load program here
+  // naive_uload(NULL, "/bin/nterm");
 }
 
 Context *schedule(Context *prev)
