@@ -51,7 +51,7 @@ void context_uload(PCB *pcb, const char *filename)
   pcb->cp = ucontext(NULL, (Area){pcb->stack, pcb->stack + STACK_SIZE}, entry);
   Area heap = {pcb->stack, pcb->stack + STACK_SIZE};
   pcb->cp->GPRx = (uintptr_t)heap.end;
-  printf("GPRx: %x\n", pcb->cp->GPRx);
+  // printf("GPRx: %x\n", pcb->cp->GPRx);
 }
 
 void naive_uload(PCB *pcb, const char *filename)
