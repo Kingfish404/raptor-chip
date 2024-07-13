@@ -26,7 +26,7 @@ int main()
 
   // init_fs();
 
-  init_proc();
+  // init_proc();
 
   Log("Finish initialization");
 
