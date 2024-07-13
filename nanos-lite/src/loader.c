@@ -45,9 +45,12 @@ static uintptr_t loader(PCB *pcb, const char *filename)
   return entry;
 }
 
-uintptr_t ucontext_load(PCB *pcb, const char *filename)
+void context_uload(PCB *pcb, const char *filename)
 {
-  return loader(pcb, filename);
+  void *entry = loader(pcb, filename);
+  pcb->cp = ucontext(NULL, (Area){pcb->stack, pcb->stack + STACK_SIZE}, entry);
+  pcb->cp->GPRx = (uintptr_t)&pcb->stack[STACK_SIZE];
+  printf("GPRx: %x\n", pcb->cp->GPRx);
 }
 
 void naive_uload(PCB *pcb, const char *filename)

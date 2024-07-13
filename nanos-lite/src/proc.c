@@ -3,7 +3,7 @@
 #define MAX_NR_PROC 4
 
 void naive_uload(PCB *pcb, const char *filename);
-uintptr_t ucontext_load(PCB *pcb, const char *filename);
+void context_uload(PCB *pcb, const char *filename);
 
 static PCB pcb[MAX_NR_PROC] __attribute__((used)) = {};
 static PCB pcb_boot = {};
@@ -33,27 +33,21 @@ void context_kload(PCB *pcb, void *entry, void *arg)
   // pcb->cp->GPRx = (uintptr_t)pcb->stack + STACK_SIZE;
 }
 
-void context_uload(PCB *pcb, const char *filename)
-{
-  void *entry = ucontext_load(pcb, filename);
-  pcb->cp = ucontext(NULL, (Area){pcb->stack, pcb->stack + STACK_SIZE}, entry);
-  pcb->cp->GPRx = (uintptr_t)&pcb->stack[STACK_SIZE];
-  printf("GPRx: %x\n", pcb->cp->GPRx);
-}
+
 
 void init_proc()
 {
   // context_kload(&pcb[0], hello_fun, "pcb[0]");
   // context_kload(&pcb[1], hello_fun, "pcb[1]");
   // context_kload(&pcb[2], hello_fun, "pcb[1]");
-  // context_uload(&pcb[0], "/bin/dummy");
-  // context_uload(&pcb[1], "/bin/dummy");
+  context_uload(&pcb[0], "/bin/dummy");
+  context_uload(&pcb[1], "/bin/dummy");
   // last = &pcb[1];
   // switch_boot_pcb();
   Log("Initializing processes...");
 
   // load program here
-  naive_uload(NULL, "/bin/nterm");
+  naive_uload(NULL, "/bin/dummy");
 }
 
 Context *schedule(Context *prev)
