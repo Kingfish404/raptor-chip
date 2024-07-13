@@ -28,7 +28,8 @@ void hello_fun(void *arg)
 
 void context_kload(PCB *pcb, void *entry, void *arg)
 {
-  pcb->cp = kcontext((Area){pcb->stack, pcb->stack + STACK_SIZE}, entry, arg);
+  Area heap = {pcb->stack, pcb->stack + STACK_SIZE};
+  pcb->cp = kcontext(heap, entry, arg);
   // pcb->cp->GPRx = (uintptr_t)pcb->stack + STACK_SIZE;
 }
 
@@ -42,11 +43,11 @@ void context_uload(PCB *pcb, const char *filename)
 
 void init_proc()
 {
-  // context_kload(&pcb[0], hello_fun, "pcb[0]");
-  // context_kload(&pcb[1], hello_fun, "pcb[1]");
+  context_kload(&pcb[0], hello_fun, "pcb[0]");
+  context_kload(&pcb[1], hello_fun, "pcb[1]");
   // context_kload(&pcb[2], hello_fun, "pcb[1]");
-  context_uload(&pcb[0], "/bin/dummy");
-  context_uload(&pcb[1], "/bin/dummy");
+  // context_uload(&pcb[0], "/bin/dummy");
+  // context_uload(&pcb[1], "/bin/dummy");
   last = &pcb[1];
   switch_boot_pcb();
   Log("Initializing processes...");

@@ -64,7 +64,7 @@ Context *kcontext(Area kstack, void (*entry)(void *), void *arg)
   Context *p = (Context *)(kstack.end - sizeof(Context));
 
   p->mepc = (uintptr_t)entry;
-  p->gpr[r_a0] = (int)arg;
+  p->GPRx = (int)arg;
 
 #ifdef CONFIG_ISA64
   p->mstatus = 0xa00001800;
