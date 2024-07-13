@@ -29,14 +29,14 @@ void hello_fun(void *arg)
 void context_kload(PCB *pcb, void *entry, void *arg)
 {
   pcb->cp = kcontext((Area){pcb->stack, pcb->stack + STACK_SIZE}, entry, arg);
-  pcb->cp->GPRx = (uintptr_t) pcb->stack + STACK_SIZE;
+  pcb->cp->GPRx = (uintptr_t)pcb->stack + STACK_SIZE;
 }
 
 void context_uload(PCB *pcb, const char *filename)
 {
   void *entry = ucontext_load(pcb, filename);
   pcb->cp = ucontext(NULL, (Area){pcb->stack, pcb->stack + STACK_SIZE}, entry);
-  pcb->cp->GPRx = (uintptr_t) pcb->stack + STACK_SIZE;
+  pcb->cp->GPRx = (uintptr_t)pcb->stack + STACK_SIZE;
 }
 
 void init_proc()
@@ -44,14 +44,14 @@ void init_proc()
   context_kload(&pcb[0], hello_fun, "pcb[0]");
   context_kload(&pcb[1], hello_fun, "pcb[1]");
   // context_kload(&pcb[2], hello_fun, "pcb[1]");
-  // context_uload(&pcb[2], "/bin/dummy");
-  last = &pcb[1];
+  context_uload(&pcb[2], "/bin/dummy");
+  last = &pcb[2];
   switch_boot_pcb();
-  yield();
   Log("Initializing processes...");
 
+  yield();
   // load program here
-  naive_uload(NULL, "/bin/dummy");
+  // naive_uload(NULL, "/bin/dummy");
 }
 
 Context *schedule(Context *prev)
