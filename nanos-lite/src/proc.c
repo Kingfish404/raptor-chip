@@ -11,10 +11,7 @@ PCB *current = NULL;
 
 void switch_boot_pcb()
 {
-  // current = &pcb_boot;
-  current = &pcb[0];
-  cte_init(schedule);
-  yield();
+  current = &pcb_boot;
 }
 
 void hello_fun(void *arg)
