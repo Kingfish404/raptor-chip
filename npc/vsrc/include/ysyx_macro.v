@@ -3,8 +3,6 @@
 `define ysyx_IDLE       0
 `define ysyx_WAIT_READY 1
 
-`define ysyx_INST_FENCE_I     32'h0000100f
-
 `define ysyx_OP_LUI           7'b0110111
 `define ysyx_OP_AUIPC         7'b0010111
 `define ysyx_OP_JAL           7'b1101111

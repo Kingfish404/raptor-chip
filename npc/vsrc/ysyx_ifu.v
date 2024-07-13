@@ -10,7 +10,7 @@ module ysyx_IFU (
     input [DATA_W-1:0] ifu_rdata,
     input ifu_rvalid,
 
-    input [ADDR_W-1:0] pc, npc,
+    input [ADDR_W-1:0] pc,
     output [DATA_W-1:0] inst_o,
     output [DATA_W-1:0] pc_o,
 
@@ -30,7 +30,6 @@ module ysyx_IFU (
   parameter integer L1I_LINE_LEN = 1;
   parameter integer L1I_SIZE = 4;
   parameter integer L1I_LEN = 2;
-  reg [DATA_W-1:0] pc_ifu;
   reg [32-1:0] l1i[L1I_SIZE][L1I_LINE_SIZE];
   reg [L1I_SIZE-1:0] l1i_valid = 0;
   reg [32-L1I_LEN-L1I_LINE_LEN-2-1:0] l1i_tag[L1I_SIZE];
@@ -38,22 +37,15 @@ module ysyx_IFU (
 
   wire arvalid;
 
-  wire [32-L1I_LEN-L1I_LINE_LEN-2-1:0] addr_tag = pc_ifu[ADDR_W-1:L1I_LEN+L1I_LINE_LEN+2];
-  wire [L1I_LEN-1:0] addr_idx = pc_ifu[L1I_LEN+L1I_LINE_LEN+2-1:L1I_LINE_LEN+2];
-  wire [L1I_LINE_LEN-1:0]addr_offset = pc_ifu[L1I_LINE_LEN+2-1:2];
+  wire [32-L1I_LEN-L1I_LINE_LEN-2-1:0] addr_tag = pc[ADDR_W-1:L1I_LEN+L1I_LINE_LEN+2];
+  wire [L1I_LEN-1:0] addr_idx = pc[L1I_LEN+L1I_LINE_LEN+2-1:L1I_LINE_LEN+2];
+  wire [L1I_LINE_LEN-1:0]addr_offset = pc[L1I_LINE_LEN+2-1:2];
 
   wire l1i_cache_hit = (
          (pvalid) & 1 & l1i_state == 'b00 &
          l1i_valid[addr_idx] == 1'b1) & (l1i_tag[addr_idx] == addr_tag);
-  wire ifu_sdram_arburst = `ysyx_I_SDRAM_ARBURST & (pc_ifu >= 'ha0000000) & (pc_ifu <= 'hc0000000);
-  wire [6:0] opcode_o = inst_o[6:0];
-  wire is_bench = (
-    (opcode_o == `ysyx_OP_JAL) | (opcode_o == `ysyx_OP_JALR) |
-    (opcode_o == `ysyx_OP_B_TYPE) | (opcode_o == `ysyx_OP_SYSTEM) |
-    (0)
-  );
 
-  assign ifu_araddr_o = (l1i_state == 'b00 | l1i_state == 'b01) ? (pc_ifu & ~'h4) : (pc_ifu | 'h4);
+  assign ifu_araddr_o = (l1i_state == 'b00 | l1i_state == 'b01) ? (pc & ~'h4) : (pc | 'h4);
   assign ifu_arvalid_o = ifu_sdram_arburst ?
     arvalid & !l1i_cache_hit & (l1i_state == 'b00 | l1i_state == 'b01) :
     arvalid & !l1i_cache_hit & l1i_state != 'b10;
@@ -61,19 +53,19 @@ module ysyx_IFU (
   // with l1i cache
   assign inst_o = l1i[addr_idx][addr_offset];
   assign valid_o = l1i_cache_hit;
+  wire ifu_sdram_arburst = `ysyx_I_SDRAM_ARBURST & (pc >= 'ha0000000) & (pc <= 'hc0000000);
 
   `ysyx_BUS_FSM()
-  assign pc_o = pc_ifu;
+  assign pc_o = pc;
   always @(posedge clk)
     begin
       if (rst)
         begin
           pvalid <= 1;
-          pc_ifu <= `ysyx_PC_INIT;
         end
       else
         begin
-          if (inst_o == `ysyx_INST_FENCE_I) begin
+          if (inst_o == 'h0000100f) begin
             l1i_valid <= 0;
           end
           case (l1i_state)
@@ -113,25 +105,13 @@ module ysyx_IFU (
               if (prev_valid)
                 begin
                   pvalid <= prev_valid;
-                  pc_ifu <= pc;
-                  if (is_bench) begin
-                    pc_ifu <= pc;
-                  end
                 end
             end
           else if (state == `ysyx_WAIT_READY)
             begin
-              if ( next_ready == 1)
+              if (next_ready == 1)
                 begin
-                  // if (valid_o & !is_bench)
-                  //   begin
-                  //     pc_ifu <= pc_ifu + 4;
-                  //     pvalid <= 0;
-                  //   end
-                  // else
-                  begin
-                    pvalid <= 0;
-                  end
+                  pvalid <= 0;
                 end
             end
         end

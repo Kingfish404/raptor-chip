@@ -1,7 +1,8 @@
 `include "ysyx_macro.v"
 `include "ysyx_macro_csr.v"
+`include "ysyx_macro_dpi_c.v"
 
-module ysyx_exu (
+module ysyx_EXU (
   input clk, rst,
 
   input prev_valid, next_ready,
@@ -22,7 +23,6 @@ module ysyx_exu (
   input [BIT_W-1:0] pc,
   output [BIT_W-1:0] reg_wdata_o, npc_wdata_o,
   output use_exu_npc_o,
-  output ebreak_o,
   output reg [4:0] rd_o,
   output [3:0] alu_op_o,
   output reg rwen_o,
@@ -65,18 +65,16 @@ module ysyx_exu (
   reg state, alu_valid, lsu_avalid;
   reg valid_once;
   reg lsu_valid;
-  reg busy;
   assign valid_o = (wen_o | ren_o) ? lsu_valid : alu_valid;
-  assign ready_o = (state != `ysyx_WAIT_READY) & !busy;
+  assign ready_o = (state != `ysyx_WAIT_READY);
   `ysyx_BUS_FSM()
   always @(posedge clk) begin
     if (rst) begin
       alu_valid <= 0; lsu_avalid <= 0;
-      busy <= 0;
     end
     else begin
       if (state == `ysyx_IDLE) begin
-        if (prev_valid & ready_o) begin
+        if (prev_valid) begin
           imm_exu <= imm; pc_exu <= pc;
           src1 <= op1; src2 <= op2;
           alu_op_exu <= alu_op; opcode_exu <= opcode;
@@ -84,12 +82,11 @@ module ysyx_exu (
           rd_o <= rd; rwen_o <= rwen;
           ren_o <= ren; wen_o <= wen;
           alu_valid <= 1;
-          busy <= 1;
           if (wen | ren) begin lsu_avalid <= 1; end
         end
       end
       else if (state == `ysyx_WAIT_READY) begin
-        if (next_ready == 1) begin lsu_valid <= 0; alu_valid <= 0; busy <= 0; end
+        if (next_ready == 1) begin lsu_valid <= 0; alu_valid <= 0; end
       end
       if (lsu_valid) begin valid_once <= 0;
       end else begin  valid_once <= 1; end
@@ -143,7 +140,7 @@ module ysyx_exu (
     ({BIT_W{((imm_exu[3:0] == `ysyx_OP_SYSTEM_CSRRCI))}} & (csr_rdata & ~src1))
   );
   always @(*) begin
-    use_exu_npc_o = 0; ebreak_o = 0;
+    use_exu_npc_o = 0;
     npc_wdata_o = addr_data;
     case (opcode)
       `ysyx_OP_SYSTEM: begin
@@ -151,7 +148,7 @@ module ysyx_exu (
           `ysyx_OP_SYSTEM_FUNC3: begin
             case (imm_exu[15:4])
               `ysyx_OP_SYSTEM_ECALL:  begin use_exu_npc_o = 1; npc_wdata_o = mtvec; end
-              `ysyx_OP_SYSTEM_EBREAK: begin use_exu_npc_o = 1; ebreak_o = 1; end
+              `ysyx_OP_SYSTEM_EBREAK: begin use_exu_npc_o = 1; `ysyx_DPI_C_npc_exu_ebreak end
               `ysyx_OP_SYSTEM_MRET:   begin use_exu_npc_o = 1; npc_wdata_o = mepc; end
               default: begin ; end
             endcase

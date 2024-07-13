@@ -1,5 +1,4 @@
 `include "ysyx_macro.v"
-`include "ysyx_macro_dpi_c.v"
 
 module ysyx_wbu (
     input clk,
@@ -9,7 +8,6 @@ module ysyx_wbu (
     input [4:0] rd,
     input [BIT_W-1:0] npc_wdata,
     input use_exu_npc,
-    input ebreak,
 
     output reg [BIT_W-1:0] reg_wdata_o,
     output reg [4:0] rd_o,
@@ -35,9 +33,6 @@ module ysyx_wbu (
         rd_o <= rd;
         npc_wdata_o <= npc_wdata;
         use_exu_npc_o <= use_exu_npc;
-        if (ebreak) begin
-          `ysyx_DPI_C_npc_exu_ebreak
-        end
       end
       if (state == `ysyx_IDLE) begin
         if (prev_valid == 1) begin

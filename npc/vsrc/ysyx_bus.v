@@ -75,7 +75,7 @@ module ysyx_BUS_ARBITER(
   wire sram_bvalid_o;
 
   // typedef enum [2:0] {IF_A, IF_D, LS_A, LS_D_R, LS_D_W} state_t;
-  //                      000,  001,  010,    011,    100,
+  //                   000,  001,  010,    011,    100,
   parameter logic [2:0] IF_A = 3'b000, IF_D = 3'b001;
   parameter logic [2:0] LS_A = 3'b010, LS_D_R = 3'b011, LS_D_W = 3'b100;
 
