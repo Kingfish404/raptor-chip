@@ -55,7 +55,11 @@ void init_proc()
 Context *schedule(Context *prev)
 {
   current->cp = prev;
-  if (current == last)
+  if (current == &pcb_boot)
+  {
+    current = &pcb[0];
+  }
+  else if (current == last)
   {
     current = &pcb[0];
   }
