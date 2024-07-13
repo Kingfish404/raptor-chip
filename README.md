@@ -58,10 +58,9 @@ cd $NPC_HOME && make menuconfig && make ARCH=riscv32e-npc run
 
 # 3. build and run the program you want
 
-## n. nanos-lite
+## n. running nanos-lite on nemu
 cd $NAVY_HOME && make ISA=$ISA fsimg
 cd $YSYX_HOME/nanos-lite && make ARCH=$ISA-nemu run
-
 ```
 
 ## Architecture
