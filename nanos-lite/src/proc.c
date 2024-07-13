@@ -45,7 +45,7 @@ void init_proc()
   context_kload(&pcb[1], hello_fun, "pcb[1]");
   // context_kload(&pcb[2], hello_fun, "pcb[1]");
   context_uload(&pcb[2], "/bin/dummy");
-  last = &pcb[2];
+  last = &pcb[1];
   switch_boot_pcb();
   Log("Initializing processes...");
 
