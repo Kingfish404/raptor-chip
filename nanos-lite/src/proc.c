@@ -37,9 +37,9 @@ void init_proc()
   last = &pcb[1];
   switch_boot_pcb();
   Log("Initializing processes...");
-  yield();
+
   // load program here
-  // naive_uload(NULL, "/bin/dummy");
+  naive_uload(NULL, "/bin/dummy");
 }
 
 Context *schedule(Context *prev)
