@@ -29,12 +29,14 @@ void hello_fun(void *arg)
 void context_kload(PCB *pcb, void *entry, void *arg)
 {
   pcb->cp = kcontext((Area){pcb->stack, pcb->stack + STACK_SIZE}, entry, arg);
+  pcb->cp->GPRx = (uintptr_t) heap.end;
 }
 
 void context_uload(PCB *pcb, const char *filename)
 {
   void *entry = ucontext_load(pcb, filename);
   pcb->cp = ucontext(NULL, (Area){pcb->stack, pcb->stack + STACK_SIZE}, entry);
+  pcb->cp->GPRx = (uintptr_t) heap.end;
 }
 
 void init_proc()
