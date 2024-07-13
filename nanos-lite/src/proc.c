@@ -33,7 +33,7 @@ void context_kload(PCB *pcb, void *entry, void *arg)
 
 void context_uload(PCB *pcb, const char *filename)
 {
-  uintptr_t entry = ucontext_load(pcb, filename);
+  void *entry = ucontext_load(pcb, filename);
   pcb->cp = ucontext(NULL, (Area){pcb->stack, pcb->stack + STACK_SIZE}, entry);
 }
 
