@@ -47,10 +47,12 @@ void init_proc()
 
 Context *schedule(Context *prev)
 {
-  if (current == NULL)
-  {
-    current->cp = prev;
-  }
-  current = (current == &pcb[0] ? &pcb[1] : &pcb[0]);
+  // save the context pointer
+  current->cp = prev;
+
+  // always select pcb[0] as the new process
+  current = &pcb[0];
+
+  // then return the new context
   return current->cp;
 }
