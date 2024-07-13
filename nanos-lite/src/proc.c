@@ -38,17 +38,15 @@ void init_proc()
 
   switch_boot_pcb();
 
-  // Log("Initializing processes...");
+  Log("Initializing processes...");
 
-  // // load program here
-  // naive_uload(NULL, "/bin/nterm");
+  // load program here
+  naive_uload(NULL, "/bin/dummy");
 }
 
 Context *schedule(Context *prev)
 {
   current->cp = prev;
-
   current = (current == &pcb[0] ? &pcb[1] : &pcb[0]);
-
   return current->cp;
 }
