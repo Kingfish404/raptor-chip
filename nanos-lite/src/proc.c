@@ -36,7 +36,7 @@ void context_uload(PCB *pcb, const char *filename)
 {
   void *entry = ucontext_load(pcb, filename);
   pcb->cp = ucontext(NULL, (Area){pcb->stack, pcb->stack + STACK_SIZE}, entry);
-  pcb->cp->GPRx = (uintptr_t)pcb->stack + STACK_SIZE;
+  pcb->cp->GPRx = (uintptr_t)pcb->stack;
   printf("GPRx: %x\n", pcb->cp->GPRx);
 }
 
