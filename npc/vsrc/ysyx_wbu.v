@@ -42,7 +42,7 @@ module ysyx_wbu (
       if (state == `ysyx_IDLE) begin
         if (prev_valid == 1) begin
           valid_o <= 1;
-          ready_o <= 0;
+          // ready_o <= 0;
         end
       end else if (state == `ysyx_WAIT_READY) begin
         if (next_ready == 1) begin
