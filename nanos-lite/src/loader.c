@@ -45,21 +45,6 @@ static uintptr_t loader(PCB *pcb, const char *filename)
   return entry;
 }
 
-void context_kload(PCB *pcb, void *entry, void *arg)
-{
-  Area heap = {pcb->stack, pcb->stack + STACK_SIZE};
-  pcb->cp = kcontext(heap, entry, arg);
-}
-
-void context_uload(PCB *pcb, const char *filename)
-{
-  void *entry = loader(pcb, filename);
-  pcb->cp = ucontext(NULL, (Area){pcb->stack, pcb->stack + STACK_SIZE}, entry);
-  Area heap = {pcb->stack, pcb->stack + STACK_SIZE};
-  pcb->cp->GPRx = (uintptr_t)heap.end;
-  // printf("GPRx: %x\n", pcb->cp->GPRx);
-}
-
 void naive_uload(PCB *pcb, const char *filename)
 {
   uintptr_t entry = loader(pcb, filename);

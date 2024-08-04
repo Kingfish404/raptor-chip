@@ -3,13 +3,10 @@
 #define MAX_NR_PROC 4
 
 void naive_uload(PCB *pcb, const char *filename);
-void context_kload(PCB *pcb, void *entry, void *arg);
-void context_uload(PCB *pcb, const char *filename);
 
 static PCB pcb[MAX_NR_PROC] __attribute__((used)) = {};
 static PCB pcb_boot = {};
 PCB *current = NULL;
-PCB *last = NULL;
 
 void switch_boot_pcb()
 {
@@ -21,7 +18,7 @@ void hello_fun(void *arg)
   int j = 1;
   while (1)
   {
-    Log("Hello World from Nanos-lite with arg '%s' for the %dth time!", (const char *)arg, j);
+    Log("Hello World from Nanos-lite with arg '%p' for the %dth time!", (uintptr_t)arg, j);
     j++;
     yield();
   }
@@ -29,33 +26,15 @@ void hello_fun(void *arg)
 
 void init_proc()
 {
-  context_kload(&pcb[0], hello_fun, "pcb[0]");
-  context_kload(&pcb[1], hello_fun, "pcb[1]");
-  // // context_kload(&pcb[2], hello_fun, "pcb[1]");
-  // // context_uload(&pcb[0], "/bin/dummy");
-  // // context_uload(&pcb[1], "/bin/dummy");
-  // last = &pcb[1];
-  // switch_boot_pcb();
+  switch_boot_pcb();
+
   Log("Initializing processes...");
 
   // load program here
-  naive_uload(NULL, "/bin/dummy");
+  naive_uload(NULL, "/bin/nterm");
 }
 
 Context *schedule(Context *prev)
 {
-  current->cp = prev;
-  if (current == &pcb_boot)
-  {
-    current = &pcb[0];
-  }
-  else if (current == last)
-  {
-    current = &pcb[0];
-  }
-  else
-  {
-    current++;
-  }
-  return current->cp;
+  return NULL;
 }
