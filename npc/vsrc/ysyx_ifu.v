@@ -123,12 +123,12 @@ module ysyx_IFU (
             begin
               if ( next_ready == 1)
                 begin
-                  // if (valid_o & !is_bench)
-                  //   begin
-                  //     pc_ifu <= pc_ifu + 4;
-                  //     pvalid <= 0;
-                  //   end
-                  // else
+                  if (valid_o & !is_bench)
+                    begin
+                      pc_ifu <= pc_ifu + 4;
+                      pvalid <= 0;
+                    end
+                  else
                   begin
                     pvalid <= 0;
                   end
