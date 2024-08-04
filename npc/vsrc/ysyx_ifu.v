@@ -120,7 +120,7 @@ module ysyx_IFU (
             end
           else if (state == `ysyx_WAIT_READY)
             begin
-              if ( next_ready == 1)
+              if (next_ready == 1)
                 begin
                   if (valid_o & !is_bench)
                     begin
