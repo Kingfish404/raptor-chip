@@ -73,7 +73,7 @@ void npc_abort()
 extern "C" void npc_exu_ebreak()
 {
   contextp->gotFinish(true);
-  printf("EBREAK at pc = " FMT_WORD_NO_PREFIX "\n", *npc.pc);
+  Log("EBREAK at pc = " FMT_WORD_NO_PREFIX "\n", *npc.pc);
   npc.state = NPC_END;
 }
 
