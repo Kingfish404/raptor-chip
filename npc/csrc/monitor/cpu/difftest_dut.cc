@@ -24,6 +24,7 @@ void difftest_should_diff_mem()
 
 void difftest_skip_ref()
 {
+  skip_dut_nr_inst = 1;
   is_skip_ref = true;
 }
 
@@ -154,6 +155,7 @@ void difftest_step(vaddr_t pc)
   if (is_skip_ref)
   {
     ref_difftest_regcpy(&npc, DIFFTEST_TO_REF);
+    ref_difftest_regcpy(&ref_r, DIFFTEST_TO_DUT);
     is_skip_ref = false;
     return;
   }

@@ -19,3 +19,4 @@
 ysyxSoC
 yosys-sta
 rt-thread-am
+*.tmp

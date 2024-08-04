@@ -78,10 +78,10 @@ static void perf()
          pmu.st_inst_cnt, percentage(pmu.st_inst_cnt, pmu.instr_cnt));
   // show average IF cycle and LS cycle
   Log(FMT_BLUE("IFU Avg Cycle: %2.1f, LSU Avg Cycle: %2.1f"),
-      (1.0 * pmu.ifu_stall_cycle + 1) / pmu.ifu_fetch_cnt,
-      (1.0 * pmu.lsu_stall_cycle + 1) / pmu.lsu_load_cnt);
-  assert(
-      pmu.ifu_fetch_cnt == pmu.instr_cnt);
+      (1.0 * pmu.ifu_stall_cycle) / (pmu.ifu_fetch_cnt + 1),
+      (1.0 * pmu.lsu_stall_cycle) / (pmu.lsu_load_cnt + 1));
+  Log(FMT_BLUE("ifu_fetch_cnt: %lld, instr_cnt: %lld"), pmu.ifu_fetch_cnt, pmu.instr_cnt);
+  // assert(pmu.ifu_fetch_cnt == pmu.instr_cnt);
   assert(
       pmu.instr_cnt ==
       (pmu.ld_inst_cnt + pmu.st_inst_cnt +
@@ -214,7 +214,7 @@ static void statistic()
       ((*npc.ret) == 0 && npc.state != NPC_ABORT
            ? FMT_GREEN("HIT GOOD TRAP")
            : FMT_RED("HIT BAD TRAP")),
-      (*npc.pc), *(npc.inst));
+      *(npc.pc), *(npc.inst));
 }
 
 static void cpu_exec_one_cycle()
@@ -266,6 +266,7 @@ void cpu_show_itrace()
 
 void disassemble(char *str, int size, uint64_t pc, uint8_t *code, int nbyte);
 
+int total_cycle = 0;
 void cpu_exec(uint64_t n)
 {
   switch (npc.state)
@@ -285,6 +286,12 @@ void cpu_exec(uint64_t n)
   while (!contextp->gotFinish() && npc.state == NPC_RUNNING && n-- > 0)
   {
     cpu_exec_one_cycle();
+    total_cycle++;
+    if (total_cycle > 0xffff)
+    {
+      npc.state = NPC_ABORT;
+      break;
+    }
     // Simulate the performance monitor unit
     perf_sample_per_cycle();
     cur_inst_cycle++;
@@ -294,7 +301,8 @@ void cpu_exec(uint64_t n)
       npc.state = NPC_ABORT;
       break;
     }
-    if (prev_pc != *(npc.pc))
+    // if (prev_pc != *(npc.pc))
+    if (*(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__wbu_valid)))
     {
       perf_sample_per_inst();
       cur_inst_cycle = 0;

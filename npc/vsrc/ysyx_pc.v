@@ -5,22 +5,28 @@
 module ysyx_pc (
     input clk,
     input rst,
-    input exu_valid,
+    input prev_valid,
     input use_exu_npc,
     input [DATA_W-1:0] npc_wdata,
-    output reg [DATA_W-1:0] pc_o
+    output wire [DATA_W-1:0] npc_o,
+    output [DATA_W-1:0] pc_o
 );
   parameter integer DATA_W = `ysyx_W_WIDTH;
+  wire [DATA_W-1:0] npc = pc + 4;
+  reg  [DATA_W-1:0] pc, lpc;
+  assign npc_o = npc;
+  assign pc_o  = pc;
 
   always @(posedge clk) begin
     if (rst) begin
-      pc_o <= `ysyx_PC_INIT;
+      pc <= `ysyx_PC_INIT;
       `ysyx_DPI_C_npc_difftest_skip_ref
-    end else if (exu_valid) begin
+    end else if (prev_valid) begin
+      lpc <= pc;
       if (use_exu_npc) begin
-        pc_o <= npc_wdata;
+        pc <= npc_wdata;
       end else begin
-        pc_o <= pc_o + 4;
+        pc <= npc;
       end
     end
   end

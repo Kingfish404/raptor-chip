@@ -81,7 +81,7 @@ module ysyx (
   parameter integer ADDR_W = `ysyx_W_WIDTH;
   parameter integer REG_ADDR_W = 5;
   // PC unit output
-  wire [DATA_W-1:0] pc;
+  wire [DATA_W-1:0] pc, npc;
 
   // REGS output
   wire [DATA_W-1:0] reg_rdata1, reg_rdata2;
@@ -118,7 +118,7 @@ module ysyx (
   // EXU output
   wire [DATA_W-1:0] reg_wdata;
   wire [DATA_W-1:0] npc_wdata;
-  wire use_exu_npc;
+  wire use_exu_npc, ebreak;
   wire [4:0] rd_exu;
   wire [3:0] alu_op_exu;
   wire rwen_exu, ren_exu, wen_exu;
@@ -140,9 +140,10 @@ module ysyx (
 
   ysyx_pc pc_unit(
     .clk(clock), .rst(reset),
-    .exu_valid(wbu_valid),
+    .prev_valid(exu_valid),
 
-    .npc_wdata(npc_wbu), .use_exu_npc(use_exu_npc_wbu),
+    .npc_wdata(npc_wdata), .use_exu_npc(use_exu_npc),
+    .npc_o(npc),
     .pc_o(pc)
   );
 
@@ -204,7 +205,7 @@ module ysyx (
     .ifu_rdata(ifu_rdata),
     .ifu_rvalid(ifu_rvalid),
 
-    .pc(pc),
+    .pc(pc), .npc(npc),
     .inst_o(inst), .pc_o(pc_ifu),
 
     .prev_valid(wbu_valid), .next_ready(idu_ready),
@@ -230,10 +231,10 @@ module ysyx (
     );
 
   // EXU(EXecution Unit): 负责根据控制信号对数据进行执行操作, 并将执行结果写回寄存器或存储器
-  ysyx_EXU #(.BIT_W(DATA_W)) exu(
+  ysyx_exu #(.BIT_W(DATA_W)) exu(
     .clk(clock), .rst(reset),
 
-    .prev_valid(idu_valid), .next_ready(ifu_ready),
+    .prev_valid(idu_valid), .next_ready(wbu_ready),
     .valid_o(exu_valid), .ready_o(exu_ready),
 
     .ren(ren), .wen(wen), .rwen(rwen),
@@ -243,6 +244,7 @@ module ysyx (
     .pc(pc_idu),
     .reg_wdata_o(reg_wdata),
     .npc_wdata_o(npc_wdata), .use_exu_npc_o(use_exu_npc),
+    .ebreak_o(ebreak),
     .rd_o(rd_exu),
 
     .rwen_o(rwen_exu),
@@ -284,7 +286,7 @@ module ysyx (
     .reg_wdata(reg_wdata),
     .rd(rd_exu),
     .npc_wdata(npc_wdata),
-    .use_exu_npc(use_exu_npc),
+    .use_exu_npc(use_exu_npc), .ebreak(ebreak),
 
     .reg_wdata_o(reg_wdata_wbu),
     .rd_o(rd_wbu),
