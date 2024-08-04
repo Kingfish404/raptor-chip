@@ -62,8 +62,8 @@ module ysyx_IFU (
   assign inst_o = l1i[addr_idx][addr_offset];
   assign valid_o = l1i_cache_hit;
 
-  `ysyx_BUS_FSM()
   assign pc_o = pc_ifu;
+  `ysyx_BUS_FSM()
   always @(posedge clk)
     begin
       if (rst)
