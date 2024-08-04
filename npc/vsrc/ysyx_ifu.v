@@ -2,7 +2,8 @@
 `include "ysyx_macro_soc.v"
 
 module ysyx_IFU (
-    input clk, rst,
+    input clk,
+    rst,
 
     // for bus
     output [DATA_W-1:0] ifu_araddr_o,
@@ -10,13 +11,16 @@ module ysyx_IFU (
     input [DATA_W-1:0] ifu_rdata,
     input ifu_rvalid,
 
-    input [ADDR_W-1:0] pc, npc,
+    input  [ADDR_W-1:0] pc,
+    npc,
     output [DATA_W-1:0] inst_o,
     output [DATA_W-1:0] pc_o,
 
-    input prev_valid, next_ready,
-    output valid_o, ready_o
-  );
+    input  prev_valid,
+    next_ready,
+    output valid_o,
+    ready_o
+);
   parameter integer ADDR_W = 32;
   parameter integer DATA_W = 32;
 
@@ -40,7 +44,7 @@ module ysyx_IFU (
 
   wire [32-L1I_LEN-L1I_LINE_LEN-2-1:0] addr_tag = pc_ifu[ADDR_W-1:L1I_LEN+L1I_LINE_LEN+2];
   wire [L1I_LEN-1:0] addr_idx = pc_ifu[L1I_LEN+L1I_LINE_LEN+2-1:L1I_LINE_LEN+2];
-  wire [L1I_LINE_LEN-1:0]addr_offset = pc_ifu[L1I_LINE_LEN+2-1:2];
+  wire [L1I_LINE_LEN-1:0] addr_offset = pc_ifu[L1I_LINE_LEN+2-1:2];
 
   wire l1i_cache_hit = (
          1 & l1i_state == 'b00 &
@@ -64,75 +68,62 @@ module ysyx_IFU (
 
   assign pc_o = pc_ifu;
   `ysyx_BUS_FSM()
-  always @(posedge clk)
-    begin
-      if (rst)
-        begin
-          pvalid <= 1;
-          pc_ifu <= `ysyx_PC_INIT;
+  always @(posedge clk) begin
+    if (rst) begin
+      pvalid <= 1;
+      pc_ifu <= `ysyx_PC_INIT;
+    end else begin
+      if (inst_o == `ysyx_INST_FENCE_I) begin
+        l1i_valid <= 0;
+      end
+      case (l1i_state)
+        'b00:
+        if (ifu_arvalid_o) begin
+          l1i_state <= 'b01;
         end
-      else
-        begin
-          if (inst_o == `ysyx_INST_FENCE_I) begin
-            l1i_valid <= 0;
+        'b01:
+        if (ifu_rvalid & !l1i_cache_hit) begin
+          if (ifu_sdram_arburst) begin
+            l1i_state <= 'b11;
+          end else begin
+            l1i_state <= 'b10;
           end
-          case (l1i_state)
-            'b00:
-              if (ifu_arvalid_o)
-                begin
-                  l1i_state <= 'b01;
-                end
-            'b01:
-               if (ifu_rvalid & !l1i_cache_hit)
-                begin
-                  if (ifu_sdram_arburst) begin
-                    l1i_state <= 'b11;
-                  end else begin
-                    l1i_state <= 'b10;
-                  end
-                  l1i[addr_idx][0] <= ifu_rdata;
-                  l1i_tag[addr_idx] <= addr_tag;
-                end
-            'b10:
-               begin
-                l1i_state <= 'b11;
-               end
-            'b11:
-              begin
-                if (ifu_rvalid)
-                begin
-                  l1i_state <= 'b00;
-                  l1i[addr_idx][1] <= ifu_rdata;
-                  l1i_tag[addr_idx] <= addr_tag;
-                  l1i_valid[addr_idx] <= 1'b1;
-                end
-              end
-          endcase
-          if (state == `ysyx_IDLE)
-            begin
-              if (prev_valid)
-                begin
-                  pvalid <= prev_valid;
-                  if (is_bench) begin
-                    pc_ifu <= pc;
-                  end
-                end
-            end
-          else if (state == `ysyx_WAIT_READY)
-            begin
-              if (next_ready == 1)
-                begin
-                  if (valid_o & !is_bench)
-                    begin
-                      pc_ifu <= pc_ifu + 4;
-                      pvalid <= 0;
-                    end
-                  else
-                  begin
-                    pvalid <= 0;
-                  end
-                end
-            end
+          l1i[addr_idx][0]  <= ifu_rdata;
+          l1i_tag[addr_idx] <= addr_tag;
         end
+        'b10: begin
+          l1i_state <= 'b11;
+        end
+        'b11: begin
+          if (ifu_rvalid) begin
+            l1i_state <= 'b00;
+            l1i[addr_idx][1] <= ifu_rdata;
+            l1i_tag[addr_idx] <= addr_tag;
+            l1i_valid[addr_idx] <= 1'b1;
+          end
+        end
+      endcase
+      if (state == `ysyx_IDLE) begin
+        if (prev_valid) begin
+          pvalid <= prev_valid;
+          if (is_bench) begin
+            pc_ifu <= pc;
+          end
+        end
+      end else if (state == `ysyx_WAIT_READY) begin
+        if (next_ready == 1) begin
+          if (valid_o) begin
+            if (!is_bench) begin
+              pc_ifu <= pc_ifu + 4;
+              pvalid <= 0;
+            end else begin
+
+            end
+          end else begin
+            pvalid <= 0;
+          end
+        end
+      end
     end
-endmodule // ysyx_IFU
+  end
+endmodule  // ysyx_IFU
