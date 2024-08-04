@@ -75,7 +75,7 @@ module ysyx_exu (
       busy <= 0;
     end
     else begin
-      if (state == `ysyx_IDLE) begin
+      // if (state == `ysyx_IDLE) begin
         if (prev_valid & ready_o) begin
           imm_exu <= imm; pc_exu <= pc;
           src1 <= op1; src2 <= op2;
@@ -86,14 +86,14 @@ module ysyx_exu (
           alu_valid <= 1;
           if (wen | ren) begin lsu_avalid <= 1; busy <= 1; end
         end
-      end
-      else if (state == `ysyx_WAIT_READY) begin
+      // end
+      // else if (state == `ysyx_WAIT_READY) begin
         if (next_ready == 1) begin
           lsu_valid <= 0;
           if (prev_valid == 0) begin alu_valid <= 0; end
           busy <= 0;
         end
-      end
+      // end
       if (lsu_valid) begin valid_once <= 0;
       end else begin valid_once <= 1; end
       if (wen_o) begin
