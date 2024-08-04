@@ -286,6 +286,10 @@ void cpu_exec(uint64_t n)
   while (!contextp->gotFinish() && npc.state == NPC_RUNNING && n-- > 0)
   {
     cpu_exec_one_cycle();
+    if (npc.state == NPC_QUIT)
+    {
+      break;
+    }
     total_cycle++;
     if (total_cycle > 0xffff)
     {
