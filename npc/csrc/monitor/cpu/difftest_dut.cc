@@ -87,6 +87,7 @@ static void checkregs(NPCState *ref, vaddr_t pc)
            (vaddr_t)(*(ref->pc)), pc);
     is_same = false;
   }
+  // can't compare inst for pipeline cpu
   // if ((uint32_t)(*(ref->inst)) != npc.last_inst)
   // {
   //   printf(FMT_RED("[ERROR]") "    inst is different! ref = " FMT_WORD_NO_PREFIX ", dut = " FMT_WORD_NO_PREFIX "\n",
