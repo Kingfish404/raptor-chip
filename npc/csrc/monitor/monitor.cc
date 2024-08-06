@@ -6,6 +6,7 @@
 #include <string.h>
 
 static const uint32_t img[] = {
+    0x00000117, // 80000008: auipc sp,0x0
     0x00108093, // 80000000: addi ra, ra, 1
     0x00108093, // 80000004: addi ra, ra, 1
     0x00108093, // 80000008: addi ra, ra, 1
