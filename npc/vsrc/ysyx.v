@@ -218,7 +218,7 @@ module ysyx (
 
     .inst(inst),
     .reg_rdata1(reg_rdata1), .reg_rdata2(reg_rdata2),
-    .pc(pc),
+    .pc(pc_ifu),
     .rwen_o(rwen), .en_j_o(en_j), .ren_o(ren), .wen_o(wen),
     .op1_o(op1), .op2_o(op2), .op_j_o(op_j), .rwaddr_o(rwaddr),
     .imm_o(imm),
