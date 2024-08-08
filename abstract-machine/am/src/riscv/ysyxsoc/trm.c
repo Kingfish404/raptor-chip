@@ -67,7 +67,7 @@ __attribute__((section(".first_boot"))) void _first_stage_bootloader(void)
   {
     size_t text_size = _second_boot_end - _second_boot_start;
     size_t text_size_u64_fix = text_size / 8;
-  asm volatile("ebreak");
+    return 0;
     for (size_t i = 0; i < text_size_u64_fix; i++)
     {
       ((uint64_t *)_second_boot_start)[i] = ((uint64_t *)_second_boot_load_start)[i];
