@@ -17,8 +17,8 @@ module ysyx_reg (
   parameter integer REG_ADDR_W = 4;
   parameter integer DATA_W = 32;
   parameter integer REG_NUM = 16;
-  reg [DATA_W-1:0] rf[REG_NUM];
-  reg rf_table[REG_NUM];
+  reg [DATA_W-1:0] rf[REG_NUM] = 0;
+  reg [REG_NUM-1:0] rf_table = 0;
 
   assign src1_o = rf[s1addr[3:0]];
   assign src2_o = rf[s2addr[3:0]];
