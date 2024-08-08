@@ -52,7 +52,7 @@ module ysyx_IFU (
          l1i_valid[addr_idx] == 1'b1) & (l1i_tag[addr_idx] == addr_tag);
   wire ifu_sdram_arburst = `ysyx_I_SDRAM_ARBURST & (pc_ifu >= 'ha0000000) & (pc_ifu <= 'hc0000000);
   wire [6:0] opcode_o = inst_o[6:0];
-  wire is_bench = (
+  wire is_branch = (
     (opcode_o == `ysyx_OP_JAL) | (opcode_o == `ysyx_OP_JALR) |
     (opcode_o == `ysyx_OP_B_TYPE) | (opcode_o == `ysyx_OP_SYSTEM) |
     (0)
@@ -107,7 +107,7 @@ module ysyx_IFU (
       if (state == `ysyx_IDLE) begin
         if (prev_valid) begin
           pvalid <= prev_valid;
-          if (is_bench) begin
+          if (is_branch) begin
             // pc_ifu <= pc;
             branch_stall <= 0;
           end
@@ -115,7 +115,7 @@ module ysyx_IFU (
       end else if (state == `ysyx_WAIT_READY) begin
         if (next_ready == 1) begin
           if (valid_o) begin
-            if (!is_bench) begin
+            if (!is_branch) begin
               pc_ifu <= pc_ifu + 4;
               pvalid <= 0;
             end else begin
