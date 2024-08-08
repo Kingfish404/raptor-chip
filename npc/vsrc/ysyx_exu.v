@@ -224,7 +224,7 @@ module ysyx_exu (
           default:           begin ; end
         endcase
       end
-      default: begin use_exu_npc <= 0; end
+      default: begin use_exu_npc = 0; end
     endcase
   end
 
