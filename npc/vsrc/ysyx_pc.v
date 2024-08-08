@@ -27,6 +27,7 @@ module ysyx_pc (
       if (use_exu_npc) begin
         valid_o <= 1;
         pc <= npc_wdata;
+        lpc <= npc_wdata;
       end else if (valid_o) begin
         valid_o <= 0;
       end else begin
