@@ -10,4 +10,5 @@ _start:
   sw	ra,8(sp)
   li t0, 0x80000000
   add t0, t0, 0x80
+  ebreak
   jal _first_stage_bootloader
