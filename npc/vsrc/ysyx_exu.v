@@ -192,7 +192,7 @@ module ysyx_exu (
 
   always @(*) begin
     use_exu_npc = 0;
-    ebreak_o = (imm_exu[15:4] == `ysyx_OP_SYSTEM_EBREAK);
+    ebreak_o = 0;
     npc_wdata_o = addr_data;
     branch_retire_o = 0;
     case (opcode_exu)
@@ -201,7 +201,7 @@ module ysyx_exu (
           `ysyx_OP_SYSTEM_FUNC3: begin
             case (imm_exu[15:4])
               `ysyx_OP_SYSTEM_ECALL:  begin use_exu_npc = 1; npc_wdata_o = mtvec; end
-              // `ysyx_OP_SYSTEM_EBREAK: begin use_exu_npc <= 1; ebreak_o <= 1; end
+              `ysyx_OP_SYSTEM_EBREAK: begin use_exu_npc = 1; ebreak_o = 1; end
               `ysyx_OP_SYSTEM_MRET:   begin use_exu_npc = 1; npc_wdata_o = mepc; end
               default: begin ; end
             endcase
