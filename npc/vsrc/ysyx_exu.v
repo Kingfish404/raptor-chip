@@ -65,8 +65,8 @@ module ysyx_exu (
   assign alu_op_o = alu_op_exu;
   assign use_exu_npc_o = use_exu_npc & !branch_calc_stall;
   wire is_branch = (
-    (opcode_o == `ysyx_OP_JAL) | (opcode_o == `ysyx_OP_JALR) |
-    (opcode_o == `ysyx_OP_B_TYPE) | (opcode_o == `ysyx_OP_SYSTEM) |
+    (opcode == `ysyx_OP_JAL) | (opcode == `ysyx_OP_JALR) |
+    (opcode == `ysyx_OP_B_TYPE) | (opcode == `ysyx_OP_SYSTEM) |
     (0)
   );
 
