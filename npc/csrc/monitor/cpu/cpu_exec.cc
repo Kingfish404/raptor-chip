@@ -266,7 +266,6 @@ void cpu_show_itrace()
 
 void disassemble(char *str, int size, uint64_t pc, uint8_t *code, int nbyte);
 
-int total_cycle = 0, should_diff = 0;
 void cpu_exec(uint64_t n)
 {
   switch (npc.state)
@@ -291,11 +290,6 @@ void cpu_exec(uint64_t n)
       break;
     }
     total_cycle++;
-    if (total_cycle > 0xffff)
-    {
-      npc.state = NPC_ABORT;
-      break;
-    }
     // Simulate the performance monitor unit
     perf_sample_per_cycle();
     cur_inst_cycle++;
