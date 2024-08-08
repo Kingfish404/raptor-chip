@@ -29,7 +29,7 @@ module ysyx_pc (
         pc <= npc_wdata;
       end else begin
         valid_o <= 0;
-        pc <= npc;
+        // pc <= npc;
       end
     end
   end
