@@ -86,6 +86,7 @@ module ysyx (
 
   // REGS output
   wire [DATA_W-1:0] reg_rdata1, reg_rdata2;
+  wire [16-1:0] rf_table;
 
   // IFU output
   wire [31:0] inst;
@@ -153,10 +154,13 @@ module ysyx (
   ysyx_reg #(.REG_ADDR_W(REG_ADDR_W), .DATA_W(DATA_W)) regs(
     .clk(clock), .rst(reset),
 
+    .idu_valid(idu_valid), .rd(rd),
+
     .reg_write_en(wbu_valid),
     .waddr(rd_wbu), .wdata(reg_wdata_wbu),
 
     .s1addr(rs1), .s2addr(rs2),
+    .rf_table_o(rf_table),
     .src1_o(reg_rdata1), .src2_o(reg_rdata2)
     );
 
