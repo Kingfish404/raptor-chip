@@ -18,6 +18,8 @@ module ysyx_IDU (
   output [6:0] opcode_o,
   output reg [BIT_W-1:0] pc_o,
 
+  input [16-1:0] rf_table,
+
   input prev_valid, next_ready,
   output reg valid_o, ready_o
 );

@@ -234,6 +234,8 @@ module ysyx (
     .alu_op_o(alu_op),
     .opcode_o(opcode), .pc_o(pc_idu),
 
+    .rf_table(rf_table),
+
     .prev_valid(ifu_valid), .next_ready(exu_ready),
     .valid_o(idu_valid), .ready_o(idu_ready)
     );
