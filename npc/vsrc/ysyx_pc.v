@@ -31,10 +31,10 @@ module ysyx_pc (
         pc <= npc;
         valid_o <= 0;
         skip_o <= 1;
-      end else begin
-        skip_o <= 0;
-        valid_o <= 0;
       end
+    end else begin
+      skip_o <= 0;
+      valid_o <= 0;
     end
   end
 endmodule  //ysyx_PC
