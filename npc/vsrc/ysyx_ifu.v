@@ -39,6 +39,7 @@ module ysyx_IFU (
   reg [L1I_SIZE-1:0] l1i_valid = 0;
   reg [32-L1I_LEN-L1I_LINE_LEN-2-1:0] l1i_tag[L1I_SIZE];
   reg [1:0] l1i_state = 0;
+  reg branch_stall = 0;
 
   wire arvalid;
 
@@ -64,7 +65,7 @@ module ysyx_IFU (
 
   // with l1i cache
   assign inst_o = l1i[addr_idx][addr_offset];
-  assign valid_o = l1i_cache_hit;
+  assign valid_o = l1i_cache_hit & !branch_stall;
 
   assign pc_o = pc_ifu;
   `ysyx_BUS_FSM()
@@ -108,6 +109,7 @@ module ysyx_IFU (
           pvalid <= prev_valid;
           if (is_bench) begin
             // pc_ifu <= pc;
+            branch_stall <= 0;
           end
         end
       end else if (state == `ysyx_WAIT_READY) begin
@@ -117,7 +119,7 @@ module ysyx_IFU (
               pc_ifu <= pc_ifu + 4;
               pvalid <= 0;
             end else begin
-
+              branch_stall <= 1;
             end
           end else begin
             pvalid <= 0;
