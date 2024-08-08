@@ -28,7 +28,7 @@ module ysyx_reg (
     if (rst) begin
       rf_table[0] <= 0;
     end else if (reg_write_en) begin
-      rf[waddr[3:0]] <= wdata;
+      rf_table[waddr[3:0]] <= 1;
     end
   end
 
