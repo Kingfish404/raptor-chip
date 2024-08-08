@@ -38,6 +38,9 @@ static const uint32_t img_char_test[] = {
     0x00a00713, // 8000002c: addi a4, zero, 0x0a
     0x00a00713, // 80000030: addi a4, zero, 0x0a
     0x00a00713, // 80000034: addi a4, zero, 0x0a
+    0xdf002117,
+    0xffc10113,
+    0xff410113,
     0x00100073, // 80000038: ebreak
 };
 
