@@ -77,6 +77,7 @@ __attribute__((section(".first_boot"))) void _first_stage_bootloader(void)
       _second_boot_start[i] = _second_boot_load_start[i];
     }
   }
+  asm volatile("mv a0, zero");
   asm volatile("ebreak");
   _second_stage_bootloader();
 }
