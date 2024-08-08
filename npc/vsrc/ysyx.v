@@ -97,7 +97,7 @@ module ysyx (
   wire ifu_valid, ifu_ready;
 
   // IDU output
-  wire [DATA_W-1:0] op1, op2, imm, op_j, pc_idu, rwaddr;
+  wire [DATA_W-1:0] op1, op2, imm, op_j, pc_idu, rwaddr_lsu;
   wire [4:0] rs1, rs2, rd;
   wire [3:0] alu_op;
   wire [6:0] opcode, funct7;
@@ -122,6 +122,7 @@ module ysyx (
   wire [4:0] rd_exu;
   wire [3:0] alu_op_exu;
   wire rwen_exu, ren_exu, wen_exu;
+  wire [DATA_W-1:0] rwaddr_exu;
   wire exu_valid, exu_ready;
 
   // WBU output
@@ -220,7 +221,7 @@ module ysyx (
     .reg_rdata1(reg_rdata1), .reg_rdata2(reg_rdata2),
     .pc(pc_ifu),
     .rwen_o(rwen), .en_j_o(en_j), .ren_o(ren), .wen_o(wen),
-    .op1_o(op1), .op2_o(op2), .op_j_o(op_j), .rwaddr_o(rwaddr),
+    .op1_o(op1), .op2_o(op2), .op_j_o(op_j), .rwaddr_o(rwaddr_idu),
     .imm_o(imm),
     .rs1_o(rs1), .rs2_o(rs2), .rd_o(rd),
     .alu_op_o(alu_op),
@@ -239,7 +240,7 @@ module ysyx (
 
     .ren(ren), .wen(wen), .rwen(rwen),
     .rd(rd), .imm(imm),
-    .op1(op1), .op2(op2), .op_j(op_j), .rwaddr(rwaddr),
+    .op1(op1), .op2(op2), .op_j(op_j), .rwaddr(rwaddr_idu),
     .alu_op(alu_op), .opcode(opcode),
     .pc(pc_idu),
     .reg_wdata_o(reg_wdata),
@@ -250,7 +251,7 @@ module ysyx (
     .rwen_o(rwen_exu),
 
     // to lsu
-    .ren_o(ren_exu), .wen_o(wen_exu),
+    .ren_o(ren_exu), .wen_o(wen_exu), .rwaddr_o(rwaddr_exu),
     .lsu_avalid_o(lsu_avalid), .alu_op_o(alu_op_exu),
     .lsu_mem_wdata_o(lsu_mem_wdata),
 
@@ -264,7 +265,7 @@ module ysyx (
     .clk(clock),
     .idu_valid(idu_valid),
     // from exu
-    .addr(rwaddr),
+    .addr(rwaddr_exu),
     .ren(ren_exu), .wen(wen_exu), .lsu_avalid(lsu_avalid), .alu_op(alu_op_exu),
     .wdata(lsu_mem_wdata),
     // to exu

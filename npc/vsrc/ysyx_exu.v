@@ -26,6 +26,7 @@ module ysyx_exu (
   output reg [4:0] rd_o,
   output [3:0] alu_op_o,
   output reg rwen_o,
+  output reg [BIT_W-1:0] rwaddr_o,
   output reg ren_o, wen_o
 );
   parameter integer BIT_W = 64;
@@ -84,7 +85,7 @@ module ysyx_exu (
           rd_o <= rd; rwen_o <= rwen;
           ren_o <= ren; wen_o <= wen;
           alu_valid <= 1;
-          if (wen | ren) begin lsu_avalid <= 1; busy <= 1; end
+          if (wen | ren) begin lsu_avalid <= 1; busy <= 1; rwaddr_o <= rwaddr; end
         end
       // end
       // else if (state == `ysyx_WAIT_READY) begin
