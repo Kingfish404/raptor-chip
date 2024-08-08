@@ -31,9 +31,8 @@ module ysyx_pc (
         valid_o <= 1;
         skip_o <= 0;
       end else if (branch_retire) begin
-        // 
-        // valid_o <= 0;
-        // skip_o <= 1;
+        valid_o <= 0;
+        skip_o <= 1;
       end
     end
   end
