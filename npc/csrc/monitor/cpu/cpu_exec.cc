@@ -266,7 +266,7 @@ void cpu_show_itrace()
 
 void disassemble(char *str, int size, uint64_t pc, uint8_t *code, int nbyte);
 
-int total_cycle = 0;
+int total_cycle = 0, should_diff = 0;
 void cpu_exec(uint64_t n)
 {
   switch (npc.state)
@@ -323,7 +323,11 @@ void cpu_exec(uint64_t n)
 #endif
 
 #ifdef CONFIG_DIFFTEST
-      difftest_step(*npc.pc);
+      if (should_diff)
+      {
+        difftest_step(*npc.pc);
+      }
+      should_diff = 1;
 #endif
       prev_pc = *(npc.pc);
       npc.last_inst = *(npc.inst);
