@@ -306,7 +306,7 @@ void cpu_exec(uint64_t n)
       break;
     }
     // if (prev_pc != *(npc.pc))
-    if (*(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__exu_valid)))
+    if (*(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__wbu_valid)))
     {
       perf_sample_per_inst();
       cur_inst_cycle = 0;
