@@ -173,7 +173,7 @@ module ysyx_exu (
           default: begin ; end
         endcase
       end
-      `ysyx_OP_JAL, `ysyx_OP_JALR: begin use_exu_npc = 1; npc_wdata_o = addr_data; end
+      `ysyx_OP_JAL, `ysyx_OP_JALR: begin use_exu_npc <= 1; npc_wdata_o <= addr_data; end
       `ysyx_OP_B_TYPE: begin
         // $display("reg_wdata: %h, npc_wdata: %h, npc: %h", reg_wdata, npc_wdata, npc);
         case (alu_op_exu)
