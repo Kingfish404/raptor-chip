@@ -28,10 +28,9 @@ module ysyx_pc (
         valid_o <= 1;
         pc <= npc_wdata;
         lpc <= npc_wdata;
-      end else if (valid_o) begin
-        valid_o <= 0;
       end else begin
         pc <= npc;
+        valid_o <= 0;
       end
     end
   end
