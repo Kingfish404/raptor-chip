@@ -9,7 +9,7 @@ static const uint32_t img[] = {
     0x00108093, // 80000000: addi ra, ra, 1
     0x00108093, // 80000004: addi ra, ra, 1
     0x00108093, // 80000008: addi ra, ra, 1
-    0x01108093, // 8000000c: addi ra, ra, 1
+    0x00108093, // 8000000c: addi ra, ra, 1
     0x00108093, // 80000010: addi ra, ra, 1
     0x00000117, // 80000014: auipc sp,0x0
     0x00100513, // 80000018: addi 0, zero, 1
