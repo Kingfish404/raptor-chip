@@ -112,7 +112,7 @@ module ysyx_IFU (
             // pc_ifu <= pc;
             pc_ifu <= npc;
           end else begin
-            pc_ifu <= pc_ifu + 4;
+            pc_ifu <= npc;
           end
         end
       end else if (state == `ysyx_WAIT_READY) begin
