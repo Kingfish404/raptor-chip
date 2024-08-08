@@ -97,7 +97,7 @@ module ysyx (
   wire ifu_valid, ifu_ready;
 
   // IDU output
-  wire [DATA_W-1:0] op1, op2, imm, op_j, pc_idu, rwaddr_lsu;
+  wire [DATA_W-1:0] op1, op2, imm, op_j, pc_idu, rwaddr_idu;
   wire [4:0] rs1, rs2, rd;
   wire [3:0] alu_op;
   wire [6:0] opcode, funct7;
