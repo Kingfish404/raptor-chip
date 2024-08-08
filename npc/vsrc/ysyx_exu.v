@@ -194,7 +194,7 @@ module ysyx_exu (
     use_exu_npc = 0;
     ebreak_o = (imm[15:4] == `ysyx_OP_SYSTEM_EBREAK);
     npc_wdata_o = addr_data;
-    branch_retire_o <= 0;
+    branch_retire_o = 0;
     case (opcode)
       `ysyx_OP_SYSTEM: begin
         case (imm[3:0])
