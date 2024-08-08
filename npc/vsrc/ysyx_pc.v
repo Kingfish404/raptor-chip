@@ -7,11 +7,9 @@ module ysyx_pc (
     input rst,
     input prev_valid,
     input use_exu_npc,
-    branch_retire,
     input [DATA_W-1:0] npc_wdata,
     output wire [DATA_W-1:0] npc_o,
-    output reg valid_o,
-    skip_o,
+    output reg valid_o, skip_o,
     output [DATA_W-1:0] pc_o
 );
   parameter integer DATA_W = `ysyx_W_WIDTH;
@@ -30,15 +28,11 @@ module ysyx_pc (
         pc <= npc_wdata;
         valid_o <= 1;
         skip_o <= 0;
+      end else begin
+        pc <= npc;
+        valid_o <= 0;
+        skip_o <= 1;
       end
-      //  else if (branch_retire) begin
-      //   // pc <= npc;
-      //   valid_o <= 0;
-      //   skip_o  <= 1;
-      // end
-    end else begin
-      skip_o  <= 0;
-      valid_o <= 0;
     end
   end
 endmodule  //ysyx_PC
