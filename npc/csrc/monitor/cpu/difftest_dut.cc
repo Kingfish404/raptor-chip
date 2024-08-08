@@ -24,7 +24,6 @@ void difftest_should_diff_mem()
 
 void difftest_skip_ref()
 {
-  skip_dut_nr_inst = 2;
   is_skip_ref = true;
 }
 
