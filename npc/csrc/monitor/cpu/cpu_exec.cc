@@ -328,7 +328,10 @@ void cpu_exec(uint64_t n)
         difftest_step(*npc.pc);
         should_diff = 0;
       }
-      should_diff = 1;
+      else
+      {
+        should_diff = 1;
+      }
 #endif
       prev_pc = *(npc.pc);
       npc.last_inst = *(npc.inst);
