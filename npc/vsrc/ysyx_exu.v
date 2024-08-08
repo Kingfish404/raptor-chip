@@ -94,6 +94,7 @@ module ysyx_exu (
       // else if (state == `ysyx_WAIT_READY) begin
         if (next_ready == 1) begin
           lsu_valid <= 0;
+          use_exu_npc <= 0; ebreak_o <= 0;
           if (prev_valid == 0) begin alu_valid <= 0; end
         end
       // end
@@ -182,9 +183,6 @@ module ysyx_exu (
         end
         default: begin use_exu_npc <= 0; end
       endcase
-    end
-    if (next_ready == 1) begin
-      use_exu_npc <= 0; ebreak_o <= 0;
     end
   end
 
