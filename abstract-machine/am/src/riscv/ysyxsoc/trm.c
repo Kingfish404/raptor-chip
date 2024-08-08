@@ -78,7 +78,6 @@ __attribute__((section(".first_boot"))) void _first_stage_bootloader(void)
     }
   }
   return 0;
-  asm volatile("ebreak");
   _second_stage_bootloader();
 }
 
