@@ -42,6 +42,7 @@ static const uint32_t img_char_test[] = {
     0xffc10113,
     0xff410113,
     0x00112423,
+    0x00112423,
     0x00100073, // 80000038: ebreak
 };
 
