@@ -27,11 +27,13 @@ module ysyx_pc (
       if (use_exu_npc) begin
         pc <= npc_wdata;
         valid_o <= 1;
-        skip_o <= 0;
       end else begin
         pc <= npc;
         valid_o <= 0;
         skip_o <= 1;
+      end else begin
+        skip_o <= 0;
+        valid_o <= 0;
       end
     end
   end
