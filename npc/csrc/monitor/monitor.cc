@@ -30,13 +30,12 @@ static const uint32_t img_char_test[] = {
     0x04100713, // 8000000c: addi a4, zero, 0x41
     0x100007b7, // 80000010: lui a5, 0x10000
     0x00000117, // 80000014: auipc sp,0x0
-    0x00012483, // 80000028: lw	s1,0(sp)
-    0x04100713, // 80000018: addi a4, zero, 0x41
-    0x100007b7, // 80000018: lui a5, 0x10000
-    0x00000117, // 8000001c: auipc sp,0x0
-    0x00a00713, // 80000020: addi a4, zero, 0x0a
-    0x00100073, // 80000024: ebreak
-    0x00100073, // 80000028: ebreak
+    0x00012483, // 80000018: lw	s1,0(sp)
+    0x04100713, // 8000001c: addi a4, zero, 0x41
+    0x100007b7, // 80000020: lui a5, 0x10000
+    0x00000117, // 80000024: auipc sp,0x0
+    0x00a00713, // 80000028: addi a4, zero, 0x0a
+    0x00100073, // 8000002c: ebreak
 };
 
 void isa_parser_elf(char *filename);
