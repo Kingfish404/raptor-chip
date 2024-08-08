@@ -11,7 +11,6 @@ module ysyx_IFU (
     input [DATA_W-1:0] ifu_rdata,
     input ifu_rvalid,
 
-    input  [ADDR_W-1:0] pc,
     input  [ADDR_W-1:0] npc,
     output [DATA_W-1:0] inst_o,
     output [DATA_W-1:0] pc_o,
