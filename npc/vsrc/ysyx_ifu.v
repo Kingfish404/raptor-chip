@@ -11,8 +11,7 @@ module ysyx_IFU (
     input [DATA_W-1:0] ifu_rdata,
     input ifu_rvalid,
 
-    input  [ADDR_W-1:0] pc,
-    npc,
+    input  [ADDR_W-1:0] npc,
     output [DATA_W-1:0] inst_o,
     output [DATA_W-1:0] pc_o,
 
@@ -111,6 +110,7 @@ module ysyx_IFU (
           if (is_branch & pc_valid) begin
             // pc_ifu <= pc;
             branch_stall <= 0;
+            pc_ifu <= npc;
           end
         end
       end else if (state == `ysyx_WAIT_READY) begin
