@@ -8,5 +8,5 @@ _start:
   mv a0, zero
   add	sp,sp,-12
   sw	ra,8(sp)
-  mv t1, zero
+  li t0, 0x80000000
   jal _first_stage_bootloader
