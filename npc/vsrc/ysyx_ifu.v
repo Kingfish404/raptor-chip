@@ -111,7 +111,7 @@ module ysyx_IFU (
             branch_stall <= 0;
             pc_ifu <= npc;
           end else if (is_branch & pc_skip) begin
-            branch_stall <= 0;
+            // branch_stall <= 0;
             // pc_ifu <= pc_ifu + 4;
           end
           // if (is_branch & pc_valid) begin
