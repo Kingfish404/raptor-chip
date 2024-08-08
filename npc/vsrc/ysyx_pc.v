@@ -25,12 +25,13 @@ module ysyx_pc (
       `ysyx_DPI_C_npc_difftest_skip_ref
     end else if (prev_valid) begin
       lpc <= pc;
+      pc <= npc;
       if (use_exu_npc) begin
         pc <= npc_wdata;
         valid_o <= 1;
         skip_o <= 0;
       end else if (branch_retire) begin
-        // pc <= npc;
+        // 
         // valid_o <= 0;
         // skip_o <= 1;
       end
