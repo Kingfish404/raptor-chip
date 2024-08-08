@@ -21,7 +21,7 @@ module ysyx_exu (
   input [6:0] opcode,
   input [BIT_W-1:0] pc,
   output [BIT_W-1:0] reg_wdata_o, npc_wdata_o,
-  output use_exu_npc_o,
+  output use_exu_npc_o, branch_retire_o,
   output ebreak_o,
   output reg [4:0] rd_o,
   output [3:0] alu_op_o,
@@ -154,6 +154,7 @@ module ysyx_exu (
       use_exu_npc <= 0;
       ebreak_o <= (imm[15:4] == `ysyx_OP_SYSTEM_EBREAK);
       npc_wdata_o <= addr_data;
+      branch_retire_o <= 0;
       case (opcode)
         `ysyx_OP_SYSTEM: begin
           case (imm[3:0])
@@ -171,6 +172,7 @@ module ysyx_exu (
         `ysyx_OP_JAL, `ysyx_OP_JALR: begin use_exu_npc <= 1; npc_wdata_o <= addr_data; end
         `ysyx_OP_B_TYPE: begin
           // $display("reg_wdata: %h, npc_wdata: %h, npc: %h", reg_wdata, npc_wdata, npc);
+          branch_retire_o <= 1;
           case (alu_op_exu)
             `ysyx_ALU_OP_SUB:  begin use_exu_npc <=(~|reg_wdata); end
             `ysyx_ALU_OP_XOR:  begin use_exu_npc <= (|reg_wdata); end
@@ -181,7 +183,7 @@ module ysyx_exu (
             default:           begin ; end
           endcase
         end
-        default: begin use_exu_npc <= 0; end
+        default: begin end
       endcase
     end
   end

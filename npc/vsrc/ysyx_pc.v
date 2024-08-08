@@ -6,7 +6,7 @@ module ysyx_pc (
     input clk,
     input rst,
     input prev_valid,
-    input use_exu_npc,
+    input use_exu_npc, branch_retire,
     input [DATA_W-1:0] npc_wdata,
     output wire [DATA_W-1:0] npc_o,
     output reg valid_o, skip_o,
@@ -27,7 +27,8 @@ module ysyx_pc (
       if (use_exu_npc) begin
         pc <= npc_wdata;
         valid_o <= 1;
-      end else begin
+        skip_o <= 0;
+      end else if (branch_retire) begin
         pc <= npc;
         valid_o <= 0;
         skip_o <= 1;
