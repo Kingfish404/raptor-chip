@@ -208,7 +208,7 @@ module ysyx (
     .ifu_rdata(ifu_rdata),
     .ifu_rvalid(ifu_rvalid),
 
-    .npc(npc),
+    .pc(pc), .npc(npc),
     .inst_o(inst), .pc_o(pc_ifu),
 
     .pc_valid(pc_valid),
