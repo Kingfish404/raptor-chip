@@ -107,9 +107,11 @@ module ysyx_IFU (
       if (state == `ysyx_IDLE) begin
         if (prev_valid) begin
           pvalid <= prev_valid;
-          if (is_branch & pc_valid) begin
+          if (is_branch) begin
             branch_stall <= 0;
-            pc_ifu <= npc;
+            if (pc_valid) begin
+              pc_ifu <= npc;
+            end
           end
           // if (is_branch & pc_valid) begin
           //   branch_stall <= 0;
