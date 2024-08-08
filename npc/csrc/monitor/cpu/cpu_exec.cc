@@ -326,6 +326,7 @@ void cpu_exec(uint64_t n)
       if (should_diff)
       {
         difftest_step(*npc.pc);
+        should_diff = 0;
       }
       should_diff = 1;
 #endif
