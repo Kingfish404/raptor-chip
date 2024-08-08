@@ -63,18 +63,12 @@ module ysyx_exu (
     (0));
   assign addr_data = addr_exu;
   assign alu_op_o = alu_op_exu;
-  // assign use_exu_npc_o = use_exu_npc & !branch_calc_stall;
-  wire is_branch = (
-    (opcode == `ysyx_OP_JAL) | (opcode == `ysyx_OP_JALR) |
-    (opcode == `ysyx_OP_B_TYPE) | (opcode == `ysyx_OP_SYSTEM) |
-    (0)
-  );
+  assign use_exu_npc_o = use_exu_npc;
 
   reg state, alu_valid, lsu_avalid;
   reg valid_once;
   reg lsu_valid = 0;
   reg busy = 0;
-  reg branch_calc_stall = 0;
   assign valid_o = (wen_o | ren_o) ? lsu_valid : alu_valid;
   assign ready_o = !busy | lsu_valid;
   `ysyx_BUS_FSM()
@@ -93,9 +87,6 @@ module ysyx_exu (
           rd_o <= rd; rwen_o <= rwen;
           ren_o <= ren; wen_o <= wen;
           alu_valid <= 1;
-          if (is_branch) begin
-            branch_calc_stall <= 1;
-          end
           if (wen | ren) begin lsu_avalid <= 1; busy <= 1; rwaddr_o <= rwaddr; end
         end
       // end
