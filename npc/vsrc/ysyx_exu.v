@@ -152,7 +152,7 @@ module ysyx_exu (
   always @(posedge clk) begin
     if (prev_valid & ready_o) begin
       use_exu_npc <= 0;
-      ebreak_o <= imm_exu[15:0] == `ysyx_OP_SYSTEM_EBREAK;
+      ebreak_o <= (imm_exu[15:4] == `ysyx_OP_SYSTEM_EBREAK);
       npc_wdata_o <= addr_data;
       case (opcode)
         `ysyx_OP_SYSTEM: begin
