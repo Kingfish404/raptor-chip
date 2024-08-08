@@ -6,7 +6,7 @@ _start:
   mv s0, zero
   la sp, _stack_pointer
   mv a0, zero
-  sw a0, 0(sp)
+  sw	ra,8(sp)
   mv a0, zero
   ebreak
   jal _first_stage_bootloader
