@@ -45,12 +45,12 @@ module ysyx_wbu (
           // ready_o <= 0;
         end
       end else if (state == `ysyx_WAIT_READY) begin
-        if (next_ready == 1) begin
+        // if (next_ready == 1) begin
           ready_o <= 1;
           if (prev_valid == 0) begin
             valid_o <= 0;
           end
-        end
+        // end
       end
     end
   end
