@@ -283,7 +283,6 @@ void cpu_exec(uint64_t n)
   prev_pc = *(npc.pc);
   uint64_t now = get_time();
   uint64_t cur_inst_cycle = 0;
-  difftest_step(*npc.pc);
   while (!contextp->gotFinish() && npc.state == NPC_RUNNING && n-- > 0)
   {
     cpu_exec_one_cycle();
