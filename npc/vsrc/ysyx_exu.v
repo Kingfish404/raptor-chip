@@ -183,6 +183,9 @@ module ysyx_exu (
         default: begin use_exu_npc <= 0; end
       endcase
     end
+    if (next_ready == 1) begin
+      use_exu_npc <= 0; ebreak_o <= 0;
+    end
   end
 
 endmodule // ysyx_EXU
