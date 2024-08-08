@@ -9,11 +9,12 @@ module ysyx_pc (
     input use_exu_npc,
     input [DATA_W-1:0] npc_wdata,
     output wire [DATA_W-1:0] npc_o,
+    output valid_o,
     output [DATA_W-1:0] pc_o
 );
   parameter integer DATA_W = `ysyx_W_WIDTH;
   wire [DATA_W-1:0] npc = pc + 4;
-  reg  [DATA_W-1:0] pc, lpc;
+  reg [DATA_W-1:0] pc, lpc;
   assign npc_o = npc;
   assign pc_o  = pc;
 
@@ -24,8 +25,10 @@ module ysyx_pc (
     end else if (prev_valid) begin
       lpc <= pc;
       if (use_exu_npc) begin
+        valid_o <= 1;
         pc <= npc_wdata;
       end else begin
+        valid_o <= 0;
         pc <= npc;
       end
     end

@@ -82,6 +82,7 @@ module ysyx (
   parameter integer REG_ADDR_W = 5;
   // PC unit output
   wire [DATA_W-1:0] pc, npc;
+  wire pc_valid;
 
   // REGS output
   wire [DATA_W-1:0] reg_rdata1, reg_rdata2;
@@ -145,6 +146,7 @@ module ysyx (
 
     .npc_wdata(npc_wdata), .use_exu_npc(use_exu_npc),
     .npc_o(npc),
+    .valid_o(pc_valid),
     .pc_o(pc)
   );
 
@@ -209,6 +211,7 @@ module ysyx (
     .pc(pc), .npc(npc),
     .inst_o(inst), .pc_o(pc_ifu),
 
+    .pc_valid(pc_valid),
     .prev_valid(wbu_valid), .next_ready(idu_ready),
     .valid_o(ifu_valid), .ready_o(ifu_ready)
   );
