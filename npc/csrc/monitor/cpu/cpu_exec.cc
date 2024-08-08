@@ -323,12 +323,8 @@ void cpu_exec(uint64_t n)
 #endif
 
 #ifdef CONFIG_DIFFTEST
-      if (should_diff)
-      {
-        difftest_step(*npc.pc);
-      }
+      difftest_step(*npc.pc);
 #endif
-      should_diff = 1;
       prev_pc = *(npc.pc);
       npc.last_inst = *(npc.inst);
     }
