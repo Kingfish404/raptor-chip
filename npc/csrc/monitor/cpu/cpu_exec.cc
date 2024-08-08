@@ -305,6 +305,13 @@ void cpu_exec(uint64_t n)
       npc.state = NPC_ABORT;
       break;
     }
+#ifdef CONFIG_DIFFTEST
+    if (should_diff)
+    {
+      difftest_step(*npc.pc);
+      should_diff = 0;
+    }
+#endif
     // if (prev_pc != *(npc.pc))
     if (*(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__wbu_valid)))
     {
@@ -321,14 +328,7 @@ void cpu_exec(uint64_t n)
           iringbuf[iringhead] + len, sizeof(iringbuf[0]), prev_pc, (uint8_t *)(npc.inst), 4);
       iringhead = (iringhead + 1) % MAX_IRING_SIZE;
 #endif
-
-#ifdef CONFIG_DIFFTEST
-      if (should_diff)
-      {
-        difftest_step(*npc.pc);
-      }
       should_diff = 1;
-#endif
       prev_pc = *(npc.pc);
       npc.last_inst = *(npc.inst);
     }
