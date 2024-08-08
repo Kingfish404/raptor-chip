@@ -26,7 +26,6 @@ static const uint32_t img[] = {
 static const uint32_t img_char_test[] = {
     0x00000117, // 80000000: auipc sp,0x0
     0x0040016f, // 80000008: jal sp, 0x4
-    0x00100073, // 80000014: ebreak
     0x00000117, // 80000004: auipc sp,0x0
     0x00012483, // 80000028: lw	s1,0(sp)
     0x100007b7, // 80000000: lui a5, 0x10000
@@ -35,6 +34,7 @@ static const uint32_t img_char_test[] = {
     0x100007b7, // 80000000: lui a5, 0x10000
     0x00000117, // 80000008: auipc sp,0x0
     0x00a00713, // 8000000c: addi a4, zero, 0x0a
+    0x00100073, // 80000014: ebreak
     0x00100073, // 80000014: ebreak
     0x00100073, // 80000014: ebreak
 };
