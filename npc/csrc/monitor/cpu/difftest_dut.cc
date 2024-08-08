@@ -144,7 +144,6 @@ static void checkmem(uint8_t *ref, uint8_t *dut, size_t n)
 
 void difftest_step(vaddr_t pc)
 {
-  Log("npc step at pc = " FMT_WORD_NO_PREFIX, pc);
   NPCState ref_r;
 
   if (skip_dut_nr_inst > 0)
@@ -163,6 +162,7 @@ void difftest_step(vaddr_t pc)
 
   ref_difftest_exec(1);
   ref_difftest_regcpy(&ref_r, DIFFTEST_TO_DUT);
+  Log("npc step at pc = " FMT_WORD_NO_PREFIX " ref pc = " FMT_WORD_NO_PREFIX, pc, *(ref_r.pc));
   checkregs(&ref_r, pc);
 
 #ifdef CONFIG_MEM_DIFFTEST
