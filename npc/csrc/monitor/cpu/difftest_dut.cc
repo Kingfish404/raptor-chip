@@ -15,7 +15,7 @@ void (*ref_difftest_raise_intr)(uint64_t NO) = NULL;
 
 static bool is_skip_ref = false;
 static bool should_diff_mem = false;
-static int skip_dut_nr_inst = 0;
+static int skip_dut_nr_inst = 1;
 
 void difftest_should_diff_mem()
 {
