@@ -15,7 +15,7 @@ module ysyx_IFU (
     output [DATA_W-1:0] inst_o,
     output [DATA_W-1:0] pc_o,
 
-    input  pc_valid,
+    input  pc_valid, pc_skip,
     input  prev_valid,
     next_ready,
     output valid_o,
@@ -110,6 +110,9 @@ module ysyx_IFU (
           if (is_branch & pc_valid) begin
             branch_stall <= 0;
             pc_ifu <= npc;
+          end else if (pc_skip) begin
+            branch_stall <= 0;
+            pc_ifu <= pc_ifu + 4;
           end
           // if (is_branch & pc_valid) begin
           //   branch_stall <= 0;
