@@ -173,7 +173,7 @@ module ysyx_exu (
         `ysyx_OP_JAL, `ysyx_OP_JALR: begin use_exu_npc <= 1; npc_wdata_o <= addr_data; end
         `ysyx_OP_B_TYPE: begin
           // $display("reg_wdata: %h, npc_wdata: %h, npc: %h", reg_wdata, npc_wdata, npc);
-          $display("(~|reg_wdata): %h, (~|reg_wdata): %h", reg_wdata, (~reg_wdata));
+          $display("(~|reg_wdata): %h, (~|reg_wdata): %h", reg_wdata, (|reg_wdata));
           branch_retire_o <= 1;
           case (alu_op_exu)
             `ysyx_ALU_OP_SUB:  begin use_exu_npc <=(~|reg_wdata); end
