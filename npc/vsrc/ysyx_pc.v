@@ -24,8 +24,8 @@ module ysyx_pc (
       `ysyx_DPI_C_npc_difftest_skip_ref
     end else if (prev_valid) begin
       lpc <= pc;
+      valid_o <= 1;
       if (use_exu_npc) begin
-        valid_o <= 1;
         pc <= npc_wdata;
       end else begin
         pc <= npc;
