@@ -9,5 +9,4 @@ _start:
   add	sp,sp,-12
   sw	ra,8(sp)
   mv a0, zero
-  ebreak
   jal _first_stage_bootloader
