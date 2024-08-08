@@ -28,7 +28,7 @@ static const uint32_t img_char_test[] = {
     0x0080016f, // 80000004: jal sp, 0x8
     0x04100713, // 80000008: addi a4, zero, 0x41
     0x04100713, // 8000000c: addi a4, zero, 0x41
-    0xfe0518e3,
+    // 0xfe0518e3, //         : bne a0, x0, -16
     0x100007b7, // 80000010: lui a5, 0x10000
     0x00000117, // 80000014: auipc sp,0x0
     0x00012483, // 80000018: lw	s1,0(sp)
