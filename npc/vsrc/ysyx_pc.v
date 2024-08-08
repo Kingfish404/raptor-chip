@@ -15,8 +15,8 @@ module ysyx_pc (
   parameter integer DATA_W = `ysyx_W_WIDTH;
   wire [DATA_W-1:0] npc = pc + 4;
   reg [DATA_W-1:0] pc, lpc;
-  assign npc_o = npc;
-  assign pc_o  = pc;
+  assign npc_o = pc;
+  // assign pc_o  = pc;
 
   always @(posedge clk) begin
     if (rst) begin
