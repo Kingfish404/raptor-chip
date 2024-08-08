@@ -289,7 +289,6 @@ void cpu_exec(uint64_t n)
     {
       break;
     }
-    total_cycle++;
     // Simulate the performance monitor unit
     perf_sample_per_cycle();
     cur_inst_cycle++;
