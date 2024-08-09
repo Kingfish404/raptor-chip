@@ -155,7 +155,7 @@ module ysyx (
   ysyx_reg #(.REG_ADDR_W(REG_ADDR_W), .DATA_W(DATA_W)) regs(
     .clk(clock), .rst(reset),
 
-    .idu_valid(idu_valid), .rd(rd),
+    .idu_valid(idu_valid & exu_ready), .rd(rd),
 
     .reg_write_en(wbu_valid),
     .waddr(rd_wbu), .wdata(reg_wdata_wbu),
