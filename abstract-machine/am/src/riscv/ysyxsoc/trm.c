@@ -117,6 +117,7 @@ __attribute__((section(".second_boot"))) void _second_stage_bootloader()
     memcpy(_data_start, _data_load_start, (size_t)data_size);
   }
   // ssb_end_time = *((uint32_t *)RTC_ADDR);
+  asm volatile("mv a0, zero\nebreak");
   _trm_init();
 }
 
@@ -134,7 +135,6 @@ void _trm_init()
   // size_t ready_time = *((uint32_t *)RTC_ADDR);
   // printf("[%d|%d] trm init, mvendorid: 0x%lx, marchid: %ld\n", ready_time, ready_time - ssb_end_time, mvendorid, marchid);
 
-  asm volatile("mv a0, zero\nebreak");
   int ret = main(mainargs);
   halt(ret);
 }
