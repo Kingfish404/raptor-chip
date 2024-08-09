@@ -137,7 +137,11 @@ module ysyx_BUS_ARBITER(
               end
             LS_AP:
               begin
-                state <= LS_A;
+                if (lsu_arvalid | lsu_awvalid) begin
+                  state <= LS_A;
+                end else begin
+                  state <= IF_A;
+                end
               end
             LS_A:
               begin
