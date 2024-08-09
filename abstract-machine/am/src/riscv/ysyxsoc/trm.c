@@ -136,5 +136,7 @@ void _trm_init()
 
   int ret = main(mainargs);
   asm volatile("mv a0, zero\nebreak");
+  asm volatile("mv a0, zero\nebreak");
+  asm volatile("mv a0, zero\nebreak");
   halt(ret);
 }
