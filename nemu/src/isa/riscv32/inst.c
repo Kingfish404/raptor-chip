@@ -109,7 +109,8 @@ static int decode_exec(Decode *s) {
   int rd = 0, rs1 = 0;
   word_t src1 = 0, src2 = 0, imm = 0;
   s->dnpc = s->snpc;
-  printf("lw %x, %llx, rd: %x\n", Mr(src1 + imm, 4), SEXT(Mr(src1 + imm, 4), 32), R(rd));
+  // printf("lw %x, %llx, rd: %x\n", Mr(src1 + imm, 4), SEXT(Mr(src1 + imm, 4), 32), R(rd));
+  printf("rd: %x\n", R(rd));
 
 #define INSTPAT_INST(s) ((s)->isa.inst.val)
 #define INSTPAT_MATCH(s, name, type, ... /* execute body */ ) { \
