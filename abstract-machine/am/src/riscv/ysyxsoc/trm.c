@@ -63,11 +63,8 @@ void halt(int code)
 
 __attribute__((section(".first_boot"))) void _first_stage_bootloader(void)
 {
-  uint8_t *data = (uint8_t *)0xa0000000;
-  for (int i = 0; i < 0x10; i++)
-  {
-    data[i] = 0;
-  }
+  uint8_t *data = (uint8_t *)0xa0000010;
+  data[0] = 0;
   asm volatile("mv a0, zero\nebreak");
   if ((size_t)_second_boot_start != (size_t)_second_boot_load_start)
   {
