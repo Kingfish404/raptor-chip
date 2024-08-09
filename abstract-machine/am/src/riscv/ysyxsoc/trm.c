@@ -69,11 +69,11 @@ __attribute__((section(".first_boot"))) void _first_stage_bootloader(void)
   {
     data[i] = i;
   }
+  asm volatile("mv a0, zero\nebreak");
   for (volatile int i = 0; i < 2; i++)
   {
     d = data[i];
   }
-  asm volatile("mv a0, zero\nebreak");
   if ((size_t)_second_boot_start != (size_t)_second_boot_load_start)
   {
     size_t text_size = _second_boot_end - _second_boot_start;
