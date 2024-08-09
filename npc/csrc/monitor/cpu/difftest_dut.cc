@@ -166,7 +166,7 @@ void difftest_step(vaddr_t pc)
   checkregs(&ref_r, pc);
 
 #ifdef CONFIG_MEM_DIFFTEST
-  if (should_diff_mem)
+  // if (should_diff_mem)
   {
     ref_difftest_memcpy(MBASE, pmem_ref, MSIZE, DIFFTEST_TO_DUT);
     checkmem(pmem_ref, guest_to_host(MBASE), MSIZE);
