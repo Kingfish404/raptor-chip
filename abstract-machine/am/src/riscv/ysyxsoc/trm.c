@@ -83,7 +83,6 @@ __attribute__((section(".first_boot"))) void _first_stage_bootloader(void)
       _second_boot_start[i] = _second_boot_load_start[i];
     }
   }
-  asm volatile("mv a0, zero\nebreak");
   _second_stage_bootloader();
 }
 
@@ -117,6 +116,7 @@ __attribute__((section(".second_boot"))) void _second_stage_bootloader()
     memcpy(_data_start, _data_load_start, (size_t)data_size);
   }
   ssb_end_time = *((uint32_t *)RTC_ADDR);
+  asm volatile("mv a0, zero\nebreak");
   _trm_init();
 }
 
