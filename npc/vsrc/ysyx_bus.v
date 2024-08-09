@@ -123,7 +123,16 @@ module ysyx_BUS_ARBITER(
                 // else
                   if (io_master_rvalid)
                     begin
-                      state <= IF_A;
+                      if (lsu_arvalid | lsu_awvalid)
+                        begin
+                          state <= LS_A;
+                          awrite_done <= 0;
+                          write_done <= 0;
+                        end
+                      else
+                        begin
+                          state <= IF_A;
+                        end
                     end
               end
             LS_A:
