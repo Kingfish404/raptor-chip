@@ -63,7 +63,7 @@ void halt(int code)
 
 __attribute__((section(".first_boot"))) void _first_stage_bootloader(void)
 {
-  volatile uint32_t *data = (uint8_t *)0xa0000010;
+  volatile uint32_t *data = (uint8_t *)0x80000010;
   volatile uint32_t d = 1;
   for (volatile int i = 0; i < 2; i++)
   {
