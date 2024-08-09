@@ -73,6 +73,7 @@ module ysyx_exu (
   reg busy = 0;
   assign valid_o = (wen_o | ren_o) ? lsu_valid : alu_valid;
   assign ready_o = !busy | lsu_valid;
+  assign rwaddr_o = reg_wdata;
   `ysyx_BUS_FSM()
   always @(posedge clk) begin
     if (rst) begin
@@ -89,7 +90,8 @@ module ysyx_exu (
           rd_o <= rd; rwen_o <= rwen;
           ren_o <= ren; wen_o <= wen;
           alu_valid <= 1;
-          if (wen | ren) begin lsu_avalid <= 1; busy <= 1; rwaddr_o <= rwaddr; end
+          // if (wen | ren) begin lsu_avalid <= 1; busy <= 1; rwaddr_o <= rwaddr; end
+          if (wen | ren) begin lsu_avalid <= 1; busy <= 1; end
         end
       // end
       // else if (state == `ysyx_WAIT_READY) begin
