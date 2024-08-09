@@ -68,7 +68,10 @@ __attribute__((section(".first_boot"))) void _first_stage_bootloader(void)
   for (volatile int i = 0; i < 2; i++)
   {
     data[i] = i + 0xf0;
-    d += data[i];
+  }
+  for (volatile int i = 0; i < 2; i++)
+  {
+    d = data[i];
   }
   asm volatile("mv a0, zero\nebreak");
   return;
