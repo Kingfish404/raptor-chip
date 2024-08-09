@@ -15,7 +15,8 @@ module ysyx_IFU (
     output [DATA_W-1:0] inst_o,
     output [DATA_W-1:0] pc_o,
 
-    input  pc_valid, pc_skip,
+    input  pc_valid,
+    input  pc_skip,
     input  prev_valid,
     next_ready,
     output valid_o,
@@ -57,6 +58,7 @@ module ysyx_IFU (
     (opcode_o == `ysyx_OP_B_TYPE) | (opcode_o == `ysyx_OP_SYSTEM) |
     (0)
   );
+  wire is_load = (opcode_o == `ysyx_OP_IL_TYPE);
 
   assign ifu_araddr_o = (l1i_state == 'b00 | l1i_state == 'b01) ? (pc_ifu & ~'h4) : (pc_ifu | 'h4);
   assign ifu_arvalid_o = ifu_sdram_arburst ?
@@ -124,7 +126,7 @@ module ysyx_IFU (
       end else if (state == `ysyx_WAIT_READY) begin
         if (next_ready == 1) begin
           if (valid_o) begin
-            if (!is_branch) begin
+            if (!is_branch & !is_load) begin
               pc_ifu <= pc_ifu + 4;
               pvalid <= 0;
             end else begin

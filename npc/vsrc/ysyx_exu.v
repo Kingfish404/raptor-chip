@@ -183,6 +183,9 @@ module ysyx_exu (
           default:           begin ; end
         endcase
       end
+      `ysyx_OP_IL_TYPE: begin
+        branch_retire_o = 1;
+      end
       default: begin use_exu_npc = 0; end
     endcase
   end
