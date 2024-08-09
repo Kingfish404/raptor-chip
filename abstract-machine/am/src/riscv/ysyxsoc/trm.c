@@ -64,8 +64,9 @@ void halt(int code)
 __attribute__((section(".first_boot"))) void _first_stage_bootloader(void)
 {
   asm volatile(
-    "add	sp,sp,-8\n"
-  );
+      "add	sp,sp,-8\n"
+      "sb   ra,4(sp)\n"
+      "lw   ra,0(sp)\n");
   volatile uint8_t *data = 0x0f001ff8;
   volatile uint32_t d = 1;
   for (volatile int i = 0; i < 2; i++)
