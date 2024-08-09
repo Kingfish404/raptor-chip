@@ -66,7 +66,7 @@ __attribute__((section(".first_boot"))) void _first_stage_bootloader(void)
   uint8_t *data = (uint8_t *)0xa0000010;
   data[0] = 0;
   data[1] = 1;
-  volatile uint32_t d;
+  volatile uint32_t d = 1;
   d = data[0];
   d = data[1];
   asm volatile("mv a0, zero\nebreak");
