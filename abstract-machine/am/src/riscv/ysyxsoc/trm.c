@@ -134,9 +134,7 @@ void _trm_init()
   // size_t ready_time = *((uint32_t *)RTC_ADDR);
   // printf("[%d|%d] trm init, mvendorid: 0x%lx, marchid: %ld\n", ready_time, ready_time - ssb_end_time, mvendorid, marchid);
 
+  asm volatile("mv a0, zero\nebreak");
   int ret = main(mainargs);
-  asm volatile("mv a0, zero\nebreak");
-  asm volatile("mv a0, zero\nebreak");
-  asm volatile("mv a0, zero\nebreak");
   halt(ret);
 }
