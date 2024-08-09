@@ -69,11 +69,11 @@ __attribute__((section(".first_boot"))) void _first_stage_bootloader(void)
   volatile uint32_t d = 1;
   d = data[0];
   d = data[1];
-  for (int i = 0; i < 4; i++)
+  for (volatile int i = 0; i < 4; i++)
   {
     data[i] = i;
   }
-  for (int i = 0; i < 4; i++)
+  for (volatile int i = 0; i < 4; i++)
   {
     d = data[i];
   }
