@@ -41,11 +41,11 @@ module ysyx_reg (
   generate
     for (i = 1; i < REG_NUM; i = i + 1) begin
       always @(posedge clk) begin
-        rf[0] <= 0;
         if (rst) begin
           rf[i] <= 0;
         end else if (reg_write_en) begin
           rf[waddr[3:0]] <= wdata;
+          rf[0] <= 0;
         end
       end
     end
