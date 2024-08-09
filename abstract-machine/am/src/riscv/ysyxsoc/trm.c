@@ -91,7 +91,6 @@ size_t ssb_start_time, ssb_end_time;
 __attribute__((section(".second_boot"))) void _second_stage_bootloader()
 {
   // ssb_start_time = *((uint32_t *)RTC_ADDR);
-  asm volatile("mv a0, zero\nebreak");
   if ((size_t)_text_start != (size_t)_text_load_start)
   {
     size_t text_size = _text_end - _text_start;
