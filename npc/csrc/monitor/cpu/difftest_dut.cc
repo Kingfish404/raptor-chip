@@ -169,6 +169,7 @@ void difftest_step(vaddr_t pc)
   // if (should_diff_mem)
   {
     ref_difftest_memcpy(MBASE, pmem_ref, MSIZE, DIFFTEST_TO_DUT);
+    printf("pmem_ref[1ffc]: %x\n", pmem_ref[0x1ffc]);
     checkmem(pmem_ref, guest_to_host(MBASE), MSIZE);
     should_diff_mem = false;
   }
