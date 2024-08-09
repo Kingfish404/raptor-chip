@@ -172,5 +172,6 @@ void difftest_step(vaddr_t pc)
     checkmem(pmem_ref, guest_to_host(MBASE), MSIZE);
     should_diff_mem = false;
   }
+  vaddr_show(0x80001ff0, 64);
 #endif
 }
