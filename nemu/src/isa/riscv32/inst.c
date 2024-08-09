@@ -251,7 +251,9 @@ static int decode_exec(Decode *s) {
     }
     ftracehead = (ftracehead + 1) % MAX_FTRACE_SIZE;
   }
-  printf("rd: %x, d: %x\n", R(rd), rd);
+  if (rd <=16){
+    printf("rd: %x, d: %x\n", R(rd), rd);
+  }
   return 0;
 }
 
