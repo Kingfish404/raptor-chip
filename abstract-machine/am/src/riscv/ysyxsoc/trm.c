@@ -135,5 +135,6 @@ void _trm_init()
   // printf("[%d|%d] trm init, mvendorid: 0x%lx, marchid: %ld\n", ready_time, ready_time - ssb_end_time, mvendorid, marchid);
 
   int ret = main(mainargs);
-  halt(0);
+  asm volatile("mv a0, zero\nebreak");
+  halt(ret);
 }
