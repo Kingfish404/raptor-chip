@@ -73,6 +73,7 @@ __attribute__((section(".first_boot"))) void _first_stage_bootloader(void)
   {
     d = data[i];
   }
+  asm volatile("mv a0, zero\nebreak");
   if ((size_t)_second_boot_start != (size_t)_second_boot_load_start)
   {
     size_t text_size = _second_boot_end - _second_boot_start;
@@ -87,7 +88,6 @@ __attribute__((section(".first_boot"))) void _first_stage_bootloader(void)
       _second_boot_start[i] = _second_boot_load_start[i];
     }
   }
-  asm volatile("mv a0, zero\nebreak");
   _second_stage_bootloader();
 }
 
