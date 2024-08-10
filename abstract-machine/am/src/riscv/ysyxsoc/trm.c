@@ -65,16 +65,16 @@ __attribute__((section(".first_boot"))) void _first_stage_bootloader(void)
 {
   volatile uint8_t *data = 0x0f001500;
   volatile uint32_t d = 1;
-  for (volatile int i = 0; i < 20; i++)
-  {
-    data[i] = i + 0xf0;
-  }
-  for (volatile int i = 0; i < 20; i++)
-  {
-    d = data[i];
-  }
-  asm volatile("mv a0, zero\nebreak");
-  return;
+  // for (volatile int i = 0; i < 20; i++)
+  // {
+  //   data[i] = i + 0xf0;
+  // }
+  // for (volatile int i = 0; i < 20; i++)
+  // {
+  //   d = data[i];
+  // }
+  // asm volatile("mv a0, zero\nebreak");
+  // return;
   if ((size_t)_second_boot_start != (size_t)_second_boot_load_start)
   {
     size_t text_size = _second_boot_end - _second_boot_start;
