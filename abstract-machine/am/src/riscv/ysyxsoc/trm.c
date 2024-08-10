@@ -89,7 +89,7 @@ __attribute__((section(".first_boot"))) void _first_stage_bootloader(void)
       _second_boot_start[i] = _second_boot_load_start[i];
     }
   }
-  // _second_stage_bootloader();
+  _second_stage_bootloader();
 }
 
 size_t ssb_start_time, ssb_end_time;
@@ -98,7 +98,7 @@ __attribute__((section(".second_boot"))) void _second_stage_bootloader()
 {
 
   asm volatile("mv a0, zero\nebreak");
-  // return;
+  return;
   // ssb_start_time = *((uint32_t *)RTC_ADDR);
   if ((size_t)_text_start != (size_t)_text_load_start)
   {
