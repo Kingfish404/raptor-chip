@@ -90,6 +90,7 @@ __attribute__((section(".first_boot"))) void _first_stage_bootloader(void)
     }
   }
   asm volatile("mv a0, zero\nebreak");
+  return;
   _second_stage_bootloader();
 }
 
