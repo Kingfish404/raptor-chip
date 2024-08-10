@@ -317,6 +317,7 @@ void cpu_exec(uint64_t n)
 
 #ifdef CONFIG_DIFFTEST
       difftest_step(*npc.pc);
+      printf("at npc =====\t");
       reg_display(GPR_SIZE);
 #endif
       prev_pc = *(npc.pc);
