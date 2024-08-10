@@ -252,9 +252,9 @@ static int decode_exec(Decode *s) {
     ftracehead = (ftracehead + 1) % MAX_FTRACE_SIZE;
   }
   if (rd <=16){
-    printf("rd: %x, d: %x, pc: %x\n", R(rd), rd, s->pc);
+    printf("rd: %x, d: %x, pc: %x, inst: %x\n", R(rd), rd, s->pc, s->isa.inst.val);
   } else {
-    printf("rd: %x, pc: %x\n", rd, s->pc);
+    printf("rd: %x, pc: %x, inst: %x\n", rd, s->pc, s->isa.inst.val);
   }
   isa_reg_display();
   return 0;
