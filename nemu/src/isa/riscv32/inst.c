@@ -253,7 +253,10 @@ static int decode_exec(Decode *s) {
   }
   if (rd <=16){
     printf("rd: %x, d: %x, pc: %x\n", R(rd), rd, s->pc);
+  } else {
+    printf("rd: %x, pc: %x\n", rd, s->pc);
   }
+  isa_reg_display();
   return 0;
 }
 
