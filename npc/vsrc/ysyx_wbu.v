@@ -52,9 +52,6 @@ module ysyx_wbu (
           end
         // end
       end
-      if (prev_valid == 0) begin
-        valid_o <= 0;
-      end
     end
   end
 
