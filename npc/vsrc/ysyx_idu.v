@@ -38,7 +38,7 @@ module ysyx_IDU (
   wire conflict = (rf_table[rs1[4-1:0]] == 1) | (rf_table[rs2[4-1:0]] == 1);
   assign opcode_o = inst_idu[6:0];
   assign valid_o = valid & !conflict;
-  assign ready_o = ready & !conflict;
+  assign ready_o = ready;
 
   reg state;
   `ysyx_BUS_FSM()
@@ -52,7 +52,7 @@ module ysyx_IDU (
         if (prev_valid == 1) begin valid <= 1; ready <= 1; end
       end
       else if (state == `ysyx_WAIT_READY) begin
-        if (next_ready == 1) begin
+        if (next_ready == 1 & !conflict) begin
           ready <= 1;
           if (prev_valid == 0) begin valid <= 0; end
         end
