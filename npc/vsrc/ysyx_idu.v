@@ -52,8 +52,7 @@ module ysyx_IDU (
         if (prev_valid == 1) begin
           valid <= 1;
           if (conflict) begin
-              ready <= 0;
-            end
+            ready <= 0;
           end
         end
       end
