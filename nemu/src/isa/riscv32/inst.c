@@ -251,7 +251,7 @@ static int decode_exec(Decode *s) {
     }
     ftracehead = (ftracehead + 1) % MAX_FTRACE_SIZE;
   }
-  if (rd <=16){
+  if (rd <=15){
     printf("rd: %x, d: %x, pc: %x, inst: %x\n", R(rd), rd, s->pc, s->isa.inst.val);
   } else {
     printf("rd: %x, pc: %x, inst: %x\n", rd, s->pc, s->isa.inst.val);
