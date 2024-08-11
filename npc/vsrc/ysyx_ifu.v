@@ -51,7 +51,7 @@ module ysyx_IFU (
   wire l1i_cache_hit = (
          1 & l1i_state == 'b00 &
          l1i_valid[addr_idx] == 1'b1) & (l1i_tag[addr_idx] == addr_tag);
-  wire ifu_sdram_arburst = `ysyx_I_SDRAM_ARBURST & (pc_ifu >= 'ha0000000) & (pc_ifu <= 'hc0000000);
+  wire ifu_sdram_arburst = 0 & `ysyx_I_SDRAM_ARBURST & (pc_ifu >= 'ha0000000) & (pc_ifu <= 'hc0000000);
   wire [6:0] opcode_o = inst_o[6:0];
   wire is_branch = (
     (opcode_o == `ysyx_OP_JAL) | (opcode_o == `ysyx_OP_JALR) |
