@@ -256,7 +256,7 @@ static int decode_exec(Decode *s) {
   // } else {
   //   printf("rd: %x, pc: %x, inst: %x\n", rd, s->pc, s->isa.inst.val);
   // }
-  // isa_reg_display();
+  isa_reg_display();
   return 0;
 }
 
