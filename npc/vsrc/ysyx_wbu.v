@@ -25,7 +25,7 @@ module ysyx_wbu (
   parameter integer BIT_W = `ysyx_W_WIDTH;
 
   reg state;
-  reg [31:0] inst_idu;
+  reg [31:0] inst_wbu;
   `ysyx_BUS_FSM()
   always @(posedge clk) begin
     if (rst) begin
@@ -44,7 +44,7 @@ module ysyx_wbu (
       if (state == `ysyx_IDLE) begin
         if (prev_valid == 1) begin
           valid_o  <= 1;
-          inst_idu <= inst;
+          inst_wbu <= inst;
           // ready_o <= 0;
         end
       end else if (state == `ysyx_WAIT_READY) begin
