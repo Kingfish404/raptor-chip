@@ -154,6 +154,7 @@ void difftest_step(vaddr_t pc)
 
   if (is_skip_ref)
   {
+    printf(FMT_RED("[ERROR]") " skip ref\n");
     // if (is_skip_ref == 1)
     {
       ref_difftest_regcpy(&npc, DIFFTEST_TO_REF);
