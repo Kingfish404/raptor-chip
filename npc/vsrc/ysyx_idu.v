@@ -59,7 +59,9 @@ module ysyx_IDU (
       else if (state == `ysyx_WAIT_READY) begin
         if (next_ready == 1) begin
           ready <= 1;
-          if (prev_valid == 0) begin valid <= 0; end
+          if (prev_valid & ready_o & next_ready) begin
+          end else begin valid <= 0; end
+          // if (prev_valid == 0) begin valid <= 0; end
         end
       end
     end
