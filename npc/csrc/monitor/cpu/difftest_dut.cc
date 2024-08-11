@@ -7,6 +7,7 @@ extern NPCState npc;
 extern char *regs[];
 
 uint8_t pmem_ref[MSIZE] = {};
+uint8_t sdram_ref[SDRAM_SIZE] = {};
 
 void (*ref_difftest_memcpy)(paddr_t addr, void *buf, size_t n, bool direction) = NULL;
 void (*ref_difftest_regcpy)(void *dut, bool direction) = NULL;
@@ -177,6 +178,8 @@ void difftest_step(vaddr_t pc)
     {
       ref_difftest_memcpy(MBASE, pmem_ref, MSIZE, DIFFTEST_TO_DUT);
       checkmem(pmem_ref, guest_to_host(MBASE), MSIZE);
+      ref_difftest_memcpy(SDRAM_BASE, sdram_ref, SDRAM_SIZE, DIFFTEST_TO_DUT);
+      checkmem(sdram_ref, guest_to_host(SDRAM_BASE), SDRAM_SIZE);
     }
     should_diff_mem = 0;
   }
