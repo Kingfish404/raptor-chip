@@ -42,7 +42,7 @@ paddr_t host_to_guest(uint8_t *haddr) {
 }
 
 uint8_t* guest_to_sdram(paddr_t paddr) { 
-  if (in_sdram(paddr)) return sram + paddr - CONFIG_SRAM_BASE;
+  if (in_sdram(paddr)) return sram + paddr - CONFIG_SDRAM_BASE;
   Assert(0, "invalid guest physical address = " FMT_PADDR, paddr);
 }
 
