@@ -36,6 +36,7 @@ typedef struct
   // for itrace
   uint32_t *inst;
   uint32_t *cpc;
+  uint32_t last_inst;
 
   // for soc
   uint8_t *soc_sram;
