@@ -99,6 +99,7 @@ module ysyx (
   wire ifu_valid, ifu_ready;
 
   // IDU output
+  wire [31:0] inst_idu;
   wire [DATA_W-1:0] op1, op2, imm, op_j, pc_idu, rwaddr_idu;
   wire [4:0] rs1, rs2, rd;
   wire [3:0] alu_op;
@@ -118,6 +119,7 @@ module ysyx (
   wire lsu_wvalid;
 
   // EXU output
+  wire [31:0] inst_exu;
   wire [DATA_W-1:0] reg_wdata;
   wire [DATA_W-1:0] npc_wdata;
   wire use_exu_npc, branch_retire, ebreak;
@@ -234,6 +236,7 @@ module ysyx (
     .rs1_o(rs1), .rs2_o(rs2), .rd_o(rd),
     .alu_op_o(alu_op),
     .opcode_o(opcode), .pc_o(pc_idu),
+    .inst_o(inst_idu),
 
     .rf_table(rf_table),
 
@@ -248,6 +251,7 @@ module ysyx (
     .prev_valid(idu_valid), .next_ready(wbu_ready),
     .valid_o(exu_valid), .ready_o(exu_ready),
 
+    .inst(inst_idu),
     .ren(ren), .wen(wen), .rwen(rwen),
     .rd(rd), .imm(imm),
     .op1(op1), .op2(op2), .op_j(op_j), .rwaddr(rwaddr_idu),
@@ -258,6 +262,7 @@ module ysyx (
     .use_exu_npc_o(use_exu_npc), .branch_retire_o(branch_retire),
     .ebreak_o(ebreak),
     .rd_o(rd_exu),
+    .inst_o(inst_exu),
 
     .rwen_o(rwen_exu),
 
@@ -294,6 +299,8 @@ module ysyx (
 
   ysyx_wbu wbu(
     .clk(clock), .rst(reset),
+
+    .inst(inst_exu),
 
     .reg_wdata(reg_wdata),
     .rd(rd_exu),

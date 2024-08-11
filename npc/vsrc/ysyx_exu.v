@@ -13,6 +13,9 @@ module ysyx_exu (
   input [BIT_W-1:0] lsu_rdata,
   input lsu_exu_rvalid, lsu_exu_wready,
 
+  input [31:0] inst,
+  input reg [31:0] inst_o,
+
   input ren, wen, rwen,
   input [4:0] rd,
   input [BIT_W-1:0] imm,
@@ -81,6 +84,7 @@ module ysyx_exu (
     else begin
       // if (state == `ysyx_IDLE) begin
         if (prev_valid & ready_o) begin
+          inst_o <= inst;
           imm_exu <= imm; pc_exu <= pc;
           src1 <= op1; src2 <= op2;
           alu_op_exu <= alu_op; opcode_exu <= opcode;

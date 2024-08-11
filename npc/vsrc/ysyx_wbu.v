@@ -5,6 +5,7 @@ module ysyx_wbu (
     input clk,
     input rst,
 
+    input [31:0] inst,
     input [BIT_W-1:0] reg_wdata,
     input [4:0] rd,
     input [BIT_W-1:0] npc_wdata,

@@ -17,6 +17,7 @@ module ysyx_IDU (
   output reg [3:0] alu_op_o,
   output [6:0] opcode_o,
   output reg [BIT_W-1:0] pc_o,
+  output [31:0] inst_o,
 
   input [16-1:0] rf_table,
 
@@ -39,6 +40,7 @@ module ysyx_IDU (
   assign opcode_o = inst_idu[6:0];
   assign valid_o = valid & !conflict;
   assign ready_o = ready & !conflict & next_ready;
+  assign inst_o = inst_idu;
 
   reg state;
   `ysyx_BUS_FSM()
