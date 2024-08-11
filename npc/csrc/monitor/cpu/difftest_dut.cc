@@ -80,7 +80,7 @@ void init_difftest(char *ref_so_file, long img_size, int port)
 static void checkregs(NPCState *ref, vaddr_t pc)
 {
   bool is_same = true;
-  if ((vaddr_t)(*(ref->pc)) != pc)
+  if ((vaddr_t)(*(ref->cpc)) != pc)
   {
     printf(FMT_RED("[ERROR]") " pc is different! ref = " FMT_GREEN(FMT_WORD) ", dut = " FMT_RED(FMT_WORD) "\n",
            (vaddr_t)(*(ref->pc)), pc);
