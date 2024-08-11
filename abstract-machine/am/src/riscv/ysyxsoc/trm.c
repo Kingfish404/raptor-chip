@@ -98,6 +98,9 @@ __attribute__((section(".second_boot"))) void _second_stage_bootloader()
 {
   asm volatile("mv a0, zero\nebreak");
   asm volatile("mv a0, zero\nebreak");
+  asm volatile("mv a0, zero\nebreak");
+  asm volatile("mv a0, zero\nebreak");
+  asm volatile("mv a0, zero\nebreak");
   // asm volatile("mv a0, zero\nebreak");
   // asm volatile("mv a0, zero\nebreak");
   return;
