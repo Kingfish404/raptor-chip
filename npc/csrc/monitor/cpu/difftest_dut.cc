@@ -154,12 +154,12 @@ void difftest_step(vaddr_t pc)
 
   if (is_skip_ref)
   {
-    if (is_skip_ref == 1)
+    // if (is_skip_ref == 1)
     {
       ref_difftest_regcpy(&npc, DIFFTEST_TO_REF);
       ref_difftest_regcpy(&ref_r, DIFFTEST_TO_DUT);
     }
-    is_skip_ref--;
+    is_skip_ref = 0;
     return;
   }
 
@@ -170,12 +170,12 @@ void difftest_step(vaddr_t pc)
 #ifdef CONFIG_MEM_DIFFTEST
   if (should_diff_mem)
   {
-    if (should_diff_mem == 1)
+    // if (should_diff_mem == 1)
     {
       ref_difftest_memcpy(MBASE, pmem_ref, MSIZE, DIFFTEST_TO_DUT);
       checkmem(pmem_ref, guest_to_host(MBASE), MSIZE);
     }
-    should_diff_mem--;
+    should_diff_mem = 0;
   }
 #endif
 }

@@ -159,8 +159,8 @@ module ysyx (
 
     .idu_valid(idu_valid & exu_ready), .rd(rd),
 
-    .reg_write_en(wbu_valid),
-    .waddr(rd_wbu), .wdata(reg_wdata_wbu),
+    .reg_write_en(exu_valid),
+    .waddr(rd_exu), .wdata(npc_wdata),
 
     .s1addr(rs1), .s2addr(rs2),
     .rf_table_o(rf_table),

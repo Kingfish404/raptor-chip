@@ -5,8 +5,8 @@ module ysyx_wbu (
     input clk,
     input rst,
 
-    input [31:0] inst,
     input [31:0] pc,
+    input [31:0] inst,
     input [BIT_W-1:0] reg_wdata,
     input [4:0] rd,
     input [BIT_W-1:0] npc_wdata,
@@ -38,8 +38,8 @@ module ysyx_wbu (
         rd_o <= rd;
         npc_wdata_o <= npc_wdata;
         use_exu_npc_o <= use_exu_npc;
-        inst_wbu <= inst;
         pc_wbu <= pc;
+        inst_wbu <= inst;
         if (ebreak) begin
           `ysyx_DPI_C_npc_exu_ebreak
         end
