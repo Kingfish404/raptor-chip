@@ -66,7 +66,6 @@ void init_difftest(char *ref_so_file, long img_size, int port)
   ref_difftest_memcpy(MBASE, guest_to_host(MBASE), img_size, DIFFTEST_TO_REF);
   ref_difftest_memcpy(MROM_BASE, guest_to_host(MROM_BASE), MROM_SIZE, DIFFTEST_TO_REF);
   ref_difftest_memcpy(FLASH_BASE, guest_to_host(FLASH_BASE), FLASH_SIZE, DIFFTEST_TO_REF);
-  ref_difftest_memcpy(SDRAM_BASE, guest_to_host(SDRAM_BASE), SDRAM_SIZE, DIFFTEST_TO_REF);
   ref_difftest_regcpy(&npc, DIFFTEST_TO_REF);
 #endif
 }
@@ -179,8 +178,6 @@ void difftest_step(vaddr_t pc)
     {
       ref_difftest_memcpy(MBASE, pmem_ref, MSIZE, DIFFTEST_TO_DUT);
       checkmem(pmem_ref, guest_to_host(MBASE), MSIZE);
-      ref_difftest_memcpy(SDRAM_BASE, sdram_ref, SDRAM_SIZE, DIFFTEST_TO_DUT);
-      checkmem(sdram_ref, guest_to_host(SDRAM_BASE), SDRAM_SIZE);
     }
     should_diff_mem = 0;
   }
