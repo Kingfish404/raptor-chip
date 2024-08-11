@@ -49,7 +49,7 @@ module ysyx_IDU (
     else begin
       if (prev_valid & ready_o & next_ready) begin inst_idu <= inst; pc_o <= pc; end
       if (state == `ysyx_IDLE) begin
-        if (prev_valid == 1) begin
+        if (prev_valid & ready_o & next_ready) begin
           valid <= 1;
           if (conflict) begin
             ready <= 0;
