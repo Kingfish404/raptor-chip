@@ -15,6 +15,7 @@ module ysyx_exu (
 
   input [31:0] inst,
   output reg [31:0] inst_o,
+  output [BIT_W-1:0] pc_o,
 
   input ren, wen, rwen,
   input [4:0] rd,
@@ -68,6 +69,7 @@ module ysyx_exu (
   assign addr_data = addr_exu;
   assign alu_op_o = alu_op_exu;
   assign use_exu_npc_o = use_exu_npc & valid_o;
+  assign pc_o = pc_exu;
 
   reg state, alu_valid, lsu_avalid;
   reg valid_once;
