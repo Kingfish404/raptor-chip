@@ -38,7 +38,6 @@ Area heap = RANGE(&_heap_start, PMEM_END);
 #define MAINARGS ""
 #endif
 static const char mainargs[] = MAINARGS;
-size_t ssb_start_time, ssb_end_time;
 
 void init_uart(void)
 {
@@ -80,6 +79,8 @@ __attribute__((section(".first_boot"))) void _first_stage_bootloader(void)
   }
   _second_stage_bootloader();
 }
+
+size_t ssb_start_time, ssb_end_time;
 
 __attribute__((section(".second_boot"))) void _second_stage_bootloader()
 {
