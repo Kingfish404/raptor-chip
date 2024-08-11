@@ -158,7 +158,7 @@ void difftest_step(vaddr_t pc)
     printf("Skip ref at pc = " FMT_WORD "\n", pc);
     {
       ref_difftest_regcpy(&npc, DIFFTEST_TO_REF);
-      // ref_difftest_regcpy(&ref_r, DIFFTEST_TO_DUT);
+      ref_difftest_regcpy(&ref_r, DIFFTEST_TO_DUT);
     }
     is_skip_ref = 0;
     return;
