@@ -65,7 +65,7 @@ module ysyx_exu (
   assign addr_data = addr_exu;
   assign alu_op_o = alu_op_exu;
   assign use_exu_npc_o = use_exu_npc & valid_o;
-  assign addr_exu = op_j + imm;
+  // assign addr_exu = op_j + imm;
 
   reg state, alu_valid, lsu_avalid;
   reg valid_once;
@@ -85,7 +85,7 @@ module ysyx_exu (
           imm_exu <= imm; pc_exu <= pc;
           src1 <= op1; src2 <= op2;
           alu_op_exu <= alu_op; opcode_exu <= opcode;
-          // addr_exu <= op_j + imm;
+          addr_exu <= op_j + imm;
           rd_o <= rd; rwen_o <= rwen;
           ren_o <= ren; wen_o <= wen;
           alu_valid <= 1;
@@ -169,7 +169,7 @@ module ysyx_exu (
           default: begin ; end
         endcase
       end
-      `ysyx_OP_JAL, `ysyx_OP_JALR: begin use_exu_npc = 1; npc_wdata_o = addr_data; end
+      `ysyx_OP_JAL, `ysyx_OP_JALR: begin use_exu_npc = 1; end
       `ysyx_OP_B_TYPE: begin
         // $display("reg_wdata: %h, npc_wdata: %h, npc: %h", reg_wdata, npc_wdata, npc);
         branch_retire_o = 1;
