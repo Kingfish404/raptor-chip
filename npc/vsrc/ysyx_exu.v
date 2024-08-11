@@ -75,7 +75,7 @@ module ysyx_exu (
   reg lsu_valid = 0;
   reg busy = 0;
   assign valid_o = (wen_o | ren_o) ? lsu_valid : alu_valid;
-  assign ready_o = !busy;
+  assign ready_o = !busy | lsu_valid;
   `ysyx_BUS_FSM()
   always @(posedge clk) begin
     if (rst) begin
@@ -103,7 +103,7 @@ module ysyx_exu (
           if (prev_valid == 0) begin alu_valid <= 0; end
         end
       // end
-      if (lsu_valid) begin busy <= 0; end
+      if (lsu_valid & !(wen | ren)) begin busy <= 0; end
       if (wen_o) begin
         if (lsu_exu_wready) begin
           lsu_valid <= 1;
