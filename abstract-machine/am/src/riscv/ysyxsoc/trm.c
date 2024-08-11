@@ -128,6 +128,10 @@ __attribute__((section(".second_boot"))) void _second_stage_bootloader()
   {
     size_t data_size = _data_end - _data_start;
     memcpy(_data_start, _data_load_start, (size_t)data_size);
+    if (memcmp(_data_start, _data_load_start, (size_t)data_size) != 0)
+    {
+      asm volatile("li a0, 1\nebreak");
+    }
   }
   // ssb_end_time = *((uint32_t *)RTC_ADDR);
   asm volatile("mv a0, zero\nebreak");
