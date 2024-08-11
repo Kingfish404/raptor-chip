@@ -97,6 +97,10 @@ __attribute__((section(".second_boot"))) void _second_stage_bootloader()
     // for (size_t i = 0; i < text_size; i++)
     {
       _text_start[i] = _text_load_start[i];
+      if (_text_start[i] != _text_load_start[i])
+      {
+        putch('a');
+      }
     }
   }
   if ((size_t)_rodata_start != (size_t)_rodata_load_start)
