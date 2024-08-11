@@ -111,7 +111,6 @@ __attribute__((section(".second_boot"))) void _second_stage_bootloader()
   }
   asm volatile("mv a0, zero\nebreak");
   // ssb_end_time = *((uint32_t *)RTC_ADDR);
-  return;
   _trm_init();
 }
 
