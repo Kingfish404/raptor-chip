@@ -13,7 +13,7 @@ void (*ref_difftest_regcpy)(void *dut, bool direction) = NULL;
 void (*ref_difftest_exec)(uint64_t n) = NULL;
 void (*ref_difftest_raise_intr)(uint64_t NO) = NULL;
 
-static bool is_skip_ref = false;
+static int is_skip_ref = 0;
 static bool should_diff_mem = false;
 static int skip_dut_nr_inst = 0;
 
@@ -24,7 +24,7 @@ void difftest_should_diff_mem()
 
 void difftest_skip_ref()
 {
-  is_skip_ref = true;
+  is_skip_ref = 2;
 }
 
 void difftest_skip_dut(int nr_ref, int nr_dut)
@@ -157,7 +157,7 @@ void difftest_step(vaddr_t pc)
   {
     ref_difftest_regcpy(&npc, DIFFTEST_TO_REF);
     ref_difftest_regcpy(&ref_r, DIFFTEST_TO_DUT);
-    is_skip_ref = false;
+    is_skip_ref--;
     return;
   }
 
