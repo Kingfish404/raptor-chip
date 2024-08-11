@@ -72,7 +72,6 @@ module ysyx_exu (
   assign pc_o = pc_exu;
 
   reg state, alu_valid, lsu_avalid;
-  reg valid_once;
   reg lsu_valid = 0;
   reg busy = 0;
   assign valid_o = (wen_o | ren_o) ? lsu_valid : alu_valid;
@@ -104,8 +103,7 @@ module ysyx_exu (
           if (prev_valid == 0) begin alu_valid <= 0; end
         end
       // end
-      if (lsu_valid) begin valid_once <= 0; busy <= 0;
-      end else begin valid_once <= 1; end
+      if (lsu_valid) begin busy <= 0; end
       if (wen_o) begin
         if (lsu_exu_wready) begin
           lsu_valid <= 1;
