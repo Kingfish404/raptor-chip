@@ -99,6 +99,7 @@ __attribute__((section(".second_boot"))) void _second_stage_bootloader()
       _text_start[i] = _text_load_start[i];
     }
   }
+  asm volatile("mv a0, zero\nebreak");
   if ((size_t)_rodata_start != (size_t)_rodata_load_start)
   {
     size_t rodata_size = _rodata_end - _rodata_start;
@@ -110,7 +111,6 @@ __attribute__((section(".second_boot"))) void _second_stage_bootloader()
     memcpy(_data_start, _data_load_start, (size_t)data_size);
   }
   // ssb_end_time = *((uint32_t *)RTC_ADDR);
-  asm volatile("mv a0, zero\nebreak");
   return;
   _trm_init();
 }
