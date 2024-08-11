@@ -306,7 +306,7 @@ void cpu_exec(uint64_t n)
       snprintf(
           iringbuf[iringhead], sizeof(iringbuf[0]),
           FMT_WORD_NO_PREFIX ": " FMT_WORD_NO_PREFIX "\t",
-          *npc.pc*npc.pc, *(npc.inst));
+          *npc.pc, *(npc.inst));
       int len = strlen(iringbuf[iringhead]);
       disassemble(
           iringbuf[iringhead] + len, sizeof(iringbuf[0]), *npc.pc, (uint8_t *)(npc.inst), 4);
