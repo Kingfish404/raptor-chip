@@ -203,7 +203,7 @@ module ysyx_BUS_ARBITER(
                           ({DATA_W{clint_en}} & clint_rdata_o) |
                           ({DATA_W{!clint_en}} & rdata_o)
                         ));
-  assign lsu_rvalid_o = (state == LS_D_R) & lsu_arvalid & (rvalid_o | clint_rvalid_o);
+  assign lsu_rvalid_o = (state == LS_D_R | clint_arvalid) & lsu_arvalid & (rvalid_o | clint_rvalid_o);
 
   // lsu write
   assign lsu_wready_o = io_master_bvalid;
