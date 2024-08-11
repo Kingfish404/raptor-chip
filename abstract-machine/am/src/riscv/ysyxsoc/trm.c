@@ -70,19 +70,11 @@ __attribute__((section(".first_boot"))) void _first_stage_bootloader(void)
     for (volatile size_t i = 0; i < text_size_u64_fix; i++)
     {
       ((uint64_t *)_second_boot_start)[i] = ((uint64_t *)_second_boot_load_start)[i];
-      if (((uint64_t *)_second_boot_start)[i] != ((uint64_t *)_second_boot_load_start)[i])
-      {
-        asm volatile("li a0, 1\nebreak");
-      }
     }
     for (size_t i = text_size_u64_fix * 8; i < text_size; i++)
     // for (size_t i = 0; i < text_size; i++)
     {
       _second_boot_start[i] = _second_boot_load_start[i];
-      if (_second_boot_start[i] != _second_boot_load_start[i])
-      {
-        asm volatile("li a0, 1\nebreak");
-      }
     }
   }
   _second_stage_bootloader();
@@ -92,7 +84,7 @@ size_t ssb_start_time, ssb_end_time;
 
 __attribute__((section(".second_boot"))) void _second_stage_bootloader()
 {
-  // ssb_start_time = *((uint32_t *)RTC_ADDR);
+  ssb_start_time = *((uint32_t *)RTC_ADDR);
   if ((size_t)_text_start != (size_t)_text_load_start)
   {
     size_t text_size = _text_end - _text_start;
@@ -100,38 +92,22 @@ __attribute__((section(".second_boot"))) void _second_stage_bootloader()
     for (size_t i = 0; i < text_size_u64_fix; i++)
     {
       ((uint64_t *)_text_start)[i] = ((uint64_t *)_text_load_start)[i];
-      if (((uint64_t *)_text_start)[i] != ((uint64_t *)_text_load_start)[i])
-      {
-        asm volatile("li a0, 1\nebreak");
-      }
     }
     for (size_t i = text_size_u64_fix * 8; i < text_size; i++)
     // for (size_t i = 0; i < text_size; i++)
     {
       _text_start[i] = _text_load_start[i];
-      if (_text_start[i] != _text_load_start[i])
-      {
-        asm volatile("li a0, 1\nebreak");
-      }
     }
   }
   if ((size_t)_rodata_start != (size_t)_rodata_load_start)
   {
     size_t rodata_size = _rodata_end - _rodata_start;
     memcpy(_rodata_start, _rodata_load_start, (size_t)rodata_size);
-    if (memcmp(_rodata_start, _rodata_load_start, (size_t)rodata_size) != 0)
-    {
-      asm volatile("li a0, 1\nebreak");
-    }
   }
   if ((size_t)_data_start != (size_t)_data_load_start)
   {
     size_t data_size = _data_end - _data_start;
     memcpy(_data_start, _data_load_start, (size_t)data_size);
-    if (memcmp(_data_start, _data_load_start, (size_t)data_size) != 0)
-    {
-      asm volatile("li a0, 1\nebreak");
-    }
   }
   // ssb_end_time = *((uint32_t *)RTC_ADDR);
   asm volatile("mv a0, zero\nebreak");
