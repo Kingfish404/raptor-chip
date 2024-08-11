@@ -99,12 +99,12 @@ __attribute__((section(".second_boot"))) void _second_stage_bootloader()
   //     _text_start[i] = _text_load_start[i];
   //   }
   // }
-  asm volatile("mv a0, zero\nebreak");
   if ((size_t)_rodata_start != (size_t)_rodata_load_start)
   {
     size_t rodata_size = _rodata_end - _rodata_start;
     memcpy(_rodata_start, _rodata_load_start, (size_t)rodata_size);
   }
+  asm volatile("mv a0, zero\nebreak");
   if ((size_t)_data_start != (size_t)_data_load_start)
   {
     size_t data_size = _data_end - _data_start;
