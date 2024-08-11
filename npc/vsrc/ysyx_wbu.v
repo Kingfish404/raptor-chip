@@ -32,19 +32,19 @@ module ysyx_wbu (
       valid_o <= 0;
       ready_o <= 1;
     end else begin
-      if (prev_valid) begin
+      if (prev_valid & ready_o) begin
         reg_wdata_o <= reg_wdata;
         rd_o <= rd;
         npc_wdata_o <= npc_wdata;
         use_exu_npc_o <= use_exu_npc;
+        inst_wbu <= inst;
         if (ebreak) begin
           `ysyx_DPI_C_npc_exu_ebreak
         end
       end
       if (state == `ysyx_IDLE) begin
         if (prev_valid == 1) begin
-          valid_o  <= 1;
-          inst_wbu <= inst;
+          valid_o <= 1;
           // ready_o <= 0;
         end
       end else if (state == `ysyx_WAIT_READY) begin
