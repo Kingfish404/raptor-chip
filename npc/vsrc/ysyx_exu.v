@@ -14,7 +14,7 @@ module ysyx_exu (
   input lsu_exu_rvalid, lsu_exu_wready,
 
   input [31:0] inst,
-  input reg [31:0] inst_o,
+  output reg [31:0] inst_o,
 
   input ren, wen, rwen,
   input [4:0] rd,
