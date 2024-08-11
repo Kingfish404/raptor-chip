@@ -319,7 +319,7 @@ void cpu_exec(uint64_t n)
       // printf("before =====\n");
       difftest_step(*npc.pc);
       // printf("at npc =====\t");
-      // reg_display(GPR_SIZE);
+      reg_display(GPR_SIZE);
 #endif
       prev_pc = *(npc.pc);
       npc.last_inst = *(npc.inst);
