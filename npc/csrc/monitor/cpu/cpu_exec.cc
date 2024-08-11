@@ -37,7 +37,6 @@ extern VerilatedContext *contextp;
 extern TOP_NAME *top;
 extern VerilatedVcdC *tfp;
 
-word_t prev_pc = 0;
 word_t g_timer = 0;
 
 #ifdef CONFIG_ITRACE
@@ -279,7 +278,6 @@ void cpu_exec(uint64_t n)
     break;
   }
 
-  prev_pc = *(npc.pc);
   uint64_t now = get_time();
   uint64_t cur_inst_cycle = 0;
   while (!contextp->gotFinish() && npc.state == NPC_RUNNING && n-- > 0)
@@ -308,10 +306,10 @@ void cpu_exec(uint64_t n)
       snprintf(
           iringbuf[iringhead], sizeof(iringbuf[0]),
           FMT_WORD_NO_PREFIX ": " FMT_WORD_NO_PREFIX "\t",
-          prev_pc, *(npc.inst));
+          *npc.pc*npc.pc, *(npc.inst));
       int len = strlen(iringbuf[iringhead]);
       disassemble(
-          iringbuf[iringhead] + len, sizeof(iringbuf[0]), prev_pc, (uint8_t *)(npc.inst), 4);
+          iringbuf[iringhead] + len, sizeof(iringbuf[0]), *npc.pc, (uint8_t *)(npc.inst), 4);
       iringhead = (iringhead + 1) % MAX_IRING_SIZE;
 #endif
 
@@ -321,7 +319,6 @@ void cpu_exec(uint64_t n)
       // printf("at npc =====\t");
       // reg_display(GPR_SIZE);
 #endif
-      prev_pc = *(npc.pc);
       npc.last_inst = *(npc.inst);
     }
   }
