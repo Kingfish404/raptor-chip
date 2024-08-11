@@ -92,6 +92,10 @@ __attribute__((section(".second_boot"))) void _second_stage_bootloader()
     for (size_t i = 0; i < text_size_u64_fix; i++)
     {
       ((uint64_t *)_text_start)[i] = ((uint64_t *)_text_load_start)[i];
+      if (((uint64_t *)_text_start)[i] != ((uint64_t *)_text_load_start)[i])
+      {
+        asm volatile("mv a0, 1\nebreak");
+      }
     }
     for (size_t i = text_size_u64_fix * 8; i < text_size; i++)
     // for (size_t i = 0; i < text_size; i++)
