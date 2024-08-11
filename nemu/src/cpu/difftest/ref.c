@@ -81,6 +81,7 @@ __EXPORT void difftest_regcpy(void *dut, bool direction)
   }
   else if (direction == DIFFTEST_TO_DUT)
   {
+    npc->cpc = &cpu.cpc;
     npc->pc = &cpu.pc;
     npc->inst = &cpu.inst;
     npc->gpr = cpu.gpr;
