@@ -53,7 +53,7 @@ __EXPORT void difftest_memcpy(paddr_t addr, void *buf, size_t n, bool direction)
     }
     if (in_sdram(addr))
     {
-      memcpy(guest_to_sram(addr), buf, n);
+      memcpy(guest_to_sdram(addr), buf, n);
       return;
     }
     Assert(0, "DIFFTEST_TO_REF invalid address: " FMT_PADDR, addr);
@@ -67,7 +67,7 @@ __EXPORT void difftest_memcpy(paddr_t addr, void *buf, size_t n, bool direction)
     }
     if (in_sdram(addr))
     {
-      memcpy(buf, guest_to_sram(addr), n);
+      memcpy(buf, guest_to_sdram(addr), n);
       return;
     }
     Assert(0, "DIFFTEST_TO_DUT invalid address: " FMT_PADDR, addr);
