@@ -65,7 +65,6 @@ module ysyx_exu (
   assign addr_data = addr_exu;
   assign alu_op_o = alu_op_exu;
   assign use_exu_npc_o = use_exu_npc & valid_o;
-  // assign addr_exu = op_j + imm;
 
   reg state, alu_valid, lsu_avalid;
   reg valid_once;
