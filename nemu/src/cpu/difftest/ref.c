@@ -51,6 +51,11 @@ __EXPORT void difftest_memcpy(paddr_t addr, void *buf, size_t n, bool direction)
       memcpy(guest_to_host(addr), buf, n);
       return;
     }
+    if (in_sdram(addr))
+    {
+      memcpy(guest_to_sram(addr), buf, n);
+      return;
+    }
     Assert(0, "DIFFTEST_TO_REF invalid address: " FMT_PADDR, addr);
   }
   else
