@@ -70,11 +70,19 @@ __attribute__((section(".first_boot"))) void _first_stage_bootloader(void)
     for (size_t i = 0; i < text_size_u64_fix; i++)
     {
       ((uint64_t *)_second_boot_start)[i] = ((uint64_t *)_second_boot_load_start)[i];
+      if (((uint64_t *)_second_boot_start)[i] != ((uint64_t *)_second_boot_load_start)[i])
+      {
+        asm volatile("mv a0, 1\nebreak");
+      }
     }
     for (size_t i = text_size_u64_fix * 8; i < text_size; i++)
     // for (size_t i = 0; i < text_size; i++)
     {
       _second_boot_start[i] = _second_boot_load_start[i];
+      if (_second_boot_start[i] != _second_boot_load_start[i])
+      {
+        asm volatile("mv a0, 1\nebreak");
+      }
     }
   }
   _second_stage_bootloader();
