@@ -152,9 +152,8 @@ void difftest_step(vaddr_t pc)
     return;
   }
 
-  if (is_skip_ref)
+  if (is_skip_ref > 0)
   {
-    printf(FMT_RED("[ERROR]") " skip ref\n");
     // if (is_skip_ref == 1)
     {
       ref_difftest_regcpy(&npc, DIFFTEST_TO_REF);
@@ -169,7 +168,7 @@ void difftest_step(vaddr_t pc)
   checkregs(&ref_r, pc);
 
 #ifdef CONFIG_MEM_DIFFTEST
-  if (should_diff_mem)
+  if (should_diff_mem > 0)
   {
     // if (should_diff_mem == 1)
     {
