@@ -60,7 +60,7 @@ module ysyx_IDU (
         if (next_ready == 1) begin
           ready <= 1;
           if (prev_valid & ready_o & next_ready) begin end
-          else begin valid <= 0; end
+          else begin valid <= 0; inst_idu <= 0; pc_o <= 0; end
           // if (prev_valid == 0) begin valid <= 0; end
         end
       end
