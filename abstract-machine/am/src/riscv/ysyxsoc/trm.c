@@ -83,7 +83,6 @@ __attribute__((section(".first_boot"))) void _first_stage_bootloader(void)
   _second_stage_bootloader();
 }
 
-
 __attribute__((section(".second_boot"))) void _second_stage_bootloader()
 {
   // ssb_start_time = *((uint32_t *)RTC_ADDR);
