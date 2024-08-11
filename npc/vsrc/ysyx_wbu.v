@@ -6,6 +6,7 @@ module ysyx_wbu (
     input rst,
 
     input [31:0] inst,
+    input [31:0] pc,
     input [BIT_W-1:0] reg_wdata,
     input [4:0] rd,
     input [BIT_W-1:0] npc_wdata,
@@ -25,7 +26,7 @@ module ysyx_wbu (
   parameter integer BIT_W = `ysyx_W_WIDTH;
 
   reg state;
-  reg [31:0] inst_wbu;
+  reg [31:0] inst_wbu, pc_wbu;
   `ysyx_BUS_FSM()
   always @(posedge clk) begin
     if (rst) begin
@@ -38,6 +39,7 @@ module ysyx_wbu (
         npc_wdata_o <= npc_wdata;
         use_exu_npc_o <= use_exu_npc;
         inst_wbu <= inst;
+        pc_wbu <= pc;
         if (ebreak) begin
           `ysyx_DPI_C_npc_exu_ebreak
         end

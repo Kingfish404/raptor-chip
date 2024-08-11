@@ -119,7 +119,7 @@ module ysyx (
   wire lsu_wvalid;
 
   // EXU output
-  wire [31:0] inst_exu;
+  wire [31:0] inst_exu, pc_exu;
   wire [DATA_W-1:0] reg_wdata;
   wire [DATA_W-1:0] npc_wdata;
   wire use_exu_npc, branch_retire, ebreak;
@@ -262,7 +262,7 @@ module ysyx (
     .use_exu_npc_o(use_exu_npc), .branch_retire_o(branch_retire),
     .ebreak_o(ebreak),
     .rd_o(rd_exu),
-    .inst_o(inst_exu),
+    .inst_o(inst_exu), .pc_o(pc_exu),
 
     .rwen_o(rwen_exu),
 
@@ -300,7 +300,7 @@ module ysyx (
   ysyx_wbu wbu(
     .clk(clock), .rst(reset),
 
-    .inst(inst_exu),
+    .inst(inst_exu), .pc(pc_exu),
 
     .reg_wdata(reg_wdata),
     .rd(rd_exu),
