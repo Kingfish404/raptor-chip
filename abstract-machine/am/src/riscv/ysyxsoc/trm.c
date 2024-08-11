@@ -111,6 +111,10 @@ __attribute__((section(".second_boot"))) void _second_stage_bootloader()
   {
     size_t rodata_size = _rodata_end - _rodata_start;
     memcpy(_rodata_start, _rodata_load_start, (size_t)rodata_size);
+    if (memcmp(_rodata_start, _rodata_load_start, (size_t)rodata_size) != 0)
+    {
+      asm volatile("li a0, 1\nebreak");
+    }
   }
   if ((size_t)_data_start != (size_t)_data_load_start)
   {
