@@ -67,7 +67,7 @@ __attribute__((section(".first_boot"))) void _first_stage_bootloader(void)
   {
     size_t text_size = _second_boot_end - _second_boot_start;
     size_t text_size_u64_fix = text_size / 8;
-    for (volatile size_t i = 0; i < text_size_u64_fix; i++)
+    for (size_t i = 0; i < text_size_u64_fix; i++)
     {
       ((uint64_t *)_second_boot_start)[i] = ((uint64_t *)_second_boot_load_start)[i];
     }
@@ -76,6 +76,11 @@ __attribute__((section(".first_boot"))) void _first_stage_bootloader(void)
     {
       _second_boot_start[i] = _second_boot_load_start[i];
     }
+  }
+  // read the second stage bootloader from flash
+  for (uintptr_t p = (uintptr_t)_second_boot_start; p < (uintptr_t)_second_boot_end; p += 4)
+  {
+    volatile uint32_t data = *(volatile uint32_t *)p;
   }
   _second_stage_bootloader();
 }
