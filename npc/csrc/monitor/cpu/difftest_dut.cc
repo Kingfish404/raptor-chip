@@ -154,7 +154,7 @@ void difftest_step(vaddr_t pc)
 
   if (is_skip_ref > 0)
   {
-    printf("Skip ref at pc = " FMT_WORD ", npc.pc = " FMT_WORD "\n", pc, *npc.pc);
+    // printf("Skip ref at pc = " FMT_WORD ", npc.pc = " FMT_WORD "\n", pc, *npc.pc);
     // if (is_skip_ref == 1)
     {
       ref_difftest_regcpy(&npc, DIFFTEST_TO_REF);
@@ -163,7 +163,7 @@ void difftest_step(vaddr_t pc)
     is_skip_ref = 0;
     return;
   }
-  printf("Diff test at pc = " FMT_WORD "\n", pc);
+  // printf("Diff test at pc = " FMT_WORD "\n", pc);
 
   ref_difftest_exec(1);
   ref_difftest_regcpy(&ref_r, DIFFTEST_TO_DUT);
