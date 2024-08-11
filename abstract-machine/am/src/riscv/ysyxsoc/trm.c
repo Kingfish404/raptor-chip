@@ -99,7 +99,7 @@ __attribute__((section(".second_boot"))) void _second_stage_bootloader()
       _text_start[i] = _text_load_start[i];
       if (_text_start[i] != _text_load_start[i])
       {
-        putch('a');
+        asm volatile("mv a0, 1\nebreak");
       }
     }
   }
