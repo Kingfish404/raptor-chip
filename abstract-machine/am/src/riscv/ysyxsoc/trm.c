@@ -114,23 +114,23 @@ __attribute__((section(".second_boot"))) void _second_stage_bootloader()
     memcpy(_data_start, _data_load_start, (size_t)data_size);
   }
   // ssb_end_time = *((uint32_t *)RTC_ADDR);
-  asm volatile("mv a0, zero\nebreak");
+  // asm volatile("mv a0, zero\nebreak");
   _trm_init();
 }
 
 void _trm_init()
 {
-  // init_uart();
-  // printf("[%d] first stage boot loader done\n", ssb_start_time);
-  // printf("[%d|%d] second stage boot loader done\n", ssb_end_time, ssb_end_time - ssb_start_time);
-  // ioe_init();
-  // uint32_t mvendorid, marchid;
-  // asm volatile(
-  //     "csrr %0, mvendorid\n\t"
-  //     "csrr %1, marchid\n\t"
-  //     : "=r"(mvendorid), "=r"(marchid) :);
-  // size_t ready_time = *((uint32_t *)RTC_ADDR);
-  // printf("[%d|%d] trm init, mvendorid: 0x%lx, marchid: %ld\n", ready_time, ready_time - ssb_end_time, mvendorid, marchid);
+  init_uart();
+  printf("[%d] first stage boot loader done\n", ssb_start_time);
+  printf("[%d|%d] second stage boot loader done\n", ssb_end_time, ssb_end_time - ssb_start_time);
+  ioe_init();
+  uint32_t mvendorid, marchid;
+  asm volatile(
+      "csrr %0, mvendorid\n\t"
+      "csrr %1, marchid\n\t"
+      : "=r"(mvendorid), "=r"(marchid) :);
+  size_t ready_time = *((uint32_t *)RTC_ADDR);
+  printf("[%d|%d] trm init, mvendorid: 0x%lx, marchid: %ld\n", ready_time, ready_time - ssb_end_time, mvendorid, marchid);
 
   int ret = main(mainargs);
   halt(ret);
