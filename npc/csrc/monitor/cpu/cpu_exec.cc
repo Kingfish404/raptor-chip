@@ -67,9 +67,9 @@ static void perf()
          (long long)pmu.csr_inst_cnt, percentage(pmu.csr_inst_cnt, pmu.instr_cnt),
          (long long)pmu.other_inst_cnt, percentage(pmu.other_inst_cnt, pmu.instr_cnt));
   printf("======== TOP DOWN Analysis ========\n");
-  printf("| %8s, %% | %8s, %% | %8s, %% | %8s, %% | %8s, %% |\n",
+  printf("| %8s,  %% | %8s,  %% | %8s,  %% | %8s,  %% | %8s,  %% |\n",
          "IFU", "LSU", "EXU", "LD", "ST");
-  printf("| %8lld,%2.0f | %8lld,%2.0f | %8lld,%2.0f | %8lld,%2.0f | %8lld,%2.0f |\n",
+  printf("| %8lld,%3.0f | %8lld,%3.0f | %8lld,%3.0f | %8lld,%3.0f | %8lld,%3.0f |\n",
          pmu.ifu_stall_cycle, percentage(pmu.ifu_stall_cycle, pmu.active_cycle),
          pmu.lsu_stall_cycle, percentage(pmu.lsu_stall_cycle, pmu.active_cycle),
          pmu.exu_alu_cnt, percentage(pmu.exu_alu_cnt, pmu.instr_cnt),
