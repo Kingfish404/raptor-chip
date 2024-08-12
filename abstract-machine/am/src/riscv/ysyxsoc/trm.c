@@ -78,10 +78,6 @@ __attribute__((section(".first_boot"))) void _first_stage_bootloader(void)
       _second_boot_start[i] = _second_boot_load_start[i];
     }
   }
-  for (uintptr_t p = (uintptr_t)_second_boot_start; p < (uintptr_t)_second_boot_end; p += 4)
-  {
-    volatile uint32_t data = *(volatile uint32_t *)p;
-  }
   _second_stage_bootloader();
 }
 
