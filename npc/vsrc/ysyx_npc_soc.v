@@ -183,13 +183,13 @@ module ysyx_MEM_SRAM_UART (
   wire ifsr_ready = `ysyx_IFSR_ENABLE ? lfsr[19] : 1;
 
   // read transaction
-  assign arready_o = (state == 'b001 & arvalid);
+  assign arready_o = (state == 'b000);
   assign rdata_o[31:0] = mem_rdata_buf[0];
   assign rdata_o[63:32] = mem_rdata_buf[1];
   assign rvalid_o = (state == 'b101);
 
   // write transaction
-  assign awready_o = (state == 'b001 & awvalid);
+  assign awready_o = (state == 'b000);
   assign wready_o = (state == 'b011 & wvalid);
   assign bvalid_o = (state == 'b100);
   wire [7:0] wmask = (
