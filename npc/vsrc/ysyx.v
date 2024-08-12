@@ -81,7 +81,7 @@ module ysyx (
   parameter integer ADDR_W = `ysyx_W_WIDTH;
   parameter integer REG_ADDR_W = 5;
   // PC unit output
-  wire [DATA_W-1:0] pc, npc;
+  wire [DATA_W-1:0] npc;
   wire pc_valid, pc_skip;
 
   // REGS output
