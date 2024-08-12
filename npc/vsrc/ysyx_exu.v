@@ -160,6 +160,7 @@ module ysyx_exu (
     branch_retire_o = 0;
     case (opcode_exu)
       `ysyx_OP_SYSTEM: begin
+        branch_retire_o = 1;
         case (imm_exu[3:0])
           `ysyx_OP_SYSTEM_FUNC3: begin
             case (imm_exu[15:4])
