@@ -183,14 +183,14 @@ module ysyx_MEM_SRAM_UART (
   wire ifsr_ready = `ysyx_IFSR_ENABLE ? lfsr[19] : 1;
 
   // read transaction
-  assign arready_o = (state == 'b01 & arvalid);
+  assign arready_o = (state == 'b001 & arvalid);
   assign rdata_o[31:0] = mem_rdata_buf[0];
   assign rdata_o[63:32] = mem_rdata_buf[1];
-  assign rvalid_o = (state == 'b10);
+  assign rvalid_o = (state == 'b101);
 
   // write transaction
-  assign awready_o = (state == 'b01 & awvalid);
-  assign wready_o = (state == 'b11 & wvalid);
+  assign awready_o = (state == 'b001 & awvalid);
+  assign wready_o = (state == 'b011 & wvalid);
   assign bvalid_o = (state == 'b100);
   wire [7:0] wmask = (
     ({{8{awsize == 3'b000}} & 8'h1 }) |
@@ -207,8 +207,11 @@ module ysyx_MEM_SRAM_UART (
       case (state)
         'b000: begin
           // wait for arvalid
-          if (arvalid | awvalid) begin
-            state <= 1;
+          if (arvalid) begin
+            state <= 'b101;
+          end
+          else if (awvalid) begin
+            state <= 'b001;
           end
           if (arvalid) begin
             if ((araddr & 'b100) == 0) begin
@@ -260,7 +263,7 @@ module ysyx_MEM_SRAM_UART (
               state <= 3;
             end
           end else begin
-            state <= 3;
+            state <= 'b011;
           end
         end
         'b011: begin
@@ -276,6 +279,12 @@ module ysyx_MEM_SRAM_UART (
           if (bready) begin
             state <= 0;
             is_writing <= 0;
+          end
+        end
+        'b101: begin
+          // wait for arvalid
+          if (arvalid) begin
+            state <= 'b000;
           end
         end
       endcase
