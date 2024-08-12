@@ -226,7 +226,7 @@ module ysyx_MEM_SRAM_UART (
         end
         'b001: begin
           // send rvalid
-          state <= 2;
+          state <= 'b010;
         end
         'b010: begin
           // send rready or wait for wlast
@@ -282,10 +282,7 @@ module ysyx_MEM_SRAM_UART (
           end
         end
         'b101: begin
-          // wait for arvalid
-          if (arvalid) begin
-            state <= 'b000;
-          end
+          state <= 'b000;
         end
       endcase
     end
