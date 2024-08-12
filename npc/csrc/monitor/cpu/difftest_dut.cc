@@ -7,25 +7,24 @@ extern NPCState npc;
 extern char *regs[];
 
 uint8_t pmem_ref[MSIZE] = {};
-uint8_t sdram_ref[SDRAM_SIZE] = {};
 
 void (*ref_difftest_memcpy)(paddr_t addr, void *buf, size_t n, bool direction) = NULL;
 void (*ref_difftest_regcpy)(void *dut, bool direction) = NULL;
 void (*ref_difftest_exec)(uint64_t n) = NULL;
 void (*ref_difftest_raise_intr)(uint64_t NO) = NULL;
 
-static int is_skip_ref = 0;
-static int should_diff_mem = 0;
+static bool is_skip_ref = false;
+static bool should_diff_mem = false;
 static int skip_dut_nr_inst = 0;
 
 void difftest_should_diff_mem()
 {
-  should_diff_mem = 2;
+  should_diff_mem = true;
 }
 
 void difftest_skip_ref()
 {
-  is_skip_ref = 2;
+  is_skip_ref = true;
 }
 
 void difftest_skip_dut(int nr_ref, int nr_dut)
@@ -154,29 +153,25 @@ void difftest_step(vaddr_t pc)
     return;
   }
 
-  if (is_skip_ref > 0)
+  if (is_skip_ref)
   {
-    // printf("Skip ref at pc = " FMT_WORD ", npc.pc = " FMT_WORD "\n", pc, *npc.cpc);
     ref_difftest_regcpy(&npc, DIFFTEST_TO_REF);
     ref_difftest_regcpy(&ref_r, DIFFTEST_TO_DUT);
-    is_skip_ref = 0;
+    is_skip_ref = false;
     return;
   }
 
   ref_difftest_exec(1);
   ref_difftest_regcpy(&ref_r, DIFFTEST_TO_DUT);
-  // printf("Diff test at ref.pc = " FMT_WORD ", npc.pc = " FMT_WORD "\n", *ref_r.cpc, *npc.cpc);
   checkregs(&ref_r, *npc.cpc);
+  // printf("Diff test at ref.pc = " FMT_WORD ", npc.pc = " FMT_WORD "\n", *ref_r.cpc, *npc.cpc);
 
 #ifdef CONFIG_MEM_DIFFTEST
-  if (should_diff_mem > 0)
+  if (should_diff_mem)
   {
-    // if (should_diff_mem == 1)
-    {
-      ref_difftest_memcpy(MBASE, pmem_ref, MSIZE, DIFFTEST_TO_DUT);
-      checkmem(pmem_ref, guest_to_host(MBASE), MSIZE);
-    }
-    should_diff_mem = 0;
+    ref_difftest_memcpy(MBASE, pmem_ref, MSIZE, DIFFTEST_TO_DUT);
+    checkmem(pmem_ref, guest_to_host(MBASE), MSIZE);
+    should_diff_mem = false;
   }
 #endif
 }
