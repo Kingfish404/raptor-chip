@@ -15,7 +15,6 @@ LDFLAGS   = -T $(AM_HOME)/scripts/linker.ysyxsoc.ld \
 						 --defsym=_entry_offset=0x0 \
 						 --defsym=_stack_pointer=0x0f002000 \
 						 --defsym=_heap_start=0x80200000 \
-						#  --defsym=_stack_pointer=0x8f002000 \
 						#  --defsym=_stack_pointer=0x80200000 \
 						#  --defsym=_heap_start=0x80200000 \
 						#  --defsym=_stack_pointer=0x0f002000 \
