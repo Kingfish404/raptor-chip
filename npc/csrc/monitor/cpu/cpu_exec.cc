@@ -290,7 +290,7 @@ void cpu_exec(uint64_t n)
     // Simulate the performance monitor unit
     perf_sample_per_cycle();
     cur_inst_cycle++;
-    if (cur_inst_cycle > 0xffff)
+    if (cur_inst_cycle > 0x1ffff)
     {
       Log(FMT_RED("Too many cycles (0x%llx cycle) at pc %x, maybe a bug."), cur_inst_cycle, *npc.pc);
       npc.state = NPC_ABORT;
