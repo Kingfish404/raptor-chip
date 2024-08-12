@@ -289,7 +289,7 @@ void cpu_exec(uint64_t n)
     }
     if (top->reset)
     {
-      // continue;
+      continue;
     }
     // Simulate the performance monitor unit
     perf_sample_per_cycle();
