@@ -150,8 +150,7 @@ module ysyx (
     .npc_wdata(npc_wdata),
     .use_exu_npc(use_exu_npc), .branch_retire(branch_retire),
     .npc_o(npc),
-    .valid_o(pc_valid), .skip_o(pc_skip),
-    .pc_o(pc)
+    .valid_o(pc_valid), .skip_o(pc_skip)
   );
 
   ysyx_reg #(.REG_ADDR_W(REG_ADDR_W), .DATA_W(DATA_W)) regs(
