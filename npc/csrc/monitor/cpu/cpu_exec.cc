@@ -289,7 +289,7 @@ void cpu_exec(uint64_t n)
     }
     if (top->reset)
     {
-      printf("Reset\n");
+      printf("Reset, instr_cnt: %lld\n", pmu.instr_cnt);
       continue;
     }
     // Simulate the performance monitor unit
