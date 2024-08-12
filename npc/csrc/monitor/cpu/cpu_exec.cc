@@ -289,6 +289,7 @@ void cpu_exec(uint64_t n)
     }
     if (top->reset)
     {
+      printf("Reset\n");
       continue;
     }
     // Simulate the performance monitor unit
