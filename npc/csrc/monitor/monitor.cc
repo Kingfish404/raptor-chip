@@ -24,12 +24,27 @@ static const uint32_t img[] = {
 };
 
 static const uint32_t img_char_test[] = {
-    0x100007b7, // 0x80000000: lui a5, 0x10000
-    0x04100713, // 0x80000004: addi a4, zero, 0x41
-    0x00e78023, // 0x80000008: sw a4, 0(a5)
-    0x00a00713, // 0x8000000c: addi a4, zero, 0x0a
-    0x00e78023, // 0x80000010: sw a4, 0(a5)
-    0x00100073, // 0x80000014: ebreak
+    0x00000117, // 80000000: auipc sp,0x0
+    0x0080016f, // 80000004: jal sp, 0x8
+    0x04100713, // 80000008: addi a4, zero, 0x41
+    0x04100713, // 8000000c: addi a4, zero, 0x41
+    0x00000463, // 80000010: beq a0, x0, 0x8
+    0x00000117, // 80000014: auipc sp,0x0
+    0x00012483, // 80000018: lw	s1,0(sp)
+    0x04100713, // 8000001c: addi a4, zero, 0x41
+    0x100007b7, // 80000020: lui a5, 0x10000
+    0x00000117, // 80000024: auipc sp,0x0
+    0x00a00713, // 80000028: addi a4, zero, 0x0a
+    0x00a00713, // 8000002c: addi a4, zero, 0x0a
+    0x00a00713, // 80000030: addi a4, zero, 0x0a
+    0x00a00713, // 80000034: addi a4, zero, 0x0a
+    0xdf002117, // 80000038: auipc sp, -135166
+    0xffc10113, // 8000003c: addi sp, sp, -4
+    0xff410113, // 80000040: addi sp, sp, -12
+    0x00a00713, // 80000044: addi a4, zero, 0x0a
+    0x00a00713, // 80000048: addi a4, zero, 0x0a
+    0x00a00713, // 8000004c: addi a4, zero, 0x0a
+    0x00100073, // 80000050: ebreak
 };
 
 void isa_parser_elf(char *filename);

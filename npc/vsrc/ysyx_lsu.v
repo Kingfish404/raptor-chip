@@ -113,7 +113,7 @@ module ysyx_LSU(
            ({DATA_W{alu_op == `ysyx_ALU_OP_LHU}} & rdata & 'hffff) |
            ({DATA_W{alu_op == `ysyx_ALU_OP_LW}} & rdata)
          );
-
+  assign lsu_araddr = addr;
   always @(posedge clk)
     begin
       // if (l1d_cache_hit)
@@ -123,7 +123,7 @@ module ysyx_LSU(
       //   end
       if (idu_valid)
         begin
-          lsu_araddr <= addr;
+          // lsu_araddr <= addr;
         end
       if (ren & lsu_rvalid & l1d_cache_within)
         begin

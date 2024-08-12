@@ -75,7 +75,7 @@ module ysyx_BUS_ARBITER(
   wire sram_bvalid_o;
 
   // typedef enum [2:0] {IF_A, IF_D, LS_A, LS_D_R, LS_D_W} state_t;
-  //                   000,  001,  010,    011,    100,
+  //                      000,  001,  010,    011,    100,
   parameter logic [2:0] IF_A = 3'b000, IF_D = 3'b001;
   parameter logic [2:0] LS_A = 3'b010, LS_D_R = 3'b011, LS_D_W = 3'b100;
 
@@ -101,11 +101,13 @@ module ysyx_BUS_ARBITER(
                     state <= IF_D;
                     first <= 0;
                   end
-                if (ifu_arvalid & io_master_arready)
+                if (ifu_arvalid)
                   begin
-                    state <= IF_D;
+                    if (io_master_arready) begin
+                      state <= IF_D;
+                    end
                   end
-                if (lsu_arvalid | lsu_awvalid)
+                else if (lsu_arvalid | lsu_awvalid)
                   begin
                     state <= LS_A;
                     awrite_done <= 0;
@@ -114,16 +116,18 @@ module ysyx_BUS_ARBITER(
               end
             IF_D:
               begin
-                if (lsu_arvalid | lsu_awvalid)
-                  begin
-                    state <= LS_A;
-                    awrite_done <= 0;
-                    write_done <= 0;
-                  end
-                else
                   if (io_master_rvalid)
                     begin
-                      state <= IF_A;
+                      if (lsu_arvalid | lsu_awvalid)
+                        begin
+                          state <= LS_A;
+                          awrite_done <= 0;
+                          write_done <= 0;
+                        end
+                      else
+                        begin
+                          state <= IF_A;
+                        end
                     end
               end
             LS_A:
@@ -138,17 +142,21 @@ module ysyx_BUS_ARBITER(
                     end
                     if (io_master_bvalid)
                     begin
-                      state <= IF_A;
+                      state <= LS_D_W;
                     end
                   end
                 else if (io_master_arvalid & io_master_arready)
                   begin
                     state <= LS_D_R;
                   end
-                else if (clint_en)
+                else if (clint_en | ifu_arvalid)
                   begin
                     state <= IF_A;
                   end
+              end
+            LS_D_W:
+              begin
+                state <= IF_A;
               end
             LS_D_R:
               begin
@@ -178,7 +186,7 @@ module ysyx_BUS_ARBITER(
                           ({DATA_W{clint_en}} & clint_rdata_o) |
                           ({DATA_W{!clint_en}} & rdata_o)
                         ));
-  assign lsu_rvalid_o = lsu_arvalid & (rvalid_o | clint_rvalid_o);
+  assign lsu_rvalid_o = (state == LS_D_R | clint_arvalid) & lsu_arvalid & (rvalid_o | clint_rvalid_o);
 
   // lsu write
   assign lsu_wready_o = io_master_bvalid;

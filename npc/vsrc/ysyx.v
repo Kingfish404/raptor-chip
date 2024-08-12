@@ -81,10 +81,12 @@ module ysyx (
   parameter integer ADDR_W = `ysyx_W_WIDTH;
   parameter integer REG_ADDR_W = 5;
   // PC unit output
-  wire [DATA_W-1:0] pc;
+  wire [DATA_W-1:0] npc;
+  wire pc_valid, pc_skip;
 
   // REGS output
   wire [DATA_W-1:0] reg_rdata1, reg_rdata2;
+  wire [16-1:0] rf_table;
 
   // IFU output
   wire [31:0] inst;
@@ -97,7 +99,8 @@ module ysyx (
   wire ifu_valid, ifu_ready;
 
   // IDU output
-  wire [DATA_W-1:0] op1, op2, imm, op_j, pc_idu, rwaddr;
+  wire [31:0] inst_idu;
+  wire [DATA_W-1:0] op1, op2, imm, op_j, pc_idu, rwaddr_idu;
   wire [4:0] rs1, rs2, rd;
   wire [3:0] alu_op;
   wire [6:0] opcode, funct7;
@@ -116,12 +119,14 @@ module ysyx (
   wire lsu_wvalid;
 
   // EXU output
+  wire [31:0] inst_exu, pc_exu;
   wire [DATA_W-1:0] reg_wdata;
   wire [DATA_W-1:0] npc_wdata;
-  wire use_exu_npc;
+  wire use_exu_npc, branch_retire, ebreak;
   wire [4:0] rd_exu;
   wire [3:0] alu_op_exu;
   wire rwen_exu, ren_exu, wen_exu;
+  wire [DATA_W-1:0] rwaddr_exu;
   wire exu_valid, exu_ready;
 
   // WBU output
@@ -140,19 +145,24 @@ module ysyx (
 
   ysyx_pc pc_unit(
     .clk(clock), .rst(reset),
-    .exu_valid(wbu_valid),
+    .prev_valid(exu_valid),
 
-    .npc_wdata(npc_wbu), .use_exu_npc(use_exu_npc_wbu),
-    .pc_o(pc)
+    .npc_wdata(npc_wdata),
+    .use_exu_npc(use_exu_npc), .branch_retire(branch_retire),
+    .npc_o(npc),
+    .valid_o(pc_valid), .skip_o(pc_skip)
   );
 
   ysyx_reg #(.REG_ADDR_W(REG_ADDR_W), .DATA_W(DATA_W)) regs(
     .clk(clock), .rst(reset),
 
-    .reg_write_en(wbu_valid),
-    .waddr(rd_wbu), .wdata(reg_wdata_wbu),
+    .idu_valid(idu_valid & exu_ready), .rd(rd),
+
+    .reg_write_en(exu_valid),
+    .waddr(rd_exu), .wdata(reg_wdata),
 
     .s1addr(rs1), .s2addr(rs2),
+    .rf_table_o(rf_table),
     .src1_o(reg_rdata1), .src2_o(reg_rdata2)
     );
 
@@ -204,9 +214,10 @@ module ysyx (
     .ifu_rdata(ifu_rdata),
     .ifu_rvalid(ifu_rvalid),
 
-    .pc(pc),
+    .npc(npc),
     .inst_o(inst), .pc_o(pc_ifu),
 
+    .pc_valid(pc_valid), .pc_skip(pc_skip),
     .prev_valid(wbu_valid), .next_ready(idu_ready),
     .valid_o(ifu_valid), .ready_o(ifu_ready)
   );
@@ -217,38 +228,45 @@ module ysyx (
 
     .inst(inst),
     .reg_rdata1(reg_rdata1), .reg_rdata2(reg_rdata2),
-    .pc(pc),
+    .pc(pc_ifu),
     .rwen_o(rwen), .en_j_o(en_j), .ren_o(ren), .wen_o(wen),
-    .op1_o(op1), .op2_o(op2), .op_j_o(op_j), .rwaddr_o(rwaddr),
+    .op1_o(op1), .op2_o(op2), .op_j_o(op_j), .rwaddr_o(rwaddr_idu),
     .imm_o(imm),
     .rs1_o(rs1), .rs2_o(rs2), .rd_o(rd),
     .alu_op_o(alu_op),
     .opcode_o(opcode), .pc_o(pc_idu),
+    .inst_o(inst_idu),
+
+    .rf_table(rf_table),
 
     .prev_valid(ifu_valid), .next_ready(exu_ready),
     .valid_o(idu_valid), .ready_o(idu_ready)
     );
 
   // EXU(EXecution Unit): 负责根据控制信号对数据进行执行操作, 并将执行结果写回寄存器或存储器
-  ysyx_EXU #(.BIT_W(DATA_W)) exu(
+  ysyx_exu #(.BIT_W(DATA_W)) exu(
     .clk(clock), .rst(reset),
 
-    .prev_valid(idu_valid), .next_ready(ifu_ready),
+    .prev_valid(idu_valid), .next_ready(wbu_ready),
     .valid_o(exu_valid), .ready_o(exu_ready),
 
+    .inst(inst_idu),
     .ren(ren), .wen(wen), .rwen(rwen),
     .rd(rd), .imm(imm),
-    .op1(op1), .op2(op2), .op_j(op_j), .rwaddr(rwaddr),
+    .op1(op1), .op2(op2), .op_j(op_j), .rwaddr(rwaddr_idu),
     .alu_op(alu_op), .opcode(opcode),
     .pc(pc_idu),
     .reg_wdata_o(reg_wdata),
-    .npc_wdata_o(npc_wdata), .use_exu_npc_o(use_exu_npc),
+    .npc_wdata_o(npc_wdata),
+    .use_exu_npc_o(use_exu_npc), .branch_retire_o(branch_retire),
+    .ebreak_o(ebreak),
     .rd_o(rd_exu),
+    .inst_o(inst_exu), .pc_o(pc_exu),
 
     .rwen_o(rwen_exu),
 
     // to lsu
-    .ren_o(ren_exu), .wen_o(wen_exu),
+    .ren_o(ren_exu), .wen_o(wen_exu), .rwaddr_o(rwaddr_exu),
     .lsu_avalid_o(lsu_avalid), .alu_op_o(alu_op_exu),
     .lsu_mem_wdata_o(lsu_mem_wdata),
 
@@ -262,7 +280,7 @@ module ysyx (
     .clk(clock),
     .idu_valid(idu_valid),
     // from exu
-    .addr(rwaddr),
+    .addr(rwaddr_exu),
     .ren(ren_exu), .wen(wen_exu), .lsu_avalid(lsu_avalid), .alu_op(alu_op_exu),
     .wdata(lsu_mem_wdata),
     // to exu
@@ -281,10 +299,12 @@ module ysyx (
   ysyx_wbu wbu(
     .clk(clock), .rst(reset),
 
+    .inst(inst_exu), .pc(pc_exu),
+
     .reg_wdata(reg_wdata),
     .rd(rd_exu),
     .npc_wdata(npc_wdata),
-    .use_exu_npc(use_exu_npc),
+    .use_exu_npc(use_exu_npc), .ebreak(ebreak),
 
     .reg_wdata_o(reg_wdata_wbu),
     .rd_o(rd_wbu),

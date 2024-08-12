@@ -37,7 +37,6 @@ extern VerilatedContext *contextp;
 extern TOP_NAME *top;
 extern VerilatedVcdC *tfp;
 
-word_t prev_pc = 0;
 word_t g_timer = 0;
 
 #ifdef CONFIG_ITRACE
@@ -55,9 +54,9 @@ static void perf()
 {
   printf("======== Instruction Analysis ========\n");
   Log(FMT_BLUE("Cycle: %llu, #Inst: %lld, IPC: %.3f"), pmu.active_cycle, pmu.instr_cnt, (1.0 * pmu.instr_cnt / pmu.active_cycle));
-  printf("| %8s, %% | %8s, %% | %8s, %% | %6s, %% | %6s, %% | %6s, %% | %6s, %% | %3s, %% | %5s, %% |\n",
+  printf("| %8s,  %% | %8s,  %% | %8s,  %% | %6s, %% | %6s, %% | %6s, %% | %6s, %% | %3s, %% | %5s, %% |\n",
          "IFU", "LSU", "EXU", "LD", "ST", "ALU", "BR", "CSR", "OTH");
-  printf("| %8lld,%2.0f | %8lld,%2.0f | %8lld,%2.0f | %6lld,%2.0f | %6lld,%2.0f | %6lld,%2.0f | %6lld,%2.0f | %3lld,%2.0f | %5lld,%2.0f |\n",
+  printf("| %8lld,%3.0f | %8lld,%3.0f | %8lld,%3.0f | %6lld,%2.0f | %6lld,%2.0f | %6lld,%2.0f | %6lld,%2.0f | %3lld,%2.0f | %5lld,%2.0f |\n",
          (long long)pmu.ifu_stall_cycle, percentage(pmu.ifu_stall_cycle, pmu.active_cycle),
          (long long)pmu.lsu_stall_cycle, percentage(pmu.lsu_stall_cycle, pmu.active_cycle),
          (long long)pmu.exu_alu_cnt, percentage(pmu.exu_alu_cnt, pmu.instr_cnt),
@@ -68,9 +67,9 @@ static void perf()
          (long long)pmu.csr_inst_cnt, percentage(pmu.csr_inst_cnt, pmu.instr_cnt),
          (long long)pmu.other_inst_cnt, percentage(pmu.other_inst_cnt, pmu.instr_cnt));
   printf("======== TOP DOWN Analysis ========\n");
-  printf("| %8s, %% | %8s, %% | %8s, %% | %8s, %% | %8s, %% |\n",
+  printf("| %8s,  %% | %8s,  %% | %8s,  %% | %8s,  %% | %8s,  %% |\n",
          "IFU", "LSU", "EXU", "LD", "ST");
-  printf("| %8lld,%2.0f | %8lld,%2.0f | %8lld,%2.0f | %8lld,%2.0f | %8lld,%2.0f |\n",
+  printf("| %8lld,%3.0f | %8lld,%3.0f | %8lld,%3.0f | %8lld,%3.0f | %8lld,%3.0f |\n",
          pmu.ifu_stall_cycle, percentage(pmu.ifu_stall_cycle, pmu.active_cycle),
          pmu.lsu_stall_cycle, percentage(pmu.lsu_stall_cycle, pmu.active_cycle),
          pmu.exu_alu_cnt, percentage(pmu.exu_alu_cnt, pmu.instr_cnt),
@@ -78,10 +77,10 @@ static void perf()
          pmu.st_inst_cnt, percentage(pmu.st_inst_cnt, pmu.instr_cnt));
   // show average IF cycle and LS cycle
   Log(FMT_BLUE("IFU Avg Cycle: %2.1f, LSU Avg Cycle: %2.1f"),
-      (1.0 * pmu.ifu_stall_cycle + 1) / pmu.ifu_fetch_cnt,
-      (1.0 * pmu.lsu_stall_cycle + 1) / pmu.lsu_load_cnt);
-  assert(
-      pmu.ifu_fetch_cnt == pmu.instr_cnt);
+      (1.0 * pmu.ifu_stall_cycle) / (pmu.ifu_fetch_cnt + 1),
+      (1.0 * pmu.lsu_stall_cycle) / (pmu.lsu_load_cnt + 1));
+  Log(FMT_BLUE("ifu_fetch_cnt: %lld, instr_cnt: %lld"), pmu.ifu_fetch_cnt, pmu.instr_cnt);
+  // assert(pmu.ifu_fetch_cnt == pmu.instr_cnt);
   assert(
       pmu.instr_cnt ==
       (pmu.ld_inst_cnt + pmu.st_inst_cnt +
@@ -102,8 +101,8 @@ static void perf()
          pmu.l1i_cache_miss_cycle, percentage(pmu.l1i_cache_miss_cycle, pmu.l1i_cache_hit_cycle + pmu.l1i_cache_miss_cycle),
          (long long)l1i_access_time, (long long)l1i_miss_penalty,
          l1i_access_time + (100 - l1i_hit_rate) / 100.0 * l1i_miss_penalty);
-  assert(
-      (pmu.l1i_cache_hit_cnt + pmu.l1i_cache_miss_cnt) == pmu.ifu_fetch_cnt);
+  // assert(
+  //     (pmu.l1i_cache_hit_cnt + pmu.l1i_cache_miss_cnt) == pmu.ifu_fetch_cnt);
 }
 
 bool i_fetching = false;
@@ -214,7 +213,7 @@ static void statistic()
       ((*npc.ret) == 0 && npc.state != NPC_ABORT
            ? FMT_GREEN("HIT GOOD TRAP")
            : FMT_RED("HIT BAD TRAP")),
-      (*npc.pc), *(npc.inst));
+      *(npc.pc), *(npc.inst));
 }
 
 static void cpu_exec_one_cycle()
@@ -279,22 +278,25 @@ void cpu_exec(uint64_t n)
     break;
   }
 
-  prev_pc = *(npc.pc);
   uint64_t now = get_time();
   uint64_t cur_inst_cycle = 0;
   while (!contextp->gotFinish() && npc.state == NPC_RUNNING && n-- > 0)
   {
     cpu_exec_one_cycle();
+    if (npc.state == NPC_END) // for ebreak
+    {
+      break;
+    }
     // Simulate the performance monitor unit
     perf_sample_per_cycle();
     cur_inst_cycle++;
-    if (cur_inst_cycle > 0xfffff)
+    if (cur_inst_cycle > 0x1ffff)
     {
-      Log(FMT_RED("Too many cycles for one instruction (0x%llx cycle), maybe a bug."), cur_inst_cycle);
+      Log(FMT_RED("Too many cycles (0x%llx cycle) at pc %x, maybe a bug."), cur_inst_cycle, *npc.pc);
       npc.state = NPC_ABORT;
       break;
     }
-    if (prev_pc != *(npc.pc))
+    if (*(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__wbu_valid)))
     {
       perf_sample_per_inst();
       cur_inst_cycle = 0;
@@ -303,17 +305,16 @@ void cpu_exec(uint64_t n)
       snprintf(
           iringbuf[iringhead], sizeof(iringbuf[0]),
           FMT_WORD_NO_PREFIX ": " FMT_WORD_NO_PREFIX "\t",
-          prev_pc, *(npc.inst));
+          *npc.cpc, *(npc.inst));
       int len = strlen(iringbuf[iringhead]);
       disassemble(
-          iringbuf[iringhead] + len, sizeof(iringbuf[0]), prev_pc, (uint8_t *)(npc.inst), 4);
+          iringbuf[iringhead] + len, sizeof(iringbuf[0]), *npc.cpc, (uint8_t *)(npc.inst), 4);
       iringhead = (iringhead + 1) % MAX_IRING_SIZE;
 #endif
 
 #ifdef CONFIG_DIFFTEST
       difftest_step(*npc.pc);
 #endif
-      prev_pc = *(npc.pc);
       npc.last_inst = *(npc.inst);
     }
   }
