@@ -63,13 +63,7 @@ void halt(int code)
 
 __attribute__((section(".first_boot"))) void _first_stage_bootloader(void)
 {
-  uint32_t mvendorid, marchid;
-  asm volatile(
-      "csrr %0, mvendorid\n\t"
-      "csrr %1, marchid\n\t"
-      : "=r"(mvendorid), "=r"(marchid) :);
-  asm volatile("mv a0, zero\nebreak");
-  return;
+  // asm volatile("mv a0, zero\nebreak");
   if ((size_t)_second_boot_start != (size_t)_second_boot_load_start)
   {
     size_t text_size = _second_boot_end - _second_boot_start;
