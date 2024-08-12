@@ -166,7 +166,7 @@ module ysyx_BUS_ARBITER(
                   begin
                     state <= IF_A;
                   end
-                else
+                else if (ifu_arvalid)
                   begin
                     state <= IF_A;
                   end
