@@ -116,12 +116,6 @@ module ysyx_IFU (
             branch_stall <= 0;
             pc_ifu <= npc;
           end
-          // if (is_branch & pc_valid) begin
-          //   branch_stall <= 0;
-          //   if (pc_valid) begin
-          //     pc_ifu <= npc;
-          //   end
-          // end
         end
       end else if (state == `ysyx_WAIT_READY) begin
         if (next_ready == 1) begin
