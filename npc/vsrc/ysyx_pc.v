@@ -19,7 +19,7 @@ module ysyx_pc (
   reg valid = 0, skip = 0;
   assign valid_o = valid | prev_valid;
   assign skip_o  = skip;
-  assign npc_o   = use_exu_npc & prev_valid ? npc_wdata : pc;
+  assign npc_o   = prev_valid ? (use_exu_npc ? npc_wdata : npc) : pc;
 
   always @(posedge clk) begin
     if (rst) begin
