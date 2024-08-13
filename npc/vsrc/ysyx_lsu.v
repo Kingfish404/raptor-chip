@@ -1,11 +1,13 @@
-`include "ysyx_macro.v"
+`include "ysyx_macro.vh"
 
-module ysyx_LSU(
+module ysyx_lsu (
     input clk,
     input idu_valid,
     // from exu
     input [ADDR_W-1:0] addr,
-    input ren, wen, lsu_avalid,
+    input ren,
+    input wen,
+    lsu_avalid,
     input [3:0] alu_op,
     input [DATA_W-1:0] wdata,
     // to exu
@@ -29,7 +31,7 @@ module ysyx_LSU(
     output lsu_wvalid_o,
     // from bus store
     input reg lsu_wready
-  );
+);
   parameter integer ADDR_W = 32, DATA_W = 32;
 
   reg [ADDR_W-1:0] lsu_araddr;
@@ -86,16 +88,16 @@ module ysyx_LSU(
 
   // load/store unit
   assign wstrb = (
-           ({8{alu_op == `ysyx_ALU_OP_SB}} & 8'h1) |
-           ({8{alu_op == `ysyx_ALU_OP_SH}} & 8'h3) |
-           ({8{alu_op == `ysyx_ALU_OP_SW}} & 8'hf)
+           ({8{alu_op == `YSYX_ALU_OP_SB}} & 8'h1) |
+           ({8{alu_op == `YSYX_ALU_OP_SH}} & 8'h3) |
+           ({8{alu_op == `YSYX_ALU_OP_SW}} & 8'hf)
          );
   assign rstrb = (
-           ({8{alu_op == `ysyx_ALU_OP_LB}} & 8'h1) |
-           ({8{alu_op == `ysyx_ALU_OP_LBU}} & 8'h1) |
-           ({8{alu_op == `ysyx_ALU_OP_LH}} & 8'h3) |
-           ({8{alu_op == `ysyx_ALU_OP_LHU}} & 8'h3) |
-           ({8{alu_op == `ysyx_ALU_OP_LW}} & 8'hf)
+           ({8{alu_op == `YSYX_ALU_OP_LB}} & 8'h1) |
+           ({8{alu_op == `YSYX_ALU_OP_LBU}} & 8'h1) |
+           ({8{alu_op == `YSYX_ALU_OP_LH}} & 8'h3) |
+           ({8{alu_op == `YSYX_ALU_OP_LHU}} & 8'h3) |
+           ({8{alu_op == `YSYX_ALU_OP_LW}} & 8'hf)
          );
 
   wire [1:0] araddr_lo = lsu_araddr_o[1:0];
@@ -107,34 +109,31 @@ module ysyx_LSU(
            (0)
          );
   assign rdata_o = (
-           ({DATA_W{alu_op == `ysyx_ALU_OP_LB}} & (rdata[7] ? rdata | 'hffffff00 : rdata & 'hff)) |
-           ({DATA_W{alu_op == `ysyx_ALU_OP_LBU}} & rdata & 'hff) |
-           ({DATA_W{alu_op == `ysyx_ALU_OP_LH}} & (rdata[15] ? rdata | 'hffff0000 : rdata & 'hffff)) |
-           ({DATA_W{alu_op == `ysyx_ALU_OP_LHU}} & rdata & 'hffff) |
-           ({DATA_W{alu_op == `ysyx_ALU_OP_LW}} & rdata)
+           ({DATA_W{alu_op == `YSYX_ALU_OP_LB}} & (rdata[7] ? rdata | 'hffffff00 : rdata & 'hff)) |
+           ({DATA_W{alu_op == `YSYX_ALU_OP_LBU}} & rdata & 'hff) |
+           ({DATA_W{alu_op == `YSYX_ALU_OP_LH}} &
+              (rdata[15] ? rdata | 'hffff0000 : rdata & 'hffff)) |
+           ({DATA_W{alu_op == `YSYX_ALU_OP_LHU}} & rdata & 'hffff) |
+           ({DATA_W{alu_op == `YSYX_ALU_OP_LW}} & rdata)
          );
   assign lsu_araddr = addr;
-  always @(posedge clk)
-    begin
-      // if (l1d_cache_hit)
-      //   begin
-      //     $display("[hit] addr: %h, l1d data: %h, tag: %h, idx: %h",
-      //              lsu_araddr_o, l1d[addr_idx], l1d_tag[addr_idx], addr_idx);
-      //   end
-      if (idu_valid)
-        begin
-          // lsu_araddr <= addr;
-        end
-      if (ren & lsu_rvalid & l1d_cache_within)
-        begin
-          l1d[addr_idx] <= lsu_rdata;
-          l1d_tag[addr_idx] <= addr_tag;
-          l1d_valid[addr_idx] <= 1'b1;
-        end
-      if (lsu_awvalid_o & l1d_cache_hit_w)
-        begin
-          // $display("l1d_cache_hit_w");
-          l1d_valid[waddr_idx] <= 1'b0;
-        end
+  always @(posedge clk) begin
+    // if (l1d_cache_hit)
+    //   begin
+    //     $display("[hit] addr: %h, l1d data: %h, tag: %h, idx: %h",
+    //              lsu_araddr_o, l1d[addr_idx], l1d_tag[addr_idx], addr_idx);
+    //   end
+    if (idu_valid) begin
+      // lsu_araddr <= addr;
     end
+    if (ren & lsu_rvalid & l1d_cache_within) begin
+      l1d[addr_idx] <= lsu_rdata;
+      l1d_tag[addr_idx] <= addr_tag;
+      l1d_valid[addr_idx] <= 1'b1;
+    end
+    if (lsu_awvalid_o & l1d_cache_hit_w) begin
+      // $display("l1d_cache_hit_w");
+      l1d_valid[waddr_idx] <= 1'b0;
+    end
+  end
 endmodule

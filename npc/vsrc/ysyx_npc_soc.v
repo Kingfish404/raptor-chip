@@ -1,6 +1,6 @@
-`include "ysyx_macro.v"
-`include "ysyx_macro_soc.v"
-`include "ysyx_macro_dpi_c.v"
+`include "ysyx_macro.vh"
+`include "ysyx_macro_soc.vh"
+`include "ysyx_macro_dpi_c.vh"
 
 module ysyxSoC (
     input clock,
@@ -101,7 +101,7 @@ module ysyxSoC (
       .io_slave_rlast   (  /* unused */)
   );
 
-  ysyx_MEM_SRAM_UART sram (
+  ysyx_npc_soc perip (
       .clk(clock),
       .arburst(auto_master_out_arburst),
       .arsize(auto_master_out_arsize),
@@ -136,7 +136,7 @@ module ysyxSoC (
 endmodule  //ysyxSoC
 
 // Memory and Universal Asynchronous Receiver-Transmitter (UART)
-module ysyx_MEM_SRAM_UART (
+module ysyx_npc_soc (
     input clk,
 
     input [1:0] arburst,
@@ -180,17 +180,17 @@ module ysyx_MEM_SRAM_UART (
   reg is_writing = 0;
 
   reg [19:0] lfsr = 101;
-  wire ifsr_ready = `ysyx_IFSR_ENABLE ? lfsr[19] : 1;
+  wire ifsr_ready = `YSYX_IFSR_ENABLE ? lfsr[19] : 1;
 
   // read transaction
-  assign arready_o = (state == 'b01 & arvalid);
+  assign arready_o = (state == 'b000);
   assign rdata_o[31:0] = mem_rdata_buf[0];
   assign rdata_o[63:32] = mem_rdata_buf[1];
-  assign rvalid_o = (state == 'b10);
+  assign rvalid_o = (state == 'b101);
 
   // write transaction
-  assign awready_o = (state == 'b01 & awvalid);
-  assign wready_o = (state == 'b11 & wvalid);
+  assign awready_o = (state == 'b000);
+  assign wready_o = (state == 'b011 & wvalid);
   assign bvalid_o = (state == 'b100);
   wire [7:0] wmask = (
     ({{8{awsize == 3'b000}} & 8'h1 }) |
@@ -207,14 +207,16 @@ module ysyx_MEM_SRAM_UART (
       case (state)
         'b000: begin
           // wait for arvalid
-          if (arvalid | awvalid) begin
-            state <= 1;
+          if (arvalid) begin
+            state <= 'b101;
+          end else if (awvalid) begin
+            state <= 'b001;
           end
           if (arvalid) begin
             if ((araddr & 'b100) == 0) begin
-              `ysyx_DPI_C_pmem_read((araddr & ~'h3), mem_rdata_buf[0]);
+              `YSYX_DPI_C_PMEM_READ((araddr & ~'h3), mem_rdata_buf[0]);
             end else begin
-              `ysyx_DPI_C_pmem_read((araddr & ~'h3), mem_rdata_buf[1]);
+              `YSYX_DPI_C_PMEM_READ((araddr & ~'h3), mem_rdata_buf[1]);
             end
           end
           if (awvalid) begin
@@ -223,44 +225,44 @@ module ysyx_MEM_SRAM_UART (
         end
         'b001: begin
           // send rvalid
-          state <= 2;
+          state <= 'b010;
         end
         'b010: begin
           // send rready or wait for wlast
           if (is_writing) begin
-            if (awaddr == `ysyx_BUS_SERIAL_PORT) begin
+            if (awaddr == `YSYX_BUS_SERIAL_PORT) begin
               $write("%c", wdata[7:0]);
             end else begin
               if (wstrb[0]) begin
-                `ysyx_DPI_C_pmem_write((awaddr & ~'h7) + 0, {wdata >>  0}[31:0], 1);
+                `YSYX_DPI_C_PMEM_WRITE((awaddr & ~'h7) + 0, {wdata >>  0}[31:0], 1);
               end
               if (wstrb[1]) begin
-                `ysyx_DPI_C_pmem_write((awaddr & ~'h7) + 1, {wdata >>  8}[31:0], 1);
+                `YSYX_DPI_C_PMEM_WRITE((awaddr & ~'h7) + 1, {wdata >>  8}[31:0], 1);
               end
               if (wstrb[2]) begin
-                `ysyx_DPI_C_pmem_write((awaddr & ~'h7) + 2, {wdata >> 16}[31:0], 1);
+                `YSYX_DPI_C_PMEM_WRITE((awaddr & ~'h7) + 2, {wdata >> 16}[31:0], 1);
               end
               if (wstrb[3]) begin
-                `ysyx_DPI_C_pmem_write((awaddr & ~'h7) + 3, {wdata >> 24}[31:0], 1);
+                `YSYX_DPI_C_PMEM_WRITE((awaddr & ~'h7) + 3, {wdata >> 24}[31:0], 1);
               end
               if (wstrb[4]) begin
-                `ysyx_DPI_C_pmem_write((awaddr & ~'h7) + 4, {wdata >> 32}[31:0], 1);
+                `YSYX_DPI_C_PMEM_WRITE((awaddr & ~'h7) + 4, {wdata >> 32}[31:0], 1);
               end
               if (wstrb[5]) begin
-                `ysyx_DPI_C_pmem_write((awaddr & ~'h7) + 5, {wdata >> 40}[31:0], 1);
+                `YSYX_DPI_C_PMEM_WRITE((awaddr & ~'h7) + 5, {wdata >> 40}[31:0], 1);
               end
               if (wstrb[6]) begin
-                `ysyx_DPI_C_pmem_write((awaddr & ~'h7) + 6, {wdata >> 48}[31:0], 1);
+                `YSYX_DPI_C_PMEM_WRITE((awaddr & ~'h7) + 6, {wdata >> 48}[31:0], 1);
               end
               if (wstrb[7]) begin
-                `ysyx_DPI_C_pmem_write((awaddr & ~'h7) + 7, {wdata >> 56}[31:0], 1);
+                `YSYX_DPI_C_PMEM_WRITE((awaddr & ~'h7) + 7, {wdata >> 56}[31:0], 1);
               end
             end
             if (wlast) begin
               state <= 3;
             end
           end else begin
-            state <= 3;
+            state <= 'b011;
           end
         end
         'b011: begin
@@ -277,6 +279,12 @@ module ysyx_MEM_SRAM_UART (
             state <= 0;
             is_writing <= 0;
           end
+        end
+        'b101: begin
+          state <= 'b000;
+        end
+        default: begin
+          state <= 'b000;
         end
       endcase
     end

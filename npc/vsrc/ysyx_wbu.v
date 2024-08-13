@@ -1,5 +1,5 @@
-`include "ysyx_macro.v"
-`include "ysyx_macro_dpi_c.v"
+`include "ysyx_macro.vh"
+`include "ysyx_macro_dpi_c.vh"
 
 module ysyx_wbu (
     input clk,
@@ -23,11 +23,11 @@ module ysyx_wbu (
     output reg valid_o,
     output ready_o
 );
-  parameter integer BIT_W = `ysyx_W_WIDTH;
+  parameter integer BIT_W = `YSYX_W_WIDTH;
 
   reg state;
   reg [31:0] inst_wbu, pc_wbu;
-  `ysyx_BUS_FSM()
+  `YSYX_BUS_FSM()
   always @(posedge clk) begin
     if (rst) begin
       valid_o <= 0;
@@ -41,15 +41,15 @@ module ysyx_wbu (
         pc_wbu <= pc;
         inst_wbu <= inst;
         if (ebreak) begin
-          `ysyx_DPI_C_npc_exu_ebreak
+          `YSYX_DPI_C_NPC_EXU_EBREAK
         end
       end
-      if (state == `ysyx_IDLE) begin
+      if (state == `YSYX_IDLE) begin
         if (prev_valid == 1) begin
           valid_o <= 1;
           // ready_o <= 0;
         end
-      end else if (state == `ysyx_WAIT_READY) begin
+      end else if (state == `YSYX_WAIT_READY) begin
         // if (next_ready == 1) begin
         ready_o <= 1;
         if (prev_valid == 0) begin

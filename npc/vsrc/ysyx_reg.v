@@ -30,6 +30,7 @@ module ysyx_reg (
     end else begin
       if (idu_valid) begin
         rf_table[rd[3:0]] <= 1;
+        rf_table[0] <= 0;
       end
       if (reg_write_en) begin
         rf_table[waddr[3:0]] <= 0;
@@ -39,7 +40,7 @@ module ysyx_reg (
 
   genvar i;
   generate
-    for (i = 1; i < REG_NUM; i = i + 1) begin
+    for (i = 1; i < REG_NUM; i = i + 1) begin : g_rf
       always @(posedge clk) begin
         if (rst) begin
           rf[i] <= 0;
