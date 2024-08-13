@@ -90,7 +90,7 @@ module ysyx_ifu (
           if (ifu_sdram_arburst) begin
             l1i_state <= 'b11;
           end else begin
-            l1i_state <= 'b11;
+            l1i_state <= 'b10;
           end
           l1i[addr_idx][0]  <= ifu_rdata;
           l1i_tag[addr_idx] <= addr_tag;
