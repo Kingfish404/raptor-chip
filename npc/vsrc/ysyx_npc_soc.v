@@ -209,8 +209,7 @@ module ysyx_MEM_SRAM_UART (
           // wait for arvalid
           if (arvalid) begin
             state <= 'b101;
-          end
-          else if (awvalid) begin
+          end else if (awvalid) begin
             state <= 'b001;
           end
           if (arvalid) begin

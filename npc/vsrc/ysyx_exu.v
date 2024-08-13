@@ -49,7 +49,7 @@ module ysyx_exu (
   reg [BIT_W-1:0] mem_rdata;
   reg use_exu_npc = 0;
 
-  ysyx_CSR_Reg csr(
+  YSYX_CSR_Reg csr(
     .clk(clk), .rst(rst), .wen(csr_wen), .exu_valid(valid_o), .ecallen(csr_ecallen),
     .waddr(csr_addr), .wdata(csr_wdata),
     .waddr_add1(csr_addr_add1), .wdata_add1(csr_wdata1),
@@ -60,11 +60,11 @@ module ysyx_exu (
     (opcode_exu == `ysyx_OP_IL_TYPE) ? mem_rdata :
     (opcode_exu == `ysyx_OP_SYSTEM) ? csr_rdata : reg_wdata);
   assign csr_addr = (
-    (imm_exu[3:0] == `ysyx_OP_SYSTEM_FUNC3) && imm_exu[15:4] == `ysyx_OP_SYSTEM_ECALL ? `ysyx_CSR_MCAUSE:
-    (imm_exu[3:0] == `ysyx_OP_SYSTEM_FUNC3) && imm_exu[15:4] == `ysyx_OP_SYSTEM_MRET  ? `ysyx_CSR_MSTATUS:
+    (imm_exu[3:0] == `ysyx_OP_SYSTEM_FUNC3) && imm_exu[15:4] == `ysyx_OP_SYSTEM_ECALL ? `YSYX_CSR_MCAUSE:
+    (imm_exu[3:0] == `ysyx_OP_SYSTEM_FUNC3) && imm_exu[15:4] == `ysyx_OP_SYSTEM_MRET  ? `YSYX_CSR_MSTATUS:
     (imm_exu[15:4]));
   assign csr_addr_add1 = (
-    (imm_exu[3:0] == `ysyx_OP_SYSTEM_FUNC3) && imm_exu[15:4] == `ysyx_OP_SYSTEM_ECALL ? `ysyx_CSR_MEPC:
+    (imm_exu[3:0] == `ysyx_OP_SYSTEM_FUNC3) && imm_exu[15:4] == `ysyx_OP_SYSTEM_ECALL ? `YSYX_CSR_MEPC:
     (0));
   assign addr_data = addr_exu;
   assign alu_op_o = alu_op_exu;
