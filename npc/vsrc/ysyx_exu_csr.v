@@ -15,16 +15,16 @@ module YSYX_CSR_Reg (
     output [BIT_W-1:0] mtvec_o,
     output [BIT_W-1:0] mepc_o
 );
-  parameter integer MNONE = 'h0;
-  parameter integer MCAUSE_IDX = 'h1;
-  parameter integer MEPC_IDX = 'h2;
-  parameter integer MTVEC_IDX = 'h3;
-  parameter integer MSTATUS_IDX = 'h4;
+  parameter  MNONE = 'h0;
+  parameter  MCAUSE_IDX = 'h1;
+  parameter  MEPC_IDX = 'h2;
+  parameter  MTVEC_IDX = 'h3;
+  parameter  MSTATUS_IDX = 'h4;
 
-  parameter R_W = 12;
-  parameter REG_W = 3;
-  parameter BIT_W = `YSYX_W_WIDTH;
-  parameter RESET_VAL = 0;
+  parameter integer R_W = 12;
+  parameter integer REG_W = 3;
+  parameter integer BIT_W = `YSYX_W_WIDTH;
+  parameter integer RESET_VAL = 0;
 
   reg [BIT_W-1:0] csr[5];
   wire [REG_W-1:0] waddr_reg_1 = (
