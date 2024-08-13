@@ -20,11 +20,11 @@ module YSYX_CSR_Reg (
   parameter integer BIT_W = `YSYX_W_WIDTH;
   parameter integer RESET_VAL = 0;
 
-  parameter reg [REG_W-1:0] MNONE = 'h0;
-  parameter reg [REG_W-1:0] MCAUSE_IDX = 'h1;
-  parameter reg [REG_W-1:0] MEPC_IDX = 'h2;
-  parameter reg [REG_W-1:0] MTVEC_IDX = 'h3;
-  parameter reg [REG_W-1:0] MSTATUS_IDX = 'h4;
+  parameter reg MNONE = 'h0;
+  parameter reg MCAUSE_IDX = 'h1;
+  parameter reg MEPC_IDX = 'h2;
+  parameter reg MTVEC_IDX = 'h3;
+  parameter reg MSTATUS_IDX = 'h4;
 
   reg [BIT_W-1:0] csr[5];
   wire [REG_W-1:0] waddr_reg_1 = (
