@@ -36,7 +36,10 @@ module ysyx_IDU (
   wire [31:0] imm_U = {inst_idu[31:12], 12'b0};
   wire [20:0] imm_J = {inst_idu[31], inst_idu[19:12], inst_idu[20], inst_idu[30:25], inst_idu[24:21], 1'b0};
   wire [15:0] imm_SYS = {{imm_I}, {1'b0, funct3}};
-  wire conflict_stall = (rf_table[rs1[4-1:0]] == 1) | (rf_table[rs2[4-1:0]] == 1);
+  wire conflict_stall = (
+    opcode_o != `ysyx_OP_LUI & opcode_o != `ysyx_OP_AUIPC &
+    opcode_o != `ysyx_OP_JAL & opcode_o != `ysyx_OP_JALR & opcode_o != `ysyx_OP_SYSTEM &
+    (rf_table[rs1[4-1:0]] == 1) | (rf_table[rs2[4-1:0]] == 1));
   assign opcode_o = inst_idu[6:0];
   assign valid_o = valid & !conflict_stall;
   assign ready_o = ready & !conflict_stall & next_ready;
