@@ -40,7 +40,7 @@ module ysyx_reg (
 
   genvar i;
   generate
-    for (i = 1; i < REG_NUM; i = i + 1) begin
+    for (i = 1; i < REG_NUM; i = i + 1) begin : g_rf
       always @(posedge clk) begin
         if (rst) begin
           rf[i] <= 0;

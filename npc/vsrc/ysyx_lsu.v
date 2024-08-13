@@ -111,7 +111,8 @@ module ysyx_lsu (
   assign rdata_o = (
            ({DATA_W{alu_op == `YSYX_ALU_OP_LB}} & (rdata[7] ? rdata | 'hffffff00 : rdata & 'hff)) |
            ({DATA_W{alu_op == `YSYX_ALU_OP_LBU}} & rdata & 'hff) |
-           ({DATA_W{alu_op == `YSYX_ALU_OP_LH}} & (rdata[15] ? rdata | 'hffff0000 : rdata & 'hffff)) |
+           ({DATA_W{alu_op == `YSYX_ALU_OP_LH}} &
+              (rdata[15] ? rdata | 'hffff0000 : rdata & 'hffff)) |
            ({DATA_W{alu_op == `YSYX_ALU_OP_LHU}} & rdata & 'hffff) |
            ({DATA_W{alu_op == `YSYX_ALU_OP_LW}} & rdata)
          );
