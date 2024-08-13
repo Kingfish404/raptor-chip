@@ -66,8 +66,8 @@ module ysyx_exu (
         ? `YSYX_CSR_MSTATUS
         : (imm_exu[15:4]));
   assign csr_addr_add1 = (
-    (imm_exu[3:0] == `YSYX_OP_SYSTEM_FUNC3) && imm_exu[15:4] == `YSYX_OP_SYSTEM_ECALL ? `YSYX_CSR_MEPC:
-    (0));
+    ((imm_exu[3:0] == `YSYX_OP_SYSTEM_FUNC3) && imm_exu[15:4] == `YSYX_OP_SYSTEM_ECALL)
+    ? `YSYX_CSR_MEPC: (0));
   assign addr_data = addr_exu;
   assign alu_op_o = alu_op_exu;
   assign use_exu_npc_o = use_exu_npc & valid_o;
