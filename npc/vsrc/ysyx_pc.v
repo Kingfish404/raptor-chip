@@ -17,9 +17,9 @@ module ysyx_pc (
   wire [DATA_W-1:0] npc = pc + 4;
   reg [DATA_W-1:0] pc, lpc;
   reg valid = 0, skip = 0;
-  assign valid_o = valid;
+  assign valid_o = valid | prev_valid;
   assign skip_o  = skip;
-  assign npc_o   = pc;
+  assign npc_o   = use_exu_npc ? npc_wdata : pc;
 
   always @(posedge clk) begin
     if (rst) begin
