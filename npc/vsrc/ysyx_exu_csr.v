@@ -15,11 +15,11 @@ module YSYX_CSR_Reg (
     output [BIT_W-1:0] mtvec_o,
     output [BIT_W-1:0] mepc_o
 );
-  parameter MNONE = 'h0;
-  parameter MCAUSE_IDX = 'h1;
-  parameter MEPC_IDX = 'h2;
-  parameter MTVEC_IDX = 'h3;
-  parameter MSTATUS_IDX = 'h4;
+  parameter integer MNONE = 'h0;
+  parameter integer MCAUSE_IDX = 'h1;
+  parameter integer MEPC_IDX = 'h2;
+  parameter integer MTVEC_IDX = 'h3;
+  parameter integer MSTATUS_IDX = 'h4;
 
   parameter R_W = 12;
   parameter REG_W = 3;
