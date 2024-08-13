@@ -21,10 +21,10 @@ module YSYX_CSR_Reg (
   parameter int MTVEC_IDX = 'h3;
   parameter int MSTATUS_IDX = 'h4;
 
-  parameter uint R_W = 12;
-  parameter uint REG_W = 3;
-  parameter uint BIT_W = `YSYX_W_WIDTH;
-  parameter uint RESET_VAL = 0;
+  parameter int R_W = 12;
+  parameter int REG_W = 3;
+  parameter int BIT_W = `YSYX_W_WIDTH;
+  parameter int RESET_VAL = 0;
 
   reg [BIT_W-1:0] csr[5];
   wire [REG_W-1:0] waddr_reg_1 = (
