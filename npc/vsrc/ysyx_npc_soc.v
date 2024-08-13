@@ -283,6 +283,9 @@ module ysyx_npc_soc (
         'b101: begin
           state <= 'b000;
         end
+        default: begin
+          state <= 'b000;
+        end
       endcase
     end
   end
