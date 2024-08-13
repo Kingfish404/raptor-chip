@@ -10,7 +10,7 @@ module ysyx_idu (
   input [BIT_W-1:0] pc,
   output en_j_o,
   output reg rwen_o, ren_o, wen_o,
-  output reg [BIT_W-1:0] op1_o, op2_o,
+  output wire [BIT_W-1:0] op1_o, op2_o,
   output wire [BIT_W-1:0] rwaddr_o, op_j_o,
   output wire [31:0] imm_o,
   output wire [4:0] rs1_o, rs2_o, rd_o,
