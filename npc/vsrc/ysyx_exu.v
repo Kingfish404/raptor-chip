@@ -132,8 +132,12 @@ module ysyx_exu (
     );
 
   // branch/system unit
-  assign csr_wdata1 = (imm_exu[3:0] == `YSYX_OP_SYSTEM_FUNC3 && imm_exu[15:4] == `YSYX_OP_SYSTEM_ECALL) ? pc_exu : 'h0;
-  assign csr_ecallen = ((opcode_exu == `YSYX_OP_SYSTEM) && imm_exu[3:0] == `YSYX_OP_SYSTEM_FUNC3 && imm_exu[15:4] == `YSYX_OP_SYSTEM_ECALL);
+  assign csr_wdata1 = (
+    imm_exu[3:0] == `YSYX_OP_SYSTEM_FUNC3 && imm_exu[15:4] == `YSYX_OP_SYSTEM_ECALL)
+    ? pc_exu : 'h0;
+  assign csr_ecallen = (
+    ((opcode_exu == `YSYX_OP_SYSTEM) && imm_exu[3:0] == `YSYX_OP_SYSTEM_FUNC3)
+    && imm_exu[15:4] == `YSYX_OP_SYSTEM_ECALL);
   assign csr_wen = (opcode_exu == `YSYX_OP_SYSTEM) && (
     ((imm_exu[3:0] == `YSYX_OP_SYSTEM_FUNC3) && (imm_exu[15:4] == `YSYX_OP_SYSTEM_ECALL)) |
     ((imm_exu[3:0] == `YSYX_OP_SYSTEM_FUNC3) && (imm_exu[15:4] == `YSYX_OP_SYSTEM_MRET)) |
