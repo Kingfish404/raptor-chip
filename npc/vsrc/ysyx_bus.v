@@ -160,13 +160,17 @@ module ysyx_bus (
                           ({DATA_W{clint_en}} & clint_rdata_o) |
                           ({DATA_W{!clint_en}} & rdata_o)
                         ));
-  assign lsu_rvalid_o = (state == LS_D_R | clint_arvalid) & lsu_arvalid & (rvalid_o | clint_rvalid_o);
+  assign lsu_rvalid_o = (
+    state == LS_D_R | clint_arvalid) &
+    lsu_arvalid & (rvalid_o | clint_rvalid_o);
 
   // lsu write
   assign lsu_wready_o = io_master_bvalid;
 
   // io lsu read
-  wire ifu_sdram_arburst = `YSYX_I_SDRAM_ARBURST & ifu_arvalid & (ifu_araddr >= 'ha0000000) & (ifu_araddr <= 'hc0000000);
+  wire ifu_sdram_arburst = (
+    `YSYX_I_SDRAM_ARBURST & ifu_arvalid &
+    (ifu_araddr >= 'ha0000000) & (ifu_araddr <= 'hc0000000));
   assign io_master_arburst = ifu_sdram_arburst ? 2'b01 : 2'b00;
   assign io_master_arsize = (
            ({3{lsu_rstrb == 8'h1}} & 3'b000) |
