@@ -220,8 +220,8 @@ module ysyx_bus (
   assign io_master_bready = 1;
 
   always @(posedge clk) begin
-    `ysyx_Assert(io_master_rresp, 2'b00);
-    `ysyx_Assert(io_master_bresp, 2'b00);
+    `YSYX_ASSERT(io_master_rresp, 2'b00);
+    `YSYX_ASSERT(io_master_bresp, 2'b00);
     if (io_master_awvalid) begin
       `YSYX_DPI_C_npc_difftest_mem_diff
       if (
