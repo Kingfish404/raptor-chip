@@ -101,7 +101,7 @@ module ysyxSoC (
       .io_slave_rlast   (  /* unused */)
   );
 
-  ysyx_MEM_SRAM_UART perip (
+  ysyx_npc_soc perip (
       .clk(clock),
       .arburst(auto_master_out_arburst),
       .arsize(auto_master_out_arsize),
@@ -136,7 +136,7 @@ module ysyxSoC (
 endmodule  //ysyxSoC
 
 // Memory and Universal Asynchronous Receiver-Transmitter (UART)
-module ysyx_MEM_SRAM_UART (
+module ysyx_npc_soc (
     input clk,
 
     input [1:0] arburst,
