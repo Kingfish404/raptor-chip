@@ -17,7 +17,7 @@ module ysyx_idu (
   output wire [3:0] alu_op_o,
   output [6:0] opcode_o,
   output reg [BIT_W-1:0] pc_o,
-  output [31:0] inst_o,
+  output wire [31:0] inst_o,
 
   input [16-1:0] rf_table,
 
