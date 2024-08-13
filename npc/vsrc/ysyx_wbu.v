@@ -41,7 +41,7 @@ module ysyx_wbu (
         pc_wbu <= pc;
         inst_wbu <= inst;
         if (ebreak) begin
-          `YSYX_DPI_C_npc_exu_ebreak
+          `YSYX_DPI_C_NPC_EXU_EBREAK
         end
       end
       if (state == `YSYX_IDLE) begin

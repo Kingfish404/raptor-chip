@@ -223,7 +223,7 @@ module ysyx_bus (
     `YSYX_ASSERT(io_master_rresp, 2'b00);
     `YSYX_ASSERT(io_master_bresp, 2'b00);
     if (io_master_awvalid) begin
-      `YSYX_DPI_C_npc_difftest_mem_diff
+      `YSYX_DPI_C_NPC_DIFFTEST_MEM_DIFF
       if (
               (io_master_awaddr >= 'h10000000 && io_master_awaddr <= 'h10000005) ||
               (io_master_awaddr >= 'h10001000 && io_master_awaddr <= 'h10001fff) ||
@@ -234,7 +234,7 @@ module ysyx_bus (
               (0)
             )
               begin
-        `YSYX_DPI_C_npc_difftest_skip_ref
+        `YSYX_DPI_C_NPC_DIFFTEST_SKIP_REF
         // $display("DIFFTEST: skip ref at aw: %h", io_master_awaddr);
       end
     end
@@ -249,7 +249,7 @@ module ysyx_bus (
                 (0)
               )
                 begin
-        `YSYX_DPI_C_npc_difftest_skip_ref
+        `YSYX_DPI_C_NPC_DIFFTEST_SKIP_REF
         // $display("DIFFTEST: skip ref at ar: %h", io_master_araddr);
       end
     end
@@ -302,7 +302,7 @@ module ysyx_CLINT (
     end else begin
       mtime <= mtime + 1;
       if (arvalid) begin
-        `YSYX_DPI_C_npc_difftest_skip_ref
+        `YSYX_DPI_C_NPC_DIFFTEST_SKIP_REF
         rvalid_o <= 1;
       end else begin
         rvalid_o <= 0;
