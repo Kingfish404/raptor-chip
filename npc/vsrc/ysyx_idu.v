@@ -2,7 +2,7 @@
 `include "ysyx_macro_idu.v"
 `include "ysyx_macro_dpi_c.v"
 
-module ysyx_IDU (
+module ysyx_idu (
   input clk, rst,
 
   input [31:0] inst,

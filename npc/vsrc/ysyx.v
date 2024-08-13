@@ -166,7 +166,7 @@ module ysyx (
     .src1_o(reg_rdata1), .src2_o(reg_rdata2)
     );
 
-  ysyx_BUS_ARBITER bus(
+  ysyx_bus bus(
     .clk(clock), .rst(reset),
 
     .io_master_arburst(io_master_arburst), .io_master_arsize(io_master_arsize),
@@ -206,7 +206,7 @@ module ysyx (
   );
 
   // IFU(Instruction Fetch Unit): 负责根据当前PC从存储器中取出一条指令
-  ysyx_IFU #(.ADDR_W(DATA_W), .DATA_W(DATA_W)) ifu(
+  ysyx_ifu #(.ADDR_W(DATA_W), .DATA_W(DATA_W)) ifu(
     .clk(clock), .rst(reset),
 
     .ifu_araddr_o(ifu_araddr_o),
@@ -223,7 +223,7 @@ module ysyx (
   );
 
   // IDU(Instruction Decode Unit): 负责对当前指令进行译码, 准备执行阶段需要使用的数据和控制信号
-  ysyx_IDU #(.BIT_W(DATA_W)) idu(
+  ysyx_idu #(.BIT_W(DATA_W)) idu(
     .clk(clock), .rst(reset),
 
     .inst(inst),
@@ -276,7 +276,7 @@ module ysyx (
     );
 
   // LSU(Load/Store Unit): 负责对存储器进行读写操作
-  ysyx_LSU lsu(
+  ysyx_lsu lsu(
     .clk(clock),
     .idu_valid(idu_valid),
     // from exu

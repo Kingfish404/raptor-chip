@@ -1,9 +1,9 @@
 `include "ysyx_macro.v"
 `include "ysyx_macro_soc.v"
 
-module ysyx_IFU (
+module ysyx_ifu (
     input clk,
-    rst,
+    input rst,
 
     // for bus
     output [DATA_W-1:0] ifu_araddr_o,
@@ -104,6 +104,9 @@ module ysyx_IFU (
             l1i_tag[addr_idx] <= addr_tag;
             l1i_valid[addr_idx] <= 1'b1;
           end
+        end
+        default begin
+          l1i_state <= 'b000;
         end
       endcase
       if (state == `ysyx_IDLE) begin

@@ -2,7 +2,7 @@
 `include "ysyx_macro_soc.v"
 `include "ysyx_macro_dpi_c.v"
 
-module ysyx_BUS_ARBITER(
+module ysyx_bus(
     input clk, rst,
 
     // AXI4 Master bus

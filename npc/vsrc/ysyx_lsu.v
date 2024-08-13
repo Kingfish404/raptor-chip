@@ -1,6 +1,6 @@
 `include "ysyx_macro.v"
 
-module ysyx_LSU(
+module ysyx_lsu(
     input clk,
     input idu_valid,
     // from exu
