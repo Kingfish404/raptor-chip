@@ -101,7 +101,7 @@ module ysyx_idu (
         `YSYX_OP_JAL:     begin `YSYX_J_TYPE(pc_o, `YSYX_ALU_OP_ADD, 4);              end
         `YSYX_OP_JALR:    begin `YSYX_I_TYPE(pc_o, `YSYX_ALU_OP_ADD, 4);              end
         `YSYX_OP_B_TYPE:  begin `YSYX_B_TYPE(reg_rdata1, {1'b0, funct3}, reg_rdata2); end
-        `YSYX_OP_I_TYPE:  begin 
+        `YSYX_OP_I_TYPE:  begin
           `YSYX_I_TYPE(reg_rdata1, {(funct3 == 3'b101) ? funct7[5]: 1'b0, funct3}, imm_o);  end
         `YSYX_OP_IL_TYPE: begin `YSYX_I_TYPE(reg_rdata1, {1'b0, funct3}, imm_o);            end
         `YSYX_OP_S_TYPE:  begin `YSYX_S_TYPE(reg_rdata1, {1'b0, funct3}, reg_rdata2);       end
