@@ -160,7 +160,7 @@ module ysyx_exu (
     ({BIT_W{((imm_exu[3:0] == `YSYX_OP_SYSTEM_CSRRSI))}} & (csr_rdata | src1)) |
     ({BIT_W{((imm_exu[3:0] == `YSYX_OP_SYSTEM_CSRRCI))}} & (csr_rdata & ~src1))
   );
-  always @(*) begin
+  always_comb begin
     use_exu_npc = 0;
     ebreak_o = 0;
     npc_wdata_o = addr_data;
