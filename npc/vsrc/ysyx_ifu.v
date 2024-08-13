@@ -44,14 +44,14 @@ module ysyx_ifu (
 
   wire arvalid;
 
-  wire [32-L1I_LEN-L1I_LINE_LEN-2-1:0] addr_tag = pc_o[ADDR_W-1:L1I_LEN+L1I_LINE_LEN+2];
-  wire [L1I_LEN-1:0] addr_idx = pc_o[L1I_LEN+L1I_LINE_LEN+2-1:L1I_LINE_LEN+2];
-  wire [L1I_LINE_LEN-1:0] addr_offset = pc_o[L1I_LINE_LEN+2-1:2];
+  wire [32-L1I_LEN-L1I_LINE_LEN-2-1:0] addr_tag = pc_ifu[ADDR_W-1:L1I_LEN+L1I_LINE_LEN+2];
+  wire [L1I_LEN-1:0] addr_idx = pc_ifu[L1I_LEN+L1I_LINE_LEN+2-1:L1I_LINE_LEN+2];
+  wire [L1I_LINE_LEN-1:0] addr_offset = pc_ifu[L1I_LINE_LEN+2-1:2];
 
   wire l1i_cache_hit = (
          1 & l1i_state == 'b00 &
          l1i_valid[addr_idx] == 1'b1) & (l1i_tag[addr_idx] == addr_tag);
-  wire ifu_sdram_arburst = `ysyx_I_SDRAM_ARBURST & (pc_o >= 'ha0000000) & (pc_o <= 'hc0000000);
+  wire ifu_sdram_arburst = `ysyx_I_SDRAM_ARBURST & (pc_ifu >= 'ha0000000) & (pc_ifu <= 'hc0000000);
   wire [6:0] opcode_o = inst_o[6:0];
   wire is_branch = (
     (opcode_o == `ysyx_OP_JAL) | (opcode_o == `ysyx_OP_JALR) |
@@ -60,17 +60,17 @@ module ysyx_ifu (
   );
   wire is_load = (opcode_o == `ysyx_OP_IL_TYPE);
 
-  assign ifu_araddr_o = (l1i_state == 'b00 | l1i_state == 'b01) ? (pc_o & ~'h4) : (pc_o | 'h4);
+  assign ifu_araddr_o = (l1i_state == 'b00 | l1i_state == 'b01) ? (pc_ifu & ~'h4) : (pc_ifu | 'h4);
   assign ifu_arvalid_o = ifu_sdram_arburst ?
     arvalid & !l1i_cache_hit & (l1i_state == 'b00 | l1i_state == 'b01) :
     arvalid & !l1i_cache_hit & l1i_state != 'b10;
 
   // with l1i cache
   wire ifu_just_load = (l1i_state == 'b11 & ifu_rvalid);
-  assign inst_o = ifu_just_load & pc_o[2] == 1'b1 ? ifu_rdata : l1i[addr_idx][addr_offset];
-  assign valid_o = (l1i_cache_hit & (!branch_stall | (branch_stall & pc_valid))) | ifu_just_load;
+  assign inst_o = ifu_just_load & pc_ifu[2] == 1'b1 ? ifu_rdata : l1i[addr_idx][addr_offset];
+  assign valid_o = (l1i_cache_hit & !branch_stall) | ifu_just_load;
 
-  assign pc_o = pc_valid ? npc : pc_ifu;
+  assign pc_o = pc_ifu;
   `ysyx_BUS_FSM()
   always @(posedge clk) begin
     if (rst) begin
