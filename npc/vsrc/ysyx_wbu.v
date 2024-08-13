@@ -30,8 +30,8 @@ module ysyx_wbu (
   `YSYX_BUS_FSM()
   always @(posedge clk) begin
     if (rst) begin
-      // valid_o <= 0;
-      // ready_o <= 1;
+      valid_o <= 0;
+      ready_o <= 1;
     end else begin
       if (prev_valid & ready_o) begin
         reg_wdata_o <= reg_wdata;
