@@ -77,8 +77,8 @@ module ysyx (
 
   input io_interrupt
 );
-  parameter integer DATA_W = `ysyx_W_WIDTH;
-  parameter integer ADDR_W = `ysyx_W_WIDTH;
+  parameter integer DATA_W = `YSYX_W_WIDTH;
+  parameter integer ADDR_W = `YSYX_W_WIDTH;
   parameter integer REG_ADDR_W = 5;
   // PC unit output
   wire [DATA_W-1:0] npc;

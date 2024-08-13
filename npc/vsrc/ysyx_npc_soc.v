@@ -180,7 +180,7 @@ module ysyx_MEM_SRAM_UART (
   reg is_writing = 0;
 
   reg [19:0] lfsr = 101;
-  wire ifsr_ready = `ysyx_IFSR_ENABLE ? lfsr[19] : 1;
+  wire ifsr_ready = `YSYX_IFSR_ENABLE ? lfsr[19] : 1;
 
   // read transaction
   assign arready_o = (state == 'b000);
@@ -230,7 +230,7 @@ module ysyx_MEM_SRAM_UART (
         'b010: begin
           // send rready or wait for wlast
           if (is_writing) begin
-            if (awaddr == `ysyx_BUS_SERIAL_PORT) begin
+            if (awaddr == `YSYX_BUS_SERIAL_PORT) begin
               $write("%c", wdata[7:0]);
             end else begin
               if (wstrb[0]) begin

@@ -23,7 +23,7 @@ module YSYX_CSR_Reg (
 
   parameter R_W = 12;
   parameter REG_W = 3;
-  parameter BIT_W = `ysyx_W_WIDTH;
+  parameter BIT_W = `YSYX_W_WIDTH;
   parameter RESET_VAL = 0;
 
   reg [BIT_W-1:0] csr[5];

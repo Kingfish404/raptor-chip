@@ -51,14 +51,14 @@ module ysyx_ifu (
   wire l1i_cache_hit = (
          1 & l1i_state == 'b00 &
          l1i_valid[addr_idx] == 1'b1) & (l1i_tag[addr_idx] == addr_tag);
-  wire ifu_sdram_arburst = `ysyx_I_SDRAM_ARBURST & (pc_ifu >= 'ha0000000) & (pc_ifu <= 'hc0000000);
+  wire ifu_sdram_arburst = `YSYX_I_SDRAM_ARBURST & (pc_ifu >= 'ha0000000) & (pc_ifu <= 'hc0000000);
   wire [6:0] opcode_o = inst_o[6:0];
   wire is_branch = (
-    (opcode_o == `ysyx_OP_JAL) | (opcode_o == `ysyx_OP_JALR) |
-    (opcode_o == `ysyx_OP_B_TYPE) | (opcode_o == `ysyx_OP_SYSTEM) |
+    (opcode_o == `YSYX_OP_JAL) | (opcode_o == `YSYX_OP_JALR) |
+    (opcode_o == `YSYX_OP_B_TYPE) | (opcode_o == `YSYX_OP_SYSTEM) |
     (0)
   );
-  wire is_load = (opcode_o == `ysyx_OP_IL_TYPE);
+  wire is_load = (opcode_o == `YSYX_OP_IL_TYPE);
 
   assign ifu_araddr_o = (l1i_state == 'b00 | l1i_state == 'b01) ? (pc_ifu & ~'h4) : (pc_ifu | 'h4);
   assign ifu_arvalid_o = ifu_sdram_arburst ?
@@ -71,13 +71,13 @@ module ysyx_ifu (
   assign valid_o = (l1i_cache_hit & !branch_stall) | ifu_just_load;
 
   assign pc_o = pc_ifu;
-  `ysyx_BUS_FSM()
+  `YSYX_BUS_FSM()
   always @(posedge clk) begin
     if (rst) begin
       pvalid <= 1;
-      pc_ifu <= `ysyx_PC_INIT;
+      pc_ifu <= `YSYX_PC_INIT;
     end else begin
-      if (inst_o == `ysyx_INST_FENCE_I) begin
+      if (inst_o == `YSYX_INST_FENCE_I) begin
         l1i_valid <= 0;
       end
       case (l1i_state)
@@ -110,7 +110,7 @@ module ysyx_ifu (
           l1i_state <= 'b000;
         end
       endcase
-      if (state == `ysyx_IDLE) begin
+      if (state == `YSYX_IDLE) begin
         if (prev_valid) begin
           pvalid <= prev_valid;
           if (is_branch & pc_valid) begin
@@ -121,7 +121,7 @@ module ysyx_ifu (
             pc_ifu <= npc;
           end
         end
-      end else if (state == `ysyx_WAIT_READY) begin
+      end else if (state == `YSYX_WAIT_READY) begin
         if (next_ready == 1) begin
           if (valid_o) begin
             if (!is_branch & !is_load) begin

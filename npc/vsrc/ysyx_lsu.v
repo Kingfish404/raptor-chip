@@ -88,16 +88,16 @@ module ysyx_lsu (
 
   // load/store unit
   assign wstrb = (
-           ({8{alu_op == `ysyx_ALU_OP_SB}} & 8'h1) |
-           ({8{alu_op == `ysyx_ALU_OP_SH}} & 8'h3) |
-           ({8{alu_op == `ysyx_ALU_OP_SW}} & 8'hf)
+           ({8{alu_op == `YSYX_ALU_OP_SB}} & 8'h1) |
+           ({8{alu_op == `YSYX_ALU_OP_SH}} & 8'h3) |
+           ({8{alu_op == `YSYX_ALU_OP_SW}} & 8'hf)
          );
   assign rstrb = (
-           ({8{alu_op == `ysyx_ALU_OP_LB}} & 8'h1) |
-           ({8{alu_op == `ysyx_ALU_OP_LBU}} & 8'h1) |
-           ({8{alu_op == `ysyx_ALU_OP_LH}} & 8'h3) |
-           ({8{alu_op == `ysyx_ALU_OP_LHU}} & 8'h3) |
-           ({8{alu_op == `ysyx_ALU_OP_LW}} & 8'hf)
+           ({8{alu_op == `YSYX_ALU_OP_LB}} & 8'h1) |
+           ({8{alu_op == `YSYX_ALU_OP_LBU}} & 8'h1) |
+           ({8{alu_op == `YSYX_ALU_OP_LH}} & 8'h3) |
+           ({8{alu_op == `YSYX_ALU_OP_LHU}} & 8'h3) |
+           ({8{alu_op == `YSYX_ALU_OP_LW}} & 8'hf)
          );
 
   wire [1:0] araddr_lo = lsu_araddr_o[1:0];
@@ -109,11 +109,11 @@ module ysyx_lsu (
            (0)
          );
   assign rdata_o = (
-           ({DATA_W{alu_op == `ysyx_ALU_OP_LB}} & (rdata[7] ? rdata | 'hffffff00 : rdata & 'hff)) |
-           ({DATA_W{alu_op == `ysyx_ALU_OP_LBU}} & rdata & 'hff) |
-           ({DATA_W{alu_op == `ysyx_ALU_OP_LH}} & (rdata[15] ? rdata | 'hffff0000 : rdata & 'hffff)) |
-           ({DATA_W{alu_op == `ysyx_ALU_OP_LHU}} & rdata & 'hffff) |
-           ({DATA_W{alu_op == `ysyx_ALU_OP_LW}} & rdata)
+           ({DATA_W{alu_op == `YSYX_ALU_OP_LB}} & (rdata[7] ? rdata | 'hffffff00 : rdata & 'hff)) |
+           ({DATA_W{alu_op == `YSYX_ALU_OP_LBU}} & rdata & 'hff) |
+           ({DATA_W{alu_op == `YSYX_ALU_OP_LH}} & (rdata[15] ? rdata | 'hffff0000 : rdata & 'hffff)) |
+           ({DATA_W{alu_op == `YSYX_ALU_OP_LHU}} & rdata & 'hffff) |
+           ({DATA_W{alu_op == `YSYX_ALU_OP_LW}} & rdata)
          );
   assign lsu_araddr = addr;
   always @(posedge clk) begin

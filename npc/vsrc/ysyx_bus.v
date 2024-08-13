@@ -155,7 +155,7 @@ module ysyx_bus (
   assign ifu_rvalid_o = !lsu_arvalid & ((rvalid_o));
 
   // lsu read
-  wire clint_en = (lsu_araddr == `ysyx_BUS_RTC_ADDR) | (lsu_araddr == `ysyx_BUS_RTC_ADDR_UP);
+  wire clint_en = (lsu_araddr == `YSYX_BUS_RTC_ADDR) | (lsu_araddr == `YSYX_BUS_RTC_ADDR_UP);
   assign lsu_rdata_o = ({DATA_W{lsu_arvalid}} & (
                           ({DATA_W{clint_en}} & clint_rdata_o) |
                           ({DATA_W{!clint_en}} & rdata_o)
@@ -166,7 +166,7 @@ module ysyx_bus (
   assign lsu_wready_o = io_master_bvalid;
 
   // io lsu read
-  wire ifu_sdram_arburst = `ysyx_I_SDRAM_ARBURST & ifu_arvalid & (ifu_araddr >= 'ha0000000) & (ifu_araddr <= 'hc0000000);
+  wire ifu_sdram_arburst = `YSYX_I_SDRAM_ARBURST & ifu_arvalid & (ifu_araddr >= 'ha0000000) & (ifu_araddr <= 'hc0000000);
   assign io_master_arburst = ifu_sdram_arburst ? 2'b01 : 2'b00;
   assign io_master_arsize = (
            ({3{lsu_rstrb == 8'h1}} & 3'b000) |
@@ -292,8 +292,8 @@ module ysyx_CLINT (
 
   reg [63:0] mtime = 0;
   assign rdata_o = (
-    (araddr == `ysyx_BUS_RTC_ADDR) ? mtime[31:0] :
-    (araddr == `ysyx_BUS_RTC_ADDR_UP) ? mtime[63:32] :
+    (araddr == `YSYX_BUS_RTC_ADDR) ? mtime[31:0] :
+    (araddr == `YSYX_BUS_RTC_ADDR_UP) ? mtime[63:32] :
     (0)
   );
   always @(posedge clk) begin

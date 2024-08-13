@@ -13,7 +13,7 @@ module ysyx_pc (
     output reg valid_o,
     skip_o
 );
-  parameter integer DATA_W = `ysyx_W_WIDTH;
+  parameter integer DATA_W = `YSYX_W_WIDTH;
   wire [DATA_W-1:0] npc = pc + 4;
   reg [DATA_W-1:0] pc, lpc;
   reg valid = 0, skip = 0;
@@ -23,7 +23,7 @@ module ysyx_pc (
 
   always @(posedge clk) begin
     if (rst) begin
-      pc <= `ysyx_PC_INIT;
+      pc <= `YSYX_PC_INIT;
       `YSYX_DPI_C_npc_difftest_skip_ref
     end else if (prev_valid) begin
       lpc <= pc;
