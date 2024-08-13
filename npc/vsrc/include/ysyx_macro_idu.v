@@ -1,4 +1,4 @@
-`include "ysyx_macro.v"
+`include "ysyx_macro.vh"
 
 `define YSYX_R_TYPE(op1, alu_op, op2)  begin \
   rwen_o = 1; \

@@ -1,4 +1,4 @@
-`include "ysyx_macro.v"
+`include "ysyx_macro.vh"
 
 module ysyx_lsu (
     input clk,

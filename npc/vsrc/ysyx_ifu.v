@@ -1,4 +1,4 @@
-`include "ysyx_macro.v"
+`include "ysyx_macro.vh"
 `include "ysyx_macro_soc.v"
 
 module ysyx_ifu (
