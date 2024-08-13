@@ -4,7 +4,7 @@ module ysyx_exu_alu (
   input [BIT_W-1:0] alu_src1,
   input [BIT_W-1:0] alu_src2,
   input [3:0] alu_op,
-  output reg [BIT_W-1:0] alu_res_o
+  output [BIT_W-1:0] alu_res_o
 );
   parameter integer BIT_W = `YSYX_W_WIDTH;
 
