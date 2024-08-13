@@ -1,6 +1,6 @@
 `include "ysyx_macro.vh"
-`include "ysyx_macro_idu.v"
-`include "ysyx_macro_dpi_c.v"
+`include "ysyx_macro_idu.vh"
+`include "ysyx_macro_dpi_c.vh"
 
 module ysyx_idu (
   input clk, rst,

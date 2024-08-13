@@ -1,6 +1,6 @@
 `include "ysyx_macro.vh"
-`include "ysyx_macro_soc.v"
-`include "ysyx_macro_dpi_c.v"
+`include "ysyx_macro_soc.vh"
+`include "ysyx_macro_dpi_c.vh"
 
 module ysyx (
   input clock, reset,

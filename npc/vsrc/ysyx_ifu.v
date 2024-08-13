@@ -1,5 +1,5 @@
 `include "ysyx_macro.vh"
-`include "ysyx_macro_soc.v"
+`include "ysyx_macro_soc.vh"
 
 module ysyx_ifu (
     input clk,
