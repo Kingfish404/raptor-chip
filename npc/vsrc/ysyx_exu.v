@@ -149,7 +149,8 @@ module ysyx_exu (
     ((imm_exu[3:0] == `YSYX_OP_SYSTEM_CSRRCI))
   );
   assign csr_wdata = {BIT_W{(opcode_exu == `YSYX_OP_SYSTEM)}} & (
-    ({BIT_W{((imm_exu[3:0] == `YSYX_OP_SYSTEM_FUNC3) && (imm_exu[15:4] == `YSYX_OP_SYSTEM_ECALL))}} & 'hb) |
+    ({BIT_W{((imm_exu[3:0] == `YSYX_OP_SYSTEM_FUNC3) && (imm_exu[15:4] == `YSYX_OP_SYSTEM_ECALL))}}
+      & 'hb) |
     ({BIT_W{((imm_exu[3:0] == `YSYX_OP_SYSTEM_FUNC3) && (imm_exu[15:4] == `YSYX_OP_SYSTEM_MRET))}} &
      {{csr_rdata[BIT_W-1:'h8]}, 1'b1, {csr_rdata[6:4]}, csr_rdata['h7], csr_rdata[2:0]}) |
     ({BIT_W{((imm_exu[3:0] == `YSYX_OP_SYSTEM_CSRRW))}} & src1) |
@@ -159,7 +160,7 @@ module ysyx_exu (
     ({BIT_W{((imm_exu[3:0] == `YSYX_OP_SYSTEM_CSRRSI))}} & (csr_rdata | src1)) |
     ({BIT_W{((imm_exu[3:0] == `YSYX_OP_SYSTEM_CSRRCI))}} & (csr_rdata & ~src1))
   );
-  always @(*) begin
+  always_comb begin
     use_exu_npc = 0;
     ebreak_o = 0;
     npc_wdata_o = addr_data;
