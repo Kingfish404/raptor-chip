@@ -34,7 +34,8 @@ module ysyx_idu (
   wire [11:0] imm_I = inst_idu[31:20], imm_S = {inst_idu[31:25], inst_idu[11:7]};
   wire [12:0] imm_B = {inst_idu[31], inst_idu[7], inst_idu[30:25], inst_idu[11:8], 1'b0};
   wire [31:0] imm_U = {inst_idu[31:12], 12'b0};
-  wire [20:0] imm_J = {inst_idu[31], inst_idu[19:12], inst_idu[20], inst_idu[30:25], inst_idu[24:21], 1'b0};
+  wire [20:0] imm_J = {
+    inst_idu[31], inst_idu[19:12], inst_idu[20], inst_idu[30:25], inst_idu[24:21], 1'b0};
   wire [15:0] imm_SYS = {{imm_I}, {1'b0, funct3}};
   wire conflict_stall = (
     opcode_o != `YSYX_OP_LUI & opcode_o != `YSYX_OP_AUIPC &
@@ -95,18 +96,19 @@ module ysyx_idu (
     rs1_o = rs1; rs2_o = rs2; rd_o = 0;
     imm_o = 0; op1_o = 0; op2_o = 0;
       case (opcode_o)
-        `YSYX_OP_LUI:     begin `YSYX_U_TYPE(0,  `YSYX_ALU_OP_ADD);                              end
-        `YSYX_OP_AUIPC:   begin `YSYX_U_TYPE(pc_o, `YSYX_ALU_OP_ADD);                              end
+        `YSYX_OP_LUI:     begin `YSYX_U_TYPE(0,  `YSYX_ALU_OP_ADD);                     end
+        `YSYX_OP_AUIPC:   begin `YSYX_U_TYPE(pc_o, `YSYX_ALU_OP_ADD);                   end
         `YSYX_OP_JAL:     begin `YSYX_J_TYPE(pc_o, `YSYX_ALU_OP_ADD, 4);              end
-        `YSYX_OP_JALR:    begin `YSYX_I_TYPE(pc_o, `YSYX_ALU_OP_ADD, 4);           end
-        `YSYX_OP_B_TYPE:  begin `YSYX_B_TYPE(reg_rdata1, {1'b0, funct3}, reg_rdata2);   end
-        `YSYX_OP_I_TYPE:  begin `YSYX_I_TYPE(reg_rdata1, {(funct3 == 3'b101) ? funct7[5]: 1'b0, funct3}, imm_o);  end
-        `YSYX_OP_IL_TYPE: begin `YSYX_I_TYPE(reg_rdata1, {1'b0, funct3}, imm_o);                 end
-        `YSYX_OP_S_TYPE:  begin `YSYX_S_TYPE(reg_rdata1, {1'b0, funct3}, reg_rdata2);            end
-        `YSYX_OP_R_TYPE:  begin `YSYX_R_TYPE(reg_rdata1, {funct7[5], funct3}, reg_rdata2);       end
-        `YSYX_OP_SYSTEM:  begin `YSYX_I_SYS_TYPE(reg_rdata1, {1'b0, funct3}, 0)                  end
-        `YSYX_OP_FENCE_I: begin                                                                  end
-        default:          begin if (valid_o) begin `YSYX_DPI_C_NPC_ILLEGAL_INST end              end
+        `YSYX_OP_JALR:    begin `YSYX_I_TYPE(pc_o, `YSYX_ALU_OP_ADD, 4);              end
+        `YSYX_OP_B_TYPE:  begin `YSYX_B_TYPE(reg_rdata1, {1'b0, funct3}, reg_rdata2); end
+        `YSYX_OP_I_TYPE:  begin 
+          `YSYX_I_TYPE(reg_rdata1, {(funct3 == 3'b101) ? funct7[5]: 1'b0, funct3}, imm_o);  end
+        `YSYX_OP_IL_TYPE: begin `YSYX_I_TYPE(reg_rdata1, {1'b0, funct3}, imm_o);            end
+        `YSYX_OP_S_TYPE:  begin `YSYX_S_TYPE(reg_rdata1, {1'b0, funct3}, reg_rdata2);       end
+        `YSYX_OP_R_TYPE:  begin `YSYX_R_TYPE(reg_rdata1, {funct7[5], funct3}, reg_rdata2);  end
+        `YSYX_OP_SYSTEM:  begin `YSYX_I_SYS_TYPE(reg_rdata1, {1'b0, funct3}, 0)             end
+        `YSYX_OP_FENCE_I: begin                                                             end
+        default:          begin if (valid_o) begin `YSYX_DPI_C_NPC_ILLEGAL_INST end         end
       endcase
   end
 endmodule // ysyx_IDU
