@@ -126,7 +126,7 @@ module ysyx_exu (
   assign lsu_mem_wdata_o = mem_wdata;
 
   // alu unit for reg_wdata
-  ysyx_ALU #(BIT_W) alu(
+  ysyx_exu_alu #(BIT_W) alu(
     .alu_src1(src1), .alu_src2(src2), .alu_op(alu_op_exu),
     .alu_res_o(reg_wdata)
     );
