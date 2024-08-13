@@ -66,8 +66,9 @@ module ysyx_ifu (
     arvalid & !l1i_cache_hit & l1i_state != 'b10;
 
   // with l1i cache
-  assign inst_o = l1i[addr_idx][addr_offset];
-  assign valid_o = l1i_cache_hit & !branch_stall;
+  wire ifu_just_load = (l1i_state == 'b11 & ifu_rvalid);
+  assign inst_o = ifu_just_load ? ifu_rdata : l1i[addr_idx][addr_offset];
+  assign valid_o = (l1i_cache_hit & !branch_stall) | ifu_just_load;
 
   assign pc_o = pc_ifu;
   `ysyx_BUS_FSM()
