@@ -47,7 +47,7 @@ module ysyx_exu (
   wire csr_wen;
   wire csr_ecallen;
   reg [BIT_W-1:0] mem_rdata;
-  reg use_exu_npc = 0;
+  reg use_exu_npc;
 
   ysyx_exu_csr csr(
     .clk(clk), .rst(rst), .wen(csr_wen), .exu_valid(valid_o), .ecallen(csr_ecallen),
