@@ -21,10 +21,10 @@ module ysyx_exu_csr (
   parameter integer RESET_VAL = 0;
 
   parameter bit[REG_W-1:0] MNONE = 'h0;
-  parameter MCAUSE_IDX = 'h1;
-  parameter MEPC_IDX = 'h2;
-  parameter MTVEC_IDX = 'h3;
-  parameter MSTATUS_IDX = 'h4;
+  parameter bit[REG_W-1:0] MCAUSE_IDX = 'h1;
+  parameter bit[REG_W-1:0] MEPC_IDX = 'h2;
+  parameter bit[REG_W-1:0] MTVEC_IDX = 'h3;
+  parameter bit[REG_W-1:0] MSTATUS_IDX = 'h4;
 
   reg [BIT_W-1:0] csr[5];
   wire [REG_W-1:0] waddr_reg_1 = (
