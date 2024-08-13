@@ -1,10 +1,10 @@
-`define ysyx_PC_INIT `YSYX_W_WIDTH'h30000000
+`define YSYX_PC_INIT `YSYX_W_WIDTH'h30000000
 
-`define ysyx_BUS_SERIAL_PORT    'h10000000
-`define ysyx_BUS_RTC_ADDR       'h02000048
-`define ysyx_BUS_RTC_ADDR_UP    `YSYX_BUS_RTC_ADDR + 4
+`define YSYX_BUS_SERIAL_PORT    'h10000000
+`define YSYX_BUS_RTC_ADDR       'h02000048
+`define YSYX_BUS_RTC_ADDR_UP    `YSYX_BUS_RTC_ADDR + 4
 
-`define ysyx_I_SDRAM_ARBURST 1
+`define YSYX_I_SDRAM_ARBURST 1
 
 // random test setting
-`define ysyx_IFSR_ENABLE 0
+`define YSYX_IFSR_ENABLE 0
