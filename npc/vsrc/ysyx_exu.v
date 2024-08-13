@@ -49,7 +49,7 @@ module ysyx_exu (
   reg [BIT_W-1:0] mem_rdata;
   reg use_exu_npc = 0;
 
-  YSYX_CSR_Reg csr(
+  ysyx_exu_csr csr(
     .clk(clk), .rst(rst), .wen(csr_wen), .exu_valid(valid_o), .ecallen(csr_ecallen),
     .waddr(csr_addr), .wdata(csr_wdata),
     .waddr_add1(csr_addr_add1), .wdata_add1(csr_wdata1),

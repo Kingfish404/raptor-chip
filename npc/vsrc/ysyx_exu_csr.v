@@ -1,7 +1,7 @@
 `include "ysyx_macro.vh"
 `include "ysyx_macro_csr.vh"
 
-module YSYX_CSR_Reg (
+module ysyx_exu_csr (
     input clk,
     rst,
     input wen,
