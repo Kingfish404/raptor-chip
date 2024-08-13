@@ -26,7 +26,7 @@ module ysyx_exu_csr (
   parameter bit [REG_W-1:0] MTVEC_IDX = 'h3;
   parameter bit [REG_W-1:0] MSTATUS_IDX = 'h4;
 
-  reg [BIT_W-1:0] csr[4];
+  reg [BIT_W-1:0] csr[5];
   wire [REG_W-1:0] waddr_reg_1 = (
     ({REG_W{waddr==`YSYX_CSR_MCAUSE}}) & (MCAUSE_IDX) |
     ({REG_W{waddr==`YSYX_CSR_MEPC}}) & (MEPC_IDX) |
