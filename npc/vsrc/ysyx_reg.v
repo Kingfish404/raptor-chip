@@ -15,8 +15,8 @@ module ysyx_reg (
     output wire [DATA_W-1:0] src2_o
 );
   parameter bit[7:0] REG_ADDR_W = 4;
-  parameter integer DATA_W = 32;
-  parameter integer REG_NUM = 16;
+  parameter bit[7:0] DATA_W = 32;
+  parameter bit[7:0] REG_NUM = 16;
   reg [DATA_W-1:0] rf[REG_NUM];
   reg [REG_NUM-1:0] rf_table = 0;
 
