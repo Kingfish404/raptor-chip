@@ -214,9 +214,9 @@ module ysyx_MEM_SRAM_UART (
           end
           if (arvalid) begin
             if ((araddr & 'b100) == 0) begin
-              `ysyx_DPI_C_pmem_read((araddr & ~'h3), mem_rdata_buf[0]);
+              `YSYX_DPI_C_pmem_read((araddr & ~'h3), mem_rdata_buf[0]);
             end else begin
-              `ysyx_DPI_C_pmem_read((araddr & ~'h3), mem_rdata_buf[1]);
+              `YSYX_DPI_C_pmem_read((araddr & ~'h3), mem_rdata_buf[1]);
             end
           end
           if (awvalid) begin
@@ -234,28 +234,28 @@ module ysyx_MEM_SRAM_UART (
               $write("%c", wdata[7:0]);
             end else begin
               if (wstrb[0]) begin
-                `ysyx_DPI_C_pmem_write((awaddr & ~'h7) + 0, {wdata >>  0}[31:0], 1);
+                `YSYX_DPI_C_pmem_write((awaddr & ~'h7) + 0, {wdata >>  0}[31:0], 1);
               end
               if (wstrb[1]) begin
-                `ysyx_DPI_C_pmem_write((awaddr & ~'h7) + 1, {wdata >>  8}[31:0], 1);
+                `YSYX_DPI_C_pmem_write((awaddr & ~'h7) + 1, {wdata >>  8}[31:0], 1);
               end
               if (wstrb[2]) begin
-                `ysyx_DPI_C_pmem_write((awaddr & ~'h7) + 2, {wdata >> 16}[31:0], 1);
+                `YSYX_DPI_C_pmem_write((awaddr & ~'h7) + 2, {wdata >> 16}[31:0], 1);
               end
               if (wstrb[3]) begin
-                `ysyx_DPI_C_pmem_write((awaddr & ~'h7) + 3, {wdata >> 24}[31:0], 1);
+                `YSYX_DPI_C_pmem_write((awaddr & ~'h7) + 3, {wdata >> 24}[31:0], 1);
               end
               if (wstrb[4]) begin
-                `ysyx_DPI_C_pmem_write((awaddr & ~'h7) + 4, {wdata >> 32}[31:0], 1);
+                `YSYX_DPI_C_pmem_write((awaddr & ~'h7) + 4, {wdata >> 32}[31:0], 1);
               end
               if (wstrb[5]) begin
-                `ysyx_DPI_C_pmem_write((awaddr & ~'h7) + 5, {wdata >> 40}[31:0], 1);
+                `YSYX_DPI_C_pmem_write((awaddr & ~'h7) + 5, {wdata >> 40}[31:0], 1);
               end
               if (wstrb[6]) begin
-                `ysyx_DPI_C_pmem_write((awaddr & ~'h7) + 6, {wdata >> 48}[31:0], 1);
+                `YSYX_DPI_C_pmem_write((awaddr & ~'h7) + 6, {wdata >> 48}[31:0], 1);
               end
               if (wstrb[7]) begin
-                `ysyx_DPI_C_pmem_write((awaddr & ~'h7) + 7, {wdata >> 56}[31:0], 1);
+                `YSYX_DPI_C_pmem_write((awaddr & ~'h7) + 7, {wdata >> 56}[31:0], 1);
               end
             end
             if (wlast) begin

@@ -1,13 +1,13 @@
 
-`define ysyx_DPI_C_npc_exu_ebreak begin end
-`define ysyx_DPI_C_npc_illegal_inst begin end
-`define ysyx_DPI_C_npc_difftest_skip_ref begin end
-`define ysyx_DPI_C_npc_difftest_mem_diff begin end
+`define YSYX_DPI_C_npc_exu_ebreak begin end
+`define YSYX_DPI_C_npc_illegal_inst begin end
+`define YSYX_DPI_C_npc_difftest_skip_ref begin end
+`define YSYX_DPI_C_npc_difftest_mem_diff begin end
 
-`define ysyx_DPI_C_pmem_read(pm_raddr, pm_rdata) begin end
-`define ysyx_DPI_C_pmem_write(pm_waddr, pm_wdata, pm_wmask) begin end
+`define YSYX_DPI_C_pmem_read(pm_raddr, pm_rdata) begin end
+`define YSYX_DPI_C_pmem_write(pm_waddr, pm_wdata, pm_wmask) begin end
 
-`define ysyx_DPI_C_sdram_read(sd_raddr, sd_rdata) begin end
-`define ysyx_DPI_C_sdram_write(sd_waddr, sd_wdata, sd_wmask) begin end
+`define YSYX_DPI_C_sdram_read(sd_raddr, sd_rdata) begin end
+`define YSYX_DPI_C_sdram_write(sd_waddr, sd_wdata, sd_wmask) begin end
 
 `define ysyx_Assert(cond, msg) begin end

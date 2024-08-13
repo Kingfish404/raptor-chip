@@ -24,7 +24,7 @@ module ysyx_pc (
   always @(posedge clk) begin
     if (rst) begin
       pc <= `ysyx_PC_INIT;
-      `ysyx_DPI_C_npc_difftest_skip_ref
+      `YSYX_DPI_C_npc_difftest_skip_ref
     end else if (prev_valid) begin
       lpc <= pc;
       pc  <= npc;

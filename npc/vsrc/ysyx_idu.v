@@ -106,7 +106,7 @@ module ysyx_idu (
         `ysyx_OP_R_TYPE:  begin `ysyx_R_TYPE(reg_rdata1, {funct7[5], funct3}, reg_rdata2);       end
         `ysyx_OP_SYSTEM:  begin `ysyx_I_SYS_TYPE(reg_rdata1, {1'b0, funct3}, 0)                  end
         `ysyx_OP_FENCE_I: begin                                                                  end
-        default:          begin if (valid_o) begin `ysyx_DPI_C_npc_illegal_inst end              end
+        default:          begin if (valid_o) begin `YSYX_DPI_C_npc_illegal_inst end              end
       endcase
   end
 endmodule // ysyx_IDU
