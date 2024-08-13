@@ -18,7 +18,7 @@ module ysyx_exu_csr (
   parameter integer R_W = 12;
   parameter integer REG_W = 3;
   parameter integer BIT_W = `YSYX_W_WIDTH;
-  parameter integer RESET_VAL = 0;
+  localparam integer ResetVal = 0;
 
   parameter bit [REG_W-1:0] MNONE = 'h0;
   parameter bit [REG_W-1:0] MCAUSE_IDX = 'h1;
@@ -56,10 +56,10 @@ module ysyx_exu_csr (
 
   always @(posedge clk) begin
     if (rst) begin
-      csr[MCAUSE_IDX]  <= RESET_VAL;
-      csr[MEPC_IDX]    <= RESET_VAL;
-      csr[MTVEC_IDX]   <= RESET_VAL;
-      csr[MSTATUS_IDX] <= RESET_VAL;
+      csr[MCAUSE_IDX]  <= ResetVal;
+      csr[MEPC_IDX]    <= ResetVal;
+      csr[MTVEC_IDX]   <= ResetVal;
+      csr[MSTATUS_IDX] <= ResetVal;
     end else if (exu_valid) begin
       if (wen) begin
         csr[waddr_reg_1] <= wdata;
