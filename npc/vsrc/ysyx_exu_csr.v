@@ -20,7 +20,7 @@ module ysyx_exu_csr (
   parameter integer BIT_W = `YSYX_W_WIDTH;
   parameter integer RESET_VAL = 0;
 
-  parameter bit[REG_W:0] MNONE = 'h0;
+  parameter bit[REG_W-1:0] MNONE = 'h0;
   parameter MCAUSE_IDX = 'h1;
   parameter MEPC_IDX = 'h2;
   parameter MTVEC_IDX = 'h3;
