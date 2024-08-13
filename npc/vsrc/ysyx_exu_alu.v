@@ -8,7 +8,7 @@ module ysyx_exu_alu (
 );
   parameter integer BIT_W = `YSYX_W_WIDTH;
 
-  always @(*) begin
+  always_comb begin
     // $display("alu_op: %h, alu_src1: %h, alu_src2: %h", alu_op, alu_src1, alu_src2);
     unique case (alu_op)
       `YSYX_ALU_OP_ADD:  begin alu_res_o = alu_src1 + alu_src2;  end
