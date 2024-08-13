@@ -2,7 +2,8 @@
 `include "ysyx_macro_csr.vh"
 
 module ysyx_exu (
-  input clk, rst,
+  input clk,
+  input rst,
 
   input prev_valid, next_ready,
   output reg valid_o, ready_o,
