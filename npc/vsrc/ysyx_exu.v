@@ -56,9 +56,14 @@ module ysyx_exu (
     .rdata_o(csr_rdata), .mepc_o(mepc), .mtvec_o(mtvec)
   );
 
+  // assign reg_wdata_o = (
+  //   (opcode_exu == `YSYX_OP_IL_TYPE) ? mem_rdata :
+  //   (opcode_exu == `YSYX_OP_SYSTEM) ? csr_rdata : reg_wdata);
   assign reg_wdata_o = (
-    (opcode_exu == `YSYX_OP_IL_TYPE) ? mem_rdata :
-    (opcode_exu == `YSYX_OP_SYSTEM) ? csr_rdata : reg_wdata);
+    {BIT_W{((opcode_exu == `YSYX_OP_IL_TYPE) & mem_rdata)}} |
+    {BIT_W{((opcode_exu == `YSYX_OP_SYSTEM) & csr_rdata)}} |
+    (reg_wdata)
+  );
   assign csr_addr = (
     (imm_exu[3:0] == `YSYX_OP_SYSTEM_FUNC3) && imm_exu[15:4] == `YSYX_OP_SYSTEM_ECALL
       ? `YSYX_CSR_MCAUSE
