@@ -104,7 +104,7 @@ module ysyx (
   wire [REG_ADDR_W-1:0] rs1, rs2, rd;
   wire [3:0] alu_op;
   wire [6:0] opcode, funct7;
-  wire en_j, ren, wen;
+  wire en_j, ren, wen, system;
   wire idu_valid, idu_ready;
 
   // LSU output
@@ -229,7 +229,7 @@ module ysyx (
     .inst(inst),
     .reg_rdata1(reg_rdata1), .reg_rdata2(reg_rdata2),
     .pc(pc_ifu),
-    .en_j_o(en_j), .ren_o(ren), .wen_o(wen),
+    .en_j_o(en_j), .ren_o(ren), .wen_o(wen), .system_o(system),
     .op1_o(op1), .op2_o(op2), .op_j_o(op_j), .rwaddr_o(rwaddr_idu),
     .imm_o(imm),
     .rs1_o(rs1), .rs2_o(rs2), .rd_o(rd),
@@ -251,7 +251,7 @@ module ysyx (
     .valid_o(exu_valid), .ready_o(exu_ready),
 
     .inst(inst_idu),
-    .ren(ren), .wen(wen),
+    .ren(ren), .wen(wen), .system(system),
     .rd(rd), .imm(imm),
     .op1(op1), .op2(op2), .op_j(op_j), .rwaddr(rwaddr_idu),
     .alu_op(alu_op), .opcode(opcode),
