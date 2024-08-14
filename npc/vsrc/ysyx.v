@@ -251,7 +251,7 @@ module ysyx (
     .valid_o(exu_valid), .ready_o(exu_ready),
 
     .inst(inst_idu),
-    .ren(ren), .wen(wen), .rwen(rwen),
+    .ren(ren), .wen(wen),
     .rd(rd), .imm(imm),
     .op1(op1), .op2(op2), .op_j(op_j), .rwaddr(rwaddr_idu),
     .alu_op(alu_op), .opcode(opcode),
@@ -262,8 +262,6 @@ module ysyx (
     .ebreak_o(ebreak),
     .rd_o(rd_exu),
     .inst_o(inst_exu), .pc_o(pc_exu),
-
-    .rwen_o(rwen_exu),
 
     // to lsu
     .ren_o(ren_exu), .wen_o(wen_exu), .rwaddr_o(rwaddr_exu),
