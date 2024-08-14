@@ -216,9 +216,13 @@ module ysyx_bus (
   };
   assign io_master_wdata[31:0] = wdata;
   assign io_master_wdata[63:32] = wdata;
-  assign io_master_wstrb = (io_master_awaddr[2:2] == 1) ?
-         {{lsu_wstrb[3:0] << awaddr_lo}, {4'b0}}:
-         {{4'b0}, {lsu_wstrb[3:0] << awaddr_lo}};
+  // assign io_master_wstrb = (io_master_awaddr[2:2] == 1) ?
+  //        {{lsu_wstrb[3:0] << awaddr_lo}, {4'b0}}:
+  //        {{4'b0}, {lsu_wstrb[3:0] << awaddr_lo}};
+  assign io_master_wstrb = (
+    {4{io_master_awaddr[2:2]}} & lsu_wstrb |
+    {4{!io_master_awaddr[2:2]}} & (lsu_wstrb << awaddr_lo)
+  );
   assign io_master_wvalid = (state == LS_A) & (lsu_wvalid) & !write_done;
 
   assign io_master_bready = 1;
@@ -297,8 +301,7 @@ module ysyx_clint (
   reg [63:0] mtime = 0;
   assign rdata_o = (
     ({32{araddr == `YSYX_BUS_RTC_ADDR}} & mtime[31:0]) |
-    ({32{araddr == `YSYX_BUS_RTC_ADDR_UP}} & mtime[63:32]) |
-    (0)
+    ({32{araddr == `YSYX_BUS_RTC_ADDR_UP}} & mtime[63:32])
   );
   always @(posedge clk) begin
     if (rst) begin
