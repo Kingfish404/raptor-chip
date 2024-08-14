@@ -69,8 +69,8 @@ module ysyx_exu_csr (
         csr[waddr_reg_2] <= wdata_add1;
       end
       if (ecallen) begin
-        csr[MSTATUS][`YSYX_CSR_MSTATUS_MPIE] <= csr[MSTATUS][`YSYX_CSR_MSTATUS_MIE];
-        csr[MSTATUS][`YSYX_CSR_MSTATUS_MIE]  <= 1'b0;
+        csr[MSTATUS][`YSYX_CSR_MSTATUS_MPIE_IDX] <= csr[MSTATUS][`YSYX_CSR_MSTATUS_MIE_IDX];
+        csr[MSTATUS][`YSYX_CSR_MSTATUS_MIE_IDX]  <= 1'b0;
       end
     end
   end
