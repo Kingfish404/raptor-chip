@@ -91,8 +91,8 @@ module ysyx_idu (
   );
   assign wen_o = (opcode_o == `YSYX_OP_S_TYPE) & valid_o;
   assign ren_o = (opcode_o == `YSYX_OP_IL_TYPE) & valid_o;
-  assign system_o = (opcode_o == `YSYX_OP_SYSTEM) & valid_o;
-  assign system_func3_o = imm_SYS[3:0] == `YSYX_OP_SYSTEM_FUNC3 & system_o;
+  assign system_o = (opcode_o == `YSYX_OP_SYSTEM);
+  assign system_func3_o = system_o & imm_SYS[3:0] == `YSYX_OP_SYSTEM_FUNC3;
   always @(*) begin
     alu_op_o = 0;
     rs1_o = rs1; rs2_o = rs2; rd_o = 0;
