@@ -62,7 +62,7 @@ module ysyx_bus (
     input lsu_wvalid,
     output lsu_wready_o
 );
-  parameter bit[7:0] ADDR_W = 32, DATA_W = 32;
+  parameter integer ADDR_W = 32, DATA_W = 32;
 
   wire arready_o;
   wire [DATA_W-1:0] rdata_o;
@@ -292,7 +292,7 @@ module ysyx_CLINT (
     output [1:0] rresp_o,
     output reg rvalid_o
 );
-  parameter bit[7:0] ADDR_W = 32, DATA_W = 32;
+  parameter integer ADDR_W = 32, DATA_W = 32;
 
   reg [63:0] mtime = 0;
   assign rdata_o = (

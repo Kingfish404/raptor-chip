@@ -3,14 +3,14 @@
 
 module ysyx_exu_csr (
     input clk,
-    input rst,
+    rst,
     input wen,
-    input exu_valid,
+    exu_valid,
     input ecallen,
     input [R_W-1:0] waddr,
-    input [R_W-1:0] waddr_add1,
+    waddr_add1,
     input [BIT_W-1:0] wdata,
-    input [BIT_W-1:0] wdata_add1,
+    wdata_add1,
     output reg [BIT_W-1:0] rdata_o,
     output [BIT_W-1:0] mtvec_o,
     output [BIT_W-1:0] mepc_o
@@ -18,13 +18,13 @@ module ysyx_exu_csr (
   parameter integer R_W = 12;
   parameter integer REG_W = 3;
   parameter integer BIT_W = `YSYX_W_WIDTH;
-  localparam integer ResetVal = 0;
+  parameter integer RESET_VAL = 0;
 
-  parameter bit [REG_W-1:0] MNONE = 'h0;
-  parameter bit [REG_W-1:0] MCAUSE_IDX = 'h1;
-  parameter bit [REG_W-1:0] MEPC_IDX = 'h2;
-  parameter bit [REG_W-1:0] MTVEC_IDX = 'h3;
-  parameter bit [REG_W-1:0] MSTATUS_IDX = 'h4;
+  parameter bit[REG_W-1:0] MNONE = 'h0;
+  parameter bit[REG_W-1:0] MCAUSE_IDX = 'h1;
+  parameter bit[REG_W-1:0] MEPC_IDX = 'h2;
+  parameter bit[REG_W-1:0] MTVEC_IDX = 'h3;
+  parameter bit[REG_W-1:0] MSTATUS_IDX = 'h4;
 
   reg [BIT_W-1:0] csr[5];
   wire [REG_W-1:0] waddr_reg_1 = (
@@ -56,10 +56,10 @@ module ysyx_exu_csr (
 
   always @(posedge clk) begin
     if (rst) begin
-      csr[MCAUSE_IDX]  <= ResetVal;
-      csr[MEPC_IDX]    <= ResetVal;
-      csr[MTVEC_IDX]   <= ResetVal;
-      csr[MSTATUS_IDX] <= ResetVal;
+      csr[MCAUSE_IDX]  <= RESET_VAL;
+      csr[MEPC_IDX]    <= RESET_VAL;
+      csr[MTVEC_IDX]   <= RESET_VAL;
+      csr[MSTATUS_IDX] <= RESET_VAL;
     end else if (exu_valid) begin
       if (wen) begin
         csr[waddr_reg_1] <= wdata;

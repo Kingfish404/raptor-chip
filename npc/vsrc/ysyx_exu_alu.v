@@ -6,7 +6,7 @@ module ysyx_exu_alu (
   input [3:0] alu_op,
   output reg [BIT_W-1:0] alu_res_o
 );
-  parameter bit[7:0] BIT_W = `YSYX_W_WIDTH;
+  parameter integer BIT_W = `YSYX_W_WIDTH;
 
   always_comb begin
     // $display("alu_op: %h, alu_src1: %h, alu_src2: %h", alu_op, alu_src1, alu_src2);

@@ -18,7 +18,7 @@ module ysyx_exu (
   output reg [31:0] inst_o,
   output [BIT_W-1:0] pc_o,
 
-  input ren, wen,
+  input ren, wen, rwen,
   input [4:0] rd,
   input [BIT_W-1:0] imm,
   input [BIT_W-1:0] op1, op2, op_j, rwaddr,
@@ -31,10 +31,11 @@ module ysyx_exu (
   output ebreak_o,
   output reg [4:0] rd_o,
   output [3:0] alu_op_o,
+  output reg rwen_o,
   output reg [BIT_W-1:0] rwaddr_o,
   output reg ren_o, wen_o
 );
-  parameter bit[7:0] BIT_W = 64;
+  parameter integer BIT_W = 64;
 
   wire [BIT_W-1:0] addr_data, reg_wdata, mepc, mtvec;
   wire [BIT_W-1:0] mem_wdata = src2;
@@ -92,7 +93,7 @@ module ysyx_exu (
           src1 <= op1; src2 <= op2;
           alu_op_exu <= alu_op; opcode_exu <= opcode;
           addr_exu <= op_j + imm;
-          rd_o <= rd;
+          rd_o <= rd; rwen_o <= rwen;
           ren_o <= ren; wen_o <= wen;
           alu_valid <= 1;
           if (wen | ren) begin lsu_avalid <= 1; busy <= 1; rwaddr_o <= rwaddr; end

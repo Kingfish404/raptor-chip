@@ -10,13 +10,13 @@ module ysyx_reg (
     input [DATA_W-1:0] wdata,
     input [REG_ADDR_W-1:0] s1addr,
     input [REG_ADDR_W-1:0] s2addr,
-    output wire [REG_NUM-1:0] rf_table_o,
-    output wire [DATA_W-1:0] src1_o,
-    output wire [DATA_W-1:0] src2_o
+    output [REG_NUM-1:0] rf_table_o,
+    output [DATA_W-1:0] src1_o,
+    output [DATA_W-1:0] src2_o
 );
-  parameter bit[7:0] REG_ADDR_W = 4;
-  parameter bit[7:0] DATA_W = 32;
-  parameter bit[7:0] REG_NUM = 16;
+  parameter integer REG_ADDR_W = 4;
+  parameter integer DATA_W = 32;
+  parameter integer REG_NUM = 16;
   reg [DATA_W-1:0] rf[REG_NUM];
   reg [REG_NUM-1:0] rf_table = 0;
 
