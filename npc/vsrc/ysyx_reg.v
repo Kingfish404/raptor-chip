@@ -14,11 +14,11 @@ module ysyx_reg (
     output [DATA_W-1:0] src1_o,
     output [DATA_W-1:0] src2_o
 );
-  parameter bit[7:0] REG_ADDR_W = 4;
-  parameter bit[7:0] DATA_W = 32;
-  parameter bit[7:0] REG_NUM = 16;
+  parameter bit [7:0] REG_ADDR_W = 4;
+  parameter bit [7:0] DATA_W = 32;
+  parameter bit [7:0] REG_NUM = 16;
   reg [DATA_W-1:0] rf[REG_NUM];
-  reg [REG_NUM-1:0] rf_table = 0;
+  reg [REG_NUM-1:0] rf_table;
 
   assign src1_o = rf[s1addr[3:0]];
   assign src2_o = rf[s2addr[3:0]];

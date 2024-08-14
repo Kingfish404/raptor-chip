@@ -316,4 +316,3 @@ module ysyx (
   );
 
 endmodule // top
-
