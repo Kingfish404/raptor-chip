@@ -36,9 +36,6 @@ module ysyx_pc (
         valid <= 0;
         skip  <= 1;
       end
-    end else begin
-      valid <= 0;
-      skip  <= 0;
     end
   end
 endmodule  //ysyx_PC
