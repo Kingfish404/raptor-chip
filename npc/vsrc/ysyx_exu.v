@@ -60,13 +60,13 @@ module ysyx_exu (
     (opcode_exu == `YSYX_OP_IL_TYPE) ? mem_rdata :
     (system_exu) ? csr_rdata : reg_wdata);
   assign csr_addr = (
-    (imm_exu[3:0] == `YSYX_OP_SYSTEM_FUNC3) && imm_exu[15:4] == `YSYX_OP_SYSTEM_ECALL
+    (system_func3_exu) && imm_exu[15:4] == `YSYX_OP_SYSTEM_ECALL
       ? `YSYX_CSR_MCAUSE
-      : (imm_exu[3:0] == `YSYX_OP_SYSTEM_FUNC3) && imm_exu[15:4] == `YSYX_OP_SYSTEM_MRET
+      : (system_func3_exu) && imm_exu[15:4] == `YSYX_OP_SYSTEM_MRET
         ? `YSYX_CSR_MSTATUS
         : (imm_exu[15:4]));
   assign csr_addr_add1 = (
-    ((imm_exu[3:0] == `YSYX_OP_SYSTEM_FUNC3) && imm_exu[15:4] == `YSYX_OP_SYSTEM_ECALL)
+    ((system_func3_exu) && imm_exu[15:4] == `YSYX_OP_SYSTEM_ECALL)
     ? `YSYX_CSR_MEPC: (0));
   assign addr_data = addr_exu;
   assign alu_op_o = alu_op_exu;
@@ -140,8 +140,8 @@ module ysyx_exu (
     ((system_exu) && imm_exu[3:0] == `YSYX_OP_SYSTEM_FUNC3)
     && imm_exu[15:4] == `YSYX_OP_SYSTEM_ECALL);
   assign csr_wen = (system_exu) && (
-    ((imm_exu[3:0] == `YSYX_OP_SYSTEM_FUNC3) && (imm_exu[15:4] == `YSYX_OP_SYSTEM_ECALL)) |
-    ((imm_exu[3:0] == `YSYX_OP_SYSTEM_FUNC3) && (imm_exu[15:4] == `YSYX_OP_SYSTEM_MRET)) |
+    ((system_func3_exu) && (imm_exu[15:4] == `YSYX_OP_SYSTEM_ECALL)) |
+    ((system_func3_exu) && (imm_exu[15:4] == `YSYX_OP_SYSTEM_MRET)) |
     ((imm_exu[3:0] == `YSYX_OP_SYSTEM_CSRRW)) |
     ((imm_exu[3:0] == `YSYX_OP_SYSTEM_CSRRS)) |
     ((imm_exu[3:0] == `YSYX_OP_SYSTEM_CSRRC)) |
@@ -150,9 +150,9 @@ module ysyx_exu (
     ((imm_exu[3:0] == `YSYX_OP_SYSTEM_CSRRCI))
   );
   assign csr_wdata = {BIT_W{(system_exu)}} & (
-    ({BIT_W{((imm_exu[3:0] == `YSYX_OP_SYSTEM_FUNC3) && (imm_exu[15:4] == `YSYX_OP_SYSTEM_ECALL))}}
+    ({BIT_W{((system_func3_exu) && (imm_exu[15:4] == `YSYX_OP_SYSTEM_ECALL))}}
       & 'hb) |
-    ({BIT_W{((imm_exu[3:0] == `YSYX_OP_SYSTEM_FUNC3) && (imm_exu[15:4] == `YSYX_OP_SYSTEM_MRET))}} &
+    ({BIT_W{((system_func3_exu) && (imm_exu[15:4] == `YSYX_OP_SYSTEM_MRET))}} &
      {{csr_rdata[BIT_W-1:'h8]}, 1'b1, {csr_rdata[6:4]}, csr_rdata['h7], csr_rdata[2:0]}) |
     ({BIT_W{((imm_exu[3:0] == `YSYX_OP_SYSTEM_CSRRW))}} & src1) |
     ({BIT_W{((imm_exu[3:0] == `YSYX_OP_SYSTEM_CSRRS))}} & (csr_rdata | src1)) |
@@ -165,8 +165,8 @@ module ysyx_exu (
     (system_exu) | (opcode_exu == `YSYX_OP_B_TYPE) |
     (opcode_exu == `YSYX_OP_IL_TYPE)
   );
-  assign ebreak_o = ((system_exu) &
-    (system_func3_exu) & (imm_exu[15:4] == `YSYX_OP_SYSTEM_EBREAK)
+  assign ebreak_o = ((system_exu) & (system_func3_exu) &
+    (imm_exu[15:4] == `YSYX_OP_SYSTEM_EBREAK)
   );
 
   always_comb begin
