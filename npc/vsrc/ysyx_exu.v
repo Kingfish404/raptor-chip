@@ -19,7 +19,7 @@ module ysyx_exu (
   output [BIT_W-1:0] pc_o,
 
   input ren, wen,
-  input [4:0] rd,
+  input [3:0] rd,
   input [BIT_W-1:0] imm,
   input [BIT_W-1:0] op1, op2, op_j, rwaddr,
   input [3:0] alu_op,
