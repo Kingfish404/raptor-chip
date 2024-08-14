@@ -47,7 +47,7 @@ module ysyx_exu (
   wire csr_wen;
   wire csr_ecallen;
   reg [BIT_W-1:0] mem_rdata;
-  reg use_exu_npc;
+  reg use_exu_npc, system_exu;
 
   ysyx_exu_csr csr(
     .clk(clk), .rst(rst), .wen(csr_wen), .exu_valid(valid_o), .ecallen(csr_ecallen),
@@ -93,7 +93,7 @@ module ysyx_exu (
           alu_op_exu <= alu_op; opcode_exu <= opcode;
           addr_exu <= op_j + imm;
           rd_o <= rd;
-          ren_o <= ren; wen_o <= wen;
+          ren_o <= ren; wen_o <= wen; system_exu <= system;
           alu_valid <= 1;
           if (wen | ren) begin lsu_avalid <= 1; busy <= 1; rwaddr_o <= rwaddr; end
         end
