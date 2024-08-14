@@ -9,14 +9,14 @@ module ysyx_idu (
   input [BIT_W-1:0] reg_rdata1, reg_rdata2,
   input [BIT_W-1:0] pc,
   output en_j_o,
-  output reg rwen_o, ren_o, wen_o,
+  output ren_o, wen_o, system_o, system_func3_o,
   output reg [BIT_W-1:0] op1_o, op2_o,
   output wire [BIT_W-1:0] rwaddr_o, op_j_o,
   output reg [31:0] imm_o,
-  output reg [4:0] rs1_o, rs2_o, rd_o,
+  output reg [3:0] rs1_o, rs2_o, rd_o,
   output reg [3:0] alu_op_o,
   output [6:0] opcode_o,
-  output reg [BIT_W-1:0] pc_o,
+  output [BIT_W-1:0] pc_o,
   output [31:0] inst_o,
 
   input [16-1:0] rf_table,
@@ -24,11 +24,12 @@ module ysyx_idu (
   input prev_valid, next_ready,
   output reg valid_o, ready_o
 );
-  parameter integer BIT_W = 32;
+  parameter bit[7:0] BIT_W = 32;
 
-  reg [31:0] inst_idu;
+  reg [31:0] inst_idu, pc_idu;
   reg valid, ready;
-  wire [4:0] rs1 = inst_idu[19:15], rs2 = inst_idu[24:20], rd = inst_idu[11:7];
+  // wire [4:0] rs1 = inst_idu[19:15], rs2 = inst_idu[24:20], rd = inst_idu[11:7];
+  wire [3:0] rs1 = inst_idu[18:15], rs2 = inst_idu[23:20], rd = inst_idu[10:7];
   wire [2:0] funct3 = inst_idu[14:12];
   wire [6:0] funct7 = inst_idu[31:25];
   wire [11:0] imm_I = inst_idu[31:20], imm_S = {inst_idu[31:25], inst_idu[11:7]};
@@ -38,13 +39,13 @@ module ysyx_idu (
     inst_idu[31], inst_idu[19:12], inst_idu[20], inst_idu[30:25], inst_idu[24:21], 1'b0};
   wire [15:0] imm_SYS = {{imm_I}, {1'b0, funct3}};
   wire conflict_stall = (
-    opcode_o != `YSYX_OP_LUI & opcode_o != `YSYX_OP_AUIPC &
-    opcode_o != `YSYX_OP_JAL & opcode_o != `YSYX_OP_SYSTEM &
+    opcode_o != `YSYX_OP_LUI & opcode_o != `YSYX_OP_AUIPC & opcode_o != `YSYX_OP_JAL &
     (rf_table[rs1[4-1:0]] == 1) | (rf_table[rs2[4-1:0]] == 1));
   assign opcode_o = inst_idu[6:0];
   assign valid_o = valid & !conflict_stall;
   assign ready_o = ready & !conflict_stall & next_ready;
   assign inst_o = inst_idu;
+  assign pc_o = pc_idu;
 
   reg state;
   `YSYX_BUS_FSM()
@@ -53,7 +54,7 @@ module ysyx_idu (
       valid <= 0; ready <= 1;
     end
     else begin
-      if (prev_valid & ready_o & next_ready) begin inst_idu <= inst; pc_o <= pc; end
+      if (prev_valid & ready_o & next_ready) begin inst_idu <= inst; pc_idu <= pc; end
       if (state == `YSYX_IDLE) begin
         if (prev_valid & ready_o & next_ready) begin
           valid <= 1;
@@ -66,7 +67,7 @@ module ysyx_idu (
         if (next_ready == 1) begin
           ready <= 1;
           if (prev_valid & ready_o & next_ready) begin end
-          else begin valid <= 0; inst_idu <= 0; pc_o <= 0; end
+          else begin valid <= 0; inst_idu <= 0; pc_idu <= 0; end
           // if (prev_valid == 0) begin valid <= 0; end
         end
       end
@@ -90,8 +91,9 @@ module ysyx_idu (
   );
   assign wen_o = (opcode_o == `YSYX_OP_S_TYPE) & valid_o;
   assign ren_o = (opcode_o == `YSYX_OP_IL_TYPE) & valid_o;
+  assign system_o = (opcode_o == `YSYX_OP_SYSTEM);
+  assign system_func3_o = system_o & imm_SYS[3:0] == `YSYX_OP_SYSTEM_FUNC3;
   always @(*) begin
-    rwen_o = 0;
     alu_op_o = 0;
     rs1_o = rs1; rs2_o = rs2; rd_o = 0;
     imm_o = 0; op1_o = 0; op2_o = 0;

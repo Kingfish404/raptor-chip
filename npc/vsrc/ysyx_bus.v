@@ -62,7 +62,7 @@ module ysyx_bus (
     input lsu_wvalid,
     output lsu_wready_o
 );
-  parameter integer ADDR_W = 32, DATA_W = 32;
+  parameter bit [7:0] ADDR_W = 32, DATA_W = 32;
 
   wire arready_o;
   wire [DATA_W-1:0] rdata_o;
@@ -77,8 +77,8 @@ module ysyx_bus (
 
   // typedef enum [2:0] {IF_A, IF_D, LS_A, LS_D_R, LS_D_W} state_t;
   //                      000,  001,  010,    011,    100,
-  parameter logic [2:0] IF_A = 3'b000, IF_D = 3'b001;
-  parameter logic [2:0] LS_A = 3'b010, LS_D_R = 3'b011, LS_D_W = 3'b100;
+  parameter bit [2:0] IF_A = 3'b000, IF_D = 3'b001;
+  parameter bit [2:0] LS_A = 3'b010, LS_D_R = 3'b011, LS_D_W = 3'b100;
 
   reg [2:0] state;
   reg first = 1;
@@ -148,7 +148,10 @@ module ysyx_bus (
   end
 
   // read
-  wire [ADDR_W-1:0] sram_araddr = ((lsu_arvalid) ? lsu_araddr : (ifu_arvalid) ? ifu_araddr : 0);
+  wire [ADDR_W-1:0] sram_araddr = (
+    ({ADDR_W{lsu_arvalid}} & lsu_araddr) |
+    ({ADDR_W{ifu_arvalid}} & ifu_araddr)
+  );
 
   // ifu read
   assign ifu_rdata_o  = ({DATA_W{ifu_rvalid_o}} & (rdata_o));
@@ -208,17 +211,16 @@ module ysyx_bus (
   assign io_master_wlast = io_master_wvalid;
   wire [1:0] awaddr_lo = io_master_awaddr[1:0];
   wire [DATA_W-1:0] wdata = {
-    ({DATA_W{awaddr_lo == 2'b00}} & lsu_wdata) |
-         ({DATA_W{awaddr_lo == 2'b01}} & {{lsu_wdata[23:0]}, {8'b0}}) |
-         ({DATA_W{awaddr_lo == 2'b10}} & {{lsu_wdata[15:0]}, {16'b0}}) |
-         ({DATA_W{awaddr_lo == 2'b11}} & {{lsu_wdata[7:0]}, {24'b0}}) |
-         (0)
+    ({DATA_W{awaddr_lo == 2'b00}} & {{lsu_wdata}}) |
+    ({DATA_W{awaddr_lo == 2'b01}} & {{lsu_wdata[23:0]}, {8'b0}}) |
+    ({DATA_W{awaddr_lo == 2'b10}} & {{lsu_wdata[15:0]}, {16'b0}}) |
+    ({DATA_W{awaddr_lo == 2'b11}} & {{lsu_wdata[7:0]}, {24'b0}}) |
+    (0)
   };
   assign io_master_wdata[31:0] = wdata;
   assign io_master_wdata[63:32] = wdata;
-  assign io_master_wstrb = (io_master_awaddr[2:2] == 1) ?
-         {{lsu_wstrb[3:0] << awaddr_lo}, {4'b0}}:
-         {{4'b0}, {lsu_wstrb[3:0] << awaddr_lo}};
+  assign io_master_wstrb = (io_master_awaddr[2:2] == 1) ? {{wstrb}, {4'b0}} : {{4'b0}, {wstrb}};
+  wire [3:0] wstrb = {lsu_wstrb[3:0] << awaddr_lo};
   assign io_master_wvalid = (state == LS_A) & (lsu_wvalid) & !write_done;
 
   assign io_master_bready = 1;
@@ -264,7 +266,7 @@ module ysyx_bus (
   wire [DATA_W-1:0] clint_rdata_o;
   wire [1:0] clint_rresp_o;
   wire clint_rvalid_o;
-  ysyx_CLINT #(
+  ysyx_clint #(
       .ADDR_W(ADDR_W),
       .DATA_W(DATA_W)
   ) clint (
@@ -280,7 +282,7 @@ module ysyx_bus (
 endmodule
 
 // Core Local INTerrupt controller
-module ysyx_CLINT (
+module ysyx_clint (
     input clk,
     rst,
 
@@ -292,13 +294,12 @@ module ysyx_CLINT (
     output [1:0] rresp_o,
     output reg rvalid_o
 );
-  parameter integer ADDR_W = 32, DATA_W = 32;
+  parameter bit [7:0] ADDR_W = 32, DATA_W = 32;
 
   reg [63:0] mtime = 0;
   assign rdata_o = (
-    (araddr == `YSYX_BUS_RTC_ADDR) ? mtime[31:0] :
-    (araddr == `YSYX_BUS_RTC_ADDR_UP) ? mtime[63:32] :
-    (0)
+    ({32{araddr == `YSYX_BUS_RTC_ADDR}} & mtime[31:0]) |
+    ({32{araddr == `YSYX_BUS_RTC_ADDR_UP}} & mtime[63:32])
   );
   always @(posedge clk) begin
     if (rst) begin

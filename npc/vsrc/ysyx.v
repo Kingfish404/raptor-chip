@@ -77,9 +77,9 @@ module ysyx (
 
   input io_interrupt
 );
-  parameter integer DATA_W = `YSYX_W_WIDTH;
-  parameter integer ADDR_W = `YSYX_W_WIDTH;
-  parameter integer REG_ADDR_W = 5;
+  parameter bit[7:0] DATA_W = `YSYX_W_WIDTH;
+  parameter bit[7:0] ADDR_W = `YSYX_W_WIDTH;
+  parameter bit[7:0] REG_ADDR_W = 4;
   // PC unit output
   wire [DATA_W-1:0] npc;
   wire pc_valid, pc_skip;
@@ -101,10 +101,10 @@ module ysyx (
   // IDU output
   wire [31:0] inst_idu;
   wire [DATA_W-1:0] op1, op2, imm, op_j, pc_idu, rwaddr_idu;
-  wire [4:0] rs1, rs2, rd;
+  wire [REG_ADDR_W-1:0] rs1, rs2, rd;
   wire [3:0] alu_op;
   wire [6:0] opcode, funct7;
-  wire rwen, en_j, ren, wen;
+  wire en_j, ren, wen, system, system_func3;
   wire idu_valid, idu_ready;
 
   // LSU output
@@ -123,15 +123,15 @@ module ysyx (
   wire [DATA_W-1:0] reg_wdata;
   wire [DATA_W-1:0] npc_wdata;
   wire use_exu_npc, branch_retire, ebreak;
-  wire [4:0] rd_exu;
+  wire [REG_ADDR_W-1:0] rd_exu;
   wire [3:0] alu_op_exu;
-  wire rwen_exu, ren_exu, wen_exu;
+  wire ren_exu, wen_exu;
   wire [DATA_W-1:0] rwaddr_exu;
   wire exu_valid, exu_ready;
 
   // WBU output
   wire [DATA_W-1:0] reg_wdata_wbu;
-  wire [4:0] rd_wbu;
+  wire [REG_ADDR_W-1:0] rd_wbu;
   wire [DATA_W-1:0] npc_wbu;
   wire use_exu_npc_wbu;
   wire wbu_valid, wbu_ready;
@@ -229,7 +229,8 @@ module ysyx (
     .inst(inst),
     .reg_rdata1(reg_rdata1), .reg_rdata2(reg_rdata2),
     .pc(pc_ifu),
-    .rwen_o(rwen), .en_j_o(en_j), .ren_o(ren), .wen_o(wen),
+    .en_j_o(en_j), .ren_o(ren), .wen_o(wen),
+    .system_o(system), .system_func3_o(system_func3),
     .op1_o(op1), .op2_o(op2), .op_j_o(op_j), .rwaddr_o(rwaddr_idu),
     .imm_o(imm),
     .rs1_o(rs1), .rs2_o(rs2), .rd_o(rd),
@@ -251,7 +252,7 @@ module ysyx (
     .valid_o(exu_valid), .ready_o(exu_ready),
 
     .inst(inst_idu),
-    .ren(ren), .wen(wen), .rwen(rwen),
+    .ren(ren), .wen(wen), .system(system), .system_func3(system_func3),
     .rd(rd), .imm(imm),
     .op1(op1), .op2(op2), .op_j(op_j), .rwaddr(rwaddr_idu),
     .alu_op(alu_op), .opcode(opcode),
@@ -262,8 +263,6 @@ module ysyx (
     .ebreak_o(ebreak),
     .rd_o(rd_exu),
     .inst_o(inst_exu), .pc_o(pc_exu),
-
-    .rwen_o(rwen_exu),
 
     // to lsu
     .ren_o(ren_exu), .wen_o(wen_exu), .rwaddr_o(rwaddr_exu),
@@ -301,15 +300,7 @@ module ysyx (
 
     .inst(inst_exu), .pc(pc_exu),
 
-    .reg_wdata(reg_wdata),
-    .rd(rd_exu),
-    .npc_wdata(npc_wdata),
-    .use_exu_npc(use_exu_npc), .ebreak(ebreak),
-
-    .reg_wdata_o(reg_wdata_wbu),
-    .rd_o(rd_wbu),
-    .npc_wdata_o(npc_wbu),
-    .use_exu_npc_o(use_exu_npc_wbu),
+    .ebreak(ebreak),
 
     .prev_valid(exu_valid),
     .next_ready(ifu_ready),
@@ -318,4 +309,3 @@ module ysyx (
   );
 
 endmodule // top
-
