@@ -192,8 +192,8 @@ module ysyx_exu (
         case (imm_exu[3:0])
           `YSYX_OP_SYSTEM_FUNC3: begin
             case (imm_exu[15:4])
-              `YSYX_OP_SYSTEM_ECALL:  begin use_exu_npc = 1; npc_wdata_o = mtvec; end
-              `YSYX_OP_SYSTEM_MRET:   begin use_exu_npc = 1; npc_wdata_o = mepc; end
+              `YSYX_OP_SYSTEM_ECALL:  begin use_exu_npc = 1; end
+              `YSYX_OP_SYSTEM_MRET:   begin use_exu_npc = 1; end
               default: begin ; end
             endcase
           end
