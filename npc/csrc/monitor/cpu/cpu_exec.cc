@@ -204,6 +204,11 @@ static void statistic()
 {
   perf();
   double time_s = g_timer / 1e6;
+  uint64_t time_clint = *(uint64_t *)&(CONCAT(VERILOG_PREFIX, __bus__DOT__clint__DOT__mtime));
+  double time_clint_us = (double)time_clint / 2;
+  double freq_clint = 1.0 / time_clint_us;
+  Log(FMT_BLUE("CLINT: %9.1f Hz, %6.3f MHz"), freq_clint, freq_clint / 1e6);
+  Log("CLINT Freq: %9.1f Hz, %6.3f MHz", freq_clint, freq_clint / 1e6);
   double frequency = pmu.active_cycle / time_s;
   Log("time: %d (ns), %d (ms)", g_timer, (int)(g_timer / 1e3));
   Log(FMT_BLUE("Simulate Freq: %9.1f Hz, %6.3f MHz"), frequency, (double)(frequency * 1.0 / 1e6));
