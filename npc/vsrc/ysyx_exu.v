@@ -164,12 +164,31 @@ module ysyx_exu (
     (opcode_exu == `YSYX_OP_SYSTEM) | (opcode_exu == `YSYX_OP_B_TYPE) |
     (opcode_exu == `YSYX_OP_IL_TYPE)
   );
-  assign ebreak_o = ( (opcode_exu == `YSYX_OP_SYSTEM) &&
-    (imm_exu[3:0] == `YSYX_OP_SYSTEM_FUNC3) && (imm_exu[15:4] == `YSYX_OP_SYSTEM_EBREAK)
+  assign ebreak_o = ((opcode_exu == `YSYX_OP_SYSTEM) &
+    (imm_exu[3:0] == `YSYX_OP_SYSTEM_FUNC3) & (imm_exu[15:4] == `YSYX_OP_SYSTEM_EBREAK)
   );
+
+  always_comb begin
+    if (opcode_exu == `YSYX_OP_SYSTEM) begin
+      `YSYX_OP_SYSTEM: begin
+        case (imm_exu[3:0])
+          `YSYX_OP_SYSTEM_FUNC3: begin
+            case (imm_exu[15:4])
+              `YSYX_OP_SYSTEM_ECALL:  begin use_exu_npc = 1; npc_wdata_o = mtvec; end
+              `YSYX_OP_SYSTEM_MRET:   begin use_exu_npc = 1; npc_wdata_o = mepc; end
+              default: begin npc_wdata_o = addr_data; end
+            endcase
+          end
+          default: begin npc_wdata_o = addr_data; end
+        endcase
+      end
+    end else begin
+      npc_wdata_o = addr_data;
+    end
+  end
+
   always_comb begin
     use_exu_npc = 0;
-    npc_wdata_o = addr_data;
     case (opcode_exu)
       `YSYX_OP_SYSTEM: begin
         case (imm_exu[3:0])
