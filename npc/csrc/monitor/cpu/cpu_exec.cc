@@ -117,6 +117,8 @@ static void perf_sample_per_cycle()
   bool ifu_pvalid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__ifu__DOT__pvalid));
   bool l1i_cache_hit = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__ifu__DOT__l1i_cache_hit));
   bool lsu_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__exu__DOT__lsu_valid));
+  uint32_t pc_ifu = *(uint32_t *)&(CONCAT(VERILOG_PREFIX, __DOT__ifu__DOT__pc_ifu));
+  static uint32_t ifu_pc = 0;
   if (ifu_valid)
   {
     pmu.ifu_fetch_cnt++;
