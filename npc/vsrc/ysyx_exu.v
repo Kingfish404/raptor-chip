@@ -160,14 +160,17 @@ module ysyx_exu (
     ({BIT_W{((imm_exu[3:0] == `YSYX_OP_SYSTEM_CSRRSI))}} & (csr_rdata | src1)) |
     ({BIT_W{((imm_exu[3:0] == `YSYX_OP_SYSTEM_CSRRCI))}} & (csr_rdata & ~src1))
   );
+  assign branch_retire_o = (
+    (opcode_exu == `YSYX_OP_SYSTEM) |
+    (opcode_exu == `YSYX_OP_B_TYPE) |
+    (opcode_exu == `YSYX_OP_IL_TYPE) |
+  );
   always_comb begin
     use_exu_npc = 0;
     ebreak_o = 0;
     npc_wdata_o = addr_data;
-    branch_retire_o = 0;
     case (opcode_exu)
       `YSYX_OP_SYSTEM: begin
-        branch_retire_o = 1;
         case (imm_exu[3:0])
           `YSYX_OP_SYSTEM_FUNC3: begin
             case (imm_exu[15:4])
@@ -183,7 +186,6 @@ module ysyx_exu (
       `YSYX_OP_JAL, `YSYX_OP_JALR: begin use_exu_npc = 1; end
       `YSYX_OP_B_TYPE: begin
         // $display("reg_wdata: %h, npc_wdata: %h, npc: %h", reg_wdata, npc_wdata, npc);
-        branch_retire_o = 1;
         case (alu_op_exu)
           `YSYX_ALU_OP_SUB:  begin use_exu_npc =(~|reg_wdata); end
           `YSYX_ALU_OP_XOR:  begin use_exu_npc = (|reg_wdata); end
@@ -195,7 +197,6 @@ module ysyx_exu (
         endcase
       end
       `YSYX_OP_IL_TYPE: begin
-        branch_retire_o = 1;
       end
       default: begin use_exu_npc = 0; end
     endcase

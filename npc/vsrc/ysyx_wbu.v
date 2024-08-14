@@ -24,10 +24,6 @@ module ysyx_wbu (
       ready_o <= 1;
     end else begin
       if (prev_valid & ready_o) begin
-        // reg_wdata_o <= reg_wdata;
-        // rd_o <= rd;
-        // npc_wdata_o <= npc_wdata;
-        // use_exu_npc_o <= use_exu_npc;
         pc_wbu <= pc;
         inst_wbu <= inst;
         if (ebreak) begin
@@ -37,15 +33,12 @@ module ysyx_wbu (
       if (state == `YSYX_IDLE) begin
         if (prev_valid == 1) begin
           valid_o <= 1;
-          // ready_o <= 0;
         end
       end else if (state == `YSYX_WAIT_READY) begin
-        // if (next_ready == 1) begin
         ready_o <= 1;
         if (prev_valid == 0) begin
           valid_o <= 0;
         end
-        // end
       end
     end
   end
