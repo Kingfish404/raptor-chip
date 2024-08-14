@@ -58,7 +58,7 @@ module ysyx_exu (
 
   assign reg_wdata_o = (
     (opcode_exu == `YSYX_OP_IL_TYPE) ? mem_rdata :
-    (opcode_exu == `YSYX_OP_SYSTEM) ? csr_rdata : reg_wdata);
+    (system) ? csr_rdata : reg_wdata);
   assign csr_addr = (
     (imm_exu[3:0] == `YSYX_OP_SYSTEM_FUNC3) && imm_exu[15:4] == `YSYX_OP_SYSTEM_ECALL
       ? `YSYX_CSR_MCAUSE
@@ -136,9 +136,9 @@ module ysyx_exu (
     imm_exu[3:0] == `YSYX_OP_SYSTEM_FUNC3 && imm_exu[15:4] == `YSYX_OP_SYSTEM_ECALL)
     ? pc_exu : 'h0;
   assign csr_ecallen = (
-    ((opcode_exu == `YSYX_OP_SYSTEM) && imm_exu[3:0] == `YSYX_OP_SYSTEM_FUNC3)
+    ((system) && imm_exu[3:0] == `YSYX_OP_SYSTEM_FUNC3)
     && imm_exu[15:4] == `YSYX_OP_SYSTEM_ECALL);
-  assign csr_wen = (opcode_exu == `YSYX_OP_SYSTEM) && (
+  assign csr_wen = (system) && (
     ((imm_exu[3:0] == `YSYX_OP_SYSTEM_FUNC3) && (imm_exu[15:4] == `YSYX_OP_SYSTEM_ECALL)) |
     ((imm_exu[3:0] == `YSYX_OP_SYSTEM_FUNC3) && (imm_exu[15:4] == `YSYX_OP_SYSTEM_MRET)) |
     ((imm_exu[3:0] == `YSYX_OP_SYSTEM_CSRRW)) |
@@ -148,7 +148,7 @@ module ysyx_exu (
     ((imm_exu[3:0] == `YSYX_OP_SYSTEM_CSRRSI)) |
     ((imm_exu[3:0] == `YSYX_OP_SYSTEM_CSRRCI))
   );
-  assign csr_wdata = {BIT_W{(opcode_exu == `YSYX_OP_SYSTEM)}} & (
+  assign csr_wdata = {BIT_W{(system)}} & (
     ({BIT_W{((imm_exu[3:0] == `YSYX_OP_SYSTEM_FUNC3) && (imm_exu[15:4] == `YSYX_OP_SYSTEM_ECALL))}}
       & 'hb) |
     ({BIT_W{((imm_exu[3:0] == `YSYX_OP_SYSTEM_FUNC3) && (imm_exu[15:4] == `YSYX_OP_SYSTEM_MRET))}} &
@@ -161,15 +161,15 @@ module ysyx_exu (
     ({BIT_W{((imm_exu[3:0] == `YSYX_OP_SYSTEM_CSRRCI))}} & (csr_rdata & ~src1))
   );
   assign branch_retire_o = (
-    (opcode_exu == `YSYX_OP_SYSTEM) | (opcode_exu == `YSYX_OP_B_TYPE) |
+    (system) | (opcode_exu == `YSYX_OP_B_TYPE) |
     (opcode_exu == `YSYX_OP_IL_TYPE)
   );
-  assign ebreak_o = ((opcode_exu == `YSYX_OP_SYSTEM) &
+  assign ebreak_o = ((system) &
     (imm_exu[3:0] == `YSYX_OP_SYSTEM_FUNC3) & (imm_exu[15:4] == `YSYX_OP_SYSTEM_EBREAK)
   );
 
   always_comb begin
-    if (opcode_exu == `YSYX_OP_SYSTEM) begin
+    if (system) begin
       case (imm_exu[3:0])
         `YSYX_OP_SYSTEM_FUNC3: begin
           case (imm_exu[15:4])
