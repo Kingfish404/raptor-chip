@@ -15,7 +15,7 @@ module ysyx_pc (
 );
   parameter bit[7:0] DATA_W = `YSYX_W_WIDTH;
   // wire [DATA_W-1:0] npc = pc + 4;
-  reg [DATA_W-1:0] pc, lpc;
+  reg [DATA_W-1:0] pc;
   reg valid = 0, skip = 0;
   assign valid_o = valid | (use_exu_npc);
   assign skip_o  = skip;
@@ -26,7 +26,6 @@ module ysyx_pc (
       pc <= `YSYX_PC_INIT;
       `YSYX_DPI_C_NPC_DIFFTEST_SKIP_REF
     end else if (prev_valid) begin
-      lpc <= pc;
       pc  <= pc + 4;
       if (use_exu_npc) begin
         pc <= npc_wdata;
