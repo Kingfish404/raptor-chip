@@ -207,7 +207,7 @@ static void statistic()
   uint64_t time_clint = *(uint64_t *)&(CONCAT(VERILOG_PREFIX, __DOT__bus__DOT__clint__DOT__mtime));
   double time_clint_us = time_clint / 2;
   double freq_clint = 1.0 / time_clint_us;
-  Log("CLINT time: %d (ns), %d (us)", time_clint, (int)(time_clint_us));
+  Log("CLINT time: %d (ns), %d (us)", time_clint, (int)(time_clint));
   Log(FMT_BLUE("CLINT: %9.1f Hz, %6.3f MHz"), freq_clint, freq_clint / 1e6);
   Log("CLINT Freq: %9.1f Hz, %6.3f MHz", freq_clint, freq_clint / 1e6);
   double frequency = pmu.active_cycle / time_s;
