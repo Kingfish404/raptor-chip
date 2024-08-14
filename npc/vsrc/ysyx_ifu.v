@@ -69,7 +69,7 @@ module ysyx_ifu (
   // with l1i cache
   wire ifu_just_load = (l1i_state == 'b11 & ifu_rvalid);
   assign inst_o = ifu_just_load & pc_ifu[2] == 1'b1 ? ifu_rdata : l1i[addr_idx][addr_offset];
-  assign valid_o = (l1i_cache_hit & !branch_stall) | ifu_just_load;
+  assign valid_o = ifu_just_load | (l1i_cache_hit & !branch_stall);
 
   assign pc_o = pc_ifu;
   `YSYX_BUS_FSM()
@@ -77,6 +77,41 @@ module ysyx_ifu (
     if (rst) begin
       pvalid <= 1;
       pc_ifu <= `YSYX_PC_INIT;
+    end else begin
+      if (valid_o & next_ready & inst_o == `YSYX_INST_FENCE_I) begin
+        l1i_valid <= 0;
+      end
+      if (state == `YSYX_IDLE) begin
+        if (prev_valid) begin
+          pvalid <= prev_valid;
+          if (is_branch & pc_valid) begin
+            branch_stall <= 0;
+            pc_ifu <= npc;
+          end else if ((is_branch | is_load) & pc_skip) begin
+            branch_stall <= 0;
+            pc_ifu <= npc;
+          end
+        end
+      end else if (state == `YSYX_WAIT_READY) begin
+        if (next_ready == 1) begin
+          if (valid_o) begin
+            if (!is_branch & !is_load) begin
+              pc_ifu <= pc_ifu + 4;
+              pvalid <= 0;
+            end else begin
+              branch_stall <= 1;
+            end
+          end else begin
+            pvalid <= 0;
+          end
+        end
+      end
+    end
+  end
+
+  always @(posedge clk) begin
+    if (rst) begin
+      l1i_state <= 'b000;
     end else begin
       case (l1i_state)
         'b00:
@@ -108,34 +143,6 @@ module ysyx_ifu (
           l1i_state <= 'b000;
         end
       endcase
-      if (valid_o & next_ready & inst_o == `YSYX_INST_FENCE_I) begin
-        l1i_valid <= 0;
-      end
-      if (state == `YSYX_IDLE) begin
-        if (prev_valid) begin
-          pvalid <= prev_valid;
-          if (is_branch & pc_valid) begin
-            branch_stall <= 0;
-            pc_ifu <= npc;
-          end else if ((is_branch | is_load) & pc_skip) begin
-            branch_stall <= 0;
-            pc_ifu <= npc;
-          end
-        end
-      end else if (state == `YSYX_WAIT_READY) begin
-        if (next_ready == 1) begin
-          if (valid_o) begin
-            if (!is_branch & !is_load) begin
-              pc_ifu <= pc_ifu + 4;
-              pvalid <= 0;
-            end else begin
-              branch_stall <= 1;
-            end
-          end else begin
-            pvalid <= 0;
-          end
-        end
-      end
     end
   end
 endmodule  // ysyx_IFU
