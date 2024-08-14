@@ -13,10 +13,10 @@ module ysyx_wbu (
     input use_exu_npc,
     input ebreak,
 
-    output reg [BIT_W-1:0] reg_wdata_o,
-    output reg [3:0] rd_o,
-    output reg [BIT_W-1:0] npc_wdata_o,
-    output reg use_exu_npc_o,
+    // output reg [BIT_W-1:0] reg_wdata_o,
+    // output reg [3:0] rd_o,
+    // output reg [BIT_W-1:0] npc_wdata_o,
+    // output reg use_exu_npc_o,
 
     input prev_valid,
     input next_ready,
@@ -34,10 +34,10 @@ module ysyx_wbu (
       ready_o <= 1;
     end else begin
       if (prev_valid & ready_o) begin
-        reg_wdata_o <= reg_wdata;
-        rd_o <= rd;
-        npc_wdata_o <= npc_wdata;
-        use_exu_npc_o <= use_exu_npc;
+        // reg_wdata_o <= reg_wdata;
+        // rd_o <= rd;
+        // npc_wdata_o <= npc_wdata;
+        // use_exu_npc_o <= use_exu_npc;
         pc_wbu <= pc;
         inst_wbu <= inst;
         if (ebreak) begin
