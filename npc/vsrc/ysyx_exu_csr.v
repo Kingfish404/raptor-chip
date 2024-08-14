@@ -24,10 +24,10 @@ module ysyx_exu_csr (
   parameter bit [BIT_W-1:0] RESET_VAL = 0;
 
   // localparam bit [REG_W-1:0] MNONE = 'h0;
-  localparam bit [REG_W-1:0] MCAUSE = 'h0;
-  localparam bit [REG_W-1:0] MEPC = 'h1;
-  localparam bit [REG_W-1:0] MTVEC = 'h2;
-  localparam bit [REG_W-1:0] MSTATUS = 'h3;
+  localparam bit [REG_W-1:0] MCAUSE = 'h1;
+  localparam bit [REG_W-1:0] MEPC = 'h2;
+  localparam bit [REG_W-1:0] MTVEC = 'h3;
+  localparam bit [REG_W-1:0] MSTATUS = 'h4;
 
   reg [BIT_W-1:0] csr[5];
   wire [REG_W-1:0] waddr_reg_1 = (
