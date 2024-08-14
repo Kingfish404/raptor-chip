@@ -78,9 +78,6 @@ module ysyx_ifu (
       pvalid <= 1;
       pc_ifu <= `YSYX_PC_INIT;
     end else begin
-      if (inst_o == `YSYX_INST_FENCE_I) begin
-        l1i_valid <= 0;
-      end
       case (l1i_state)
         'b00:
         if (ifu_arvalid_o) begin
@@ -111,6 +108,9 @@ module ysyx_ifu (
           l1i_state <= 'b000;
         end
       endcase
+      if (valid_o & next_ready & inst_o == `YSYX_INST_FENCE_I) begin
+        l1i_valid <= 0;
+      end
       if (state == `YSYX_IDLE) begin
         if (prev_valid) begin
           pvalid <= prev_valid;
