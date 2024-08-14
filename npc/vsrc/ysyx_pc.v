@@ -13,7 +13,7 @@ module ysyx_pc (
     output reg valid_o,
     skip_o
 );
-  parameter integer DATA_W = `YSYX_W_WIDTH;
+  parameter bit[7:0] DATA_W = `YSYX_W_WIDTH;
   wire [DATA_W-1:0] npc = pc + 4;
   reg [DATA_W-1:0] pc, lpc;
   reg valid = 0, skip = 0;

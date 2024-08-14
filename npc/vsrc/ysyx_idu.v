@@ -24,7 +24,7 @@ module ysyx_idu (
   input prev_valid, next_ready,
   output reg valid_o, ready_o
 );
-  parameter integer BIT_W = 32;
+  parameter bit[7:0] BIT_W = 32;
 
   reg [31:0] inst_idu, pc_idu;
   reg valid, ready;

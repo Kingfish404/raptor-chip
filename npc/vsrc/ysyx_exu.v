@@ -34,7 +34,7 @@ module ysyx_exu (
   output reg [BIT_W-1:0] rwaddr_o,
   output reg ren_o, wen_o
 );
-  parameter integer BIT_W = 64;
+  parameter bit[7:0] BIT_W = 64;
 
   wire [BIT_W-1:0] addr_data, reg_wdata, mepc, mtvec;
   wire [BIT_W-1:0] mem_wdata = src2;

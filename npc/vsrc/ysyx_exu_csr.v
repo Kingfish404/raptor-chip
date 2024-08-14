@@ -15,10 +15,10 @@ module ysyx_exu_csr (
     output [BIT_W-1:0] mtvec_o,
     output [BIT_W-1:0] mepc_o
 );
-  parameter integer R_W = 12;
-  parameter integer REG_W = 3;
-  parameter integer BIT_W = `YSYX_W_WIDTH;
-  parameter integer RESET_VAL = 0;
+  parameter bit[7:0] R_W = 12;
+  parameter bit[7:0] REG_W = 3;
+  parameter bit[7:0] BIT_W = `YSYX_W_WIDTH;
+  parameter bit[7:0] RESET_VAL = 0;
 
   parameter bit[REG_W-1:0] MNONE = 'h0;
   parameter bit[REG_W-1:0] MCAUSE_IDX = 'h1;

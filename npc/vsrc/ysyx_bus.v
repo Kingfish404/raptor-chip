@@ -62,7 +62,7 @@ module ysyx_bus (
     input lsu_wvalid,
     output lsu_wready_o
 );
-  parameter integer ADDR_W = 32, DATA_W = 32;
+  parameter bit[7:0] ADDR_W = 32, DATA_W = 32;
 
   wire arready_o;
   wire [DATA_W-1:0] rdata_o;
@@ -77,8 +77,8 @@ module ysyx_bus (
 
   // typedef enum [2:0] {IF_A, IF_D, LS_A, LS_D_R, LS_D_W} state_t;
   //                      000,  001,  010,    011,    100,
-  parameter logic [2:0] IF_A = 3'b000, IF_D = 3'b001;
-  parameter logic [2:0] LS_A = 3'b010, LS_D_R = 3'b011, LS_D_W = 3'b100;
+  parameter bit[2:0] IF_A = 3'b000, IF_D = 3'b001;
+  parameter bit[2:0] LS_A = 3'b010, LS_D_R = 3'b011, LS_D_W = 3'b100;
 
   reg [2:0] state;
   reg first = 1;
@@ -264,7 +264,7 @@ module ysyx_bus (
   wire [DATA_W-1:0] clint_rdata_o;
   wire [1:0] clint_rresp_o;
   wire clint_rvalid_o;
-  ysyx_CLINT #(
+  ysyx_clint #(
       .ADDR_W(ADDR_W),
       .DATA_W(DATA_W)
   ) clint (
@@ -280,7 +280,7 @@ module ysyx_bus (
 endmodule
 
 // Core Local INTerrupt controller
-module ysyx_CLINT (
+module ysyx_clint (
     input clk,
     rst,
 
@@ -292,7 +292,7 @@ module ysyx_CLINT (
     output [1:0] rresp_o,
     output reg rvalid_o
 );
-  parameter integer ADDR_W = 32, DATA_W = 32;
+  parameter bit[7:0] ADDR_W = 32, DATA_W = 32;
 
   reg [63:0] mtime = 0;
   assign rdata_o = (
