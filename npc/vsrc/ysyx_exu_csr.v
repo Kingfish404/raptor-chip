@@ -23,26 +23,24 @@ module ysyx_exu_csr (
   parameter bit [7:0] BIT_W = `YSYX_W_WIDTH;
   parameter bit [BIT_W-1:0] RESET_VAL = 0;
 
-  localparam bit [REG_W-1:0] MNONE = 'h0;
-  localparam bit [REG_W-1:0] MCAUSE = 'h1;
-  localparam bit [REG_W-1:0] MEPC = 'h2;
-  localparam bit [REG_W-1:0] MTVEC = 'h3;
-  localparam bit [REG_W-1:0] MSTATUS = 'h4;
+  // localparam bit [REG_W-1:0] MNONE = 'h0;
+  localparam bit [REG_W-1:0] MCAUSE = 'h0;
+  localparam bit [REG_W-1:0] MEPC = 'h1;
+  localparam bit [REG_W-1:0] MTVEC = 'h2;
+  localparam bit [REG_W-1:0] MSTATUS = 'h3;
 
   reg [BIT_W-1:0] csr[5];
   wire [REG_W-1:0] waddr_reg_1 = (
     ({REG_W{waddr==`YSYX_CSR_MCAUSE}}) & (MCAUSE) |
     ({REG_W{waddr==`YSYX_CSR_MEPC}}) & (MEPC) |
     ({REG_W{waddr==`YSYX_CSR_MTVEC}}) & (MTVEC) |
-    ({REG_W{waddr==`YSYX_CSR_MSTATUS}}) & (MSTATUS) |
-    (MNONE)
+    ({REG_W{waddr==`YSYX_CSR_MSTATUS}}) & (MSTATUS)
   );
   wire [REG_W-1:0] waddr_reg_2 = (
     ({REG_W{waddr_add1==`YSYX_CSR_MCAUSE}}) & (MCAUSE) |
     ({REG_W{waddr_add1==`YSYX_CSR_MEPC}}) & (MEPC) |
     ({REG_W{waddr_add1==`YSYX_CSR_MTVEC}}) & (MTVEC) |
-    ({REG_W{waddr_add1==`YSYX_CSR_MSTATUS}}) & (MSTATUS) |
-    (MNONE)
+    ({REG_W{waddr_add1==`YSYX_CSR_MSTATUS}}) & (MSTATUS)
   );
 
   assign rdata_o = (
