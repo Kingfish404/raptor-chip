@@ -150,8 +150,7 @@ module ysyx_exu (
     ((imm_exu[3:0] == `YSYX_OP_SYSTEM_CSRRCI))
   );
   assign csr_wdata = {BIT_W{(system_exu)}} & (
-    ({BIT_W{((system_func3_exu) && (imm_exu[15:4] == `YSYX_OP_SYSTEM_ECALL))}}
-      & 'hb) |
+    ({BIT_W{((system_func3_exu) && (imm_exu[15:4] == `YSYX_OP_SYSTEM_ECALL))}} & 'hb) |
     ({BIT_W{((system_func3_exu) && (imm_exu[15:4] == `YSYX_OP_SYSTEM_MRET))}} &
      {{csr_rdata[BIT_W-1:'h8]}, 1'b1, {csr_rdata[6:4]}, csr_rdata['h7], csr_rdata[2:0]}) |
     ({BIT_W{((imm_exu[3:0] == `YSYX_OP_SYSTEM_CSRRW))}} & src1) |
@@ -185,16 +184,11 @@ module ysyx_exu (
     case (opcode_exu)
       `YSYX_OP_SYSTEM: begin
         if (system_func3_exu) begin
-          // case (imm_exu[3:0])
-          //   `YSYX_OP_SYSTEM_FUNC3: begin
-              case (imm_exu[15:4])
-                `YSYX_OP_SYSTEM_ECALL:  begin use_exu_npc = 1; end
-                `YSYX_OP_SYSTEM_MRET:   begin use_exu_npc = 1; end
-                default: begin use_exu_npc = 0; end
-              endcase
-          //   end
-          //   default: begin use_exu_npc = 0; end
-          // endcase
+          case (imm_exu[15:4])
+            `YSYX_OP_SYSTEM_ECALL:  begin use_exu_npc = 1; end
+            `YSYX_OP_SYSTEM_MRET:   begin use_exu_npc = 1; end
+            default: begin use_exu_npc = 0; end
+          endcase
         end else begin use_exu_npc = 0; end
       end
       `YSYX_OP_JAL, `YSYX_OP_JALR: begin use_exu_npc = 1; end
