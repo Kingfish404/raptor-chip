@@ -213,7 +213,7 @@ module ysyx_exu (
           default:           begin use_exu_npc = 0; end
         endcase
       end
-      `YSYX_OP_IL_TYPE: begin ; end
+      `YSYX_OP_IL_TYPE: begin use_exu_npc = 0; end
       default: begin use_exu_npc = 0; end
     endcase
   end
