@@ -123,7 +123,7 @@ module ysyx (
   wire [DATA_W-1:0] reg_wdata;
   wire [DATA_W-1:0] npc_wdata;
   wire use_exu_npc, branch_retire, ebreak;
-  wire [4:0] rd_exu;
+  wire [REG_ADDR_W-1:0] rd_exu;
   wire [3:0] alu_op_exu;
   wire ren_exu, wen_exu;
   wire [DATA_W-1:0] rwaddr_exu;
@@ -131,7 +131,7 @@ module ysyx (
 
   // WBU output
   wire [DATA_W-1:0] reg_wdata_wbu;
-  wire [4:0] rd_wbu;
+  wire [REG_ADDR_W-1:0] rd_wbu;
   wire [DATA_W-1:0] npc_wbu;
   wire use_exu_npc_wbu;
   wire wbu_valid, wbu_ready;
