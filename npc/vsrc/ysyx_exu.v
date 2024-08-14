@@ -170,18 +170,16 @@ module ysyx_exu (
 
   always_comb begin
     if (opcode_exu == `YSYX_OP_SYSTEM) begin
-      `YSYX_OP_SYSTEM: begin
-        case (imm_exu[3:0])
-          `YSYX_OP_SYSTEM_FUNC3: begin
-            case (imm_exu[15:4])
-              `YSYX_OP_SYSTEM_ECALL:  begin use_exu_npc = 1; npc_wdata_o = mtvec; end
-              `YSYX_OP_SYSTEM_MRET:   begin use_exu_npc = 1; npc_wdata_o = mepc; end
-              default: begin npc_wdata_o = addr_data; end
-            endcase
-          end
-          default: begin npc_wdata_o = addr_data; end
-        endcase
-      end
+      case (imm_exu[3:0])
+        `YSYX_OP_SYSTEM_FUNC3: begin
+          case (imm_exu[15:4])
+            `YSYX_OP_SYSTEM_ECALL:  begin use_exu_npc = 1; npc_wdata_o = mtvec; end
+            `YSYX_OP_SYSTEM_MRET:   begin use_exu_npc = 1; npc_wdata_o = mepc; end
+            default: begin npc_wdata_o = addr_data; end
+          endcase
+        end
+        default: begin npc_wdata_o = addr_data; end
+      endcase
     end else begin
       npc_wdata_o = addr_data;
     end
@@ -216,7 +214,7 @@ module ysyx_exu (
         endcase
       end
       `YSYX_OP_IL_TYPE: begin ; end
-      default: begin use_exu_npc = 0; end
+      default: begin use_exu_npc[] = 0; end
     endcase
   end
 
