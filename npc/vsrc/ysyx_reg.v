@@ -22,8 +22,8 @@ module ysyx_reg (
 
   // assign src1_o = rf[s1addr[3:0]];
   // assign src2_o = rf[s2addr[3:0]];
-  assign src1_o = s1addr[3:0] ? rf[s1addr[3:0]] : 0;
-  assign src2_o = s2addr[3:0] ? rf[s2addr[3:0]] : 0;
+  assign src1_o = |s1addr[3:0] ? rf[s1addr[3:0]] : 0;
+  assign src2_o = |s2addr[3:0] ? rf[s2addr[3:0]] : 0;
   assign rf_table_o = rf_table;
 
   always @(posedge clk) begin
