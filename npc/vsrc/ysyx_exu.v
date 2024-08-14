@@ -134,10 +134,10 @@ module ysyx_exu (
 
   // branch/system unit
   assign csr_wdata1 = (
-    imm_exu[3:0] == `YSYX_OP_SYSTEM_FUNC3 && imm_exu[15:4] == `YSYX_OP_SYSTEM_ECALL)
+    (system_func3_exu) && imm_exu[15:4] == `YSYX_OP_SYSTEM_ECALL)
     ? pc_exu : 'h0;
   assign csr_ecallen = (
-    ((system_exu) && imm_exu[3:0] == `YSYX_OP_SYSTEM_FUNC3)
+    ((system_exu) && (system_func3_exu))
     && imm_exu[15:4] == `YSYX_OP_SYSTEM_ECALL);
   assign csr_wen = (system_exu) && (
     ((system_func3_exu) && (imm_exu[15:4] == `YSYX_OP_SYSTEM_ECALL)) |
@@ -170,17 +170,12 @@ module ysyx_exu (
   );
 
   always_comb begin
-    if (system_exu) begin
-      case (imm_exu[3:0])
-        `YSYX_OP_SYSTEM_FUNC3: begin
+    if (system_exu & system_func3_exu) begin
           case (imm_exu[15:4])
             `YSYX_OP_SYSTEM_ECALL:  begin npc_wdata_o = mtvec; end
             `YSYX_OP_SYSTEM_MRET:   begin npc_wdata_o = mepc; end
             default: begin npc_wdata_o = addr_data; end
           endcase
-        end
-        default: begin npc_wdata_o = addr_data; end
-      endcase
     end else begin
       npc_wdata_o = addr_data;
     end
@@ -189,16 +184,18 @@ module ysyx_exu (
   always_comb begin
     case (opcode_exu)
       `YSYX_OP_SYSTEM: begin
-        case (imm_exu[3:0])
-          `YSYX_OP_SYSTEM_FUNC3: begin
-            case (imm_exu[15:4])
-              `YSYX_OP_SYSTEM_ECALL:  begin use_exu_npc = 1; end
-              `YSYX_OP_SYSTEM_MRET:   begin use_exu_npc = 1; end
-              default: begin use_exu_npc = 0; end
-            endcase
-          end
-          default: begin use_exu_npc = 0; end
-        endcase
+        if (system_func3_exu) begin
+          // case (imm_exu[3:0])
+          //   `YSYX_OP_SYSTEM_FUNC3: begin
+              case (imm_exu[15:4])
+                `YSYX_OP_SYSTEM_ECALL:  begin use_exu_npc = 1; end
+                `YSYX_OP_SYSTEM_MRET:   begin use_exu_npc = 1; end
+                default: begin use_exu_npc = 0; end
+              endcase
+          //   end
+          //   default: begin use_exu_npc = 0; end
+          // endcase
+        end else begin use_exu_npc = 0; end
       end
       `YSYX_OP_JAL, `YSYX_OP_JALR: begin use_exu_npc = 1; end
       `YSYX_OP_B_TYPE: begin
