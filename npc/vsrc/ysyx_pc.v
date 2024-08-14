@@ -31,11 +31,12 @@ module ysyx_pc (
       if (use_exu_npc) begin
         pc <= npc_wdata;
         valid <= 1;
-        skip <= 0;
       end else if (branch_retire) begin
-        valid <= 0;
         skip  <= 1;
       end
+    end else begin
+      valid <= 0;
+      skip  <= 0;
     end
   end
 endmodule  //ysyx_PC
