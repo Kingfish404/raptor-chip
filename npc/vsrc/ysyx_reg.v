@@ -46,7 +46,7 @@ module ysyx_reg (
       always @(posedge clk) begin
         if (rst) begin
           rf[i] <= 0;
-        end else if (reg_write_en & waddr[3:0]) begin
+        end else if (reg_write_en & |waddr[3:0]) begin
           rf[waddr[3:0]] <= wdata;
           rf[0] <= 0;
         end
