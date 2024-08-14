@@ -220,8 +220,8 @@ module ysyx_bus (
   //        {{lsu_wstrb[3:0] << awaddr_lo}, {4'b0}}:
   //        {{4'b0}, {lsu_wstrb[3:0] << awaddr_lo}};
   assign io_master_wstrb = (
-    {4{io_master_awaddr[2:2]}} & lsu_wstrb |
-    {4{!io_master_awaddr[2:2]}} & (lsu_wstrb << awaddr_lo)
+    {4{io_master_awaddr[2:2]}} & {{lsu_wstrb[3:0] << awaddr_lo}, {4'b0}} |
+    {4{!io_master_awaddr[2:2]}} & {{4'b0}, {lsu_wstrb[3:0] << awaddr_lo}}
   );
   assign io_master_wvalid = (state == LS_A) & (lsu_wvalid) & !write_done;
 
