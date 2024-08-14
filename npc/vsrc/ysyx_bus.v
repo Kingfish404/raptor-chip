@@ -148,7 +148,11 @@ module ysyx_bus (
   end
 
   // read
-  wire [ADDR_W-1:0] sram_araddr = ((lsu_arvalid) ? lsu_araddr : (ifu_arvalid) ? ifu_araddr : 0);
+  // wire [ADDR_W-1:0] sram_araddr = ((lsu_arvalid) ? lsu_araddr : (ifu_arvalid) ? ifu_araddr : 0);
+  wire [ADDR_W-1:0] sram_araddr = (
+    ({ADDR_W{state == IF_A}} & ifu_araddr) |
+    ({ADDR_W{state == LS_A}} & lsu_araddr)
+  );
 
   // ifu read
   assign ifu_rdata_o  = ({DATA_W{ifu_rvalid_o}} & (rdata_o));
@@ -216,13 +220,8 @@ module ysyx_bus (
   };
   assign io_master_wdata[31:0] = wdata;
   assign io_master_wdata[63:32] = wdata;
-  // assign io_master_wstrb = (io_master_awaddr[2:2] == 1) ?
-  //        {{lsu_wstrb[3:0] << awaddr_lo}, {4'b0}}:
-  //        {{4'b0}, {lsu_wstrb[3:0] << awaddr_lo}};
-  assign io_master_wstrb = (
-    {8{io_master_awaddr[2:2]}} & {{lsu_wstrb[3:0] << awaddr_lo}, {4'b0}} |
-    {8{!io_master_awaddr[2:2]}} & {{4'b0}, {lsu_wstrb[3:0] << awaddr_lo}}
-  );
+  assign io_master_wstrb = (io_master_awaddr[2:2] == 1) ? {{wstrb}, {4'b0}}: {{4'b0}, {wstrb}};
+  wire wstrb[3:0] = {lsu_wstrb[3:0] << awaddr_lo};
   assign io_master_wvalid = (state == LS_A) & (lsu_wvalid) & !write_done;
 
   assign io_master_bready = 1;
