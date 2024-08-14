@@ -79,7 +79,7 @@ module ysyx (
 );
   parameter bit[7:0] DATA_W = `YSYX_W_WIDTH;
   parameter bit[7:0] ADDR_W = `YSYX_W_WIDTH;
-  parameter bit[7:0] REG_ADDR_W = 5;
+  parameter bit[7:0] REG_ADDR_W = 4;
   // PC unit output
   wire [DATA_W-1:0] npc;
   wire pc_valid, pc_skip;
