@@ -32,9 +32,9 @@ module ysyx_reg (
     end else begin
       if (idu_valid) begin
         rf_table[rd[3:0]] <= 1;
-        rf_table[0] <= 0;
+        // rf_table[0] <= 0;
       end
-      if (reg_write_en) begin
+      if (reg_write_en & |waddr[3:0]) begin
         rf_table[waddr[3:0]] <= 0;
       end
     end
@@ -48,7 +48,7 @@ module ysyx_reg (
           rf[i] <= 0;
         end else if (reg_write_en & |waddr[3:0]) begin
           rf[waddr[3:0]] <= wdata;
-          rf[0] <= 0;
+          // rf[0] <= 0;
         end
       end
     end
