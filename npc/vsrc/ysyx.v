@@ -299,6 +299,8 @@ module ysyx (
 
     .inst(inst_exu), .pc(pc_exu),
 
+    .ebreak(ebreak),
+
     .prev_valid(exu_valid),
     .next_ready(ifu_ready),
     .valid_o(wbu_valid),

@@ -8,6 +8,8 @@ module ysyx_wbu (
     input [31:0] pc,
     input [31:0] inst,
 
+    input ebreak,
+
     input prev_valid,
     input next_ready,
     output reg valid_o,
