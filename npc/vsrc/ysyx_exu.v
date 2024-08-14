@@ -163,7 +163,7 @@ module ysyx_exu (
   assign branch_retire_o = (
     (opcode_exu == `YSYX_OP_SYSTEM) |
     (opcode_exu == `YSYX_OP_B_TYPE) |
-    (opcode_exu == `YSYX_OP_IL_TYPE) |
+    (opcode_exu == `YSYX_OP_IL_TYPE)
   );
   always_comb begin
     use_exu_npc = 0;
