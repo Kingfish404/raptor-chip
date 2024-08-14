@@ -23,7 +23,7 @@ module ysyx_wbu (
     output reg valid_o,
     output ready_o
 );
-  parameter bit[7:0] BIT_W = `YSYX_W_WIDTH;
+  parameter bit [7:0] BIT_W = `YSYX_W_WIDTH;
 
   reg state;
   reg [31:0] inst_wbu, pc_wbu;
