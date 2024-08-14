@@ -61,10 +61,10 @@ module ysyx_ifu (
   );
   wire is_load = (opcode_o == `YSYX_OP_IL_TYPE);
 
-  assign ifu_araddr_o[ADDR_W-1:3] = pc_ifu[ADDR_W-1:3];
-  assign ifu_araddr_o[2:2] = (l1i_state == 'b00 | l1i_state == 'b01) ? 0 : 1;
-  assign ifu_araddr_o[1:0] = 0;
-  // assign ifu_araddr_o = (l1i_state == 'b00 | l1i_state == 'b01) ? (pc_ifu & ~'h4) : (pc_ifu | 'h4);
+  // assign ifu_araddr_o[ADDR_W-1:3] = pc_ifu[ADDR_W-1:3];
+  // assign ifu_araddr_o[2:2] = !(l1i_state == 'b00 | l1i_state == 'b01);
+  // assign ifu_araddr_o[1:0] = 0;
+  assign ifu_araddr_o = (l1i_state == 'b00 | l1i_state == 'b01) ? (pc_ifu & ~'h4) : (pc_ifu | 'h4);
   assign ifu_arvalid_o = ifu_sdram_arburst ?
     arvalid & !l1i_cache_hit & (l1i_state == 'b00 | l1i_state == 'b01) :
     arvalid & !l1i_cache_hit & l1i_state != 'b10;
@@ -135,7 +135,7 @@ module ysyx_ifu (
               branch_stall <= 1;
             end
           end else begin
-            pvalid <= 0;
+            // pvalid <= 0;
           end
         end
       end
