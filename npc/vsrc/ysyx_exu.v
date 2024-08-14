@@ -47,7 +47,7 @@ module ysyx_exu (
   wire csr_wen;
   wire csr_ecallen;
   reg [BIT_W-1:0] mem_rdata;
-  reg use_exu_npc, system_exu;
+  reg use_exu_npc, system_exu, system_func3_exu;
 
   ysyx_exu_csr csr(
     .clk(clk), .rst(rst), .wen(csr_wen), .exu_valid(valid_o), .ecallen(csr_ecallen),
@@ -93,7 +93,8 @@ module ysyx_exu (
           alu_op_exu <= alu_op; opcode_exu <= opcode;
           addr_exu <= op_j + imm;
           rd_o <= rd;
-          ren_o <= ren; wen_o <= wen; system_exu <= system;
+          ren_o <= ren; wen_o <= wen;
+          system_exu <= system; system_func3_exu <= system_func3;
           alu_valid <= 1;
           if (wen | ren) begin lsu_avalid <= 1; busy <= 1; rwaddr_o <= rwaddr; end
         end
@@ -165,7 +166,7 @@ module ysyx_exu (
     (opcode_exu == `YSYX_OP_IL_TYPE)
   );
   assign ebreak_o = ((system_exu) &
-    (imm_exu[3:0] == `YSYX_OP_SYSTEM_FUNC3) & (imm_exu[15:4] == `YSYX_OP_SYSTEM_EBREAK)
+    (system_func3_exu) & (imm_exu[15:4] == `YSYX_OP_SYSTEM_EBREAK)
   );
 
   always_comb begin
