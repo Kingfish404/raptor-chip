@@ -8,13 +8,13 @@ module ysyx_wbu (
     input [31:0] pc,
     input [31:0] inst,
     input [BIT_W-1:0] reg_wdata,
-    input [4:0] rd,
+    input [3:0] rd,
     input [BIT_W-1:0] npc_wdata,
     input use_exu_npc,
     input ebreak,
 
     output reg [BIT_W-1:0] reg_wdata_o,
-    output reg [4:0] rd_o,
+    output reg [3:0] rd_o,
     output reg [BIT_W-1:0] npc_wdata_o,
     output reg use_exu_npc_o,
 
