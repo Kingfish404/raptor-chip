@@ -9,7 +9,7 @@ module ysyx_idu (
   input [BIT_W-1:0] reg_rdata1, reg_rdata2,
   input [BIT_W-1:0] pc,
   output en_j_o,
-  output ren_o, wen_o, system_o,
+  output ren_o, wen_o, system_o, system_func3_o,
   output reg [BIT_W-1:0] op1_o, op2_o,
   output wire [BIT_W-1:0] rwaddr_o, op_j_o,
   output reg [31:0] imm_o,
@@ -92,6 +92,7 @@ module ysyx_idu (
   assign wen_o = (opcode_o == `YSYX_OP_S_TYPE) & valid_o;
   assign ren_o = (opcode_o == `YSYX_OP_IL_TYPE) & valid_o;
   assign system_o = (opcode_o == `YSYX_OP_SYSTEM) & valid_o;
+  assign system_func3_o = imm_SYS[3:0] == `YSYX_OP_SYSTEM_FUNC3 & system_o;
   always @(*) begin
     alu_op_o = 0;
     rs1_o = rs1; rs2_o = rs2; rd_o = 0;
