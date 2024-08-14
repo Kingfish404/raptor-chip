@@ -20,21 +20,21 @@ module ysyx_reg (
   reg [DATA_W-1:0] rf[REG_NUM];
   reg [REG_NUM-1:0] rf_table;
 
-  // assign src1_o = rf[s1addr[3:0]];
-  // assign src2_o = rf[s2addr[3:0]];
-  assign src1_o = |s1addr[3:0] ? rf[s1addr[3:0]] : 0;
-  assign src2_o = |s2addr[3:0] ? rf[s2addr[3:0]] : 0;
+  wire not_r0_write = reg_write_en & |waddr[REG_ADDR_W-1:0];
+
+  assign src1_o = |s1addr[REG_ADDR_W-1:0] ? rf[s1addr[REG_ADDR_W-1:0]] : 0;
+  assign src2_o = |s2addr[REG_ADDR_W-1:0] ? rf[s2addr[REG_ADDR_W-1:0]] : 0;
   assign rf_table_o = rf_table;
 
   always @(posedge clk) begin
     if (rst) begin
-      rf_table[0] <= 0;
+      rf_table <= 0;
     end else begin
       if (idu_valid) begin
         rf_table[rd[3:0]] <= 1;
         rf_table[0] <= 0;
       end
-      if (reg_write_en & |waddr[3:0]) begin
+      if (not_r0_write) begin
         rf_table[waddr[3:0]] <= 0;
       end
     end
@@ -46,9 +46,8 @@ module ysyx_reg (
       always @(posedge clk) begin
         if (rst) begin
           rf[i] <= 0;
-        end else if (reg_write_en & |waddr[3:0]) begin
-          rf[waddr[3:0]] <= wdata;
-          // rf[0] <= 0;
+        end else if (not_r0_write) begin
+          rf[waddr[REG_ADDR_W-1:0]] <= wdata;
         end
       end
     end
