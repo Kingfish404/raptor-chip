@@ -32,7 +32,7 @@ module ysyx_lsu (
     // from bus store
     input reg lsu_wready
 );
-  parameter bit[7:0] ADDR_W = 32, DATA_W = 32;
+  parameter bit [7:0] ADDR_W = 32, DATA_W = 32;
 
   reg [ADDR_W-1:0] lsu_araddr;
 
@@ -61,8 +61,8 @@ module ysyx_lsu (
 
   assign wready_o = lsu_wready;
 
-  parameter bit[7:0] L1D_SIZE = 2;
-  parameter bit[7:0] L1D_LEN = 1;
+  parameter bit [7:0] L1D_SIZE = 2;
+  parameter bit [7:0] L1D_LEN = 1;
   reg [32-1:0] l1d[L1D_SIZE];
   reg [L1D_SIZE-1:0] l1d_valid = 0;
   reg [32-L1D_LEN-2-1:0] l1d_tag[L1D_SIZE];
@@ -71,7 +71,7 @@ module ysyx_lsu (
   wire [32-L1D_LEN-2-1:0] addr_tag = lsu_araddr_o[ADDR_W-1:L1D_LEN+2];
   wire [L1D_LEN-1:0] addr_idx = lsu_araddr_o[L1D_LEN+2-1:0+2];
   wire l1d_cache_hit = (
-         ren & lsu_avalid & 1 &
+         ren & lsu_avalid & 0 &
          l1d_valid[addr_idx] == 1'b1) & (l1d_tag[addr_idx] == addr_tag);
   wire l1d_cache_within = (
          (lsu_araddr_o >= 'h30000000 && lsu_araddr_o < 'h40000000) ||
@@ -118,14 +118,6 @@ module ysyx_lsu (
          );
   assign lsu_araddr = addr;
   always @(posedge clk) begin
-    // if (l1d_cache_hit)
-    //   begin
-    //     $display("[hit] addr: %h, l1d data: %h, tag: %h, idx: %h",
-    //              lsu_araddr_o, l1d[addr_idx], l1d_tag[addr_idx], addr_idx);
-    //   end
-    if (idu_valid) begin
-      // lsu_araddr <= addr;
-    end
     if (ren & lsu_rvalid & l1d_cache_within) begin
       l1d[addr_idx] <= lsu_rdata;
       l1d_tag[addr_idx] <= addr_tag;

@@ -3,28 +3,31 @@
 
 module ysyx_exu_csr (
     input clk,
-    rst,
+    input rst,
+
     input wen,
-    exu_valid,
+    input exu_valid,
     input ecallen,
-    input [R_W-1:0] waddr,
-    waddr_add1,
+
+    input [  R_W-1:0] waddr,
+    input [  R_W-1:0] waddr_add1,
     input [BIT_W-1:0] wdata,
-    wdata_add1,
-    output reg [BIT_W-1:0] rdata_o,
+    input [BIT_W-1:0] wdata_add1,
+
+    output [BIT_W-1:0] rdata_o,
     output [BIT_W-1:0] mtvec_o,
     output [BIT_W-1:0] mepc_o
 );
-  parameter bit[7:0] R_W = 12;
-  parameter bit[7:0] REG_W = 3;
-  parameter bit[7:0] BIT_W = `YSYX_W_WIDTH;
-  parameter bit[BIT_W-1:0] RESET_VAL = 0;
+  parameter bit [7:0] R_W = 12;
+  parameter bit [7:0] REG_W = 3;
+  parameter bit [7:0] BIT_W = `YSYX_W_WIDTH;
+  parameter bit [BIT_W-1:0] RESET_VAL = 0;
 
-  parameter bit[REG_W-1:0] MNONE = 'h0;
-  parameter bit[REG_W-1:0] MCAUSE_IDX = 'h1;
-  parameter bit[REG_W-1:0] MEPC_IDX = 'h2;
-  parameter bit[REG_W-1:0] MTVEC_IDX = 'h3;
-  parameter bit[REG_W-1:0] MSTATUS_IDX = 'h4;
+  parameter bit [REG_W-1:0] MNONE = 'h0;
+  parameter bit [REG_W-1:0] MCAUSE_IDX = 'h1;
+  parameter bit [REG_W-1:0] MEPC_IDX = 'h2;
+  parameter bit [REG_W-1:0] MTVEC_IDX = 'h3;
+  parameter bit [REG_W-1:0] MSTATUS_IDX = 'h4;
 
   reg [BIT_W-1:0] csr[5];
   wire [REG_W-1:0] waddr_reg_1 = (
