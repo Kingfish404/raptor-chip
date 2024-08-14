@@ -208,11 +208,11 @@ module ysyx_bus (
   assign io_master_wlast = io_master_wvalid;
   wire [1:0] awaddr_lo = io_master_awaddr[1:0];
   wire [DATA_W-1:0] wdata = {
-    ({DATA_W{awaddr_lo == 2'b00}} & lsu_wdata) |
-         ({DATA_W{awaddr_lo == 2'b01}} & {{lsu_wdata[23:0]}, {8'b0}}) |
-         ({DATA_W{awaddr_lo == 2'b10}} & {{lsu_wdata[15:0]}, {16'b0}}) |
-         ({DATA_W{awaddr_lo == 2'b11}} & {{lsu_wdata[7:0]}, {24'b0}}) |
-         (0)
+    ({DATA_W{awaddr_lo == 2'b00}} & {{lsu_wdata}}) |
+    ({DATA_W{awaddr_lo == 2'b01}} & {{lsu_wdata[23:0]}, {8'b0}}) |
+    ({DATA_W{awaddr_lo == 2'b10}} & {{lsu_wdata[15:0]}, {16'b0}}) |
+    ({DATA_W{awaddr_lo == 2'b11}} & {{lsu_wdata[7:0]}, {24'b0}}) |
+    (0)
   };
   assign io_master_wdata[31:0] = wdata;
   assign io_master_wdata[63:32] = wdata;
