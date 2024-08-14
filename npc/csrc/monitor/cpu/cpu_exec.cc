@@ -208,7 +208,7 @@ static void statistic()
   uint64_t time_clint_us = time_clint / 2;
   Log("CLINT time: %lld (us), %2.3f MIPS", (time_clint_us), (double)((pmu.instr_cnt / 1e6) / (time_clint_us / 1e6)));
   double frequency = pmu.active_cycle / time_s;
-  Log("time: %d (ns), %d (ms)", g_timer, (int)(g_timer / 1e3));
+  Log(FMT_BLUE("Simulate time: %d (ns), %d (ms)"), g_timer, (int)(g_timer / 1e3));
   Log(FMT_BLUE("Simulate Freq: %9.1f Hz, %6.3f MHz"), frequency, (double)(frequency * 1.0 / 1e6));
   Log(FMT_BLUE("Simulate Inst: %9.1f I/s, %5.3f MIPS"),
       pmu.instr_cnt / time_s, pmu.instr_cnt / time_s / 1e6);
