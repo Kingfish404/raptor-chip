@@ -150,8 +150,8 @@ module ysyx_bus (
   // read
   // wire [ADDR_W-1:0] sram_araddr = ((lsu_arvalid) ? lsu_araddr : (ifu_arvalid) ? ifu_araddr : 0);
   wire [ADDR_W-1:0] sram_araddr = (
-    ({ADDR_W{lsu_arvalid}} & ifu_araddr) |
-    ({ADDR_W{ifu_arvalid}} & lsu_araddr)
+    ({ADDR_W{lsu_arvalid}} & lsu_araddr) |
+    ({ADDR_W{ifu_arvalid}} & ifu_araddr)
   );
 
   // ifu read
