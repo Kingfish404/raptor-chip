@@ -60,8 +60,8 @@ module ysyx_exu (
   //   (opcode_exu == `YSYX_OP_IL_TYPE) ? mem_rdata :
   //   (opcode_exu == `YSYX_OP_SYSTEM) ? csr_rdata : reg_wdata);
   assign reg_wdata_o = (
-    ({BIT_W{opcode_exu == `YSYX_OP_IL_TYPE} & {mem_rdata}}) |
-    ({BIT_W{opcode_exu == `YSYX_OP_SYSTEM} & {csr_rdata}}) |
+    ({BIT_W{opcode_exu == `YSYX_OP_IL_TYPE} & {{mem_rdata}}}) |
+    ({BIT_W{opcode_exu == `YSYX_OP_SYSTEM} & {{csr_rdata}}}) |
     (reg_wdata)
   );
   assign csr_addr = (
