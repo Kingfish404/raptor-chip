@@ -103,7 +103,7 @@ module ysyx (
   wire [DATA_W-1:0] op1, op2, imm, op_j, pc_idu, rwaddr_idu;
   wire [REG_ADDR_W-1:0] rs1, rs2, rd;
   wire [3:0] alu_op;
-  wire [6:0] opcode, funct7;
+  wire [6:0] opcode;
   wire en_j, ren, wen, system, system_func3;
   wire idu_valid, idu_ready;
 
@@ -130,10 +130,6 @@ module ysyx (
   wire exu_valid, exu_ready;
 
   // WBU output
-  wire [DATA_W-1:0] reg_wdata_wbu;
-  wire [REG_ADDR_W-1:0] rd_wbu;
-  wire [DATA_W-1:0] npc_wbu;
-  wire use_exu_npc_wbu;
   wire wbu_valid, wbu_ready;
 
   // BUS output
