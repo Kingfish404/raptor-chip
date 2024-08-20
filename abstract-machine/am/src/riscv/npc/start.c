@@ -1,3 +1,5 @@
+void _trm_init();
+
 __attribute__((section("entry"))) void _start(void)
 {
     asm volatile(
