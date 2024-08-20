@@ -9,10 +9,12 @@
 
 __attribute__((section("entry"))) void _start(void)
 {
-    asm volatile(
+    // asm volatile(
+    //     "mv s0, zero\n"
+    //     "la sp, _stack_pointer\n"
+    //     "");
+    asm(
         "mv s0, zero\n"
-        "la sp, _stack_pointer\n"
-        "jal _trm_init\n"
-        "");
+        "la sp, _stack_pointer\n");
     _trm_init();
 }
