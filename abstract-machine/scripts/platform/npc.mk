@@ -1,4 +1,4 @@
-AM_SRCS := riscv/npc/start.c \
+AM_SRCS := riscv/npc/start.S \
            riscv/npc/trm.c \
            riscv/npc/ioe.c \
            riscv/npc/timer.c \
