@@ -1,4 +1,4 @@
-AM_SRCS := riscv/ysyxsoc/start.S \
+AM_SRCS := riscv/ysyxsoc/start.c \
            riscv/ysyxsoc/trm.c \
 		   riscv/ysyxsoc/ioe.c \
            riscv/ysyxsoc/input.c \
