@@ -6,7 +6,5 @@ __attribute__((section("entry"))) void _start(void)
         "mv s0, zero\n"
         "la sp, _stack_pointer\n"
         "");
-    asm volatile(
-        "ebreak");
     _trm_init();
 }
