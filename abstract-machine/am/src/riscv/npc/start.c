@@ -12,7 +12,6 @@ __attribute__((section("entry"))) void _start(void)
     asm volatile(
         "mv s0, zero\n"
         "la sp, _stack_pointer\n"
-        "jal _trm_init\n"
         "");
     _trm_init();
 }
