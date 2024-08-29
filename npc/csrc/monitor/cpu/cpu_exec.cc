@@ -227,7 +227,6 @@ static void statistic()
 static void cpu_exec_one_cycle()
 {
 #ifdef CONFIG_NVBoard
-  // nvboard_update();
   if (!top->reset)
   {
     nvboard_update();
