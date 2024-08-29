@@ -228,6 +228,10 @@ static void cpu_exec_one_cycle()
 {
 #ifdef CONFIG_NVBoard
   // nvboard_update();
+  if (!top->reset)
+  {
+    nvboard_update();
+  }
 #endif
 
   top->clock = (top->clock == 0) ? 1 : 0;
