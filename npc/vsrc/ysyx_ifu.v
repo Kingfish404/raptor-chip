@@ -104,10 +104,10 @@ module ysyx_ifu (
           end
         end
       end
-      if (pipeline_fetch) begin
-        pvalid <= 1;
-        pipeline_fetch <= 0;
-      end
+      // if (pipeline_fetch) begin
+      //   pvalid <= 1;
+      //   pipeline_fetch <= 0;
+      // end
     end
   end
 
