@@ -114,6 +114,12 @@ static void perf_sample_per_cycle()
   }
   pmu.active_cycle++;
   bool ifu_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, ifu_valid));
+  bool idu_ready = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, idu_ready));
+  bool idu_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, idu_valid));
+  bool exu_ready = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, exu_ready));
+  bool exu_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, exu_valid));
+  bool wbu_ready = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, wbu_ready));
+  bool wbu_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, wbu_valid));
   bool ifu_pvalid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, ifu__DOT__pvalid));
   bool l1i_cache_hit = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, ifu__DOT__l1i_cache_hit));
   bool lsu_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, exu__DOT__lsu_valid));
@@ -122,7 +128,7 @@ static void perf_sample_per_cycle()
   uint32_t pc_exu = *(uint32_t *)&(CONCAT(VERILOG_PREFIX, exu__DOT__pc_exu));
   uint32_t pc_wbu = *(uint32_t *)&(CONCAT(VERILOG_PREFIX, wbu__DOT__pc_wbu));
   static uint32_t ifu_pc = 0;
-  if (ifu_valid)
+  if (ifu_valid && idu_ready)
   {
     pmu.ifu_fetch_cnt++;
   }
