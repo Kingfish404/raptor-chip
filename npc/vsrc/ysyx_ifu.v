@@ -50,7 +50,7 @@ module ysyx_ifu (
   wire [L1I_LINE_LEN-1:0] addr_offset = pc_ifu[L1I_LINE_LEN+2-1:2];
 
   wire l1i_cache_hit = (
-         1 & l1i_state == 'b00 &
+         1 & (l1i_state == 'b00 | l1i_state == 'b100) &
          l1i_valid[addr_idx] == 1'b1) & (l1i_tag[addr_idx] == addr_tag);
   wire ifu_sdram_arburst = `YSYX_I_SDRAM_ARBURST & (pc_ifu >= 'ha0000000) & (pc_ifu <= 'hc0000000);
   wire [6:0] opcode_o = inst_o[6:0];
@@ -67,7 +67,7 @@ module ysyx_ifu (
     arvalid & !l1i_cache_hit & (l1i_state != 'b10 & l1i_state != 'b100);
 
   // with l1i cache
-  wire ifu_just_load = ((l1i_state == 'b11 | l1i_state == 'b100) & ifu_rvalid);
+  wire ifu_just_load = ((l1i_state == 'b11) & ifu_rvalid);
   assign inst_o = ifu_just_load & pc_ifu[2] == 1'b1 ? ifu_rdata : l1i[addr_idx][addr_offset];
   assign valid_o = ifu_just_load | (l1i_cache_hit & !branch_stall);
 
