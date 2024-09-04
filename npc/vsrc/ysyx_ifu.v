@@ -101,6 +101,7 @@ module ysyx_ifu (
               pvalid <= 1;
             end else begin
               branch_stall <= 1;
+              pvalid <= 0;
             end
           end else begin
             pvalid <= 0;
