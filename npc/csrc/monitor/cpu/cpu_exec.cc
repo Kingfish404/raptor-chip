@@ -189,20 +189,20 @@ static void perf_sample_per_inst()
   pmu.instr_cnt++;
   switch (*(uint8_t *)&(CONCAT(VERILOG_PREFIX, exu__DOT__opcode_exu)))
   {
-  case 0b0000011:
+  case 0b0000011: // I type: lb, lh, lw, lbu, lhu
     pmu.ld_inst_cnt++;
     break;
-  case 0b0100011:
+  case 0b0100011: // S type: sb, sh, sw
     pmu.st_inst_cnt++;
     break;
-  case 0b0110011:
-  case 0b0010011:
+  case 0b0110011: // R type: add, sub, sll, slt, sltu, xor, srl, sra, or, and
+  case 0b0010011: // I type: addi, slti, sltiu, xori, ori, andi, slli, srli, srai
     pmu.alu_inst_cnt++;
     break;
-  case 0b1100011:
+  case 0b1100011: // B type: beq, bne, blt, bge, bltu, bgeu
     pmu.b_inst_cnt++;
     break;
-  case 0b1110011:
+  case 0b1110011: // N type: ecall, ebreak, csrrw, csrrs, csrrc, csrrwi, csrrsi, csrrci, mert
     pmu.csr_inst_cnt++;
     break;
   default:
@@ -303,6 +303,7 @@ void cpu_exec(uint64_t n)
     if (npc.state == NPC_END) // for ebreak
     {
       pmu.instr_cnt++;
+      pmu.csr_inst_cnt++;
       break;
     }
     // Simulate the performance monitor unit
