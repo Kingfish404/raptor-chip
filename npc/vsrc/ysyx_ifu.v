@@ -77,6 +77,7 @@ module ysyx_ifu (
     if (rst) begin
       pvalid <= 1;
       pc_ifu <= `YSYX_PC_INIT;
+      l1i_valid <= 0;
     end else begin
       if (valid_o & next_ready & inst_o == `YSYX_INST_FENCE_I) begin
         l1i_valid <= 0;

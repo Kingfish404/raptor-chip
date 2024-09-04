@@ -83,10 +83,8 @@ static void perf()
   assert(pmu.ifu_fetch_cnt == pmu.instr_cnt);
   assert(
       pmu.instr_cnt ==
-      (pmu.ld_inst_cnt + pmu.st_inst_cnt +
-       pmu.alu_inst_cnt + pmu.b_inst_cnt +
-       pmu.csr_inst_cnt +
-       pmu.other_inst_cnt));
+      (pmu.ld_inst_cnt + pmu.st_inst_cnt + pmu.alu_inst_cnt + pmu.b_inst_cnt +
+       pmu.csr_inst_cnt + pmu.other_inst_cnt));
   printf("======== Cache Analysis ========\n");
   // AMAT: Average Memory Access Time
   printf("| %8s, %% | %8s, %% | %8s, %% | %8s, %% | %13s | %13s | %8s |\n",
@@ -140,12 +138,11 @@ static void perf_sample_per_cycle()
   {
     pmu.lsu_load_cnt++;
   }
-  if (!lsu_valid &&
-      *(uint8_t *)&(CONCAT(VERILOG_PREFIX, exu__DOT__lsu_avalid)))
+  if (!lsu_valid && *(uint8_t *)&(CONCAT(VERILOG_PREFIX, exu__DOT__lsu_avalid)))
   {
     pmu.lsu_stall_cycle++;
   }
-  if (*(uint8_t *)&(CONCAT(VERILOG_PREFIX, exu_valid)))
+  if (exu_valid)
   {
     pmu.exu_alu_cnt++;
   }
