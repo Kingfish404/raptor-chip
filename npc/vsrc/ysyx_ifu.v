@@ -67,7 +67,7 @@ module ysyx_ifu (
     arvalid & !l1i_cache_hit & (l1i_state != 'b10 & l1i_state != 'b100);
 
   // with l1i cache
-  wire ifu_just_load = (l1i_state == 'b11 & ifu_rvalid);
+  wire ifu_just_load = ((l1i_state == 'b11 | l1i_state == 'b100) & ifu_rvalid);
   assign inst_o = ifu_just_load & pc_ifu[2] == 1'b1 ? ifu_rdata : l1i[addr_idx][addr_offset];
   assign valid_o = ifu_just_load | (l1i_cache_hit & !branch_stall);
 
