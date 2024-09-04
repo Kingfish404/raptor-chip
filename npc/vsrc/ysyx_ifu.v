@@ -95,8 +95,8 @@ module ysyx_ifu (
         end
         if (pipeline_fetch) begin
           pvalid <= 1;
-        pipeline_fetch <= 0;
-      end
+          pipeline_fetch <= 0;
+        end
       end else if (state == `YSYX_WAIT_READY) begin
         if (next_ready == 1) begin
           if (valid_o) begin
