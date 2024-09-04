@@ -113,14 +113,14 @@ static void perf_sample_per_cycle()
     return;
   }
   pmu.active_cycle++;
-  bool ifu_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__ifu__DOT__l1i_cache_hit));
-  bool ifu_pvalid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__ifu__DOT__pvalid));
-  bool l1i_cache_hit = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__ifu__DOT__l1i_cache_hit));
-  bool lsu_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__exu__DOT__lsu_valid));
-  uint32_t pc_ifu = *(uint32_t *)&(CONCAT(VERILOG_PREFIX, __DOT__ifu__DOT__pc_ifu));
-  uint32_t pc_idu = *(uint32_t *)&(CONCAT(VERILOG_PREFIX, __DOT__idu__DOT__pc_idu));
-  uint32_t pc_exu = *(uint32_t *)&(CONCAT(VERILOG_PREFIX, __DOT__exu__DOT__pc_exu));
-  uint32_t pc_wbu = *(uint32_t *)&(CONCAT(VERILOG_PREFIX, __DOT__wbu__DOT__pc_wbu));
+  bool ifu_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, ifu__DOT__l1i_cache_hit));
+  bool ifu_pvalid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, ifu__DOT__pvalid));
+  bool l1i_cache_hit = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, ifu__DOT__l1i_cache_hit));
+  bool lsu_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, exu__DOT__lsu_valid));
+  uint32_t pc_ifu = *(uint32_t *)&(CONCAT(VERILOG_PREFIX, ifu__DOT__pc_ifu));
+  uint32_t pc_idu = *(uint32_t *)&(CONCAT(VERILOG_PREFIX, idu__DOT__pc_idu));
+  uint32_t pc_exu = *(uint32_t *)&(CONCAT(VERILOG_PREFIX, exu__DOT__pc_exu));
+  uint32_t pc_wbu = *(uint32_t *)&(CONCAT(VERILOG_PREFIX, wbu__DOT__pc_wbu));
   static uint32_t ifu_pc = 0;
   if (ifu_valid)
   {
@@ -135,11 +135,11 @@ static void perf_sample_per_cycle()
     pmu.lsu_load_cnt++;
   }
   if (!lsu_valid &&
-      *(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__exu__DOT__lsu_avalid)))
+      *(uint8_t *)&(CONCAT(VERILOG_PREFIX, exu__DOT__lsu_avalid)))
   {
     pmu.lsu_stall_cycle++;
   }
-  if (*(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__exu_valid)))
+  if (*(uint8_t *)&(CONCAT(VERILOG_PREFIX, exu_valid)))
   {
     pmu.exu_alu_cnt++;
   }
@@ -181,7 +181,7 @@ static void perf_sample_per_inst()
     return;
   }
   pmu.instr_cnt++;
-  switch (*(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__exu__DOT__opcode_exu)))
+  switch (*(uint8_t *)&(CONCAT(VERILOG_PREFIX, exu__DOT__opcode_exu)))
   {
   case 0b0000011:
     pmu.ld_inst_cnt++;
@@ -209,7 +209,7 @@ static void statistic()
 {
   perf();
   double time_s = g_timer / 1e6;
-  uint64_t time_clint = *(uint64_t *)&(CONCAT(VERILOG_PREFIX, __DOT__bus__DOT__clint__DOT__mtime));
+  uint64_t time_clint = *(uint64_t *)&(CONCAT(VERILOG_PREFIX, bus__DOT__clint__DOT__mtime));
   uint64_t time_clint_us = time_clint / 2;
   Log("CLINT time: %lld (us), %2.3f MIPS", (time_clint_us), (double)((pmu.instr_cnt / 1e6) / (time_clint_us / 1e6)));
   double frequency = pmu.active_cycle / time_s;
@@ -307,7 +307,7 @@ void cpu_exec(uint64_t n)
       npc.state = NPC_ABORT;
       break;
     }
-    if (*(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__wbu_valid)))
+    if (*(uint8_t *)&(CONCAT(VERILOG_PREFIX, wbu_valid)))
     {
       perf_sample_per_inst();
       cur_inst_cycle = 0;
