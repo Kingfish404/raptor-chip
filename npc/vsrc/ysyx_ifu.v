@@ -94,6 +94,7 @@ module ysyx_ifu (
           end
         end
       end else if (state == `YSYX_WAIT_READY) begin
+        pvalid <= 0;
         if (next_ready == 1 & valid_o) begin
           if (!is_branch & !is_load) begin
             pc_ifu <= pc_ifu + 4;
