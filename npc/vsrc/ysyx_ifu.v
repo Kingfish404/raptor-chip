@@ -101,6 +101,7 @@ module ysyx_ifu (
             pvalid <= 1;
             pipeline_fetch <= 1;
           end else begin
+            pvalid <= 1;
             branch_stall <= 1;
           end
         end
