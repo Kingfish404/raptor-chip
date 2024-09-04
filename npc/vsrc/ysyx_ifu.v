@@ -98,7 +98,7 @@ module ysyx_ifu (
         if (next_ready == 1 & valid_o) begin
           if (!is_branch & !is_load) begin
             pc_ifu <= pc_ifu + 4;
-            pvalid <= 0;
+            pvalid <= 1;
             pipeline_fetch <= 1;
           end else begin
             branch_stall <= 1;
