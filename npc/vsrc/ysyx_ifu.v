@@ -136,7 +136,7 @@ module ysyx_ifu (
         end
         'b11: begin
           if (ifu_rvalid) begin
-            l1i_state <= 'b00;
+            l1i_state <= 'b100;
             l1i[addr_idx][1] <= ifu_rdata;
             l1i_tag[addr_idx] <= addr_tag;
             l1i_valid[addr_idx] <= 1'b1;
