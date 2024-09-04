@@ -302,7 +302,7 @@ void cpu_exec(uint64_t n)
     cpu_exec_one_cycle();
     if (npc.state == NPC_END) // for ebreak
     {
-      pmc.instr_cnt++;
+      pmu.instr_cnt++;
       break;
     }
     // Simulate the performance monitor unit
