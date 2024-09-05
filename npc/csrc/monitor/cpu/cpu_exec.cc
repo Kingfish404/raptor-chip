@@ -131,7 +131,7 @@ static void perf_sample_per_cycle()
   {
     pmu.ifu_fetch_cnt++;
   }
-  if (!ifu_valid && (l1i_state == 0b00 || l1i_state == 0b001 ||
+  if (!ifu_valid && (l1i_state == 0b000 || l1i_state == 0b001 ||
                      l1i_state == 0b010 || l1i_state == 0b011))
   {
     pmu.ifu_stall_cycle++;
@@ -157,7 +157,7 @@ static void perf_sample_per_cycle()
       pmu.l1i_cache_hit_cnt++;
       pmu.l1i_cache_hit_cycle++;
     }
-    else if (l1i_state == 0b00)
+    else if (l1i_state == 0b000)
     {
       i_fetching = true;
       pmu.l1i_cache_miss_cnt++;
