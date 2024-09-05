@@ -103,7 +103,6 @@ static void perf()
   //     (pmu.l1i_cache_hit_cnt + pmu.l1i_cache_miss_cnt) == pmu.ifu_fetch_cnt);
 }
 
-bool i_fetching = false;
 static void perf_sample_per_cycle()
 {
   if (top->reset)
@@ -148,6 +147,7 @@ static void perf_sample_per_cycle()
     pmu.exu_alu_cnt++;
   }
   // cache sample
+  static bool i_fetching = false;
   if (i_fetching == false)
   {
     if (l1i_cache_hit)
