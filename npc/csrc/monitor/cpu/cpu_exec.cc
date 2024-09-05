@@ -84,8 +84,6 @@ static void perf()
          l1i_access_time + (100 - l1i_hit_rate) / 100.0 * l1i_miss_penalty);
   assert(
       (pmu.l1i_cache_hit_cnt + pmu.l1i_cache_miss_cnt) == pmu.ifu_fetch_cnt);
-  printf("pmu.l1i_cache_hit_cnt + pmu.l1i_cache_miss_cnt = %lld\n", pmu.l1i_cache_hit_cnt + pmu.l1i_cache_miss_cnt);
-  printf("pmu.ifu_fetch_cnt = %lld\n", pmu.ifu_fetch_cnt);
 }
 
 static void perf_sample_per_cycle()
