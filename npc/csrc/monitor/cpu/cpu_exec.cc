@@ -130,7 +130,8 @@ static void perf_sample_per_cycle()
   {
     pmu.ifu_fetch_cnt++;
   }
-  if (l1i_state)
+  if (!ifu_valid && (l1i_state == 0b00 | l1i_state == 0b001 |
+                     l1i_state == 0b010 | l1i_state == 0b011))
   {
     pmu.ifu_stall_cycle++;
   }
