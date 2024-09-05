@@ -29,8 +29,8 @@ module ysyx_ifu (
 
   parameter bit [7:0] L1I_LINE_SIZE = 2;
   parameter bit [7:0] L1I_LINE_LEN = 1;
-  parameter bit [7:0] L1I_SIZE = 4;
-  parameter bit [7:0] L1I_LEN = $sqrt(L1I_SIZE);
+  parameter integer [7:0] L1I_SIZE = 4;
+  parameter integer [7:0] L1I_LEN = $sqrt(L1I_SIZE);
 
   reg state;
 
