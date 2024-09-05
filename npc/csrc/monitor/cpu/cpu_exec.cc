@@ -61,8 +61,10 @@ static void perf()
   Log(FMT_BLUE("IFU Avg Cycle: %2.1f, LSU Avg Cycle: %2.1f"),
       (1.0 * pmu.ifu_fetch_stall_cycle) / (pmu.ifu_fetch_cnt + 1),
       (1.0 * pmu.lsu_stall_cycle) / (pmu.lsu_load_cnt + 1));
-  printf("ifu_hazard_cycle: %lld (branch, load instruction)\n", pmu.ifu_hazard_cycle);
-  printf("idu_hazard_cycle: %lld (data hazard)\n", pmu.idu_hazard_cycle);
+  printf("ifu_hazard_cycle: %lld, %3.0f%% (branch, load instruction)\n",
+         pmu.ifu_hazard_cycle, percentage(pmu.ifu_hazard_cycle, pmu.active_cycle));
+  printf("idu_hazard_cycle: %lld, %3.0f%% (data hazard)\n",
+         pmu.idu_hazard_cycle, percentage(pmu.idu_hazard_cycle, pmu.active_cycle));
   Log(FMT_BLUE("ifu_fetch_cnt: %lld, instr_cnt: %lld"), pmu.ifu_fetch_cnt, pmu.instr_cnt);
   assert(pmu.ifu_fetch_cnt == pmu.instr_cnt);
   assert(
