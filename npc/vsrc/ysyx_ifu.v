@@ -32,7 +32,7 @@ module ysyx_ifu (
   parameter bit [7:0] L1I_SIZE = 4;
   parameter bit [7:0] L1I_LEN = 2;
 
-  reg state = `YSYX_IDLE;
+  reg state;
 
   reg [DATA_W-1:0] pc_ifu;
   reg [32-1:0] l1i[L1I_SIZE][L1I_LINE_SIZE];
