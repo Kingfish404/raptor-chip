@@ -61,7 +61,7 @@ static void perf()
   Log(FMT_BLUE("IFU Avg Cycle: %2.1f, LSU Avg Cycle: %2.1f"),
       (1.0 * pmu.ifu_fetch_stall_cycle) / (pmu.ifu_fetch_cnt + 1),
       (1.0 * pmu.lsu_stall_cycle) / (pmu.lsu_load_cnt + 1));
-  printf("ifu_stall_cycle: %lld\n", pmu.ifu_stall_cycle);
+  printf("ifu_hazard_cycle: %lld (branch, load instruction)\n", pmu.ifu_hazard_cycle);
   Log(FMT_BLUE("ifu_fetch_cnt: %lld, instr_cnt: %lld"), pmu.ifu_fetch_cnt, pmu.instr_cnt);
   assert(pmu.ifu_fetch_cnt == pmu.instr_cnt);
   assert(
@@ -94,7 +94,7 @@ static void perf_sample_per_cycle()
   }
   pmu.active_cycle++;
   bool ifu_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, ifu_valid));
-  bool ifu_stall = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, ifu__DOT__ifu_stall));
+  bool ifu_hazard = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, ifu__DOT__ifu_hazard));
   bool idu_ready = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, idu_ready));
   bool idu_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, idu_valid));
   bool exu_ready = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, exu_ready));
@@ -118,9 +118,9 @@ static void perf_sample_per_cycle()
   {
     pmu.ifu_fetch_stall_cycle++;
   }
-  if (ifu_stall)
+  if (ifu_hazard)
   {
-    pmu.ifu_stall_cycle++;
+    pmu.ifu_hazard_cycle++;
   }
   if (lsu_valid)
   {

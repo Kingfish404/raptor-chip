@@ -39,7 +39,7 @@ module ysyx_ifu (
   reg [L1I_SIZE-1:0] l1i_valid = 0;
   reg [32-L1I_LEN-L1I_LINE_LEN-2-1:0] l1i_tag[L1I_SIZE];
   reg [2:0] l1i_state = 0;
-  reg ifu_stall = 0;
+  reg ifu_hazard = 0;
 
 
   wire [32-L1I_LEN-L1I_LINE_LEN-2-1:0] addr_tag = pc_ifu[ADDR_W-1:L1I_LEN+L1I_LINE_LEN+2];
@@ -66,7 +66,7 @@ module ysyx_ifu (
   // with l1i cache
   wire ifu_just_load = ((l1i_state == 'b11) & ifu_rvalid);
   assign inst_o = ifu_just_load & pc_ifu[2] == 1'b1 ? ifu_rdata : l1i[addr_idx][addr_offset];
-  assign valid_o = ifu_just_load | (l1i_cache_hit & !ifu_stall);
+  assign valid_o = ifu_just_load | (l1i_cache_hit & !ifu_hazard);
   assign ready_o = !valid_o;
 
   assign pc_o = pc_ifu;
@@ -82,10 +82,10 @@ module ysyx_ifu (
       if (state == `YSYX_IDLE) begin
         if (prev_valid) begin
           if (is_branch & pc_valid) begin
-            ifu_stall <= 0;
+            ifu_hazard <= 0;
             pc_ifu <= npc;
           end else if ((is_branch | is_load) & pc_skip) begin
-            ifu_stall <= 0;
+            ifu_hazard <= 0;
             pc_ifu <= npc;
           end
         end
@@ -94,7 +94,7 @@ module ysyx_ifu (
           if (!is_branch & !is_load) begin
             pc_ifu <= pc_ifu + 4;
           end else begin
-            ifu_stall <= 1;
+            ifu_hazard <= 1;
           end
         end
       end
