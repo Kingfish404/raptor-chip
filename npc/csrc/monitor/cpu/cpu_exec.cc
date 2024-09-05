@@ -152,16 +152,13 @@ static void perf_sample_per_cycle()
   static bool i_fetching = false;
   if (i_fetching == false)
   {
-    if (ifu_valid && idu_ready)
-    {
-      pmu.l1i_cache_hit_cnt++;
-      pmu.l1i_cache_hit_cycle++;
-    }
-    else if (l1i_state == 0b000)
+    if (!(ifu_valid && idu_ready) && l1i_state == 0b000)
     {
       i_fetching = true;
       pmu.l1i_cache_miss_cnt++;
       pmu.l1i_cache_miss_cycle++;
+      pmu.l1i_cache_hit_cnt = pmu.ifu_fetch_cnt - pmu.l1i_cache_miss_cnt;
+      pmu.l1i_cache_hit_cycle = pmu.l1i_cache_hit_cnt;
     }
   }
   else
