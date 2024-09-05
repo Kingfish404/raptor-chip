@@ -26,16 +26,14 @@ module ysyx_ifu (
   parameter bit [7:0] ADDR_W = 32;
   parameter bit [7:0] DATA_W = 32;
 
-  reg state;
-  reg pvalid;
-
-  assign ready_o = !valid_o;
-  assign arvalid = pvalid;
 
   parameter bit [7:0] L1I_LINE_SIZE = 2;
   parameter bit [7:0] L1I_LINE_LEN = 1;
   parameter bit [7:0] L1I_SIZE = 4;
   parameter bit [7:0] L1I_LEN = 2;
+
+  reg state;
+
   reg [DATA_W-1:0] pc_ifu;
   reg [32-1:0] l1i[L1I_SIZE][L1I_LINE_SIZE];
   reg [L1I_SIZE-1:0] l1i_valid = 0;
@@ -43,7 +41,6 @@ module ysyx_ifu (
   reg [2:0] l1i_state = 0;
   reg branch_stall = 0;
 
-  wire arvalid;
 
   wire [32-L1I_LEN-L1I_LINE_LEN-2-1:0] addr_tag = pc_ifu[ADDR_W-1:L1I_LEN+L1I_LINE_LEN+2];
   wire [L1I_LEN-1:0] addr_idx = pc_ifu[L1I_LEN+L1I_LINE_LEN+2-1:L1I_LINE_LEN+2];
@@ -63,19 +60,19 @@ module ysyx_ifu (
 
   assign ifu_araddr_o = (l1i_state == 'b00 | l1i_state == 'b01) ? (pc_ifu & ~'h4) : (pc_ifu | 'h4);
   assign ifu_arvalid_o = ifu_sdram_arburst ?
-    arvalid & !l1i_cache_hit & (l1i_state == 'b00 | l1i_state == 'b01) :
-    arvalid & !l1i_cache_hit & (l1i_state != 'b10 & l1i_state != 'b100);
+    !l1i_cache_hit & (l1i_state == 'b00 | l1i_state == 'b01) :
+    !l1i_cache_hit & (l1i_state != 'b10 & l1i_state != 'b100);
 
   // with l1i cache
   wire ifu_just_load = ((l1i_state == 'b11) & ifu_rvalid);
   assign inst_o = ifu_just_load & pc_ifu[2] == 1'b1 ? ifu_rdata : l1i[addr_idx][addr_offset];
   assign valid_o = ifu_just_load | (l1i_cache_hit & !branch_stall);
+  assign ready_o = !valid_o;
 
   assign pc_o = pc_ifu;
   `YSYX_BUS_FSM()
   always @(posedge clk) begin
     if (rst) begin
-      pvalid <= 1;
       pc_ifu <= `YSYX_PC_INIT;
       l1i_valid <= 0;
     end else begin
@@ -84,7 +81,6 @@ module ysyx_ifu (
       end
       if (state == `YSYX_IDLE) begin
         if (prev_valid) begin
-          pvalid <= prev_valid;
           if (is_branch & pc_valid) begin
             branch_stall <= 0;
             pc_ifu <= npc;
@@ -95,7 +91,6 @@ module ysyx_ifu (
         end
       end else if (state == `YSYX_WAIT_READY) begin
         if (next_ready == 1 & valid_o) begin
-          pvalid <= 1;
           if (!is_branch & !is_load) begin
             pc_ifu <= pc_ifu + 4;
           end else begin
