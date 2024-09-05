@@ -32,7 +32,7 @@ module ysyx_ifu (
   parameter bit [7:0] L1I_SIZE = 4;
   parameter bit [7:0] L1I_LEN = 2;
 
-  reg state;
+  reg state = `YSYX_IDLE;
 
   reg [DATA_W-1:0] pc_ifu;
   reg [32-1:0] l1i[L1I_SIZE][L1I_LINE_SIZE];
@@ -74,7 +74,6 @@ module ysyx_ifu (
   always @(posedge clk) begin
     if (rst) begin
       pc_ifu <= `YSYX_PC_INIT;
-      l1i_valid <= 0;
     end else begin
       if (valid_o & next_ready & inst_o == `YSYX_INST_FENCE_I) begin
         l1i_valid <= 0;
@@ -104,6 +103,7 @@ module ysyx_ifu (
   always @(posedge clk) begin
     if (rst) begin
       l1i_state <= 'b000;
+      l1i_valid <= 0;
     end else begin
       case (l1i_state)
         'b000:
