@@ -83,10 +83,10 @@ module ysyx_ifu (
             ifu_hazard <= 0;
             pc_ifu <= npc;
           end
-          if (pc_skip) begin
-            ifu_hazard <= 0;
-            pc_ifu <= npc;
-          end
+        end
+        if (pc_skip) begin
+          ifu_hazard <= 0;
+          pc_ifu <= npc;
         end
       end else if (state == `YSYX_WAIT_READY) begin
         if (next_ready == 1 & valid_o) begin
