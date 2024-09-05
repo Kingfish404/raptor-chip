@@ -62,6 +62,7 @@ static void perf()
       (1.0 * pmu.ifu_fetch_stall_cycle) / (pmu.ifu_fetch_cnt + 1),
       (1.0 * pmu.lsu_stall_cycle) / (pmu.lsu_load_cnt + 1));
   printf("ifu_hazard_cycle: %lld (branch, load instruction)\n", pmu.ifu_hazard_cycle);
+  printf("idu_hazard_cycle: %lld (data hazard)\n", pmu.idu_hazard_cycle);
   Log(FMT_BLUE("ifu_fetch_cnt: %lld, instr_cnt: %lld"), pmu.ifu_fetch_cnt, pmu.instr_cnt);
   assert(pmu.ifu_fetch_cnt == pmu.instr_cnt);
   assert(
@@ -124,6 +125,10 @@ static void perf_sample_per_cycle()
   if (ifu_hazard)
   {
     pmu.ifu_hazard_cycle++;
+  }
+  if (idu_hazard)
+  {
+    pmu.idu_hazard_cycle++;
   }
   if (lsu_valid)
   {
