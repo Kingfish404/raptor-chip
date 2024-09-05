@@ -96,11 +96,10 @@ module ysyx_ifu (
       end else if (state == `YSYX_WAIT_READY) begin
         pvalid <= 0;
         if (next_ready == 1 & valid_o) begin
+          pvalid <= 1;
           if (!is_branch & !is_load) begin
             pc_ifu <= pc_ifu + 4;
-            pvalid <= 1;
           end else begin
-            pvalid <= 1;
             branch_stall <= 1;
           end
         end
@@ -113,24 +112,24 @@ module ysyx_ifu (
       l1i_state <= 'b000;
     end else begin
       case (l1i_state)
-        'b00:
+        'b000:
         if (ifu_arvalid_o) begin
-          l1i_state <= 'b01;
+          l1i_state <= 'b001;
         end
-        'b01:
+        'b001:
         if (ifu_rvalid & !l1i_cache_hit) begin
           if (ifu_sdram_arburst) begin
-            l1i_state <= 'b11;
+            l1i_state <= 'b011;
           end else begin
-            l1i_state <= 'b10;
+            l1i_state <= 'b010;
           end
           l1i[addr_idx][0]  <= ifu_rdata;
           l1i_tag[addr_idx] <= addr_tag;
         end
-        'b10: begin
-          l1i_state <= 'b11;
+        'b010: begin
+          l1i_state <= 'b011;
         end
-        'b11: begin
+        'b011: begin
           if (ifu_rvalid) begin
             l1i_state <= 'b100;
             l1i[addr_idx][1] <= ifu_rdata;
@@ -139,7 +138,7 @@ module ysyx_ifu (
           end
         end
         'b100: begin
-          l1i_state <= 'b00;
+          l1i_state <= 'b000;
         end
         default begin
           l1i_state <= 'b000;
