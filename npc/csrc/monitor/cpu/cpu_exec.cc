@@ -166,7 +166,7 @@ static void perf_sample_per_cycle()
   }
   else
   {
-    if (ifu_valid)
+    if (ifu_valid && l1i_state == 0b011)
     {
       i_fetching = false;
     }
