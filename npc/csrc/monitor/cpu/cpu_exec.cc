@@ -95,6 +95,7 @@ static void perf_sample_per_cycle()
   }
   pmu.active_cycle++;
   bool ifu_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, ifu_valid));
+  bool ifu_bubble = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, ifu_bubble));
   bool idu_ready = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, idu_ready));
   bool idu_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, idu_valid));
   bool exu_ready = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, exu_ready));
@@ -118,6 +119,7 @@ static void perf_sample_per_cycle()
   {
     pmu.ifu_stall_cycle++;
   }
+  if ()
   if (lsu_valid)
   {
     pmu.lsu_load_cnt++;
