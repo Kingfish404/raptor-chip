@@ -78,15 +78,15 @@ module ysyx_ifu (
         l1i_valid <= 0;
       end
       if (state == `YSYX_IDLE) begin
-        // if (prev_valid) begin
+        if (prev_valid) begin
           if ((is_branch & pc_valid)) begin
             ifu_hazard <= 0;
             pc_ifu <= npc;
           end
-        // end
-        if (pc_skip) begin
-          ifu_hazard <= 0;
-          pc_ifu <= npc;
+          if (pc_skip) begin
+            ifu_hazard <= 0;
+            pc_ifu <= npc;
+          end
         end
       end else if (state == `YSYX_WAIT_READY) begin
         if (next_ready == 1 & valid_o) begin
