@@ -41,7 +41,7 @@ module ysyx_ifu (
   reg [L1I_SIZE-1:0] l1i_valid = 0;
   reg [32-L1I_LEN-L1I_LINE_LEN-2-1:0] l1i_tag[L1I_SIZE];
   reg [2:0] l1i_state = 0;
-  reg branch_stall = 0, pipeline_fetch = 0;
+  reg branch_stall = 0;
 
   wire arvalid;
 
@@ -99,16 +99,11 @@ module ysyx_ifu (
           if (!is_branch & !is_load) begin
             pc_ifu <= pc_ifu + 4;
             pvalid <= 1;
-            pipeline_fetch <= 1;
           end else begin
             pvalid <= 1;
             branch_stall <= 1;
           end
         end
-      end
-      if (pipeline_fetch) begin
-        pvalid <= 1;
-        pipeline_fetch <= 0;
       end
     end
   end
