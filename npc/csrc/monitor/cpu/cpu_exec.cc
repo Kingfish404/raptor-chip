@@ -13,25 +13,7 @@
 
 extern NPCState npc;
 
-PMUState pmu = {
-    .active_cycle = 0,
-    .instr_cnt = 0,
-    .ifu_fetch_cnt = 0,
-    .lsu_load_cnt = 0,
-    .exu_alu_cnt = 0,
-
-    .ld_inst_cnt = 0,
-    .st_inst_cnt = 0,
-    .alu_inst_cnt = 0,
-    .b_inst_cnt = 0,
-    .csr_inst_cnt = 0,
-    .other_inst_cnt = 0,
-
-    .l1i_cache_hit_cnt = 0,
-    .l1i_cache_hit_cycle = 0,
-    .l1i_cache_miss_cnt = 0,
-    .l1i_cache_miss_cycle = 0,
-};
+PMUState pmu;
 
 extern VerilatedContext *contextp;
 extern TOP_NAME *top;
@@ -275,6 +257,11 @@ void cpu_show_itrace()
 }
 
 void disassemble(char *str, int size, uint64_t pc, uint8_t *code, int nbyte);
+
+void cpu_exec_init()
+{
+  memset(&pmu, 0, sizeof(pmu));
+}
 
 void cpu_exec(uint64_t n)
 {
