@@ -157,7 +157,7 @@ static void perf_sample_per_cycle()
   }
   if (i_fetching == false)
   {
-    else if (l1i_state == 0b000)
+    if (l1i_state == 0b000)
     {
       i_fetching = true;
       pmu.l1i_cache_miss_cnt++;
