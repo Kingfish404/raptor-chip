@@ -95,8 +95,11 @@ static void perf_sample_per_cycle()
   pmu.active_cycle++;
   bool ifu_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, ifu_valid));
   bool ifu_hazard = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, ifu__DOT__ifu_hazard));
+
   bool idu_ready = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, idu_ready));
   bool idu_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, idu_valid));
+  bool idu_hazard = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, idu__DOT__idu_hazard));
+
   bool exu_ready = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, exu_ready));
   bool exu_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, exu_valid));
   bool wbu_ready = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, wbu_ready));
