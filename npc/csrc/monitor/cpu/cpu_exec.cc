@@ -148,32 +148,29 @@ static void perf_sample_per_cycle()
     pmu.exu_alu_cnt++;
   }
   // cache sample
-  if (l1i_state)
+  if (i_fetching == false)
   {
-    if (i_fetching == false)
+    if (l1i_cache_hit)
     {
-      if (l1i_cache_hit)
-      {
-        pmu.l1i_cache_hit_cnt++;
-        pmu.l1i_cache_hit_cycle++;
-      }
-      else
-      {
-        i_fetching = true;
-        pmu.l1i_cache_miss_cnt++;
-        pmu.l1i_cache_miss_cycle++;
-      }
+      pmu.l1i_cache_hit_cnt++;
+      pmu.l1i_cache_hit_cycle++;
     }
     else
     {
-      if (ifu_valid)
-      {
-        i_fetching = false;
-      }
-      else
-      {
-        pmu.l1i_cache_miss_cycle++;
-      }
+      i_fetching = true;
+      pmu.l1i_cache_miss_cnt++;
+      pmu.l1i_cache_miss_cycle++;
+    }
+  }
+  else
+  {
+    if (ifu_valid)
+    {
+      i_fetching = false;
+    }
+    else
+    {
+      pmu.l1i_cache_miss_cycle++;
     }
   }
 }
