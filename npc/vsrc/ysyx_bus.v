@@ -76,9 +76,9 @@ module ysyx_bus (
   wire [1:0] sram_bresp_o;
   wire sram_bvalid_o;
 
-  // typedef enum [2:0] {IF_A, IF_D, LS_A, LS_D_R} state_t;
+  // typedef enum [2:0] {IF_A, IF_D, LS_A, LS_R} state_t;
   //                      000,  001,  010,    011
-  parameter bit [3:0] IF_A = 'b0001, IF_D = 'b0010, LS_A = 'b0100, LS_D_R = 'b1000;
+  parameter bit [3:0] IF_A = 'b0001, IF_D = 'b0010, LS_A = 'b0100, LS_R = 'b1000;
   parameter bit [2:0] LS_S_A = 'b001, LS_S_W = 'b010, LS_S_B = 'b100;
 
   reg [3:0] state;
@@ -114,12 +114,12 @@ module ysyx_bus (
         end
         LS_A: begin  // 010
           if (io_master_arvalid & io_master_arready) begin
-            state <= LS_D_R;
+            state <= LS_R;
           end else if (clint_en | ifu_arvalid) begin
             state <= IF_A;
           end
         end
-        LS_D_R: begin  // 011
+        LS_R: begin  // 011
           if (io_master_rvalid) begin
             state <= IF_A;
           end
@@ -181,7 +181,7 @@ module ysyx_bus (
                           ({DATA_W{!clint_en}} & rdata_o)
                         ));
   assign lsu_rvalid_o = (
-    state == LS_D_R | clint_arvalid) &
+    state == LS_R | clint_arvalid) &
     lsu_arvalid & (rvalid_o | clint_rvalid_o);
 
   // lsu write
