@@ -231,7 +231,7 @@ module ysyx_bus (
            (3'b000)
          );
   assign io_master_awaddr = lsu_awaddr;
-  assign io_master_awvalid = (state == LS_A) & (lsu_wvalid) & !awrite_done;
+  assign io_master_awvalid = (state_store == LS_A) & (lsu_wvalid) & !awrite_done;
 
   assign io_master_wlast = io_master_wvalid;
   wire [1:0] awaddr_lo = io_master_awaddr[1:0];
@@ -246,7 +246,7 @@ module ysyx_bus (
   assign io_master_wdata[63:32] = wdata;
   assign io_master_wstrb = (io_master_awaddr[2:2] == 1) ? {{wstrb}, {4'b0}} : {{4'b0}, {wstrb}};
   wire [3:0] wstrb = {lsu_wstrb[3:0] << awaddr_lo};
-  assign io_master_wvalid = (state == LS_A) & (lsu_wvalid) & !write_done;
+  assign io_master_wvalid = (state_store == LS_A) & (lsu_wvalid) & !write_done;
 
   assign io_master_bready = 1;
 
