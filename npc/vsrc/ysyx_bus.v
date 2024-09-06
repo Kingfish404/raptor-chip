@@ -76,13 +76,13 @@ module ysyx_bus (
   wire [1:0] sram_bresp_o;
   wire sram_bvalid_o;
 
-  // typedef enum [2:0] {IF_A, IF_D, LS_A, LS_D_R, LS_D_W} state_t;
-  //                      000,  001,  010,    011,    100,
-  parameter bit [2:0] IF_A = 3'b000, IF_D = 3'b001;
-  parameter bit [2:0] LS_A = 3'b010, LS_D_R = 3'b011;
+  // typedef enum [2:0] {IF_A, IF_D, LS_A, LS_D_R} state_t;
+  //                      000,  001,  010,    011
+  parameter bit [3:0] IF_A = 3'b000, IF_D = 3'b001;
+  parameter bit [3:0] LS_A = 3'b010, LS_D_R = 3'b011;
   parameter bit [2:0] LS_S_A = 3'b001, LS_S_W = 3'b010, LS_S_B = 3'b100;
 
-  reg [2:0] state;
+  reg [3:0] state;
   reg first = 1;
   reg write_done = 0, awrite_done = 0;
   always @(posedge clk) begin
