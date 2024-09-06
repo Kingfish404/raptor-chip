@@ -117,6 +117,11 @@ static void perf_sample_per_cycle()
   bool ifu_pvalid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__ifu__DOT__pvalid));
   bool l1i_cache_hit = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__ifu__DOT__l1i_cache_hit));
   bool lsu_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__exu__DOT__lsu_valid));
+  uint32_t pc_ifu = *(uint32_t *)&(CONCAT(VERILOG_PREFIX, __DOT__ifu__DOT__pc_ifu));
+  uint32_t pc_idu = *(uint32_t *)&(CONCAT(VERILOG_PREFIX, __DOT__idu__DOT__pc_idu));
+  uint32_t pc_exu = *(uint32_t *)&(CONCAT(VERILOG_PREFIX, __DOT__exu__DOT__pc_exu));
+  uint32_t pc_wbu = *(uint32_t *)&(CONCAT(VERILOG_PREFIX, __DOT__wbu__DOT__pc_wbu));
+  static uint32_t ifu_pc = 0;
   if (ifu_valid)
   {
     pmu.ifu_fetch_cnt++;
@@ -204,8 +209,11 @@ static void statistic()
 {
   perf();
   double time_s = g_timer / 1e6;
+  uint64_t time_clint = *(uint64_t *)&(CONCAT(VERILOG_PREFIX, __DOT__bus__DOT__clint__DOT__mtime));
+  uint64_t time_clint_us = time_clint / 2;
+  Log("CLINT time: %lld (us), %2.3f MIPS", (time_clint_us), (double)((pmu.instr_cnt / 1e6) / (time_clint_us / 1e6)));
   double frequency = pmu.active_cycle / time_s;
-  Log("time: %d (ns), %d (ms)", g_timer, (int)(g_timer / 1e3));
+  Log(FMT_BLUE("Simulate time: %d (ns), %d (ms)"), g_timer, (int)(g_timer / 1e3));
   Log(FMT_BLUE("Simulate Freq: %9.1f Hz, %6.3f MHz"), frequency, (double)(frequency * 1.0 / 1e6));
   Log(FMT_BLUE("Simulate Inst: %9.1f I/s, %5.3f MIPS"),
       pmu.instr_cnt / time_s, pmu.instr_cnt / time_s / 1e6);
@@ -219,7 +227,10 @@ static void statistic()
 static void cpu_exec_one_cycle()
 {
 #ifdef CONFIG_NVBoard
-  nvboard_update();
+  if (!top->reset)
+  {
+    nvboard_update();
+  }
 #endif
 
   top->clock = (top->clock == 0) ? 1 : 0;
