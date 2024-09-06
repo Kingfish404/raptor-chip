@@ -149,6 +149,20 @@ module ysyx_bus (
     end
   end
 
+  reg [2:0] state_store;
+  always @(posedge clk) begin
+    if (rst) begin
+      state_store <= IF_A;
+    end else begin
+      case (state)
+        LS_A: state_store <= LS_A;
+        LS_D_R: state_store <= LS_D_R;
+        LS_D_W: state_store <= LS_D_W;
+        default: state_store <= IF_A;
+      endcase
+    end
+  end
+
   // read
   wire [ADDR_W-1:0] sram_araddr = (
     ({ADDR_W{lsu_arvalid}} & lsu_araddr) |
@@ -209,7 +223,7 @@ module ysyx_bus (
            (3'b000)
          );
   assign io_master_awaddr = lsu_awaddr;
-  assign io_master_awvalid = (lsu_wvalid) & !awrite_done;
+  assign io_master_awvalid = (state == LS_A) & (lsu_wvalid) & !awrite_done;
 
   assign io_master_wlast = io_master_wvalid;
   wire [1:0] awaddr_lo = io_master_awaddr[1:0];
@@ -224,7 +238,7 @@ module ysyx_bus (
   assign io_master_wdata[63:32] = wdata;
   assign io_master_wstrb = (io_master_awaddr[2:2] == 1) ? {{wstrb}, {4'b0}} : {{4'b0}, {wstrb}};
   wire [3:0] wstrb = {lsu_wstrb[3:0] << awaddr_lo};
-  assign io_master_wvalid = (lsu_wvalid) & !write_done;
+  assign io_master_wvalid = (state == LS_A) & (lsu_wvalid) & !write_done;
 
   assign io_master_bready = 1;
 
