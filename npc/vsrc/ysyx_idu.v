@@ -8,6 +8,11 @@ module ysyx_idu (
   input [31:0] inst,
   input [BIT_W-1:0] reg_rdata1, reg_rdata2,
   input [BIT_W-1:0] pc,
+
+  input exu_valid,
+  input [BIT_W-1:0] exu_forward,
+  input [3:0] exu_forward_rd,
+
   output en_j_o,
   output ren_o, wen_o, system_o, system_func3_o,
   output reg [BIT_W-1:0] op1_o, op2_o,
@@ -39,7 +44,7 @@ module ysyx_idu (
     inst_idu[31], inst_idu[19:12], inst_idu[20], inst_idu[30:25], inst_idu[24:21], 1'b0};
   wire [15:0] imm_SYS = {{imm_I}, {1'b0, funct3}};
   wire idu_hazard = valid & (
-    opcode_o != `YSYX_OP_LUI & opcode_o != `YSYX_OP_AUIPC & opcode_o != `YSYX_OP_JAL &
+    // opcode_o != `YSYX_OP_LUI & opcode_o != `YSYX_OP_AUIPC & opcode_o != `YSYX_OP_JAL &
     (rf_table[rs1[4-1:0]] == 1) | (rf_table[rs2[4-1:0]] == 1));
   assign opcode_o = inst_idu[6:0];
   assign valid_o = valid & !idu_hazard;

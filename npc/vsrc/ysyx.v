@@ -225,6 +225,9 @@ module ysyx (
     .inst(inst),
     .reg_rdata1(reg_rdata1), .reg_rdata2(reg_rdata2),
     .pc(pc_ifu),
+
+    .exu_valid(exu_valid), .exu_forward(0), .exu_forward_rd(0),
+
     .en_j_o(en_j), .ren_o(ren), .wen_o(wen),
     .system_o(system), .system_func3_o(system_func3),
     .op1_o(op1), .op2_o(op2), .op_j_o(op_j), .rwaddr_o(rwaddr_idu),
