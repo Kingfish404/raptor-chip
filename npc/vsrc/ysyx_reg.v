@@ -22,8 +22,10 @@ module ysyx_reg (
 
   wire not_r0_write = reg_write_en & |waddr[REG_ADDR_W-1:0];
 
-  assign src1_o = |s1addr[REG_ADDR_W-1:0] ? rf[s1addr[REG_ADDR_W-1:0]] : 0;
-  assign src2_o = |s2addr[REG_ADDR_W-1:0] ? rf[s2addr[REG_ADDR_W-1:0]] : 0;
+  // assign src1_o = |s1addr[REG_ADDR_W-1:0] ? rf[s1addr[REG_ADDR_W-1:0]] : 0;
+  // assign src2_o = |s2addr[REG_ADDR_W-1:0] ? rf[s2addr[REG_ADDR_W-1:0]] : 0;
+  assign src1_o = rf[s1addr[REG_ADDR_W-1:0]];
+  assign src2_o = rf[s2addr[REG_ADDR_W-1:0]];
   assign rf_table_o = rf_table;
 
   always @(posedge clk) begin
@@ -32,7 +34,7 @@ module ysyx_reg (
     end else begin
       if (idu_valid) begin
         rf_table[rd] <= 1;
-        rf_table[0]  <= 0;
+        // rf_table[0]  <= 0;
       end
       if (not_r0_write) begin
         rf_table[waddr[3:0]] <= 0;
