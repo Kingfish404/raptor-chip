@@ -80,6 +80,7 @@ module ysyx_bus (
   //                      000,  001,  010,    011,    100,
   parameter bit [2:0] IF_A = 3'b000, IF_D = 3'b001;
   parameter bit [2:0] LS_A = 3'b010, LS_D_R = 3'b011, LS_D_W = 3'b100;
+  parameter bit [2:0] LS_S_A = 3'b010, LS_S_W = 3'b010, LS_S_B = 3'b100;
 
   reg [2:0] state;
   reg first = 1;
@@ -140,17 +141,17 @@ module ysyx_bus (
   reg [2:0] state_store;
   always @(posedge clk) begin
     if (rst) begin
-      state_store <= IF_A;
+      state_store <= LS_S_A;
     end else begin
       case (state_store)
-        IF_A: begin
+        LS_S_A: begin
           if (lsu_awvalid) begin
-            state_store <= LS_A;
+            state_store <= LS_S_W;
             awrite_done <= 0;
-            write_done <= 0;
+            write_done  <= 0;
           end
         end
-        LS_A: begin
+        LS_S_W: begin
           if (lsu_wvalid) begin
             if (io_master_awready) begin
               awrite_done <= 1;
@@ -163,10 +164,10 @@ module ysyx_bus (
             end
           end
         end
-        LS_D_W: begin
-          state_store <= IF_A;
+        LS_S_B: begin
+          state_store <= LS_S_A;
         end
-        default: state_store <= LS_A;
+        default: state_store <= LS_S_W;
       endcase
     end
   end
@@ -231,7 +232,7 @@ module ysyx_bus (
            (3'b000)
          );
   assign io_master_awaddr = lsu_awaddr;
-  assign io_master_awvalid = (state_store == LS_A) & (lsu_wvalid) & !awrite_done;
+  assign io_master_awvalid = (state_store == LS_S_W) & (lsu_wvalid) & !awrite_done;
 
   assign io_master_wlast = io_master_wvalid;
   wire [1:0] awaddr_lo = io_master_awaddr[1:0];
@@ -246,7 +247,7 @@ module ysyx_bus (
   assign io_master_wdata[63:32] = wdata;
   assign io_master_wstrb = (io_master_awaddr[2:2] == 1) ? {{wstrb}, {4'b0}} : {{4'b0}, {wstrb}};
   wire [3:0] wstrb = {lsu_wstrb[3:0] << awaddr_lo};
-  assign io_master_wvalid = (state_store == LS_A) & (lsu_wvalid) & !write_done;
+  assign io_master_wvalid = (state_store == LS_S_W) & (lsu_wvalid) & !write_done;
 
   assign io_master_bready = 1;
 
