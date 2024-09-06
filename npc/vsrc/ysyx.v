@@ -223,7 +223,7 @@ module ysyx (
     .clk(clock), .rst(reset),
 
     .inst(inst),
-    .reg_rdata1(reg_rdata1), .reg_rdata2(reg_rdata2),
+    .reg_rdata1(rdata1), .reg_rdata2(rdata2),
     .pc(pc_ifu),
 
     .exu_valid(exu_valid), .exu_forward(0), .exu_forward_rd(0),
