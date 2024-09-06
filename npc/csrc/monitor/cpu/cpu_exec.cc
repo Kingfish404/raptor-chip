@@ -61,8 +61,9 @@ static void perf()
   Log(FMT_BLUE("IFU Avg Cycle: %2.1f, LSU Avg Cycle: %2.1f"),
       (1.0 * pmu.ifu_fetch_stall_cycle) / (pmu.ifu_fetch_cnt + 1),
       (1.0 * pmu.lsu_stall_cycle) / (pmu.lsu_load_cnt + 1));
-  printf("ifu_hazard_cycle: %10lld,%3.0f%% (branch, load instruction)\n",
-         pmu.ifu_hazard_cycle, percentage(pmu.ifu_hazard_cycle, pmu.active_cycle));
+  printf("ifu_hazard_cycle: %10lld,%3.0f%% (branch + load instruction (%10lld,%3.0f%%))\n",
+         pmu.ifu_hazard_cycle, percentage(pmu.ifu_hazard_cycle, pmu.active_cycle),
+         pmu.ifu_lsu_hazard_cycle, percentage(pmu.ifu_lsu_hazard_cycle, pmu.active_cycle));
   printf("idu_hazard_cycle: %10lld,%3.0f%% (data hazard)\n",
          pmu.idu_hazard_cycle, percentage(pmu.idu_hazard_cycle, pmu.active_cycle));
   Log(FMT_BLUE("ifu_fetch_cnt: %lld, instr_cnt: %lld"), pmu.ifu_fetch_cnt, pmu.instr_cnt);
@@ -98,6 +99,7 @@ static void perf_sample_per_cycle()
   pmu.active_cycle++;
   bool ifu_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, ifu_valid));
   bool ifu_hazard = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, ifu__DOT__ifu_hazard));
+  bool ifu_lsu_hazard = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, ifu__DOT__ifu_lsu_hazard));
 
   bool idu_ready = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, idu_ready));
   bool idu_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, idu_valid));
@@ -127,6 +129,10 @@ static void perf_sample_per_cycle()
   if (ifu_hazard)
   {
     pmu.ifu_hazard_cycle++;
+    if (ifu_lsu_hazard)
+    {
+      pmu.ifu_lsu_hazard_cycle++;
+    }
   }
   if (idu_hazard)
   {
