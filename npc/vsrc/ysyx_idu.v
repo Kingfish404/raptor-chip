@@ -6,8 +6,13 @@ module ysyx_idu (
   input clk, rst,
 
   input [31:0] inst,
-  input [BIT_W-1:0] reg_rdata1, reg_rdata2,
+  input [BIT_W-1:0] rdata1, rdata2,
   input [BIT_W-1:0] pc,
+
+  input exu_valid,
+  input [BIT_W-1:0] exu_forward,
+  input [3:0] exu_forward_rd,
+
   output en_j_o,
   output ren_o, wen_o, system_o, system_func3_o,
   output reg [BIT_W-1:0] op1_o, op2_o,
@@ -38,12 +43,17 @@ module ysyx_idu (
   wire [20:0] imm_J = {
     inst_idu[31], inst_idu[19:12], inst_idu[20], inst_idu[30:25], inst_idu[24:21], 1'b0};
   wire [15:0] imm_SYS = {{imm_I}, {1'b0, funct3}};
-  wire conflict_stall = (
+  wire idu_hazard = valid & (
     opcode_o != `YSYX_OP_LUI & opcode_o != `YSYX_OP_AUIPC & opcode_o != `YSYX_OP_JAL &
-    (rf_table[rs1[4-1:0]] == 1) | (rf_table[rs2[4-1:0]] == 1));
+    ((rf_table[rs1[4-1:0]] == 1) & !(exu_valid & rs1[4-1:0] == exu_forward_rd)) |
+    ((rf_table[rs2[4-1:0]] == 1) & !(exu_valid & rs2[4-1:0] == exu_forward_rd)) |
+    (0)
+    );
+  wire [BIT_W-1:0] reg_rdata1 = exu_valid & rs1[4-1:0] == exu_forward_rd ? exu_forward : rdata1;
+  wire [BIT_W-1:0] reg_rdata2 = exu_valid & rs2[4-1:0] == exu_forward_rd ? exu_forward : rdata2;
   assign opcode_o = inst_idu[6:0];
-  assign valid_o = valid & !conflict_stall;
-  assign ready_o = ready & !conflict_stall & next_ready;
+  assign valid_o = valid & !idu_hazard;
+  assign ready_o = ready & !idu_hazard & next_ready;
   assign inst_o = inst_idu;
   assign pc_o = pc_idu;
 
@@ -58,7 +68,7 @@ module ysyx_idu (
       if (state == `YSYX_IDLE) begin
         if (prev_valid & ready_o & next_ready) begin
           valid <= 1;
-          if (conflict_stall) begin
+          if (idu_hazard) begin
             ready <= 0;
           end
         end
@@ -98,8 +108,8 @@ module ysyx_idu (
     rs1_o = rs1; rs2_o = rs2; rd_o = 0;
     imm_o = 0; op1_o = 0; op2_o = 0;
       case (opcode_o)
-        `YSYX_OP_LUI:     begin `YSYX_U_TYPE(0,  `YSYX_ALU_OP_ADD);                     end
-        `YSYX_OP_AUIPC:   begin `YSYX_U_TYPE(pc_o, `YSYX_ALU_OP_ADD);                   end
+        `YSYX_OP_LUI:     begin `YSYX_U_TYPE(   0, `YSYX_ALU_OP_ADD);                 end
+        `YSYX_OP_AUIPC:   begin `YSYX_U_TYPE(pc_o, `YSYX_ALU_OP_ADD);                 end
         `YSYX_OP_JAL:     begin `YSYX_J_TYPE(pc_o, `YSYX_ALU_OP_ADD, 4);              end
         `YSYX_OP_JALR:    begin `YSYX_I_TYPE(pc_o, `YSYX_ALU_OP_ADD, 4);              end
         `YSYX_OP_B_TYPE:  begin `YSYX_B_TYPE(reg_rdata1, {1'b0, funct3}, reg_rdata2); end

@@ -13,25 +13,7 @@
 
 extern NPCState npc;
 
-PMUState pmu = {
-    .active_cycle = 0,
-    .instr_cnt = 0,
-    .ifu_fetch_cnt = 0,
-    .lsu_load_cnt = 0,
-    .exu_alu_cnt = 0,
-
-    .ld_inst_cnt = 0,
-    .st_inst_cnt = 0,
-    .alu_inst_cnt = 0,
-    .b_inst_cnt = 0,
-    .csr_inst_cnt = 0,
-    .other_inst_cnt = 0,
-
-    .l1i_cache_hit_cnt = 0,
-    .l1i_cache_hit_cycle = 0,
-    .l1i_cache_miss_cnt = 0,
-    .l1i_cache_miss_cycle = 0,
-};
+PMUState pmu;
 
 extern VerilatedContext *contextp;
 extern TOP_NAME *top;
@@ -57,7 +39,7 @@ static void perf()
   printf("| %8s,  %% | %8s,  %% | %8s,  %% | %6s, %% | %6s, %% | %6s, %% | %6s, %% | %3s, %% | %5s, %% |\n",
          "IFU", "LSU", "EXU", "LD", "ST", "ALU", "BR", "CSR", "OTH");
   printf("| %8lld,%3.0f | %8lld,%3.0f | %8lld,%3.0f | %6lld,%2.0f | %6lld,%2.0f | %6lld,%2.0f | %6lld,%2.0f | %3lld,%2.0f | %5lld,%2.0f |\n",
-         (long long)pmu.ifu_stall_cycle, percentage(pmu.ifu_stall_cycle, pmu.active_cycle),
+         (long long)pmu.ifu_fetch_stall_cycle, percentage(pmu.ifu_fetch_stall_cycle, pmu.active_cycle),
          (long long)pmu.lsu_stall_cycle, percentage(pmu.lsu_stall_cycle, pmu.active_cycle),
          (long long)pmu.exu_alu_cnt, percentage(pmu.exu_alu_cnt, pmu.instr_cnt),
          (long long)pmu.ld_inst_cnt, percentage(pmu.ld_inst_cnt, pmu.instr_cnt),
@@ -70,23 +52,26 @@ static void perf()
   printf("| %8s,  %% | %8s,  %% | %8s,  %% | %8s,  %% | %8s,  %% |\n",
          "IFU", "LSU", "EXU", "LD", "ST");
   printf("| %8lld,%3.0f | %8lld,%3.0f | %8lld,%3.0f | %8lld,%3.0f | %8lld,%3.0f |\n",
-         pmu.ifu_stall_cycle, percentage(pmu.ifu_stall_cycle, pmu.active_cycle),
+         pmu.ifu_fetch_stall_cycle, percentage(pmu.ifu_fetch_stall_cycle, pmu.active_cycle),
          pmu.lsu_stall_cycle, percentage(pmu.lsu_stall_cycle, pmu.active_cycle),
          pmu.exu_alu_cnt, percentage(pmu.exu_alu_cnt, pmu.instr_cnt),
          pmu.ld_inst_cnt, percentage(pmu.ld_inst_cnt, pmu.instr_cnt),
          pmu.st_inst_cnt, percentage(pmu.st_inst_cnt, pmu.instr_cnt));
   // show average IF cycle and LS cycle
   Log(FMT_BLUE("IFU Avg Cycle: %2.1f, LSU Avg Cycle: %2.1f"),
-      (1.0 * pmu.ifu_stall_cycle) / (pmu.ifu_fetch_cnt + 1),
+      (1.0 * pmu.ifu_fetch_stall_cycle) / (pmu.ifu_fetch_cnt + 1),
       (1.0 * pmu.lsu_stall_cycle) / (pmu.lsu_load_cnt + 1));
+  printf("ifu_hazard_cycle: %8lld,%3.0f%% (branch + load instruction (%8lld,%3.0f%%))\n",
+         pmu.ifu_hazard_cycle, percentage(pmu.ifu_hazard_cycle, pmu.active_cycle),
+         pmu.ifu_lsu_hazard_cycle, percentage(pmu.ifu_lsu_hazard_cycle, pmu.active_cycle));
+  printf("idu_hazard_cycle: %8lld,%3.0f%% (data hazard)\n",
+         pmu.idu_hazard_cycle, percentage(pmu.idu_hazard_cycle, pmu.active_cycle));
   Log(FMT_BLUE("ifu_fetch_cnt: %lld, instr_cnt: %lld"), pmu.ifu_fetch_cnt, pmu.instr_cnt);
-  // assert(pmu.ifu_fetch_cnt == pmu.instr_cnt);
+  assert(pmu.ifu_fetch_cnt == pmu.instr_cnt);
   assert(
       pmu.instr_cnt ==
-      (pmu.ld_inst_cnt + pmu.st_inst_cnt +
-       pmu.alu_inst_cnt + pmu.b_inst_cnt +
-       pmu.csr_inst_cnt +
-       pmu.other_inst_cnt));
+      (pmu.ld_inst_cnt + pmu.st_inst_cnt + pmu.alu_inst_cnt + pmu.b_inst_cnt +
+       pmu.csr_inst_cnt + pmu.other_inst_cnt));
   printf("======== Cache Analysis ========\n");
   // AMAT: Average Memory Access Time
   printf("| %8s, %% | %8s, %% | %8s, %% | %8s, %% | %13s | %13s | %8s |\n",
@@ -101,11 +86,10 @@ static void perf()
          pmu.l1i_cache_miss_cycle, percentage(pmu.l1i_cache_miss_cycle, pmu.l1i_cache_hit_cycle + pmu.l1i_cache_miss_cycle),
          (long long)l1i_access_time, (long long)l1i_miss_penalty,
          l1i_access_time + (100 - l1i_hit_rate) / 100.0 * l1i_miss_penalty);
-  // assert(
-  //     (pmu.l1i_cache_hit_cnt + pmu.l1i_cache_miss_cnt) == pmu.ifu_fetch_cnt);
+  assert(
+      (pmu.l1i_cache_hit_cnt + pmu.l1i_cache_miss_cnt) == pmu.ifu_fetch_cnt);
 }
 
-bool i_fetching = false;
 static void perf_sample_per_cycle()
 {
   if (top->reset)
@@ -113,63 +97,81 @@ static void perf_sample_per_cycle()
     return;
   }
   pmu.active_cycle++;
-  bool ifu_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__ifu__DOT__l1i_cache_hit));
-  bool ifu_pvalid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__ifu__DOT__pvalid));
-  bool l1i_cache_hit = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__ifu__DOT__l1i_cache_hit));
-  bool lsu_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__exu__DOT__lsu_valid));
-  uint32_t pc_ifu = *(uint32_t *)&(CONCAT(VERILOG_PREFIX, __DOT__ifu__DOT__pc_ifu));
-  uint32_t pc_idu = *(uint32_t *)&(CONCAT(VERILOG_PREFIX, __DOT__idu__DOT__pc_idu));
-  uint32_t pc_exu = *(uint32_t *)&(CONCAT(VERILOG_PREFIX, __DOT__exu__DOT__pc_exu));
-  uint32_t pc_wbu = *(uint32_t *)&(CONCAT(VERILOG_PREFIX, __DOT__wbu__DOT__pc_wbu));
+  bool ifu_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, ifu_valid));
+  bool ifu_hazard = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, ifu__DOT__ifu_hazard));
+  bool ifu_lsu_hazard = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, ifu__DOT__ifu_lsu_hazard));
+
+  bool idu_ready = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, idu_ready));
+  bool idu_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, idu_valid));
+  bool idu_hazard = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, idu__DOT__idu_hazard));
+
+  bool exu_ready = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, exu_ready));
+  bool exu_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, exu_valid));
+  bool wbu_ready = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, wbu_ready));
+  bool wbu_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, wbu_valid));
+  uint8_t l1i_state = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, ifu__DOT__l1i_state));
+  bool l1i_cache_hit = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, ifu__DOT__l1i_cache_hit));
+  bool lsu_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, exu__DOT__lsu_valid));
+  uint32_t pc_ifu = *(uint32_t *)&(CONCAT(VERILOG_PREFIX, ifu__DOT__pc_ifu));
+  uint32_t pc_idu = *(uint32_t *)&(CONCAT(VERILOG_PREFIX, idu__DOT__pc_idu));
+  uint32_t pc_exu = *(uint32_t *)&(CONCAT(VERILOG_PREFIX, exu__DOT__pc_exu));
+  uint32_t pc_wbu = *(uint32_t *)&(CONCAT(VERILOG_PREFIX, wbu__DOT__pc_wbu));
   static uint32_t ifu_pc = 0;
-  if (ifu_valid)
+  if (ifu_valid && idu_ready)
   {
     pmu.ifu_fetch_cnt++;
   }
-  if (!ifu_valid && ifu_pvalid)
+  if (!ifu_valid && (l1i_state == 0b000 || l1i_state == 0b001 ||
+                     l1i_state == 0b010 || l1i_state == 0b011))
   {
-    pmu.ifu_stall_cycle++;
+    pmu.ifu_fetch_stall_cycle++;
+  }
+  if (ifu_hazard)
+  {
+    pmu.ifu_hazard_cycle++;
+    if (ifu_lsu_hazard)
+    {
+      pmu.ifu_lsu_hazard_cycle++;
+    }
+  }
+  if (idu_hazard)
+  {
+    pmu.idu_hazard_cycle++;
   }
   if (lsu_valid)
   {
     pmu.lsu_load_cnt++;
   }
-  if (!lsu_valid &&
-      *(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__exu__DOT__lsu_avalid)))
+  if (!lsu_valid && *(uint8_t *)&(CONCAT(VERILOG_PREFIX, exu__DOT__lsu_avalid)))
   {
     pmu.lsu_stall_cycle++;
   }
-  if (*(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__exu_valid)))
+  if (exu_valid)
   {
     pmu.exu_alu_cnt++;
   }
   // cache sample
-  if (ifu_pvalid)
+  static bool i_fetching = false;
+  if (i_fetching == false)
   {
-    if (i_fetching == false)
+    if (!(ifu_valid && idu_ready) && l1i_state == 0b000)
     {
-      if (l1i_cache_hit)
-      {
-        pmu.l1i_cache_hit_cnt++;
-        pmu.l1i_cache_hit_cycle++;
-      }
-      else
-      {
-        i_fetching = true;
-        pmu.l1i_cache_miss_cnt++;
-        pmu.l1i_cache_miss_cycle++;
-      }
+      i_fetching = true;
+      pmu.l1i_cache_miss_cnt++;
+      pmu.l1i_cache_miss_cycle++;
+      pmu.l1i_cache_hit_cnt = pmu.ifu_fetch_cnt - pmu.l1i_cache_miss_cnt;
+      pmu.l1i_cache_hit_cycle = pmu.l1i_cache_hit_cnt;
+    }
+  }
+  else
+  {
+    if (ifu_valid && l1i_state == 0b011)
+    {
+      i_fetching = false;
     }
     else
     {
-      if (ifu_valid)
-      {
-        i_fetching = false;
-      }
-      else
-      {
-        pmu.l1i_cache_miss_cycle++;
-      }
+      pmu.l1i_cache_miss_cycle++;
     }
   }
 }
@@ -181,22 +183,22 @@ static void perf_sample_per_inst()
     return;
   }
   pmu.instr_cnt++;
-  switch (*(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__exu__DOT__opcode_exu)))
+  switch (*(uint8_t *)&(CONCAT(VERILOG_PREFIX, exu__DOT__opcode_exu)))
   {
-  case 0b0000011:
+  case 0b0000011: // I type: lb, lh, lw, lbu, lhu
     pmu.ld_inst_cnt++;
     break;
-  case 0b0100011:
+  case 0b0100011: // S type: sb, sh, sw
     pmu.st_inst_cnt++;
     break;
-  case 0b0110011:
-  case 0b0010011:
+  case 0b0110011: // R type: add, sub, sll, slt, sltu, xor, srl, sra, or, and
+  case 0b0010011: // I type: addi, slti, sltiu, xori, ori, andi, slli, srli, srai
     pmu.alu_inst_cnt++;
     break;
-  case 0b1100011:
+  case 0b1100011: // B type: beq, bne, blt, bge, bltu, bgeu
     pmu.b_inst_cnt++;
     break;
-  case 0b1110011:
+  case 0b1110011: // N type: ecall, ebreak, csrrw, csrrs, csrrc, csrrwi, csrrsi, csrrci, mert
     pmu.csr_inst_cnt++;
     break;
   default:
@@ -209,7 +211,7 @@ static void statistic()
 {
   perf();
   double time_s = g_timer / 1e6;
-  uint64_t time_clint = *(uint64_t *)&(CONCAT(VERILOG_PREFIX, __DOT__bus__DOT__clint__DOT__mtime));
+  uint64_t time_clint = *(uint64_t *)&(CONCAT(VERILOG_PREFIX, bus__DOT__clint__DOT__mtime));
   uint64_t time_clint_us = time_clint / 2;
   Log("CLINT time: %lld (us), %2.3f MIPS", (time_clint_us), (double)((pmu.instr_cnt / 1e6) / (time_clint_us / 1e6)));
   double frequency = pmu.active_cycle / time_s;
@@ -276,6 +278,11 @@ void cpu_show_itrace()
 
 void disassemble(char *str, int size, uint64_t pc, uint8_t *code, int nbyte);
 
+void cpu_exec_init()
+{
+  memset(&pmu, 0, sizeof(pmu));
+}
+
 void cpu_exec(uint64_t n)
 {
   switch (npc.state)
@@ -296,6 +303,8 @@ void cpu_exec(uint64_t n)
     cpu_exec_one_cycle();
     if (npc.state == NPC_END) // for ebreak
     {
+      pmu.instr_cnt++;
+      pmu.csr_inst_cnt++;
       break;
     }
     // Simulate the performance monitor unit
@@ -307,7 +316,7 @@ void cpu_exec(uint64_t n)
       npc.state = NPC_ABORT;
       break;
     }
-    if (*(uint8_t *)&(CONCAT(VERILOG_PREFIX, __DOT__wbu_valid)))
+    if (*(uint8_t *)&(CONCAT(VERILOG_PREFIX, wbu_valid)))
     {
       perf_sample_per_inst();
       cur_inst_cycle = 0;

@@ -126,7 +126,12 @@ typedef struct
   uint64_t active_cycle;
   uint64_t instr_cnt;
   uint64_t ifu_fetch_cnt;
-  uint64_t ifu_stall_cycle;
+  uint64_t ifu_fetch_stall_cycle;
+
+  uint64_t ifu_hazard_cycle;
+  uint64_t ifu_lsu_hazard_cycle;
+  uint64_t idu_hazard_cycle;
+
   uint64_t lsu_load_cnt;
   uint64_t lsu_stall_cycle;
   uint64_t exu_alu_cnt;

@@ -10,21 +10,21 @@
 #include CONCAT_HEAD(CONCAT(TOP_NAME, __Dpi))
 
 #ifdef YSYX_SOC
-#define VERILOG_PREFIX top->rootp->ysyxSoCFull__DOT__asic__DOT__cpu__DOT__cpu
+#define VERILOG_PREFIX top->rootp->ysyxSoCFull__DOT__asic__DOT__cpu__DOT__cpu__DOT__
 #else
-#define VERILOG_PREFIX top->rootp->ysyxSoC__DOT__cpu
+#define VERILOG_PREFIX top->rootp->ysyxSoC__DOT__cpu__DOT__
 #endif
 
 static inline void verilog_connect(TOP_NAME *top, NPCState *npc)
 {
   // for difftest
-  npc->inst = (uint32_t *)&(CONCAT(VERILOG_PREFIX, __DOT__wbu__DOT__inst_wbu));
+  npc->inst = (uint32_t *)&(CONCAT(VERILOG_PREFIX, wbu__DOT__inst_wbu));
 
-  npc->gpr = (word_t *)&CONCAT(VERILOG_PREFIX, __DOT__regs__DOT__rf);
-  npc->cpc = (uint32_t *)&CONCAT(VERILOG_PREFIX, __DOT__wbu__DOT__pc_wbu);
-  npc->pc = (uint32_t *)&CONCAT(VERILOG_PREFIX, __DOT__pc_unit__DOT__pc);
+  npc->gpr = (word_t *)&CONCAT(VERILOG_PREFIX, regs__DOT__rf);
+  npc->cpc = (uint32_t *)&CONCAT(VERILOG_PREFIX, wbu__DOT__pc_wbu);
+  npc->pc = (uint32_t *)&CONCAT(VERILOG_PREFIX, pc_unit__DOT__pc);
   npc->ret = npc->gpr + reg_str2idx("a0");
-  word_t *csr = (word_t *)&CONCAT(VERILOG_PREFIX, __DOT__exu__DOT__csr__DOT__csr);
+  word_t *csr = (word_t *)&CONCAT(VERILOG_PREFIX, exu__DOT__csr__DOT__csr);
 
   npc->state = NPC_RUNNING;
   npc->mstatus = csr + CSR_MSTATUS;

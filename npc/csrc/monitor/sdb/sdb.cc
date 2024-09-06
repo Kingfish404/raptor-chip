@@ -293,6 +293,7 @@ void sdb_sim_init(int argc, char **argv)
 
 void engine_start()
 {
+  cpu_exec_init();
   sdb_mainloop();
 }
 

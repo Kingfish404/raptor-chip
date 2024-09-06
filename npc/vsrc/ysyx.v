@@ -92,8 +92,8 @@ module ysyx (
   wire [31:0] inst;
   wire [DATA_W-1:0] pc_ifu;
   // IFU bus wire
-  wire [DATA_W-1:0] ifu_araddr_o;
-  wire ifu_arvalid_o;
+  wire [DATA_W-1:0] ifu_araddr;
+  wire ifu_arvalid, ifu_required;
   wire [DATA_W-1:0] ifu_rdata;
   wire ifu_rvalid;
   wire ifu_valid, ifu_ready;
@@ -190,7 +190,7 @@ module ysyx (
     .io_master_bvalid(io_master_bvalid),
     .io_master_bready(io_master_bready),
 
-    .ifu_araddr(ifu_araddr_o), .ifu_arvalid(ifu_arvalid_o),
+    .ifu_araddr(ifu_araddr), .ifu_arvalid(ifu_arvalid), .ifu_required(ifu_required),
     .ifu_rdata_o(ifu_rdata), .ifu_rvalid_o(ifu_rvalid),
 
     .lsu_araddr(lsu_araddr), .lsu_arvalid(lsu_arvalid), .lsu_rstrb(lsu_rstrb),
@@ -205,8 +205,8 @@ module ysyx (
   ysyx_ifu #(.ADDR_W(DATA_W), .DATA_W(DATA_W)) ifu(
     .clk(clock), .rst(reset),
 
-    .ifu_araddr_o(ifu_araddr_o),
-    .ifu_arvalid_o(ifu_arvalid_o),
+    .ifu_araddr_o(ifu_araddr),
+    .ifu_arvalid_o(ifu_arvalid), .ifu_required_o(ifu_required),
     .ifu_rdata(ifu_rdata),
     .ifu_rvalid(ifu_rvalid),
 
@@ -223,8 +223,11 @@ module ysyx (
     .clk(clock), .rst(reset),
 
     .inst(inst),
-    .reg_rdata1(reg_rdata1), .reg_rdata2(reg_rdata2),
+    .rdata1(reg_rdata1), .rdata2(reg_rdata2),
     .pc(pc_ifu),
+
+    .exu_valid(exu_valid), .exu_forward(reg_wdata), .exu_forward_rd(rd_exu),
+
     .en_j_o(en_j), .ren_o(ren), .wen_o(wen),
     .system_o(system), .system_func3_o(system_func3),
     .op1_o(op1), .op2_o(op2), .op_j_o(op_j), .rwaddr_o(rwaddr_idu),
@@ -273,7 +276,6 @@ module ysyx (
   // LSU(Load/Store Unit): 负责对存储器进行读写操作
   ysyx_lsu lsu(
     .clk(clock),
-    .idu_valid(idu_valid),
     // from exu
     .addr(rwaddr_exu),
     .ren(ren_exu), .wen(wen_exu), .lsu_avalid(lsu_avalid), .alu_op(alu_op_exu),
