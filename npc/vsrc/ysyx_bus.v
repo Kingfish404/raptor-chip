@@ -79,7 +79,7 @@ module ysyx_bus (
   // typedef enum [2:0] {IF_A, IF_D, LS_A, LS_D_R, LS_D_W} state_t;
   //                      000,  001,  010,    011,    100,
   parameter bit [2:0] IF_A = 3'b000, IF_D = 3'b001;
-  parameter bit [2:0] LS_A = 3'b010, LS_D_R = 3'b011, LS_D_W = 3'b100;
+  parameter bit [2:0] LS_A = 3'b010, LS_D_R = 3'b011;
   parameter bit [2:0] LS_S_A = 3'b001, LS_S_W = 3'b010, LS_S_B = 3'b100;
 
   reg [2:0] state;
@@ -108,11 +108,6 @@ module ysyx_bus (
         end
         IF_D: begin  // 001
           if (io_master_rvalid) begin
-            // if ((lsu_arvalid | lsu_awvalid)) begin
-            //   state <= LS_A;
-            //   awrite_done <= 0;
-            //   write_done <= 0;
-            // end else
             begin
               state <= IF_A;
             end
@@ -124,9 +119,6 @@ module ysyx_bus (
           end else if (clint_en | ifu_arvalid) begin
             state <= IF_A;
           end
-        end
-        LS_D_W: begin  // 100
-          state <= IF_A;
         end
         LS_D_R: begin  // 011
           if (io_master_rvalid) begin
@@ -160,7 +152,7 @@ module ysyx_bus (
               write_done <= 1;
             end
             if (io_master_bvalid) begin
-              state_store <= LS_D_W;
+              state_store <= LS_S_B;
             end
           end
         end
