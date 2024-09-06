@@ -43,7 +43,8 @@ module ysyx_bus (
 
     // ifu
     input [DATA_W-1:0] ifu_araddr,
-    input ifu_arvalid, ifu_required,
+    input ifu_arvalid,
+    ifu_required,
     output [DATA_W-1:0] ifu_rdata_o,
     output ifu_rvalid_o,
 
@@ -91,7 +92,7 @@ module ysyx_bus (
       // $display("state: %d, arready: %d",
       //          state, io_master_arready,);
       case (state)
-        IF_A: begin
+        IF_A: begin  // 000
           if (first) begin
             state <= IF_D;
             first <= 0;
@@ -106,18 +107,19 @@ module ysyx_bus (
             write_done <= 0;
           end
         end
-        IF_D: begin
+        IF_D: begin  // 001
           if (io_master_rvalid) begin
-            if ((lsu_arvalid | lsu_awvalid)) begin
-              state <= LS_A;
-              awrite_done <= 0;
-              write_done <= 0;
-            end else begin
+            // if ((lsu_arvalid | lsu_awvalid)) begin
+            //   state <= LS_A;
+            //   awrite_done <= 0;
+            //   write_done <= 0;
+            // end else 
+            begin
               state <= IF_A;
             end
           end
         end
-        LS_A: begin
+        LS_A: begin  // 010
           if (lsu_wvalid) begin
             if (io_master_awready) begin
               awrite_done <= 1;
@@ -134,10 +136,10 @@ module ysyx_bus (
             state <= IF_A;
           end
         end
-        LS_D_W: begin
+        LS_D_W: begin  // 100
           state <= IF_A;
         end
-        LS_D_R: begin
+        LS_D_R: begin  // 011
           if (io_master_rvalid) begin
             state <= IF_A;
           end
