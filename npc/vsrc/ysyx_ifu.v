@@ -8,6 +8,7 @@ module ysyx_ifu (
     // for bus
     output [DATA_W-1:0] ifu_araddr_o,
     output ifu_arvalid_o,
+    ifu_required_o,
     input [DATA_W-1:0] ifu_rdata,
     input ifu_rvalid,
 
@@ -58,8 +59,9 @@ module ysyx_ifu (
 
   assign ifu_araddr_o = (l1i_state == 'b00 | l1i_state == 'b01) ? (pc_ifu & ~'h4) : (pc_ifu | 'h4);
   assign ifu_arvalid_o = ifu_sdram_arburst ?
-    !l1i_cache_hit & (l1i_state == 'b00 | l1i_state == 'b01) :
-    !l1i_cache_hit & (l1i_state != 'b10 & l1i_state != 'b100);
+    !l1i_cache_hit & (l1i_state == 'b000 | l1i_state == 'b001) :
+    !l1i_cache_hit & (l1i_state != 'b010 & l1i_state != 'b100);
+  assign ifu_aquired_o = (l1i_state != 'b000);
 
   // with l1i cache
   wire ifu_just_load = ((l1i_state == 'b11) & ifu_rvalid);
@@ -92,7 +94,7 @@ module ysyx_ifu (
       end else if (state == `YSYX_WAIT_READY) begin
         if (next_ready == 1 & valid_o) begin
           if (!is_branch) begin
-          // if (!is_branch & !is_load) begin
+            // if (!is_branch & !is_load) begin
             pc_ifu <= pc_ifu + 4;
           end else begin
             ifu_hazard <= 1;
