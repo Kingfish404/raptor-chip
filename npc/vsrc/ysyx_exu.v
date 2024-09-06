@@ -56,7 +56,7 @@ module ysyx_exu (
     .rdata_o(csr_rdata), .mepc_o(mepc), .mtvec_o(mtvec)
   );
 
-  assign reg_wdata_o = (
+  assign reg_wdata_o = {BIT_W{(rd_o != 0)}} & (
     (opcode_exu == `YSYX_OP_IL_TYPE) ? mem_rdata :
     (system_exu) ? csr_rdata : reg_wdata);
   assign csr_addr = (
