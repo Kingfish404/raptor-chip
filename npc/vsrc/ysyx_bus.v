@@ -172,7 +172,6 @@ module ysyx_bus (
   // ifu read
   assign ifu_rdata_o  = ({DATA_W{ifu_rvalid_o}} & (rdata_o));
   assign ifu_rvalid_o = (state == IF_D | state == IF_A) & ((rvalid_o));
-  // assign ifu_rvalid_o = !lsu_arvalid & ((rvalid_o));
 
   // lsu read
   wire clint_en = (lsu_araddr == `YSYX_BUS_RTC_ADDR) | (lsu_araddr == `YSYX_BUS_RTC_ADDR_UP);
@@ -181,8 +180,9 @@ module ysyx_bus (
                           ({DATA_W{!clint_en}} & rdata_o)
                         ));
   assign lsu_rvalid_o = (
-    state == LS_R | clint_arvalid) &
-    lsu_arvalid & (rvalid_o | clint_rvalid_o);
+    (state == LS_R | clint_arvalid) &
+    (lsu_arvalid) &
+    (rvalid_o | clint_rvalid_o));
 
   // lsu write
   assign lsu_wready_o = io_master_bvalid;
