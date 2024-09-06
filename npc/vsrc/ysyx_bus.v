@@ -44,7 +44,7 @@ module ysyx_bus (
     // ifu
     input [DATA_W-1:0] ifu_araddr,
     input ifu_arvalid,
-    ifu_required,
+    input ifu_required,
     output [DATA_W-1:0] ifu_rdata_o,
     output ifu_rvalid_o,
 
@@ -101,7 +101,7 @@ module ysyx_bus (
             if (io_master_arready) begin
               state <= IF_D;
             end
-          end else if (lsu_arvalid | lsu_awvalid) begin
+          end else if (!ifu_required & (lsu_arvalid | lsu_awvalid)) begin
             state <= LS_A;
             awrite_done <= 0;
             write_done <= 0;
@@ -113,7 +113,7 @@ module ysyx_bus (
             //   state <= LS_A;
             //   awrite_done <= 0;
             //   write_done <= 0;
-            // end else 
+            // end else
             begin
               state <= IF_A;
             end
