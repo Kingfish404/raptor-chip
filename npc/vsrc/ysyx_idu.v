@@ -98,8 +98,8 @@ module ysyx_idu (
     rs1_o = rs1; rs2_o = rs2; rd_o = 0;
     imm_o = 0; op1_o = 0; op2_o = 0;
       case (opcode_o)
-        `YSYX_OP_LUI:     begin `YSYX_U_TYPE(0,  `YSYX_ALU_OP_ADD);                     end
-        `YSYX_OP_AUIPC:   begin `YSYX_U_TYPE(pc_o, `YSYX_ALU_OP_ADD);                   end
+        `YSYX_OP_LUI:     begin `YSYX_U_TYPE(   0, `YSYX_ALU_OP_ADD);                 end
+        `YSYX_OP_AUIPC:   begin `YSYX_U_TYPE(pc_o, `YSYX_ALU_OP_ADD);                 end
         `YSYX_OP_JAL:     begin `YSYX_J_TYPE(pc_o, `YSYX_ALU_OP_ADD, 4);              end
         `YSYX_OP_JALR:    begin `YSYX_I_TYPE(pc_o, `YSYX_ALU_OP_ADD, 4);              end
         `YSYX_OP_B_TYPE:  begin `YSYX_B_TYPE(reg_rdata1, {1'b0, funct3}, reg_rdata2); end

@@ -273,7 +273,6 @@ module ysyx (
   // LSU(Load/Store Unit): 负责对存储器进行读写操作
   ysyx_lsu lsu(
     .clk(clock),
-    .idu_valid(idu_valid),
     // from exu
     .addr(rwaddr_exu),
     .ren(ren_exu), .wen(wen_exu), .lsu_avalid(lsu_avalid), .alu_op(alu_op_exu),
