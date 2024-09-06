@@ -108,7 +108,7 @@ module ysyx_bus (
         end
         IF_D: begin
           if (io_master_rvalid) begin
-            if !ifu_required & (lsu_arvalid | lsu_awvalid) begin
+            if (!ifu_required & (lsu_arvalid | lsu_awvalid)) begin
               state <= LS_A;
               awrite_done <= 0;
               write_done <= 0;
