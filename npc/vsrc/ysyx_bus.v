@@ -120,17 +120,7 @@ module ysyx_bus (
           end
         end
         LS_A: begin  // 010
-          if (lsu_wvalid) begin
-            if (io_master_awready) begin
-              awrite_done <= 1;
-            end
-            if (io_master_wready) begin
-              write_done <= 1;
-            end
-            if (io_master_bvalid) begin
-              state <= LS_D_W;
-            end
-          end else if (io_master_arvalid & io_master_arready) begin
+          if (io_master_arvalid & io_master_arready) begin
             state <= LS_D_R;
           end else if (clint_en | ifu_arvalid) begin
             state <= IF_A;
@@ -154,11 +144,24 @@ module ysyx_bus (
     if (rst) begin
       state_store <= IF_A;
     end else begin
-      case (state)
-        LS_A: state_store <= LS_A;
-        LS_D_R: state_store <= LS_D_R;
-        LS_D_W: state_store <= LS_D_W;
-        default: state_store <= IF_A;
+      case (state_store)
+        LS_A: begin
+          if (lsu_wvalid) begin
+            if (io_master_awready) begin
+              awrite_done <= 1;
+            end
+            if (io_master_wready) begin
+              write_done <= 1;
+            end
+            if (io_master_bvalid) begin
+              state_store <= LS_D_W;
+            end
+          end
+        end
+        LS_D_W: begin
+          state_store <= LS_A;
+        end
+        default: state_store <= LS_A;
       endcase
     end
   end
