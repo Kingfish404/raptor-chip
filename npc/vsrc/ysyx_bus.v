@@ -80,7 +80,7 @@ module ysyx_bus (
   //                      000,  001,  010,    011,    100,
   parameter bit [2:0] IF_A = 3'b000, IF_D = 3'b001;
   parameter bit [2:0] LS_A = 3'b010, LS_D_R = 3'b011, LS_D_W = 3'b100;
-  parameter bit [2:0] LS_S_A = 3'b010, LS_S_W = 3'b010, LS_S_B = 3'b100;
+  parameter bit [2:0] LS_S_A = 3'b001, LS_S_W = 3'b010, LS_S_B = 3'b100;
 
   reg [2:0] state;
   reg first = 1;
