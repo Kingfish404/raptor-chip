@@ -8,7 +8,7 @@ module ysyx_ifu (
     // for bus
     output [DATA_W-1:0] ifu_araddr_o,
     output ifu_arvalid_o,
-    ifu_required_o,
+    output ifu_required_o,
     input [DATA_W-1:0] ifu_rdata,
     input ifu_rvalid,
 
@@ -61,7 +61,7 @@ module ysyx_ifu (
   assign ifu_arvalid_o = ifu_sdram_arburst ?
     !l1i_cache_hit & (l1i_state == 'b000 | l1i_state == 'b001) :
     !l1i_cache_hit & (l1i_state != 'b010 & l1i_state != 'b100);
-  assign ifu_aquired_o = (l1i_state != 'b000);
+  assign ifu_required_o = (l1i_state != 'b000);
 
   // with l1i cache
   wire ifu_just_load = ((l1i_state == 'b11) & ifu_rvalid);
