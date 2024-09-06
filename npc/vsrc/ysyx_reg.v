@@ -34,7 +34,7 @@ module ysyx_reg (
     end else begin
       if (idu_valid) begin
         rf_table[rd] <= 1;
-        // rf_table[0]  <= 0;
+        rf_table[0]  <= 0;
       end
       if (not_r0_write) begin
         rf_table[waddr[3:0]] <= 0;
