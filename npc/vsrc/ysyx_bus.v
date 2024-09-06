@@ -101,10 +101,8 @@ module ysyx_bus (
             if (io_master_arready) begin
               state <= IF_D;
             end
-          end else if (!ifu_required & (lsu_arvalid | lsu_awvalid)) begin
+          end else if (!ifu_required & (lsu_arvalid)) begin
             state <= LS_A;
-            awrite_done <= 0;
-            write_done <= 0;
           end
         end
         IF_D: begin  // 001
