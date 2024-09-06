@@ -130,9 +130,10 @@ module ysyx_bus (
             end
           end else if (io_master_arvalid & io_master_arready) begin
             state <= LS_D_R;
-          end else if (clint_en | ifu_arvalid) begin
-            state <= IF_A;
           end
+          // else if (clint_en | ifu_arvalid) begin
+          //   state <= IF_A;
+          // end
         end
         LS_D_W: begin
           state <= IF_A;
