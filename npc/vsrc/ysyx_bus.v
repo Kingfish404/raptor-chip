@@ -78,8 +78,7 @@ module ysyx_bus (
 
   // typedef enum [2:0] {IF_A, IF_D, LS_A, LS_D_R} state_t;
   //                      000,  001,  010,    011
-  parameter bit [3:0] IF_A = 'b000, IF_D = 'b001;
-  parameter bit [3:0] LS_A = 'b010, LS_D_R = 'b011;
+  parameter bit [3:0] IF_A = 'b0001, IF_D = 'b0010, LS_A = 'b0100, LS_D_R = 'b1000;
   parameter bit [2:0] LS_S_A = 'b001, LS_S_W = 'b010, LS_S_B = 'b100;
 
   reg [3:0] state;
