@@ -136,7 +136,7 @@ module ysyx_ifu (
             if (pc_change) begin
               pc_ifu <= npc;
             end else if (pc_retire) begin
-              pc_ifu <= pc + 4;
+              pc_ifu <= pc_ifu + 4;
             end
           end
           if (pc_change) begin
