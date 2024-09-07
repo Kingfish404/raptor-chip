@@ -65,6 +65,7 @@ module ysyx_ifu (
     (0)
   );
   wire is_load = (opcode_o == `YSYX_OP_IL_TYPE);
+  wire is_store = (opcode_o == `YSYX_OP_S_TYPE);
 
   assign ifu_araddr_o = (l1i_state == 'b00 | l1i_state == 'b01) ? (pc_ifu & ~'h4) : (pc_ifu | 'h4);
   assign ifu_arvalid_o = ifu_sdram_arburst ?
@@ -75,7 +76,8 @@ module ysyx_ifu (
   // with l1i cache
   wire ifu_just_load = ((l1i_state == 'b11) & ifu_rvalid);
   assign inst_o = ifu_just_load & pc_ifu[2] == 1'b1 ? ifu_rdata : l1i[addr_idx][addr_offset];
-  assign valid_o = (l1i_cache_hit & !ifu_hazard) & !bad_speculation & !(speculation & is_load);
+  assign valid_o = (l1i_cache_hit & !ifu_hazard) &
+   !bad_speculation & !(speculation & (is_load | is_store));
   assign ready_o = !valid_o;
 
   // for speculation
