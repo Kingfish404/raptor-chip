@@ -39,7 +39,7 @@ void perf()
 
          (long long)pmu.csr_inst_cnt, percentage(pmu.csr_inst_cnt, pmu.instr_cnt),
          (long long)pmu.other_inst_cnt, percentage(pmu.other_inst_cnt, pmu.instr_cnt));
-  printf("| %6s, %% | %6s, %% |\n", "JAL", "JALR");
+  printf("| %6s,  %% | %6s,  %% |\n", "JAL", "JALR");
   printf("| %6lld,%3.0f | %6lld,%3.0f |\n",
          pmu.jal_inst_cnt, percentage(pmu.jal_inst_cnt, pmu.instr_cnt),
          pmu.jalr_inst_cnt, percentage(pmu.jalr_inst_cnt, pmu.instr_cnt));
