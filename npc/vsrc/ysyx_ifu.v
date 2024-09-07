@@ -41,7 +41,7 @@ module ysyx_ifu (
   reg [DATA_W-1:0] pc_ifu;
   reg [32-1:0] l1i[L1I_SIZE][L1I_LINE_SIZE];
   reg [L1I_SIZE-1:0] l1i_valid = 0;
-  reg [32-L1I_LEN-L1I_LINE_LEN-2-1:0] l1i_tag[L1I_SIZE];
+  reg [32-L1I_LEN-L1I_LINE_LEN-2-1:0] l1i_tag[L1I_SIZE][L1I_LINE_SIZE];
   reg [2:0] l1i_state = 0;
   reg ifu_hazard = 0, ifu_lsu_hazard = 0, ifu_branch_hazard = 0;
 
@@ -54,7 +54,7 @@ module ysyx_ifu (
 
   wire l1i_cache_hit = (
          1 & (l1i_state == 'b00 | l1i_state == 'b100) &
-         l1i_valid[addr_idx] == 1'b1) & (l1i_tag[addr_idx] == addr_tag);
+         l1i_valid[addr_idx] == 1'b1) & (l1i_tag[addr_idx][addr_offset] == addr_tag);
   wire ifu_sdram_arburst = `YSYX_I_SDRAM_ARBURST & (pc_ifu >= 'ha0000000) & (pc_ifu <= 'hc0000000);
   wire [6:0] opcode_o = inst_o[6:0];
   wire is_branch = (
@@ -103,13 +103,11 @@ module ysyx_ifu (
         ifu_lsu_hazard <= 0;
         ifu_branch_hazard <= 0;
         pc_ifu <= npc;
-        $display("speculation bad");
       end else if (good_speculation) begin
         speculation <= 0;
         ifu_hazard <= 0;
         ifu_lsu_hazard <= 0;
         ifu_branch_hazard <= 0;
-        $display("speculation good");
       end
       if (state == `YSYX_IDLE) begin
         if (prev_valid) begin
@@ -167,7 +165,7 @@ module ysyx_ifu (
             l1i_state <= 'b010;
           end
           l1i[addr_idx][0]  <= ifu_rdata;
-          l1i_tag[addr_idx] <= addr_tag;
+          l1i_tag[addr_idx][0] <= addr_tag;
         end
         'b010: begin
           l1i_state <= 'b011;
@@ -176,7 +174,7 @@ module ysyx_ifu (
           if (ifu_rvalid) begin
             l1i_state <= 'b100;
             l1i[addr_idx][1] <= ifu_rdata;
-            l1i_tag[addr_idx] <= addr_tag;
+            l1i_tag[addr_idx][1] <= addr_tag;
             l1i_valid[addr_idx] <= 1'b1;
           end
         end
