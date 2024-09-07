@@ -34,13 +34,12 @@ module ysyx_pc (
       valid <= 1;
       `YSYX_DPI_C_NPC_DIFFTEST_SKIP_REF
     end else if (prev_valid) begin
+      pc <= npc;
       if (use_exu_npc) begin
         pc <= npc_wdata;
         valid <= 1;
       end else if (branch_retire) begin
         retire <= 1;
-      end else begin
-        pc <= npc;
       end
     end else begin
       valid  <= 0;
