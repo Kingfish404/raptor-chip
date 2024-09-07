@@ -124,7 +124,7 @@ module ysyx_ifu (
             if (!good_speculation) begin
               pc_ifu <= npc;
             end else begin
-              pc_ifu <= pc_ifu + 4;
+              // pc_ifu <= pc_ifu + 4;
             end
           end
           if (pc_change) begin
