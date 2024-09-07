@@ -119,6 +119,9 @@ module ysyx_ifu (
         // ifu_hazard <= 0;
         // ifu_branch_hazard <= 0;
       end
+      if (pc_change) begin
+          pc_ifu <= ifu_pc_hange;
+      end
       if (speculation & ((
         pc_change & npc == ifu_speculation) | (pc_retire & pc + 4 == ifu_speculation))) begin
         good_speculation <= 1;
