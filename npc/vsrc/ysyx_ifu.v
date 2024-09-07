@@ -113,11 +113,11 @@ module ysyx_ifu (
       if (prev_valid & (pc_change | pc_retire) & speculation & (npc == ifu_speculation)) begin
         good_speculation <= 1;
         speculation <= 0;
-        pc_ifu <= pc;
       end
       if (prev_valid & (pc_change | pc_retire) & speculation & (npc != ifu_speculation)) begin
         bad_speculation <= 1;
         speculation <= 0;
+        pc_ifu <= pc;
       end
       if (state == `YSYX_IDLE) begin
         if (prev_valid) begin
