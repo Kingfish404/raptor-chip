@@ -92,6 +92,7 @@ module ysyx (
   // IFU output
   wire [31:0] inst;
   wire [DATA_W-1:0] pc_ifu;
+  wire speculation_ifu;
   wire bad_speculation;
   // IFU bus wire
   wire [DATA_W-1:0] ifu_araddr;
@@ -107,6 +108,7 @@ module ysyx (
   wire [3:0] alu_op;
   wire [6:0] opcode;
   wire en_j, ren, wen, system, system_func3;
+  wire speculation_idu;
   wire idu_valid, idu_ready;
 
   // LSU output
@@ -129,6 +131,7 @@ module ysyx (
   wire [3:0] alu_op_exu;
   wire ren_exu, wen_exu;
   wire [DATA_W-1:0] rwaddr_exu;
+  wire speculation_exu;
   wire exu_valid, exu_ready;
 
   // WBU output
@@ -253,6 +256,7 @@ module ysyx (
 
       .pc_change(pc_valid),
       .pc_retire(pc_retire),
+      .speculation_o(speculation_ifu),
       .bad_speculation_o(bad_speculation),
 
       .prev_valid(wbu_valid),
@@ -272,6 +276,7 @@ module ysyx (
       .rdata1(reg_rdata1),
       .rdata2(reg_rdata2),
       .pc(pc_ifu),
+      .speculation(speculation_ifu),
 
       .exu_valid(exu_valid),
       .exu_forward(reg_wdata),
@@ -294,6 +299,7 @@ module ysyx (
       .opcode_o(opcode),
       .pc_o(pc_idu),
       .inst_o(inst_idu),
+      .speculation_o(speculation_idu),
 
       .rf_table(rf_table),
 
@@ -329,6 +335,8 @@ module ysyx (
       .alu_op(alu_op),
       .opcode(opcode),
       .pc(pc_idu),
+      .speculation(speculation_idu),
+
       .reg_wdata_o(reg_wdata),
       .npc_wdata_o(npc_wdata),
       .use_exu_npc_o(use_exu_npc),
@@ -337,6 +345,7 @@ module ysyx (
       .rd_o(rd_exu),
       .inst_o(inst_exu),
       .pc_o(pc_exu),
+      .speculation_o(speculation_exu),
 
       // to lsu
       .ren_o(ren_exu),

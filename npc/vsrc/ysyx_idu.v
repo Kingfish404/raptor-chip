@@ -8,6 +8,7 @@ module ysyx_idu (
   input [31:0] inst,
   input [BIT_W-1:0] rdata1, rdata2,
   input [BIT_W-1:0] pc,
+  input speculation,
 
   input exu_valid,
   input [BIT_W-1:0] exu_forward,
@@ -23,6 +24,7 @@ module ysyx_idu (
   output [6:0] opcode_o,
   output [BIT_W-1:0] pc_o,
   output [31:0] inst_o,
+  output speculation_o,
 
   input [16-1:0] rf_table,
 
@@ -64,7 +66,10 @@ module ysyx_idu (
       valid <= 0; ready <= 1;
     end
     else begin
-      if (prev_valid & ready_o & next_ready) begin inst_idu <= inst; pc_idu <= pc; end
+      if (prev_valid & ready_o & next_ready) begin 
+        inst_idu <= inst; pc_idu <= pc;
+        speculation_o <= speculation;
+      end
       if (state == `YSYX_IDLE) begin
         if (prev_valid & ready_o & next_ready) begin
           valid <= 1;

@@ -29,6 +29,8 @@ module ysyx_exu (
     input [3:0] alu_op,
     input [6:0] opcode,
     input [BIT_W-1:0] pc,
+    input speculation,
+
     output [BIT_W-1:0] reg_wdata_o,
     output [BIT_W-1:0] npc_wdata_o,
     output use_exu_npc_o,
@@ -39,6 +41,7 @@ module ysyx_exu (
     output reg [BIT_W-1:0] rwaddr_o,
     output reg ren_o,
     output reg wen_o,
+    output reg speculation_o,
 
     input prev_valid,
     input next_ready,
@@ -123,6 +126,7 @@ module ysyx_exu (
         system_exu <= system;
         system_func3_exu <= system_func3;
         alu_valid <= 1;
+        speculation_o <= speculation;
         if (wen | ren) begin
           lsu_avalid <= 1;
           busy <= 1;
