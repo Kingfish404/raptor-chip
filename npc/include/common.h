@@ -141,6 +141,8 @@ typedef struct
   uint64_t st_inst_cnt;
   uint64_t alu_inst_cnt;
   uint64_t b_inst_cnt;
+  uint64_t jal_inst_cnt;
+  uint64_t jalr_inst_cnt;
   uint64_t csr_inst_cnt;
   uint64_t other_inst_cnt;
 
