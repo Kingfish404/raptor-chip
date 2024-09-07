@@ -81,8 +81,9 @@ module ysyx_ifu (
   // for speculation
   assign speculation_o = speculation;
   assign good_speculation_o = good_speculation;
-  assign bad_speculation_o = bad_speculation | (speculation & ((
-        pc_change & npc != ifu_speculation) | (pc_retire & pc + 4 != ifu_speculation )));
+  assign bad_speculation_o = bad_speculation | bad_speculationing;
+  wire bad_speculationing = (speculation & ((
+        pc_change & npc != ifu_speculation) | (pc_retire & pc + 4 != ifu_speculation )))
   reg good_speculation;
   reg bad_speculation_pc_change;
 
@@ -125,8 +126,7 @@ module ysyx_ifu (
         ifu_b_speculation <= 0;
         ifu_npc_bad_speculation <= npc;
       end
-      if (speculation & ((
-        pc_change & npc != ifu_speculation) | (pc_retire & pc + 4 != ifu_speculation))) begin
+      if (speculation & (bad_speculationing)) begin
         bad_speculation <= 1;
         speculation <= 0;
         bad_speculation_pc_change <= pc_change;
