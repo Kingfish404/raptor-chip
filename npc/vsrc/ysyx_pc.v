@@ -24,8 +24,8 @@ module ysyx_pc (
     input prev_valid
 );
   parameter bit [7:0] DATA_W = `YSYX_W_WIDTH;
-  wire [DATA_W-1:0] npc = pc + 4;
-  reg  [DATA_W-1:0] pc;
+  reg [DATA_W-1:0] npc;
+  reg [DATA_W-1:0] pc;
   reg valid, retire;
   assign change_o = valid;
   assign retire_o = retire;
@@ -38,9 +38,9 @@ module ysyx_pc (
       valid <= 1;
       `YSYX_DPI_C_NPC_DIFFTEST_SKIP_REF
     end else if (prev_valid) begin
-      pc <= npc;
+      pc <= pc + 4;
       if (use_exu_npc) begin
-        pc <= npc_wdata;
+        npc   <= npc_wdata;
         valid <= 1;
       end else if (branch_retire) begin
         retire <= 1;
