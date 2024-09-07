@@ -78,6 +78,9 @@ module ysyx_ifu (
   assign bad_speculation_o = (
     prev_valid & (pc_change | pc_retire) &
     speculation & (npc != ifu_speculation));
+  wire good_speculation = (
+    prev_valid & (pc_change | pc_retire) &
+    speculation & (npc == ifu_speculation));
 
   assign pc_o = pc_ifu;
   `YSYX_BUS_FSM()
@@ -96,6 +99,11 @@ module ysyx_ifu (
         ifu_lsu_hazard <= 0;
         ifu_branch_hazard <= 0;
         pc_ifu <= npc;
+      end else if (good_speculation) begin
+        speculation <= 0;
+        ifu_hazard <= 0;
+        ifu_lsu_hazard <= 0;
+        ifu_branch_hazard <= 0;
       end
       if (state == `YSYX_IDLE) begin
         if (prev_valid) begin
