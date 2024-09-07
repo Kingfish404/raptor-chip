@@ -75,7 +75,7 @@ module ysyx_ifu (
   // with l1i cache
   wire ifu_just_load = ((l1i_state == 'b11) & ifu_rvalid);
   assign inst_o = ifu_just_load & pc_ifu[2] == 1'b1 ? ifu_rdata : l1i[addr_idx][addr_offset];
-  assign valid_o = (l1i_cache_hit & !ifu_hazard) & !bad_speculation;
+  assign valid_o = (l1i_cache_hit & !ifu_hazard) & !bad_speculation & !(speculation & is_load);
   assign ready_o = !valid_o;
 
   // for speculation
@@ -129,11 +129,6 @@ module ysyx_ifu (
         bad_speculation <= 1;
         speculation <= 0;
         bad_speculation_pc_change <= pc_change;
-        // if (ifu_b_speculation & !pc_change) begin
-        //   pc_ifu <= ifu_npc_speculation;
-        // end else begin
-        //   pc_ifu <= npc;
-        // end
       end
       if (state == `YSYX_IDLE) begin
         if (prev_valid) begin
