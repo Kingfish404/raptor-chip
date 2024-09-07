@@ -103,6 +103,7 @@ module ysyx_ifu (
         ifu_lsu_hazard <= 0;
         ifu_branch_hazard <= 0;
         pc_ifu <= npc;
+        $display("speculation bad");
       end else if (good_speculation) begin
         speculation <= 0;
         ifu_hazard <= 0;
