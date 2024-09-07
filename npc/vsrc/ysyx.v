@@ -136,7 +136,7 @@ module ysyx (
 
   // WBU output
   wire wbu_valid, wbu_ready;
-  wire pc_wbu;
+  wire [31:0] pc_wbu;
 
   // BUS output
   wire [DATA_W-1:0] bus_lsu_rdata;
