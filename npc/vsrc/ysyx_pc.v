@@ -19,7 +19,7 @@ module ysyx_pc (
   wire [DATA_W-1:0] npc = pc + 4;
   reg  [DATA_W-1:0] pc;
   reg valid, retire;
-  assign change_o = valid | (use_exu_npc);
+  assign change_o = valid;
   assign retire_o = retire;
   assign npc_o = use_exu_npc ? npc_wdata : pc;
 
