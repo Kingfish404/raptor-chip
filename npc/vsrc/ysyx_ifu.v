@@ -131,7 +131,7 @@ module ysyx_ifu (
         speculation <= 0;
         bad_speculation_pc_change <= pc_change;
         // if (pc_change) begin
-          ifu_npc_speculation <= npc;
+          ifu_npc_speculation <= pc_change ? npc : ifu_npc_bad_speculation;
           $display("bad speculation: npc=%h, ifu_npc_speculation=%h", npc, ifu_npc_speculation);
         // end
       end
