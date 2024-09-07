@@ -43,6 +43,7 @@ module ysyx_pc (
         npc   <= npc_wdata;
         valid <= 1;
       end else if (branch_retire) begin
+        valid  <= 0;
         retire <= 1;
       end
     end else begin
