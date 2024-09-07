@@ -82,16 +82,16 @@ module ysyx_ifu (
       end
       if (state == `YSYX_IDLE) begin
         if (prev_valid) begin
-          if (pc_change) begin
+          if (pc_change | pc_retire) begin
             ifu_hazard <= 0;
             ifu_lsu_hazard <= 0;
             pc_ifu <= npc;
           end
-          if (pc_retire) begin
-            ifu_hazard <= 0;
-            ifu_lsu_hazard <= 0;
-            pc_ifu <= npc;
-          end
+          // if (pc_retire) begin
+          //   ifu_hazard <= 0;
+          //   ifu_lsu_hazard <= 0;
+          //   pc_ifu <= npc;
+          // end
         end
       end else if (state == `YSYX_WAIT_READY) begin
         if (next_ready == 1 & valid_o) begin
