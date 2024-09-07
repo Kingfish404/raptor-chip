@@ -149,7 +149,7 @@ module ysyx (
       .rst(reset),
       .prev_valid(exu_valid & (!speculation_exu)),
 
-      .good_speculation(speculation_ifu),
+      .good_speculation(good_speculation),
       .pc_ifu(pc_ifu),
 
       .npc_wdata(npc_wdata),
