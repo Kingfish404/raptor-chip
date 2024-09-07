@@ -111,6 +111,7 @@ module ysyx_ifu (
         ifu_hazard <= 0;
         ifu_lsu_hazard <= 0;
         ifu_branch_hazard <= 0;
+        pc_ifu <= pc_ifu + 4;
       end
       if (state == `YSYX_IDLE) begin
         if (prev_valid) begin
