@@ -29,7 +29,7 @@ module ysyx_pc (
   reg valid, retire;
   assign change_o = valid;
   assign retire_o = retire;
-  assign npc_o = use_exu_npc ? npc_wdata : pc;
+  assign npc_o = use_exu_npc ? npc_wdata : npc;
   assign pc_o = pc_wbu;
 
   always @(posedge clk) begin
