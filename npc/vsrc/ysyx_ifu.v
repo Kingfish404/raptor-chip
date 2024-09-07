@@ -79,7 +79,8 @@ module ysyx_ifu (
   // for speculation
   assign speculation_o = speculation;
   assign good_speculation_o = good_speculation;
-  assign bad_speculation_o = bad_speculation;
+  assign bad_speculation_o = bad_speculation |( prev_valid & (pc_change | pc_retire) &
+    speculation & (npc != ifu_speculation));
   wire good_speculation = (
     prev_valid & (pc_change | pc_retire) &
     speculation & (npc == ifu_speculation));
@@ -95,9 +96,8 @@ module ysyx_ifu (
       if (valid_o & next_ready & inst_o == `YSYX_INST_FENCE_I) begin
         l1i_valid <= 0;
       end
-      if (prev_valid & (pc_change | pc_retire) &
-        speculation & (npc != ifu_speculation)) begin
-            bad_speculation <= 1;
+      if (prev_valid & (pc_change | pc_retire) & speculation & (npc != ifu_speculation)) begin
+        bad_speculation <= 1;
       end
       if (bad_speculation_o & next_ready) begin
         speculation <= 0;
