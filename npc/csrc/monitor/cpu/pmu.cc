@@ -213,7 +213,7 @@ void perf()
 
 void statistic()
 {
-  perf();
+  // perf();
   double time_s = g_timer / 1e6;
   uint64_t time_clint = *(uint64_t *)&(CONCAT(VERILOG_PREFIX, bus__DOT__clint__DOT__mtime));
   uint64_t time_clint_us = time_clint / 2;
