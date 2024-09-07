@@ -46,7 +46,7 @@ module ysyx_ifu (
   reg ifu_hazard = 0, ifu_lsu_hazard = 0, ifu_branch_hazard = 0;
 
   reg [DATA_W-1:0] btb, ifu_speculation;
-  reg btb_valid, speculation;
+  reg btb_valid, speculation, bad_speculation;
 
   wire [32-L1I_LEN-L1I_LINE_LEN-2-1:0] addr_tag = pc_ifu[ADDR_W-1:L1I_LEN+L1I_LINE_LEN+2];
   wire [L1I_LEN-1:0] addr_idx = pc_ifu[L1I_LEN+L1I_LINE_LEN+2-1:L1I_LINE_LEN+2];
@@ -79,9 +79,7 @@ module ysyx_ifu (
   // for speculation
   assign speculation_o = speculation;
   assign good_speculation_o = good_speculation;
-  assign bad_speculation_o = (
-    prev_valid & (pc_change | pc_retire) &
-    speculation & (npc != ifu_speculation));
+  assign bad_speculation_o = bad_speculation;
   wire good_speculation = (
     prev_valid & (pc_change | pc_retire) &
     speculation & (npc == ifu_speculation));
@@ -96,6 +94,10 @@ module ysyx_ifu (
     end else begin
       if (valid_o & next_ready & inst_o == `YSYX_INST_FENCE_I) begin
         l1i_valid <= 0;
+      end
+      if (prev_valid & (pc_change | pc_retire) &
+        speculation & (npc != ifu_speculation)) begin
+            bad_speculation <= 1;
       end
       if (bad_speculation_o & next_ready) begin
         speculation <= 0;
