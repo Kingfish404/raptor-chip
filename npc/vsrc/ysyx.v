@@ -262,6 +262,7 @@ module ysyx (
       .inst_o(inst),
       .pc_o(pc_ifu),
 
+      .pc(pc),
       .pc_change(pc_valid),
       .pc_retire(pc_retire),
       .speculation_o(speculation_ifu),
