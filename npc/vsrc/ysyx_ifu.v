@@ -108,6 +108,7 @@ module ysyx_ifu (
         ifu_hazard <= 0;
         ifu_lsu_hazard <= 0;
         ifu_branch_hazard <= 0;
+        $display("speculation good");
       end
       if (state == `YSYX_IDLE) begin
         if (prev_valid) begin
