@@ -26,7 +26,7 @@ module ysyx_wbu (
       ready_o <= 1;
     end else begin
       if (prev_valid & ready_o) begin
-        pc_wbu <= pc;
+        pc_wbu   <= pc;
         inst_wbu <= inst;
         if (ebreak) begin
           `YSYX_DPI_C_NPC_EXU_EBREAK

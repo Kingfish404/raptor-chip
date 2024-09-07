@@ -92,7 +92,7 @@ module ysyx_bus (
       // $display("state: %d, arready: %d",
       //          state, io_master_arready,);
       case (state)
-        IF_A: begin  // 000
+        IF_A: begin
           if (first) begin
             state <= IF_D;
             first <= 0;
@@ -105,21 +105,21 @@ module ysyx_bus (
             state <= LS_A;
           end
         end
-        IF_D: begin  // 001
+        IF_D: begin
           if (io_master_rvalid) begin
             begin
               state <= IF_A;
             end
           end
         end
-        LS_A: begin  // 010
+        LS_A: begin
           if (io_master_arvalid & io_master_arready) begin
             state <= LS_R;
           end else if (clint_en | ifu_arvalid) begin
             state <= IF_A;
           end
         end
-        LS_R: begin  // 011
+        LS_R: begin
           if (io_master_rvalid) begin
             state <= IF_A;
           end
