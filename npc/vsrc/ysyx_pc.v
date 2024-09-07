@@ -28,6 +28,7 @@ module ysyx_pc (
   assign change_o = valid;
   assign retire_o = retire;
   assign npc_o = use_exu_npc ? npc_wdata : pc;
+  assign pc_o = pc;
 
   always @(posedge clk) begin
     if (rst) begin
