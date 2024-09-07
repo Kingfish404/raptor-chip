@@ -45,6 +45,8 @@ module ysyx_pc (
       end else if (branch_retire) begin
         change <= 0;
         retire <= 1;
+      end else begin
+        change <= 0;
       end
     end else begin
       change <= 0;
