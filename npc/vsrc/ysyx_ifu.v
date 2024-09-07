@@ -130,8 +130,8 @@ module ysyx_ifu (
           if (!is_branch & !is_load) begin
             pc_ifu <= pc_ifu + 4;
           end else begin
-            if (is_branch) begin
-              if (btb_valid & !speculation) begin
+            if (is_branch & !speculation) begin
+              if (btb_valid) begin
                 pc_ifu <= btb;
                 ifu_speculation <= btb;
                 speculation <= 1;
