@@ -145,7 +145,6 @@ void perf()
   printf("======== Instruction Analysis ========\n");
   Log(FMT_BLUE("Cycle: %llu, #Inst: %lld, IPC: %.3f"),
       pmu.active_cycle, pmu.instr_cnt, (1.0 * pmu.instr_cnt / pmu.active_cycle));
-  return;
   printf("| %8s,  %% | %8s,  %% | %8s,  %% |\n",
          "IFU", "LSU", "EXU");
   printf("| %8lld,%3.0f | %8lld,%3.0f | %8lld,%3.0f |\n",
