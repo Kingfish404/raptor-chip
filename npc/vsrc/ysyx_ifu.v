@@ -117,7 +117,7 @@ module ysyx_ifu (
         ifu_b_speculation <= 0;
       end
       if (speculation & ((
-        pc_change & npc != ifu_speculation) & (pc_retire & pc + 4 != ifu_speculation ))) begin
+        pc_change & npc != ifu_speculation) | (pc_retire & pc + 4 != ifu_speculation ))) begin
         bad_speculation <= 1;
         speculation <= 0;
         if (ifu_b_speculation & !pc_change) begin
