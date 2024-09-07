@@ -128,7 +128,7 @@ module ysyx_ifu (
             pc_ifu <= pc_ifu + 4;
           end else begin
             if (is_branch) begin
-              if (btb_valid & (opcode_o == `YSYX_OP_B_TYPE) & !speculation) begin
+              if (btb_valid & (opcode_o == `YSYX_OP_B_TYPE) & 0 & !speculation) begin
                 pc_ifu <= btb;
                 ifu_speculation <= btb;
                 speculation <= 1;
