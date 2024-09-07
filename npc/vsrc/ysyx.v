@@ -4,7 +4,7 @@
 
 module ysyx (
     input clock,
-    reset,
+    input reset,
 
     // AXI4 Slave
     input [1:0] io_slave_arburst,

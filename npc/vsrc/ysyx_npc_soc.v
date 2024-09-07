@@ -4,9 +4,9 @@
 
 module ysyxSoC (
     input clock,
-    reset
+    input reset
 );
-  parameter bit[7:0] ADDR_W = 32, DATA_W = 32;
+  parameter bit [7:0] ADDR_W = 32, DATA_W = 32;
   wire auto_master_out_awready;
   wire auto_master_out_awvalid;
   wire [3:0] auto_master_out_awid;
@@ -173,7 +173,7 @@ module ysyx_npc_soc (
     output reg bvalid_o,
     input bready
 );
-  parameter bit[7:0] ADDR_W = 32, DATA_W = 64;
+  parameter bit [7:0] ADDR_W = 32, DATA_W = 64;
 
   reg [31:0] mem_rdata_buf[2];
   reg [2:0] state = 0;
