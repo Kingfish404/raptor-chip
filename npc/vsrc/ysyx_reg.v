@@ -32,12 +32,13 @@ module ysyx_reg (
     end else begin
       if (bad_speculation) begin
         rf_table <= 0;
-      end
-      if (idu_valid & rd != 0) begin
-        rf_table[rd] <= 1;
-      end
-      if (reg_write_en) begin
-        rf_table[waddr[3:0]] <= 0;
+      end else begin
+        if (idu_valid & rd != 0) begin
+          rf_table[rd] <= 1;
+        end
+        if (reg_write_en) begin
+          rf_table[waddr[3:0]] <= 0;
+        end
       end
     end
   end
