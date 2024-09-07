@@ -133,9 +133,9 @@ module ysyx_ifu (
         bad_speculation <= 1;
         speculation <= 0;
         bad_speculation_pc_change <= pc_change;
-        if (pc_change) begin
-          ifu_pc_hange <= npc;
-        end
+        // if (pc_change) begin
+        //   ifu_pc_hange <= npc;
+        // end
       end
       if (state == `YSYX_IDLE) begin
         if (prev_valid) begin
