@@ -120,12 +120,12 @@ extern "C" void pmem_read(word_t raddr, word_t *data)
     if (raddr >= MBASE && raddr < MBASE + MSIZE)
     {
         *data = host_read(pmem + raddr - MBASE, 4);
-        Log("raddr: " FMT_WORD_NO_PREFIX ", data: " FMT_WORD_NO_PREFIX,
-            raddr, *data);
+        // Log("raddr: " FMT_WORD_NO_PREFIX ", data: " FMT_WORD_NO_PREFIX,
+        //     raddr, *data);
         return;
     }
     npc_abort();
-    assert(0);
+    // assert(0);
 }
 
 extern "C" void pmem_write(word_t waddr, word_t wdata, char wmask)
