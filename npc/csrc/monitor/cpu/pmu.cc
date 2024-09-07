@@ -5,6 +5,7 @@
 #include <npc_verilog.h>
 #include <verilated_vcd_c.h>
 
+extern NPCState npc;
 extern TOP_NAME *top;
 
 PMUState pmu;

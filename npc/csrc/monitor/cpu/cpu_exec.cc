@@ -12,14 +12,12 @@
 #define MAX_IRING_SIZE 16
 
 extern NPCState npc;
-
 extern PMUState pmu;
+extern word_t g_timer = 0;
 
 extern VerilatedContext *contextp;
 extern TOP_NAME *top;
 extern VerilatedVcdC *tfp;
-
-extern word_t g_timer = 0;
 
 #ifdef CONFIG_ITRACE
 static char iringbuf[MAX_IRING_SIZE][128] = {};
