@@ -6,6 +6,7 @@ module ysyx_pc (
     input clk,
     input rst,
 
+    input speculation,
     input good_speculation,
     input [DATA_W-1:0] pc_ifu,
 
@@ -33,10 +34,10 @@ module ysyx_pc (
       `YSYX_DPI_C_NPC_DIFFTEST_SKIP_REF
     end else if (prev_valid) begin
       pc <= npc;
-      if (use_exu_npc) begin
+      if (use_exu_npc & !speculation) begin
         pc <= npc_wdata;
         valid <= 1;
-      end else if (branch_retire) begin
+      end else if (branch_retire & !speculation) begin
         retire <= 1;
       end
     end else begin
