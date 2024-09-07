@@ -94,7 +94,7 @@ module ysyx_idu (
     (0)
   );
   assign op_j_o = (
-    {BIT_W{opcode_o == `YSYX_OP_JAL | opcode_o == `YSYX_OP_B_TYPE}} & pc |
+    {BIT_W{opcode_o == `YSYX_OP_JAL | opcode_o == `YSYX_OP_B_TYPE}} & pc_idu |
     {BIT_W{opcode_o == `YSYX_OP_JALR | opcode_o == `YSYX_OP_IL_TYPE | opcode_o == `YSYX_OP_S_TYPE}}
       & reg_rdata1 |
     (0)
