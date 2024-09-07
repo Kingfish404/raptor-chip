@@ -40,6 +40,7 @@ module ysyx_pc (
         retire <= 1;
       end
     end else begin
+      pc <= npc;
       valid  <= 0;
       retire <= 0;
       if (good_speculation) begin
