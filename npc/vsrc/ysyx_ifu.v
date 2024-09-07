@@ -110,11 +110,11 @@ module ysyx_ifu (
         ifu_lsu_hazard <= 0;
         ifu_branch_hazard <= 0;
       end
-      if (prev_valid & (pc_change | pc_retire) & speculation & (npc == ifu_speculation)) begin
+      if (prev_valid & (pc_change | pc_retire) & speculation & (pc == ifu_speculation)) begin
         good_speculation <= 1;
         speculation <= 0;
       end
-      if (prev_valid & (pc_change | pc_retire) & speculation & (npc != ifu_speculation)) begin
+      if (prev_valid & (pc_change | pc_retire) & speculation & (pc != ifu_speculation)) begin
         bad_speculation <= 1;
         speculation <= 0;
         pc_ifu <= pc;
