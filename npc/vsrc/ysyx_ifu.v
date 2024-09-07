@@ -94,10 +94,6 @@ module ysyx_ifu (
       if (valid_o & next_ready & inst_o == `YSYX_INST_FENCE_I) begin
         l1i_valid <= 0;
       end
-      if (prev_valid & (pc_change | pc_retire) & speculation & (npc != ifu_speculation)) begin
-        bad_speculation <= 1;
-        speculation <= 0;
-      end
       if (bad_speculation & next_ready & l1i_state == 'b000) begin
         bad_speculation <= 0;
         speculation <= 0;
@@ -115,6 +111,10 @@ module ysyx_ifu (
       end
       if (prev_valid & (pc_change | pc_retire) & speculation & (npc == ifu_speculation)) begin
         good_speculation <= 1;
+        speculation <= 0;
+      end
+      if (prev_valid & (pc_change | pc_retire) & speculation & (npc != ifu_speculation)) begin
+        bad_speculation <= 1;
         speculation <= 0;
       end
       if (state == `YSYX_IDLE) begin
