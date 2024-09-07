@@ -47,8 +47,8 @@ module ysyx_ifu (
   reg [2:0] l1i_state = 0;
   reg ifu_hazard = 0, ifu_lsu_hazard = 0, ifu_branch_hazard = 0;
 
-  reg [DATA_W-1:0] btb, ifu_speculation;
-  reg btb_valid, speculation, bad_speculation;
+  reg [DATA_W-1:0] btb, ifu_speculation, ifu_npc_speculation;
+  reg btb_valid, speculation, bad_speculation, ifu_b_speculation;
 
   wire [32-L1I_LEN-L1I_LINE_LEN-2-1:0] addr_tag = pc_ifu[ADDR_W-1:L1I_LEN+L1I_LINE_LEN+2];
   wire [L1I_LEN-1:0] addr_idx = pc_ifu[L1I_LEN+L1I_LINE_LEN+2-1:L1I_LINE_LEN+2];
@@ -113,11 +113,17 @@ module ysyx_ifu (
       if (prev_valid & (pc_change | pc_retire) & speculation & (pc == ifu_speculation)) begin
         good_speculation <= 1;
         speculation <= 0;
+        ifu_b_speculation <= 0;
       end
       if (prev_valid & (pc_change | pc_retire) & speculation & (pc != ifu_speculation)) begin
         bad_speculation <= 1;
         speculation <= 0;
-        pc_ifu <= pc;
+        if (ifu_b_speculation) begin
+          pc_ifu <= ifu_npc_speculation;
+        end else begin
+          pc_ifu <= pc;
+        end
+        ifu_b_speculation <= 0;
       end
       if (state == `YSYX_IDLE) begin
         if (prev_valid) begin
@@ -145,7 +151,11 @@ module ysyx_ifu (
               if (btb_valid & 1 & !speculation) begin
                 pc_ifu <= btb;
                 ifu_speculation <= btb;
+                ifu_npc_speculation <= pc_ifu + 4;
                 speculation <= 1;
+                if (opcode_o == `YSYX_OP_B_TYPE) begin
+                  ifu_b_speculation <= 1;
+                end
               end else begin
                 ifu_hazard <= 1;
                 ifu_branch_hazard <= 1;
