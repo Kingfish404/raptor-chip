@@ -16,8 +16,8 @@ module ysyx_ifu (
     output [DATA_W-1:0] inst_o,
     output [DATA_W-1:0] pc_o,
 
-    input pc_valid,
-    input pc_skip,
+    input pc_change,
+    input pc_retire,
 
     input  prev_valid,
     input  next_ready,
@@ -40,6 +40,8 @@ module ysyx_ifu (
   reg [32-L1I_LEN-L1I_LINE_LEN-2-1:0] l1i_tag[L1I_SIZE];
   reg [2:0] l1i_state = 0;
   reg ifu_hazard = 0, ifu_lsu_hazard = 0;
+
+  reg [DATA_W-1:0] btb;
 
   wire [32-L1I_LEN-L1I_LINE_LEN-2-1:0] addr_tag = pc_ifu[ADDR_W-1:L1I_LEN+L1I_LINE_LEN+2];
   wire [L1I_LEN-1:0] addr_idx = pc_ifu[L1I_LEN+L1I_LINE_LEN+2-1:L1I_LINE_LEN+2];
@@ -80,12 +82,12 @@ module ysyx_ifu (
       end
       if (state == `YSYX_IDLE) begin
         if (prev_valid) begin
-          if ((is_branch & pc_valid)) begin
+          if (pc_change) begin
             ifu_hazard <= 0;
             ifu_lsu_hazard <= 0;
             pc_ifu <= npc;
           end
-          if (pc_skip) begin
+          if (pc_retire) begin
             ifu_hazard <= 0;
             ifu_lsu_hazard <= 0;
             pc_ifu <= npc;

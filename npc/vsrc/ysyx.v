@@ -250,8 +250,9 @@ module ysyx (
       .inst_o(inst),
       .pc_o(pc_ifu),
 
-      .pc_valid(pc_valid),
-      .pc_skip(pc_skip),
+      .pc_change(pc_valid),
+      .pc_retire(pc_skip),
+
       .prev_valid(wbu_valid),
       .next_ready(idu_ready),
       .valid_o(ifu_valid),
