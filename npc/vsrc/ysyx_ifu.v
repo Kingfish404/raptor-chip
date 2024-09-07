@@ -108,7 +108,7 @@ module ysyx_ifu (
         if (ifu_b_speculation & !bad_speculation_pc_change) begin
           pc_ifu <= ifu_npc_speculation;
         end else begin
-          pc_ifu <= ifu_npc_bad_speculation;
+          pc_ifu <= npc;
         end
       end
       if (good_speculation) begin
