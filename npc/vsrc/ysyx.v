@@ -147,14 +147,14 @@ module ysyx (
   ysyx_pc pc_unit (
       .clk(clock),
       .rst(reset),
-      .prev_valid(exu_valid & !speculation_exu),
+      .prev_valid(exu_valid),
       .speculation(speculation_exu),
 
       .good_speculation(good_speculation),
       .pc_ifu(pc_ifu),
 
       .npc_wdata(npc_wdata),
-      .use_exu_npc(use_exu_npc),
+      .use_exu_npc(use_exu_npc & !speculation_exu),
       .branch_retire(branch_retire),
       .npc_o(npc),
       .change_o(pc_valid),
