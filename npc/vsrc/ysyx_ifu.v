@@ -106,7 +106,7 @@ module ysyx_ifu (
       if (good_speculation) begin
         good_speculation <= 0;
         speculation <= 0;
-        ifu_lsu_hazard <= 0;
+        // ifu_lsu_hazard <= 0;
         // ifu_hazard <= 0;
         // ifu_branch_hazard <= 0;
       end
