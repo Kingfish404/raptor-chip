@@ -297,7 +297,7 @@ module ysyx (
 
       .rf_table(rf_table),
 
-      .prev_valid(ifu_valid),
+      .prev_valid(ifu_valid & bad_speculation == 0),
       .next_ready(exu_ready),
       .valid_o(idu_valid),
       .ready_o(idu_ready)
@@ -310,7 +310,7 @@ module ysyx (
       .clk(clock),
       .rst(reset),
 
-      .prev_valid(idu_valid),
+      .prev_valid(idu_valid & bad_speculation == 0),
       .next_ready(wbu_ready),
       .valid_o(exu_valid),
       .ready_o(exu_ready),
