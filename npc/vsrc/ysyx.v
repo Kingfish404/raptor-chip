@@ -170,6 +170,8 @@ module ysyx (
       .idu_valid(idu_valid & exu_ready),
       .rd(rd),
 
+
+      .bad_speculation(bad_speculation),
       .reg_write_en(exu_valid & bad_speculation == 0),
       .waddr(rd_exu),
       .wdata(reg_wdata),
