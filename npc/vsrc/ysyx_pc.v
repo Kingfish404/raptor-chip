@@ -37,7 +37,7 @@ module ysyx_pc (
       pc <= `YSYX_PC_INIT;
       change <= 1;
       `YSYX_DPI_C_NPC_DIFFTEST_SKIP_REF
-    end else if (prev_valid) begin
+    end else if (prev_valid & !bad_speculation) begin
       pc <= pc + 4;
       if (use_exu_npc) begin
         npc <= npc_wdata;
