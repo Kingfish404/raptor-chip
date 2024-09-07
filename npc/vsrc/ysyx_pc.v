@@ -38,6 +38,7 @@ module ysyx_pc (
       valid <= 1;
       `YSYX_DPI_C_NPC_DIFFTEST_SKIP_REF
     end else if (prev_valid) begin
+      pc <= npc;
       if (use_exu_npc) begin
         pc <= npc_wdata;
         valid <= 1;
