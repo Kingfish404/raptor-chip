@@ -6,6 +6,9 @@ module ysyx_pc (
     input clk,
     input rst,
 
+    input good_speculation,
+    input [DATA_W-1:0] pc_ifu,
+
     input use_exu_npc,
     input branch_retire,
     input [DATA_W-1:0] npc_wdata,
@@ -39,6 +42,10 @@ module ysyx_pc (
     end else begin
       valid  <= 0;
       retire <= 0;
+      if (good_speculation) begin
+        valid <= 1;
+        pc <= pc_ifu;
+      end
     end
   end
 endmodule  //ysyx_PC

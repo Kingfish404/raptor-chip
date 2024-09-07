@@ -93,7 +93,7 @@ module ysyx (
   wire [31:0] inst;
   wire [DATA_W-1:0] pc_ifu;
   wire speculation_ifu;
-  wire bad_speculation;
+  wire bad_speculation, good_speculation;
   // IFU bus wire
   wire [DATA_W-1:0] ifu_araddr;
   wire ifu_arvalid, ifu_required;
@@ -148,6 +148,9 @@ module ysyx (
       .clk(clock),
       .rst(reset),
       .prev_valid(exu_valid & (!speculation_exu)),
+
+      .good_speculation(good_speculation),
+      .pc_ifu(pc_ifu),
 
       .npc_wdata(npc_wdata),
       .use_exu_npc(use_exu_npc),
@@ -258,6 +261,7 @@ module ysyx (
       .pc_retire(pc_retire),
       .speculation_o(speculation_ifu),
       .bad_speculation_o(bad_speculation),
+      .good_speculation_o(good_speculation),
 
       .prev_valid(wbu_valid),
       .next_ready(idu_ready),

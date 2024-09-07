@@ -21,6 +21,7 @@ module ysyx_ifu (
 
     output speculation_o,
     output bad_speculation_o,
+    output good_speculation_o,
 
     input  prev_valid,
     input  next_ready,
@@ -77,6 +78,7 @@ module ysyx_ifu (
 
   // for speculation
   assign speculation_o = speculation;
+  assign good_speculation_o = good_speculation;
   assign bad_speculation_o = (
     prev_valid & (pc_change | pc_retire) &
     speculation & (npc != ifu_speculation));
