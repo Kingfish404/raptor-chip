@@ -102,10 +102,10 @@ module ysyx_ifu (
         ifu_branch_hazard <= 0;
         pc_ifu <= npc;
       end else if (good_speculation) begin
-        // speculation <= 0;
-        // ifu_hazard <= 0;
-        // ifu_lsu_hazard <= 0;
-        // ifu_branch_hazard <= 0;
+        speculation <= 0;
+        ifu_hazard <= 0;
+        ifu_lsu_hazard <= 0;
+        ifu_branch_hazard <= 0;
       end
       if (state == `YSYX_IDLE) begin
         if (prev_valid) begin
