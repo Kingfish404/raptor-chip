@@ -75,7 +75,9 @@ module ysyx_ifu (
   assign ready_o = !valid_o;
 
   // for speculation
-  assign bad_speculation_o = prev_valid & (pc_change | pc_retire) & speculation & (npc != ifu_speculation);
+  assign bad_speculation_o = (
+    prev_valid & (pc_change | pc_retire) &
+    speculation & (npc != ifu_speculation));
 
   assign pc_o = pc_ifu;
   `YSYX_BUS_FSM()
