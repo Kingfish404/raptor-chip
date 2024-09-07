@@ -138,6 +138,7 @@ module ysyx_ifu (
               end
             end
             if (is_load) begin
+              ifu_hazard <= 1;
               ifu_lsu_hazard <= 1;
             end
           end
