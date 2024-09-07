@@ -66,8 +66,8 @@ void perf()
   assert(
       pmu.instr_cnt ==
       (pmu.ld_inst_cnt + pmu.st_inst_cnt + pmu.alu_inst_cnt +
-       pmu.b_inst_cnt + pmu.jal_inst_cnt + pmu.jalr_inst_cnt +
-       pmu.csr_inst_cnt + pmu.other_inst_cnt));
+       pmu.b_inst_cnt + pmu.csr_inst_cnt + pmu.other_inst_cnt +
+       pmu.jal_inst_cnt + pmu.jalr_inst_cnt));
   printf("======== Cache Analysis ========\n");
   // AMAT: Average Memory Access Time
   printf("| %8s, %% | %8s, %% | %8s, %% | %8s, %% | %13s | %13s | %8s |\n",
