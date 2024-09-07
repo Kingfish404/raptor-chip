@@ -99,7 +99,7 @@ module ysyx_ifu (
       if (prev_valid & (pc_change | pc_retire) & speculation & (npc != ifu_speculation)) begin
         bad_speculation <= 1;
       end
-      if (bad_speculation & next_ready) begin
+      if (bad_speculation & next_ready & l1i_state == 'b000) begin
         bad_speculation <= 0;
         speculation <= 0;
         ifu_hazard <= 0;
