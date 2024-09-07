@@ -171,7 +171,7 @@ module ysyx (
       .rd(rd),
 
 
-      .bad_speculation(bad_speculation),
+      .bad_speculation(speculation_ifu),
       .reg_write_en(exu_valid & bad_speculation == 0),
       .waddr(rd_exu),
       .wdata(reg_wdata),
