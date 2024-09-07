@@ -97,7 +97,7 @@ module ysyx_ifu (
       if (valid_o & next_ready & inst_o == `YSYX_INST_FENCE_I) begin
         l1i_valid <= 0;
       end
-      if (bad_speculation_o) begin
+      if (bad_speculation_o & next_ready) begin
         speculation <= 0;
         ifu_hazard <= 0;
         ifu_lsu_hazard <= 0;
@@ -164,7 +164,7 @@ module ysyx_ifu (
           end else begin
             l1i_state <= 'b010;
           end
-          l1i[addr_idx][0]  <= ifu_rdata;
+          l1i[addr_idx][0] <= ifu_rdata;
           l1i_tag[addr_idx][0] <= addr_tag;
         end
         'b010: begin
