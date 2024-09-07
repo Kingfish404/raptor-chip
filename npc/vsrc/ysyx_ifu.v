@@ -39,7 +39,7 @@ module ysyx_ifu (
   reg [L1I_SIZE-1:0] l1i_valid = 0;
   reg [32-L1I_LEN-L1I_LINE_LEN-2-1:0] l1i_tag[L1I_SIZE];
   reg [2:0] l1i_state = 0;
-  reg ifu_hazard = 0, ifu_lsu_hazard = 0, ifu_branch_hazard = 0;
+  reg ifu_hazard = 0, ifu_lsu_hazard = 0;
 
   wire [32-L1I_LEN-L1I_LINE_LEN-2-1:0] addr_tag = pc_ifu[ADDR_W-1:L1I_LEN+L1I_LINE_LEN+2];
   wire [L1I_LEN-1:0] addr_idx = pc_ifu[L1I_LEN+L1I_LINE_LEN+2-1:L1I_LINE_LEN+2];
@@ -83,13 +83,11 @@ module ysyx_ifu (
           if ((is_branch & pc_valid)) begin
             ifu_hazard <= 0;
             ifu_lsu_hazard <= 0;
-            ifu_branch_hazard <= 0;
             pc_ifu <= npc;
           end
           if (pc_skip) begin
             ifu_hazard <= 0;
             ifu_lsu_hazard <= 0;
-            ifu_branch_hazard <= 0;
             pc_ifu <= npc;
           end
         end
@@ -99,9 +97,6 @@ module ysyx_ifu (
             pc_ifu <= pc_ifu + 4;
           end else begin
             ifu_hazard <= 1;
-            if (is_branch) begin
-              ifu_branch_hazard <= 1;
-            end
             if (is_load) begin
               ifu_lsu_hazard <= 1;
             end
