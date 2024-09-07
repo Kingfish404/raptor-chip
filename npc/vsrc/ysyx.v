@@ -136,6 +136,7 @@ module ysyx (
 
   // WBU output
   wire wbu_valid, wbu_ready;
+  wire pc_wbu;
 
   // BUS output
   wire [DATA_W-1:0] bus_lsu_rdata;
@@ -153,6 +154,8 @@ module ysyx (
       .good_speculation(good_speculation),
       .bad_speculation(bad_speculation),
       .pc_ifu(pc_ifu),
+
+      .pc_wbu(pc_wbu),
 
       .npc_wdata(npc_wdata),
       .use_exu_npc(use_exu_npc),
@@ -411,6 +414,7 @@ module ysyx (
       .pc  (pc_exu),
 
       .ebreak(ebreak),
+      .pc_o  (pc_wbu),
 
       .prev_valid(exu_valid & bad_speculation == 0),
       .next_ready(ifu_ready),
