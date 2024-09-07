@@ -92,6 +92,7 @@ module ysyx (
   // IFU output
   wire [31:0] inst;
   wire [DATA_W-1:0] pc_ifu;
+  wire bad_speculation;
   // IFU bus wire
   wire [DATA_W-1:0] ifu_araddr;
   wire ifu_arvalid, ifu_required;
@@ -252,6 +253,7 @@ module ysyx (
 
       .pc_change(pc_valid),
       .pc_retire(pc_retire),
+      .bad_speculation_o(bad_speculation),
 
       .prev_valid(wbu_valid),
       .next_ready(idu_ready),

@@ -19,6 +19,8 @@ module ysyx_ifu (
     input pc_change,
     input pc_retire,
 
+    output bad_speculation_o,
+
     input  prev_valid,
     input  next_ready,
     output valid_o,
@@ -41,7 +43,7 @@ module ysyx_ifu (
   reg [2:0] l1i_state = 0;
   reg ifu_hazard = 0, ifu_lsu_hazard = 0, ifu_branch_hazard = 0;
 
-  reg [DATA_W-1:0] btb;
+  reg [DATA_W-1:0] btb, ifu_speculation;
   reg btb_valid, speculation;
 
   wire [32-L1I_LEN-L1I_LINE_LEN-2-1:0] addr_tag = pc_ifu[ADDR_W-1:L1I_LEN+L1I_LINE_LEN+2];
@@ -71,6 +73,9 @@ module ysyx_ifu (
   assign inst_o = ifu_just_load & pc_ifu[2] == 1'b1 ? ifu_rdata : l1i[addr_idx][addr_offset];
   assign valid_o = ifu_just_load | (l1i_cache_hit & !ifu_hazard);
   assign ready_o = !valid_o;
+
+  // for speculation
+  assign bad_speculation_o = speculation & (npc != ifu_speculation);
 
   assign pc_o = pc_ifu;
   `YSYX_BUS_FSM()
@@ -102,8 +107,9 @@ module ysyx_ifu (
             pc_ifu <= pc_ifu + 4;
           end else begin
             if (is_branch) begin
-              if (btb_valid) begin
+              if (btb_valid & !speculation) begin
                 pc_ifu <= btb;
+                ifu_speculation <= btb;
                 speculation <= 1;
               end else begin
                 ifu_hazard <= 1;
