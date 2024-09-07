@@ -160,7 +160,7 @@ module ysyx_ifu (
               if (btb_valid & 1 & !speculation) begin
                 pc_ifu <= btb;
                 ifu_speculation <= btb;
-                // ifu_npc_speculation <= pc_ifu + 4;
+                ifu_npc_speculation <= pc_ifu + 4;
                 speculation <= 1;
                 if (opcode_o == `YSYX_OP_B_TYPE) begin
                   ifu_b_speculation <= 1;
