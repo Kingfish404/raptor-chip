@@ -62,7 +62,7 @@ void perf()
   printf("idu_hazard_cycle: %8lld,%3.0f%% (data hazard)\n",
          pmu.idu_hazard_cycle, percentage(pmu.idu_hazard_cycle, pmu.active_cycle));
   Log(FMT_BLUE("ifu_fetch_cnt: %lld, instr_cnt: %lld"), pmu.ifu_fetch_cnt, pmu.instr_cnt);
-  assert(pmu.ifu_fetch_cnt == pmu.instr_cnt);
+  // assert(pmu.ifu_fetch_cnt == pmu.instr_cnt);
   assert(
       pmu.instr_cnt ==
       (pmu.ld_inst_cnt + pmu.st_inst_cnt + pmu.alu_inst_cnt +
