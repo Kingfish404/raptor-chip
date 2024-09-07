@@ -39,9 +39,10 @@ module ysyx_ifu (
   reg [L1I_SIZE-1:0] l1i_valid = 0;
   reg [32-L1I_LEN-L1I_LINE_LEN-2-1:0] l1i_tag[L1I_SIZE];
   reg [2:0] l1i_state = 0;
-  reg ifu_hazard = 0, ifu_lsu_hazard = 0;
+  reg ifu_hazard = 0, ifu_lsu_hazard = 0, ifu_branch_hazard = 0;
 
   reg [DATA_W-1:0] btb;
+  reg btb_valid, speculation;
 
   wire [32-L1I_LEN-L1I_LINE_LEN-2-1:0] addr_tag = pc_ifu[ADDR_W-1:L1I_LEN+L1I_LINE_LEN+2];
   wire [L1I_LEN-1:0] addr_idx = pc_ifu[L1I_LEN+L1I_LINE_LEN+2-1:L1I_LINE_LEN+2];
@@ -76,6 +77,8 @@ module ysyx_ifu (
   always @(posedge clk) begin
     if (rst) begin
       pc_ifu <= `YSYX_PC_INIT;
+      btb_valid <= 0;
+      speculation <= 0;
     end else begin
       if (valid_o & next_ready & inst_o == `YSYX_INST_FENCE_I) begin
         l1i_valid <= 0;
@@ -85,10 +88,12 @@ module ysyx_ifu (
           if (pc_change | pc_retire) begin
             ifu_hazard <= 0;
             ifu_lsu_hazard <= 0;
+            ifu_branch_hazard <= 0;
             pc_ifu <= npc;
           end
           if (pc_change) begin
             btb <= pc_ifu;
+            btb_valid <= 1;
           end
         end
       end else if (state == `YSYX_WAIT_READY) begin
@@ -96,7 +101,15 @@ module ysyx_ifu (
           if (!is_branch & !is_load) begin
             pc_ifu <= pc_ifu + 4;
           end else begin
-            ifu_hazard <= 1;
+            if (is_branch) begin
+              if (btb_valid) begin
+                pc_ifu <= btb;
+                speculation <= 1;
+              end else begin
+                ifu_hazard <= 1;
+                ifu_branch_hazard <= 1;
+              end
+            end
             if (is_load) begin
               ifu_lsu_hazard <= 1;
             end
