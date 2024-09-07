@@ -26,7 +26,7 @@ module ysyx_pc (
   reg  [DATA_W-1:0] pc;
   reg valid, retire;
   assign change_o = valid;
-  assign retire_o = retire | branch_retire;
+  assign retire_o = retire;
   assign npc_o = use_exu_npc ? npc_wdata : pc;
   assign pc_o = pc;
 
