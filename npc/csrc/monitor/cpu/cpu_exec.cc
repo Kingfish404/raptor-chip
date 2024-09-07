@@ -13,7 +13,7 @@
 
 extern NPCState npc;
 extern PMUState pmu;
-extern word_t g_timer = 0;
+extern word_t g_timer;
 
 extern VerilatedContext *contextp;
 extern TOP_NAME *top;
