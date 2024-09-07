@@ -134,7 +134,7 @@ module ysyx_ifu (
             ifu_lsu_hazard <= 0;
             ifu_branch_hazard <= 0;
             if (pc_change) begin
-              pc_ifu <= npc + 4;
+              pc_ifu <= npc;
             end else begin
               // pc_ifu <= pc_ifu + 4;
             end
