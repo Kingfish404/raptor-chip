@@ -26,7 +26,7 @@ module ysyx_pc (
   reg  [DATA_W-1:0] pc;
   reg valid, retire;
   assign change_o = valid;
-  assign retire_o = retire;
+  assign retire_o = retire | branch_retire;
   assign npc_o = use_exu_npc ? npc_wdata : pc;
   assign pc_o = pc;
 
@@ -48,7 +48,7 @@ module ysyx_pc (
       retire <= 0;
       if (good_speculation) begin
         valid <= 1;
-        pc <= pc_ifu;
+        pc <= pc_ifu + 4;
       end
     end
   end

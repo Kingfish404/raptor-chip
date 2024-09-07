@@ -17,77 +17,6 @@ float percentage(int a, int b)
   return ret == 100.0 ? 99.0 : ret;
 }
 
-void perf()
-{
-  printf("======== Instruction Analysis ========\n");
-  Log(FMT_BLUE("Cycle: %llu, #Inst: %lld, IPC: %.3f"),
-      pmu.active_cycle, pmu.instr_cnt, (1.0 * pmu.instr_cnt / pmu.active_cycle));
-  printf("| %8s,  %% | %8s,  %% | %8s,  %% |\n",
-         "IFU", "LSU", "EXU");
-  printf("| %8lld,%3.0f | %8lld,%3.0f | %8lld,%3.0f |\n",
-         pmu.ifu_fetch_stall_cycle, percentage(pmu.ifu_fetch_stall_cycle, pmu.active_cycle),
-         pmu.lsu_stall_cycle, percentage(pmu.lsu_stall_cycle, pmu.active_cycle),
-         pmu.exu_alu_cnt, percentage(pmu.exu_alu_cnt, pmu.instr_cnt));
-  printf("| %6s, %% | %6s, %% | %6s, %% | %6s, %% | %3s, %% | %5s, %% | %6s,  %% | %6s,  %% |\n",
-         "LD", "ST", "ALU", "BR", "CSR", "OTH", "JAL", "JALR");
-  printf("| %6lld,%2.0f | %6lld,%2.0f | %6lld,%2.0f "
-         "| %6lld,%2.0f | %3lld,%2.0f | %5lld,%2.0f "
-         "| %6lld,%3.0f | %6lld,%3.0f |\n",
-         pmu.ld_inst_cnt, percentage(pmu.ld_inst_cnt, pmu.instr_cnt),
-         pmu.st_inst_cnt, percentage(pmu.st_inst_cnt, pmu.instr_cnt),
-         pmu.alu_inst_cnt, percentage(pmu.alu_inst_cnt, pmu.instr_cnt),
-
-         pmu.b_inst_cnt, percentage(pmu.b_inst_cnt, pmu.instr_cnt),
-         pmu.csr_inst_cnt, percentage(pmu.csr_inst_cnt, pmu.instr_cnt),
-         pmu.other_inst_cnt, percentage(pmu.other_inst_cnt, pmu.instr_cnt),
-
-         pmu.jal_inst_cnt, percentage(pmu.jal_inst_cnt, pmu.instr_cnt),
-         pmu.jalr_inst_cnt, percentage(pmu.jalr_inst_cnt, pmu.instr_cnt));
-  printf("======== TOP DOWN Analysis ========\n");
-  printf("| %8s,  %% | %8s,  %% | %8s,  %% | %8s,  %% | %8s,  %% |\n",
-         "IFU", "LSU", "EXU", "LD", "ST");
-  printf("| %8lld,%3.0f | %8lld,%3.0f | %8lld,%3.0f | %8lld,%3.0f | %8lld,%3.0f |\n",
-         pmu.ifu_fetch_stall_cycle, percentage(pmu.ifu_fetch_stall_cycle, pmu.active_cycle),
-         pmu.lsu_stall_cycle, percentage(pmu.lsu_stall_cycle, pmu.active_cycle),
-         pmu.exu_alu_cnt, percentage(pmu.exu_alu_cnt, pmu.instr_cnt),
-         pmu.ld_inst_cnt, percentage(pmu.ld_inst_cnt, pmu.instr_cnt),
-         pmu.st_inst_cnt, percentage(pmu.st_inst_cnt, pmu.instr_cnt));
-  // show average IF cycle and LS cycle
-  Log(FMT_BLUE("IFU Avg Cycle: %2.1f, LSU Avg Cycle: %2.1f"),
-      (1.0 * pmu.ifu_fetch_stall_cycle) / (pmu.ifu_fetch_cnt + 1),
-      (1.0 * pmu.lsu_stall_cycle) / (pmu.lsu_load_cnt + 1));
-  printf("ifu_hazard_cycle: %8lld,%3.0f%% (branch + load instruction (%8lld,%3.0f%%))\n",
-         pmu.ifu_hazard_cycle, percentage(pmu.ifu_hazard_cycle, pmu.active_cycle),
-         pmu.ifu_lsu_hazard_cycle, percentage(pmu.ifu_lsu_hazard_cycle, pmu.active_cycle));
-  printf("idu_hazard_cycle: %8lld,%3.0f%% (data hazard)\n",
-         pmu.idu_hazard_cycle, percentage(pmu.idu_hazard_cycle, pmu.active_cycle));
-  Log(FMT_BLUE("ifu_fetch_cnt: %lld, instr_cnt: %lld"), pmu.ifu_fetch_cnt, pmu.instr_cnt);
-  // assert(pmu.ifu_fetch_cnt == pmu.instr_cnt);
-  assert(
-      pmu.instr_cnt ==
-      (pmu.ld_inst_cnt + pmu.st_inst_cnt + pmu.alu_inst_cnt +
-       pmu.b_inst_cnt + pmu.csr_inst_cnt + pmu.other_inst_cnt +
-       pmu.jal_inst_cnt + pmu.jalr_inst_cnt));
-  printf("======== Cache Analysis ========\n");
-  // AMAT: Average Memory Access Time
-  printf("| %8s, %% | %8s, %% | %8s, %% | %8s, %% | %13s | %13s | %8s |\n",
-         "HIT", "MISS", "HIT CYC", "MISS CYC", "HIT Cost AVG", "MISS Cost AVG", "AMAT");
-  double l1i_hit_rate = percentage(pmu.l1i_cache_hit_cnt, pmu.l1i_cache_hit_cnt + pmu.l1i_cache_miss_cnt);
-  double l1i_access_time = pmu.l1i_cache_hit_cycle / (pmu.l1i_cache_hit_cnt + 1);
-  double l1i_miss_penalty = pmu.l1i_cache_miss_cycle / (pmu.l1i_cache_miss_cnt + 1);
-  printf("| %8lld,%2.0f | %8lld,%2.0f | %8lld,%2.0f | %8lld,%2.0f | %13lld | %13lld | %8.1f |\n",
-         pmu.l1i_cache_hit_cnt, l1i_hit_rate,
-         pmu.l1i_cache_miss_cnt, 100 - l1i_hit_rate,
-         pmu.l1i_cache_hit_cycle,
-         percentage(pmu.l1i_cache_hit_cycle, pmu.l1i_cache_hit_cycle + pmu.l1i_cache_miss_cycle),
-         pmu.l1i_cache_miss_cycle,
-         percentage(pmu.l1i_cache_miss_cycle, pmu.l1i_cache_hit_cycle + pmu.l1i_cache_miss_cycle),
-         (long long)l1i_access_time, (long long)l1i_miss_penalty,
-         l1i_access_time + (100 - l1i_hit_rate) / 100.0 * l1i_miss_penalty);
-  // assert(
-  //     (pmu.l1i_cache_hit_cnt + pmu.l1i_cache_miss_cnt) == pmu.ifu_fetch_cnt);
-}
-
 void perf_sample_per_cycle()
 {
   if (top->reset)
@@ -209,6 +138,77 @@ void perf_sample_per_inst()
     pmu.other_inst_cnt++;
     break;
   }
+}
+
+void perf()
+{
+  printf("======== Instruction Analysis ========\n");
+  Log(FMT_BLUE("Cycle: %llu, #Inst: %lld, IPC: %.3f"),
+      pmu.active_cycle, pmu.instr_cnt, (1.0 * pmu.instr_cnt / pmu.active_cycle));
+  printf("| %8s,  %% | %8s,  %% | %8s,  %% |\n",
+         "IFU", "LSU", "EXU");
+  printf("| %8lld,%3.0f | %8lld,%3.0f | %8lld,%3.0f |\n",
+         pmu.ifu_fetch_stall_cycle, percentage(pmu.ifu_fetch_stall_cycle, pmu.active_cycle),
+         pmu.lsu_stall_cycle, percentage(pmu.lsu_stall_cycle, pmu.active_cycle),
+         pmu.exu_alu_cnt, percentage(pmu.exu_alu_cnt, pmu.instr_cnt));
+  printf("| %6s, %% | %6s, %% | %6s, %% | %6s, %% | %3s, %% | %5s, %% | %6s,  %% | %6s,  %% |\n",
+         "LD", "ST", "ALU", "BR", "CSR", "OTH", "JAL", "JALR");
+  printf("| %6lld,%2.0f | %6lld,%2.0f | %6lld,%2.0f "
+         "| %6lld,%2.0f | %3lld,%2.0f | %5lld,%2.0f "
+         "| %6lld,%3.0f | %6lld,%3.0f |\n",
+         pmu.ld_inst_cnt, percentage(pmu.ld_inst_cnt, pmu.instr_cnt),
+         pmu.st_inst_cnt, percentage(pmu.st_inst_cnt, pmu.instr_cnt),
+         pmu.alu_inst_cnt, percentage(pmu.alu_inst_cnt, pmu.instr_cnt),
+
+         pmu.b_inst_cnt, percentage(pmu.b_inst_cnt, pmu.instr_cnt),
+         pmu.csr_inst_cnt, percentage(pmu.csr_inst_cnt, pmu.instr_cnt),
+         pmu.other_inst_cnt, percentage(pmu.other_inst_cnt, pmu.instr_cnt),
+
+         pmu.jal_inst_cnt, percentage(pmu.jal_inst_cnt, pmu.instr_cnt),
+         pmu.jalr_inst_cnt, percentage(pmu.jalr_inst_cnt, pmu.instr_cnt));
+  printf("======== TOP DOWN Analysis ========\n");
+  printf("| %8s,  %% | %8s,  %% | %8s,  %% | %8s,  %% | %8s,  %% |\n",
+         "IFU", "LSU", "EXU", "LD", "ST");
+  printf("| %8lld,%3.0f | %8lld,%3.0f | %8lld,%3.0f | %8lld,%3.0f | %8lld,%3.0f |\n",
+         pmu.ifu_fetch_stall_cycle, percentage(pmu.ifu_fetch_stall_cycle, pmu.active_cycle),
+         pmu.lsu_stall_cycle, percentage(pmu.lsu_stall_cycle, pmu.active_cycle),
+         pmu.exu_alu_cnt, percentage(pmu.exu_alu_cnt, pmu.instr_cnt),
+         pmu.ld_inst_cnt, percentage(pmu.ld_inst_cnt, pmu.instr_cnt),
+         pmu.st_inst_cnt, percentage(pmu.st_inst_cnt, pmu.instr_cnt));
+  // show average IF cycle and LS cycle
+  Log(FMT_BLUE("IFU Avg Cycle: %2.1f, LSU Avg Cycle: %2.1f"),
+      (1.0 * pmu.ifu_fetch_stall_cycle) / (pmu.ifu_fetch_cnt + 1),
+      (1.0 * pmu.lsu_stall_cycle) / (pmu.lsu_load_cnt + 1));
+  printf("ifu_hazard_cycle: %8lld,%3.0f%% (branch + load instruction (%8lld,%3.0f%%))\n",
+         pmu.ifu_hazard_cycle, percentage(pmu.ifu_hazard_cycle, pmu.active_cycle),
+         pmu.ifu_lsu_hazard_cycle, percentage(pmu.ifu_lsu_hazard_cycle, pmu.active_cycle));
+  printf("idu_hazard_cycle: %8lld,%3.0f%% (data hazard)\n",
+         pmu.idu_hazard_cycle, percentage(pmu.idu_hazard_cycle, pmu.active_cycle));
+  Log(FMT_BLUE("ifu_fetch_cnt: %lld, instr_cnt: %lld"), pmu.ifu_fetch_cnt, pmu.instr_cnt);
+  // assert(pmu.ifu_fetch_cnt == pmu.instr_cnt);
+  assert(
+      pmu.instr_cnt ==
+      (pmu.ld_inst_cnt + pmu.st_inst_cnt + pmu.alu_inst_cnt +
+       pmu.b_inst_cnt + pmu.csr_inst_cnt + pmu.other_inst_cnt +
+       pmu.jal_inst_cnt + pmu.jalr_inst_cnt));
+  printf("======== Cache Analysis ========\n");
+  // AMAT: Average Memory Access Time
+  printf("| %8s, %% | %8s, %% | %8s, %% | %8s, %% | %13s | %13s | %8s |\n",
+         "HIT", "MISS", "HIT CYC", "MISS CYC", "HIT Cost AVG", "MISS Cost AVG", "AMAT");
+  double l1i_hit_rate = percentage(pmu.l1i_cache_hit_cnt, pmu.l1i_cache_hit_cnt + pmu.l1i_cache_miss_cnt);
+  double l1i_access_time = pmu.l1i_cache_hit_cycle / (pmu.l1i_cache_hit_cnt + 1);
+  double l1i_miss_penalty = pmu.l1i_cache_miss_cycle / (pmu.l1i_cache_miss_cnt + 1);
+  printf("| %8lld,%2.0f | %8lld,%2.0f | %8lld,%2.0f | %8lld,%2.0f | %13lld | %13lld | %8.1f |\n",
+         pmu.l1i_cache_hit_cnt, l1i_hit_rate,
+         pmu.l1i_cache_miss_cnt, 100 - l1i_hit_rate,
+         pmu.l1i_cache_hit_cycle,
+         percentage(pmu.l1i_cache_hit_cycle, pmu.l1i_cache_hit_cycle + pmu.l1i_cache_miss_cycle),
+         pmu.l1i_cache_miss_cycle,
+         percentage(pmu.l1i_cache_miss_cycle, pmu.l1i_cache_hit_cycle + pmu.l1i_cache_miss_cycle),
+         (long long)l1i_access_time, (long long)l1i_miss_penalty,
+         l1i_access_time + (100 - l1i_hit_rate) / 100.0 * l1i_miss_penalty);
+  // assert(
+  //     (pmu.l1i_cache_hit_cnt + pmu.l1i_cache_miss_cnt) == pmu.ifu_fetch_cnt);
 }
 
 void statistic()
