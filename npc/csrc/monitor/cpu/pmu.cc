@@ -33,13 +33,13 @@ void perf()
   printf("| %6lld,%2.0f | %6lld,%2.0f | %6lld,%2.0f "
          "| %6lld,%2.0f | %3lld,%2.0f | %5lld,%2.0f "
          "| %6lld,%3.0f | %6lld,%3.0f |\n",
-         (long long)pmu.ld_inst_cnt, percentage(pmu.ld_inst_cnt, pmu.instr_cnt),
-         (long long)pmu.st_inst_cnt, percentage(pmu.st_inst_cnt, pmu.instr_cnt),
-         (long long)pmu.alu_inst_cnt, percentage(pmu.alu_inst_cnt, pmu.instr_cnt),
+         pmu.ld_inst_cnt, percentage(pmu.ld_inst_cnt, pmu.instr_cnt),
+         pmu.st_inst_cnt, percentage(pmu.st_inst_cnt, pmu.instr_cnt),
+         pmu.alu_inst_cnt, percentage(pmu.alu_inst_cnt, pmu.instr_cnt),
 
-         (long long)pmu.b_inst_cnt, percentage(pmu.b_inst_cnt, pmu.instr_cnt),
-         (long long)pmu.csr_inst_cnt, percentage(pmu.csr_inst_cnt, pmu.instr_cnt),
-         (long long)pmu.other_inst_cnt, percentage(pmu.other_inst_cnt, pmu.instr_cnt),
+         pmu.b_inst_cnt, percentage(pmu.b_inst_cnt, pmu.instr_cnt),
+         pmu.csr_inst_cnt, percentage(pmu.csr_inst_cnt, pmu.instr_cnt),
+         pmu.other_inst_cnt, percentage(pmu.other_inst_cnt, pmu.instr_cnt),
 
          pmu.jal_inst_cnt, percentage(pmu.jal_inst_cnt, pmu.instr_cnt),
          pmu.jalr_inst_cnt, percentage(pmu.jalr_inst_cnt, pmu.instr_cnt));
