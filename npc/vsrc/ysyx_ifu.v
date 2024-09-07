@@ -84,6 +84,7 @@ module ysyx_ifu (
   assign bad_speculation_o = bad_speculation | (speculation & ((
         pc_change & npc != ifu_speculation) | (pc_retire & pc + 4 != ifu_speculation )));
   reg good_speculation;
+  reg bad_speculation_pc_change;
 
   assign pc_o = pc_ifu;
   `YSYX_BUS_FSM()
@@ -103,7 +104,8 @@ module ysyx_ifu (
         ifu_lsu_hazard <= 0;
         ifu_branch_hazard <= 0;
         ifu_b_speculation <= 0;
-        if (ifu_b_speculation & !pc_change) begin
+        bad_speculation_pc_change <= 0;
+        if (ifu_b_speculation & !bad_speculation_pc_change) begin
           pc_ifu <= ifu_npc_speculation;
         end else begin
           pc_ifu <= npc;
@@ -126,6 +128,7 @@ module ysyx_ifu (
         pc_change & npc != ifu_speculation) | (pc_retire & pc + 4 != ifu_speculation))) begin
         bad_speculation <= 1;
         speculation <= 0;
+        bad_speculation_pc_change <= pc_change;
         // if (ifu_b_speculation & !pc_change) begin
         //   pc_ifu <= ifu_npc_speculation;
         // end else begin
