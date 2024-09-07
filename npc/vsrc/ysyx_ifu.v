@@ -130,7 +130,7 @@ module ysyx_ifu (
             pc_ifu <= pc_ifu + 4;
           end else begin
             if (is_branch) begin
-              if (btb_valid & (opcode_o == `YSYX_OP_JAL) & !speculation) begin
+              if (btb_valid & !speculation) begin
                 pc_ifu <= btb;
                 ifu_speculation <= btb;
                 speculation <= 1;
