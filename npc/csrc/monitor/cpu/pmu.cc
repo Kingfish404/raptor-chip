@@ -9,7 +9,6 @@ extern NPCState npc;
 extern TOP_NAME *top;
 
 PMUState pmu;
-
 word_t g_timer = 0;
 
 float percentage(int a, int b)
@@ -21,28 +20,30 @@ float percentage(int a, int b)
 void perf()
 {
   printf("======== Instruction Analysis ========\n");
-  Log(FMT_BLUE("Cycle: %llu, #Inst: %lld, IPC: %.3f"), pmu.active_cycle, pmu.instr_cnt, (1.0 * pmu.instr_cnt / pmu.active_cycle));
-  printf("| %8s,  %% | %8s,  %% | %8s,  %% | %6s, %% | %6s, %% | %6s, %% | %6s, %% | %3s, %% | %5s, %% |\n",
-         "IFU", "LSU", "EXU", "LD", "ST", "ALU", "BR", "CSR", "OTH");
-  printf("| %8lld,%3.0f | %8lld,%3.0f | %8lld,%3.0f "
-         "| %6lld,%2.0f | %6lld,%2.0f | %6lld,%2.0f "
-         "| %6lld,%2.0f | %3lld,%2.0f | %5lld,%2.0f |\n",
+  Log(FMT_BLUE("Cycle: %llu, #Inst: %lld, IPC: %.3f"),
+      pmu.active_cycle, pmu.instr_cnt, (1.0 * pmu.instr_cnt / pmu.active_cycle));
+  printf("| %8s,  %% | %8s,  %% | %8s,  %% |\n",
+         "IFU", "LSU", "EXU");
+  printf("| %8lld,%3.0f | %8lld,%3.0f | %8lld,%3.0f |\n",
          (long long)pmu.ifu_fetch_stall_cycle, percentage(pmu.ifu_fetch_stall_cycle, pmu.active_cycle),
          (long long)pmu.lsu_stall_cycle, percentage(pmu.lsu_stall_cycle, pmu.active_cycle),
-         (long long)pmu.exu_alu_cnt, percentage(pmu.exu_alu_cnt, pmu.instr_cnt),
+         (long long)pmu.exu_alu_cnt, percentage(pmu.exu_alu_cnt, pmu.instr_cnt));
+  printf("| %6s, %% | %6s, %% | %6s, %% | %6s, %% | %3s, %% | %5s, %% | %6s,  %% | %6s,  %% |\n",
+         "LD", "ST", "ALU", "BR", "CSR", "OTH", "JAL", "JALR");
+  printf(
+      "| %6lld,%2.0f | %6lld,%2.0f | %6lld,%2.0f "
+      "| %6lld,%2.0f | %3lld,%2.0f | %5lld,%2.0f "
+      "| %6lld,%3.0f | %6lld,%3.0f |\n",
+      (long long)pmu.ld_inst_cnt, percentage(pmu.ld_inst_cnt, pmu.instr_cnt),
+      (long long)pmu.st_inst_cnt, percentage(pmu.st_inst_cnt, pmu.instr_cnt),
+      (long long)pmu.alu_inst_cnt, percentage(pmu.alu_inst_cnt, pmu.instr_cnt),
 
-         (long long)pmu.ld_inst_cnt, percentage(pmu.ld_inst_cnt, pmu.instr_cnt),
-         (long long)pmu.st_inst_cnt, percentage(pmu.st_inst_cnt, pmu.instr_cnt),
-         (long long)pmu.alu_inst_cnt, percentage(pmu.alu_inst_cnt, pmu.instr_cnt),
+      (long long)pmu.b_inst_cnt, percentage(pmu.b_inst_cnt, pmu.instr_cnt),
+      (long long)pmu.csr_inst_cnt, percentage(pmu.csr_inst_cnt, pmu.instr_cnt),
+      (long long)pmu.other_inst_cnt, percentage(pmu.other_inst_cnt, pmu.instr_cnt),
 
-         (long long)pmu.b_inst_cnt, percentage(pmu.b_inst_cnt, pmu.instr_cnt),
-
-         (long long)pmu.csr_inst_cnt, percentage(pmu.csr_inst_cnt, pmu.instr_cnt),
-         (long long)pmu.other_inst_cnt, percentage(pmu.other_inst_cnt, pmu.instr_cnt));
-  printf("| %6s,  %% | %6s,  %% |\n", "JAL", "JALR");
-  printf("| %6lld,%3.0f | %6lld,%3.0f |\n",
-         pmu.jal_inst_cnt, percentage(pmu.jal_inst_cnt, pmu.instr_cnt),
-         pmu.jalr_inst_cnt, percentage(pmu.jalr_inst_cnt, pmu.instr_cnt));
+      pmu.jal_inst_cnt, percentage(pmu.jal_inst_cnt, pmu.instr_cnt),
+      pmu.jalr_inst_cnt, percentage(pmu.jalr_inst_cnt, pmu.instr_cnt));
   printf("======== TOP DOWN Analysis ========\n");
   printf("| %8s,  %% | %8s,  %% | %8s,  %% | %8s,  %% | %8s,  %% |\n",
          "IFU", "LSU", "EXU", "LD", "ST");
@@ -78,8 +79,10 @@ void perf()
   printf("| %8lld,%2.0f | %8lld,%2.0f | %8lld,%2.0f | %8lld,%2.0f | %13lld | %13lld | %8.1f |\n",
          pmu.l1i_cache_hit_cnt, l1i_hit_rate,
          pmu.l1i_cache_miss_cnt, 100 - l1i_hit_rate,
-         pmu.l1i_cache_hit_cycle, percentage(pmu.l1i_cache_hit_cycle, pmu.l1i_cache_hit_cycle + pmu.l1i_cache_miss_cycle),
-         pmu.l1i_cache_miss_cycle, percentage(pmu.l1i_cache_miss_cycle, pmu.l1i_cache_hit_cycle + pmu.l1i_cache_miss_cycle),
+         pmu.l1i_cache_hit_cycle,
+         percentage(pmu.l1i_cache_hit_cycle, pmu.l1i_cache_hit_cycle + pmu.l1i_cache_miss_cycle),
+         pmu.l1i_cache_miss_cycle,
+         percentage(pmu.l1i_cache_miss_cycle, pmu.l1i_cache_hit_cycle + pmu.l1i_cache_miss_cycle),
          (long long)l1i_access_time, (long long)l1i_miss_penalty,
          l1i_access_time + (100 - l1i_hit_rate) / 100.0 * l1i_miss_penalty);
   assert(
