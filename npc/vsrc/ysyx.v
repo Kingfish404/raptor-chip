@@ -82,7 +82,7 @@ module ysyx (
   parameter bit [7:0] ADDR_W = `YSYX_W_WIDTH;
   parameter bit [7:0] REG_ADDR_W = 4;
   // PC unit output
-  wire [DATA_W-1:0] npc;
+  wire [DATA_W-1:0] npc, pc;
   wire pc_valid, pc_retire;
 
   // REGS output
@@ -157,6 +157,7 @@ module ysyx (
       .npc_wdata(npc_wdata),
       .use_exu_npc(use_exu_npc),
       .branch_retire(branch_retire),
+      .pc_o(pc),
       .npc_o(npc),
       .change_o(pc_valid),
       .retire_o(pc_retire)
