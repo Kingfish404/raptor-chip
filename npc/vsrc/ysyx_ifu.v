@@ -47,7 +47,7 @@ module ysyx_ifu (
   reg [2:0] l1i_state = 0;
   reg ifu_hazard = 0, ifu_lsu_hazard = 0, ifu_branch_hazard = 0;
 
-  reg [DATA_W-1:0] btb, ifu_speculation, ifu_npc_speculation, ifu_npc_bad_speculation;
+  reg [DATA_W-1:0] btb, ifu_speculation, ifu_npc_speculation, ifu_npc_bad_speculation, ifu_pc_hange;
   reg btb_valid, speculation, bad_speculation, ifu_b_speculation;
 
   wire [32-L1I_LEN-L1I_LINE_LEN-2-1:0] addr_tag = pc_ifu[ADDR_W-1:L1I_LEN+L1I_LINE_LEN+2];
@@ -109,7 +109,7 @@ module ysyx_ifu (
         if (ifu_b_speculation & !bad_speculation_pc_change) begin
           pc_ifu <= ifu_npc_speculation;
         end else begin
-          pc_ifu <= npc;
+          pc_ifu <= ifu_pc_hange;
         end
       end
       if (good_speculation) begin
@@ -130,10 +130,10 @@ module ysyx_ifu (
         bad_speculation <= 1;
         speculation <= 0;
         bad_speculation_pc_change <= pc_change;
-        // if (pc_change) begin
-          ifu_npc_speculation <= pc_change ? npc : ifu_npc_bad_speculation;
+        if (pc_change) begin
+          ifu_pc_hange <= npc;
           $display("bad speculation: npc=%h, ifu_npc_speculation=%h", npc, ifu_npc_speculation);
-        // end
+        end
       end
       if (state == `YSYX_IDLE) begin
         if (prev_valid) begin
