@@ -36,7 +36,7 @@ module ysyx_pc (
     end else if (prev_valid) begin
       pc <= npc;
       if (use_exu_npc) begin
-        pc <= npc_wdata;
+        pc <= npc_wdata - 4;
         valid <= 1;
       end else if (branch_retire) begin
         retire <= 1;
