@@ -113,7 +113,7 @@ module ysyx_ifu (
       if (prev_valid & (pc_change | pc_retire) & speculation & (npc == ifu_speculation)) begin
         good_speculation <= 1;
         speculation <= 0;
-        pc_ifu <= npc;
+        pc_ifu <= pc;
       end
       if (prev_valid & (pc_change | pc_retire) & speculation & (npc != ifu_speculation)) begin
         bad_speculation <= 1;
@@ -142,7 +142,7 @@ module ysyx_ifu (
             pc_ifu <= pc_ifu + 4;
           end else begin
             if (is_branch) begin
-              if (btb_valid & 0 & !speculation) begin
+              if (btb_valid & 1 & !speculation) begin
                 pc_ifu <= btb;
                 ifu_speculation <= btb;
                 speculation <= 1;
