@@ -393,7 +393,7 @@ module ysyx (
 
       .ebreak(ebreak),
 
-      .prev_valid(exu_valid),
+      .prev_valid(exu_valid & bad_speculation == 0),
       .next_ready(ifu_ready),
       .valid_o(wbu_valid),
       .ready_o(wbu_ready)
