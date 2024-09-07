@@ -149,7 +149,7 @@ module ysyx (
       .use_exu_npc(use_exu_npc),
       .branch_retire(branch_retire),
       .npc_o(npc),
-      .valid_o(pc_valid),
+      .change_o(pc_valid),
       .retire_o(pc_retire)
   );
 
