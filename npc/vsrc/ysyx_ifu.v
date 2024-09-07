@@ -97,21 +97,21 @@ module ysyx_ifu (
       if (valid_o & next_ready & inst_o == `YSYX_INST_FENCE_I) begin
         l1i_valid <= 0;
       end
+      if (bad_speculation_o) begin
+        speculation <= 0;
+        ifu_hazard <= 0;
+        ifu_lsu_hazard <= 0;
+        ifu_branch_hazard <= 0;
+        pc_ifu <= npc;
+        $display("speculation bad");
+      end else if (good_speculation) begin
+        speculation <= 0;
+        ifu_hazard <= 0;
+        ifu_lsu_hazard <= 0;
+        ifu_branch_hazard <= 0;
+        $display("speculation good");
+      end
       if (state == `YSYX_IDLE) begin
-        if (bad_speculation_o) begin
-          speculation <= 0;
-          ifu_hazard <= 0;
-          ifu_lsu_hazard <= 0;
-          ifu_branch_hazard <= 0;
-          pc_ifu <= npc;
-          $display("speculation bad");
-        end else if (good_speculation) begin
-          speculation <= 0;
-          ifu_hazard <= 0;
-          ifu_lsu_hazard <= 0;
-          ifu_branch_hazard <= 0;
-          $display("speculation good");
-        end
         if (prev_valid) begin
           if (pc_change | pc_retire) begin
             ifu_hazard <= 0;
