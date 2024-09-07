@@ -151,6 +151,7 @@ module ysyx (
       .speculation(speculation_exu),
 
       .good_speculation(good_speculation),
+      .bad_speculation(bad_speculation),
       .pc_ifu(pc_ifu),
 
       .npc_wdata(npc_wdata),
