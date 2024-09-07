@@ -106,7 +106,7 @@ module ysyx_ifu (
             pc_ifu <= npc;
           end
           if (pc_change) begin
-            btb <= pc_ifu;
+            btb <= npc;
             btb_valid <= 1;
           end
         end
