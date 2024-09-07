@@ -87,11 +87,9 @@ module ysyx_ifu (
             ifu_lsu_hazard <= 0;
             pc_ifu <= npc;
           end
-          // if (pc_retire) begin
-          //   ifu_hazard <= 0;
-          //   ifu_lsu_hazard <= 0;
-          //   pc_ifu <= npc;
-          // end
+          if (pc_change) begin
+            btb <= pc_ifu;
+          end
         end
       end else if (state == `YSYX_WAIT_READY) begin
         if (next_ready == 1 & valid_o) begin

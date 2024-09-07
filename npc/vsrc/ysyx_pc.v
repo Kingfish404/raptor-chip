@@ -10,16 +10,16 @@ module ysyx_pc (
     input branch_retire,
     input [DATA_W-1:0] npc_wdata,
     output [DATA_W-1:0] npc_o,
-    output valid_o,
-    output skip_o
+    output change_o,
+    output retire_o
 );
   parameter bit [7:0] DATA_W = `YSYX_W_WIDTH;
   wire [DATA_W-1:0] npc = pc + 4;
   reg  [DATA_W-1:0] pc;
-  reg valid, skip;
-  assign valid_o = valid | (use_exu_npc);
-  assign skip_o  = skip;
-  assign npc_o   = use_exu_npc ? npc_wdata : pc;
+  reg change, retire;
+  assign change_o = valid | (use_exu_npc);
+  assign retire_o = retire;
+  assign npc_o = use_exu_npc ? npc_wdata : pc;
 
   always @(posedge clk) begin
     if (rst) begin
@@ -32,11 +32,11 @@ module ysyx_pc (
         pc <= npc_wdata;
         valid <= 1;
       end else if (branch_retire) begin
-        skip <= 1;
+        retire <= 1;
       end
     end else begin
-      valid <= 0;
-      skip  <= 0;
+      valid  <= 0;
+      retire <= 0;
     end
   end
 endmodule  //ysyx_PC
