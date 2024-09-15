@@ -41,8 +41,8 @@ module ysyx_pc (
       pc  <= pc + 4;
       npc <= npc + 4;
       if (use_exu_npc) begin
-        npc <= npc_wdata;
         pc <= npc_wdata;
+        npc <= npc_wdata;
         change <= 1;
       end else if (branch_retire) begin
         change <= 0;
@@ -54,7 +54,8 @@ module ysyx_pc (
       change <= 0;
       retire <= 0;
       if (good_speculation) begin
-        pc <= pc_ifu + 4;
+        pc  <= pc_ifu + 4;
+        npc <= pc_ifu + 4;
       end
     end
   end
