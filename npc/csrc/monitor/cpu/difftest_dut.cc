@@ -82,7 +82,7 @@ static void checkregs(NPCState *ref, vaddr_t pc)
   bool is_same = true;
   if ((vaddr_t)(*(ref->cpc)) != pc)
   {
-    printf(FMT_RED("[ERROR]") " pc is different! ref = " FMT_GREEN(FMT_WORD) ", dut = " FMT_RED(FMT_WORD) "\n",
+    printf(FMT_RED("[ERROR]") " pc is different! ref = " FMT_GREEN(FMT_WORD_NO_PREFIX) ", dut = " FMT_RED(FMT_WORD_NO_PREFIX) "\n",
            (vaddr_t)(*(ref->cpc)), pc);
     is_same = false;
   }
