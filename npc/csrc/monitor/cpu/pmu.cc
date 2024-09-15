@@ -147,8 +147,8 @@ void perf()
   uint64_t time_clint = *(uint64_t *)&(CONCAT(VERILOG_PREFIX, bus__DOT__clint__DOT__mtime));
   uint64_t time_clint_us = time_clint / 2;
   Log(
-      "Cycle: %llu, #Inst: %lld, IPC: %.3f"
-      "CLINT time: %lld (us), %2.3f MIPS",
+      "Cycle: %llu, #Inst: %lld, "
+      "" FMT_BLUE("IPC: %2.3f, ") "CLINT time: %lld (us), %2.3f MIPS",
       pmu.active_cycle, pmu.instr_cnt, (1.0 * pmu.instr_cnt / pmu.active_cycle),
       (time_clint_us), (double)((pmu.instr_cnt / 1e6) / (time_clint_us / 1e6)));
   return;
