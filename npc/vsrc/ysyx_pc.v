@@ -54,8 +54,8 @@ module ysyx_pc (
       change <= 0;
       retire <= 0;
       if (good_speculation) begin
-        pc  <= pc_ifu + 4;
-        npc <= pc_ifu + 4;
+        pc  <= pc_ifu;
+        npc <= pc_ifu;
       end
     end
   end
