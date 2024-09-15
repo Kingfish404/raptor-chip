@@ -191,9 +191,9 @@ void perf()
   Log(FMT_BLUE("IFU Avg Cycle: %2.1f, LSU Avg Cycle: %2.1f"),
       (1.0 * pmu.ifu_fetch_stall_cycle) / (pmu.ifu_fetch_cnt + 1),
       (1.0 * pmu.lsu_stall_cycle) / (pmu.lsu_load_cnt + 1));
-  Log(FMT_BLUE("BPU Success: %lld, Fail: %lld, Rate: %2.1f%%"),
-      pmu.bpu_success_cnt, pmu.bpu_fail_cnt,
-      percentage(pmu.bpu_success_cnt, pmu.bpu_success_cnt + pmu.bpu_fail_cnt));
+  printf("BPU Success: %lld, Fail: %lld, Rate: %2.1f%%",
+         pmu.bpu_success_cnt, pmu.bpu_fail_cnt,
+         percentage(pmu.bpu_success_cnt, pmu.bpu_success_cnt + pmu.bpu_fail_cnt));
   printf("ifu_hazard_cycle: %8lld,%3.0f%% (branch + load instruction (%8lld,%3.0f%%))\n",
          pmu.ifu_hazard_cycle, percentage(pmu.ifu_hazard_cycle, pmu.active_cycle),
          pmu.ifu_lsu_hazard_cycle, percentage(pmu.ifu_lsu_hazard_cycle, pmu.active_cycle));
