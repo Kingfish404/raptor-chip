@@ -29,6 +29,7 @@
 
 extern int boot_from_flash;
 FILE *pc_trace = NULL;
+FILE *bpu_trace = NULL;
 uint64_t pc_continue_cnt = 1;
 
 CPU_state cpu = {};
@@ -68,6 +69,10 @@ static void exec_once(Decode *s, vaddr_t pc) {
       pc_trace = fopen("./pc-trace.txt", "w");
       fprintf(pc_trace, FMT_WORD "-", s->pc);
     }
+    if (bpu_trace == NULL)
+    {
+      bpu_trace = fopen("./bpu-trace.txt", "w");
+    }
     if (s->dnpc == s->pc + 4)
     {
       pc_continue_cnt++;
@@ -76,6 +81,11 @@ static void exec_once(Decode *s, vaddr_t pc) {
       pc_continue_cnt = 1;
       fprintf(pc_trace, FMT_WORD "-", s->pc);
     }
+    uint32_t opcode = BITS(s->isa.inst.val, 6, 0);
+    if (opcode == 0b1100011 || opcode == 0b1100111 || opcode == 0b1101111)
+    {
+      fprintf(bpu_trace, FMT_WORD "-" FMT_WORD "\n", s->pc, s->dnpc - s->pc);
+    };
   }
   cpu.pc = s->dnpc;
   cpu.inst = s->isa.inst.val;
