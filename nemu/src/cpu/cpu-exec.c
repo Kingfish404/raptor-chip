@@ -82,9 +82,17 @@ static void exec_once(Decode *s, vaddr_t pc) {
       fprintf(pc_trace, FMT_WORD "-", s->pc);
     }
     uint32_t opcode = BITS(s->isa.inst.val, 6, 0);
+    // branch: 0b1100011; jalr: 0b1100111 ; jal: 0b1101111 ;
     if (opcode == 0b1100011 || opcode == 0b1100111 || opcode == 0b1101111)
     {
-      fprintf(bpu_trace, FMT_WORD "-" FMT_WORD "\n", s->pc, s->dnpc);
+      // jalr x0, 0(x1): 0x00008067, a.k.a. ret
+      char btype = (s->isa.inst.val == 0x00008067) ? 'r' : (
+        opcode == 0b1100011 ? 'b' : (
+          opcode == 0b1100111 ? 'j' : 'c'
+        )
+      );
+      fprintf(bpu_trace, FMT_WORD "-" FMT_WORD "-%c\n",
+       s->pc, s->dnpc, btype);
     };
   }
   cpu.pc = s->dnpc;
