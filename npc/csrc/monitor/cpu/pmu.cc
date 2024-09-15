@@ -143,7 +143,6 @@ void perf_sample_per_inst()
 void perf()
 {
   printf("======== Instruction Analysis ========\n");
-
   uint64_t time_clint = *(uint64_t *)&(CONCAT(VERILOG_PREFIX, bus__DOT__clint__DOT__mtime));
   uint64_t time_clint_us = time_clint / 2;
   Log("#Inst: %lld, cycle: %llu, "
@@ -213,8 +212,7 @@ void perf()
          percentage(pmu.l1i_cache_miss_cycle, pmu.l1i_cache_hit_cycle + pmu.l1i_cache_miss_cycle),
          (long long)l1i_access_time, (long long)l1i_miss_penalty,
          l1i_access_time + (100 - l1i_hit_rate) / 100.0 * l1i_miss_penalty);
-  // assert(
-  //     (pmu.l1i_cache_hit_cnt + pmu.l1i_cache_miss_cnt) == pmu.ifu_fetch_cnt);
+  // assert((pmu.l1i_cache_hit_cnt + pmu.l1i_cache_miss_cnt) == pmu.ifu_fetch_cnt);
 }
 
 void statistic()
