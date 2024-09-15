@@ -145,6 +145,10 @@ void perf()
   printf("======== Instruction Analysis ========\n");
   Log(FMT_BLUE("Cycle: %llu, #Inst: %lld, IPC: %.3f"),
       pmu.active_cycle, pmu.instr_cnt, (1.0 * pmu.instr_cnt / pmu.active_cycle));
+  uint64_t time_clint = *(uint64_t *)&(CONCAT(VERILOG_PREFIX, bus__DOT__clint__DOT__mtime));
+  uint64_t time_clint_us = time_clint / 2;
+  Log("CLINT time: %lld (us), %2.3f MIPS",
+      (time_clint_us), (double)((pmu.instr_cnt / 1e6) / (time_clint_us / 1e6)));
   return;
   printf("| %8s,  %% | %8s,  %% | %8s,  %% |\n",
          "IFU", "LSU", "EXU");
@@ -216,10 +220,6 @@ void statistic()
 {
   perf();
   double time_s = g_timer / 1e6;
-  uint64_t time_clint = *(uint64_t *)&(CONCAT(VERILOG_PREFIX, bus__DOT__clint__DOT__mtime));
-  uint64_t time_clint_us = time_clint / 2;
-  Log("CLINT time: %lld (us), %2.3f MIPS",
-      (time_clint_us), (double)((pmu.instr_cnt / 1e6) / (time_clint_us / 1e6)));
   double frequency = pmu.active_cycle / time_s;
   Log("Simulate time:"
       " %d (ns), %d (ms), Freq: %5.3f MHz, Inst: %9.1f I/s, %5.3f MIPS",
