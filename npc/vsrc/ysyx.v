@@ -148,7 +148,7 @@ module ysyx (
   ysyx_pc pc_unit (
       .clk(clock),
       .rst(reset),
-      .prev_valid(wbu_valid),
+      .prev_valid(exu_valid),
       .speculation(speculation_exu),
 
       .good_speculation(good_speculation),
