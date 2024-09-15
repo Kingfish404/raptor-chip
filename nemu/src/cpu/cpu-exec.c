@@ -84,7 +84,7 @@ static void exec_once(Decode *s, vaddr_t pc) {
     uint32_t opcode = BITS(s->isa.inst.val, 6, 0);
     if (opcode == 0b1100011 || opcode == 0b1100111 || opcode == 0b1101111)
     {
-      fprintf(bpu_trace, FMT_WORD "-" FMT_WORD "\n", s->pc, s->dnpc - s->pc);
+      fprintf(bpu_trace, FMT_WORD "-" FMT_WORD "\n", s->pc, s->dnpc);
     };
   }
   cpu.pc = s->dnpc;
