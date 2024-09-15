@@ -41,6 +41,7 @@ module ysyx_pc (
       pc <= pc + 4;
       if (use_exu_npc) begin
         npc <= npc_wdata;
+        pc <= npc_wdata;
         change <= 1;
       end else if (branch_retire) begin
         change <= 0;
