@@ -222,7 +222,7 @@ void statistic()
   double time_s = g_timer / 1e6;
   double frequency = pmu.active_cycle / time_s;
   Log("Simulate time:"
-      " %d (ns), %d (ms), Freq: %5.3f MHz, Inst: %8.1f I/s, %5.3f MIPS",
+      " %d (ns), %d (ms), Freq: %5.3f MHz, Inst: %6.0f I/s, %5.3f MIPS",
       g_timer, (int)(g_timer / 1e3),
       (double)(frequency * 1.0 / 1e6),
       pmu.instr_cnt / time_s, pmu.instr_cnt / time_s / 1e6);
