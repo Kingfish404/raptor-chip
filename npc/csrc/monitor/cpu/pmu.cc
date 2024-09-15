@@ -218,11 +218,14 @@ void statistic()
   double time_s = g_timer / 1e6;
   uint64_t time_clint = *(uint64_t *)&(CONCAT(VERILOG_PREFIX, bus__DOT__clint__DOT__mtime));
   uint64_t time_clint_us = time_clint / 2;
-  Log("CLINT time: %lld (us), %2.3f MIPS", (time_clint_us), (double)((pmu.instr_cnt / 1e6) / (time_clint_us / 1e6)));
+  Log("CLINT time: %lld (us), %2.3f MIPS",
+      (time_clint_us), (double)((pmu.instr_cnt / 1e6) / (time_clint_us / 1e6)));
   double frequency = pmu.active_cycle / time_s;
-  Log(FMT_BLUE("Simulate time: %d (ns), %d (ms)"), g_timer, (int)(g_timer / 1e3));
-  Log(FMT_BLUE("Simulate Freq: %9.1f Hz, %6.3f MHz"), frequency, (double)(frequency * 1.0 / 1e6));
-  Log(FMT_BLUE("Simulate Inst: %9.1f I/s, %5.3f MIPS"),
+  Log(FMT_BLUE("Simulate time: %d (ns), %d (ms)"),
+      g_timer, (int)(g_timer / 1e3));
+  Log(FMT_BLUE(
+          "Simulate Freq: %9.1f Hz, %6.3f MHz, Inst: %9.1f I/s, %5.3f MIPS"),
+      frequency, (double)(frequency * 1.0 / 1e6),
       pmu.instr_cnt / time_s, pmu.instr_cnt / time_s / 1e6);
   Log("%s at pc: " FMT_WORD_NO_PREFIX ", inst: " FMT_WORD_NO_PREFIX,
       ((*npc.ret) == 0 && npc.state != NPC_ABORT
