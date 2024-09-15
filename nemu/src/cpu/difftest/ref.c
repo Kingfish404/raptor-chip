@@ -69,7 +69,7 @@ __EXPORT void difftest_regcpy(void *dut, bool direction)
   NPCState *npc = (NPCState *)dut;
   if (direction == DIFFTEST_TO_REF)
   {
-    cpu.pc = *npc->cpc;
+    cpu.pc = *npc->pc;
     for (int i = 0; i < RISCV_GPR_NUM; i++)
     {
       cpu.gpr[i] = npc->gpr[i];
