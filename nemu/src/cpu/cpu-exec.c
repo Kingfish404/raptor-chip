@@ -67,7 +67,7 @@ static void exec_once(Decode *s, vaddr_t pc) {
     if (pc_trace == NULL)
     {
       pc_trace = fopen("./pc-trace.txt", "w");
-      fprintf(pc_trace, FMT_WORD "-", s->pc);
+      fprintf(pc_trace, FMT_WORD_NO_PREFIX "-", s->pc);
     }
     if (bpu_trace == NULL)
     {
@@ -79,7 +79,7 @@ static void exec_once(Decode *s, vaddr_t pc) {
     } else {
       fprintf(pc_trace, "%llu\n", pc_continue_cnt);
       pc_continue_cnt = 1;
-      fprintf(pc_trace, FMT_WORD "-", s->pc);
+      fprintf(pc_trace, FMT_WORD_NO_PREFIX "-", s->pc);
     }
     uint32_t opcode = BITS(s->isa.inst.val, 6, 0);
     // branch: 0b1100011; jalr: 0b1100111 ; jal: 0b1101111 ;
@@ -91,7 +91,7 @@ static void exec_once(Decode *s, vaddr_t pc) {
           opcode == 0b1100111 ? 'j' : 'c'
         )
       );
-      fprintf(bpu_trace, FMT_WORD "-" FMT_WORD "-%c\n",
+      fprintf(bpu_trace, FMT_WORD_NO_PREFIX "-" FMT_WORD_NO_PREFIX "-%c\n",
        s->pc, s->dnpc, btype);
     };
   }
