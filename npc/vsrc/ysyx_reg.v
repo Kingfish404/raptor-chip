@@ -5,6 +5,8 @@ module ysyx_reg (
     input idu_valid,
     input [REG_ADDR_W-1:0] rd,
 
+    input bad_speculation,
+
     input reg_write_en,
     input [REG_ADDR_W-1:0] waddr,
     input [DATA_W-1:0] wdata,
@@ -28,11 +30,15 @@ module ysyx_reg (
     if (rst) begin
       rf_table <= 0;
     end else begin
-      if (idu_valid & rd != 0) begin
-        rf_table[rd] <= 1;
-      end
-      if (reg_write_en) begin
-        rf_table[waddr[3:0]] <= 0;
+      if (bad_speculation) begin
+        rf_table <= 0;
+      end else begin
+        if (idu_valid & rd != 0) begin
+          rf_table[rd] <= 1;
+        end
+        if (reg_write_en) begin
+          rf_table[waddr[3:0]] <= 0;
+        end
       end
     end
   end

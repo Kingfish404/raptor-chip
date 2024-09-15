@@ -5,38 +5,58 @@
 module ysyx_pc (
     input clk,
     input rst,
-    input prev_valid,
+
+    input speculation,
+    input good_speculation,
+    input bad_speculation,
+    input [DATA_W-1:0] pc_ifu,
+
+    input [DATA_W-1:0] pc_wbu,
+
     input use_exu_npc,
     input branch_retire,
     input [DATA_W-1:0] npc_wdata,
     output [DATA_W-1:0] npc_o,
-    output valid_o,
-    output skip_o
+    output [DATA_W-1:0] pc_o,
+    output change_o,
+    output retire_o,
+
+    input prev_valid
 );
   parameter bit [7:0] DATA_W = `YSYX_W_WIDTH;
-  wire [DATA_W-1:0] npc = pc + 4;
-  reg  [DATA_W-1:0] pc;
-  reg valid, skip;
-  assign valid_o = valid | (use_exu_npc);
-  assign skip_o  = skip;
-  assign npc_o   = use_exu_npc ? npc_wdata : pc;
+  reg [DATA_W-1:0] npc;
+  reg [DATA_W-1:0] pc;
+  reg change, retire;
+  assign change_o = change;
+  assign retire_o = retire;
+  assign npc_o = use_exu_npc ? npc_wdata : npc;
+  assign pc_o = pc_wbu;
 
   always @(posedge clk) begin
     if (rst) begin
       pc <= `YSYX_PC_INIT;
-      valid <= 1;
+      change <= 1;
       `YSYX_DPI_C_NPC_DIFFTEST_SKIP_REF
-    end else if (prev_valid) begin
-      pc <= npc;
+    end else if (prev_valid & !bad_speculation) begin
+      pc  <= pc + 4;
+      npc <= npc + 4;
       if (use_exu_npc) begin
         pc <= npc_wdata;
-        valid <= 1;
+        npc <= npc_wdata;
+        change <= 1;
       end else if (branch_retire) begin
-        skip <= 1;
+        change <= 0;
+        retire <= 1;
+      end else begin
+        change <= 0;
       end
     end else begin
-      valid <= 0;
-      skip  <= 0;
+      change <= 0;
+      retire <= 0;
+      if (good_speculation) begin
+        pc  <= pc_ifu;
+        npc <= pc_ifu;
+      end
     end
   end
 endmodule  //ysyx_PC

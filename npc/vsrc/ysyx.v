@@ -82,8 +82,8 @@ module ysyx (
   parameter bit [7:0] ADDR_W = `YSYX_W_WIDTH;
   parameter bit [7:0] REG_ADDR_W = 4;
   // PC unit output
-  wire [DATA_W-1:0] npc;
-  wire pc_valid, pc_skip;
+  wire [DATA_W-1:0] npc, pc;
+  wire pc_valid, pc_retire;
 
   // REGS output
   wire [DATA_W-1:0] reg_rdata1, reg_rdata2;
@@ -92,6 +92,8 @@ module ysyx (
   // IFU output
   wire [31:0] inst;
   wire [DATA_W-1:0] pc_ifu;
+  wire speculation_ifu;
+  wire bad_speculation, good_speculation;
   // IFU bus wire
   wire [DATA_W-1:0] ifu_araddr;
   wire ifu_arvalid, ifu_required;
@@ -106,6 +108,7 @@ module ysyx (
   wire [3:0] alu_op;
   wire [6:0] opcode;
   wire en_j, ren, wen, system, system_func3;
+  wire speculation_idu;
   wire idu_valid, idu_ready;
 
   // LSU output
@@ -128,10 +131,12 @@ module ysyx (
   wire [3:0] alu_op_exu;
   wire ren_exu, wen_exu;
   wire [DATA_W-1:0] rwaddr_exu;
+  wire speculation_exu;
   wire exu_valid, exu_ready;
 
   // WBU output
   wire wbu_valid, wbu_ready;
+  wire [31:0] pc_wbu;
 
   // BUS output
   wire [DATA_W-1:0] bus_lsu_rdata;
@@ -144,13 +149,21 @@ module ysyx (
       .clk(clock),
       .rst(reset),
       .prev_valid(exu_valid),
+      .speculation(speculation_exu),
+
+      .good_speculation(good_speculation),
+      .bad_speculation(bad_speculation),
+      .pc_ifu(pc_ifu),
+
+      .pc_wbu(pc_wbu),
 
       .npc_wdata(npc_wdata),
       .use_exu_npc(use_exu_npc),
       .branch_retire(branch_retire),
+      .pc_o(pc),
       .npc_o(npc),
-      .valid_o(pc_valid),
-      .skip_o(pc_skip)
+      .change_o(pc_valid),
+      .retire_o(pc_retire)
   );
 
   ysyx_reg #(
@@ -163,7 +176,9 @@ module ysyx (
       .idu_valid(idu_valid & exu_ready),
       .rd(rd),
 
-      .reg_write_en(exu_valid),
+
+      .bad_speculation(bad_speculation),
+      .reg_write_en(exu_valid & bad_speculation == 0),
       .waddr(rd_exu),
       .wdata(reg_wdata),
 
@@ -250,8 +265,13 @@ module ysyx (
       .inst_o(inst),
       .pc_o(pc_ifu),
 
-      .pc_valid(pc_valid),
-      .pc_skip(pc_skip),
+      .pc(pc),
+      .pc_change(pc_valid),
+      .pc_retire(pc_retire),
+      .speculation_o(speculation_ifu),
+      .bad_speculation_o(bad_speculation),
+      .good_speculation_o(good_speculation),
+
       .prev_valid(wbu_valid),
       .next_ready(idu_ready),
       .valid_o(ifu_valid),
@@ -269,6 +289,7 @@ module ysyx (
       .rdata1(reg_rdata1),
       .rdata2(reg_rdata2),
       .pc(pc_ifu),
+      .speculation(speculation_ifu),
 
       .exu_valid(exu_valid),
       .exu_forward(reg_wdata),
@@ -291,10 +312,11 @@ module ysyx (
       .opcode_o(opcode),
       .pc_o(pc_idu),
       .inst_o(inst_idu),
+      .speculation_o(speculation_idu),
 
       .rf_table(rf_table),
 
-      .prev_valid(ifu_valid),
+      .prev_valid(ifu_valid & bad_speculation == 0),
       .next_ready(exu_ready),
       .valid_o(idu_valid),
       .ready_o(idu_ready)
@@ -307,7 +329,7 @@ module ysyx (
       .clk(clock),
       .rst(reset),
 
-      .prev_valid(idu_valid),
+      .prev_valid(idu_valid & bad_speculation == 0),
       .next_ready(wbu_ready),
       .valid_o(exu_valid),
       .ready_o(exu_ready),
@@ -326,6 +348,8 @@ module ysyx (
       .alu_op(alu_op),
       .opcode(opcode),
       .pc(pc_idu),
+      .speculation(speculation_idu),
+
       .reg_wdata_o(reg_wdata),
       .npc_wdata_o(npc_wdata),
       .use_exu_npc_o(use_exu_npc),
@@ -334,6 +358,7 @@ module ysyx (
       .rd_o(rd_exu),
       .inst_o(inst_exu),
       .pc_o(pc_exu),
+      .speculation_o(speculation_exu),
 
       // to lsu
       .ren_o(ren_exu),
@@ -389,8 +414,9 @@ module ysyx (
       .pc  (pc_exu),
 
       .ebreak(ebreak),
+      .pc_o  (pc_wbu),
 
-      .prev_valid(exu_valid),
+      .prev_valid(exu_valid & bad_speculation == 0),
       .next_ready(ifu_ready),
       .valid_o(wbu_valid),
       .ready_o(wbu_ready)

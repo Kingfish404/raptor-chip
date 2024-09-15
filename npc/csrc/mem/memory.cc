@@ -125,7 +125,8 @@ extern "C" void pmem_read(word_t raddr, word_t *data)
         return;
     }
     npc_abort();
-    assert(0);
+    Log(FMT_RED("Invalid read: addr = " FMT_WORD), raddr);
+    // assert(0);
 }
 
 extern "C" void pmem_write(word_t waddr, word_t wdata, char wmask)

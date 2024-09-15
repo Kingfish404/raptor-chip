@@ -9,6 +9,7 @@ module ysyx_wbu (
     input [31:0] inst,
 
     input ebreak,
+    output [31:0] pc_o,
 
     input prev_valid,
     input next_ready,
@@ -19,6 +20,9 @@ module ysyx_wbu (
 
   reg state;
   reg [31:0] inst_wbu, pc_wbu;
+
+  assign pc_o = pc_wbu;
+
   `YSYX_BUS_FSM()
   always @(posedge clk) begin
     if (rst) begin
