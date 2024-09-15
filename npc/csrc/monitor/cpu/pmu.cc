@@ -149,7 +149,6 @@ void perf()
       "" FMT_BLUE("IPC: %2.3f ") ", CLINT: %lld (us), " FMT_BLUE(" %2.3f MIPS"),
       pmu.instr_cnt, pmu.active_cycle, (1.0 * pmu.instr_cnt / pmu.active_cycle),
       (time_clint_us), (double)((pmu.instr_cnt / 1e6) / (time_clint_us / 1e6)));
-  return;
   printf("| %8s,  %% | %8s,  %% | %8s,  %% |\n",
          "IFU", "LSU", "EXU");
   printf("| %8lld,%3.0f | %8lld,%3.0f | %8lld,%3.0f |\n",
