@@ -136,6 +136,10 @@ typedef struct
   uint64_t lsu_stall_cycle;
   uint64_t exu_alu_cnt;
 
+  // bpu
+  uint64_t bpu_success_cnt;
+  uint64_t bpu_fail_cnt;
+
   // for inst
   uint64_t ld_inst_cnt;
   uint64_t st_inst_cnt;
