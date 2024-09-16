@@ -16,6 +16,8 @@
 #include <isa.h>
 #include <memory/paddr.h>
 
+extern FILE *mem_trace;
+
 word_t vaddr_ifetch(vaddr_t addr, int len)
 {
   return paddr_read(addr, len);
@@ -23,11 +25,13 @@ word_t vaddr_ifetch(vaddr_t addr, int len)
 
 word_t vaddr_read(vaddr_t addr, int len)
 {
+  fprintf(mem_trace, FMT_WORD_NO_PREFIX "-%c\n", addr, 'r');
   return paddr_read(addr, len);
 }
 
 void vaddr_write(vaddr_t addr, int len, word_t data)
 {
+  fprintf(mem_trace, FMT_WORD_NO_PREFIX "-%c\n", addr, 'w');
   paddr_write(addr, len, data);
 }
 

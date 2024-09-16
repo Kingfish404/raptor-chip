@@ -100,12 +100,7 @@ static void exec_once(Decode *s, vaddr_t pc) {
       {
         mem_trace = fopen("./mem-trace.txt", "w");
       }
-      // load: 0b0000011; store: 0b0100011
-      if (opcode == 0b0000011 || opcode == 0b0100011)
-      {
-        fprintf(mem_trace, FMT_WORD_NO_PREFIX "-%c\n",
-                s->pc, (opcode == 0b0000011 ? 'l' : 's'));
-      }
+      // record vaddr of load and store at `vaddr.c`
     }
   }
   cpu.pc = s->dnpc;
