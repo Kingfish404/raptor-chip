@@ -28,8 +28,7 @@
 #define MAX_IRING_SIZE 16
 
 extern int boot_from_flash;
-FILE *pc_trace = NULL;
-FILE *bpu_trace = NULL;
+FILE *pc_trace = NULL, *bpu_trace = NULL, *mem_trace = NULL;
 uint64_t pc_continue_cnt = 1;
 
 CPU_state cpu = {};
@@ -64,36 +63,50 @@ static void exec_once(Decode *s, vaddr_t pc) {
   isa_exec_once(s);
   if (boot_from_flash)
   {
-    if (pc_trace == NULL)
     {
-      pc_trace = fopen("./pc-trace.txt", "w");
-      fprintf(pc_trace, FMT_WORD_NO_PREFIX "-", s->pc);
-    }
-    if (bpu_trace == NULL)
-    {
-      bpu_trace = fopen("./bpu-trace.txt", "w");
-    }
-    if (s->dnpc == s->pc + 4)
-    {
-      pc_continue_cnt++;
-    } else {
-      fprintf(pc_trace, "%llu\n", pc_continue_cnt);
-      pc_continue_cnt = 1;
-      fprintf(pc_trace, FMT_WORD_NO_PREFIX "-", s->pc);
+      if (pc_trace == NULL)
+      {
+        pc_trace = fopen("./pc-trace.txt", "w");
+        fprintf(pc_trace, FMT_WORD_NO_PREFIX "-", s->pc);
+      }
+      if (s->dnpc == s->pc + 4)
+      {
+        pc_continue_cnt++;
+      }
+      else
+      {
+        fprintf(pc_trace, "%llu\n", pc_continue_cnt);
+        pc_continue_cnt = 1;
+        fprintf(pc_trace, FMT_WORD_NO_PREFIX "-", s->pc);
+      }
     }
     uint32_t opcode = BITS(s->isa.inst.val, 6, 0);
-    // branch: 0b1100011; jalr: 0b1100111 ; jal: 0b1101111 ;
-    if (opcode == 0b1100011 || opcode == 0b1100111 || opcode == 0b1101111)
     {
-      // jalr x0, 0(x1): 0x00008067, a.k.a. ret
-      char btype = (s->isa.inst.val == 0x00008067) ? 'r' : (
-        opcode == 0b1100011 ? 'b' : (
-          opcode == 0b1100111 ? 'j' : 'c'
-        )
-      );
-      fprintf(bpu_trace, FMT_WORD_NO_PREFIX "-" FMT_WORD_NO_PREFIX "-%c\n",
-       s->pc, s->dnpc, btype);
-    };
+      if (bpu_trace == NULL)
+      {
+        bpu_trace = fopen("./bpu-trace.txt", "w");
+      }
+      // branch: 0b1100011; jalr: 0b1100111 ; jal: 0b1101111 ;
+      if (opcode == 0b1100011 || opcode == 0b1100111 || opcode == 0b1101111)
+      {
+        // jalr x0, 0(x1): 0x00008067, a.k.a. ret
+        char btype = (s->isa.inst.val == 0x00008067) ? 'r' : (opcode == 0b1100011 ? 'b' : (opcode == 0b1100111 ? 'j' : 'c'));
+        fprintf(bpu_trace, FMT_WORD_NO_PREFIX "-" FMT_WORD_NO_PREFIX "-%c\n",
+                s->pc, s->dnpc, btype);
+      };
+    }
+    {
+      if (mem_trace == NULL)
+      {
+        mem_trace = fopen("./mem-trace.txt", "w");
+      }
+      // load: 0b0000011; store: 0b0100011
+      if (opcode == 0b0000011 || opcode == 0b0100011)
+      {
+        fprintf(mem_trace, FMT_WORD_NO_PREFIX "-%c\n",
+                s->pc, (opcode == 0b0000011 ? 'l' : 's'));
+      }
+    }
   }
   cpu.pc = s->dnpc;
   cpu.inst = s->isa.inst.val;
