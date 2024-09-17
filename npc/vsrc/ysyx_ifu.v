@@ -218,7 +218,7 @@ module ysyx_ifu_l1i (
   wire [L1I_LINE_LEN-1:0] addr_offset = pc_ifu[L1I_LINE_LEN+2-1:2];
 
   wire l1i_cache_hit = (
-         1 & (l1i_state == 'b00 | l1i_state == 'b10000) &
+         1 & (l1i_state == 'b00001 | l1i_state == 'b10000) &
          l1i_valid[addr_idx] == 1'b1) & (l1i_tag[addr_idx][addr_offset] == addr_tag);
   wire ifu_sdram_arburst = `YSYX_I_SDRAM_ARBURST & (pc_ifu >= 'ha0000000) & (pc_ifu <= 'hc0000000);
 
