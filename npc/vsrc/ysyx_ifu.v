@@ -166,7 +166,7 @@ module ysyx_ifu (
       .clk(clk),
       .rst(rst),
 
-      .ifu_addr(pc_ifu),
+      .pc_ifu(pc_ifu),
 
       .ifu_araddr_o(ifu_araddr_o),
       .ifu_arvalid_o(ifu_arvalid_o),
@@ -188,7 +188,7 @@ module ysyx_ifu_l1i (
     input rst,
 
     // from ifu
-    input [DATA_W-1:0] ifu_addr,
+    input [DATA_W-1:0] pc_ifu,
 
     // for bus
     output [DATA_W-1:0] ifu_araddr_o,
