@@ -193,7 +193,7 @@ module ysyx_ifu_l1i (
     input [DATA_W-1:0] pc_ifu,
     input invalid_l1i,
     // to ifu
-    output reg [DATA_W-1:0] inst_o,
+    output [DATA_W-1:0] inst_o,
 
     output reg valid_o,
     output reg ready_o
@@ -202,7 +202,7 @@ module ysyx_ifu_l1i (
 
   parameter bit [7:0] L1I_LINE_LEN = 1;
   parameter bit [7:0] L1I_LINE_SIZE = 2 ** L1I_LINE_LEN;
-  parameter bit [7:0] L1I_LEN = 2;
+  parameter bit [7:0] L1I_LEN = 8;
   parameter bit [7:0] L1I_SIZE = 2 ** L1I_LEN;
 
   assign valid_o = l1i_cache_hit;
@@ -238,40 +238,43 @@ module ysyx_ifu_l1i (
     end else begin
       if (invalid_l1i) begin
         l1i_valid <= 0;
-      end
-      case (l1i_state)
-        'b000:
-        if (ifu_arvalid_o) begin
-          l1i_state <= 'b001;
-        end
-        'b001:
-        if (ifu_rvalid & !l1i_cache_hit) begin
-          if (ifu_sdram_arburst) begin
+      end else begin
+        case (l1i_state)
+          'b000: begin
+            if (ifu_arvalid_o) begin
+              l1i_state <= 'b001;
+            end
+          end
+          'b001: begin
+            if (ifu_rvalid & !l1i_cache_hit) begin
+              if (ifu_sdram_arburst) begin
+                l1i_state <= 'b011;
+              end else begin
+                l1i_state <= 'b010;
+              end
+              l1i[addr_idx][0] <= ifu_rdata;
+              l1i_tag[addr_idx][0] <= addr_tag;
+            end
+          end
+          'b010: begin
             l1i_state <= 'b011;
-          end else begin
-            l1i_state <= 'b010;
           end
-          l1i[addr_idx][0] <= ifu_rdata;
-          l1i_tag[addr_idx][0] <= addr_tag;
-        end
-        'b010: begin
-          l1i_state <= 'b011;
-        end
-        'b011: begin
-          if (ifu_rvalid) begin
-            l1i_state <= 'b100;
-            l1i[addr_idx][1] <= ifu_rdata;
-            l1i_tag[addr_idx][1] <= addr_tag;
-            l1i_valid[addr_idx] <= 1'b1;
+          'b011: begin
+            if (ifu_rvalid) begin
+              l1i_state <= 'b100;
+              l1i[addr_idx][1] <= ifu_rdata;
+              l1i_tag[addr_idx][1] <= addr_tag;
+              l1i_valid[addr_idx] <= 1'b1;
+            end
           end
-        end
-        'b100: begin
-          l1i_state <= 'b000;
-        end
-        default begin
-          l1i_state <= 'b000;
-        end
-      endcase
+          'b100: begin
+            l1i_state <= 'b000;
+          end
+          default begin
+            l1i_state <= 'b000;
+          end
+        endcase
+      end
     end
   end
 
