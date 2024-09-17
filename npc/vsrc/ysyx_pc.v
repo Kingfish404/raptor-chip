@@ -24,12 +24,11 @@ module ysyx_pc (
     input prev_valid
 );
   parameter bit [7:0] DATA_W = `YSYX_W_WIDTH;
-  reg [DATA_W-1:0] npc;
   reg [DATA_W-1:0] pc;
   reg change, retire;
   assign change_o = change;
   assign retire_o = retire;
-  assign npc_o = use_exu_npc ? npc_wdata : npc;
+  assign npc_o = use_exu_npc ? npc_wdata : pc;
   assign pc_o = pc_wbu;
 
   always @(posedge clk) begin
@@ -38,11 +37,9 @@ module ysyx_pc (
       change <= 1;
       `YSYX_DPI_C_NPC_DIFFTEST_SKIP_REF
     end else if (prev_valid & !bad_speculation) begin
-      pc  <= pc + 4;
-      npc <= npc + 4;
+      pc <= pc + 4;
       if (use_exu_npc) begin
         pc <= npc_wdata;
-        npc <= npc_wdata;
         change <= 1;
       end else if (branch_retire) begin
         change <= 0;
@@ -54,8 +51,7 @@ module ysyx_pc (
       change <= 0;
       retire <= 0;
       if (good_speculation) begin
-        pc  <= pc_ifu;
-        npc <= pc_ifu;
+        pc <= pc_ifu;
       end
     end
   end
