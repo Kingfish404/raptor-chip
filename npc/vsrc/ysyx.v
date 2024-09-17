@@ -166,9 +166,7 @@ module ysyx (
       .retire_o(pc_retire)
   );
 
-  ysyx_reg #(
-      .REG_ADDR_W(REG_ADDR_W)
-  ) regs (
+  ysyx_reg regs (
       .clk(clock),
       .rst(reset),
 
