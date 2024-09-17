@@ -261,6 +261,7 @@ module ysyx_ifu_l1i (
 );
   parameter bit [7:0] DATA_W = 32;
 
-
+  assign inst_o = ifu_addr;
+  assign valid_o = 1;
 
 endmodule  // ysyx_IFU_L1I
