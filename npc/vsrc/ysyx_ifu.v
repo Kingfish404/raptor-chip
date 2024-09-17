@@ -202,76 +202,77 @@ module ysyx_ifu_l1i (
 
   parameter bit [7:0] L1I_LINE_LEN = 1;
   parameter bit [7:0] L1I_LINE_SIZE = 2 ** L1I_LINE_LEN;
-  parameter bit [7:0] L1I_LEN = 1;
+  parameter bit [7:0] L1I_LEN = 2;
   parameter bit [7:0] L1I_SIZE = 2 ** L1I_LEN;
 
   assign valid_o = l1i_cache_hit;
-  assign ready_o = (l1i_state == 'b000);
+  assign ready_o = (l1i_state == 'b00001);
 
   reg [32-1:0] l1i[L1I_SIZE][L1I_LINE_SIZE];
   reg [L1I_SIZE-1:0] l1i_valid = 0;
   reg [32-L1I_LEN-L1I_LINE_LEN-2-1:0] l1i_tag[L1I_SIZE][L1I_LINE_SIZE];
-  reg [2:0] l1i_state = 0;
+  reg [4:0] l1i_state = 0;
 
   wire [32-L1I_LEN-L1I_LINE_LEN-2-1:0] addr_tag = pc_ifu[DATA_W-1:L1I_LEN+L1I_LINE_LEN+2];
   wire [L1I_LEN-1:0] addr_idx = pc_ifu[L1I_LEN+L1I_LINE_LEN+2-1:L1I_LINE_LEN+2];
   wire [L1I_LINE_LEN-1:0] addr_offset = pc_ifu[L1I_LINE_LEN+2-1:2];
 
   wire l1i_cache_hit = (
-         1 & (l1i_state == 'b00 | l1i_state == 'b100) &
+         1 & (l1i_state == 'b00 | l1i_state == 'b10000) &
          l1i_valid[addr_idx] == 1'b1) & (l1i_tag[addr_idx][addr_offset] == addr_tag);
   wire ifu_sdram_arburst = `YSYX_I_SDRAM_ARBURST & (pc_ifu >= 'ha0000000) & (pc_ifu <= 'hc0000000);
 
-  assign ifu_araddr_o = (l1i_state == 'b00 | l1i_state == 'b01) ? (pc_ifu & ~'h4) : (pc_ifu | 'h4);
+  assign ifu_araddr_o = (l1i_state == 'b00001 | l1i_state == 'b00010) ?
+   (pc_ifu & ~'h4) : (pc_ifu | 'h4);
   assign ifu_arvalid_o = ifu_sdram_arburst ?
-    !l1i_cache_hit & (l1i_state == 'b000 | l1i_state == 'b001) :
-    !l1i_cache_hit & (l1i_state != 'b010 & l1i_state != 'b100);
-  assign ifu_required_o = (l1i_state != 'b000);
+    !l1i_cache_hit & (l1i_state == 'b00001 | l1i_state == 'b00010) :
+    !l1i_cache_hit & (l1i_state != 'b00100 & l1i_state != 'b10000);
+  assign ifu_required_o = (l1i_state != 'b00001);
 
   // with l1i cache
   assign inst_o = l1i[addr_idx][addr_offset];
 
   always @(posedge clk) begin
     if (rst) begin
-      l1i_state <= 'b000;
+      l1i_state <= 'b00001;
       l1i_valid <= 0;
     end else begin
       if (invalid_l1i) begin
         l1i_valid <= 0;
       end else begin
         case (l1i_state)
-          'b000: begin
+          'b00001: begin
             if (ifu_arvalid_o) begin
-              l1i_state <= 'b001;
+              l1i_state <= 'b00010;
             end
           end
-          'b001: begin
+          'b00010: begin
             if (ifu_rvalid & !l1i_cache_hit) begin
               if (ifu_sdram_arburst) begin
-                l1i_state <= 'b011;
+                l1i_state <= 'b01000;
               end else begin
-                l1i_state <= 'b010;
+                l1i_state <= 'b00100;
               end
               l1i[addr_idx][0] <= ifu_rdata;
               l1i_tag[addr_idx][0] <= addr_tag;
             end
           end
-          'b010: begin
-            l1i_state <= 'b011;
+          'b00100: begin
+            l1i_state <= 'b01000;
           end
-          'b011: begin
+          'b01000: begin
             if (ifu_rvalid) begin
-              l1i_state <= 'b100;
+              l1i_state <= 'b10000;
               l1i[addr_idx][1] <= ifu_rdata;
               l1i_tag[addr_idx][1] <= addr_tag;
               l1i_valid[addr_idx] <= 1'b1;
             end
           end
-          'b100: begin
-            l1i_state <= 'b000;
+          'b10000: begin
+            l1i_state <= 'b00001;
           end
           default begin
-            l1i_state <= 'b000;
+            l1i_state <= 'b00001;
           end
         endcase
       end
