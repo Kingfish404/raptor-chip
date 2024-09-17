@@ -80,7 +80,7 @@ module ysyx_ifu (
       speculation <= 0;
     end else begin
       if (valid_o & next_ready & is_fence) begin
-        l1i_valid <= 0;
+        // l1i_valid <= 0;
       end
       if (bad_speculation & next_ready & l1i_state == 'b000) begin
         bad_speculation <= 0;
@@ -161,8 +161,8 @@ module ysyx_ifu (
     end
   end
 
-  wire l1i_valid;
-  wire [DATA_W-1:0] inst_l1i;
+  wire [L1I_SIZE-1:0] l1i_valid;
+  wire [  DATA_W-1:0] inst_l1i;
   ysyx_ifu_l1i ifu_l1i (
       .clk(clk),
       .rst(rst),
@@ -203,7 +203,7 @@ module ysyx_ifu_l1i (
     output reg [2:0] l1i_state_o,
     output reg l1i_cache_hit_o,
 
-    output reg l1i_valid_o
+    output reg [L1I_SIZE-1:0] l1i_valid_o
 );
   parameter bit [7:0] ADDR_W = 32;
   parameter bit [7:0] DATA_W = 32;
@@ -218,7 +218,7 @@ module ysyx_ifu_l1i (
   assign l1i_valid_o = l1i_valid;
 
   reg [32-1:0] l1i[L1I_SIZE][L1I_LINE_SIZE];
-  reg l1i_valid = 0;
+  reg [L1I_SIZE-1:0] l1i_valid = 0;
   reg [32-L1I_LEN-L1I_LINE_LEN-2-1:0] l1i_tag[L1I_SIZE][L1I_LINE_SIZE];
   reg [2:0] l1i_state = 0;
 
