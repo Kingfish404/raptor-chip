@@ -59,7 +59,7 @@ module ysyx_idu (
     inst_idu[31], inst_idu[19:12], inst_idu[20], inst_idu[30:25], inst_idu[24:21], 1'b0
   };
   wire [15:0] imm_SYS = {{imm_I}, {1'b0, funct3}};
-  wire idu_hazard = valid & (
+  wire idu_hazard = (
     (use_rs1 & (rf_table[rs1[4-1:0]] == 1) & !(exu_valid & rs1[4-1:0] == exu_forward_rd)) |
     (use_rs2 & (rf_table[rs2[4-1:0]] == 1) & !(exu_valid & rs2[4-1:0] == exu_forward_rd)) |
     (0)
