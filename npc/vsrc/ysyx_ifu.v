@@ -45,6 +45,7 @@ module ysyx_ifu (
   wire [2:0] l1i_state;
   wire l1i_cache_hit;
 
+  reg btb_valid, speculation, bad_speculation, ifu_b_speculation;
 
   wire [6:0] opcode_o = inst_o[6:0];
   wire is_branch = (
@@ -219,9 +220,6 @@ module ysyx_ifu_l1i (
   reg [L1I_SIZE-1:0] l1i_valid = 0;
   reg [32-L1I_LEN-L1I_LINE_LEN-2-1:0] l1i_tag[L1I_SIZE][L1I_LINE_SIZE];
   reg [2:0] l1i_state = 0;
-
-  reg [DATA_W-1:0] btb, ifu_speculation, ifu_npc_speculation, ifu_npc_bad_speculation;
-  reg btb_valid, speculation, bad_speculation, ifu_b_speculation;
 
   wire [32-L1I_LEN-L1I_LINE_LEN-2-1:0] addr_tag = pc_ifu[ADDR_W-1:L1I_LEN+L1I_LINE_LEN+2];
   wire [L1I_LEN-1:0] addr_idx = pc_ifu[L1I_LEN+L1I_LINE_LEN+2-1:L1I_LINE_LEN+2];
