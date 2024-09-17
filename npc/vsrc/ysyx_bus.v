@@ -283,10 +283,7 @@ module ysyx_bus (
   wire [DATA_W-1:0] clint_rdata_o;
   wire [1:0] clint_rresp_o;
   wire clint_rvalid_o;
-  ysyx_clint #(
-      .ADDR_W(ADDR_W),
-      .DATA_W(DATA_W)
-  ) clint (
+  ysyx_clint clint (
       .clk(clk),
       .rst(rst),
       .araddr(sram_araddr),

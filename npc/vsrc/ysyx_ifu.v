@@ -16,7 +16,6 @@ module ysyx_ifu (
     output [DATA_W-1:0] inst_o,
     output [DATA_W-1:0] pc_o,
 
-
     input [DATA_W-1:0] pc,
     input pc_change,
     input pc_retire,

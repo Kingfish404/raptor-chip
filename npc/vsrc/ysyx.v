@@ -107,7 +107,7 @@ module ysyx (
   wire [REG_ADDR_W-1:0] rs1, rs2, rd;
   wire [3:0] alu_op;
   wire [6:0] opcode;
-  wire en_j, ren, wen, system, system_func3;
+  wire en_j, ren, wen, system, system_func3, csr_wen;
   wire speculation_idu;
   wire idu_valid, idu_ready;
 
@@ -148,28 +148,22 @@ module ysyx (
   ysyx_pc pc_unit (
       .clk(clock),
       .rst(reset),
-      .prev_valid(exu_valid),
-      .speculation(speculation_exu),
 
       .good_speculation(good_speculation),
       .bad_speculation(bad_speculation),
       .pc_ifu(pc_ifu),
 
-      .pc_wbu(pc_wbu),
-
       .npc_wdata(npc_wdata),
       .use_exu_npc(use_exu_npc),
       .branch_retire(branch_retire),
-      .pc_o(pc),
       .npc_o(npc),
       .change_o(pc_valid),
-      .retire_o(pc_retire)
+      .retire_o(pc_retire),
+
+      .prev_valid(exu_valid)
   );
 
-  ysyx_reg #(
-      .REG_ADDR_W(REG_ADDR_W),
-      .DATA_W(DATA_W)
-  ) regs (
+  ysyx_reg regs (
       .clk(clock),
       .rst(reset),
 
@@ -248,10 +242,7 @@ module ysyx (
   );
 
   // IFU(Instruction Fetch Unit): 负责根据当前PC从存储器中取出一条指令
-  ysyx_ifu #(
-      .ADDR_W(DATA_W),
-      .DATA_W(DATA_W)
-  ) ifu (
+  ysyx_ifu ifu (
       .clk(clock),
       .rst(reset),
 
@@ -265,7 +256,7 @@ module ysyx (
       .inst_o(inst),
       .pc_o(pc_ifu),
 
-      .pc(pc),
+      .pc(pc_wbu),
       .pc_change(pc_valid),
       .pc_retire(pc_retire),
       .speculation_o(speculation_ifu),
@@ -279,9 +270,7 @@ module ysyx (
   );
 
   // IDU(Instruction Decode Unit): 负责对当前指令进行译码, 准备执行阶段需要使用的数据和控制信号
-  ysyx_idu #(
-      .BIT_W(DATA_W)
-  ) idu (
+  ysyx_idu idu (
       .clk(clock),
       .rst(reset),
 
@@ -300,6 +289,8 @@ module ysyx (
       .wen_o(wen),
       .system_o(system),
       .system_func3_o(system_func3),
+      .csr_wen_o(csr_wen),
+
       .op1_o(op1),
       .op2_o(op2),
       .op_j_o(op_j),
@@ -323,9 +314,7 @@ module ysyx (
   );
 
   // EXU(EXecution Unit): 负责根据控制信号对数据进行执行操作, 并将执行结果写回寄存器或存储器
-  ysyx_exu #(
-      .BIT_W(DATA_W)
-  ) exu (
+  ysyx_exu exu (
       .clk(clock),
       .rst(reset),
 
@@ -339,6 +328,7 @@ module ysyx (
       .wen(wen),
       .system(system),
       .system_func3(system_func3),
+      .csr_wen(csr_wen),
       .rd(rd),
       .imm(imm),
       .op1(op1),
