@@ -257,7 +257,7 @@ module ysyx_ifu_l1i (
     // to ifu
     output reg [DATA_W-1:0] inst_o,
 
-    output reg valid_o,
+    output reg valid_o
 );
   parameter bit [7:0] DATA_W = 32;
 
