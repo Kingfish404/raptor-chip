@@ -44,6 +44,7 @@ module ysyx_ifu (
 
   wire l1i_ready;
   wire l1i_cache_hit;
+  wire l1i_valid;
 
   reg [DATA_W-1:0] btb, ifu_speculation, ifu_npc_speculation, ifu_npc_bad_speculation;
   reg btb_valid, speculation, bad_speculation, ifu_b_speculation;
@@ -58,7 +59,7 @@ module ysyx_ifu (
   wire is_store = (opcode_o == `YSYX_OP_S_TYPE);
   wire is_fence = (inst_o == `YSYX_INST_FENCE_I);
 
-  assign valid_o = (l1i_cache_hit & !ifu_hazard) &
+  assign valid_o = (l1i_valid & !ifu_hazard) &
    !bad_speculation & !(speculation & (is_load | is_store));
   assign ready_o = !valid_o;
 
@@ -158,7 +159,6 @@ module ysyx_ifu (
     end
   end
 
-  wire [L1I_SIZE-1:0] l1i_valid;
   ysyx_ifu_l1i ifu_l1i (
       .clk(clk),
       .rst(rst),
@@ -174,9 +174,9 @@ module ysyx_ifu (
 
       .inst_o(inst_o),
       .l1i_cache_hit_o(l1i_cache_hit),
-      .l1i_ready_o(l1i_ready),
 
-      .l1i_valid_o(l1i_valid)
+      .l1i_valid_o(l1i_valid),
+      .l1i_ready_o(l1i_ready)
   );
 endmodule  // ysyx_IFU
 
@@ -198,10 +198,10 @@ module ysyx_ifu_l1i (
 
     // to ifu
     output reg [DATA_W-1:0] inst_o,
-    output reg l1i_ready_o,
     output reg l1i_cache_hit_o,
 
-    output reg [L1I_SIZE-1:0] l1i_valid_o
+    output reg l1i_valid_o,
+    output reg l1i_ready_o
 );
   parameter bit [7:0] ADDR_W = 32;
   parameter bit [7:0] DATA_W = 32;
@@ -212,7 +212,7 @@ module ysyx_ifu_l1i (
   parameter bit [7:0] L1I_SIZE = 2 ** L1I_LEN;
 
   assign l1i_cache_hit_o = l1i_cache_hit;
-  assign l1i_valid_o = l1i_valid;
+  assign l1i_valid_o = l1i_cache_hit;
   assign l1i_ready_o = (l1i_state == 'b000);
 
   reg [32-1:0] l1i[L1I_SIZE][L1I_LINE_SIZE];
