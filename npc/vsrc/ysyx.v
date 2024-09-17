@@ -155,12 +155,9 @@ module ysyx (
       .bad_speculation(bad_speculation),
       .pc_ifu(pc_ifu),
 
-      .pc_wbu(pc_wbu),
-
       .npc_wdata(npc_wdata),
       .use_exu_npc(use_exu_npc),
       .branch_retire(branch_retire),
-      .pc_o(pc),
       .npc_o(npc),
       .change_o(pc_valid),
       .retire_o(pc_retire)

@@ -15,7 +15,6 @@ module ysyx_pc (
     input branch_retire,
     input [DATA_W-1:0] npc_wdata,
     output [DATA_W-1:0] npc_o,
-    output [DATA_W-1:0] pc_o,
     output change_o,
     output retire_o,
 
