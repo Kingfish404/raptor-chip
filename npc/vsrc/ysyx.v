@@ -167,8 +167,7 @@ module ysyx (
   );
 
   ysyx_reg #(
-      .REG_ADDR_W(REG_ADDR_W),
-      .DATA_W(DATA_W)
+      .REG_ADDR_W(REG_ADDR_W)
   ) regs (
       .clk(clock),
       .rst(reset),
@@ -248,10 +247,7 @@ module ysyx (
   );
 
   // IFU(Instruction Fetch Unit): 负责根据当前PC从存储器中取出一条指令
-  ysyx_ifu #(
-      .ADDR_W(DATA_W),
-      .DATA_W(DATA_W)
-  ) ifu (
+  ysyx_ifu ifu (
       .clk(clock),
       .rst(reset),
 
@@ -279,9 +275,7 @@ module ysyx (
   );
 
   // IDU(Instruction Decode Unit): 负责对当前指令进行译码, 准备执行阶段需要使用的数据和控制信号
-  ysyx_idu #(
-      .BIT_W(DATA_W)
-  ) idu (
+  ysyx_idu idu (
       .clk(clock),
       .rst(reset),
 
@@ -323,9 +317,7 @@ module ysyx (
   );
 
   // EXU(EXecution Unit): 负责根据控制信号对数据进行执行操作, 并将执行结果写回寄存器或存储器
-  ysyx_exu #(
-      .BIT_W(DATA_W)
-  ) exu (
+  ysyx_exu exu (
       .clk(clock),
       .rst(reset),
 

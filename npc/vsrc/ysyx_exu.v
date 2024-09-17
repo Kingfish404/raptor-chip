@@ -48,7 +48,7 @@ module ysyx_exu (
     output reg valid_o,
     output reg ready_o
 );
-  parameter bit [7:0] BIT_W = 64;
+  parameter bit [7:0] BIT_W = `YSYX_W_WIDTH;
 
   wire [BIT_W-1:0] addr_data, reg_wdata, mepc, mtvec;
   wire [BIT_W-1:0] mem_wdata = src2;
@@ -166,7 +166,7 @@ module ysyx_exu (
   assign lsu_mem_wdata_o = mem_wdata;
 
   // alu unit for reg_wdata
-  ysyx_exu_alu #(BIT_W) alu (
+  ysyx_exu_alu alu (
       .alu_src1(src1),
       .alu_src2(src2),
       .alu_op(alu_op_exu),
