@@ -12,7 +12,7 @@ module ysyx_ifu (
     input [DATA_W-1:0] ifu_rdata,
     input ifu_rvalid,
 
-    input  [ADDR_W-1:0] npc,
+    input  [DATA_W-1:0] npc,
     output [DATA_W-1:0] inst_o,
     output [DATA_W-1:0] pc_o,
 
@@ -29,7 +29,6 @@ module ysyx_ifu (
     output valid_o,
     output ready_o
 );
-  parameter bit [7:0] ADDR_W = 32;
   parameter bit [7:0] DATA_W = 32;
 
   parameter bit [7:0] L1I_LINE_LEN = 1;
@@ -199,7 +198,6 @@ module ysyx_ifu_l1i (
     output reg valid_o,
     output reg ready_o
 );
-  parameter bit [7:0] ADDR_W = 32;
   parameter bit [7:0] DATA_W = 32;
 
   parameter bit [7:0] L1I_LINE_LEN = 1;
@@ -215,7 +213,7 @@ module ysyx_ifu_l1i (
   reg [32-L1I_LEN-L1I_LINE_LEN-2-1:0] l1i_tag[L1I_SIZE][L1I_LINE_SIZE];
   reg [2:0] l1i_state = 0;
 
-  wire [32-L1I_LEN-L1I_LINE_LEN-2-1:0] addr_tag = pc_ifu[ADDR_W-1:L1I_LEN+L1I_LINE_LEN+2];
+  wire [32-L1I_LEN-L1I_LINE_LEN-2-1:0] addr_tag = pc_ifu[DATA_W-1:L1I_LEN+L1I_LINE_LEN+2];
   wire [L1I_LEN-1:0] addr_idx = pc_ifu[L1I_LEN+L1I_LINE_LEN+2-1:L1I_LINE_LEN+2];
   wire [L1I_LINE_LEN-1:0] addr_offset = pc_ifu[L1I_LINE_LEN+2-1:2];
 
