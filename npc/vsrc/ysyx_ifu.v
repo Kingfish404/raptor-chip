@@ -161,7 +161,7 @@ module ysyx_ifu (
     end
   end
 
-  wire l1i_valid1;
+  wire l1i_valid;
   wire [DATA_W-1:0] inst_l1i;
   ysyx_ifu_l1i ifu_l1i (
       .clk(clk),
@@ -179,7 +179,7 @@ module ysyx_ifu (
       .l1i_state_o(l1i_state),
       .l1i_cache_hit_o(l1i_cache_hit),
 
-      .valid_o(l1i_valid1)
+      .l1i_valid_o(l1i_valid)
   );
 endmodule  // ysyx_IFU
 
@@ -203,7 +203,7 @@ module ysyx_ifu_l1i (
     output reg [2:0] l1i_state_o,
     output reg l1i_cache_hit_o,
 
-    output reg valid_o
+    output reg l1i_valid_o
 );
   parameter bit [7:0] ADDR_W = 32;
   parameter bit [7:0] DATA_W = 32;
@@ -215,6 +215,7 @@ module ysyx_ifu_l1i (
 
   assign l1i_state_o = l1i_state;
   assign l1i_cache_hit_o = l1i_cache_hit;
+  assign l1i_valid_o = l1i_valid;
 
   reg [32-1:0] l1i[L1I_SIZE][L1I_LINE_SIZE];
   reg [L1I_SIZE-1:0] l1i_valid = 0;
