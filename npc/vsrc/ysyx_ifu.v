@@ -43,7 +43,6 @@ module ysyx_ifu (
   reg ifu_hazard = 0, ifu_lsu_hazard = 0, ifu_branch_hazard = 0;
 
   wire l1i_ready;
-  wire l1i_cache_hit;
   wire l1i_valid;
 
   reg [DATA_W-1:0] btb, ifu_speculation, ifu_npc_speculation, ifu_npc_bad_speculation;
@@ -173,7 +172,6 @@ module ysyx_ifu (
       .ifu_rvalid(ifu_rvalid),
 
       .inst_o(inst_o),
-      .l1i_cache_hit_o(l1i_cache_hit),
 
       .l1i_valid_o(l1i_valid),
       .l1i_ready_o(l1i_ready)
@@ -185,10 +183,6 @@ module ysyx_ifu_l1i (
     input clk,
     input rst,
 
-    // from ifu
-    input [DATA_W-1:0] pc_ifu,
-    input invalid_l1i,
-
     // for bus
     output [DATA_W-1:0] ifu_araddr_o,
     output ifu_arvalid_o,
@@ -196,9 +190,11 @@ module ysyx_ifu_l1i (
     input [DATA_W-1:0] ifu_rdata,
     input ifu_rvalid,
 
+    // from ifu
+    input [DATA_W-1:0] pc_ifu,
+    input invalid_l1i,
     // to ifu
     output reg [DATA_W-1:0] inst_o,
-    output reg l1i_cache_hit_o,
 
     output reg l1i_valid_o,
     output reg l1i_ready_o
