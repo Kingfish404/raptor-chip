@@ -236,9 +236,11 @@ static int decode_exec(Decode *s) {
   R(0) = 0; // reset $zero to 0
 
   uint32_t opcode = BITS(s->isa.inst.val, 6, 0);
+  // jalr: 0b1100111 ; jal: 0b1101111  
   if (opcode == 0b1100111 || opcode == 0b1101111) {
     ftracebuf[ftracehead].pc = s->pc;
     ftracebuf[ftracehead].npc = s->dnpc;
+    // jalr x0, 0(x1): 0x00008067, a.k.a. ret
     if (s->isa.inst.val == 0x00008067) {
       ftracebuf[ftracehead].ret = true;
       ftracedepth--;
