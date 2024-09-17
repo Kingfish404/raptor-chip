@@ -231,7 +231,6 @@ module ysyx_ifu_l1i (
   assign ifu_required_o = (l1i_state != 'b000);
 
   // with l1i cache
-  wire ifu_just_load = ((l1i_state == 'b11) & ifu_rvalid);
   assign inst_o = l1i[addr_idx][addr_offset];
 
   always @(posedge clk) begin
