@@ -25,13 +25,19 @@ word_t vaddr_ifetch(vaddr_t addr, int len)
 
 word_t vaddr_read(vaddr_t addr, int len)
 {
-  fprintf(mem_trace, FMT_WORD_NO_PREFIX "-%c\n", addr, 'r');
+  if (mem_trace != NULL)
+  {
+    fprintf(mem_trace, FMT_WORD_NO_PREFIX "-%c\n", addr, 'r');
+  }
   return paddr_read(addr, len);
 }
 
 void vaddr_write(vaddr_t addr, int len, word_t data)
 {
-  fprintf(mem_trace, FMT_WORD_NO_PREFIX "-%c\n", addr, 'w');
+  if (mem_trace != NULL)
+  {
+    fprintf(mem_trace, FMT_WORD_NO_PREFIX "-%c\n", addr, 'w');
+  }
   paddr_write(addr, len, data);
 }
 
