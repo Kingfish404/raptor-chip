@@ -241,12 +241,17 @@ module ysyx_ifu_l1i (
     input clk,
     input rst,
 
+    // from ifu
+
     // for bus
     output [DATA_W-1:0] ifu_araddr_o,
     output ifu_arvalid_o,
     output ifu_required_o,
     input [DATA_W-1:0] ifu_rdata,
     input ifu_rvalid,
+
+    // to ifu
+    output [DATA_W-1:0] inst_o,
 
     output valid_o,
 );
