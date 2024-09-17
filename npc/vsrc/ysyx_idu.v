@@ -15,7 +15,7 @@ module ysyx_idu (
   input [3:0] exu_forward_rd,
 
   output en_j_o,
-  output ren_o, wen_o, system_o, system_func3_o,
+  output ren_o, wen_o, system_o, system_func3_o, csr_wen_o,
   output reg [BIT_W-1:0] op1_o, op2_o,
   output wire [BIT_W-1:0] rwaddr_o, op_j_o,
   output reg [31:0] imm_o,
@@ -106,6 +106,16 @@ module ysyx_idu (
   );
   assign wen_o = (opcode_o == `YSYX_OP_S_TYPE) & valid_o;
   assign ren_o = (opcode_o == `YSYX_OP_IL_TYPE) & valid_o;
+  assign csr_wen_o = (opcode_o == `YSYX_OP_SYSTEM) && (
+    ((imm_SYS[3:0] == `YSYX_OP_SYSTEM_FUNC3) && (imm_o[15:4] == `YSYX_OP_SYSTEM_ECALL)) |
+    ((imm_SYS[3:0] == `YSYX_OP_SYSTEM_FUNC3) && (imm_o[15:4] == `YSYX_OP_SYSTEM_MRET)) |
+    ((imm_o[3:0] == `YSYX_OP_SYSTEM_CSRRW)) |
+    ((imm_o[3:0] == `YSYX_OP_SYSTEM_CSRRS)) |
+    ((imm_o[3:0] == `YSYX_OP_SYSTEM_CSRRC)) |
+    ((imm_o[3:0] == `YSYX_OP_SYSTEM_CSRRWI)) |
+    ((imm_o[3:0] == `YSYX_OP_SYSTEM_CSRRSI)) |
+    ((imm_o[3:0] == `YSYX_OP_SYSTEM_CSRRCI))
+  );
   assign system_o = (opcode_o == `YSYX_OP_SYSTEM) | (opcode_o == `YSYX_OP_FENCE_I);
   assign system_func3_o = system_o & imm_SYS[3:0] == `YSYX_OP_SYSTEM_FUNC3;
   always @(*) begin

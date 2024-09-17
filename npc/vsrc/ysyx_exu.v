@@ -20,6 +20,8 @@ module ysyx_exu (
     input wen,
     input system,
     input system_func3,
+    input csr_wen,
+
     input [3:0] rd,
     input [BIT_W-1:0] imm,
     input [BIT_W-1:0] op1,
@@ -58,7 +60,7 @@ module ysyx_exu (
   reg [BIT_W-1:0] imm_exu, pc_exu, src1, src2, addr_exu;
   reg [3:0] alu_op_exu;
   reg [6:0] opcode_exu;
-  wire csr_wen;
+  reg csr_wen_exu;
   wire csr_ecallen;
   reg [BIT_W-1:0] mem_rdata;
   reg use_exu_npc, system_exu, system_func3_exu;
@@ -66,7 +68,7 @@ module ysyx_exu (
   ysyx_exu_csr csr (
       .clk(clk),
       .rst(rst),
-      .wen(csr_wen),
+      .wen(csr_wen_exu),
       .exu_valid(valid_o),
       .ecallen(csr_ecallen),
       .waddr(csr_addr),
@@ -125,6 +127,7 @@ module ysyx_exu (
         wen_o <= wen;
         system_exu <= system;
         system_func3_exu <= system_func3;
+        csr_wen_exu <= csr_wen;
         alu_valid <= 1;
         speculation_o <= speculation;
         if (wen | ren) begin
@@ -178,16 +181,6 @@ module ysyx_exu (
   assign csr_ecallen = (
     ((system_exu) && (system_func3_exu))
     && imm_exu[15:4] == `YSYX_OP_SYSTEM_ECALL);
-  assign csr_wen = (system_exu) && (
-    ((system_func3_exu) && (imm_exu[15:4] == `YSYX_OP_SYSTEM_ECALL)) |
-    ((system_func3_exu) && (imm_exu[15:4] == `YSYX_OP_SYSTEM_MRET)) |
-    ((imm_exu[3:0] == `YSYX_OP_SYSTEM_CSRRW)) |
-    ((imm_exu[3:0] == `YSYX_OP_SYSTEM_CSRRS)) |
-    ((imm_exu[3:0] == `YSYX_OP_SYSTEM_CSRRC)) |
-    ((imm_exu[3:0] == `YSYX_OP_SYSTEM_CSRRWI)) |
-    ((imm_exu[3:0] == `YSYX_OP_SYSTEM_CSRRSI)) |
-    ((imm_exu[3:0] == `YSYX_OP_SYSTEM_CSRRCI))
-  );
   assign csr_wdata = {BIT_W{(system_exu)}} & (
     ({BIT_W{((system_func3_exu) && (imm_exu[15:4] == `YSYX_OP_SYSTEM_ECALL))}} & 'hb) |
     ({BIT_W{((system_func3_exu) && (imm_exu[15:4] == `YSYX_OP_SYSTEM_MRET))}} &
