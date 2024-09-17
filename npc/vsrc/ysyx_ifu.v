@@ -171,6 +171,9 @@ module ysyx_ifu (
               ifu_hazard <= 1;
               ifu_lsu_hazard <= 1;
             end
+            if (is_fence) begin
+              ifu_hazard <= 1;
+            end
           end
         end
       end
