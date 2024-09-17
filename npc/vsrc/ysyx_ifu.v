@@ -111,7 +111,7 @@ module ysyx_ifu (
       end
       if (state == `YSYX_IDLE) begin
         if (prev_valid) begin
-          if ((ifu_hazard) & !speculation & (pc_change | pc_retire) & l1i_state == 'b000) begin
+          if ((ifu_hazard) & !speculation & (pc_change | pc_retire) & l1i_ready) begin
             ifu_hazard <= 0;
             ifu_lsu_hazard <= 0;
             ifu_branch_hazard <= 0;
