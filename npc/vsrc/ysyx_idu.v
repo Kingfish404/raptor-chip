@@ -8,7 +8,7 @@ module ysyx_idu (
 
     input [31:0] inst,
     input [BIT_W-1:0] rdata1,
-    input rdata2,
+    input [BIT_W-1:0] rdata2,
     input [BIT_W-1:0] pc,
     input speculation,
 
