@@ -179,7 +179,7 @@ module ysyx_ifu (
     end
   end
 
-  wire l1i_valid;
+  wire l1i_valid1;
   wire [DATA_W-1:0] inst_l1i;
   ysyx_ifu_l1i ifu_l1i (
       .clk(clk),
@@ -194,7 +194,7 @@ module ysyx_ifu (
       // .ifu_rvalid(ifu_rvalid),
 
       .inst_o(inst_l1i),
-      .valid_o(l1i_valid)
+      .valid_o(l1i_valid1)
   );
 
   always @(posedge clk) begin
