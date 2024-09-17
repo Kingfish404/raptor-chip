@@ -66,6 +66,7 @@ module ysyx_ifu (
   );
   wire is_load = (opcode_o == `YSYX_OP_IL_TYPE);
   wire is_store = (opcode_o == `YSYX_OP_S_TYPE);
+  wire is_fence = (inst_o == `YSYX_INST_FENCE_I);
 
   assign ifu_araddr_o = (l1i_state == 'b00 | l1i_state == 'b01) ? (pc_ifu & ~'h4) : (pc_ifu | 'h4);
   assign ifu_arvalid_o = ifu_sdram_arburst ?
@@ -97,7 +98,7 @@ module ysyx_ifu (
       btb_valid <= 0;
       speculation <= 0;
     end else begin
-      if (valid_o & next_ready & inst_o == `YSYX_INST_FENCE_I) begin
+      if (valid_o & next_ready & is_fence) begin
         l1i_valid <= 0;
       end
       if (bad_speculation & next_ready & l1i_state == 'b000) begin
@@ -149,7 +150,7 @@ module ysyx_ifu (
         end
       end else if (state == `YSYX_WAIT_READY) begin
         if (!bad_speculation_o & next_ready == 1 & valid_o) begin
-          if (!is_branch & !is_load) begin
+          if (!is_branch & !is_load & !is_fence) begin
             pc_ifu <= pc_ifu + 4;
           end else begin
             if (is_branch) begin
