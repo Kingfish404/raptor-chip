@@ -6,7 +6,6 @@ module ysyx_pc (
     input clk,
     input rst,
 
-    input speculation,
     input good_speculation,
     input bad_speculation,
     input [DATA_W-1:0] pc_ifu,

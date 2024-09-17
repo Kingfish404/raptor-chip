@@ -148,8 +148,6 @@ module ysyx (
   ysyx_pc pc_unit (
       .clk(clock),
       .rst(reset),
-      .prev_valid(exu_valid),
-      .speculation(speculation_exu),
 
       .good_speculation(good_speculation),
       .bad_speculation(bad_speculation),
@@ -160,7 +158,9 @@ module ysyx (
       .branch_retire(branch_retire),
       .npc_o(npc),
       .change_o(pc_valid),
-      .retire_o(pc_retire)
+      .retire_o(pc_retire),
+
+      .prev_valid(exu_valid)
   );
 
   ysyx_reg regs (
