@@ -218,7 +218,7 @@ module ysyx_ifu_l1i (
   assign l1i_valid_o = l1i_valid;
 
   reg [32-1:0] l1i[L1I_SIZE][L1I_LINE_SIZE];
-  reg [L1I_SIZE-1:0] l1i_valid = 0;
+  reg l1i_valid = 0;
   reg [32-L1I_LEN-L1I_LINE_LEN-2-1:0] l1i_tag[L1I_SIZE][L1I_LINE_SIZE];
   reg [2:0] l1i_state = 0;
 
