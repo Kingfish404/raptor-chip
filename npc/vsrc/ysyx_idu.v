@@ -121,7 +121,8 @@ module ysyx_idu (
       & reg_rdata1 |
     (0)
   );
-  assign rs1_o = rs1; rs2_o = rs2;
+  assign rs1_o = rs1;
+  assign rs2_o = rs2;
   assign wen_o = (opcode_o == `YSYX_OP_S_TYPE) & valid_o;
   assign ren_o = (opcode_o == `YSYX_OP_IL_TYPE) & valid_o;
   assign csr_wen_o = (opcode_o == `YSYX_OP_SYSTEM) && (
