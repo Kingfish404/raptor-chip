@@ -204,6 +204,7 @@ module ysyx_ifu_l1i (
 
     output reg valid_o
 );
+  parameter bit [7:0] ADDR_W = 32;
   parameter bit [7:0] DATA_W = 32;
 
   parameter bit [7:0] L1I_LINE_LEN = 1;
