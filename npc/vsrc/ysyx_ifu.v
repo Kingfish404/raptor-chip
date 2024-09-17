@@ -259,6 +259,6 @@ module ysyx_ifu_l1i (
 
     output valid_o,
 );
-
+  parameter bit [7:0] DATA_W = 32;
 
 endmodule  // ysyx_IFU_L1I
