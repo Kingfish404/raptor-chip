@@ -45,6 +45,7 @@ module ysyx_ifu (
   wire [2:0] l1i_state;
   wire l1i_cache_hit;
 
+  reg [DATA_W-1:0] btb, ifu_speculation, ifu_npc_speculation, ifu_npc_bad_speculation;
   reg btb_valid, speculation, bad_speculation, ifu_b_speculation;
 
   wire [6:0] opcode_o = inst_o[6:0];
@@ -56,7 +57,6 @@ module ysyx_ifu (
   wire is_load = (opcode_o == `YSYX_OP_IL_TYPE);
   wire is_store = (opcode_o == `YSYX_OP_S_TYPE);
   wire is_fence = (inst_o == `YSYX_INST_FENCE_I);
-
 
   assign valid_o = (l1i_cache_hit & !ifu_hazard) &
    !bad_speculation & !(speculation & (is_load | is_store));
