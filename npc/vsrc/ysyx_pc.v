@@ -28,7 +28,7 @@ module ysyx_pc (
   reg change, retire;
   assign change_o = change;
   assign retire_o = retire;
-  assign npc_o = use_exu_npc ? npc_wdata : pc;
+  assign npc_o = pc;
   assign pc_o = pc_wbu;
 
   always @(posedge clk) begin
