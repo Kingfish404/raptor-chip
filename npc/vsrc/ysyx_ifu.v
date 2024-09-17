@@ -46,6 +46,9 @@ module ysyx_ifu (
   reg [2:0] l1i_state = 0;
   reg ifu_hazard = 0, ifu_lsu_hazard = 0, ifu_branch_hazard = 0;
 
+  reg [DATA_W-1:0] btb, ifu_speculation, ifu_npc_speculation, ifu_npc_bad_speculation;
+  reg btb_valid, speculation, bad_speculation, ifu_b_speculation;
+
   wire [32-L1I_LEN-L1I_LINE_LEN-2-1:0] addr_tag = pc_ifu[ADDR_W-1:L1I_LEN+L1I_LINE_LEN+2];
   wire [L1I_LEN-1:0] addr_idx = pc_ifu[L1I_LEN+L1I_LINE_LEN+2-1:L1I_LINE_LEN+2];
   wire [L1I_LINE_LEN-1:0] addr_offset = pc_ifu[L1I_LINE_LEN+2-1:2];
@@ -78,48 +81,58 @@ module ysyx_ifu (
   assign ready_o = !valid_o;
 
   // for speculation
-  wire bad_speculationing;
-  reg  good_speculation;
-  reg  bad_speculation_pc_change;
-
-  ysyx_bpu bpu_inst (
-      .clk(clk),
-      .rst(rst),
-      .pc_ifu(pc_ifu),
-      .npc(npc),
-      .pc(pc),
-      .pc_change(pc_change),
-      .pc_retire(pc_retire),
-      .opcode_o(opcode_o),
-      .next_ready(next_ready),
-      .valid_o(valid_o),
-      .speculation_o(speculation_o),
-      .good_speculation_o(good_speculation_o),
-      .bad_speculation_o(bad_speculation_o),
-      .bad_speculationing(bad_speculationing),
-      .good_speculation(good_speculation),
-      .bad_speculation_pc_change(bad_speculation_pc_change)
-  );
+  assign speculation_o = speculation;
+  assign good_speculation_o = good_speculation;
+  assign bad_speculation_o = bad_speculation | bad_speculationing;
+  wire bad_speculationing = (speculation & ((
+        pc_change & npc != ifu_speculation) | (pc_retire & pc + 4 != ifu_speculation )));
+  reg good_speculation;
+  reg bad_speculation_pc_change;
 
   assign pc_o = pc_ifu;
   `YSYX_BUS_FSM()
   always @(posedge clk) begin
     if (rst) begin
       pc_ifu <= `YSYX_PC_INIT;
+      btb_valid <= 0;
+      speculation <= 0;
     end else begin
       if (valid_o & next_ready & is_fence) begin
         l1i_valid <= 0;
       end
-      if (bad_speculation_o & next_ready & l1i_state == 'b000) begin
-        if (bpu_inst.ifu_b_speculation & !bad_speculation_pc_change) begin
-          pc_ifu <= bpu_inst.ifu_npc_speculation;
+      if (bad_speculation & next_ready & l1i_state == 'b000) begin
+        bad_speculation <= 0;
+        speculation <= 0;
+        ifu_hazard <= 0;
+        ifu_lsu_hazard <= 0;
+        ifu_branch_hazard <= 0;
+        ifu_b_speculation <= 0;
+        bad_speculation_pc_change <= 0;
+        if (ifu_b_speculation & !bad_speculation_pc_change) begin
+          pc_ifu <= ifu_npc_speculation;
         end else begin
           pc_ifu <= npc;
         end
       end
+      if (good_speculation) begin
+        good_speculation <= 0;
+        speculation <= 0;
+      end
+      if (speculation & ((
+        pc_change & npc == ifu_speculation) | (pc_retire & pc + 4 == ifu_speculation))) begin
+        good_speculation <= 1;
+        speculation <= 0;
+        ifu_b_speculation <= 0;
+        ifu_npc_bad_speculation <= npc;
+      end
+      if (speculation & (bad_speculationing)) begin
+        bad_speculation <= 1;
+        speculation <= 0;
+        bad_speculation_pc_change <= pc_change;
+      end
       if (state == `YSYX_IDLE) begin
         if (prev_valid) begin
-          if ((ifu_hazard) & !speculation_o & (pc_change | pc_retire) & l1i_state == 'b000) begin
+          if ((ifu_hazard) & !speculation & (pc_change | pc_retire) & l1i_state == 'b000) begin
             ifu_hazard <= 0;
             ifu_lsu_hazard <= 0;
             ifu_branch_hazard <= 0;
@@ -130,8 +143,8 @@ module ysyx_ifu (
             end
           end
           if (pc_change) begin
-            bpu_inst.btb <= npc;
-            bpu_inst.btb_valid <= 1;
+            btb <= npc;
+            btb_valid <= 1;
           end
         end
       end else if (state == `YSYX_WAIT_READY) begin
@@ -140,13 +153,13 @@ module ysyx_ifu (
             pc_ifu <= pc_ifu + 4;
           end else begin
             if (is_branch) begin
-              if (bpu_inst.btb_valid & 1 & !speculation_o) begin
-                pc_ifu <= bpu_inst.btb;
-                bpu_inst.ifu_speculation <= bpu_inst.btb;
-                bpu_inst.ifu_npc_speculation <= pc_ifu + 4;
-                bpu_inst.speculation <= 1;
+              if (btb_valid & 1 & !speculation) begin
+                pc_ifu <= btb;
+                ifu_speculation <= btb;
+                ifu_npc_speculation <= pc_ifu + 4;
+                speculation <= 1;
                 if (opcode_o == `YSYX_OP_B_TYPE) begin
-                  bpu_inst.ifu_b_speculation <= 1;
+                  ifu_b_speculation <= 1;
                 end
               end else begin
                 ifu_hazard <= 1;
@@ -166,6 +179,21 @@ module ysyx_ifu (
     end
   end
 
+  wire l1i_valid;
+  wire [DATA_W-1:0] inst_l1i;
+  ysyx_ifu_l1i ifu_l1i (
+      .clk(clk),
+      .rst(rst),
+      .ifu_araddr_o(ifu_araddr_o),
+      .ifu_arvalid_o(ifu_arvalid_o),
+      .ifu_required_o(ifu_required_o),
+      .ifu_rdata(ifu_rdata),
+      .ifu_rvalid(ifu_rvalid),
+
+      .inst_o(inst_l1i),
+      .valid_o(l1i_valid)
+  );
+
   always @(posedge clk) begin
     if (rst) begin
       l1i_state <= 'b000;
@@ -173,7 +201,7 @@ module ysyx_ifu (
     end else begin
       case (l1i_state)
         'b000:
-        if (ifu_arvalid_o & !bad_speculation_o) begin
+        if (ifu_arvalid_o & !bad_speculation) begin
           l1i_state <= 'b001;
         end
         'b001:
@@ -208,63 +236,20 @@ module ysyx_ifu (
   end
 endmodule  // ysyx_IFU
 
-module ysyx_bpu (
+
+module ysyx_ifu_l1i (
     input clk,
     input rst,
-    input [DATA_W-1:0] pc_ifu,
-    input [ADDR_W-1:0] npc,
-    input [DATA_W-1:0] pc,
-    input pc_change,
-    input pc_retire,
-    input [6:0] opcode_o,
-    input next_ready,
-    input valid_o,
-    output reg speculation_o,
-    output reg good_speculation_o,
-    output reg bad_speculation_o,
-    output wire bad_speculationing,
-    output reg good_speculation,
-    output reg bad_speculation_pc_change
+
+    // for bus
+    output [DATA_W-1:0] ifu_araddr_o,
+    output ifu_arvalid_o,
+    output ifu_required_o,
+    input [DATA_W-1:0] ifu_rdata,
+    input ifu_rvalid,
+
+    output valid_o,
 );
-  parameter bit [7:0] ADDR_W = 32;
-  parameter bit [7:0] DATA_W = 32;
 
-  reg [DATA_W-1:0] btb, ifu_speculation, ifu_npc_speculation, ifu_npc_bad_speculation;
-  reg btb_valid, speculation, bad_speculation, ifu_b_speculation;
 
-  assign bad_speculationing = (speculation & ((
-        pc_change & npc != ifu_speculation) | (pc_retire & pc + 4 != ifu_speculation )));
-
-  always @(posedge clk) begin
-    if (rst) begin
-      btb_valid   <= 0;
-      speculation <= 0;
-    end else begin
-      if (bad_speculation & next_ready) begin
-        bad_speculation <= 0;
-        speculation <= 0;
-        ifu_b_speculation <= 0;
-        bad_speculation_pc_change <= 0;
-        if (ifu_b_speculation & !bad_speculation_pc_change) begin
-          ifu_npc_speculation <= npc;
-        end
-      end
-      if (good_speculation) begin
-        good_speculation <= 0;
-        speculation <= 0;
-      end
-      if (speculation & ((
-        pc_change & npc == ifu_speculation) | (pc_retire & pc + 4 == ifu_speculation))) begin
-        good_speculation <= 1;
-        speculation <= 0;
-        ifu_b_speculation <= 0;
-        ifu_npc_bad_speculation <= npc;
-      end
-      if (speculation & (bad_speculationing)) begin
-        bad_speculation <= 1;
-        speculation <= 0;
-        bad_speculation_pc_change <= pc_change;
-      end
-    end
-  end
-endmodule  // ysyx_bpu
+endmodule  // ysyx_IFU_L1I
