@@ -11,8 +11,6 @@ module ysyx_pc (
     input bad_speculation,
     input [DATA_W-1:0] pc_ifu,
 
-    input [DATA_W-1:0] pc_wbu,
-
     input use_exu_npc,
     input branch_retire,
     input [DATA_W-1:0] npc_wdata,
@@ -29,7 +27,6 @@ module ysyx_pc (
   assign change_o = change;
   assign retire_o = retire;
   assign npc_o = pc;
-  assign pc_o = pc_wbu;
 
   always @(posedge clk) begin
     if (rst) begin
