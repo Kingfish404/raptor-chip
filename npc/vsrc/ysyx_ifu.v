@@ -173,8 +173,8 @@ module ysyx_ifu (
 
       .inst_o(inst_o),
 
-      .l1i_valid_o(l1i_valid),
-      .l1i_ready_o(l1i_ready)
+      .valid_o(l1i_valid),
+      .ready_o(l1i_ready)
   );
 endmodule  // ysyx_IFU
 
@@ -196,8 +196,8 @@ module ysyx_ifu_l1i (
     // to ifu
     output reg [DATA_W-1:0] inst_o,
 
-    output reg l1i_valid_o,
-    output reg l1i_ready_o
+    output reg valid_o,
+    output reg ready_o
 );
   parameter bit [7:0] ADDR_W = 32;
   parameter bit [7:0] DATA_W = 32;
@@ -207,8 +207,8 @@ module ysyx_ifu_l1i (
   parameter bit [7:0] L1I_LEN = 2;
   parameter bit [7:0] L1I_SIZE = 2 ** L1I_LEN;
 
-  assign l1i_valid_o = l1i_cache_hit;
-  assign l1i_ready_o = (l1i_state == 'b000);
+  assign valid_o = l1i_cache_hit;
+  assign ready_o = (l1i_state == 'b000);
 
   reg [32-1:0] l1i[L1I_SIZE][L1I_LINE_SIZE];
   reg [L1I_SIZE-1:0] l1i_valid = 0;
@@ -232,7 +232,7 @@ module ysyx_ifu_l1i (
 
   // with l1i cache
   wire ifu_just_load = ((l1i_state == 'b11) & ifu_rvalid);
-  assign inst_o = ifu_just_load & pc_ifu[2] == 1'b1 ? ifu_rdata : l1i[addr_idx][addr_offset];
+  assign inst_o = l1i[addr_idx][addr_offset];
 
   always @(posedge clk) begin
     if (rst) begin
