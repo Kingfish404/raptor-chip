@@ -204,7 +204,7 @@ module ysyx_ifu (
     end else begin
       case (l1i_state)
         'b000:
-        if (ifu_arvalid_o & !bad_speculation) begin
+        if (ifu_arvalid_o) begin
           l1i_state <= 'b001;
         end
         'b001:
