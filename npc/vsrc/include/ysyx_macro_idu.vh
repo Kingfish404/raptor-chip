@@ -59,5 +59,4 @@ end
   op2_o = op2; \
   alu_op_o = alu_op; \
   rd_o = rd; \
-  use_rs1 = 1; \
 end
