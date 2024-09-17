@@ -123,8 +123,8 @@ module ysyx_idu (
   );
   assign rs1_o = rs1;
   assign rs2_o = rs2;
-  assign wen_o = (opcode_o == `YSYX_OP_S_TYPE) & valid_o;
-  assign ren_o = (opcode_o == `YSYX_OP_IL_TYPE) & valid_o;
+  assign wen_o = (opcode_o == `YSYX_OP_S_TYPE);
+  assign ren_o = (opcode_o == `YSYX_OP_IL_TYPE);
   assign csr_wen_o = (opcode_o == `YSYX_OP_SYSTEM) && (
     ((imm_SYS[3:0] == `YSYX_OP_SYSTEM_FUNC3) && (imm_o[15:4] == `YSYX_OP_SYSTEM_ECALL)) |
     ((imm_SYS[3:0] == `YSYX_OP_SYSTEM_FUNC3) && (imm_o[15:4] == `YSYX_OP_SYSTEM_MRET)) |
