@@ -138,7 +138,7 @@ module ysyx_idu (
   assign system_o = (opcode_o == `YSYX_OP_SYSTEM) | (opcode_o == `YSYX_OP_FENCE_I);
   assign system_func3_o = system_o & imm_SYS[3:0] == `YSYX_OP_SYSTEM_FUNC3;
   always @(*) begin
-    alu_op_o = 0; imm_o = 0; op1_o = 0; op2_o = 0; rd_o = rd;
+    alu_op_o = 0; imm_o = 0; op1_o = 0; op2_o = 0; rd_o = 0;
       case (opcode_o)
         `YSYX_OP_LUI:     begin `YSYX_U_TYPE(   0, `YSYX_ALU_OP_ADD);                 end
         `YSYX_OP_AUIPC:   begin `YSYX_U_TYPE(pc_o, `YSYX_ALU_OP_ADD);                 end
