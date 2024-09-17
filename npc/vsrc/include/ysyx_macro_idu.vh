@@ -5,6 +5,8 @@
   op2_o = op2; \
   alu_op_o = alu_op; \
   rd_o = rd; \
+  use_rs1 = 1; \
+  use_rs2 = 1; \
 end
 
 `define YSYX_I_TYPE(op1, alu_op, op2)  begin \
@@ -13,6 +15,7 @@ end
   op2_o = op2; \
   alu_op_o = alu_op; \
   rd_o = rd; \
+  use_rs1 = 1; \
 end
 
 `define YSYX_S_TYPE(op1, alu_op, op2) begin \
@@ -20,6 +23,8 @@ end
   op1_o = op1; \
   op2_o = op2; \
   alu_op_o = alu_op; \
+  use_rs1 = 1; \
+  use_rs2 = 1; \
 end
 
 `define YSYX_B_TYPE(op1, alu_op, op2) begin \
@@ -35,6 +40,8 @@ end
     ({4{(alu_op == `YSYX_ALU_OP_BGEU)}} & `YSYX_ALU_OP_SLEU) | \
     `YSYX_ALU_OP_ADD \
   ); \
+  use_rs1 = 1; \
+  use_rs2 = 1; \
 end
 
 `define YSYX_U_TYPE(op1, alu_op)  begin \
@@ -59,4 +66,5 @@ end
   op2_o = op2; \
   alu_op_o = alu_op; \
   rd_o = rd; \
+  use_rs1 = 1; \
 end
