@@ -159,7 +159,6 @@ module ysyx_ifu (
   end
 
   wire [L1I_SIZE-1:0] l1i_valid;
-  wire [  DATA_W-1:0] inst_l1i;
   ysyx_ifu_l1i ifu_l1i (
       .clk(clk),
       .rst(rst),
@@ -173,7 +172,7 @@ module ysyx_ifu (
       .ifu_rdata(ifu_rdata),
       .ifu_rvalid(ifu_rvalid),
 
-      .inst_o(inst_l1i),
+      .inst_o(inst_o),
       .l1i_state_o(l1i_state),
       .l1i_cache_hit_o(l1i_cache_hit),
 
@@ -239,7 +238,6 @@ module ysyx_ifu_l1i (
   // with l1i cache
   wire ifu_just_load = ((l1i_state == 'b11) & ifu_rvalid);
   assign inst_o = ifu_just_load & pc_ifu[2] == 1'b1 ? ifu_rdata : l1i[addr_idx][addr_offset];
-
 
   always @(posedge clk) begin
     if (rst) begin
