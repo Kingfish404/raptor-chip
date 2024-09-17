@@ -187,11 +187,11 @@ module ysyx_ifu (
 
       .ifu_addr(pc_ifu),
 
-      .ifu_araddr_o(ifu_araddr_o),
-      .ifu_arvalid_o(ifu_arvalid_o),
-      .ifu_required_o(ifu_required_o),
-      .ifu_rdata(ifu_rdata),
-      .ifu_rvalid(ifu_rvalid),
+      // .ifu_araddr_o(ifu_araddr_o),
+      // .ifu_arvalid_o(ifu_arvalid_o),
+      // .ifu_required_o(ifu_required_o),
+      // .ifu_rdata(ifu_rdata),
+      // .ifu_rvalid(ifu_rvalid),
 
       .inst_o(inst_l1i),
       .valid_o(l1i_valid)
@@ -248,11 +248,11 @@ module ysyx_ifu_l1i (
     input [DATA_W-1:0] ifu_addr,
 
     // for bus
-    output [DATA_W-1:0] ifu_araddr_o,
-    output ifu_arvalid_o,
-    output ifu_required_o,
-    input [DATA_W-1:0] ifu_rdata,
-    input ifu_rvalid,
+    // output [DATA_W-1:0] ifu_araddr_o,
+    // output ifu_arvalid_o,
+    // output ifu_required_o,
+    // input [DATA_W-1:0] ifu_rdata,
+    // input ifu_rvalid,
 
     // to ifu
     output [DATA_W-1:0] inst_o,
