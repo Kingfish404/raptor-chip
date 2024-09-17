@@ -79,9 +79,6 @@ module ysyx_ifu (
       btb_valid <= 0;
       speculation <= 0;
     end else begin
-      if (valid_o & next_ready & is_fence) begin
-        // l1i_valid <= 0;
-      end
       if (bad_speculation & next_ready & l1i_state == 'b000) begin
         bad_speculation <= 0;
         speculation <= 0;
@@ -168,6 +165,7 @@ module ysyx_ifu (
       .rst(rst),
 
       .pc_ifu(pc_ifu),
+      .invalid_l1i(valid_o & next_ready & is_fence),
 
       .ifu_araddr_o(ifu_araddr_o),
       .ifu_arvalid_o(ifu_arvalid_o),
@@ -190,6 +188,7 @@ module ysyx_ifu_l1i (
 
     // from ifu
     input [DATA_W-1:0] pc_ifu,
+    input invalid_l1i,
 
     // for bus
     output [DATA_W-1:0] ifu_araddr_o,
@@ -247,6 +246,9 @@ module ysyx_ifu_l1i (
       l1i_state <= 'b000;
       l1i_valid <= 0;
     end else begin
+      if (invalid_l1i) begin
+        l1i_valid <= 0;
+      end
       case (l1i_state)
         'b000:
         if (ifu_arvalid_o) begin
