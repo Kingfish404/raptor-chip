@@ -31,10 +31,10 @@ module ysyx_ifu (
 );
   parameter bit [7:0] DATA_W = 32;
 
-  parameter bit [7:0] L1I_LINE_LEN = 1;
-  parameter bit [7:0] L1I_LINE_SIZE = 2 ** L1I_LINE_LEN;
-  parameter bit [7:0] L1I_LEN = 2;
-  parameter bit [7:0] L1I_SIZE = 2 ** L1I_LEN;
+  // parameter bit [7:0] L1I_LINE_LEN = 1;
+  // parameter bit [7:0] L1I_LINE_SIZE = 2 ** L1I_LINE_LEN;
+  // parameter bit [7:0] L1I_LEN = 2;
+  // parameter bit [7:0] L1I_SIZE = 2 ** L1I_LEN;
 
   reg state;
   reg [DATA_W-1:0] pc_ifu;
