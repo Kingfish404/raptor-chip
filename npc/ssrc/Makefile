@@ -6,7 +6,6 @@ test:
 	mill -i $(PRJ).test
 
 verilog:
-	# $(call git_commit, "generate verilog")
 	mkdir -p $(BUILD_DIR)
 	mill -i $(PRJ).runMain Elaborate --target-dir $(BUILD_DIR)
 
@@ -31,7 +30,4 @@ clean:
 .PHONY: test verilog help reformat checkformat clean
 
 sim:
-	$(call git_commit, "sim RTL") # DO NOT REMOVE THIS LINE!!!
 	@echo "Write this Makefile by yourself."
-
-# -include ../Makefile
