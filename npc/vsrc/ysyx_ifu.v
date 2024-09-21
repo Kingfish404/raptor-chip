@@ -153,6 +153,7 @@ module ysyx_ifu (
   wire l1i_valid;
   wire l1i_ready;
 
+  // L1I cache
   parameter bit [7:0] L1I_LINE_LEN = 1;
   parameter bit [7:0] L1I_LINE_SIZE = 2 ** L1I_LINE_LEN;
   parameter bit [7:0] L1I_LEN = 2;
@@ -193,7 +194,7 @@ module ysyx_ifu (
 
   always @(posedge clk) begin
     if (rst) begin
-      l1i_state <= 'b000;
+      l1i_state  <= 'b000;
       l1ic_valid <= 0;
     end else begin
       case (l1i_state)
