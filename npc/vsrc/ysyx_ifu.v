@@ -186,7 +186,7 @@ module ysyx_ifu (
   assign l1i_ready = (l1i_state == 'b00001);
 
   reg [32-1:0] l1i[L1I_SIZE][L1I_LINE_SIZE];
-  reg [L1I_SIZE-1:0] l1i_valid = 0;
+  reg [L1I_SIZE-1:0] l1ic_valid = 0;
   reg [32-L1I_LEN-L1I_LINE_LEN-2-1:0] l1i_tag[L1I_SIZE][L1I_LINE_SIZE];
   reg [4:0] l1i_state = 0;
 
@@ -196,7 +196,7 @@ module ysyx_ifu (
 
   wire l1i_cache_hit = (
          1 & (l1i_state == 'b00001 | l1i_state == 'b10000) &
-         l1i_valid[addr_idx] == 1'b1) & (l1i_tag[addr_idx][addr_offset] == addr_tag);
+         l1ic_valid[addr_idx] == 1'b1) & (l1i_tag[addr_idx][addr_offset] == addr_tag);
   wire ifu_sdram_arburst = `YSYX_I_SDRAM_ARBURST & (pc_ifu >= 'ha0000000) & (pc_ifu <= 'hc0000000);
 
   assign ifu_araddr_o = (l1i_state == 'b00001 | l1i_state == 'b00010) ?
@@ -212,10 +212,10 @@ module ysyx_ifu (
   always @(posedge clk) begin
     if (rst) begin
       l1i_state <= 'b00001;
-      l1i_valid <= 0;
+      l1ic_valid <= 0;
     end else begin
       if (invalid_l1i) begin
-        l1i_valid <= 0;
+        l1ic_valid <= 0;
       end else begin
         case (l1i_state)
           'b00001: begin
@@ -242,7 +242,7 @@ module ysyx_ifu (
               l1i_state <= 'b10000;
               l1i[addr_idx][1] <= ifu_rdata;
               l1i_tag[addr_idx][1] <= addr_tag;
-              l1i_valid[addr_idx] <= 1'b1;
+              l1ic_valid[addr_idx] <= 1'b1;
             end
           end
           'b10000: begin
