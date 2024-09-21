@@ -98,7 +98,8 @@ module ysyx_ifu (
         end else if (good_speculation) begin
           good_speculation <= 0;
           speculation <= 0;
-        end else if (prev_valid) begin
+        end
+        if (prev_valid) begin
           if ((ifu_hazard) & !speculation & (pc_change | pc_retire) & l1i_ready) begin
             ifu_hazard <= 0;
             ifu_lsu_hazard <= 0;
