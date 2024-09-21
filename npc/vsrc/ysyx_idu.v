@@ -136,14 +136,15 @@ module ysyx_idu (
   //   ((imm_o[3:0] == `YSYX_OP_SYSTEM_CSRRCI))
   // );
   // assign system_o = (opcode_o == `YSYX_OP_SYSTEM) | (opcode_o == `YSYX_OP_FENCE_I);
+  // assign system_func3_o = system_o & imm_SYS[3:0] == `YSYX_OP_SYSTEM_FUNC3;
   CSRDecoder csr_decoder (
     .clock(clk),
     .reset(rst),
     .instruction(inst_idu),
+    .system_func3_zero_o(system_func3_o),
     .csr_wen_o(csr_wen_o),
     .system_o(system_o)
   );
-  assign system_func3_o = system_o & imm_SYS[3:0] == `YSYX_OP_SYSTEM_FUNC3;
   always @(*) begin
     alu_op_o = 0; imm_o = 0; op1_o = 0; op2_o = 0; rd_o = 0;
       case (opcode_o)
@@ -158,7 +159,6 @@ module ysyx_idu (
         `YSYX_OP_S_TYPE:  begin `YSYX_S_TYPE(reg_rdata1, {1'b0, funct3}, reg_rdata2);     end
         `YSYX_OP_R_TYPE:  begin `YSYX_R_TYPE(reg_rdata1, {funct7[5], funct3}, reg_rdata2);end
         `YSYX_OP_SYSTEM:  begin `YSYX_I_SYS_TYPE(reg_rdata1, {1'b0, funct3}, 0)           end
-        `YSYX_OP_FENCE_I: begin                                                           end
         default:          begin if (valid) begin `YSYX_DPI_C_NPC_ILLEGAL_INST end         end
       endcase
   end

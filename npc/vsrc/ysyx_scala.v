@@ -3,12 +3,13 @@ module CSRDecoder(	// @[src/main/GCD.scala:8:7]
   input         clock,	// @[src/main/GCD.scala:8:7]
                 reset,	// @[src/main/GCD.scala:8:7]
   input  [31:0] instruction,	// @[src/main/GCD.scala:33:23]
-  output        csr_wen_o,	// @[src/main/GCD.scala:34:21]
-                system_o	// @[src/main/GCD.scala:35:20]
+  output        system_func3_zero_o,	// @[src/main/GCD.scala:34:31]
+                csr_wen_o,	// @[src/main/GCD.scala:35:21]
+                system_o	// @[src/main/GCD.scala:36:20]
 );
 
   wire [29:0] decoded_invInputs = ~(instruction[31:2]);	// @[src/main/GCD.scala:33:23, src/main/scala/chisel3/util/pla.scala:78:21]
-  wire [29:0] _decoded_andMatrixOutputs_T =
+  wire [31:0] _decoded_andMatrixOutputs_T =
     {instruction[0],
      instruction[1],
      decoded_invInputs[0],
@@ -21,6 +22,8 @@ module CSRDecoder(	// @[src/main/GCD.scala:8:7]
      decoded_invInputs[7],
      decoded_invInputs[8],
      decoded_invInputs[9],
+     decoded_invInputs[10],
+     decoded_invInputs[11],
      decoded_invInputs[12],
      decoded_invInputs[13],
      decoded_invInputs[14],
@@ -57,7 +60,7 @@ module CSRDecoder(	// @[src/main/GCD.scala:8:7]
      instruction[5],
      instruction[6],
      instruction[13]};	// @[src/main/scala/chisel3/util/pla.scala:78:21, :90:45, :91:29, :98:53]
-  wire [29:0] _decoded_andMatrixOutputs_T_4 =
+  wire [31:0] _decoded_andMatrixOutputs_T_4 =
     {instruction[0],
      instruction[1],
      decoded_invInputs[0],
@@ -70,6 +73,8 @@ module CSRDecoder(	// @[src/main/GCD.scala:8:7]
      decoded_invInputs[7],
      decoded_invInputs[8],
      decoded_invInputs[9],
+     decoded_invInputs[10],
+     decoded_invInputs[11],
      decoded_invInputs[12],
      decoded_invInputs[13],
      decoded_invInputs[14],
@@ -88,6 +93,8 @@ module CSRDecoder(	// @[src/main/GCD.scala:8:7]
      instruction[29],
      decoded_invInputs[28],
      decoded_invInputs[29]};	// @[src/main/scala/chisel3/util/pla.scala:78:21, :90:45, :91:29, :98:53]
+  assign system_func3_zero_o =
+    |{&_decoded_andMatrixOutputs_T, &_decoded_andMatrixOutputs_T_4};	// @[src/main/GCD.scala:8:7, src/main/scala/chisel3/util/pla.scala:98:{53,70}, :114:{19,36}]
   assign csr_wen_o =
     |{&_decoded_andMatrixOutputs_T,
       &_decoded_andMatrixOutputs_T_2,
