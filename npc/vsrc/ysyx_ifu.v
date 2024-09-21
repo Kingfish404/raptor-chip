@@ -103,18 +103,6 @@ module ysyx_ifu (
           bad_speculation_pc_change <= pc_change;
         end
       end
-      // if (speculation & ((
-      //   pc_change & npc == ifu_speculation) | (pc_retire & pc + 4 == ifu_speculation))) begin
-      //   good_speculation <= 1;
-      //   speculation <= 0;
-      //   ifu_b_speculation <= 0;
-      //   ifu_npc_bad_speculation <= npc;
-      // end
-      // if (speculation & (bad_speculationing)) begin
-      //   bad_speculation <= 1;
-      //   speculation <= 0;
-      //   bad_speculation_pc_change <= pc_change;
-      // end
       if (state == `YSYX_IDLE) begin
         if (prev_valid) begin
           if ((ifu_hazard) & !speculation & (pc_change | pc_retire) & l1i_ready) begin
