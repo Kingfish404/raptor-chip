@@ -111,11 +111,12 @@ module ysyx_ifu (
             //   pc_ifu <= pc_ifu + 4;
             // end
             pc_ifu <= pc_change ? npc : pc_ifu + 4;
+            if (pc_change) begin
+              btb <= npc;
+              btb_valid <= 1;
+            end
           end
-          if (pc_change) begin
-            btb <= npc;
-            btb_valid <= 1;
-          end
+
         end
       end else if (state == `YSYX_WAIT_READY) begin
         if (!bad_speculation_o & next_ready == 1 & valid_o) begin
