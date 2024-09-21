@@ -36,7 +36,8 @@ module ysyx_ifu (
   reg [DATA_W-1:0] pc_ifu;
   reg ifu_hazard = 0, ifu_lsu_hazard = 0, ifu_branch_hazard = 0;
 
-  reg [DATA_W-1:0] btb, ifu_speculation, ifu_npc_speculation, ifu_npc_bad_speculation;
+  reg [DATA_W-1:0] btb;
+  reg [DATA_W-1:0] ifu_speculation, ifu_npc_speculation, ifu_npc_bad_speculation;
   reg btb_valid, speculation, bad_speculation, ifu_b_speculation;
 
   wire [6:0] opcode_o = inst_o[6:0];
@@ -53,7 +54,7 @@ module ysyx_ifu (
    !bad_speculation & !(speculation & (is_load | is_store));
   assign ready_o = !valid_o;
 
-  // for speculation
+  // Branch Prediction
   assign speculation_o = speculation;
   assign good_speculation_o = good_speculation;
   assign bad_speculation_o = bad_speculation | bad_speculationing;
@@ -180,7 +181,6 @@ module ysyx_ifu (
          l1ic_valid[addr_idx] == 1'b1) & (l1i_tag[addr_idx][addr_offset] == addr_tag);
   wire ifu_sdram_arburst = `YSYX_I_SDRAM_ARBURST & (pc_ifu >= 'ha0000000) & (pc_ifu <= 'hc0000000);
 
-  // with l1i cache
   wire ifu_just_load = ((l1i_state == 'b11) & ifu_rvalid);
   assign inst_o = ifu_just_load & pc_ifu[2] == 1'b1 ? ifu_rdata : l1i[addr_idx][addr_offset];
 
