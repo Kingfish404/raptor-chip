@@ -190,7 +190,6 @@ int cmd_help(char *args)
 
 void sdb_mainloop()
 {
-  printf("NPC monitor: is_batch_mode = %d\n", is_batch_mode);
   if (is_batch_mode)
   {
     cmd_c(NULL);
