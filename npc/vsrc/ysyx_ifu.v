@@ -70,7 +70,7 @@ module ysyx_ifu (
       btb_valid <= 0;
       speculation <= 0;
     end else begin
-      if (bad_speculation & next_ready & l1i_state == 'b000) begin
+      if (bad_speculation & next_ready & l1i_ready) begin
         bad_speculation <= 0;
         speculation <= 0;
         ifu_hazard <= 0;
