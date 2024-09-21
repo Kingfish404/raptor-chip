@@ -230,7 +230,7 @@ module ysyx_ifu_l1i (
   assign ifu_required_o = (l1i_state != 'b00001);
 
   // with l1i cache
-  // assign inst_o = l1i[addr_idx][addr_offset];
+  assign inst_o = l1i[addr_idx][addr_offset];
 
   always @(posedge clk) begin
     if (rst) begin
@@ -240,9 +240,6 @@ module ysyx_ifu_l1i (
       if (invalid_l1i) begin
         l1i_valid <= 0;
       end else begin
-        if (l1i_cache_hit) begin
-          inst_o <= l1i[addr_idx][addr_offset];
-        end
         case (l1i_state)
           'b00001: begin
             if (ifu_arvalid_o) begin
