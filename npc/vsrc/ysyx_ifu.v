@@ -176,7 +176,6 @@ module ysyx_ifu (
   //     .ready_o(l1i_ready)
   // );
   assign invalid_l1i = valid_o & next_ready & is_fence;
-  assign l1i_valid;
 
   parameter bit [7:0] L1I_LINE_LEN = 1;
   parameter bit [7:0] L1I_LINE_SIZE = 2 ** L1I_LINE_LEN;
