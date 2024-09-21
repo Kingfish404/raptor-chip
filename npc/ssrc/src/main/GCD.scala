@@ -32,7 +32,7 @@ class CSRDecoder extends Module {
       CSRRSI -> BitPat("b011"),
       CSRRCI -> BitPat("b011")
     ),
-    BitPat("b100")
+    BitPat("b000")
   )
   val instruction = IO(Input(UInt(32.W)))
   val system_func3_zero_o = IO(Output(UInt(1.W)))
