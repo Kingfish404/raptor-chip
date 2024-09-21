@@ -49,7 +49,7 @@ module ysyx_ifu (
   wire is_store = (opcode_o == `YSYX_OP_S_TYPE);
   wire is_fence = (inst_o == `YSYX_INST_FENCE_I);
 
-  assign valid_o = (l1i_cache_hit & !ifu_hazard) &
+  assign valid_o = (l1i_valid & !ifu_hazard) &
    !bad_speculation & !(speculation & (is_load | is_store));
   assign ready_o = !valid_o;
 
@@ -102,7 +102,7 @@ module ysyx_ifu (
       end
       if (state == `YSYX_IDLE) begin
         if (prev_valid) begin
-          if ((ifu_hazard) & !speculation & (pc_change | pc_retire) & l1i_state == 'b000) begin
+          if ((ifu_hazard) & !speculation & (pc_change | pc_retire) & l1i_ready) begin
             ifu_hazard <= 0;
             ifu_lsu_hazard <= 0;
             ifu_branch_hazard <= 0;
@@ -149,12 +149,55 @@ module ysyx_ifu (
     end
   end
 
-  wire invalid_l1i = valid_o & next_ready & is_fence;
+  wire l1i_valid;
+  wire l1i_ready;
 
+  ysyx_ifu_l1i ifu_l1i (
+      .clk(clk),
+      .rst(rst),
+
+      .pc_ifu(pc_ifu),
+      .invalid_l1i(valid_o & next_ready & is_fence),
+
+      .ifu_araddr_o(ifu_araddr_o),
+      .ifu_arvalid_o(ifu_arvalid_o),
+      .ifu_required_o(ifu_required_o),
+      .ifu_rdata(ifu_rdata),
+      .ifu_rvalid(ifu_rvalid),
+
+      .inst_o(inst_o),
+
+      .valid_o(l1i_valid),
+      .ready_o(l1i_ready)
+  );
+endmodule  // ysyx_IFU
+
+module ysyx_ifu_l1i (
+    input clk,
+    input rst,
+
+    // for bus
+    output [DATA_W-1:0] ifu_araddr_o,
+    output ifu_arvalid_o,
+    output ifu_required_o,
+    input [DATA_W-1:0] ifu_rdata,
+    input ifu_rvalid,
+
+    input [DATA_W-1:0] pc_ifu,
+    input invalid_l1i,
+    // to ifu
+    output reg [DATA_W-1:0] inst_o,
+
+    output reg valid_o,
+    output reg ready_o
+);
   parameter bit [7:0] L1I_LINE_LEN = 1;
   parameter bit [7:0] L1I_LINE_SIZE = 2 ** L1I_LINE_LEN;
   parameter bit [7:0] L1I_LEN = 2;
   parameter bit [7:0] L1I_SIZE = 2 ** L1I_LEN;
+
+  assign valid_o = l1i_cache_hit;
+  assign ready_o = (l1i_state == 'b00001);
 
   reg [32-1:0] l1i[L1I_SIZE][L1I_LINE_SIZE];
   reg [L1I_SIZE-1:0] l1i_valid = 0;
@@ -228,4 +271,4 @@ module ysyx_ifu (
       endcase
     end
   end
-endmodule  // ysyx_IFU
+endmodule
