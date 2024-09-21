@@ -12,7 +12,7 @@ module ysyx_ifu (
     input [DATA_W-1:0] ifu_rdata,
     input ifu_rvalid,
 
-    input  [ADDR_W-1:0] npc,
+    input  [DATA_W-1:0] npc,
     output [DATA_W-1:0] inst_o,
     output [DATA_W-1:0] pc_o,
 
@@ -29,7 +29,6 @@ module ysyx_ifu (
     output valid_o,
     output ready_o
 );
-  parameter bit [7:0] ADDR_W = 32;
   parameter bit [7:0] DATA_W = 32;
 
   reg state;
@@ -50,6 +49,9 @@ module ysyx_ifu (
   wire is_store = (opcode_o == `YSYX_OP_S_TYPE);
   wire is_fence = (inst_o == `YSYX_INST_FENCE_I);
 
+  assign valid_o = (l1i_cache_hit & !ifu_hazard) &
+   !bad_speculation & !(speculation & (is_load | is_store));
+  assign ready_o = !valid_o;
 
   // for speculation
   assign speculation_o = speculation;
@@ -68,9 +70,6 @@ module ysyx_ifu (
       btb_valid <= 0;
       speculation <= 0;
     end else begin
-      if (valid_o & next_ready & is_fence) begin
-        l1i_valid <= 0;
-      end
       if (bad_speculation & next_ready & l1i_state == 'b000) begin
         bad_speculation <= 0;
         speculation <= 0;
@@ -150,6 +149,7 @@ module ysyx_ifu (
     end
   end
 
+  wire invalid_l1i = valid_o & next_ready & is_fence;
 
   parameter bit [7:0] L1I_LINE_LEN = 1;
   parameter bit [7:0] L1I_LINE_SIZE = 2 ** L1I_LINE_LEN;
@@ -161,10 +161,9 @@ module ysyx_ifu (
   reg [32-L1I_LEN-L1I_LINE_LEN-2-1:0] l1i_tag[L1I_SIZE][L1I_LINE_SIZE];
   reg [2:0] l1i_state = 0;
 
-  wire [32-L1I_LEN-L1I_LINE_LEN-2-1:0] addr_tag = pc_ifu[ADDR_W-1:L1I_LEN+L1I_LINE_LEN+2];
+  wire [32-L1I_LEN-L1I_LINE_LEN-2-1:0] addr_tag = pc_ifu[DATA_W-1:L1I_LEN+L1I_LINE_LEN+2];
   wire [L1I_LEN-1:0] addr_idx = pc_ifu[L1I_LEN+L1I_LINE_LEN+2-1:L1I_LINE_LEN+2];
   wire [L1I_LINE_LEN-1:0] addr_offset = pc_ifu[L1I_LINE_LEN+2-1:2];
-
 
   assign ifu_araddr_o = (l1i_state == 'b00 | l1i_state == 'b01) ? (pc_ifu & ~'h4) : (pc_ifu | 'h4);
   assign ifu_arvalid_o = ifu_sdram_arburst ?
@@ -180,9 +179,14 @@ module ysyx_ifu (
   // with l1i cache
   wire ifu_just_load = ((l1i_state == 'b11) & ifu_rvalid);
   assign inst_o = ifu_just_load & pc_ifu[2] == 1'b1 ? ifu_rdata : l1i[addr_idx][addr_offset];
-  assign valid_o = (l1i_cache_hit & !ifu_hazard) &
-   !bad_speculation & !(speculation & (is_load | is_store));
-  assign ready_o = !valid_o;
+
+  always @(posedge clk) begin
+    if (!rst) begin
+      if (invalid_l1i) begin
+        l1i_valid <= 0;
+      end
+    end
+  end
 
   always @(posedge clk) begin
     if (rst) begin
