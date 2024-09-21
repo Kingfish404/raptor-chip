@@ -141,8 +141,8 @@ module ysyx_idu (
     .clock(clk),
     .reset(rst),
     .instruction(inst_idu),
-    .csr_wen_o(0),
-    .system_o(0)
+    .csr_wen_o(),
+    .system_o()
   );
   always @(*) begin
     alu_op_o = 0; imm_o = 0; op1_o = 0; op2_o = 0; rd_o = 0;
