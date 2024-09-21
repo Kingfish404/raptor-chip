@@ -135,7 +135,7 @@ module ysyx_idu (
   //   ((imm_o[3:0] == `YSYX_OP_SYSTEM_CSRRSI)) |
   //   ((imm_o[3:0] == `YSYX_OP_SYSTEM_CSRRCI))
   // );
-  assign system_o = (opcode_o == `YSYX_OP_SYSTEM) | (opcode_o == `YSYX_OP_FENCE_I);
+  // assign system_o = (opcode_o == `YSYX_OP_SYSTEM) | (opcode_o == `YSYX_OP_FENCE_I);
   // assign system_func3_o = system_o & imm_SYS[3:0] == `YSYX_OP_SYSTEM_FUNC3;
   CSRDecoder csr_decoder (
     .clock(clk),
@@ -143,7 +143,7 @@ module ysyx_idu (
     .instruction(inst_idu),
     .system_func3_zero_o(system_func3_o),
     .csr_wen_o(csr_wen_o),
-    .system_o()
+    .system_o(system_o)
   );
   always @(*) begin
     alu_op_o = 0; imm_o = 0; op1_o = 0; op2_o = 0; rd_o = 0;
