@@ -199,7 +199,7 @@ module ysyx_ifu_l1i (
   parameter bit [7:0] L1I_SIZE = 2 ** L1I_LEN;
 
   assign valid_o = l1i_cache_hit;
-  assign ready_o = (l1i_state == 'b00001);
+  assign ready_o = (l1i_state == 'b000);
 
   reg [32-1:0] l1i[L1I_SIZE][L1I_LINE_SIZE];
   reg [L1I_SIZE-1:0] l1i_valid = 0;
