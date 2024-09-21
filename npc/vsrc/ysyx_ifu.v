@@ -72,24 +72,6 @@ module ysyx_ifu (
       btb_valid <= 0;
       speculation <= 0;
     end else begin
-      if (bad_speculation & next_ready & l1i_ready) begin
-        bad_speculation <= 0;
-        speculation <= 0;
-        ifu_hazard <= 0;
-        ifu_lsu_hazard <= 0;
-        ifu_branch_hazard <= 0;
-        ifu_b_speculation <= 0;
-        bad_speculation_pc_change <= 0;
-        if (ifu_b_speculation & !bad_speculation_pc_change) begin
-          pc_ifu <= ifu_npc_speculation;
-        end else begin
-          pc_ifu <= npc;
-        end
-      end
-      if (good_speculation) begin
-        good_speculation <= 0;
-        speculation <= 0;
-      end
       if (speculation) begin
         if (good_speculationing) begin
           good_speculation <= 1;
@@ -103,17 +85,32 @@ module ysyx_ifu (
           bad_speculation_pc_change <= pc_change;
         end
       end
+      if (bad_speculation & next_ready & l1i_ready) begin
+        bad_speculation <= 0;
+        speculation <= 0;
+        ifu_hazard <= 0;
+        ifu_lsu_hazard <= 0;
+        ifu_branch_hazard <= 0;
+        ifu_b_speculation <= 0;
+        bad_speculation_pc_change <= 0;
+        pc_ifu <= (ifu_b_speculation & !bad_speculation_pc_change) ? ifu_npc_speculation : npc;
+      end
+      if (good_speculation) begin
+        good_speculation <= 0;
+        speculation <= 0;
+      end
       if (state == `YSYX_IDLE) begin
         if (prev_valid) begin
           if ((ifu_hazard) & !speculation & (pc_change | pc_retire) & l1i_ready) begin
             ifu_hazard <= 0;
             ifu_lsu_hazard <= 0;
             ifu_branch_hazard <= 0;
-            if (pc_change) begin
-              pc_ifu <= npc;
-            end else if (pc_retire) begin
-              pc_ifu <= pc_ifu + 4;
-            end
+            // if (pc_change) begin
+            //   pc_ifu <= npc;
+            // end else if (pc_retire) begin
+            //   pc_ifu <= pc_ifu + 4;
+            // end
+            pc_ifu <= pc_change ? npc : pc_ifu + 4;
           end
           if (pc_change) begin
             btb <= npc;
