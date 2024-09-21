@@ -72,20 +72,20 @@ module ysyx_ifu (
       btb_valid <= 0;
       speculation <= 0;
     end else begin
-      if (state == `YSYX_IDLE) begin
-        if (speculation) begin
-          if (good_speculationing) begin
-            good_speculation <= 1;
-            speculation <= 0;
-            ifu_b_speculation <= 0;
-            ifu_npc_bad_speculation <= npc;
-          end
-          if ((bad_speculationing)) begin
-            bad_speculation <= 1;
-            speculation <= 0;
-            bad_speculation_pc_change <= pc_change;
-          end
+      if (speculation) begin
+        if (good_speculationing) begin
+          good_speculation <= 1;
+          speculation <= 0;
+          ifu_b_speculation <= 0;
+          ifu_npc_bad_speculation <= npc;
         end
+        if ((bad_speculationing)) begin
+          bad_speculation <= 1;
+          speculation <= 0;
+          bad_speculation_pc_change <= pc_change;
+        end
+      end
+      if (state == `YSYX_IDLE) begin
         if (bad_speculation & next_ready & l1i_ready) begin
           bad_speculation <= 0;
           speculation <= 0;
@@ -95,8 +95,7 @@ module ysyx_ifu (
           ifu_b_speculation <= 0;
           bad_speculation_pc_change <= 0;
           pc_ifu <= (ifu_b_speculation & !bad_speculation_pc_change) ? ifu_npc_speculation : npc;
-        end
-        if (good_speculation) begin
+        end else if (good_speculation) begin
           good_speculation <= 0;
           speculation <= 0;
         end
