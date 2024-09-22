@@ -64,7 +64,7 @@ module ysyx_exu (
   reg csr_wen_exu;
   wire csr_ecallen;
   reg [BIT_W-1:0] mem_rdata;
-  reg use_exu_npc, system_exu, system_func3_exu, ebreak;
+  reg use_exu_npc, system_exu, system_func3_exu;
 
   ysyx_exu_csr csr (
       .clk(clk),
