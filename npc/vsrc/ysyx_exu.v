@@ -84,15 +84,15 @@ module ysyx_exu (
   assign reg_wdata_o = {BIT_W{(rd_o != 0)}} & (
     (opcode_exu == `YSYX_OP_IL_TYPE) ? mem_rdata :
     (system_exu) ? csr_rdata : reg_wdata);
-  assign csr_addr = ((system_func3_exu) && imm_exu[15:4] ==
+  assign csr_addr = ((system_func3_exu) && imm_exu ==
       `YSYX_OP_SYSTEM_ECALL
       ?
       `YSYX_CSR_MCAUSE
-      : (system_func3_exu) && imm_exu[15:4] ==
+      : (system_func3_exu) && imm_exu ==
       `YSYX_OP_SYSTEM_MRET
       ?
       `YSYX_CSR_MSTATUS
-      : (imm_exu[15:4]));
+      : (imm_exu));
   assign csr_addr_add1 = (
     ((system_func3_exu) && imm_exu[15:4] == `YSYX_OP_SYSTEM_ECALL)
     ? `YSYX_CSR_MEPC: (0));
