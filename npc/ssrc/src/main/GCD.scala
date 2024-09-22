@@ -175,6 +175,7 @@ class Decoder extends Module with InstrType {
   val immjv = Cat(in.inst(31), in.inst(19, 12), in.inst(20), in.inst(30, 21))
   val imm_j = Cat(Fill(11, in.inst(31)), immjv, 0.U)
 
+  val imm = in.inst(31, 20)
   val csr = in.inst(31, 20)
 
   val decoded = decoder(in.inst, table)
@@ -196,7 +197,7 @@ class Decoder extends Module with InstrType {
     is(InstrB.U) { out.imm := imm_b; }
     is(InstrU.U) { out.rd := rd; out.imm := imm_u; }
     is(InstrJ.U) { out.rd := rd; out.imm := imm_j; }
-    is(InstrN.U) { out.rd := rd; }
+    is(InstrN.U) { out.rd := rd; out.imm := imm; }
     is(InstrCSR.U) { out.rd := rd; out.imm := csr; }
   }
 }

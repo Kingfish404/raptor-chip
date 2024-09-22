@@ -65,6 +65,7 @@ module ysyx_exu (
   wire csr_ecallen;
   reg [BIT_W-1:0] mem_rdata;
   reg use_exu_npc, system_exu, system_func3_exu;
+  reg [2:0] func3 = inst[14:12];
 
   ysyx_exu_csr csr (
       .clk(clk),
@@ -94,7 +95,7 @@ module ysyx_exu (
       `YSYX_CSR_MSTATUS
       : (imm_exu));
   assign csr_addr_add1 = (
-    ((system_func3_exu) && imm_exu[15:4] == `YSYX_OP_SYSTEM_ECALL)
+    ((system_func3_exu) && imm_exu == `YSYX_OP_SYSTEM_ECALL)
     ? `YSYX_CSR_MEPC: (0));
   assign addr_data = addr_exu;
   assign alu_op_o = alu_op_exu;
@@ -181,20 +182,20 @@ module ysyx_exu (
   );
 
   // branch/system unit
-  assign csr_wdata1 = ((system_func3_exu) && imm_exu[15:4] == `YSYX_OP_SYSTEM_ECALL) ? pc_exu : 'h0;
+  assign csr_wdata1 = ((system_func3_exu) && imm_exu == `YSYX_OP_SYSTEM_ECALL) ? pc_exu : 'h0;
   assign csr_ecallen = (
     ((system_exu) && (system_func3_exu))
-    && imm_exu[15:4] == `YSYX_OP_SYSTEM_ECALL);
+    && imm_exu == `YSYX_OP_SYSTEM_ECALL);
   assign csr_wdata = {BIT_W{(system_exu)}} & (
-    ({BIT_W{((system_func3_exu) && (imm_exu[15:4] == `YSYX_OP_SYSTEM_ECALL))}} & 'hb) |
-    ({BIT_W{((system_func3_exu) && (imm_exu[15:4] == `YSYX_OP_SYSTEM_MRET))}} &
+    ({BIT_W{((system_func3_exu) && (imm_exu == `YSYX_OP_SYSTEM_ECALL))}} & 'hb) |
+    ({BIT_W{((system_func3_exu) && (imm_exu == `YSYX_OP_SYSTEM_MRET))}} &
      {{csr_rdata[BIT_W-1:'h8]}, 1'b1, {csr_rdata[6:4]}, csr_rdata['h7], csr_rdata[2:0]}) |
-    ({BIT_W{((imm_exu[3:0] == `YSYX_OP_SYSTEM_CSRRW))}} & src1) |
-    ({BIT_W{((imm_exu[3:0] == `YSYX_OP_SYSTEM_CSRRS))}} & (csr_rdata | src1)) |
-    ({BIT_W{((imm_exu[3:0] == `YSYX_OP_SYSTEM_CSRRC))}} & (csr_rdata & ~src1)) |
-    ({BIT_W{((imm_exu[3:0] == `YSYX_OP_SYSTEM_CSRRWI))}} & src1) |
-    ({BIT_W{((imm_exu[3:0] == `YSYX_OP_SYSTEM_CSRRSI))}} & (csr_rdata | src1)) |
-    ({BIT_W{((imm_exu[3:0] == `YSYX_OP_SYSTEM_CSRRCI))}} & (csr_rdata & ~src1))
+    ({BIT_W{((func3 == `YSYX_OP_SYSTEM_CSRRW))}} & src1) |
+    ({BIT_W{((func3 == `YSYX_OP_SYSTEM_CSRRS))}} & (csr_rdata | src1)) |
+    ({BIT_W{((func3 == `YSYX_OP_SYSTEM_CSRRC))}} & (csr_rdata & ~src1)) |
+    ({BIT_W{((func3 == `YSYX_OP_SYSTEM_CSRRWI))}} & src1) |
+    ({BIT_W{((func3 == `YSYX_OP_SYSTEM_CSRRSI))}} & (csr_rdata | src1)) |
+    ({BIT_W{((func3 == `YSYX_OP_SYSTEM_CSRRCI))}} & (csr_rdata & ~src1))
   );
   assign branch_retire_o = (
     (system_exu) | (opcode_exu == `YSYX_OP_B_TYPE) |
@@ -203,7 +204,7 @@ module ysyx_exu (
 
   always_comb begin
     if (system_exu & system_func3_exu) begin
-      case (imm_exu[15:4])
+      case (imm_exu)
         `YSYX_OP_SYSTEM_ECALL: begin
           npc_wdata_o = mtvec;
         end
@@ -223,7 +224,7 @@ module ysyx_exu (
     case (opcode_exu)
       `YSYX_OP_SYSTEM: begin
         if (system_func3_exu) begin
-          case (imm_exu[15:4])
+          case (imm_exu)
             `YSYX_OP_SYSTEM_ECALL: begin
               use_exu_npc = 1;
             end
