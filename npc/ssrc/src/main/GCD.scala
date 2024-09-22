@@ -215,7 +215,6 @@ class ysyx_idu_decoder extends Module with InstrType with Instr {
       }.otherwise {
         out.op1 := in.rs1v; out.op2 := imm_i;
       }
-      out.op1 := in.rs1v; out.op2 := imm_i;
     }
     is(InstrS.U) { out.imm := imm_s; out.op1 := in.rs1v; out.op2 := in.rs2v; }
     is(InstrB.U) { 
