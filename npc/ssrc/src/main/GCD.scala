@@ -109,7 +109,7 @@ class ysyx_idu_decoder extends Module with InstrType with Instr {
       LUI___ -> BitPat(InstrU),
       AUIPC_ -> BitPat(InstrU),
       JAL___ -> BitPat(InstrJ),
-      JALR__ -> BitPat(InstrJ),
+      JALR__ -> BitPat(InstrI),
       BEQ___ -> BitPat(InstrB),
       BNE___ -> BitPat(InstrB),
       BLT___ -> BitPat(InstrB),
@@ -208,7 +208,15 @@ class ysyx_idu_decoder extends Module with InstrType with Instr {
   out.op2 := 0.U
   switch(wire) {
     is(InstrR.U) { out.rd := rd; out.op1 := in.rs1v; out.op2 := in.rs2v; }
-    is(InstrI.U) { out.rd := rd; out.imm := imm_i; out.op1 := in.rs1v; out.op2 := imm_i; }
+    is(InstrI.U) { 
+      out.rd := rd; out.imm := imm_i;
+      when (opcode === 0b1100111.U) {
+        out.op1 := in.pc; out.op2 := 4.U;
+      }.otherwise {
+        out.op1 := in.rs1v; out.op2 := imm_i;
+      }
+      out.op1 := in.rs1v; out.op2 := imm_i;
+    }
     is(InstrS.U) { out.imm := imm_s; out.op1 := in.rs1v; out.op2 := in.rs2v; }
     is(InstrB.U) { 
       out.imm := imm_b;
