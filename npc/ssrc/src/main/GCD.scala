@@ -109,7 +109,7 @@ class ysyx_idu_decoder extends Module with InstrType with Instr {
       LUI___ -> BitPat(InstrU),
       AUIPC_ -> BitPat(InstrU),
       JAL___ -> BitPat(InstrJ),
-      JALR__ -> BitPat(InstrI),
+      JALR__ -> BitPat(InstrJ),
       BEQ___ -> BitPat(InstrB),
       BNE___ -> BitPat(InstrB),
       BLT___ -> BitPat(InstrB),

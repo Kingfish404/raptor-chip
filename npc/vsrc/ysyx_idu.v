@@ -160,7 +160,8 @@ module ysyx_idu (
     .out_sys_system(system_o)
   );
   always @(*) begin
-    alu_op_o = 0; op1_o = 0; op2_o = 0;
+    alu_op_o = 0;
+    // op1_o = 0; op2_o = 0;
       case (opcode_o)
         `YSYX_OP_LUI:     begin alu_op_o = `YSYX_ALU_OP_ADD; end
         `YSYX_OP_AUIPC:   begin alu_op_o = `YSYX_ALU_OP_ADD; end
