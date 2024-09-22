@@ -60,14 +60,14 @@ module ysyx_idu (
   // };
   // wire [15:0] imm_SYS = {{imm_I}, {1'b0, funct3}};
   wire idu_hazard = valid & (
-    opcode_o != `YSYX_OP_LUI & opcode_o != `YSYX_OP_AUIPC & opcode_o != `YSYX_OP_JAL &
+    opcode != `YSYX_OP_LUI & opcode != `YSYX_OP_AUIPC & opcode != `YSYX_OP_JAL &
     ((rf_table[rs1[4-1:0]] == 1) & !(exu_valid & rs1[4-1:0] == exu_forward_rd)) |
     ((rf_table[rs2[4-1:0]] == 1) & !(exu_valid & rs2[4-1:0] == exu_forward_rd)) |
     (0)
     );
   wire [BIT_W-1:0] reg_rdata1 = exu_valid & rs1[4-1:0] == exu_forward_rd ? exu_forward : rdata1;
   wire [BIT_W-1:0] reg_rdata2 = exu_valid & rs2[4-1:0] == exu_forward_rd ? exu_forward : rdata2;
-  assign opcode_o = inst_idu[6:0];
+  wire opcode = inst_idu[6:0];
   assign valid_o = valid & !idu_hazard;
   assign ready_o = ready & !idu_hazard & next_ready;
   assign inst_o = inst_idu;
@@ -108,25 +108,25 @@ module ysyx_idu (
   end
 
   assign en_j_o = (
-    (opcode_o == `YSYX_OP_JAL) | (opcode_o == `YSYX_OP_JALR) |
-    (opcode_o == `YSYX_OP_B_TYPE) | (opcode_o == `YSYX_OP_SYSTEM) |
+    (opcode == `YSYX_OP_JAL) | (opcode == `YSYX_OP_JALR) |
+    (opcode == `YSYX_OP_B_TYPE) | (opcode == `YSYX_OP_SYSTEM) |
     (0)
   );
   assign rwaddr_o = (
-    {BIT_W{opcode_o == `YSYX_OP_IL_TYPE | opcode_o == `YSYX_OP_S_TYPE}} & reg_rdata1 + imm_o |
+    {BIT_W{opcode == `YSYX_OP_IL_TYPE | opcode == `YSYX_OP_S_TYPE}} & reg_rdata1 + imm_o |
     (0)
   );
   assign op_j_o = (
-    {BIT_W{opcode_o == `YSYX_OP_JAL | opcode_o == `YSYX_OP_B_TYPE}} & pc_idu |
-    {BIT_W{opcode_o == `YSYX_OP_JALR | opcode_o == `YSYX_OP_IL_TYPE | opcode_o == `YSYX_OP_S_TYPE}}
+    {BIT_W{opcode == `YSYX_OP_JAL | opcode == `YSYX_OP_B_TYPE}} & pc_idu |
+    {BIT_W{opcode == `YSYX_OP_JALR | opcode == `YSYX_OP_IL_TYPE | opcode == `YSYX_OP_S_TYPE}}
       & reg_rdata1 |
     (0)
   );
   assign rs1_o = rs1;
   assign rs2_o = rs2;
-  // assign wen_o = (opcode_o == `YSYX_OP_S_TYPE);
-  // assign ren_o = (opcode_o == `YSYX_OP_IL_TYPE);
-  // assign csr_wen_o = (opcode_o == `YSYX_OP_SYSTEM) && (
+  // assign wen_o = (opcode == `YSYX_OP_S_TYPE);
+  // assign ren_o = (opcode == `YSYX_OP_IL_TYPE);
+  // assign csr_wen_o = (opcode == `YSYX_OP_SYSTEM) && (
   //   ((imm_SYS[3:0] == `YSYX_OP_SYSTEM_FUNC3) && (imm_o[15:4] == `YSYX_OP_SYSTEM_ECALL)) |
   //   ((imm_SYS[3:0] == `YSYX_OP_SYSTEM_FUNC3) && (imm_o[15:4] == `YSYX_OP_SYSTEM_MRET)) |
   //   ((imm_o[3:0] == `YSYX_OP_SYSTEM_CSRRW)) |
@@ -136,7 +136,7 @@ module ysyx_idu (
   //   ((imm_o[3:0] == `YSYX_OP_SYSTEM_CSRRSI)) |
   //   ((imm_o[3:0] == `YSYX_OP_SYSTEM_CSRRCI))
   // );
-  // assign system_o = (opcode_o == `YSYX_OP_SYSTEM) | (opcode_o == `YSYX_OP_FENCE_I);
+  // assign system_o = (opcode == `YSYX_OP_SYSTEM) | (opcode == `YSYX_OP_FENCE_I);
   // assign system_func3_o = system_o & imm_SYS[3:0] == `YSYX_OP_SYSTEM_FUNC3;
   ysyx_idu_decoder idu_decoder (
     .clock(clk),
@@ -162,7 +162,7 @@ module ysyx_idu (
   always @(*) begin
     alu_op_o = 0;
     // op1_o = 0; op2_o = 0;
-      case (opcode_o)
+      case (opcode)
         `YSYX_OP_LUI:     begin alu_op_o = `YSYX_ALU_OP_ADD; end
         `YSYX_OP_AUIPC:   begin alu_op_o = `YSYX_ALU_OP_ADD; end
         `YSYX_OP_JAL:     begin alu_op_o = `YSYX_ALU_OP_ADD; end
@@ -188,7 +188,7 @@ module ysyx_idu (
   end
   // always @(*) begin
   //   alu_op_o = 0; op1_o = 0; op2_o = 0;
-  //     case (opcode_o)
+  //     case (opcode)
   //       `YSYX_OP_LUI:     begin op1_o = 0; op2_o = imm; alu_op_o = `YSYX_ALU_OP_ADD; end
   //       `YSYX_OP_AUIPC:   begin op1_o = pc_idu; op2_o = imm; alu_op_o = `YSYX_ALU_OP_ADD; end
   //       `YSYX_OP_JAL:     begin op1_o = pc_idu; op2_o = 4; alu_op_o = `YSYX_ALU_OP_ADD; end
