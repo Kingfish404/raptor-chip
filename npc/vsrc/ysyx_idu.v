@@ -160,7 +160,20 @@ module ysyx_idu (
         `YSYX_OP_AUIPC:   begin op1_o = pc_idu; op2_o = imm; alu_op_o = `YSYX_ALU_OP_ADD; end
         `YSYX_OP_JAL:     begin op1_o = pc_idu; op2_o = 4; alu_op_o = `YSYX_ALU_OP_ADD; end
         `YSYX_OP_JALR:    begin op1_o = pc_idu; op2_o = 4; alu_op_o = `YSYX_ALU_OP_ADD; end
-        `YSYX_OP_B_TYPE:  begin `YSYX_B_TYPE(reg_rdata1, {1'b0, funct3}, reg_rdata2); end
+        `YSYX_OP_B_TYPE:  begin
+          `YSYX_B_TYPE(reg_rdata1, {1'b0, funct3}, reg_rdata2);
+          op1_o = ({1'b0, funct3} == `YSYX_ALU_OP_BGE || {1'b0, funct3} == `YSYX_ALU_OP_BGEU) ? reg_rdata2 : reg_rdata1;
+          op2_o = ({1'b0, funct3} == `YSYX_ALU_OP_BGE || {1'b0, funct3} == `YSYX_ALU_OP_BGEU) ? reg_rdata1 : reg_rdata2;
+          alu_op_o = ( \
+            ({4{({1'b0, funct3} == `YSYX_ALU_OP_BEQ)}} & `YSYX_ALU_OP_SUB) |
+            ({4{({1'b0, funct3} == `YSYX_ALU_OP_BNE)}} & `YSYX_ALU_OP_XOR) |
+            ({4{({1'b0, funct3} == `YSYX_ALU_OP_BLT)}} & `YSYX_ALU_OP_SLT) |
+            ({4{({1'b0, funct3} == `YSYX_ALU_OP_BLTU)}} & `YSYX_ALU_OP_SLTU) |
+            ({4{({1'b0, funct3} == `YSYX_ALU_OP_BGE)}} & `YSYX_ALU_OP_SLE) |
+            ({4{({1'b0, funct3} == `YSYX_ALU_OP_BGEU)}} & `YSYX_ALU_OP_SLEU) |
+            `YSYX_ALU_OP_ADD
+          );
+          end
         `YSYX_OP_I_TYPE:  begin op1_o = reg_rdata1; op2_o = imm; alu_op_o = {(funct3 == 3'b101) ? funct7[5]: 1'b0, funct3}; end
         `YSYX_OP_IL_TYPE: begin op1_o = reg_rdata1; op2_o = imm; alu_op_o = {1'b0, funct3}; end
         `YSYX_OP_S_TYPE:  begin op1_o = reg_rdata1; op2_o = reg_rdata2; alu_op_o = {1'b0, funct3}; end

@@ -1,23 +1,5 @@
 `include "ysyx_macro.vh"
 
-`define YSYX_R_TYPE(op1, alu_op, op2)  begin \
-  op1_o = op1; \
-  op2_o = op2; \
-  alu_op_o = alu_op; \
-end
-
-`define YSYX_I_TYPE(op1, alu_op, op2)  begin \
-  op1_o = op1; \
-  op2_o = op2; \
-  alu_op_o = alu_op; \
-end
-
-`define YSYX_S_TYPE(op1, alu_op, op2) begin \
-  op1_o = op1; \
-  op2_o = op2; \
-  alu_op_o = alu_op; \
-end
-
 `define YSYX_B_TYPE(op1, alu_op, op2) begin \
   op1_o = (alu_op == `YSYX_ALU_OP_BGE || alu_op == `YSYX_ALU_OP_BGEU) ? op2 : op1; \
   op2_o = (alu_op == `YSYX_ALU_OP_BGE || alu_op == `YSYX_ALU_OP_BGEU) ? op1 : op2; \
@@ -30,10 +12,4 @@ end
     ({4{(alu_op == `YSYX_ALU_OP_BGEU)}} & `YSYX_ALU_OP_SLEU) | \
     `YSYX_ALU_OP_ADD \
   ); \
-end
-
-`define YSYX_I_SYS_TYPE(op1, alu_op, op2)  begin \
-  op1_o = op1; \
-  op2_o = op2; \
-  alu_op_o = alu_op; \
 end
