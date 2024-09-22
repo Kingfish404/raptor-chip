@@ -142,7 +142,7 @@ module ysyx_idu (
     .clock(clk),
     .reset(rst),
     .instruction(inst_idu),
-    .ebreak_o(ebreak_o),
+    .ebreak(ebreak_o),
     .system_func3_zero_o(system_func3_o),
     .csr_wen_o(csr_wen_o),
     .system_o(system_o)
