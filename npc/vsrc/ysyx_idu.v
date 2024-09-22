@@ -52,13 +52,13 @@ module ysyx_idu (
   wire [3:0] rs1 = inst_idu[18:15], rs2 = inst_idu[23:20], rd = inst_idu[10:7];
   wire [2:0] funct3 = inst_idu[14:12];
   wire [6:0] funct7 = inst_idu[31:25];
-  wire [11:0] imm_I = inst_idu[31:20], imm_S = {inst_idu[31:25], inst_idu[11:7]};
-  wire [12:0] imm_B = {inst_idu[31], inst_idu[7], inst_idu[30:25], inst_idu[11:8], 1'b0};
-  wire [31:0] imm_U = {inst_idu[31:12], 12'b0};
-  wire [20:0] imm_J = {
-    inst_idu[31], inst_idu[19:12], inst_idu[20], inst_idu[30:25], inst_idu[24:21], 1'b0
-  };
-  wire [15:0] imm_SYS = {{imm_I}, {1'b0, funct3}};
+  // wire [11:0] imm_I = inst_idu[31:20], imm_S = {inst_idu[31:25], inst_idu[11:7]};
+  // wire [12:0] imm_B = {inst_idu[31], inst_idu[7], inst_idu[30:25], inst_idu[11:8], 1'b0};
+  // wire [31:0] imm_U = {inst_idu[31:12], 12'b0};
+  // wire [20:0] imm_J = {
+  //   inst_idu[31], inst_idu[19:12], inst_idu[20], inst_idu[30:25], inst_idu[24:21], 1'b0
+  // };
+  // wire [15:0] imm_SYS = {{imm_I}, {1'b0, funct3}};
   wire idu_hazard = valid & (
     opcode_o != `YSYX_OP_LUI & opcode_o != `YSYX_OP_AUIPC & opcode_o != `YSYX_OP_JAL &
     ((rf_table[rs1[4-1:0]] == 1) & !(exu_valid & rs1[4-1:0] == exu_forward_rd)) |
