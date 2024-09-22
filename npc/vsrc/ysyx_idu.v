@@ -141,7 +141,7 @@ module ysyx_idu (
     .clock(clk),
     .reset(rst),
 
-    .in_instruction(inst_idu),
+    .in_inst(inst_idu),
     .out_inst_type(),
     .out_rd(rd_o),
     .out_imm(imm_o),
