@@ -142,7 +142,6 @@ module ysyx_idu (
     .reset(rst),
 
     .in_instruction(inst_idu),
-    .in_rd(rd),
     .out_inst_type(),
     .out_rd(rd_o),
 

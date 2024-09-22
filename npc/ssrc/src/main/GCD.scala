@@ -152,7 +152,6 @@ class Decoder extends Module with InstrType {
   )
   val in = IO(new Bundle {
     val instruction = Input(UInt(32.W))
-    val rd = Input(UInt(4.W))
   })
   val out = IO(new Bundle {
     val inst_type = Output(UInt(4.W))
@@ -164,6 +163,7 @@ class Decoder extends Module with InstrType {
     val csr_wen = Output(UInt(1.W))
     val system = Output(UInt(1.W))
   })
+  val rd = in.instruction(11, 7)
 
   val decoded = decoder(in.instruction, table)
   out_sys.ebreak := decoded(3)
@@ -177,13 +177,13 @@ class Decoder extends Module with InstrType {
   out.inst_type := inst_type
   out.rd := 0.U
   switch(wire) {
-    is(InstrR.U) { out.rd := in.rd; }
-    is(InstrI.U) { out.rd := in.rd; }
+    is(InstrR.U) { out.rd := rd; }
+    is(InstrI.U) { out.rd := rd; }
     is(InstrS.U) {}
     is(InstrB.U) {}
-    is(InstrU.U) { out.rd := in.rd; }
-    is(InstrJ.U) { out.rd := in.rd; }
-    is(InstrN.U) { out.rd := in.rd; }
+    is(InstrU.U) { out.rd := rd; }
+    is(InstrJ.U) { out.rd := rd; }
+    is(InstrN.U) { out.rd := rd; }
   }
 }
 
