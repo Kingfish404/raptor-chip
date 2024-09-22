@@ -16,6 +16,8 @@ trait InstrType {
   def InstrU = "b0110"
   def InstrJ = "b0111"
   def InstrA = "b1110"
+
+  def InstrCSR = "b1111"
 }
 
 class Decoder extends Module with InstrType {
@@ -141,12 +143,12 @@ class Decoder extends Module with InstrType {
       EBREAK -> BitPat(InstrN),
       MRET__ -> BitPat(InstrN),
       FENCEI -> BitPat(InstrN),
-      CSRRW_ -> BitPat(InstrN),
-      CSRRS_ -> BitPat(InstrN),
-      CSRRC_ -> BitPat(InstrN),
-      CSRRWI -> BitPat(InstrN),
-      CSRRSI -> BitPat(InstrN),
-      CSRRCI -> BitPat(InstrN)
+      CSRRW_ -> BitPat(InstrCSR),
+      CSRRS_ -> BitPat(InstrCSR),
+      CSRRC_ -> BitPat(InstrCSR),
+      CSRRWI -> BitPat(InstrCSR),
+      CSRRSI -> BitPat(InstrCSR),
+      CSRRCI -> BitPat(InstrCSR)
     ),
     BitPat(InstrN)
   )
@@ -173,6 +175,8 @@ class Decoder extends Module with InstrType {
   val immjv = Cat(in.inst(31), in.inst(19, 12), in.inst(20), in.inst(30, 21))
   val imm_j = Cat(Fill(11, in.inst(31)), immjv, 0.U)
 
+  val csr = in.inst(31, 20)
+
   val decoded = decoder(in.inst, table)
   out_sys.ebreak := decoded(3)
   out_sys.system_func3_zero := decoded(2)
@@ -193,6 +197,7 @@ class Decoder extends Module with InstrType {
     is(InstrU.U) { out.rd := rd; out.imm := imm_u; }
     is(InstrJ.U) { out.rd := rd; out.imm := imm_j; }
     is(InstrN.U) { out.rd := rd; }
+    is(InstrCSR.U) { out.rd := rd; out.imm := csr; }
   }
 }
 
