@@ -32,18 +32,6 @@ end
   ); \
 end
 
-`define YSYX_U_TYPE(op1, alu_op)  begin \
-  op1_o = op1;    \
-  op2_o = imm_o;  \
-  alu_op_o = alu_op; \
-end
-
-`define YSYX_J_TYPE(op1, alu_op, op2)  begin \
-  op1_o = op1; \
-  op2_o = op2; \
-  alu_op_o = alu_op; \
-end
-
 `define YSYX_I_SYS_TYPE(op1, alu_op, op2)  begin \
   op1_o = op1; \
   op2_o = op2; \
