@@ -118,7 +118,7 @@ void perf_sample_per_inst()
     return;
   }
   pmu.instr_cnt++;
-  switch (*(uint8_t *)&(CONCAT(VERILOG_PREFIX, exu__DOT__opcode_exu)))
+  switch (*(uint8_t *)&(CONCAT(VERILOG_PREFIX, exu__DOT__opcode)))
   {
   case 0b0000011: // I type: lb, lh, lw, lbu, lhu
     pmu.ld_inst_cnt++;
