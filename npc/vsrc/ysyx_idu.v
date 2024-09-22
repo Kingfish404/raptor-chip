@@ -52,6 +52,7 @@ module ysyx_idu (
   wire [3:0] rs1 = inst_idu[18:15], rs2 = inst_idu[23:20], rd = inst_idu[10:7];
   wire [2:0] funct3 = inst_idu[14:12];
   wire [6:0] funct7 = inst_idu[31:25];
+  wire [31:0] imm;
   // wire [11:0] imm_I = inst_idu[31:20], imm_S = {inst_idu[31:25], inst_idu[11:7]};
   // wire [12:0] imm_B = {inst_idu[31], inst_idu[7], inst_idu[30:25], inst_idu[11:8], 1'b0};
   // wire [31:0] imm_U = {inst_idu[31:12], 12'b0};
@@ -72,6 +73,7 @@ module ysyx_idu (
   assign ready_o = ready & !idu_hazard & next_ready;
   assign inst_o = inst_idu;
   assign pc_o = pc_idu;
+  assign imm_o = imm;
 
   reg state;
   `YSYX_BUS_FSM()
@@ -137,14 +139,14 @@ module ysyx_idu (
   // );
   // assign system_o = (opcode_o == `YSYX_OP_SYSTEM) | (opcode_o == `YSYX_OP_FENCE_I);
   // assign system_func3_o = system_o & imm_SYS[3:0] == `YSYX_OP_SYSTEM_FUNC3;
-  Decoder idu_decoder (
+  ysyx_idu_decoder idu_decoder (
     .clock(clk),
     .reset(rst),
 
     .in_inst(inst_idu),
     .out_inst_type(),
     .out_rd(rd_o),
-    .out_imm(imm_o),
+    .out_imm(imm),
 
     .out_sys_ebreak(ebreak_o),
     .out_sys_system_func3_zero(system_func3_o),
@@ -153,17 +155,15 @@ module ysyx_idu (
   );
   always @(*) begin
     alu_op_o = 0; op1_o = 0; op2_o = 0;
-    // imm_o = 0;
-    // rd_o = 0;
       case (opcode_o)
-        `YSYX_OP_LUI:     begin `YSYX_U_TYPE(   0, `YSYX_ALU_OP_ADD);                 end
-        `YSYX_OP_AUIPC:   begin `YSYX_U_TYPE(pc_o, `YSYX_ALU_OP_ADD);                 end
+        `YSYX_OP_LUI:     begin op1_o = 0; op2_o = imm; alu_op_o = `YSYX_ALU_OP_ADD; end
+        `YSYX_OP_AUIPC:   begin op1_o = pc_idu; op2_o = imm; alu_op_o = `YSYX_ALU_OP_ADD; end
         `YSYX_OP_JAL:     begin `YSYX_J_TYPE(pc_o, `YSYX_ALU_OP_ADD, 4);              end
         `YSYX_OP_JALR:    begin `YSYX_I_TYPE(pc_o, `YSYX_ALU_OP_ADD, 4);              end
         `YSYX_OP_B_TYPE:  begin `YSYX_B_TYPE(reg_rdata1, {1'b0, funct3}, reg_rdata2); end
         `YSYX_OP_I_TYPE:  begin
-          `YSYX_I_TYPE(reg_rdata1, {(funct3 == 3'b101) ? funct7[5]: 1'b0, funct3}, imm_o);end
-        `YSYX_OP_IL_TYPE: begin `YSYX_I_TYPE(reg_rdata1, {1'b0, funct3}, imm_o);          end
+          `YSYX_I_TYPE(reg_rdata1, {(funct3 == 3'b101) ? funct7[5]: 1'b0, funct3}, imm);end
+        `YSYX_OP_IL_TYPE: begin `YSYX_I_TYPE(reg_rdata1, {1'b0, funct3}, imm);          end
         `YSYX_OP_S_TYPE:  begin `YSYX_S_TYPE(reg_rdata1, {1'b0, funct3}, reg_rdata2);     end
         `YSYX_OP_R_TYPE:  begin `YSYX_R_TYPE(reg_rdata1, {funct7[5], funct3}, reg_rdata2);end
         `YSYX_OP_SYSTEM:  begin `YSYX_I_SYS_TYPE(reg_rdata1, {1'b0, funct3}, 0)           end
