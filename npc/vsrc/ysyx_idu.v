@@ -144,9 +144,15 @@ module ysyx_idu (
     .reset(rst),
 
     .in_inst(inst_idu),
+    .in_pc(pc_idu),
+    .in_rs1v(reg_rdata1),
+    .in_rs2v(reg_rdata2),
+
     .out_inst_type(),
     .out_rd(rd_o),
     .out_imm(imm),
+    .out_op1(op1_o),
+    .out_op2(op2_o),
 
     .out_sys_ebreak(ebreak_o),
     .out_sys_system_func3_zero(system_func3_o),

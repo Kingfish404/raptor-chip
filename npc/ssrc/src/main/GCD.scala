@@ -9,6 +9,7 @@ import scala.annotation.switch
 
 trait InstrType {
   def InstrN = "b0000"
+
   def InstrI = "b0100"
   def InstrR = "b0101"
   def InstrS = "b0010"
@@ -20,7 +21,10 @@ trait InstrType {
   def InstrCSR = "b1111"
 }
 
-class ysyx_idu_decoder extends Module with InstrType {
+trait Instr {
+  def LUI_OPCODE = 0b0110111.U
+  def AUIPC_OPCODE = 0b0010111.U
+
   def LUI___ = BitPat("b??????? ????? ????? ??? ????? 0110111")
   def AUIPC_ = BitPat("b??????? ????? ????? ??? ????? 0010111")
   def JAL___ = BitPat("b??????? ????? ????? ??? ????? 1101111")
@@ -82,6 +86,9 @@ class ysyx_idu_decoder extends Module with InstrType {
   def CSRRWI = BitPat("b??????? ????? ????? 101 ????? 1110011")
   def CSRRSI = BitPat("b??????? ????? ????? 110 ????? 1110011")
   def CSRRCI = BitPat("b??????? ????? ????? 111 ????? 1110011")
+}
+
+class ysyx_idu_decoder extends Module with InstrType with Instr {
   val table = TruthTable(
     Map(
       ECALL_ -> BitPat("b0111"),
@@ -154,11 +161,16 @@ class ysyx_idu_decoder extends Module with InstrType {
   )
   val in = IO(new Bundle {
     val inst = Input(UInt(32.W))
+    val pc = Input(UInt(32.W))
+    val rs1v = Input(UInt(32.W))
+    val rs2v = Input(UInt(32.W))
   })
   val out = IO(new Bundle {
     val inst_type = Output(UInt(4.W))
     val rd = Output(UInt(4.W))
     val imm = Output(UInt(32.W))
+    val op1 = Output(UInt(32.W))
+    val op2 = Output(UInt(32.W))
   })
   val out_sys = IO(new Bundle {
     var ebreak = Output(UInt(1.W))
@@ -167,6 +179,8 @@ class ysyx_idu_decoder extends Module with InstrType {
     val system = Output(UInt(1.W))
   })
   val rd = in.inst(11, 7)
+  val opcode = in.inst(6, 0)
+  val funct3 = in.inst(14, 12)
   val imm_i = Cat(Fill(20, in.inst(31)), in.inst(31, 20))
   val imm_s = Cat(Fill(20, in.inst(31)), in.inst(31, 25), in.inst(11, 7))
   val immbv = Cat(in.inst(31), in.inst(7), in.inst(30, 25), in.inst(11, 8))
@@ -190,14 +204,29 @@ class ysyx_idu_decoder extends Module with InstrType {
   out.inst_type := inst_type
   out.rd := 0.U
   out.imm := 0.U
+  out.op1 := 0.U
+  out.op2 := 0.U
   switch(wire) {
-    is(InstrR.U) { out.rd := rd; }
-    is(InstrI.U) { out.rd := rd; out.imm := imm_i; }
-    is(InstrS.U) { out.imm := imm_s; }
-    is(InstrB.U) { out.imm := imm_b; }
-    is(InstrU.U) { out.rd := rd; out.imm := imm_u; }
-    is(InstrJ.U) { out.rd := rd; out.imm := imm_j; }
-    is(InstrN.U) { out.rd := rd; out.imm := imm; }
+    is(InstrR.U) { out.rd := rd; out.op1 := in.rs1v; out.op2 := in.rs2v; }
+    is(InstrI.U) { out.rd := rd; out.imm := imm_i; out.op1 := in.rs1v; out.op2 := imm_i; }
+    is(InstrS.U) { out.imm := imm_s; out.op1 := in.rs1v; out.op2 := in.rs2v; }
+    is(InstrB.U) { 
+      out.imm := imm_b;
+      when (funct3 === 0b101.U || funct3 === 0b111.U) {
+        out.op1 := in.rs2v; out.op2 := in.rs1v;
+      }.otherwise {
+        out.op1 := in.rs1v; out.op2 := in.rs2v;
+      }
+    }
+    is(InstrU.U) {
+      out.rd := rd; out.imm := imm_u;
+      switch(opcode) {
+        is(LUI_OPCODE) { out.op1 := 0.U; out.op2 := imm_u; }
+        is(AUIPC_OPCODE) { out.op1 := in.pc; out.op2 := imm_u; }
+      }
+    }
+    is(InstrJ.U) { out.rd := rd; out.imm := imm_j; out.op1 := in.pc; out.op2 := 4.U; }
+    is(InstrN.U) { out.rd := rd; out.imm := imm; out.op1 := in.rs1v; }
     is(InstrCSR.U) { out.rd := rd; out.imm := csr; }
   }
 }
