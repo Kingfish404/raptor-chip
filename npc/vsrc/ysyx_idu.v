@@ -67,7 +67,7 @@ module ysyx_idu (
     );
   wire [BIT_W-1:0] reg_rdata1 = exu_valid & rs1[4-1:0] == exu_forward_rd ? exu_forward : rdata1;
   wire [BIT_W-1:0] reg_rdata2 = exu_valid & rs2[4-1:0] == exu_forward_rd ? exu_forward : rdata2;
-  wire opcode = inst_idu[6:0];
+  wire [6:0] opcode = inst_idu[6:0];
   assign valid_o = valid & !idu_hazard;
   assign ready_o = ready & !idu_hazard & next_ready;
   assign inst_o = inst_idu;
