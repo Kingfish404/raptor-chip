@@ -166,6 +166,7 @@ void cpu_exec(uint64_t n)
     }
   case NPC_QUIT:
     statistic();
+    printf("Simulation time: " FMT_WORD " us\n", g_timer);
     break;
   default:
     assert(0);
