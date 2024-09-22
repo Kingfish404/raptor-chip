@@ -162,15 +162,11 @@ module ysyx_idu (
   always @(*) begin
     alu_op_o = 0; op1_o = 0; op2_o = 0;
       case (opcode_o)
-        `YSYX_OP_LUI:     begin op1_o = 0; op2_o = imm; alu_op_o = `YSYX_ALU_OP_ADD; end
-        `YSYX_OP_AUIPC:   begin op1_o = pc_idu; op2_o = imm; alu_op_o = `YSYX_ALU_OP_ADD; end
-        `YSYX_OP_JAL:     begin op1_o = pc_idu; op2_o = 4; alu_op_o = `YSYX_ALU_OP_ADD; end
-        `YSYX_OP_JALR:    begin op1_o = pc_idu; op2_o = 4; alu_op_o = `YSYX_ALU_OP_ADD; end
+        `YSYX_OP_LUI:     begin alu_op_o = `YSYX_ALU_OP_ADD; end
+        `YSYX_OP_AUIPC:   begin alu_op_o = `YSYX_ALU_OP_ADD; end
+        `YSYX_OP_JAL:     begin alu_op_o = `YSYX_ALU_OP_ADD; end
+        `YSYX_OP_JALR:    begin alu_op_o = `YSYX_ALU_OP_ADD; end
         `YSYX_OP_B_TYPE:  begin
-          op1_o = ({1'b0, funct3} == `YSYX_ALU_OP_BGE || {1'b0, funct3} == `YSYX_ALU_OP_BGEU) ?
-            reg_rdata2 : reg_rdata1;
-          op2_o = ({1'b0, funct3} == `YSYX_ALU_OP_BGE || {1'b0, funct3} == `YSYX_ALU_OP_BGEU) ?
-            reg_rdata1 : reg_rdata2;
           alu_op_o = (
             ({4{({1'b0, funct3} == `YSYX_ALU_OP_BEQ)}} & `YSYX_ALU_OP_SUB) |
             ({4{({1'b0, funct3} == `YSYX_ALU_OP_BNE)}} & `YSYX_ALU_OP_XOR) |
@@ -181,13 +177,43 @@ module ysyx_idu (
             `YSYX_ALU_OP_ADD
           );
           end
-        `YSYX_OP_I_TYPE:  begin op1_o = reg_rdata1; op2_o = imm;
-          alu_op_o = {(funct3 == 3'b101) ? funct7[5]: 1'b0, funct3}; end
-        `YSYX_OP_IL_TYPE: begin op1_o = reg_rdata1; op2_o = imm; alu_op_o = {1'b0, funct3}; end
-        `YSYX_OP_S_TYPE:  begin op1_o = reg_rdata1; op2_o = reg_rdata2; alu_op_o = {1'b0, funct3}; end
-        `YSYX_OP_R_TYPE:  begin op1_o = reg_rdata1; op2_o = reg_rdata2; alu_op_o = {funct7[5], funct3}; end
-        `YSYX_OP_SYSTEM:  begin op1_o = reg_rdata1; op2_o = 0; alu_op_o = {1'b0, funct3}; end
+        `YSYX_OP_I_TYPE:  begin alu_op_o = {(funct3 == 3'b101) ? funct7[5]: 1'b0, funct3}; end
+        `YSYX_OP_IL_TYPE: begin alu_op_o = {1'b0, funct3}; end
+        `YSYX_OP_S_TYPE:  begin alu_op_o = {1'b0, funct3}; end
+        `YSYX_OP_R_TYPE:  begin alu_op_o = {funct7[5], funct3}; end
+        `YSYX_OP_SYSTEM:  begin alu_op_o = {1'b0, funct3}; end
         default:          begin if (valid) begin `YSYX_DPI_C_NPC_ILLEGAL_INST end         end
       endcase
   end
+  // always @(*) begin
+  //   alu_op_o = 0; op1_o = 0; op2_o = 0;
+  //     case (opcode_o)
+  //       `YSYX_OP_LUI:     begin op1_o = 0; op2_o = imm; alu_op_o = `YSYX_ALU_OP_ADD; end
+  //       `YSYX_OP_AUIPC:   begin op1_o = pc_idu; op2_o = imm; alu_op_o = `YSYX_ALU_OP_ADD; end
+  //       `YSYX_OP_JAL:     begin op1_o = pc_idu; op2_o = 4; alu_op_o = `YSYX_ALU_OP_ADD; end
+  //       `YSYX_OP_JALR:    begin op1_o = pc_idu; op2_o = 4; alu_op_o = `YSYX_ALU_OP_ADD; end
+  //       `YSYX_OP_B_TYPE:  begin
+  //         op1_o = ({1'b0, funct3} == `YSYX_ALU_OP_BGE || {1'b0, funct3} == `YSYX_ALU_OP_BGEU) ?
+  //           reg_rdata2 : reg_rdata1;
+  //         op2_o = ({1'b0, funct3} == `YSYX_ALU_OP_BGE || {1'b0, funct3} == `YSYX_ALU_OP_BGEU) ?
+  //           reg_rdata1 : reg_rdata2;
+  //         alu_op_o = (
+  //           ({4{({1'b0, funct3} == `YSYX_ALU_OP_BEQ)}} & `YSYX_ALU_OP_SUB) |
+  //           ({4{({1'b0, funct3} == `YSYX_ALU_OP_BNE)}} & `YSYX_ALU_OP_XOR) |
+  //           ({4{({1'b0, funct3} == `YSYX_ALU_OP_BLT)}} & `YSYX_ALU_OP_SLT) |
+  //           ({4{({1'b0, funct3} == `YSYX_ALU_OP_BLTU)}} & `YSYX_ALU_OP_SLTU) |
+  //           ({4{({1'b0, funct3} == `YSYX_ALU_OP_BGE)}} & `YSYX_ALU_OP_SLE) |
+  //           ({4{({1'b0, funct3} == `YSYX_ALU_OP_BGEU)}} & `YSYX_ALU_OP_SLEU) |
+  //           `YSYX_ALU_OP_ADD
+  //         );
+  //         end
+  //       `YSYX_OP_I_TYPE:  begin op1_o = reg_rdata1; op2_o = imm;
+  //         alu_op_o = {(funct3 == 3'b101) ? funct7[5]: 1'b0, funct3}; end
+  //       `YSYX_OP_IL_TYPE: begin op1_o = reg_rdata1; op2_o = imm; alu_op_o = {1'b0, funct3}; end
+  //       `YSYX_OP_S_TYPE:  begin op1_o = reg_rdata1; op2_o = reg_rdata2; alu_op_o = {1'b0, funct3}; end
+  //       `YSYX_OP_R_TYPE:  begin op1_o = reg_rdata1; op2_o = reg_rdata2; alu_op_o = {funct7[5], funct3}; end
+  //       `YSYX_OP_SYSTEM:  begin op1_o = reg_rdata1; op2_o = 0; alu_op_o = {1'b0, funct3}; end
+  //       default:          begin if (valid) begin `YSYX_DPI_C_NPC_ILLEGAL_INST end         end
+  //     endcase
+  // end
 endmodule  // ysyx_IDU
