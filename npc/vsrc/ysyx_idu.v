@@ -32,7 +32,6 @@ module ysyx_idu (
     output reg [3:0] rs2_o,
     output reg [3:0] rd_o,
     output reg [3:0] alu_op_o,
-    output [6:0] opcode_o,
     output [BIT_W-1:0] pc_o,
     output [31:0] inst_o,
     output speculation_o,
@@ -125,8 +124,8 @@ module ysyx_idu (
   );
   assign rs1_o = rs1;
   assign rs2_o = rs2;
-  assign wen_o = (opcode_o == `YSYX_OP_S_TYPE);
-  assign ren_o = (opcode_o == `YSYX_OP_IL_TYPE);
+  // assign wen_o = (opcode_o == `YSYX_OP_S_TYPE);
+  // assign ren_o = (opcode_o == `YSYX_OP_IL_TYPE);
   // assign csr_wen_o = (opcode_o == `YSYX_OP_SYSTEM) && (
   //   ((imm_SYS[3:0] == `YSYX_OP_SYSTEM_FUNC3) && (imm_o[15:4] == `YSYX_OP_SYSTEM_ECALL)) |
   //   ((imm_SYS[3:0] == `YSYX_OP_SYSTEM_FUNC3) && (imm_o[15:4] == `YSYX_OP_SYSTEM_MRET)) |
@@ -153,7 +152,7 @@ module ysyx_idu (
     .out_imm(imm),
     .out_op1(op1_o),
     .out_op2(op2_o),
-    .out_funct3(),
+    .out_wen(wen_o),
 
     .out_sys_ebreak(ebreak_o),
     .out_sys_system_func3_zero(system_func3_o),

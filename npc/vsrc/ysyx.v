@@ -301,7 +301,6 @@ module ysyx (
       .rs2_o(rs2),
       .rd_o(rd),
       .alu_op_o(alu_op),
-      .opcode_o(opcode),
       .pc_o(pc_idu),
       .inst_o(inst_idu),
       .speculation_o(speculation_idu),
@@ -338,7 +337,6 @@ module ysyx (
       .op_j(op_j),
       .rwaddr(rwaddr_idu),
       .alu_op(alu_op),
-      .opcode(opcode),
       .pc(pc_idu),
       .speculation(speculation_idu),
 

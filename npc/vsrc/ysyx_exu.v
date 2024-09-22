@@ -59,13 +59,14 @@ module ysyx_exu (
   wire [BIT_W-1:0] csr_wdata1, csr_rdata;
   wire [BIT_W-1:0] csr_wdata;
   reg [BIT_W-1:0] imm_exu, pc_exu, src1, src2, addr_exu;
+  reg [BIT_W-1:0] inst_exu;
   reg [3:0] alu_op_exu;
-  reg [6:0] opcode_exu;
+  reg [6:0] opcode_exu = inst_exu[6:0];
   reg csr_wen_exu;
   wire csr_ecallen;
   reg [BIT_W-1:0] mem_rdata;
   reg use_exu_npc, system_exu, system_func3_exu;
-  reg [2:0] func3 = inst[14:12];
+  reg [2:0] func3 = inst_exu[14:12];
 
   ysyx_exu_csr csr (
       .clk(clk),
@@ -101,6 +102,7 @@ module ysyx_exu (
   assign alu_op_o = alu_op_exu;
   assign use_exu_npc_o = use_exu_npc & valid_o;
   assign pc_o = pc_exu;
+  assign inst_o = inst_exu;
 
   reg state, alu_valid, lsu_avalid;
   reg lsu_valid = 0;
@@ -116,13 +118,12 @@ module ysyx_exu (
     end else begin
       // if (state == `YSYX_IDLE) begin
       if (prev_valid & ready_o) begin
-        inst_o <= inst;
+        inst_exu <= inst;
         imm_exu <= imm;
         pc_exu <= pc;
         src1 <= op1;
         src2 <= op2;
         alu_op_exu <= alu_op;
-        opcode_exu <= opcode;
         addr_exu <= op_j + imm;
         rd_o <= rd;
         ren_o <= ren;

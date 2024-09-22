@@ -171,7 +171,8 @@ class ysyx_idu_decoder extends Module with InstrType with Instr {
     val imm = Output(UInt(32.W))
     val op1 = Output(UInt(32.W))
     val op2 = Output(UInt(32.W))
-    val funct3 = Output(UInt(3.W))
+    val wen = Output(UInt(1.W))
+    val ren = Output(UInt(1.W))
   })
   val out_sys = IO(new Bundle {
     var ebreak = Output(UInt(1.W))
@@ -207,7 +208,8 @@ class ysyx_idu_decoder extends Module with InstrType with Instr {
   out.imm := 0.U
   out.op1 := 0.U
   out.op2 := 0.U
-  out.funct3 := funct3
+  out.wen := 0.U
+  out.ren := 0.U
   switch(wire) {
     is(InstrR.U) { out.rd := rd; out.op1 := in.rs1v; out.op2 := in.rs2v; }
     is(InstrI.U) { 
@@ -217,8 +219,12 @@ class ysyx_idu_decoder extends Module with InstrType with Instr {
       }.otherwise {
         out.op1 := in.rs1v; out.op2 := imm_i;
       }
+      when (opcode === 0b0000011.U) { out.ren := 1.U; }
     }
-    is(InstrS.U) { out.imm := imm_s; out.op1 := in.rs1v; out.op2 := in.rs2v; }
+    is(InstrS.U) {
+      out.imm := imm_s; out.op1 := in.rs1v; out.op2 := in.rs2v;
+      out.wen := 1.U;
+    }
     is(InstrB.U) { 
       out.imm := imm_b;
       switch (funct3) {
@@ -229,11 +235,6 @@ class ysyx_idu_decoder extends Module with InstrType with Instr {
         is(0b110.U) { out.op1 := in.rs1v; out.op2 := in.rs2v; }
         is(0b111.U) { out.op1 := in.rs2v; out.op2 := in.rs1v; }
       }
-      // when (funct3 === 0b101.U || funct3 === 0b111.U) {
-      //   out.op1 := in.rs2v; out.op2 := in.rs1v;
-      // }.otherwise {
-      //   out.op1 := in.rs1v; out.op2 := in.rs2v;
-      // }
     }
     is(InstrU.U) {
       out.rd := rd; out.imm := imm_u;
