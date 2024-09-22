@@ -171,6 +171,7 @@ class ysyx_idu_decoder extends Module with InstrType with Instr {
     val imm = Output(UInt(32.W))
     val op1 = Output(UInt(32.W))
     val op2 = Output(UInt(32.W))
+    val funct3 = Output(UInt(3.W))
   })
   val out_sys = IO(new Bundle {
     var ebreak = Output(UInt(1.W))
@@ -206,6 +207,7 @@ class ysyx_idu_decoder extends Module with InstrType with Instr {
   out.imm := 0.U
   out.op1 := 0.U
   out.op2 := 0.U
+  out.funct3 := funct3
   switch(wire) {
     is(InstrR.U) { out.rd := rd; out.op1 := in.rs1v; out.op2 := in.rs2v; }
     is(InstrI.U) { 
