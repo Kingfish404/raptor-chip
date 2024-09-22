@@ -153,7 +153,7 @@ module ysyx_idu (
     .out_imm(imm),
     .out_op1(op1_o),
     .out_op2(op2_o),
-    .out_func3(),
+    .out_funct3(),
 
     .out_sys_ebreak(ebreak_o),
     .out_sys_system_func3_zero(system_func3_o),
