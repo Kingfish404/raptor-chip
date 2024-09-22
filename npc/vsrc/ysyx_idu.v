@@ -101,7 +101,6 @@ module ysyx_idu (
             inst_idu <= 0;
             pc_idu <= 0;
           end
-          // if (prev_valid == 0) begin valid <= 0; end
         end
       end
     end
@@ -138,9 +137,14 @@ module ysyx_idu (
   // );
   // assign system_o = (opcode_o == `YSYX_OP_SYSTEM) | (opcode_o == `YSYX_OP_FENCE_I);
   // assign system_func3_o = system_o & imm_SYS[3:0] == `YSYX_OP_SYSTEM_FUNC3;
-  CSRDecoder csr_decoder (
+  Decoder idu_decoder (
     .clock(clk),
     .reset(rst),
+
+    .in_rd(rd),
+    .out_inst_type(),
+    .out_rd(rd_o),
+
     .instruction(inst_idu),
     .ebreak_o(ebreak_o),
     .system_func3_zero_o(system_func3_o),
@@ -148,7 +152,8 @@ module ysyx_idu (
     .system_o(system_o)
   );
   always @(*) begin
-    alu_op_o = 0; imm_o = 0; op1_o = 0; op2_o = 0; rd_o = 0;
+    alu_op_o = 0; imm_o = 0; op1_o = 0; op2_o = 0;
+    // rd_o = 0;
       case (opcode_o)
         `YSYX_OP_LUI:     begin `YSYX_U_TYPE(   0, `YSYX_ALU_OP_ADD);                 end
         `YSYX_OP_AUIPC:   begin `YSYX_U_TYPE(pc_o, `YSYX_ALU_OP_ADD);                 end
