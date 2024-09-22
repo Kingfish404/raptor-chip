@@ -9,7 +9,7 @@ import chisel3.util.experimental.decode._
 class CSRDecoder extends Module {
 
   def ECALL_ = BitPat("b0000000 00000 00000 000 00000 1110011")
-  def EBREAK = BitPat("b0011000 00010 00000 000 00000 1110011")
+  def EBREAK = BitPat("b0000000 00001 00000 000 00000 1110011")
   def MRET__ = BitPat("b0011000 00010 00000 000 00000 1110011")
 
   def FENCEI = BitPat("b??????? ????? ????? 001 ????? 0001111")
@@ -33,7 +33,7 @@ class CSRDecoder extends Module {
       CSRRSI -> BitPat("b0011"),
       CSRRCI -> BitPat("b0011")
     ),
-    BitPat("b000")
+    BitPat("b0000")
   )
   val instruction = IO(Input(UInt(32.W)))
   var ebreak_o = IO(Output(UInt(1.W)))
