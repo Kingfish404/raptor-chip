@@ -130,7 +130,7 @@ module ysyx_exu (
         system_exu <= system;
         system_func3_exu <= system_func3;
         csr_wen_exu <= csr_wen;
-        ebreak <= ebreak;
+        ebreak_o <= ebreak;
 
         alu_valid <= 1;
         speculation_o <= speculation;
@@ -200,7 +200,6 @@ module ysyx_exu (
     (system_exu) | (opcode_exu == `YSYX_OP_B_TYPE) |
     (opcode_exu == `YSYX_OP_IL_TYPE)
   );
-  assign ebreak_o = ebreak;
 
   always_comb begin
     if (system_exu & system_func3_exu) begin
