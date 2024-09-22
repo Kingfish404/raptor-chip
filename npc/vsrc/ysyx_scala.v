@@ -3,9 +3,10 @@ module CSRDecoder(	// @[src/main/GCD.scala:9:7]
   input         clock,	// @[src/main/GCD.scala:9:7]
                 reset,	// @[src/main/GCD.scala:9:7]
   input  [31:0] instruction,	// @[src/main/GCD.scala:38:23]
-  output        system_func3_zero_o,	// @[src/main/GCD.scala:39:31]
-                csr_wen_o,	// @[src/main/GCD.scala:40:21]
-                system_o	// @[src/main/GCD.scala:41:20]
+  output        ebreak,	// @[src/main/GCD.scala:39:18]
+                system_func3_zero_o,	// @[src/main/GCD.scala:40:31]
+                csr_wen_o,	// @[src/main/GCD.scala:41:21]
+                system_o	// @[src/main/GCD.scala:42:20]
 );
 
   wire [29:0] decoded_invInputs = ~(instruction[31:2]);	// @[src/main/GCD.scala:38:23, src/main/scala/chisel3/util/pla.scala:78:21]
@@ -93,6 +94,7 @@ module CSRDecoder(	// @[src/main/GCD.scala:9:7]
      instruction[29],
      decoded_invInputs[28],
      decoded_invInputs[29]};	// @[src/main/scala/chisel3/util/pla.scala:78:21, :90:45, :91:29, :98:53]
+  assign ebreak = 1'h0;	// @[src/main/GCD.scala:9:7, src/main/scala/chisel3/util/pla.scala:102:36]
   assign system_func3_zero_o =
     |{&_decoded_andMatrixOutputs_T, &_decoded_andMatrixOutputs_T_4};	// @[src/main/GCD.scala:9:7, src/main/scala/chisel3/util/pla.scala:98:{53,70}, :114:{19,36}]
   assign csr_wen_o =

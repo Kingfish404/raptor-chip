@@ -21,6 +21,7 @@ module ysyx_exu (
     input system,
     input system_func3,
     input csr_wen,
+    input ebreak,
 
     input [3:0] rd,
     input [BIT_W-1:0] imm,
@@ -63,7 +64,7 @@ module ysyx_exu (
   reg csr_wen_exu;
   wire csr_ecallen;
   reg [BIT_W-1:0] mem_rdata;
-  reg use_exu_npc, system_exu, system_func3_exu;
+  reg use_exu_npc, system_exu, system_func3_exu, ebreak;
 
   ysyx_exu_csr csr (
       .clk(clk),
@@ -125,9 +126,12 @@ module ysyx_exu (
         rd_o <= rd;
         ren_o <= ren;
         wen_o <= wen;
+
         system_exu <= system;
         system_func3_exu <= system_func3;
         csr_wen_exu <= csr_wen;
+        ebreak <= ebreak;
+
         alu_valid <= 1;
         speculation_o <= speculation;
         if (wen | ren) begin
@@ -196,7 +200,7 @@ module ysyx_exu (
     (system_exu) | (opcode_exu == `YSYX_OP_B_TYPE) |
     (opcode_exu == `YSYX_OP_IL_TYPE)
   );
-  assign ebreak_o = ((system_exu) & (system_func3_exu) & (imm_exu[15:4] == `YSYX_OP_SYSTEM_EBREAK));
+  assign ebreak_o = ebreak;
 
   always_comb begin
     if (system_exu & system_func3_exu) begin

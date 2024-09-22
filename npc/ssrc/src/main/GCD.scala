@@ -22,25 +22,27 @@ class CSRDecoder extends Module {
   def CSRRCI = BitPat("b??????? ????? ????? 111 ????? 1110011")
   val table = TruthTable(
     Map(
-      ECALL_ -> BitPat("b111"),
-      EBREAK -> BitPat("b111"),
-      MRET__ -> BitPat("b111"),
-      FENCEI -> BitPat("b001"),
-      CSRRW_ -> BitPat("b011"),
-      CSRRS_ -> BitPat("b011"),
-      CSRRC_ -> BitPat("b011"),
-      CSRRWI -> BitPat("b011"),
-      CSRRSI -> BitPat("b011"),
-      CSRRCI -> BitPat("b011")
+      ECALL_ -> BitPat("b0111"),
+      EBREAK -> BitPat("b1111"),
+      MRET__ -> BitPat("b0111"),
+      FENCEI -> BitPat("b0001"),
+      CSRRW_ -> BitPat("b0011"),
+      CSRRS_ -> BitPat("b0011"),
+      CSRRC_ -> BitPat("b0011"),
+      CSRRWI -> BitPat("b0011"),
+      CSRRSI -> BitPat("b0011"),
+      CSRRCI -> BitPat("b0011")
     ),
     BitPat("b000")
   )
   val instruction = IO(Input(UInt(32.W)))
+  var ebreak = IO(Output(UInt(1.W)))
   val system_func3_zero_o = IO(Output(UInt(1.W)))
   val csr_wen_o = IO(Output(UInt(1.W)))
   val system_o = IO(Output(UInt(1.W)))
 
   val decoded = decoder(instruction, table)
+  ebreak := decoded(3)
   system_func3_zero_o := decoded(2)
   csr_wen_o := decoded(1)
   system_o := decoded(0)

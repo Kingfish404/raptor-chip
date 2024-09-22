@@ -107,7 +107,7 @@ module ysyx (
   wire [REG_ADDR_W-1:0] rs1, rs2, rd;
   wire [3:0] alu_op;
   wire [6:0] opcode;
-  wire en_j, ren, wen, system, system_func3, csr_wen;
+  wire en_j, ren, wen, system, system_func3, csr_wen, ebreak_idu;
   wire speculation_idu;
   wire idu_valid, idu_ready;
 
@@ -290,6 +290,7 @@ module ysyx (
       .system_o(system),
       .system_func3_o(system_func3),
       .csr_wen_o(csr_wen),
+      .ebreak_o(ebreak_idu),
 
       .op1_o(op1),
       .op2_o(op2),
@@ -329,6 +330,7 @@ module ysyx (
       .system(system),
       .system_func3(system_func3),
       .csr_wen(csr_wen),
+      .ebreak(ebreak_idu),
       .rd(rd),
       .imm(imm),
       .op1(op1),

@@ -22,6 +22,7 @@ module ysyx_idu (
     output system_o,
     output system_func3_o,
     output csr_wen_o,
+    output ebreak_o,
     output reg [BIT_W-1:0] op1_o,
     output reg [BIT_W-1:0] op2_o,
     output wire [BIT_W-1:0] rwaddr_o,
@@ -141,6 +142,7 @@ module ysyx_idu (
     .clock(clk),
     .reset(rst),
     .instruction(inst_idu),
+    .ebreak_o(ebreak_o),
     .system_func3_zero_o(system_func3_o),
     .csr_wen_o(csr_wen_o),
     .system_o(system_o)
