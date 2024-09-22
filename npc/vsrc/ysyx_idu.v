@@ -144,6 +144,7 @@ module ysyx_idu (
     .in_instruction(inst_idu),
     .out_inst_type(),
     .out_rd(rd_o),
+    .out_imm(imm_o),
 
     .out_sys_ebreak(ebreak_o),
     .out_sys_system_func3_zero(system_func3_o),
@@ -151,7 +152,8 @@ module ysyx_idu (
     .out_sys_system(system_o)
   );
   always @(*) begin
-    alu_op_o = 0; imm_o = 0; op1_o = 0; op2_o = 0;
+    alu_op_o = 0; op1_o = 0; op2_o = 0;
+    // imm_o = 0;
     // rd_o = 0;
       case (opcode_o)
         `YSYX_OP_LUI:     begin `YSYX_U_TYPE(   0, `YSYX_ALU_OP_ADD);                 end

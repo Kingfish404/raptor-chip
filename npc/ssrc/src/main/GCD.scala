@@ -1,7 +1,7 @@
 package gcd
 
 import chisel3._
-import chisel3.util.{switch, is}
+import chisel3.util.{switch, is, Cat, Fill}
 import chisel3.util.BitPat
 import chisel3.util.Cat
 import chisel3.util.experimental.decode._
@@ -151,11 +151,12 @@ class Decoder extends Module with InstrType {
     BitPat(InstrN)
   )
   val in = IO(new Bundle {
-    val instruction = Input(UInt(32.W))
+    val inst = Input(UInt(32.W))
   })
   val out = IO(new Bundle {
     val inst_type = Output(UInt(4.W))
     val rd = Output(UInt(4.W))
+    val imm = Output(UInt(32.W))
   })
   val out_sys = IO(new Bundle {
     var ebreak = Output(UInt(1.W))
@@ -163,26 +164,34 @@ class Decoder extends Module with InstrType {
     val csr_wen = Output(UInt(1.W))
     val system = Output(UInt(1.W))
   })
-  val rd = in.instruction(11, 7)
+  val rd = in.inst(11, 7)
+  val imm_i = Cat(Fill(20, in.inst(31)), in.inst(31, 20))
+  val imm_s = Cat(Fill(20, in.inst(31)), in.inst(31, 25), in.inst(11, 7))
+  val immbv = Cat(in.inst(31), in.inst(7), in.inst(30, 25), in.inst(11, 8))
+  val imm_b = Cat(Fill(19, in.inst(31)), immbv, 0.U)
+  val imm_u = Cat(in.inst(31, 12), Fill(12, 0.U))
+  val immjv = Cat(in.inst(31), in.inst(19, 12), in.inst(20), in.inst(30, 21))
+  val imm_j = Cat(Fill(11, in.inst(31)), immjv, 0.U)
 
-  val decoded = decoder(in.instruction, table)
+  val decoded = decoder(in.inst, table)
   out_sys.ebreak := decoded(3)
   out_sys.system_func3_zero := decoded(2)
   out_sys.csr_wen := decoded(1)
   out_sys.system := decoded(0)
 
-  val inst_type = decoder(in.instruction, type_decoder)
+  val inst_type = decoder(in.inst, type_decoder)
   val wire = Wire(UInt(4.W))
   wire := inst_type
   out.inst_type := inst_type
   out.rd := 0.U
+  out.imm := 0.U
   switch(wire) {
     is(InstrR.U) { out.rd := rd; }
-    is(InstrI.U) { out.rd := rd; }
-    is(InstrS.U) {}
-    is(InstrB.U) {}
-    is(InstrU.U) { out.rd := rd; }
-    is(InstrJ.U) { out.rd := rd; }
+    is(InstrI.U) { out.rd := rd; out.imm := imm_i; }
+    is(InstrS.U) { out.imm := imm_s; }
+    is(InstrB.U) { out.imm := imm_b; }
+    is(InstrU.U) { out.rd := rd; out.imm := imm_u; }
+    is(InstrJ.U) { out.rd := rd; out.imm := imm_j; }
     is(InstrN.U) { out.rd := rd; }
   }
 }

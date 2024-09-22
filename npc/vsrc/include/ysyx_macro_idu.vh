@@ -4,26 +4,24 @@
   op1_o = op1; \
   op2_o = op2; \
   alu_op_o = alu_op; \
-  // rd_o = rd; \
 end
 
 `define YSYX_I_TYPE(op1, alu_op, op2)  begin \
-  imm_o = `YSYX_SIGN_EXTEND(imm_I, 12, `YSYX_W_WIDTH); \
+  // imm_o = `YSYX_SIGN_EXTEND(imm_I, 12, `YSYX_W_WIDTH); \
   op1_o = op1; \
   op2_o = op2; \
   alu_op_o = alu_op; \
-  // rd_o = rd; \
 end
 
 `define YSYX_S_TYPE(op1, alu_op, op2) begin \
-  imm_o = `YSYX_SIGN_EXTEND(imm_S, 12, `YSYX_W_WIDTH); \
+  // imm_o = `YSYX_SIGN_EXTEND(imm_S, 12, `YSYX_W_WIDTH); \
   op1_o = op1; \
   op2_o = op2; \
   alu_op_o = alu_op; \
 end
 
 `define YSYX_B_TYPE(op1, alu_op, op2) begin \
-  imm_o = `YSYX_SIGN_EXTEND(imm_B, 13, `YSYX_W_WIDTH); \
+  // imm_o = `YSYX_SIGN_EXTEND(imm_B, 13, `YSYX_W_WIDTH); \
   op1_o = (alu_op == `YSYX_ALU_OP_BGE || alu_op == `YSYX_ALU_OP_BGEU) ? op2 : op1; \
   op2_o = (alu_op == `YSYX_ALU_OP_BGE || alu_op == `YSYX_ALU_OP_BGEU) ? op1 : op2; \
   alu_op_o = ( \
@@ -38,25 +36,22 @@ end
 end
 
 `define YSYX_U_TYPE(op1, alu_op)  begin \
-  imm_o = `YSYX_SIGN_EXTEND(imm_U, 32, `YSYX_W_WIDTH); \
+  // imm_o = `YSYX_SIGN_EXTEND(imm_U, 32, `YSYX_W_WIDTH); \
   op1_o = op1;    \
   op2_o = imm_o;  \
   alu_op_o = alu_op; \
-  // rd_o = rd;      \
 end
 
 `define YSYX_J_TYPE(op1, alu_op, op2)  begin \
-  imm_o = `YSYX_SIGN_EXTEND(imm_J, 21, `YSYX_W_WIDTH); \
+  // imm_o = `YSYX_SIGN_EXTEND(imm_J, 21, `YSYX_W_WIDTH); \
   op1_o = op1; \
   op2_o = op2; \
   alu_op_o = alu_op; \
-  // rd_o = rd; \
 end
 
 `define YSYX_I_SYS_TYPE(op1, alu_op, op2)  begin \
-  imm_o = `YSYX_SIGN_EXTEND(imm_SYS, 16, `YSYX_W_WIDTH); \
+  // imm_o = `YSYX_SIGN_EXTEND(imm_SYS, 16, `YSYX_W_WIDTH); \
   op1_o = op1; \
   op2_o = op2; \
   alu_op_o = alu_op; \
-  // rd_o = rd; \
 end
