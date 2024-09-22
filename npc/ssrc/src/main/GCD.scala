@@ -8,17 +8,16 @@ import chisel3.util.experimental.decode._
 import scala.annotation.switch
 
 trait InstrType {
-  def InstrN = "b0000"
+  def N = "b0000".U(4.W)
+  def I = "b0100".U(4.W)
+  def R = "b0101".U(4.W)
+  def S = "b0010".U(4.W)
+  def B = "b0001".U(4.W)
+  def U = "b0110".U(4.W)
+  def J = "b0111".U(4.W)
+  def A = "b1110".U(4.W)
 
-  def InstrI = "b0100"
-  def InstrR = "b0101"
-  def InstrS = "b0010"
-  def InstrB = "b0001"
-  def InstrU = "b0110"
-  def InstrJ = "b0111"
-  def InstrA = "b1110"
-
-  def InstrCSR = "b1111"
+  def CSR = "b1111".U(4.W)
 }
 
 trait Instr {
@@ -106,58 +105,58 @@ class ysyx_idu_decoder extends Module with InstrType with Instr {
   )
   val type_decoder = TruthTable(
     Map(
-      LUI___ -> BitPat(InstrU),
-      AUIPC_ -> BitPat(InstrU),
-      JAL___ -> BitPat(InstrJ),
-      JALR__ -> BitPat(InstrI),
-      BEQ___ -> BitPat(InstrB),
-      BNE___ -> BitPat(InstrB),
-      BLT___ -> BitPat(InstrB),
-      BGE___ -> BitPat(InstrB),
-      BLTU__ -> BitPat(InstrB),
-      BGEU__ -> BitPat(InstrB),
-      LB____ -> BitPat(InstrI),
-      LH____ -> BitPat(InstrI),
-      LW____ -> BitPat(InstrI),
-      LBU___ -> BitPat(InstrI),
-      LHU___ -> BitPat(InstrI),
-      SB____ -> BitPat(InstrS),
-      SH____ -> BitPat(InstrS),
-      SW____ -> BitPat(InstrS),
-      ADDI__ -> BitPat(InstrI),
-      SLTI__ -> BitPat(InstrI),
-      SLTIU_ -> BitPat(InstrI),
-      XORI__ -> BitPat(InstrI),
-      ORI___ -> BitPat(InstrI),
-      ANDI__ -> BitPat(InstrI),
-      SLLI__ -> BitPat(InstrI),
-      SRLI__ -> BitPat(InstrI),
-      SRAI__ -> BitPat(InstrI),
-      ADD___ -> BitPat(InstrR),
-      SUB___ -> BitPat(InstrR),
-      SLL___ -> BitPat(InstrR),
-      SLT___ -> BitPat(InstrR),
-      SLTU__ -> BitPat(InstrR),
-      XOR___ -> BitPat(InstrR),
-      SRL___ -> BitPat(InstrR),
-      SRA___ -> BitPat(InstrR),
-      OR____ -> BitPat(InstrR),
-      AND___ -> BitPat(InstrR),
-      FENCE_ -> BitPat(InstrN),
-      FENCET -> BitPat(InstrN),
-      PAUSE_ -> BitPat(InstrN),
-      ECALL_ -> BitPat(InstrN),
-      EBREAK -> BitPat(InstrN),
-      MRET__ -> BitPat(InstrN),
-      FENCEI -> BitPat(InstrN),
-      CSRRW_ -> BitPat(InstrCSR),
-      CSRRS_ -> BitPat(InstrCSR),
-      CSRRC_ -> BitPat(InstrCSR),
-      CSRRWI -> BitPat(InstrCSR),
-      CSRRSI -> BitPat(InstrCSR),
-      CSRRCI -> BitPat(InstrCSR)
+      LUI___ -> BitPat(U),
+      AUIPC_ -> BitPat(U),
+      JAL___ -> BitPat(J),
+      JALR__ -> BitPat(I),
+      BEQ___ -> BitPat(B),
+      BNE___ -> BitPat(B),
+      BLT___ -> BitPat(B),
+      BGE___ -> BitPat(B),
+      BLTU__ -> BitPat(B),
+      BGEU__ -> BitPat(B),
+      LB____ -> BitPat(I),
+      LH____ -> BitPat(I),
+      LW____ -> BitPat(I),
+      LBU___ -> BitPat(I),
+      LHU___ -> BitPat(I),
+      SB____ -> BitPat(S),
+      SH____ -> BitPat(S),
+      SW____ -> BitPat(S),
+      ADDI__ -> BitPat(I),
+      SLTI__ -> BitPat(I),
+      SLTIU_ -> BitPat(I),
+      XORI__ -> BitPat(I),
+      ORI___ -> BitPat(I),
+      ANDI__ -> BitPat(I),
+      SLLI__ -> BitPat(I),
+      SRLI__ -> BitPat(I),
+      SRAI__ -> BitPat(I),
+      ADD___ -> BitPat(R),
+      SUB___ -> BitPat(R),
+      SLL___ -> BitPat(R),
+      SLT___ -> BitPat(R),
+      SLTU__ -> BitPat(R),
+      XOR___ -> BitPat(R),
+      SRL___ -> BitPat(R),
+      SRA___ -> BitPat(R),
+      OR____ -> BitPat(R),
+      AND___ -> BitPat(R),
+      FENCE_ -> BitPat(N),
+      FENCET -> BitPat(N),
+      PAUSE_ -> BitPat(N),
+      ECALL_ -> BitPat(N),
+      EBREAK -> BitPat(N),
+      MRET__ -> BitPat(N),
+      FENCEI -> BitPat(N),
+      CSRRW_ -> BitPat(CSR),
+      CSRRS_ -> BitPat(CSR),
+      CSRRC_ -> BitPat(CSR),
+      CSRRWI -> BitPat(CSR),
+      CSRRSI -> BitPat(CSR),
+      CSRRCI -> BitPat(CSR)
     ),
-    BitPat(InstrN)
+    BitPat(N)
   )
   val in = IO(new Bundle {
     val inst = Input(UInt(32.W))
@@ -211,8 +210,8 @@ class ysyx_idu_decoder extends Module with InstrType with Instr {
   out.wen := 0.U
   out.ren := 0.U
   switch(wire) {
-    is(InstrR.U) { out.rd := rd; out.op1 := in.rs1v; out.op2 := in.rs2v; }
-    is(InstrI.U) { 
+    is(R) { out.rd := rd; out.op1 := in.rs1v; out.op2 := in.rs2v; }
+    is(I) { 
       out.rd := rd; out.imm := imm_i;
       when (opcode === 0b1100111.U) {
         out.op1 := in.pc; out.op2 := 4.U;
@@ -221,11 +220,11 @@ class ysyx_idu_decoder extends Module with InstrType with Instr {
       }
       when (opcode === 0b0000011.U) { out.ren := 1.U; }
     }
-    is(InstrS.U) {
+    is(S) {
       out.imm := imm_s; out.op1 := in.rs1v; out.op2 := in.rs2v;
       out.wen := 1.U;
     }
-    is(InstrB.U) { 
+    is(B) { 
       out.imm := imm_b;
       switch (funct3) {
         is(0b000.U) { out.op1 := in.rs1v; out.op2 := in.rs2v; }
@@ -236,16 +235,16 @@ class ysyx_idu_decoder extends Module with InstrType with Instr {
         is(0b111.U) { out.op1 := in.rs2v; out.op2 := in.rs1v; }
       }
     }
-    is(InstrU.U) {
+    is(U) {
       out.rd := rd; out.imm := imm_u;
       switch(opcode) {
         is(LUI_OPCODE) { out.op1 := 0.U; out.op2 := imm_u; }
         is(AUIPC_OPCODE) { out.op1 := in.pc; out.op2 := imm_u; }
       }
     }
-    is(InstrJ.U) { out.rd := rd; out.imm := imm_j; out.op1 := in.pc; out.op2 := 4.U; }
-    is(InstrN.U) { out.rd := rd; out.imm := imm; out.op1 := in.rs1v; }
-    is(InstrCSR.U) { out.rd := rd; out.imm := csr; }
+    is(J) { out.rd := rd; out.imm := imm_j; out.op1 := in.pc; out.op2 := 4.U; }
+    is(N) { out.rd := rd; out.imm := imm; out.op1 := in.rs1v; }
+    is(CSR) { out.rd := rd; out.imm := csr; }
   }
 }
 
