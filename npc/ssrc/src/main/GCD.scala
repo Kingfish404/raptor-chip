@@ -1,6 +1,7 @@
 package gcd
 
 import chisel3._
+import chisel3.util.{switch, is}
 import chisel3.util.BitPat
 import chisel3.util.Cat
 import chisel3.util.experimental.decode._
