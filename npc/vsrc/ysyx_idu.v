@@ -164,7 +164,7 @@ module ysyx_idu (
           `YSYX_B_TYPE(reg_rdata1, {1'b0, funct3}, reg_rdata2);
           op1_o = ({1'b0, funct3} == `YSYX_ALU_OP_BGE || {1'b0, funct3} == `YSYX_ALU_OP_BGEU) ? reg_rdata2 : reg_rdata1;
           op2_o = ({1'b0, funct3} == `YSYX_ALU_OP_BGE || {1'b0, funct3} == `YSYX_ALU_OP_BGEU) ? reg_rdata1 : reg_rdata2;
-          alu_op_o = ( \
+          alu_op_o = (
             ({4{({1'b0, funct3} == `YSYX_ALU_OP_BEQ)}} & `YSYX_ALU_OP_SUB) |
             ({4{({1'b0, funct3} == `YSYX_ALU_OP_BNE)}} & `YSYX_ALU_OP_XOR) |
             ({4{({1'b0, funct3} == `YSYX_ALU_OP_BLT)}} & `YSYX_ALU_OP_SLT) |
