@@ -91,7 +91,6 @@ void cpu_exec_init()
 
 void cpu_exec(uint64_t n)
 {
-  printf("Executing %lld instructions...\n", n);
   switch (npc.state)
   {
   case NPC_END:
