@@ -30,7 +30,6 @@ module ysyx_exu (
     input [BIT_W-1:0] op_j,
     input [BIT_W-1:0] rwaddr,
     input [3:0] alu_op,
-    input [6:0] opcode,
     input [BIT_W-1:0] pc,
     input speculation,
 
