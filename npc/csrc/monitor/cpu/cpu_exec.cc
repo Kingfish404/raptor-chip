@@ -171,4 +171,5 @@ void cpu_exec(uint64_t n)
     assert(0);
     break;
   }
+  printf("state: %d\n", npc.state);
 }
