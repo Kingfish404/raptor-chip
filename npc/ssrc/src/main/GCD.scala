@@ -150,26 +150,28 @@ class Decoder extends Module with InstrType {
     ),
     BitPat(InstrN)
   )
-  val instruction = IO(Input(UInt(32.W)))
-  var ebreak_o = IO(Output(UInt(1.W)))
-  val system_func3_zero_o = IO(Output(UInt(1.W)))
-  val csr_wen_o = IO(Output(UInt(1.W)))
-  val system_o = IO(Output(UInt(1.W)))
   val in = IO(new Bundle {
+    val instruction = Input(UInt(32.W))
     val rd = Input(UInt(4.W))
   })
   val out = IO(new Bundle {
     val inst_type = Output(UInt(4.W))
     val rd = Output(UInt(4.W))
   })
+  val out_sys = IO(new Bundle {
+    var ebreak_o = Output(UInt(1.W))
+    val system_func3_zero_o = Output(UInt(1.W))
+    val csr_wen_o = Output(UInt(1.W))
+    val system_o = Output(UInt(1.W))
+  })
 
-  val decoded = decoder(instruction, table)
-  ebreak_o := decoded(3)
-  system_func3_zero_o := decoded(2)
-  csr_wen_o := decoded(1)
-  system_o := decoded(0)
+  val decoded = decoder(in.instruction, table)
+  out_sys.ebreak_o := decoded(3)
+  out_sys.system_func3_zero_o := decoded(2)
+  out_sys.csr_wen_o := decoded(1)
+  out_sys.system_o := decoded(0)
 
-  val inst_type = decoder(instruction, type_decoder)
+  val inst_type = decoder(in.instruction, type_decoder)
   val wire = Wire(UInt(4.W))
   wire := inst_type
   out.inst_type := inst_type

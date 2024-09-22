@@ -141,15 +141,15 @@ module ysyx_idu (
     .clock(clk),
     .reset(rst),
 
+    .in_instruction(inst_idu),
     .in_rd(rd),
     .out_inst_type(),
     .out_rd(rd_o),
 
-    .instruction(inst_idu),
-    .ebreak_o(ebreak_o),
-    .system_func3_zero_o(system_func3_o),
-    .csr_wen_o(csr_wen_o),
-    .system_o(system_o)
+    .out_sys_ebreak(ebreak_o),
+    .out_sys_system_func3_zero(system_func3_o),
+    .out_sys_csr_wen(csr_wen_o),
+    .out_sys_system(system_o)
   );
   always @(*) begin
     alu_op_o = 0; imm_o = 0; op1_o = 0; op2_o = 0;
