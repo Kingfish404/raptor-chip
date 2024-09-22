@@ -219,11 +219,19 @@ class ysyx_idu_decoder extends Module with InstrType with Instr {
     is(InstrS.U) { out.imm := imm_s; out.op1 := in.rs1v; out.op2 := in.rs2v; }
     is(InstrB.U) { 
       out.imm := imm_b;
-      when (funct3 === 0b101.U || funct3 === 0b111.U) {
-        out.op1 := in.rs2v; out.op2 := in.rs1v;
-      }.otherwise {
-        out.op1 := in.rs1v; out.op2 := in.rs2v;
+      switch (funct3) {
+        is(0b000.U) { out.op1 := in.rs1v; out.op2 := in.rs2v; }
+        is(0b001.U) { out.op1 := in.rs1v; out.op2 := in.rs2v; }
+        is(0b100.U) { out.op1 := in.rs1v; out.op2 := in.rs2v; }
+        is(0b101.U) { out.op1 := in.rs2v; out.op2 := in.rs1v; }
+        is(0b110.U) { out.op1 := in.rs1v; out.op2 := in.rs2v; }
+        is(0b111.U) { out.op1 := in.rs2v; out.op2 := in.rs1v; }
       }
+      // when (funct3 === 0b101.U || funct3 === 0b111.U) {
+      //   out.op1 := in.rs2v; out.op2 := in.rs1v;
+      // }.otherwise {
+      //   out.op1 := in.rs1v; out.op2 := in.rs2v;
+      // }
     }
     is(InstrU.U) {
       out.rd := rd; out.imm := imm_u;
