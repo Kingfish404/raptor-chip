@@ -1,4 +1,4 @@
-`include "ysyx_macro.vh"
+`include "ysyx_macro.svh"
 
 module ysyx_exu_alu (
     input [BIT_W-1:0] alu_src1,
