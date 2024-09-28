@@ -224,7 +224,7 @@ class ysyx_idu_decoder extends Module with InstrType with Instr with MicroOP {
       CSRRCI -> BitPat("b" +   "0111" + CSR)
     // format: on
     ),
-    BitPat("b" + N__ + ALU_ADD_)
+    BitPat("b" + ALU_ADD_ + N__)
   )
   val table1 = Array(
     // format: off
@@ -297,7 +297,7 @@ class ysyx_idu_decoder extends Module with InstrType with Instr with MicroOP {
   out.op2 := var_decoder(3)
   out.wen := (opcode === "b0100011".U)
   out.ren := (opcode === "b0000011".U)
-  out.alu_op := inst_type(3, 0)
+  out.alu_op := inst_type(0, 3)
   // val wire = Wire(UInt(4.W))
   // wire := inst_type
   // switch(wire) {
