@@ -1,6 +1,6 @@
 BUILD_DIR = ./build
 
-PRJ = playground
+PRJ = npc
 
 test:
 	mill -i $(PRJ).test

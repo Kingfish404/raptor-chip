@@ -8,7 +8,7 @@ import mill.scalalib._
 // support BSP
 import mill.bsp._
 
-object playground extends SbtModule with ScalafmtModule { m =>
+object npc extends SbtModule with ScalafmtModule { m =>
   val useChisel3 = false
   override def millSourcePath = os.pwd / "src"
   override def scalaVersion = if (useChisel3) "2.13.10" else "2.13.14"
