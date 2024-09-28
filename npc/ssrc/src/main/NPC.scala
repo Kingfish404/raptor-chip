@@ -17,6 +17,22 @@ trait InstrType {
   def CSR = "1111"
 }
 
+trait MicroOP {
+  def ALU_ADD_ = "0000"
+  def ALU_SUB_ = "1000"
+  def ALU_SLT_ = "0010"
+  def ALU_SLE_ = "1010"
+  def ALU_SLTU = "0011"
+  def ALU_SLEU = "1011"
+  def ALU_XOR_ = "0100"
+  def ALU_OR__ = "0110"
+  def ALU_AND_ = "0111"
+  def ALU_NAND = "1111"
+  def ALU_SLL_ = "0001"
+  def ALU_SRL_ = "0101"
+  def ALU_SRA_ = "1101"
+}
+
 trait Instr {
   def LUI_OPCODE = "b0110111".U(7.W)
   def AUIPC_OPCODE = "b0010111".U(7.W)
@@ -84,37 +100,6 @@ trait Instr {
   def CSRRCI = BitPat("b??????? ????? ????? 111 ????? 1110011")
 }
 
-// `define YSYX_ALU_OP_ADD   4'b0000
-// `define YSYX_ALU_OP_SUB   4'b1000
-// `define YSYX_ALU_OP_SLT   4'b0010
-// `define YSYX_ALU_OP_SLE   4'b1010
-// `define YSYX_ALU_OP_SLTU  4'b0011
-// `define YSYX_ALU_OP_SLEU  4'b1011
-// `define YSYX_ALU_OP_XOR   4'b0100
-// `define YSYX_ALU_OP_OR    4'b0110
-// `define YSYX_ALU_OP_AND   4'b0111
-// `define YSYX_ALU_OP_NAND  4'b1111
-
-// `define YSYX_ALU_OP_SLL   4'b0001
-// `define YSYX_ALU_OP_SRL   4'b0101
-// `define YSYX_ALU_OP_SRA   4'b1101
-
-trait MicroOP {
-  def ALU_ADD_ = "0000"
-  def ALU_SUB_ = "1000"
-  def ALU_SLT_ = "0010"
-  def ALU_SLE_ = "1010"
-  def ALU_SLTU = "0011"
-  def ALU_SLEU = "1011"
-  def ALU_XOR_ = "0100"
-  def ALU_OR__ = "0110"
-  def ALU_AND_ = "0111"
-  def ALU_NAND = "1111"
-  def ALU_SLL_ = "0001"
-  def ALU_SRL_ = "0101"
-  def ALU_SRA_ = "1101"
-}
-
 class ysyx_idu_decoder extends Module with InstrType with Instr with MicroOP {
   val in = IO(new Bundle {
     val inst = Input(UInt(32.W))
@@ -155,78 +140,78 @@ class ysyx_idu_decoder extends Module with InstrType with Instr with MicroOP {
 
   val imm = in.inst(31, 20)
   val csr = in.inst(31, 20)
-  val table = TruthTable(
-    Map(
-      ECALL_ -> BitPat("b0111"),
-      EBREAK -> BitPat("b1111"),
-      MRET__ -> BitPat("b0111"),
-      FENCEI -> BitPat("b0001"),
-      CSRRW_ -> BitPat("b0011"),
-      CSRRS_ -> BitPat("b0011"),
-      CSRRC_ -> BitPat("b0011"),
-      CSRRWI -> BitPat("b0011"),
-      CSRRSI -> BitPat("b0011"),
-      CSRRCI -> BitPat("b0011")
-    ),
-    BitPat("b0000")
-  )
+  // val table = TruthTable(
+  //   Map(
+  //     ECALL_ -> BitPat("b0111"),
+  //     EBREAK -> BitPat("b1111"),
+  //     MRET__ -> BitPat("b0111"),
+  //     FENCEI -> BitPat("b0001"),
+  //     CSRRW_ -> BitPat("b0011"),
+  //     CSRRS_ -> BitPat("b0011"),
+  //     CSRRC_ -> BitPat("b0011"),
+  //     CSRRWI -> BitPat("b0011"),
+  //     CSRRSI -> BitPat("b0011"),
+  //     CSRRCI -> BitPat("b0011")
+  //   ),
+  //   BitPat("b0000")
+  // )
   val type_decoder = TruthTable(
     Map(
       // format: off
-      //                  | type |  ls |  j  |  alu op |
-      LUI___ -> BitPat("b" + U__ + "00" + "0" + ALU_ADD_),
-      AUIPC_ -> BitPat("b" + U__ + "00" + "0" + ALU_ADD_),
-      JAL___ -> BitPat("b" + J__ + "00" + "1" + ALU_ADD_),
-      JALR__ -> BitPat("b" + I__ + "00" + "1" + ALU_ADD_),
-      BEQ___ -> BitPat("b" + B__ + "00" + "1" + ALU_SUB_),
-      BNE___ -> BitPat("b" + B__ + "00" + "1" + ALU_XOR_),
-      BLT___ -> BitPat("b" + B__ + "00" + "1" + ALU_SLT_),
-      BGE___ -> BitPat("b" + B__ + "00" + "1" + ALU_SLE_),
-      BLTU__ -> BitPat("b" + B__ + "00" + "1" + ALU_SLTU),
-      BGEU__ -> BitPat("b" + B__ + "00" + "1" + ALU_SLEU),
-      LB____ -> BitPat("b" + I__ + "10" + "0" +   "0000"),
-      LH____ -> BitPat("b" + I__ + "10" + "0" +   "0001"),
-      LW____ -> BitPat("b" + I__ + "10" + "0" +   "0010"),
-      LBU___ -> BitPat("b" + I__ + "10" + "0" +   "0100"),
-      LHU___ -> BitPat("b" + I__ + "10" + "0" +   "0101"),
-      SB____ -> BitPat("b" + S__ + "01" + "0" +   "0000"),
-      SH____ -> BitPat("b" + S__ + "01" + "0" +   "0001"),
-      SW____ -> BitPat("b" + S__ + "01" + "0" +   "0010"),
-      ADDI__ -> BitPat("b" + I__ + "00" + "0" +   "0000"),
-      SLTI__ -> BitPat("b" + I__ + "00" + "0" +   "0010"),
-      SLTIU_ -> BitPat("b" + I__ + "00" + "0" +   "0011"),
-      XORI__ -> BitPat("b" + I__ + "00" + "0" +   "0100"),
-      ORI___ -> BitPat("b" + I__ + "00" + "0" +   "0110"),
-      ANDI__ -> BitPat("b" + I__ + "00" + "0" +   "0111"),
-      SLLI__ -> BitPat("b" + I__ + "00" + "0" +   "0001"),
-      SRLI__ -> BitPat("b" + I__ + "00" + "0" +   "0101"),
-      SRAI__ -> BitPat("b" + I__ + "00" + "0" +   "1101"),
-      ADD___ -> BitPat("b" + R__ + "00" + "0" +   "0000"),
-      SUB___ -> BitPat("b" + R__ + "00" + "0" +   "1000"),
-      SLL___ -> BitPat("b" + R__ + "00" + "0" +   "0001"),
-      SLT___ -> BitPat("b" + R__ + "00" + "0" +   "0010"),
-      SLTU__ -> BitPat("b" + R__ + "00" + "0" +   "0011"),
-      XOR___ -> BitPat("b" + R__ + "00" + "0" +   "0100"),
-      SRL___ -> BitPat("b" + R__ + "00" + "0" +   "0101"),
-      SRA___ -> BitPat("b" + R__ + "00" + "0" +   "1101"),
-      OR____ -> BitPat("b" + R__ + "00" + "0" +   "0110"),
-      AND___ -> BitPat("b" + R__ + "00" + "0" +   "0111"),
-      FENCE_ -> BitPat("b" + N__ + "00" + "0" +   "0000"),
-      FENCET -> BitPat("b" + N__ + "00" + "0" +   "0000"),
-      PAUSE_ -> BitPat("b" + N__ + "00" + "0" +   "0000"),
-      ECALL_ -> BitPat("b" + N__ + "00" + "1" +   "0000"),
-      EBREAK -> BitPat("b" + N__ + "00" + "1" +   "0000"),
-      MRET__ -> BitPat("b" + N__ + "00" + "1" +   "0000"),
-      FENCEI -> BitPat("b" + N__ + "00" + "0" +   "0000"),
-      CSRRW_ -> BitPat("b" + CSR + "00" + "1" +   "0001"),
-      CSRRS_ -> BitPat("b" + CSR + "00" + "1" +   "0010"),
-      CSRRC_ -> BitPat("b" + CSR + "00" + "1" +   "0011"),
-      CSRRWI -> BitPat("b" + CSR + "00" + "1" +   "0101"),
-      CSRRSI -> BitPat("b" + CSR + "00" + "1" +   "0110"),
-      CSRRCI -> BitPat("b" + CSR + "00" + "1" +   "0111")
+      //                  | type | sys |  ls |  j  |  alu op |
+      LUI___ -> BitPat("b" + U__ + "???0" + "00" + "0" + ALU_ADD_),
+      AUIPC_ -> BitPat("b" + U__ + "???0" + "00" + "0" + ALU_ADD_),
+      JAL___ -> BitPat("b" + J__ + "???0" + "00" + "1" + ALU_ADD_),
+      JALR__ -> BitPat("b" + I__ + "???0" + "00" + "1" + ALU_ADD_),
+      BEQ___ -> BitPat("b" + B__ + "???0" + "00" + "1" + ALU_SUB_),
+      BNE___ -> BitPat("b" + B__ + "???0" + "00" + "1" + ALU_XOR_),
+      BLT___ -> BitPat("b" + B__ + "???0" + "00" + "1" + ALU_SLT_),
+      BGE___ -> BitPat("b" + B__ + "???0" + "00" + "1" + ALU_SLE_),
+      BLTU__ -> BitPat("b" + B__ + "???0" + "00" + "1" + ALU_SLTU),
+      BGEU__ -> BitPat("b" + B__ + "???0" + "00" + "1" + ALU_SLEU),
+      LB____ -> BitPat("b" + I__ + "???0" + "10" + "0" +   "0000"),
+      LH____ -> BitPat("b" + I__ + "???0" + "10" + "0" +   "0001"),
+      LW____ -> BitPat("b" + I__ + "???0" + "10" + "0" +   "0010"),
+      LBU___ -> BitPat("b" + I__ + "???0" + "10" + "0" +   "0100"),
+      LHU___ -> BitPat("b" + I__ + "???0" + "10" + "0" +   "0101"),
+      SB____ -> BitPat("b" + S__ + "???0" + "01" + "0" +   "0000"),
+      SH____ -> BitPat("b" + S__ + "???0" + "01" + "0" +   "0001"),
+      SW____ -> BitPat("b" + S__ + "???0" + "01" + "0" +   "0010"),
+      ADDI__ -> BitPat("b" + I__ + "???0" + "00" + "0" +   "0000"),
+      SLTI__ -> BitPat("b" + I__ + "???0" + "00" + "0" +   "0010"),
+      SLTIU_ -> BitPat("b" + I__ + "???0" + "00" + "0" +   "0011"),
+      XORI__ -> BitPat("b" + I__ + "???0" + "00" + "0" +   "0100"),
+      ORI___ -> BitPat("b" + I__ + "???0" + "00" + "0" +   "0110"),
+      ANDI__ -> BitPat("b" + I__ + "???0" + "00" + "0" +   "0111"),
+      SLLI__ -> BitPat("b" + I__ + "???0" + "00" + "0" +   "0001"),
+      SRLI__ -> BitPat("b" + I__ + "???0" + "00" + "0" +   "0101"),
+      SRAI__ -> BitPat("b" + I__ + "???0" + "00" + "0" +   "1101"),
+      ADD___ -> BitPat("b" + R__ + "???0" + "00" + "0" +   "0000"),
+      SUB___ -> BitPat("b" + R__ + "???0" + "00" + "0" +   "1000"),
+      SLL___ -> BitPat("b" + R__ + "???0" + "00" + "0" +   "0001"),
+      SLT___ -> BitPat("b" + R__ + "???0" + "00" + "0" +   "0010"),
+      SLTU__ -> BitPat("b" + R__ + "???0" + "00" + "0" +   "0011"),
+      XOR___ -> BitPat("b" + R__ + "???0" + "00" + "0" +   "0100"),
+      SRL___ -> BitPat("b" + R__ + "???0" + "00" + "0" +   "0101"),
+      SRA___ -> BitPat("b" + R__ + "???0" + "00" + "0" +   "1101"),
+      OR____ -> BitPat("b" + R__ + "???0" + "00" + "0" +   "0110"),
+      AND___ -> BitPat("b" + R__ + "???0" + "00" + "0" +   "0111"),
+      FENCE_ -> BitPat("b" + N__ + "???0" + "00" + "0" +   "0000"),
+      FENCET -> BitPat("b" + N__ + "???0" + "00" + "0" +   "0000"),
+      PAUSE_ -> BitPat("b" + N__ + "???0" + "00" + "0" +   "0000"),
+      ECALL_ -> BitPat("b" + N__ + "0111" + "00" + "1" +   "0000"),
+      EBREAK -> BitPat("b" + N__ + "1111" + "00" + "1" +   "0000"),
+      MRET__ -> BitPat("b" + N__ + "0111" + "00" + "1" +   "0000"),
+      FENCEI -> BitPat("b" + N__ + "0001" + "00" + "0" +   "0000"),
+      CSRRW_ -> BitPat("b" + CSR + "0011" + "00" + "1" +   "0001"),
+      CSRRS_ -> BitPat("b" + CSR + "0011" + "00" + "1" +   "0010"),
+      CSRRC_ -> BitPat("b" + CSR + "0011" + "00" + "1" +   "0011"),
+      CSRRWI -> BitPat("b" + CSR + "0011" + "00" + "1" +   "0101"),
+      CSRRSI -> BitPat("b" + CSR + "0011" + "00" + "1" +   "0110"),
+      CSRRCI -> BitPat("b" + CSR + "0011" + "00" + "1" +   "0111")
     // format: on
     ),
-    BitPat("b" + N__ + "00" + "0" + ALU_ADD_)
+    BitPat("b" + N__ + "????" + "00" + "0" + ALU_ADD_)
   )
   val table1 = Array(
     // format: off
@@ -286,75 +271,19 @@ class ysyx_idu_decoder extends Module with InstrType with Instr with MicroOP {
   val var_decoder =
     ListLookup(in.inst, List(0.U, 0.U, 0.U, 0.U), table1)
 
-  val decoded = decoder(in.inst, table)
-  out_sys.ebreak := decoded(3)
-  out_sys.system_func3_zero := decoded(2)
-  out_sys.csr_wen := decoded(1)
-  out_sys.system := decoded(0)
-
-  val inst_type = decoder(in.inst, type_decoder)
   out.rd := var_decoder(0)
   out.imm := var_decoder(1)
   out.op1 := var_decoder(2)
   out.op2 := var_decoder(3)
+
+  // val decoded = decoder(in.inst, table)
+  val inst_type = decoder(in.inst, type_decoder)
   out.alu_op := inst_type(3, 0)
   out.en_j := inst_type(4)
   out.wen := inst_type(5)
   out.ren := inst_type(6)
-  // val wire = Wire(UInt(4.W))
-  // wire := inst_type
-  // switch(wire) {
-  //   is(R__.U(4.W)) {
-  //     // out.rd := rd;
-  //     // out.op1 := in.rs1v; out.op2 := in.rs2v;
-  //   }
-  //   is(I__.U(4.W)) {
-  //     // out.rd := rd;
-  //     // out.imm := imm_i;
-  //     when(opcode === "b1100111".U) {
-  //       // out.op1 := in.pc; out.op2 := 4.U;
-  //     }.otherwise {
-  //       // out.op1 := in.rs1v; out.op2 := imm_i;
-  //     }
-  //     // when(opcode === "b0000011".U) { out.ren := 1.U; }
-  //   }
-  //   is(S__.U(4.W)) {
-  //     // out.imm := imm_s;
-  //     // out.op1 := in.rs1v; out.op2 := in.rs2v;
-  //     // out.wen := 1.U;
-  //   }
-  //   is(B__.U(4.W)) {
-  //     // out.imm := imm_b;
-  //     // switch(funct3) {
-  //     //   is("b000".U) { out.op1 := in.rs1v; out.op2 := in.rs2v; }
-  //     //   is("b001".U) { out.op1 := in.rs1v; out.op2 := in.rs2v; }
-  //     //   is("b100".U) { out.op1 := in.rs1v; out.op2 := in.rs2v; }
-  //     //   is("b101".U) { out.op1 := in.rs2v; out.op2 := in.rs1v; }
-  //     //   is("b110".U) { out.op1 := in.rs1v; out.op2 := in.rs2v; }
-  //     //   is("b111".U) { out.op1 := in.rs2v; out.op2 := in.rs1v; }
-  //     // }
-  //   }
-  //   is(U__.U(4.W)) {
-  //     // out.imm := imm_u;
-  //     // out.rd := rd;
-  //     // switch(opcode) {
-  //     //   is(LUI_OPCODE) { out.op1 := 0.U; out.op2 := imm_u; }
-  //     //   is(AUIPC_OPCODE) { out.op1 := in.pc; out.op2 := imm_u; }
-  //     // }
-  //   }
-  //   is(J__.U(4.W)) {
-  //     // out.imm := imm_j;
-  //     // out.rd := rd;
-  //     // out.op1 := in.pc; out.op2 := 4.U;
-  //   }
-  //   is(N__.U(4.W)) {
-  //     // out.imm := imm;
-  //     // out.rd := rd;
-  //     // out.op1 := in.rs1v;
-  //   }
-  //   is(CSR.U(4.W)) {
-  //     // out.imm := csr;
-  //     // out.rd := rd;
-  //   }
-  // }
+  out_sys.system := inst_type(7)
+  out_sys.csr_wen := inst_type(8)
+  out_sys.system_func3_zero := inst_type(9)
+  out_sys.ebreak := inst_type(10)
 }
