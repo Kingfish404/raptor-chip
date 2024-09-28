@@ -259,8 +259,8 @@ class ysyx_idu_decoder extends Module with InstrType with Instr {
   out.imm := var_decoder(2)
   out.op1 := var_decoder(3)
   out.op2 := var_decoder(4)
-  out.wen := 0.U
-  out.ren := 0.U
+  out.wen := (opcode === "b0100011".U)
+  out.ren := (opcode === "b0000011".U)
   switch(wire) {
     is(R__.U(4.W)) {
       // out.rd := rd;
@@ -274,12 +274,12 @@ class ysyx_idu_decoder extends Module with InstrType with Instr {
       }.otherwise {
         // out.op1 := in.rs1v; out.op2 := imm_i;
       }
-      when(opcode === "b0000011".U) { out.ren := 1.U; }
+      // when(opcode === "b0000011".U) { out.ren := 1.U; }
     }
     is(S__.U(4.W)) {
       // out.imm := imm_s;
       // out.op1 := in.rs1v; out.op2 := in.rs2v;
-      out.wen := 1.U;
+      // out.wen := 1.U;
     }
     is(B__.U(4.W)) {
       // out.imm := imm_b;
