@@ -48,10 +48,11 @@ module ysyx_idu (
   reg [31:0] inst_idu, pc_idu;
   reg valid, ready;
   // wire [4:0] rs1 = inst_idu[19:15], rs2 = inst_idu[24:20], rd = inst_idu[11:7];
-  wire [3:0] rs1 = inst_idu[18:15], rs2 = inst_idu[23:20], rd = inst_idu[10:7];
-  wire [2:0] funct3 = inst_idu[14:12];
-  wire [6:0] funct7 = inst_idu[31:25];
+  wire [ 3:0] rs1 = inst_idu[18:15], rs2 = inst_idu[23:20], rd = inst_idu[10:7];
+  wire [ 2:0] funct3 = inst_idu[14:12];
+  wire [ 6:0] funct7 = inst_idu[31:25];
   wire [31:0] imm;
+  wire wen, ren;
   // wire [11:0] imm_I = inst_idu[31:20], imm_S = {inst_idu[31:25], inst_idu[11:7]};
   // wire [12:0] imm_B = {inst_idu[31], inst_idu[7], inst_idu[30:25], inst_idu[11:8], 1'b0};
   // wire [31:0] imm_U = {inst_idu[31:12], 12'b0};
@@ -73,6 +74,8 @@ module ysyx_idu (
   assign inst_o = inst_idu;
   assign pc_o = pc_idu;
   assign imm_o = imm;
+  assign ren_o = ren;
+  assign wen_o = wen;
 
   reg state;
   `YSYX_BUS_FSM()
@@ -112,10 +115,7 @@ module ysyx_idu (
   //   (opcode == `YSYX_OP_B_TYPE) | (opcode == `YSYX_OP_SYSTEM) |
   //   (0)
   // );
-  assign rwaddr_o = (
-    {BIT_W{opcode == `YSYX_OP_IL_TYPE | opcode == `YSYX_OP_S_TYPE}} & reg_rdata1 + imm_o |
-    (0)
-  );
+  assign rwaddr_o = ({BIT_W{wen | ren}} & reg_rdata1 + imm_o | (0));
   assign op_j_o = (
     {BIT_W{opcode == `YSYX_OP_JAL | opcode == `YSYX_OP_B_TYPE}} & pc_idu |
     {BIT_W{opcode == `YSYX_OP_JALR | opcode == `YSYX_OP_IL_TYPE | opcode == `YSYX_OP_S_TYPE}}
@@ -179,8 +179,8 @@ module ysyx_idu (
       .out_imm(imm),
       .out_op1(op1_o),
       .out_op2(op2_o),
-      .out_wen(wen_o),
-      .out_ren(ren_o),
+      .out_wen(wen),
+      .out_ren(ren),
       .out_alu_op(alu_op_o),
       .out_en_j(en_j_o),
 
