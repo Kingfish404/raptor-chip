@@ -252,8 +252,6 @@ class ysyx_idu_decoder extends Module with InstrType with Instr {
   out_sys.system := decoded(0)
 
   val inst_type = decoder(in.inst, type_decoder)
-  val wire = Wire(UInt(4.W))
-  wire := inst_type
   out.inst_type := inst_type
   out.rd := var_decoder(1)
   out.imm := var_decoder(2)
@@ -261,58 +259,60 @@ class ysyx_idu_decoder extends Module with InstrType with Instr {
   out.op2 := var_decoder(4)
   out.wen := (opcode === "b0100011".U)
   out.ren := (opcode === "b0000011".U)
-  switch(wire) {
-    is(R__.U(4.W)) {
-      // out.rd := rd;
-      // out.op1 := in.rs1v; out.op2 := in.rs2v;
-    }
-    is(I__.U(4.W)) {
-      // out.rd := rd;
-      // out.imm := imm_i;
-      when(opcode === "b1100111".U) {
-        // out.op1 := in.pc; out.op2 := 4.U;
-      }.otherwise {
-        // out.op1 := in.rs1v; out.op2 := imm_i;
-      }
-      // when(opcode === "b0000011".U) { out.ren := 1.U; }
-    }
-    is(S__.U(4.W)) {
-      // out.imm := imm_s;
-      // out.op1 := in.rs1v; out.op2 := in.rs2v;
-      // out.wen := 1.U;
-    }
-    is(B__.U(4.W)) {
-      // out.imm := imm_b;
-      // switch(funct3) {
-      //   is("b000".U) { out.op1 := in.rs1v; out.op2 := in.rs2v; }
-      //   is("b001".U) { out.op1 := in.rs1v; out.op2 := in.rs2v; }
-      //   is("b100".U) { out.op1 := in.rs1v; out.op2 := in.rs2v; }
-      //   is("b101".U) { out.op1 := in.rs2v; out.op2 := in.rs1v; }
-      //   is("b110".U) { out.op1 := in.rs1v; out.op2 := in.rs2v; }
-      //   is("b111".U) { out.op1 := in.rs2v; out.op2 := in.rs1v; }
-      // }
-    }
-    is(U__.U(4.W)) {
-      // out.imm := imm_u;
-      // out.rd := rd;
-      // switch(opcode) {
-      //   is(LUI_OPCODE) { out.op1 := 0.U; out.op2 := imm_u; }
-      //   is(AUIPC_OPCODE) { out.op1 := in.pc; out.op2 := imm_u; }
-      // }
-    }
-    is(J__.U(4.W)) {
-      // out.imm := imm_j;
-      // out.rd := rd;
-      // out.op1 := in.pc; out.op2 := 4.U;
-    }
-    is(N__.U(4.W)) {
-      // out.imm := imm;
-      // out.rd := rd;
-      // out.op1 := in.rs1v;
-    }
-    is(CSR.U(4.W)) {
-      // out.imm := csr;
-      // out.rd := rd;
-    }
-  }
+  // val wire = Wire(UInt(4.W))
+  // wire := inst_type
+  // switch(wire) {
+  //   is(R__.U(4.W)) {
+  //     // out.rd := rd;
+  //     // out.op1 := in.rs1v; out.op2 := in.rs2v;
+  //   }
+  //   is(I__.U(4.W)) {
+  //     // out.rd := rd;
+  //     // out.imm := imm_i;
+  //     when(opcode === "b1100111".U) {
+  //       // out.op1 := in.pc; out.op2 := 4.U;
+  //     }.otherwise {
+  //       // out.op1 := in.rs1v; out.op2 := imm_i;
+  //     }
+  //     // when(opcode === "b0000011".U) { out.ren := 1.U; }
+  //   }
+  //   is(S__.U(4.W)) {
+  //     // out.imm := imm_s;
+  //     // out.op1 := in.rs1v; out.op2 := in.rs2v;
+  //     // out.wen := 1.U;
+  //   }
+  //   is(B__.U(4.W)) {
+  //     // out.imm := imm_b;
+  //     // switch(funct3) {
+  //     //   is("b000".U) { out.op1 := in.rs1v; out.op2 := in.rs2v; }
+  //     //   is("b001".U) { out.op1 := in.rs1v; out.op2 := in.rs2v; }
+  //     //   is("b100".U) { out.op1 := in.rs1v; out.op2 := in.rs2v; }
+  //     //   is("b101".U) { out.op1 := in.rs2v; out.op2 := in.rs1v; }
+  //     //   is("b110".U) { out.op1 := in.rs1v; out.op2 := in.rs2v; }
+  //     //   is("b111".U) { out.op1 := in.rs2v; out.op2 := in.rs1v; }
+  //     // }
+  //   }
+  //   is(U__.U(4.W)) {
+  //     // out.imm := imm_u;
+  //     // out.rd := rd;
+  //     // switch(opcode) {
+  //     //   is(LUI_OPCODE) { out.op1 := 0.U; out.op2 := imm_u; }
+  //     //   is(AUIPC_OPCODE) { out.op1 := in.pc; out.op2 := imm_u; }
+  //     // }
+  //   }
+  //   is(J__.U(4.W)) {
+  //     // out.imm := imm_j;
+  //     // out.rd := rd;
+  //     // out.op1 := in.pc; out.op2 := 4.U;
+  //   }
+  //   is(N__.U(4.W)) {
+  //     // out.imm := imm;
+  //     // out.rd := rd;
+  //     // out.op1 := in.rs1v;
+  //   }
+  //   is(CSR.U(4.W)) {
+  //     // out.imm := csr;
+  //     // out.rd := rd;
+  //   }
+  // }
 }
