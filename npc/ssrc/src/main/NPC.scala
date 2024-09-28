@@ -262,10 +262,11 @@ class ysyx_idu_decoder extends Module with InstrType with Instr {
   out.ren := 0.U
   switch(wire) {
     is(R__.U(4.W)) {
-      out.rd := rd; out.op1 := in.rs1v; out.op2 := in.rs2v;
+      // out.rd := rd;
+      out.op1 := in.rs1v; out.op2 := in.rs2v;
     }
     is(I__.U(4.W)) {
-      out.rd := rd;
+      // out.rd := rd;
       // out.imm := imm_i;
       when(opcode === "b1100111".U) {
         out.op1 := in.pc; out.op2 := 4.U;
@@ -292,7 +293,7 @@ class ysyx_idu_decoder extends Module with InstrType with Instr {
     }
     is(U__.U(4.W)) {
       // out.imm := imm_u;
-      out.rd := rd;
+      // out.rd := rd;
       switch(opcode) {
         is(LUI_OPCODE) { out.op1 := 0.U; out.op2 := imm_u; }
         is(AUIPC_OPCODE) { out.op1 := in.pc; out.op2 := imm_u; }
@@ -300,15 +301,17 @@ class ysyx_idu_decoder extends Module with InstrType with Instr {
     }
     is(J__.U(4.W)) {
       // out.imm := imm_j;
-      out.rd := rd; out.op1 := in.pc; out.op2 := 4.U;
+      // out.rd := rd;
+      out.op1 := in.pc; out.op2 := 4.U;
     }
     is(N__.U(4.W)) {
       // out.imm := imm;
-      out.rd := rd; out.op1 := in.rs1v;
+      // out.rd := rd;
+      out.op1 := in.rs1v;
     }
     is(CSR.U(4.W)) {
       // out.imm := csr;
-      out.rd := rd;
+      // out.rd := rd;
     }
   }
 }
