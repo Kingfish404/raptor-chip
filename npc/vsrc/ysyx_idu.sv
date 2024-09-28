@@ -101,8 +101,8 @@ module ysyx_idu (
           if (prev_valid & ready_o & next_ready) begin
           end else begin
             valid <= 0;
-            // inst_idu <= 0;
-            // pc_idu <= 0;
+            inst_idu <= 0;
+            pc_idu <= 0;
           end
         end
       end
