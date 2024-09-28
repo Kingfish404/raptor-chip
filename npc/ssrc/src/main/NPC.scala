@@ -201,11 +201,11 @@ class ysyx_idu_decoder extends Module with InstrType with Instr {
     BGE___ -> List(B__.U(4.W), 0.U, imm_b),
     BLTU__ -> List(B__.U(4.W), 0.U, imm_b),
     BGEU__ -> List(B__.U(4.W), 0.U, imm_b),
-    LB____ -> List(I__.U(4.W), rd, 0.U),
-    LH____ -> List(I__.U(4.W), rd, 0.U),
-    LW____ -> List(I__.U(4.W), rd, 0.U),
-    LBU___ -> List(I__.U(4.W), rd, 0.U),
-    LHU___ -> List(I__.U(4.W), rd, 0.U),
+    LB____ -> List(I__.U(4.W), rd, imm_i),
+    LH____ -> List(I__.U(4.W), rd, imm_i),
+    LW____ -> List(I__.U(4.W), rd, imm_i),
+    LBU___ -> List(I__.U(4.W), rd, imm_i),
+    LHU___ -> List(I__.U(4.W), rd, imm_i),
     SB____ -> List(S__.U(4.W), 0.U, imm_s),
     SH____ -> List(S__.U(4.W), 0.U, imm_s),
     SW____ -> List(S__.U(4.W), 0.U, imm_s),
@@ -261,7 +261,9 @@ class ysyx_idu_decoder extends Module with InstrType with Instr {
   out.wen := 0.U
   out.ren := 0.U
   switch(wire) {
-    is(R__.U(4.W)) { out.rd := rd; out.op1 := in.rs1v; out.op2 := in.rs2v; }
+    is(R__.U(4.W)) {
+      out.rd := rd; out.op1 := in.rs1v; out.op2 := in.rs2v;
+    }
     is(I__.U(4.W)) {
       out.rd := rd;
       // out.imm := imm_i;
