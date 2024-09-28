@@ -297,7 +297,7 @@ class ysyx_idu_decoder extends Module with InstrType with Instr with MicroOP {
   out.op2 := var_decoder(3)
   out.wen := (opcode === "b0100011".U)
   out.ren := (opcode === "b0000011".U)
-  out.alu_op := inst_type(0, 3)
+  out.alu_op := inst_type(3, 0)
   // val wire = Wire(UInt(4.W))
   // wire := inst_type
   // switch(wire) {
