@@ -6,16 +6,16 @@ import chisel3.util.experimental.decode._
 import scala.annotation.switch
 
 trait InstrType {
-  def N__ = "b0000".U(4.W)
-  def R__ = "b0101".U(4.W)
-  def I__ = "b0100".U(4.W)
-  def S__ = "b0010".U(4.W)
-  def B__ = "b0001".U(4.W)
-  def U__ = "b0110".U(4.W)
-  def J__ = "b0111".U(4.W)
-  def A__ = "b1110".U(4.W)
+  def N__ = "b0000"
+  def R__ = "b0101"
+  def I__ = "b0100"
+  def S__ = "b0010"
+  def B__ = "b0001"
+  def U__ = "b0110"
+  def J__ = "b0111"
+  def A__ = "b1110"
 
-  def CSR = "b1111".U(4.W)
+  def CSR = "b1111"
 }
 
 trait Instr {
@@ -191,58 +191,58 @@ class ysyx_idu_decoder extends Module with InstrType with Instr {
     BitPat(N__)
   )
   val table1 = Array(
-    LUI___ -> List(U__, rd, imm_u),
-    AUIPC_ -> List(U__, rd, imm_u),
-    JAL___ -> List(J__, rd, imm_j),
-    JALR__ -> List(I__, rd, imm_i),
-    BEQ___ -> List(B__, 0.U, imm_b),
-    BNE___ -> List(B__, 0.U, imm_b),
-    BLT___ -> List(B__, 0.U, imm_b),
-    BGE___ -> List(B__, 0.U, imm_b),
-    BLTU__ -> List(B__, 0.U, imm_b),
-    BGEU__ -> List(B__, 0.U, imm_b),
-    LB____ -> List(I__, rd, 0.U),
-    LH____ -> List(I__, rd, 0.U),
-    LW____ -> List(I__, rd, 0.U),
-    LBU___ -> List(I__, rd, 0.U),
-    LHU___ -> List(I__, rd, 0.U),
-    SB____ -> List(S__, 0.U, imm_s),
-    SH____ -> List(S__, 0.U, imm_s),
-    SW____ -> List(S__, 0.U, imm_s),
-    ADDI__ -> List(I__, rd, imm_i),
-    SLTI__ -> List(I__, rd, imm_i),
-    SLTIU_ -> List(I__, rd, imm_i),
-    XORI__ -> List(I__, rd, imm_i),
-    ORI___ -> List(I__, rd, imm_i),
-    ANDI__ -> List(I__, rd, imm_i),
-    SLLI__ -> List(I__, rd, imm_i),
-    SRLI__ -> List(I__, rd, imm_i),
-    SRAI__ -> List(I__, rd, imm_i),
-    ADD___ -> List(R__, rd, 0.U),
-    SUB___ -> List(R__, rd, 0.U),
-    SLL___ -> List(R__, rd, 0.U),
-    SLT___ -> List(R__, rd, 0.U),
-    SLTU__ -> List(R__, rd, 0.U),
-    XOR___ -> List(R__, rd, 0.U),
-    SRL___ -> List(R__, rd, 0.U),
-    SRA___ -> List(R__, rd, 0.U),
-    OR____ -> List(R__, rd, 0.U),
-    AND___ -> List(R__, rd, 0.U),
-    FENCE_ -> List(N__, rd, imm),
-    FENCET -> List(N__, rd, imm),
-    PAUSE_ -> List(N__, rd, imm),
-    ECALL_ -> List(N__, rd, imm),
-    EBREAK -> List(N__, rd, imm),
-    MRET__ -> List(N__, rd, imm),
-    FENCEI -> List(N__, rd, imm),
-    CSRRW_ -> List(CSR, rd, csr),
-    CSRRS_ -> List(CSR, rd, csr),
-    CSRRC_ -> List(CSR, rd, csr),
-    CSRRWI -> List(CSR, rd, csr),
-    CSRRSI -> List(CSR, rd, csr),
-    CSRRCI -> List(CSR, rd, csr)
+    LUI___ -> List(U__.U(4.W), rd, imm_u),
+    AUIPC_ -> List(U__.U(4.W), rd, imm_u),
+    JAL___ -> List(J__.U(4.W), rd, imm_j),
+    JALR__ -> List(I__.U(4.W), rd, imm_i),
+    BEQ___ -> List(B__.U(4.W), 0.U, imm_b),
+    BNE___ -> List(B__.U(4.W), 0.U, imm_b),
+    BLT___ -> List(B__.U(4.W), 0.U, imm_b),
+    BGE___ -> List(B__.U(4.W), 0.U, imm_b),
+    BLTU__ -> List(B__.U(4.W), 0.U, imm_b),
+    BGEU__ -> List(B__.U(4.W), 0.U, imm_b),
+    LB____ -> List(I__.U(4.W), rd, 0.U),
+    LH____ -> List(I__.U(4.W), rd, 0.U),
+    LW____ -> List(I__.U(4.W), rd, 0.U),
+    LBU___ -> List(I__.U(4.W), rd, 0.U),
+    LHU___ -> List(I__.U(4.W), rd, 0.U),
+    SB____ -> List(S__.U(4.W), 0.U, imm_s),
+    SH____ -> List(S__.U(4.W), 0.U, imm_s),
+    SW____ -> List(S__.U(4.W), 0.U, imm_s),
+    ADDI__ -> List(I__.U(4.W), rd, imm_i),
+    SLTI__ -> List(I__.U(4.W), rd, imm_i),
+    SLTIU_ -> List(I__.U(4.W), rd, imm_i),
+    XORI__ -> List(I__.U(4.W), rd, imm_i),
+    ORI___ -> List(I__.U(4.W), rd, imm_i),
+    ANDI__ -> List(I__.U(4.W), rd, imm_i),
+    SLLI__ -> List(I__.U(4.W), rd, imm_i),
+    SRLI__ -> List(I__.U(4.W), rd, imm_i),
+    SRAI__ -> List(I__.U(4.W), rd, imm_i),
+    ADD___ -> List(R__.U(4.W), rd, 0.U),
+    SUB___ -> List(R__.U(4.W), rd, 0.U),
+    SLL___ -> List(R__.U(4.W), rd, 0.U),
+    SLT___ -> List(R__.U(4.W), rd, 0.U),
+    SLTU__ -> List(R__.U(4.W), rd, 0.U),
+    XOR___ -> List(R__.U(4.W), rd, 0.U),
+    SRL___ -> List(R__.U(4.W), rd, 0.U),
+    SRA___ -> List(R__.U(4.W), rd, 0.U),
+    OR____ -> List(R__.U(4.W), rd, 0.U),
+    AND___ -> List(R__.U(4.W), rd, 0.U),
+    FENCE_ -> List(N__.U(4.W), rd, imm),
+    FENCET -> List(N__.U(4.W), rd, imm),
+    PAUSE_ -> List(N__.U(4.W), rd, imm),
+    ECALL_ -> List(N__.U(4.W), rd, imm),
+    EBREAK -> List(N__.U(4.W), rd, imm),
+    MRET__ -> List(N__.U(4.W), rd, imm),
+    FENCEI -> List(N__.U(4.W), rd, imm),
+    CSRRW_ -> List(CSR.U(4.W), rd, csr),
+    CSRRS_ -> List(CSR.U(4.W), rd, csr),
+    CSRRC_ -> List(CSR.U(4.W), rd, csr),
+    CSRRWI -> List(CSR.U(4.W), rd, csr),
+    CSRRSI -> List(CSR.U(4.W), rd, csr),
+    CSRRCI -> List(CSR.U(4.W), rd, csr)
   )
-  val var_decoder = ListLookup(in.inst, List(N__, 0.U, 0.U), table1)
+  val var_decoder = ListLookup(in.inst, List(N__.U(4.W), 0.U, 0.U), table1)
 
   val decoded = decoder(in.inst, table)
   out_sys.ebreak := decoded(3)
@@ -261,9 +261,10 @@ class ysyx_idu_decoder extends Module with InstrType with Instr {
   out.wen := 0.U
   out.ren := 0.U
   switch(wire) {
-    is(R__) { out.rd := rd; out.op1 := in.rs1v; out.op2 := in.rs2v; }
-    is(I__) {
-      out.rd := rd; out.imm := imm_i;
+    is(R__.U(4.W)) { out.rd := rd; out.op1 := in.rs1v; out.op2 := in.rs2v; }
+    is(I__.U(4.W)) {
+      out.rd := rd;
+      // out.imm := imm_i;
       when(opcode === "b1100111".U) {
         out.op1 := in.pc; out.op2 := 4.U;
       }.otherwise {
@@ -271,12 +272,13 @@ class ysyx_idu_decoder extends Module with InstrType with Instr {
       }
       when(opcode === "b0000011".U) { out.ren := 1.U; }
     }
-    is(S__) {
-      out.imm := imm_s; out.op1 := in.rs1v; out.op2 := in.rs2v;
+    is(S__.U(4.W)) {
+      // out.imm := imm_s;
+      out.op1 := in.rs1v; out.op2 := in.rs2v;
       out.wen := 1.U;
     }
-    is(B__) {
-      out.imm := imm_b;
+    is(B__.U(4.W)) {
+      // out.imm := imm_b;
       switch(funct3) {
         is("b000".U) { out.op1 := in.rs1v; out.op2 := in.rs2v; }
         is("b001".U) { out.op1 := in.rs1v; out.op2 := in.rs2v; }
@@ -286,17 +288,25 @@ class ysyx_idu_decoder extends Module with InstrType with Instr {
         is("b111".U) { out.op1 := in.rs2v; out.op2 := in.rs1v; }
       }
     }
-    is(U__) {
-      out.rd := rd; out.imm := imm_u;
+    is(U__.U(4.W)) {
+      // out.imm := imm_u;
+      out.rd := rd;
       switch(opcode) {
         is(LUI_OPCODE) { out.op1 := 0.U; out.op2 := imm_u; }
         is(AUIPC_OPCODE) { out.op1 := in.pc; out.op2 := imm_u; }
       }
     }
-    is(J__) {
-      out.rd := rd; out.imm := imm_j; out.op1 := in.pc; out.op2 := 4.U;
+    is(J__.U(4.W)) {
+      // out.imm := imm_j;
+      out.rd := rd; out.op1 := in.pc; out.op2 := 4.U;
     }
-    is(N__) { out.rd := rd; out.imm := imm; out.op1 := in.rs1v; }
-    is(CSR) { out.rd := rd; out.imm := csr; }
+    is(N__.U(4.W)) {
+      // out.imm := imm;
+      out.rd := rd; out.op1 := in.rs1v;
+    }
+    is(CSR.U(4.W)) {
+      // out.imm := csr;
+      out.rd := rd;
+    }
   }
 }
