@@ -49,8 +49,8 @@ module ysyx_idu (
   reg valid, ready;
   // wire [4:0] rs1 = inst_idu[19:15], rs2 = inst_idu[24:20], rd = inst_idu[11:7];
   wire [ 3:0] rs1 = inst_idu[18:15], rs2 = inst_idu[23:20], rd = inst_idu[10:7];
-  wire [ 2:0] funct3 = inst_idu[14:12];
-  wire [ 6:0] funct7 = inst_idu[31:25];
+  // wire [ 2:0] funct3 = inst_idu[14:12];
+  // wire [ 6:0] funct7 = inst_idu[31:25];
   wire [31:0] imm;
   wire wen, ren;
   // wire [11:0] imm_I = inst_idu[31:20], imm_S = {inst_idu[31:25], inst_idu[11:7]};

@@ -137,28 +137,13 @@ class ysyx_idu_decoder extends Module with InstrType with Instr with MicroOP {
   val imm_u = Cat(in.inst(31, 12), Fill(12, 0.U))
   val immjv = Cat(in.inst(31), in.inst(19, 12), in.inst(20), in.inst(30, 21))
   val imm_j = Cat(Fill(11, in.inst(31)), immjv, 0.U)
-
   val imm = in.inst(31, 20)
   val csr = in.inst(31, 20)
-  // val table = TruthTable(
-  //   Map(
-  //     ECALL_ -> BitPat("b0111"),
-  //     EBREAK -> BitPat("b1111"),
-  //     MRET__ -> BitPat("b0111"),
-  //     FENCEI -> BitPat("b0001"),
-  //     CSRRW_ -> BitPat("b0011"),
-  //     CSRRS_ -> BitPat("b0011"),
-  //     CSRRC_ -> BitPat("b0011"),
-  //     CSRRWI -> BitPat("b0011"),
-  //     CSRRSI -> BitPat("b0011"),
-  //     CSRRCI -> BitPat("b0011")
-  //   ),
-  //   BitPat("b0000")
-  // )
+
   val type_decoder = TruthTable(
     Map(
       // format: off
-      //                  | type | sys |  ls |  j  |  alu op |
+      //                  | type |    sys |  ls |  j  |  alu op |
       LUI___ -> BitPat("b" + U__ + "0000" + "00" + "0" + ALU_ADD_),
       AUIPC_ -> BitPat("b" + U__ + "0000" + "00" + "0" + ALU_ADD_),
       JAL___ -> BitPat("b" + J__ + "0000" + "00" + "1" + ALU_ADD_),
