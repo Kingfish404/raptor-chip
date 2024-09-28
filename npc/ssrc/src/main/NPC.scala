@@ -191,58 +191,59 @@ class ysyx_idu_decoder extends Module with InstrType with Instr {
     BitPat(N__)
   )
   val table1 = Array(
-    LUI___ -> List(U__.U(4.W), rd, imm_u),
-    AUIPC_ -> List(U__.U(4.W), rd, imm_u),
-    JAL___ -> List(J__.U(4.W), rd, imm_j),
-    JALR__ -> List(I__.U(4.W), rd, imm_i),
-    BEQ___ -> List(B__.U(4.W), 0.U, imm_b),
-    BNE___ -> List(B__.U(4.W), 0.U, imm_b),
-    BLT___ -> List(B__.U(4.W), 0.U, imm_b),
-    BGE___ -> List(B__.U(4.W), 0.U, imm_b),
-    BLTU__ -> List(B__.U(4.W), 0.U, imm_b),
-    BGEU__ -> List(B__.U(4.W), 0.U, imm_b),
-    LB____ -> List(I__.U(4.W), rd, imm_i),
-    LH____ -> List(I__.U(4.W), rd, imm_i),
-    LW____ -> List(I__.U(4.W), rd, imm_i),
-    LBU___ -> List(I__.U(4.W), rd, imm_i),
-    LHU___ -> List(I__.U(4.W), rd, imm_i),
-    SB____ -> List(S__.U(4.W), 0.U, imm_s),
-    SH____ -> List(S__.U(4.W), 0.U, imm_s),
-    SW____ -> List(S__.U(4.W), 0.U, imm_s),
-    ADDI__ -> List(I__.U(4.W), rd, imm_i),
-    SLTI__ -> List(I__.U(4.W), rd, imm_i),
-    SLTIU_ -> List(I__.U(4.W), rd, imm_i),
-    XORI__ -> List(I__.U(4.W), rd, imm_i),
-    ORI___ -> List(I__.U(4.W), rd, imm_i),
-    ANDI__ -> List(I__.U(4.W), rd, imm_i),
-    SLLI__ -> List(I__.U(4.W), rd, imm_i),
-    SRLI__ -> List(I__.U(4.W), rd, imm_i),
-    SRAI__ -> List(I__.U(4.W), rd, imm_i),
-    ADD___ -> List(R__.U(4.W), rd, 0.U),
-    SUB___ -> List(R__.U(4.W), rd, 0.U),
-    SLL___ -> List(R__.U(4.W), rd, 0.U),
-    SLT___ -> List(R__.U(4.W), rd, 0.U),
-    SLTU__ -> List(R__.U(4.W), rd, 0.U),
-    XOR___ -> List(R__.U(4.W), rd, 0.U),
-    SRL___ -> List(R__.U(4.W), rd, 0.U),
-    SRA___ -> List(R__.U(4.W), rd, 0.U),
-    OR____ -> List(R__.U(4.W), rd, 0.U),
-    AND___ -> List(R__.U(4.W), rd, 0.U),
-    FENCE_ -> List(N__.U(4.W), rd, imm),
-    FENCET -> List(N__.U(4.W), rd, imm),
-    PAUSE_ -> List(N__.U(4.W), rd, imm),
-    ECALL_ -> List(N__.U(4.W), rd, imm),
-    EBREAK -> List(N__.U(4.W), rd, imm),
-    MRET__ -> List(N__.U(4.W), rd, imm),
-    FENCEI -> List(N__.U(4.W), rd, imm),
-    CSRRW_ -> List(CSR.U(4.W), rd, csr),
-    CSRRS_ -> List(CSR.U(4.W), rd, csr),
-    CSRRC_ -> List(CSR.U(4.W), rd, csr),
-    CSRRWI -> List(CSR.U(4.W), rd, csr),
-    CSRRSI -> List(CSR.U(4.W), rd, csr),
-    CSRRCI -> List(CSR.U(4.W), rd, csr)
+    LUI___ -> List(U__.U(4.W), rd, imm_u, 0.U, imm_u),
+    AUIPC_ -> List(U__.U(4.W), rd, imm_u, in.pc, imm_u),
+    JAL___ -> List(J__.U(4.W), rd, imm_j, in.pc, 4.U),
+    JALR__ -> List(I__.U(4.W), rd, imm_i, in.pc, 4.U),
+    BEQ___ -> List(B__.U(4.W), 0.U, imm_b, in.rs1v, in.rs2v),
+    BNE___ -> List(B__.U(4.W), 0.U, imm_b, in.rs1v, in.rs2v),
+    BLT___ -> List(B__.U(4.W), 0.U, imm_b, in.rs1v, in.rs2v),
+    BGE___ -> List(B__.U(4.W), 0.U, imm_b, in.rs2v, in.rs1v),
+    BLTU__ -> List(B__.U(4.W), 0.U, imm_b, in.rs1v, in.rs2v),
+    BGEU__ -> List(B__.U(4.W), 0.U, imm_b, in.rs2v, in.rs1v),
+    LB____ -> List(I__.U(4.W), rd, imm_i, in.rs1v, imm_i),
+    LH____ -> List(I__.U(4.W), rd, imm_i, in.rs1v, imm_i),
+    LW____ -> List(I__.U(4.W), rd, imm_i, in.rs1v, imm_i),
+    LBU___ -> List(I__.U(4.W), rd, imm_i, in.rs1v, imm_i),
+    LHU___ -> List(I__.U(4.W), rd, imm_i, in.rs1v, imm_i),
+    SB____ -> List(S__.U(4.W), 0.U, imm_s, in.rs1v, in.rs2v),
+    SH____ -> List(S__.U(4.W), 0.U, imm_s, in.rs1v, in.rs2v),
+    SW____ -> List(S__.U(4.W), 0.U, imm_s, in.rs1v, in.rs2v),
+    ADDI__ -> List(I__.U(4.W), rd, imm_i, in.rs1v, imm_i),
+    SLTI__ -> List(I__.U(4.W), rd, imm_i, in.rs1v, imm_i),
+    SLTIU_ -> List(I__.U(4.W), rd, imm_i, in.rs1v, imm_i),
+    XORI__ -> List(I__.U(4.W), rd, imm_i, in.rs1v, imm_i),
+    ORI___ -> List(I__.U(4.W), rd, imm_i, in.rs1v, imm_i),
+    ANDI__ -> List(I__.U(4.W), rd, imm_i, in.rs1v, imm_i),
+    SLLI__ -> List(I__.U(4.W), rd, imm_i, in.rs1v, imm_i),
+    SRLI__ -> List(I__.U(4.W), rd, imm_i, in.rs1v, imm_i),
+    SRAI__ -> List(I__.U(4.W), rd, imm_i, in.rs1v, imm_i),
+    ADD___ -> List(R__.U(4.W), rd, 0.U, in.rs1v, in.rs2v),
+    SUB___ -> List(R__.U(4.W), rd, 0.U, in.rs1v, in.rs2v),
+    SLL___ -> List(R__.U(4.W), rd, 0.U, in.rs1v, in.rs2v),
+    SLT___ -> List(R__.U(4.W), rd, 0.U, in.rs1v, in.rs2v),
+    SLTU__ -> List(R__.U(4.W), rd, 0.U, in.rs1v, in.rs2v),
+    XOR___ -> List(R__.U(4.W), rd, 0.U, in.rs1v, in.rs2v),
+    SRL___ -> List(R__.U(4.W), rd, 0.U, in.rs1v, in.rs2v),
+    SRA___ -> List(R__.U(4.W), rd, 0.U, in.rs1v, in.rs2v),
+    OR____ -> List(R__.U(4.W), rd, 0.U, in.rs1v, in.rs2v),
+    AND___ -> List(R__.U(4.W), rd, 0.U, in.rs1v, in.rs2v),
+    FENCE_ -> List(N__.U(4.W), rd, imm, in.rs1v, 0.U),
+    FENCET -> List(N__.U(4.W), rd, imm, in.rs1v, 0.U),
+    PAUSE_ -> List(N__.U(4.W), rd, imm, in.rs1v, 0.U),
+    ECALL_ -> List(N__.U(4.W), rd, imm, in.rs1v, 0.U),
+    EBREAK -> List(N__.U(4.W), rd, imm, in.rs1v, 0.U),
+    MRET__ -> List(N__.U(4.W), rd, imm, in.rs1v, 0.U),
+    FENCEI -> List(N__.U(4.W), rd, imm, in.rs1v, 0.U),
+    CSRRW_ -> List(CSR.U(4.W), rd, csr, 0.U, 0.U),
+    CSRRS_ -> List(CSR.U(4.W), rd, csr, 0.U, 0.U),
+    CSRRC_ -> List(CSR.U(4.W), rd, csr, 0.U, 0.U),
+    CSRRWI -> List(CSR.U(4.W), rd, csr, 0.U, 0.U),
+    CSRRSI -> List(CSR.U(4.W), rd, csr, 0.U, 0.U),
+    CSRRCI -> List(CSR.U(4.W), rd, csr, 0.U, 0.U)
   )
-  val var_decoder = ListLookup(in.inst, List(N__.U(4.W), 0.U, 0.U), table1)
+  val var_decoder =
+    ListLookup(in.inst, List(N__.U(4.W), 0.U, 0.U, 0.U, 0.U), table1)
 
   val decoded = decoder(in.inst, table)
   out_sys.ebreak := decoded(3)
@@ -263,51 +264,51 @@ class ysyx_idu_decoder extends Module with InstrType with Instr {
   switch(wire) {
     is(R__.U(4.W)) {
       // out.rd := rd;
-      out.op1 := in.rs1v; out.op2 := in.rs2v;
+      // out.op1 := in.rs1v; out.op2 := in.rs2v;
     }
     is(I__.U(4.W)) {
       // out.rd := rd;
       // out.imm := imm_i;
       when(opcode === "b1100111".U) {
-        out.op1 := in.pc; out.op2 := 4.U;
+        // out.op1 := in.pc; out.op2 := 4.U;
       }.otherwise {
-        out.op1 := in.rs1v; out.op2 := imm_i;
+        // out.op1 := in.rs1v; out.op2 := imm_i;
       }
       when(opcode === "b0000011".U) { out.ren := 1.U; }
     }
     is(S__.U(4.W)) {
       // out.imm := imm_s;
-      out.op1 := in.rs1v; out.op2 := in.rs2v;
+      // out.op1 := in.rs1v; out.op2 := in.rs2v;
       out.wen := 1.U;
     }
     is(B__.U(4.W)) {
       // out.imm := imm_b;
-      switch(funct3) {
-        is("b000".U) { out.op1 := in.rs1v; out.op2 := in.rs2v; }
-        is("b001".U) { out.op1 := in.rs1v; out.op2 := in.rs2v; }
-        is("b100".U) { out.op1 := in.rs1v; out.op2 := in.rs2v; }
-        is("b101".U) { out.op1 := in.rs2v; out.op2 := in.rs1v; }
-        is("b110".U) { out.op1 := in.rs1v; out.op2 := in.rs2v; }
-        is("b111".U) { out.op1 := in.rs2v; out.op2 := in.rs1v; }
-      }
+      // switch(funct3) {
+      //   is("b000".U) { out.op1 := in.rs1v; out.op2 := in.rs2v; }
+      //   is("b001".U) { out.op1 := in.rs1v; out.op2 := in.rs2v; }
+      //   is("b100".U) { out.op1 := in.rs1v; out.op2 := in.rs2v; }
+      //   is("b101".U) { out.op1 := in.rs2v; out.op2 := in.rs1v; }
+      //   is("b110".U) { out.op1 := in.rs1v; out.op2 := in.rs2v; }
+      //   is("b111".U) { out.op1 := in.rs2v; out.op2 := in.rs1v; }
+      // }
     }
     is(U__.U(4.W)) {
       // out.imm := imm_u;
       // out.rd := rd;
-      switch(opcode) {
-        is(LUI_OPCODE) { out.op1 := 0.U; out.op2 := imm_u; }
-        is(AUIPC_OPCODE) { out.op1 := in.pc; out.op2 := imm_u; }
-      }
+      // switch(opcode) {
+      //   is(LUI_OPCODE) { out.op1 := 0.U; out.op2 := imm_u; }
+      //   is(AUIPC_OPCODE) { out.op1 := in.pc; out.op2 := imm_u; }
+      // }
     }
     is(J__.U(4.W)) {
       // out.imm := imm_j;
       // out.rd := rd;
-      out.op1 := in.pc; out.op2 := 4.U;
+      // out.op1 := in.pc; out.op2 := 4.U;
     }
     is(N__.U(4.W)) {
       // out.imm := imm;
       // out.rd := rd;
-      out.op1 := in.rs1v;
+      // out.op1 := in.rs1v;
     }
     is(CSR.U(4.W)) {
       // out.imm := csr;
