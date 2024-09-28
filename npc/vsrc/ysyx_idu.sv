@@ -107,11 +107,11 @@ module ysyx_idu (
     end
   end
 
-  assign en_j_o = (
-    (opcode == `YSYX_OP_JAL) | (opcode == `YSYX_OP_JALR) |
-    (opcode == `YSYX_OP_B_TYPE) | (opcode == `YSYX_OP_SYSTEM) |
-    (0)
-  );
+  // assign en_j_o = (
+  //   (opcode == `YSYX_OP_JAL) | (opcode == `YSYX_OP_JALR) |
+  //   (opcode == `YSYX_OP_B_TYPE) | (opcode == `YSYX_OP_SYSTEM) |
+  //   (0)
+  // );
   assign rwaddr_o = (
     {BIT_W{opcode == `YSYX_OP_IL_TYPE | opcode == `YSYX_OP_S_TYPE}} & reg_rdata1 + imm_o |
     (0)
@@ -182,6 +182,7 @@ module ysyx_idu (
       .out_wen(wen_o),
       .out_ren(ren_o),
       .out_alu_op(alu_op_o),
+      .out_en_j(en_j_o),
 
       .out_sys_ebreak(ebreak_o),
       .out_sys_system_func3_zero(system_func3_o),
