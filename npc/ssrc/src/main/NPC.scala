@@ -85,7 +85,39 @@ trait Instr {
   def CSRRCI = BitPat("b??????? ????? ????? 111 ????? 1110011")
 }
 
-class ysyx_idu_decoder extends Module with InstrType with Instr {
+// `define YSYX_ALU_OP_ADD   4'b0000
+// `define YSYX_ALU_OP_SUB   4'b1000
+// `define YSYX_ALU_OP_SLT   4'b0010
+// `define YSYX_ALU_OP_SLE   4'b1010
+// `define YSYX_ALU_OP_SLTU  4'b0011
+// `define YSYX_ALU_OP_SLEU  4'b1011
+// `define YSYX_ALU_OP_XOR   4'b0100
+// `define YSYX_ALU_OP_OR    4'b0110
+// `define YSYX_ALU_OP_AND   4'b0111
+// `define YSYX_ALU_OP_NAND  4'b1111
+
+// `define YSYX_ALU_OP_SLL   4'b0001
+// `define YSYX_ALU_OP_SRL   4'b0101
+// `define YSYX_ALU_OP_SRA   4'b1101
+
+trait MicroOP {
+  def ALU_ADD_ = "b0000".U(4.W)
+  def ALU_SUB_ = "b1000".U(4.W)
+  def ALU_SLT_ = "b0010".U(4.W)
+  def ALU_SLE_ = "b1010".U(4.W)
+  def ALU_SLTU = "b0011".U(4.W)
+  def ALU_SLEU = "b1011".U(4.W)
+  def ALU_XOR_ = "b0100".U(4.W)
+  def ALU_OR__ = "b0110".U(4.W)
+  def ALU_AND_ = "b0111".U(4.W)
+  def ALU_NAND = "b1111".U(4.W)
+
+  def ALU_SLL_ = "b0001".U(4.W)
+  def ALU_SRL_ = "b0101".U(4.W)
+  def ALU_SRA_ = "b1101".U(4.W)
+}
+
+class ysyx_idu_decoder extends Module with InstrType with Instr with MicroOP {
   val in = IO(new Bundle {
     val inst = Input(UInt(32.W))
     val pc = Input(UInt(32.W))
@@ -93,13 +125,13 @@ class ysyx_idu_decoder extends Module with InstrType with Instr {
     val rs2v = Input(UInt(32.W))
   })
   val out = IO(new Bundle {
-    val inst_type = Output(UInt(4.W))
     val rd = Output(UInt(4.W))
     val imm = Output(UInt(32.W))
     val op1 = Output(UInt(32.W))
     val op2 = Output(UInt(32.W))
     val wen = Output(UInt(1.W))
     val ren = Output(UInt(1.W))
+    val alu_op = Output(UInt(4.W))
   })
   val out_sys = IO(new Bundle {
     var ebreak = Output(UInt(1.W))
@@ -110,6 +142,10 @@ class ysyx_idu_decoder extends Module with InstrType with Instr {
   val rd = in.inst(11, 7)
   val opcode = in.inst(6, 0)
   val funct3 = in.inst(14, 12)
+  val funct7 = in.inst(31, 25)
+  val ALU_F3OP = Cat(0.U(1.W), funct3)
+  val ALU_F3_5 = Cat(funct7(5), funct3)
+
   val imm_i = Cat(Fill(20, in.inst(31)), in.inst(31, 20))
   val imm_s = Cat(Fill(20, in.inst(31)), in.inst(31, 25), in.inst(11, 7))
   val immbv = Cat(in.inst(31), in.inst(7), in.inst(30, 25), in.inst(11, 8))
@@ -191,59 +227,62 @@ class ysyx_idu_decoder extends Module with InstrType with Instr {
     BitPat(N__)
   )
   val table1 = Array(
-    LUI___ -> List(U__.U(4.W), rd, imm_u, 0.U, imm_u),
-    AUIPC_ -> List(U__.U(4.W), rd, imm_u, in.pc, imm_u),
-    JAL___ -> List(J__.U(4.W), rd, imm_j, in.pc, 4.U),
-    JALR__ -> List(I__.U(4.W), rd, imm_i, in.pc, 4.U),
-    BEQ___ -> List(B__.U(4.W), 0.U, imm_b, in.rs1v, in.rs2v),
-    BNE___ -> List(B__.U(4.W), 0.U, imm_b, in.rs1v, in.rs2v),
-    BLT___ -> List(B__.U(4.W), 0.U, imm_b, in.rs1v, in.rs2v),
-    BGE___ -> List(B__.U(4.W), 0.U, imm_b, in.rs2v, in.rs1v),
-    BLTU__ -> List(B__.U(4.W), 0.U, imm_b, in.rs1v, in.rs2v),
-    BGEU__ -> List(B__.U(4.W), 0.U, imm_b, in.rs2v, in.rs1v),
-    LB____ -> List(I__.U(4.W), rd, imm_i, in.rs1v, imm_i),
-    LH____ -> List(I__.U(4.W), rd, imm_i, in.rs1v, imm_i),
-    LW____ -> List(I__.U(4.W), rd, imm_i, in.rs1v, imm_i),
-    LBU___ -> List(I__.U(4.W), rd, imm_i, in.rs1v, imm_i),
-    LHU___ -> List(I__.U(4.W), rd, imm_i, in.rs1v, imm_i),
-    SB____ -> List(S__.U(4.W), 0.U, imm_s, in.rs1v, in.rs2v),
-    SH____ -> List(S__.U(4.W), 0.U, imm_s, in.rs1v, in.rs2v),
-    SW____ -> List(S__.U(4.W), 0.U, imm_s, in.rs1v, in.rs2v),
-    ADDI__ -> List(I__.U(4.W), rd, imm_i, in.rs1v, imm_i),
-    SLTI__ -> List(I__.U(4.W), rd, imm_i, in.rs1v, imm_i),
-    SLTIU_ -> List(I__.U(4.W), rd, imm_i, in.rs1v, imm_i),
-    XORI__ -> List(I__.U(4.W), rd, imm_i, in.rs1v, imm_i),
-    ORI___ -> List(I__.U(4.W), rd, imm_i, in.rs1v, imm_i),
-    ANDI__ -> List(I__.U(4.W), rd, imm_i, in.rs1v, imm_i),
-    SLLI__ -> List(I__.U(4.W), rd, imm_i, in.rs1v, imm_i),
-    SRLI__ -> List(I__.U(4.W), rd, imm_i, in.rs1v, imm_i),
-    SRAI__ -> List(I__.U(4.W), rd, imm_i, in.rs1v, imm_i),
-    ADD___ -> List(R__.U(4.W), rd, 0.U, in.rs1v, in.rs2v),
-    SUB___ -> List(R__.U(4.W), rd, 0.U, in.rs1v, in.rs2v),
-    SLL___ -> List(R__.U(4.W), rd, 0.U, in.rs1v, in.rs2v),
-    SLT___ -> List(R__.U(4.W), rd, 0.U, in.rs1v, in.rs2v),
-    SLTU__ -> List(R__.U(4.W), rd, 0.U, in.rs1v, in.rs2v),
-    XOR___ -> List(R__.U(4.W), rd, 0.U, in.rs1v, in.rs2v),
-    SRL___ -> List(R__.U(4.W), rd, 0.U, in.rs1v, in.rs2v),
-    SRA___ -> List(R__.U(4.W), rd, 0.U, in.rs1v, in.rs2v),
-    OR____ -> List(R__.U(4.W), rd, 0.U, in.rs1v, in.rs2v),
-    AND___ -> List(R__.U(4.W), rd, 0.U, in.rs1v, in.rs2v),
-    FENCE_ -> List(N__.U(4.W), rd, imm, in.rs1v, 0.U),
-    FENCET -> List(N__.U(4.W), rd, imm, in.rs1v, 0.U),
-    PAUSE_ -> List(N__.U(4.W), rd, imm, in.rs1v, 0.U),
-    ECALL_ -> List(N__.U(4.W), rd, imm, in.rs1v, 0.U),
-    EBREAK -> List(N__.U(4.W), rd, imm, in.rs1v, 0.U),
-    MRET__ -> List(N__.U(4.W), rd, imm, in.rs1v, 0.U),
-    FENCEI -> List(N__.U(4.W), rd, imm, in.rs1v, 0.U),
-    CSRRW_ -> List(CSR.U(4.W), rd, csr, 0.U, 0.U),
-    CSRRS_ -> List(CSR.U(4.W), rd, csr, 0.U, 0.U),
-    CSRRC_ -> List(CSR.U(4.W), rd, csr, 0.U, 0.U),
-    CSRRWI -> List(CSR.U(4.W), rd, csr, 0.U, 0.U),
-    CSRRSI -> List(CSR.U(4.W), rd, csr, 0.U, 0.U),
-    CSRRCI -> List(CSR.U(4.W), rd, csr, 0.U, 0.U)
+    // format: off
+    // inst                |  rd |   imm | op1    |    op2 | alu_op |
+    LUI___ -> List(U__.U(4.W),  rd, imm_u,     0.U,   imm_u, ALU_ADD_),
+    AUIPC_ -> List(U__.U(4.W),  rd, imm_u,   in.pc,   imm_u, ALU_ADD_),
+    JAL___ -> List(J__.U(4.W),  rd, imm_j,   in.pc,     4.U, ALU_ADD_),
+    JALR__ -> List(I__.U(4.W),  rd, imm_i,   in.pc,     4.U, ALU_ADD_),
+    BEQ___ -> List(B__.U(4.W), 0.U, imm_b, in.rs1v, in.rs2v, ALU_SUB_),
+    BNE___ -> List(B__.U(4.W), 0.U, imm_b, in.rs1v, in.rs2v, ALU_XOR_),
+    BLT___ -> List(B__.U(4.W), 0.U, imm_b, in.rs1v, in.rs2v, ALU_SLT_),
+    BGE___ -> List(B__.U(4.W), 0.U, imm_b, in.rs2v, in.rs1v, ALU_SLTU),
+    BLTU__ -> List(B__.U(4.W), 0.U, imm_b, in.rs1v, in.rs2v, ALU_SLE_),
+    BGEU__ -> List(B__.U(4.W), 0.U, imm_b, in.rs2v, in.rs1v, ALU_SLEU),
+    LB____ -> List(I__.U(4.W),  rd, imm_i, in.rs1v,   imm_i, ALU_F3OP),
+    LH____ -> List(I__.U(4.W),  rd, imm_i, in.rs1v,   imm_i, ALU_F3OP),
+    LW____ -> List(I__.U(4.W),  rd, imm_i, in.rs1v,   imm_i, ALU_F3OP),
+    LBU___ -> List(I__.U(4.W),  rd, imm_i, in.rs1v,   imm_i, ALU_F3OP),
+    LHU___ -> List(I__.U(4.W),  rd, imm_i, in.rs1v,   imm_i, ALU_F3OP),
+    SB____ -> List(S__.U(4.W), 0.U, imm_s, in.rs1v, in.rs2v, ALU_F3OP),
+    SH____ -> List(S__.U(4.W), 0.U, imm_s, in.rs1v, in.rs2v, ALU_F3OP),
+    SW____ -> List(S__.U(4.W), 0.U, imm_s, in.rs1v, in.rs2v, ALU_F3OP),
+    ADDI__ -> List(I__.U(4.W),  rd, imm_i, in.rs1v,   imm_i, ALU_F3OP),
+    SLTI__ -> List(I__.U(4.W),  rd, imm_i, in.rs1v,   imm_i, ALU_F3OP),
+    SLTIU_ -> List(I__.U(4.W),  rd, imm_i, in.rs1v,   imm_i, ALU_F3OP),
+    XORI__ -> List(I__.U(4.W),  rd, imm_i, in.rs1v,   imm_i, ALU_F3OP),
+    ORI___ -> List(I__.U(4.W),  rd, imm_i, in.rs1v,   imm_i, ALU_F3OP),
+    ANDI__ -> List(I__.U(4.W),  rd, imm_i, in.rs1v,   imm_i, ALU_F3OP),
+    SLLI__ -> List(I__.U(4.W),  rd, imm_i, in.rs1v,   imm_i, ALU_F3_5),
+    SRLI__ -> List(I__.U(4.W),  rd, imm_i, in.rs1v,   imm_i, ALU_F3_5),
+    SRAI__ -> List(I__.U(4.W),  rd, imm_i, in.rs1v,   imm_i, ALU_F3_5),
+    ADD___ -> List(R__.U(4.W),  rd,   0.U, in.rs1v, in.rs2v, ALU_F3_5),
+    SUB___ -> List(R__.U(4.W),  rd,   0.U, in.rs1v, in.rs2v, ALU_F3_5),
+    SLL___ -> List(R__.U(4.W),  rd,   0.U, in.rs1v, in.rs2v, ALU_F3_5),
+    SLT___ -> List(R__.U(4.W),  rd,   0.U, in.rs1v, in.rs2v, ALU_F3_5),
+    SLTU__ -> List(R__.U(4.W),  rd,   0.U, in.rs1v, in.rs2v, ALU_F3_5),
+    XOR___ -> List(R__.U(4.W),  rd,   0.U, in.rs1v, in.rs2v, ALU_F3_5),
+    SRL___ -> List(R__.U(4.W),  rd,   0.U, in.rs1v, in.rs2v, ALU_F3_5),
+    SRA___ -> List(R__.U(4.W),  rd,   0.U, in.rs1v, in.rs2v, ALU_F3_5),
+    OR____ -> List(R__.U(4.W),  rd,   0.U, in.rs1v, in.rs2v, ALU_F3_5),
+    AND___ -> List(R__.U(4.W),  rd,   0.U, in.rs1v, in.rs2v, ALU_F3_5),
+    FENCE_ -> List(N__.U(4.W),  rd,   imm, in.rs1v,     0.U, ALU_F3OP),
+    FENCET -> List(N__.U(4.W),  rd,   imm, in.rs1v,     0.U, ALU_F3OP),
+    PAUSE_ -> List(N__.U(4.W),  rd,   imm, in.rs1v,     0.U, ALU_F3OP),
+    ECALL_ -> List(N__.U(4.W),  rd,   imm, in.rs1v,     0.U, ALU_F3OP),
+    EBREAK -> List(N__.U(4.W),  rd,   imm, in.rs1v,     0.U, ALU_F3OP),
+    MRET__ -> List(N__.U(4.W),  rd,   imm, in.rs1v,     0.U, ALU_F3OP),
+    FENCEI -> List(N__.U(4.W),  rd,   imm, in.rs1v,     0.U, ALU_F3OP),
+    CSRRW_ -> List(CSR.U(4.W),  rd,   csr,      0.U,    0.U, ALU_F3OP),
+    CSRRS_ -> List(CSR.U(4.W),  rd,   csr,      0.U,    0.U, ALU_F3OP),
+    CSRRC_ -> List(CSR.U(4.W),  rd,   csr,      0.U,    0.U, ALU_F3OP),
+    CSRRWI -> List(CSR.U(4.W),  rd,   csr,      0.U,    0.U, ALU_F3OP),
+    CSRRSI -> List(CSR.U(4.W),  rd,   csr,      0.U,    0.U, ALU_F3OP),
+    CSRRCI -> List(CSR.U(4.W),  rd,   csr,      0.U,    0.U, ALU_F3OP)
+    // format: on
   )
   val var_decoder =
-    ListLookup(in.inst, List(N__.U(4.W), 0.U, 0.U, 0.U, 0.U), table1)
+    ListLookup(in.inst, List(N__.U(4.W), 0.U, 0.U, 0.U, 0.U, 0.U), table1)
 
   val decoded = decoder(in.inst, table)
   out_sys.ebreak := decoded(3)
@@ -251,14 +290,14 @@ class ysyx_idu_decoder extends Module with InstrType with Instr {
   out_sys.csr_wen := decoded(1)
   out_sys.system := decoded(0)
 
-  val inst_type = decoder(in.inst, type_decoder)
-  out.inst_type := inst_type
+  // val inst_type = decoder(in.inst, type_decoder)
   out.rd := var_decoder(1)
   out.imm := var_decoder(2)
   out.op1 := var_decoder(3)
   out.op2 := var_decoder(4)
   out.wen := (opcode === "b0100011".U)
   out.ren := (opcode === "b0000011".U)
+  out.alu_op := var_decoder(5)
   // val wire = Wire(UInt(4.W))
   // wire := inst_type
   // switch(wire) {
