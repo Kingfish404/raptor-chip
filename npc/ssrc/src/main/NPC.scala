@@ -257,8 +257,8 @@ class ysyx_idu_decoder extends Module with InstrType with Instr {
   out.inst_type := inst_type
   out.rd := var_decoder(1)
   out.imm := var_decoder(2)
-  out.op1 := 0.U
-  out.op2 := 0.U
+  out.op1 := var_decoder(3)
+  out.op2 := var_decoder(4)
   out.wen := 0.U
   out.ren := 0.U
   switch(wire) {
