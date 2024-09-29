@@ -202,14 +202,14 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
     BGE___ -> List(0.U, imm_b,  rs2v,  rs1v, in.pc), // B__
     BLTU__ -> List(0.U, imm_b,  rs1v,  rs2v, in.pc), // B__
     BGEU__ -> List(0.U, imm_b,  rs2v,  rs1v, in.pc), // B__
-    LB____ -> List( rd, imm_i,  rs1v, imm_i,   0.U), // I__
-    LH____ -> List( rd, imm_i,  rs1v, imm_i,   0.U), // I__
-    LW____ -> List( rd, imm_i,  rs1v, imm_i,   0.U), // I__
-    LBU___ -> List( rd, imm_i,  rs1v, imm_i,   0.U), // I__
-    LHU___ -> List( rd, imm_i,  rs1v, imm_i,   0.U), // I__
-    SB____ -> List(0.U, imm_s,  rs1v,  rs2v,   0.U), // S__
-    SH____ -> List(0.U, imm_s,  rs1v,  rs2v,   0.U), // S__
-    SW____ -> List(0.U, imm_s,  rs1v,  rs2v,   0.U), // S__
+    LB____ -> List( rd, imm_i,  rs1v, imm_i,  rs1v), // I__
+    LH____ -> List( rd, imm_i,  rs1v, imm_i,  rs1v), // I__
+    LW____ -> List( rd, imm_i,  rs1v, imm_i,  rs1v), // I__
+    LBU___ -> List( rd, imm_i,  rs1v, imm_i,  rs1v), // I__
+    LHU___ -> List( rd, imm_i,  rs1v, imm_i,  rs1v), // I__
+    SB____ -> List(0.U, imm_s,  rs1v,  rs2v,  rs1v), // S__
+    SH____ -> List(0.U, imm_s,  rs1v,  rs2v,  rs1v), // S__
+    SW____ -> List(0.U, imm_s,  rs1v,  rs2v,  rs1v), // S__
     ADDI__ -> List( rd, imm_i,  rs1v, imm_i,   0.U), // I__
     SLTI__ -> List( rd, imm_i,  rs1v, imm_i,   0.U), // I__
     SLTIU_ -> List( rd, imm_i,  rs1v, imm_i,   0.U), // I__
