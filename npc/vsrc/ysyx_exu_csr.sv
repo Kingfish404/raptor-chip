@@ -56,7 +56,7 @@ module ysyx_exu_csr (
       csr[MSTATUS] <= RESET_VAL;
     end else begin
       if (wen & exu_valid) begin
-        csr[waddr_reg0] <= rwaddr;
+        csr[waddr_reg0] <= wdata;
       end
       if (ecallen & exu_valid) begin
         csr[MSTATUS][`YSYX_CSR_MSTATUS_MPIE_IDX] <= csr[MSTATUS][`YSYX_CSR_MSTATUS_MIE_IDX];
