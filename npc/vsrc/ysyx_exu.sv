@@ -192,19 +192,22 @@ module ysyx_exu (
           `YSYX_ALU_OP_SUB: begin
             use_exu_npc = (~|reg_wdata);
           end
+          // `YSYX_ALU_OP_XOR: begin
+          //   use_exu_npc = (|reg_wdata);
+          // end
+          // `YSYX_ALU_OP_SLT: begin
+          //   use_exu_npc = (|reg_wdata);
+          // end
+          // `YSYX_ALU_OP_SLTU: begin
+          //   use_exu_npc = (|reg_wdata);
+          // end
+          // `YSYX_ALU_OP_SLE: begin
+          //   use_exu_npc = (|reg_wdata);
+          // end
+          `YSYX_ALU_OP_XOR,
           `YSYX_ALU_OP_SLT,
-          `YSYX_ALU_OP_XOR: begin
-            use_exu_npc = (|reg_wdata);
-          end
-          `YSYX_ALU_OP_SLT: begin
-            use_exu_npc = (|reg_wdata);
-          end
-          `YSYX_ALU_OP_SLTU: begin
-            use_exu_npc = (|reg_wdata);
-          end
-          `YSYX_ALU_OP_SLE: begin
-            use_exu_npc = (|reg_wdata);
-          end
+          `YSYX_ALU_OP_SLTU,
+          `YSYX_ALU_OP_SLE,
           `YSYX_ALU_OP_SLEU: begin
             use_exu_npc = (|reg_wdata);
           end
