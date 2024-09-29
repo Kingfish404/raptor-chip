@@ -58,7 +58,7 @@ module ysyx_exu (
       .exu_valid(valid_o),
       .ecallen(ecall),
 
-      .waddr(csr_addr0),
+      .rwaddr(csr_addr0),
       .wdata(csr_wdata),
       .pc(pc_exu),
 
