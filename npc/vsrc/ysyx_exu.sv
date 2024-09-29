@@ -136,7 +136,7 @@ module ysyx_exu (
 
         alu_valid <= 1;
         speculation_o <= idu_if.speculation;
-        if (wen | ren) begin
+        if (idu_if.wen | idu_if.ren) begin
           lsu_avalid <= 1;
           busy <= 1;
           rwaddr_o <= idu_if.op1 + idu_if.imm;
@@ -152,7 +152,7 @@ module ysyx_exu (
         end
       end
       // end
-      if (lsu_valid & !(wen | ren)) begin
+      if (lsu_valid & !(idu_if.wen | idu_if.ren)) begin
         busy <= 0;
       end
       if (wen_o) begin
