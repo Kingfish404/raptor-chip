@@ -126,23 +126,25 @@ module ysyx_lsu (
     if (rst) begin
       l1d_valid <= 0;
       valid_r   <= 0;
-    end
-    if (ren & lsu_rvalid) begin
-      if (l1d_cache_within) begin
-        l1d[addr_idx] <= lsu_rdata;
-        l1d_tag[addr_idx] <= addr_tag;
-        l1d_valid[addr_idx] <= 1'b1;
-      end else begin
-        rdata_lsu <= lsu_rdata;
-        valid_r   <= 1'b1;
+    end else begin
+      if (ren & lsu_rvalid) begin
+        if (l1d_cache_within) begin
+          l1d[addr_idx] <= lsu_rdata;
+          l1d_tag[addr_idx] <= addr_tag;
+          l1d_valid[addr_idx] <= 1'b1;
+        end else begin
+          rdata_lsu <= lsu_rdata;
+          valid_r   <= 1'b1;
+        end
       end
+
       if (valid_r) begin
         valid_r <= 0;
       end
-    end
-    if (lsu_awvalid_o & l1d_cache_hit_w) begin
-      // $display("l1d_cache_hit_w");
-      l1d_valid[waddr_idx] <= 1'b0;
+      if (lsu_awvalid_o & l1d_cache_hit_w) begin
+        // $display("l1d_cache_hit_w");
+        l1d_valid[waddr_idx] <= 1'b0;
+      end
     end
   end
 endmodule
