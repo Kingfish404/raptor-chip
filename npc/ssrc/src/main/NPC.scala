@@ -204,9 +204,9 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
     LW____ -> List( rd, imm_i, in.rs1v,   imm_i), // I__
     LBU___ -> List( rd, imm_i, in.rs1v,   imm_i), // I__
     LHU___ -> List( rd, imm_i, in.rs1v,   imm_i), // I__
-    SB____ -> List(0.U, in.rs2v, in.rs1v, imm_s), // S__
-    SH____ -> List(0.U, in.rs2v, in.rs1v, imm_s), // S__
-    SW____ -> List(0.U, in.rs2v, in.rs1v, imm_s), // S__
+    SB____ -> List(0.U, imm_s, in.rs1v, in.rs2v), // S__
+    SH____ -> List(0.U, imm_s, in.rs1v, in.rs2v), // S__
+    SW____ -> List(0.U, imm_s, in.rs1v, in.rs2v), // S__
     ADDI__ -> List( rd, imm_i, in.rs1v,   imm_i), // I__
     SLTI__ -> List( rd, imm_i, in.rs1v,   imm_i), // I__
     SLTIU_ -> List( rd, imm_i, in.rs1v,   imm_i), // I__
@@ -233,12 +233,12 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
     EBREAK -> List( rd,   imm, in.rs1v,     0.U), // N__
     MRET__ -> List( rd,   imm, in.rs1v,     0.U), // N__
     FENCEI -> List( rd,   imm, in.rs1v,     0.U), // N__
-    CSRRW_ -> List( rd,   csr,     0.U,     0.U), // CSR
-    CSRRS_ -> List( rd,   csr,     0.U,     0.U), // CSR
-    CSRRC_ -> List( rd,   csr,     0.U,     0.U), // CSR
-    CSRRWI -> List( rd,   csr,     0.U,     0.U), // CSR
-    CSRRSI -> List( rd,   csr,     0.U,     0.U), // CSR
-    CSRRCI -> List( rd,   csr,     0.U,     0.U)  // CSR
+    CSRRW_ -> List( rd,   csr,     0.U,    0.U), // CSR
+    CSRRS_ -> List( rd,   csr,     0.U,    0.U), // CSR
+    CSRRC_ -> List( rd,   csr,     0.U,    0.U), // CSR
+    CSRRWI -> List( rd,   csr,     0.U,    0.U), // CSR
+    CSRRSI -> List( rd,   csr,     0.U,    0.U), // CSR
+    CSRRCI -> List( rd,   csr,     0.U,    0.U)  // CSR
     // format: on
   )
   val var_decoder =
