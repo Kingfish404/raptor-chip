@@ -78,57 +78,54 @@ module ysyx_exu (
   assign addr_exu = opj + imm_exu;
 
   reg state, alu_valid, lsu_avalid;
-  reg lsu_valid = 0;
-  reg busy = 0;
+  reg lsu_valid;
+  reg ready;
   assign valid_o = (wen_o | ren_o) ? lsu_valid : alu_valid;
-  assign ready_o = !busy | lsu_valid;
+  assign ready_o = ready & next_ready;
   `YSYX_BUS_FSM()
   always @(posedge clk) begin
     if (rst) begin
       alu_valid <= 0;
       lsu_avalid <= 0;
-      busy <= 0;
+      ready <= 1;
     end else begin
-      if (state == `YSYX_IDLE) begin
-        if (prev_valid & ready_o) begin
-          pc_exu <= idu_if.pc;
-          inst_exu <= idu_if.inst;
-          imm_exu <= idu_if.imm;
-          src1 <= idu_if.op1;
-          src2 <= idu_if.op2;
-          alu_op_exu <= idu_if.alu_op;
-          opj <= idu_if.opj;
+      if (prev_valid & ready_o) begin
+        pc_exu <= idu_if.pc;
+        inst_exu <= idu_if.inst;
+        imm_exu <= idu_if.imm;
+        src1 <= idu_if.op1;
+        src2 <= idu_if.op2;
+        alu_op_exu <= idu_if.alu_op;
+        opj <= idu_if.opj;
 
-          rd_o <= idu_if.rd;
-          ren_o <= idu_if.ren;
-          wen_o <= idu_if.wen;
-          jen <= idu_if.jen;
-          ben <= idu_if.ben;
+        rd_o <= idu_if.rd;
+        ren_o <= idu_if.ren;
+        wen_o <= idu_if.wen;
+        jen <= idu_if.jen;
+        ben <= idu_if.ben;
 
-          system_exu <= idu_if.system;
-          csr_wen_exu <= idu_if.csr_wen;
-          ebreak_o <= idu_if.ebreak;
-          ecall <= idu_if.ecall;
-          mret <= idu_if.mret;
+        system_exu <= idu_if.system;
+        csr_wen_exu <= idu_if.csr_wen;
+        ebreak_o <= idu_if.ebreak;
+        ecall <= idu_if.ecall;
+        mret <= idu_if.mret;
 
-          alu_valid <= 1;
-          speculation_o <= idu_if.speculation;
-          if (idu_if.wen | idu_if.ren) begin
-            lsu_avalid <= 1;
-            busy <= 1;
-          end
+        alu_valid <= 1;
+        speculation_o <= idu_if.speculation;
+        if (idu_if.wen | idu_if.ren) begin
+          lsu_avalid <= 1;
+          ready <= 0;
         end
-      end else if (state == `YSYX_WAIT_READY) begin
-        if (next_ready == 1) begin
-          lsu_valid <= 0;
-          // use_exu_npc <= 0;
-          if (prev_valid == 0) begin
-            alu_valid <= 0;
-          end
+      end
+      if (next_ready == 1) begin
+        lsu_valid <= 0;
+        // use_exu_npc <= 0;
+        if (prev_valid == 0) begin
+          alu_valid <= 0;
         end
       end
       if (lsu_valid & !(idu_if.wen | idu_if.ren)) begin
-        busy <= 0;
+        ready <= 1;
       end
       if (wen_o) begin
         if (lsu_exu_wready) begin
