@@ -1,4 +1,3 @@
-`include "ysyx.svh"
 `include "ysyx_soc.svh"
 `include "ysyx_dpi_c.svh"
 
