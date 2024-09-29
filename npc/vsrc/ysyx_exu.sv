@@ -176,17 +176,24 @@ module ysyx_exu (
 
   always_comb begin
     if (system_exu & system_func3_exu) begin
-      case (imm_exu)
-        `YSYX_OP_SYSTEM_ECALL: begin
-          npc_wdata_o = mtvec;
-        end
-        `YSYX_OP_SYSTEM_MRET: begin
-          npc_wdata_o = mepc;
-        end
-        default: begin
-          npc_wdata_o = addr_exu;
-        end
-      endcase
+      if (ecall) begin
+        npc_wdata_o = mtvec;
+      end else if (mret) begin
+        npc_wdata_o = mepc;
+      end else begin
+        npc_wdata_o = addr_exu;
+      end
+      // case (imm_exu)
+      //   `YSYX_OP_SYSTEM_ECALL: begin
+      //     npc_wdata_o = mtvec;
+      //   end
+      //   `YSYX_OP_SYSTEM_MRET: begin
+      //     npc_wdata_o = mepc;
+      //   end
+      //   default: begin
+      //     npc_wdata_o = addr_exu;
+      //   end
+      // endcase
     end else begin
       npc_wdata_o = addr_exu;
     end
