@@ -124,7 +124,7 @@ module ysyx_exu (
         if (idu_if.wen | idu_if.ren) begin
           lsu_avalid <= 1;
           busy <= 1;
-          rwaddr_o <= idu_if.opj + idu_if.imm;
+          rwaddr_o <= idu_if.op1 + idu_if.imm;
         end
       end
       // end
