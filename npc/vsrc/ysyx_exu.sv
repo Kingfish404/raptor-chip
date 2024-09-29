@@ -173,16 +173,7 @@ module ysyx_exu (
   assign branch_retire_o = (
     (system_exu) | (opcode_exu == `YSYX_OP_B_TYPE) | (opcode_exu == `YSYX_OP_IL_TYPE)
   );
-
-  always_comb begin
-    if (ecall) begin
-      npc_wdata_o = mtvec;
-    end else if (mret) begin
-      npc_wdata_o = mepc;
-    end else begin
-      npc_wdata_o = addr_exu;
-    end
-  end
+  assign npc_wdata_o = (ecall) ? mtvec : (mret) ? mepc : addr_exu;
 
   always_comb begin
     case (opcode_exu)
