@@ -124,7 +124,7 @@ module ysyx_exu (
         src2 <= op2;
         alu_op_exu <= alu_op;
         addr_exu <= op_j + imm;
-        rd_o <= rd;
+        rd_o <= ie_if.rd;
         ren_o <= ren;
         wen_o <= wen;
 
