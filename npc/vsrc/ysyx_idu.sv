@@ -47,7 +47,7 @@ module ysyx_idu (
   reg speculation_o;
 
   // wire [4:0] rs1 = inst_idu[19:15], rs2 = inst_idu[24:20], rd = inst_idu[11:7];
-  wire [ 3:0] rs1 = inst_idu[18:15], rs2 = inst_idu[23:20], rd = inst_idu[10:7];
+  wire [3:0] rs1 = inst_idu[18:15], rs2 = inst_idu[23:20], rd = inst_idu[10:7];
   wire [31:0] imm;
   wire wen, ren;
   wire idu_hazard = valid & (
