@@ -157,7 +157,7 @@ module ysyx_exu (
   // branch/system unit
   wire [BIT_W-1:0] csrv_or_src1 = (csr_rdata | src1);
   wire [BIT_W-1:0] csrv_and_src1 = (csr_rdata & ~src1);
-  assign csr_wdata0 = {BIT_W{(system_exu)}} & (
+  assign csr_wdata = {BIT_W{(system_exu)}} & (
     ({BIT_W{ecall}} & 'hb) |
     ({BIT_W{mret}} &
      {{csr_rdata[BIT_W-1:'h8]}, 1'b1, {csr_rdata[6:4]}, csr_rdata['h7], csr_rdata[2:0]}) |
