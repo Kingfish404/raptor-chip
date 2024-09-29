@@ -119,10 +119,9 @@ module ysyx_exu (
       end
       if (next_ready == 1) begin
         lsu_valid <= 0;
-        // use_exu_npc <= 0;
-        if (prev_valid == 0) begin
-          alu_valid <= 0;
-        end
+        // if (prev_valid == 0) begin
+        //   alu_valid <= 0;
+        // end
       end
       if (wen_o) begin
         if (lsu_exu_wready) begin
