@@ -140,6 +140,8 @@ module ysyx_idu (
       .out_sys_system(system_o),
       .out_sys_func3_zero(func3_z_o),
       .out_sys_csr_wen(csr_wen_o),
-      .out_sys_ebreak(ebreak_o)
+      .out_sys_ebreak(ebreak_o),
+      .out_sys_ecall(idu_if.ecall),
+      .out_sys_mret(idu_if.mret)
   );
 endmodule  // ysyx_IDU

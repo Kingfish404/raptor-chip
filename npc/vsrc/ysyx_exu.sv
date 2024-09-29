@@ -45,7 +45,7 @@ module ysyx_exu (
   reg [3:0] alu_op_exu;
   reg [6:0] opcode_exu = inst_exu[6:0];
   reg csr_wen_exu;
-  wire csr_ecallen;
+  wire ecall, mret;
   reg [BIT_W-1:0] mem_rdata;
   reg use_exu_npc, system_exu, system_func3_exu;
   reg [2:0] func3 = inst_exu[14:12];
@@ -55,7 +55,7 @@ module ysyx_exu (
       .rst(rst),
       .wen(csr_wen_exu),
       .exu_valid(valid_o),
-      .ecallen(csr_ecallen),
+      .ecallen(ecall),
       .waddr0(csr_addr0),
       .wdata0(csr_wdata0),
       .waddr1(csr_addr1),
@@ -107,6 +107,8 @@ module ysyx_exu (
         system_func3_exu <= idu_if.system_func3_z;
         csr_wen_exu <= idu_if.csr_wen;
         ebreak_o <= idu_if.ebreak;
+        ecall <= idu_if.ecall;
+        mret <= idu_if.mret;
 
         alu_valid <= 1;
         speculation_o <= idu_if.speculation;
@@ -156,18 +158,16 @@ module ysyx_exu (
   );
 
   // branch/system unit
-  assign csr_ecallen = (
-    ((system_exu) && (system_func3_exu)) && opcode_exu == `YSYX_OP_SYSTEM_ECALL);
   assign csr_wdata0 = {BIT_W{(system_exu)}} & (
-    ({BIT_W{((system_func3_exu) && (opcode_exu == `YSYX_OP_SYSTEM_ECALL))}} & 'hb) |
-    ({BIT_W{((system_func3_exu) && (opcode_exu == `YSYX_OP_SYSTEM_MRET))}} &
-     {{csr_rdata[BIT_W-1:'h8]}, 1'b1, {csr_rdata[6:4]}, csr_rdata['h7], csr_rdata[2:0]}) |
+    ({BIT_W{ecall}} & 'hb) |
+    ({BIT_W{mret}} & {{csr_rdata[BIT_W-1:'h8]}, 1'b1, {csr_rdata[6:4]}, csr_rdata['h7], csr_rdata[2:0]}) |
     ({BIT_W{((func3 == `YSYX_OP_SYSTEM_CSRRW))}} & src1) |
     ({BIT_W{((func3 == `YSYX_OP_SYSTEM_CSRRS))}} & (csr_rdata | src1)) |
     ({BIT_W{((func3 == `YSYX_OP_SYSTEM_CSRRC))}} & (csr_rdata & ~src1)) |
     ({BIT_W{((func3 == `YSYX_OP_SYSTEM_CSRRWI))}} & src1) |
     ({BIT_W{((func3 == `YSYX_OP_SYSTEM_CSRRSI))}} & (csr_rdata | src1)) |
-    ({BIT_W{((func3 == `YSYX_OP_SYSTEM_CSRRCI))}} & (csr_rdata & ~src1))
+    ({BIT_W{((func3 == `YSYX_OP_SYSTEM_CSRRCI))}} & (csr_rdata & ~src1)) |
+    (0)
   );
   assign csr_wdata1 = ((system_func3_exu) && opcode_exu == `YSYX_OP_SYSTEM_ECALL) ? pc_exu : 'h0;
   assign branch_retire_o = (
