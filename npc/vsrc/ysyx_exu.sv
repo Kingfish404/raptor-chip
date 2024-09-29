@@ -173,9 +173,7 @@ module ysyx_exu (
     (0)
   );
   assign csr_wdata1 = (ecall) ? pc_exu : 'h0;
-  assign branch_retire_o = (
-    (system_exu) | (opcode_exu == `YSYX_OP_B_TYPE) | (opcode_exu == `YSYX_OP_IL_TYPE)
-  );
+  assign branch_retire_o = 1;
   assign npc_wdata_o = (ecall) ? mtvec : (mret) ? mepc : addr_exu;
 
   always_comb begin
