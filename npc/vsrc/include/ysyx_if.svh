@@ -14,7 +14,7 @@ interface idu_pipe_if (
   logic jen;
 
   logic system;
-  logic [2:0] system_func3;
+  logic system_func3;
   logic csr_wen;
   logic ebreak;
 endinterface
