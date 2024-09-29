@@ -107,6 +107,7 @@ module ysyx_idu (
   assign rs1_o = rs1;
   assign rs2_o = rs2;
   assign idu_if.rd = rd_o;
+  assign idu_if.imm = imm_o;
 
   ysyx_idu_decoder idu_de (
       .clock(clk),
