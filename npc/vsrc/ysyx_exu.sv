@@ -65,7 +65,7 @@ module ysyx_exu (
       .mtvec_o(mtvec)
   );
 
-  assign reg_wdata_o = {BIT_W{(rd_o != 0)}} & (
+  assign reg_wdata_o = (
     (opcode_exu == `YSYX_OP_IL_TYPE) ? mem_rdata :
     (system_exu) ? csr_rdata : reg_wdata);
   assign csr_addr0 = (imm_exu[11:0]);
@@ -181,7 +181,6 @@ module ysyx_exu (
         use_exu_npc = 1;
       end
       `YSYX_OP_B_TYPE: begin
-        // $display("reg_wdata: %h, npc_wdata: %h, npc: %h", reg_wdata, npc_wdata, npc);
         case (alu_op_exu)
           `YSYX_ALU_OP_SUB: begin
             use_exu_npc = (~|reg_wdata);
