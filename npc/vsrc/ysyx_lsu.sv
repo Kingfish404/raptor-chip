@@ -95,7 +95,7 @@ module ysyx_lsu (
   //          ({8{alu_op == `YSYX_ALU_OP_SH}} & 8'h3) |
   //          ({8{alu_op == `YSYX_ALU_OP_SW}} & 8'hf)
   //        );
-  assign wstrb = {4{0}, {alu_op}};
+  assign wstrb = {{4{0}}, {alu_op}};
   assign rstrb = (
            ({8{alu_op == `YSYX_ALU_OP_LB}} & 8'h1) |
            ({8{alu_op == `YSYX_ALU_OP_LBU}} & 8'h1) |
