@@ -50,8 +50,6 @@ module ysyx_lsu (
   // assign rvalid_o = lsu_rvalid;
 
   // with l1d cache
-  // assign rdata_unalign = (lsu_rvalid) ? lsu_rdata : l1d[addr_idx];
-  // assign rvalid_o = lsu_rvalid | l1d_cache_hit;
   assign rdata_unalign = (valid_r) ? rdata_lsu : l1d[addr_idx];
   assign rvalid_o = valid_r | l1d_cache_hit;
 
@@ -96,14 +94,13 @@ module ysyx_lsu (
   //          ({8{alu_op == `YSYX_ALU_OP_SW}} & 8'hf)
   //        );
   assign wstrb = {{4{1'b0}}, {alu_op}};
-  // assign rstrb = (
-  //          ({8{alu_op == `YSYX_ALU_OP_LB}} & 8'h1) |
-  //          ({8{alu_op == `YSYX_ALU_OP_LBU}} & 8'h1) |
-  //          ({8{alu_op == `YSYX_ALU_OP_LH}} & 8'h3) |
-  //          ({8{alu_op == `YSYX_ALU_OP_LHU}} & 8'h3) |
-  //          ({8{alu_op == `YSYX_ALU_OP_LW}} & 8'hf)
-  //        );
-  assign wstrb = {{4{1'b0}}, {alu_op}};
+  assign rstrb = (
+           ({8{alu_op == `YSYX_ALU_OP_LB}} & 8'h1) |
+           ({8{alu_op == `YSYX_ALU_OP_LBU}} & 8'h1) |
+           ({8{alu_op == `YSYX_ALU_OP_LH}} & 8'h3) |
+           ({8{alu_op == `YSYX_ALU_OP_LHU}} & 8'h3) |
+           ({8{alu_op == `YSYX_ALU_OP_LW}} & 8'hf)
+         );
 
   wire [1:0] araddr_lo = lsu_araddr_o[1:0];
   assign rdata = (
