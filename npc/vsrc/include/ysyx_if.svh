@@ -7,6 +7,7 @@ interface idu_pipe_if (
   logic [31:0] op1;
   logic [31:0] op2;
   logic [31:0] opj;
+  logic [3:0] alu_op;
 
   logic ren;
   logic wen;

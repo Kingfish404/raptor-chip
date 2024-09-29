@@ -113,8 +113,9 @@ module ysyx_idu (
   assign idu_if.op2 = op2_o;
   assign idu_if.wen = wen_o;
   assign idu_if.ren = ren_o;
+  assign idu_if.jen = en_j_o;
+
   assign idu_if.alu_op = alu_op_o;
-  assign idu_if.en_j = en_j_o;
   assign idu_if.system = system_o;
   assign idu_if.system_func3 = system_func3_o;
   assign idu_if.csr_wen = csr_wen_o;
