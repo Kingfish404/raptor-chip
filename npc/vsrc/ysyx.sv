@@ -1,6 +1,7 @@
 `include "ysyx.svh"
 `include "ysyx_soc.svh"
 `include "ysyx_dpi_c.svh"
+`include "ysyx_if.svh"
 
 module ysyx (
     input clock,
