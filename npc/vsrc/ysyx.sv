@@ -285,7 +285,7 @@ module ysyx (
       .exu_forward(reg_wdata),
       .exu_forward_rd(rd_exu),
 
-      .ie_if(ie_if),
+      .idu_if(idu_if),
 
       .en_j_o(en_j),
       .ren_o(ren),
@@ -327,7 +327,7 @@ module ysyx (
 
       .inst(inst_idu),
 
-      .ie_if(ie_if),
+      .idu_if(idu_if),
 
       .ren(ren),
       .wen(wen),
