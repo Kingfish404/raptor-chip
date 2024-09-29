@@ -36,7 +36,7 @@ module ysyx_exu (
 );
   parameter bit [7:0] BIT_W = `YSYX_W_WIDTH;
 
-  wire [BIT_W-1:0] addr_data, reg_wdata, mepc, mtvec;
+  wire [BIT_W-1:0] reg_wdata, mepc, mtvec;
   wire [BIT_W-1:0] mem_wdata = src2;
   wire [12-1:0] csr_addr, csr_addr_add1;
   wire [BIT_W-1:0] csr_wdata1, csr_rdata;
@@ -81,7 +81,6 @@ module ysyx_exu (
   assign csr_addr_add1 = (
     ((system_func3_exu) && imm_exu == `YSYX_OP_SYSTEM_ECALL)
     ? `YSYX_CSR_MEPC: (0));
-  assign addr_data = addr_exu;
   assign alu_op_o = alu_op_exu;
   assign use_exu_npc_o = use_exu_npc & valid_o;
   assign pc_o = pc_exu;
@@ -195,11 +194,11 @@ module ysyx_exu (
           npc_wdata_o = mepc;
         end
         default: begin
-          npc_wdata_o = addr_data;
+          npc_wdata_o = addr_exu;
         end
       endcase
     end else begin
-      npc_wdata_o = addr_data;
+      npc_wdata_o = addr_exu;
     end
   end
 
