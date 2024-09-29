@@ -71,7 +71,7 @@ module ysyx_exu (
   assign csr_addr0 = (imm_exu[11:0]);
   assign csr_addr1 = (opj[11:0]);
   assign alu_op_o = alu_op_exu;
-  assign use_exu_npc_o = use_exu_npc & valid_o;
+  assign use_exu_npc_o = use_exu_npc;
   assign pc_o = pc_exu;
   assign inst_o = inst_exu;
   assign rwaddr_o = addr_exu;
