@@ -85,7 +85,7 @@ module ysyx_exu (
   assign use_exu_npc_o = use_exu_npc & valid_o;
   assign pc_o = pc_exu;
   assign inst_o = inst_exu;
-  assign addr_exu = opj + imm;
+  assign addr_exu = opj + imm_exu;
   assign rwaddr_o = addr_exu;
 
   reg state, alu_valid, lsu_avalid;
