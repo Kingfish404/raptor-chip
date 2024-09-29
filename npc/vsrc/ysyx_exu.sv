@@ -169,7 +169,7 @@ module ysyx_exu (
     ({BIT_W{((func3 == `YSYX_OP_SYSTEM_CSRRCI))}} & (csr_rdata & ~src1)) |
     (0)
   );
-  assign csr_wdata1 = ((system_func3_exu) && opcode_exu == `YSYX_OP_SYSTEM_ECALL) ? pc_exu : 'h0;
+  assign csr_wdata1 = (ecall) ? pc_exu : 'h0;
   assign branch_retire_o = (
     (system_exu) | (opcode_exu == `YSYX_OP_B_TYPE) | (opcode_exu == `YSYX_OP_IL_TYPE)
   );
