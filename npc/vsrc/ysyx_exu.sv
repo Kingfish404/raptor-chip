@@ -7,9 +7,15 @@ module ysyx_exu (
     // from idu
     idu_pipe_if idu_if,
 
-    // for bus
+    // for lsu
+    output reg ren_o,
+    output reg wen_o,
+    output reg [BIT_W-1:0] rwaddr_o,
     output lsu_avalid_o,
+    output [3:0] alu_op_o,
     output [BIT_W-1:0] lsu_mem_wdata_o,
+
+    // from lsu
     input [BIT_W-1:0] lsu_rdata,
     input lsu_exu_rvalid,
     input lsu_exu_wready,
@@ -23,10 +29,6 @@ module ysyx_exu (
     output branch_retire_o,
     output ebreak_o,
     output reg [3:0] rd_o,
-    output [3:0] alu_op_o,
-    output reg [BIT_W-1:0] rwaddr_o,
-    output reg ren_o,
-    output reg wen_o,
     output reg speculation_o,
 
     input prev_valid,
@@ -39,7 +41,7 @@ module ysyx_exu (
   wire [BIT_W-1:0] reg_wdata, mepc, mtvec;
   wire [BIT_W-1:0] mem_wdata = src2;
   wire [12-1:0] csr_addr0, csr_addr1;
-  wire [BIT_W-1:0] csr_wdata0, csr_wdata1, csr_rdata;
+  wire [BIT_W-1:0] csr_wdata, csr_rdata;
   reg [BIT_W-1:0] imm_exu, pc_exu, src1, src2, opj, addr_exu;
   reg [BIT_W-1:0] inst_exu;
   reg [3:0] alu_op_exu;
@@ -53,15 +55,18 @@ module ysyx_exu (
   ysyx_exu_csr csr (
       .clk(clk),
       .rst(rst),
+
       .wen(csr_wen_exu),
       .exu_valid(valid_o),
-      .ecallen(ecall),
-      .waddr0(csr_addr0),
-      .wdata0(csr_wdata0),
-      .waddr1(csr_addr1),
-      .wdata1(csr_wdata1),
+      .ecall(ecall),
+      .mret(mret),
+
+      .rwaddr(csr_addr0),
+      .wdata(csr_wdata),
+      .pc(pc_exu),
+
       .rdata_o(csr_rdata),
-      .mepc_o(mepc),
+      .mepc_o (mepc),
       .mtvec_o(mtvec)
   );
 
@@ -78,18 +83,17 @@ module ysyx_exu (
   assign addr_exu = opj + imm_exu;
 
   reg state, alu_valid, lsu_avalid;
-  reg lsu_valid = 0;
-  reg busy = 0;
+  reg lsu_valid;
+  reg ready;
   assign valid_o = (wen_o | ren_o) ? lsu_valid : alu_valid;
-  assign ready_o = !busy | lsu_valid;
+  assign ready_o = ready & next_ready;
   `YSYX_BUS_FSM()
   always @(posedge clk) begin
     if (rst) begin
       alu_valid <= 0;
       lsu_avalid <= 0;
-      busy <= 0;
+      ready <= 1;
     end else begin
-      // if (state == `YSYX_IDLE) begin
       if (prev_valid & ready_o) begin
         pc_exu <= idu_if.pc;
         inst_exu <= idu_if.inst;
@@ -115,33 +119,28 @@ module ysyx_exu (
         speculation_o <= idu_if.speculation;
         if (idu_if.wen | idu_if.ren) begin
           lsu_avalid <= 1;
-          busy <= 1;
+          ready <= 0;
         end
       end
-      // end
-      // else if (state == `YSYX_WAIT_READY) begin
       if (next_ready == 1) begin
         lsu_valid <= 0;
-        // use_exu_npc <= 0;
         if (prev_valid == 0) begin
           alu_valid <= 0;
         end
       end
-      // end
-      if (lsu_valid & !(idu_if.wen | idu_if.ren)) begin
-        busy <= 0;
-      end
       if (wen_o) begin
         if (lsu_exu_wready) begin
-          lsu_valid  <= 1;
+          lsu_valid <= 1;
           lsu_avalid <= 0;
+          ready <= 1;
         end
       end
       if (ren_o) begin
         if (lsu_exu_rvalid) begin
-          lsu_valid  <= 1;
+          lsu_valid <= 1;
           lsu_avalid <= 0;
-          mem_rdata  <= lsu_rdata;
+          mem_rdata <= lsu_rdata;
+          ready <= 1;
         end
       end
     end
@@ -159,18 +158,12 @@ module ysyx_exu (
   );
 
   // branch/system unit
-  wire [BIT_W-1:0] csrv_or_src1 = (csr_rdata | src1);
-  wire [BIT_W-1:0] csrv_and_src1 = (csr_rdata & ~src1);
-  assign csr_wdata0 = {BIT_W{(system_exu)}} & (
-    ({BIT_W{ecall}} & 'hb) |
-    ({BIT_W{mret}} &
-     {{csr_rdata[BIT_W-1:'h8]}, 1'b1, {csr_rdata[6:4]}, csr_rdata['h7], csr_rdata[2:0]}) |
+  assign csr_wdata = (
     ({BIT_W{(func3 == `YSYX_F3_CSRRW) | (func3 == `YSYX_F3_CSRRWI)}} & src1) |
-    ({BIT_W{(func3 == `YSYX_F3_CSRRS) | (func3 == `YSYX_F3_CSRRSI)}} & (csrv_or_src1)) |
-    ({BIT_W{(func3 == `YSYX_F3_CSRRC) | (func3 == `YSYX_F3_CSRRCI)}} & (csrv_and_src1)) |
+    ({BIT_W{(func3 == `YSYX_F3_CSRRS) | (func3 == `YSYX_F3_CSRRSI)}} & (csr_rdata | src1)) |
+    ({BIT_W{(func3 == `YSYX_F3_CSRRC) | (func3 == `YSYX_F3_CSRRCI)}} & (csr_rdata & ~src1)) |
     (0)
   );
-  assign csr_wdata1 = (ecall) ? pc_exu : 'h0;
   assign branch_retire_o = ((system_exu) | (ben) | (ren_o));
   assign npc_wdata_o = (ecall) ? mtvec : (mret) ? mepc : addr_exu;
 
