@@ -326,24 +326,7 @@ module ysyx (
       .valid_o(exu_valid),
       .ready_o(exu_ready),
 
-      //   .inst(inst_idu),
-
       .idu_if(idu_if),
-
-      //   .ren(ren),
-      //   .wen(wen),
-      //   .system(system),
-      //   .system_func3(system_func3),
-      //   .csr_wen(csr_wen),
-      //   .ebreak(ebreak_idu),
-      //   .rd(rd),
-      //   .imm(imm),
-      //   .op1(op1),
-      //   .op2(op2),
-      //   .op_j(op_j),
-      //   .alu_op(alu_op),
-      //   .pc(pc_idu),
-      //   .speculation(speculation_idu),
 
       .reg_wdata_o(reg_wdata),
       .npc_wdata_o(npc_wdata),
