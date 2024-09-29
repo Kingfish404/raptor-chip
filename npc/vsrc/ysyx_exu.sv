@@ -164,7 +164,7 @@ module ysyx_exu (
   ysyx_exu_alu alu (
       .alu_src1(src1),
       .alu_src2(src2),
-      .alu_op(idu_if.wen | wen_o ? `YSYX_ALU_OP_ADD : alu_op_exu),
+      .alu_op(idu_if.wen | idu_if.ren | wen_o | ren_o ? `YSYX_ALU_OP_ADD : alu_op_exu),
       .alu_res_o(reg_wdata)
   );
 
