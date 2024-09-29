@@ -33,6 +33,7 @@ module ysyx_lsu (
   parameter bit [7:0] ADDR_W = 32, DATA_W = 32;
 
   reg [ADDR_W-1:0] lsu_araddr;
+  reg valid_r;
 
   wire [DATA_W-1:0] rdata, rdata_unalign;
   wire [7:0] wstrb, rstrb;
@@ -47,8 +48,10 @@ module ysyx_lsu (
   // assign rvalid_o = lsu_rvalid;
 
   // with l1d cache
-  assign rdata_unalign = (lsu_rvalid) ? lsu_rdata : l1d[addr_idx];
-  assign rvalid_o = lsu_rvalid | l1d_cache_hit;
+  // assign rdata_unalign = (lsu_rvalid) ? lsu_rdata : l1d[addr_idx];
+  // assign rvalid_o = lsu_rvalid | l1d_cache_hit;
+  assign rdata_unalign = (valid_r) ? rdata_lsu : l1d[addr_idx];
+  assign rvalid_o = valid_r | l1d_cache_hit;
   // assign rdata_unalign = l1d[addr_idx];
   // assign rvalid_o = l1d_cache_hit;
 
@@ -63,7 +66,7 @@ module ysyx_lsu (
 
   parameter bit [7:0] L1D_SIZE = 2;
   parameter bit [7:0] L1D_LEN = 1;
-  reg [32-1:0] l1d[L1D_SIZE];
+  reg [32-1:0] l1d[L1D_SIZE], rdata_lsu;
   reg [L1D_SIZE-1:0] l1d_valid = 0;
   reg [32-L1D_LEN-2-1:0] l1d_tag[L1D_SIZE];
 
@@ -118,10 +121,22 @@ module ysyx_lsu (
          );
   assign lsu_araddr = addr;
   always @(posedge clk) begin
-    if (ren & lsu_rvalid & l1d_cache_within) begin
-      l1d[addr_idx] <= lsu_rdata;
-      l1d_tag[addr_idx] <= addr_tag;
-      l1d_valid[addr_idx] <= 1'b1;
+    if (rst) begin
+      l1d_valid <= 0;
+      valid_r   <= 0;
+    end
+    if (ren & lsu_rvalid) begin
+      if (l1d_cache_within) begin
+        l1d[addr_idx] <= lsu_rdata;
+        l1d_tag[addr_idx] <= addr_tag;
+        l1d_valid[addr_idx] <= 1'b1;
+      end else begin
+        rdata_lsu <= lsu_rdata;
+        valid_r   <= 1'b1;
+      end
+      if (valid_r) begin
+        valid_r <= 0;
+      end
     end
     if (lsu_awvalid_o & l1d_cache_hit_w) begin
       // $display("l1d_cache_hit_w");
