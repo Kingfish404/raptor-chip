@@ -137,7 +137,6 @@ module ysyx_lsu (
           valid_r   <= 1'b1;
         end
       end
-
       if (valid_r) begin
         valid_r <= 0;
       end
