@@ -38,17 +38,16 @@ module ysyx_exu (
 
   wire [BIT_W-1:0] reg_wdata, mepc, mtvec;
   wire [BIT_W-1:0] mem_wdata = src2;
-  wire [12-1:0] csr_addr, csr_addr_add1;
-  wire [BIT_W-1:0] csr_wdata1, csr_rdata;
-  wire [BIT_W-1:0] csr_wdata;
-  reg [BIT_W-1:0] imm_exu, pc_exu, src1, src2, addr_exu;
+  wire [12-1:0] csr_addr0, csr_addr1;
+  wire [BIT_W-1:0] csr_wdata0, csr_wdata1, csr_rdata;
+  reg [BIT_W-1:0] imm_exu, pc_exu, src1, src2, opj, addr_exu;
   reg [BIT_W-1:0] inst_exu;
   reg [3:0] alu_op_exu;
-  reg [6:0] opcode_exu = inst_exu[6:0];
   reg csr_wen_exu;
-  wire csr_ecallen;
+  reg jen, ben;
+  reg ecall, mret;
   reg [BIT_W-1:0] mem_rdata;
-  reg use_exu_npc, system_exu, system_func3_exu;
+  reg use_exu_npc, system_exu;
   reg [2:0] func3 = inst_exu[14:12];
 
   ysyx_exu_csr csr (
@@ -56,35 +55,27 @@ module ysyx_exu (
       .rst(rst),
       .wen(csr_wen_exu),
       .exu_valid(valid_o),
-      .ecallen(csr_ecallen),
-      .waddr(csr_addr),
-      .wdata(csr_wdata),
-      .waddr_add1(csr_addr_add1),
-      .wdata_add1(csr_wdata1),
+      .ecallen(ecall),
+      .waddr0(csr_addr0),
+      .wdata0(csr_wdata0),
+      .waddr1(csr_addr1),
+      .wdata1(csr_wdata1),
       .rdata_o(csr_rdata),
       .mepc_o(mepc),
       .mtvec_o(mtvec)
   );
 
   assign reg_wdata_o = {BIT_W{(rd_o != 0)}} & (
-    (opcode_exu == `YSYX_OP_IL_TYPE) ? mem_rdata :
+    (ren_o) ? mem_rdata :
     (system_exu) ? csr_rdata : reg_wdata);
-  assign csr_addr = ((system_func3_exu) && imm_exu ==
-      `YSYX_OP_SYSTEM_ECALL
-      ?
-      `YSYX_CSR_MCAUSE
-      : (system_func3_exu) && imm_exu ==
-      `YSYX_OP_SYSTEM_MRET
-      ?
-      `YSYX_CSR_MSTATUS
-      : (imm_exu[11:0]));
-  assign csr_addr_add1 = (
-    ((system_func3_exu) && imm_exu == `YSYX_OP_SYSTEM_ECALL)
-    ? `YSYX_CSR_MEPC: (0));
+  assign csr_addr0 = (imm_exu[11:0]);
+  assign csr_addr1 = (opj[11:0]);
   assign alu_op_o = alu_op_exu;
-  assign use_exu_npc_o = use_exu_npc & valid_o;
+  assign use_exu_npc_o = use_exu_npc;
   assign pc_o = pc_exu;
   assign inst_o = inst_exu;
+  assign rwaddr_o = addr_exu;
+  assign addr_exu = opj + imm_exu;
 
   reg state, alu_valid, lsu_avalid;
   reg lsu_valid = 0;
@@ -100,31 +91,31 @@ module ysyx_exu (
     end else begin
       // if (state == `YSYX_IDLE) begin
       if (prev_valid & ready_o) begin
+        pc_exu <= idu_if.pc;
         inst_exu <= idu_if.inst;
         imm_exu <= idu_if.imm;
-        pc_exu <= idu_if.pc;
         src1 <= idu_if.op1;
         src2 <= idu_if.op2;
         alu_op_exu <= idu_if.alu_op;
-        if (idu_if.jen) begin
-          addr_exu <= idu_if.opj + idu_if.imm;
-        end
+        opj <= idu_if.opj;
 
         rd_o <= idu_if.rd;
         ren_o <= idu_if.ren;
         wen_o <= idu_if.wen;
+        jen <= idu_if.jen;
+        ben <= idu_if.ben;
 
         system_exu <= idu_if.system;
-        system_func3_exu <= idu_if.system_func3_z;
         csr_wen_exu <= idu_if.csr_wen;
         ebreak_o <= idu_if.ebreak;
+        ecall <= idu_if.ecall;
+        mret <= idu_if.mret;
 
         alu_valid <= 1;
         speculation_o <= idu_if.speculation;
         if (idu_if.wen | idu_if.ren) begin
           lsu_avalid <= 1;
           busy <= 1;
-          rwaddr_o <= idu_if.op1 + idu_if.imm;
         end
       end
       // end
@@ -168,97 +159,41 @@ module ysyx_exu (
   );
 
   // branch/system unit
-  assign csr_wdata1 = ((system_func3_exu) && imm_exu == `YSYX_OP_SYSTEM_ECALL) ? pc_exu : 'h0;
-  assign csr_ecallen = (((system_exu) && (system_func3_exu)) && imm_exu == `YSYX_OP_SYSTEM_ECALL);
-  assign csr_wdata = {BIT_W{(system_exu)}} & (
-    ({BIT_W{((system_func3_exu) && (imm_exu == `YSYX_OP_SYSTEM_ECALL))}} & 'hb) |
-    ({BIT_W{((system_func3_exu) && (imm_exu == `YSYX_OP_SYSTEM_MRET))}} &
+  wire [BIT_W-1:0] csrv_or_src1 = (csr_rdata | src1);
+  wire [BIT_W-1:0] csrv_and_src1 = (csr_rdata & ~src1);
+  assign csr_wdata0 = {BIT_W{(system_exu)}} & (
+    ({BIT_W{ecall}} & 'hb) |
+    ({BIT_W{mret}} &
      {{csr_rdata[BIT_W-1:'h8]}, 1'b1, {csr_rdata[6:4]}, csr_rdata['h7], csr_rdata[2:0]}) |
-    ({BIT_W{((func3 == `YSYX_OP_SYSTEM_CSRRW))}} & src1) |
-    ({BIT_W{((func3 == `YSYX_OP_SYSTEM_CSRRS))}} & (csr_rdata | src1)) |
-    ({BIT_W{((func3 == `YSYX_OP_SYSTEM_CSRRC))}} & (csr_rdata & ~src1)) |
-    ({BIT_W{((func3 == `YSYX_OP_SYSTEM_CSRRWI))}} & src1) |
-    ({BIT_W{((func3 == `YSYX_OP_SYSTEM_CSRRSI))}} & (csr_rdata | src1)) |
-    ({BIT_W{((func3 == `YSYX_OP_SYSTEM_CSRRCI))}} & (csr_rdata & ~src1))
+    ({BIT_W{(func3 == `YSYX_F3_CSRRW) | (func3 == `YSYX_F3_CSRRWI)}} & src1) |
+    ({BIT_W{(func3 == `YSYX_F3_CSRRS) | (func3 == `YSYX_F3_CSRRSI)}} & (csrv_or_src1)) |
+    ({BIT_W{(func3 == `YSYX_F3_CSRRC) | (func3 == `YSYX_F3_CSRRCI)}} & (csrv_and_src1)) |
+    (0)
   );
-  assign branch_retire_o = (
-    (system_exu) | (opcode_exu == `YSYX_OP_B_TYPE) |
-    (opcode_exu == `YSYX_OP_IL_TYPE)
-  );
+  assign csr_wdata1 = (ecall) ? pc_exu : 'h0;
+  assign branch_retire_o = ((system_exu) | (ben) | (ren_o));
+  assign npc_wdata_o = (ecall) ? mtvec : (mret) ? mepc : addr_exu;
 
   always_comb begin
-    if (system_exu & system_func3_exu) begin
-      case (imm_exu)
-        `YSYX_OP_SYSTEM_ECALL: begin
-          npc_wdata_o = mtvec;
+    if (ben) begin
+      case (alu_op_exu)
+        `YSYX_ALU_OP_SUB: begin
+          use_exu_npc = (~|reg_wdata);
         end
-        `YSYX_OP_SYSTEM_MRET: begin
-          npc_wdata_o = mepc;
+        `YSYX_ALU_OP_XOR,
+          `YSYX_ALU_OP_SLT,
+          `YSYX_ALU_OP_SLTU,
+          `YSYX_ALU_OP_SLE,
+          `YSYX_ALU_OP_SLEU: begin
+          use_exu_npc = (|reg_wdata);
         end
         default: begin
-          npc_wdata_o = addr_exu;
+          use_exu_npc = 0;
         end
       endcase
     end else begin
-      npc_wdata_o = addr_exu;
+      use_exu_npc = (ecall | mret | jen);
     end
-  end
-
-  always_comb begin
-    case (opcode_exu)
-      `YSYX_OP_SYSTEM: begin
-        if (system_func3_exu) begin
-          case (imm_exu)
-            `YSYX_OP_SYSTEM_ECALL: begin
-              use_exu_npc = 1;
-            end
-            `YSYX_OP_SYSTEM_MRET: begin
-              use_exu_npc = 1;
-            end
-            default: begin
-              use_exu_npc = 0;
-            end
-          endcase
-        end else begin
-          use_exu_npc = 0;
-        end
-      end
-      `YSYX_OP_JAL, `YSYX_OP_JALR: begin
-        use_exu_npc = 1;
-      end
-      `YSYX_OP_B_TYPE: begin
-        // $display("reg_wdata: %h, npc_wdata: %h, npc: %h", reg_wdata, npc_wdata, npc);
-        case (alu_op_exu)
-          `YSYX_ALU_OP_SUB: begin
-            use_exu_npc = (~|reg_wdata);
-          end
-          `YSYX_ALU_OP_XOR: begin
-            use_exu_npc = (|reg_wdata);
-          end
-          `YSYX_ALU_OP_SLT: begin
-            use_exu_npc = (|reg_wdata);
-          end
-          `YSYX_ALU_OP_SLTU: begin
-            use_exu_npc = (|reg_wdata);
-          end
-          `YSYX_ALU_OP_SLE: begin
-            use_exu_npc = (|reg_wdata);
-          end
-          `YSYX_ALU_OP_SLEU: begin
-            use_exu_npc = (|reg_wdata);
-          end
-          default: begin
-            use_exu_npc = 0;
-          end
-        endcase
-      end
-      `YSYX_OP_IL_TYPE: begin
-        use_exu_npc = 0;
-      end
-      default: begin
-        use_exu_npc = 0;
-      end
-    endcase
   end
 
 endmodule  // ysyx_EXU
