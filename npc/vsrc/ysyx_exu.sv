@@ -28,7 +28,6 @@ module ysyx_exu (
     input [BIT_W-1:0] op1,
     input [BIT_W-1:0] op2,
     input [BIT_W-1:0] op_j,
-    input [BIT_W-1:0] rwaddr,
     input [3:0] alu_op,
     input [BIT_W-1:0] pc,
     input speculation,
@@ -183,9 +182,7 @@ module ysyx_exu (
 
   // branch/system unit
   assign csr_wdata1 = ((system_func3_exu) && imm_exu == `YSYX_OP_SYSTEM_ECALL) ? pc_exu : 'h0;
-  assign csr_ecallen = (
-    ((system_exu) && (system_func3_exu))
-    && imm_exu == `YSYX_OP_SYSTEM_ECALL);
+  assign csr_ecallen = (((system_exu) && (system_func3_exu)) && imm_exu == `YSYX_OP_SYSTEM_ECALL);
   assign csr_wdata = {BIT_W{(system_exu)}} & (
     ({BIT_W{((system_func3_exu) && (imm_exu == `YSYX_OP_SYSTEM_ECALL))}} & 'hb) |
     ({BIT_W{((system_func3_exu) && (imm_exu == `YSYX_OP_SYSTEM_MRET))}} &

@@ -103,7 +103,7 @@ module ysyx (
 
   // IDU output
   wire [31:0] inst_idu;
-  wire [DATA_W-1:0] op1, op2, imm, op_j, pc_idu, rwaddr_idu;
+  wire [DATA_W-1:0] op1, op2, imm, op_j, pc_idu;
   wire [REG_ADDR_W-1:0] rs1, rs2, rd;
   wire [3:0] alu_op;
   wire [6:0] opcode;
@@ -295,7 +295,6 @@ module ysyx (
       .op1_o(op1),
       .op2_o(op2),
       .op_j_o(op_j),
-      .rwaddr_o(rwaddr_idu),
       .imm_o(imm),
       .rs1_o(rs1),
       .rs2_o(rs2),
@@ -335,7 +334,6 @@ module ysyx (
       .op1(op1),
       .op2(op2),
       .op_j(op_j),
-      .rwaddr(rwaddr_idu),
       .alu_op(alu_op),
       .pc(pc_idu),
       .speculation(speculation_idu),
