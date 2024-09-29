@@ -136,8 +136,8 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
   val imm_u = Cat(in.inst(31, 12), Fill(12, 0.U))
   val immjv = Cat(in.inst(31), in.inst(19, 12), in.inst(20), in.inst(30, 21))
   val imm_j = Cat(Fill(11, in.inst(31)), immjv, 0.U)
-  val imm = in.inst(31, 20)
   val csr = in.inst(31, 20)
+  val uimm = in.inst(19, 15)
 
   val type_decoder = TruthTable(
     Map(
@@ -244,12 +244,12 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
     EBREAK -> List( rd,    0.U,  rs1v,   0.U,    0.U), // N__
     MRET__ -> List( rd,MSTATUS,  rs1v,   0.U,    0.U), // N__
     FENCEI -> List( rd,    0.U,  rs1v,   0.U,    0.U), // N__
-    CSRRW_ -> List( rd,    csr,   0.U,   0.U,    csr), // CSR
-    CSRRS_ -> List( rd,    csr,   0.U,   0.U,    csr), // CSR
-    CSRRC_ -> List( rd,    csr,   0.U,   0.U,    csr), // CSR
-    CSRRWI -> List( rd,    csr,   0.U,   0.U,    csr), // CSR
-    CSRRSI -> List( rd,    csr,   0.U,   0.U,    csr), // CSR
-    CSRRCI -> List( rd,    csr,   0.U,   0.U,    csr)  // CSR
+    CSRRW_ -> List( rd,    csr,  rs1v,   0.U,    csr), // CSR
+    CSRRS_ -> List( rd,    csr,  rs1v,   0.U,    csr), // CSR
+    CSRRC_ -> List( rd,    csr,  rs1v,   0.U,    csr), // CSR
+    CSRRWI -> List( rd,    csr,  uimm,   0.U,    csr), // CSR
+    CSRRSI -> List( rd,    csr,  uimm,   0.U,    csr), // CSR
+    CSRRCI -> List( rd,    csr,  uimm,   0.U,    csr)  // CSR
     // format: on
   )
   val var_decoder =
