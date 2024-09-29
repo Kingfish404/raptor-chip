@@ -145,7 +145,7 @@ module ysyx_idu (
       .out_ren(ren),
       .out_alu_op(alu_op_o),
       .out_en_j(en_j_o),
-      .out_opj(op_j_o)
+      .out_opj(op_j_o),
 
       .out_sys_ebreak(ebreak_o),
       .out_sys_system_func3_zero(system_func3_o),
