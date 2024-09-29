@@ -61,7 +61,7 @@ module ysyx_reg (
       rf[13] <= 0;
       rf[14] <= 0;
       rf[15] <= 0;
-    end else if (reg_write_en & waddr[REG_ADDR_W-1:0] != 0) begin
+    end else if (reg_write_en) begin
       rf[waddr[REG_ADDR_W-1:0]] <= wdata;
     end
   end
