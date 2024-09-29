@@ -131,7 +131,7 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
   val type_decoder = TruthTable(
     Map(
       // format: off
-      //                   |    sys |  ls |   j  |  alu op |
+      //                   |    sys |  rw |   j  |  alu op |
       LUI___ -> BitPat("b" + "0000" + "00" + "0" + ALU_ADD_), // U__
       AUIPC_ -> BitPat("b" + "0000" + "00" + "0" + ALU_ADD_), // U__
       JAL___ -> BitPat("b" + "0000" + "00" + "1" + ALU_ADD_), // J__
@@ -184,7 +184,7 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
       CSRRCI -> BitPat("b" + "0011" + "00" + "1" +   "0111")  // CSR
     // format: on
     ),
-    BitPat("b" + N__ + "????" + "00" + "0" + ALU_ADD_)
+    BitPat("b" + "????" + "00" + "0" + ALU_ADD_)
   )
   val table1 = Array(
     // format: off
@@ -204,9 +204,9 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
     LW____ -> List( rd, imm_i, in.rs1v,   imm_i), // I__
     LBU___ -> List( rd, imm_i, in.rs1v,   imm_i), // I__
     LHU___ -> List( rd, imm_i, in.rs1v,   imm_i), // I__
-    SB____ -> List(0.U, imm_s, in.rs1v, in.rs2v), // S__
-    SH____ -> List(0.U, imm_s, in.rs1v, in.rs2v), // S__
-    SW____ -> List(0.U, imm_s, in.rs1v, in.rs2v), // S__
+    SB____ -> List(0.U, imm_s, in.rs1v,   imm_s), // S__
+    SH____ -> List(0.U, imm_s, in.rs1v,   imm_s), // S__
+    SW____ -> List(0.U, imm_s, in.rs1v,   imm_s), // S__
     ADDI__ -> List( rd, imm_i, in.rs1v,   imm_i), // I__
     SLTI__ -> List( rd, imm_i, in.rs1v,   imm_i), // I__
     SLTIU_ -> List( rd, imm_i, in.rs1v,   imm_i), // I__
@@ -233,12 +233,12 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
     EBREAK -> List( rd,   imm, in.rs1v,     0.U), // N__
     MRET__ -> List( rd,   imm, in.rs1v,     0.U), // N__
     FENCEI -> List( rd,   imm, in.rs1v,     0.U), // N__
-    CSRRW_ -> List( rd,   csr,      0.U,    0.U), // CSR
-    CSRRS_ -> List( rd,   csr,      0.U,    0.U), // CSR
-    CSRRC_ -> List( rd,   csr,      0.U,    0.U), // CSR
-    CSRRWI -> List( rd,   csr,      0.U,    0.U), // CSR
-    CSRRSI -> List( rd,   csr,      0.U,    0.U), // CSR
-    CSRRCI -> List( rd,   csr,      0.U,    0.U)  // CSR
+    CSRRW_ -> List( rd,   csr,     0.U,    0.U), // CSR
+    CSRRS_ -> List( rd,   csr,     0.U,    0.U), // CSR
+    CSRRC_ -> List( rd,   csr,     0.U,    0.U), // CSR
+    CSRRWI -> List( rd,   csr,     0.U,    0.U), // CSR
+    CSRRSI -> List( rd,   csr,     0.U,    0.U), // CSR
+    CSRRCI -> List( rd,   csr,     0.U,    0.U)  // CSR
     // format: on
   )
   val var_decoder =
