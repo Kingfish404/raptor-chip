@@ -199,11 +199,11 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
     BGE___ -> List(0.U, imm_b, in.rs2v, in.rs1v), // B__
     BLTU__ -> List(0.U, imm_b, in.rs1v, in.rs2v), // B__
     BGEU__ -> List(0.U, imm_b, in.rs2v, in.rs1v), // B__
-    LB____ -> List( rd, imm_i, in.rs1v,     0.U), // I__
-    LH____ -> List( rd, imm_i, in.rs1v,     0.U), // I__
-    LW____ -> List( rd, imm_i, in.rs1v,     0.U), // I__
-    LBU___ -> List( rd, imm_i, in.rs1v,     0.U), // I__
-    LHU___ -> List( rd, imm_i, in.rs1v,     0.U), // I__
+    LB____ -> List( rd, imm_i, in.rs1v,   imm_i), // I__
+    LH____ -> List( rd, imm_i, in.rs1v,   imm_i), // I__
+    LW____ -> List( rd, imm_i, in.rs1v,   imm_i), // I__
+    LBU___ -> List( rd, imm_i, in.rs1v,   imm_i), // I__
+    LHU___ -> List( rd, imm_i, in.rs1v,   imm_i), // I__
     SB____ -> List(0.U, in.rs2v, in.rs1v, imm_s), // S__
     SH____ -> List(0.U, in.rs2v, in.rs1v, imm_s), // S__
     SW____ -> List(0.U, in.rs2v, in.rs1v, imm_s), // S__
