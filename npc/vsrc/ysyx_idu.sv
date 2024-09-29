@@ -106,8 +106,33 @@ module ysyx_idu (
   );
   assign rs1_o = rs1;
   assign rs2_o = rs2;
+
   assign idu_if.rd = rd_o;
   assign idu_if.imm = imm_o;
+  assign idu_if.op1 = op1_o;
+  assign idu_if.op2 = op2_o;
+  assign idu_if.wen = wen_o;
+  assign idu_if.ren = ren_o;
+  assign idu_if.alu_op = alu_op_o;
+  assign idu_if.en_j = en_j_o;
+  assign idu_if.system = system_o;
+  assign idu_if.system_func3 = system_func3_o;
+  assign idu_if.csr_wen = csr_wen_o;
+  assign idu_if.ebreak = ebreak_o;
+  assign idu_if = {
+    .clk(clk),
+    .rd(rd_o),
+    .imm(imm_o),
+    .op1(op1_o),
+    .op2(op2_o),
+    .ren(ren_o),
+    .wen(wen_o),
+    .jen(en_j_o),
+    .system(system_o),
+    .system_func3(system_func3_o),
+    .csr_wen(csr_wen_o),
+    .ebreak(ebreak_o)
+  };
 
   ysyx_idu_decoder idu_de (
       .clock(clk),
