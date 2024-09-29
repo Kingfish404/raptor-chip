@@ -74,7 +74,9 @@ module ysyx_exu (
       : ((system_func3_exu) && imm_exu == `YSYX_OP_SYSTEM_MRET) ?
       `YSYX_CSR_MSTATUS
       : (imm_exu[11:0]));
-  assign csr_addr_add1 = (imm_exu[11:0]);
+  assign csr_addr_add1 = (
+    ((system_func3_exu) && imm_exu == `YSYX_OP_SYSTEM_ECALL)
+    ? `YSYX_CSR_MEPC: (0));
   assign alu_op_o = alu_op_exu;
   assign use_exu_npc_o = use_exu_npc & valid_o;
   assign pc_o = pc_exu;
