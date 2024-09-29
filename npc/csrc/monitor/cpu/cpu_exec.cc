@@ -43,7 +43,7 @@ static void cpu_exec_one_cycle()
 
   top->clock = (top->clock == 0) ? 1 : 0;
   top->eval();
-  if (tfp && contextp->time() > 13115894)
+  if (tfp && contextp->time() > 25431852)
   {
     tfp->dump(contextp->time());
   }
@@ -51,7 +51,7 @@ static void cpu_exec_one_cycle()
 
   top->clock = (top->clock == 0) ? 1 : 0;
   top->eval();
-  if (tfp && contextp->time() > 13115894)
+  if (tfp && contextp->time() > 25431852)
   {
     tfp->dump(contextp->time());
   }
