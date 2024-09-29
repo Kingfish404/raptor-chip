@@ -176,24 +176,24 @@ module ysyx_exu (
   assign npc_wdata_o = (ecall) ? mtvec : (mret) ? mepc : addr_exu;
 
   always_comb begin
-    if (ben) {
+    if (ben) begin
       case (alu_op_exu)
-          `YSYX_ALU_OP_SUB: begin
-            use_exu_npc = (~|reg_wdata);
-          end
-          `YSYX_ALU_OP_XOR,
+        `YSYX_ALU_OP_SUB: begin
+          use_exu_npc = (~|reg_wdata);
+        end
+        `YSYX_ALU_OP_XOR,
           `YSYX_ALU_OP_SLT,
           `YSYX_ALU_OP_SLTU,
           `YSYX_ALU_OP_SLE,
           `YSYX_ALU_OP_SLEU: begin
-            use_exu_npc = (|reg_wdata);
-          end
-          default: begin
-            use_exu_npc = 0;
-          end
-        endcase
-    } else begin
-        use_exu_npc = (jen | ecall | mret);
+          use_exu_npc = (|reg_wdata);
+        end
+        default: begin
+          use_exu_npc = 0;
+        end
+      endcase
+    end else begin
+      use_exu_npc = (jen | ecall | mret);
     end
   end
 
