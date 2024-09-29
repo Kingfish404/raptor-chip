@@ -180,9 +180,6 @@ module ysyx_exu (
 
   always_comb begin
     case (opcode_exu)
-      `YSYX_OP_SYSTEM: begin
-        use_exu_npc = (ecall | mret);
-      end
       `YSYX_OP_JAL, `YSYX_OP_JALR: begin
         use_exu_npc = 1;
       end
@@ -192,18 +189,6 @@ module ysyx_exu (
           `YSYX_ALU_OP_SUB: begin
             use_exu_npc = (~|reg_wdata);
           end
-          // `YSYX_ALU_OP_XOR: begin
-          //   use_exu_npc = (|reg_wdata);
-          // end
-          // `YSYX_ALU_OP_SLT: begin
-          //   use_exu_npc = (|reg_wdata);
-          // end
-          // `YSYX_ALU_OP_SLTU: begin
-          //   use_exu_npc = (|reg_wdata);
-          // end
-          // `YSYX_ALU_OP_SLE: begin
-          //   use_exu_npc = (|reg_wdata);
-          // end
           `YSYX_ALU_OP_XOR,
           `YSYX_ALU_OP_SLT,
           `YSYX_ALU_OP_SLTU,
@@ -216,11 +201,8 @@ module ysyx_exu (
           end
         endcase
       end
-      `YSYX_OP_IL_TYPE: begin
-        use_exu_npc = 0;
-      end
       default: begin
-        use_exu_npc = 0;
+        use_exu_npc = (ecall | mret);
       end
     endcase
   end
