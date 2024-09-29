@@ -15,7 +15,7 @@ module ysyx_exu (
     output reg [31:0] inst_o,
     output [BIT_W-1:0] pc_o,
 
-    idu_exu_if ie_if,
+    idu_pipe_if idu_if,
 
     input ren,
     input wen,
@@ -124,7 +124,7 @@ module ysyx_exu (
         src2 <= op2;
         alu_op_exu <= alu_op;
         addr_exu <= op_j + imm;
-        rd_o <= ie_if.rd;
+        rd_o <= idu_if.rd;
         ren_o <= ren;
         wen_o <= wen;
 

@@ -1,4 +1,4 @@
-interface idu_exu_if (
+interface idu_pipe_if (
     input logic clk
 );
   logic [ 3:0] rd;

@@ -111,7 +111,7 @@ module ysyx (
   wire en_j, ren, wen, system, system_func3, csr_wen, ebreak_idu;
   wire speculation_idu;
   wire idu_valid, idu_ready;
-  idu_exu_if ie_if (.clk(clock));
+  idu_pipe_if idu_if (.clk(clock));
 
   // LSU output
   wire [DATA_W-1:0] lsu_rdata;
@@ -170,7 +170,7 @@ module ysyx (
       .rst(reset),
 
       .idu_valid(idu_valid & exu_ready),
-      .rd(ie_if.rd),
+      .rd(idu_if.rd),
 
       .bad_speculation(bad_speculation),
       .reg_write_en(exu_valid & bad_speculation == 0),

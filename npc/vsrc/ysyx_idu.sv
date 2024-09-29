@@ -13,7 +13,7 @@ module ysyx_idu (
     input [BIT_W-1:0] exu_forward,
     input [3:0] exu_forward_rd,
 
-    idu_exu_if ie_if,
+    idu_pipe_if idu_if,
 
     output en_j_o,
     output ren_o,
@@ -106,7 +106,7 @@ module ysyx_idu (
   );
   assign rs1_o = rs1;
   assign rs2_o = rs2;
-  assign ie_if.rd = rd_o;
+  assign idu_if.rd = rd_o;
 
   ysyx_idu_decoder idu_de (
       .clock(clk),
