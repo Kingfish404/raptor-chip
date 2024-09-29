@@ -47,7 +47,7 @@ module ysyx_exu (
   reg csr_wen_exu;
   reg ecall, mret;
   reg [BIT_W-1:0] mem_rdata;
-  reg use_exu_npc, system_exu, system_func3_exu;
+  reg use_exu_npc, system_exu;
   reg [2:0] func3 = inst_exu[14:12];
 
   ysyx_exu_csr csr (
@@ -104,7 +104,6 @@ module ysyx_exu (
         wen_o <= idu_if.wen;
 
         system_exu <= idu_if.system;
-        system_func3_exu <= idu_if.system_func3_z;
         csr_wen_exu <= idu_if.csr_wen;
         ebreak_o <= idu_if.ebreak;
         ecall <= idu_if.ecall;
