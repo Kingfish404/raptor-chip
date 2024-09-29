@@ -13,6 +13,9 @@ module ysyx_idu (
     input [BIT_W-1:0] exu_forward,
     input [3:0] exu_forward_rd,
 
+    output [3:0] rs1_o,
+    output [3:0] rs2_o,
+
     idu_pipe_if idu_if,
 
     input [16-1:0] rf_table,
@@ -38,8 +41,7 @@ module ysyx_idu (
   reg [BIT_W-1:0] op2_o;
   reg [BIT_W-1:0] op_j_o;
   reg [31:0] imm_o;
-  reg [3:0] rs1_o;
-  reg [3:0] rs2_o;
+
   reg [3:0] rd_o;
   reg [3:0] alu_op_o;
   reg [BIT_W-1:0] pc_o;
