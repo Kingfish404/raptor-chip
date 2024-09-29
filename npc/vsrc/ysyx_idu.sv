@@ -102,8 +102,7 @@ module ysyx_idu (
 
   assign op_j_o = (
     {BIT_W{opcode == `YSYX_OP_JAL | opcode == `YSYX_OP_B_TYPE}} & pc_idu |
-    {BIT_W{opcode == `YSYX_OP_JALR}}
-      & reg_rdata1 |
+    {BIT_W{opcode == `YSYX_OP_JALR}} & reg_rdata1 |
     (0)
   );
   assign rs1_o = rs1;
