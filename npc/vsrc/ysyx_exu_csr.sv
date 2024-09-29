@@ -64,7 +64,7 @@ module ysyx_exu_csr (
       csr[MSTATUS] <= RESET_VAL;
     end else if (exu_valid) begin
       if (wen) begin
-        csr['b11] <= 'b11;
+        csr[waddr_reg_1] <= wdata;
         csr[waddr_reg_2] <= wdata_add1;
       end
       if (ecallen) begin
