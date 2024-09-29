@@ -117,7 +117,7 @@ module ysyx_idu (
 
   assign idu_if.alu_op = alu_op_o;
   assign idu_if.system = system_o;
-  assign idu_if.system_func3 = system_func3_o;
+  assign idu_if.system_func3_z = system_func3_o;
   assign idu_if.csr_wen = csr_wen_o;
   assign idu_if.ebreak = ebreak_o;
 
