@@ -156,7 +156,7 @@ module ysyx_exu (
   );
 
   // branch/system unit
-  assign csr_wdata = {BIT_W{(csr_wen_exu)}} & (
+  assign csr_wdata = (
     ({BIT_W{(func3 == `YSYX_F3_CSRRW) | (func3 == `YSYX_F3_CSRRWI)}} & src1) |
     ({BIT_W{(func3 == `YSYX_F3_CSRRS) | (func3 == `YSYX_F3_CSRRSI)}} & (csr_rdata | src1)) |
     ({BIT_W{(func3 == `YSYX_F3_CSRRC) | (func3 == `YSYX_F3_CSRRCI)}} & (csr_rdata & ~src1)) |
