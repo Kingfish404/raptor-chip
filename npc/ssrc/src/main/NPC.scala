@@ -237,13 +237,13 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
     SRA___ -> List( rd,   0.U,  rs1v,  rs2v,   0.U), // R__
     OR____ -> List( rd,   0.U,  rs1v,  rs2v,   0.U), // R__
     AND___ -> List( rd,   0.U,  rs1v,  rs2v,   0.U), // R__
-    FENCE_ -> List( rd,   imm,  rs1v,   0.U,   0.U), // N__
-    FENCET -> List( rd,   imm,  rs1v,   0.U,   0.U), // N__
-    PAUSE_ -> List( rd,   imm,  rs1v,   0.U,   0.U), // N__
-    ECALL_ -> List( rd,   imm,  rs1v,   0.U,   0.U), // N__
-    EBREAK -> List( rd,   imm,  rs1v,   0.U,   0.U), // N__
-    MRET__ -> List( rd,   imm,  rs1v,   0.U,   0.U), // N__
-    FENCEI -> List( rd,   imm,  rs1v,   0.U,   0.U), // N__
+    FENCE_ -> List( rd,   0.U,  rs1v,   0.U,   0.U), // N__
+    FENCET -> List( rd,   0.U,  rs1v,   0.U,   0.U), // N__
+    PAUSE_ -> List( rd,   0.U,  rs1v,   0.U,   0.U), // N__
+    ECALL_ -> List( rd,   0.U,  rs1v,   0.U,   0.U), // N__
+    EBREAK -> List( rd,   0.U,  rs1v,   0.U,   0.U), // N__
+    MRET__ -> List( rd,   0.U,  rs1v,   0.U,   0.U), // N__
+    FENCEI -> List( rd,   0.U,  rs1v,   0.U,   0.U), // N__
     CSRRW_ -> List( rd,   csr,   0.U,   0.U,   csr), // CSR
     CSRRS_ -> List( rd,   csr,   0.U,   0.U,   csr), // CSR
     CSRRC_ -> List( rd,   csr,   0.U,   0.U,   csr), // CSR
