@@ -45,7 +45,7 @@ module ysyx_exu (
   reg [3:0] alu_op_exu;
   reg [6:0] opcode_exu = inst_exu[6:0];
   reg csr_wen_exu;
-  wire ecall, mret;
+  reg ecall, mret;
   reg [BIT_W-1:0] mem_rdata;
   reg use_exu_npc, system_exu, system_func3_exu;
   reg [2:0] func3 = inst_exu[14:12];
