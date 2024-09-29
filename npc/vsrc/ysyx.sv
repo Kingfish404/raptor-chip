@@ -327,6 +327,9 @@ module ysyx (
       .ready_o(exu_ready),
 
       .inst(inst_idu),
+
+      .ie_if(ie_if),
+
       .ren(ren),
       .wen(wen),
       .system(system),

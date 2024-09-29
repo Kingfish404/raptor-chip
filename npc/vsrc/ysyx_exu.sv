@@ -16,6 +16,8 @@ module ysyx_exu (
     output reg [31:0] inst_o,
     output [BIT_W-1:0] pc_o,
 
+    idu_exu_if ie_if,
+
     input ren,
     input wen,
     input system,
