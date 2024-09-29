@@ -32,8 +32,7 @@ module ysyx_exu_csr (
     ({REG_W{rwaddr==`YSYX_CSR_MCAUSE}}) & (MCAUSE) |
     ({REG_W{rwaddr==`YSYX_CSR_MEPC}}) & (MEPC) |
     ({REG_W{rwaddr==`YSYX_CSR_MTVEC}}) & (MTVEC) |
-    ({REG_W{rwaddr==`YSYX_CSR_MSTATUS}}) & (MSTATUS) |
-    (MNONE)
+    ({REG_W{rwaddr==`YSYX_CSR_MSTATUS}}) & (MSTATUS)
   );
 
   assign rdata_o = (
@@ -54,11 +53,11 @@ module ysyx_exu_csr (
       csr[MEPC]    <= RESET_VAL;
       csr[MTVEC]   <= RESET_VAL;
       csr[MSTATUS] <= RESET_VAL;
-    end else begin
-      if (wen & exu_valid) begin
+    end else (exu_valid) begin
+      if (wen) begin
         csr[waddr_reg0] <= wdata;
       end
-      if (ecallen & exu_valid) begin
+      if (ecallen) begin
         csr[MSTATUS][`YSYX_CSR_MSTATUS_MPIE_IDX] <= csr[MSTATUS][`YSYX_CSR_MSTATUS_MIE_IDX];
         csr[MSTATUS][`YSYX_CSR_MSTATUS_MIE_IDX] <= 1'b0;
         csr[MEPC] <= pc;
