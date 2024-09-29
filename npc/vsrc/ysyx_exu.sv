@@ -43,7 +43,6 @@ module ysyx_exu (
   reg [BIT_W-1:0] imm_exu, pc_exu, src1, src2, opj, addr_exu;
   reg [BIT_W-1:0] inst_exu;
   reg [3:0] alu_op_exu;
-  reg [6:0] opcode_exu = inst_exu[6:0];
   reg csr_wen_exu;
   reg jen, ben;
   reg ecall, mret;
@@ -172,7 +171,7 @@ module ysyx_exu (
     (0)
   );
   assign csr_wdata1 = (ecall) ? pc_exu : 'h0;
-  assign branch_retire_o = ((system_exu) | (opcode_exu == `YSYX_OP_B_TYPE) | (ren_o));
+  assign branch_retire_o = ((system_exu) | (ben) | (ren_o));
   assign npc_wdata_o = (ecall) ? mtvec : (mret) ? mepc : addr_exu;
 
   always_comb begin
