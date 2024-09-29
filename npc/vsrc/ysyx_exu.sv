@@ -7,7 +7,7 @@ module ysyx_exu (
     // from idu
     idu_pipe_if idu_if,
 
-    // for bus
+    // to lsu
     output lsu_avalid_o,
     output [BIT_W-1:0] lsu_mem_wdata_o,
     input [BIT_W-1:0] lsu_rdata,
@@ -37,7 +37,7 @@ module ysyx_exu (
   parameter bit [7:0] BIT_W = `YSYX_W_WIDTH;
 
   wire [BIT_W-1:0] reg_wdata, mepc, mtvec;
-  wire [BIT_W-1:0] mem_wdata = src2;
+  wire [BIT_W-1:0] mem_wdata = imm_exu;
   wire [12-1:0] csr_addr, csr_addr_add1;
   wire [BIT_W-1:0] csr_wdata1, csr_rdata;
   wire [BIT_W-1:0] csr_wdata;
@@ -124,7 +124,7 @@ module ysyx_exu (
         if (idu_if.wen | idu_if.ren) begin
           lsu_avalid <= 1;
           busy <= 1;
-          rwaddr_o <= idu_if.op1 + idu_if.imm[11:0];
+          // rwaddr_o <= idu_if.op1 + idu_if.imm[11:0];
         end
       end
       // end
@@ -158,12 +158,13 @@ module ysyx_exu (
 
   assign lsu_avalid_o = lsu_avalid;
   assign lsu_mem_wdata_o = mem_wdata;
+  assign rwaddr_o = reg_wdata;
 
   // alu unit for reg_wdata
   ysyx_exu_alu alu (
       .alu_src1(src1),
       .alu_src2(src2),
-      .alu_op(alu_op_exu),
+      .alu_op(idu_if.wen | wen ? `ALU_OP_ADD : alu_op_exu),
       .alu_res_o(reg_wdata)
   );
 
