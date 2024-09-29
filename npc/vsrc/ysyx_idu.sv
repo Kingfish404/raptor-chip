@@ -43,9 +43,7 @@ module ysyx_idu (
   logic [31:0] imm_o;
   logic [3:0] rd_o;
   logic [3:0] alu_op_o;
-  logic [BIT_W-1:0] pc_o;
-  logic [31:0] inst_o;
-  logic speculation_o;
+  logic speculation_idu;
 
   // wire [4:0] rs1 = inst_idu[19:15], rs2 = inst_idu[24:20], rd = inst_idu[11:7];
   wire [3:0] rs1 = inst_idu[18:15], rs2 = inst_idu[23:20], rd = inst_idu[10:7];
@@ -61,10 +59,8 @@ module ysyx_idu (
   wire [6:0] opcode = inst_idu[6:0];
   assign valid_o = valid & !idu_hazard;
   assign ready_o = ready & !idu_hazard & next_ready;
-  assign inst_o = inst_idu;
-  assign pc_o = pc_idu;
-  assign rs1_o = rs1;
-  assign rs2_o = rs2;
+  assign rs1_o   = rs1;
+  assign rs2_o   = rs2;
 
   reg state;
   `YSYX_BUS_FSM()
@@ -76,7 +72,7 @@ module ysyx_idu (
       if (prev_valid & ready & !idu_hazard & next_ready) begin
         inst_idu <= inst;
         pc_idu <= pc;
-        speculation_o <= speculation;
+        speculation_idu <= speculation;
       end
       if (state == `YSYX_IDLE) begin
         if (prev_valid & ready & !idu_hazard & next_ready) begin
@@ -98,6 +94,18 @@ module ysyx_idu (
     end
   end
 
+  assign idu_if.pc = pc_idu;
+  assign idu_if.inst = inst_idu;
+  assign idu_if.speculation = speculation_idu;
+
+  assign idu_if.op1 = op1_o;
+  assign idu_if.op2 = op2_o;
+  assign idu_if.opj = opj_o;
+  assign idu_if.alu_op = alu_op_o;
+
+  assign idu_if.rd = rd_o;
+  assign idu_if.imm = imm_o;
+
   assign idu_if.wen = wen_o;
   assign idu_if.ren = ren_o;
   assign idu_if.jen = jen_o;
@@ -106,17 +114,6 @@ module ysyx_idu (
   assign idu_if.system_func3_z = func3_z_o;
   assign idu_if.csr_wen = csr_wen_o;
   assign idu_if.ebreak = ebreak_o;
-
-  assign idu_if.op1 = op1_o;
-  assign idu_if.op2 = op2_o;
-  assign idu_if.opj = opj_o;
-  assign idu_if.alu_op = alu_op_o;
-  assign idu_if.rd = rd_o;
-  assign idu_if.imm = imm_o;
-
-  assign idu_if.pc = pc_o;
-  assign idu_if.inst = inst_o;
-  assign idu_if.speculation = speculation_o;
 
   ysyx_idu_decoder idu_de (
       .clock(clk),
