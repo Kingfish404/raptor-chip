@@ -1,4 +1,4 @@
-`include "ysyx_macro.svh"
+`include "ysyx.svh"
 `include "ysyx_soc.svh"
 
 module ysyx_ifu (

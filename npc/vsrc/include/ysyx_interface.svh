@@ -1,1 +1,1 @@
-`include "ysyx_macro.svh"
+`include "ysyx.svh"
