@@ -173,7 +173,9 @@ module ysyx_exu (
     (0)
   );
   assign csr_wdata1 = (ecall) ? pc_exu : 'h0;
-  assign branch_retire_o = 1;
+  assign branch_retire_o = (
+    (system_exu) | (opcode_exu == `YSYX_OP_B_TYPE) | (opcode_exu == `YSYX_OP_IL_TYPE)
+  );
   assign npc_wdata_o = (ecall) ? mtvec : (mret) ? mepc : addr_exu;
 
   always_comb begin
@@ -190,6 +192,7 @@ module ysyx_exu (
           `YSYX_ALU_OP_SUB: begin
             use_exu_npc = (~|reg_wdata);
           end
+          `YSYX_ALU_OP_SLT
           `YSYX_ALU_OP_XOR: begin
             use_exu_npc = (|reg_wdata);
           end
