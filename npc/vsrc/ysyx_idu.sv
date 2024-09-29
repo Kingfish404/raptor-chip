@@ -36,7 +36,7 @@ module ysyx_idu (
   reg ebreak_o;
   reg [BIT_W-1:0] op1_o;
   reg [BIT_W-1:0] op2_o;
-  wire [BIT_W-1:0] op_j_o;
+  reg [BIT_W-1:0] op_j_o;
   reg [31:0] imm_o;
   reg [3:0] rs1_o;
   reg [3:0] rs2_o;

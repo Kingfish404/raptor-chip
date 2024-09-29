@@ -105,7 +105,8 @@ module ysyx (
   // IDU output
 //   wire [31:0] inst_idu;
 //   wire [DATA_W-1:0] op1, op2, imm, op_j, pc_idu;
-  wire [REG_ADDR_W-1:0] rs1, rs2, rd;
+//   wire [REG_ADDR_W-1:0] rs1, rs2, rd;
+  wire [REG_ADDR_W-1:0] rs1, rs2;
 //   wire [3:0] alu_op;
 //   wire [6:0] opcode;
 //   wire en_j, ren, wen, system, system_func3, csr_wen, ebreak_idu;
