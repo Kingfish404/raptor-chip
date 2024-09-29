@@ -64,8 +64,8 @@ module ysyx_exu_csr (
       csr[MSTATUS] <= RESET_VAL;
     end else begin
       if (wen & exu_valid) begin
-        $display("1 csr[%0d] <= %0d", waddr_reg0, wdata0);
-        $display("2 csr[%0d] <= %0d", waddr_reg1, wdata1);
+        $display("1 csr[%0d] <= %0d, 2 csr[%0d] <= %0d", waddr_reg0, wdata0, waddr_reg1, wdata1);
+        $display("", );
         csr[waddr_reg0] <= wdata0;
         csr[waddr_reg1] <= wdata1;
       end
