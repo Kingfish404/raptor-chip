@@ -98,7 +98,6 @@ module ysyx_idu (
     end
   end
 
-  assign rwaddr_o = ({BIT_W{wen | ren}} & reg_rdata1 + imm_o | (0));
   assign op_j_o = (
     {BIT_W{opcode == `YSYX_OP_JAL | opcode == `YSYX_OP_B_TYPE}} & pc_idu |
     {BIT_W{opcode == `YSYX_OP_JALR | opcode == `YSYX_OP_IL_TYPE | opcode == `YSYX_OP_S_TYPE}}
