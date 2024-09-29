@@ -297,22 +297,7 @@ module ysyx (
       .clk(clock),
       .rst(reset),
 
-      .prev_valid(idu_valid & bad_speculation == 0),
-      .next_ready(wbu_ready),
-      .valid_o(exu_valid),
-      .ready_o(exu_ready),
-
       .idu_if(idu_if),
-
-      .reg_wdata_o(reg_wdata),
-      .npc_wdata_o(npc_wdata),
-      .use_exu_npc_o(use_exu_npc),
-      .branch_retire_o(branch_retire),
-      .ebreak_o(ebreak),
-      .rd_o(rd_exu),
-      .inst_o(inst_exu),
-      .pc_o(pc_exu),
-      .speculation_o(speculation_exu),
 
       // to lsu
       .ren_o(ren_exu),
@@ -325,7 +310,23 @@ module ysyx (
       // from lsu
       .lsu_rdata(lsu_rdata),
       .lsu_exu_rvalid(lsu_exu_rvalid),
-      .lsu_exu_wready(lsu_exu_wready)
+      .lsu_exu_wready(lsu_exu_wready),
+
+      .inst_o(inst_exu),
+      .pc_o  (pc_exu),
+
+      .reg_wdata_o(reg_wdata),
+      .npc_wdata_o(npc_wdata),
+      .use_exu_npc_o(use_exu_npc),
+      .branch_retire_o(branch_retire),
+      .ebreak_o(ebreak),
+      .rd_o(rd_exu),
+      .speculation_o(speculation_exu),
+
+      .prev_valid(idu_valid & bad_speculation == 0),
+      .next_ready(wbu_ready),
+      .valid_o(exu_valid),
+      .ready_o(exu_ready)
   );
 
   // LSU(Load/Store Unit): 负责对存储器进行读写操作

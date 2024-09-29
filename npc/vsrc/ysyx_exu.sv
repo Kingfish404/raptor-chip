@@ -7,8 +7,6 @@ module ysyx_exu (
     // from idu
     idu_pipe_if idu_if,
 
-    output reg speculation_o,
-
     // for lsu
     output reg ren_o,
     output reg wen_o,
@@ -31,7 +29,7 @@ module ysyx_exu (
     output branch_retire_o,
     output ebreak_o,
     output reg [3:0] rd_o,
-
+    output reg speculation_o,
 
     input prev_valid,
     input next_ready,
