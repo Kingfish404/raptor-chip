@@ -37,7 +37,7 @@ module ysyx_lsu (
   reg [BIT_W-1:0] lsu_araddr;
   reg valid_r;
 
-  wire [BIT_W-1:0] rdata, rdata_unalign, rdata_align;
+  wire [BIT_W-1:0] rdata, rdata_unalign;
   wire [7:0] wstrb, rstrb;
 
   assign lsu_araddr_o = lsu_araddr;
@@ -50,8 +50,7 @@ module ysyx_lsu (
   // assign rvalid_o = lsu_rvalid;
 
   // with l1d cache
-  // assign rdata_unalign = (valid_r) ? rdata_lsu : l1d[addr_idx];
-  assign rdata_unalign = lsu_rdata;
+  assign rdata_unalign = (valid_r) ? rdata_lsu : l1d[addr_idx];
   assign rvalid_o = valid_r | l1d_cache_hit;
 
   assign lsu_awaddr_o = lsu_araddr;
@@ -104,14 +103,13 @@ module ysyx_lsu (
          );
 
   wire [1:0] araddr_lo = lsu_araddr_o[1:0];
-  assign rdata_align = (
+  assign rdata = (
            ({BIT_W{araddr_lo == 2'b00}} & rdata_unalign) |
            ({BIT_W{araddr_lo == 2'b01}} & {{8'b0}, {rdata_unalign[31:8]}}) |
            ({BIT_W{araddr_lo == 2'b10}} & {{16'b0}, {rdata_unalign[31:16]}}) |
            ({BIT_W{araddr_lo == 2'b11}} & {{24'b0}, {rdata_unalign[31:24]}}) |
            (0)
          );
-  assign rdata = (valid_r) ? rdata_lsu : l1d[addr_idx];
   assign rdata_o = (
            ({BIT_W{alu_op == `YSYX_ALU_OP_LB}} & (rdata[7] ? rdata | 'hffffff00 : rdata & 'hff)) |
            ({BIT_W{alu_op == `YSYX_ALU_OP_LBU}} & rdata & 'hff) |
@@ -128,11 +126,11 @@ module ysyx_lsu (
     end else begin
       if (ren & lsu_rvalid) begin
         if (l1d_cache_within) begin
-          l1d[addr_idx] <= rdata_align;
+          l1d[addr_idx] <= lsu_rdata;
           l1d_tag[addr_idx] <= addr_tag;
           l1d_valid[addr_idx] <= 1'b1;
         end else begin
-          rdata_lsu <= rdata_align;
+          rdata_lsu <= lsu_rdata;
           valid_r   <= 1'b1;
         end
       end
