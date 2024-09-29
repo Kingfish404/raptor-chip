@@ -45,7 +45,7 @@ static void cpu_exec_one_cycle()
   top->eval();
   if (tfp)
   {
-    tfp->dump(contextp->time());
+    tfp->dump(contextp->time() % 100000);
   }
   contextp->timeInc(1);
 
@@ -53,8 +53,7 @@ static void cpu_exec_one_cycle()
   top->eval();
   if (tfp)
   {
-    tfp->dump(contextp->time());
-    tfp->flush();
+    tfp->dump(contextp->time() % 100000);
   }
   contextp->timeInc(1);
 }
