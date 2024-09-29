@@ -192,7 +192,7 @@ module ysyx_exu (
         end
       endcase
     end else begin
-      use_exu_npc = 0;
+      use_exu_npc = (ecall | mret | jen);
     end
   end
 
