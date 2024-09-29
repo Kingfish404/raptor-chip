@@ -124,9 +124,6 @@ module ysyx_exu (
           alu_valid <= 0;
         end
       end
-      if (lsu_valid & !(idu_if.wen | idu_if.ren)) begin
-        ready <= 1;
-      end
       if (wen_o) begin
         if (lsu_exu_wready) begin
           lsu_valid <= 1;
