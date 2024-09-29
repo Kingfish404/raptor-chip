@@ -45,6 +45,7 @@ module ysyx_exu (
   reg [3:0] alu_op_exu;
   reg [6:0] opcode_exu = inst_exu[6:0];
   reg csr_wen_exu;
+  reg jen, ben;
   reg ecall, mret;
   reg [BIT_W-1:0] mem_rdata;
   reg use_exu_npc, system_exu;
@@ -102,6 +103,8 @@ module ysyx_exu (
         rd_o <= idu_if.rd;
         ren_o <= idu_if.ren;
         wen_o <= idu_if.wen;
+        jen <= idu_if.jen;
+        ben <= idu_if.ben;
 
         system_exu <= idu_if.system;
         csr_wen_exu <= idu_if.csr_wen;
@@ -173,12 +176,8 @@ module ysyx_exu (
   assign npc_wdata_o = (ecall) ? mtvec : (mret) ? mepc : addr_exu;
 
   always_comb begin
-    case (opcode_exu)
-      `YSYX_OP_JAL, `YSYX_OP_JALR: begin
-        use_exu_npc = 1;
-      end
-      `YSYX_OP_B_TYPE: begin
-        case (alu_op_exu)
+    if (ben) {
+      case (alu_op_exu)
           `YSYX_ALU_OP_SUB: begin
             use_exu_npc = (~|reg_wdata);
           end
@@ -193,11 +192,9 @@ module ysyx_exu (
             use_exu_npc = 0;
           end
         endcase
-      end
-      default: begin
-        use_exu_npc = (ecall | mret);
-      end
-    endcase
+    } else begin
+        use_exu_npc = (jen | ecall | mret);
+    end
   end
 
 endmodule  // ysyx_EXU
