@@ -43,7 +43,7 @@ module ysyx_ifu (
   wire [6:0] opcode_o = inst_o[6:0];
   wire is_branch = (
     (opcode_o == `YSYX_OP_JAL) | (opcode_o == `YSYX_OP_JALR) |
-    (opcode_o == `YSYX_OP_B_TYPE) | (opcode_o == `YSYX_OP_SYSTEM) |
+    (opcode_o == `YSYX_OP_B_TYPE) |
     (0)
   );
   wire is_load = (opcode_o == `YSYX_OP_IL_TYPE);
