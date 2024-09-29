@@ -192,7 +192,7 @@ module ysyx_exu (
           `YSYX_ALU_OP_SUB: begin
             use_exu_npc = (~|reg_wdata);
           end
-          `YSYX_ALU_OP_SLT
+          `YSYX_ALU_OP_SLT,
           `YSYX_ALU_OP_XOR: begin
             use_exu_npc = (|reg_wdata);
           end
