@@ -118,7 +118,7 @@ module ysyx_lsu (
          );
   assign lsu_araddr = addr;
   always @(posedge clk) begin
-    if (ren & lsu_rvalid & 1) begin
+    if (ren & lsu_rvalid & l1d_cache_within) begin
       l1d[addr_idx] <= lsu_rdata;
       l1d_tag[addr_idx] <= addr_tag;
       l1d_valid[addr_idx] <= 1'b1;
