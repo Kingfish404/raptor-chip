@@ -179,21 +179,6 @@ module ysyx_exu (
     case (opcode_exu)
       `YSYX_OP_SYSTEM: begin
         use_exu_npc = (ecall | mret);
-        // if (system_func3_exu) begin
-        //   case (imm_exu)
-        //     `YSYX_OP_SYSTEM_ECALL: begin
-        //       use_exu_npc = 1;
-        //     end
-        //     `YSYX_OP_SYSTEM_MRET: begin
-        //       use_exu_npc = 1;
-        //     end
-        //     default: begin
-        //       use_exu_npc = 0;
-        //     end
-        //   endcase
-        // end else begin
-        //   use_exu_npc = 0;
-        // end
       end
       `YSYX_OP_JAL, `YSYX_OP_JALR: begin
         use_exu_npc = 1;
