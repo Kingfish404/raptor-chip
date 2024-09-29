@@ -16,6 +16,7 @@ interface idu_pipe_if (
   logic ren;
   logic wen;
   logic jen;
+  logic ben;
 
   logic system;
   logic system_func3_z;
