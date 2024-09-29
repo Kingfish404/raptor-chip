@@ -244,12 +244,12 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
     EBREAK -> List( rd,    0.U,  rs1v,   0.U,    0.U), // N__
     MRET__ -> List( rd,MSTATUS,  rs1v,   0.U,    0.U), // N__
     FENCEI -> List( rd,    0.U,  rs1v,   0.U,    0.U), // N__
-    CSRRW_ -> List( rd,    csr,  rs1v,   0.U,    csr), // CSR
-    CSRRS_ -> List( rd,    csr,  rs1v,   0.U,    csr), // CSR
-    CSRRC_ -> List( rd,    csr,  rs1v,   0.U,    csr), // CSR
-    CSRRWI -> List( rd,    csr,  uimm,   0.U,    csr), // CSR
-    CSRRSI -> List( rd,    csr,  uimm,   0.U,    csr), // CSR
-    CSRRCI -> List( rd,    csr,  uimm,   0.U,    csr)  // CSR
+    CSRRW_ -> List( rd,    csr,  rs1v,   0.U,    0.U), // CSR
+    CSRRS_ -> List( rd,    csr,  rs1v,   0.U,    0.U), // CSR
+    CSRRC_ -> List( rd,    csr,  rs1v,   0.U,    0.U), // CSR
+    CSRRWI -> List( rd,    csr,  uimm,   0.U,    0.U), // CSR
+    CSRRSI -> List( rd,    csr,  uimm,   0.U,    0.U), // CSR
+    CSRRCI -> List( rd,    csr,  uimm,   0.U,    0.U)  // CSR
     // format: on
   )
   val var_decoder =

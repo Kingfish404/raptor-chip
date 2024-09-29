@@ -38,7 +38,7 @@ module ysyx_exu (
 
   wire [BIT_W-1:0] reg_wdata, mepc, mtvec;
   wire [BIT_W-1:0] mem_wdata = src2;
-  wire [12-1:0] csr_addr, csr_addr_add1;
+  wire [12-1:0] csr_addr0, csr_addr1;
   wire [BIT_W-1:0] csr_wdata1, csr_rdata;
   wire [BIT_W-1:0] csr_wdata;
   reg [BIT_W-1:0] imm_exu, pc_exu, src1, src2, opj, addr_exu;
@@ -57,10 +57,10 @@ module ysyx_exu (
       .wen(csr_wen_exu),
       .exu_valid(valid_o),
       .ecallen(csr_ecallen),
-      .waddr(csr_addr),
-      .wdata(csr_wdata),
-      .waddr_add1(csr_addr_add1),
-      .wdata_add1(csr_wdata1),
+      .waddr0(csr_addr0),
+      .wdata0(csr_wdata),
+      .waddr1(csr_addr1),
+      .wdata1(csr_wdata1),
       .rdata_o(csr_rdata),
       .mepc_o(mepc),
       .mtvec_o(mtvec)
@@ -69,8 +69,8 @@ module ysyx_exu (
   assign reg_wdata_o = {BIT_W{(rd_o != 0)}} & (
     (opcode_exu == `YSYX_OP_IL_TYPE) ? mem_rdata :
     (system_exu) ? csr_rdata : reg_wdata);
-  assign csr_addr = (imm_exu[11:0]);
-  assign csr_addr_add1 = (opj[11:0]);
+  assign csr_addr0 = (imm_exu[11:0]);
+  assign csr_addr1 = (opj[11:0]);
   assign alu_op_o = alu_op_exu;
   assign use_exu_npc_o = use_exu_npc & valid_o;
   assign pc_o = pc_exu;
