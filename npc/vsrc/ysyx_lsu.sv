@@ -96,13 +96,14 @@ module ysyx_lsu (
   //          ({8{alu_op == `YSYX_ALU_OP_SW}} & 8'hf)
   //        );
   assign wstrb = {{4{1'b0}}, {alu_op}};
-  assign rstrb = (
-           ({8{alu_op == `YSYX_ALU_OP_LB}} & 8'h1) |
-           ({8{alu_op == `YSYX_ALU_OP_LBU}} & 8'h1) |
-           ({8{alu_op == `YSYX_ALU_OP_LH}} & 8'h3) |
-           ({8{alu_op == `YSYX_ALU_OP_LHU}} & 8'h3) |
-           ({8{alu_op == `YSYX_ALU_OP_LW}} & 8'hf)
-         );
+  // assign rstrb = (
+  //          ({8{alu_op == `YSYX_ALU_OP_LB}} & 8'h1) |
+  //          ({8{alu_op == `YSYX_ALU_OP_LBU}} & 8'h1) |
+  //          ({8{alu_op == `YSYX_ALU_OP_LH}} & 8'h3) |
+  //          ({8{alu_op == `YSYX_ALU_OP_LHU}} & 8'h3) |
+  //          ({8{alu_op == `YSYX_ALU_OP_LW}} & 8'hf)
+  //        );
+  assign wstrb = {{4{1'b0}}, {alu_op}};
 
   wire [1:0] araddr_lo = lsu_araddr_o[1:0];
   assign rdata = (
