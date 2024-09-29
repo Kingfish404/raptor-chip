@@ -39,7 +39,7 @@ module ysyx_exu (
   wire [BIT_W-1:0] reg_wdata, mepc, mtvec;
   wire [BIT_W-1:0] mem_wdata = src2;
   wire [12-1:0] csr_addr0, csr_addr1;
-  wire [BIT_W-1:0] csr_wdata0, csr_wdata1, csr_rdata;
+  wire [BIT_W-1:0] csr_wdata, csr_rdata;
   reg [BIT_W-1:0] imm_exu, pc_exu, src1, src2, opj, addr_exu;
   reg [BIT_W-1:0] inst_exu;
   reg [3:0] alu_op_exu;
@@ -53,15 +53,17 @@ module ysyx_exu (
   ysyx_exu_csr csr (
       .clk(clk),
       .rst(rst),
+
       .wen(csr_wen_exu),
       .exu_valid(valid_o),
       .ecallen(ecall),
-      .waddr0(csr_addr0),
-      .wdata0(csr_wdata0),
-      .waddr1(csr_addr1),
-      .wdata1(csr_wdata1),
+
+      .waddr(csr_addr0),
+      .wdata(csr_wdata),
+      .pc(pc_exu),
+
       .rdata_o(csr_rdata),
-      .mepc_o(mepc),
+      .mepc_o (mepc),
       .mtvec_o(mtvec)
   );
 
@@ -119,9 +121,9 @@ module ysyx_exu (
       end
       if (next_ready == 1) begin
         lsu_valid <= 0;
-        // if (prev_valid == 0) begin
-        //   alu_valid <= 0;
-        // end
+        if (prev_valid == 0) begin
+          alu_valid <= 0;
+        end
       end
       if (wen_o) begin
         if (lsu_exu_wready) begin
@@ -164,7 +166,6 @@ module ysyx_exu (
     ({BIT_W{(func3 == `YSYX_F3_CSRRC) | (func3 == `YSYX_F3_CSRRCI)}} & (csrv_and_src1)) |
     (0)
   );
-  assign csr_wdata1 = (ecall) ? pc_exu : 'h0;
   assign branch_retire_o = ((system_exu) | (ben) | (ren_o));
   assign npc_wdata_o = (ecall) ? mtvec : (mret) ? mepc : addr_exu;
 
