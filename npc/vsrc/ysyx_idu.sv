@@ -27,24 +27,24 @@ module ysyx_idu (
   reg [31:0] inst_idu, pc_idu;
   reg valid, ready;
 
-  reg en_j_o,
-  reg ren_o,
-  reg wen_o,
-  reg system_o,
-  reg system_func3_o,
-  reg csr_wen_o,
-  reg ebreak_o,
-  reg [BIT_W-1:0] op1_o,
-  reg [BIT_W-1:0] op2_o,
-  wire [BIT_W-1:0] op_j_o,
-  reg [31:0] imm_o,
-  reg [3:0] rs1_o,
-  reg [3:0] rs2_o,
-  reg [3:0] rd_o,
-  reg [3:0] alu_op_o,
-  reg [BIT_W-1:0] pc_o,
-  reg [31:0] inst_o,
-  reg speculation_o,
+  reg en_j_o;
+  reg ren_o;
+  reg wen_o;
+  reg system_o;
+  reg system_func3_o;
+  reg csr_wen_o;
+  reg ebreak_o;
+  reg [BIT_W-1:0] op1_o;
+  reg [BIT_W-1:0] op2_o;
+  wire [BIT_W-1:0] op_j_o;
+  reg [31:0] imm_o;
+  reg [3:0] rs1_o;
+  reg [3:0] rs2_o;
+  reg [3:0] rd_o;
+  reg [3:0] alu_op_o;
+  reg [BIT_W-1:0] pc_o;
+  reg [31:0] inst_o;
+  reg speculation_o;
 
   // wire [4:0] rs1 = inst_idu[19:15], rs2 = inst_idu[24:20], rd = inst_idu[11:7];
   wire [ 3:0] rs1 = inst_idu[18:15], rs2 = inst_idu[23:20], rd = inst_idu[10:7];
