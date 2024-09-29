@@ -85,8 +85,8 @@ module ysyx_exu (
   assign use_exu_npc_o = use_exu_npc & valid_o;
   assign pc_o = pc_exu;
   assign inst_o = inst_exu;
-  assign addr_exu = opj + imm_exu;
   assign rwaddr_o = addr_exu;
+  assign addr_exu = opj + imm_exu;
 
   reg state, alu_valid, lsu_avalid;
   reg lsu_valid = 0;
@@ -109,7 +109,6 @@ module ysyx_exu (
         src2 <= idu_if.op2;
         alu_op_exu <= idu_if.alu_op;
         opj <= idu_if.opj;
-        // addr_exu <= idu_if.opj + idu_if.imm;
 
         rd_o <= idu_if.rd;
         ren_o <= idu_if.ren;
@@ -125,7 +124,6 @@ module ysyx_exu (
         if (idu_if.wen | idu_if.ren) begin
           lsu_avalid <= 1;
           busy <= 1;
-          // rwaddr_o <= idu_if.opj + idu_if.imm;
         end
       end
       // end

@@ -49,7 +49,6 @@ module ysyx_idu (
 
   // wire [4:0] rs1 = inst_idu[19:15], rs2 = inst_idu[24:20], rd = inst_idu[11:7];
   wire [3:0] rs1 = inst_idu[18:15], rs2 = inst_idu[23:20], rd = inst_idu[10:7];
-  wire [31:0] imm;
   wire wen, ren;
   wire idu_hazard = valid & (
     opcode != `YSYX_OP_LUI & opcode != `YSYX_OP_AUIPC & opcode != `YSYX_OP_JAL &
@@ -64,9 +63,9 @@ module ysyx_idu (
   assign ready_o = ready & !idu_hazard & next_ready;
   assign inst_o = inst_idu;
   assign pc_o = pc_idu;
-  assign imm_o = imm;
-  assign ren_o = ren;
   assign wen_o = wen;
+  assign rs1_o = rs1;
+  assign rs2_o = rs2;
 
   reg state;
   `YSYX_BUS_FSM()
@@ -100,14 +99,6 @@ module ysyx_idu (
     end
   end
 
-  // assign op_j_o = (
-  //   {BIT_W{opcode == `YSYX_OP_JAL | opcode == `YSYX_OP_B_TYPE}} & pc_idu |
-  //   {BIT_W{opcode == `YSYX_OP_JALR}} & reg_rdata1 |
-  //   (0)
-  // );
-  assign rs1_o = rs1;
-  assign rs2_o = rs2;
-
   assign idu_if.wen = wen_o;
   assign idu_if.ren = ren_o;
   assign idu_if.jen = en_j_o;
@@ -138,11 +129,11 @@ module ysyx_idu (
       .in_rs2v(reg_rdata2),
 
       .out_rd(rd_o),
-      .out_imm(imm),
+      .out_imm(imm_o),
       .out_op1(op1_o),
       .out_op2(op2_o),
-      .out_wen(wen),
-      .out_ren(ren),
+      .out_wen(wen_o),
+      .out_ren(ren_o),
       .out_alu_op(alu_op_o),
       .out_en_j(en_j_o),
       .out_opj(op_j_o),
