@@ -27,23 +27,8 @@ module ysyx_idu (
 );
   parameter bit [7:0] BIT_W = 32;
 
-  reg [31:0] inst_idu, pc_idu;
+  reg [31:0] inst_idu, pc_idu, speculation_idu;
   reg valid, ready;
-
-  logic jen_o;
-  logic ren_o;
-  logic wen_o;
-  logic system_o;
-  logic func3_z_o;
-  logic csr_wen_o;
-  logic ebreak_o;
-  logic [BIT_W-1:0] op1_o;
-  logic [BIT_W-1:0] op2_o;
-  logic [BIT_W-1:0] opj_o;
-  logic [31:0] imm_o;
-  logic [3:0] rd_o;
-  logic [3:0] alu_op_o;
-  logic speculation_idu;
 
   // wire [4:0] rs1 = inst_idu[19:15], rs2 = inst_idu[24:20], rd = inst_idu[11:7];
   wire [3:0] rs1 = inst_idu[18:15], rs2 = inst_idu[23:20], rd = inst_idu[10:7];
@@ -98,23 +83,6 @@ module ysyx_idu (
   assign idu_if.inst = inst_idu;
   assign idu_if.speculation = speculation_idu;
 
-  assign idu_if.op1 = op1_o;
-  assign idu_if.op2 = op2_o;
-  assign idu_if.opj = opj_o;
-  assign idu_if.alu_op = alu_op_o;
-
-  assign idu_if.rd = rd_o;
-  assign idu_if.imm = imm_o;
-
-  assign idu_if.wen = wen_o;
-  assign idu_if.ren = ren_o;
-  assign idu_if.jen = jen_o;
-
-  assign idu_if.system = system_o;
-  assign idu_if.system_func3_z = func3_z_o;
-  assign idu_if.csr_wen = csr_wen_o;
-  assign idu_if.ebreak = ebreak_o;
-
   ysyx_idu_decoder idu_de (
       .clock(clk),
       .reset(rst),
@@ -125,22 +93,23 @@ module ysyx_idu (
       .in_rs1v(reg_rdata1),
       .in_rs2v(reg_rdata2),
 
-      .out_op1(op1_o),
-      .out_op2(op2_o),
-      .out_opj(opj_o),
-      .out_alu_op(alu_op_o),
+      .out_op1(idu_if.op1),
+      .out_op2(idu_if.op2),
+      .out_opj(idu_if.opj),
+      .out_alu_op(idu_if.alu_op),
 
-      .out_rd (rd_o),
-      .out_imm(imm_o),
+      .out_rd (idu_if.rd),
+      .out_imm(idu_if.imm),
 
-      .out_wen(wen_o),
-      .out_ren(ren_o),
-      .out_jen(jen_o),
+      .out_wen(idu_if.wen),
+      .out_ren(idu_if.ren),
+      .out_jen(idu_if.jen),
+      .out_ben(idu_if.ben),
 
-      .out_sys_system(system_o),
-      .out_sys_func3_zero(func3_z_o),
-      .out_sys_csr_wen(csr_wen_o),
-      .out_sys_ebreak(ebreak_o),
+      .out_sys_system(idu_if.system),
+      .out_sys_func3_zero(idu_if.func3_z),
+      .out_sys_csr_wen(idu_if.csr_wen),
+      .out_sys_ebreak(idu_if.ebreak),
       .out_sys_ecall(idu_if.ecall),
       .out_sys_mret(idu_if.mret)
   );
