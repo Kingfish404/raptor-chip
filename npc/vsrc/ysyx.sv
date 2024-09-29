@@ -331,6 +331,7 @@ module ysyx (
   // LSU(Load/Store Unit): 负责对存储器进行读写操作
   ysyx_lsu lsu (
       .clk(clock),
+      .rst(reset),
       // from exu
       .addr(rwaddr_exu),
       .ren(ren_exu),

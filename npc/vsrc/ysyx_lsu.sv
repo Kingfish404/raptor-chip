@@ -1,6 +1,8 @@
 
 module ysyx_lsu (
     input clk,
+    input rst,
+
     // from exu
     input [ADDR_W-1:0] addr,
     input ren,
