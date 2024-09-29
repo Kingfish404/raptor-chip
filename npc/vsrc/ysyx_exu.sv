@@ -106,7 +106,9 @@ module ysyx_exu (
         src1 <= idu_if.op1;
         src2 <= idu_if.op2;
         alu_op_exu <= idu_if.alu_op;
-        addr_exu <= idu_if.opj + idu_if.imm;
+        if (idu_if.jen) begin
+          addr_exu <= idu_if.opj + idu_if.imm;
+        end
 
         rd_o <= idu_if.rd;
         ren_o <= idu_if.ren;
