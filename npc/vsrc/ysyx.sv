@@ -103,16 +103,9 @@ module ysyx (
   wire ifu_valid, ifu_ready;
 
   // IDU output
-//   wire [31:0] inst_idu;
-//   wire [DATA_W-1:0] op1, op2, imm, op_j, pc_idu;
-//   wire [REG_ADDR_W-1:0] rs1, rs2, rd;
   wire [REG_ADDR_W-1:0] rs1, rs2;
-//   wire [3:0] alu_op;
-//   wire [6:0] opcode;
-//   wire en_j, ren, wen, system, system_func3, csr_wen, ebreak_idu;
-//   wire speculation_idu;
-  wire idu_valid, idu_ready;
   idu_pipe_if idu_if (.clk(clock));
+  wire idu_valid, idu_ready;
 
   // LSU output
   wire [DATA_W-1:0] lsu_rdata;
@@ -286,28 +279,10 @@ module ysyx (
       .exu_forward(reg_wdata),
       .exu_forward_rd(rd_exu),
 
-      .idu_if(idu_if),
-
       .rs1_o(rs1),
       .rs2_o(rs2),
 
-    //   .en_j_o(en_j),
-    //   .ren_o(ren),
-    //   .wen_o(wen),
-    //   .system_o(system),
-    //   .system_func3_o(system_func3),
-    //   .csr_wen_o(csr_wen),
-    //   .ebreak_o(ebreak_idu),
-
-    //   .op1_o(op1),
-    //   .op2_o(op2),
-    //   .op_j_o(op_j),
-    //   .alu_op_o(alu_op),
-    //   .imm_o(imm),
-    //   .rd_o(rd),
-    //   .pc_o(pc_idu),
-    //   .inst_o(inst_idu),
-    //   .speculation_o(speculation_idu),
+      .idu_if(idu_if),
 
       .rf_table(rf_table),
 
