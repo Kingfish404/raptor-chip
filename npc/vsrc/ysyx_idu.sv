@@ -27,7 +27,8 @@ module ysyx_idu (
 );
   parameter bit [7:0] BIT_W = 32;
 
-  reg [31:0] inst_idu, pc_idu, speculation_idu;
+  reg [31:0] inst_idu, pc_idu;
+  reg speculation_idu;
   reg valid, ready;
 
   // wire [4:0] rs1 = inst_idu[19:15], rs2 = inst_idu[24:20], rd = inst_idu[11:7];
