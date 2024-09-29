@@ -117,24 +117,25 @@ module ysyx_exu (
     end else begin
       // if (state == `YSYX_IDLE) begin
       if (prev_valid & ready_o) begin
-        inst_exu <= inst;
-        imm_exu <= imm;
-        pc_exu <= pc;
-        src1 <= op1;
-        src2 <= op2;
-        alu_op_exu <= alu_op;
-        addr_exu <= op_j + imm;
-        rd_o <= idu_if.rd;
-        ren_o <= ren;
-        wen_o <= wen;
+        inst_exu <= idu_if.inst;
+        imm_exu <= idu_if.imm;
+        pc_exu <= idu_if.pc;
+        src1 <= idu_if.op1;
+        src2 <= idu_if.op2;
+        alu_op_exu <= idu_if.alu_op;
+        addr_exu <= idu_if.opj + idu_if.imm;
 
-        system_exu <= system;
-        system_func3_exu <= system_func3;
-        csr_wen_exu <= csr_wen;
-        ebreak_o <= ebreak;
+        rd_o <= idu_if.rd;
+        ren_o <= idu_if.ren;
+        wen_o <= idu_if.wen;
+
+        system_exu <= idu_if.system;
+        system_func3_exu <= idu_if.system_func3_z;
+        csr_wen_exu <= idu_if.csr_wen;
+        ebreak_o <= idu_if.ebreak;
 
         alu_valid <= 1;
-        speculation_o <= speculation;
+        speculation_o <= idu_if.speculation;
         if (wen | ren) begin
           lsu_avalid <= 1;
           busy <= 1;
