@@ -90,11 +90,12 @@ module ysyx_lsu (
          l1d_valid[waddr_idx] == 1'b1) & (l1d_tag[waddr_idx] == waddr_tag);
 
   // load/store unit
-  assign wstrb = (
-           ({8{alu_op == `YSYX_ALU_OP_SB}} & 8'h1) |
-           ({8{alu_op == `YSYX_ALU_OP_SH}} & 8'h3) |
-           ({8{alu_op == `YSYX_ALU_OP_SW}} & 8'hf)
-         );
+  // assign wstrb = (
+  //          ({8{alu_op == `YSYX_ALU_OP_SB}} & 8'h1) |
+  //          ({8{alu_op == `YSYX_ALU_OP_SH}} & 8'h3) |
+  //          ({8{alu_op == `YSYX_ALU_OP_SW}} & 8'hf)
+  //        );
+  assign wstrb = {4{0}, {alu_op}};
   assign rstrb = (
            ({8{alu_op == `YSYX_ALU_OP_LB}} & 8'h1) |
            ({8{alu_op == `YSYX_ALU_OP_LBU}} & 8'h1) |
