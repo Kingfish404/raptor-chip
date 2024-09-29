@@ -1,5 +1,5 @@
 `include "ysyx_macro.svh"
-`include "ysyx_macro_csr.svh"
+`include "ysyx_csr.svh"
 
 module ysyx_exu (
     input clk,

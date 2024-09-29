@@ -7,8 +7,9 @@
 !*.mk
 !*.[cSh]
 !*.v
-!*.sv
 !*.vh
+!*.sv
+!*.svh
 !*.cc
 !*.cpp
 !.gitignore
