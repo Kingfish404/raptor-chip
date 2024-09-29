@@ -170,7 +170,7 @@ module ysyx (
       .rst(reset),
 
       .idu_valid(idu_valid & exu_ready),
-      .rd(rd),
+      .rd(ie_if.rd),
 
 
       .bad_speculation(bad_speculation),
