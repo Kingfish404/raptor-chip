@@ -6,7 +6,8 @@ module ysyx_exu_csr (
 
     input wen,
     input exu_valid,
-    input ecallen,
+    input ecall,
+    input mret,
 
     input [  R_W-1:0] rwaddr,
     input [BIT_W-1:0] wdata,
@@ -57,10 +58,20 @@ module ysyx_exu_csr (
       if (wen) begin
         csr[waddr_reg0] <= wdata;
       end
-      if (ecallen) begin
+      if (ecall) begin
+        csr[MCAUSE] <= 'hb;
         csr[MSTATUS][`YSYX_CSR_MSTATUS_MPIE_IDX] <= csr[MSTATUS][`YSYX_CSR_MSTATUS_MIE_IDX];
         csr[MSTATUS][`YSYX_CSR_MSTATUS_MIE_IDX] <= 1'b0;
         csr[MEPC] <= pc;
+      end
+      if (mret) begin
+        csr[MSTATUS] <= {
+          {csr[MSTATUS][BIT_W-1:'h8]},
+          1'b1,
+          {csr[MSTATUS][6:4]},
+          csr[MSTATUS]['h7],
+          csr[MSTATUS][2:0]
+        };
       end
     end
   end

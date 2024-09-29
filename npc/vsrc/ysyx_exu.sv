@@ -56,7 +56,8 @@ module ysyx_exu (
 
       .wen(csr_wen_exu),
       .exu_valid(valid_o),
-      .ecallen(ecall),
+      .ecall(ecall),
+      .mret(mret),
 
       .rwaddr(csr_addr0),
       .wdata(csr_wdata),
@@ -155,15 +156,13 @@ module ysyx_exu (
   );
 
   // branch/system unit
-  wire [BIT_W-1:0] csrv_or_src1 = (csr_rdata | src1);
-  wire [BIT_W-1:0] csrv_and_src1 = (csr_rdata & ~src1);
   assign csr_wdata = {BIT_W{(system_exu)}} & (
-    ({BIT_W{ecall}} & 'hb) |
-    ({BIT_W{mret}} &
-     {{csr_rdata[BIT_W-1:'h8]}, 1'b1, {csr_rdata[6:4]}, csr_rdata['h7], csr_rdata[2:0]}) |
-    ({BIT_W{(func3 == `YSYX_F3_CSRRW) | (func3 == `YSYX_F3_CSRRWI)}} & src1) |
-    ({BIT_W{(func3 == `YSYX_F3_CSRRS) | (func3 == `YSYX_F3_CSRRSI)}} & (csrv_or_src1)) |
-    ({BIT_W{(func3 == `YSYX_F3_CSRRC) | (func3 == `YSYX_F3_CSRRCI)}} & (csrv_and_src1)) |
+      // ({BIT_W{ecall}} & 'hb) |
+      //   ({BIT_W{mret}} &
+      //  {{csr_rdata[BIT_W-1:'h8]}, 1'b1, {csr_rdata[6:4]}, csr_rdata['h7], csr_rdata[2:0]}) |
+      ({BIT_W{(func3 == `YSYX_F3_CSRRW) | (func3 == `YSYX_F3_CSRRWI)}} & src1) |
+    ({BIT_W{(func3 == `YSYX_F3_CSRRS) | (func3 == `YSYX_F3_CSRRSI)}} & (csr_rdata | src1)) |
+    ({BIT_W{(func3 == `YSYX_F3_CSRRC) | (func3 == `YSYX_F3_CSRRCI)}} & (csr_rdata & ~src1)) |
     (0)
   );
   assign branch_retire_o = ((system_exu) | (ben) | (ren_o));
