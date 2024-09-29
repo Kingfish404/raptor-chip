@@ -47,8 +47,10 @@ module ysyx_lsu (
   // assign rvalid_o = lsu_rvalid;
 
   // with l1d cache
-  assign rdata_unalign = (lsu_rvalid) ? lsu_rdata : l1d[addr_idx];
-  assign rvalid_o = lsu_rvalid | l1d_cache_hit;
+  // assign rdata_unalign = (lsu_rvalid) ? lsu_rdata : l1d[addr_idx];
+  // assign rvalid_o = lsu_rvalid | l1d_cache_hit;
+  assign rdata_unalign = l1d[addr_idx];
+  assign rvalid_o = l1d_cache_hit;
 
   assign lsu_awaddr_o = lsu_araddr;
   assign lsu_awvalid_o = wen & lsu_avalid;
@@ -71,12 +73,12 @@ module ysyx_lsu (
   wire l1d_cache_hit = (
          ren & lsu_avalid & 1 &
          l1d_valid[addr_idx] == 1'b1) & (l1d_tag[addr_idx] == addr_tag);
-  wire l1d_cache_within = (
-         (lsu_araddr_o >= 'h30000000 && lsu_araddr_o < 'h40000000) ||
-         (lsu_araddr_o >= 'h80000000 && lsu_araddr_o < 'h80400000) ||
-         (lsu_araddr_o >= 'ha0000000 && lsu_araddr_o < 'hc0000000) ||
-         (0)
-       );
+  // wire l1d_cache_within = (
+  //        (lsu_araddr_o >= 'h30000000 && lsu_araddr_o < 'h40000000) ||
+  //        (lsu_araddr_o >= 'h80000000 && lsu_araddr_o < 'h80400000) ||
+  //        (lsu_araddr_o >= 'ha0000000 && lsu_araddr_o < 'hc0000000) ||
+  //        (0)
+  //      );
 
   wire [32-L1D_LEN-2-1:0] waddr_tag = lsu_awaddr_o[ADDR_W-1:L1D_LEN+2];
   wire [L1D_LEN-1:0] waddr_idx = lsu_awaddr_o[L1D_LEN+2-1:0+2];
@@ -116,7 +118,7 @@ module ysyx_lsu (
          );
   assign lsu_araddr = addr;
   always @(posedge clk) begin
-    if (ren & lsu_rvalid & l1d_cache_within) begin
+    if (ren & lsu_rvalid & 1) begin
       l1d[addr_idx] <= lsu_rdata;
       l1d_tag[addr_idx] <= addr_tag;
       l1d_valid[addr_idx] <= 1'b1;
