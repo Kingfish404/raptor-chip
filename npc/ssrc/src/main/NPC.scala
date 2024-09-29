@@ -251,6 +251,7 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
   out.imm := var_decoder(1)
   out.op1 := var_decoder(2)
   out.op2 := var_decoder(3)
+  out.opj := var_decoder(4)
 
   // val decoded = decoder(in.inst, table)
   val inst_type = decoder(in.inst, type_decoder)
@@ -258,7 +259,6 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
   out.en_j := inst_type(4)
   out.wen := inst_type(5)
   out.ren := inst_type(6)
-  out.opj := inst_type(7)
   out_sys.system := inst_type(7)
   out_sys.csr_wen := inst_type(8)
   out_sys.system_func3_zero := inst_type(9)
