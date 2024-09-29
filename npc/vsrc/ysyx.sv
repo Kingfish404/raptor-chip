@@ -1,6 +1,7 @@
 `include "ysyx.svh"
 `include "ysyx_soc.svh"
 `include "ysyx_dpi_c.svh"
+`include "ysyx_if.svh"
 
 module ysyx (
     input clock,
@@ -110,6 +111,7 @@ module ysyx (
   wire en_j, ren, wen, system, system_func3, csr_wen, ebreak_idu;
   wire speculation_idu;
   wire idu_valid, idu_ready;
+  idu_exu_if ie_if;
 
   // LSU output
   wire [DATA_W-1:0] lsu_rdata;
@@ -283,6 +285,8 @@ module ysyx (
       .exu_valid(exu_valid),
       .exu_forward(reg_wdata),
       .exu_forward_rd(rd_exu),
+
+      .ie_if(ie_if),
 
       .en_j_o(en_j),
       .ren_o(ren),

@@ -1,5 +1,6 @@
 `include "ysyx.svh"
 `include "ysyx_dpi_c.svh"
+`include "ysyx_if.svh"
 
 module ysyx_idu (
     input clk,
@@ -14,6 +15,8 @@ module ysyx_idu (
     input exu_valid,
     input [BIT_W-1:0] exu_forward,
     input [3:0] exu_forward_rd,
+
+    idu_exu_if ie_if,
 
     output en_j_o,
     output ren_o,
