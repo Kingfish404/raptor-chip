@@ -103,13 +103,13 @@ module ysyx (
   wire ifu_valid, ifu_ready;
 
   // IDU output
-  wire [31:0] inst_idu;
-  wire [DATA_W-1:0] op1, op2, imm, op_j, pc_idu;
+//   wire [31:0] inst_idu;
+//   wire [DATA_W-1:0] op1, op2, imm, op_j, pc_idu;
   wire [REG_ADDR_W-1:0] rs1, rs2, rd;
-  wire [3:0] alu_op;
-  wire [6:0] opcode;
-  wire en_j, ren, wen, system, system_func3, csr_wen, ebreak_idu;
-  wire speculation_idu;
+//   wire [3:0] alu_op;
+//   wire [6:0] opcode;
+//   wire en_j, ren, wen, system, system_func3, csr_wen, ebreak_idu;
+//   wire speculation_idu;
   wire idu_valid, idu_ready;
   idu_pipe_if idu_if (.clk(clock));
 
