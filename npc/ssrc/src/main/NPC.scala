@@ -19,6 +19,13 @@ trait MicroOP {
   def ALU_SLL_ = "0001"
   def ALU_SRL_ = "0101"
   def ALU_SRA_ = "1101"
+
+  // Machine Trap Handling
+  def CSR_MCAUSE_ = "h342".U(12.W)
+  def CSR_MEPC___ = "h341".U(12.W)
+  // Machine Trap Settup
+  def CSR_MTVEC__ = "h305".U(12.W)
+  def CSR_MSTATUS = "h300".U(12.W)
 }
 
 trait Instr {
@@ -237,12 +244,12 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
     EBREAK -> List( rd,   imm,  rs1v,   0.U,   0.U), // N__
     MRET__ -> List( rd,   imm,  rs1v,   0.U,   0.U), // N__
     FENCEI -> List( rd,   imm,  rs1v,   0.U,   0.U), // N__
-    CSRRW_ -> List( rd,   csr,   0.U,   0.U,   0.U), // CSR
-    CSRRS_ -> List( rd,   csr,   0.U,   0.U,   0.U), // CSR
-    CSRRC_ -> List( rd,   csr,   0.U,   0.U,   0.U), // CSR
-    CSRRWI -> List( rd,   csr,   0.U,   0.U,   0.U), // CSR
-    CSRRSI -> List( rd,   csr,   0.U,   0.U,   0.U), // CSR
-    CSRRCI -> List( rd,   csr,   0.U,   0.U,   0.U)  // CSR
+    CSRRW_ -> List( rd,   csr,   0.U,   0.U,   csr), // CSR
+    CSRRS_ -> List( rd,   csr,   0.U,   0.U,   csr), // CSR
+    CSRRC_ -> List( rd,   csr,   0.U,   0.U,   csr), // CSR
+    CSRRWI -> List( rd,   csr,   0.U,   0.U,   csr), // CSR
+    CSRRSI -> List( rd,   csr,   0.U,   0.U,   csr), // CSR
+    CSRRCI -> List( rd,   csr,   0.U,   0.U,   csr)  // CSR
     // format: on
   )
   val var_decoder =
