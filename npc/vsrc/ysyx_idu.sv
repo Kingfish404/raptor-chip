@@ -107,19 +107,25 @@ module ysyx_idu (
   assign rs1_o = rs1;
   assign rs2_o = rs2;
 
-  assign idu_if.rd = rd_o;
-  assign idu_if.imm = imm_o;
-  assign idu_if.op1 = op1_o;
-  assign idu_if.op2 = op2_o;
   assign idu_if.wen = wen_o;
   assign idu_if.ren = ren_o;
   assign idu_if.jen = en_j_o;
 
-  assign idu_if.alu_op = alu_op_o;
   assign idu_if.system = system_o;
   assign idu_if.system_func3_z = system_func3_o;
   assign idu_if.csr_wen = csr_wen_o;
   assign idu_if.ebreak = ebreak_o;
+
+  assign idu_if.op1 = op1_o;
+  assign idu_if.op2 = op2_o;
+  assign idu_if.opj = op_j_o;
+  assign idu_if.alu_op = alu_op_o;
+  assign idu_if.rd = rd_o;
+  assign idu_if.imm = imm_o;
+
+  assign idu_if.pc = pc_o;
+  assign idu_if.inst = inst_o;
+  assign idu_if.speculation = speculation_o;
 
   ysyx_idu_decoder idu_de (
       .clock(clk),

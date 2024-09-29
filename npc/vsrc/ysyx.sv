@@ -285,6 +285,9 @@ module ysyx (
       .exu_forward(reg_wdata),
       .exu_forward_rd(rd_exu),
 
+      .rs1_o(rs1),
+      .rs2_o(rs2),
+
       .idu_if(idu_if),
 
       .en_j_o(en_j),
@@ -298,11 +301,9 @@ module ysyx (
       .op1_o(op1),
       .op2_o(op2),
       .op_j_o(op_j),
-      .imm_o(imm),
-      .rs1_o(rs1),
-      .rs2_o(rs2),
-      .rd_o(rd),
       .alu_op_o(alu_op),
+      .imm_o(imm),
+      .rd_o(rd),
       .pc_o(pc_idu),
       .inst_o(inst_idu),
       .speculation_o(speculation_idu),
