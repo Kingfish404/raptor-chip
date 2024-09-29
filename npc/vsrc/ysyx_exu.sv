@@ -41,7 +41,7 @@ module ysyx_exu (
   wire [12-1:0] csr_addr, csr_addr_add1;
   wire [BIT_W-1:0] csr_wdata1, csr_rdata;
   wire [BIT_W-1:0] csr_wdata;
-  reg [BIT_W-1:0] imm_exu, pc_exu, src1, src2, addr_exu;
+  reg [BIT_W-1:0] imm_exu, pc_exu, src1, src2, opj, addr_exu;
   reg [BIT_W-1:0] inst_exu;
   reg [3:0] alu_op_exu;
   reg [6:0] opcode_exu = inst_exu[6:0];
@@ -85,6 +85,8 @@ module ysyx_exu (
   assign use_exu_npc_o = use_exu_npc & valid_o;
   assign pc_o = pc_exu;
   assign inst_o = inst_exu;
+  assign addr_exu = opj + imm;
+  assign rwaddr_o = addr_exu;
 
   reg state, alu_valid, lsu_avalid;
   reg lsu_valid = 0;
@@ -106,9 +108,8 @@ module ysyx_exu (
         src1 <= idu_if.op1;
         src2 <= idu_if.op2;
         alu_op_exu <= idu_if.alu_op;
-        if (idu_if.jen) begin
-          addr_exu <= idu_if.opj + idu_if.imm;
-        end
+        opj <= idu_if.opj;
+        // addr_exu <= idu_if.opj + idu_if.imm;
 
         rd_o <= idu_if.rd;
         ren_o <= idu_if.ren;
@@ -124,7 +125,7 @@ module ysyx_exu (
         if (idu_if.wen | idu_if.ren) begin
           lsu_avalid <= 1;
           busy <= 1;
-          rwaddr_o <= idu_if.opj + idu_if.imm;
+          // rwaddr_o <= idu_if.opj + idu_if.imm;
         end
       end
       // end
