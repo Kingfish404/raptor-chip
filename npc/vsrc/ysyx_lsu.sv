@@ -1,4 +1,3 @@
-`include "ysyx.svh"
 
 module ysyx_lsu (
     input clk,
