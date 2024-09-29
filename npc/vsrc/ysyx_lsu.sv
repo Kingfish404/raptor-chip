@@ -47,10 +47,10 @@ module ysyx_lsu (
   // assign rvalid_o = lsu_rvalid;
 
   // with l1d cache
-  // assign rdata_unalign = (lsu_rvalid) ? lsu_rdata : l1d[addr_idx];
-  // assign rvalid_o = lsu_rvalid | l1d_cache_hit;
-  assign rdata_unalign = l1d[addr_idx];
-  assign rvalid_o = l1d_cache_hit;
+  assign rdata_unalign = (lsu_rvalid) ? lsu_rdata : l1d[addr_idx];
+  assign rvalid_o = lsu_rvalid | l1d_cache_hit;
+  // assign rdata_unalign = l1d[addr_idx];
+  // assign rvalid_o = l1d_cache_hit;
 
   assign lsu_awaddr_o = lsu_araddr;
   assign lsu_awvalid_o = wen & lsu_avalid;
