@@ -158,15 +158,18 @@ module ysyx_exu (
   );
 
   // branch/system unit
+  wire [BIT_W-1:0] csrv_or_src1 = (csr_rdata | src1);
+  wire [BIT_W-1:0] csrv_and_src1 = (csr_rdata & ~src1);
   assign csr_wdata0 = {BIT_W{(system_exu)}} & (
     ({BIT_W{ecall}} & 'hb) |
-    ({BIT_W{mret}} & {{csr_rdata[BIT_W-1:'h8]}, 1'b1, {csr_rdata[6:4]}, csr_rdata['h7], csr_rdata[2:0]}) |
+    ({BIT_W{mret}} &
+     {{csr_rdata[BIT_W-1:'h8]}, 1'b1, {csr_rdata[6:4]}, csr_rdata['h7], csr_rdata[2:0]}) |
     ({BIT_W{((func3 == `YSYX_OP_SYSTEM_CSRRW))}} & src1) |
-    ({BIT_W{((func3 == `YSYX_OP_SYSTEM_CSRRS))}} & (csr_rdata | src1)) |
-    ({BIT_W{((func3 == `YSYX_OP_SYSTEM_CSRRC))}} & (csr_rdata & ~src1)) |
+    ({BIT_W{((func3 == `YSYX_OP_SYSTEM_CSRRS))}} & (csrv_or_src1)) |
+    ({BIT_W{((func3 == `YSYX_OP_SYSTEM_CSRRC))}} & (csrv_and_src1)) |
     ({BIT_W{((func3 == `YSYX_OP_SYSTEM_CSRRWI))}} & src1) |
-    ({BIT_W{((func3 == `YSYX_OP_SYSTEM_CSRRSI))}} & (csr_rdata | src1)) |
-    ({BIT_W{((func3 == `YSYX_OP_SYSTEM_CSRRCI))}} & (csr_rdata & ~src1)) |
+    ({BIT_W{((func3 == `YSYX_OP_SYSTEM_CSRRSI))}} & (csrv_or_src1)) |
+    ({BIT_W{((func3 == `YSYX_OP_SYSTEM_CSRRCI))}} & (csrv_and_src1)) |
     (0)
   );
   assign csr_wdata1 = (ecall) ? pc_exu : 'h0;
