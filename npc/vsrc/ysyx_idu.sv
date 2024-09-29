@@ -63,7 +63,6 @@ module ysyx_idu (
   assign ready_o = ready & !idu_hazard & next_ready;
   assign inst_o = inst_idu;
   assign pc_o = pc_idu;
-  assign wen_o = wen;
   assign rs1_o = rs1;
   assign rs2_o = rs2;
 
