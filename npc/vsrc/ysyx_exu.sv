@@ -91,9 +91,9 @@ module ysyx_exu (
     end else begin
       // if (state == `YSYX_IDLE) begin
       if (prev_valid & ready_o) begin
+        pc_exu <= idu_if.pc;
         inst_exu <= idu_if.inst;
         imm_exu <= idu_if.imm;
-        pc_exu <= idu_if.pc;
         src1 <= idu_if.op1;
         src2 <= idu_if.op2;
         alu_op_exu <= idu_if.alu_op;
@@ -164,12 +164,9 @@ module ysyx_exu (
     ({BIT_W{ecall}} & 'hb) |
     ({BIT_W{mret}} &
      {{csr_rdata[BIT_W-1:'h8]}, 1'b1, {csr_rdata[6:4]}, csr_rdata['h7], csr_rdata[2:0]}) |
-    ({BIT_W{((func3 == `YSYX_OP_SYSTEM_CSRRW))}} & src1) |
-    ({BIT_W{((func3 == `YSYX_OP_SYSTEM_CSRRS))}} & (csrv_or_src1)) |
-    ({BIT_W{((func3 == `YSYX_OP_SYSTEM_CSRRC))}} & (csrv_and_src1)) |
-    ({BIT_W{((func3 == `YSYX_OP_SYSTEM_CSRRWI))}} & src1) |
-    ({BIT_W{((func3 == `YSYX_OP_SYSTEM_CSRRSI))}} & (csrv_or_src1)) |
-    ({BIT_W{((func3 == `YSYX_OP_SYSTEM_CSRRCI))}} & (csrv_and_src1)) |
+    ({BIT_W{(func3 == `YSYX_F3_CSRRW) | (func3 == `YSYX_F3_CSRRWI)}} & src1) |
+    ({BIT_W{(func3 == `YSYX_F3_CSRRS) | (func3 == `YSYX_F3_CSRRSI)}} & (csrv_or_src1)) |
+    ({BIT_W{(func3 == `YSYX_F3_CSRRC) | (func3 == `YSYX_F3_CSRRCI)}} & (csrv_and_src1)) |
     (0)
   );
   assign csr_wdata1 = (ecall) ? pc_exu : 'h0;
