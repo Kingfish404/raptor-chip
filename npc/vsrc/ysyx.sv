@@ -288,8 +288,8 @@ module ysyx (
 
       .idu_if(idu_if),
 
-    //   .rs1_o(rs1),
-    //   .rs2_o(rs2),
+      .rs1_o(rs1),
+      .rs2_o(rs2),
 
     //   .en_j_o(en_j),
     //   .ren_o(ren),
