@@ -43,17 +43,17 @@ static void cpu_exec_one_cycle()
 
   top->clock = (top->clock == 0) ? 1 : 0;
   top->eval();
-  if (tfp)
+  if (tfp && contextp->time() > 13115894)
   {
-    tfp->dump(contextp->time() % 100000);
+    tfp->dump(contextp->time());
   }
   contextp->timeInc(1);
 
   top->clock = (top->clock == 0) ? 1 : 0;
   top->eval();
-  if (tfp)
+  if (tfp && contextp->time() > 13115894)
   {
-    tfp->dump(contextp->time() % 100000);
+    tfp->dump(contextp->time());
   }
   contextp->timeInc(1);
 }
