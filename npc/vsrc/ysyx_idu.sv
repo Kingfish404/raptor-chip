@@ -1,6 +1,5 @@
 `include "ysyx.svh"
 `include "ysyx_dpi_c.svh"
-`include "ysyx_if.svh"
 
 module ysyx_idu (
     input clk,
