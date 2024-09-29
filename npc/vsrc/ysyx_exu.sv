@@ -7,9 +7,17 @@ module ysyx_exu (
     // from idu
     idu_pipe_if idu_if,
 
-    // for bus
+    output reg speculation_o,
+
+    // for lsu
+    output reg ren_o,
+    output reg wen_o,
+    output reg [BIT_W-1:0] rwaddr_o,
     output lsu_avalid_o,
+    output [3:0] alu_op_o,
     output [BIT_W-1:0] lsu_mem_wdata_o,
+
+    // from lsu
     input [BIT_W-1:0] lsu_rdata,
     input lsu_exu_rvalid,
     input lsu_exu_wready,
@@ -23,11 +31,7 @@ module ysyx_exu (
     output branch_retire_o,
     output ebreak_o,
     output reg [3:0] rd_o,
-    output [3:0] alu_op_o,
-    output reg [BIT_W-1:0] rwaddr_o,
-    output reg ren_o,
-    output reg wen_o,
-    output reg speculation_o,
+
 
     input prev_valid,
     input next_ready,
