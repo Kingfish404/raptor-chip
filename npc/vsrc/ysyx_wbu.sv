@@ -1,5 +1,3 @@
-`include "ysyx_macro.vh"
-`include "ysyx_macro_dpi_c.vh"
 
 module ysyx_wbu (
     input clk,

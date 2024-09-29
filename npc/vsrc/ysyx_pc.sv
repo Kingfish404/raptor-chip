@@ -1,6 +1,5 @@
-`include "ysyx_macro.vh"
-`include "ysyx_macro_soc.vh"
-`include "ysyx_macro_dpi_c.vh"
+`include "ysyx_soc.svh"
+`include "ysyx_dpi_c.svh"
 
 module ysyx_pc (
     input clk,

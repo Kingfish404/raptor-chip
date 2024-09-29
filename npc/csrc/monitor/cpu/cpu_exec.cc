@@ -54,7 +54,6 @@ static void cpu_exec_one_cycle()
   if (tfp)
   {
     tfp->dump(contextp->time());
-    tfp->flush();
   }
   contextp->timeInc(1);
 }

@@ -21,11 +21,11 @@ VTARGET=ysyxSoCFull
 SOC_DEFINE=-DYSYX_SOC
 SOC_SOURCE=$(shell find $(abspath $(SOC_HOME)/perip) -name "*.v") \
     $(SOC_HOME)/build/ysyxSoCFull.v
-INC_PATH +=	$(NPC_HOME)/vinclude/ysyxsoc
+INC_PATH +=	$(abspath ./vsrc/include/ysyxsoc)
 else
 VTARGET=ysyxSoC
 SOC_SOURCE=
-INC_PATH +=	$(NPC_HOME)/vinclude/npc
+INC_PATH +=	$(abspath ./vsrc/include/npc)
 endif
 BUILD_DIR = ./build
 OBJ_DIR = $(BUILD_DIR)/obj_dir
@@ -42,7 +42,10 @@ include $(FILELIST_MK)
 
 $(shell mkdir -p $(BUILD_DIR))
 
-VSRCS = $(shell find $(abspath ./vsrc) -name "*.v") $(SOC_SOURCE)
+VSRCS = \
+	$(shell find $(abspath ./vsrc) -name "*.sv") \
+	$(SOC_SOURCE) \
+	$(shell find $(abspath ./ssrc/build) -name "*.sv")
 CSRCS = $(shell find $(abspath ./csrc) -name "*.c")
 CCSRCS = $(shell find $(abspath ./csrc) -name "*.cc" -or -name "*.cpp")
 

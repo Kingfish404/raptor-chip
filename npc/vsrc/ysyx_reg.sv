@@ -43,16 +43,26 @@ module ysyx_reg (
     end
   end
 
-  genvar i;
-  generate
-    for (i = 1; i < REG_NUM; i = i + 1) begin : g_rf
-      always @(posedge clk) begin
-        if (rst) begin
-          rf[i] <= 0;
-        end else if (reg_write_en) begin
-          rf[waddr[REG_ADDR_W-1:0]] <= wdata;
-        end
-      end
+  always @(posedge clk) begin
+    if (rst) begin
+      rf[0]  <= 0;
+      rf[1]  <= 0;
+      rf[2]  <= 0;
+      rf[3]  <= 0;
+      rf[4]  <= 0;
+      rf[5]  <= 0;
+      rf[6]  <= 0;
+      rf[7]  <= 0;
+      rf[8]  <= 0;
+      rf[9]  <= 0;
+      rf[10] <= 0;
+      rf[11] <= 0;
+      rf[12] <= 0;
+      rf[13] <= 0;
+      rf[14] <= 0;
+      rf[15] <= 0;
+    end else if (reg_write_en) begin
+      rf[waddr[REG_ADDR_W-1:0]] <= wdata;
     end
-  endgenerate
+  end
 endmodule  // ysyx_reg

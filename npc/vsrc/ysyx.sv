@@ -1,6 +1,7 @@
-`include "ysyx_macro.vh"
-`include "ysyx_macro_soc.vh"
-`include "ysyx_macro_dpi_c.vh"
+`include "ysyx.svh"
+`include "ysyx_if.svh"
+`include "ysyx_soc.svh"
+`include "ysyx_dpi_c.svh"
 
 module ysyx (
     input clock,
@@ -102,13 +103,8 @@ module ysyx (
   wire ifu_valid, ifu_ready;
 
   // IDU output
-  wire [31:0] inst_idu;
-  wire [DATA_W-1:0] op1, op2, imm, op_j, pc_idu, rwaddr_idu;
-  wire [REG_ADDR_W-1:0] rs1, rs2, rd;
-  wire [3:0] alu_op;
-  wire [6:0] opcode;
-  wire en_j, ren, wen, system, system_func3, csr_wen;
-  wire speculation_idu;
+  wire [REG_ADDR_W-1:0] rs1, rs2;
+  idu_pipe_if idu_if (.clk(clock));
   wire idu_valid, idu_ready;
 
   // LSU output
@@ -168,8 +164,7 @@ module ysyx (
       .rst(reset),
 
       .idu_valid(idu_valid & exu_ready),
-      .rd(rd),
-
+      .rd(idu_if.rd),
 
       .bad_speculation(bad_speculation),
       .reg_write_en(exu_valid & bad_speculation == 0),
@@ -284,26 +279,10 @@ module ysyx (
       .exu_forward(reg_wdata),
       .exu_forward_rd(rd_exu),
 
-      .en_j_o(en_j),
-      .ren_o(ren),
-      .wen_o(wen),
-      .system_o(system),
-      .system_func3_o(system_func3),
-      .csr_wen_o(csr_wen),
-
-      .op1_o(op1),
-      .op2_o(op2),
-      .op_j_o(op_j),
-      .rwaddr_o(rwaddr_idu),
-      .imm_o(imm),
       .rs1_o(rs1),
       .rs2_o(rs2),
-      .rd_o(rd),
-      .alu_op_o(alu_op),
-      .opcode_o(opcode),
-      .pc_o(pc_idu),
-      .inst_o(inst_idu),
-      .speculation_o(speculation_idu),
+
+      .idu_if(idu_if),
 
       .rf_table(rf_table),
 
@@ -323,22 +302,7 @@ module ysyx (
       .valid_o(exu_valid),
       .ready_o(exu_ready),
 
-      .inst(inst_idu),
-      .ren(ren),
-      .wen(wen),
-      .system(system),
-      .system_func3(system_func3),
-      .csr_wen(csr_wen),
-      .rd(rd),
-      .imm(imm),
-      .op1(op1),
-      .op2(op2),
-      .op_j(op_j),
-      .rwaddr(rwaddr_idu),
-      .alu_op(alu_op),
-      .opcode(opcode),
-      .pc(pc_idu),
-      .speculation(speculation_idu),
+      .idu_if(idu_if),
 
       .reg_wdata_o(reg_wdata),
       .npc_wdata_o(npc_wdata),
