@@ -30,16 +30,16 @@ module ysyx_idu (
   reg [31:0] inst_idu, pc_idu;
   reg valid, ready;
 
-  logic en_j_o;
+  logic jen_o;
   logic ren_o;
   logic wen_o;
   logic system_o;
-  logic system_func3_o;
+  logic func3_z_o;
   logic csr_wen_o;
   logic ebreak_o;
   logic [BIT_W-1:0] op1_o;
   logic [BIT_W-1:0] op2_o;
-  logic [BIT_W-1:0] op_j_o;
+  logic [BIT_W-1:0] opj_o;
   logic [31:0] imm_o;
   logic [3:0] rd_o;
   logic [3:0] alu_op_o;
@@ -100,16 +100,16 @@ module ysyx_idu (
 
   assign idu_if.wen = wen_o;
   assign idu_if.ren = ren_o;
-  assign idu_if.jen = en_j_o;
+  assign idu_if.jen = jen_o;
 
   assign idu_if.system = system_o;
-  assign idu_if.system_func3_z = system_func3_o;
+  assign idu_if.system_func3_z = func3_z_o;
   assign idu_if.csr_wen = csr_wen_o;
   assign idu_if.ebreak = ebreak_o;
 
   assign idu_if.op1 = op1_o;
   assign idu_if.op2 = op2_o;
-  assign idu_if.opj = op_j_o;
+  assign idu_if.opj = opj_o;
   assign idu_if.alu_op = alu_op_o;
   assign idu_if.rd = rd_o;
   assign idu_if.imm = imm_o;
@@ -122,24 +122,27 @@ module ysyx_idu (
       .clock(clk),
       .reset(rst),
 
-      .in_inst(inst_idu),
       .in_pc  (pc_idu),
+      .in_inst(inst_idu),
+
       .in_rs1v(reg_rdata1),
       .in_rs2v(reg_rdata2),
 
-      .out_rd(rd_o),
-      .out_imm(imm_o),
       .out_op1(op1_o),
       .out_op2(op2_o),
+      .out_opj(opj_o),
+      .out_alu_op(alu_op_o),
+
+      .out_rd (rd_o),
+      .out_imm(imm_o),
+
       .out_wen(wen_o),
       .out_ren(ren_o),
-      .out_alu_op(alu_op_o),
-      .out_en_j(en_j_o),
-      .out_opj(op_j_o),
+      .out_jen(jen_o),
 
-      .out_sys_ebreak(ebreak_o),
-      .out_sys_system_func3_zero(system_func3_o),
+      .out_sys_system(system_o),
+      .out_sys_func3_zero(func3_z_o),
       .out_sys_csr_wen(csr_wen_o),
-      .out_sys_system(system_o)
+      .out_sys_ebreak(ebreak_o)
   );
 endmodule  // ysyx_IDU

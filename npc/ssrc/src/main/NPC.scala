@@ -96,21 +96,22 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
     val rs2v = Input(UInt(32.W))
   })
   val out = IO(new Bundle {
+    val wen = Output(UInt(1.W))
+    val ren = Output(UInt(1.W))
+    val jen = Output(UInt(1.W))
+
     val rd = Output(UInt(4.W))
     val imm = Output(UInt(32.W))
     val op1 = Output(UInt(32.W))
     val op2 = Output(UInt(32.W))
-    val wen = Output(UInt(1.W))
-    val ren = Output(UInt(1.W))
     val alu_op = Output(UInt(4.W))
-    val en_j = Output(UInt(1.W))
     val opj = Output(UInt(32.W))
   })
   val out_sys = IO(new Bundle {
-    var ebreak = Output(UInt(1.W))
-    val system_func3_zero = Output(UInt(1.W))
-    val csr_wen = Output(UInt(1.W))
     val system = Output(UInt(1.W))
+    val func3_zero = Output(UInt(1.W))
+    val csr_wen = Output(UInt(1.W))
+    var ebreak = Output(UInt(1.W))
   })
   val rs1v = in.rs1v
   val rs2v = in.rs2v
@@ -256,11 +257,11 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
   // val decoded = decoder(in.inst, table)
   val inst_type = decoder(in.inst, type_decoder)
   out.alu_op := inst_type(3, 0)
-  out.en_j := inst_type(4)
+  out.jen := inst_type(4)
   out.wen := inst_type(5)
   out.ren := inst_type(6)
   out_sys.system := inst_type(7)
   out_sys.csr_wen := inst_type(8)
-  out_sys.system_func3_zero := inst_type(9)
+  out_sys.func3_zero := inst_type(9)
   out_sys.ebreak := inst_type(10)
 }
