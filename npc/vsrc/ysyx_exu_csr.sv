@@ -53,7 +53,7 @@ module ysyx_exu_csr (
       csr[MEPC]    <= RESET_VAL;
       csr[MTVEC]   <= RESET_VAL;
       csr[MSTATUS] <= RESET_VAL;
-    end else (exu_valid) begin
+    end else if (exu_valid) begin
       if (wen) begin
         csr[waddr_reg0] <= wdata;
       end
