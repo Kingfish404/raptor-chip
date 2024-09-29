@@ -129,15 +129,17 @@ module ysyx_exu (
       end
       if (wen_o) begin
         if (lsu_exu_wready) begin
-          lsu_valid  <= 1;
+          lsu_valid <= 1;
           lsu_avalid <= 0;
+          ready <= 1;
         end
       end
       if (ren_o) begin
         if (lsu_exu_rvalid) begin
-          lsu_valid  <= 1;
+          lsu_valid <= 1;
           lsu_avalid <= 0;
-          mem_rdata  <= lsu_rdata;
+          mem_rdata <= lsu_rdata;
+          ready <= 1;
         end
       end
     end
