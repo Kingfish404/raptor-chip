@@ -187,7 +187,7 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
       FENCET -> BitPat("b" + "000000" + "00" + "0" + "0" +   "0000"), // N__
       PAUSE_ -> BitPat("b" + "000000" + "00" + "0" + "0" +   "0000"), // N__
       ECALL_ -> BitPat("b" + "010111" + "00" + "0" + "0" +   "0000"), // N__
-      EBREAK -> BitPat("b" + "001111" + "00" + "0" + "0" +   "0000"), // N__
+      EBREAK -> BitPat("b" + "001101" + "00" + "0" + "0" +   "0000"), // N__
       MRET__ -> BitPat("b" + "100111" + "00" + "0" + "0" +   "0000"), // N__
       FENCEI -> BitPat("b" + "000001" + "00" + "0" + "0" +   "0000"), // N__
       CSRRW_ -> BitPat("b" + "000011" + "00" + "0" + "0" +   "0001"), // CSR
@@ -198,7 +198,7 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
       CSRRCI -> BitPat("b" + "000011" + "00" + "0" + "0" +   "0111")  // CSR
     // format: on
     ),
-    BitPat("b" + "000000" + "00" + "0" + ALU_ADD_)
+    BitPat("b" + "000000" + "00" + "0" + "0" + ALU_ADD_)
   )
   // val decoded = decoder(in.inst, table)
   val inst_type = decoder(in.inst, type_decoder)
@@ -207,6 +207,7 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
   out.ben := inst_type(5)
   out.wen := inst_type(6)
   out.ren := inst_type(7)
+
   out_sys.system := inst_type(8)
   out_sys.csr_wen := inst_type(9)
   out_sys.func3_zero := inst_type(10)
