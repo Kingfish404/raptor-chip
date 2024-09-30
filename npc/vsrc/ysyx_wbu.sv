@@ -12,7 +12,7 @@ module ysyx_wbu (
     input prev_valid,
     input next_ready,
     output reg valid_o,
-    output ready_o
+    output reg ready_o
 );
   parameter bit [7:0] BIT_W = `YSYX_W_WIDTH;
 

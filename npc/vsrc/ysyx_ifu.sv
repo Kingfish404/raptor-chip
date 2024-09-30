@@ -193,16 +193,13 @@ module ysyx_ifu (
   assign inst_o = ifu_just_load & pc_ifu[2] == 1'b1 ? ifu_rdata : l1i[addr_idx][addr_offset];
 
   always @(posedge clk) begin
-    if (!rst & invalid_l1i) begin
-      l1ic_valid <= 0;
-    end
-  end
-
-  always @(posedge clk) begin
     if (rst) begin
       l1i_state  <= 'b000;
       l1ic_valid <= 0;
     end else begin
+      if (invalid_l1i) begin
+        l1ic_valid <= 0;
+      end
       case (l1i_state)
         'b000:
         if (ifu_arvalid_o) begin

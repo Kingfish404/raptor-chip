@@ -27,7 +27,7 @@ module ysyx_exu (
     output [BIT_W-1:0] npc_wdata_o,
     output use_exu_npc_o,
     output branch_retire_o,
-    output ebreak_o,
+    output reg ebreak_o,
     output reg [3:0] rd_o,
     output reg speculation_o,
 
