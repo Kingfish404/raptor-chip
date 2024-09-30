@@ -6,11 +6,11 @@ module ysyxSoC (
     input clock,
     input reset
 );
-  parameter bit [7:0] ADDR_W = 32, DATA_W = 32;
+  parameter bit [7:0] BIT_W = 32;
   wire auto_master_out_awready;
   wire auto_master_out_awvalid;
   wire [3:0] auto_master_out_awid;
-  wire [ADDR_W-1:0] auto_master_out_awaddr;
+  wire [BIT_W-1:0] auto_master_out_awaddr;
   wire [7:0] auto_master_out_awlen;
   wire [2:0] auto_master_out_awsize;
   wire [1:0] auto_master_out_awburst;
@@ -26,7 +26,7 @@ module ysyxSoC (
   wire auto_master_out_arready;
   wire auto_master_out_arvalid;
   wire [3:0] auto_master_out_arid;
-  wire [ADDR_W-1:0] auto_master_out_araddr;
+  wire [BIT_W-1:0] auto_master_out_araddr;
   wire [7:0] auto_master_out_arlen;
   wire [2:0] auto_master_out_arsize;
   wire [1:0] auto_master_out_arburst;

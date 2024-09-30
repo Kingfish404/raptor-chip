@@ -16,7 +16,7 @@ module ysyx_idu (
     output [3:0] rs1_o,
     output [3:0] rs2_o,
 
-    idu_pipe_if idu_if,
+    idu_pipe_if.out idu_if,
 
     input [16-1:0] rf_table,
 
@@ -49,7 +49,17 @@ module ysyx_idu (
   assign rs2_o   = rs2;
 
   reg state;
-  `YSYX_BUS_FSM()
+  always_comb begin
+    state = 0;
+    unique case (state)
+      `YSYX_IDLE: begin
+        state = ((valid_o ? `YSYX_WAIT_READY : state));
+      end
+      `YSYX_WAIT_READY: begin
+        state = ((next_ready ? `YSYX_IDLE : state));
+      end
+    endcase
+  end
   always @(posedge clk) begin
     if (rst) begin
       valid <= 0;

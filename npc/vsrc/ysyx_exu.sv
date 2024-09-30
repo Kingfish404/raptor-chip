@@ -5,7 +5,7 @@ module ysyx_exu (
     input rst,
 
     // from idu
-    idu_pipe_if idu_if,
+    idu_pipe_if.in idu_if,
 
     // for lsu
     output reg ren_o,
@@ -87,7 +87,17 @@ module ysyx_exu (
   reg ready;
   assign valid_o = (wen_o | ren_o) ? lsu_valid : alu_valid;
   assign ready_o = ready & next_ready;
-  `YSYX_BUS_FSM()
+  always_comb begin
+    state = 0;
+    unique case (state)
+      `YSYX_IDLE: begin
+        state = ((valid_o ? `YSYX_WAIT_READY : state));
+      end
+      `YSYX_WAIT_READY: begin
+        state = ((next_ready ? `YSYX_IDLE : state));
+      end
+    endcase
+  end
   always @(posedge clk) begin
     if (rst) begin
       alu_valid <= 0;

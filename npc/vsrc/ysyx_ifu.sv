@@ -66,7 +66,17 @@ module ysyx_ifu (
   reg bad_speculation_pc_change;
 
   assign pc_o = pc_ifu;
-  `YSYX_BUS_FSM()
+  always_comb begin
+    state = 0;
+    unique case (state)
+      `YSYX_IDLE: begin
+        state = ((valid_o ? `YSYX_WAIT_READY : state));
+      end
+      `YSYX_WAIT_READY: begin
+        state = ((next_ready ? `YSYX_IDLE : state));
+      end
+    endcase
+  end
   always @(posedge clk) begin
     if (rst) begin
       pc_ifu <= `YSYX_PC_INIT;
