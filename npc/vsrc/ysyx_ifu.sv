@@ -196,7 +196,7 @@ module ysyx_ifu (
       case (l1i_state)
         'b000: begin
           if (invalid_l1i) begin
-            l1ic_valid <= 0;
+            // l1ic_valid <= 0;
           end
           if (ifu_arvalid_o) begin
             l1i_state <= 'b001;
