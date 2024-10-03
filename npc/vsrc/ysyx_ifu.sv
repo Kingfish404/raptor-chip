@@ -81,7 +81,7 @@ module ysyx_ifu (
   //   (state == `YSYX_WAIT_READY & next_ready) ? `YSYX_IDLE : 0;
   // State register update (on rising edge of the clock or reset)
   always_ff @(posedge clk or posedge rst) begin
-    if (reset) begin
+    if (rst) begin
       state <= `YSYX_IDLE;  // Reset state to IDLE
     end else begin
       state <= next_state;  // Update state to the next state
