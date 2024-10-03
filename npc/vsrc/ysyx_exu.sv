@@ -102,6 +102,7 @@ module ysyx_exu (
     if (rst) begin
       alu_valid <= 0;
       lsu_avalid <= 0;
+      lsu_valid <= 0;
       ready <= 1;
     end else begin
       if (prev_valid & ready_o) begin

@@ -69,14 +69,14 @@
 `define YSYX_ALU_OP_SRL   4'b0101
 `define YSYX_ALU_OP_SRA   4'b1101
 
-`define YSYX_BUS_FSM() \
-always @(*) begin \
-  state = 0; \
-  case (state) \
-    `YSYX_IDLE:       begin state = ((valid_o ? `YSYX_WAIT_READY : state)); end \
-    `YSYX_WAIT_READY: begin state = ((next_ready ? `YSYX_IDLE : state));       end \
-  endcase \
-end
+// `define YSYX_BUS_FSM() \
+// always @(*) begin \
+//   state = 0; \
+//   case (state) \
+//     `YSYX_IDLE:       begin state = ((valid_o ? `YSYX_WAIT_READY : state)); end \
+//     `YSYX_WAIT_READY: begin state = ((next_ready ? `YSYX_IDLE : state));       end \
+//   endcase \
+// end
 
 `define ASSERT(signal, value) \
   if (signal !== value) begin \
