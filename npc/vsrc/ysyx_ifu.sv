@@ -77,7 +77,7 @@ module ysyx_ifu (
   //     end
   //   endcase
   // end
-  state = valid_o;
+  assign state = valid_o;
   // assign state = (state == `YSYX_IDLE & valid_o) ? `YSYX_WAIT_READY :
   //   (state == `YSYX_WAIT_READY & next_ready) ? `YSYX_IDLE : 0;
   // State register update (on rising edge of the clock or reset)
