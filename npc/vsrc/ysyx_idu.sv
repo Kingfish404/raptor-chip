@@ -49,7 +49,8 @@ module ysyx_idu (
   assign rs2_o   = rs2;
 
   reg state;
-  `YSYX_BUS_FSM()
+  // `YSYX_BUS_FSM()
+  assign state = valid_o;
   always @(posedge clk) begin
     if (rst) begin
       valid <= 0;

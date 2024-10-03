@@ -66,7 +66,8 @@ module ysyx_ifu (
   reg bad_speculation_pc_change;
 
   assign pc_o = pc_ifu;
-  `YSYX_BUS_FSM()
+  // `YSYX_BUS_FSM()
+  assign state = valid_o;
   always @(posedge clk) begin
     if (rst) begin
       pc_ifu <= `YSYX_PC_INIT;
@@ -190,12 +191,16 @@ module ysyx_ifu (
       l1ic_valid <= 0;
     end else begin
       if (invalid_l1i) begin
-        l1ic_valid <= 0;
+        // l1ic_valid <= 0;
       end
       case (l1i_state)
-        'b000:
-        if (ifu_arvalid_o) begin
-          l1i_state <= 'b001;
+        'b000: begin
+          if (invalid_l1i) begin
+            l1ic_valid <= 0;
+          end
+          if (ifu_arvalid_o) begin
+            l1i_state <= 'b001;
+          end
         end
         'b001:
         if (ifu_rvalid & !l1i_cache_hit) begin
