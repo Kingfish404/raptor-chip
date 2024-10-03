@@ -66,32 +66,7 @@ module ysyx_ifu (
   reg bad_speculation_pc_change;
 
   assign pc_o = pc_ifu;
-  // always_comb begin
-  //   state = 0;
-  //   unique case (state)
-  //     `YSYX_IDLE: begin
-  //       state = ((valid_o ? `YSYX_WAIT_READY : state));
-  //     end
-  //     `YSYX_WAIT_READY: begin
-  //       state = ((next_ready ? `YSYX_IDLE : state));
-  //     end
-  //   endcase
-  // end
-  assign state = valid_o;
-  // assign state = (state == `YSYX_IDLE & valid_o) ? `YSYX_WAIT_READY :
-  //   (state == `YSYX_WAIT_READY & next_ready) ? `YSYX_IDLE : 0;
-  // State register update (on rising edge of the clock or reset)
-  // always_ff @(posedge clk or posedge rst) begin
-  //   if (rst) begin
-  //     state <= `YSYX_IDLE;  // Reset state to IDLE
-  //   end else begin
-  //     state <= next_state;  // Update state to the next state
-  //   end
-  // end
-  // wire next_state;
-  // // Combinational logic to calculate next state
-  // assign next_state = (state == `YSYX_IDLE & valid_o) ? `YSYX_WAIT_READY :
-  //   (state == `YSYX_WAIT_READY & next_ready) ? `YSYX_IDLE : 0;
+  `YSYX_BUS_FSM()
   always @(posedge clk) begin
     if (rst) begin
       pc_ifu <= `YSYX_PC_INIT;

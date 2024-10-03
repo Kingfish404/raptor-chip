@@ -49,17 +49,7 @@ module ysyx_idu (
   assign rs2_o   = rs2;
 
   reg state;
-  always_comb begin
-    state = 0;
-    unique case (state)
-      `YSYX_IDLE: begin
-        state = ((valid_o ? `YSYX_WAIT_READY : state));
-      end
-      `YSYX_WAIT_READY: begin
-        state = ((next_ready ? `YSYX_IDLE : state));
-      end
-    endcase
-  end
+  `YSYX_BUS_FSM()
   always @(posedge clk) begin
     if (rst) begin
       valid <= 0;
