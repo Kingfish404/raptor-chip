@@ -182,7 +182,8 @@ module ysyx_ifu (
   wire ifu_sdram_arburst = `YSYX_I_SDRAM_ARBURST & (pc_ifu >= 'ha0000000) & (pc_ifu <= 'hc0000000);
 
   wire ifu_just_load = ((l1i_state == 'b11) & ifu_rvalid);
-  assign inst_o = ifu_just_load & pc_ifu[2] == 1'b1 ? ifu_rdata : l1i[addr_idx][addr_offset];
+  // assign inst_o = ifu_just_load & pc_ifu[2] == 1'b1 ? ifu_rdata : l1i[addr_idx][addr_offset];
+  assign inst_o = l1i[addr_idx][addr_offset];
 
 
   always @(posedge clk) begin
@@ -190,13 +191,10 @@ module ysyx_ifu (
       l1i_state  <= 'b000;
       l1ic_valid <= 0;
     end else begin
-      if (invalid_l1i) begin
-        // l1ic_valid <= 0;
-      end
       case (l1i_state)
         'b000: begin
           if (invalid_l1i) begin
-            // l1ic_valid <= 0;
+            l1ic_valid <= 0;
           end
           if (ifu_arvalid_o) begin
             l1i_state <= 'b001;
