@@ -16,7 +16,7 @@ module ysyx_idu (
     output [3:0] rs1_o,
     output [3:0] rs2_o,
 
-    idu_pipe_if idu_if,
+    idu_pipe_if.out idu_if,
 
     input [16-1:0] rf_table,
 

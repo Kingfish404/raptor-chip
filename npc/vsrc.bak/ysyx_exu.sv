@@ -5,7 +5,7 @@ module ysyx_exu (
     input rst,
 
     // from idu
-    idu_pipe_if idu_if,
+    idu_pipe_if.in idu_if,
 
     // for lsu
     output reg ren_o,
