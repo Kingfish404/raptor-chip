@@ -78,7 +78,7 @@ module ysyx_ifu (
   //   endcase
   // end
   assign state = (state == `YSYX_IDLE & valid_o) ? `YSYX_WAIT_READY :
-    (state == `YSYX_WAIT_READY & next_ready) ? `YSYX_IDLE : state;
+    (state == `YSYX_WAIT_READY & next_ready) ? `YSYX_IDLE : 0;
   always @(posedge clk) begin
     if (rst) begin
       pc_ifu <= `YSYX_PC_INIT;
