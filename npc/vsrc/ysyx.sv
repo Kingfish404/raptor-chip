@@ -253,7 +253,7 @@ module ysyx (
 
       .pc(pc_wbu),
       .pc_change(pc_change),
-      .pc_retire(pc_retire),
+      .pc_retire(pc_retire | branch_retire),
       .speculation_o(speculation_ifu),
       .bad_speculation_o(bad_speculation),
       .good_speculation_o(good_speculation),
