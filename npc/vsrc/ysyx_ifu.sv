@@ -115,7 +115,6 @@ module ysyx_ifu (
           ifu_lsu_hazard <= 0;
           pc_ifu <= pc_ifu + 4;
         end
-
       end
       if (pc_change) begin
         btb <= npc;
