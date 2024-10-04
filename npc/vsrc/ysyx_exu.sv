@@ -82,12 +82,11 @@ module ysyx_exu (
   assign rwaddr_o = addr_exu;
   assign addr_exu = opj + imm_exu;
 
-  reg state, alu_valid, lsu_avalid;
+  reg alu_valid, lsu_avalid;
   reg lsu_valid;
   reg ready;
   assign valid_o = (wen_o | ren_o) ? lsu_valid : alu_valid;
   assign ready_o = ready & next_ready;
-  assign state = valid_o;
   always @(posedge clk) begin
     if (rst) begin
       alu_valid <= 0;
