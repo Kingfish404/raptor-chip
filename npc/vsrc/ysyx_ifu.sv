@@ -45,12 +45,13 @@ module ysyx_ifu (
   wire [6:0] opcode = inst_o[6:0];
   wire is_branch = (
     (opcode == `YSYX_OP_JAL) | (opcode == `YSYX_OP_JALR) |
-    (opcode == `YSYX_OP_B_TYPE) | (opcode == `YSYX_OP_SYSTEM) |
+    (opcode == `YSYX_OP_B_TYPE) |
     (0)
   );
   wire is_load = (opcode == `YSYX_OP_IL_TYPE);
   wire is_store = (opcode == `YSYX_OP_S_TYPE);
-  wire is_fence = (inst_o == `YSYX_INST_FENCE_I);
+  wire is_fencei = (inst_o == `YSYX_INST_FENCE_I);  // fence.i is system instruction
+  wire is_sys = (opcode == `YSYX_OP_SYSTEM);
 
   assign valid_o = (l1i_valid & !ifu_hazard) &
    !bad_speculation & !(speculation & (is_load | is_store));
@@ -121,7 +122,7 @@ module ysyx_ifu (
         btb_valid <= 1;
       end
       if (!bad_speculation_o & next_ready == 1 & valid_o) begin
-        if (!is_branch & !is_load & !is_fence) begin
+        if (!is_branch & !is_load & !is_sys) begin
           pc_ifu <= pc_ifu + 4;
         end else begin
           if (is_branch) begin
@@ -140,7 +141,7 @@ module ysyx_ifu (
           if (is_load) begin
             ifu_lsu_hazard <= 1;
           end
-          if (is_fence) begin
+          if (is_sys) begin
             ifu_branch_hazard <= 1;
           end
         end
@@ -148,7 +149,7 @@ module ysyx_ifu (
     end
   end
 
-  wire invalid_l1i = valid_o & next_ready & is_fence;
+  wire invalid_l1i = valid_o & next_ready & is_fencei;
   wire l1i_valid;
   wire l1i_ready;
 
