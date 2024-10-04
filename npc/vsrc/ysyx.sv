@@ -252,13 +252,13 @@ module ysyx (
       .pc_o(pc_ifu),
 
       .pc(pc_wbu),
-      .pc_change(pc_valid),
-      .pc_retire(pc_retire),
+      .pc_change(branch_change),
+      .pc_retire(branch_retire),
       .speculation_o(speculation_ifu),
       .bad_speculation_o(bad_speculation),
       .good_speculation_o(good_speculation),
 
-      .prev_valid(wbu_valid),
+      .prev_valid(exu_valid),
       .next_ready(idu_ready),
       .valid_o(ifu_valid),
       .ready_o(ifu_ready)
