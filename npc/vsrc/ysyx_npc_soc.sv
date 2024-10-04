@@ -143,7 +143,7 @@ module ysyx_npc_soc (
     input [2:0] arsize,
     input [7:0] arlen,
     input [3:0] arid,
-    input [ADDR_W-1:0] araddr,
+    input [BIT_W-1:0] araddr,
     input arvalid,
     output reg arready_o,
 
@@ -158,7 +158,7 @@ module ysyx_npc_soc (
     input [2:0] awsize,
     input [7:0] awlen,
     input [3:0] awid,
-    input [ADDR_W-1:0] awaddr,
+    input [BIT_W-1:0] awaddr,
     input awvalid,
     output awready_o,
 
@@ -173,7 +173,7 @@ module ysyx_npc_soc (
     output reg bvalid_o,
     input bready
 );
-  parameter bit [7:0] ADDR_W = 32, DATA_W = 64;
+  parameter bit [7:0] BIT_W = 32, DATA_W = 64;
 
   reg [31:0] mem_rdata_buf[2];
   reg [2:0] state = 0;
