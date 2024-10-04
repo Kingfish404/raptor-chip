@@ -84,7 +84,7 @@ module ysyx (
   parameter bit [7:0] REG_ADDR_W = 4;
   // PC unit output
   wire [DATA_W-1:0] npc, pc;
-  wire pc_valid, pc_retire;
+  wire pc_change, pc_retire;
 
   // REGS output
   wire [DATA_W-1:0] reg_rdata1, reg_rdata2;
@@ -153,7 +153,7 @@ module ysyx (
       .branch_change(branch_change),
       .branch_retire(branch_retire),
       .npc_o(npc),
-      .change_o(pc_valid),
+      .change_o(pc_change),
       .retire_o(pc_retire),
 
       .prev_valid(exu_valid)
