@@ -19,7 +19,6 @@ module ysyx_ifu (
     input [DATA_W-1:0] pc,
     input pc_change,
     input pc_retire,
-    input exu_valid,
 
     output speculation_o,
     output bad_speculation_o,
@@ -100,11 +99,21 @@ module ysyx_ifu (
         good_speculation <= 0;
       end
       if (prev_valid) begin
-        if ((ifu_hazard) & !speculation & (pc_change | pc_retire) & l1i_ready) begin
+        // if ((ifu_hazard) & !speculation & (pc_change | pc_retire) & l1i_ready) begin
+        //   ifu_hazard <= 0;
+        //   ifu_lsu_hazard <= 0;
+        //   ifu_branch_hazard <= 0;
+        //   pc_ifu <= pc_change ? npc : pc_ifu + 4;
+        // end
+        if ((ifu_branch_hazard) & !speculation & (pc_change | pc_retire) & l1i_ready) begin
           ifu_hazard <= 0;
-          ifu_lsu_hazard <= 0;
           ifu_branch_hazard <= 0;
           pc_ifu <= pc_change ? npc : pc_ifu + 4;
+        end
+        if ((ifu_lsu_hazard) & !speculation & pc_retire & l1i_ready) begin
+          ifu_hazard <= 0;
+          ifu_lsu_hazard <= 0;
+          pc_ifu <= pc_ifu + 4;
         end
         if (pc_change) begin
           btb <= npc;
