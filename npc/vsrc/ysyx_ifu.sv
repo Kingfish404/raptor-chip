@@ -73,7 +73,6 @@ module ysyx_ifu (
   always @(posedge clk) begin
     if (rst) begin
       pc_ifu <= `YSYX_PC_INIT;
-      btb_valid <= 0;
       speculation <= 0;
       ifu_lsu_hazard <= 0;
       ifu_branch_hazard <= 0;
@@ -102,12 +101,6 @@ module ysyx_ifu (
         good_speculation <= 0;
       end
       if (!speculation) begin
-        // if ((ifu_hazard) & !speculation & (pc_change | pc_retire) & l1i_ready) begin
-        //   ifu_hazard <= 0;
-        //   ifu_lsu_hazard <= 0;
-        //   ifu_branch_hazard <= 0;
-        //   pc_ifu <= pc_change ? npc : pc_ifu + 4;
-        // end
         if (ifu_branch_hazard & (pc_change | pc_retire) & l1i_ready) begin
           ifu_branch_hazard <= 0;
           pc_ifu <= pc_change ? npc : pc_ifu + 4;
