@@ -119,16 +119,15 @@ module ysyx_ifu (
           pc_ifu <= pc_ifu + 4;
         end else begin
           if (is_branch) begin
-            // if (btb_valid & 1 & !speculation) begin
-            //   pc_ifu <= btb;
-            //   ifu_speculation <= btb;
-            //   ifu_npc_speculation <= pc_ifu + 4;
-            //   speculation <= 1;
-            //   if (opcode == `YSYX_OP_B_TYPE) begin
-            //     ifu_b_speculation <= 1;
-            //   end
-            // end else
-            begin
+            if (btb_valid & 1 & !speculation) begin
+              pc_ifu <= btb;
+              ifu_speculation <= btb;
+              ifu_npc_speculation <= pc_ifu + 4;
+              speculation <= 1;
+              if (opcode == `YSYX_OP_B_TYPE) begin
+                ifu_b_speculation <= 1;
+              end
+            end else begin
               ifu_hazard <= 1;
               ifu_branch_hazard <= 1;
             end
