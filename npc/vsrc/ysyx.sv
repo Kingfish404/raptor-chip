@@ -150,8 +150,8 @@ module ysyx (
       .pc_ifu(pc_ifu),
 
       .npc_wdata(npc_wdata),
-      .branch_change(pc_change),
-      .branch_retire(pc_retire),
+      .branch_change(branch_change),
+      .branch_retire(branch_retire),
       .npc_o(npc),
       .change_o(pc_valid),
       .retire_o(pc_retire),
