@@ -104,12 +104,13 @@ module ysyx_ifu (
           ifu_lsu_hazard <= 0;
           ifu_branch_hazard <= 0;
           if (pc_change) begin
-            pc_ifu <= npc;
-          end else begin
+          end
+          if (pc_retire) begin
             pc_ifu <= pc_ifu + 4;
           end
         end
         if (pc_change) begin
+          pc_ifu <= npc;
           btb <= npc;
           btb_valid <= 1;
         end
