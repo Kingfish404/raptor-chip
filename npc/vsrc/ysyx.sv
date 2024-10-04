@@ -84,7 +84,7 @@ module ysyx (
   parameter bit [7:0] REG_ADDR_W = 4;
   // PC unit output
   wire [DATA_W-1:0] npc, pc;
-  wire pc_valid, pc_retire;
+  wire pc_change, pc_retire;
 
   // REGS output
   wire [DATA_W-1:0] reg_rdata1, reg_rdata2;
@@ -122,7 +122,7 @@ module ysyx (
   wire [31:0] inst_exu, pc_exu;
   wire [DATA_W-1:0] reg_wdata;
   wire [DATA_W-1:0] npc_wdata;
-  wire use_exu_npc, branch_retire, ebreak;
+  wire branch_change, branch_retire, ebreak, load_retire;
   wire [REG_ADDR_W-1:0] rd_exu;
   wire [3:0] alu_op_exu;
   wire ren_exu, wen_exu;
@@ -150,10 +150,10 @@ module ysyx (
       .pc_ifu(pc_ifu),
 
       .npc_wdata(npc_wdata),
-      .use_exu_npc(use_exu_npc),
+      .branch_change(branch_change),
       .branch_retire(branch_retire),
       .npc_o(npc),
-      .change_o(pc_valid),
+      .change_o(pc_change),
       .retire_o(pc_retire),
 
       .prev_valid(exu_valid)
@@ -252,8 +252,10 @@ module ysyx (
       .pc_o(pc_ifu),
 
       .pc(pc_wbu),
-      .pc_change(pc_valid),
+      .pc_change(pc_change),
       .pc_retire(pc_retire),
+      .load_retire(load_retire),
+
       .speculation_o(speculation_ifu),
       .bad_speculation_o(bad_speculation),
       .good_speculation_o(good_speculation),
@@ -317,8 +319,10 @@ module ysyx (
 
       .reg_wdata_o(reg_wdata),
       .npc_wdata_o(npc_wdata),
-      .use_exu_npc_o(use_exu_npc),
+      .branch_change_o(branch_change),
       .branch_retire_o(branch_retire),
+      .load_retire_o(load_retire),
+
       .ebreak_o(ebreak),
       .rd_o(rd_exu),
       .speculation_o(speculation_exu),

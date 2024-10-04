@@ -19,6 +19,7 @@ module ysyx_ifu (
     input [DATA_W-1:0] pc,
     input pc_change,
     input pc_retire,
+    input load_retire,
 
     output speculation_o,
     output bad_speculation_o,
@@ -34,21 +35,23 @@ module ysyx_ifu (
   reg state;
 
   reg [DATA_W-1:0] pc_ifu;
-  reg ifu_hazard = 0, ifu_lsu_hazard = 0, ifu_branch_hazard = 0;
+  reg ifu_lsu_hazard = 0, ifu_branch_hazard = 0;
 
   reg [DATA_W-1:0] btb;
   reg [DATA_W-1:0] ifu_speculation, ifu_npc_speculation, ifu_npc_bad_speculation;
   reg btb_valid, speculation, bad_speculation, ifu_b_speculation;
 
+  wire ifu_hazard = ifu_lsu_hazard | ifu_branch_hazard;
   wire [6:0] opcode = inst_o[6:0];
   wire is_branch = (
     (opcode == `YSYX_OP_JAL) | (opcode == `YSYX_OP_JALR) |
-    (opcode == `YSYX_OP_B_TYPE) | (opcode == `YSYX_OP_SYSTEM) |
+    (opcode == `YSYX_OP_B_TYPE) |
     (0)
   );
   wire is_load = (opcode == `YSYX_OP_IL_TYPE);
   wire is_store = (opcode == `YSYX_OP_S_TYPE);
-  wire is_fence = (inst_o == `YSYX_INST_FENCE_I);
+  wire is_fencei = (inst_o == `YSYX_INST_FENCE_I);  // fence.i is system instruction
+  wire is_sys = (opcode == `YSYX_OP_SYSTEM);
 
   assign valid_o = (l1i_valid & !ifu_hazard) &
    !bad_speculation & !(speculation & (is_load | is_store));
@@ -59,9 +62,11 @@ module ysyx_ifu (
   assign good_speculation_o = good_speculation;
   assign bad_speculation_o = bad_speculation | bad_speculationing;
   wire good_speculationing = (
-    (pc_change & npc == ifu_speculation) | (pc_retire & pc + 4 == ifu_speculation));
+    (pc_change & npc == ifu_speculation) |
+    (pc_retire & pc + 4 == ifu_speculation));
   wire bad_speculationing = (speculation & (
-    (pc_change & npc != ifu_speculation) | (pc_retire & pc + 4 != ifu_speculation )));
+    (pc_change & npc != ifu_speculation) |
+    (pc_retire & !pc_change & pc + 4 != ifu_speculation)));
   reg good_speculation;
   reg bad_speculation_pc_change;
 
@@ -70,9 +75,9 @@ module ysyx_ifu (
   always @(posedge clk) begin
     if (rst) begin
       pc_ifu <= `YSYX_PC_INIT;
-      btb_valid <= 0;
       speculation <= 0;
-      ifu_hazard <= 0;
+      ifu_lsu_hazard <= 0;
+      ifu_branch_hazard <= 0;
     end else begin
       if (speculation) begin
         if (good_speculationing) begin
@@ -89,7 +94,6 @@ module ysyx_ifu (
       end
       if (bad_speculation & next_ready & l1i_ready) begin
         bad_speculation <= 0;
-        ifu_hazard <= 0;
         ifu_lsu_hazard <= 0;
         ifu_branch_hazard <= 0;
         ifu_b_speculation <= 0;
@@ -98,24 +102,22 @@ module ysyx_ifu (
       end else if (good_speculation) begin
         good_speculation <= 0;
       end
-      if (prev_valid) begin
-        if ((ifu_hazard) & !speculation & (pc_change | pc_retire) & l1i_ready) begin
-          ifu_hazard <= 0;
-          ifu_lsu_hazard <= 0;
+      if (!speculation) begin
+        if (ifu_branch_hazard & (pc_change | pc_retire) & l1i_ready) begin
           ifu_branch_hazard <= 0;
-          if (pc_change) begin
-            pc_ifu <= npc;
-          end else begin
-            pc_ifu <= pc_ifu + 4;
-          end
+          pc_ifu <= pc_change ? npc : pc_ifu + 4;
         end
-        if (pc_change) begin
-          btb <= npc;
-          btb_valid <= 1;
+        if (ifu_lsu_hazard & load_retire & l1i_ready) begin
+          ifu_lsu_hazard <= 0;
+          pc_ifu <= pc_ifu + 4;
         end
       end
+      if (pc_change) begin
+        btb <= npc;
+        btb_valid <= 1;
+      end
       if (!bad_speculation_o & next_ready == 1 & valid_o) begin
-        if (!is_branch & !is_load & !is_fence) begin
+        if (!is_branch & !is_load & !is_sys) begin
           pc_ifu <= pc_ifu + 4;
         end else begin
           if (is_branch) begin
@@ -128,23 +130,21 @@ module ysyx_ifu (
                 ifu_b_speculation <= 1;
               end
             end else begin
-              ifu_hazard <= 1;
               ifu_branch_hazard <= 1;
             end
           end
           if (is_load) begin
-            ifu_hazard <= 1;
             ifu_lsu_hazard <= 1;
           end
-          if (is_fence) begin
-            ifu_hazard <= 1;
+          if (is_sys) begin
+            ifu_branch_hazard <= 1;
           end
         end
       end
     end
   end
 
-  wire invalid_l1i = valid_o & next_ready & is_fence;
+  wire invalid_l1i = valid_o & next_ready & is_fencei;
   wire l1i_valid;
   wire l1i_ready;
 

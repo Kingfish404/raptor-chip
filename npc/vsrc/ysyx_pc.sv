@@ -9,7 +9,7 @@ module ysyx_pc (
     input bad_speculation,
     input [DATA_W-1:0] pc_ifu,
 
-    input use_exu_npc,
+    input branch_change,
     input branch_retire,
     input [DATA_W-1:0] npc_wdata,
     output [DATA_W-1:0] npc_o,
@@ -31,16 +31,9 @@ module ysyx_pc (
       change <= 1;
       `YSYX_DPI_C_NPC_DIFFTEST_SKIP_REF
     end else if (prev_valid & !bad_speculation) begin
-      pc <= pc + 4;
-      if (use_exu_npc) begin
-        pc <= npc_wdata;
-        change <= 1;
-      end else if (branch_retire) begin
-        change <= 0;
-        retire <= 1;
-      end else begin
-        change <= 0;
-      end
+      change <= branch_change;
+      retire <= branch_retire;
+      pc <= branch_change ? npc_wdata : pc + 4;
     end else begin
       change <= 0;
       retire <= 0;

@@ -25,8 +25,9 @@ module ysyx_exu (
 
     output [BIT_W-1:0] reg_wdata_o,
     output [BIT_W-1:0] npc_wdata_o,
-    output use_exu_npc_o,
+    output branch_change_o,
     output branch_retire_o,
+    output load_retire_o,
     output reg ebreak_o,
     output reg [3:0] rd_o,
     output reg speculation_o,
@@ -49,7 +50,7 @@ module ysyx_exu (
   reg jen, ben;
   reg ecall, mret;
   reg [BIT_W-1:0] mem_rdata;
-  reg use_exu_npc, system_exu;
+  reg branch_change, system_exu;
   reg [2:0] func3 = inst_exu[14:12];
 
   ysyx_exu_csr csr (
@@ -57,7 +58,7 @@ module ysyx_exu (
       .rst(rst),
 
       .wen(csr_wen_exu),
-      .exu_valid(valid_o),
+      .exu_valid(valid),
       .ecall(ecall),
       .mret(mret),
 
@@ -76,16 +77,18 @@ module ysyx_exu (
   assign csr_addr0 = (imm_exu[11:0]);
   assign csr_addr1 = (opj[11:0]);
   assign alu_op_o = alu_op_exu;
-  assign use_exu_npc_o = use_exu_npc;
+  assign branch_change_o = branch_change;
   assign pc_o = pc_exu;
   assign inst_o = inst_exu;
   assign rwaddr_o = addr_exu;
   assign addr_exu = opj + imm_exu;
 
   reg alu_valid, lsu_avalid;
-  reg lsu_valid;
-  reg ready;
-  assign valid_o = (wen_o | ren_o) ? lsu_valid : alu_valid;
+  reg  lsu_valid;
+  reg  ready;
+  wire valid;
+  assign valid   = (wen_o | ren_o) ? lsu_valid : alu_valid;
+  assign valid_o = valid;
   assign ready_o = ready & next_ready;
   always @(posedge clk) begin
     if (rst) begin
@@ -165,27 +168,28 @@ module ysyx_exu (
     (0)
   );
   assign branch_retire_o = ((system_exu) | (ben) | (ren_o));
+  assign load_retire_o = (ren_o) & valid;
   assign npc_wdata_o = (ecall) ? mtvec : (mret) ? mepc : addr_exu;
 
   always_comb begin
     if (ben) begin
       case (alu_op_exu)
         `YSYX_ALU_OP_SUB: begin
-          use_exu_npc = (~|reg_wdata);
+          branch_change = (~|reg_wdata);
         end
         `YSYX_ALU_OP_XOR,
           `YSYX_ALU_OP_SLT,
           `YSYX_ALU_OP_SLTU,
           `YSYX_ALU_OP_SLE,
           `YSYX_ALU_OP_SLEU: begin
-          use_exu_npc = (|reg_wdata);
+          branch_change = (|reg_wdata);
         end
         default: begin
-          use_exu_npc = 0;
+          branch_change = 0;
         end
       endcase
     end else begin
-      use_exu_npc = (ecall | mret | jen);
+      branch_change = (ecall | mret | jen);
     end
   end
 
