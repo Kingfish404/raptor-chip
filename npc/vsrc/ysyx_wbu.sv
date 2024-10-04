@@ -20,29 +20,22 @@ module ysyx_wbu (
   reg [31:0] inst_wbu, pc_wbu;
 
   assign pc_o = pc_wbu;
+  assign ready_o = '1;
 
   assign state = valid_o;
   always @(posedge clk) begin
     if (rst) begin
       valid_o <= 0;
-      ready_o <= 1;
     end else begin
       if (prev_valid & ready_o) begin
         pc_wbu   <= pc;
         inst_wbu <= inst;
+        valid_o  <= 1;
         if (ebreak) begin
           `YSYX_DPI_C_NPC_EXU_EBREAK
         end
-      end
-      if (state == `YSYX_IDLE) begin
-        if (prev_valid == 1) begin
-          valid_o <= 1;
-        end
-      end else if (state == `YSYX_WAIT_READY) begin
-        ready_o <= 1;
-        if (prev_valid == 0) begin
-          valid_o <= 0;
-        end
+      end else begin
+        valid_o <= 0;
       end
     end
   end
