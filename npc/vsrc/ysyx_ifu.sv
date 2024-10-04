@@ -109,7 +109,7 @@ module ysyx_ifu (
             pc_ifu <= pc_ifu + 4;
           end
         end
-        if (pc_change) begin
+        if ((ifu_hazard) & !speculation & pc_change) begin
           pc_ifu <= npc;
           btb <= npc;
           btb_valid <= 1;
