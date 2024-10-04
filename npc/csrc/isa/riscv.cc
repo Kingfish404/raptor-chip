@@ -30,9 +30,9 @@ void reg_display(int n)
         printf("%3s: " FMT_WORD_NO_PREFIX " ", regs[i], npc.gpr[i]);
     }
     printf("\n");
-    printf("npc.csr.mcause: " FMT_WORD_NO_PREFIX "\n", *npc.mcause);
+    printf("npc.csr.mcause: " FMT_WORD_NO_PREFIX " ", *npc.mcause);
     printf("npc.csr.mepc: " FMT_WORD_NO_PREFIX "\n", *npc.mepc);
-    printf("npc.csr.mtvec: " FMT_WORD_NO_PREFIX "\n", *npc.mtvec);
+    printf("npc.csr.mtvec: " FMT_WORD_NO_PREFIX "  ", *npc.mtvec);
     printf("npc.csr.mstatus: " FMT_WORD_NO_PREFIX "\n", *npc.mstatus);
 }
 
