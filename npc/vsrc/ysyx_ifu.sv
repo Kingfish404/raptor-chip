@@ -108,7 +108,7 @@ module ysyx_ifu (
             btb <= npc;
             btb_valid <= 1;
           end
-          if (pc_retire) begin
+          else if (pc_retire) begin
             pc_ifu <= pc_ifu + 4;
           end
         end
