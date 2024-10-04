@@ -105,12 +105,13 @@ module ysyx_ifu (
           ifu_branch_hazard <= 0;
           if (pc_change) begin
             pc_ifu <= npc;
-            btb <= npc;
-            btb_valid <= 1;
-          end
-          else if (pc_retire) begin
+          end else begin
             pc_ifu <= pc_ifu + 4;
           end
+        end
+        if (pc_change) begin
+          btb <= npc;
+          btb_valid <= 1;
         end
       end
       if (!bad_speculation_o & next_ready == 1 & valid_o) begin
