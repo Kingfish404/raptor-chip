@@ -247,11 +247,12 @@ module ysyx (
       .ifu_rdata(ifu_rdata),
       .ifu_rvalid(ifu_rvalid),
 
-      .npc(npc_wdata),
+      .npc(npc),
       .inst_o(inst),
       .pc_o(pc_ifu),
 
       .pc(pc_wbu),
+      .npc_wdata(npc_wdata),
       .pc_change(branch_change),
       .pc_retire(branch_retire),
       .speculation_o(speculation_ifu),
