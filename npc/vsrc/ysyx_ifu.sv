@@ -87,7 +87,6 @@ module ysyx_ifu (
           bad_speculation_pc_change <= pc_change;
         end
       end
-      // if (state == `YSYX_IDLE) begin
       if (bad_speculation & next_ready & l1i_ready) begin
         bad_speculation <= 0;
         ifu_hazard <= 0;
@@ -115,7 +114,6 @@ module ysyx_ifu (
           btb_valid <= 1;
         end
       end
-      // end else if (state == `YSYX_WAIT_READY) begin
       if (!bad_speculation_o & next_ready == 1 & valid_o) begin
         if (!is_branch & !is_load & !is_fence) begin
           pc_ifu <= pc_ifu + 4;
@@ -144,7 +142,6 @@ module ysyx_ifu (
           end
         end
       end
-      // end
     end
   end
 
@@ -155,7 +152,7 @@ module ysyx_ifu (
   // L1I cache
   parameter bit [7:0] L1I_LINE_LEN = 1;
   parameter bit [7:0] L1I_LINE_SIZE = 2 ** L1I_LINE_LEN;
-  parameter bit [7:0] L1I_LEN = 1;
+  parameter bit [7:0] L1I_LEN = 2;
   parameter bit [7:0] L1I_SIZE = 2 ** L1I_LEN;
 
   assign l1i_valid = l1i_cache_hit;

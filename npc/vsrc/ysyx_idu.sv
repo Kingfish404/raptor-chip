@@ -60,14 +60,12 @@ module ysyx_idu (
         pc_idu <= pc;
         speculation_idu <= speculation;
       end
-      // if (state == `YSYX_IDLE) begin
       if (prev_valid & ready & !idu_hazard & next_ready) begin
         valid <= 1;
         if (idu_hazard) begin
           ready <= 0;
         end
       end
-      // end else if (state == `YSYX_WAIT_READY) begin
       if (next_ready == 1) begin
         ready <= 1;
         if (prev_valid & ready_o & next_ready) begin
@@ -76,7 +74,6 @@ module ysyx_idu (
           inst_idu <= 0;
         end
       end
-      // end
     end
   end
 
