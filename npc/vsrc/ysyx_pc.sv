@@ -33,7 +33,7 @@ module ysyx_pc (
     end else if (prev_valid & !bad_speculation) begin
       pc <= pc + 4;
       change <= branch_change;
-      retire <= !branch_change & branch_retire;
+      retire <= !branch_change && branch_retire;
       // if (branch_change) begin
       //   pc <= npc_wdata;
       //   change <= 1;
