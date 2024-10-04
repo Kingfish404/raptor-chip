@@ -99,7 +99,7 @@ module ysyx_ifu (
       end else if (good_speculation) begin
         good_speculation <= 0;
       end
-      if (1) begin
+      if (prev_valid) begin
         if ((ifu_hazard) & !speculation & (pc_change | pc_retire) & l1i_ready) begin
           ifu_hazard <= 0;
           ifu_lsu_hazard <= 0;
@@ -111,7 +111,7 @@ module ysyx_ifu (
           end
         end
         if (pc_change) begin
-          btb <= npc;
+          btb <= npc_wdata;
           btb_valid <= 1;
         end
       end
