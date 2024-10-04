@@ -122,7 +122,7 @@ module ysyx (
   wire [31:0] inst_exu, pc_exu;
   wire [DATA_W-1:0] reg_wdata;
   wire [DATA_W-1:0] npc_wdata;
-  wire branch_change, branch_retire, ebreak;
+  wire branch_change, branch_retire, ebreak, load_retire;
   wire [REG_ADDR_W-1:0] rd_exu;
   wire [3:0] alu_op_exu;
   wire ren_exu, wen_exu;
@@ -319,6 +319,8 @@ module ysyx (
       .npc_wdata_o(npc_wdata),
       .branch_change_o(branch_change),
       .branch_retire_o(branch_retire),
+      .load_retire_o(load_retire),
+
       .ebreak_o(ebreak),
       .rd_o(rd_exu),
       .speculation_o(speculation_exu),

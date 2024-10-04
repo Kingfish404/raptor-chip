@@ -27,6 +27,7 @@ module ysyx_exu (
     output [BIT_W-1:0] npc_wdata_o,
     output branch_change_o,
     output branch_retire_o,
+    output load_retire_o,
     output reg ebreak_o,
     output reg [3:0] rd_o,
     output reg speculation_o,
@@ -57,7 +58,7 @@ module ysyx_exu (
       .rst(rst),
 
       .wen(csr_wen_exu),
-      .exu_valid(valid_o),
+      .exu_valid(valid),
       .ecall(ecall),
       .mret(mret),
 
@@ -83,9 +84,11 @@ module ysyx_exu (
   assign addr_exu = opj + imm_exu;
 
   reg alu_valid, lsu_avalid;
-  reg lsu_valid;
-  reg ready;
-  assign valid_o = (wen_o | ren_o) ? lsu_valid : alu_valid;
+  reg  lsu_valid;
+  reg  ready;
+  wire valid;
+  assign valid   = (wen_o | ren_o) ? lsu_valid : alu_valid;
+  assign valid_o = valid;
   assign ready_o = ready & next_ready;
   always @(posedge clk) begin
     if (rst) begin
@@ -165,6 +168,7 @@ module ysyx_exu (
     (0)
   );
   assign branch_retire_o = ((system_exu) | (ben) | (ren_o));
+  assign load_retire_o = (ren_o) & valid;
   assign npc_wdata_o = (ecall) ? mtvec : (mret) ? mepc : addr_exu;
 
   always_comb begin
