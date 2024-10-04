@@ -16,13 +16,11 @@ module ysyx_wbu (
 );
   parameter bit [7:0] BIT_W = `YSYX_W_WIDTH;
 
-  reg state;
   reg [31:0] inst_wbu, pc_wbu;
 
   assign pc_o = pc_wbu;
   assign ready_o = '1;
 
-  assign state = valid_o;
   always @(posedge clk) begin
     if (rst) begin
       valid_o <= 0;
