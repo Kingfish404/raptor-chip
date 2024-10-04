@@ -35,7 +35,6 @@ module ysyx_pc (
       if (branch_change) begin
         pc <= npc_wdata;
         change <= 1;
-        retire <= 1;
       end else if (branch_retire) begin
         change <= 0;
         retire <= 1;
