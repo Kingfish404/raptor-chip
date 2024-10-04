@@ -150,8 +150,8 @@ module ysyx (
       .pc_ifu(pc_ifu),
 
       .npc_wdata(npc_wdata),
-      .branch_change(branch_change),
-      .branch_retire(branch_retire),
+      .branch_change(pc_change),
+      .branch_retire(pc_retire),
       .npc_o(npc),
       .change_o(pc_valid),
       .retire_o(pc_retire),
@@ -252,14 +252,13 @@ module ysyx (
       .pc_o(pc_ifu),
 
       .pc(pc_wbu),
-      .npc_wdata(npc_wdata),
       .pc_change(branch_change),
       .pc_retire(branch_retire),
       .speculation_o(speculation_ifu),
       .bad_speculation_o(bad_speculation),
       .good_speculation_o(good_speculation),
 
-      .prev_valid(exu_valid),
+      .prev_valid(wbu_valid),
       .next_ready(idu_ready),
       .valid_o(ifu_valid),
       .ready_o(ifu_ready)
