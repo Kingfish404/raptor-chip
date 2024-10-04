@@ -52,18 +52,9 @@ void perf_sample_per_cycle()
   {
     pmu.ifu_fetch_stall_cycle++;
   }
-  if (ifu_bra_hazard)
-  {
-    pmu.ifu_hazard_cycle++;
-    if (ifu_lsu_hazard)
-    {
-      pmu.ifu_lsu_hazard_cycle++;
-    }
-  }
-  if (idu_hazard)
-  {
-    pmu.idu_hazard_cycle++;
-  }
+  pmu.ifu_bra_hazard_cycle += ifu_bra_hazard ? 1 : 0;
+  pmu.ifu_lsu_hazard_cycle += ifu_lsu_hazard ? 1 : 0;
+  pmu.idu_hazard_cycle += idu_hazard ? 1 : 0;
   if (lsu_valid)
   {
     pmu.lsu_load_cnt++;
@@ -195,8 +186,8 @@ void perf()
   printf("BPU Success: %lld, Fail: %lld, Rate: %2.1f%%\n",
          pmu.bpu_success_cnt, pmu.bpu_fail_cnt,
          percentage(pmu.bpu_success_cnt, pmu.bpu_success_cnt + pmu.bpu_fail_cnt));
-  printf("ifu_hazard_cycle: %8lld,%3.0f%% (branch + load instruction (%8lld,%3.0f%%))\n",
-         pmu.ifu_hazard_cycle, percentage(pmu.ifu_hazard_cycle, pmu.active_cycle),
+  printf("ifu_bra_hazard_cycle: %8lld,%3.0f%%, ifu_lsu_hazard_cycle: %8lld,%3.0f%%\n",
+         pmu.ifu_bra_hazard_cycle, percentage(pmu.ifu_bra_hazard_cycle, pmu.active_cycle),
          pmu.ifu_lsu_hazard_cycle, percentage(pmu.ifu_lsu_hazard_cycle, pmu.active_cycle));
   printf("idu_hazard_cycle: %8lld,%3.0f%% (data hazard)\n",
          pmu.idu_hazard_cycle, percentage(pmu.idu_hazard_cycle, pmu.active_cycle));
