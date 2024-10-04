@@ -123,7 +123,7 @@ module ysyx_ifu (
         end
       end
       if (exu_valid) begin
-        if (ifu_lsu_hazard & !speculation & l1i_ready & pc_retire) begin
+        if (ifu_lsu_hazard & !speculation & l1i_ready) begin
           ifu_hazard <= 0;
           ifu_lsu_hazard <= 0;
           pc_ifu <= pc_ifu + 4;
