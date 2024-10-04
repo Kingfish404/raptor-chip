@@ -63,7 +63,7 @@ module ysyx_ifu (
   assign bad_speculation_o = bad_speculation | bad_speculationing;
   wire good_speculationing = (
     (pc_change & npc == ifu_speculation) |
-    (pc_retire & !pc_change & pc + 4 == ifu_speculation));
+    (pc_retire & pc + 4 == ifu_speculation));
   wire bad_speculationing = (speculation & (
     (pc_change & npc != ifu_speculation) |
     (pc_retire & !pc_change & pc + 4 != ifu_speculation)));
