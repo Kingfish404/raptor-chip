@@ -35,12 +35,13 @@ module ysyx_ifu (
   reg state;
 
   reg [DATA_W-1:0] pc_ifu;
-  reg ifu_hazard = 0, ifu_lsu_hazard = 0, ifu_branch_hazard = 0;
+  reg ifu_lsu_hazard = 0, ifu_branch_hazard = 0;
 
   reg [DATA_W-1:0] btb;
   reg [DATA_W-1:0] ifu_speculation, ifu_npc_speculation, ifu_npc_bad_speculation;
   reg btb_valid, speculation, bad_speculation, ifu_b_speculation;
 
+  wire ifu_hazard = ifu_lsu_hazard | ifu_branch_hazard;
   wire [6:0] opcode = inst_o[6:0];
   wire is_branch = (
     (opcode == `YSYX_OP_JAL) | (opcode == `YSYX_OP_JALR) |
@@ -73,7 +74,8 @@ module ysyx_ifu (
       pc_ifu <= `YSYX_PC_INIT;
       btb_valid <= 0;
       speculation <= 0;
-      ifu_hazard <= 0;
+      ifu_lsu_hazard <= 0;
+      ifu_branch_hazard <= 0;
     end else begin
       if (speculation) begin
         if (good_speculationing) begin
@@ -90,7 +92,6 @@ module ysyx_ifu (
       end
       if (bad_speculation & next_ready & l1i_ready) begin
         bad_speculation <= 0;
-        ifu_hazard <= 0;
         ifu_lsu_hazard <= 0;
         ifu_branch_hazard <= 0;
         ifu_b_speculation <= 0;
@@ -107,12 +108,10 @@ module ysyx_ifu (
         //   pc_ifu <= pc_change ? npc : pc_ifu + 4;
         // end
         if (ifu_branch_hazard & (pc_change | pc_retire) & l1i_ready) begin
-          ifu_hazard <= 0;
           ifu_branch_hazard <= 0;
           pc_ifu <= pc_change ? npc : pc_ifu + 4;
         end
         if (ifu_lsu_hazard & load_retire & l1i_ready) begin
-          ifu_hazard <= 0;
           ifu_lsu_hazard <= 0;
           pc_ifu <= pc_ifu + 4;
         end
@@ -135,16 +134,14 @@ module ysyx_ifu (
                 ifu_b_speculation <= 1;
               end
             end else begin
-              ifu_hazard <= 1;
               ifu_branch_hazard <= 1;
             end
           end
           if (is_load) begin
-            ifu_hazard <= 1;
             ifu_lsu_hazard <= 1;
           end
           if (is_fence) begin
-            ifu_hazard <= 1;
+            ifu_branch_hazard <= 1;
           end
         end
       end
