@@ -25,7 +25,7 @@ void perf_sample_per_cycle()
   }
   pmu.active_cycle++;
   bool ifu_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, ifu_valid));
-  bool ifu_hazard = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, ifu__DOT__ifu_hazard));
+  bool ifu_bra_hazard = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, ifu__DOT__ifu_branch_hazard));
   bool ifu_lsu_hazard = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, ifu__DOT__ifu_lsu_hazard));
 
   bool idu_ready = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, idu_ready));
@@ -52,7 +52,7 @@ void perf_sample_per_cycle()
   {
     pmu.ifu_fetch_stall_cycle++;
   }
-  if (ifu_hazard)
+  if (ifu_bra_hazard)
   {
     pmu.ifu_hazard_cycle++;
     if (ifu_lsu_hazard)
