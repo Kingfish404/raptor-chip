@@ -99,7 +99,7 @@ module ysyx_ifu (
         good_speculation <= 0;
       end
       if (prev_valid) begin
-        if ((ifu_hazard) & !speculation & l1i_ready) begin
+        if ((ifu_branch_hazard) & !speculation & l1i_ready) begin
           if (pc_change) begin
             ifu_hazard <= 0;
             ifu_lsu_hazard <= 0;
@@ -122,6 +122,12 @@ module ysyx_ifu (
           btb <= npc;
           btb_valid <= 1;
         end
+      end
+      if (ifu_lsu_hazard & !speculation & l1i_ready) begin
+        ifu_hazard <= 0;
+        ifu_lsu_hazard <= 0;
+        ifu_branch_hazard <= 0;
+        pc_ifu <= pc_ifu + 4;
       end
       if (!bad_speculation_o & next_ready == 1 & valid_o) begin
         if (!is_branch & !is_load & !is_fence) begin
