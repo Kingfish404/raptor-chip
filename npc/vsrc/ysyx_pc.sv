@@ -41,7 +41,6 @@ module ysyx_pc (
         retire <= 1;
       end else begin
         change <= 0;
-        retire <= 0;
       end
     end else begin
       change <= 0;
