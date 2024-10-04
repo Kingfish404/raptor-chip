@@ -40,14 +40,14 @@ module ysyx_ifu (
   reg [DATA_W-1:0] ifu_speculation, ifu_npc_speculation, ifu_npc_bad_speculation;
   reg btb_valid, speculation, bad_speculation, ifu_b_speculation;
 
-  wire [6:0] opcode_o = inst_o[6:0];
+  wire [6:0] opcode = inst_o[6:0];
   wire is_branch = (
-    (opcode_o == `YSYX_OP_JAL) | (opcode_o == `YSYX_OP_JALR) |
-    (opcode_o == `YSYX_OP_B_TYPE) |
+    (opcode == `YSYX_OP_JAL) | (opcode == `YSYX_OP_JALR) |
+    (opcode == `YSYX_OP_B_TYPE) |
     (0)
   );
-  wire is_load = (opcode_o == `YSYX_OP_IL_TYPE);
-  wire is_store = (opcode_o == `YSYX_OP_S_TYPE);
+  wire is_load = (opcode == `YSYX_OP_IL_TYPE);
+  wire is_store = (opcode == `YSYX_OP_S_TYPE);
   wire is_fence = (inst_o == `YSYX_INST_FENCE_I);
 
   assign valid_o = (l1i_valid & !ifu_hazard) &
@@ -65,8 +65,7 @@ module ysyx_ifu (
   reg good_speculation;
   reg bad_speculation_pc_change;
 
-  assign pc_o = pc_ifu;
-  // `YSYX_BUS_FSM()
+  assign pc_o  = pc_ifu;
   assign state = valid_o;
   always @(posedge clk) begin
     if (rst) begin
@@ -127,7 +126,7 @@ module ysyx_ifu (
               //   ifu_speculation <= btb;
               //   ifu_npc_speculation <= pc_ifu + 4;
               //   speculation <= 1;
-              //   if (opcode_o == `YSYX_OP_B_TYPE) begin
+              //   if (opcode == `YSYX_OP_B_TYPE) begin
               //     ifu_b_speculation <= 1;
               //   end
               // end else
@@ -178,14 +177,11 @@ module ysyx_ifu (
   assign ifu_required_o = (l1i_state != 'b000);
 
   wire l1i_cache_hit = (
-         1 & (l1i_state == 'b00 | l1i_state == 'b100) &
+         (l1i_state == 'b000 | l1i_state == 'b100) &
          l1ic_valid[addr_idx] == 1'b1) & (l1i_tag[addr_idx][addr_offset] == addr_tag);
   wire ifu_sdram_arburst = `YSYX_I_SDRAM_ARBURST & (pc_ifu >= 'ha0000000) & (pc_ifu <= 'hc0000000);
 
-  wire ifu_just_load = ((l1i_state == 'b11) & ifu_rvalid);
-  // assign inst_o = ifu_just_load & pc_ifu[2] == 1'b1 ? ifu_rdata : l1i[addr_idx][addr_offset];
   assign inst_o = l1i[addr_idx][addr_offset];
-
 
   always @(posedge clk) begin
     if (rst) begin
@@ -195,7 +191,7 @@ module ysyx_ifu (
       case (l1i_state)
         'b000: begin
           if (invalid_l1i) begin
-            // l1ic_valid <= 0;
+            l1ic_valid <= 0;
           end
           if (ifu_arvalid_o) begin
             l1i_state <= 'b001;

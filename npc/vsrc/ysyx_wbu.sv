@@ -21,7 +21,6 @@ module ysyx_wbu (
 
   assign pc_o = pc_wbu;
 
-  // `YSYX_BUS_FSM()
   assign state = valid_o;
   always @(posedge clk) begin
     if (rst) begin
