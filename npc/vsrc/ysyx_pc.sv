@@ -31,23 +31,9 @@ module ysyx_pc (
       change <= 1;
       `YSYX_DPI_C_NPC_DIFFTEST_SKIP_REF
     end else if (prev_valid & !bad_speculation) begin
-      pc <= pc + 4;
       change <= branch_change;
       retire <= branch_retire;
-      if (branch_change) begin
-        pc <= npc_wdata;
-      end
-      // if (branch_change) begin
-      //   pc <= npc_wdata;
-      //   change <= 1;
-      //   retire <= 0;
-      // end else if (branch_retire) begin
-      //   change <= 0;
-      //   retire <= 1;
-      // end else begin
-      //   change <= 0;
-      //   retire <= 0;
-      // end
+      pc <= branch_change ? npc_wdata : pc + 4;
     end else begin
       change <= 0;
       retire <= 0;
