@@ -6,11 +6,11 @@ module ysyxSoC (
     input clock,
     input reset
 );
-  parameter bit [7:0] ADDR_W = 32, DATA_W = 32;
+  parameter bit [7:0] BIT_W = 32;
   wire auto_master_out_awready;
   wire auto_master_out_awvalid;
   wire [3:0] auto_master_out_awid;
-  wire [ADDR_W-1:0] auto_master_out_awaddr;
+  wire [BIT_W-1:0] auto_master_out_awaddr;
   wire [7:0] auto_master_out_awlen;
   wire [2:0] auto_master_out_awsize;
   wire [1:0] auto_master_out_awburst;
@@ -26,7 +26,7 @@ module ysyxSoC (
   wire auto_master_out_arready;
   wire auto_master_out_arvalid;
   wire [3:0] auto_master_out_arid;
-  wire [ADDR_W-1:0] auto_master_out_araddr;
+  wire [BIT_W-1:0] auto_master_out_araddr;
   wire [7:0] auto_master_out_arlen;
   wire [2:0] auto_master_out_arsize;
   wire [1:0] auto_master_out_arburst;
@@ -143,7 +143,7 @@ module ysyx_npc_soc (
     input [2:0] arsize,
     input [7:0] arlen,
     input [3:0] arid,
-    input [ADDR_W-1:0] araddr,
+    input [BIT_W-1:0] araddr,
     input arvalid,
     output reg arready_o,
 
@@ -158,7 +158,7 @@ module ysyx_npc_soc (
     input [2:0] awsize,
     input [7:0] awlen,
     input [3:0] awid,
-    input [ADDR_W-1:0] awaddr,
+    input [BIT_W-1:0] awaddr,
     input awvalid,
     output awready_o,
 
@@ -173,7 +173,7 @@ module ysyx_npc_soc (
     output reg bvalid_o,
     input bready
 );
-  parameter bit [7:0] ADDR_W = 32, DATA_W = 64;
+  parameter bit [7:0] BIT_W = 32, DATA_W = 64;
 
   reg [31:0] mem_rdata_buf[2];
   reg [2:0] state = 0;

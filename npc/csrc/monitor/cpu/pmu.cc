@@ -34,7 +34,6 @@ void perf_sample_per_cycle()
 
   bool exu_ready = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, exu_ready));
   bool exu_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, exu_valid));
-  bool wbu_ready = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, wbu_ready));
   bool wbu_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, wbu_valid));
   uint8_t l1i_state = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, ifu__DOT__l1i_state));
   bool l1i_cache_hit = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, ifu__DOT__l1i_cache_hit));

@@ -27,7 +27,7 @@ module ysyx_exu (
     output [BIT_W-1:0] npc_wdata_o,
     output use_exu_npc_o,
     output branch_retire_o,
-    output ebreak_o,
+    output reg ebreak_o,
     output reg [3:0] rd_o,
     output reg speculation_o,
 
@@ -82,16 +82,16 @@ module ysyx_exu (
   assign rwaddr_o = addr_exu;
   assign addr_exu = opj + imm_exu;
 
-  reg state, alu_valid, lsu_avalid;
+  reg alu_valid, lsu_avalid;
   reg lsu_valid;
   reg ready;
   assign valid_o = (wen_o | ren_o) ? lsu_valid : alu_valid;
   assign ready_o = ready & next_ready;
-  `YSYX_BUS_FSM()
   always @(posedge clk) begin
     if (rst) begin
       alu_valid <= 0;
       lsu_avalid <= 0;
+      lsu_valid <= 0;
       ready <= 1;
     end else begin
       if (prev_valid & ready_o) begin

@@ -49,7 +49,7 @@ module ysyx_idu (
   assign rs2_o   = rs2;
 
   reg state;
-  `YSYX_BUS_FSM()
+  assign state = valid_o;
   always @(posedge clk) begin
     if (rst) begin
       valid <= 0;
@@ -60,21 +60,18 @@ module ysyx_idu (
         pc_idu <= pc;
         speculation_idu <= speculation;
       end
-      if (state == `YSYX_IDLE) begin
-        if (prev_valid & ready & !idu_hazard & next_ready) begin
-          valid <= 1;
-          if (idu_hazard) begin
-            ready <= 0;
-          end
+      if (prev_valid & ready & !idu_hazard & next_ready) begin
+        valid <= 1;
+        if (idu_hazard) begin
+          ready <= 0;
         end
-      end else if (state == `YSYX_WAIT_READY) begin
-        if (next_ready == 1) begin
-          ready <= 1;
-          if (prev_valid & ready_o & next_ready) begin
-          end else begin
-            valid <= 0;
-            inst_idu <= 0;
-          end
+      end
+      if (next_ready == 1) begin
+        ready <= 1;
+        if (prev_valid & ready_o & next_ready) begin
+        end else begin
+          valid <= 0;
+          inst_idu <= 0;
         end
       end
     end

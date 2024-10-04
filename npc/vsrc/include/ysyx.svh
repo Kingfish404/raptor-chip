@@ -1,8 +1,5 @@
 `define YSYX_W_WIDTH 32
 
-`define YSYX_IDLE       0
-`define YSYX_WAIT_READY 1
-
 `define YSYX_INST_FENCE_I    32'h0000100f
 
 `define YSYX_OP_LUI           7'b0110111
@@ -68,15 +65,6 @@
 `define YSYX_ALU_OP_SLL   4'b0001
 `define YSYX_ALU_OP_SRL   4'b0101
 `define YSYX_ALU_OP_SRA   4'b1101
-
-`define YSYX_BUS_FSM() \
-always @(*) begin \
-  state = 0; \
-  case (state) \
-    `YSYX_IDLE:       begin state = ((valid_o ? `YSYX_WAIT_READY : state)); end \
-    `YSYX_WAIT_READY: begin state = ((next_ready ? `YSYX_IDLE : state));       end \
-  endcase \
-end
 
 `define ASSERT(signal, value) \
   if (signal !== value) begin \

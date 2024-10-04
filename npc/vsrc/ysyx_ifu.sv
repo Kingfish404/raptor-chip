@@ -40,14 +40,14 @@ module ysyx_ifu (
   reg [DATA_W-1:0] ifu_speculation, ifu_npc_speculation, ifu_npc_bad_speculation;
   reg btb_valid, speculation, bad_speculation, ifu_b_speculation;
 
-  wire [6:0] opcode_o = inst_o[6:0];
+  wire [6:0] opcode = inst_o[6:0];
   wire is_branch = (
-    (opcode_o == `YSYX_OP_JAL) | (opcode_o == `YSYX_OP_JALR) |
-    (opcode_o == `YSYX_OP_B_TYPE) |
+    (opcode == `YSYX_OP_JAL) | (opcode == `YSYX_OP_JALR) |
+    (opcode == `YSYX_OP_B_TYPE) | (opcode == `YSYX_OP_SYSTEM) |
     (0)
   );
-  wire is_load = (opcode_o == `YSYX_OP_IL_TYPE);
-  wire is_store = (opcode_o == `YSYX_OP_S_TYPE);
+  wire is_load = (opcode == `YSYX_OP_IL_TYPE);
+  wire is_store = (opcode == `YSYX_OP_S_TYPE);
   wire is_fence = (inst_o == `YSYX_INST_FENCE_I);
 
   assign valid_o = (l1i_valid & !ifu_hazard) &
@@ -65,13 +65,14 @@ module ysyx_ifu (
   reg good_speculation;
   reg bad_speculation_pc_change;
 
-  assign pc_o = pc_ifu;
-  `YSYX_BUS_FSM()
+  assign pc_o  = pc_ifu;
+  assign state = valid_o;
   always @(posedge clk) begin
     if (rst) begin
       pc_ifu <= `YSYX_PC_INIT;
       btb_valid <= 0;
       speculation <= 0;
+      ifu_hazard <= 0;
     end else begin
       if (speculation) begin
         if (good_speculationing) begin
@@ -86,60 +87,57 @@ module ysyx_ifu (
           bad_speculation_pc_change <= pc_change;
         end
       end
-      if (state == `YSYX_IDLE) begin
-        if (bad_speculation & next_ready & l1i_ready) begin
-          bad_speculation <= 0;
+      if (bad_speculation & next_ready & l1i_ready) begin
+        bad_speculation <= 0;
+        ifu_hazard <= 0;
+        ifu_lsu_hazard <= 0;
+        ifu_branch_hazard <= 0;
+        ifu_b_speculation <= 0;
+        bad_speculation_pc_change <= 0;
+        pc_ifu <= (ifu_b_speculation & !bad_speculation_pc_change) ? ifu_npc_speculation : npc;
+      end else if (good_speculation) begin
+        good_speculation <= 0;
+      end
+      if (prev_valid) begin
+        if ((ifu_hazard) & !speculation & (pc_change | pc_retire) & l1i_ready) begin
           ifu_hazard <= 0;
           ifu_lsu_hazard <= 0;
           ifu_branch_hazard <= 0;
-          ifu_b_speculation <= 0;
-          bad_speculation_pc_change <= 0;
-          pc_ifu <= (ifu_b_speculation & !bad_speculation_pc_change) ? ifu_npc_speculation : npc;
-        end else if (good_speculation) begin
-          good_speculation <= 0;
-        end
-        if (prev_valid) begin
-          if ((ifu_hazard) & !speculation & (pc_change | pc_retire) & l1i_ready) begin
-            ifu_hazard <= 0;
-            ifu_lsu_hazard <= 0;
-            ifu_branch_hazard <= 0;
-            if (pc_change) begin
-              pc_ifu <= npc;
-            end else begin
-              pc_ifu <= pc_ifu + 4;
-            end
-          end
           if (pc_change) begin
-            btb <= npc;
-            btb_valid <= 1;
+            pc_ifu <= npc;
+          end else begin
+            pc_ifu <= pc_ifu + 4;
           end
         end
-      end else if (state == `YSYX_WAIT_READY) begin
-        if (!bad_speculation_o & next_ready == 1 & valid_o) begin
-          if (!is_branch & !is_load & !is_fence) begin
-            pc_ifu <= pc_ifu + 4;
-          end else begin
-            if (is_branch) begin
-              if (btb_valid & 1 & !speculation) begin
-                pc_ifu <= btb;
-                ifu_speculation <= btb;
-                ifu_npc_speculation <= pc_ifu + 4;
-                speculation <= 1;
-                if (opcode_o == `YSYX_OP_B_TYPE) begin
-                  ifu_b_speculation <= 1;
-                end
-              end else begin
-                ifu_hazard <= 1;
-                ifu_branch_hazard <= 1;
+        if (pc_change) begin
+          btb <= npc;
+          btb_valid <= 1;
+        end
+      end
+      if (!bad_speculation_o & next_ready == 1 & valid_o) begin
+        if (!is_branch & !is_load & !is_fence) begin
+          pc_ifu <= pc_ifu + 4;
+        end else begin
+          if (is_branch) begin
+            if (btb_valid & 1 & !speculation) begin
+              pc_ifu <= btb;
+              ifu_speculation <= btb;
+              ifu_npc_speculation <= pc_ifu + 4;
+              speculation <= 1;
+              if (opcode == `YSYX_OP_B_TYPE) begin
+                ifu_b_speculation <= 1;
               end
-            end
-            if (is_load) begin
+            end else begin
               ifu_hazard <= 1;
-              ifu_lsu_hazard <= 1;
+              ifu_branch_hazard <= 1;
             end
-            if (is_fence) begin
-              ifu_hazard <= 1;
-            end
+          end
+          if (is_load) begin
+            ifu_hazard <= 1;
+            ifu_lsu_hazard <= 1;
+          end
+          if (is_fence) begin
+            ifu_hazard <= 1;
           end
         end
       end
@@ -175,18 +173,11 @@ module ysyx_ifu (
   assign ifu_required_o = (l1i_state != 'b000);
 
   wire l1i_cache_hit = (
-         1 & (l1i_state == 'b00 | l1i_state == 'b100) &
+         (l1i_state == 'b000 | l1i_state == 'b100) &
          l1ic_valid[addr_idx] == 1'b1) & (l1i_tag[addr_idx][addr_offset] == addr_tag);
   wire ifu_sdram_arburst = `YSYX_I_SDRAM_ARBURST & (pc_ifu >= 'ha0000000) & (pc_ifu <= 'hc0000000);
 
-  wire ifu_just_load = ((l1i_state == 'b11) & ifu_rvalid);
-  assign inst_o = ifu_just_load & pc_ifu[2] == 1'b1 ? ifu_rdata : l1i[addr_idx][addr_offset];
-
-  always @(posedge clk) begin
-    if (!rst & invalid_l1i) begin
-      l1ic_valid <= 0;
-    end
-  end
+  assign inst_o = l1i[addr_idx][addr_offset];
 
   always @(posedge clk) begin
     if (rst) begin
@@ -194,9 +185,13 @@ module ysyx_ifu (
       l1ic_valid <= 0;
     end else begin
       case (l1i_state)
-        'b000:
-        if (ifu_arvalid_o) begin
-          l1i_state <= 'b001;
+        'b000: begin
+          if (invalid_l1i) begin
+            l1ic_valid <= 0;
+          end
+          if (ifu_arvalid_o) begin
+            l1i_state <= 'b001;
+          end
         end
         'b001:
         if (ifu_rvalid & !l1i_cache_hit) begin
