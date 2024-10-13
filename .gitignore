@@ -15,6 +15,8 @@
 /nvboard
 /am-kernels
 
+!/fpga
+
 # Ignore monorepo directories
 ysyxSoC
 yosys-sta

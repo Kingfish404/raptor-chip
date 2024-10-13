@@ -54,6 +54,7 @@ export CROSS_COMPILE=riscv64-unknown-elf-
 cd $NEMU_HOME && make menuconfig && make && make run
 
 # 2. build and run NPC
+cd $NPC_HOME/ssrc && make verilog
 cd $NPC_HOME && make menuconfig && make ARCH=riscv32e-npc run
 
 # 3. build and run the program you want
@@ -64,6 +65,10 @@ cd $NAVY_HOME/apps/nterm && make ISA=$ISA install
 cd $NAVY_HOME/apps/pal && make ISA=$ISA install
 cd $YSYX_HOME/nanos-lite && make ARCH=$ISA-nemu update run
 cd $YSYX_HOME/nanos-lite && make ARCH=$ISA-nemu run
+
+## fpga. running on gowin-tang-nano-20k
+./npc/yosys-fpga-cat.sh
+# then follow `fpga/gowin-tang-nano-20k/README.md`
 ```
 
 ## Architecture
