@@ -73,4 +73,4 @@ cd $YSYX_HOME/nanos-lite && make ARCH=$ISA-nemu run
 
 ## Architecture
 
-![](./npc/assets/npc-rv32e-ysyxsoc.svg)
+![](./assets/npc-rv32e-pipeline.svg)
