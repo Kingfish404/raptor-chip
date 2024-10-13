@@ -17,7 +17,6 @@
 #include "sim.h"
 #include "../../include/common.h"
 #include <difftest-def.h>
-#include <isa-def.h>
 
 #define NR_GPR MUXDEF(CONFIG_RVE, 16, 32)
 
