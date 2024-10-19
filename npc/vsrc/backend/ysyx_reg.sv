@@ -9,18 +9,18 @@ module ysyx_reg (
 
     input reg_write_en,
     input [REG_ADDR_W-1:0] waddr,
-    input [DATA_W-1:0] wdata,
+    input [XLEN-1:0] wdata,
     input [REG_ADDR_W-1:0] s1addr,
     input [REG_ADDR_W-1:0] s2addr,
 
     output [REG_NUM-1:0] out_rf_table,
-    output [ DATA_W-1:0] out_src1,
-    output [ DATA_W-1:0] out_src2
+    output [  XLEN-1:0] out_src1,
+    output [  XLEN-1:0] out_src2
 );
   parameter bit [7:0] REG_ADDR_W = 4;
   parameter bit [7:0] REG_NUM = 16;
-  parameter bit [7:0] DATA_W = 32;
-  reg [DATA_W-1:0] rf[REG_NUM];
+  parameter bit [7:0] XLEN = 32;
+  reg [XLEN-1:0] rf[REG_NUM];
   reg [REG_NUM-1:0] rf_table;
 
   assign out_rf_table = rf_table;

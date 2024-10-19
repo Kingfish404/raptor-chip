@@ -5,52 +5,55 @@ module ysyx_exu (
     input clock,
 
     // from idu
-    idu_pipe_if idu_if,
+    idu_pipe_if.in idu_if,
 
     // for lsu
-    output reg ren_o,
-    output reg wen_o,
-    output reg [BIT_W-1:0] rwaddr_o,
-    output lsu_avalid_o,
-    output [3:0] alu_op_o,
-    output [BIT_W-1:0] lsu_mem_wdata_o,
+    output reg out_ren,
+    output reg out_wen,
+    output reg [XLEN-1:0] out_rwaddr,
+    output out_lsu_avalid,
+    output [3:0] out_alu_op,
+    output [XLEN-1:0] out_lsu_mem_wdata,
 
     // from lsu
-    input [BIT_W-1:0] lsu_rdata,
+    input [XLEN-1:0] lsu_rdata,
     input lsu_exu_rvalid,
     input lsu_exu_wready,
 
-    output reg [31:0] inst_o,
-    output [BIT_W-1:0] pc_o,
+    output reg [31:0] out_inst,
+    output [XLEN-1:0] out_pc,
 
-    output [BIT_W-1:0] reg_wdata_o,
-    output [BIT_W-1:0] npc_wdata_o,
-    output branch_change_o,
-    output branch_retire_o,
-    output load_retire_o,
-    output reg ebreak_o,
-    output reg [3:0] rd_o,
+    output [XLEN-1:0] out_reg_wdata,
+    output out_load_retire,
+
+    output [XLEN-1:0] out_npc_wdata,
+    output out_branch_change,
+    output out_branch_retire,
+
+    output reg out_ebreak,
+    output reg [3:0] out_rd,
 
     input prev_valid,
     input next_ready,
-    output reg valid_o,
-    output reg ready_o,
+    output reg out_valid,
+    output reg out_ready,
 
     input reset
 );
-  parameter bit [7:0] BIT_W = `YSYX_W_WIDTH;
+  parameter bit [7:0] XLEN = `YSYX_XLEN;
 
-  wire [BIT_W-1:0] reg_wdata, mepc, mtvec;
-  wire [BIT_W-1:0] mem_wdata = src2;
-  wire [12-1:0] csr_addr0;
-  wire [BIT_W-1:0] csr_wdata, csr_rdata;
-  reg [BIT_W-1:0] imm_exu, pc_exu, src1, src2, opj, addr_exu;
-  reg [BIT_W-1:0] inst_exu;
+  wire [XLEN-1:0] reg_wdata, mepc, mtvec;
+  wire [XLEN-1:0] mem_wdata = src2;
+  wire [  12-1:0] csr_addr0;
+  wire [XLEN-1:0] csr_wdata, csr_rdata;
+  reg [XLEN-1:0] imm_exu, pc_exu, src1, src2, opj, addr_exu;
+  reg [XLEN-1:0] inst_exu;
   reg [3:0] alu_op_exu;
+  reg [3:0] rd;
   reg csr_wen_exu;
-  reg jen, ben;
+  reg jen, ben, ren, wen, ebreak;
   reg ecall, mret;
-  reg [BIT_W-1:0] mem_rdata;
+  reg [XLEN-1:0] mem_rdata;
   reg branch_change, system_exu;
   reg [2:0] func3 = inst_exu[14:12];
 
@@ -67,29 +70,32 @@ module ysyx_exu (
       .wdata(csr_wdata),
       .pc(pc_exu),
 
-      .rdata_o(csr_rdata),
-      .mepc_o (mepc),
-      .mtvec_o(mtvec)
+      .out_rdata(csr_rdata),
+      .out_mepc (mepc),
+      .out_mtvec(mtvec)
   );
 
-  assign reg_wdata_o = {BIT_W{(rd_o != 0)}} & (
-    (ren_o) ? mem_rdata :
+  assign out_reg_wdata = {XLEN{(rd != 0)}} & (
+    (ren) ? mem_rdata :
     (system_exu) ? csr_rdata : reg_wdata);
   assign csr_addr0 = (imm_exu[11:0]);
-  assign alu_op_o = alu_op_exu;
-  assign branch_change_o = branch_change;
-  assign pc_o = pc_exu;
-  assign inst_o = inst_exu;
-  assign rwaddr_o = addr_exu;
+  assign out_alu_op = alu_op_exu;
+  assign out_branch_change = branch_change;
+  assign out_pc = pc_exu;
+  assign out_inst = inst_exu;
+  assign out_rwaddr = addr_exu;
+  assign out_ren = ren, out_wen = wen, out_ebreak = ebreak;
+  assign out_rd = rd;
+
   assign addr_exu = opj + imm_exu;
 
   reg alu_valid, lsu_avalid;
   reg  lsu_valid;
   reg  ready;
   wire valid;
-  assign valid   = (wen_o | ren_o) ? lsu_valid : alu_valid;
-  assign valid_o = valid;
-  assign ready_o = ready & next_ready;
+  assign valid = (wen | ren) ? lsu_valid : alu_valid;
+  assign out_valid = valid;
+  assign out_ready = ready & next_ready;
   always @(posedge clock) begin
     if (reset) begin
       alu_valid <= 0;
@@ -97,7 +103,7 @@ module ysyx_exu (
       lsu_valid <= 0;
       ready <= 1;
     end else begin
-      if (prev_valid & ready_o) begin
+      if (prev_valid & ready) begin
         pc_exu <= idu_if.pc;
         inst_exu <= idu_if.inst;
         imm_exu <= idu_if.imm;
@@ -106,15 +112,15 @@ module ysyx_exu (
         alu_op_exu <= idu_if.alu_op;
         opj <= idu_if.opj;
 
-        rd_o <= idu_if.rd;
-        ren_o <= idu_if.ren;
-        wen_o <= idu_if.wen;
+        rd <= idu_if.rd;
+        ren <= idu_if.ren;
+        wen <= idu_if.wen;
         jen <= idu_if.jen;
         ben <= idu_if.ben;
 
         system_exu <= idu_if.system;
         csr_wen_exu <= idu_if.csr_wen;
-        ebreak_o <= idu_if.ebreak;
+        ebreak <= idu_if.ebreak;
         ecall <= idu_if.ecall;
         mret <= idu_if.mret;
 
@@ -130,14 +136,14 @@ module ysyx_exu (
           alu_valid <= 0;
         end
       end
-      if (wen_o) begin
+      if (wen) begin
         if (lsu_exu_wready) begin
           lsu_valid <= 1;
           lsu_avalid <= 0;
           ready <= 1;
         end
       end
-      if (ren_o) begin
+      if (ren) begin
         if (lsu_exu_rvalid) begin
           lsu_valid <= 1;
           lsu_avalid <= 0;
@@ -148,27 +154,27 @@ module ysyx_exu (
     end
   end
 
-  assign lsu_avalid_o = lsu_avalid;
-  assign lsu_mem_wdata_o = mem_wdata;
+  assign out_lsu_avalid = lsu_avalid;
+  assign out_lsu_mem_wdata = mem_wdata;
 
   // alu unit for reg_wdata
   ysyx_exu_alu alu (
       .alu_src1(src1),
       .alu_src2(src2),
       .alu_op(alu_op_exu),
-      .alu_res_o(reg_wdata)
+      .out_alu_res(reg_wdata)
   );
 
   // branch/system unit
   assign csr_wdata = (
-    ({BIT_W{(func3 == `YSYX_F3_CSRRW) | (func3 == `YSYX_F3_CSRRWI)}} & src1) |
-    ({BIT_W{(func3 == `YSYX_F3_CSRRS) | (func3 == `YSYX_F3_CSRRSI)}} & (csr_rdata | src1)) |
-    ({BIT_W{(func3 == `YSYX_F3_CSRRC) | (func3 == `YSYX_F3_CSRRCI)}} & (csr_rdata & ~src1)) |
+    ({XLEN{(func3 == `YSYX_F3_CSRRW) | (func3 == `YSYX_F3_CSRRWI)}} & src1) |
+    ({XLEN{(func3 == `YSYX_F3_CSRRS) | (func3 == `YSYX_F3_CSRRSI)}} & (csr_rdata | src1)) |
+    ({XLEN{(func3 == `YSYX_F3_CSRRC) | (func3 == `YSYX_F3_CSRRCI)}} & (csr_rdata & ~src1)) |
     (0)
   );
-  assign branch_retire_o = ((system_exu) | (ben) | (ren_o));
-  assign load_retire_o = (ren_o) & valid;
-  assign npc_wdata_o = (ecall) ? mtvec : (mret) ? mepc : addr_exu;
+  assign out_branch_retire = ((system_exu) | (ben) | (ren));
+  assign out_load_retire = (ren) & valid;
+  assign out_npc_wdata = (ecall) ? mtvec : (mret) ? mepc : (branch_change ? addr_exu : pc_exu + 4);
 
   always_comb begin
     if (ben) begin

@@ -6,31 +6,29 @@ module ysyx_idu (
     input reset,
 
     input [31:0] inst,
-    input [BIT_W-1:0] rdata1,
-    input [BIT_W-1:0] rdata2,
-    input [BIT_W-1:0] pc,
-    input speculation,
+    input [XLEN-1:0] rdata1,
+    input [XLEN-1:0] rdata2,
+    input [XLEN-1:0] pc,
 
     input exu_valid,
-    input [BIT_W-1:0] exu_forward,
+    input [XLEN-1:0] exu_forward,
     input [3:0] exu_forward_rd,
 
-    output [3:0] rs1_o,
-    output [3:0] rs2_o,
+    output [3:0] out_rs1,
+    output [3:0] out_rs2,
 
-    idu_pipe_if idu_if,
+    idu_pipe_if.out idu_if,
 
     input [16-1:0] rf_table,
 
     input prev_valid,
     input next_ready,
-    output reg valid_o,
-    output reg ready_o
+    output reg out_valid,
+    output reg out_ready
 );
-  parameter bit [7:0] BIT_W = 32;
+  parameter bit [7:0] XLEN = 32;
 
   reg [31:0] inst_idu, pc_idu;
-  reg speculation_idu;
   reg valid, ready;
 
   // wire [4:0] rs1 = inst_idu[19:15], rs2 = inst_idu[24:20], rd = inst_idu[11:7];
@@ -42,16 +40,16 @@ module ysyx_idu (
     ((rf_table[rs2[4-1:0]] == 1) & !(exu_valid & rs2[4-1:0] == exu_forward_rd)) |
     (0)
     );
-  wire [BIT_W-1:0] reg_rdata1 = exu_valid & rs1[4-1:0] == exu_forward_rd ? exu_forward : rdata1;
-  wire [BIT_W-1:0] reg_rdata2 = exu_valid & rs2[4-1:0] == exu_forward_rd ? exu_forward : rdata2;
+  wire [XLEN-1:0] reg_rdata1 = exu_valid & rs1[4-1:0] == exu_forward_rd ? exu_forward : rdata1;
+  wire [XLEN-1:0] reg_rdata2 = exu_valid & rs2[4-1:0] == exu_forward_rd ? exu_forward : rdata2;
   wire [6:0] opcode = inst_idu[6:0];
-  assign valid_o = valid & !idu_hazard;
-  assign ready_o = ready & !idu_hazard & next_ready;
-  assign rs1_o   = rs1;
-  assign rs2_o   = rs2;
+  assign out_valid = valid & !idu_hazard;
+  assign out_ready = ready & !idu_hazard & next_ready;
+  assign out_rs1   = rs1;
+  assign out_rs2   = rs2;
 
   reg state;
-  assign state = valid_o;
+  assign state = out_valid;
   always @(posedge clock) begin
     if (reset) begin
       valid <= 0;
@@ -59,8 +57,7 @@ module ysyx_idu (
     end else begin
       if (prev_valid & ready & !idu_hazard & next_ready) begin
         inst_idu <= inst;
-        pc_idu <= pc;
-        speculation_idu <= speculation;
+        pc_idu   <= pc;
       end
       if (prev_valid & ready & !idu_hazard & next_ready) begin
         valid <= 1;
@@ -70,7 +67,7 @@ module ysyx_idu (
       end
       if (next_ready == 1) begin
         ready <= 1;
-        if (prev_valid & ready_o & next_ready) begin
+        if (prev_valid & out_ready) begin
         end else begin
           valid <= 0;
           inst_idu <= 0;
@@ -79,9 +76,8 @@ module ysyx_idu (
     end
   end
 
-  assign idu_if.pc = pc_idu;
+  assign idu_if.pc   = pc_idu;
   assign idu_if.inst = inst_idu;
-  assign idu_if.speculation = speculation_idu;
 
   ysyx_idu_decoder idu_de (
       .clock(clock),

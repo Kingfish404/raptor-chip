@@ -24,17 +24,17 @@ void perf_sample_per_cycle()
     return;
   }
   pmu.active_cycle++;
-  bool ifu_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, ifu_valid));
+  bool ifu_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, ifu__DOT__valid));
   bool ifu_bra_hazard = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, ifu__DOT__ifu_branch_hazard));
   bool ifu_lsu_hazard = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, ifu__DOT__ifu_lsu_hazard));
 
-  bool idu_ready = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, idu_ready));
-  bool idu_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, idu_valid));
+  bool idu_ready = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, idu__DOT__ready));
+  bool idu_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, idu__DOT__valid));
   bool idu_hazard = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, idu__DOT__idu_hazard));
 
-  bool exu_ready = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, exu_ready));
+  bool exu_ready = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, exu__DOT__ready));
   bool exu_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, exu__DOT__alu_valid));
-  bool wbu_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, wbu_valid));
+  bool wbu_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, wbu__DOT__valid));
   uint8_t l1i_state = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, ifu__DOT__l1i_cache__DOT__l1i_state));
   bool l1i_cache_hit = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, ifu__DOT__l1i_cache__DOT__l1i_cache_hit));
   bool lsu_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, exu__DOT__lsu_valid));
@@ -71,7 +71,7 @@ void perf_sample_per_cycle()
   {
     pmu.bpu_fail_cnt++;
   }
-  if (*(uint8_t *)&(CONCAT(VERILOG_PREFIX, ifu__DOT__good_speculation)))
+  if (*(uint8_t *)&(CONCAT(VERILOG_PREFIX, ifu__DOT__good_speculationing)))
   {
     pmu.bpu_success_cnt++;
   }

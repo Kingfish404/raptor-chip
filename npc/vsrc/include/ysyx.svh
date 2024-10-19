@@ -1,4 +1,4 @@
-`define YSYX_W_WIDTH 32
+`define YSYX_XLEN 32
 
 `define YSYX_INST_FENCE_I    32'h0000100f
 

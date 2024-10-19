@@ -6,11 +6,11 @@ module ysyxSoC (
     input clock,
     input reset
 );
-  parameter bit [7:0] BIT_W = 32;
+  parameter bit [7:0] XLEN = 32;
   wire auto_master_out_awready;
   wire auto_master_out_awvalid;
   wire [3:0] auto_master_out_awid;
-  wire [BIT_W-1:0] auto_master_out_awaddr;
+  wire [XLEN-1:0] auto_master_out_awaddr;
   wire [7:0] auto_master_out_awlen;
   wire [2:0] auto_master_out_awsize;
   wire [1:0] auto_master_out_awburst;
@@ -26,7 +26,7 @@ module ysyxSoC (
   wire auto_master_out_arready;
   wire auto_master_out_arvalid;
   wire [3:0] auto_master_out_arid;
-  wire [BIT_W-1:0] auto_master_out_araddr;
+  wire [XLEN-1:0] auto_master_out_araddr;
   wire [7:0] auto_master_out_arlen;
   wire [2:0] auto_master_out_arsize;
   wire [1:0] auto_master_out_arburst;
@@ -109,12 +109,12 @@ module ysyxSoC (
       .arid(auto_master_out_arid),
       .araddr(auto_master_out_araddr),
       .arvalid(auto_master_out_arvalid),
-      .arready_o(auto_master_out_arready),
-      .rid(auto_master_out_rid),
-      .rlast_o(auto_master_out_rlast),
-      .rdata_o(auto_master_out_rdata),
-      .rresp_o(auto_master_out_rresp),
-      .rvalid_o(auto_master_out_rvalid),
+      .out_arready(auto_master_out_arready),
+      .out_rid(auto_master_out_rid),
+      .out_rlast(auto_master_out_rlast),
+      .out_rdata(auto_master_out_rdata),
+      .out_rresp(auto_master_out_rresp),
+      .out_rvalid(auto_master_out_rvalid),
       .rready(auto_master_out_rready),
       .awburst(auto_master_out_awburst),
       .awsize(auto_master_out_awsize),
@@ -122,15 +122,15 @@ module ysyxSoC (
       .awid(auto_master_out_awid),
       .awaddr(auto_master_out_awaddr),
       .awvalid(auto_master_out_awvalid),
-      .awready_o(auto_master_out_awready),
+      .out_awready(auto_master_out_awready),
       .wlast(auto_master_out_wlast),
       .wdata(auto_master_out_wdata),
       .wstrb(auto_master_out_wstrb),
       .wvalid(auto_master_out_wvalid),
-      .wready_o(auto_master_out_wready),
-      .bid(auto_master_out_bid),
-      .bresp_o(auto_master_out_bresp),
-      .bvalid_o(auto_master_out_bvalid),
+      .out_wready(auto_master_out_wready),
+      .out_bid(auto_master_out_bid),
+      .out_bresp(auto_master_out_bresp),
+      .out_bvalid(auto_master_out_bvalid),
       .bready(auto_master_out_bready)
   );
 endmodule  //ysyxSoC
@@ -143,37 +143,37 @@ module ysyx_npc_soc (
     input [2:0] arsize,
     input [7:0] arlen,
     input [3:0] arid,
-    input [BIT_W-1:0] araddr,
+    input [XLEN-1:0] araddr,
     input arvalid,
-    output reg arready_o,
+    output reg out_arready,
 
-    output reg [3:0] rid,
-    output reg rlast_o,
-    output reg [DATA_W-1:0] rdata_o,
-    output reg [1:0] rresp_o,
-    output reg rvalid_o,
+    output reg [3:0] out_rid,
+    output reg out_rlast,
+    output reg [DATA_W-1:0] out_rdata,
+    output reg [1:0] out_rresp,
+    output reg out_rvalid,
     input rready,
 
     input [1:0] awburst,
     input [2:0] awsize,
     input [7:0] awlen,
     input [3:0] awid,
-    input [BIT_W-1:0] awaddr,
+    input [XLEN-1:0] awaddr,
     input awvalid,
-    output awready_o,
+    output out_awready,
 
     input wlast,
     input [DATA_W-1:0] wdata,
     input [7:0] wstrb,
     input wvalid,
-    output reg wready_o,
+    output reg out_wready,
 
-    output reg [3:0] bid,
-    output reg [1:0] bresp_o,
-    output reg bvalid_o,
+    output reg [3:0] out_bid,
+    output reg [1:0] out_bresp,
+    output reg out_bvalid,
     input bready
 );
-  parameter bit [7:0] BIT_W = 32, DATA_W = 64;
+  parameter bit [7:0] XLEN = 32, DATA_W = 64;
 
   reg [31:0] mem_rdata_buf[2];
   reg [2:0] state = 0;
@@ -183,15 +183,15 @@ module ysyx_npc_soc (
   wire ifsr_ready = `YSYX_IFSR_ENABLE ? lfsr[19] : 1;
 
   // read transaction
-  assign arready_o = (state == 'b000);
-  assign rdata_o[31:0] = mem_rdata_buf[0];
-  assign rdata_o[63:32] = mem_rdata_buf[1];
-  assign rvalid_o = (state == 'b101);
+  assign out_arready = (state == 'b000);
+  assign out_rdata[31:0] = mem_rdata_buf[0];
+  assign out_rdata[63:32] = mem_rdata_buf[1];
+  assign out_rvalid = (state == 'b101);
 
   // write transaction
-  assign awready_o = (state == 'b000);
-  assign wready_o = (state == 'b011 & wvalid);
-  assign bvalid_o = (state == 'b100);
+  assign out_awready = (state == 'b000);
+  assign out_wready = (state == 'b011 & wvalid);
+  assign out_bvalid = (state == 'b100);
   wire [7:0] wmask = (
     ({{8{awsize == 3'b000}} & 8'h1 }) |
     ({{8{awsize == 3'b001}} & 8'h3 }) |

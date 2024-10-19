@@ -5,14 +5,13 @@
 
 module ysyx (
     input clock,
-    input reset,
 
     // AXI4 Slave
     input [1:0] io_slave_arburst,
     input [2:0] io_slave_arsize,
     input [7:0] io_slave_arlen,
     input [3:0] io_slave_arid,
-    input [ADDR_W-1:0] io_slave_araddr,
+    input [XLEN-1:0] io_slave_araddr,
     input io_slave_arvalid,
     output reg io_slave_arready,
 
@@ -27,7 +26,7 @@ module ysyx (
     input [2:0] io_slave_awsize,
     input [7:0] io_slave_awlen,
     input [3:0] io_slave_awid,
-    input [ADDR_W-1:0] io_slave_awaddr,
+    input [XLEN-1:0] io_slave_awaddr,
     input io_slave_awvalid,
     output reg io_slave_awready,
 
@@ -47,7 +46,7 @@ module ysyx (
     output [2:0] io_master_arsize,
     output [7:0] io_master_arlen,
     output [3:0] io_master_arid,
-    output [ADDR_W-1:0] io_master_araddr,
+    output [XLEN-1:0] io_master_araddr,
     output io_master_arvalid,
     input reg io_master_arready,
 
@@ -62,7 +61,7 @@ module ysyx (
     output [2:0] io_master_awsize,
     output [7:0] io_master_awlen,
     output [3:0] io_master_awid,
-    output [ADDR_W-1:0] io_master_awaddr,
+    output [XLEN-1:0] io_master_awaddr,
     output io_master_awvalid,
     input reg io_master_awready,
 
@@ -77,73 +76,72 @@ module ysyx (
     input reg io_master_bvalid,
     output io_master_bready,
 
-    input io_interrupt
+    input io_interrupt,
+
+    input reset
 );
-  parameter bit [7:0] DATA_W = `YSYX_W_WIDTH;
-  parameter bit [7:0] ADDR_W = `YSYX_W_WIDTH;
+  parameter bit [7:0] XLEN = `YSYX_XLEN;
   parameter bit [7:0] REG_ADDR_W = 4;
 
   // IFU out
   wire [31:0] ifu_inst;
-  wire [DATA_W-1:0] ifu_pc;
+  wire [XLEN-1:0] ifu_pc;
   wire ifu_speculation;
-  wire ifu_bad_speculation, ifu_good_speculation;
+  wire flush_pipeline;
   wire ifu_valid, ifu_ready;
   // IFU out bus
-  wire [DATA_W-1:0] ifu_araddr;
+  wire [XLEN-1:0] ifu_araddr;
   wire ifu_arvalid, ifu_required;
 
   // IDU out
-  idu_pipe_if idu_if (.clk(clock));
+  idu_pipe_if idu_if ();
   wire idu_valid, idu_ready;
   wire [REG_ADDR_W-1:0] idu_rs1, idu_rs2;
 
   // EXU out
   wire [31:0] exu_inst, exu_pc;
-  wire [DATA_W-1:0] exu_reg_wdata;
-  wire [DATA_W-1:0] exu_npc_wdata;
+  wire [XLEN-1:0] exu_reg_wdata;
+  wire [XLEN-1:0] exu_npc_wdata;
   wire exu_branch_change, exu_branch_retire, exu_load_retire;
   wire exu_ebreak;
   wire [REG_ADDR_W-1:0] exu_rd;
   wire exu_valid, exu_ready;
   // EXU out lsu
   wire exu_ren, exu_wen;
-  wire [DATA_W-1:0] exu_rwaddr;
+  wire [XLEN-1:0] exu_rwaddr;
   wire exu_lsu_avalid;
   wire [3:0] exu_alu_op;
-  wire [DATA_W-1:0] exu_lsu_wdata;
+  wire [XLEN-1:0] exu_lsu_wdata;
 
   // WBU out
   wire [31:0] wbu_pc;
   wire wbu_valid, wbu_ready;
-
-  // pc out
-  wire [DATA_W-1:0] pc_npc;
-  wire pc_change, pc_retire;
+  wire [XLEN-1:0] wbu_npc;
+  wire wbu_pc_change, wbu_pc_retire;
 
   // reg out
   wire [16-1:0] reg_rf_table;
-  wire [DATA_W-1:0] reg_rdata1, reg_rdata2;
+  wire [XLEN-1:0] reg_rdata1, reg_rdata2;
 
   // lsu out
-  wire [DATA_W-1:0] lsu_rdata;
+  wire [XLEN-1:0] lsu_rdata;
   wire lsu_exu_rvalid;
   wire lsu_exu_wready;
   // lsu out load
-  wire [DATA_W-1:0] lsu_araddr;
+  wire [XLEN-1:0] lsu_araddr;
   wire lsu_arvalid;
   wire [7:0] lsu_rstrb;
   // lsu out store
-  wire [DATA_W-1:0] lsu_awaddr;
+  wire [XLEN-1:0] lsu_awaddr;
   wire lsu_awvalid;
-  wire [DATA_W-1:0] lsu_wdata;
+  wire [XLEN-1:0] lsu_wdata;
   wire [7:0] lsu_wstrb;
   wire lsu_wvalid;
 
   // bus out
-  wire [DATA_W-1:0] bus_ifu_rdata;
+  wire [XLEN-1:0] bus_ifu_rdata;
   wire bus_ifu_rvalid;
-  wire [DATA_W-1:0] bus_lsu_rdata;
+  wire [XLEN-1:0] bus_lsu_rdata;
   wire bus_lsu_rvalid;
   wire bus_lsu_wready;
 
@@ -162,26 +160,24 @@ module ysyx (
   ysyx_ifu ifu (
       .clock(clock),
 
-      .npc(pc_npc),
-      .pc(wbu_pc),
-      .pc_change(pc_change),
-      .pc_retire(pc_retire),
       .load_retire(exu_load_retire),
 
-      .inst_o(ifu_inst),
-      .pc_o(ifu_pc),
-      .speculation_o(ifu_speculation),
-      .bad_speculation_o(ifu_bad_speculation),
-      .good_speculation_o(ifu_good_speculation),
+      .npc(wbu_npc),
+      .pc_change(wbu_pc_change),
+      .pc_retire(wbu_pc_retire),
+
+      .out_inst(ifu_inst),
+      .out_pc(ifu_pc),
+      .out_flush_pipeline(flush_pipeline),
 
       .prev_valid(wbu_valid),
       .next_ready(idu_ready),
-      .valid_o(ifu_valid),
-      .ready_o(ifu_ready),
+      .out_valid (ifu_valid),
+      .out_ready (ifu_ready),
 
-      .ifu_araddr_o(ifu_araddr),
-      .ifu_arvalid_o(ifu_arvalid),
-      .ifu_required_o(ifu_required),
+      .out_ifu_araddr(ifu_araddr),
+      .out_ifu_arvalid(ifu_arvalid),
+      .out_ifu_required(ifu_required),
       .ifu_rdata(bus_ifu_rdata),
       .ifu_rvalid(bus_ifu_rvalid),
 
@@ -196,7 +192,6 @@ module ysyx (
       .rdata1(reg_rdata1),
       .rdata2(reg_rdata2),
       .pc(ifu_pc),
-      .speculation(ifu_speculation),
 
       .exu_valid(exu_valid),
       .exu_forward(exu_reg_wdata),
@@ -204,15 +199,15 @@ module ysyx (
 
       .idu_if(idu_if),
 
-      .rs1_o(idu_rs1),
-      .rs2_o(idu_rs2),
+      .out_rs1(idu_rs1),
+      .out_rs2(idu_rs2),
 
       .rf_table(reg_rf_table),
 
-      .prev_valid(ifu_valid & ifu_bad_speculation == 0),
+      .prev_valid(ifu_valid & flush_pipeline == 0),
       .next_ready(exu_ready),
-      .valid_o(idu_valid),
-      .ready_o(idu_ready),
+      .out_valid (idu_valid),
+      .out_ready (idu_ready),
 
       .reset(reset)
   );
@@ -223,30 +218,31 @@ module ysyx (
 
       .idu_if(idu_if),
 
-      .inst_o(exu_inst),
-      .pc_o  (exu_pc),
+      .out_inst(exu_inst),
+      .out_pc  (exu_pc),
 
-      .reg_wdata_o(exu_reg_wdata),
-      .npc_wdata_o(exu_npc_wdata),
-      .branch_change_o(exu_branch_change),
-      .branch_retire_o(exu_branch_retire),
-      .load_retire_o(exu_load_retire),
+      .out_reg_wdata  (exu_reg_wdata),
+      .out_load_retire(exu_load_retire),
 
-      .ebreak_o(exu_ebreak),
-      .rd_o((exu_rd)),
+      .out_npc_wdata(exu_npc_wdata),
+      .out_branch_change(exu_branch_change),
+      .out_branch_retire(exu_branch_retire),
 
-      .prev_valid(idu_valid & ifu_bad_speculation == 0),
+      .out_ebreak(exu_ebreak),
+      .out_rd((exu_rd)),
+
+      .prev_valid(idu_valid & flush_pipeline == 0),
       .next_ready(wbu_ready),
-      .valid_o(exu_valid),
-      .ready_o(exu_ready),
+      .out_valid (exu_valid),
+      .out_ready (exu_ready),
 
       // to lsu
-      .ren_o(exu_ren),
-      .wen_o(exu_wen),
-      .rwaddr_o(exu_rwaddr),
-      .lsu_avalid_o(exu_lsu_avalid),
-      .alu_op_o(exu_alu_op),
-      .lsu_mem_wdata_o(exu_lsu_wdata),
+      .out_ren(exu_ren),
+      .out_wen(exu_wen),
+      .out_rwaddr(exu_rwaddr),
+      .out_lsu_avalid(exu_lsu_avalid),
+      .out_alu_op(exu_alu_op),
+      .out_lsu_mem_wdata(exu_lsu_wdata),
 
       // from lsu
       .lsu_rdata(lsu_rdata),
@@ -261,34 +257,21 @@ module ysyx (
       .clock(clock),
 
       .inst(exu_inst),
-      .pc  (exu_pc),
-
+      .pc(exu_pc),
       .ebreak(exu_ebreak),
-      .pc_o  (wbu_pc),
-
-      .prev_valid(exu_valid & ifu_bad_speculation == 0),
-      .next_ready(ifu_ready),
-      .valid_o(wbu_valid),
-      .ready_o(wbu_ready),
-
-      .reset(reset)
-  );
-
-  ysyx_pc pc_unit (
-      .clock(clock),
-
-      .good_speculation(ifu_good_speculation),
-      .bad_speculation(ifu_bad_speculation),
-      .pc_ifu(ifu_pc),
 
       .npc_wdata(exu_npc_wdata),
       .branch_change(exu_branch_change),
       .branch_retire(exu_branch_retire),
-      .out_npc(pc_npc),
-      .out_change(pc_change),
-      .out_retire(pc_retire),
 
-      .prev_valid(exu_valid),
+      .out_npc(wbu_npc),
+      .out_change(wbu_pc_change),
+      .out_retire(wbu_pc_retire),
+
+      .prev_valid(exu_valid & flush_pipeline == 0),
+      .next_ready(ifu_ready),
+      .out_valid (wbu_valid),
+      .out_ready (wbu_ready),
 
       .reset(reset)
   );
@@ -299,8 +282,8 @@ module ysyx (
       .idu_valid(idu_valid & exu_ready),
       .rd(idu_if.rd),
 
-      .bad_speculation(ifu_bad_speculation),
-      .reg_write_en(exu_valid & ifu_bad_speculation == 0),
+      .bad_speculation(flush_pipeline),
+      .reg_write_en(exu_valid & flush_pipeline == 0),
       .waddr((exu_rd)),
       .wdata(exu_reg_wdata),
 
@@ -326,28 +309,27 @@ module ysyx (
       .alu_op(exu_alu_op),
       .wdata(exu_lsu_wdata),
       // to exu
-      .rdata_o(lsu_rdata),
-      .rvalid_o(lsu_exu_rvalid),
-      .wready_o(lsu_exu_wready),
+      .out_rdata(lsu_rdata),
+      .out_rvalid(lsu_exu_rvalid),
+      .out_wready(lsu_exu_wready),
 
       // to-from bus load
-      .lsu_araddr_o(lsu_araddr),
-      .lsu_arvalid_o(lsu_arvalid),
-      .lsu_rstrb_o(lsu_rstrb),
+      .out_lsu_araddr(lsu_araddr),
+      .out_lsu_arvalid(lsu_arvalid),
+      .out_lsu_rstrb(lsu_rstrb),
       .bus_rdata(bus_lsu_rdata),
       .lsu_rvalid(bus_lsu_rvalid),
 
       // to-from bus store
-      .lsu_awaddr_o(lsu_awaddr),
-      .lsu_awvalid_o(lsu_awvalid),
-      .lsu_wdata_o(lsu_wdata),
-      .lsu_wstrb_o(lsu_wstrb),
-      .lsu_wvalid_o(lsu_wvalid),
+      .out_lsu_awaddr(lsu_awaddr),
+      .out_lsu_awvalid(lsu_awvalid),
+      .out_lsu_wdata(lsu_wdata),
+      .out_lsu_wstrb(lsu_wstrb),
+      .out_lsu_wvalid(lsu_wvalid),
       .lsu_wready(bus_lsu_wready),
 
       .reset(reset)
   );
-
 
   ysyx_bus bus (
       .clock(clock),
@@ -386,26 +368,26 @@ module ysyx (
       .io_master_bvalid(io_master_bvalid),
       .io_master_bready(io_master_bready),
 
-      .ifu_araddr  (ifu_araddr),
-      .ifu_arvalid (ifu_arvalid),
+      .ifu_araddr(ifu_araddr),
+      .ifu_arvalid(ifu_arvalid),
       .ifu_required(ifu_required),
-      .ifu_rdata_o (bus_ifu_rdata),
-      .ifu_rvalid_o(bus_ifu_rvalid),
+      .out_ifu_rdata(bus_ifu_rdata),
+      .out_ifu_rvalid(bus_ifu_rvalid),
 
       .lsu_araddr(lsu_araddr),
       .lsu_arvalid(lsu_arvalid),
       .lsu_rstrb(lsu_rstrb),
-      .lsu_rdata_o(bus_lsu_rdata),
-      .lsu_rvalid_o(bus_lsu_rvalid),
+      .out_lsu_rdata(bus_lsu_rdata),
+      .out_lsu_rvalid(bus_lsu_rvalid),
 
       .lsu_awaddr(lsu_awaddr),
       .lsu_awvalid(lsu_awvalid),
       .lsu_wdata(lsu_wdata),
       .lsu_wstrb(lsu_wstrb),
       .lsu_wvalid(lsu_wvalid),
-      .lsu_wready_o(bus_lsu_wready),
+      .out_lsu_wready(bus_lsu_wready),
 
       .reset(reset)
   );
 
-endmodule  // top
+endmodule  // ysyx

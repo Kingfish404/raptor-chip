@@ -9,18 +9,18 @@ module ysyx_exu_csr (
     input ecall,
     input mret,
 
-    input [  R_W-1:0] rwaddr,
-    input [BIT_W-1:0] wdata,
-    input [BIT_W-1:0] pc,
+    input [ R_W-1:0] rwaddr,
+    input [XLEN-1:0] wdata,
+    input [XLEN-1:0] pc,
 
-    output [BIT_W-1:0] rdata_o,
-    output [BIT_W-1:0] mtvec_o,
-    output [BIT_W-1:0] mepc_o
+    output [XLEN-1:0] out_rdata,
+    output [XLEN-1:0] out_mtvec,
+    output [XLEN-1:0] out_mepc
 );
   parameter bit [7:0] R_W = 12;
   parameter bit [7:0] REG_W = 3;
-  parameter bit [7:0] BIT_W = `YSYX_W_WIDTH;
-  parameter bit [BIT_W-1:0] RESET_VAL = 0;
+  parameter bit [7:0] XLEN = `YSYX_XLEN;
+  parameter bit [XLEN-1:0] RESET_VAL = 0;
 
   localparam bit [REG_W-1:0] MNONE = 'h0;
   localparam bit [REG_W-1:0] MCAUSE = 'h1;
@@ -28,7 +28,7 @@ module ysyx_exu_csr (
   localparam bit [REG_W-1:0] MTVEC = 'h3;
   localparam bit [REG_W-1:0] MSTATUS = 'h4;
 
-  reg [BIT_W-1:0] csr[5];
+  reg [XLEN-1:0] csr[5];
   wire [REG_W-1:0] waddr_reg0 = (
     ({REG_W{rwaddr==`YSYX_CSR_MCAUSE}}) & (MCAUSE) |
     ({REG_W{rwaddr==`YSYX_CSR_MEPC}}) & (MEPC) |
@@ -36,17 +36,17 @@ module ysyx_exu_csr (
     ({REG_W{rwaddr==`YSYX_CSR_MSTATUS}}) & (MSTATUS)
   );
 
-  assign rdata_o = (
-           ({BIT_W{rwaddr==`YSYX_CSR_MVENDORID}}) & (32'h79737978) |
-           ({BIT_W{rwaddr==`YSYX_CSR_MARCHID}}) & (32'h15fde77) |
-           ({BIT_W{rwaddr==`YSYX_CSR_MSTATUS}}) & (csr[MSTATUS]) |
-           ({BIT_W{rwaddr==`YSYX_CSR_MCAUSE}}) & (csr[MCAUSE]) |
-           ({BIT_W{rwaddr==`YSYX_CSR_MEPC}}) & (csr[MEPC]) |
-           ({BIT_W{rwaddr==`YSYX_CSR_MTVEC}}) & (csr[MTVEC])
+  assign out_rdata = (
+           ({XLEN{rwaddr==`YSYX_CSR_MVENDORID}}) & (32'h79737978) |
+           ({XLEN{rwaddr==`YSYX_CSR_MARCHID}}) & (32'h15fde77) |
+           ({XLEN{rwaddr==`YSYX_CSR_MSTATUS}}) & (csr[MSTATUS]) |
+           ({XLEN{rwaddr==`YSYX_CSR_MCAUSE}}) & (csr[MCAUSE]) |
+           ({XLEN{rwaddr==`YSYX_CSR_MEPC}}) & (csr[MEPC]) |
+           ({XLEN{rwaddr==`YSYX_CSR_MTVEC}}) & (csr[MTVEC])
          );
 
-  assign mepc_o = csr[MEPC];
-  assign mtvec_o = csr[MTVEC];
+  assign out_mepc = csr[MEPC];
+  assign out_mtvec = csr[MTVEC];
 
   always @(posedge clock) begin
     if (reset) begin
@@ -66,7 +66,7 @@ module ysyx_exu_csr (
       end
       if (mret) begin
         csr[MSTATUS] <= {
-          {csr[MSTATUS][BIT_W-1:'h8]},
+          {csr[MSTATUS][XLEN-1:'h8]},
           1'b1,
           {csr[MSTATUS][6:4]},
           csr[MSTATUS]['h7],
