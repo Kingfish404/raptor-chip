@@ -20,3 +20,4 @@ tmp/
 /obj_dir
 /include/config
 /include/generated
+/vsrc/generated

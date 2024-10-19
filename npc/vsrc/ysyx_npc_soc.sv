@@ -102,7 +102,7 @@ module ysyxSoC (
   );
 
   ysyx_npc_soc perip (
-      .clk(clock),
+      .clock(clock),
       .arburst(auto_master_out_arburst),
       .arsize(auto_master_out_arsize),
       .arlen(auto_master_out_arlen),
@@ -137,7 +137,7 @@ endmodule  //ysyxSoC
 
 // Memory and Universal Asynchronous Receiver-Transmitter (UART)
 module ysyx_npc_soc (
-    input clk,
+    input clock,
 
     input [1:0] arburst,
     input [2:0] arsize,
@@ -199,10 +199,10 @@ module ysyx_npc_soc (
     (8'h00)
   );
 
-  always @(posedge clk) begin
+  always @(posedge clock) begin
     lfsr <= {lfsr[18:0], lfsr[19] ^ lfsr[18]};
   end
-  always @(posedge clk) begin
+  always @(posedge clock) begin
     if (ifsr_ready) begin
       case (state)
         'b000: begin

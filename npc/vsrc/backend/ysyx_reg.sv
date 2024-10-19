@@ -1,6 +1,6 @@
 module ysyx_reg (
-    input clk,
-    input rst,
+    input clock,
+    input reset,
 
     input idu_valid,
     input [REG_ADDR_W-1:0] rd,
@@ -12,9 +12,10 @@ module ysyx_reg (
     input [DATA_W-1:0] wdata,
     input [REG_ADDR_W-1:0] s1addr,
     input [REG_ADDR_W-1:0] s2addr,
-    output [REG_NUM-1:0] rf_table_o,
-    output [DATA_W-1:0] src1_o,
-    output [DATA_W-1:0] src2_o
+
+    output [REG_NUM-1:0] out_rf_table,
+    output [ DATA_W-1:0] out_src1,
+    output [ DATA_W-1:0] out_src2
 );
   parameter bit [7:0] REG_ADDR_W = 4;
   parameter bit [7:0] REG_NUM = 16;
@@ -22,12 +23,12 @@ module ysyx_reg (
   reg [DATA_W-1:0] rf[REG_NUM];
   reg [REG_NUM-1:0] rf_table;
 
-  assign src1_o = rf[s1addr[REG_ADDR_W-1:0]];
-  assign src2_o = rf[s2addr[REG_ADDR_W-1:0]];
-  assign rf_table_o = rf_table;
+  assign out_rf_table = rf_table;
+  assign out_src1 = rf[s1addr[REG_ADDR_W-1:0]];
+  assign out_src2 = rf[s2addr[REG_ADDR_W-1:0]];
 
-  always @(posedge clk) begin
-    if (rst) begin
+  always @(posedge clock) begin
+    if (reset) begin
       rf_table <= 0;
     end else begin
       if (bad_speculation) begin
@@ -43,8 +44,8 @@ module ysyx_reg (
     end
   end
 
-  always @(posedge clk) begin
-    if (rst) begin
+  always @(posedge clock) begin
+    if (reset) begin
       rf[0]  <= 0;
       rf[1]  <= 0;
       rf[2]  <= 0;

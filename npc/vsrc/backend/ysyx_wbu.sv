@@ -1,7 +1,9 @@
+`include "ysyx.svh"
+`include "ysyx_dpi_c.svh"
 
 module ysyx_wbu (
-    input clk,
-    input rst,
+    input clock,
+    input reset,
 
     input [31:0] pc,
     input [31:0] inst,
@@ -21,8 +23,8 @@ module ysyx_wbu (
   assign pc_o = pc_wbu;
   assign ready_o = '1;
 
-  always @(posedge clk) begin
-    if (rst) begin
+  always @(posedge clock) begin
+    if (reset) begin
       valid_o <= 0;
     end else begin
       if (prev_valid & ready_o) begin

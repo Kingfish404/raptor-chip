@@ -44,8 +44,7 @@ $(shell mkdir -p $(BUILD_DIR))
 
 VSRCS = \
 	$(shell find $(abspath ./vsrc) -name "*.sv") \
-	$(SOC_SOURCE) \
-	$(shell find $(abspath ./ssrc/build) -name "*.sv")
+	$(SOC_SOURCE)
 CSRCS = $(shell find $(abspath ./csrc) -name "*.c")
 CCSRCS = $(shell find $(abspath ./csrc) -name "*.cc" -or -name "*.cpp")
 

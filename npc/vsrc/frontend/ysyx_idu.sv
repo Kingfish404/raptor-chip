@@ -1,7 +1,9 @@
+`include "ysyx.svh"
+`include "ysyx_if.svh"
 
 module ysyx_idu (
-    input clk,
-    input rst,
+    input clock,
+    input reset,
 
     input [31:0] inst,
     input [BIT_W-1:0] rdata1,
@@ -50,8 +52,8 @@ module ysyx_idu (
 
   reg state;
   assign state = valid_o;
-  always @(posedge clk) begin
-    if (rst) begin
+  always @(posedge clock) begin
+    if (reset) begin
       valid <= 0;
       ready <= 1;
     end else begin
@@ -82,8 +84,7 @@ module ysyx_idu (
   assign idu_if.speculation = speculation_idu;
 
   ysyx_idu_decoder idu_de (
-      .clock(clk),
-      .reset(rst),
+      .clock(clock),
 
       .in_pc  (pc_idu),
       .in_inst(inst_idu),
@@ -109,6 +110,8 @@ module ysyx_idu (
       .out_sys_csr_wen(idu_if.csr_wen),
       .out_sys_ebreak(idu_if.ebreak),
       .out_sys_ecall(idu_if.ecall),
-      .out_sys_mret(idu_if.mret)
+      .out_sys_mret(idu_if.mret),
+
+      .reset(reset)
   );
 endmodule  // ysyx_IDU

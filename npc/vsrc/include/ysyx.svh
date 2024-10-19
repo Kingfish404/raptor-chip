@@ -66,6 +66,22 @@
 `define YSYX_ALU_OP_SRL   4'b0101
 `define YSYX_ALU_OP_SRA   4'b1101
 
+// Machine Trap Handling
+`define YSYX_CSR_MCAUSE 'h342
+`define YSYX_CSR_MEPC   'h341
+
+// Machine Trap Settup
+`define YSYX_CSR_MTVEC   'h305
+`define YSYX_CSR_MSTATUS 'h300
+
+// CSR_MSTATUS FLAGS
+`define YSYX_CSR_MSTATUS_MPIE_IDX  'h7
+`define YSYX_CSR_MSTATUS_MIE_IDX   'h3
+
+// Machine Information Registers
+`define YSYX_CSR_MVENDORID 'hf11
+`define YSYX_CSR_MARCHID   'hf12
+
 `define ASSERT(signal, value) \
   if (signal !== value) begin \
     $error("ASSERTION FAILED in %m: signal != value"); \

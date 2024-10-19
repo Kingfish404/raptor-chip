@@ -1,3 +1,6 @@
+`ifndef YSYX_IF
+`define YSYX_IF
+
 interface idu_pipe_if (
     input logic clk
 );
@@ -25,3 +28,5 @@ interface idu_pipe_if (
   logic ecall;
   logic mret;
 endinterface
+
+`endif

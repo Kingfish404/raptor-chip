@@ -10,7 +10,6 @@ Contents at a glance:
 * `build.sc` - instructs mill to build the Chisel project
 * `Makefile` - rules to call mill
 * `playground/src/GCD.scala` - GCD source file
-* `playground/src/DecoupledGCD.scala` - another GCD source file
 * `playground/src/Elaborate.scala` - wrapper file to call chisel command with the GCD module
 * `playground/test/src/GCDSpec.scala` - GCD tester
 

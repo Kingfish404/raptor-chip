@@ -1,4 +1,4 @@
-BUILD_DIR = ./build
+BUILD_DIR = ../vsrc/generated
 
 PRJ = npc
 

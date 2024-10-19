@@ -3,8 +3,8 @@
 `include "ysyx_dpi_c.svh"
 
 module ysyx_bus (
-    input clk,
-    input rst,
+    input clock,
+    input reset,
 
     // AXI4 Master bus
     output [1:0] io_master_arburst,
@@ -84,8 +84,8 @@ module ysyx_bus (
   reg [3:0] state;
   reg first = 1;
   reg write_done = 0, awrite_done = 0;
-  always @(posedge clk) begin
-    if (rst) begin
+  always @(posedge clock) begin
+    if (reset) begin
       state <= IF_A;
       first <= 1;
     end else begin
@@ -130,8 +130,8 @@ module ysyx_bus (
   end
 
   reg [2:0] state_store;
-  always @(posedge clk) begin
-    if (rst) begin
+  always @(posedge clock) begin
+    if (reset) begin
       state_store <= LS_S_A;
     end else begin
       case (state_store)
@@ -200,7 +200,7 @@ module ysyx_bus (
          );
   assign io_master_arlen = ifu_sdram_arburst ? 8'h1 : 8'h0;
   assign io_master_araddr = sram_araddr;
-  assign io_master_arvalid = !rst & (
+  assign io_master_arvalid = !reset & (
            ((state == IF_A) & ifu_arvalid) |
            ((state == LS_A) & lsu_arvalid & !clint_en) // for new soc
       );
@@ -242,7 +242,7 @@ module ysyx_bus (
 
   assign io_master_bready = 1;
 
-  always @(posedge clk) begin
+  always @(posedge clock) begin
     `YSYX_ASSERT(io_master_rresp, 2'b00);
     `YSYX_ASSERT(io_master_bresp, 2'b00);
     if (io_master_awvalid) begin
@@ -284,8 +284,8 @@ module ysyx_bus (
   wire [1:0] clint_rresp_o;
   wire clint_rvalid_o;
   ysyx_clint clint (
-      .clk(clk),
-      .rst(rst),
+      .clock(clock),
+      .reset(reset),
       .araddr(sram_araddr),
       .arvalid(clint_arvalid),
       .arready_o(clint_arready_o),
@@ -297,8 +297,8 @@ endmodule
 
 // Core Local INTerrupt controller
 module ysyx_clint (
-    input clk,
-    rst,
+    input clock,
+    input reset,
 
     input [ADDR_W-1:0] araddr,
     input arvalid,
@@ -315,8 +315,8 @@ module ysyx_clint (
     ({32{araddr == `YSYX_BUS_RTC_ADDR}} & mtime[31:0]) |
     ({32{araddr == `YSYX_BUS_RTC_ADDR_UP}} & mtime[63:32])
   );
-  always @(posedge clk) begin
-    if (rst) begin
+  always @(posedge clock) begin
+    if (reset) begin
       mtime <= 0;
     end else begin
       mtime <= mtime + 1;

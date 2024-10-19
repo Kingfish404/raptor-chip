@@ -1,8 +1,8 @@
-`include "ysyx_csr.svh"
+`include "ysyx.svh"
+`include "ysyx_if.svh"
 
 module ysyx_exu (
-    input clk,
-    input rst,
+    input clock,
 
     // from idu
     idu_pipe_if idu_if,
@@ -30,18 +30,19 @@ module ysyx_exu (
     output load_retire_o,
     output reg ebreak_o,
     output reg [3:0] rd_o,
-    output reg speculation_o,
 
     input prev_valid,
     input next_ready,
     output reg valid_o,
-    output reg ready_o
+    output reg ready_o,
+
+    input reset
 );
   parameter bit [7:0] BIT_W = `YSYX_W_WIDTH;
 
   wire [BIT_W-1:0] reg_wdata, mepc, mtvec;
   wire [BIT_W-1:0] mem_wdata = src2;
-  wire [12-1:0] csr_addr0, csr_addr1;
+  wire [12-1:0] csr_addr0;
   wire [BIT_W-1:0] csr_wdata, csr_rdata;
   reg [BIT_W-1:0] imm_exu, pc_exu, src1, src2, opj, addr_exu;
   reg [BIT_W-1:0] inst_exu;
@@ -54,8 +55,8 @@ module ysyx_exu (
   reg [2:0] func3 = inst_exu[14:12];
 
   ysyx_exu_csr csr (
-      .clk(clk),
-      .rst(rst),
+      .clock(clock),
+      .reset(reset),
 
       .wen(csr_wen_exu),
       .exu_valid(valid),
@@ -75,7 +76,6 @@ module ysyx_exu (
     (ren_o) ? mem_rdata :
     (system_exu) ? csr_rdata : reg_wdata);
   assign csr_addr0 = (imm_exu[11:0]);
-  assign csr_addr1 = (opj[11:0]);
   assign alu_op_o = alu_op_exu;
   assign branch_change_o = branch_change;
   assign pc_o = pc_exu;
@@ -90,8 +90,8 @@ module ysyx_exu (
   assign valid   = (wen_o | ren_o) ? lsu_valid : alu_valid;
   assign valid_o = valid;
   assign ready_o = ready & next_ready;
-  always @(posedge clk) begin
-    if (rst) begin
+  always @(posedge clock) begin
+    if (reset) begin
       alu_valid <= 0;
       lsu_avalid <= 0;
       lsu_valid <= 0;
@@ -119,7 +119,6 @@ module ysyx_exu (
         mret <= idu_if.mret;
 
         alu_valid <= 1;
-        speculation_o <= idu_if.speculation;
         if (idu_if.wen | idu_if.ren) begin
           lsu_avalid <= 1;
           ready <= 0;
@@ -178,10 +177,11 @@ module ysyx_exu (
           branch_change = (~|reg_wdata);
         end
         `YSYX_ALU_OP_XOR,
-          `YSYX_ALU_OP_SLT,
-          `YSYX_ALU_OP_SLTU,
-          `YSYX_ALU_OP_SLE,
-          `YSYX_ALU_OP_SLEU: begin
+        `YSYX_ALU_OP_SLT,
+        `YSYX_ALU_OP_SLTU,
+        `YSYX_ALU_OP_SLE,
+        `YSYX_ALU_OP_SLEU:
+        begin
           branch_change = (|reg_wdata);
         end
         default: begin

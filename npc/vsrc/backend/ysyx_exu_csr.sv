@@ -1,8 +1,8 @@
-`include "ysyx_csr.svh"
+`include "ysyx.svh"
 
 module ysyx_exu_csr (
-    input clk,
-    input rst,
+    input clock,
+    input reset,
 
     input wen,
     input exu_valid,
@@ -48,8 +48,8 @@ module ysyx_exu_csr (
   assign mepc_o = csr[MEPC];
   assign mtvec_o = csr[MTVEC];
 
-  always @(posedge clk) begin
-    if (rst) begin
+  always @(posedge clock) begin
+    if (reset) begin
       csr[MCAUSE]  <= RESET_VAL;
       csr[MEPC]    <= RESET_VAL;
       csr[MTVEC]   <= RESET_VAL;
