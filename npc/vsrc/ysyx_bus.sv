@@ -17,7 +17,7 @@ module ysyx_bus (
 
     input [3:0] io_master_rid,
     input io_master_rlast,
-    input [63:0] io_master_rdata,
+    input [XLEN-1:0] io_master_rdata,
     input [1:0] io_master_rresp,
     input io_master_rvalid,
     output io_master_rready,
@@ -30,11 +30,11 @@ module ysyx_bus (
     output            io_master_awvalid,  // reqired
     input             io_master_awready,  // reqired
 
-    output        io_master_wlast,   // reqired
-    output [63:0] io_master_wdata,   // reqired
-    output [ 7:0] io_master_wstrb,
-    output        io_master_wvalid,  // reqired
-    input         io_master_wready,  // reqired
+    output            io_master_wlast,   // reqired
+    output [XLEN-1:0] io_master_wdata,   // reqired
+    output [     3:0] io_master_wstrb,
+    output            io_master_wvalid,  // reqired
+    input             io_master_wready,  // reqired
 
     input  [3:0] io_master_bid,
     input  [1:0] io_master_bresp,
@@ -78,6 +78,13 @@ module ysyx_bus (
   reg [3:0] state;
   reg first = 1;
   reg write_done = 0, awrite_done = 0;
+
+  assign io_master_arid = 0;
+
+  assign io_master_awburst = 0;
+  assign io_master_awlen = 0;
+  assign io_master_awid = 0;
+
   always @(posedge clock) begin
     if (reset) begin
       state <= IF_A;
@@ -192,7 +199,7 @@ module ysyx_bus (
            ({3{lsu_rstrb == 8'hf | ifu_arvalid}} & 3'b010) |
            (3'b000)
          );
-  assign io_master_arlen = ifu_sdram_arburst ? 8'h1 : 8'h0;
+  assign io_master_arlen = ifu_sdram_arburst ? 'h1 : 'h0;
   assign io_master_araddr = sram_araddr;
   assign io_master_arvalid = !reset & (
            ((state == IF_A) & ifu_arvalid) |
@@ -200,9 +207,10 @@ module ysyx_bus (
       );
   assign arready = io_master_arready & io_master_bvalid;
 
-  wire [XLEN-1:0] io_rdata = (io_master_araddr[2:2] == 1) ?
-       io_master_rdata[63:32]:
-       io_master_rdata[31:00];
+  // wire [XLEN-1:0] io_rdata = (io_master_araddr[2:2] == 1) ?
+  //      io_master_rdata[63:32]:
+  //      io_master_rdata[31:00];
+  wire [XLEN-1:0] io_rdata = io_master_rdata;
   wire [1:0] araddr_lo = io_master_araddr[1:0];
   assign out_rdata = io_rdata;
   assign rvalid = io_master_rvalid;
@@ -227,9 +235,8 @@ module ysyx_bus (
     ({XLEN{awaddr_lo == 2'b11}} & {{lsu_wdata[7:0]}, {24'b0}}) |
     (0)
   };
-  assign io_master_wdata[31:0] = wdata;
-  assign io_master_wdata[63:32] = wdata;
-  assign io_master_wstrb = (io_master_awaddr[2:2] == 1) ? {{wstrb}, {4'b0}} : {{4'b0}, {wstrb}};
+  assign io_master_wdata = wdata;
+  assign io_master_wstrb = {wstrb};
   wire [3:0] wstrb = {lsu_wstrb[3:0] << awaddr_lo};
   assign io_master_wvalid = (state_store == LS_S_W) & (lsu_wvalid) & !write_done;
 
@@ -308,6 +315,8 @@ module ysyx_clint (
     ({32{araddr == `YSYX_BUS_RTC_ADDR}} & mtime[31:0]) |
     ({32{araddr == `YSYX_BUS_RTC_ADDR_UP}} & mtime[63:32])
   );
+  assign out_arready = 0;
+  assign out_rresp = 0;
   always @(posedge clock) begin
     if (reset) begin
       mtime <= 0;

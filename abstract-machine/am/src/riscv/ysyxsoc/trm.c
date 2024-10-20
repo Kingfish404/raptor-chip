@@ -31,7 +31,7 @@ extern char _data_end[];
 extern char _data_load_start[];
 
 #define PMEM_SIZE (4 * 1024 * 1024)
-#define PMEM_END ((uintptr_t) & _pmem_start + PMEM_SIZE)
+#define PMEM_END ((uintptr_t)&_pmem_start + PMEM_SIZE)
 
 Area heap = RANGE(&_heap_start, PMEM_END);
 #ifndef MAINARGS
@@ -80,11 +80,11 @@ __attribute__((section(".first_boot"))) void _first_stage_bootloader(void)
   _second_stage_bootloader();
 }
 
-size_t ssb_start_time, ssb_end_time;
+size_t ssb_start, ssb_end;
 
 __attribute__((section(".second_boot"))) void _second_stage_bootloader()
 {
-  ssb_start_time = *((uint32_t *)RTC_ADDR);
+  ssb_start = *((uint32_t *)RTC_ADDR);
   if ((size_t)_text_start != (size_t)_text_load_start)
   {
     size_t text_size = _text_end - _text_start;
@@ -109,15 +109,14 @@ __attribute__((section(".second_boot"))) void _second_stage_bootloader()
     size_t data_size = _data_end - _data_start;
     memcpy(_data_start, _data_load_start, (size_t)data_size);
   }
-  ssb_end_time = *((uint32_t *)RTC_ADDR);
+  ssb_end = *((uint32_t *)RTC_ADDR);
   _trm_init();
 }
 
 void _trm_init()
 {
   init_uart();
-  printf("[%d] first stage boot loader done\n", ssb_start_time);
-  printf("[%d|%d] second stage boot loader done\n", ssb_end_time, ssb_end_time - ssb_start_time);
+  printf("FSBL: %d, SSBL: %d|%d\n", ssb_start, ssb_end, ssb_end - ssb_start);
   ioe_init();
   uint32_t mvendorid, marchid;
   asm volatile(
@@ -125,8 +124,9 @@ void _trm_init()
       "csrr %1, marchid\n\t"
       : "=r"(mvendorid), "=r"(marchid) :);
   size_t ready_time = *((uint32_t *)RTC_ADDR);
-  printf("[%d|%d] trm init, mvendorid: 0x%lx, marchid: %ld\n", ready_time, ready_time - ssb_end_time, mvendorid, marchid);
-
+  printf("Init: %d|%d, mvendorid: 0x%lx, marchid: %ld\n",
+         ready_time, ready_time - ssb_end, mvendorid, marchid);
+  asm volatile("fence");
   int ret = main(mainargs);
   halt(ret);
 }

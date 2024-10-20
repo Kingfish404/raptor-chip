@@ -35,7 +35,7 @@ module ysyx_idu (
   wire [3:0] rs1 = inst_idu[18:15], rs2 = inst_idu[23:20], rd = inst_idu[10:7];
   wire wen, ren;
   wire idu_hazard = valid & (
-    opcode != `YSYX_OP_LUI & opcode != `YSYX_OP_AUIPC & opcode != `YSYX_OP_JAL &
+    (opcode != `YSYX_OP_LUI & opcode != `YSYX_OP_AUIPC & opcode != `YSYX_OP_JAL) &
     ((rf_table[rs1[4-1:0]] == 1) & !(exu_valid & rs1[4-1:0] == exu_forward_rd)) |
     ((rf_table[rs2[4-1:0]] == 1) & !(exu_valid & rs2[4-1:0] == exu_forward_rd)) |
     (0)
@@ -48,8 +48,6 @@ module ysyx_idu (
   assign out_rs1   = rs1;
   assign out_rs2   = rs2;
 
-  reg state;
-  assign state = out_valid;
   always @(posedge clock) begin
     if (reset) begin
       valid <= 0;

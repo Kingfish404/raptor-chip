@@ -2,6 +2,8 @@
 `include "ysyx_soc.svh"
 `include "ysyx_dpi_c.svh"
 
+// verilator lint_off UNDRIVEN
+// verilator lint_off PINCONNECTEMPTY
 module ysyxSoC (
     input clock,
     input reset
@@ -16,8 +18,8 @@ module ysyxSoC (
   wire [1:0] auto_master_out_awburst;
   wire auto_master_out_wready;
   wire auto_master_out_wvalid;
-  wire [63:0] auto_master_out_wdata;
-  wire [7:0] auto_master_out_wstrb;
+  wire [XLEN-1:0] auto_master_out_wdata;
+  wire [3:0] auto_master_out_wstrb;
   wire auto_master_out_wlast;
   wire auto_master_out_bready;
   wire auto_master_out_bvalid;
@@ -33,7 +35,7 @@ module ysyxSoC (
   wire auto_master_out_rready;
   wire auto_master_out_rvalid;
   wire [3:0] auto_master_out_rid;
-  wire [63:0] auto_master_out_rdata;
+  wire [XLEN-1:0] auto_master_out_rdata;
   wire [1:0] auto_master_out_rresp;
   wire auto_master_out_rlast;
 
@@ -79,8 +81,8 @@ module ysyxSoC (
       .io_slave_awburst (2'h0),
       .io_slave_wready  (  /* unused */),
       .io_slave_wvalid  (1'h0),
-      .io_slave_wdata   (64'h0),
-      .io_slave_wstrb   (8'h0),
+      .io_slave_wdata   (32'h0),
+      .io_slave_wstrb   (4'h0),
       .io_slave_wlast   (1'h0),
       .io_slave_bready  (1'h0),
       .io_slave_bvalid  (  /* unused */),
@@ -100,7 +102,6 @@ module ysyxSoC (
       .io_slave_rresp   (  /* unused */),
       .io_slave_rlast   (  /* unused */)
   );
-
   ysyx_npc_soc perip (
       .clock(clock),
       .arburst(auto_master_out_arburst),
@@ -149,7 +150,7 @@ module ysyx_npc_soc (
 
     output reg [3:0] out_rid,
     output reg out_rlast,
-    output reg [DATA_W-1:0] out_rdata,
+    output reg [XLEN-1:0] out_rdata,
     output reg [1:0] out_rresp,
     output reg out_rvalid,
     input rready,
@@ -163,8 +164,8 @@ module ysyx_npc_soc (
     output out_awready,
 
     input wlast,
-    input [DATA_W-1:0] wdata,
-    input [7:0] wstrb,
+    input [XLEN-1:0] wdata,
+    input [3:0] wstrb,
     input wvalid,
     output reg out_wready,
 
@@ -173,9 +174,9 @@ module ysyx_npc_soc (
     output reg out_bvalid,
     input bready
 );
-  parameter bit [7:0] XLEN = 32, DATA_W = 64;
+  parameter bit [7:0] XLEN = 32;
 
-  reg [31:0] mem_rdata_buf[2];
+  reg [31:0] mem_rdata_buf;
   reg [2:0] state = 0;
   reg is_writing = 0;
 
@@ -184,14 +185,13 @@ module ysyx_npc_soc (
 
   // read transaction
   assign out_arready = (state == 'b000);
-  assign out_rdata[31:0] = mem_rdata_buf[0];
-  assign out_rdata[63:32] = mem_rdata_buf[1];
-  assign out_rvalid = (state == 'b101);
+  assign out_rdata   = mem_rdata_buf;
+  assign out_rvalid  = (state == 'b101);
 
   // write transaction
   assign out_awready = (state == 'b000);
-  assign out_wready = (state == 'b011 & wvalid);
-  assign out_bvalid = (state == 'b100);
+  assign out_wready  = (state == 'b011 & wvalid);
+  assign out_bvalid  = (state == 'b100);
   wire [7:0] wmask = (
     ({{8{awsize == 3'b000}} & 8'h1 }) |
     ({{8{awsize == 3'b001}} & 8'h3 }) |
@@ -213,11 +213,7 @@ module ysyx_npc_soc (
             state <= 'b001;
           end
           if (arvalid) begin
-            if ((araddr & 'b100) == 0) begin
-              `YSYX_DPI_C_PMEM_READ((araddr & ~'h3), mem_rdata_buf[0]);
-            end else begin
-              `YSYX_DPI_C_PMEM_READ((araddr & ~'h3), mem_rdata_buf[1]);
-            end
+            `YSYX_DPI_C_PMEM_READ((araddr & ~'h3), mem_rdata_buf);
           end
           if (awvalid) begin
             is_writing <= 1;
@@ -234,28 +230,16 @@ module ysyx_npc_soc (
               $write("%c", wdata[7:0]);
             end else begin
               if (wstrb[0]) begin
-                `YSYX_DPI_C_PMEM_WRITE((awaddr & ~'h7) + 0, {wdata >>  0}[31:0], 1);
+                `YSYX_DPI_C_PMEM_WRITE((awaddr & ~'h3) + 0, {wdata >>  0}[31:0], 1);
               end
               if (wstrb[1]) begin
-                `YSYX_DPI_C_PMEM_WRITE((awaddr & ~'h7) + 1, {wdata >>  8}[31:0], 1);
+                `YSYX_DPI_C_PMEM_WRITE((awaddr & ~'h3) + 1, {wdata >>  8}[31:0], 1);
               end
               if (wstrb[2]) begin
-                `YSYX_DPI_C_PMEM_WRITE((awaddr & ~'h7) + 2, {wdata >> 16}[31:0], 1);
+                `YSYX_DPI_C_PMEM_WRITE((awaddr & ~'h3) + 2, {wdata >> 16}[31:0], 1);
               end
               if (wstrb[3]) begin
-                `YSYX_DPI_C_PMEM_WRITE((awaddr & ~'h7) + 3, {wdata >> 24}[31:0], 1);
-              end
-              if (wstrb[4]) begin
-                `YSYX_DPI_C_PMEM_WRITE((awaddr & ~'h7) + 4, {wdata >> 32}[31:0], 1);
-              end
-              if (wstrb[5]) begin
-                `YSYX_DPI_C_PMEM_WRITE((awaddr & ~'h7) + 5, {wdata >> 40}[31:0], 1);
-              end
-              if (wstrb[6]) begin
-                `YSYX_DPI_C_PMEM_WRITE((awaddr & ~'h7) + 6, {wdata >> 48}[31:0], 1);
-              end
-              if (wstrb[7]) begin
-                `YSYX_DPI_C_PMEM_WRITE((awaddr & ~'h7) + 7, {wdata >> 56}[31:0], 1);
+                `YSYX_DPI_C_PMEM_WRITE((awaddr & ~'h3) + 3, {wdata >> 24}[31:0], 1);
               end
             end
             if (wlast) begin
@@ -290,3 +274,6 @@ module ysyx_npc_soc (
     end
   end
 endmodule  //ysyx_MEM_SRAM
+
+// verilator lint_on PINCONNECTEMPTY
+// verilator lint_on UNDRIVEN

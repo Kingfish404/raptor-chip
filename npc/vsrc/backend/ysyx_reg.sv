@@ -1,6 +1,5 @@
 module ysyx_reg (
     input clock,
-    input reset,
 
     input idu_valid,
     input [REG_ADDR_W-1:0] rd,
@@ -14,8 +13,10 @@ module ysyx_reg (
     input [REG_ADDR_W-1:0] s2addr,
 
     output [REG_NUM-1:0] out_rf_table,
-    output [  XLEN-1:0] out_src1,
-    output [  XLEN-1:0] out_src2
+    output [XLEN-1:0] out_src1,
+    output [XLEN-1:0] out_src2,
+
+    input reset
 );
   parameter bit [7:0] REG_ADDR_W = 4;
   parameter bit [7:0] REG_NUM = 16;
@@ -46,22 +47,9 @@ module ysyx_reg (
 
   always @(posedge clock) begin
     if (reset) begin
-      rf[0]  <= 0;
-      rf[1]  <= 0;
-      rf[2]  <= 0;
-      rf[3]  <= 0;
-      rf[4]  <= 0;
-      rf[5]  <= 0;
-      rf[6]  <= 0;
-      rf[7]  <= 0;
-      rf[8]  <= 0;
-      rf[9]  <= 0;
-      rf[10] <= 0;
-      rf[11] <= 0;
-      rf[12] <= 0;
-      rf[13] <= 0;
-      rf[14] <= 0;
-      rf[15] <= 0;
+      for (integer i = 0; i < REG_NUM; i = i + 1) begin
+        rf[i] <= 0;
+      end
     end else if (reg_write_en) begin
       rf[waddr[REG_ADDR_W-1:0]] <= wdata;
     end

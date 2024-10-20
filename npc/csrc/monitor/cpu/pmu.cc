@@ -10,6 +10,8 @@ extern TOP_NAME *top;
 
 PMUState pmu;
 word_t g_timer = 0;
+word_t main_cycle_cnt = 0;
+word_t main_inst_cnt = 0;
 
 float percentage(int a, int b)
 {
@@ -109,6 +111,11 @@ void perf_sample_per_inst()
   }
   pmu.instr_cnt++;
   uint32_t inst = *(uint32_t *)&(CONCAT(VERILOG_PREFIX, wbu__DOT__inst_wbu));
+  if (inst == 0x0ff0000f) // fence
+  {
+    main_cycle_cnt = pmu.active_cycle;
+    main_inst_cnt = pmu.instr_cnt;
+  }
   uint32_t opcode = inst & 0x7f;
   switch (opcode)
   {
@@ -145,10 +152,14 @@ void perf()
   printf("======== Instruction Analysis ========\n");
   uint64_t time_clint = *(uint64_t *)&(CONCAT(VERILOG_PREFIX, bus__DOT__clint__DOT__mtime));
   uint64_t time_clint_us = time_clint / 2;
+  float IPC = (1.0 * pmu.instr_cnt / pmu.active_cycle);
+  float MAIN_IPC = (1.0 * (pmu.instr_cnt - main_inst_cnt) / (pmu.active_cycle - main_cycle_cnt));
+  float MIPS = (double)((pmu.instr_cnt / 1e6) / (time_clint_us / 1e6));
   Log("#Inst: %lld, cycle: %llu, "
-      "" FMT_BLUE("IPC: %2.3f ") ", CLINT: %lld (us), " FMT_BLUE(" %2.3f MIPS"),
-      pmu.instr_cnt, pmu.active_cycle, (1.0 * pmu.instr_cnt / pmu.active_cycle),
-      (time_clint_us), (double)((pmu.instr_cnt / 1e6) / (time_clint_us / 1e6)));
+      "" FMT_BLUE("IPC: %2.3f, %2.3f (main)") ", CLINT: %lld (us), " FMT_BLUE(" %2.3f MIPS"),
+      pmu.instr_cnt, pmu.active_cycle, IPC,
+      (main_cycle_cnt != 0) ? MAIN_IPC : 0,
+      (time_clint_us), MIPS);
   printf("| %8s,  %% | %8s,  %% | %8s,  %% |\n",
          "IFU", "LSU", "EXU");
   printf("| %8lld,%3.0f | %8lld,%3.0f | %8lld,%3.0f |\n",

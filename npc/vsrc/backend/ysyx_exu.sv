@@ -57,7 +57,7 @@ module ysyx_exu (
   reg branch_change, system_exu;
   reg [2:0] func3 = inst_exu[14:12];
 
-  ysyx_exu_csr csr (
+  ysyx_exu_csr csrs (
       .clock(clock),
       .reset(reset),
 

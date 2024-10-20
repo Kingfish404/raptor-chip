@@ -6,6 +6,7 @@
 module ysyx (
     input clock,
 
+    // verilator lint_off UNDRIVEN
     // AXI4 Slave
     input [1:0] io_slave_arburst,
     input [2:0] io_slave_arsize,
@@ -17,7 +18,7 @@ module ysyx (
 
     output reg [3:0] io_slave_rid,
     output reg io_slave_rlast,
-    output reg [63:0] io_slave_rdata,
+    output reg [XLEN-1:0] io_slave_rdata,
     output reg [1:0] io_slave_rresp,
     output reg io_slave_rvalid,
     input io_slave_rready,
@@ -31,8 +32,8 @@ module ysyx (
     output reg io_slave_awready,
 
     input io_slave_wlast,
-    input [63:0] io_slave_wdata,
-    input [7:0] io_slave_wstrb,
+    input [XLEN-1:0] io_slave_wdata,
+    input [3:0] io_slave_wstrb,
     input io_slave_wvalid,
     output reg io_slave_wready,
 
@@ -40,6 +41,7 @@ module ysyx (
     output reg [1:0] io_slave_bresp,
     output reg io_slave_bvalid,
     input io_slave_bready,
+    // verilator lint_on UNDRIVEN
 
     // AXI4 Master
     output [1:0] io_master_arburst,
@@ -52,7 +54,7 @@ module ysyx (
 
     input reg [3:0] io_master_rid,
     input reg io_master_rlast,
-    input reg [63:0] io_master_rdata,
+    input reg [XLEN-1:0] io_master_rdata,
     input reg [1:0] io_master_rresp,
     input reg io_master_rvalid,
     output io_master_rready,
@@ -66,8 +68,8 @@ module ysyx (
     input reg io_master_awready,
 
     output io_master_wlast,
-    output [63:0] io_master_wdata,
-    output [7:0] io_master_wstrb,
+    output [XLEN-1:0] io_master_wdata,
+    output [3:0] io_master_wstrb,
     output io_master_wvalid,
     input reg io_master_wready,
 
