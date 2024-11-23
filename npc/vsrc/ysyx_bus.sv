@@ -63,7 +63,7 @@ module ysyx_bus (
     input lsu_wvalid,
     output out_lsu_wready
 );
-  parameter bit [7:0] XLEN = 32;
+  parameter bit [7:0] XLEN = `YSYX_XLEN;
 
   wire arready;
   wire [XLEN-1:0] out_rdata;
@@ -102,7 +102,7 @@ module ysyx_bus (
             if (io_master_arready) begin
               state <= IF_D;
             end
-          end else if (!ifu_required & (lsu_arvalid)) begin
+          end else if (!ifu_required && (lsu_arvalid)) begin
             state <= LS_A;
           end
         end
@@ -114,9 +114,9 @@ module ysyx_bus (
           end
         end
         LS_A: begin
-          if (io_master_arvalid & io_master_arready) begin
+          if (io_master_arvalid && io_master_arready) begin
             state <= LS_R;
-          end else if (clint_en | ifu_arvalid) begin
+          end else if (clint_en || ifu_arvalid) begin
             state <= IF_A;
           end
         end
@@ -172,40 +172,40 @@ module ysyx_bus (
 
   // ifu read
   assign out_ifu_rdata  = ({XLEN{out_ifu_rvalid}} & (out_rdata));
-  assign out_ifu_rvalid = (state == IF_D | state == IF_A) & ((rvalid));
+  assign out_ifu_rvalid = (state == IF_D || state == IF_A) && ((rvalid));
 
   // lsu read
-  wire clint_en = (lsu_araddr == `YSYX_BUS_RTC_ADDR) | (lsu_araddr == `YSYX_BUS_RTC_ADDR_UP);
+  wire clint_en = (lsu_araddr == `YSYX_BUS_RTC_ADDR) || (lsu_araddr == `YSYX_BUS_RTC_ADDR_UP);
   assign out_lsu_rdata = ({XLEN{lsu_arvalid}} & (
                           ({XLEN{clint_en}} & out_clint_rdata) |
                           ({XLEN{!clint_en}} & out_rdata)
                         ));
   assign out_lsu_rvalid = (
-    (state == LS_R | clint_arvalid) &
-    (lsu_arvalid) &
-    (rvalid | out_clint_rvalid));
+    (state == LS_R || clint_arvalid) &&
+    (lsu_arvalid) &&
+    (rvalid || out_clint_rvalid));
 
   // lsu write
   assign out_lsu_wready = io_master_bvalid;
 
   // io lsu read
   wire ifu_sdram_arburst = (
-    `YSYX_I_SDRAM_ARBURST & ifu_arvalid &
-    (ifu_araddr >= 'ha0000000) & (ifu_araddr <= 'hc0000000));
+    `YSYX_I_SDRAM_ARBURST && ifu_arvalid &&
+    (ifu_araddr >= 'ha0000000) && (ifu_araddr <= 'hc0000000));
   assign io_master_arburst = ifu_sdram_arburst ? 2'b01 : 2'b00;
   assign io_master_arsize = (
            ({3{lsu_rstrb == 8'h1}} & 3'b000) |
            ({3{lsu_rstrb == 8'h3}} & 3'b001) |
-           ({3{lsu_rstrb == 8'hf | ifu_arvalid}} & 3'b010) |
+           ({3{lsu_rstrb == 8'hf || ifu_arvalid}} & 3'b010) |
            (3'b000)
          );
   assign io_master_arlen = ifu_sdram_arburst ? 'h1 : 'h0;
   assign io_master_araddr = sram_araddr;
-  assign io_master_arvalid = !reset & (
-           ((state == IF_A) & ifu_arvalid) |
-           ((state == LS_A) & lsu_arvalid & !clint_en) // for new soc
+  assign io_master_arvalid = !reset && (
+           ((state == IF_A) && ifu_arvalid) |
+           ((state == LS_A) && lsu_arvalid && !clint_en) // for new soc
       );
-  assign arready = io_master_arready & io_master_bvalid;
+  assign arready = io_master_arready && io_master_bvalid;
 
   // wire [XLEN-1:0] io_rdata = (io_master_araddr[2:2] == 1) ?
   //      io_master_rdata[63:32]:
@@ -224,7 +224,7 @@ module ysyx_bus (
            (3'b000)
          );
   assign io_master_awaddr = lsu_awaddr;
-  assign io_master_awvalid = (state_store == LS_S_W) & (lsu_wvalid) & !awrite_done;
+  assign io_master_awvalid = (state_store == LS_S_W) && (lsu_wvalid) && !awrite_done;
 
   assign io_master_wlast = io_master_wvalid;
   wire [1:0] awaddr_lo = io_master_awaddr[1:0];
@@ -238,7 +238,7 @@ module ysyx_bus (
   assign io_master_wdata = wdata;
   assign io_master_wstrb = {wstrb};
   wire [3:0] wstrb = {lsu_wstrb[3:0] << awaddr_lo};
-  assign io_master_wvalid = (state_store == LS_S_W) & (lsu_wvalid) & !write_done;
+  assign io_master_wvalid = (state_store == LS_S_W) && (lsu_wvalid) && !write_done;
 
   assign io_master_bready = 1;
 
@@ -278,7 +278,7 @@ module ysyx_bus (
     end
   end
 
-  wire clint_arvalid = (lsu_arvalid & clint_en);
+  wire clint_arvalid = (lsu_arvalid && clint_en);
   wire out_clint_arready;
   wire [XLEN-1:0] out_clint_rdata;
   wire [1:0] out_clint_rresp;
@@ -293,7 +293,7 @@ module ysyx_bus (
       .out_rresp(out_clint_rresp),
       .out_rvalid(out_clint_rvalid)
   );
-endmodule
+endmodule  // ysyx_bus
 
 // Core Local INTerrupt controller
 module ysyx_clint (
@@ -308,7 +308,7 @@ module ysyx_clint (
     output [1:0] out_rresp,
     output reg out_rvalid
 );
-  parameter bit [7:0] XLEN = 32;
+  parameter bit [7:0] XLEN = `YSYX_XLEN;
 
   reg [63:0] mtime = 0;
   assign out_rdata = (
@@ -330,4 +330,4 @@ module ysyx_clint (
       end
     end
   end
-endmodule  //ysyx_CLINT
+endmodule  //ysyx_clint

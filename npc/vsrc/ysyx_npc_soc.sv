@@ -8,7 +8,7 @@ module ysyxSoC (
     input clock,
     input reset
 );
-  parameter bit [7:0] XLEN = 32;
+  parameter bit [7:0] XLEN = `YSYX_XLEN;
   wire auto_master_out_awready;
   wire auto_master_out_awvalid;
   wire [3:0] auto_master_out_awid;
@@ -75,13 +75,13 @@ module ysyxSoC (
       .io_slave_awready (  /* unused */),
       .io_slave_awvalid (1'h0),
       .io_slave_awid    (4'h0),
-      .io_slave_awaddr  (32'h0),
+      .io_slave_awaddr  ('h0),
       .io_slave_awlen   (8'h0),
       .io_slave_awsize  (3'h0),
       .io_slave_awburst (2'h0),
       .io_slave_wready  (  /* unused */),
       .io_slave_wvalid  (1'h0),
-      .io_slave_wdata   (32'h0),
+      .io_slave_wdata   ('h0),
       .io_slave_wstrb   (4'h0),
       .io_slave_wlast   (1'h0),
       .io_slave_bready  (1'h0),
@@ -91,7 +91,7 @@ module ysyxSoC (
       .io_slave_arready (  /* unused */),
       .io_slave_arvalid (1'h0),
       .io_slave_arid    (4'h0),
-      .io_slave_araddr  (32'h0),
+      .io_slave_araddr  ('h0),
       .io_slave_arlen   (8'h0),
       .io_slave_arsize  (3'h0),
       .io_slave_arburst (2'h0),
@@ -174,7 +174,7 @@ module ysyx_npc_soc (
     output reg out_bvalid,
     input bready
 );
-  parameter bit [7:0] XLEN = 32;
+  parameter bit [7:0] XLEN = `YSYX_XLEN;
 
   reg [31:0] mem_rdata_buf;
   reg [2:0] state = 0;
@@ -190,7 +190,7 @@ module ysyx_npc_soc (
 
   // write transaction
   assign out_awready = (state == 'b000);
-  assign out_wready  = (state == 'b011 & wvalid);
+  assign out_wready  = (state == 'b011 && wvalid);
   assign out_bvalid  = (state == 'b100);
   wire [7:0] wmask = (
     ({{8{awsize == 3'b000}} & 8'h1 }) |
@@ -251,7 +251,7 @@ module ysyx_npc_soc (
         end
         'b011: begin
           // wait for rready
-          if (!is_writing & rready) begin
+          if (!is_writing && rready) begin
             state <= 0;
           end else if (is_writing) begin
             state <= 'b100;

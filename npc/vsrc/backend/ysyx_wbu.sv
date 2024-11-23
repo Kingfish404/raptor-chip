@@ -60,4 +60,4 @@ module ysyx_wbu (
     end
   end
 
-endmodule  // ysyx_WBU
+endmodule  // ysyx_wbu

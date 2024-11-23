@@ -19,7 +19,7 @@ module ysyx_ifu_l1i (
 
     input reset
 );
-  parameter bit [7:0] XLEN = 32;
+  parameter bit [7:0] XLEN = `YSYX_XLEN;
   parameter bit [7:0] L1I_LINE_LEN = 1;
   parameter bit [7:0] L1I_LINE_SIZE = 2 ** L1I_LINE_LEN;
   parameter bit [7:0] L1I_LEN = 2;
@@ -37,18 +37,18 @@ module ysyx_ifu_l1i (
   wire [L1I_LEN-1:0] addr_idx = pc_ifu[L1I_LEN+L1I_LINE_LEN+2-1:L1I_LINE_LEN+2];
   wire [L1I_LINE_LEN-1:0] addr_offset = pc_ifu[L1I_LINE_LEN+2-1:2];
 
-  assign out_ifu_araddr = (l1i_state == 'b00 | l1i_state == 'b01) ?
+  assign out_ifu_araddr = (l1i_state == 'b00 || l1i_state == 'b01) ?
     (pc_ifu & ~'h4) :
     (pc_ifu | 'h4);
   assign out_ifu_arvalid = ifu_sdram_arburst ?
-    !l1i_cache_hit & (l1i_state == 'b000 | l1i_state == 'b001) :
-    !l1i_cache_hit & (l1i_state != 'b010 & l1i_state != 'b100);
+    !l1i_cache_hit && (l1i_state == 'b000 || l1i_state == 'b001) :
+    !l1i_cache_hit && (l1i_state != 'b010 && l1i_state != 'b100);
   assign out_ifu_required = (l1i_state != 'b000);
 
   wire l1i_cache_hit = (
-         (l1i_state == 'b000 | l1i_state == 'b100) &
-         l1ic_valid[addr_idx] == 1'b1) & (l1i_tag[addr_idx][addr_offset] == addr_tag);
-  wire ifu_sdram_arburst = `YSYX_I_SDRAM_ARBURST & (pc_ifu >= 'ha0000000) & (pc_ifu <= 'hc0000000);
+         (l1i_state == 'b000 || l1i_state == 'b100) &&
+         l1ic_valid[addr_idx] == 1'b1) && (l1i_tag[addr_idx][addr_offset] == addr_tag);
+  wire ifu_sdram_arburst = `YSYX_I_SDRAM_ARBURST && (pc_ifu >= 'ha0000000) && (pc_ifu <= 'hc0000000);
 
   assign out_inst = l1i[addr_idx][addr_offset];
 
@@ -67,7 +67,7 @@ module ysyx_ifu_l1i (
           end
         end
         'b001:
-        if (ifu_rvalid & !l1i_cache_hit) begin
+        if (ifu_rvalid && !l1i_cache_hit) begin
           if (ifu_sdram_arburst) begin
             l1i_state <= 'b011;
           end else begin
@@ -96,4 +96,4 @@ module ysyx_ifu_l1i (
       endcase
     end
   end
-endmodule
+endmodule  // ysyx_ifu_l1i

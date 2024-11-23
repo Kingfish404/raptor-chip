@@ -8,27 +8,34 @@ bash init.sh subproject-name
 
 [lecture note]: https://ysyx.oscc.cc/docs/
 
-设计的处理器暂称为 **New Processor Core (NPC)** , 采用了`RISC-V`指令集架构, 使用`Verilog`语言进行描述.
+设计的处理器暂称为 **New Processor Core (NPC)** , 采用[`RISC-V`][RISC-V]指令集架构, 使用`SystemVerilog`和`Chisel`进行描述.
+
+[RISC-V]: https://riscv.org/
 
 ## Preparation
 
 ```shell
-# macOS
+# macOS or Linux(debian/ubuntu/fedora)
+# install brew https://brew.sh/
 brew install verilator sdl2 sdl2_image sdl2_ttf flex
 brew tap riscv-software-src/riscv
 brew install riscv-tools
-brew install readline
-brew install llvm
+brew install readline llvm yosys
 
 # debian/ubuntu
 apt-get install verilator libsdl2-dev libsdl2-image-dev libsdl2-ttf-dev flex
 apt-get install gcc-riscv64-linux-gnu
-sudo apt-get install libreadline-dev 
+sudo apt-get install libreadline-dev
 sudo apt-get install llvm
 
 # clone mono repository
+git clone https://github.com/kingfish404/am-kernels
 git clone https://github.com/Kingfish404/ysyxSoC
 git clone https://github.com/NJU-ProjectN/nvboard
+
+# install mill
+cd ./npc/ssrc
+wget https://github.com/com-lihaoyi/mill/releases/download/0.11.13/0.11.13 -O mill
 ```
 
 ## Environment Variables
@@ -67,10 +74,16 @@ cd $YSYX_HOME/nanos-lite && make ARCH=$ISA-nemu update run
 cd $YSYX_HOME/nanos-lite && make ARCH=$ISA-nemu run
 
 ## fpga. running on gowin-tang-nano-20k
-./npc/yosys-fpga-cat.sh
+./npc/ana-fpga-cat.sh
 # then follow `fpga/gowin-tang-nano-20k/README.md`
 ```
 
 ## Architecture
 
 ![](./assets/npc-rv32e-pipeline.svg)
+
+## Reference
+
+- [Specifications – RISC-V International](https://riscv.org/technical/specifications/)
+- [riscv/riscv-isa-manual: RISC-V Instruction Set Manual](https://github.com/riscv/riscv-isa-manual)
+- [riscv-software-src/riscv-unified-db: Machine-readable database of the RISC-V specification, and tools to generate various views](https://github.com/riscv-software-src/riscv-unified-db)

@@ -31,20 +31,20 @@ module ysyx_exu_csr (
 
   reg [XLEN-1:0] csr[5];
   wire [REG_W-1:0] waddr_reg0 = (
-    ({REG_W{rwaddr==`YSYX_CSR_MCAUSE}}) & (MCAUSE) |
-    ({REG_W{rwaddr==`YSYX_CSR_MEPC}}) & (MEPC) |
-    ({REG_W{rwaddr==`YSYX_CSR_MTVEC}}) & (MTVEC) |
+    ({REG_W{rwaddr==`YSYX_CSR_MCAUSE_}}) & (MCAUSE) |
+    ({REG_W{rwaddr==`YSYX_CSR_MEPC___}}) & (MEPC) |
+    ({REG_W{rwaddr==`YSYX_CSR_MTVEC__}}) & (MTVEC) |
     ({REG_W{rwaddr==`YSYX_CSR_MSTATUS}}) & (MSTATUS) |
     (MNONE)
   );
 
   assign out_rdata = (
-    ({XLEN{rwaddr==`YSYX_CSR_MVENDORID}}) & (32'h79737978) |
-    ({XLEN{rwaddr==`YSYX_CSR_MARCHID}}) & (32'h15fde77) |
+    ({XLEN{rwaddr==`YSYX_CSR_MVENDORID}}) & ('h79737978) |
+    ({XLEN{rwaddr==`YSYX_CSR_MARCHID__}}) & ('h15fde77) |
     ({XLEN{rwaddr==`YSYX_CSR_MSTATUS}}) & (csr[MSTATUS]) |
-    ({XLEN{rwaddr==`YSYX_CSR_MCAUSE}}) & (csr[MCAUSE]) |
-    ({XLEN{rwaddr==`YSYX_CSR_MEPC}}) & (csr[MEPC]) |
-    ({XLEN{rwaddr==`YSYX_CSR_MTVEC}}) & (csr[MTVEC]) |
+    ({XLEN{rwaddr==`YSYX_CSR_MCAUSE_}}) & (csr[MCAUSE]) |
+    ({XLEN{rwaddr==`YSYX_CSR_MEPC___}}) & (csr[MEPC]) |
+    ({XLEN{rwaddr==`YSYX_CSR_MTVEC__}}) & (csr[MTVEC]) |
     (0)
   );
 
@@ -63,8 +63,8 @@ module ysyx_exu_csr (
       end
       if (ecall) begin
         csr[MCAUSE] <= 'hb;
-        csr[MSTATUS][`YSYX_CSR_MSTATUS_MPIE_IDX] <= csr[MSTATUS][`YSYX_CSR_MSTATUS_MIE_IDX];
-        csr[MSTATUS][`YSYX_CSR_MSTATUS_MIE_IDX] <= 1'b0;
+        csr[MSTATUS][`YSYX_CSR_MSTATUS_MPIE] <= csr[MSTATUS][`YSYX_CSR_MSTATUS_MIE_];
+        csr[MSTATUS][`YSYX_CSR_MSTATUS_MIE_] <= 1'b0;
         csr[MEPC] <= pc;
       end
       if (mret) begin
@@ -78,4 +78,4 @@ module ysyx_exu_csr (
       end
     end
   end
-endmodule  //YSYX_csr
+endmodule  // ysyx_exu_csr

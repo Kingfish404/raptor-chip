@@ -83,7 +83,7 @@ module ysyx (
     input reset
 );
   parameter bit [7:0] XLEN = `YSYX_XLEN;
-  parameter bit [7:0] REG_ADDR_W = 4;
+  parameter bit [7:0] REG_ADDR_W = `YSYX_REG_LEN;
 
   // IFU out
   wire [31:0] ifu_inst;
@@ -112,7 +112,7 @@ module ysyx (
   wire exu_ren, exu_wen;
   wire [XLEN-1:0] exu_rwaddr;
   wire exu_lsu_avalid;
-  wire [3:0] exu_alu_op;
+  wire [4:0] exu_alu_op;
   wire [XLEN-1:0] exu_lsu_wdata;
 
   // WBU out
@@ -122,7 +122,7 @@ module ysyx (
   wire wbu_pc_change, wbu_pc_retire;
 
   // reg out
-  wire [16-1:0] reg_rf_table;
+  wire [`YSYX_REG_NUM-1:0] reg_rf_table;
   wire [XLEN-1:0] reg_rdata1, reg_rdata2;
 
   // lsu out
@@ -206,7 +206,7 @@ module ysyx (
 
       .rf_table(reg_rf_table),
 
-      .prev_valid(ifu_valid & flush_pipeline == 0),
+      .prev_valid(ifu_valid && flush_pipeline == 0),
       .next_ready(exu_ready),
       .out_valid (idu_valid),
       .out_ready (idu_ready),
@@ -233,7 +233,7 @@ module ysyx (
       .out_ebreak(exu_ebreak),
       .out_rd((exu_rd)),
 
-      .prev_valid(idu_valid & flush_pipeline == 0),
+      .prev_valid(idu_valid && flush_pipeline == 0),
       .next_ready(wbu_ready),
       .out_valid (exu_valid),
       .out_ready (exu_ready),
@@ -270,7 +270,7 @@ module ysyx (
       .out_change(wbu_pc_change),
       .out_retire(wbu_pc_retire),
 
-      .prev_valid(exu_valid & flush_pipeline == 0),
+      .prev_valid(exu_valid && flush_pipeline == 0),
       .next_ready(ifu_ready),
       .out_valid (wbu_valid),
       .out_ready (wbu_ready),
@@ -281,11 +281,11 @@ module ysyx (
   ysyx_reg regs (
       .clock(clock),
 
-      .idu_valid(idu_valid & exu_ready),
+      .idu_valid(idu_valid && exu_ready),
       .rd(idu_if.rd),
 
       .bad_speculation(flush_pipeline),
-      .reg_write_en(exu_valid & flush_pipeline == 0),
+      .reg_write_en(exu_valid && flush_pipeline == 0),
       .waddr((exu_rd)),
       .wdata(exu_reg_wdata),
 

@@ -1,28 +1,29 @@
-BUILD_DIR = ../vsrc/generated
+BUILD_DIR = ./../vsrc/generated
 
 PRJ = npc
+MILL = ./mill
 
 test:
-	mill -i $(PRJ).test
+	$(MILL) -i $(PRJ).test
 
 verilog:
 	mkdir -p $(BUILD_DIR)
-	mill -i $(PRJ).runMain Elaborate --target-dir $(BUILD_DIR)
+	$(MILL) -i $(PRJ).runMain Elaborate --target-dir $(BUILD_DIR)
 
 help:
-	mill -i $(PRJ).runMain Elaborate --help
+	$(MILL) -i $(PRJ).runMain Elaborate --help
 
 reformat:
-	mill -i __.reformat
+	$(MILL) -i __.reformat
 
 checkformat:
-	mill -i __.checkFormat
+	$(MILL) -i __.checkFormat
 
 bsp:
-	mill -i mill.bsp.BSP/install
+	$(MILL) -i mill.bsp.BSP/install
 
 idea:
-	mill -i mill.idea.GenIdea/idea
+	$(MILL) -i mill.idea.GenIdea/idea
 
 clean:
 	-rm -rf $(BUILD_DIR)

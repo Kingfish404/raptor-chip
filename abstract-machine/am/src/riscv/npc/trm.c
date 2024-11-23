@@ -25,6 +25,7 @@ void halt(int code) {
 }
 
 void _trm_init() {
+  asm volatile("fence");
   int ret = main(mainargs);
   halt(ret);
 }

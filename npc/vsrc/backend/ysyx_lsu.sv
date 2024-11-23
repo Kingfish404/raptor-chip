@@ -8,7 +8,7 @@ module ysyx_lsu (
     input ren,
     input wen,
     lsu_avalid,
-    input [3:0] alu_op,
+    input [4:0] alu_op,
     input [XLEN-1:0] wdata,
     // to exu
     output [XLEN-1:0] out_rdata,
@@ -34,7 +34,7 @@ module ysyx_lsu (
 
     input reset
 );
-  parameter bit [7:0] XLEN = 32;
+  parameter bit [7:0] XLEN = `YSYX_XLEN;
 
   reg valid_r;
 
@@ -45,7 +45,7 @@ module ysyx_lsu (
 
   assign out_lsu_araddr = lsu_araddr;
   assign out_lsu_arvalid = arvalid;
-  assign arvalid = ren & lsu_avalid & !l1d_cache_hit;
+  assign arvalid = ren && lsu_avalid && !l1d_cache_hit;
   assign out_lsu_rstrb = rstrb;
 
   // without l1d cache
@@ -54,14 +54,14 @@ module ysyx_lsu (
 
   // with l1d cache
   assign rdata_unalign = (valid_r) ? rdata_lsu : l1d[addr_idx];
-  assign out_rvalid = valid_r | l1d_cache_hit;
+  assign out_rvalid = valid_r || l1d_cache_hit;
 
   assign out_lsu_awaddr = lsu_araddr;
-  assign out_lsu_awvalid = wen & lsu_avalid;
+  assign out_lsu_awvalid = wen && lsu_avalid;
 
   assign out_lsu_wdata = wdata;
   assign out_lsu_wstrb = wstrb;
-  assign out_lsu_wvalid = wen & lsu_avalid;
+  assign out_lsu_wvalid = wen && lsu_avalid;
 
   assign out_wready = lsu_wready;
 
@@ -82,8 +82,8 @@ module ysyx_lsu (
   wire l1d_cache_hit_w;
 
   assign l1d_cache_hit = (
-         ren & lsu_avalid & 1 &
-         l1d_valid[addr_idx] == 1'b1) & (l1d_tag[addr_idx] == addr_tag);
+         ren && lsu_avalid && 1 &&
+         l1d_valid[addr_idx] == 1'b1) && (l1d_tag[addr_idx] == addr_tag);
   assign addr_tag = out_lsu_araddr[XLEN-1:L1D_LEN+2];
   assign addr_idx = out_lsu_araddr[L1D_LEN+2-1:0+2];
   assign l1d_cache_within = (
@@ -96,22 +96,22 @@ module ysyx_lsu (
   assign waddr_tag = out_lsu_awaddr[XLEN-1:L1D_LEN+2];
   assign waddr_idx = out_lsu_awaddr[L1D_LEN+2-1:0+2];
   assign l1d_cache_hit_w = (
-         wen & lsu_avalid &
-         l1d_valid[waddr_idx] == 1'b1) & (l1d_tag[waddr_idx] == waddr_tag);
+         wen && lsu_avalid &&
+         l1d_valid[waddr_idx] == 1'b1) && (l1d_tag[waddr_idx] == waddr_tag);
 
   // load/store unit
   // assign wstrb = (
-  //          ({8{alu_op == `YSYX_ALU_OP_SB}} & 8'h1) |
-  //          ({8{alu_op == `YSYX_ALU_OP_SH}} & 8'h3) |
-  //          ({8{alu_op == `YSYX_ALU_OP_SW}} & 8'hf)
+  //          ({8{alu_op == `YSYX_ALU_SB}} & 8'h1) |
+  //          ({8{alu_op == `YSYX_ALU_SH}} & 8'h3) |
+  //          ({8{alu_op == `YSYX_ALU_SW}} & 8'hf)
   //        );
-  assign wstrb = {{4{1'b0}}, {alu_op}};
+  assign wstrb = {{4{1'b0}}, {alu_op[3:0]}};
   assign rstrb = (
-           ({8{alu_op == `YSYX_ALU_OP_LB}} & 8'h1) |
-           ({8{alu_op == `YSYX_ALU_OP_LBU}} & 8'h1) |
-           ({8{alu_op == `YSYX_ALU_OP_LH}} & 8'h3) |
-           ({8{alu_op == `YSYX_ALU_OP_LHU}} & 8'h3) |
-           ({8{alu_op == `YSYX_ALU_OP_LW}} & 8'hf)
+           ({8{alu_op == `YSYX_ALU_LB__}} & 8'h1) |
+           ({8{alu_op == `YSYX_ALU_LBU_}} & 8'h1) |
+           ({8{alu_op == `YSYX_ALU_LH__}} & 8'h3) |
+           ({8{alu_op == `YSYX_ALU_LHU_}} & 8'h3) |
+           ({8{alu_op == `YSYX_ALU_LW__}} & 8'hf)
          );
 
   wire [1:0] araddr_lo = out_lsu_araddr[1:0];
@@ -123,12 +123,12 @@ module ysyx_lsu (
            (0)
          );
   assign out_rdata = (
-           ({XLEN{alu_op == `YSYX_ALU_OP_LB}} & (rdata[7] ? rdata | 'hffffff00 : rdata & 'hff)) |
-           ({XLEN{alu_op == `YSYX_ALU_OP_LBU}} & rdata & 'hff) |
-           ({XLEN{alu_op == `YSYX_ALU_OP_LH}} &
+           ({XLEN{alu_op == `YSYX_ALU_LB__}} & (rdata[7] ? rdata | 'hffffff00 : rdata & 'hff)) |
+           ({XLEN{alu_op == `YSYX_ALU_LBU_}} & rdata & 'hff) |
+           ({XLEN{alu_op == `YSYX_ALU_LH__}} &
               (rdata[15] ? rdata | 'hffff0000 : rdata & 'hffff)) |
-           ({XLEN{alu_op == `YSYX_ALU_OP_LHU}} & rdata & 'hffff) |
-           ({XLEN{alu_op == `YSYX_ALU_OP_LW}} & rdata)
+           ({XLEN{alu_op == `YSYX_ALU_LHU_}} & rdata & 'hffff) |
+           ({XLEN{alu_op == `YSYX_ALU_LW__}} & rdata)
          );
   assign lsu_araddr = addr;
   always @(posedge clock) begin
@@ -136,7 +136,7 @@ module ysyx_lsu (
       l1d_valid <= 0;
       valid_r   <= 0;
     end else begin
-      if (ren & lsu_rvalid) begin
+      if (ren && lsu_rvalid) begin
         if (l1d_cache_within) begin
           l1d[addr_idx] <= bus_rdata;
           l1d_tag[addr_idx] <= addr_tag;
@@ -149,10 +149,10 @@ module ysyx_lsu (
       if (valid_r) begin
         valid_r <= 0;
       end
-      if (out_lsu_awvalid & l1d_cache_hit_w) begin
+      if (out_lsu_awvalid && l1d_cache_hit_w) begin
         // $display("l1d_cache_hit_w");
         l1d_valid[waddr_idx] <= 1'b0;
       end
     end
   end
-endmodule
+endmodule  // ysyx_lsu
