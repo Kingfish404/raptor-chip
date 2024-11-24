@@ -184,7 +184,6 @@ module ysyx_exu (
   // alu for M Extension
   ysyx_exu_mul mul (
       .clock(clock),
-      .reset(reset),
       .in_a(idu_if.op1),
       .in_b(idu_if.op2),
       .in_op(idu_if.alu_op),

@@ -5,6 +5,9 @@
 `define YSYX_I_EXTENSION 'h1
 `define YSYX_M_EXTENSION 'h1
 
+// Microarchitecture
+// `define YSYX_M_FAST 'h1
+
 `define YSYX_INST_FENCE_I 32'h0000100f
 
 `define YSYX_OP_LUI___ 7'b0110111
