@@ -21,6 +21,8 @@ brew install verilator sdl2 sdl2_image sdl2_ttf flex
 brew tap riscv-software-src/riscv
 brew install riscv-tools
 brew install readline llvm yosys
+# devlopment tools
+brew install surfer # Waveform viewer, supporting VCD, FST, or GHW format
 
 # debian/ubuntu
 apt-get install verilator libsdl2-dev libsdl2-image-dev libsdl2-ttf-dev flex
@@ -80,7 +82,7 @@ cd $YSYX_HOME/nanos-lite && make ARCH=$ISA-nemu run
 
 ## Architecture
 
-![](./assets/npc-rv32e-pipeline.svg)
+![](./docs/assets/npc-rv32e-pipeline.svg)
 
 ## Reference
 

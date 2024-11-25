@@ -4,7 +4,7 @@
 #include <readline/history.h>
 #include <npc_verilog.h>
 #include <verilated.h>
-#include <verilated_vcd_c.h>
+#include "verilated_fst_c.h"
 #ifdef CONFIG_NVBoard
 #include <nvboard.h>
 #endif
@@ -31,7 +31,7 @@ NPCState npc = {
 
 VerilatedContext *contextp = NULL;
 TOP_NAME *top = NULL;
-VerilatedVcdC *tfp = NULL;
+VerilatedFstC *tfp = NULL;
 
 static bool is_batch_mode = false;
 static bool enable_vcd = true;
@@ -246,9 +246,9 @@ void sdb_sim_init(int argc, char **argv)
 #ifdef CONFIG_WTRACE
   if (enable_vcd)
   {
-    tfp = new VerilatedVcdC;
+    tfp = new VerilatedFstC;
     top->trace(tfp, 99);
-    tfp->open("npc.vcd");
+    tfp->open("npc.fst");
   }
 #endif
   verilog_connect(top, &npc);

@@ -3,7 +3,7 @@
 #include <readline/readline.h>
 #include <readline/history.h>
 #include <npc_verilog.h>
-#include <verilated_vcd_c.h>
+#include "verilated_fst_c.h"
 #ifdef CONFIG_NVBoard
 #include <nvboard.h>
 #endif
@@ -17,7 +17,7 @@ extern word_t g_timer;
 
 extern VerilatedContext *contextp;
 extern TOP_NAME *top;
-extern VerilatedVcdC *tfp;
+extern VerilatedFstC *tfp;
 
 #ifdef CONFIG_ITRACE
 static char iringbuf[MAX_IRING_SIZE][128] = {};

@@ -6,6 +6,7 @@
 !*.[cSh]
 !*.cc
 !.gitignore
+!/sim/*
 !README.md
 !Kconfig
 include/config
