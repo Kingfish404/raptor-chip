@@ -51,3 +51,92 @@ void naive_uload(PCB *pcb, const char *filename)
   Log("Jump to entry = %p", entry);
   ((void (*)())entry)();
 }
+
+void context_kload(PCB *pcb, void *entry, void *arg)
+{
+  pcb->cp = kcontext((Area){pcb->stack, pcb->stack + STACK_SIZE}, entry, arg);
+}
+
+void context_uload(PCB *pcb, const char *filename, char *const argv[], char *const envp[])
+{
+  uintptr_t entry = loader(pcb, filename);
+  int argc = 0, envp_size = 0;
+  while (argv[argc] != NULL)
+  {
+    argc++;
+  }
+  while (envp[envp_size] != NULL)
+  {
+    envp_size++;
+  }
+  Log("Jump to entry = %p, argc = %d, envp_size = %d", entry, argc, envp_size);
+  envp_size = 0; // TODO: fixme for pal
+  char *argv_table[argc + 1], *envp_table[envp_size + 1];
+  int argv_sizes[argc], envp_sizes[envp_size];
+  for (int i = 0; i < argc; i++)
+  {
+    for (int j = 0; argv[i][j] != '\0'; j++)
+    {
+      argv_sizes[i] = j;
+    }
+    argv_sizes[i] += 2;
+  }
+  for (int i = 0; i < envp_size; i++)
+  {
+    for (int j = 0; envp[i][j] != '\0'; j++)
+    {
+      envp_sizes[i] = j;
+    }
+    envp_sizes[i] += 2;
+  }
+  const Area kstack = (Area){.start = pcb->stack, .end = pcb->stack + STACK_SIZE};
+  pcb->cp = ucontext(NULL, kstack, (void *)entry);
+  void *const ustack_s = new_page(4);
+  void *sp = ustack_s + 4 * PGSIZE;
+  // Unspecified area
+  sp -= 4 * sizeof(int);
+  // string area: argv[]
+  for (int i = argc - 1; i >= 0; i--)
+  {
+    sp -= argv_sizes[i] + 1;
+    sp = (void *)((uintptr_t)sp & ~15);
+    for (int j = 0; j < argv_sizes[i] - 1; j++)
+    {
+      *(char *)(sp + j) = argv[i][j];
+    }
+    *(char *)(sp + argv_sizes[i] - 1) = '\0';
+    argv_table[i] = sp;
+  }
+  // string area: envp[]
+  for (int i = envp_size - 1; i >= 0; i--)
+  {
+    sp -= envp_sizes[i] + 1;
+    sp = (void *)((uintptr_t)sp & ~15);
+    for (int j = 0; j < envp_sizes[i] - 1; j++)
+    {
+      *(char *)(sp + j) = envp[i][j];
+    }
+    *(char *)(sp + envp_sizes[i] - 1) = '\0';
+    envp_table[i] = (char *)sp;
+  }
+  // NULL
+  sp -= sizeof(size_t);
+  sp = (void *)((uintptr_t)sp & ~15);
+  *(char **)sp = NULL;
+  // envp[]
+  for (int i = envp_size - 1; i >= 0; i--)
+  {
+    sp -= sizeof(char *);
+    *(char **)sp = (char *)envp_table[i];
+  }
+  // argv[]
+  for (int i = argc - 1; i >= 0; i--)
+  {
+    sp -= sizeof(char *);
+    *(char **)sp = argv_table[i];
+  }
+  // argc
+  sp -= sizeof(int);
+  *(int *)sp = argc;
+  pcb->cp->gpr[r_a0] = (uintptr_t)sp;
+}

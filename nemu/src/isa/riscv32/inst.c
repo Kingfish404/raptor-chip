@@ -163,17 +163,16 @@ static int decode_exec(Decode *s) {
   INSTPAT("0000000 ????? ????? 110 ????? 01100 11", or      , R, R(rd) = src1 | src2);
   INSTPAT("0000000 ????? ????? 111 ????? 01100 11", and     , R, R(rd) = src1 & src2);
 
-  INSTPAT("0000??? ????? 00000 000 00000 00011 11", fence   ,  N, {}); 
+  INSTPAT("0000??? ????? 00000 000 00000 00011 11", fence   ,  N, {});
   INSTPAT("1000001 10011 00000 000 00000 00111 11", fence_tso, N, {});
   INSTPAT("0000000 10000 00000 000 00000 00011 11", pause   ,  N, {});
-  INSTPAT("0000000 00000 00000 000 00000 11100 11", ecall   ,  N, 
-    // bool success;
-    // s->dnpc = isa_raise_intr(isa_reg_str2val("a7", &success), s->pc)
-    s->dnpc = isa_raise_intr(0xb, s->pc)
-    );
+  INSTPAT("0000000 00000 00000 000 00000 11100 11", ecall   ,  N,
+          // bool success;
+          // s->dnpc = isa_raise_intr(isa_reg_str2val("a7", &success), s->pc)
+          s->dnpc = isa_raise_intr(0xb, s->pc));
   INSTPAT("0000000 00001 00000 000 00000 11100 11", ebreak  ,  N, NEMUTRAP(s->pc, R(10))); // R(10) is $a0
 
-  // RV64I Base Instruction Set 
+  // RV64I Base Instruction Set
   INSTPAT("??????? ????? ????? 110 ????? 00000 11", lwu    , I, R(rd) = Mr(src1 + imm, 4));
   INSTPAT("??????? ????? ????? 011 ????? 00000 11", ld     , I, R(rd) = Mr(src1 + imm, 8));
   INSTPAT("??????? ????? ????? 011 ????? 01000 11", sd     , S, Mw(src1 + imm, 8, src2));
@@ -222,26 +221,34 @@ static int decode_exec(Decode *s) {
   INSTPAT("0000001 ????? ????? 111 ????? 01110 11", remuw   , R, R(rd) = SEXT((uint32_t)src1 % (uint32_t)src2, 32));
 
   // Trap-Return Instructions
-  INSTPAT("0011000 00010 00000 000 00000 11100 11", mret    , N, s->dnpc = CSR(CSR_MEPC); 
+  INSTPAT("0011000 00010 00000 000 00000 11100 11", mret    , N, s->dnpc = CSR(CSR_MEPC);
 #ifdef CONFIG_DIFFTEST
-    difftest_skip_ref();
+          difftest_skip_ref();
 #endif
-    CSR_BIT_COND_SET(CSR_MSTATUS, CSR_MSTATUS_MPIE, CSR_MSTATUS_MIE) // csr.mstatus.m.MIE = csr.mstatus.m.MPIE;
-    CSR_SET(CSR_MSTATUS, CSR_MSTATUS_MPIE) // csr.mstatus.m.MPIE= 1;
-    );
+          CSR_BIT_COND_SET(CSR_MSTATUS, CSR_MSTATUS_MPIE, CSR_MSTATUS_MIE) // csr.mstatus.m.MIE = csr.mstatus.m.MPIE;
+          CSR_SET(CSR_MSTATUS, CSR_MSTATUS_MPIE)                           // csr.mstatus.m.MPIE= 1;
+  );
 
   INSTPAT("??????? ????? ????? ??? ????? ????? ??", inv     , N, INV(s->pc));
   INSTPAT_END();
 
+#ifdef CONFIG_RV64
+  CSR(CSR_MSTATUS) = CSR(CSR_MSTATUS) & 0x800000FF007FFFEA;
+#else
+  CSR(CSR_MSTATUS) = CSR(CSR_MSTATUS) & 0x807FFFEA;
+#endif
+
   R(0) = 0; // reset $zero to 0
 
   uint32_t opcode = BITS(s->isa.inst.val, 6, 0);
-  // jalr: 0b1100111 ; jal: 0b1101111  
-  if (opcode == 0b1100111 || opcode == 0b1101111) {
+  // jalr: 0b1100111 ; jal: 0b1101111
+  if (opcode == 0b1100111 || opcode == 0b1101111 ||
+      s->isa.inst.val == 0x00000073 || s->isa.inst.val == 0x30200073) {
     ftracebuf[ftracehead].pc = s->pc;
     ftracebuf[ftracehead].npc = s->dnpc;
     // jalr x0, 0(x1): 0x00008067, a.k.a. ret
-    if (s->isa.inst.val == 0x00008067) {
+    // mret: 0x30200073
+    if (s->isa.inst.val == 0x00008067 || s->isa.inst.val == 0x30200073) {
       ftracebuf[ftracehead].ret = true;
       ftracedepth--;
       ftracebuf[ftracehead].depth = ftracedepth;
@@ -318,9 +325,9 @@ void cpu_show_ftrace() {
   Ftrace *ftrace = NULL;
   for (size_t i = 0; i < ftracehead; i++) {
     ftrace = ftracebuf + i;
-    printf("" FMT_WORD ": ", ftrace->pc);
+    printf("" FMT_WORD_NO_PREFIX ": ", ftrace->pc);
     for (size_t j = 0; j < ftrace->depth; j++) {
-      printf("  ");
+      printf(" ");
     }
     printf("%s ", ftrace->ret ? "ret" : "call");
     if (elfshdr_symtab == NULL) {

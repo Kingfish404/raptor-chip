@@ -48,18 +48,18 @@ const char *regs[] = {
 
 void isa_reg_display()
 {
-  printf(" pc: " FMT_WORD "\n", cpu.pc);
+  printf(" pc: " FMT_WORD_NO_PREFIX "\n", cpu.pc);
   for (int i = 0; i < MUXDEF(CONFIG_RVE, 16, 32); i++)
   {
     if (i > 0 && i % 4 == 0)
       printf("\n");
-    printf("%3s: " FMT_WORD "\t", regs[i], cpu.gpr[i]);
+    printf("%3s: " FMT_WORD_NO_PREFIX "\t", regs[i], cpu.gpr[i]);
   }
   printf("\n");
-  printf("msr.mstatus: " FMT_WORD "\n", cpu.sr[CSR_MSTATUS]);
-  printf("msr.mepc: " FMT_WORD "\n", cpu.sr[CSR_MEPC]);
-  printf("msr.mcause: " FMT_WORD "\n", cpu.sr[CSR_MCAUSE]);
-  printf("msr.mtvec: " FMT_WORD "\n", cpu.sr[CSR_MTVEC]);
+  printf("msr.mstatus: " FMT_WORD_NO_PREFIX "\n", cpu.sr[CSR_MSTATUS]);
+  printf("   msr.mepc: " FMT_WORD_NO_PREFIX "\n", cpu.sr[CSR_MEPC]);
+  printf(" msr.mcause: " FMT_WORD_NO_PREFIX "\n", cpu.sr[CSR_MCAUSE]);
+  printf("  msr.mtvec: " FMT_WORD_NO_PREFIX "\n", cpu.sr[CSR_MTVEC]);
 }
 
 word_t isa_reg_str2val(const char *s, bool *success)

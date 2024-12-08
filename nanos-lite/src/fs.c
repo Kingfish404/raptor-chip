@@ -88,8 +88,7 @@ int fs_open(const char *pathname, int flags, int mode)
       return i;
     }
   }
-  panic("failed to open file %s", pathname);
-  assert(0);
+  Log("failed to open file %s", pathname);
   return -1;
 }
 
@@ -98,7 +97,8 @@ size_t fs_read(int fd, void *buf, size_t len)
   assert(fd >= 0 && fd < sizeof(file_table) / sizeof(file_table[0]));
   Finfo *f = &file_table[fd];
   size_t usable_len = len;
-  if (f->size != 0) {
+  if (f->size != 0)
+  {
     usable_len = f->open_offset + len <= f->size ? len : f->size - f->open_offset;
   }
   int ret = f->read(buf, f->disk_offset + f->open_offset, usable_len);
@@ -111,7 +111,8 @@ size_t fs_write(int fd, const void *buf, size_t len)
   assert(fd >= 0 && fd < sizeof(file_table) / sizeof(file_table[0]));
   Finfo *f = &file_table[fd];
   size_t usable_len = len;
-  if (f->size != 0) {
+  if (f->size != 0)
+  {
     usable_len = f->open_offset + len <= f->size ? len : f->size - f->open_offset;
   }
   int ret = f->write(buf, f->disk_offset + f->open_offset, usable_len);

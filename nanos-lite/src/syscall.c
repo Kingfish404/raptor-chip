@@ -5,6 +5,8 @@
 #include "syscall.h"
 
 void naive_uload(PCB *pcb, const char *filename);
+void context_uload(PCB *pcb, const char *filename, char *const argv[], char *const envp[]);
+void switch_boot_pcb();
 
 // #define CONFIG_STRACE
 
@@ -66,8 +68,19 @@ void sys_gettimeofday(Context *c)
 void sys_execve(Context *c)
 {
   const char *fname = (const char *)c->GPR2;
-  naive_uload(NULL, fname);
-  c->GPRx = 0;
+  const void *argv = (const void *)c->GPR3;
+  const void *envp = (const void *)c->GPR4;
+  if (fs_open(fname, 0, 0) == -1)
+  {
+    c->GPRx = -1;
+    return;
+  }
+  // naive_uload(NULL, fname);
+  // c->GPRx = 0;
+  // Log("execve: fname %s, argv %p, envp %p", fname, argv, envp);
+  context_uload(current, fname, argv, envp);
+  switch_boot_pcb();
+  yield();
 }
 
 static void strace(Context *c)

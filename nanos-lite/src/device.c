@@ -15,6 +15,7 @@ static const char *keyname[256] __attribute__((used)) = {
 
 size_t serial_write(const void *buf, size_t offset, size_t len)
 {
+  yield();
   for (size_t i = 0; i < len; i++)
   {
     putch(((char *)buf)[i]);
@@ -24,6 +25,7 @@ size_t serial_write(const void *buf, size_t offset, size_t len)
 
 size_t events_read(void *buf, size_t offset, size_t len)
 {
+  yield();
   AM_INPUT_KEYBRD_T ev = io_read(AM_INPUT_KEYBRD);
   if (ev.keycode != 0)
   {
@@ -47,6 +49,7 @@ static inline void outl(uintptr_t addr, uint32_t data) { *(volatile uint32_t *)a
 
 size_t fb_write(const void *buf, size_t offset, size_t len)
 {
+  yield();
   uint32_t *p = (uint32_t *)buf;
   AM_GPU_CONFIG_T config = io_read(AM_GPU_CONFIG);
   int x = offset % config.width;

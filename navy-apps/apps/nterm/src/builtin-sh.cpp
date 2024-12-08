@@ -38,12 +38,25 @@ static void sh_handle_cmd(const char *cmd) {
   strcpy(command, cmd);
   command[strlen(command) - 1] = '\0';
 
-  if (strcmp(command, "exit") == 0 || strcmp(command, "q") == 0) {
+  if (strcmp(command, "quit") == 0 || strcmp(command, "q") == 0) {
     exit(0);
-  } else if (strcmp(command, "help") == 0) {
+  } else if (strcmp(command, "help") == 0 || strcmp(command, "h") == 0) {
     sh_help();
+    return;
   }
-  int ret = execvp(command, NULL);
+  int argc = 0;
+  const char *argv[16];
+  char *p = strtok(command, " ");
+  while (p) {
+    argv[argc++] = p;
+    p[strlen(p)] = '\0';
+    p = strtok(NULL, " ");
+  }
+  argv[argc] = NULL;
+  int ret = execvp(command, (char**)argv);
+  if (ret == -1) {
+    sh_command_not_found(command);
+  }
 }
 
 int setenv (const char *name, const char *value, int rewrite)

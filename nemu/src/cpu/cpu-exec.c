@@ -156,6 +156,7 @@ static void statistic() {
 
 void assert_fail_msg() {
   isa_reg_display();
+  cpu_show_itrace();
   statistic();
 }
 
@@ -181,6 +182,7 @@ void cpu_exec(uint64_t n) {
 
     case NEMU_END: case NEMU_ABORT:
       if (nemu_state.state == NEMU_ABORT) {
+        isa_reg_display();
         cpu_show_itrace();
       }
       Log("nemu: %s at pc = " FMT_WORD,
