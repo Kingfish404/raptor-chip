@@ -1,0 +1,22 @@
+[tasks]
+basic bmc
+basic: default
+
+[options]
+bmc:
+mode bmc
+depth 64
+
+[engines]
+smtbmc
+
+[script]
+read -formal exu_mul.sv ysyx_exu_mul.sv
+prep -top formal_exu_mul
+
+[files]
+exu_mul.sv
+ysyx_exu_mul.sv ./../vsrc/backend/ysyx_exu_mul.sv
+ysyx.svh ./../vsrc/include/ysyx.svh
+ysyx_dpi_c.svh ./../vsrc/include/ysyx_dpi_c.svh.mock
+ysyx_soc.svh ./../vsrc/include/ysyxsoc/ysyx_soc.svh

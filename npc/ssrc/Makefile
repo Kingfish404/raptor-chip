@@ -6,7 +6,10 @@ MILL = ./mill
 test:
 	$(MILL) -i $(PRJ).test
 
-verilog:
+mill:
+	wget https://github.com/com-lihaoyi/mill/releases/download/0.11.13/0.11.13 -O mill
+
+verilog: mill
 	mkdir -p $(BUILD_DIR)
 	$(MILL) -i $(PRJ).runMain Elaborate --target-dir $(BUILD_DIR)
 

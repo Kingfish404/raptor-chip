@@ -54,10 +54,8 @@ module ysyx_exu_mul (
       `YSYX_ALU_DIVU__: begin r = s2 != 0 ? (s1) / (s2) : -1; end
       `YSYX_ALU_REM___: begin r = s2 != 0 ? $signed($signed(s1) % $signed(s2)): s1; end
       `YSYX_ALU_REMU__: begin r = s2 != 0 ? (s1) % (s2) : s1; end
+               default: begin r = 0; end
       // verilog_format: on
-      default: begin
-        r = 0;
-      end
     endcase
   end
 

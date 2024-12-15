@@ -193,10 +193,10 @@ module ysyx_bus (
     `YSYX_I_SDRAM_ARBURST && ifu_arvalid &&
     (ifu_araddr >= 'ha0000000) && (ifu_araddr <= 'hc0000000));
   assign io_master_arburst = ifu_sdram_arburst ? 2'b01 : 2'b00;
-  assign io_master_arsize = (
+  assign io_master_arsize = ifu_arvalid ? 3'b010 : (
            ({3{lsu_rstrb == 8'h1}} & 3'b000) |
            ({3{lsu_rstrb == 8'h3}} & 3'b001) |
-           ({3{lsu_rstrb == 8'hf || ifu_arvalid}} & 3'b010) |
+           ({3{lsu_rstrb == 8'hf}} & 3'b010) |
            (3'b000)
          );
   assign io_master_arlen = ifu_sdram_arburst ? 'h1 : 'h0;

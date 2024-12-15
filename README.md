@@ -20,24 +20,30 @@ bash init.sh subproject-name
 brew install verilator sdl2 sdl2_image sdl2_ttf flex
 brew tap riscv-software-src/riscv
 brew install riscv-tools
-brew install readline llvm yosys
+brew install readline ncurses llvm yosys
 # devlopment tools
 brew install surfer # Waveform viewer, supporting VCD, FST, or GHW format
 
 # debian/ubuntu
 apt-get install verilator libsdl2-dev libsdl2-image-dev libsdl2-ttf-dev flex
 apt-get install gcc-riscv64-linux-gnu
-sudo apt-get install libreadline-dev
+sudo apt-get install libreadline-dev flock
 sudo apt-get install llvm
 
 # clone mono repository
 git clone https://github.com/kingfish404/am-kernels
-git clone https://github.com/Kingfish404/ysyxSoC
 git clone https://github.com/NJU-ProjectN/nvboard
+git clone https://github.com/Kingfish404/ysyxSoC
+cd ysyxSoC && make dev-init
 
-# install mill
+# install mill and espresso
 cd ./npc/ssrc
 wget https://github.com/com-lihaoyi/mill/releases/download/0.11.13/0.11.13 -O mill
+chmod +x mill
+# install espresso
+wget https://github.com/chipsalliance/espresso/releases/download/v2.4/arm64-apple-macos11-espresso
+# generated from chisel (scala) at `npc/ssrc`
+make verilog
 ```
 
 ## Environment Variables

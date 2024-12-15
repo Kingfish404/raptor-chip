@@ -1,0 +1,22 @@
+[tasks]
+basic bmc
+basic: default
+
+[options]
+bmc:
+mode bmc
+depth 8
+
+[engines]
+smtbmc
+
+[script]
+read -formal Bus.sv ysyx_bus.sv
+prep -top formal_bus
+
+[files]
+Bus.sv
+ysyx_bus.sv ./../vsrc/ysyx_bus.sv
+ysyx.svh ./../vsrc/include/ysyx.svh
+ysyx_dpi_c.svh ./../vsrc/include/ysyx_dpi_c.svh.mock
+ysyx_soc.svh ./../vsrc/include/ysyxsoc/ysyx_soc.svh
