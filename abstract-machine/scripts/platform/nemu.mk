@@ -17,10 +17,7 @@ CFLAGS += -DMAINARGS=\"$(mainargs)\"
 CFLAGS += -I$(AM_HOME)/am/src/platform/nemu/include
 .PHONY: $(AM_HOME)/am/src/platform/nemu/trm.c
 
-# if MODE == batch, add -b to NEMUFLAGS
-ifeq ($(MODE), batch)
-  NEMUFLAGS += -b
-endif
+NEMUFLAGS += $(FLAGS)
 
 # if ELF != '', add -e to NEMUFLAGS
 ifneq ($(ELF), )

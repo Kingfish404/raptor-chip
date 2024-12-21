@@ -76,7 +76,7 @@ $(BIN): $(VSRCS) $(CCSRCS) $(NVBOARD_ARCHIVE)
 
 DIFF_REF_SO = -d $(abspath $(NEMU_HOME)/build/riscv32-nemu-interpreter-so)
 IMG ?=
-NPC_EXEC := $(BIN) $(NPCFLAGS) $(DIFF_REF_SO) -m $(MROM_IMG) $(IMG)
+NPC_EXEC := $(BIN) $(FLAGS) $(DIFF_REF_SO) -m $(MROM_IMG) $(IMG)
 
 run: $(BIN) $(MROM_IMG)
 	$(call git_commit, "sim RTL") # DO NOT REMOVE THIS LINE!!!
@@ -93,7 +93,7 @@ AM_KERNEL:
 
 perf:
 	if [ ! -d $(AM_KERNEL) ]; then make AM_KERNEL; fi
-	make -s -C $(AM_KERNEL)/benchmarks/microbench/ ARCH=riscv32e-ysyxsoc NPCFLAGS='-b -n' mainargs=test run
+	make -s -C $(AM_KERNEL)/benchmarks/microbench/ ARCH=riscv32e-ysyxsoc FLAGS='-b -n' mainargs=test run
 
 test:
 	echo $(CXXFLAGS)

@@ -23,6 +23,8 @@ brew install riscv-tools
 brew install readline ncurses llvm yosys
 # devlopment tools
 brew install surfer # Waveform viewer, supporting VCD, FST, or GHW format
+brew install scons  # for rt-thread-am
+brew install colima # for macOS to run Linux container
 
 # debian/ubuntu
 apt-get install verilator libsdl2-dev libsdl2-image-dev libsdl2-ttf-dev flex
@@ -58,7 +60,7 @@ export NPC_HOME=$YSYX_HOME/npc
 export NVBOARD_HOME=$YSYX_HOME/nvboard
 export NAVY_HOME=$YSYX_HOME/navy-apps
 
-export ISA=riscv32e
+export ISA=riscv32
 export CROSS_COMPILE=riscv64-unknown-elf-
 ```
 
@@ -76,10 +78,20 @@ cd $NPC_HOME && make menuconfig && make ARCH=riscv32e-npc run
 
 ## n. running nanos-lite on nemu
 cd $NAVY_HOME && make ISA=$ISA fsimg
-cd $NAVY_HOME/apps/nterm && make ISA=$ISA install
-cd $NAVY_HOME/apps/pal && make ISA=$ISA install
+cd $NAVY_HOME/apps/menu && make ISA=$ISA install
 cd $YSYX_HOME/nanos-lite && make ARCH=$ISA-nemu update run
 cd $YSYX_HOME/nanos-lite && make ARCH=$ISA-nemu run
+
+## n+1. running busybox on nemu (Linux required)
+cd $NAVY_HOME/apps/busybox && colima ssh # login to Linux container
+make ARCH=riscv32-nemu install
+
+## 2n. running microbench/coremark on npc
+cd $YSYX_HOME/am-kernels/benchmarks/coremark && \
+    make ARCH=riscv32e-npc run FLAGS="-b -n"
+cd $YSYX_HOME/am-kernels/benchmarks/microbench && \
+    make ARCH=riscv32e-npc run FLAGS="-b -n"
+# FLAGS="-b -n" is optional, -b is for batch mode, -n is for no wave trace
 
 ## fpga. running on gowin-tang-nano-20k
 ./npc/ana-fpga-cat.sh

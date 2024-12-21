@@ -71,12 +71,12 @@ typedef word_t vaddr_t;
 
 #define __FILENAME__ (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__)
 
-#define Log(format, ...)                        \
-  _Log(FMT_BLUE("[npc %s:%d %s] ") format "\n", \
+#define Log(format, ...)                      \
+  _Log(FMT_BLUE("npc %s:%d %s ") format "\n", \
        __FILENAME__, __LINE__, __func__, ##__VA_ARGS__)
 
-#define Error(format, ...)                     \
-  _Log(FMT_RED("[npc %s:%d %s] ") format "\n", \
+#define Error(format, ...)                    \
+  _Log(FMT_RED("npc %s:%3d %s ") format "\n", \
        __FILENAME__, __LINE__, __func__, ##__VA_ARGS__)
 
 #define Assert(cond, format, ...) \

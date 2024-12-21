@@ -34,9 +34,11 @@ void init_proc()
   char *envp[] = {NULL};
 
   context_kload(&pcb[0], hello_fun, (void *)0);
-  // char *argv[] = {"/bin/pal", "--skip", NULL};
+  // char *argv[] = {"/bin/menu", NULL};
   // char *argv[] = {"/bin/nterm", NULL};
-  char *argv[] = {"/bin/menu", NULL};
+  // char *argv[] = {"/bin/pal", "--skip", NULL};
+  char *argv[] = {"/usr/bin/wc", "/share/files/num", NULL};
+  // char *argv[] = {"/bin/printenv", "hello", NULL};
   context_uload(&pcb[1], argv[0], argv, envp);
   // context_kload(&pcb[1], hello_fun, (void *)1);
   switch_boot_pcb();

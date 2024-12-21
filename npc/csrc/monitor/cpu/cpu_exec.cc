@@ -96,6 +96,9 @@ void cpu_exec(uint64_t n)
   case NPC_ABORT:
     printf("Program execution has ended. To restart the program, exit NEMU and run again.\n");
     return;
+  case NPC_QUIT:
+    printf("Program execution has been quitted.\n");
+    break;
   default:
     npc.state = NPC_RUNNING;
     break;

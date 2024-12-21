@@ -33,6 +33,11 @@ static void sh_help() {
   sh_printf("  <cmd> - execute command\n");
 }
 
+int setenv (const char *name, const char *value, int rewrite)
+{
+  return _setenv_r (_REENT, name, value, rewrite);
+}
+
 static void sh_handle_cmd(const char *cmd) {
   char command[64];
   strcpy(command, cmd);
@@ -53,22 +58,17 @@ static void sh_handle_cmd(const char *cmd) {
     p = strtok(NULL, " ");
   }
   argv[argc] = NULL;
+  setenv("PATH", "/usr/bin:/bin", false);
   int ret = execvp(command, (char**)argv);
   if (ret == -1) {
     sh_command_not_found(command);
   }
 }
 
-int setenv (const char *name, const char *value, int rewrite)
-{
-  return _setenv_r (_REENT, name, value, rewrite);
-}
-
 void builtin_sh_run() {
   sh_banner();
   sh_prompt();
 
-  setenv("PATH", "/bin", 0);
   while (1) {
     SDL_Event ev;
     if (SDL_PollEvent(&ev)) {

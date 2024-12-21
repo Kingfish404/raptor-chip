@@ -5,42 +5,42 @@ import chisel3.util._
 import chisel3.util.experimental.decode._
 
 class ysyx_idu_decoder extends Module with Instr with MicroOP {
-  val in = IO(new Bundle {
+  val in       = IO(new Bundle {
     val inst = Input(UInt(32.W))
-    val pc = Input(UInt(32.W))
+    val pc   = Input(UInt(32.W))
     val rs1v = Input(UInt(32.W))
     val rs2v = Input(UInt(32.W))
   })
-  val out = IO(new Bundle {
+  val out      = IO(new Bundle {
     val wen = Output(UInt(1.W))
     val ren = Output(UInt(1.W))
     val jen = Output(UInt(1.W))
     val ben = Output(UInt(1.W))
 
-    val rd = Output(UInt(5.W))
-    val imm = Output(UInt(32.W))
-    val op1 = Output(UInt(32.W))
-    val op2 = Output(UInt(32.W))
+    val rd     = Output(UInt(5.W))
+    val imm    = Output(UInt(32.W))
+    val op1    = Output(UInt(32.W))
+    val op2    = Output(UInt(32.W))
     val alu_op = Output(UInt(5.W))
-    val opj = Output(UInt(32.W))
+    val opj    = Output(UInt(32.W))
 
     // U/J-type, and no `rs1` or `rs2` instructions
     val indie = Output(UInt(1.W))
   })
-  val out_sys = IO(new Bundle {
-    val system = Output(UInt(1.W))
+  val out_sys  = IO(new Bundle {
+    val system     = Output(UInt(1.W))
     val func3_zero = Output(UInt(1.W))
-    val csr_wen = Output(UInt(1.W))
-    var ebreak = Output(UInt(1.W))
-    var ecall = Output(UInt(1.W))
-    var mret = Output(UInt(1.W))
+    val csr_wen    = Output(UInt(1.W))
+    var ebreak     = Output(UInt(1.W))
+    var ecall      = Output(UInt(1.W))
+    var mret       = Output(UInt(1.W))
   })
-  val rs1v = in.rs1v
-  val rs2v = in.rs2v
-  val rd = in.inst(11, 7)
-  val opcode = in.inst(6, 0)
-  val funct3 = in.inst(14, 12)
-  val funct7 = in.inst(31, 25)
+  val rs1v     = in.rs1v
+  val rs2v     = in.rs2v
+  val rd       = in.inst(11, 7)
+  val opcode   = in.inst(6, 0)
+  val funct3   = in.inst(14, 12)
+  val funct7   = in.inst(31, 25)
   val ALU_F3OP = Cat(0.U(1.W), funct3)
   val ALU_F3_5 = Cat(funct7(5), funct3)
 
@@ -51,12 +51,11 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
   val imm_u = Cat(in.inst(31, 12), Fill(12, 0.U))
   val immjv = Cat(in.inst(31), in.inst(19, 12), in.inst(20), in.inst(30, 21))
   val imm_j = Cat(Fill(11, in.inst(31)), immjv, 0.U)
-  val csr = in.inst(31, 20)
-  val uimm = in.inst(19, 15)
+  val csr   = in.inst(31, 20)
+  val uimm  = in.inst(19, 15)
 
   val type_decoder = TruthTable(
     Map(
-      // format: off
       //                  | indie |    sys  |  rw  |  b  |  j  |  alu op |
       LUI___ -> BitPat("b" + "1" + "000000" + "00" + "0" + "0" + ALU_ADD_), // U
       AUIPC_ -> BitPat("b" + "1" + "000000" + "00" + "0" + "0" + ALU_ADD_), // U
@@ -70,14 +69,14 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
       BLTU__ -> BitPat("b" + "0" + "000000" + "00" + "1" + "0" + ALU_SLTU), // B
       BGEU__ -> BitPat("b" + "0" + "000000" + "00" + "1" + "0" + ALU_SLEU), // B
 
-      LB____ -> BitPat("b" + "0" + "000000" + "10" + "0" + "0" +  LSU_LB_), // I
-      LH____ -> BitPat("b" + "0" + "000000" + "10" + "0" + "0" +  LSU_LH_), // I
-      LW____ -> BitPat("b" + "0" + "000000" + "10" + "0" + "0" +  LSU_LW_), // I
-      LBU___ -> BitPat("b" + "0" + "000000" + "10" + "0" + "0" +  LSU_LBU), // I
-      LHU___ -> BitPat("b" + "0" + "000000" + "10" + "0" + "0" +  LSU_LHU), // I
-      SB____ -> BitPat("b" + "0" + "000000" + "01" + "0" + "0" +  LSU_SB_), // S
-      SH____ -> BitPat("b" + "0" + "000000" + "01" + "0" + "0" +  LSU_SH_), // S
-      SW____ -> BitPat("b" + "0" + "000000" + "01" + "0" + "0" +  LSU_SW_), // S
+      LB____ -> BitPat("b" + "0" + "000000" + "10" + "0" + "0" + LSU_LB_), // I
+      LH____ -> BitPat("b" + "0" + "000000" + "10" + "0" + "0" + LSU_LH_), // I
+      LW____ -> BitPat("b" + "0" + "000000" + "10" + "0" + "0" + LSU_LW_), // I
+      LBU___ -> BitPat("b" + "0" + "000000" + "10" + "0" + "0" + LSU_LBU), // I
+      LHU___ -> BitPat("b" + "0" + "000000" + "10" + "0" + "0" + LSU_LHU), // I
+      SB____ -> BitPat("b" + "0" + "000000" + "01" + "0" + "0" + LSU_SB_), // S
+      SH____ -> BitPat("b" + "0" + "000000" + "01" + "0" + "0" + LSU_SH_), // S
+      SW____ -> BitPat("b" + "0" + "000000" + "01" + "0" + "0" + LSU_SW_), // S
 
       ADDI__ -> BitPat("b" + "0" + "000000" + "00" + "0" + "0" + ALU_ADD_), // I
       SLTI__ -> BitPat("b" + "0" + "000000" + "00" + "0" + "0" + ALU_SLT_), // I
@@ -99,20 +98,20 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
       OR____ -> BitPat("b" + "0" + "000000" + "00" + "0" + "0" + ALU_OR__), // R
       AND___ -> BitPat("b" + "0" + "000000" + "00" + "0" + "0" + ALU_AND_), // R
 
-      FENCE_ -> BitPat("b" + "1" + "000000" + "00" + "0" + "0" +  "0????"), // N
-      FENCET -> BitPat("b" + "1" + "000000" + "00" + "0" + "0" +  "0????"), // N
-      PAUSE_ -> BitPat("b" + "1" + "000000" + "00" + "0" + "0" +  "0????"), // N
-      ECALL_ -> BitPat("b" + "1" + "010101" + "00" + "0" + "0" +  "0????"), // N
-      EBREAK -> BitPat("b" + "1" + "001101" + "00" + "0" + "0" +  "0????"), // N
-      MRET__ -> BitPat("b" + "1" + "100101" + "00" + "0" + "0" +  "0????"), // N
-      FENCEI -> BitPat("b" + "1" + "000001" + "00" + "0" + "0" +  "0????"), // N
+      FENCE_ -> BitPat("b" + "1" + "000000" + "00" + "0" + "0" + "0????"), // N
+      FENCET -> BitPat("b" + "1" + "000000" + "00" + "0" + "0" + "0????"), // N
+      PAUSE_ -> BitPat("b" + "1" + "000000" + "00" + "0" + "0" + "0????"), // N
+      ECALL_ -> BitPat("b" + "1" + "010101" + "00" + "0" + "0" + "0????"), // N
+      EBREAK -> BitPat("b" + "1" + "001101" + "00" + "0" + "0" + "0????"), // N
+      MRET__ -> BitPat("b" + "1" + "100101" + "00" + "0" + "0" + "0????"), // N
+      FENCEI -> BitPat("b" + "1" + "000001" + "00" + "0" + "0" + "0????"), // N
 
-      CSRRW_ -> BitPat("b" + "0" + "000011" + "00" + "0" + "0" +  "0????"), // CSR
-      CSRRS_ -> BitPat("b" + "0" + "000011" + "00" + "0" + "0" +  "0????"), // CSR
-      CSRRC_ -> BitPat("b" + "0" + "000011" + "00" + "0" + "0" +  "0????"), // CSR
-      CSRRWI -> BitPat("b" + "1" + "000011" + "00" + "0" + "0" +  "0????"), // CSR
-      CSRRSI -> BitPat("b" + "1" + "000011" + "00" + "0" + "0" +  "0????"), // CSR
-      CSRRCI -> BitPat("b" + "1" + "000011" + "00" + "0" + "0" +  "0????"), // CSR
+      CSRRW_ -> BitPat("b" + "0" + "000011" + "00" + "0" + "0" + "0????"), // CSR
+      CSRRS_ -> BitPat("b" + "0" + "000011" + "00" + "0" + "0" + "0????"), // CSR
+      CSRRC_ -> BitPat("b" + "0" + "000011" + "00" + "0" + "0" + "0????"), // CSR
+      CSRRWI -> BitPat("b" + "1" + "000011" + "00" + "0" + "0" + "0????"), // CSR
+      CSRRSI -> BitPat("b" + "1" + "000011" + "00" + "0" + "0" + "0????"), // CSR
+      CSRRCI -> BitPat("b" + "1" + "000011" + "00" + "0" + "0" + "0????"), // CSR
 
       MUL___ -> BitPat("b" + "0" + "000000" + "00" + "0" + "0" + ALU_MUL_), // R
       MULH__ -> BitPat("b" + "0" + "000000" + "00" + "0" + "0" + ALU_MULH), // R
@@ -122,26 +121,27 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
       DIVU__ -> BitPat("b" + "0" + "000000" + "00" + "0" + "0" + ALU_DIVU), // R
       REM___ -> BitPat("b" + "0" + "000000" + "00" + "0" + "0" + ALU_REM_), // R
       REMU__ -> BitPat("b" + "0" + "000000" + "00" + "0" + "0" + ALU_REMU)  // R
+      // format: off
     ),          BitPat("b" + "0" + "000000" + "00" + "0" + "0" + ALU_ADD_)
-    // format: on
+      // format: on
   )
   // val decoded = decoder(in.inst, table)
-  val inst_type = decoder(in.inst, type_decoder)
+  val inst_type    = decoder(in.inst, type_decoder)
   out.alu_op := inst_type(4, 0)
-  out.jen := inst_type(5)
-  out.ben := inst_type(6)
-  out.wen := inst_type(7)
-  out.ren := inst_type(8)
+  out.jen    := inst_type(5)
+  out.ben    := inst_type(6)
+  out.wen    := inst_type(7)
+  out.ren    := inst_type(8)
 
-  out_sys.system := inst_type(9)
-  out_sys.csr_wen := inst_type(10)
+  out_sys.system     := inst_type(9)
+  out_sys.csr_wen    := inst_type(10)
   out_sys.func3_zero := inst_type(11)
-  out_sys.ebreak := inst_type(12)
-  out_sys.ecall := inst_type(13)
-  out_sys.mret := inst_type(14)
-  out.indie := inst_type(15)
+  out_sys.ebreak     := inst_type(12)
+  out_sys.ecall      := inst_type(13)
+  out_sys.mret       := inst_type(14)
+  out.indie          := inst_type(15)
 
-  val op_table = Array(
+  val op_table    = Array(
     // format: off
     // inst      | rd |  imm |    op1 |    op2 | opj |
     LUI___ -> List( rd,  imm_u,   0.U, imm_u,    0.U), // U
@@ -211,8 +211,8 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
   )
   val var_decoder = ListLookup(
      in.inst, List( 0.U,   0.U,   0.U,   0.U,    0.U), op_table)
-  out.rd  := var_decoder(0)
   // format: on
+  out.rd  := var_decoder(0)
   out.imm := var_decoder(1)
   out.op1 := var_decoder(2)
   out.op2 := var_decoder(3)

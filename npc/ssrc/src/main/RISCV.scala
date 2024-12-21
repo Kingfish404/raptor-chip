@@ -37,15 +37,15 @@ trait MicroOP {
   def LSU_SW_ = "01111" // alu_op to axi wstrb
 
   // Machine Trap Handling
-  def MCAUSE = "h342".U(12.W)
-  def MEPC__ = "h341".U(12.W)
+  def MCAUSE  = "h342".U(12.W)
+  def MEPC__  = "h341".U(12.W)
   // Machine Trap Settup
-  def MTVEC_ = "h305".U(12.W)
+  def MTVEC_  = "h305".U(12.W)
   def MSTATUS = "h300".U(12.W)
 }
 
 trait Instr {
-  def LUI_OPCODE = "b0110111".U(7.W)
+  def LUI_OPCODE   = "b0110111".U(7.W)
   def AUIPC_OPCODE = "b0010111".U(7.W)
 
   def LUI___ = BitPat("b??????? ????? ????? ??? ????? 0110111")

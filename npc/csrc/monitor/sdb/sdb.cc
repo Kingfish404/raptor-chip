@@ -149,6 +149,7 @@ int cmd_info(char *args)
 int cmd_q(char *args)
 {
   npc.state = NPC_QUIT;
+  cpu_exec(0);
   return -1;
 }
 

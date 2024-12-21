@@ -65,6 +65,10 @@ void context_uload(PCB *pcb, const char *filename, char *const argv[], char *con
   {
     argc++;
   }
+  if (envp == NULL)
+  {
+    envp = (char *const[]){NULL};
+  }
   while (envp[envp_size] != NULL)
   {
     envp_size++;

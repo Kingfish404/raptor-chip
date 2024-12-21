@@ -1,6 +1,7 @@
 # Source file
 !*.scala
 !build.sc
+!.scalafmt.conf
 
 ### Project Specific stuff
 test_run_dir/*

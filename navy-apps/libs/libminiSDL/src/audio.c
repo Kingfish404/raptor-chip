@@ -44,7 +44,7 @@ SDL_AudioSpec *SDL_LoadWAV(const char *file, SDL_AudioSpec *spec, uint8_t **audi
   *(audio_len) = ftell(f);
   struct wave_header *wave_p;
 
-  *(audio_buf) = malloc(*(audio_len));
+  *(audio_buf) = (void *)malloc(*(audio_len));
   fseek(f, 0, SEEK_SET);
   fread(*(audio_buf), 1, *(audio_len), f);
 
