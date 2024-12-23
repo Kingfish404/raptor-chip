@@ -73,6 +73,7 @@ SoC Frequency: 100 MHz
 | RV32E          |                |                 |                | 6886/10141/.039 | 0.950          |
 | RV32EM (multi) |                |                 |                |                 | 6540/9228/.025 |
 
+### PPA result
 
 ```shell
 # commit: 4c5d3bc
@@ -171,6 +172,55 @@ Total Power   ==  9.792e-03
    Chip area for module '\ysyx_reg': 14954.254000
    Chip area for module '\ysyx_wbu': 333.830000
    Chip area for top module '\ysyx': 45844.036000
+```
+
+### ysyxsoc simulation result
+
+```log
+./build/ysyxSoCFull -b -n -d /Users/yujin/Developer/c-projects/ysyx-workbench/nemu/build/riscv32-nemu-interpreter-so -m /Users/yujin/Developer/c-projects/ysyx-workbench/npc/csrc/mem/mrom-data/build/mrom-data.bin /Users/yujin/Developer/c-projects/ysyx-workbench/am-kernels/benchmarks/microbench/build/microbench-riscv32e-ysyxsoc.bin
+npc monitor.cc:74 load_file image: /Users/yujin/Developer/c-projects/ysyx-workbench/am-kernels/benchmarks/microbench/build/microbench-riscv32e-ysyxsoc.bin, size: 22925
+npc monitor.cc:105 load_img Load MROM image from /Users/yujin/Developer/c-projects/ysyx-workbench/npc/csrc/mem/mrom-data/build/mrom-data.bin
+npc monitor.cc:74 load_file image: /Users/yujin/Developer/c-projects/ysyx-workbench/npc/csrc/mem/mrom-data/build/mrom-data.bin, size: 24
+[src/memory/paddr.c:64 init_mem] physical memory area [0x80000000, 0x87ffffff]
+2024-12-23 11:49:51.354 ysyxSoCFull[59576:16288533] +[IMKClient subclass]: chose IMKClient_Modern
+2024-12-23 11:49:51.354 ysyxSoCFull[59576:16288533] +[IMKInputSession subclass]: chose IMKInputSession_Modern
+FSBL: 63160, SSBL: 718841|655681
+Init: 747215|28374, mvendorid: 0x79737978, marchid: 23060087
+======= Running MicroBench [input *test*] =======
+[qsort] Quick sort: * Passed.
+[queen] Queen placement: * Passed.
+[bf] Brainf**k interpreter: * Passed.
+[fib] Fibonacci number: * Passed.
+[sieve] Eratosthenes sieve: * Passed.
+[15pz] A* 15-puzzle search: * Passed.
+[dinic] Dinic's maxflow algorithm: * Passed.
+[lzip] Lzip compression: * Passed.
+[ssort] Suffix sort: * Passed.
+[md5] MD5 digest: * Passed.
+==================================================
+MicroBench PASS
+Scored time: 6313.000 ms
+Total  time: 9015.000 ms
+npc sdb.cc:76 npc_exu_ebreak EBREAK at pc = a000392c
+npc pmu.cc:151 perf ======== Instruction Analysis ========
+npc pmu.cc:161 perf #Inst: 477791, cycle: 18938284, IPC: 0.025, 0.023 (main), CLINT: 9469137 (us),  0.050 MIPS
+npc pmu.cc:163 perf |      IFU,  % |      LSU,  % |      EXU,  % |
+npc pmu.cc:167 perf | 12690375, 67 | 13039537, 69 |  6082718,1273 |
+npc pmu.cc:169 perf |     LD, % |     ST, % |    ALU, % |     BR, % | CSR, % |   OTH, % |    JAL,  % |   JALR,  % |
+npc pmu.cc:182 perf |  69461,15 |  56518,12 | 232521,49 |  64691,14 |   3, 0 | 10533, 2 |  32239,  7 |  11825,  2 |
+npc pmu.cc:183 perf ======== TOP DOWN Analysis ========
+npc pmu.cc:185 perf |      IFU,  % |      LSU,  % |      EXU,  % |       LD,  % |       ST,  % |
+npc pmu.cc:191 perf | 12690375, 67 | 13039537, 69 |  6082718,1273 |    69461, 15 |    56518, 12 |
+npc pmu.cc:195 perf IFU Avg Cycle: 2.0, LSU Avg Cycle: 103.5
+npc pmu.cc:198 perf BPU Success: 24327, Fail: 60867, Rate: 28.6%
+npc pmu.cc:201 perf ifu_bra_hazard_cycle:   153288,  1%, ifu_lsu_hazard_cycle:  7077426, 37%
+npc pmu.cc:203 perf idu_hazard_cycle:     9053,  0% (data hazard)
+npc pmu.cc:204 perf ifu_fetch_cnt: 6237083, instr_cnt: 477791
+npc pmu.cc:211 perf ======== Cache Analysis ========
+npc pmu.cc:214 perf |      HIT, % |     MISS, % |  HIT CYC, % | MISS CYC, % |  HIT Cost AVG | MISS Cost AVG |     AMAT |
+npc pmu.cc:226 perf |       -1, 0 |        1,100 |       -1,-0 | 18938284,100 |             0 |       9469142 | 9469142.0 |
+npc pmu.cc:239 statistic Simulate time: 24032346 us, 24032 ms, Freq: 0.788 MHz, Inst:  19881 I/s, 0.020 MIPS
+npc pmu.cc:244 statistic HIT GOOD TRAP at pc: a0003930, inst: 00100073
 ```
 
 ## ICache Simulator Result using microbench trace

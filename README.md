@@ -38,10 +38,7 @@ git clone https://github.com/NJU-ProjectN/nvboard
 git clone https://github.com/Kingfish404/ysyxSoC
 cd ysyxSoC && make dev-init
 
-# install mill and espresso
 cd ./npc/ssrc
-wget https://github.com/com-lihaoyi/mill/releases/download/0.11.13/0.11.13 -O mill
-chmod +x mill
 # install espresso
 wget https://github.com/chipsalliance/espresso/releases/download/v2.4/arm64-apple-macos11-espresso
 # generated from chisel (scala) at `npc/ssrc`

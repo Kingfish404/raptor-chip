@@ -159,7 +159,7 @@ void cpu_exec(uint64_t n)
       Log("a0 = " FMT_RED(FMT_WORD), *npc.ret);
     }
   case NPC_ABORT:
-    if (npc.state == NPC_ABORT)
+    if (npc.state == NPC_ABORT || *npc.ret != 0)
     {
       Log("Program execution has aborted.");
       cpu_show_itrace();

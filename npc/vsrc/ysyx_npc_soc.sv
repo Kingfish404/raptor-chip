@@ -177,11 +177,8 @@ module ysyx_npc_soc (
   parameter bit [7:0] XLEN = `YSYX_XLEN;
 
   reg [31:0] mem_rdata_buf;
-  reg [2:0] state = 0;
+  reg [2:0] state = 0, state_w = 0;
   reg is_writing = 0;
-
-  reg [19:0] lfsr = 101;
-  wire ifsr_ready = `YSYX_IFSR_ENABLE ? lfsr[19] : 1;
 
   // read transaction
   assign out_arready = (state == 'b000);
@@ -189,9 +186,9 @@ module ysyx_npc_soc (
   assign out_rvalid  = (state == 'b101);
 
   // write transaction
-  assign out_awready = (state == 'b000);
-  assign out_wready  = (state == 'b011 && wvalid);
-  assign out_bvalid  = (state == 'b100);
+  assign out_awready = (state_w == 'b000);
+  assign out_wready  = (state_w == 'b011 && wvalid);
+  assign out_bvalid  = (state_w == 'b100);
   wire [7:0] wmask = (
     ({{8{awsize == 3'b000}} & 8'h1 }) |
     ({{8{awsize == 3'b001}} & 8'h3 }) |
@@ -200,78 +197,92 @@ module ysyx_npc_soc (
   );
 
   always @(posedge clock) begin
-    lfsr <= {lfsr[18:0], lfsr[19] ^ lfsr[18]};
-  end
-  always @(posedge clock) begin
-    if (ifsr_ready) begin
-      case (state)
-        'b000: begin
-          // wait for arvalid
-          if (arvalid) begin
-            state <= 'b101;
-          end else if (awvalid) begin
-            state <= 'b001;
-          end
-          if (arvalid) begin
-            `YSYX_DPI_C_PMEM_READ((araddr & ~'h3), mem_rdata_buf);
-          end
-          if (awvalid) begin
-            is_writing <= 1;
-          end
+    case (state_w)
+      'b000: begin
+        if (awvalid) begin
+          state_w <= 'b001;
+          is_writing <= 1;
         end
-        'b001: begin
-          // send rvalid
-          state <= 'b010;
-        end
-        'b010: begin
-          // send rready or wait for wlast
-          if (is_writing) begin
-            if (awaddr == `YSYX_BUS_SERIAL_PORT) begin
-              $write("%c", wdata[7:0]);
-            end else begin
-              if (wstrb[0]) begin
-                `YSYX_DPI_C_PMEM_WRITE((awaddr & ~'h3) + 0, {wdata >>  0}[31:0], 1);
-              end
-              if (wstrb[1]) begin
-                `YSYX_DPI_C_PMEM_WRITE((awaddr & ~'h3) + 1, {wdata >>  8}[31:0], 1);
-              end
-              if (wstrb[2]) begin
-                `YSYX_DPI_C_PMEM_WRITE((awaddr & ~'h3) + 2, {wdata >> 16}[31:0], 1);
-              end
-              if (wstrb[3]) begin
-                `YSYX_DPI_C_PMEM_WRITE((awaddr & ~'h3) + 3, {wdata >> 24}[31:0], 1);
-              end
-            end
-            if (wlast) begin
-              state <= 3;
-            end
+      end
+      'b001: begin
+        state_w <= 'b010;
+      end
+      'b010: begin
+        if (is_writing) begin
+          if (awaddr == `YSYX_BUS_SERIAL_PORT) begin
+            $write("%c", wdata[7:0]);
           end else begin
-            state <= 'b011;
+            if (wstrb[0]) begin
+              `YSYX_DPI_C_PMEM_WRITE((awaddr & ~'h3) + 0, {wdata >>  0}[31:0], 1);
+            end
+            if (wstrb[1]) begin
+              `YSYX_DPI_C_PMEM_WRITE((awaddr & ~'h3) + 1, {wdata >>  8}[31:0], 1);
+            end
+            if (wstrb[2]) begin
+              `YSYX_DPI_C_PMEM_WRITE((awaddr & ~'h3) + 2, {wdata >> 16}[31:0], 1);
+            end
+            if (wstrb[3]) begin
+              `YSYX_DPI_C_PMEM_WRITE((awaddr & ~'h3) + 3, {wdata >> 24}[31:0], 1);
+            end
+          end
+          if (wlast) begin
+            state_w <= 3;
           end
         end
-        'b011: begin
-          // wait for rready
-          if (!is_writing && rready) begin
-            state <= 0;
-          end else if (is_writing) begin
-            state <= 'b100;
-          end
+      end
+      'b011: begin
+        if (is_writing) begin
+          state_w <= 'b100;
         end
-        'b100: begin
-          // wait for bready
-          if (bready) begin
-            state <= 0;
-            is_writing <= 0;
-          end
+      end
+      'b100: begin
+        if (bready) begin
+          state_w <= 'b000;
+          is_writing <= 0;
         end
-        'b101: begin
-          state <= 'b000;
+      end
+      default: begin
+        state_w <= 'b000;
+      end
+    endcase
+    case (state)
+      'b000: begin
+        // wait for arvalid
+        if (arvalid) begin
+          state <= 'b101;
         end
-        default: begin
-          state <= 'b000;
+        if (arvalid) begin
+          `YSYX_DPI_C_PMEM_READ((araddr & ~'h3), mem_rdata_buf);
         end
-      endcase
-    end
+      end
+      'b001: begin
+        // send rvalid
+        state <= 'b010;
+      end
+      'b010: begin
+        // send rready or wait for wlast
+        state <= 'b011;
+      end
+      'b011: begin
+        // wait for rready
+        if (rready) begin
+          state <= 0;
+        end
+      end
+      'b100: begin
+        // wait for bready
+        // if (bready) begin
+        //   state <= 0;
+        //   is_writing <= 0;
+        // end
+      end
+      'b101: begin
+        state <= 'b000;
+      end
+      default: begin
+        state <= 'b000;
+      end
+    endcase
   end
 endmodule  //ysyx_MEM_SRAM
 

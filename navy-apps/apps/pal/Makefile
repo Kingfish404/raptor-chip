@@ -27,7 +27,7 @@ init:;
 install-file:
 	mkdir -p $(REPO_PATH)/data
 	echo "OPLSampleRate=11025\nSampleRate=11025\nWindowHeight=200\nWindowWidth=320" > \
-		$(REPO_PATH)/data/pal.cfg
+		$(REPO_PATH)/data/sdlpal.cfg
 	$(LN) -sf -T $(abspath $(REPO_PATH)/data) $(NAVY_HOME)/fsimg/share/games/pal
 
 .PHONY: install-file init
