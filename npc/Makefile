@@ -66,6 +66,12 @@ INCFLAGS = $(addprefix -I, $(INC_PATH))
 CXXFLAGS += $(INCFLAGS) -DTOP_NAME="\"V$(VTARGET)\"" $(SOC_DEFINE) \
 	-DMROM_PATH=$(MROM_IMG)
 
+ifneq (,$(filter sta%,$(MAKECMDGOALS)))
+INC_PATH += $(abspath ./vsrc/include/dpic_mock)
+else
+INC_PATH += $(abspath ./vsrc/include/dpic)
+endif
+
 $(BIN): $(VSRCS) $(CCSRCS) $(NVBOARD_ARCHIVE)
 	$(call git_commit, "build RTL")
 	$(VERILATOR) --trace-fst -cc --exe --build -j $(shell nproc) --debug $(VERILATOR_FLAG) $^ \
@@ -94,6 +100,26 @@ AM_KERNEL:
 perf:
 	if [ ! -d $(AM_KERNEL) ]; then make AM_KERNEL; fi
 	make -s -C $(AM_KERNEL)/benchmarks/microbench/ ARCH=riscv32e-ysyxsoc FLAGS='-b -n' mainargs=test run
+
+YOSYS_OPENSTA = $(YSYX_HOME)/yosys-opensta
+
+YOSYS_OPENSTA:
+	git clone https://github.com/Kingfish404/yosys-opensta $(YSYX_HOME)/yosys-opensta
+	make -C $(YSYX_HOME)/yosys-opensta init init_opensta
+
+sta:
+	echo $(MAKECMDGOALS)
+	if [ ! -d $(YSYX_HOME)/yosys-opensta ]; then make YOSYS_OPENSTA; fi
+	make -C $(YSYX_HOME)/yosys-opensta sta show \
+		DESIGN=ysyx \
+		RTL_FILES="$(VSRCS)" \
+		VERILOG_INCLUDE_DIRS="$(INC_PATH)"
+
+sta_local:
+	make -C $(YSYX_HOME)/yosys-opensta sta_local show \
+	DESIGN=ysyx \
+	RTL_FILES="$(VSRCS)" \
+	VERILOG_INCLUDE_DIRS="$(INC_PATH)"
 
 test:
 	echo $(CXXFLAGS)

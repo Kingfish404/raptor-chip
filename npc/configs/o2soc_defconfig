@@ -1,0 +1,21 @@
+#
+# Automatically generated file; DO NOT EDIT.
+# NPC Configuration Menu
+#
+# CONFIG_CC_O0 is not set
+# CONFIG_CC_O1 is not set
+CONFIG_CC_O2=y
+# CONFIG_CC_O3 is not set
+CONFIG_CC_OPT="-O2"
+
+#
+# Testing and Debugging
+#
+# CONFIG_WTRACE is not set
+# CONFIG_ITRACE is not set
+# CONFIG_DIFFTEST is not set
+# end of Testing and Debugging
+
+CONFIG_ysyxSoC=y
+CONFIG_MODE="soc"
+# CONFIG_NVBoard is not set

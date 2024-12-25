@@ -1,3 +1,4 @@
+`ifdef USE_DPI_C
 import "DPI-C" function void npc_exu_ebreak();
 import "DPI-C" function void npc_illegal_inst();
 import "DPI-C" function void npc_difftest_skip_ref();
@@ -22,3 +23,4 @@ import "DPI-C" function void sdram_write(
   input byte wdata,
   input byte wmask
 );
+`endif

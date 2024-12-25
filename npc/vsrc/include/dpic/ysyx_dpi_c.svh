@@ -12,3 +12,5 @@
     sdram_write(sd_waddr, sd_wdata, sd_wmask)
 
 `define YSYX_ASSERT(cond, msg) `ASSERT(cond, msg)
+
+`define USE_DPI_C 1

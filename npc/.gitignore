@@ -15,6 +15,7 @@
 !.gitignore
 !README.md
 !Kconfig
+!configs/*
 build/
 tmp/
 /obj_dir
