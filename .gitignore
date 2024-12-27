@@ -11,6 +11,8 @@
 !README.md
 !.gitignore
 !init.sh
+!/.github/workflows/*
+!Dockerfile
 /fceux-am
 /code
 /nvboard
