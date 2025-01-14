@@ -29,8 +29,9 @@ module ysyx_exu_csr (
   localparam bit [REG_W-1:0] MTVEC = 'h3;
   localparam bit [REG_W-1:0] MSTATUS = 'h4;
 
-  reg [XLEN-1:0] csr[5];
-  wire [REG_W-1:0] waddr_reg0 = (
+  logic [XLEN-1:0] csr[5];
+  logic [REG_W-1:0] waddr_reg0;
+  assign waddr_reg0 = (
     ({REG_W{rwaddr==`YSYX_CSR_MCAUSE_}}) & (MCAUSE) |
     ({REG_W{rwaddr==`YSYX_CSR_MEPC___}}) & (MEPC) |
     ({REG_W{rwaddr==`YSYX_CSR_MTVEC__}}) & (MTVEC) |

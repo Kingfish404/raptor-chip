@@ -65,19 +65,19 @@ module ysyx_bus (
 );
   parameter bit [7:0] XLEN = `YSYX_XLEN;
 
-  wire arready;
-  wire [XLEN-1:0] out_rdata;
+  logic arready;
+  logic [XLEN-1:0] out_rdata;
 
-  wire rvalid;
+  logic rvalid;
 
   // typedef enum [2:0] {IF_A, IF_D, LS_A, LS_R} state_t;
   //                      000,  001,  010,    011
   parameter bit [3:0] IF_A = 'b0001, IF_D = 'b0010, LS_A = 'b0100, LS_R = 'b1000;
   parameter bit [2:0] LS_S_A = 'b001, LS_S_W = 'b010, LS_S_B = 'b100;
 
-  reg [3:0] state;
-  reg first = 1;
-  reg write_done = 0, awrite_done = 0;
+  logic [3:0] state;
+  logic first = 1;
+  logic write_done = 0, awrite_done = 0;
 
   assign io_master_arid = 0;
 
@@ -130,7 +130,7 @@ module ysyx_bus (
     end
   end
 
-  reg [2:0] state_store;
+  logic [2:0] state_store;
   always @(posedge clock) begin
     if (reset) begin
       state_store <= LS_S_A;
@@ -165,17 +165,16 @@ module ysyx_bus (
   end
 
   // read
-  wire [XLEN-1:0] sram_araddr = (
-    ({XLEN{lsu_arvalid}} & lsu_araddr) |
-    ({XLEN{ifu_arvalid}} & ifu_araddr)
-  );
+  logic [XLEN-1:0] sram_araddr;
+  assign sram_araddr = (({XLEN{lsu_arvalid}} & lsu_araddr) | ({XLEN{ifu_arvalid}} & ifu_araddr));
 
   // ifu read
-  assign out_ifu_rdata  = ({XLEN{out_ifu_rvalid}} & (out_rdata));
+  assign out_ifu_rdata = ({XLEN{out_ifu_rvalid}} & (out_rdata));
   assign out_ifu_rvalid = (state == IF_D || state == IF_A) && ((rvalid));
 
   // lsu read
-  wire clint_en = (lsu_araddr == `YSYX_BUS_RTC_ADDR) || (lsu_araddr == `YSYX_BUS_RTC_ADDR_UP);
+  logic clint_en;
+  assign clint_en = (lsu_araddr == `YSYX_BUS_RTC_ADDR) || (lsu_araddr == `YSYX_BUS_RTC_ADDR_UP);
   assign out_lsu_rdata = ({XLEN{lsu_arvalid}} & (
                           ({XLEN{clint_en}} & out_clint_rdata) |
                           ({XLEN{!clint_en}} & out_rdata)
@@ -189,7 +188,8 @@ module ysyx_bus (
   assign out_lsu_wready = io_master_bvalid;
 
   // io lsu read
-  wire ifu_sdram_arburst = (
+  logic ifu_sdram_arburst;
+  assign ifu_sdram_arburst = (
     `YSYX_I_SDRAM_ARBURST && ifu_arvalid &&
     (ifu_araddr >= 'ha0000000) && (ifu_araddr <= 'hc0000000));
   assign io_master_arburst = ifu_sdram_arburst ? 2'b01 : 2'b00;
@@ -207,11 +207,12 @@ module ysyx_bus (
       );
   assign arready = io_master_arready && io_master_bvalid;
 
-  // wire [XLEN-1:0] io_rdata = (io_master_araddr[2:2] == 1) ?
-  //      io_master_rdata[63:32]:
-  //      io_master_rdata[31:00];
-  wire [XLEN-1:0] io_rdata = io_master_rdata;
-  wire [1:0] araddr_lo = io_master_araddr[1:0];
+  // logic [XLEN-1:0] io_rdata;
+  // assign io_rdata = (io_master_araddr[2:2] == 1) ? io_master_rdata[63:32] : io_master_rdata[31:00];
+  logic [XLEN-1:0] io_rdata;
+  logic [1:0] araddr_lo;
+  assign io_rdata = io_master_rdata;
+  assign araddr_lo = io_master_araddr[1:0];
   assign out_rdata = io_rdata;
   assign rvalid = io_master_rvalid;
   assign io_master_rready = 1;
@@ -227,8 +228,10 @@ module ysyx_bus (
   assign io_master_awvalid = (state_store == LS_S_W) && (lsu_wvalid) && !awrite_done;
 
   assign io_master_wlast = io_master_wvalid;
-  wire [1:0] awaddr_lo = io_master_awaddr[1:0];
-  wire [XLEN-1:0] wdata = {
+  logic [1:0] awaddr_lo;
+  logic [XLEN-1:0] wdata;
+  assign awaddr_lo = io_master_awaddr[1:0];
+  assign wdata = {
     ({XLEN{awaddr_lo == 2'b00}} & {{lsu_wdata}}) |
     ({XLEN{awaddr_lo == 2'b01}} & {{lsu_wdata[23:0]}, {8'b0}}) |
     ({XLEN{awaddr_lo == 2'b10}} & {{lsu_wdata[15:0]}, {16'b0}}) |
@@ -237,7 +240,8 @@ module ysyx_bus (
   };
   assign io_master_wdata = wdata;
   assign io_master_wstrb = {wstrb};
-  wire [3:0] wstrb = {lsu_wstrb[3:0] << awaddr_lo};
+  logic [3:0] wstrb;
+  assign wstrb = {lsu_wstrb[3:0] << awaddr_lo};
   assign io_master_wvalid = (state_store == LS_S_W) && (lsu_wvalid) && !write_done;
 
   assign io_master_bready = 1;
@@ -278,11 +282,11 @@ module ysyx_bus (
     end
   end
 
-  wire clint_arvalid = (lsu_arvalid && clint_en);
-  wire out_clint_arready;
-  wire [XLEN-1:0] out_clint_rdata;
-  wire [1:0] out_clint_rresp;
-  wire out_clint_rvalid;
+  logic clint_arvalid, out_clint_arready;
+  logic [XLEN-1:0] out_clint_rdata;
+  logic [1:0] out_clint_rresp;
+  logic out_clint_rvalid;
+  assign clint_arvalid = (lsu_arvalid && clint_en);
   ysyx_clint clint (
       .clock(clock),
       .reset(reset),
@@ -306,11 +310,11 @@ module ysyx_clint (
 
     output [XLEN-1:0] out_rdata,
     output [1:0] out_rresp,
-    output reg out_rvalid
+    output logic out_rvalid
 );
   parameter bit [7:0] XLEN = `YSYX_XLEN;
 
-  reg [63:0] mtime = 0;
+  logic [63:0] mtime = 0;
   assign out_rdata = (
     ({32{araddr == `YSYX_BUS_RTC_ADDR}} & mtime[31:0]) |
     ({32{araddr == `YSYX_BUS_RTC_ADDR_UP}} & mtime[63:32])

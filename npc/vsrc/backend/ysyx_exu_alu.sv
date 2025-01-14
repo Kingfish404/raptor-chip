@@ -4,7 +4,7 @@ module ysyx_exu_alu (
     input [XLEN-1:0] s1,
     input [XLEN-1:0] s2,
     input [4:0] op,
-    output reg [XLEN-1:0] out_r
+    output logic [XLEN-1:0] out_r
 );
   parameter bit [7:0] XLEN = `YSYX_XLEN;
 

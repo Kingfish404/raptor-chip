@@ -128,7 +128,6 @@ void cpu_exec(uint64_t n)
     {
       perf_sample_per_inst();
       cur_inst_cycle = 0;
-      fflush(stdout);
 #ifdef CONFIG_ITRACE
       snprintf(
           iringbuf[iringhead], sizeof(iringbuf[0]),

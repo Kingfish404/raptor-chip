@@ -9,35 +9,35 @@ module ysyxSoC (
     input reset
 );
   parameter bit [7:0] XLEN = `YSYX_XLEN;
-  wire auto_master_out_awready;
-  wire auto_master_out_awvalid;
-  wire [3:0] auto_master_out_awid;
-  wire [XLEN-1:0] auto_master_out_awaddr;
-  wire [7:0] auto_master_out_awlen;
-  wire [2:0] auto_master_out_awsize;
-  wire [1:0] auto_master_out_awburst;
-  wire auto_master_out_wready;
-  wire auto_master_out_wvalid;
-  wire [XLEN-1:0] auto_master_out_wdata;
-  wire [3:0] auto_master_out_wstrb;
-  wire auto_master_out_wlast;
-  wire auto_master_out_bready;
-  wire auto_master_out_bvalid;
-  wire [3:0] auto_master_out_bid;
-  wire [1:0] auto_master_out_bresp;
-  wire auto_master_out_arready;
-  wire auto_master_out_arvalid;
-  wire [3:0] auto_master_out_arid;
-  wire [XLEN-1:0] auto_master_out_araddr;
-  wire [7:0] auto_master_out_arlen;
-  wire [2:0] auto_master_out_arsize;
-  wire [1:0] auto_master_out_arburst;
-  wire auto_master_out_rready;
-  wire auto_master_out_rvalid;
-  wire [3:0] auto_master_out_rid;
-  wire [XLEN-1:0] auto_master_out_rdata;
-  wire [1:0] auto_master_out_rresp;
-  wire auto_master_out_rlast;
+  logic auto_master_out_awready;
+  logic auto_master_out_awvalid;
+  logic [3:0] auto_master_out_awid;
+  logic [XLEN-1:0] auto_master_out_awaddr;
+  logic [7:0] auto_master_out_awlen;
+  logic [2:0] auto_master_out_awsize;
+  logic [1:0] auto_master_out_awburst;
+  logic auto_master_out_wready;
+  logic auto_master_out_wvalid;
+  logic [XLEN-1:0] auto_master_out_wdata;
+  logic [3:0] auto_master_out_wstrb;
+  logic auto_master_out_wlast;
+  logic auto_master_out_bready;
+  logic auto_master_out_bvalid;
+  logic [3:0] auto_master_out_bid;
+  logic [1:0] auto_master_out_bresp;
+  logic auto_master_out_arready;
+  logic auto_master_out_arvalid;
+  logic [3:0] auto_master_out_arid;
+  logic [XLEN-1:0] auto_master_out_araddr;
+  logic [7:0] auto_master_out_arlen;
+  logic [2:0] auto_master_out_arsize;
+  logic [1:0] auto_master_out_arburst;
+  logic auto_master_out_rready;
+  logic auto_master_out_rvalid;
+  logic [3:0] auto_master_out_rid;
+  logic [XLEN-1:0] auto_master_out_rdata;
+  logic [1:0] auto_master_out_rresp;
+  logic auto_master_out_rlast;
 
   ysyx cpu (  // src/CPU.scala:38:21
       .clock            (clock),
@@ -146,13 +146,13 @@ module ysyx_npc_soc (
     input [3:0] arid,
     input [XLEN-1:0] araddr,
     input arvalid,
-    output reg out_arready,
+    output logic out_arready,
 
-    output reg [3:0] out_rid,
-    output reg out_rlast,
-    output reg [XLEN-1:0] out_rdata,
-    output reg [1:0] out_rresp,
-    output reg out_rvalid,
+    output logic [3:0] out_rid,
+    output logic out_rlast,
+    output logic [XLEN-1:0] out_rdata,
+    output logic [1:0] out_rresp,
+    output logic out_rvalid,
     input rready,
 
     input [1:0] awburst,
@@ -167,18 +167,18 @@ module ysyx_npc_soc (
     input [XLEN-1:0] wdata,
     input [3:0] wstrb,
     input wvalid,
-    output reg out_wready,
+    output logic out_wready,
 
-    output reg [3:0] out_bid,
-    output reg [1:0] out_bresp,
-    output reg out_bvalid,
+    output logic [3:0] out_bid,
+    output logic [1:0] out_bresp,
+    output logic out_bvalid,
     input bready
 );
   parameter bit [7:0] XLEN = `YSYX_XLEN;
 
-  reg [31:0] mem_rdata_buf;
-  reg [2:0] state = 0, state_w = 0;
-  reg is_writing = 0;
+  logic [31:0] mem_rdata_buf;
+  logic [2:0] state = 0, state_w = 0;
+  logic is_writing = 0;
 
   // read transaction
   assign out_arready = (state == 'b000);
@@ -189,7 +189,7 @@ module ysyx_npc_soc (
   assign out_awready = (state_w == 'b000);
   assign out_wready  = (state_w == 'b011 && wvalid);
   assign out_bvalid  = (state_w == 'b100);
-  wire [7:0] wmask = (
+  logic [7:0] wmask = (
     ({{8{awsize == 3'b000}} & 8'h1 }) |
     ({{8{awsize == 3'b001}} & 8'h3 }) |
     ({{8{awsize == 3'b010}} & 8'hf }) |

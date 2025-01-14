@@ -13,14 +13,7 @@
 #define PRV_M 0x3
 
 // RISC-V PTE fields
-#define PTE_V 0x1
-#define PTE_R 0x2
-#define PTE_W 0x4
-#define PTE_X 0x8
-#define PTE_U 0x10
 #define PTE_G 0x20
-#define PTE_A 0x40
-#define PTE_D 0x80
 
 enum
 {

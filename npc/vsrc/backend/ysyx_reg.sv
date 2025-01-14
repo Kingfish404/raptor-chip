@@ -23,8 +23,8 @@ module ysyx_reg (
   parameter bit [7:0] XLEN = `YSYX_XLEN;
   parameter bit [7:0] REG_LEN = `YSYX_REG_LEN;
   parameter bit [7:0] REG_NUM = `YSYX_REG_NUM;
-  reg [XLEN-1:0] rf[REG_NUM];
-  reg [REG_NUM-1:0] rf_table;
+  logic [XLEN-1:0] rf[REG_NUM];
+  logic [REG_NUM-1:0] rf_table;
 
   assign out_rf_table = rf_table;
   assign out_src1 = rf[s1addr[REG_LEN-1:0]];
@@ -33,10 +33,16 @@ module ysyx_reg (
   always @(posedge clock) begin
     if (reset) begin
       rf_table <= 0;
+      for (integer i = 0; i < REG_NUM; i = i + 1) begin
+        rf[i] <= 0;
+      end
     end else begin
       if (bad_speculation) begin
         rf_table <= 0;
       end else begin
+        if (reg_write_en) begin
+          rf[waddr[REG_LEN-1:0]] <= wdata;
+        end
         if (idu_valid && rd != 0) begin
           rf_table[rd] <= 1;
         end
@@ -44,16 +50,6 @@ module ysyx_reg (
           rf_table[waddr] <= 0;
         end
       end
-    end
-  end
-
-  always @(posedge clock) begin
-    if (reset) begin
-      for (integer i = 0; i < REG_NUM; i = i + 1) begin
-        rf[i] <= 0;
-      end
-    end else if (reg_write_en) begin
-      rf[waddr[REG_LEN-1:0]] <= wdata;
     end
   end
 endmodule  // ysyx_reg

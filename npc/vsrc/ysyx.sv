@@ -14,13 +14,13 @@ module ysyx (
     input [3:0] io_slave_arid,
     input [XLEN-1:0] io_slave_araddr,
     input io_slave_arvalid,
-    output reg io_slave_arready,
+    output logic io_slave_arready,
 
-    output reg [3:0] io_slave_rid,
-    output reg io_slave_rlast,
-    output reg [XLEN-1:0] io_slave_rdata,
-    output reg [1:0] io_slave_rresp,
-    output reg io_slave_rvalid,
+    output logic [3:0] io_slave_rid,
+    output logic io_slave_rlast,
+    output logic [XLEN-1:0] io_slave_rdata,
+    output logic [1:0] io_slave_rresp,
+    output logic io_slave_rvalid,
     input io_slave_rready,
 
     input [1:0] io_slave_awburst,
@@ -29,17 +29,17 @@ module ysyx (
     input [3:0] io_slave_awid,
     input [XLEN-1:0] io_slave_awaddr,
     input io_slave_awvalid,
-    output reg io_slave_awready,
+    output logic io_slave_awready,
 
     input io_slave_wlast,
     input [XLEN-1:0] io_slave_wdata,
     input [3:0] io_slave_wstrb,
     input io_slave_wvalid,
-    output reg io_slave_wready,
+    output logic io_slave_wready,
 
-    output reg [3:0] io_slave_bid,
-    output reg [1:0] io_slave_bresp,
-    output reg io_slave_bvalid,
+    output logic [3:0] io_slave_bid,
+    output logic [1:0] io_slave_bresp,
+    output logic io_slave_bvalid,
     input io_slave_bready,
     // verilator lint_on UNDRIVEN
 
@@ -50,13 +50,13 @@ module ysyx (
     output [3:0] io_master_arid,
     output [XLEN-1:0] io_master_araddr,
     output io_master_arvalid,
-    input reg io_master_arready,
+    input logic io_master_arready,
 
-    input reg [3:0] io_master_rid,
-    input reg io_master_rlast,
-    input reg [XLEN-1:0] io_master_rdata,
-    input reg [1:0] io_master_rresp,
-    input reg io_master_rvalid,
+    input logic [3:0] io_master_rid,
+    input logic io_master_rlast,
+    input logic [XLEN-1:0] io_master_rdata,
+    input logic [1:0] io_master_rresp,
+    input logic io_master_rvalid,
     output io_master_rready,
 
     output [1:0] io_master_awburst,
@@ -65,17 +65,17 @@ module ysyx (
     output [3:0] io_master_awid,
     output [XLEN-1:0] io_master_awaddr,
     output io_master_awvalid,
-    input reg io_master_awready,
+    input logic io_master_awready,
 
     output io_master_wlast,
     output [XLEN-1:0] io_master_wdata,
     output [3:0] io_master_wstrb,
     output io_master_wvalid,
-    input reg io_master_wready,
+    input logic io_master_wready,
 
-    input reg [3:0] io_master_bid,
-    input reg [1:0] io_master_bresp,
-    input reg io_master_bvalid,
+    input logic [3:0] io_master_bid,
+    input logic [1:0] io_master_bresp,
+    input logic io_master_bvalid,
     output io_master_bready,
 
     input io_interrupt,
@@ -86,66 +86,66 @@ module ysyx (
   parameter bit [7:0] REG_ADDR_W = `YSYX_REG_LEN;
 
   // IFU out
-  wire [31:0] ifu_inst;
-  wire [XLEN-1:0] ifu_pc;
-  wire ifu_speculation;
-  wire flush_pipeline;
-  wire ifu_valid, ifu_ready;
+  logic [31:0] ifu_inst;
+  logic [XLEN-1:0] ifu_pc;
+  logic ifu_speculation;
+  logic flush_pipeline;
+  logic ifu_valid, ifu_ready;
   // IFU out bus
-  wire [XLEN-1:0] ifu_araddr;
-  wire ifu_arvalid, ifu_required;
+  logic [XLEN-1:0] ifu_araddr;
+  logic ifu_arvalid, ifu_required;
 
   // IDU out
   idu_pipe_if idu_if ();
-  wire idu_valid, idu_ready;
-  wire [REG_ADDR_W-1:0] idu_rs1, idu_rs2;
+  logic idu_valid, idu_ready;
+  logic [REG_ADDR_W-1:0] idu_rs1, idu_rs2;
 
   // EXU out
-  wire [31:0] exu_inst, exu_pc;
-  wire [XLEN-1:0] exu_reg_wdata;
-  wire [XLEN-1:0] exu_npc_wdata;
-  wire exu_branch_change, exu_branch_retire, exu_load_retire;
-  wire exu_ebreak;
-  wire [REG_ADDR_W-1:0] exu_rd;
-  wire exu_valid, exu_ready;
+  logic [31:0] exu_inst, exu_pc;
+  logic [XLEN-1:0] exu_reg_wdata;
+  logic [XLEN-1:0] exu_npc_wdata;
+  logic exu_branch_change, exu_branch_retire, exu_load_retire;
+  logic exu_ebreak;
+  logic [REG_ADDR_W-1:0] exu_rd;
+  logic exu_valid, exu_ready;
   // EXU out lsu
-  wire exu_ren, exu_wen;
-  wire [XLEN-1:0] exu_rwaddr;
-  wire exu_lsu_avalid;
-  wire [4:0] exu_alu_op;
-  wire [XLEN-1:0] exu_lsu_wdata;
+  logic exu_ren, exu_wen;
+  logic [XLEN-1:0] exu_rwaddr;
+  logic exu_lsu_avalid;
+  logic [4:0] exu_alu_op;
+  logic [XLEN-1:0] exu_lsu_wdata;
 
   // WBU out
-  wire [31:0] wbu_pc;
-  wire wbu_valid, wbu_ready;
-  wire [XLEN-1:0] wbu_npc;
-  wire wbu_pc_change, wbu_pc_retire;
+  logic [31:0] wbu_pc;
+  logic wbu_valid, wbu_ready;
+  logic [XLEN-1:0] wbu_npc;
+  logic wbu_pc_change, wbu_pc_retire;
 
-  // reg out
-  wire [`YSYX_REG_NUM-1:0] reg_rf_table;
-  wire [XLEN-1:0] reg_rdata1, reg_rdata2;
+  // logic out
+  logic [`YSYX_REG_NUM-1:0] reg_rf_table;
+  logic [XLEN-1:0] reg_rdata1, reg_rdata2;
 
   // lsu out
-  wire [XLEN-1:0] lsu_rdata;
-  wire lsu_exu_rvalid;
-  wire lsu_exu_wready;
+  logic [XLEN-1:0] lsu_rdata;
+  logic lsu_exu_rvalid;
+  logic lsu_exu_wready;
   // lsu out load
-  wire [XLEN-1:0] lsu_araddr;
-  wire lsu_arvalid;
-  wire [7:0] lsu_rstrb;
+  logic [XLEN-1:0] lsu_araddr;
+  logic lsu_arvalid;
+  logic [7:0] lsu_rstrb;
   // lsu out store
-  wire [XLEN-1:0] lsu_awaddr;
-  wire lsu_awvalid;
-  wire [XLEN-1:0] lsu_wdata;
-  wire [7:0] lsu_wstrb;
-  wire lsu_wvalid;
+  logic [XLEN-1:0] lsu_awaddr;
+  logic lsu_awvalid;
+  logic [XLEN-1:0] lsu_wdata;
+  logic [7:0] lsu_wstrb;
+  logic lsu_wvalid;
 
   // bus out
-  wire [XLEN-1:0] bus_ifu_rdata;
-  wire bus_ifu_rvalid;
-  wire [XLEN-1:0] bus_lsu_rdata;
-  wire bus_lsu_rvalid;
-  wire bus_lsu_wready;
+  logic [XLEN-1:0] bus_ifu_rdata;
+  logic bus_ifu_rvalid;
+  logic [XLEN-1:0] bus_lsu_rdata;
+  logic bus_lsu_rvalid;
+  logic bus_lsu_wready;
 
   //------------------------------------------------------------------------------
   // RISC-V Processor Core

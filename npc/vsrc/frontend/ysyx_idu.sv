@@ -23,34 +23,36 @@ module ysyx_idu (
 
     input prev_valid,
     input next_ready,
-    output reg out_valid,
-    output reg out_ready
+    output logic out_valid,
+    output logic out_ready
 );
   parameter bit [7:0] XLEN = `YSYX_XLEN;
 
-  reg [31:0] inst_idu, pc_idu;
-  reg valid, ready;
+  logic [31:0] inst_idu, pc_idu;
+  logic valid, ready;
 
-  wire [4:0] rd;
-  wire [`YSYX_REG_LEN-1:0]
-    rs1 = inst_idu[15+`YSYX_REG_LEN-1:15],
-    rs2 = inst_idu[20+`YSYX_REG_LEN-1:20];
+  logic [4:0] rd;
+  logic [`YSYX_REG_LEN-1:0]
+      rs1 = inst_idu[15+`YSYX_REG_LEN-1:15], rs2 = inst_idu[20+`YSYX_REG_LEN-1:20];
 
-  wire wen, ren, indie;
-  wire idu_hazard = valid && (indie == 0) && (
+  logic wen, ren, indie;
+  logic idu_hazard = valid && (indie == 0) && (
     ((rf_table[rs1[`YSYX_REG_LEN-1:0]] == 1) &&
        !(exu_valid && rs1[`YSYX_REG_LEN-1:0] == exu_forward_rd)) ||
     ((rf_table[rs2[`YSYX_REG_LEN-1:0]] == 1) &&
        !(exu_valid && rs2[`YSYX_REG_LEN-1:0] == exu_forward_rd)) ||
     (0));
-  wire [XLEN-1:0] reg_rdata1 = (exu_valid && rs1[`YSYX_REG_LEN-1:0] == exu_forward_rd)
+  logic [XLEN-1:0] reg_rdata1;
+  logic [XLEN-1:0] reg_rdata2;
+
+  assign reg_rdata1 = (exu_valid && rs1[`YSYX_REG_LEN-1:0] == exu_forward_rd)
     ? exu_forward : rdata1;
-  wire [XLEN-1:0] reg_rdata2 = (exu_valid && rs2[`YSYX_REG_LEN-1:0] == exu_forward_rd)
+  assign reg_rdata2 = (exu_valid && rs2[`YSYX_REG_LEN-1:0] == exu_forward_rd)
     ? exu_forward : rdata2;
   assign out_valid = valid && !idu_hazard;
   assign out_ready = ready && !idu_hazard && next_ready;
-  assign out_rs1   = rs1;
-  assign out_rs2   = rs2;
+  assign out_rs1 = rs1;
+  assign out_rs2 = rs2;
 
   always @(posedge clock) begin
     if (reset) begin

@@ -8,9 +8,9 @@ module ysyx_exu (
     idu_pipe_if.in idu_if,
 
     // for lsu
-    output reg out_ren,
-    output reg out_wen,
-    output reg [XLEN-1:0] out_rwaddr,
+    output logic out_ren,
+    output logic out_wen,
+    output logic [XLEN-1:0] out_rwaddr,
     output out_lsu_avalid,
     output [4:0] out_alu_op,
     output [XLEN-1:0] out_lsu_mem_wdata,
@@ -20,7 +20,7 @@ module ysyx_exu (
     input lsu_exu_rvalid,
     input lsu_exu_wready,
 
-    output reg [31:0] out_inst,
+    output logic [31:0] out_inst,
     output [XLEN-1:0] out_pc,
 
     output [XLEN-1:0] out_reg_wdata,
@@ -30,33 +30,33 @@ module ysyx_exu (
     output out_branch_change,
     output out_branch_retire,
 
-    output reg out_ebreak,
-    output reg [`YSYX_REG_LEN-1:0] out_rd,
+    output logic out_ebreak,
+    output logic [`YSYX_REG_LEN-1:0] out_rd,
 
     input prev_valid,
     input next_ready,
-    output reg out_valid,
-    output reg out_ready,
+    output logic out_valid,
+    output logic out_ready,
 
     input reset
 );
   parameter bit [7:0] XLEN = `YSYX_XLEN;
 
-  wire [XLEN-1:0] reg_wdata, reg_wdata_mul, mepc, mtvec;
-  wire [XLEN-1:0] mem_wdata = src2;
-  wire [  12-1:0] csr_addr0;
-  wire [XLEN-1:0] csr_wdata, csr_rdata;
-  wire is_mul;
-  reg [XLEN-1:0] imm_exu, pc_exu, src1, src2, opj, addr_exu;
-  reg [XLEN-1:0] inst_exu;
-  reg [4:0] alu_op_exu;
-  reg [`YSYX_REG_LEN-1:0] rd;
-  reg csr_wen_exu;
-  reg jen, ben, ren, wen, ebreak;
-  reg ecall, mret;
-  reg [XLEN-1:0] mem_rdata;
-  reg branch_change, system_exu;
-  reg [2:0] func3;
+  logic [XLEN-1:0] reg_wdata, reg_wdata_mul, mepc, mtvec;
+  logic [XLEN-1:0] mem_wdata = src2;
+  logic [  12-1:0] csr_addr0;
+  logic [XLEN-1:0] csr_wdata, csr_rdata;
+  logic is_mul;
+  logic [XLEN-1:0] imm_exu, pc_exu, src1, src2, opj, addr_exu;
+  logic [XLEN-1:0] inst_exu;
+  logic [4:0] alu_op_exu;
+  logic [`YSYX_REG_LEN-1:0] rd;
+  logic csr_wen_exu;
+  logic jen, ben, ren, wen, ebreak;
+  logic ecall, mret;
+  logic [XLEN-1:0] mem_rdata;
+  logic branch_change, system_exu;
+  logic [2:0] func3;
 
   ysyx_exu_csr csrs (
       .clock(clock),
@@ -92,10 +92,10 @@ module ysyx_exu (
 
   assign addr_exu = opj + imm_exu;
 
-  reg alu_valid, mul_valid, lsu_avalid;
-  reg  lsu_valid;
-  reg  ready;
-  wire valid;
+  logic alu_valid, mul_valid, lsu_avalid;
+  logic lsu_valid;
+  logic ready;
+  logic valid;
   assign valid = (wen || ren) ? lsu_valid : (is_mul ? mul_valid : alu_valid);
   assign out_valid = valid;
   assign out_ready = ready && next_ready;

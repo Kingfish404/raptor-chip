@@ -25,9 +25,9 @@ module ysyx_wbu (
 );
   parameter bit [7:0] XLEN = `YSYX_XLEN;
 
-  reg [31:0] inst_wbu, pc_wbu, npc_wbu;
+  logic [31:0] inst_wbu, pc_wbu, npc_wbu;
 
-  reg change, retire, valid, ready;
+  logic change, retire, valid, ready;
 
   assign out_valid = valid;
   assign out_ready = ready;

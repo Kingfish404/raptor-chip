@@ -6,21 +6,21 @@ module ysyx_exu_mul (
     input [XLEN-1:0] in_b,
     input [4:0] in_op,
     input in_valid,
-    output reg [XLEN-1:0] out_r,
-    output reg out_valid
+    output logic [XLEN-1:0] out_r,
+    output logic out_valid
 );
   parameter bit [7:0] XLEN = `YSYX_XLEN;
-  reg [XLEN-1:0] s1, s2;
-  reg [4:0] op;
-  reg valid;
+  logic [XLEN-1:0] s1, s2;
+  logic [4:0] op;
+  logic valid;
 
   assign out_valid = valid;
 
 `ifdef YSYX_M_FAST
-  reg [XLEN-1:0] r;
-  wire [63:0] mulh;
-  wire [64:0] muls;
-  wire [63:0] mulu;
+  logic [XLEN-1:0] r;
+  logic [63:0] mulh;
+  logic [64:0] muls;
+  logic [63:0] mulu;
 
   always_ff @(posedge clock) begin
     if (in_valid) begin
@@ -61,18 +61,20 @@ module ysyx_exu_mul (
 
 `else
 
-  reg [XLEN-1:0] p, s, quotient;
-  reg [6:0] counter;
-  reg [1:0] bb;
+  logic [XLEN-1:0] p, s, quotient;
+  logic [6:0] counter;
+  logic [1:0] bb;
 
-  reg [63:0] ss1, ss2;
-  reg [63:0] pp, ss;
-  wire signed_op = in_op == `YSYX_ALU_REM___ || in_op == `YSYX_ALU_DIV___;
-  wire [XLEN-1:0] s1_signed = ((signed_op) && in_a[31]) ? -in_a : in_a;
+  logic [63:0] ss1, ss2;
+  logic [63:0] pp, ss;
+  logic signed_op;
+  assign signed_op = in_op == `YSYX_ALU_REM___ || in_op == `YSYX_ALU_DIV___;
+  logic [XLEN-1:0] s1_signed;
+  assign s1_signed = ((signed_op) && in_a[31]) ? -in_a : in_a;
 
-  reg [XLEN-1:0] div_bit;
-  reg [32:0] reh;
-  reg [1:0] sign;
+  logic [XLEN-1:0] div_bit;
+  logic [32:0] reh;
+  logic [1:0] sign;
 
   always_ff @(posedge clock) begin
     if (in_valid) begin

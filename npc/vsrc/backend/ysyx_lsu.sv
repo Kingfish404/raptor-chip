@@ -30,18 +30,18 @@ module ysyx_lsu (
     output [7:0] out_lsu_wstrb,
     output out_lsu_wvalid,
     // from bus store
-    input reg lsu_wready,
+    input logic lsu_wready,
 
     input reset
 );
   parameter bit [7:0] XLEN = `YSYX_XLEN;
 
-  reg valid_r;
+  logic valid_r;
 
-  wire [XLEN-1:0] lsu_araddr;
-  wire [XLEN-1:0] rdata, rdata_unalign;
-  wire [7:0] wstrb, rstrb;
-  wire arvalid;
+  logic [XLEN-1:0] lsu_araddr;
+  logic [XLEN-1:0] rdata, rdata_unalign;
+  logic [7:0] wstrb, rstrb;
+  logic arvalid;
 
   assign out_lsu_araddr = lsu_araddr;
   assign out_lsu_arvalid = arvalid;
@@ -67,19 +67,19 @@ module ysyx_lsu (
 
   parameter bit [7:0] L1D_LEN = 1;
   parameter bit [7:0] L1D_SIZE = 2 ** L1D_LEN;
-  reg [32-1:0] l1d[L1D_SIZE], rdata_lsu;
-  reg [L1D_SIZE-1:0] l1d_valid = 0;
-  reg [32-L1D_LEN-2-1:0] l1d_tag[L1D_SIZE];
+  logic [32-1:0] l1d[L1D_SIZE], rdata_lsu;
+  logic [L1D_SIZE-1:0] l1d_valid = 0;
+  logic [32-L1D_LEN-2-1:0] l1d_tag[L1D_SIZE];
 
-  wire [32-L1D_LEN-2-1:0] addr_tag;
-  wire [L1D_LEN-1:0] addr_idx;
-  wire l1d_cache_hit;
-  wire l1d_cache_within;
+  logic [32-L1D_LEN-2-1:0] addr_tag;
+  logic [L1D_LEN-1:0] addr_idx;
+  logic l1d_cache_hit;
+  logic l1d_cache_within;
 
 
-  wire [32-L1D_LEN-2-1:0] waddr_tag;
-  wire [L1D_LEN-1:0] waddr_idx;
-  wire l1d_cache_hit_w;
+  logic [32-L1D_LEN-2-1:0] waddr_tag;
+  logic [L1D_LEN-1:0] waddr_idx;
+  logic l1d_cache_hit_w;
 
   assign l1d_cache_hit = (
          ren && lsu_avalid && 1 &&
@@ -114,7 +114,7 @@ module ysyx_lsu (
            ({8{alu_op == `YSYX_ALU_LW__}} & 8'hf)
          );
 
-  wire [1:0] araddr_lo = out_lsu_araddr[1:0];
+  logic [1:0] araddr_lo = out_lsu_araddr[1:0];
   assign rdata = (
            ({XLEN{araddr_lo == 2'b00}} & rdata_unalign) |
            ({XLEN{araddr_lo == 2'b01}} & {{8'b0}, {rdata_unalign[31:8]}}) |

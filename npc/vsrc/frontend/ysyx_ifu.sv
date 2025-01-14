@@ -31,24 +31,27 @@ module ysyx_ifu (
 );
   parameter bit [7:0] XLEN = `YSYX_XLEN;
 
-  reg [XLEN-1:0] pc_ifu;
-  reg ifu_lsu_hazard = 0, ifu_branch_hazard = 0;
+  logic [XLEN-1:0] pc_ifu;
+  logic ifu_lsu_hazard = 0, ifu_branch_hazard = 0;
 
-  reg [XLEN-1:0] btb, btb_jal;
-  reg [XLEN-1:0] ifu_speculation;
-  reg speculation, bad_speculation, ifu_b_speculation;
+  logic [XLEN-1:0] btb, btb_jal;
+  logic [XLEN-1:0] ifu_speculation;
+  logic speculation, bad_speculation, ifu_b_speculation;
 
-  wire ifu_hazard = ifu_lsu_hazard || ifu_branch_hazard;
-  wire [6:0] opcode = out_inst[6:0];
-  wire is_jalr = (opcode == `YSYX_OP_JALR__);
-  wire is_jal = (opcode == `YSYX_OP_JAL___);
-  wire is_b_type = (opcode == `YSYX_OP_B_TYPE_);
-  wire is_branch = (is_jal || is_jalr || is_b_type);
-  wire is_load = (opcode == `YSYX_OP_IL_TYPE);
-  wire is_store = (opcode == `YSYX_OP_S_TYPE_);
-  wire is_fencei = (out_inst == `YSYX_INST_FENCE_I);  // fence.i is system instruction
-  wire is_sys = (opcode == `YSYX_OP_SYSTEM);
-  wire valid;
+  logic ifu_hazard;
+  logic [6:0] opcode;
+  logic is_jalr, is_jal, is_b_type, is_branch, is_load, is_store, is_fencei, is_sys;
+  assign ifu_hazard = ifu_lsu_hazard || ifu_branch_hazard;
+  assign opcode = out_inst[6:0];
+  assign is_jalr = (opcode == `YSYX_OP_JALR__);
+  assign is_jal = (opcode == `YSYX_OP_JAL___);
+  assign is_b_type = (opcode == `YSYX_OP_B_TYPE_);
+  assign is_branch = (is_jal || is_jalr || is_b_type);
+  assign is_load = (opcode == `YSYX_OP_IL_TYPE);
+  assign is_store = (opcode == `YSYX_OP_S_TYPE_);
+  assign is_fencei = (out_inst == `YSYX_INST_FENCE_I);  // fence.i is system instruction
+  assign is_sys = (opcode == `YSYX_OP_SYSTEM);
+  logic valid;
 
   assign valid =(l1i_valid && !ifu_hazard) &&
    !bad_speculation && !(speculation && (is_load || is_store));
@@ -57,8 +60,9 @@ module ysyx_ifu (
 
   // Branch Prediction
   assign out_flush_pipeline = bad_speculation || bad_speculationing;
-  wire good_speculationing = ((pc_change || pc_retire) && npc == ifu_speculation);
-  wire bad_speculationing = (speculation) && ((pc_change || pc_retire) && npc != ifu_speculation);
+  logic good_speculationing, bad_speculationing;
+  assign good_speculationing = ((pc_change || pc_retire) && npc == ifu_speculation);
+  assign bad_speculationing = (speculation) && ((pc_change || pc_retire) && npc != ifu_speculation);
 
   assign out_pc = pc_ifu;
   always @(posedge clock) begin
@@ -138,9 +142,10 @@ module ysyx_ifu (
     end
   end
 
-  wire invalid_l1i = valid && next_ready && is_fencei;
-  wire l1i_valid;
-  wire l1i_ready;
+  logic invalid_l1i;
+  assign invalid_l1i = valid && next_ready && is_fencei;
+  logic l1i_valid;
+  logic l1i_ready;
 
   ysyx_ifu_l1i l1i_cache (
       .clock(clock),
