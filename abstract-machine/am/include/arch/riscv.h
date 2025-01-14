@@ -7,6 +7,21 @@
 #define NR_REGS 32
 #endif
 
+// RISC-V privilege levels
+#define PRV_U 0x0
+#define PRV_S 0x1
+#define PRV_M 0x3
+
+// RISC-V PTE fields
+#define PTE_V 0x1
+#define PTE_R 0x2
+#define PTE_W 0x4
+#define PTE_X 0x8
+#define PTE_U 0x10
+#define PTE_G 0x20
+#define PTE_A 0x40
+#define PTE_D 0x80
+
 enum
 {
   r_zero = 0,
@@ -43,9 +58,37 @@ enum
   r_t6 = 31
 };
 
+typedef union
+{
+  struct
+  {
+    size_t rev1 : 1;
+    size_t sie : 1;
+    size_t rev2 : 1;
+    size_t mie : 1;
+    size_t rev3 : 1;
+    size_t spie : 1;
+    size_t ube : 1;
+    size_t mpie : 1;
+    size_t spp : 1;
+    size_t vs : 2;
+    size_t mpp : 2;
+    size_t fs : 2;
+    size_t xs : 2;
+    size_t mprv : 1;
+    size_t sum : 1;
+    size_t mxr : 1;
+    size_t tvm : 1;
+    size_t tw : 1;
+    size_t tsr : 1;
+    size_t rev4 : 8;
+    size_t sd : 1;
+  } mstatus;
+  size_t val;
+} csr_t;
+
 struct Context
 {
-  // TODO: fix the order of these members to match trap.S
   uintptr_t gpr[NR_REGS], mcause, mstatus, mepc;
   void *pdir;
 };

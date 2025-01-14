@@ -38,7 +38,7 @@ bool vme_init(void *(*pgalloc_f)(int), void (*pgfree_f)(void *))
     void *va = segments[i].start;
     for (; va < segments[i].end; va += PGSIZE)
     {
-      map(&kas, va, va, 0);
+      map(&kas, va, va, (PTE_A | PTE_D | PTE_R | PTE_W | PTE_U));
     }
   }
 
@@ -77,6 +77,24 @@ void __am_switch(Context *c)
 
 void map(AddrSpace *as, void *va, void *pa, int prot)
 {
+  PTE *pdir = (PTE *)as->ptr;
+#if __riscv_xlen == 32
+  uintptr_t vpn1 = (uintptr_t)va >> 22;
+  uintptr_t vpn0 = (uintptr_t)va >> 12 & 0x3ff;
+  uintptr_t ppn1 = (uintptr_t)pa >> 22;
+  uintptr_t ppn0 = (uintptr_t)pa >> 12 & 0x3ff;
+  // printf("va: %x, pa: %x\t", va, pa);
+  // printf("vpn1: %x, vpn0: %x, ppn1: %x, ppn0: %x\n", vpn1, vpn0, ppn1, ppn0);
+  if (pdir[vpn1] == NULL)
+  {
+    uintptr_t l1 = (uintptr_t)pgalloc_usr(PGSIZE);
+    pdir[vpn1] = (l1 >> 2) | PTE_V;
+  }
+  PTE *pte1 = ((PTE *)((pdir[vpn1] << 2) & ~0xfff));
+  (pte1)[vpn0] = ((ppn1 << 20) | (ppn0 << 10) | prot | PTE_V);
+#else
+  panic("not implemented");
+#endif
 }
 
 Context *ucontext(AddrSpace *as, Area ustack, void *entry)
@@ -88,7 +106,12 @@ Context *ucontext(AddrSpace *as, Area ustack, void *entry)
 #ifdef CONFIG_ISA64
   c->mstatus = 0xa00001800;
 #else // __risv32
-  c->mstatus = 0x1800;
+  csr_t csr = {.val = 0x0};
+  csr.mstatus.mpp = PRV_U;
+  csr.mstatus.sum = 1;
+  csr.mstatus.mxr = 1;
+  c->mstatus = csr.val;
 #endif
+  c->pdir = as->ptr;
   return c;
 }

@@ -34,6 +34,7 @@ void init_proc()
   char *envp[] = {NULL};
 
   context_kload(&pcb[0], hello_fun, (void *)0);
+  // char *argv[] = {"/bin/dummy", NULL};
   // char *argv[] = {"/bin/menu", NULL};
   // char *argv[] = {"/bin/nterm", NULL};
   // char *argv[] = {"/bin/pal", "--skip", NULL};

@@ -78,6 +78,8 @@ cd $NAVY_HOME && make ISA=$ISA fsimg
 cd $NAVY_HOME/apps/menu && make ISA=$ISA install
 cd $YSYX_HOME/nanos-lite && make ARCH=$ISA-nemu update run
 cd $YSYX_HOME/nanos-lite && make ARCH=$ISA-nemu run
+## n.vme running nanos-lite on nemu with VME
+cd $YSYX_HOME/nanos-lite && make ARCH=$ISA-nemu update run FLAGS="-b" VME=1
 
 ## n+1. running busybox on nemu (Linux required)
 cd $NAVY_HOME/apps/busybox && colima ssh # login to Linux container

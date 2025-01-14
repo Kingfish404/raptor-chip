@@ -56,8 +56,10 @@ void isa_reg_display()
     printf("%3s: " FMT_WORD_NO_PREFIX "\t", regs[i], cpu.gpr[i]);
   }
   printf("\n");
+  printf("   msr.satp: " FMT_WORD_NO_PREFIX "\t", cpu.sr[CSR_SATP]);
+
   printf("msr.mstatus: " FMT_WORD_NO_PREFIX "\n", cpu.sr[CSR_MSTATUS]);
-  printf("   msr.mepc: " FMT_WORD_NO_PREFIX "\n", cpu.sr[CSR_MEPC]);
+  printf("   msr.mepc: " FMT_WORD_NO_PREFIX "\t", cpu.sr[CSR_MEPC]);
   printf(" msr.mcause: " FMT_WORD_NO_PREFIX "\n", cpu.sr[CSR_MCAUSE]);
   printf("  msr.mtvec: " FMT_WORD_NO_PREFIX "\n", cpu.sr[CSR_MTVEC]);
 }

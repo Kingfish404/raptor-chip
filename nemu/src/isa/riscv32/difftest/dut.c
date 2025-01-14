@@ -50,6 +50,7 @@ bool isa_difftest_checkregs(CPU_state *ref_r, vaddr_t pc)
   CHECK_CSR(CSR_MEPC);
   CHECK_CSR(CSR_MTVEC);
   CHECK_CSR(CSR_MCAUSE);
+  CHECK_CSR(CSR_SATP);
   return is_same;
 }
 

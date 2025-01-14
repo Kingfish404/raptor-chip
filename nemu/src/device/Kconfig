@@ -28,7 +28,7 @@ config SERIAL_PORT
 
 config SERIAL_MMIO
   hex "MMIO address of the serial controller"
-  default 0x10000000
+  default 0x000003f8
 
 config SERIAL_INPUT_FIFO
   bool "Enable input FIFO with /tmp/nemu.serial"
@@ -47,7 +47,7 @@ config RTC_PORT
 
 config RTC_MMIO
   hex "MMIO address of the timer"
-  default 0x02000048
+  default 0x00000048
 endif # HAS_TIMER
 
 menuconfig HAS_KEYBOARD

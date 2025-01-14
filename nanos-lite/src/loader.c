@@ -37,11 +37,24 @@ static uintptr_t loader(PCB *pcb, const char *filename)
     if (elf_phdr.p_type == PT_LOAD)
     {
       uintptr_t pa = elf_phdr.p_paddr;
+      uintptr_t start_aligned = elf_phdr.p_vaddr & ~(PGSIZE - 1);
+      int n_pages = ((elf_phdr.p_memsz + elf_phdr.p_vaddr - start_aligned + PGSIZE - 1) / PGSIZE) + 1;
+      void *page = new_page(n_pages);
+      void *page_start = page + (elf_phdr.p_vaddr - start_aligned);
       fs_lseek(fd, elf_phdr.p_offset, SEEK_SET);
-      fs_read(fd, (void *)pa, elf_phdr.p_filesz);
-      memset((void *)(pa + elf_phdr.p_filesz), 0, elf_phdr.p_memsz - elf_phdr.p_filesz);
+      fs_read(fd, (void *)page_start, elf_phdr.p_filesz);
+      memset((page_start + elf_phdr.p_filesz), 0, elf_phdr.p_memsz - elf_phdr.p_filesz);
+      for (int j = 0; j < n_pages; j++)
+      {
+        map(&pcb->as,
+            (void *)(start_aligned + j * PGSIZE),
+            page + j * PGSIZE,
+            (PTE_A | PTE_D | PTE_R | PTE_W | PTE_X | PTE_U));
+      }
+      pcb->max_brk = (uintptr_t)(start_aligned + n_pages * PGSIZE);
     }
   }
+  fs_close(fd);
   return entry;
 }
 
@@ -59,6 +72,7 @@ void context_kload(PCB *pcb, void *entry, void *arg)
 
 void context_uload(PCB *pcb, const char *filename, char *const argv[], char *const envp[])
 {
+  protect(&pcb->as);
   uintptr_t entry = loader(pcb, filename);
   int argc = 0, envp_size = 0;
   while (argv[argc] != NULL)
@@ -94,9 +108,17 @@ void context_uload(PCB *pcb, const char *filename, char *const argv[], char *con
     envp_sizes[i] += 2;
   }
   const Area kstack = (Area){.start = pcb->stack, .end = pcb->stack + STACK_SIZE};
-  pcb->cp = ucontext(NULL, kstack, (void *)entry);
-  void *const ustack_s = new_page(4);
-  void *sp = ustack_s + 4 * PGSIZE;
+  pcb->cp = ucontext(&pcb->as, kstack, (void *)entry);
+  void *const ustack_s = new_page(8);
+  void *const ustack_end = ustack_s + 8 * PGSIZE;
+  for (int i = 0; i < 8; i++)
+  {
+    map(&pcb->as,
+        (void *)pcb->as.area.end - 8 * PGSIZE + i * PGSIZE,
+        (void *)ustack_s + i * PGSIZE,
+        (PTE_A | PTE_D | PTE_R | PTE_W | PTE_U));
+  }
+  void *sp = ustack_s + 8 * PGSIZE;
   // Unspecified area
   sp -= 4 * sizeof(int);
   // string area: argv[]

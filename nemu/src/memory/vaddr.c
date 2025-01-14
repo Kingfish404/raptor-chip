@@ -20,7 +20,17 @@ extern FILE *mem_trace;
 
 word_t vaddr_ifetch(vaddr_t addr, int len)
 {
-  return paddr_read(addr, len);
+  paddr_t paddr = addr;
+  if (isa_mmu_check(addr, len, MEM_TYPE_IFETCH) == MMU_DIRECT)
+  {
+    paddr = addr;
+  }
+  else
+  {
+    // printf("ir = " FMT_WORD "\n", addr);
+    paddr = isa_mmu_translate(addr, len, MEM_TYPE_IFETCH);
+  }
+  return paddr_read(paddr, len);
 }
 
 word_t vaddr_read(vaddr_t addr, int len)
@@ -29,7 +39,17 @@ word_t vaddr_read(vaddr_t addr, int len)
   {
     fprintf(mem_trace, FMT_WORD_NO_PREFIX "-%c\n", addr, 'r');
   }
-  return paddr_read(addr, len);
+  paddr_t paddr = addr;
+  if (isa_mmu_check(addr, len, MEM_TYPE_READ) == MMU_DIRECT)
+  {
+    paddr = addr;
+  }
+  else
+  {
+    // printf("dr: addr = " FMT_WORD "\n", addr);
+    paddr = isa_mmu_translate(addr, len, MEM_TYPE_READ);
+  }
+  return paddr_read(paddr, len);
 }
 
 void vaddr_write(vaddr_t addr, int len, word_t data)
@@ -38,7 +58,17 @@ void vaddr_write(vaddr_t addr, int len, word_t data)
   {
     fprintf(mem_trace, FMT_WORD_NO_PREFIX "-%c\n", addr, 'w');
   }
-  paddr_write(addr, len, data);
+  paddr_t paddr = 0;
+  if (isa_mmu_check(addr, len, MEM_TYPE_WRITE) == MMU_DIRECT)
+  {
+    paddr = addr;
+  }
+  else
+  {
+    // printf("dw:  addr = " FMT_WORD "\n", addr);
+    paddr = isa_mmu_translate(addr, len, MEM_TYPE_WRITE);
+  }
+  paddr_write(paddr, len, data);
 }
 
 void vaddr_show(vaddr_t addr, int n)

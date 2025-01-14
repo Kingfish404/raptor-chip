@@ -1,4 +1,5 @@
 #include <common.h>
+#include <memory.h>
 #include <fs.h>
 #include <proc.h>
 #include <sys/time.h>
@@ -86,7 +87,7 @@ void do_syscall(Context *c)
     c->GPRx = fs_write(a[1], (void *)a[2], a[3]);
     break;
   case SYS_brk:
-    c->GPRx = 0;
+    c->GPRx = mm_brk(a[1]);
     break;
   case SYS_read:
     c->GPRx = fs_read(a[1], (void *)a[2], a[3]);
