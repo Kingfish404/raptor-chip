@@ -1,13 +1,55 @@
-// width of an integer register in bits
+/**
+ * Architecture (arch) Parameters
+ * @param YSYX_XLEN: Width of an integer register in bits
+ * @param YSYX_I_EXTENSION: I Extension
+ * @param YSYX_M_EXTENSION: M Extension
+ */
 `define YSYX_XLEN 32
-
-// Extensions
 `define YSYX_I_EXTENSION 'h1
 `define YSYX_M_EXTENSION 'h1
 
-// Microarchitecture
-// `define YSYX_M_FAST 'h1
+/**
+ * Microarchitecture (uarch)
+       +-----+                          +-----+
+     ,-| BPU |          |#(IQU_SIZE)  ,-| MUL #(YSYX_M_FAST)
+     | +-----+          |             | +--+--+
+  +--|--+    +-----+    +-----+    +--|--+    +-----+
+  | IFU +----> IDU +----> IQU +----> EXU +----> WBU |
+  +^-|--+    +-----+    +-----+    +---^-+    +-----+
+   | | +-----+                         |
+   | `-| L1I #(L1I_LINE_LEN, L1I_LEN)  |
+   |   +-----+                         |
+   |           +-----+      +-----+    |
+    `----------+ BUS <------> LSU <----'
+               +--^--+      +----|+
+  "AXI4 protocol" |              | +-----+
+       +----------v----------+   `-| L1D #(L1D_LEN)
+       |         SoC         |     +-----+
+       +---------------------+
 
+ * uarch Parameters
+ * @param YSYX_M_FAST: M Extension Fast Mode (one cycle)
+ * @param L1I_LINE_LEN: L1I Line Length
+ * @param L1I_LEN: L1I Length (Size)
+ * @param IQU_SIZE: Issue Queue Size
+ * @param L1D_LEN: L1D Length (Size)
+ */
+
+// `define YSYX_M_FAST 'h1
+`define YSYX_L1I_LINE_LEN 1
+`define YSYX_L1I_LEN 2
+`define YSYX_IQU_SIZE 4
+`define YSYX_L1D_LEN 1
+
+`ifdef YSYX_I_EXTENSION
+`define YSYX_REG_LEN 5  // 32 registers
+`else
+`define YSYX_REG_LEN 4  // 16 registers
+`endif
+
+`define YSYX_REG_NUM 2**`YSYX_REG_LEN
+
+// Instruction Set Opcodes
 `define YSYX_INST_FENCE_I 32'h0000100f
 
 `define YSYX_OP_LUI___ 7'b0110111
@@ -67,6 +109,11 @@
 `define YSYX_ALU_SH__ 'b000001
 `define YSYX_ALU_SW__ 'b000010
 
+// Privilege Levels
+`define YSYX_PRIV_U 2'h0
+`define YSYX_PRIV_S 2'h1
+`define YSYX_PRIV_M 2'h3
+
 // Machine Trap Handling
 `define YSYX_CSR_MCAUSE_ 'h342
 `define YSYX_CSR_MEPC___ 'h341
@@ -76,21 +123,15 @@
 `define YSYX_CSR_MSTATUS 'h300
 
 // CSR_MSTATUS FLAGS
-`define YSYX_CSR_MSTATUS_MPIE 'h7
-`define YSYX_CSR_MSTATUS_MIE_ 'h3
+`define YSYX_CSR_MSTATUS_MPP_ 12:11
+`define YSYX_CSR_MSTATUS_MPIE 7
+`define YSYX_CSR_MSTATUS_MIE_ 3
 
 // Machine Information Registers
 `define YSYX_CSR_MVENDORID 'hf11
 `define YSYX_CSR_MARCHID__ 'hf12
 
-`ifdef YSYX_I_EXTENSION
-`define YSYX_REG_LEN 5  // 32 registers
-`else
-`define YSYX_REG_LEN 4  // 16 registers
-`endif
-
-`define YSYX_REG_NUM 2**`YSYX_REG_LEN
-
+// Macros
 `define ASSERT(signal, value) \
   if (signal !== value) begin \
     $error("ASSERTION FAILED in %m: signal != value"); \

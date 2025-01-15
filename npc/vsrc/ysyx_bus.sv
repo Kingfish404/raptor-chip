@@ -2,7 +2,9 @@
 `include "ysyx_soc.svh"
 `include "ysyx_dpi_c.svh"
 
-module ysyx_bus (
+module ysyx_bus #(
+    parameter bit [7:0] XLEN = `YSYX_XLEN
+) (
     input clock,
     input reset,
 
@@ -63,21 +65,30 @@ module ysyx_bus (
     input lsu_wvalid,
     output out_lsu_wready
 );
-  parameter bit [7:0] XLEN = `YSYX_XLEN;
+  typedef enum logic [3:0] {
+    IF_A,
+    IF_D,
+    LS_A,
+    LS_R
+  } state_load_t;
+  typedef enum logic [2:0] {
+    LS_S_A,
+    LS_S_W,
+    LS_S_B
+  } state_store_t;
 
   logic arready;
   logic [XLEN-1:0] out_rdata;
-
   logic rvalid;
-
-  // typedef enum [2:0] {IF_A, IF_D, LS_A, LS_R} state_t;
-  //                      000,  001,  010,    011
-  parameter bit [3:0] IF_A = 'b0001, IF_D = 'b0010, LS_A = 'b0100, LS_R = 'b1000;
-  parameter bit [2:0] LS_S_A = 'b001, LS_S_W = 'b010, LS_S_B = 'b100;
-
-  logic [3:0] state;
-  logic first = 1;
   logic write_done = 0, awrite_done = 0;
+
+  // lsu read
+  logic clint_en;
+
+  logic clint_arvalid, out_clint_arready;
+  logic [XLEN-1:0] out_clint_rdata;
+  logic [1:0] out_clint_rresp;
+  logic out_clint_rvalid;
 
   assign io_master_arid = 0;
 
@@ -85,52 +96,47 @@ module ysyx_bus (
   assign io_master_awlen = 0;
   assign io_master_awid = 0;
 
+  state_load_t state_load;
   always @(posedge clock) begin
     if (reset) begin
-      state <= IF_A;
-      first <= 1;
+      state_load <= IF_A;
     end else begin
-      // $display("state: %d, arready: %d",
-      //          state, io_master_arready,);
-      case (state)
+      // $display("state: %d, arready: %d", state, io_master_arready,);
+      case (state_load)
         IF_A: begin
-          if (first) begin
-            state <= IF_D;
-            first <= 0;
-          end
           if (ifu_arvalid) begin
             if (io_master_arready) begin
-              state <= IF_D;
+              state_load <= IF_D;
             end
           end else if (!ifu_required && (lsu_arvalid)) begin
-            state <= LS_A;
+            state_load <= LS_A;
           end
         end
         IF_D: begin
           if (io_master_rvalid) begin
             begin
-              state <= IF_A;
+              state_load <= IF_A;
             end
           end
         end
         LS_A: begin
           if (io_master_arvalid && io_master_arready) begin
-            state <= LS_R;
+            state_load <= LS_R;
           end else if (clint_en || ifu_arvalid) begin
-            state <= IF_A;
+            state_load <= IF_A;
           end
         end
         LS_R: begin
           if (io_master_rvalid) begin
-            state <= IF_A;
+            state_load <= IF_A;
           end
         end
-        default: state <= IF_A;
+        default: state_load <= IF_A;
       endcase
     end
   end
 
-  logic [2:0] state_store;
+  state_store_t state_store;
   always @(posedge clock) begin
     if (reset) begin
       state_store <= LS_S_A;
@@ -170,17 +176,15 @@ module ysyx_bus (
 
   // ifu read
   assign out_ifu_rdata = ({XLEN{out_ifu_rvalid}} & (out_rdata));
-  assign out_ifu_rvalid = (state == IF_D || state == IF_A) && ((rvalid));
+  assign out_ifu_rvalid = (state_load == IF_D || state_load == IF_A) && ((rvalid));
 
-  // lsu read
-  logic clint_en;
   assign clint_en = (lsu_araddr == `YSYX_BUS_RTC_ADDR) || (lsu_araddr == `YSYX_BUS_RTC_ADDR_UP);
-  assign out_lsu_rdata = ({XLEN{lsu_arvalid}} & (
-                          ({XLEN{clint_en}} & out_clint_rdata) |
-                          ({XLEN{!clint_en}} & out_rdata)
-                        ));
+  assign out_lsu_rdata = (
+    {XLEN{lsu_arvalid}} &
+    (({XLEN{clint_en}} & out_clint_rdata) | ({XLEN{!clint_en}} & out_rdata))
+    );
   assign out_lsu_rvalid = (
-    (state == LS_R || clint_arvalid) &&
+    (state_load == LS_R || clint_arvalid) &&
     (lsu_arvalid) &&
     (rvalid || out_clint_rvalid));
 
@@ -202,8 +206,8 @@ module ysyx_bus (
   assign io_master_arlen = ifu_sdram_arburst ? 'h1 : 'h0;
   assign io_master_araddr = sram_araddr;
   assign io_master_arvalid = !reset && (
-           ((state == IF_A) && ifu_arvalid) |
-           ((state == LS_A) && lsu_arvalid && !clint_en) // for new soc
+           ((state_load == IF_A) && ifu_arvalid) |
+           ((state_load == LS_A) && lsu_arvalid && !clint_en) // for new soc
       );
   assign arready = io_master_arready && io_master_bvalid;
 
@@ -230,6 +234,7 @@ module ysyx_bus (
   assign io_master_wlast = io_master_wvalid;
   logic [1:0] awaddr_lo;
   logic [XLEN-1:0] wdata;
+  logic [3:0] wstrb;
   assign awaddr_lo = io_master_awaddr[1:0];
   assign wdata = {
     ({XLEN{awaddr_lo == 2'b00}} & {{lsu_wdata}}) |
@@ -240,7 +245,6 @@ module ysyx_bus (
   };
   assign io_master_wdata = wdata;
   assign io_master_wstrb = {wstrb};
-  logic [3:0] wstrb;
   assign wstrb = {lsu_wstrb[3:0] << awaddr_lo};
   assign io_master_wvalid = (state_store == LS_S_W) && (lsu_wvalid) && !write_done;
 
@@ -282,10 +286,6 @@ module ysyx_bus (
     end
   end
 
-  logic clint_arvalid, out_clint_arready;
-  logic [XLEN-1:0] out_clint_rdata;
-  logic [1:0] out_clint_rresp;
-  logic out_clint_rvalid;
   assign clint_arvalid = (lsu_arvalid && clint_en);
   ysyx_clint clint (
       .clock(clock),
@@ -297,10 +297,12 @@ module ysyx_bus (
       .out_rresp(out_clint_rresp),
       .out_rvalid(out_clint_rvalid)
   );
-endmodule  // ysyx_bus
+endmodule
 
 // Core Local INTerrupt controller
-module ysyx_clint (
+module ysyx_clint #(
+    parameter bit [7:0] XLEN = `YSYX_XLEN
+) (
     input clock,
     input reset,
 
@@ -312,8 +314,6 @@ module ysyx_clint (
     output [1:0] out_rresp,
     output logic out_rvalid
 );
-  parameter bit [7:0] XLEN = `YSYX_XLEN;
-
   logic [63:0] mtime = 0;
   assign out_rdata = (
     ({32{araddr == `YSYX_BUS_RTC_ADDR}} & mtime[31:0]) |
@@ -334,4 +334,4 @@ module ysyx_clint (
       end
     end
   end
-endmodule  //ysyx_clint
+endmodule

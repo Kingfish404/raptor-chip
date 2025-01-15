@@ -1,7 +1,9 @@
 `include "ysyx.svh"
 `include "ysyx_dpi_c.svh"
 
-module ysyx_wbu (
+module ysyx_wbu #(
+    parameter bit [7:0] XLEN = `YSYX_XLEN
+) (
     input clock,
 
     input [31:0] inst,
@@ -23,8 +25,6 @@ module ysyx_wbu (
 
     input reset
 );
-  parameter bit [7:0] XLEN = `YSYX_XLEN;
-
   logic [31:0] inst_wbu, pc_wbu, npc_wbu;
 
   logic change, retire, valid, ready;
@@ -60,4 +60,4 @@ module ysyx_wbu (
     end
   end
 
-endmodule  // ysyx_wbu
+endmodule

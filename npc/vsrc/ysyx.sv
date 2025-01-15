@@ -3,7 +3,25 @@
 `include "ysyx_soc.svh"
 `include "ysyx_dpi_c.svh"
 
-module ysyx (
+/**
+ ------------------------------------------------------------
+ RISC-V processor pipeline
+ has the following (conceptual) stages:
+ ------------------------------------------------------------
+ | in-order      | if - Instruction fetch
+ | frontend      | id - Instruction Decode
+ | --------------+ iq - Instruction Queue
+ | execution     : ex - Execution
+ | backend       : wb - Write Back
+ ------------------------------------------------------------
+ [frontend: [if => id]] => iq => [backend: [ex => wb]]
+ ------------------------------------------------------------
+ See ./include/ysyx.svh for more details.
+ */
+module ysyx #(
+    parameter bit [7:0] XLEN = `YSYX_XLEN,
+    parameter bit [7:0] REG_ADDR_W = `YSYX_REG_LEN
+) (
     input clock,
 
     // verilator lint_off UNDRIVEN
@@ -82,9 +100,6 @@ module ysyx (
 
     input reset
 );
-  parameter bit [7:0] XLEN = `YSYX_XLEN;
-  parameter bit [7:0] REG_ADDR_W = `YSYX_REG_LEN;
-
   // IFU out
   logic [31:0] ifu_inst;
   logic [XLEN-1:0] ifu_pc;
@@ -99,6 +114,10 @@ module ysyx (
   idu_pipe_if idu_if ();
   logic idu_valid, idu_ready;
   logic [REG_ADDR_W-1:0] idu_rs1, idu_rs2;
+
+  // IQU out
+  idu_pipe_if iqu_if ();
+  logic iqu_valid, iqu_ready;
 
   // EXU out
   logic [31:0] exu_inst, exu_pc;
@@ -146,17 +165,6 @@ module ysyx (
   logic [XLEN-1:0] bus_lsu_rdata;
   logic bus_lsu_rvalid;
   logic bus_lsu_wready;
-
-  //------------------------------------------------------------------------------
-  // RISC-V Processor Core
-  //------------------------------------------------------------------------------
-  // has the following (conceptual) stages:
-  //   if - Instruction fetch
-  //   id - Instruction Decode
-  //   ex - Execution
-  //   wb - Write Back
-  //------------------------------------------------------------------------------
-  // [frontend: [if => id]] => [backend: [ex => wb]]
 
   // IFU (Instruction Fetch Unit)
   ysyx_ifu ifu (
@@ -206,19 +214,35 @@ module ysyx (
 
       .rf_table(reg_rf_table),
 
-      .prev_valid(ifu_valid && flush_pipeline == 0),
-      .next_ready(exu_ready),
+      .prev_valid(ifu_valid),
+      .next_ready(iqu_ready),
       .out_valid (idu_valid),
       .out_ready (idu_ready),
 
-      .reset(reset)
+      .reset(reset || flush_pipeline)
+  );
+
+  // IQU (Instruction Queue Unit)
+  ysyx_iqu iqu (
+      .clock(clock),
+
+      .idu_if(idu_if),
+      .iqu_if(iqu_if),
+
+      .prev_valid(idu_valid),
+      .next_ready(exu_ready),
+      .out_valid (iqu_valid),
+      .out_ready (iqu_ready),
+
+      .reset(reset || flush_pipeline)
   );
 
   // EXU (EXecution Unit)
   ysyx_exu exu (
       .clock(clock),
 
-      .idu_if(idu_if),
+      .idu_if(iqu_if),
+      .flush_pipeline(flush_pipeline),
 
       .out_inst(exu_inst),
       .out_pc  (exu_pc),
@@ -233,11 +257,6 @@ module ysyx (
       .out_ebreak(exu_ebreak),
       .out_rd((exu_rd)),
 
-      .prev_valid(idu_valid && flush_pipeline == 0),
-      .next_ready(wbu_ready),
-      .out_valid (exu_valid),
-      .out_ready (exu_ready),
-
       // to lsu
       .out_ren(exu_ren),
       .out_wen(exu_wen),
@@ -250,6 +269,11 @@ module ysyx (
       .lsu_rdata(lsu_rdata),
       .lsu_exu_rvalid(lsu_exu_rvalid),
       .lsu_exu_wready(lsu_exu_wready),
+
+      .prev_valid(iqu_valid),
+      .next_ready(wbu_ready),
+      .out_valid (exu_valid),
+      .out_ready (exu_ready),
 
       .reset(reset)
   );
@@ -281,7 +305,7 @@ module ysyx (
   ysyx_reg regs (
       .clock(clock),
 
-      .idu_valid(idu_valid && exu_ready),
+      .idu_valid(idu_valid && iqu_ready),
       .rd(idu_if.rd),
 
       .bad_speculation(flush_pipeline),
@@ -392,4 +416,4 @@ module ysyx (
       .reset(reset)
   );
 
-endmodule  // ysyx
+endmodule

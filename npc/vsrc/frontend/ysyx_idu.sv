@@ -1,7 +1,9 @@
 `include "ysyx.svh"
 `include "ysyx_if.svh"
 
-module ysyx_idu (
+module ysyx_idu #(
+    parameter bit [7:0] XLEN = `YSYX_XLEN
+) (
     input clock,
     input reset,
 
@@ -26,22 +28,21 @@ module ysyx_idu (
     output logic out_valid,
     output logic out_ready
 );
-  parameter bit [7:0] XLEN = `YSYX_XLEN;
-
   logic [31:0] inst_idu, pc_idu;
   logic valid, ready;
 
   logic [4:0] rd;
-  logic [`YSYX_REG_LEN-1:0]
-      rs1 = inst_idu[15+`YSYX_REG_LEN-1:15], rs2 = inst_idu[20+`YSYX_REG_LEN-1:20];
+  logic [`YSYX_REG_LEN-1:0] rs1, rs2;
+  assign rs1 = inst_idu[15+`YSYX_REG_LEN-1:15];
+  assign rs2 = inst_idu[20+`YSYX_REG_LEN-1:20];
 
   logic wen, ren, indie;
-  logic idu_hazard = valid && (indie == 0) && (
-    ((rf_table[rs1[`YSYX_REG_LEN-1:0]] == 1) &&
-       !(exu_valid && rs1[`YSYX_REG_LEN-1:0] == exu_forward_rd)) ||
-    ((rf_table[rs2[`YSYX_REG_LEN-1:0]] == 1) &&
-       !(exu_valid && rs2[`YSYX_REG_LEN-1:0] == exu_forward_rd)) ||
-    (0));
+  logic idu_hazard;
+  assign idu_hazard = valid && (indie == 0) && (((rf_table[rs1[`YSYX_REG_LEN-1:0]] == 1)
+      // && !(exu_valid && rs1[`YSYX_REG_LEN-1:0] == exu_forward_rd)
+      ) || ((rf_table[rs2[`YSYX_REG_LEN-1:0]] == 1)
+      // && !(exu_valid && rs2[`YSYX_REG_LEN-1:0] == exu_forward_rd)
+      ) || (0));
   logic [XLEN-1:0] reg_rdata1;
   logic [XLEN-1:0] reg_rdata2;
 
@@ -69,7 +70,7 @@ module ysyx_idu (
           ready <= 0;
         end
       end
-      if (next_ready == 1) begin
+      if (next_ready == 1 && !idu_hazard) begin
         ready <= 1;
         if (prev_valid && out_ready) begin
         end else begin
@@ -94,14 +95,12 @@ module ysyx_idu (
       .in_rs1v(reg_rdata1),
       .in_rs2v(reg_rdata2),
 
+      .out_imm(idu_if.imm),
+      .out_alu_op(idu_if.alu_op),
       .out_op1(idu_if.op1),
       .out_op2(idu_if.op2),
-      .out_opj(idu_if.opj),
-      .out_alu_op(idu_if.alu_op),
 
       .out_rd (rd),
-      .out_imm(idu_if.imm),
-
       .out_wen(idu_if.wen),
       .out_ren(idu_if.ren),
       .out_jen(idu_if.jen),
@@ -118,4 +117,4 @@ module ysyx_idu (
 
       .reset(reset)
   );
-endmodule  // ysyx_idu
+endmodule

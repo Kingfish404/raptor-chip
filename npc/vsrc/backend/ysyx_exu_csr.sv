@@ -1,6 +1,11 @@
 `include "ysyx.svh"
 
-module ysyx_exu_csr (
+module ysyx_exu_csr #(
+    parameter bit [7:0] XLEN = `YSYX_XLEN,
+    parameter bit [7:0] R_W = 12,
+    parameter bit [7:0] REG_W = 3,
+    parameter bit [XLEN-1:0] RESET_VAL = 0
+) (
     input clock,
 
     input wen,
@@ -18,10 +23,6 @@ module ysyx_exu_csr (
 
     input reset
 );
-  parameter bit [7:0] R_W = 12;
-  parameter bit [7:0] REG_W = 3;
-  parameter bit [7:0] XLEN = `YSYX_XLEN;
-  parameter bit [XLEN-1:0] RESET_VAL = 0;
 
   localparam bit [REG_W-1:0] MNONE = 'h0;
   localparam bit [REG_W-1:0] MCAUSE = 'h1;
@@ -29,6 +30,7 @@ module ysyx_exu_csr (
   localparam bit [REG_W-1:0] MTVEC = 'h3;
   localparam bit [REG_W-1:0] MSTATUS = 'h4;
 
+  logic [1:0] priv_mode;
   logic [XLEN-1:0] csr[5];
   logic [REG_W-1:0] waddr_reg0;
   assign waddr_reg0 = (
@@ -52,8 +54,11 @@ module ysyx_exu_csr (
   assign out_mepc = csr[MEPC];
   assign out_mtvec = csr[MTVEC];
 
+  logic mstatus_mie = csr[MSTATUS][`YSYX_CSR_MSTATUS_MIE_];
+
   always @(posedge clock) begin
     if (reset) begin
+      priv_mode <= `YSYX_PRIV_M;
       csr[MCAUSE]  <= RESET_VAL;
       csr[MEPC]    <= RESET_VAL;
       csr[MTVEC]   <= RESET_VAL;
@@ -63,20 +68,24 @@ module ysyx_exu_csr (
         csr[waddr_reg0] <= wdata;
       end
       if (ecall) begin
-        csr[MCAUSE] <= 'hb;
+        csr[MCAUSE] <= priv_mode == `YSYX_PRIV_M ? 'hb : priv_mode == `YSYX_PRIV_S ? 'h9 : 'h8;
+        csr[MSTATUS][`YSYX_CSR_MSTATUS_MPP_] <= priv_mode;
         csr[MSTATUS][`YSYX_CSR_MSTATUS_MPIE] <= csr[MSTATUS][`YSYX_CSR_MSTATUS_MIE_];
         csr[MSTATUS][`YSYX_CSR_MSTATUS_MIE_] <= 1'b0;
         csr[MEPC] <= pc;
       end
       if (mret) begin
+        priv_mode <= csr[MSTATUS][`YSYX_CSR_MSTATUS_MPP_];
         csr[MSTATUS] <= {
-          {csr[MSTATUS][XLEN-1:'h8]},
+          csr[MSTATUS][XLEN-1:13],
+          `YSYX_PRIV_U,
+          csr[MSTATUS][10:8],
           1'b1,
-          {csr[MSTATUS][6:4]},
-          csr[MSTATUS]['h7],
+          csr[MSTATUS][6:4],
+          csr[MSTATUS][`YSYX_CSR_MSTATUS_MPIE],
           csr[MSTATUS][2:0]
         };
       end
     end
   end
-endmodule  // ysyx_exu_csr
+endmodule

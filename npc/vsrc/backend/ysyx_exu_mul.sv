@@ -1,6 +1,8 @@
 `include "ysyx.svh"
 
-module ysyx_exu_mul (
+module ysyx_exu_mul #(
+    parameter bit [7:0] XLEN = `YSYX_XLEN
+) (
     input clock,
     input [XLEN-1:0] in_a,
     input [XLEN-1:0] in_b,
@@ -9,7 +11,6 @@ module ysyx_exu_mul (
     output logic [XLEN-1:0] out_r,
     output logic out_valid
 );
-  parameter bit [7:0] XLEN = `YSYX_XLEN;
   logic [XLEN-1:0] s1, s2;
   logic [4:0] op;
   logic valid;
@@ -187,4 +188,4 @@ module ysyx_exu_mul (
   end
 `endif
 
-endmodule  // ysyx_alu_mul
+endmodule

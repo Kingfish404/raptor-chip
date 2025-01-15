@@ -1,7 +1,9 @@
 `include "ysyx.svh"
 `include "ysyx_soc.svh"
 
-module ysyx_ifu (
+module ysyx_ifu #(
+    parameter bit [7:0] XLEN = `YSYX_XLEN
+) (
     input clock,
 
     input [XLEN-1:0] npc,
@@ -29,8 +31,6 @@ module ysyx_ifu (
 
     input reset
 );
-  parameter bit [7:0] XLEN = `YSYX_XLEN;
-
   logic [XLEN-1:0] pc_ifu;
   logic ifu_lsu_hazard = 0, ifu_branch_hazard = 0;
 
@@ -41,6 +41,13 @@ module ysyx_ifu (
   logic ifu_hazard;
   logic [6:0] opcode;
   logic is_jalr, is_jal, is_b_type, is_branch, is_load, is_store, is_fencei, is_sys;
+  logic valid;
+  logic good_speculationing, bad_speculationing;
+
+  logic invalid_l1i;
+  logic l1i_valid;
+  logic l1i_ready;
+
   assign ifu_hazard = ifu_lsu_hazard || ifu_branch_hazard;
   assign opcode = out_inst[6:0];
   assign is_jalr = (opcode == `YSYX_OP_JALR__);
@@ -51,7 +58,6 @@ module ysyx_ifu (
   assign is_store = (opcode == `YSYX_OP_S_TYPE_);
   assign is_fencei = (out_inst == `YSYX_INST_FENCE_I);  // fence.i is system instruction
   assign is_sys = (opcode == `YSYX_OP_SYSTEM);
-  logic valid;
 
   assign valid =(l1i_valid && !ifu_hazard) &&
    !bad_speculation && !(speculation && (is_load || is_store));
@@ -60,7 +66,6 @@ module ysyx_ifu (
 
   // Branch Prediction
   assign out_flush_pipeline = bad_speculation || bad_speculationing;
-  logic good_speculationing, bad_speculationing;
   assign good_speculationing = ((pc_change || pc_retire) && npc == ifu_speculation);
   assign bad_speculationing = (speculation) && ((pc_change || pc_retire) && npc != ifu_speculation);
 
@@ -142,10 +147,7 @@ module ysyx_ifu (
     end
   end
 
-  logic invalid_l1i;
   assign invalid_l1i = valid && next_ready && is_fencei;
-  logic l1i_valid;
-  logic l1i_ready;
 
   ysyx_ifu_l1i l1i_cache (
       .clock(clock),
@@ -165,4 +167,4 @@ module ysyx_ifu (
 
       .reset(reset)
   );
-endmodule  // ysyx_ifu
+endmodule

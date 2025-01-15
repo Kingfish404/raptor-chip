@@ -1,13 +1,13 @@
 `include "ysyx.svh"
 
-module ysyx_exu_alu (
+module ysyx_exu_alu #(
+    parameter bit [7:0] XLEN = `YSYX_XLEN
+) (
     input [XLEN-1:0] s1,
     input [XLEN-1:0] s2,
     input [4:0] op,
     output logic [XLEN-1:0] out_r
 );
-  parameter bit [7:0] XLEN = `YSYX_XLEN;
-
   always_comb begin
     // $display("op: %h, s1: %h, s2: %h", op, s1, s2);
     unique case (op)
@@ -32,4 +32,4 @@ module ysyx_exu_alu (
     endcase
     // $display("out_r: %h", out_r);
   end
-endmodule  // ysyx_exu_alu
+endmodule

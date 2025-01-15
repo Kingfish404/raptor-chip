@@ -1,6 +1,10 @@
 `include "ysyx.svh"
 
-module ysyx_reg (
+module ysyx_reg #(
+    parameter bit [7:0] XLEN = `YSYX_XLEN,
+    parameter bit [7:0] REG_LEN = `YSYX_REG_LEN,
+    parameter bit [7:0] REG_NUM = `YSYX_REG_NUM
+) (
     input clock,
 
     input idu_valid,
@@ -20,9 +24,6 @@ module ysyx_reg (
 
     input reset
 );
-  parameter bit [7:0] XLEN = `YSYX_XLEN;
-  parameter bit [7:0] REG_LEN = `YSYX_REG_LEN;
-  parameter bit [7:0] REG_NUM = `YSYX_REG_NUM;
   logic [XLEN-1:0] rf[REG_NUM];
   logic [REG_NUM-1:0] rf_table;
 
@@ -52,4 +53,4 @@ module ysyx_reg (
       end
     end
   end
-endmodule  // ysyx_reg
+endmodule

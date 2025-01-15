@@ -22,7 +22,6 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
     val op1    = Output(UInt(32.W))
     val op2    = Output(UInt(32.W))
     val alu_op = Output(UInt(5.W))
-    val opj    = Output(UInt(32.W))
 
     // U/J-type, and no `rs1` or `rs2` instructions
     val indie = Output(UInt(1.W))
@@ -143,78 +142,77 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
 
   val op_table    = Array(
     // format: off
-    // inst      | rd |  imm |    op1 |    op2 | opj |
-    LUI___ -> List( rd,  imm_u,   0.U, imm_u,    0.U), // U
-    AUIPC_ -> List( rd,  imm_u, in.pc, imm_u,    0.U), // U
-    JAL___ -> List( rd,  imm_j, in.pc,   4.U,  in.pc), // J
-    JALR__ -> List( rd,  imm_i, in.pc,   4.U,   rs1v), // I
+    // inst      |  rd|    imm|   op1|   op2|
+    LUI___ -> List( rd,    0.U,   0.U, imm_u), // U
+    AUIPC_ -> List( rd,    0.U, in.pc, imm_u), // U
+    JAL___ -> List( rd,  imm_j, in.pc,   0.U), // J
+    JALR__ -> List( rd,  imm_i,  rs1v,   0.U), // I
 
-    BEQ___ -> List(0.U,  imm_b,  rs1v,  rs2v,  in.pc), // B
-    BNE___ -> List(0.U,  imm_b,  rs1v,  rs2v,  in.pc), // B
-    BLT___ -> List(0.U,  imm_b,  rs1v,  rs2v,  in.pc), // B
-    BGE___ -> List(0.U,  imm_b,  rs2v,  rs1v,  in.pc), // B
-    BLTU__ -> List(0.U,  imm_b,  rs1v,  rs2v,  in.pc), // B
-    BGEU__ -> List(0.U,  imm_b,  rs2v,  rs1v,  in.pc), // B
+    BEQ___ -> List(0.U,  imm_b,  rs1v,  rs2v), // B
+    BNE___ -> List(0.U,  imm_b,  rs1v,  rs2v), // B
+    BLT___ -> List(0.U,  imm_b,  rs1v,  rs2v), // B
+    BGE___ -> List(0.U,  imm_b,  rs2v,  rs1v), // B
+    BLTU__ -> List(0.U,  imm_b,  rs1v,  rs2v), // B
+    BGEU__ -> List(0.U,  imm_b,  rs2v,  rs1v), // B
 
-    LB____ -> List( rd,  imm_i,  rs1v, imm_i,   rs1v), // I
-    LH____ -> List( rd,  imm_i,  rs1v, imm_i,   rs1v), // I
-    LW____ -> List( rd,  imm_i,  rs1v, imm_i,   rs1v), // I
-    LBU___ -> List( rd,  imm_i,  rs1v, imm_i,   rs1v), // I
-    LHU___ -> List( rd,  imm_i,  rs1v, imm_i,   rs1v), // I
-    SB____ -> List(0.U,  imm_s,  rs1v,  rs2v,   rs1v), // S
-    SH____ -> List(0.U,  imm_s,  rs1v,  rs2v,   rs1v), // S
-    SW____ -> List(0.U,  imm_s,  rs1v,  rs2v,   rs1v), // S
+    LB____ -> List( rd,  imm_i,  rs1v, imm_i), // I
+    LH____ -> List( rd,  imm_i,  rs1v, imm_i), // I
+    LW____ -> List( rd,  imm_i,  rs1v, imm_i), // I
+    LBU___ -> List( rd,  imm_i,  rs1v, imm_i), // I
+    LHU___ -> List( rd,  imm_i,  rs1v, imm_i), // I
+    SB____ -> List(0.U,  imm_s,  rs1v,  rs2v), // S
+    SH____ -> List(0.U,  imm_s,  rs1v,  rs2v), // S
+    SW____ -> List(0.U,  imm_s,  rs1v,  rs2v), // S
 
-    ADDI__ -> List( rd,  imm_i,  rs1v, imm_i,    0.U), // I
-    SLTI__ -> List( rd,  imm_i,  rs1v, imm_i,    0.U), // I
-    SLTIU_ -> List( rd,  imm_i,  rs1v, imm_i,    0.U), // I
-    XORI__ -> List( rd,  imm_i,  rs1v, imm_i,    0.U), // I
-    ORI___ -> List( rd,  imm_i,  rs1v, imm_i,    0.U), // I
-    ANDI__ -> List( rd,  imm_i,  rs1v, imm_i,    0.U), // I
-    SLLI__ -> List( rd,  imm_i,  rs1v, imm_i,    0.U), // I
-    SRLI__ -> List( rd,  imm_i,  rs1v, imm_i,    0.U), // I
-    SRAI__ -> List( rd,  imm_i,  rs1v, imm_i,    0.U), // I
-    ADD___ -> List( rd,    0.U,  rs1v,  rs2v,    0.U), // R
-    SUB___ -> List( rd,    0.U,  rs1v,  rs2v,    0.U), // R
-    SLL___ -> List( rd,    0.U,  rs1v,  rs2v,    0.U), // R
-    SLT___ -> List( rd,    0.U,  rs1v,  rs2v,    0.U), // R
-    SLTU__ -> List( rd,    0.U,  rs1v,  rs2v,    0.U), // R
-    XOR___ -> List( rd,    0.U,  rs1v,  rs2v,    0.U), // R
-    SRL___ -> List( rd,    0.U,  rs1v,  rs2v,    0.U), // R
-    SRA___ -> List( rd,    0.U,  rs1v,  rs2v,    0.U), // R
-    OR____ -> List( rd,    0.U,  rs1v,  rs2v,    0.U), // R
-    AND___ -> List( rd,    0.U,  rs1v,  rs2v,    0.U), // R
+    ADDI__ -> List( rd,  imm_i,  rs1v, imm_i), // I
+    SLTI__ -> List( rd,  imm_i,  rs1v, imm_i), // I
+    SLTIU_ -> List( rd,  imm_i,  rs1v, imm_i), // I
+    XORI__ -> List( rd,  imm_i,  rs1v, imm_i), // I
+    ORI___ -> List( rd,  imm_i,  rs1v, imm_i), // I
+    ANDI__ -> List( rd,  imm_i,  rs1v, imm_i), // I
+    SLLI__ -> List( rd,  imm_i,  rs1v, imm_i), // I
+    SRLI__ -> List( rd,  imm_i,  rs1v, imm_i), // I
+    SRAI__ -> List( rd,  imm_i,  rs1v, imm_i), // I
+    ADD___ -> List( rd,    0.U,  rs1v,  rs2v), // R
+    SUB___ -> List( rd,    0.U,  rs1v,  rs2v), // R
+    SLL___ -> List( rd,    0.U,  rs1v,  rs2v), // R
+    SLT___ -> List( rd,    0.U,  rs1v,  rs2v), // R
+    SLTU__ -> List( rd,    0.U,  rs1v,  rs2v), // R
+    XOR___ -> List( rd,    0.U,  rs1v,  rs2v), // R
+    SRL___ -> List( rd,    0.U,  rs1v,  rs2v), // R
+    SRA___ -> List( rd,    0.U,  rs1v,  rs2v), // R
+    OR____ -> List( rd,    0.U,  rs1v,  rs2v), // R
+    AND___ -> List( rd,    0.U,  rs1v,  rs2v), // R
 
-    FENCE_ -> List( rd,    0.U,  rs1v,   0.U,    0.U), // N
-    FENCET -> List( rd,    0.U,  rs1v,   0.U,    0.U), // N
-    PAUSE_ -> List( rd,    0.U,  rs1v,   0.U,    0.U), // N
-    ECALL_ -> List( rd, MCAUSE,  rs1v,   0.U, MEPC__), // N
-    EBREAK -> List( rd,    0.U,  rs1v,   0.U,    0.U), // N
-    MRET__ -> List( rd,MSTATUS,  rs1v,   0.U,    0.U), // N
-    FENCEI -> List( rd,    0.U,  rs1v,   0.U,    0.U), // N
+    FENCE_ -> List( rd,    0.U,  rs1v,   0.U), // N
+    FENCET -> List( rd,    0.U,  rs1v,   0.U), // N
+    PAUSE_ -> List( rd,    0.U,  rs1v,   0.U), // N
+    ECALL_ -> List( rd, MCAUSE,  rs1v,   0.U), // N
+    EBREAK -> List( rd,    0.U,  rs1v,   0.U), // N
+    MRET__ -> List( rd,MSTATUS,  rs1v,   0.U), // N
+    FENCEI -> List( rd,    0.U,  rs1v,   0.U), // N
 
-    CSRRW_ -> List( rd,    csr,  rs1v,   0.U,    0.U), // CSR
-    CSRRS_ -> List( rd,    csr,  rs1v,   0.U,    0.U), // CSR
-    CSRRC_ -> List( rd,    csr,  rs1v,   0.U,    0.U), // CSR
-    CSRRWI -> List( rd,    csr,  uimm,   0.U,    0.U), // CSR
-    CSRRSI -> List( rd,    csr,  uimm,   0.U,    0.U), // CSR
-    CSRRCI -> List( rd,    csr,  uimm,   0.U,    0.U), // CSR
+    CSRRW_ -> List( rd,    csr,  rs1v,   0.U), // CSR
+    CSRRS_ -> List( rd,    csr,  rs1v,   0.U), // CSR
+    CSRRC_ -> List( rd,    csr,  rs1v,   0.U), // CSR
+    CSRRWI -> List( rd,    csr,  uimm,   0.U), // CSR
+    CSRRSI -> List( rd,    csr,  uimm,   0.U), // CSR
+    CSRRCI -> List( rd,    csr,  uimm,   0.U), // CSR
 
-    MUL___ -> List( rd,    0.U,  rs1v,  rs2v,    0.U), // R
-    MULH__ -> List( rd,    0.U,  rs1v,  rs2v,    0.U), // R
-    MULHSU -> List( rd,    0.U,  rs1v,  rs2v,    0.U), // R
-    MULHU_ -> List( rd,    0.U,  rs1v,  rs2v,    0.U), // R
-    DIV___ -> List( rd,    0.U,  rs1v,  rs2v,    0.U), // R
-    DIVU__ -> List( rd,    0.U,  rs1v,  rs2v,    0.U), // R
-    REM___ -> List( rd,    0.U,  rs1v,  rs2v,    0.U), // R
-    REMU__ -> List( rd,    0.U,  rs1v,  rs2v,    0.U)  // R
+    MUL___ -> List( rd,    0.U,  rs1v,  rs2v), // R
+    MULH__ -> List( rd,    0.U,  rs1v,  rs2v), // R
+    MULHSU -> List( rd,    0.U,  rs1v,  rs2v), // R
+    MULHU_ -> List( rd,    0.U,  rs1v,  rs2v), // R
+    DIV___ -> List( rd,    0.U,  rs1v,  rs2v), // R
+    DIVU__ -> List( rd,    0.U,  rs1v,  rs2v), // R
+    REM___ -> List( rd,    0.U,  rs1v,  rs2v), // R
+    REMU__ -> List( rd,    0.U,  rs1v,  rs2v)  // R
   )
   val var_decoder = ListLookup(
-     in.inst, List( 0.U,   0.U,   0.U,   0.U,    0.U), op_table)
+     in.inst, List( 0.U,   0.U,   0.U,   0.U), op_table)
   // format: on
   out.rd  := var_decoder(0)
   out.imm := var_decoder(1)
   out.op1 := var_decoder(2)
   out.op2 := var_decoder(3)
-  out.opj := var_decoder(4)
 }

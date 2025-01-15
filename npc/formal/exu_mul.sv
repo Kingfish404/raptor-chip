@@ -76,4 +76,4 @@ module formal_exu_mul (
     end
   end
 `endif  // FORMAL
-endmodule  // formal_exu_mul
+endmodule

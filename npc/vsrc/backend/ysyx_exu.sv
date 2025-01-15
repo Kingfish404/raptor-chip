@@ -1,11 +1,14 @@
 `include "ysyx.svh"
 `include "ysyx_if.svh"
 
-module ysyx_exu (
+module ysyx_exu #(
+    parameter bit [7:0] XLEN = `YSYX_XLEN
+) (
     input clock,
 
     // from idu
     idu_pipe_if.in idu_if,
+    input flush_pipeline,
 
     // for lsu
     output logic out_ren,
@@ -40,14 +43,12 @@ module ysyx_exu (
 
     input reset
 );
-  parameter bit [7:0] XLEN = `YSYX_XLEN;
-
   logic [XLEN-1:0] reg_wdata, reg_wdata_mul, mepc, mtvec;
+  logic [XLEN-1:0] imm_exu, pc_exu, src1, src2, addr_exu;
   logic [XLEN-1:0] mem_wdata = src2;
   logic [  12-1:0] csr_addr0;
   logic [XLEN-1:0] csr_wdata, csr_rdata;
   logic is_mul;
-  logic [XLEN-1:0] imm_exu, pc_exu, src1, src2, opj, addr_exu;
   logic [XLEN-1:0] inst_exu;
   logic [4:0] alu_op_exu;
   logic [`YSYX_REG_LEN-1:0] rd;
@@ -57,6 +58,11 @@ module ysyx_exu (
   logic [XLEN-1:0] mem_rdata;
   logic branch_change, system_exu;
   logic [2:0] func3;
+
+  logic alu_valid, mul_valid, lsu_avalid;
+  logic lsu_valid;
+  logic ready;
+  logic valid;
 
   ysyx_exu_csr csrs (
       .clock(clock),
@@ -79,6 +85,7 @@ module ysyx_exu (
   assign is_mul = (alu_op_exu[4:4] == 1);
   assign out_reg_wdata = {XLEN{(rd != 0)}} & (
     (ren) ? mem_rdata :
+    (jen) ? (pc_exu + 4) :
     (system_exu) ? csr_rdata :
     (is_mul) ? reg_wdata_mul: reg_wdata);
   assign csr_addr0 = (imm_exu[11:0]);
@@ -86,24 +93,21 @@ module ysyx_exu (
   assign out_branch_change = branch_change;
   assign out_pc = pc_exu;
   assign out_inst = inst_exu;
-  assign out_rwaddr = addr_exu;
+  assign out_rwaddr = src1 + imm_exu;
   assign out_ren = ren, out_wen = wen, out_ebreak = ebreak;
   assign out_rd = rd;
 
-  assign addr_exu = opj + imm_exu;
+  assign addr_exu = (jen ? src1 : pc_exu) + imm_exu;
 
-  logic alu_valid, mul_valid, lsu_avalid;
-  logic lsu_valid;
-  logic ready;
-  logic valid;
   assign valid = (wen || ren) ? lsu_valid : (is_mul ? mul_valid : alu_valid);
   assign out_valid = valid;
   assign out_ready = ready && next_ready;
   always @(posedge clock) begin
-    if (reset) begin
+    if (reset || flush_pipeline) begin
       alu_valid <= 0;
       lsu_avalid <= 0;
       lsu_valid <= 0;
+      alu_op_exu <= 0;
       ready <= 1;
     end else begin
       if (prev_valid && ready) begin
@@ -113,7 +117,6 @@ module ysyx_exu (
         src1 <= idu_if.op1;
         src2 <= idu_if.op2;
         alu_op_exu <= idu_if.alu_op;
-        opj <= idu_if.opj;
 
         rd <= idu_if.rd;
         ren <= idu_if.ren;
@@ -224,4 +227,4 @@ module ysyx_exu (
     end
   end
 
-endmodule  // ysyx_exu
+endmodule

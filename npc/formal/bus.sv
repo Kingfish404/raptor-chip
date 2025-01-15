@@ -130,4 +130,4 @@ module formal_bus (
     end
   end
 `endif  // FORMAL
-endmodule  // formal_bus
+endmodule

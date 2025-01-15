@@ -1,6 +1,10 @@
 `include "ysyx.svh"
 
-module ysyx_lsu (
+module ysyx_lsu #(
+    parameter bit [7:0] XLEN = `YSYX_XLEN,
+    parameter bit [7:0] L1D_LEN = `YSYX_L1D_LEN,
+    parameter bit [7:0] L1D_SIZE = 2 ** L1D_LEN
+) (
     input clock,
 
     // from exu
@@ -34,14 +38,26 @@ module ysyx_lsu (
 
     input reset
 );
-  parameter bit [7:0] XLEN = `YSYX_XLEN;
-
   logic valid_r;
 
   logic [XLEN-1:0] lsu_araddr;
   logic [XLEN-1:0] rdata, rdata_unalign;
   logic [7:0] wstrb, rstrb;
   logic arvalid;
+
+  logic [32-1:0] l1d[L1D_SIZE], rdata_lsu;
+  logic [L1D_SIZE-1:0] l1d_valid = 0;
+  logic [32-L1D_LEN-2-1:0] l1d_tag[L1D_SIZE];
+
+  logic [32-L1D_LEN-2-1:0] addr_tag;
+  logic [L1D_LEN-1:0] addr_idx;
+  logic l1d_cache_hit;
+  logic l1d_cache_within;
+
+
+  logic [32-L1D_LEN-2-1:0] waddr_tag;
+  logic [L1D_LEN-1:0] waddr_idx;
+  logic l1d_cache_hit_w;
 
   assign out_lsu_araddr = lsu_araddr;
   assign out_lsu_arvalid = arvalid;
@@ -64,22 +80,6 @@ module ysyx_lsu (
   assign out_lsu_wvalid = wen && lsu_avalid;
 
   assign out_wready = lsu_wready;
-
-  parameter bit [7:0] L1D_LEN = 1;
-  parameter bit [7:0] L1D_SIZE = 2 ** L1D_LEN;
-  logic [32-1:0] l1d[L1D_SIZE], rdata_lsu;
-  logic [L1D_SIZE-1:0] l1d_valid = 0;
-  logic [32-L1D_LEN-2-1:0] l1d_tag[L1D_SIZE];
-
-  logic [32-L1D_LEN-2-1:0] addr_tag;
-  logic [L1D_LEN-1:0] addr_idx;
-  logic l1d_cache_hit;
-  logic l1d_cache_within;
-
-
-  logic [32-L1D_LEN-2-1:0] waddr_tag;
-  logic [L1D_LEN-1:0] waddr_idx;
-  logic l1d_cache_hit_w;
 
   assign l1d_cache_hit = (
          ren && lsu_avalid && 1 &&
@@ -155,4 +155,4 @@ module ysyx_lsu (
       end
     end
   end
-endmodule  // ysyx_lsu
+endmodule

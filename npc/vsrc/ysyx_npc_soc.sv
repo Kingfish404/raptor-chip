@@ -134,10 +134,12 @@ module ysyxSoC (
       .out_bvalid(auto_master_out_bvalid),
       .bready(auto_master_out_bready)
   );
-endmodule  //ysyxSoC
+endmodule
 
 // Memory and Universal Asynchronous Receiver-Transmitter (UART)
-module ysyx_npc_soc (
+module ysyx_npc_soc #(
+    parameter bit [7:0] XLEN = `YSYX_XLEN
+) (
     input clock,
 
     input [1:0] arburst,
@@ -174,8 +176,6 @@ module ysyx_npc_soc (
     output logic out_bvalid,
     input bready
 );
-  parameter bit [7:0] XLEN = `YSYX_XLEN;
-
   logic [31:0] mem_rdata_buf;
   logic [2:0] state = 0, state_w = 0;
   logic is_writing = 0;
@@ -284,7 +284,7 @@ module ysyx_npc_soc (
       end
     endcase
   end
-endmodule  //ysyx_MEM_SRAM
+endmodule
 
 // verilator lint_on PINCONNECTEMPTY
 // verilator lint_on UNDRIVEN
