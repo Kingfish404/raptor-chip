@@ -102,7 +102,7 @@ module ysyx_bus #(
       state_load <= IF_A;
     end else begin
       // $display("state: %d, arready: %d", state, io_master_arready,);
-      case (state_load)
+      unique case (state_load)
         IF_A: begin
           if (ifu_arvalid) begin
             if (io_master_arready) begin
@@ -141,7 +141,7 @@ module ysyx_bus #(
     if (reset) begin
       state_store <= LS_S_A;
     end else begin
-      case (state_store)
+      unique case (state_store)
         LS_S_A: begin
           if (lsu_awvalid) begin
             state_store <= LS_S_W;

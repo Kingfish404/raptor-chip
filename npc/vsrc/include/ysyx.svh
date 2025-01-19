@@ -79,13 +79,20 @@
 
 `define YSYX_ALU_ADD_ 'b00000
 `define YSYX_ALU_SUB_ 'b01000
+`define YSYX_ALU_EQ__ 'b01100
 `define YSYX_ALU_SLT_ 'b00010
 `define YSYX_ALU_SLE_ 'b01010
+`define YSYX_ALU_SGE_ 'b01110
 `define YSYX_ALU_SLTU 'b00011
 `define YSYX_ALU_SLEU 'b01011
+`define YSYX_ALU_SGEU 'b01111
 `define YSYX_ALU_XOR_ 'b00100
 `define YSYX_ALU_OR__ 'b00110
 `define YSYX_ALU_AND_ 'b00111
+
+`define YSYX_ALU_SLL_ 'b00001
+`define YSYX_ALU_SRL_ 'b00101
+`define YSYX_ALU_SRA_ 'b01101
 
 `define YSYX_ALU_MUL___ 'b11000
 `define YSYX_ALU_MULH__ 'b11001
@@ -95,10 +102,6 @@
 `define YSYX_ALU_DIVU__ 'b11101
 `define YSYX_ALU_REM___ 'b11110
 `define YSYX_ALU_REMU__ 'b11111
-
-`define YSYX_ALU_SLL_ 'b00001
-`define YSYX_ALU_SRL_ 'b00101
-`define YSYX_ALU_SRA_ 'b01101
 
 `define YSYX_ALU_LB__ 'b000000
 `define YSYX_ALU_LH__ 'b000001

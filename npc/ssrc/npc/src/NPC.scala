@@ -59,12 +59,12 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
       JAL___ -> BitPat("b" + "1 00 0 1" + ALU_ADD_), // J
       JALR__ -> BitPat("b" + "0 00 0 1" + ALU_ADD_), // I
 
-      BEQ___ -> BitPat("b" + "0 00 1 0" + ALU_SUB_), // B
+      BEQ___ -> BitPat("b" + "0 00 1 0" + ALU_EQ__), // B
       BNE___ -> BitPat("b" + "0 00 1 0" + ALU_XOR_), // B
       BLT___ -> BitPat("b" + "0 00 1 0" + ALU_SLT_), // B
-      BGE___ -> BitPat("b" + "0 00 1 0" + ALU_SLE_), // B
+      BGE___ -> BitPat("b" + "0 00 1 0" + ALU_SGE_), // B
       BLTU__ -> BitPat("b" + "0 00 1 0" + ALU_SLTU), // B
-      BGEU__ -> BitPat("b" + "0 00 1 0" + ALU_SLEU), // B
+      BGEU__ -> BitPat("b" + "0 00 1 0" + ALU_SGEU), // B
 
       LB____ -> BitPat("b" + "0 10 0 0" + LSU_LB_), // I
       LH____ -> BitPat("b" + "0 10 0 0" + LSU_LH_), // I
@@ -162,18 +162,18 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
 
   val op_table    = Array(
     // format: off
-    // inst      |  rd|    imm|   op1|   op2|
-    LUI___ -> List( rd,    0.U, imm_u,   0.U), // U
-    AUIPC_ -> List( rd,    0.U, in.pc, imm_u), // U
+    // inst      |  rd|    imm|   op1|   op2|  r_rs1  | r_rs2 |
+    LUI___ -> List( rd,  imm_u, imm_u,   0.U), // U
+    AUIPC_ -> List( rd,  imm_u, in.pc, imm_u), // U
     JAL___ -> List( rd,  imm_j, in.pc,   0.U), // J
     JALR__ -> List( rd,  imm_i,  rs1v,   0.U), // I
 
     BEQ___ -> List(0.U,  imm_b,  rs1v,  rs2v), // B
     BNE___ -> List(0.U,  imm_b,  rs1v,  rs2v), // B
     BLT___ -> List(0.U,  imm_b,  rs1v,  rs2v), // B
-    BGE___ -> List(0.U,  imm_b,  rs2v,  rs1v), // B
+    BGE___ -> List(0.U,  imm_b,  rs1v,  rs2v), // B
     BLTU__ -> List(0.U,  imm_b,  rs1v,  rs2v), // B
-    BGEU__ -> List(0.U,  imm_b,  rs2v,  rs1v), // B
+    BGEU__ -> List(0.U,  imm_b,  rs1v,  rs2v), // B
 
     LB____ -> List( rd,  imm_i,  rs1v, imm_i), // I
     LH____ -> List( rd,  imm_i,  rs1v, imm_i), // I

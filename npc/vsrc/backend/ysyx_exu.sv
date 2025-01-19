@@ -208,24 +208,7 @@ module ysyx_exu #(
   // branch
   assign out_branch_retire = ((system_exu) || (ben) || (ren));
   assign out_load_retire = (ren) && valid;
+  assign branch_change = (ben && |reg_wdata) || (jen || ecall || mret);
   assign out_npc_wdata = (ecall) ? mtvec : (mret) ? mepc : (branch_change ? addr_exu : pc_exu + 4);
-
-  always_comb begin
-    if (ben) begin
-      case (alu_op_exu)
-        `YSYX_ALU_SUB_: begin
-          branch_change = (~|reg_wdata);
-        end
-        `YSYX_ALU_XOR_, `YSYX_ALU_SLT_, `YSYX_ALU_SLTU, `YSYX_ALU_SLE_, `YSYX_ALU_SLEU: begin
-          branch_change = (|reg_wdata);
-        end
-        default: begin
-          branch_change = 0;
-        end
-      endcase
-    end else begin
-      branch_change = (ecall || mret || jen);
-    end
-  end
 
 endmodule

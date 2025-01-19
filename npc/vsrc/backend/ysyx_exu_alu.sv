@@ -15,10 +15,13 @@ module ysyx_exu_alu #(
       // verilog_format: off
       `YSYX_ALU_ADD_: begin out_r = s1 + s2; end
       `YSYX_ALU_SUB_: begin out_r = s1 - s2; end
+      `YSYX_ALU_EQ__: begin out_r = (s1 == s2) ? 1 : 0; end
       `YSYX_ALU_SLT_: begin out_r = (($signed(s1)) < ($signed(s2))) ? 1 : 0;  end
       `YSYX_ALU_SLE_: begin out_r = (($signed(s1)) <= ($signed(s2))) ? 1 : 0; end
+      `YSYX_ALU_SGE_: begin out_r = (($signed(s1)) >= ($signed(s2))) ? 1 : 0; end
       `YSYX_ALU_SLTU: begin out_r = (s1 < s2) ? 1 : 0;  end
       `YSYX_ALU_SLEU: begin out_r = (s1 <= s2) ? 1 : 0; end
+      `YSYX_ALU_SGEU: begin out_r = (s1 >= s2) ? 1 : 0; end
       `YSYX_ALU_XOR_: begin out_r = s1 ^ s2; end
       `YSYX_ALU_OR__: begin out_r = s1 | s2; end
       `YSYX_ALU_AND_: begin out_r = s1 & s2; end

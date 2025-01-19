@@ -61,7 +61,7 @@ module ysyx_ifu_l1i #(
       l1i_state  <= 'b000;
       l1ic_valid <= 0;
     end else begin
-      case (l1i_state)
+      unique case (l1i_state)
         'b000: begin
           if (invalid_l1i) begin
             l1ic_valid <= 0;

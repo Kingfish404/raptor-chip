@@ -6,13 +6,20 @@ import chisel3.util._
 trait MicroOP {
   def ALU_ADD_ = "00000"
   def ALU_SUB_ = "01000"
+  def ALU_EQ__ = "01100"
   def ALU_SLT_ = "00010"
   def ALU_SLE_ = "01010"
+  def ALU_SGE_ = "01110"
   def ALU_SLTU = "00011"
   def ALU_SLEU = "01011"
+  def ALU_SGEU = "01111"
   def ALU_XOR_ = "00100"
   def ALU_OR__ = "00110"
   def ALU_AND_ = "00111"
+
+  def ALU_SLL_ = "00001"
+  def ALU_SRL_ = "00101"
+  def ALU_SRA_ = "01101"
 
   def ALU_MUL_ = "11000"
   def ALU_MULH = "11001"
@@ -22,10 +29,6 @@ trait MicroOP {
   def ALU_DIVU = "11101"
   def ALU_REM_ = "11110"
   def ALU_REMU = "11111"
-
-  def ALU_SLL_ = "00001"
-  def ALU_SRL_ = "00101"
-  def ALU_SRA_ = "01101"
 
   def LSU_LB_ = "00000"
   def LSU_LH_ = "00001"

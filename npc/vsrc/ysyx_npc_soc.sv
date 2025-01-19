@@ -197,7 +197,7 @@ module ysyx_npc_soc #(
   );
 
   always @(posedge clock) begin
-    case (state_w)
+    unique case (state_w)
       'b000: begin
         if (awvalid) begin
           state_w <= 'b001;
@@ -245,7 +245,7 @@ module ysyx_npc_soc #(
         state_w <= 'b000;
       end
     endcase
-    case (state)
+    unique case (state)
       'b000: begin
         // wait for arvalid
         if (arvalid) begin

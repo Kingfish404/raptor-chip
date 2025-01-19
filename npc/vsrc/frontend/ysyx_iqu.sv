@@ -55,7 +55,7 @@ module ysyx_iqu (
       size     <= 0;
       state    <= EMPTY;
     end else begin
-      casez (state)
+      unique casez (state)
         EMPTY: begin
           if (prev_valid) begin
             size <= 1;
