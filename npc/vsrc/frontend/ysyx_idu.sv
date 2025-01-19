@@ -83,7 +83,6 @@ module ysyx_idu #(
 
   assign idu_if.pc = pc_idu;
   assign idu_if.inst = inst_idu;
-  assign idu_if.func3 = inst_idu[14:12];
   assign idu_if.rd[`YSYX_REG_LEN-1:0] = rd[`YSYX_REG_LEN-1:0];
 
   ysyx_idu_decoder idu_de (
@@ -100,20 +99,19 @@ module ysyx_idu #(
       .out_op1(idu_if.op1),
       .out_op2(idu_if.op2),
 
-      .out_rd (rd),
-      .out_wen(idu_if.wen),
-      .out_ren(idu_if.ren),
+      .out_rd(rd),
       .out_jen(idu_if.jen),
       .out_ben(idu_if.ben),
+      .out_wen(idu_if.wen),
+      .out_ren(idu_if.ren),
+      .out_indie(indie),
 
       .out_sys_system(idu_if.system),
-      .out_sys_func3_zero(idu_if.func3_z),
-      .out_sys_csr_wen(idu_if.csr_wen),
-      .out_sys_ebreak(idu_if.ebreak),
       .out_sys_ecall(idu_if.ecall),
+      .out_sys_ebreak(idu_if.ebreak),
+      .out_sys_fence_i(),
       .out_sys_mret(idu_if.mret),
-
-      .out_indie(indie),
+      .out_sys_csr_csw(idu_if.csr_csw),
 
       .reset(reset)
   );

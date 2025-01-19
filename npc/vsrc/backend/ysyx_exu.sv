@@ -44,20 +44,21 @@ module ysyx_exu #(
     input reset
 );
   logic [XLEN-1:0] reg_wdata, reg_wdata_mul, mepc, mtvec;
-  logic [XLEN-1:0] imm_exu, pc_exu, src1, src2, addr_exu;
-  logic [XLEN-1:0] mem_wdata = src2;
+  logic [XLEN-1:0] imm_exu, pc_exu, op1, op2, addr_exu;
+  logic [XLEN-1:0] mem_wdata = op2;
   logic [  12-1:0] csr_addr0;
   logic [XLEN-1:0] csr_wdata, csr_rdata;
   logic is_mul;
   logic [XLEN-1:0] inst_exu;
-  logic [4:0] alu_op_exu;
   logic [`YSYX_REG_LEN-1:0] rd;
-  logic csr_wen_exu;
-  logic jen, ben, ren, wen, ebreak;
-  logic ecall, mret;
+
+  logic [4:0] alu_op_exu;
+  logic jen, ben, wen, ren;
+  logic ecall, ebreak, mret;
+  logic [2:0] csr_csw_exu;
+
   logic [XLEN-1:0] mem_rdata;
   logic branch_change, system_exu;
-  logic [2:0] func3;
 
   logic alu_valid, mul_valid, lsu_avalid;
   logic lsu_valid;
@@ -68,7 +69,7 @@ module ysyx_exu #(
       .clock(clock),
       .reset(reset),
 
-      .wen(csr_wen_exu),
+      .wen(|csr_csw_exu),
       .exu_valid(valid),
       .ecall(ecall),
       .mret(mret),
@@ -84,20 +85,20 @@ module ysyx_exu #(
 
   assign is_mul = (alu_op_exu[4:4] == 1);
   assign out_reg_wdata = {XLEN{(rd != 0)}} & (
+    (system_exu) ? csr_rdata :
     (ren) ? mem_rdata :
     (jen) ? (pc_exu + 4) :
-    (system_exu) ? csr_rdata :
     (is_mul) ? reg_wdata_mul: reg_wdata);
   assign csr_addr0 = (imm_exu[11:0]);
   assign out_alu_op = alu_op_exu;
   assign out_branch_change = branch_change;
   assign out_pc = pc_exu;
   assign out_inst = inst_exu;
-  assign out_rwaddr = src1 + imm_exu;
+  assign out_rwaddr = op1 + imm_exu;
   assign out_ren = ren, out_wen = wen, out_ebreak = ebreak;
   assign out_rd = rd;
 
-  assign addr_exu = (jen ? src1 : pc_exu) + imm_exu;
+  assign addr_exu = (jen ? op1 : pc_exu) + imm_exu;
 
   assign valid = (wen || ren) ? lsu_valid : (is_mul ? mul_valid : alu_valid);
   assign out_valid = valid;
@@ -113,9 +114,10 @@ module ysyx_exu #(
       if (prev_valid && ready) begin
         pc_exu <= idu_if.pc;
         inst_exu <= idu_if.inst;
+
         imm_exu <= idu_if.imm;
-        src1 <= idu_if.op1;
-        src2 <= idu_if.op2;
+        op1 <= idu_if.op1;
+        op2 <= idu_if.op2;
         alu_op_exu <= idu_if.alu_op;
 
         rd <= idu_if.rd;
@@ -124,12 +126,11 @@ module ysyx_exu #(
         jen <= idu_if.jen;
         ben <= idu_if.ben;
 
-        func3 <= idu_if.func3;
         system_exu <= idu_if.system;
-        csr_wen_exu <= idu_if.csr_wen;
-        ebreak <= idu_if.ebreak;
         ecall <= idu_if.ecall;
+        ebreak <= idu_if.ebreak;
         mret <= idu_if.mret;
+        csr_csw_exu <= idu_if.csr_csw;
 
         if (idu_if.wen || idu_if.ren) begin
           lsu_avalid <= 1;
@@ -177,8 +178,8 @@ module ysyx_exu #(
 
   // alu for I Extension
   ysyx_exu_alu alu (
-      .s1(src1),
-      .s2(src2),
+      .s1(op1),
+      .s2(op2),
       .op(alu_op_exu),
       .out_r(reg_wdata)
   );
@@ -198,9 +199,9 @@ module ysyx_exu #(
 
   // csr
   assign csr_wdata = (
-    ({XLEN{(func3 == `YSYX_F3_CSRRW_) || (func3 == `YSYX_F3_CSRRWI)}} & src1) |
-    ({XLEN{(func3 == `YSYX_F3_CSRRS_) || (func3 == `YSYX_F3_CSRRSI)}} & (csr_rdata | src1)) |
-    ({XLEN{(func3 == `YSYX_F3_CSRRC_) || (func3 == `YSYX_F3_CSRRCI)}} & (csr_rdata & ~src1)) |
+    ({XLEN{csr_csw_exu[0]}} & op1) |
+    ({XLEN{csr_csw_exu[1]}} & (csr_rdata | op1)) |
+    ({XLEN{csr_csw_exu[2]}} & (csr_rdata & ~op1)) |
     (0)
   );
 

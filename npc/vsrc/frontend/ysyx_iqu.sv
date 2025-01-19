@@ -37,13 +37,11 @@ module ysyx_iqu (
   logic jen[QUEUE_SIZE];
   logic ben[QUEUE_SIZE];
 
-  logic [2:0] func3[QUEUE_SIZE];
   logic system[QUEUE_SIZE];
-  logic func3_z[QUEUE_SIZE];
-  logic csr_wen[QUEUE_SIZE];
-  logic ebreak[QUEUE_SIZE];
   logic ecall[QUEUE_SIZE];
+  logic ebreak[QUEUE_SIZE];
   logic mret[QUEUE_SIZE];
+  logic [2:0] csr_csw[QUEUE_SIZE];
   // === micro op queue ===
 
   assign out_valid  = (size > 0);
@@ -114,13 +112,11 @@ module ysyx_iqu (
         jen[uop_tail]     <= idu_if.jen;
         ben[uop_tail]     <= idu_if.ben;
 
-        func3[uop_tail]   <= idu_if.func3;
         system[uop_tail]  <= idu_if.system;
-        func3_z[uop_tail] <= idu_if.func3_z;
-        csr_wen[uop_tail] <= idu_if.csr_wen;
-        ebreak[uop_tail]  <= idu_if.ebreak;
         ecall[uop_tail]   <= idu_if.ecall;
+        ebreak[uop_tail]  <= idu_if.ebreak;
         mret[uop_tail]    <= idu_if.mret;
+        csr_csw[uop_tail] <= idu_if.csr_csw;
       end
     end
   end
@@ -140,12 +136,10 @@ module ysyx_iqu (
     iqu_if.jen     = jen[uop_head];
     iqu_if.ben     = ben[uop_head];
 
-    iqu_if.func3   = func3[uop_head];
     iqu_if.system  = system[uop_head];
-    iqu_if.func3_z = func3_z[uop_head];
-    iqu_if.csr_wen = csr_wen[uop_head];
-    iqu_if.ebreak  = ebreak[uop_head];
     iqu_if.ecall   = ecall[uop_head];
+    iqu_if.ebreak  = ebreak[uop_head];
     iqu_if.mret    = mret[uop_head];
+    iqu_if.csr_csw = csr_csw[uop_head];
   end
 endmodule

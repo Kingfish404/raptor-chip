@@ -18,10 +18,8 @@ interface idu_pipe_if;
   logic jen;
   logic ben;
 
-  logic [2:0] func3;
   logic system;
-  logic func3_z;
-  logic csr_wen;
+  logic [2:0] csr_csw;
   logic ebreak;
   logic ecall;
   logic mret;
@@ -30,14 +28,14 @@ interface idu_pipe_if;
       input pc, inst,
       input imm, alu_op, op1, op2,
       input rd, ren, wen, jen, ben,
-      input func3, system, func3_z, csr_wen, ebreak, ecall, mret
+      input system, csr_csw, ebreak, ecall, mret
   );
 
   modport out(
       output pc, inst,
       output imm, alu_op, op1, op2,
       output rd, ren, wen, jen, ben,
-      output func3, system, func3_z, csr_wen, ebreak, ecall, mret
+      output system, csr_csw, ebreak, ecall, mret
   );
 endinterface
 
@@ -57,10 +55,8 @@ typedef struct packed {
   logic jen;
   logic ben;
 
-  logic [2:0] func3;
   logic system;
-  logic func3_z;
-  logic csr_wen;
+  logic [2:0] csr_csw;
   logic ebreak;
   logic ecall;
   logic mret;
