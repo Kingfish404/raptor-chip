@@ -103,7 +103,6 @@ module ysyx #(
   // IFU out
   logic [31:0] ifu_inst;
   logic [XLEN-1:0] ifu_pc;
-  logic ifu_speculation;
   logic flush_pipeline;
   logic ifu_valid, ifu_ready;
   // IFU out bus
@@ -113,11 +112,11 @@ module ysyx #(
   // IDU out
   idu_pipe_if idu_if ();
   logic idu_valid, idu_ready;
-  logic [REG_ADDR_W-1:0] idu_rs1, idu_rs2;
 
   // IQU out
   idu_pipe_if iqu_if ();
   logic iqu_valid, iqu_ready;
+  logic [REG_ADDR_W-1:0] iqu_rs1, iqu_rs2;
 
   // EXU out
   logic [31:0] exu_inst, exu_pc;
@@ -141,7 +140,6 @@ module ysyx #(
   logic wbu_pc_change, wbu_pc_retire;
 
   // logic out
-  logic [`YSYX_REG_NUM-1:0] reg_rf_table;
   logic [XLEN-1:0] reg_rdata1, reg_rdata2;
 
   // lsu out
@@ -199,20 +197,8 @@ module ysyx #(
       .clock(clock),
 
       .inst(ifu_inst),
-      .rdata1(reg_rdata1),
-      .rdata2(reg_rdata2),
       .pc(ifu_pc),
-
-      .exu_valid(exu_valid),
-      .exu_forward(exu_reg_wdata),
-      .exu_forward_rd((exu_rd)),
-
       .idu_if(idu_if),
-
-      .out_rs1(idu_rs1),
-      .out_rs2(idu_rs2),
-
-      .rf_table(reg_rf_table),
 
       .prev_valid(ifu_valid),
       .next_ready(iqu_ready),
@@ -228,6 +214,14 @@ module ysyx #(
 
       .idu_if(idu_if),
       .iqu_if(iqu_if),
+
+      .exu_valid(exu_valid),
+      .exu_rd(exu_rd),
+
+      .out_rs1(iqu_rs1),
+      .out_rs2(iqu_rs2),
+      .rdata1 (reg_rdata1),
+      .rdata2 (reg_rdata2),
 
       .prev_valid(idu_valid),
       .next_ready(exu_ready),
@@ -305,18 +299,12 @@ module ysyx #(
   ysyx_reg regs (
       .clock(clock),
 
-      .idu_valid(idu_valid && iqu_ready),
-      .rd(idu_if.rd),
-
-      .bad_speculation(flush_pipeline),
-      .reg_write_en(exu_valid && flush_pipeline == 0),
+      .write_en(exu_valid && flush_pipeline == 0),
       .waddr((exu_rd)),
       .wdata(exu_reg_wdata),
 
-      .s1addr(idu_rs1),
-      .s2addr(idu_rs2),
-
-      .out_rf_table(reg_rf_table),
+      .s1addr  (iqu_if.rs1),
+      .s2addr  (iqu_if.rs2),
       .out_src1(reg_rdata1),
       .out_src2(reg_rdata2),
 

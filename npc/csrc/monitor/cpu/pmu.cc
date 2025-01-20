@@ -31,7 +31,7 @@ void perf_sample_per_cycle()
 
   bool idu_ready = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, idu__DOT__ready));
   bool idu_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, idu__DOT__valid));
-  bool idu_hazard = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, idu__DOT__idu_hazard));
+  bool iqu_hazard = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, iqu__DOT__iqu_hazard));
 
   bool exu_ready = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, exu__DOT__ready));
   bool exu_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, exu__DOT__alu_valid));
@@ -55,7 +55,7 @@ void perf_sample_per_cycle()
   }
   pmu.ifu_bra_hazard_cycle += ifu_bra_hazard ? 1 : 0;
   pmu.ifu_lsu_hazard_cycle += ifu_lsu_hazard ? 1 : 0;
-  pmu.idu_hazard_cycle += idu_hazard ? 1 : 0;
+  pmu.iqu_hazard_cycle += iqu_hazard ? 1 : 0;
   if (lsu_valid)
   {
     pmu.lsu_load_cnt++;
@@ -199,8 +199,8 @@ void perf()
   Log("ifu_bra_hazard_cycle: %8lld,%3.0f%%, ifu_lsu_hazard_cycle: %8lld,%3.0f%%",
       pmu.ifu_bra_hazard_cycle, percentage(pmu.ifu_bra_hazard_cycle, pmu.active_cycle),
       pmu.ifu_lsu_hazard_cycle, percentage(pmu.ifu_lsu_hazard_cycle, pmu.active_cycle));
-  Log("idu_hazard_cycle: %8lld,%3.0f%% (data hazard)",
-      pmu.idu_hazard_cycle, percentage(pmu.idu_hazard_cycle, pmu.active_cycle));
+  Log("iqu_hazard_cycle: %8lld,%3.0f%% (data hazard)",
+      pmu.iqu_hazard_cycle, percentage(pmu.iqu_hazard_cycle, pmu.active_cycle));
   Log(FMT_BLUE("ifu_fetch_cnt: %lld, instr_cnt: %lld"), pmu.ifu_fetch_cnt, pmu.instr_cnt);
   // assert(pmu.ifu_fetch_cnt == pmu.instr_cnt);
   assert(
