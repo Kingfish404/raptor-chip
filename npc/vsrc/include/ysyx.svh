@@ -39,6 +39,8 @@
 `define YSYX_L1I_LINE_LEN 1
 `define YSYX_L1I_LEN 2
 `define YSYX_IQU_SIZE 4
+`define YSYX_ROB_SIZE 4
+`define YSYX_RS_SIZE 4
 `define YSYX_L1D_LEN 1
 
 `ifdef YSYX_I_EXTENSION
@@ -135,8 +137,7 @@
 `define YSYX_CSR_MARCHID__ 'hf12
 
 // Macros
-`define ASSERT(signal, value) \
-  if (signal !== value) begin \
-    $error("ASSERTION FAILED in %m: signal != value"); \
-    $finish; \
+`define ASSERT(signal, str) \
+  if (signal == 'h0) begin \
+    $write("ASSERTION FAILED in %m, %s\n", str); \
   end

@@ -120,7 +120,7 @@ void cpu_exec(uint64_t n)
     cur_inst_cycle++;
     if (cur_inst_cycle > 0x1ffff)
     {
-      Log(FMT_RED("Too many cycles (0x%llx cycle) at pc %x, maybe a bug."), cur_inst_cycle, *npc.pc);
+      Log(FMT_RED("Too many cycles (0x%llx) stalled at pc: %x."), cur_inst_cycle, *npc.pc);
       npc.state = NPC_ABORT;
       break;
     }

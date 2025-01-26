@@ -14,10 +14,12 @@ module ysyx_ifu #(
 
     output [XLEN-1:0] out_inst,
     output [XLEN-1:0] out_pc,
+    output [XLEN-1:0] out_pnpc,
 
-    output out_flush_pipeline,
+    input flush_pipeline,
 
     // for bus
+    input bus_ifu_ready,
     output [XLEN-1:0] out_ifu_araddr,
     output out_ifu_arvalid,
     output out_ifu_required,
@@ -32,6 +34,7 @@ module ysyx_ifu #(
     input reset
 );
   logic [XLEN-1:0] pc_ifu;
+  logic [XLEN-1:0] pnpc_ifu;
   logic ifu_lsu_hazard = 0, ifu_branch_hazard = 0;
 
   logic [XLEN-1:0] btb, btb_jal;
@@ -47,9 +50,12 @@ module ysyx_ifu #(
   logic invalid_l1i;
   logic l1i_valid;
   logic l1i_ready;
+  logic [XLEN-1:0] l1_inst;
 
   assign ifu_hazard = ifu_lsu_hazard || ifu_branch_hazard;
+  assign out_inst = l1i_valid ? l1_inst : 'h0;
   assign opcode = out_inst[6:0];
+  // pre decode
   assign is_jalr = (opcode == `YSYX_OP_JALR__);
   assign is_jal = (opcode == `YSYX_OP_JAL___);
   assign is_b_type = (opcode == `YSYX_OP_B_TYPE_);
@@ -59,17 +65,16 @@ module ysyx_ifu #(
   assign is_fencei = (out_inst == `YSYX_INST_FENCE_I);  // fence.i is system instruction
   assign is_sys = (opcode == `YSYX_OP_SYSTEM);
 
-  assign valid =(l1i_valid && !ifu_hazard) &&
-   !bad_speculation && !(speculation && (is_load || is_store));
+  assign valid =(l1i_valid && !ifu_hazard) && !flush_pipeline &&
+          !(speculation && (is_load || is_store));
   assign out_valid = valid;
   assign out_ready = !valid;
 
-  // Branch Prediction
-  assign out_flush_pipeline = bad_speculation || bad_speculationing;
-  assign good_speculationing = ((pc_change || pc_retire) && npc == ifu_speculation);
-  assign bad_speculationing = (speculation) && ((pc_change || pc_retire) && npc != ifu_speculation);
-
+  // BTFN (Backward Taken, Forward Not-taken), jalr is always not taken
+  assign pnpc_ifu = ((is_b_type && (btb < pc_ifu)) ? btb :
+   (is_jal && (btb_jal < pc_ifu)) ? btb_jal : ((is_load) ? pc_ifu + 4 :pc_ifu));
   assign out_pc = pc_ifu;
+  assign out_pnpc = pnpc_ifu;
   always @(posedge clock) begin
     if (reset) begin
       btb <= `YSYX_PC_INIT;
@@ -79,58 +84,43 @@ module ysyx_ifu #(
       ifu_lsu_hazard <= 0;
       ifu_branch_hazard <= 0;
     end else begin
-      if (prev_valid) begin
-        if (speculation) begin
-          if (good_speculationing) begin
-            speculation <= 0;
-            ifu_b_speculation <= 0;
-          end
-          if ((bad_speculationing)) begin
-            bad_speculation <= 1;
-            speculation <= 0;
-          end
-        end
-      end
-      if (bad_speculationing || pc_change) begin
-        btb <= npc;
+      if (flush_pipeline) begin
+        speculation <= 0;
+        pc_ifu <= npc;
+        ifu_lsu_hazard <= 0;
+        ifu_branch_hazard <= 0;
+        ifu_b_speculation <= 0;
         if (ifu_b_speculation) begin
+          btb <= npc;
         end else begin
           btb_jal <= npc;
         end
-      end
-      if (bad_speculation && next_ready && l1i_ready) begin
-        bad_speculation <= 0;
+      end else if (prev_valid && pc_retire) begin
+        speculation <= 0;
         ifu_branch_hazard <= 0;
-        ifu_b_speculation <= 0;
-        pc_ifu <= npc;
-      end
-      if (!speculation) begin
-        if (ifu_branch_hazard && (pc_change || pc_retire) && l1i_ready) begin
-          ifu_branch_hazard <= 0;
+        if (ifu_branch_hazard) begin
           pc_ifu <= npc;
         end
+      end
+      if (!speculation) begin
         if (ifu_lsu_hazard && load_retire && l1i_ready) begin
           ifu_lsu_hazard <= 0;
           pc_ifu <= pc_ifu + 4;
         end
       end
-      if (!(bad_speculation || bad_speculationing) && next_ready == 1 && valid) begin
+      if (next_ready && valid) begin
+        `ASSERT(out_inst != 'h0, "inst != 0");
         if (!is_branch && !is_load && !is_sys) begin
           pc_ifu <= pc_ifu + 4;
         end else begin
           if (is_branch) begin
-            // jalr is always not taken
             if (!speculation) begin
-              // BTFN (Backward Taken, Forward Not-taken)
+              pc_ifu <= pnpc_ifu;
               if (is_b_type && (btb < pc_ifu)) begin
                 speculation <= 1;
                 ifu_b_speculation <= 1;
-                ifu_speculation <= btb;
-                pc_ifu <= btb;
               end else if (is_jal && (btb_jal < pc_ifu)) begin
                 speculation <= 1;
-                ifu_speculation <= btb_jal;
-                pc_ifu <= btb_jal;
               end else begin
                 ifu_branch_hazard <= 1;
               end
@@ -156,12 +146,14 @@ module ysyx_ifu #(
       .ifu_rvalid(ifu_rvalid),
       .ifu_rdata(ifu_rdata),
       .invalid_l1i(invalid_l1i),
+      .flush_pipeline(flush_pipeline),
 
-      .out_ifu_araddr  (out_ifu_araddr),
-      .out_ifu_arvalid (out_ifu_arvalid),
+      .bus_ifu_ready(bus_ifu_ready),
+      .out_ifu_araddr(out_ifu_araddr),
+      .out_ifu_arvalid(out_ifu_arvalid),
       .out_ifu_required(out_ifu_required),
 
-      .out_inst (out_inst),
+      .out_inst (l1_inst),
       .l1i_valid(l1i_valid),
       .l1i_ready(l1i_ready),
 

@@ -9,6 +9,7 @@ module ysyx_idu #(
 
     input [31:0] inst,
     input [XLEN-1:0] pc,
+    input [XLEN-1:0] pnpc,
     idu_pipe_if.out idu_if,
 
     input prev_valid,
@@ -16,13 +17,10 @@ module ysyx_idu #(
     output logic out_valid,
     output logic out_ready
 );
-  logic [31:0] inst_idu, pc_idu;
+  logic [31:0] inst_idu, pc_idu, pnpc_idu;
   logic valid, ready;
 
   logic [4:0] rd;
-  logic [`YSYX_REG_LEN-1:0] rs1, rs2;
-  assign rs1 = inst_idu[15+`YSYX_REG_LEN-1:15];
-  assign rs2 = inst_idu[20+`YSYX_REG_LEN-1:20];
 
   logic [XLEN-1:0] reg_rdata1;
   logic [XLEN-1:0] reg_rdata2;
@@ -37,6 +35,7 @@ module ysyx_idu #(
       if (prev_valid && ready && next_ready) begin
         inst_idu <= inst;
         pc_idu   <= pc;
+        pnpc_idu <= pnpc;
       end
       if (prev_valid && ready && next_ready) begin
         valid <= 1;
@@ -54,6 +53,7 @@ module ysyx_idu #(
 
   assign idu_if.pc = pc_idu;
   assign idu_if.inst = inst_idu;
+  assign idu_if.pnpc = pnpc_idu;
   assign idu_if.rd[`YSYX_REG_LEN-1:0] = rd[`YSYX_REG_LEN-1:0];
 
   ysyx_idu_decoder idu_de (

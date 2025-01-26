@@ -44,6 +44,7 @@ module ysyx_bus #(
     output       io_master_bready,  // reqired
 
     // ifu
+    output bus_ifu_ready,
     input [XLEN-1:0] ifu_araddr,
     input ifu_arvalid,
     input ifu_required,
@@ -97,6 +98,7 @@ module ysyx_bus #(
   assign io_master_awid = 0;
 
   state_load_t state_load;
+  assign bus_ifu_ready = state_load == IF_A;
   always @(posedge clock) begin
     if (reset) begin
       state_load <= IF_A;
@@ -128,10 +130,10 @@ module ysyx_bus #(
         end
         LS_R: begin
           if (io_master_rvalid) begin
-            state_load <= IF_A;
+            state_load <= LS_A;
           end
         end
-        default: state_load <= IF_A;
+        default: state_load <= LS_A;
       endcase
     end
   end
@@ -157,22 +159,25 @@ module ysyx_bus #(
             if (io_master_wready) begin
               write_done <= 1;
             end
-            if (io_master_bvalid) begin
-              state_store <= LS_S_B;
-            end
+          end
+          if (io_master_bvalid) begin
+            state_store <= LS_S_B;
           end
         end
         LS_S_B: begin
           state_store <= LS_S_A;
         end
-        default: state_store <= LS_S_W;
+        default: state_store <= LS_S_A;
       endcase
     end
   end
 
   // read
   logic [XLEN-1:0] sram_araddr;
-  assign sram_araddr = (({XLEN{lsu_arvalid}} & lsu_araddr) | ({XLEN{ifu_arvalid}} & ifu_araddr));
+  assign sram_araddr = (
+    ({XLEN{state_load == LS_A}} & lsu_araddr) |
+    ({XLEN{state_load == IF_A}} & ifu_araddr)
+  );
 
   // ifu read
   assign out_ifu_rdata = ({XLEN{out_ifu_rvalid}} & (out_rdata));
@@ -251,8 +256,8 @@ module ysyx_bus #(
   assign io_master_bready = 1;
 
   always @(posedge clock) begin
-    `YSYX_ASSERT(io_master_rresp, 2'b00);
-    `YSYX_ASSERT(io_master_bresp, 2'b00);
+    `YSYX_ASSERT(io_master_rresp == 2'b00, "rresp == 2'b00");
+    `YSYX_ASSERT(io_master_bresp == 2'b00, "bresp == 2'b00");
     if (io_master_awvalid) begin
       `YSYX_DPI_C_NPC_DIFFTEST_MEM_DIFF
       if (

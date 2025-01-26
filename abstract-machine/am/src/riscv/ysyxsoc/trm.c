@@ -82,7 +82,7 @@ __attribute__((section(".first_boot"))) void _first_stage_bootloader(void)
 
 size_t ssb_start, ssb_end;
 
-__attribute__((section(".second_boot"))) void _second_stage_bootloader()
+__attribute__((section(".second_boot"))) void _second_stage_bootloader(void)
 {
   ssb_start = *((uint32_t *)RTC_ADDR);
   if ((size_t)_text_start != (size_t)_text_load_start)
@@ -113,7 +113,7 @@ __attribute__((section(".second_boot"))) void _second_stage_bootloader()
   _trm_init();
 }
 
-void _trm_init()
+void _trm_init(void)
 {
   init_uart();
   printf("FSBL: %d, SSBL: %d|%d\n", ssb_start, ssb_end, ssb_end - ssb_start);

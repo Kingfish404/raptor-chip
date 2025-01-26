@@ -108,8 +108,7 @@ static void checkregs(NPCState *ref, vaddr_t pc)
 
   if (!is_same)
   {
-    printf(FMT_RED("[ERROR]") " npc.pc: " FMT_WORD_NO_PREFIX ", ref.pc: " FMT_WORD_NO_PREFIX "\n",
-           pc, (vaddr_t)(*(ref->cpc)));
+    printf(FMT_RED("[ERROR]") " npc.pc: " FMT_WORD_NO_PREFIX "\n", pc);
     npc.state = NPC_ABORT;
   }
 }

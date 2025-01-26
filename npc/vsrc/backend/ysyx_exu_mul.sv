@@ -103,12 +103,16 @@ module ysyx_exu_mul #(
           if (counter == 33) begin
             out_r <= p;
             valid <= 1;
+          end else begin
+            valid <= 0;
           end
         end
         `YSYX_ALU_MULH__, `YSYX_ALU_MULHSU, `YSYX_ALU_MULHU_: begin
           if (counter == 65) begin
             out_r <= pp[63:32];
             valid <= 1;
+          end else begin
+            valid <= 0;
           end
         end
         `YSYX_ALU_DIV___, `YSYX_ALU_DIVU__: begin
@@ -117,23 +121,29 @@ module ysyx_exu_mul #(
             valid <= 1;
           end else if (op == `YSYX_ALU_DIV___ && counter == 32) begin
             out_r <= (sign == 'b00 || sign == 'b11) ? quotient : ~quotient + 1;
-            valid <= 1;
             op <= 0;
+            valid <= 1;
           end else if (op == `YSYX_ALU_DIVU__ && counter == 32) begin
             out_r <= quotient;
             valid <= 1;
+          end else begin
+            valid <= 0;
           end
         end
         `YSYX_ALU_REM___: begin
           if (counter == 32) begin
             out_r <= (sign == 'b00 || sign == 'b01) ? reh[32:1] : ~reh[32:1] + 1;
             valid <= 1;
+          end else begin
+            valid <= 0;
           end
         end
         `YSYX_ALU_REMU__: begin
           if (counter == 32) begin
             out_r <= reh[32:1];
             valid <= 1;
+          end else begin
+            valid <= 0;
           end
         end
         default: begin

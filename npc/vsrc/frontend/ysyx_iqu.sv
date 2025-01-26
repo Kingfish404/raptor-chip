@@ -7,17 +7,28 @@ module ysyx_iqu #(
     input clock,
     input reset,
 
+    // <= idu
     idu_pipe_if.in  idu_if,
-    idu_pipe_if.out iqu_if,
+    // => exu
+    idu_pipe_if.out iqu_exu_if,
 
-    // input [`YSYX_REG_NUM-1:0] rf_table,
-    input exu_valid,
-    input [`YSYX_REG_LEN-1:0] exu_rd,
+    // <= exu
+    exu_pipe_if.in exu_iqu_if,
 
+    // <=> wbu & reg
+    exu_pipe_if.out iqu_wbu_if,
+
+    // <=> reg
     output [`YSYX_REG_LEN-1:0] out_rs1,
     output [`YSYX_REG_LEN-1:0] out_rs2,
     input [XLEN-1:0] rdata1,
     input [XLEN-1:0] rdata2,
+
+    // => exu (commit)
+    exu_pipe_if.out iqu_exu_commit_if,
+
+    // pipeline
+    output flush_pipeline,
 
     input prev_valid,
     input next_ready,
@@ -25,160 +36,255 @@ module ysyx_iqu #(
     output logic out_ready
 );
   parameter unsigned QUEUE_SIZE = `YSYX_IQU_SIZE;
+  parameter unsigned ROB_SIZE = `YSYX_ROB_SIZE;
   parameter bit [7:0] REG_NUM = `YSYX_REG_NUM;
+  typedef enum logic [1:0] {
+    CM = 2'b00,
+    WB = 2'b01,
+    EX = 2'b10
+  } rob_state_t;
 
-  parameter bit [1:0] EMPTY = 2'b00, READY = 2'b01, FULL = 2'b10;
-  micro_op_t uop_queue[QUEUE_SIZE];
-  logic [$clog2(QUEUE_SIZE)-1:0] uop_head, uop_tail;
-  logic [$clog2(QUEUE_SIZE):0] size;
-  logic [1:0] state;
-  logic [`YSYX_REG_LEN-1:0] cur_rs1, cur_rs2;
-  logic [REG_NUM-1:0] rf_table;
+  micro_op_t uoq_queue[QUEUE_SIZE];
+  logic [`YSYX_REG_LEN-1:0] rs1, rs2;
 
-  // === micro op queue ===
-  logic [4:0] alu_op[QUEUE_SIZE];
-  logic jen[QUEUE_SIZE];
-  logic ben[QUEUE_SIZE];
-  logic wen[QUEUE_SIZE];
-  logic ren[QUEUE_SIZE];
+  // === micro-op queue (UOQ) ===
+  logic [$clog2(QUEUE_SIZE)-1:0] uoq_tail;
+  logic [$clog2(QUEUE_SIZE)-1:0] uoq_head;
+  logic [QUEUE_SIZE-1:0] uoq_valid;
 
-  logic system[QUEUE_SIZE];
-  logic ecall[QUEUE_SIZE];
-  logic ebreak[QUEUE_SIZE];
-  logic mret[QUEUE_SIZE];
-  logic [2:0] csr_csw[QUEUE_SIZE];
+  logic [4:0] uoq_alu_op[QUEUE_SIZE];
+  logic uoq_jen[QUEUE_SIZE];
+  logic uoq_ben[QUEUE_SIZE];
+  logic uoq_wen[QUEUE_SIZE];
+  logic uoq_ren[QUEUE_SIZE];
 
-  logic [`YSYX_REG_LEN-1:0] rd[QUEUE_SIZE];
-  logic [31:0] imm[QUEUE_SIZE];
-  logic [31:0] op1[QUEUE_SIZE];
-  logic [31:0] op2[QUEUE_SIZE];
-  logic [`YSYX_REG_LEN-1:0] rs1[QUEUE_SIZE];
-  logic [`YSYX_REG_LEN-1:0] rs2[QUEUE_SIZE];
+  logic uoq_system[QUEUE_SIZE];
+  logic uoq_ecall[QUEUE_SIZE];
+  logic uoq_ebreak[QUEUE_SIZE];
+  logic uoq_mret[QUEUE_SIZE];
+  logic [2:0] uoq_csr_csw[QUEUE_SIZE];
 
-  logic [31:0] inst[QUEUE_SIZE];
-  logic [31:0] pc[QUEUE_SIZE];
-  // === micro op queue ===
+  logic [`YSYX_REG_LEN-1:0] uoq_rd[QUEUE_SIZE];
+  logic [31:0] uoq_imm[QUEUE_SIZE];
+  logic [31:0] uoq_op1[QUEUE_SIZE];
+  logic [31:0] uoq_op2[QUEUE_SIZE];
+  logic [`YSYX_REG_LEN-1:0] uoq_rs1[QUEUE_SIZE];
+  logic [`YSYX_REG_LEN-1:0] uoq_rs2[QUEUE_SIZE];
 
-  logic iqu_hazard;
-  assign iqu_hazard = ((
-    out_rs1[`YSYX_REG_LEN-1:0] != 0 &&
-    (rf_table[out_rs1[`YSYX_REG_LEN-1:0]] == 1)
-      // && !(exu_valid && rs1[`YSYX_REG_LEN-1:0] == exu_forward_rd)
-      ) || (out_rs2[`YSYX_REG_LEN-1:0] != 0 && (rf_table[out_rs2[`YSYX_REG_LEN-1:0]] == 1)
-      // && !(exu_valid && rs2[`YSYX_REG_LEN-1:0] == exu_forward_rd)
-      ) || (0));
+  logic [XLEN-1:0] uoq_pnpc[QUEUE_SIZE];
+  logic [31:0] uoq_inst[QUEUE_SIZE];
+  logic [XLEN-1:0] uoq_pc[QUEUE_SIZE];
+  // === micro-op queue (UOQ) ===
 
-  assign out_valid = (state != EMPTY) && !iqu_hazard;
-  assign out_ready = (state != FULL);
+  logic dispatch_ready;
+
+  // === re-order buffer (ROB) ===
+  logic [$clog2(ROB_SIZE)-1:0] rob_head;
+  logic [$clog2(ROB_SIZE)-1:0] rob_tail;
+
+  logic [ROB_SIZE-1:0] rob_busy;
+  logic [`YSYX_REG_LEN-1:0] rob_rd[ROB_SIZE];
+  logic [31:0] rob_inst[ROB_SIZE];
+  rob_state_t rob_state[ROB_SIZE];
+  logic [XLEN-1:0] rob_value[ROB_SIZE];
+  logic [XLEN-1:0] rob_pc[ROB_SIZE];
+  logic [XLEN-1:0] rob_pnpc[ROB_SIZE];
+
+  logic [XLEN-1:0] rob_npc[ROB_SIZE];
+  logic rob_pc_change[ROB_SIZE];
+  logic rob_pc_retire[ROB_SIZE];
+  logic rob_ebreak[ROB_SIZE];
+
+  logic rob_csr_wen[ROB_SIZE];
+  logic [XLEN-1:0] rob_csr_wdata[ROB_SIZE];
+  logic [11:0] rob_csr_addr[ROB_SIZE];
+  logic rob_ecall[ROB_SIZE];
+  logic rob_mret[ROB_SIZE];
+  // === re-order buffer (ROB) ===
+
+  // === Register File (RF) status ===
+  logic [$clog2(ROB_SIZE)-1:0] rf_reorder[REG_NUM];
+  logic [REG_NUM-1:0] rf_busy;
+  // === Register File (RF) status ===
+
+  assign dispatch_ready = (next_ready && uoq_valid[uoq_tail] && rob_busy[rob_tail] == 0);
+
+  assign out_valid = uoq_valid[uoq_tail] && (rob_busy[rob_tail] == 0);
+  assign out_ready = uoq_valid[uoq_head] == 0;
 
   always @(posedge clock) begin
-    if (reset) begin
-      uop_head <= 0;
-      uop_tail <= 0;
-      size     <= 0;
-      state    <= EMPTY;
-      rf_table <= 0;
+    if (reset || flush_pipeline) begin
+      uoq_head  <= 0;
+      uoq_tail  <= 0;
+      uoq_valid <= 0;
     end else begin
-      if (exu_valid) begin
-        rf_table[exu_rd] <= 0;
+      if (prev_valid && uoq_valid[uoq_head] == 0) begin
+        // Issue
+        uoq_head              <= uoq_head + 1;
+
+        uoq_alu_op[uoq_head]  <= idu_if.alu_op;
+        uoq_jen[uoq_head]     <= idu_if.jen;
+        uoq_ben[uoq_head]     <= idu_if.ben;
+        uoq_wen[uoq_head]     <= idu_if.wen;
+        uoq_ren[uoq_head]     <= idu_if.ren;
+
+        uoq_system[uoq_head]  <= idu_if.system;
+        uoq_ecall[uoq_head]   <= idu_if.ecall;
+        uoq_ebreak[uoq_head]  <= idu_if.ebreak;
+        uoq_mret[uoq_head]    <= idu_if.mret;
+        uoq_csr_csw[uoq_head] <= idu_if.csr_csw;
+
+        uoq_rd[uoq_head]      <= idu_if.rd;
+        uoq_imm[uoq_head]     <= idu_if.imm;
+        uoq_op1[uoq_head]     <= idu_if.op1;
+        uoq_op2[uoq_head]     <= idu_if.op2;
+        uoq_rs1[uoq_head]     <= idu_if.rs1;
+        uoq_rs2[uoq_head]     <= idu_if.rs2;
+
+        uoq_pnpc[uoq_head]    <= idu_if.pnpc;
+        uoq_inst[uoq_head]    <= idu_if.inst;
+        uoq_pc[uoq_head]      <= idu_if.pc;
+
+        uoq_valid[uoq_head]   <= 1;
       end
-      unique casez (state)
-        EMPTY: begin
-          if (prev_valid) begin
-            size <= 1;
-            state <= READY;
-            uop_tail <= uop_tail + 1;
-          end
-        end
-        READY: begin
-          if (prev_valid) begin
-            if (next_ready && !iqu_hazard) begin
-              uop_head <= uop_head + 1;
-              uop_tail <= uop_tail + 1;
-              rf_table[rd[uop_head]] <= 1;
-            end else begin
-              size <= size + 1;
-              uop_tail <= uop_tail + 1;
-              if (size == (QUEUE_SIZE - 1)) begin
-                state <= FULL;
-              end
-            end
-          end else begin
-            if (next_ready && !iqu_hazard) begin
-              size <= size - 1;
-              uop_head <= uop_head + 1;
-              rf_table[rd[uop_head]] <= 1;
-              if (size == 1) begin
-                state <= EMPTY;
-              end
-            end else begin
-            end
-          end
-        end
-        FULL: begin
-          if (next_ready && !iqu_hazard) begin
-            size <= size - 1;
-            uop_head <= uop_head + 1;
-            rf_table[rd[uop_head]] <= 1;
-            state <= READY;
-          end
-        end
-        default: begin
-          state <= EMPTY;
-        end
-      endcase
-      if (state != FULL) begin
-        alu_op[uop_tail]  <= idu_if.alu_op;
-        jen[uop_tail]     <= idu_if.jen;
-        ben[uop_tail]     <= idu_if.ben;
-        wen[uop_tail]     <= idu_if.wen;
-        ren[uop_tail]     <= idu_if.ren;
-
-        system[uop_tail]  <= idu_if.system;
-        ecall[uop_tail]   <= idu_if.ecall;
-        ebreak[uop_tail]  <= idu_if.ebreak;
-        mret[uop_tail]    <= idu_if.mret;
-        csr_csw[uop_tail] <= idu_if.csr_csw;
-
-        rd[uop_tail]      <= idu_if.rd;
-        imm[uop_tail]     <= idu_if.imm;
-        op1[uop_tail]     <= idu_if.op1;
-        op2[uop_tail]     <= idu_if.op2;
-        rs1[uop_tail]     <= idu_if.rs1;
-        rs2[uop_tail]     <= idu_if.rs2;
-
-        inst[uop_tail]    <= idu_if.inst;
-        pc[uop_tail]      <= idu_if.pc;
+      if (dispatch_ready) begin
+        // Dispatch
+        uoq_tail <= uoq_tail + 1;
+        uoq_valid[uoq_tail] <= 0;
+        uoq_inst[uoq_tail] <= 0;
       end
     end
   end
 
-
-  assign cur_rs1 = rs1[uop_head];
-  assign cur_rs2 = rs2[uop_head];
-  assign out_rs1 = cur_rs1;
-  assign out_rs2 = cur_rs2;
+  assign rs1 = uoq_rs1[uoq_tail];
+  assign rs2 = uoq_rs2[uoq_tail];
+  assign out_rs1 = rs1;
+  assign out_rs2 = rs2;
+  logic [$clog2(`YSYX_ROB_SIZE):0] rs1_dest;
+  logic [$clog2(`YSYX_ROB_SIZE):0] rs2_dest;
+  logic rs1_hit_rob;
+  logic rs2_hit_rob;
+  assign rs1_hit_rob = (rf_busy[rs1] && (rob_state[rf_reorder[rs1]] == WB));
+  assign rs2_hit_rob = (rf_busy[rs2] && (rob_state[rf_reorder[rs2]] == WB));
   always_comb begin
-    iqu_if.alu_op  = alu_op[uop_head];
-    iqu_if.jen     = jen[uop_head];
-    iqu_if.ben     = ben[uop_head];
-    iqu_if.wen     = wen[uop_head];
-    iqu_if.ren     = ren[uop_head];
+    // Dispatch Send
+    iqu_exu_if.alu_op = uoq_alu_op[uoq_tail];
+    iqu_exu_if.jen = uoq_jen[uoq_tail];
+    iqu_exu_if.ben = uoq_ben[uoq_tail];
+    iqu_exu_if.wen = uoq_wen[uoq_tail];
+    iqu_exu_if.ren = uoq_ren[uoq_tail];
 
-    iqu_if.system  = system[uop_head];
-    iqu_if.ecall   = ecall[uop_head];
-    iqu_if.ebreak  = ebreak[uop_head];
-    iqu_if.mret    = mret[uop_head];
-    iqu_if.csr_csw = csr_csw[uop_head];
+    iqu_exu_if.system = uoq_system[uoq_tail];
+    iqu_exu_if.ecall = uoq_ecall[uoq_tail];
+    iqu_exu_if.ebreak = uoq_ebreak[uoq_tail];
+    iqu_exu_if.mret = uoq_mret[uoq_tail];
+    iqu_exu_if.csr_csw = uoq_csr_csw[uoq_tail];
 
-    iqu_if.rd      = rd[uop_head];
-    iqu_if.imm     = imm[uop_head];
-    iqu_if.op1     = rs1[uop_head] != 0 ? rdata1 : op1[uop_head];
-    iqu_if.op2     = rs2[uop_head] != 0 ? rdata2 : op2[uop_head];
-    iqu_if.rs1     = rs1[uop_head];
-    iqu_if.rs2     = rs2[uop_head];
+    iqu_exu_if.rd = uoq_rd[uoq_tail];
+    iqu_exu_if.imm = uoq_imm[uoq_tail];
+    iqu_exu_if.op1 = (rs1 != 0 ?
+      (rs1_hit_rob ? rob_value[rf_reorder[rs1]] : rdata1)
+      : uoq_op1[uoq_tail]);
+    iqu_exu_if.op2 = (rs2 != 0 ?
+      (rs2_hit_rob ? rob_value[rf_reorder[rs2]] : rdata2)
+      : uoq_op2[uoq_tail]);
+    iqu_exu_if.rs1 = (rs1 == 0 || rf_busy[rs1] == 0) ? 0 : rs1;
+    iqu_exu_if.rs2 = (rs2 == 0 || rf_busy[rs2] == 0) ? 0 : rs2;
 
-    iqu_if.inst    = inst[uop_head];
-    iqu_if.pc      = pc[uop_head];
+    iqu_exu_if.qj = (rs1 == 0 || rf_busy[rs1] == 0) ? 0 :
+      (rs1_hit_rob ? 0 : (rf_reorder[rs1] + 'h1));
+    iqu_exu_if.qk = (rs2 == 0 || rf_busy[rs2] == 0) ? 0 :
+      (rs2_hit_rob ? 0 : (rf_reorder[rs2] + 'h1));
+    iqu_exu_if.dest = {{1'h0}, {rob_tail}} + 'h1;
+
+    iqu_exu_if.inst = uoq_inst[uoq_tail];
+    iqu_exu_if.pc = uoq_pc[uoq_tail];
   end
+
+  logic [  $clog2(`YSYX_ROB_SIZE):0] dest;
+  logic [$clog2(`YSYX_ROB_SIZE)-1:0] wb_dest;
+  assign dest = (exu_iqu_if.dest - 'h1);
+  assign wb_dest = dest[$clog2(`YSYX_ROB_SIZE)-1:0];
+  always @(posedge clock) begin
+    if (reset || flush_pipeline) begin
+      rob_head <= 0;
+      rob_tail <= 0;
+      rob_busy <= 0;
+      for (int i = 0; i < ROB_SIZE; i++) begin
+        rob_state[i] <= CM;
+        rob_inst[i]  <= 0;
+      end
+      rf_busy <= 0;
+      flush_pipeline <= 0;
+    end else begin
+      if (dispatch_ready) begin
+        // Dispatch Recieve
+        rf_reorder[uoq_rd[uoq_tail]] <= rob_tail;
+        rf_busy[uoq_rd[uoq_tail]] <= 1;
+
+        rob_tail <= rob_tail + 1;
+        rob_busy[rob_tail] <= 1;
+        rob_inst[rob_tail] <= uoq_inst[uoq_tail];
+        rob_state[rob_tail] <= EX;
+        rob_rd[rob_tail] <= uoq_rd[uoq_tail];
+        rob_pc[rob_tail] <= uoq_pc[uoq_tail];
+        rob_pnpc[rob_tail] <= uoq_pnpc[uoq_tail];
+      end
+      if (rob_busy[rob_head] && rob_state[rob_head] == WB) begin
+        // Write result and commit
+        rob_head <= rob_head + 1;
+
+        rob_busy[rob_head] <= 0;
+        rob_inst[rob_head] <= 0;
+        rob_state[rob_head] <= CM;
+        if (rf_reorder[rob_rd[rob_head]] == rob_head) begin
+          if (dispatch_ready && (uoq_rd[uoq_tail] == rob_rd[rob_head])) begin
+          end else begin
+            rf_busy[rob_rd[rob_head]] <= 0;
+          end
+        end
+        if ((rob_pc_change[rob_head] || rob_pc_retire[rob_head]) &&
+            (rob_npc[rob_head] != rob_pnpc[rob_head])) begin
+          flush_pipeline <= 1;
+        end
+      end
+      if (exu_iqu_if.valid) begin
+        // Execute and get result
+        rob_state[wb_dest] <= WB;
+
+        rob_value[wb_dest] <= exu_iqu_if.result;
+        rob_npc[wb_dest] <= exu_iqu_if.npc;
+        rob_pc_change[wb_dest] <= exu_iqu_if.pc_change;
+        rob_pc_retire[wb_dest] <= exu_iqu_if.pc_retire;
+        rob_ebreak[wb_dest] <= exu_iqu_if.ebreak;
+
+        rob_csr_wen[wb_dest] <= exu_iqu_if.csr_wen;
+        rob_csr_wdata[wb_dest] <= exu_iqu_if.csr_wdata;
+        rob_csr_addr[wb_dest] <= exu_iqu_if.csr_addr;
+        rob_ecall[wb_dest] <= exu_iqu_if.ecall;
+        rob_mret[wb_dest] <= exu_iqu_if.mret;
+      end
+    end
+  end
+
+  assign iqu_wbu_if.rd = rob_rd[rob_head];
+  assign iqu_wbu_if.inst = rob_inst[rob_head];
+  assign iqu_wbu_if.pc = rob_pc[rob_head];
+  assign iqu_wbu_if.pnpc = rob_pnpc[rob_head];
+
+  assign iqu_wbu_if.result = rob_value[rob_head];
+  assign iqu_wbu_if.npc = rob_npc[rob_head];
+  assign iqu_wbu_if.pc_change = rob_pc_change[rob_head];
+  assign iqu_wbu_if.pc_retire = rob_pc_retire[rob_head];
+  assign iqu_wbu_if.ebreak = rob_ebreak[rob_head];
+  assign iqu_wbu_if.valid = rob_busy[rob_head] && rob_state[rob_head] == WB && !flush_pipeline;
+
+  assign iqu_exu_commit_if.pc = rob_pc[rob_head];
+  assign iqu_exu_commit_if.csr_wdata = rob_csr_wdata[rob_head];
+  assign iqu_exu_commit_if.csr_wen = rob_csr_wen[rob_head];
+  assign iqu_exu_commit_if.csr_addr = rob_csr_addr[rob_head];
+  assign iqu_exu_commit_if.ecall = rob_ecall[rob_head];
+  assign iqu_exu_commit_if.mret = rob_mret[rob_head];
+  assign iqu_exu_commit_if.valid = rob_busy[rob_head] &&
+    rob_state[rob_head] == WB && !flush_pipeline;
 endmodule

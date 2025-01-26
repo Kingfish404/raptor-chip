@@ -13,10 +13,11 @@ module ysyx_exu_csr #(
     input ecall,
     input mret,
 
-    input [ R_W-1:0] rwaddr,
+    input [ R_W-1:0] waddr,
     input [XLEN-1:0] wdata,
     input [XLEN-1:0] pc,
 
+    input  [ R_W-1:0] raddr,
     output [XLEN-1:0] out_rdata,
     output [XLEN-1:0] out_mtvec,
     output [XLEN-1:0] out_mepc,
@@ -34,20 +35,20 @@ module ysyx_exu_csr #(
   logic [XLEN-1:0] csr[5];
   logic [REG_W-1:0] waddr_reg0;
   assign waddr_reg0 = (
-    ({REG_W{rwaddr==`YSYX_CSR_MCAUSE_}}) & (MCAUSE) |
-    ({REG_W{rwaddr==`YSYX_CSR_MEPC___}}) & (MEPC) |
-    ({REG_W{rwaddr==`YSYX_CSR_MTVEC__}}) & (MTVEC) |
-    ({REG_W{rwaddr==`YSYX_CSR_MSTATUS}}) & (MSTATUS) |
+    ({REG_W{waddr==`YSYX_CSR_MCAUSE_}}) & (MCAUSE) |
+    ({REG_W{waddr==`YSYX_CSR_MEPC___}}) & (MEPC) |
+    ({REG_W{waddr==`YSYX_CSR_MTVEC__}}) & (MTVEC) |
+    ({REG_W{waddr==`YSYX_CSR_MSTATUS}}) & (MSTATUS) |
     (MNONE)
   );
 
   assign out_rdata = (
-    ({XLEN{rwaddr==`YSYX_CSR_MVENDORID}}) & ('h79737978) |
-    ({XLEN{rwaddr==`YSYX_CSR_MARCHID__}}) & ('h15fde77) |
-    ({XLEN{rwaddr==`YSYX_CSR_MSTATUS}}) & (csr[MSTATUS]) |
-    ({XLEN{rwaddr==`YSYX_CSR_MCAUSE_}}) & (csr[MCAUSE]) |
-    ({XLEN{rwaddr==`YSYX_CSR_MEPC___}}) & (csr[MEPC]) |
-    ({XLEN{rwaddr==`YSYX_CSR_MTVEC__}}) & (csr[MTVEC]) |
+    ({XLEN{raddr==`YSYX_CSR_MVENDORID}}) & ('h79737978) |
+    ({XLEN{raddr==`YSYX_CSR_MARCHID__}}) & ('h15fde77) |
+    ({XLEN{raddr==`YSYX_CSR_MSTATUS}}) & (csr[MSTATUS]) |
+    ({XLEN{raddr==`YSYX_CSR_MCAUSE_}}) & (csr[MCAUSE]) |
+    ({XLEN{raddr==`YSYX_CSR_MEPC___}}) & (csr[MEPC]) |
+    ({XLEN{raddr==`YSYX_CSR_MTVEC__}}) & (csr[MTVEC]) |
     (0)
   );
 

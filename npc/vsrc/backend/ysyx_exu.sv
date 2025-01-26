@@ -6,11 +6,11 @@ module ysyx_exu #(
 ) (
     input clock,
 
-    // from idu
+    // <= idu
     idu_pipe_if.in idu_if,
     input flush_pipeline,
 
-    // for lsu
+    // => lsu
     output logic out_ren,
     output logic out_wen,
     output logic [XLEN-1:0] out_rwaddr,
@@ -18,23 +18,17 @@ module ysyx_exu #(
     output [4:0] out_alu_op,
     output [XLEN-1:0] out_lsu_mem_wdata,
 
-    // from lsu
+    // <= lsu
     input [XLEN-1:0] lsu_rdata,
     input lsu_exu_rvalid,
     input lsu_exu_wready,
 
-    output logic [31:0] out_inst,
-    output [XLEN-1:0] out_pc,
-
-    output [XLEN-1:0] out_reg_wdata,
+    // => iqu & (wbu)
+    exu_pipe_if.out exu_iqu_if,
     output out_load_retire,
 
-    output [XLEN-1:0] out_npc_wdata,
-    output out_branch_change,
-    output out_branch_retire,
-
-    output logic out_ebreak,
-    output logic [`YSYX_REG_LEN-1:0] out_rd,
+    // <= iqu (commit)
+    exu_pipe_if.in iqu_exu_commit_if,
 
     input prev_valid,
     input next_ready,
@@ -43,172 +37,324 @@ module ysyx_exu #(
 
     input reset
 );
+  parameter unsigned RS_SIZE = `YSYX_RS_SIZE;
+  parameter unsigned ROB_SIZE = `YSYX_ROB_SIZE;
+  parameter unsigned REG_LEN = `YSYX_REG_LEN;
+
   logic [XLEN-1:0] reg_wdata, reg_wdata_mul, mepc, mtvec;
+  logic [XLEN-1:0] npc_wdata;
   logic [XLEN-1:0] imm_exu, pc_exu, op1, op2, addr_exu;
-  logic [XLEN-1:0] mem_wdata = op2;
+  logic [XLEN-1:0] mem_wdata;
   logic [  12-1:0] csr_addr0;
   logic [XLEN-1:0] csr_wdata, csr_rdata;
-  logic is_mul;
   logic [XLEN-1:0] inst_exu;
-  logic [`YSYX_REG_LEN-1:0] rd;
 
-  logic [4:0] alu_op_exu;
   logic jen, ben, wen, ren;
   logic ecall, ebreak, mret;
-  logic [2:0] csr_csw_exu;
 
   logic [XLEN-1:0] mem_rdata;
-  logic branch_change, system_exu;
+  logic branch_change, branch_retire, system_exu;
 
-  logic alu_valid, mul_valid, lsu_avalid;
-  logic lsu_valid;
+  logic mul_valid, lsu_avalid;
   logic ready;
   logic valid;
 
-  ysyx_exu_csr csrs (
-      .clock(clock),
-      .reset(reset),
+  // === Revervation Station (RS) ===
+  logic [RS_SIZE-1:0] rs_busy;
+  logic [4:0] rs_alu_op[RS_SIZE];
+  logic [XLEN-1:0] rs_vj[RS_SIZE];
+  logic [XLEN-1:0] rs_vk[RS_SIZE];
+  logic [$clog2(`YSYX_ROB_SIZE):0] rs_qj[RS_SIZE];
+  logic [$clog2(`YSYX_ROB_SIZE):0] rs_qk[RS_SIZE];
+  logic [$clog2(`YSYX_ROB_SIZE):0] rs_dest[RS_SIZE];
+  logic [XLEN-1:0] rs_a[RS_SIZE];
 
-      .wen(|csr_csw_exu),
-      .exu_valid(valid),
-      .ecall(ecall),
-      .mret(mret),
+  logic [RS_SIZE-1:0] rs_mul_valid;
+  logic [XLEN-1:0] rs_mul_a[RS_SIZE];
 
-      .rwaddr(csr_addr0),
-      .wdata(csr_wdata),
-      .pc(pc_exu),
+  logic [RS_SIZE-1:0] rs_wen;
+  logic [RS_SIZE-1:0] rs_ren;
+  logic [RS_SIZE-1:0] rs_ren_ready;
+  logic [XLEN-1:0] rs_ren_data[RS_SIZE];
+  logic [RS_SIZE-1:0] rs_jen;
+  logic [RS_SIZE-1:0] rs_branch_change;
+  logic [RS_SIZE-1:0] rs_branch_retire;
+  logic [RS_SIZE-1:0] rs_branch;
+  logic [RS_SIZE-1:0] rs_jump;
+  logic [XLEN-1:0] rs_imm[RS_SIZE];
+  logic [XLEN-1:0] rs_pc[RS_SIZE];
+  logic [32-1:0] rs_inst[RS_SIZE];
 
-      .out_rdata(csr_rdata),
-      .out_mepc (mepc),
-      .out_mtvec(mtvec)
-  );
+  logic [RS_SIZE-1:0] rs_system;
+  logic [RS_SIZE-1:0] rs_ecall;
+  logic [RS_SIZE-1:0] rs_ebreak;
+  logic [RS_SIZE-1:0] rs_mret;
+  logic [2:0] rs_csr_csw[RS_SIZE];
+  logic [`YSYX_REG_LEN-1:0] rs_rd[RS_SIZE];
+  // === Revervation Station (RS) ===
+  logic rs_ready;
 
-  assign is_mul = (alu_op_exu[4:4] == 1);
-  assign out_reg_wdata = {XLEN{(rd != 0)}} & (
-    (system_exu) ? csr_rdata :
-    (ren) ? mem_rdata :
-    (jen) ? (pc_exu + 4) :
-    (is_mul) ? reg_wdata_mul: reg_wdata);
+  logic [$clog2(RS_SIZE)-1:0] lowest_free_index;
+  logic [$clog2(RS_SIZE)-1:0] lowest_busy_index;
+  logic [$clog2(RS_SIZE)-1:0] mul_rs_index;
+  logic [$clog2(RS_SIZE)-1:0] store_rs_index;
+  logic [$clog2(RS_SIZE)-1:0] load_rs_index;
+  logic free_found, busy_found, mul_found, store_found, load_found;
+
+  always_comb begin
+    lowest_free_index = 0;
+    lowest_busy_index = 0;
+    mul_rs_index = 0;
+    store_rs_index = 0;
+    load_rs_index = 0;
+    free_found = 0;
+    busy_found = 0;
+    mul_found = 0;
+    store_found = 0;
+    load_found = 0;
+    for (integer i = 0; i < RS_SIZE; i++) begin
+      if (rs_busy[i] == 0 && !free_found) begin
+        lowest_free_index = i[$clog2(RS_SIZE)-1:0];
+        free_found = 1;
+      end
+    end
+    for (integer i = 0; i < RS_SIZE; i++) begin
+      if ((rs_busy[i] == 1 && !busy_found) &&
+          (rs_alu_op[lowest_busy_index][4:4] == 0 || mul_valid)
+         ) begin
+        lowest_busy_index = i[$clog2(RS_SIZE)-1:0];
+        busy_found = 1;
+      end
+    end
+    for (integer i = 0; i < RS_SIZE; i++) begin
+      if (rs_busy[i] == 1 && rs_alu_op[i][4:4] == 1 && !mul_found) begin
+        mul_rs_index = i[$clog2(RS_SIZE)-1:0];
+        mul_found = 1;
+      end
+    end
+    for (integer i = 0; i < RS_SIZE; i++) begin
+      if (rs_busy[i] == 1 && rs_wen[i] == 1 && !store_found) begin
+        store_rs_index = i[$clog2(RS_SIZE)-1:0];
+        store_found = 1;
+      end
+    end
+    for (integer i = 0; i < RS_SIZE; i++) begin
+      if (rs_busy[i] == 1 && rs_ren[i] == 1 && !load_found) begin
+        load_rs_index = i[$clog2(RS_SIZE)-1:0];
+        load_found = 1;
+      end
+    end
+  end
+
   assign csr_addr0 = (imm_exu[11:0]);
-  assign out_alu_op = alu_op_exu;
-  assign out_branch_change = branch_change;
-  assign out_pc = pc_exu;
-  assign out_inst = inst_exu;
-  assign out_rwaddr = op1 + imm_exu;
-  assign out_ren = ren, out_wen = wen, out_ebreak = ebreak;
-  assign out_rd = rd;
 
-  assign addr_exu = (jen ? op1 : pc_exu) + imm_exu;
+  assign out_alu_op = (load_found) ? rs_alu_op[load_rs_index] :
+    (store_found) ? rs_alu_op[store_rs_index] : 0;
+  assign out_ren = (load_found) && (rs_qj[load_rs_index] == 0 && rs_qk[load_rs_index] == 0);
+  assign out_wen = (store_found) && (rs_qj[store_rs_index] == 0 && rs_qk[store_rs_index] == 0);
+  assign out_rwaddr = (load_found) ? rs_vj[load_rs_index] + rs_imm[load_rs_index] :
+    (store_found) ? rs_vj[store_rs_index] + rs_imm[store_rs_index] : 0;
+  assign lsu_avalid = out_ren || out_wen;
+  assign out_lsu_avalid = lsu_avalid;
+  assign out_lsu_mem_wdata = rs_vk[store_rs_index];
 
-  assign valid = (wen || ren) ? lsu_valid : (is_mul ? mul_valid : alu_valid);
+  assign valid = exu_iqu_if.valid;
   assign out_valid = valid;
-  assign out_ready = ready && next_ready;
+  assign rs_ready = !&rs_busy && !|rs_wen && !|rs_ren && !(mul_found && idu_if.alu_op[4:4]);
+  assign out_ready = rs_ready;
   always @(posedge clock) begin
     if (reset || flush_pipeline) begin
-      alu_valid <= 0;
-      lsu_avalid <= 0;
-      lsu_valid <= 0;
-      alu_op_exu <= 0;
-      ready <= 1;
+      rs_ren  <= 0;
+      rs_wen  <= 0;
+      rs_busy <= 0;
+      ready   <= 1;
     end else begin
-      if (prev_valid && ready) begin
-        pc_exu <= idu_if.pc;
-        inst_exu <= idu_if.inst;
+      if (prev_valid && rs_ready) begin
+        rs_busy[lowest_free_index] <= 1;
+        rs_alu_op[lowest_free_index] <= idu_if.alu_op;
+        rs_vj[lowest_free_index] <= (exu_iqu_if.valid && exu_iqu_if.dest == idu_if.qj) ?
+          exu_iqu_if.result : idu_if.op1;
+        rs_vk[lowest_free_index] <= (exu_iqu_if.valid && exu_iqu_if.dest == idu_if.qk) ?
+          exu_iqu_if.result : idu_if.op2;
+        rs_qj[lowest_free_index] <= (exu_iqu_if.valid && exu_iqu_if.dest == idu_if.qj) ?
+          0 : idu_if.qj;
+        rs_qk[lowest_free_index] <= (exu_iqu_if.valid && exu_iqu_if.dest == idu_if.qk) ?
+          0 : idu_if.qk;
+        rs_dest[lowest_free_index] <= idu_if.dest;
 
-        imm_exu <= idu_if.imm;
-        op1 <= idu_if.op1;
-        op2 <= idu_if.op2;
-        alu_op_exu <= idu_if.alu_op;
+        rs_wen[lowest_free_index] <= idu_if.wen;
+        rs_ren[lowest_free_index] <= idu_if.ren;
+        rs_jen[lowest_free_index] <= idu_if.jen;
+        rs_branch_retire[lowest_free_index] <= (idu_if.system || idu_if.ben || idu_if.ren);
+        rs_branch_change[lowest_free_index] <= (idu_if.jen || idu_if.ecall || idu_if.mret);
+        rs_branch[lowest_free_index] <= (idu_if.ben);
+        rs_jump[lowest_free_index] <= (idu_if.jen);
+        rs_imm[lowest_free_index] <= idu_if.imm;
+        rs_pc[lowest_free_index] <= idu_if.pc;
+        rs_inst[lowest_free_index] <= idu_if.inst;
 
-        rd <= idu_if.rd;
-        ren <= idu_if.ren;
-        wen <= idu_if.wen;
-        jen <= idu_if.jen;
-        ben <= idu_if.ben;
+        rs_system[lowest_free_index] <= idu_if.system;
+        rs_ecall[lowest_free_index] <= idu_if.ecall;
+        rs_ebreak[lowest_free_index] <= idu_if.ebreak;
+        rs_mret[lowest_free_index] <= idu_if.mret;
+        rs_rd[lowest_free_index] <= idu_if.rd;
+        rs_csr_csw[lowest_free_index] <= idu_if.csr_csw;
+      end
+    end
+  end
 
-        system_exu <= idu_if.system;
-        ecall <= idu_if.ecall;
-        ebreak <= idu_if.ebreak;
-        mret <= idu_if.mret;
-        csr_csw_exu <= idu_if.csr_csw;
+  // branch
+  assign out_load_retire = lsu_exu_rvalid;
 
-        if (idu_if.wen || idu_if.ren) begin
-          lsu_avalid <= 1;
-          ready <= 0;
-        end
-        if (idu_if.alu_op[4:4] == 1) begin
-          ready <= 0;
-        end
-      end
-      if (is_mul) begin
-        alu_valid <= 0;
-        if (mul_valid) begin
-          ready <= 1;
-          alu_op_exu <= 0;
-        end
-      end else begin
-        alu_valid <= 1;
-      end
-      if (next_ready == 1) begin
-        lsu_valid <= 0;
-        if (prev_valid == 0) begin
-          alu_valid <= 0;
-        end
-      end
-      if (wen) begin
-        if (lsu_exu_wready) begin
-          lsu_valid <= 1;
-          lsu_avalid <= 0;
-          ready <= 1;
-        end
-      end
-      if (ren) begin
-        if (lsu_exu_rvalid) begin
-          lsu_valid <= 1;
-          lsu_avalid <= 0;
-          mem_rdata <= lsu_rdata;
-          ready <= 1;
+  // ALU for each RS
+  genvar g;
+  generate
+    for (g = 0; g < RS_SIZE; g = g + 1) begin : gen_alu
+      ysyx_exu_alu gen_alu (
+          .s1(rs_vj[g]),
+          .s2(rs_vk[g]),
+          .op(rs_alu_op[g]),
+          .out_r(rs_a[g])
+      );
+    end
+  endgenerate
+  logic muling = 0;
+  always @(posedge clock) begin
+    if (reset || flush_pipeline) begin
+      rs_busy <= 0;
+      muling  <= 0;
+    end else begin
+      for (integer i = 0; i < RS_SIZE; i++) begin
+        if (rs_busy[i] == 1 && rs_qj[i] == 0 && rs_qk[i] == 0) begin
+          if (lsu_exu_wready && rs_wen[i]) begin
+            rs_wen[i] <= 0;
+          end
+          if (lsu_exu_rvalid && rs_ren[i]) begin
+            rs_ren_ready[i] <= 1;
+            rs_ren_data[i]  <= lsu_rdata;
+          end
+          if (rs_alu_op[i][4:4] == 1) begin
+            if (rs_mul_valid[i] == 0 && muling == 0) begin
+              muling <= 1;
+            end
+            if (muling == 1 && mul_valid) begin
+              rs_mul_valid[i] <= 1;
+              muling <= 0;
+              rs_mul_a[i] <= reg_wdata_mul;
+            end
+          end
+          if (
+            (rs_alu_op[i][4:4] == 0 || rs_mul_valid[i]) &&
+            (!rs_wen[i]) && (!rs_ren[i] || rs_ren_ready[i])) begin
+            if (lowest_busy_index == i[$clog2(RS_SIZE)-1:0]) begin
+              // write back
+              rs_busy[i] <= 0;
+              rs_alu_op[i] <= 0;
+              rs_inst[i] <= 0;
+              rs_ren[i] <= 0;
+              rs_ren_ready[i] <= 0;
+              rs_mul_valid[i] <= 0;
+            end
+            for (integer j = 0; j < RS_SIZE; j++) begin
+              if (rs_busy[j] && rs_qj[j] == rs_dest[i] && j != i) begin
+                rs_vj[j] <= rs_alu_op[i][4:4] == 1 ? reg_wdata_mul : rs_a[i];
+                rs_qj[j] <= 0;
+              end
+              if (rs_busy[j] && rs_qk[j] == (rs_dest[i]) && j != i) begin
+                rs_vk[j] <= rs_alu_op[i][4:4] == 1 ? reg_wdata_mul : rs_a[i];
+                rs_qk[j] <= 0;
+              end
+            end
+          end
         end
       end
     end
   end
 
-  assign out_lsu_avalid = lsu_avalid;
-  assign out_lsu_mem_wdata = mem_wdata;
+  assign reg_wdata = (
+    rs_alu_op[lowest_busy_index][4:4] == 0 ?
+    (
+      rs_system[lowest_busy_index] ? csr_rdata :
+      rs_ren_ready[lowest_busy_index] ? rs_ren_data[lowest_busy_index] :
+      rs_jen[lowest_busy_index] ? rs_pc[lowest_busy_index] + 4 :
+      rs_a[lowest_busy_index]
+    ) :
+    rs_mul_a[lowest_busy_index]
+    );
+  assign exu_iqu_if.dest = rs_dest[lowest_busy_index];
+  assign exu_iqu_if.result = reg_wdata;
 
-  // alu for I Extension
-  ysyx_exu_alu alu (
-      .s1(op1),
-      .s2(op2),
-      .op(alu_op_exu),
-      .out_r(reg_wdata)
-  );
+  assign addr_exu = (rs_jump[lowest_busy_index] ? rs_vj[lowest_busy_index] :
+     rs_pc[lowest_busy_index]) + rs_imm[lowest_busy_index];
+  assign exu_iqu_if.npc = (
+    (rs_ecall[lowest_busy_index]) ? mtvec :
+    (rs_mret[lowest_busy_index]) ? mepc :
+    ((rs_branch_change[lowest_busy_index]) ||
+    (rs_branch[lowest_busy_index] && |rs_a[lowest_busy_index])) ? addr_exu :
+    (rs_pc[lowest_busy_index] + 4));
+  assign exu_iqu_if.pc_change = (
+    (rs_branch_change[lowest_busy_index]) ||
+    (rs_branch[lowest_busy_index] && |rs_a[lowest_busy_index]));
+  assign exu_iqu_if.pc_retire = rs_branch_retire[lowest_busy_index];
+  assign exu_iqu_if.ebreak = rs_ebreak[lowest_busy_index];
+  assign exu_iqu_if.pc = rs_pc[lowest_busy_index];
+  assign exu_iqu_if.inst = rs_inst[lowest_busy_index];
+
+  assign exu_iqu_if.csr_wen = |rs_csr_csw[lowest_busy_index];
+  assign exu_iqu_if.csr_wdata = csr_wdata;
+  assign exu_iqu_if.csr_addr = rs_imm[lowest_busy_index][11:0];
+  assign exu_iqu_if.ecall = rs_ecall[lowest_busy_index];
+  assign exu_iqu_if.mret = rs_mret[lowest_busy_index];
+
+  assign exu_iqu_if.valid = (rs_alu_op[lowest_busy_index][4:4] == 0)
+    ? (rs_busy[lowest_busy_index] &&
+       (rs_qj[lowest_busy_index] == 0 && rs_qk[lowest_busy_index] == 0))
+       &&
+      (rs_wen[lowest_busy_index] == 0)
+       &&
+      (rs_ren[lowest_busy_index] == 0 || rs_ren_ready[lowest_busy_index])
+    : rs_mul_valid[lowest_busy_index];
 
 `ifdef YSYX_M_EXTENSION
   // alu for M Extension
   ysyx_exu_mul mul (
       .clock(clock),
-      .in_a(idu_if.op1),
-      .in_b(idu_if.op2),
-      .in_op(idu_if.alu_op),
-      .in_valid(prev_valid && ready),
+      .in_a(rs_vj[mul_rs_index]),
+      .in_b(rs_vk[mul_rs_index]),
+      .in_op(rs_alu_op[mul_rs_index]),
+      .in_valid(mul_found && !muling &&
+         rs_mul_valid[mul_rs_index] == 0 &&
+         rs_qj[mul_rs_index] == 0 && rs_qk[mul_rs_index] == 0),
       .out_r(reg_wdata_mul),
       .out_valid(mul_valid)
   );
 `endif
 
-  // csr
-  assign csr_wdata = (
-    ({XLEN{csr_csw_exu[0]}} & op1) |
-    ({XLEN{csr_csw_exu[1]}} & (csr_rdata | op1)) |
-    ({XLEN{csr_csw_exu[2]}} & (csr_rdata & ~op1)) |
-    (0)
+  // Zicsr
+  ysyx_exu_csr csrs (
+      .clock(clock),
+      .reset(reset),
+
+      .wen(iqu_exu_commit_if.csr_wen),
+      .exu_valid(iqu_exu_commit_if.valid),
+      .ecall(iqu_exu_commit_if.ecall),
+      .mret(iqu_exu_commit_if.mret),
+
+      .waddr(iqu_exu_commit_if.csr_addr),
+      .wdata(iqu_exu_commit_if.csr_wdata),
+      .pc(iqu_exu_commit_if.pc),
+
+      .raddr(rs_imm[lowest_busy_index][11:0]),
+      .out_rdata(csr_rdata),
+      .out_mepc(mepc),
+      .out_mtvec(mtvec)
   );
 
-  // branch
-  assign out_branch_retire = ((system_exu) || (ben) || (ren));
-  assign out_load_retire = (ren) && valid;
-  assign branch_change = (ben && |reg_wdata) || (jen || ecall || mret);
-  assign out_npc_wdata = (ecall) ? mtvec : (mret) ? mepc : (branch_change ? addr_exu : pc_exu + 4);
-
+  // csr
+  assign csr_wdata = (
+    ({XLEN{rs_csr_csw[lowest_busy_index][0]}} & rs_vj[lowest_busy_index]) |
+    ({XLEN{rs_csr_csw[lowest_busy_index][1]}} & (csr_rdata | rs_vj[lowest_busy_index])) |
+    ({XLEN{rs_csr_csw[lowest_busy_index][2]}} & (csr_rdata & ~rs_vj[lowest_busy_index])) |
+    (0)
+  );
 endmodule

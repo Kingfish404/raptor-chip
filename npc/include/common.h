@@ -13,7 +13,7 @@ typedef uint32_t word_t;
 typedef word_t paddr_t;
 typedef word_t vaddr_t;
 
-#define GPR_SIZE 16
+#define GPR_SIZE 32
 
 #define MBASE 0x80000000
 #define MSIZE 0x08000000

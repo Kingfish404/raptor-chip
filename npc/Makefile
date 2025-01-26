@@ -34,7 +34,7 @@ VERILATOR_FLAG =--prof-c --prof-cfuncs --prof-exec \
 	--autoflush --timescale "1ns/1ns" --no-timing # -Wall -Wno-DECLFILENAME -Wno-UNUSED
 CXXFLAGS = -Wall -Werror \
 	-Wno-bool-operation -Wno-implicit-fallthrough -Wno-macro-redefined \
-	-Wno-unused-variable \
+	-Wno-parentheses-equality -Wno-unused-variable \
 	$(call remove_quote,$(CONFIG_CC_OPT))
 LDFLAGS = -lreadline -ldl
 
@@ -106,6 +106,13 @@ YOSYS_OPENSTA = $(YSYX_HOME)/yosys-opensta
 YOSYS_OPENSTA:
 	git clone https://github.com/Kingfish404/yosys-opensta $(YSYX_HOME)/yosys-opensta
 	make -C $(YSYX_HOME)/yosys-opensta init init_opensta
+
+build_packed:
+	mkdir -p $(YSYX_HOME)/npc/build/packed
+	cp -r $(VSRCS) $(YSYX_HOME)/npc/build/packed
+	cp -r $(abspath ./vsrc/include)/*.svh \
+		  $(abspath ./vsrc/include/dpic_mock)/*.svh \
+		  $(abspath ./vsrc/include/npc)/*.svh $(YSYX_HOME)/npc/build/packed
 
 sta:
 	echo $(MAKECMDGOALS)
