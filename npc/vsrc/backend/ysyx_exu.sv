@@ -9,7 +9,6 @@ module ysyx_exu #(
     // <= idu
     idu_pipe_if.in idu_if,
     input flush_pipeline,
-
     // => lsu
     output logic out_ren,
     output logic out_wen,
@@ -17,16 +16,13 @@ module ysyx_exu #(
     output out_lsu_avalid,
     output [4:0] out_alu_op,
     output [XLEN-1:0] out_lsu_mem_wdata,
-
     // <= lsu
     input [XLEN-1:0] lsu_rdata,
     input lsu_exu_rvalid,
     input lsu_exu_wready,
-
     // => iqu & (wbu)
     exu_pipe_if.out exu_iqu_if,
     output out_load_retire,
-
     // <= iqu (commit)
     exu_pipe_if.in iqu_exu_commit_if,
 
@@ -39,21 +35,10 @@ module ysyx_exu #(
 );
   parameter unsigned RS_SIZE = `YSYX_RS_SIZE;
   parameter unsigned ROB_SIZE = `YSYX_ROB_SIZE;
-  parameter unsigned REG_LEN = `YSYX_REG_LEN;
 
   logic [XLEN-1:0] reg_wdata, reg_wdata_mul, mepc, mtvec;
-  logic [XLEN-1:0] npc_wdata;
-  logic [XLEN-1:0] imm_exu, pc_exu, op1, op2, addr_exu;
-  logic [XLEN-1:0] mem_wdata;
-  logic [  12-1:0] csr_addr0;
+  logic [XLEN-1:0] addr_exu;
   logic [XLEN-1:0] csr_wdata, csr_rdata;
-  logic [XLEN-1:0] inst_exu;
-
-  logic jen, ben, wen, ren;
-  logic ecall, ebreak, mret;
-
-  logic [XLEN-1:0] mem_rdata;
-  logic branch_change, branch_retire, system_exu;
 
   logic mul_valid, lsu_avalid;
   logic ready;
@@ -64,9 +49,9 @@ module ysyx_exu #(
   logic [4:0] rs_alu_op[RS_SIZE];
   logic [XLEN-1:0] rs_vj[RS_SIZE];
   logic [XLEN-1:0] rs_vk[RS_SIZE];
-  logic [$clog2(`YSYX_ROB_SIZE):0] rs_qj[RS_SIZE];
-  logic [$clog2(`YSYX_ROB_SIZE):0] rs_qk[RS_SIZE];
-  logic [$clog2(`YSYX_ROB_SIZE):0] rs_dest[RS_SIZE];
+  logic [$clog2(ROB_SIZE):0] rs_qj[RS_SIZE];
+  logic [$clog2(ROB_SIZE):0] rs_qk[RS_SIZE];
+  logic [$clog2(ROB_SIZE):0] rs_dest[RS_SIZE];
   logic [XLEN-1:0] rs_a[RS_SIZE];
 
   logic [RS_SIZE-1:0] rs_mul_valid;
@@ -90,7 +75,6 @@ module ysyx_exu #(
   logic [RS_SIZE-1:0] rs_ebreak;
   logic [RS_SIZE-1:0] rs_mret;
   logic [2:0] rs_csr_csw[RS_SIZE];
-  logic [`YSYX_REG_LEN-1:0] rs_rd[RS_SIZE];
   // === Revervation Station (RS) ===
   logic rs_ready;
 
@@ -146,8 +130,6 @@ module ysyx_exu #(
     end
   end
 
-  assign csr_addr0 = (imm_exu[11:0]);
-
   assign out_alu_op = (load_found) ? rs_alu_op[load_rs_index] :
     (store_found) ? rs_alu_op[store_rs_index] : 0;
   assign out_ren = (load_found) && (rs_qj[load_rs_index] == 0 && rs_qk[load_rs_index] == 0);
@@ -161,13 +143,13 @@ module ysyx_exu #(
   assign valid = exu_iqu_if.valid;
   assign out_valid = valid;
   assign rs_ready = !&rs_busy && !|rs_wen && !|rs_ren && !(mul_found && idu_if.alu_op[4:4]);
-  assign out_ready = rs_ready;
+  assign ready = rs_ready;
+  assign out_ready = ready;
   always @(posedge clock) begin
     if (reset || flush_pipeline) begin
       rs_ren  <= 0;
       rs_wen  <= 0;
       rs_busy <= 0;
-      ready   <= 1;
     end else begin
       if (prev_valid && rs_ready) begin
         rs_busy[lowest_free_index] <= 1;
@@ -197,13 +179,11 @@ module ysyx_exu #(
         rs_ecall[lowest_free_index] <= idu_if.ecall;
         rs_ebreak[lowest_free_index] <= idu_if.ebreak;
         rs_mret[lowest_free_index] <= idu_if.mret;
-        rs_rd[lowest_free_index] <= idu_if.rd;
         rs_csr_csw[lowest_free_index] <= idu_if.csr_csw;
       end
     end
   end
 
-  // branch
   assign out_load_retire = lsu_exu_rvalid;
 
   // ALU for each RS
@@ -247,7 +227,7 @@ module ysyx_exu #(
             (rs_alu_op[i][4:4] == 0 || rs_mul_valid[i]) &&
             (!rs_wen[i]) && (!rs_ren[i] || rs_ren_ready[i])) begin
             if (lowest_busy_index == i[$clog2(RS_SIZE)-1:0]) begin
-              // write back
+              // Write back
               rs_busy[i] <= 0;
               rs_alu_op[i] <= 0;
               rs_inst[i] <= 0;
@@ -284,6 +264,7 @@ module ysyx_exu #(
   assign exu_iqu_if.dest = rs_dest[lowest_busy_index];
   assign exu_iqu_if.result = reg_wdata;
 
+  // Branch
   assign addr_exu = (rs_jump[lowest_busy_index] ? rs_vj[lowest_busy_index] :
      rs_pc[lowest_busy_index]) + rs_imm[lowest_busy_index];
   assign exu_iqu_if.npc = (
@@ -297,6 +278,7 @@ module ysyx_exu #(
     (rs_branch[lowest_busy_index] && |rs_a[lowest_busy_index]));
   assign exu_iqu_if.pc_retire = rs_branch_retire[lowest_busy_index];
   assign exu_iqu_if.ebreak = rs_ebreak[lowest_busy_index];
+
   assign exu_iqu_if.pc = rs_pc[lowest_busy_index];
   assign exu_iqu_if.inst = rs_inst[lowest_busy_index];
 

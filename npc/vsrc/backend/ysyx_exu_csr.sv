@@ -71,7 +71,7 @@ module ysyx_exu_csr #(
       if (ecall) begin
         csr[MCAUSE] <= priv_mode == `YSYX_PRIV_M ? 'hb : priv_mode == `YSYX_PRIV_S ? 'h9 : 'h8;
         csr[MSTATUS][`YSYX_CSR_MSTATUS_MPP_] <= priv_mode;
-        csr[MSTATUS][`YSYX_CSR_MSTATUS_MPIE] <= csr[MSTATUS][`YSYX_CSR_MSTATUS_MIE_];
+        csr[MSTATUS][`YSYX_CSR_MSTATUS_MPIE] <= mstatus_mie;
         csr[MSTATUS][`YSYX_CSR_MSTATUS_MIE_] <= 1'b0;
         csr[MEPC] <= pc;
       end

@@ -11,12 +11,13 @@ depth 8
 smtbmc
 
 [script]
-read -formal Bus.sv ysyx_bus.sv
+read -formal formal_bus.sv ysyx_bus.sv ysyx_clint.sv
 prep -top formal_bus
 
 [files]
-Bus.sv
+formal_bus.sv
 ysyx_bus.sv ./../vsrc/ysyx_bus.sv
+ysyx_clint.sv ./../vsrc/ysyx_clint.sv
 ysyx.svh ./../vsrc/include/ysyx.svh
-ysyx_dpi_c.svh ./../vsrc/include/ysyx_dpi_c.svh.mock
+ysyx_dpi_c.svh ./../vsrc/include/dpic_mock/ysyx_dpi_c.svh
 ysyx_soc.svh ./../vsrc/include/ysyxsoc/ysyx_soc.svh

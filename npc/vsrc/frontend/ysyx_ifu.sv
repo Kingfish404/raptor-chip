@@ -6,11 +6,11 @@ module ysyx_ifu #(
 ) (
     input clock,
 
-    input [XLEN-1:0] npc,
+    input load_retire,
 
+    input [XLEN-1:0] npc,
     input pc_change,
     input pc_retire,
-    input load_retire,
 
     output [XLEN-1:0] out_inst,
     output [XLEN-1:0] out_pc,
@@ -22,7 +22,7 @@ module ysyx_ifu #(
     input bus_ifu_ready,
     output [XLEN-1:0] out_ifu_araddr,
     output out_ifu_arvalid,
-    output out_ifu_required,
+    output out_ifu_lock,
     input [XLEN-1:0] ifu_rdata,
     input ifu_rvalid,
 
@@ -38,14 +38,12 @@ module ysyx_ifu #(
   logic ifu_lsu_hazard = 0, ifu_branch_hazard = 0;
 
   logic [XLEN-1:0] btb, btb_jal;
-  logic [XLEN-1:0] ifu_speculation;
-  logic speculation, bad_speculation, ifu_b_speculation;
+  logic speculation, ifu_b_speculation;
 
   logic ifu_hazard;
   logic [6:0] opcode;
   logic is_jalr, is_jal, is_b_type, is_branch, is_load, is_store, is_fencei, is_sys;
   logic valid;
-  logic good_speculationing, bad_speculationing;
 
   logic invalid_l1i;
   logic l1i_valid;
@@ -101,15 +99,11 @@ module ysyx_ifu #(
         if (ifu_branch_hazard) begin
           pc_ifu <= npc;
         end
-      end
-      if (!speculation) begin
-        if (ifu_lsu_hazard && load_retire && l1i_ready) begin
-          ifu_lsu_hazard <= 0;
-          pc_ifu <= pc_ifu + 4;
-        end
+      end else if (ifu_lsu_hazard && load_retire && l1i_ready) begin
+        ifu_lsu_hazard <= 0;
+        pc_ifu <= pc_ifu + 4;
       end
       if (next_ready && valid) begin
-        `ASSERT(out_inst != 'h0, "inst != 0");
         if (!is_branch && !is_load && !is_sys) begin
           pc_ifu <= pc_ifu + 4;
         end else begin
@@ -143,19 +137,19 @@ module ysyx_ifu #(
       .clock(clock),
 
       .pc_ifu(pc_ifu),
-      .ifu_rvalid(ifu_rvalid),
-      .ifu_rdata(ifu_rdata),
+      .out_inst(l1_inst),
+      .l1i_valid(l1i_valid),
+      .l1i_ready(l1i_ready),
       .invalid_l1i(invalid_l1i),
       .flush_pipeline(flush_pipeline),
 
+      // <=> bus
       .bus_ifu_ready(bus_ifu_ready),
+      .out_ifu_lock(out_ifu_lock),
       .out_ifu_araddr(out_ifu_araddr),
       .out_ifu_arvalid(out_ifu_arvalid),
-      .out_ifu_required(out_ifu_required),
-
-      .out_inst (l1_inst),
-      .l1i_valid(l1i_valid),
-      .l1i_ready(l1i_ready),
+      .ifu_rdata(ifu_rdata),
+      .ifu_rvalid(ifu_rvalid),
 
       .reset(reset)
   );

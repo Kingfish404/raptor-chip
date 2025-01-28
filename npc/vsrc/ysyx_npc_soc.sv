@@ -4,6 +4,8 @@
 
 // verilator lint_off UNDRIVEN
 // verilator lint_off PINCONNECTEMPTY
+// verilator lint_off DECLFILENAME
+// verilator lint_off UNUSEDSIGNAL
 module ysyxSoC (
     input clock,
     input reset
@@ -288,3 +290,5 @@ endmodule
 
 // verilator lint_on PINCONNECTEMPTY
 // verilator lint_on UNDRIVEN
+// verilator lint_on DECLFILENAME
+// verilator lint_on UNUSEDSIGNAL

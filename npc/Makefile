@@ -128,6 +128,9 @@ sta_local:
 	RTL_FILES="$(VSRCS)" \
 	VERILOG_INCLUDE_DIRS="$(INC_PATH)"
 
+lint:
+	$(VERILATOR) --lint-only -Wall $(VSRCS) $(INCFLAGS) --top-module $(VTARGET)
+
 test:
 	echo $(CXXFLAGS)
 

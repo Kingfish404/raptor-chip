@@ -10,17 +10,21 @@
 
 /**
  * Microarchitecture (uarch)
+ * See ./../ysyx.sv for the pipeline stages.
        +-----+                          +-----+
      ,-| BPU |          |#(IQU_SIZE)  ,-| MUL #(YSYX_M_FAST)
-     | +-----+          |             | +--+--+
-  +--|--+    +-----+    +-----+    +--|--+    +-----+
-  | IFU +----> IDU +----> IQU +----> EXU +----> WBU |
-  +^-|--+    +-----+    +-----+    +---^-+    +-----+
-   | | +-----+                         |
-   | `-| L1I #(L1I_LINE_LEN, L1I_LEN)  |
-   |   +-----+                         |
-   |           +-----+      +-----+    |
-    `----------+ BUS <------> LSU <----'
+     | +-----+          |    ,------. | +--+--+
+  +--|--+    +-----+    +----v+    +--|--+
+  | IFU +----> IDU +----> IQU +-----> EXU +-----| #(RS_SIZE)
+  +^-|--+    +-----+    ++--+-+     +---^+
+   | |                   |  |           |
+   | | +-----+      +----v+ |#(RS_SIZE) |
+   | `-| L1I #      | WBU |             |
+   |   ++----+      +-----+             |
+   |    |#(L1I_LINE_LEN, L1I_LEN)       |
+   |                                    |
+   |           +-----+      +-----+     |
+    `----------+ BUS <------> LSU <-----'
                +--^--+      +----|+
   "AXI4 protocol" |              | +-----+
        +----------v----------+   `-| L1D #(L1D_LEN)
@@ -32,15 +36,16 @@
  * @param L1I_LINE_LEN: L1I Line Length
  * @param L1I_LEN: L1I Length (Size)
  * @param IQU_SIZE: Issue Queue Size
+ * @param RS_SIZE: Revervation Station Size
  * @param L1D_LEN: L1D Length (Size)
  */
 
 // `define YSYX_M_FAST 'h1
 `define YSYX_L1I_LINE_LEN 1
 `define YSYX_L1I_LEN 2
-`define YSYX_IQU_SIZE 4
-`define YSYX_ROB_SIZE 4
+`define YSYX_IQU_SIZE 2
 `define YSYX_RS_SIZE 4
+`define YSYX_ROB_SIZE 4
 `define YSYX_L1D_LEN 1
 
 `ifdef YSYX_I_EXTENSION

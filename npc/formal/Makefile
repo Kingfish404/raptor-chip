@@ -1,3 +1,5 @@
+all: formal_exu_mul formal_bus
+
 formal_bus:
 	sby -f bus.sby
 

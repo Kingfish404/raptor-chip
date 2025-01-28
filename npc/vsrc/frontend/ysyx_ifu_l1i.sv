@@ -15,11 +15,11 @@ module ysyx_ifu_l1i #(
     input flush_pipeline,
 
     input bus_ifu_ready,
+    output out_ifu_lock,
     output [XLEN-1:0] out_ifu_araddr,
     output out_ifu_arvalid,
-    input ifu_rvalid,
     input [XLEN-1:0] ifu_rdata,
-    output out_ifu_required,
+    input ifu_rvalid,
 
     output [XLEN-1:0] out_inst,
     output l1i_valid,
@@ -27,11 +27,19 @@ module ysyx_ifu_l1i #(
 
     input reset
 );
+  typedef enum logic [2:0] {
+    IDLE = 3'b000,
+    RD_0 = 3'b001,
+    WAIT = 3'b010,
+    RD_1 = 3'b011,
+    WB_0 = 3'b100,
+    NULL = 3'b111
+  } l1i_state_t;
   logic [XLEN-1:0] l1i_pc;
   logic [32-1:0] l1i[L1I_SIZE][L1I_LINE_SIZE];
   logic [L1I_SIZE-1:0] l1ic_valid;
   logic [32-L1I_LEN-L1I_LINE_LEN-2-1:0] l1i_tag[L1I_SIZE][L1I_LINE_SIZE];
-  logic [2:0] l1i_state;
+  l1i_state_t l1i_state;
 
   logic [32-L1I_LEN-L1I_LINE_LEN-2-1:0] addr_tag;
   logic [L1I_LEN-1:0] addr_idx;
@@ -44,21 +52,21 @@ module ysyx_ifu_l1i #(
 
   assign l1i_pc = received_flush_pipeline ? reverse_pc_ifu : pc_ifu;
   assign l1i_valid = l1i_cache_hit && !flush_pipeline && !received_flush_pipeline;
-  assign l1i_ready = (l1i_state == 'b000);
+  assign l1i_ready = (l1i_state == IDLE);
   assign addr_tag = l1i_pc[XLEN-1:L1I_LEN+L1I_LINE_LEN+2];
   assign addr_idx = l1i_pc[L1I_LEN+L1I_LINE_LEN+2-1:L1I_LINE_LEN+2];
   assign addr_offset = l1i_pc[L1I_LINE_LEN+2-1:2];
 
-  assign out_ifu_araddr = (l1i_state == 'b000 || l1i_state == 'b001) ?
+  assign out_ifu_araddr = (l1i_state == IDLE || l1i_state == RD_0) ?
     (l1i_pc & ~'h4) :
     (l1i_pc | 'h4);
   assign out_ifu_arvalid = (ifu_sdram_arburst ?
-    !l1i_cache_hit && (l1i_state == 'b000 || l1i_state == 'b001) :
-    !l1i_cache_hit && (l1i_state != 'b010 && l1i_state != 'b100));
-  assign out_ifu_required = (l1i_state != 'b000);
+    !l1i_cache_hit && (l1i_state == IDLE || l1i_state == RD_0) :
+    !l1i_cache_hit && (l1i_state != WAIT && l1i_state != WB_0));
+  assign out_ifu_lock = (l1i_state != IDLE);
 
   assign l1i_cache_hit = (
-         (l1i_state == 'b000 || l1i_state == 'b100) &&
+         (l1i_state == IDLE || l1i_state == WB_0) &&
          l1ic_valid[addr_idx] == 1'b1) && (l1i_tag[addr_idx][addr_offset] == addr_tag);
   assign ifu_sdram_arburst = (`YSYX_I_SDRAM_ARBURST &&
     (l1i_pc >= 'ha0000000) && (l1i_pc <= 'hc0000000));
@@ -67,50 +75,49 @@ module ysyx_ifu_l1i #(
 
   always @(posedge clock) begin
     if (reset) begin
-      l1i_state  <= 'b000;
+      l1i_state  <= IDLE;
       l1ic_valid <= 0;
     end else begin
-      if (flush_pipeline && (l1i_state != 'b000)) begin
+      if (flush_pipeline && (l1i_state != IDLE)) begin
         received_flush_pipeline <= 1;
         reverse_pc_ifu <= pc_ifu;
       end
-      // TODO: change l1i_state to typedef enum
       unique case (l1i_state)
-        'b000: begin
+        IDLE: begin
           if (invalid_l1i) begin
             l1ic_valid <= 0;
           end
           if (out_ifu_arvalid && bus_ifu_ready) begin
-            l1i_state <= 'b001;
+            l1i_state <= RD_0;
           end
         end
-        'b001:
+        RD_0:
         if (ifu_rvalid && !l1i_cache_hit) begin
           if (ifu_sdram_arburst) begin
-            l1i_state <= 'b011;
+            l1i_state <= RD_1;
           end else begin
-            l1i_state <= 'b010;
+            l1i_state <= WAIT;
           end
           l1i[addr_idx][0] <= ifu_rdata;
           l1i_tag[addr_idx][0] <= addr_tag;
         end
-        'b010: begin
-          l1i_state <= 'b011;
+        WAIT: begin
+          l1i_state <= RD_1;
         end
-        'b011: begin
+        RD_1: begin
           if (ifu_rvalid) begin
-            l1i_state <= 'b100;
+            l1i_state <= WB_0;
             l1i[addr_idx][1] <= ifu_rdata;
             l1i_tag[addr_idx][1] <= addr_tag;
             l1ic_valid[addr_idx] <= 1'b1;
           end
         end
-        'b100: begin
-          l1i_state <= 'b000;
+        WB_0: begin
+          l1i_state <= IDLE;
           received_flush_pipeline <= 0;
         end
         default begin
-          l1i_state <= 'b000;
+          l1i_state <= IDLE;
           received_flush_pipeline <= 0;
         end
       endcase

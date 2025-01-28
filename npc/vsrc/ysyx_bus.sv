@@ -47,7 +47,7 @@ module ysyx_bus #(
     output bus_ifu_ready,
     input [XLEN-1:0] ifu_araddr,
     input ifu_arvalid,
-    input ifu_required,
+    input ifu_lock,
     output [XLEN-1:0] out_ifu_rdata,
     output out_ifu_rvalid,
 
@@ -78,7 +78,6 @@ module ysyx_bus #(
     LS_S_B
   } state_store_t;
 
-  logic arready;
   logic [XLEN-1:0] out_rdata;
   logic rvalid;
   logic write_done = 0, awrite_done = 0;
@@ -103,14 +102,13 @@ module ysyx_bus #(
     if (reset) begin
       state_load <= IF_A;
     end else begin
-      // $display("state: %d, arready: %d", state, io_master_arready,);
       unique case (state_load)
         IF_A: begin
           if (ifu_arvalid) begin
             if (io_master_arready) begin
               state_load <= IF_D;
             end
-          end else if (!ifu_required && (lsu_arvalid)) begin
+          end else if ((!ifu_lock) && (lsu_arvalid)) begin
             state_load <= LS_A;
           end
         end
@@ -214,14 +212,11 @@ module ysyx_bus #(
            ((state_load == IF_A) && ifu_arvalid) |
            ((state_load == LS_A) && lsu_arvalid && !clint_en) // for new soc
       );
-  assign arready = io_master_arready && io_master_bvalid;
 
   // logic [XLEN-1:0] io_rdata;
   // assign io_rdata = (io_master_araddr[2:2] == 1) ? io_master_rdata[63:32] : io_master_rdata[31:00];
   logic [XLEN-1:0] io_rdata;
-  logic [1:0] araddr_lo;
   assign io_rdata = io_master_rdata;
-  assign araddr_lo = io_master_araddr[1:0];
   assign out_rdata = io_rdata;
   assign rvalid = io_master_rvalid;
   assign io_master_rready = 1;
@@ -302,41 +297,4 @@ module ysyx_bus #(
       .out_rresp(out_clint_rresp),
       .out_rvalid(out_clint_rvalid)
   );
-endmodule
-
-// Core Local INTerrupt controller
-module ysyx_clint #(
-    parameter bit [7:0] XLEN = `YSYX_XLEN
-) (
-    input clock,
-    input reset,
-
-    input [XLEN-1:0] araddr,
-    input arvalid,
-    output out_arready,
-
-    output [XLEN-1:0] out_rdata,
-    output [1:0] out_rresp,
-    output logic out_rvalid
-);
-  logic [63:0] mtime = 0;
-  assign out_rdata = (
-    ({32{araddr == `YSYX_BUS_RTC_ADDR}} & mtime[31:0]) |
-    ({32{araddr == `YSYX_BUS_RTC_ADDR_UP}} & mtime[63:32])
-  );
-  assign out_arready = 0;
-  assign out_rresp = 0;
-  always @(posedge clock) begin
-    if (reset) begin
-      mtime <= 0;
-    end else begin
-      mtime <= mtime + 1;
-      if (arvalid) begin
-        `YSYX_DPI_C_NPC_DIFFTEST_SKIP_REF
-        out_rvalid <= 1;
-      end else begin
-        out_rvalid <= 0;
-      end
-    end
-  end
 endmodule

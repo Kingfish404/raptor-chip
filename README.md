@@ -4,11 +4,13 @@
 ```bash
 bash init.sh subproject-name
 ```
-进行初始化, 具体请参考[实验讲义][lecture note].
+进行初始化, 具体请参考[实验讲义][^lecture note].
 
-[lecture note]: https://ysyx.oscc.cc/docs/
+[^lecture note]: https://ysyx.oscc.cc/docs/
 
 设计的处理器暂称为 **New Processor Core (NPC)** , 采用[`RISC-V`][RISC-V]指令集架构, 使用`SystemVerilog`和`Chisel`进行描述.
+
+Candidate ip core name: `bird-0.1-sparrow`.
 
 [RISC-V]: https://riscv.org/
 
@@ -99,7 +101,7 @@ cd $YSYX_HOME/am-kernels/benchmarks/microbench && \
 
 ## Architecture
 
-![](./docs/assets/npc-rv32e-pipeline.svg)
+![](./docs/assets/npc-rv32e-o3-pipeline.svg)
 
 ## Reference
 

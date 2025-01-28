@@ -42,7 +42,7 @@ module formal_bus (
     // ifu
     input [XLEN-1:0] ifu_araddr,
     input ifu_arvalid,
-    input ifu_required,
+    input ifu_lock,
     output [XLEN-1:0] bus_ifu_rdata,
     output bus_ifu_rvalid,
 
@@ -102,7 +102,7 @@ module formal_bus (
 
       .ifu_araddr(ifu_araddr),
       .ifu_arvalid(ifu_arvalid),
-      .ifu_required(ifu_required),
+      .ifu_lock(ifu_lock),
       .out_ifu_rdata(bus_ifu_rdata),
       .out_ifu_rvalid(bus_ifu_rvalid),
 
@@ -123,7 +123,7 @@ module formal_bus (
   );
 
 `ifdef FORMAL
-  always @(*) begin
+  always_comb begin
     if (XLEN == 32) begin
       arsize_assert : assert (io_master_arsize != 3'b011);
       awsize_assert : assert (io_master_awsize != 3'b011);

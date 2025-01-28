@@ -8,13 +8,31 @@
  RISC-V processor pipeline
  has the following (conceptual) stages:
  ------------------------------------------------------------
- | in-order      | if - Instruction fetch
- | frontend      | id - Instruction Decode
- | --------------+ iq - Instruction Queue
- | execution     : ex - Execution
- | backend       : wb - Write Back
+ in-order      | IFU - Instruction Fetch Unit
+ issue         | IDU - Instruction Decode Unit
+ --------------+ IQU - Instruction Queue Unit
+ out-of-order  :
+ execution     : EXU - Execution Unit
+ --------------+
+ in-order      | IQU - Instruction Queue Unit
+ commit        | WBU - Write Back Unit
  ------------------------------------------------------------
- [frontend: [if => id]] => iq => [backend: [ex => wb]]
+ Stages (`=>' split each stage):
+ [
+  frontend (in-order and speculative issue):
+        v- [BUS <-load- AXI4]
+    IFU[l1i] =issue=> IDU =issue=> IQU[uop]
+        ^- bpu[btb,btb_jal]
+    IQU[uop] -dispatch-> IQU[rob]
+             =dispatch=> EXU[rs ]
+  backend  (out-of-order execution):
+    EXU[rs]  =write-back=> IQU[rob]
+        ^- LSU[l1d] <-load/store-> [BUS <-load/store-> AXI4]
+        |- MUL :mult/div
+  frontend (in-order commit):
+    IQU[rob] =commit=>
+    WBU[rf ] =resolve-branch=> frontend: IFU[pc,bpu]
+ ]
  ------------------------------------------------------------
  See ./include/ysyx.svh for more details.
  */
@@ -24,8 +42,9 @@ module ysyx #(
 ) (
     input clock,
 
-    // verilator lint_off UNDRIVEN
     // AXI4 Slave
+    // verilator lint_off UNDRIVEN
+    // verilator lint_off UNUSEDSIGNAL
     input [1:0] io_slave_arburst,
     input [2:0] io_slave_arsize,
     input [7:0] io_slave_arlen,
@@ -60,6 +79,7 @@ module ysyx #(
     output logic io_slave_bvalid,
     input io_slave_bready,
     // verilator lint_on UNDRIVEN
+    // verilator lint_on UNUSEDSIGNAL
 
     // AXI4 Master
     output [1:0] io_master_arburst,
@@ -96,7 +116,11 @@ module ysyx #(
     input logic io_master_bvalid,
     output io_master_bready,
 
+    // verilator lint_off UNDRIVEN
+    // verilator lint_off UNUSEDSIGNAL
     input io_interrupt,
+    // verilator lint_on UNDRIVEN
+    // verilator lint_on UNUSEDSIGNAL
 
     input reset
 );
@@ -108,7 +132,7 @@ module ysyx #(
   logic ifu_valid, ifu_ready;
   // IFU out bus
   logic [XLEN-1:0] ifu_araddr;
-  logic ifu_arvalid, ifu_required;
+  logic ifu_arvalid, ifu_bus_lock;
 
   // IDU out
   idu_pipe_if idu_if ();
@@ -123,12 +147,7 @@ module ysyx #(
 
   // EXU out
   exu_pipe_if exu_iqu_if ();
-  logic [31:0] exu_inst, exu_pc;
-  logic [XLEN-1:0] exu_reg_wdata;
-  logic [XLEN-1:0] exu_npc_wdata;
-  logic exu_branch_change, exu_branch_retire, exu_load_retire;
-  logic exu_ebreak;
-  logic [REG_ADDR_W-1:0] exu_rd;
+  logic exu_load_retire;
   logic exu_valid, exu_ready;
   // EXU out lsu
   logic exu_ren, exu_wen;
@@ -138,7 +157,6 @@ module ysyx #(
   logic [XLEN-1:0] exu_lsu_wdata;
 
   // WBU out
-  logic [31:0] wbu_pc;
   logic wbu_valid, wbu_ready;
   logic [XLEN-1:0] wbu_npc;
   logic wbu_pc_change, wbu_pc_retire;
@@ -173,8 +191,9 @@ module ysyx #(
   ysyx_ifu ifu (
       .clock(clock),
 
+      // <= exu
       .load_retire(exu_load_retire),
-
+      // <= wbu
       .npc(wbu_npc),
       .pc_change(wbu_pc_change),
       .pc_retire(wbu_pc_retire),
@@ -184,17 +203,17 @@ module ysyx #(
       .out_pnpc(ifu_pnpc),
       .flush_pipeline(flush_pipeline),
 
+      .bus_ifu_ready(bus_ifu_ready),
+      .out_ifu_lock(ifu_bus_lock),
+      .out_ifu_araddr(ifu_araddr),
+      .out_ifu_arvalid(ifu_arvalid),
+      .ifu_rdata(bus_ifu_rdata),
+      .ifu_rvalid(bus_ifu_rvalid),
+
       .prev_valid(wbu_valid),
       .next_ready(idu_ready),
       .out_valid (ifu_valid),
       .out_ready (ifu_ready),
-
-      .bus_ifu_ready(bus_ifu_ready),
-      .out_ifu_araddr(ifu_araddr),
-      .out_ifu_arvalid(ifu_arvalid),
-      .out_ifu_required(ifu_required),
-      .ifu_rdata(bus_ifu_rdata),
-      .ifu_rvalid(bus_ifu_rvalid),
 
       .reset(reset)
   );
@@ -394,7 +413,7 @@ module ysyx #(
       .bus_ifu_ready(bus_ifu_ready),
       .ifu_araddr(ifu_araddr),
       .ifu_arvalid(ifu_arvalid),
-      .ifu_required(ifu_required),
+      .ifu_lock(ifu_bus_lock),
       .out_ifu_rdata(bus_ifu_rdata),
       .out_ifu_rvalid(bus_ifu_rvalid),
       // lsu load

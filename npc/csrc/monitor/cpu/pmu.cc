@@ -40,7 +40,6 @@ void perf_sample_per_cycle()
   bool lsu_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, exu_lsu_avalid));
   uint32_t pc_ifu = *(uint32_t *)&(CONCAT(VERILOG_PREFIX, ifu__DOT__pc_ifu));
   uint32_t pc_idu = *(uint32_t *)&(CONCAT(VERILOG_PREFIX, idu__DOT__pc_idu));
-  uint32_t pc_exu = *(uint32_t *)&(CONCAT(VERILOG_PREFIX, exu__DOT__pc_exu));
   uint32_t pc_wbu = *(uint32_t *)&(CONCAT(VERILOG_PREFIX, wbu__DOT__pc_wbu));
   static uint32_t ifu_pc = 0;
   if (ifu_valid && idu_ready)

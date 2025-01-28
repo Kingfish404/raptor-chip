@@ -44,7 +44,6 @@ module ysyx_iqu #(
     EX = 2'b10
   } rob_state_t;
 
-  micro_op_t uoq_queue[QUEUE_SIZE];
   logic [`YSYX_REG_LEN-1:0] rs1, rs2;
 
   // === micro-op queue (UOQ) ===
@@ -119,7 +118,7 @@ module ysyx_iqu #(
       uoq_valid <= 0;
     end else begin
       if (prev_valid && uoq_valid[uoq_head] == 0) begin
-        // Issue
+        // Issue to uoq
         uoq_head              <= uoq_head + 1;
 
         uoq_alu_op[uoq_head]  <= idu_if.alu_op;
@@ -148,7 +147,7 @@ module ysyx_iqu #(
         uoq_valid[uoq_head]   <= 1;
       end
       if (dispatch_ready) begin
-        // Dispatch
+        // Dispatch to exu and rob
         uoq_tail <= uoq_tail + 1;
         uoq_valid[uoq_tail] <= 0;
         uoq_inst[uoq_tail] <= 0;
@@ -160,14 +159,12 @@ module ysyx_iqu #(
   assign rs2 = uoq_rs2[uoq_tail];
   assign out_rs1 = rs1;
   assign out_rs2 = rs2;
-  logic [$clog2(`YSYX_ROB_SIZE):0] rs1_dest;
-  logic [$clog2(`YSYX_ROB_SIZE):0] rs2_dest;
   logic rs1_hit_rob;
   logic rs2_hit_rob;
   assign rs1_hit_rob = (rf_busy[rs1] && (rob_state[rf_reorder[rs1]] == WB));
   assign rs2_hit_rob = (rf_busy[rs2] && (rob_state[rf_reorder[rs2]] == WB));
   always_comb begin
-    // Dispatch Send
+    // Dispatch connect
     iqu_exu_if.alu_op = uoq_alu_op[uoq_tail];
     iqu_exu_if.jen = uoq_jen[uoq_tail];
     iqu_exu_if.ben = uoq_ben[uoq_tail];
@@ -230,6 +227,22 @@ module ysyx_iqu #(
         rob_pc[rob_tail] <= uoq_pc[uoq_tail];
         rob_pnpc[rob_tail] <= uoq_pnpc[uoq_tail];
       end
+      if (exu_iqu_if.valid) begin
+        // Execute result get
+        rob_state[wb_dest] <= WB;
+
+        rob_value[wb_dest] <= exu_iqu_if.result;
+        rob_npc[wb_dest] <= exu_iqu_if.npc;
+        rob_pc_change[wb_dest] <= exu_iqu_if.pc_change;
+        rob_pc_retire[wb_dest] <= exu_iqu_if.pc_retire;
+        rob_ebreak[wb_dest] <= exu_iqu_if.ebreak;
+
+        rob_csr_wen[wb_dest] <= exu_iqu_if.csr_wen;
+        rob_csr_wdata[wb_dest] <= exu_iqu_if.csr_wdata;
+        rob_csr_addr[wb_dest] <= exu_iqu_if.csr_addr;
+        rob_ecall[wb_dest] <= exu_iqu_if.ecall;
+        rob_mret[wb_dest] <= exu_iqu_if.mret;
+      end
       if (rob_busy[rob_head] && rob_state[rob_head] == WB) begin
         // Write result and commit
         rob_head <= rob_head + 1;
@@ -247,22 +260,6 @@ module ysyx_iqu #(
             (rob_npc[rob_head] != rob_pnpc[rob_head])) begin
           flush_pipeline <= 1;
         end
-      end
-      if (exu_iqu_if.valid) begin
-        // Execute and get result
-        rob_state[wb_dest] <= WB;
-
-        rob_value[wb_dest] <= exu_iqu_if.result;
-        rob_npc[wb_dest] <= exu_iqu_if.npc;
-        rob_pc_change[wb_dest] <= exu_iqu_if.pc_change;
-        rob_pc_retire[wb_dest] <= exu_iqu_if.pc_retire;
-        rob_ebreak[wb_dest] <= exu_iqu_if.ebreak;
-
-        rob_csr_wen[wb_dest] <= exu_iqu_if.csr_wen;
-        rob_csr_wdata[wb_dest] <= exu_iqu_if.csr_wdata;
-        rob_csr_addr[wb_dest] <= exu_iqu_if.csr_addr;
-        rob_ecall[wb_dest] <= exu_iqu_if.ecall;
-        rob_mret[wb_dest] <= exu_iqu_if.mret;
       end
     end
   end

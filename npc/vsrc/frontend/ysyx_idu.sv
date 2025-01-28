@@ -22,8 +22,6 @@ module ysyx_idu #(
 
   logic [4:0] rd;
 
-  logic [XLEN-1:0] reg_rdata1;
-  logic [XLEN-1:0] reg_rdata2;
   assign out_valid = valid;
   assign out_ready = ready && next_ready;
 
