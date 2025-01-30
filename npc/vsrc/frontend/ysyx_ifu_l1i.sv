@@ -78,7 +78,7 @@ module ysyx_ifu_l1i #(
       l1i_state  <= IDLE;
       l1ic_valid <= 0;
     end else begin
-      if (flush_pipeline && (l1i_state != IDLE)) begin
+      if (flush_pipeline && (!l1i_cache_hit)) begin
         received_flush_pipeline <= 1;
         reverse_pc_ifu <= pc_ifu;
       end

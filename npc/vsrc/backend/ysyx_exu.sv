@@ -265,8 +265,8 @@ module ysyx_exu #(
   assign exu_iqu_if.result = reg_wdata;
 
   // Branch
-  assign addr_exu = (rs_jump[lowest_busy_index] ? rs_vj[lowest_busy_index] :
-     rs_pc[lowest_busy_index]) + rs_imm[lowest_busy_index];
+  assign addr_exu = ((rs_jump[lowest_busy_index] ? rs_vj[lowest_busy_index] :
+     rs_pc[lowest_busy_index]) + rs_imm[lowest_busy_index]) & ~1;
   assign exu_iqu_if.npc = (
     (rs_ecall[lowest_busy_index]) ? mtvec :
     (rs_mret[lowest_busy_index]) ? mepc :

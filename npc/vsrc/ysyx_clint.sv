@@ -1,3 +1,7 @@
+`include "ysyx.svh"
+`include "ysyx_soc.svh"
+`include "ysyx_dpi_c.svh"
+
 // Core Local INTerrupt controller
 module ysyx_clint #(
     parameter bit [7:0] XLEN = `YSYX_XLEN

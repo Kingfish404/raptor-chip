@@ -13,6 +13,7 @@ WORKDIR /app
 RUN git clone https://github.com/Kingfish404/ysyx-workbench
 WORKDIR /app/ysyx-workbench/
 RUN git clone https://github.com/kingfish404/am-kernels && \
+    git clone https://github.com/Kingfish404/riscv-arch-test-am && \
     git clone https://github.com/Kingfish404/ysyxSoC && \
     git clone https://github.com/Kingfish404/yosys-opensta
 
