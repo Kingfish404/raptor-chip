@@ -207,25 +207,28 @@ module ysyx_exu #(
       for (integer i = 0; i < RS_SIZE; i++) begin
         if (rs_busy[i] == 1 && rs_qj[i] == 0 && rs_qk[i] == 0) begin
           if (lsu_exu_wready && rs_wen[i]) begin
+            // Start store
             rs_wen[i] <= 0;
           end
           if (lsu_exu_rvalid && rs_ren[i]) begin
+            // Load result is ready
             rs_ren_ready[i] <= 1;
             rs_ren_data[i]  <= lsu_rdata;
           end
           if (rs_alu_op[i][4:4] == 1) begin
             if (rs_mul_valid[i] == 0 && muling == 0) begin
+              // Mul start
               muling <= 1;
             end
             if (muling == 1 && mul_valid) begin
+              // Mul result is ready
               rs_mul_valid[i] <= 1;
               muling <= 0;
               rs_mul_a[i] <= reg_wdata_mul;
             end
           end
-          if (
-            (rs_alu_op[i][4:4] == 0 || rs_mul_valid[i]) &&
-            (!rs_wen[i]) && (!rs_ren[i] || rs_ren_ready[i])) begin
+          if ((rs_alu_op[i][4:4] == 0 || rs_mul_valid[i]) &&
+              (!rs_wen[i]) && (!rs_ren[i] || rs_ren_ready[i])) begin
             if (lowest_busy_index == i[$clog2(RS_SIZE)-1:0]) begin
               // Write back
               rs_busy[i] <= 0;
@@ -236,6 +239,7 @@ module ysyx_exu #(
               rs_mul_valid[i] <= 0;
             end
             for (integer j = 0; j < RS_SIZE; j++) begin
+              // Forwarding
               if (rs_busy[j] && rs_qj[j] == rs_dest[i] && j != i) begin
                 rs_vj[j] <= rs_alu_op[i][4:4] == 1 ? reg_wdata_mul : rs_a[i];
                 rs_qj[j] <= 0;

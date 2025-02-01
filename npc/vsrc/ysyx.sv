@@ -143,7 +143,7 @@ module ysyx #(
   exu_pipe_if iqu_wbu_if ();
   exu_pipe_if iqu_exu_commit_if ();
   logic iqu_valid, iqu_ready;
-  logic [REG_ADDR_W-1:0] iqu_rs1, iqu_rs2;
+  logic [4:0] iqu_rs1, iqu_rs2;
 
   // EXU out
   exu_pipe_if exu_iqu_if ();

@@ -17,12 +17,12 @@ interface idu_pipe_if;
   logic mret;
   logic [2:0] csr_csw;
 
-  logic [`YSYX_REG_LEN-1:0] rd;
+  logic [4:0] rd;
   logic [31:0] imm;
   logic [31:0] op1;
   logic [31:0] op2;
-  logic [`YSYX_REG_LEN-1:0] rs1;
-  logic [`YSYX_REG_LEN-1:0] rs2;
+  logic [4:0] rs1;
+  logic [4:0] rs2;
 
   logic [$clog2(`YSYX_ROB_SIZE):0] qj;
   logic [$clog2(`YSYX_ROB_SIZE):0] qk;
@@ -54,7 +54,7 @@ interface idu_pipe_if;
 endinterface
 
 interface exu_pipe_if;
-  logic [`YSYX_REG_LEN-1:0] rd;
+  logic [4:0] rd;
   logic [31:0] inst;
   logic [`YSYX_XLEN-1:0] pc;
 

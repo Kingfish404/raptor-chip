@@ -19,8 +19,8 @@ module ysyx_iqu #(
     exu_pipe_if.out iqu_wbu_if,
 
     // <=> reg
-    output [`YSYX_REG_LEN-1:0] out_rs1,
-    output [`YSYX_REG_LEN-1:0] out_rs2,
+    output [4:0] out_rs1,
+    output [4:0] out_rs2,
     input [XLEN-1:0] rdata1,
     input [XLEN-1:0] rdata2,
 
@@ -44,7 +44,7 @@ module ysyx_iqu #(
     EX = 2'b10
   } rob_state_t;
 
-  logic [`YSYX_REG_LEN-1:0] rs1, rs2;
+  logic [4:0] rs1, rs2;
 
   // === micro-op queue (UOQ) ===
   logic [$clog2(QUEUE_SIZE)-1:0] uoq_tail;
@@ -63,12 +63,12 @@ module ysyx_iqu #(
   logic uoq_mret[QUEUE_SIZE];
   logic [2:0] uoq_csr_csw[QUEUE_SIZE];
 
-  logic [`YSYX_REG_LEN-1:0] uoq_rd[QUEUE_SIZE];
+  logic [4:0] uoq_rd[QUEUE_SIZE];
   logic [31:0] uoq_imm[QUEUE_SIZE];
   logic [31:0] uoq_op1[QUEUE_SIZE];
   logic [31:0] uoq_op2[QUEUE_SIZE];
-  logic [`YSYX_REG_LEN-1:0] uoq_rs1[QUEUE_SIZE];
-  logic [`YSYX_REG_LEN-1:0] uoq_rs2[QUEUE_SIZE];
+  logic [4:0] uoq_rs1[QUEUE_SIZE];
+  logic [4:0] uoq_rs2[QUEUE_SIZE];
 
   logic [XLEN-1:0] uoq_pnpc[QUEUE_SIZE];
   logic [31:0] uoq_inst[QUEUE_SIZE];
@@ -82,7 +82,7 @@ module ysyx_iqu #(
   logic [$clog2(ROB_SIZE)-1:0] rob_tail;
 
   logic [ROB_SIZE-1:0] rob_busy;
-  logic [`YSYX_REG_LEN-1:0] rob_rd[ROB_SIZE];
+  logic [4:0] rob_rd[ROB_SIZE];
   logic [31:0] rob_inst[ROB_SIZE];
   rob_state_t rob_state[ROB_SIZE];
   logic [XLEN-1:0] rob_value[ROB_SIZE];
@@ -161,8 +161,8 @@ module ysyx_iqu #(
   assign out_rs2 = rs2;
   logic rs1_hit_rob;
   logic rs2_hit_rob;
-  assign rs1_hit_rob = (rf_busy[rs1] && (rob_state[rf_reorder[rs1]] == WB));
-  assign rs2_hit_rob = (rf_busy[rs2] && (rob_state[rf_reorder[rs2]] == WB));
+  assign rs1_hit_rob = (rf_busy[rs1[`YSYX_REG_LEN-1:0]] && (rob_state[rf_reorder[rs1[`YSYX_REG_LEN-1:0]]] == WB));
+  assign rs2_hit_rob = (rf_busy[rs2[`YSYX_REG_LEN-1:0]] && (rob_state[rf_reorder[rs2[`YSYX_REG_LEN-1:0]]] == WB));
   always_comb begin
     // Dispatch connect
     iqu_exu_if.alu_op = uoq_alu_op[uoq_tail];
@@ -180,18 +180,18 @@ module ysyx_iqu #(
     iqu_exu_if.rd = uoq_rd[uoq_tail];
     iqu_exu_if.imm = uoq_imm[uoq_tail];
     iqu_exu_if.op1 = (rs1 != 0 ?
-      (rs1_hit_rob ? rob_value[rf_reorder[rs1]] : rdata1)
+      (rs1_hit_rob ? rob_value[rf_reorder[rs1[`YSYX_REG_LEN-1:0]]] : rdata1)
       : uoq_op1[uoq_tail]);
     iqu_exu_if.op2 = (rs2 != 0 ?
-      (rs2_hit_rob ? rob_value[rf_reorder[rs2]] : rdata2)
+      (rs2_hit_rob ? rob_value[rf_reorder[rs2[`YSYX_REG_LEN-1:0]]] : rdata2)
       : uoq_op2[uoq_tail]);
-    iqu_exu_if.rs1 = (rs1 == 0 || rf_busy[rs1] == 0) ? 0 : rs1;
-    iqu_exu_if.rs2 = (rs2 == 0 || rf_busy[rs2] == 0) ? 0 : rs2;
+    iqu_exu_if.rs1 = (rs1 == 0 || rf_busy[rs1[`YSYX_REG_LEN-1:0]] == 0) ? 0 : rs1;
+    iqu_exu_if.rs2 = (rs2 == 0 || rf_busy[rs2[`YSYX_REG_LEN-1:0]] == 0) ? 0 : rs2;
 
-    iqu_exu_if.qj = (rs1 == 0 || rf_busy[rs1] == 0) ? 0 :
-      (rs1_hit_rob ? 0 : (rf_reorder[rs1] + 'h1));
-    iqu_exu_if.qk = (rs2 == 0 || rf_busy[rs2] == 0) ? 0 :
-      (rs2_hit_rob ? 0 : (rf_reorder[rs2] + 'h1));
+    iqu_exu_if.qj = (rs1 == 0 || rf_busy[rs1[`YSYX_REG_LEN-1:0]] == 0) ? 0 :
+      (rs1_hit_rob ? 0 : (rf_reorder[rs1[`YSYX_REG_LEN-1:0]] + 'h1));
+    iqu_exu_if.qk = (rs2 == 0 || rf_busy[rs2[`YSYX_REG_LEN-1:0]] == 0) ? 0 :
+      (rs2_hit_rob ? 0 : (rf_reorder[rs2[`YSYX_REG_LEN-1:0]] + 'h1));
     iqu_exu_if.dest = {{1'h0}, {rob_tail}} + 'h1;
 
     iqu_exu_if.inst = uoq_inst[uoq_tail];
@@ -216,8 +216,8 @@ module ysyx_iqu #(
     end else begin
       if (dispatch_ready) begin
         // Dispatch Recieve
-        rf_reorder[uoq_rd[uoq_tail]] <= rob_tail;
-        rf_busy[uoq_rd[uoq_tail]] <= 1;
+        rf_reorder[uoq_rd[uoq_tail][`YSYX_REG_LEN-1:0]] <= rob_tail;
+        rf_busy[uoq_rd[uoq_tail][`YSYX_REG_LEN-1:0]] <= 1;
 
         rob_tail <= rob_tail + 1;
         rob_busy[rob_tail] <= 1;
@@ -250,10 +250,10 @@ module ysyx_iqu #(
         rob_busy[rob_head] <= 0;
         rob_inst[rob_head] <= 0;
         rob_state[rob_head] <= CM;
-        if (rf_reorder[rob_rd[rob_head]] == rob_head) begin
+        if (rf_reorder[rob_rd[rob_head][`YSYX_REG_LEN-1:0]] == rob_head) begin
           if (dispatch_ready && (uoq_rd[uoq_tail] == rob_rd[rob_head])) begin
           end else begin
-            rf_busy[rob_rd[rob_head]] <= 0;
+            rf_busy[rob_rd[rob_head][`YSYX_REG_LEN-1:0]] <= 0;
           end
         end
         if ((rob_pc_change[rob_head] || rob_pc_retire[rob_head]) &&
