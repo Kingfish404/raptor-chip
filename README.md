@@ -6,9 +6,13 @@
 
 设计的处理器暂称为 **New Processor Core (NPC)** , 采用[`RISC-V`][RISC-V]指令集架构, 使用`SystemVerilog`和`Chisel`进行描述.
 
-Candidate ip core name: `bird-0.1-sparrow`.
+Candidate ip core name: `bird-0.1.0-sparrow`.
 
 [RISC-V]: https://riscv.org/
+
+## Microarchitecture
+
+![](./docs/assets/npc-rv32im-o3-pipeline.svg)
 
 ## Preparation
 
@@ -93,11 +97,10 @@ cd $YSYX_HOME/am-kernels/benchmarks/microbench && \
 ## fpga. running on gowin-tang-nano-20k
 ./npc/ana-fpga-cat.sh
 # then follow `fpga/gowin-tang-nano-20k/README.md`
+
+## package all sv files into one
+cd npc && make build_packed
 ```
-
-## Architecture
-
-![](./docs/assets/npc-rv32e-o3-pipeline.svg)
 
 ## Reference
 

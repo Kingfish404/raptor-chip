@@ -14,16 +14,14 @@ module ysyx_clint #(
     output out_arready,
 
     output [XLEN-1:0] out_rdata,
-    output [1:0] out_rresp,
     output logic out_rvalid
 );
   logic [63:0] mtime = 0;
   assign out_rdata = (
-    ({32{araddr == `YSYX_BUS_RTC_ADDR}} & mtime[31:0]) |
-    ({32{araddr == `YSYX_BUS_RTC_ADDR_UP}} & mtime[63:32])
+    ({XLEN{araddr == `YSYX_BUS_RTC_ADDR}} & mtime[31:0]) |
+    ({XLEN{araddr == `YSYX_BUS_RTC_ADDR_UP}} & mtime[63:32])
   );
-  assign out_arready = 0;
-  assign out_rresp = 0;
+  assign out_arready = 1;
   always @(posedge clock) begin
     if (reset) begin
       mtime <= 0;

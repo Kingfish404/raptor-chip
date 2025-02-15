@@ -15,26 +15,21 @@ module ysyx_wbu #(
     input branch_retire,
 
     output [XLEN-1:0] out_npc,
-    output out_change,
     output out_retire,
 
     input  prev_valid,
-    input  next_ready,
     output out_valid,
-    output out_ready,
 
     input reset
 );
   logic [31:0] inst_wbu, pc_wbu, npc_wbu;
 
-  logic change, retire, valid, ready;
+  logic retire, valid, ready;
 
   assign out_valid = valid;
-  assign out_ready = ready;
   assign ready = 1;
 
   assign out_npc = npc_wbu;
-  assign out_change = change;
   assign out_retire = retire;
 
   always @(posedge clock) begin
@@ -46,7 +41,6 @@ module ysyx_wbu #(
         pc_wbu <= pc;
         inst_wbu <= inst;
         valid <= 1;
-        change <= branch_change;
         retire <= branch_retire;
         npc_wbu <= npc_wdata;
         if (ebreak) begin
@@ -54,7 +48,6 @@ module ysyx_wbu #(
         end
       end else begin
         valid  <= 0;
-        change <= 0;
         retire <= 0;
       end
     end

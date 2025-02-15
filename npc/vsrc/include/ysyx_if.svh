@@ -11,9 +11,9 @@ interface idu_pipe_if;
   logic ren;
 
   logic system;
+  logic ecall;
   logic ebreak;
   logic fence_i;
-  logic ecall;
   logic mret;
   logic [2:0] csr_csw;
 
@@ -32,19 +32,19 @@ interface idu_pipe_if;
 
   logic [31:0] inst;
   logic [`YSYX_XLEN-1:0] pc;
+
   modport in(
       input alu_op, jen, ben, wen, ren,
-      input system, ebreak, fence_i, ecall, mret, csr_csw,
+      input system, ecall, ebreak, fence_i, mret, csr_csw,
       input rd, imm, op1, op2, rs1, rs2,
       input qj, qk, dest,
       input pnpc,
       input inst,
       input pc
   );
-
   modport out(
       output alu_op, jen, ben, wen, ren,
-      output system, ebreak, fence_i, ecall, mret, csr_csw,
+      output system, ecall, ebreak, fence_i, mret, csr_csw,
       output rd, imm, op1, op2, rs1, rs2,
       output qj, qk, dest,
       output pnpc,
@@ -62,28 +62,29 @@ interface exu_pipe_if;
   logic [`YSYX_XLEN-1:0] result;
 
   logic [`YSYX_XLEN-1:0] npc;
-  logic [`YSYX_XLEN-1:0] pnpc;
   logic pc_change;
   logic pc_retire;
-  logic ebreak;
 
   logic csr_wen;
   logic [`YSYX_XLEN-1:0] csr_wdata;
   logic [11:0] csr_addr;
+
   logic ecall;
+  logic ebreak;
+  logic fence_i;
   logic mret;
 
   logic valid;
 
   modport in(
       input rd, inst, pc,
-      input dest, result, npc, pnpc, pc_change, pc_retire, ebreak,
+      input dest, result, npc, pc_change, pc_retire, ebreak, fence_i,
       input csr_wen, csr_wdata, csr_addr, ecall, mret,
       input valid
   );
   modport out(
       output rd, inst, pc,
-      output dest, result, npc, pnpc, pc_change, pc_retire, ebreak,
+      output dest, result, npc, pc_change, pc_retire, ebreak, fence_i,
       output csr_wen, csr_wdata, csr_addr, ecall, mret,
       output valid
   );

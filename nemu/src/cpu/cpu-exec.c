@@ -29,7 +29,7 @@
 
 extern int boot_from_flash;
 FILE *pc_trace = NULL, *bpu_trace = NULL, *mem_trace = NULL;
-uint64_t pc_continue_cnt = 1;
+size_t pc_continue_cnt = 1;
 
 CPU_state cpu = {};
 uint64_t g_nr_guest_inst = 0;
@@ -75,7 +75,7 @@ static void exec_once(Decode *s, vaddr_t pc) {
       }
       else
       {
-        fprintf(pc_trace, "%llu\n", pc_continue_cnt);
+        fprintf(pc_trace, "%zu\n", pc_continue_cnt);
         pc_continue_cnt = 1;
         fprintf(pc_trace, FMT_WORD_NO_PREFIX "-", s->pc);
       }

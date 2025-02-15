@@ -27,8 +27,6 @@ module ysyx_exu #(
     exu_pipe_if.in iqu_exu_commit_if,
 
     input prev_valid,
-    input next_ready,
-    output logic out_valid,
     output logic out_ready,
 
     input reset
@@ -42,7 +40,6 @@ module ysyx_exu #(
 
   logic mul_valid, lsu_avalid;
   logic ready;
-  logic valid;
 
   // === Revervation Station (RS) ===
   logic [RS_SIZE-1:0] rs_busy;
@@ -140,50 +137,9 @@ module ysyx_exu #(
   assign out_lsu_avalid = lsu_avalid;
   assign out_lsu_mem_wdata = rs_vk[store_rs_index];
 
-  assign valid = exu_iqu_if.valid;
-  assign out_valid = valid;
-  assign rs_ready = !&rs_busy && !|rs_wen && !|rs_ren && !(mul_found && idu_if.alu_op[4:4]);
+  assign rs_ready = !(&rs_busy) && !(|rs_wen) && !(|rs_ren) && !(mul_found && idu_if.alu_op[4:4]);
   assign ready = rs_ready;
   assign out_ready = ready;
-  always @(posedge clock) begin
-    if (reset || flush_pipeline) begin
-      rs_ren  <= 0;
-      rs_wen  <= 0;
-      rs_busy <= 0;
-    end else begin
-      if (prev_valid && rs_ready) begin
-        rs_busy[lowest_free_index] <= 1;
-        rs_alu_op[lowest_free_index] <= idu_if.alu_op;
-        rs_vj[lowest_free_index] <= (exu_iqu_if.valid && exu_iqu_if.dest == idu_if.qj) ?
-          exu_iqu_if.result : idu_if.op1;
-        rs_vk[lowest_free_index] <= (exu_iqu_if.valid && exu_iqu_if.dest == idu_if.qk) ?
-          exu_iqu_if.result : idu_if.op2;
-        rs_qj[lowest_free_index] <= (exu_iqu_if.valid && exu_iqu_if.dest == idu_if.qj) ?
-          0 : idu_if.qj;
-        rs_qk[lowest_free_index] <= (exu_iqu_if.valid && exu_iqu_if.dest == idu_if.qk) ?
-          0 : idu_if.qk;
-        rs_dest[lowest_free_index] <= idu_if.dest;
-
-        rs_wen[lowest_free_index] <= idu_if.wen;
-        rs_ren[lowest_free_index] <= idu_if.ren;
-        rs_jen[lowest_free_index] <= idu_if.jen;
-        rs_branch_retire[lowest_free_index] <= (idu_if.system || idu_if.ben || idu_if.ren);
-        rs_branch_change[lowest_free_index] <= (idu_if.jen || idu_if.ecall || idu_if.mret);
-        rs_branch[lowest_free_index] <= (idu_if.ben);
-        rs_jump[lowest_free_index] <= (idu_if.jen);
-        rs_imm[lowest_free_index] <= idu_if.imm;
-        rs_pc[lowest_free_index] <= idu_if.pc;
-        rs_inst[lowest_free_index] <= idu_if.inst;
-
-        rs_system[lowest_free_index] <= idu_if.system;
-        rs_ecall[lowest_free_index] <= idu_if.ecall;
-        rs_ebreak[lowest_free_index] <= idu_if.ebreak;
-        rs_mret[lowest_free_index] <= idu_if.mret;
-        rs_csr_csw[lowest_free_index] <= idu_if.csr_csw;
-      end
-    end
-  end
-
   assign out_load_retire = lsu_exu_rvalid;
 
   // ALU for each RS
@@ -199,54 +155,91 @@ module ysyx_exu #(
     end
   endgenerate
   logic muling = 0;
+
   always @(posedge clock) begin
     if (reset || flush_pipeline) begin
+      rs_ren  <= 0;
+      rs_wen  <= 0;
+      rs_busy <= 0;
       rs_busy <= 0;
       muling  <= 0;
     end else begin
       for (integer i = 0; i < RS_SIZE; i++) begin
-        if (rs_busy[i] == 1 && rs_qj[i] == 0 && rs_qk[i] == 0) begin
-          if (lsu_exu_wready && rs_wen[i]) begin
-            // Start store
-            rs_wen[i] <= 0;
+        if (free_found && i[$clog2(RS_SIZE)-1:0] == lowest_free_index) begin
+          if (prev_valid && rs_ready) begin
+            rs_busy[lowest_free_index] <= 1;
+            rs_alu_op[lowest_free_index] <= idu_if.alu_op;
+            rs_vj[lowest_free_index] <= (exu_iqu_if.valid && exu_iqu_if.dest == idu_if.qj) ?
+          exu_iqu_if.result : idu_if.op1;
+            rs_vk[lowest_free_index] <= (exu_iqu_if.valid && exu_iqu_if.dest == idu_if.qk) ?
+          exu_iqu_if.result : idu_if.op2;
+            rs_qj[lowest_free_index] <= (exu_iqu_if.valid && exu_iqu_if.dest == idu_if.qj) ?
+          0 : idu_if.qj;
+            rs_qk[lowest_free_index] <= (exu_iqu_if.valid && exu_iqu_if.dest == idu_if.qk) ?
+          0 : idu_if.qk;
+            rs_dest[lowest_free_index] <= idu_if.dest;
+
+            rs_wen[lowest_free_index] <= idu_if.wen;
+            rs_ren[lowest_free_index] <= idu_if.ren;
+            rs_jen[lowest_free_index] <= idu_if.jen;
+            rs_branch_retire[lowest_free_index] <= (idu_if.system || idu_if.ben || idu_if.ren);
+            rs_branch_change[lowest_free_index] <= (idu_if.jen || idu_if.ecall || idu_if.mret);
+            rs_branch[lowest_free_index] <= (idu_if.ben);
+            rs_jump[lowest_free_index] <= (idu_if.jen);
+            rs_imm[lowest_free_index] <= idu_if.imm;
+            rs_pc[lowest_free_index] <= idu_if.pc;
+            rs_inst[lowest_free_index] <= idu_if.inst;
+
+            rs_system[lowest_free_index] <= idu_if.system;
+            rs_ecall[lowest_free_index] <= idu_if.ecall;
+            rs_ebreak[lowest_free_index] <= idu_if.ebreak;
+            rs_mret[lowest_free_index] <= idu_if.mret;
+            rs_csr_csw[lowest_free_index] <= idu_if.csr_csw;
           end
-          if (lsu_exu_rvalid && rs_ren[i]) begin
-            // Load result is ready
-            rs_ren_ready[i] <= 1;
-            rs_ren_data[i]  <= lsu_rdata;
-          end
-          if (rs_alu_op[i][4:4] == 1) begin
-            if (rs_mul_valid[i] == 0 && muling == 0) begin
-              // Mul start
-              muling <= 1;
+        end else begin
+          if (rs_busy[i] == 1 && rs_qj[i] == 0 && rs_qk[i] == 0) begin
+            if (lsu_exu_wready && rs_wen[i]) begin
+              // Start store
+              rs_wen[i] <= 0;
             end
-            if (muling == 1 && mul_valid) begin
-              // Mul result is ready
-              rs_mul_valid[i] <= 1;
-              muling <= 0;
-              rs_mul_a[i] <= reg_wdata_mul;
+            if (lsu_exu_rvalid && rs_ren[i]) begin
+              // Load result is ready
+              rs_ren_ready[i] <= 1;
+              rs_ren_data[i]  <= lsu_rdata;
             end
-          end
-          if ((rs_alu_op[i][4:4] == 0 || rs_mul_valid[i]) &&
-              (!rs_wen[i]) && (!rs_ren[i] || rs_ren_ready[i])) begin
-            if (lowest_busy_index == i[$clog2(RS_SIZE)-1:0]) begin
-              // Write back
-              rs_busy[i] <= 0;
-              rs_alu_op[i] <= 0;
-              rs_inst[i] <= 0;
-              rs_ren[i] <= 0;
-              rs_ren_ready[i] <= 0;
-              rs_mul_valid[i] <= 0;
-            end
-            for (integer j = 0; j < RS_SIZE; j++) begin
-              // Forwarding
-              if (rs_busy[j] && rs_qj[j] == rs_dest[i] && j != i) begin
-                rs_vj[j] <= rs_alu_op[i][4:4] == 1 ? reg_wdata_mul : rs_a[i];
-                rs_qj[j] <= 0;
+            if (rs_alu_op[i][4:4] == 1) begin
+              if (rs_mul_valid[i] == 0 && muling == 0) begin
+                // Mul start
+                muling <= 1;
               end
-              if (rs_busy[j] && rs_qk[j] == (rs_dest[i]) && j != i) begin
-                rs_vk[j] <= rs_alu_op[i][4:4] == 1 ? reg_wdata_mul : rs_a[i];
-                rs_qk[j] <= 0;
+              if (muling == 1 && mul_valid) begin
+                // Mul result is ready
+                rs_mul_valid[i] <= 1;
+                muling <= 0;
+                rs_mul_a[i] <= reg_wdata_mul;
+              end
+            end
+            if ((rs_alu_op[i][4:4] == 0 || rs_mul_valid[i]) &&
+              (!rs_wen[i]) && (!rs_ren[i] || rs_ren_ready[i])) begin
+              if (lowest_busy_index == i[$clog2(RS_SIZE)-1:0]) begin
+                // Write back
+                rs_busy[i] <= 0;
+                rs_alu_op[i] <= 0;
+                rs_inst[i] <= 0;
+                rs_ren[i] <= 0;
+                rs_ren_ready[i] <= 0;
+                rs_mul_valid[i] <= 0;
+              end
+              for (integer j = 0; j < RS_SIZE; j++) begin
+                // Forwarding
+                if (rs_busy[j] && rs_qj[j] == rs_dest[i] && j != i) begin
+                  rs_vj[j] <= rs_alu_op[i][4:4] == 1 ? reg_wdata_mul : rs_a[i];
+                  rs_qj[j] <= 0;
+                end
+                if (rs_busy[j] && rs_qk[j] == (rs_dest[i]) && j != i) begin
+                  rs_vk[j] <= rs_alu_op[i][4:4] == 1 ? reg_wdata_mul : rs_a[i];
+                  rs_qk[j] <= 0;
+                end
               end
             end
           end

@@ -37,8 +37,7 @@
  See ./include/ysyx.svh for more details.
  */
 module ysyx #(
-    parameter bit [7:0] XLEN = `YSYX_XLEN,
-    parameter bit [7:0] REG_ADDR_W = `YSYX_REG_LEN
+    parameter bit [7:0] XLEN = `YSYX_XLEN
 ) (
     input clock,
 
@@ -148,7 +147,7 @@ module ysyx #(
   // EXU out
   exu_pipe_if exu_iqu_if ();
   logic exu_load_retire;
-  logic exu_valid, exu_ready;
+  logic exu_ready;
   // EXU out lsu
   logic exu_ren, exu_wen;
   logic [XLEN-1:0] exu_rwaddr;
@@ -157,9 +156,9 @@ module ysyx #(
   logic [XLEN-1:0] exu_lsu_wdata;
 
   // WBU out
-  logic wbu_valid, wbu_ready;
+  logic wbu_valid;
   logic [XLEN-1:0] wbu_npc;
-  logic wbu_pc_change, wbu_pc_retire;
+  logic wbu_pc_retire;
 
   // Reg out
   logic [XLEN-1:0] reg_rdata1, reg_rdata2;
@@ -195,7 +194,6 @@ module ysyx #(
       .load_retire(exu_load_retire),
       // <= wbu
       .npc(wbu_npc),
-      .pc_change(wbu_pc_change),
       .pc_retire(wbu_pc_retire),
 
       .out_inst(ifu_inst),
@@ -209,6 +207,8 @@ module ysyx #(
       .out_ifu_arvalid(ifu_arvalid),
       .ifu_rdata(bus_ifu_rdata),
       .ifu_rvalid(bus_ifu_rvalid),
+
+      .fence_i(iqu_wbu_if.fence_i),
 
       .prev_valid(wbu_valid),
       .next_ready(idu_ready),
@@ -292,8 +292,6 @@ module ysyx #(
       .iqu_exu_commit_if(iqu_exu_commit_if),
 
       .prev_valid(iqu_valid),
-      .next_ready(wbu_ready),
-      .out_valid (exu_valid),
       .out_ready (exu_ready),
 
       .reset(reset)
@@ -312,13 +310,10 @@ module ysyx #(
       .branch_retire(iqu_wbu_if.pc_retire),
 
       .out_npc(wbu_npc),
-      .out_change(wbu_pc_change),
       .out_retire(wbu_pc_retire),
 
       .prev_valid(iqu_wbu_if.valid),
-      .next_ready(ifu_ready),
       .out_valid (wbu_valid),
-      .out_ready (wbu_ready),
 
       .reset(reset)
   );
@@ -410,10 +405,11 @@ module ysyx #(
       .io_master_bready(io_master_bready),
 
       // ifu
-      .bus_ifu_ready(bus_ifu_ready),
+      .out_bus_ifu_ready(bus_ifu_ready),
       .ifu_araddr(ifu_araddr),
       .ifu_arvalid(ifu_arvalid),
       .ifu_lock(ifu_bus_lock),
+      .ifu_ready(ifu_ready),
       .out_ifu_rdata(bus_ifu_rdata),
       .out_ifu_rvalid(bus_ifu_rvalid),
       // lsu load

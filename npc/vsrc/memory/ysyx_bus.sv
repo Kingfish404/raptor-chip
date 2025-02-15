@@ -44,10 +44,11 @@ module ysyx_bus #(
     output       io_master_bready,  // reqired
 
     // ifu
-    output bus_ifu_ready,
+    output out_bus_ifu_ready,
     input [XLEN-1:0] ifu_araddr,
     input ifu_arvalid,
     input ifu_lock,
+    input ifu_ready,
     output [XLEN-1:0] out_ifu_rdata,
     output out_ifu_rvalid,
 
@@ -87,7 +88,6 @@ module ysyx_bus #(
 
   logic clint_arvalid, out_clint_arready;
   logic [XLEN-1:0] out_clint_rdata;
-  logic [1:0] out_clint_rresp;
   logic out_clint_rvalid;
 
   assign io_master_arid = 0;
@@ -97,14 +97,14 @@ module ysyx_bus #(
   assign io_master_awid = 0;
 
   state_load_t state_load;
-  assign bus_ifu_ready = state_load == IF_A;
+  assign out_bus_ifu_ready = state_load == IF_A;
   always @(posedge clock) begin
     if (reset) begin
       state_load <= IF_A;
     end else begin
       unique case (state_load)
         IF_A: begin
-          if (ifu_arvalid) begin
+          if (ifu_arvalid && ifu_ready) begin
             if (io_master_arready) begin
               state_load <= IF_D;
             end
@@ -255,31 +255,27 @@ module ysyx_bus #(
     `YSYX_ASSERT(io_master_bresp == 2'b00, "bresp == 2'b00");
     if (io_master_awvalid) begin
       `YSYX_DPI_C_NPC_DIFFTEST_MEM_DIFF
-      if (
-              (io_master_awaddr >= 'h10000000 && io_master_awaddr <= 'h10000005) ||
-              (io_master_awaddr >= 'h10001000 && io_master_awaddr <= 'h10001fff) ||
-              (io_master_awaddr >= 'h10002000 && io_master_awaddr <= 'h1000200f) ||
-              (io_master_awaddr >= 'h10011000 && io_master_awaddr <= 'h10011007) ||
-              (io_master_awaddr >= 'h21000000 && io_master_awaddr <= 'h211fffff) ||
-              (io_master_awaddr >= 'hc0000000) ||
-              (0)
-            )
-              begin
+      if ((io_master_awaddr >= 'h10000000 && io_master_awaddr <= 'h10000005) ||
+          (io_master_awaddr >= 'h10001000 && io_master_awaddr <= 'h10001fff) ||
+          (io_master_awaddr >= 'h10002000 && io_master_awaddr <= 'h1000200f) ||
+          (io_master_awaddr >= 'h10011000 && io_master_awaddr <= 'h10011007) ||
+          (io_master_awaddr >= 'h21000000 && io_master_awaddr <= 'h211fffff) ||
+          (io_master_awaddr >= 'hc0000000) ||
+          (0))
+        begin
         `YSYX_DPI_C_NPC_DIFFTEST_SKIP_REF
         // $display("DIFFTEST: skip ref at aw: %h", io_master_awaddr);
       end
     end
     if (io_master_arvalid) begin
-      if (
-                (io_master_araddr >= 'h10000000 && io_master_araddr <= 'h10000005) ||
-                (io_master_araddr >= 'h10001000 && io_master_araddr <= 'h10001fff) ||
-                (io_master_araddr >= 'h10002000 && io_master_araddr <= 'h1000200f) ||
-                (io_master_araddr >= 'h10011000 && io_master_araddr <= 'h10011007) ||
-                (io_master_araddr >= 'h21000000 && io_master_araddr <= 'h211fffff) ||
-                (io_master_araddr >= 'hc0000000) ||
-                (0)
-              )
-                begin
+      if ((io_master_araddr >= 'h10000000 && io_master_araddr <= 'h10000005) ||
+          (io_master_araddr >= 'h10001000 && io_master_araddr <= 'h10001fff) ||
+          (io_master_araddr >= 'h10002000 && io_master_araddr <= 'h1000200f) ||
+          (io_master_araddr >= 'h10011000 && io_master_araddr <= 'h10011007) ||
+          (io_master_araddr >= 'h21000000 && io_master_araddr <= 'h211fffff) ||
+          (io_master_araddr >= 'hc0000000) ||
+          (0))
+        begin
         `YSYX_DPI_C_NPC_DIFFTEST_SKIP_REF
         // $display("DIFFTEST: skip ref at ar: %h", io_master_araddr);
       end
@@ -294,7 +290,6 @@ module ysyx_bus #(
       .arvalid(clint_arvalid),
       .out_arready(out_clint_arready),
       .out_rdata(out_clint_rdata),
-      .out_rresp(out_clint_rresp),
       .out_rvalid(out_clint_rvalid)
   );
 endmodule

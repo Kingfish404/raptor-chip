@@ -31,9 +31,9 @@ void reg_display(int n)
     }
     printf("\n");
     printf(" mcause: " FMT_WORD_NO_PREFIX "  ", *npc.mcause);
-    printf(" mepc: " FMT_WORD_NO_PREFIX "\n", *npc.mepc);
-    printf(" mtvec: " FMT_WORD_NO_PREFIX "   ", *npc.mtvec);
-    printf(" mstatus: " FMT_WORD_NO_PREFIX "\n", *npc.mstatus);
+    printf("    mepc: " FMT_WORD_NO_PREFIX "\n", *npc.mepc);
+    printf("  mtvec: " FMT_WORD_NO_PREFIX "   ", *npc.mtvec);
+    printf("mstatus: " FMT_WORD_NO_PREFIX "\n", *npc.mstatus);
 }
 
 void isa_parser_elf(char *filename)

@@ -28,7 +28,7 @@ module ysyx_iqu #(
     exu_pipe_if.out iqu_exu_commit_if,
 
     // pipeline
-    output flush_pipeline,
+    output logic flush_pipeline,
 
     input prev_valid,
     input next_ready,
@@ -60,6 +60,7 @@ module ysyx_iqu #(
   logic uoq_system[QUEUE_SIZE];
   logic uoq_ecall[QUEUE_SIZE];
   logic uoq_ebreak[QUEUE_SIZE];
+  logic uoq_fence_i[QUEUE_SIZE];
   logic uoq_mret[QUEUE_SIZE];
   logic [2:0] uoq_csr_csw[QUEUE_SIZE];
 
@@ -85,19 +86,21 @@ module ysyx_iqu #(
   logic [4:0] rob_rd[ROB_SIZE];
   logic [31:0] rob_inst[ROB_SIZE];
   rob_state_t rob_state[ROB_SIZE];
-  logic [XLEN-1:0] rob_value[ROB_SIZE];
   logic [XLEN-1:0] rob_pc[ROB_SIZE];
   logic [XLEN-1:0] rob_pnpc[ROB_SIZE];
 
+  logic [XLEN-1:0] rob_value[ROB_SIZE];
   logic [XLEN-1:0] rob_npc[ROB_SIZE];
   logic rob_pc_change[ROB_SIZE];
   logic rob_pc_retire[ROB_SIZE];
-  logic rob_ebreak[ROB_SIZE];
 
   logic rob_csr_wen[ROB_SIZE];
   logic [XLEN-1:0] rob_csr_wdata[ROB_SIZE];
   logic [11:0] rob_csr_addr[ROB_SIZE];
+
   logic rob_ecall[ROB_SIZE];
+  logic rob_ebreak[ROB_SIZE];
+  logic rob_fence_i[ROB_SIZE];
   logic rob_mret[ROB_SIZE];
   // === re-order buffer (ROB) ===
 
@@ -130,6 +133,7 @@ module ysyx_iqu #(
         uoq_system[uoq_head]  <= idu_if.system;
         uoq_ecall[uoq_head]   <= idu_if.ecall;
         uoq_ebreak[uoq_head]  <= idu_if.ebreak;
+        uoq_fence_i[uoq_head] <= idu_if.fence_i;
         uoq_mret[uoq_head]    <= idu_if.mret;
         uoq_csr_csw[uoq_head] <= idu_if.csr_csw;
 
@@ -198,10 +202,8 @@ module ysyx_iqu #(
     iqu_exu_if.pc = uoq_pc[uoq_tail];
   end
 
-  logic [  $clog2(`YSYX_ROB_SIZE):0] dest;
   logic [$clog2(`YSYX_ROB_SIZE)-1:0] wb_dest;
-  assign dest = (exu_iqu_if.dest - 'h1);
-  assign wb_dest = dest[$clog2(`YSYX_ROB_SIZE)-1:0];
+  assign wb_dest = exu_iqu_if.dest[$clog2(`YSYX_ROB_SIZE)-1:0] - 1;
   always @(posedge clock) begin
     if (reset || flush_pipeline) begin
       rob_head <= 0;
@@ -221,11 +223,14 @@ module ysyx_iqu #(
 
         rob_tail <= rob_tail + 1;
         rob_busy[rob_tail] <= 1;
+        rob_rd[rob_tail] <= uoq_rd[uoq_tail];
         rob_inst[rob_tail] <= uoq_inst[uoq_tail];
         rob_state[rob_tail] <= EX;
-        rob_rd[rob_tail] <= uoq_rd[uoq_tail];
+
         rob_pc[rob_tail] <= uoq_pc[uoq_tail];
         rob_pnpc[rob_tail] <= uoq_pnpc[uoq_tail];
+
+        rob_fence_i[rob_tail] <= uoq_fence_i[uoq_tail];
       end
       if (exu_iqu_if.valid) begin
         // Execute result get
@@ -256,8 +261,11 @@ module ysyx_iqu #(
             rf_busy[rob_rd[rob_head][`YSYX_REG_LEN-1:0]] <= 0;
           end
         end
-        if ((rob_pc_change[rob_head] || rob_pc_retire[rob_head]) &&
-            (rob_npc[rob_head] != rob_pnpc[rob_head])) begin
+        if (
+          (rob_fence_i[rob_head]) ||
+          ((rob_pc_change[rob_head] || rob_pc_retire[rob_head]) &&
+            (rob_npc[rob_head] != rob_pnpc[rob_head]))
+          ) begin
           flush_pipeline <= 1;
         end
       end
@@ -267,13 +275,13 @@ module ysyx_iqu #(
   assign iqu_wbu_if.rd = rob_rd[rob_head];
   assign iqu_wbu_if.inst = rob_inst[rob_head];
   assign iqu_wbu_if.pc = rob_pc[rob_head];
-  assign iqu_wbu_if.pnpc = rob_pnpc[rob_head];
 
   assign iqu_wbu_if.result = rob_value[rob_head];
   assign iqu_wbu_if.npc = rob_npc[rob_head];
   assign iqu_wbu_if.pc_change = rob_pc_change[rob_head];
   assign iqu_wbu_if.pc_retire = rob_pc_retire[rob_head];
   assign iqu_wbu_if.ebreak = rob_ebreak[rob_head];
+  assign iqu_wbu_if.fence_i = rob_fence_i[rob_head];
   assign iqu_wbu_if.valid = rob_busy[rob_head] && rob_state[rob_head] == WB && !flush_pipeline;
 
   assign iqu_exu_commit_if.pc = rob_pc[rob_head];

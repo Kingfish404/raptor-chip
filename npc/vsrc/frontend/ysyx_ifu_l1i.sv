@@ -48,10 +48,13 @@ module ysyx_ifu_l1i #(
   logic l1i_cache_hit;
   logic ifu_sdram_arburst;
   logic received_flush_pipeline;
+  logic received_fence_i;
   logic [XLEN-1:0] reverse_pc_ifu;
 
   assign l1i_pc = received_flush_pipeline ? reverse_pc_ifu : pc_ifu;
-  assign l1i_valid = l1i_cache_hit && !flush_pipeline && !received_flush_pipeline;
+  assign l1i_valid = (
+    (l1i_cache_hit && !flush_pipeline) &&
+    (!received_flush_pipeline && !received_fence_i));
   assign l1i_ready = (l1i_state == IDLE);
   assign addr_tag = l1i_pc[XLEN-1:L1I_LEN+L1I_LINE_LEN+2];
   assign addr_idx = l1i_pc[L1I_LEN+L1I_LINE_LEN+2-1:L1I_LINE_LEN+2];
@@ -78,15 +81,15 @@ module ysyx_ifu_l1i #(
       l1i_state  <= IDLE;
       l1ic_valid <= 0;
     end else begin
-      if (flush_pipeline && (!l1i_cache_hit)) begin
+      if ((!l1i_cache_hit) && flush_pipeline) begin
         received_flush_pipeline <= 1;
         reverse_pc_ifu <= pc_ifu;
       end
+      if ((!l1i_cache_hit) && invalid_l1i) begin
+        received_fence_i <= 1;
+      end
       unique case (l1i_state)
         IDLE: begin
-          if (invalid_l1i) begin
-            l1ic_valid <= 0;
-          end
           if (out_ifu_arvalid && bus_ifu_ready) begin
             l1i_state <= RD_0;
           end
@@ -115,6 +118,10 @@ module ysyx_ifu_l1i #(
         WB_0: begin
           l1i_state <= IDLE;
           received_flush_pipeline <= 0;
+          if (received_fence_i) begin
+            l1ic_valid <= 0;
+            received_fence_i <= 0;
+          end
         end
         default begin
           l1i_state <= IDLE;

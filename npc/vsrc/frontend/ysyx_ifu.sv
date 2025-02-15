@@ -9,7 +9,6 @@ module ysyx_ifu #(
     input load_retire,
 
     input [XLEN-1:0] npc,
-    input pc_change,
     input pc_retire,
 
     output [XLEN-1:0] out_inst,
@@ -25,6 +24,9 @@ module ysyx_ifu #(
     output out_ifu_lock,
     input [XLEN-1:0] ifu_rdata,
     input ifu_rvalid,
+
+    // for iqu
+    input fence_i,
 
     input  prev_valid,
     input  next_ready,
@@ -42,7 +44,7 @@ module ysyx_ifu #(
 
   logic ifu_hazard;
   logic [6:0] opcode;
-  logic is_jalr, is_jal, is_b_type, is_branch, is_load, is_store, is_fencei, is_sys;
+  logic is_jalr, is_jal, is_b_type, is_branch, is_load, is_store, is_sys;
   logic valid;
 
   logic invalid_l1i;
@@ -60,7 +62,6 @@ module ysyx_ifu #(
   assign is_branch = (is_jal || is_jalr || is_b_type);
   assign is_load = (opcode == `YSYX_OP_IL_TYPE);
   assign is_store = (opcode == `YSYX_OP_S_TYPE_);
-  assign is_fencei = (out_inst == `YSYX_INST_FENCE_I);  // fence.i is system instruction
   assign is_sys = (opcode == `YSYX_OP_SYSTEM);
 
   assign valid =(l1i_valid && !ifu_hazard) && !flush_pipeline &&
@@ -131,8 +132,6 @@ module ysyx_ifu #(
     end
   end
 
-  assign invalid_l1i = valid && next_ready && is_fencei;
-
   ysyx_ifu_l1i l1i_cache (
       .clock(clock),
 
@@ -140,7 +139,7 @@ module ysyx_ifu #(
       .out_inst(l1_inst),
       .l1i_valid(l1i_valid),
       .l1i_ready(l1i_ready),
-      .invalid_l1i(invalid_l1i),
+      .invalid_l1i(fence_i),
       .flush_pipeline(flush_pipeline),
 
       // <=> bus
