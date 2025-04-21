@@ -110,8 +110,10 @@ Context *ucontext(AddrSpace *as, Area ustack, void *entry)
   csr.mstatus.mpp = PRV_U;
   csr.mstatus.sum = 1;
   csr.mstatus.mxr = 1;
+  csr.mstatus.mie = 1;
   c->mstatus = csr.val;
 #endif
   c->pdir = as->ptr;
+  c->np = PRV_U;
   return c;
 }

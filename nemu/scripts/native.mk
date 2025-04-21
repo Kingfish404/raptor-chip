@@ -31,7 +31,10 @@ override ARGS += $(ARGS_DIFF)
 IMG ?=
 NEMU_EXEC := $(BINARY) $(ARGS) $(IMG)
 
-run-env: $(BINARY) $(DIFF_REF_SO)
+$(CONFIG_ROM_DTB_PATH):
+	$(MAKE) -C $(NEMU_HOME)/src/memory/rom build_dtb
+
+run-env: $(BINARY) $(DIFF_REF_SO) $(CONFIG_ROM_DTB_PATH)
 
 run: run-env
 	$(call git_commit, "run NEMU")

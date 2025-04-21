@@ -56,12 +56,16 @@ static int cmd_q(char *args) {
   return -1;
 }
 
+static int cmd_info(char *args);
+
 static int cmd_si(char *args) {
   int n = 1;
   if (args != NULL) {
     sscanf(args, "%d", &n);
   }
   cpu_exec(n);
+  cmd_info("i");
+  cmd_info("r");
   return 0;
 }
 
@@ -177,6 +181,7 @@ static struct {
 } cmd_table [] = {
   { "help", "Display information about all supported commands", cmd_help },
   { "c", "Continue the execution of the program", cmd_c },
+  { "rs", "Run the execution of the program (same to `c`)", cmd_c },
   { "q", "Exit NEMU", cmd_q },
   { "si", "si/s [N]\tExecute 'N' instructions step by step. When N is not given, the default is 1.", cmd_si },
   { "info", "info/i SUBCMD\tPrint: register state by 'i r'. watchpoint information by 'i w'. instruction flow by 'i i'. function flow by 'i f", cmd_info },

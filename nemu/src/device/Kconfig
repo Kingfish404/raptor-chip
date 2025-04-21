@@ -33,6 +33,11 @@ config SERIAL_MMIO
 config SERIAL_INPUT_FIFO
   bool "Enable input FIFO with /tmp/nemu.serial"
   default n
+
+config SERIAL_MMIO_US16550
+  hex "MMIO address of the serial controller (US16550)"
+  default 0x10000000
+
 endif # HAS_SERIAL
 
 menuconfig HAS_TIMER
@@ -48,7 +53,16 @@ config RTC_PORT
 config RTC_MMIO
   hex "MMIO address of the timer"
   default 0x00000048
+
+config RTC_MMIO_CLINT
+  hex "MMIO address of the timer (CLINT)"
+  default 0x02000000
 endif # HAS_TIMER
+
+
+config PLIC_MMIO
+  hex "MMIO address of the PLIC"
+  default 0x0c000000
 
 menuconfig HAS_KEYBOARD
   bool "Enable keyboard"

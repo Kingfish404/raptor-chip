@@ -22,6 +22,10 @@
 #define PMEM_RIGHT ((paddr_t)CONFIG_MBASE + CONFIG_MSIZE - 1)
 #define RESET_VECTOR (PMEM_LEFT + CONFIG_PC_RESET_OFFSET)
 
+// https://github.com/qemu/qemu/blob/master/hw/riscv/virt.c
+static const uint64_t CONFIG_ROM_BASE = 0x00001000;
+#define CONFIG_ROM_SIZE 0x0000f000
+
 static const uint64_t CONFIG_SDRAM_BASE = 0xa0000000;
 #define CONFIG_SDRAM_SIZE 0x20000000
 
@@ -44,6 +48,11 @@ paddr_t sram_to_guest(uint8_t *haddr);
 
 uint8_t *guest_to_mrom(paddr_t paddr);
 paddr_t mrom_to_guest(uint8_t *haddr);
+
+static inline bool in_rom(paddr_t addr)
+{
+  return addr >= CONFIG_ROM_BASE && addr < CONFIG_ROM_BASE + CONFIG_ROM_SIZE;
+}
 
 static inline bool in_pmem(paddr_t addr)
 {

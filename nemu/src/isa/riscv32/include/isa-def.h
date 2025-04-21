@@ -19,33 +19,74 @@
 #include <common.h>
 
 // RISC-V privilege levels
-#define PRV_U 0
-#define PRV_S 1
-#define PRV_M 3
+enum PRV
+{
+  PRV_U = 0,
+  PRV_S = 1,
+  PRV_M = 3,
+};
 
-// RISC-V supervisor-level CSR addresses
-#define CSR_SATP 0x180
+#define CSR_MISA_VALUE 0x40141101
 
-// Machine Trap Settup
-#define CSR_MSTATUS 0x300
-#define CSR_MTVEC 0x305
+enum CSR
+{
+  // RISC-V supervisor-level CSR addresses
+  CSR_SSTATUS = 0x100,
+  CSR_SIE = 0x104,
+  CSR_STVEC = 0x105,
 
-// Machine Trap Handling
-#define CSR_MEPC 0x341
-#define CSR_MCAUSE 0x342
+  CSR_SCOUNTEREN = 0x106,
+
+  CSR_SSCRATCH = 0x140,
+  CSR_SEPC = 0x141,
+  CSR_SCAUSE = 0x142,
+  CSR_STVAL = 0x143,
+  CSR_SIP = 0x144,
+  CSR_SATP = 0x180,
+
+  // Machine Trap Settup
+  CSR_MSTATUS = 0x300,
+  CSR_MISA = 0x301,
+  CSR_MEDELEG = 0x302,
+  CSR_MIDELEG = 0x303,
+  CSR_MIE = 0x304,
+  CSR_MTVEC = 0x305,
+
+  CSR_MSTATUSH = 0x310,
+
+  // Machine Trap Handling
+  CSR_MSCRATCH = 0x340,
+  CSR_MEPC = 0x341,
+  CSR_MCAUSE = 0x342,
+  CSR_MTVAL = 0x343,
+  CSR_MIP = 0x344,
+
+  CSR_MCYCLE = 0xb00,
+  CSR_TIME = 0xc01,
+  CSR_TIMEH = 0xc81,
+
+  // Machine Information Registers
+  CSR_MVENDORID = 0xf11,
+  CSR_MARCHID = 0xf12,
+  CSR_IMPID = 0xf13,
+  CSR_MHARTID = 0xf14,
+};
 
 // CSR_MSTATUS FLAGS
-#define CSR_MSTATUS_MPP 0x1800
-#define CSR_MSTATUS_MPIE 0x80
-#define CSR_MSTATUS_MIE 0x8
-
-// Machine Information Registers
-#define CSR_MVENDORID 0xf11
-#define CSR_MARCHID 0xf12
+enum CSR_MSTATUS
+{
+  CSR_MSTATUS_MPRV = 0x20000,
+  CSR_MSTATUS_MPP = 0x1800,
+  CSR_MSTATUS_SPP = 0x100,
+  CSR_MSTATUS_MPIE = 0x80,
+  CSR_MSTATUS_MIE = 0x8,
+};
 
 #if defined(CONFIG_RV64)
 #error "RV64 is not supported"
+#define XLEN 64
 #else
+#define XLEN 32
 // !important: only Little-Endian is supported
 typedef union
 {
@@ -79,9 +120,98 @@ typedef union
     word_t asid : 9;
     word_t mode : 1;
   } satp;
+  struct
+  {
+    word_t rev1 : 1;
+    word_t ssie : 1;
+    word_t rev2 : 3;
+    word_t stie : 1;
+    word_t rev3 : 3;
+    word_t seie : 1;
+    word_t rev4 : 3;
+    word_t lcofie : 1;
+  } sie;
+  struct
+  {
+    word_t rev1 : 1;
+    word_t ssie : 1;
+    word_t rev2 : 3;
+    word_t stie : 1;
+    word_t vstie : 1;
+    word_t mtie : 1;
+    word_t rev3 : 1;
+    word_t seie : 1;
+    word_t vseie : 1;
+    word_t mteie : 1;
+    word_t sgeie : 1;
+    word_t lcofie : 1;
+  } mie;
   word_t val;
 } csr_t;
 #endif
+
+// Machine cause register (mcause) values after trap.
+enum MCAUSE
+{
+  MCA_SUP_SOF_INT = 1 | (1 << (XLEN - 1)),
+  MCA_MAC_SOF_INT = 3 | (1 << (XLEN - 1)),
+
+  MCA_SUP_TIM_INT = 5 | (1 << (XLEN - 1)),
+  MCA_MAC_TIM_INT = 7 | (1 << (XLEN - 1)),
+
+  MCA_SUP_EXT_INT = 9 | (1 << (XLEN - 1)),
+  MCA_MAC_EXT_INT = 11 | (1 << (XLEN - 1)),
+
+  MCA_COU_OVE_INT = 13 | (1 << (XLEN - 1)),
+
+  MCA_INS_ADD_MIS = 0,
+  MCA_INS_ACC_FAU = 1,
+  MCA_ILL_INS = 2,
+  MCA_BRE = 3,
+  MCA_LOA_ADD_MIS = 4,
+  MCA_LOA_ACC_FAU = 5,
+  MCA_STO_ADD_MIS = 6,
+  MCA_STO_ACC_FAU = 7,
+  MCA_ENV_CAL_UMO = 8,
+  MCA_ENV_CAL_SMO = 9,
+
+  MCA_ENV_CAL_MMO = 11,
+  MCA_INS_PAG_FAU = 12,
+  MCA_LOA_PAG_FAU = 13,
+
+  MCA_STO_PAG_FAU = 15,
+  MCA_SOF_CHE = 18,
+  MCA_HAR_ERR = 19,
+};
+
+// Supervisor cause register (scause) values after trap.
+enum SCAUSE
+{
+  SCA_SUP_SOF_INT = 1 | (1 << (XLEN - 1)),
+  SCA_SUP_TIM_INT = 5 | (1 << (XLEN - 1)),
+
+  SCA_SUP_EXT_INT = 9 | (1 << (XLEN - 1)),
+  SCA_COU_OVE_INT = 11 | (1 << (XLEN - 1)),
+
+  SCA_INS_ADD_MIS = 0,
+  SCA_INS_ACC_FAU = 1,
+  SCA_ILL_INS = 2,
+  SCA_BRE = 3,
+  SCA_LOA_ADD_MIS = 4,
+  SCA_LOA_ACC_FAU = 5,
+  SCA_STO_ADD_MIS = 6,
+  SCA_STO_ACC_FAU = 7,
+  SCA_ENV_CAL_UMO = 8,
+  SCA_ENV_CAL_SMO = 9,
+
+  SCA_INS_PAG_FAU = 12,
+  SCA_LOA_PAG_FAU = 13,
+
+  SCA_STO_PAG_FAU = 15,
+
+  SCA_SOF_CHE = 18,
+  SCA_HAR_ERR = 19,
+};
 
 #define CSR_SET__(REG, BIT_MASK) \
   {                              \
@@ -113,6 +243,10 @@ typedef struct
   vaddr_t cpc; // for difftest.ref
   uint32_t inst;
   uint32_t priv;
+  bool intr;
+  uint32_t last_inst_priv;
+  uint64_t mtimecmp;
+  vaddr_t reservation;
 } MUXDEF(CONFIG_RV64, riscv64_CPU_state, riscv32_CPU_state);
 
 // decode

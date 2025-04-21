@@ -16,6 +16,8 @@
 #include <isa.h>
 #include <memory/paddr.h>
 
+extern char *btb_file;
+
 void init_rand();
 void init_log(const char *log_file);
 void init_mem();
@@ -74,6 +76,18 @@ static long load_img() {
   return size;
 }
 
+void usage(int argc, char *argv[]) {
+  printf("Usage: %s [OPTION...] IMAGE [args]\n\n", argv[0]);
+  printf("\t-b,--batch              run with batch mode\n");
+  printf("\t-l,--log=FILE           output log to FILE\n");
+  printf("\t-d,--diff=REF_SO        run DiffTest with reference REF_SO\n");
+  printf("\t-p,--port=PORT          run DiffTest with port PORT\n");
+  printf("\t-e,--elf=ELF_FILE       add ELF_FILE for ftrace\n");
+  printf("\t-t,--tree=BTB_FILE      add BTB_FILE for rom\n");
+  printf("\t-n,--none               do nothing\n");
+  printf("\n");
+}
+
 static int parse_args(int argc, char *argv[]) {
   const struct option table[] = {
     {"batch"    , no_argument      , NULL, 'b'},
@@ -82,12 +96,17 @@ static int parse_args(int argc, char *argv[]) {
     {"diff"     , required_argument, NULL, 'd'},
     {"port"     , required_argument, NULL, 'p'},
     {"elf"      , required_argument, NULL, 'e'},
+    {"tree"     , required_argument, NULL, 't'},
     {"none"     , no_argument      , NULL, 'n'},
     {"help"     , no_argument      , NULL, 'h'},
     {0          , 0                , NULL,  0 },
   };
   int o;
-  while ( (o = getopt_long(argc, argv, "-bfhl:d:p:e:n", table, NULL)) != -1) {
+  if (argc == 1) {
+    usage(argc, argv);
+    exit(0);
+  }
+  while ( (o = getopt_long(argc, argv, "-bfl:d:p:e:t:hn", table, NULL)) != -1) {
     switch (o) {
       case 'b': sdb_set_batch_mode(); break;
       case 'f': boot_from_flash = 1; break;
@@ -95,17 +114,12 @@ static int parse_args(int argc, char *argv[]) {
       case 'l': log_file = optarg; break;
       case 'd': diff_so_file = optarg; break;
       case 'e': isa_parser_elf(optarg); break;
+      case 't': btb_file = optarg; break;
       case 'n': break;
       case 1: img_file = optarg; return 0;
+      case 0:
       default:
-        printf("Usage: %s [OPTION...] IMAGE [args]\n\n", argv[0]);
-        printf("\t-b,--batch              run with batch mode\n");
-        printf("\t-l,--log=FILE           output log to FILE\n");
-        printf("\t-d,--diff=REF_SO        run DiffTest with reference REF_SO\n");
-        printf("\t-p,--port=PORT          run DiffTest with port PORT\n");
-        printf("\t-e,--elf=ELF_FILE       add ELF_FILE for ftrace\n");
-        printf("\t-n,--none               do nothing\n");
-        printf("\n");
+        usage(argc, argv);
         exit(0);
     }
   }

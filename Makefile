@@ -25,15 +25,15 @@ define git_commit
 endef
 
 .git_commit:
-	-@while (test -e .git/index.lock); do sleep 0.1; done;               `# wait for other git instances`
-	-@git branch $(TRACER_BRANCH) -q 2>/dev/null || true                 `# create tracer branch if not existent`
-	-@cp -a .git/index $(WORK_INDEX)                                     `# backup git index`
-	-@$(call git_soft_checkout, $(TRACER_BRANCH))                        `# switch to tracer branch`
-	-@git add . -A --ignore-errors                                       `# add files to commit`
-	-@(echo "> $(MSG)" && echo $(STUID) $(STUNAME) && uname -a && uptime `# generate commit msg`) \
-	                | git commit -F - $(GITFLAGS)                        `# commit changes in tracer branch`
-	-@$(call git_soft_checkout, $(WORK_BRANCH))                          `# switch to work branch`
-	-@mv $(WORK_INDEX) .git/index                                        `# restore git index`
+	# -@while (test -e .git/index.lock); do sleep 0.1; done;               `# wait for other git instances`
+	# -@git branch $(TRACER_BRANCH) -q 2>/dev/null || true                 `# create tracer branch if not existent`
+	# -@cp -a .git/index $(WORK_INDEX)                                     `# backup git index`
+	# -@$(call git_soft_checkout, $(TRACER_BRANCH))                        `# switch to tracer branch`
+	# -@git add . -A --ignore-errors                                       `# add files to commit`
+	# -@(echo "> $(MSG)" && echo $(STUID) $(STUNAME) && uname -a && uptime `# generate commit msg`) \
+	#                 | git commit -F - $(GITFLAGS)                        `# commit changes in tracer branch`
+	# -@$(call git_soft_checkout, $(WORK_BRANCH))                          `# switch to work branch`
+	# -@mv $(WORK_INDEX) .git/index                                        `# restore git index`
 
 .clean_index:
 	rm -f $(WORK_INDEX)

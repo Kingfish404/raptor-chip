@@ -37,6 +37,9 @@ static void restart()
   {
     cpu.pc = CONFIG_FLASH_BASE;
   }
+#if defined(CONFIG_ROM_DTB)
+  cpu.pc = CONFIG_ROM_BASE;
+#endif
 
   /* The zero register is always 0. */
   cpu.gpr[0] = 0;
@@ -44,7 +47,10 @@ static void restart()
   /* Setting the machine information */
   cpu.sr[CSR_MVENDORID] = 0x79737978;
   cpu.sr[CSR_MARCHID] = 0x015fde77;
+  cpu.sr[CSR_MISA] = CSR_MISA_VALUE;
   cpu.priv = PRV_M;
+  cpu.last_inst_priv = PRV_M;
+  cpu.reservation = 0;
 }
 
 void init_isa()

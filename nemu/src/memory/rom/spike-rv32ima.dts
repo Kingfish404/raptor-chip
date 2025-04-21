@@ -1,0 +1,83 @@
+/dts-v1/;
+
+/ {
+	#address-cells = <0x02>;
+	#size-cells = <0x02>;
+	compatible = "ucbbar,spike-bare-dev";
+	model = "ucbbar,spike-bare";
+
+	chosen {
+		stdout-path = "/soc/ns16550@10000000";
+		bootargs = "console=ttyS0 earlycon init=/init";
+	};
+
+	cpus {
+		#address-cells = <0x01>;
+		#size-cells = <0x00>;
+		timebase-frequency = <0x989680>;
+
+		cpu@0 {
+			device_type = "cpu";
+			reg = <0x00>;
+			status = "okay";
+			compatible = "riscv";
+			riscv,isa = "rv32ima_zicsr_zifencei_zicntr";
+			mmu-type = "riscv,sv32";
+			riscv,pmpregions = <0x10>;
+			riscv,pmpgranularity = <0x04>;
+			clock-frequency = <0x3b9aca00>;
+
+			interrupt-controller {
+				#address-cells = <0x02>;
+				#interrupt-cells = <0x01>;
+				interrupt-controller;
+				compatible = "riscv,cpu-intc";
+				phandle = <0x01>;
+			};
+		};
+	};
+
+	memory@80000000 {
+		device_type = "memory";
+		reg = <0x00 0x80000000 0x00 0x8000000>;
+	};
+
+	soc {
+		#address-cells = <0x02>;
+		#size-cells = <0x02>;
+		compatible = "ucbbar,spike-bare-soc", "simple-bus";
+		ranges;
+
+		clint@2000000 {
+			compatible = "riscv,clint0";
+			interrupts-extended = <0x01 0x03 0x01 0x07>;
+			reg = <0x00 0x2000000 0x00 0xc0000>;
+		};
+
+		plic@c000000 {
+			compatible = "riscv,plic0";
+			#address-cells = <0x02>;
+			interrupts-extended = <0x01 0x0b 0x01 0x09>;
+			reg = <0x00 0xc000000 0x00 0x1000000>;
+			riscv,ndev = <0x1f>;
+			riscv,max-priority = <0x0f>;
+			#interrupt-cells = <0x01>;
+			interrupt-controller;
+			phandle = <0x02>;
+		};
+
+		ns16550@10000000 {
+			compatible = "ns16550a";
+			clock-frequency = <0x989680>;
+			interrupt-parent = <0x02>;
+			interrupts = <0x01>;
+			reg = <0x00 0x10000000 0x00 0x100>;
+			reg-shift = <0x00>;
+			reg-io-width = <0x01>;
+		};
+	};
+
+	htif {
+		compatible = "ucb,htif0";
+	};
+};

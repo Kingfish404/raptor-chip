@@ -12,6 +12,7 @@
 !README.md
 !.gitignore
 !init.sh
+!environment.env
 !/.github/workflows/*
 !Dockerfile
 /fceux-am

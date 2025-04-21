@@ -40,6 +40,13 @@ struct diff_context_t {
   word_t sr[4096];
   word_t gpr[MUXDEF(CONFIG_RVE, 16, 32)];
   word_t pc;
+  word_t cpc;
+  uint32_t inst;
+  uint32_t priv;
+  bool intr;
+  uint32_t last_inst_priv;
+  uint64_t mtimecmp;
+  vaddr_t reservation;
 };
 
 static sim_t* s = NULL;
@@ -57,30 +64,70 @@ void sim_t::diff_step(uint64_t n) {
 
 void sim_t::diff_get_regs(void* diff_context) {
   struct diff_context_t* ctx = (struct diff_context_t*)diff_context;
+  ctx->pc = state->pc;
   for (int i = 0; i < NR_GPR; i++) {
     ctx->gpr[i] = state->XPR[i];
   }
-  ctx->pc = state->pc;
+  ctx->sr[CSR_SSTATUS] = state->sstatus->read();
+  ctx->sr[CSR_SIE] = state->csrmap[CSR_SIE]->read();
+  ctx->sr[CSR_STVEC] = state->stvec->read();
+
+  ctx->sr[CSR_SSCRATCH] = state->csrmap[CSR_SSCRATCH]->read();
+  ctx->sr[CSR_SEPC] = state->sepc->read();
+  ctx->sr[CSR_SCAUSE] = state->scause->read();
+  ctx->sr[CSR_STVAL] = state->stval->read();
+  ctx->sr[CSR_SIP] = state->csrmap[CSR_SIP]->read();
   ctx->sr[CSR_SATP] = state->satp->read();
 
-  ctx->sr[CSR_MEPC] = state->mepc->read();
+  ctx->sr[CSR_MSTATUSH] = state->mstatush->read();
   ctx->sr[CSR_MSTATUS] = state->mstatus->read();
-  ctx->sr[CSR_MCAUSE] = state->mcause->read();
+  ctx->sr[CSR_MEDELEG] = state->medeleg->read();
+  ctx->sr[CSR_MIDELEG] = state->mideleg->read();
+  ctx->sr[CSR_MIE] = state->mie->read();
   ctx->sr[CSR_MTVEC] = state->mtvec->read();
+
+  ctx->sr[CSR_MSCRATCH] = state->csrmap[CSR_MSCRATCH]->read();
+  ctx->sr[CSR_MEPC] = state->mepc->read();
+  ctx->sr[CSR_MCAUSE] = state->mcause->read();
+  ctx->sr[CSR_MTVAL] = state->mtval->read();
+  ctx->sr[CSR_MIP] = state->csrmap[CSR_MIP]->read();
+
+  ctx->priv = state->prv;
 }
 
 void sim_t::diff_set_regs(void* diff_context) {
   struct diff_context_t* ctx = (struct diff_context_t*)diff_context;
+  state->pc = ctx->pc;
   for (int i = 0; i < NR_GPR; i++) {
     state->XPR.write(i, (sword_t)ctx->gpr[i]);
   }
-  state->pc = ctx->pc;
+  state->sstatus->write(ctx->sr[CSR_SSTATUS]);
+  state->csrmap[CSR_SIE]->write(ctx->sr[CSR_SIE]);
+  state->stvec->write(ctx->sr[CSR_STVEC]);
+
+  state->csrmap[CSR_SSCRATCH]->write(ctx->sr[CSR_SSCRATCH]);
+  state->sepc->write(ctx->sr[CSR_SEPC]);
+  state->scause->write(ctx->sr[CSR_SCAUSE]);
+  state->stval->write(ctx->sr[CSR_STVAL]);
+  state->csrmap[CSR_SIP]->write(ctx->sr[CSR_SIP]);
   state->satp->write(ctx->sr[CSR_SATP]);
 
-  state->mepc->write(ctx->sr[CSR_MEPC]);
+  state->mstatush->write(ctx->sr[CSR_MSTATUSH]);
   state->mstatus->write(ctx->sr[CSR_MSTATUS]);
-  state->mcause->write(ctx->sr[CSR_MCAUSE]);
+  state->medeleg->write(ctx->sr[CSR_MEDELEG]);
+  state->mideleg->write(ctx->sr[CSR_MIDELEG]);
+  state->mie->write(ctx->sr[CSR_MIE]);
   state->mtvec->write(ctx->sr[CSR_MTVEC]);
+
+  state->csrmap[CSR_MSCRATCH]->write(ctx->sr[CSR_MSCRATCH]);
+  state->mepc->write(ctx->sr[CSR_MEPC]);
+  state->mcause->write(ctx->sr[CSR_MCAUSE]);
+  state->mtval->write(ctx->sr[CSR_MTVAL]);
+  state->csrmap[CSR_MIP]->write(ctx->sr[CSR_MIP]);
+
+  state->misa->write(ctx->sr[CSR_MISA]);
+  
+  state->prv = ctx->priv;
 }
 
 void sim_t::diff_memcpy(reg_t dest, void* src, size_t n) {

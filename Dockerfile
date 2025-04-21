@@ -1,4 +1,4 @@
-FROM --platform=linux/amd64 homebrew/brew:latest
+FROM --platform=linux/amd64 homebrew/ubuntu24.04
 
 RUN brew install verilator yosys mill
 RUN sudo apt update && \
@@ -7,7 +7,7 @@ RUN sudo apt update && \
     wget cmake curl llvm \
     tcl-dev tcl-tclreadline libeigen3-dev swig bison automake autotools-dev \
     libsdl2-dev libsdl2-image-dev libsdl2-ttf-dev flex \
-    libreadline-dev libncurses5-dev libncursesw5-dev
+    libreadline-dev libncurses5-dev libncursesw5-dev device-tree-compiler
 
 WORKDIR /app
 RUN git clone https://github.com/Kingfish404/ysyx-workbench

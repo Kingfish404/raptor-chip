@@ -8,12 +8,23 @@
 #endif
 
 // RISC-V privilege levels
-#define PRV_U 0x0
-#define PRV_S 0x1
-#define PRV_M 0x3
+enum
+{
+  PRV_U = 0,
+  PRV_S = 1,
+  PRV_M = 3,
+};
 
 // RISC-V PTE fields
 #define PTE_G 0x20
+
+#define PTE_V 0x01
+#define PTE_R 0x02
+#define PTE_W 0x04
+#define PTE_X 0x08
+#define PTE_U 0x10
+#define PTE_A 0x40
+#define PTE_D 0x80
 
 enum
 {
@@ -82,8 +93,10 @@ typedef union
 
 struct Context
 {
-  uintptr_t gpr[NR_REGS], mcause, mstatus, mepc;
+  uintptr_t gpr[NR_REGS];
+  uintptr_t mcause, mstatus, mepc;
   void *pdir;
+  uintptr_t np;
 };
 
 #ifdef __riscv_e

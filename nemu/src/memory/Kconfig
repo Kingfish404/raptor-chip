@@ -1,5 +1,28 @@
 menu "Memory Configuration"
 
+config ROM
+  bool "Enable ROM"
+  default y
+  help
+    Enable ROM for the system. This is used for storing the bootloader
+    and other system firmware.
+
+config ROM_DTB
+  bool "Enable ROM DTB"
+  depends on !TARGET_AM
+  depends on ROM
+  default n
+  help
+    Enable ROM DTB for the system. This is used for storing the device
+    tree blob.
+
+config ROM_DTB_PATH
+  string "Path to ROM DTB"
+  depends on ROM_DTB
+  default "./src/memory/rom/spike-rv32ima.dtb"
+  help
+    Specify the path to the device tree blob file.
+
 config MBASE
   hex "Memory base address"
   default 0x0        if ISA_x86

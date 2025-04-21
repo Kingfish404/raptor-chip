@@ -13,14 +13,46 @@
  * See the Mulan PSL v2 for more details.
  ***************************************************************************************/
 
+#include <setjmp.h>
 #include <isa.h>
 #include <memory/paddr.h>
 
+extern jmp_buf exec_jmp_buf;
+extern int cause;
+
 extern FILE *mem_trace;
+
+word_t g_vaddr = 0;
+
+word_t get_paddr(vaddr_t addr, int len)
+{
+  paddr_t paddr = addr;
+  if (paddr == 0)
+  {
+    cause = MCA_INS_ACC_FAU;
+    longjmp(exec_jmp_buf, 20);
+  }
+  if (isa_mmu_check(addr, len, MEM_TYPE_IFETCH) == MMU_DIRECT)
+  {
+    paddr = addr;
+  }
+  else
+  {
+    // printf("ir = " FMT_WORD "\n", addr);
+    paddr = isa_mmu_translate(addr, len, MEM_TYPE_IFETCH);
+  }
+  return paddr;
+}
 
 word_t vaddr_ifetch(vaddr_t addr, int len)
 {
+  g_vaddr = addr;
   paddr_t paddr = addr;
+  if (paddr == 0)
+  {
+    cause = MCA_INS_ACC_FAU;
+    longjmp(exec_jmp_buf, 20);
+  }
   if (isa_mmu_check(addr, len, MEM_TYPE_IFETCH) == MMU_DIRECT)
   {
     paddr = addr;
@@ -35,6 +67,12 @@ word_t vaddr_ifetch(vaddr_t addr, int len)
 
 word_t vaddr_read(vaddr_t addr, int len)
 {
+  g_vaddr = addr;
+  if ((addr % len) != 0)
+  {
+    cause = MCA_LOA_ADD_MIS;
+    longjmp(exec_jmp_buf, 21);
+  }
   if (mem_trace != NULL)
   {
     fprintf(mem_trace, FMT_WORD_NO_PREFIX "-%c\n", addr, 'r');
@@ -54,6 +92,12 @@ word_t vaddr_read(vaddr_t addr, int len)
 
 void vaddr_write(vaddr_t addr, int len, word_t data)
 {
+  g_vaddr = addr;
+  if ((addr % len) != 0)
+  {
+    cause = MCA_STO_ADD_MIS;
+    longjmp(exec_jmp_buf, 21);
+  }
   if (mem_trace != NULL)
   {
     fprintf(mem_trace, FMT_WORD_NO_PREFIX "-%c\n", addr, 'w');
@@ -69,6 +113,10 @@ void vaddr_write(vaddr_t addr, int len, word_t data)
     paddr = isa_mmu_translate(addr, len, MEM_TYPE_WRITE);
   }
   paddr_write(paddr, len, data);
+  if ((cpu.reservation & ~0x3) == (paddr & ~0x3))
+  {
+    cpu.reservation = 0;
+  }
 }
 
 void vaddr_show(vaddr_t addr, int n)

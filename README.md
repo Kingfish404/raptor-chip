@@ -10,6 +10,8 @@ Candidate ip core name: `bird-0.1.0-sparrow`.
 
 [RISC-V]: https://riscv.org/
 
+**[Core Documentation](./docs/README.md)**
+
 ## Microarchitecture
 
 ![](./docs/assets/npc-rv32im-o3-pipeline.svg)
@@ -17,22 +19,28 @@ Candidate ip core name: `bird-0.1.0-sparrow`.
 ## Preparation
 
 ```shell
-# macOS or Linux(debian/ubuntu/fedora)
-# install brew https://brew.sh/
-brew install verilator sdl2 sdl2_image sdl2_ttf flex
+# macOS or Linux(debian/ubuntu/fedora), install brew https://brew.sh/
+brew install verilator yosys mill
+
+# using riscv's homebrew tap
 brew tap riscv-software-src/riscv
 brew install riscv-tools
-brew install readline ncurses llvm yosys
+# or using homebrew's cask
+brew install riscv64-elf-binutils riscv64-elf-gcc riscv64-elf-gdb
+
+brew install readline sdl2 sdl2_image sdl2_ttf flex ncurses llvm gnu-sed
+brew install dtc # device tree compiler
 # devlopment tools
 brew install surfer # Waveform viewer, supporting VCD, FST, or GHW format
 brew install scons  # for rt-thread-am
 brew install colima # for macOS to run Linux container
 
 # debian/ubuntu
-apt-get install verilator libsdl2-dev libsdl2-image-dev libsdl2-ttf-dev flex
 apt-get install gcc-riscv64-linux-gnu
+apt-get install verilator libsdl2-dev libsdl2-image-dev libsdl2-ttf-dev flex
 sudo apt-get install libreadline-dev flock
-sudo apt-get install llvm
+sudo apt-get install libncurses5-dev llvm
+sudo apt-get install device-tree-compiler
 
 # clone mono repository
 git clone https://github.com/kingfish404/am-kernels
@@ -47,25 +55,12 @@ wget https://github.com/chipsalliance/espresso/releases/download/v2.4/arm64-appl
 make verilog
 ```
 
-## Environment Variables
-
-```shell 
-export YSYX_HOME=[path to ysyx-workbench]
-
-export NEMU_HOME=$YSYX_HOME/nemu
-
-export AM_HOME=$YSYX_HOME/abstract-machine
-export NPC_HOME=$YSYX_HOME/npc
-export NVBOARD_HOME=$YSYX_HOME/nvboard
-export NAVY_HOME=$YSYX_HOME/navy-apps
-
-export ISA=riscv32
-export CROSS_COMPILE=riscv64-unknown-elf-
-```
-
 ## Build and Run
 
 ```shell
+# 0. environment variables at project root directory
+source ./environment.env
+
 # 1. build and run NEMU
 cd $NEMU_HOME && make menuconfig && make && make run
 
@@ -101,6 +96,23 @@ cd $YSYX_HOME/am-kernels/benchmarks/microbench && \
 ## package all sv files into one
 cd npc && make build_packed
 ```
+
+## Run opensbi & Kernel
+
+change line 302 from `PLATFORM_RISCV_ISA := rv$(PLATFORM_RISCV_XLEN)imafdc` to `PLATFORM_RISCV_ISA := rv$(PLATFORM_RISCV_XLEN)ima`
+```shell
+git clone https://github.com/riscv-software-src/opensbihttps://github.com/riscv-software-src/opensbi
+
+# linux using sed
+sed -i '302s/PLATFORM_RISCV_ISA := rv$(PLATFORM_RISCV_XLEN)imafdc/PLATFORM_RISCV_ISA := rv$(PLATFORM_RISCV_XLEN)ima/' Makefile
+# macos with gsed `brew install gnu-sed`
+gsed -i '302s/PLATFORM_RISCV_ISA := rv$(PLATFORM_RISCV_XLEN)imafdc/PLATFORM_RISCV_ISA := rv$(PLATFORM_RISCV_XLEN)ima/' Makefile
+
+make PLATFORM_RISCV_XLEN=32 PLATFORM=generic -j`nproc`
+# then run the `make run IMG=../opensbi/build/generic/fw_payload.bin` at `$YSYX_HOME/nemu` to run the opensbi
+```
+
+Boot [Linux Kernel](./docs/linux_kernel.md)
 
 ## Reference
 
