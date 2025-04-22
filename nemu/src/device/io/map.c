@@ -19,7 +19,7 @@
 #include <memory/vaddr.h>
 #include <device/map.h>
 
-#define IO_SPACE_MAX (2 * 0x01000000) // 2 * 16MB
+#define IO_SPACE_MAX (32 * 1024 * 1024) // 32 * 1MB
 
 extern jmp_buf exec_jmp_buf;
 extern int cause;

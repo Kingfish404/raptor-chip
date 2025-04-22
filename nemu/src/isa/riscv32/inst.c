@@ -168,7 +168,7 @@ bool csr_valid(Decode *s, uint16_t csr)
 
 static void decode_operand(Decode *s, int *rd, int *rs, word_t *src1, word_t *src2, word_t *imm, int type)
 {
-  uint32_t i = s->isa.inst.val;
+  uint32_t i = s->isa.inst;
   uint32_t rs1 = BITS(i, 19, 15);
   uint32_t rs2 = BITS(i, 24, 20);
   *rd = BITS(i, 11, 7);
@@ -203,6 +203,10 @@ static void decode_operand(Decode *s, int *rd, int *rs, word_t *src1, word_t *sr
   case TYPE_J:
     immJ();
     break;
+  case TYPE_N:
+    break;
+  default:
+    panic("unsupported type = %d", type);
   }
 }
 
@@ -217,13 +221,13 @@ static void decode_operand(Decode *s, int *rd, int *rs, word_t *src1, word_t *sr
  */
 static int decode_exec(Decode *s)
 {
-  int rd = 0, rs1 = 0;
-  word_t src1 = 0, src2 = 0, imm = 0;
   s->dnpc = s->snpc;
 
-#define INSTPAT_INST(s) ((s)->isa.inst.val)
+#define INSTPAT_INST(s) ((s)->isa.inst)
 #define INSTPAT_MATCH(s, name, type, ... /* execute body */)               \
   {                                                                        \
+    int rd = 0, rs1 = 0;                                                   \
+    word_t src1 = 0, src2 = 0, imm = 0;                                    \
     decode_operand(s, &rd, &rs1, &src1, &src2, &imm, concat(TYPE_, type)); \
     __VA_ARGS__;                                                           \
   }
@@ -451,16 +455,16 @@ static int decode_exec(Decode *s)
 
   R(0) = 0; // reset $zero to 0
 
-  uint32_t opcode = BITS(s->isa.inst.val, 6, 0);
+  uint32_t opcode = BITS(s->isa.inst, 6, 0);
   // jalr: 0b1100111 ; jal: 0b1101111
   if (opcode == 0b1100111 || opcode == 0b1101111 ||
-      s->isa.inst.val == 0x00000073 || s->isa.inst.val == 0x30200073)
+      s->isa.inst == 0x00000073 || s->isa.inst == 0x30200073)
   {
     ftracebuf[ftracehead].pc = s->pc;
     ftracebuf[ftracehead].npc = s->dnpc;
     // jalr x0, 0(x1): 0x00008067, a.k.a. ret
     // mret: 0x30200073
-    if (s->isa.inst.val == 0x00008067 || s->isa.inst.val == 0x30200073)
+    if (s->isa.inst == 0x00008067 || s->isa.inst == 0x30200073)
     {
       ftracebuf[ftracehead].ret = true;
       ftracedepth--;
@@ -490,15 +494,15 @@ int isa_exec_once(Decode *s)
     s->dnpc = isa_raise_intr(cause, s->pc);
     return 0;
   }
-  s->isa.inst.val = inst_fetch(&s->snpc, 4);
-  cpu.inst = s->isa.inst.val;
+  s->isa.inst = inst_fetch(&s->snpc, 4);
+  cpu.inst = s->isa.inst;
 
   // instruction decode and execute
   jmp_value = setjmp(exec_jmp_buf);
   if (jmp_value)
   {
     // printf("de longjmp(%2d), cause: %d, pc: " FMT_WORD_NO_PREFIX ", inst: " FMT_WORD_NO_PREFIX "\n",
-    //        jmp_value, cause, s->pc, s->isa.inst.val);
+    //        jmp_value, cause, s->pc, s->isa.inst);
     s->dnpc = isa_raise_intr(cause, s->pc);
     return 0;
   }

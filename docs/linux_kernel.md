@@ -8,11 +8,22 @@
 
 ## openSBI
 
+Note: change line 302 from `PLATFORM_RISCV_ISA := rv$(PLATFORM_RISCV_XLEN)imafdc` to `PLATFORM_RISCV_ISA := rv$(PLATFORM_RISCV_XLEN)ima`
+
 ```shell
+git clone https://github.com/riscv-software-src/opensbi
+
+# linux using sed
+sed -i '302s/PLATFORM_RISCV_ISA := rv$(PLATFORM_RISCV_XLEN)imafdc/PLATFORM_RISCV_ISA := rv$(PLATFORM_RISCV_XLEN)ima/' Makefile
+# macos with gsed `brew install gnu-sed`
+gsed -i '302s/PLATFORM_RISCV_ISA := rv$(PLATFORM_RISCV_XLEN)imafdc/PLATFORM_RISCV_ISA := rv$(PLATFORM_RISCV_XLEN)ima/' Makefile
+
 make PLATFORM_RISCV_XLEN=32 PLATFORM=generic -j`nproc`
 # or after build Linux Image
 make PLATFORM_RISCV_XLEN=32 PLATFORM=generic -j`nproc` FW_PAYLOAD_PATH=~/linux-6.15-rc2/arch/riscv/boot/Image
 ```
+
+Both `QEMU` and `Spike` device tree tables are supported and listed in `nemu/src/memory/rom`.
 
 ## Device Tree
 

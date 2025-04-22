@@ -1,58 +1,32 @@
 # "一生一芯"工程项目
 
-这是"一生一芯"的工程项目. 具体请参考[实验讲义][^lecture note].
-
-[^lecture note]: https://ysyx.oscc.cc/docs/
-
 设计的处理器暂称为 **New Processor Core (NPC)** , 采用[`RISC-V`][RISC-V]指令集架构, 使用`SystemVerilog`和`Chisel`进行描述.
 
 Candidate ip core name: `bird-0.1.0-sparrow`.
 
-[RISC-V]: https://riscv.org/
-
 **[Core Documentation](./docs/README.md)**
+
+> "一生一芯"参考[实验讲义][^lecture note].
+
+[^lecture note]: https://ysyx.oscc.cc/docs/
+[RISC-V]: https://riscv.org/
 
 ## Microarchitecture
 
 ![](./docs/assets/npc-rv32im-o3-pipeline.svg)
 
-## Preparation
+## Build Setup
+
+Suggest install `tmux` for better terminal management. [`surfer`][^surfer] for wave viewer. [`colima`][^colima] for Linux container.
+
+[^surfer]: https://surfer-project.org/
+[^colima]: https://github.com/abiosoft/colima
 
 ```shell
-# macOS or Linux(debian/ubuntu/fedora), install brew https://brew.sh/
-brew install verilator yosys mill
+build-setup.sh
 
-# using riscv's homebrew tap
-brew tap riscv-software-src/riscv
-brew install riscv-tools
-# or using homebrew's cask
-brew install riscv64-elf-binutils riscv64-elf-gcc riscv64-elf-gdb
-
-brew install readline sdl2 sdl2_image sdl2_ttf flex ncurses llvm gnu-sed
-brew install dtc # device tree compiler
-# devlopment tools
-brew install surfer # Waveform viewer, supporting VCD, FST, or GHW format
-brew install scons  # for rt-thread-am
-brew install colima # for macOS to run Linux container
-
-# debian/ubuntu
-apt-get install gcc-riscv64-linux-gnu
-apt-get install verilator libsdl2-dev libsdl2-image-dev libsdl2-ttf-dev flex
-sudo apt-get install libreadline-dev flock
-sudo apt-get install libncurses5-dev llvm
-sudo apt-get install device-tree-compiler
-
-# clone mono repository
-git clone https://github.com/kingfish404/am-kernels
-git clone https://github.com/NJU-ProjectN/nvboard
-git clone https://github.com/Kingfish404/ysyxSoC
-cd ysyxSoC && make dev-init
-
-cd ./npc/ssrc
-# install espresso
+# Optional: install espresso if you need
 wget https://github.com/chipsalliance/espresso/releases/download/v2.4/arm64-apple-macos11-espresso
-# generated from chisel (scala) at `npc/ssrc`
-make verilog
 ```
 
 ## Build and Run
@@ -62,7 +36,7 @@ make verilog
 source ./environment.env
 
 # 1. build and run NEMU
-cd $NEMU_HOME && make menuconfig && make && make run
+cd $NEMU_HOME && make riscv32_linux_defconfig && make && make run
 
 # 2. build and run NPC
 cd $NPC_HOME/ssrc && make verilog
@@ -99,20 +73,7 @@ cd npc && make build_packed
 
 ## Run opensbi & Kernel
 
-change line 302 from `PLATFORM_RISCV_ISA := rv$(PLATFORM_RISCV_XLEN)imafdc` to `PLATFORM_RISCV_ISA := rv$(PLATFORM_RISCV_XLEN)ima`
-```shell
-git clone https://github.com/riscv-software-src/opensbihttps://github.com/riscv-software-src/opensbi
-
-# linux using sed
-sed -i '302s/PLATFORM_RISCV_ISA := rv$(PLATFORM_RISCV_XLEN)imafdc/PLATFORM_RISCV_ISA := rv$(PLATFORM_RISCV_XLEN)ima/' Makefile
-# macos with gsed `brew install gnu-sed`
-gsed -i '302s/PLATFORM_RISCV_ISA := rv$(PLATFORM_RISCV_XLEN)imafdc/PLATFORM_RISCV_ISA := rv$(PLATFORM_RISCV_XLEN)ima/' Makefile
-
-make PLATFORM_RISCV_XLEN=32 PLATFORM=generic -j`nproc`
-# then run the `make run IMG=../opensbi/build/generic/fw_payload.bin` at `$YSYX_HOME/nemu` to run the opensbi
-```
-
-Boot [Linux Kernel](./docs/linux_kernel.md)
+See [Linux Kernel](./docs/linux_kernel.md)
 
 ## Reference
 

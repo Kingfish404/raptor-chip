@@ -15,7 +15,7 @@
 
 REPO_PATH = repo
 ifeq ($(wildcard repo/spike_main),)
-  $(shell git clone --depth=1 git@github.com:NJU-ProjectN/riscv-isa-sim $(REPO_PATH))
+  $(shell git clone --depth=1 https://github.com/NJU-ProjectN/riscv-isa-sim $(REPO_PATH))
 endif
 
 REPO_BUILD_PATH = $(REPO_PATH)/build
@@ -28,8 +28,6 @@ $(REPO_MAKEFILE):
 SPIKE = $(REPO_BUILD_PATH)/spike
 $(SPIKE): $(REPO_MAKEFILE)
 	CFLAGS="-fvisibility=hidden" CXXFLAGS="-fvisibility=hidden" $(MAKE) -C $(^D)
-
-LDFLAGS += $(CFLAGS_BUILD) $(shell sdl2-config --libs) $(shell llvm-config --libs)
 
 BUILD_DIR = ./build
 $(shell mkdir -p $(BUILD_DIR))

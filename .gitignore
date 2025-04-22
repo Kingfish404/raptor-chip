@@ -12,6 +12,7 @@
 !README.md
 !.gitignore
 !init.sh
+!setup.sh
 !environment.env
 !/.github/workflows/*
 !Dockerfile

@@ -52,8 +52,8 @@ void isa_reg_display()
 {
   csr_t reg_mstatus = {.val = cpu.sr[CSR_MSTATUS]};
   csr_t reg_mie = {.val = cpu.sr[CSR_MIE]};
-  printf(" pc: " FMT_WORD_NO_PREFIX ", num: %llu , inst.val: " FMT_WORD "\n",
-         cpu.pc, g_nr_guest_inst, cpu.inst);
+  printf(" pc: " FMT_WORD_NO_PREFIX ", num: %ld , inst: " FMT_WORD "\n",
+         cpu.pc, (long int)g_nr_guest_inst, cpu.inst);
   printf(" cpu.inst: %x, cpu.priv: %d, cpu.intr: %d\n",
          cpu.inst, cpu.priv, cpu.intr);
   printf(" mstatus.mie: %d, mie.mtie: %d, mstatus.sie: %d, mie.stie: %d\n",
@@ -84,7 +84,7 @@ void isa_reg_display()
   printf("     csr.mip: " FMT_WORD "\n", cpu.sr[CSR_MIP]);
 
   printf("  csr.mcycle: " FMT_WORD " ", cpu.sr[CSR_MCYCLE]);
-  printf("csr.mtimecmp:  %8llx ", cpu.mtimecmp);
+  printf("csr.mtimecmp: " FMT_WORD " ", (word_t)cpu.mtimecmp);
   printf("    csr.misa: " FMT_WORD "\n", cpu.sr[CSR_MISA]);
   printf("\n");
   for (int i = 0; i < MUXDEF(CONFIG_RVE, 16, 32); i++)

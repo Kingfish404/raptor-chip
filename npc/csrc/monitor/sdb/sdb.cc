@@ -161,6 +161,10 @@ int cmd_si(char *args)
     sscanf(args, "%d", &n);
   }
   cpu_exec(n);
+  char cmd[] = "i";
+  cmd_info(cmd);
+  cmd[0] = 'r';
+  cmd_info(cmd);
   return 0;
 }
 

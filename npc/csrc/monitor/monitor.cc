@@ -55,8 +55,6 @@ void sdb_set_vcd(bool status);
 
 void sdb_sim_init(int argc, char **argv);
 
-void init_disasm(const char *triple);
-
 static char *log_file = NULL;
 static char *diff_so_file = NULL;
 static char *img_file = NULL;
@@ -185,5 +183,8 @@ void init_monitor(int argc, char *argv[])
 
   init_difftest(diff_so_file, img_size, difftest_port);
 
-  init_disasm("riscv32");
+#if defined(CONFIG_ITRACE)
+  void init_disasm();
+  init_disasm();
+#endif
 }

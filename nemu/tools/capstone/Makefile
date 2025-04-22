@@ -13,9 +13,10 @@
 # See the Mulan PSL v2 for more details.
 #**************************************************************************************/
 
-ifeq ($(CONFIG_ITRACE)$(CONFIG_IQUEUE),)
-SRCS-BLACKLIST-y += src/utils/disasm.c
-else
+REPO_PATH = repo
+ifeq ($(wildcard repo/include/capstone/capstone.h),)
+  $(shell git clone --depth=1 -b 5.0.6 https://github.com/capstone-engine/capstone.git $(REPO_PATH))
+endif
 
 ifeq ($(shell uname -s),Linux)
 suffix = so.5
@@ -25,9 +26,14 @@ else
   $(error Unsupported OS)
 endif
 
-LIBCAPSTONE = tools/capstone/repo/libcapstone.$(suffix)
-CFLAGS += -I tools/capstone/repo/include
-src/utils/disasm.c: $(LIBCAPSTONE)
-$(LIBCAPSTONE):
-	$(MAKE) -C tools/capstone
-endif
+CAPSTONE = $(REPO_PATH)/libcapstone.$(suffix)
+$(CAPSTONE):
+	cd $(REPO_PATH) && CAPSTONE_ARCHS="x86|mips|riscv|loongarch" bash make.sh
+
+clean:
+	$(MAKE) -C $(REPO_PATH) clean
+
+all: $(CAPSTONE)
+.DEFAULT_GOAL = all
+
+.PHONY: all clean

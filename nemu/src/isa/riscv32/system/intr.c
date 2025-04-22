@@ -45,14 +45,12 @@ word_t isa_raise_intr(word_t NO, vaddr_t epc)
     break;
   case MCA_LOA_ADD_MIS:
     tval = g_vaddr;
-    difftest_skip_ref(); // fix bug difftest from spike
     break;
   case MCA_LOA_ACC_FAU:
     tval = g_vaddr;
     break;
   case MCA_STO_ADD_MIS:
     tval = g_vaddr;
-    difftest_skip_ref(); // fix bug difftest from spike
     break;
   case MCA_STO_ACC_FAU:
     tval = g_vaddr;

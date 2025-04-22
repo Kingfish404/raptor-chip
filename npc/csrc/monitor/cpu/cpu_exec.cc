@@ -81,8 +81,6 @@ void cpu_show_itrace()
 #endif
 }
 
-void disassemble(char *str, int size, uint64_t pc, uint8_t *code, int nbyte);
-
 void cpu_exec_init()
 {
   memset(&pmu, 0, sizeof(pmu));
@@ -134,6 +132,7 @@ void cpu_exec(uint64_t n)
           FMT_WORD_NO_PREFIX ": " FMT_WORD_NO_PREFIX "\t",
           *npc.cpc, *(npc.inst));
       int len = strlen(iringbuf[iringhead]);
+      void disassemble(char *str, int size, uint64_t pc, uint8_t *code, int nbyte);
       disassemble(
           iringbuf[iringhead] + len, sizeof(iringbuf[0]), *npc.cpc, (uint8_t *)(npc.inst), 4);
       iringhead = (iringhead + 1) % MAX_IRING_SIZE;
