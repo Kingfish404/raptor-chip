@@ -1,8 +1,5 @@
-#include <stdio.h>
-#include <stdint.h>
-#include <string.h>
-
 #include <am.h>
+#include <klib.h>
 #include <ysyxsoc.h>
 #include <klib-macros.h>
 

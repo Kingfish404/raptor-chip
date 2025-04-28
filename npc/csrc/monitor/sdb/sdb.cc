@@ -153,7 +153,32 @@ int cmd_q(char *args)
   return -1;
 }
 
+extern PMUState pmu;
+
 int cmd_si(char *args)
+{
+  int n = 1;
+  if (args != NULL)
+  {
+    sscanf(args, "%d", &n);
+  }
+  size_t instr_cnt = pmu.instr_cnt;
+  while ((pmu.instr_cnt - instr_cnt) < n)
+  {
+    cpu_exec(1);
+    if (npc.state == NPC_ABORT || npc.state == NPC_END)
+    {
+      break;
+    }
+  }
+  char cmd[] = "i";
+  cmd_info(cmd);
+  cmd[0] = 'r';
+  cmd_info(cmd);
+  return 0;
+}
+
+int cmd_sc(char *args)
 {
   int n = 1;
   if (args != NULL)
@@ -178,7 +203,9 @@ static struct
 } cmd_table[] = {
     {"help", "h\tDisplay information about all supported commands", cmd_help},
     {"c", "c\tContinue the execution of the program", cmd_c},
+    {"rs", "Run the execution of the program (same to `c`)", cmd_c},
     {"si", "si/s [N] \tExecute N instructions step by step", cmd_si},
+    {"sc", "sc/s [N] \tExecute N cycle step by step", cmd_sc},
     {"info", "info/i [ARG]\tGeneric command for showing things about regs (r), instruction trace (i)", cmd_info},
     {"q", "q\tExit NPC", cmd_q},
 };
@@ -219,8 +246,7 @@ void sdb_mainloop()
     int i;
     for (i = 0; i < ARRLEN(cmd_table); i++)
     {
-      if (
-          (strcmp(cmd, cmd_table[i].name) == 0) ||
+      if ((strcmp(cmd, cmd_table[i].name) == 0) ||
           (strlen(cmd) == 1 && cmd[0] == cmd_table[i].name[0]))
       {
         if (cmd_table[i].handler(args) < 0)

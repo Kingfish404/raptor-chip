@@ -23,7 +23,7 @@ Suggest install `tmux` for better terminal management. [`surfer`][^surfer] for w
 [^colima]: https://github.com/abiosoft/colima
 
 ```shell
-build-setup.sh
+./setup.sh
 
 # Optional: install espresso if you need
 wget https://github.com/chipsalliance/espresso/releases/download/v2.4/arm64-apple-macos11-espresso

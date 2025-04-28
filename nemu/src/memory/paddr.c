@@ -118,7 +118,7 @@ void init_mem()
     rom[i * 4 + 2] = (reset_vec[i] >> 16) & 0xff;
     rom[i * 4 + 3] = (reset_vec[i] >> 24) & 0xff;
   }
-#if defined(CONFIG_ROM_DTB)
+#if defined(CONFIG_ROM_DTB) && !defined(CONFIG_TARGET_SHARE)
   char default_filename[] = CONFIG_ROM_DTB_PATH;
   char *filename = default_filename;
   if (btb_file != NULL)

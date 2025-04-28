@@ -94,4 +94,5 @@ echo "Step $step: Initializing repositories..."
 repo_init
 
 step=$((step + 1))
+source ./environment.env
 echo "Step $step: Build environment setup complete."

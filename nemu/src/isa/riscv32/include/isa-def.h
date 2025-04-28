@@ -26,6 +26,29 @@ enum PRV
   PRV_M = 3,
 };
 
+typedef enum
+{
+  // 32-bit instruction type
+  TYPE_R,
+  TYPE_I,
+  TYPE_I_I,
+  TYPE_S,
+  TYPE_B,
+  TYPE_U,
+  TYPE_J,
+  // 16-bit C extension subtype
+  TYPE_CR,
+  TYPE_CI,
+  TYPE_CSS,
+  TYPE_CIW,
+  TYPE_CL,
+  TYPE_CS,
+  TYPE_CA,
+  TYPE_CB,
+  TYPE_CJ,
+  TYPE_N,
+} Inst_type;
+
 #define CSR_MISA_VALUE 0x40141101
 
 enum CSR
@@ -256,5 +279,50 @@ typedef struct
 } MUXDEF(CONFIG_RV64, riscv64_ISADecodeInfo, riscv32_ISADecodeInfo);
 
 // #define isa_mmu_check(vaddr, len, type) (MMU_DIRECT)
+
+#define src1R()     \
+  do                \
+  {                 \
+    *src1 = R(rs1); \
+  } while (0)
+#define src2R()     \
+  do                \
+  {                 \
+    *src2 = R(rs2); \
+  } while (0)
+#define immI()                        \
+  do                                  \
+  {                                   \
+    *imm = SEXT(BITS(i, 31, 20), 12); \
+  } while (0)
+#define immU()                              \
+  do                                        \
+  {                                         \
+    *imm = SEXT(BITS(i, 31, 12), 20) << 12; \
+  } while (0)
+#define immS()                                               \
+  do                                                         \
+  {                                                          \
+    *imm = (SEXT(BITS(i, 31, 25), 7) << 5) | BITS(i, 11, 7); \
+  } while (0)
+#define immB()                                 \
+  do                                           \
+  {                                            \
+    *imm = ((SEXT(BITS(i, 31, 31), 1) << 12) | \
+            (BITS(i, 7, 7) << 11) |            \
+            (BITS(i, 30, 25) << 5) |           \
+            (BITS(i, 11, 8) << 1)) &           \
+           ~1;                                 \
+  } while (0)
+#define immJ()                                 \
+  do                                           \
+  {                                            \
+    *imm = ((SEXT(BITS(i, 31, 31), 1) << 20) | \
+            (BITS(i, 19, 12) << 12) |          \
+            (BITS(i, 20, 20) << 11) |          \
+            (BITS(i, 30, 25) << 5) |           \
+            (BITS(i, 24, 21) << 1)) &          \
+           ~1;                                 \
+  } while (0)
 
 #endif
