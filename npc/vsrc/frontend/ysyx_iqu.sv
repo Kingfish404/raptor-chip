@@ -13,7 +13,7 @@ module ysyx_iqu #(
     idu_pipe_if.out iqu_exu_if,
 
     // <= exu
-    exu_pipe_if.in exu_iqu_if,
+    exu_pipe_if.in exu_wb_if,
 
     // <=> wbu & reg
     exu_pipe_if.out iqu_wbu_if,
@@ -25,7 +25,7 @@ module ysyx_iqu #(
     input [XLEN-1:0] rdata2,
 
     // => exu (commit)
-    exu_pipe_if.out iqu_exu_commit_if,
+    exu_pipe_if.out iqu_cm_if,
 
     // pipeline
     output logic flush_pipeline,
@@ -37,6 +37,7 @@ module ysyx_iqu #(
 );
   parameter unsigned QUEUE_SIZE = `YSYX_IQU_SIZE;
   parameter unsigned ROB_SIZE = `YSYX_ROB_SIZE;
+  parameter unsigned RS_SIZE = `YSYX_RS_SIZE;
   parameter bit [7:0] REG_NUM = `YSYX_REG_NUM;
   typedef enum logic [1:0] {
     CM = 2'b00,
@@ -102,6 +103,9 @@ module ysyx_iqu #(
   logic rob_ebreak[ROB_SIZE];
   logic rob_fence_i[ROB_SIZE];
   logic rob_mret[ROB_SIZE];
+
+  logic [$clog2(RS_SIZE)-1:0] rob_rs_idx[ROB_SIZE];
+  logic rob_store[ROB_SIZE];
   // === re-order buffer (ROB) ===
 
   // === Register File (RF) status ===
@@ -203,7 +207,7 @@ module ysyx_iqu #(
   end
 
   logic [$clog2(`YSYX_ROB_SIZE)-1:0] wb_dest;
-  assign wb_dest = exu_iqu_if.dest[$clog2(`YSYX_ROB_SIZE)-1:0] - 1;
+  assign wb_dest = exu_wb_if.dest[$clog2(`YSYX_ROB_SIZE)-1:0] - 1;
   always @(posedge clock) begin
     if (reset || flush_pipeline) begin
       rob_head <= 0;
@@ -216,6 +220,7 @@ module ysyx_iqu #(
       rf_busy <= 0;
       flush_pipeline <= 0;
     end else begin
+      // Dispatch
       if (dispatch_ready) begin
         // Dispatch Recieve
         rf_reorder[uoq_rd[uoq_tail][`YSYX_REG_LEN-1:0]] <= rob_tail;
@@ -231,23 +236,28 @@ module ysyx_iqu #(
         rob_pnpc[rob_tail] <= uoq_pnpc[uoq_tail];
 
         rob_fence_i[rob_tail] <= uoq_fence_i[uoq_tail];
+
+        rob_rs_idx[rob_tail] <= exu_wb_if.rs_idx;
+        rob_store[rob_tail] <= uoq_wen[uoq_tail];
       end
-      if (exu_iqu_if.valid) begin
+      // Write back
+      if (exu_wb_if.valid) begin
         // Execute result get
         rob_state[wb_dest] <= WB;
 
-        rob_value[wb_dest] <= exu_iqu_if.result;
-        rob_npc[wb_dest] <= exu_iqu_if.npc;
-        rob_pc_change[wb_dest] <= exu_iqu_if.pc_change;
-        rob_pc_retire[wb_dest] <= exu_iqu_if.pc_retire;
-        rob_ebreak[wb_dest] <= exu_iqu_if.ebreak;
+        rob_value[wb_dest] <= exu_wb_if.result;
+        rob_npc[wb_dest] <= exu_wb_if.npc;
+        rob_pc_change[wb_dest] <= exu_wb_if.pc_change;
+        rob_pc_retire[wb_dest] <= exu_wb_if.pc_retire;
+        rob_ebreak[wb_dest] <= exu_wb_if.ebreak;
 
-        rob_csr_wen[wb_dest] <= exu_iqu_if.csr_wen;
-        rob_csr_wdata[wb_dest] <= exu_iqu_if.csr_wdata;
-        rob_csr_addr[wb_dest] <= exu_iqu_if.csr_addr;
-        rob_ecall[wb_dest] <= exu_iqu_if.ecall;
-        rob_mret[wb_dest] <= exu_iqu_if.mret;
+        rob_csr_wen[wb_dest] <= exu_wb_if.csr_wen;
+        rob_csr_wdata[wb_dest] <= exu_wb_if.csr_wdata;
+        rob_csr_addr[wb_dest] <= exu_wb_if.csr_addr;
+        rob_ecall[wb_dest] <= exu_wb_if.ecall;
+        rob_mret[wb_dest] <= exu_wb_if.mret;
       end
+      // Commit
       if (rob_busy[rob_head] && rob_state[rob_head] == WB) begin
         // Write result and commit
         rob_head <= rob_head + 1;
@@ -261,10 +271,9 @@ module ysyx_iqu #(
             rf_busy[rob_rd[rob_head][`YSYX_REG_LEN-1:0]] <= 0;
           end
         end
-        if (
-          (rob_fence_i[rob_head]) ||
-          ((rob_pc_change[rob_head] || rob_pc_retire[rob_head]) &&
-            (rob_npc[rob_head] != rob_pnpc[rob_head]))
+        if ((rob_fence_i[rob_head]) ||
+            ((rob_pc_change[rob_head] || rob_pc_retire[rob_head]) &&
+             (rob_npc[rob_head] != rob_pnpc[rob_head]))
           ) begin
           flush_pipeline <= 1;
         end
@@ -284,12 +293,15 @@ module ysyx_iqu #(
   assign iqu_wbu_if.fence_i = rob_fence_i[rob_head];
   assign iqu_wbu_if.valid = rob_busy[rob_head] && rob_state[rob_head] == WB && !flush_pipeline;
 
-  assign iqu_exu_commit_if.pc = rob_pc[rob_head];
-  assign iqu_exu_commit_if.csr_wdata = rob_csr_wdata[rob_head];
-  assign iqu_exu_commit_if.csr_wen = rob_csr_wen[rob_head];
-  assign iqu_exu_commit_if.csr_addr = rob_csr_addr[rob_head];
-  assign iqu_exu_commit_if.ecall = rob_ecall[rob_head];
-  assign iqu_exu_commit_if.mret = rob_mret[rob_head];
-  assign iqu_exu_commit_if.valid = rob_busy[rob_head] &&
-    rob_state[rob_head] == WB && !flush_pipeline;
+  assign iqu_cm_if.pc = rob_pc[rob_head];
+  assign iqu_cm_if.csr_wdata = rob_csr_wdata[rob_head];
+  assign iqu_cm_if.csr_wen = rob_csr_wen[rob_head];
+  assign iqu_cm_if.csr_addr = rob_csr_addr[rob_head];
+  assign iqu_cm_if.ecall = rob_ecall[rob_head];
+  assign iqu_cm_if.mret = rob_mret[rob_head];
+
+  assign iqu_cm_if.sq_idx = rob_rs_idx[rob_head];
+  assign iqu_cm_if.store_commit = rob_store[rob_head] && !flush_pipeline;
+
+  assign iqu_cm_if.valid = rob_busy[rob_head] && rob_state[rob_head] == WB && !flush_pipeline;
 endmodule

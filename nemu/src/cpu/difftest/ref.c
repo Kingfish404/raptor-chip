@@ -33,9 +33,16 @@ typedef struct
   word_t *mepc;
   word_t *mstatus;
 
+  // for mem diff
+  word_t vwaddr;
+  word_t pwaddr;
+  word_t wdata;
+  word_t wstrb;
+  word_t len;
+
   // for itrace
   uint32_t *inst;
-  uint32_t *cpc;
+  word_t *cpc;
   uint32_t last_inst;
 
   // for soc
@@ -89,6 +96,11 @@ __EXPORT void difftest_regcpy(void *dut, bool direction)
     npc->mepc = &cpu.sr[CSR_MEPC];
     npc->mtvec = &cpu.sr[CSR_MTVEC];
     npc->mstatus = &cpu.sr[CSR_MSTATUS];
+
+    npc->vwaddr = cpu.vwaddr;
+    npc->pwaddr = cpu.pwaddr;
+    npc->wdata = cpu.wdata;
+    npc->len = cpu.len;
   }
   // isa_reg_display();
   // vaddr_show(cpu.pc, 0x2c);

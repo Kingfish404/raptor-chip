@@ -34,8 +34,7 @@ RUN git clone https://github.com/chipsalliance/rocket-chip.git && \
     make verilog -j`nproc`
 
 WORKDIR /workspaces/ysyx-workbench/npc
-RUN make o2soc_defconfig && \
-    make -j`nproc`
+RUN make o2soc_defconfig && make -j`nproc`
 
 # Prepare STA env: https://github.com/parallaxsw/OpenSTA
 WORKDIR /workspaces/ysyx-workbench/yosys-opensta/
@@ -57,6 +56,7 @@ WORKDIR /workspaces/ysyx-workbench/nemu
 RUN make riscv32_linux_defconfig && make -j
 
 WORKDIR /workspaces/ysyx-workbench/npc
+RUN make o2_defconfig && make -j`nproc`
 # RUN make sta_local
 
 CMD ["bash"]

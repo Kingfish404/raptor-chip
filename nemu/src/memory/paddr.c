@@ -159,6 +159,18 @@ word_t paddr_read(paddr_t addr, int len)
   return 0;
 }
 
+word_t ref_paddr_write(paddr_t addr)
+{
+  if ((addr >= 0x02000000 && addr < 0x020c0000) ||
+      (addr >= 0x0c000000 && addr < 0x0d000000) ||
+      (addr >= 0x10000000 && addr < 0x10000100) ||
+      (0))
+  {
+    return 1;
+  }
+  return 0;
+}
+
 void paddr_write(paddr_t addr, int len, word_t data)
 {
 #ifdef CONFIG_MTRACE
@@ -172,5 +184,11 @@ void paddr_write(paddr_t addr, int len, word_t data)
     return;
   }
   IFDEF(CONFIG_DEVICE, mmio_write(addr, len, data); return);
+#if defined(CONFIG_TARGET_SHARE)
+  if (ref_paddr_write(addr))
+  {
+    return;
+  }
+#endif
   out_of_bound(addr);
 }

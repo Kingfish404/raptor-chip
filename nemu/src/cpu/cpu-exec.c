@@ -242,7 +242,7 @@ void cpu_show_itrace()
     iringbuf[i].logbuf[1] = ' ';
     if ((i + 1) % MAX_IRING_SIZE == iringhead)
     {
-      printf("=> %-76s\n", iringbuf[i].logbuf);
+      printf("-> %-76s\n", iringbuf[i].logbuf);
     }
     else
     {

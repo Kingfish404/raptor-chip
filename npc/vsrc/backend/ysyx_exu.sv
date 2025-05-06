@@ -21,10 +21,10 @@ module ysyx_exu #(
     input lsu_exu_rvalid,
     input lsu_exu_wready,
     // => iqu & (wbu)
-    exu_pipe_if.out exu_iqu_if,
+    exu_pipe_if.out exu_wb_if,
     output out_load_retire,
     // <= iqu (commit)
-    exu_pipe_if.in iqu_exu_commit_if,
+    exu_pipe_if.in iqu_cm_if,
 
     input prev_valid,
     output logic out_ready,
@@ -73,38 +73,50 @@ module ysyx_exu #(
   logic [RS_SIZE-1:0] rs_mret;
   logic [2:0] rs_csr_csw[RS_SIZE];
   // === Revervation Station (RS) ===
+
+  // === Store Queue (SQ) ===
+  logic [RS_SIZE-1:0] sq_commit;
+  logic [RS_SIZE-1:0] sq_busy;
+  logic [4:0] sq_alu_op[RS_SIZE];
+  logic [XLEN-1:0] sq_addr[RS_SIZE];
+  logic [XLEN-1:0] sq_data[RS_SIZE];
+  // === Store Queue (SQ) ===
   logic rs_ready;
 
-  logic [$clog2(RS_SIZE)-1:0] lowest_free_index;
-  logic [$clog2(RS_SIZE)-1:0] lowest_busy_index;
+  logic [$clog2(RS_SIZE)-1:0] free_idx;
+  logic [$clog2(RS_SIZE)-1:0] lowest_valid_index;
   logic [$clog2(RS_SIZE)-1:0] mul_rs_index;
-  logic [$clog2(RS_SIZE)-1:0] store_rs_index;
+  logic [$clog2(RS_SIZE)-1:0] sq_index;
   logic [$clog2(RS_SIZE)-1:0] load_rs_index;
-  logic free_found, busy_found, mul_found, store_found, load_found;
+  logic free_found, valid_found, mul_found, store_found, load_found;
 
   always_comb begin
-    lowest_free_index = 0;
-    lowest_busy_index = 0;
+    free_idx = 0;
+    lowest_valid_index = 0;
     mul_rs_index = 0;
-    store_rs_index = 0;
+    sq_index = 0;
     load_rs_index = 0;
     free_found = 0;
-    busy_found = 0;
+    valid_found = 0;
     mul_found = 0;
     store_found = 0;
     load_found = 0;
     for (integer i = 0; i < RS_SIZE; i++) begin
       if (rs_busy[i] == 0 && !free_found) begin
-        lowest_free_index = i[$clog2(RS_SIZE)-1:0];
+        free_idx   = i[$clog2(RS_SIZE)-1:0];
         free_found = 1;
       end
     end
     for (integer i = 0; i < RS_SIZE; i++) begin
-      if ((rs_busy[i] == 1 && !busy_found) &&
-          (rs_alu_op[lowest_busy_index][4:4] == 0 || mul_valid)
-         ) begin
-        lowest_busy_index = i[$clog2(RS_SIZE)-1:0];
-        busy_found = 1;
+      if (!valid_found && rs_busy[i] == 1) begin
+        if (
+            // mul ready
+            (rs_alu_op[i][4:4] == 0 || rs_mul_valid[i]) &&
+            // alu / load ready
+            (((rs_qj[i] == 0 && rs_qk[i] == 0)) && (rs_ren[i] == 0 || rs_ren_ready[i]))) begin
+          lowest_valid_index = i[$clog2(RS_SIZE)-1:0];
+          valid_found = 1;
+        end
       end
     end
     for (integer i = 0; i < RS_SIZE; i++) begin
@@ -114,8 +126,8 @@ module ysyx_exu #(
       end
     end
     for (integer i = 0; i < RS_SIZE; i++) begin
-      if (rs_busy[i] == 1 && rs_wen[i] == 1 && !store_found) begin
-        store_rs_index = i[$clog2(RS_SIZE)-1:0];
+      if (sq_busy[i] == 1 && !store_found) begin
+        sq_index = i[$clog2(RS_SIZE)-1:0];
         store_found = 1;
       end
     end
@@ -128,16 +140,16 @@ module ysyx_exu #(
   end
 
   assign out_alu_op = (load_found) ? rs_alu_op[load_rs_index] :
-    (store_found) ? rs_alu_op[store_rs_index] : 0;
+    (store_found) ? sq_alu_op[sq_index] : 0;
   assign out_ren = (load_found) && (rs_qj[load_rs_index] == 0 && rs_qk[load_rs_index] == 0);
-  assign out_wen = (store_found) && (rs_qj[store_rs_index] == 0 && rs_qk[store_rs_index] == 0);
+  assign out_wen = ((store_found) && (iqu_cm_if.store_commit || sq_commit[sq_index]));
   assign out_rwaddr = (load_found) ? rs_vj[load_rs_index] + rs_imm[load_rs_index] :
-    (store_found) ? rs_vj[store_rs_index] + rs_imm[store_rs_index] : 0;
+    (store_found) ? sq_addr[sq_index] : 0;
   assign lsu_avalid = out_ren || out_wen;
   assign out_lsu_avalid = lsu_avalid;
-  assign out_lsu_mem_wdata = rs_vk[store_rs_index];
+  assign out_lsu_mem_wdata = sq_data[sq_index];
 
-  assign rs_ready = !(&rs_busy) && !(|rs_wen) && !(|rs_ren) && !(mul_found && idu_if.alu_op[4:4]);
+  assign rs_ready = !(&rs_busy) && !(store_found) && !(|rs_ren) && !(mul_found && idu_if.alu_op[4:4]);
   assign ready = rs_ready;
   assign out_ready = ready;
   assign out_load_retire = lsu_exu_rvalid;
@@ -163,83 +175,95 @@ module ysyx_exu #(
       rs_busy <= 0;
       rs_busy <= 0;
       muling  <= 0;
+      sq_busy <= 0;
     end else begin
+      if (!sq_commit[iqu_cm_if.sq_idx] && sq_busy[iqu_cm_if.sq_idx]) begin
+        sq_commit[iqu_cm_if.sq_idx] <= iqu_cm_if.store_commit;
+      end
+      if (lsu_exu_wready && sq_busy[sq_index]) begin
+        // Store Commit
+        sq_busy[sq_index]   <= 0;
+        sq_commit[sq_index] <= 0;
+      end
       for (integer i = 0; i < RS_SIZE; i++) begin
-        if (free_found && i[$clog2(RS_SIZE)-1:0] == lowest_free_index) begin
+        if (free_found && i[$clog2(RS_SIZE)-1:0] == free_idx) begin
           if (prev_valid && rs_ready) begin
-            rs_busy[lowest_free_index] <= 1;
-            rs_alu_op[lowest_free_index] <= idu_if.alu_op;
-            rs_vj[lowest_free_index] <= (exu_iqu_if.valid && exu_iqu_if.dest == idu_if.qj) ?
-          exu_iqu_if.result : idu_if.op1;
-            rs_vk[lowest_free_index] <= (exu_iqu_if.valid && exu_iqu_if.dest == idu_if.qk) ?
-          exu_iqu_if.result : idu_if.op2;
-            rs_qj[lowest_free_index] <= (exu_iqu_if.valid && exu_iqu_if.dest == idu_if.qj) ?
-          0 : idu_if.qj;
-            rs_qk[lowest_free_index] <= (exu_iqu_if.valid && exu_iqu_if.dest == idu_if.qk) ?
-          0 : idu_if.qk;
-            rs_dest[lowest_free_index] <= idu_if.dest;
+            // Dispatch receive
+            rs_busy[free_idx] <= 1;
+            rs_alu_op[free_idx] <= idu_if.alu_op;
+            rs_vj[free_idx] <= (exu_wb_if.valid && exu_wb_if.dest == idu_if.qj) ?
+              exu_wb_if.result : idu_if.op1;
+            rs_vk[free_idx] <= (exu_wb_if.valid && exu_wb_if.dest == idu_if.qk) ?
+              exu_wb_if.result : idu_if.op2;
+            rs_qj[free_idx] <= (exu_wb_if.valid && exu_wb_if.dest == idu_if.qj) ? 0 : idu_if.qj;
+            rs_qk[free_idx] <= (exu_wb_if.valid && exu_wb_if.dest == idu_if.qk) ? 0 : idu_if.qk;
+            rs_dest[free_idx] <= idu_if.dest;
 
-            rs_wen[lowest_free_index] <= idu_if.wen;
-            rs_ren[lowest_free_index] <= idu_if.ren;
-            rs_jen[lowest_free_index] <= idu_if.jen;
-            rs_branch_retire[lowest_free_index] <= (idu_if.system || idu_if.ben || idu_if.ren);
-            rs_branch_change[lowest_free_index] <= (idu_if.jen || idu_if.ecall || idu_if.mret);
-            rs_branch[lowest_free_index] <= (idu_if.ben);
-            rs_jump[lowest_free_index] <= (idu_if.jen);
-            rs_imm[lowest_free_index] <= idu_if.imm;
-            rs_pc[lowest_free_index] <= idu_if.pc;
-            rs_inst[lowest_free_index] <= idu_if.inst;
+            rs_wen[free_idx] <= idu_if.wen;
+            sq_busy[free_idx] <= idu_if.wen;
+            sq_alu_op[free_idx] <= idu_if.alu_op;
+            sq_commit[free_idx] <= 0;
+            rs_ren[free_idx] <= idu_if.ren;
+            rs_ren_ready[free_idx] <= 0;
+            rs_jen[free_idx] <= idu_if.jen;
+            rs_branch_retire[free_idx] <= (idu_if.system || idu_if.ben || idu_if.ren);
+            rs_branch_change[free_idx] <= (idu_if.jen || idu_if.ecall || idu_if.mret);
+            rs_branch[free_idx] <= (idu_if.ben);
+            rs_jump[free_idx] <= (idu_if.jen);
+            rs_imm[free_idx] <= idu_if.imm;
+            rs_pc[free_idx] <= idu_if.pc;
+            rs_inst[free_idx] <= idu_if.inst;
 
-            rs_system[lowest_free_index] <= idu_if.system;
-            rs_ecall[lowest_free_index] <= idu_if.ecall;
-            rs_ebreak[lowest_free_index] <= idu_if.ebreak;
-            rs_mret[lowest_free_index] <= idu_if.mret;
-            rs_csr_csw[lowest_free_index] <= idu_if.csr_csw;
+            rs_system[free_idx] <= idu_if.system;
+            rs_ecall[free_idx] <= idu_if.ecall;
+            rs_ebreak[free_idx] <= idu_if.ebreak;
+            rs_mret[free_idx] <= idu_if.mret;
+            rs_csr_csw[free_idx] <= idu_if.csr_csw;
           end
-        end else begin
-          if (rs_busy[i] == 1 && rs_qj[i] == 0 && rs_qk[i] == 0) begin
-            if (lsu_exu_wready && rs_wen[i]) begin
-              // Start store
-              rs_wen[i] <= 0;
+        end else if (rs_busy[i] == 1 && rs_qj[i] == 0 && rs_qk[i] == 0) begin
+          // Load
+          if (lsu_exu_rvalid && rs_ren[i]) begin
+            // Load result is ready
+            rs_ren_ready[i] <= 1;
+            rs_ren_data[i]  <= lsu_rdata;
+          end
+          // Mul
+          if (rs_alu_op[i][4:4] == 1) begin
+            if (rs_mul_valid[i] == 0 && muling == 0) begin
+              // Mul start
+              muling <= 1;
             end
-            if (lsu_exu_rvalid && rs_ren[i]) begin
-              // Load result is ready
-              rs_ren_ready[i] <= 1;
-              rs_ren_data[i]  <= lsu_rdata;
+            if (muling == 1 && mul_valid) begin
+              // Mul result is ready
+              rs_mul_valid[i] <= 1;
+              muling <= 0;
+              rs_mul_a[i] <= reg_wdata_mul;
             end
-            if (rs_alu_op[i][4:4] == 1) begin
-              if (rs_mul_valid[i] == 0 && muling == 0) begin
-                // Mul start
-                muling <= 1;
-              end
-              if (muling == 1 && mul_valid) begin
-                // Mul result is ready
-                rs_mul_valid[i] <= 1;
-                muling <= 0;
-                rs_mul_a[i] <= reg_wdata_mul;
-              end
+          end
+          // Write back
+          if (valid_found && lowest_valid_index == i[$clog2(RS_SIZE)-1:0]) begin
+            // Store Ready
+            if (rs_wen[i] == 1) begin
+              sq_addr[i] <= rs_vj[i] + rs_imm[i];
+              sq_data[i] <= rs_vk[i];
+              rs_wen[i]  <= 0;
             end
-            if ((rs_alu_op[i][4:4] == 0 || rs_mul_valid[i]) &&
-              (!rs_wen[i]) && (!rs_ren[i] || rs_ren_ready[i])) begin
-              if (lowest_busy_index == i[$clog2(RS_SIZE)-1:0]) begin
-                // Write back
-                rs_busy[i] <= 0;
-                rs_alu_op[i] <= 0;
-                rs_inst[i] <= 0;
-                rs_ren[i] <= 0;
-                rs_ren_ready[i] <= 0;
-                rs_mul_valid[i] <= 0;
+            // Clear RS
+            rs_busy[i] <= 0;
+            rs_alu_op[i] <= 0;
+            rs_inst[i] <= 0;
+            rs_ren[i] <= 0;
+            rs_ren_ready[i] <= 0;
+            rs_mul_valid[i] <= 0;
+            for (integer j = 0; j < RS_SIZE; j++) begin
+              // Forwarding
+              if (rs_busy[j] && rs_qj[j] == rs_dest[i] && j != i) begin
+                rs_vj[j] <= rs_alu_op[i][4:4] == 1 ? reg_wdata_mul : rs_a[i];
+                rs_qj[j] <= 0;
               end
-              for (integer j = 0; j < RS_SIZE; j++) begin
-                // Forwarding
-                if (rs_busy[j] && rs_qj[j] == rs_dest[i] && j != i) begin
-                  rs_vj[j] <= rs_alu_op[i][4:4] == 1 ? reg_wdata_mul : rs_a[i];
-                  rs_qj[j] <= 0;
-                end
-                if (rs_busy[j] && rs_qk[j] == (rs_dest[i]) && j != i) begin
-                  rs_vk[j] <= rs_alu_op[i][4:4] == 1 ? reg_wdata_mul : rs_a[i];
-                  rs_qk[j] <= 0;
-                end
+              if (rs_busy[j] && rs_qk[j] == (rs_dest[i]) && j != i) begin
+                rs_vk[j] <= rs_alu_op[i][4:4] == 1 ? reg_wdata_mul : rs_a[i];
+                rs_qk[j] <= 0;
               end
             end
           end
@@ -248,51 +272,47 @@ module ysyx_exu #(
     end
   end
 
-  assign reg_wdata = (
-    rs_alu_op[lowest_busy_index][4:4] == 0 ?
-    (
-      rs_system[lowest_busy_index] ? csr_rdata :
-      rs_ren_ready[lowest_busy_index] ? rs_ren_data[lowest_busy_index] :
-      rs_jen[lowest_busy_index] ? rs_pc[lowest_busy_index] + 4 :
-      rs_a[lowest_busy_index]
-    ) :
-    rs_mul_a[lowest_busy_index]
-    );
-  assign exu_iqu_if.dest = rs_dest[lowest_busy_index];
-  assign exu_iqu_if.result = reg_wdata;
-
   // Branch
-  assign addr_exu = ((rs_jump[lowest_busy_index] ? rs_vj[lowest_busy_index] :
-     rs_pc[lowest_busy_index]) + rs_imm[lowest_busy_index]) & ~1;
-  assign exu_iqu_if.npc = (
-    (rs_ecall[lowest_busy_index]) ? mtvec :
-    (rs_mret[lowest_busy_index]) ? mepc :
-    ((rs_branch_change[lowest_busy_index]) ||
-    (rs_branch[lowest_busy_index] && |rs_a[lowest_busy_index])) ? addr_exu :
-    (rs_pc[lowest_busy_index] + 4));
-  assign exu_iqu_if.pc_change = (
-    (rs_branch_change[lowest_busy_index]) ||
-    (rs_branch[lowest_busy_index] && |rs_a[lowest_busy_index]));
-  assign exu_iqu_if.pc_retire = rs_branch_retire[lowest_busy_index];
-  assign exu_iqu_if.ebreak = rs_ebreak[lowest_busy_index];
+  assign addr_exu = ((rs_jump[lowest_valid_index] ? rs_vj[lowest_valid_index] :
+     rs_pc[lowest_valid_index]) + rs_imm[lowest_valid_index]) & ~1;
 
-  assign exu_iqu_if.pc = rs_pc[lowest_busy_index];
-  assign exu_iqu_if.inst = rs_inst[lowest_busy_index];
+  // Write back
+  assign reg_wdata = (
+    rs_alu_op[lowest_valid_index][4:4] == 0 ?
+    (
+      rs_system[lowest_valid_index] ? csr_rdata :
+      rs_ren_ready[lowest_valid_index] ? rs_ren_data[lowest_valid_index] :
+      rs_jen[lowest_valid_index] ? rs_pc[lowest_valid_index] + 4 :
+      rs_a[lowest_valid_index]
+    ) :
+    rs_mul_a[lowest_valid_index]
+    );
+  assign exu_wb_if.rs_idx = free_idx;
+  assign exu_wb_if.dest = rs_dest[lowest_valid_index];
+  assign exu_wb_if.result = reg_wdata;
 
-  assign exu_iqu_if.csr_wen = |rs_csr_csw[lowest_busy_index];
-  assign exu_iqu_if.csr_wdata = csr_wdata;
-  assign exu_iqu_if.csr_addr = rs_imm[lowest_busy_index][11:0];
-  assign exu_iqu_if.ecall = rs_ecall[lowest_busy_index];
-  assign exu_iqu_if.mret = rs_mret[lowest_busy_index];
+  assign exu_wb_if.npc = (
+    (rs_ecall[lowest_valid_index]) ? mtvec :
+    (rs_mret[lowest_valid_index]) ? mepc :
+    ((rs_branch_change[lowest_valid_index]) ||
+    (rs_branch[lowest_valid_index] && |rs_a[lowest_valid_index])) ? addr_exu :
+    (rs_pc[lowest_valid_index] + 4));
+  assign exu_wb_if.pc_change = (
+    (rs_branch_change[lowest_valid_index]) ||
+    (rs_branch[lowest_valid_index] && |rs_a[lowest_valid_index]));
+  assign exu_wb_if.pc_retire = rs_branch_retire[lowest_valid_index];
+  assign exu_wb_if.ebreak = rs_ebreak[lowest_valid_index];
 
-  assign exu_iqu_if.valid = (rs_alu_op[lowest_busy_index][4:4] == 0)
-    ? (rs_busy[lowest_busy_index] &&
-       (rs_qj[lowest_busy_index] == 0 && rs_qk[lowest_busy_index] == 0))
-       &&
-      (rs_wen[lowest_busy_index] == 0)
-       &&
-      (rs_ren[lowest_busy_index] == 0 || rs_ren_ready[lowest_busy_index])
-    : rs_mul_valid[lowest_busy_index];
+  assign exu_wb_if.pc = rs_pc[lowest_valid_index];
+  assign exu_wb_if.inst = rs_inst[lowest_valid_index];
+
+  assign exu_wb_if.csr_wen = |rs_csr_csw[lowest_valid_index];
+  assign exu_wb_if.csr_wdata = csr_wdata;
+  assign exu_wb_if.csr_addr = rs_imm[lowest_valid_index][11:0];
+  assign exu_wb_if.ecall = rs_ecall[lowest_valid_index];
+  assign exu_wb_if.mret = rs_mret[lowest_valid_index];
+
+  assign exu_wb_if.valid = valid_found;
 
 `ifdef YSYX_M_EXTENSION
   // alu for M Extension
@@ -314,16 +334,16 @@ module ysyx_exu #(
       .clock(clock),
       .reset(reset),
 
-      .wen(iqu_exu_commit_if.csr_wen),
-      .exu_valid(iqu_exu_commit_if.valid),
-      .ecall(iqu_exu_commit_if.ecall),
-      .mret(iqu_exu_commit_if.mret),
+      .wen  (iqu_cm_if.csr_wen),
+      .valid(iqu_cm_if.valid),
+      .ecall(iqu_cm_if.ecall),
+      .mret (iqu_cm_if.mret),
 
-      .waddr(iqu_exu_commit_if.csr_addr),
-      .wdata(iqu_exu_commit_if.csr_wdata),
-      .pc(iqu_exu_commit_if.pc),
+      .waddr(iqu_cm_if.csr_addr),
+      .wdata(iqu_cm_if.csr_wdata),
+      .pc(iqu_cm_if.pc),
 
-      .raddr(rs_imm[lowest_busy_index][11:0]),
+      .raddr(rs_imm[lowest_valid_index][11:0]),
       .out_rdata(csr_rdata),
       .out_mepc(mepc),
       .out_mtvec(mtvec)
@@ -331,9 +351,9 @@ module ysyx_exu #(
 
   // csr
   assign csr_wdata = (
-    ({XLEN{rs_csr_csw[lowest_busy_index][0]}} & rs_vj[lowest_busy_index]) |
-    ({XLEN{rs_csr_csw[lowest_busy_index][1]}} & (csr_rdata | rs_vj[lowest_busy_index])) |
-    ({XLEN{rs_csr_csw[lowest_busy_index][2]}} & (csr_rdata & ~rs_vj[lowest_busy_index])) |
+    ({XLEN{rs_csr_csw[lowest_valid_index][0]}} & rs_vj[lowest_valid_index]) |
+    ({XLEN{rs_csr_csw[lowest_valid_index][1]}} & (csr_rdata | rs_vj[lowest_valid_index])) |
+    ({XLEN{rs_csr_csw[lowest_valid_index][2]}} & (csr_rdata & ~rs_vj[lowest_valid_index])) |
     (0)
   );
 endmodule

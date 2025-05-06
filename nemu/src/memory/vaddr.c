@@ -93,6 +93,9 @@ word_t vaddr_read(vaddr_t addr, int len)
 void vaddr_write(vaddr_t addr, int len, word_t data)
 {
   g_vaddr = addr;
+  cpu.vwaddr = addr;
+  cpu.wdata = data;
+  cpu.len = len;
   if ((addr % len) != 0)
   {
     cause = MCA_STO_ADD_MIS;
@@ -112,6 +115,7 @@ void vaddr_write(vaddr_t addr, int len, word_t data)
     // printf("dw:  addr = " FMT_WORD "\n", addr);
     paddr = isa_mmu_translate(addr, len, MEM_TYPE_WRITE);
   }
+  cpu.pwaddr = paddr;
   paddr_write(paddr, len, data);
   if ((cpu.reservation & ~0x3) == (paddr & ~0x3))
   {

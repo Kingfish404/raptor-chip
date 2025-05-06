@@ -33,13 +33,13 @@ brew_install() {
 if [ "$(uname)" == "Darwin" ]; then
   brew install sdl2 sdl2_image sdl2_ttf
 fi
-  brew install gnu-sed wget dtc cmake automake
+  brew install gnu-sed wget dtc cmake automake flock
 }
 
 apt_install() {
   sudo apt install -y gcc-riscv64-linux-gnu
   sudo apt install -y libsdl2-dev libsdl2-image-dev libsdl2-ttf-dev
-  sudo apt install -y libreadline-dev libncurses5-dev flock
+  sudo apt install -y libreadline-dev libncurses5-dev
   sudo apt install -y tcl-dev tcl-tclreadline libeigen3-dev swig autotools-dev libncursesw5-dev
 }
 

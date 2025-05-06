@@ -140,12 +140,12 @@ module ysyx #(
   // IQU out
   idu_pipe_if iqu_exu_if ();
   exu_pipe_if iqu_wbu_if ();
-  exu_pipe_if iqu_exu_commit_if ();
+  exu_pipe_if iqu_cm_if ();
   logic iqu_valid, iqu_ready;
   logic [4:0] iqu_rs1, iqu_rs2;
 
   // EXU out
-  exu_pipe_if exu_iqu_if ();
+  exu_pipe_if exu_wb_if ();
   logic exu_load_retire;
   logic exu_ready;
   // EXU out lsu
@@ -242,7 +242,7 @@ module ysyx #(
       .idu_if(idu_if),
       .iqu_exu_if(iqu_exu_if),
 
-      .exu_iqu_if(exu_iqu_if),
+      .exu_wb_if(exu_wb_if),
 
       .iqu_wbu_if(iqu_wbu_if),
 
@@ -252,7 +252,7 @@ module ysyx #(
       .rdata2 (reg_rdata2),
 
       // => exu (commit)
-      .iqu_exu_commit_if(iqu_exu_commit_if),
+      .iqu_cm_if(iqu_cm_if),
 
       .flush_pipeline(flush_pipeline),
 
@@ -285,11 +285,11 @@ module ysyx #(
       .lsu_exu_wready(lsu_exu_wready),
 
       // => iqu & (wbu)
-      .exu_iqu_if(exu_iqu_if),
+      .exu_wb_if(exu_wb_if),
       .out_load_retire(exu_load_retire),
 
       // <= iqu
-      .iqu_exu_commit_if(iqu_exu_commit_if),
+      .iqu_cm_if(iqu_cm_if),
 
       .prev_valid(iqu_valid),
       .out_ready (exu_ready),

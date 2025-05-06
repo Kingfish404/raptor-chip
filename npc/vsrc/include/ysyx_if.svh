@@ -54,6 +54,8 @@ interface idu_pipe_if;
 endinterface
 
 interface exu_pipe_if;
+  logic [$clog2(`YSYX_RS_SIZE)-1:0] rs_idx;
+
   logic [4:0] rd;
   logic [31:0] inst;
   logic [`YSYX_XLEN-1:0] pc;
@@ -61,10 +63,12 @@ interface exu_pipe_if;
   logic [$clog2(`YSYX_ROB_SIZE):0] dest;
   logic [`YSYX_XLEN-1:0] result;
 
+  // wbu
   logic [`YSYX_XLEN-1:0] npc;
   logic pc_change;
   logic pc_retire;
 
+  // csr
   logic csr_wen;
   logic [`YSYX_XLEN-1:0] csr_wdata;
   logic [11:0] csr_addr;
@@ -74,18 +78,26 @@ interface exu_pipe_if;
   logic fence_i;
   logic mret;
 
+  // store
+  logic [$clog2(`YSYX_RS_SIZE)-1:0] sq_idx;
+  logic store_commit;
+
   logic valid;
 
   modport in(
+      input rs_idx,
       input rd, inst, pc,
       input dest, result, npc, pc_change, pc_retire, ebreak, fence_i,
       input csr_wen, csr_wdata, csr_addr, ecall, mret,
+      input sq_idx, store_commit,
       input valid
   );
   modport out(
+      output rs_idx,
       output rd, inst, pc,
       output dest, result, npc, pc_change, pc_retire, ebreak, fence_i,
       output csr_wen, csr_wdata, csr_addr, ecall, mret,
+      output sq_idx, store_commit,
       output valid
   );
 endinterface

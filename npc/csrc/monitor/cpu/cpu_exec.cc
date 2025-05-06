@@ -69,11 +69,11 @@ void cpu_show_itrace()
     }
     if ((i + 1) % MAX_IRING_SIZE == iringhead)
     {
-      printf(" => %s\n", iringbuf[i]);
+      printf("-> %s\n", iringbuf[i]);
     }
     else
     {
-      printf("    %s\n", iringbuf[i]);
+      printf("   %s\n", iringbuf[i]);
     }
   }
 #else

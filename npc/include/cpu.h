@@ -1,13 +1,42 @@
 #ifndef __NPC_CPU_H__
 #define __NPC_CPU_H__
 
-enum CSR_REGISTER
+typedef enum
 {
-    CSR_MCAUSE = 0x1,
-    CSR_MEPC = 0x2,
-    CSR_MTVEC = 0x3,
-    CSR_MSTATUS = 0x4,
-};
+    MNONE__ = 0,
+
+    SSTATUS,
+    SIE____,
+    STVEC__,
+
+    SCOUNTE,
+
+    SSCRATC,
+    SEPC___,
+    SCAUSE_,
+    STVAL__,
+    SIP____,
+    SATP___,
+
+    MSTATUS,
+    MISA___,
+    MEDELEG,
+    MIDELEG,
+    MIE____,
+    MTVEC__,
+
+    MSTATUSH,
+
+    MSCRATCH,
+    MEPC___,
+    MCAUSE_,
+    MTVAL__,
+    MIP____,
+
+    MCYCLE_,
+    TIME___,
+    TIMEH__
+} csr_t;
 
 void cpu_exec_init();
 

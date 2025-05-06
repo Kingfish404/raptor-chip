@@ -21,7 +21,7 @@ jobs:
       - name: Show the RISC-V Architecture Test result riscv32-npc
         run: docker run --rm sta:latest bash -c "make o2_defconfig && make -C /workspaces/ysyx-workbench/riscv-arch-test-am ARCH=riscv32-npc run mainargs="test" FLAGS="-b -n""
       - name: Show the microbench ysyxsoc payload result (IPC, Mark)
-        run: docker run --rm sta:latest make -C /workspaces/ysyx-workbench/am-kernels/benchmarks/microbench ARCH=riscv32e-ysyxsoc run mainargs="test" FLAGS="-b -n"
+        run: docker run --rm sta:latest bash -c "make o2soc_defconfig && make && make -C /workspaces/ysyx-workbench/am-kernels/benchmarks/microbench ARCH=riscv32e-ysyxsoc run mainargs="test" FLAGS="-b -n""
       - name: Show the STA result (Power, Frequency, Area)
         run: docker run --rm sta:latest make sta_local
       - name: Clean up

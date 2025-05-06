@@ -11,7 +11,7 @@ module ysyx_lsu #(
     input [XLEN-1:0] addr,
     input ren,
     input wen,
-    lsu_avalid,
+    input lsu_avalid,
     input [4:0] alu_op,
     input [XLEN-1:0] wdata,
     // to exu

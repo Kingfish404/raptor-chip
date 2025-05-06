@@ -47,6 +47,11 @@ struct diff_context_t {
   uint32_t last_inst_priv;
   uint64_t mtimecmp;
   vaddr_t reservation;
+
+  vaddr_t vwaddr;
+  word_t pwaddr;
+  word_t wdata;
+  word_t len;
 };
 
 static sim_t* s = NULL;

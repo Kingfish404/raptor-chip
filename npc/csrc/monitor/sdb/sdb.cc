@@ -82,8 +82,12 @@ void npc_difftest_skip_ref()
   difftest_skip_ref();
 }
 
-void npc_difftest_mem_diff()
+void npc_difftest_mem_diff(int waddr, int wdata, char wstrb)
 {
+  npc.vwaddr = (word_t)waddr;
+  npc.pwaddr = (word_t)waddr;
+  npc.wdata = (word_t)wdata;
+  npc.wstrb = (word_t)wstrb;
   difftest_should_diff_mem();
 }
 
@@ -143,6 +147,32 @@ int cmd_info(char *args)
     printf("Unknown argument '%s'.\n", args);
     break;
   }
+  return 0;
+}
+
+void vaddr_show(vaddr_t addr, int n);
+
+static int cmd_x(char *args)
+{
+  char *arg = strtok(args, " ");
+  if (arg == NULL)
+  {
+    printf("No argument given.\n");
+    return 0;
+  }
+  char *e = strtok(NULL, " ");
+  if (e == NULL)
+  {
+    printf("Require second argument.\n");
+    return 0;
+  }
+
+  int n;
+  long long addr;
+  bool success = true;
+  sscanf(arg, "%x", &n);
+  sscanf(e, "%llx", &addr);
+  vaddr_show(addr, n);
   return 0;
 }
 
@@ -207,6 +237,7 @@ static struct
     {"si", "si/s [N] \tExecute N instructions step by step", cmd_si},
     {"sc", "sc/s [N] \tExecute N cycle step by step", cmd_sc},
     {"info", "info/i [ARG]\tGeneric command for showing things about regs (r), instruction trace (i)", cmd_info},
+    {"x", "x N EXPR\tScan 'N' continue 4 bytes, using 'EXPR' as start address.", cmd_x},
     {"q", "q\tExit NPC", cmd_q},
 };
 

@@ -103,7 +103,7 @@ typedef struct
   NPC_STATE_CODE state;
   word_t *gpr;
   word_t *ret;
-  uint32_t *pc;
+  word_t *pc;
 
   // csr
   word_t *mcause;
@@ -111,9 +111,16 @@ typedef struct
   word_t *mepc;
   word_t *mstatus;
 
+  // for mem diff
+  word_t vwaddr;
+  word_t pwaddr;
+  word_t wdata;
+  word_t wstrb;
+  word_t len;
+
   // for itrace
   uint32_t *inst;
-  uint32_t *cpc;
+  word_t *cpc;
   uint32_t last_inst;
 
   // for soc

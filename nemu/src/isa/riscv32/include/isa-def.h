@@ -53,7 +53,7 @@ typedef enum
 
 enum CSR
 {
-  // RISC-V supervisor-level CSR addresses
+  // Supervisor-level CSR
   CSR_SSTATUS = 0x100,
   CSR_SIE = 0x104,
   CSR_STVEC = 0x105,
@@ -270,6 +270,11 @@ typedef struct
   uint32_t last_inst_priv;
   uint64_t mtimecmp;
   vaddr_t reservation;
+
+  vaddr_t vwaddr;
+  word_t pwaddr;
+  word_t wdata;
+  word_t len;
 } MUXDEF(CONFIG_RV64, riscv64_CPU_state, riscv32_CPU_state);
 
 // decode

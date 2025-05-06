@@ -42,11 +42,11 @@
 
 // `define YSYX_M_FAST 'h1
 `define YSYX_L1I_LINE_LEN 1
-`define YSYX_L1I_LEN 2
-`define YSYX_IQU_SIZE 2
+`define YSYX_L1I_LEN 3
+`define YSYX_IQU_SIZE 4
 `define YSYX_RS_SIZE 4
 `define YSYX_ROB_SIZE 4
-`define YSYX_L1D_LEN 1
+`define YSYX_L1D_LEN 3
 
 `ifdef YSYX_I_EXTENSION
 `define YSYX_REG_LEN 5  // 32 registers
@@ -124,22 +124,51 @@
 `define YSYX_PRIV_S 2'h1
 `define YSYX_PRIV_M 2'h3
 
-// Machine Trap Handling
-`define YSYX_CSR_MCAUSE_ 'h342
-`define YSYX_CSR_MEPC___ 'h341
+// Supervisor-level CSR
+`define YSYX_CSR_SSTATUS 'h100
+`define YSYX_CSR_SIE____ 'h100
+`define YSYX_CSR_STVEC__ 'h100
+
+`define YSYX_CSR_SCOUNTE 'h100
+
+`define YSYX_CSR_SSCRATC 'h100
+`define YSYX_CSR_SEPC___ 'h100
+`define YSYX_CSR_SCAUSE_ 'h100
+`define YSYX_CSR_STVAL__ 'h100
+`define YSYX_CSR_SIP____ 'h100
+`define YSYX_CSR_SATP___ 'h100
 
 // Machine Trap Settup
-`define YSYX_CSR_MTVEC__ 'h305
 `define YSYX_CSR_MSTATUS 'h300
+`define YSYX_CSR_MISA___ 'h301
+`define YSYX_CSR_MEDELEG 'h302
+`define YSYX_CSR_MIDELEG 'h303
+`define YSYX_CSR_MIE____ 'h304
+`define YSYX_CSR_MTVEC__ 'h305
+
+`define YSYX_CSR_MSTATUSH 'h306
+
+// Machine Trap Handling
+`define YSYX_CSR_MSCRATCH 'h340
+`define YSYX_CSR_MEPC___ 'h341
+`define YSYX_CSR_MCAUSE_ 'h342
+`define YSYX_CSR_MTVAL__ 'h343
+`define YSYX_CSR_MIP____ 'h344
+
+`define YSYX_CSR_MCYCLE_ 'hb00
+`define YSYX_CSR_TIME___ 'hc01
+`define YSYX_CSR_TIMEH__ 'hc81
+
+// Machine Information Registers
+`define YSYX_CSR_MVENDORID 'hf11
+`define YSYX_CSR_MARCHID__ 'hf12
+`define YSYX_CSR_IMPID____ 'hf13
+`define YSYX_CSR_MHARTID__ 'hf14
 
 // CSR_MSTATUS FLAGS
 `define YSYX_CSR_MSTATUS_MPP_ 12:11
 `define YSYX_CSR_MSTATUS_MPIE 7
 `define YSYX_CSR_MSTATUS_MIE_ 3
-
-// Machine Information Registers
-`define YSYX_CSR_MVENDORID 'hf11
-`define YSYX_CSR_MARCHID__ 'hf12
 
 // Macros
 `define ASSERT(signal, str) \

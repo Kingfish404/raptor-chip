@@ -163,6 +163,7 @@ void difftest_step(vaddr_t pc)
     // printf("Skip end   at ref.cpc: " FMT_WORD_NO_PREFIX ", npc.cpc: " FMT_WORD_NO_PREFIX
     //        ", ref.pc: " FMT_WORD_NO_PREFIX ", npc.pc: " FMT_WORD_NO_PREFIX "\n",
     //        *ref_r.cpc, *npc.cpc, *ref_r.pc, *npc.pc);
+    should_diff_mem = false;
     return;
   }
 
@@ -171,13 +172,47 @@ void difftest_step(vaddr_t pc)
   checkregs(&ref_r, *npc.cpc);
   // printf("Diff test at ref.cpc: " FMT_WORD_NO_PREFIX ", npc.cpc: " FMT_WORD_NO_PREFIX "\n",
   //        *ref_r.cpc, *npc.cpc);
-
-#ifdef CONFIG_MEM_DIFFTEST
   if (should_diff_mem)
   {
+    int low2addr = npc.vwaddr & 0x3;
+    int len = ref_r.len;
+    word_t align_wdata = ((word_t)npc.wdata) >> (low2addr * 8);
+    word_t ref_wdata = ref_r.wdata;
+    switch (len)
+    {
+    case 1:
+      align_wdata = (uint8_t)(align_wdata);
+      ref_wdata = (uint8_t)(ref_wdata);
+      break;
+    case 2:
+      align_wdata = (uint16_t)(align_wdata);
+      ref_wdata = (uint16_t)(ref_wdata);
+      break;
+    case 4:
+      align_wdata = (uint32_t)(align_wdata);
+      ref_wdata = (uint32_t)(ref_wdata);
+      break;
+    default:
+      break;
+    }
+    if (npc.vwaddr != ref_r.vwaddr || align_wdata != ref_wdata)
+    {
+      printf("npc.vwaddr: " FMT_WORD_NO_PREFIX ", rawdta: " FMT_WORD_NO_PREFIX
+             ", wdata: " FMT_WORD_NO_PREFIX ", wstrb: %x, pc: " FMT_WORD_NO_PREFIX "\n",
+             (word_t)npc.vwaddr, (word_t)npc.wdata, align_wdata,
+             npc.wstrb, *npc.cpc);
+      printf("ref.vwaddr: " FMT_WORD_NO_PREFIX ", pwaddr: " FMT_WORD_NO_PREFIX ", "
+             "wdata: " FMT_WORD_NO_PREFIX ",   len: %x, pc: " FMT_WORD_NO_PREFIX "\n",
+             (ref_r.vwaddr), ref_r.pwaddr, ref_wdata, ref_r.len, *ref_r.cpc);
+      reg_display(32);
+      npc.state = NPC_ABORT;
+    }
+    ref_r.vwaddr = 0;
+    ref_r.pwaddr = 0;
+#ifdef CONFIG_MEM_DIFFTEST
     ref_difftest_memcpy(MBASE, pmem_ref, MSIZE, DIFFTEST_TO_DUT);
     checkmem(pmem_ref, guest_to_host(MBASE), MSIZE);
+#endif
     should_diff_mem = false;
   }
-#endif
 }
