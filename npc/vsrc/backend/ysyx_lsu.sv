@@ -2,8 +2,8 @@
 
 module ysyx_lsu #(
     parameter bit [7:0] XLEN = `YSYX_XLEN,
-    parameter bit [7:0] L1D_LEN = `YSYX_L1D_LEN,
-    parameter bit [7:0] L1D_SIZE = 2 ** L1D_LEN
+    parameter bit [`YSYX_L1D_LEN:0] L1D_LEN = `YSYX_L1D_LEN,
+    parameter bit [`YSYX_L1D_LEN:0] L1D_SIZE = 2 ** L1D_LEN
 ) (
     input clock,
 

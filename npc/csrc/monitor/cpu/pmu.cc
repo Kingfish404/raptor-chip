@@ -25,8 +25,13 @@ void perf_sample_per_cycle()
     return;
   }
   pmu.active_cycle++;
+  bool speculation = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, ifu__DOT__speculation));
+  bool pc_retire = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, wbu__DOT__retire));
+  bool flush_pipeline = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, flush_pipeline));
+  pmu.bpu_success_cnt += speculation && pc_retire ? 1 : 0;
+  pmu.bpu_fail_cnt += speculation && flush_pipeline ? 1 : 0;
   bool ifu_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, ifu_arvalid));
-  bool ifu_bra_hazard = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, ifu__DOT__ifu_branch_hazard));
+  bool ifu_sys_hazard = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, ifu__DOT__ifu_sys_hazard));
   bool ifu_lsu_hazard = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, ifu__DOT__ifu_lsu_hazard));
 
   bool idu_ready = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, idu__DOT__ready));
@@ -43,7 +48,7 @@ void perf_sample_per_cycle()
   {
     pmu.ifu_fetch_stall_cycle++;
   }
-  pmu.ifu_bra_hazard_cycle += ifu_bra_hazard ? 1 : 0;
+  pmu.ifu_sys_hazard_cycle += ifu_sys_hazard ? 1 : 0;
   pmu.ifu_lsu_hazard_cycle += ifu_lsu_hazard ? 1 : 0;
   pmu.iqu_hazard_cycle += !iqu_ready ? 1 : 0;
   // cache sample
@@ -166,8 +171,8 @@ void perf()
   Log("BPU Success: %lld, Fail: %lld, Rate: %2.1f%%",
       pmu.bpu_success_cnt, pmu.bpu_fail_cnt,
       percentage(pmu.bpu_success_cnt, pmu.bpu_success_cnt + pmu.bpu_fail_cnt));
-  Log("ifu_bra_hazard_cycle: %8lld,%3.0f%%, ifu_lsu_hazard_cycle: %8lld,%3.0f%%",
-      pmu.ifu_bra_hazard_cycle, percentage(pmu.ifu_bra_hazard_cycle, pmu.active_cycle),
+  Log("ifu_sys_hazard_cycle: %8lld,%3.0f%%, ifu_lsu_hazard_cycle: %8lld,%3.0f%%",
+      pmu.ifu_sys_hazard_cycle, percentage(pmu.ifu_sys_hazard_cycle, pmu.active_cycle),
       pmu.ifu_lsu_hazard_cycle, percentage(pmu.ifu_lsu_hazard_cycle, pmu.active_cycle));
   Log("iqu_hazard_cycle: %8lld,%3.0f%% (structure hazard)",
       pmu.iqu_hazard_cycle, percentage(pmu.iqu_hazard_cycle, pmu.active_cycle));

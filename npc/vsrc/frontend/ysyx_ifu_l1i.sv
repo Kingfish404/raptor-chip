@@ -3,10 +3,10 @@
 
 module ysyx_ifu_l1i #(
     parameter bit [7:0] XLEN = `YSYX_XLEN,
-    parameter bit [7:0] L1I_LINE_LEN = `YSYX_L1I_LINE_LEN,
-    parameter bit [7:0] L1I_LINE_SIZE = 2 ** L1I_LINE_LEN,
-    parameter bit [7:0] L1I_LEN = `YSYX_L1I_LEN,
-    parameter bit [7:0] L1I_SIZE = 2 ** L1I_LEN
+    parameter bit [`YSYX_L1I_LEN:0] L1I_LINE_LEN = `YSYX_L1I_LINE_LEN,
+    parameter bit [`YSYX_L1I_LEN:0] L1I_LINE_SIZE = 2 ** L1I_LINE_LEN,
+    parameter bit [`YSYX_L1I_LEN:0] L1I_LEN = `YSYX_L1I_LEN,
+    parameter bit [`YSYX_L1I_LEN:0] L1I_SIZE = 2 ** L1I_LEN
 ) (
     input clock,
 

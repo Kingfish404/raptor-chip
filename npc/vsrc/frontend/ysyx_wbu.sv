@@ -15,6 +15,7 @@ module ysyx_wbu #(
     input branch_retire,
 
     output [XLEN-1:0] out_npc,
+    output [XLEN-1:0] out_rpc,
     output out_retire,
 
     input  prev_valid,
@@ -30,6 +31,7 @@ module ysyx_wbu #(
   assign ready = 1;
 
   assign out_npc = npc_wbu;
+  assign out_rpc = pc_wbu;
   assign out_retire = retire;
 
   always @(posedge clock) begin
@@ -41,7 +43,7 @@ module ysyx_wbu #(
         pc_wbu <= pc;
         inst_wbu <= inst;
         valid <= 1;
-        retire <= branch_retire;
+        retire <= branch_retire | branch_change;
         npc_wbu <= npc_wdata;
         if (ebreak) begin
           `YSYX_DPI_C_NPC_EXU_EBREAK

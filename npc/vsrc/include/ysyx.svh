@@ -42,11 +42,14 @@
 
 // `define YSYX_M_FAST 'h1
 `define YSYX_L1I_LINE_LEN 1
-`define YSYX_L1I_LEN 3
+`define YSYX_L1I_LEN 7
+
+`define YSYX_BTB_SIZE 64
+
 `define YSYX_IQU_SIZE 4
 `define YSYX_RS_SIZE 4
 `define YSYX_ROB_SIZE 4
-`define YSYX_L1D_LEN 3
+`define YSYX_L1D_LEN 8
 
 `ifdef YSYX_I_EXTENSION
 `define YSYX_REG_LEN 5  // 32 registers
@@ -55,6 +58,8 @@
 `endif
 
 `define YSYX_REG_NUM 2**`YSYX_REG_LEN
+
+// === Architecture (arch) Parameters ===
 
 // Instruction Set Opcodes
 `define YSYX_INST_FENCE_I 32'h0000100f
