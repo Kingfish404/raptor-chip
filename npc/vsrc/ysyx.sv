@@ -151,7 +151,6 @@ module ysyx #(
   // EXU out lsu
   logic exu_ren, exu_wen;
   logic [XLEN-1:0] exu_rwaddr;
-  logic exu_lsu_avalid;
   logic [4:0] exu_alu_op;
   logic [XLEN-1:0] exu_lsu_wdata;
 
@@ -276,7 +275,6 @@ module ysyx #(
       .out_ren(exu_ren),
       .out_wen(exu_wen),
       .out_rwaddr(exu_rwaddr),
-      .out_lsu_avalid(exu_lsu_avalid),
       .out_alu_op(exu_alu_op),
       .out_lsu_mem_wdata(exu_lsu_wdata),
       // <= lsu
@@ -338,11 +336,10 @@ module ysyx #(
       .clock(clock),
 
       // from exu
-      .addr(exu_rwaddr),
+      .rwaddr(exu_rwaddr),
+      .alu_op(exu_alu_op),
       .ren(exu_ren),
       .wen(exu_wen),
-      .lsu_avalid(exu_lsu_avalid),
-      .alu_op(exu_alu_op),
       .wdata(exu_lsu_wdata),
       // to exu
       .out_rdata(lsu_rdata),

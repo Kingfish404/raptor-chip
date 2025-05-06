@@ -30,17 +30,9 @@ void perf_sample_per_cycle()
   bool ifu_lsu_hazard = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, ifu__DOT__ifu_lsu_hazard));
 
   bool idu_ready = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, idu__DOT__ready));
-  bool idu_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, idu__DOT__valid));
 
   bool iqu_ready = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, iqu_ready));
-  bool iqu_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, iqu_valid));
-  bool wbu_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, wbu__DOT__valid));
   uint8_t l1i_state = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, ifu__DOT__l1i_cache__DOT__l1i_state));
-  bool l1i_cache_hit = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, ifu__DOT__l1i_cache__DOT__l1i_cache_hit));
-  bool lsu_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, exu_lsu_avalid));
-  uint32_t pc_ifu = *(uint32_t *)&(CONCAT(VERILOG_PREFIX, ifu__DOT__pc_ifu));
-  uint32_t pc_idu = *(uint32_t *)&(CONCAT(VERILOG_PREFIX, idu__DOT__pc_idu));
-  uint32_t pc_wbu = *(uint32_t *)&(CONCAT(VERILOG_PREFIX, wbu__DOT__pc_wbu));
   static uint32_t ifu_pc = 0;
   if (ifu_valid && idu_ready)
   {

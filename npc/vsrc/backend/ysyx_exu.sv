@@ -13,7 +13,6 @@ module ysyx_exu #(
     output logic out_ren,
     output logic out_wen,
     output logic [XLEN-1:0] out_rwaddr,
-    output out_lsu_avalid,
     output [4:0] out_alu_op,
     output [XLEN-1:0] out_lsu_mem_wdata,
     // <= lsu
@@ -23,7 +22,7 @@ module ysyx_exu #(
     // => iqu & (wbu)
     exu_pipe_if.out exu_wb_if,
     output out_load_retire,
-    // <= iqu (commit)
+    // <= iqu (commit, cm)
     exu_pipe_if.in iqu_cm_if,
 
     input prev_valid,
@@ -38,8 +37,7 @@ module ysyx_exu #(
   logic [XLEN-1:0] addr_exu;
   logic [XLEN-1:0] csr_wdata, csr_rdata;
 
-  logic mul_valid, lsu_avalid;
-  logic ready;
+  logic mul_valid;
 
   // === Revervation Station (RS) ===
   logic [RS_SIZE-1:0] rs_busy;
@@ -84,7 +82,7 @@ module ysyx_exu #(
   logic rs_ready;
 
   logic [$clog2(RS_SIZE)-1:0] free_idx;
-  logic [$clog2(RS_SIZE)-1:0] lowest_valid_index;
+  logic [$clog2(RS_SIZE)-1:0] valid_idx;
   logic [$clog2(RS_SIZE)-1:0] mul_rs_index;
   logic [$clog2(RS_SIZE)-1:0] sq_index;
   logic [$clog2(RS_SIZE)-1:0] load_rs_index;
@@ -92,7 +90,7 @@ module ysyx_exu #(
 
   always_comb begin
     free_idx = 0;
-    lowest_valid_index = 0;
+    valid_idx = 0;
     mul_rs_index = 0;
     sq_index = 0;
     load_rs_index = 0;
@@ -114,7 +112,7 @@ module ysyx_exu #(
             (rs_alu_op[i][4:4] == 0 || rs_mul_valid[i]) &&
             // alu / load ready
             (((rs_qj[i] == 0 && rs_qk[i] == 0)) && (rs_ren[i] == 0 || rs_ren_ready[i]))) begin
-          lowest_valid_index = i[$clog2(RS_SIZE)-1:0];
+          valid_idx   = i[$clog2(RS_SIZE)-1:0];
           valid_found = 1;
         end
       end
@@ -126,15 +124,15 @@ module ysyx_exu #(
       end
     end
     for (integer i = 0; i < RS_SIZE; i++) begin
-      if (sq_busy[i] == 1 && !store_found) begin
-        sq_index = i[$clog2(RS_SIZE)-1:0];
-        store_found = 1;
-      end
-    end
-    for (integer i = 0; i < RS_SIZE; i++) begin
       if (rs_busy[i] == 1 && rs_ren[i] == 1 && !load_found) begin
         load_rs_index = i[$clog2(RS_SIZE)-1:0];
         load_found = 1;
+      end
+    end
+    for (integer i = 0; i < RS_SIZE; i++) begin
+      if (sq_busy[i] == 1 && !store_found) begin
+        sq_index = i[$clog2(RS_SIZE)-1:0];
+        store_found = 1;
       end
     end
   end
@@ -145,13 +143,11 @@ module ysyx_exu #(
   assign out_wen = ((store_found) && (iqu_cm_if.store_commit || sq_commit[sq_index]));
   assign out_rwaddr = (load_found) ? rs_vj[load_rs_index] + rs_imm[load_rs_index] :
     (store_found) ? sq_addr[sq_index] : 0;
-  assign lsu_avalid = out_ren || out_wen;
-  assign out_lsu_avalid = lsu_avalid;
   assign out_lsu_mem_wdata = sq_data[sq_index];
 
-  assign rs_ready = !(&rs_busy) && !(store_found) && !(|rs_ren) && !(mul_found && idu_if.alu_op[4:4]);
-  assign ready = rs_ready;
-  assign out_ready = ready;
+  assign rs_ready = !(&rs_busy) &&
+   !(store_found) && !(|rs_ren) && !(mul_found && idu_if.alu_op[4:4]);
+  assign out_ready = rs_ready;
   assign out_load_retire = lsu_exu_rvalid;
 
   // ALU for each RS
@@ -241,7 +237,7 @@ module ysyx_exu #(
             end
           end
           // Write back
-          if (valid_found && lowest_valid_index == i[$clog2(RS_SIZE)-1:0]) begin
+          if (valid_found && valid_idx == i[$clog2(RS_SIZE)-1:0]) begin
             // Store Ready
             if (rs_wen[i] == 1) begin
               sq_addr[i] <= rs_vj[i] + rs_imm[i];
@@ -273,44 +269,44 @@ module ysyx_exu #(
   end
 
   // Branch
-  assign addr_exu = ((rs_jump[lowest_valid_index] ? rs_vj[lowest_valid_index] :
-     rs_pc[lowest_valid_index]) + rs_imm[lowest_valid_index]) & ~1;
+  assign addr_exu = ((rs_jump[valid_idx] ? rs_vj[valid_idx] :
+     rs_pc[valid_idx]) + rs_imm[valid_idx]) & ~1;
 
   // Write back
   assign reg_wdata = (
-    rs_alu_op[lowest_valid_index][4:4] == 0 ?
+    rs_alu_op[valid_idx][4:4] == 0 ?
     (
-      rs_system[lowest_valid_index] ? csr_rdata :
-      rs_ren_ready[lowest_valid_index] ? rs_ren_data[lowest_valid_index] :
-      rs_jen[lowest_valid_index] ? rs_pc[lowest_valid_index] + 4 :
-      rs_a[lowest_valid_index]
+      rs_system[valid_idx] ? csr_rdata :
+      rs_ren_ready[valid_idx] ? rs_ren_data[valid_idx] :
+      rs_jen[valid_idx] ? rs_pc[valid_idx] + 4 :
+      rs_a[valid_idx]
     ) :
-    rs_mul_a[lowest_valid_index]
+    rs_mul_a[valid_idx]
     );
   assign exu_wb_if.rs_idx = free_idx;
-  assign exu_wb_if.dest = rs_dest[lowest_valid_index];
+  assign exu_wb_if.dest = rs_dest[valid_idx];
   assign exu_wb_if.result = reg_wdata;
 
   assign exu_wb_if.npc = (
-    (rs_ecall[lowest_valid_index]) ? mtvec :
-    (rs_mret[lowest_valid_index]) ? mepc :
-    ((rs_branch_change[lowest_valid_index]) ||
-    (rs_branch[lowest_valid_index] && |rs_a[lowest_valid_index])) ? addr_exu :
-    (rs_pc[lowest_valid_index] + 4));
+    (rs_ecall[valid_idx]) ? mtvec :
+    (rs_mret[valid_idx]) ? mepc :
+    ((rs_branch_change[valid_idx]) ||
+    (rs_branch[valid_idx] && |rs_a[valid_idx])) ? addr_exu :
+    (rs_pc[valid_idx] + 4));
   assign exu_wb_if.pc_change = (
-    (rs_branch_change[lowest_valid_index]) ||
-    (rs_branch[lowest_valid_index] && |rs_a[lowest_valid_index]));
-  assign exu_wb_if.pc_retire = rs_branch_retire[lowest_valid_index];
-  assign exu_wb_if.ebreak = rs_ebreak[lowest_valid_index];
+    (rs_branch_change[valid_idx]) ||
+    (rs_branch[valid_idx] && |rs_a[valid_idx]));
+  assign exu_wb_if.pc_retire = rs_branch_retire[valid_idx];
+  assign exu_wb_if.ebreak = rs_ebreak[valid_idx];
 
-  assign exu_wb_if.pc = rs_pc[lowest_valid_index];
-  assign exu_wb_if.inst = rs_inst[lowest_valid_index];
+  assign exu_wb_if.pc = rs_pc[valid_idx];
+  assign exu_wb_if.inst = rs_inst[valid_idx];
 
-  assign exu_wb_if.csr_wen = |rs_csr_csw[lowest_valid_index];
+  assign exu_wb_if.csr_wen = |rs_csr_csw[valid_idx];
   assign exu_wb_if.csr_wdata = csr_wdata;
-  assign exu_wb_if.csr_addr = rs_imm[lowest_valid_index][11:0];
-  assign exu_wb_if.ecall = rs_ecall[lowest_valid_index];
-  assign exu_wb_if.mret = rs_mret[lowest_valid_index];
+  assign exu_wb_if.csr_addr = rs_imm[valid_idx][11:0];
+  assign exu_wb_if.ecall = rs_ecall[valid_idx];
+  assign exu_wb_if.mret = rs_mret[valid_idx];
 
   assign exu_wb_if.valid = valid_found;
 
@@ -330,6 +326,12 @@ module ysyx_exu #(
 `endif
 
   // Zicsr
+  assign csr_wdata = (
+    ({XLEN{rs_csr_csw[valid_idx][0]}} & rs_vj[valid_idx]) |
+    ({XLEN{rs_csr_csw[valid_idx][1]}} & (csr_rdata | rs_vj[valid_idx])) |
+    ({XLEN{rs_csr_csw[valid_idx][2]}} & (csr_rdata & ~rs_vj[valid_idx])) |
+    (0)
+  );
   ysyx_exu_csr csrs (
       .clock(clock),
       .reset(reset),
@@ -343,17 +345,9 @@ module ysyx_exu #(
       .wdata(iqu_cm_if.csr_wdata),
       .pc(iqu_cm_if.pc),
 
-      .raddr(rs_imm[lowest_valid_index][11:0]),
+      .raddr(rs_imm[valid_idx][11:0]),
       .out_rdata(csr_rdata),
       .out_mepc(mepc),
       .out_mtvec(mtvec)
-  );
-
-  // csr
-  assign csr_wdata = (
-    ({XLEN{rs_csr_csw[lowest_valid_index][0]}} & rs_vj[lowest_valid_index]) |
-    ({XLEN{rs_csr_csw[lowest_valid_index][1]}} & (csr_rdata | rs_vj[lowest_valid_index])) |
-    ({XLEN{rs_csr_csw[lowest_valid_index][2]}} & (csr_rdata & ~rs_vj[lowest_valid_index])) |
-    (0)
   );
 endmodule

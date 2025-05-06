@@ -71,7 +71,8 @@ module ysyx_bus #(
     IF_A,
     IF_D,
     LS_A,
-    LS_R
+    LS_R,
+    LS_R_FLUSHED
   } state_load_t;
   typedef enum logic [2:0] {
     LS_S_A,
@@ -197,10 +198,10 @@ module ysyx_bus #(
   // io lsu read
   logic ifu_sdram_arburst;
   assign ifu_sdram_arburst = (
-    `YSYX_I_SDRAM_ARBURST && ifu_arvalid &&
+    `YSYX_I_SDRAM_ARBURST && ifu_arvalid && (state_load == IF_A || state_load == IF_D) &&
     (ifu_araddr >= 'ha0000000) && (ifu_araddr <= 'hc0000000));
   assign io_master_arburst = ifu_sdram_arburst ? 2'b01 : 2'b00;
-  assign io_master_arsize = ifu_arvalid ? 3'b010 : (
+  assign io_master_arsize = state_load == IF_A ? 3'b010 : (
            ({3{lsu_rstrb == 8'h1}} & 3'b000) |
            ({3{lsu_rstrb == 8'h3}} & 3'b001) |
            ({3{lsu_rstrb == 8'hf}} & 3'b010) |
