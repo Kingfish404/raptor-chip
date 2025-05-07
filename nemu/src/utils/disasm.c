@@ -26,7 +26,7 @@ static csh handle;
 #if defined(__APPLE__)
 #define CS_LIB_SUFFIX "5.dylib"
 #elif defined(__linux__)
-#define CS_LIB_SUFFIX ".so.5"
+#define CS_LIB_SUFFIX "so.5"
 #else
 #error "Unsupported platform"
 #endif

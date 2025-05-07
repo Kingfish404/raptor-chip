@@ -113,6 +113,7 @@ word_t isa_raise_intr(word_t NO, vaddr_t epc)
   cpu.sr[CSR_MSTATUS] = reg.val;
 
   cpu.last_inst_priv = cpu.priv;
+  cpu.raise_intr = NO;
   cpu.priv = PRV_M;
   ret_pc = cpu.sr[CSR_MTVEC];
   return ret_pc;

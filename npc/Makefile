@@ -2,6 +2,10 @@ ifneq ($(words $(CURDIR)),1)
  $(error Unsupported: GNU Make cannot build in directories containing spaces, build elsewhere: '$(CURDIR)')
 endif
 
+ifeq ($(wildcard $(YSYX_HOME)/npc/Makefile),)
+  $(error YSYX_HOME=$(YSYX_HOME) is not a YSYX repo)
+endif
+
 ifeq ($(VERILATOR_ROOT),)
 VERILATOR = verilator
 else
@@ -113,6 +117,9 @@ build_packed:
 	cp -r $(abspath ./vsrc/include)/*.svh \
 		  $(abspath ./vsrc/include/dpic_mock)/*.svh \
 		  $(abspath ./vsrc/include/npc)/*.svh $(YSYX_HOME)/npc/build/packed
+	cp scripts/packed.sh $(YSYX_HOME)/npc/build/packed && chmod +x $(YSYX_HOME)/npc/build/packed/packed.sh
+	cd $(YSYX_HOME)/npc/build/packed && \
+		./packed.sh
 
 sta:
 	echo $(MAKECMDGOALS)

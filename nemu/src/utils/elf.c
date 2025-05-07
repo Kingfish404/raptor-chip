@@ -1,4 +1,6 @@
 #include <common.h>
+#include <isa.h>
+#include <cpu/cpu.h>
 #include <isa-def.h>
 #include <elf.h>
 
@@ -31,8 +33,9 @@ typedef struct Ftrace
 } Ftrace;
 
 Ftrace ftracebuf[MAX_FTRACE_SIZE];
-word_t ftracehead = 0;
-word_t ftracedepth = 0;
+int ftracehead = 0;
+int ftracedepth = 0;
+int ftracedepth_max = 0;
 char elfbuf[MAX_ELF_SIZE];
 
 typedef MUXDEF(CONFIG_ISA64, Elf64_Ehdr, Elf32_Ehdr) Elf_Ehdr;
@@ -102,56 +105,58 @@ void isa_parser_elf(char *filename)
   }
 }
 
-static int in_ecall = 0;
-
 void ftrace_add(word_t pc, word_t npc, word_t inst)
 {
 #if defined(CONFIG_ISA_riscv)
   uint32_t opcode = BITS(inst, 6, 0);
   int is_call = 0, is_ret = 0;
-  switch (inst)
+  if (cpu.raise_intr != INTR_EMPTY)
   {
-  case INST_RET:
-    sprintf(ftracebuf[ftracehead].logbuf, "ret");
-    is_ret = 1;
-    break;
-  case INST_ECALL:
+    sprintf(ftracebuf[ftracehead].logbuf, "intr: %d", cpu.raise_intr);
     is_call = 1;
-    in_ecall = 1;
-    sprintf(ftracebuf[ftracehead].logbuf, "ecall");
-    break;
-  case INST_MRET:
-    if (in_ecall)
+    cpu.raise_intr = INTR_EMPTY;
+  }
+  else
+  {
+    switch (inst)
     {
-      sprintf(ftracebuf[ftracehead].logbuf, "mret");
-      is_ret = in_ecall;
-    }
-    in_ecall = 0;
-    break;
-  case INST_SRET:
-    if (in_ecall)
-    {
-      sprintf(ftracebuf[ftracehead].logbuf, "sret");
-      is_ret = in_ecall;
-    }
-    in_ecall = 0;
-    break;
-  default:
-    switch (opcode)
-    {
-    case OP_JAL:
-      sprintf(ftracebuf[ftracehead].logbuf, "jal");
-      is_call = (inst & 0xfff) != 0x0000006f ? 1 : 0;
+    case INST_ECALL:
+      sprintf(ftracebuf[ftracehead].logbuf, "ecall");
+      is_call = 1;
       break;
-    case OP_JALR:
-      sprintf(ftracebuf[ftracehead].logbuf, "jalr");
-      is_call = (inst & 0xfff) != 0x00000067 ? 1 : 0;
+    case INST_EBREAK:
+      sprintf(ftracebuf[ftracehead].logbuf, "ebreak");
+      is_call = 1;
+      break;
+    case INST_RET:
+      sprintf(ftracebuf[ftracehead].logbuf, "ret");
+      is_ret = 1;
+      break;
+    case INST_MRET:
+      sprintf(ftracebuf[ftracehead].logbuf, "mret");
+      is_ret = 1;
+      break;
+    case INST_SRET:
+      sprintf(ftracebuf[ftracehead].logbuf, "sret");
+      is_ret = 1;
       break;
     default:
-      is_call = 0;
+      switch (opcode)
+      {
+      case OP_JAL:
+        sprintf(ftracebuf[ftracehead].logbuf, "jal");
+        is_call = (inst & 0xfff) != 0x0000006f ? 1 : 0;
+        break;
+      case OP_JALR:
+        sprintf(ftracebuf[ftracehead].logbuf, "jalr");
+        is_call = (inst & 0xfff) != 0x00000067 ? 1 : 0;
+        break;
+      default:
+        is_call = 0;
+        break;
+      }
       break;
     }
-    break;
   }
   if (is_call || is_ret)
   {
@@ -170,7 +175,6 @@ void ftrace_add(word_t pc, word_t npc, word_t inst)
     ftracebuf[ftracehead].ret = false;
     ftracebuf[ftracehead].depth = ftracedepth;
     ftracedepth++;
-    ftracehead = (ftracehead + 1) % MAX_FTRACE_SIZE;
   }
   else if (is_ret)
   {
@@ -179,7 +183,19 @@ void ftrace_add(word_t pc, word_t npc, word_t inst)
     ftracebuf[ftracehead].ret = true;
     ftracedepth--;
     ftracebuf[ftracehead].depth = ftracedepth;
+  }
+  if (ftracedepth > ftracedepth_max)
+  {
+    ftracedepth_max = ftracedepth;
+  }
+  if (is_call || is_ret)
+  {
     ftracehead = (ftracehead + 1) % MAX_FTRACE_SIZE;
+  }
+  if (ftracedepth < 0)
+  {
+    cpu_show_ftrace();
+    exit(0);
   }
 #else
 #error "Unsupported ISA"
@@ -190,18 +206,20 @@ void cpu_show_ftrace(void)
 {
   Elf_Sym *sym = NULL;
   Ftrace *ftrace = NULL;
+  printf("ftrace max depth: %d\n", ftracedepth_max);
   for (size_t i = 0; i < ftracehead; i++)
   {
     ftrace = ftracebuf + i;
     printf("" FMT_WORD_NO_PREFIX
            " -> " FMT_WORD_NO_PREFIX ": ",
            ftrace->pc, ftrace->npc);
-    for (size_t j = 0; j < 8 && j < ftrace->depth; j++)
+    for (size_t j = 0; j < (ftrace->depth % 16); j++)
     {
       printf(" ");
     }
-    printf("%d:", ftrace->depth);
-    printf("%c (%08x): %s ", ftrace->ret ? '>' : '<', ftrace->inst, ftrace->logbuf);
+    printf("%d ", ftrace->depth);
+    printf("%c (%08x): %s ", ftrace->ret ? '<' : '>',
+           ftrace->inst, ftrace->logbuf);
     if (elfshdr_symtab == NULL)
     {
       printf("\n");

@@ -7,8 +7,6 @@ module ysyx_ifu #(
 ) (
     input clock,
 
-    input load_retire,
-
     input [XLEN-1:0] npc,
     input [XLEN-1:0] cpc,
     input br_retire,
@@ -39,7 +37,7 @@ module ysyx_ifu #(
 );
   logic [XLEN-1:0] pc_ifu;
   logic [XLEN-1:0] pnpc_ifu;
-  logic ifu_lsu_hazard = 0, ifu_sys_hazard = 0;
+  logic ifu_sys_hazard = 0;
 
   logic [XLEN-1:0] btb, btb_jal;
   logic [XLEN-1:0] bpu_btb[BTB_SIZE], bpu_btb_jal[BTB_SIZE];
@@ -48,7 +46,8 @@ module ysyx_ifu #(
 
   logic ifu_hazard;
   logic [6:0] opcode;
-  logic is_jalr, is_jal, is_b_type, is_branch, is_load, is_sys;
+  logic is_jalr, is_jal, is_b_type, is_branch;
+  logic is_sys;
   logic valid;
 
   logic invalid_l1i;
@@ -56,7 +55,7 @@ module ysyx_ifu #(
   logic l1i_ready;
   logic [XLEN-1:0] l1_inst;
 
-  assign ifu_hazard = ifu_lsu_hazard || ifu_sys_hazard;
+  assign ifu_hazard = ifu_sys_hazard;
   assign out_inst = l1i_valid ? l1_inst : 'h0;
   assign opcode = out_inst[6:0];
   // pre decode
@@ -64,16 +63,15 @@ module ysyx_ifu #(
   assign is_jal = (opcode == `YSYX_OP_JAL___);
   assign is_b_type = (opcode == `YSYX_OP_B_TYPE_);
   assign is_branch = (is_jal || is_jalr || is_b_type);
-  assign is_load = (opcode == `YSYX_OP_IL_TYPE);
   assign is_sys = (opcode == `YSYX_OP_SYSTEM);
 
-  assign valid = (l1i_valid && !ifu_hazard) && !flush_pipeline && !(speculation && is_load);
+  assign valid = (l1i_valid && !ifu_hazard) && !flush_pipeline;
   assign out_valid = valid;
   assign out_ready = !valid;
 
   // BTFN (Backward Taken, Forward Not-taken), jalr is always not taken
   assign pnpc_ifu = ((is_b_type && (btb < pc_ifu)) ? btb :
-   (is_jal && (btb_jal < pc_ifu)) ? btb_jal : ((is_load) ? pc_ifu + 4 :pc_ifu));
+   (is_jal && (btb_jal < pc_ifu)) ? btb_jal : pc_ifu + 4);
   assign btb = bpu_btb[pc_idx];
   assign btb_jal = bpu_btb_jal[pc_idx];
   assign cpc_idx = cpc[$clog2(BTB_SIZE)-1+2:2];
@@ -85,7 +83,6 @@ module ysyx_ifu #(
     if (reset) begin
       pc_ifu <= `YSYX_PC_INIT;
       speculation <= 0;
-      ifu_lsu_hazard <= 0;
       ifu_sys_hazard <= 0;
       for (int i = 0; i < BTB_SIZE; i++) begin
         bpu_btb[i[$clog2(BTB_SIZE)-1:0]] <= `YSYX_PC_INIT;
@@ -93,44 +90,39 @@ module ysyx_ifu #(
       end
     end else begin
       if (flush_pipeline) begin
-        speculation <= 0;
         pc_ifu <= npc;
-        ifu_lsu_hazard <= 0;
         ifu_sys_hazard <= 0;
+        speculation <= 0;
         ifu_b_speculation <= 0;
         if (ifu_b_speculation) begin
-          // btb <= npc;
           bpu_btb[cpc_idx] <= npc;
         end else begin
-          // btb_jal <= npc;
           bpu_btb_jal[cpc_idx] <= npc;
         end
-      end else if (prev_valid && br_retire) begin
-        speculation <= 0;
-        ifu_sys_hazard <= 0;
-        if (ifu_sys_hazard) begin
-          pc_ifu <= npc;
+      end else begin
+        if (prev_valid && br_retire) begin
+          speculation <= 0;
+          ifu_b_speculation <= 0;
+          ifu_sys_hazard <= 0;
+          if (ifu_sys_hazard) begin
+            pc_ifu <= npc;
+          end
         end
-      end else if (ifu_lsu_hazard && load_retire && l1i_ready) begin
-        ifu_lsu_hazard <= 0;
-        pc_ifu <= pc_ifu + 4;
-      end
-      if (next_ready && valid) begin
-        if (!is_branch && !is_load && !is_sys) begin
-          pc_ifu <= pc_ifu + 4;
-        end else begin
-          if (is_branch) begin
-            pc_ifu <= pnpc_ifu;
-            if (is_b_type && (btb < pc_ifu)) begin
-              speculation <= 1;
-              ifu_b_speculation <= 1;
-            end else if (is_jal && (btb_jal < pc_ifu)) begin
-              speculation <= 1;
+        if (next_ready && valid) begin
+          if (!is_branch && !is_sys) begin
+            pc_ifu <= pc_ifu + 4;
+          end else begin
+            if (is_branch) begin
+              pc_ifu <= pnpc_ifu;
+              if (is_b_type && (btb < pc_ifu)) begin
+                speculation <= 1;
+                ifu_b_speculation <= 1;
+              end else if (is_jal && (btb_jal < pc_ifu)) begin
+                speculation <= 1;
+              end
+            end else if (is_sys) begin
+              ifu_sys_hazard <= 1;
             end
-          end else if (is_load) begin
-            ifu_lsu_hazard <= 1;
-          end else if (is_sys) begin
-            ifu_sys_hazard <= 1;
           end
         end
       end

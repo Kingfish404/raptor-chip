@@ -51,17 +51,29 @@ module ysyx_lsu #(
   logic [32-L1D_LEN-2-1:0] addr_tag;
   logic [L1D_LEN-1:0] addr_idx;
   logic l1d_cache_hit;
-  logic cacheable;
-
+  logic uncacheable;
 
   logic [32-L1D_LEN-2-1:0] waddr_tag;
   logic [L1D_LEN-1:0] waddr_idx;
   logic l1d_cache_hit_w;
+  logic lsu_addr_valid;
+
+  assign lsu_addr_valid = (
+         (lsu_addr >= 'h02000048 && lsu_addr < 'h02000050) ||
+         (lsu_addr >= 'h0f000000 && lsu_addr < 'h0f002000) ||
+         (lsu_addr >= 'h10000000 && lsu_addr < 'h10002000) ||
+         (lsu_addr >= 'h20000000 && lsu_addr < 'h20001000) ||
+         (lsu_addr >= 'h30000000 && lsu_addr < 'h31000000) ||
+         (lsu_addr >= 'h40000000 && lsu_addr < 'h41000000) ||
+         (lsu_addr >= 'h80000000 && lsu_addr < 'h80400000) ||
+         (lsu_addr >= 'ha0000000 && lsu_addr < 'hc0000000) ||
+         (0)
+       );
 
   assign lsu_addr = rwaddr;
   assign out_lsu_araddr = lsu_addr;
   assign out_lsu_arvalid = arvalid;
-  assign arvalid = ren && !l1d_cache_hit;
+  assign arvalid = ren && lsu_addr_valid && !l1d_cache_hit;
   assign out_lsu_rstrb = rstrb;
 
   // without l1d cache
@@ -69,7 +81,7 @@ module ysyx_lsu #(
   // assign rvalid_o = lsu_rvalid;
 
   // with l1d cache
-  assign rdata_unalign = (valid_r) ? rdata_lsu : l1d[addr_idx];
+  assign rdata_unalign = (uncacheable) ? rdata_lsu : l1d[addr_idx];
   assign out_rvalid = valid_r || l1d_cache_hit;
 
   assign out_lsu_awaddr = lsu_addr;
@@ -86,10 +98,10 @@ module ysyx_lsu #(
          l1d_valid[addr_idx] == 1'b1) && (l1d_tag[addr_idx] == addr_tag);
   assign addr_tag = lsu_addr[XLEN-1:L1D_LEN+2];
   assign addr_idx = lsu_addr[L1D_LEN+2-1:0+2];
-  assign cacheable = (
-         (lsu_addr >= 'h30000000 && lsu_addr < 'h40000000) ||
-         (lsu_addr >= 'h80000000 && lsu_addr < 'h80400000) ||
-         (lsu_addr >= 'ha0000000 && lsu_addr < 'hc0000000) ||
+  assign uncacheable = (
+         (lsu_addr >= 'h0c000000 && lsu_addr < 'h0d000000) ||
+         (lsu_addr >= 'h02000000 && lsu_addr < 'h02000100) ||
+         (lsu_addr >= 'h10000000 && lsu_addr < 'h20000000) ||
          (0)
        );
 
@@ -136,20 +148,19 @@ module ysyx_lsu #(
       valid_r   <= 0;
     end else begin
       if (ren && lsu_rvalid) begin
-        if (cacheable) begin
+        if (uncacheable) begin
+          rdata_lsu <= bus_rdata;
+          valid_r   <= 1'b1;
+        end else begin
           l1d[addr_idx] <= bus_rdata;
           l1d_tag[addr_idx] <= addr_tag;
           l1d_valid[addr_idx] <= 1'b1;
-        end else begin
-          rdata_lsu <= bus_rdata;
-          valid_r   <= 1'b1;
         end
       end
       if (valid_r) begin
         valid_r <= 0;
       end
       if (wen && l1d_cache_hit_w) begin
-        // $display("l1d_cache_hit_w");
         l1d_valid[waddr_idx] <= 1'b0;
       end
     end

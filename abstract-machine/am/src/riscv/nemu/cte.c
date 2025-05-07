@@ -48,12 +48,12 @@ Context *__am_irq_handle(Context *c)
 
     size_t mscratch = 0, sp;
     asm volatile("csrr %0, mscratch\nmv %1, sp" : "=r"(mscratch), "=r"(sp));
-    printf("- c: %p, c->np: %d, cp->gpr[sp]: %x, mscratch = %x, sp = %x\n",
-           c, c->np, c->gpr[2], mscratch, sp);
+    // printf("- c: %p, c->np: %d, cp->gpr[sp]: %x, mscratch = %x, sp = %x\n",
+    //        c, c->np, c->gpr[2], mscratch, sp);
     c = user_handler(ev, c);
     asm volatile("csrr %0, mscratch\nmv %1, sp" : "=r"(mscratch), "=r"(sp));
-    printf("= c: %p, c->np: %d, cp->gpr[sp]: %x, mscratch = %x, sp = %x\n",
-           c, c->np, c->gpr[2], mscratch, sp);
+    // printf("= c: %p, c->np: %d, cp->gpr[sp]: %x, mscratch = %x, sp = %x\n",
+    //        c, c->np, c->gpr[2], mscratch, sp);
     assert(c != NULL);
   }
   __am_switch(c);

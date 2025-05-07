@@ -267,6 +267,7 @@ typedef struct
   uint32_t inst;
   uint32_t priv;
   bool intr;
+  word_t raise_intr;
   uint32_t last_inst_priv;
   uint64_t mtimecmp;
   vaddr_t reservation;

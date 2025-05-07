@@ -146,7 +146,6 @@ module ysyx #(
 
   // EXU out
   exu_pipe_if exu_wb_if ();
-  logic exu_load_retire;
   logic exu_ready;
   // EXU out lsu
   logic exu_ren, exu_wen;
@@ -190,8 +189,6 @@ module ysyx #(
   ysyx_ifu ifu (
       .clock(clock),
 
-      // <= exu
-      .load_retire(exu_load_retire),
       // <= wbu
       .npc(wbu_npc),
       .cpc(wbu_rpc),
@@ -286,7 +283,6 @@ module ysyx #(
 
       // => iqu & (wbu)
       .exu_wb_if(exu_wb_if),
-      .out_load_retire(exu_load_retire),
 
       // <= iqu
       .iqu_cm_if(iqu_cm_if),

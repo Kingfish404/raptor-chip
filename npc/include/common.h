@@ -136,7 +136,6 @@ typedef struct
   uint64_t ifu_stall_cycle;
 
   uint64_t ifu_sys_hazard_cycle;
-  uint64_t ifu_lsu_hazard_cycle;
   uint64_t iqu_hazard_cycle;
 
   uint64_t lsu_load_cnt;

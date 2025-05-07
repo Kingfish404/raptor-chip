@@ -28,6 +28,7 @@
 #define MAX_IRING_SIZE 16
 
 extern int boot_from_flash;
+extern int ftracedepth_max;
 FILE *pc_trace = NULL, *bpu_trace = NULL, *mem_trace = NULL;
 size_t pc_continue_cnt = 1;
 
@@ -167,10 +168,11 @@ static void execute(uint64_t n)
   }
 }
 
-static void statistic()
+void statistic()
 {
   IFNDEF(CONFIG_TARGET_AM, setlocale(LC_NUMERIC, ""));
 #define NUMBERIC_FMT MUXDEF(CONFIG_TARGET_AM, "%", "%'") PRIu64
+  Log("ftracedepth_max = %d ", ftracedepth_max);
   Log("host time spent = " NUMBERIC_FMT " us", g_timer);
   Log("total guest instructions = " NUMBERIC_FMT, g_nr_guest_inst);
   if (g_timer > 0)

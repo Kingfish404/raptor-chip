@@ -16,6 +16,7 @@
 !README.md
 !Kconfig
 !configs/*
+!scripts/*.sh
 build/
 tmp/
 /obj_dir

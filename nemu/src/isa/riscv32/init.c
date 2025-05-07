@@ -49,6 +49,7 @@ static void restart()
   cpu.sr[CSR_MARCHID] = 0x015fde77;
   cpu.sr[CSR_MISA] = CSR_MISA_VALUE;
   cpu.priv = PRV_M;
+  cpu.raise_intr = INTR_EMPTY;
   cpu.last_inst_priv = PRV_M;
   cpu.reservation = 0;
 }

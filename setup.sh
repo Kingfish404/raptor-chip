@@ -40,14 +40,18 @@ apt_install() {
   sudo apt install -y gcc-riscv64-linux-gnu
   sudo apt install -y libsdl2-dev libsdl2-image-dev libsdl2-ttf-dev
   sudo apt install -y libreadline-dev libncurses5-dev
-  sudo apt install -y tcl-dev tcl-tclreadline libeigen3-dev swig autotools-dev libncursesw5-dev
+  sudo apt install -y tcl-dev tcl-tclreadline libeigen3-dev \
+    swig autotools-dev libncursesw5-dev device-tree-compiler
 }
 
 repo_clone() {
   mkdir -p third_party/NJU-ProjectN
   git clone https://github.com/kingfish404/am-kernels
   git clone https://github.com/Kingfish404/ysyxSoC
-  git clone https://github.com/NJU-ProjectN/nvboard third_party/NJU-ProjectN/nvboard 
+  git clone https://github.com/NJU-ProjectN/nvboard third_party/NJU-ProjectN/nvboard
+
+  mkdir -p third_party/riscv-software-src/
+  git clone https://github.com/riscv-software-src/opensbi third_party/riscv-software-src/opensbi
 }
 
 repo_init() {

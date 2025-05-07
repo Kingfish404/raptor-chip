@@ -14,6 +14,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build the Docker image
         run: docker build . --file Dockerfile --tag sta:latest --build-arg CACHEBUST=$(date +%s)
+      - name: Show the coremark npc payload result (IPC, Mark)
+        run: docker run --rm sta:latest bash -c "make o2_defconfig && make -C /workspaces/ysyx-workbench/am-kernels/benchmarks/coremark_eembc ARCH=riscv32-npc run mainargs="test" FLAGS="-b -n""
       - name: Show the microbench npc payload result (IPC, Mark)
         run: docker run --rm sta:latest bash -c "make o2_defconfig && make -C /workspaces/ysyx-workbench/am-kernels/benchmarks/microbench ARCH=riscv32e-npc run mainargs="test" FLAGS="-b -n""
       - name: Show the RISC-V Architecture Test result riscv32e-npc
@@ -22,7 +24,23 @@ jobs:
         run: docker run --rm sta:latest bash -c "make o2_defconfig && make -C /workspaces/ysyx-workbench/riscv-arch-test-am ARCH=riscv32-npc run mainargs="test" FLAGS="-b -n""
       - name: Show the microbench ysyxsoc payload result (IPC, Mark)
         run: docker run --rm sta:latest bash -c "make o2soc_defconfig && make && make -C /workspaces/ysyx-workbench/am-kernels/benchmarks/microbench ARCH=riscv32e-ysyxsoc run mainargs="test" FLAGS="-b -n""
+      - name: Show the microbench ysyxsoc payload result (IPC, Mark)
+        run: docker run --rm sta:latest bash -c "make o2soc_defconfig && make && make -C /workspaces/ysyx-workbench/am-kernels/benchmarks/microbench ARCH=riscv32-ysyxsoc run mainargs="test" FLAGS="-b -n""
       - name: Show the STA result (Power, Frequency, Area)
         run: docker run --rm sta:latest bash -c "make sta_local >> /dev/null && make sta_local"
       - name: Clean up
         run: docker rmi sta:latest
+
+  nemu-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup envirement
+        run: ./setup.sh
+      - name: Build OpenSBI
+        run: make -C third_party/riscv-software-src/opensbi PLATFORM_RISCV_ISA=rv32ima_zicsr_zifencei_zicntr CROSS_COMPILE=riscv64-linux-gnu- PLATFORM_RISCV_XLEN=32 PLATFORM=generic -j`nproc`
+      - name: Build NEMU
+        run: NEMU_HOME=/home/runner/work/ysyx-workbench/ysyx-workbench/nemu make -C nemu riscv32_linux_defconfig && NEMU_HOME=/home/runner/work/ysyx-workbench/ysyx-workbench/nemu make -C nemu
+      - name: Test OpenSBI
+        run: timeout -s KILL 360 make -C nemu run IMG=../third_party/riscv-software-src/opensbi/build/platform/generic/firmware/fw_payload.bin ARGS="-b -m 10000000 --log ./build/nemu-log.txt" NEMU_HOME=/home/runner/work/ysyx-workbench/ysyx-workbench/nemu
