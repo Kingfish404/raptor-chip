@@ -133,7 +133,7 @@ typedef struct
   uint64_t active_cycle;
   uint64_t instr_cnt;
   uint64_t ifu_fetch_cnt;
-  uint64_t ifu_fetch_stall_cycle;
+  uint64_t ifu_stall_cycle;
 
   uint64_t ifu_sys_hazard_cycle;
   uint64_t ifu_lsu_hazard_cycle;
@@ -141,7 +141,7 @@ typedef struct
 
   uint64_t lsu_load_cnt;
   uint64_t lsu_stall_cycle;
-  uint64_t exu_alu_cnt;
+  uint64_t exu_stall_cycle;
 
   // bpu
   uint64_t bpu_success_cnt;

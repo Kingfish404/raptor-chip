@@ -38,10 +38,10 @@ module ysyx_ifu_l1i #(
   logic [XLEN-1:0] l1i_pc;
   logic [32-1:0] l1i[L1I_SIZE][L1I_LINE_SIZE];
   logic [L1I_SIZE-1:0] l1ic_valid;
-  logic [32-L1I_LEN-L1I_LINE_LEN-2-1:0] l1i_tag[L1I_SIZE][L1I_LINE_SIZE];
+  logic [32-{{2'b0}, L1I_LEN+L1I_LINE_LEN}-2-1:0] l1i_tag[L1I_SIZE][L1I_LINE_SIZE];
   l1i_state_t l1i_state;
 
-  logic [32-L1I_LEN-L1I_LINE_LEN-2-1:0] addr_tag;
+  logic [32-{{2'b0}, L1I_LEN+L1I_LINE_LEN}-2-1:0] addr_tag;
   logic [L1I_LEN-1:0] addr_idx;
   logic [L1I_LINE_LEN-1:0] addr_offset;
 

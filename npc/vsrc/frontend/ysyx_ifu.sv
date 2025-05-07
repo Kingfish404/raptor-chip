@@ -74,9 +74,6 @@ module ysyx_ifu #(
   // BTFN (Backward Taken, Forward Not-taken), jalr is always not taken
   assign pnpc_ifu = ((is_b_type && (btb < pc_ifu)) ? btb :
    (is_jal && (btb_jal < pc_ifu)) ? btb_jal : ((is_load) ? pc_ifu + 4 :pc_ifu));
-  // assign pnpc_ifu = ((is_b_type && (bpu_btb[pc_idx] < pc_ifu)) ?
-  //   bpu_btb[pc_idx] : (is_jal && (bpu_btb_jal[pc_idx] < pc_ifu)) ?
-  //        bpu_btb_jal[pc_idx] : ((is_load) ? pc_ifu + 4 :pc_ifu));
   assign btb = bpu_btb[pc_idx];
   assign btb_jal = bpu_btb_jal[pc_idx];
   assign cpc_idx = cpc[$clog2(BTB_SIZE)-1+2:2];
@@ -86,8 +83,6 @@ module ysyx_ifu #(
   assign out_pnpc = pnpc_ifu;
   always @(posedge clock) begin
     if (reset) begin
-      // btb <= `YSYX_PC_INIT;
-      // btb_jal <= `YSYX_PC_INIT;
       pc_ifu <= `YSYX_PC_INIT;
       speculation <= 0;
       ifu_lsu_hazard <= 0;

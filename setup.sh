@@ -33,7 +33,7 @@ brew_install() {
 if [ "$(uname)" == "Darwin" ]; then
   brew install sdl2 sdl2_image sdl2_ttf
 fi
-  brew install gnu-sed wget dtc cmake automake flock
+  brew install gnu-sed wget dtc cmake automake
 }
 
 apt_install() {

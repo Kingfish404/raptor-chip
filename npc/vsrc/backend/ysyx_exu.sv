@@ -199,6 +199,7 @@ module ysyx_exu #(
             sq_busy[free_idx] <= idu_if.wen;
             sq_alu_op[free_idx] <= idu_if.alu_op;
             sq_commit[free_idx] <= 0;
+
             rs_ren[free_idx] <= idu_if.ren;
             rs_ren_ready[free_idx] <= 0;
             rs_jen[free_idx] <= idu_if.jen;

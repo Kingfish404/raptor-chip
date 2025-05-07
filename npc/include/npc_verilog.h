@@ -11,8 +11,10 @@
 
 #ifdef YSYX_SOC
 #define VERILOG_PREFIX top->rootp->ysyxSoCFull__DOT__asic__DOT__cpu__DOT__cpu__DOT__
+#define VERILOG_RESET top->rootp->ysyxSoCFull__DOT__asic__DOT__cpu_reset_chain__DOT__output_chain__DOT__sync_0
 #else
 #define VERILOG_PREFIX top->rootp->ysyxSoC__DOT__cpu__DOT__
+#define VERILOG_RESET top->reset
 #endif
 
 static inline void verilog_connect(TOP_NAME *top, NPCState *npc)

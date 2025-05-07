@@ -370,6 +370,8 @@ module ysyx #(
   ysyx_bus bus (
       .clock(clock),
 
+      .flush_pipeline(flush_pipeline),
+
       .io_master_arburst(io_master_arburst),
       .io_master_arsize(io_master_arsize),
       .io_master_arlen(io_master_arlen),

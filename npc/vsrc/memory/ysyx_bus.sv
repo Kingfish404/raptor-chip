@@ -6,7 +6,8 @@ module ysyx_bus #(
     parameter bit [7:0] XLEN = `YSYX_XLEN
 ) (
     input clock,
-    input reset,
+
+    input flush_pipeline,
 
     // AXI4 Master bus
     output [1:0] io_master_arburst,
@@ -65,7 +66,9 @@ module ysyx_bus #(
     input [XLEN-1:0] lsu_wdata,
     input [7:0] lsu_wstrb,
     input lsu_wvalid,
-    output out_lsu_wready
+    output out_lsu_wready,
+
+    input reset
 );
   typedef enum logic [3:0] {
     IF_A,
@@ -128,6 +131,13 @@ module ysyx_bus #(
           end
         end
         LS_R: begin
+          if (io_master_rvalid) begin
+            state_load <= LS_A;
+          end else if (flush_pipeline) begin
+            state_load <= LS_R_FLUSHED;
+          end
+        end
+        LS_R_FLUSHED: begin
           if (io_master_rvalid) begin
             state_load <= LS_A;
           end

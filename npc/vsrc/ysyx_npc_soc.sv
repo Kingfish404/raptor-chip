@@ -134,11 +134,11 @@ module ysyxSoC (
       .out_bid(auto_master_out_bid),
       .out_bresp(auto_master_out_bresp),
       .out_bvalid(auto_master_out_bvalid),
-      .bready(auto_master_out_bready)
+      .bready(auto_master_out_bready),
+      .reset(reset)
   );
 endmodule
 
-// Memory and Universal Asynchronous Receiver-Transmitter (UART)
 module ysyx_npc_soc #(
     parameter bit [7:0] XLEN = `YSYX_XLEN
 ) (
@@ -176,21 +176,35 @@ module ysyx_npc_soc #(
     output logic [3:0] out_bid,
     output logic [1:0] out_bresp,
     output logic out_bvalid,
-    input bready
+    input bready,
+
+    input reset
 );
+  typedef enum logic [2:0] {
+    WIDLE   = 3'b000,
+    WAREADY = 3'b001,
+    WDWRITE = 3'b010,
+    WDREADY = 3'b011,
+    WFINISH = 3'b100
+  } state_w_t;
+  typedef enum logic [2:0] {
+    RIDLE  = 3'b000,
+    RVALID = 3'b101
+  } state_r_t;
+
   logic [31:0] mem_rdata_buf;
-  logic [2:0] state = 0, state_w = 0;
-  logic is_writing = 0;
+  state_r_t state_r;
+  state_w_t state_w;
 
   // read transaction
-  assign out_arready = (state == 'b000);
+  assign out_arready = (state_r == RIDLE);
   assign out_rdata   = mem_rdata_buf;
-  assign out_rvalid  = (state == 'b101);
+  assign out_rvalid  = (state_r == RVALID);
 
   // write transaction
-  assign out_awready = (state_w == 'b000);
-  assign out_wready  = (state_w == 'b011 && wvalid);
-  assign out_bvalid  = (state_w == 'b100);
+  assign out_awready = (state_w == WIDLE);
+  assign out_wready  = (state_w == WDREADY && wvalid);
+  assign out_bvalid  = (state_w == WFINISH);
   logic [7:0] wmask = (
     ({{8{awsize == 3'b000}} & 8'h1 }) |
     ({{8{awsize == 3'b001}} & 8'h3 }) |
@@ -199,18 +213,21 @@ module ysyx_npc_soc #(
   );
 
   always @(posedge clock) begin
-    unique case (state_w)
-      'b000: begin
-        if (awvalid) begin
-          state_w <= 'b001;
-          is_writing <= 1;
+    if (reset) begin
+      state_w <= WIDLE;
+      state_r <= RIDLE;
+    end else begin
+      // AXI4 write transaction
+      unique case (state_w)
+        WIDLE: begin
+          if (awvalid) begin
+            state_w <= WAREADY;
+          end
         end
-      end
-      'b001: begin
-        state_w <= 'b010;
-      end
-      'b010: begin
-        if (is_writing) begin
+        WAREADY: begin
+          state_w <= WDWRITE;
+        end
+        WDWRITE: begin
           if (awaddr == `YSYX_BUS_SERIAL_PORT) begin
             $write("%c", wdata[7:0]);
           end else begin
@@ -228,63 +245,39 @@ module ysyx_npc_soc #(
             end
           end
           if (wlast) begin
-            state_w <= 3;
+            state_w <= WDREADY;
           end
         end
-      end
-      'b011: begin
-        if (is_writing) begin
-          state_w <= 'b100;
+        WDREADY: begin
+          state_w <= WFINISH;
         end
-      end
-      'b100: begin
-        if (bready) begin
-          state_w <= 'b000;
-          is_writing <= 0;
+        WFINISH: begin
+          if (bready) begin
+            state_w <= WIDLE;
+          end
         end
-      end
-      default: begin
-        state_w <= 'b000;
-      end
-    endcase
-    unique case (state)
-      'b000: begin
-        // wait for arvalid
-        if (arvalid) begin
-          state <= 'b101;
+        default: begin
+          state_w <= WIDLE;
         end
-        if (arvalid) begin
-          `YSYX_DPI_C_PMEM_READ((araddr & ~'h3), mem_rdata_buf);
+      endcase
+
+      // AXI4 read transaction
+      unique case (state_r)
+        RIDLE: begin
+          // wait for arvalid
+          if (arvalid) begin
+            state_r <= RVALID;
+            `YSYX_DPI_C_PMEM_READ((araddr & ~'h3), mem_rdata_buf);
+          end
         end
-      end
-      'b001: begin
-        // send rvalid
-        state <= 'b010;
-      end
-      'b010: begin
-        // send rready or wait for wlast
-        state <= 'b011;
-      end
-      'b011: begin
-        // wait for rready
-        if (rready) begin
-          state <= 0;
+        RVALID: begin
+          state_r <= RIDLE;
         end
-      end
-      'b100: begin
-        // wait for bready
-        // if (bready) begin
-        //   state <= 0;
-        //   is_writing <= 0;
-        // end
-      end
-      'b101: begin
-        state <= 'b000;
-      end
-      default: begin
-        state <= 'b000;
-      end
-    endcase
+        default: begin
+          state_r <= RIDLE;
+        end
+      endcase
+    end
   end
 endmodule
 
