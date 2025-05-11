@@ -61,10 +61,7 @@ module ysyx_lsu #(
   assign lsu_addr_valid = (
          (lsu_addr >= 'h02000048 && lsu_addr < 'h02000050) ||
          (lsu_addr >= 'h0f000000 && lsu_addr < 'h0f002000) ||
-         (lsu_addr >= 'h10000000 && lsu_addr < 'h10002000) ||
-         (lsu_addr >= 'h20000000 && lsu_addr < 'h20001000) ||
-         (lsu_addr >= 'h30000000 && lsu_addr < 'h31000000) ||
-         (lsu_addr >= 'h40000000 && lsu_addr < 'h41000000) ||
+         (lsu_addr >= 'h10000000 && lsu_addr < 'h10020000) ||
          (lsu_addr >= 'h80000000 && lsu_addr < 'h80400000) ||
          (lsu_addr >= 'ha0000000 && lsu_addr < 'hc0000000) ||
          (0)
@@ -75,10 +72,6 @@ module ysyx_lsu #(
   assign out_lsu_arvalid = arvalid;
   assign arvalid = ren && lsu_addr_valid && !l1d_cache_hit;
   assign out_lsu_rstrb = rstrb;
-
-  // without l1d cache
-  // assign rdata = bus_rdata;
-  // assign rvalid_o = lsu_rvalid;
 
   // with l1d cache
   assign rdata_unalign = (uncacheable) ? rdata_lsu : l1d[addr_idx];
@@ -99,9 +92,9 @@ module ysyx_lsu #(
   assign addr_tag = lsu_addr[XLEN-1:L1D_LEN+2];
   assign addr_idx = lsu_addr[L1D_LEN+2-1:0+2];
   assign uncacheable = (
+         (lsu_addr >= 'h02000048 && lsu_addr < 'h02000050) ||
          (lsu_addr >= 'h0c000000 && lsu_addr < 'h0d000000) ||
-         (lsu_addr >= 'h02000000 && lsu_addr < 'h02000100) ||
-         (lsu_addr >= 'h10000000 && lsu_addr < 'h20000000) ||
+         (lsu_addr >= 'h10000000 && lsu_addr < 'h10020000) ||
          (0)
        );
 

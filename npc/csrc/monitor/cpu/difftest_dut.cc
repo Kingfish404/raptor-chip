@@ -167,11 +167,6 @@ void difftest_step(vaddr_t pc)
     return;
   }
 
-  ref_difftest_exec(1);
-  ref_difftest_regcpy(&ref_r, DIFFTEST_TO_DUT);
-  checkregs(&ref_r, *npc.cpc);
-  // printf("Diff test at ref.cpc: " FMT_WORD_NO_PREFIX ", npc.cpc: " FMT_WORD_NO_PREFIX "\n",
-  //        *ref_r.cpc, *npc.cpc);
   if (should_diff_mem)
   {
     int low2addr = npc.vwaddr & 0x3;
@@ -215,4 +210,10 @@ void difftest_step(vaddr_t pc)
 #endif
     should_diff_mem = false;
   }
+
+  ref_difftest_exec(1);
+  ref_difftest_regcpy(&ref_r, DIFFTEST_TO_DUT);
+  checkregs(&ref_r, *npc.cpc);
+  // printf("Diff test at ref.cpc: " FMT_WORD_NO_PREFIX ", npc.cpc: " FMT_WORD_NO_PREFIX "\n",
+  //        *ref_r.cpc, *npc.cpc);
 }

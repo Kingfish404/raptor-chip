@@ -7,7 +7,7 @@ on:
     branches: ["master", "main"]
 
 jobs:
-  ppa-eval:
+  ppa-npc-eval:
     runs-on: ubuntu-latest
 
     steps:
@@ -22,14 +22,39 @@ jobs:
         run: docker run --rm sta:latest bash -c "make o2_defconfig && make -C /workspaces/ysyx-workbench/riscv-arch-test-am ARCH=riscv32e-npc run mainargs="test" FLAGS="-b -n""
       - name: Show the RISC-V Architecture Test result riscv32-npc
         run: docker run --rm sta:latest bash -c "make o2_defconfig && make -C /workspaces/ysyx-workbench/riscv-arch-test-am ARCH=riscv32-npc run mainargs="test" FLAGS="-b -n""
-      - name: Show the microbench ysyxsoc payload result (IPC, Mark)
-        run: docker run --rm sta:latest bash -c "make o2soc_defconfig && make && make -C /workspaces/ysyx-workbench/am-kernels/benchmarks/microbench ARCH=riscv32e-ysyxsoc run mainargs="test" FLAGS="-b -n""
-      - name: Show the microbench ysyxsoc payload result (IPC, Mark)
-        run: docker run --rm sta:latest bash -c "make o2soc_defconfig && make && make -C /workspaces/ysyx-workbench/am-kernels/benchmarks/microbench ARCH=riscv32-ysyxsoc run mainargs="test" FLAGS="-b -n""
       - name: Show the STA result (Power, Frequency, Area)
         run: docker run --rm sta:latest bash -c "make sta_local >> /dev/null && make sta_local"
       - name: Clean up
         run: docker rmi sta:latest
+
+  ysyxsoc-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the Docker image
+        run: docker build . --file Dockerfile --tag sta:latest --build-arg CACHEBUST=$(date +%s)
+      - name: Show the microbench ysyxsoc payload result (IPC, Mark)
+        run: docker run --rm sta:latest bash -c "make o2soc_defconfig && make && make -C /workspaces/ysyx-workbench/am-kernels/benchmarks/microbench ARCH=riscv32e-ysyxsoc run mainargs="test" FLAGS="-b -n""
+      - name: Show the microbench ysyxsoc payload result (IPC, Mark)
+        run: docker run --rm sta:latest bash -c "make o2soc_defconfig && make && make -C /workspaces/ysyx-workbench/am-kernels/benchmarks/microbench ARCH=riscv32-ysyxsoc run mainargs="test" FLAGS="-b -n""
+      - name: Clean up
+        run: docker rmi sta:latest
+
+  litex-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup envirement
+        run: ./setup.sh
+      - name: prepare litex
+        run:  cd fpga/litex && YSYX_HOME=/home/runner/work/ysyx-workbench/ysyx-workbench/ ./setup.sh
+      # - name: run litex
+      #   run: cd fpga/litex && eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)" && source ./venv/bin/activate && YSYX_HOME=/home/runner/work/ysyx-workbench/ysyx-workbench/ timeout -s KILL 360 make run
+      # - name: liftoff
+      #   run: cd fpga/litex && eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)" && source ./venv/bin/activate && pushd $YSYX_HOME/third_party/enjoy-digital/litex && litex_bare_metal_demo --build-path=build/sim/ && popd &&
+      #         YSYX_HOME=/home/runner/work/ysyx-workbench/ysyx-workbench/ timeout -s KILL 360 make liftoff
 
   nemu-test:
     runs-on: ubuntu-latest

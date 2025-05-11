@@ -99,4 +99,5 @@ repo_init
 
 step=$((step + 1))
 source ./environment.env
+make -C ./npc build_packed
 echo "Step $step: Build environment setup complete."
