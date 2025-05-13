@@ -11,8 +11,7 @@ module ysyx_wbu #(
     input ebreak,
 
     input [XLEN-1:0] npc_wdata,
-    input branch_change,
-    input branch_retire,
+    input sys_retire,
 
     output [XLEN-1:0] out_npc,
     output [XLEN-1:0] out_rpc,
@@ -43,7 +42,7 @@ module ysyx_wbu #(
         pc_wbu <= pc;
         inst_wbu <= inst;
         valid <= 1;
-        retire <= branch_retire | branch_change;
+        retire <= sys_retire;
         npc_wbu <= npc_wdata;
         if (ebreak) begin
           `YSYX_DPI_C_NPC_EXU_EBREAK

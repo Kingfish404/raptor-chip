@@ -9,7 +9,7 @@ module ysyx_ifu #(
 
     input [XLEN-1:0] npc,
     input [XLEN-1:0] cpc,
-    input br_retire,
+    input sys_retire,
 
     output [XLEN-1:0] out_inst,
     output [XLEN-1:0] out_pc,
@@ -40,7 +40,8 @@ module ysyx_ifu #(
   logic ifu_sys_hazard = 0;
 
   logic [XLEN-1:0] btb, btb_jal;
-  logic [XLEN-1:0] bpu_btb[BTB_SIZE], bpu_btb_jal[BTB_SIZE];
+  logic [XLEN-1:0] bpu_btb[BTB_SIZE];
+  logic [BTB_SIZE-1:0] bpu_btb_valid;
   logic [$clog2(BTB_SIZE)-1:0] cpc_idx, pc_idx;
   logic speculation, ifu_b_speculation;
 
@@ -70,10 +71,8 @@ module ysyx_ifu #(
   assign out_ready = !valid;
 
   // BTFN (Backward Taken, Forward Not-taken), jalr is always not taken
-  assign pnpc_ifu = ((is_b_type && (btb < pc_ifu)) ? btb :
-   (is_jal && (btb_jal < pc_ifu)) ? btb_jal : pc_ifu + 4);
+  assign pnpc_ifu = ((is_b_type || is_jal) && bpu_btb_valid[pc_idx] ? btb : pc_ifu + 4);
   assign btb = bpu_btb[pc_idx];
-  assign btb_jal = bpu_btb_jal[pc_idx];
   assign cpc_idx = cpc[$clog2(BTB_SIZE)-1+2:2];
   assign pc_idx = pc_ifu[$clog2(BTB_SIZE)-1+2:2];
 
@@ -82,47 +81,26 @@ module ysyx_ifu #(
   always @(posedge clock) begin
     if (reset) begin
       pc_ifu <= `YSYX_PC_INIT;
-      speculation <= 0;
       ifu_sys_hazard <= 0;
-      for (int i = 0; i < BTB_SIZE; i++) begin
-        bpu_btb[i[$clog2(BTB_SIZE)-1:0]] <= `YSYX_PC_INIT;
-        bpu_btb_jal[i[$clog2(BTB_SIZE)-1:0]] <= `YSYX_PC_INIT;
-      end
+      bpu_btb_valid <= 0;
     end else begin
       if (flush_pipeline) begin
         pc_ifu <= npc;
         ifu_sys_hazard <= 0;
-        speculation <= 0;
-        ifu_b_speculation <= 0;
-        if (ifu_b_speculation) begin
-          bpu_btb[cpc_idx] <= npc;
-        end else begin
-          bpu_btb_jal[cpc_idx] <= npc;
-        end
+        bpu_btb[cpc_idx] <= npc;
+        bpu_btb_valid[cpc_idx] <= 1;
       end else begin
-        if (prev_valid && br_retire) begin
-          speculation <= 0;
-          ifu_b_speculation <= 0;
+        if (prev_valid && sys_retire) begin
           ifu_sys_hazard <= 0;
-          if (ifu_sys_hazard) begin
-            pc_ifu <= npc;
-          end
+          pc_ifu <= npc;
         end
         if (next_ready && valid) begin
-          if (!is_branch && !is_sys) begin
-            pc_ifu <= pc_ifu + 4;
+          if (is_branch) begin
+            pc_ifu <= pnpc_ifu;
+          end else if (is_sys) begin
+            ifu_sys_hazard <= 1;
           end else begin
-            if (is_branch) begin
-              pc_ifu <= pnpc_ifu;
-              if (is_b_type && (btb < pc_ifu)) begin
-                speculation <= 1;
-                ifu_b_speculation <= 1;
-              end else if (is_jal && (btb_jal < pc_ifu)) begin
-                speculation <= 1;
-              end
-            end else if (is_sys) begin
-              ifu_sys_hazard <= 1;
-            end
+            pc_ifu <= pc_ifu + 4;
           end
         end
       end

@@ -157,7 +157,7 @@ module ysyx #(
   logic wbu_valid;
   logic [XLEN-1:0] wbu_npc;
   logic [XLEN-1:0] wbu_rpc;
-  logic wbu_br_retire;
+  logic wbu_retire;
 
   // Reg out
   logic [XLEN-1:0] reg_rdata1, reg_rdata2;
@@ -192,7 +192,7 @@ module ysyx #(
       // <= wbu
       .npc(wbu_npc),
       .cpc(wbu_rpc),
-      .br_retire(wbu_br_retire),
+      .sys_retire(wbu_retire),
 
       .out_inst(ifu_inst),
       .out_pc(ifu_pc),
@@ -301,13 +301,12 @@ module ysyx #(
       .pc(iqu_wbu_if.pc),
       .ebreak(iqu_wbu_if.ebreak),
 
-      .npc_wdata(iqu_wbu_if.npc),
-      .branch_change(iqu_wbu_if.pc_change),
-      .branch_retire(iqu_wbu_if.pc_retire),
+      .npc_wdata (iqu_wbu_if.npc),
+      .sys_retire(iqu_wbu_if.sys_retire),
 
       .out_npc(wbu_npc),
       .out_rpc(wbu_rpc),
-      .out_retire(wbu_br_retire),
+      .out_retire(wbu_retire),
 
       .prev_valid(iqu_wbu_if.valid),
       .out_valid (wbu_valid),

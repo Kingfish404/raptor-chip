@@ -56,9 +56,8 @@ module ysyx_exu #(
   logic [RS_SIZE-1:0] rs_ren_ready;
   logic [XLEN-1:0] rs_ren_data[RS_SIZE];
   logic [RS_SIZE-1:0] rs_jen;
-  logic [RS_SIZE-1:0] rs_branch_change;
-  logic [RS_SIZE-1:0] rs_branch_retire;
-  logic [RS_SIZE-1:0] rs_branch;
+  logic [RS_SIZE-1:0] rs_br_jmp;
+  logic [RS_SIZE-1:0] rs_br_cond;
   logic [RS_SIZE-1:0] rs_jump;
   logic [XLEN-1:0] rs_imm[RS_SIZE];
   logic [XLEN-1:0] rs_pc[RS_SIZE];
@@ -204,9 +203,8 @@ module ysyx_exu #(
             rs_ren[free_idx] <= idu_if.ren;
             rs_ren_ready[free_idx] <= 0;
             rs_jen[free_idx] <= idu_if.jen;
-            rs_branch_retire[free_idx] <= (idu_if.system || idu_if.ben || idu_if.ren);
-            rs_branch_change[free_idx] <= (idu_if.jen || idu_if.ecall || idu_if.mret);
-            rs_branch[free_idx] <= (idu_if.ben);
+            rs_br_jmp[free_idx] <= (idu_if.jen || idu_if.ecall || idu_if.mret);
+            rs_br_cond[free_idx] <= (idu_if.ben);
             rs_jump[free_idx] <= (idu_if.jen);
             rs_imm[free_idx] <= idu_if.imm;
             rs_pc[free_idx] <= idu_if.pc;
@@ -292,13 +290,10 @@ module ysyx_exu #(
   assign exu_wb_if.npc = (
     (rs_ecall[valid_idx]) ? mtvec :
     (rs_mret[valid_idx]) ? mepc :
-    ((rs_branch_change[valid_idx]) ||
-    (rs_branch[valid_idx] && |rs_a[valid_idx])) ? addr_exu :
+    ((rs_br_jmp[valid_idx]) || (rs_br_cond[valid_idx] && |rs_a[valid_idx])) ? addr_exu :
     (rs_pc[valid_idx] + 4));
-  assign exu_wb_if.pc_change = (
-    (rs_branch_change[valid_idx]) ||
-    (rs_branch[valid_idx] && |rs_a[valid_idx]));
-  assign exu_wb_if.pc_retire = rs_branch_retire[valid_idx];
+  assign exu_wb_if.sys_retire = rs_system[valid_idx];
+  assign exu_wb_if.br_retire = rs_br_jmp[valid_idx] || rs_br_cond[valid_idx];
   assign exu_wb_if.ebreak = rs_ebreak[valid_idx];
 
   assign exu_wb_if.pc = rs_pc[valid_idx];

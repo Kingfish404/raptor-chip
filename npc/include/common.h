@@ -143,7 +143,7 @@ typedef struct
   uint64_t exu_stall_cycle;
 
   // bpu
-  uint64_t bpu_success_cnt;
+  uint64_t bpu_cnt;
   uint64_t bpu_fail_cnt;
 
   // for inst

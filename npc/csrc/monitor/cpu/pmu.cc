@@ -27,10 +27,11 @@ void perf_sample_per_cycle()
   }
   pmu.active_cycle++;
   bool speculation = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, ifu__DOT__speculation));
-  bool pc_retire = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, wbu__DOT__retire));
+  bool is_br = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, iqu__DOT__head_is_br));
+  bool br_predict_fail = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, iqu__DOT__head_br_p_fail));
   bool flush_pipeline = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, flush_pipeline));
-  pmu.bpu_success_cnt += speculation && pc_retire ? 1 : 0;
-  pmu.bpu_fail_cnt += speculation && flush_pipeline ? 1 : 0;
+  pmu.bpu_cnt += is_br ? 1 : 0;
+  pmu.bpu_fail_cnt += is_br && br_predict_fail ? 1 : 0;
   bool ifu_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, ifu__DOT__l1i_valid));
   bool ifu_sys_hazard = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, ifu__DOT__ifu_sys_hazard));
 
@@ -175,8 +176,8 @@ void perf()
       (1.0 * pmu.ifu_stall_cycle) / (pmu.ifu_fetch_cnt + 1),
       (1.0 * pmu.lsu_stall_cycle) / (pmu.lsu_load_cnt + 1));
   Log("BPU Success: %lld, Fail: %lld, Rate: %2.1f%%",
-      pmu.bpu_success_cnt, pmu.bpu_fail_cnt,
-      percentage(pmu.bpu_success_cnt, pmu.bpu_success_cnt + pmu.bpu_fail_cnt));
+      pmu.bpu_cnt - pmu.bpu_fail_cnt, pmu.bpu_fail_cnt,
+      percentage(pmu.bpu_cnt - pmu.bpu_fail_cnt, pmu.bpu_cnt));
   Log(FMT_BLUE("ifu_fetch_cnt: %lld, instr_cnt: %lld"), pmu.ifu_fetch_cnt, pmu.instr_cnt);
   // assert(pmu.ifu_fetch_cnt == pmu.instr_cnt);
   assert(

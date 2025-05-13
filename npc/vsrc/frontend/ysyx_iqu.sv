@@ -92,8 +92,8 @@ module ysyx_iqu #(
 
   logic [XLEN-1:0] rob_value[ROB_SIZE];
   logic [XLEN-1:0] rob_npc[ROB_SIZE];
-  logic rob_pc_change[ROB_SIZE];
-  logic rob_pc_retire[ROB_SIZE];
+  logic rob_sys[ROB_SIZE];
+  logic rob_br_retire[ROB_SIZE];
 
   logic rob_csr_wen[ROB_SIZE];
   logic [XLEN-1:0] rob_csr_wdata[ROB_SIZE];
@@ -112,6 +112,9 @@ module ysyx_iqu #(
   logic [$clog2(ROB_SIZE)-1:0] rf_reorder[REG_NUM];
   logic [REG_NUM-1:0] rf_busy;
   // === Register File (RF) status ===
+
+  logic head_is_br;
+  logic head_br_p_fail;
 
   assign dispatch_ready = (next_ready && uoq_valid[uoq_tail] && rob_busy[rob_tail] == 0);
 
@@ -247,8 +250,8 @@ module ysyx_iqu #(
 
         rob_value[wb_dest] <= exu_wb_if.result;
         rob_npc[wb_dest] <= exu_wb_if.npc;
-        rob_pc_change[wb_dest] <= exu_wb_if.pc_change;
-        rob_pc_retire[wb_dest] <= exu_wb_if.pc_retire;
+        rob_sys[wb_dest] <= exu_wb_if.sys_retire;
+        rob_br_retire[wb_dest] <= exu_wb_if.br_retire;
         rob_ebreak[wb_dest] <= exu_wb_if.ebreak;
 
         rob_csr_wen[wb_dest] <= exu_wb_if.csr_wen;
@@ -271,15 +274,15 @@ module ysyx_iqu #(
             rf_busy[rob_rd[rob_head][`YSYX_REG_LEN-1:0]] <= 0;
           end
         end
-        if ((rob_fence_i[rob_head]) ||
-            ((rob_pc_change[rob_head] || rob_pc_retire[rob_head]) &&
-             (rob_npc[rob_head] != rob_pnpc[rob_head]))
-          ) begin
+        if ((rob_fence_i[rob_head]) || (head_is_br && head_br_p_fail)) begin
           flush_pipeline <= 1;
         end
       end
     end
   end
+
+  assign head_is_br = (rob_br_retire[rob_head]);
+  assign head_br_p_fail = rob_npc[rob_head] != rob_pnpc[rob_head];
 
   assign iqu_wbu_if.rd = rob_rd[rob_head];
   assign iqu_wbu_if.inst = rob_inst[rob_head];
@@ -287,8 +290,7 @@ module ysyx_iqu #(
 
   assign iqu_wbu_if.result = rob_value[rob_head];
   assign iqu_wbu_if.npc = rob_npc[rob_head];
-  assign iqu_wbu_if.pc_change = rob_pc_change[rob_head];
-  assign iqu_wbu_if.pc_retire = rob_pc_retire[rob_head];
+  assign iqu_wbu_if.sys_retire = rob_sys[rob_head];
   assign iqu_wbu_if.ebreak = rob_ebreak[rob_head];
   assign iqu_wbu_if.fence_i = rob_fence_i[rob_head];
   assign iqu_wbu_if.valid = rob_busy[rob_head] && rob_state[rob_head] == WB && !flush_pipeline;

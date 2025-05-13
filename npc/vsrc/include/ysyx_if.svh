@@ -65,8 +65,8 @@ interface exu_pipe_if;
 
   // wbu
   logic [`YSYX_XLEN-1:0] npc;
-  logic pc_change;
-  logic pc_retire;
+  logic sys_retire;
+  logic br_retire;
 
   // csr
   logic csr_wen;
@@ -87,7 +87,7 @@ interface exu_pipe_if;
   modport in(
       input rs_idx,
       input rd, inst, pc,
-      input dest, result, npc, pc_change, pc_retire, ebreak, fence_i,
+      input dest, result, npc, sys_retire, br_retire, ebreak, fence_i,
       input csr_wen, csr_wdata, csr_addr, ecall, mret,
       input sq_idx, store_commit,
       input valid
@@ -95,7 +95,7 @@ interface exu_pipe_if;
   modport out(
       output rs_idx,
       output rd, inst, pc,
-      output dest, result, npc, pc_change, pc_retire, ebreak, fence_i,
+      output dest, result, npc, sys_retire, br_retire, ebreak, fence_i,
       output csr_wen, csr_wdata, csr_addr, ecall, mret,
       output sq_idx, store_commit,
       output valid
