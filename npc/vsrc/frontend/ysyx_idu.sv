@@ -65,10 +65,12 @@ module ysyx_idu #(
 
       .out_sys_system(idu_if.system),
       .out_sys_ebreak(idu_if.ebreak),
-      .out_sys_fence_i(idu_if.fence_i),
       .out_sys_ecall(idu_if.ecall),
       .out_sys_mret(idu_if.mret),
       .out_sys_csr_csw(idu_if.csr_csw),
+
+      .out_fence_i(idu_if.fence_i),
+      .out_fence_time(idu_if.fence_time),
 
       .out_rd (rd),
       .out_imm(idu_if.imm),

@@ -1,3 +1,5 @@
+`include "ysyx_dpi_c.svh"
+
 `ifdef USE_DPI_C
 import "DPI-C" function void npc_exu_ebreak();
 import "DPI-C" function void npc_illegal_inst();

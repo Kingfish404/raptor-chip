@@ -68,7 +68,7 @@ cd $YSYX_HOME/am-kernels/benchmarks/microbench && \
 # then follow `fpga/gowin-tang-nano-20k/README.md`
 
 ## package all sv files into one
-cd npc && make build_packed
+cd npc && make pack
 ```
 
 ## Run opensbi & Kernel

@@ -16,6 +16,7 @@ module ysyx_ifu #(
     output [XLEN-1:0] out_pnpc,
 
     input flush_pipeline,
+    input fence_time,
 
     // for bus
     input bus_ifu_ready,
@@ -48,7 +49,7 @@ module ysyx_ifu #(
   logic ifu_hazard;
   logic [6:0] opcode;
   logic is_jalr, is_jal, is_b_type, is_branch;
-  logic is_sys;
+  logic is_fence, is_sys;
   logic valid;
 
   logic invalid_l1i;
@@ -64,14 +65,15 @@ module ysyx_ifu #(
   assign is_jal = (opcode == `YSYX_OP_JAL___);
   assign is_b_type = (opcode == `YSYX_OP_B_TYPE_);
   assign is_branch = (is_jal || is_jalr || is_b_type);
-  assign is_sys = (opcode == `YSYX_OP_SYSTEM);
+  assign is_fence = (opcode == `YSYX_OP_FENCE_);
+  assign is_sys = (opcode == `YSYX_OP_SYSTEM) || is_fence;
 
   assign valid = (l1i_valid && !ifu_hazard) && !flush_pipeline;
   assign out_valid = valid;
   assign out_ready = !valid;
 
   // BTFN (Backward Taken, Forward Not-taken), jalr is always not taken
-  assign pnpc_ifu = ((is_b_type || is_jal) && bpu_btb_valid[pc_idx] ? btb : pc_ifu + 4);
+  assign pnpc_ifu = (is_branch && bpu_btb_valid[pc_idx] ? btb : pc_ifu + 4);
   assign btb = bpu_btb[pc_idx];
   assign cpc_idx = cpc[$clog2(BTB_SIZE)-1+2:2];
   assign pc_idx = pc_ifu[$clog2(BTB_SIZE)-1+2:2];
@@ -88,7 +90,11 @@ module ysyx_ifu #(
         pc_ifu <= npc;
         ifu_sys_hazard <= 0;
         bpu_btb[cpc_idx] <= npc;
-        bpu_btb_valid[cpc_idx] <= 1;
+        if (fence_time) begin
+          bpu_btb_valid <= 0;
+        end else begin
+          bpu_btb_valid[cpc_idx] <= 1;
+        end
       end else begin
         if (prev_valid && sys_retire) begin
           ifu_sys_hazard <= 0;

@@ -140,8 +140,7 @@ module ysyx_exu #(
   assign out_ren = (load_found) &&
     (rs_qj[load_rs_index] == 0 && rs_qk[load_rs_index] == 0) &&
      !rs_ren_ready[load_rs_index];
-  assign out_wen = ((store_found) &&
-    (iqu_cm_if.store_commit || (sq_commit[sq_index] && sq_busy[sq_index])));
+  assign out_wen = ((store_found) && (sq_commit[sq_index] && sq_busy[sq_index]));
   assign out_rwaddr = (load_found) ? rs_vj[load_rs_index] + rs_imm[load_rs_index] :
     (store_found) ? sq_addr[sq_index] : 0;
   assign out_lsu_mem_wdata = sq_data[sq_index];

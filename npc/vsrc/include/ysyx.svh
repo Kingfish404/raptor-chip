@@ -8,7 +8,7 @@
 `define YSYX_OP_JAL___ 7'b1101111
 `define YSYX_OP_JALR__ 7'b1100111
 `define YSYX_OP_SYSTEM 7'b1110011
-`define YSYX_OP_FENCE_I 7'b0001111
+`define YSYX_OP_FENCE_ 7'b0001111
 
 `define YSYX_F3_CSRRW_ 3'b001
 `define YSYX_F3_CSRRS_ 3'b010

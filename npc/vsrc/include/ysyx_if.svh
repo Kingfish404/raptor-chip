@@ -14,6 +14,7 @@ interface idu_pipe_if;
   logic ecall;
   logic ebreak;
   logic fence_i;
+  logic fence_time;
   logic mret;
   logic [2:0] csr_csw;
 
@@ -35,7 +36,8 @@ interface idu_pipe_if;
 
   modport in(
       input alu_op, jen, ben, wen, ren,
-      input system, ecall, ebreak, fence_i, mret, csr_csw,
+      input system, ecall, ebreak, mret, csr_csw,
+      input fence_i, fence_time,
       input rd, imm, op1, op2, rs1, rs2,
       input qj, qk, dest,
       input pnpc,
@@ -44,7 +46,8 @@ interface idu_pipe_if;
   );
   modport out(
       output alu_op, jen, ben, wen, ren,
-      output system, ecall, ebreak, fence_i, mret, csr_csw,
+      output system, ecall, ebreak, mret, csr_csw,
+      output fence_i, fence_time,
       output rd, imm, op1, op2, rs1, rs2,
       output qj, qk, dest,
       output pnpc,
@@ -87,7 +90,8 @@ interface exu_pipe_if;
   modport in(
       input rs_idx,
       input rd, inst, pc,
-      input dest, result, npc, sys_retire, br_retire, ebreak, fence_i,
+      input dest, result, npc, sys_retire, br_retire, ebreak,
+      input fence_i,
       input csr_wen, csr_wdata, csr_addr, ecall, mret,
       input sq_idx, store_commit,
       input valid
@@ -95,7 +99,8 @@ interface exu_pipe_if;
   modport out(
       output rs_idx,
       output rd, inst, pc,
-      output dest, result, npc, sys_retire, br_retire, ebreak, fence_i,
+      output dest, result, npc, sys_retire, br_retire, ebreak,
+      output fence_i,
       output csr_wen, csr_wdata, csr_addr, ecall, mret,
       output sq_idx, store_commit,
       output valid

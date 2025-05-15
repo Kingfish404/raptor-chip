@@ -192,6 +192,7 @@ module ysyx_npc_soc #(
     RVALID = 3'b101
   } state_r_t;
 
+  logic [XLEN-1:0] awaddr_buf;
   logic [31:0] mem_rdata_buf;
   state_r_t state_r;
   state_w_t state_w;
@@ -203,7 +204,7 @@ module ysyx_npc_soc #(
 
   // write transaction
   assign out_awready = (state_w == WIDLE);
-  assign out_wready  = (state_w == WDREADY && wvalid);
+  assign out_wready  = ((state_w == WDREADY || state_w == WDWRITE) && wvalid);
   assign out_bvalid  = (state_w == WFINISH);
   logic [7:0] wmask = (
     ({{8{awsize == 3'b000}} & 8'h1 }) |
@@ -222,26 +223,27 @@ module ysyx_npc_soc #(
         WIDLE: begin
           if (awvalid) begin
             state_w <= WAREADY;
+            awaddr_buf <= awaddr;
           end
         end
         WAREADY: begin
           state_w <= WDWRITE;
         end
         WDWRITE: begin
-          if (awaddr == `YSYX_BUS_SERIAL_PORT) begin
+          if (awaddr_buf == `YSYX_BUS_SERIAL_PORT) begin
             $write("%c", wdata[7:0]);
           end else begin
             if (wstrb[0]) begin
-              `YSYX_DPI_C_PMEM_WRITE((awaddr & ~'h3) + 0, {wdata >>  0}[31:0], 1);
+              `YSYX_DPI_C_PMEM_WRITE((awaddr_buf & ~'h3) + 0, {wdata >>  0}[31:0], 1);
             end
             if (wstrb[1]) begin
-              `YSYX_DPI_C_PMEM_WRITE((awaddr & ~'h3) + 1, {wdata >>  8}[31:0], 1);
+              `YSYX_DPI_C_PMEM_WRITE((awaddr_buf & ~'h3) + 1, {wdata >>  8}[31:0], 1);
             end
             if (wstrb[2]) begin
-              `YSYX_DPI_C_PMEM_WRITE((awaddr & ~'h3) + 2, {wdata >> 16}[31:0], 1);
+              `YSYX_DPI_C_PMEM_WRITE((awaddr_buf & ~'h3) + 2, {wdata >> 16}[31:0], 1);
             end
             if (wstrb[3]) begin
-              `YSYX_DPI_C_PMEM_WRITE((awaddr & ~'h3) + 3, {wdata >> 24}[31:0], 1);
+              `YSYX_DPI_C_PMEM_WRITE((awaddr_buf & ~'h3) + 3, {wdata >> 24}[31:0], 1);
             end
           end
           if (wlast) begin

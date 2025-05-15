@@ -54,6 +54,7 @@ class ysyx(CPU):
         0x0200_0000: 0x000C_0000,
         0x0C00_0000: 0x0100_0000,
         0x1000_0000: 0x0002_0000,
+        0xA000_0000: 0x1000_0000,
     }  # Origin, Length.
 
     # GCC Flags.
@@ -68,10 +69,11 @@ class ysyx(CPU):
         return {
             "rom": 0x8000_0000,
             "sram": 0x8020_0000,
-            "main_ram": 0xA000_0000,
+            "main_ram": 0xC000_0000,
             "clint": 0x0200_0000,
             "plic": 0x0C00_0000,
             "csr": 0x1001_0000,
+            "mmap_m": 0xA000_0000,
         }
 
     def __init__(self, platform, variant="standard"):
@@ -145,8 +147,8 @@ class ysyx(CPU):
             raise EnvironmentError(
                 "Please set YSYX_HOME environment variable to the path of your YSYX repository."
             )
-        os.system("make -C ${YSYX_HOME}/npc build_packed")
-        vdir = os.path.join(base_dir, "npc/build/packed")
+        os.system("make -C ${YSYX_HOME}/npc pack")
+        vdir = os.path.join(base_dir, "npc/build/pack")
         platform.add_verilog_include_path(vdir)
         platform.add_source_dir(vdir)
         print(base_dir)

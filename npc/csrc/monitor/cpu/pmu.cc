@@ -29,7 +29,6 @@ void perf_sample_per_cycle()
   bool speculation = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, ifu__DOT__speculation));
   bool is_br = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, iqu__DOT__head_is_br));
   bool br_predict_fail = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, iqu__DOT__head_br_p_fail));
-  bool flush_pipeline = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, flush_pipeline));
   pmu.bpu_cnt += is_br ? 1 : 0;
   pmu.bpu_fail_cnt += is_br && br_predict_fail ? 1 : 0;
   bool ifu_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, ifu__DOT__l1i_valid));

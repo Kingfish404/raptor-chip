@@ -27,7 +27,11 @@ SOC_SOURCE=$(shell find $(abspath $(SOC_HOME)/perip) -name "*.v") \
     $(SOC_HOME)/build/ysyxSoCFull.v
 INC_PATH +=	$(abspath ./vsrc/include/ysyxsoc)
 else
+ifeq ($(CONFIG_wrapBus), y)
+VTARGET=wrapSoC
+else
 VTARGET=ysyxSoC
+endif
 SOC_SOURCE=
 INC_PATH +=	$(abspath ./vsrc/include/npc)
 endif
@@ -111,15 +115,14 @@ YOSYS_OPENSTA:
 	git clone https://github.com/Kingfish404/yosys-opensta $(YSYX_HOME)/yosys-opensta
 	make -C $(YSYX_HOME)/yosys-opensta init init_opensta
 
-build_packed:
-	mkdir -p $(YSYX_HOME)/npc/build/packed
-	cp -r $(VSRCS) $(YSYX_HOME)/npc/build/packed
+pack:
+	mkdir -p $(YSYX_HOME)/npc/build/pack
+	cp -r $(VSRCS) $(YSYX_HOME)/npc/build/pack
 	cp -r $(abspath ./vsrc/include)/*.svh \
 		  $(abspath ./vsrc/include/dpic_mock)/*.svh \
-		  $(abspath ./vsrc/include/npc)/*.svh $(YSYX_HOME)/npc/build/packed
-	cp scripts/packed.sh $(YSYX_HOME)/npc/build/packed && chmod +x $(YSYX_HOME)/npc/build/packed/packed.sh
-	cd $(YSYX_HOME)/npc/build/packed && \
-		./packed.sh
+		  $(abspath ./vsrc/include/npc)/*.svh $(YSYX_HOME)/npc/build/pack
+	cp scripts/pack.sh $(YSYX_HOME)/npc/build/pack && chmod +x $(YSYX_HOME)/npc/build/pack/pack.sh
+	cd $(YSYX_HOME)/npc/build/pack && ./pack.sh
 
 sta:
 	echo $(MAKECMDGOALS)

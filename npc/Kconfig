@@ -48,6 +48,10 @@ config MEM_DIFFTEST
 
 endmenu
 
+menuconfig wrapBus
+    bool "Enable wrapBus"
+    default n
+
 menuconfig ysyxSoC
     bool "Enable ysyxSoC"
     default y

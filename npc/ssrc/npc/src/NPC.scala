@@ -28,7 +28,6 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
     val system  = Output(UInt(1.W))
     var ecall   = Output(UInt(1.W))
     var ebreak  = Output(UInt(1.W))
-    val fence_i = Output(UInt(1.W))
     var mret    = Output(UInt(1.W))
     val csr_csw = Output(UInt(3.W))
   })
@@ -95,13 +94,9 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
       OR____ -> BitPat("b" + "00 0 0" + ALU_OR__), // R
       AND___ -> BitPat("b" + "00 0 0" + ALU_AND_), // R
 
-      FENCE_ -> BitPat("b" + "00 0 0" + "0????"), // N
-      FENCET -> BitPat("b" + "00 0 0" + "0????"), // N
       PAUSE_ -> BitPat("b" + "00 0 0" + "0????"), // N
       ECALL_ -> BitPat("b" + "00 0 0" + "0????"), // N
       EBREAK -> BitPat("b" + "00 0 0" + "0????"), // N
-
-      FENCEI -> BitPat("b" + "00 0 0" + "0????"), // N
 
       CSRRW_ -> BitPat("b" + "00 0 0" + "0????"), // CSR
       CSRRS_ -> BitPat("b" + "00 0 0" + "0????"), // CSR
@@ -111,6 +106,11 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
       CSRRCI -> BitPat("b" + "00 0 0" + "0????"), // CSR
 
       MRET__ -> BitPat("b" + "00 0 0" + "0????"), // N
+
+      FENCE____ -> BitPat("b" + "00 0 0" + "0????"), // N
+      FENCE_TSO -> BitPat("b" + "00 0 0" + "0????"), // N
+      FENCE_I__ -> BitPat("b" + "00 0 0" + "0????"), // N
+      FENCE_TIM -> BitPat("b" + "00 0 0" + "0????"), // N
 
       MUL___ -> BitPat("b" + "00 0 0" + ALU_MUL_), // R
       MULH__ -> BitPat("b" + "00 0 0" + ALU_MULH), // R
@@ -132,22 +132,27 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
   out.ren    := inst_decoded(8)
 
   val sys_misc_table = TruthTable(
-    Map( //                   csw rebc s
-      ECALL_ -> BitPat("b" + "000 0001 1"), // N
-      EBREAK -> BitPat("b" + "000 0010 1"), // N
+    Map( //                   csw rbc s
+      ECALL_ -> BitPat("b" + "000 001 1"), // N
+      EBREAK -> BitPat("b" + "000 010 1"), // N
 
-      FENCEI -> BitPat("b" + "000 0100 1"), // N
+    // format: off
+   FENCE____ -> BitPat("b" + "000 000 1"), // N
+   FENCE_TSO -> BitPat("b" + "000 000 1"), // N
+   FENCE_I__ -> BitPat("b" + "000 000 1"), // N
+   FENCE_TIM -> BitPat("b" + "000 000 1"), // N
+    // format: on
 
-      MRET__ -> BitPat("b" + "000 1000 1"), // N
+      MRET__ -> BitPat("b" + "000 100 1"), // N
 
-      CSRRW_ -> BitPat("b" + "001 0000 1"), // CSR
-      CSRRS_ -> BitPat("b" + "010 0000 1"), // CSR
-      CSRRC_ -> BitPat("b" + "100 0000 1"), // CSR
-      CSRRWI -> BitPat("b" + "001 0000 1"), // CSR
-      CSRRSI -> BitPat("b" + "010 0000 1"), // CSR
-      CSRRCI -> BitPat("b" + "100 0000 1")  // CSR
+      CSRRW_ -> BitPat("b" + "001 000 1"), // CSR
+      CSRRS_ -> BitPat("b" + "010 000 1"), // CSR
+      CSRRC_ -> BitPat("b" + "100 000 1"), // CSR
+      CSRRWI -> BitPat("b" + "001 000 1"), // CSR
+      CSRRSI -> BitPat("b" + "010 000 1"), // CSR
+      CSRRCI -> BitPat("b" + "100 000 1")  // CSR
     ),
-    BitPat("b" + "000 0000 0")
+    BitPat("b" + "000 000 0")
   )
 
   val sys_decoded = decoder(in.inst, sys_misc_table)
@@ -155,9 +160,26 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
   out_sys.system  := sys_decoded(0)
   out_sys.ecall   := sys_decoded(1)
   out_sys.ebreak  := sys_decoded(2)
-  out_sys.fence_i := sys_decoded(3)
-  out_sys.mret    := sys_decoded(4)
-  out_sys.csr_csw := sys_decoded(7, 5)
+  out_sys.mret    := sys_decoded(3)
+  out_sys.csr_csw := sys_decoded(6, 4)
+
+  val out_fence = IO(new Bundle {
+    val i    = Output(UInt(1.W))
+    val time = Output(UInt(1.W))
+  })
+
+  val fence_table   = TruthTable(
+    Map( //                      ftime iflush
+      FENCE____ -> BitPat("b" + "0" + "0"), // N
+      FENCE_TSO -> BitPat("b" + "0" + "0"), // N
+      FENCE_I__ -> BitPat("b" + "0" + "1"), // N
+      FENCE_TIM -> BitPat("b" + "1" + "1")  // N
+    ),
+    BitPat("b" + "0" + "0")
+  )
+  val fence_decoded = decoder(in.inst, fence_table)
+  out_fence.i    := fence_decoded(0)
+  out_fence.time := fence_decoded(1)
 
   val op_table    = Array(
     // format: off
@@ -203,13 +225,11 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
     OR____ -> List( rd,    0.U,  rs1v,  rs2v, rs1, rs2), // R
     AND___ -> List( rd,    0.U,  rs1v,  rs2v, rs1, rs2), // R
 
-    FENCE_ -> List( rd,    0.U,   0.U,   0.U, 0.U, 0.U), // N
-    FENCET -> List( rd,    0.U,   0.U,   0.U, 0.U, 0.U), // N
+
     PAUSE_ -> List( rd,    0.U,   0.U,   0.U, 0.U, 0.U), // N
     ECALL_ -> List( rd, MCAUSE,   0.U,   0.U, 0.U, 0.U), // N
     EBREAK -> List( rd,    0.U,   0.U,   0.U, 0.U, 0.U), // N
 
-    FENCEI -> List( rd,    0.U,   0.U,   0.U, 0.U, 0.U), // N
 
     CSRRW_ -> List( rd,    csr,  rs1v,   0.U, rs1, 0.U), // CSR
     CSRRS_ -> List( rd,    csr,  rs1v,   0.U, rs1, 0.U), // CSR
@@ -219,6 +239,11 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
     CSRRCI -> List( rd,    csr,  uimm,   0.U, 0.U, 0.U), // CSR
 
     MRET__ -> List( rd,MSTATUS,   0.U,   0.U, 0.U, 0.U), // N
+
+ FENCE____ -> List( rd,    0.U,   0.U,   0.U, 0.U, 0.U), // N
+ FENCE_TSO -> List( rd,    0.U,   0.U,   0.U, 0.U, 0.U), // N
+ FENCE_I__ -> List( rd,    0.U,   0.U,   0.U, 0.U, 0.U), // N
+ FENCE_TIM -> List( rd,    0.U,   0.U,   0.U, 0.U, 0.U), // N
 
     MUL___ -> List( rd,    0.U,  rs1v,  rs2v, rs1, rs2), // R
     MULH__ -> List( rd,    0.U,  rs1v,  rs2v, rs1, rs2), // R

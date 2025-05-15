@@ -68,7 +68,7 @@ module ysyx_ifu_l1i #(
     !l1i_cache_hit && (l1i_state != WAIT && l1i_state != WB_0));
   assign out_ifu_lock = (l1i_state != IDLE);
 
-  assign l1i_cache_hit = (
+  assign l1i_cache_hit = !invalid_l1i && (
          (l1i_state == IDLE || l1i_state == WB_0) &&
          l1ic_valid[addr_idx] == 1'b1) && (l1i_tag[addr_idx][addr_offset] == addr_tag);
   assign ifu_sdram_arburst = (`YSYX_I_SDRAM_ARBURST &&

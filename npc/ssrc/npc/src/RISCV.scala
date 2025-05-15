@@ -95,13 +95,17 @@ trait Instr {
   def OR____ = BitPat("b0000000 ????? ????? 110 ????? 0110011")
   def AND___ = BitPat("b0000000 ????? ????? 111 ????? 0110011")
 
-  def FENCE_ = BitPat("b0000111 11111 00000 000 00000 0001111")
-  def FENCET = BitPat("b1000001 10011 00000 000 00000 0011111")
   def PAUSE_ = BitPat("b0000000 10000 00000 000 00000 0001111")
   def ECALL_ = BitPat("b0000000 00000 00000 000 00000 1110011")
   def EBREAK = BitPat("b0000000 00001 00000 000 00000 1110011")
+
+  def FENCE____ = BitPat("b0000111 11111 00000 000 00000 0001111")
+  def FENCE_TSO = BitPat("b1000001 10011 00000 000 00000 0011111")
   // Zifencei               imm[11:0]   rs1 func3  rd  opcode
-  def FENCEI = BitPat("b??????? ????? ????? 001 ????? 0001111")
+  def FENCE_I__ = BitPat("b??????? ????? ????? 001 ????? 0001111")
+  // Zifencetime
+  def FENCE_TIM = BitPat("b0000000 00000 00000 010 00000 0001111")
+
   // Trap-Return          func7   rs2   rs1 func3  rd  opcode
   def MRET__ = BitPat("b0011000 00010 00000 000 00000 1110011")
   // RV32/RV64 Zicsr              csr   rs1 func3  rd  opcode

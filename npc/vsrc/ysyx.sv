@@ -127,7 +127,6 @@ module ysyx #(
   logic [31:0] ifu_inst;
   logic [XLEN-1:0] ifu_pc;
   logic [XLEN-1:0] ifu_pnpc;
-  logic flush_pipeline;
   logic ifu_valid, ifu_ready;
   // IFU out bus
   logic [XLEN-1:0] ifu_araddr;
@@ -143,6 +142,8 @@ module ysyx #(
   exu_pipe_if iqu_cm_if ();
   logic iqu_valid, iqu_ready;
   logic [4:0] iqu_rs1, iqu_rs2;
+  logic flush_pipeline;
+  logic fence_time;
 
   // EXU out
   exu_pipe_if exu_wb_if ();
@@ -198,6 +199,7 @@ module ysyx #(
       .out_pc(ifu_pc),
       .out_pnpc(ifu_pnpc),
       .flush_pipeline(flush_pipeline),
+      .fence_time(fence_time),
 
       .bus_ifu_ready(bus_ifu_ready),
       .out_ifu_lock(ifu_bus_lock),
@@ -252,7 +254,8 @@ module ysyx #(
       // => exu (commit)
       .iqu_cm_if(iqu_cm_if),
 
-      .flush_pipeline(flush_pipeline),
+      .out_flush_pipeline(flush_pipeline),
+      .out_fence_time(fence_time),
 
       .prev_valid(idu_valid),
       .next_ready(exu_ready),
@@ -332,6 +335,8 @@ module ysyx #(
   // LSU (Load/Store Unit)
   ysyx_lsu lsu (
       .clock(clock),
+
+      .fence_time(fence_time),
 
       // from exu
       .rwaddr(exu_rwaddr),

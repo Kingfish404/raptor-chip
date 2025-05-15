@@ -7,6 +7,8 @@ module ysyx_lsu #(
 ) (
     input clock,
 
+    input fence_time,
+
     // from exu
     input [XLEN-1:0] rwaddr,
     input [4:0] alu_op,
@@ -58,14 +60,14 @@ module ysyx_lsu #(
   logic l1d_cache_hit_w;
   logic lsu_addr_valid;
 
-  assign lsu_addr_valid = (
-         (lsu_addr >= 'h02000048 && lsu_addr < 'h02000050) ||
-         (lsu_addr >= 'h0f000000 && lsu_addr < 'h0f002000) ||
-         (lsu_addr >= 'h10000000 && lsu_addr < 'h10020000) ||
-         (lsu_addr >= 'h80000000 && lsu_addr < 'h80400000) ||
-         (lsu_addr >= 'ha0000000 && lsu_addr < 'hc0000000) ||
-         (0)
-       );
+  assign lsu_addr_valid = (  //
+      (lsu_addr >= 'h02000048 && lsu_addr < 'h02000050) ||  // clint
+      (lsu_addr >= 'h0f000000 && lsu_addr < 'h0f002000) ||  // sram
+      (lsu_addr >= 'h10000000 && lsu_addr < 'h10020000) ||  // uart/csr
+      (lsu_addr >= 'h30000000 && lsu_addr < 'h40000000) ||  // flash
+      (lsu_addr >= 'h80000000 && lsu_addr < 'h80400000) ||  // psram
+      (lsu_addr >= 'ha0000000 && lsu_addr < 'hd0000000) ||  // sdram
+      (0));
 
   assign lsu_addr = rwaddr;
   assign out_lsu_araddr = lsu_addr;
@@ -95,6 +97,7 @@ module ysyx_lsu #(
          (lsu_addr >= 'h02000048 && lsu_addr < 'h02000050) ||
          (lsu_addr >= 'h0c000000 && lsu_addr < 'h0d000000) ||
          (lsu_addr >= 'h10000000 && lsu_addr < 'h10020000) ||
+         (lsu_addr >= 'ha0000000 && lsu_addr < 'hb0000000) ||
          (0)
        );
 
@@ -140,11 +143,14 @@ module ysyx_lsu #(
       l1d_valid <= 0;
       valid_r   <= 0;
     end else begin
+      if (fence_time) begin
+        l1d_valid <= 0;
+      end
       if (ren && lsu_rvalid) begin
         if (uncacheable) begin
           rdata_lsu <= bus_rdata;
           valid_r   <= 1'b1;
-        end else begin
+        end else if (!fence_time) begin
           l1d[addr_idx] <= bus_rdata;
           l1d_tag[addr_idx] <= addr_tag;
           l1d_valid[addr_idx] <= 1'b1;

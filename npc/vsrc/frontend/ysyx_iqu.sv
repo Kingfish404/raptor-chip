@@ -28,7 +28,8 @@ module ysyx_iqu #(
     exu_pipe_if.out iqu_cm_if,
 
     // pipeline
-    output logic flush_pipeline,
+    output logic out_flush_pipeline,
+    output logic out_fence_time,
 
     input prev_valid,
     input next_ready,
@@ -61,9 +62,11 @@ module ysyx_iqu #(
   logic uoq_system[QUEUE_SIZE];
   logic uoq_ecall[QUEUE_SIZE];
   logic uoq_ebreak[QUEUE_SIZE];
-  logic uoq_fence_i[QUEUE_SIZE];
   logic uoq_mret[QUEUE_SIZE];
   logic [2:0] uoq_csr_csw[QUEUE_SIZE];
+
+  logic uoq_f_i[QUEUE_SIZE];
+  logic uoq_f_time[QUEUE_SIZE];
 
   logic [4:0] uoq_rd[QUEUE_SIZE];
   logic [31:0] uoq_imm[QUEUE_SIZE];
@@ -101,8 +104,10 @@ module ysyx_iqu #(
 
   logic rob_ecall[ROB_SIZE];
   logic rob_ebreak[ROB_SIZE];
-  logic rob_fence_i[ROB_SIZE];
   logic rob_mret[ROB_SIZE];
+
+  logic rob_f_i[ROB_SIZE];
+  logic rob_f_time[ROB_SIZE];
 
   logic [$clog2(RS_SIZE)-1:0] rob_rs_idx[ROB_SIZE];
   logic rob_store[ROB_SIZE];
@@ -115,6 +120,11 @@ module ysyx_iqu #(
 
   logic head_is_br;
   logic head_br_p_fail;
+  logic head_valid;
+  logic flush_pipeline;
+  logic fence_time;
+  assign out_flush_pipeline = flush_pipeline;
+  assign out_fence_time = fence_time;
 
   assign dispatch_ready = (next_ready && uoq_valid[uoq_tail] && rob_busy[rob_tail] == 0);
 
@@ -140,9 +150,11 @@ module ysyx_iqu #(
         uoq_system[uoq_head]  <= idu_if.system;
         uoq_ecall[uoq_head]   <= idu_if.ecall;
         uoq_ebreak[uoq_head]  <= idu_if.ebreak;
-        uoq_fence_i[uoq_head] <= idu_if.fence_i;
         uoq_mret[uoq_head]    <= idu_if.mret;
         uoq_csr_csw[uoq_head] <= idu_if.csr_csw;
+
+        uoq_f_i[uoq_head]     <= idu_if.fence_i;
+        uoq_f_time[uoq_head]  <= idu_if.fence_time;
 
         uoq_rd[uoq_head]      <= idu_if.rd;
         uoq_imm[uoq_head]     <= idu_if.imm;
@@ -212,7 +224,7 @@ module ysyx_iqu #(
   logic [$clog2(`YSYX_ROB_SIZE)-1:0] wb_dest;
   assign wb_dest = exu_wb_if.dest[$clog2(`YSYX_ROB_SIZE)-1:0] - 1;
   always @(posedge clock) begin
-    if (reset || flush_pipeline) begin
+    if (reset || flush_pipeline || fence_time) begin
       rob_head <= 0;
       rob_tail <= 0;
       rob_busy <= 0;
@@ -222,6 +234,7 @@ module ysyx_iqu #(
       end
       rf_busy <= 0;
       flush_pipeline <= 0;
+      fence_time <= 0;
     end else begin
       // Dispatch
       if (dispatch_ready) begin
@@ -238,7 +251,8 @@ module ysyx_iqu #(
         rob_pc[rob_tail] <= uoq_pc[uoq_tail];
         rob_pnpc[rob_tail] <= uoq_pnpc[uoq_tail];
 
-        rob_fence_i[rob_tail] <= uoq_fence_i[uoq_tail];
+        rob_f_i[rob_tail] <= uoq_f_i[uoq_tail];
+        rob_f_time[rob_tail] <= uoq_f_time[uoq_tail];
 
         rob_rs_idx[rob_tail] <= exu_wb_if.rs_idx;
         rob_store[rob_tail] <= uoq_wen[uoq_tail];
@@ -274,8 +288,11 @@ module ysyx_iqu #(
             rf_busy[rob_rd[rob_head][`YSYX_REG_LEN-1:0]] <= 0;
           end
         end
-        if ((rob_fence_i[rob_head]) || (head_is_br && head_br_p_fail)) begin
+        if ((rob_f_i[rob_head]) || (head_is_br && head_br_p_fail)) begin
           flush_pipeline <= 1;
+        end
+        if (rob_f_time[rob_head]) begin
+          fence_time <= 1;
         end
       end
     end
@@ -283,6 +300,7 @@ module ysyx_iqu #(
 
   assign head_is_br = (rob_br_retire[rob_head]);
   assign head_br_p_fail = rob_npc[rob_head] != rob_pnpc[rob_head];
+  assign head_valid = rob_busy[rob_head] && rob_state[rob_head] == WB && !flush_pipeline;
 
   assign iqu_wbu_if.rd = rob_rd[rob_head];
   assign iqu_wbu_if.inst = rob_inst[rob_head];
@@ -290,10 +308,10 @@ module ysyx_iqu #(
 
   assign iqu_wbu_if.result = rob_value[rob_head];
   assign iqu_wbu_if.npc = rob_npc[rob_head];
-  assign iqu_wbu_if.sys_retire = rob_sys[rob_head];
-  assign iqu_wbu_if.ebreak = rob_ebreak[rob_head];
-  assign iqu_wbu_if.fence_i = rob_fence_i[rob_head];
-  assign iqu_wbu_if.valid = rob_busy[rob_head] && rob_state[rob_head] == WB && !flush_pipeline;
+  assign iqu_wbu_if.sys_retire = rob_sys[rob_head] && head_valid;
+  assign iqu_wbu_if.ebreak = rob_ebreak[rob_head] && head_valid;
+  assign iqu_wbu_if.fence_i = rob_f_i[rob_head] && head_valid;
+  assign iqu_wbu_if.valid = head_valid;
 
   assign iqu_cm_if.pc = rob_pc[rob_head];
   assign iqu_cm_if.csr_wdata = rob_csr_wdata[rob_head];

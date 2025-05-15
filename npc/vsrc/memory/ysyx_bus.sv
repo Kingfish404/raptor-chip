@@ -85,7 +85,7 @@ module ysyx_bus #(
 
   logic [XLEN-1:0] out_rdata;
   logic rvalid;
-  logic write_done = 0, awrite_done = 0;
+  logic write_done = 0;
 
   // lsu read
   logic clint_en;
@@ -158,27 +158,26 @@ module ysyx_bus #(
     end else begin
       unique case (state_store)
         LS_S_A: begin
-          if (lsu_awvalid) begin
+          if (lsu_awvalid && io_master_awready) begin
             state_store <= LS_S_W;
-            awrite_done <= 0;
             write_done  <= 0;
           end
         end
         LS_S_W: begin
           if (lsu_wvalid) begin
-            if (io_master_awready) begin
-              awrite_done <= 1;
-            end
             if (io_master_wready) begin
-              write_done <= 1;
+              write_done  <= 1;
+              state_store <= LS_S_B;
             end
           end
-          if (io_master_bvalid) begin
-            state_store <= LS_S_B;
-          end
+          // if (io_master_bvalid) begin
+          //   state_store <= LS_S_B;
+          // end
         end
         LS_S_B: begin
-          state_store <= LS_S_A;
+          if (io_master_bvalid) begin
+            state_store <= LS_S_A;
+          end
         end
         default: state_store <= LS_S_A;
       endcase
@@ -235,19 +234,19 @@ module ysyx_bus #(
   assign io_rdata = io_master_rdata;
   assign out_rdata = io_rdata;
   assign rvalid = io_master_rvalid;
-  assign io_master_rready = 1;
+  assign io_master_rready = (state_load == IF_D ||
+            state_load == LS_R || state_load == LS_R_FLUSHED);
 
   // io lsu write
-  assign io_master_awsize = (
+  assign io_master_awsize = lsu_awvalid ? (
            ({3{lsu_wstrb == 8'h1}} & 3'b000) |
            ({3{lsu_wstrb == 8'h3}} & 3'b001) |
            ({3{lsu_wstrb == 8'hf}} & 3'b010) |
            (3'b000)
-         );
-  assign io_master_awaddr = lsu_awaddr;
-  assign io_master_awvalid = (state_store == LS_S_W) && (lsu_wvalid) && !awrite_done;
+         ) : 3'b000;
+  assign io_master_awaddr = lsu_awvalid ? lsu_awaddr : 'h0;
+  assign io_master_awvalid = (state_store == LS_S_A) && (lsu_awvalid);
 
-  assign io_master_wlast = io_master_wvalid;
   logic [1:0] awaddr_lo;
   logic [XLEN-1:0] wdata;
   logic [3:0] wstrb;
@@ -260,11 +259,12 @@ module ysyx_bus #(
     (0)
   };
   assign io_master_wdata = wdata;
+  assign io_master_wvalid = (state_store == LS_S_W) && (lsu_wvalid) && !write_done;
+  assign io_master_wlast = io_master_wvalid && io_master_wready;
   assign io_master_wstrb = {wstrb};
   assign wstrb = {lsu_wstrb[3:0] << awaddr_lo};
-  assign io_master_wvalid = (state_store == LS_S_W) && (lsu_wvalid) && !write_done;
 
-  assign io_master_bready = 1;
+  assign io_master_bready = (state_store == LS_S_B);
 
   always @(posedge clock) begin
     `YSYX_ASSERT(io_master_rresp == 2'b00, "rresp == 2'b00");
