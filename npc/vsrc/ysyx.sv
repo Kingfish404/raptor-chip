@@ -41,6 +41,7 @@ module ysyx #(
 ) (
     input clock,
 
+`ifdef YSYX_USE_SLAVE
     // AXI4 Slave
     // verilator lint_off UNDRIVEN
     // verilator lint_off UNUSEDSIGNAL
@@ -79,6 +80,7 @@ module ysyx #(
     input io_slave_bready,
     // verilator lint_on UNDRIVEN
     // verilator lint_on UNUSEDSIGNAL
+`endif
 
     // AXI4 Master
     output [1:0] io_master_arburst,

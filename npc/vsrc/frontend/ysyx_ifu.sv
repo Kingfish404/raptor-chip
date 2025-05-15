@@ -38,7 +38,7 @@ module ysyx_ifu #(
 );
   logic [XLEN-1:0] pc_ifu;
   logic [XLEN-1:0] pnpc_ifu;
-  logic ifu_sys_hazard = 0;
+  logic ifu_sys_hazard;
 
   logic [XLEN-1:0] btb, btb_jal;
   logic [XLEN-1:0] bpu_btb[BTB_SIZE];

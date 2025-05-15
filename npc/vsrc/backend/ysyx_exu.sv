@@ -2,6 +2,8 @@
 `include "ysyx_if.svh"
 
 module ysyx_exu #(
+    parameter unsigned RS_SIZE = `YSYX_RS_SIZE,
+    parameter unsigned ROB_SIZE = `YSYX_ROB_SIZE,
     parameter bit [7:0] XLEN = `YSYX_XLEN
 ) (
     input clock,
@@ -29,8 +31,7 @@ module ysyx_exu #(
 
     input reset
 );
-  parameter unsigned RS_SIZE = `YSYX_RS_SIZE;
-  parameter unsigned ROB_SIZE = `YSYX_ROB_SIZE;
+
 
   logic [XLEN-1:0] reg_wdata, reg_wdata_mul, mepc, mtvec;
   logic [XLEN-1:0] addr_exu;
@@ -97,13 +98,13 @@ module ysyx_exu #(
     mul_found = 0;
     store_found = 0;
     load_found = 0;
-    for (integer i = 0; i < RS_SIZE; i++) begin
+    for (bit [XLEN-1:0] i = 0; i < RS_SIZE; i++) begin
       if (rs_busy[i] == 0 && !free_found) begin
         free_idx   = i[$clog2(RS_SIZE)-1:0];
         free_found = 1;
       end
     end
-    for (integer i = 0; i < RS_SIZE; i++) begin
+    for (bit [XLEN-1:0] i = 0; i < RS_SIZE; i++) begin
       if (!valid_found && rs_busy[i] == 1) begin
         if (
             // mul ready
@@ -115,19 +116,19 @@ module ysyx_exu #(
         end
       end
     end
-    for (integer i = 0; i < RS_SIZE; i++) begin
+    for (bit [XLEN-1:0] i = 0; i < RS_SIZE; i++) begin
       if (rs_busy[i] == 1 && rs_alu_op[i][4:4] == 1 && !mul_found) begin
         mul_rs_index = i[$clog2(RS_SIZE)-1:0];
         mul_found = 1;
       end
     end
-    for (integer i = 0; i < RS_SIZE; i++) begin
+    for (bit [XLEN-1:0] i = 0; i < RS_SIZE; i++) begin
       if (rs_busy[i] == 1 && rs_ren[i] == 1 && !load_found) begin
         load_rs_index = i[$clog2(RS_SIZE)-1:0];
         load_found = 1;
       end
     end
-    for (integer i = 0; i < RS_SIZE; i++) begin
+    for (bit [XLEN-1:0] i = 0; i < RS_SIZE; i++) begin
       if (sq_busy[i] == 1 && !store_found) begin
         sq_index = i[$clog2(RS_SIZE)-1:0];
         store_found = 1;
@@ -161,7 +162,7 @@ module ysyx_exu #(
       );
     end
   endgenerate
-  logic muling = 0;
+  logic muling;
 
   always @(posedge clock) begin
     if (reset || flush_pipeline) begin
@@ -180,7 +181,7 @@ module ysyx_exu #(
         sq_busy[sq_index]   <= 0;
         sq_commit[sq_index] <= 0;
       end
-      for (integer i = 0; i < RS_SIZE; i++) begin
+      for (bit [XLEN-1:0] i = 0; i < RS_SIZE; i++) begin
         if (free_found && i[$clog2(RS_SIZE)-1:0] == free_idx) begin
           if (prev_valid && rs_ready) begin
             // Dispatch receive
@@ -250,7 +251,7 @@ module ysyx_exu #(
             rs_ren[i] <= 0;
             rs_ren_ready[i] <= 0;
             rs_mul_valid[i] <= 0;
-            for (integer j = 0; j < RS_SIZE; j++) begin
+            for (bit [XLEN-1:0] j = 0; j < RS_SIZE; j++) begin
               // Forwarding
               if (rs_busy[j] && rs_qj[j] == rs_dest[i] && j != i) begin
                 rs_vj[j] <= rs_alu_op[i][4:4] == 1 ? reg_wdata_mul : rs_a[i];
@@ -269,7 +270,7 @@ module ysyx_exu #(
 
   // Branch
   assign addr_exu = ((rs_jump[valid_idx] ? rs_vj[valid_idx] :
-     rs_pc[valid_idx]) + rs_imm[valid_idx]) & ~1;
+     rs_pc[valid_idx]) + rs_imm[valid_idx]) & ~'b1;
 
   // Write back
   assign reg_wdata = (

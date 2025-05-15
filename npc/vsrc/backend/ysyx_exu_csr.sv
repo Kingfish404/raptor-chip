@@ -128,7 +128,8 @@ module ysyx_exu_csr #(
   assign out_mepc = csr[MEPC___];
   assign out_mtvec = csr[MTVEC__];
 
-  logic mstatus_mie = csr[MSTATUS][`YSYX_CSR_MSTATUS_MIE_];
+  logic mstatus_mie;
+  assign mstatus_mie = csr[MSTATUS][`YSYX_CSR_MSTATUS_MIE_];
 
   always @(posedge clock) begin
     if (reset) begin

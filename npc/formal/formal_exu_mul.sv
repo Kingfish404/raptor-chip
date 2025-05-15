@@ -1,6 +1,8 @@
 `include "ysyx.svh"
 
-module formal_exu_mul (
+module formal_exu_mul #(
+    parameter bit [7:0] XLEN = `YSYX_XLEN
+) (
     input clock,
 
     input [XLEN-1:0] in_a,
@@ -12,8 +14,6 @@ module formal_exu_mul (
 
     input reset
 );
-  parameter bit [7:0] XLEN = `YSYX_XLEN;
-
   wire [XLEN-1:0] s1 = in_a;
   wire [XLEN-1:0] s2 = in_b;
 

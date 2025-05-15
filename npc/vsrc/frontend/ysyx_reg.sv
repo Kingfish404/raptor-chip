@@ -117,7 +117,7 @@ module ysyx_reg #(
 
   always @(posedge clock) begin
     if (reset) begin
-      for (integer i = 0; i < REG_NUM; i = i + 1) begin
+      for (bit [XLEN-1:0] i = 0; i < REG_NUM; i = i + 1) begin
         rf[i] <= 0;
       end
     end else begin

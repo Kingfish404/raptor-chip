@@ -2,6 +2,10 @@
 `include "ysyx_if.svh"
 
 module ysyx_iqu #(
+    parameter unsigned QUEUE_SIZE = `YSYX_IQU_SIZE,
+    parameter unsigned ROB_SIZE = `YSYX_ROB_SIZE,
+    parameter unsigned RS_SIZE = `YSYX_RS_SIZE,
+    parameter bit [7:0] REG_NUM = `YSYX_REG_NUM,
     parameter bit [7:0] XLEN = `YSYX_XLEN
 ) (
     input clock,
@@ -36,10 +40,6 @@ module ysyx_iqu #(
     output logic out_valid,
     output logic out_ready
 );
-  parameter unsigned QUEUE_SIZE = `YSYX_IQU_SIZE;
-  parameter unsigned ROB_SIZE = `YSYX_ROB_SIZE;
-  parameter unsigned RS_SIZE = `YSYX_RS_SIZE;
-  parameter bit [7:0] REG_NUM = `YSYX_REG_NUM;
   typedef enum logic [1:0] {
     CM = 2'b00,
     WB = 2'b01,

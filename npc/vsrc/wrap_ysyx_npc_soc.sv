@@ -3,7 +3,9 @@
 `include "ysyx_dpi_c.svh"
 
 
-module rng_chip (
+module rng_chip #(
+    parameter bit [7:0] XLEN = `YSYX_XLEN
+) (
     input clock,
 
     // rnp
@@ -30,7 +32,6 @@ module rng_chip (
 
     input reset
 );
-  parameter bit [7:0] XLEN = `YSYX_XLEN;
 
   logic auto_master_out_awready_cpu;
   logic auto_master_out_awvalid_cpu;
@@ -112,7 +113,6 @@ module rng_chip (
 
   ysyx cpu (  // src/CPU.scala:38:21
       .clock            (clock),
-      .reset            (reset),
       .io_interrupt     (1'h0),
       .io_master_awready(auto_master_out_awready_cpu),
       .io_master_awvalid(auto_master_out_awvalid_cpu),
@@ -146,35 +146,41 @@ module rng_chip (
       .io_master_rdata  (auto_master_out_rdata_cpu),
       .io_master_rresp  (auto_master_out_rresp_cpu),
       .io_master_rlast  (auto_master_out_rlast_cpu),
-      .io_slave_awready (  /* unused */),
-      .io_slave_awvalid (1'h0),
-      .io_slave_awid    (4'h0),
-      .io_slave_awaddr  ('h0),
-      .io_slave_awlen   (8'h0),
-      .io_slave_awsize  (3'h0),
-      .io_slave_awburst (2'h0),
-      .io_slave_wready  (  /* unused */),
-      .io_slave_wvalid  (1'h0),
-      .io_slave_wdata   ('h0),
-      .io_slave_wstrb   (4'h0),
-      .io_slave_wlast   (1'h0),
-      .io_slave_bready  (1'h0),
-      .io_slave_bvalid  (  /* unused */),
-      .io_slave_bid     (  /* unused */),
-      .io_slave_bresp   (  /* unused */),
-      .io_slave_arready (  /* unused */),
-      .io_slave_arvalid (1'h0),
-      .io_slave_arid    (4'h0),
-      .io_slave_araddr  ('h0),
-      .io_slave_arlen   (8'h0),
-      .io_slave_arsize  (3'h0),
-      .io_slave_arburst (2'h0),
-      .io_slave_rready  (1'h0),
-      .io_slave_rvalid  (  /* unused */),
-      .io_slave_rid     (  /* unused */),
-      .io_slave_rdata   (  /* unused */),
-      .io_slave_rresp   (  /* unused */),
-      .io_slave_rlast   (  /* unused */)
+
+
+`ifdef YSYX_USE_SLAVE
+      .io_slave_awready(  /* unused */),
+      .io_slave_awvalid(1'h0),
+      .io_slave_awid   (4'h0),
+      .io_slave_awaddr ('h0),
+      .io_slave_awlen  (8'h0),
+      .io_slave_awsize (3'h0),
+      .io_slave_awburst(2'h0),
+      .io_slave_wready (  /* unused */),
+      .io_slave_wvalid (1'h0),
+      .io_slave_wdata  ('h0),
+      .io_slave_wstrb  (4'h0),
+      .io_slave_wlast  (1'h0),
+      .io_slave_bready (1'h0),
+      .io_slave_bvalid (  /* unused */),
+      .io_slave_bid    (  /* unused */),
+      .io_slave_bresp  (  /* unused */),
+      .io_slave_arready(  /* unused */),
+      .io_slave_arvalid(1'h0),
+      .io_slave_arid   (4'h0),
+      .io_slave_araddr ('h0),
+      .io_slave_arlen  (8'h0),
+      .io_slave_arsize (3'h0),
+      .io_slave_arburst(2'h0),
+      .io_slave_rready (1'h0),
+      .io_slave_rvalid (  /* unused */),
+      .io_slave_rid    (  /* unused */),
+      .io_slave_rdata  (  /* unused */),
+      .io_slave_rresp  (  /* unused */),
+      .io_slave_rlast  (  /* unused */),
+`endif
+
+      .reset(reset)
   );
 
 endmodule
@@ -183,12 +189,12 @@ endmodule
 // verilator lint_off PINCONNECTEMPTY
 // verilator lint_off DECLFILENAME
 // verilator lint_off UNUSEDSIGNAL
-module wrapSoC (
+module wrapSoC #(
+    parameter bit [7:0] XLEN = `YSYX_XLEN
+) (
     input clock,
     input reset
 );
-  parameter bit [7:0] XLEN = `YSYX_XLEN;
-
   // rnp
   logic [XLEN-1:0] rnp_mdata;
   logic [XLEN-1:0] rnp_cdata;

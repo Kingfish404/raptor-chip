@@ -47,7 +47,7 @@ module ysyx_lsu #(
   logic arvalid;
 
   logic [32-1:0] l1d[L1D_SIZE], rdata_lsu;
-  logic [L1D_SIZE-1:0] l1d_valid = 0;
+  logic [L1D_SIZE-1:0] l1d_valid;
   logic [32-L1D_LEN-2-1:0] l1d_tag[L1D_SIZE];
 
   logic [32-L1D_LEN-2-1:0] addr_tag;
@@ -122,7 +122,8 @@ module ysyx_lsu #(
            ({8{alu_op == `YSYX_ALU_LW__}} & 8'hf)
          );
 
-  logic [1:0] araddr_lo = lsu_addr[1:0];
+  logic [1:0] araddr_lo;
+  assign araddr_lo = lsu_addr[1:0];
   assign rdata = (
            ({XLEN{araddr_lo == 2'b00}} & rdata_unalign) |
            ({XLEN{araddr_lo == 2'b01}} & {{8'b0}, {rdata_unalign[31:8]}}) |

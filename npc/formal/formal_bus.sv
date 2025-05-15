@@ -1,6 +1,8 @@
 `include "ysyx.svh"
 
-module formal_bus (
+module formal_bus #(
+    parameter bit [7:0] XLEN = `YSYX_XLEN
+) (
     input clock,
     input reset,
 
@@ -61,8 +63,6 @@ module formal_bus (
     input lsu_wvalid,
     output bus_lsu_wready
 );
-  parameter bit [7:0] XLEN = `YSYX_XLEN;
-
   ysyx_bus bus (
       .clock(clock),
 

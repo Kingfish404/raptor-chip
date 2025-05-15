@@ -6,11 +6,12 @@
 // verilator lint_off PINCONNECTEMPTY
 // verilator lint_off DECLFILENAME
 // verilator lint_off UNUSEDSIGNAL
-module ysyxSoC (
+module ysyxSoC #(
+    parameter bit [7:0] XLEN = `YSYX_XLEN
+) (
     input clock,
     input reset
 );
-  parameter bit [7:0] XLEN = `YSYX_XLEN;
   logic auto_master_out_awready;
   logic auto_master_out_awvalid;
   logic [3:0] auto_master_out_awid;
@@ -43,7 +44,6 @@ module ysyxSoC (
 
   ysyx cpu (  // src/CPU.scala:38:21
       .clock            (clock),
-      .reset            (reset),
       .io_interrupt     (1'h0),
       .io_master_awready(auto_master_out_awready),
       .io_master_awvalid(auto_master_out_awvalid),
@@ -74,35 +74,40 @@ module ysyxSoC (
       .io_master_rdata  (auto_master_out_rdata),
       .io_master_rresp  (auto_master_out_rresp),
       .io_master_rlast  (auto_master_out_rlast),
-      .io_slave_awready (  /* unused */),
-      .io_slave_awvalid (1'h0),
-      .io_slave_awid    (4'h0),
-      .io_slave_awaddr  ('h0),
-      .io_slave_awlen   (8'h0),
-      .io_slave_awsize  (3'h0),
-      .io_slave_awburst (2'h0),
-      .io_slave_wready  (  /* unused */),
-      .io_slave_wvalid  (1'h0),
-      .io_slave_wdata   ('h0),
-      .io_slave_wstrb   (4'h0),
-      .io_slave_wlast   (1'h0),
-      .io_slave_bready  (1'h0),
-      .io_slave_bvalid  (  /* unused */),
-      .io_slave_bid     (  /* unused */),
-      .io_slave_bresp   (  /* unused */),
-      .io_slave_arready (  /* unused */),
-      .io_slave_arvalid (1'h0),
-      .io_slave_arid    (4'h0),
-      .io_slave_araddr  ('h0),
-      .io_slave_arlen   (8'h0),
-      .io_slave_arsize  (3'h0),
-      .io_slave_arburst (2'h0),
-      .io_slave_rready  (1'h0),
-      .io_slave_rvalid  (  /* unused */),
-      .io_slave_rid     (  /* unused */),
-      .io_slave_rdata   (  /* unused */),
-      .io_slave_rresp   (  /* unused */),
-      .io_slave_rlast   (  /* unused */)
+
+`ifdef YSYX_USE_SLAVE
+      .io_slave_awready(  /* unused */),
+      .io_slave_awvalid(1'h0),
+      .io_slave_awid   (4'h0),
+      .io_slave_awaddr ('h0),
+      .io_slave_awlen  (8'h0),
+      .io_slave_awsize (3'h0),
+      .io_slave_awburst(2'h0),
+      .io_slave_wready (  /* unused */),
+      .io_slave_wvalid (1'h0),
+      .io_slave_wdata  ('h0),
+      .io_slave_wstrb  (4'h0),
+      .io_slave_wlast  (1'h0),
+      .io_slave_bready (1'h0),
+      .io_slave_bvalid (  /* unused */),
+      .io_slave_bid    (  /* unused */),
+      .io_slave_bresp  (  /* unused */),
+      .io_slave_arready(  /* unused */),
+      .io_slave_arvalid(1'h0),
+      .io_slave_arid   (4'h0),
+      .io_slave_araddr ('h0),
+      .io_slave_arlen  (8'h0),
+      .io_slave_arsize (3'h0),
+      .io_slave_arburst(2'h0),
+      .io_slave_rready (1'h0),
+      .io_slave_rvalid (  /* unused */),
+      .io_slave_rid    (  /* unused */),
+      .io_slave_rdata  (  /* unused */),
+      .io_slave_rresp  (  /* unused */),
+      .io_slave_rlast  (  /* unused */),
+`endif
+
+      .reset(reset)
   );
   ysyx_npc_soc perip (
       .clock(clock),
@@ -206,7 +211,8 @@ module ysyx_npc_soc #(
   assign out_awready = (state_w == WIDLE);
   assign out_wready  = ((state_w == WDREADY || state_w == WDWRITE) && wvalid);
   assign out_bvalid  = (state_w == WFINISH);
-  logic [7:0] wmask = (
+  logic [7:0] wmask;
+  assign wmask = (
     ({{8{awsize == 3'b000}} & 8'h1 }) |
     ({{8{awsize == 3'b001}} & 8'h3 }) |
     ({{8{awsize == 3'b010}} & 8'hf }) |

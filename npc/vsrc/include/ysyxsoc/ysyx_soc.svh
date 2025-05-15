@@ -8,6 +8,8 @@
 `define YSYX_BUS_SERIAL_PORT 'h10000000
 `define YSYX_BUS_NS16550_ADDR 'h10000000
 
+`define YSYX_USE_SLAVE 1
+
 `define YSYX_I_SDRAM_ARBURST 1
 
 // random test setting

@@ -16,7 +16,7 @@ module ysyx_clint #(
     output [XLEN-1:0] out_rdata,
     output logic out_rvalid
 );
-  logic [63:0] mtime = 0;
+  logic [63:0] mtime;
   assign out_rdata = (
     ({XLEN{araddr == `YSYX_BUS_RTC_ADDR}} & mtime[31:0]) |
     ({XLEN{araddr == `YSYX_BUS_RTC_ADDR_UP}} & mtime[63:32])

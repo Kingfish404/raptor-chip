@@ -85,7 +85,7 @@ module ysyx_bus #(
 
   logic [XLEN-1:0] out_rdata;
   logic rvalid;
-  logic write_done = 0;
+  logic write_done;
 
   // lsu read
   logic clint_en;
@@ -155,6 +155,7 @@ module ysyx_bus #(
   always @(posedge clock) begin
     if (reset) begin
       state_store <= LS_S_A;
+      write_done  <= 0;
     end else begin
       unique case (state_store)
         LS_S_A: begin
