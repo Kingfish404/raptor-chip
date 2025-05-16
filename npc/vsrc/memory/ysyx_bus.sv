@@ -77,7 +77,7 @@ module ysyx_bus #(
     LS_R = 3,
     LS_R_FLUSHED = 4
   } state_load_t;
-  typedef enum logic [2:0] {
+  typedef enum logic [1:0] {
     LS_S_A = 0,
     LS_S_W = 1,
     LS_S_B = 2

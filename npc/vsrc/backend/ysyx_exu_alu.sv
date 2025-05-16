@@ -15,13 +15,13 @@ module ysyx_exu_alu #(
       // verilog_format: off
       `YSYX_ALU_ADD_: begin out_r = s1 + s2; end
       `YSYX_ALU_SUB_: begin out_r = s1 - s2; end
-      `YSYX_ALU_EQ__: begin out_r = (s1 == s2) ? 1 : 0; end
-      `YSYX_ALU_SLT_: begin out_r = (($signed(s1)) < ($signed(s2))) ? 1 : 0;  end
-      `YSYX_ALU_SLE_: begin out_r = (($signed(s1)) <= ($signed(s2))) ? 1 : 0; end
-      `YSYX_ALU_SGE_: begin out_r = (($signed(s1)) >= ($signed(s2))) ? 1 : 0; end
-      `YSYX_ALU_SLTU: begin out_r = (s1 < s2) ? 1 : 0;  end
-      `YSYX_ALU_SLEU: begin out_r = (s1 <= s2) ? 1 : 0; end
-      `YSYX_ALU_SGEU: begin out_r = (s1 >= s2) ? 1 : 0; end
+      `YSYX_ALU_EQ__: begin out_r = (s1 == s2) ? 'h1 : 0; end
+      `YSYX_ALU_SLT_: begin out_r = (($signed(s1)) < ($signed(s2))) ? 'h1 : 0;  end
+      `YSYX_ALU_SLE_: begin out_r = (($signed(s1)) <= ($signed(s2))) ? 'h1 : 0; end
+      `YSYX_ALU_SGE_: begin out_r = (($signed(s1)) >= ($signed(s2))) ? 'h1 : 0; end
+      `YSYX_ALU_SLTU: begin out_r = (s1 < s2) ? 'h1 : 0;  end
+      `YSYX_ALU_SLEU: begin out_r = (s1 <= s2) ? 'h1 : 0; end
+      `YSYX_ALU_SGEU: begin out_r = (s1 >= s2) ? 'h1 : 0; end
       `YSYX_ALU_XOR_: begin out_r = s1 ^ s2; end
       `YSYX_ALU_OR__: begin out_r = s1 | s2; end
       `YSYX_ALU_AND_: begin out_r = s1 & s2; end
@@ -30,7 +30,7 @@ module ysyx_exu_alu #(
       `YSYX_ALU_SRA_: begin out_r = ($signed(s1)) >>> (s2 & 'h1f);  end
       // verilog_format: on
       default: begin
-        out_r = 0;
+        out_r = 'h0;
       end
     endcase
     // $display("out_r: %h", out_r);

@@ -51,8 +51,8 @@ module ysyx_exu_mul #(
       `YSYX_ALU_MULH__: begin r = mulh[63:32];  end
       `YSYX_ALU_MULHSU: begin r = muls[63:32];  end
       `YSYX_ALU_MULHU_: begin r = mulu[63:32];  end
-      `YSYX_ALU_DIV___: begin r = s2 != 0 ? $signed($signed(s1) / $signed(s2)): -1; end
-      `YSYX_ALU_DIVU__: begin r = s2 != 0 ? (s1) / (s2) : -1; end
+      `YSYX_ALU_DIV___: begin r = s2 != 0 ? $signed($signed(s1) / $signed(s2)): ~'h0; end
+      `YSYX_ALU_DIVU__: begin r = s2 != 0 ? (s1) / (s2) : ~'h0; end
       `YSYX_ALU_REM___: begin r = s2 != 0 ? $signed($signed(s1) % $signed(s2)): s1; end
       `YSYX_ALU_REMU__: begin r = s2 != 0 ? (s1) % (s2) : s1; end
                default: begin r = 0; end

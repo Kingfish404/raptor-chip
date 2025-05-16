@@ -14,8 +14,10 @@ module ysyx_exu #(
     // => lsu
     output logic out_ren,
     output logic out_wen,
-    output logic [XLEN-1:0] out_rwaddr,
-    output [4:0] out_alu_op,
+    output logic [XLEN-1:0] out_raddr,
+    output logic [XLEN-1:0] out_waddr,
+    output [4:0] out_ralu,
+    output [4:0] out_walu,
     output [XLEN-1:0] out_lsu_mem_wdata,
     // <= lsu
     input [XLEN-1:0] lsu_rdata,
@@ -123,7 +125,7 @@ module ysyx_exu #(
       end
     end
     for (bit [XLEN-1:0] i = 0; i < RS_SIZE; i++) begin
-      if (rs_busy[i] == 1 && rs_ren[i] == 1 && !load_found) begin
+      if (rs_busy[i] == 1 && rs_ren[i] == 1 && !rs_ren_ready[i] && !load_found) begin
         load_rs_index = i[$clog2(RS_SIZE)-1:0];
         load_found = 1;
       end
@@ -136,14 +138,12 @@ module ysyx_exu #(
     end
   end
 
-  assign out_alu_op = (load_found) ? rs_alu_op[load_rs_index] :
-    (store_found) ? sq_alu_op[sq_index] : 0;
-  assign out_ren = (load_found) &&
-    (rs_qj[load_rs_index] == 0 && rs_qk[load_rs_index] == 0) &&
-     !rs_ren_ready[load_rs_index];
-  assign out_wen = ((store_found) && (sq_commit[sq_index] && sq_busy[sq_index]));
-  assign out_rwaddr = (load_found) ? rs_vj[load_rs_index] + rs_imm[load_rs_index] :
-    (store_found) ? sq_addr[sq_index] : 0;
+  assign out_ralu = rs_alu_op[load_rs_index];
+  assign out_walu = sq_alu_op[sq_index];
+  assign out_ren = (load_found) && (rs_qj[load_rs_index] == 0 && rs_qk[load_rs_index] == 0);
+  assign out_wen = (store_found) && sq_commit[sq_index] && sq_busy[sq_index];
+  assign out_raddr = rs_vj[load_rs_index] + rs_imm[load_rs_index];
+  assign out_waddr = sq_addr[sq_index];
   assign out_lsu_mem_wdata = sq_data[sq_index];
 
   assign rs_ready = !(&rs_busy) &&

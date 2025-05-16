@@ -152,8 +152,10 @@ module ysyx #(
   logic exu_ready;
   // EXU out lsu
   logic exu_ren, exu_wen;
-  logic [XLEN-1:0] exu_rwaddr;
-  logic [4:0] exu_alu_op;
+  logic [XLEN-1:0] exu_raddr;
+  logic [XLEN-1:0] exu_waddr;
+  logic [4:0] exu_ralu;
+  logic [4:0] exu_walu;
   logic [XLEN-1:0] exu_lsu_wdata;
 
   // WBU out
@@ -278,8 +280,10 @@ module ysyx #(
       // => lsu
       .out_ren(exu_ren),
       .out_wen(exu_wen),
-      .out_rwaddr(exu_rwaddr),
-      .out_alu_op(exu_alu_op),
+      .out_raddr(exu_raddr),
+      .out_waddr(exu_waddr),
+      .out_ralu(exu_ralu),
+      .out_walu(exu_walu),
       .out_lsu_mem_wdata(exu_lsu_wdata),
       // <= lsu
       .lsu_rdata(lsu_rdata),
@@ -341,8 +345,10 @@ module ysyx #(
       .fence_time(fence_time),
 
       // from exu
-      .rwaddr(exu_rwaddr),
-      .alu_op(exu_alu_op),
+      .raddr(exu_raddr),
+      .waddr(exu_waddr),
+      .ralu(exu_ralu),
+      .walu(exu_walu),
       .ren(exu_ren),
       .wen(exu_wen),
       .wdata(exu_lsu_wdata),

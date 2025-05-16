@@ -10,8 +10,10 @@ module ysyx_lsu #(
     input fence_time,
 
     // from exu
-    input [XLEN-1:0] rwaddr,
-    input [4:0] alu_op,
+    input [XLEN-1:0] raddr,
+    input [XLEN-1:0] waddr,
+    input [4:0] ralu,
+    input [4:0] walu,
     input ren,
     input wen,
     input [XLEN-1:0] wdata,
@@ -39,14 +41,25 @@ module ysyx_lsu #(
 
     input reset
 );
-  logic valid_r;
+  typedef enum logic [1:0] {
+    IF_A = 0,
+    IF_L = 1,
+    IF_V = 2
+  } state_load_t;
 
-  logic [XLEN-1:0] lsu_addr;
+  typedef enum logic [1:0] {
+    LS_S_V = 0,
+    LS_S_R = 1
+  } state_store_t;
+
+  state_load_t  state_load;
+  state_store_t state_store;
+
   logic [XLEN-1:0] rdata, rdata_unalign;
   logic [7:0] wstrb, rstrb;
   logic arvalid;
 
-  logic [32-1:0] l1d[L1D_SIZE], rdata_lsu;
+  logic [32-1:0] l1d[L1D_SIZE], lsu_rdata;
   logic [L1D_SIZE-1:0] l1d_valid;
   logic [32-L1D_LEN-2-1:0] l1d_tag[L1D_SIZE];
 
@@ -58,111 +71,136 @@ module ysyx_lsu #(
   logic [32-L1D_LEN-2-1:0] waddr_tag;
   logic [L1D_LEN-1:0] waddr_idx;
   logic l1d_cache_hit_w;
-  logic lsu_addr_valid;
+  logic raddr_valid;
 
-  assign lsu_addr_valid = (  //
-      (lsu_addr >= 'h02000048 && lsu_addr < 'h02000050) ||  // clint
-      (lsu_addr >= 'h0f000000 && lsu_addr < 'h0f002000) ||  // sram
-      (lsu_addr >= 'h10000000 && lsu_addr < 'h10020000) ||  // uart/csr
-      (lsu_addr >= 'h30000000 && lsu_addr < 'h40000000) ||  // flash
-      (lsu_addr >= 'h80000000 && lsu_addr < 'h80400000) ||  // psram
-      (lsu_addr >= 'ha0000000 && lsu_addr < 'hd0000000) ||  // sdram
+  assign raddr_valid = (  //
+      (raddr >= 'h02000048 && raddr < 'h02000050) ||  // clint
+      (raddr >= 'h0f000000 && raddr < 'h0f002000) ||  // sram
+      (raddr >= 'h10000000 && raddr < 'h10020000) ||  // uart/csr
+      (raddr >= 'h30000000 && raddr < 'h40000000) ||  // flash
+      (raddr >= 'h80000000 && raddr < 'h80400000) ||  // psram
+      (raddr >= 'ha0000000 && raddr < 'hd0000000) ||  // sdram
       (0));
 
-  assign lsu_addr = rwaddr;
-  assign out_lsu_araddr = lsu_addr;
+  assign out_lsu_araddr = raddr;
   assign out_lsu_arvalid = arvalid;
-  assign arvalid = ren && lsu_addr_valid && !l1d_cache_hit;
+  assign arvalid = ren && raddr_valid && state_load == IF_L;
   assign out_lsu_rstrb = rstrb;
 
-  // with l1d cache
-  assign rdata_unalign = (uncacheable) ? rdata_lsu : l1d[addr_idx];
-  assign out_rvalid = valid_r || l1d_cache_hit;
+  assign rdata_unalign = lsu_rdata;
+  assign out_rvalid = state_load == IF_V;
 
-  assign out_lsu_awaddr = lsu_addr;
-  assign out_lsu_awvalid = wen;
+  assign out_lsu_awaddr = waddr;
+  assign out_lsu_awvalid = wen && state_store == LS_S_V;
 
   assign out_lsu_wdata = wdata;
   assign out_lsu_wstrb = wstrb;
-  assign out_lsu_wvalid = wen;
+  assign out_lsu_wvalid = wen && state_store == LS_S_V;
 
-  assign out_wready = lsu_wready;
+  assign out_wready = state_store == LS_S_R;
 
-  assign l1d_cache_hit = (
-         ren  && 1 &&
-         l1d_valid[addr_idx] == 1'b1) && (l1d_tag[addr_idx] == addr_tag);
-  assign addr_tag = lsu_addr[XLEN-1:L1D_LEN+2];
-  assign addr_idx = lsu_addr[L1D_LEN+2-1:0+2];
+  assign l1d_cache_hit = (l1d_valid[addr_idx] == 1'b1) && (l1d_tag[addr_idx] == addr_tag);
+  assign addr_tag = raddr[XLEN-1:L1D_LEN+2];
+  assign addr_idx = raddr[L1D_LEN+2-1:0+2];
   assign uncacheable = (
-         (lsu_addr >= 'h02000048 && lsu_addr < 'h02000050) ||
-         (lsu_addr >= 'h0c000000 && lsu_addr < 'h0d000000) ||
-         (lsu_addr >= 'h10000000 && lsu_addr < 'h10020000) ||
-         (lsu_addr >= 'ha0000000 && lsu_addr < 'hb0000000) ||
+         (raddr >= 'h02000048 && raddr < 'h02000050) ||
+         (raddr >= 'h0c000000 && raddr < 'h0d000000) ||
+         (raddr >= 'h10000000 && raddr < 'h10020000) ||
+         (raddr >= 'ha0000000 && raddr < 'hb0000000) ||
          (0)
        );
 
-  assign waddr_tag = lsu_addr[XLEN-1:L1D_LEN+2];
-  assign waddr_idx = lsu_addr[L1D_LEN+2-1:0+2];
-  assign l1d_cache_hit_w = (
-         wen &&
-         l1d_valid[waddr_idx] == 1'b1) && (l1d_tag[waddr_idx] == waddr_tag);
+  assign waddr_tag = waddr[XLEN-1:L1D_LEN+2];
+  assign waddr_idx = waddr[L1D_LEN+2-1:0+2];
+  assign l1d_cache_hit_w = (l1d_valid[waddr_idx] == 1'b1) && (l1d_tag[waddr_idx] == waddr_tag);
 
   // load/store unit
   // assign wstrb = (
-  //          ({8{alu_op == `YSYX_ALU_SB}} & 8'h1) |
-  //          ({8{alu_op == `YSYX_ALU_SH}} & 8'h3) |
-  //          ({8{alu_op == `YSYX_ALU_SW}} & 8'hf)
+  //          ({8{ralu == `YSYX_ALU_SB}} & 8'h1) |
+  //          ({8{ralu == `YSYX_ALU_SH}} & 8'h3) |
+  //          ({8{ralu == `YSYX_ALU_SW}} & 8'hf)
   //        );
-  assign wstrb = {{4{1'b0}}, {alu_op[3:0]}};
+  assign wstrb = {{4{1'b0}}, {walu[3:0]}};
   assign rstrb = (
-           ({8{alu_op == `YSYX_ALU_LB__}} & 8'h1) |
-           ({8{alu_op == `YSYX_ALU_LBU_}} & 8'h1) |
-           ({8{alu_op == `YSYX_ALU_LH__}} & 8'h3) |
-           ({8{alu_op == `YSYX_ALU_LHU_}} & 8'h3) |
-           ({8{alu_op == `YSYX_ALU_LW__}} & 8'hf)
+           ({8{ralu == `YSYX_ALU_LB__}} & 8'h1) |
+           ({8{ralu == `YSYX_ALU_LBU_}} & 8'h1) |
+           ({8{ralu == `YSYX_ALU_LH__}} & 8'h3) |
+           ({8{ralu == `YSYX_ALU_LHU_}} & 8'h3) |
+           ({8{ralu == `YSYX_ALU_LW__}} & 8'hf)
          );
 
-  logic [1:0] araddr_lo;
-  assign araddr_lo = lsu_addr[1:0];
   assign rdata = (
-           ({XLEN{araddr_lo == 2'b00}} & rdata_unalign) |
-           ({XLEN{araddr_lo == 2'b01}} & {{8'b0}, {rdata_unalign[31:8]}}) |
-           ({XLEN{araddr_lo == 2'b10}} & {{16'b0}, {rdata_unalign[31:16]}}) |
-           ({XLEN{araddr_lo == 2'b11}} & {{24'b0}, {rdata_unalign[31:24]}}) |
+           ({XLEN{raddr[1:0] == 2'b00}} & rdata_unalign) |
+           ({XLEN{raddr[1:0] == 2'b01}} & {{8'b0}, {rdata_unalign[31:8]}}) |
+           ({XLEN{raddr[1:0] == 2'b10}} & {{16'b0}, {rdata_unalign[31:16]}}) |
+           ({XLEN{raddr[1:0] == 2'b11}} & {{24'b0}, {rdata_unalign[31:24]}}) |
            (0)
          );
   assign out_rdata = (
-           ({XLEN{alu_op == `YSYX_ALU_LB__}} & (rdata[7] ? rdata | 'hffffff00 : rdata & 'hff)) |
-           ({XLEN{alu_op == `YSYX_ALU_LBU_}} & rdata & 'hff) |
-           ({XLEN{alu_op == `YSYX_ALU_LH__}} &
+           ({XLEN{ralu == `YSYX_ALU_LB__}} & (rdata[7] ? rdata | 'hffffff00 : rdata & 'hff)) |
+           ({XLEN{ralu == `YSYX_ALU_LBU_}} & rdata & 'hff) |
+           ({XLEN{ralu == `YSYX_ALU_LH__}} &
               (rdata[15] ? rdata | 'hffff0000 : rdata & 'hffff)) |
-           ({XLEN{alu_op == `YSYX_ALU_LHU_}} & rdata & 'hffff) |
-           ({XLEN{alu_op == `YSYX_ALU_LW__}} & rdata)
+           ({XLEN{ralu == `YSYX_ALU_LHU_}} & rdata & 'hffff) |
+           ({XLEN{ralu == `YSYX_ALU_LW__}} & rdata)
          );
   always @(posedge clock) begin
     if (reset) begin
-      l1d_valid <= 0;
-      valid_r   <= 0;
+      l1d_valid   <= 0;
+      state_load  <= IF_A;
+      state_store <= LS_S_V;
     end else begin
-      if (fence_time) begin
-        l1d_valid <= 0;
-      end
-      if (ren && lsu_rvalid) begin
-        if (uncacheable) begin
-          rdata_lsu <= bus_rdata;
-          valid_r   <= 1'b1;
-        end else if (!fence_time) begin
-          l1d[addr_idx] <= bus_rdata;
-          l1d_tag[addr_idx] <= addr_tag;
-          l1d_valid[addr_idx] <= 1'b1;
+      unique case (state_load)
+        IF_A: begin
+          if (fence_time) begin
+            l1d_valid <= 0;
+          end
+          if (ren) begin
+            if (l1d_cache_hit) begin
+              state_load <= IF_V;
+              lsu_rdata  <= l1d[addr_idx];
+            end else begin
+              state_load <= IF_L;
+            end
+          end
         end
-      end
-      if (valid_r) begin
-        valid_r <= 0;
-      end
-      if (wen && l1d_cache_hit_w) begin
-        l1d_valid[waddr_idx] <= 1'b0;
-      end
+        IF_L: begin
+          if (ren && lsu_rvalid) begin
+            lsu_rdata  <= bus_rdata;
+            state_load <= IF_V;
+            if (!uncacheable) begin
+              l1d[addr_idx] <= bus_rdata;
+              l1d_tag[addr_idx] <= addr_tag;
+              l1d_valid[addr_idx] <= 1'b1;
+            end
+          end
+        end
+        IF_V: begin
+          state_load <= IF_A;
+        end
+        default: begin
+          state_load <= IF_A;
+        end
+      endcase
+
+      unique case (state_store)
+        LS_S_V: begin
+          if (wen) begin
+            if (l1d_cache_hit_w) begin
+              l1d_valid[waddr_idx] <= 1'b0;
+            end
+            if (lsu_wready) begin
+              state_store <= LS_S_R;
+            end
+          end
+        end
+        LS_S_R: begin
+          state_store <= LS_S_V;
+        end
+        default: begin
+          state_store <= LS_S_V;
+        end
+      endcase
     end
   end
 endmodule
