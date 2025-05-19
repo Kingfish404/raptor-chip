@@ -1,5 +1,5 @@
-`ifndef YSYX_IF
-`define YSYX_IF
+`ifndef YSYX_IF_SVH
+`define YSYX_IF_SVH
 `include "ysyx.svh"
 
 // verilator lint_off DECLFILENAME

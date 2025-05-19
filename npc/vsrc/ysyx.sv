@@ -196,7 +196,7 @@ module ysyx #(
 
       // <= wbu
       .npc(wbu_npc),
-      .cpc(wbu_rpc),
+      .rpc(wbu_rpc),
       .sys_retire(wbu_retire),
 
       .out_inst(ifu_inst),
@@ -284,7 +284,7 @@ module ysyx #(
       .out_waddr(exu_waddr),
       .out_ralu(exu_ralu),
       .out_walu(exu_walu),
-      .out_lsu_mem_wdata(exu_lsu_wdata),
+      .out_lsu_wdata(exu_lsu_wdata),
       // <= lsu
       .lsu_rdata(lsu_rdata),
       .lsu_exu_rvalid(lsu_exu_rvalid),

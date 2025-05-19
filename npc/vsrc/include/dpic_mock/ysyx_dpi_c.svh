@@ -1,3 +1,5 @@
+`ifndef YSYX_DPI_C_SVH
+`define YSYX_DPI_C_SVH
 
 `define YSYX_DPI_C_NPC_EXU_EBREAK begin end
 `define YSYX_DPI_C_NPC_ILLEGAL_INST begin end
@@ -11,3 +13,5 @@
 `define YSYX_DPI_C_SDRAM_WRITE(sd_waddr, sd_wdata, sd_wmask) begin end
 
 `define YSYX_ASSERT(cond, msg) begin end
+
+`endif

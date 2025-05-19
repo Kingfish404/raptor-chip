@@ -167,8 +167,6 @@ static int decode_exec(Decode *s)
   INSTPAT("0000000 ????? ????? 110 ????? 01100 11", or, R, R(rd) = src1 | src2);
   INSTPAT("0000000 ????? ????? 111 ????? 01100 11", and, R, R(rd) = src1 & src2);
 
-  INSTPAT("0000??? ????? 00000 000 00000 00011 11", fence, N, {});
-  INSTPAT("1000001 10011 00000 000 00000 00111 11", fence_tso, N, {});
   INSTPAT("0000000 10000 00000 000 00000 00011 11", pause, N, {});
   INSTPAT("0000000 00000 00000 000 00000 11100 11", ecall, N,
           s->dnpc = isa_raise_intr(
@@ -200,8 +198,15 @@ static int decode_exec(Decode *s)
   INSTPAT("0000000 ????? ????? 101 ????? 01110 11", srlw, R, R(rd) = SEXT((uint32_t)src1 >> ((uint32_t)src2), 32));
   INSTPAT("0100000 ????? ????? 101 ????? 01110 11", sraw, R, R(rd) = SEXT((int32_t)src1 >> ((int32_t)src2), 32));
 
+  // RV32/RV64 fence Instructions
+  INSTPAT("0000??? ????? 00000 000 00000 00011 11", fence, N, {});
+  INSTPAT("1000001 10011 00000 000 00000 00111 11", fence_tso, N, {});
   // RV32/RV64 Zifencei Extension
   INSTPAT("??????? ????? ????? 001 ????? 00011 11", fence_i, I, {});
+  // Zifencetime
+  INSTPAT("0000000 00000 00000 010 00000 00011 11", fence.time, N, {});
+
+  INSTPAT("0001001 ????? ????? 000 00000 11100 11", sfence.vma, N, {});
 
   // RV32/RV64 Zicsr Extension
   INSTPAT("??????? ????? ????? 001 ????? 11100 11", csrrw, I, { if (csr_valid(s, imm)) {R(rd) = CSR(imm); CSR(imm) = src1; } });
@@ -279,10 +284,6 @@ static int decode_exec(Decode *s)
           CSR(CSR_SSTATUS) = reg.val;);
   // Interrupt-Management Instructions
   INSTPAT("0001000 00101 00000 000 00000 11100 11", wfi, N, { difftest_skip_ref(); });
-  INSTPAT("0001001 ????? ????? 000 00000 11100 11", sfence.vma, N, {});
-
-  // Zifencetime
-  INSTPAT("0000000 00000 00000 010 00000 00011 11", zifence.time, N, {});
 
   INSTPAT("??????? ????? ????? ??? ????? ????? ??", inv, N, {
     if (CSR(CSR_MTVEC))

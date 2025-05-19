@@ -1,3 +1,5 @@
+`ifndef YSYX_SVH
+`define YSYX_SVH
 `include "ysyx_config.svh"
 
 // Instruction Set Opcodes
@@ -28,6 +30,8 @@
 `define YSYX_ZERO_EXTEND(x, l, n) ({{n-l{1'b0}}, x})
 `define YSYX_LAMBDA(x) (x)
 
+`define YSYX_ALU_ILL_ 'b01001
+
 `define YSYX_ALU_ADD_ 'b00000
 `define YSYX_ALU_SUB_ 'b01000
 `define YSYX_ALU_EQ__ 'b01100
@@ -54,14 +58,21 @@
 `define YSYX_ALU_REM___ 'b11110
 `define YSYX_ALU_REMU__ 'b11111
 
-`define YSYX_ALU_LB__ 'b000000
-`define YSYX_ALU_LH__ 'b000001
-`define YSYX_ALU_LW__ 'b000010
-`define YSYX_ALU_LBU_ 'b000100
-`define YSYX_ALU_LHU_ 'b000101
-`define YSYX_ALU_SB__ 'b000000
-`define YSYX_ALU_SH__ 'b000001
-`define YSYX_ALU_SW__ 'b000010
+`define YSYX_ALU_LB__ 'b00000
+`define YSYX_ALU_LH__ 'b00001
+`define YSYX_ALU_LW__ 'b00010
+`define YSYX_ALU_LBU_ 'b00100
+`define YSYX_ALU_LHU_ 'b00101
+
+`define YSYX_ALU_SB__ 'b00000
+`define YSYX_ALU_SH__ 'b00001
+`define YSYX_ALU_SW__ 'b00010
+
+`define YSYX_ALU_AW__ 'b01000
+
+`define YSYX_WSTRB_SB 'b00001
+`define YSYX_WSTRB_SH 'b00011
+`define YSYX_WSTRB_SW 'b11111
 
 // Privilege Levels
 `define YSYX_PRIV_U 2'h0
@@ -119,3 +130,5 @@
   if (signal == 'h0) begin \
     $write("ASSERTION FAILED in %m, %s\n", str); \
   end
+
+`endif

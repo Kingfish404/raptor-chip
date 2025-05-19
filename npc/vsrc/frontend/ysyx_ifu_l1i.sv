@@ -45,16 +45,14 @@ module ysyx_ifu_l1i #(
   logic [L1I_LEN-1:0] addr_idx;
   logic [L1I_LINE_LEN-1:0] addr_offset;
 
-  logic l1i_cache_hit;
+  logic hit;
   logic ifu_sdram_arburst;
   logic received_flush_pipeline;
   logic received_fence_i;
   logic [XLEN-1:0] reverse_pc_ifu;
 
   assign l1i_pc = received_flush_pipeline ? reverse_pc_ifu : pc_ifu;
-  assign l1i_valid = (
-    (l1i_cache_hit && !flush_pipeline) &&
-    (!received_flush_pipeline && !received_fence_i));
+  assign l1i_valid = ((hit && !flush_pipeline) && (!received_flush_pipeline && !received_fence_i));
   assign l1i_ready = (l1i_state == IDLE);
   assign addr_tag = l1i_pc[XLEN-1:L1I_LEN+L1I_LINE_LEN+2];
   assign addr_idx = l1i_pc[L1I_LEN+L1I_LINE_LEN+2-1:L1I_LINE_LEN+2];
@@ -64,11 +62,11 @@ module ysyx_ifu_l1i #(
     (l1i_pc & ~'h4) :
     (l1i_pc | 'h4);
   assign out_ifu_arvalid = (ifu_sdram_arburst ?
-    !l1i_cache_hit && (l1i_state == IDLE || l1i_state == RD_0) :
-    !l1i_cache_hit && (l1i_state != WAIT && l1i_state != WB_0));
+    !hit && (l1i_state == IDLE || l1i_state == RD_0) :
+    !hit && (l1i_state != WAIT && l1i_state != WB_0));
   assign out_ifu_lock = (l1i_state != IDLE);
 
-  assign l1i_cache_hit = !invalid_l1i && (
+  assign hit = !invalid_l1i && (
          (l1i_state == IDLE || l1i_state == WB_0) &&
          l1ic_valid[addr_idx] == 1'b1) && (l1i_tag[addr_idx][addr_offset] == addr_tag);
   assign ifu_sdram_arburst = (`YSYX_I_SDRAM_ARBURST &&
@@ -81,11 +79,11 @@ module ysyx_ifu_l1i #(
       l1i_state  <= IDLE;
       l1ic_valid <= 0;
     end else begin
-      if ((!l1i_cache_hit) && flush_pipeline) begin
+      if ((!hit) && flush_pipeline) begin
         received_flush_pipeline <= 1;
         reverse_pc_ifu <= pc_ifu;
       end
-      if ((!l1i_cache_hit) && invalid_l1i) begin
+      if ((!hit) && invalid_l1i) begin
         received_fence_i <= 1;
       end
       unique case (l1i_state)
@@ -95,7 +93,7 @@ module ysyx_ifu_l1i #(
           end
         end
         RD_0:
-        if (ifu_rvalid && !l1i_cache_hit) begin
+        if (ifu_rvalid && !hit) begin
           if (ifu_sdram_arburst) begin
             l1i_state <= RD_1;
           end else begin

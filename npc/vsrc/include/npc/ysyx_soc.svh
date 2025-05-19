@@ -1,6 +1,9 @@
-`define YSYX_PC_INIT `YSYX_XLEN'h80000000
+`ifndef YSYX_SOC_SVH
+`define YSYX_SOC_SVH
 
-`define YSYX_ROM_ADDR 'h00001000
+`define YSYX_PC_INIT `YSYX_XLEN'h20000000
+
+`define YSYX_ROM_ADDR 'h20000000
 
 `define YSYX_BUS_RTC_ADDR 'h02000048
 `define YSYX_BUS_RTC_ADDR_UP `YSYX_BUS_RTC_ADDR + 4
@@ -14,3 +17,5 @@
 
 // random test setting
 `define YSYX_IFSR_ENABLE 0
+
+`endif

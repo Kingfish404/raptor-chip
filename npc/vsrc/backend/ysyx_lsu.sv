@@ -77,9 +77,10 @@ module ysyx_lsu #(
       (raddr >= 'h02000048 && raddr < 'h02000050) ||  // clint
       (raddr >= 'h0f000000 && raddr < 'h0f002000) ||  // sram
       (raddr >= 'h10000000 && raddr < 'h10020000) ||  // uart/csr
+      (raddr >= 'h20000000 && raddr < 'h20400000) ||  // mrom
       (raddr >= 'h30000000 && raddr < 'h40000000) ||  // flash
       (raddr >= 'h80000000 && raddr < 'h80400000) ||  // psram
-      (raddr >= 'ha0000000 && raddr < 'hd0000000) ||  // sdram
+      (raddr >= 'ha0000000 && raddr < 'hc0000000) ||  // sdram
       (0));
 
   assign out_lsu_araddr = raddr;

@@ -28,7 +28,7 @@ typedef word_t vaddr_t;
 #define SRAM_SIZE 0x00002000
 
 #define MROM_BASE 0x20000000
-#define MROM_SIZE 0x00001000
+#define MROM_SIZE 0x00010000
 
 #define FLASH_BASE 0x30000000
 #define FLASH_SIZE 0x10000000

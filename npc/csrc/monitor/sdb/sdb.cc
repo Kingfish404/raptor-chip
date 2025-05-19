@@ -178,7 +178,10 @@ static int cmd_x(char *args)
 
 int cmd_q(char *args)
 {
-  npc.state = NPC_QUIT;
+  if (npc.state == NPC_RUNNING)
+  {
+    npc.state = NPC_QUIT;
+  }
   cpu_exec(0);
   return -1;
 }

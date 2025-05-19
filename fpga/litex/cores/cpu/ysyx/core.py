@@ -67,9 +67,9 @@ class ysyx(CPU):
     @property
     def mem_map(self):
         return {
-            "rom": 0x8000_0000,
+            "rom": 0x2000_0000,
             "sram": 0x8020_0000,
-            "main_ram": 0xC000_0000,
+            "main_ram": 0x8000_0000,
             "clint": 0x0200_0000,
             "plic": 0x0C00_0000,
             "csr": 0x1001_0000,

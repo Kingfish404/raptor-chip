@@ -165,15 +165,10 @@ module ysyx_bus #(
           end
         end
         LS_S_W: begin
-          if (lsu_wvalid) begin
-            if (io_master_wready) begin
-              write_done  <= 1;
-              state_store <= LS_S_B;
-            end
+          if (io_master_wready) begin
+            write_done  <= 1;
+            state_store <= LS_S_B;
           end
-          // if (io_master_bvalid) begin
-          //   state_store <= LS_S_B;
-          // end
         end
         LS_S_B: begin
           if (io_master_bvalid) begin
@@ -290,6 +285,7 @@ module ysyx_bus #(
           (io_master_araddr >= 'h10001000 && io_master_araddr <= 'h10001fff) ||
           (io_master_araddr >= 'h10002000 && io_master_araddr <= 'h1000200f) ||
           (io_master_araddr >= 'h10011000 && io_master_araddr <= 'h10011007) ||
+          (io_master_araddr >= 'h20000000 && io_master_araddr <= 'h20010000) ||
           (io_master_araddr >= 'h21000000 && io_master_araddr <= 'h211fffff) ||
           (io_master_araddr >= 'hc0000000) ||
           (0))

@@ -321,7 +321,7 @@ module ysyx_iqu #(
   assign iqu_cm_if.mret = rob_mret[rob_head];
 
   assign iqu_cm_if.sq_idx = rob_rs_idx[rob_head];
-  assign iqu_cm_if.store_commit = rob_store[rob_head] && !flush_pipeline;
+  assign iqu_cm_if.store_commit = head_valid && rob_store[rob_head] && !flush_pipeline;
 
   assign iqu_cm_if.valid = rob_busy[rob_head] && rob_state[rob_head] == WB && !flush_pipeline;
 endmodule

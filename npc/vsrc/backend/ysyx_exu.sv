@@ -18,7 +18,7 @@ module ysyx_exu #(
     output logic [XLEN-1:0] out_waddr,
     output [4:0] out_ralu,
     output [4:0] out_walu,
-    output [XLEN-1:0] out_lsu_mem_wdata,
+    output [XLEN-1:0] out_lsu_wdata,
     // <= lsu
     input [XLEN-1:0] lsu_rdata,
     input lsu_exu_rvalid,
@@ -138,13 +138,14 @@ module ysyx_exu #(
     end
   end
 
-  assign out_ralu = rs_alu_op[load_rs_index];
-  assign out_walu = sq_alu_op[sq_index];
+  assign out_ralu = rs_alu_op[load_rs_index] == `YSYX_ALU_AW__ ?
+    `YSYX_ALU_LW__ : rs_alu_op[load_rs_index];
+  assign out_walu = sq_alu_op[sq_index] == `YSYX_ALU_AW__ ? `YSYX_WSTRB_SW : sq_alu_op[sq_index];
   assign out_ren = (load_found) && (rs_qj[load_rs_index] == 0 && rs_qk[load_rs_index] == 0);
   assign out_wen = (store_found) && sq_commit[sq_index] && sq_busy[sq_index];
   assign out_raddr = rs_vj[load_rs_index] + rs_imm[load_rs_index];
   assign out_waddr = sq_addr[sq_index];
-  assign out_lsu_mem_wdata = sq_data[sq_index];
+  assign out_lsu_wdata = sq_data[sq_index];
 
   assign rs_ready = !(&rs_busy) &&
    !(store_found) && !(|rs_ren) && !(mul_found && idu_if.alu_op[4:4]);

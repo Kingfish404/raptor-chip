@@ -36,7 +36,8 @@ uint8_t *guest_to_host(paddr_t addr)
     {
         return sdram + addr - SDRAM_BASE;
     }
-    Assert(0, "Invalid guest address: " FMT_WORD, addr);
+    // Assert(0, "Invalid guest address: " FMT_WORD, addr);
+    return NULL;
 }
 
 paddr_t host_to_guest(uint8_t *addr)
@@ -117,16 +118,16 @@ extern "C" void pmem_read(word_t raddr, word_t *data)
         return;
     }
 #endif
-    if (raddr >= MBASE && raddr < MBASE + MSIZE)
+    uint8_t *host_addr = guest_to_host(raddr);
+    if (host_addr == NULL)
     {
-        *data = host_read(pmem + raddr - MBASE, 4);
-        // Log("raddr: " FMT_WORD_NO_PREFIX ", data: " FMT_WORD_NO_PREFIX,
-        //     raddr, *data);
+        Log(FMT_RED("Invalid read: addr = " FMT_WORD), raddr);
+        npc_abort();
         return;
     }
-    npc_abort();
-    Log(FMT_RED("Invalid read: addr = " FMT_WORD), raddr);
-    // assert(0);
+    *data = host_read(host_addr, 4);
+    // Log("raddr: " FMT_WORD_NO_PREFIX ", data: " FMT_WORD_NO_PREFIX,
+    //     raddr, *data);
 }
 
 extern "C" void pmem_write(word_t waddr, word_t wdata, char wmask)
@@ -142,7 +143,8 @@ extern "C" void pmem_write(word_t waddr, word_t wdata, char wmask)
         return;
     }
 #endif
-    if (waddr < MBASE || waddr > MBASE + MSIZE)
+    uint8_t *host_addr = guest_to_host(waddr);
+    if (host_addr == NULL)
     {
         Log(FMT_RED("Invalid write: addr = " FMT_WORD ", data = " FMT_WORD ", mask = %02x"),
             waddr, wdata, wmask & 0xff);
@@ -152,13 +154,13 @@ extern "C" void pmem_write(word_t waddr, word_t wdata, char wmask)
     switch (wmask)
     {
     case 0x1:
-        host_write(pmem + waddr - MBASE, wdata, 1);
+        host_write(host_addr, wdata, 1);
         break;
     case 0x3:
-        host_write(pmem + waddr - MBASE, wdata, 2);
+        host_write(host_addr, wdata, 2);
         break;
     case 0xf:
-        host_write(pmem + waddr - MBASE, wdata, 4);
+        host_write(host_addr, wdata, 4);
         break;
     // case 0xff:
     //     host_write(pmem + waddr - MBASE, wdata, 8);

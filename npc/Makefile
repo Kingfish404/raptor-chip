@@ -54,8 +54,10 @@ $(shell mkdir -p $(BUILD_DIR))
 VSRCS = \
 	$(shell find $(abspath ./vsrc) -name "*.sv") \
 	$(SOC_SOURCE)
+VHSRCS = $(shell find $(abspath ./vsrc) -name "*.svh")
 CSRCS = $(shell find $(abspath ./csrc) -name "*.c")
 CCSRCS = $(shell find $(abspath ./csrc) -name "*.cc" -or -name "*.cpp")
+CHSRCS = $(shell find $(abspath ./csrc) -name "*.h" -or -name "*.hpp")
 
 ifeq ($(MROM_IMG),)
 MROM_IMG ?= $(NPC_HOME)/csrc/mem/mrom-data/build/mrom-data.bin
@@ -80,7 +82,7 @@ else
 INC_PATH += $(abspath ./vsrc/include/dpic)
 endif
 
-$(BIN): $(VSRCS) $(CCSRCS) $(NVBOARD_ARCHIVE)
+$(BIN): $(VSRCS) $(VHSRCS) $(CCSRCS) $(CHSRCS) $(NVBOARD_ARCHIVE)
 	$(call git_commit, "build RTL")
 	$(VERILATOR) --trace-fst -cc --exe --build -j $(shell nproc) --debug $(VERILATOR_FLAG) $^ \
 		--top-module $(VTARGET) \
@@ -91,6 +93,9 @@ $(BIN): $(VSRCS) $(CCSRCS) $(NVBOARD_ARCHIVE)
 DIFF_REF_SO = -d $(abspath $(NEMU_HOME)/build/riscv32-nemu-interpreter-so)
 IMG ?=
 NPC_EXEC := $(BIN) $(FLAGS) $(DIFF_REF_SO) -m $(MROM_IMG) $(IMG)
+
+verilog:
+	make -C ssrc verilog
 
 run: $(BIN) $(MROM_IMG)
 	$(call git_commit, "sim RTL") # DO NOT REMOVE THIS LINE!!!
@@ -115,7 +120,7 @@ YOSYS_OPENSTA:
 	git clone https://github.com/Kingfish404/yosys-opensta $(YSYX_HOME)/yosys-opensta
 	make -C $(YSYX_HOME)/yosys-opensta init init_opensta
 
-pack:
+pack: $(VSRCS)
 	mkdir -p $(YSYX_HOME)/npc/build/pack
 	cp -r $(VSRCS) $(YSYX_HOME)/npc/build/pack
 	cp -r $(abspath ./vsrc/include)/*.svh \

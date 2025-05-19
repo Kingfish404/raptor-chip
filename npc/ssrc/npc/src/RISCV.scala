@@ -4,6 +4,8 @@ import chisel3._
 import chisel3.util._
 
 trait MicroOP {
+  def ALU_ILL_ = "01001"
+
   def ALU_ADD_ = "00000"
   def ALU_SUB_ = "01000"
   def ALU_EQ__ = "01100"
@@ -30,21 +32,59 @@ trait MicroOP {
   def ALU_REM_ = "11110"
   def ALU_REMU = "11111"
 
+  // w: word 32, h: half 16, b: byte 8
   def LSU_LB_ = "00000"
   def LSU_LH_ = "00001"
   def LSU_LW_ = "00010"
   def LSU_LBU = "00100"
   def LSU_LHU = "00101"
+
   def LSU_SB_ = "00001" // alu_op to axi wstrb
   def LSU_SH_ = "00011" // alu_op to axi wstrb
   def LSU_SW_ = "01111" // alu_op to axi wstrb
 
-  // Machine Trap Handling
-  def MCAUSE  = "h342".U(12.W)
-  def MEPC__  = "h341".U(12.W)
+  def LSU_AW_ = "01000" // alu_op to atomic op
+
+  // Supervisor-level CSR
+  def SSTATUS = "h100".U(12.W)
+  def SIE___  = "h104".U(12.W)
+  def STVEC_  = "h105".U(12.W)
+
+  def SCOUNTEREN = "h106".U(12.W)
+
+  def SSCRATCH = "h140".U(12.W)
+  def SEPC__   = "h141".U(12.W)
+  def SCAUSE   = "h142".U(12.W)
+  def STVAL_   = "h143".U(12.W)
+  def SIP___   = "h144".U(12.W)
+  def SATP__   = "h180".U(12.W)
+
   // Machine Trap Settup
-  def MTVEC_  = "h305".U(12.W)
   def MSTATUS = "h300".U(12.W)
+  def MISA__  = "h301".U(12.W)
+  def MEDELEG = "h302".U(12.W)
+  def MIDELEG = "h303".U(12.W)
+  def MIE___  = "h304".U(12.W)
+  def MTVEC_  = "h305".U(12.W)
+
+  def MSTATUSH = "h310".U(12.W)
+
+  // Machine Trap Handling
+  def MSCRATCH = "h340".U(12.W)
+  def MEPC__   = "h341".U(12.W)
+  def MCAUSE   = "h342".U(12.W)
+  def MTVAL_   = "h343".U(12.W)
+  def MIP___   = "h344".U(12.W)
+
+  def MCYCLE = "hb00".U(12.W)
+  def MTIME_ = "hc01".U(12.W)
+  def MTIMEH = "hc81".U(12.W)
+
+  // Machine Information Registers
+  def MVENDORID  = "hf11".U(12.W)
+  def MARCHID    = "hf12".U(12.W)
+  def MIMPID     = "hf13".U(12.W)
+  def MCONFIGPTR = "hf14".U(12.W)
 }
 
 trait Instr {
@@ -106,8 +146,8 @@ trait Instr {
   // Zifencetime
   def FENCE_TIM = BitPat("b0000000 00000 00000 010 00000 0001111")
 
-  // Trap-Return          func7   rs2   rs1 func3  rd  opcode
-  def MRET__ = BitPat("b0011000 00010 00000 000 00000 1110011")
+  def SFENCE_VM = BitPat("b0001001 ????? ????? 000 00000 1110011")
+
   // RV32/RV64 Zicsr              csr   rs1 func3  rd  opcode
   def CSRRW_ = BitPat("b??????? ????? ????? 001 ????? 1110011")
   def CSRRS_ = BitPat("b??????? ????? ????? 010 ????? 1110011")
@@ -125,4 +165,23 @@ trait Instr {
   def DIVU__ = BitPat("b0000001 ????? ????? 101 ????? 0110011")
   def REM___ = BitPat("b0000001 ????? ????? 110 ????? 0110011")
   def REMU__ = BitPat("b0000001 ????? ????? 111 ????? 0110011")
+
+  // RV32A                      ar  rs2   rs1  f3    rd   opcode
+  def LR_W__    = BitPat("b00010?? 00000 ????? 010 ????? 0101111")
+  def SC_W__    = BitPat("b00011?? ????? ????? 010 ????? 0101111")
+  def AMOSWAP_W = BitPat("b00001?? ????? ????? 010 ????? 0101111")
+  def AMOADD_W_ = BitPat("b00000?? ????? ????? 010 ????? 0101111")
+  def AMOXOR_W_ = BitPat("b00100?? ????? ????? 010 ????? 0101111")
+  def AMOAND_W_ = BitPat("b01100?? ????? ????? 010 ????? 0101111")
+  def AMOOR_W__ = BitPat("b01000?? ????? ????? 010 ????? 0101111")
+  def AMOMIN_W_ = BitPat("b10000?? ????? ????? 010 ????? 0101111")
+  def AMOMAX_W_ = BitPat("b10100?? ????? ????? 010 ????? 0101111")
+  def AMOMINU_W = BitPat("b11000?? ????? ????? 010 ????? 0101111")
+  def AMOMAXU_W = BitPat("b11100?? ????? ????? 010 ????? 0101111")
+
+  // Trap-Return          func7   rs2   rs1 func3  rd  opcode
+  def MRET__ = BitPat("b0011000 00010 00000 000 00000 1110011")
+  def SRET__ = BitPat("b0001000 00010 00000 000 00000 1110011")
+
+  def WFI___ = BitPat("b0001000 00101 00000 000 00000 1110011")
 }

@@ -55,7 +55,9 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
       //                      rw b j  |  alu op |
       LUI___ -> BitPat("b" + "00 0 0" + ALU_ADD_), // U
       AUIPC_ -> BitPat("b" + "00 0 0" + ALU_ADD_), // U
+
       JAL___ -> BitPat("b" + "00 0 1" + ALU_ADD_), // J
+
       JALR__ -> BitPat("b" + "00 0 1" + ALU_ADD_), // I
 
       BEQ___ -> BitPat("b" + "00 1 0" + ALU_EQ__), // B
@@ -70,6 +72,7 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
       LW____ -> BitPat("b" + "10 0 0" + LSU_LW_), // I
       LBU___ -> BitPat("b" + "10 0 0" + LSU_LBU), // I
       LHU___ -> BitPat("b" + "10 0 0" + LSU_LHU), // I
+
       SB____ -> BitPat("b" + "01 0 0" + LSU_SB_), // S
       SH____ -> BitPat("b" + "01 0 0" + LSU_SH_), // S
       SW____ -> BitPat("b" + "01 0 0" + LSU_SW_), // S
@@ -80,9 +83,11 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
       XORI__ -> BitPat("b" + "00 0 0" + ALU_XOR_), // I
       ORI___ -> BitPat("b" + "00 0 0" + ALU_OR__), // I
       ANDI__ -> BitPat("b" + "00 0 0" + ALU_AND_), // I
+
       SLLI__ -> BitPat("b" + "00 0 0" + ALU_SLL_), // I
       SRLI__ -> BitPat("b" + "00 0 0" + ALU_SRL_), // I
       SRAI__ -> BitPat("b" + "00 0 0" + ALU_SRA_), // I
+
       ADD___ -> BitPat("b" + "00 0 0" + ALU_ADD_), // R
       SUB___ -> BitPat("b" + "00 0 0" + ALU_SUB_), // R
       SLL___ -> BitPat("b" + "00 0 0" + ALU_SLL_), // R
@@ -94,23 +99,23 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
       OR____ -> BitPat("b" + "00 0 0" + ALU_OR__), // R
       AND___ -> BitPat("b" + "00 0 0" + ALU_AND_), // R
 
-      PAUSE_ -> BitPat("b" + "00 0 0" + "0????"), // N
-      ECALL_ -> BitPat("b" + "00 0 0" + "0????"), // N
-      EBREAK -> BitPat("b" + "00 0 0" + "0????"), // N
+      PAUSE_ -> BitPat("b" + "00 0 0" + "0???0"), // N
+      ECALL_ -> BitPat("b" + "00 0 0" + "0???0"), // N
+      EBREAK -> BitPat("b" + "00 0 0" + "0???0"), // N
 
-      CSRRW_ -> BitPat("b" + "00 0 0" + "0????"), // CSR
-      CSRRS_ -> BitPat("b" + "00 0 0" + "0????"), // CSR
-      CSRRC_ -> BitPat("b" + "00 0 0" + "0????"), // CSR
-      CSRRWI -> BitPat("b" + "00 0 0" + "0????"), // CSR
-      CSRRSI -> BitPat("b" + "00 0 0" + "0????"), // CSR
-      CSRRCI -> BitPat("b" + "00 0 0" + "0????"), // CSR
+      FENCE____ -> BitPat("b" + "00 0 0" + "0???0"), // N
+      FENCE_TSO -> BitPat("b" + "00 0 0" + "0???0"), // N
+      FENCE_I__ -> BitPat("b" + "00 0 0" + "0???0"), // N
+      FENCE_TIM -> BitPat("b" + "00 0 0" + "0???0"), // N
 
-      MRET__ -> BitPat("b" + "00 0 0" + "0????"), // N
+      SFENCE_VM -> BitPat("b" + "00 0 0" + "0???0"), // N
 
-      FENCE____ -> BitPat("b" + "00 0 0" + "0????"), // N
-      FENCE_TSO -> BitPat("b" + "00 0 0" + "0????"), // N
-      FENCE_I__ -> BitPat("b" + "00 0 0" + "0????"), // N
-      FENCE_TIM -> BitPat("b" + "00 0 0" + "0????"), // N
+      CSRRW_ -> BitPat("b" + "00 0 0" + "0???0"), // CSR
+      CSRRS_ -> BitPat("b" + "00 0 0" + "0???0"), // CSR
+      CSRRC_ -> BitPat("b" + "00 0 0" + "0???0"), // CSR
+      CSRRWI -> BitPat("b" + "00 0 0" + "0???0"), // CSR
+      CSRRSI -> BitPat("b" + "00 0 0" + "0???0"), // CSR
+      CSRRCI -> BitPat("b" + "00 0 0" + "0???0"), // CSR
 
       MUL___ -> BitPat("b" + "00 0 0" + ALU_MUL_), // R
       MULH__ -> BitPat("b" + "00 0 0" + ALU_MULH), // R
@@ -119,9 +124,29 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
       DIV___ -> BitPat("b" + "00 0 0" + ALU_DIV_), // R
       DIVU__ -> BitPat("b" + "00 0 0" + ALU_DIVU), // R
       REM___ -> BitPat("b" + "00 0 0" + ALU_REM_), // R
-      REMU__ -> BitPat("b" + "00 0 0" + ALU_REMU)  // R
+      REMU__ -> BitPat("b" + "00 0 0" + ALU_REMU), // R
+
+      // TODO: add reservation
+      LR_W__ -> BitPat("b" + "10 0 0" + LSU_AW_), // N
+      SC_W__ -> BitPat("b" + "01 0 0" + LSU_AW_), // N
+
+      AMOSWAP_W -> BitPat("b" + "11 0 0" + LSU_AW_), // N
+      // AMOADD_W_ -> BitPat("b" + "11 0 0" + LSU_AW_), // N
+      // AMOXOR_W_ -> BitPat("b" + "11 0 0" + LSU_AW_), // N
+      // AMOAND_W_ -> BitPat("b" + "11 0 0" + LSU_AW_), // N
+      // AMOOR_W__ -> BitPat("b" + "11 0 0" + LSU_AW_), // N
+      // AMOMIN_W_ -> BitPat("b" + "11 0 0" + LSU_AW_), // N
+      // AMOMAX_W_ -> BitPat("b" + "11 0 0" + LSU_AW_), // N
+      // AMOMINU_W -> BitPat("b" + "11 0 0" + LSU_AW_), // N
+      // AMOMAXU_W -> BitPat("b" + "11 0 0" + LSU_AW_), // N
+
+      MRET__ -> BitPat("b" + "00 0 0" + "0???0"), // N
+      SRET__ -> BitPat("b" + "00 0 0" + "0???0"), // N
+
+      WFI___ -> BitPat("b" + "00 0 0" + ALU_ADD_) // N
+      //                      rw b j  |  alu op |
     ),
-    BitPat("b" + "00 0 0" + ALU_ADD_)
+    BitPat("b" + "00 0 0" + ALU_ILL_)
   )
   // val decoded = decoder(in.inst, table)
   val inst_decoded = decoder(in.inst, type_table)
@@ -186,7 +211,9 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
     // inst      |  rd|    imm|   op1|   op2| rs1| rs2|
     LUI___ -> List( rd,  imm_u, imm_u,   0.U, 0.U, 0.U), // U
     AUIPC_ -> List( rd,  imm_u, in.pc, imm_u, 0.U, 0.U), // U
+    
     JAL___ -> List( rd,  imm_j, in.pc,   0.U, 0.U, 0.U), // J
+    
     JALR__ -> List( rd,  imm_i,  rs1v,   0.U, rs1, 0.U), // I
 
     BEQ___ -> List(0.U,  imm_b,  rs1v,  rs2v, rs1, rs2), // B
@@ -201,6 +228,7 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
     LW____ -> List( rd,  imm_i,  rs1v, imm_i, rs1, 0.U), // I
     LBU___ -> List( rd,  imm_i,  rs1v, imm_i, rs1, 0.U), // I
     LHU___ -> List( rd,  imm_i,  rs1v, imm_i, rs1, 0.U), // I
+    
     SB____ -> List(0.U,  imm_s,  rs1v,  rs2v, rs1, rs2), // S
     SH____ -> List(0.U,  imm_s,  rs1v,  rs2v, rs1, rs2), // S
     SW____ -> List(0.U,  imm_s,  rs1v,  rs2v, rs1, rs2), // S
@@ -211,9 +239,11 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
     XORI__ -> List( rd,  imm_i,  rs1v, imm_i, rs1, 0.U), // I
     ORI___ -> List( rd,  imm_i,  rs1v, imm_i, rs1, 0.U), // I
     ANDI__ -> List( rd,  imm_i,  rs1v, imm_i, rs1, 0.U), // I
+    
     SLLI__ -> List( rd,  imm_i,  rs1v, imm_i, rs1, 0.U), // I
     SRLI__ -> List( rd,  imm_i,  rs1v, imm_i, rs1, 0.U), // I
     SRAI__ -> List( rd,  imm_i,  rs1v, imm_i, rs1, 0.U), // I
+    
     ADD___ -> List( rd,    0.U,  rs1v,  rs2v, rs1, rs2), // R
     SUB___ -> List( rd,    0.U,  rs1v,  rs2v, rs1, rs2), // R
     SLL___ -> List( rd,    0.U,  rs1v,  rs2v, rs1, rs2), // R
@@ -225,11 +255,16 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
     OR____ -> List( rd,    0.U,  rs1v,  rs2v, rs1, rs2), // R
     AND___ -> List( rd,    0.U,  rs1v,  rs2v, rs1, rs2), // R
 
-
     PAUSE_ -> List( rd,    0.U,   0.U,   0.U, 0.U, 0.U), // N
     ECALL_ -> List( rd, MCAUSE,   0.U,   0.U, 0.U, 0.U), // N
     EBREAK -> List( rd,    0.U,   0.U,   0.U, 0.U, 0.U), // N
 
+    FENCE____ -> List( rd,    0.U,   0.U,   0.U, 0.U, 0.U), // N
+    FENCE_TSO -> List( rd,    0.U,   0.U,   0.U, 0.U, 0.U), // N
+    FENCE_I__ -> List( rd,    0.U,   0.U,   0.U, 0.U, 0.U), // N
+    FENCE_TIM -> List( rd,    0.U,   0.U,   0.U, 0.U, 0.U), // N
+
+    SFENCE_VM -> List( rd,    0.U,   0.U,   0.U, 0.U, 0.U), // N   
 
     CSRRW_ -> List( rd,    csr,  rs1v,   0.U, rs1, 0.U), // CSR
     CSRRS_ -> List( rd,    csr,  rs1v,   0.U, rs1, 0.U), // CSR
@@ -238,13 +273,6 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
     CSRRSI -> List( rd,    csr,  uimm,   0.U, 0.U, 0.U), // CSR
     CSRRCI -> List( rd,    csr,  uimm,   0.U, 0.U, 0.U), // CSR
 
-    MRET__ -> List( rd,MSTATUS,   0.U,   0.U, 0.U, 0.U), // N
-
- FENCE____ -> List( rd,    0.U,   0.U,   0.U, 0.U, 0.U), // N
- FENCE_TSO -> List( rd,    0.U,   0.U,   0.U, 0.U, 0.U), // N
- FENCE_I__ -> List( rd,    0.U,   0.U,   0.U, 0.U, 0.U), // N
- FENCE_TIM -> List( rd,    0.U,   0.U,   0.U, 0.U, 0.U), // N
-
     MUL___ -> List( rd,    0.U,  rs1v,  rs2v, rs1, rs2), // R
     MULH__ -> List( rd,    0.U,  rs1v,  rs2v, rs1, rs2), // R
     MULHSU -> List( rd,    0.U,  rs1v,  rs2v, rs1, rs2), // R
@@ -252,7 +280,25 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
     DIV___ -> List( rd,    0.U,  rs1v,  rs2v, rs1, rs2), // R
     DIVU__ -> List( rd,    0.U,  rs1v,  rs2v, rs1, rs2), // R
     REM___ -> List( rd,    0.U,  rs1v,  rs2v, rs1, rs2), // R
-    REMU__ -> List( rd,    0.U,  rs1v,  rs2v, rs1, rs2)  // R
+    REMU__ -> List( rd,    0.U,  rs1v,  rs2v, rs1, rs2), // R
+
+    LR_W__ -> List( rd,    0.U,  rs1v,  rs2v, rs1, 0.U), // N
+    SC_W__ -> List( rd,    0.U,  rs1v,  rs2v, rs1, rs2), // N
+
+ AMOSWAP_W -> List( rd,    0.U,  rs1v,  rs2v, rs1, rs2), // N
+ AMOADD_W_ -> List( rd,    0.U,  rs1v,  rs2v, rs1, rs2), // N
+ AMOXOR_W_ -> List( rd,    0.U,  rs1v,  rs2v, rs1, rs2), // N
+ AMOAND_W_ -> List( rd,    0.U,  rs1v,  rs2v, rs1, rs2), // N
+ AMOOR_W__ -> List( rd,    0.U,  rs1v,  rs2v, rs1, rs2), // N
+ AMOMIN_W_ -> List( rd,    0.U,  rs1v,  rs2v, rs1, rs2), // N
+ AMOMAX_W_ -> List( rd,    0.U,  rs1v,  rs2v, rs1, rs2), // N
+ AMOMINU_W -> List( rd,    0.U,  rs1v,  rs2v, rs1, rs2), // N
+ AMOMAXU_W -> List( rd,    0.U,  rs1v,  rs2v, rs1, rs2), // N
+
+    MRET__ -> List( rd,MSTATUS,   0.U,   0.U, 0.U, 0.U), // N
+    SRET__ -> List( rd,SSTATUS,   0.U,   0.U, 0.U, 0.U), // N
+
+    WFI___ -> List( rd,    0.U,   0.U,   0.U, 0.U, 0.U) // N
   )
   val var_decoder = ListLookup(in.inst,
               List(0.U, 0.U, 0.U, 0.U, 0.U, 0.U), op_table)

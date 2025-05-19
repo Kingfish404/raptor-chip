@@ -7,11 +7,11 @@ OBJDUMP   = $(CROSS_COMPILE)objdump
 OBJCOPY   = $(CROSS_COMPILE)objcopy
 READELF   = $(CROSS_COMPILE)readelf
 
-COMMON_CFLAGS = -march=rv32e -mabi=ilp32e  # overwrite
+COMMON_CFLAGS = -march=rv32im_zicsr_zifencei -mabi=ilp32  # overwrite
 LDFLAGS       =
 
 IMAGE = ./build/mrom-data
-SOURCE = $(wildcard *.c)
+SOURCE = rom.c dtb.c
 
 CFLAGS = -g -O2 -MMD -Wall \
 	-fno-asynchronous-unwind-tables -fno-builtin -fno-stack-protector \
@@ -19,9 +19,14 @@ CFLAGS = -g -O2 -MMD -Wall \
 
 all: $(IMAGE).elf $(IMAGE).bin
 
-$(IMAGE).elf:
+dtb.c: raptor.dts
+	# brew install dtc
+	dtc raptor.dts -o raptor.dtb
+	xxd -i raptor.dtb > dtb.c
+
+$(IMAGE).elf: $(SOURCE)
 	mkdir -p $(dir $(IMAGE))
-	$(CC) -o $(IMAGE).elf $(CFLAGS) $(LINKAGE) $(LDFLAGS) $(SOURCE)
+	$(CC) -o $(IMAGE).elf $(CFLAGS) $(LINKAGE) $(SOURCE) $(LDFLAGS)
 
 $(IMAGE).bin: $(IMAGE).elf
 	$(OBJDUMP) -d $(IMAGE).elf > $(IMAGE).txt

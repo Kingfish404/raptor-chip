@@ -41,7 +41,7 @@ apt_install() {
   sudo apt install -y libsdl2-dev libsdl2-image-dev libsdl2-ttf-dev
   sudo apt install -y libreadline-dev libncurses5-dev
   sudo apt install -y tcl-dev tcl-tclreadline libeigen3-dev \
-    swig autotools-dev libncursesw5-dev device-tree-compiler
+    swig autotools-dev libncursesw5-dev device-tree-compiler xxd
 }
 
 repo_clone() {
