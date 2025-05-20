@@ -23,6 +23,28 @@ void reg_display(int n)
 {
     printf(" pc: " FMT_GREEN(FMT_WORD_NO_PREFIX) "\n",
            *(npc.pc));
+    printf(" sstatus: " FMT_WORD_NO_PREFIX " ", *npc.sstatus);
+    printf("     sie: " FMT_WORD_NO_PREFIX " ", *npc.sie____);
+    printf("   stvec: " FMT_WORD_NO_PREFIX "\n", *npc.stvec__);
+
+    printf("sscratch: " FMT_WORD_NO_PREFIX " ", *npc.sscratch);
+    printf("    sepc: " FMT_WORD_NO_PREFIX " ", *npc.sepc___);
+    printf("  scause: " FMT_WORD_NO_PREFIX "\n", *npc.scause_);
+    printf("   stval: " FMT_WORD_NO_PREFIX " ", *npc.stval__);
+    printf("     sip: " FMT_WORD_NO_PREFIX " ", *npc.sip____);
+    printf("    satp: " FMT_WORD_NO_PREFIX "\n", *npc.satp___);
+
+    printf(" mstatus: " FMT_WORD_NO_PREFIX " ", *npc.mstatus);
+    printf(" medeleg: " FMT_WORD_NO_PREFIX " ", *npc.medeleg);
+    printf(" mideleg: " FMT_WORD_NO_PREFIX "\n", *npc.mideleg);
+    printf("     mie: " FMT_WORD_NO_PREFIX " ", *npc.mie____);
+    printf("   mtvec: " FMT_WORD_NO_PREFIX "\n", *npc.mtvec__);
+
+    printf("mscratch: " FMT_WORD_NO_PREFIX " ", *npc.mscratch);
+    printf("    mepc: " FMT_WORD_NO_PREFIX " ", *npc.mepc___);
+    printf("  mcause: " FMT_WORD_NO_PREFIX "\n", *npc.mcause_);
+    printf("   mtval: " FMT_WORD_NO_PREFIX " ", *npc.mtval__);
+    printf("     mip: " FMT_WORD_NO_PREFIX "\n", *npc.mip____);
     for (size_t i = 0; i < n; i++)
     {
         if (i != 0 && i % 4 == 0)
@@ -30,10 +52,6 @@ void reg_display(int n)
         printf("%3s: " FMT_WORD_NO_PREFIX " ", regs[i], npc.gpr[i]);
     }
     printf("\n");
-    printf(" mcause: " FMT_WORD_NO_PREFIX "  ", *npc.mcause);
-    printf("    mepc: " FMT_WORD_NO_PREFIX "\n", *npc.mepc);
-    printf("  mtvec: " FMT_WORD_NO_PREFIX "   ", *npc.mtvec);
-    printf("mstatus: " FMT_WORD_NO_PREFIX "\n", *npc.mstatus);
 }
 
 void isa_parser_elf(char *filename)

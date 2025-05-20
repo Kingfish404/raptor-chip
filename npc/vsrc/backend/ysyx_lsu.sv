@@ -79,7 +79,7 @@ module ysyx_lsu #(
       (raddr >= 'h10000000 && raddr < 'h10020000) ||  // uart/csr
       (raddr >= 'h20000000 && raddr < 'h20400000) ||  // mrom
       (raddr >= 'h30000000 && raddr < 'h40000000) ||  // flash
-      (raddr >= 'h80000000 && raddr < 'h80400000) ||  // psram
+      (raddr >= 'h80000000 && raddr < 'h88000000) ||  // psram
       (raddr >= 'ha0000000 && raddr < 'hc0000000) ||  // sdram
       (0));
 

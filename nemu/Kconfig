@@ -5,28 +5,21 @@ choice
   default ISA_riscv
 config ISA_x86
   bool "x86"
-config ISA_mips32
-  bool "mips32"
 config ISA_riscv
   bool "riscv"
-config ISA_loongarch32r
-  bool "loongarch32r"
 endchoice
 
 config ISA
   string
   default "x86" if ISA_x86
-  default "mips32" if ISA_mips32
   default "riscv32" if ISA_riscv && !RV64
   default "riscv64" if ISA_riscv &&  RV64
-  default "loongarch32r" if ISA_loongarch32r
   default "none"
 
 config ISA64
   depends on ISA_riscv && RV64
   bool
   default y
-
 
 if ISA_riscv
 source "src/isa/riscv32/Kconfig"
@@ -129,6 +122,9 @@ endmenu
 
 menu "Testing and Debugging"
 
+config DEBUG
+  bool "Enable ebreak breakpoint"
+  default y
 
 config TRACE
   bool "Enable tracer"

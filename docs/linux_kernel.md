@@ -111,6 +111,9 @@ install: init
 
 ```shell
 make run IMG=../riscv-software-src/build/linux-mmu/fw_payload.bin
+
+# or batch mode
+make run IMG=../riscv-software-src/build/linux-mmu/fw_payload.bin ARGS="-b --log=build/nemu-log.txt"
 ```
 
 ## References

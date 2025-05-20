@@ -4,11 +4,12 @@
 
 // verilator lint_off DECLFILENAME
 interface idu_pipe_if;
-  logic [4:0] alu_op;
+  logic [4:0] alu;
   logic jen;
   logic ben;
   logic wen;
   logic ren;
+  logic atom;
 
   logic system;
   logic ecall;
@@ -35,7 +36,7 @@ interface idu_pipe_if;
   logic [`YSYX_XLEN-1:0] pc;
 
   modport in(
-      input alu_op, jen, ben, wen, ren,
+      input alu, jen, ben, wen, ren, atom,
       input system, ecall, ebreak, mret, csr_csw,
       input fence_i, fence_time,
       input rd, imm, op1, op2, rs1, rs2,
@@ -45,7 +46,7 @@ interface idu_pipe_if;
       input pc
   );
   modport out(
-      output alu_op, jen, ben, wen, ren,
+      output alu, jen, ben, wen, ren, atom,
       output system, ecall, ebreak, mret, csr_csw,
       output fence_i, fence_time,
       output rd, imm, op1, op2, rs1, rs2,

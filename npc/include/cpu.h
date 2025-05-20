@@ -11,7 +11,7 @@ typedef enum
 
     SCOUNTE,
 
-    SSCRATC,
+    SSCRATCH,
     SEPC___,
     SCAUSE_,
     STVAL__,

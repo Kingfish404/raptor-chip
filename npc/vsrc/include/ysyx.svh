@@ -68,7 +68,17 @@
 `define YSYX_ALU_SH__ 'b00001
 `define YSYX_ALU_SW__ 'b00010
 
-`define YSYX_ALU_AW__ 'b01000
+`define YSYX_ATO_LR__ 'b00000
+`define YSYX_ATO_SC__ 'b00001
+`define YSYX_ATO_SWAP 'b00010
+`define YSYX_ATO_ADD_ 'b00011
+`define YSYX_ATO_XOR_ 'b00100
+`define YSYX_ATO_AND_ 'b00101
+`define YSYX_ATO_OR__ 'b00110
+`define YSYX_ATO_MIN_ 'b00111
+`define YSYX_ATO_MAX_ 'b01000
+`define YSYX_ATO_MINU 'b01001
+`define YSYX_ATO_MAXU 'b01010
 
 `define YSYX_WSTRB_SB 'b00001
 `define YSYX_WSTRB_SH 'b00011

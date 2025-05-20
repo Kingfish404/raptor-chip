@@ -44,7 +44,7 @@ bool csr_valid(Decode *s, uint16_t csr)
     return true;
     break;
   case CSR_NOT_EXIST:
-    s->dnpc = isa_raise_intr(MCA_ILL_INS, s->pc);
+    s->dnpc = isa_raise_intr(MCA_ILL_INST, s->pc);
     difftest_skip_ref();
     break;
   default:
@@ -167,15 +167,15 @@ static int decode_exec(Decode *s)
   INSTPAT("0000000 ????? ????? 110 ????? 01100 11", or, R, R(rd) = src1 | src2);
   INSTPAT("0000000 ????? ????? 111 ????? 01100 11", and, R, R(rd) = src1 & src2);
 
-  INSTPAT("0000000 10000 00000 000 00000 00011 11", pause, N, {});
+  INSTPAT("0000000 10000 00000 000 00000 00011 11", pause, N, {}); // hint instruction (include in fence)
   INSTPAT("0000000 00000 00000 000 00000 11100 11", ecall, N,
           s->dnpc = isa_raise_intr(
               ((cpu.priv == PRV_U) ? MCA_ENV_CAL_UMO : ((cpu.priv == PRV_S) ? MCA_ENV_CAL_SMO : MCA_ENV_CAL_MMO)),
               s->pc));
-#if defined(CONFIG_ROM_DTB)
-  INSTPAT("0000000 00001 00000 000 00000 11100 11", ebreak, N, { s->dnpc = isa_raise_intr(MCA_BRE, s->pc); });
-#else
+#if defined(CONFIG_DEBUG)
   INSTPAT("0000000 00001 00000 000 00000 11100 11", ebreak, N, NEMUTRAP(s->pc, R(10))); // R(10) is $a0
+#else
+  INSTPAT("0000000 00001 00000 000 00000 11100 11", ebreak, N, { s->dnpc = isa_raise_intr(MCA_BREAK_POINT, s->pc); });
 #endif
 
   // RV64I Base Instruction Set
@@ -248,8 +248,9 @@ static int decode_exec(Decode *s)
   INSTPAT("11100?? ????? ????? 010 ????? 01011 11", amomaxu.w, R, {sword_t tmp = Mr(src1, 4);Mw(src1, 4, (tmp > src2) ? src2 : tmp);R(rd) = SEXT(tmp, 32); });
 
   // RV64A Extension
-  INSTPAT("00010?? 00000 ????? 011 ????? 01011 11", lr.d, R, R(rd) = Mr(src1, 8));
-  INSTPAT("00011?? ????? ????? 011 ????? 01011 11", sc.d, R, R(rd) = 0; Mw(src1, 8, src2););
+  INSTPAT("00010?? 00000 ????? 011 ????? 01011 11", lr.d, R, { R(rd) = Mr(src1, 8); cpu.reservation = get_paddr(src1, 8); });
+  INSTPAT("00011?? ????? ????? 011 ????? 01011 11", sc.d, R, { 
+    if (cpu.reservation == get_paddr(src1, 8)) { R(rd) = 0; Mw(src1, 8, src2); } else { R(rd) = 1; } });
   INSTPAT("00001?? ????? ????? 011 ????? 01011 11", amoswap.d, R, {sword_t tmp = Mr(src1, 8);Mw(src1, 8, src2);R(rd) = tmp; });
   INSTPAT("00000?? ????? ????? 011 ????? 01011 11", amoadd.d, R, {sword_t tmp = Mr(src1, 8);Mw(src1, 8, src2 + tmp);R(rd) = tmp; });
   INSTPAT("00100?? ????? ????? 011 ????? 01011 11", amoxor.d, R, {sword_t tmp = Mr(src1, 8);Mw(src1, 8, src2 ^ tmp);R(rd) = tmp; });
@@ -288,7 +289,7 @@ static int decode_exec(Decode *s)
   INSTPAT("??????? ????? ????? ??? ????? ????? ??", inv, N, {
     if (CSR(CSR_MTVEC))
     {
-      s->dnpc = isa_raise_intr(MCA_ILL_INS, s->pc);
+      s->dnpc = isa_raise_intr(MCA_ILL_INST, s->pc);
     }
     else
     {

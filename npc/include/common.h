@@ -19,7 +19,7 @@ typedef word_t vaddr_t;
 #define MSIZE 0x08000000
 
 #define PSRAM_BASE 0x80000000
-#define PSRAM_SIZE 0x00400000
+#define PSRAM_SIZE 0x08000000
 
 #define SDRAM_BASE 0xa0000000
 #define SDRAM_SIZE 0x20000000
@@ -106,10 +106,37 @@ typedef struct
   word_t *pc;
 
   // csr
-  word_t *mcause;
-  word_t *mtvec;
-  word_t *mepc;
+  word_t *sstatus;
+  word_t *sie____;
+  word_t *stvec__;
+
+  word_t *scounte;
+
+  word_t *sscratch;
+  word_t *sepc___;
+  word_t *scause_;
+  word_t *stval__;
+  word_t *sip____;
+  word_t *satp___;
+
   word_t *mstatus;
+  word_t *misa___;
+  word_t *medeleg;
+  word_t *mideleg;
+  word_t *mie____;
+  word_t *mtvec__;
+
+  word_t *mstatush;
+
+  word_t *mscratch;
+  word_t *mepc___;
+  word_t *mcause_;
+  word_t *mtval__;
+  word_t *mip____;
+
+  word_t *mcycle_;
+  word_t *time___;
+  word_t *timeh__;
 
   // for mem diff
   word_t vwaddr;

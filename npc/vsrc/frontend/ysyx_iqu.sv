@@ -53,11 +53,12 @@ module ysyx_iqu #(
   logic [$clog2(QUEUE_SIZE)-1:0] uoq_head;
   logic [QUEUE_SIZE-1:0] uoq_valid;
 
-  logic [4:0] uoq_alu_op[QUEUE_SIZE];
+  logic [4:0] uoq_alu[QUEUE_SIZE];
   logic uoq_jen[QUEUE_SIZE];
   logic uoq_ben[QUEUE_SIZE];
   logic uoq_wen[QUEUE_SIZE];
   logic uoq_ren[QUEUE_SIZE];
+  logic uoq_atom[QUEUE_SIZE];
 
   logic uoq_system[QUEUE_SIZE];
   logic uoq_ecall[QUEUE_SIZE];
@@ -141,11 +142,12 @@ module ysyx_iqu #(
         // Issue to uoq
         uoq_head              <= uoq_head + 1;
 
-        uoq_alu_op[uoq_head]  <= idu_if.alu_op;
+        uoq_alu[uoq_head]     <= idu_if.alu;
         uoq_jen[uoq_head]     <= idu_if.jen;
         uoq_ben[uoq_head]     <= idu_if.ben;
         uoq_wen[uoq_head]     <= idu_if.wen;
         uoq_ren[uoq_head]     <= idu_if.ren;
+        uoq_atom[uoq_head]    <= idu_if.atom;
 
         uoq_system[uoq_head]  <= idu_if.system;
         uoq_ecall[uoq_head]   <= idu_if.ecall;
@@ -188,11 +190,12 @@ module ysyx_iqu #(
   assign rs2_hit_rob = (rf_busy[rs2[`YSYX_REG_LEN-1:0]] && (rob_state[rf_reorder[rs2[`YSYX_REG_LEN-1:0]]] == WB));
   always_comb begin
     // Dispatch connect
-    iqu_exu_if.alu_op = uoq_alu_op[uoq_tail];
+    iqu_exu_if.alu = uoq_alu[uoq_tail];
     iqu_exu_if.jen = uoq_jen[uoq_tail];
     iqu_exu_if.ben = uoq_ben[uoq_tail];
     iqu_exu_if.wen = uoq_wen[uoq_tail];
     iqu_exu_if.ren = uoq_ren[uoq_tail];
+    iqu_exu_if.atom = uoq_atom[uoq_tail];
 
     iqu_exu_if.system = uoq_system[uoq_tail];
     iqu_exu_if.ecall = uoq_ecall[uoq_tail];
@@ -319,6 +322,7 @@ module ysyx_iqu #(
   assign iqu_cm_if.csr_addr = rob_csr_addr[rob_head];
   assign iqu_cm_if.ecall = rob_ecall[rob_head];
   assign iqu_cm_if.mret = rob_mret[rob_head];
+  assign iqu_cm_if.ebreak = rob_ebreak[rob_head];
 
   assign iqu_cm_if.sq_idx = rob_rs_idx[rob_head];
   assign iqu_cm_if.store_commit = head_valid && rob_store[rob_head] && !flush_pipeline;

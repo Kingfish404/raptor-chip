@@ -40,6 +40,22 @@ uint8_t *guest_to_host(paddr_t addr)
     return NULL;
 }
 
+uint8_t mmio_check_and_handle(
+    paddr_t addr, word_t wdata, char wmask, bool is_write,
+    word_t *data)
+{
+    // TODO: implement clint, plic, and serial
+    if (addr >= 0x10000000 && addr < 0x10000000 + 0x100)
+    {
+        return 1;
+    }
+    if (addr >= 0x10011800 && addr < 0x10011800 + 0x100)
+    {
+        return 1;
+    }
+    return 0;
+}
+
 paddr_t host_to_guest(uint8_t *addr)
 {
     return addr + MBASE - pmem;
@@ -118,6 +134,12 @@ extern "C" void pmem_read(word_t raddr, word_t *data)
         return;
     }
 #endif
+    if (mmio_check_and_handle(raddr, 0, 0, false, data))
+    {
+        // Log("MMIO read: addr = " FMT_WORD ", data = " FMT_WORD,
+        //     raddr, *data);
+        return;
+    }
     uint8_t *host_addr = guest_to_host(raddr);
     if (host_addr == NULL)
     {
@@ -143,6 +165,12 @@ extern "C" void pmem_write(word_t waddr, word_t wdata, char wmask)
         return;
     }
 #endif
+    if (mmio_check_and_handle(waddr, wdata, wmask, true, NULL))
+    {
+        // Log("MMIO write: addr = " FMT_WORD ", data = " FMT_WORD ", mask = %02x",
+        //     waddr, wdata, wmask & 0xff);
+        return;
+    }
     uint8_t *host_addr = guest_to_host(waddr);
     if (host_addr == NULL)
     {

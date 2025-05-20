@@ -69,11 +69,19 @@ void init_difftest(char *ref_so_file, long img_size, int port)
 #endif
 }
 
-#define CHECK_NPC_CSR(name)                                                                                             \
+#define CHECK_NPC_CSR_M(name)                                                                                           \
   if (*(ref->m##name) != *(npc.m##name))                                                                                \
   {                                                                                                                     \
     printf(FMT_RED("[ERROR]") " m" #name " is different! ref = " FMT_WORD_NO_PREFIX ", dut = " FMT_WORD_NO_PREFIX "\n", \
            *(ref->m##name), *(npc.m##name));                                                                            \
+    is_same = false;                                                                                                    \
+  }
+
+#define CHECK_NPC_CSR_S(name)                                                                                           \
+  if (*(ref->s##name) != *(npc.s##name))                                                                                \
+  {                                                                                                                     \
+    printf(FMT_RED("[ERROR]") " s" #name " is different! ref = " FMT_WORD_NO_PREFIX ", dut = " FMT_WORD_NO_PREFIX "\n", \
+           *(ref->s##name), *(npc.s##name));                                                                            \
     is_same = false;                                                                                                    \
   }
 
@@ -101,10 +109,28 @@ static void checkregs(NPCState *ref, vaddr_t pc)
       is_same = false;
     }
   }
-  CHECK_NPC_CSR(cause);
-  CHECK_NPC_CSR(tvec);
-  CHECK_NPC_CSR(epc);
-  CHECK_NPC_CSR(status);
+  CHECK_NPC_CSR_S(status);
+  CHECK_NPC_CSR_S(ie____);
+  CHECK_NPC_CSR_S(tvec__);
+
+  CHECK_NPC_CSR_S(scratch);
+  CHECK_NPC_CSR_S(epc___);
+  CHECK_NPC_CSR_S(cause_);
+  CHECK_NPC_CSR_S(tval__);
+  CHECK_NPC_CSR_S(ip____);
+  CHECK_NPC_CSR_S(atp___);
+
+  CHECK_NPC_CSR_M(status);
+  CHECK_NPC_CSR_M(edeleg);
+  CHECK_NPC_CSR_M(ideleg);
+  CHECK_NPC_CSR_M(ie____);
+  CHECK_NPC_CSR_M(tvec__);
+
+  CHECK_NPC_CSR_M(scratch);
+  CHECK_NPC_CSR_M(epc___);
+  CHECK_NPC_CSR_M(cause_);
+  CHECK_NPC_CSR_M(tval__);
+  CHECK_NPC_CSR_M(ip____);
 
   if (!is_same)
   {

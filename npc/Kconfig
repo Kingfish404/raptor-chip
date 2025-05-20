@@ -23,6 +23,10 @@ config CC_OPT
 
 menu "Testing and Debugging"
 
+config DEBUG
+  bool "Enable ebreak breakpoint"
+  default y
+
 config WTRACE
   bool "Enable wave tracer"
   default n

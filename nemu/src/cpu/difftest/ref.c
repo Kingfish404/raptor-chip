@@ -28,10 +28,37 @@ typedef struct
   word_t *pc;
 
   // csr
-  word_t *mcause;
-  word_t *mtvec;
-  word_t *mepc;
+  word_t *sstatus;
+  word_t *sie____;
+  word_t *stvec__;
+
+  word_t *scounte;
+
+  word_t *sscratch;
+  word_t *sepc___;
+  word_t *scause_;
+  word_t *stval__;
+  word_t *sip____;
+  word_t *satp___;
+
   word_t *mstatus;
+  word_t *misa___;
+  word_t *medeleg;
+  word_t *mideleg;
+  word_t *mie____;
+  word_t *mtvec__;
+
+  word_t *mstatush;
+
+  word_t *mscratch;
+  word_t *mepc___;
+  word_t *mcause_;
+  word_t *mtval__;
+  word_t *mip____;
+
+  word_t *mcycle_;
+  word_t *time___;
+  word_t *timeh__;
 
   // for mem diff
   word_t vwaddr;
@@ -81,10 +108,28 @@ __EXPORT void difftest_regcpy(void *dut, bool direction)
     {
       cpu.gpr[i] = npc->gpr[i];
     }
-    cpu.sr[CSR_MCAUSE] = *npc->mcause;
-    cpu.sr[CSR_MEPC] = *npc->mepc;
-    cpu.sr[CSR_MTVEC] = *npc->mtvec;
+    cpu.sr[CSR_SSTATUS] = *npc->sstatus;
+    cpu.sr[CSR_SIE] = *npc->sie____;
+    cpu.sr[CSR_STVEC] = *npc->stvec__;
+
+    cpu.sr[CSR_SSCRATCH] = *npc->sscratch;
+    cpu.sr[CSR_SEPC] = *npc->sepc___;
+    cpu.sr[CSR_SCAUSE] = *npc->scause_;
+    cpu.sr[CSR_STVAL] = *npc->stval__;
+    cpu.sr[CSR_SIP] = *npc->sip____;
+    cpu.sr[CSR_SATP] = *npc->satp___;
+
     cpu.sr[CSR_MSTATUS] = *npc->mstatus;
+    cpu.sr[CSR_MEDELEG] = *npc->medeleg;
+    cpu.sr[CSR_MIDELEG] = *npc->mideleg;
+    cpu.sr[CSR_MIE] = *npc->mie____;
+    cpu.sr[CSR_MTVEC] = *npc->mtvec__;
+
+    cpu.sr[CSR_MSCRATCH] = *npc->mscratch;
+    cpu.sr[CSR_MEPC] = *npc->mepc___;
+    cpu.sr[CSR_MCAUSE] = *npc->mcause_;
+    cpu.sr[CSR_MTVAL] = *npc->mtval__;
+    cpu.sr[CSR_MIP] = *npc->mip____;
   }
   else if (direction == DIFFTEST_TO_DUT)
   {
@@ -92,10 +137,29 @@ __EXPORT void difftest_regcpy(void *dut, bool direction)
     npc->pc = &cpu.pc;
     npc->inst = &cpu.inst;
     npc->gpr = cpu.gpr;
-    npc->mcause = &cpu.sr[CSR_MCAUSE];
-    npc->mepc = &cpu.sr[CSR_MEPC];
-    npc->mtvec = &cpu.sr[CSR_MTVEC];
+
+    npc->sstatus = &cpu.sr[CSR_SSTATUS];
+    npc->sie____ = &cpu.sr[CSR_SIE];
+    npc->stvec__ = &cpu.sr[CSR_STVEC];
+
+    npc->sscratch = &cpu.sr[CSR_SSCRATCH];
+    npc->sepc___ = &cpu.sr[CSR_SEPC];
+    npc->scause_ = &cpu.sr[CSR_SCAUSE];
+    npc->stval__ = &cpu.sr[CSR_STVAL];
+    npc->sip____ = &cpu.sr[CSR_SIP];
+    npc->satp___ = &cpu.sr[CSR_SATP];
+
     npc->mstatus = &cpu.sr[CSR_MSTATUS];
+    npc->medeleg = &cpu.sr[CSR_MEDELEG];
+    npc->mideleg = &cpu.sr[CSR_MIDELEG];
+    npc->mie____ = &cpu.sr[CSR_MIE];
+    npc->mtvec__ = &cpu.sr[CSR_MTVEC];
+
+    npc->mscratch = &cpu.sr[CSR_MSCRATCH];
+    npc->mepc___ = &cpu.sr[CSR_MEPC];
+    npc->mcause_ = &cpu.sr[CSR_MCAUSE];
+    npc->mtval__ = &cpu.sr[CSR_MTVAL];
+    npc->mip____ = &cpu.sr[CSR_MIP];
 
     npc->vwaddr = cpu.vwaddr;
     npc->pwaddr = cpu.pwaddr;

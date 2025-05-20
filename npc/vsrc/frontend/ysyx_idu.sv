@@ -57,11 +57,13 @@ module ysyx_idu #(
   ysyx_idu_decoder idu_de (
       .clock(clock),
 
-      .out_alu_op(idu_if.alu_op),
+      .out_alu(idu_if.alu),
       .out_jen(idu_if.jen),
       .out_ben(idu_if.ben),
       .out_wen(idu_if.wen),
       .out_ren(idu_if.ren),
+
+      .out_atom(idu_if.atom),
 
       .out_sys_system(idu_if.system),
       .out_sys_ebreak(idu_if.ebreak),

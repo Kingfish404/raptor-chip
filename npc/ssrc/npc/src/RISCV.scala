@@ -43,7 +43,17 @@ trait MicroOP {
   def LSU_SH_ = "00011" // alu_op to axi wstrb
   def LSU_SW_ = "01111" // alu_op to axi wstrb
 
-  def LSU_AW_ = "01000" // alu_op to atomic op
+  def ATO_LR__ = "00000"
+  def ATO_SC__ = "00001"
+  def ATO_SWAP = "00010"
+  def ATO_ADD_ = "00011"
+  def ATO_XOR_ = "00100"
+  def ATO_AND_ = "00101"
+  def ATO_OR__ = "00110"
+  def ATO_MIN_ = "00111"
+  def ATO_MAX_ = "01000"
+  def ATO_MINU = "01001"
+  def ATO_MAXU = "01010"
 
   // Supervisor-level CSR
   def SSTATUS = "h100".U(12.W)
@@ -135,11 +145,10 @@ trait Instr {
   def OR____ = BitPat("b0000000 ????? ????? 110 ????? 0110011")
   def AND___ = BitPat("b0000000 ????? ????? 111 ????? 0110011")
 
-  def PAUSE_ = BitPat("b0000000 10000 00000 000 00000 0001111")
   def ECALL_ = BitPat("b0000000 00000 00000 000 00000 1110011")
   def EBREAK = BitPat("b0000000 00001 00000 000 00000 1110011")
 
-  def FENCE____ = BitPat("b0000111 11111 00000 000 00000 0001111")
+  def FENCE____ = BitPat("b0000??? ????? 00000 000 00000 0001111")
   def FENCE_TSO = BitPat("b1000001 10011 00000 000 00000 0011111")
   // Zifencei               imm[11:0]   rs1 func3  rd  opcode
   def FENCE_I__ = BitPat("b??????? ????? ????? 001 ????? 0001111")

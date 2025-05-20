@@ -19,11 +19,6 @@ NPCState npc = {
     .ret = NULL,
     .pc = NULL,
 
-    .mcause = NULL,
-    .mtvec = NULL,
-    .mepc = NULL,
-    .mstatus = NULL,
-
     .inst = NULL,
 
     .soc_sram = NULL,
@@ -72,9 +67,11 @@ void npc_abort()
 
 extern "C" void npc_exu_ebreak()
 {
+#if defined(CONFIG_DEBUG)
   contextp->gotFinish(true);
   Log("EBREAK at pc = " FMT_WORD_NO_PREFIX "", *npc.pc);
   npc.state = NPC_END;
+#endif
 }
 
 void npc_difftest_skip_ref()

@@ -3,9 +3,7 @@
 # NEMU Configuration Menu
 #
 # CONFIG_ISA_x86 is not set
-# CONFIG_ISA_mips32 is not set
 CONFIG_ISA_riscv=y
-# CONFIG_ISA_loongarch32r is not set
 CONFIG_ISA="riscv32"
 
 #
@@ -43,6 +41,7 @@ CONFIG_WATCHPOINT=y
 #
 # Testing and Debugging
 #
+# CONFIG_DEBUG is not set
 CONFIG_TRACE=y
 CONFIG_TRACE_START=0
 CONFIG_TRACE_END=10000
@@ -68,6 +67,7 @@ CONFIG_PC_RESET_OFFSET=0
 # CONFIG_MTRACE is not set
 # CONFIG_PMEM_MALLOC is not set
 CONFIG_PMEM_GARRAY=y
+# CONFIG_MEM_RANDOM is not set
 # end of Memory Configuration
 
 CONFIG_DEVICE=y

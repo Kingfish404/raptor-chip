@@ -10,12 +10,13 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
     val pc   = Input(UInt(32.W))
   })
   val out     = IO(new Bundle {
-    val alu_op = Output(UInt(5.W))
-
+    val alu = Output(UInt(5.W))
     val jen = Output(UInt(1.W))
     val ben = Output(UInt(1.W))
     val wen = Output(UInt(1.W))
     val ren = Output(UInt(1.W))
+
+    val atom = Output(UInt(1.W))
 
     val rd  = Output(UInt(5.W))
     val imm = Output(UInt(32.W))
@@ -99,7 +100,6 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
       OR____ -> BitPat("b" + "00 0 0" + ALU_OR__), // R
       AND___ -> BitPat("b" + "00 0 0" + ALU_AND_), // R
 
-      PAUSE_ -> BitPat("b" + "00 0 0" + "0???0"), // N
       ECALL_ -> BitPat("b" + "00 0 0" + "0???0"), // N
       EBREAK -> BitPat("b" + "00 0 0" + "0???0"), // N
 
@@ -126,19 +126,18 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
       REM___ -> BitPat("b" + "00 0 0" + ALU_REM_), // R
       REMU__ -> BitPat("b" + "00 0 0" + ALU_REMU), // R
 
-      // TODO: add reservation
-      LR_W__ -> BitPat("b" + "10 0 0" + LSU_AW_), // N
-      SC_W__ -> BitPat("b" + "01 0 0" + LSU_AW_), // N
-
-      AMOSWAP_W -> BitPat("b" + "11 0 0" + LSU_AW_), // N
-      // AMOADD_W_ -> BitPat("b" + "11 0 0" + LSU_AW_), // N
-      // AMOXOR_W_ -> BitPat("b" + "11 0 0" + LSU_AW_), // N
-      // AMOAND_W_ -> BitPat("b" + "11 0 0" + LSU_AW_), // N
-      // AMOOR_W__ -> BitPat("b" + "11 0 0" + LSU_AW_), // N
-      // AMOMIN_W_ -> BitPat("b" + "11 0 0" + LSU_AW_), // N
-      // AMOMAX_W_ -> BitPat("b" + "11 0 0" + LSU_AW_), // N
-      // AMOMINU_W -> BitPat("b" + "11 0 0" + LSU_AW_), // N
-      // AMOMAXU_W -> BitPat("b" + "11 0 0" + LSU_AW_), // N
+      // TODO: add reservation for lr/sc
+      LR_W__    -> BitPat("b" + "10 0 0" + ATO_LR__), // R
+      SC_W__    -> BitPat("b" + "01 0 0" + ATO_SC__), // R
+      AMOSWAP_W -> BitPat("b" + "11 0 0" + ATO_SWAP), // R
+      AMOADD_W_ -> BitPat("b" + "11 0 0" + ATO_ADD_), // R
+      AMOXOR_W_ -> BitPat("b" + "11 0 0" + ATO_XOR_), // R
+      AMOAND_W_ -> BitPat("b" + "11 0 0" + ATO_AND_), // R
+      AMOOR_W__ -> BitPat("b" + "11 0 0" + ATO_OR__), // R
+      AMOMIN_W_ -> BitPat("b" + "11 0 0" + ATO_MIN_), // R
+      AMOMAX_W_ -> BitPat("b" + "11 0 0" + ATO_MAX_), // R
+      AMOMINU_W -> BitPat("b" + "11 0 0" + ATO_MINU), // R
+      AMOMAXU_W -> BitPat("b" + "11 0 0" + ATO_MAXU), // R
 
       MRET__ -> BitPat("b" + "00 0 0" + "0???0"), // N
       SRET__ -> BitPat("b" + "00 0 0" + "0???0"), // N
@@ -148,13 +147,33 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
     ),
     BitPat("b" + "00 0 0" + ALU_ILL_)
   )
-  // val decoded = decoder(in.inst, table)
   val inst_decoded = decoder(in.inst, type_table)
-  out.alu_op := inst_decoded(4, 0)
-  out.jen    := inst_decoded(5)
-  out.ben    := inst_decoded(6)
-  out.wen    := inst_decoded(7)
-  out.ren    := inst_decoded(8)
+  out.alu := inst_decoded(4, 0)
+  out.jen := inst_decoded(5)
+  out.ben := inst_decoded(6)
+  out.wen := inst_decoded(7)
+  out.ren := inst_decoded(8)
+
+  val atom_decoded = decoder(
+    in.inst,
+    TruthTable(
+      Map(
+        LR_W__    -> BitPat("b" + "1"), // R
+        SC_W__    -> BitPat("b" + "1"), // R
+        AMOSWAP_W -> BitPat("b" + "1"), // N
+        AMOADD_W_ -> BitPat("b" + "1"), // N
+        AMOXOR_W_ -> BitPat("b" + "1"), // N
+        AMOAND_W_ -> BitPat("b" + "1"), // N
+        AMOOR_W__ -> BitPat("b" + "1"), // N
+        AMOMIN_W_ -> BitPat("b" + "1"), // N
+        AMOMAX_W_ -> BitPat("b" + "1"), // N
+        AMOMINU_W -> BitPat("b" + "1"), // N
+        AMOMAXU_W -> BitPat("b" + "1")  // N
+      ),
+      BitPat("b" + "0")
+    )
+  );
+  out.atom := atom_decoded(0)
 
   val sys_misc_table = TruthTable(
     Map( //                   csw rbc s
@@ -255,7 +274,6 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
     OR____ -> List( rd,    0.U,  rs1v,  rs2v, rs1, rs2), // R
     AND___ -> List( rd,    0.U,  rs1v,  rs2v, rs1, rs2), // R
 
-    PAUSE_ -> List( rd,    0.U,   0.U,   0.U, 0.U, 0.U), // N
     ECALL_ -> List( rd, MCAUSE,   0.U,   0.U, 0.U, 0.U), // N
     EBREAK -> List( rd,    0.U,   0.U,   0.U, 0.U, 0.U), // N
 

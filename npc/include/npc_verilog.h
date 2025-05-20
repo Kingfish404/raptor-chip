@@ -36,10 +36,31 @@ static inline void verilog_connect(TOP_NAME *top, NPCState *npc)
   word_t *csr = (word_t *)&CONCAT(VERILOG_PREFIX, exu__DOT__csrs__DOT__csr);
 
   npc->state = NPC_RUNNING;
+
+  npc->sstatus = csr + SSTATUS;
+  npc->sie____ = csr + SIE____;
+  npc->stvec__ = csr + STVEC__;
+
+  npc->scounte = csr + SCOUNTE;
+
+  npc->sscratch = csr + SSCRATCH;
+  npc->sepc___ = csr + SEPC___;
+  npc->scause_ = csr + SCAUSE_;
+  npc->stval__ = csr + STVAL__;
+  npc->sip____ = csr + SIP____;
+  npc->satp___ = csr + SATP___;
+
   npc->mstatus = csr + MSTATUS;
-  npc->mcause = csr + MCAUSE_;
-  npc->mepc = csr + MEPC___;
-  npc->mtvec = csr + MTVEC__;
+  npc->medeleg = csr + MEDELEG;
+  npc->mideleg = csr + MIDELEG;
+  npc->mie____ = csr + MIE____;
+  npc->mtvec__ = csr + MTVEC__;
+
+  npc->mscratch = csr + MSCRATCH;
+  npc->mepc___ = csr + MEPC___;
+  npc->mcause_ = csr + MCAUSE_;
+  npc->mtval__ = csr + MTVAL__;
+  npc->mip____ = csr + MIP____;
 }
 
 #endif // __NPC_VERILOG_H__

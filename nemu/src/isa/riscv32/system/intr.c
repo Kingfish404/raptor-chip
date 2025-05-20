@@ -37,10 +37,10 @@ word_t isa_raise_intr(word_t NO, vaddr_t epc)
   word_t tval = 0;
   switch (NO)
   {
-  case MCA_ILL_INS:
+  case MCA_ILL_INST:
     tval = cpu.inst;
     break;
-  case MCA_BRE:
+  case MCA_BREAK_POINT:
     tval = epc;
     break;
   case MCA_LOA_ADD_MIS:

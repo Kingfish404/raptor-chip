@@ -271,7 +271,7 @@ module ysyx_bus #(
       if ((io_master_awaddr >= 'h10000000 && io_master_awaddr <= 'h10000005) ||
           (io_master_awaddr >= 'h10001000 && io_master_awaddr <= 'h10001fff) ||
           (io_master_awaddr >= 'h10002000 && io_master_awaddr <= 'h1000200f) ||
-          (io_master_awaddr >= 'h10011000 && io_master_awaddr <= 'h10011007) ||
+          (io_master_awaddr >= 'h10011000 && io_master_awaddr <= 'h10012000) ||
           (io_master_awaddr >= 'h21000000 && io_master_awaddr <= 'h211fffff) ||
           (io_master_awaddr >= 'hc0000000) ||
           (0))
@@ -284,8 +284,7 @@ module ysyx_bus #(
       if ((io_master_araddr >= 'h10000000 && io_master_araddr <= 'h10000005) ||
           (io_master_araddr >= 'h10001000 && io_master_araddr <= 'h10001fff) ||
           (io_master_araddr >= 'h10002000 && io_master_araddr <= 'h1000200f) ||
-          (io_master_araddr >= 'h10011000 && io_master_araddr <= 'h10011007) ||
-          (io_master_araddr >= 'h20000000 && io_master_araddr <= 'h20010000) ||
+          (io_master_araddr >= 'h10011000 && io_master_araddr <= 'h10012000) ||
           (io_master_araddr >= 'h21000000 && io_master_araddr <= 'h211fffff) ||
           (io_master_araddr >= 'hc0000000) ||
           (0))

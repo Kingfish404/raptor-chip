@@ -19,9 +19,9 @@ CFLAGS = -g -O2 -MMD -Wall \
 
 all: $(IMAGE).elf $(IMAGE).bin
 
-dtb.c: raptor.dts
+dtb.c: raptor.dts spike-rv32ima.dts
 	# brew install dtc
-	dtc raptor.dts -o raptor.dtb
+	dtc spike-rv32ima.dts -o raptor.dtb
 	xxd -i raptor.dtb > dtb.c
 
 $(IMAGE).elf: $(SOURCE)
