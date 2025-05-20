@@ -1,19 +1,16 @@
-# "一生一芯"工程项目
+# Raptor Project
 
-设计的处理器暂称为 **New Processor Core (NPC)** , 采用[`RISC-V`][RISC-V]指令集架构, 使用`SystemVerilog`和`Chisel`进行描述.
+**New Processor Core (NPC)** with [`RISC-V`][RISC-V] ISA. Hardware generation is done using `SystemVerilog` and `Chisel` (`Scala`).
 
 Candidate ip core name: `raptor-0.1.0-falcon`.
 
-**[Core Documentation](./docs/README.md)**
-
-> "一生一芯"参考[实验讲义][^lecture note].
-
-[^lecture note]: https://ysyx.oscc.cc/docs/
 [RISC-V]: https://riscv.org/
 
 ## Microarchitecture
 
 ![](./docs/assets/npc-rv32im-o3-pipeline.svg)
+
+**[Core Documentation](./docs/README.md)**
 
 ## Build Setup
 
@@ -70,7 +67,7 @@ cd $YSYX_HOME/am-kernels/benchmarks/microbench && \
 cd npc && make pack
 ```
 
-## Run opensbi & Kernel
+## Run OpenSBI & Linux Kernel
 
 See [Linux Kernel](./docs/linux_kernel.md)
 
@@ -79,3 +76,4 @@ See [Linux Kernel](./docs/linux_kernel.md)
 - [Specifications – RISC-V International](https://riscv.org/technical/specifications/)
 - [riscv/riscv-isa-manual: RISC-V Instruction Set Manual](https://github.com/riscv/riscv-isa-manual)
 - [riscv-software-src/riscv-unified-db: Machine-readable database of the RISC-V specification, and tools to generate various views](https://github.com/riscv-software-src/riscv-unified-db)
+- ["一生一芯"](https://ysyx.oscc.cc/)

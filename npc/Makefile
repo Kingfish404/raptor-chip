@@ -83,7 +83,6 @@ INC_PATH += $(abspath ./vsrc/include/dpic)
 endif
 
 $(BIN): $(VSRCS) $(VHSRCS) $(CCSRCS) $(CHSRCS) $(NVBOARD_ARCHIVE)
-	$(call git_commit, "build RTL")
 	$(VERILATOR) --trace-fst -cc --exe --build -j $(shell nproc) --debug $(VERILATOR_FLAG) $^ \
 		--top-module $(VTARGET) \
 		$(addprefix -CFLAGS , $(CXXFLAGS)) $(addprefix -LDFLAGS , $(LDFLAGS)) \
@@ -98,11 +97,9 @@ verilog:
 	make -C ssrc verilog
 
 run: $(BIN) $(MROM_IMG)
-	$(call git_commit, "sim RTL") # DO NOT REMOVE THIS LINE!!!
 	$(NPC_EXEC)
 
 sim: $(BIN)
-	$(call git_commit, "sim RTL") # DO NOT REMOVE THIS LINE!!!
 	@$^
 
 AM_KERNEL = $(YSYX_HOME)/am-kernels
