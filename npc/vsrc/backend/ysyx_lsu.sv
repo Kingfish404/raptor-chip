@@ -76,7 +76,8 @@ module ysyx_lsu #(
   assign raddr_valid = (  //
       (raddr >= 'h02000048 && raddr < 'h02000050) ||  // clint
       (raddr >= 'h0f000000 && raddr < 'h0f002000) ||  // sram
-      (raddr >= 'h10000000 && raddr < 'h10020000) ||  // uart/csr
+      (raddr >= 'h10000000 && raddr < 'h10001000) ||  // uart/ns16550
+      (raddr >= 'h10010000 && raddr < 'h10011900) ||  // liteuart0/csr
       (raddr >= 'h20000000 && raddr < 'h20400000) ||  // mrom
       (raddr >= 'h30000000 && raddr < 'h40000000) ||  // flash
       (raddr >= 'h80000000 && raddr < 'h88000000) ||  // psram

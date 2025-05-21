@@ -24,6 +24,7 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
     val op2 = Output(UInt(32.W))
     val rs1 = Output(UInt(5.W))
     val rs2 = Output(UInt(5.W))
+    val csr = Output(UInt(12.W))
   })
   val out_sys = IO(new Bundle {
     val system  = Output(UInt(1.W))
@@ -32,14 +33,18 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
     var mret    = Output(UInt(1.W))
     val csr_csw = Output(UInt(3.W))
   })
-  val rs1v    = 0.U
-  val rs2v    = 0.U
-  val rs1     = in.inst(19, 15)
-  val rs2     = in.inst(24, 20)
-  val rd      = in.inst(11, 7)
-  val opcode  = in.inst(6, 0)
-  val funct3  = in.inst(14, 12)
-  val funct7  = in.inst(31, 25)
+
+  val out_fence = IO(new Bundle {
+    val i    = Output(UInt(1.W))
+    val time = Output(UInt(1.W))
+  })
+
+  val rs1    = in.inst(19, 15)
+  val rs2    = in.inst(24, 20)
+  val rd     = in.inst(11, 7)
+  val opcode = in.inst(6, 0)
+  val funct3 = in.inst(14, 12)
+  val funct7 = in.inst(31, 25)
 
   val imm_i = Cat(Fill(20, in.inst(31)), in.inst(31, 20))
   val imm_s = Cat(Fill(20, in.inst(31)), in.inst(31, 25), in.inst(11, 7))
@@ -185,6 +190,8 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
    FENCE_TSO -> BitPat("b" + "000 000 1"), // N
    FENCE_I__ -> BitPat("b" + "000 000 1"), // N
    FENCE_TIM -> BitPat("b" + "000 000 1"), // N
+
+   SFENCE_VM -> BitPat("b" + "000 000 1"), // N
     // format: on
 
       MRET__ -> BitPat("b" + "000 100 1"), // N
@@ -194,23 +201,21 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
       CSRRC_ -> BitPat("b" + "100 000 1"), // CSR
       CSRRWI -> BitPat("b" + "001 000 1"), // CSR
       CSRRSI -> BitPat("b" + "010 000 1"), // CSR
-      CSRRCI -> BitPat("b" + "100 000 1")  // CSR
+      CSRRCI -> BitPat("b" + "100 000 1"), // CSR
+
+      WFI___ -> BitPat("b" + "000 000 1") // N
     ),
     BitPat("b" + "000 000 0")
   )
 
   val sys_decoded = decoder(in.inst, sys_misc_table)
 
-  out_sys.system  := sys_decoded(0)
-  out_sys.ecall   := sys_decoded(1)
-  out_sys.ebreak  := sys_decoded(2)
-  out_sys.mret    := sys_decoded(3)
-  out_sys.csr_csw := sys_decoded(6, 4)
-
-  val out_fence = IO(new Bundle {
-    val i    = Output(UInt(1.W))
-    val time = Output(UInt(1.W))
-  })
+  out_sys.system := sys_decoded(0)
+  out_sys.ecall  := sys_decoded(1)
+  out_sys.ebreak := sys_decoded(2)
+  out_sys.mret   := sys_decoded(3)
+  val csr_csw = sys_decoded(6, 4)
+  out_sys.csr_csw := csr_csw
 
   val fence_table   = TruthTable(
     Map( //                      ftime iflush
@@ -233,90 +238,90 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
     
     JAL___ -> List( rd,  imm_j, in.pc,   0.U, 0.U, 0.U), // J
     
-    JALR__ -> List( rd,  imm_i,  rs1v,   0.U, rs1, 0.U), // I
+    JALR__ -> List( rd,  imm_i,   0.U,   0.U, rs1, 0.U), // I
 
-    BEQ___ -> List(0.U,  imm_b,  rs1v,  rs2v, rs1, rs2), // B
-    BNE___ -> List(0.U,  imm_b,  rs1v,  rs2v, rs1, rs2), // B
-    BLT___ -> List(0.U,  imm_b,  rs1v,  rs2v, rs1, rs2), // B
-    BGE___ -> List(0.U,  imm_b,  rs1v,  rs2v, rs1, rs2), // B
-    BLTU__ -> List(0.U,  imm_b,  rs1v,  rs2v, rs1, rs2), // B
-    BGEU__ -> List(0.U,  imm_b,  rs1v,  rs2v, rs1, rs2), // B
+    BEQ___ -> List(0.U,  imm_b,   0.U,   0.U, rs1, rs2), // B
+    BNE___ -> List(0.U,  imm_b,   0.U,   0.U, rs1, rs2), // B
+    BLT___ -> List(0.U,  imm_b,   0.U,   0.U, rs1, rs2), // B
+    BGE___ -> List(0.U,  imm_b,   0.U,   0.U, rs1, rs2), // B
+    BLTU__ -> List(0.U,  imm_b,   0.U,   0.U, rs1, rs2), // B
+    BGEU__ -> List(0.U,  imm_b,   0.U,   0.U, rs1, rs2), // B
 
-    LB____ -> List( rd,  imm_i,  rs1v, imm_i, rs1, 0.U), // I
-    LH____ -> List( rd,  imm_i,  rs1v, imm_i, rs1, 0.U), // I
-    LW____ -> List( rd,  imm_i,  rs1v, imm_i, rs1, 0.U), // I
-    LBU___ -> List( rd,  imm_i,  rs1v, imm_i, rs1, 0.U), // I
-    LHU___ -> List( rd,  imm_i,  rs1v, imm_i, rs1, 0.U), // I
+    LB____ -> List( rd,  imm_i,   0.U, imm_i, rs1, 0.U), // I
+    LH____ -> List( rd,  imm_i,   0.U, imm_i, rs1, 0.U), // I
+    LW____ -> List( rd,  imm_i,   0.U, imm_i, rs1, 0.U), // I
+    LBU___ -> List( rd,  imm_i,   0.U, imm_i, rs1, 0.U), // I
+    LHU___ -> List( rd,  imm_i,   0.U, imm_i, rs1, 0.U), // I
     
-    SB____ -> List(0.U,  imm_s,  rs1v,  rs2v, rs1, rs2), // S
-    SH____ -> List(0.U,  imm_s,  rs1v,  rs2v, rs1, rs2), // S
-    SW____ -> List(0.U,  imm_s,  rs1v,  rs2v, rs1, rs2), // S
+    SB____ -> List(0.U,  imm_s,   0.U,   0.U, rs1, rs2), // S
+    SH____ -> List(0.U,  imm_s,   0.U,   0.U, rs1, rs2), // S
+    SW____ -> List(0.U,  imm_s,   0.U,   0.U, rs1, rs2), // S
 
-    ADDI__ -> List( rd,  imm_i,  rs1v, imm_i, rs1, 0.U), // I
-    SLTI__ -> List( rd,  imm_i,  rs1v, imm_i, rs1, 0.U), // I
-    SLTIU_ -> List( rd,  imm_i,  rs1v, imm_i, rs1, 0.U), // I
-    XORI__ -> List( rd,  imm_i,  rs1v, imm_i, rs1, 0.U), // I
-    ORI___ -> List( rd,  imm_i,  rs1v, imm_i, rs1, 0.U), // I
-    ANDI__ -> List( rd,  imm_i,  rs1v, imm_i, rs1, 0.U), // I
+    ADDI__ -> List( rd,  imm_i,   0.U, imm_i, rs1, 0.U), // I
+    SLTI__ -> List( rd,  imm_i,   0.U, imm_i, rs1, 0.U), // I
+    SLTIU_ -> List( rd,  imm_i,   0.U, imm_i, rs1, 0.U), // I
+    XORI__ -> List( rd,  imm_i,   0.U, imm_i, rs1, 0.U), // I
+    ORI___ -> List( rd,  imm_i,   0.U, imm_i, rs1, 0.U), // I
+    ANDI__ -> List( rd,  imm_i,   0.U, imm_i, rs1, 0.U), // I
     
-    SLLI__ -> List( rd,  imm_i,  rs1v, imm_i, rs1, 0.U), // I
-    SRLI__ -> List( rd,  imm_i,  rs1v, imm_i, rs1, 0.U), // I
-    SRAI__ -> List( rd,  imm_i,  rs1v, imm_i, rs1, 0.U), // I
+    SLLI__ -> List( rd,  imm_i,   0.U, imm_i, rs1, 0.U), // I
+    SRLI__ -> List( rd,  imm_i,   0.U, imm_i, rs1, 0.U), // I
+    SRAI__ -> List( rd,  imm_i,   0.U, imm_i, rs1, 0.U), // I
     
-    ADD___ -> List( rd,    0.U,  rs1v,  rs2v, rs1, rs2), // R
-    SUB___ -> List( rd,    0.U,  rs1v,  rs2v, rs1, rs2), // R
-    SLL___ -> List( rd,    0.U,  rs1v,  rs2v, rs1, rs2), // R
-    SLT___ -> List( rd,    0.U,  rs1v,  rs2v, rs1, rs2), // R
-    SLTU__ -> List( rd,    0.U,  rs1v,  rs2v, rs1, rs2), // R
-    XOR___ -> List( rd,    0.U,  rs1v,  rs2v, rs1, rs2), // R
-    SRL___ -> List( rd,    0.U,  rs1v,  rs2v, rs1, rs2), // R
-    SRA___ -> List( rd,    0.U,  rs1v,  rs2v, rs1, rs2), // R
-    OR____ -> List( rd,    0.U,  rs1v,  rs2v, rs1, rs2), // R
-    AND___ -> List( rd,    0.U,  rs1v,  rs2v, rs1, rs2), // R
+    ADD___ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
+    SUB___ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
+    SLL___ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
+    SLT___ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
+    SLTU__ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
+    XOR___ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
+    SRL___ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
+    SRA___ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
+    OR____ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
+    AND___ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
 
     ECALL_ -> List( rd, MCAUSE,   0.U,   0.U, 0.U, 0.U), // N
     EBREAK -> List( rd,    0.U,   0.U,   0.U, 0.U, 0.U), // N
 
-    FENCE____ -> List( rd,    0.U,   0.U,   0.U, 0.U, 0.U), // N
-    FENCE_TSO -> List( rd,    0.U,   0.U,   0.U, 0.U, 0.U), // N
-    FENCE_I__ -> List( rd,    0.U,   0.U,   0.U, 0.U, 0.U), // N
-    FENCE_TIM -> List( rd,    0.U,   0.U,   0.U, 0.U, 0.U), // N
+    FENCE____ -> List( rd, 0.U,   0.U,   0.U, 0.U, 0.U), // N
+    FENCE_TSO -> List( rd, 0.U,   0.U,   0.U, 0.U, 0.U), // N
+    FENCE_I__ -> List( rd, 0.U,   0.U,   0.U, 0.U, 0.U), // N
+    FENCE_TIM -> List( rd, 0.U,   0.U,   0.U, 0.U, 0.U), // N
 
     SFENCE_VM -> List( rd,    0.U,   0.U,   0.U, 0.U, 0.U), // N   
 
-    CSRRW_ -> List( rd,    csr,  rs1v,   0.U, rs1, 0.U), // CSR
-    CSRRS_ -> List( rd,    csr,  rs1v,   0.U, rs1, 0.U), // CSR
-    CSRRC_ -> List( rd,    csr,  rs1v,   0.U, rs1, 0.U), // CSR
+    CSRRW_ -> List( rd,    csr,   0.U,   0.U, rs1, 0.U), // CSR
+    CSRRS_ -> List( rd,    csr,   0.U,   0.U, rs1, 0.U), // CSR
+    CSRRC_ -> List( rd,    csr,   0.U,   0.U, rs1, 0.U), // CSR
     CSRRWI -> List( rd,    csr,  uimm,   0.U, 0.U, 0.U), // CSR
     CSRRSI -> List( rd,    csr,  uimm,   0.U, 0.U, 0.U), // CSR
     CSRRCI -> List( rd,    csr,  uimm,   0.U, 0.U, 0.U), // CSR
 
-    MUL___ -> List( rd,    0.U,  rs1v,  rs2v, rs1, rs2), // R
-    MULH__ -> List( rd,    0.U,  rs1v,  rs2v, rs1, rs2), // R
-    MULHSU -> List( rd,    0.U,  rs1v,  rs2v, rs1, rs2), // R
-    MULHU_ -> List( rd,    0.U,  rs1v,  rs2v, rs1, rs2), // R
-    DIV___ -> List( rd,    0.U,  rs1v,  rs2v, rs1, rs2), // R
-    DIVU__ -> List( rd,    0.U,  rs1v,  rs2v, rs1, rs2), // R
-    REM___ -> List( rd,    0.U,  rs1v,  rs2v, rs1, rs2), // R
-    REMU__ -> List( rd,    0.U,  rs1v,  rs2v, rs1, rs2), // R
+    MUL___ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
+    MULH__ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
+    MULHSU -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
+    MULHU_ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
+    DIV___ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
+    DIVU__ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
+    REM___ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
+    REMU__ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
 
-    LR_W__ -> List( rd,    0.U,  rs1v,  rs2v, rs1, 0.U), // N
-    SC_W__ -> List( rd,    0.U,  rs1v,  rs2v, rs1, rs2), // N
+    LR_W__ -> List( rd,    0.U,   0.U,  0.U, rs1, 0.U), // N
+    SC_W__ -> List( rd,    0.U,   0.U,  0.U, rs1, rs2), // N
 
- AMOSWAP_W -> List( rd,    0.U,  rs1v,  rs2v, rs1, rs2), // N
- AMOADD_W_ -> List( rd,    0.U,  rs1v,  rs2v, rs1, rs2), // N
- AMOXOR_W_ -> List( rd,    0.U,  rs1v,  rs2v, rs1, rs2), // N
- AMOAND_W_ -> List( rd,    0.U,  rs1v,  rs2v, rs1, rs2), // N
- AMOOR_W__ -> List( rd,    0.U,  rs1v,  rs2v, rs1, rs2), // N
- AMOMIN_W_ -> List( rd,    0.U,  rs1v,  rs2v, rs1, rs2), // N
- AMOMAX_W_ -> List( rd,    0.U,  rs1v,  rs2v, rs1, rs2), // N
- AMOMINU_W -> List( rd,    0.U,  rs1v,  rs2v, rs1, rs2), // N
- AMOMAXU_W -> List( rd,    0.U,  rs1v,  rs2v, rs1, rs2), // N
+ AMOSWAP_W -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // N
+ AMOADD_W_ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // N
+ AMOXOR_W_ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // N
+ AMOAND_W_ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // N
+ AMOOR_W__ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // N
+ AMOMIN_W_ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // N
+ AMOMAX_W_ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // N
+ AMOMINU_W -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // N
+ AMOMAXU_W -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // N
 
     MRET__ -> List( rd,MSTATUS,   0.U,   0.U, 0.U, 0.U), // N
     SRET__ -> List( rd,SSTATUS,   0.U,   0.U, 0.U, 0.U), // N
 
-    WFI___ -> List( rd,    0.U,   0.U,   0.U, 0.U, 0.U) // N
+    WFI___ -> List(0.U,    0.U,   0.U,   0.U, 0.U, 0.U) // N
   )
   val var_decoder = ListLookup(in.inst,
               List(0.U, 0.U, 0.U, 0.U, 0.U, 0.U), op_table)
@@ -327,4 +332,5 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
   out.op2 := var_decoder(3)
   out.rs1 := var_decoder(4)
   out.rs2 := var_decoder(5)
+  out.csr := csr
 }

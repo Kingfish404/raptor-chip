@@ -19,6 +19,10 @@ interface idu_pipe_if;
   logic mret;
   logic [2:0] csr_csw;
 
+  logic trap;
+  logic [`YSYX_XLEN-1:0] tval;
+  logic [`YSYX_XLEN-1:0] cause;
+
   logic [4:0] rd;
   logic [31:0] imm;
   logic [31:0] op1;
@@ -38,6 +42,7 @@ interface idu_pipe_if;
   modport in(
       input alu, jen, ben, wen, ren, atom,
       input system, ecall, ebreak, mret, csr_csw,
+      input trap, tval, cause,
       input fence_i, fence_time,
       input rd, imm, op1, op2, rs1, rs2,
       input qj, qk, dest,
@@ -48,6 +53,7 @@ interface idu_pipe_if;
   modport out(
       output alu, jen, ben, wen, ren, atom,
       output system, ecall, ebreak, mret, csr_csw,
+      output trap, tval, cause,
       output fence_i, fence_time,
       output rd, imm, op1, op2, rs1, rs2,
       output qj, qk, dest,
@@ -82,6 +88,10 @@ interface exu_pipe_if;
   logic fence_i;
   logic mret;
 
+  logic trap;
+  logic [`YSYX_XLEN-1:0] tval;
+  logic [`YSYX_XLEN-1:0] cause;
+
   // store
   logic [$clog2(`YSYX_RS_SIZE)-1:0] sq_idx;
   logic store_commit;
@@ -94,6 +104,7 @@ interface exu_pipe_if;
       input dest, result, npc, sys_retire, br_retire, ebreak,
       input fence_i,
       input csr_wen, csr_wdata, csr_addr, ecall, mret,
+      input trap, tval, cause,
       input sq_idx, store_commit,
       input valid
   );
@@ -103,6 +114,7 @@ interface exu_pipe_if;
       output dest, result, npc, sys_retire, br_retire, ebreak,
       output fence_i,
       output csr_wen, csr_wdata, csr_addr, ecall, mret,
+      output trap, tval, cause,
       output sq_idx, store_commit,
       output valid
   );

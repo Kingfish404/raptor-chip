@@ -91,17 +91,17 @@
 
 // Supervisor-level CSR
 `define YSYX_CSR_SSTATUS 'h100
-`define YSYX_CSR_SIE____ 'h100
-`define YSYX_CSR_STVEC__ 'h100
+`define YSYX_CSR_SIE____ 'h104
+`define YSYX_CSR_STVEC__ 'h105
 
-`define YSYX_CSR_SCOUNTE 'h100
+`define YSYX_CSR_SCOUNTE 'h106
 
-`define YSYX_CSR_SSCRATC 'h100
-`define YSYX_CSR_SEPC___ 'h100
-`define YSYX_CSR_SCAUSE_ 'h100
-`define YSYX_CSR_STVAL__ 'h100
-`define YSYX_CSR_SIP____ 'h100
-`define YSYX_CSR_SATP___ 'h100
+`define YSYX_CSR_SSCRATC 'h140
+`define YSYX_CSR_SEPC___ 'h141
+`define YSYX_CSR_SCAUSE_ 'h142
+`define YSYX_CSR_STVAL__ 'h143
+`define YSYX_CSR_SIP____ 'h144
+`define YSYX_CSR_SATP___ 'h180
 
 // Machine Trap Settup
 `define YSYX_CSR_MSTATUS 'h300
@@ -111,7 +111,7 @@
 `define YSYX_CSR_MIE____ 'h304
 `define YSYX_CSR_MTVEC__ 'h305
 
-`define YSYX_CSR_MSTATUSH 'h306
+`define YSYX_CSR_MSTATUSH 'h310
 
 // Machine Trap Handling
 `define YSYX_CSR_MSCRATCH 'h340

@@ -66,6 +66,10 @@ module ysyx_iqu #(
   logic uoq_mret[QUEUE_SIZE];
   logic [2:0] uoq_csr_csw[QUEUE_SIZE];
 
+  logic uoq_trap[QUEUE_SIZE];
+  logic [XLEN-1:0] uoq_tval[QUEUE_SIZE];
+  logic [XLEN-1:0] uoq_cause[QUEUE_SIZE];
+
   logic uoq_f_i[QUEUE_SIZE];
   logic uoq_f_time[QUEUE_SIZE];
 
@@ -106,6 +110,10 @@ module ysyx_iqu #(
   logic rob_ecall[ROB_SIZE];
   logic rob_ebreak[ROB_SIZE];
   logic rob_mret[ROB_SIZE];
+
+  logic rob_trap[ROB_SIZE];
+  logic [XLEN-1:0] rob_tval[ROB_SIZE];
+  logic [XLEN-1:0] rob_cause[ROB_SIZE];
 
   logic rob_f_i[ROB_SIZE];
   logic rob_f_time[ROB_SIZE];
@@ -155,6 +163,10 @@ module ysyx_iqu #(
         uoq_mret[uoq_head]    <= idu_if.mret;
         uoq_csr_csw[uoq_head] <= idu_if.csr_csw;
 
+        uoq_trap[uoq_head]    <= idu_if.trap;
+        uoq_tval[uoq_head]    <= idu_if.tval;
+        uoq_cause[uoq_head]   <= idu_if.cause;
+
         uoq_f_i[uoq_head]     <= idu_if.fence_i;
         uoq_f_time[uoq_head]  <= idu_if.fence_time;
 
@@ -202,6 +214,10 @@ module ysyx_iqu #(
     iqu_exu_if.ebreak = uoq_ebreak[uoq_tail];
     iqu_exu_if.mret = uoq_mret[uoq_tail];
     iqu_exu_if.csr_csw = uoq_csr_csw[uoq_tail];
+
+    iqu_exu_if.trap = uoq_trap[uoq_tail];
+    iqu_exu_if.tval = uoq_tval[uoq_tail];
+    iqu_exu_if.cause = uoq_cause[uoq_tail];
 
     iqu_exu_if.rd = uoq_rd[uoq_tail];
     iqu_exu_if.imm = uoq_imm[uoq_tail];
@@ -276,6 +292,10 @@ module ysyx_iqu #(
         rob_csr_addr[wb_dest] <= exu_wb_if.csr_addr;
         rob_ecall[wb_dest] <= exu_wb_if.ecall;
         rob_mret[wb_dest] <= exu_wb_if.mret;
+
+        rob_trap[wb_dest] <= exu_wb_if.trap;
+        rob_tval[wb_dest] <= exu_wb_if.tval;
+        rob_cause[wb_dest] <= exu_wb_if.cause;
       end
       // Commit
       if (rob_busy[rob_head] && rob_state[rob_head] == WB) begin
@@ -323,6 +343,10 @@ module ysyx_iqu #(
   assign iqu_cm_if.ecall = rob_ecall[rob_head];
   assign iqu_cm_if.mret = rob_mret[rob_head];
   assign iqu_cm_if.ebreak = rob_ebreak[rob_head];
+
+  assign iqu_cm_if.trap = rob_trap[rob_head];
+  assign iqu_cm_if.tval = rob_tval[rob_head];
+  assign iqu_cm_if.cause = rob_cause[rob_head];
 
   assign iqu_cm_if.sq_idx = rob_rs_idx[rob_head];
   assign iqu_cm_if.store_commit = head_valid && rob_store[rob_head] && !flush_pipeline;

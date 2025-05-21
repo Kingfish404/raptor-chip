@@ -71,6 +71,10 @@ module ysyx_exu #(
   logic [RS_SIZE-1:0] rs_ebreak;
   logic [RS_SIZE-1:0] rs_mret;
   logic [2:0] rs_csr_csw[RS_SIZE];
+
+  logic rs_trap[RS_SIZE];
+  logic [XLEN-1:0] rs_tval[RS_SIZE];
+  logic [XLEN-1:0] rs_cause[RS_SIZE];
   // === Revervation Station (RS) ===
 
   // === Store Queue (SQ) ===
@@ -220,6 +224,10 @@ module ysyx_exu #(
             rs_ebreak[free_idx] <= idu_if.ebreak;
             rs_mret[free_idx] <= idu_if.mret;
             rs_csr_csw[free_idx] <= idu_if.csr_csw;
+
+            rs_trap[free_idx] <= idu_if.trap;
+            rs_tval[free_idx] <= idu_if.tval;
+            rs_cause[free_idx] <= idu_if.cause;
           end
         end else if (rs_busy[i] == 1 && rs_qj[i] == 0 && rs_qk[i] == 0) begin
           // Load
@@ -324,6 +332,7 @@ module ysyx_exu #(
       rs_system[valid_idx] ? csr_rdata :
       rs_ren_ready[valid_idx] ? rs_ren_data[valid_idx] :
       rs_jen[valid_idx] ? rs_pc[valid_idx] + 4 :
+      sq_atom[valid_idx] &&  rs_alu[valid_idx] == `YSYX_ATO_SC__ ? 0 :
       rs_a[valid_idx]
     ) :
     rs_mul_a[valid_idx]
@@ -333,7 +342,7 @@ module ysyx_exu #(
   assign exu_wb_if.result = reg_wdata;
 
   assign exu_wb_if.npc = (
-    (rs_ecall[valid_idx] || rs_ebreak[valid_idx]) ? mtvec :
+    (rs_ecall[valid_idx] || rs_ebreak[valid_idx] || rs_trap[valid_idx]) ? mtvec :
     (rs_mret[valid_idx]) ? mepc :
     ((rs_br_jmp[valid_idx]) || (rs_br_cond[valid_idx] && |rs_a[valid_idx])) ? addr_exu :
     (rs_pc[valid_idx] + 4));
@@ -349,6 +358,10 @@ module ysyx_exu #(
   assign exu_wb_if.csr_addr = rs_imm[valid_idx][11:0];
   assign exu_wb_if.ecall = rs_ecall[valid_idx];
   assign exu_wb_if.mret = rs_mret[valid_idx];
+
+  assign exu_wb_if.trap = rs_trap[valid_idx];
+  assign exu_wb_if.tval = rs_tval[valid_idx];
+  assign exu_wb_if.cause = rs_cause[valid_idx];
 
   assign exu_wb_if.valid = valid_found;
 
@@ -384,12 +397,16 @@ module ysyx_exu #(
       .mret(iqu_cm_if.mret),
       .ebreak(iqu_cm_if.ebreak),
 
+      .trap(iqu_cm_if.trap),
+      .tval(iqu_cm_if.tval),
+
+      .cause(iqu_cm_if.cause),
+
       .waddr(iqu_cm_if.csr_addr),
       .wdata(iqu_cm_if.csr_wdata),
       .pc(iqu_cm_if.pc),
 
       .raddr(rs_imm[valid_idx][11:0]),
-      .out_illegal(csr_illegal),
       .out_rdata(csr_rdata),
       .out_mepc(mepc),
       .out_mtvec(mtvec)

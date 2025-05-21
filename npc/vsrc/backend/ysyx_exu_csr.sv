@@ -18,8 +18,11 @@ module ysyx_exu_csr #(
     input [XLEN-1:0] wdata,
     input [XLEN-1:0] pc,
 
-    input [R_W-1:0] raddr,
-    output out_illegal,
+    input trap,
+    input [XLEN-1:0] tval,
+    input [XLEN-1:0] cause,
+
+    input  [ R_W-1:0] raddr,
     output [XLEN-1:0] out_rdata,
     output [XLEN-1:0] out_mtvec,
     output [XLEN-1:0] out_mepc,
@@ -124,13 +127,16 @@ module ysyx_exu_csr #(
     ({REG_W{raddr==`YSYX_CSR_MTVAL__}}) & (MTVAL__) |
     ({REG_W{raddr==`YSYX_CSR_MIP____}}) & (MIP____) |
 
+    ({REG_W{raddr==`YSYX_CSR_MCYCLE_}}) & (MCYCLE_) |
+    ({REG_W{raddr==`YSYX_CSR_TIME___}}) & (TIME___) |
+    ({REG_W{raddr==`YSYX_CSR_TIMEH__}}) & (TIMEH__) |
+
     ({REG_W{raddr==`YSYX_CSR_MVENDORID}}) & (MVENDORID) |
     ({REG_W{raddr==`YSYX_CSR_MARCHID__}}) & (MARCHID) |
     ({REG_W{raddr==`YSYX_CSR_IMPID____}}) & (IMPID__) |
     ({REG_W{raddr==`YSYX_CSR_MHARTID__}}) & (MHARTID) |
     (MNONE__)
   );
-  assign out_illegal = (waddr_reg == MNONE__) || (raddr_reg == MNONE__);
 
   assign out_rdata = (
     ({XLEN{raddr_reg == SSTATUS}}) & (csr[SSTATUS]) |
@@ -159,6 +165,10 @@ module ysyx_exu_csr #(
     ({XLEN{raddr_reg == MTVAL__}}) & (csr[MTVAL__]) |
     ({XLEN{raddr_reg == MIP____}}) & (csr[MIP____]) |
 
+    ({XLEN{raddr_reg == MCYCLE_}}) & (csr[MCYCLE_]) |
+    ({XLEN{raddr_reg == TIME___}}) & (csr[TIME___]) |
+    ({XLEN{raddr_reg == TIMEH__}}) & (csr[TIMEH__]) |
+
     ({XLEN{raddr_reg == MVENDORID}}) & ('h79737978) |
     ({XLEN{raddr_reg == MARCHID}}) & ('h015fde77) |
     ({XLEN{raddr_reg == IMPID__}}) & ('h0) |
@@ -178,36 +188,57 @@ module ysyx_exu_csr #(
       csr[MEPC___]    <= RESET_VAL;
       csr[MTVEC__]   <= RESET_VAL;
       csr[MSTATUS] <= RESET_VAL;
-    end else if (valid) begin
-      if (wen) begin
-        csr[waddr_reg] <= wdata;
+      csr[TIME___] <= RESET_VAL;
+      csr[TIMEH__] <= RESET_VAL;
+    end else begin
+      csr[TIME___] <= csr[TIME___] + 1;
+      if (csr[TIME___] == 'hffffffff) begin
+        csr[TIMEH__] <= csr[TIMEH__] + 1;
       end
-      if (ecall) begin
-        csr[MCAUSE_] <= priv_mode == `YSYX_PRIV_M ? 'hb : priv_mode == `YSYX_PRIV_S ? 'h9 : 'h8;
-        csr[MSTATUS][`YSYX_CSR_MSTATUS_MPP_] <= priv_mode;
-        csr[MSTATUS][`YSYX_CSR_MSTATUS_MPIE] <= mstatus_mie;
-        csr[MSTATUS][`YSYX_CSR_MSTATUS_MIE_] <= 1'b0;
-        csr[MEPC___] <= pc;
-      end
-      if (mret) begin
-        priv_mode <= csr[MSTATUS][`YSYX_CSR_MSTATUS_MPP_];
-        csr[MSTATUS] <= {
-          csr[MSTATUS][XLEN-1:13],
-          `YSYX_PRIV_U,
-          csr[MSTATUS][10:8],
-          1'b1,
-          csr[MSTATUS][6:4],
-          csr[MSTATUS][`YSYX_CSR_MSTATUS_MPIE],
-          csr[MSTATUS][2:0]
-        };
-      end
-      if (ebreak) begin
-        csr[MCAUSE_] <= 'h3;
-        csr[MSTATUS][`YSYX_CSR_MSTATUS_MPP_] <= priv_mode;
-        csr[MSTATUS][`YSYX_CSR_MSTATUS_MPIE] <= mstatus_mie;
-        csr[MSTATUS][`YSYX_CSR_MSTATUS_MIE_] <= 1'b0;
-        csr[MEPC___] <= pc;
-        csr[MTVAL__] <= pc;
+      if (valid) begin
+        if (raddr_reg == TIME___ || raddr_reg == TIMEH__) begin
+          `YSYX_DPI_C_NPC_DIFFTEST_SKIP_REF
+        end
+        if (wen) begin
+          if (waddr_reg == MEDELEG) begin
+            csr[waddr_reg] <= (wdata & 'h1ffff);
+          end else begin
+            csr[waddr_reg] <= wdata;
+          end
+        end
+        if (ecall) begin
+          csr[MCAUSE_] <= priv_mode == `YSYX_PRIV_M ? 'hb : priv_mode == `YSYX_PRIV_S ? 'h9 : 'h8;
+          csr[MSTATUS][`YSYX_CSR_MSTATUS_MPP_] <= priv_mode;
+          csr[MSTATUS][`YSYX_CSR_MSTATUS_MPIE] <= mstatus_mie;
+          csr[MSTATUS][`YSYX_CSR_MSTATUS_MIE_] <= 1'b0;
+          csr[MEPC___] <= pc;
+          csr[MTVAL__] <= 0;
+        end else if (mret) begin
+          priv_mode <= csr[MSTATUS][`YSYX_CSR_MSTATUS_MPP_];
+          csr[MSTATUS] <= {
+            csr[MSTATUS][XLEN-1:13],
+            `YSYX_PRIV_U,
+            csr[MSTATUS][10:8],
+            1'b1,
+            csr[MSTATUS][6:4],
+            csr[MSTATUS][`YSYX_CSR_MSTATUS_MPIE],
+            csr[MSTATUS][2:0]
+          };
+        end else if (ebreak) begin
+          csr[MCAUSE_] <= 'h3;
+          csr[MSTATUS][`YSYX_CSR_MSTATUS_MPP_] <= priv_mode;
+          csr[MSTATUS][`YSYX_CSR_MSTATUS_MPIE] <= mstatus_mie;
+          csr[MSTATUS][`YSYX_CSR_MSTATUS_MIE_] <= 1'b0;
+          csr[MEPC___] <= pc;
+          csr[MTVAL__] <= pc;
+        end else if (trap) begin
+          csr[MCAUSE_] <= cause;
+          csr[MSTATUS][`YSYX_CSR_MSTATUS_MPP_] <= priv_mode;
+          csr[MSTATUS][`YSYX_CSR_MSTATUS_MPIE] <= mstatus_mie;
+          csr[MSTATUS][`YSYX_CSR_MSTATUS_MIE_] <= 1'b0;
+          csr[MEPC___] <= pc;
+          csr[MTVAL__] <= tval;
+        end
       end
     end
   end

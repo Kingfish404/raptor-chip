@@ -14,4 +14,6 @@ extern "C" void pmem_write(word_t addr, char data);
 
 void vaddr_show(vaddr_t addr, int n);
 
+void init_mem();
+
 #endif /* __NPC_MEMORY_H__ */

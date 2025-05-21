@@ -236,9 +236,7 @@ module ysyx_npc_soc #(
           state_w <= WDWRITE;
         end
         WDWRITE: begin
-          if (awaddr_buf == `YSYX_BUS_SERIAL_PORT) begin
-            $write("%c", wdata[7:0]);
-          end else begin
+          begin
             if (wstrb[0]) begin
               `YSYX_DPI_C_PMEM_WRITE((awaddr_buf & ~'h3) + 0, {wdata >>  0}[31:0], 1);
             end
@@ -275,7 +273,7 @@ module ysyx_npc_soc #(
           // wait for arvalid
           if (arvalid) begin
             state_r <= RVALID;
-            `YSYX_DPI_C_PMEM_READ((araddr & ~'h3), mem_rdata_buf);
+            `YSYX_DPI_C_PMEM_READ((araddr), mem_rdata_buf);
           end
         end
         RVALID: begin

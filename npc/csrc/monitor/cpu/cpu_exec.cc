@@ -32,6 +32,8 @@ void perf_sample_per_inst();
 
 void statistic();
 
+static uint64_t tfp_cycle = 0x0;
+
 static void cpu_exec_one_cycle()
 {
 #ifdef CONFIG_NVBoard
@@ -43,7 +45,7 @@ static void cpu_exec_one_cycle()
 
   top->clock = (top->clock == 0) ? 1 : 0;
   top->eval();
-  if (tfp)
+  if (tfp && pmu.active_cycle > tfp_cycle)
   {
     tfp->dump(contextp->time());
   }
@@ -51,7 +53,7 @@ static void cpu_exec_one_cycle()
 
   top->clock = (top->clock == 0) ? 1 : 0;
   top->eval();
-  if (tfp)
+  if (tfp && pmu.active_cycle > tfp_cycle)
   {
     tfp->dump(contextp->time());
   }
