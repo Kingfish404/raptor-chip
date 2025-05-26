@@ -55,6 +55,7 @@ __attribute__((__unused__)) static void serial_io_handler(uint32_t offset, int l
   }
 }
 
+// https://github.com/riscv-software-src/riscv-isa-sim/blob/master/riscv/ns16550.cc
 #define UART_QUEUE_SIZE 64
 
 #define UART_RX 0 /* In:  Receive buffer */

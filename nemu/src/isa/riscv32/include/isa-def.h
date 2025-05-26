@@ -176,35 +176,39 @@ typedef union
 // Machine cause register (mcause) values after trap.
 enum MCAUSE
 {
-  MCA_SUP_SOF_INT = 1 | (1 << (XLEN - 1)),
-  MCA_MAC_SOF_INT = 3 | (1 << (XLEN - 1)),
+  MCA_SUP_SOF_INT = 0x1 | (1 << (XLEN - 1)),
+  MCA_MAC_SOF_INT = 0x3 | (1 << (XLEN - 1)),
 
-  MCA_SUP_TIM_INT = 5 | (1 << (XLEN - 1)),
-  MCA_MAC_TIM_INT = 7 | (1 << (XLEN - 1)),
+  MCA_SUP_TIM_INT = 0x5 | (1 << (XLEN - 1)),
+  MCA_MAC_TIM_INT = 0x7 | (1 << (XLEN - 1)),
 
-  MCA_SUP_EXT_INT = 9 | (1 << (XLEN - 1)),
-  MCA_MAC_EXT_INT = 11 | (1 << (XLEN - 1)),
+  MCA_SUP_EXT_INT = 0x9 | (1 << (XLEN - 1)),
+  MCA_MAC_EXT_INT = 0xb | (1 << (XLEN - 1)),
 
-  MCA_COU_OVE_INT = 13 | (1 << (XLEN - 1)),
+  MCA_COU_OVE_INT = 0xd | (1 << (XLEN - 1)),
 
-  MCA_INS_ADD_MIS = 0,
-  MCA_INS_ACC_FAU = 1,
-  MCA_ILL_INST = 2,
-  MCA_BREAK_POINT = 3,
-  MCA_LOA_ADD_MIS = 4,
-  MCA_LOA_ACC_FAU = 5,
-  MCA_STO_ADD_MIS = 6,
-  MCA_STO_ACC_FAU = 7,
-  MCA_ENV_CAL_UMO = 8,
-  MCA_ENV_CAL_SMO = 9,
+  MCA_INS_ADD_MIS = 0x0,
+  MCA_INS_ACC_FAU = 0x1,
+  MCA_ILLEGAL_INS = 0x2,
 
-  MCA_ENV_CAL_MMO = 11,
-  MCA_INS_PAG_FAU = 12,
-  MCA_LOA_PAG_FAU = 13,
+  MCA_BREAK_POINT = 0x3,
 
-  MCA_STO_PAG_FAU = 15,
-  MCA_SOF_CHE = 18,
-  MCA_HAR_ERR = 19,
+  MCA_LOA_ADD_MIS = 0x4,
+  MCA_LOA_ACC_FAU = 0x5,
+  MCA_STO_ADD_MIS = 0x6,
+  MCA_STO_ACC_FAU = 0x7,
+
+  MCA_ENV_CAL_UMO = 0x8,
+  MCA_ENV_CAL_SMO = 0x9,
+
+  MCA_ENV_CAL_MMO = 0xb,
+  MCA_INS_PAG_FAU = 0xc,
+  MCA_LOA_PAG_FAU = 0xd,
+
+  MCA_STO_PAG_FAU = 0xf,
+
+  MCA_SOF_CHE = 0x12,
+  MCA_HAR_ERR = 0x13,
 };
 
 // Supervisor cause register (scause) values after trap.
@@ -216,24 +220,27 @@ enum SCAUSE
   SCA_SUP_EXT_INT = 9 | (1 << (XLEN - 1)),
   SCA_COU_OVE_INT = 11 | (1 << (XLEN - 1)),
 
-  SCA_INS_ADD_MIS = 0,
-  SCA_INS_ACC_FAU = 1,
-  SCA_ILL_INS = 2,
-  SCA_BRE = 3,
-  SCA_LOA_ADD_MIS = 4,
-  SCA_LOA_ACC_FAU = 5,
-  SCA_STO_ADD_MIS = 6,
-  SCA_STO_ACC_FAU = 7,
-  SCA_ENV_CAL_UMO = 8,
-  SCA_ENV_CAL_SMO = 9,
+  SCA_INS_ADD_MIS = 0x0,
+  SCA_INS_ACC_FAU = 0x1,
+  SCA_ILLEGAL_INS = 0x2,
 
-  SCA_INS_PAG_FAU = 12,
-  SCA_LOA_PAG_FAU = 13,
+  SCA_BREAK_POINT = 0x3,
 
-  SCA_STO_PAG_FAU = 15,
+  SCA_LOA_ADD_MIS = 0x4,
+  SCA_LOA_ACC_FAU = 0x5,
+  SCA_STO_ADD_MIS = 0x6,
+  SCA_STO_ACC_FAU = 0x7,
 
-  SCA_SOF_CHE = 18,
-  SCA_HAR_ERR = 19,
+  SCA_ENV_CAL_UMO = 0x8,
+  SCA_ENV_CAL_SMO = 0x9,
+
+  SCA_INS_PAG_FAU = 0xc,
+  SCA_LOA_PAG_FAU = 0xd,
+
+  SCA_STO_PAG_FAU = 0xf,
+
+  SCA_SOF_CHE = 0x12,
+  SCA_HAR_ERR = 0x13,
 };
 
 #define CSR_SET__(REG, BIT_MASK) \

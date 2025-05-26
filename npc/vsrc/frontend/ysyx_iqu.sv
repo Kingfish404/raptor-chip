@@ -311,7 +311,7 @@ module ysyx_iqu #(
             rf_busy[rob_rd[rob_head][`YSYX_REG_LEN-1:0]] <= 0;
           end
         end
-        if ((rob_f_i[rob_head]) || (head_is_br && head_br_p_fail)) begin
+        if ((rob_f_i[rob_head]) || (head_is_br && head_br_p_fail) || (rob_trap[rob_head])) begin
           flush_pipeline <= 1;
         end
         if (rob_f_time[rob_head]) begin

@@ -73,9 +73,10 @@ module ysyx_bus #(
   typedef enum logic [3:0] {
     IF_A = 0,
     IF_D = 1,
-    LS_A = 2,
-    LS_R = 3,
-    LS_R_FLUSHED = 4
+    IF_B = 2,
+    LS_A = 3,
+    LS_R = 4,
+    LS_R_FLUSHED = 5
   } state_load_t;
   typedef enum logic [1:0] {
     LS_S_A = 0,
@@ -88,11 +89,13 @@ module ysyx_bus #(
   logic write_done;
 
   // lsu read
+  logic [XLEN-1:0] io_rdata;
   logic clint_en;
 
-  logic clint_arvalid, out_clint_arready;
-  logic [XLEN-1:0] out_clint_rdata;
-  logic out_clint_rvalid;
+  logic clint_arvalid, clint_arready;
+  logic [XLEN-1:0] clint_rdata;
+  logic [XLEN-1:0] rdata;
+  logic clint_rvalid;
 
   assign io_master_arid = 0;
 
@@ -118,10 +121,12 @@ module ysyx_bus #(
         end
         IF_D: begin
           if (io_master_rvalid) begin
-            begin
-              state_load <= IF_A;
-            end
+            state_load <= IF_B;
+            rdata <= io_master_rdata;
           end
+        end
+        IF_B: begin
+          state_load <= IF_A;
         end
         LS_A: begin
           if (io_master_arvalid && io_master_arready) begin
@@ -188,19 +193,14 @@ module ysyx_bus #(
   );
 
   // ifu read
-  assign out_ifu_rdata = ({XLEN{out_ifu_rvalid}} & (out_rdata));
-  assign out_ifu_rvalid = (state_load == IF_D || state_load == IF_A) && ((rvalid));
+  assign out_ifu_rdata = rdata;
+  assign out_ifu_rvalid = (state_load == IF_B);
 
   assign clint_en = (lsu_araddr == `YSYX_BUS_RTC_ADDR) || (lsu_araddr == `YSYX_BUS_RTC_ADDR_UP);
-  assign out_lsu_rdata = (
-    {XLEN{lsu_arvalid}} &
-    (({XLEN{clint_en}} & out_clint_rdata) |
-     ({XLEN{!clint_en}} & out_rdata))
-    );
+  assign out_lsu_rdata = clint_en ? clint_rdata : io_rdata;
   assign out_lsu_rvalid = (
     (state_load == LS_R || clint_arvalid) &&
-    (lsu_arvalid) &&
-    (rvalid || out_clint_rvalid));
+    (lsu_arvalid) && (rvalid || clint_rvalid));
 
   // lsu write
   assign out_lsu_wready = io_master_bvalid;
@@ -226,9 +226,7 @@ module ysyx_bus #(
 
   // logic [XLEN-1:0] io_rdata;
   // assign io_rdata = (io_master_araddr[2:2] == 1) ? io_master_rdata[63:32] : io_master_rdata[31:00];
-  logic [XLEN-1:0] io_rdata;
   assign io_rdata = io_master_rdata;
-  assign out_rdata = io_rdata;
   assign rvalid = io_master_rvalid;
   assign io_master_rready = (state_load == IF_D ||
             state_load == LS_R || state_load == LS_R_FLUSHED);
@@ -301,8 +299,8 @@ module ysyx_bus #(
       .reset(reset),
       .araddr(lsu_araddr),
       .arvalid(clint_arvalid),
-      .out_arready(out_clint_arready),
-      .out_rdata(out_clint_rdata),
-      .out_rvalid(out_clint_rvalid)
+      .out_arready(clint_arready),
+      .out_rdata(clint_rdata),
+      .out_rvalid(clint_rvalid)
   );
 endmodule

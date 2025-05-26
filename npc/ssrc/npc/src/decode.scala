@@ -108,12 +108,14 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
       ECALL_ -> BitPat("b" + "00 0 0" + "0???0"), // N
       EBREAK -> BitPat("b" + "00 0 0" + "0???0"), // N
 
-      FENCE____ -> BitPat("b" + "00 0 0" + "0???0"), // N
-      FENCE_TSO -> BitPat("b" + "00 0 0" + "0???0"), // N
-      FENCE_I__ -> BitPat("b" + "00 0 0" + "0???0"), // N
-      FENCE_TIM -> BitPat("b" + "00 0 0" + "0???0"), // N
+    // format: off
+   FENCE____ -> BitPat("b" + "00 0 0" + "0???0"), // N
+   FENCE_TSO -> BitPat("b" + "00 0 0" + "0???0"), // N
+   FENCE_I__ -> BitPat("b" + "00 0 0" + "0???0"), // N
+   FENCE_TIM -> BitPat("b" + "00 0 0" + "0???0"), // N
 
-      SFENCE_VM -> BitPat("b" + "00 0 0" + "0???0"), // N
+   SFENCE_VM -> BitPat("b" + "00 0 0" + "0???0"), // N
+    // format: on
 
       CSRRW_ -> BitPat("b" + "00 0 0" + "0???0"), // CSR
       CSRRS_ -> BitPat("b" + "00 0 0" + "0???0"), // CSR
@@ -132,17 +134,19 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
       REMU__ -> BitPat("b" + "00 0 0" + ALU_REMU), // R
 
       // TODO: add reservation for lr/sc
-      LR_W__    -> BitPat("b" + "10 0 0" + ATO_LR__), // R
-      SC_W__    -> BitPat("b" + "01 0 0" + ATO_SC__), // R
-      AMOSWAP_W -> BitPat("b" + "11 0 0" + ATO_SWAP), // R
-      AMOADD_W_ -> BitPat("b" + "11 0 0" + ATO_ADD_), // R
-      AMOXOR_W_ -> BitPat("b" + "11 0 0" + ATO_XOR_), // R
-      AMOAND_W_ -> BitPat("b" + "11 0 0" + ATO_AND_), // R
-      AMOOR_W__ -> BitPat("b" + "11 0 0" + ATO_OR__), // R
-      AMOMIN_W_ -> BitPat("b" + "11 0 0" + ATO_MIN_), // R
-      AMOMAX_W_ -> BitPat("b" + "11 0 0" + ATO_MAX_), // R
-      AMOMINU_W -> BitPat("b" + "11 0 0" + ATO_MINU), // R
-      AMOMAXU_W -> BitPat("b" + "11 0 0" + ATO_MAXU), // R
+      // format: off
+      LR_W__ -> BitPat("b" + "10 0 0" + ATO_LR__), // R
+      SC_W__ -> BitPat("b" + "01 0 0" + ATO_SC__), // R
+   AMOSWAP_W -> BitPat("b" + "11 0 0" + ATO_SWAP), // R
+   AMOADD_W_ -> BitPat("b" + "11 0 0" + ATO_ADD_), // R
+   AMOXOR_W_ -> BitPat("b" + "11 0 0" + ATO_XOR_), // R
+   AMOAND_W_ -> BitPat("b" + "11 0 0" + ATO_AND_), // R
+   AMOOR_W__ -> BitPat("b" + "11 0 0" + ATO_OR__), // R
+   AMOMIN_W_ -> BitPat("b" + "11 0 0" + ATO_MIN_), // R
+   AMOMAX_W_ -> BitPat("b" + "11 0 0" + ATO_MAX_), // R
+   AMOMINU_W -> BitPat("b" + "11 0 0" + ATO_MINU), // R
+   AMOMAXU_W -> BitPat("b" + "11 0 0" + ATO_MAXU), // R
+      // format: on
 
       MRET__ -> BitPat("b" + "00 0 0" + "0???0"), // N
       SRET__ -> BitPat("b" + "00 0 0" + "0???0"), // N

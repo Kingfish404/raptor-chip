@@ -1,5 +1,6 @@
 #include <common.h>
 
+// https://github.com/riscv-software-src/riscv-isa-sim/blob/master/riscv/ns16550.cc
 #define UART_QUEUE_SIZE 64
 
 #define UART_RX 0 /* In:  Receive buffer */
