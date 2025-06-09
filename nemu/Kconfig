@@ -54,7 +54,7 @@ choice
   prompt "Build target"
   default TARGET_NATIVE_ELF
 config TARGET_NATIVE_ELF
-  bool "Executable on Linux Native"
+  bool "Executable on Linux/macOS Native"
 config TARGET_SHARE
   bool "Shared object (used as REF for differential testing)"
 config TARGET_AM

@@ -20,6 +20,8 @@
 #include <memory/paddr.h>
 #include <memory/vaddr.h>
 
+extern CPU_state cpu;
+
 typedef struct
 {
   int state;
@@ -66,6 +68,10 @@ typedef struct
   word_t wdata;
   word_t wstrb;
   word_t len;
+
+  // for iomm
+  word_t iomm_addr;
+  word_t skip;
 
   // for itrace
   uint32_t *inst;
@@ -130,6 +136,7 @@ __EXPORT void difftest_regcpy(void *dut, bool direction)
     cpu.sr[CSR_MCAUSE] = *npc->mcause_;
     cpu.sr[CSR_MTVAL] = *npc->mtval__;
     cpu.sr[CSR_MIP] = *npc->mip____;
+    cpu.skip = 0; // reset skip flag
   }
   else if (direction == DIFFTEST_TO_DUT)
   {
@@ -165,6 +172,7 @@ __EXPORT void difftest_regcpy(void *dut, bool direction)
     npc->pwaddr = cpu.pwaddr;
     npc->wdata = cpu.wdata;
     npc->len = cpu.len;
+    npc->skip = cpu.skip;
   }
   // isa_reg_display();
   // vaddr_show(cpu.pc, 0x2c);

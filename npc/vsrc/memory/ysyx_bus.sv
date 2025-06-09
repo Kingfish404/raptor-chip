@@ -279,7 +279,7 @@ module ysyx_bus #(
       end
     end
     if (io_master_arvalid) begin
-      if ((io_master_araddr >= 'h10000000 && io_master_araddr <= 'h10000005) ||
+      if ((io_master_araddr >= 'h10000000 && io_master_araddr <= 'h10000010) ||
           (io_master_araddr >= 'h10001000 && io_master_araddr <= 'h10001fff) ||
           (io_master_araddr >= 'h10002000 && io_master_araddr <= 'h1000200f) ||
           (io_master_araddr >= 'h10011000 && io_master_araddr <= 'h10012000) ||

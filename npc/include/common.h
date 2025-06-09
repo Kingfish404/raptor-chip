@@ -145,6 +145,10 @@ typedef struct
   word_t wstrb;
   word_t len;
 
+  // for iomm
+  word_t iomm_addr;
+  word_t skip;
+
   // for itrace
   uint32_t *inst;
   word_t *cpc;

@@ -140,6 +140,20 @@ void init_mem()
 #endif
 }
 
+word_t ref_paddr_io(paddr_t addr)
+{
+  if ((addr >= 0x02000000 && addr < 0x020c0000) ||
+      (addr >= 0x0c000000 && addr < 0x0d000000) ||
+      (addr >= 0x10000000 && addr < 0x10000100) ||
+      (0))
+  {
+    cpu.iomm_addr = addr;
+    cpu.skip = 1; // skip the instruction
+    return 1;
+  }
+  return 0;
+}
+
 word_t paddr_read(paddr_t addr, int len)
 {
 #ifdef CONFIG_MTRACE
@@ -154,20 +168,14 @@ word_t paddr_read(paddr_t addr, int len)
           in_mrom(addr) ||
           in_flash(addr)))
     return pmem_read(addr, len);
+#if defined(CONFIG_TARGET_SHARE)
+  if (ref_paddr_io(addr))
+  {
+    return 0;
+  }
+#endif
   IFDEF(CONFIG_DEVICE, return mmio_read(addr, len));
   out_of_bound(addr);
-  return 0;
-}
-
-word_t ref_paddr_write(paddr_t addr)
-{
-  if ((addr >= 0x02000000 && addr < 0x020c0000) ||
-      (addr >= 0x0c000000 && addr < 0x0d000000) ||
-      (addr >= 0x10000000 && addr < 0x10000100) ||
-      (0))
-  {
-    return 1;
-  }
   return 0;
 }
 
@@ -183,12 +191,12 @@ void paddr_write(paddr_t addr, int len, word_t data)
     pmem_write(addr, len, data);
     return;
   }
-  IFDEF(CONFIG_DEVICE, mmio_write(addr, len, data); return);
 #if defined(CONFIG_TARGET_SHARE)
-  if (ref_paddr_write(addr))
+  if (ref_paddr_io(addr))
   {
     return;
   }
 #endif
+  IFDEF(CONFIG_DEVICE, mmio_write(addr, len, data); return);
   out_of_bound(addr);
 }

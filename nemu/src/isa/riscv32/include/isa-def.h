@@ -283,6 +283,9 @@ typedef struct
   word_t pwaddr;
   word_t wdata;
   word_t len;
+
+  word_t iomm_addr; // for iomm
+  word_t skip;      // for iomm
 } MUXDEF(CONFIG_RV64, riscv64_CPU_state, riscv32_CPU_state);
 
 // decode

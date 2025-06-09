@@ -19,7 +19,7 @@ endif
 INC_PATH ?= $(abspath ./include) $(abspath ./vsrc/include)
 
 ifeq ($(CONFIG_MODE), "soc")
-SOC_HOME  = $(abspath ./../ysyxSoC)
+SOC_HOME  = $(abspath $(YSYX_HOME)/third_party/kingfish404/ysyxSoC)
 INC_PATH += $(abspath $(SOC_HOME)/perip/uart16550/rtl) $(abspath $(SOC_HOME)/perip/spi/rtl)
 VTARGET=ysyxSoCFull
 SOC_DEFINE=-DYSYX_SOC
@@ -111,11 +111,11 @@ perf:
 	if [ ! -d $(AM_KERNEL) ]; then make AM_KERNEL; fi
 	make -s -C $(AM_KERNEL)/benchmarks/microbench/ ARCH=riscv32e-ysyxsoc FLAGS='-b -n' mainargs=test run
 
-YOSYS_OPENSTA = $(YSYX_HOME)/yosys-opensta
+YOSYS_OPENSTA = $(YSYX_HOME)/third_party/yosys-opensta
 
 YOSYS_OPENSTA:
-	git clone https://github.com/Kingfish404/yosys-opensta $(YSYX_HOME)/yosys-opensta
-	make -C $(YSYX_HOME)/yosys-opensta init init_opensta
+	git clone https://github.com/Kingfish404/yosys-opensta $(YOSYS_OPENSTA)
+	make -C $(YOSYS_OPENSTA) init init_opensta
 
 pack: $(VSRCS)
 	mkdir -p $(YSYX_HOME)/npc/build/pack
@@ -128,14 +128,14 @@ pack: $(VSRCS)
 
 sta:
 	echo $(MAKECMDGOALS)
-	if [ ! -d $(YSYX_HOME)/yosys-opensta ]; then make YOSYS_OPENSTA; fi
-	make -C $(YSYX_HOME)/yosys-opensta sta show \
+	if [ ! -d $(YOSYS_OPENSTA) ]; then make YOSYS_OPENSTA; fi
+	make -C $(YOSYS_OPENSTA) sta show \
 		DESIGN=ysyx \
 		RTL_FILES="$(VSRCS)" \
 		VERILOG_INCLUDE_DIRS="$(INC_PATH)"
 
 sta_local:
-	make -C $(YSYX_HOME)/yosys-opensta sta_local show \
+	make -C $(YOSYS_OPENSTA) sta_local show \
 	DESIGN=ysyx \
 	RTL_FILES="$(VSRCS)" \
 	VERILOG_INCLUDE_DIRS="$(INC_PATH)"

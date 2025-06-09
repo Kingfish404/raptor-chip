@@ -14,6 +14,9 @@ git clone https://github.com/riscv-software-src/opensbi
 make PLATFORM_RISCV_ISA=rv32ima_zicsr_zifencei_zicntr PLATFORM_RISCV_XLEN=32 PLATFORM=generic -j`nproc`
 # or build with Linux Image as payload
 make PLATFORM_RISCV_ISA=rv32ima_zicsr_zifencei_zicntr PLATFORM_RISCV_XLEN=32 PLATFORM=generic -j`nproc` FW_PAYLOAD_PATH=~/linux/linux-6.14.2/arch/riscv/boot/Image
+# or build using llvm + clang
+brew install llvm lld
+make LLVM=1 PLATFORM_RISCV_ISA=rv32ima_zicsr_zifencei_zicntr PLATFORM_RISCV_XLEN=32 PLATFORM=generic -j`nproc`
 ```
 
 Both `QEMU` and `Spike` device tree tables are supported and listed in `nemu/src/memory/rom`.

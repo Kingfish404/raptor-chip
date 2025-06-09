@@ -184,7 +184,6 @@ void difftest_step(vaddr_t pc)
     //        ", ref.pc: " FMT_WORD_NO_PREFIX ", npc.pc: " FMT_WORD_NO_PREFIX "\n",
     //        *ref_r.cpc, *npc.cpc, *ref_r.pc, *npc.pc);
     ref_difftest_regcpy(&npc, DIFFTEST_TO_REF);
-    ref_difftest_regcpy(&ref_r, DIFFTEST_TO_DUT);
     is_skip_ref = false;
     // printf("Skip end   at ref.cpc: " FMT_WORD_NO_PREFIX ", npc.cpc: " FMT_WORD_NO_PREFIX
     //        ", ref.pc: " FMT_WORD_NO_PREFIX ", npc.pc: " FMT_WORD_NO_PREFIX "\n",
@@ -239,7 +238,18 @@ void difftest_step(vaddr_t pc)
 
   ref_difftest_exec(1);
   ref_difftest_regcpy(&ref_r, DIFFTEST_TO_DUT);
-  checkregs(&ref_r, *npc.cpc);
+  if (ref_r.skip)
+  {
+    // printf("Skip instruction at ref.cpc: " FMT_WORD_NO_PREFIX ", npc.cpc: " FMT_WORD_NO_PREFIX
+    //        ", ref.pc: " FMT_WORD_NO_PREFIX ", npc.pc: " FMT_WORD_NO_PREFIX "\n",
+    //        *ref_r.cpc, *npc.cpc, *ref_r.pc, *npc.pc);
+    ref_difftest_regcpy(&npc, DIFFTEST_TO_REF);
+  }
+  else
+  {
+    checkregs(&ref_r, *npc.cpc);
+  }
+
   // printf("Diff test at ref.cpc: " FMT_WORD_NO_PREFIX ", npc.cpc: " FMT_WORD_NO_PREFIX "\n",
   //        *ref_r.cpc, *npc.cpc);
 }

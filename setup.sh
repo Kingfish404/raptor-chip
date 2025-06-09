@@ -46,8 +46,9 @@ apt_install() {
 
 repo_clone() {
   mkdir -p third_party/NJU-ProjectN
+  mkdir -p third_party/kingfish404
   git clone https://github.com/kingfish404/am-kernels
-  git clone https://github.com/Kingfish404/ysyxSoC
+  git clone https://github.com/Kingfish404/ysyxSoC third_party/kingfish404/ysyxSoC
   git clone https://github.com/NJU-ProjectN/nvboard third_party/NJU-ProjectN/nvboard
 
   mkdir -p third_party/riscv-software-src/
