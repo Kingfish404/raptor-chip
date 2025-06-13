@@ -347,7 +347,6 @@ module ysyx_exu #(
     ((rs_br_jmp[valid_idx]) || (rs_br_cond[valid_idx] && |rs_a[valid_idx])) ? addr_exu :
     (rs_pc[valid_idx] + 4));
   assign exu_wb_if.sys_retire = rs_system[valid_idx];
-  assign exu_wb_if.br_retire = rs_br_jmp[valid_idx] || rs_br_cond[valid_idx];
   assign exu_wb_if.ebreak = rs_ebreak[valid_idx];
 
   assign exu_wb_if.pc = rs_pc[valid_idx];

@@ -97,11 +97,12 @@ module ysyx_iqu #(
   rob_state_t rob_state[ROB_SIZE];
   logic [XLEN-1:0] rob_pc[ROB_SIZE];
   logic [XLEN-1:0] rob_pnpc[ROB_SIZE];
+  logic rob_jen[ROB_SIZE];
+  logic rob_ben[ROB_SIZE];
 
   logic [XLEN-1:0] rob_value[ROB_SIZE];
   logic [XLEN-1:0] rob_npc[ROB_SIZE];
   logic rob_sys[ROB_SIZE];
-  logic rob_br_retire[ROB_SIZE];
 
   logic rob_csr_wen[ROB_SIZE];
   logic [XLEN-1:0] rob_csr_wdata[ROB_SIZE];
@@ -269,6 +270,8 @@ module ysyx_iqu #(
 
         rob_pc[rob_tail] <= uoq_pc[uoq_tail];
         rob_pnpc[rob_tail] <= uoq_pnpc[uoq_tail];
+        rob_ben[rob_tail] <= uoq_ben[uoq_tail];
+        rob_jen[rob_tail] <= uoq_jen[uoq_tail];
 
         rob_f_i[rob_tail] <= uoq_f_i[uoq_tail];
         rob_f_time[rob_tail] <= uoq_f_time[uoq_tail];
@@ -284,7 +287,6 @@ module ysyx_iqu #(
         rob_value[wb_dest] <= exu_wb_if.result;
         rob_npc[wb_dest] <= exu_wb_if.npc;
         rob_sys[wb_dest] <= exu_wb_if.sys_retire;
-        rob_br_retire[wb_dest] <= exu_wb_if.br_retire;
         rob_ebreak[wb_dest] <= exu_wb_if.ebreak;
 
         rob_csr_wen[wb_dest] <= exu_wb_if.csr_wen;
@@ -321,7 +323,7 @@ module ysyx_iqu #(
     end
   end
 
-  assign head_is_br = (rob_br_retire[rob_head]);
+  assign head_is_br = (rob_jen[rob_head] || rob_ben[rob_head]);
   assign head_br_p_fail = rob_npc[rob_head] != rob_pnpc[rob_head];
   assign head_valid = rob_busy[rob_head] && rob_state[rob_head] == WB && !flush_pipeline;
 
@@ -332,6 +334,9 @@ module ysyx_iqu #(
   assign iqu_wbu_if.result = rob_value[rob_head];
   assign iqu_wbu_if.npc = rob_npc[rob_head];
   assign iqu_wbu_if.sys_retire = rob_sys[rob_head] && head_valid;
+  assign iqu_wbu_if.jen = rob_jen[rob_head];
+  assign iqu_wbu_if.ben = rob_ben[rob_head];
+
   assign iqu_wbu_if.ebreak = rob_ebreak[rob_head] && head_valid;
   assign iqu_wbu_if.fence_i = rob_f_i[rob_head] && head_valid;
   assign iqu_wbu_if.valid = head_valid;

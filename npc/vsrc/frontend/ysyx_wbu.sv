@@ -11,10 +11,14 @@ module ysyx_wbu #(
     input ebreak,
 
     input [XLEN-1:0] npc_wdata,
+    input jen,
+    input ben,
     input sys_retire,
 
     output [XLEN-1:0] out_npc,
     output [XLEN-1:0] out_rpc,
+    output out_jen,
+    output out_ben,
     output out_retire,
 
     input  prev_valid,
@@ -24,6 +28,7 @@ module ysyx_wbu #(
 );
   logic [31:0] inst_wbu, pc_wbu, npc_wbu;
 
+  logic jen_wbu, ben_wbu;
   logic retire, valid, ready;
 
   assign out_valid = valid;
@@ -31,6 +36,8 @@ module ysyx_wbu #(
 
   assign out_npc = npc_wbu;
   assign out_rpc = pc_wbu;
+  assign out_jen = jen_wbu;
+  assign out_ben = ben_wbu;
   assign out_retire = retire;
 
   always @(posedge clock) begin
@@ -42,14 +49,18 @@ module ysyx_wbu #(
         pc_wbu <= pc;
         inst_wbu <= inst;
         valid <= 1;
+        jen_wbu <= jen;
+        ben_wbu <= ben;
         retire <= sys_retire;
         npc_wbu <= npc_wdata;
         if (ebreak) begin
           `YSYX_DPI_C_NPC_EXU_EBREAK
         end
       end else begin
-        valid  <= 0;
-        retire <= 0;
+        valid   <= 0;
+        retire  <= 0;
+        jen_wbu <= 0;
+        ben_wbu <= 0;
       end
     end
   end
