@@ -71,12 +71,15 @@ module ysyx_bus #(
     input reset
 );
   typedef enum logic [3:0] {
-    IF_A = 0,
-    IF_D = 1,
-    IF_B = 2,
-    LS_A = 3,
-    LS_R = 4,
-    LS_R_FLUSHED = 5
+    IF_A,
+    IF_AS,
+    IF_D,
+    IF_B,
+    LS_A,
+    LS_AS,
+    LS_AS_FLUSHED,
+    LS_R,
+    LS_R_FLUSHED
   } state_load_t;
   typedef enum logic [1:0] {
     LS_S_A = 0,
@@ -97,6 +100,9 @@ module ysyx_bus #(
   logic [XLEN-1:0] rdata;
   logic clint_rvalid;
 
+  logic [XLEN-1:0] bus_araddr;
+  logic arburst;
+
   assign io_master_arid = 0;
 
   assign io_master_awburst = 0;
@@ -111,12 +117,18 @@ module ysyx_bus #(
     end else begin
       unique case (state_load)
         IF_A: begin
-          if (ifu_arvalid && ifu_ready) begin
-            if (io_master_arready) begin
-              state_load <= IF_D;
-            end
-          end else if ((!ifu_lock) && (lsu_arvalid)) begin
-            state_load <= LS_A;
+          if (ifu_arvalid) begin
+            bus_araddr <= ifu_araddr;
+            state_load <= IF_AS;
+          end else if (lsu_arvalid && !flush_pipeline) begin
+            bus_araddr <= lsu_araddr;
+            state_load <= LS_AS;
+          end
+        end
+        IF_AS: begin
+          if (io_master_arready) begin
+            state_load <= IF_D;
+            arburst <= ifu_sdram_arburst;
           end
         end
         IF_D: begin
@@ -126,17 +138,35 @@ module ysyx_bus #(
           end
         end
         IF_B: begin
-          state_load <= IF_A;
+          if (arburst) begin
+            state_load <= IF_D;
+            arburst <= 0;
+          end else begin
+            state_load <= IF_A;
+          end
         end
         LS_A: begin
-          if (io_master_arvalid && io_master_arready) begin
-            if (flush_pipeline) begin
-              state_load <= LS_R_FLUSHED;
-            end else begin
-              state_load <= LS_R;
-            end
+          if (lsu_arvalid && !flush_pipeline) begin
+            state_load <= LS_AS;
+            bus_araddr <= lsu_araddr;
           end else if (clint_en || ifu_arvalid) begin
             state_load <= IF_A;
+          end
+        end
+        LS_AS: begin
+          if (flush_pipeline) begin
+            if (io_master_arready) begin
+              state_load <= LS_R_FLUSHED;
+            end else begin
+              state_load <= LS_AS_FLUSHED;
+            end
+          end else if (io_master_arready) begin
+            state_load <= LS_R;
+          end
+        end
+        LS_AS_FLUSHED: begin
+          if (io_master_arready) begin
+            state_load <= LS_R_FLUSHED;
           end
         end
         LS_R: begin
@@ -166,11 +196,18 @@ module ysyx_bus #(
         LS_S_A: begin
           if (lsu_awvalid && io_master_awready) begin
             state_store <= LS_S_W;
-            write_done  <= 0;
+            if (io_master_wready) begin
+              write_done <= 1;
+            end else begin
+              write_done <= 0;
+            end
           end
         end
         LS_S_W: begin
-          if (io_master_wready) begin
+          if (io_master_bvalid) begin
+            state_store <= LS_S_A;
+            write_done  <= 0;
+          end else if (io_master_wready) begin
             write_done  <= 1;
             state_store <= LS_S_B;
           end
@@ -178,19 +215,13 @@ module ysyx_bus #(
         LS_S_B: begin
           if (io_master_bvalid) begin
             state_store <= LS_S_A;
+            write_done  <= 0;
           end
         end
         default: state_store <= LS_S_A;
       endcase
     end
   end
-
-  // read
-  logic [XLEN-1:0] bus_araddr;
-  assign bus_araddr = (
-    ({XLEN{state_load == LS_A}} & lsu_araddr) |
-    ({XLEN{state_load == IF_A}} & ifu_araddr)
-  );
 
   // ifu read
   assign out_ifu_rdata = rdata;
@@ -208,8 +239,8 @@ module ysyx_bus #(
   // io lsu read
   logic ifu_sdram_arburst;
   assign ifu_sdram_arburst = (
-    `YSYX_I_SDRAM_ARBURST && ifu_arvalid && (state_load == IF_A || state_load == IF_D) &&
-    (ifu_araddr >= 'ha0000000) && (ifu_araddr <= 'hc0000000));
+    `YSYX_I_SDRAM_ARBURST && (state_load == IF_AS || state_load == IF_D) &&
+    (bus_araddr >= 'ha0000000) && (bus_araddr <= 'hc0000000));
   assign io_master_arburst = ifu_sdram_arburst ? 2'b01 : 2'b00;
   assign io_master_arsize = state_load == IF_A ? 3'b010 : (
            ({3{lsu_rstrb == 8'h1}} & 3'b000) |
@@ -219,10 +250,8 @@ module ysyx_bus #(
          );
   assign io_master_arlen = ifu_sdram_arburst ? 'h1 : 'h0;
   assign io_master_araddr = bus_araddr;
-  assign io_master_arvalid = !reset && (
-           ((state_load == IF_A && ifu_ready) && ifu_arvalid) |
-           ((state_load == LS_A) && lsu_arvalid && !clint_en) // for new soc
-      );
+  assign io_master_arvalid = ((state_load == IF_AS)
+    || ((state_load == LS_AS || state_load == LS_AS_FLUSHED)));
 
   // logic [XLEN-1:0] io_rdata;
   // assign io_rdata = (io_master_araddr[2:2] == 1) ? io_master_rdata[63:32] : io_master_rdata[31:00];
@@ -253,12 +282,13 @@ module ysyx_bus #(
     (0)
   };
   assign io_master_wdata = wdata;
-  assign io_master_wvalid = (state_store == LS_S_W) && (lsu_wvalid) && !write_done;
+  assign io_master_wvalid = (((state_store == LS_S_A) && (lsu_awvalid)) || (state_store == LS_S_W))
+    && (lsu_wvalid) && !write_done;
   assign io_master_wlast = io_master_wvalid && io_master_wready;
   assign io_master_wstrb = {wstrb};
   assign wstrb = {lsu_wstrb[3:0] << awaddr_lo};
 
-  assign io_master_bready = (state_store == LS_S_B);
+  assign io_master_bready = (state_store == LS_S_B) || (state_store == LS_S_W);
 
   always @(posedge clock) begin
     `YSYX_ASSERT(io_master_rresp == 2'b00, "rresp == 2'b00");

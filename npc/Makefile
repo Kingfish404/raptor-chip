@@ -16,7 +16,9 @@ endif
 -include ./include/config/auto.conf
 -include ./include/config/auto.conf.cmd
 
-INC_PATH ?= $(abspath ./include) $(abspath ./vsrc/include)
+VSRC_PATH ?= $(abspath ./vsrc)
+
+INC_PATH ?= $(abspath ./include) $(abspath $(VSRC_PATH)/include)
 
 ifeq ($(CONFIG_MODE), "soc")
 SOC_HOME  = $(abspath $(YSYX_HOME)/third_party/kingfish404/ysyxSoC)
@@ -25,7 +27,7 @@ VTARGET=ysyxSoCFull
 SOC_DEFINE=-DYSYX_SOC
 SOC_SOURCE=$(shell find $(abspath $(SOC_HOME)/perip) -name "*.v") \
     $(SOC_HOME)/build/ysyxSoCFull.v
-INC_PATH +=	$(abspath ./vsrc/include/ysyxsoc)
+INC_PATH +=	$(abspath $(VSRC_PATH)/include/ysyxsoc)
 else
 ifeq ($(CONFIG_wrapBus), y)
 VTARGET=wrapSoC
@@ -33,7 +35,7 @@ else
 VTARGET=ysyxSoC
 endif
 SOC_SOURCE=
-INC_PATH +=	$(abspath ./vsrc/include/npc)
+INC_PATH +=	$(abspath $(VSRC_PATH)/include/npc)
 endif
 BUILD_DIR = ./build
 OBJ_DIR = $(BUILD_DIR)/obj_dir
@@ -52,9 +54,9 @@ include $(FILELIST_MK)
 $(shell mkdir -p $(BUILD_DIR))
 
 VSRCS = \
-	$(shell find $(abspath ./vsrc) -name "*.sv") \
+	$(shell find $(VSRC_PATH) -name "*.sv") \
 	$(SOC_SOURCE)
-VHSRCS = $(shell find $(abspath ./vsrc) -name "*.svh")
+VHSRCS = $(shell find $(VSRC_PATH) -name "*.svh")
 CSRCS = $(shell find $(abspath ./csrc) -name "*.c")
 CCSRCS = $(shell find $(abspath ./csrc) -name "*.cc" -or -name "*.cpp")
 CHSRCS = $(shell find $(abspath ./csrc) -name "*.h" -or -name "*.hpp")
@@ -77,9 +79,9 @@ CXXFLAGS += $(INCFLAGS) -DTOP_NAME="\"V$(VTARGET)\"" $(SOC_DEFINE) \
 	-DMROM_PATH=$(MROM_IMG)
 
 ifneq (,$(filter sta%,$(MAKECMDGOALS)))
-INC_PATH += $(abspath ./vsrc/include/dpic_mock)
+INC_PATH += $(abspath $(VSRC_PATH)/include/dpic_mock)
 else
-INC_PATH += $(abspath ./vsrc/include/dpic)
+INC_PATH += $(abspath $(VSRC_PATH)/include/dpic)
 endif
 
 $(BIN): $(VSRCS) $(VHSRCS) $(CCSRCS) $(CHSRCS) $(NVBOARD_ARCHIVE)
@@ -120,9 +122,9 @@ YOSYS_OPENSTA:
 pack: $(VSRCS)
 	mkdir -p $(YSYX_HOME)/npc/build/pack
 	cp -r $(VSRCS) $(YSYX_HOME)/npc/build/pack
-	cp -r $(abspath ./vsrc/include)/*.svh \
-		  $(abspath ./vsrc/include/dpic_mock)/*.svh \
-		  $(abspath ./vsrc/include/npc)/*.svh $(YSYX_HOME)/npc/build/pack
+	cp -r $(abspath $(VSRC_PATH)/include)/*.svh \
+		  $(abspath $(VSRC_PATH)/include/dpic_mock)/*.svh \
+		  $(abspath $(VSRC_PATH)/include/npc)/*.svh $(YSYX_HOME)/npc/build/pack
 	cp scripts/pack.sh $(YSYX_HOME)/npc/build/pack && chmod +x $(YSYX_HOME)/npc/build/pack/pack.sh
 	cd $(YSYX_HOME)/npc/build/pack && ./pack.sh
 

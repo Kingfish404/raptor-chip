@@ -1,4 +1,5 @@
 `include "ysyx.svh"
+`include "ysyx_dpi_c.svh"
 
 module ysyx_exu_csr #(
     parameter bit [7:0] XLEN = `YSYX_XLEN,

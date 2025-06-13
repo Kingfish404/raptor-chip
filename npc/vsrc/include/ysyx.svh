@@ -139,6 +139,7 @@
 `define ASSERT(signal, str) \
   if (signal == 'h0) begin \
     $write("ASSERTION FAILED in %m, %s\n", str); \
+    $finish; \
   end
 
 `endif
