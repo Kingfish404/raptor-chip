@@ -94,8 +94,8 @@ interface exu_pipe_if;
   logic [`YSYX_XLEN-1:0] cause;
 
   // store
-  logic [$clog2(`YSYX_RS_SIZE)-1:0] sq_idx;
-  logic store_commit;
+  logic [`YSYX_XLEN-1:0] sq_waddr;
+  logic [`YSYX_XLEN-1:0] sq_wdata;
 
   logic valid;
 
@@ -106,7 +106,7 @@ interface exu_pipe_if;
       input fence_i,
       input csr_wen, csr_wdata, csr_addr, ecall, mret,
       input trap, tval, cause,
-      input sq_idx, store_commit,
+      input sq_waddr, sq_wdata,
       input valid
   );
   modport out(
@@ -116,10 +116,24 @@ interface exu_pipe_if;
       output fence_i,
       output csr_wen, csr_wdata, csr_addr, ecall, mret,
       output trap, tval, cause,
-      output sq_idx, store_commit,
+      output sq_waddr, sq_wdata,
       output valid
   );
 endinterface
 // verilator lint_on DECLFILENAME
+
+interface cm_store_if;
+  logic store;
+  logic [4:0] alu;
+  logic [`YSYX_XLEN-1:0] sq_waddr;
+  logic [`YSYX_XLEN-1:0] sq_wdata;
+
+  logic valid;
+
+  modport in(input store, alu, sq_waddr, sq_wdata, input valid);
+
+  modport out(output store, alu, sq_waddr, sq_wdata, output valid);
+
+endinterface  //cm_store_if
 
 `endif

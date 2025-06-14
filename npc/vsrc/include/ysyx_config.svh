@@ -51,6 +51,7 @@
 
 `define YSYX_IQU_SIZE 4
 `define YSYX_RS_SIZE 4
+`define YSYX_SQ_SIZE 8
 `define YSYX_ROB_SIZE 4
 `define YSYX_L1D_LEN 8
 

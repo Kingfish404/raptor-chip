@@ -13,16 +13,11 @@ module ysyx_exu #(
     input flush_pipeline,
     // => lsu
     output logic out_ren,
-    output logic out_wen,
     output logic [XLEN-1:0] out_raddr,
-    output logic [XLEN-1:0] out_waddr,
     output [4:0] out_ralu,
-    output [4:0] out_walu,
-    output [XLEN-1:0] out_lsu_wdata,
     // <= lsu
     input [XLEN-1:0] lsu_rdata,
     input lsu_exu_rvalid,
-    input lsu_exu_wready,
     // => iqu & (wbu)
     exu_pipe_if.out exu_wb_if,
     // <= iqu (commit, cm)
@@ -75,40 +70,31 @@ module ysyx_exu #(
   logic rs_trap[RS_SIZE];
   logic [XLEN-1:0] rs_tval[RS_SIZE];
   logic [XLEN-1:0] rs_cause[RS_SIZE];
-  // === Revervation Station (RS) ===
-
-  // === Store Queue (SQ) ===
-  logic [RS_SIZE-1:0] sq_commit;
-  logic [RS_SIZE-1:0] sq_busy;
-  logic [4:0] sq_alu[RS_SIZE];
-  logic [XLEN-1:0] sq_addr[RS_SIZE];
-  logic [XLEN-1:0] sq_data[RS_SIZE];
-  logic [RS_SIZE-1:0] sq_atom;
-  // === Store Queue (SQ) ===
+  logic [RS_SIZE-1:0] rs_atom;
+  logic [XLEN-1:0] rs_data[RS_SIZE];
   logic rs_ready;
+  // === Revervation Station (RS) ===
 
   logic [$clog2(RS_SIZE)-1:0] free_idx;
   logic [$clog2(RS_SIZE)-1:0] valid_idx;
-  logic [$clog2(RS_SIZE)-1:0] mul_rs_index;
-  logic [$clog2(RS_SIZE)-1:0] sq_index;
-  logic [$clog2(RS_SIZE)-1:0] load_rs_index;
-  logic free_found, valid_found, mul_found, store_found, load_found;
+  logic [$clog2(RS_SIZE)-1:0] mul_rs_idx;
+  logic [$clog2(RS_SIZE)-1:0] load_rs_idx;
+  logic free_found, valid_found, mul_found, load_found;
 
   logic csr_illegal;
 
   always_comb begin
-    free_idx = 0;
-    valid_idx = 0;
-    mul_rs_index = 0;
-    sq_index = 0;
-    load_rs_index = 0;
     free_found = 0;
     valid_found = 0;
     mul_found = 0;
-    store_found = 0;
     load_found = 0;
+
+    free_idx = 0;
+    valid_idx = 0;
+    mul_rs_idx = 0;
+    load_rs_idx = 0;
     for (bit [XLEN-1:0] i = 0; i < RS_SIZE; i++) begin
-      if (rs_busy[i] == 0 && sq_busy[i] == 0 && !free_found) begin
+      if (rs_busy[i] == 0 && !free_found) begin
         free_idx   = i[$clog2(RS_SIZE)-1:0];
         free_found = 1;
       end
@@ -127,33 +113,23 @@ module ysyx_exu #(
     end
     for (bit [XLEN-1:0] i = 0; i < RS_SIZE; i++) begin
       if (rs_busy[i] == 1 && rs_alu[i][4:4] == 1 && !mul_found) begin
-        mul_rs_index = i[$clog2(RS_SIZE)-1:0];
-        mul_found = 1;
+        mul_rs_idx = i[$clog2(RS_SIZE)-1:0];
+        mul_found  = 1;
       end
     end
     for (bit [XLEN-1:0] i = 0; i < RS_SIZE; i++) begin
       if (rs_busy[i] == 1 && rs_ren[i] == 1 && !rs_ren_ready[i] && !load_found) begin
-        load_rs_index = i[$clog2(RS_SIZE)-1:0];
-        load_found = 1;
-      end
-    end
-    for (bit [XLEN-1:0] i = 0; i < RS_SIZE; i++) begin
-      if (sq_busy[i] == 1 && !store_found) begin
-        sq_index = i[$clog2(RS_SIZE)-1:0];
-        store_found = 1;
+        load_rs_idx = i[$clog2(RS_SIZE)-1:0];
+        load_found  = 1;
       end
     end
   end
 
-  assign out_ralu = sq_atom[load_rs_index] ? `YSYX_ALU_LW__ : rs_alu[load_rs_index];
-  assign out_walu = sq_atom[sq_index] ? `YSYX_WSTRB_SW : sq_alu[sq_index];
-  assign out_ren = (load_found) && (rs_qj[load_rs_index] == 0 && rs_qk[load_rs_index] == 0);
-  assign out_wen = (store_found) && sq_commit[sq_index] && sq_busy[sq_index];
-  assign out_raddr = rs_vj[load_rs_index] + rs_imm[load_rs_index];
-  assign out_waddr = sq_addr[sq_index];
-  assign out_lsu_wdata = sq_data[sq_index];
+  assign out_ralu  = rs_atom[load_rs_idx] ? `YSYX_ALU_LW__ : rs_alu[load_rs_idx];
+  assign out_ren   = (load_found) && rs_qj[load_rs_idx] == 0 && rs_qk[load_rs_idx] == 0;
+  assign out_raddr = rs_vj[load_rs_idx] + rs_imm[load_rs_idx];
 
-  assign rs_ready = !(&rs_busy) && !(store_found) && !(|rs_ren) && !(mul_found && idu_if.alu[4:4]);
+  assign rs_ready  = free_found && !(|rs_wen) && !(|rs_ren) && !(mul_found && idu_if.alu[4:4]);
   assign out_ready = rs_ready;
 
   // ALU for each RS
@@ -177,17 +153,7 @@ module ysyx_exu #(
       rs_busy <= 0;
       rs_busy <= 0;
       muling  <= 0;
-      sq_busy <= 0;
     end else begin
-      if (!sq_commit[iqu_cm_if.sq_idx] && sq_busy[iqu_cm_if.sq_idx]) begin
-        sq_commit[iqu_cm_if.sq_idx] <= iqu_cm_if.store_commit;
-      end
-      if (lsu_exu_wready && sq_busy[sq_index]) begin
-        // Store Commit
-        sq_busy[sq_index]   <= 0;
-        sq_commit[sq_index] <= 0;
-        sq_atom[sq_index]   <= 0;
-      end
       for (bit [XLEN-1:0] i = 0; i < RS_SIZE; i++) begin
         if (free_found && i[$clog2(RS_SIZE)-1:0] == free_idx) begin
           if (prev_valid && rs_ready) begin
@@ -203,10 +169,7 @@ module ysyx_exu #(
             rs_dest[free_idx] <= idu_if.dest;
 
             rs_wen[free_idx] <= idu_if.wen;
-            sq_alu[free_idx] <= idu_if.alu;
-            sq_commit[free_idx] <= 0;
-            sq_busy[free_idx] <= idu_if.wen;
-            sq_atom[free_idx] <= idu_if.atom;
+            rs_atom[free_idx] <= idu_if.atom;
 
             rs_ren[free_idx] <= idu_if.ren;
             rs_ren_ready[free_idx] <= 0;
@@ -231,10 +194,12 @@ module ysyx_exu #(
           end
         end else if (rs_busy[i] == 1 && rs_qj[i] == 0 && rs_qk[i] == 0) begin
           // Load
-          if (lsu_exu_rvalid && rs_ren[i]) begin
+          if (rs_ren[i]) begin
             // Load result is ready
-            rs_ren_ready[i] <= 1;
-            rs_ren_data[i]  <= lsu_rdata;
+            if (lsu_exu_rvalid) begin
+              rs_ren_ready[i] <= 1;
+              rs_ren_data[i]  <= lsu_rdata;
+            end
           end
           // Mul
           if (rs_alu[i][4:4] == 1) begin
@@ -251,57 +216,12 @@ module ysyx_exu #(
           end
           // Write back
           if (valid_found && valid_idx == i[$clog2(RS_SIZE)-1:0]) begin
-            // Store Ready
-            if (rs_wen[i] == 1) begin
-              sq_addr[i] <= rs_vj[i] + rs_imm[i];
-              if (sq_atom[i]) begin
-                case (rs_alu[i])
-                  // TODO: add reservation for lr/sc
-                  `YSYX_ATO_LR__: begin
-                  end
-                  `YSYX_ATO_SC__: begin
-                    sq_data[i] <= rs_vk[i];
-                  end
-                  `YSYX_ATO_SWAP: begin
-                    sq_data[i] <= rs_vk[i];
-                  end
-                  `YSYX_ATO_ADD_: begin
-                    sq_data[i] <= rs_vk[i] + rs_ren_data[i];
-                  end
-                  `YSYX_ATO_XOR_: begin
-                    sq_data[i] <= rs_vk[i] ^ rs_ren_data[i];
-                  end
-                  `YSYX_ATO_AND_: begin
-                    sq_data[i] <= rs_vk[i] & rs_ren_data[i];
-                  end
-                  `YSYX_ATO_OR__: begin
-                    sq_data[i] <= rs_vk[i] | rs_ren_data[i];
-                  end
-                  `YSYX_ATO_MIN_: begin
-                    sq_data[i] <= rs_ren_data[i] < rs_vk[i] ? rs_ren_data[i] : rs_vk[i];
-                  end
-                  `YSYX_ATO_MAX_: begin
-                    sq_data[i] <= rs_ren_data[i] > rs_vk[i] ? rs_ren_data[i] : rs_vk[i];
-                  end
-                  `YSYX_ATO_MINU: begin
-                    sq_data[i] <= rs_ren_data[i] < rs_vk[i] ? rs_vk[i] : rs_ren_data[i];
-                  end
-                  `YSYX_ATO_MAXU: begin
-                    sq_data[i] <= rs_ren_data[i] > rs_vk[i] ? rs_vk[i] : rs_ren_data[i];
-                  end
-                  default: begin
-                  end
-                endcase
-              end else begin
-                sq_data[i] <= rs_vk[i];
-              end
-              rs_wen[i] <= 0;
-            end
             // Clear RS
             rs_busy[i] <= 0;
             rs_alu[i] <= 0;
             rs_inst[i] <= 0;
             rs_ren[i] <= 0;
+            rs_wen[i] <= 0;
             rs_ren_ready[i] <= 0;
             rs_mul_valid[i] <= 0;
             for (bit [XLEN-1:0] j = 0; j < RS_SIZE; j++) begin
@@ -321,6 +241,54 @@ module ysyx_exu #(
     end
   end
 
+  always_comb begin
+    for (bit [XLEN-1:0] i = 0; i < RS_SIZE; i++) begin
+      if (rs_atom[i]) begin
+        case (rs_alu[i])
+          // TODO: add reservation for lr/sc
+          `YSYX_ATO_LR__: begin
+            rs_data[i] = 'b0;
+          end
+          `YSYX_ATO_SC__: begin
+            rs_data[i] = rs_vk[i];
+          end
+          `YSYX_ATO_SWAP: begin
+            rs_data[i] = rs_vk[i];
+          end
+          `YSYX_ATO_ADD_: begin
+            rs_data[i] = rs_vk[i] + rs_ren_data[i];
+          end
+          `YSYX_ATO_XOR_: begin
+            rs_data[i] = rs_vk[i] ^ rs_ren_data[i];
+          end
+          `YSYX_ATO_AND_: begin
+            rs_data[i] = rs_vk[i] & rs_ren_data[i];
+          end
+          `YSYX_ATO_OR__: begin
+            rs_data[i] = rs_vk[i] | rs_ren_data[i];
+          end
+          `YSYX_ATO_MIN_: begin
+            rs_data[i] = rs_ren_data[i] < rs_vk[i] ? rs_ren_data[i] : rs_vk[i];
+          end
+          `YSYX_ATO_MAX_: begin
+            rs_data[i] = rs_ren_data[i] > rs_vk[i] ? rs_ren_data[i] : rs_vk[i];
+          end
+          `YSYX_ATO_MINU: begin
+            rs_data[i] = rs_ren_data[i] < rs_vk[i] ? rs_vk[i] : rs_ren_data[i];
+          end
+          `YSYX_ATO_MAXU: begin
+            rs_data[i] = rs_ren_data[i] > rs_vk[i] ? rs_vk[i] : rs_ren_data[i];
+          end
+          default: begin
+            rs_data[i] = 'b0;
+          end
+        endcase
+      end else begin
+        rs_data[i] = rs_vk[i];
+      end
+    end
+  end
+
   // Branch
   assign addr_exu = ((rs_jump[valid_idx] ? rs_vj[valid_idx] :
      rs_pc[valid_idx]) + rs_imm[valid_idx]) & ~'b1;
@@ -332,7 +300,7 @@ module ysyx_exu #(
       rs_system[valid_idx] ? csr_rdata :
       rs_ren_ready[valid_idx] ? rs_ren_data[valid_idx] :
       rs_jen[valid_idx] ? rs_pc[valid_idx] + 4 :
-      sq_atom[valid_idx] &&  rs_alu[valid_idx] == `YSYX_ATO_SC__ ? 0 :
+      rs_atom[valid_idx] && rs_alu[valid_idx] == `YSYX_ATO_SC__ ? 0 :
       rs_a[valid_idx]
     ) :
     rs_mul_a[valid_idx]
@@ -362,18 +330,20 @@ module ysyx_exu #(
   assign exu_wb_if.tval = rs_tval[valid_idx];
   assign exu_wb_if.cause = rs_cause[valid_idx];
 
+  assign exu_wb_if.sq_waddr = rs_vj[valid_idx] + rs_imm[valid_idx];
+  assign exu_wb_if.sq_wdata = rs_data[valid_idx];
   assign exu_wb_if.valid = valid_found;
 
 `ifdef YSYX_M_EXTENSION
   // alu for M Extension
   ysyx_exu_mul mul (
       .clock(clock),
-      .in_a(rs_vj[mul_rs_index]),
-      .in_b(rs_vk[mul_rs_index]),
-      .in_op(rs_alu[mul_rs_index]),
+      .in_a(rs_vj[mul_rs_idx]),
+      .in_b(rs_vk[mul_rs_idx]),
+      .in_op(rs_alu[mul_rs_idx]),
       .in_valid(mul_found && !muling &&
-         rs_mul_valid[mul_rs_index] == 0 &&
-         rs_qj[mul_rs_index] == 0 && rs_qk[mul_rs_index] == 0),
+         rs_mul_valid[mul_rs_idx] == 0 &&
+         rs_qj[mul_rs_idx] == 0 && rs_qk[mul_rs_idx] == 0),
       .out_r(reg_wdata_mul),
       .out_valid(mul_valid)
   );

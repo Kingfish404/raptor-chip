@@ -43,13 +43,11 @@ module ysyx_ifu #(
   logic [XLEN-1:0] bpu_npc;
   logic ifu_sys_hazard;
 
-  logic [XLEN-1:0] btb;
-  logic [XLEN-1:0] bpu_btb[BTB_SIZE];
   logic [2:0] bpu_pht[PHT_SIZE];
+  logic [XLEN-1:0] bpu_btb[BTB_SIZE];
   logic [BTB_SIZE-1:0] bpu_btb_v;
   logic [$clog2(PHT_SIZE)-1:0] pht_rpc_idx, pht_idx;
   logic [$clog2(BTB_SIZE)-1:0] rpc_idx, btb_idx;
-  logic speculation, ifu_b_speculation;
 
   logic ifu_hazard;
   logic [6:0] opcode;
@@ -83,25 +81,21 @@ module ysyx_ifu #(
     {XLEN - 21{l1_inst[31]}}, {l1_inst[31:31]}, l1_inst[19:12], l1_inst[20], l1_inst[30:21], 1'b0
   };
 
+  // bpu
   assign bpu_npc = is_jalr && bpu_btb_v[btb_idx]
-    ? btb
+    ? bpu_btb[btb_idx]
     : is_b && (bpu_pht[pht_idx][2:2])
       ? pc_ifu + imm_b
       :  (is_jal)
         ? pc_ifu + imm_j
         : pc_ifu + 4;
-  assign btb = bpu_btb[btb_idx];
   assign pht_rpc_idx = rpc[$clog2(PHT_SIZE)-1+2:2];
   assign pht_idx = pc_ifu[$clog2(PHT_SIZE)-1+2:2];
   assign rpc_idx = rpc[$clog2(BTB_SIZE)-1+2:2];
   assign btb_idx = pc_ifu[$clog2(BTB_SIZE)-1+2:2];
 
-  assign out_pc = pc_ifu;
-  assign out_pnpc = bpu_npc;
   always @(posedge clock) begin
     if (reset) begin
-      pc_ifu <= `YSYX_PC_INIT;
-      ifu_sys_hazard <= 0;
       for (int i = 0; i < PHT_SIZE; i++) begin
         bpu_pht[i] <= 0;
       end
@@ -131,6 +125,17 @@ module ysyx_ifu #(
           end
         end
       end
+    end
+  end
+
+  // ifu
+  assign out_pc   = pc_ifu;
+  assign out_pnpc = bpu_npc;
+  always @(posedge clock) begin
+    if (reset) begin
+      pc_ifu <= `YSYX_PC_INIT;
+      ifu_sys_hazard <= 0;
+    end else begin
       if (flush_pipeline) begin
         pc_ifu <= npc;
         ifu_sys_hazard <= 0;

@@ -26,14 +26,17 @@ void perf_sample_per_cycle()
     return;
   }
   pmu.active_cycle++;
-  bool speculation = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, ifu__DOT__speculation));
+  bool b = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, iqu__DOT__head_ben));
+  bool j = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, iqu__DOT__head_jen));
   bool wb_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, iqu__DOT__head_valid));
   if (wb_valid)
   {
-    bool is_br = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, iqu__DOT__head_is_br));
+    bool is_br = b || j;
     bool br_predict_fail = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, iqu__DOT__head_br_p_fail));
     pmu.bpu_cnt += is_br ? 1 : 0;
     pmu.bpu_fail_cnt += is_br && br_predict_fail ? 1 : 0;
+    pmu.bpu_b_fail += br_predict_fail && b ? 1 : 0;
+    pmu.bpu_j_fail += br_predict_fail && j ? 1 : 0;
   }
   bool ifu_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, ifu__DOT__l1i_cache__DOT__hit));
   bool ifu_sys_hazard = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, ifu__DOT__ifu_sys_hazard));
@@ -42,8 +45,8 @@ void perf_sample_per_cycle()
 
   bool iqu_ready = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, iqu_ready));
   bool exu_rs_ready = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, exu__DOT__rs_ready));
-  bool ren = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, exu_ren));
-  bool wen = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, exu_wen));
+  bool ren = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, exu__DOT__load_found));
+  bool wen = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, lsu__DOT__wen));
   uint8_t l1i_state = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, ifu__DOT__l1i_cache__DOT__l1i_state));
   static uint32_t ifu_pc = 0;
   if (ifu_valid && idu_ready)
@@ -132,7 +135,7 @@ void perf()
 {
   Log("======== Instruction Analysis ========");
   uint64_t time_clint = *(uint64_t *)&(CONCAT(VERILOG_PREFIX, bus__DOT__clint__DOT__mtime));
-  uint64_t time_clint_us = time_clint / 2;
+  long long int time_clint_us = time_clint / 2;
   float IPC = (1.0 * pmu.instr_cnt / pmu.active_cycle);
   float MAIN_IPC = (1.0 * (pmu.instr_cnt - main_inst_cnt) / (pmu.active_cycle - main_cycle_cnt));
   float MIPS = (double)((pmu.instr_cnt / 1e6) / (time_clint_us / 1e6));
@@ -178,9 +181,10 @@ void perf()
   Log(FMT_BLUE("IFU Avg Cycle: %2.1f, LSU Avg Cycle: %2.1f"),
       (1.0 * pmu.ifu_stall_cycle) / (pmu.ifu_fetch_cnt + 1),
       (1.0 * pmu.lsu_stall_cycle) / (pmu.lsu_load_cnt + 1));
-  Log("BPU Success: %lld, Fail: %lld, Rate: %2.1f%%",
+  Log("BPU Success: %lld, Fail: %lld, Rate: %2.1f%% (b: %lld, j: %lld)",
       pmu.bpu_cnt - pmu.bpu_fail_cnt, pmu.bpu_fail_cnt,
-      percentage(pmu.bpu_cnt - pmu.bpu_fail_cnt, pmu.bpu_cnt));
+      percentage(pmu.bpu_cnt - pmu.bpu_fail_cnt, pmu.bpu_cnt),
+      pmu.bpu_b_fail, pmu.bpu_j_fail);
   Log(FMT_BLUE("ifu_fetch_cnt: %lld, instr_cnt: %lld"), pmu.ifu_fetch_cnt, pmu.instr_cnt);
   // assert(pmu.ifu_fetch_cnt == pmu.instr_cnt);
   assert(

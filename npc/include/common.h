@@ -161,37 +161,39 @@ typedef struct
 typedef struct
 {
   // for microarch
-  uint64_t active_cycle;
-  uint64_t instr_cnt;
-  uint64_t ifu_fetch_cnt;
-  uint64_t ifu_stall_cycle;
+  long long int active_cycle;
+  long long int instr_cnt;
+  long long int ifu_fetch_cnt;
+  long long int ifu_stall_cycle;
 
-  uint64_t ifu_sys_hazard_cycle;
-  uint64_t iqu_hazard_cycle;
+  long long int ifu_sys_hazard_cycle;
+  long long int iqu_hazard_cycle;
 
-  uint64_t lsu_load_cnt;
-  uint64_t lsu_stall_cycle;
-  uint64_t exu_stall_cycle;
+  long long int lsu_load_cnt;
+  long long int lsu_stall_cycle;
+  long long int exu_stall_cycle;
 
   // bpu
-  uint64_t bpu_cnt;
-  uint64_t bpu_fail_cnt;
+  long long int bpu_cnt;
+  long long int bpu_fail_cnt;
+  long long int bpu_b_fail;
+  long long int bpu_j_fail;
 
   // for inst
-  uint64_t ld_inst_cnt;
-  uint64_t st_inst_cnt;
-  uint64_t alu_inst_cnt;
-  uint64_t b_inst_cnt;
-  uint64_t jal_inst_cnt;
-  uint64_t jalr_inst_cnt;
-  uint64_t csr_inst_cnt;
-  uint64_t other_inst_cnt;
+  long long int ld_inst_cnt;
+  long long int st_inst_cnt;
+  long long int alu_inst_cnt;
+  long long int b_inst_cnt;
+  long long int jal_inst_cnt;
+  long long int jalr_inst_cnt;
+  long long int csr_inst_cnt;
+  long long int other_inst_cnt;
 
   // for cache
-  uint64_t l1i_cache_hit_cnt;
-  uint64_t l1i_cache_hit_cycle;
-  uint64_t l1i_cache_miss_cnt;
-  uint64_t l1i_cache_miss_cycle;
+  long long int l1i_cache_hit_cnt;
+  long long int l1i_cache_hit_cycle;
+  long long int l1i_cache_miss_cnt;
+  long long int l1i_cache_miss_cycle;
 } PMUState;
 
 #define panic(format, ...) Assert(0, format, ##__VA_ARGS__)

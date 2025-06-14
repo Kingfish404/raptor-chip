@@ -142,6 +142,7 @@ module ysyx #(
   idu_pipe_if iqu_exu_if ();
   exu_pipe_if iqu_wbu_if ();
   exu_pipe_if iqu_cm_if ();
+  cm_store_if cm_store ();
   logic iqu_valid, iqu_ready;
   logic [4:0] iqu_rs1, iqu_rs2;
   logic flush_pipeline;
@@ -150,6 +151,7 @@ module ysyx #(
   // EXU out
   exu_pipe_if exu_wb_if ();
   logic exu_ready;
+  logic sq_ready;
   // EXU out lsu
   logic exu_ren, exu_wen;
   logic [XLEN-1:0] exu_raddr;
@@ -171,7 +173,6 @@ module ysyx #(
   // lsu out
   logic [XLEN-1:0] lsu_rdata;
   logic lsu_exu_rvalid;
-  logic lsu_exu_wready;
   // lsu out load
   logic [XLEN-1:0] lsu_araddr;
   logic lsu_arvalid;
@@ -260,12 +261,14 @@ module ysyx #(
 
       // => exu (commit)
       .iqu_cm_if(iqu_cm_if),
+      .cm_store (cm_store),
 
       .out_flush_pipeline(flush_pipeline),
       .out_fence_time(fence_time),
 
       .prev_valid(idu_valid),
       .next_ready(exu_ready),
+      .sq_ready  (sq_ready),
       .out_valid (iqu_valid),
       .out_ready (iqu_ready),
 
@@ -282,16 +285,11 @@ module ysyx #(
 
       // => lsu
       .out_ren(exu_ren),
-      .out_wen(exu_wen),
       .out_raddr(exu_raddr),
-      .out_waddr(exu_waddr),
       .out_ralu(exu_ralu),
-      .out_walu(exu_walu),
-      .out_lsu_wdata(exu_lsu_wdata),
       // <= lsu
       .lsu_rdata(lsu_rdata),
       .lsu_exu_rvalid(lsu_exu_rvalid),
-      .lsu_exu_wready(lsu_exu_wready),
 
       // => iqu & (wbu)
       .exu_wb_if(exu_wb_if),
@@ -349,20 +347,19 @@ module ysyx #(
   ysyx_lsu lsu (
       .clock(clock),
 
+      .flush_pipeline(flush_pipeline),
       .fence_time(fence_time),
 
       // from exu
-      .raddr(exu_raddr),
-      .waddr(exu_waddr),
-      .ralu(exu_ralu),
-      .walu(exu_walu),
       .ren(exu_ren),
-      .wen(exu_wen),
-      .wdata(exu_lsu_wdata),
+      .raddr(exu_raddr),
+      .ralu(exu_ralu),
       // to exu
       .out_rdata(lsu_rdata),
       .out_rvalid(lsu_exu_rvalid),
-      .out_wready(lsu_exu_wready),
+
+      .cm_store(cm_store),
+      .out_sq_ready(sq_ready),
 
       // to-from bus load
       .out_lsu_araddr(lsu_araddr),

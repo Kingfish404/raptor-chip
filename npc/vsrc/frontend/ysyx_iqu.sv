@@ -30,6 +30,8 @@ module ysyx_iqu #(
 
     // => exu (commit)
     exu_pipe_if.out iqu_cm_if,
+    // => lsu (commit)
+    cm_store_if.out cm_store,
 
     // pipeline
     output logic out_flush_pipeline,
@@ -37,6 +39,7 @@ module ysyx_iqu #(
 
     input prev_valid,
     input next_ready,
+    input sq_ready,
     output logic out_valid,
     output logic out_ready
 );
@@ -119,8 +122,10 @@ module ysyx_iqu #(
   logic rob_f_i[ROB_SIZE];
   logic rob_f_time[ROB_SIZE];
 
-  logic [$clog2(RS_SIZE)-1:0] rob_rs_idx[ROB_SIZE];
   logic rob_store[ROB_SIZE];
+  logic [4:0] rob_alu[ROB_SIZE];
+  logic [XLEN-1:0] rob_sq_waddr[ROB_SIZE];
+  logic [XLEN-1:0] rob_sq_wdata[ROB_SIZE];
   // === re-order buffer (ROB) ===
 
   // === Register File (RF) status ===
@@ -128,7 +133,8 @@ module ysyx_iqu #(
   logic [REG_NUM-1:0] rf_busy;
   // === Register File (RF) status ===
 
-  logic head_is_br;
+  logic head_ben;
+  logic head_jen;
   logic head_br_p_fail;
   logic head_valid;
   logic flush_pipeline;
@@ -136,7 +142,7 @@ module ysyx_iqu #(
   assign out_flush_pipeline = flush_pipeline;
   assign out_fence_time = fence_time;
 
-  assign dispatch_ready = (next_ready && uoq_valid[uoq_tail] && rob_busy[rob_tail] == 0);
+  assign dispatch_ready = (next_ready & sq_ready && uoq_valid[uoq_tail] && rob_busy[rob_tail] == 0);
 
   assign out_valid = uoq_valid[uoq_tail] && (rob_busy[rob_tail] == 0);
   assign out_ready = uoq_valid[uoq_head] == 0;
@@ -276,8 +282,8 @@ module ysyx_iqu #(
         rob_f_i[rob_tail] <= uoq_f_i[uoq_tail];
         rob_f_time[rob_tail] <= uoq_f_time[uoq_tail];
 
-        rob_rs_idx[rob_tail] <= exu_wb_if.rs_idx;
         rob_store[rob_tail] <= uoq_wen[uoq_tail];
+        rob_alu[rob_tail] <= uoq_atom[uoq_tail] ? `YSYX_WSTRB_SW : uoq_alu[uoq_tail];
       end
       // Write back
       if (exu_wb_if.valid) begin
@@ -298,22 +304,28 @@ module ysyx_iqu #(
         rob_trap[wb_dest] <= exu_wb_if.trap;
         rob_tval[wb_dest] <= exu_wb_if.tval;
         rob_cause[wb_dest] <= exu_wb_if.cause;
+        rob_sq_waddr[wb_dest] <= exu_wb_if.sq_waddr;
+        rob_sq_wdata[wb_dest] <= exu_wb_if.sq_wdata;
       end
       // Commit
-      if (rob_busy[rob_head] && rob_state[rob_head] == WB) begin
+      if (head_valid) begin
         // Write result and commit
         rob_head <= rob_head + 1;
 
         rob_busy[rob_head] <= 0;
         rob_inst[rob_head] <= 0;
         rob_state[rob_head] <= CM;
+
+        rob_store[rob_head] <= 0;
+        rob_sq_waddr[rob_head] <= 0;
+        rob_sq_wdata[rob_head] <= 0;
         if (rf_reorder[rob_rd[rob_head][`YSYX_REG_LEN-1:0]] == rob_head) begin
           if (dispatch_ready && (uoq_rd[uoq_tail] == rob_rd[rob_head])) begin
           end else begin
             rf_busy[rob_rd[rob_head][`YSYX_REG_LEN-1:0]] <= 0;
           end
         end
-        if ((rob_f_i[rob_head]) || (head_is_br && head_br_p_fail) || (rob_trap[rob_head])) begin
+        if ((rob_f_i[rob_head]) || ((head_ben || head_jen) && head_br_p_fail) || (rob_trap[rob_head])) begin
           flush_pipeline <= 1;
         end
         if (rob_f_time[rob_head]) begin
@@ -323,9 +335,11 @@ module ysyx_iqu #(
     end
   end
 
-  assign head_is_br = (rob_jen[rob_head] || rob_ben[rob_head]);
+  assign head_ben = (rob_ben[rob_head]);
+  assign head_jen = (rob_jen[rob_head]);
   assign head_br_p_fail = rob_npc[rob_head] != rob_pnpc[rob_head];
-  assign head_valid = rob_busy[rob_head] && rob_state[rob_head] == WB && !flush_pipeline;
+  assign head_valid = rob_busy[rob_head] && rob_state[rob_head] == WB
+        && (sq_ready || !rob_store[rob_head]) && !flush_pipeline;
 
   assign iqu_wbu_if.rd = rob_rd[rob_head];
   assign iqu_wbu_if.inst = rob_inst[rob_head];
@@ -353,8 +367,11 @@ module ysyx_iqu #(
   assign iqu_cm_if.tval = rob_tval[rob_head];
   assign iqu_cm_if.cause = rob_cause[rob_head];
 
-  assign iqu_cm_if.sq_idx = rob_rs_idx[rob_head];
-  assign iqu_cm_if.store_commit = head_valid && rob_store[rob_head] && !flush_pipeline;
+  assign cm_store.store = rob_store[rob_head];
+  assign cm_store.alu = rob_alu[rob_head];
+  assign cm_store.sq_waddr = rob_sq_waddr[rob_head];
+  assign cm_store.sq_wdata = rob_sq_wdata[rob_head];
+  assign cm_store.valid = head_valid;
 
-  assign iqu_cm_if.valid = rob_busy[rob_head] && rob_state[rob_head] == WB && !flush_pipeline;
+  assign iqu_cm_if.valid = head_valid;
 endmodule

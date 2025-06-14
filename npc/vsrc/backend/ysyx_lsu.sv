@@ -1,26 +1,27 @@
 `include "ysyx.svh"
 
 module ysyx_lsu #(
-    parameter bit [7:0] XLEN = `YSYX_XLEN,
+    parameter unsigned SQ_SIZE = `YSYX_SQ_SIZE,
     parameter bit [`YSYX_L1D_LEN:0] L1D_LEN = `YSYX_L1D_LEN,
-    parameter bit [`YSYX_L1D_LEN:0] L1D_SIZE = 2 ** L1D_LEN
+    parameter bit [`YSYX_L1D_LEN:0] L1D_SIZE = 2 ** L1D_LEN,
+    parameter bit [7:0] XLEN = `YSYX_XLEN
 ) (
     input clock,
 
+    input flush_pipeline,
     input fence_time,
 
     // from exu
-    input [XLEN-1:0] raddr,
-    input [XLEN-1:0] waddr,
-    input [4:0] ralu,
-    input [4:0] walu,
     input ren,
-    input wen,
-    input [XLEN-1:0] wdata,
+    input [XLEN-1:0] raddr,
+    input [4:0] ralu,
     // to exu
     output [XLEN-1:0] out_rdata,
     output out_rvalid,
-    output out_wready,
+
+    // from iqu
+    cm_store_if.in cm_store,
+    output logic out_sq_ready,
 
     // to bus load
     output [XLEN-1:0] out_lsu_araddr,
@@ -73,16 +74,76 @@ module ysyx_lsu #(
   logic l1d_cache_hit_w;
   logic raddr_valid;
 
+  // === Store Queue (SQ) ===
+  logic sq_ready;
+  logic [$clog2(SQ_SIZE)-1:0] sq_head;
+  logic [$clog2(SQ_SIZE)-1:0] sq_tail;
+  logic [SQ_SIZE-1:0] sq_valid;
+  logic [4:0] sq_alu[SQ_SIZE];
+  logic [XLEN-1:0] sq_waddr[SQ_SIZE];
+  logic [XLEN-1:0] sq_wdata[SQ_SIZE];
+  // === Store Queue (SQ) ===
+
+  logic [$clog2(SQ_SIZE)-1:0] load_in_sq_idx;
+  logic load_in_sq;
+
+  logic wen;
+  logic [XLEN-1:0] waddr;
+  logic [XLEN-1:0] wdata;
+  logic [4:0] walu;
+  logic wready;
+
+  assign sq_ready = sq_valid[sq_tail] == 0;
+  assign out_sq_ready = sq_ready;
+
+  assign wen = sq_valid[sq_head];
+  assign wdata = sq_wdata[sq_head];
+  assign waddr = sq_waddr[sq_head];
+  assign walu = sq_alu[sq_head];
+
+  always @(posedge clock) begin
+    if (reset) begin
+      sq_head  <= 0;
+      sq_tail  <= 0;
+      sq_valid <= 0;
+    end else begin
+      if (cm_store.valid && cm_store.store && sq_ready) begin
+        sq_valid[sq_tail] <= 1;
+        sq_alu[sq_tail] <= cm_store.alu;
+        sq_waddr[sq_tail] <= cm_store.sq_waddr;
+        sq_wdata[sq_tail] <= cm_store.sq_wdata;
+        sq_tail <= sq_tail + 1;
+      end
+      if (wready && sq_valid[sq_head]) begin
+        // Store Commit
+        sq_valid[sq_head] <= 0;
+        sq_head <= sq_head + 1;
+      end
+    end
+  end
+
+  always_comb begin
+    load_in_sq = 0;
+    load_in_sq_idx = 0;
+    // TODO: fix me, rewrite to synthesis friendly code
+    // for (bit [$clog2(SQ_SIZE)-1:0] i = sq_tail - 1; i != sq_tail; i--) begin
+    //   if (sq_valid[i] && sq_waddr[i] == (raddr) && !load_in_sq) begin
+    //     load_in_sq = 1;
+    //     load_in_sq_idx = i[$clog2(SQ_SIZE)-1:0];
+    //   end
+    // end
+  end
+
   assign raddr_valid = (  //
-      (raddr >= 'h02000048 && raddr < 'h02000050) ||  // clint
-      (raddr >= 'h0f000000 && raddr < 'h0f002000) ||  // sram
-      (raddr >= 'h10000000 && raddr < 'h10001000) ||  // uart/ns16550
-      (raddr >= 'h10010000 && raddr < 'h10011900) ||  // liteuart0/csr
-      (raddr >= 'h20000000 && raddr < 'h20400000) ||  // mrom
-      (raddr >= 'h30000000 && raddr < 'h40000000) ||  // flash
-      (raddr >= 'h80000000 && raddr < 'h88000000) ||  // psram
-      (raddr >= 'ha0000000 && raddr < 'hc0000000) ||  // sdram
-      (0));
+      (raddr >= 'h02000048 && raddr < 'h02000050)  // clint
+      || (raddr >= 'h0f000000 && raddr < 'h0f002000)  // sram
+      || (raddr >= 'h10000000 && raddr < 'h10001000)  // uart/ns16550
+      || (raddr >= 'h10010000 && raddr < 'h10011900)  // liteuart0/csr
+      || (raddr >= 'h20000000 && raddr < 'h20400000)  // mrom
+      || (raddr >= 'h30000000 && raddr < 'h40000000)  // flash
+      || (raddr >= 'h80000000 && raddr < 'h88000000)  // psram
+      || (raddr >= 'ha0000000 && raddr < 'hc0000000)  // sdram
+      || (0));
 
   assign out_lsu_araddr = raddr;
   assign out_lsu_arvalid = arvalid;
@@ -99,7 +160,7 @@ module ysyx_lsu #(
   assign out_lsu_wstrb = wstrb;
   assign out_lsu_wvalid = wen && state_store == LS_S_V;
 
-  assign out_wready = state_store == LS_S_R;
+  assign wready = state_store == LS_S_R;
 
   assign l1d_cache_hit = (l1d_valid[addr_idx] == 1'b1) && (l1d_tag[addr_idx] == addr_tag);
   assign addr_tag = raddr[XLEN-1:L1D_LEN+2];
@@ -157,8 +218,12 @@ module ysyx_lsu #(
           if (fence_time) begin
             l1d_valid <= 0;
           end
-          if (ren) begin
-            if (l1d_cache_hit) begin
+          if (flush_pipeline) begin
+          end else if (ren && !(|sq_valid)) begin  // TODO: fix `!(|sq_valid)` requirement
+            if (load_in_sq) begin
+              state_load <= IF_V;
+              lsu_rdata  <= sq_wdata[load_in_sq_idx] << ({{3'b0}, raddr[1:0]} << 3);
+            end else if (l1d_cache_hit) begin
               state_load <= IF_V;
               lsu_rdata  <= l1d[addr_idx];
             end else begin
@@ -167,13 +232,19 @@ module ysyx_lsu #(
           end
         end
         IF_L: begin
-          if (ren && lsu_rvalid) begin
-            lsu_rdata  <= bus_rdata;
+          if (flush_pipeline) begin
+            state_load <= IF_A;
+          end else if (ren && lsu_rvalid) begin
             state_load <= IF_V;
-            if (!uncacheable) begin
-              l1d[addr_idx] <= bus_rdata;
-              l1d_tag[addr_idx] <= addr_tag;
-              l1d_valid[addr_idx] <= 1'b1;
+            if (load_in_sq) begin
+              lsu_rdata <= sq_wdata[load_in_sq_idx] << ({{3'b0}, raddr[1:0]} << 3);
+            end else begin
+              lsu_rdata <= bus_rdata;
+              if (!uncacheable) begin
+                l1d[addr_idx] <= bus_rdata;
+                l1d_tag[addr_idx] <= addr_tag;
+                l1d_valid[addr_idx] <= 1'b1;
+              end
             end
           end
         end

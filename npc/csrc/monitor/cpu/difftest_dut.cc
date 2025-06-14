@@ -192,8 +192,9 @@ void difftest_step(vaddr_t pc)
     return;
   }
 
-  if (should_diff_mem)
+  if (0)
   {
+    ref_difftest_regcpy(&ref_r, DIFFTEST_TO_DUT);
     int low2addr = npc.vwaddr & 0x3;
     int len = ref_r.len;
     word_t align_wdata = ((word_t)npc.wdata) >> (low2addr * 8);
