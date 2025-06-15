@@ -209,7 +209,7 @@ module ysyx_npc_soc #(
 
   // write transaction
   assign out_awready = (state_w == WIDLE);
-  assign out_wready  = ((state_w == WDREADY || state_w == WDWRITE) && wvalid);
+  assign out_wready  = ((state_w == WIDLE || state_w == WDREADY || state_w == WDWRITE) && wvalid);
   assign out_bvalid  = (state_w == WFINISH);
   logic [7:0] wmask;
   assign wmask = (
@@ -228,30 +228,49 @@ module ysyx_npc_soc #(
       unique case (state_w)
         WIDLE: begin
           if (awvalid) begin
-            state_w <= WAREADY;
+            if (wvalid) begin
+              begin
+                if (wstrb[0]) begin
+                  `YSYX_DPI_C_PMEM_WRITE((awaddr & ~'h3) + 0, {wdata >>  0}[31:0], 1);
+                end
+                if (wstrb[1]) begin
+                  `YSYX_DPI_C_PMEM_WRITE((awaddr & ~'h3) + 1, {wdata >>  8}[31:0], 1);
+                end
+                if (wstrb[2]) begin
+                  `YSYX_DPI_C_PMEM_WRITE((awaddr & ~'h3) + 2, {wdata >> 16}[31:0], 1);
+                end
+                if (wstrb[3]) begin
+                  `YSYX_DPI_C_PMEM_WRITE((awaddr & ~'h3) + 3, {wdata >> 24}[31:0], 1);
+                end
+              end
+            end
+            if (wlast) begin
+              state_w <= WFINISH;
+            end else begin
+              state_w <= WDWRITE;
+            end
             awaddr_buf <= awaddr;
           end
         end
-        WAREADY: begin
-          state_w <= WDWRITE;
-        end
         WDWRITE: begin
-          begin
-            if (wstrb[0]) begin
-              `YSYX_DPI_C_PMEM_WRITE((awaddr_buf & ~'h3) + 0, {wdata >>  0}[31:0], 1);
-            end
-            if (wstrb[1]) begin
-              `YSYX_DPI_C_PMEM_WRITE((awaddr_buf & ~'h3) + 1, {wdata >>  8}[31:0], 1);
-            end
-            if (wstrb[2]) begin
-              `YSYX_DPI_C_PMEM_WRITE((awaddr_buf & ~'h3) + 2, {wdata >> 16}[31:0], 1);
-            end
-            if (wstrb[3]) begin
-              `YSYX_DPI_C_PMEM_WRITE((awaddr_buf & ~'h3) + 3, {wdata >> 24}[31:0], 1);
+          if (wvalid) begin
+            begin
+              if (wstrb[0]) begin
+                `YSYX_DPI_C_PMEM_WRITE((awaddr_buf & ~'h3) + 0, {wdata >>  0}[31:0], 1);
+              end
+              if (wstrb[1]) begin
+                `YSYX_DPI_C_PMEM_WRITE((awaddr_buf & ~'h3) + 1, {wdata >>  8}[31:0], 1);
+              end
+              if (wstrb[2]) begin
+                `YSYX_DPI_C_PMEM_WRITE((awaddr_buf & ~'h3) + 2, {wdata >> 16}[31:0], 1);
+              end
+              if (wstrb[3]) begin
+                `YSYX_DPI_C_PMEM_WRITE((awaddr_buf & ~'h3) + 3, {wdata >> 24}[31:0], 1);
+              end
             end
           end
           if (wlast) begin
-            state_w <= WDREADY;
+            state_w <= WFINISH;
           end
         end
         WDREADY: begin

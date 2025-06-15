@@ -84,6 +84,7 @@ module ysyx_lsu #(
   logic [XLEN-1:0] sq_wdata[SQ_SIZE];
   // === Store Queue (SQ) ===
 
+  logic [XLEN-1:0] lsu_wdata;
   logic [$clog2(SQ_SIZE)-1:0] load_in_sq_idx;
   logic load_in_sq;
 
@@ -259,15 +260,24 @@ module ysyx_lsu #(
       unique case (state_store)
         LS_S_V: begin
           if (wen) begin
-            if (l1d_cache_hit_w) begin
-              l1d_valid[waddr_idx] <= 1'b0;
-            end
             if (lsu_wready) begin
+              lsu_wdata   <= wdata;
               state_store <= LS_S_R;
             end
           end
         end
         LS_S_R: begin
+          if (walu == `YSYX_SW_WSTRB) begin
+            l1d[waddr_idx] <= lsu_wdata;
+            l1d_tag[waddr_idx] <= waddr_tag;
+            l1d_valid[waddr_idx] <= 1'b1;
+          end else if (l1d_cache_hit_w) begin
+            if (walu == `YSYX_SB_WSTRB) begin
+              l1d[waddr_idx][waddr[1:0]*8+:8] <= lsu_wdata[7:0];
+            end else if (walu == `YSYX_SH_WSTRB) begin
+              l1d[waddr_idx][waddr[1:0]*8+:16] <= lsu_wdata[15:0];
+            end
+          end
           state_store <= LS_S_V;
         end
         default: begin

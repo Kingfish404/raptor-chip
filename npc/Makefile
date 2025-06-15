@@ -104,14 +104,15 @@ run: $(BIN) $(MROM_IMG)
 sim: $(BIN)
 	@$^
 
-AM_KERNEL = $(YSYX_HOME)/am-kernels
+AM_KERNEL = $(YSYX_HOME)/third_party/kingfish404/am-kernels
 
 AM_KERNEL:
+	mkdir -p $(abspath $(AM_KERNEL))
 	git clone https://github.com/kingfish404/am-kernels $(YSYX_HOME)/am-kernels
 
 perf:
 	if [ ! -d $(AM_KERNEL) ]; then make AM_KERNEL; fi
-	make -s -C $(AM_KERNEL)/benchmarks/microbench/ ARCH=riscv32e-ysyxsoc FLAGS='-b -n' mainargs=test run
+	make -s -C $(AM_KERNEL)/benchmarks/microbench/ ARCH=riscv32-ysyxsoc FLAGS='-b -n' mainargs=test run
 
 YOSYS_OPENSTA = $(YSYX_HOME)/third_party/yosys-opensta
 

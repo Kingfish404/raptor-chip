@@ -250,27 +250,26 @@ npc pmu.cc:244 statistic HIT GOOD TRAP at pc: a0003930, inst: 00100073
 |          4 |        1 |         4 |        0 |        31 | 1.18818e-06 |      31 |
 
 
-## TODO: 流水线处理器中异常的实现
-https://ysyx.oscc.cc/docs/2306/basic/1.10.html#%E6%8E%A7%E5%88%B6%E5%86%92%E9%99%A9
+## TODO: Exception Handling
 
 - 抛出异常时, 需要将`mepc`设置为发生异常的指令的PC值, 这种特性称为"精确异常". 如果不满足这一特性, 从异常处理通过`mret`返回时, 就无法精确返回到之前发生异常的指令处, 从而使得发生异常前后的状态不一致. 这可能会导致系统软件无法利用异常机制实现现代操作系统的某些关键机制, 例如进程切换, 请页调度等. 但在流水线处理器中, IFU的PC会不断变化, 等到某条指令在执行过程中抛出异常时, IFU的PC已经与这条指令不匹配了. 为了获取与该指令匹配的PC, 我们需要在IFU取指时将相应的PC一同传递到下游.
 - 指令可能会在推测执行时抛出异常, 但如果推测错误, 那实际上这条指令不应该被执行, 所抛出的异常也不应该被处理. 因此, 在异常处理过程中需要更新处理器状态的操作, 都需要等到确认推测正确后, 才能真正进行, 包括写入`mepc`, `mcause`, 跳转到`mtvec`所指示的位置等.
 - `mcause`的更新取决于异常的类型, 在RISC-V处理器中, 不同的异常号由不同的部件产生. 产生的异常号也需要传递到流水线的下游, 等到确认推测正确后, 才能真正写入`mcause`.
 
-| 异常号 | 异常描述                       | 产生部件 |
-| ------ | ------------------------------ | -------- |
-| 0      | Instruction address misaligned | IFU      |
-| 1      | Instruction access fault       | IFU      |
-| 2      | Illegal Instruction            | IDU      |
-| 3      | Breakpoint                     | IDU      |
-| 4      | Load address misaligned        | LSU      |
-| 5      | Load access fault              | LSU      |
-| 6      | Store/AMO address misaligned   | LSU      |
-| 7      | Store/AMO access fault         | LSU      |
-| 8      | Environment call from U-mode   | IDU      |
-| 9      | Environment call from S-mode   | IDU      |
-| 11     | Environment call from M-mode   | IDU      |
-| 12     | Instruction page fault         | IFU      |
-| 13     | Load page fault                | LSU      |
-| 15     | Store/AMO page fault           | LSU      |
+| 异常号 | 异常描述                       | 产生部件 | OK  |
+| ------ | ------------------------------ | -------- | --- |
+| 0      | Instruction address misaligned | IFU      |     |
+| 1      | Instruction access fault       | IFU      |     |
+| 2      | Illegal Instruction            | IDU      | y   |
+| 3      | Breakpoint                     | IDU      | y   |
+| 4      | Load address misaligned        | LSU      |     |
+| 5      | Load access fault              | LSU      |     |
+| 6      | Store/AMO address misaligned   | LSU      |     |
+| 7      | Store/AMO access fault         | LSU      |     |
+| 8      | Environment call from U-mode   | IDU      | y   |
+| 9      | Environment call from S-mode   | IDU      | y   |
+| 11     | Environment call from M-mode   | IDU      | y   |
+| 12     | Instruction page fault         | IFU      |     |
+| 13     | Load page fault                | LSU      |     |
+| 15     | Store/AMO page fault           | LSU      |     |
 

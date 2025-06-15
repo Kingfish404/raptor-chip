@@ -68,6 +68,10 @@
 `define YSYX_ALU_SH__ 'b00001
 `define YSYX_ALU_SW__ 'b00010
 
+`define YSYX_SB_WSTRB 'b00001
+`define YSYX_SH_WSTRB 'b00011
+`define YSYX_SW_WSTRB 'b01111
+
 `define YSYX_ATO_LR__ 'b00000
 `define YSYX_ATO_SC__ 'b00001
 `define YSYX_ATO_SWAP 'b00010
