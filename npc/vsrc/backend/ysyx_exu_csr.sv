@@ -196,8 +196,12 @@ module ysyx_exu_csr #(
       if (csr[TIME___] == 'hffffffff) begin
         csr[TIMEH__] <= csr[TIMEH__] + 1;
       end
+      csr[MCYCLE_] <= csr[MCYCLE_] + 1;
+      if (csr[MCYCLE_] == 'hffffffff) begin
+        csr[TIMEH__] <= csr[TIMEH__] + 1;
+      end
       if (valid) begin
-        if (raddr_reg == TIME___ || raddr_reg == TIMEH__) begin
+        if (raddr_reg == TIME___ || raddr_reg == TIMEH__ || raddr_reg == MCYCLE_) begin
           `YSYX_DPI_C_NPC_DIFFTEST_SKIP_REF
         end
         if (wen) begin

@@ -85,8 +85,10 @@ module ysyx_lsu #(
   // === Store Queue (SQ) ===
 
   logic [XLEN-1:0] lsu_wdata;
-  logic [$clog2(SQ_SIZE)-1:0] load_in_sq_idx;
   logic load_in_sq;
+  logic [$clog2(SQ_SIZE)-1:0] load_in_sq_idx;
+  logic store_in_sq;
+  logic [$clog2(SQ_SIZE)-1:0] store_in_sq_idx;
 
   logic wen;
   logic [XLEN-1:0] waddr;
@@ -94,7 +96,7 @@ module ysyx_lsu #(
   logic [4:0] walu;
   logic wready;
 
-  assign sq_ready = sq_valid[sq_tail] == 0;
+  assign sq_ready = sq_valid[sq_tail] == 0 && (!store_in_sq || sq_valid[store_in_sq_idx] == 0);
   assign out_sq_ready = sq_ready;
 
   assign wen = sq_valid[sq_head];
@@ -109,14 +111,18 @@ module ysyx_lsu #(
       sq_valid <= 0;
     end else begin
       if (cm_store.valid && cm_store.store && sq_ready) begin
+        // Store Commit
         sq_valid[sq_tail] <= 1;
         sq_alu[sq_tail] <= cm_store.alu;
         sq_waddr[sq_tail] <= cm_store.sq_waddr;
         sq_wdata[sq_tail] <= cm_store.sq_wdata;
         sq_tail <= sq_tail + 1;
+        if (store_in_sq && store_in_sq_idx != sq_tail) begin
+          sq_waddr[store_in_sq_idx] <= 0;
+        end
       end
       if (wready && sq_valid[sq_head]) begin
-        // Store Commit
+        // Store Finished
         sq_valid[sq_head] <= 0;
         sq_head <= sq_head + 1;
       end
@@ -126,13 +132,20 @@ module ysyx_lsu #(
   always_comb begin
     load_in_sq = 0;
     load_in_sq_idx = 0;
-    // TODO: fix me, rewrite to synthesis friendly code
-    // for (bit [$clog2(SQ_SIZE)-1:0] i = sq_tail - 1; i != sq_tail; i--) begin
-    //   if (sq_valid[i] && sq_waddr[i] == (raddr) && !load_in_sq) begin
-    //     load_in_sq = 1;
-    //     load_in_sq_idx = i[$clog2(SQ_SIZE)-1:0];
-    //   end
-    // end
+    for (int i = 0; i < SQ_SIZE; i++) begin
+      if (sq_waddr[i] == (raddr) && !load_in_sq) begin
+        load_in_sq = 1;
+        load_in_sq_idx = i[$clog2(SQ_SIZE)-1:0];
+      end
+    end
+    store_in_sq = 0;
+    store_in_sq_idx = 0;
+    for (int i = 0; i < SQ_SIZE; i++) begin
+      if (sq_waddr[i] == (cm_store.sq_waddr) && !store_in_sq) begin
+        store_in_sq = 1;
+        store_in_sq_idx = i[$clog2(SQ_SIZE)-1:0];
+      end
+    end
   end
 
   assign raddr_valid = (  //
@@ -220,7 +233,7 @@ module ysyx_lsu #(
             l1d_valid <= 0;
           end
           if (flush_pipeline) begin
-          end else if (ren && !(|sq_valid)) begin  // TODO: fix `!(|sq_valid)` requirement
+          end else if (ren && (!(|sq_valid) || load_in_sq)) begin  // TODO: fix `!(|sq_valid)` requirement
             if (load_in_sq) begin
               state_load <= IF_V;
               lsu_rdata  <= sq_wdata[load_in_sq_idx] << ({{3'b0}, raddr[1:0]} << 3);

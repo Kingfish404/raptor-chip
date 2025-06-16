@@ -14,6 +14,8 @@
  out-of-order  :
  execution     : EXU - Execution Unit
  --------------+
+ in-order      | LSU - Load Store Unit
+ --------------+
  in-order      | IQU - Instruction Queue Unit
  commit        | WBU - Write Back Unit
  ------------------------------------------------------------
