@@ -1,4 +1,5 @@
 `include "ysyx.svh"
+`include "ysyx_if.svh"
 `include "ysyx_soc.svh"
 `include "ysyx_dpi_c.svh"
 
@@ -53,20 +54,7 @@ module ysyx_bus #(
     output [XLEN-1:0] out_ifu_rdata,
     output out_ifu_rvalid,
 
-    // lsu:load
-    input [XLEN-1:0] lsu_araddr,
-    input lsu_arvalid,
-    input [7:0] lsu_rstrb,
-    output [XLEN-1:0] out_lsu_rdata,
-    output out_lsu_rvalid,
-
-    // lsu:store
-    input [XLEN-1:0] lsu_awaddr,
-    input lsu_awvalid,
-    input [XLEN-1:0] lsu_wdata,
-    input [7:0] lsu_wstrb,
-    input lsu_wvalid,
-    output out_lsu_wready,
+    lsu_bus_if.slave lsu_bus,
 
     input reset
 );
@@ -120,8 +108,8 @@ module ysyx_bus #(
           if (ifu_arvalid) begin
             bus_araddr <= ifu_araddr;
             state_load <= IF_AS;
-          end else if (lsu_arvalid && !flush_pipeline) begin
-            bus_araddr <= lsu_araddr;
+          end else if (lsu_bus.arvalid && !flush_pipeline) begin
+            bus_araddr <= lsu_bus.araddr;
             state_load <= LS_AS;
           end
         end
@@ -146,9 +134,9 @@ module ysyx_bus #(
           end
         end
         LS_A: begin
-          if (lsu_arvalid && !flush_pipeline) begin
+          if (lsu_bus.arvalid && !flush_pipeline) begin
             state_load <= LS_AS;
-            bus_araddr <= lsu_araddr;
+            bus_araddr <= lsu_bus.araddr;
           end else if (clint_en || ifu_arvalid) begin
             state_load <= IF_A;
           end
@@ -194,7 +182,7 @@ module ysyx_bus #(
     end else begin
       unique case (state_store)
         LS_S_A: begin
-          if (lsu_awvalid && io_master_awready) begin
+          if (lsu_bus.awvalid && io_master_awready) begin
             state_store <= LS_S_W;
             if (io_master_wready) begin
               write_done <= 1;
@@ -227,14 +215,17 @@ module ysyx_bus #(
   assign out_ifu_rdata = rdata;
   assign out_ifu_rvalid = (state_load == IF_B);
 
-  assign clint_en = (lsu_araddr == `YSYX_BUS_RTC_ADDR) || (lsu_araddr == `YSYX_BUS_RTC_ADDR_UP);
-  assign out_lsu_rdata = clint_en ? clint_rdata : io_rdata;
-  assign out_lsu_rvalid = (
-    (state_load == LS_R || clint_arvalid) &&
-    (lsu_arvalid) && (rvalid || clint_rvalid));
+  assign clint_en = (lsu_bus.araddr == `YSYX_BUS_RTC_ADDR) || (lsu_bus.araddr == `YSYX_BUS_RTC_ADDR_UP);
+  assign lsu_bus.rdata = clint_en ? clint_rdata : io_rdata;
+  assign lsu_bus.rvalid = ((state_load == LS_R || clint_arvalid) && (rvalid || clint_rvalid));
+  // assign out_lsu_rdata = clint_en ? clint_rdata : io_rdata;
+  // assign out_lsu_rvalid = (
+  //   (state_load == LS_R || clint_arvalid) &&
+  //   (lsu_bus.arvalid) && (rvalid || clint_rvalid));
+  assign lsu_bus.wready = io_master_bvalid;
 
   // lsu write
-  assign out_lsu_wready = io_master_bvalid;
+  // assign out_lsu_wready = io_master_bvalid;
 
   // io lsu read
   logic ifu_sdram_arburst;
@@ -243,9 +234,9 @@ module ysyx_bus #(
     (bus_araddr >= 'ha0000000) && (bus_araddr <= 'hc0000000));
   assign io_master_arburst = ifu_sdram_arburst ? 2'b01 : 2'b00;
   assign io_master_arsize = state_load == IF_A ? 3'b010 : (
-           ({3{lsu_rstrb == 8'h1}} & 3'b000) |
-           ({3{lsu_rstrb == 8'h3}} & 3'b001) |
-           ({3{lsu_rstrb == 8'hf}} & 3'b010) |
+           ({3{lsu_bus.rstrb == 8'h1}} & 3'b000) |
+           ({3{lsu_bus.rstrb == 8'h3}} & 3'b001) |
+           ({3{lsu_bus.rstrb == 8'hf}} & 3'b010) |
            (3'b000)
          );
   assign io_master_arlen = ifu_sdram_arburst ? 'h1 : 'h0;
@@ -261,32 +252,32 @@ module ysyx_bus #(
             state_load == LS_R || state_load == LS_R_FLUSHED);
 
   // io lsu write
-  assign io_master_awsize = lsu_awvalid ? (
-           ({3{lsu_wstrb == 8'h1}} & 3'b000) |
-           ({3{lsu_wstrb == 8'h3}} & 3'b001) |
-           ({3{lsu_wstrb == 8'hf}} & 3'b010) |
+  assign io_master_awsize = lsu_bus.awvalid ? (
+           ({3{lsu_bus.wstrb == 8'h1}} & 3'b000) |
+           ({3{lsu_bus.wstrb == 8'h3}} & 3'b001) |
+           ({3{lsu_bus.wstrb == 8'hf}} & 3'b010) |
            (3'b000)
          ) : 3'b000;
-  assign io_master_awaddr = lsu_awvalid ? lsu_awaddr : 'h0;
-  assign io_master_awvalid = (state_store == LS_S_A) && (lsu_awvalid);
+  assign io_master_awaddr = lsu_bus.awvalid ? lsu_bus.awaddr : 'h0;
+  assign io_master_awvalid = (state_store == LS_S_A) && (lsu_bus.awvalid);
 
   logic [1:0] awaddr_lo;
   logic [XLEN-1:0] wdata;
   logic [3:0] wstrb;
   assign awaddr_lo = io_master_awaddr[1:0];
   assign wdata = {
-    ({XLEN{awaddr_lo == 2'b00}} & {{lsu_wdata}}) |
-    ({XLEN{awaddr_lo == 2'b01}} & {{lsu_wdata[23:0]}, {8'b0}}) |
-    ({XLEN{awaddr_lo == 2'b10}} & {{lsu_wdata[15:0]}, {16'b0}}) |
-    ({XLEN{awaddr_lo == 2'b11}} & {{lsu_wdata[7:0]}, {24'b0}}) |
+    ({XLEN{awaddr_lo == 2'b00}} & {{lsu_bus.wdata}}) |
+    ({XLEN{awaddr_lo == 2'b01}} & {{lsu_bus.wdata[23:0]}, {8'b0}}) |
+    ({XLEN{awaddr_lo == 2'b10}} & {{lsu_bus.wdata[15:0]}, {16'b0}}) |
+    ({XLEN{awaddr_lo == 2'b11}} & {{lsu_bus.wdata[7:0]}, {24'b0}}) |
     (0)
   };
   assign io_master_wdata = wdata;
-  assign io_master_wvalid = (((state_store == LS_S_A) && (lsu_awvalid)) || (state_store == LS_S_W))
-    && (lsu_wvalid) && !write_done;
+  assign io_master_wvalid = (((state_store == LS_S_A) && (lsu_bus.awvalid)) || (state_store == LS_S_W))
+    && (lsu_bus.wvalid) && !write_done;
   assign io_master_wlast = io_master_wvalid && io_master_wready;
   assign io_master_wstrb = {wstrb};
-  assign wstrb = {lsu_wstrb[3:0] << awaddr_lo};
+  assign wstrb = {lsu_bus.wstrb[3:0] << awaddr_lo};
 
   assign io_master_bready = (state_store == LS_S_B) || (state_store == LS_S_W);
 
@@ -323,11 +314,11 @@ module ysyx_bus #(
     end
   end
 
-  assign clint_arvalid = (lsu_arvalid && clint_en);
+  assign clint_arvalid = (lsu_bus.arvalid && clint_en);
   ysyx_clint clint (
       .clock(clock),
       .reset(reset),
-      .araddr(lsu_araddr),
+      .araddr(lsu_bus.araddr),
       .arvalid(clint_arvalid),
       .out_arready(clint_arready),
       .out_rdata(clint_rdata),

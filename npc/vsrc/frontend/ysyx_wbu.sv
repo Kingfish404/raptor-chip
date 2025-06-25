@@ -1,4 +1,5 @@
 `include "ysyx.svh"
+`include "ysyx_if.svh"
 `include "ysyx_dpi_c.svh"
 
 module ysyx_wbu #(
@@ -15,11 +16,7 @@ module ysyx_wbu #(
     input ben,
     input sys_retire,
 
-    output [XLEN-1:0] out_npc,
-    output [XLEN-1:0] out_rpc,
-    output out_jen,
-    output out_ben,
-    output out_retire,
+    wbu_pipe_if.out wbu_if,
 
     input  prev_valid,
     output out_valid,
@@ -34,11 +31,11 @@ module ysyx_wbu #(
   assign out_valid = valid;
   assign ready = 1;
 
-  assign out_npc = npc_wbu;
-  assign out_rpc = pc_wbu;
-  assign out_jen = jen_wbu;
-  assign out_ben = ben_wbu;
-  assign out_retire = retire;
+  assign wbu_if.npc = npc_wbu;
+  assign wbu_if.rpc = pc_wbu;
+  assign wbu_if.jen = jen_wbu;
+  assign wbu_if.ben = ben_wbu;
+  assign wbu_if.sys_retire = retire;
 
   always @(posedge clock) begin
     if (reset) begin

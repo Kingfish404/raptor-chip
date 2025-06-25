@@ -1,12 +1,13 @@
 # Core docs
 
+- **[uarch](./uarch.md)**
 - **[Boot Linux Kernel](./linux_kernel.md)**
 - [PROFILE](./PROFILE.md)
 - [REFERENCE](./REFERENCE.md)
 
 ## (Micro)Architecture
 
-![](./assets/npc-rv32e-pipeline.svg)
+![](./assets/npc-rv32im-o3.svg)
 
 ## spike device tree
 

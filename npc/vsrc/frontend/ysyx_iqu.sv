@@ -31,7 +31,7 @@ module ysyx_iqu #(
     // => exu (commit)
     exu_pipe_if.out iqu_cm_if,
     // => lsu (commit)
-    cm_store_if.out cm_store,
+    iqu_lsu_if.out  iqu_lsu_o,
 
     // pipeline
     output logic out_flush_pipeline,
@@ -367,11 +367,11 @@ module ysyx_iqu #(
   assign iqu_cm_if.tval = rob_tval[rob_head];
   assign iqu_cm_if.cause = rob_cause[rob_head];
 
-  assign cm_store.store = rob_store[rob_head];
-  assign cm_store.alu = rob_alu[rob_head];
-  assign cm_store.sq_waddr = rob_sq_waddr[rob_head];
-  assign cm_store.sq_wdata = rob_sq_wdata[rob_head];
-  assign cm_store.valid = head_valid;
+  assign iqu_lsu_o.store = rob_store[rob_head];
+  assign iqu_lsu_o.alu = rob_alu[rob_head];
+  assign iqu_lsu_o.sq_waddr = rob_sq_waddr[rob_head];
+  assign iqu_lsu_o.sq_wdata = rob_sq_wdata[rob_head];
+  assign iqu_lsu_o.valid = head_valid;
 
   assign iqu_cm_if.valid = head_valid;
 endmodule

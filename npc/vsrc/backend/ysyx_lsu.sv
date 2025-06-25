@@ -1,4 +1,5 @@
 `include "ysyx.svh"
+`include "ysyx_if.svh"
 
 module ysyx_lsu #(
     parameter unsigned SQ_SIZE = `YSYX_SQ_SIZE,
@@ -20,25 +21,10 @@ module ysyx_lsu #(
     output out_rvalid,
 
     // from iqu
-    cm_store_if.in cm_store,
+    iqu_lsu_if.in iqu_lsu_i,
     output logic out_sq_ready,
 
-    // to bus load
-    output [XLEN-1:0] out_lsu_araddr,
-    output out_lsu_arvalid,
-    output [7:0] out_lsu_rstrb,
-    // from bus load
-    input [XLEN-1:0] bus_rdata,
-    input lsu_rvalid,
-
-    // to bus store
-    output [XLEN-1:0] out_lsu_awaddr,
-    output out_lsu_awvalid,
-    output [XLEN-1:0] out_lsu_wdata,
-    output [7:0] out_lsu_wstrb,
-    output out_lsu_wvalid,
-    // from bus store
-    input logic lsu_wready,
+    lsu_bus_if.master lsu_bus,
 
     input reset
 );
@@ -110,12 +96,12 @@ module ysyx_lsu #(
       sq_tail  <= 0;
       sq_valid <= 0;
     end else begin
-      if (cm_store.valid && cm_store.store && sq_ready) begin
+      if (iqu_lsu_i.valid && iqu_lsu_i.store && sq_ready) begin
         // Store Commit
         sq_valid[sq_tail] <= 1;
-        sq_alu[sq_tail] <= cm_store.alu;
-        sq_waddr[sq_tail] <= cm_store.sq_waddr;
-        sq_wdata[sq_tail] <= cm_store.sq_wdata;
+        sq_alu[sq_tail] <= iqu_lsu_i.alu;
+        sq_waddr[sq_tail] <= iqu_lsu_i.sq_waddr;
+        sq_wdata[sq_tail] <= iqu_lsu_i.sq_wdata;
         sq_tail <= sq_tail + 1;
         if (store_in_sq && store_in_sq_idx != sq_tail) begin
           sq_waddr[store_in_sq_idx] <= 0;
@@ -141,7 +127,7 @@ module ysyx_lsu #(
     store_in_sq = 0;
     store_in_sq_idx = 0;
     for (int i = 0; i < SQ_SIZE; i++) begin
-      if (sq_waddr[i] == (cm_store.sq_waddr) && !store_in_sq) begin
+      if (sq_waddr[i] == (iqu_lsu_i.sq_waddr) && !store_in_sq) begin
         store_in_sq = 1;
         store_in_sq_idx = i[$clog2(SQ_SIZE)-1:0];
       end
@@ -159,20 +145,17 @@ module ysyx_lsu #(
       || (raddr >= 'ha0000000 && raddr < 'hc0000000)  // sdram
       || (0));
 
-  assign out_lsu_araddr = raddr;
-  assign out_lsu_arvalid = arvalid;
-  assign arvalid = ren && raddr_valid && state_load == IF_L;
-  assign out_lsu_rstrb = rstrb;
-
-  assign rdata_unalign = lsu_rdata;
   assign out_rvalid = state_load == IF_V;
 
-  assign out_lsu_awaddr = waddr;
-  assign out_lsu_awvalid = wen && state_store == LS_S_V;
+  assign lsu_bus.arvalid = ren && raddr_valid && state_load == IF_L;
+  assign lsu_bus.araddr = raddr;
+  assign lsu_bus.rstrb = rstrb;
 
-  assign out_lsu_wdata = wdata;
-  assign out_lsu_wstrb = wstrb;
-  assign out_lsu_wvalid = wen && state_store == LS_S_V;
+  assign lsu_bus.awvalid = wen && state_store == LS_S_V;
+  assign lsu_bus.awaddr = waddr;
+  assign lsu_bus.wstrb = wstrb;
+  assign lsu_bus.wvalid = wen && state_store == LS_S_V;
+  assign lsu_bus.wdata = wdata;
 
   assign wready = state_store == LS_S_R;
 
@@ -206,6 +189,7 @@ module ysyx_lsu #(
            ({8{ralu == `YSYX_ALU_LW__}} & 8'hf)
          );
 
+  assign rdata_unalign = lsu_rdata;
   assign rdata = (
            ({XLEN{raddr[1:0] == 2'b00}} & rdata_unalign) |
            ({XLEN{raddr[1:0] == 2'b01}} & {{8'b0}, {rdata_unalign[31:8]}}) |
@@ -248,14 +232,14 @@ module ysyx_lsu #(
         IF_L: begin
           if (flush_pipeline) begin
             state_load <= IF_A;
-          end else if (ren && lsu_rvalid) begin
+          end else if (ren && lsu_bus.rvalid) begin
             state_load <= IF_V;
             if (load_in_sq) begin
               lsu_rdata <= sq_wdata[load_in_sq_idx] << ({{3'b0}, raddr[1:0]} << 3);
             end else begin
-              lsu_rdata <= bus_rdata;
+              lsu_rdata <= lsu_bus.rdata;
               if (!uncacheable) begin
-                l1d[addr_idx] <= bus_rdata;
+                l1d[addr_idx] <= lsu_bus.rdata;
                 l1d_tag[addr_idx] <= addr_tag;
                 l1d_valid[addr_idx] <= 1'b1;
               end
@@ -273,7 +257,7 @@ module ysyx_lsu #(
       unique case (state_store)
         LS_S_V: begin
           if (wen) begin
-            if (lsu_wready) begin
+            if (lsu_bus.wready) begin
               lsu_wdata   <= wdata;
               state_store <= LS_S_R;
             end

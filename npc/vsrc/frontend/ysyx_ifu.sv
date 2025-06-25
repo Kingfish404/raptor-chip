@@ -1,4 +1,5 @@
 `include "ysyx.svh"
+`include "ysyx_if.svh"
 `include "ysyx_soc.svh"
 
 module ysyx_ifu #(
@@ -8,11 +9,7 @@ module ysyx_ifu #(
 ) (
     input clock,
 
-    input [XLEN-1:0] npc,
-    input [XLEN-1:0] rpc,
-    input jen,
-    input ben,
-    input sys_retire,
+    wbu_pipe_if.in wbu_if,
 
     output [XLEN-1:0] out_inst,
     output [XLEN-1:0] out_pc,
@@ -61,6 +58,18 @@ module ysyx_ifu #(
   logic [XLEN-1:0] l1_inst;
   logic [XLEN-1:0] imm_b;
   logic [XLEN-1:0] imm_j;
+
+  logic [XLEN-1:0] npc;
+  logic [XLEN-1:0] rpc;
+  logic jen;
+  logic ben;
+  logic sys_retire;
+
+  assign npc = wbu_if.npc;
+  assign rpc = wbu_if.rpc;
+  assign jen = wbu_if.jen;
+  assign ben = wbu_if.ben;
+  assign sys_retire = wbu_if.sys_retire;
 
   assign ifu_hazard = ifu_sys_hazard;
   assign out_inst = l1_inst;

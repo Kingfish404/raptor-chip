@@ -2,7 +2,6 @@
 `define YSYX_IF_SVH
 `include "ysyx.svh"
 
-// verilator lint_off DECLFILENAME
 interface idu_pipe_if;
   logic [4:0] alu;
   logic jen;
@@ -120,9 +119,8 @@ interface exu_pipe_if;
       output valid
   );
 endinterface
-// verilator lint_on DECLFILENAME
 
-interface cm_store_if;
+interface iqu_lsu_if;
   logic store;
   logic [4:0] alu;
   logic [`YSYX_XLEN-1:0] sq_waddr;
@@ -131,9 +129,50 @@ interface cm_store_if;
   logic valid;
 
   modport in(input store, alu, sq_waddr, sq_wdata, input valid);
-
   modport out(output store, alu, sq_waddr, sq_wdata, output valid);
 
 endinterface  //cm_store_if
+
+interface wbu_pipe_if;
+  logic [`YSYX_XLEN-1:0] npc;
+  logic [`YSYX_XLEN-1:0] rpc;
+  logic jen;
+  logic ben;
+  logic sys_retire;
+
+  modport in(input npc, rpc, jen, ben, sys_retire);
+  modport out(output npc, rpc, jen, ben, sys_retire);
+
+endinterface  //wbu_pipe_if
+
+interface lsu_bus_if #(
+    parameter int XLEN = `YSYX_XLEN
+);
+  // load
+  logic arvalid;
+  logic [XLEN-1:0] araddr;
+  logic [7:0] rstrb;
+  logic rvalid;
+  logic [XLEN-1:0] rdata;
+  // store
+  logic awvalid;
+  logic [XLEN-1:0] awaddr;
+  logic [7:0] wstrb;
+  logic wvalid;
+  logic [XLEN-1:0] wdata;
+  logic wready;
+
+  modport master(
+      output araddr, arvalid, rstrb,
+      output awaddr, awvalid, wdata, wstrb, wvalid,
+      input rdata, rvalid, wready
+  );
+  modport slave(
+      input araddr, arvalid, rstrb,
+      input awaddr, awvalid, wdata, wstrb, wvalid,
+      output rdata, rvalid, wready
+  );
+
+endinterface  //lsu_pipe_if
 
 `endif

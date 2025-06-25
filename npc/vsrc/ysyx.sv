@@ -3,41 +3,6 @@
 `include "ysyx_soc.svh"
 `include "ysyx_dpi_c.svh"
 
-/**
- ------------------------------------------------------------
- RISC-V processor pipeline
- has the following (conceptual) stages:
- ------------------------------------------------------------
- in-order      | IFU - Instruction Fetch Unit
- issue         | IDU - Instruction Decode Unit
- --------------+ IQU - Instruction Queue Unit
- out-of-order  :
- execution     : EXU - Execution Unit
- --------------+
- in-order      | LSU - Load Store Unit
- --------------+
- in-order      | IQU - Instruction Queue Unit
- commit        | WBU - Write Back Unit
- ------------------------------------------------------------
- Stages (`=>' split each stage):
- [
-  frontend (in-order and speculative issue):
-        v- [BUS <-load- AXI4]
-    IFU[l1i] =issue=> IDU =issue=> IQU[uop]
-        ^- bpu[btb,btb_jal]
-    IQU[uop] -dispatch-> IQU[rob]
-             =dispatch=> EXU[rs ]
-  backend  (out-of-order execution):
-    EXU[rs]  =write-back=> IQU[rob]
-        ^- LSU[l1d] <-load/store-> [BUS <-load/store-> AXI4]
-        |- MUL :mult/div
-  frontend (in-order commit):
-    IQU[rob] =commit=>
-    WBU[rf ] =resolve-branch=> frontend: IFU[pc,bpu]
- ]
- ------------------------------------------------------------
- See ./include/ysyx.svh for more details.
- */
 module ysyx #(
     parameter bit [7:0] XLEN = `YSYX_XLEN
 ) (
@@ -137,14 +102,14 @@ module ysyx #(
   logic ifu_arvalid, ifu_bus_lock;
 
   // IDU out
-  idu_pipe_if idu_if ();
+  idu_pipe_if idu_iqu ();
   logic idu_valid, idu_ready;
 
   // IQU out
   idu_pipe_if iqu_exu_if ();
   exu_pipe_if iqu_wbu_if ();
-  exu_pipe_if iqu_cm_if ();
-  cm_store_if cm_store ();
+  exu_pipe_if iqu_exu_cm ();
+  iqu_lsu_if iqu_lsu ();
   logic iqu_valid, iqu_ready;
   logic [4:0] iqu_rs1, iqu_rs2;
   logic flush_pipeline;
@@ -153,21 +118,15 @@ module ysyx #(
   // EXU out
   exu_pipe_if exu_wb_if ();
   logic exu_ready;
-  logic sq_ready;
+  logic lsu_sq_ready;
   // EXU out lsu
-  logic exu_ren, exu_wen;
+  logic exu_ren;
   logic [XLEN-1:0] exu_raddr;
-  logic [XLEN-1:0] exu_waddr;
   logic [4:0] exu_ralu;
-  logic [4:0] exu_walu;
-  logic [XLEN-1:0] exu_lsu_wdata;
 
   // WBU out
+  wbu_pipe_if wbu_if ();
   logic wbu_valid;
-  logic [XLEN-1:0] wbu_npc;
-  logic [XLEN-1:0] wbu_rpc;
-  logic wbu_jen, wbu_ben;
-  logic wbu_retire;
 
   // Reg out
   logic [XLEN-1:0] reg_rdata1, reg_rdata2;
@@ -175,35 +134,19 @@ module ysyx #(
   // lsu out
   logic [XLEN-1:0] lsu_rdata;
   logic lsu_exu_rvalid;
-  // lsu out load
-  logic [XLEN-1:0] lsu_araddr;
-  logic lsu_arvalid;
-  logic [7:0] lsu_rstrb;
-  // lsu out store
-  logic [XLEN-1:0] lsu_awaddr;
-  logic lsu_awvalid;
-  logic [XLEN-1:0] lsu_wdata;
-  logic [7:0] lsu_wstrb;
-  logic lsu_wvalid;
+  lsu_bus_if lsu_bus ();
 
   // bus out
-  logic bus_ifu_ready;
-  logic [XLEN-1:0] bus_ifu_rdata;
   logic bus_ifu_rvalid;
-  logic [XLEN-1:0] bus_lsu_rdata;
-  logic bus_lsu_rvalid;
-  logic bus_lsu_wready;
+  logic [XLEN-1:0] bus_ifu_rdata;
+  logic bus_ifu_ready;
 
   // IFU (Instruction Fetch Unit)
   ysyx_ifu ifu (
       .clock(clock),
 
       // <= wbu
-      .npc(wbu_npc),
-      .rpc(wbu_rpc),
-      .jen(wbu_jen),
-      .ben(wbu_ben),
-      .sys_retire(wbu_retire),
+      .wbu_if(wbu_if),
 
       .out_inst(ifu_inst),
       .out_pc(ifu_pc),
@@ -235,7 +178,7 @@ module ysyx #(
       .inst(ifu_inst),
       .pc(ifu_pc),
       .pnpc(ifu_pnpc),
-      .idu_if(idu_if),
+      .idu_if(idu_iqu),
 
       .prev_valid(ifu_valid),
       .next_ready(iqu_ready),
@@ -249,7 +192,7 @@ module ysyx #(
   ysyx_iqu iqu (
       .clock(clock),
 
-      .idu_if(idu_if),
+      .idu_if(idu_iqu),
       .iqu_exu_if(iqu_exu_if),
 
       .exu_wb_if(exu_wb_if),
@@ -262,15 +205,15 @@ module ysyx #(
       .rdata2 (reg_rdata2),
 
       // => exu (commit)
-      .iqu_cm_if(iqu_cm_if),
-      .cm_store (cm_store),
+      .iqu_cm_if(iqu_exu_cm),
+      .iqu_lsu_o(iqu_lsu),
 
       .out_flush_pipeline(flush_pipeline),
       .out_fence_time(fence_time),
 
       .prev_valid(idu_valid),
       .next_ready(exu_ready),
-      .sq_ready  (sq_ready),
+      .sq_ready  (lsu_sq_ready),
       .out_valid (iqu_valid),
       .out_ready (iqu_ready),
 
@@ -297,7 +240,7 @@ module ysyx #(
       .exu_wb_if(exu_wb_if),
 
       // <= iqu
-      .iqu_cm_if(iqu_cm_if),
+      .iqu_cm_if(iqu_exu_cm),
 
       .prev_valid(iqu_valid),
       .out_ready (exu_ready),
@@ -318,11 +261,7 @@ module ysyx #(
       .ben(iqu_wbu_if.ben),
       .sys_retire(iqu_wbu_if.sys_retire),
 
-      .out_npc(wbu_npc),
-      .out_rpc(wbu_rpc),
-      .out_jen(wbu_jen),
-      .out_ben(wbu_ben),
-      .out_retire(wbu_retire),
+      .wbu_if(wbu_if),
 
       .prev_valid(iqu_wbu_if.valid),
       .out_valid (wbu_valid),
@@ -360,23 +299,10 @@ module ysyx #(
       .out_rdata(lsu_rdata),
       .out_rvalid(lsu_exu_rvalid),
 
-      .cm_store(cm_store),
-      .out_sq_ready(sq_ready),
+      .iqu_lsu_i(iqu_lsu),
+      .out_sq_ready(lsu_sq_ready),
 
-      // to-from bus load
-      .out_lsu_araddr(lsu_araddr),
-      .out_lsu_arvalid(lsu_arvalid),
-      .out_lsu_rstrb(lsu_rstrb),
-      .bus_rdata(bus_lsu_rdata),
-      .lsu_rvalid(bus_lsu_rvalid),
-
-      // to-from bus store
-      .out_lsu_awaddr(lsu_awaddr),
-      .out_lsu_awvalid(lsu_awvalid),
-      .out_lsu_wdata(lsu_wdata),
-      .out_lsu_wstrb(lsu_wstrb),
-      .out_lsu_wvalid(lsu_wvalid),
-      .lsu_wready(bus_lsu_wready),
+      .lsu_bus(lsu_bus),
 
       .reset(reset)
   );
@@ -428,19 +354,8 @@ module ysyx #(
       .ifu_ready(ifu_ready),
       .out_ifu_rdata(bus_ifu_rdata),
       .out_ifu_rvalid(bus_ifu_rvalid),
-      // lsu load
-      .lsu_araddr(lsu_araddr),
-      .lsu_arvalid(lsu_arvalid),
-      .lsu_rstrb(lsu_rstrb),
-      .out_lsu_rdata(bus_lsu_rdata),
-      .out_lsu_rvalid(bus_lsu_rvalid),
-      // lsu store
-      .lsu_awaddr(lsu_awaddr),
-      .lsu_awvalid(lsu_awvalid),
-      .lsu_wdata(lsu_wdata),
-      .lsu_wstrb(lsu_wstrb),
-      .lsu_wvalid(lsu_wvalid),
-      .out_lsu_wready(bus_lsu_wready),
+
+      .lsu_bus(lsu_bus),
 
       .reset(reset)
   );
