@@ -56,13 +56,10 @@ repo_clone() {
 }
 
 repo_init() {
-  cd ysyxSoC
-  sed -i 's/git@github.com:/https:\/\/github.com\//' .git/config 
-  make dev-init
-  cd ..
+  make -C ./third_party/kingfish404/ysyxSoC/ dev-init verilog
 
-  # generated from chisel (scala) at `npc/ssrc`
-  cd ./npc/ssrc &&  make verilog && cd ../..
+  # generated from chisel (scala) at `rtl_scala`
+  make -C ./rtl_scala verilog -j`nproc`
 }
 
 if [ "$(uname)" == "Linux" ]; then
@@ -100,5 +97,5 @@ repo_init
 
 step=$((step + 1))
 source ./environment.env
-make -C ./npc pack
+make -C ./nsim pack
 echo "Step $step: Build environment setup complete."

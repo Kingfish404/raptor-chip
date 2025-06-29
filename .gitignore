@@ -6,7 +6,8 @@
 !/nexus-am/*
 !/nanos-lite/*
 !/navy-apps/*
-!/npc/*
+!/nsim/*
+!/rtl_*/*
 !/docs/*
 !Makefile
 !README.md
@@ -16,14 +17,14 @@
 !environment.env
 !/.github/workflows/*
 !Dockerfile
-/fceux-am
-/code
-/nvboard
-/am-kernels
+!*.v
+!*.vh
+!*.sv
+!*.svh
+/rtl_*/generated
+code
+build
 
 !/fpga
 
-# Ignore monorepo directories
-ysyxSoC
-yosys-sta
-rt-thread-am
+/third_party

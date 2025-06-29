@@ -148,7 +148,7 @@ class ysyx(CPU):
                 "Please set YSYX_HOME environment variable to the path of your YSYX repository."
             )
         os.system("make -C ${YSYX_HOME}/npc pack")
-        vdir = os.path.join(base_dir, "npc/build/pack")
+        vdir = os.path.join(base_dir, "nsim/build/pack")
         platform.add_verilog_include_path(vdir)
         platform.add_source_dir(vdir)
         print(base_dir)

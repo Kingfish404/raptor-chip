@@ -2,7 +2,7 @@ ifneq ($(words $(CURDIR)),1)
  $(error Unsupported: GNU Make cannot build in directories containing spaces, build elsewhere: '$(CURDIR)')
 endif
 
-ifeq ($(wildcard $(YSYX_HOME)/npc/Makefile),)
+ifeq ($(wildcard $(YSYX_HOME)/nsim/Makefile),)
   $(error YSYX_HOME=$(YSYX_HOME) is not a YSYX repo)
 endif
 
@@ -16,7 +16,7 @@ endif
 -include ./include/config/auto.conf
 -include ./include/config/auto.conf.cmd
 
-VSRC_PATH ?= $(abspath ./vsrc)
+VSRC_PATH ?= $(abspath ../rtl_sv)
 
 INC_PATH ?= $(abspath ./include) $(abspath $(VSRC_PATH)/include)
 
@@ -62,11 +62,11 @@ CCSRCS = $(shell find $(abspath ./csrc) -name "*.cc" -or -name "*.cpp")
 CHSRCS = $(shell find $(abspath ./csrc) -name "*.h" -or -name "*.hpp")
 
 ifeq ($(MROM_IMG),)
-MROM_IMG ?= $(NPC_HOME)/csrc/mem/mrom-data/build/mrom-data.bin
+MROM_IMG ?= $(NSIM_HOME)/csrc/mem/mrom-data/build/mrom-data.bin
 endif
 
-$(NPC_HOME)/csrc/mem/mrom-data/build/mrom-data.bin:
-	$(MAKE) -C $(NPC_HOME)/csrc/mem/mrom-data
+$(NSIM_HOME)/csrc/mem/mrom-data/build/mrom-data.bin:
+	$(MAKE) -C $(NSIM_HOME)/csrc/mem/mrom-data
 
 all: $(BIN)
 

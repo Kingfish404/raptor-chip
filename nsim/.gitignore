@@ -6,10 +6,6 @@
 !Makefile
 !*.mk
 !*.[cSh]
-!*.v
-!*.vh
-!*.sv
-!*.svh
 !*.cc
 !*.cpp
 !.gitignore
@@ -22,4 +18,3 @@ tmp/
 /obj_dir
 /include/config
 /include/generated
-/vsrc/generated

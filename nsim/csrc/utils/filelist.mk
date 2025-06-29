@@ -11,7 +11,7 @@ endif
 
 LIBCAPSTONE = $(YSYX_HOME)/nemu/tools/capstone/repo/libcapstone.$(suffix)
 CXXFLAGS += -I $(YSYX_HOME)/nemu/tools/capstone/repo/include
-$(YSYX_HOME)/npc/csrc/utils/disasm.cc: $(LIBCAPSTONE)
+$(YSYX_HOME)/nsim/csrc/utils/disasm.cc: $(LIBCAPSTONE)
 $(LIBCAPSTONE):
 	$(MAKE) -C $(YSYX_HOME)/nemu/tools/capstone
 endif

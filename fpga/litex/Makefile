@@ -1,4 +1,4 @@
-ifeq ($(wildcard $(YSYX_HOME)/npc/Makefile),)
+ifeq ($(wildcard $(YSYX_HOME)/nsim/Makefile),)
   $(error YSYX_HOME=$(YSYX_HOME) is not a YSYX repo)
 endif
 

@@ -41,8 +41,8 @@ source ./environment.env
 cd $NEMU_HOME && make riscv32_linux_defconfig && make && make run
 
 # 2. build and run NPC
-cd $NPC_HOME/ssrc && make verilog
-cd $NPC_HOME && make menuconfig && make ARCH=riscv32e-npc run
+cd $NSIM_HOME/ssrc && make verilog
+cd $NSIM_HOME && make menuconfig && make ARCH=riscv32e-npc run
 
 # 3. build and run the program you want
 
@@ -69,7 +69,7 @@ cd $YSYX_HOME/am-kernels/benchmarks/microbench && \
 ### follow `fpga/gowin-tang-nano-20k/README.md`
 
 ## package all sv files into one
-cd npc && make pack
+cd nsim && make pack
 ```
 
 ## Run OpenSBI & Linux Kernel
