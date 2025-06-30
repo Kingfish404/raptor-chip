@@ -1,8 +1,8 @@
 `include "ysyx.svh"
 `include "ysyx_if.svh"
 
-module ysyx_iqu #(
-    parameter unsigned QUEUE_SIZE = `YSYX_IQU_SIZE,
+module ysyx_rou #(
+    parameter unsigned IQ_SIZE = `YSYX_IQ_SIZE,
     parameter unsigned ROB_SIZE = `YSYX_ROB_SIZE,
     parameter unsigned RS_SIZE = `YSYX_RS_SIZE,
     parameter bit [7:0] REG_NUM = `YSYX_REG_NUM,
@@ -14,13 +14,13 @@ module ysyx_iqu #(
     // <= idu
     idu_pipe_if.in  idu_if,
     // => exu
-    idu_pipe_if.out iqu_exu_if,
+    idu_pipe_if.out rou_exu_if,
 
     // <= exu
-    exu_pipe_if.in exu_wb_if,
+    exu_pipe_if.in exu_rou,
 
     // <=> wbu & reg
-    exu_pipe_if.out iqu_wbu_if,
+    exu_pipe_if.out rou_wbu_if,
 
     // <=> reg
     output [4:0] out_rs1,
@@ -28,10 +28,10 @@ module ysyx_iqu #(
     input [XLEN-1:0] rdata1,
     input [XLEN-1:0] rdata2,
 
-    // => exu (commit)
-    exu_pipe_if.out iqu_cm_if,
-    // => lsu (commit)
-    iqu_lsu_if.out  iqu_lsu_o,
+    // <=>  csr commit
+    exu_pipe_if.out rou_csr,
+    // => store commit
+    rou_lsu_if.out  rou_lsu,
 
     // pipeline
     output logic out_flush_pipeline,
@@ -52,40 +52,40 @@ module ysyx_iqu #(
   logic [4:0] rs1, rs2;
 
   // === micro-op queue (UOQ) ===
-  logic [$clog2(QUEUE_SIZE)-1:0] uoq_tail;
-  logic [$clog2(QUEUE_SIZE)-1:0] uoq_head;
-  logic [QUEUE_SIZE-1:0] uoq_valid;
+  logic [$clog2(IQ_SIZE)-1:0] uoq_tail;
+  logic [$clog2(IQ_SIZE)-1:0] uoq_head;
+  logic [IQ_SIZE-1:0] uoq_valid;
 
-  logic [4:0] uoq_alu[QUEUE_SIZE];
-  logic uoq_jen[QUEUE_SIZE];
-  logic uoq_ben[QUEUE_SIZE];
-  logic uoq_wen[QUEUE_SIZE];
-  logic uoq_ren[QUEUE_SIZE];
-  logic uoq_atom[QUEUE_SIZE];
+  logic [4:0] uoq_alu[IQ_SIZE];
+  logic uoq_jen[IQ_SIZE];
+  logic uoq_ben[IQ_SIZE];
+  logic uoq_wen[IQ_SIZE];
+  logic uoq_ren[IQ_SIZE];
+  logic uoq_atom[IQ_SIZE];
 
-  logic uoq_system[QUEUE_SIZE];
-  logic uoq_ecall[QUEUE_SIZE];
-  logic uoq_ebreak[QUEUE_SIZE];
-  logic uoq_mret[QUEUE_SIZE];
-  logic [2:0] uoq_csr_csw[QUEUE_SIZE];
+  logic uoq_system[IQ_SIZE];
+  logic uoq_ecall[IQ_SIZE];
+  logic uoq_ebreak[IQ_SIZE];
+  logic uoq_mret[IQ_SIZE];
+  logic [2:0] uoq_csr_csw[IQ_SIZE];
 
-  logic uoq_trap[QUEUE_SIZE];
-  logic [XLEN-1:0] uoq_tval[QUEUE_SIZE];
-  logic [XLEN-1:0] uoq_cause[QUEUE_SIZE];
+  logic uoq_trap[IQ_SIZE];
+  logic [XLEN-1:0] uoq_tval[IQ_SIZE];
+  logic [XLEN-1:0] uoq_cause[IQ_SIZE];
 
-  logic uoq_f_i[QUEUE_SIZE];
-  logic uoq_f_time[QUEUE_SIZE];
+  logic uoq_f_i[IQ_SIZE];
+  logic uoq_f_time[IQ_SIZE];
 
-  logic [4:0] uoq_rd[QUEUE_SIZE];
-  logic [31:0] uoq_imm[QUEUE_SIZE];
-  logic [31:0] uoq_op1[QUEUE_SIZE];
-  logic [31:0] uoq_op2[QUEUE_SIZE];
-  logic [4:0] uoq_rs1[QUEUE_SIZE];
-  logic [4:0] uoq_rs2[QUEUE_SIZE];
+  logic [4:0] uoq_rd[IQ_SIZE];
+  logic [31:0] uoq_imm[IQ_SIZE];
+  logic [31:0] uoq_op1[IQ_SIZE];
+  logic [31:0] uoq_op2[IQ_SIZE];
+  logic [4:0] uoq_rs1[IQ_SIZE];
+  logic [4:0] uoq_rs2[IQ_SIZE];
 
-  logic [XLEN-1:0] uoq_pnpc[QUEUE_SIZE];
-  logic [31:0] uoq_inst[QUEUE_SIZE];
-  logic [XLEN-1:0] uoq_pc[QUEUE_SIZE];
+  logic [XLEN-1:0] uoq_pnpc[IQ_SIZE];
+  logic [31:0] uoq_inst[IQ_SIZE];
+  logic [XLEN-1:0] uoq_pc[IQ_SIZE];
   // === micro-op queue (UOQ) ===
 
   logic dispatch_ready;
@@ -209,46 +209,46 @@ module ysyx_iqu #(
   assign rs2_hit_rob = (rf_busy[rs2[`YSYX_REG_LEN-1:0]] && (rob_state[rf_reorder[rs2[`YSYX_REG_LEN-1:0]]] == WB));
   always_comb begin
     // Dispatch connect
-    iqu_exu_if.alu = uoq_alu[uoq_tail];
-    iqu_exu_if.jen = uoq_jen[uoq_tail];
-    iqu_exu_if.ben = uoq_ben[uoq_tail];
-    iqu_exu_if.wen = uoq_wen[uoq_tail];
-    iqu_exu_if.ren = uoq_ren[uoq_tail];
-    iqu_exu_if.atom = uoq_atom[uoq_tail];
+    rou_exu_if.alu = uoq_alu[uoq_tail];
+    rou_exu_if.jen = uoq_jen[uoq_tail];
+    rou_exu_if.ben = uoq_ben[uoq_tail];
+    rou_exu_if.wen = uoq_wen[uoq_tail];
+    rou_exu_if.ren = uoq_ren[uoq_tail];
+    rou_exu_if.atom = uoq_atom[uoq_tail];
 
-    iqu_exu_if.system = uoq_system[uoq_tail];
-    iqu_exu_if.ecall = uoq_ecall[uoq_tail];
-    iqu_exu_if.ebreak = uoq_ebreak[uoq_tail];
-    iqu_exu_if.mret = uoq_mret[uoq_tail];
-    iqu_exu_if.csr_csw = uoq_csr_csw[uoq_tail];
+    rou_exu_if.system = uoq_system[uoq_tail];
+    rou_exu_if.ecall = uoq_ecall[uoq_tail];
+    rou_exu_if.ebreak = uoq_ebreak[uoq_tail];
+    rou_exu_if.mret = uoq_mret[uoq_tail];
+    rou_exu_if.csr_csw = uoq_csr_csw[uoq_tail];
 
-    iqu_exu_if.trap = uoq_trap[uoq_tail];
-    iqu_exu_if.tval = uoq_tval[uoq_tail];
-    iqu_exu_if.cause = uoq_cause[uoq_tail];
+    rou_exu_if.trap = uoq_trap[uoq_tail];
+    rou_exu_if.tval = uoq_tval[uoq_tail];
+    rou_exu_if.cause = uoq_cause[uoq_tail];
 
-    iqu_exu_if.rd = uoq_rd[uoq_tail];
-    iqu_exu_if.imm = uoq_imm[uoq_tail];
-    iqu_exu_if.op1 = (rs1 != 0 ?
+    rou_exu_if.rd = uoq_rd[uoq_tail];
+    rou_exu_if.imm = uoq_imm[uoq_tail];
+    rou_exu_if.op1 = (rs1 != 0 ?
       (rs1_hit_rob ? rob_value[rf_reorder[rs1[`YSYX_REG_LEN-1:0]]] : rdata1)
       : uoq_op1[uoq_tail]);
-    iqu_exu_if.op2 = (rs2 != 0 ?
+    rou_exu_if.op2 = (rs2 != 0 ?
       (rs2_hit_rob ? rob_value[rf_reorder[rs2[`YSYX_REG_LEN-1:0]]] : rdata2)
       : uoq_op2[uoq_tail]);
-    iqu_exu_if.rs1 = (rs1 == 0 || rf_busy[rs1[`YSYX_REG_LEN-1:0]] == 0) ? 0 : rs1;
-    iqu_exu_if.rs2 = (rs2 == 0 || rf_busy[rs2[`YSYX_REG_LEN-1:0]] == 0) ? 0 : rs2;
+    rou_exu_if.rs1 = (rs1 == 0 || rf_busy[rs1[`YSYX_REG_LEN-1:0]] == 0) ? 0 : rs1;
+    rou_exu_if.rs2 = (rs2 == 0 || rf_busy[rs2[`YSYX_REG_LEN-1:0]] == 0) ? 0 : rs2;
 
-    iqu_exu_if.qj = (rs1 == 0 || rf_busy[rs1[`YSYX_REG_LEN-1:0]] == 0) ? 0 :
+    rou_exu_if.qj = (rs1 == 0 || rf_busy[rs1[`YSYX_REG_LEN-1:0]] == 0) ? 0 :
       (rs1_hit_rob ? 0 : (rf_reorder[rs1[`YSYX_REG_LEN-1:0]] + 'h1));
-    iqu_exu_if.qk = (rs2 == 0 || rf_busy[rs2[`YSYX_REG_LEN-1:0]] == 0) ? 0 :
+    rou_exu_if.qk = (rs2 == 0 || rf_busy[rs2[`YSYX_REG_LEN-1:0]] == 0) ? 0 :
       (rs2_hit_rob ? 0 : (rf_reorder[rs2[`YSYX_REG_LEN-1:0]] + 'h1));
-    iqu_exu_if.dest = {{1'h0}, {rob_tail}} + 'h1;
+    rou_exu_if.dest = {{1'h0}, {rob_tail}} + 'h1;
 
-    iqu_exu_if.inst = uoq_inst[uoq_tail];
-    iqu_exu_if.pc = uoq_pc[uoq_tail];
+    rou_exu_if.inst = uoq_inst[uoq_tail];
+    rou_exu_if.pc = uoq_pc[uoq_tail];
   end
 
   logic [$clog2(`YSYX_ROB_SIZE)-1:0] wb_dest;
-  assign wb_dest = exu_wb_if.dest[$clog2(`YSYX_ROB_SIZE)-1:0] - 1;
+  assign wb_dest = exu_rou.dest[$clog2(`YSYX_ROB_SIZE)-1:0] - 1;
   always @(posedge clock) begin
     if (reset || flush_pipeline || fence_time) begin
       rob_head <= 0;
@@ -286,26 +286,26 @@ module ysyx_iqu #(
         rob_alu[rob_tail] <= uoq_atom[uoq_tail] ? `YSYX_WSTRB_SW : uoq_alu[uoq_tail];
       end
       // Write back
-      if (exu_wb_if.valid) begin
+      if (exu_rou.valid) begin
         // Execute result get
         rob_state[wb_dest] <= WB;
 
-        rob_value[wb_dest] <= exu_wb_if.result;
-        rob_npc[wb_dest] <= exu_wb_if.npc;
-        rob_sys[wb_dest] <= exu_wb_if.sys_retire;
-        rob_ebreak[wb_dest] <= exu_wb_if.ebreak;
+        rob_value[wb_dest] <= exu_rou.result;
+        rob_npc[wb_dest] <= exu_rou.npc;
+        rob_sys[wb_dest] <= exu_rou.sys_retire;
+        rob_ebreak[wb_dest] <= exu_rou.ebreak;
 
-        rob_csr_wen[wb_dest] <= exu_wb_if.csr_wen;
-        rob_csr_wdata[wb_dest] <= exu_wb_if.csr_wdata;
-        rob_csr_addr[wb_dest] <= exu_wb_if.csr_addr;
-        rob_ecall[wb_dest] <= exu_wb_if.ecall;
-        rob_mret[wb_dest] <= exu_wb_if.mret;
+        rob_csr_wen[wb_dest] <= exu_rou.csr_wen;
+        rob_csr_wdata[wb_dest] <= exu_rou.csr_wdata;
+        rob_csr_addr[wb_dest] <= exu_rou.csr_addr;
+        rob_ecall[wb_dest] <= exu_rou.ecall;
+        rob_mret[wb_dest] <= exu_rou.mret;
 
-        rob_trap[wb_dest] <= exu_wb_if.trap;
-        rob_tval[wb_dest] <= exu_wb_if.tval;
-        rob_cause[wb_dest] <= exu_wb_if.cause;
-        rob_sq_waddr[wb_dest] <= exu_wb_if.sq_waddr;
-        rob_sq_wdata[wb_dest] <= exu_wb_if.sq_wdata;
+        rob_trap[wb_dest] <= exu_rou.trap;
+        rob_tval[wb_dest] <= exu_rou.tval;
+        rob_cause[wb_dest] <= exu_rou.cause;
+        rob_sq_waddr[wb_dest] <= exu_rou.sq_waddr;
+        rob_sq_wdata[wb_dest] <= exu_rou.sq_wdata;
       end
       // Commit
       if (head_valid) begin
@@ -341,37 +341,37 @@ module ysyx_iqu #(
   assign head_valid = rob_busy[rob_head] && rob_state[rob_head] == WB
         && (sq_ready || !rob_store[rob_head]) && !flush_pipeline;
 
-  assign iqu_wbu_if.rd = rob_rd[rob_head];
-  assign iqu_wbu_if.inst = rob_inst[rob_head];
-  assign iqu_wbu_if.pc = rob_pc[rob_head];
+  assign rou_wbu_if.rd = rob_rd[rob_head];
+  assign rou_wbu_if.inst = rob_inst[rob_head];
+  assign rou_wbu_if.pc = rob_pc[rob_head];
 
-  assign iqu_wbu_if.result = rob_value[rob_head];
-  assign iqu_wbu_if.npc = rob_npc[rob_head];
-  assign iqu_wbu_if.sys_retire = rob_sys[rob_head] && head_valid;
-  assign iqu_wbu_if.jen = rob_jen[rob_head];
-  assign iqu_wbu_if.ben = rob_ben[rob_head];
+  assign rou_wbu_if.result = rob_value[rob_head];
+  assign rou_wbu_if.npc = rob_npc[rob_head];
+  assign rou_wbu_if.sys_retire = rob_sys[rob_head] && head_valid;
+  assign rou_wbu_if.jen = rob_jen[rob_head];
+  assign rou_wbu_if.ben = rob_ben[rob_head];
 
-  assign iqu_wbu_if.ebreak = rob_ebreak[rob_head] && head_valid;
-  assign iqu_wbu_if.fence_i = rob_f_i[rob_head] && head_valid;
-  assign iqu_wbu_if.valid = head_valid;
+  assign rou_wbu_if.ebreak = rob_ebreak[rob_head] && head_valid;
+  assign rou_wbu_if.fence_i = rob_f_i[rob_head] && head_valid;
+  assign rou_wbu_if.valid = head_valid;
 
-  assign iqu_cm_if.pc = rob_pc[rob_head];
-  assign iqu_cm_if.csr_wdata = rob_csr_wdata[rob_head];
-  assign iqu_cm_if.csr_wen = rob_csr_wen[rob_head];
-  assign iqu_cm_if.csr_addr = rob_csr_addr[rob_head];
-  assign iqu_cm_if.ecall = rob_ecall[rob_head];
-  assign iqu_cm_if.mret = rob_mret[rob_head];
-  assign iqu_cm_if.ebreak = rob_ebreak[rob_head];
+  assign rou_csr.pc = rob_pc[rob_head];
+  assign rou_csr.csr_wdata = rob_csr_wdata[rob_head];
+  assign rou_csr.csr_wen = rob_csr_wen[rob_head];
+  assign rou_csr.csr_addr = rob_csr_addr[rob_head];
+  assign rou_csr.ecall = rob_ecall[rob_head];
+  assign rou_csr.mret = rob_mret[rob_head];
+  assign rou_csr.ebreak = rob_ebreak[rob_head];
 
-  assign iqu_cm_if.trap = rob_trap[rob_head];
-  assign iqu_cm_if.tval = rob_tval[rob_head];
-  assign iqu_cm_if.cause = rob_cause[rob_head];
+  assign rou_csr.trap = rob_trap[rob_head];
+  assign rou_csr.tval = rob_tval[rob_head];
+  assign rou_csr.cause = rob_cause[rob_head];
+  assign rou_csr.valid = head_valid;
 
-  assign iqu_lsu_o.store = rob_store[rob_head];
-  assign iqu_lsu_o.alu = rob_alu[rob_head];
-  assign iqu_lsu_o.sq_waddr = rob_sq_waddr[rob_head];
-  assign iqu_lsu_o.sq_wdata = rob_sq_wdata[rob_head];
-  assign iqu_lsu_o.valid = head_valid;
+  assign rou_lsu.store = rob_store[rob_head];
+  assign rou_lsu.alu = rob_alu[rob_head];
+  assign rou_lsu.sq_waddr = rob_sq_waddr[rob_head];
+  assign rou_lsu.sq_wdata = rob_sq_wdata[rob_head];
+  assign rou_lsu.valid = head_valid;
 
-  assign iqu_cm_if.valid = head_valid;
 endmodule

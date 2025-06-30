@@ -120,7 +120,22 @@ interface exu_pipe_if;
   );
 endinterface
 
-interface iqu_lsu_if;
+
+interface exu_csr_if #(
+    parameter bit [7:0] R_W  = 12,
+    parameter bit [7:0] XLEN = `YSYX_XLEN
+);
+  logic [ R_W-1:0] raddr;
+
+  logic [XLEN-1:0] rdata;
+  logic [XLEN-1:0] mtvec;
+  logic [XLEN-1:0] mepc;
+
+  modport master(output raddr, input rdata, mtvec, mepc);
+  modport slave(input raddr, output rdata, mtvec, mepc);
+endinterface
+
+interface rou_lsu_if;
   logic store;
   logic [4:0] alu;
   logic [`YSYX_XLEN-1:0] sq_waddr;

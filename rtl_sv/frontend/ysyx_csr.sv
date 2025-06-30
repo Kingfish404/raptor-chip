@@ -1,11 +1,12 @@
 `include "ysyx.svh"
+`include "ysyx_if.svh"
 `include "ysyx_dpi_c.svh"
 
-module ysyx_exu_csr #(
-    parameter bit [7:0] XLEN = `YSYX_XLEN,
+module ysyx_csr #(
     parameter bit [7:0] R_W = 12,
     parameter bit [7:0] REG_W = 5,
-    parameter bit [XLEN-1:0] RESET_VAL = 0
+    parameter bit [XLEN-1:0] RESET_VAL = 0,
+    parameter bit [7:0] XLEN = `YSYX_XLEN
 ) (
     input clock,
 
@@ -23,10 +24,8 @@ module ysyx_exu_csr #(
     input [XLEN-1:0] tval,
     input [XLEN-1:0] cause,
 
-    input  [ R_W-1:0] raddr,
-    output [XLEN-1:0] out_rdata,
-    output [XLEN-1:0] out_mtvec,
-    output [XLEN-1:0] out_mepc,
+    exu_csr_if.slave exu_csr,
+
 
     input reset
 );
@@ -74,6 +73,8 @@ module ysyx_exu_csr #(
   logic [XLEN-1:0] csr[32];
   logic mstatus_mie;
   csr_t waddr_reg, raddr_reg;
+  logic [R_W-1:0] raddr;
+  assign raddr = exu_csr.raddr;
   assign waddr_reg = csr_t'(
     ({REG_W{waddr==`YSYX_CSR_SSTATUS}}) & (SSTATUS) |
     ({REG_W{waddr==`YSYX_CSR_SIE____}}) & (SIE____) |
@@ -139,7 +140,7 @@ module ysyx_exu_csr #(
     (MNONE__)
   );
 
-  assign out_rdata = (
+  assign exu_csr.rdata = (
     ({XLEN{raddr_reg == SSTATUS}}) & (csr[SSTATUS]) |
     ({XLEN{raddr_reg == SIE____}}) & (csr[SIE____]) |
     ({XLEN{raddr_reg == STVEC__}}) & (csr[STVEC__]) |
@@ -177,8 +178,8 @@ module ysyx_exu_csr #(
     (0)
   );
 
-  assign out_mepc = csr[MEPC___];
-  assign out_mtvec = csr[MTVEC__];
+  assign exu_csr.mepc = csr[MEPC___];
+  assign exu_csr.mtvec = csr[MTVEC__];
 
   assign mstatus_mie = csr[MSTATUS][`YSYX_CSR_MSTATUS_MIE_];
 

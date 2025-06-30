@@ -121,13 +121,13 @@ YOSYS_OPENSTA:
 	make -C $(YOSYS_OPENSTA) init init_opensta
 
 pack: $(VSRCS)
-	mkdir -p $(YSYX_HOME)/npc/build/pack
-	cp -r $(VSRCS) $(YSYX_HOME)/npc/build/pack
+	mkdir -p $(YSYX_HOME)/nsim/build/pack
+	cp -r $(VSRCS) $(YSYX_HOME)/nsim/build/pack
 	cp -r $(abspath $(VSRC_PATH)/include)/*.svh \
 		  $(abspath $(VSRC_PATH)/include/dpic_mock)/*.svh \
-		  $(abspath $(VSRC_PATH)/include/npc)/*.svh $(YSYX_HOME)/npc/build/pack
-	cp scripts/pack.sh $(YSYX_HOME)/npc/build/pack && chmod +x $(YSYX_HOME)/npc/build/pack/pack.sh
-	cd $(YSYX_HOME)/npc/build/pack && ./pack.sh
+		  $(abspath $(VSRC_PATH)/include/npc)/*.svh $(YSYX_HOME)/nsim/build/pack
+	cp scripts/pack.sh $(YSYX_HOME)/nsim/build/pack && chmod +x $(YSYX_HOME)/nsim/build/pack/pack.sh
+	cd $(YSYX_HOME)/nsim/build/pack && ./pack.sh
 
 sta:
 	echo $(MAKECMDGOALS)

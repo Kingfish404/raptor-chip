@@ -167,7 +167,7 @@ typedef struct
   long long int ifu_stall_cycle;
 
   long long int ifu_sys_hazard_cycle;
-  long long int iqu_hazard_cycle;
+  long long int rou_hazard_cycle;
 
   long long int lsu_load_cnt;
   long long int lsu_stall_cycle;

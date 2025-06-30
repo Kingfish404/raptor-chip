@@ -102,21 +102,22 @@ module ysyx #(
   logic ifu_arvalid, ifu_bus_lock;
 
   // IDU out
-  idu_pipe_if idu_iqu ();
+  idu_pipe_if idu_rou ();
   logic idu_valid, idu_ready;
 
-  // IQU out
-  idu_pipe_if iqu_exu_if ();
-  exu_pipe_if iqu_wbu_if ();
-  exu_pipe_if iqu_exu_cm ();
-  iqu_lsu_if iqu_lsu ();
-  logic iqu_valid, iqu_ready;
-  logic [4:0] iqu_rs1, iqu_rs2;
+  // ROU out
+  idu_pipe_if rou_exu_if ();
+  exu_pipe_if rou_wbu_if ();
+  exu_pipe_if rou_csr ();
+  rou_lsu_if rou_lsu ();
+  logic rou_valid, rou_ready;
+  logic [4:0] rou_rs1, rou_rs2;
   logic flush_pipeline;
   logic fence_time;
 
   // EXU out
-  exu_pipe_if exu_wb_if ();
+  exu_pipe_if exu_rou ();
+  exu_csr_if exu_csr ();
   logic exu_ready;
   logic lsu_sq_ready;
   // EXU out lsu
@@ -161,7 +162,7 @@ module ysyx #(
       .ifu_rdata(bus_ifu_rdata),
       .ifu_rvalid(bus_ifu_rvalid),
 
-      .fence_i(iqu_wbu_if.fence_i),
+      .fence_i(rou_wbu_if.fence_i),
 
       .prev_valid(wbu_valid),
       .next_ready(idu_ready),
@@ -178,35 +179,36 @@ module ysyx #(
       .inst(ifu_inst),
       .pc(ifu_pc),
       .pnpc(ifu_pnpc),
-      .idu_if(idu_iqu),
+      .idu_if(idu_rou),
 
       .prev_valid(ifu_valid),
-      .next_ready(iqu_ready),
+      .next_ready(rou_ready),
       .out_valid (idu_valid),
       .out_ready (idu_ready),
 
       .reset(reset || flush_pipeline)
   );
 
-  // IQU (Instruction Queue Unit)
-  ysyx_iqu iqu (
+  // ROU (Re-Order Unit)
+  ysyx_rou rou (
       .clock(clock),
 
-      .idu_if(idu_iqu),
-      .iqu_exu_if(iqu_exu_if),
+      .idu_if(idu_rou),
+      .rou_exu_if(rou_exu_if),
 
-      .exu_wb_if(exu_wb_if),
+      .exu_rou(exu_rou),
 
-      .iqu_wbu_if(iqu_wbu_if),
+      .rou_wbu_if(rou_wbu_if),
 
-      .out_rs1(iqu_rs1),
-      .out_rs2(iqu_rs2),
+      .out_rs1(rou_rs1),
+      .out_rs2(rou_rs2),
       .rdata1 (reg_rdata1),
       .rdata2 (reg_rdata2),
 
-      // => exu (commit)
-      .iqu_cm_if(iqu_exu_cm),
-      .iqu_lsu_o(iqu_lsu),
+      // <=>  csr commit
+      .rou_csr(rou_csr),
+      // => store commit
+      .rou_lsu(rou_lsu),
 
       .out_flush_pipeline(flush_pipeline),
       .out_fence_time(fence_time),
@@ -214,8 +216,8 @@ module ysyx #(
       .prev_valid(idu_valid),
       .next_ready(exu_ready),
       .sq_ready  (lsu_sq_ready),
-      .out_valid (iqu_valid),
-      .out_ready (iqu_ready),
+      .out_valid (rou_valid),
+      .out_ready (rou_ready),
 
       .reset(reset || flush_pipeline)
   );
@@ -225,7 +227,7 @@ module ysyx #(
       .clock(clock),
 
       // <= idu
-      .idu_if(iqu_exu_if),
+      .idu_if(rou_exu_if),
       .flush_pipeline(flush_pipeline),
 
       // => lsu
@@ -236,13 +238,14 @@ module ysyx #(
       .lsu_rdata(lsu_rdata),
       .lsu_exu_rvalid(lsu_exu_rvalid),
 
-      // => iqu & (wbu)
-      .exu_wb_if(exu_wb_if),
+      // => rou & (wbu)
+      .exu_rou(exu_rou),
+      .exu_csr(exu_csr),
 
-      // <= iqu
-      .iqu_cm_if(iqu_exu_cm),
+      // <= rou
+      .rou_cm_if(rou_csr),
 
-      .prev_valid(iqu_valid),
+      .prev_valid(rou_valid),
       .out_ready (exu_ready),
 
       .reset(reset)
@@ -252,18 +255,18 @@ module ysyx #(
   ysyx_wbu wbu (
       .clock(clock),
 
-      .inst(iqu_wbu_if.inst),
-      .pc(iqu_wbu_if.pc),
-      .ebreak(iqu_wbu_if.ebreak),
+      .inst(rou_wbu_if.inst),
+      .pc(rou_wbu_if.pc),
+      .ebreak(rou_wbu_if.ebreak),
 
-      .npc_wdata(iqu_wbu_if.npc),
-      .jen(iqu_wbu_if.jen),
-      .ben(iqu_wbu_if.ben),
-      .sys_retire(iqu_wbu_if.sys_retire),
+      .npc_wdata(rou_wbu_if.npc),
+      .jen(rou_wbu_if.jen),
+      .ben(rou_wbu_if.ben),
+      .sys_retire(rou_wbu_if.sys_retire),
 
       .wbu_if(wbu_if),
 
-      .prev_valid(iqu_wbu_if.valid),
+      .prev_valid(rou_wbu_if.valid),
       .out_valid (wbu_valid),
 
       .reset(reset)
@@ -272,14 +275,37 @@ module ysyx #(
   ysyx_reg regs (
       .clock(clock),
 
-      .write_en(iqu_wbu_if.valid && flush_pipeline == 0),
-      .waddr(iqu_wbu_if.rd),
-      .wdata(iqu_wbu_if.result),
+      .write_en(rou_wbu_if.valid && flush_pipeline == 0),
+      .waddr(rou_wbu_if.rd),
+      .wdata(rou_wbu_if.result),
 
-      .s1addr  (iqu_rs1),
-      .s2addr  (iqu_rs2),
+      .s1addr  (rou_rs1),
+      .s2addr  (rou_rs2),
       .out_src1(reg_rdata1),
       .out_src2(reg_rdata2),
+
+      .reset(reset)
+  );
+
+  ysyx_csr csrs (
+      .clock(clock),
+
+      .wen(rou_csr.csr_wen),
+      .valid(rou_csr.valid),
+      .ecall(rou_csr.ecall),
+      .mret(rou_csr.mret),
+      .ebreak(rou_csr.ebreak),
+
+      .trap(rou_csr.trap),
+      .tval(rou_csr.tval),
+
+      .cause(rou_csr.cause),
+
+      .waddr(rou_csr.csr_addr),
+      .wdata(rou_csr.csr_wdata),
+      .pc(rou_csr.pc),
+
+      .exu_csr(exu_csr),
 
       .reset(reset)
   );
@@ -299,7 +325,7 @@ module ysyx #(
       .out_rdata(lsu_rdata),
       .out_rvalid(lsu_exu_rvalid),
 
-      .iqu_lsu_i(iqu_lsu),
+      .rou_lsu(rou_lsu),
       .out_sq_ready(lsu_sq_ready),
 
       .lsu_bus(lsu_bus),

@@ -14,10 +14,10 @@
  * Microarchitecture (uarch)
  * See ./../ysyx.sv for the pipeline stages.
        +-----+                          +-----+
-     ,-| BPU |          |#(IQU_SIZE)  ,-| MUL #(YSYX_M_FAST)
+     ,-| BPU |          |#(IQ_SIZE)  ,-| MUL #(YSYX_M_FAST)
      | +-----+          |    ,------. | +--+--+
   +--|--+    +-----+    +----v+    +--|--+
-  | IFU +----> IDU +----> IQU +-----> EXU +-----| #(RS_SIZE)
+  | IFU +----> IDU +----> ROU +-----> EXU +-----| #(RS_SIZE)
   +^-|--+    +-----+    ++--+-+     +---^+
    | |                   |  |           |
    | | +-----+      +----v+ |#(RS_SIZE) |
@@ -37,7 +37,7 @@
  * @param YSYX_M_FAST: M Extension Fast Mode (one cycle)
  * @param L1I_LINE_LEN: L1I Line Length
  * @param L1I_LEN: L1I Length (Size)
- * @param IQU_SIZE: Issue Queue Size
+ * @param IQ_SIZE: Issue Queue Size
  * @param RS_SIZE: Revervation Station Size
  * @param L1D_LEN: L1D Length (Size)
  */
@@ -49,7 +49,7 @@
 `define YSYX_PHT_SIZE 128
 `define YSYX_BTB_SIZE 128
 
-`define YSYX_IQU_SIZE 4
+`define YSYX_IQ_SIZE 4
 `define YSYX_RS_SIZE 4
 `define YSYX_SQ_SIZE 8
 `define YSYX_ROB_SIZE 4

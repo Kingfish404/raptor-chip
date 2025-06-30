@@ -20,8 +20,8 @@ module ysyx_lsu #(
     output [XLEN-1:0] out_rdata,
     output out_rvalid,
 
-    // from iqu
-    iqu_lsu_if.in iqu_lsu_i,
+    // from rou
+    rou_lsu_if.in rou_lsu,
     output logic out_sq_ready,
 
     lsu_bus_if.master lsu_bus,
@@ -96,12 +96,12 @@ module ysyx_lsu #(
       sq_tail  <= 0;
       sq_valid <= 0;
     end else begin
-      if (iqu_lsu_i.valid && iqu_lsu_i.store && sq_ready) begin
+      if (rou_lsu.valid && rou_lsu.store && sq_ready) begin
         // Store Commit
         sq_valid[sq_tail] <= 1;
-        sq_alu[sq_tail] <= iqu_lsu_i.alu;
-        sq_waddr[sq_tail] <= iqu_lsu_i.sq_waddr;
-        sq_wdata[sq_tail] <= iqu_lsu_i.sq_wdata;
+        sq_alu[sq_tail] <= rou_lsu.alu;
+        sq_waddr[sq_tail] <= rou_lsu.sq_waddr;
+        sq_wdata[sq_tail] <= rou_lsu.sq_wdata;
         sq_tail <= sq_tail + 1;
         if (store_in_sq && store_in_sq_idx != sq_tail) begin
           sq_waddr[store_in_sq_idx] <= 0;
@@ -127,7 +127,7 @@ module ysyx_lsu #(
     store_in_sq = 0;
     store_in_sq_idx = 0;
     for (int i = 0; i < SQ_SIZE; i++) begin
-      if (sq_waddr[i] == (iqu_lsu_i.sq_waddr) && !store_in_sq) begin
+      if (sq_waddr[i] == (rou_lsu.sq_waddr) && !store_in_sq) begin
         store_in_sq = 1;
         store_in_sq_idx = i[$clog2(SQ_SIZE)-1:0];
       end

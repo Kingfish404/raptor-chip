@@ -18,10 +18,11 @@ module ysyx_exu #(
     // <= lsu
     input [XLEN-1:0] lsu_rdata,
     input lsu_exu_rvalid,
-    // => iqu & (wbu)
-    exu_pipe_if.out exu_wb_if,
-    // <= iqu (commit, cm)
-    exu_pipe_if.in iqu_cm_if,
+    // => rou & (wbu)
+    exu_pipe_if.out exu_rou,
+    exu_csr_if.master exu_csr,
+    // <= rou (commit, cm)
+    exu_pipe_if.in rou_cm_if,
 
     input prev_valid,
     output logic out_ready,
@@ -160,12 +161,12 @@ module ysyx_exu #(
             // Dispatch receive
             rs_busy[free_idx] <= 1;
             rs_alu[free_idx] <= idu_if.alu;
-            rs_vj[free_idx] <= (exu_wb_if.valid && exu_wb_if.dest == idu_if.qj) ?
-              exu_wb_if.result : idu_if.op1;
-            rs_vk[free_idx] <= (exu_wb_if.valid && exu_wb_if.dest == idu_if.qk) ?
-              exu_wb_if.result : idu_if.op2;
-            rs_qj[free_idx] <= (exu_wb_if.valid && exu_wb_if.dest == idu_if.qj) ? 0 : idu_if.qj;
-            rs_qk[free_idx] <= (exu_wb_if.valid && exu_wb_if.dest == idu_if.qk) ? 0 : idu_if.qk;
+            rs_vj[free_idx] <= (exu_rou.valid && exu_rou.dest == idu_if.qj) ?
+              exu_rou.result : idu_if.op1;
+            rs_vk[free_idx] <= (exu_rou.valid && exu_rou.dest == idu_if.qk) ?
+              exu_rou.result : idu_if.op2;
+            rs_qj[free_idx] <= (exu_rou.valid && exu_rou.dest == idu_if.qj) ? 0 : idu_if.qj;
+            rs_qk[free_idx] <= (exu_rou.valid && exu_rou.dest == idu_if.qk) ? 0 : idu_if.qk;
             rs_dest[free_idx] <= idu_if.dest;
 
             rs_wen[free_idx] <= idu_if.wen;
@@ -305,34 +306,34 @@ module ysyx_exu #(
     ) :
     rs_mul_a[valid_idx]
     );
-  assign exu_wb_if.rs_idx = free_idx;
-  assign exu_wb_if.dest = rs_dest[valid_idx];
-  assign exu_wb_if.result = reg_wdata;
+  assign exu_rou.rs_idx = free_idx;
+  assign exu_rou.dest = rs_dest[valid_idx];
+  assign exu_rou.result = reg_wdata;
 
-  assign exu_wb_if.npc = (
+  assign exu_rou.npc = (
     (rs_ecall[valid_idx] || rs_ebreak[valid_idx] || rs_trap[valid_idx]) ? mtvec :
     (rs_mret[valid_idx]) ? mepc :
     ((rs_br_jmp[valid_idx]) || (rs_br_cond[valid_idx] && |rs_a[valid_idx])) ? addr_exu :
     (rs_pc[valid_idx] + 4));
-  assign exu_wb_if.sys_retire = rs_system[valid_idx];
-  assign exu_wb_if.ebreak = rs_ebreak[valid_idx];
+  assign exu_rou.sys_retire = rs_system[valid_idx];
+  assign exu_rou.ebreak = rs_ebreak[valid_idx];
 
-  assign exu_wb_if.pc = rs_pc[valid_idx];
-  assign exu_wb_if.inst = rs_inst[valid_idx];
+  assign exu_rou.pc = rs_pc[valid_idx];
+  assign exu_rou.inst = rs_inst[valid_idx];
 
-  assign exu_wb_if.csr_wen = |rs_csr_csw[valid_idx];
-  assign exu_wb_if.csr_wdata = csr_wdata;
-  assign exu_wb_if.csr_addr = rs_imm[valid_idx][11:0];
-  assign exu_wb_if.ecall = rs_ecall[valid_idx];
-  assign exu_wb_if.mret = rs_mret[valid_idx];
+  assign exu_rou.csr_wen = |rs_csr_csw[valid_idx];
+  assign exu_rou.csr_wdata = csr_wdata;
+  assign exu_rou.csr_addr = rs_imm[valid_idx][11:0];
+  assign exu_rou.ecall = rs_ecall[valid_idx];
+  assign exu_rou.mret = rs_mret[valid_idx];
 
-  assign exu_wb_if.trap = rs_trap[valid_idx];
-  assign exu_wb_if.tval = rs_tval[valid_idx];
-  assign exu_wb_if.cause = rs_cause[valid_idx];
+  assign exu_rou.trap = rs_trap[valid_idx];
+  assign exu_rou.tval = rs_tval[valid_idx];
+  assign exu_rou.cause = rs_cause[valid_idx];
 
-  assign exu_wb_if.sq_waddr = rs_vj[valid_idx] + rs_imm[valid_idx];
-  assign exu_wb_if.sq_wdata = rs_data[valid_idx];
-  assign exu_wb_if.valid = valid_found;
+  assign exu_rou.sq_waddr = rs_vj[valid_idx] + rs_imm[valid_idx];
+  assign exu_rou.sq_wdata = rs_data[valid_idx];
+  assign exu_rou.valid = valid_found;
 
 `ifdef YSYX_M_EXTENSION
   // alu for M Extension
@@ -356,28 +357,9 @@ module ysyx_exu #(
     ({XLEN{rs_csr_csw[valid_idx][2]}} & (csr_rdata & ~rs_vj[valid_idx])) |
     (0)
   );
-  ysyx_exu_csr csrs (
-      .clock(clock),
-      .reset(reset),
 
-      .wen(iqu_cm_if.csr_wen),
-      .valid(iqu_cm_if.valid),
-      .ecall(iqu_cm_if.ecall),
-      .mret(iqu_cm_if.mret),
-      .ebreak(iqu_cm_if.ebreak),
-
-      .trap(iqu_cm_if.trap),
-      .tval(iqu_cm_if.tval),
-
-      .cause(iqu_cm_if.cause),
-
-      .waddr(iqu_cm_if.csr_addr),
-      .wdata(iqu_cm_if.csr_wdata),
-      .pc(iqu_cm_if.pc),
-
-      .raddr(rs_imm[valid_idx][11:0]),
-      .out_rdata(csr_rdata),
-      .out_mepc(mepc),
-      .out_mtvec(mtvec)
-  );
+  assign exu_csr.raddr = rs_imm[valid_idx][11:0];
+  assign csr_rdata = exu_csr.rdata;
+  assign mepc = exu_csr.mepc;
+  assign mtvec = exu_csr.mtvec;
 endmodule
