@@ -11,6 +11,10 @@ module ysyx_ifu_l1i #(
     input clock,
 
     input [XLEN-1:0] pc_ifu,
+    output [XLEN-1:0] out_inst,
+    output l1i_valid,
+    output l1i_ready,
+
     input invalid_l1i,
     input flush_pipeline,
 
@@ -20,10 +24,6 @@ module ysyx_ifu_l1i #(
     output out_ifu_arvalid,
     input [XLEN-1:0] ifu_rdata,
     input ifu_rvalid,
-
-    output [XLEN-1:0] out_inst,
-    output l1i_valid,
-    output l1i_ready,
 
     input reset
 );
@@ -93,14 +93,12 @@ module ysyx_ifu_l1i #(
           end
         end
         RD_0:
-        if (ifu_rvalid && !hit) begin
+        if (ifu_rvalid) begin
           if (ifu_sdram_arburst) begin
             l1i_state <= RD_1;
           end else begin
             l1i_state <= WAIT;
           end
-          l1i[addr_idx][0] <= ifu_rdata;
-          l1i_tag[addr_idx][0] <= addr_tag;
         end
         WAIT: begin
           l1i_state <= RD_1;
@@ -108,9 +106,6 @@ module ysyx_ifu_l1i #(
         RD_1: begin
           if (ifu_rvalid) begin
             l1i_state <= WB_0;
-            l1i[addr_idx][1] <= ifu_rdata;
-            l1i_tag[addr_idx][1] <= addr_tag;
-            l1ic_valid[addr_idx] <= 1'b1;
           end
         end
         WB_0: begin
@@ -126,6 +121,20 @@ module ysyx_ifu_l1i #(
           received_flush_pipeline <= 0;
         end
       endcase
+    end
+  end
+
+  always @(posedge clock) begin
+    if (reset) begin
+      l1ic_valid <= 0;
+    end else begin
+      if (ifu_rvalid) begin
+        l1i[addr_idx][l1i_state==RD_0?0 : 1] <= ifu_rdata;
+        l1i_tag[addr_idx][l1i_state==RD_0?0 : 1] <= addr_tag;
+        if (l1i_state == RD_1) begin
+          l1ic_valid[addr_idx] <= 1'b1;
+        end
+      end
     end
   end
 endmodule

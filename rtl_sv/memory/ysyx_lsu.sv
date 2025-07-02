@@ -46,6 +46,7 @@ module ysyx_lsu #(
   logic [7:0] wstrb, rstrb;
   logic arvalid;
 
+  logic raddr_valid;
   logic [32-1:0] l1d[L1D_SIZE], lsu_rdata;
   logic [L1D_SIZE-1:0] l1d_valid;
   logic [32-L1D_LEN-2-1:0] l1d_tag[L1D_SIZE];
@@ -53,12 +54,18 @@ module ysyx_lsu #(
   logic [32-L1D_LEN-2-1:0] addr_tag;
   logic [L1D_LEN-1:0] addr_idx;
   logic l1d_cache_hit;
+  logic [XLEN-1:0] l1d_data;
   logic uncacheable;
 
   logic [32-L1D_LEN-2-1:0] waddr_tag;
   logic [L1D_LEN-1:0] waddr_idx;
   logic l1d_cache_hit_w;
-  logic raddr_valid;
+
+  logic l1d_w_update;
+  logic [XLEN-1:0] l1d_w_data;
+  logic l1d_w_valid;
+  logic [32-L1D_LEN-2-1:0] l1d_w_tag;
+  logic [L1D_LEN-1:0] l1d_w_idx;
 
   // === Store Queue (SQ) ===
   logic sq_ready;
@@ -159,9 +166,6 @@ module ysyx_lsu #(
 
   assign wready = state_store == LS_S_R;
 
-  assign l1d_cache_hit = (l1d_valid[addr_idx] == 1'b1) && (l1d_tag[addr_idx] == addr_tag);
-  assign addr_tag = raddr[XLEN-1:L1D_LEN+2];
-  assign addr_idx = raddr[L1D_LEN+2-1:0+2];
   assign uncacheable = (
          (raddr >= 'h02000048 && raddr < 'h02000050) ||
          (raddr >= 'h0c000000 && raddr < 'h0d000000) ||
@@ -169,6 +173,11 @@ module ysyx_lsu #(
          (raddr >= 'ha0000000 && raddr < 'hb0000000) ||
          (0)
        );
+
+  assign addr_tag = raddr[XLEN-1:L1D_LEN+2];
+  assign addr_idx = raddr[L1D_LEN+2-1:0+2];
+  assign l1d_cache_hit = (l1d_valid[addr_idx] == 1'b1) && (l1d_tag[addr_idx] == addr_tag);
+  assign l1d_data = l1d[addr_idx];
 
   assign waddr_tag = waddr[XLEN-1:L1D_LEN+2];
   assign waddr_idx = waddr[L1D_LEN+2-1:0+2];
@@ -205,9 +214,9 @@ module ysyx_lsu #(
            ({XLEN{ralu == `YSYX_ALU_LHU_}} & rdata & 'hffff) |
            ({XLEN{ralu == `YSYX_ALU_LW__}} & rdata)
          );
+
   always @(posedge clock) begin
     if (reset) begin
-      l1d_valid   <= 0;
       state_load  <= IF_A;
       state_store <= LS_S_V;
     end else begin
@@ -223,7 +232,7 @@ module ysyx_lsu #(
               lsu_rdata  <= sq_wdata[load_in_sq_idx] << ({{3'b0}, raddr[1:0]} << 3);
             end else if (l1d_cache_hit) begin
               state_load <= IF_V;
-              lsu_rdata  <= l1d[addr_idx];
+              lsu_rdata  <= l1d_data;
             end else begin
               state_load <= IF_L;
             end
@@ -239,9 +248,11 @@ module ysyx_lsu #(
             end else begin
               lsu_rdata <= lsu_bus.rdata;
               if (!uncacheable) begin
-                l1d[addr_idx] <= lsu_bus.rdata;
-                l1d_tag[addr_idx] <= addr_tag;
-                l1d_valid[addr_idx] <= 1'b1;
+                l1d_w_update <= 1'b1;
+                l1d_w_data <= lsu_bus.rdata;
+                l1d_w_valid <= 1'b1;
+                l1d_w_tag <= addr_tag;
+                l1d_w_idx <= addr_idx;
               end
             end
           end
@@ -260,27 +271,43 @@ module ysyx_lsu #(
             if (lsu_bus.wready) begin
               lsu_wdata   <= wdata;
               state_store <= LS_S_R;
+              if (walu == `YSYX_SW_WSTRB) begin
+                l1d_w_update <= 1'b1;
+                l1d_w_data <= wdata;
+                l1d_w_valid <= 1'b1;
+                l1d_w_tag <= waddr_tag;
+                l1d_w_idx <= waddr_idx;
+              end else begin
+                if (l1d_cache_hit_w) begin
+                  l1d_w_update <= 1'b1;
+                  l1d_w_valid <= 0;
+                  l1d_w_tag <= waddr_tag;
+                  l1d_w_idx <= waddr_idx;
+                end
+              end
             end
           end
         end
         LS_S_R: begin
-          if (walu == `YSYX_SW_WSTRB) begin
-            l1d[waddr_idx] <= lsu_wdata;
-            l1d_tag[waddr_idx] <= waddr_tag;
-            l1d_valid[waddr_idx] <= 1'b1;
-          end else if (l1d_cache_hit_w) begin
-            if (walu == `YSYX_SB_WSTRB) begin
-              l1d[waddr_idx][waddr[1:0]*8+:8] <= lsu_wdata[7:0];
-            end else if (walu == `YSYX_SH_WSTRB) begin
-              l1d[waddr_idx][waddr[1:0]*8+:16] <= lsu_wdata[15:0];
-            end
-          end
           state_store <= LS_S_V;
         end
         default: begin
           state_store <= LS_S_V;
         end
       endcase
+    end
+  end
+
+  always @(posedge clock) begin
+    if (reset) begin
+      l1d_valid <= 0;
+    end else begin
+      if (l1d_w_update) begin
+        l1d[l1d_w_idx] <= l1d_w_data;
+        l1d_tag[l1d_w_idx] <= l1d_w_tag;
+        l1d_valid[l1d_w_idx] <= l1d_w_valid;
+        l1d_w_update <= 0;
+      end
     end
   end
 endmodule

@@ -170,6 +170,7 @@ module ysyx_ifu #(
       .out_inst(l1_inst),
       .l1i_valid(l1i_valid),
       .l1i_ready(l1i_ready),
+
       .invalid_l1i(fence_i),
       .flush_pipeline(flush_pipeline),
 
