@@ -323,7 +323,7 @@ module ysyx #(
       .ralu(exu_ralu),
       // to exu
       .out_rdata(lsu_rdata),
-      .out_rvalid(lsu_exu_rvalid),
+      .out_rready(lsu_exu_rvalid),
 
       .rou_lsu(rou_lsu),
       .out_sq_ready(lsu_sq_ready),

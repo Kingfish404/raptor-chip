@@ -75,7 +75,6 @@ module ysyx_bus #(
     LS_S_B = 2
   } state_store_t;
 
-  logic [XLEN-1:0] out_rdata;
   logic rvalid;
   logic write_done;
 

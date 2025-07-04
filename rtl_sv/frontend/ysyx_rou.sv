@@ -4,7 +4,6 @@
 module ysyx_rou #(
     parameter unsigned IQ_SIZE = `YSYX_IQ_SIZE,
     parameter unsigned ROB_SIZE = `YSYX_ROB_SIZE,
-    parameter unsigned RS_SIZE = `YSYX_RS_SIZE,
     parameter bit [7:0] REG_NUM = `YSYX_REG_NUM,
     parameter bit [7:0] XLEN = `YSYX_XLEN
 ) (

@@ -4,7 +4,7 @@
 module ysyx_lsu #(
     parameter unsigned SQ_SIZE = `YSYX_SQ_SIZE,
     parameter bit [`YSYX_L1D_LEN:0] L1D_LEN = `YSYX_L1D_LEN,
-    parameter bit [`YSYX_L1D_LEN:0] L1D_SIZE = 2 ** L1D_LEN,
+    parameter bit [`YSYX_L1D_LEN:0] L1D_SIZE = 2 ** `YSYX_L1D_LEN,
     parameter bit [7:0] XLEN = `YSYX_XLEN
 ) (
     input clock,
@@ -18,54 +18,27 @@ module ysyx_lsu #(
     input [4:0] ralu,
     // to exu
     output [XLEN-1:0] out_rdata,
-    output out_rvalid,
+    output out_rready,
 
     // from rou
     rou_lsu_if.in rou_lsu,
     output logic out_sq_ready,
 
+    // to bus
     lsu_bus_if.master lsu_bus,
 
     input reset
 );
   typedef enum logic [1:0] {
-    IF_A = 0,
-    IF_L = 1,
-    IF_V = 2
-  } state_load_t;
-
-  typedef enum logic [1:0] {
     LS_S_V = 0,
     LS_S_R = 1
   } state_store_t;
 
-  state_load_t  state_load;
   state_store_t state_store;
 
-  logic [XLEN-1:0] rdata, rdata_unalign;
-  logic [7:0] wstrb, rstrb;
-  logic arvalid;
-
   logic raddr_valid;
-  logic [32-1:0] l1d[L1D_SIZE], lsu_rdata;
-  logic [L1D_SIZE-1:0] l1d_valid;
-  logic [32-L1D_LEN-2-1:0] l1d_tag[L1D_SIZE];
-
-  logic [32-L1D_LEN-2-1:0] addr_tag;
-  logic [L1D_LEN-1:0] addr_idx;
-  logic l1d_cache_hit;
-  logic [XLEN-1:0] l1d_data;
-  logic uncacheable;
-
-  logic [32-L1D_LEN-2-1:0] waddr_tag;
-  logic [L1D_LEN-1:0] waddr_idx;
-  logic l1d_cache_hit_w;
-
-  logic l1d_w_update;
-  logic [XLEN-1:0] l1d_w_data;
-  logic l1d_w_valid;
-  logic [32-L1D_LEN-2-1:0] l1d_w_tag;
-  logic [L1D_LEN-1:0] l1d_w_idx;
+  logic [XLEN-1:0] rdata_unalign;
+  logic [XLEN-1:0] rdata;
 
   // === Store Queue (SQ) ===
   logic sq_ready;
@@ -83,7 +56,7 @@ module ysyx_lsu #(
   logic store_in_sq;
   logic [$clog2(SQ_SIZE)-1:0] store_in_sq_idx;
 
-  logic wen;
+  logic wvalid;
   logic [XLEN-1:0] waddr;
   logic [XLEN-1:0] wdata;
   logic [4:0] walu;
@@ -92,7 +65,7 @@ module ysyx_lsu #(
   assign sq_ready = sq_valid[sq_tail] == 0 && (!store_in_sq || sq_valid[store_in_sq_idx] == 0);
   assign out_sq_ready = sq_ready;
 
-  assign wen = sq_valid[sq_head];
+  assign wvalid = sq_valid[sq_head];
   assign wdata = sq_wdata[sq_head];
   assign waddr = sq_waddr[sq_head];
   assign walu = sq_alu[sq_head];
@@ -141,8 +114,8 @@ module ysyx_lsu #(
     end
   end
 
-  assign raddr_valid = (  //
-      (raddr >= 'h02000048 && raddr < 'h02000050)  // clint
+  assign raddr_valid = ((0)  //
+      || (raddr >= 'h02000048 && raddr < 'h02000050)  // clint
       || (raddr >= 'h0f000000 && raddr < 'h0f002000)  // sram
       || (raddr >= 'h10000000 && raddr < 'h10001000)  // uart/ns16550
       || (raddr >= 'h10010000 && raddr < 'h10011900)  // liteuart0/csr
@@ -150,55 +123,22 @@ module ysyx_lsu #(
       || (raddr >= 'h30000000 && raddr < 'h40000000)  // flash
       || (raddr >= 'h80000000 && raddr < 'h88000000)  // psram
       || (raddr >= 'ha0000000 && raddr < 'hc0000000)  // sdram
-      || (0));
+      );
 
-  assign out_rvalid = state_load == IF_V;
-
-  assign lsu_bus.arvalid = ren && raddr_valid && state_load == IF_L;
-  assign lsu_bus.araddr = raddr;
-  assign lsu_bus.rstrb = rstrb;
-
-  assign lsu_bus.awvalid = wen && state_store == LS_S_V;
-  assign lsu_bus.awaddr = waddr;
-  assign lsu_bus.wstrb = wstrb;
-  assign lsu_bus.wvalid = wen && state_store == LS_S_V;
-  assign lsu_bus.wdata = wdata;
-
-  assign wready = state_store == LS_S_R;
-
-  assign uncacheable = (
-         (raddr >= 'h02000048 && raddr < 'h02000050) ||
-         (raddr >= 'h0c000000 && raddr < 'h0d000000) ||
-         (raddr >= 'h10000000 && raddr < 'h10020000) ||
-         (raddr >= 'ha0000000 && raddr < 'hb0000000) ||
-         (0)
-       );
-
-  assign addr_tag = raddr[XLEN-1:L1D_LEN+2];
-  assign addr_idx = raddr[L1D_LEN+2-1:0+2];
-  assign l1d_cache_hit = (l1d_valid[addr_idx] == 1'b1) && (l1d_tag[addr_idx] == addr_tag);
-  assign l1d_data = l1d[addr_idx];
-
-  assign waddr_tag = waddr[XLEN-1:L1D_LEN+2];
-  assign waddr_idx = waddr[L1D_LEN+2-1:0+2];
-  assign l1d_cache_hit_w = (l1d_valid[waddr_idx] == 1'b1) && (l1d_tag[waddr_idx] == waddr_tag);
-
-  // load/store unit
+  // logic [7:0] wstrb;
   // assign wstrb = (
   //          ({8{ralu == `YSYX_ALU_SB}} & 8'h1) |
   //          ({8{ralu == `YSYX_ALU_SH}} & 8'h3) |
   //          ({8{ralu == `YSYX_ALU_SW}} & 8'hf)
   //        );
-  assign wstrb = {{4{1'b0}}, {walu[3:0]}};
-  assign rstrb = (
-           ({8{ralu == `YSYX_ALU_LB__}} & 8'h1) |
-           ({8{ralu == `YSYX_ALU_LBU_}} & 8'h1) |
-           ({8{ralu == `YSYX_ALU_LH__}} & 8'h3) |
-           ({8{ralu == `YSYX_ALU_LHU_}} & 8'h3) |
-           ({8{ralu == `YSYX_ALU_LW__}} & 8'hf)
-         );
+  assign lsu_bus.awvalid = wvalid && state_store == LS_S_V;
+  assign lsu_bus.awaddr = waddr;
+  assign lsu_bus.wstrb[3:0] = walu[3:0];
+  assign lsu_bus.wvalid = wvalid && state_store == LS_S_V;
+  assign lsu_bus.wdata = wdata;
 
-  assign rdata_unalign = lsu_rdata;
+  assign wready = state_store == LS_S_R;
+
   assign rdata = (
            ({XLEN{raddr[1:0] == 2'b00}} & rdata_unalign) |
            ({XLEN{raddr[1:0] == 2'b01}} & {{8'b0}, {rdata_unalign[31:8]}}) |
@@ -217,74 +157,14 @@ module ysyx_lsu #(
 
   always @(posedge clock) begin
     if (reset) begin
-      state_load  <= IF_A;
       state_store <= LS_S_V;
     end else begin
-      unique case (state_load)
-        IF_A: begin
-          if (fence_time) begin
-            l1d_valid <= 0;
-          end
-          if (flush_pipeline) begin
-          end else if (ren && (!(|sq_valid) || load_in_sq)) begin  // TODO: fix `!(|sq_valid)` requirement
-            if (load_in_sq) begin
-              state_load <= IF_V;
-              lsu_rdata  <= sq_wdata[load_in_sq_idx] << ({{3'b0}, raddr[1:0]} << 3);
-            end else if (l1d_cache_hit) begin
-              state_load <= IF_V;
-              lsu_rdata  <= l1d_data;
-            end else begin
-              state_load <= IF_L;
-            end
-          end
-        end
-        IF_L: begin
-          if (flush_pipeline) begin
-            state_load <= IF_A;
-          end else if (ren && lsu_bus.rvalid) begin
-            state_load <= IF_V;
-            if (load_in_sq) begin
-              lsu_rdata <= sq_wdata[load_in_sq_idx] << ({{3'b0}, raddr[1:0]} << 3);
-            end else begin
-              lsu_rdata <= lsu_bus.rdata;
-              if (!uncacheable) begin
-                l1d_w_update <= 1'b1;
-                l1d_w_data <= lsu_bus.rdata;
-                l1d_w_valid <= 1'b1;
-                l1d_w_tag <= addr_tag;
-                l1d_w_idx <= addr_idx;
-              end
-            end
-          end
-        end
-        IF_V: begin
-          state_load <= IF_A;
-        end
-        default: begin
-          state_load <= IF_A;
-        end
-      endcase
-
       unique case (state_store)
         LS_S_V: begin
-          if (wen) begin
+          if (wvalid) begin
             if (lsu_bus.wready) begin
               lsu_wdata   <= wdata;
               state_store <= LS_S_R;
-              if (walu == `YSYX_SW_WSTRB) begin
-                l1d_w_update <= 1'b1;
-                l1d_w_data <= wdata;
-                l1d_w_valid <= 1'b1;
-                l1d_w_tag <= waddr_tag;
-                l1d_w_idx <= waddr_idx;
-              end else begin
-                if (l1d_cache_hit_w) begin
-                  l1d_w_update <= 1'b1;
-                  l1d_w_valid <= 0;
-                  l1d_w_tag <= waddr_tag;
-                  l1d_w_idx <= waddr_idx;
-                end
-              end
             end
           end
         end
@@ -298,16 +178,35 @@ module ysyx_lsu #(
     end
   end
 
-  always @(posedge clock) begin
-    if (reset) begin
-      l1d_valid <= 0;
-    end else begin
-      if (l1d_w_update) begin
-        l1d[l1d_w_idx] <= l1d_w_data;
-        l1d_tag[l1d_w_idx] <= l1d_w_tag;
-        l1d_valid[l1d_w_idx] <= l1d_w_valid;
-        l1d_w_update <= 0;
-      end
-    end
-  end
+  ysyx_lsu_l1d #(
+      .XLEN(XLEN),
+      .L1D_LEN(L1D_LEN),
+      .L1D_SIZE(L1D_SIZE)
+  ) l1d_cache (
+      .clock(clock),
+
+      .flush_pipeline(flush_pipeline),
+      .fence_time(fence_time),
+
+      // load
+      .raddr(raddr),
+      .ralu(ralu),
+      .rvalid(ren && raddr_valid && !(|sq_valid)),
+      .lsu_rdata(rdata_unalign),
+      .lsu_rready(out_rready),
+
+      .load_in_sq(load_in_sq),
+      .sq_wdata  (sq_wdata[load_in_sq_idx]),
+
+      // write
+      .waddr (waddr),
+      .wvalid(wvalid && lsu_bus.wready),
+      .wdata (wdata),
+      .walu  (walu),
+
+      // <=> bus
+      .lsu_bus(lsu_bus),
+
+      .reset(reset)
+  );
 endmodule

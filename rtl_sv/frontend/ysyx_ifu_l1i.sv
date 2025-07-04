@@ -126,7 +126,6 @@ module ysyx_ifu_l1i #(
 
   always @(posedge clock) begin
     if (reset) begin
-      l1ic_valid <= 0;
     end else begin
       if (ifu_rvalid) begin
         l1i[addr_idx][l1i_state==RD_0?0 : 1] <= ifu_rdata;
