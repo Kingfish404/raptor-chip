@@ -11,30 +11,23 @@ module ysyx_rou #(
     input reset,
 
     // <= idu
-    idu_pipe_if.in  idu_if,
+    idu_pipe_if.in  idu_rou,
     // => exu
-    idu_pipe_if.out rou_exu_if,
+    idu_pipe_if.out rou_exu,
 
     // <= exu
     exu_pipe_if.in exu_rou,
 
-    // <=> wbu & reg
-    exu_pipe_if.out rou_wbu_if,
+    rou_reg_if.master rou_reg,
 
-    // <=> reg
-    output [4:0] out_rs1,
-    output [4:0] out_rs2,
-    input [XLEN-1:0] rdata1,
-    input [XLEN-1:0] rdata2,
-
-    // <=>  csr commit
-    exu_pipe_if.out rou_csr,
-    // => store commit
-    rou_lsu_if.out  rou_lsu,
+    // commit
+    rou_wbu_if.out rou_wbu,
+    rou_csr_if.out rou_csr,
+    rou_lsu_if.out rou_lsu,
 
     // pipeline
-    output logic out_flush_pipeline,
-    output logic out_fence_time,
+    input logic flush_pipe,
+    input logic fence_time,
 
     input prev_valid,
     input next_ready,
@@ -136,10 +129,6 @@ module ysyx_rou #(
   logic head_jen;
   logic head_br_p_fail;
   logic head_valid;
-  logic flush_pipeline;
-  logic fence_time;
-  assign out_flush_pipeline = flush_pipeline;
-  assign out_fence_time = fence_time;
 
   assign dispatch_ready = (next_ready & sq_ready && uoq_valid[uoq_tail] && rob_busy[rob_tail] == 0);
 
@@ -147,7 +136,7 @@ module ysyx_rou #(
   assign out_ready = uoq_valid[uoq_head] == 0;
 
   always @(posedge clock) begin
-    if (reset || flush_pipeline) begin
+    if (reset || flush_pipe) begin
       uoq_head  <= 0;
       uoq_tail  <= 0;
       uoq_valid <= 0;
@@ -156,36 +145,36 @@ module ysyx_rou #(
         // Issue to uoq
         uoq_head              <= uoq_head + 1;
 
-        uoq_alu[uoq_head]     <= idu_if.alu;
-        uoq_jen[uoq_head]     <= idu_if.jen;
-        uoq_ben[uoq_head]     <= idu_if.ben;
-        uoq_wen[uoq_head]     <= idu_if.wen;
-        uoq_ren[uoq_head]     <= idu_if.ren;
-        uoq_atom[uoq_head]    <= idu_if.atom;
+        uoq_alu[uoq_head]     <= idu_rou.alu;
+        uoq_jen[uoq_head]     <= idu_rou.jen;
+        uoq_ben[uoq_head]     <= idu_rou.ben;
+        uoq_wen[uoq_head]     <= idu_rou.wen;
+        uoq_ren[uoq_head]     <= idu_rou.ren;
+        uoq_atom[uoq_head]    <= idu_rou.atom;
 
-        uoq_system[uoq_head]  <= idu_if.system;
-        uoq_ecall[uoq_head]   <= idu_if.ecall;
-        uoq_ebreak[uoq_head]  <= idu_if.ebreak;
-        uoq_mret[uoq_head]    <= idu_if.mret;
-        uoq_csr_csw[uoq_head] <= idu_if.csr_csw;
+        uoq_system[uoq_head]  <= idu_rou.system;
+        uoq_ecall[uoq_head]   <= idu_rou.ecall;
+        uoq_ebreak[uoq_head]  <= idu_rou.ebreak;
+        uoq_mret[uoq_head]    <= idu_rou.mret;
+        uoq_csr_csw[uoq_head] <= idu_rou.csr_csw;
 
-        uoq_trap[uoq_head]    <= idu_if.trap;
-        uoq_tval[uoq_head]    <= idu_if.tval;
-        uoq_cause[uoq_head]   <= idu_if.cause;
+        uoq_trap[uoq_head]    <= idu_rou.trap;
+        uoq_tval[uoq_head]    <= idu_rou.tval;
+        uoq_cause[uoq_head]   <= idu_rou.cause;
 
-        uoq_f_i[uoq_head]     <= idu_if.fence_i;
-        uoq_f_time[uoq_head]  <= idu_if.fence_time;
+        uoq_f_i[uoq_head]     <= idu_rou.fence_i;
+        uoq_f_time[uoq_head]  <= idu_rou.fence_time;
 
-        uoq_rd[uoq_head]      <= idu_if.rd;
-        uoq_imm[uoq_head]     <= idu_if.imm;
-        uoq_op1[uoq_head]     <= idu_if.op1;
-        uoq_op2[uoq_head]     <= idu_if.op2;
-        uoq_rs1[uoq_head]     <= idu_if.rs1;
-        uoq_rs2[uoq_head]     <= idu_if.rs2;
+        uoq_rd[uoq_head]      <= idu_rou.rd;
+        uoq_imm[uoq_head]     <= idu_rou.imm;
+        uoq_op1[uoq_head]     <= idu_rou.op1;
+        uoq_op2[uoq_head]     <= idu_rou.op2;
+        uoq_rs1[uoq_head]     <= idu_rou.rs1;
+        uoq_rs2[uoq_head]     <= idu_rou.rs2;
 
-        uoq_pnpc[uoq_head]    <= idu_if.pnpc;
-        uoq_inst[uoq_head]    <= idu_if.inst;
-        uoq_pc[uoq_head]      <= idu_if.pc;
+        uoq_pnpc[uoq_head]    <= idu_rou.pnpc;
+        uoq_inst[uoq_head]    <= idu_rou.inst;
+        uoq_pc[uoq_head]      <= idu_rou.pc;
 
         uoq_valid[uoq_head]   <= 1;
       end
@@ -200,56 +189,56 @@ module ysyx_rou #(
 
   assign rs1 = uoq_rs1[uoq_tail];
   assign rs2 = uoq_rs2[uoq_tail];
-  assign out_rs1 = rs1;
-  assign out_rs2 = rs2;
+  assign rou_reg.rs1 = rs1;
+  assign rou_reg.rs2 = rs2;
   logic rs1_hit_rob;
   logic rs2_hit_rob;
   assign rs1_hit_rob = (rf_busy[rs1[`YSYX_REG_LEN-1:0]] && (rob_state[rf_reorder[rs1[`YSYX_REG_LEN-1:0]]] == WB));
   assign rs2_hit_rob = (rf_busy[rs2[`YSYX_REG_LEN-1:0]] && (rob_state[rf_reorder[rs2[`YSYX_REG_LEN-1:0]]] == WB));
   always_comb begin
     // Dispatch connect
-    rou_exu_if.alu = uoq_alu[uoq_tail];
-    rou_exu_if.jen = uoq_jen[uoq_tail];
-    rou_exu_if.ben = uoq_ben[uoq_tail];
-    rou_exu_if.wen = uoq_wen[uoq_tail];
-    rou_exu_if.ren = uoq_ren[uoq_tail];
-    rou_exu_if.atom = uoq_atom[uoq_tail];
+    rou_exu.alu = uoq_alu[uoq_tail];
+    rou_exu.jen = uoq_jen[uoq_tail];
+    rou_exu.ben = uoq_ben[uoq_tail];
+    rou_exu.wen = uoq_wen[uoq_tail];
+    rou_exu.ren = uoq_ren[uoq_tail];
+    rou_exu.atom = uoq_atom[uoq_tail];
 
-    rou_exu_if.system = uoq_system[uoq_tail];
-    rou_exu_if.ecall = uoq_ecall[uoq_tail];
-    rou_exu_if.ebreak = uoq_ebreak[uoq_tail];
-    rou_exu_if.mret = uoq_mret[uoq_tail];
-    rou_exu_if.csr_csw = uoq_csr_csw[uoq_tail];
+    rou_exu.system = uoq_system[uoq_tail];
+    rou_exu.ecall = uoq_ecall[uoq_tail];
+    rou_exu.ebreak = uoq_ebreak[uoq_tail];
+    rou_exu.mret = uoq_mret[uoq_tail];
+    rou_exu.csr_csw = uoq_csr_csw[uoq_tail];
 
-    rou_exu_if.trap = uoq_trap[uoq_tail];
-    rou_exu_if.tval = uoq_tval[uoq_tail];
-    rou_exu_if.cause = uoq_cause[uoq_tail];
+    rou_exu.trap = uoq_trap[uoq_tail];
+    rou_exu.tval = uoq_tval[uoq_tail];
+    rou_exu.cause = uoq_cause[uoq_tail];
 
-    rou_exu_if.rd = uoq_rd[uoq_tail];
-    rou_exu_if.imm = uoq_imm[uoq_tail];
-    rou_exu_if.op1 = (rs1 != 0 ?
-      (rs1_hit_rob ? rob_value[rf_reorder[rs1[`YSYX_REG_LEN-1:0]]] : rdata1)
+    rou_exu.rd = uoq_rd[uoq_tail];
+    rou_exu.imm = uoq_imm[uoq_tail];
+    rou_exu.op1 = (rs1 != 0 ?
+      (rs1_hit_rob ? rob_value[rf_reorder[rs1[`YSYX_REG_LEN-1:0]]] : rou_reg.src1)
       : uoq_op1[uoq_tail]);
-    rou_exu_if.op2 = (rs2 != 0 ?
-      (rs2_hit_rob ? rob_value[rf_reorder[rs2[`YSYX_REG_LEN-1:0]]] : rdata2)
+    rou_exu.op2 = (rs2 != 0 ?
+      (rs2_hit_rob ? rob_value[rf_reorder[rs2[`YSYX_REG_LEN-1:0]]] : rou_reg.src2)
       : uoq_op2[uoq_tail]);
-    rou_exu_if.rs1 = (rs1 == 0 || rf_busy[rs1[`YSYX_REG_LEN-1:0]] == 0) ? 0 : rs1;
-    rou_exu_if.rs2 = (rs2 == 0 || rf_busy[rs2[`YSYX_REG_LEN-1:0]] == 0) ? 0 : rs2;
+    rou_exu.rs1 = (rs1 == 0 || rf_busy[rs1[`YSYX_REG_LEN-1:0]] == 0) ? 0 : rs1;
+    rou_exu.rs2 = (rs2 == 0 || rf_busy[rs2[`YSYX_REG_LEN-1:0]] == 0) ? 0 : rs2;
 
-    rou_exu_if.qj = (rs1 == 0 || rf_busy[rs1[`YSYX_REG_LEN-1:0]] == 0) ? 0 :
+    rou_exu.qj = (rs1 == 0 || rf_busy[rs1[`YSYX_REG_LEN-1:0]] == 0) ? 0 :
       (rs1_hit_rob ? 0 : (rf_reorder[rs1[`YSYX_REG_LEN-1:0]] + 'h1));
-    rou_exu_if.qk = (rs2 == 0 || rf_busy[rs2[`YSYX_REG_LEN-1:0]] == 0) ? 0 :
+    rou_exu.qk = (rs2 == 0 || rf_busy[rs2[`YSYX_REG_LEN-1:0]] == 0) ? 0 :
       (rs2_hit_rob ? 0 : (rf_reorder[rs2[`YSYX_REG_LEN-1:0]] + 'h1));
-    rou_exu_if.dest = {{1'h0}, {rob_tail}} + 'h1;
+    rou_exu.dest = {{1'h0}, {rob_tail}} + 'h1;
 
-    rou_exu_if.inst = uoq_inst[uoq_tail];
-    rou_exu_if.pc = uoq_pc[uoq_tail];
+    rou_exu.inst = uoq_inst[uoq_tail];
+    rou_exu.pc = uoq_pc[uoq_tail];
   end
 
   logic [$clog2(`YSYX_ROB_SIZE)-1:0] wb_dest;
   assign wb_dest = exu_rou.dest[$clog2(`YSYX_ROB_SIZE)-1:0] - 1;
   always @(posedge clock) begin
-    if (reset || flush_pipeline || fence_time) begin
+    if (reset || flush_pipe || fence_time) begin
       rob_head <= 0;
       rob_tail <= 0;
       rob_busy <= 0;
@@ -258,8 +247,6 @@ module ysyx_rou #(
         rob_inst[i]  <= 0;
       end
       rf_busy <= 0;
-      flush_pipeline <= 0;
-      fence_time <= 0;
     end else begin
       // Dispatch
       if (dispatch_ready) begin
@@ -324,12 +311,6 @@ module ysyx_rou #(
             rf_busy[rob_rd[rob_head][`YSYX_REG_LEN-1:0]] <= 0;
           end
         end
-        if ((rob_f_i[rob_head]) || ((head_ben || head_jen) && head_br_p_fail) || (rob_trap[rob_head])) begin
-          flush_pipeline <= 1;
-        end
-        if (rob_f_time[rob_head]) begin
-          fence_time <= 1;
-        end
       end
     end
   end
@@ -338,29 +319,37 @@ module ysyx_rou #(
   assign head_jen = (rob_jen[rob_head]);
   assign head_br_p_fail = rob_npc[rob_head] != rob_pnpc[rob_head];
   assign head_valid = rob_busy[rob_head] && rob_state[rob_head] == WB
-        && (sq_ready || !rob_store[rob_head]) && !flush_pipeline;
+        && (sq_ready || !rob_store[rob_head]) && !flush_pipe;
 
-  assign rou_wbu_if.rd = rob_rd[rob_head];
-  assign rou_wbu_if.inst = rob_inst[rob_head];
-  assign rou_wbu_if.pc = rob_pc[rob_head];
+  assign rou_wbu.rd = rob_rd[rob_head];
+  assign rou_wbu.inst = rob_inst[rob_head];
+  assign rou_wbu.pc = rob_pc[rob_head];
 
-  assign rou_wbu_if.result = rob_value[rob_head];
-  assign rou_wbu_if.npc = rob_npc[rob_head];
-  assign rou_wbu_if.sys_retire = rob_sys[rob_head] && head_valid;
-  assign rou_wbu_if.jen = rob_jen[rob_head];
-  assign rou_wbu_if.ben = rob_ben[rob_head];
+  assign rou_wbu.wdata = rob_value[rob_head];
+  assign rou_wbu.npc = rob_npc[rob_head];
+  assign rou_wbu.sys_retire = rob_sys[rob_head] && head_valid;
+  assign rou_wbu.jen = rob_jen[rob_head];
+  assign rou_wbu.ben = rob_ben[rob_head];
 
-  assign rou_wbu_if.ebreak = rob_ebreak[rob_head] && head_valid;
-  assign rou_wbu_if.fence_i = rob_f_i[rob_head] && head_valid;
-  assign rou_wbu_if.valid = head_valid;
+  assign rou_wbu.ebreak = rob_ebreak[rob_head] && head_valid;
+  assign rou_wbu.fence_time = rob_f_time[rob_head] && head_valid;
+  assign rou_wbu.fence_i = rob_f_i[rob_head] && head_valid;
+
+  assign rou_wbu.flush_pipe = ((0)
+    || (rob_f_i[rob_head])
+    || (head_br_p_fail)
+    || (rob_trap[rob_head])
+  );
+
+  assign rou_wbu.valid = head_valid;
 
   assign rou_csr.pc = rob_pc[rob_head];
-  assign rou_csr.csr_wdata = rob_csr_wdata[rob_head];
   assign rou_csr.csr_wen = rob_csr_wen[rob_head];
+  assign rou_csr.csr_wdata = rob_csr_wdata[rob_head];
   assign rou_csr.csr_addr = rob_csr_addr[rob_head];
   assign rou_csr.ecall = rob_ecall[rob_head];
-  assign rou_csr.mret = rob_mret[rob_head];
   assign rou_csr.ebreak = rob_ebreak[rob_head];
+  assign rou_csr.mret = rob_mret[rob_head];
 
   assign rou_csr.trap = rob_trap[rob_head];
   assign rou_csr.tval = rob_tval[rob_head];

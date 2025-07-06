@@ -9,7 +9,7 @@ module ysyx_lsu_l1d #(
 ) (
     input clock,
 
-    input flush_pipeline,
+    input flush_pipe,
     input fence_time,
 
     // read
@@ -101,7 +101,7 @@ module ysyx_lsu_l1d #(
           if (fence_time) begin
             l1d_valid <= 0;
           end
-          if (flush_pipeline) begin
+          if (flush_pipe) begin
           end else if (rvalid) begin
             if (load_in_sq) begin
               state_load <= IF_V;
@@ -115,7 +115,7 @@ module ysyx_lsu_l1d #(
           end
         end
         IF_L: begin
-          if (flush_pipeline) begin
+          if (flush_pipe) begin
             state_load <= IF_A;
           end else if (rvalid && lsu_bus.rvalid) begin
             state_load <= IF_V;

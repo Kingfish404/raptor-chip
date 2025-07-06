@@ -1,5 +1,7 @@
 `include "ysyx.svh"
 
+`define YSYX_ADV_REG
+
 module ysyx_reg #(
     parameter bit [7:0] XLEN = `YSYX_XLEN,
     parameter bit [7:0] REG_LEN = `YSYX_REG_LEN,
@@ -11,10 +13,11 @@ module ysyx_reg #(
     input [4:0] waddr,
     input [XLEN-1:0] wdata,
 
-    input [4:0] s1addr,
-    input [4:0] s2addr,
-    output [XLEN-1:0] out_src1,
-    output [XLEN-1:0] out_src2,
+    rou_reg_if.slave rou_reg,
+    // input [4:0] s1addr,
+    // input [4:0] s2addr,
+    // output [XLEN-1:0] out_src1,
+    // output [XLEN-1:0] out_src2,
 
     input reset
 );
@@ -24,9 +27,10 @@ module ysyx_reg #(
   logic [REG_LEN-1:0] rswaddr;
   logic [XLEN-1:0] low_rf1, low_rf1_h;
   logic [XLEN-1:0] low_rf2, low_rf2_h;
-  assign rs1addr = s1addr[REG_LEN-1:0];
-  assign rs2addr = s2addr[REG_LEN-1:0];
+  assign rs1addr = rou_reg.rs1[REG_LEN-1:0];
+  assign rs2addr = rou_reg.rs2[REG_LEN-1:0];
   assign rswaddr = waddr[REG_LEN-1:0];
+`ifdef YSYX_ADV_REG
   assign low_rf1 = {
     ({XLEN{rs1addr == 'h1}} & rf[1]) |
     ({XLEN{rs1addr == 'h2}} & rf[2]) |
@@ -104,15 +108,20 @@ module ysyx_reg #(
     ({XLEN{rs2addr == 'h1e}} & rf[30]) |
     ({XLEN{rs2addr == 'h1f}} & rf[31])
   };
-  assign out_src1 = (rs1addr[REG_LEN-1:REG_LEN-1] == 1) ?
-    (hig_rf1) :
-    (rs1addr[REG_LEN-2:REG_LEN-2] == 1 ? low_rf1_h : low_rf1);
-  assign out_src2 = (rs2addr[REG_LEN-1:REG_LEN-1] == 1) ?
-    (hig_rf2) :
-    (rs2addr[REG_LEN-2:REG_LEN-2] == 1 ? low_rf2_h : low_rf2);
+  assign rou_reg.src1 =(rs1addr[REG_LEN-1:REG_LEN-1] == 1)
+    ? (hig_rf1)
+    :  (rs1addr[REG_LEN-2:REG_LEN-2] == 1 ? low_rf1_h : low_rf1);
+  assign rou_reg.src2 =(rs2addr[REG_LEN-1:REG_LEN-1] == 1)
+    ? (hig_rf2)
+    : (rs2addr[REG_LEN-2:REG_LEN-2] == 1 ? low_rf2_h : low_rf2);
 `else
-  assign out_src1 = (rs1addr[REG_LEN-1:REG_LEN-1] == 1) ? low_rf1_h : low_rf1;
-  assign out_src2 = (rs2addr[REG_LEN-1:REG_LEN-1] == 1) ? low_rf2_h : low_rf2;
+  assign rou_reg.src1 = (rs1addr[REG_LEN-1:REG_LEN-1] == 1) ? low_rf1_h : low_rf1;
+  assign rou_reg.src2 = (rs2addr[REG_LEN-1:REG_LEN-1] == 1) ? low_rf2_h : low_rf2;
+`endif
+
+`else
+  assign rou_reg.src1 = (s1addr == 0) ? 0 : rf[rs1addr];
+  assign rou_reg.src2 = (s2addr == 0) ? 0 : rf[rs2addr];
 `endif
 
   always @(posedge clock) begin

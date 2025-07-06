@@ -9,17 +9,11 @@ module ysyx_lsu #(
 ) (
     input clock,
 
-    input flush_pipeline,
+    input flush_pipe,
     input fence_time,
 
     // from exu
-    input ren,
-    input [XLEN-1:0] raddr,
-    input [4:0] ralu,
-    // to exu
-    output [XLEN-1:0] out_rdata,
-    output out_rready,
-
+    exu_lsu_if.slave exu_lsu,
     // from rou
     rou_lsu_if.in rou_lsu,
     output logic out_sq_ready,
@@ -37,8 +31,11 @@ module ysyx_lsu #(
   state_store_t state_store;
 
   logic raddr_valid;
+  logic [XLEN-1:0] raddr;
+  logic [4:0] ralu;
   logic [XLEN-1:0] rdata_unalign;
   logic [XLEN-1:0] rdata;
+  logic rready;
 
   // === Store Queue (SQ) ===
   logic sq_ready;
@@ -62,7 +59,9 @@ module ysyx_lsu #(
   logic [4:0] walu;
   logic wready;
 
-  assign sq_ready = sq_valid[sq_tail] == 0 && (!store_in_sq || sq_valid[store_in_sq_idx] == 0);
+  assign raddr = exu_lsu.raddr;
+  assign ralu = exu_lsu.ralu;
+  assign sq_ready = sq_valid[sq_tail] == 0;
   assign out_sq_ready = sq_ready;
 
   assign wvalid = sq_valid[sq_head];
@@ -146,7 +145,7 @@ module ysyx_lsu #(
            ({XLEN{raddr[1:0] == 2'b11}} & {{24'b0}, {rdata_unalign[31:24]}}) |
            (0)
          );
-  assign out_rdata = (
+  assign exu_lsu.rdata = (
            ({XLEN{ralu == `YSYX_ALU_LB__}} & (rdata[7] ? rdata | 'hffffff00 : rdata & 'hff)) |
            ({XLEN{ralu == `YSYX_ALU_LBU_}} & rdata & 'hff) |
            ({XLEN{ralu == `YSYX_ALU_LH__}} &
@@ -154,6 +153,7 @@ module ysyx_lsu #(
            ({XLEN{ralu == `YSYX_ALU_LHU_}} & rdata & 'hffff) |
            ({XLEN{ralu == `YSYX_ALU_LW__}} & rdata)
          );
+  assign exu_lsu.rready = rready;
 
   always @(posedge clock) begin
     if (reset) begin
@@ -185,15 +185,15 @@ module ysyx_lsu #(
   ) l1d_cache (
       .clock(clock),
 
-      .flush_pipeline(flush_pipeline),
+      .flush_pipe(flush_pipe),
       .fence_time(fence_time),
 
       // load
       .raddr(raddr),
       .ralu(ralu),
-      .rvalid(ren && raddr_valid && !(|sq_valid)),
+      .rvalid(exu_lsu.arvalid && raddr_valid && !(|sq_valid)),
       .lsu_rdata(rdata_unalign),
-      .lsu_rready(out_rready),
+      .lsu_rready(rready),
 
       .load_in_sq(load_in_sq),
       .sq_wdata  (sq_wdata[load_in_sq_idx]),

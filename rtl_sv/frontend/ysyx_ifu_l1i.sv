@@ -16,10 +16,9 @@ module ysyx_ifu_l1i #(
     output l1i_ready,
 
     input invalid_l1i,
-    input flush_pipeline,
+    input flush_pipe,
 
     input bus_ifu_ready,
-    output out_ifu_lock,
     output [XLEN-1:0] out_ifu_araddr,
     output out_ifu_arvalid,
     input [XLEN-1:0] ifu_rdata,
@@ -47,12 +46,12 @@ module ysyx_ifu_l1i #(
 
   logic hit;
   logic ifu_sdram_arburst;
-  logic received_flush_pipeline;
+  logic received_flush_pipe;
   logic received_fence_i;
   logic [XLEN-1:0] reverse_pc_ifu;
 
-  assign l1i_pc = received_flush_pipeline ? reverse_pc_ifu : pc_ifu;
-  assign l1i_valid = ((hit && !flush_pipeline) && (!received_flush_pipeline && !received_fence_i));
+  assign l1i_pc = received_flush_pipe ? reverse_pc_ifu : pc_ifu;
+  assign l1i_valid = ((hit && !flush_pipe) && (!received_flush_pipe && !received_fence_i));
   assign l1i_ready = (l1i_state == IDLE);
   assign addr_tag = l1i_pc[XLEN-1:L1I_LEN+L1I_LINE_LEN+2];
   assign addr_idx = l1i_pc[L1I_LEN+L1I_LINE_LEN+2-1:L1I_LINE_LEN+2];
@@ -64,7 +63,6 @@ module ysyx_ifu_l1i #(
   assign out_ifu_arvalid = (ifu_sdram_arburst ?
     !hit && (l1i_state == IDLE || l1i_state == RD_0) :
     !hit && (l1i_state != WAIT && l1i_state != WB_0));
-  assign out_ifu_lock = (l1i_state != IDLE);
 
   assign hit = !invalid_l1i && (
          (l1i_state == IDLE || l1i_state == WB_0) &&
@@ -79,8 +77,8 @@ module ysyx_ifu_l1i #(
       l1i_state  <= IDLE;
       l1ic_valid <= 0;
     end else begin
-      if ((!hit) && flush_pipeline) begin
-        received_flush_pipeline <= 1;
+      if ((!hit) && flush_pipe) begin
+        received_flush_pipe <= 1;
         reverse_pc_ifu <= pc_ifu;
       end
       if ((!hit) && invalid_l1i) begin
@@ -110,7 +108,7 @@ module ysyx_ifu_l1i #(
         end
         WB_0: begin
           l1i_state <= IDLE;
-          received_flush_pipeline <= 0;
+          received_flush_pipe <= 0;
           if (received_fence_i) begin
             l1ic_valid <= 0;
             received_fence_i <= 0;
@@ -118,7 +116,7 @@ module ysyx_ifu_l1i #(
         end
         default begin
           l1i_state <= IDLE;
-          received_flush_pipeline <= 0;
+          received_flush_pipe <= 0;
         end
       endcase
     end

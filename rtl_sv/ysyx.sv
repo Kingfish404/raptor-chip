@@ -92,82 +92,56 @@ module ysyx #(
 
     input reset
 );
-  // IFU out
-  logic [31:0] ifu_inst;
-  logic [XLEN-1:0] ifu_pc;
-  logic [XLEN-1:0] ifu_pnpc;
-  logic ifu_valid, ifu_ready;
-  // IFU out bus
-  logic [XLEN-1:0] ifu_araddr;
-  logic ifu_arvalid, ifu_bus_lock;
+  // IFU
+  ifu_idu_if ifu_idu ();
+  ifu_bus_if ifu_bus ();
+  logic ifu_valid;
 
-  // IDU out
+  // IDU
   idu_pipe_if idu_rou ();
   logic idu_valid, idu_ready;
 
-  // ROU out
-  idu_pipe_if rou_exu_if ();
-  exu_pipe_if rou_wbu_if ();
-  exu_pipe_if rou_csr ();
+  // ROU
+  idu_pipe_if rou_exu ();
   rou_lsu_if rou_lsu ();
-  logic rou_valid, rou_ready;
-  logic [4:0] rou_rs1, rou_rs2;
-  logic flush_pipeline;
-  logic fence_time;
+  rou_reg_if rou_reg ();
 
-  // EXU out
+  rou_csr_if rou_csr ();
+  rou_wbu_if rou_wbu ();
+  logic rou_valid, rou_ready;
+
+  // EXU
   exu_pipe_if exu_rou ();
   exu_csr_if exu_csr ();
-  logic exu_ready;
-  logic lsu_sq_ready;
-  // EXU out lsu
-  logic exu_ren;
-  logic [XLEN-1:0] exu_raddr;
-  logic [4:0] exu_ralu;
+  exu_lsu_if exu_lsu ();
+  logic exu_valid, exu_ready;
 
-  // WBU out
-  wbu_pipe_if wbu_if ();
+  // WBU
+  wbu_pipe_if wbu_bcast ();
   logic wbu_valid;
 
-  // Reg out
-  logic [XLEN-1:0] reg_rdata1, reg_rdata2;
-
-  // lsu out
-  logic [XLEN-1:0] lsu_rdata;
-  logic lsu_exu_rvalid;
+  // LSU
   lsu_bus_if lsu_bus ();
-
-  // bus out
-  logic bus_ifu_rvalid;
-  logic [XLEN-1:0] bus_ifu_rdata;
-  logic bus_ifu_ready;
+  logic lsu_sq_ready;
 
   // IFU (Instruction Fetch Unit)
   ysyx_ifu ifu (
       .clock(clock),
 
+      .flush_pipe(wbu_bcast.flush_pipe),
+      .fence_time(wbu_bcast.fence_time),
+
       // <= wbu
-      .wbu_if(wbu_if),
+      .wbu_bcast(wbu_bcast),
 
-      .out_inst(ifu_inst),
-      .out_pc(ifu_pc),
-      .out_pnpc(ifu_pnpc),
-      .flush_pipeline(flush_pipeline),
-      .fence_time(fence_time),
+      .ifu_idu(ifu_idu),
+      .ifu_bus(ifu_bus),
 
-      .bus_ifu_ready(bus_ifu_ready),
-      .out_ifu_lock(ifu_bus_lock),
-      .out_ifu_araddr(ifu_araddr),
-      .out_ifu_arvalid(ifu_arvalid),
-      .ifu_rdata(bus_ifu_rdata),
-      .ifu_rvalid(bus_ifu_rvalid),
-
-      .fence_i(rou_wbu_if.fence_i),
+      .fence_i(wbu_bcast.fence_i),
 
       .prev_valid(wbu_valid),
       .next_ready(idu_ready),
       .out_valid (ifu_valid),
-      .out_ready (ifu_ready),
 
       .reset(reset)
   );
@@ -176,50 +150,44 @@ module ysyx #(
   ysyx_idu idu (
       .clock(clock),
 
-      .inst(ifu_inst),
-      .pc(ifu_pc),
-      .pnpc(ifu_pnpc),
-      .idu_if(idu_rou),
+      .flush_pipe(wbu_bcast.flush_pipe),
+
+      .ifu_idu(ifu_idu),
+      .idu_rou(idu_rou),
 
       .prev_valid(ifu_valid),
       .next_ready(rou_ready),
       .out_valid (idu_valid),
       .out_ready (idu_ready),
 
-      .reset(reset || flush_pipeline)
+      .reset(reset)
   );
 
   // ROU (Re-Order Unit)
   ysyx_rou rou (
       .clock(clock),
 
-      .idu_if(idu_rou),
-      .rou_exu_if(rou_exu_if),
+      .flush_pipe(wbu_bcast.flush_pipe),
+      .fence_time(wbu_bcast.fence_time),
 
+      .idu_rou(idu_rou),
+      .rou_exu(rou_exu),
       .exu_rou(exu_rou),
 
-      .rou_wbu_if(rou_wbu_if),
+      .rou_wbu(rou_wbu),
 
-      .out_rs1(rou_rs1),
-      .out_rs2(rou_rs2),
-      .rdata1 (reg_rdata1),
-      .rdata2 (reg_rdata2),
-
-      // <=>  csr commit
+      .rou_reg(rou_reg),
       .rou_csr(rou_csr),
-      // => store commit
       .rou_lsu(rou_lsu),
 
-      .out_flush_pipeline(flush_pipeline),
-      .out_fence_time(fence_time),
+      .sq_ready(lsu_sq_ready),
 
       .prev_valid(idu_valid),
       .next_ready(exu_ready),
-      .sq_ready  (lsu_sq_ready),
       .out_valid (rou_valid),
       .out_ready (rou_ready),
 
-      .reset(reset || flush_pipeline)
+      .reset(reset)
   );
 
   // EXU (EXecution Unit)
@@ -227,25 +195,16 @@ module ysyx #(
       .clock(clock),
 
       // <= idu
-      .idu_if(rou_exu_if),
-      .flush_pipeline(flush_pipeline),
+      .rou_exu(rou_exu),
+      .flush_pipe(wbu_bcast.flush_pipe),
 
-      // => lsu
-      .out_ren(exu_ren),
-      .out_raddr(exu_raddr),
-      .out_ralu(exu_ralu),
-      // <= lsu
-      .lsu_rdata(lsu_rdata),
-      .lsu_exu_rvalid(lsu_exu_rvalid),
-
-      // => rou & (wbu)
       .exu_rou(exu_rou),
+
+      .exu_lsu(exu_lsu),
       .exu_csr(exu_csr),
 
-      // <= rou
-      .rou_cm_if(rou_csr),
-
       .prev_valid(rou_valid),
+      .out_valid (exu_valid),
       .out_ready (exu_ready),
 
       .reset(reset)
@@ -255,18 +214,10 @@ module ysyx #(
   ysyx_wbu wbu (
       .clock(clock),
 
-      .inst(rou_wbu_if.inst),
-      .pc(rou_wbu_if.pc),
-      .ebreak(rou_wbu_if.ebreak),
+      .rou_wbu  (rou_wbu),
+      .wbu_bcast(wbu_bcast),
 
-      .npc_wdata(rou_wbu_if.npc),
-      .jen(rou_wbu_if.jen),
-      .ben(rou_wbu_if.ben),
-      .sys_retire(rou_wbu_if.sys_retire),
-
-      .wbu_if(wbu_if),
-
-      .prev_valid(rou_wbu_if.valid),
+      .prev_valid(rou_wbu.valid),
       .out_valid (wbu_valid),
 
       .reset(reset)
@@ -275,14 +226,11 @@ module ysyx #(
   ysyx_reg regs (
       .clock(clock),
 
-      .write_en(rou_wbu_if.valid && flush_pipeline == 0),
-      .waddr(rou_wbu_if.rd),
-      .wdata(rou_wbu_if.result),
+      .write_en(rou_wbu.valid && wbu_bcast.flush_pipe == 0),
+      .waddr(rou_wbu.rd),
+      .wdata(rou_wbu.wdata),
 
-      .s1addr  (rou_rs1),
-      .s2addr  (rou_rs2),
-      .out_src1(reg_rdata1),
-      .out_src2(reg_rdata2),
+      .rou_reg(rou_reg),
 
       .reset(reset)
   );
@@ -314,17 +262,10 @@ module ysyx #(
   ysyx_lsu lsu (
       .clock(clock),
 
-      .flush_pipeline(flush_pipeline),
-      .fence_time(fence_time),
+      .flush_pipe(wbu_bcast.flush_pipe),
+      .fence_time(wbu_bcast.fence_time),
 
-      // from exu
-      .ren(exu_ren),
-      .raddr(exu_raddr),
-      .ralu(exu_ralu),
-      // to exu
-      .out_rdata(lsu_rdata),
-      .out_rready(lsu_exu_rvalid),
-
+      .exu_lsu(exu_lsu),
       .rou_lsu(rou_lsu),
       .out_sq_ready(lsu_sq_ready),
 
@@ -336,7 +277,7 @@ module ysyx #(
   ysyx_bus bus (
       .clock(clock),
 
-      .flush_pipeline(flush_pipeline),
+      .flush_pipe(wbu_bcast.flush_pipe),
 
       .io_master_arburst(io_master_arburst),
       .io_master_arsize(io_master_arsize),
@@ -372,15 +313,7 @@ module ysyx #(
       .io_master_bvalid(io_master_bvalid),
       .io_master_bready(io_master_bready),
 
-      // ifu
-      .out_bus_ifu_ready(bus_ifu_ready),
-      .ifu_araddr(ifu_araddr),
-      .ifu_arvalid(ifu_arvalid),
-      .ifu_lock(ifu_bus_lock),
-      .ifu_ready(ifu_ready),
-      .out_ifu_rdata(bus_ifu_rdata),
-      .out_ifu_rvalid(bus_ifu_rvalid),
-
+      .ifu_bus(ifu_bus),
       .lsu_bus(lsu_bus),
 
       .reset(reset)

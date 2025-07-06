@@ -9,30 +9,18 @@ module ysyx_ifu #(
 ) (
     input clock,
 
-    wbu_pipe_if.in wbu_if,
-
-    output [XLEN-1:0] out_inst,
-    output [XLEN-1:0] out_pc,
-    output [XLEN-1:0] out_pnpc,
-
-    input flush_pipeline,
+    input flush_pipe,
     input fence_time,
-
-    // for bus
-    input bus_ifu_ready,
-    output [XLEN-1:0] out_ifu_araddr,
-    output out_ifu_arvalid,
-    output out_ifu_lock,
-    input [XLEN-1:0] ifu_rdata,
-    input ifu_rvalid,
-
-    // for iqu
     input fence_i,
+
+    wbu_pipe_if.in wbu_bcast,
+
+    ifu_idu_if.master ifu_idu,
+    ifu_bus_if.master ifu_bus,
 
     input  prev_valid,
     input  next_ready,
     output out_valid,
-    output out_ready,
 
     input reset
 );
@@ -65,24 +53,22 @@ module ysyx_ifu #(
   logic ben;
   logic sys_retire;
 
-  assign npc = wbu_if.npc;
-  assign rpc = wbu_if.rpc;
-  assign jen = wbu_if.jen;
-  assign ben = wbu_if.ben;
-  assign sys_retire = wbu_if.sys_retire;
+  assign rpc = wbu_bcast.pc;
+  assign npc = wbu_bcast.npc;
+  assign jen = wbu_bcast.jen;
+  assign ben = wbu_bcast.ben;
+  assign sys_retire = wbu_bcast.sys_retire;
 
   assign ifu_hazard = ifu_sys_hazard;
-  assign out_inst = l1_inst;
-  assign opcode = out_inst[6:0];
+  assign opcode = l1_inst[6:0];
   // pre decode
   assign is_jalr = (opcode == `YSYX_OP_JALR__);
   assign is_b = (opcode == `YSYX_OP_B_TYPE_);
   assign is_jal = (opcode == `YSYX_OP_JAL___);
   assign is_sys = (opcode == `YSYX_OP_SYSTEM) || (opcode == `YSYX_OP_FENCE_);
 
-  assign valid = (l1i_valid && !ifu_hazard) && !flush_pipeline;
+  assign valid = (l1i_valid && !ifu_hazard) && !flush_pipe;
   assign out_valid = valid;
-  assign out_ready = !valid;
   assign imm_b = {
     {XLEN - 13{l1_inst[31]}}, {l1_inst[31:31]}, {l1_inst[7:7]}, l1_inst[30:25], l1_inst[11:8], 1'b0
   };
@@ -138,14 +124,18 @@ module ysyx_ifu #(
   end
 
   // ifu
-  assign out_pc   = pc_ifu;
-  assign out_pnpc = bpu_npc;
+  assign ifu_idu.pc = pc_ifu;
+  assign ifu_idu.pnpc = bpu_npc;
+  assign ifu_idu.inst = l1_inst;
+
+  assign ifu_idu.valid = valid;
+
   always @(posedge clock) begin
     if (reset) begin
       pc_ifu <= `YSYX_PC_INIT;
       ifu_sys_hazard <= 0;
     end else begin
-      if (flush_pipeline) begin
+      if (flush_pipe) begin
         pc_ifu <= npc;
         ifu_sys_hazard <= 0;
       end else begin
@@ -172,15 +162,14 @@ module ysyx_ifu #(
       .l1i_ready(l1i_ready),
 
       .invalid_l1i(fence_i),
-      .flush_pipeline(flush_pipeline),
+      .flush_pipe (flush_pipe),
 
       // <=> bus
-      .bus_ifu_ready(bus_ifu_ready),
-      .out_ifu_lock(out_ifu_lock),
-      .out_ifu_araddr(out_ifu_araddr),
-      .out_ifu_arvalid(out_ifu_arvalid),
-      .ifu_rdata(ifu_rdata),
-      .ifu_rvalid(ifu_rvalid),
+      .bus_ifu_ready(ifu_bus.bus_ready),
+      .out_ifu_araddr(ifu_bus.araddr),
+      .out_ifu_arvalid(ifu_bus.arvalid),
+      .ifu_rdata(ifu_bus.rdata),
+      .ifu_rvalid(ifu_bus.rready),
 
       .reset(reset)
   );

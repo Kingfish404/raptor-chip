@@ -9,28 +9,20 @@ module ysyx_exu #(
     input clock,
 
     // <= idu
-    idu_pipe_if.in idu_if,
-    input flush_pipeline,
-    // => lsu
-    output logic out_ren,
-    output logic [XLEN-1:0] out_raddr,
-    output [4:0] out_ralu,
-    // <= lsu
-    input [XLEN-1:0] lsu_rdata,
-    input lsu_exu_rvalid,
-    // => rou & (wbu)
+    idu_pipe_if.in rou_exu,
+    input flush_pipe,
+
     exu_pipe_if.out exu_rou,
+
+    exu_lsu_if.master exu_lsu,
     exu_csr_if.master exu_csr,
-    // <= rou (commit, cm)
-    exu_pipe_if.in rou_cm_if,
 
     input prev_valid,
+    output logic out_valid,
     output logic out_ready,
 
     input reset
 );
-
-
   logic [XLEN-1:0] reg_wdata, reg_wdata_mul, mepc, mtvec;
   logic [XLEN-1:0] addr_exu;
   logic [XLEN-1:0] csr_wdata, csr_rdata;
@@ -50,10 +42,6 @@ module ysyx_exu #(
   logic [RS_SIZE-1:0] rs_mul_valid;
   logic [XLEN-1:0] rs_mul_a[RS_SIZE];
 
-  logic [RS_SIZE-1:0] rs_wen;
-  logic [RS_SIZE-1:0] rs_ren;
-  logic [RS_SIZE-1:0] rs_ren_ready;
-  logic [XLEN-1:0] rs_ren_data[RS_SIZE];
   logic [RS_SIZE-1:0] rs_jen;
   logic [RS_SIZE-1:0] rs_br_jmp;
   logic [RS_SIZE-1:0] rs_br_cond;
@@ -71,10 +59,26 @@ module ysyx_exu #(
   logic rs_trap[RS_SIZE];
   logic [XLEN-1:0] rs_tval[RS_SIZE];
   logic [XLEN-1:0] rs_cause[RS_SIZE];
-  logic [RS_SIZE-1:0] rs_atom;
   logic [XLEN-1:0] rs_data[RS_SIZE];
   logic rs_ready;
   // === Revervation Station (RS) ===
+
+  // === In-Order Queue (IOQ), for Load, Store ===
+  logic [RS_SIZE-1:0] ioq_busy;
+  logic [4:0] ioq_alu[RS_SIZE];
+  logic [XLEN-1:0] ioq_vj[RS_SIZE];
+  logic [XLEN-1:0] ioq_vk[RS_SIZE];
+  logic [$clog2(ROB_SIZE):0] ioq_dest[RS_SIZE];
+  logic [XLEN-1:0] ioq_a[RS_SIZE];
+
+  logic [$clog2(ROB_SIZE):0] ioq_qj[RS_SIZE];
+  logic [$clog2(ROB_SIZE):0] ioq_qk[RS_SIZE];
+  logic [RS_SIZE-1:0] ioq_wen;
+  logic [RS_SIZE-1:0] ioq_ren;
+  logic [RS_SIZE-1:0] ioq_ren_ready;
+  logic [XLEN-1:0] ioq_ren_data[RS_SIZE];
+  logic [RS_SIZE-1:0] ioq_atom;
+  // === In-Order Queue (IOQ), for Load, Store ===
 
   logic [$clog2(RS_SIZE)-1:0] free_idx;
   logic [$clog2(RS_SIZE)-1:0] valid_idx;
@@ -106,7 +110,7 @@ module ysyx_exu #(
             // mul ready
             (rs_alu[i][4:4] == 0 || rs_mul_valid[i]) &&
             // alu / load ready
-            (((rs_qj[i] == 0 && rs_qk[i] == 0)) && (rs_ren[i] == 0 || rs_ren_ready[i]))) begin
+            (((rs_qj[i] == 0 && rs_qk[i] == 0)) && (ioq_ren[i] == 0 || ioq_ren_ready[i]))) begin
           valid_idx   = i[$clog2(RS_SIZE)-1:0];
           valid_found = 1;
         end
@@ -119,18 +123,18 @@ module ysyx_exu #(
       end
     end
     for (bit [XLEN-1:0] i = 0; i < RS_SIZE; i++) begin
-      if (rs_busy[i] == 1 && rs_ren[i] == 1 && !rs_ren_ready[i] && !load_found) begin
+      if (rs_busy[i] == 1 && ioq_ren[i] == 1 && !ioq_ren_ready[i] && !load_found) begin
         load_rs_idx = i[$clog2(RS_SIZE)-1:0];
         load_found  = 1;
       end
     end
   end
 
-  assign out_ralu  = rs_atom[load_rs_idx] ? `YSYX_ALU_LW__ : rs_alu[load_rs_idx];
-  assign out_ren   = (load_found) && rs_qj[load_rs_idx] == 0 && rs_qk[load_rs_idx] == 0;
-  assign out_raddr = rs_vj[load_rs_idx] + rs_imm[load_rs_idx];
+  assign exu_lsu.arvalid = (load_found) && rs_qj[load_rs_idx] == 0 && rs_qk[load_rs_idx] == 0;
+  assign exu_lsu.raddr = rs_vj[load_rs_idx] + rs_imm[load_rs_idx];
+  assign exu_lsu.ralu = ioq_atom[load_rs_idx] ? `YSYX_ALU_LW__ : rs_alu[load_rs_idx];
 
-  assign rs_ready  = free_found && !(|rs_wen) && !(|rs_ren) && !(mul_found && idu_if.alu[4:4]);
+  assign rs_ready = free_found && !(|ioq_wen) && !(|ioq_ren) && !(mul_found && rou_exu.alu[4:4]);
   assign out_ready = rs_ready;
 
   // ALU for each RS
@@ -148,9 +152,9 @@ module ysyx_exu #(
   logic muling;
 
   always @(posedge clock) begin
-    if (reset || flush_pipeline) begin
-      rs_ren  <= 0;
-      rs_wen  <= 0;
+    if (reset || flush_pipe) begin
+      ioq_ren <= 0;
+      ioq_wen <= 0;
       rs_busy <= 0;
       rs_busy <= 0;
       muling  <= 0;
@@ -160,46 +164,46 @@ module ysyx_exu #(
           if (prev_valid && rs_ready) begin
             // Dispatch receive
             rs_busy[free_idx] <= 1;
-            rs_alu[free_idx] <= idu_if.alu;
-            rs_vj[free_idx] <= (exu_rou.valid && exu_rou.dest == idu_if.qj) ?
-              exu_rou.result : idu_if.op1;
-            rs_vk[free_idx] <= (exu_rou.valid && exu_rou.dest == idu_if.qk) ?
-              exu_rou.result : idu_if.op2;
-            rs_qj[free_idx] <= (exu_rou.valid && exu_rou.dest == idu_if.qj) ? 0 : idu_if.qj;
-            rs_qk[free_idx] <= (exu_rou.valid && exu_rou.dest == idu_if.qk) ? 0 : idu_if.qk;
-            rs_dest[free_idx] <= idu_if.dest;
+            rs_alu[free_idx] <= rou_exu.alu;
+            rs_vj[free_idx] <= (exu_rou.valid && exu_rou.dest == rou_exu.qj) ?
+              exu_rou.result : rou_exu.op1;
+            rs_vk[free_idx] <= (exu_rou.valid && exu_rou.dest == rou_exu.qk) ?
+              exu_rou.result : rou_exu.op2;
+            rs_qj[free_idx] <= (exu_rou.valid && exu_rou.dest == rou_exu.qj) ? 0 : rou_exu.qj;
+            rs_qk[free_idx] <= (exu_rou.valid && exu_rou.dest == rou_exu.qk) ? 0 : rou_exu.qk;
+            rs_dest[free_idx] <= rou_exu.dest;
 
-            rs_wen[free_idx] <= idu_if.wen;
-            rs_atom[free_idx] <= idu_if.atom;
+            ioq_wen[free_idx] <= rou_exu.wen;
+            ioq_atom[free_idx] <= rou_exu.atom;
 
-            rs_ren[free_idx] <= idu_if.ren;
-            rs_ren_ready[free_idx] <= 0;
+            ioq_ren[free_idx] <= rou_exu.ren;
+            ioq_ren_ready[free_idx] <= 0;
 
-            rs_jen[free_idx] <= idu_if.jen;
-            rs_br_jmp[free_idx] <= (idu_if.jen || idu_if.ecall || idu_if.mret);
-            rs_br_cond[free_idx] <= (idu_if.ben);
-            rs_jump[free_idx] <= (idu_if.jen);
-            rs_imm[free_idx] <= idu_if.imm;
-            rs_pc[free_idx] <= idu_if.pc;
-            rs_inst[free_idx] <= idu_if.inst;
+            rs_jen[free_idx] <= rou_exu.jen;
+            rs_br_jmp[free_idx] <= (rou_exu.jen || rou_exu.ecall || rou_exu.mret);
+            rs_br_cond[free_idx] <= (rou_exu.ben);
+            rs_jump[free_idx] <= (rou_exu.jen);
+            rs_imm[free_idx] <= rou_exu.imm;
+            rs_pc[free_idx] <= rou_exu.pc;
+            rs_inst[free_idx] <= rou_exu.inst;
 
-            rs_system[free_idx] <= idu_if.system;
-            rs_ecall[free_idx] <= idu_if.ecall;
-            rs_ebreak[free_idx] <= idu_if.ebreak;
-            rs_mret[free_idx] <= idu_if.mret;
-            rs_csr_csw[free_idx] <= idu_if.csr_csw;
+            rs_system[free_idx] <= rou_exu.system;
+            rs_ecall[free_idx] <= rou_exu.ecall;
+            rs_ebreak[free_idx] <= rou_exu.ebreak;
+            rs_mret[free_idx] <= rou_exu.mret;
+            rs_csr_csw[free_idx] <= rou_exu.csr_csw;
 
-            rs_trap[free_idx] <= idu_if.trap;
-            rs_tval[free_idx] <= idu_if.tval;
-            rs_cause[free_idx] <= idu_if.cause;
+            rs_trap[free_idx] <= rou_exu.trap;
+            rs_tval[free_idx] <= rou_exu.tval;
+            rs_cause[free_idx] <= rou_exu.cause;
           end
         end else if (rs_busy[i] == 1 && rs_qj[i] == 0 && rs_qk[i] == 0) begin
           // Load
-          if (rs_ren[i]) begin
+          if (ioq_ren[i]) begin
             // Load result is ready
-            if (lsu_exu_rvalid) begin
-              rs_ren_ready[i] <= 1;
-              rs_ren_data[i]  <= lsu_rdata;
+            if (exu_lsu.rready) begin
+              ioq_ren_ready[i] <= 1;
+              ioq_ren_data[i]  <= exu_lsu.rdata;
             end
           end
           // Mul
@@ -221,9 +225,9 @@ module ysyx_exu #(
             rs_busy[i] <= 0;
             rs_alu[i] <= 0;
             rs_inst[i] <= 0;
-            rs_ren[i] <= 0;
-            rs_wen[i] <= 0;
-            rs_ren_ready[i] <= 0;
+            ioq_ren[i] <= 0;
+            ioq_wen[i] <= 0;
+            ioq_ren_ready[i] <= 0;
             rs_mul_valid[i] <= 0;
             for (bit [XLEN-1:0] j = 0; j < RS_SIZE; j++) begin
               // Forwarding
@@ -244,7 +248,7 @@ module ysyx_exu #(
 
   always_comb begin
     for (bit [XLEN-1:0] i = 0; i < RS_SIZE; i++) begin
-      if (rs_atom[i]) begin
+      if (ioq_atom[i]) begin
         case (rs_alu[i])
           // TODO: add reservation for lr/sc
           `YSYX_ATO_LR__: begin
@@ -257,28 +261,28 @@ module ysyx_exu #(
             rs_data[i] = rs_vk[i];
           end
           `YSYX_ATO_ADD_: begin
-            rs_data[i] = rs_vk[i] + rs_ren_data[i];
+            rs_data[i] = rs_vk[i] + ioq_ren_data[i];
           end
           `YSYX_ATO_XOR_: begin
-            rs_data[i] = rs_vk[i] ^ rs_ren_data[i];
+            rs_data[i] = rs_vk[i] ^ ioq_ren_data[i];
           end
           `YSYX_ATO_AND_: begin
-            rs_data[i] = rs_vk[i] & rs_ren_data[i];
+            rs_data[i] = rs_vk[i] & ioq_ren_data[i];
           end
           `YSYX_ATO_OR__: begin
-            rs_data[i] = rs_vk[i] | rs_ren_data[i];
+            rs_data[i] = rs_vk[i] | ioq_ren_data[i];
           end
           `YSYX_ATO_MIN_: begin
-            rs_data[i] = rs_ren_data[i] < rs_vk[i] ? rs_ren_data[i] : rs_vk[i];
+            rs_data[i] = ioq_ren_data[i] < rs_vk[i] ? ioq_ren_data[i] : rs_vk[i];
           end
           `YSYX_ATO_MAX_: begin
-            rs_data[i] = rs_ren_data[i] > rs_vk[i] ? rs_ren_data[i] : rs_vk[i];
+            rs_data[i] = ioq_ren_data[i] > rs_vk[i] ? ioq_ren_data[i] : rs_vk[i];
           end
           `YSYX_ATO_MINU: begin
-            rs_data[i] = rs_ren_data[i] < rs_vk[i] ? rs_vk[i] : rs_ren_data[i];
+            rs_data[i] = ioq_ren_data[i] < rs_vk[i] ? rs_vk[i] : ioq_ren_data[i];
           end
           `YSYX_ATO_MAXU: begin
-            rs_data[i] = rs_ren_data[i] > rs_vk[i] ? rs_vk[i] : rs_ren_data[i];
+            rs_data[i] = ioq_ren_data[i] > rs_vk[i] ? rs_vk[i] : ioq_ren_data[i];
           end
           default: begin
             rs_data[i] = 'b0;
@@ -299,14 +303,13 @@ module ysyx_exu #(
     rs_alu[valid_idx][4:4] == 0 ?
     (
       rs_system[valid_idx] ? csr_rdata :
-      rs_ren_ready[valid_idx] ? rs_ren_data[valid_idx] :
+      ioq_ren_ready[valid_idx] ? ioq_ren_data[valid_idx] :
       rs_jen[valid_idx] ? rs_pc[valid_idx] + 4 :
-      rs_atom[valid_idx] && rs_alu[valid_idx] == `YSYX_ATO_SC__ ? 0 :
+      ioq_atom[valid_idx] && rs_alu[valid_idx] == `YSYX_ATO_SC__ ? 0 :
       rs_a[valid_idx]
     ) :
     rs_mul_a[valid_idx]
     );
-  assign exu_rou.rs_idx = free_idx;
   assign exu_rou.dest = rs_dest[valid_idx];
   assign exu_rou.result = reg_wdata;
 
@@ -334,6 +337,7 @@ module ysyx_exu #(
   assign exu_rou.sq_waddr = rs_vj[valid_idx] + rs_imm[valid_idx];
   assign exu_rou.sq_wdata = rs_data[valid_idx];
   assign exu_rou.valid = valid_found;
+  assign out_valid = valid_found;
 
 `ifdef YSYX_M_EXTENSION
   // alu for M Extension

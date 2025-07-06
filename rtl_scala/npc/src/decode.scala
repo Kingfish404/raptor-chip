@@ -13,8 +13,8 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
     val alu = Output(UInt(5.W))
     val jen = Output(UInt(1.W))
     val ben = Output(UInt(1.W))
-    val wen = Output(UInt(1.W))
-    val ren = Output(UInt(1.W))
+    val len = Output(UInt(1.W))
+    val sen = Output(UInt(1.W))
 
     val atom = Output(UInt(1.W))
 
@@ -58,7 +58,7 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
 
   val type_table   = TruthTable(
     Map(
-      //                      rw b j  |  alu op |
+      //                      ls b j  |  alu op |
       LUI___ -> BitPat("b" + "00 0 0" + ALU_ADD_), // U
       AUIPC_ -> BitPat("b" + "00 0 0" + ALU_ADD_), // U
 
@@ -160,8 +160,8 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
   out.alu := inst_decoded(4, 0)
   out.jen := inst_decoded(5)
   out.ben := inst_decoded(6)
-  out.wen := inst_decoded(7)
-  out.ren := inst_decoded(8)
+  out.sen := inst_decoded(7)
+  out.len := inst_decoded(8)
 
   val atom_decoded = decoder(
     in.inst,

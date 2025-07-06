@@ -8,7 +8,7 @@ module ysyx_bus #(
 ) (
     input clock,
 
-    input flush_pipeline,
+    input flush_pipe,
 
     // AXI4 Master bus
     output [1:0] io_master_arburst,
@@ -45,15 +45,7 @@ module ysyx_bus #(
     input        io_master_bvalid,  // reqired
     output       io_master_bready,  // reqired
 
-    // ifu
-    output out_bus_ifu_ready,
-    input [XLEN-1:0] ifu_araddr,
-    input ifu_arvalid,
-    input ifu_lock,
-    input ifu_ready,
-    output [XLEN-1:0] out_ifu_rdata,
-    output out_ifu_rvalid,
-
+    ifu_bus_if.slave ifu_bus,
     lsu_bus_if.slave lsu_bus,
 
     input reset
@@ -97,17 +89,16 @@ module ysyx_bus #(
   assign io_master_awid = 0;
 
   state_load_t state_load;
-  assign out_bus_ifu_ready = state_load == IF_A;
   always @(posedge clock) begin
     if (reset) begin
       state_load <= IF_A;
     end else begin
       unique case (state_load)
         IF_A: begin
-          if (ifu_arvalid) begin
-            bus_araddr <= ifu_araddr;
+          if (ifu_bus.arvalid) begin
+            bus_araddr <= ifu_bus.araddr;
             state_load <= IF_AS;
-          end else if (lsu_bus.arvalid && !flush_pipeline) begin
+          end else if (lsu_bus.arvalid && !flush_pipe) begin
             bus_araddr <= lsu_bus.araddr;
             state_load <= LS_AS;
           end
@@ -133,15 +124,15 @@ module ysyx_bus #(
           end
         end
         LS_A: begin
-          if (lsu_bus.arvalid && !flush_pipeline) begin
+          if (lsu_bus.arvalid && !flush_pipe) begin
             state_load <= LS_AS;
             bus_araddr <= lsu_bus.araddr;
-          end else if (clint_en || ifu_arvalid) begin
+          end else if (clint_en || ifu_bus.arvalid) begin
             state_load <= IF_A;
           end
         end
         LS_AS: begin
-          if (flush_pipeline) begin
+          if (flush_pipe) begin
             if (io_master_arready) begin
               state_load <= LS_R_FLUSHED;
             end else begin
@@ -159,7 +150,7 @@ module ysyx_bus #(
         LS_R: begin
           if (io_master_rvalid) begin
             state_load <= LS_A;
-          end else if (flush_pipeline) begin
+          end else if (flush_pipe) begin
             state_load <= LS_R_FLUSHED;
           end
         end
@@ -211,8 +202,9 @@ module ysyx_bus #(
   end
 
   // ifu read
-  assign out_ifu_rdata = rdata;
-  assign out_ifu_rvalid = (state_load == IF_B);
+  assign ifu_bus.bus_ready = state_load == IF_A;
+  assign ifu_bus.rready = (state_load == IF_B);
+  assign ifu_bus.rdata = rdata;
 
   assign clint_en = (lsu_bus.araddr == `YSYX_BUS_RTC_ADDR) || (lsu_bus.araddr == `YSYX_BUS_RTC_ADDR_UP);
   assign lsu_bus.rdata = clint_en ? clint_rdata : io_rdata;

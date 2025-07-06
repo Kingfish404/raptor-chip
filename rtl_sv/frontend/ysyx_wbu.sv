@@ -7,35 +7,35 @@ module ysyx_wbu #(
 ) (
     input clock,
 
-    input [31:0] inst,
-    input [31:0] pc,
-    input ebreak,
-
-    input [XLEN-1:0] npc_wdata,
-    input jen,
-    input ben,
-    input sys_retire,
-
-    wbu_pipe_if.out wbu_if,
+    rou_wbu_if.in   rou_wbu,
+    wbu_pipe_if.out wbu_bcast,
 
     input  prev_valid,
     output out_valid,
 
     input reset
 );
+  logic valid;
   logic [31:0] inst_wbu, pc_wbu, npc_wbu;
 
+  logic sys_retire;
   logic jen_wbu, ben_wbu;
-  logic retire, valid, ready;
+  logic fence_time, fence_i;
+  logic flush_pipe;
 
   assign out_valid = valid;
-  assign ready = 1;
 
-  assign wbu_if.npc = npc_wbu;
-  assign wbu_if.rpc = pc_wbu;
-  assign wbu_if.jen = jen_wbu;
-  assign wbu_if.ben = ben_wbu;
-  assign wbu_if.sys_retire = retire;
+  assign wbu_bcast.pc = pc_wbu;
+  assign wbu_bcast.npc = npc_wbu;
+
+  assign wbu_bcast.sys_retire = sys_retire;
+  assign wbu_bcast.jen = jen_wbu;
+  assign wbu_bcast.ben = ben_wbu;
+
+  assign wbu_bcast.fence_time = fence_time;
+  assign wbu_bcast.fence_i = fence_i;
+
+  assign wbu_bcast.flush_pipe = flush_pipe;
 
   always @(posedge clock) begin
     if (reset) begin
@@ -43,21 +43,35 @@ module ysyx_wbu #(
       `YSYX_DPI_C_NPC_DIFFTEST_SKIP_REF
     end else begin
       if (prev_valid) begin
-        pc_wbu <= pc;
-        inst_wbu <= inst;
         valid <= 1;
-        jen_wbu <= jen;
-        ben_wbu <= ben;
-        retire <= sys_retire;
-        npc_wbu <= npc_wdata;
-        if (ebreak) begin
+
+        if (rou_wbu.ebreak) begin
           `YSYX_DPI_C_NPC_EXU_EBREAK
         end
+        pc_wbu <= rou_wbu.pc;
+        npc_wbu <= rou_wbu.npc;
+
+        sys_retire <= rou_wbu.sys_retire;
+        jen_wbu <= rou_wbu.jen;
+        ben_wbu <= rou_wbu.ben;
+
+        fence_time <= rou_wbu.fence_time;
+        fence_i <= rou_wbu.fence_i;
+
+        flush_pipe <= rou_wbu.flush_pipe;
+
+        inst_wbu <= rou_wbu.inst;
       end else begin
-        valid   <= 0;
-        retire  <= 0;
+        valid <= 0;
+
+        sys_retire <= 0;
         jen_wbu <= 0;
         ben_wbu <= 0;
+
+        fence_time <= 0;
+        fence_i <= 0;
+
+        flush_pipe <= 0;
       end
     end
   end
