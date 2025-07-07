@@ -1,5 +1,6 @@
 `ifndef YSYX_DPI_C_SVH
 `define YSYX_DPI_C_SVH
+
 `define YSYX_DPI_C_NPC_EXU_EBREAK npc_exu_ebreak();
 `define YSYX_DPI_C_NPC_ILLEGAL_INST npc_illegal_inst();
 `define YSYX_DPI_C_NPC_DIFFTEST_SKIP_REF npc_difftest_skip_ref();

@@ -1,5 +1,6 @@
 `include "ysyx.svh"
 `include "ysyx_if.svh"
+`include "ysyx_dpi_c.svh"
 
 module ysyx_lsu #(
     parameter unsigned SQ_SIZE = `YSYX_SQ_SIZE,
@@ -14,6 +15,7 @@ module ysyx_lsu #(
 
     // from exu
     exu_lsu_if.slave exu_lsu,
+    exu_ioq_rou_if.in exu_ioq_rou,
     // from rou
     rou_lsu_if.in rou_lsu,
     output logic out_sq_ready,
@@ -36,6 +38,16 @@ module ysyx_lsu #(
   logic [XLEN-1:0] rdata_unalign;
   logic [XLEN-1:0] rdata;
   logic rready;
+
+  // === Store Temporary Queue (STQ) ===
+  logic [$clog2(SQ_SIZE)-1:0] stq_head;
+  logic [$clog2(SQ_SIZE)-1:0] stq_tail;
+  logic [SQ_SIZE-1:0] stq_valid;
+
+  logic [4:0] stq_alu[SQ_SIZE];
+  logic [XLEN-1:0] stq_waddr[SQ_SIZE];
+  logic [XLEN-1:0] stq_wdata[SQ_SIZE];
+  // === Store Temporary Queue (STQ) ===
 
   // === Store Queue (SQ) ===
   logic sq_ready;
@@ -71,20 +83,43 @@ module ysyx_lsu #(
 
   always @(posedge clock) begin
     if (reset) begin
-      sq_head  <= 0;
-      sq_tail  <= 0;
-      sq_valid <= 0;
+      sq_head   <= 0;
+      sq_tail   <= 0;
+      sq_valid  <= 0;
+
+      stq_head  <= 0;
+      stq_tail  <= 0;
+      stq_valid <= 0;
     end else begin
+      if (flush_pipe || fence_time) begin
+        stq_head  <= 0;
+        stq_tail  <= 0;
+        stq_valid <= 0;
+      end else begin
+        if (exu_ioq_rou.valid && exu_ioq_rou.wen) begin
+          stq_valid[stq_tail] <= 1;
+
+          stq_alu[stq_tail] <= exu_ioq_rou.alu;
+          stq_waddr[stq_tail] <= exu_ioq_rou.sq_waddr;
+          stq_wdata[stq_tail] <= exu_ioq_rou.sq_wdata;
+          stq_tail <= stq_tail + 1;
+        end
+        if (rou_lsu.valid && rou_lsu.store && sq_ready) begin
+          stq_valid[stq_head] <= 0;
+          stq_head <= stq_head + 1;
+        end
+      end
       if (rou_lsu.valid && rou_lsu.store && sq_ready) begin
         // Store Commit
         sq_valid[sq_tail] <= 1;
-        sq_alu[sq_tail] <= rou_lsu.alu;
+        sq_alu[sq_tail]   <= rou_lsu.alu;
         sq_waddr[sq_tail] <= rou_lsu.sq_waddr;
         sq_wdata[sq_tail] <= rou_lsu.sq_wdata;
-        sq_tail <= sq_tail + 1;
         if (store_in_sq && store_in_sq_idx != sq_tail) begin
           sq_waddr[store_in_sq_idx] <= 0;
         end
+        sq_tail <= sq_tail + 1;
+        `YSYX_DPI_C_NPC_DIFFTEST_MEM_DIFF(rou_lsu.sq_waddr, rou_lsu.sq_wdata, {{3'b0}, rou_lsu.alu})
       end
       if (wready && sq_valid[sq_head]) begin
         // Store Finished
@@ -98,7 +133,7 @@ module ysyx_lsu #(
     load_in_sq = 0;
     load_in_sq_idx = 0;
     for (int i = 0; i < SQ_SIZE; i++) begin
-      if (sq_waddr[i] == (raddr) && !load_in_sq) begin
+      if (sq_waddr[i] == (raddr) && sq_valid[i] && !load_in_sq) begin
         load_in_sq = 1;
         load_in_sq_idx = i[$clog2(SQ_SIZE)-1:0];
       end
@@ -191,7 +226,7 @@ module ysyx_lsu #(
       // load
       .raddr(raddr),
       .ralu(ralu),
-      .rvalid(exu_lsu.arvalid && raddr_valid && !(|sq_valid)),
+      .rvalid(exu_lsu.arvalid && raddr_valid && !(|sq_valid) && !(|stq_valid)),
       .lsu_rdata(rdata_unalign),
       .lsu_rready(rready),
 

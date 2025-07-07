@@ -11,34 +11,19 @@
 `define YSYX_M_EXTENSION 'h1
 
 /**
- * Microarchitecture (uarch)
- * See ./../ysyx.sv for the pipeline stages.
-       +-----+                          +-----+
-     ,-| BPU |          |#(IQ_SIZE)  ,-| MUL #(YSYX_M_FAST)
-     | +-----+          |    ,------. | +--+--+
-  +--|--+    +-----+    +----v+    +--|--+
-  | IFU +----> IDU +----> ROU +-----> EXU +-----| #(RS_SIZE)
-  +^-|--+    +-----+    ++--+-+     +---^+
-   | |                   |  |           |
-   | | +-----+      +----v+ |#(RS_SIZE) |
-   | `-| L1I #      | WBU |             |
-   |   ++----+      +-----+             |
-   |    |#(L1I_LINE_LEN, L1I_LEN)       |
-   |                                    |
-   |           +-----+      +-----+     |
-    `----------+ BUS <------> LSU <-----'
-               +--^--+      +----|+
-  "AXI4 protocol" |              | +-----+
-       +----------v----------+   `-| L1D #(L1D_LEN)
-       |         SoC         |     +-----+
-       +---------------------+
-
- * uarch Parameters
+ * Microarchitecture (uarch) Parameters
  * @param YSYX_M_FAST: M Extension Fast Mode (one cycle)
+ *
  * @param L1I_LINE_LEN: L1I Line Length
  * @param L1I_LEN: L1I Length (Size)
+ *
  * @param IQ_SIZE: Issue Queue Size
+ * @param ROB_SIZE: ReOrder Buffer Size
+ *
  * @param RS_SIZE: Revervation Station Size
+ * @param IOQ_SIZE: In-Order Queue Size
+ *
+ * @param SQ_SIZE: Store Queue Size
  * @param L1D_LEN: L1D Length (Size)
  */
 
@@ -50,9 +35,12 @@
 `define YSYX_BTB_SIZE 128
 
 `define YSYX_IQ_SIZE 4
-`define YSYX_RS_SIZE 4
-`define YSYX_SQ_SIZE 8
 `define YSYX_ROB_SIZE 4
+
+`define YSYX_RS_SIZE 4
+`define YSYX_IOQ_SIZE 4
+
+`define YSYX_SQ_SIZE 8
 `define YSYX_L1D_LEN 8
 
 `ifdef YSYX_I_EXTENSION
@@ -61,7 +49,9 @@
 `define YSYX_REG_LEN 4  // 16 registers
 `endif
 
-`define YSYX_REG_NUM 2**`YSYX_REG_LEN
+`define YSYX_REG_SIZE 2**`YSYX_REG_LEN
 
-// === Architecture (arch) Parameters ===
+`define YSYX_PHY_SIZE 64 // physical register number
+`define YSYX_PHY_LEN $clog2(`YSYX_PHY_SIZE)
+
 `endif

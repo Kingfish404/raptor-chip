@@ -111,7 +111,8 @@ module ysyx #(
   logic rou_valid, rou_ready;
 
   // EXU
-  exu_pipe_if exu_rou ();
+  exu_rou_if exu_rou ();
+  exu_ioq_rou_if exu_ioq_rou ();
   exu_csr_if exu_csr ();
   exu_lsu_if exu_lsu ();
   logic exu_valid, exu_ready;
@@ -172,13 +173,15 @@ module ysyx #(
 
       .idu_rou(idu_rou),
       .rou_exu(rou_exu),
-      .exu_rou(exu_rou),
 
-      .rou_wbu(rou_wbu),
+      .exu_rou(exu_rou),
+      .exu_ioq_rou(exu_ioq_rou),
 
       .rou_reg(rou_reg),
       .rou_csr(rou_csr),
+
       .rou_lsu(rou_lsu),
+      .rou_wbu(rou_wbu),
 
       .sq_ready(lsu_sq_ready),
 
@@ -199,6 +202,7 @@ module ysyx #(
       .flush_pipe(wbu_bcast.flush_pipe),
 
       .exu_rou(exu_rou),
+      .exu_ioq_rou(exu_ioq_rou),
 
       .exu_lsu(exu_lsu),
       .exu_csr(exu_csr),
@@ -266,6 +270,7 @@ module ysyx #(
       .fence_time(wbu_bcast.fence_time),
 
       .exu_lsu(exu_lsu),
+      .exu_ioq_rou(exu_ioq_rou),
       .rou_lsu(rou_lsu),
       .out_sq_ready(lsu_sq_ready),
 

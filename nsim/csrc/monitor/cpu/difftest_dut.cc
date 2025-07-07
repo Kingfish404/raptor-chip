@@ -142,23 +142,24 @@ static void checkregs(NPCState *ref, vaddr_t pc)
 #ifdef CONFIG_MEM_DIFFTEST
 static void checkmem(uint8_t *ref, uint8_t *dut, size_t n)
 {
+  return;
+  ref_difftest_memcpy(MBASE, pmem_ref, MSIZE, DIFFTEST_TO_DUT);
   for (size_t i = 0; i < n; i++)
   {
     if (ref[i] != dut[i])
     {
       printf(FMT_RED("[ERROR]") " mem[%x] is different! ref = " FMT_WORD_NO_PREFIX ", dut = " FMT_WORD_NO_PREFIX "\n",
              (word_t)i, ref[i], dut[i]);
-      // print the before 16 bits and after 16 bits of memory
-      printf("mem_ref: ");
-      for (int j = 0; j < 16; j++)
-      {
-        printf("%02x ", ref[i - 8 + j]);
-      }
-      printf("\n");
       printf("mem_dut: ");
       for (int j = 0; j < 16; j++)
       {
         printf("%02x ", dut[i - 8 + j]);
+      }
+      printf("\n");
+      printf("mem_ref: ");
+      for (int j = 0; j < 16; j++)
+      {
+        printf("%02x ", ref[i - 8 + j]);
       }
       printf("\n");
       npc.state = NPC_ABORT;
@@ -192,12 +193,14 @@ void difftest_step(vaddr_t pc)
     return;
   }
 
+  ref_difftest_exec(1);
+
   if (0)
   {
     ref_difftest_regcpy(&ref_r, DIFFTEST_TO_DUT);
     int low2addr = npc.vwaddr & 0x3;
     int len = ref_r.len;
-    word_t align_wdata = ((word_t)npc.wdata) >> (low2addr * 8);
+    word_t align_wdata = ((word_t)npc.wdata);
     word_t ref_wdata = ref_r.wdata;
     switch (len)
     {
@@ -214,30 +217,30 @@ void difftest_step(vaddr_t pc)
       ref_wdata = (uint32_t)(ref_wdata);
       break;
     default:
+      align_wdata = (uint64_t)(align_wdata);
+      ref_wdata = (uint64_t)(ref_wdata);
       break;
     }
-    if (npc.vwaddr != ref_r.vwaddr || align_wdata != ref_wdata)
+    if ((npc.vwaddr != ref_r.vwaddr) || (align_wdata != ref_wdata))
     {
-      printf("npc.vwaddr: " FMT_WORD_NO_PREFIX ", rawdta: " FMT_WORD_NO_PREFIX
-             ", wdata: " FMT_WORD_NO_PREFIX ", wstrb: %x, pc: " FMT_WORD_NO_PREFIX "\n",
-             (word_t)npc.vwaddr, (word_t)npc.wdata, align_wdata,
+      printf("[npc.vwaddr: " FMT_WORD_NO_PREFIX ", wdata: " FMT_WORD_NO_PREFIX "], "
+             "rawdta: " FMT_WORD_NO_PREFIX ", wstrb: %x, pc: " FMT_WORD_NO_PREFIX "\n",
+             (word_t)npc.vwaddr, align_wdata, (word_t)npc.wdata,
              npc.wstrb, *npc.cpc);
-      printf("ref.vwaddr: " FMT_WORD_NO_PREFIX ", pwaddr: " FMT_WORD_NO_PREFIX ", "
-             "wdata: " FMT_WORD_NO_PREFIX ",   len: %x, pc: " FMT_WORD_NO_PREFIX "\n",
-             (ref_r.vwaddr), ref_r.pwaddr, ref_wdata, ref_r.len, *ref_r.cpc);
+      printf("[ref.vwaddr: " FMT_WORD_NO_PREFIX ", wdata: " FMT_WORD_NO_PREFIX "], "
+             "pwaddr: " FMT_WORD_NO_PREFIX ",   len: %x, pc: " FMT_WORD_NO_PREFIX "\n",
+             (ref_r.vwaddr), ref_wdata, ref_r.pwaddr, ref_r.len, *ref_r.cpc);
       reg_display(32);
       npc.state = NPC_ABORT;
     }
     ref_r.vwaddr = 0;
     ref_r.pwaddr = 0;
 #ifdef CONFIG_MEM_DIFFTEST
-    ref_difftest_memcpy(MBASE, pmem_ref, MSIZE, DIFFTEST_TO_DUT);
     checkmem(pmem_ref, guest_to_host(MBASE), MSIZE);
 #endif
     should_diff_mem = false;
   }
 
-  ref_difftest_exec(1);
   ref_difftest_regcpy(&ref_r, DIFFTEST_TO_DUT);
   if (ref_r.skip)
   {

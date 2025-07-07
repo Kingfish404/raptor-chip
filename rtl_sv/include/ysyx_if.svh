@@ -1,6 +1,7 @@
 `ifndef YSYX_IF_SVH
 `define YSYX_IF_SVH
 `include "ysyx.svh"
+`include "ysyx_pipe_if.svh"
 
 interface ifu_idu_if #(
     parameter int XLEN = `YSYX_XLEN
@@ -29,68 +30,6 @@ interface ifu_bus_if #(
   modport slave(input arvalid, araddr, output bus_ready, rready, rdata);
 endinterface
 
-interface idu_pipe_if #(
-    parameter int XLEN = `YSYX_XLEN
-);
-  logic [4:0] alu;
-  logic jen;
-  logic ben;
-  logic wen;
-  logic ren;
-  logic atom;
-
-  logic system;
-  logic ecall;
-  logic ebreak;
-  logic fence_i;
-  logic fence_time;
-  logic mret;
-  logic [2:0] csr_csw;
-
-  logic trap;
-  logic [`YSYX_XLEN-1:0] tval;
-  logic [`YSYX_XLEN-1:0] cause;
-
-  logic [4:0] rd;
-  logic [XLEN-1:0] imm;
-  logic [XLEN-1:0] op1;
-  logic [XLEN-1:0] op2;
-  logic [4:0] rs1;
-  logic [4:0] rs2;
-
-  logic [$clog2(`YSYX_ROB_SIZE):0] qj;
-  logic [$clog2(`YSYX_ROB_SIZE):0] qk;
-  logic [$clog2(`YSYX_ROB_SIZE):0] dest;
-
-  logic [XLEN-1:0] pnpc;
-
-  logic [31:0] inst;
-  logic [XLEN-1:0] pc;
-
-  modport in(
-      input alu, jen, ben, wen, ren, atom,
-      input system, ecall, ebreak, mret, csr_csw,
-      input trap, tval, cause,
-      input fence_i, fence_time,
-      input rd, imm, op1, op2, rs1, rs2,
-      input qj, qk, dest,
-      input pnpc,
-      input inst,
-      input pc
-  );
-  modport out(
-      output alu, jen, ben, wen, ren, atom,
-      output system, ecall, ebreak, mret, csr_csw,
-      output trap, tval, cause,
-      output fence_i, fence_time,
-      output rd, imm, op1, op2, rs1, rs2,
-      output qj, qk, dest,
-      output pnpc,
-      output inst,
-      output pc
-  );
-endinterface
-
 interface rou_reg_if #(
     parameter int XLEN = `YSYX_XLEN
 );
@@ -104,21 +43,15 @@ interface rou_reg_if #(
   modport slave(input rs1, rs2, output src1, src2);
 endinterface
 
-interface exu_pipe_if #(
+interface exu_rou_if #(
     parameter int XLEN = `YSYX_XLEN
 );
-  logic [4:0] rd;
   logic [31:0] inst;
   logic [XLEN-1:0] pc;
+  logic [XLEN-1:0] npc;
 
   logic [$clog2(`YSYX_ROB_SIZE):0] dest;
   logic [XLEN-1:0] result;
-
-  // wbu
-  logic [XLEN-1:0] npc;
-  logic sys_retire;
-  logic jen;
-  logic ben;
 
   // csr
   logic csr_wen;
@@ -127,37 +60,49 @@ interface exu_pipe_if #(
 
   logic ecall;
   logic ebreak;
-  logic fence_i;
   logic mret;
 
   logic trap;
   logic [XLEN-1:0] tval;
   logic [XLEN-1:0] cause;
 
-  // store
+  logic valid;
+
+  modport in(
+      input inst, pc, npc,
+      input dest, result, ebreak,
+      input csr_wen, csr_wdata, csr_addr, ecall, mret,
+      input trap, tval, cause,
+      input valid
+  );
+  modport out(
+      output inst, pc, npc,
+      output dest, result, ebreak,
+      output csr_wen, csr_wdata, csr_addr, ecall, mret,
+      output trap, tval, cause,
+      output valid
+  );
+endinterface
+
+interface exu_ioq_rou_if #(
+    parameter int XLEN = `YSYX_XLEN
+);
+  logic [31:0] inst;
+  logic [XLEN-1:0] pc;
+  logic [XLEN-1:0] npc;
+
+  logic [XLEN-1:0] result;
+  logic [$clog2(`YSYX_ROB_SIZE):0] dest;
+
+  logic wen;
+  logic [4:0] alu;
   logic [XLEN-1:0] sq_waddr;
   logic [XLEN-1:0] sq_wdata;
 
   logic valid;
 
-  modport in(
-      input rd, inst, pc,
-      input dest, result, npc, sys_retire, jen, ben, ebreak,
-      input fence_i,
-      input csr_wen, csr_wdata, csr_addr, ecall, mret,
-      input trap, tval, cause,
-      input sq_waddr, sq_wdata,
-      input valid
-  );
-  modport out(
-      output rd, inst, pc,
-      output dest, result, npc, sys_retire, jen, ben, ebreak,
-      output fence_i,
-      output csr_wen, csr_wdata, csr_addr, ecall, mret,
-      output trap, tval, cause,
-      output sq_waddr, sq_wdata,
-      output valid
-  );
+  modport in(input inst, pc, npc, result, dest, wen, alu, sq_waddr, sq_wdata, input valid);
+  modport out(output inst, pc, npc, result, dest, wen, alu, sq_waddr, sq_wdata, output valid);
 endinterface
 
 interface exu_lsu_if #(
@@ -269,25 +214,6 @@ interface rou_wbu_if #(
       output ebreak, fence_time, fence_i, flush_pipe,
       output valid
   );
-endinterface
-
-interface wbu_pipe_if #(
-    parameter int XLEN = `YSYX_XLEN
-);
-  logic [XLEN-1:0] pc;
-  logic [XLEN-1:0] npc;
-
-  logic sys_retire;
-  logic jen;
-  logic ben;
-
-  logic fence_time;
-  logic fence_i;
-
-  logic flush_pipe;
-
-  modport in(input pc, npc, sys_retire, jen, ben, fence_time, fence_i, flush_pipe);
-  modport out(output pc, npc, sys_retire, jen, ben, fence_time, fence_i, flush_pipe);
 endinterface
 
 interface lsu_bus_if #(

@@ -103,7 +103,7 @@ module ysyx_lsu_l1d #(
           end
           if (flush_pipe) begin
           end else if (rvalid) begin
-            if (load_in_sq) begin
+            if (load_in_sq && cacheable) begin
               state_load <= IF_V;
               lsu_rdata  <= sq_wdata << ({{3'b0}, raddr[1:0]} << 3);
             end else if (l1d_cache_hit) begin
@@ -119,7 +119,7 @@ module ysyx_lsu_l1d #(
             state_load <= IF_A;
           end else if (rvalid && lsu_bus.rvalid) begin
             state_load <= IF_V;
-            if (load_in_sq) begin
+            if (load_in_sq && cacheable) begin
               lsu_rdata <= sq_wdata << ({{3'b0}, raddr[1:0]} << 3);
             end else begin
               lsu_rdata <= lsu_bus.rdata;

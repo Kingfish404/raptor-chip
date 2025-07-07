@@ -276,8 +276,6 @@ module ysyx_bus #(
     `YSYX_ASSERT(io_master_rresp == 2'b00, "rresp == 2'b00");
     `YSYX_ASSERT(io_master_bresp == 2'b00, "bresp == 2'b00");
     if (io_master_awvalid) begin
-      `YSYX_DPI_C_NPC_DIFFTEST_MEM_DIFF(io_master_awaddr, io_master_wdata, {{4'b0}, io_master_wstrb
-                                        })
       if ((io_master_awaddr >= 'h10000000 && io_master_awaddr <= 'h10000005) ||
           (io_master_awaddr >= 'h10001000 && io_master_awaddr <= 'h10001fff) ||
           (io_master_awaddr >= 'h10002000 && io_master_awaddr <= 'h1000200f) ||

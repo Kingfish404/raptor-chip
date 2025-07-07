@@ -61,7 +61,7 @@ class ysyx(CPU):
     @property
     def gcc_flags(self):
         flags = GCC_FLAGS[self.variant]
-        flags += " -D__kianv__ "
+        flags += " -D__raptor__ "
         return flags
 
     @property
@@ -147,7 +147,7 @@ class ysyx(CPU):
             raise EnvironmentError(
                 "Please set YSYX_HOME environment variable to the path of your YSYX repository."
             )
-        os.system("make -C ${YSYX_HOME}/npc pack")
+        os.system("make -C ${YSYX_HOME}/nsim pack")
         vdir = os.path.join(base_dir, "nsim/build/pack")
         platform.add_verilog_include_path(vdir)
         platform.add_source_dir(vdir)

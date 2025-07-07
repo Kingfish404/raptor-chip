@@ -5,7 +5,7 @@
 module ysyx_reg #(
     parameter bit [7:0] XLEN = `YSYX_XLEN,
     parameter bit [7:0] REG_LEN = `YSYX_REG_LEN,
-    parameter bit [7:0] REG_NUM = `YSYX_REG_NUM
+    parameter bit [7:0] REG_NUM = `YSYX_REG_SIZE
 ) (
     input clock,
 

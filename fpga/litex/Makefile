@@ -37,6 +37,8 @@ liftoff: $(LITEX_PATH)/README.md
 			--ram-init=demo.bin --integrated-main-ram-size=0x10000
 
 coremark: $(LITEX_PATH)/README.md
-	cd $(LITEX_PATH) && \
-			python3 ./litex/tools/litex_sim.py --cpu-type=ysyx \
+	cd $(LITEX_PATH) \
+		&& python3 ./litex/soc/software/coremark/coremark.py \
+			--build-path=build/sim/ \
+		&& python3 ./litex/tools/litex_sim.py --cpu-type=ysyx \
 			--ram-init=coremark.bin --integrated-main-ram-size=0x10000

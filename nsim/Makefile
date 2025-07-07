@@ -46,7 +46,7 @@ CXXFLAGS = -Wall -Werror \
 	-Wno-bool-operation -Wno-implicit-fallthrough -Wno-macro-redefined \
 	-Wno-parentheses-equality -Wno-unused-variable \
 	$(call remove_quote,$(CONFIG_CC_OPT))
-LDFLAGS = -lreadline -ldl
+LDFLAGS = -lreadline
 
 FILELIST_MK = $(shell find -L ./csrc -name "filelist.mk")
 include $(FILELIST_MK)
@@ -85,7 +85,7 @@ INC_PATH += $(abspath $(VSRC_PATH)/include/dpic)
 endif
 
 $(BIN): $(VSRCS) $(VHSRCS) $(CCSRCS) $(CHSRCS) $(NVBOARD_ARCHIVE)
-	$(VERILATOR) --trace-fst -cc --exe --build -j $(shell nproc) --debug $(VERILATOR_FLAG) $^ \
+	$(VERILATOR) --trace-fst -cc --exe --build -j $(shell nproc) $(VERILATOR_FLAG) $^ \
 		--top-module $(VTARGET) \
 		$(addprefix -CFLAGS , $(CXXFLAGS)) $(addprefix -LDFLAGS , $(LDFLAGS)) \
 		$(addprefix -I, $(INC_PATH)) \

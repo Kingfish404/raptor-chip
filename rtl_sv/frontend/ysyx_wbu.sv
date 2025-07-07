@@ -16,7 +16,8 @@ module ysyx_wbu #(
     input reset
 );
   logic valid;
-  logic [31:0] inst_wbu, pc_wbu, npc_wbu;
+  logic [31:0] inst_wbu;
+  logic [XLEN-1:0] pc_wbu, npc_wbu;
 
   logic sys_retire;
   logic jen_wbu, ben_wbu;
