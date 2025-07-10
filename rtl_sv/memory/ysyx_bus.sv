@@ -133,11 +133,7 @@ module ysyx_bus #(
         end
         LS_AS: begin
           if (flush_pipe) begin
-            if (io_master_arready) begin
-              state_load <= LS_R_FLUSHED;
-            end else begin
-              state_load <= LS_AS_FLUSHED;
-            end
+            state_load <= LS_A;
           end else if (io_master_arready) begin
             state_load <= LS_R;
           end
@@ -206,7 +202,8 @@ module ysyx_bus #(
   assign ifu_bus.rready = (state_load == IF_B);
   assign ifu_bus.rdata = rdata;
 
-  assign clint_en = (lsu_bus.araddr == `YSYX_BUS_RTC_ADDR) || (lsu_bus.araddr == `YSYX_BUS_RTC_ADDR_UP);
+  assign clint_en = (lsu_bus.araddr == `YSYX_BUS_RTC_ADDR)
+    || (lsu_bus.araddr == `YSYX_BUS_RTC_ADDR_UP);
   assign lsu_bus.rdata = clint_en ? clint_rdata : io_rdata;
   assign lsu_bus.rvalid = ((state_load == LS_R || clint_arvalid) && (rvalid || clint_rvalid));
   // assign out_lsu_rdata = clint_en ? clint_rdata : io_rdata;
@@ -224,7 +221,7 @@ module ysyx_bus #(
     `YSYX_I_SDRAM_ARBURST && (state_load == IF_AS || state_load == IF_D) &&
     (bus_araddr >= 'ha0000000) && (bus_araddr <= 'hc0000000));
   assign io_master_arburst = ifu_sdram_arburst ? 2'b01 : 2'b00;
-  assign io_master_arsize = state_load == IF_A ? 3'b010 : (
+  assign io_master_arsize = (state_load == IF_A || state_load == IF_AS) ? 3'b010 : (
            ({3{lsu_bus.rstrb == 8'h1}} & 3'b000) |
            ({3{lsu_bus.rstrb == 8'h3}} & 3'b001) |
            ({3{lsu_bus.rstrb == 8'hf}} & 3'b010) |
@@ -232,8 +229,7 @@ module ysyx_bus #(
          );
   assign io_master_arlen = ifu_sdram_arburst ? 'h1 : 'h0;
   assign io_master_araddr = bus_araddr;
-  assign io_master_arvalid = ((state_load == IF_AS)
-    || ((state_load == LS_AS || state_load == LS_AS_FLUSHED)));
+  assign io_master_arvalid = ((state_load == IF_AS) || (((state_load == LS_AS && !flush_pipe))));
 
   // logic [XLEN-1:0] io_rdata;
   // assign io_rdata = (io_master_araddr[2:2] == 1) ? io_master_rdata[63:32] : io_master_rdata[31:00];
@@ -264,8 +260,10 @@ module ysyx_bus #(
     (0)
   };
   assign io_master_wdata = wdata;
-  assign io_master_wvalid = (((state_store == LS_S_A) && (lsu_bus.awvalid)) || (state_store == LS_S_W))
-    && (lsu_bus.wvalid) && !write_done;
+  assign io_master_wvalid = (
+    (((state_store == LS_S_A) && (lsu_bus.awvalid)) || (state_store == LS_S_W))
+    && (lsu_bus.wvalid)
+    && !write_done);
   assign io_master_wlast = io_master_wvalid && io_master_wready;
   assign io_master_wstrb = {wstrb};
   assign wstrb = {lsu_bus.wstrb[3:0] << awaddr_lo};
@@ -276,26 +274,26 @@ module ysyx_bus #(
     `YSYX_ASSERT(io_master_rresp == 2'b00, "rresp == 2'b00");
     `YSYX_ASSERT(io_master_bresp == 2'b00, "bresp == 2'b00");
     if (io_master_awvalid) begin
-      if ((io_master_awaddr >= 'h10000000 && io_master_awaddr <= 'h10000005) ||
-          (io_master_awaddr >= 'h10001000 && io_master_awaddr <= 'h10001fff) ||
-          (io_master_awaddr >= 'h10002000 && io_master_awaddr <= 'h1000200f) ||
-          (io_master_awaddr >= 'h10011000 && io_master_awaddr <= 'h10012000) ||
-          (io_master_awaddr >= 'h21000000 && io_master_awaddr <= 'h211fffff) ||
-          (io_master_awaddr >= 'hc0000000) ||
-          (0))
+      if ((0)
+          // || (io_master_awaddr >= 'h10000000 && io_master_awaddr <= 'h10000005)
+          || (io_master_awaddr >= 'h10001000 && io_master_awaddr <= 'h10001fff)
+          || (io_master_awaddr >= 'h10002000 && io_master_awaddr <= 'h1000200f)
+          || (io_master_awaddr >= 'h10011000 && io_master_awaddr <= 'h10012000)
+          || (io_master_awaddr >= 'h21000000 && io_master_awaddr <= 'h211fffff)
+          || (io_master_awaddr >= 'hc0000000))
         begin
         `YSYX_DPI_C_NPC_DIFFTEST_SKIP_REF
         // $display("DIFFTEST: skip ref at aw: %h", io_master_awaddr);
       end
     end
     if (io_master_arvalid) begin
-      if ((io_master_araddr >= 'h10000000 && io_master_araddr <= 'h10000010) ||
-          (io_master_araddr >= 'h10001000 && io_master_araddr <= 'h10001fff) ||
-          (io_master_araddr >= 'h10002000 && io_master_araddr <= 'h1000200f) ||
-          (io_master_araddr >= 'h10011000 && io_master_araddr <= 'h10012000) ||
-          (io_master_araddr >= 'h21000000 && io_master_araddr <= 'h211fffff) ||
-          (io_master_araddr >= 'hc0000000) ||
-          (0))
+      if ((0)
+          // || (io_master_araddr >= 'h10000000 && io_master_araddr <= 'h10000010)
+          || (io_master_araddr >= 'h10001000 && io_master_araddr <= 'h10001fff)
+          || (io_master_araddr >= 'h10002000 && io_master_araddr <= 'h1000200f)
+          || (io_master_araddr >= 'h10011000 && io_master_araddr <= 'h10012000)
+          || (io_master_araddr >= 'h21000000 && io_master_araddr <= 'h211fffff)
+          || (io_master_araddr >= 'hc0000000))
         begin
         `YSYX_DPI_C_NPC_DIFFTEST_SKIP_REF
         // $display("DIFFTEST: skip ref at ar: %h", io_master_araddr);

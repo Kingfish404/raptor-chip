@@ -290,13 +290,21 @@ module ysyx_rou #(
         rob_ben[rob_tail] <= uoq_ben[uoq_tail];
         rob_jen[rob_tail] <= uoq_jen[uoq_tail];
 
+        rob_store[rob_tail] <= uoq_wen[uoq_tail];
+        rob_alu[rob_tail] <= uoq_atom[uoq_tail] ? `YSYX_WSTRB_SW : uoq_alu[uoq_tail];
+
         rob_sys[rob_tail] <= uoq_system[uoq_tail];
 
         rob_f_i[rob_tail] <= uoq_f_i[uoq_tail];
         rob_f_time[rob_tail] <= uoq_f_time[uoq_tail];
 
-        rob_store[rob_tail] <= uoq_wen[uoq_tail];
-        rob_alu[rob_tail] <= uoq_atom[uoq_tail] ? `YSYX_WSTRB_SW : uoq_alu[uoq_tail];
+        rob_ecall[rob_tail] <= uoq_ecall[uoq_tail];
+        rob_ebreak[rob_tail] <= uoq_ebreak[uoq_tail];
+        rob_mret[rob_tail] <= uoq_mret[uoq_tail];
+
+        rob_trap[rob_tail] <= uoq_trap[uoq_tail];
+        rob_tval[rob_tail] <= uoq_tval[uoq_tail];
+        rob_cause[rob_tail] <= uoq_cause[uoq_tail];
       end
       // Write back
       if (exu_ioq_rou.valid) begin
@@ -319,7 +327,6 @@ module ysyx_rou #(
         rob_csr_wdata[wb_dest] <= exu_rou.csr_wdata;
         rob_csr_addr[wb_dest] <= exu_rou.csr_addr;
 
-        // rob_sys[wb_dest] <= exu_rou.sys_retire;
         rob_ecall[wb_dest] <= exu_rou.ecall;
         rob_ebreak[wb_dest] <= exu_rou.ebreak;
         rob_mret[wb_dest] <= exu_rou.mret;
@@ -377,7 +384,7 @@ module ysyx_rou #(
   assign rou_wbu.fence_time = rob_f_time[rob_head] && head_valid;
   assign rou_wbu.fence_i = rob_f_i[rob_head] && head_valid;
 
-  assign rou_wbu.flush_pipe = ((0)
+  assign rou_wbu.flush_pipe = head_valid && ((0)
     || (rob_f_i[rob_head])
     || (head_br_p_fail)
     || (rob_trap[rob_head])
@@ -402,6 +409,7 @@ module ysyx_rou #(
   assign rou_lsu.alu = rob_alu[rob_head];
   assign rou_lsu.sq_waddr = rob_sq_waddr[rob_head];
   assign rou_lsu.sq_wdata = rob_sq_wdata[rob_head];
+  assign rou_lsu.pc = rob_pc[rob_head];
   assign rou_lsu.valid = head_valid;
 
 endmodule

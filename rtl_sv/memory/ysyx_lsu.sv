@@ -57,6 +57,7 @@ module ysyx_lsu #(
   logic [4:0] sq_alu[SQ_SIZE];
   logic [XLEN-1:0] sq_waddr[SQ_SIZE];
   logic [XLEN-1:0] sq_wdata[SQ_SIZE];
+  logic [XLEN-1:0] sq_pc[SQ_SIZE];
   // === Store Queue (SQ) ===
 
   logic [XLEN-1:0] lsu_wdata;
@@ -73,7 +74,7 @@ module ysyx_lsu #(
 
   assign raddr = exu_lsu.raddr;
   assign ralu = exu_lsu.ralu;
-  assign sq_ready = sq_valid[sq_tail] == 0;
+  assign sq_ready = sq_valid[sq_tail] == 0 && !store_in_sq;
   assign out_sq_ready = sq_ready;
 
   assign wvalid = sq_valid[sq_head];
@@ -112,18 +113,23 @@ module ysyx_lsu #(
       if (rou_lsu.valid && rou_lsu.store && sq_ready) begin
         // Store Commit
         sq_valid[sq_tail] <= 1;
-        sq_alu[sq_tail]   <= rou_lsu.alu;
+
+        sq_alu[sq_tail] <= rou_lsu.alu;
         sq_waddr[sq_tail] <= rou_lsu.sq_waddr;
         sq_wdata[sq_tail] <= rou_lsu.sq_wdata;
-        if (store_in_sq && store_in_sq_idx != sq_tail) begin
-          sq_waddr[store_in_sq_idx] <= 0;
-        end
+        sq_pc[sq_tail] <= rou_lsu.pc;
+
         sq_tail <= sq_tail + 1;
         `YSYX_DPI_C_NPC_DIFFTEST_MEM_DIFF(rou_lsu.sq_waddr, rou_lsu.sq_wdata, {{3'b0}, rou_lsu.alu})
       end
       if (wready && sq_valid[sq_head]) begin
         // Store Finished
         sq_valid[sq_head] <= 0;
+
+        sq_alu[sq_head] <= 0;
+        sq_waddr[sq_head] <= 0;
+        sq_wdata[sq_head] <= 0;
+
         sq_head <= sq_head + 1;
       end
     end
@@ -141,7 +147,7 @@ module ysyx_lsu #(
     store_in_sq = 0;
     store_in_sq_idx = 0;
     for (int i = 0; i < SQ_SIZE; i++) begin
-      if (sq_waddr[i] == (rou_lsu.sq_waddr) && !store_in_sq) begin
+      if (sq_waddr[i] == (rou_lsu.sq_waddr) && sq_valid[i] && !store_in_sq) begin
         store_in_sq = 1;
         store_in_sq_idx = i[$clog2(SQ_SIZE)-1:0];
       end
@@ -229,9 +235,6 @@ module ysyx_lsu #(
       .rvalid(exu_lsu.arvalid && raddr_valid && !(|sq_valid) && !(|stq_valid)),
       .lsu_rdata(rdata_unalign),
       .lsu_rready(rready),
-
-      .load_in_sq(load_in_sq),
-      .sq_wdata  (sq_wdata[load_in_sq_idx]),
 
       // write
       .waddr (waddr),

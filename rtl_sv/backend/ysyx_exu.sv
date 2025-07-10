@@ -30,6 +30,7 @@ module ysyx_exu #(
   logic [XLEN-1:0] csr_wdata;
 
   logic mul_valid;
+  logic [XLEN-1:0] alu_result;
 
   // === Revervation Station (RS) ===
   logic [RS_SIZE-1:0] rs_busy;
@@ -43,7 +44,6 @@ module ysyx_exu #(
   logic [$clog2(ROB_SIZE):0] rs_qj[RS_SIZE];
   logic [$clog2(ROB_SIZE):0] rs_qk[RS_SIZE];
   logic [$clog2(ROB_SIZE):0] rs_dest[RS_SIZE];
-  logic [XLEN-1:0] rs_a[RS_SIZE];
 
   logic [RS_SIZE-1:0] rs_mul_valid;
   logic [XLEN-1:0] rs_mul_a[RS_SIZE];
@@ -136,25 +136,20 @@ module ysyx_exu #(
     && ioq_ex_ready[ioq_head] == 0);
   assign exu_lsu.raddr = ioq_vj[ioq_head] + ioq_vk[ioq_head];
   assign exu_lsu.ralu = ioq_atom[ioq_head] ? `YSYX_ALU_LW__ : ioq_alu[ioq_head];
+  assign exu_lsu.pc = ioq_pc[ioq_head];
 
   assign ioq_ready = ioq_valid[ioq_tail] == 0;
   assign rs_ready = ((rou_exu.wen || rou_exu.ren)
     ? ioq_ready
-    : free_found && !(|ioq_valid) && !(mul_found && rou_exu.alu[4:4]));
+    : free_found && !(mul_found && rou_exu.alu[4:4]));
   assign out_ready = rs_ready;
 
-  // ALU for each RS
-  genvar g;
-  generate
-    for (g = 0; g < RS_SIZE; g = g + 1) begin : gen_alu
-      ysyx_exu_alu gen_alu (
-          .s1(rs_vj[g]),
-          .s2(rs_vk[g]),
-          .op(rs_alu[g]),
-          .out_r(rs_a[g])
-      );
-    end
-  endgenerate
+  ysyx_exu_alu gen_alu (
+      .s1(rs_vj[valid_idx]),
+      .s2(rs_vk[valid_idx]),
+      .op(rs_alu[valid_idx]),
+      .out_r(alu_result)
+  );
   logic muling;
 
   always @(posedge clock) begin
@@ -384,7 +379,9 @@ module ysyx_exu #(
   assign exu_ioq_rou.inst = ioq_inst[ioq_head];
   assign exu_ioq_rou.pc = ioq_pc[ioq_head];
   assign exu_ioq_rou.npc = ioq_pc[ioq_head] + 4;
-  assign exu_ioq_rou.result = (ioq_ex_ready[ioq_head] ? ioq_ren_data[ioq_head] : ioq_data[ioq_head]);
+  assign exu_ioq_rou.result = (ioq_ex_ready[ioq_head]
+    ? ioq_ren_data[ioq_head]
+    : ioq_data[ioq_head]);
   assign exu_ioq_rou.dest = ioq_dest[ioq_head];
 
   assign exu_ioq_rou.wen = ioq_wen[ioq_head];
@@ -404,15 +401,15 @@ module ysyx_exu #(
       ? exu_csr.rdata
       : rs_jen[valid_idx]
         ? rs_pc[valid_idx] + 4
-        : rs_a[valid_idx])
+        : alu_result)
     : rs_mul_a[valid_idx]);
 
   assign exu_rou.npc = (
-    (rs_ecall[valid_idx] || rs_ebreak[valid_idx] || rs_trap[valid_idx]) 
+    (rs_ecall[valid_idx] || rs_ebreak[valid_idx] || rs_trap[valid_idx])
     ? exu_csr.mtvec
     : rs_mret[valid_idx]
       ? exu_csr.mepc
-      : (rs_br_jmp[valid_idx]) || (rs_br_cond[valid_idx] && |rs_a[valid_idx])
+      : (rs_br_jmp[valid_idx]) || (rs_br_cond[valid_idx] && |alu_result)
         ? addr_exu
         : (rs_pc[valid_idx] + 4));
   assign exu_rou.ebreak = rs_ebreak[valid_idx];

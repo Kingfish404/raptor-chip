@@ -111,12 +111,13 @@ interface exu_lsu_if #(
   logic arvalid;
   logic [XLEN-1:0] raddr;
   logic [4:0] ralu;
+  logic [XLEN-1:0] pc;
 
   logic [XLEN-1:0] rdata;
   logic rready;
 
-  modport master(output arvalid, raddr, ralu, input rdata, rready);
-  modport slave(input arvalid, raddr, ralu, output rdata, rready);
+  modport master(output arvalid, raddr, ralu, pc, input rdata, rready);
+  modport slave(input arvalid, raddr, ralu, pc, output rdata, rready);
 endinterface
 
 interface exu_csr_if #(
@@ -140,11 +141,12 @@ interface rou_lsu_if #(
   logic [4:0] alu;
   logic [XLEN-1:0] sq_waddr;
   logic [XLEN-1:0] sq_wdata;
+  logic [XLEN-1:0] pc;
 
   logic valid;
 
-  modport in(input store, alu, sq_waddr, sq_wdata, input valid);
-  modport out(output store, alu, sq_waddr, sq_wdata, output valid);
+  modport in(input store, alu, sq_waddr, sq_wdata, pc, input valid);
+  modport out(output store, alu, sq_waddr, sq_wdata, pc, output valid);
 endinterface
 
 interface rou_csr_if #(

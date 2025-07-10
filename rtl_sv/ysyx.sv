@@ -282,7 +282,7 @@ module ysyx #(
   ysyx_bus bus (
       .clock(clock),
 
-      .flush_pipe(wbu_bcast.flush_pipe),
+      .flush_pipe(wbu_bcast.flush_pipe || rou_wbu.flush_pipe),
 
       .io_master_arburst(io_master_arburst),
       .io_master_arsize(io_master_arsize),

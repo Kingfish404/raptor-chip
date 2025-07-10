@@ -19,9 +19,6 @@ module ysyx_lsu_l1d #(
     output logic [XLEN-1:0] lsu_rdata,
     output logic lsu_rready,
 
-    input logic load_in_sq,
-    input logic [XLEN-1:0] sq_wdata,
-
     // write
     input logic [XLEN-1:0] waddr,
     input logic wvalid,
@@ -51,16 +48,17 @@ module ysyx_lsu_l1d #(
   logic l1d_cache_hit;
   logic [XLEN-1:0] l1d_data;
   logic cacheable;
+  logic cacheable_w;
 
   logic [32-L1D_LEN-2-1:0] waddr_tag;
   logic [L1D_LEN-1:0] waddr_idx;
   logic l1d_cache_hit_w;
 
-  logic l1d_w_update;
-  logic [XLEN-1:0] l1d_w_data;
-  logic l1d_w_valid;
-  logic [32-L1D_LEN-2-1:0] l1d_w_tag;
-  logic [L1D_LEN-1:0] l1d_w_idx;
+  logic l1d_update;
+  logic [XLEN-1:0] l1d_data_u;
+  logic l1d_valid_u;
+  logic [32-L1D_LEN-2-1:0] l1d_tag_u;
+  logic [L1D_LEN-1:0] l1d_idx;
 
   assign rstrb = (
            ({8{ralu == `YSYX_ALU_LB__}} & 8'h1) |
@@ -87,6 +85,12 @@ module ysyx_lsu_l1d #(
       || (raddr >= 'h80000000 && raddr < 'h88000000)  // psram
       || (raddr >= 'ha0000000 && raddr < 'hc0000000)  // sdram
       );
+  assign cacheable_w = ((0)  //
+      || (waddr >= 'h20000000 && waddr < 'h20400000)  // mrom
+      || (waddr >= 'h30000000 && waddr < 'h40000000)  // flash
+      || (waddr >= 'h80000000 && waddr < 'h88000000)  // psram
+      || (waddr >= 'ha0000000 && waddr < 'hc0000000)  // sdram
+      );
 
   assign lsu_bus.arvalid = rvalid && state_load == IF_L;
   assign lsu_bus.araddr = raddr;
@@ -103,10 +107,7 @@ module ysyx_lsu_l1d #(
           end
           if (flush_pipe) begin
           end else if (rvalid) begin
-            if (load_in_sq && cacheable) begin
-              state_load <= IF_V;
-              lsu_rdata  <= sq_wdata << ({{3'b0}, raddr[1:0]} << 3);
-            end else if (l1d_cache_hit) begin
+            if (l1d_cache_hit) begin
               state_load <= IF_V;
               lsu_rdata  <= l1d_data;
             end else begin
@@ -119,11 +120,7 @@ module ysyx_lsu_l1d #(
             state_load <= IF_A;
           end else if (rvalid && lsu_bus.rvalid) begin
             state_load <= IF_V;
-            if (load_in_sq && cacheable) begin
-              lsu_rdata <= sq_wdata << ({{3'b0}, raddr[1:0]} << 3);
-            end else begin
-              lsu_rdata <= lsu_bus.rdata;
-            end
+            lsu_rdata  <= lsu_bus.rdata;
           end
         end
         IF_V: begin
@@ -134,29 +131,29 @@ module ysyx_lsu_l1d #(
         end
       endcase
 
-      if (wvalid) begin
+      if (wvalid && cacheable_w) begin
         if (walu == `YSYX_SW_WSTRB) begin
-          l1d_w_update <= 1'b1;
-          l1d_w_data <= wdata;
-          l1d_w_valid <= 1'b1;
-          l1d_w_tag <= waddr_tag;
-          l1d_w_idx <= waddr_idx;
+          l1d_update <= 1'b1;
+          l1d_data_u <= wdata;
+          l1d_valid_u <= 1'b1;
+          l1d_tag_u <= waddr_tag;
+          l1d_idx <= waddr_idx;
         end else begin
           if (l1d_cache_hit_w) begin
-            l1d_w_update <= 1'b1;
-            l1d_w_valid <= 0;
-            l1d_w_tag <= waddr_tag;
-            l1d_w_idx <= waddr_idx;
+            // invalid cache
+            l1d_update <= 1'b1;
+            l1d_valid_u <= 0;
+            l1d_idx <= waddr_idx;
           end
         end
       end else if (state_load == IF_L) begin
         if (rvalid && lsu_bus.rvalid) begin
           if (cacheable) begin
-            l1d_w_update <= 1'b1;
-            l1d_w_data <= lsu_bus.rdata;
-            l1d_w_valid <= 1'b1;
-            l1d_w_tag <= addr_tag;
-            l1d_w_idx <= addr_idx;
+            l1d_update <= 1'b1;
+            l1d_data_u <= lsu_bus.rdata;
+            l1d_valid_u <= 1'b1;
+            l1d_tag_u <= addr_tag;
+            l1d_idx <= addr_idx;
           end
         end
       end
@@ -167,11 +164,11 @@ module ysyx_lsu_l1d #(
     if (reset) begin
       l1d_valid <= 0;
     end else begin
-      if (l1d_w_update) begin
-        l1d[l1d_w_idx] <= l1d_w_data;
-        l1d_tag[l1d_w_idx] <= l1d_w_tag;
-        l1d_valid[l1d_w_idx] <= l1d_w_valid;
-        l1d_w_update <= 0;
+      if (l1d_update) begin
+        l1d[l1d_idx] <= l1d_data_u;
+        l1d_tag[l1d_idx] <= l1d_tag_u;
+        l1d_valid[l1d_idx] <= l1d_valid_u;
+        l1d_update <= 0;
       end
     end
   end
