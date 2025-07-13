@@ -155,7 +155,7 @@ module ysyx_csr #(
     ({XLEN{raddr_reg == SATP___}}) & (csr[SATP___]) |
 
     ({XLEN{raddr_reg == MSTATUS}}) & (csr[MSTATUS]) |
-    ({XLEN{raddr_reg == MISA___}}) & ('h40141101) |
+    ({XLEN{raddr_reg == MISA___}}) & (`YSYX_MISA) |
     ({XLEN{raddr_reg == MEDELEG}}) & (csr[MEDELEG]) |
     ({XLEN{raddr_reg == MIDELEG}}) & (csr[MIDELEG]) |
     ({XLEN{raddr_reg == MIE____}}) & (csr[MIE____]) |

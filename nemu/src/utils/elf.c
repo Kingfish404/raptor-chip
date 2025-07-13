@@ -105,6 +105,8 @@ void isa_parser_elf(char *filename)
   }
 }
 
+static int during_intr_trap = 0;
+
 void ftrace_add(word_t pc, word_t npc, word_t inst)
 {
 #if defined(CONFIG_ISA_riscv)
@@ -114,6 +116,7 @@ void ftrace_add(word_t pc, word_t npc, word_t inst)
   {
     sprintf(ftracebuf[ftracehead].logbuf, "intr: %d", cpu.raise_intr);
     is_call = 1;
+    during_intr_trap = 1;
     cpu.raise_intr = INTR_EMPTY;
   }
   else
@@ -134,11 +137,13 @@ void ftrace_add(word_t pc, word_t npc, word_t inst)
       break;
     case INST_MRET:
       sprintf(ftracebuf[ftracehead].logbuf, "mret");
-      is_ret = 1;
+      is_ret = during_intr_trap;
+      during_intr_trap = 0;
       break;
     case INST_SRET:
       sprintf(ftracebuf[ftracehead].logbuf, "sret");
-      is_ret = 1;
+      is_ret = during_intr_trap;
+      during_intr_trap = 0;
       break;
     default:
       switch (opcode)
@@ -195,6 +200,8 @@ void ftrace_add(word_t pc, word_t npc, word_t inst)
   if (ftracedepth < 0)
   {
     cpu_show_ftrace();
+    Log(ANSI_FMT("ftrace depth negative (%d)", ANSI_FG_RED),
+        ftracedepth);
     exit(0);
   }
 #else

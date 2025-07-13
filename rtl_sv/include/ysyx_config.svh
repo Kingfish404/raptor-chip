@@ -10,6 +10,8 @@
 `define YSYX_I_EXTENSION 'h1
 `define YSYX_M_EXTENSION 'h1
 
+`define YSYX_MISA 'h40141105
+
 /**
  * Microarchitecture (uarch) Parameters
  * @param YSYX_M_FAST: M Extension Fast Mode (one cycle)

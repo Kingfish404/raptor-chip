@@ -1,4 +1,4 @@
-# Boot Linux Kernel
+# Boot Linux Kernel (NEMU)
 
 - Boot Linux: firmware (rom) -> openSBI -> Linux
 - [RISC-V Open Source Supervisor Binary Interface](https://github.com/riscv-software-src/opensbi)
@@ -11,12 +11,15 @@
 ```shell
 git clone https://github.com/riscv-software-src/opensbi
 
-make PLATFORM_RISCV_ISA=rv32ima_zicsr_zifencei_zicntr PLATFORM_RISCV_XLEN=32 PLATFORM=generic -j`nproc`
+make PLATFORM_RISCV_ISA=rv32imac_zicsr_zifencei_zicntr PLATFORM_RISCV_XLEN=32 PLATFORM=generic -j`nproc`
 # or build with Linux Image as payload
-make PLATFORM_RISCV_ISA=rv32ima_zicsr_zifencei_zicntr PLATFORM_RISCV_XLEN=32 PLATFORM=generic -j`nproc` FW_PAYLOAD_PATH=~/linux/linux-6.14.2/arch/riscv/boot/Image
+make PLATFORM_RISCV_ISA=rv32imac_zicsr_zifencei_zicntr PLATFORM_RISCV_XLEN=32 PLATFORM=generic -j`nproc` FW_PAYLOAD_PATH=~/linux/linux-6.14.2/arch/riscv/boot/Image
+
 # or build using llvm + clang
 brew install llvm lld
-make LLVM=1 PLATFORM_RISCV_ISA=rv32ima_zicsr_zifencei_zicntr PLATFORM_RISCV_XLEN=32 PLATFORM=generic -j`nproc`
+make LLVM=1 PLATFORM_RISCV_ISA=rv32imac_zicsr_zifencei_zicntr PLATFORM_RISCV_XLEN=32 PLATFORM=generic -j`nproc`
+# with Linux Image as payload
+make LLVM=1 PLATFORM_RISCV_ISA=rv32imac_zicsr_zifencei_zicntr PLATFORM_RISCV_XLEN=32 PLATFORM=generic -j`nproc` FW_PAYLOAD_PATH=~/linux/linux-6.14.2/arch/riscv/boot/Image
 ```
 
 Both `QEMU` and `Spike` device tree tables are supported and listed in `nemu/src/memory/rom`.
@@ -56,6 +59,15 @@ index fd1c6fb1..63b8418c 100644
 
 ## Linux Kernel Setting and Build
 
+Get the Linux Kernel source code from [The Linux Kernel Archives](https://www.kernel.org/):
+
+```shell
+wget https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.15.6.tar.xz
+
+tar -xf linux-6.15.6.tar.xz
+cd linux-6.15.6
+```
+
 ```shell
 #!/bin/bash
 
@@ -63,8 +75,6 @@ make ARCH=riscv -j`nproc` defconfig
 ./scripts/config --enable CONFIG_NONPORTABLE
 ./scripts/config --disable CONFIG_ARCH_RV64I
 ./scripts/config --enable CONFIG_ARCH_RV32I
-./scripts/config --disable CONFIG_EFI
-./scripts/config --disable CONFIG_RISCV_ISA_C
 ./scripts/config --disable CONFIG_FPU
 ./scripts/config --disable CONFIG_RISCV_ISA_ZAWRS
 ./scripts/config --disable CONFIG_RISCV_ISA_ZBA
@@ -89,6 +99,12 @@ sudo mknod dev/null c 1 3
 sudo mknod dev/sda b 8 0
 cd ..
 (cd initramfs && find . | cpio -o --format=newc | gzip > ../initramfs.cpio.gz)
+
+# set initramfs at Kernel config
+make ARCH=riscv menuconfig
+# -> General setup -> Initial RAM filesystem and RAM disk (initramfs/initrd) support
+# -> [*] Initramfs source file(s) -> [PATH of initramfs] (e.g. `/home/username/initramfs`)
+./scripts/config --enable CONFIG_INITRAMFS_SOURCE="/home/username/initramfs"
 ```
 
 ### `init` at `initramfs/root/init-linux`
@@ -113,10 +129,12 @@ install: init
 ## Run at `nemu`
 
 ```shell
-make run IMG=../riscv-software-src/build/linux-mmu/fw_payload.bin
+make riscv32_linux_defconfig
+
+make run IMG=../third_party/riscv-software-src/build/linux-mmu/fw_payload.bin
 
 # or batch mode
-make run IMG=../riscv-software-src/build/linux-mmu/fw_payload.bin ARGS="-b --log=build/nemu-log.txt"
+make run IMG=../third_party/riscv-software-src/build/linux-mmu/fw_payload.bin ARGS="-b --log=build/nemu-log.txt"
 ```
 
 ## References

@@ -74,13 +74,14 @@ static void exec_once(Decode *s, vaddr_t pc)
   isa_exec_once(s);
   if (boot_from_flash)
   {
+    if (pc_trace == NULL)
     {
-      if (pc_trace == NULL)
-      {
-        pc_trace = fopen("./pc-trace.txt", "w");
-        fprintf(pc_trace, FMT_WORD_NO_PREFIX "-", s->pc);
-      }
-      if (s->dnpc == s->pc + 4)
+      pc_trace = fopen("./pc-trace.txt", "w");
+      fprintf(pc_trace, FMT_WORD_NO_PREFIX "-", s->pc);
+    }
+    else
+    {
+      if (s->dnpc == s->snpc)
       {
         pc_continue_cnt++;
       }
@@ -114,19 +115,17 @@ static void exec_once(Decode *s, vaddr_t pc)
       // record vaddr of load and store at `vaddr.c`
     }
   }
-  cpu.pc = s->dnpc;
-  cpu.inst = s->isa.inst;
 #ifdef CONFIG_ITRACE
   char *p = s->logbuf;
-  p += snprintf(p, sizeof(s->logbuf), FMT_WORD ":", s->pc);
-  int ilen = s->snpc - s->pc;
+  p += snprintf(p, sizeof(s->logbuf), FMT_WORD ":", cpu.pc);
+  int ilen = s->snpc - cpu.pc;
   int i;
   uint8_t *inst = (uint8_t *)&s->isa.inst;
   for (i = ilen - 1; i >= 0; i--)
   {
     p += snprintf(p, 4, " %02x", inst[i]);
   }
-  int ilen_max = MUXDEF(CONFIG_ISA_x86, 8, 4);
+  int ilen_max = 4;
   int space_len = ilen_max - ilen;
   if (space_len < 0)
     space_len = 0;
@@ -135,12 +134,13 @@ static void exec_once(Decode *s, vaddr_t pc)
   p += space_len;
 
   void disassemble(char *str, int size, uint64_t pc, uint8_t *code, int nbyte);
-  disassemble(p, s->logbuf + sizeof(s->logbuf) - p,
-              MUXDEF(CONFIG_ISA_x86, s->snpc, s->pc), (uint8_t *)&s->isa.inst, ilen);
+  disassemble(p, s->logbuf + sizeof(s->logbuf) - p, s->pc, (uint8_t *)&cpu.inst, ilen);
   iringbuf[iringhead] = *s;
   iringhead = (iringhead + 1) % MAX_IRING_SIZE;
   iringbuf[iringhead].logbuf[0] = '\0';
 #endif
+  cpu.pc = s->pc;
+  cpu.inst = s->isa.inst;
 }
 
 static void execute(uint64_t n)

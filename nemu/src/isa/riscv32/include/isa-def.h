@@ -49,7 +49,7 @@ typedef enum
   TYPE_N,
 } Inst_type;
 
-#define CSR_MISA_VALUE 0x40141101
+#define CSR_MISA_VALUE 0x40141105
 
 enum CSR
 {

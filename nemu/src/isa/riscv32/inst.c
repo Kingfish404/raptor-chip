@@ -109,6 +109,23 @@ static void decode_operand(Decode *s, int *rd, int *rs, word_t *src1, word_t *sr
  */
 static int decode_exec(Decode *s)
 {
+  if ((s->isa.inst & 0x3) != 3)
+  {
+    s->isa.inst &= 0xffff;
+    s->snpc = s->pc + 2;
+    // uint32_t inst = s->isa.inst;
+    uint32_t decompress_c(uint32_t inst);
+    s->isa.inst = decompress_c(s->isa.inst);
+
+    // char p[512];
+    // void disassemble(char *str, int size, uint64_t pc, uint8_t *code, int nbyte);
+    // disassemble(p, 512, s->pc, (uint8_t *)(&s->isa.inst), 4);
+    // printf("[C2I] %08x: %04x -> %08x, %s\n", s->pc, inst, s->isa.inst, p);
+  }
+  else
+  {
+    s->snpc = s->pc + 4;
+  }
   s->dnpc = s->snpc;
 
 #define INSTPAT_INST(s) ((s)->isa.inst)
@@ -124,8 +141,8 @@ static int decode_exec(Decode *s)
   //      |31      24    19    14  11    6      0|
   INSTPAT("??????? ????? ????? ??? ????? 01101 11", lui, U, R(rd) = imm);
   INSTPAT("??????? ????? ????? ??? ????? 00101 11", auipc, U, R(rd) = s->pc + imm);
-  INSTPAT("??????? ????? ????? ??? ????? 11011 11", jal, J, R(rd) = s->pc + 4; s->dnpc = (s->pc + imm) & ~1);
-  INSTPAT("??????? ????? ????? 000 ????? 11001 11", jalr, I, R(rd) = s->pc + 4; s->dnpc = (src1 + imm) & ~1);
+  INSTPAT("??????? ????? ????? ??? ????? 11011 11", jal, J, R(rd) = s->snpc; s->dnpc = (s->pc + imm) & ~1);
+  INSTPAT("??????? ????? ????? 000 ????? 11001 11", jalr, I, R(rd) = s->snpc; s->dnpc = (src1 + imm) & ~1);
 
   INSTPAT("??????? ????? ????? 000 ????? 11000 11", beq, B, if (src1 == src2) s->dnpc = s->pc + imm);
   INSTPAT("??????? ????? ????? 001 ????? 11000 11", bne, B, if (src1 != src2) s->dnpc = s->pc + imm);
@@ -302,7 +319,7 @@ static int decode_exec(Decode *s)
   CSR(CSR_MSTATUS) = CSR(CSR_MSTATUS) & 0x807FFFEA;
 #endif
   CSR(CSR_MISA) = CSR_MISA_VALUE;
-  CSR(CSR_MEDELEG) &= 0x1ffff;
+  CSR(CSR_MEDELEG) &= 0xfffff;
   if ((cpu.last_inst_priv == PRV_S && cpu.priv != PRV_M) || cpu.priv == PRV_S)
   {
     csr_t reg_mstatus = {.val = CSR(CSR_MSTATUS)};
@@ -357,7 +374,10 @@ static int decode_exec(Decode *s)
 
   R(0) = 0; // reset $zero to 0
 
+#if !defined(CONFIG_TARGET_SHARE)
   ftrace_add(s->pc, s->dnpc, s->isa.inst);
+#endif
+  s->pc = s->dnpc;
   return 0;
 }
 
@@ -371,7 +391,7 @@ int isa_exec_once(Decode *s)
   if (jmp_value)
   {
     // printf("if longjmp(%d), cause: %d, pc: " FMT_WORD_NO_PREFIX "\n", jmp_value, cause, s->pc);
-    s->dnpc = isa_raise_intr(cause, s->pc);
+    s->pc = isa_raise_intr(cause, s->pc);
     return 0;
   }
   s->isa.inst = inst_fetch(&s->snpc, 4);
@@ -383,7 +403,7 @@ int isa_exec_once(Decode *s)
   {
     // printf("de longjmp(%2d), cause: %d, pc: " FMT_WORD_NO_PREFIX ", inst: " FMT_WORD_NO_PREFIX "\n",
     //        jmp_value, cause, s->pc, s->isa.inst);
-    s->dnpc = isa_raise_intr(cause, s->pc);
+    s->pc = isa_raise_intr(cause, s->pc);
     return 0;
   }
   return decode_exec(s);

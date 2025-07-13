@@ -1,0 +1,13 @@
+diff --git a/riscv/processor.h b/riscv/processor.h
+index a6e9eeb1..5e0df1fc 100644
+--- a/riscv/processor.h
++++ b/riscv/processor.h
+@@ -380,6 +380,8 @@ public:
+ 
+   reg_t select_an_interrupt_with_default_priority(reg_t enabled_interrupts) const;
+ 
++  void take_trap_public(trap_t &t, reg_t epc) { take_trap(t, epc); }
++
+ private:
+   const isa_parser_t isa;
+   const cfg_t * const cfg;
