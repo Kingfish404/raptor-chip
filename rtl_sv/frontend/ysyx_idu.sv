@@ -24,6 +24,7 @@ module ysyx_idu #(
 
   state_idu_t state_idu;
 
+  logic [31:0] inst, inst_de;
   logic [31:0] inst_idu, pc_idu, pnpc_idu;
 
   logic [ 4:0] alu;
@@ -31,7 +32,9 @@ module ysyx_idu #(
   logic [11:0] csr;
   logic [ 2:0] csr_csw;
   logic illegal_csr, illegal_inst;
+  logic is_c;
 
+  assign is_c = !(inst[1:0] == 2'b11);
   assign out_valid = state_idu == VALID;
   assign out_ready = state_idu == IDLE || (next_ready && state_idu == VALID);
 
@@ -62,14 +65,17 @@ module ysyx_idu #(
       endcase
       if (state_idu == IDLE || next_ready) begin
         if (ifu_idu.valid) begin
-          inst_idu <= ifu_idu.inst;
-          pc_idu   <= ifu_idu.pc;
+
+          inst <= ifu_idu.inst;
+          pc_idu <= ifu_idu.pc;
           pnpc_idu <= ifu_idu.pnpc;
         end
       end
     end
   end
 
+  assign inst_idu = is_c ? inst_de : inst;
+  assign idu_rou.c = is_c;
   assign idu_rou.alu = alu;
   assign idu_rou.pc = pc_idu;
   assign idu_rou.inst = inst_idu;
@@ -118,6 +124,15 @@ module ysyx_idu #(
       || (csr == `YSYX_CSR_MARCHID__)
       || (csr == `YSYX_CSR_IMPID____)
       || (csr == `YSYX_CSR_MHARTID__)
+  );
+
+  ysyx_idu_decoder_c idu_de_c (
+      .clock(clock),
+
+      .io_cinst(inst[15:0]),
+      .io_inst (inst_de),
+
+      .reset(reset)
   );
 
   ysyx_idu_decoder idu_de (

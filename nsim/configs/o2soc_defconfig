@@ -13,8 +13,8 @@ CONFIG_CC_OPT="-O2"
 #
 CONFIG_DEBUG=y
 # CONFIG_WTRACE is not set
-# CONFIG_ITRACE is not set
-# CONFIG_DIFFTEST is not set
+CONFIG_ITRACE=y
+CONFIG_ITRACE=y
 # end of Testing and Debugging
 
 CONFIG_ysyxSoC=y

@@ -43,7 +43,7 @@
 `define YSYX_IOQ_SIZE 4
 
 `define YSYX_SQ_SIZE 8
-`define YSYX_L1D_LEN 8
+`define YSYX_L1D_LEN 7
 
 `ifdef YSYX_I_EXTENSION
 `define YSYX_REG_LEN 5  // 32 registers

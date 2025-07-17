@@ -12,6 +12,11 @@
 `define YSYX_OP_SYSTEM 7'b1110011
 `define YSYX_OP_FENCE_ 7'b0001111
 
+`define YSYX_OP_C_J___ 7'b0010101
+`define YSYX_OP_C_JAL_ 7'b0000101
+`define YSYX_OP_C_BEQZ 7'b0011001
+`define YSYX_OP_C_BNEZ 7'b0011101
+
 `define YSYX_F3_CSRRW_ 3'b001
 `define YSYX_F3_CSRRS_ 3'b010
 `define YSYX_F3_CSRRC_ 3'b011

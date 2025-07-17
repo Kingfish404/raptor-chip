@@ -5,6 +5,7 @@
 interface idu_pipe_if #(
     parameter int XLEN = `YSYX_XLEN
 );
+  logic c;
   logic [4:0] alu;
   logic jen;
   logic ben;
@@ -41,6 +42,7 @@ interface idu_pipe_if #(
   logic [XLEN-1:0] pc;
 
   modport in(
+      input c,
       input alu, jen, ben, wen, ren, atom,
       input system, ecall, ebreak, mret, csr_csw,
       input trap, tval, cause,
@@ -52,6 +54,7 @@ interface idu_pipe_if #(
       input pc
   );
   modport out(
+      output c,
       output alu, jen, ben, wen, ren, atom,
       output system, ecall, ebreak, mret, csr_csw,
       output trap, tval, cause,

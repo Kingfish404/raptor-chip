@@ -19,42 +19,42 @@ SECTIONS {
   /* _pmem_start and _entry_offset are defined in LDFLAGS */
   . = ORIGIN(flash);
   .first_boot :
-    {
-      *(entry)
-      *(.first_boot*)
-    } > flash AT> flash : first_boot
+  {
+    *(entry)
+    *(.first_boot*)
+  } > flash AT> flash : first_boot
   . = _pmem_start + _entry_offset;
   .second_boot :
-    {
-      _second_boot_start = .;
-      *(.second_boot*)
-    } > sdram AT> flash : second_boot
+  {
+    _second_boot_start = .;
+    *(.second_boot*)
+  } > sdram AT> flash : second_boot
   _second_boot_end = ADDR(.text);
   _second_boot_load_start = LOADADDR(.second_boot);
   .text :
-    {
-      _text_start = .;
-      *(.text*)
-    } > sdram AT> flash : text
+  {
+    _text_start = .;
+    *(.text*)
+  } > sdram AT> flash : text
   _text_end = ADDR(.rodata);
   _text_load_start = LOADADDR(.text);
   etext = .;
   _etext = .;
   .rodata :
-    {
-      _rodata_start = .;
-      *(.rodata*)
-      *(.srodata*)
+  {
+    _rodata_start = .;
+    *(.rodata*)
+    *(.srodata*)
 
-      rodata_end = .;
-    } > sdram AT> flash : rodata
+    rodata_end = .;
+  } > sdram AT> flash : rodata
   _rodata_end = ADDR(.data);
   _rodata_load_start = LOADADDR(.rodata);
   .data :
-    {
+  {
     _data_start = .;
-      *(.data*)
-      *(.sdata*)
+    *(.data*)
+    *(.sdata*)
 
     /* for rt-thread */
     __fsymtab_start = .;
@@ -83,25 +83,23 @@ SECTIONS {
     . = ALIGN(8);
     __rt_utest_tc_tab_end = .;
     /* end for rt-thread */
-      
     } > sdram AT> flash : data
   _data_end = ADDR(.bss);
   _data_load_start = LOADADDR(.data);
   .bss :
-    {
-      _bss_start = .;
-      *(.bss*)
-      *(.sbss*)
-      *(.scommon)
-    } > sdram AT> flash : bss
-   .bss.extra : {
-    . = ALIGN(8);
+  {
+    _bss_start = .;
+    *(.bss*)
+    *(.sbss*)
+    *(.scommon)
+  } > sdram AT> flash : bss
+  .bss.extra :
+  {
     __am_apps_bss_start = .;
     *(__am_apps.bss*)
     *(__am_apps.sbss*)
     *(__am_apps.scommon*)
     __am_apps_bss_end = .;
-    . = ALIGN(8);
   } > sdram AT> flash : bss 
   _stack_top = ALIGN(0x1000);
   . = _stack_top + 0x8000;

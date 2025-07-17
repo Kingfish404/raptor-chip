@@ -10,7 +10,6 @@ RUN git clone https://github.com/Kingfish404/riscv-arch-test-am && \
 # setting environment variables
 ENV YSYX_HOME=/workspaces/ysyx-workbench/
 ENV NEMU_HOME=${YSYX_HOME}/nemu
-ENV NSIM_HOME=${YSYX_HOME}/nsim
 ENV AM_HOME=${YSYX_HOME}/abstract-machine
 ENV NAVY_HOME=${YSYX_HOME}/navy-apps
 ENV NVBOARD_HOME=${YSYX_HOME}/third_party/NJU-ProjectN/nvboard
@@ -19,10 +18,12 @@ ENV CROSS_COMPILE=riscv64-elf-
 
 RUN make -C ./rtl_scala verilog -j`nproc`
 
+WORKDIR /workspaces/ysyx-workbench/nemu/tools/capstone
+RUN make
+WORKDIR /workspaces/ysyx-workbench/nemu
+RUN make riscv32_ref_defconfig && make -j`nproc`
 WORKDIR /workspaces/ysyx-workbench/nsim
-RUN make o2_defconfig && \
-    sed -i 's/-Werror//' Makefile && \
-    sudo touch /usr/riscv64-linux-gnu/include/gnu/stubs-ilp32.h
+RUN make o2_defconfig && sed -i 's/-Werror//' Makefile
 RUN make o2soc_defconfig && make -j`nproc`
 
 # Prepare STA env: https://github.com/parallaxsw/OpenSTA

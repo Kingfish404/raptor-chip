@@ -30,9 +30,9 @@ brew_install() {
   brew install verilator yosys mill
   brew install riscv64-elf-binutils riscv64-elf-gcc
   brew install ncurses readline flex bison
-if [ "$(uname)" == "Darwin" ]; then
-  brew install sdl2 sdl2_image sdl2_ttf
-fi
+  if [ "$(uname)" == "Darwin" ]; then
+    brew install sdl2 sdl2_image sdl2_ttf
+  fi
   brew install gnu-sed wget dtc cmake automake
 }
 
@@ -66,12 +66,12 @@ if [ "$(uname)" == "Linux" ]; then
   echo "Linux detected"
   # Check if the system is Ubuntu/Debian
   if [ -f /etc/os-release ]; then
-    echo "Ubuntu/Debian detected"
+    echo "Debian/Ubuntu detected"
     sudo apt update
     sudo apt install -y build-essential git curl gcc
     apt_install
   else
-    echo "Non-Ubuntu Linux detected, please install dependencies manually."
+    echo "Non-Debian Linux detected, please install dependencies manually."
   fi
 elif [ "$(uname)" == "Darwin" ]; then
   echo "macOS detected"

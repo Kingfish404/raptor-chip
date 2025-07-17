@@ -9,4 +9,5 @@ object Elaborate extends App {
     ).reduce(_ + "," + _)
   )
   circt.stage.ChiselStage.emitSystemVerilogFile(new npc.ysyx_idu_decoder(), args, firtoolOptions)
+  circt.stage.ChiselStage.emitSystemVerilogFile(new npc.ysyx_idu_decoder_c(), args, firtoolOptions)
 }

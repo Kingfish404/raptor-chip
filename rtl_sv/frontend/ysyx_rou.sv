@@ -51,6 +51,7 @@ module ysyx_rou #(
   logic [$clog2(IQ_SIZE)-1:0] uoq_head;
   logic [IQ_SIZE-1:0] uoq_valid;
 
+  logic uoq_c[IQ_SIZE];
   logic [4:0] uoq_alu[IQ_SIZE];
   logic uoq_jen[IQ_SIZE];
   logic uoq_ben[IQ_SIZE];
@@ -146,6 +147,7 @@ module ysyx_rou #(
         // Issue to uoq
         uoq_head              <= uoq_head + 1;
 
+        uoq_c[uoq_head]       <= idu_rou.c;
         uoq_alu[uoq_head]     <= idu_rou.alu;
         uoq_jen[uoq_head]     <= idu_rou.jen;
         uoq_ben[uoq_head]     <= idu_rou.ben;
@@ -198,6 +200,7 @@ module ysyx_rou #(
   assign rs2_hit_rob = (rf_busy[rs2[REG_LEN-1:0]] && (rob_state[rf_rmt[rs2[REG_LEN-1:0]]] == WB));
   always_comb begin
     // Dispatch connect
+    rou_exu.c = uoq_c[uoq_tail];
     rou_exu.alu = uoq_alu[uoq_tail];
     rou_exu.jen = uoq_jen[uoq_tail];
     rou_exu.ben = uoq_ben[uoq_tail];

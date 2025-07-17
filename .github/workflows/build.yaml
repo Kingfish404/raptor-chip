@@ -9,64 +9,78 @@ on:
 jobs:
   ppa-npc-eval:
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
-      - name: Build the Docker image
+      - name: Build Docker image
         run: docker build . --file Dockerfile --tag sta:latest --build-arg CACHEBUST=$(date +%s)
-      - name: Show the microbench riscv32-npc payload result (IPC, Mark)
+      - name: Show microbench riscv32-npc payload result (IPC, Mark)
         run: docker run --rm sta:latest bash -c "make o2_defconfig && make -C /workspaces/ysyx-workbench/am-kernels/benchmarks/microbench ARCH=riscv32-npc run mainargs="test" FLAGS="-b -n""
-      - name: Show the microbench riscv32e-npc payload result (IPC, Mark)
+      - name: Show microbench riscv32e-npc payload result (IPC, Mark)
         run: docker run --rm sta:latest bash -c "make o2_defconfig && make -C /workspaces/ysyx-workbench/am-kernels/benchmarks/microbench ARCH=riscv32e-npc run mainargs="test" FLAGS="-b -n""
-      - name: Show the coremark riscv32-npc payload result (IPC, Mark)
+      - name: Show coremark riscv32-npc payload result (IPC, Mark)
         run: docker run --rm sta:latest bash -c "make o2_defconfig && make -C /workspaces/ysyx-workbench/am-kernels/benchmarks/coremark_eembc ARCH=riscv32-npc run mainargs="test" FLAGS="-b -n""
-      - name: Show the coremark riscv32e-npc payload result (IPC, Mark)
+      - name: Show coremark riscv32e-npc payload result (IPC, Mark)
         run: docker run --rm sta:latest bash -c "make o2_defconfig && make -C /workspaces/ysyx-workbench/am-kernels/benchmarks/coremark_eembc ARCH=riscv32e-npc run mainargs="test" FLAGS="-b -n""
-      - name: Show the RISC-V Architecture Test result riscv32-npc
+      - name: Show RISC-V Architecture Test result riscv32-npc
         run: docker run --rm sta:latest bash -c "make o2_defconfig && make -C /workspaces/ysyx-workbench/riscv-arch-test-am ARCH=riscv32-npc run FLAGS="-b -n""
-      - name: Show the RISC-V Architecture Test result riscv32e-npc
+      - name: Show RISC-V Architecture Test result riscv32e-npc
         run: docker run --rm sta:latest bash -c "make o2_defconfig && make -C /workspaces/ysyx-workbench/riscv-arch-test-am ARCH=riscv32e-npc run FLAGS="-b -n""
-      - name: Show the STA result (Power, Frequency, Area)
+      - name: Show STA result (Power, Frequency, Area)
         run: docker run --rm sta:latest bash -c "make sta_local >> /dev/null && make sta_local"
       - name: Clean up
         run: docker rmi sta:latest
 
   ysyxsoc-test:
     runs-on: ubuntu-latest
-
+    env:
+      YSYX_HOME: /home/runner/work/ysyx-workbench/ysyx-workbench
+      NEMU_HOME: /home/runner/work/ysyx-workbench/ysyx-workbench/nemu
+      AM_HOME: /home/runner/work/ysyx-workbench/ysyx-workbench/abstract-machine
+      CROSS_COMPILE: riscv64-elf-
     steps:
       - uses: actions/checkout@v4
-      - name: Build the Docker image
-        run: docker build . --file Dockerfile --tag sta:latest --build-arg CACHEBUST=$(date +%s)
-      - name: Show the microbench riscv32-ysyxsoc payload result
-        run: docker run --rm sta:latest bash -c "make o2soc_defconfig && make && make -C /workspaces/ysyx-workbench/am-kernels/benchmarks/microbench ARCH=riscv32-ysyxsoc run mainargs="test" FLAGS="-b -n""
-      - name: Show the microbench riscv32e-ysyxsoc payload result
-        run: docker run --rm sta:latest bash -c "make o2soc_defconfig && make && make -C /workspaces/ysyx-workbench/am-kernels/benchmarks/microbench ARCH=riscv32e-ysyxsoc run mainargs="test" FLAGS="-b -n""
-      - name: Show the coremark riscv32-ysyxsoc payload result
-        run: docker run --rm sta:latest bash -c "make o2soc_defconfig && make && make -C /workspaces/ysyx-workbench/am-kernels/benchmarks/coremark_eembc ARCH=riscv32-ysyxsoc run FLAGS="-b -n""
-      - name: Show the coremark riscv32e-ysyxsoc payload result
-        run: docker run --rm sta:latest bash -c "make o2soc_defconfig && make && make -C /workspaces/ysyx-workbench/am-kernels/benchmarks/coremark_eembc ARCH=riscv32e-ysyxsoc run FLAGS="-b -n""
-      - name: Clean up
-        run: docker rmi sta:latest
+      - name: Setup envirement
+        run: ./setup.sh
+      - name: Build SoC
+        shell: bash -l {0}
+        run: make -C nsim o2soc_defconfig && make -C nsim -j`nproc`
+      - name: Build NEMU-Ref
+        shell: bash -l {0}
+        run: make -C $NEMU_HOME riscv32_ref_defconfig && make -C $NEMU_HOME
+      - name: Show microbench riscv32-ysyxsoc payload result
+        shell: bash -l {0}
+        run: make -C $YSYX_HOME/am-kernels/benchmarks/microbench ARCH=riscv32-ysyxsoc run mainargs="test" FLAGS="-b -n"
+      - name: Show microbench riscv32e-ysyxsoc payload result
+        shell: bash -l {0}
+        run: make -C $YSYX_HOME/am-kernels/benchmarks/microbench ARCH=riscv32e-ysyxsoc run mainargs="test" FLAGS="-b -n"
+      - name: Show coremark riscv32-ysyxsoc payload result
+        shell: bash -l {0}
+        run: make -C $YSYX_HOME/am-kernels/benchmarks/coremark_eembc ARCH=riscv32-ysyxsoc run FLAGS="-b -n"
+      - name: Show coremark riscv32e-ysyxsoc payload result
+        shell: bash -l {0}
+        run: make -C $YSYX_HOME/am-kernels/benchmarks/coremark_eembc ARCH=riscv32e-ysyxsoc run FLAGS="-b -n"
 
   litex-test:
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
       - name: Setup envirement
         run: ./setup.sh
       - name: prepare litex
-        run: cd fpga/litex && YSYX_HOME=/home/runner/work/ysyx-workbench/ysyx-workbench/ ./setup.sh
+        run: cd fpga/litex && ./setup.sh
+        env:
+          YSYX_HOME: /home/runner/work/ysyx-workbench/ysyx-workbench/
       # - name: run litex
-      #   run: cd fpga/litex && eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)" && source ./venv/bin/activate && YSYX_HOME=/home/runner/work/ysyx-workbench/ysyx-workbench/ timeout -s KILL 360 make run
+      #   run: cd fpga/litex && source ./venv/bin/activate && timeout -s KILL 360 make run
+      #   env:
+      #     YSYX_HOME: /home/runner/work/ysyx-workbench/ysyx-workbench/
       # - name: liftoff
-      #   run: cd fpga/litex && eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)" && source ./venv/bin/activate && pushd $YSYX_HOME/third_party/enjoy-digital/litex && litex_bare_metal_demo --build-path=build/sim/ && popd &&
-      #         YSYX_HOME=/home/runner/work/ysyx-workbench/ysyx-workbench/ timeout -s KILL 360 make liftoff
+      #   run: cd fpga/litex && source ./venv/bin/activate && pushd $YSYX_HOME/third_party/enjoy-digital/litex && litex_bare_metal_demo --build-path=build/sim/ && popd && timeout -s KILL 360 make liftoff
+      #   env:
+      #     YSYX_HOME: /home/runner/work/ysyx-workbench/ysyx-workbench/
 
   nemu-test:
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
       - name: Setup envirement
@@ -74,6 +88,8 @@ jobs:
       - name: Build OpenSBI
         run: make -C third_party/riscv-software-src/opensbi PLATFORM_RISCV_ISA=rv32imac_zicsr_zifencei_zicntr CROSS_COMPILE=riscv64-linux-gnu- PLATFORM_RISCV_XLEN=32 PLATFORM=generic -j`nproc`
       - name: Build NEMU
-        run: NEMU_HOME=/home/runner/work/ysyx-workbench/ysyx-workbench/nemu make -C nemu riscv32_linux_defconfig && NEMU_HOME=/home/runner/work/ysyx-workbench/ysyx-workbench/nemu make -C nemu
+        run: make -C nemu riscv32_linux_defconfig && make -C nemu
+        env:
+          NEMU_HOME: /home/runner/work/ysyx-workbench/ysyx-workbench/nemu
       - name: Test OpenSBI
         run: timeout -s KILL 1440 make -C nemu run IMG=../third_party/riscv-software-src/opensbi/build/platform/generic/firmware/fw_payload.bin ARGS="-b -m 10000000 --log ./build/nemu-log.txt" NEMU_HOME=/home/runner/work/ysyx-workbench/ysyx-workbench/nemu

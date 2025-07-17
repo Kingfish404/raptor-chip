@@ -10,7 +10,7 @@ module ysyx_lsu_l1d #(
     input clock,
 
     input flush_pipe,
-    input fence_time,
+    input invalid_l1d,
 
     // read
     input logic [XLEN-1:0] raddr,
@@ -99,12 +99,11 @@ module ysyx_lsu_l1d #(
   always @(posedge clock) begin
     if (reset) begin
       state_load <= IF_A;
+      l1d_valid  <= 0;
+      l1d_update <= 0;
     end else begin
       unique case (state_load)
         IF_A: begin
-          if (fence_time) begin
-            l1d_valid <= 0;
-          end
           if (flush_pipe) begin
           end else if (rvalid) begin
             if (l1d_cache_hit) begin
@@ -157,14 +156,10 @@ module ysyx_lsu_l1d #(
           end
         end
       end
-    end
-  end
 
-  always @(posedge clock) begin
-    if (reset) begin
-      l1d_valid <= 0;
-    end else begin
-      if (l1d_update) begin
+      if (invalid_l1d) begin
+        l1d_valid <= 0;
+      end else if (l1d_update) begin
         l1d[l1d_idx] <= l1d_data_u;
         l1d_tag[l1d_idx] <= l1d_tag_u;
         l1d_valid[l1d_idx] <= l1d_valid_u;

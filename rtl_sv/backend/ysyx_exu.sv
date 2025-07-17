@@ -38,6 +38,7 @@ module ysyx_exu #(
   logic [32-1:0] rs_inst[RS_SIZE];
   logic [XLEN-1:0] rs_pc[RS_SIZE];
 
+  logic rs_c[RS_SIZE];
   logic [4:0] rs_alu[RS_SIZE];
   logic [XLEN-1:0] rs_vj[RS_SIZE];
   logic [XLEN-1:0] rs_vk[RS_SIZE];
@@ -74,6 +75,7 @@ module ysyx_exu #(
   logic [32-1:0] ioq_inst[IOQ_SIZE];
   logic [XLEN-1:0] ioq_pc[IOQ_SIZE];
 
+  logic ioq_c[IOQ_SIZE];
   logic [4:0] ioq_alu[IOQ_SIZE];
   logic [XLEN-1:0] ioq_vj[IOQ_SIZE];
   logic [XLEN-1:0] ioq_vk[IOQ_SIZE];
@@ -172,6 +174,7 @@ module ysyx_exu #(
         ioq_inst[ioq_tail] <= rou_exu.inst;
         ioq_pc[ioq_tail] <= rou_exu.pc;
 
+        ioq_c[ioq_tail] <= rou_exu.c;
         ioq_alu[ioq_tail] <= rou_exu.alu;
         ioq_vj[ioq_tail] <= rou_exu.op1;
         ioq_vk[ioq_tail] <= rou_exu.op2;
@@ -244,6 +247,7 @@ module ysyx_exu #(
             rs_qk[free_idx] <= rou_exu.qk;
             rs_dest[free_idx] <= rou_exu.dest;
 
+            rs_c[free_idx] <= rou_exu.c;
             rs_jen[free_idx] <= rou_exu.jen;
             rs_br_jmp[free_idx] <= (rou_exu.jen || rou_exu.ecall || rou_exu.mret);
             rs_br_cond[free_idx] <= (rou_exu.ben);
@@ -378,7 +382,7 @@ module ysyx_exu #(
   // Write back (IOQ)
   assign exu_ioq_rou.inst = ioq_inst[ioq_head];
   assign exu_ioq_rou.pc = ioq_pc[ioq_head];
-  assign exu_ioq_rou.npc = ioq_pc[ioq_head] + 4;
+  assign exu_ioq_rou.npc = ioq_pc[ioq_head] + (ioq_c[ioq_head] ? 2 : 4);
   assign exu_ioq_rou.result = (ioq_ex_ready[ioq_head]
     ? ioq_ren_data[ioq_head]
     : ioq_data[ioq_head]);
@@ -400,7 +404,7 @@ module ysyx_exu #(
     ? (rs_system[valid_idx]
       ? exu_csr.rdata
       : rs_jen[valid_idx]
-        ? rs_pc[valid_idx] + 4
+        ? rs_pc[valid_idx] + (rs_c[valid_idx] ? 2 : 4)
         : alu_result)
     : rs_mul_a[valid_idx]);
 
@@ -411,7 +415,7 @@ module ysyx_exu #(
       ? exu_csr.mepc
       : (rs_br_jmp[valid_idx]) || (rs_br_cond[valid_idx] && |alu_result)
         ? addr_exu
-        : (rs_pc[valid_idx] + 4));
+        : (rs_pc[valid_idx] + (rs_c[valid_idx] ? 2 : 4)));
   assign exu_rou.ebreak = rs_ebreak[valid_idx];
 
   assign exu_rou.inst = rs_inst[valid_idx];

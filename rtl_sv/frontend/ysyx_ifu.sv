@@ -36,13 +36,13 @@ module ysyx_ifu #(
 
   logic ifu_hazard;
   logic [6:0] opcode;
+  logic is_c, is_cjr, is_cjalr;
   logic is_jalr, is_jal, is_b;
   logic is_sys;
   logic valid;
 
   logic invalid_l1i;
   logic l1i_valid;
-  logic l1i_ready;
   logic [XLEN-1:0] l1_inst;
   logic [XLEN-1:0] imm_b;
   logic [XLEN-1:0] imm_j;
@@ -60,30 +60,60 @@ module ysyx_ifu #(
   assign sys_retire = wbu_bcast.sys_retire;
 
   assign ifu_hazard = ifu_sys_hazard;
-  assign opcode = l1_inst[6:0];
+  assign opcode = is_c ? {2'b0, {l1_inst[15:13]}, {l1_inst[1:0]}} : l1_inst[6:0];
   // pre decode
+  assign is_c = !(l1_inst[1:0] == 2'b11);
+  assign is_cjr = (l1_inst[15:12] == 'b1000 && l1_inst[6:0] == 'b0000010);
+  assign is_cjalr = (l1_inst[15:12] == 'b1001 && l1_inst[6:0] == 'b0000010);
   assign is_jalr = (opcode == `YSYX_OP_JALR__);
-  assign is_b = (opcode == `YSYX_OP_B_TYPE_);
-  assign is_jal = (opcode == `YSYX_OP_JAL___);
+
+  assign is_b = (opcode == `YSYX_OP_B_TYPE_)
+    || (opcode == `YSYX_OP_C_BEQZ)
+    || (opcode == `YSYX_OP_C_BNEZ);
+  assign is_jal = (opcode == `YSYX_OP_JAL___)
+    || (opcode == `YSYX_OP_C_J___)
+    || (opcode == `YSYX_OP_C_JAL_);
   assign is_sys = (opcode == `YSYX_OP_SYSTEM) || (opcode == `YSYX_OP_FENCE_);
 
   assign valid = (l1i_valid && !ifu_hazard) && !flush_pipe;
   assign out_valid = valid;
-  assign imm_b = {
-    {XLEN - 13{l1_inst[31]}}, {l1_inst[31:31]}, {l1_inst[7:7]}, l1_inst[30:25], l1_inst[11:8], 1'b0
-  };
-  assign imm_j = {
-    {XLEN - 21{l1_inst[31]}}, {l1_inst[31:31]}, l1_inst[19:12], l1_inst[20], l1_inst[30:21], 1'b0
-  };
+  assign imm_b = (is_c)
+    ? {
+    {XLEN - 9{l1_inst[12]}},
+    {l1_inst[12:12]},
+    {l1_inst[6:6]},
+    {l1_inst[5:5]},
+    {l1_inst[2:2]},
+    {l1_inst[11:11]},
+    {l1_inst[10:10]},
+    {l1_inst[4:4]},
+    {l1_inst[3:3]},
+    {1'b0}}
+    :{{XLEN - 13{l1_inst[31]}}, {l1_inst[31:31]}, {l1_inst[7:7]}, l1_inst[30:25], l1_inst[11:8], 1'b0};
+  assign imm_j = (is_c)
+    ? {
+    {XLEN - 12{l1_inst[12]}},
+    {l1_inst[12:12]},
+    {l1_inst[8:8]},
+    {l1_inst[10:9]},
+    {l1_inst[6:6]},
+    {l1_inst[7:7]},
+    {l1_inst[2:2]},
+    {l1_inst[11:11]},
+    {l1_inst[5:3]},
+    {1'b0}}
+    : {{XLEN - 21{l1_inst[31]}}, {l1_inst[31:31]}, l1_inst[19:12], l1_inst[20], l1_inst[30:21], 1'b0};
 
   // bpu
-  assign bpu_npc = is_jalr && bpu_btb_v[btb_idx]
+  assign bpu_npc = (is_jalr || is_cjr || is_cjalr) && bpu_btb_v[btb_idx]
     ? bpu_btb[btb_idx]
     : is_b && (bpu_pht[pht_idx][2:2])
       ? pc_ifu + imm_b
       :  (is_jal)
         ? pc_ifu + imm_j
-        : pc_ifu + 4;
+        : is_c
+          ? pc_ifu + 2
+          : pc_ifu + 4;
   assign pht_rpc_idx = rpc[$clog2(PHT_SIZE)-1+2:2];
   assign pht_idx = pc_ifu[$clog2(PHT_SIZE)-1+2:2];
   assign rpc_idx = rpc[$clog2(BTB_SIZE)-1+2:2];
@@ -107,7 +137,7 @@ module ysyx_ifu #(
           bpu_btb_v[rpc_idx] <= 1;
         end
         if (ben) begin
-          if (npc == rpc + 4) begin
+          if ((npc == rpc + 4) || (npc == rpc + 2)) begin
             if (bpu_pht[pht_rpc_idx] != 'b000) begin
               bpu_pht[pht_rpc_idx] <= bpu_pht[pht_rpc_idx] - 1;
             end else begin
@@ -158,11 +188,9 @@ module ysyx_ifu #(
 
       .pc_ifu(pc_ifu),
       .out_inst(l1_inst),
-      .l1i_valid(l1i_valid),
-      .l1i_ready(l1i_ready),
+      .out_valid(l1i_valid),
 
       .invalid_l1i(fence_i),
-      .flush_pipe (flush_pipe),
 
       // <=> bus
       .bus_ifu_ready(ifu_bus.bus_ready),

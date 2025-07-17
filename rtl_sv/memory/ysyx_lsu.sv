@@ -226,8 +226,8 @@ module ysyx_lsu #(
   ) l1d_cache (
       .clock(clock),
 
-      .flush_pipe(flush_pipe),
-      .fence_time(fence_time),
+      .flush_pipe (flush_pipe),
+      .invalid_l1d(fence_time),
 
       // load
       .raddr(raddr),

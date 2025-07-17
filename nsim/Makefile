@@ -16,8 +16,8 @@ endif
 -include ./include/config/auto.conf
 -include ./include/config/auto.conf.cmd
 
+NSIM_HOME = $(abspath $(YSYX_HOME)/nsim)
 VSRC_PATH ?= $(abspath ../rtl_sv)
-
 INC_PATH ?= $(abspath ./include) $(abspath $(VSRC_PATH)/include)
 
 ifeq ($(CONFIG_MODE), "soc")
@@ -46,7 +46,7 @@ CXXFLAGS = -Wall -Werror \
 	-Wno-bool-operation -Wno-implicit-fallthrough -Wno-macro-redefined \
 	-Wno-parentheses-equality -Wno-unused-variable \
 	$(call remove_quote,$(CONFIG_CC_OPT))
-LDFLAGS = -lreadline
+LDFLAGS = -lreadline -ldl -pie
 
 FILELIST_MK = $(shell find -L ./csrc -name "filelist.mk")
 include $(FILELIST_MK)
