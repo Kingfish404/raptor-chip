@@ -47,7 +47,7 @@ module ysyx_lsu_l1d #(
   logic [L1D_LEN-1:0] addr_idx;
   logic l1d_cache_hit;
   logic [XLEN-1:0] l1d_data;
-  logic cacheable;
+  logic cacheable_r;
   logic cacheable_w;
 
   logic [32-L1D_LEN-2-1:0] waddr_tag;
@@ -79,7 +79,7 @@ module ysyx_lsu_l1d #(
   assign waddr_idx = waddr[L1D_LEN+2-1:0+2];
   assign l1d_cache_hit_w = (l1d_valid[waddr_idx] == 1'b1) && (l1d_tag[waddr_idx] == waddr_tag);
 
-  assign cacheable = ((0)  //
+  assign cacheable_r = ((0)  //
       || (raddr >= 'h20000000 && raddr < 'h20400000)  // mrom
       || (raddr >= 'h30000000 && raddr < 'h40000000)  // flash
       || (raddr >= 'h80000000 && raddr < 'h88000000)  // psram
@@ -93,8 +93,8 @@ module ysyx_lsu_l1d #(
       );
 
   assign lsu_bus.arvalid = rvalid && state_load == IF_L;
-  assign lsu_bus.araddr = raddr;
-  assign lsu_bus.rstrb = rstrb;
+  assign lsu_bus.araddr = cacheable_r ? raddr & ~'h3 : raddr;
+  assign lsu_bus.rstrb = cacheable_r ? 8'hf : rstrb;
 
   always @(posedge clock) begin
     if (reset) begin
@@ -147,7 +147,7 @@ module ysyx_lsu_l1d #(
         end
       end else if (state_load == IF_L) begin
         if (rvalid && lsu_bus.rvalid) begin
-          if (cacheable) begin
+          if (cacheable_r) begin
             l1d_update <= 1'b1;
             l1d_data_u <= lsu_bus.rdata;
             l1d_valid_u <= 1'b1;

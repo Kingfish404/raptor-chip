@@ -52,7 +52,7 @@ trait MicroOP {
   def ATO_OR__ = "00110"
   def ATO_MIN_ = "00111"
   def ATO_MAX_ = "01000"
-  def ATO_MINU = "01001"
+  def ATO_MINU = "01100"
   def ATO_MAXU = "01010"
 
   // Supervisor-level CSR

@@ -72,12 +72,11 @@ module ysyx_bus #(
 
   // lsu read
   logic [XLEN-1:0] io_rdata;
-  logic clint_en;
+  logic is_clint;
 
   logic clint_arvalid, clint_arready;
   logic [XLEN-1:0] clint_rdata;
   logic [XLEN-1:0] rdata;
-  logic clint_rvalid;
 
   logic [XLEN-1:0] bus_araddr;
   logic arburst;
@@ -98,7 +97,7 @@ module ysyx_bus #(
           if (ifu_bus.arvalid) begin
             bus_araddr <= ifu_bus.araddr;
             state_load <= IF_AS;
-          end else if (lsu_bus.arvalid && !flush_pipe) begin
+          end else if (lsu_bus.arvalid && !is_clint && !flush_pipe) begin
             bus_araddr <= lsu_bus.araddr;
             state_load <= LS_AS;
           end
@@ -124,10 +123,10 @@ module ysyx_bus #(
           end
         end
         LS_A: begin
-          if (lsu_bus.arvalid && !flush_pipe) begin
+          if (lsu_bus.arvalid && !is_clint && !flush_pipe) begin
             state_load <= LS_AS;
             bus_araddr <= lsu_bus.araddr;
-          end else if (clint_en || ifu_bus.arvalid) begin
+          end else if (is_clint || ifu_bus.arvalid) begin
             state_load <= IF_A;
           end
         end
@@ -202,14 +201,10 @@ module ysyx_bus #(
   assign ifu_bus.rready = (state_load == IF_B);
   assign ifu_bus.rdata = rdata;
 
-  assign clint_en = (lsu_bus.araddr == `YSYX_BUS_RTC_ADDR)
+  assign is_clint = (lsu_bus.araddr == `YSYX_BUS_RTC_ADDR)
     || (lsu_bus.araddr == `YSYX_BUS_RTC_ADDR_UP);
-  assign lsu_bus.rdata = clint_en ? clint_rdata : io_rdata;
-  assign lsu_bus.rvalid = ((state_load == LS_R || clint_arvalid) && (rvalid || clint_rvalid));
-  // assign out_lsu_rdata = clint_en ? clint_rdata : io_rdata;
-  // assign out_lsu_rvalid = (
-  //   (state_load == LS_R || clint_arvalid) &&
-  //   (lsu_bus.arvalid) && (rvalid || clint_rvalid));
+  assign lsu_bus.rdata = is_clint ? clint_rdata : io_rdata;
+  assign lsu_bus.rvalid = (state_load == LS_R && rvalid) || is_clint;
   assign lsu_bus.wready = io_master_bvalid;
 
   // lsu write
@@ -301,14 +296,13 @@ module ysyx_bus #(
     end
   end
 
-  assign clint_arvalid = (lsu_bus.arvalid && clint_en);
+  assign clint_arvalid = (lsu_bus.arvalid && is_clint);
   ysyx_clint clint (
       .clock(clock),
-      .reset(reset),
       .araddr(lsu_bus.araddr),
       .arvalid(clint_arvalid),
       .out_arready(clint_arready),
       .out_rdata(clint_rdata),
-      .out_rvalid(clint_rvalid)
+      .reset(reset)
   );
 endmodule

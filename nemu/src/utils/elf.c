@@ -12,13 +12,13 @@ typedef enum
   INST_ECALL = 0x00000073,
   INST_MRET = 0x30200073,
   INST_SRET = 0x10200073,
-  INST_RET = 0x00008067,
+  INST_RET_ = 0x00008067,
   INST_EBREAK = 0x00100073,
 } rv_inst_t;
 
 typedef enum
 {
-  OP_JAL = 0b1101111,
+  OP_JAL_ = 0b1101111,
   OP_JALR = 0b1100111,
 } rv_opcode_t;
 
@@ -131,7 +131,7 @@ void ftrace_add(word_t pc, word_t npc, word_t inst)
       sprintf(ftracebuf[ftracehead].logbuf, "ebreak");
       is_call = 1;
       break;
-    case INST_RET:
+    case INST_RET_:
       sprintf(ftracebuf[ftracehead].logbuf, "ret");
       is_ret = 1;
       break;
@@ -148,7 +148,7 @@ void ftrace_add(word_t pc, word_t npc, word_t inst)
     default:
       switch (opcode)
       {
-      case OP_JAL:
+      case OP_JAL_:
         sprintf(ftracebuf[ftracehead].logbuf, "jal");
         is_call = (inst & 0xfff) != 0x0000006f ? 1 : 0;
         break;

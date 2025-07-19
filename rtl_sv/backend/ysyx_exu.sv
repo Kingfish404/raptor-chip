@@ -32,6 +32,8 @@ module ysyx_exu #(
   logic mul_valid;
   logic [XLEN-1:0] alu_result;
 
+  logic [XLEN-1:0] reservation;
+
   // === Revervation Station (RS) ===
   logic [RS_SIZE-1:0] rs_busy;
 
@@ -136,7 +138,9 @@ module ysyx_exu #(
     && ioq_ren[ioq_head]
     && ioq_qj[ioq_head] == 0 && ioq_qk[ioq_head] == 0
     && ioq_ex_ready[ioq_head] == 0);
-  assign exu_lsu.raddr = ioq_vj[ioq_head] + ioq_vk[ioq_head];
+  assign exu_lsu.raddr = ioq_atom[ioq_head]
+    ? ioq_vj[ioq_head]
+    : ioq_vj[ioq_head] + ioq_vk[ioq_head];
   assign exu_lsu.ralu = ioq_atom[ioq_head] ? `YSYX_ALU_LW__ : ioq_alu[ioq_head];
   assign exu_lsu.pc = ioq_pc[ioq_head];
 
@@ -168,7 +172,7 @@ module ysyx_exu #(
     end else begin
       // In-Order Queue (IOQ)
       if (prev_valid && ioq_ready && (rou_exu.wen || rou_exu.ren)) begin
-        // Dispatch send
+        // Dispatch send of IOQ
         ioq_valid[ioq_tail] <= 1;
 
         ioq_inst[ioq_tail] <= rou_exu.inst;
@@ -192,15 +196,15 @@ module ysyx_exu #(
         ioq_tail <= (ioq_tail + 1);
       end
       if (exu_lsu.rready) begin
-        // Load ready
+        // Load ready of IOQ
         ioq_ex_ready[ioq_head] <= 1;
         ioq_ren_data[ioq_head] <= exu_lsu.rdata;
       end
       if (ioq_valid[ioq_head]
         && ioq_qj[ioq_head] == 0 && ioq_qk[ioq_head] == 0
-        && ((ioq_ren[ioq_head] && ioq_ex_ready[ioq_head]) || ioq_wen[ioq_head])
+        && ((!ioq_ren[ioq_head] || ioq_ex_ready[ioq_head]))
         ) begin
-        // Write back
+        // Write back of IOQ
         ioq_inst[ioq_head] <= 0;
 
         ioq_wen[ioq_head] <= 0;
@@ -208,6 +212,16 @@ module ysyx_exu #(
         ioq_ex_ready[ioq_head] <= 0;
         ioq_valid[ioq_head] <= 0;
 
+        if (ioq_atom[ioq_head]) begin
+          if (ioq_alu[ioq_head] == `YSYX_ATO_LR__) begin
+            // lr.w
+            reservation <= ioq_vj[ioq_head];
+          end
+          if (ioq_alu[ioq_head] == `YSYX_ATO_SC__) begin
+            // sc.w
+            reservation <= 0;
+          end
+        end
         ioq_head <= (ioq_head + 1);
       end
       for (bit [XLEN-1:0] i = 0; i < IOQ_SIZE; i++) begin
@@ -395,7 +409,7 @@ module ysyx_exu #(
 
   assign exu_ioq_rou.valid = (ioq_valid[ioq_head]
     && ioq_qj[ioq_head] == 0 && ioq_qk[ioq_head] == 0
-    && ((ioq_ren[ioq_head] && ioq_ex_ready[ioq_head]) || ioq_wen[ioq_head])
+    && ((!ioq_ren[ioq_head] || ioq_ex_ready[ioq_head]))
   );
 
   // Write back (RS)

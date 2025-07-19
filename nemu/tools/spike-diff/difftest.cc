@@ -224,20 +224,22 @@ extern "C"
     cfg.real_time_clint = false;
     cfg.trigger_count = 4;
     cfg.external_simulator = std::nullopt;
-    s = new diffsim_t(
-        &cfg, false,
-        difftest_mem, difftest_plugin_devices, difftest_htif_args,
-        difftest_dm_config, nullptr, false, NULL,
-        false,
-        NULL,
-        std::nullopt);
+    if (s == NULL)
+    {
+      s = new diffsim_t(
+          &cfg, false,
+          difftest_mem, difftest_plugin_devices, difftest_htif_args,
+          difftest_dm_config, nullptr, false, NULL,
+          false,
+          NULL,
+          std::nullopt);
+    }
     s->diff_init(port);
   }
 
   __EXPORT void difftest_raise_intr(uint64_t NO)
   {
     trap_t t(NO);
-    // See `riscv-isa-sim.patch` to support this
-    // s->p->take_trap_public(t, s->state->pc);
+    s->p->take_trap_public(t, s->state->pc);
   }
 }

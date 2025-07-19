@@ -188,6 +188,8 @@ typedef struct
   long long int jalr_inst_cnt;
   long long int csr_inst_cnt;
   long long int other_inst_cnt;
+  long long int call_inst_cnt;
+  long long int ret_inst_cnt;
 
   // for cache
   long long int l1i_cache_hit_cnt;

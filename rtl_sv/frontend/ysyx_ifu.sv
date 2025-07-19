@@ -3,9 +3,10 @@
 `include "ysyx_soc.svh"
 
 module ysyx_ifu #(
-    parameter bit [7:0] XLEN = `YSYX_XLEN,
     parameter bit [$clog2(`YSYX_PHT_SIZE):0] PHT_SIZE = `YSYX_PHT_SIZE,
-    parameter bit [$clog2(`YSYX_BTB_SIZE):0] BTB_SIZE = `YSYX_BTB_SIZE
+    parameter bit [$clog2(`YSYX_BTB_SIZE):0] BTB_SIZE = `YSYX_BTB_SIZE,
+    parameter bit [$clog2(`YSYX_RSB_SIZE):0] RSB_SIZE = `YSYX_RSB_SIZE,
+    parameter bit [7:0] XLEN = `YSYX_XLEN
 ) (
     input clock,
 
@@ -31,13 +32,17 @@ module ysyx_ifu #(
   logic [2:0] bpu_pht[PHT_SIZE];
   logic [XLEN-1:0] bpu_btb[BTB_SIZE];
   logic [BTB_SIZE-1:0] bpu_btb_v;
+  logic [XLEN-1:0] bpu_rsb[RSB_SIZE];
+  logic [RSB_SIZE-1:0] bpu_rsb_v;
+  logic [$clog2(RSB_SIZE)-1:0] bpu_rsb_idx;
+
   logic [$clog2(PHT_SIZE)-1:0] pht_rpc_idx, pht_idx;
   logic [$clog2(BTB_SIZE)-1:0] rpc_idx, btb_idx;
 
   logic ifu_hazard;
   logic [6:0] opcode;
   logic is_c, is_cjr, is_cjalr;
-  logic is_jalr, is_jal, is_b;
+  logic is_b, is_jalr, is_jal, is_call, is_ret;
   logic is_sys;
   logic valid;
 
@@ -73,6 +78,11 @@ module ysyx_ifu #(
   assign is_jal = (opcode == `YSYX_OP_JAL___)
     || (opcode == `YSYX_OP_C_J___)
     || (opcode == `YSYX_OP_C_JAL_);
+  assign is_call = ((is_jal && (l1_inst[12-1:0] != 'h06f))
+    || (is_jalr && (l1_inst[12-1:0] != 'h067))
+    || (is_cjalr)
+    );
+  assign is_ret = (l1_inst == 'h00008067) || (is_c && (l1_inst[15:0] == 'h8082));
   assign is_sys = (opcode == `YSYX_OP_SYSTEM) || (opcode == `YSYX_OP_FENCE_);
 
   assign valid = (l1i_valid && !ifu_hazard) && !flush_pipe;
@@ -105,19 +115,19 @@ module ysyx_ifu #(
     : {{XLEN - 21{l1_inst[31]}}, {l1_inst[31:31]}, l1_inst[19:12], l1_inst[20], l1_inst[30:21], 1'b0};
 
   // bpu
-  assign bpu_npc = (is_jalr || is_cjr || is_cjalr) && bpu_btb_v[btb_idx]
-    ? bpu_btb[btb_idx]
-    : is_b && (bpu_pht[pht_idx][2:2])
-      ? pc_ifu + imm_b
-      :  (is_jal)
-        ? pc_ifu + imm_j
-        : is_c
-          ? pc_ifu + 2
-          : pc_ifu + 4;
-  assign pht_rpc_idx = rpc[$clog2(PHT_SIZE)-1+2:2];
-  assign pht_idx = pc_ifu[$clog2(PHT_SIZE)-1+2:2];
-  assign rpc_idx = rpc[$clog2(BTB_SIZE)-1+2:2];
-  assign btb_idx = pc_ifu[$clog2(BTB_SIZE)-1+2:2];
+  assign bpu_npc = (is_ret) && bpu_rsb_v[bpu_rsb_idx-1]
+    ? bpu_rsb[bpu_rsb_idx-1]
+    : (is_jalr || is_cjalr || is_cjr) && bpu_btb_v[btb_idx]
+      ? bpu_btb[btb_idx]
+      : is_b && (bpu_pht[pht_idx][2:2])
+        ? pc_ifu + imm_b
+        :  (is_jal)
+          ? pc_ifu + imm_j
+          : pc_ifu + (is_c ? 'h2 : 'h4);
+  assign pht_rpc_idx = rpc[$clog2(PHT_SIZE)-1+1:1];
+  assign pht_idx = pc_ifu[$clog2(PHT_SIZE)-1+1:1];
+  assign rpc_idx = rpc[$clog2(BTB_SIZE)-1+1:1];
+  assign btb_idx = pc_ifu[$clog2(BTB_SIZE)-1+1:1];
 
   always @(posedge clock) begin
     if (reset) begin
@@ -132,7 +142,7 @@ module ysyx_ifu #(
         end
         bpu_btb_v <= 0;
       end else begin
-        if (jen) begin
+        if (jen && flush_pipe) begin
           bpu_btb[rpc_idx]   <= npc;
           bpu_btb_v[rpc_idx] <= 1;
         end
@@ -175,6 +185,16 @@ module ysyx_ifu #(
         end
         if (next_ready && valid) begin
           pc_ifu <= bpu_npc;
+          if (is_call) begin
+            bpu_rsb[bpu_rsb_idx] <= pc_ifu + (is_c ? 'h2 : 'h4);
+            bpu_rsb_v[bpu_rsb_idx] <= 1;
+            bpu_rsb_idx <= (bpu_rsb_idx + 1);
+          end else if (is_ret) begin
+            if (bpu_rsb_v[bpu_rsb_idx-1]) begin
+              bpu_rsb_v[bpu_rsb_idx-1] <= 0;
+              bpu_rsb_idx <= (bpu_rsb_idx - 1);
+            end
+          end
           if (is_sys) begin
             ifu_sys_hazard <= 1;
           end

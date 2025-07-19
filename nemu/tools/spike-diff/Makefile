@@ -16,6 +16,7 @@
 REPO_PATH = repo
 ifeq ($(wildcard repo/spike_main),)
   $(shell git clone --depth=1 https://github.com/riscv-software-src/riscv-isa-sim $(REPO_PATH))
+  $(shell bash ./patch.sh)
 endif
 
 REPO_BUILD_PATH = $(REPO_PATH)/build

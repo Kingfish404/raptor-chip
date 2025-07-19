@@ -86,7 +86,7 @@
 `define YSYX_ATO_OR__ 'b00110
 `define YSYX_ATO_MIN_ 'b00111
 `define YSYX_ATO_MAX_ 'b01000
-`define YSYX_ATO_MINU 'b01001
+`define YSYX_ATO_MINU 'b01100
 `define YSYX_ATO_MAXU 'b01010
 
 `define YSYX_WSTRB_SB 'b00001
