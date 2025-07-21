@@ -8,8 +8,6 @@ module ysyx_bus #(
 ) (
     input clock,
 
-    input flush_pipe,
-
     // AXI4 Master bus
     output [1:0] io_master_arburst,
     output [2:0] io_master_arsize,
@@ -57,7 +55,6 @@ module ysyx_bus #(
     IF_B,
     LS_A,
     LS_AS,
-    LS_AS_FLUSHED,
     LS_R,
     LS_R_FLUSHED
   } state_load_t;
@@ -97,7 +94,7 @@ module ysyx_bus #(
           if (ifu_bus.arvalid) begin
             bus_araddr <= ifu_bus.araddr;
             state_load <= IF_AS;
-          end else if (lsu_bus.arvalid && !is_clint && !flush_pipe) begin
+          end else if (lsu_bus.arvalid && !is_clint) begin
             bus_araddr <= lsu_bus.araddr;
             state_load <= LS_AS;
           end
@@ -123,30 +120,25 @@ module ysyx_bus #(
           end
         end
         LS_A: begin
-          if (lsu_bus.arvalid && !is_clint && !flush_pipe) begin
-            state_load <= LS_AS;
-            bus_araddr <= lsu_bus.araddr;
+          if (lsu_bus.arvalid && !is_clint) begin
+            if (io_master_arready) begin
+              state_load <= LS_R;
+            end else begin
+              state_load <= LS_AS;
+              bus_araddr <= lsu_bus.araddr;
+            end
           end else if (is_clint || ifu_bus.arvalid) begin
             state_load <= IF_A;
           end
         end
         LS_AS: begin
-          if (flush_pipe) begin
-            state_load <= LS_A;
-          end else if (io_master_arready) begin
-            state_load <= LS_R;
-          end
-        end
-        LS_AS_FLUSHED: begin
           if (io_master_arready) begin
-            state_load <= LS_R_FLUSHED;
+            state_load <= LS_R;
           end
         end
         LS_R: begin
           if (io_master_rvalid) begin
             state_load <= LS_A;
-          end else if (flush_pipe) begin
-            state_load <= LS_R_FLUSHED;
           end
         end
         LS_R_FLUSHED: begin
@@ -223,8 +215,12 @@ module ysyx_bus #(
            (3'b000)
          );
   assign io_master_arlen = ifu_sdram_arburst ? 'h1 : 'h0;
-  assign io_master_araddr = bus_araddr;
-  assign io_master_arvalid = ((state_load == IF_AS) || (((state_load == LS_AS && !flush_pipe))));
+  assign io_master_araddr = (state_load == LS_A && lsu_bus.arvalid && !is_clint)
+    ? lsu_bus.araddr
+    : bus_araddr;
+  assign io_master_arvalid = ((state_load == IF_AS) || (
+    (state_load == LS_A && lsu_bus.arvalid && !is_clint)
+    || (state_load == LS_AS)));
 
   // logic [XLEN-1:0] io_rdata;
   // assign io_rdata = (io_master_araddr[2:2] == 1) ? io_master_rdata[63:32] : io_master_rdata[31:00];
@@ -234,12 +230,11 @@ module ysyx_bus #(
             state_load == LS_R || state_load == LS_R_FLUSHED);
 
   // io lsu write
-  assign io_master_awsize = lsu_bus.awvalid ? (
-           ({3{lsu_bus.wstrb == 8'h1}} & 3'b000) |
-           ({3{lsu_bus.wstrb == 8'h3}} & 3'b001) |
-           ({3{lsu_bus.wstrb == 8'hf}} & 3'b010) |
-           (3'b000)
-         ) : 3'b000;
+  assign io_master_awsize = lsu_bus.awvalid
+    ? (({3{lsu_bus.wstrb == 8'h1}} & 3'b000)
+      |({3{lsu_bus.wstrb == 8'h3}} & 3'b001)
+      |({3{lsu_bus.wstrb == 8'hf}} & 3'b010))
+    : 3'b000;
   assign io_master_awaddr = lsu_bus.awvalid ? lsu_bus.awaddr : 'h0;
   assign io_master_awvalid = (state_store == LS_S_A) && (lsu_bus.awvalid);
 
@@ -248,11 +243,10 @@ module ysyx_bus #(
   logic [3:0] wstrb;
   assign awaddr_lo = io_master_awaddr[1:0];
   assign wdata = {
-    ({XLEN{awaddr_lo == 2'b00}} & {{lsu_bus.wdata}}) |
-    ({XLEN{awaddr_lo == 2'b01}} & {{lsu_bus.wdata[23:0]}, {8'b0}}) |
-    ({XLEN{awaddr_lo == 2'b10}} & {{lsu_bus.wdata[15:0]}, {16'b0}}) |
-    ({XLEN{awaddr_lo == 2'b11}} & {{lsu_bus.wdata[7:0]}, {24'b0}}) |
-    (0)
+    ({XLEN{awaddr_lo == 2'b00}} & {{lsu_bus.wdata}})
+    |({XLEN{awaddr_lo == 2'b01}} & {{lsu_bus.wdata[23:0]}, {8'b0}})
+    |({XLEN{awaddr_lo == 2'b10}} & {{lsu_bus.wdata[15:0]}, {16'b0}})
+    |({XLEN{awaddr_lo == 2'b11}} & {{lsu_bus.wdata[7:0]}, {24'b0}})
   };
   assign io_master_wdata = wdata;
   assign io_master_wvalid = (

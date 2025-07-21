@@ -243,7 +243,7 @@ module ysyx #(
       .clock(clock),
 
       .wen(rou_csr.csr_wen),
-      .valid(rou_csr.valid),
+      .valid(rou_csr.valid && wbu_bcast.flush_pipe == 0),
       .ecall(rou_csr.ecall),
       .mret(rou_csr.mret),
       .ebreak(rou_csr.ebreak),
@@ -281,8 +281,6 @@ module ysyx #(
 
   ysyx_bus bus (
       .clock(clock),
-
-      .flush_pipe(wbu_bcast.flush_pipe || rou_wbu.flush_pipe),
 
       .io_master_arburst(io_master_arburst),
       .io_master_arsize(io_master_arsize),

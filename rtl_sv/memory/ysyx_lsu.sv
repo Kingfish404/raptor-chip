@@ -171,7 +171,11 @@ module ysyx_lsu #(
   //          ({8{ralu == `YSYX_ALU_SH}} & 8'h3) |
   //          ({8{ralu == `YSYX_ALU_SW}} & 8'hf)
   //        );
-  assign lsu_bus.awvalid = wvalid && state_store == LS_S_V;
+  assign lsu_bus.awvalid = wvalid
+    && state_store == LS_S_V
+    && !(lsu_bus.arvalid
+      && (lsu_bus.araddr <= waddr + 'h200)
+      && (lsu_bus.araddr >= waddr - 'h200)); // TODO: this fix ysyxsoc ?bug
   assign lsu_bus.awaddr = waddr;
   assign lsu_bus.wstrb[3:0] = walu[3:0];
   assign lsu_bus.wvalid = wvalid && state_store == LS_S_V;
@@ -180,20 +184,18 @@ module ysyx_lsu #(
   assign wready = state_store == LS_S_R;
 
   assign rdata = (
-           ({XLEN{raddr[1:0] == 2'b00}} & rdata_unalign) |
-           ({XLEN{raddr[1:0] == 2'b01}} & {{8'b0}, {rdata_unalign[31:8]}}) |
-           ({XLEN{raddr[1:0] == 2'b10}} & {{16'b0}, {rdata_unalign[31:16]}}) |
-           ({XLEN{raddr[1:0] == 2'b11}} & {{24'b0}, {rdata_unalign[31:24]}}) |
-           (0)
-         );
+      ({XLEN{raddr[1:0] == 2'b00}} & rdata_unalign)
+    | ({XLEN{raddr[1:0] == 2'b01}} & {{8'b0}, {rdata_unalign[31:8]}})
+    | ({XLEN{raddr[1:0] == 2'b10}} & {{16'b0}, {rdata_unalign[31:16]}})
+    | ({XLEN{raddr[1:0] == 2'b11}} & {{24'b0}, {rdata_unalign[31:24]}})
+    );
   assign exu_lsu.rdata = (
-           ({XLEN{ralu == `YSYX_ALU_LB__}} & (rdata[7] ? rdata | 'hffffff00 : rdata & 'hff)) |
-           ({XLEN{ralu == `YSYX_ALU_LBU_}} & rdata & 'hff) |
-           ({XLEN{ralu == `YSYX_ALU_LH__}} &
-              (rdata[15] ? rdata | 'hffff0000 : rdata & 'hffff)) |
-           ({XLEN{ralu == `YSYX_ALU_LHU_}} & rdata & 'hffff) |
-           ({XLEN{ralu == `YSYX_ALU_LW__}} & rdata)
-         );
+      ({XLEN{ralu == `YSYX_ALU_LB__}} & (rdata[7] ? rdata | 'hffffff00 : rdata & 'hff))
+    | ({XLEN{ralu == `YSYX_ALU_LBU_}} & rdata & 'hff)
+    | ({XLEN{ralu == `YSYX_ALU_LH__}} & (rdata[15] ? rdata | 'hffff0000 : rdata & 'hffff))
+    | ({XLEN{ralu == `YSYX_ALU_LHU_}} & rdata & 'hffff)
+    | ({XLEN{ralu == `YSYX_ALU_LW__}} & rdata)
+    );
   assign exu_lsu.rready = rready;
 
   always @(posedge clock) begin
@@ -233,8 +235,8 @@ module ysyx_lsu #(
       .raddr(raddr),
       .ralu(ralu),
       .rvalid(exu_lsu.arvalid && raddr_valid && !(|sq_valid) && !(|stq_valid)),
-      .lsu_rdata(rdata_unalign),
-      .lsu_rready(rready),
+      .io_rdata_o(rdata_unalign),
+      .io_rready_o(rready),
 
       // write
       .waddr (waddr),

@@ -406,7 +406,7 @@ module ysyx_rou #(
   assign rou_csr.trap = rob_trap[rob_head];
   assign rou_csr.tval = rob_tval[rob_head];
   assign rou_csr.cause = rob_cause[rob_head];
-  assign rou_csr.valid = head_valid;
+  assign rou_csr.valid = head_valid && rob_sys[rob_head];
 
   assign rou_lsu.store = rob_store[rob_head];
   assign rou_lsu.alu = rob_alu[rob_head];

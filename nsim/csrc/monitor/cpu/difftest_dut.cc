@@ -37,6 +37,33 @@ void difftest_skip_dut(int nr_ref, int nr_dut)
   }
 }
 
+static void checkmem(uint8_t *ref, uint8_t *dut, size_t n)
+{
+  ref_difftest_memcpy(MBASE, ref, n, DIFFTEST_TO_DUT);
+  for (size_t i = 0; i < n; i++)
+  {
+    if (ref[i] != dut[i])
+    {
+      printf(FMT_RED("[ERROR]") " mem[%zx] is different! ref = " FMT_WORD_NO_PREFIX ", dut = " FMT_WORD_NO_PREFIX "\n",
+             i, ref[i], dut[i]);
+      printf("mem_dut: ");
+      for (int j = 0; j < 16; j++)
+      {
+        printf("%02x ", dut[i - 8 + j]);
+      }
+      printf("\n");
+      printf("mem_ref: ");
+      for (int j = 0; j < 16; j++)
+      {
+        printf("%02x ", ref[i - 8 + j]);
+      }
+      printf("\n");
+      npc.state = NPC_ABORT;
+      return;
+    }
+  }
+}
+
 void init_difftest(char *ref_so_file, long img_size, int port)
 {
 #ifdef CONFIG_DIFFTEST
@@ -134,40 +161,11 @@ static void checkregs(NPCState *ref, vaddr_t pc)
 
   if (!is_same)
   {
+    checkmem(pmem_ref, guest_to_host(MBASE), MSIZE);
     printf(FMT_RED("[ERROR]") " npc.pc: " FMT_WORD_NO_PREFIX "\n", pc);
     npc.state = NPC_ABORT;
   }
 }
-
-#ifdef CONFIG_MEM_DIFFTEST
-static void checkmem(uint8_t *ref, uint8_t *dut, size_t n)
-{
-  return;
-  ref_difftest_memcpy(MBASE, pmem_ref, MSIZE, DIFFTEST_TO_DUT);
-  for (size_t i = 0; i < n; i++)
-  {
-    if (ref[i] != dut[i])
-    {
-      printf(FMT_RED("[ERROR]") " mem[%x] is different! ref = " FMT_WORD_NO_PREFIX ", dut = " FMT_WORD_NO_PREFIX "\n",
-             (word_t)i, ref[i], dut[i]);
-      printf("mem_dut: ");
-      for (int j = 0; j < 16; j++)
-      {
-        printf("%02x ", dut[i - 8 + j]);
-      }
-      printf("\n");
-      printf("mem_ref: ");
-      for (int j = 0; j < 16; j++)
-      {
-        printf("%02x ", ref[i - 8 + j]);
-      }
-      printf("\n");
-      npc.state = NPC_ABORT;
-      return;
-    }
-  }
-}
-#endif
 
 void difftest_step(vaddr_t pc)
 {
