@@ -38,15 +38,21 @@ void perf_sample_per_cycle()
     pmu.bpu_b_fail += br_predict_fail && b ? 1 : 0;
     pmu.bpu_j_fail += br_predict_fail && j ? 1 : 0;
   }
-  bool ifu_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, ifu__DOT__l1i_cache__DOT__hit));
+  bool ifu_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, ifu__DOT__valid));
   bool ifu_sys_hazard = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, ifu__DOT__ifu_sys_hazard));
 
   bool idu_ready = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, idu_ready));
 
   bool rou_ready = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, rou_ready));
-  bool exu_rs_ready = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, exu__DOT__rs_ready));
-  bool ren = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, lsu__DOT____Vcellinp__l1d_cache__rvalid));
-  bool wen = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, lsu__DOT__wvalid));
+  uint32_t exu_ooo_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, exu__DOT__rs_valid));
+  bool exu_ooo_valid_found = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, exu__DOT__valid_found));
+  uint32_t exu_ioq_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, exu__DOT__ioq_valid));
+  bool exu_ioq_valid_found = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, exu__DOT__ioq_valid_found));
+  bool lsu_rvalid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, lsu__DOT____Vcellinp__l1d_cache__rvalid));
+  bool lsu_l1d_hit = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, lsu__DOT__l1d_cache__DOT__hit));
+  uint32_t lsu_sq_valid = *(uint32_t *)&(CONCAT(VERILOG_PREFIX, lsu__DOT__sq_valid));
+  bool lsu_sq_ready = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, lsu__DOT__sq_ready));
+  bool wbu_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, wbu__DOT__valid));
   uint8_t l1i_state = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, ifu__DOT__l1i_cache__DOT__l1i_state));
   static uint32_t ifu_pc = 0;
   if (ifu_valid && idu_ready)
@@ -59,8 +65,20 @@ void perf_sample_per_cycle()
   }
   pmu.ifu_sys_hazard_cycle += ifu_sys_hazard ? 1 : 0;
   pmu.rou_hazard_cycle += !rou_ready ? 1 : 0;
-  pmu.exu_stall_cycle += !exu_rs_ready ? 1 : 0;
-  pmu.lsu_stall_cycle += (ren || wen) ? 1 : 0;
+  if (exu_ooo_valid && !exu_ooo_valid_found)
+  {
+    pmu.exu_ooo_stall_cycle++;
+  }
+  if (exu_ioq_valid && !exu_ioq_valid_found)
+  {
+    pmu.exu_ioq_stall_cycle++;
+  }
+  pmu.lsu_l1d_stall_cycle += (lsu_rvalid && !lsu_l1d_hit) ? 1 : 0;
+  pmu.lsu_sq_stall_cycle += !lsu_sq_ready ? 1 : 0;
+  if (!wbu_valid)
+  {
+    pmu.wbu_stall_cycle++;
+  }
   // cache sample
   static bool i_fetching = false;
   if (i_fetching == false)
@@ -171,44 +189,39 @@ void perf()
       pmu.instr_cnt, pmu.active_cycle, IPC,
       (main_cycle_cnt != 0) ? MAIN_IPC : 0,
       (time_clint_us), MIPS);
-  Log("| %8s,  %% | %8s,  %% | %8s,  %% |",
-      "IFU", "EXU", "LSU");
-  Log("| %8lld,%3.0f | %8lld,%3.0f | %8lld,%3.0f |",
-      pmu.ifu_stall_cycle, percentage(pmu.ifu_stall_cycle, pmu.active_cycle),
-      pmu.exu_stall_cycle, percentage(pmu.exu_stall_cycle, pmu.active_cycle),
-      pmu.lsu_stall_cycle, percentage(pmu.lsu_stall_cycle, pmu.active_cycle));
-  Log("hazard cycle of ifu_sys: %8lld,%3.0f%%, rou_cycle: %8lld,%3.0f%% (structural)",
-      pmu.ifu_sys_hazard_cycle, percentage(pmu.ifu_sys_hazard_cycle, pmu.active_cycle),
-      pmu.rou_hazard_cycle, percentage(pmu.rou_hazard_cycle, pmu.active_cycle));
-  Log("|%6s, %%|%6s, %%|%6s, %%|%6s, %%|%3s, %%|%5s, %%|%6s,  %%|%6s,  %%|",
+  Log("|%6s, %%|%6s, %%|%6s, %%|%6s, %%|%6s, %%|%6s, %%|%6s,  %%|%6s,  %%|",
       "LD", "ST", "ALU", "BR", "CSR", "OTH", "JAL", "JALR");
-  Log("|%6lld,%2.0f|%6lld,%2.0f|%6lld,%2.0f"
-      "|%6lld,%2.0f|%3lld,%2.0f|%5lld,%2.0f"
-      "|%6lld,%3.0f|%6lld,%3.0f|",
-      pmu.ld_inst_cnt, percentage(pmu.ld_inst_cnt, pmu.instr_cnt),
-      pmu.st_inst_cnt, percentage(pmu.st_inst_cnt, pmu.instr_cnt),
-      pmu.alu_inst_cnt, percentage(pmu.alu_inst_cnt, pmu.instr_cnt),
+  Log("|%6.0e,%2.0f|%6.0e,%2.0f|%6.0e,%2.0f"
+      "|%6.0e,%2.0f|%6lld,%2.0f|%6.0e,%2.0f"
+      "|%6.0e,%3.0f|%6.0e,%3.0f|",
+      (double)pmu.ld_inst_cnt, percentage(pmu.ld_inst_cnt, pmu.instr_cnt),
+      (double)pmu.st_inst_cnt, percentage(pmu.st_inst_cnt, pmu.instr_cnt),
+      (double)pmu.alu_inst_cnt, percentage(pmu.alu_inst_cnt, pmu.instr_cnt),
 
-      pmu.b_inst_cnt, percentage(pmu.b_inst_cnt, pmu.instr_cnt),
+      (double)pmu.b_inst_cnt, percentage(pmu.b_inst_cnt, pmu.instr_cnt),
       pmu.csr_inst_cnt, percentage(pmu.csr_inst_cnt, pmu.instr_cnt),
-      pmu.other_inst_cnt, percentage(pmu.other_inst_cnt, pmu.instr_cnt),
+      (double)pmu.other_inst_cnt, percentage(pmu.other_inst_cnt, pmu.instr_cnt),
 
-      pmu.jal_inst_cnt, percentage(pmu.jal_inst_cnt, pmu.instr_cnt),
-      pmu.jalr_inst_cnt, percentage(pmu.jalr_inst_cnt, pmu.instr_cnt));
-  Log("======== TOP DOWN Analysis ========");
-  Log("| %8s,  %% | %8s,  %% | %8s,  %% | %8s,  %% | %8s,  %% |",
-      "IFU", "LSU", "EXU", "LD", "ST");
-  Log("| %8lld,%3.0f | %8lld,%3.0f | %8lld,%3.0f | %8lld,%3.0f | %8lld,%3.0f |",
+      (double)pmu.jal_inst_cnt, percentage(pmu.jal_inst_cnt, pmu.instr_cnt),
+      (double)pmu.jalr_inst_cnt, percentage(pmu.jalr_inst_cnt, pmu.instr_cnt));
+  Log("======== TOP DOWN Stall Analysis ========");
+  Log("|%7s, %%|%7s, %%|%7s, %%|%7s, %%|%7s, %%|%7s, %%|",
+      "IFU", "EXU OoO", "EXU IoQ", "LSU L1D", "LSU SQ", "Bubble");
+  Log("|%7lld,%2.0f|%7lld,%2.0f|%7lld,%2.0f|%7lld,%2.0f|%7lld,%2.0f|%7lld,%2.0f|",
       pmu.ifu_stall_cycle, percentage(pmu.ifu_stall_cycle, pmu.active_cycle),
-      pmu.lsu_stall_cycle, percentage(pmu.lsu_stall_cycle, pmu.active_cycle),
-      pmu.exu_stall_cycle, percentage(pmu.exu_stall_cycle, pmu.active_cycle),
-      pmu.ld_inst_cnt, percentage(pmu.ld_inst_cnt, pmu.instr_cnt),
-      pmu.st_inst_cnt, percentage(pmu.st_inst_cnt, pmu.instr_cnt));
+      pmu.exu_ooo_stall_cycle, percentage(pmu.exu_ooo_stall_cycle, pmu.active_cycle),
+      pmu.exu_ioq_stall_cycle, percentage(pmu.exu_ioq_stall_cycle, pmu.active_cycle),
+      pmu.lsu_l1d_stall_cycle, percentage(pmu.lsu_l1d_stall_cycle, pmu.active_cycle),
+      pmu.lsu_sq_stall_cycle, percentage(pmu.lsu_sq_stall_cycle, pmu.active_cycle),
+      pmu.wbu_stall_cycle, percentage(pmu.wbu_stall_cycle, pmu.active_cycle));
   Log("BPU Success: %lld, Fail: %lld, Rate: %2.1f%% (b: %lld, j: %lld), call: %lld, ret: %lld",
       pmu.bpu_cnt - pmu.bpu_fail_cnt, pmu.bpu_fail_cnt,
       percentage(pmu.bpu_cnt - pmu.bpu_fail_cnt, pmu.bpu_cnt),
       pmu.bpu_b_fail, pmu.bpu_j_fail,
       pmu.call_inst_cnt, pmu.ret_inst_cnt);
+  Log("hazard cycle of ifu_sys: %6lld,%2.0f%%, rou_cycle: %6lld,%2.0f%% (structural)",
+      pmu.ifu_sys_hazard_cycle, percentage(pmu.ifu_sys_hazard_cycle, pmu.active_cycle),
+      pmu.rou_hazard_cycle, percentage(pmu.rou_hazard_cycle, pmu.active_cycle));
   assert(
       pmu.instr_cnt ==
       (pmu.ld_inst_cnt + pmu.st_inst_cnt + pmu.alu_inst_cnt +
@@ -217,7 +230,7 @@ void perf()
   Log("======== Cache Analysis ========");
   // AMAT: Average Memory Access Time
   Log("|%8s,  %%|%8s, %%|%8s, %%|%8s, %%|%13s|%13s|%6s|",
-      "HIT", "MISS", "HIT CYC", "MISS CYC", "HIT Cost AVG", "MISS Cost AVG", "AMAT");
+      "L1I HIT", "L1I MISS", "HIT CYC", "MISS CYC", "HIT Cost AVG", "MISS Cost AVG", "AMAT");
   double l1i_hit_rate = percentage(pmu.l1i_cache_hit_cnt, pmu.l1i_cache_hit_cnt + pmu.l1i_cache_miss_cnt);
   double l1i_access_time = pmu.l1i_cache_hit_cycle / (pmu.l1i_cache_hit_cnt + 1);
   double l1i_miss_penalty = pmu.l1i_cache_miss_cycle / (pmu.l1i_cache_miss_cnt + 1);

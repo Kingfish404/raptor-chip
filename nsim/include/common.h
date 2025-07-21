@@ -164,14 +164,17 @@ typedef struct
   long long int active_cycle;
   long long int instr_cnt;
   long long int ifu_fetch_cnt;
+  long long int lsu_load_cnt;
+
   long long int ifu_stall_cycle;
+  long long int exu_ooo_stall_cycle;
+  long long int exu_ioq_stall_cycle;
+  long long int lsu_l1d_stall_cycle;
+  long long int lsu_sq_stall_cycle;
+  long long int wbu_stall_cycle;
 
   long long int ifu_sys_hazard_cycle;
   long long int rou_hazard_cycle;
-
-  long long int lsu_load_cnt;
-  long long int lsu_stall_cycle;
-  long long int exu_stall_cycle;
 
   // bpu
   long long int bpu_cnt;

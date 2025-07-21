@@ -39,8 +39,9 @@ INC_PATH +=	$(abspath $(VSRC_PATH)/include/npc)
 endif
 BUILD_DIR = ./build
 OBJ_DIR = $(BUILD_DIR)/obj_dir
-BIN = $(BUILD_DIR)/$(VTARGET)
+BIN = $(BUILD_DIR)/$(VTARGET)-$(CONFIG_MODE)
 VERILATOR_FLAG =--prof-c --prof-cfuncs --prof-exec \
+	--public \
 	--autoflush --timescale "1ns/1ns" --no-timing # -Wall -Wno-DECLFILENAME -Wno-UNUSED
 CXXFLAGS = -Wall -Werror \
 	-Wno-bool-operation -Wno-implicit-fallthrough -Wno-macro-redefined \

@@ -35,7 +35,7 @@ module ysyx_exu #(
   logic [XLEN-1:0] reservation;
 
   // === Revervation Station (RS) ===
-  logic [RS_SIZE-1:0] rs_busy;
+  logic [RS_SIZE-1:0] rs_valid;
 
   logic [32-1:0] rs_inst[RS_SIZE];
   logic [XLEN-1:0] rs_pc[RS_SIZE];
@@ -91,8 +91,6 @@ module ysyx_exu #(
   logic [IOQ_SIZE-1:0] ioq_wen;
   logic [IOQ_SIZE-1:0] ioq_ren;
   logic [IOQ_SIZE-1:0] ioq_atom;
-  logic [IOQ_SIZE-1:0] ioq_ex_ready;
-  logic [XLEN-1:0] ioq_ren_data[IOQ_SIZE];
 
   logic ioq_ready;
   // === In-Order Queue (IOQ), for Load, Store ===
@@ -100,7 +98,7 @@ module ysyx_exu #(
   logic [$clog2(RS_SIZE)-1:0] free_idx;
   logic [$clog2(RS_SIZE)-1:0] valid_idx;
   logic [$clog2(RS_SIZE)-1:0] mul_rs_idx;
-  logic free_found, valid_found, mul_found;
+  logic free_found, valid_found, mul_found, ioq_valid_found;
 
   logic csr_illegal;
 
@@ -113,13 +111,13 @@ module ysyx_exu #(
     valid_idx = 0;
     mul_rs_idx = 0;
     for (bit [XLEN-1:0] i = 0; i < RS_SIZE; i++) begin
-      if (rs_busy[i] == 0 && !free_found) begin
+      if (rs_valid[i] == 0 && !free_found) begin
         free_idx   = i[$clog2(RS_SIZE)-1:0];
         free_found = 1;
       end
     end
     for (bit [XLEN-1:0] i = 0; i < RS_SIZE; i++) begin
-      if (!valid_found && rs_busy[i] && rs_qj[i] == 0 && rs_qk[i] == 0) begin
+      if (!valid_found && rs_valid[i] && rs_qj[i] == 0 && rs_qk[i] == 0) begin
         if (rs_alu[i][4:4] == 0 || rs_mul_valid[i]) begin
           valid_idx   = i[$clog2(RS_SIZE)-1:0];
           valid_found = 1;
@@ -127,7 +125,7 @@ module ysyx_exu #(
       end
     end
     for (bit [XLEN-1:0] i = 0; i < RS_SIZE; i++) begin
-      if (rs_busy[i] == 1 && rs_alu[i][4:4] == 1 && !mul_found) begin
+      if (rs_valid[i] == 1 && rs_alu[i][4:4] == 1 && !mul_found) begin
         mul_rs_idx = i[$clog2(RS_SIZE)-1:0];
         mul_found  = 1;
       end
@@ -136,8 +134,7 @@ module ysyx_exu #(
 
   assign exu_lsu.arvalid = (ioq_valid[ioq_head]
     && ioq_ren[ioq_head]
-    && ioq_qj[ioq_head] == 0 && ioq_qk[ioq_head] == 0
-    && ioq_ex_ready[ioq_head] == 0);
+    && ioq_qj[ioq_head] == 0 && ioq_qk[ioq_head] == 0);
   assign exu_lsu.raddr = ioq_atom[ioq_head]
     ? ioq_vj[ioq_head]
     : ioq_vj[ioq_head] + ioq_vk[ioq_head];
@@ -162,8 +159,7 @@ module ysyx_exu #(
     if (reset || flush_pipe) begin
       ioq_ren <= 0;
       ioq_wen <= 0;
-      rs_busy <= 0;
-      rs_busy <= 0;
+      rs_valid <= 0;
       muling <= 0;
 
       ioq_valid <= 0;
@@ -191,25 +187,18 @@ module ysyx_exu #(
         ioq_wen[ioq_tail] <= rou_exu.wen;
         ioq_ren[ioq_tail] <= rou_exu.ren;
         ioq_atom[ioq_tail] <= rou_exu.atom;
-        ioq_ex_ready[ioq_tail] <= 0;
 
         ioq_tail <= (ioq_tail + 1);
       end
-      if (exu_lsu.rready) begin
-        // Load ready of IOQ
-        ioq_ex_ready[ioq_head] <= 1;
-        ioq_ren_data[ioq_head] <= exu_lsu.rdata;
-      end
       if (ioq_valid[ioq_head]
         && ioq_qj[ioq_head] == 0 && ioq_qk[ioq_head] == 0
-        && ((!ioq_ren[ioq_head] || ioq_ex_ready[ioq_head]))
+        && ((!ioq_ren[ioq_head] || exu_lsu.rready))
         ) begin
         // Write back of IOQ
-        ioq_inst[ioq_head] <= 0;
+        ioq_inst[ioq_head]  <= 0;
 
-        ioq_wen[ioq_head] <= 0;
-        ioq_ren[ioq_head] <= 0;
-        ioq_ex_ready[ioq_head] <= 0;
+        ioq_wen[ioq_head]   <= 0;
+        ioq_ren[ioq_head]   <= 0;
         ioq_valid[ioq_head] <= 0;
 
         if (ioq_atom[ioq_head]) begin
@@ -226,12 +215,12 @@ module ysyx_exu #(
       end
       for (bit [XLEN-1:0] i = 0; i < IOQ_SIZE; i++) begin
         if (ioq_valid[i]) begin
-          if (ioq_qj[i] == exu_ioq_rou.dest && exu_ioq_rou.valid) begin
+          if (ioq_qj[i] == exu_ioq_rou.dest && ioq_valid_found) begin
             // Forwarding from IOQ
             ioq_vj[i] <= exu_ioq_rou.result;
             ioq_qj[i] <= 0;
           end
-          if (ioq_qk[i] == exu_ioq_rou.dest && exu_ioq_rou.valid) begin
+          if (ioq_qk[i] == exu_ioq_rou.dest && ioq_valid_found) begin
             // Forwarding from IOQ
             ioq_vk[i] <= exu_ioq_rou.result;
             ioq_qk[i] <= 0;
@@ -253,7 +242,7 @@ module ysyx_exu #(
         if (free_found && i[$clog2(RS_SIZE)-1:0] == free_idx) begin
           if (prev_valid && rs_ready && !(rou_exu.wen || rou_exu.ren)) begin
             // Dispatch receive
-            rs_busy[free_idx] <= 1;
+            rs_valid[free_idx] <= 1;
             rs_alu[free_idx] <= rou_exu.alu;
             rs_vj[free_idx] <= rou_exu.op1;
             rs_qj[free_idx] <= rou_exu.qj;
@@ -280,7 +269,7 @@ module ysyx_exu #(
             rs_tval[free_idx] <= rou_exu.tval;
             rs_cause[free_idx] <= rou_exu.cause;
           end
-        end else if (rs_busy[i] && rs_qj[i] == 0 && rs_qk[i] == 0) begin
+        end else if (rs_valid[i] && rs_qj[i] == 0 && rs_qk[i] == 0) begin
           // Mul
           if (rs_alu[i][4:4]) begin
             if (rs_mul_valid[i] == 0 && muling == 0) begin
@@ -296,18 +285,18 @@ module ysyx_exu #(
           end
           if (valid_found && valid_idx == i[$clog2(RS_SIZE)-1:0]) begin
             // Write back and clear RS
-            rs_busy[i] <= 0;
+            rs_valid[i] <= 0;
             rs_alu[i] <= 0;
             rs_inst[i] <= 0;
             rs_mul_valid[i] <= 0;
           end
-        end else if (rs_busy[i]) begin
-          if (rs_qj[i] == exu_ioq_rou.dest && exu_ioq_rou.valid) begin
+        end else if (rs_valid[i]) begin
+          if (rs_qj[i] == exu_ioq_rou.dest && ioq_valid_found) begin
             // Forwarding for IOQ
             rs_vj[i] <= exu_ioq_rou.result;
             rs_qj[i] <= 0;
           end
-          if (rs_qk[i] == exu_ioq_rou.dest && exu_ioq_rou.valid) begin
+          if (rs_qk[i] == exu_ioq_rou.dest && ioq_valid_found) begin
             // Forwarding for IOQ
             rs_vk[i] <= exu_ioq_rou.result;
             rs_qk[i] <= 0;
@@ -317,11 +306,11 @@ module ysyx_exu #(
       if (exu_rou.valid) begin
         for (bit [XLEN-1:0] j = 0; j < RS_SIZE; j++) begin
           // RS forwarding to RS
-          if (rs_busy[j] && rs_qj[j] == exu_rou.dest) begin
+          if (rs_valid[j] && rs_qj[j] == exu_rou.dest) begin
             rs_vj[j] <= exu_rou.result;
             rs_qj[j] <= 0;
           end
-          if (rs_busy[j] && rs_qk[j] == exu_rou.dest) begin
+          if (rs_valid[j] && rs_qk[j] == exu_rou.dest) begin
             rs_vk[j] <= exu_rou.result;
             rs_qk[j] <= 0;
           end
@@ -356,28 +345,28 @@ module ysyx_exu #(
             ioq_data[i] = ioq_vk[i];
           end
           `YSYX_ATO_ADD_: begin
-            ioq_data[i] = ioq_vk[i] + ioq_ren_data[i];
+            ioq_data[i] = ioq_vk[i] + exu_lsu.rdata;
           end
           `YSYX_ATO_XOR_: begin
-            ioq_data[i] = ioq_vk[i] ^ ioq_ren_data[i];
+            ioq_data[i] = ioq_vk[i] ^ exu_lsu.rdata;
           end
           `YSYX_ATO_AND_: begin
-            ioq_data[i] = ioq_vk[i] & ioq_ren_data[i];
+            ioq_data[i] = ioq_vk[i] & exu_lsu.rdata;
           end
           `YSYX_ATO_OR__: begin
-            ioq_data[i] = ioq_vk[i] | ioq_ren_data[i];
+            ioq_data[i] = ioq_vk[i] | exu_lsu.rdata;
           end
           `YSYX_ATO_MIN_: begin
-            ioq_data[i] = ioq_ren_data[i] < ioq_vk[i] ? ioq_ren_data[i] : ioq_vk[i];
+            ioq_data[i] = exu_lsu.rdata < ioq_vk[i] ? exu_lsu.rdata : ioq_vk[i];
           end
           `YSYX_ATO_MAX_: begin
-            ioq_data[i] = ioq_ren_data[i] > ioq_vk[i] ? ioq_ren_data[i] : ioq_vk[i];
+            ioq_data[i] = exu_lsu.rdata > ioq_vk[i] ? exu_lsu.rdata : ioq_vk[i];
           end
           `YSYX_ATO_MINU: begin
-            ioq_data[i] = ioq_ren_data[i] < ioq_vk[i] ? ioq_vk[i] : ioq_ren_data[i];
+            ioq_data[i] = exu_lsu.rdata < ioq_vk[i] ? ioq_vk[i] : exu_lsu.rdata;
           end
           `YSYX_ATO_MAXU: begin
-            ioq_data[i] = ioq_ren_data[i] > ioq_vk[i] ? ioq_vk[i] : ioq_ren_data[i];
+            ioq_data[i] = exu_lsu.rdata > ioq_vk[i] ? ioq_vk[i] : exu_lsu.rdata;
           end
           default: begin
             ioq_data[i] = 'b0;
@@ -397,9 +386,7 @@ module ysyx_exu #(
   assign exu_ioq_rou.inst = ioq_inst[ioq_head];
   assign exu_ioq_rou.pc = ioq_pc[ioq_head];
   assign exu_ioq_rou.npc = ioq_pc[ioq_head] + (ioq_c[ioq_head] ? 2 : 4);
-  assign exu_ioq_rou.result = (ioq_ex_ready[ioq_head]
-    ? ioq_ren_data[ioq_head]
-    : ioq_data[ioq_head]);
+  assign exu_ioq_rou.result = (exu_lsu.rready ? exu_lsu.rdata : ioq_data[ioq_head]);
   assign exu_ioq_rou.dest = ioq_dest[ioq_head];
 
   assign exu_ioq_rou.wen = ioq_wen[ioq_head];
@@ -407,10 +394,11 @@ module ysyx_exu #(
   assign exu_ioq_rou.sq_waddr = ioq_vj[ioq_head] + ioq_imm[ioq_head];
   assign exu_ioq_rou.sq_wdata = ioq_data[ioq_head];
 
-  assign exu_ioq_rou.valid = (ioq_valid[ioq_head]
+  assign ioq_valid_found = (ioq_valid[ioq_head]
     && ioq_qj[ioq_head] == 0 && ioq_qk[ioq_head] == 0
-    && ((!ioq_ren[ioq_head] || ioq_ex_ready[ioq_head]))
+    && ((!ioq_ren[ioq_head] || exu_lsu.rready))
   );
+  assign exu_ioq_rou.valid = ioq_valid_found;
 
   // Write back (RS)
   assign exu_rou.dest = rs_dest[valid_idx];

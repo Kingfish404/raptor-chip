@@ -29,7 +29,7 @@
  * @param L1D_LEN: L1D Length (Size)
  */
 
-// `define YSYX_M_FAST 'h1
+`define YSYX_M_FAST 'h1
 `define YSYX_L1I_LINE_LEN 1
 `define YSYX_L1I_LEN 7
 

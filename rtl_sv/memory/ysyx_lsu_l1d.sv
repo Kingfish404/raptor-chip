@@ -52,14 +52,14 @@ module ysyx_lsu_l1d #(
 
   logic [32-L1D_LEN-2-1:0] addr_tag;
   logic [L1D_LEN-1:0] addr_idx;
-  logic l1d_cache_hit;
+  logic hit;
   logic [XLEN-1:0] l1d_data;
   logic cacheable_r;
   logic cacheable_w;
 
   logic [32-L1D_LEN-2-1:0] waddr_tag;
   logic [L1D_LEN-1:0] waddr_idx;
-  logic l1d_cache_hit_w;
+  logic hit_w;
 
   logic l1d_update;
   logic [XLEN-1:0] l1d_data_u;
@@ -81,15 +81,15 @@ module ysyx_lsu_l1d #(
   assign l1d_addr_tag = l1d_raddr[XLEN-1:L1D_LEN+2];
   assign l1d_addr_idx = l1d_raddr[L1D_LEN+2-1:0+2];
 
-  assign l1d_cache_hit = (l1d_valid[addr_idx] == 1'b1) && (l1d_tag[addr_idx] == addr_tag);
+  assign hit = (l1d_valid[addr_idx] == 1'b1) && (l1d_tag[addr_idx] == addr_tag);
   assign l1d_data = l1d[addr_idx];
 
-  assign io_rdata_o = l1d_cache_hit ? l1d_data : l1d_buffer;
-  assign io_rready_o = rvalid && (l1d_cache_hit || (state_load == IF_V) && l1d_raddr == raddr);
+  assign io_rdata_o = hit ? l1d_data : lsu_bus.rdata;
+  assign io_rready_o = rvalid && (hit || (lsu_bus.rvalid) && l1d_raddr == raddr);
 
   assign waddr_tag = waddr[XLEN-1:L1D_LEN+2];
   assign waddr_idx = waddr[L1D_LEN+2-1:0+2];
-  assign l1d_cache_hit_w = (l1d_valid[waddr_idx] == 1'b1) && (l1d_tag[waddr_idx] == waddr_tag);
+  assign hit_w = (l1d_valid[waddr_idx] == 1'b1) && (l1d_tag[waddr_idx] == waddr_tag);
 
   assign cacheable_r = ((0)  //
       || (l1d_raddr >= 'h20000000 && l1d_raddr < 'h20400000)  // mrom
@@ -118,7 +118,7 @@ module ysyx_lsu_l1d #(
         IF_A: begin
           if (flush_pipe) begin
           end else if (rvalid) begin
-            if (!l1d_cache_hit) begin
+            if (!hit) begin
               state_load <= IF_L;
               l1d_raddr  <= raddr;
               l1d_walu   <= ralu;
@@ -151,7 +151,7 @@ module ysyx_lsu_l1d #(
           l1d_tag_u <= waddr_tag;
           l1d_idx <= waddr_idx;
         end else begin
-          if (l1d_cache_hit_w) begin
+          if (hit_w) begin
             // invalid cache
             l1d_update <= 1'b1;
             l1d_valid_u <= 0;

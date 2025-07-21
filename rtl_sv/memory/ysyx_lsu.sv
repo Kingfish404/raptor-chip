@@ -60,7 +60,6 @@ module ysyx_lsu #(
   logic [XLEN-1:0] sq_pc[SQ_SIZE];
   // === Store Queue (SQ) ===
 
-  logic [XLEN-1:0] lsu_wdata;
   logic load_in_sq;
   logic [$clog2(SQ_SIZE)-1:0] load_in_sq_idx;
   logic store_in_sq;
@@ -206,7 +205,6 @@ module ysyx_lsu #(
         LS_S_V: begin
           if (wvalid) begin
             if (lsu_bus.wready) begin
-              lsu_wdata   <= wdata;
               state_store <= LS_S_R;
             end
           end
