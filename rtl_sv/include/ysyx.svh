@@ -130,6 +130,8 @@
 `define YSYX_CSR_MIP____ 'h344
 
 `define YSYX_CSR_MCYCLE_ 'hb00
+`define YSYX_CSR_MCYCLEH 'hb80
+`define YSYX_CSR_CYCLE__ 'hc00
 `define YSYX_CSR_TIME___ 'hc01
 `define YSYX_CSR_TIMEH__ 'hc81
 

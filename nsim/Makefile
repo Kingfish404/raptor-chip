@@ -16,7 +16,7 @@ endif
 -include ./include/config/auto.conf
 -include ./include/config/auto.conf.cmd
 
-NSIM_HOME = $(abspath $(YSYX_HOME)/nsim)
+NSIM_HOME = $(abspath .)
 VSRC_PATH ?= $(abspath ../rtl_sv)
 INC_PATH ?= $(abspath ./include) $(abspath $(VSRC_PATH)/include)
 
@@ -79,7 +79,7 @@ INCFLAGS = $(addprefix -I, $(INC_PATH))
 CXXFLAGS += $(INCFLAGS) -DTOP_NAME="\"V$(VTARGET)\"" $(SOC_DEFINE) \
 	-DMROM_PATH=$(MROM_IMG)
 
-ifneq (,$(filter sta%,$(MAKECMDGOALS)))
+ifneq (,$(filter sta% pack%,$(MAKECMDGOALS)))
 INC_PATH += $(abspath $(VSRC_PATH)/include/dpic_mock)
 else
 INC_PATH += $(abspath $(VSRC_PATH)/include/dpic)
@@ -121,14 +121,10 @@ YOSYS_OPENSTA:
 	git clone https://github.com/Kingfish404/yosys-opensta $(YOSYS_OPENSTA)
 	make -C $(YOSYS_OPENSTA) init init_opensta
 
-pack: $(VSRCS)
-	mkdir -p $(YSYX_HOME)/nsim/build/pack
-	cp -r $(VSRCS) $(YSYX_HOME)/nsim/build/pack
-	cp -r $(abspath $(VSRC_PATH)/include)/*.svh \
-		  $(abspath $(VSRC_PATH)/include/dpic_mock)/*.svh \
-		  $(abspath $(VSRC_PATH)/include/npc)/*.svh $(YSYX_HOME)/nsim/build/pack
-	cp scripts/pack.sh $(YSYX_HOME)/nsim/build/pack && chmod +x $(YSYX_HOME)/nsim/build/pack/pack.sh
-	cd $(YSYX_HOME)/nsim/build/pack && ./pack.sh
+pack: $(VSRCS) $(VHSRCS)
+	mkdir -p $(BUILD_DIR)
+	verilator -E -P $(addprefix -I, $(INC_PATH)) $(VSRCS) > $(BUILD_DIR)/ysyx_pack.sv
+	verilator -E -P --dump-defines $(addprefix -I, $(INC_PATH)) $(VSRCS) > $(BUILD_DIR)/ysyx_pack.svh
 
 sta:
 	echo $(MAKECMDGOALS)

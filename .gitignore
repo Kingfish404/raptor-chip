@@ -14,7 +14,7 @@
 !.gitignore
 !init.sh
 !setup.sh
-!environment.env
+!env.sh
 !/.github/workflows/*
 !Dockerfile
 !*.v

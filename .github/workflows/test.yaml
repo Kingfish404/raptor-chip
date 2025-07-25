@@ -1,0 +1,56 @@
+name: cpu tests
+
+on:
+  push:
+    branches: ["master", "main"]
+  pull_request:
+    branches: ["master", "main"]
+
+jobs:
+  npc-cpu-tests:
+    runs-on: ubuntu-latest
+    env:
+      YSYX_HOME: ${{ github.workspace  }}
+      NEMU_HOME: ${{ github.workspace  }}/nemu
+      AM_HOME: ${{ github.workspace  }}/abstract-machine
+      CROSS_COMPILE: riscv64-elf-
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup envirement
+        run: ./setup.sh
+      - name: Build SoC
+        shell: bash -l {0}
+        run: make -C nsim o2_defconfig && make -C nsim -j`nproc`
+      - name: Build NEMU-Ref
+        shell: bash -l {0}
+        run: make -C $NEMU_HOME riscv32_ref_defconfig && make -C $NEMU_HOME
+      - name: cpu-tests of riscv32-ysyxsoc payload result
+        shell: bash -l {0}
+        run: make -C $YSYX_HOME/am-kernels/tests/cpu-tests ARCH=riscv32-npc run FLAGS="-b -n"
+      - name: cpu-tests of riscv32e-npc
+        shell: bash -l {0}
+        run: make -C $YSYX_HOME/am-kernels/tests/cpu-tests ARCH=riscv32e-npc run FLAGS="-b -n"
+
+  ysyxsoc-cpu-tests:
+    runs-on: ubuntu-latest
+    env:
+      YSYX_HOME: ${{ github.workspace  }}
+      NEMU_HOME: ${{ github.workspace  }}/nemu
+      AM_HOME: ${{ github.workspace  }}/abstract-machine
+      CROSS_COMPILE: riscv64-elf-
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup envirement
+        run: ./setup.sh
+      - name: Build SoC
+        shell: bash -l {0}
+        run: make -C nsim o2soc_defconfig && make -C nsim -j`nproc`
+      - name: Build NEMU-Ref
+        shell: bash -l {0}
+        run: make -C $NEMU_HOME riscv32_ref_defconfig && make -C $NEMU_HOME
+      - name: cpu-tests of riscv32-ysyxsoc
+        shell: bash -l {0}
+        run: make -C $YSYX_HOME/am-kernels/tests/cpu-tests ARCH=riscv32-ysyxsoc run FLAGS="-b -n"
+      - name: cpu-tests of riscv32e-ysyxsoc
+        shell: bash -l {0}
+        run: make -C $YSYX_HOME/am-kernels/tests/cpu-tests ARCH=riscv32e-ysyxsoc run FLAGS="-b -n"

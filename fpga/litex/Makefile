@@ -28,6 +28,12 @@ run: $(LITEX_PATH)/README.md
 		python3 ./litex/tools/litex_sim.py --cpu-type=ysyx \
 			--integrated-main-ram-size 0x10000
 
+run_ni: $(LITEX_PATH)/README.md
+	cd $(LITEX_PATH) && \
+		python3 ./litex/tools/litex_sim.py --cpu-type=ysyx \
+			--non-interactive \
+			--integrated-main-ram-size 0x10000
+
 linux_btb: build
 	litex_json2dts_linux $(LITEX_PATH)/build/sim/csr.json > $(LITEX_PATH)/build/ysyx.dts
 
@@ -41,4 +47,5 @@ coremark: $(LITEX_PATH)/README.md
 		&& python3 ./litex/soc/software/coremark/coremark.py \
 			--build-path=build/sim/ \
 		&& python3 ./litex/tools/litex_sim.py --cpu-type=ysyx \
+			--non-interactive \
 			--ram-init=coremark.bin --integrated-main-ram-size=0x10000

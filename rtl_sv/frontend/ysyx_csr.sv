@@ -60,6 +60,7 @@ module ysyx_csr #(
     MIP____,
 
     MCYCLE_,
+    MCYCLEH,
     TIME___,
     TIMEH__,
 
@@ -130,6 +131,8 @@ module ysyx_csr #(
     ({REG_W{raddr==`YSYX_CSR_MIP____}}) & (MIP____) |
 
     ({REG_W{raddr==`YSYX_CSR_MCYCLE_}}) & (MCYCLE_) |
+    ({REG_W{raddr==`YSYX_CSR_MCYCLEH}}) & (MCYCLEH) |
+    ({REG_W{raddr==`YSYX_CSR_CYCLE__}}) & (MCYCLE_) |
     ({REG_W{raddr==`YSYX_CSR_TIME___}}) & (TIME___) |
     ({REG_W{raddr==`YSYX_CSR_TIMEH__}}) & (TIMEH__) |
 
@@ -168,6 +171,7 @@ module ysyx_csr #(
     ({XLEN{raddr_reg == MIP____}}) & (csr[MIP____]) |
 
     ({XLEN{raddr_reg == MCYCLE_}}) & (csr[MCYCLE_]) |
+    ({XLEN{raddr_reg == MCYCLEH}}) & (csr[MCYCLEH]) |
     ({XLEN{raddr_reg == TIME___}}) & (csr[TIME___]) |
     ({XLEN{raddr_reg == TIMEH__}}) & (csr[TIMEH__]) |
 
@@ -199,10 +203,14 @@ module ysyx_csr #(
       end
       csr[MCYCLE_] <= csr[MCYCLE_] + 1;
       if (csr[MCYCLE_] == 'hffffffff) begin
-        csr[TIMEH__] <= csr[TIMEH__] + 1;
+        csr[MCYCLEH] <= csr[MCYCLEH] + 1;
       end
       if (valid) begin
-        if (raddr_reg == TIME___ || raddr_reg == TIMEH__ || raddr_reg == MCYCLE_) begin
+        if (raddr_reg == TIME___
+        || raddr_reg == TIMEH__
+        || raddr_reg == MCYCLE_
+        || raddr_reg == MCYCLEH
+        ) begin
           `YSYX_DPI_C_NPC_DIFFTEST_SKIP_REF
         end
         if (wen) begin

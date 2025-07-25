@@ -35,7 +35,7 @@ wget https://github.com/chipsalliance/espresso/releases/download/v2.4/arm64-appl
 
 ```shell
 # 0. environment variables at project root directory
-source ./environment.env
+source ./env.sh
 
 # 1. build and run NEMU
 cd $NEMU_HOME && make riscv32_linux_defconfig && make && make run

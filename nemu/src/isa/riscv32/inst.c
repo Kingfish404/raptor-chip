@@ -346,6 +346,7 @@ static int decode_exec(Decode *s)
   CSR(CSR_SSTATUS) = CSR(CSR_MSTATUS) & 0x800de762;
   CSR(CSR_SIE) = CSR(CSR_MIE) & 0x2666;
 
+  CSR(CSR_CYCLE_) = CSR(CSR_CYCLE_) + 0x1;
   CSR(CSR_TIME) = CSR(CSR_TIME) + 0x1;
   CSR(CSR_MCYCLE) = CSR(CSR_MCYCLE) + 0x1;
   if (CSR(CSR_TIME) == ~0)

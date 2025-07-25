@@ -117,6 +117,8 @@ module ysyx_idu #(
       || (csr == `YSYX_CSR_MIP____)
 
       || (csr == `YSYX_CSR_MCYCLE_)
+      || (csr == `YSYX_CSR_MCYCLEH)
+      || (csr == `YSYX_CSR_CYCLE__)
       || (csr == `YSYX_CSR_TIME___)
       || (csr == `YSYX_CSR_TIMEH__)
 

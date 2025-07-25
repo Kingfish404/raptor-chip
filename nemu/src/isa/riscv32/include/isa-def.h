@@ -85,6 +85,8 @@ enum CSR
   CSR_MIP = 0x344,
 
   CSR_MCYCLE = 0xb00,
+  CSR_MCYCLEH = 0xb80,
+  CSR_CYCLE_ = 0xc00,
   CSR_TIME = 0xc01,
   CSR_TIMEH = 0xc81,
 

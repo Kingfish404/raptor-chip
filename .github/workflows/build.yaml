@@ -33,9 +33,9 @@ jobs:
   ysyxsoc-test:
     runs-on: ubuntu-latest
     env:
-      YSYX_HOME: /home/runner/work/ysyx-workbench/ysyx-workbench
-      NEMU_HOME: /home/runner/work/ysyx-workbench/ysyx-workbench/nemu
-      AM_HOME: /home/runner/work/ysyx-workbench/ysyx-workbench/abstract-machine
+      YSYX_HOME: ${{ github.workspace  }}
+      NEMU_HOME: ${{ github.workspace  }}/nemu
+      AM_HOME: ${{ github.workspace  }}/abstract-machine
       CROSS_COMPILE: riscv64-elf-
     steps:
       - uses: actions/checkout@v4
@@ -62,22 +62,25 @@ jobs:
 
   litex-test:
     runs-on: ubuntu-latest
+    env:
+      YSYX_HOME: ${{ github.workspace  }}
     steps:
       - uses: actions/checkout@v4
       - name: Setup envirement
+        shell: bash -l {0}
         run: ./setup.sh
       - name: prepare litex
+        shell: bash -l {0}
         run: cd fpga/litex && ./setup.sh
-        env:
-          YSYX_HOME: /home/runner/work/ysyx-workbench/ysyx-workbench/
-      # - name: run litex
-      #   run: cd fpga/litex && source ./venv/bin/activate && timeout -s KILL 360 make run
-      #   env:
-      #     YSYX_HOME: /home/runner/work/ysyx-workbench/ysyx-workbench/
-      # - name: liftoff
-      #   run: cd fpga/litex && source ./venv/bin/activate && pushd $YSYX_HOME/third_party/enjoy-digital/litex && litex_bare_metal_demo --build-path=build/sim/ && popd && timeout -s KILL 360 make liftoff
-      #   env:
-      #     YSYX_HOME: /home/runner/work/ysyx-workbench/ysyx-workbench/
+      - name: patch litex
+        shell: bash -l {0}
+        run: cd $YSYX_HOME/third_party/ && sed -i.bak 's/^#define PRINTF_LEVEL PRINTF_STD$/#define PRINTF_LEVEL PRINTF_FLT/' enjoy-digital/pythondata-software-picolibc/pythondata_software_picolibc/data/newlib/libc/tinystdio/vfiprintf.c
+      - name: run litex
+        shell: bash -l {0}
+        run: cd fpga/litex && source ./venv/bin/activate && timeout 180s make run_ni || true
+      - name: coremark
+        shell: bash -l {0}
+        run: cd fpga/litex && source ./venv/bin/activate && pushd $YSYX_HOME/third_party/enjoy-digital/litex && litex_bare_metal_demo --build-path=build/sim/ && popd && timeout 300s make coremark || true
 
   nemu-test:
     runs-on: ubuntu-latest
@@ -90,6 +93,6 @@ jobs:
       - name: Build NEMU
         run: make -C nemu riscv32_linux_defconfig && make -C nemu
         env:
-          NEMU_HOME: /home/runner/work/ysyx-workbench/ysyx-workbench/nemu
+          NEMU_HOME: ${{ github.workspace  }}/nemu
       - name: Test OpenSBI
-        run: timeout -s KILL 1440 make -C nemu run IMG=../third_party/riscv-software-src/opensbi/build/platform/generic/firmware/fw_payload.bin ARGS="-b -m 10000000 --log ./build/nemu-log.txt" NEMU_HOME=/home/runner/work/ysyx-workbench/ysyx-workbench/nemu
+        run: timeout -s KILL 1440 make -C nemu run IMG=../third_party/riscv-software-src/opensbi/build/platform/generic/firmware/fw_payload.bin ARGS="-b -m 10000000 --log ./build/nemu-log.txt" NEMU_HOME=${{ github.workspace  }}/nemu
