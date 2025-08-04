@@ -7,7 +7,7 @@
  * @param YSYX_M_EXTENSION: M Extension
  */
 `define YSYX_XLEN 32
-`define YSYX_I_EXTENSION 'h1
+// `define YSYX_I_EXTENSION 'h1
 `define YSYX_M_EXTENSION 'h1
 
 `define YSYX_MISA 'h40141105
@@ -29,22 +29,22 @@
  * @param L1D_LEN: L1D Length (Size)
  */
 
-`define YSYX_M_FAST 'h1
+// `define YSYX_M_FAST 'h1
 `define YSYX_L1I_LINE_LEN 1
-`define YSYX_L1I_LEN 6
+`define YSYX_L1I_LEN 1
 
-`define YSYX_PHT_SIZE 128
-`define YSYX_BTB_SIZE 128
-`define YSYX_RSB_SIZE 16
+`define YSYX_PHT_SIZE 2
+`define YSYX_BTB_SIZE 2
+`define YSYX_RSB_SIZE 2
 
-`define YSYX_IQ_SIZE 4
-`define YSYX_ROB_SIZE 4
+`define YSYX_IQ_SIZE 2
+`define YSYX_ROB_SIZE 2
 
-`define YSYX_RS_SIZE 4
-`define YSYX_IOQ_SIZE 4
+`define YSYX_RS_SIZE 2
+`define YSYX_IOQ_SIZE 2
 
-`define YSYX_SQ_SIZE 8
-`define YSYX_L1D_LEN 7
+`define YSYX_SQ_SIZE 2
+`define YSYX_L1D_LEN 1
 
 `ifdef YSYX_I_EXTENSION
 `define YSYX_REG_LEN 5  // 32 registers

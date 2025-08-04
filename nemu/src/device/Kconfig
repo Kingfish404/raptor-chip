@@ -84,7 +84,7 @@ menuconfig HAS_VGA
   default y
 
 if HAS_VGA
-config FB_ADDR
+config FB_ADDR__
   hex "Physical address of the VGA frame buffer"
   default 0x01000000
 

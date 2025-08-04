@@ -47,7 +47,7 @@ CXXFLAGS = -Wall -Werror \
 	-Wno-bool-operation -Wno-implicit-fallthrough -Wno-macro-redefined \
 	-Wno-parentheses-equality -Wno-unused-variable \
 	$(call remove_quote,$(CONFIG_CC_OPT))
-LDFLAGS = -lreadline -ldl -pie
+LDFLAGS = -lreadline -ldl
 
 FILELIST_MK = $(shell find -L ./csrc -name "filelist.mk")
 include $(FILELIST_MK)

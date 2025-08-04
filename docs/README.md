@@ -7,7 +7,7 @@
 
 ## (Micro)Architecture
 
-![](./assets/npc-rv32im-o3.svg)
+![](./assets/npc-rv32.svg)
 
 ## spike device tree
 

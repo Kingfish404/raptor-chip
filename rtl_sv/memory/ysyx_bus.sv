@@ -43,12 +43,12 @@ module ysyx_bus #(
     input        io_master_bvalid,  // reqired
     output       io_master_bready,  // reqired
 
-    ifu_bus_if.slave ifu_bus,
-    lsu_bus_if.slave lsu_bus,
+    l1i_bus_if.slave l1i_bus,
+    l1d_bus_if.slave l1d_bus,
 
     input reset
 );
-  typedef enum logic [3:0] {
+  typedef enum {
     IF_A,
     IF_AS,
     IF_D,
@@ -58,7 +58,7 @@ module ysyx_bus #(
     LS_R,
     LS_R_FLUSHED
   } state_load_t;
-  typedef enum logic [1:0] {
+  typedef enum {
     LS_S_A = 0,
     LS_S_W = 1,
     LS_S_B = 2
@@ -91,11 +91,11 @@ module ysyx_bus #(
     end else begin
       unique case (state_load)
         IF_A: begin
-          if (ifu_bus.arvalid) begin
-            bus_araddr <= ifu_bus.araddr;
+          if (l1i_bus.arvalid) begin
+            bus_araddr <= l1i_bus.araddr;
             state_load <= IF_AS;
-          end else if (lsu_bus.arvalid && !is_clint) begin
-            bus_araddr <= lsu_bus.araddr;
+          end else if (l1d_bus.arvalid && !is_clint) begin
+            bus_araddr <= l1d_bus.araddr;
             state_load <= LS_AS;
           end
         end
@@ -120,14 +120,14 @@ module ysyx_bus #(
           end
         end
         LS_A: begin
-          if (lsu_bus.arvalid && !is_clint) begin
+          if (l1d_bus.arvalid && !is_clint) begin
             if (io_master_arready) begin
               state_load <= LS_R;
             end else begin
               state_load <= LS_AS;
-              bus_araddr <= lsu_bus.araddr;
+              bus_araddr <= l1d_bus.araddr;
             end
-          end else if (is_clint || ifu_bus.arvalid) begin
+          end else if (is_clint || l1i_bus.arvalid) begin
             state_load <= IF_A;
           end
         end
@@ -159,7 +159,7 @@ module ysyx_bus #(
     end else begin
       unique case (state_store)
         LS_S_A: begin
-          if (lsu_bus.awvalid && io_master_awready) begin
+          if (l1d_bus.awvalid && io_master_awready) begin
             state_store <= LS_S_W;
             if (io_master_wready) begin
               write_done <= 1;
@@ -189,15 +189,15 @@ module ysyx_bus #(
   end
 
   // ifu read
-  assign ifu_bus.bus_ready = state_load == IF_A;
-  assign ifu_bus.rready = (state_load == IF_B);
-  assign ifu_bus.rdata = rdata;
+  assign l1i_bus.bus_ready = state_load == IF_A;
+  assign l1i_bus.rready = (state_load == IF_B);
+  assign l1i_bus.rdata = rdata;
 
-  assign is_clint = (lsu_bus.araddr == `YSYX_BUS_RTC_ADDR)
-    || (lsu_bus.araddr == `YSYX_BUS_RTC_ADDR_UP);
-  assign lsu_bus.rdata = is_clint ? clint_rdata : io_rdata;
-  assign lsu_bus.rvalid = (state_load == LS_R && rvalid) || is_clint;
-  assign lsu_bus.wready = io_master_bvalid;
+  assign is_clint = (l1d_bus.araddr == `YSYX_BUS_RTC_ADDR)
+    || (l1d_bus.araddr == `YSYX_BUS_RTC_ADDR_UP);
+  assign l1d_bus.rdata = is_clint ? clint_rdata : io_rdata;
+  assign l1d_bus.rvalid = (state_load == LS_R && rvalid) || is_clint;
+  assign l1d_bus.wready = io_master_bvalid;
 
   // lsu write
   // assign out_lsu_wready = io_master_bvalid;
@@ -209,17 +209,17 @@ module ysyx_bus #(
     (bus_araddr >= 'ha0000000) && (bus_araddr <= 'hc0000000));
   assign io_master_arburst = ifu_sdram_arburst ? 2'b01 : 2'b00;
   assign io_master_arsize = (state_load == IF_A || state_load == IF_AS) ? 3'b010 : (
-           ({3{lsu_bus.rstrb == 8'h1}} & 3'b000) |
-           ({3{lsu_bus.rstrb == 8'h3}} & 3'b001) |
-           ({3{lsu_bus.rstrb == 8'hf}} & 3'b010) |
+           ({3{l1d_bus.rstrb == 8'h1}} & 3'b000) |
+           ({3{l1d_bus.rstrb == 8'h3}} & 3'b001) |
+           ({3{l1d_bus.rstrb == 8'hf}} & 3'b010) |
            (3'b000)
          );
   assign io_master_arlen = ifu_sdram_arburst ? 'h1 : 'h0;
-  assign io_master_araddr = (state_load == LS_A && lsu_bus.arvalid && !is_clint)
-    ? lsu_bus.araddr
+  assign io_master_araddr = (state_load == LS_A && l1d_bus.arvalid && !is_clint)
+    ? l1d_bus.araddr
     : bus_araddr;
   assign io_master_arvalid = ((state_load == IF_AS) || (
-    (state_load == LS_A && lsu_bus.arvalid && !is_clint)
+    (state_load == LS_A && l1d_bus.arvalid && !is_clint)
     || (state_load == LS_AS)));
 
   // logic [XLEN-1:0] io_rdata;
@@ -230,32 +230,32 @@ module ysyx_bus #(
             state_load == LS_R || state_load == LS_R_FLUSHED);
 
   // io lsu write
-  assign io_master_awsize = lsu_bus.awvalid
-    ? (({3{lsu_bus.wstrb == 8'h1}} & 3'b000)
-      |({3{lsu_bus.wstrb == 8'h3}} & 3'b001)
-      |({3{lsu_bus.wstrb == 8'hf}} & 3'b010))
+  assign io_master_awsize = l1d_bus.awvalid
+    ? (({3{l1d_bus.wstrb == 8'h1}} & 3'b000)
+      |({3{l1d_bus.wstrb == 8'h3}} & 3'b001)
+      |({3{l1d_bus.wstrb == 8'hf}} & 3'b010))
     : 3'b000;
-  assign io_master_awaddr = lsu_bus.awvalid ? lsu_bus.awaddr : 'h0;
-  assign io_master_awvalid = (state_store == LS_S_A) && (lsu_bus.awvalid);
+  assign io_master_awaddr = l1d_bus.awvalid ? l1d_bus.awaddr : 'h0;
+  assign io_master_awvalid = (state_store == LS_S_A) && (l1d_bus.awvalid);
 
   logic [1:0] awaddr_lo;
   logic [XLEN-1:0] wdata;
   logic [3:0] wstrb;
   assign awaddr_lo = io_master_awaddr[1:0];
   assign wdata = {
-    ({XLEN{awaddr_lo == 2'b00}} & {{lsu_bus.wdata}})
-    |({XLEN{awaddr_lo == 2'b01}} & {{lsu_bus.wdata[23:0]}, {8'b0}})
-    |({XLEN{awaddr_lo == 2'b10}} & {{lsu_bus.wdata[15:0]}, {16'b0}})
-    |({XLEN{awaddr_lo == 2'b11}} & {{lsu_bus.wdata[7:0]}, {24'b0}})
+    ({XLEN{awaddr_lo == 2'b00}} & {{l1d_bus.wdata}})
+    |({XLEN{awaddr_lo == 2'b01}} & {{l1d_bus.wdata[23:0]}, {8'b0}})
+    |({XLEN{awaddr_lo == 2'b10}} & {{l1d_bus.wdata[15:0]}, {16'b0}})
+    |({XLEN{awaddr_lo == 2'b11}} & {{l1d_bus.wdata[7:0]}, {24'b0}})
   };
   assign io_master_wdata = wdata;
   assign io_master_wvalid = (
-    (((state_store == LS_S_A) && (lsu_bus.awvalid)) || (state_store == LS_S_W))
-    && (lsu_bus.wvalid)
+    (((state_store == LS_S_A) && (l1d_bus.awvalid)) || (state_store == LS_S_W))
+    && (l1d_bus.wvalid)
     && !write_done);
   assign io_master_wlast = io_master_wvalid && io_master_wready;
   assign io_master_wstrb = {wstrb};
-  assign wstrb = {lsu_bus.wstrb[3:0] << awaddr_lo};
+  assign wstrb = {l1d_bus.wstrb[3:0] << awaddr_lo};
 
   assign io_master_bready = (state_store == LS_S_B) || (state_store == LS_S_W);
 
@@ -290,10 +290,10 @@ module ysyx_bus #(
     end
   end
 
-  assign clint_arvalid = (lsu_bus.arvalid && is_clint);
+  assign clint_arvalid = (l1d_bus.arvalid && is_clint);
   ysyx_clint clint (
       .clock(clock),
-      .araddr(lsu_bus.araddr),
+      .araddr(l1d_bus.araddr),
       .arvalid(clint_arvalid),
       .out_arready(clint_arready),
       .out_rdata(clint_rdata),

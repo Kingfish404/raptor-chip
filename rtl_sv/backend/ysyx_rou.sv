@@ -11,9 +11,7 @@ module ysyx_rou #(
     input clock,
     input reset,
 
-    // pipeline
-    input logic flush_pipe,
-    input logic fence_time,
+    wbu_pipe_if.in wbu_bcast,
 
     // <= idu
     idu_pipe_if.in  idu_rou,
@@ -38,10 +36,10 @@ module ysyx_rou #(
     output logic out_valid,
     output logic out_ready
 );
-  typedef enum logic [1:0] {
-    CM = 2'b00,
-    WB = 2'b01,
-    EX = 2'b10
+  typedef enum {
+    CM = 'b00,
+    WB = 'b01,
+    EX = 'b10
   } rob_state_t;
 
   logic [4:0] rs1, rs2;
@@ -138,7 +136,7 @@ module ysyx_rou #(
   assign out_ready = uoq_valid[uoq_head] == 0;
 
   always @(posedge clock) begin
-    if (reset || flush_pipe) begin
+    if (reset || wbu_bcast.flush_pipe) begin
       uoq_head  <= 0;
       uoq_tail  <= 0;
       uoq_valid <= 0;
@@ -264,7 +262,7 @@ module ysyx_rou #(
   assign wb_dest = exu_rou.dest[$clog2(ROB_SIZE)-1:0] - 1;
   assign wb_dest_ioq = exu_ioq_rou.dest[$clog2(ROB_SIZE)-1:0] - 1;
   always @(posedge clock) begin
-    if (reset || flush_pipe || fence_time) begin
+    if (reset || wbu_bcast.flush_pipe || wbu_bcast.fence_time) begin
       rob_head <= 0;
       rob_tail <= 0;
       rob_busy <= 0;
@@ -371,7 +369,7 @@ module ysyx_rou #(
 
   assign head_br_p_fail = rob_npc[rob_head] != rob_pnpc[rob_head];
   assign head_valid = rob_busy[rob_head] && rob_state[rob_head] == WB
-        && (sq_ready || !rob_store[rob_head]) && !flush_pipe;
+        && (sq_ready || !rob_store[rob_head]) && !(wbu_bcast.flush_pipe);
 
   assign rou_wbu.rd = rob_rd[rob_head];
   assign rou_wbu.inst = rob_inst[rob_head];

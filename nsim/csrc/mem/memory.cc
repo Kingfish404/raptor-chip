@@ -130,7 +130,7 @@ extern "C" void pmem_read(word_t raddr, word_t *data)
 {
     // Log("raddr: " FMT_WORD_NO_PREFIX, raddr);
 #ifdef CONFIG_SOFT_MMIO
-    if (raddr == RTC_ADDR + 4)
+    if (raddr == RTC_ADDR_ + 4)
     {
         uint64_t t = get_time();
         rtc_port_base[0] = (uint32_t)(t >> 32);
@@ -138,7 +138,7 @@ extern "C" void pmem_read(word_t raddr, word_t *data)
         difftest_skip_ref();
         return;
     }
-    else if (raddr == RTC_ADDR)
+    else if (raddr == RTC_ADDR_)
     {
         uint64_t t = get_time();
         rtc_port_base[1] = (uint32_t)(t);

@@ -9,9 +9,9 @@ module ysyx_exu #(
 ) (
     input clock,
 
-    // <= idu
+    wbu_pipe_if.in wbu_bcast,
+
     idu_pipe_if.in rou_exu,
-    input flush_pipe,
 
     exu_rou_if.out exu_rou,
     exu_ioq_rou_if.out exu_ioq_rou,
@@ -156,7 +156,7 @@ module ysyx_exu #(
   logic muling;
 
   always @(posedge clock) begin
-    if (reset || flush_pipe) begin
+    if (reset || wbu_bcast.flush_pipe) begin
       ioq_ren <= 0;
       ioq_wen <= 0;
       rs_valid <= 0;

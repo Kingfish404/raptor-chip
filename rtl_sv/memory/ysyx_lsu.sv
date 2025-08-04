@@ -4,15 +4,13 @@
 
 module ysyx_lsu #(
     parameter unsigned SQ_SIZE = `YSYX_SQ_SIZE,
-    parameter bit [`YSYX_L1D_LEN:0] L1D_LEN = `YSYX_L1D_LEN,
-    parameter bit [`YSYX_L1D_LEN:0] L1D_SIZE = 2 ** `YSYX_L1D_LEN,
     parameter bit [7:0] XLEN = `YSYX_XLEN
 ) (
     input clock,
 
-    input flush_pipe,
-    input fence_time,
+    wbu_pipe_if.in wbu_bcast,
 
+    lsu_l1d_if.master lsu_l1d,
     // from exu
     exu_lsu_if.slave exu_lsu,
     exu_ioq_rou_if.in exu_ioq_rou,
@@ -20,12 +18,11 @@ module ysyx_lsu #(
     rou_lsu_if.in rou_lsu,
     output logic out_sq_ready,
 
-    // to bus
-    lsu_bus_if.master lsu_bus,
+    l1d_bus_if.master l1d_bus,
 
     input reset
 );
-  typedef enum logic [1:0] {
+  typedef enum {
     LS_S_V = 0,
     LS_S_R = 1
   } state_store_t;
@@ -91,7 +88,7 @@ module ysyx_lsu #(
       stq_tail  <= 0;
       stq_valid <= 0;
     end else begin
-      if (flush_pipe || fence_time) begin
+      if (wbu_bcast.flush_pipe || wbu_bcast.fence_time) begin
         stq_head  <= 0;
         stq_tail  <= 0;
         stq_valid <= 0;
@@ -153,7 +150,7 @@ module ysyx_lsu #(
     end
   end
 
-  assign raddr_valid = ((0)  //
+  assign raddr_valid = exu_lsu.arvalid && ((0)
       || (raddr >= 'h02000048 && raddr < 'h02000050)  // clint
       || (raddr >= 'h0f000000 && raddr < 'h0f002000)  // sram
       || (raddr >= 'h10000000 && raddr < 'h10001000)  // uart/ns16550
@@ -170,15 +167,15 @@ module ysyx_lsu #(
   //          ({8{ralu == `YSYX_ALU_SH}} & 8'h3) |
   //          ({8{ralu == `YSYX_ALU_SW}} & 8'hf)
   //        );
-  assign lsu_bus.awvalid = wvalid
+  assign l1d_bus.awvalid = wvalid
     && state_store == LS_S_V
-    && !(lsu_bus.arvalid
-      && (lsu_bus.araddr <= waddr + 'h200)
-      && (lsu_bus.araddr >= waddr - 'h200)); // TODO: this fix ysyxsoc ?bug
-  assign lsu_bus.awaddr = waddr;
-  assign lsu_bus.wstrb[3:0] = walu[3:0];
-  assign lsu_bus.wvalid = wvalid && state_store == LS_S_V;
-  assign lsu_bus.wdata = wdata;
+    && !(l1d_bus.arvalid
+      && (l1d_bus.araddr <= waddr + 'h200)
+      && (l1d_bus.araddr >= waddr - 'h200)); // TODO: this fix ysyxsoc ?bug
+  assign l1d_bus.awaddr = waddr;
+  assign l1d_bus.wstrb[3:0] = walu[3:0];
+  assign l1d_bus.wvalid = wvalid && state_store == LS_S_V;
+  assign l1d_bus.wdata = wdata;
 
   assign wready = state_store == LS_S_R;
 
@@ -204,7 +201,7 @@ module ysyx_lsu #(
       unique case (state_store)
         LS_S_V: begin
           if (wvalid) begin
-            if (lsu_bus.wready) begin
+            if (l1d_bus.wready) begin
               state_store <= LS_S_R;
             end
           end
@@ -219,32 +216,14 @@ module ysyx_lsu #(
     end
   end
 
-  ysyx_lsu_l1d #(
-      .XLEN(XLEN),
-      .L1D_LEN(L1D_LEN),
-      .L1D_SIZE(L1D_SIZE)
-  ) l1d_cache (
-      .clock(clock),
+  assign lsu_l1d.raddr = raddr;
+  assign lsu_l1d.ralu = ralu;
+  assign lsu_l1d.rvalid = raddr_valid && !(|sq_valid) && !(|stq_valid);
+  assign rdata_unalign = lsu_l1d.rdata;
+  assign rready = lsu_l1d.rready;
 
-      .flush_pipe (flush_pipe),
-      .invalid_l1d(fence_time),
-
-      // load
-      .raddr(raddr),
-      .ralu(ralu),
-      .rvalid(exu_lsu.arvalid && raddr_valid && !(|sq_valid) && !(|stq_valid)),
-      .io_rdata_o(rdata_unalign),
-      .io_rready_o(rready),
-
-      // write
-      .waddr (waddr),
-      .wvalid(wvalid && lsu_bus.wready),
-      .wdata (wdata),
-      .walu  (walu),
-
-      // <=> bus
-      .lsu_bus(lsu_bus),
-
-      .reset(reset)
-  );
+  assign lsu_l1d.waddr = waddr;
+  assign lsu_l1d.walu = walu;
+  assign lsu_l1d.wvalid = wvalid;
+  assign lsu_l1d.wdata = wdata;
 endmodule

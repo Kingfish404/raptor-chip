@@ -76,7 +76,7 @@ size_t ssb_start, ssb_end;
 
 __attribute__((section(".second_boot"))) void _second_stage_bootloader(void)
 {
-  ssb_start = *((uint32_t *)RTC_ADDR);
+  ssb_start = *((uint32_t *)RTC_ADDR_);
   if ((size_t)_text_start != (size_t)_text_load_start)
   {
     size_t text_size = _text_end - _text_start;
@@ -95,7 +95,7 @@ __attribute__((section(".second_boot"))) void _second_stage_bootloader(void)
     size_t data_size = _data_end - _data_start;
     memcpy(_data_start, _data_load_start, (size_t)data_size);
   }
-  ssb_end = *((uint32_t *)RTC_ADDR);
+  ssb_end = *((uint32_t *)RTC_ADDR_);
   _trm_init();
 }
 
@@ -109,7 +109,7 @@ void _trm_init(void)
       "csrr %0, mvendorid\n\t"
       "csrr %1, marchid\n\t"
       : "=r"(mvendorid), "=r"(marchid) :);
-  size_t ready_time = *((uint32_t *)RTC_ADDR);
+  size_t ready_time = *((uint32_t *)RTC_ADDR_);
   printf("Init: %d|%d, mvendorid: 0x%lx, marchid: %ld\n",
          ready_time, ready_time - ssb_end, mvendorid, marchid);
   asm volatile("fence");

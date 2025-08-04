@@ -7,7 +7,7 @@ module ysyx_idu #(
     input clock,
     input reset,
 
-    input flush_pipe,
+    wbu_pipe_if.in wbu_bcast,
 
     ifu_idu_if.slave ifu_idu,
     idu_pipe_if.out  idu_rou,
@@ -17,7 +17,7 @@ module ysyx_idu #(
     output logic out_valid,
     output logic out_ready
 );
-  typedef enum logic [1:0] {
+  typedef enum {
     IDLE  = 'b00,
     VALID = 'b01
   } state_idu_t;
@@ -51,7 +51,7 @@ module ysyx_idu #(
           end
         end
         VALID: begin
-          if (flush_pipe) begin
+          if (wbu_bcast.flush_pipe) begin
             state_idu <= IDLE;
           end else if (next_ready) begin
             if (prev_valid) begin

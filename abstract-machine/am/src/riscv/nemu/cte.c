@@ -16,10 +16,17 @@ Context *__am_irq_handle(Context *c)
     Event ev = {0};
     switch (c->mcause)
     {
+#if defined(CONFIG_ISA64)
+    case 0x8000000000000007:
+#endif
+    case 0x80000007:
+    {
+      ev.event = EVENT_IRQ_TIMER;
+    }
+    break;
     case 0x8ul: // Environment call from U-mode or VU-mode
     case 0x9ul: // Environment call from S-mode
     case 0xbul: // Environment call from M-mode
-    {
       c->mepc += 4;
       if (c->GPR1 == -1)
       {
@@ -29,16 +36,7 @@ Context *__am_irq_handle(Context *c)
       {
         ev.event = EVENT_SYSCALL;
       }
-    }
-    break;
-#if defined(CONFIG_ISA64)
-    case 0x8000000000000007:
-#endif
-    case 0x80000007:
-    {
-      ev.event = EVENT_IRQ_TIMER;
-    }
-    break;
+      break;
     default:
     {
       ev.event = EVENT_ERROR;

@@ -93,9 +93,12 @@ module ysyx #(
     input reset
 );
   // IFU
+  ifu_l1i_if ifu_l1i ();
   ifu_idu_if ifu_idu ();
-  ifu_bus_if ifu_bus ();
   logic ifu_valid;
+
+  // L1I Cache
+  l1i_bus_if l1i_bus ();
 
   // IDU
   idu_pipe_if idu_rou ();
@@ -122,23 +125,20 @@ module ysyx #(
   logic wbu_valid;
 
   // LSU
-  lsu_bus_if lsu_bus ();
+  lsu_l1d_if lsu_l1d ();
   logic lsu_sq_ready;
+
+  // L1D Cache
+  l1d_bus_if l1d_bus ();
 
   // IFU (Instruction Fetch Unit)
   ysyx_ifu ifu (
       .clock(clock),
 
-      .flush_pipe(wbu_bcast.flush_pipe),
-      .fence_time(wbu_bcast.fence_time),
-
-      // <= wbu
       .wbu_bcast(wbu_bcast),
 
+      .ifu_l1i(ifu_l1i),
       .ifu_idu(ifu_idu),
-      .ifu_bus(ifu_bus),
-
-      .fence_i(wbu_bcast.fence_i),
 
       .prev_valid(wbu_valid),
       .next_ready(idu_ready),
@@ -147,11 +147,20 @@ module ysyx #(
       .reset(reset)
   );
 
+  ysyx_l1i l1i_cache (
+      .clock(clock),
+
+      .ifu_l1i(ifu_l1i),
+      .l1i_bus(l1i_bus),
+
+      .reset(reset)
+  );
+
   // IDU (Instruction Decode Unit)
   ysyx_idu idu (
       .clock(clock),
 
-      .flush_pipe(wbu_bcast.flush_pipe),
+      .wbu_bcast(wbu_bcast),
 
       .ifu_idu(ifu_idu),
       .idu_rou(idu_rou),
@@ -168,8 +177,7 @@ module ysyx #(
   ysyx_rou rou (
       .clock(clock),
 
-      .flush_pipe(wbu_bcast.flush_pipe),
-      .fence_time(wbu_bcast.fence_time),
+      .wbu_bcast(wbu_bcast),
 
       .idu_rou(idu_rou),
       .rou_exu(rou_exu),
@@ -197,9 +205,9 @@ module ysyx #(
   ysyx_exu exu (
       .clock(clock),
 
-      // <= idu
+      .wbu_bcast(wbu_bcast),
+
       .rou_exu(rou_exu),
-      .flush_pipe(wbu_bcast.flush_pipe),
 
       .exu_rou(exu_rou),
       .exu_ioq_rou(exu_ioq_rou),
@@ -242,21 +250,7 @@ module ysyx #(
   ysyx_csr csrs (
       .clock(clock),
 
-      .wen(rou_csr.csr_wen),
-      .valid(rou_csr.valid && wbu_bcast.flush_pipe == 0),
-      .ecall(rou_csr.ecall),
-      .mret(rou_csr.mret),
-      .ebreak(rou_csr.ebreak),
-
-      .trap(rou_csr.trap),
-      .tval(rou_csr.tval),
-
-      .cause(rou_csr.cause),
-
-      .waddr(rou_csr.csr_addr),
-      .wdata(rou_csr.csr_wdata),
-      .pc(rou_csr.pc),
-
+      .rou_csr(rou_csr),
       .exu_csr(exu_csr),
 
       .reset(reset)
@@ -266,15 +260,27 @@ module ysyx #(
   ysyx_lsu lsu (
       .clock(clock),
 
-      .flush_pipe(wbu_bcast.flush_pipe),
-      .fence_time(wbu_bcast.fence_time),
+      .wbu_bcast(wbu_bcast),
+
+      .lsu_l1d(lsu_l1d),
 
       .exu_lsu(exu_lsu),
       .exu_ioq_rou(exu_ioq_rou),
       .rou_lsu(rou_lsu),
       .out_sq_ready(lsu_sq_ready),
 
-      .lsu_bus(lsu_bus),
+      .l1d_bus(l1d_bus),
+
+      .reset(reset)
+  );
+
+  ysyx_l1d l1d_cache (
+      .clock(clock),
+
+      .wbu_bcast(wbu_bcast),
+
+      .lsu_l1d(lsu_l1d),
+      .l1d_bus(l1d_bus),
 
       .reset(reset)
   );
@@ -316,8 +322,8 @@ module ysyx #(
       .io_master_bvalid(io_master_bvalid),
       .io_master_bready(io_master_bready),
 
-      .ifu_bus(ifu_bus),
-      .lsu_bus(lsu_bus),
+      .l1i_bus(l1i_bus),
+      .l1d_bus(l1d_bus),
 
       .reset(reset)
   );

@@ -13,7 +13,7 @@ Candidate ip core name: `raptor-0.1.0-falcon` (`rt-f`).
 
 ## Microarchitecture
 
-![](./docs/assets/npc-rv32im-o3.svg)
+![](./docs/assets/npc-rv32.svg)
 
 **[Core Documentation](./docs/README.md)**
 

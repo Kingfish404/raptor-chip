@@ -24,7 +24,7 @@ jobs:
       - name: Build NEMU-Ref
         shell: bash -l {0}
         run: make -C $NEMU_HOME riscv32_ref_defconfig && make -C $NEMU_HOME
-      - name: cpu-tests of riscv32-ysyxsoc payload result
+      - name: cpu-tests of riscv32-npc payload result
         shell: bash -l {0}
         run: make -C $YSYX_HOME/am-kernels/tests/cpu-tests ARCH=riscv32-npc run FLAGS="-b -n"
       - name: cpu-tests of riscv32e-npc

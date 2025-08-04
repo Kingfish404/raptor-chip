@@ -10,22 +10,8 @@ module ysyx_csr #(
 ) (
     input clock,
 
-    input wen,
-    input valid,
-    input ecall,
-    input mret,
-    input ebreak,
-
-    input [ R_W-1:0] waddr,
-    input [XLEN-1:0] wdata,
-    input [XLEN-1:0] pc,
-
-    input trap,
-    input [XLEN-1:0] tval,
-    input [XLEN-1:0] cause,
-
+    rou_csr_if.out   rou_csr,
     exu_csr_if.slave exu_csr,
-
 
     input reset
 );
@@ -77,109 +63,108 @@ module ysyx_csr #(
   logic [R_W-1:0] raddr;
   assign raddr = exu_csr.raddr;
   assign waddr_reg = csr_t'(
-    ({REG_W{waddr==`YSYX_CSR_SSTATUS}}) & (SSTATUS) |
-    ({REG_W{waddr==`YSYX_CSR_SIE____}}) & (SIE____) |
-    ({REG_W{waddr==`YSYX_CSR_STVEC__}}) & (STVEC__) |
+      ({REG_W{rou_csr.csr_addr==`YSYX_CSR_SSTATUS}}) & (SSTATUS)
+    | ({REG_W{rou_csr.csr_addr==`YSYX_CSR_SIE____}}) & (SIE____)
+    | ({REG_W{rou_csr.csr_addr==`YSYX_CSR_STVEC__}}) & (STVEC__)
 
-    ({REG_W{waddr==`YSYX_CSR_SCOUNTE}}) & (SCOUNTE) |
+    | ({REG_W{rou_csr.csr_addr==`YSYX_CSR_SCOUNTE}}) & (SCOUNTE)
 
-    ({REG_W{waddr==`YSYX_CSR_SSCRATC}}) & (SSCRATC) |
-    ({REG_W{waddr==`YSYX_CSR_SEPC___}}) & (SEPC___) |
-    ({REG_W{waddr==`YSYX_CSR_SCAUSE_}}) & (SCAUSE_) |
-    ({REG_W{waddr==`YSYX_CSR_STVAL__}}) & (STVAL__) |
-    ({REG_W{waddr==`YSYX_CSR_SIP____}}) & (SIP____) |
-    ({REG_W{waddr==`YSYX_CSR_SATP___}}) & (SATP___) |
+    | ({REG_W{rou_csr.csr_addr==`YSYX_CSR_SSCRATC}}) & (SSCRATC)
+    | ({REG_W{rou_csr.csr_addr==`YSYX_CSR_SEPC___}}) & (SEPC___)
+    | ({REG_W{rou_csr.csr_addr==`YSYX_CSR_SCAUSE_}}) & (SCAUSE_)
+    | ({REG_W{rou_csr.csr_addr==`YSYX_CSR_STVAL__}}) & (STVAL__)
+    | ({REG_W{rou_csr.csr_addr==`YSYX_CSR_SIP____}}) & (SIP____)
+    | ({REG_W{rou_csr.csr_addr==`YSYX_CSR_SATP___}}) & (SATP___)
 
-    ({REG_W{waddr==`YSYX_CSR_MSTATUS}}) & (MSTATUS) |
-    ({REG_W{waddr==`YSYX_CSR_MEDELEG}}) & (MEDELEG) |
-    ({REG_W{waddr==`YSYX_CSR_MIDELEG}}) & (MIDELEG) |
-    ({REG_W{waddr==`YSYX_CSR_MIE____}}) & (MIE____) |
-    ({REG_W{waddr==`YSYX_CSR_MTVEC__}}) & (MTVEC__) |
+    | ({REG_W{rou_csr.csr_addr==`YSYX_CSR_MSTATUS}}) & (MSTATUS)
+    | ({REG_W{rou_csr.csr_addr==`YSYX_CSR_MEDELEG}}) & (MEDELEG)
+    | ({REG_W{rou_csr.csr_addr==`YSYX_CSR_MIDELEG}}) & (MIDELEG)
+    | ({REG_W{rou_csr.csr_addr==`YSYX_CSR_MIE____}}) & (MIE____)
+    | ({REG_W{rou_csr.csr_addr==`YSYX_CSR_MTVEC__}}) & (MTVEC__)
 
-    ({REG_W{waddr==`YSYX_CSR_MSCRATCH}}) &(MSCRATCH) |
-    ({REG_W{waddr==`YSYX_CSR_MEPC___}}) & (MEPC___) |
-    ({REG_W{waddr==`YSYX_CSR_MCAUSE_}}) & (MCAUSE_) |
-    ({REG_W{waddr==`YSYX_CSR_MTVAL__}}) & (MTVAL__) |
-    ({REG_W{waddr==`YSYX_CSR_MIP____}}) & (MIP____) |
-    (MNONE__)
+    | ({REG_W{rou_csr.csr_addr==`YSYX_CSR_MSCRATCH}}) &(MSCRATCH)
+    | ({REG_W{rou_csr.csr_addr==`YSYX_CSR_MEPC___}}) & (MEPC___)
+    | ({REG_W{rou_csr.csr_addr==`YSYX_CSR_MCAUSE_}}) & (MCAUSE_)
+    | ({REG_W{rou_csr.csr_addr==`YSYX_CSR_MTVAL__}}) & (MTVAL__)
+    | ({REG_W{rou_csr.csr_addr==`YSYX_CSR_MIP____}}) & (MIP____)
+    | (MNONE__)
   );
   assign raddr_reg = csr_t'(
-    ({REG_W{raddr==`YSYX_CSR_SSTATUS}}) & (SSTATUS) |
-    ({REG_W{raddr==`YSYX_CSR_SIE____}}) & (SIE____) |
-    ({REG_W{raddr==`YSYX_CSR_STVEC__}}) & (STVEC__) |
+      ({REG_W{raddr==`YSYX_CSR_SSTATUS}}) & (SSTATUS)
+    | ({REG_W{raddr==`YSYX_CSR_SIE____}}) & (SIE____)
+    | ({REG_W{raddr==`YSYX_CSR_STVEC__}}) & (STVEC__)
 
-    ({REG_W{raddr==`YSYX_CSR_SCOUNTE}}) & (SCOUNTE) |
+    | ({REG_W{raddr==`YSYX_CSR_SCOUNTE}}) & (SCOUNTE)
 
-    ({REG_W{raddr==`YSYX_CSR_SSCRATC}}) & (SSCRATC) |
-    ({REG_W{raddr==`YSYX_CSR_SEPC___}}) & (SEPC___) |
-    ({REG_W{raddr==`YSYX_CSR_SCAUSE_}}) & (SCAUSE_) |
-    ({REG_W{raddr==`YSYX_CSR_STVAL__}}) & (STVAL__) |
-    ({REG_W{raddr==`YSYX_CSR_SIP____}}) & (SIP____) |
-    ({REG_W{raddr==`YSYX_CSR_SATP___}}) & (SATP___) |
+    | ({REG_W{raddr==`YSYX_CSR_SSCRATC}}) & (SSCRATC)
+    | ({REG_W{raddr==`YSYX_CSR_SEPC___}}) & (SEPC___)
+    | ({REG_W{raddr==`YSYX_CSR_SCAUSE_}}) & (SCAUSE_)
+    | ({REG_W{raddr==`YSYX_CSR_STVAL__}}) & (STVAL__)
+    | ({REG_W{raddr==`YSYX_CSR_SIP____}}) & (SIP____)
+    | ({REG_W{raddr==`YSYX_CSR_SATP___}}) & (SATP___)
 
-    ({REG_W{raddr==`YSYX_CSR_MSTATUS}}) & (MSTATUS) |
-    ({REG_W{raddr==`YSYX_CSR_MISA___}}) & (MISA___) |
-    ({REG_W{raddr==`YSYX_CSR_MEDELEG}}) & (MEDELEG) |
-    ({REG_W{raddr==`YSYX_CSR_MIDELEG}}) & (MIDELEG) |
-    ({REG_W{raddr==`YSYX_CSR_MIE____}}) & (MIE____) |
-    ({REG_W{raddr==`YSYX_CSR_MTVEC__}}) & (MTVEC__) |
+    | ({REG_W{raddr==`YSYX_CSR_MSTATUS}}) & (MSTATUS)
+    | ({REG_W{raddr==`YSYX_CSR_MISA___}}) & (MISA___)
+    | ({REG_W{raddr==`YSYX_CSR_MEDELEG}}) & (MEDELEG)
+    | ({REG_W{raddr==`YSYX_CSR_MIDELEG}}) & (MIDELEG)
+    | ({REG_W{raddr==`YSYX_CSR_MIE____}}) & (MIE____)
+    | ({REG_W{raddr==`YSYX_CSR_MTVEC__}}) & (MTVEC__)
 
-    ({REG_W{raddr==`YSYX_CSR_MSCRATCH}}) & (MSCRATCH) |
-    ({REG_W{raddr==`YSYX_CSR_MEPC___}}) & (MEPC___) |
-    ({REG_W{raddr==`YSYX_CSR_MCAUSE_}}) & (MCAUSE_) |
-    ({REG_W{raddr==`YSYX_CSR_MTVAL__}}) & (MTVAL__) |
-    ({REG_W{raddr==`YSYX_CSR_MIP____}}) & (MIP____) |
+    | ({REG_W{raddr==`YSYX_CSR_MSCRATCH}}) & (MSCRATCH)
+    | ({REG_W{raddr==`YSYX_CSR_MEPC___}}) & (MEPC___)
+    | ({REG_W{raddr==`YSYX_CSR_MCAUSE_}}) & (MCAUSE_)
+    | ({REG_W{raddr==`YSYX_CSR_MTVAL__}}) & (MTVAL__)
+    | ({REG_W{raddr==`YSYX_CSR_MIP____}}) & (MIP____)
 
-    ({REG_W{raddr==`YSYX_CSR_MCYCLE_}}) & (MCYCLE_) |
-    ({REG_W{raddr==`YSYX_CSR_MCYCLEH}}) & (MCYCLEH) |
-    ({REG_W{raddr==`YSYX_CSR_CYCLE__}}) & (MCYCLE_) |
-    ({REG_W{raddr==`YSYX_CSR_TIME___}}) & (TIME___) |
-    ({REG_W{raddr==`YSYX_CSR_TIMEH__}}) & (TIMEH__) |
+    | ({REG_W{raddr==`YSYX_CSR_MCYCLE_}}) & (MCYCLE_)
+    | ({REG_W{raddr==`YSYX_CSR_MCYCLEH}}) & (MCYCLEH)
+    | ({REG_W{raddr==`YSYX_CSR_CYCLE__}}) & (MCYCLE_)
+    | ({REG_W{raddr==`YSYX_CSR_TIME___}}) & (TIME___)
+    | ({REG_W{raddr==`YSYX_CSR_TIMEH__}}) & (TIMEH__)
 
-    ({REG_W{raddr==`YSYX_CSR_MVENDORID}}) & (MVENDORID) |
-    ({REG_W{raddr==`YSYX_CSR_MARCHID__}}) & (MARCHID) |
-    ({REG_W{raddr==`YSYX_CSR_IMPID____}}) & (IMPID__) |
-    ({REG_W{raddr==`YSYX_CSR_MHARTID__}}) & (MHARTID) |
-    (MNONE__)
+    | ({REG_W{raddr==`YSYX_CSR_MVENDORID}}) & (MVENDORID)
+    | ({REG_W{raddr==`YSYX_CSR_MARCHID__}}) & (MARCHID)
+    | ({REG_W{raddr==`YSYX_CSR_IMPID____}}) & (IMPID__)
+    | ({REG_W{raddr==`YSYX_CSR_MHARTID__}}) & (MHARTID)
+    | (MNONE__)
   );
 
   assign exu_csr.rdata = (
-    ({XLEN{raddr_reg == SSTATUS}}) & (csr[SSTATUS]) |
-    ({XLEN{raddr_reg == SIE____}}) & (csr[SIE____]) |
-    ({XLEN{raddr_reg == STVEC__}}) & (csr[STVEC__]) |
+      ({XLEN{raddr_reg == SSTATUS}}) & (csr[SSTATUS])
+    | ({XLEN{raddr_reg == SIE____}}) & (csr[SIE____])
+    | ({XLEN{raddr_reg == STVEC__}}) & (csr[STVEC__])
 
-    ({XLEN{raddr_reg == SCOUNTE}}) & (csr[SCOUNTE]) |
+    | ({XLEN{raddr_reg == SCOUNTE}}) & (csr[SCOUNTE])
 
-    ({XLEN{raddr_reg == SSCRATC}}) & (csr[SSCRATC]) |
-    ({XLEN{raddr_reg == SEPC___}}) & (csr[SEPC___]) |
-    ({XLEN{raddr_reg == SCAUSE_}}) & (csr[SCAUSE_]) |
-    ({XLEN{raddr_reg == STVAL__}}) & (csr[STVAL__]) |
-    ({XLEN{raddr_reg == SIP____}}) & (csr[SIP____]) |
-    ({XLEN{raddr_reg == SATP___}}) & (csr[SATP___]) |
+    | ({XLEN{raddr_reg == SSCRATC}}) & (csr[SSCRATC])
+    | ({XLEN{raddr_reg == SEPC___}}) & (csr[SEPC___])
+    | ({XLEN{raddr_reg == SCAUSE_}}) & (csr[SCAUSE_])
+    | ({XLEN{raddr_reg == STVAL__}}) & (csr[STVAL__])
+    | ({XLEN{raddr_reg == SIP____}}) & (csr[SIP____])
+    | ({XLEN{raddr_reg == SATP___}}) & (csr[SATP___])
 
-    ({XLEN{raddr_reg == MSTATUS}}) & (csr[MSTATUS]) |
-    ({XLEN{raddr_reg == MISA___}}) & (`YSYX_MISA) |
-    ({XLEN{raddr_reg == MEDELEG}}) & (csr[MEDELEG]) |
-    ({XLEN{raddr_reg == MIDELEG}}) & (csr[MIDELEG]) |
-    ({XLEN{raddr_reg == MIE____}}) & (csr[MIE____]) |
-    ({XLEN{raddr_reg == MTVEC__}}) & (csr[MTVEC__]) |
+    | ({XLEN{raddr_reg == MSTATUS}}) & (csr[MSTATUS])
+    | ({XLEN{raddr_reg == MISA___}}) & (`YSYX_MISA)
+    | ({XLEN{raddr_reg == MEDELEG}}) & (csr[MEDELEG])
+    | ({XLEN{raddr_reg == MIDELEG}}) & (csr[MIDELEG])
+    | ({XLEN{raddr_reg == MIE____}}) & (csr[MIE____])
+    | ({XLEN{raddr_reg == MTVEC__}}) & (csr[MTVEC__])
 
-    ({XLEN{raddr_reg == MSCRATCH}}) & (csr[MSCRATCH]) |
-    ({XLEN{raddr_reg == MEPC___}}) & (csr[MEPC___]) |
-    ({XLEN{raddr_reg == MCAUSE_}}) & (csr[MCAUSE_]) |
-    ({XLEN{raddr_reg == MTVAL__}}) & (csr[MTVAL__]) |
-    ({XLEN{raddr_reg == MIP____}}) & (csr[MIP____]) |
+    | ({XLEN{raddr_reg == MSCRATCH}}) & (csr[MSCRATCH])
+    | ({XLEN{raddr_reg == MEPC___}}) & (csr[MEPC___])
+    | ({XLEN{raddr_reg == MCAUSE_}}) & (csr[MCAUSE_])
+    | ({XLEN{raddr_reg == MTVAL__}}) & (csr[MTVAL__])
+    | ({XLEN{raddr_reg == MIP____}}) & (csr[MIP____])
 
-    ({XLEN{raddr_reg == MCYCLE_}}) & (csr[MCYCLE_]) |
-    ({XLEN{raddr_reg == MCYCLEH}}) & (csr[MCYCLEH]) |
-    ({XLEN{raddr_reg == TIME___}}) & (csr[TIME___]) |
-    ({XLEN{raddr_reg == TIMEH__}}) & (csr[TIMEH__]) |
+    | ({XLEN{raddr_reg == MCYCLE_}}) & (csr[MCYCLE_])
+    | ({XLEN{raddr_reg == MCYCLEH}}) & (csr[MCYCLEH])
+    | ({XLEN{raddr_reg == TIME___}}) & (csr[TIME___])
+    | ({XLEN{raddr_reg == TIMEH__}}) & (csr[TIMEH__])
 
-    ({XLEN{raddr_reg == MVENDORID}}) & ('h79737978) |
-    ({XLEN{raddr_reg == MARCHID}}) & ('h015fde77) |
-    ({XLEN{raddr_reg == IMPID__}}) & ('h0) |
-    ({XLEN{raddr_reg == MHARTID}}) & ('h0) |
-    (0)
+    | ({XLEN{raddr_reg == MVENDORID}}) & ('h79737978)
+    | ({XLEN{raddr_reg == MARCHID}}) & ('h015fde77)
+    | ({XLEN{raddr_reg == IMPID__}}) & ('h0)
+    | ({XLEN{raddr_reg == MHARTID}}) & ('h0)
   );
 
   assign exu_csr.mepc = csr[MEPC___];
@@ -198,36 +183,36 @@ module ysyx_csr #(
       csr[TIMEH__] <= RESET_VAL;
     end else begin
       csr[TIME___] <= csr[TIME___] + 1;
-      if (csr[TIME___] == 'hffffffff) begin
+      if (csr[TIME___] == ~'h0) begin
         csr[TIMEH__] <= csr[TIMEH__] + 1;
       end
       csr[MCYCLE_] <= csr[MCYCLE_] + 1;
-      if (csr[MCYCLE_] == 'hffffffff) begin
+      if (csr[MCYCLE_] == ~'h0) begin
         csr[MCYCLEH] <= csr[MCYCLEH] + 1;
       end
-      if (valid) begin
+      if (rou_csr.valid) begin
         if (raddr_reg == TIME___
-        || raddr_reg == TIMEH__
-        || raddr_reg == MCYCLE_
-        || raddr_reg == MCYCLEH
+         || raddr_reg == TIMEH__
+         || raddr_reg == MCYCLE_
+         || raddr_reg == MCYCLEH
         ) begin
           `YSYX_DPI_C_NPC_DIFFTEST_SKIP_REF
         end
-        if (wen) begin
+        if (rou_csr.csr_wen) begin
           if (waddr_reg == MEDELEG) begin
-            csr[waddr_reg] <= (wdata & 'h1ffff);
+            csr[waddr_reg] <= (rou_csr.csr_wdata & 'h1ffff);
           end else begin
-            csr[waddr_reg] <= wdata;
+            csr[waddr_reg] <= (rou_csr.csr_wdata);
           end
         end
-        if (ecall) begin
+        if (rou_csr.ecall) begin
           csr[MCAUSE_] <= priv_mode == `YSYX_PRIV_M ? 'hb : priv_mode == `YSYX_PRIV_S ? 'h9 : 'h8;
           csr[MSTATUS][`YSYX_CSR_MSTATUS_MPP_] <= priv_mode;
           csr[MSTATUS][`YSYX_CSR_MSTATUS_MPIE] <= mstatus_mie;
           csr[MSTATUS][`YSYX_CSR_MSTATUS_MIE_] <= 1'b0;
-          csr[MEPC___] <= pc;
+          csr[MEPC___] <= rou_csr.pc;
           csr[MTVAL__] <= 0;
-        end else if (mret) begin
+        end else if (rou_csr.mret) begin
           priv_mode <= csr[MSTATUS][`YSYX_CSR_MSTATUS_MPP_];
           csr[MSTATUS] <= {
             csr[MSTATUS][XLEN-1:13],
@@ -238,20 +223,20 @@ module ysyx_csr #(
             csr[MSTATUS][`YSYX_CSR_MSTATUS_MPIE],
             csr[MSTATUS][2:0]
           };
-        end else if (ebreak) begin
+        end else if (rou_csr.ebreak) begin
           csr[MCAUSE_] <= 'h3;
           csr[MSTATUS][`YSYX_CSR_MSTATUS_MPP_] <= priv_mode;
           csr[MSTATUS][`YSYX_CSR_MSTATUS_MPIE] <= mstatus_mie;
           csr[MSTATUS][`YSYX_CSR_MSTATUS_MIE_] <= 1'b0;
-          csr[MEPC___] <= pc;
-          csr[MTVAL__] <= pc;
-        end else if (trap) begin
-          csr[MCAUSE_] <= cause;
+          csr[MEPC___] <= rou_csr.pc;
+          csr[MTVAL__] <= rou_csr.pc;
+        end else if (rou_csr.trap) begin
+          csr[MCAUSE_] <= rou_csr.cause;
           csr[MSTATUS][`YSYX_CSR_MSTATUS_MPP_] <= priv_mode;
           csr[MSTATUS][`YSYX_CSR_MSTATUS_MPIE] <= mstatus_mie;
           csr[MSTATUS][`YSYX_CSR_MSTATUS_MIE_] <= 1'b0;
-          csr[MEPC___] <= pc;
-          csr[MTVAL__] <= tval;
+          csr[MEPC___] <= rou_csr.pc;
+          csr[MTVAL__] <= rou_csr.tval;
         end
       end
     end

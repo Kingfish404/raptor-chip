@@ -2,35 +2,21 @@
 `include "ysyx_if.svh"
 `include "ysyx_soc.svh"
 
-module ysyx_lsu_l1d #(
+module ysyx_l1d #(
     parameter bit [`YSYX_L1D_LEN:0] L1D_LEN = `YSYX_L1D_LEN,
     parameter bit [`YSYX_L1D_LEN:0] L1D_SIZE = 2 ** `YSYX_L1D_LEN,
     parameter bit [7:0] XLEN = `YSYX_XLEN
 ) (
     input clock,
 
-    input flush_pipe,
-    input invalid_l1d,
+    wbu_pipe_if.in wbu_bcast,
 
-    // read
-    input logic [XLEN-1:0] raddr,
-    input logic rvalid,
-    input [4:0] ralu,
-    output logic [XLEN-1:0] io_rdata_o,
-    output logic io_rready_o,
-
-    // write
-    input logic [XLEN-1:0] waddr,
-    input logic wvalid,
-    input logic [XLEN-1:0] wdata,
-    input logic [4:0] walu,
-
-    // to bus
-    lsu_bus_if.master lsu_bus,
+    lsu_l1d_if.slave  lsu_l1d,
+    l1d_bus_if.master l1d_bus,
 
     input reset
 );
-  typedef enum logic [1:0] {
+  typedef enum {
     IF_A = 0,
     IF_L = 1,
     IF_V = 2
@@ -38,34 +24,38 @@ module ysyx_lsu_l1d #(
 
   state_load_t state_load;
 
+  logic invalid_l1d;
+
   logic [XLEN-1:0] l1d_buffer;
 
   logic [XLEN-1:0] l1d_raddr;
   logic [4:0] l1d_walu;
-  logic [32-L1D_LEN-2-1:0] l1d_addr_tag;
+  logic [32-{{3'b0}, L1D_LEN}-2-1:0] l1d_addr_tag;
   logic [L1D_LEN-1:0] l1d_addr_idx;
 
   logic [XLEN-1:0] l1d[L1D_SIZE];
   logic [L1D_SIZE-1:0] l1d_valid;
-  logic [32-L1D_LEN-2-1:0] l1d_tag[L1D_SIZE];
+  logic [32-{{3'b0}, L1D_LEN}-2-1:0] l1d_tag[L1D_SIZE];
   logic [7:0] rstrb;
 
-  logic [32-L1D_LEN-2-1:0] addr_tag;
+  logic [32-{{3'b0}, L1D_LEN}-2-1:0] addr_tag;
   logic [L1D_LEN-1:0] addr_idx;
   logic hit;
   logic [XLEN-1:0] l1d_data;
   logic cacheable_r;
   logic cacheable_w;
 
-  logic [32-L1D_LEN-2-1:0] waddr_tag;
+  logic [32-{{3'b0}, L1D_LEN}-2-1:0] waddr_tag;
   logic [L1D_LEN-1:0] waddr_idx;
   logic hit_w;
 
   logic l1d_update;
   logic [XLEN-1:0] l1d_data_u;
   logic l1d_valid_u;
-  logic [32-L1D_LEN-2-1:0] l1d_tag_u;
+  logic [32-{{3'b0}, L1D_LEN}-2-1:0] l1d_tag_u;
   logic [L1D_LEN-1:0] l1d_idx;
+
+  assign invalid_l1d = wbu_bcast.fence_time;
 
   assign rstrb = (
       ({8{l1d_walu == `YSYX_ALU_LB__}} & 8'h1)
@@ -75,8 +65,8 @@ module ysyx_lsu_l1d #(
     | ({8{l1d_walu == `YSYX_ALU_LW__}} & 8'hf)
     );
 
-  assign addr_tag = raddr[XLEN-1:L1D_LEN+2];
-  assign addr_idx = raddr[L1D_LEN+2-1:0+2];
+  assign addr_tag = lsu_l1d.raddr[XLEN-1:L1D_LEN+2];
+  assign addr_idx = lsu_l1d.raddr[L1D_LEN+2-1:0+2];
 
   assign l1d_addr_tag = l1d_raddr[XLEN-1:L1D_LEN+2];
   assign l1d_addr_idx = l1d_raddr[L1D_LEN+2-1:0+2];
@@ -84,11 +74,8 @@ module ysyx_lsu_l1d #(
   assign hit = (l1d_valid[addr_idx] == 1'b1) && (l1d_tag[addr_idx] == addr_tag);
   assign l1d_data = l1d[addr_idx];
 
-  assign io_rdata_o = hit ? l1d_data : lsu_bus.rdata;
-  assign io_rready_o = rvalid && (hit || (lsu_bus.rvalid) && l1d_raddr == raddr);
-
-  assign waddr_tag = waddr[XLEN-1:L1D_LEN+2];
-  assign waddr_idx = waddr[L1D_LEN+2-1:0+2];
+  assign waddr_tag = lsu_l1d.waddr[XLEN-1:L1D_LEN+2];
+  assign waddr_idx = lsu_l1d.waddr[L1D_LEN+2-1:0+2];
   assign hit_w = (l1d_valid[waddr_idx] == 1'b1) && (l1d_tag[waddr_idx] == waddr_tag);
 
   assign cacheable_r = ((0)  //
@@ -98,15 +85,18 @@ module ysyx_lsu_l1d #(
       || (l1d_raddr >= 'ha0000000 && l1d_raddr < 'hc0000000)  // sdram
       );
   assign cacheable_w = ((0)  //
-      || (waddr >= 'h20000000 && waddr < 'h20400000)  // mrom
-      || (waddr >= 'h30000000 && waddr < 'h40000000)  // flash
-      || (waddr >= 'h80000000 && waddr < 'h88000000)  // psram
-      || (waddr >= 'ha0000000 && waddr < 'hc0000000)  // sdram
+      || (lsu_l1d.waddr >= 'h20000000 && lsu_l1d.waddr < 'h20400000)  // mrom
+      || (lsu_l1d.waddr >= 'h30000000 && lsu_l1d.waddr < 'h40000000)  // flash
+      || (lsu_l1d.waddr >= 'h80000000 && lsu_l1d.waddr < 'h88000000)  // psram
+      || (lsu_l1d.waddr >= 'ha0000000 && lsu_l1d.waddr < 'hc0000000)  // sdram
       );
 
-  assign lsu_bus.arvalid = (state_load == IF_L);
-  assign lsu_bus.araddr = cacheable_r ? l1d_raddr & ~'h3 : l1d_raddr;
-  assign lsu_bus.rstrb = cacheable_r ? 8'hf : rstrb;
+  assign l1d_bus.arvalid = (state_load == IF_L);
+  assign l1d_bus.araddr = cacheable_r ? l1d_raddr & ~'h3 : l1d_raddr;
+  assign l1d_bus.rstrb = cacheable_r ? 8'hf : rstrb;
+
+  assign lsu_l1d.rdata = hit ? l1d_data : l1d_bus.rdata;
+  assign lsu_l1d.rready = lsu_l1d.rvalid && (hit || (l1d_bus.rvalid) && l1d_raddr == lsu_l1d.raddr);
 
   always @(posedge clock) begin
     if (reset) begin
@@ -116,21 +106,21 @@ module ysyx_lsu_l1d #(
     end else begin
       unique case (state_load)
         IF_A: begin
-          if (flush_pipe) begin
-          end else if (rvalid) begin
+          if (wbu_bcast.flush_pipe) begin
+          end else if (lsu_l1d.rvalid) begin
             if (!hit) begin
               state_load <= IF_L;
-              l1d_raddr  <= raddr;
-              l1d_walu   <= ralu;
+              l1d_raddr  <= lsu_l1d.raddr;
+              l1d_walu   <= lsu_l1d.ralu;
             end
           end else begin
             l1d_raddr <= '0;
           end
         end
         IF_L: begin
-          if (lsu_bus.rvalid) begin
+          if (l1d_bus.rvalid) begin
             state_load <= IF_V;
-            l1d_buffer <= lsu_bus.rdata;
+            l1d_buffer <= l1d_bus.rdata;
           end
         end
         IF_V: begin
@@ -143,10 +133,10 @@ module ysyx_lsu_l1d #(
         end
       endcase
 
-      if (wvalid && cacheable_w) begin
-        if (walu == `YSYX_SW_WSTRB) begin
+      if (lsu_l1d.wvalid && l1d_bus.wready && cacheable_w) begin
+        if (lsu_l1d.walu == `YSYX_SW_WSTRB) begin
           l1d_update <= 1'b1;
-          l1d_data_u <= wdata;
+          l1d_data_u <= lsu_l1d.wdata;
           l1d_valid_u <= 1'b1;
           l1d_tag_u <= waddr_tag;
           l1d_idx <= waddr_idx;
@@ -159,10 +149,10 @@ module ysyx_lsu_l1d #(
           end
         end
       end else if (state_load == IF_L) begin
-        if (rvalid && lsu_bus.rvalid) begin
+        if (lsu_l1d.rvalid && l1d_bus.rvalid) begin
           if (cacheable_r) begin
             l1d_update <= 1'b1;
-            l1d_data_u <= lsu_bus.rdata;
+            l1d_data_u <= l1d_bus.rdata;
             l1d_valid_u <= 1'b1;
             l1d_tag_u <= l1d_addr_tag;
             l1d_idx <= l1d_addr_idx;

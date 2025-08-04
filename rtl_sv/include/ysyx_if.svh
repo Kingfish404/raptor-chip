@@ -3,6 +3,21 @@
 `include "ysyx.svh"
 `include "ysyx_pipe_if.svh"
 
+interface ifu_l1i_if #(
+    parameter int XLEN = `YSYX_XLEN,
+    parameter int L1I_LEN = `YSYX_L1I_LEN,
+    parameter int L1I_LINE_LEN = `YSYX_L1I_LINE_LEN
+);
+  logic [XLEN-1:0] pc;
+  logic [31:0] inst;
+  logic valid;
+
+  logic invalid;
+
+  modport master(output pc, invalid, input inst, valid);
+  modport slave(input pc, invalid, output inst, valid);
+endinterface
+
 interface ifu_idu_if #(
     parameter int XLEN = `YSYX_XLEN
 );
@@ -16,7 +31,7 @@ interface ifu_idu_if #(
   modport slave(input inst, pc, pnpc, valid);
 endinterface
 
-interface ifu_bus_if #(
+interface l1i_bus_if #(
     parameter int XLEN = `YSYX_XLEN
 );
   logic arvalid;
@@ -218,7 +233,31 @@ interface rou_wbu_if #(
   );
 endinterface
 
-interface lsu_bus_if #(
+interface lsu_l1d_if #(
+    parameter int XLEN = `YSYX_XLEN,
+    parameter int L1D_LEN = `YSYX_L1D_LEN
+);
+  logic [XLEN-1:0] raddr;
+  logic [4:0] ralu;
+  logic rvalid;
+
+  logic [XLEN-1:0] rdata;
+  logic rready;
+
+  logic [XLEN-1:0] waddr;
+  logic [4:0] walu;
+  logic wvalid;
+  logic [XLEN-1:0] wdata;
+
+  modport master(
+      output raddr, ralu, rvalid,
+      input rdata, rready,
+      output waddr, walu, wvalid, wdata
+  );
+  modport slave(input raddr, ralu, rvalid, output rdata, rready, input waddr, walu, wvalid, wdata);
+endinterface
+
+interface l1d_bus_if #(
     parameter int XLEN = `YSYX_XLEN
 );
   // load

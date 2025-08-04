@@ -8,7 +8,7 @@ void __am_gpu_init() {
   int i;
   int w = inl(VGACTL_ADDR) >> 16;
   int h = inl(VGACTL_ADDR) & 0xffff;
-  uint32_t *fb = (uint32_t *)(uintptr_t)FB_ADDR;
+  uint32_t *fb = (uint32_t *)(uintptr_t)FB_ADDR__;
   for (i = 0; i < w * h; i ++) fb[i] = i;
   outl(SYNC_ADDR, 1);
 }
@@ -26,7 +26,7 @@ void __am_gpu_fbdraw(AM_GPU_FBDRAW_T *ctl) {
   uint32_t *pixels = ctl->pixels;
   int H = inl(VGACTL_ADDR) & 0xffff;
   int W = inl(VGACTL_ADDR) >> 16;
-  uint32_t *fb = (uint32_t *)(uintptr_t)FB_ADDR;
+  uint32_t *fb = (uint32_t *)(uintptr_t)FB_ADDR__;
   for (int j = 0; j < h && y + j < H; j ++) {
     for (int i = 0; i < w && x + i < W; i ++) {
       fb[(y + j) * W + (x + i)] = pixels[i];

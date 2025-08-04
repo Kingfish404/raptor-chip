@@ -185,16 +185,16 @@ module ysyx_npc_soc #(
 
     input reset
 );
-  typedef enum logic [2:0] {
-    WIDLE   = 3'b000,
-    WAREADY = 3'b001,
-    WDWRITE = 3'b010,
-    WDREADY = 3'b011,
-    WFINISH = 3'b100
+  typedef enum {
+    WIDLE   = 'b000,
+    WAREADY = 'b001,
+    WDWRITE = 'b010,
+    WDREADY = 'b011,
+    WFINISH = 'b100
   } state_w_t;
-  typedef enum logic [2:0] {
-    RIDLE  = 3'b000,
-    RVALID = 3'b101
+  typedef enum {
+    RIDLE  = 'b000,
+    RVALID = 'b101
   } state_r_t;
 
   logic [XLEN-1:0] awaddr_buf;
