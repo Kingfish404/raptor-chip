@@ -16,12 +16,11 @@ module ysyx_l1i #(
 
     input reset
 );
-  typedef enum {
+  typedef enum logic [2:0] {
     IDLE = 'b000,
     RD_0 = 'b001,
     WAIT = 'b010,
     RD_1 = 'b011,
-    WB_0 = 'b100,
     NULL = 'b111
   } l1i_state_t;
 
@@ -75,7 +74,7 @@ module ysyx_l1i #(
     : (l1i_addr | 'h4);
   assign l1i_bus.arvalid = (ifu_sdram_arburst
     ? (l1i_state == RD_0)
-    : (l1i_state != IDLE && l1i_state != WAIT && l1i_state != WB_0));
+    : (l1i_state != IDLE && l1i_state != WAIT));
 
   assign hit = !invalid_l1i && !wait_invalid
     && (l1i_valid[addr_idx] == 1'b1)
@@ -114,9 +113,9 @@ module ysyx_l1i #(
           end
         end
         RD_0:
-        if (l1i_bus.rready) begin
-          if (ifu_sdram_arburst) begin
-            l1i_state <= RD_1;
+        if (l1i_bus.rvalid) begin
+          if (ifu_sdram_arburst && l1i_bus.rlast) begin
+            l1i_state <= IDLE;
           end else begin
             l1i_state <= WAIT;
           end
@@ -125,12 +124,13 @@ module ysyx_l1i #(
           l1i_state <= RD_1;
         end
         RD_1: begin
-          if (l1i_bus.rready) begin
-            l1i_state <= WB_0;
+          if (l1i_bus.rvalid) begin
+            if (ifu_sdram_arburst && l1i_bus.rlast) begin
+              l1i_state <= IDLE;
+            end else begin
+              l1i_state <= IDLE;
+            end
           end
-        end
-        WB_0: begin
-          l1i_state <= IDLE;
         end
         default begin
           l1i_state <= IDLE;
@@ -151,7 +151,7 @@ module ysyx_l1i #(
           wait_invalid <= 1;
         end
       end
-      if (l1i_bus.rready) begin
+      if (l1i_bus.rvalid) begin
         l1i[idx_fetch][l1i_state==RD_0?0 : 1] <= l1i_bus.rdata;
         l1i_tag[idx_fetch][l1i_state==RD_0?0 : 1] <= tag_fetch;
         if (l1i_state == RD_1) begin

@@ -37,12 +37,13 @@ interface l1i_bus_if #(
   logic arvalid;
   logic [XLEN-1:0] araddr;
 
-  logic bus_ready;
-  logic rready;
   logic [XLEN-1:0] rdata;
+  logic rvalid;
+  logic rlast;
 
-  modport master(output arvalid, araddr, input bus_ready, rready, rdata);
-  modport slave(input arvalid, araddr, output bus_ready, rready, rdata);
+  logic bus_ready;
+  modport master(output arvalid, araddr, input bus_ready, rdata, rvalid, rlast);
+  modport slave(input arvalid, araddr, output bus_ready, rdata, rvalid, rlast);
 endinterface
 
 interface rou_reg_if #(

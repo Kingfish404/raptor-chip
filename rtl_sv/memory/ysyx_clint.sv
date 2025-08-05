@@ -10,7 +10,6 @@ module ysyx_clint #(
 
     input [XLEN-1:0] araddr,
     input arvalid,
-    output out_arready,
 
     output [XLEN-1:0] out_rdata,
     input reset
@@ -20,7 +19,6 @@ module ysyx_clint #(
     ({XLEN{araddr == `YSYX_BUS_RTC_ADDR}} & mtime[31:0]) |
     ({XLEN{araddr == `YSYX_BUS_RTC_ADDR_UP}} & mtime[63:32])
   );
-  assign out_arready = 1;
   always @(posedge clock) begin
     if (reset) begin
       mtime <= 0;

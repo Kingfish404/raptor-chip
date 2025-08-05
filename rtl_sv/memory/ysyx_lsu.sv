@@ -11,10 +11,10 @@ module ysyx_lsu #(
     wbu_pipe_if.in wbu_bcast,
 
     lsu_l1d_if.master lsu_l1d,
-    // from exu
-    exu_lsu_if.slave exu_lsu,
+
+    exu_lsu_if.slave  exu_lsu,
     exu_ioq_rou_if.in exu_ioq_rou,
-    // from rou
+
     rou_lsu_if.in rou_lsu,
     output logic out_sq_ready,
 

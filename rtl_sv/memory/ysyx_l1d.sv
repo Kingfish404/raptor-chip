@@ -16,7 +16,7 @@ module ysyx_l1d #(
 
     input reset
 );
-  typedef enum {
+  typedef enum logic [1:0] {
     IF_A = 0,
     IF_L = 1,
     IF_V = 2
