@@ -197,6 +197,7 @@ module ysyx_npc_soc #(
     RVALID = 'b101
   } state_r_t;
 
+  logic [3:0] rid;
   logic [XLEN-1:0] awaddr_buf;
   logic [31:0] mem_rdata_buf;
   state_r_t state_r;
@@ -204,13 +205,14 @@ module ysyx_npc_soc #(
 
   // read transaction
   assign out_arready = (state_r == RIDLE);
-  assign out_rdata   = mem_rdata_buf;
-  assign out_rvalid  = (state_r == RVALID);
+  assign out_rdata = mem_rdata_buf;
+  assign out_rvalid = (state_r == RVALID);
+  assign out_rid = rid;
 
   // write transaction
   assign out_awready = (state_w == WIDLE);
-  assign out_wready  = ((state_w == WIDLE || state_w == WDREADY || state_w == WDWRITE) && wvalid);
-  assign out_bvalid  = (state_w == WFINISH);
+  assign out_wready = ((state_w == WIDLE || state_w == WDREADY || state_w == WDWRITE) && wvalid);
+  assign out_bvalid = (state_w == WFINISH);
   logic [7:0] wmask;
   assign wmask = (
     ({{8{awsize == 3'b000}} & 8'h1 }) |
@@ -292,6 +294,7 @@ module ysyx_npc_soc #(
           // wait for arvalid
           if (arvalid) begin
             state_r <= RVALID;
+            rid <= arid;
             `YSYX_DPI_C_PMEM_READ((araddr), mem_rdata_buf);
           end
         end

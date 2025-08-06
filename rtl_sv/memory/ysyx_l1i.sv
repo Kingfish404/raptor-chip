@@ -4,6 +4,7 @@
 
 module ysyx_l1i #(
     parameter bit [7:0] XLEN = `YSYX_XLEN,
+    parameter unsigned IFQ_SIZE = 2,
     parameter bit [`YSYX_L1I_LEN:0] L1I_LINE_LEN = `YSYX_L1I_LINE_LEN,
     parameter bit [`YSYX_L1I_LEN:0] L1I_LINE_SIZE = 2 ** L1I_LINE_LEN,
     parameter bit [`YSYX_L1I_LEN:0] L1I_LEN = `YSYX_L1I_LEN,
@@ -21,6 +22,7 @@ module ysyx_l1i #(
     RD_0 = 'b001,
     WAIT = 'b010,
     RD_1 = 'b011,
+    FINA = 'b100,
     NULL = 'b111
   } l1i_state_t;
 
@@ -31,6 +33,7 @@ module ysyx_l1i #(
   logic [15:0] inst_lo, inst_hi;
   logic [XLEN-1:0] pc_ifu_next;
   logic [XLEN-1:0] l1i_addr;
+  logic [XLEN-1:0] fetch_addr;
   logic [32-1:0] l1i[L1I_SIZE][L1I_LINE_SIZE];
   logic [L1I_SIZE-1:0] l1i_valid;
   logic [32-{{3'b0}, L1I_LEN+L1I_LINE_LEN}-2-1:0] l1i_tag[L1I_SIZE][L1I_LINE_SIZE];
@@ -53,6 +56,12 @@ module ysyx_l1i #(
   logic wait_invalid;
   logic [XLEN-1:0] reverse_pc_ifu;
 
+
+  logic [$clog2(IFQ_SIZE)-1:0] ifq_head;
+  logic [$clog2(IFQ_SIZE)-1:0] ifq_tail;
+  logic [IFQ_SIZE-1:0] ifq_valid;
+  logic [XLEN-1:0] ifq_raddr[IFQ_SIZE];
+
   assign pc_ifu = ifu_l1i.pc;
   assign invalid_l1i = ifu_l1i.invalid;
   assign pc_ifu_next = pc_ifu + 2;
@@ -65,16 +74,15 @@ module ysyx_l1i #(
   assign addr_idx_next = pc_ifu_next[L1I_LEN+L1I_LINE_LEN+2-1:L1I_LINE_LEN+2];
   assign addr_offset_next = pc_ifu_next[L1I_LINE_LEN+2-1:2];
 
-  assign tag_fetch = l1i_addr[XLEN-1:L1I_LEN+L1I_LINE_LEN+2];
-  assign offset_fetch = l1i_addr[L1I_LINE_LEN+2-1:2];
-  assign idx_fetch = l1i_addr[L1I_LEN+L1I_LINE_LEN+2-1:L1I_LINE_LEN+2];
+  assign fetch_addr = ifq_raddr[ifq_tail];
+  assign tag_fetch = fetch_addr[XLEN-1:L1I_LEN+L1I_LINE_LEN+2];
+  assign offset_fetch = fetch_addr[L1I_LINE_LEN+2-1:2];
+  assign idx_fetch = fetch_addr[L1I_LEN+L1I_LINE_LEN+2-1:L1I_LINE_LEN+2];
 
-  assign l1i_bus.araddr = (l1i_state == IDLE || l1i_state == RD_0)
-    ? (l1i_addr & ~'h4)
-    : (l1i_addr | 'h4);
+  assign l1i_bus.araddr = (l1i_state == RD_0) ? (l1i_addr & ~'h4) : (l1i_addr | 'h4);
   assign l1i_bus.arvalid = (ifu_sdram_arburst
     ? (l1i_state == RD_0)
-    : (l1i_state != IDLE && l1i_state != WAIT));
+    : (l1i_state == RD_0 || l1i_state == RD_1));
 
   assign hit = !invalid_l1i && !wait_invalid
     && (l1i_valid[addr_idx] == 1'b1)
@@ -99,6 +107,9 @@ module ysyx_l1i #(
   always @(posedge clock) begin
     if (reset) begin
       l1i_state <= IDLE;
+      ifq_head  <= 0;
+      ifq_tail  <= 0;
+      ifq_valid <= 0;
     end else begin
       unique case (l1i_state)
         IDLE: begin
@@ -112,24 +123,27 @@ module ysyx_l1i #(
             end
           end
         end
-        RD_0:
-        if (l1i_bus.rvalid) begin
-          if (ifu_sdram_arburst && l1i_bus.rlast) begin
-            l1i_state <= IDLE;
-          end else begin
-            l1i_state <= WAIT;
+        RD_0: begin
+          if (l1i_bus.rready) begin
+            l1i_state <= RD_1;
+
+            ifq_raddr[ifq_head] <= l1i_bus.araddr;
+            ifq_valid[ifq_head] <= 1'b1;
+            ifq_head <= ifq_head + 1;
           end
         end
-        WAIT: begin
-          l1i_state <= RD_1;
-        end
         RD_1: begin
-          if (l1i_bus.rvalid) begin
-            if (ifu_sdram_arburst && l1i_bus.rlast) begin
-              l1i_state <= IDLE;
-            end else begin
-              l1i_state <= IDLE;
-            end
+          if (ifu_sdram_arburst || l1i_bus.rready) begin
+            l1i_state <= FINA;
+
+            ifq_raddr[ifq_head] <= l1i_bus.araddr;
+            ifq_valid[ifq_head] <= 1'b1;
+            ifq_head <= ifq_head + 1;
+          end
+        end
+        FINA: begin
+          if (ifq_valid == 0) begin
+            l1i_state <= IDLE;
           end
         end
         default begin
@@ -152,11 +166,13 @@ module ysyx_l1i #(
         end
       end
       if (l1i_bus.rvalid) begin
-        l1i[idx_fetch][l1i_state==RD_0?0 : 1] <= l1i_bus.rdata;
-        l1i_tag[idx_fetch][l1i_state==RD_0?0 : 1] <= tag_fetch;
-        if (l1i_state == RD_1) begin
+        l1i[idx_fetch][fetch_addr[2]] <= l1i_bus.rdata;
+        l1i_tag[idx_fetch][fetch_addr[2]] <= tag_fetch;
+        if (ifq_valid[0] == 0) begin
           l1i_valid[idx_fetch] <= 1'b1;
         end
+        ifq_valid[ifq_tail] <= 0;
+        ifq_tail <= ifq_tail + 1;
       end
     end
   end

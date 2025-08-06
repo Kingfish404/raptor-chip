@@ -9,10 +9,10 @@ interface ifu_l1i_if #(
     parameter int L1I_LINE_LEN = `YSYX_L1I_LINE_LEN
 );
   logic [XLEN-1:0] pc;
-  logic [31:0] inst;
-  logic valid;
-
   logic invalid;
+  logic [31:0] inst;
+
+  logic valid;
 
   modport master(output pc, invalid, input inst, valid);
   modport slave(input pc, invalid, output inst, valid);
@@ -29,21 +29,6 @@ interface ifu_idu_if #(
 
   modport master(output inst, pc, pnpc, valid);
   modport slave(input inst, pc, pnpc, valid);
-endinterface
-
-interface l1i_bus_if #(
-    parameter int XLEN = `YSYX_XLEN
-);
-  logic arvalid;
-  logic [XLEN-1:0] araddr;
-
-  logic [XLEN-1:0] rdata;
-  logic rvalid;
-  logic rlast;
-
-  logic bus_ready;
-  modport master(output arvalid, araddr, input bus_ready, rdata, rvalid, rlast);
-  modport slave(input arvalid, araddr, output bus_ready, rdata, rvalid, rlast);
 endinterface
 
 interface rou_reg_if #(
@@ -124,7 +109,7 @@ endinterface
 interface exu_lsu_if #(
     parameter int XLEN = `YSYX_XLEN
 );
-  logic arvalid;
+  logic rvalid;
   logic [XLEN-1:0] raddr;
   logic [4:0] ralu;
   logic [XLEN-1:0] pc;
@@ -132,8 +117,8 @@ interface exu_lsu_if #(
   logic [XLEN-1:0] rdata;
   logic rready;
 
-  modport master(output arvalid, raddr, ralu, pc, input rdata, rready);
-  modport slave(input arvalid, raddr, ralu, pc, output rdata, rready);
+  modport master(output rvalid, raddr, ralu, pc, input rdata, rready);
+  modport slave(input rvalid, raddr, ralu, pc, output rdata, rready);
 endinterface
 
 interface exu_csr_if #(
@@ -258,6 +243,22 @@ interface lsu_l1d_if #(
   modport slave(input raddr, ralu, rvalid, output rdata, rready, input waddr, walu, wvalid, wdata);
 endinterface
 
+interface l1i_bus_if #(
+    parameter int XLEN = `YSYX_XLEN
+);
+  // load
+  logic arvalid;
+  logic [XLEN-1:0] araddr;
+  logic rready;
+
+  logic [XLEN-1:0] rdata;
+  logic rvalid;
+  logic rlast;
+
+  modport master(output arvalid, araddr, input rready, rdata, rvalid, rlast);
+  modport slave(input arvalid, araddr, output rready, rdata, rvalid, rlast);
+endinterface
+
 interface l1d_bus_if #(
     parameter int XLEN = `YSYX_XLEN
 );
@@ -265,25 +266,35 @@ interface l1d_bus_if #(
   logic arvalid;
   logic [XLEN-1:0] araddr;
   logic [7:0] rstrb;
-  logic rvalid;
+  logic rready;
+
   logic [XLEN-1:0] rdata;
+  logic rvalid;
+  logic rlast;
+
   // store
   logic awvalid;
   logic [XLEN-1:0] awaddr;
-  logic [7:0] wstrb;
   logic wvalid;
   logic [XLEN-1:0] wdata;
+  logic [7:0] wstrb;
   logic wready;
 
   modport master(
-      output araddr, arvalid, rstrb,
-      output awaddr, awvalid, wdata, wstrb, wvalid,
-      input rdata, rvalid, wready
+      output arvalid, araddr, rstrb,
+      input rready,
+      input rdata, rvalid, rlast,
+
+      output awvalid, awaddr, wvalid, wdata, wstrb,
+      input wready
   );
   modport slave(
-      input araddr, arvalid, rstrb,
-      input awaddr, awvalid, wdata, wstrb, wvalid,
-      output rdata, rvalid, wready
+      input arvalid, araddr, rstrb,
+      output rready,
+      output rdata, rvalid, rlast,
+
+      input awvalid, awaddr, wvalid, wdata, wstrb,
+      output wready
   );
 endinterface
 

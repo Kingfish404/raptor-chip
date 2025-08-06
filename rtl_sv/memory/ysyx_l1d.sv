@@ -17,16 +17,11 @@ module ysyx_l1d #(
     input reset
 );
   typedef enum logic [1:0] {
-    IF_A = 0,
-    IF_L = 1,
-    IF_V = 2
+    LD_A = 0,
+    LD_D = 1
   } state_load_t;
 
   state_load_t state_load;
-
-  logic invalid_l1d;
-
-  logic [XLEN-1:0] l1d_buffer;
 
   logic [XLEN-1:0] l1d_raddr;
   logic [4:0] l1d_walu;
@@ -55,8 +50,6 @@ module ysyx_l1d #(
   logic [32-{{3'b0}, L1D_LEN}-2-1:0] l1d_tag_u;
   logic [L1D_LEN-1:0] l1d_idx;
 
-  assign invalid_l1d = wbu_bcast.fence_time;
-
   assign rstrb = (
       ({8{l1d_walu == `YSYX_ALU_LB__}} & 8'h1)
     | ({8{l1d_walu == `YSYX_ALU_LBU_}} & 8'h1)
@@ -79,10 +72,10 @@ module ysyx_l1d #(
   assign hit_w = (l1d_valid[waddr_idx] == 1'b1) && (l1d_tag[waddr_idx] == waddr_tag);
 
   assign cacheable_r = ((0)  //
-      || (l1d_raddr >= 'h20000000 && l1d_raddr < 'h20400000)  // mrom
-      || (l1d_raddr >= 'h30000000 && l1d_raddr < 'h40000000)  // flash
-      || (l1d_raddr >= 'h80000000 && l1d_raddr < 'h88000000)  // psram
-      || (l1d_raddr >= 'ha0000000 && l1d_raddr < 'hc0000000)  // sdram
+      || (lsu_l1d.raddr >= 'h20000000 && lsu_l1d.raddr < 'h20400000)  // mrom
+      || (lsu_l1d.raddr >= 'h30000000 && lsu_l1d.raddr < 'h40000000)  // flash
+      || (lsu_l1d.raddr >= 'h80000000 && lsu_l1d.raddr < 'h88000000)  // psram
+      || (lsu_l1d.raddr >= 'ha0000000 && lsu_l1d.raddr < 'hc0000000)  // sdram
       );
   assign cacheable_w = ((0)  //
       || (lsu_l1d.waddr >= 'h20000000 && lsu_l1d.waddr < 'h20400000)  // mrom
@@ -91,8 +84,8 @@ module ysyx_l1d #(
       || (lsu_l1d.waddr >= 'ha0000000 && lsu_l1d.waddr < 'hc0000000)  // sdram
       );
 
-  assign l1d_bus.arvalid = (state_load == IF_L);
-  assign l1d_bus.araddr = cacheable_r ? l1d_raddr & ~'h3 : l1d_raddr;
+  assign l1d_bus.arvalid = (state_load == LD_A) && lsu_l1d.rvalid && !hit && !wbu_bcast.flush_pipe;
+  assign l1d_bus.araddr = cacheable_r ? lsu_l1d.raddr & ~'h3 : lsu_l1d.raddr;
   assign l1d_bus.rstrb = cacheable_r ? 8'hf : rstrb;
 
   assign lsu_l1d.rdata = hit ? l1d_data : l1d_bus.rdata;
@@ -100,16 +93,15 @@ module ysyx_l1d #(
 
   always @(posedge clock) begin
     if (reset) begin
-      state_load <= IF_A;
+      state_load <= LD_A;
       l1d_valid  <= 0;
       l1d_update <= 0;
     end else begin
       unique case (state_load)
-        IF_A: begin
-          if (wbu_bcast.flush_pipe) begin
-          end else if (lsu_l1d.rvalid) begin
-            if (!hit) begin
-              state_load <= IF_L;
+        LD_A: begin
+          if (lsu_l1d.rvalid && !hit && !wbu_bcast.flush_pipe) begin
+            if (l1d_bus.rready) begin
+              state_load <= LD_D;
               l1d_raddr  <= lsu_l1d.raddr;
               l1d_walu   <= lsu_l1d.ralu;
             end
@@ -117,18 +109,13 @@ module ysyx_l1d #(
             l1d_raddr <= '0;
           end
         end
-        IF_L: begin
+        LD_D: begin
           if (l1d_bus.rvalid) begin
-            state_load <= IF_V;
-            l1d_buffer <= l1d_bus.rdata;
+            state_load <= LD_A;
           end
         end
-        IF_V: begin
-          state_load <= IF_A;
-          l1d_raddr  <= '0;
-        end
         default: begin
-          state_load <= IF_A;
+          state_load <= LD_A;
           l1d_raddr  <= '0;
         end
       endcase
@@ -148,7 +135,7 @@ module ysyx_l1d #(
             l1d_idx <= waddr_idx;
           end
         end
-      end else if (state_load == IF_L) begin
+      end else if (state_load == LD_D) begin
         if (lsu_l1d.rvalid && l1d_bus.rvalid) begin
           if (cacheable_r) begin
             l1d_update <= 1'b1;
@@ -160,7 +147,7 @@ module ysyx_l1d #(
         end
       end
 
-      if (invalid_l1d) begin
+      if (wbu_bcast.fence_time) begin
         l1d_valid <= 0;
       end else if (l1d_update) begin
         l1d[l1d_idx] <= l1d_data_u;

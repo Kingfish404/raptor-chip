@@ -132,7 +132,7 @@ module ysyx_exu #(
     end
   end
 
-  assign exu_lsu.arvalid = (ioq_valid[ioq_head]
+  assign exu_lsu.rvalid = (ioq_valid[ioq_head]
     && ioq_ren[ioq_head]
     && ioq_qj[ioq_head] == 0 && ioq_qk[ioq_head] == 0);
   assign exu_lsu.raddr = ioq_atom[ioq_head]

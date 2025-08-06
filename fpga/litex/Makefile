@@ -49,3 +49,11 @@ coremark: $(LITEX_PATH)/README.md
 		&& python3 ./litex/tools/litex_sim.py --cpu-type=ysyx \
 			--non-interactive \
 			--ram-init=coremark.bin --integrated-main-ram-size=0x10000
+
+coremark_wave: $(LITEX_PATH)/README.md
+	cd $(LITEX_PATH) \
+		&& python3 ./litex/soc/software/coremark/coremark.py \
+			--build-path=build/sim/ \
+		&& python3 ./litex/tools/litex_sim.py --cpu-type=ysyx \
+			--non-interactive --gtkwave-savefile --trace --trace-fst \
+			--ram-init=coremark.bin --integrated-main-ram-size=0x10000

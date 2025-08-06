@@ -48,18 +48,22 @@ module ysyx_bus #(
 
     input reset
 );
-  typedef enum logic [3:0] {
+  typedef enum logic [2:0] {
     LD_A,
-    IF_AS,
-    IF_D,
-    LS_AS,
-    LS_D
+    LD_AS,
+    LD_D
   } state_load_t;
   typedef enum logic [1:0] {
     LS_S_A = 0,
     LS_S_W = 1,
     LS_S_B = 2
   } state_store_t;
+  typedef enum logic [3:0] {
+    L1I  = 1,
+    L1D  = 2,
+    TLBI = 3,
+    TLBD = 4
+  } state_lds_t;  // load source
 
   logic write_done;
 
@@ -70,14 +74,37 @@ module ysyx_bus #(
   logic [XLEN-1:0] clint_rdata;
   logic [XLEN-1:0] bus_araddr;
   logic arburst;
+  logic [2:0] arsize;
 
   assign axi_arid = arid;
-
   assign axi_awburst = 0;
   assign axi_awlen = 0;
   assign axi_awid = awid;
 
   state_load_t state_load;
+  state_lds_t  state_load_source;
+  state_lds_t  load_bridge;
+  assign load_bridge = l1d_bus.arvalid ? L1D : L1I;
+  // ifu read
+  assign l1i_bus.rready = (state_load == LD_A && load_bridge == L1I);
+  assign l1i_bus.rdata = axi_rdata;
+  assign l1i_bus.rvalid = (axi_rid == L1I) && axi_rvalid;
+  assign l1i_bus.rlast = (axi_rid == L1I) && axi_rlast;
+
+  // lsu read
+  assign l1d_bus.rready = (state_load == LD_A && load_bridge == L1D);
+  assign is_clint = (l1d_bus.araddr == `YSYX_BUS_RTC_ADDR)
+    || (l1d_bus.araddr == `YSYX_BUS_RTC_ADDR_UP);
+  assign l1d_bus.rdata = is_clint ? clint_rdata : axi_rdata;
+  assign l1d_bus.rvalid = ((axi_rid == L1D) && axi_rvalid) || is_clint;
+
+  assign axi_arburst = arburst ? 2'b01 : 2'b00;
+  assign axi_arsize = arsize;
+  assign axi_arlen = arburst ? 'h1 : 'h0;
+  assign axi_araddr = bus_araddr;
+  assign axi_arvalid = (state_load == LD_AS);
+  assign axi_rready = 1;
+
   always @(posedge clock) begin
     if (reset) begin
       state_load <= LD_A;
@@ -87,44 +114,41 @@ module ysyx_bus #(
           if (l1d_bus.arvalid) begin
             if (is_clint) begin
             end else begin
-              state_load <= LS_AS;
+              state_load <= LD_AS;
               bus_araddr <= l1d_bus.araddr;
-              arid <= 'h1;
+              arid <= L1D;
+              state_load_source <= L1D;
+              arsize = (
+                ({3{l1d_bus.rstrb == 8'h1}} & 3'b000) |
+                ({3{l1d_bus.rstrb == 8'h3}} & 3'b001) |
+                ({3{l1d_bus.rstrb == 8'hf}} & 3'b010) |
+                (3'b000)
+              );
             end
           end else if (l1i_bus.arvalid) begin
             bus_araddr <= l1i_bus.araddr;
-            state_load <= IF_AS;
+            state_load <= LD_AS;
             arburst <= ((`YSYX_I_SDRAM_ARBURST)
               && (l1i_bus.araddr >= 'ha0000000)
               && (l1i_bus.araddr <= 'hc0000000));
-            arid <= 'h2;
+            arid <= L1I;
+            arsize <= 3'b010;
+            state_load_source <= L1I;
           end
         end
-        IF_AS: begin
+        LD_AS: begin
           if (axi_arready) begin
-            state_load <= IF_D;
+            state_load <= LD_D;
+            arburst <= 0;
+            bus_araddr <= 'h0;
           end
         end
-        IF_D: begin
-          if (axi_rvalid) begin
-            if (arburst) begin
-              if (axi_rlast) begin
-                state_load <= LD_A;
-                arburst <= 0;
-              end
-            end else begin
-              state_load <= LD_A;
-            end
-          end
-        end
-        LS_AS: begin
-          if (axi_arready) begin
-            state_load <= LS_D;
-          end
-        end
-        LS_D: begin
+        LD_D: begin
+          // TODO: remove while preventing ysyxSoC rresp==3
           if (axi_rvalid) begin
             state_load <= LD_A;
+            arburst <= 0;
+            bus_araddr <= 'h0;
           end
         end
         default: state_load <= LD_A;
@@ -132,7 +156,41 @@ module ysyx_bus #(
     end
   end
 
+  assign clint_arvalid = (l1d_bus.arvalid && is_clint);
+  ysyx_clint clint (
+      .clock(clock),
+      .araddr(l1d_bus.araddr),
+      .arvalid(clint_arvalid),
+      .out_rdata(clint_rdata),
+      .reset(reset)
+  );
+
   state_store_t state_store;
+  // lsu write
+  assign l1d_bus.wready = axi_bvalid;
+
+  assign axi_awsize = l1d_bus.awvalid
+    ? (({3{l1d_bus.wstrb == 8'h1}} & 3'b000)
+      |({3{l1d_bus.wstrb == 8'h3}} & 3'b001)
+      |({3{l1d_bus.wstrb == 8'hf}} & 3'b010))
+    : 3'b000;
+  assign axi_awaddr = l1d_bus.awvalid ? l1d_bus.awaddr : 'h0;
+  assign axi_awvalid = (state_store == LS_S_A) && (l1d_bus.awvalid);
+
+  logic [1:0] awaddr_lo;
+  assign awaddr_lo = axi_awaddr[1:0];
+  assign axi_wdata = {
+    (({XLEN{awaddr_lo == 2'b00}} & {{l1d_bus.wdata}})
+    |({XLEN{awaddr_lo == 2'b01}} & {{l1d_bus.wdata[23:0]}, {8'b0}})
+    |({XLEN{awaddr_lo == 2'b10}} & {{l1d_bus.wdata[15:0]}, {16'b0}})
+    |({XLEN{awaddr_lo == 2'b11}} & {{l1d_bus.wdata[7:0]}, {24'b0}}))
+  };
+  assign axi_wvalid = ((l1d_bus.wvalid) && !write_done);
+  assign axi_wlast = axi_wvalid && axi_wready;
+  assign axi_wstrb = {l1d_bus.wstrb[3:0] << awaddr_lo};
+
+  assign axi_bready = (state_store == LS_S_W);
+
   always @(posedge clock) begin
     if (reset) begin
       state_store <= LS_S_A;
@@ -162,64 +220,6 @@ module ysyx_bus #(
       endcase
     end
   end
-
-  // ifu read
-  assign l1i_bus.bus_ready = state_load == LD_A;
-  assign l1i_bus.rdata = axi_rdata;
-  assign l1i_bus.rvalid = (state_load == IF_D) && axi_rvalid;
-  assign l1i_bus.rlast = (state_load == IF_D) && axi_rlast;
-
-  // lsu read
-  assign is_clint = (l1d_bus.araddr == `YSYX_BUS_RTC_ADDR)
-    || (l1d_bus.araddr == `YSYX_BUS_RTC_ADDR_UP);
-  assign l1d_bus.rdata = is_clint ? clint_rdata : axi_rdata;
-  assign l1d_bus.rvalid = (state_load == LS_D && axi_rvalid) || is_clint;
-  assign l1d_bus.wready = axi_bvalid;
-
-  assign axi_arburst = arburst ? 2'b01 : 2'b00;
-  assign axi_arsize = (state_load == LD_A || state_load == IF_AS) ? 3'b010 : (
-           ({3{l1d_bus.rstrb == 8'h1}} & 3'b000) |
-           ({3{l1d_bus.rstrb == 8'h3}} & 3'b001) |
-           ({3{l1d_bus.rstrb == 8'hf}} & 3'b010) |
-           (3'b000)
-         );
-  assign axi_arlen = arburst ? 'h1 : 'h0;
-  assign axi_araddr = bus_araddr;
-  assign axi_arvalid = (state_load == IF_AS) || (state_load == LS_AS);
-
-  assign axi_rready = (state_load == IF_D || state_load == LS_D);
-
-  // lsu write
-  assign axi_awsize = l1d_bus.awvalid
-    ? (({3{l1d_bus.wstrb == 8'h1}} & 3'b000)
-      |({3{l1d_bus.wstrb == 8'h3}} & 3'b001)
-      |({3{l1d_bus.wstrb == 8'hf}} & 3'b010))
-    : 3'b000;
-  assign axi_awaddr = l1d_bus.awvalid ? l1d_bus.awaddr : 'h0;
-  assign axi_awvalid = (state_store == LS_S_A) && (l1d_bus.awvalid);
-
-  logic [1:0] awaddr_lo;
-  assign awaddr_lo = axi_awaddr[1:0];
-  assign axi_wdata = {
-    (({XLEN{awaddr_lo == 2'b00}} & {{l1d_bus.wdata}})
-    |({XLEN{awaddr_lo == 2'b01}} & {{l1d_bus.wdata[23:0]}, {8'b0}})
-    |({XLEN{awaddr_lo == 2'b10}} & {{l1d_bus.wdata[15:0]}, {16'b0}})
-    |({XLEN{awaddr_lo == 2'b11}} & {{l1d_bus.wdata[7:0]}, {24'b0}}))
-  };
-  assign axi_wvalid = ((l1d_bus.wvalid) && !write_done);
-  assign axi_wlast = axi_wvalid && axi_wready;
-  assign axi_wstrb = {l1d_bus.wstrb[3:0] << awaddr_lo};
-
-  assign axi_bready = (state_store == LS_S_W);
-
-  assign clint_arvalid = (l1d_bus.arvalid && is_clint);
-  ysyx_clint clint (
-      .clock(clock),
-      .araddr(l1d_bus.araddr),
-      .arvalid(clint_arvalid),
-      .out_rdata(clint_rdata),
-      .reset(reset)
-  );
 
   always @(posedge clock) begin
     `YSYX_ASSERT(axi_rresp == 2'b00, "rresp == 2'b00");

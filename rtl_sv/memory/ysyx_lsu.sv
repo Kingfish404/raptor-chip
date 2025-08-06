@@ -150,7 +150,7 @@ module ysyx_lsu #(
     end
   end
 
-  assign raddr_valid = exu_lsu.arvalid && ((0)
+  assign raddr_valid = exu_lsu.rvalid && ((0)
       || (raddr >= 'h02000048 && raddr < 'h02000050)  // clint
       || (raddr >= 'h0f000000 && raddr < 'h0f002000)  // sram
       || (raddr >= 'h10000000 && raddr < 'h10001000)  // uart/ns16550
@@ -167,11 +167,7 @@ module ysyx_lsu #(
   //          ({8{ralu == `YSYX_ALU_SH}} & 8'h3) |
   //          ({8{ralu == `YSYX_ALU_SW}} & 8'hf)
   //        );
-  assign l1d_bus.awvalid = wvalid
-    && state_store == LS_S_V
-    && !(l1d_bus.arvalid
-      && (l1d_bus.araddr <= waddr + 'h200)
-      && (l1d_bus.araddr >= waddr - 'h200)); // TODO: this fix ysyxsoc ?bug
+  assign l1d_bus.awvalid = wvalid && state_store == LS_S_V;
   assign l1d_bus.awaddr = waddr;
   assign l1d_bus.wstrb[3:0] = walu[3:0];
   assign l1d_bus.wvalid = wvalid && state_store == LS_S_V;
