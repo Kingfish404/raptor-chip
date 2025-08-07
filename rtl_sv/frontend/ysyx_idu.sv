@@ -44,7 +44,8 @@ module ysyx_idu #(
     end else begin
       unique case (state_idu)
         IDLE: begin
-          if (prev_valid) begin
+          if (wbu_bcast.flush_pipe) begin
+          end else if (prev_valid) begin
             state_idu <= VALID;
           end else begin
             state_idu <= IDLE;

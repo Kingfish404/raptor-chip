@@ -70,10 +70,9 @@ endinterface
 interface wbu_pipe_if #(
     parameter int XLEN = `YSYX_XLEN
 );
-  logic [XLEN-1:0] pc;
-  logic [XLEN-1:0] npc;
+  logic [XLEN-1:0] rpc;
+  logic [XLEN-1:0] cpc;
 
-  logic sys_retire;
   logic jen;
   logic ben;
 
@@ -82,8 +81,8 @@ interface wbu_pipe_if #(
 
   logic flush_pipe;
 
-  modport in(input pc, npc, sys_retire, jen, ben, fence_time, fence_i, flush_pipe);
-  modport out(output pc, npc, sys_retire, jen, ben, fence_time, fence_i, flush_pipe);
+  modport in(input rpc, cpc, jen, ben, fence_time, fence_i, flush_pipe);
+  modport out(output rpc, cpc, jen, ben, fence_time, fence_i, flush_pipe);
 endinterface
 
 `endif

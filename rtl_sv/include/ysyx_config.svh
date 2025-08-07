@@ -33,9 +33,9 @@
 `define YSYX_L1I_LINE_LEN 1
 `define YSYX_L1I_LEN 6
 
-`define YSYX_PHT_SIZE 128
-`define YSYX_BTB_SIZE 128
-`define YSYX_RSB_SIZE 16
+`define YSYX_PHT_SIZE 32
+`define YSYX_BTB_SIZE 32
+`define YSYX_RSB_SIZE 8
 
 `define YSYX_IQ_SIZE 4
 `define YSYX_ROB_SIZE 4

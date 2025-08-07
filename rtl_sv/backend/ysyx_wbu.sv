@@ -17,19 +17,17 @@ module ysyx_wbu #(
 );
   logic valid;
   logic [31:0] inst_wbu;
-  logic [XLEN-1:0] pc_wbu, npc_wbu;
+  logic [XLEN-1:0] rpc_wbu, npc_wbu;
 
-  logic sys_retire;
   logic jen_wbu, ben_wbu;
   logic fence_time, fence_i;
   logic flush_pipe;
 
   assign out_valid = valid;
 
-  assign wbu_bcast.pc = pc_wbu;
-  assign wbu_bcast.npc = npc_wbu;
+  assign wbu_bcast.rpc = rpc_wbu;  // retire pc
+  assign wbu_bcast.cpc = npc_wbu;  // correct pc
 
-  assign wbu_bcast.sys_retire = sys_retire;
   assign wbu_bcast.jen = jen_wbu;
   assign wbu_bcast.ben = ben_wbu;
 
@@ -49,10 +47,9 @@ module ysyx_wbu #(
         if (rou_wbu.ebreak) begin
           `YSYX_DPI_C_NPC_EXU_EBREAK
         end
-        pc_wbu <= rou_wbu.pc;
+        rpc_wbu <= rou_wbu.pc;
         npc_wbu <= rou_wbu.npc;
 
-        sys_retire <= rou_wbu.sys_retire;
         jen_wbu <= rou_wbu.jen;
         ben_wbu <= rou_wbu.ben;
 
@@ -65,7 +62,6 @@ module ysyx_wbu #(
       end else begin
         valid <= 0;
 
-        sys_retire <= 0;
         jen_wbu <= 0;
         ben_wbu <= 0;
 

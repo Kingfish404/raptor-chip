@@ -39,7 +39,7 @@ void perf_sample_per_cycle()
     pmu.bpu_j_fail += br_predict_fail && j ? 1 : 0;
   }
   bool ifu_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, ifu__DOT__valid));
-  bool ifu_sys_hazard = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, ifu__DOT__ifu_sys_hazard));
+  bool ifu_hazard = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, ifu__DOT__ifu_hazard));
 
   bool idu_ready = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, idu_ready));
 
@@ -63,7 +63,7 @@ void perf_sample_per_cycle()
   {
     pmu.ifu_stall_cycle++;
   }
-  pmu.ifu_sys_hazard_cycle += ifu_sys_hazard ? 1 : 0;
+  pmu.ifu_sys_hazard_cycle += ifu_hazard ? 1 : 0;
   pmu.rou_hazard_cycle += !rou_ready ? 1 : 0;
   if (exu_ooo_valid && !exu_ooo_valid_found)
   {

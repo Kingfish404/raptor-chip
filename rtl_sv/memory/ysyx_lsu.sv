@@ -63,14 +63,13 @@ module ysyx_lsu #(
   logic [$clog2(SQ_SIZE)-1:0] store_in_sq_idx;
 
   logic wvalid;
-  logic [XLEN-1:0] waddr;
   logic [XLEN-1:0] wdata;
+  logic [XLEN-1:0] waddr;
   logic [4:0] walu;
-  logic wready;
 
   assign raddr = exu_lsu.raddr;
   assign ralu = exu_lsu.ralu;
-  assign sq_ready = sq_valid[sq_tail] == 0 && !store_in_sq;
+  assign sq_ready = sq_valid[sq_tail] == 0;
   assign out_sq_ready = sq_ready;
 
   assign wvalid = sq_valid[sq_head];
@@ -118,7 +117,7 @@ module ysyx_lsu #(
         sq_tail <= sq_tail + 1;
         `YSYX_DPI_C_NPC_DIFFTEST_MEM_DIFF(rou_lsu.sq_waddr, rou_lsu.sq_wdata, {{3'b0}, rou_lsu.alu})
       end
-      if (wready && sq_valid[sq_head]) begin
+      if (state_store == LS_S_R && sq_valid[sq_head]) begin
         // Store Finished
         sq_valid[sq_head] <= 0;
 
@@ -173,8 +172,7 @@ module ysyx_lsu #(
   assign l1d_bus.wvalid = wvalid && state_store == LS_S_V;
   assign l1d_bus.wdata = wdata;
 
-  assign wready = state_store == LS_S_R;
-
+  assign rdata_unalign = lsu_l1d.rdata;
   assign rdata = (
       ({XLEN{raddr[1:0] == 2'b00}} & rdata_unalign)
     | ({XLEN{raddr[1:0] == 2'b01}} & {{8'b0}, {rdata_unalign[31:8]}})
@@ -188,7 +186,7 @@ module ysyx_lsu #(
     | ({XLEN{ralu == `YSYX_ALU_LHU_}} & rdata & 'hffff)
     | ({XLEN{ralu == `YSYX_ALU_LW__}} & rdata)
     );
-  assign exu_lsu.rready = rready;
+  assign exu_lsu.rready = lsu_l1d.rready;
 
   always @(posedge clock) begin
     if (reset) begin
@@ -212,14 +210,12 @@ module ysyx_lsu #(
     end
   end
 
-  assign lsu_l1d.raddr = raddr;
-  assign lsu_l1d.ralu = ralu;
+  assign lsu_l1d.raddr  = raddr;
+  assign lsu_l1d.ralu   = ralu;
   assign lsu_l1d.rvalid = raddr_valid && !(|sq_valid) && !(|stq_valid);
-  assign rdata_unalign = lsu_l1d.rdata;
-  assign rready = lsu_l1d.rready;
 
-  assign lsu_l1d.waddr = waddr;
-  assign lsu_l1d.walu = walu;
+  assign lsu_l1d.waddr  = waddr;
+  assign lsu_l1d.walu   = walu;
   assign lsu_l1d.wvalid = wvalid;
-  assign lsu_l1d.wdata = wdata;
+  assign lsu_l1d.wdata  = wdata;
 endmodule

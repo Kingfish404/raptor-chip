@@ -377,7 +377,6 @@ module ysyx_rou #(
 
   assign rou_wbu.wdata = rob_value[rob_head];
   assign rou_wbu.npc = rob_npc[rob_head];
-  assign rou_wbu.sys_retire = rob_sys[rob_head] && head_valid;
   assign rou_wbu.jen = rob_jen[rob_head];
   assign rou_wbu.ben = rob_ben[rob_head];
 
@@ -389,6 +388,7 @@ module ysyx_rou #(
     || (rob_f_i[rob_head])
     || (head_br_p_fail)
     || (rob_trap[rob_head])
+    || (rob_sys[rob_head])
   );
 
   assign rou_wbu.valid = head_valid;

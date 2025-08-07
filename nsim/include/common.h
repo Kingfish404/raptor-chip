@@ -151,7 +151,7 @@ typedef struct
 
   // for itrace
   uint32_t *inst;
-  word_t *cpc;
+  word_t *rpc;
   uint32_t last_inst;
 
   // for soc

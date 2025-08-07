@@ -132,16 +132,16 @@ void cpu_exec(uint64_t n)
       snprintf(
           iringbuf[iringhead], sizeof(iringbuf[0]),
           FMT_WORD_NO_PREFIX ": " FMT_WORD_NO_PREFIX "\t",
-          *npc.cpc, *(npc.inst));
+          *npc.rpc, *(npc.inst));
       int len = strlen(iringbuf[iringhead]);
       void disassemble(char *str, int size, uint64_t pc, uint8_t *code, int nbyte);
       disassemble(
-          iringbuf[iringhead] + len, sizeof(iringbuf[0]), *npc.cpc, (uint8_t *)(npc.inst), 4);
+          iringbuf[iringhead] + len, sizeof(iringbuf[0]), *npc.rpc, (uint8_t *)(npc.inst), 4);
       iringhead = (iringhead + 1) % MAX_IRING_SIZE;
 #endif
 
 #ifdef CONFIG_DIFFTEST
-      difftest_step(*npc.cpc);
+      difftest_step(*npc.rpc);
 #endif
       npc.last_inst = *(npc.inst);
     }

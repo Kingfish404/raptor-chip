@@ -3,6 +3,22 @@
 `include "ysyx.svh"
 `include "ysyx_pipe_if.svh"
 
+interface ifu_bpu_if #(
+    parameter int XLEN = `YSYX_XLEN,
+    parameter int PHT_SIZE = `YSYX_PHT_SIZE,
+    parameter int BTB_SIZE = `YSYX_BTB_SIZE,
+    parameter int RSB_SIZE = `YSYX_RSB_SIZE
+);
+  logic [XLEN-1:0] pc;
+  logic [XLEN-1:0] inst;
+
+  logic [XLEN-1:0] npc;
+  logic taken;
+
+  modport out(output pc, inst, input npc, taken);
+  modport in(input pc, inst, output npc, taken);
+endinterface
+
 interface ifu_l1i_if #(
     parameter int XLEN = `YSYX_XLEN,
     parameter int L1I_LEN = `YSYX_L1I_LEN,
@@ -193,7 +209,6 @@ interface rou_wbu_if #(
   logic [XLEN-1:0] pc;
 
   logic [XLEN-1:0] npc;
-  logic sys_retire;
   logic jen;
   logic ben;
 
@@ -207,13 +222,13 @@ interface rou_wbu_if #(
 
   modport in(
       input rd, wdata, inst, pc,
-      input npc, sys_retire, jen, ben,
+      input npc, jen, ben,
       input ebreak, fence_time, fence_i, flush_pipe,
       input valid
   );
   modport out(
       output rd, wdata, inst, pc,
-      output npc, sys_retire, jen, ben,
+      output npc, jen, ben,
       output ebreak, fence_time, fence_i, flush_pipe,
       output valid
   );

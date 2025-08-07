@@ -92,7 +92,8 @@ module ysyx #(
 
     input reset
 );
-  // IFU
+  // IFU stage
+  ifu_bpu_if ifu_bpu ();
   ifu_l1i_if ifu_l1i ();
   ifu_idu_if ifu_idu ();
   logic ifu_valid;
@@ -100,11 +101,11 @@ module ysyx #(
   // L1I Cache
   l1i_bus_if l1i_bus ();
 
-  // IDU
+  // IDU stage
   idu_pipe_if idu_rou ();
   logic idu_valid, idu_ready;
 
-  // ROU
+  // ROU stage
   idu_pipe_if rou_exu ();
   rou_lsu_if rou_lsu ();
   rou_reg_if rou_reg ();
@@ -113,14 +114,14 @@ module ysyx #(
   rou_wbu_if rou_wbu ();
   logic rou_valid, rou_ready;
 
-  // EXU
+  // EXU stage => CMT stage
   exu_rou_if exu_rou ();
   exu_ioq_rou_if exu_ioq_rou ();
   exu_csr_if exu_csr ();
   exu_lsu_if exu_lsu ();
   logic exu_valid, exu_ready;
 
-  // WBU
+  // WBU stage
   wbu_pipe_if wbu_bcast ();
   logic wbu_valid;
 
@@ -131,16 +132,26 @@ module ysyx #(
   // L1D Cache
   l1d_bus_if l1d_bus ();
 
+  ysyx_bpu bpu (
+      .clock(clock),
+
+      .wbu_bcast(wbu_bcast),
+
+      .ifu_bpu(ifu_bpu),
+
+      .reset(reset)
+  );
+
   // IFU (Instruction Fetch Unit)
   ysyx_ifu ifu (
       .clock(clock),
 
       .wbu_bcast(wbu_bcast),
 
+      .ifu_bpu(ifu_bpu),
       .ifu_l1i(ifu_l1i),
       .ifu_idu(ifu_idu),
 
-      .prev_valid(wbu_valid),
       .next_ready(idu_ready),
       .out_valid (ifu_valid),
 
