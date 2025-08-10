@@ -92,42 +92,41 @@ module ysyx #(
 
     input reset
 );
-  // IFU stage
-  ifu_bpu_if ifu_bpu ();
-  ifu_l1i_if ifu_l1i ();
-  ifu_idu_if ifu_idu ();
-  logic ifu_valid;
-
   // L1I Cache
   l1i_bus_if l1i_bus ();
 
+  // IFU stage
+  ifu_idu_if ifu_idu ();  // Fetch => Decode
+
+  ifu_bpu_if ifu_bpu ();
+  ifu_l1i_if ifu_l1i ();
+
   // IDU stage
-  idu_pipe_if idu_rou ();
-  logic idu_valid, idu_ready;
+  idu_rnu_if idu_rnu ();  // Decode => Re-naming
+
+  // RNU stage
+  rnu_rou_if rnu_rou ();  // Re-naming => Issue
 
   // ROU stage
-  idu_pipe_if rou_exu ();
-  rou_lsu_if rou_lsu ();
-  rou_reg_if rou_reg ();
+  rou_exu_if rou_exu ();  // Issue => Execute
+  rou_lsu_if rou_lsu ();  // Commit
+  rou_cmu_if rou_cmu ();  // Commit
 
   rou_csr_if rou_csr ();
-  rou_wbu_if rou_wbu ();
-  logic rou_valid, rou_ready;
 
-  // EXU stage => CMT stage
-  exu_rou_if exu_rou ();
+  // EXU stage
+  exu_rou_if exu_rou ();  // Execute & Writeback => Commit
+
+  exu_prf_if exu_prf ();
   exu_ioq_rou_if exu_ioq_rou ();
   exu_csr_if exu_csr ();
   exu_lsu_if exu_lsu ();
-  logic exu_valid, exu_ready;
 
-  // WBU stage
-  wbu_pipe_if wbu_bcast ();
-  logic wbu_valid;
+  // CMU
+  cmu_pipe_if cmu_bcast ();  // Difftest & Debug
 
   // LSU
   lsu_l1d_if lsu_l1d ();
-  logic lsu_sq_ready;
 
   // L1D Cache
   l1d_bus_if l1d_bus ();
@@ -135,7 +134,7 @@ module ysyx #(
   ysyx_bpu bpu (
       .clock(clock),
 
-      .wbu_bcast(wbu_bcast),
+      .cmu_bcast(cmu_bcast),
 
       .ifu_bpu(ifu_bpu),
 
@@ -146,14 +145,11 @@ module ysyx #(
   ysyx_ifu ifu (
       .clock(clock),
 
-      .wbu_bcast(wbu_bcast),
+      .cmu_bcast(cmu_bcast),
 
       .ifu_bpu(ifu_bpu),
       .ifu_l1i(ifu_l1i),
       .ifu_idu(ifu_idu),
-
-      .next_ready(idu_ready),
-      .out_valid (ifu_valid),
 
       .reset(reset)
   );
@@ -171,15 +167,30 @@ module ysyx #(
   ysyx_idu idu (
       .clock(clock),
 
-      .wbu_bcast(wbu_bcast),
+      .cmu_bcast(cmu_bcast),
 
       .ifu_idu(ifu_idu),
-      .idu_rou(idu_rou),
+      .idu_rnu(idu_rnu),
 
-      .prev_valid(ifu_valid),
-      .next_ready(rou_ready),
-      .out_valid (idu_valid),
-      .out_ready (idu_ready),
+      .reset(reset)
+  );
+
+  // RNU (Re-naming Unit)
+  ysyx_rnu rnu (
+      .clock(clock),
+
+      // write-back
+      .exu_rou(exu_rou),
+      .exu_ioq_rou(exu_ioq_rou),
+
+      // commit
+      .rou_cmu  (rou_cmu),
+      .cmu_bcast(cmu_bcast),
+
+      .idu_rnu(idu_rnu),
+      .rnu_rou(rnu_rou),
+
+      .exu_prf(exu_prf),
 
       .reset(reset)
   );
@@ -188,26 +199,19 @@ module ysyx #(
   ysyx_rou rou (
       .clock(clock),
 
-      .wbu_bcast(wbu_bcast),
+      .idu_rou(rnu_rou),
 
-      .idu_rou(idu_rou),
+      // issue
+      .exu_prf(exu_prf),
       .rou_exu(rou_exu),
 
       .exu_rou(exu_rou),
       .exu_ioq_rou(exu_ioq_rou),
 
-      .rou_reg(rou_reg),
       .rou_csr(rou_csr),
 
       .rou_lsu(rou_lsu),
-      .rou_wbu(rou_wbu),
-
-      .sq_ready(lsu_sq_ready),
-
-      .prev_valid(idu_valid),
-      .next_ready(exu_ready),
-      .out_valid (rou_valid),
-      .out_ready (rou_ready),
+      .rou_cmu(rou_cmu),
 
       .reset(reset)
   );
@@ -216,7 +220,7 @@ module ysyx #(
   ysyx_exu exu (
       .clock(clock),
 
-      .wbu_bcast(wbu_bcast),
+      .cmu_bcast(cmu_bcast),
 
       .rou_exu(rou_exu),
 
@@ -226,34 +230,15 @@ module ysyx #(
       .exu_lsu(exu_lsu),
       .exu_csr(exu_csr),
 
-      .prev_valid(rou_valid),
-      .out_valid (exu_valid),
-      .out_ready (exu_ready),
-
       .reset(reset)
   );
 
-  // WBU (Write Back Unit)
-  ysyx_wbu wbu (
+  // CMU (ComMit Unit)
+  ysyx_cmu cmu (
       .clock(clock),
 
-      .rou_wbu  (rou_wbu),
-      .wbu_bcast(wbu_bcast),
-
-      .prev_valid(rou_wbu.valid),
-      .out_valid (wbu_valid),
-
-      .reset(reset)
-  );
-
-  ysyx_reg regs (
-      .clock(clock),
-
-      .write_en(rou_wbu.valid && wbu_bcast.flush_pipe == 0),
-      .waddr(rou_wbu.rd),
-      .wdata(rou_wbu.wdata),
-
-      .rou_reg(rou_reg),
+      .rou_cmu  (rou_cmu),
+      .cmu_bcast(cmu_bcast),
 
       .reset(reset)
   );
@@ -271,14 +256,13 @@ module ysyx #(
   ysyx_lsu lsu (
       .clock(clock),
 
-      .wbu_bcast(wbu_bcast),
+      .cmu_bcast(cmu_bcast),
 
       .lsu_l1d(lsu_l1d),
 
       .exu_lsu(exu_lsu),
       .exu_ioq_rou(exu_ioq_rou),
       .rou_lsu(rou_lsu),
-      .out_sq_ready(lsu_sq_ready),
 
       .l1d_bus(l1d_bus),
 
@@ -288,7 +272,7 @@ module ysyx #(
   ysyx_l1d l1d_cache (
       .clock(clock),
 
-      .wbu_bcast(wbu_bcast),
+      .cmu_bcast(cmu_bcast),
 
       .lsu_l1d(lsu_l1d),
       .l1d_bus(l1d_bus),

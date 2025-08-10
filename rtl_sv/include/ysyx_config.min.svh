@@ -8,7 +8,7 @@
  */
 `define YSYX_XLEN 32
 // `define YSYX_I_EXTENSION 'h1
-`define YSYX_M_EXTENSION 'h1
+// `define YSYX_M_EXTENSION 'h1
 
 `define YSYX_MISA 'h40141105
 
@@ -31,30 +31,31 @@
 
 // `define YSYX_M_FAST 'h1
 `define YSYX_L1I_LINE_LEN 1
-`define YSYX_L1I_LEN 1
+`define YSYX_L1I_LEN 2
 
 `define YSYX_PHT_SIZE 2
 `define YSYX_BTB_SIZE 2
 `define YSYX_RSB_SIZE 2
 
-`define YSYX_IQ_SIZE 2
+`define YSYX_RIQ_SIZE 2
+`define YSYX_IIQ_SIZE 2
 `define YSYX_ROB_SIZE 2
 
 `define YSYX_RS_SIZE 2
 `define YSYX_IOQ_SIZE 2
 
 `define YSYX_SQ_SIZE 2
-`define YSYX_L1D_LEN 1
+`define YSYX_L1D_LEN 2
 
 `ifdef YSYX_I_EXTENSION
-`define YSYX_REG_LEN 5  // 32 registers
+`define YSYX_REG_SIZE 32 // 32 registers
 `else
-`define YSYX_REG_LEN 4  // 16 registers
+`define YSYX_REG_SIZE 16 // 16 registers
 `endif
 
-`define YSYX_REG_SIZE 2**`YSYX_REG_LEN
+`define YSYX_REG_LEN $clog2(`YSYX_REG_SIZE) // Register Length
 
-`define YSYX_PHY_SIZE 64 // physical register number
+`define YSYX_PHY_SIZE 32 // physical register number
 `define YSYX_PHY_LEN $clog2(`YSYX_PHY_SIZE)
 
 `endif

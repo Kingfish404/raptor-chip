@@ -9,7 +9,7 @@ module ysyx_bpu #(
 ) (
     input clock,
 
-    wbu_pipe_if.in wbu_bcast,
+    cmu_pipe_if.in cmu_bcast,
 
     ifu_bpu_if.in ifu_bpu,
 
@@ -91,8 +91,8 @@ module ysyx_bpu #(
           ? pc + imm_j
           : pc + (is_c ? 'h2 : 'h4);
 
-  assign rpc = wbu_bcast.rpc;
-  assign cpc = wbu_bcast.cpc;
+  assign rpc = cmu_bcast.rpc;
+  assign cpc = cmu_bcast.cpc;
 
   assign pht_idx = pc[$clog2(PHT_SIZE)-1+1:1];
   assign btb_idx = pc[$clog2(BTB_SIZE)-1+1:1];
@@ -103,17 +103,17 @@ module ysyx_bpu #(
   assign ifu_bpu.taken = bpu_btb_v[btb_idx];
 
   always @(posedge clock) begin
-    if (reset || wbu_bcast.fence_time) begin
+    if (reset || cmu_bcast.fence_time) begin
       for (int i = 0; i < PHT_SIZE; i++) begin
         bpu_pht[i] <= 0;
       end
       bpu_btb_v <= 0;
     end else begin
-      if (wbu_bcast.jen && wbu_bcast.flush_pipe) begin
+      if (cmu_bcast.jen && cmu_bcast.flush_pipe) begin
         bpu_btb[rpc_idx]   <= cpc;
         bpu_btb_v[rpc_idx] <= 1;
       end
-      if (wbu_bcast.ben) begin
+      if (cmu_bcast.ben) begin
         if ((cpc == rpc + 4) || (cpc == rpc + 2)) begin
           if (bpu_pht[pht_rpc_idx] != 'b000) begin
             bpu_pht[pht_rpc_idx] <= bpu_pht[pht_rpc_idx] - 1;

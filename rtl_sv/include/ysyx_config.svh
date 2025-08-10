@@ -37,8 +37,9 @@
 `define YSYX_BTB_SIZE 32
 `define YSYX_RSB_SIZE 8
 
-`define YSYX_IQ_SIZE 4
-`define YSYX_ROB_SIZE 4
+`define YSYX_RIQ_SIZE 4
+`define YSYX_IIQ_SIZE 4
+`define YSYX_ROB_SIZE 8
 
 `define YSYX_RS_SIZE 4
 `define YSYX_IOQ_SIZE 4
@@ -47,12 +48,12 @@
 `define YSYX_L1D_LEN 7
 
 `ifdef YSYX_I_EXTENSION
-`define YSYX_REG_LEN 5  // 32 registers
+`define YSYX_REG_SIZE 32 // 32 registers
 `else
-`define YSYX_REG_LEN 4  // 16 registers
+`define YSYX_REG_SIZE 16 // 16 registers
 `endif
 
-`define YSYX_REG_SIZE 2**`YSYX_REG_LEN
+`define YSYX_REG_LEN $clog2(`YSYX_REG_SIZE) // Register Length
 
 `define YSYX_PHY_SIZE 64 // physical register number
 `define YSYX_PHY_LEN $clog2(`YSYX_PHY_SIZE)

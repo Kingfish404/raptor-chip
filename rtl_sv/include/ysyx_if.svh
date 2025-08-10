@@ -1,7 +1,8 @@
 `ifndef YSYX_IF_SVH
 `define YSYX_IF_SVH
 `include "ysyx.svh"
-`include "ysyx_pipe_if.svh"
+`include "ysyx_id_if.svh"
+`include "ysyx_rn_if.svh"
 
 interface ifu_bpu_if #(
     parameter int XLEN = `YSYX_XLEN,
@@ -42,9 +43,10 @@ interface ifu_idu_if #(
   logic [XLEN-1:0] pnpc;
 
   logic valid;
+  logic ready;
 
-  modport master(output inst, pc, pnpc, valid);
-  modport slave(input inst, pc, pnpc, valid);
+  modport master(output inst, pc, pnpc, valid, input ready);
+  modport slave(input inst, pc, pnpc, valid, output ready);
 endinterface
 
 interface rou_reg_if #(
@@ -58,68 +60,6 @@ interface rou_reg_if #(
 
   modport master(output rs1, rs2, input src1, src2);
   modport slave(input rs1, rs2, output src1, src2);
-endinterface
-
-interface exu_rou_if #(
-    parameter int XLEN = `YSYX_XLEN
-);
-  logic [31:0] inst;
-  logic [XLEN-1:0] pc;
-  logic [XLEN-1:0] npc;
-
-  logic [$clog2(`YSYX_ROB_SIZE):0] dest;
-  logic [XLEN-1:0] result;
-
-  // csr
-  logic csr_wen;
-  logic [XLEN-1:0] csr_wdata;
-  logic [11:0] csr_addr;
-
-  logic ecall;
-  logic ebreak;
-  logic mret;
-
-  logic trap;
-  logic [XLEN-1:0] tval;
-  logic [XLEN-1:0] cause;
-
-  logic valid;
-
-  modport in(
-      input inst, pc, npc,
-      input dest, result, ebreak,
-      input csr_wen, csr_wdata, csr_addr, ecall, mret,
-      input trap, tval, cause,
-      input valid
-  );
-  modport out(
-      output inst, pc, npc,
-      output dest, result, ebreak,
-      output csr_wen, csr_wdata, csr_addr, ecall, mret,
-      output trap, tval, cause,
-      output valid
-  );
-endinterface
-
-interface exu_ioq_rou_if #(
-    parameter int XLEN = `YSYX_XLEN
-);
-  logic [31:0] inst;
-  logic [XLEN-1:0] pc;
-  logic [XLEN-1:0] npc;
-
-  logic [XLEN-1:0] result;
-  logic [$clog2(`YSYX_ROB_SIZE):0] dest;
-
-  logic wen;
-  logic [4:0] alu;
-  logic [XLEN-1:0] sq_waddr;
-  logic [XLEN-1:0] sq_wdata;
-
-  logic valid;
-
-  modport in(input inst, pc, npc, result, dest, wen, alu, sq_waddr, sq_wdata, input valid);
-  modport out(output inst, pc, npc, result, dest, wen, alu, sq_waddr, sq_wdata, output valid);
 endinterface
 
 interface exu_lsu_if #(
@@ -158,12 +98,13 @@ interface rou_lsu_if #(
   logic [4:0] alu;
   logic [XLEN-1:0] sq_waddr;
   logic [XLEN-1:0] sq_wdata;
+  logic sq_ready;
   logic [XLEN-1:0] pc;
 
   logic valid;
 
-  modport in(input store, alu, sq_waddr, sq_wdata, pc, input valid);
-  modport out(output store, alu, sq_waddr, sq_wdata, pc, output valid);
+  modport in(input store, alu, sq_waddr, sq_wdata, pc, valid, output sq_ready);
+  modport out(output store, alu, sq_waddr, sq_wdata, pc, valid, input sq_ready);
 endinterface
 
 interface rou_csr_if #(
@@ -195,41 +136,6 @@ interface rou_csr_if #(
       output pc,
       output csr_wen, csr_wdata, csr_addr, ecall, ebreak, mret,
       output trap, tval, cause,
-      output valid
-  );
-endinterface
-
-interface rou_wbu_if #(
-    parameter int XLEN = `YSYX_XLEN
-);
-  logic [4:0] rd;
-  logic [XLEN-1:0] wdata;
-
-  logic [31:0] inst;
-  logic [XLEN-1:0] pc;
-
-  logic [XLEN-1:0] npc;
-  logic jen;
-  logic ben;
-
-  logic ebreak;
-  logic fence_time;
-  logic fence_i;
-
-  logic flush_pipe;
-
-  logic valid;
-
-  modport in(
-      input rd, wdata, inst, pc,
-      input npc, jen, ben,
-      input ebreak, fence_time, fence_i, flush_pipe,
-      input valid
-  );
-  modport out(
-      output rd, wdata, inst, pc,
-      output npc, jen, ben,
-      output ebreak, fence_time, fence_i, flush_pipe,
       output valid
   );
 endinterface
@@ -311,6 +217,26 @@ interface l1d_bus_if #(
       input awvalid, awaddr, wvalid, wdata, wstrb,
       output wready
   );
+endinterface
+
+interface cmu_pipe_if #(
+    parameter unsigned RLEN = `YSYX_REG_LEN,
+    parameter int XLEN = `YSYX_XLEN
+);
+  logic [XLEN-1:0] rpc;
+  logic [XLEN-1:0] cpc;
+  logic [RLEN-1:0] rd;
+
+  logic jen;
+  logic ben;
+
+  logic fence_time;
+  logic fence_i;
+
+  logic flush_pipe;
+
+  modport in(input rpc, cpc, rd, jen, ben, fence_time, fence_i, flush_pipe);
+  modport out(output rpc, cpc, rd, jen, ben, fence_time, fence_i, flush_pipe);
 endinterface
 
 `endif

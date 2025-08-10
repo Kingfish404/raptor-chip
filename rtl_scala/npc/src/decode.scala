@@ -283,15 +283,15 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
     OR____ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
     AND___ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
 
-    ECALL_ -> List( rd, MCAUSE,   0.U,   0.U, 0.U, 0.U), // N
-    EBREAK -> List( rd,    0.U,   0.U,   0.U, 0.U, 0.U), // N
+    ECALL_ -> List(0.U, MCAUSE,   0.U,   0.U, 0.U, 0.U), // N
+    EBREAK -> List(0.U,    0.U,   0.U,   0.U, 0.U, 0.U), // N
 
-    FENCE____ -> List( rd, 0.U,   0.U,   0.U, 0.U, 0.U), // N
-    FENCE_TSO -> List( rd, 0.U,   0.U,   0.U, 0.U, 0.U), // N
-    FENCE_I__ -> List( rd, 0.U,   0.U,   0.U, 0.U, 0.U), // N
-    FENCE_TIM -> List( rd, 0.U,   0.U,   0.U, 0.U, 0.U), // N
+    FENCE____ -> List(0.U, 0.U,   0.U,   0.U, 0.U, 0.U), // N
+    FENCE_TSO -> List(0.U, 0.U,   0.U,   0.U, 0.U, 0.U), // N
+    FENCE_I__ -> List(0.U, 0.U,   0.U,   0.U, 0.U, 0.U), // N
+    FENCE_TIM -> List(0.U, 0.U,   0.U,   0.U, 0.U, 0.U), // N
 
-    SFENCE_VM -> List( rd,    0.U,   0.U,   0.U, 0.U, 0.U), // N   
+    SFENCE_VM -> List(0.U,    0.U,   0.U,   0.U, 0.U, 0.U), // N   
 
     CSRRW_ -> List( rd,    csr,   0.U,   0.U, rs1, 0.U), // CSR
     CSRRS_ -> List( rd,    csr,   0.U,   0.U, rs1, 0.U), // CSR

@@ -41,7 +41,7 @@ GCC_FLAGS = {
 
 class ysyx(CPU):
     category = "softcore"
-    family = "riscv"
+    family = "riscv32"
     name = "sparrow"
     human_name = "sparrow"
     variants = CPU_VARIANTS

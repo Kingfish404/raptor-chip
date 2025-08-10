@@ -2,20 +2,17 @@
 `include "ysyx_if.svh"
 
 module ysyx_idu #(
+    parameter unsigned RLEN = `YSYX_REG_LEN,
     parameter bit [7:0] XLEN = `YSYX_XLEN
 ) (
     input clock,
-    input reset,
 
-    wbu_pipe_if.in wbu_bcast,
+    cmu_pipe_if.in cmu_bcast,
 
-    ifu_idu_if.slave ifu_idu,
-    idu_pipe_if.out  idu_rou,
+    ifu_idu_if.slave  ifu_idu,
+    idu_rnu_if.master idu_rnu,
 
-    input prev_valid,
-    input next_ready,
-    output logic out_valid,
-    output logic out_ready
+    input reset
 );
   typedef enum {
     IDLE  = 'b00,
@@ -28,15 +25,17 @@ module ysyx_idu #(
   logic [31:0] inst_idu, pc_idu, pnpc_idu;
 
   logic [ 4:0] alu;
-  logic [ 4:0] rd;
   logic [11:0] csr;
   logic [ 2:0] csr_csw;
   logic illegal_csr, illegal_inst;
   logic is_c;
+  logic valid, ready;
+  logic [5-1:0] rd, rs1, rs2;
 
-  assign is_c = !(inst[1:0] == 2'b11);
-  assign out_valid = state_idu == VALID;
-  assign out_ready = state_idu == IDLE || (next_ready && state_idu == VALID);
+  assign valid = state_idu == VALID;
+  assign ready = state_idu == IDLE || idu_rnu.ready;
+  assign idu_rnu.valid = valid;
+  assign ifu_idu.ready = ready;
 
   always @(posedge clock) begin
     if (reset) begin
@@ -44,18 +43,18 @@ module ysyx_idu #(
     end else begin
       unique case (state_idu)
         IDLE: begin
-          if (wbu_bcast.flush_pipe) begin
-          end else if (prev_valid) begin
+          if (cmu_bcast.flush_pipe) begin
+          end else if (ifu_idu.valid) begin
             state_idu <= VALID;
           end else begin
             state_idu <= IDLE;
           end
         end
         VALID: begin
-          if (wbu_bcast.flush_pipe) begin
+          if (cmu_bcast.flush_pipe) begin
             state_idu <= IDLE;
-          end else if (next_ready) begin
-            if (prev_valid) begin
+          end else if (idu_rnu.ready) begin
+            if (ifu_idu.valid) begin
             end else begin
               state_idu <= IDLE;
             end
@@ -64,7 +63,7 @@ module ysyx_idu #(
         default: begin
         end
       endcase
-      if (state_idu == IDLE || next_ready) begin
+      if (state_idu == IDLE || idu_rnu.ready) begin
         if (ifu_idu.valid) begin
 
           inst <= ifu_idu.inst;
@@ -75,19 +74,20 @@ module ysyx_idu #(
     end
   end
 
+  assign is_c = !(inst[1:0] == 2'b11);
   assign inst_idu = is_c ? inst_de : inst;
-  assign idu_rou.c = is_c;
-  assign idu_rou.alu = alu;
-  assign idu_rou.pc = pc_idu;
-  assign idu_rou.inst = inst_idu;
-  assign idu_rou.pnpc = pnpc_idu;
-  assign idu_rou.rd[`YSYX_REG_LEN-1:0] = illegal_csr || illegal_inst ? 0 : rd[`YSYX_REG_LEN-1:0];
+  assign idu_rnu.c = is_c;
+  assign idu_rnu.alu = alu;
+  assign idu_rnu.pc = pc_idu;
+  assign idu_rnu.inst = inst_idu;
+  assign idu_rnu.pnpc = pnpc_idu;
+  assign idu_rnu.rd[RLEN-1:0] = illegal_csr || illegal_inst ? 0 : rd[RLEN-1:0];
 
-  assign idu_rou.csr_csw = csr_csw;
+  assign idu_rnu.csr_csw = csr_csw;
 
-  assign idu_rou.trap = illegal_csr || illegal_inst;
-  assign idu_rou.tval = illegal_csr || illegal_inst ? inst_idu : 0;
-  assign idu_rou.cause = illegal_csr || illegal_inst ? 'h2 : 0;
+  assign idu_rnu.trap = illegal_csr || illegal_inst;
+  assign idu_rnu.tval = illegal_csr || illegal_inst ? inst_idu : 0;
+  assign idu_rnu.cause = illegal_csr || illegal_inst ? 'h2 : 0;
 
   assign illegal_inst = alu == `YSYX_ALU_ILL_;
   assign illegal_csr = (csr_csw != 3'b000) && !((0)
@@ -138,32 +138,36 @@ module ysyx_idu #(
       .reset(reset)
   );
 
+  assign idu_rnu.rs1[RLEN-1:0] = rs1[RLEN-1:0];
+  assign idu_rnu.rs2[RLEN-1:0] = rs2[RLEN-1:0];
+  assign idu_rnu.rd[RLEN-1:0]  = rd[RLEN-1:0];
+
   ysyx_idu_decoder idu_de (
       .clock(clock),
 
       .out_alu(alu),
-      .out_jen(idu_rou.jen),
-      .out_ben(idu_rou.ben),
-      .out_sen(idu_rou.wen),
-      .out_len(idu_rou.ren),
+      .out_jen(idu_rnu.jen),
+      .out_ben(idu_rnu.ben),
+      .out_sen(idu_rnu.wen),
+      .out_len(idu_rnu.ren),
 
-      .out_atom(idu_rou.atom),
+      .out_atom(idu_rnu.atom),
 
-      .out_sys_system(idu_rou.system),
-      .out_sys_ebreak(idu_rou.ebreak),
-      .out_sys_ecall(idu_rou.ecall),
-      .out_sys_mret(idu_rou.mret),
+      .out_sys_system(idu_rnu.system),
+      .out_sys_ebreak(idu_rnu.ebreak),
+      .out_sys_ecall(idu_rnu.ecall),
+      .out_sys_mret(idu_rnu.mret),
       .out_sys_csr_csw(csr_csw),
 
-      .out_fence_i(idu_rou.fence_i),
-      .out_fence_time(idu_rou.fence_time),
+      .out_fence_i(idu_rnu.f_i),
+      .out_fence_time(idu_rnu.f_time),
 
       .out_rd (rd),
-      .out_imm(idu_rou.imm),
-      .out_op1(idu_rou.op1),
-      .out_op2(idu_rou.op2),
-      .out_rs1(idu_rou.rs1),
-      .out_rs2(idu_rou.rs2),
+      .out_imm(idu_rnu.imm),
+      .out_op1(idu_rnu.op1),
+      .out_op2(idu_rnu.op2),
+      .out_rs1(rs1),
+      .out_rs2(rs2),
       .out_csr(csr),
 
       .in_inst(inst_idu),

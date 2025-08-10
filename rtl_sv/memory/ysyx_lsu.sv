@@ -8,7 +8,7 @@ module ysyx_lsu #(
 ) (
     input clock,
 
-    wbu_pipe_if.in wbu_bcast,
+    cmu_pipe_if.in cmu_bcast,
 
     lsu_l1d_if.master lsu_l1d,
 
@@ -16,7 +16,6 @@ module ysyx_lsu #(
     exu_ioq_rou_if.in exu_ioq_rou,
 
     rou_lsu_if.in rou_lsu,
-    output logic out_sq_ready,
 
     l1d_bus_if.master l1d_bus,
 
@@ -70,7 +69,7 @@ module ysyx_lsu #(
   assign raddr = exu_lsu.raddr;
   assign ralu = exu_lsu.ralu;
   assign sq_ready = sq_valid[sq_tail] == 0;
-  assign out_sq_ready = sq_ready;
+  assign rou_lsu.sq_ready = sq_ready;
 
   assign wvalid = sq_valid[sq_head];
   assign wdata = sq_wdata[sq_head];
@@ -87,7 +86,7 @@ module ysyx_lsu #(
       stq_tail  <= 0;
       stq_valid <= 0;
     end else begin
-      if (wbu_bcast.flush_pipe || wbu_bcast.fence_time) begin
+      if (cmu_bcast.flush_pipe || cmu_bcast.fence_time) begin
         stq_head  <= 0;
         stq_tail  <= 0;
         stq_valid <= 0;

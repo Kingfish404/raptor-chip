@@ -211,7 +211,7 @@ extern "C"
   __EXPORT void difftest_init(int port)
   {
     difftest_htif_args.push_back("");
-    const char *isa = "RV" MUXDEF(CONFIG_RV64, "64", "32") MUXDEF(CONFIG_RVE, "E", "I") "MAFDC";
+    const char *isa = "RV" MUXDEF(CONFIG_RV64, "64", "32") MUXDEF(CONFIG_RVE, "E", "I") "MAFDC_zicsr_zifencei_zicntr";
     cfg.initrd_bounds = std::make_pair((reg_t)0, (reg_t)0);
     cfg.bootargs = nullptr;
     cfg.isa = isa;

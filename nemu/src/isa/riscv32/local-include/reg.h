@@ -92,14 +92,20 @@ static inline CSR_status check_csr_exist(uint16_t csr)
           csr == CSR_IMPID ||
           csr == CSR_MHARTID))
   {
-    if (
-        csr == CSR_MISA ||
-        csr == CSR_TIME ||
-        csr == CSR_TIMEH ||
-        csr == CSR_MCYCLE ||
-        csr == CSR_MCYCLEH ||
-        csr == CSR_MVENDORID ||
-        csr == CSR_MARCHID)
+    if ((0) //
+        || csr == CSR_MISA
+
+        || (csr == CSR_MCYCLE)  //
+        || (csr == CSR_MCYCLEH) //
+        || (csr == CSR_CYCLE_)  //
+        || (csr == CSR_TIME)    //
+        || (csr == CSR_TIMEH)   //
+
+        || (csr == CSR_MVENDORID) //
+        || (csr == CSR_MARCHID)   //
+        || (csr == CSR_IMPID)     //
+        || (csr == CSR_MHARTID)   //
+    )
     {
       return CSR_EXIST_DIFF_SKIP;
     }

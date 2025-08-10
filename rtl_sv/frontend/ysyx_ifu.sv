@@ -10,14 +10,11 @@ module ysyx_ifu #(
 ) (
     input clock,
 
-    wbu_pipe_if.in wbu_bcast,
+    cmu_pipe_if.in cmu_bcast,
 
     ifu_bpu_if.out ifu_bpu,
     ifu_l1i_if.master ifu_l1i,
     ifu_idu_if.master ifu_idu,
-
-    input  next_ready,
-    output out_valid,
 
     input reset
 );
@@ -46,13 +43,12 @@ module ysyx_ifu #(
   assign is_sys = (opcode == `YSYX_OP_SYSTEM) || (opcode == `YSYX_OP_FENCE_);
 
   assign valid = state_ifu == VALID;
-  assign out_valid = valid;
 
   assign ifu_bpu.pc = pc_ifu;
   assign ifu_bpu.inst = ifu_l1i.inst;
 
   assign ifu_l1i.pc = pc_ifu;
-  assign ifu_l1i.invalid = wbu_bcast.fence_i;
+  assign ifu_l1i.invalid = cmu_bcast.fence_i;
 
   assign ifu_idu.pc = pc;
   assign ifu_idu.pnpc = pc_ifu;
@@ -60,7 +56,7 @@ module ysyx_ifu #(
 
   assign ifu_idu.valid = valid;
 
-  assign nextpc = (wbu_bcast.flush_pipe ? wbu_bcast.cpc : ifu_bpu.npc);
+  assign nextpc = (cmu_bcast.flush_pipe ? cmu_bcast.cpc : ifu_bpu.npc);
 
   always @(posedge clock) begin
     if (reset) begin
@@ -68,7 +64,7 @@ module ysyx_ifu #(
     end else begin
       unique case (state_ifu)
         IDLE: begin
-          if (wbu_bcast.flush_pipe) begin
+          if (cmu_bcast.flush_pipe) begin
             state_ifu <= IDLE;
             pc_ifu <= nextpc;
           end else if (ifu_l1i.valid) begin
@@ -79,12 +75,12 @@ module ysyx_ifu #(
           end
         end
         VALID: begin
-          if (wbu_bcast.flush_pipe) begin
+          if (cmu_bcast.flush_pipe) begin
             state_ifu <= IDLE;
             pc_ifu <= nextpc;
           end else if (is_sys) begin
             state_ifu <= STALL;
-          end else if (next_ready) begin
+          end else if (ifu_idu.ready) begin
             if (ifu_l1i.valid) begin
               inst <= ifu_l1i.inst;
               pc <= pc_ifu;
@@ -95,7 +91,7 @@ module ysyx_ifu #(
           end
         end
         STALL: begin
-          if (wbu_bcast.flush_pipe) begin
+          if (cmu_bcast.flush_pipe) begin
             state_ifu <= IDLE;
             pc_ifu <= nextpc;
           end

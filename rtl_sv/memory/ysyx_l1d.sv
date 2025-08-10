@@ -9,7 +9,7 @@ module ysyx_l1d #(
 ) (
     input clock,
 
-    wbu_pipe_if.in wbu_bcast,
+    cmu_pipe_if.in cmu_bcast,
 
     lsu_l1d_if.slave  lsu_l1d,
     l1d_bus_if.master l1d_bus,
@@ -84,7 +84,7 @@ module ysyx_l1d #(
       || (lsu_l1d.waddr >= 'ha0000000 && lsu_l1d.waddr < 'hc0000000)  // sdram
       );
 
-  assign l1d_bus.arvalid = (state_load == LD_A) && lsu_l1d.rvalid && !hit && !wbu_bcast.flush_pipe;
+  assign l1d_bus.arvalid = (state_load == LD_A) && lsu_l1d.rvalid && !hit && !cmu_bcast.flush_pipe;
   assign l1d_bus.araddr = cacheable_r ? lsu_l1d.raddr & ~'h3 : lsu_l1d.raddr;
   assign l1d_bus.rstrb = cacheable_r ? 8'hf : rstrb;
 
@@ -99,7 +99,7 @@ module ysyx_l1d #(
     end else begin
       unique case (state_load)
         LD_A: begin
-          if (lsu_l1d.rvalid && !hit && !wbu_bcast.flush_pipe) begin
+          if (lsu_l1d.rvalid && !hit && !cmu_bcast.flush_pipe) begin
             if (l1d_bus.rready) begin
               state_load <= LD_D;
               l1d_raddr  <= lsu_l1d.raddr;
@@ -147,7 +147,7 @@ module ysyx_l1d #(
         end
       end
 
-      if (wbu_bcast.fence_time) begin
+      if (cmu_bcast.fence_time) begin
         l1d_valid <= 0;
       end else if (l1d_update) begin
         l1d[l1d_idx] <= l1d_data_u;
