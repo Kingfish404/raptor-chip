@@ -34,8 +34,9 @@ module ysyx_rnu #(
 
   logic rnq_c[RIQ_SIZE];
   logic [4:0] rnq_alu[RIQ_SIZE];
-  logic rnq_jen[RIQ_SIZE];
   logic rnq_ben[RIQ_SIZE];
+  logic rnq_jen[RIQ_SIZE];
+  logic rnq_jren[RIQ_SIZE];
   logic rnq_wen[RIQ_SIZE];
   logic rnq_ren[RIQ_SIZE];
   logic rnq_atom[RIQ_SIZE];
@@ -67,41 +68,11 @@ module ysyx_rnu #(
 
   logic rename_fire;
 
-  assign valid           = rnq_valid[rnq_tail];
-  assign ready           = rnq_valid[rnq_head] == 0;
-  assign rnu_rou.valid   = valid;
-  assign idu_rnu.ready   = ready;
-  assign rename_fire     = (rnu_rou.ready && valid);
-
-  assign rnu_rou.c       = rnq_c[rnq_tail];
-  assign rnu_rou.alu     = rnq_alu[rnq_tail];
-  assign rnu_rou.jen     = rnq_jen[rnq_tail];
-  assign rnu_rou.ben     = rnq_ben[rnq_tail];
-  assign rnu_rou.wen     = rnq_wen[rnq_tail];
-  assign rnu_rou.ren     = rnq_ren[rnq_tail];
-  assign rnu_rou.atom    = rnq_atom[rnq_tail];
-
-  assign rnu_rou.system  = rnq_system[rnq_tail];
-  assign rnu_rou.ecall   = rnq_ecall[rnq_tail];
-  assign rnu_rou.ebreak  = rnq_ebreak[rnq_tail];
-  assign rnu_rou.mret    = rnq_mret[rnq_tail];
-  assign rnu_rou.csr_csw = rnq_csr_csw[rnq_tail];
-
-  assign rnu_rou.trap    = rnq_trap[rnq_tail];
-  assign rnu_rou.tval    = rnq_tval[rnq_tail];
-  assign rnu_rou.cause   = rnq_cause[rnq_tail];
-
-  assign rnu_rou.f_i     = rnq_f_i[rnq_tail];
-  assign rnu_rou.f_time  = rnq_f_time[rnq_tail];
-
-  assign rnu_rou.rd      = rnq_rd[rnq_tail];
-  assign rnu_rou.imm     = rnq_imm[rnq_tail];
-  assign rnu_rou.op1     = rnq_op1[rnq_tail];
-  assign rnu_rou.op2     = rnq_op2[rnq_tail];
-
-  assign rnu_rou.pnpc    = rnq_pnpc[rnq_tail];
-  assign rnu_rou.inst    = rnq_inst[rnq_tail];
-  assign rnu_rou.pc      = rnq_pc[rnq_tail];
+  assign valid         = rnq_valid[rnq_tail];
+  assign ready         = rnq_valid[rnq_head] == 0;
+  assign rnu_rou.valid = valid;
+  assign idu_rnu.ready = ready;
+  assign rename_fire   = (rnu_rou.ready && valid);
 
   always @(posedge clock) begin
     if (reset || cmu_bcast.flush_pipe) begin
@@ -116,8 +87,9 @@ module ysyx_rnu #(
 
         rnq_c[rnq_head]       <= idu_rnu.c;
         rnq_alu[rnq_head]     <= idu_rnu.alu;
-        rnq_jen[rnq_head]     <= idu_rnu.jen;
         rnq_ben[rnq_head]     <= idu_rnu.ben;
+        rnq_jen[rnq_head]     <= idu_rnu.jen;
+        rnq_jren[rnq_head]    <= idu_rnu.jren;
         rnq_wen[rnq_head]     <= idu_rnu.wen;
         rnq_ren[rnq_head]     <= idu_rnu.ren;
         rnq_atom[rnq_head]    <= idu_rnu.atom;
@@ -154,15 +126,49 @@ module ysyx_rnu #(
     end
   end
 
-  assign rnu_rou.pr1 = map[rnq_rs1[rnq_tail]];
-  assign rnu_rou.pr2 = map[rnq_rs2[rnq_tail]];
-  assign rnu_rou.prd = rnq_rd[rnq_tail] != 0 ? new_pr : 0;
-  assign rnu_rou.prs = map[rnq_rd[rnq_tail]];
-  assign allocate = rename_fire && !empty && rnq_rd[rnq_tail] != 0;
-  assign new_pr = fifo[head[PLEN-1:0]];
-  assign empty = (head == tail);
-  assign deallocate = rou_cmu.valid && rou_cmu.rd != 0;
-  assign dealloc_pr = rou_cmu.prs;
+  assign rnu_rou.c       = rnq_c[rnq_tail];
+  assign rnu_rou.alu     = rnq_alu[rnq_tail];
+  assign rnu_rou.ben     = rnq_ben[rnq_tail];
+  assign rnu_rou.jen     = rnq_jen[rnq_tail];
+  assign rnu_rou.jren    = rnq_jren[rnq_tail];
+  assign rnu_rou.wen     = rnq_wen[rnq_tail];
+  assign rnu_rou.ren     = rnq_ren[rnq_tail];
+  assign rnu_rou.atom    = rnq_atom[rnq_tail];
+
+  assign rnu_rou.system  = rnq_system[rnq_tail];
+  assign rnu_rou.ecall   = rnq_ecall[rnq_tail];
+  assign rnu_rou.ebreak  = rnq_ebreak[rnq_tail];
+  assign rnu_rou.mret    = rnq_mret[rnq_tail];
+  assign rnu_rou.csr_csw = rnq_csr_csw[rnq_tail];
+
+  assign rnu_rou.trap    = rnq_trap[rnq_tail];
+  assign rnu_rou.tval    = rnq_tval[rnq_tail];
+  assign rnu_rou.cause   = rnq_cause[rnq_tail];
+
+  assign rnu_rou.f_i     = rnq_f_i[rnq_tail];
+  assign rnu_rou.f_time  = rnq_f_time[rnq_tail];
+
+  assign rnu_rou.rd      = rnq_rd[rnq_tail];
+  assign rnu_rou.imm     = rnq_imm[rnq_tail];
+  assign rnu_rou.op1     = rnq_op1[rnq_tail];
+  assign rnu_rou.op2     = rnq_op2[rnq_tail];
+
+  assign rnu_rou.pnpc    = rnq_pnpc[rnq_tail];
+  assign rnu_rou.inst    = rnq_inst[rnq_tail];
+  assign rnu_rou.pc      = rnq_pc[rnq_tail];
+
+  // --- Register Renaming
+  assign rnu_rou.pr1     = map[rnq_rs1[rnq_tail]];
+  assign rnu_rou.pr2     = map[rnq_rs2[rnq_tail]];
+  assign rnu_rou.prd     = rnq_rd[rnq_tail] != 0 ? new_pr : 0;
+  assign rnu_rou.prs     = map[rnq_rd[rnq_tail]];
+  // === Register Renaming
+
+  assign allocate        = rename_fire && !empty && rnq_rd[rnq_tail] != 0;
+  assign new_pr          = fifo[head[PLEN-1:0]];
+  assign empty           = (head == tail);
+  assign deallocate      = rou_cmu.valid && rou_cmu.rd != 0;
+  assign dealloc_pr      = rou_cmu.prs;
   // { Free List
   logic allocate;
   logic [PLEN-1:0] new_pr;

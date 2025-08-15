@@ -431,6 +431,7 @@ module ysyx_exu #(
         ? addr_exu
         : (rs_pc[valid_idx] + (rs_c[valid_idx] ? 2 : 4)));
   assign exu_rou.ebreak = rs_ebreak[valid_idx];
+  assign exu_rou.btaken = (rs_br_cond[valid_idx] && |alu_result);
 
   assign exu_rou.prd = rs_prd[valid_idx];
   assign exu_rou.rd = rs_rd[valid_idx];

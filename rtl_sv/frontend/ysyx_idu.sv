@@ -78,9 +78,6 @@ module ysyx_idu #(
   assign inst_idu = is_c ? inst_de : inst;
   assign idu_rnu.c = is_c;
   assign idu_rnu.alu = alu;
-  assign idu_rnu.pc = pc_idu;
-  assign idu_rnu.inst = inst_idu;
-  assign idu_rnu.pnpc = pnpc_idu;
   assign idu_rnu.rd[RLEN-1:0] = illegal_csr || illegal_inst ? 0 : rd[RLEN-1:0];
 
   assign idu_rnu.csr_csw = csr_csw;
@@ -88,6 +85,10 @@ module ysyx_idu #(
   assign idu_rnu.trap = illegal_csr || illegal_inst;
   assign idu_rnu.tval = illegal_csr || illegal_inst ? inst_idu : 0;
   assign idu_rnu.cause = illegal_csr || illegal_inst ? 'h2 : 0;
+
+  assign idu_rnu.pnpc = pnpc_idu;
+  assign idu_rnu.inst = inst_idu;
+  assign idu_rnu.pc = pc_idu;
 
   assign illegal_inst = alu == `YSYX_ALU_ILL_;
   assign illegal_csr = (csr_csw != 3'b000) && !((0)
@@ -145,11 +146,12 @@ module ysyx_idu #(
   ysyx_idu_decoder idu_de (
       .clock(clock),
 
-      .out_alu(alu),
-      .out_jen(idu_rnu.jen),
-      .out_ben(idu_rnu.ben),
-      .out_sen(idu_rnu.wen),
-      .out_len(idu_rnu.ren),
+      .out_alu (alu),
+      .out_ben (idu_rnu.ben),
+      .out_jen (idu_rnu.jen),
+      .out_jren(idu_rnu.jren),
+      .out_wen (idu_rnu.wen),
+      .out_ren (idu_rnu.ren),
 
       .out_atom(idu_rnu.atom),
 

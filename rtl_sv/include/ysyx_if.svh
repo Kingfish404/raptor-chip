@@ -11,13 +11,12 @@ interface ifu_bpu_if #(
     parameter int RSB_SIZE = `YSYX_RSB_SIZE
 );
   logic [XLEN-1:0] pc;
-  logic [XLEN-1:0] inst;
 
   logic [XLEN-1:0] npc;
   logic taken;
 
-  modport out(output pc, inst, input npc, taken);
-  modport in(input pc, inst, output npc, taken);
+  modport out(output pc, input npc, taken);
+  modport in(input pc, output npc, taken);
 endinterface
 
 interface ifu_l1i_if #(
@@ -227,16 +226,18 @@ interface cmu_pipe_if #(
   logic [XLEN-1:0] cpc;
   logic [RLEN-1:0] rd;
 
-  logic jen;
   logic ben;
+  logic jen;
+  logic jren;
+  logic btaken;
 
   logic fence_time;
   logic fence_i;
 
   logic flush_pipe;
 
-  modport in(input rpc, cpc, rd, jen, ben, fence_time, fence_i, flush_pipe);
-  modport out(output rpc, cpc, rd, jen, ben, fence_time, fence_i, flush_pipe);
+  modport in(input rpc, cpc, rd, ben, jen, jren, btaken, fence_time, fence_i, flush_pipe);
+  modport out(output rpc, cpc, rd, ben, jen, jren, btaken, fence_time, fence_i, flush_pipe);
 endinterface
 
 `endif

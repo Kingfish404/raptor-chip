@@ -17,18 +17,21 @@ module ysyx_cmu #(
   logic [31:0] inst;
   logic [XLEN-1:0] rpc, npc;
 
-  logic jen, ben;
+  logic ben, jen, jren;
 
   assign prev_valid = rou_cmu.valid;
-  assign jen = rou_cmu.jen;
   assign ben = rou_cmu.ben;
+  assign jen = rou_cmu.jen;
+  assign jren = rou_cmu.jren;
 
   assign cmu_bcast.rpc = rou_cmu.pc;  // retire pc
   assign cmu_bcast.cpc = rou_cmu.npc;  // correct pc
   assign cmu_bcast.rd = rou_cmu.rd;
 
-  assign cmu_bcast.jen = jen;
-  assign cmu_bcast.ben = ben;
+  assign cmu_bcast.ben = prev_valid && ben;
+  assign cmu_bcast.jen = prev_valid && jen;
+  assign cmu_bcast.jren = prev_valid && jren;
+  assign cmu_bcast.btaken = prev_valid && rou_cmu.btaken;
 
   assign cmu_bcast.fence_time = rou_cmu.fence_time;
   assign cmu_bcast.fence_i = rou_cmu.fence_i;

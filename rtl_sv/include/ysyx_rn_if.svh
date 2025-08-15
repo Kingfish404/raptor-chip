@@ -2,6 +2,16 @@
 `define YSYX_RN_IF_SVH
 `include "ysyx.svh"
 
+interface decode_common_if #(
+    parameter int XLEN = `YSYX_XLEN
+);
+  logic ben;
+  logic jen;
+  logic jren;
+
+  modport in(input ben, jen, jren);
+  modport out(output ben, jen, jren);
+endinterface
 
 interface rnu_rou_if #(
     parameter unsigned PLEN = `YSYX_PHY_LEN,
@@ -10,8 +20,9 @@ interface rnu_rou_if #(
 );
   logic c;
   logic [4:0] alu;
-  logic jen;
   logic ben;
+  logic jen;
+  logic jren;
   logic wen;
   logic ren;
   logic atom;
@@ -40,7 +51,6 @@ interface rnu_rou_if #(
   logic [XLEN-1:0] op2;
 
   logic [XLEN-1:0] pnpc;
-
   logic [31:0] inst;
   logic [XLEN-1:0] pc;
 
@@ -49,7 +59,7 @@ interface rnu_rou_if #(
 
   modport master(
       output c,
-      output alu, jen, ben, wen, ren, atom,
+      output alu, ben, jen, jren, wen, ren, atom,
       output system, ecall, ebreak, mret, csr_csw,
       output trap, tval, cause,
       output f_i, f_time,
@@ -63,7 +73,7 @@ interface rnu_rou_if #(
   );
   modport slave(
       input c,
-      input alu, jen, ben, wen, ren, atom,
+      input alu, ben, jen, jren, wen, ren, atom,
       input system, ecall, ebreak, mret, csr_csw,
       input trap, tval, cause,
       input f_i, f_time,
@@ -100,8 +110,9 @@ interface rou_exu_if #(
 );
   logic c;
   logic [4:0] alu;
-  logic jen;
   logic ben;
+  logic jen;
+  logic jren;
   logic wen;
   logic ren;
   logic atom;
@@ -143,7 +154,7 @@ interface rou_exu_if #(
 
   modport master(
       output c,
-      output alu, jen, ben, wen, ren, atom,
+      output alu, ben, jen, jren, wen, ren, atom,
       output system, ecall, ebreak, mret, csr_csw,
       output trap, tval, cause,
       output fence_i, fence_time,
@@ -158,7 +169,7 @@ interface rou_exu_if #(
   );
   modport slave(
       input c,
-      input alu, jen, ben, wen, ren, atom,
+      input alu, ben, jen, jren, wen, ren, atom,
       input system, ecall, ebreak, mret, csr_csw,
       input trap, tval, cause,
       input fence_i, fence_time,
@@ -181,6 +192,7 @@ interface exu_rou_if #(
   logic [31:0] inst;
   logic [XLEN-1:0] pc;
   logic [XLEN-1:0] npc;
+  logic btaken;
 
   logic [$clog2(`YSYX_ROB_SIZE):0] dest;
   logic [XLEN-1:0] result;
@@ -204,7 +216,7 @@ interface exu_rou_if #(
   logic valid;
 
   modport in(
-      input inst, pc, npc,
+      input inst, pc, npc, btaken,
       input dest, result, ebreak,
       input prd, rd,
       input csr_wen, csr_wdata, csr_addr, ecall, mret,
@@ -212,7 +224,7 @@ interface exu_rou_if #(
       input valid
   );
   modport out(
-      output inst, pc, npc,
+      output inst, pc, npc, btaken,
       output dest, result, ebreak,
       output prd, rd,
       output csr_wen, csr_wdata, csr_addr, ecall, mret,
@@ -272,9 +284,11 @@ interface rou_cmu_if #(
   logic [PLEN-1:0] prd;
   logic [PLEN-1:0] prs;
 
+  logic btaken;
   logic [XLEN-1:0] npc;
-  logic jen;
   logic ben;
+  logic jen;
+  logic jren;
 
   logic ebreak;
   logic fence_time;
@@ -286,14 +300,14 @@ interface rou_cmu_if #(
 
   modport out(
       output rd, inst, pc,
-      output npc, jen, ben,
+      output btaken, npc, ben, jen, jren,
       output prd, prs,
       output ebreak, fence_time, fence_i, flush_pipe,
       output valid
   );
   modport in(
       input rd, inst, pc,
-      input npc, jen, ben,
+      input btaken, npc, ben, jen, jren,
       input prd, prs,
       input ebreak, fence_time, fence_i, flush_pipe,
       input valid

@@ -8,8 +8,9 @@ interface idu_rnu_if #(
 );
   logic c;
   logic [4:0] alu;
-  logic jen;
   logic ben;
+  logic jen;
+  logic jren;
   logic wen;
   logic ren;
   logic atom;
@@ -38,7 +39,6 @@ interface idu_rnu_if #(
   logic [$clog2(`YSYX_ROB_SIZE):0] dest;
 
   logic [XLEN-1:0] pnpc;
-
   logic [31:0] inst;
   logic [XLEN-1:0] pc;
 
@@ -47,12 +47,13 @@ interface idu_rnu_if #(
 
   modport master(
       output c,
-      output alu, jen, ben, wen, ren, atom,
+      output alu, ben, jen, jren, wen, ren, atom,
       output system, ecall, ebreak, mret, csr_csw,
       output trap, tval, cause,
       output f_i, f_time,
       output rd, imm, op1, op2, rs1, rs2,
       output qj, qk, dest,
+
       output pnpc,
       output inst,
       output pc,
@@ -61,12 +62,13 @@ interface idu_rnu_if #(
   );
   modport slave(
       input c,
-      input alu, jen, ben, wen, ren, atom,
+      input alu, ben, jen, jren, wen, ren, atom,
       input system, ecall, ebreak, mret, csr_csw,
       input trap, tval, cause,
       input f_i, f_time,
       input rd, imm, op1, op2, rs1, rs2,
       input qj, qk, dest,
+
       input pnpc,
       input inst,
       input pc,

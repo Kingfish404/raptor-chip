@@ -27,17 +27,21 @@ module ysyx_ifu #(
   state_ifu_t state_ifu;
   logic [XLEN-1:0] pc;
   logic [XLEN-1:0] pc_ifu;
+  logic [XLEN-1:0] seqpc;
   logic [XLEN-1:0] nextpc;
 
   logic ifu_hazard;
-  logic [6:0] opcode;
+  logic pre_is_c;
   logic is_c;
+  logic [6:0] opcode;
   logic is_sys;
+  logic recv_ready;
   logic valid;
 
   logic [XLEN-1:0] inst;
 
   assign ifu_hazard = state_ifu == STALL;
+  assign pre_is_c = !(ifu_l1i.inst[1:0] == 2'b11);
   assign is_c = !(inst[1:0] == 2'b11);
   assign opcode = is_c ? {2'b0, {inst[15:13]}, {inst[1:0]}} : inst[6:0];
   assign is_sys = (opcode == `YSYX_OP_SYSTEM) || (opcode == `YSYX_OP_FENCE_);
@@ -45,18 +49,20 @@ module ysyx_ifu #(
   assign valid = state_ifu == VALID;
 
   assign ifu_bpu.pc = pc_ifu;
-  assign ifu_bpu.inst = ifu_l1i.inst;
 
   assign ifu_l1i.pc = pc_ifu;
   assign ifu_l1i.invalid = cmu_bcast.fence_i;
 
-  assign ifu_idu.pc = pc;
   assign ifu_idu.pnpc = pc_ifu;
   assign ifu_idu.inst = inst;
+  assign ifu_idu.pc = pc;
 
   assign ifu_idu.valid = valid;
 
-  assign nextpc = (cmu_bcast.flush_pipe ? cmu_bcast.cpc : ifu_bpu.npc);
+  assign seqpc = pc_ifu + (pre_is_c ? 'h2 : 'h4);
+  assign nextpc = (cmu_bcast.flush_pipe ? cmu_bcast.cpc : ifu_bpu.taken ? ifu_bpu.npc : seqpc);
+
+  assign recv_ready = (ifu_l1i.valid && (ifu_idu.ready || (state_ifu == IDLE)));
 
   always @(posedge clock) begin
     if (reset) begin
@@ -66,25 +72,17 @@ module ysyx_ifu #(
         IDLE: begin
           if (cmu_bcast.flush_pipe) begin
             state_ifu <= IDLE;
-            pc_ifu <= nextpc;
           end else if (ifu_l1i.valid) begin
             state_ifu <= VALID;
-            inst <= ifu_l1i.inst;
-            pc <= pc_ifu;
-            pc_ifu <= nextpc;
           end
         end
         VALID: begin
           if (cmu_bcast.flush_pipe) begin
             state_ifu <= IDLE;
-            pc_ifu <= nextpc;
           end else if (is_sys) begin
             state_ifu <= STALL;
           end else if (ifu_idu.ready) begin
             if (ifu_l1i.valid) begin
-              inst <= ifu_l1i.inst;
-              pc <= pc_ifu;
-              pc_ifu <= nextpc;
             end else begin
               state_ifu <= IDLE;
             end
@@ -93,13 +91,19 @@ module ysyx_ifu #(
         STALL: begin
           if (cmu_bcast.flush_pipe) begin
             state_ifu <= IDLE;
-            pc_ifu <= nextpc;
           end
         end
         default: begin
           state_ifu <= IDLE;
         end
       endcase
+      if (recv_ready || cmu_bcast.flush_pipe) begin
+        pc_ifu <= nextpc;
+      end
+      if (recv_ready) begin
+        inst <= ifu_l1i.inst;
+        pc   <= pc_ifu;
+      end
     end
   end
 

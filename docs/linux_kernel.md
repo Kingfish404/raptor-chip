@@ -11,15 +11,15 @@
 ```shell
 git clone https://github.com/riscv-software-src/opensbi
 
-make PLATFORM_RISCV_ISA=rv32imac_zicsr_zifencei_zicntr PLATFORM_RISCV_XLEN=32 PLATFORM=generic -j`nproc`
+make PLATFORM_RISCV_ISA=rv32imac_zicntr_zicsr_zifencei PLATFORM_RISCV_XLEN=32 PLATFORM=generic -j`nproc`
 # or build with Linux Image as payload
-make PLATFORM_RISCV_ISA=rv32imac_zicsr_zifencei_zicntr PLATFORM_RISCV_XLEN=32 PLATFORM=generic -j`nproc` FW_PAYLOAD_PATH=~/linux/linux-6.14.2/arch/riscv/boot/Image
+make PLATFORM_RISCV_ISA=rv32imac_zicntr_zicsr_zifencei PLATFORM_RISCV_XLEN=32 PLATFORM=generic -j`nproc` FW_PAYLOAD_PATH=~/linux/linux-6.14.2/arch/riscv/boot/Image
 
 # or build using llvm + clang
 brew install llvm lld
-make LLVM=1 PLATFORM_RISCV_ISA=rv32imac_zicsr_zifencei_zicntr PLATFORM_RISCV_XLEN=32 PLATFORM=generic -j`nproc`
+make LLVM=1 PLATFORM_RISCV_ISA=rv32imac_zicntr_zicsr_zifencei PLATFORM_RISCV_XLEN=32 PLATFORM=generic -j`nproc`
 # with Linux Image as payload
-make LLVM=1 PLATFORM_RISCV_ISA=rv32imac_zicsr_zifencei_zicntr PLATFORM_RISCV_XLEN=32 PLATFORM=generic -j`nproc` FW_PAYLOAD_PATH=~/linux/linux-6.14.2/arch/riscv/boot/Image
+make LLVM=1 PLATFORM_RISCV_ISA=rv32imac_zicntr_zicsr_zifencei PLATFORM_RISCV_XLEN=32 PLATFORM=generic -j`nproc` FW_PAYLOAD_PATH=~/linux/linux-6.14.2/arch/riscv/boot/Image
 ```
 
 Both `QEMU` and `Spike` device tree tables are supported and listed in `nemu/src/memory/rom`.

@@ -199,7 +199,7 @@ module ysyx #(
   ysyx_rou rou (
       .clock(clock),
 
-      .idu_rou(rnu_rou),
+      .rnu_rou(rnu_rou),
 
       // issue
       .exu_prf(exu_prf),
