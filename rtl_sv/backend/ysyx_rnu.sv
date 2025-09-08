@@ -1,5 +1,6 @@
 `include "ysyx.svh"
 `include "ysyx_if.svh"
+import ysyx_pkg::*;
 
 module ysyx_rnu #(
     parameter unsigned RIQ_SIZE = `YSYX_RIQ_SIZE,
@@ -32,34 +33,14 @@ module ysyx_rnu #(
   logic [$clog2(RIQ_SIZE)-1:0] rnq_head;
   logic [RIQ_SIZE-1:0] rnq_valid;
 
-  logic rnq_c[RIQ_SIZE];
-  logic [4:0] rnq_alu[RIQ_SIZE];
-  logic rnq_ben[RIQ_SIZE];
-  logic rnq_jen[RIQ_SIZE];
-  logic rnq_jren[RIQ_SIZE];
-  logic rnq_wen[RIQ_SIZE];
-  logic rnq_ren[RIQ_SIZE];
-  logic rnq_atom[RIQ_SIZE];
+  ysyx_pkg::uop_t rnq_uops[RIQ_SIZE];
 
-  logic rnq_system[RIQ_SIZE];
-  logic rnq_ecall[RIQ_SIZE];
-  logic rnq_ebreak[RIQ_SIZE];
-  logic rnq_mret[RIQ_SIZE];
-  logic [2:0] rnq_csr_csw[RIQ_SIZE];
+  logic [RLEN-1:0] rnq_rd[RIQ_SIZE];
 
-  logic rnq_trap[RIQ_SIZE];
-  logic [XLEN-1:0] rnq_tval[RIQ_SIZE];
-  logic [XLEN-1:0] rnq_cause[RIQ_SIZE];
-
-  logic rnq_f_i[RIQ_SIZE];
-  logic rnq_f_time[RIQ_SIZE];
-
-  logic [31:0] rnq_imm[RIQ_SIZE];
   logic [31:0] rnq_op1[RIQ_SIZE];
   logic [31:0] rnq_op2[RIQ_SIZE];
   logic [RLEN-1:0] rnq_rs1[RIQ_SIZE];
   logic [RLEN-1:0] rnq_rs2[RIQ_SIZE];
-  logic [RLEN-1:0] rnq_rd[RIQ_SIZE];
 
   logic [XLEN-1:0] rnq_pnpc[RIQ_SIZE];
   logic [31:0] rnq_inst[RIQ_SIZE];
@@ -67,6 +48,50 @@ module ysyx_rnu #(
   // } micro-op queue (UOQ) }
 
   logic rename_fire;
+
+  // { Register Mapping Table
+  logic [RLEN-1:0] arch_reg_a, arch_reg_b;
+  logic [PLEN-1:0] phys_a, phys_b;
+  logic write_en;
+  logic [RLEN-1:0] arch_reg_w;
+  logic [PLEN-1:0] phys_w;
+  logic write_en_b;
+  logic [RLEN-1:0] arch_reg_w_b;
+  logic [PLEN-1:0] phys_w_b;
+  logic [PLEN-1:0] map[RNUM];
+
+  // { Free List
+  logic allocate;
+  logic [PLEN-1:0] new_pr;
+  logic empty;
+  logic deallocate;
+  logic [PLEN-1:0] dealloc_pr;
+  logic [PLEN-1:0] fifo[PNUM];  // FIFO queue for free physical registers
+  logic [PLEN-1:0] head, tail;
+  logic [PLEN-1:0] inflight_pr_num;
+  logic [PLEN-1:0] inflight_inst_num;
+
+  // { Physical Register File
+  logic [PLEN-1:0] prf_phys_a, prf_phys_b;
+  logic [XLEN-1:0] data_a, data_b;
+  logic prf_write_en;
+  logic [PLEN-1:0] prf_phys_w;
+  logic [XLEN-1:0] prf_data_w;
+  logic prf_write_en_b;
+  logic [PLEN-1:0] prf_phys_w_b;
+  logic [XLEN-1:0] prf_data_w_b;
+  // Physical register
+  logic [XLEN-1:0] prf[PNUM];
+  logic [PNUM-1:0] prf_valid;
+  logic [PNUM-1:0] prf_transient;  // Track transient registers
+
+  // { Register Alias Table
+  logic [RLEN-1:0] rat_reg_a, rat_reg_b;
+  logic [PLEN-1:0] rat_phys_a, rat_phys_b;
+  logic rat_write_en;
+  logic [RLEN-1:0] rat_reg_w;
+  logic [PLEN-1:0] rat_phys_w;
+  logic [PLEN-1:0] rat[RNUM];
 
   assign valid         = rnq_valid[rnq_tail];
   assign ready         = rnq_valid[rnq_head] == 0;
@@ -82,41 +107,17 @@ module ysyx_rnu #(
     end else begin
       if (idu_rnu.valid && rnq_valid[rnq_head] == 0) begin
         // Issue to uoq
-        rnq_head              <= rnq_head + 1;
-        rnq_valid[rnq_head]   <= 1;
+        rnq_head            <= rnq_head + 1;
+        rnq_valid[rnq_head] <= 1;
 
-        rnq_c[rnq_head]       <= idu_rnu.c;
-        rnq_alu[rnq_head]     <= idu_rnu.alu;
-        rnq_ben[rnq_head]     <= idu_rnu.ben;
-        rnq_jen[rnq_head]     <= idu_rnu.jen;
-        rnq_jren[rnq_head]    <= idu_rnu.jren;
-        rnq_wen[rnq_head]     <= idu_rnu.wen;
-        rnq_ren[rnq_head]     <= idu_rnu.ren;
-        rnq_atom[rnq_head]    <= idu_rnu.atom;
+        rnq_uops[rnq_head]  <= idu_rnu.uop;
 
-        rnq_system[rnq_head]  <= idu_rnu.system;
-        rnq_ecall[rnq_head]   <= idu_rnu.ecall;
-        rnq_ebreak[rnq_head]  <= idu_rnu.ebreak;
-        rnq_mret[rnq_head]    <= idu_rnu.mret;
-        rnq_csr_csw[rnq_head] <= idu_rnu.csr_csw;
+        rnq_rd[rnq_head]    <= idu_rnu.uop.rd;
+        rnq_op1[rnq_head]   <= idu_rnu.op1;
+        rnq_op2[rnq_head]   <= idu_rnu.op2;
+        rnq_rs1[rnq_head]   <= idu_rnu.rs1;
+        rnq_rs2[rnq_head]   <= idu_rnu.rs2;
 
-        rnq_trap[rnq_head]    <= idu_rnu.trap;
-        rnq_tval[rnq_head]    <= idu_rnu.tval;
-        rnq_cause[rnq_head]   <= idu_rnu.cause;
-
-        rnq_f_i[rnq_head]     <= idu_rnu.f_i;
-        rnq_f_time[rnq_head]  <= idu_rnu.f_time;
-
-        rnq_rd[rnq_head]      <= idu_rnu.rd;
-        rnq_imm[rnq_head]     <= idu_rnu.imm;
-        rnq_op1[rnq_head]     <= idu_rnu.op1;
-        rnq_op2[rnq_head]     <= idu_rnu.op2;
-        rnq_rs1[rnq_head]     <= idu_rnu.rs1;
-        rnq_rs2[rnq_head]     <= idu_rnu.rs2;
-
-        rnq_pnpc[rnq_head]    <= idu_rnu.pnpc;
-        rnq_inst[rnq_head]    <= idu_rnu.inst;
-        rnq_pc[rnq_head]      <= idu_rnu.pc;
       end
       if (rename_fire) begin
         // Dispatch to exu and rob
@@ -126,59 +127,17 @@ module ysyx_rnu #(
     end
   end
 
-  assign rnu_rou.c       = rnq_c[rnq_tail];
-  assign rnu_rou.alu     = rnq_alu[rnq_tail];
-  assign rnu_rou.ben     = rnq_ben[rnq_tail];
-  assign rnu_rou.jen     = rnq_jen[rnq_tail];
-  assign rnu_rou.jren    = rnq_jren[rnq_tail];
-  assign rnu_rou.wen     = rnq_wen[rnq_tail];
-  assign rnu_rou.ren     = rnq_ren[rnq_tail];
-  assign rnu_rou.atom    = rnq_atom[rnq_tail];
+  assign rnu_rou.uop = rnq_uops[rnq_tail];
 
-  assign rnu_rou.system  = rnq_system[rnq_tail];
-  assign rnu_rou.ecall   = rnq_ecall[rnq_tail];
-  assign rnu_rou.ebreak  = rnq_ebreak[rnq_tail];
-  assign rnu_rou.mret    = rnq_mret[rnq_tail];
-  assign rnu_rou.csr_csw = rnq_csr_csw[rnq_tail];
+  assign rnu_rou.op1 = rnq_op1[rnq_tail];
+  assign rnu_rou.op2 = rnq_op2[rnq_tail];
 
-  assign rnu_rou.trap    = rnq_trap[rnq_tail];
-  assign rnu_rou.tval    = rnq_tval[rnq_tail];
-  assign rnu_rou.cause   = rnq_cause[rnq_tail];
-
-  assign rnu_rou.f_i     = rnq_f_i[rnq_tail];
-  assign rnu_rou.f_time  = rnq_f_time[rnq_tail];
-
-  assign rnu_rou.rd      = rnq_rd[rnq_tail];
-  assign rnu_rou.imm     = rnq_imm[rnq_tail];
-  assign rnu_rou.op1     = rnq_op1[rnq_tail];
-  assign rnu_rou.op2     = rnq_op2[rnq_tail];
-
-  assign rnu_rou.pnpc    = rnq_pnpc[rnq_tail];
-  assign rnu_rou.inst    = rnq_inst[rnq_tail];
-  assign rnu_rou.pc      = rnq_pc[rnq_tail];
-
-  // --- Register Renaming
-  assign rnu_rou.pr1     = map[rnq_rs1[rnq_tail]];
-  assign rnu_rou.pr2     = map[rnq_rs2[rnq_tail]];
-  assign rnu_rou.prd     = rnq_rd[rnq_tail] != 0 ? new_pr : 0;
-  assign rnu_rou.prs     = map[rnq_rd[rnq_tail]];
-  // === Register Renaming
-
-  assign allocate        = rename_fire && !empty && rnq_rd[rnq_tail] != 0;
-  assign new_pr          = fifo[head[PLEN-1:0]];
-  assign empty           = (head == tail);
-  assign deallocate      = rou_cmu.valid && rou_cmu.rd != 0;
-  assign dealloc_pr      = rou_cmu.prs;
+  assign allocate    = rename_fire && !empty && rnq_rd[rnq_tail] != 0;
+  assign new_pr      = fifo[head[PLEN-1:0]];
+  assign empty       = (head == tail);
+  assign deallocate  = rou_cmu.valid && rou_cmu.rd != 0;
+  assign dealloc_pr  = rou_cmu.prs;
   // { Free List
-  logic allocate;
-  logic [PLEN-1:0] new_pr;
-  logic empty;
-  logic deallocate;
-  logic [PLEN-1:0] dealloc_pr;
-  logic [PLEN-1:0] fifo[PNUM];  // FIFO queue for free physical registers
-  logic [PLEN-1:0] head, tail;
-  logic [PLEN-1:0] inflight_pr_num;
-  logic [PLEN-1:0] inflight_inst_num;
   always @(posedge clock) begin
     if (reset) begin
       for (integer i = 0; i < PNUM; i = i + 1) begin
@@ -231,15 +190,6 @@ module ysyx_rnu #(
   assign arch_reg_w = rnq_rd[rnq_tail];
   assign phys_w = new_pr;
   // { Register Mapping Table
-  logic [RLEN-1:0] arch_reg_a, arch_reg_b;
-  logic [PLEN-1:0] phys_a, phys_b;
-  logic write_en;
-  logic [RLEN-1:0] arch_reg_w;
-  logic [PLEN-1:0] phys_w;
-  logic write_en_b;
-  logic [RLEN-1:0] arch_reg_w_b;
-  logic [PLEN-1:0] phys_w_b;
-  logic [PLEN-1:0] map[RNUM];
   always @(posedge clock) begin
     if (reset) begin
       for (integer i = 0; i < RNUM; i = i + 1) begin
@@ -249,7 +199,7 @@ module ysyx_rnu #(
       if (cmu_bcast.flush_pipe) begin
         for (integer i = 0; i < RNUM; i = i + 1) begin
           if (rat_write_en && rat_reg_w == i[RLEN-1:0]) begin
-            map[rat_reg_w] = rat_phys_w;  // Update mapping for the written register
+            map[rat_reg_w] <= rat_phys_w;  // Update mapping for the written register
           end else begin
             map[i] <= rat[i];  // Reset to initial mapping
           end
@@ -271,12 +221,6 @@ module ysyx_rnu #(
   assign rat_reg_w = rou_cmu.rd;
   assign rat_phys_w = rou_cmu.prd;
   // { Register Alias Table
-  logic [RLEN-1:0] rat_reg_a, rat_reg_b;
-  logic [PLEN-1:0] rat_phys_a, rat_phys_b;
-  logic rat_write_en;
-  logic [RLEN-1:0] rat_reg_w;
-  logic [PLEN-1:0] rat_phys_w;
-  logic [PLEN-1:0] rat[RNUM];
   always @(posedge clock) begin
     if (reset) begin
       for (integer i = 0; i < RNUM; i = i + 1) begin
@@ -292,34 +236,28 @@ module ysyx_rnu #(
   end
   // } Register Alias Table
 
+  // --- Register Renaming
+  assign rnu_rou.pr1       = map[rnq_rs1[rnq_tail]];
+  assign rnu_rou.pr2       = map[rnq_rs2[rnq_tail]];
+  assign rnu_rou.prd       = rnq_rd[rnq_tail] != 0 ? new_pr : 0;
+  assign rnu_rou.prs       = map[rnq_rd[rnq_tail]];
+  // === Register Renaming
 
   // { Commit
-  assign prf_phys_a = exu_prf.pr1;
-  assign prf_phys_b = exu_prf.pr2;
-  assign exu_prf.pv1 = data_a;
+  assign prf_phys_a        = exu_prf.pr1;
+  assign prf_phys_b        = exu_prf.pr2;
+  assign exu_prf.pv1       = data_a;
   assign exu_prf.pv1_valid = prf_valid[prf_phys_a];
-  assign exu_prf.pv2 = data_b;
+  assign exu_prf.pv2       = data_b;
   assign exu_prf.pv2_valid = prf_valid[prf_phys_b];
   // } Commit
-  assign prf_write_en = exu_rou.valid && exu_rou.rd != 0;
-  assign prf_phys_w = exu_rou.prd;
-  assign prf_data_w = exu_rou.result;
-  assign prf_write_en_b = exu_ioq_rou.valid && exu_ioq_rou.rd != 0;
-  assign prf_phys_w_b = exu_ioq_rou.prd;
-  assign prf_data_w_b = exu_ioq_rou.result;
+  assign prf_write_en      = exu_rou.valid && exu_rou.rd != 0;
+  assign prf_phys_w        = exu_rou.prd;
+  assign prf_data_w        = exu_rou.result;
+  assign prf_write_en_b    = exu_ioq_rou.valid && exu_ioq_rou.rd != 0;
+  assign prf_phys_w_b      = exu_ioq_rou.prd;
+  assign prf_data_w_b      = exu_ioq_rou.result;
   // { Physical Register File
-  logic [PLEN-1:0] prf_phys_a, prf_phys_b;
-  logic [XLEN-1:0] data_a, data_b;
-  logic prf_write_en;
-  logic [PLEN-1:0] prf_phys_w;
-  logic [XLEN-1:0] prf_data_w;
-  logic prf_write_en_b;
-  logic [PLEN-1:0] prf_phys_w_b;
-  logic [XLEN-1:0] prf_data_w_b;
-  // Physical register
-  logic [XLEN-1:0] prf[PNUM];
-  logic [PNUM-1:0] prf_valid;
-  logic [PNUM-1:0] prf_transient;  // Track transient registers
   always @(posedge clock) begin
     if (reset) begin
       for (integer i = 0; i < PNUM; i = i + 1) begin

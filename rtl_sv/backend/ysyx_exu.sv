@@ -146,9 +146,9 @@ module ysyx_exu #(
   assign exu_lsu.pc = ioq_pc[ioq_head];
 
   assign ioq_ready = ioq_valid[ioq_tail] == 0;
-  assign rs_ready = ((rou_exu.wen || rou_exu.ren)
+  assign rs_ready = ((rou_exu.uop.wen || rou_exu.uop.ren)
     ? ioq_ready
-    : free_found && !(mul_found && rou_exu.alu[4:4]));
+    : free_found && !(mul_found && rou_exu.uop.alu[4:4]));
   assign rou_exu.ready = rs_ready;
 
   ysyx_exu_alu gen_alu (
@@ -172,29 +172,29 @@ module ysyx_exu #(
       ioq_tail <= 0;
     end else begin
       // In-Order Queue (IOQ)
-      if (rou_exu.valid && ioq_ready && (rou_exu.wen || rou_exu.ren)) begin
+      if (rou_exu.valid && ioq_ready && (rou_exu.uop.wen || rou_exu.uop.ren)) begin
         // Dispatch send of IOQ
         ioq_valid[ioq_tail] <= 1;
 
-        ioq_inst[ioq_tail] <= rou_exu.inst;
-        ioq_pc[ioq_tail] <= rou_exu.pc;
+        ioq_inst[ioq_tail] <= rou_exu.uop.inst;
+        ioq_pc[ioq_tail] <= rou_exu.uop.pc;
 
         ioq_pr1[ioq_tail] <= rou_exu.pr1;
         ioq_pr2[ioq_tail] <= rou_exu.pr2;
         ioq_prd[ioq_tail] <= rou_exu.prd;
-        ioq_rd[ioq_tail] <= rou_exu.rd;
+        ioq_rd[ioq_tail] <= rou_exu.uop.rd;
 
-        ioq_c[ioq_tail] <= rou_exu.c;
-        ioq_alu[ioq_tail] <= rou_exu.alu;
+        ioq_c[ioq_tail] <= rou_exu.uop.c;
+        ioq_alu[ioq_tail] <= rou_exu.uop.alu;
         ioq_vj[ioq_tail] <= rou_exu.op1;
         ioq_vk[ioq_tail] <= rou_exu.op2;
         ioq_dest[ioq_tail] <= rou_exu.dest;
 
-        ioq_imm[ioq_tail] <= rou_exu.imm;
+        ioq_imm[ioq_tail] <= rou_exu.uop.imm;
 
-        ioq_wen[ioq_tail] <= rou_exu.wen;
-        ioq_ren[ioq_tail] <= rou_exu.ren;
-        ioq_atom[ioq_tail] <= rou_exu.atom;
+        ioq_wen[ioq_tail] <= rou_exu.uop.wen;
+        ioq_ren[ioq_tail] <= rou_exu.uop.ren;
+        ioq_atom[ioq_tail] <= rou_exu.uop.atom;
 
         ioq_tail <= (ioq_tail + 1);
       end
@@ -250,10 +250,10 @@ module ysyx_exu #(
       // Reservation Station (RS)
       for (bit [XLEN-1:0] i = 0; i < RS_SIZE; i++) begin
         if (free_found && i[$clog2(RS_SIZE)-1:0] == free_idx) begin
-          if (rou_exu.valid && rs_ready && !(rou_exu.wen || rou_exu.ren)) begin
+          if (rou_exu.valid && rs_ready && !(rou_exu.uop.wen || rou_exu.uop.ren)) begin
             // Dispatch receive
             rs_valid[free_idx] <= 1;
-            rs_alu[free_idx] <= rou_exu.alu;
+            rs_alu[free_idx] <= rou_exu.uop.alu;
             rs_vj[free_idx] <= rou_exu.op1;
             rs_vk[free_idx] <= rou_exu.op2;
             rs_dest[free_idx] <= rou_exu.dest;
@@ -261,26 +261,26 @@ module ysyx_exu #(
             rs_pr1[free_idx] <= rou_exu.pr1;
             rs_pr2[free_idx] <= rou_exu.pr2;
             rs_prd[free_idx] <= rou_exu.prd;
-            rs_rd[free_idx] <= rou_exu.rd;
+            rs_rd[free_idx] <= rou_exu.uop.rd;
 
-            rs_c[free_idx] <= rou_exu.c;
-            rs_jen[free_idx] <= rou_exu.jen;
-            rs_br_jmp[free_idx] <= (rou_exu.jen || rou_exu.ecall || rou_exu.mret);
-            rs_br_cond[free_idx] <= (rou_exu.ben);
-            rs_jump[free_idx] <= (rou_exu.jen);
-            rs_imm[free_idx] <= rou_exu.imm;
-            rs_pc[free_idx] <= rou_exu.pc;
-            rs_inst[free_idx] <= rou_exu.inst;
+            rs_c[free_idx] <= rou_exu.uop.c;
+            rs_jen[free_idx] <= rou_exu.uop.jen;
+            rs_br_jmp[free_idx] <= (rou_exu.uop.jen || rou_exu.uop.ecall || rou_exu.uop.mret);
+            rs_br_cond[free_idx] <= (rou_exu.uop.ben);
+            rs_jump[free_idx] <= (rou_exu.uop.jen);
+            rs_imm[free_idx] <= rou_exu.uop.imm;
+            rs_pc[free_idx] <= rou_exu.uop.pc;
+            rs_inst[free_idx] <= rou_exu.uop.inst;
 
-            rs_system[free_idx] <= rou_exu.system;
-            rs_ecall[free_idx] <= rou_exu.ecall;
-            rs_ebreak[free_idx] <= rou_exu.ebreak;
-            rs_mret[free_idx] <= rou_exu.mret;
-            rs_csr_csw[free_idx] <= rou_exu.csr_csw;
+            rs_system[free_idx] <= rou_exu.uop.system;
+            rs_ecall[free_idx] <= rou_exu.uop.ecall;
+            rs_ebreak[free_idx] <= rou_exu.uop.ebreak;
+            rs_mret[free_idx] <= rou_exu.uop.mret;
+            rs_csr_csw[free_idx] <= rou_exu.uop.csr_csw;
 
-            rs_trap[free_idx] <= rou_exu.trap;
-            rs_tval[free_idx] <= rou_exu.tval;
-            rs_cause[free_idx] <= rou_exu.cause;
+            rs_trap[free_idx] <= rou_exu.uop.trap;
+            rs_tval[free_idx] <= rou_exu.uop.tval;
+            rs_cause[free_idx] <= rou_exu.uop.cause;
           end
         end else if (rs_valid[i] && rs_pr1[i] == 0 && rs_pr2[i] == 0) begin
           // Mul

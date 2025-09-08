@@ -3,10 +3,10 @@
 `include "ysyx_dpi_c.svh"
 
 module ysyx_csr #(
+    parameter bit [7:0] XLEN = `YSYX_XLEN,
     parameter bit [7:0] R_W = 12,
     parameter bit [7:0] REG_W = 5,
-    parameter bit [XLEN-1:0] RESET_VAL = 0,
-    parameter bit [7:0] XLEN = `YSYX_XLEN
+    parameter bit [XLEN-1:0] RESET_VAL = 0
 ) (
     input clock,
 

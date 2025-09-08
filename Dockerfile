@@ -42,6 +42,9 @@ RUN make init && git clone https://github.com/parallaxsw/OpenSTA.git
 WORKDIR /workspaces/ysyx-workbench/third_party/yosys-opensta/OpenSTA/
 RUN cmake -DCUDD_DIR=../cudd-3.0.0 -B build . && cmake --build build -j`nproc`
 
+RUN git clone --recursive https://github.com/povik/yosys-slang \
+    && cd yosys-slang && make -j`nproc` && make install
+
 WORKDIR /workspaces/ysyx-workbench/nemu
 RUN make riscv32_linux_defconfig && make -j
 

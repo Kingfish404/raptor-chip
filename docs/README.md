@@ -5,6 +5,20 @@
 - [PROFILE](./PROFILE.md)
 - [REFERENCE](./REFERENCE.md)
 
+## Code Style and Conventions
+
+SystemVerilog features used in this project:
+- `logic` instead of `reg` and `wire`
+- `always_comb`, `always_ff`, `always_latch` instead of `always @(*)`, `always @(posedge clk)`, `always @(...)`
+- `typedef enum` for finite state machines
+- `typedef struct` for bundled signals
+- `interface` for module ports
+- `package` for global definitions
+
+The rtl should be synthesizable by Yosys (with slang^[1]).
+
+[1]: https://github.com/povik/yosys-slang
+
 ## (Micro)Architecture
 
 ![](./assets/npc-rv32.svg)

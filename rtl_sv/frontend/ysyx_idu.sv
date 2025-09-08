@@ -76,19 +76,19 @@ module ysyx_idu #(
 
   assign is_c = !(inst[1:0] == 2'b11);
   assign inst_idu = is_c ? inst_de : inst;
-  assign idu_rnu.c = is_c;
-  assign idu_rnu.alu = alu;
-  assign idu_rnu.rd[RLEN-1:0] = illegal_csr || illegal_inst ? 0 : rd[RLEN-1:0];
+  assign idu_rnu.uop.c = is_c;
+  assign idu_rnu.uop.alu = alu;
+  assign idu_rnu.uop.rd[RLEN-1:0] = illegal_csr || illegal_inst ? 0 : rd[RLEN-1:0];
 
-  assign idu_rnu.csr_csw = csr_csw;
+  assign idu_rnu.uop.csr_csw = csr_csw;
 
-  assign idu_rnu.trap = illegal_csr || illegal_inst;
-  assign idu_rnu.tval = illegal_csr || illegal_inst ? inst_idu : 0;
-  assign idu_rnu.cause = illegal_csr || illegal_inst ? 'h2 : 0;
+  assign idu_rnu.uop.trap = illegal_csr || illegal_inst;
+  assign idu_rnu.uop.tval = illegal_csr || illegal_inst ? inst_idu : 0;
+  assign idu_rnu.uop.cause = illegal_csr || illegal_inst ? 'h2 : 0;
 
-  assign idu_rnu.pnpc = pnpc_idu;
-  assign idu_rnu.inst = inst_idu;
-  assign idu_rnu.pc = pc_idu;
+  assign idu_rnu.uop.pnpc = pnpc_idu;
+  assign idu_rnu.uop.inst = inst_idu;
+  assign idu_rnu.uop.pc = pc_idu;
 
   assign illegal_inst = alu == `YSYX_ALU_ILL_;
   assign illegal_csr = (csr_csw != 3'b000) && !((0)
@@ -141,40 +141,39 @@ module ysyx_idu #(
 
   assign idu_rnu.rs1[RLEN-1:0] = rs1[RLEN-1:0];
   assign idu_rnu.rs2[RLEN-1:0] = rs2[RLEN-1:0];
-  assign idu_rnu.rd[RLEN-1:0]  = rd[RLEN-1:0];
 
   ysyx_idu_decoder idu_de (
       .clock(clock),
 
+      .in_pc  (pc_idu),
+      .in_inst(inst_idu),
+
       .out_alu (alu),
-      .out_ben (idu_rnu.ben),
-      .out_jen (idu_rnu.jen),
-      .out_jren(idu_rnu.jren),
-      .out_wen (idu_rnu.wen),
-      .out_ren (idu_rnu.ren),
+      .out_ben (idu_rnu.uop.ben),
+      .out_jen (idu_rnu.uop.jen),
+      .out_jren(idu_rnu.uop.jren),
+      .out_wen (idu_rnu.uop.wen),
+      .out_ren (idu_rnu.uop.ren),
 
-      .out_atom(idu_rnu.atom),
+      .out_atom(idu_rnu.uop.atom),
 
-      .out_sys_system(idu_rnu.system),
-      .out_sys_ebreak(idu_rnu.ebreak),
-      .out_sys_ecall(idu_rnu.ecall),
-      .out_sys_mret(idu_rnu.mret),
+      .out_sys_system(idu_rnu.uop.system),
+      .out_sys_ebreak(idu_rnu.uop.ebreak),
+      .out_sys_ecall(idu_rnu.uop.ecall),
+      .out_sys_mret(idu_rnu.uop.mret),
       .out_sys_csr_csw(csr_csw),
 
-      .out_fence_i(idu_rnu.f_i),
-      .out_fence_time(idu_rnu.f_time),
+      .out_fence_i(idu_rnu.uop.f_i),
+      .out_fence_time(idu_rnu.uop.f_time),
 
+      .out_imm(idu_rnu.uop.imm),
       .out_rd (rd),
-      .out_imm(idu_rnu.imm),
+      .out_csr(csr),
+
       .out_op1(idu_rnu.op1),
       .out_op2(idu_rnu.op2),
       .out_rs1(rs1),
       .out_rs2(rs2),
-      .out_csr(csr),
-
-      .in_inst(inst_idu),
-
-      .in_pc(pc_idu),
 
       .reset(reset)
   );

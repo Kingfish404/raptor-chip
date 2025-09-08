@@ -101,11 +101,11 @@ static void decode_operand(Decode *s, int *rd, int *rs, word_t *src1, word_t *sr
 /*
     31       27   25 24     20 19     15 14  12 11     7 6      0
     |  funct7       |   rs2   |   rs1   |funct3|  rd    | opcode | R-type
-    |  imm[11:0]              |   rs1   |funct3|  rd    | opcode | I-type
-    |  imm[11:5]    |   rs2   |   rs1   |funct3|imm[4:0]| opcode | S-type
-    |  imm[12|10:5] |   rs2   |   rs1|funct3|imm[4:1|11]| opcode | B-type
-    |  imm[31:12]                              |   rd   | opcode | U-type
-    |  imm[20|10:1|11|19:12]                   |   rd   | opcode | J-type
+    |  [11:0]                 |   rs1   |funct3|  rd    | opcode | I-type
+    |  [11:5]       |   rs2   |   rs1   |funct3|   [4:0]| opcode | S-type
+    |  [12|10:5]    |   rs2   |   rs1   |funct3|[4:1|11]| opcode | B-type
+    |  [31:12]                                 |   rd   | opcode | U-type
+    |  [20|10:1|11|19:12]                      |   rd   | opcode | J-type
  */
 static int decode_exec(Decode *s)
 {
@@ -138,7 +138,7 @@ static int decode_exec(Decode *s)
   }
 
   INSTPAT_START();
-  //      |31      24    19    14  11    6      0|
+  //      |31      24rs2 19rs1 14  11 rd 6      0|
   INSTPAT("??????? ????? ????? ??? ????? 01101 11", lui, U, R(rd) = imm);
   INSTPAT("??????? ????? ????? ??? ????? 00101 11", auipc, U, R(rd) = s->pc + imm);
   INSTPAT("??????? ????? ????? ??? ????? 11011 11", jal, J, R(rd) = s->snpc; s->dnpc = (s->pc + imm) & ~1);

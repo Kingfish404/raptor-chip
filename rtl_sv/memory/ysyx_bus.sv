@@ -118,7 +118,7 @@ module ysyx_bus #(
               bus_araddr <= l1d_bus.araddr;
               arid <= L1D;
               state_load_source <= L1D;
-              arsize = (
+              arsize <= (
                 ({3{l1d_bus.rstrb == 8'h1}} & 3'b000) |
                 ({3{l1d_bus.rstrb == 8'h3}} & 3'b001) |
                 ({3{l1d_bus.rstrb == 8'hf}} & 3'b010) |

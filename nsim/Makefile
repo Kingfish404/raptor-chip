@@ -126,19 +126,17 @@ pack: $(VSRCS) $(VHSRCS)
 	verilator -E -P $(addprefix -I, $(INC_PATH)) $(VSRCS) > $(BUILD_DIR)/ysyx_pack.sv
 	verilator -E -P --dump-defines $(addprefix -I, $(INC_PATH)) $(VSRCS) > $(BUILD_DIR)/ysyx_pack.svh
 
-sta:
+sta: pack
 	echo $(MAKECMDGOALS)
 	if [ ! -d $(YOSYS_OPENSTA) ]; then make YOSYS_OPENSTA; fi
 	make -C $(YOSYS_OPENSTA) sta show \
 		DESIGN=ysyx \
-		RTL_FILES="$(VSRCS)" \
-		VERILOG_INCLUDE_DIRS="$(INC_PATH)"
+		RTL_FILES="$(abspath $(BUILD_DIR)/ysyx_pack.sv)
 
-sta_local:
+sta_local: pack
 	make -C $(YOSYS_OPENSTA) sta_local show \
-	DESIGN=ysyx \
-	RTL_FILES="$(VSRCS)" \
-	VERILOG_INCLUDE_DIRS="$(INC_PATH)"
+		DESIGN=ysyx \
+		RTL_FILES="$(abspath $(BUILD_DIR)/ysyx_pack.sv)"
 
 lint:
 	$(VERILATOR) --lint-only -Wall $(VSRCS) $(INCFLAGS) --top-module $(VTARGET)
