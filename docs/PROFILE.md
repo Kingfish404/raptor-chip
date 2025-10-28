@@ -177,10 +177,10 @@ Total Power   ==  9.792e-03
 ### ysyxsoc simulation result
 
 ```log
-./build/ysyxSoCFull -b -n -d /Users/yujin/Developer/c-projects/ysyx-workbench/nemu/build/riscv32-nemu-interpreter-so -m /Users/yujin/Developer/c-projects/ysyx-workbench/nsim/csrc/mem/mrom-data/build/mrom-data.bin /Users/yujin/Developer/c-projects/ysyx-workbench/am-kernels/benchmarks/microbench/build/microbench-riscv32e-ysyxsoc.bin
-npc monitor.cc:74 load_file image: /Users/yujin/Developer/c-projects/ysyx-workbench/am-kernels/benchmarks/microbench/build/microbench-riscv32e-ysyxsoc.bin, size: 22925
-npc monitor.cc:105 load_img Load MROM image from /Users/yujin/Developer/c-projects/ysyx-workbench/nsim/csrc/mem/mrom-data/build/mrom-data.bin
-npc monitor.cc:74 load_file image: /Users/yujin/Developer/c-projects/ysyx-workbench/nsim/csrc/mem/mrom-data/build/mrom-data.bin, size: 24
+./build/ysyxSoCFull -b -n -d /Users/yujin/Developer/c-projects/raptor-chip/nemu/build/riscv32-nemu-interpreter-so -m /Users/yujin/Developer/c-projects/raptor-chip/nsim/csrc/mem/mrom-data/build/mrom-data.bin /Users/yujin/Developer/c-projects/raptor-chip/am-kernels/benchmarks/microbench/build/microbench-riscv32e-ysyxsoc.bin
+npc monitor.cc:74 load_file image: /Users/yujin/Developer/c-projects/raptor-chip/am-kernels/benchmarks/microbench/build/microbench-riscv32e-ysyxsoc.bin, size: 22925
+npc monitor.cc:105 load_img Load MROM image from /Users/yujin/Developer/c-projects/raptor-chip/nsim/csrc/mem/mrom-data/build/mrom-data.bin
+npc monitor.cc:74 load_file image: /Users/yujin/Developer/c-projects/raptor-chip/nsim/csrc/mem/mrom-data/build/mrom-data.bin, size: 24
 [src/memory/paddr.c:64 init_mem] physical memory area [0x80000000, 0x87ffffff]
 2024-12-23 11:49:51.354 ysyxSoCFull[59576:16288533] +[IMKClient subclass]: chose IMKClient_Modern
 2024-12-23 11:49:51.354 ysyxSoCFull[59576:16288533] +[IMKInputSession subclass]: chose IMKInputSession_Modern

@@ -27,7 +27,7 @@ brew_init() {
 }
 
 brew_install() {
-  brew install verilator yosys mill
+  brew install verilator yosys mill sbt
   brew install riscv64-elf-binutils riscv64-elf-gcc
   brew install ncurses readline flex bison
   if [ "$(uname)" == "Darwin" ]; then

@@ -14,7 +14,7 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
     val ben  = Output(UInt(1.W))
     val jen  = Output(UInt(1.W))
     val jren = Output(UInt(1.W))
-    val ren  = Output(UInt(1.W))
+  val ren  = Output(UInt(1.W))
     val wen  = Output(UInt(1.W))
 
     val atom = Output(UInt(1.W))
@@ -270,11 +270,11 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
     BLTU__ -> List(0.U,  imm_b,   0.U,   0.U, rs1, rs2), // B
     BGEU__ -> List(0.U,  imm_b,   0.U,   0.U, rs1, rs2), // B
 
-    LB____ -> List( rd,  imm_i,   0.U, imm_i, rs1, 0.U), // I
-    LH____ -> List( rd,  imm_i,   0.U, imm_i, rs1, 0.U), // I
-    LW____ -> List( rd,  imm_i,   0.U, imm_i, rs1, 0.U), // I
-    LBU___ -> List( rd,  imm_i,   0.U, imm_i, rs1, 0.U), // I
-    LHU___ -> List( rd,  imm_i,   0.U, imm_i, rs1, 0.U), // I
+    LB____ -> List( rd,  imm_i,   0.U,   0.U, rs1, 0.U), // I
+    LH____ -> List( rd,  imm_i,   0.U,   0.U, rs1, 0.U), // I
+    LW____ -> List( rd,  imm_i,   0.U,   0.U, rs1, 0.U), // I
+    LBU___ -> List( rd,  imm_i,   0.U,   0.U, rs1, 0.U), // I
+    LHU___ -> List( rd,  imm_i,   0.U,   0.U, rs1, 0.U), // I
     
     SB____ -> List(0.U,  imm_s,   0.U,   0.U, rs1, rs2), // S
     SH____ -> List(0.U,  imm_s,   0.U,   0.U, rs1, rs2), // S
