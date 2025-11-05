@@ -26,13 +26,16 @@ interface exu_lsu_if #(
   logic rvalid;
   logic [XLEN-1:0] raddr;
   logic [4:0] ralu;
+  logic atomic_lock;
   logic [XLEN-1:0] pc;
 
   logic [XLEN-1:0] rdata;
+  logic trap;
+  logic [XLEN-1:0] cause;
   logic rready;
 
-  modport master(output rvalid, raddr, ralu, pc, input rdata, rready);
-  modport slave(input rvalid, raddr, ralu, pc, output rdata, rready);
+  modport master(output rvalid, raddr, ralu, atomic_lock, pc, input rdata, trap, cause, rready);
+  modport slave(input rvalid, raddr, ralu, atomic_lock, pc, output rdata, trap, cause, rready);
 endinterface
 
 
@@ -45,9 +48,10 @@ interface exu_csr_if #(
   logic [XLEN-1:0] rdata;
   logic [XLEN-1:0] mtvec;
   logic [XLEN-1:0] mepc;
+  logic [XLEN-1:0] sepc;
 
-  modport master(output raddr, input rdata, mtvec, mepc);
-  modport slave(input raddr, output rdata, mtvec, mepc);
+  modport master(output raddr, input rdata, mtvec, mepc, sepc);
+  modport slave(input raddr, output rdata, mtvec, mepc, sepc);
 endinterface
 
 interface exu_rou_if #(
@@ -74,6 +78,7 @@ interface exu_rou_if #(
   logic ecall;
   logic ebreak;
   logic mret;
+  logic sret;
 
   logic trap;
   logic [XLEN-1:0] tval;
@@ -85,7 +90,7 @@ interface exu_rou_if #(
       input inst, pc, npc, btaken,
       input dest, result, ebreak,
       input prd, rd,
-      input csr_wen, csr_wdata, csr_addr, ecall, mret,
+      input csr_wen, csr_wdata, csr_addr, ecall, mret, sret,
       input trap, tval, cause,
       input valid
   );
@@ -93,18 +98,35 @@ interface exu_rou_if #(
       output inst, pc, npc, btaken,
       output dest, result, ebreak,
       output prd, rd,
-      output csr_wen, csr_wdata, csr_addr, ecall, mret,
+      output csr_wen, csr_wdata, csr_addr, ecall, mret, sret,
       output trap, tval, cause,
       output valid
   );
 endinterface
 
-interface exu_ioq_rou_if #(
+interface exu_l1d_if #(
+    parameter int XLEN = `YSYX_XLEN
+);
+  logic mmu_en;
+  logic [XLEN-1:0] vaddr;
+  logic [4:0] walu;
+  logic valid;
+
+  logic [XLEN-1:0] paddr;
+  logic trap;
+  logic [XLEN-1:0] cause;
+  logic [XLEN-1:0] reservation;
+  logic ready;
+
+  modport master(output mmu_en, vaddr, walu, valid, input paddr, trap, cause, reservation, ready);
+  modport slave(input mmu_en, vaddr, walu, valid, output paddr, trap, cause, reservation, ready);
+endinterface
+
+interface exu_ioq_bcast_if #(
     parameter unsigned PLEN = `YSYX_PHY_LEN,
     parameter unsigned RLEN = `YSYX_REG_LEN,
     parameter int XLEN = `YSYX_XLEN
 );
-  logic [31:0] inst;
   logic [XLEN-1:0] pc;
   logic [XLEN-1:0] npc;
 
@@ -119,20 +141,27 @@ interface exu_ioq_rou_if #(
   logic [XLEN-1:0] sq_waddr;
   logic [XLEN-1:0] sq_wdata;
 
+  logic trap;
+  logic [XLEN-1:0] tval;
+  logic [XLEN-1:0] cause;
+  logic [31:0] inst;
+
   logic valid;
 
   modport in(
-      input inst, pc, npc,
+      input pc, npc,
       input result, dest,
       input prd, rd,
       input wen, alu, sq_waddr, sq_wdata,
+      input trap, tval, cause, inst,
       input valid
   );
   modport out(
-      output inst, pc, npc,
+      output pc, npc,
       output result, dest,
       output prd, rd,
       output wen, alu, sq_waddr, sq_wdata,
+      output trap, tval, cause, inst,
       output valid
   );
 endinterface

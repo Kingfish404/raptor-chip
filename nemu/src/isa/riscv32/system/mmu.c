@@ -92,27 +92,45 @@ paddr_t isa_mmu_translate(vaddr_t vaddr, int len, int type)
   word_t vpn[2] = {addr.vaddr.vpn0, addr.vaddr.vpn1};
   word_t a = reg.satp.ppn * 4096;
   addr_t pte = {.val = 0};
-  // printf("vaddr: %x, vpn1: %x, vpn0: %x, ", vaddr, vpn[1], vpn[0]);
+  if (0 && type == MEM_TYPE_WRITE && vaddr == 0x0000beaf)
+  {
+    printf(">[%c]va: %x, vpn[1,0]: [%3x, %3x], ",
+           type == MEM_TYPE_IFETCH ? 'I' : (type == MEM_TYPE_READ ? 'R' : 'W'), vaddr, vpn[1], vpn[0]);
+  }
   for (int i = 1; i >= 0; i--)
   {
     word_t pte_addr = a + (vpn[i] * 4);
     if (pte_addr == 0)
     {
-      cause = MCA_INS_PAG_FAU;
+      cause = type == MEM_TYPE_IFETCH
+                  ? MCA_INS_PAG_FAU
+                  : (type == MEM_TYPE_READ ? MCA_LOA_PAG_FAU : MCA_STO_PAG_FAU);
+      if (0 && type == MEM_TYPE_WRITE && vaddr == 0x0000beaf)
+      {
+        printf("[%c]va: %x, vpn[%d]: %x, pte_addr is NULL\n",
+               type == MEM_TYPE_IFETCH ? 'I' : (type == MEM_TYPE_READ ? 'R' : 'W'), vaddr, i, vpn[i]);
+      }
       longjmp(exec_jmp_buf, 1);
     }
     pte.val = paddr_read(pte_addr, 4);
-    // printf("i: %x, pte_addr: %x, pte: %x, ", i, pte_addr, val.val);
+    if (0 && type == MEM_TYPE_WRITE && vaddr == 0x0000beaf)
+    {
+      printf("[%x]addr: %x, pte: %x, ", i, pte_addr, pte.val);
+    }
     if (pte.pte.v == 0)
     {
-      cause = MCA_INS_PAG_FAU;
+      cause = type == MEM_TYPE_IFETCH
+                  ? MCA_INS_PAG_FAU
+                  : (type == MEM_TYPE_READ ? MCA_LOA_PAG_FAU : MCA_STO_PAG_FAU);
       longjmp(exec_jmp_buf, 2);
     }
     if ((pte.pte.r == 1) || (pte.pte.x == 1))
     {
       if (i > 0 && ((pte.pte.ppn0 & 0x1) != 0))
       {
-        cause = MCA_INS_PAG_FAU;
+        cause = type == MEM_TYPE_IFETCH
+                    ? MCA_INS_PAG_FAU
+                    : (type == MEM_TYPE_READ ? MCA_LOA_PAG_FAU : MCA_STO_PAG_FAU);
         longjmp(exec_jmp_buf, 3);
       }
       if (i > 0)
@@ -125,12 +143,17 @@ paddr_t isa_mmu_translate(vaddr_t vaddr, int len, int type)
     }
     if ((i - 1) < -1)
     {
-      cause = MCA_INS_PAG_FAU;
+      cause = type == MEM_TYPE_IFETCH
+                  ? MCA_INS_PAG_FAU
+                  : (type == MEM_TYPE_READ ? MCA_LOA_PAG_FAU : MCA_STO_PAG_FAU);
       longjmp(exec_jmp_buf, 4);
     }
     a = pte.pte_ppn.ppn * 4096;
   }
-  // printf("ppn: %x, paddr: %x\n", val.pte_ppn.ppn, (val.pte_ppn.ppn * 4096) | offset);
+  if (0 && type == MEM_TYPE_WRITE && vaddr == 0x0000beaf)
+  {
+    printf("[paddr]: %x\n", (pte.pte_ppn.ppn * 4096) | offset);
+  }
   word_t paddr = (pte.pte_ppn.ppn * 4096) | offset;
   return paddr;
 }

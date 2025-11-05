@@ -15,6 +15,7 @@ interface rou_csr_if #(
   logic ecall;
   logic ebreak;
   logic mret;
+  logic sret;
 
   logic trap;
   logic [XLEN-1:0] tval;
@@ -24,13 +25,13 @@ interface rou_csr_if #(
 
   modport in(
       input pc,
-      input csr_wen, csr_wdata, csr_addr, ecall, ebreak, mret,
+      input csr_wen, csr_wdata, csr_addr, ecall, ebreak, mret, sret,
       input trap, tval, cause,
       input valid
   );
   modport out(
       output pc,
-      output csr_wen, csr_wdata, csr_addr, ecall, ebreak, mret,
+      output csr_wen, csr_wdata, csr_addr, ecall, ebreak, mret, sret,
       output trap, tval, cause,
       output valid
   );
@@ -82,11 +83,10 @@ interface rou_lsu_if #(
   logic [4:0] alu;
   logic [XLEN-1:0] sq_waddr;
   logic [XLEN-1:0] sq_wdata;
-  logic sq_ready;
   logic [XLEN-1:0] pc;
-
   logic valid;
 
+  logic sq_ready;
   modport in(input store, alu, sq_waddr, sq_wdata, pc, valid, output sq_ready);
   modport out(output store, alu, sq_waddr, sq_wdata, pc, valid, input sq_ready);
 endinterface
@@ -110,27 +110,29 @@ interface rou_cmu_if #(
   logic ben;
   logic jen;
   logic jren;
+  logic atomic_sc;
 
   logic ebreak;
   logic fence_time;
   logic fence_i;
 
   logic flush_pipe;
+  logic time_trap;
 
   logic valid;
 
   modport out(
       output rd, inst, pc,
-      output btaken, npc, ben, jen, jren,
+      output btaken, npc, ben, jen, jren, atomic_sc,
       output prd, prs,
-      output ebreak, fence_time, fence_i, flush_pipe,
+      output ebreak, fence_time, fence_i, flush_pipe, time_trap,
       output valid
   );
   modport in(
       input rd, inst, pc,
-      input btaken, npc, ben, jen, jren,
+      input btaken, npc, ben, jen, jren, atomic_sc,
       input prd, prs,
-      input ebreak, fence_time, fence_i, flush_pipe,
+      input ebreak, fence_time, fence_i, flush_pipe, time_trap,
       input valid
   );
 endinterface

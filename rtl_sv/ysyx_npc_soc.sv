@@ -295,7 +295,9 @@ module ysyx_npc_soc #(
           if (arvalid) begin
             state_r <= RVALID;
             rid <= arid;
-            `YSYX_DPI_C_PMEM_READ((araddr), mem_rdata_buf);
+            if (araddr > 'h1000) begin
+              `YSYX_DPI_C_PMEM_READ((araddr), mem_rdata_buf);
+            end
           end
         end
         RVALID: begin

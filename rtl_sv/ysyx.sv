@@ -118,18 +118,24 @@ module ysyx #(
   exu_rou_if exu_rou ();  // Execute & Writeback => Commit
 
   exu_prf_if exu_prf ();
-  exu_ioq_rou_if exu_ioq_rou ();
+  exu_ioq_bcast_if exu_ioq_bcast ();
   exu_csr_if exu_csr ();
   exu_lsu_if exu_lsu ();
+  exu_l1d_if exu_l1d ();
 
   // CMU
-  cmu_pipe_if cmu_bcast ();  // Difftest & Debug
+  cmu_bcast_if cmu_bcast ();  // Difftest & Debug
 
   // LSU
   lsu_l1d_if lsu_l1d ();
 
   // L1D Cache
   l1d_bus_if l1d_bus ();
+
+  // CSR
+  csr_bcast_if csr_bcast ();
+
+  logic clint_trap;
 
   ysyx_bpu bpu (
       .clock(clock),
@@ -157,8 +163,12 @@ module ysyx #(
   ysyx_l1i l1i_cache (
       .clock(clock),
 
+      .cmu_bcast(cmu_bcast),
+
       .ifu_l1i(ifu_l1i),
       .l1i_bus(l1i_bus),
+
+      .csr_bcast(csr_bcast),
 
       .reset(reset)
   );
@@ -181,7 +191,7 @@ module ysyx #(
 
       // write-back
       .exu_rou(exu_rou),
-      .exu_ioq_rou(exu_ioq_rou),
+      .exu_ioq_bcast(exu_ioq_bcast),
 
       // commit
       .rou_cmu  (rou_cmu),
@@ -206,12 +216,14 @@ module ysyx #(
       .rou_exu(rou_exu),
 
       .exu_rou(exu_rou),
-      .exu_ioq_rou(exu_ioq_rou),
+      .exu_ioq_bcast(exu_ioq_bcast),
 
-      .rou_csr(rou_csr),
+      .csr_bcast (csr_bcast),
+      .clint_trap(clint_trap),
 
-      .rou_lsu(rou_lsu),
       .rou_cmu(rou_cmu),
+      .rou_csr(rou_csr),
+      .rou_lsu(rou_lsu),
 
       .reset(reset)
   );
@@ -225,10 +237,13 @@ module ysyx #(
       .rou_exu(rou_exu),
 
       .exu_rou(exu_rou),
-      .exu_ioq_rou(exu_ioq_rou),
+      .exu_ioq_bcast(exu_ioq_bcast),
 
       .exu_lsu(exu_lsu),
       .exu_csr(exu_csr),
+
+      .csr_bcast(csr_bcast),
+      .exu_l1d  (exu_l1d),
 
       .reset(reset)
   );
@@ -249,6 +264,8 @@ module ysyx #(
       .rou_csr(rou_csr),
       .exu_csr(exu_csr),
 
+      .csr_bcast(csr_bcast),
+
       .reset(reset)
   );
 
@@ -261,10 +278,10 @@ module ysyx #(
       .lsu_l1d(lsu_l1d),
 
       .exu_lsu(exu_lsu),
-      .exu_ioq_rou(exu_ioq_rou),
+      .exu_ioq_bcast(exu_ioq_bcast),
       .rou_lsu(rou_lsu),
 
-      .l1d_bus(l1d_bus),
+      .csr_bcast(csr_bcast),
 
       .reset(reset)
   );
@@ -276,6 +293,11 @@ module ysyx #(
 
       .lsu_l1d(lsu_l1d),
       .l1d_bus(l1d_bus),
+
+      .csr_bcast(csr_bcast),
+
+      .exu_l1d(exu_l1d),
+      .rou_cmu(rou_cmu),
 
       .reset(reset)
   );
@@ -319,6 +341,10 @@ module ysyx #(
 
       .l1i_bus(l1i_bus),
       .l1d_bus(l1d_bus),
+
+      .csr_bcast(csr_bcast),
+      .cmu_bcast(cmu_bcast),
+      .io_trap_o(clint_trap),
 
       .reset(reset)
   );

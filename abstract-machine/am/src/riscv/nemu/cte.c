@@ -107,5 +107,10 @@ bool cte_init(Context *(*handler)(Event, Context *))
   asm volatile("csrw mstatus, %0" : : "r"(0x1808));
 #endif
 
+  // enable timer interrupt
+  asm volatile(
+      "li t0, 0x80\n"
+      "csrs mie, t0\n");
+
   return true;
 }

@@ -24,12 +24,14 @@ interface ifu_l1i_if #(
 );
   logic [XLEN-1:0] pc;
   logic invalid;
-  logic [31:0] inst;
 
+  logic [31:0] inst;
+  logic trap;
+  logic [XLEN-1:0] cause;
   logic valid;
 
-  modport master(output pc, invalid, input inst, valid);
-  modport slave(input pc, invalid, output inst, valid);
+  modport master(output pc, invalid, input inst, trap, cause, valid);
+  modport slave(input pc, invalid, output inst, trap, cause, valid);
 endinterface
 
 interface ifu_idu_if #(
@@ -39,11 +41,14 @@ interface ifu_idu_if #(
   logic [XLEN-1:0] pc;
   logic [XLEN-1:0] pnpc;
 
+  logic trap;
+  logic [XLEN-1:0] cause;
   logic valid;
+
   logic ready;
 
-  modport master(output inst, pc, pnpc, valid, input ready);
-  modport slave(input inst, pc, pnpc, valid, output ready);
+  modport master(output inst, pc, pnpc, trap, cause, valid, input ready);
+  modport slave(input inst, pc, pnpc, trap, cause, valid, output ready);
 endinterface
 
 `endif  // YSYX_IF_IF_SVH

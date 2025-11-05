@@ -10,6 +10,7 @@
 `define YSYX_OP_JAL___ 7'b1101111
 `define YSYX_OP_JALR__ 7'b1100111
 `define YSYX_OP_SYSTEM 7'b1110011
+`define YSYX_OP_AMO___ 7'b0101111
 `define YSYX_OP_FENCE_ 7'b0001111
 
 `define YSYX_OP_C_J___ 7'b0010101
@@ -112,6 +113,9 @@
 `define YSYX_CSR_SIP____ 'h144
 `define YSYX_CSR_SATP___ 'h180
 
+`define YSYX_CSR_SATP_MODE_ 31
+`define YSYX_CSR_MSTATUS_MPRV 17
+
 // Machine Trap Settup
 `define YSYX_CSR_MSTATUS 'h300
 `define YSYX_CSR_MISA___ 'h301
@@ -143,8 +147,15 @@
 
 // CSR_MSTATUS FLAGS
 `define YSYX_CSR_MSTATUS_MPP_ 12:11
+`define YSYX_CSR_MSTATUS_SPP_ 8
 `define YSYX_CSR_MSTATUS_MPIE 7
+`define YSYX_CSR_MSTATUS_SPIE 5
 `define YSYX_CSR_MSTATUS_MIE_ 3
+`define YSYX_CSR_MSTATUS_SIE_ 1
+
+// CSR_MIE FLAGS
+`define YSYX_CSR_MIE_STIE 5
+`define YSYX_CSR_MIE_MTIE 7
 
 // Macros
 `define ASSERT(signal, str) \

@@ -1,3 +1,7 @@
+#define PRV_U 0x0
+#define PRV_S 0x1
+#define PRV_M 0x3
+
 #define concat_temp(x, y) x ## y
 #define concat(x, y) concat_temp(x, y)
 #define MAP(c, f) c(f)
@@ -31,15 +35,24 @@ f(30) f(31)
 #define PUSH(n) STORE concat(x, n), (n * XLEN)(sp);
 #define POP(n)  LOAD  concat(x, n), (n * XLEN)(sp);
 
-#define CONTEXT_SIZE  ((NR_REGS + 3 + 1) * XLEN)
-#define OFFSET_SP     ( 2 * XLEN)
+#define CONTEXT_SIZE  ((NR_REGS + 3 + 2) * XLEN)
+#define OFFSET_SP     ((2) * XLEN)
 #define OFFSET_CAUSE  ((NR_REGS + 0) * XLEN)
 #define OFFSET_STATUS ((NR_REGS + 1) * XLEN)
 #define OFFSET_EPC    ((NR_REGS + 2) * XLEN)
+#define OFFSET_NP     ((NR_REGS + 4) * XLEN)
 
 .align 3
 .globl __am_asm_trap
 __am_asm_trap:
+  csrrw sp, mscratch, sp // (1) atomically exchange sp and mscratch
+  bnez sp, save_context  // (2) take the branch if we trapped from user
+  csrrw sp, mscratch, sp // (3) if we trapped from kernel, restore the original sp
+
+save_context:
+  // TODO: pa4 is not yet correctly implemented
+  // now sp is pointing to the kernel stack
+  // save the context...
   addi sp, sp, -CONTEXT_SIZE
 
   MAP(REGS, PUSH)
@@ -52,6 +65,25 @@ __am_asm_trap:
   STORE t1, OFFSET_STATUS(sp)
   STORE t2, OFFSET_EPC(sp)
 
+  // c->np = (ksp == 0 ? KERNEL : USER);  // np should be in Context
+  li t0, PRV_M
+  STORE t0, OFFSET_NP(sp)
+  csrr t0, mscratch
+  beqz t0, trap_handle
+  addi t0, t0, -CONTEXT_SIZE
+  STORE t0, OFFSET_SP(sp)
+  li t1, PRV_U
+  STORE t1, OFFSET_NP(sp)
+
+trap_handle:
+  # set mstatus.MPRV to pass difftest
+  li a0, (1 << 17)
+  or t1, t1, a0
+  csrw mstatus, t1
+
+  // ksp = 0;
+  // csrw mscratch, zero
+
   mv a0, sp
   jal __am_irq_handle
   mv sp, a0
@@ -61,6 +93,15 @@ __am_asm_trap:
   csrw mstatus, t1
   csrw mepc, t2
 
+  // if (c->np == USER) { ksp = $sp; }
+  LOAD t0, OFFSET_NP(sp)
+  li t1, PRV_U
+  bne t0, t1, restore_context
+  mv t0, sp
+  addi t0, t0, CONTEXT_SIZE
+  csrw mscratch, t0 // ksp = $sp
+
+restore_context:
   MAP(REGS, POP)
 
   addi sp, sp, CONTEXT_SIZE

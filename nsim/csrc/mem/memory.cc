@@ -5,36 +5,39 @@
 void difftest_skip_ref();
 void npc_abort();
 
-static uint8_t pmem[MSIZE] = {};
-static uint8_t sdram[SDRAM_SIZE] = {};
-static uint8_t sram[SRAM_SIZE] = {};
-static uint8_t mrom[MROM_SIZE] = {};
-static uint8_t flash[FLASH_SIZE] = {};
+static struct
+{
+    uint8_t pmem[MSIZE];
+    uint8_t sdram[SDRAM_SIZE];
+    uint8_t sram[SRAM_SIZE];
+    uint8_t mrom[MROM_SIZE];
+    uint8_t flash[FLASH_SIZE];
 #ifdef CONFIG_SOFT_MMIO
-static uint32_t rtc_port_base[2] = {0x0, 0x0};
+    uint32_t rtc_port_base[2] = {0x0, 0x0};
 #endif
+} memory;
 
 uint8_t *guest_to_host(paddr_t addr)
 {
     if (addr >= MBASE && addr <= MBASE + MSIZE)
     {
-        return pmem + addr - MBASE;
+        return memory.pmem + addr - MBASE;
     }
     if (addr >= MROM_BASE && addr < MROM_BASE + MROM_SIZE)
     {
-        return mrom + addr - MROM_BASE;
+        return memory.mrom + addr - MROM_BASE;
     }
     if (addr >= SRAM_BASE && addr < SRAM_BASE + SRAM_SIZE)
     {
-        return sram + addr - SRAM_BASE;
+        return memory.sram + addr - SRAM_BASE;
     }
     if (addr >= FLASH_BASE && addr < FLASH_BASE + FLASH_SIZE)
     {
-        return flash + addr - FLASH_BASE;
+        return memory.flash + addr - FLASH_BASE;
     }
     if (addr >= SDRAM_BASE && addr < SDRAM_BASE + SDRAM_SIZE)
     {
-        return sdram + addr - SDRAM_BASE;
+        return memory.sdram + addr - SDRAM_BASE;
     }
     // Assert(0, "Invalid guest address: " FMT_WORD, addr);
     return NULL;
@@ -71,7 +74,7 @@ uint8_t mmio_check_and_handle(
 
 paddr_t host_to_guest(uint8_t *addr)
 {
-    return addr + MBASE - pmem;
+    return addr + MBASE - memory.pmem;
 }
 
 static inline word_t host_read(void *addr, int len)
@@ -115,14 +118,14 @@ static inline void host_write(void *addr, word_t data, int len)
 extern "C" void sdram_read(uint32_t addr, uint8_t *data)
 {
     uint32_t offset = (addr - SDRAM_BASE);
-    *data = sdram[offset];
+    *data = memory.sdram[offset];
     // Log(" sdram raddr: 0x%x, rdata: 0x%02x, offest: 0x%02x", addr, *data, offset);
 }
 
 extern "C" void sdram_write(uint32_t addr, uint8_t data)
 {
     uint32_t offset = (addr - SDRAM_BASE);
-    sdram[offset] = data;
+    memory.sdram[offset] = data;
     // Log("sdram waddr: 0x%x, wdata: 0x%02x, offest: 0x%02x", addr, data, offset);
 }
 
@@ -133,16 +136,16 @@ extern "C" void pmem_read(word_t raddr, word_t *data)
     if (raddr == RTC_ADDR_ + 4)
     {
         uint64_t t = get_time();
-        rtc_port_base[0] = (uint32_t)(t >> 32);
-        *data = rtc_port_base[0];
+        memory.rtc_port_base[0] = (uint32_t)(t >> 32);
+        *data = memory.rtc_port_base[0];
         difftest_skip_ref();
         return;
     }
     else if (raddr == RTC_ADDR_)
     {
         uint64_t t = get_time();
-        rtc_port_base[1] = (uint32_t)(t);
-        *data = rtc_port_base[1];
+        memory.rtc_port_base[1] = (uint32_t)(t);
+        *data = memory.rtc_port_base[1];
         difftest_skip_ref();
         return;
     }
@@ -217,14 +220,14 @@ extern "C" void pmem_write(word_t waddr, word_t wdata, char wmask)
 extern "C" void flash_read(uint32_t addr, uint32_t *data)
 {
     uint32_t offset = addr;
-    *data = *((uint32_t *)(flash + offset));
+    *data = *((uint32_t *)(memory.flash + offset));
     // Log("flash raddr: 0x%08x, rdata: 0x%08x, offest: 0x%08x", addr, *data, offset);
 }
 
 extern "C" void mrom_read(uint32_t addr, uint32_t *data)
 {
     uint32_t offset = ((addr & 0xfffffffc) - MROM_BASE);
-    *data = *((uint32_t *)(mrom + offset));
+    *data = *((uint32_t *)(memory.mrom + offset));
     // Log("mrom raddr: 0x%x, rdata: 0x%x, offest: 0x%x", addr, *data, offset);
 }
 

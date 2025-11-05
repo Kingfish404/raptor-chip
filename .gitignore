@@ -9,6 +9,7 @@
 !/nsim/*
 !/rtl_*/*
 !/docs/*
+!/linux/*
 !Makefile
 !README.md
 !.gitignore

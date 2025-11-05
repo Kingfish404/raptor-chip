@@ -37,6 +37,11 @@ void difftest_skip_dut(int nr_ref, int nr_dut)
   }
 }
 
+void difftest_raise_intr(uint64_t NO)
+{
+  ref_difftest_raise_intr(NO);
+}
+
 static void checkmem(uint8_t *ref, uint8_t *dut, size_t n)
 {
   ref_difftest_memcpy(MBASE, ref, n, DIFFTEST_TO_DUT);
@@ -119,6 +124,12 @@ static void checkregs(NPCState *ref, vaddr_t pc)
   {
     printf(FMT_RED("[ERROR]") " pc is different! ref = " FMT_GREEN(FMT_WORD_NO_PREFIX) ", dut = " FMT_RED(FMT_WORD_NO_PREFIX) "\n",
            (vaddr_t)(*(ref->rpc)), pc);
+    is_same = false;
+  }
+  if ((word_t)(*(ref->priv)) != (word_t)(*(npc.priv)))
+  {
+    printf(FMT_RED("[ERROR]") " priv is different! ref = " FMT_WORD_NO_PREFIX ", dut = " FMT_WORD_NO_PREFIX "\n",
+           (word_t)(*(ref->priv)), (word_t)(*(npc.priv)));
     is_same = false;
   }
   if ((uint32_t)(*(ref->inst)) != *npc.inst)

@@ -74,9 +74,9 @@ word_t isa_raise_intr(word_t NO, vaddr_t epc)
   word_t ret_pc = 0;
   if (cpu.priv <= PRV_S)
   {
-    if ((cpu.sr[CSR_MEDELEG] & (1 << NO)) ||
-        ((NO & (1 << (XLEN - 1))) &&
-         (cpu.sr[CSR_MIDELEG] & (1 << (NO & ~(1 << (XLEN - 1)))))))
+    if ((cpu.sr[CSR_MEDELEG] & (1 << NO)) //
+        || ((NO & (1 << (XLEN - 1)))      //
+            && (cpu.sr[CSR_MIDELEG] & (1 << (NO & ~(1 << (XLEN - 1)))))))
     {
       // printf("NO: %x, (NO & (1 << (XLEN - 1))): %x, "
       //        "(1 << (NO & ~(1 << (XLEN - 1)))): %x\n",
@@ -141,5 +141,8 @@ word_t isa_query_intr()
       return MCA_SUP_TIM_INT;
     }
   }
+#if defined(CONFIG_TARGET_SHARE)
+  cpu.intr = false;
+#endif
   return INTR_EMPTY;
 }

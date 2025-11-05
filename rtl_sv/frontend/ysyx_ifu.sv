@@ -10,7 +10,7 @@ module ysyx_ifu #(
 ) (
     input clock,
 
-    cmu_pipe_if.in cmu_bcast,
+    cmu_bcast_if.in cmu_bcast,
 
     ifu_bpu_if.out ifu_bpu,
     ifu_l1i_if.master ifu_l1i,
@@ -35,16 +35,24 @@ module ysyx_ifu #(
   logic is_c;
   logic [6:0] opcode;
   logic is_sys;
+  logic is_atomic;
   logic recv_ready;
   logic valid;
 
   logic [XLEN-1:0] inst;
+  logic trap;
+  logic [XLEN-1:0] cause;
+
+  // debug signals
+  logic [XLEN-1:0] pc_stride;
+  logic [XLEN-1:0] pred_stride;
 
   assign ifu_hazard = state_ifu == STALL;
   assign pre_is_c = !(ifu_l1i.inst[1:0] == 2'b11);
   assign is_c = !(inst[1:0] == 2'b11);
   assign opcode = is_c ? {2'b0, {inst[15:13]}, {inst[1:0]}} : inst[6:0];
   assign is_sys = (opcode == `YSYX_OP_SYSTEM) || (opcode == `YSYX_OP_FENCE_);
+  assign is_atomic = (opcode == `YSYX_OP_AMO___);
 
   assign valid = state_ifu == VALID;
 
@@ -53,9 +61,12 @@ module ysyx_ifu #(
   assign ifu_l1i.pc = pc_ifu;
   assign ifu_l1i.invalid = cmu_bcast.fence_i;
 
-  assign ifu_idu.pnpc = pc_ifu;
   assign ifu_idu.inst = inst;
   assign ifu_idu.pc = pc;
+  assign ifu_idu.pnpc = pc_ifu;
+
+  assign ifu_idu.trap = trap;
+  assign ifu_idu.cause = cause;
 
   assign ifu_idu.valid = valid;
 
@@ -64,9 +75,13 @@ module ysyx_ifu #(
 
   assign recv_ready = (ifu_l1i.valid && (ifu_idu.ready || (state_ifu == IDLE)));
 
+  assign pc_stride = pc_ifu - pc;
+  assign pred_stride = nextpc - pc_ifu;
+
   always @(posedge clock) begin
     if (reset) begin
       pc_ifu <= `YSYX_PC_INIT;
+      trap   <= 0;
     end else begin
       unique case (state_ifu)
         IDLE: begin
@@ -79,9 +94,10 @@ module ysyx_ifu #(
         VALID: begin
           if (cmu_bcast.flush_pipe) begin
             state_ifu <= IDLE;
-          end else if (is_sys) begin
-            state_ifu <= STALL;
           end else if (ifu_idu.ready) begin
+            if (is_sys || is_atomic || trap) begin
+              state_ifu <= STALL;
+            end else
             if (ifu_l1i.valid) begin
             end else begin
               state_ifu <= IDLE;
@@ -91,6 +107,7 @@ module ysyx_ifu #(
         STALL: begin
           if (cmu_bcast.flush_pipe) begin
             state_ifu <= IDLE;
+            trap <= 0;
           end
         end
         default: begin
@@ -102,7 +119,9 @@ module ysyx_ifu #(
       end
       if (recv_ready) begin
         inst <= ifu_l1i.inst;
-        pc   <= pc_ifu;
+        trap <= ifu_l1i.trap;
+        cause <= ifu_l1i.cause;
+        pc <= pc_ifu;
       end
     end
   end

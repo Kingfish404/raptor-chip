@@ -14,7 +14,7 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
     val ben  = Output(UInt(1.W))
     val jen  = Output(UInt(1.W))
     val jren = Output(UInt(1.W))
-  val ren  = Output(UInt(1.W))
+    val ren  = Output(UInt(1.W))
     val wen  = Output(UInt(1.W))
 
     val atom = Output(UInt(1.W))
@@ -32,6 +32,7 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
     var ecall   = Output(UInt(1.W))
     var ebreak  = Output(UInt(1.W))
     var mret    = Output(UInt(1.W))
+    var sret    = Output(UInt(1.W))
     val csr_csw = Output(UInt(3.W))
   })
 
@@ -204,31 +205,32 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
   out.atom := atom_decoded(0)
 
   val sys_misc_table = TruthTable(
-    Map( //                   csw rbc s
-      ECALL_ -> BitPat("b" + "000 001 1"), // N
-      EBREAK -> BitPat("b" + "000 010 1"), // N
+    Map( //                   csw sr mr eb ec sys
+      ECALL_ -> BitPat("b" + "000 0  0  0  1  1"), // N
+      EBREAK -> BitPat("b" + "000 0  0  1  0  1"), // N
 
     // format: off
-   FENCE____ -> BitPat("b" + "000 000 1"), // N
-   FENCE_TSO -> BitPat("b" + "000 000 1"), // N
-   FENCE_I__ -> BitPat("b" + "000 000 1"), // N
-   FENCE_TIM -> BitPat("b" + "000 000 1"), // N
+   FENCE____ -> BitPat("b" + "000 0  0  0  0  1"), // N
+   FENCE_TSO -> BitPat("b" + "000 0  0  0  0  1"), // N
+   FENCE_I__ -> BitPat("b" + "000 0  0  0  0  1"), // N
+   FENCE_TIM -> BitPat("b" + "000 0  0  0  0  1"), // N
 
-   SFENCE_VM -> BitPat("b" + "000 000 1"), // N
+   SFENCE_VM -> BitPat("b" + "000 0  0  0  0  1"), // N
     // format: on
 
-      MRET__ -> BitPat("b" + "000 100 1"), // N
+      MRET__ -> BitPat("b" + "000 0  1  0  0  1"), // N
+      SRET__ -> BitPat("b" + "000 1  0  0  0  1"), // N
 
-      CSRRW_ -> BitPat("b" + "001 000 1"), // CSR
-      CSRRS_ -> BitPat("b" + "010 000 1"), // CSR
-      CSRRC_ -> BitPat("b" + "100 000 1"), // CSR
-      CSRRWI -> BitPat("b" + "001 000 1"), // CSR
-      CSRRSI -> BitPat("b" + "010 000 1"), // CSR
-      CSRRCI -> BitPat("b" + "100 000 1"), // CSR
+      CSRRW_ -> BitPat("b" + "001 0  0  0  0  1"), // CSR
+      CSRRS_ -> BitPat("b" + "010 0  0  0  0  1"), // CSR
+      CSRRC_ -> BitPat("b" + "100 0  0  0  0  1"), // CSR
+      CSRRWI -> BitPat("b" + "001 0  0  0  0  1"), // CSR
+      CSRRSI -> BitPat("b" + "010 0  0  0  0  1"), // CSR
+      CSRRCI -> BitPat("b" + "100 0  0  0  0  1"), // CSR
 
-      WFI___ -> BitPat("b" + "000 000 1") // N
+      WFI___ -> BitPat("b" + "000 0  0  0  0  1") // N
     ),
-    BitPat("b" + "000 000 0")
+    BitPat("b" + "000 0 0 0 0 0")
   )
 
   val sys_decoded = decoder(in.inst, sys_misc_table)
@@ -237,7 +239,8 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
   out_sys.ecall  := sys_decoded(1)
   out_sys.ebreak := sys_decoded(2)
   out_sys.mret   := sys_decoded(3)
-  val csr_csw = sys_decoded(6, 4)
+  out_sys.sret   := sys_decoded(4)
+  val csr_csw = sys_decoded(7, 5)
   out_sys.csr_csw := csr_csw
 
   val fence_table   = TruthTable(

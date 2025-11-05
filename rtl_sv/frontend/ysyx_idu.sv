@@ -7,7 +7,7 @@ module ysyx_idu #(
 ) (
     input clock,
 
-    cmu_pipe_if.in cmu_bcast,
+    cmu_bcast_if.in cmu_bcast,
 
     ifu_idu_if.slave  ifu_idu,
     idu_rnu_if.master idu_rnu,
@@ -23,10 +23,12 @@ module ysyx_idu #(
 
   logic [31:0] inst, inst_de;
   logic [31:0] inst_idu, pc_idu, pnpc_idu;
+  logic ifu_trap;
+  logic [XLEN-1:0] ifu_cause;
 
-  logic [ 4:0] alu;
+  logic [4:0] alu;
   logic [11:0] csr;
-  logic [ 2:0] csr_csw;
+  logic [2:0] csr_csw;
   logic illegal_csr, illegal_inst;
   logic is_c;
   logic valid, ready;
@@ -69,6 +71,9 @@ module ysyx_idu #(
           inst <= ifu_idu.inst;
           pc_idu <= ifu_idu.pc;
           pnpc_idu <= ifu_idu.pnpc;
+
+          ifu_trap <= ifu_idu.trap;
+          ifu_cause <= ifu_idu.cause;
         end
       end
     end
@@ -78,13 +83,13 @@ module ysyx_idu #(
   assign inst_idu = is_c ? inst_de : inst;
   assign idu_rnu.uop.c = is_c;
   assign idu_rnu.uop.alu = alu;
-  assign idu_rnu.uop.rd[RLEN-1:0] = illegal_csr || illegal_inst ? 0 : rd[RLEN-1:0];
+  assign idu_rnu.uop.rd[RLEN-1:0] = (illegal_csr || illegal_inst) ? 0 : rd[RLEN-1:0];
 
   assign idu_rnu.uop.csr_csw = csr_csw;
 
-  assign idu_rnu.uop.trap = illegal_csr || illegal_inst;
-  assign idu_rnu.uop.tval = illegal_csr || illegal_inst ? inst_idu : 0;
-  assign idu_rnu.uop.cause = illegal_csr || illegal_inst ? 'h2 : 0;
+  assign idu_rnu.uop.trap = ifu_trap || (illegal_csr || illegal_inst);
+  assign idu_rnu.uop.tval = ifu_trap ? pc_idu : (illegal_csr || illegal_inst) ? inst_idu : 0;
+  assign idu_rnu.uop.cause = ifu_trap ? ifu_cause : (illegal_csr || illegal_inst) ? 'h2 : 0;
 
   assign idu_rnu.uop.pnpc = pnpc_idu;
   assign idu_rnu.uop.inst = inst_idu;
@@ -161,6 +166,7 @@ module ysyx_idu #(
       .out_sys_ebreak(idu_rnu.uop.ebreak),
       .out_sys_ecall(idu_rnu.uop.ecall),
       .out_sys_mret(idu_rnu.uop.mret),
+      .out_sys_sret(idu_rnu.uop.sret),
       .out_sys_csr_csw(csr_csw),
 
       .out_fence_i(idu_rnu.uop.f_i),

@@ -28,6 +28,7 @@ typedef struct
   word_t *gpr;
   word_t *ret;
   word_t *pc;
+  char *priv;
 
   // csr
   word_t *sstatus;
@@ -141,9 +142,10 @@ __EXPORT void difftest_regcpy(void *dut, bool direction)
   else if (direction == DIFFTEST_TO_DUT)
   {
     npc->cpc = &cpu.cpc;
-    npc->pc = &cpu.pc;
     npc->inst = &cpu.inst;
     npc->gpr = cpu.gpr;
+    npc->pc = &cpu.pc;
+    npc->priv = (char *)&cpu.priv;
 
     npc->sstatus = &cpu.sr[CSR_SSTATUS];
     npc->sie____ = &cpu.sr[CSR_SIE];
@@ -185,7 +187,7 @@ __EXPORT void difftest_exec(uint64_t n)
 
 __EXPORT void difftest_raise_intr(word_t NO)
 {
-  assert(0);
+  cpu.intr = true;
 }
 
 __EXPORT void difftest_init(int port)

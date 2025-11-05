@@ -7,9 +7,11 @@ void __am_timer_init()
 
 void __am_timer_uptime(AM_TIMER_UPTIME_T *uptime)
 {
-  uptime->us = inl(RTC_ADDR_ + 4);
-  uptime->us <<= 32;
-  uptime->us += inl(RTC_ADDR_);
+  uint32_t time;
+  asm volatile(
+      "rdtime %0"
+      : "=r"(time) :);
+  uptime->us = time;
   uptime->us /= 500;
   // 500MHz, 2us per cycle, thus 500 cycles = 1us
 }

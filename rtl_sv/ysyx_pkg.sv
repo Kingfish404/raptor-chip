@@ -25,11 +25,12 @@ package ysyx_pkg;
     logic f_i;
     logic f_time;
     logic mret;
+    logic sret;
     logic [2:0] csr_csw;
 
     logic trap;
-    logic [`YSYX_XLEN-1:0] tval;
-    logic [`YSYX_XLEN-1:0] cause;
+    logic [XLEN-1:0] tval;
+    logic [XLEN-1:0] cause;
 
     logic [RLEN-1:0] rd;
     logic [XLEN-1:0] imm;

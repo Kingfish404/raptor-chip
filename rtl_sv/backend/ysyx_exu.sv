@@ -11,15 +11,18 @@ module ysyx_exu #(
 ) (
     input clock,
 
-    cmu_pipe_if.in cmu_bcast,
+    cmu_bcast_if.in cmu_bcast,
 
     rou_exu_if.slave rou_exu,
 
     exu_rou_if.out exu_rou,
-    exu_ioq_rou_if.out exu_ioq_rou,
+    exu_ioq_bcast_if.out exu_ioq_bcast,
 
     exu_lsu_if.master exu_lsu,
     exu_csr_if.master exu_csr,
+
+    csr_bcast_if.in   csr_bcast,
+    exu_l1d_if.master exu_l1d,
 
     input reset
 );
@@ -29,8 +32,6 @@ module ysyx_exu #(
 
   logic mul_valid;
   logic [XLEN-1:0] alu_result;
-
-  logic [XLEN-1:0] reservation;
 
   // === Revervation Station (RS) ===
   logic [RS_SIZE-1:0] rs_valid;
@@ -62,6 +63,7 @@ module ysyx_exu #(
   logic [RS_SIZE-1:0] rs_ecall;
   logic [RS_SIZE-1:0] rs_ebreak;
   logic [RS_SIZE-1:0] rs_mret;
+  logic [RS_SIZE-1:0] rs_sret;
   logic [2:0] rs_csr_csw[RS_SIZE];
 
   logic rs_trap[RS_SIZE];
@@ -93,11 +95,17 @@ module ysyx_exu #(
   logic [XLEN-1:0] ioq_data[IOQ_SIZE];
 
   logic [IOQ_SIZE-1:0] ioq_wen;
+  logic [IOQ_SIZE-1:0] ioq_mmu_en;
+  logic [IOQ_SIZE-1:0] ioq_trap;
+  logic [XLEN-1:0] ioq_cause[IOQ_SIZE];
+  logic [XLEN-1:0] ioq_paddr[IOQ_SIZE];
   logic [IOQ_SIZE-1:0] ioq_ren;
   logic [IOQ_SIZE-1:0] ioq_atom;
 
   logic ioq_ready;
   // === In-Order Queue (IOQ), for Load, Store ===
+
+  logic reservation_match;
 
   logic [$clog2(RS_SIZE)-1:0] free_idx;
   logic [$clog2(RS_SIZE)-1:0] valid_idx;
@@ -141,8 +149,9 @@ module ysyx_exu #(
     && ioq_pr1[ioq_head] == 0 && ioq_pr2[ioq_head] == 0);
   assign exu_lsu.raddr = ioq_atom[ioq_head]
     ? ioq_vj[ioq_head]
-    : ioq_vj[ioq_head] + ioq_vk[ioq_head];
+    : ioq_vj[ioq_head] + ioq_imm[ioq_head];
   assign exu_lsu.ralu = ioq_atom[ioq_head] ? `YSYX_ALU_LW__ : ioq_alu[ioq_head];
+  assign exu_lsu.atomic_lock = ioq_atom[ioq_head] && ioq_alu[ioq_head] == `YSYX_ATO_LR__;
   assign exu_lsu.pc = ioq_pc[ioq_head];
 
   assign ioq_ready = ioq_valid[ioq_tail] == 0;
@@ -163,6 +172,7 @@ module ysyx_exu #(
     if (reset || cmu_bcast.flush_pipe) begin
       ioq_ren <= 0;
       ioq_wen <= 0;
+      ioq_mmu_en <= 0;
       rs_valid <= 0;
       rs_mul_ready <= 0;
       muling <= 0;
@@ -193,40 +203,36 @@ module ysyx_exu #(
         ioq_imm[ioq_tail] <= rou_exu.uop.imm;
 
         ioq_wen[ioq_tail] <= rou_exu.uop.wen;
+        ioq_mmu_en[ioq_tail] <= csr_bcast.dmmu_en;
         ioq_ren[ioq_tail] <= rou_exu.uop.ren;
         ioq_atom[ioq_tail] <= rou_exu.uop.atom;
+        ioq_trap[ioq_tail] <= rou_exu.uop.trap;
 
         ioq_tail <= (ioq_tail + 1);
       end
-      if (ioq_valid[ioq_head]
-        && ioq_pr1[ioq_head] == 0 && ioq_pr2[ioq_head] == 0
-        && ((!ioq_ren[ioq_head] || exu_lsu.rready))
-        ) begin
+      if (exu_l1d.ready && ioq_mmu_en[ioq_head]) begin
+        ioq_paddr[ioq_head]  <= exu_l1d.paddr;
+        ioq_mmu_en[ioq_head] <= 0;
+        ioq_trap[ioq_head]   <= exu_l1d.trap;
+        ioq_cause[ioq_head]  <= exu_l1d.cause;
+      end
+      if (ioq_valid_found) begin
         // Write back of IOQ
-        ioq_inst[ioq_head]  <= 0;
+        ioq_inst[ioq_head] <= 0;
 
-        ioq_wen[ioq_head]   <= 0;
-        ioq_ren[ioq_head]   <= 0;
+        ioq_wen[ioq_head] <= 0;
+        ioq_mmu_en[ioq_head] <= 0;
+        ioq_trap[ioq_head] <= 0;
+        ioq_ren[ioq_head] <= 0;
         ioq_valid[ioq_head] <= 0;
-
-        if (ioq_atom[ioq_head]) begin
-          if (ioq_alu[ioq_head] == `YSYX_ATO_LR__) begin
-            // lr.w
-            reservation <= ioq_vj[ioq_head];
-          end
-          if (ioq_alu[ioq_head] == `YSYX_ATO_SC__) begin
-            // sc.w
-            reservation <= 0;
-          end
-        end
         ioq_head <= (ioq_head + 1);
       end
       for (bit [XLEN-1:0] i = 0; i < IOQ_SIZE; i++) begin
         if (ioq_valid[i]) begin
           if (|ioq_pr1[i]) begin
-            if (exu_ioq_rou.valid && exu_ioq_rou.prd == ioq_pr1[i]) begin
+            if (exu_ioq_bcast.valid && exu_ioq_bcast.prd == ioq_pr1[i]) begin
               // Forwarding from IOQ
-              ioq_vj[i]  <= exu_ioq_rou.result;
+              ioq_vj[i]  <= exu_ioq_bcast.result;
               ioq_pr1[i] <= 0;  // Clear physical register
             end else if (exu_rou.valid && exu_rou.prd == ioq_pr1[i]) begin
               // Forwarding from RS
@@ -235,9 +241,9 @@ module ysyx_exu #(
             end
           end
           if (|ioq_pr2[i]) begin
-            if (exu_ioq_rou.valid && exu_ioq_rou.prd == ioq_pr2[i]) begin
+            if (exu_ioq_bcast.valid && exu_ioq_bcast.prd == ioq_pr2[i]) begin
               // Forwarding from IOQ
-              ioq_vk[i]  <= exu_ioq_rou.result;
+              ioq_vk[i]  <= exu_ioq_bcast.result;
               ioq_pr2[i] <= 0;  // Clear physical register
             end else if (exu_rou.valid && exu_rou.prd == ioq_pr2[i]) begin
               // Forwarding from RS
@@ -276,6 +282,7 @@ module ysyx_exu #(
             rs_ecall[free_idx] <= rou_exu.uop.ecall;
             rs_ebreak[free_idx] <= rou_exu.uop.ebreak;
             rs_mret[free_idx] <= rou_exu.uop.mret;
+            rs_sret[free_idx] <= rou_exu.uop.sret;
             rs_csr_csw[free_idx] <= rou_exu.uop.csr_csw;
 
             rs_trap[free_idx] <= rou_exu.uop.trap;
@@ -304,18 +311,18 @@ module ysyx_exu #(
             rs_mul_ready[i] <= 0;
           end
         end else if (rs_valid[i]) begin
-          if (|rs_pr1[i] && exu_ioq_rou.valid && exu_ioq_rou.prd == rs_pr1[i]) begin
+          if (|rs_pr1[i] && exu_ioq_bcast.valid && exu_ioq_bcast.prd == rs_pr1[i]) begin
             // Forwarding from IOQ
-            rs_vj[i]  <= exu_ioq_rou.result;
+            rs_vj[i]  <= exu_ioq_bcast.result;
             rs_pr1[i] <= 0;  // Clear physical register
           end else if (|rs_pr1[i] && exu_rou.valid && exu_rou.prd == rs_pr1[i]) begin
             // Forwarding from RS
             rs_vj[i]  <= exu_rou.result;
             rs_pr1[i] <= 0;  // Clear physical register
           end
-          if (|rs_pr2[i] && exu_ioq_rou.valid && exu_ioq_rou.prd == rs_pr2[i]) begin
+          if (|rs_pr2[i] && exu_ioq_bcast.valid && exu_ioq_bcast.prd == rs_pr2[i]) begin
             // Forwarding from IOQ
-            rs_vk[i]  <= exu_ioq_rou.result;
+            rs_vk[i]  <= exu_ioq_bcast.result;
             rs_pr2[i] <= 0;  // Clear physical register
           end else if (|rs_pr2[i] && exu_rou.valid && exu_rou.prd == rs_pr2[i]) begin
             // Forwarding from RS
@@ -331,7 +338,6 @@ module ysyx_exu #(
     for (bit [XLEN-1:0] i = 0; i < IOQ_SIZE; i++) begin
       if (ioq_atom[i]) begin
         case (ioq_alu[i])
-          // TODO: add reservation for lr/sc
           `YSYX_ATO_LR__: begin
             ioq_data[i] = 'b0;
           end
@@ -375,31 +381,65 @@ module ysyx_exu #(
     end
   end
 
+  // MMU for Store
+  assign exu_l1d.mmu_en = (ioq_wen[ioq_head]
+    && ioq_mmu_en[ioq_head]
+    && ioq_pr1[ioq_head] == 0
+    && ioq_pr2[ioq_head] == 0);
+  assign exu_l1d.vaddr = ioq_vj[ioq_head] + ioq_imm[ioq_head];
+  assign exu_l1d.walu = ioq_alu[ioq_head];
+  assign exu_l1d.valid = (ioq_wen[ioq_head] && ioq_pr1[ioq_head] == 0 && ioq_pr2[ioq_head] == 0);
+
   // Branch
   assign addr_exu = ((rs_jump[valid_idx]
     ? rs_vj[valid_idx]
     : rs_pc[valid_idx]) + rs_imm[valid_idx]) & ~'b1;
 
+  assign reservation_match = exu_l1d.reservation == (csr_bcast.dmmu_en
+    ? ioq_paddr[ioq_head]
+    : (ioq_vj[ioq_head] + ioq_imm[ioq_head]));
   // { Write back (IOQ)
-  assign exu_ioq_rou.inst = ioq_inst[ioq_head];
-  assign exu_ioq_rou.pc = ioq_pc[ioq_head];
-  assign exu_ioq_rou.npc = ioq_pc[ioq_head] + (ioq_c[ioq_head] ? 2 : 4);
-  assign exu_ioq_rou.result = (exu_lsu.rready ? exu_lsu.rdata : ioq_data[ioq_head]);
-  assign exu_ioq_rou.dest = ioq_dest[ioq_head];
+  assign exu_ioq_bcast.pc = ioq_pc[ioq_head];
+  assign exu_ioq_bcast.npc = ioq_ren[ioq_head]
+    ? (exu_lsu.trap
+      ? csr_bcast.tvec
+      : ioq_pc[ioq_head] + (ioq_c[ioq_head] ? 2 : 4))
+    : ioq_trap[ioq_head]
+      ? csr_bcast.tvec
+      : ioq_pc[ioq_head] + (ioq_c[ioq_head] ? 2 : 4);
+  assign exu_ioq_bcast.result = (ioq_atom[ioq_head] && ioq_alu[ioq_head] == `YSYX_ATO_SC__)
+    ? (reservation_match ? 0 : 1)
+    : (exu_lsu.rready
+      ? exu_lsu.rdata
+      : ioq_data[ioq_head]);
+  assign exu_ioq_bcast.dest = ioq_dest[ioq_head];
 
-  assign exu_ioq_rou.prd = ioq_prd[ioq_head];
-  assign exu_ioq_rou.rd = ioq_rd[ioq_head];
+  assign exu_ioq_bcast.prd = ioq_prd[ioq_head];
+  assign exu_ioq_bcast.rd = ioq_rd[ioq_head];
 
-  assign exu_ioq_rou.wen = ioq_wen[ioq_head];
-  assign exu_ioq_rou.alu = ioq_alu[ioq_head];
-  assign exu_ioq_rou.sq_waddr = ioq_vj[ioq_head] + ioq_imm[ioq_head];
-  assign exu_ioq_rou.sq_wdata = ioq_data[ioq_head];
+  assign exu_ioq_bcast.wen = (ioq_atom[ioq_head] && ioq_alu[ioq_head] == `YSYX_ATO_SC__)
+    ? (reservation_match ? 1 : 0)
+    : (ioq_wen[ioq_head]);
+  assign exu_ioq_bcast.alu = ioq_alu[ioq_head];
+  assign exu_ioq_bcast.sq_waddr = csr_bcast.dmmu_en
+    ? ioq_paddr[ioq_head]
+    : ioq_vj[ioq_head] + ioq_imm[ioq_head];
+  assign exu_ioq_bcast.sq_wdata = ioq_data[ioq_head];
+
+  assign exu_ioq_bcast.trap = ioq_ren[ioq_head] ? exu_lsu.trap : ioq_trap[ioq_head];
+  assign exu_ioq_bcast.tval = ioq_ren[ioq_head]
+    ? exu_lsu.raddr
+    : ioq_vj[ioq_head] + ioq_imm[ioq_head];
+  assign exu_ioq_bcast.cause = ioq_ren[ioq_head] ? exu_lsu.cause : ioq_cause[ioq_head];
+  assign exu_ioq_bcast.inst = exu_lsu.trap || ioq_trap[ioq_head] ? 'h13 : ioq_inst[ioq_head];
 
   assign ioq_valid_found = (ioq_valid[ioq_head]
     && ioq_pr1[ioq_head] == 0 && ioq_pr2[ioq_head] == 0
-    && ((!ioq_ren[ioq_head] || exu_lsu.rready))
+    && (ioq_ren[ioq_head]
+        ? exu_lsu.rready
+        : ioq_mmu_en[ioq_head] == 0)
   );
-  assign exu_ioq_rou.valid = ioq_valid_found;
+  assign exu_ioq_bcast.valid = ioq_valid_found;
   // } Write back (IOQ)
 
 
@@ -423,13 +463,17 @@ module ysyx_exu #(
     : rs_mul_a[valid_idx]);
 
   assign exu_rou.npc = (
-    (rs_ecall[valid_idx] || rs_ebreak[valid_idx] || rs_trap[valid_idx])
-    ? exu_csr.mtvec
-    : rs_mret[valid_idx]
-      ? exu_csr.mepc
-      : (rs_br_jmp[valid_idx]) || (rs_br_cond[valid_idx] && |alu_result)
-        ? addr_exu
-        : (rs_pc[valid_idx] + (rs_c[valid_idx] ? 2 : 4)));
+    (rs_ecall[valid_idx] || rs_ebreak[valid_idx])
+    ? csr_bcast.mtvec
+    : rs_trap[valid_idx]
+      ? csr_bcast.tvec
+      : rs_mret[valid_idx]
+        ? exu_csr.mepc
+        : rs_sret[valid_idx]
+          ? exu_csr.sepc
+          : (rs_br_jmp[valid_idx]) || (rs_br_cond[valid_idx] && |alu_result)
+            ? addr_exu
+            : (rs_pc[valid_idx] + (rs_c[valid_idx] ? 2 : 4)));
   assign exu_rou.ebreak = rs_ebreak[valid_idx];
   assign exu_rou.btaken = (rs_br_cond[valid_idx] && |alu_result);
 
@@ -444,6 +488,7 @@ module ysyx_exu #(
   assign exu_rou.csr_addr = rs_imm[valid_idx][11:0];
   assign exu_rou.ecall = rs_ecall[valid_idx];
   assign exu_rou.mret = rs_mret[valid_idx];
+  assign exu_rou.sret = rs_sret[valid_idx];
 
   assign exu_rou.trap = rs_trap[valid_idx];
   assign exu_rou.tval = rs_tval[valid_idx];

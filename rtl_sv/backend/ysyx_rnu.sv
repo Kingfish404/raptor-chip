@@ -13,11 +13,11 @@ module ysyx_rnu #(
     input clock,
 
     exu_rou_if.out exu_rou,
-    exu_ioq_rou_if.out exu_ioq_rou,
+    exu_ioq_bcast_if.out exu_ioq_bcast,
 
 
     rou_cmu_if.in  rou_cmu,
-    cmu_pipe_if.in cmu_bcast,
+    cmu_bcast_if.in cmu_bcast,
 
     idu_rnu_if.slave  idu_rnu,
     rnu_rou_if.master rnu_rou,
@@ -43,7 +43,6 @@ module ysyx_rnu #(
   logic [RLEN-1:0] rnq_rs2[RIQ_SIZE];
 
   logic [XLEN-1:0] rnq_pnpc[RIQ_SIZE];
-  logic [31:0] rnq_inst[RIQ_SIZE];
   logic [XLEN-1:0] rnq_pc[RIQ_SIZE];
   // } micro-op queue (UOQ) }
 
@@ -254,9 +253,9 @@ module ysyx_rnu #(
   assign prf_write_en      = exu_rou.valid && exu_rou.rd != 0;
   assign prf_phys_w        = exu_rou.prd;
   assign prf_data_w        = exu_rou.result;
-  assign prf_write_en_b    = exu_ioq_rou.valid && exu_ioq_rou.rd != 0;
-  assign prf_phys_w_b      = exu_ioq_rou.prd;
-  assign prf_data_w_b      = exu_ioq_rou.result;
+  assign prf_write_en_b    = exu_ioq_bcast.valid && exu_ioq_bcast.rd != 0;
+  assign prf_phys_w_b      = exu_ioq_bcast.prd;
+  assign prf_data_w_b      = exu_ioq_bcast.result;
   // { Physical Register File
   always @(posedge clock) begin
     if (reset) begin

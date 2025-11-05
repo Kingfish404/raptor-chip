@@ -26,7 +26,7 @@ jobs:
       - name: Show RISC-V Architecture Test result riscv32e-npc
         run: docker run --rm sta:latest bash -c "make o2_defconfig && make -C /workspaces/raptor-chip/riscv-arch-test-am ARCH=riscv32e-npc run FLAGS="-b -n""
       - name: Show STA result (Power, Frequency, Area)
-        run: docker run --rm sta:latest bash -c "make sta_local >> /dev/null && make sta_local"
+        run: docker run --rm sta:latest bash -c "make sta_local 2>&1 > log.txt && make sta_local"
       - name: Clean up
         run: docker rmi sta:latest
 
@@ -41,6 +41,9 @@ jobs:
       - uses: actions/checkout@v4
       - name: Setup envirement
         run: ./setup.sh
+      - name: Generate SoC
+        shell: bash -l {0}
+        run: make -C ./third_party/kingfish404/ysyxSoC/ dev-init verilog
       - name: Build SoC
         shell: bash -l {0}
         run: make -C nsim o2soc_defconfig && make -C nsim -j`nproc`

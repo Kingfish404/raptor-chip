@@ -8,16 +8,15 @@ module ysyx_lsu #(
 ) (
     input clock,
 
-    cmu_pipe_if.in cmu_bcast,
+    cmu_bcast_if.in cmu_bcast,
 
     lsu_l1d_if.master lsu_l1d,
 
-    exu_lsu_if.slave  exu_lsu,
-    exu_ioq_rou_if.in exu_ioq_rou,
-
+    exu_lsu_if.slave exu_lsu,
+    exu_ioq_bcast_if.in exu_ioq_bcast,
     rou_lsu_if.in rou_lsu,
 
-    l1d_bus_if.master l1d_bus,
+    csr_bcast_if.in csr_bcast,
 
     input reset
 );
@@ -91,12 +90,12 @@ module ysyx_lsu #(
         stq_tail  <= 0;
         stq_valid <= 0;
       end else begin
-        if (exu_ioq_rou.valid && exu_ioq_rou.wen) begin
+        if (exu_ioq_bcast.valid && exu_ioq_bcast.wen) begin
           stq_valid[stq_tail] <= 1;
 
-          stq_alu[stq_tail] <= exu_ioq_rou.alu;
-          stq_waddr[stq_tail] <= exu_ioq_rou.sq_waddr;
-          stq_wdata[stq_tail] <= exu_ioq_rou.sq_wdata;
+          stq_alu[stq_tail] <= exu_ioq_bcast.alu;
+          stq_waddr[stq_tail] <= exu_ioq_bcast.sq_waddr;
+          stq_wdata[stq_tail] <= exu_ioq_bcast.sq_wdata;
           stq_tail <= stq_tail + 1;
         end
         if (rou_lsu.valid && rou_lsu.store && sq_ready) begin
@@ -149,6 +148,7 @@ module ysyx_lsu #(
   end
 
   assign raddr_valid = exu_lsu.rvalid && ((0)
+      || (csr_bcast.dmmu_en && (raddr >= 'h01000000)) // mmu userspace
       || (raddr >= 'h02000048 && raddr < 'h02000050)  // clint
       || (raddr >= 'h0f000000 && raddr < 'h0f002000)  // sram
       || (raddr >= 'h10000000 && raddr < 'h10001000)  // uart/ns16550
@@ -156,7 +156,7 @@ module ysyx_lsu #(
       || (raddr >= 'h20000000 && raddr < 'h20400000)  // mrom
       || (raddr >= 'h30000000 && raddr < 'h40000000)  // flash
       || (raddr >= 'h80000000 && raddr < 'h88000000)  // psram
-      || (raddr >= 'ha0000000 && raddr < 'hc0000000)  // sdram
+      || (raddr >= 'ha0000000 && raddr < 'ha2000000)  // sdram
       );
 
   // logic [7:0] wstrb;
@@ -165,11 +165,6 @@ module ysyx_lsu #(
   //          ({8{ralu == `YSYX_ALU_SH}} & 8'h3) |
   //          ({8{ralu == `YSYX_ALU_SW}} & 8'hf)
   //        );
-  assign l1d_bus.awvalid = wvalid && state_store == LS_S_V;
-  assign l1d_bus.awaddr = waddr;
-  assign l1d_bus.wstrb[3:0] = walu[3:0];
-  assign l1d_bus.wvalid = wvalid && state_store == LS_S_V;
-  assign l1d_bus.wdata = wdata;
 
   assign rdata_unalign = lsu_l1d.rdata;
   assign rdata = (
@@ -185,6 +180,8 @@ module ysyx_lsu #(
     | ({XLEN{ralu == `YSYX_ALU_LHU_}} & rdata & 'hffff)
     | ({XLEN{ralu == `YSYX_ALU_LW__}} & rdata)
     );
+  assign exu_lsu.trap = lsu_l1d.trap;
+  assign exu_lsu.cause = lsu_l1d.cause;
   assign exu_lsu.rready = lsu_l1d.rready;
 
   always @(posedge clock) begin
@@ -194,7 +191,7 @@ module ysyx_lsu #(
       unique case (state_store)
         LS_S_V: begin
           if (wvalid) begin
-            if (l1d_bus.wready) begin
+            if (lsu_l1d.wready) begin
               state_store <= LS_S_R;
             end
           end
@@ -209,12 +206,13 @@ module ysyx_lsu #(
     end
   end
 
-  assign lsu_l1d.raddr  = raddr;
-  assign lsu_l1d.ralu   = ralu;
+  assign lsu_l1d.raddr = raddr;
+  assign lsu_l1d.ralu = ralu;
   assign lsu_l1d.rvalid = raddr_valid && !(|sq_valid) && !(|stq_valid);
+  assign lsu_l1d.atomic_lock = exu_lsu.atomic_lock;
 
-  assign lsu_l1d.waddr  = waddr;
-  assign lsu_l1d.walu   = walu;
-  assign lsu_l1d.wvalid = wvalid;
-  assign lsu_l1d.wdata  = wdata;
+  assign lsu_l1d.waddr = waddr;
+  assign lsu_l1d.walu = walu;
+  assign lsu_l1d.wvalid = wvalid && state_store == LS_S_V;
+  assign lsu_l1d.wdata = wdata;
 endmodule

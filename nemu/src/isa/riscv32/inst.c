@@ -253,20 +253,21 @@ static int decode_exec(Decode *s)
   INSTPAT("00010?? 00000 ????? 010 ????? 01011 11", lr.w, R, { R(rd) = Mr(src1, 4); cpu.reservation = get_paddr(src1, 4); });
   INSTPAT("00011?? ????? ????? 010 ????? 01011 11", sc.w, R, {
     if (cpu.reservation == get_paddr(src1, 4)) { R(rd) = 0; Mw(src1, 4, src2); } else { R(rd) = 1; }; cpu.reservation = 0; });
-  INSTPAT("00001?? ????? ????? 010 ????? 01011 11", amoswap.w, R, {sword_t tmp = Mr(src1, 4);Mw(src1, 4, src2);R(rd) = tmp; });
-  INSTPAT("00000?? ????? ????? 010 ????? 01011 11", amoadd.w, R, {sword_t tmp = Mr(src1, 4);Mw(src1, 4, src2 + tmp);R(rd) = SEXT(tmp, 32); });
+  INSTPAT("00001?? ????? ????? 010 ????? 01011 11", amoswap.w, R, {sword_t tmp = Mr(src1, 4); Mw(src1, 4, src2); R(rd) = tmp; });
+  INSTPAT("00000?? ????? ????? 010 ????? 01011 11", amoadd.w, R, {sword_t  tmp = Mr(src1, 4); Mw(src1, 4, src2 + tmp); R(rd) = SEXT(tmp, 32); });
   INSTPAT("00100?? ????? ????? 010 ????? 01011 11", amoxor.w, R, { sword_t tmp = Mr(src1, 4); Mw(src1, 4, src2 ^ tmp); R(rd) = SEXT(tmp, 32); });
   INSTPAT("01100?? ????? ????? 010 ????? 01011 11", amoand.w, R, { sword_t tmp = Mr(src1, 4); Mw(src1, 4, src2 & tmp); R(rd) = SEXT(tmp, 32); });
-  INSTPAT("01000?? ????? ????? 010 ????? 01011 11", amoor.w, R, { sword_t tmp = Mr(src1, 4); Mw(src1, 4, src2 | tmp); R(rd) = SEXT(tmp, 32); });
-  INSTPAT("10000?? ????? ????? 010 ????? 01011 11", amomin.w, R, {sword_t tmp = Mr(src1, 4);Mw(src1, 4, (tmp < src2) ? tmp : src2);R(rd) = SEXT(tmp, 32); });
-  INSTPAT("10100?? ????? ????? 010 ????? 01011 11", amomax.w, R, {sword_t tmp = Mr(src1, 4);Mw(src1, 4, (tmp > src2) ? tmp : src2);R(rd) = SEXT(tmp, 32); });
-  INSTPAT("11000?? ????? ????? 010 ????? 01011 11", amominu.w, R, {sword_t tmp = Mr(src1, 4);Mw(src1, 4, (tmp < src2) ? src2 : tmp);R(rd) = SEXT(tmp, 32); });
-  INSTPAT("11100?? ????? ????? 010 ????? 01011 11", amomaxu.w, R, {sword_t tmp = Mr(src1, 4);Mw(src1, 4, (tmp > src2) ? src2 : tmp);R(rd) = SEXT(tmp, 32); });
+  INSTPAT("01000?? ????? ????? 010 ????? 01011 11", amoor.w, R, { sword_t  tmp = Mr(src1, 4); Mw(src1, 4, src2 | tmp); R(rd) = SEXT(tmp, 32); });
+  INSTPAT("10000?? ????? ????? 010 ????? 01011 11", amomin.w, R, {sword_t  tmp = Mr(src1, 4); Mw(src1, 4, (tmp < src2) ? tmp : src2);R(rd) = SEXT(tmp, 32); });
+  INSTPAT("10100?? ????? ????? 010 ????? 01011 11", amomax.w, R, {sword_t  tmp = Mr(src1, 4); Mw(src1, 4, (tmp > src2) ? tmp : src2);R(rd) = SEXT(tmp, 32); });
+  INSTPAT("11000?? ????? ????? 010 ????? 01011 11", amominu.w, R, {sword_t tmp = Mr(src1, 4); Mw(src1, 4, (tmp < src2) ? src2 : tmp);R(rd) = SEXT(tmp, 32); });
+  INSTPAT("11100?? ????? ????? 010 ????? 01011 11", amomaxu.w, R, {sword_t tmp = Mr(src1, 4); Mw(src1, 4, (tmp > src2) ? src2 : tmp);R(rd) = SEXT(tmp, 32); });
 
   // RV64A Extension
-  INSTPAT("00010?? 00000 ????? 011 ????? 01011 11", lr.d, R, { R(rd) = Mr(src1, 8); cpu.reservation = get_paddr(src1, 8); });
+  INSTPAT("00010?? 00000 ????? 011 ????? 01011 11", lr.d, R, {
+    R(rd) = Mr(src1, 8); cpu.reservation = get_paddr(src1, 8); });
   INSTPAT("00011?? ????? ????? 011 ????? 01011 11", sc.d, R, {
-    if (cpu.reservation == get_paddr(src1, 8)) { R(rd) = 0; Mw(src1, 8, src2); } else { R(rd) = 1; } });
+    if (cpu.reservation == get_paddr(src1, 8)) { R(rd) = 0; Mw(src1, 8, src2); } else { R(rd) = 1; }; cpu.reservation = 0; });
   INSTPAT("00001?? ????? ????? 011 ????? 01011 11", amoswap.d, R, {sword_t tmp = Mr(src1, 8);Mw(src1, 8, src2);R(rd) = tmp; });
   INSTPAT("00000?? ????? ????? 011 ????? 01011 11", amoadd.d, R, {sword_t tmp = Mr(src1, 8);Mw(src1, 8, src2 + tmp);R(rd) = tmp; });
   INSTPAT("00100?? ????? ????? 011 ????? 01011 11", amoxor.d, R, {sword_t tmp = Mr(src1, 8);Mw(src1, 8, src2 ^ tmp);R(rd) = tmp; });
@@ -319,7 +320,7 @@ static int decode_exec(Decode *s)
   CSR(CSR_MSTATUS) = CSR(CSR_MSTATUS) & 0x807FFFEA;
 #endif
   CSR(CSR_MISA) = CSR_MISA_VALUE;
-  CSR(CSR_MEDELEG) &= 0xfffff;
+  CSR(CSR_MEDELEG) &= 0xf4bfff;
   if ((cpu.last_inst_priv == PRV_S && cpu.priv != PRV_M) || cpu.priv == PRV_S)
   {
     csr_t reg_mstatus = {.val = CSR(CSR_MSTATUS)};
@@ -354,11 +355,10 @@ static int decode_exec(Decode *s)
     CSR(CSR_TIME) = 0;
     CSR(CSR_TIMEH) = CSR(CSR_TIMEH) + 0x1;
   }
+#if !defined(CONFIG_TARGET_SHARE)
   csr_t reg_mie = {.val = CSR(CSR_MIE)};
   csr_t reg_mstatus = {.val = CSR(CSR_MSTATUS)};
-#if !defined(CONFIG_TARGET_SHARE)
   cpu.mtimecmp = get_mtimecmp();
-#endif
   if (CSR(CSR_TIME) >= cpu.mtimecmp &&
       reg_mstatus.mstatus.mie)
   {
@@ -372,6 +372,7 @@ static int decode_exec(Decode *s)
       cpu.intr = 1;
     }
   }
+#endif
 
   R(0) = 0; // reset $zero to 0
 
@@ -393,6 +394,7 @@ int isa_exec_once(Decode *s)
   {
     // printf("if longjmp(%d), cause: %d, pc: " FMT_WORD_NO_PREFIX "\n", jmp_value, cause, s->pc);
     s->pc = isa_raise_intr(cause, s->pc);
+    s->isa.inst = 0x13; // addi x0, x0, 0; a.k.a. NOP
     return 0;
   }
   s->isa.inst = inst_fetch(&s->snpc, 4);
@@ -405,6 +407,7 @@ int isa_exec_once(Decode *s)
     // printf("de longjmp(%2d), cause: %d, pc: " FMT_WORD_NO_PREFIX ", inst: " FMT_WORD_NO_PREFIX "\n",
     //        jmp_value, cause, s->pc, s->isa.inst);
     s->pc = isa_raise_intr(cause, s->pc);
+    s->isa.inst = 0x13; // addi x0, x0, 0; a.k.a. NOP
     return 0;
   }
   return decode_exec(s);

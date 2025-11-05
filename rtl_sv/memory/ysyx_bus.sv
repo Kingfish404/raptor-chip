@@ -46,6 +46,10 @@ module ysyx_bus #(
     l1i_bus_if.slave l1i_bus,
     l1d_bus_if.slave l1d_bus,
 
+    csr_bcast_if.in csr_bcast,
+    cmu_bcast_if.in cmu_bcast,
+    output io_trap_o,
+
     input reset
 );
   typedef enum logic [2:0] {
@@ -66,6 +70,8 @@ module ysyx_bus #(
   } state_lds_t;  // load source
 
   logic write_done;
+
+  logic clint_trap;
 
   logic is_clint;
   logic [3:0] arid;
@@ -157,11 +163,16 @@ module ysyx_bus #(
   end
 
   assign clint_arvalid = (l1d_bus.arvalid && is_clint);
+  assign io_trap_o = clint_trap && csr_bcast.interrupt_en;
   ysyx_clint clint (
       .clock(clock),
       .araddr(l1d_bus.araddr),
       .arvalid(clint_arvalid),
       .out_rdata(clint_rdata),
+
+      .io_trap_o(clint_trap),
+      .io_trap_received_i(cmu_bcast.time_trap),
+
       .reset(reset)
   );
 

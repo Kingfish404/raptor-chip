@@ -3,9 +3,14 @@
 #include <klib.h>
 
 static Context *(*user_handler)(Event, Context *) = NULL;
+void __am_get_cur_as(Context *c);
+void __am_switch(Context *c);
+
+extern void __am_asm_trap(void);
 
 Context *__am_irq_handle(Context *c)
 {
+  __am_get_cur_as(c);
   if (user_handler)
   {
     Event ev = {0};
@@ -33,33 +38,24 @@ Context *__am_irq_handle(Context *c)
       }
       break;
     default:
+    {
       ev.event = EVENT_ERROR;
-      break;
+    }
+    break;
     }
 
+    size_t mscratch = 0, sp;
+    asm volatile("csrr %0, mscratch\nmv %1, sp" : "=r"(mscratch), "=r"(sp));
+    // printf("- c: %p, c->np: %d, cp->gpr[sp]: %x, mscratch = %x, sp = %x\n",
+    //        c, c->np, c->gpr[2], mscratch, sp);
     c = user_handler(ev, c);
+    asm volatile("csrr %0, mscratch\nmv %1, sp" : "=r"(mscratch), "=r"(sp));
+    // printf("= c: %p, c->np: %d, cp->gpr[sp]: %x, mscratch = %x, sp = %x\n",
+    //        c, c->np, c->gpr[2], mscratch, sp);
     assert(c != NULL);
   }
+  __am_switch(c);
   return c;
-}
-
-extern void __am_asm_trap(void);
-
-bool cte_init(Context *(*handler)(Event, Context *))
-{
-  // initialize exception entry
-  asm volatile("csrw mtvec, %0" : : "r"(__am_asm_trap));
-
-#ifdef CONFIG_ISA64
-  asm volatile("csrw mstatus, %0" : : "r"(0xa00001800));
-#else // __risv32
-  asm volatile("csrw mstatus, %0" : : "r"(0x1800));
-#endif
-
-  // register event handler
-  user_handler = handler;
-
-  return true;
 }
 
 Context *kcontext(Area kstack, void (*entry)(void *), void *arg)
@@ -70,10 +66,11 @@ Context *kcontext(Area kstack, void (*entry)(void *), void *arg)
   p->gpr[r_a0] = (int)arg;
 
 #ifdef CONFIG_ISA64
-  p->mstatus = 0xa00001800;
+  p->mstatus = 0xa00001808;
 #else // __risv32
-  p->mstatus = 0x1800;
+  p->mstatus = 0x1808;
 #endif
+  p->np = PRV_M;
   return p;
 }
 
@@ -93,4 +90,26 @@ bool ienabled()
 
 void iset(bool enable)
 {
+}
+
+bool cte_init(Context *(*handler)(Event, Context *))
+{
+  // register event handler
+  user_handler = handler;
+
+  // initialize exception entry
+  asm volatile("csrw mtvec, %0" : : "r"(__am_asm_trap));
+
+#ifdef CONFIG_ISA64
+  asm volatile("csrw mstatus, %0" : : "r"(0xa00001808));
+#else // __risv32
+  asm volatile("csrw mstatus, %0" : : "r"(0x1808));
+#endif
+
+  // enable timer interrupt
+  asm volatile(
+      "li t0, 0x80\n"
+      "csrs mie, t0\n");
+
+  return true;
 }

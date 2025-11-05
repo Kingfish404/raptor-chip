@@ -148,6 +148,13 @@ static void execute(uint64_t n)
   Decode s;
   for (; n > 0; n--)
   {
+    word_t intr = isa_query_intr();
+    if (intr != INTR_EMPTY)
+    {
+      // Log("nemu: intr %x at pc = " FMT_WORD, intr, cpu.pc);
+      cpu.pc = isa_raise_intr(intr, cpu.pc);
+      difftest_skip_ref();
+    }
     exec_once(&s, cpu.pc);
 
     g_nr_guest_inst++;
@@ -157,14 +164,6 @@ static void execute(uint64_t n)
       break;
     }
     IFDEF(CONFIG_DEVICE, device_update());
-
-    word_t intr = isa_query_intr();
-    if (intr != INTR_EMPTY)
-    {
-      // Log("nemu: intr %x at pc = " FMT_WORD, intr, cpu.pc);
-      cpu.pc = isa_raise_intr(intr, cpu.pc);
-      difftest_skip_ref();
-    }
   }
 }
 

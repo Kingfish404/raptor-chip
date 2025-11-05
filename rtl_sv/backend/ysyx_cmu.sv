@@ -7,8 +7,8 @@ module ysyx_cmu #(
 ) (
     input clock,
 
-    rou_cmu_if.in   rou_cmu,
-    cmu_pipe_if.out cmu_bcast,
+    rou_cmu_if.in rou_cmu,
+    cmu_bcast_if.out cmu_bcast,
 
     input reset
 );
@@ -18,6 +18,7 @@ module ysyx_cmu #(
   logic [XLEN-1:0] rpc, npc;
 
   logic ben, jen, jren;
+  logic [XLEN-1:0] pmu_inst_retire;
 
   assign prev_valid = rou_cmu.valid;
   assign ben = rou_cmu.ben;
@@ -32,6 +33,7 @@ module ysyx_cmu #(
   assign cmu_bcast.jen = prev_valid && jen;
   assign cmu_bcast.jren = prev_valid && jren;
   assign cmu_bcast.btaken = prev_valid && rou_cmu.btaken;
+  assign cmu_bcast.time_trap = rou_cmu.time_trap;
 
   assign cmu_bcast.fence_time = rou_cmu.fence_time;
   assign cmu_bcast.fence_i = rou_cmu.fence_i;
@@ -40,11 +42,13 @@ module ysyx_cmu #(
   always @(posedge clock) begin
     if (reset) begin
       valid <= 0;
+      pmu_inst_retire <= 0;
       `YSYX_DPI_C_NPC_DIFFTEST_SKIP_REF
     end else begin
       if (rou_cmu.valid) begin
         // Debug & Difftest
         valid <= 1;
+        pmu_inst_retire <= pmu_inst_retire + 1;
         if (rou_cmu.ebreak) begin
           `YSYX_DPI_C_NPC_EXU_EBREAK
         end

@@ -117,58 +117,88 @@ static long load_img()
 static int parse_args(int argc, char *argv[])
 {
   const struct option table[] = {
-      {"mrom", required_argument, NULL, 'm'},
+      {"help", no_argument, NULL, 'h'},
       {"batch", no_argument, NULL, 'b'},
       {"no-vcd", no_argument, NULL, 'n'},
+      {"mrom", required_argument, NULL, 'm'},
       {"log", required_argument, NULL, 'l'},
+      {"cycle threshold for wave", required_argument, NULL, 'c'},
+      {"instr threshold for wave", required_argument, NULL, 'i'},
       {"diff", required_argument, NULL, 'd'},
       {"port", required_argument, NULL, 'p'},
       {"elf", required_argument, NULL, 'e'},
-      {"help", no_argument, NULL, 'h'},
       {0, 0, NULL, 0},
   };
   int o;
-  while ((o = getopt_long(argc, argv, "-bhnm:l:d:p:e:", table, NULL)) != -1)
+  size_t cycle_threshold = -1, instr_threshold = -1;
+  while ((o = getopt_long(argc, argv, "-hbnm:l:c:i:d:p:e:", table, NULL)) != -1)
   {
     switch (o)
     {
-    case 'm':
-      mrom_img_file = optarg;
-      break;
     case 'b':
       sdb_set_batch_mode();
       break;
     case 'n':
       sdb_set_vcd(false);
       break;
-    case 'p':
-      sscanf(optarg, "%d", &difftest_port);
+    case 'm':
+      mrom_img_file = optarg;
       break;
     case 'l':
       log_file = optarg;
       break;
+    case 'c':
+      if (optarg[0] == '0' && (optarg[1] == 'x' || optarg[1] == 'X'))
+      {
+        sscanf(optarg, "%zx", &cycle_threshold);
+      }
+      else
+      {
+        sscanf(optarg, "%zu", &cycle_threshold);
+      }
+      break;
+    case 'i':
+      if (optarg[0] == '0' && (optarg[1] == 'x' || optarg[1] == 'X'))
+      {
+        sscanf(optarg, "%zx", &instr_threshold);
+      }
+      else
+      {
+        sscanf(optarg, "%zu", &instr_threshold);
+      }
+      break;
     case 'd':
       diff_so_file = optarg;
+      break;
+    case 'p':
+      sscanf(optarg, "%d", &difftest_port);
       break;
     case 'e':
       isa_parser_elf(optarg);
       break;
     case 1:
       img_file = optarg;
-      return 0;
+      break;
     default:
       printf("Usage: %s [OPTION...] IMAGE [args]\n\n", argv[0]);
       printf("Options:\n");
-      printf("\t-m,--mrom=FILE          load MROM image from FILE\n");
       printf("\t-b,--batch              run with batch mode\n");
       printf("\t-n,--no-vcd             disable VCD output\n");
+      printf("\t-m,--mrom=FILE          load MROM image from FILE\n");
       printf("\t-l,--log=FILE           output log to FILE\n");
+      printf("\t-c,--cycle=THRESHOLD    set cycle threshold for waveform dump\n");
+      printf("\t-i,--instr=THRESHOLD    set instruction threshold for waveform dump\n");
       printf("\t-d,--diff=REF_SO        run DiffTest with reference REF_SO\n");
       printf("\t-p,--port=PORT          run DiffTest with port PORT\n");
       printf("\t-e,--elf=ELF_FILE       add ELF_FILE for ftrace\n");
       printf("\n");
       exit(0);
     }
+  }
+  void cpu_exec_set_threshold(uint64_t cycle, uint64_t inst);
+  if (cycle_threshold != (size_t)-1 || instr_threshold != (size_t)-1)
+  {
+    cpu_exec_set_threshold(cycle_threshold, instr_threshold);
   }
   return 0;
 }
@@ -180,9 +210,12 @@ void init_monitor(int argc, char *argv[])
   long img_size = load_img();
 
   sdb_sim_init(argc, argv);
+
   init_mem();
 
+#ifdef CONFIG_DIFFTEST
   init_difftest(diff_so_file, img_size, difftest_port);
+#endif
 
 #if defined(CONFIG_ITRACE)
   void init_disasm();

@@ -27,7 +27,8 @@ brew_init() {
 }
 
 brew_install() {
-  brew install verilator yosys mill sbt
+  brew install verilator yosys mill sbt openjdk@17
+  brew link --force --overwrite openjdk@17
   brew install riscv64-elf-binutils riscv64-elf-gcc
   brew install ncurses readline flex bison
   if [ "$(uname)" == "Darwin" ]; then
@@ -57,9 +58,6 @@ repo_clone() {
 
 repo_init() {
   make -C ./third_party/kingfish404/ysyxSoC/ dev-init verilog
-
-  # generated from chisel (scala) at `rtl_scala`
-  make -C ./rtl_scala verilog -j`nproc`
 }
 
 if [ "$(uname)" == "Linux" ]; then
@@ -92,10 +90,11 @@ echo "Step $step: Cloning repositories..."
 repo_clone
 
 step=$((step + 1))
-echo "Step $step: Initializing repositories..."
-repo_init
-
-step=$((step + 1))
 source ./env.sh
+make -C ./rtl_scala verilog -j`nproc`
 make -C ./nsim pack
 echo "Step $step: Build environment setup complete."
+
+# step=$((step + 1))
+# repo_init
+# echo "Step $step: Initializing Third-party Repositories..."

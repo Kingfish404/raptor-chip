@@ -59,33 +59,33 @@ void isa_reg_display()
   printf(" mstatus.mie: %d, mie.mtie: %d, mstatus.sie: %d, mie.stie: %d\n",
          reg_mstatus.mstatus.mie, reg_mie.mie.mtie, reg_mstatus.mstatus.sie, reg_mie.mie.stie);
 
-  printf(" csr.sstatus: " FMT_WORD " ", cpu.sr[CSR_SSTATUS]);
-  printf("     csr.sie: " FMT_WORD " ", cpu.sr[CSR_SIE]);
-  printf("   csr.stvec: " FMT_WORD "\n", cpu.sr[CSR_STVEC]);
+  printf(" csr.sstatus: " FMT_WORD_NO_PREFIX " ", cpu.sr[CSR_SSTATUS]);
+  printf("     csr.sie: " FMT_WORD_NO_PREFIX " ", cpu.sr[CSR_SIE]);
+  printf("   csr.stvec: " FMT_WORD_NO_PREFIX "\n", cpu.sr[CSR_STVEC]);
 
-  printf("csr.sscratch: " FMT_WORD " ", cpu.sr[CSR_SSCRATCH]);
-  printf("    csr.sepc: " FMT_WORD " ", cpu.sr[CSR_SEPC]);
-  printf("  csr.scause: " FMT_WORD "\n", cpu.sr[CSR_SCAUSE]);
-  printf("   csr.stval: " FMT_WORD " ", cpu.sr[CSR_STVAL]);
-  printf("     csr.sip: " FMT_WORD " ", cpu.sr[CSR_SIP]);
-  printf("    csr.satp: " FMT_WORD "\n", cpu.sr[CSR_SATP]);
+  printf("csr.sscratch: " FMT_WORD_NO_PREFIX " ", cpu.sr[CSR_SSCRATCH]);
+  printf("    csr.sepc: " FMT_WORD_NO_PREFIX " ", cpu.sr[CSR_SEPC]);
+  printf("  csr.scause: " FMT_WORD_NO_PREFIX "\n", cpu.sr[CSR_SCAUSE]);
+  printf("   csr.stval: " FMT_WORD_NO_PREFIX " ", cpu.sr[CSR_STVAL]);
+  printf("     csr.sip: " FMT_WORD_NO_PREFIX " ", cpu.sr[CSR_SIP]);
+  printf("    csr.satp: " FMT_WORD_NO_PREFIX "\n", cpu.sr[CSR_SATP]);
 
-  printf("csr.mstatush: " FMT_WORD "\n", cpu.sr[CSR_MSTATUSH]);
-  printf(" csr.mstatus: " FMT_WORD " ", cpu.sr[CSR_MSTATUS]);
-  printf(" csr.medeleg: " FMT_WORD " ", cpu.sr[CSR_MEDELEG]);
-  printf(" csr.mideleg: " FMT_WORD "\n", cpu.sr[CSR_MIDELEG]);
-  printf("     csr.mie: " FMT_WORD " ", cpu.sr[CSR_MIE]);
-  printf("   csr.mtvec: " FMT_WORD "\n", cpu.sr[CSR_MTVEC]);
+  printf("csr.mstatush: " FMT_WORD_NO_PREFIX "\n", cpu.sr[CSR_MSTATUSH]);
+  printf(" csr.mstatus: " FMT_WORD_NO_PREFIX " ", cpu.sr[CSR_MSTATUS]);
+  printf(" csr.medeleg: " FMT_WORD_NO_PREFIX " ", cpu.sr[CSR_MEDELEG]);
+  printf(" csr.mideleg: " FMT_WORD_NO_PREFIX "\n", cpu.sr[CSR_MIDELEG]);
+  printf("     csr.mie: " FMT_WORD_NO_PREFIX " ", cpu.sr[CSR_MIE]);
+  printf("   csr.mtvec: " FMT_WORD_NO_PREFIX "\n", cpu.sr[CSR_MTVEC]);
 
-  printf("csr.mscratch: " FMT_WORD " ", cpu.sr[CSR_MSCRATCH]);
-  printf("    csr.mepc: " FMT_WORD " ", cpu.sr[CSR_MEPC]);
-  printf("  csr.mcause: " FMT_WORD "\n", cpu.sr[CSR_MCAUSE]);
-  printf("   csr.mtval: " FMT_WORD " ", cpu.sr[CSR_MTVAL]);
-  printf("     csr.mip: " FMT_WORD "\n", cpu.sr[CSR_MIP]);
+  printf("csr.mscratch: " FMT_WORD_NO_PREFIX " ", cpu.sr[CSR_MSCRATCH]);
+  printf("    csr.mepc: " FMT_WORD_NO_PREFIX " ", cpu.sr[CSR_MEPC]);
+  printf("  csr.mcause: " FMT_WORD_NO_PREFIX "\n", cpu.sr[CSR_MCAUSE]);
+  printf("   csr.mtval: " FMT_WORD_NO_PREFIX " ", cpu.sr[CSR_MTVAL]);
+  printf("     csr.mip: " FMT_WORD_NO_PREFIX "\n", cpu.sr[CSR_MIP]);
 
-  printf("  csr.mcycle: " FMT_WORD " ", cpu.sr[CSR_MCYCLE]);
-  printf("csr.mtimecmp: " FMT_WORD " ", (word_t)cpu.mtimecmp);
-  printf("    csr.misa: " FMT_WORD "\n", cpu.sr[CSR_MISA]);
+  printf("  csr.mcycle: " FMT_WORD_NO_PREFIX " ", cpu.sr[CSR_MCYCLE]);
+  printf("csr.mtimecmp: " FMT_WORD_NO_PREFIX " ", (word_t)cpu.mtimecmp);
+  printf("    csr.misa: " FMT_WORD_NO_PREFIX "\n", cpu.sr[CSR_MISA]);
   printf("\n");
   for (int i = 0; i < MUXDEF(CONFIG_RVE, 16, 32); i++)
   {

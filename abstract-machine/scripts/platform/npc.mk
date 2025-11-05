@@ -20,6 +20,7 @@ CFLAGS += -I$(AM_HOME)/am/src/riscv/npc/include
 image: $(IMAGE).elf
 	@$(OBJDUMP) -d $(IMAGE).elf > $(IMAGE).txt
 	@echo + OBJCOPY "->" $(IMAGE_REL).bin
+	@$(READELF) -a $(IMAGE).elf > $(IMAGE).elf.txt
 	@$(OBJCOPY) -S --set-section-flags .bss=alloc,contents -O binary $(IMAGE).elf $(IMAGE).bin
 
 run: image

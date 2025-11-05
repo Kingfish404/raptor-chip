@@ -16,7 +16,7 @@ ENV NVBOARD_HOME=${YSYX_HOME}/third_party/NJU-ProjectN/nvboard
 ENV ISA=riscv32
 ENV CROSS_COMPILE=riscv64-elf-
 
-RUN make -C ./rtl_scala verilog -j`nproc`
+RUN make -C ./third_party/kingfish404/ysyxSoC/ dev-init verilog
 
 WORKDIR /workspaces/raptor-chip/nemu/tools/capstone
 RUN make

@@ -22,7 +22,7 @@ typedef word_t vaddr_t;
 #define PSRAM_SIZE 0x08000000
 
 #define SDRAM_BASE 0xa0000000
-#define SDRAM_SIZE 0x20000000
+#define SDRAM_SIZE 0x02000000
 
 #define SRAM_BASE 0x0f000000
 #define SRAM_SIZE 0x00002000
@@ -104,6 +104,7 @@ typedef struct
   word_t *gpr;
   word_t *ret;
   word_t *pc;
+  char *priv;
 
   // csr
   word_t *sstatus;
@@ -199,6 +200,11 @@ typedef struct
   long long int l1i_cache_hit_cycle;
   long long int l1i_cache_miss_cnt;
   long long int l1i_cache_miss_cycle;
+
+  // for tlb & page table walk
+  long long int itlb_ptw_cycle;
+  long long int stlb_ptw_cycle;
+  long long int ltlb_ptw_cycle;
 } PMUState;
 
 #define panic(format, ...) Assert(0, format, ##__VA_ARGS__)

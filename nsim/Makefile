@@ -38,6 +38,7 @@ SOC_SOURCE=
 INC_PATH +=	$(abspath $(VSRC_PATH)/include/npc)
 endif
 BUILD_DIR = ./build
+DATA_DIR = ./data
 OBJ_DIR = $(BUILD_DIR)/obj_dir
 BIN = $(BUILD_DIR)/$(VTARGET)-$(CONFIG_MODE)
 VERILATOR_FLAG =--prof-c --prof-cfuncs --prof-exec \
@@ -53,6 +54,7 @@ FILELIST_MK = $(shell find -L ./csrc -name "filelist.mk")
 include $(FILELIST_MK)
 
 $(shell mkdir -p $(BUILD_DIR))
+$(shell mkdir -p $(DATA_DIR))
 
 VSRCS = \
 	$(shell find $(VSRC_PATH) -name "*.sv") \
@@ -76,7 +78,7 @@ include $(NVBOARD_HOME)/scripts/nvboard.mk
 endif
 
 INCFLAGS = $(addprefix -I, $(INC_PATH))
-CXXFLAGS += $(INCFLAGS) -DTOP_NAME="\"V$(VTARGET)\"" $(SOC_DEFINE) \
+CXXFLAGS += -g $(INCFLAGS) -DTOP_NAME="\"V$(VTARGET)\"" $(SOC_DEFINE) \
 	-DMROM_PATH=$(MROM_IMG)
 
 ifneq (,$(filter sta% pack%,$(MAKECMDGOALS)))
@@ -101,6 +103,9 @@ verilog:
 
 run: $(BIN) $(MROM_IMG)
 	$(NPC_EXEC)
+
+run_log: $(BIN) $(MROM_IMG)
+	$(NPC_EXEC) 2>&1 | tee $(DATA_DIR)/npc.log
 
 sim: $(BIN)
 	@$^
@@ -135,6 +140,11 @@ sta: pack
 
 sta_local: pack
 	make -C $(YOSYS_OPENSTA) sta_local show \
+		DESIGN=ysyx \
+		RTL_FILES="$(abspath $(BUILD_DIR)/ysyx_pack.sv)"
+
+sta_show: pack
+	make -C $(YOSYS_OPENSTA) show \
 		DESIGN=ysyx \
 		RTL_FILES="$(abspath $(BUILD_DIR)/ysyx_pack.sv)"
 

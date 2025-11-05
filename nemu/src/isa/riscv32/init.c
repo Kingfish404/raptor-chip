@@ -52,6 +52,8 @@ static void restart()
   cpu.raise_intr = INTR_EMPTY;
   cpu.last_inst_priv = PRV_M;
   cpu.reservation = 0;
+
+  cpu.intr = false;
 }
 
 void init_isa()

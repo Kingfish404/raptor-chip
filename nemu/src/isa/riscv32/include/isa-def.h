@@ -202,7 +202,6 @@ enum MCAUSE
 
   MCA_ENV_CAL_UMO = 0x8,
   MCA_ENV_CAL_SMO = 0x9,
-
   MCA_ENV_CAL_MMO = 0xb,
   MCA_INS_PAG_FAU = 0xc,
   MCA_LOA_PAG_FAU = 0xd,

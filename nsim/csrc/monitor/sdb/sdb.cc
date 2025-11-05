@@ -9,21 +9,11 @@
 #include <nvboard.h>
 #endif
 
-extern char *regs[];
+extern NPCState npc;
 extern PMUState pmu;
+
 void difftest_skip_ref();
 void difftest_should_diff_mem();
-
-NPCState npc = {
-    .state = NPC_RUNNING,
-    .gpr = NULL,
-    .ret = NULL,
-    .pc = NULL,
-
-    .inst = NULL,
-
-    .soc_sram = NULL,
-};
 
 VerilatedContext *contextp = NULL;
 TOP_NAME *top = NULL;

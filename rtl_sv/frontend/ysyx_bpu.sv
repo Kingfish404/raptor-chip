@@ -13,7 +13,7 @@ module ysyx_bpu #(
 ) (
     input clock,
 
-    cmu_pipe_if.in cmu_bcast,
+    cmu_bcast_if.in cmu_bcast,
 
     ifu_bpu_if.in ifu_bpu,
 

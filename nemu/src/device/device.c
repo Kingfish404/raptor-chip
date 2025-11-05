@@ -96,7 +96,9 @@ void init_device()
   IFDEF(CONFIG_HAS_DISK, init_disk());
   IFDEF(CONFIG_HAS_SDCARD, init_sdcard());
 
+#ifndef CONFIG_TARGET_SHARE
   IFNDEF(CONFIG_TARGET_AM, init_alarm());
+#endif
 
   IFNDEF(CONFIG_TARGET_AM, init_intr(););
 }
