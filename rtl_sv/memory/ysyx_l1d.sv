@@ -346,6 +346,9 @@ module ysyx_l1d #(
         LD_D: begin
           if (l1d_bus.rvalid) begin
             l1d_state <= IDLE;
+            if (lsu_l1d.atomic_lock) begin
+              reservation <= l1d_addr;
+            end
           end
         end
         default: begin

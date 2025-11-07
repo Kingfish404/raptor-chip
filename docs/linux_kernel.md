@@ -68,63 +68,7 @@ tar -xf linux-6.15.6.tar.xz
 cd linux-6.15.6
 ```
 
-```shell
-#!/bin/bash
-
-make ARCH=riscv -j`nproc` defconfig
-./scripts/config --enable CONFIG_NONPORTABLE
-./scripts/config --disable CONFIG_ARCH_RV64I
-./scripts/config --enable CONFIG_ARCH_RV32I
-./scripts/config --disable CONFIG_FPU
-./scripts/config --disable CONFIG_RISCV_ISA_ZAWRS
-./scripts/config --disable CONFIG_RISCV_ISA_ZBA
-./scripts/config --disable CONFIG_RISCV_ISA_ZBB
-./scripts/config --disable CONFIG_RISCV_ISA_ZBC
-./scripts/config --disable CONFIG_RISCV_ISA_ZICBOM
-./scripts/config --disable CONFIG_RISCV_ISA_ZICBOZ
-./scripts/config --disable CONFIG_RISCV_ISA_ZICBOM
-
-make ARCH=riscv -j`nproc` olddefconfig
-
-make ARCH=riscv -j`nproc`
-```
-
-## make `initramfs`
-
-```shell
-mkdir initramfs && cd initramfs
-mkdir --parents {bin,dev,etc,lib,lib64,mnt/root,proc,root/init-linux,sbin,sys,run}
-sudo mknod dev/console c 5 1
-sudo mknod dev/null c 1 3
-sudo mknod dev/sda b 8 0
-cd ..
-(cd initramfs && find . | cpio -o --format=newc | gzip > ../initramfs.cpio.gz)
-
-# set initramfs at Kernel config
-make ARCH=riscv menuconfig
-# -> General setup -> Initial RAM filesystem and RAM disk (initramfs/initrd) support
-# -> [*] Initramfs source file(s) -> [PATH of initramfs] (e.g. `/home/username/initramfs`)
-./scripts/config --enable CONFIG_INITRAMFS_SOURCE="/home/username/initramfs"
-```
-
-### `init` at `initramfs/root/init-linux`
-
-```c
-int main() {
-  for (;;) {
-  }
-}
-```
-
-```makefile
-CFLAGS=-march=rv32ima_zicsr_zifencei_zicntr -mabi=ilp32 -nostdlib
-
-init:
-	riscv64-linux-gnu-gcc $(CFLAGS) -static -o init init.c $(LDFLAG)
-
-install: init
-	mv init ../../
-```
+See more details in [linux/README.md](../linux/README.md).
 
 ## Run at `nemu`
 
