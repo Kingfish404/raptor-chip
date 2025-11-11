@@ -30,6 +30,27 @@ jobs:
       - name: Clean up
         run: docker rmi sta:latest
 
+  linux-npc-test:
+    runs-on: ubuntu-latest
+    env:
+      YSYX_HOME: ${{ github.workspace  }}
+      NEMU_HOME: ${{ github.workspace  }}/nemu
+      AM_HOME: ${{ github.workspace  }}/abstract-machine
+      CROSS_COMPILE: riscv64-elf-
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup envirement
+        run: ./setup.sh
+      - name: Build SoC
+        shell: bash -l {0}
+        run: make -C nsim o2linux_defconfig && make -C nsim -j`nproc`
+      - name: Get Linux binary (OpenSBI)
+        shell: bash -l {0}
+        run: wget https://github.com/user-attachments/files/23468431/linux-6.12.57.zip && unzip linux-6.12.57.zip
+      - name: Boot Linux
+        shell: bash -l {0}
+        run: timeout 2700s make -C nsim run IMG=../linux-6.12.57/fw_payload.bin FLAGS="-b -n" || true
+
   ysyxsoc-test:
     runs-on: ubuntu-latest
     env:
@@ -98,4 +119,10 @@ jobs:
         env:
           NEMU_HOME: ${{ github.workspace  }}/nemu
       - name: Test OpenSBI
-        run: timeout -s KILL 1440 make -C nemu run IMG=../third_party/riscv-software-src/opensbi/build/platform/generic/firmware/fw_payload.bin ARGS="-b -m 10000000 --log ./build/nemu-log.txt" NEMU_HOME=${{ github.workspace  }}/nemu
+        run: timeout 1440s make -C nemu run IMG=../third_party/riscv-software-src/opensbi/build/platform/generic/firmware/fw_payload.bin ARGS="-b -m 10000000 --log ./build/nemu-log.txt" NEMU_HOME=${{ github.workspace  }}/nemu
+      - name: Get Linux binary (OpenSBI)
+        shell: bash -l {0}
+        run: wget https://github.com/user-attachments/files/23468431/linux-6.12.57.zip && unzip linux-6.12.57.zip
+      - name: Boot Linux
+        shell: bash -l {0}
+        run: timeout 1800s make -C nemu run IMG=../linux-6.12.57/fw_payload.bin ARGS="-b -m 10000000 --log ./build/nemu-log.txt" NEMU_HOME=${{ github.workspace  }}/nemu
