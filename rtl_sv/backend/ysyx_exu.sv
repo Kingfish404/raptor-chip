@@ -112,8 +112,6 @@ module ysyx_exu #(
   logic [$clog2(RS_SIZE)-1:0] mul_rs_idx;
   logic free_found, valid_found, mul_found, ioq_valid_found;
 
-  logic csr_illegal;
-
   always_comb begin
     free_found = 0;
     valid_found = 0;

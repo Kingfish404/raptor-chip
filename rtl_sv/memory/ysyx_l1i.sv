@@ -38,6 +38,7 @@ module ysyx_l1i #(
 
   l1i_state_t l1i_state;
 
+  /* verilator lint_off UNUSEDSIGNAL */
   logic raddr_valid;
   logic [XLEN-1:0] pc_ifu;
   logic [XLEN-1:0] vaddr;
@@ -86,6 +87,7 @@ module ysyx_l1i #(
   logic [$clog2(IFQ_SIZE)-1:0] ifq_tail;
   logic [IFQ_SIZE-1:0] ifq_valid;
   logic [XLEN-1:0] ifq_raddr[IFQ_SIZE];
+  /* verilator lint_on UNUSEDSIGNAL */
 
   assign mmu_en = csr_bcast.immu_en;
   assign pc_ifu = mmu_en ? {tlb_ptag, tlb_offset}[XLEN-1:0] : ifu_l1i.pc;

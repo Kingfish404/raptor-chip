@@ -1,3 +1,4 @@
+/* verilator lint_off UNUSEDPARAM */
 package ysyx_pkg;
   `include "ysyx.svh"
 

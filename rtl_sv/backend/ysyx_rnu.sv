@@ -22,7 +22,9 @@ module ysyx_rnu #(
     parameter unsigned RLEN = `YSYX_REG_LEN,
     parameter unsigned PNUM = `YSYX_PHY_SIZE,
     parameter unsigned PLEN = `YSYX_PHY_LEN,
+    /* verilator lint_off UNUSEDPARAM */
     parameter unsigned XLEN = `YSYX_XLEN
+    /* verilator lint_on UNUSEDPARAM */
 ) (
     input clock,
 

@@ -19,6 +19,7 @@ module ysyx_bpu #(
 
     input reset
 );
+  /* verilator lint_off UNUSEDSIGNAL */
   typedef enum logic [1:0] {
     COND = 'b00,  // Conditional Branch
     DIRE = 'b01,  // Direct Jump
@@ -60,6 +61,8 @@ module ysyx_bpu #(
 
   logic [XLEN-1:0] rpc;
   logic [XLEN-1:0] cpc;
+
+  /* verilator lint_on UNUSEDSIGNAL */
 
   assign fpc = ifu_bpu.pc;
   assign is_b = (btb_t[fbtb_idx] == COND);

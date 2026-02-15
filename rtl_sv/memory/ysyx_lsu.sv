@@ -20,6 +20,7 @@ module ysyx_lsu #(
 
     input reset
 );
+  /* verilator lint_off UNUSEDSIGNAL */
   typedef enum {
     LS_S_V = 0,
     LS_S_R = 1
@@ -210,6 +211,8 @@ module ysyx_lsu #(
   assign lsu_l1d.ralu = ralu;
   assign lsu_l1d.rvalid = raddr_valid && !(|sq_valid) && !(|stq_valid);
   assign lsu_l1d.atomic_lock = exu_lsu.atomic_lock;
+
+  /* verilator lint_on UNUSEDSIGNAL */
 
   assign lsu_l1d.waddr = waddr;
   assign lsu_l1d.walu = walu;

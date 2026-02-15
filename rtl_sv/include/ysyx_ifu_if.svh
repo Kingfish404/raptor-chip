@@ -2,6 +2,9 @@
 `define YSYX_IF_IF_SVH
 `include "ysyx.svh"
 
+/* verilator lint_off UNUSEDSIGNAL */
+/* verilator lint_off UNUSEDPARAM */
+
 interface ifu_bpu_if #(
     parameter int XLEN = `YSYX_XLEN,
     parameter int PHT_SIZE = `YSYX_PHT_SIZE,
@@ -50,5 +53,8 @@ interface ifu_idu_if #(
   modport master(output inst, pc, pnpc, trap, cause, valid, input ready);
   modport slave(input inst, pc, pnpc, trap, cause, valid, output ready);
 endinterface
+
+/* verilator lint_on UNUSEDSIGNAL */
+/* verilator lint_on UNUSEDPARAM */
 
 `endif  // YSYX_IF_IF_SVH

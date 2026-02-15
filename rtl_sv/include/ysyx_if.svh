@@ -7,6 +7,10 @@
 `include "ysyx_rou_if.svh"
 `include "ysyx_exu_if.svh"
 
+/* verilator lint_off UNUSEDSIGNAL */
+/* verilator lint_off UNUSEDPARAM */
+/* verilator lint_off UNDRIVEN */
+
 // lsu to l1d interface
 interface lsu_l1d_if #(
     parameter int XLEN = `YSYX_XLEN,
@@ -146,5 +150,9 @@ interface cmu_bcast_if #(
       output fence_time, fence_i, flush_pipe, time_trap
   );
 endinterface
+
+/* verilator lint_on UNUSEDSIGNAL */
+/* verilator lint_on UNUSEDPARAM */
+/* verilator lint_on UNDRIVEN */
 
 `endif

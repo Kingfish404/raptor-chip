@@ -2,6 +2,7 @@
 `include "ysyx_if.svh"
 `include "ysyx_soc.svh"
 
+/* verilator lint_off UNUSEDPARAM */
 module ysyx_ifu #(
     parameter bit [$clog2(`YSYX_PHT_SIZE):0] PHT_SIZE = `YSYX_PHT_SIZE,
     parameter bit [$clog2(`YSYX_BTB_SIZE):0] BTB_SIZE = `YSYX_BTB_SIZE,
@@ -18,6 +19,8 @@ module ysyx_ifu #(
 
     input reset
 );
+  /* verilator lint_on UNUSEDPARAM */
+  /* verilator lint_off UNUSEDSIGNAL */
   typedef enum logic [1:0] {
     IDLE  = 'b00,
     VALID = 'b01,
@@ -125,5 +128,7 @@ module ysyx_ifu #(
       end
     end
   end
+  /* verilator lint_on UNUSEDPARAM */
+  /* verilator lint_on UNUSEDSIGNAL */
 
 endmodule

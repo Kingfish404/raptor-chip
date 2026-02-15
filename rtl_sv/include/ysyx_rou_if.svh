@@ -3,6 +3,9 @@
 `include "ysyx.svh"
 import ysyx_pkg::*;
 
+/* verilator lint_off UNUSEDSIGNAL */
+/* verilator lint_off UNUSEDPARAM */
+
 interface rou_csr_if #(
     parameter int XLEN = `YSYX_XLEN
 );
@@ -136,5 +139,8 @@ interface rou_cmu_if #(
       input valid
   );
 endinterface
+
+/* verilator lint_on UNUSEDSIGNAL */
+/* verilator lint_on UNUSEDPARAM */
 
 `endif  // YSYX_RO_IF_SVH

@@ -12,10 +12,12 @@ module ysyx_cmu #(
 
     input reset
 );
+  /* verilator lint_off UNUSEDSIGNAL */
   logic valid;
   logic prev_valid;
   logic [31:0] inst;
   logic [XLEN-1:0] rpc, npc;
+  /* verilator lint_on UNUSEDSIGNAL */
 
   logic ben, jen, jren;
   logic [XLEN-1:0] pmu_inst_retire;

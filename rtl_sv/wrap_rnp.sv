@@ -1,6 +1,8 @@
 // rnp: reduce net protocol (Ring-necked Pheasant)
 // axi2rnp: AXI4 to rnp
 // rnp2axi: rnp to AXI4
+/* verilator lint_off DECLFILENAME */
+/* verilator lint_off VARHIDDEN */
 
 module axi2rnp #(
     parameter bit [7:0] XLEN = 32

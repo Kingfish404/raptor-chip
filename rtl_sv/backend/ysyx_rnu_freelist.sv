@@ -7,7 +7,9 @@ module ysyx_rnu_freelist #(
     parameter unsigned RNUM = `YSYX_REG_SIZE,
     parameter unsigned PNUM = `YSYX_PHY_SIZE,
     parameter unsigned PLEN = `YSYX_PHY_LEN,
+    /* verilator lint_off UNUSEDPARAM */
     parameter unsigned RLEN = `YSYX_REG_LEN
+    /* verilator lint_on UNUSEDPARAM */
 ) (
     input clock,
     input reset,

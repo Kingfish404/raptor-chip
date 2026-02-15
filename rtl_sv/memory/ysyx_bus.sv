@@ -38,7 +38,9 @@ module ysyx_bus #(
     output            axi_wvalid,  // reqired
     input             axi_wready,  // reqired
 
+    /* verilator lint_off UNUSEDSIGNAL */
     input  [3:0] axi_bid,
+    /* verilator lint_on UNUSEDSIGNAL */
     input  [1:0] axi_bresp,
     input        axi_bvalid,  // reqired
     output       axi_bready,  // reqired
@@ -88,7 +90,9 @@ module ysyx_bus #(
   assign axi_awid = awid;
 
   state_load_t state_load;
+  /* verilator lint_off UNUSEDSIGNAL */
   state_lds_t  state_load_source;
+  /* verilator lint_on UNUSEDSIGNAL */
   state_lds_t  load_bridge;
   assign load_bridge = l1d_bus.arvalid ? L1D : L1I;
   // ifu read

@@ -206,8 +206,10 @@ module ysyx #(
 
   // PRF (Physical Register File) — top-level shared resource
   // Debug: architectural register view (committed + speculative)
+  /* verilator lint_off UNUSEDSIGNAL */
   logic [XLEN-1:0] rf     [`YSYX_REG_SIZE];
   logic [XLEN-1:0] rf_map [`YSYX_REG_SIZE];
+  /* verilator lint_on UNUSEDSIGNAL */
 
   ysyx_prf prf (
       .clock    (clock),

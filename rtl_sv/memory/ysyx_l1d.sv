@@ -76,7 +76,9 @@ module ysyx_l1d #(
 
   // page table walk
   logic [9:0] vpn[2];
+  /* verilator lint_off UNUSEDSIGNAL */
   logic [XLEN-1+2:0] ppn_a;
+  /* verilator lint_on UNUSEDSIGNAL */
 
   // mis-alignment check
   logic mis_align_load;

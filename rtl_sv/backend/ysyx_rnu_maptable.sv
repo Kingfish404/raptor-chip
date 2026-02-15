@@ -18,6 +18,20 @@ module ysyx_rnu_maptable #(
     // Debug: full RAT snapshot (committed, unpacked array)
     output [PLEN-1:0] rat_snapshot [RNUM]
 );
+  // ---- Committed Map (RAT) ----
+  // Declared before MAP because MAP's flush path reads rat[].
+  logic [PLEN-1:0] rat [RNUM];
+
+  always @(posedge clock) begin
+    if (reset) begin
+      for (integer i = 0; i < RNUM; i = i + 1) begin
+        rat[i] <= i[PLEN-1:0];
+      end
+    end else if (mt.rat_wen) begin
+      rat[mt.rat_waddr] <= mt.rat_wdata;
+    end
+  end
+
   // ---- Speculative Map (MAP) ----
   logic [PLEN-1:0] map [RNUM];
 
@@ -44,19 +58,6 @@ module ysyx_rnu_maptable #(
   assign mt.map_rdata_a = map[mt.map_raddr_a];
   assign mt.map_rdata_b = map[mt.map_raddr_b];
   assign mt.map_rdata_c = map[mt.map_raddr_c];
-
-  // ---- Committed Map (RAT) ----
-  logic [PLEN-1:0] rat [RNUM];
-
-  always @(posedge clock) begin
-    if (reset) begin
-      for (integer i = 0; i < RNUM; i = i + 1) begin
-        rat[i] <= i[PLEN-1:0];
-      end
-    end else if (mt.rat_wen) begin
-      rat[mt.rat_waddr] <= mt.rat_wdata;
-    end
-  end
 
   // Expose full MAP and RAT for debug - generate continuous assigns
   genvar gi;

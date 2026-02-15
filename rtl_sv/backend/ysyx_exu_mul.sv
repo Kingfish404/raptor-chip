@@ -19,9 +19,11 @@ module ysyx_exu_mul #(
 
 `ifdef YSYX_M_FAST
   logic [XLEN-1:0] r;
+  /* verilator lint_off UNUSEDSIGNAL */
   logic [63:0] mulh;
   logic [64:0] muls;
   logic [63:0] mulu;
+  /* verilator lint_on UNUSEDSIGNAL */
 
   always_ff @(posedge clock) begin
     if (in_valid) begin

@@ -14,8 +14,10 @@ import ysyx_pkg::*;
 module ysyx_rou #(
     parameter unsigned IIQ_SIZE = `YSYX_IIQ_SIZE,
     parameter unsigned ROB_SIZE = `YSYX_ROB_SIZE,
+    /* verilator lint_off UNUSEDPARAM */
     parameter unsigned RNUM = `YSYX_REG_SIZE,
     parameter unsigned RLEN = `YSYX_REG_LEN,
+    /* verilator lint_on UNUSEDPARAM */
     parameter unsigned PLEN = `YSYX_PHY_LEN,
     parameter unsigned XLEN = `YSYX_XLEN
 ) (
@@ -47,6 +49,12 @@ module ysyx_rou #(
   // Async trap state
   logic           recieved_trap;
   logic [XLEN-1:0] trap_pc;
+
+  // Forward declarations (used across sections)
+  logic [$clog2(ROB_SIZE)-1:0] rob_head, rob_tail;
+  ysyx_pkg::rob_entry_t rob_entry [ROB_SIZE];
+  logic head_br_p_fail;
+  logic head_valid;
 
   // ================================================================
   // 1. Dispatch Queue (UOQ)
@@ -148,8 +156,6 @@ module ysyx_rou #(
   // ================================================================
   // 3. Reorder Buffer (ROB) - uses rob_entry_t struct array
   // ================================================================
-  logic [$clog2(ROB_SIZE)-1:0] rob_head, rob_tail;
-  ysyx_pkg::rob_entry_t rob_entry [ROB_SIZE];
 
   // Write-back destination index decoding
   logic [$clog2(ROB_SIZE)-1:0] wb_dest_exu, wb_dest_ioq;
@@ -275,9 +281,6 @@ module ysyx_rou #(
   // ================================================================
   // Aliases for ROB head entry (readability)
   wire [$clog2(ROB_SIZE)-1:0] h = rob_head;
-
-  logic head_br_p_fail;
-  logic head_valid;
 
   assign head_br_p_fail = rob_entry[h].npc != rob_entry[h].pnpc;
   assign head_valid     = recieved_trap || (

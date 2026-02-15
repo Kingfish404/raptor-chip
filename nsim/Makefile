@@ -137,7 +137,7 @@ sta: pack
 	if [ ! -d $(YOSYS_OPENSTA) ]; then make YOSYS_OPENSTA; fi
 	make -C $(YOSYS_OPENSTA) sta show \
 		DESIGN=ysyx \
-		RTL_FILES="$(abspath $(BUILD_DIR)/ysyx_pack.sv)
+		RTL_FILES="$(abspath $(BUILD_DIR)/ysyx_pack.sv)"
 
 sta_local: pack
 	make -C $(YOSYS_OPENSTA) sta_local show \

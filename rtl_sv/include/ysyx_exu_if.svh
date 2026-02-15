@@ -3,6 +3,9 @@
 `include "ysyx.svh"
 import ysyx_pkg::*;
 
+/* verilator lint_off UNUSEDSIGNAL */
+/* verilator lint_off UNUSEDPARAM */
+
 interface exu_prf_if #(
     parameter unsigned PLEN = `YSYX_PHY_LEN,
     parameter unsigned XLEN = `YSYX_XLEN
@@ -165,5 +168,8 @@ interface exu_ioq_bcast_if #(
       output valid
   );
 endinterface
+
+/* verilator lint_on UNUSEDSIGNAL */
+/* verilator lint_on UNUSEDPARAM */
 
 `endif  // YSYX_EX_IF_SVH

@@ -3,6 +3,9 @@
 `include "ysyx.svh"
 import ysyx_pkg::*;
 
+/* verilator lint_off UNUSEDSIGNAL */
+/* verilator lint_off UNUSEDPARAM */
+
 interface rnu_rou_if #(
     parameter unsigned PLEN = `YSYX_PHY_LEN,
     parameter unsigned RLEN = `YSYX_REG_LEN,
@@ -25,5 +28,7 @@ interface rnu_rou_if #(
   modport slave(input uop, input op1, op2, input pr1, pr2, prd, prs, input valid, output ready);
 endinterface
 
+/* verilator lint_on UNUSEDSIGNAL */
+/* verilator lint_on UNUSEDPARAM */
 
 `endif
