@@ -75,10 +75,10 @@ See more details in [linux/README.md](../linux/README.md).
 ```shell
 make riscv32_linux_defconfig
 
-make run IMG=../third_party/riscv-software-src/build/linux-mmu/fw_payload.bin
+make run IMG=../third_party/riscv-software-src/opensbi/build/platform/generic/firmware/fw_payload.bin
 
 # or batch mode
-make run IMG=../third_party/riscv-software-src/build/linux-mmu/fw_payload.bin ARGS="-b --log=build/nemu-log.txt"
+make run IMG=../third_party/riscv-software-src/opensbi/build/platform/generic/firmware/fw_payload.bin ARGS="-b --log=build/nemu-log.txt"
 ```
 
 ## References

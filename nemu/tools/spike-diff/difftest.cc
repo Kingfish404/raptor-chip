@@ -216,7 +216,6 @@ extern "C"
     cfg.bootargs = nullptr;
     cfg.isa = isa;
     cfg.priv = DEFAULT_PRIV;
-    cfg.misaligned = false;
     cfg.endianness = endianness_little;
     cfg.pmpregions = 16;
     cfg.mem_layout = std::vector<mem_cfg_t>();

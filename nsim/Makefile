@@ -97,7 +97,7 @@ $(BIN): $(VSRCS) $(VHSRCS) $(CCSRCS) $(CHSRCS) $(NVBOARD_ARCHIVE)
 
 DIFF_REF_SO = -d $(abspath $(NEMU_HOME)/build/riscv32-nemu-interpreter-so)
 IMG ?=
-NPC_EXEC := $(BIN) $(FLAGS) $(DIFF_REF_SO) -m $(MROM_IMG) $(IMG)
+NPC_EXEC := $(BIN) $(ARGS) $(DIFF_REF_SO) -m $(MROM_IMG) $(IMG)
 
 verilog:
 	make -C ssrc verilog
@@ -119,7 +119,7 @@ AM_KERNEL:
 
 perf:
 	if [ ! -d $(AM_KERNEL) ]; then make AM_KERNEL; fi
-	make -s -C $(AM_KERNEL)/benchmarks/microbench/ ARCH=riscv32-ysyxsoc FLAGS='-b -n' mainargs=test run
+	make -s -C $(AM_KERNEL)/benchmarks/microbench/ ARCH=riscv32-ysyxsoc ARGS='-b -n' mainargs=test run
 
 YOSYS_OPENSTA = $(YSYX_HOME)/third_party/yosys-opensta
 

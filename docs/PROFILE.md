@@ -3,7 +3,7 @@
 使用`am-kernels`中的`microbench`测试程序进行性能测试。
 
 ```shell
-cd npc
+cd nsim
 make perf
 ```
 

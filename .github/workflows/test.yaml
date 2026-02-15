@@ -26,10 +26,10 @@ jobs:
         run: make -C $NEMU_HOME riscv32_ref_defconfig && make -C $NEMU_HOME
       - name: cpu-tests of riscv32-npc payload result
         shell: bash -l {0}
-        run: make -C $YSYX_HOME/am-kernels/tests/cpu-tests ARCH=riscv32-npc run FLAGS="-b -n"
+        run: make -C $YSYX_HOME/am-kernels/tests/cpu-tests ARCH=riscv32-npc run ARGS="-b -n"
       - name: cpu-tests of riscv32e-npc
         shell: bash -l {0}
-        run: make -C $YSYX_HOME/am-kernels/tests/cpu-tests ARCH=riscv32e-npc run FLAGS="-b -n"
+        run: make -C $YSYX_HOME/am-kernels/tests/cpu-tests ARCH=riscv32e-npc run ARGS="-b -n"
 
   ysyxsoc-cpu-tests:
     runs-on: ubuntu-latest
@@ -53,7 +53,7 @@ jobs:
         run: make -C $NEMU_HOME riscv32_ref_defconfig && make -C $NEMU_HOME
       - name: cpu-tests of riscv32-ysyxsoc
         shell: bash -l {0}
-        run: make -C $YSYX_HOME/am-kernels/tests/cpu-tests ARCH=riscv32-ysyxsoc run FLAGS="-b -n"
+        run: make -C $YSYX_HOME/am-kernels/tests/cpu-tests ARCH=riscv32-ysyxsoc run ARGS="-b -n"
       - name: cpu-tests of riscv32e-ysyxsoc
         shell: bash -l {0}
-        run: make -C $YSYX_HOME/am-kernels/tests/cpu-tests ARCH=riscv32e-ysyxsoc run FLAGS="-b -n"
+        run: make -C $YSYX_HOME/am-kernels/tests/cpu-tests ARCH=riscv32e-ysyxsoc run ARGS="-b -n"

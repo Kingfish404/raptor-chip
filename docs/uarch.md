@@ -7,30 +7,34 @@
  ------------------------------------------------------------
  in-order      | IFU - Instruction Fetch Unit
  issue         | IDU - Instruction Decode Unit
- --------------+ ROU - Re-Order Unit
+               | RNU - Register Naming Unit (rename, PRF)
+ --------------+ ROU - Re-Order Unit (ROB, uop queue)
  out-of-order  :
- execution     : EXU - Execution Unit
+ execution     : EXU - Execution Unit (RS, IOQ)
  --------------+
- in-order      | LSU - Load Store Unit
+ in-order      | LSU - Load Store Unit (STQ, SQ)
  --------------+
  in-order      | ROU - Re-Order Unit
- commit        | WBU - Write Back Unit
+ commit        | CMU - Commit Unit
  ------------------------------------------------------------
  Stages (`=>' split each stage):
  [
   frontend (in-order and speculative issue):
         v- [BUS <-load- AXI4]
-    IFU[l1i] =issue=> IDU =issue=> ROU[uop]
-        ^- bpu[btb,btb_jal]
+    IFU[l1i,tlb] =issue=> IDU =issue=> RNU[prf,rmt,rat]
+        ^- bpu[btb(COND/DIRE/INDR/RETU),pht,rsb]
+    RNU =rename=> ROU[uop]
     ROU[uop] -dispatch-> ROU[rob]
              =dispatch=> EXU[rs ]
   backend  (out-of-order execution):
     EXU[rs]  =write-back=> ROU[rob]
-        ^- LSU[l1d] <-load/store-> [BUS <-load/store-> AXI4]
+        ^- LSU[l1d,tlb] <-load/store-> [BUS <-load/store-> AXI4]
         |- MUL :mult/div
+    LSU[stq] (speculative store temp queue)
+    LSU[sq ] (committed store queue -> L1D/BUS)
   frontend (in-order commit):
-    ROU[rob] =commit=> WBU[rf ] & LSU[store_queue]
-    WBU[rf ] =resolve-branch=> frontend: IFU[pc,bpu]
+    ROU[rob] =commit=> CMU & LSU[sq]
+    CMU =resolve-branch=> frontend: IFU[pc,bpu]
  ]
  ------------------------------------------------------------
  See /rtl_sv/include/ysyx.svh for more details.
@@ -44,37 +48,40 @@ flowchart TD
         IFU["IFU"]
         L1I["L1I"]
         IDU["IDU"]
-        BPU["BPU"]
-        ROU["ROU"]
+        BPU["BPU (BTB/PHT/RSB)"]
+        RNU["RNU (PRF/RMT/RAT)"]
+        ROU["ROU (ROB)"]
         CSR["CSR"]
-        REG["REG"]
-        WBU["WBU"]
+        CMU["CMU"]
   end
  subgraph BE["backend (out-of-order)"]
-        EXU["EXU"]
+        EXU["EXU (RS/IOQ)"]
         MUL["MUL"]
         ALU["ALU"]
   end
  subgraph MEM["memory subsystem"]
         LSU["LSU"]
+        STQ["Store Temp Queue"]
         SQ["Store Queue"]
         L1D["L1D"]
         BUS["BUS"]
         CLINT["CLINT"]
   end
     IFU --> IDU & L1I & BPU
-    IDU --> ROU
-    ROU --> EXU & LSU & WBU & REG & CSR
-    LSU --> BUS & SQ & L1D
+    IDU --> RNU
+    RNU --> ROU
+    ROU --> EXU & LSU & CMU & CSR
+    LSU --> BUS & STQ & SQ & L1D
     EXU --> ROU & MUL & ALU
     BUS --> LSU & AXI["AXI4"] & IFU
     L1I --> IFU
-    WBU --> IFU
+    CMU --> IFU
     BPU --> IFU
     L1D --> LSU
     SQ --> LSU & BUS
+    STQ --> SQ
     CSR --> EXU
-    REG --> ROU
+    RNU --> ROU
     ALU --> EXU
     MUL --> EXU
     CLINT --> BUS

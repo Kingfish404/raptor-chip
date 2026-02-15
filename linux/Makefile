@@ -10,7 +10,7 @@ all:
 	echo "  - build_linux: Build Linux kernel for RISC-V 32-bit architecture"
 	echo "  - make_initramfs: Create a simple initramfs image"
 	echo "  - build_init: Build the init process payload"
-	echo "  - install_initramfs: Configure Linux kernel to use the created initramfs
+	echo "  - install_initramfs: Configure Linux kernel to use the created initramfs"
 	echo "  - build_opensbi_with_kernel: Build OpenSBI with the Linux kernel as payload"
 
 linux:

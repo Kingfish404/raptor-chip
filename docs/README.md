@@ -1,9 +1,49 @@
 # Core docs
 
-- **[uarch](./uarch.md)**
-- **[Boot Linux Kernel](./linux_kernel.md)**
-- [PROFILE](./PROFILE.md)
-- [REFERENCE](./REFERENCE.md)
+- **[uarch](./uarch.md)** — Microarchitecture details (pipeline, modules, mermaid diagram)
+- **[Boot Linux Kernel](./linux_kernel.md)** — OpenSBI + Linux kernel boot on NEMU/NPC
+- [PROFILE](./PROFILE.md) — Performance evaluation results (microbench, coremark, PPA)
+- [REFERENCE](./REFERENCE.md) — AXI protocol and PPA benchmark references
+
+## Quick Command Reference
+
+All commands run from the **project root**. No `source env.sh` needed.
+
+| Task | Command |
+|------|---------|
+| Show all targets | `make help` |
+| Setup environment | `make setup` |
+| Generate RTL | `make verilog` |
+| Build & run NEMU | `make nemu-run` |
+| Full NPC simulation | `make npc-sim` |
+| NPC simulation (batch, no wave) | `make npc-run ARGS="-b -n"` |
+| Run CoreMark on NPC | `make coremark ARGS="-b -n"` |
+| Run MicroBench on NPC | `make microbench ARGS="-b -n"` |
+| Run nanos-lite on NEMU | `make nanos-nemu` |
+| Boot Linux on NEMU | `make linux-boot` |
+| FPGA synthesis | `make fpga-syn` |
+| Pack SV / Lint / STA | `make pack` / `make lint` / `make sta` |
+| Clean all | `make clean` |
+
+## Project Structure
+
+```
+raptor-chip/
+├── Makefile              # Top-level Makefile (one-line commands)
+├── env.sh                # Environment variables (auto-sourced by Makefile)
+├── setup.sh              # Dependency installation script
+├── rtl_scala/            # Chisel (Scala) → SystemVerilog generation
+├── rtl_sv/               # Generated & handwritten SystemVerilog RTL
+├── nemu/                 # NEMU software emulator (RISC-V ISS)
+├── nsim/                 # NPC simulator (Verilator testbench)
+├── abstract-machine/     # Abstract Machine runtime framework
+├── navy-apps/            # Navy applications (for nanos-lite)
+├── nanos-lite/           # NanoS-lite simple OS
+├── linux/                # Linux kernel build scripts
+├── fpga/                 # FPGA targets (Gowin Tang Nano 20K)
+├── third_party/          # Third-party dependencies
+└── docs/                 # Documentation (this directory)
+```
 
 ## Code Style and Conventions
 

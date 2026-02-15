@@ -33,5 +33,5 @@ image: $(IMAGE).elf
 	@$(OBJCOPY) -S --set-section-flags .bss=alloc,contents -O binary $(IMAGE).elf $(IMAGE).bin
 
 run: image
-	make -C $(NSIM_HOME) ISA=$(ISA) run FLAGS="$(FLAGS)" IMG=$(IMAGE).bin
-	# make -C $(NSIM_HOME) ISA=$(ISA) run FLAGS="$(FLAGS)" IMG=$(IMAGE).bin MROM_IMG=$(IMAGE).bin
+	make -C $(NSIM_HOME) ISA=$(ISA) run ARGS="$(ARGS)" IMG=$(IMAGE).bin
+	# make -C $(NSIM_HOME) ISA=$(ISA) run ARGS="$(ARGS)" IMG=$(IMAGE).bin MROM_IMG=$(IMAGE).bin
