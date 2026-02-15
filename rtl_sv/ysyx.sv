@@ -185,24 +185,46 @@ module ysyx #(
       .reset(reset)
   );
 
-  // RNU (Re-naming Unit)
+  // RNU (Re-naming Unit) — pure rename: RNQ + freelist + maptable
+  logic [`YSYX_PHY_LEN-1:0] rnu_map_snapshot [`YSYX_REG_SIZE];
+  logic [`YSYX_PHY_LEN-1:0] rnu_rat_snapshot [`YSYX_REG_SIZE];
+
   ysyx_rnu rnu (
       .clock(clock),
 
-      // write-back
-      .exu_rou(exu_rou),
-      .exu_ioq_bcast(exu_ioq_bcast),
-
-      // commit
       .rou_cmu  (rou_cmu),
       .cmu_bcast(cmu_bcast),
 
       .idu_rnu(idu_rnu),
       .rnu_rou(rnu_rou),
 
-      .exu_prf(exu_prf),
+      .map_snapshot(rnu_map_snapshot),
+      .rat_snapshot(rnu_rat_snapshot),
 
       .reset(reset)
+  );
+
+  // PRF (Physical Register File) — top-level shared resource
+  // Debug: architectural register view (committed + speculative)
+  logic [XLEN-1:0] rf     [`YSYX_REG_SIZE];
+  logic [XLEN-1:0] rf_map [`YSYX_REG_SIZE];
+
+  ysyx_prf prf (
+      .clock    (clock),
+      .reset    (reset),
+
+      .prf_rd   (exu_prf),
+
+      .exu_rou       (exu_rou),
+      .exu_ioq_bcast (exu_ioq_bcast),
+      .rou_cmu       (rou_cmu),
+      .cmu_bcast     (cmu_bcast),
+
+      .map_snapshot  (rnu_map_snapshot),
+      .rat_snapshot  (rnu_rat_snapshot),
+
+      .rf     (rf),
+      .rf_map (rf_map)
   );
 
   // ROU (Re-Order Unit)

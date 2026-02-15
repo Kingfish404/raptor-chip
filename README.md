@@ -5,9 +5,9 @@
 [![macOS](https://img.shields.io/badge/macOS-000000?style=flat&logo=apple&logoColor=white)](https://en.wikipedia.org/wiki/MacOS)
 [![Github](https://img.shields.io/badge/GitHub-181717?style=flat&logo=github&logoColor=white)](https://github.dev/Kingfish404/raptor-chip)
 
-**New Processor Core (NPC)** with [`RISC-V`][RISC-V] ISA. Hardware generation is done using `SystemVerilog` and `Chisel` (`Scala`).
+**Out-of-order RISC-V (RV32IMAC\_Zicsr\_Zifencei_Sv32) processor core** with register renaming, ROB, and reservation stations. The RTL is hand-written `SystemVerilog` with `Chisel` (`Scala`) used only for decoder generation. Features Sv32 virtual memory (MMU/TLB), LR/SC + AMO atomics, compressed instructions (RVC), and boots Linux 6.12 via OpenSBI.
 
-Candidate ip core name: `raptor-0.1.0-falcon` (`rt-f`).
+Candidate ip core name: `raptor-falcon-0.1.0` (`rf-0.1.0`).
 
 [RISC-V]: https://riscv.org/
 
@@ -34,7 +34,7 @@ wget https://github.com/chipsalliance/espresso/releases/download/v2.4/arm64-appl
 
 ## Quick Start
 
-All commands run from the project root. (No need to `source env.sh` — the Makefile exports all environment variables automatically.)
+All commands run from the project root. (No need to `source env.sh` - the Makefile exports all environment variables automatically.)
 
 ```shell
 # Show all available targets

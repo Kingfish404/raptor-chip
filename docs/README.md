@@ -1,9 +1,10 @@
 # Core docs
 
-- **[uarch](./uarch.md)** — Microarchitecture details (pipeline, modules, mermaid diagram)
-- **[Boot Linux Kernel](./linux_kernel.md)** — OpenSBI + Linux kernel boot on NEMU/NPC
-- [PROFILE](./PROFILE.md) — Performance evaluation results (microbench, coremark, PPA)
-- [REFERENCE](./REFERENCE.md) — AXI protocol and PPA benchmark references
+- **[uarch](./uarch.md)** - Microarchitecture details (pipeline stages, module descriptions, interfaces, config parameters, mermaid diagram)
+- **[Boot Linux Kernel](./linux_kernel.md)** - OpenSBI + Linux kernel boot on NEMU/NPC
+- [PROFILE](./PROFILE.md) - Performance evaluation results (microbench, coremark, PPA)
+- [perf-iterations](./perf-iterations.md) - Microarchitecture change performance tracking (IPC, stall breakdown)
+- [REFERENCE](./REFERENCE.md) - AXI protocol and PPA benchmark references
 
 ## Quick Command Reference
 
@@ -34,6 +35,17 @@ raptor-chip/
 ├── setup.sh              # Dependency installation script
 ├── rtl_scala/            # Chisel (Scala) → SystemVerilog generation
 ├── rtl_sv/               # Generated & handwritten SystemVerilog RTL
+│   ├── include/          # Config, interfaces, DPI-C macros
+│   │   ├── ysyx_config.svh          # Microarch params (ISSUE_WIDTH, ROB_SIZE, cache, BPU, …)
+│   │   ├── ysyx_rnu_internal_if.svh # RNU internal interfaces (rnu_fl_if, rnu_mt_if)
+│   │   └── ysyx_*_if.svh            # Inter-module interfaces (ifu/idu/rnu/rou/exu)
+│   ├── ysyx_pkg.sv       # Types: uop_t, prd_t, rob_entry_t, rob_state_t
+│   ├── ysyx.sv            # Top-level core (pure wiring, instantiates all stages + PRF)
+│   ├── frontend/         # IFU, IDU (RVC + csr_addr_valid), BPU (PHT/BTB/GHR/RSB), CSR* (M/S-mode)
+│   ├── backend/          # RNU (RNQ + freelist + maptable), PRF (2R/2W), ROU (UOQ + ROB), EXU (RS + IOQ + ALU + MUL), CMU
+│   ├── memory/           # LSU (STQ + SQ), L1I (TLB, Sv32 PTW), L1D (TLB, STLB, Sv32 PTW), BUS (AXI4), CLINT
+│   └── generated/        # Chisel-generated decoders
+│   # *CSR lives in frontend/ on disk but architecturally belongs to the backend
 ├── nemu/                 # NEMU software emulator (RISC-V ISS)
 ├── nsim/                 # NPC simulator (Verilator testbench)
 ├── abstract-machine/     # Abstract Machine runtime framework
@@ -50,14 +62,16 @@ raptor-chip/
 SystemVerilog features used in this project:
 - `logic` instead of `reg` and `wire`
 - `always_comb`, `always_ff`, `always_latch` instead of `always @(*)`, `always @(posedge clk)`, `always @(...)`
-- `typedef enum` for finite state machines
-- `typedef struct` for bundled signals
-- `interface` for module ports
-- `package` for global definitions
+- `typedef enum` for finite state machines (e.g., `rob_state_t`)
+- `typedef struct packed` for bundled signals (e.g., `uop_t`, `prd_t`, `rob_entry_t`)
+- `interface` for inter-module ports (`<src>_<dst>_if`) and internal sub-module ports (`rnu_<component>_if`)
+- `package` for global definitions (`ysyx_pkg`)
+- All modules/defines use `ysyx_` prefix
+- Named port connections only (`.port(signal)`), never positional
 
-The rtl should be synthesizable by Yosys (with slang^[1]).
+The rtl should be synthesizable by Yosys (with slang[^1]).
 
-[1]: https://github.com/povik/yosys-slang
+[^1]: https://github.com/povik/yosys-slang
 
 ## (Micro)Architecture
 

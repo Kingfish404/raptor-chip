@@ -29,7 +29,7 @@ static inline void verilog_connect(TOP_NAME *top, NPCState *npc)
   // for difftest
   npc->inst = (uint32_t *)&(CONCAT(VERILOG_PREFIX, cmu__DOT__inst));
 
-  npc->gpr = (word_t *)&CONCAT(VERILOG_PREFIX, rnu__DOT__rf);
+  npc->gpr = (word_t *)&CONCAT(VERILOG_PREFIX, rf);
   npc->rpc = (uint32_t *)&CONCAT(VERILOG_PREFIX, cmu__DOT__rpc);
   npc->ret = npc->gpr + reg_str2idx("a0");
   npc->pc = (uint32_t *)&CONCAT(VERILOG_PREFIX, cmu__DOT__npc);

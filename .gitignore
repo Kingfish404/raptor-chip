@@ -16,7 +16,7 @@
 !init.sh
 !setup.sh
 !env.sh
-!/.github/workflows/*
+!/.github/*
 !Dockerfile
 !*.v
 !*.vh

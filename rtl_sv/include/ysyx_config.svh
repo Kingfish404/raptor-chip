@@ -47,6 +47,10 @@
 `define YSYX_SQ_SIZE 8
 `define YSYX_L1D_LEN 7
 
+// Issue width (number of instructions dispatched per cycle)
+// Set to 1 for single-issue; increase for multi-issue
+`define YSYX_ISSUE_WIDTH 1
+
 `ifdef YSYX_I_EXTENSION
 `define YSYX_REG_SIZE 32 // 32 registers
 `else

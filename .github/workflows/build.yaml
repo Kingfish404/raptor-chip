@@ -26,7 +26,7 @@ jobs:
       - name: Show RISC-V Architecture Test result riscv32e-npc
         run: docker run --rm sta:latest bash -c "make o2_defconfig && make -C /workspaces/raptor-chip/riscv-arch-test-am ARCH=riscv32e-npc run ARGS="-b -n""
       - name: Show STA result (Power, Frequency, Area)
-        run: docker run --rm sta:latest bash -c "make sta_local 2>&1 > log.txt && make sta_local"
+        run: docker run --rm sta:latest bash -c "make sta_local 2>&1 | tail -256"
       - name: Clean up
         run: docker rmi sta:latest
 
