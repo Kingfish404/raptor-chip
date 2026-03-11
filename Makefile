@@ -51,8 +51,8 @@ help:
 	@echo "  make npc-sim            - Shortcut: verilog + config + build + run"
 	@echo ""
 	@echo "AM Kernels / Benchmarks:"
-	@echo "  make coremark           - Run CoreMark on NPC (riscv32e-npc)"
-	@echo "  make microbench         - Run MicroBench on NPC (riscv32e-npc)"
+	@echo "  make coremark-npc       - Run CoreMark on NPC (riscv32e-npc)"
+	@echo "  make microbench-npc     - Run MicroBench on NPC (riscv32e-npc)"
 	@echo "  make coremark-nemu      - Run CoreMark on NEMU"
 	@echo "  make microbench-nemu    - Run MicroBench on NEMU"
 	@echo ""
@@ -61,7 +61,8 @@ help:
 	@echo "  make nanos-npc          - Build and run nanos-lite on NPC"
 	@echo ""
 	@echo "Linux Kernel:"
-	@echo "  make linux-boot         - Boot Linux on NEMU (via OpenSBI)"
+	@echo "  make linux-boot-nemu    - Boot Linux on NEMU (via OpenSBI)"
+	@echo "  make linux-boot-npc     - Boot Linux on NPC"
 	@echo ""
 	@echo "FPGA:"
 	@echo "  make fpga-syn           - Synthesize for Gowin Tang Nano 20K"
@@ -100,6 +101,9 @@ NEMU_DEFCONFIG ?= riscv32_defconfig
 nemu-config:
 	$(MAKE) -C $(NEMU_HOME) $(NEMU_DEFCONFIG)
 
+nemu-config-linux:
+	$(MAKE) -C $(NEMU_HOME) riscv32_linux_defconfig
+
 nemu-menuconfig:
 	$(MAKE) -C $(NEMU_HOME) menuconfig
 
@@ -129,6 +133,9 @@ NPC_ARCH ?= riscv32e-npc
 npc-config:
 	$(MAKE) -C $(NSIM_HOME) $(NPC_DEFCONFIG)
 
+npc-config-linux:
+	$(MAKE) -C $(NSIM_HOME) o2linux_defconfig
+
 npc-menuconfig:
 	$(MAKE) -C $(NSIM_HOME) menuconfig
 
@@ -157,10 +164,10 @@ $(AM_KERNELS):
 
 MAINARGS ?= test
 
-coremark: $(AM_KERNELS)
+coremark-npc: $(AM_KERNELS) npc-config
 	$(MAKE) -C $(AM_KERNELS)/benchmarks/coremark_eembc ARCH=$(NPC_ARCH) run ARGS="$(ARGS)"
 
-microbench: $(AM_KERNELS)
+microbench-npc: $(AM_KERNELS) npc-config
 	$(MAKE) -C $(AM_KERNELS)/benchmarks/microbench ARCH=$(NPC_ARCH) run ARGS="$(ARGS)" mainargs=$(MAINARGS)
 
 coremark-nemu: $(AM_KERNELS)
@@ -189,9 +196,13 @@ nanos-npc:
 # ============================================================================
 OPENSBI_PAYLOAD ?= $(YSYX_HOME)/third_party/riscv-software-src/opensbi/build/platform/generic/firmware/fw_payload.bin
 
-linux-boot: nemu-linux-config
+linux-boot-nemu: nemu-linux-config
 	$(MAKE) -C $(NEMU_HOME) -j$(NPROC)
 	$(MAKE) -C $(NEMU_HOME) run IMG=$(OPENSBI_PAYLOAD) ARGS="$(ARGS)"
+
+linux-boot-npc: npc-config-linux
+	$(MAKE) -C $(NSIM_HOME) -j$(NPROC)
+	$(MAKE) -C $(NSIM_HOME) run IMG=$(OPENSBI_PAYLOAD) ARGS="$(ARGS)"
 
 # ============================================================================
 # FPGA Targets
@@ -212,7 +223,7 @@ lint:
 	$(MAKE) -C $(NSIM_HOME) lint
 
 sta:
-	$(MAKE) -C $(NSIM_HOME) sta
+	$(MAKE) -C $(NSIM_HOME) sta_local
 
 clean:
 	-$(MAKE) -C $(NEMU_HOME) clean 2>/dev/null || true
@@ -222,8 +233,8 @@ clean:
 .PHONY: help setup verilog \
 	nemu-config nemu-menuconfig nemu-build nemu-run nemu-ref nemu-linux-config nemu-linux-run \
 	npc-config npc-menuconfig npc-build npc-run npc-sim \
-	coremark microbench coremark-nemu microbench-nemu \
-	nanos-nemu nanos-npc linux-boot \
+	coremark-npc microbench-npc coremark-nemu microbench-nemu \
+	nanos-nemu nanos-npc linux-boot-nemu linux-boot-npc \
 	fpga-syn fpga-pnr pack lint sta clean
 
 endif # Guard: root-only targets

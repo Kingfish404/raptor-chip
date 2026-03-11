@@ -81,8 +81,8 @@ make npc-menuconfig
 
 ```shell
 # Run on NPC (riscv32e-npc)
-make coremark ARGS="-b -n"
-make microbench ARGS="-b -n"
+make coremark-npc ARGS="-b -n"
+make microbench-npc ARGS="-b -n"
 
 # Run on NEMU (riscv32-nemu)
 make coremark-nemu ARGS="-b -n"
@@ -103,7 +103,10 @@ make nanos-npc
 
 ```shell
 # Boot Linux on NEMU (requires OpenSBI payload built first)
-make linux-boot
+make linux-boot-nemu
+
+# Boot Linux on NPC
+make linux-boot-npc
 
 # See detailed instructions
 # docs/linux_kernel.md, linux/README.md

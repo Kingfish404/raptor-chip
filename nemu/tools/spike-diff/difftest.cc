@@ -15,6 +15,7 @@
 
 #include "mmu.h"
 #include "sim.h"
+#include "platform.h"
 #include "../../include/common.h"
 #include <difftest-def.h>
 
@@ -64,6 +65,7 @@ public:
   diffsim_t(const cfg_t *cfg, bool halted,
             std::vector<std::pair<reg_t, abstract_mem_t *>> mems,
             const std::vector<device_factory_sargs_t> &plugin_device_factories,
+            const bool dtb_discovery,
             const std::vector<std::string> &args,
             const debug_module_config_t &dm_config,
             const char *log_path,
@@ -71,7 +73,7 @@ public:
             bool socket_enabled,
             FILE *cmd_file, // needed for command line option --cmd
             std::optional<unsigned long long> instruction_limit)
-      : sim_t(cfg, halted, mems, plugin_device_factories, args,
+      : sim_t(cfg, halted, mems, plugin_device_factories, dtb_discovery, args,
               dm_config, log_path, dtb_enabled, dtb_file,
               socket_enabled, cmd_file, instruction_limit)
   {
@@ -83,6 +85,9 @@ public:
   {
     p = get_core(0);
     state = p->get_state();
+    // Set CLINT mtimecmp to UINT64_MAX so MTIP starts deasserted (mtime < mtimecmp)
+    uint64_t max_timecmp = UINT64_MAX;
+    static_cast<simif_t *>(this)->mmio_store(CLINT_BASE + 0x4000, 8, (uint8_t *)&max_timecmp);
   }
 
   void diff_step(uint64_t n)
@@ -165,11 +170,9 @@ public:
 
   void diff_memcpy(reg_t dest, void *src, size_t n)
   {
-    mmu_t *mmu = p->get_mmu();
-    for (size_t i = 0; i < n; i++)
-    {
-      mmu->store<uint8_t>(dest + i, *((uint8_t *)src + i));
-    }
+    auto &mem_pair = difftest_mem[0];
+    reg_t base = mem_pair.first;
+    mem_pair.second->store(dest - base, n, (const uint8_t *)src);
   }
 };
 
@@ -227,8 +230,8 @@ extern "C"
     {
       s = new diffsim_t(
           &cfg, false,
-          difftest_mem, difftest_plugin_devices, difftest_htif_args,
-          difftest_dm_config, nullptr, false, NULL,
+          difftest_mem, difftest_plugin_devices, false, difftest_htif_args,
+          difftest_dm_config, nullptr, true, NULL,
           false,
           NULL,
           std::nullopt);

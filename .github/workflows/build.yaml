@@ -96,9 +96,6 @@ jobs:
       - name: prepare litex
         shell: bash -l {0}
         run: cd fpga/litex && ./setup.sh
-      - name: patch litex
-        shell: bash -l {0}
-        run: cd $YSYX_HOME/third_party/ && sed -i.bak 's/^#define PRINTF_LEVEL PRINTF_STD$/#define PRINTF_LEVEL PRINTF_FLT/' enjoy-digital/pythondata-software-picolibc/pythondata_software_picolibc/data/newlib/libc/tinystdio/vfiprintf.c
       - name: run litex
         shell: bash -l {0}
         run: cd fpga/litex && source ./venv/bin/activate && timeout 180s make run_ni || true
