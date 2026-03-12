@@ -32,6 +32,8 @@ jobs:
 
   linux-npc-test:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     env:
       YSYX_HOME: ${{ github.workspace  }}
       NEMU_HOME: ${{ github.workspace  }}/nemu
@@ -50,6 +52,62 @@ jobs:
       - name: Boot Linux
         shell: bash -l {0}
         run: timeout 2700s make -C nsim run IMG=../linux-6.12.57/fw_payload.bin ARGS="-b -n" || true
+      - name: Pack RTL into single file
+        shell: bash -l {0}
+        run: make pack
+      - name: Collect release artifacts
+        run: |
+          mkdir -p dist/rtl_sv
+          cp nsim/build/ysyx_pack.sv dist/
+          cp nsim/build/ysyx_pack.svh dist/
+          cp -r rtl_sv/. dist/rtl_sv/
+          printf "commit: %s\nref: %s\ndate: %s\n" \
+            "${{ github.sha }}" "${{ github.ref_name }}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > dist/VERSION
+          cd dist && zip -r ../raptor-chip-rtl.zip .
+      - name: Upload RTL artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: raptor-chip-rtl-${{ github.sha }}
+          path: dist/
+          retention-days: 90
+          overwrite: true
+      - name: Delete existing nightly release if same branch
+        if: github.event_name == 'push'
+        run: |
+          # Only delete if the existing rtl-nightly release was created from the
+          # same branch (ref_name). This avoids a re-run of an older amended
+          # commit clobbering a newer release on the same branch, while still
+          # allowing the normal rolling-nightly update.
+          EXISTING=$(gh release view rtl-nightly --json tagName,body -q '.body' 2>/dev/null || true)
+          if [ -z "$EXISTING" ]; then
+            echo "No existing nightly release, will create."
+          else
+            EXISTING_SHA=$(echo "$EXISTING" | grep -oP '(?<=commit `)[0-9a-f]+(?=`)' | head -1 || true)
+            # Allow overwrite if: no SHA found, same SHA, or current SHA is a
+            # descendant of the existing one (i.e. the branch moved forward or
+            # was amended).
+            if [ -z "$EXISTING_SHA" ] || git merge-base --is-ancestor "$EXISTING_SHA" "${{ github.sha }}" 2>/dev/null || [ "$EXISTING_SHA" = "${{ github.sha }}" ]; then
+              echo "Existing nightly is from same branch lineage, deleting."
+              gh release delete rtl-nightly --yes --cleanup-tag 2>/dev/null || true
+            else
+              echo "Existing nightly is from a different/newer commit ($EXISTING_SHA), skipping delete."
+              exit 0
+            fi
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Create nightly RTL release
+        if: github.event_name == 'push'
+        run: |
+          gh release create rtl-nightly \
+            --title "RTL Nightly (${{ github.ref_name }}, $(date -u +%Y-%m-%d))" \
+            --notes "Auto-generated RTL release from commit \`${{ github.sha }}\`." \
+            --prerelease \
+            "nsim/build/ysyx_pack.sv#ysyx_pack.sv (single-file packed RTL)" \
+            "nsim/build/ysyx_pack.svh#ysyx_pack.svh (macro definitions)" \
+            "raptor-chip-rtl.zip#raptor-chip-rtl.zip (full RTL source)"
+        env:
+          GH_TOKEN: ${{ github.token }}
 
   ysyxsoc-test:
     runs-on: ubuntu-latest
