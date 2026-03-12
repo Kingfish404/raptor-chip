@@ -107,6 +107,9 @@ Raptor is an out-of-order, single-issue RISC-V (RV32IMAC\_Zicsr\_Zifencei\_Sv32)
 
 - Direct-mapped, `2^L1I_LEN` entries (default 64, 6-bit index)
 - Line size: `2^L1I_LINE_LEN` words (default 2 words per line)
+- **Data storage**: Banked `ysyx_sram_1r1w` instances (one per word position) with synchronous read (1-cycle latency)
+- **SRAM data readiness**: `pc_ifu_d1` register tracks PC stability; `sram_data_ready = (pc_ifu_d1 == pc_ifu)` ensures SRAM output matches the current fetch address before asserting `valid`
+- **Tag/Valid**: Register arrays (multi-port read, fast bulk invalidation)
 - **IFQ**: 2-entry instruction fetch queue for outstanding requests
 - **TLB**: Single-entry ITLB (vtag→ptag)
 - **Sv32 PTW**: 2-level page table walk (PTW1→PTW0) with trap on page fault
@@ -213,6 +216,9 @@ Raptor is an out-of-order, single-issue RISC-V (RV32IMAC\_Zicsr\_Zifencei\_Sv32)
 #### L1D — Data Cache (`ysyx_l1d.sv`)
 
 - Direct-mapped, `2^L1D_LEN` entries (default 128, 7-bit index)
+- **Data storage**: `ysyx_sram_1r1w` instance for cache data with synchronous read (1-cycle latency)
+- **Tag/Valid**: Register arrays (multi-port read for simultaneous load/store hit check, fast fence invalidation)
+- **Hit logic**: Split into `tag_hit` (combinational from register tags in `LD_A`) and `data_hit` (SRAM data ready in `LD_HIT`). Bus requests suppressed by `tag_hit`; load data returned by `data_hit`.
 - Write-through policy: full-word writes update cache, sub-word writes invalidate
 - **Load TLB**: Single-entry (vtag→ptag)
 - **Store TLB (STLB)**: Separate single-entry TLB for store address translation
@@ -221,7 +227,7 @@ Raptor is an out-of-order, single-issue RISC-V (RV32IMAC\_Zicsr\_Zifencei\_Sv32)
 - Misalignment detection for loads/stores
 - Cacheability determined by address ranges
 - `fence_time` invalidates entire cache
-- **FSM**: 6-state (`IDLE`, `PTW0`, `PTW1`, `TRAP`, `LD_A`, `LD_D`)
+- **FSM**: 7-state (`IDLE`, `PTW0`, `PTW1`, `TRAP`, `LD_A`, `LD_HIT`, `LD_D`)
 
 #### BUS — AXI4 Bus Bridge (`ysyx_bus.sv`)
 

@@ -25,6 +25,7 @@
 /rtl_*/generated
 code
 build
+reference
 
 !/fpga
 

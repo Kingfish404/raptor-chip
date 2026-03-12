@@ -22,7 +22,7 @@ IFU → IDU → RNU (rename) → ROU (ROB/dispatch) → EXU (RS/IOQ) → CMU (co
   - **EXU**: RS (`RS_SIZE`, priority issue, operand forwarding) + IOQ (`IOQ_SIZE`, in-order, for ld/st/amo/Zicsr) + ALU (combinational RV32I) + MUL (Booth's / iterative div, or fast single-cycle mode)
   - **CMU** (commit): lightweight broadcast unit (retire PC, branch resolution, flush, fence)
   - **CSR** (`ysyx_csr.sv`): M/S-mode CSR file, trap delegation, privilege transitions, MMU broadcasts (`immu_en`/`dmmu_en`, `satp_ppn`, `tvec`)
-- **Memory** (`rtl_sv/memory/`): LSU (STQ + SQ, store-to-load forwarding CAM), L1I (direct-mapped, ITLB, Sv32 PTW, IFQ), L1D (direct-mapped, load TLB + store STLB, Sv32 PTW, write-through, LR/SC reservation), BUS (AXI4 bridge, L1D priority, CLINT internal), CLINT (64-bit mtime, periodic timer interrupt)
+- **Memory** (`rtl_sv/memory/`): LSU (STQ + SQ, store-to-load forwarding CAM), L1I (direct-mapped, ITLB, Sv32 PTW, IFQ, banked SRAM data storage via `ysyx_sram_1r1w`, `sram_data_ready` for synchronous read timing), L1D (direct-mapped, load TLB + store STLB, Sv32 PTW, write-through, LR/SC reservation, SRAM data storage via `ysyx_sram_1r1w`, 7-state FSM with `LD_HIT` for SRAM read latency, split `tag_hit`/`data_hit`), BUS (AXI4 bridge, L1D priority, CLINT internal), CLINT (64-bit mtime, periodic timer interrupt), SRAM wrapper (`ysyx_sram_1r1w.sv` — synchronous-read behavioral model with write-first bypass, `YSYX_USE_SRAM_MACRO` ifdef for foundry macro swap, matches ASIC SRAM timing and FPGA Block RAM inference)
 - **Top-level**: `rtl_sv/ysyx.sv` (bare core, pure wiring — instantiates all stages + PRF), `rtl_sv/ysyx_npc_soc.sv` (SoC wrapper for Verilator sim)
 - **Config/types**: `rtl_sv/include/ysyx_config.svh` (params incl. `YSYX_ISSUE_WIDTH`, cache/BPU/queue sizes), `rtl_sv/ysyx_pkg.sv` (`uop_t`, `prd_t`, `rob_entry_t`, `rob_state_t` types)
 - **Interfaces**: `rtl_sv/include/ysyx_*_if.svh` (inter-module: `ifu_idu_if`, `idu_rnu_if`, `rnu_rou_if`, `rou_exu_if`, `exu_rou_if`, `exu_ioq_bcast_if`, `exu_prf_if`, `exu_lsu_if`, `exu_csr_if`, `exu_l1d_if`, `rou_cmu_if`, `rou_csr_if`, `rou_lsu_if`, `cmu_bcast_if`, `csr_bcast_if`, `lsu_l1d_if`, `l1i_bus_if`, `l1d_bus_if`), `rtl_sv/include/ysyx_rnu_internal_if.svh` (`rnu_fl_if`, `rnu_mt_if`)
@@ -35,7 +35,7 @@ make verilog           # Chisel → SV decoders (output: rtl_sv/generated/)
 make npc-sim           # Full pipeline: verilog + config + build + run
 make npc-run ARGS="-b -n"  # Run NPC sim (batch, no wave)
 make nemu-run          # Build & run NEMU reference emulator
-make coremark ARGS="-b -n" # CoreMark on NPC
+make coremark-npc ARGS="-b -n" # CoreMark on NPC
 make lint              # Verilator lint
 make sta               # Static timing analysis (Yosys + OpenSTA)
 make pack              # Pack all SV into single file

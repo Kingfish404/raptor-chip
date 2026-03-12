@@ -28,12 +28,10 @@ module ysyx_l1i #(
     PTW1 = 'b1001,
     TRAP = 'b1010,
 
-    RD_A = 'b0001,
+    RD_A = 'b0001,  // re-check hit after PTW/MMU before issuing AXI fetch
     RD_0 = 'b0010,
-    WAIT = 'b0100,
     RD_1 = 'b0110,
-    FINA = 'b0111,
-    NULL = 'b0101
+    FINA = 'b0111
   } l1i_state_t;
 
   l1i_state_t l1i_state;
@@ -50,9 +48,14 @@ module ysyx_l1i #(
   logic [XLEN-1:0] l1i_addr;
   logic [XLEN-1:0] rec_addr;
   logic [XLEN-1:0] fetch_addr;
-  logic [32-1:0] l1i[L1I_SIZE][L1I_LINE_SIZE];
+  // Tag and valid arrays (kept as registers for multi-port read and fast bulk invalidation)
   logic [L1I_SIZE-1:0] l1i_valid;
   logic [32-{{3'b0}, L1I_LEN+L1I_LINE_LEN}-2-1:0] l1i_tag[L1I_SIZE][L1I_LINE_SIZE];
+
+  // Data SRAM bank signals — one bank per word position in cache line
+  logic [31:0] data_bank_rdata [L1I_LINE_SIZE];
+  logic [L1I_LEN-1:0] data_bank_raddr [L1I_LINE_SIZE];
+  logic data_bank_wen [L1I_LINE_SIZE];
 
   logic [32-{{3'b0}, L1I_LEN+L1I_LINE_LEN}-2-1:0] addr_tag;
   logic [L1I_LEN-1:0] addr_idx;
@@ -146,19 +149,79 @@ module ysyx_l1i #(
     && (l1i_addr >= 'ha0000000)
     && (l1i_addr <= 'hc0000000);
 
-  assign inst_lo = (pc_ifu[1]
-    ? l1i[addr_idx][addr_offset][31:16]
-    : l1i[addr_idx][addr_offset][15:0]);
-  assign inst_hi = (pc_ifu[1]
-    ? l1i[addr_idx_next][addr_offset_next][15:0]
-    : l1i[addr_idx][addr_offset][31:16]);
+  // Fill write condition — suppress during PTW states where the bus is used for
+  // page table reads (IFQ is always empty during PTW, but be explicit)
+  logic l1i_fill_en;
+  assign l1i_fill_en = l1i_bus.rvalid && ifq_valid[ifq_tail]
+    && (l1i_state != PTW0 && l1i_state != PTW1);
+
+  // Data SRAM bank instantiation and address routing
+  // Each bank stores one word position of every cache set.
+  // When pc[1]=1 (halfword-misaligned), inst_lo and inst_hi read from different
+  // banks, avoiding read port conflicts. Fill writes target one bank at a time.
+  generate
+    for (genvar gi = 0; gi < L1I_LINE_SIZE; gi++) begin : gen_data_bank
+      assign data_bank_raddr[gi] =
+          (addr_offset == gi[L1I_LINE_LEN-1:0]) ? addr_idx : addr_idx_next;
+      assign data_bank_wen[gi] =
+          l1i_fill_en && (offset_fetch == gi[L1I_LINE_LEN-1:0]);
+
+      ysyx_sram_1r1w #(
+          .ADDR_WIDTH(L1I_LEN),
+          .DATA_WIDTH(32)
+      ) u_data_sram (
+          .clock(clock),
+          .ren  (1'b1),
+          .raddr(data_bank_raddr[gi]),
+          .rdata(data_bank_rdata[gi]),
+          .wen  (data_bank_wen[gi]),
+          .waddr(idx_fetch),
+          .wdata(l1i_bus.rdata)
+      );
+    end
+  endgenerate
+
+  // Word selection from SRAM banks for instruction output
+  /* verilator lint_off UNUSEDSIGNAL */
+  logic [31:0] l1i_word_current, l1i_word_next;
+  /* verilator lint_on UNUSEDSIGNAL */
+  assign l1i_word_current = data_bank_rdata[addr_offset];
+  assign l1i_word_next = data_bank_rdata[addr_offset_next];
+
+  assign inst_lo = pc_ifu[1] ? l1i_word_current[31:16] : l1i_word_current[15:0];
+  assign inst_hi = pc_ifu[1] ? l1i_word_next[15:0] : l1i_word_current[31:16];
   assign is_c = !(inst_lo[1:0] == 2'b11);
+
+  // SRAM data readiness — per-bank address tracking.
+  //
+  // Each bank gi drives raddr = addr_idx when addr_offset==gi, else addr_idx_next.
+  // Non-current banks pre-read the next set every cycle, so for sequential fetch
+  // the target bank has already loaded the right data in the previous cycle
+  // (sram_data_ready = 1 with zero bubble).  Branches/redirects still incur the
+  // one-cycle SRAM latency, as the banks were reading a different index.
+  //
+  // inst_lo comes from bank[addr_offset]  → check data_bank_raddr_d1[addr_offset] == addr_idx
+  // inst_hi comes from bank[addr_offset_next] → check data_bank_raddr_d1[addr_offset_next] == addr_idx_next
+  //   (skipped when is_c=1, since only inst_lo is needed for 16-bit instructions)
+  logic [L1I_LEN-1:0] data_bank_raddr_d1[L1I_LINE_SIZE];
+  logic sram_data_ready;
+  always_ff @(posedge clock) begin
+    if (reset) begin
+      for (int i = 0; i < int'(L1I_LINE_SIZE); i++)
+        data_bank_raddr_d1[i] <= '0;
+    end else begin
+      for (int i = 0; i < int'(L1I_LINE_SIZE); i++)
+        data_bank_raddr_d1[i] <= data_bank_raddr[i];
+    end
+  end
+  assign sram_data_ready = (data_bank_raddr_d1[addr_offset] == addr_idx)
+    && (is_c || data_bank_raddr_d1[addr_offset_next] == addr_idx_next);
 
   assign ifu_l1i.inst = (l1i_state == TRAP) ? 'h00000013 : {{inst_hi}, {inst_lo}};
   assign ifu_l1i.trap = (l1i_state == TRAP && rec_addr == ifu_l1i.pc);
   assign ifu_l1i.cause = cause;
   assign ifu_l1i.valid = l1i_state == TRAP ? rec_addr == ifu_l1i.pc
-    : (hit && (hit_next || is_c) && !wait_invalid);
+    : (hit && sram_data_ready && (hit_next || is_c) && !wait_invalid);
 
   always @(posedge clock) begin
     if (reset) begin
@@ -178,10 +241,16 @@ module ysyx_l1i #(
               // tlb lookup
               if (tlb_hit) begin
                 // $display("[I] MMU hit pc: %h", ifu_l1i.pc);
-                l1i_addr <= pc_ifu;
                 rec_addr <= ifu_l1i.pc;
-                if (!hit || !hit_next) begin
+                if (!hit) begin
+                  // Current line missing: enter RD_A to re-check after registering
+                  // rec_addr (handles race where a concurrent fill completes)
+                  l1i_addr <= pc_ifu;
                   l1i_state <= RD_A;
+                end else if (!hit_next) begin
+                  // Current line hits, next line missing: address is known, skip RD_A
+                  l1i_addr <= pc_ifu_next;
+                  l1i_state <= RD_0;
                 end
               end else begin
                 // $display("[I] MMU miss pc: %h", ifu_l1i.pc);
@@ -319,9 +388,9 @@ module ysyx_l1i #(
         wait_invalid <= 1;
       end
     end
-    if (l1i_bus.rvalid && ifq_valid[ifq_tail] && (l1i_state != PTW0 || l1i_state != PTW1)) begin
-      l1i[idx_fetch][fetch_addr[2]] <= l1i_bus.rdata;
-      l1i_tag[idx_fetch][fetch_addr[2]] <= tag_fetch;
+    if (l1i_fill_en) begin
+      // Data write handled by SRAM banks (wen driven by l1i_fill_en)
+      l1i_tag[idx_fetch][offset_fetch] <= tag_fetch;
       if (ifq_valid[0] == 0) begin
         l1i_valid[idx_fetch] <= 1'b1;
       end

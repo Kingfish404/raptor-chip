@@ -37,14 +37,15 @@ module ysyx_l1d #(
   logic [4:0] l1d_ralu;
   logic [XLEN-1:0] rec_addr;
 
-  logic [XLEN-1:0] l1d[L1D_SIZE];
+  // Tag and valid arrays (kept as registers for multi-port read and fast bulk invalidation)
   logic [L1D_SIZE-1:0] l1d_valid;
   logic [32-{{3'b0}, L1D_LEN}-2-1:0] l1d_tag[L1D_SIZE];
   logic [7:0] rstrb;
 
   logic [32-{{3'b0}, L1D_LEN}-2-1:0] addr_tag;
   logic [L1D_LEN-1:0] addr_idx;
-  logic hit;
+  logic tag_hit;   // tag comparison result (combinational, from register arrays)
+  logic data_hit;  // SRAM data ready after 1-cycle read latency
   logic [XLEN-1:0] l1d_data;
   logic cacheable_r;
   logic cacheable_w;
@@ -90,6 +91,31 @@ module ysyx_l1d #(
   logic [32-{{3'b0}, L1D_LEN}-2-1:0] l1d_tag_u;
   logic [L1D_LEN-1:0] l1d_idx;
 
+  // Speculative SRAM read: when IDLE with a pending load, drive the *incoming*
+  // virtual index directly instead of waiting for l1d_addr to be registered.
+  // Safe because L1D_LEN+2 = 9 < 12 (page offset), so virt_idx == phys_idx
+  // (VIPT constraint satisfied). PTW paths are also safe: l1d_addr holds the
+  // virtual address during PTW, whose index equals the final physical index.
+  logic [L1D_LEN-1:0] sram_raddr;
+  assign sram_raddr = (l1d_state == IDLE && lsu_l1d.rvalid && !cmu_bcast.flush_pipe)
+      ? lsu_l1d.raddr[L1D_LEN+2-1:2]
+      : addr_idx;
+
+  // Data SRAM — read port serves cache hit path, write port serves fill/store update
+  logic [XLEN-1:0] data_sram_rdata;
+  ysyx_sram_1r1w #(
+      .ADDR_WIDTH(L1D_LEN),
+      .DATA_WIDTH(XLEN)
+  ) u_data_sram (
+      .clock(clock),
+      .ren  (1'b1),
+      .raddr(sram_raddr),
+      .rdata(data_sram_rdata),
+      .wen  (l1d_update),
+      .waddr(l1d_idx),
+      .wdata(l1d_data_u)
+  );
+
   assign mmu_en = csr_bcast.dmmu_en;
 
   assign tlb_offset = l1d_addr[11:0];
@@ -108,9 +134,13 @@ module ysyx_l1d #(
   assign addr_tag = l1d_addr[XLEN-1:L1D_LEN+2];
   assign addr_idx = l1d_addr[L1D_LEN+2-1:0+2];
 
-  assign hit = (l1d_state == LD_A)
+  // tag_hit: combinational tag match in LD_A (tags in registers, no SRAM latency)
+  assign tag_hit = (l1d_state == LD_A)
     && (l1d_valid[addr_idx] == 1'b1) && (l1d_tag[addr_idx] == addr_tag);
-  assign l1d_data = l1d[addr_idx];
+  // data_hit: SRAM data ready in LD_A — the speculative read in the preceding
+  // IDLE (or PTW-wait) cycle guarantees data_sram_rdata is valid on LD_A entry.
+  assign data_hit = (l1d_state == LD_A) && tag_hit;
+  assign l1d_data = data_sram_rdata;
 
   assign waddr_tag = lsu_l1d.waddr[XLEN-1:L1D_LEN+2];
   assign waddr_idx = lsu_l1d.waddr[L1D_LEN+2-1:0+2];
@@ -142,18 +172,19 @@ module ysyx_l1d #(
   // read channel
   assign l1d_bus.arvalid = (l1d_state == PTW1 || l1d_state == PTW0)
     ? 1'b1
-    : (l1d_state == LD_A) && !hit && !cmu_bcast.flush_pipe;
+    : (l1d_state == LD_A) && !tag_hit && !cmu_bcast.flush_pipe;
   assign l1d_bus.araddr = (l1d_state == PTW1 || l1d_state == PTW0) ? ppn_a[XLEN-1:0] : l1d_addr;
   assign l1d_bus.rstrb = (cacheable_r || (l1d_state == PTW1 || l1d_state == PTW0)) ? 8'hf : rstrb;
 
-  assign lsu_l1d.rdata = hit ? l1d_data : l1d_bus.rdata;
+  assign lsu_l1d.rdata = data_hit ? l1d_data : l1d_bus.rdata;
   assign lsu_l1d.trap = (l1d_state == TRAP) && (rec_addr == lsu_l1d.raddr);
   assign lsu_l1d.cause = cause;
   assign lsu_l1d.rready = (l1d_state == TRAP)
-      || ((l1d_state == LD_A || (l1d_state == LD_D))
+      || (data_hit && lsu_l1d.rvalid && rec_addr == lsu_l1d.raddr)
+      || ((l1d_state == LD_D)
           && (lsu_l1d.rvalid)
-          && ((hit) || (l1d_bus.rvalid)))
-      && (rec_addr == lsu_l1d.raddr);
+          && (l1d_bus.rvalid)
+          && (rec_addr == lsu_l1d.raddr));
 
   // write channel
   assign l1d_bus.awvalid = lsu_l1d.wvalid;
@@ -336,13 +367,14 @@ module ysyx_l1d #(
           if (lsu_l1d.atomic_lock) begin
             reservation <= l1d_addr;
           end
-          if (!hit) begin
+          if (tag_hit) begin
+            // SRAM data ready (pre-read in preceding cycle) — retire to IDLE immediately
+            l1d_addr  <= '0;
+            l1d_state <= IDLE;
+          end else begin
             if (l1d_bus.rready) begin
               l1d_state <= LD_D;
             end
-          end else begin
-            l1d_addr <= '0;
-            l1d_state <= IDLE;
           end
         end
         LD_D: begin
@@ -389,7 +421,7 @@ module ysyx_l1d #(
       if (cmu_bcast.fence_time) begin
         l1d_valid <= 0;
       end else if (l1d_update) begin
-        l1d[l1d_idx] <= l1d_data_u;
+        // Data write handled by u_data_sram (wen=l1d_update)
         l1d_tag[l1d_idx] <= l1d_tag_u;
         l1d_valid[l1d_idx] <= l1d_valid_u;
         l1d_update <= 0;

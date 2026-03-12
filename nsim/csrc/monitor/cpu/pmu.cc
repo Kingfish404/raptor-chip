@@ -105,7 +105,7 @@ void perf_sample_per_cycle()
   uint32_t exu_ioq_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, exu__DOT__ioq_valid));
   bool exu_ioq_valid_found = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, exu__DOT__ioq_valid_found));
   uint8_t l1d_state = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, l1d_cache__DOT__l1d_state));
-  bool lsu_l1d_hit = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, l1d_cache__DOT__hit));
+  bool lsu_l1d_hit = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, l1d_cache__DOT__tag_hit));
   uint32_t lsu_sq_valid = *(uint32_t *)&(CONCAT(VERILOG_PREFIX, lsu__DOT__sq_valid));
   bool lsu_sq_ready = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, lsu__DOT__sq_ready));
   bool wbu_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, cmu__DOT__valid));
