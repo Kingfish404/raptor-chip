@@ -32,16 +32,19 @@ trait MicroOP {
   def ALU_REM_ = "11110"
   def ALU_REMU = "11111"
 
-  // w: word 32, h: half 16, b: byte 8
+  // w: word 32, h: half 16, b: byte 8, d: doubleword 64
   def LSU_LB_ = "00000"
   def LSU_LH_ = "00001"
   def LSU_LW_ = "00010"
   def LSU_LBU = "00100"
   def LSU_LHU = "00101"
+  def LSU_LWU = "00110"
+  def LSU_LD_ = "00011"
 
   def LSU_SB_ = "00001" // alu_op to axi wstrb
   def LSU_SH_ = "00011" // alu_op to axi wstrb
   def LSU_SW_ = "01111" // alu_op to axi wstrb
+  def LSU_SD_ = "11111" // alu_op to axi wstrb (8 bytes)
 
   def ATO_LR__ = "00000"
   def ATO_SC__ = "00001"

@@ -40,6 +40,7 @@ module ysyx_exu #(
   logic [XLEN-1:0] rs_pc[RS_SIZE];
 
   logic rs_c[RS_SIZE];
+  logic rs_word[RS_SIZE];
   logic [4:0] rs_alu[RS_SIZE];
   logic [XLEN-1:0] rs_vj[RS_SIZE];
   logic [XLEN-1:0] rs_vk[RS_SIZE];
@@ -86,6 +87,7 @@ module ysyx_exu #(
   logic [RLEN-1:0] ioq_rd[IOQ_SIZE];
 
   logic ioq_c[IOQ_SIZE];
+  logic ioq_word[IOQ_SIZE];
   logic [4:0] ioq_alu[IOQ_SIZE];
   logic [XLEN-1:0] ioq_vj[IOQ_SIZE];
   logic [XLEN-1:0] ioq_vk[IOQ_SIZE];
@@ -162,6 +164,7 @@ module ysyx_exu #(
       .s1(rs_vj[valid_idx]),
       .s2(rs_vk[valid_idx]),
       .op(rs_alu[valid_idx]),
+      .word(rs_word[valid_idx]),
       .out_r(alu_result)
   );
   logic muling;
@@ -193,6 +196,7 @@ module ysyx_exu #(
         ioq_rd[ioq_tail] <= rou_exu.uop.rd;
 
         ioq_c[ioq_tail] <= rou_exu.uop.c;
+        ioq_word[ioq_tail] <= rou_exu.uop.word;
         ioq_alu[ioq_tail] <= rou_exu.uop.alu;
         ioq_vj[ioq_tail] <= rou_exu.op1;
         ioq_vk[ioq_tail] <= rou_exu.op2;
@@ -268,6 +272,7 @@ module ysyx_exu #(
             rs_rd[free_idx] <= rou_exu.uop.rd;
 
             rs_c[free_idx] <= rou_exu.uop.c;
+            rs_word[free_idx] <= rou_exu.uop.word;
             rs_jen[free_idx] <= rou_exu.uop.jen;
             rs_br_jmp[free_idx] <= (rou_exu.uop.jen || rou_exu.uop.ecall || rou_exu.uop.mret);
             rs_br_cond[free_idx] <= (rou_exu.uop.ben);
@@ -502,6 +507,7 @@ module ysyx_exu #(
       .in_a(rs_vj[mul_rs_idx]),
       .in_b(rs_vk[mul_rs_idx]),
       .in_op(rs_alu[mul_rs_idx]),
+      .in_word(rs_word[mul_rs_idx]),
       .in_valid(mul_found
         && !muling
         && rs_mul_ready[mul_rs_idx] == 0

@@ -8,8 +8,17 @@
 #include <pthread.h>
 #include <string.h>
 #include <stdint.h>
+#include <inttypes.h>
 
+#ifdef CONFIG_ISA64
+typedef uint64_t word_t;
+#define FMT_WORD "0x%016" PRIx64
+#define FMT_WORD_NO_PREFIX "%016" PRIx64
+#else
 typedef uint32_t word_t;
+#define FMT_WORD "0x%08x"
+#define FMT_WORD_NO_PREFIX "%08x"
+#endif
 typedef word_t paddr_t;
 typedef word_t vaddr_t;
 
@@ -48,8 +57,6 @@ typedef word_t vaddr_t;
 #define AUDIO_SBUF_ADDR (MMIO_BASE + 0x1200000)
 #endif
 
-#define FMT_WORD "0x%08x"
-#define FMT_WORD_NO_PREFIX "%08x"
 #define FMT_RED(x) "\33[1;31m" x "\33[0m"
 #define FMT_GREEN(x) "\33[1;32m" x "\33[0m"
 #define FMT_BLUE(x) "\33[1;34m" x "\33[0m"
@@ -172,6 +179,9 @@ typedef struct
   long long int exu_ioq_stall_cycle;
   long long int lsu_l1d_stall_cycle;
   long long int lsu_sq_stall_cycle;
+  long long int lsu_fwd_cnt;
+  long long int lsu_sq_conflict_cnt;
+  long long int lsu_stq_conflict_cnt;
   long long int wbu_stall_cycle;
 
   long long int ifu_sys_hazard_cycle;

@@ -26,7 +26,18 @@
 #define Mr vaddr_read
 #define Mw vaddr_write
 
+#ifdef CONFIG_RV64
+typedef __int128 dword_t;
+typedef unsigned __int128 udword_t;
+#define MULH_SHIFT 64
+#else
+typedef int64_t dword_t;
+typedef uint64_t udword_t;
+#define MULH_SHIFT 32
+#endif
+
 uint64_t get_mtimecmp();
+uint64_t get_time();
 word_t get_paddr(vaddr_t addr, int len);
 
 void ftrace_add(word_t pc, word_t npc, word_t inst);
@@ -234,9 +245,9 @@ static int decode_exec(Decode *s)
 
   // RV32M Extension
   INSTPAT("0000001 ????? ????? 000 ????? 01100 11", mul, R, R(rd) = src1 * src2);
-  INSTPAT("0000001 ????? ????? 001 ????? 01100 11", mulh, R, R(rd) = ((int64_t)(sword_t)src1 * (int64_t)(sword_t)src2) >> 32);
-  INSTPAT("0000001 ????? ????? 010 ????? 01100 11", mulhsu, R, R(rd) = ((int64_t)(sword_t)src1 * (int64_t)(word_t)src2) >> 32);
-  INSTPAT("0000001 ????? ????? 011 ????? 01100 11", mulhu, R, R(rd) = ((int64_t)(word_t)src1 * (int64_t)(word_t)src2) >> 32);
+  INSTPAT("0000001 ????? ????? 001 ????? 01100 11", mulh, R, R(rd) = ((dword_t)(sword_t)src1 * (dword_t)(sword_t)src2) >> MULH_SHIFT);
+  INSTPAT("0000001 ????? ????? 010 ????? 01100 11", mulhsu, R, R(rd) = ((dword_t)(sword_t)src1 * (dword_t)(word_t)src2) >> MULH_SHIFT);
+  INSTPAT("0000001 ????? ????? 011 ????? 01100 11", mulhu, R, R(rd) = ((udword_t)(word_t)src1 * (udword_t)(word_t)src2) >> MULH_SHIFT);
   INSTPAT("0000001 ????? ????? 100 ????? 01100 11", div, R, R(rd) = ((sword_t)src2 == 0) ? ~0 : (sword_t)src1 / (sword_t)src2);
   INSTPAT("0000001 ????? ????? 101 ????? 01100 11", divu, R, R(rd) = ((word_t)src2 == 0) ? ~0 : (word_t)src1 / (word_t)src2);
   INSTPAT("0000001 ????? ????? 110 ????? 01100 11", rem, R, R(rd) = (sword_t)src1 % (sword_t)src2);
@@ -293,12 +304,9 @@ static int decode_exec(Decode *s)
           csr_t reg = {.val = CSR(CSR_MSTATUS)};
           cpu.last_inst_priv = cpu.priv;
           cpu.priv = reg.mstatus.spp;
-          reg.mstatus.mie = reg.mstatus.mpie;
-          reg.mstatus.sie = 1;
+          reg.mstatus.sie = reg.mstatus.spie;
+          reg.mstatus.spie = 1;
           reg.mstatus.spp = 0;
-          reg.mstatus.mpp = PRV_S;
-          // printf(" mret: priv: %d, mstatus_p: " FMT_WORD_NO_PREFIX ", mstatus: " FMT_WORD "\n",
-          //        cpu.priv, CSR(CSR_MSTATUS), reg.val);
           CSR(CSR_SSTATUS) = reg.val;);
   // Interrupt-Management Instructions
   INSTPAT("0001000 00101 00000 000 00000 11100 11", wfi, N, { difftest_skip_ref(); });
@@ -320,7 +328,7 @@ static int decode_exec(Decode *s)
   CSR(CSR_MSTATUS) = CSR(CSR_MSTATUS) & 0x807FFFEA;
 #endif
   CSR(CSR_MISA) = CSR_MISA_VALUE;
-  CSR(CSR_MEDELEG) &= 0xf4bfff;
+  CSR(CSR_MEDELEG) &= 0xf4bffe; // bit 0 (insn addr misaligned) hardwired 0 with C ext
   if ((cpu.last_inst_priv == PRV_S && cpu.priv != PRV_M) || cpu.priv == PRV_S)
   {
     csr_t reg_mstatus = {.val = CSR(CSR_MSTATUS)};
@@ -344,22 +352,26 @@ static int decode_exec(Decode *s)
     reg_mie.mie.lcofie = reg_sie.sie.lcofie;
     CSR(CSR_MIE) = reg_mie.val;
   }
+#ifdef CONFIG_RV64
+  CSR(CSR_SSTATUS) = CSR(CSR_MSTATUS) & 0x80000003000DE762ULL;
+  CSR(CSR_SIE) = CSR(CSR_MIE) & 0x2666;
+#else
   CSR(CSR_SSTATUS) = CSR(CSR_MSTATUS) & 0x800de762;
   CSR(CSR_SIE) = CSR(CSR_MIE) & 0x2666;
+#endif
 
   CSR(CSR_CYCLE_) = CSR(CSR_CYCLE_) + 0x1;
-  CSR(CSR_TIME) = CSR(CSR_TIME) + 0x1;
   CSR(CSR_MCYCLE) = CSR(CSR_MCYCLE) + 0x1;
-  if (CSR(CSR_TIME) == ~0)
-  {
-    CSR(CSR_TIME) = 0;
-    CSR(CSR_TIMEH) = CSR(CSR_TIMEH) + 0x1;
-  }
+  // CSR_TIME from host wall clock scaled to 10MHz (matching DTS timebase-frequency)
+  uint64_t ticks = get_time() * 10;
+  CSR(CSR_TIME) = (word_t)ticks;
+#ifndef CONFIG_RV64
+  CSR(CSR_TIMEH) = (uint32_t)(ticks >> 32);
+#endif
 #if !defined(CONFIG_TARGET_SHARE)
   csr_t reg_mie = {.val = CSR(CSR_MIE)};
   csr_t reg_mstatus = {.val = CSR(CSR_MSTATUS)};
-  cpu.mtimecmp = get_mtimecmp();
-  if (CSR(CSR_TIME) >= cpu.mtimecmp &&
+  if (ticks >= cpu.mtimecmp &&
       reg_mstatus.mstatus.mie)
   {
     if (cpu.priv == PRV_M && reg_mie.mie.mtie)

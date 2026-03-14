@@ -50,22 +50,23 @@ module ysyx_l1i #(
   logic [XLEN-1:0] fetch_addr;
   // Tag and valid arrays (kept as registers for multi-port read and fast bulk invalidation)
   logic [L1I_SIZE-1:0] l1i_valid;
-  logic [32-{{3'b0}, L1I_LEN+L1I_LINE_LEN}-2-1:0] l1i_tag[L1I_SIZE][L1I_LINE_SIZE];
+  localparam L1I_TAG_W = XLEN - L1I_LEN - L1I_LINE_LEN - 2;  // 2 = $clog2(4), instruction word size
+  logic [L1I_TAG_W-1:0] l1i_tag[L1I_SIZE][L1I_LINE_SIZE];
 
   // Data SRAM bank signals — one bank per word position in cache line
   logic [31:0] data_bank_rdata [L1I_LINE_SIZE];
   logic [L1I_LEN-1:0] data_bank_raddr [L1I_LINE_SIZE];
   logic data_bank_wen [L1I_LINE_SIZE];
 
-  logic [32-{{3'b0}, L1I_LEN+L1I_LINE_LEN}-2-1:0] addr_tag;
+  logic [L1I_TAG_W-1:0] addr_tag;
   logic [L1I_LEN-1:0] addr_idx;
   logic [L1I_LINE_LEN-1:0] addr_offset;
 
-  logic [32-{{3'b0}, L1I_LEN+L1I_LINE_LEN}-2-1:0] addr_tag_next;
+  logic [L1I_TAG_W-1:0] addr_tag_next;
   logic [L1I_LEN-1:0] addr_idx_next;
   logic [L1I_LINE_LEN-1:0] addr_offset_next;
 
-  logic [32-{{3'b0}, L1I_LEN+L1I_LINE_LEN}-2-1:0] tag_fetch;
+  logic [L1I_TAG_W-1:0] tag_fetch;
   logic [L1I_LEN-1:0] idx_fetch;
   logic [L1I_LINE_LEN-1:0] offset_fetch;
 
@@ -155,6 +156,21 @@ module ysyx_l1i #(
   assign l1i_fill_en = l1i_bus.rvalid && ifq_valid[ifq_tail]
     && (l1i_state != PTW0 && l1i_state != PTW1);
 
+`ifdef YSYX_RV64
+  // For RV64, pmem_read returns an 8-byte naturally-aligned word. L1I always
+  // does 4-byte reads (arsize=010), so we must select the correct 32-bit half
+  // based on bit[2] of the requested address.
+  // - Fill path: fetch_addr[2] tracks which word was requested
+  // - PTW path: ppn_a[2] is the PTE address bit[2]
+  logic [31:0] l1i_fill_data;
+  assign l1i_fill_data = fetch_addr[2] ? l1i_bus.rdata[63:32] : l1i_bus.rdata[31:0];
+  logic [31:0] l1i_ptw_data;
+  assign l1i_ptw_data = ppn_a[2] ? l1i_bus.rdata[63:32] : l1i_bus.rdata[31:0];
+`else
+  wire [31:0] l1i_fill_data = l1i_bus.rdata[31:0];
+  wire [31:0] l1i_ptw_data = l1i_bus.rdata[31:0];
+`endif
+
   // Data SRAM bank instantiation and address routing
   // Each bank stores one word position of every cache set.
   // When pc[1]=1 (halfword-misaligned), inst_lo and inst_hi read from different
@@ -176,7 +192,7 @@ module ysyx_l1i #(
           .rdata(data_bank_rdata[gi]),
           .wen  (data_bank_wen[gi]),
           .waddr(idx_fetch),
-          .wdata(l1i_bus.rdata)
+          .wdata(l1i_fill_data)
       );
     end
   endgenerate
@@ -284,19 +300,19 @@ module ysyx_l1i #(
           if (mmu_en) begin
             if (l1i_bus.rvalid) begin
               // $display("[I-PTW1] vpn1: %h, vpn0: %h, ppn_a: %h, pte1: %h",
-              //   vpn[1], vpn[0], ppn_a, l1i_bus.rdata);
-              if (l1i_bus.rdata == 0) begin
+              //   vpn[1], vpn[0], ppn_a, l1i_ptw_data);
+              if (l1i_ptw_data == 0) begin
                 l1i_state <= TRAP;
                 cause <= 'hc; // instruction page fault
-              end else if (l1i_bus.rdata[2] == 'b1 || l1i_bus.rdata[1] == 'b1) begin
+              end else if (l1i_ptw_data[2] == 'b1 || l1i_ptw_data[1] == 'b1) begin
                 // inst page table walk finish
-                l1i_addr <= {l1i_bus.rdata[31:20], vpn[0], tlb_offset}[XLEN-1:0];
-                tlb_ptag <= {l1i_bus.rdata[31:20], vpn[0]};
+                l1i_addr <= XLEN'({l1i_ptw_data[31:20], vpn[0], tlb_offset});
+                tlb_ptag <= {l1i_ptw_data[31:20], vpn[0]};
                 tlb_vtag <= {vpn[1], vpn[0]};
                 tlb_valid <= 'b1;
                 l1i_state <= RD_A;
               end else begin
-                ppn_a <= {l1i_bus.rdata[31:10], 12'b0} + (vpn[0] * 4);
+                ppn_a <= {l1i_ptw_data[31:10], 12'b0} + (vpn[0] * 4);
                 l1i_state <= PTW0;
               end
             end
@@ -308,14 +324,14 @@ module ysyx_l1i #(
           if (mmu_en) begin
             if (l1i_bus.rvalid) begin
               // $display("[I-PTW0] pte0: %h, paddr: %h",
-              //  l1i_bus.rdata, {l1i_bus.rdata[31:10], tlb_offset});
-              if (l1i_bus.rdata == 0) begin
+              //  l1i_ptw_data, {l1i_ptw_data[31:10], tlb_offset});
+              if (l1i_ptw_data == 0) begin
                 l1i_state <= TRAP;
                 cause <= 'hc; // instruction page fault
               end else begin
                 // inst page table walk finish
-                l1i_addr <= {l1i_bus.rdata[31:10], tlb_offset}[XLEN-1:0];
-                tlb_ptag <= l1i_bus.rdata[31:10];
+                l1i_addr <= XLEN'({l1i_ptw_data[31:10], tlb_offset});
+                tlb_ptag <= l1i_ptw_data[31:10];
                 tlb_vtag <= {vpn[1], vpn[0]};
                 tlb_valid <= 'b1;
                 l1i_state <= RD_A;

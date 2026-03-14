@@ -52,6 +52,15 @@ static void restart()
   cpu.raise_intr = INTR_EMPTY;
   cpu.last_inst_priv = PRV_M;
   cpu.reservation = 0;
+  cpu.mtimecmp = ~(uint64_t)0;
+
+#if defined(CONFIG_RV64)
+  /* Set SXL=2, UXL=2 (XLEN=64 for S-mode and U-mode) */
+  csr_t mstatus = {.val = cpu.sr[CSR_MSTATUS]};
+  mstatus.mstatus.sxl = 2;
+  mstatus.mstatus.uxl = 2;
+  cpu.sr[CSR_MSTATUS] = mstatus.val;
+#endif
 
   cpu.intr = false;
 }

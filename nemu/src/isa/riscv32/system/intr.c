@@ -35,48 +35,52 @@ word_t isa_raise_intr(word_t NO, vaddr_t epc)
          NO, epc, cpu.sr[CSR_MTVEC]);
 #endif
   word_t tval = 0;
-  switch (NO)
+  // Interrupts (MSB set) always have tval=0 per RISC-V spec
+  if (!(NO & MCA_INTR_BIT))
   {
-  case MCA_ILLEGAL_INS:
-    tval = cpu.inst;
-    break;
-  case MCA_BREAK_POINT:
-    tval = epc;
-    break;
-  case MCA_LOA_ADD_MIS:
-    tval = g_vaddr;
-    break;
-  case MCA_LOA_ACC_FAU:
-    tval = g_vaddr;
-    break;
-  case MCA_STO_ADD_MIS:
-    tval = g_vaddr;
-    break;
-  case MCA_STO_ACC_FAU:
-    tval = g_vaddr;
-    break;
-  case MCA_ENV_CAL_UMO:
-  case MCA_ENV_CAL_SMO:
-  case MCA_ENV_CAL_MMO:
-    tval = 0;
-    break;
-  case MCA_INS_PAG_FAU:
-    tval = epc;
-    break;
-  case MCA_LOA_PAG_FAU:
-  case MCA_STO_PAG_FAU:
-    tval = g_vaddr;
-    break;
-  default:
-    tval = epc;
-    break;
+    switch (NO)
+    {
+    case MCA_ILLEGAL_INS:
+      tval = cpu.inst;
+      break;
+    case MCA_BREAK_POINT:
+      tval = epc;
+      break;
+    case MCA_LOA_ADD_MIS:
+      tval = g_vaddr;
+      break;
+    case MCA_LOA_ACC_FAU:
+      tval = g_vaddr;
+      break;
+    case MCA_STO_ADD_MIS:
+      tval = g_vaddr;
+      break;
+    case MCA_STO_ACC_FAU:
+      tval = g_vaddr;
+      break;
+    case MCA_ENV_CAL_UMO:
+    case MCA_ENV_CAL_SMO:
+    case MCA_ENV_CAL_MMO:
+      tval = 0;
+      break;
+    case MCA_INS_PAG_FAU:
+      tval = epc;
+      break;
+    case MCA_LOA_PAG_FAU:
+    case MCA_STO_PAG_FAU:
+      tval = g_vaddr;
+      break;
+    default:
+      tval = 0;
+      break;
+    }
   }
   word_t ret_pc = 0;
   if (cpu.priv <= PRV_S)
   {
-    if ((cpu.sr[CSR_MEDELEG] & (1 << NO)) //
-        || ((NO & (1 << (XLEN - 1)))      //
-            && (cpu.sr[CSR_MIDELEG] & (1 << (NO & ~(1 << (XLEN - 1)))))))
+    if ((cpu.sr[CSR_MEDELEG] & ((word_t)1 << NO)) //
+        || ((NO & ((word_t)1 << (XLEN - 1)))      //
+            && (cpu.sr[CSR_MIDELEG] & ((word_t)1 << (NO & ~((word_t)1 << (XLEN - 1)))))))
     {
       // printf("NO: %x, (NO & (1 << (XLEN - 1))): %x, "
       //        "(1 << (NO & ~(1 << (XLEN - 1)))): %x\n",
@@ -123,7 +127,26 @@ word_t isa_query_intr()
 {
   csr_t reg_mstatus = {.val = cpu.sr[CSR_MSTATUS]};
   csr_t reg_mie = {.val = cpu.sr[CSR_MIE]};
+  csr_t reg_mip = {.val = cpu.sr[CSR_MIP]};
 
+  // RISC-V interrupt priority (highest first): MEI > MSI > MTI > SEI > SSI > STI
+
+  // --- Machine External Interrupt (MEIP, bit 11) ---
+  if (reg_mip.mie.mteie && reg_mie.mie.mteie)
+  {
+    word_t deleg = cpu.sr[CSR_MIDELEG] & (1u << 11);
+    bool can_take;
+    if (deleg)
+      can_take = (cpu.priv < PRV_S) ||
+                 (cpu.priv == PRV_S && reg_mstatus.mstatus.sie);
+    else
+      can_take = (cpu.priv < PRV_M) ||
+                 (cpu.priv == PRV_M && reg_mstatus.mstatus.mie);
+    if (can_take)
+      return MCA_MAC_EXT_INT;
+  }
+
+  // --- Machine Timer Interrupt (existing cpu.intr flag from CLINT alarm) ---
   if (cpu.intr)
   {
     if (cpu.priv == PRV_M &&
@@ -141,6 +164,22 @@ word_t isa_query_intr()
       return MCA_SUP_TIM_INT;
     }
   }
+
+  // --- Supervisor External Interrupt (SEIP, bit 9) ---
+  if (reg_mip.mie.seie && reg_mie.mie.seie)
+  {
+    word_t deleg = cpu.sr[CSR_MIDELEG] & (1u << 9);
+    bool can_take;
+    if (deleg)
+      can_take = (cpu.priv < PRV_S) ||
+                 (cpu.priv == PRV_S && reg_mstatus.mstatus.sie);
+    else
+      can_take = (cpu.priv < PRV_M) ||
+                 (cpu.priv == PRV_M && reg_mstatus.mstatus.mie);
+    if (can_take)
+      return MCA_SUP_EXT_INT;
+  }
+
 #if defined(CONFIG_TARGET_SHARE)
   cpu.intr = false;
 #endif

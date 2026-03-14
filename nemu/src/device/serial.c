@@ -16,6 +16,82 @@
 #include <utils.h>
 #include <device/map.h>
 
+#ifdef CONFIG_SERIAL_INPUT_FIFO
+#include <fcntl.h>
+#include <unistd.h>
+#include <termios.h>
+
+static struct termios orig_termios;
+static bool termios_saved = false;
+
+static void serial_restore_term(void) {
+  if (termios_saved) {
+    tcsetattr(STDIN_FILENO, TCSANOW, &orig_termios);
+  }
+}
+
+static void serial_set_raw_term(void) {
+  if (!isatty(STDIN_FILENO)) return;
+  if (tcgetattr(STDIN_FILENO, &orig_termios) < 0) return;
+  termios_saved = true;
+  atexit(serial_restore_term);
+
+  struct termios raw = orig_termios;
+  raw.c_lflag &= ~(ICANON | ECHO);
+  raw.c_cc[VMIN] = 0;
+  raw.c_cc[VTIME] = 0;
+  tcsetattr(STDIN_FILENO, TCSANOW, &raw);
+
+  // Also set stdin non-blocking
+  int flags = fcntl(STDIN_FILENO, F_GETFL, 0);
+  fcntl(STDIN_FILENO, F_SETFL, flags | O_NONBLOCK);
+}
+
+#define SERIAL_RX_FIFO_SIZE 256
+static uint8_t serial_rx_fifo[SERIAL_RX_FIFO_SIZE];
+static int serial_rx_head = 0, serial_rx_tail = 0;
+
+static inline int serial_rx_count(void) {
+  return (serial_rx_tail - serial_rx_head + SERIAL_RX_FIFO_SIZE) % SERIAL_RX_FIFO_SIZE;
+}
+
+static void serial_rx_enqueue(uint8_t ch) {
+  int next = (serial_rx_tail + 1) % SERIAL_RX_FIFO_SIZE;
+  if (next == serial_rx_head) return; // full, drop
+  serial_rx_fifo[serial_rx_tail] = ch;
+  serial_rx_tail = next;
+}
+
+static int serial_rx_dequeue(void) {
+  if (serial_rx_head == serial_rx_tail) return -1; // empty
+  uint8_t ch = serial_rx_fifo[serial_rx_head];
+  serial_rx_head = (serial_rx_head + 1) % SERIAL_RX_FIFO_SIZE;
+  return ch;
+}
+
+static bool raw_term_inited = false;
+
+static void serial_ensure_raw_term(void) {
+  if (raw_term_inited) return;
+  raw_term_inited = true;
+  serial_set_raw_term();
+}
+
+void serial_poll_stdin(void) {
+  serial_ensure_raw_term();
+  uint8_t buf[64];
+  ssize_t n = read(STDIN_FILENO, buf, sizeof(buf));
+  if (n > 0) {
+    for (ssize_t i = 0; i < n; i++) {
+      serial_rx_enqueue(buf[i]);
+    }
+    // Raise PLIC external interrupt for UART (source 1)
+    extern void plic_raise_irq(int irq);
+    plic_raise_irq(1);
+  }
+}
+#endif /* CONFIG_SERIAL_INPUT_FIFO */
+
 /* http://en.wikibooks.org/wiki/Serial_Programming/8250_UART_Programming */
 // NOTE: this is compatible to 16550
 
@@ -154,7 +230,12 @@ __attribute__((__unused__)) static void serial_io_handler_ns16550(uint32_t offse
       }
       else
       {
+#ifdef CONFIG_SERIAL_INPUT_FIFO
+        int ch = serial_rx_dequeue();
+        val = (ch >= 0) ? (uint8_t)ch : 0;
+#else
         val = 0;
+#endif
       }
     }
     break;
@@ -164,6 +245,13 @@ __attribute__((__unused__)) static void serial_io_handler_ns16550(uint32_t offse
       if (!(lcr & UART_LCR_DLAB))
       {
         ier = val & 0x0f;
+#ifdef CONFIG_SERIAL_INPUT_FIFO
+        // Re-evaluate PLIC IRQ when interrupt enables change
+        if ((ier & UART_IER_RDI) && serial_rx_count() > 0) {
+          extern void plic_raise_irq(int irq);
+          plic_raise_irq(1);
+        }
+#endif
       }
       else
       {
@@ -187,6 +275,20 @@ __attribute__((__unused__)) static void serial_io_handler_ns16550(uint32_t offse
     {
       fcr = val;
     }
+    else
+    {
+      // Compute IIR dynamically based on UART state
+      uint8_t iir_type = (fcr & UART_FCR_ENABLE_FIFO) ? UART_IIR_TYPE_BITS : 0;
+#ifdef CONFIG_SERIAL_INPUT_FIFO
+      if ((ier & UART_IER_RDI) && serial_rx_count() > 0)
+        val = UART_IIR_RDI | iir_type;
+      else
+#endif
+      if (ier & UART_IER_THRI)
+        val = UART_IIR_THRI | iir_type;
+      else
+        val = UART_IIR_NO_INT | iir_type;
+    }
     break;
   case UART_LCR:
     if (is_write)
@@ -201,6 +303,14 @@ __attribute__((__unused__)) static void serial_io_handler_ns16550(uint32_t offse
     }
     break;
   case UART_LSR:
+    if (!is_write)
+    {
+      val = UART_LSR_TEMT | UART_LSR_THRE;
+#ifdef CONFIG_SERIAL_INPUT_FIFO
+      if (serial_rx_count() > 0)
+        val |= UART_LSR_DR;
+#endif
+    }
     break;
   case UART_MSR:
     break;
@@ -234,4 +344,7 @@ void init_serial()
   // https://github.com/riscv-software-src/riscv-isa-sim/blob/master/riscv/ns16550.cc
   add_mmio_map("serial_ns16550", CONFIG_SERIAL_MMIO_US16550, serial_us16550_base, 0x100, serial_io_handler_ns16550);
 #endif
+
+  // Raw terminal mode is deferred to first serial_poll_stdin() call,
+  // so SDB readline works in non-batch mode.
 }

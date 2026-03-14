@@ -2,9 +2,11 @@
 
 ## Overview
 
-Raptor is an out-of-order, single-issue RISC-V (RV32IMAC\_Zicsr\_Zifencei\_Sv32) processor core with register renaming, a reorder buffer (ROB), reservation stations, and Sv32 virtual memory support.
+Raptor is an out-of-order, single-issue RISC-V processor core with register renaming, a reorder buffer (ROB), reservation stations, and virtual memory support.
 
-**ISA**: RV32I + M (mul/div) + A (atomics: LR/SC, AMO) + C (compressed) + Zicsr + Sv32 MMU
+**ISA**: RV32/RV64 I + M (mul/div) + A (atomics: LR/SC, AMO) + C (compressed) + Zicsr + Sv32 MMU
+
+The core supports configurable **RV32** and **RV64** modes via a compile-time switch (`YSYX_RV64`). When `YSYX_RV64` is defined, XLEN=64 and all datapath, register file, AXI bus, and DPI-C interfaces widen to 64 bits. RV64 adds W-variant instructions (ADDIW, SLLIW, etc.) with 32-bit result sign-extension.
 
 ```text
  Pipeline Overview — 3 major partitions

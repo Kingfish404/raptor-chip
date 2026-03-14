@@ -21,6 +21,10 @@ include $(NEMU_HOME)/tools/difftest.mk
 # Some convenient rules
 
 override ARGS ?= --log=$(BUILD_DIR)/nemu-log.txt
+# Always ensure --log is present (even when ARGS is passed from parent make)
+ifeq ($(findstring --log=,$(ARGS)),)
+override ARGS += --log=$(BUILD_DIR)/nemu-log.txt
+endif
 override ARGS += $(ARGS_DIFF)
 
 # Command to execute NEMU

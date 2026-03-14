@@ -114,7 +114,7 @@ void ftrace_add(word_t pc, word_t npc, word_t inst)
   int is_call = 0, is_ret = 0;
   if (cpu.raise_intr != INTR_EMPTY)
   {
-    sprintf(ftracebuf[ftracehead].logbuf, "intr: %d", cpu.raise_intr);
+    sprintf(ftracebuf[ftracehead].logbuf, "intr: " FMT_WORD, cpu.raise_intr);
     is_call = 1;
     during_intr_trap = 1;
     cpu.raise_intr = INTR_EMPTY;
@@ -224,8 +224,8 @@ void cpu_show_ftrace(void)
     {
       printf(" ");
     }
-    printf("%d ", ftrace->depth);
-    printf("%c (%08x): %s ", ftrace->ret ? '<' : '>',
+    printf("%u ", (uint32_t)ftrace->depth);
+    printf("%c (" FMT_WORD_NO_PREFIX "): %s ", ftrace->ret ? '<' : '>',
            ftrace->inst, ftrace->logbuf);
     if (elfshdr_symtab == NULL)
     {

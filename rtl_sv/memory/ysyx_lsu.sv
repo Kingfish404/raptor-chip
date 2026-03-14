@@ -61,6 +61,10 @@ module ysyx_lsu #(
   logic store_in_sq;
   logic [$clog2(SQ_SIZE)-1:0] store_in_sq_idx;
 
+  // Store-to-load forwarding from SQ
+  logic sq_fwd_ok;
+  logic [XLEN-1:0] sq_fwd_data;
+
   logic wvalid;
   logic [XLEN-1:0] wdata;
   logic [XLEN-1:0] waddr;
@@ -129,13 +133,30 @@ module ysyx_lsu #(
     end
   end
 
+  // SQ address conflict + store-to-load forwarding.
+  // Iterate from oldest (sq_head) to youngest; last match wins.
   always_comb begin
     load_in_sq = 0;
     load_in_sq_idx = 0;
-    for (int i = 0; i < SQ_SIZE; i++) begin
-      if (sq_waddr[i] == (raddr) && sq_valid[i] && !load_in_sq) begin
+    sq_fwd_ok = 0;
+    sq_fwd_data = 0;
+    for (int j = 0; j < SQ_SIZE; j++) begin
+      if (sq_valid[sq_head + j[$clog2(SQ_SIZE)-1:0]]
+          && sq_waddr[sq_head + j[$clog2(SQ_SIZE)-1:0]][XLEN-1:$clog2(XLEN/8)] == raddr[XLEN-1:$clog2(XLEN/8)]) begin
         load_in_sq = 1;
-        load_in_sq_idx = i[$clog2(SQ_SIZE)-1:0];
+        load_in_sq_idx = sq_head + j[$clog2(SQ_SIZE)-1:0];
+        if (sq_alu[sq_head + j[$clog2(SQ_SIZE)-1:0]] ==
+`ifdef YSYX_RV64
+            `YSYX_SD_WSTRB
+`else
+            `YSYX_SW_WSTRB
+`endif
+        ) begin
+          sq_fwd_ok = 1;
+          sq_fwd_data = sq_wdata[sq_head + j[$clog2(SQ_SIZE)-1:0]];
+        end else begin
+          sq_fwd_ok = 0;
+        end
       end
     end
     store_in_sq = 0;
@@ -147,6 +168,41 @@ module ysyx_lsu #(
       end
     end
   end
+
+  // STQ address conflict + store-to-load forwarding
+  logic stq_addr_conflict;
+  logic stq_fwd_ok;
+  logic [XLEN-1:0] stq_fwd_data;
+  always_comb begin
+    stq_addr_conflict = 0;
+    stq_fwd_ok = 0;
+    stq_fwd_data = 0;
+    for (int j = 0; j < SQ_SIZE; j++) begin
+      if (stq_valid[stq_head + j[$clog2(SQ_SIZE)-1:0]]
+          && stq_waddr[stq_head + j[$clog2(SQ_SIZE)-1:0]][XLEN-1:$clog2(XLEN/8)] == raddr[XLEN-1:$clog2(XLEN/8)]) begin
+        stq_addr_conflict = 1;
+        if (stq_alu[stq_head + j[$clog2(SQ_SIZE)-1:0]] ==
+`ifdef YSYX_RV64
+            `YSYX_SD_WSTRB
+`else
+            `YSYX_SW_WSTRB
+`endif
+        ) begin
+          stq_fwd_ok = 1;
+          stq_fwd_data = stq_wdata[stq_head + j[$clog2(SQ_SIZE)-1:0]];
+        end else begin
+          stq_fwd_ok = 0;
+        end
+      end
+    end
+  end
+
+  // Store-to-load forwarding priority: STQ (youngest) > SQ (committed)
+  logic fwd_hit;
+  logic [XLEN-1:0] fwd_data;
+  assign fwd_hit = (stq_addr_conflict && stq_fwd_ok)
+                || (!stq_addr_conflict && load_in_sq && sq_fwd_ok);
+  assign fwd_data = (stq_addr_conflict && stq_fwd_ok) ? stq_fwd_data : sq_fwd_data;
 
   assign raddr_valid = exu_lsu.rvalid && ((0)
       || (csr_bcast.dmmu_en && (raddr >= 'h01000000)) // mmu userspace
@@ -167,23 +223,24 @@ module ysyx_lsu #(
   //          ({8{ralu == `YSYX_ALU_SW}} & 8'hf)
   //        );
 
-  assign rdata_unalign = lsu_l1d.rdata;
-  assign rdata = (
-      ({XLEN{raddr[1:0] == 2'b00}} & rdata_unalign)
-    | ({XLEN{raddr[1:0] == 2'b01}} & {{8'b0}, {rdata_unalign[31:8]}})
-    | ({XLEN{raddr[1:0] == 2'b10}} & {{16'b0}, {rdata_unalign[31:16]}})
-    | ({XLEN{raddr[1:0] == 2'b11}} & {{24'b0}, {rdata_unalign[31:24]}})
-    );
+  assign rdata_unalign = (raddr_valid && fwd_hit) ? fwd_data : lsu_l1d.rdata;
+  assign rdata = (rdata_unalign >> (raddr[$clog2(XLEN/8)-1:0] * 8));
   assign exu_lsu.rdata = (
-      ({XLEN{ralu == `YSYX_ALU_LB__}} & (rdata[7] ? rdata | 'hffffff00 : rdata & 'hff))
-    | ({XLEN{ralu == `YSYX_ALU_LBU_}} & rdata & 'hff)
-    | ({XLEN{ralu == `YSYX_ALU_LH__}} & (rdata[15] ? rdata | 'hffff0000 : rdata & 'hffff))
-    | ({XLEN{ralu == `YSYX_ALU_LHU_}} & rdata & 'hffff)
+      ({XLEN{ralu == `YSYX_ALU_LB__}} & {{XLEN-8{rdata[7]}}, rdata[7:0]})
+    | ({XLEN{ralu == `YSYX_ALU_LBU_}} & {{XLEN-8{1'b0}}, rdata[7:0]})
+    | ({XLEN{ralu == `YSYX_ALU_LH__}} & {{XLEN-16{rdata[15]}}, rdata[15:0]})
+    | ({XLEN{ralu == `YSYX_ALU_LHU_}} & {{XLEN-16{1'b0}}, rdata[15:0]})
+`ifdef YSYX_RV64
+    | ({XLEN{ralu == `YSYX_ALU_LW__}} & {{XLEN-32{rdata[31]}}, rdata[31:0]})
+    | ({XLEN{ralu == `YSYX_ALU_LWU_}} & {{XLEN-32{1'b0}}, rdata[31:0]})
+    | ({XLEN{ralu == `YSYX_ALU_LD__}} & rdata)
+`else
     | ({XLEN{ralu == `YSYX_ALU_LW__}} & rdata)
+`endif
     );
-  assign exu_lsu.trap = lsu_l1d.trap;
+  assign exu_lsu.trap = (raddr_valid && fwd_hit) ? 1'b0 : lsu_l1d.trap;
   assign exu_lsu.cause = lsu_l1d.cause;
-  assign exu_lsu.rready = lsu_l1d.rready;
+  assign exu_lsu.rready = (raddr_valid && fwd_hit) || lsu_l1d.rready;
 
   always @(posedge clock) begin
     if (reset) begin
@@ -209,7 +266,7 @@ module ysyx_lsu #(
 
   assign lsu_l1d.raddr = raddr;
   assign lsu_l1d.ralu = ralu;
-  assign lsu_l1d.rvalid = raddr_valid && !(|sq_valid) && !(|stq_valid);
+  assign lsu_l1d.rvalid = raddr_valid && !load_in_sq && !stq_addr_conflict;
   assign lsu_l1d.atomic_lock = exu_lsu.atomic_lock;
 
   /* verilator lint_on UNUSEDSIGNAL */

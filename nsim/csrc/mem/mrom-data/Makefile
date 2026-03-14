@@ -7,7 +7,12 @@ OBJDUMP   = $(CROSS_COMPILE)objdump
 OBJCOPY   = $(CROSS_COMPILE)objcopy
 READELF   = $(CROSS_COMPILE)readelf
 
-COMMON_CFLAGS = -march=rv32im_zicsr_zifencei -mabi=ilp32  # overwrite
+# ISA64=1 to build for RV64, default RV32
+ifeq ($(ISA64),1)
+COMMON_CFLAGS = -march=rv64im_zicsr_zifencei -mabi=lp64
+else
+COMMON_CFLAGS = -march=rv32im_zicsr_zifencei -mabi=ilp32
+endif
 LDFLAGS       =
 
 IMAGE = ./build/mrom-data

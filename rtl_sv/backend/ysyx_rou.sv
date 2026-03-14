@@ -189,6 +189,7 @@ module ysyx_rou #(
         rob_entry[rob_tail].pnpc   <= uoq_uops[uoq_tail].pnpc;
 
         rob_entry[rob_tail].wen    <= uoq_uops[uoq_tail].wen;
+        rob_entry[rob_tail].word   <= uoq_uops[uoq_tail].word;
         rob_entry[rob_tail].alu    <= uoq_uops[uoq_tail].atom ? `YSYX_WSTRB_SW
                                                                : uoq_uops[uoq_tail].alu;
 

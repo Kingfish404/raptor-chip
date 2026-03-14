@@ -140,6 +140,7 @@ void cpu_exec(uint64_t n)
 
   uint64_t now = get_time();
   uint64_t cur_inst_cycle = 0;
+  uint64_t progress_cycle = 0;
   while (!contextp->gotFinish() && npc.state == NPC_RUNNING && n-- > 0)
   {
     cpu_exec_one_cycle();
@@ -152,9 +153,16 @@ void cpu_exec(uint64_t n)
     // Simulate the performance monitor unit
     perf_sample_per_cycle();
     cur_inst_cycle++;
+    progress_cycle++;
+    if (progress_cycle % 10000000 == 0) {
+      Log("progress: %llu cycles, %llu insts, pc=" FMT_WORD_NO_PREFIX,
+          (unsigned long long)progress_cycle, (unsigned long long)pmu.instr_cnt,
+          (word_t)(*npc.pc));
+    }
     if (cur_inst_cycle > 0x1ffff)
     {
-      Log(FMT_RED("Too many cycles (0x%llx) stalled at pc: %x."), (long long int)cur_inst_cycle, *npc.pc);
+      Log(FMT_RED("Too many cycles (0x%llx) stalled at pc: " FMT_WORD_NO_PREFIX ", rpc: " FMT_WORD_NO_PREFIX ", inst: %08x."),
+          (long long int)cur_inst_cycle, (word_t)(*npc.pc), (word_t)(*npc.rpc), (uint32_t)(*(npc.inst)));
       npc.state = NPC_ABORT;
       break;
     }
@@ -178,8 +186,12 @@ void cpu_exec(uint64_t n)
       char interrupt = *(char *)&(CONCAT(VERILOG_PREFIX, rou__DOT__recieved_trap));
       if (interrupt)
       {
-        // printf("[npc] interrupt triggered at pc: " FMT_WORD_NO_PREFIX "\n", *npc.rpc);
-        difftest_raise_intr(0);
+        // Determine actual timer interrupt cause based on privilege level
+        // before trap (CSR module hasn't updated priv_mode yet at this point)
+        uint8_t priv = *(uint8_t *)npc.priv;
+        word_t cause = ((priv == 3) ? 0x7u : 0x5u)
+                     | ((word_t)1 << (sizeof(word_t) * 8 - 1));
+        difftest_raise_intr(cause);
       }
 #endif
       npc.last_inst = *(npc.inst);

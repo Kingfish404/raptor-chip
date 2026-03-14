@@ -43,18 +43,37 @@ OBJ_DIR = $(BUILD_DIR)/obj_dir
 BIN = $(BUILD_DIR)/$(VTARGET)-$(CONFIG_MODE)
 VERILATOR_FLAG =--prof-c --prof-cfuncs --prof-exec \
 	--public \
-	--autoflush --timescale "1ns/1ns" --no-timing # -Wall -Wno-DECLFILENAME -Wno-UNUSED
+	--autoflush --timescale "1ns/1ns" --no-timing \
+	-Wno-WIDTHEXPAND -Wno-WIDTHTRUNC # -Wall -Wno-DECLFILENAME -Wno-UNUSED
 CXXFLAGS = -Wall -Werror \
 	-Wno-bool-operation -Wno-implicit-fallthrough -Wno-macro-redefined \
 	-Wno-parentheses-equality -Wno-unused-variable \
 	$(call remove_quote,$(CONFIG_CC_OPT))
 LDFLAGS = -lreadline -ldl
 
+# RV64 support: pass VFLAGS="-DYSYX_RV64" to enable 64-bit mode
+VFLAGS ?=
+ifneq (,$(findstring DYSYX_RV64,$(VFLAGS)))
+CXXFLAGS += -DCONFIG_ISA64
+ISA64 = 1
+else
+ISA64 = 0
+endif
+
 FILELIST_MK = $(shell find -L ./csrc -name "filelist.mk")
 include $(FILELIST_MK)
 
 $(shell mkdir -p $(BUILD_DIR))
 $(shell mkdir -p $(DATA_DIR))
+
+# Auto-invalidate build when VFLAGS changes (e.g., switching between RV32/RV64)
+VFLAGS_STAMP := $(BUILD_DIR)/.vflags_stamp
+VFLAGS_PREV  := $(shell cat $(VFLAGS_STAMP) 2>/dev/null)
+ifneq ($(VFLAGS),$(VFLAGS_PREV))
+$(shell rm -rf $(OBJ_DIR) $(BIN) $(VFLAGS_STAMP))
+$(info [nsim] VFLAGS changed: '$(VFLAGS_PREV)' -> '$(VFLAGS)', rebuilding...)
+endif
+$(shell printf '%s' '$(VFLAGS)' > $(VFLAGS_STAMP))
 
 VSRCS = \
 	$(shell find $(VSRC_PATH) -name "*.sv") \
@@ -69,7 +88,7 @@ MROM_IMG ?= $(NSIM_HOME)/csrc/mem/mrom-data/build/mrom-data.bin
 endif
 
 $(NSIM_HOME)/csrc/mem/mrom-data/build/mrom-data.bin:
-	$(MAKE) -C $(NSIM_HOME)/csrc/mem/mrom-data
+	$(MAKE) -C $(NSIM_HOME)/csrc/mem/mrom-data ISA64=$(ISA64)
 
 all: $(BIN)
 
@@ -93,9 +112,14 @@ $(BIN): $(VSRCS) $(VHSRCS) $(CCSRCS) $(CHSRCS) $(NVBOARD_ARCHIVE)
 		--top-module $(VTARGET) \
 		$(addprefix -CFLAGS , $(CXXFLAGS)) $(addprefix -LDFLAGS , $(LDFLAGS)) \
 		$(addprefix -I, $(INC_PATH)) \
+		$(VFLAGS) \
 		--Mdir $(OBJ_DIR) --exe -o $(abspath $(BIN))
 
+ifeq ($(ISA64),1)
+DIFF_REF_SO = -d $(abspath $(NEMU_HOME)/build/riscv64-nemu-interpreter-so)
+else
 DIFF_REF_SO = -d $(abspath $(NEMU_HOME)/build/riscv32-nemu-interpreter-so)
+endif
 IMG ?=
 NPC_EXEC := $(BIN) $(ARGS) $(DIFF_REF_SO) -m $(MROM_IMG) $(IMG)
 
@@ -150,7 +174,7 @@ sta_show: pack
 		RTL_FILES="$(abspath $(BUILD_DIR)/ysyx_pack.sv)"
 
 lint:
-	$(VERILATOR) --lint-only -Wall $(VSRCS) $(INCFLAGS) --top-module $(VTARGET)
+	$(VERILATOR) --lint-only -Wall $(VSRCS) $(INCFLAGS) $(VFLAGS) --top-module $(VTARGET)
 
 test:
 	echo $(CXXFLAGS)

@@ -34,7 +34,7 @@ module ysyx_bus #(
 
     output            axi_wlast,   // reqired
     output [XLEN-1:0] axi_wdata,   // reqired
-    output [     3:0] axi_wstrb,
+    output [XLEN/8-1:0] axi_wstrb,
     output            axi_wvalid,  // reqired
     input             axi_wready,  // reqired
 
@@ -132,6 +132,7 @@ module ysyx_bus #(
                 ({3{l1d_bus.rstrb == 8'h1}} & 3'b000) |
                 ({3{l1d_bus.rstrb == 8'h3}} & 3'b001) |
                 ({3{l1d_bus.rstrb == 8'hf}} & 3'b010) |
+                ({3{l1d_bus.rstrb == 8'hff}} & 3'b011) |
                 (3'b000)
               );
             end
@@ -142,7 +143,7 @@ module ysyx_bus #(
               && (l1i_bus.araddr >= 'ha0000000)
               && (l1i_bus.araddr <= 'hc0000000));
             arid <= L1I;
-            arsize <= 3'b010;
+            arsize <= 3'b010; // always 4-byte: instructions are 32-bit
             state_load_source <= L1I;
           end
         end
@@ -187,22 +188,19 @@ module ysyx_bus #(
   assign axi_awsize = l1d_bus.awvalid
     ? (({3{l1d_bus.wstrb == 8'h1}} & 3'b000)
       |({3{l1d_bus.wstrb == 8'h3}} & 3'b001)
-      |({3{l1d_bus.wstrb == 8'hf}} & 3'b010))
+      |({3{l1d_bus.wstrb == 8'hf}} & 3'b010)
+      |({3{l1d_bus.wstrb == 8'hff}} & 3'b011))
     : 3'b000;
   assign axi_awaddr = l1d_bus.awvalid ? l1d_bus.awaddr : 'h0;
   assign axi_awvalid = (state_store == LS_S_A) && (l1d_bus.awvalid);
 
-  logic [1:0] awaddr_lo;
-  assign awaddr_lo = axi_awaddr[1:0];
-  assign axi_wdata = {
-    (({XLEN{awaddr_lo == 2'b00}} & {{l1d_bus.wdata}})
-    |({XLEN{awaddr_lo == 2'b01}} & {{l1d_bus.wdata[23:0]}, {8'b0}})
-    |({XLEN{awaddr_lo == 2'b10}} & {{l1d_bus.wdata[15:0]}, {16'b0}})
-    |({XLEN{awaddr_lo == 2'b11}} & {{l1d_bus.wdata[7:0]}, {24'b0}}))
-  };
+  localparam ADDR_LO_BITS = $clog2(XLEN / 8);  // 2 for RV32, 3 for RV64
+  logic [ADDR_LO_BITS-1:0] awaddr_lo;
+  assign awaddr_lo = axi_awaddr[ADDR_LO_BITS-1:0];
+  assign axi_wdata = l1d_bus.wdata << (awaddr_lo * 8);
   assign axi_wvalid = ((l1d_bus.wvalid) && !write_done);
   assign axi_wlast = axi_wvalid && axi_wready;
-  assign axi_wstrb = {l1d_bus.wstrb[3:0] << awaddr_lo};
+  assign axi_wstrb = l1d_bus.wstrb[XLEN/8-1:0] << awaddr_lo;
 
   assign axi_bready = (state_store == LS_S_W);
 

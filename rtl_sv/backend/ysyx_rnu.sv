@@ -48,8 +48,8 @@ module ysyx_rnu #(
 
   ysyx_pkg::uop_t              rnq_uops  [RIQ_SIZE];
   logic [RLEN-1:0]             rnq_rd    [RIQ_SIZE];
-  logic [31:0]                 rnq_op1   [RIQ_SIZE];
-  logic [31:0]                 rnq_op2   [RIQ_SIZE];
+  logic [XLEN-1:0]             rnq_op1   [RIQ_SIZE];
+  logic [XLEN-1:0]             rnq_op2   [RIQ_SIZE];
   logic [RLEN-1:0]             rnq_rs1   [RIQ_SIZE];
   logic [RLEN-1:0]             rnq_rs2   [RIQ_SIZE];
 

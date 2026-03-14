@@ -5,7 +5,7 @@
 [![macOS](https://img.shields.io/badge/macOS-000000?style=flat&logo=apple&logoColor=white)](https://en.wikipedia.org/wiki/MacOS)
 [![Github](https://img.shields.io/badge/GitHub-181717?style=flat&logo=github&logoColor=white)](https://github.dev/Kingfish404/raptor-chip)
 
-**Out-of-order RISC-V (RV32IMAC\_Zicsr\_Zifencei_Sv32) processor core** with register renaming, ROB, and reservation stations. The RTL is hand-written `SystemVerilog` with `Chisel` (`Scala`) used only for decoder generation. Features Sv32 virtual memory (MMU/TLB), LR/SC + AMO atomics, compressed instructions (RVC), and boots Linux 6.12 via OpenSBI.
+**Out-of-order RISC-V (RV32/RV64 IMAC\_Zicsr\_Zifencei) processor core** with register renaming, ROB, and reservation stations. The RTL is hand-written `SystemVerilog` with `Chisel` (`Scala`) used only for decoder generation. Features Sv32 virtual memory (MMU/TLB), LR/SC + AMO atomics, compressed instructions (RVC), and boots Linux 6.12 via OpenSBI. Supports configurable **RV32** and **RV64** modes via compile-time switch.
 
 Candidate ip core name: `raptor-falcon-0.1.0` (`rf-0.1.0`).
 
@@ -45,68 +45,92 @@ make help
 
 ```shell
 # Configure, build and run NEMU (riscv32)
-make nemu-run
+make run-nemu32
 
 # Or step by step
-make nemu-config          # configure (riscv32_defconfig)
-make nemu-build           # build
-make nemu-run             # run
+make config-nemu32          # configure (riscv32_defconfig)
+make build-nemu32           # build
+make run-nemu32             # run
 
 # Interactive menuconfig
-make nemu-menuconfig
+make menuconfig-nemu32
 ```
 
 ### 2. NPC Simulation (Verilator)
 
 ```shell
 # Full pipeline: generate RTL → configure → build → run
-make npc-sim
+make sim-npc32
 
 # Or step by step
 make verilog              # Chisel → SystemVerilog
-make npc-config           # configure (o2_defconfig)
-make npc-build            # build Verilator simulator
-make npc-run              # run simulation
+make config-npc32         # configure (o2_defconfig)
+make build-npc32          # build Verilator simulator
+make run-npc32            # run simulation
 
 
 # Run with args
-make npc-run ARGS="-b -n"    # -b: batch mode [default], -n: no wave trace
-make npc-run IMG=path/to.bin  # load custom image
+make run-npc32 ARGS="-b -n"    # -b: batch mode [default], -n: no wave trace
+make run-npc32 IMG=path/to.bin  # load custom image
 
 # Interactive menuconfig
-make npc-menuconfig
+make menuconfig-npc32
+```
+
+#### RV64 Mode
+
+The processor supports RV64 via a compile-time switch (`-DYSYX_RV64`). Switching between RV32 and RV64 automatically invalidates the build cache — no manual `make clean` needed.
+
+```shell
+# Build and run in RV64 mode (convenience targets)
+make build-npc64
+make run-npc64 ARGS="-b -n"
+
+# Or explicitly pass VFLAGS
+make run-npc32 VFLAGS="-DYSYX_RV64" ARGS="-b -n"
+
+# Lint in RV64 mode
+make lint-npc64
 ```
 
 ### 3. Benchmarks
 
 ```shell
 # Run on NPC (riscv32e-npc)
-make coremark-npc ARGS="-b -n"
-make microbench-npc ARGS="-b -n"
+make coremark-npc32 ARGS="-b -n"
+make microbench-npc32 ARGS="-b -n"
+
+# Run on NPC with difftest (vs NEMU reference)
+make coremark-npc32-difftest ARGS="-b -n"
+make microbench-npc32-difftest ARGS="-b -n"
+
+# Run on ysyxSoC
+make coremark-ysyxsoc ARGS="-b -n"
+make microbench-ysyxsoc ARGS="-b -n"
 
 # Run on NEMU (riscv32-nemu)
-make coremark-nemu ARGS="-b -n"
-make microbench-nemu ARGS="-b -n"
+make coremark-nemu32 ARGS="-b -n"
+make microbench-nemu32 ARGS="-b -n"
 ```
 
 ### 4. Nanos-lite OS
 
 ```shell
 # Run nanos-lite on NEMU
-make nanos-nemu
+make nanos-nemu32
 
 # Run nanos-lite on NPC
-make nanos-npc
+make nanos-npc32
 ```
 
 ### 5. Linux Kernel
 
 ```shell
 # Boot Linux on NEMU (requires OpenSBI payload built first)
-make linux-boot-nemu
+make linux-boot-nemu32
 
 # Boot Linux on NPC
-make linux-boot-npc
+make linux-boot-npc32
 
 # See detailed instructions
 # docs/linux_kernel.md, linux/README.md

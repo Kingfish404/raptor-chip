@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Out-of-order RISC-V (RV32IMAC_Zicsr_Sv32) processor core ("raptor") with register renaming, ROB, reservation stations, and Sv32 virtual memory. Features LR/SC + AMO atomics, compressed instructions (RVC), and boots Linux 6.12 via OpenSBI. The RTL is hand-written **SystemVerilog** with Chisel used only for decoder generation. Verification uses Verilator simulation with differential testing against NEMU (a reference ISA emulator).
+Out-of-order RISC-V (RV32/RV64 IMAC_Zicsr) processor core ("raptor") with register renaming, ROB, reservation stations, and Sv32 virtual memory. Features LR/SC + AMO atomics, compressed instructions (RVC), and boots Linux 6.12 via OpenSBI. Supports configurable **RV32** and **RV64** modes via compile-time `YSYX_RV64` define. The RTL is hand-written **SystemVerilog** with Chisel used only for decoder generation. Verification uses Verilator simulation with differential testing against NEMU (a reference ISA emulator).
 
 ## Architecture (Pipeline Stages)
 
@@ -19,7 +19,7 @@ IFU → IDU → RNU (rename) → ROU (ROB/dispatch) → EXU (RS/IOQ) → CMU (co
     - `ysyx_rnu_maptable.sv` - speculative MAP + committed RAT (`rnu_mt_if`, 3 read ports, flush: MAP←RAT, exposes `map_snapshot`/`rat_snapshot`)
   - **PRF** (`ysyx_prf.sv`): multi-ported physical register file (2R/2W), instantiated at top level (`ysyx.sv`) — valid + transient tracking, flush invalidates transient entries. Write port A: `exu_rou_if`, Write port B: `exu_ioq_bcast_if`, Read: `exu_prf_if`
   - **ROU** (ROB/dispatch): UOQ (dispatch queue, `IIQ_SIZE`) + ROB (`rob_entry_t[]`, `ROB_SIZE`, states: `ROB_EX`→`ROB_WB`→`ROB_CM`), operand bypass (PRF > IOQ > EXU), async trap from CLINT
-  - **EXU**: RS (`RS_SIZE`, priority issue, operand forwarding) + IOQ (`IOQ_SIZE`, in-order, for ld/st/amo/Zicsr) + ALU (combinational RV32I) + MUL (Booth's / iterative div, or fast single-cycle mode)
+  - **EXU**: RS (`RS_SIZE`, priority issue, operand forwarding) + IOQ (`IOQ_SIZE`, in-order, for ld/st/amo/Zicsr) + ALU (combinational RV32I/RV64I, W-variant sign-extension for RV64) + MUL (Booth's / iterative div, or fast single-cycle mode; W-variants for RV64)
   - **CMU** (commit): lightweight broadcast unit (retire PC, branch resolution, flush, fence)
   - **CSR** (`ysyx_csr.sv`): M/S-mode CSR file, trap delegation, privilege transitions, MMU broadcasts (`immu_en`/`dmmu_en`, `satp_ppn`, `tvec`)
 - **Memory** (`rtl_sv/memory/`): LSU (STQ + SQ, store-to-load forwarding CAM), L1I (direct-mapped, ITLB, Sv32 PTW, IFQ, banked SRAM data storage via `ysyx_sram_1r1w`, `sram_data_ready` for synchronous read timing), L1D (direct-mapped, load TLB + store STLB, Sv32 PTW, write-through, LR/SC reservation, SRAM data storage via `ysyx_sram_1r1w`, 7-state FSM with `LD_HIT` for SRAM read latency, split `tag_hit`/`data_hit`), BUS (AXI4 bridge, L1D priority, CLINT internal), CLINT (64-bit mtime, periodic timer interrupt), SRAM wrapper (`ysyx_sram_1r1w.sv` — synchronous-read behavioral model with write-first bypass, `YSYX_USE_SRAM_MACRO` ifdef for foundry macro swap, matches ASIC SRAM timing and FPGA Block RAM inference)
@@ -32,16 +32,20 @@ IFU → IDU → RNU (rename) → ROU (ROB/dispatch) → EXU (RS/IOQ) → CMU (co
 ```shell
 make help              # Show all targets
 make verilog           # Chisel → SV decoders (output: rtl_sv/generated/)
-make npc-sim           # Full pipeline: verilog + config + build + run
-make npc-run ARGS="-b -n"  # Run NPC sim (batch, no wave)
-make nemu-run          # Build & run NEMU reference emulator
-make coremark-npc ARGS="-b -n" # CoreMark on NPC
+make sim-npc32         # Full pipeline: verilog + config + build + run
+make run-npc32 ARGS="-b -n"  # Run NPC sim (batch, no wave)
+make run-npc64 ARGS="-b -n" # Run NPC sim in RV64 mode
+make run-nemu32          # Build & run NEMU reference emulator
+make coremark-npc32 ARGS="-b -n" # CoreMark on NPC
 make lint              # Verilator lint
+make lint-npc64        # Verilator lint (RV64 mode)
 make sta               # Static timing analysis (Yosys + OpenSTA)
 make pack              # Pack all SV into single file
+make clean-npc         # Clean NPC build only
 ```
 
 No `source env.sh` needed - the Makefile exports all environment variables automatically.
+Switching between RV32 and RV64 (`make run-npc32` vs `make run-npc64`) automatically invalidates the build cache.
 
 ## SystemVerilog Conventions
 
@@ -60,6 +64,8 @@ No `source env.sh` needed - the Makefile exports all environment variables autom
 - DPI-C calls are **macro-wrapped** (e.g., `` `YSYX_DPI_C_PMEM_READ``), defined in two variants:
   - `rtl_sv/include/dpic/ysyx_dpi_c.svh` - real calls for Verilator simulation
   - `rtl_sv/include/dpic_mock/ysyx_dpi_c.svh` - no-ops for synthesis/formal
+- DPI-C function signatures are **conditional on YSYX_RV64**: `longint` params for RV64, `int` for RV32 (see `ysyx_dpi_c.sv`)
+- C-side counterparts use `#ifdef CONFIG_ISA64` for matching `long long` vs `int` signatures
 - **Differential testing** (difftest) compares NPC vs NEMU instruction-by-instruction; enabled by default
 - Simulator config uses **Kconfig** in `nsim/configs/` - profiles: `o2_defconfig` (standalone), `o2linux_defconfig`, `o2soc_defconfig`
 
@@ -70,6 +76,7 @@ No `source env.sh` needed - the Makefile exports all environment variables autom
 ## Configuration & Parameters
 
 Microarchitecture tunables are in `rtl_sv/include/ysyx_config.svh`:
+- **XLEN**: 32 (default) or 64 (when `YSYX_RV64` is defined)
 - **Cache**: `L1I_LINE_LEN` (line words), `L1I_LEN` (index bits, 2^6=64 entries), `L1D_LEN` (index bits, 2^7=128 entries)
 - **BPU**: `PHT_SIZE` (512), `BTB_SIZE` (64), `RSB_SIZE` (8)
 - **OoO queues**: `RIQ_SIZE` (rename queue, 4), `IIQ_SIZE` (dispatch queue, 4), `ROB_SIZE` (8), `RS_SIZE` (4), `IOQ_SIZE` (4), `SQ_SIZE` (store queue, 8)
@@ -78,6 +85,8 @@ Microarchitecture tunables are in `rtl_sv/include/ysyx_config.svh`:
 - **MUL mode**: `YSYX_M_FAST` (1 = single-cycle for sim, 0 = iterative Booth's)
 
 Interface `parameter` declarations default to these macros.
+
+**MROM**: boot stub in `nsim/csrc/mem/mrom-data/` auto-builds for RV32 or RV64 (controlled by `ISA64` variable, auto-detected from `VFLAGS`).
 
 ## CI / Testing
 
@@ -99,5 +108,5 @@ After completing any code modification (new modules, interface changes, refactor
    - `README.md` - top-level project overview (if architecture/build commands changed)
 3. **Verify consistency** - confirm that module names, interface names, type names, parameter names, and file paths mentioned in documentation match the actual codebase.
 4. **Run verification** - after documentation updates, run:
-   - `make lint` and `make npc-run ARGS="-b -n"` to ensure nothing is broken
+   - `make lint` and `make run-npc32 ARGS="-b -n"` to ensure nothing is broken
    - For **microarchitecture / performance-related changes**, also run `make coremark ARGS="-b -n"` and `make microbench ARGS="-b -n"`, then append a new row to `docs/perf-iterations.md` recording the commit, change description, IPC, cycle count, and stall breakdown.

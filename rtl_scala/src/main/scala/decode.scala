@@ -7,10 +7,11 @@ import chisel3.util.experimental.decode._
 class ysyx_idu_decoder extends Module with Instr with MicroOP {
   val in      = IO(new Bundle {
     val inst = Input(UInt(32.W))
-    val pc   = Input(UInt(32.W))
+    val pc   = Input(UInt(64.W))
   })
   val out     = IO(new Bundle {
     val alu  = Output(UInt(5.W))
+    val word = Output(UInt(1.W))
     val ben  = Output(UInt(1.W))
     val jen  = Output(UInt(1.W))
     val jren = Output(UInt(1.W))
@@ -20,9 +21,9 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
     val atom = Output(UInt(1.W))
 
     val rd  = Output(UInt(5.W))
-    val imm = Output(UInt(32.W))
-    val op1 = Output(UInt(32.W))
-    val op2 = Output(UInt(32.W))
+    val imm = Output(UInt(64.W))
+    val op1 = Output(UInt(64.W))
+    val op2 = Output(UInt(64.W))
     val rs1 = Output(UInt(5.W))
     val rs2 = Output(UInt(5.W))
     val csr = Output(UInt(12.W))
@@ -48,13 +49,13 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
   val funct3 = in.inst(14, 12)
   val funct7 = in.inst(31, 25)
 
-  val imm_i = Cat(Fill(20, in.inst(31)), in.inst(31, 20))
-  val imm_s = Cat(Fill(20, in.inst(31)), in.inst(31, 25), in.inst(11, 7))
+  val imm_i = Cat(Fill(52, in.inst(31)), in.inst(31, 20))
+  val imm_s = Cat(Fill(52, in.inst(31)), in.inst(31, 25), in.inst(11, 7))
   val immbv = Cat(in.inst(31), in.inst(7), in.inst(30, 25), in.inst(11, 8))
-  val imm_b = Cat(Fill(19, in.inst(31)), immbv, 0.U)
-  val imm_u = Cat(in.inst(31, 12), Fill(12, 0.U))
+  val imm_b = Cat(Fill(51, in.inst(31)), immbv, 0.U)
+  val imm_u = Cat(Fill(32, in.inst(31)), in.inst(31, 12), Fill(12, 0.U))
   val immjv = Cat(in.inst(31), in.inst(19, 12), in.inst(20), in.inst(30, 21))
-  val imm_j = Cat(Fill(11, in.inst(31)), immjv, 0.U)
+  val imm_j = Cat(Fill(43, in.inst(31)), immjv, 0.U)
   val csr   = in.inst(31, 20)
   val uimm  = in.inst(19, 15)
 
@@ -135,6 +136,41 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
       REM___ -> BitPat("b" + "00" + ALU_REM_), // R
       REMU__ -> BitPat("b" + "00" + ALU_REMU), // R
 
+      // RV64I
+      LWU___ -> BitPat("b" + "10" + LSU_LWU), // I
+      LD____ -> BitPat("b" + "10" + LSU_LD_), // I
+      SD____ -> BitPat("b" + "01" + LSU_SD_), // S
+
+      ADDIW_ -> BitPat("b" + "00" + ALU_ADD_), // I (W-variant)
+      SLLIW_ -> BitPat("b" + "00" + ALU_SLL_), // I (W-variant)
+      SRLIW_ -> BitPat("b" + "00" + ALU_SRL_), // I (W-variant)
+      SRAIW_ -> BitPat("b" + "00" + ALU_SRA_), // I (W-variant)
+      ADDW__ -> BitPat("b" + "00" + ALU_ADD_), // R (W-variant)
+      SUBW__ -> BitPat("b" + "00" + ALU_SUB_), // R (W-variant)
+      SLLW__ -> BitPat("b" + "00" + ALU_SLL_), // R (W-variant)
+      SRLW__ -> BitPat("b" + "00" + ALU_SRL_), // R (W-variant)
+      SRAW__ -> BitPat("b" + "00" + ALU_SRA_), // R (W-variant)
+
+      // RV64M
+      MULW__ -> BitPat("b" + "00" + ALU_MUL_), // R (W-variant)
+      DIVW__ -> BitPat("b" + "00" + ALU_DIV_), // R (W-variant)
+      DIVUW_ -> BitPat("b" + "00" + ALU_DIVU), // R (W-variant)
+      REMW__ -> BitPat("b" + "00" + ALU_REM_), // R (W-variant)
+      REMUW_ -> BitPat("b" + "00" + ALU_REMU), // R (W-variant)
+
+      // RV64A
+      LR_D__    -> BitPat("b" + "10" + ATO_LR__), // R
+      SC_D__    -> BitPat("b" + "01" + ATO_SC__), // R
+   AMOSWAP_D -> BitPat("b" + "11" + ATO_SWAP), // R
+   AMOADD_D_ -> BitPat("b" + "11" + ATO_ADD_), // R
+   AMOXOR_D_ -> BitPat("b" + "11" + ATO_XOR_), // R
+   AMOAND_D_ -> BitPat("b" + "11" + ATO_AND_), // R
+   AMOOR_D__ -> BitPat("b" + "11" + ATO_OR__), // R
+   AMOMIN_D_ -> BitPat("b" + "11" + ATO_MIN_), // R
+   AMOMAX_D_ -> BitPat("b" + "11" + ATO_MAX_), // R
+   AMOMINU_D -> BitPat("b" + "11" + ATO_MINU), // R
+   AMOMAXU_D -> BitPat("b" + "11" + ATO_MAXU), // R
+
       // TODO: add reservation for lr/sc
       // format: off
       LR_W__ -> BitPat("b" + "10" + ATO_LR__), // R
@@ -197,12 +233,46 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
         AMOMIN_W_ -> BitPat("b" + "1"), // N
         AMOMAX_W_ -> BitPat("b" + "1"), // N
         AMOMINU_W -> BitPat("b" + "1"), // N
-        AMOMAXU_W -> BitPat("b" + "1")  // N
+        AMOMAXU_W -> BitPat("b" + "1"), // N
+        LR_D__    -> BitPat("b" + "1"), // N
+        SC_D__    -> BitPat("b" + "1"), // N
+        AMOSWAP_D -> BitPat("b" + "1"), // N
+        AMOADD_D_ -> BitPat("b" + "1"), // N
+        AMOXOR_D_ -> BitPat("b" + "1"), // N
+        AMOAND_D_ -> BitPat("b" + "1"), // N
+        AMOOR_D__ -> BitPat("b" + "1"), // N
+        AMOMIN_D_ -> BitPat("b" + "1"), // N
+        AMOMAX_D_ -> BitPat("b" + "1"), // N
+        AMOMINU_D -> BitPat("b" + "1"), // N
+        AMOMAXU_D -> BitPat("b" + "1")  // N
       ),
       BitPat("b" + "0")
     )
   );
   out.atom := atom_decoded(0)
+
+  // RV64 W-variant (word) flag decode table
+  val word_table = TruthTable(
+    Map(
+      ADDIW_ -> BitPat("b" + "1"), // W
+      SLLIW_ -> BitPat("b" + "1"), // W
+      SRLIW_ -> BitPat("b" + "1"), // W
+      SRAIW_ -> BitPat("b" + "1"), // W
+      ADDW__ -> BitPat("b" + "1"), // W
+      SUBW__ -> BitPat("b" + "1"), // W
+      SLLW__ -> BitPat("b" + "1"), // W
+      SRLW__ -> BitPat("b" + "1"), // W
+      SRAW__ -> BitPat("b" + "1"), // W
+      MULW__ -> BitPat("b" + "1"), // W
+      DIVW__ -> BitPat("b" + "1"), // W
+      DIVUW_ -> BitPat("b" + "1"), // W
+      REMW__ -> BitPat("b" + "1"), // W
+      REMUW_ -> BitPat("b" + "1")  // W
+    ),
+    BitPat("b" + "0")
+  )
+  val word_decoded = decoder(in.inst, word_table)
+  out.word := word_decoded(0)
 
   val sys_misc_table = TruthTable(
     Map( //                   csw sr mr eb ec sys
@@ -343,6 +413,40 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
  AMOMAX_W_ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // N
  AMOMINU_W -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // N
  AMOMAXU_W -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // N
+
+    // RV64I
+    LWU___ -> List( rd,  imm_i,   0.U,   0.U, rs1, 0.U), // I
+    LD____ -> List( rd,  imm_i,   0.U,   0.U, rs1, 0.U), // I
+    SD____ -> List(0.U,  imm_s,   0.U,   0.U, rs1, rs2), // S
+    ADDIW_ -> List( rd,  imm_i,   0.U, imm_i, rs1, 0.U), // I
+    SLLIW_ -> List( rd,  imm_i,   0.U, imm_i, rs1, 0.U), // I
+    SRLIW_ -> List( rd,  imm_i,   0.U, imm_i, rs1, 0.U), // I
+    SRAIW_ -> List( rd,  imm_i,   0.U, imm_i, rs1, 0.U), // I
+    ADDW__ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
+    SUBW__ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
+    SLLW__ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
+    SRLW__ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
+    SRAW__ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
+
+    // RV64M
+    MULW__ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
+    DIVW__ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
+    DIVUW_ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
+    REMW__ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
+    REMUW_ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
+
+    // RV64A
+    LR_D__ -> List( rd,    0.U,   0.U,  0.U, rs1, 0.U), // N
+    SC_D__ -> List( rd,    0.U,   0.U,  0.U, rs1, rs2), // N
+ AMOSWAP_D -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // N
+ AMOADD_D_ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // N
+ AMOXOR_D_ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // N
+ AMOAND_D_ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // N
+ AMOOR_D__ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // N
+ AMOMIN_D_ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // N
+ AMOMAX_D_ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // N
+ AMOMINU_D -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // N
+ AMOMAXU_D -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // N
 
     MRET__ -> List( rd,MSTATUS,   0.U,   0.U, 0.U, 0.U), // N
     SRET__ -> List( rd,SSTATUS,   0.U,   0.U, 0.U, 0.U), // N

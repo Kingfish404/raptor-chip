@@ -36,10 +36,10 @@ module ysyx_idu #(
   assign ifu_idu.ready = ready;
 
   // Pipeline latch: capture from IFU when ready
-  logic [31:0]    inst, inst_de;
-  logic [31:0]    pc_idu;
+  logic [31:0] inst, inst_de;
+  logic [XLEN-1:0] pc_idu;
   logic [XLEN-1:0] pnpc_idu;
-  logic           ifu_trap;
+  logic            ifu_trap;
   logic [XLEN-1:0] ifu_cause;
 
   always @(posedge clock) begin
@@ -79,10 +79,11 @@ module ysyx_idu #(
   // ================================================================
   // Instruction Decoding (combinational)
   // ================================================================
-  logic [4:0]  alu;
+  logic [ 4:0] alu;
+  logic        word_flag;
   logic [11:0] csr;
-  logic [2:0]  csr_csw;
-  logic [4:0]  rd, rs1, rs2;
+  logic [ 2:0] csr_csw;
+  logic [4:0] rd, rs1, rs2;
 
   // Compressed instruction expansion
   logic        is_c;
@@ -90,19 +91,26 @@ module ysyx_idu #(
   assign is_c     = (inst[1:0] != 2'b11);
   assign inst_idu = is_c ? inst_de : inst;
 
+  // Decoder output wires (always 64-bit from generated decoder)
+  /* verilator lint_off UNUSEDSIGNAL */
+  logic [63:0] dec_imm, dec_op1, dec_op2;
+  /* verilator lint_on UNUSEDSIGNAL */
+
   ysyx_idu_decoder_c idu_de_c (
-      .clock   (clock),
-      .io_cinst(inst[15:0]),
-      .io_inst (inst_de),
-      .reset   (reset)
+      .clock     (clock),
+      .io_cinst  (inst[15:0]),
+      .io_is_rv64(XLEN == 64 ? 1'b1 : 1'b0),
+      .io_inst   (inst_de),
+      .reset     (reset)
   );
 
   ysyx_idu_decoder idu_de (
-      .clock   (clock),
-      .in_pc   (pc_idu),
-      .in_inst (inst_idu),
+      .clock  (clock),
+      .in_pc  ({{(64 - XLEN) {1'b0}}, pc_idu}),
+      .in_inst(inst_idu),
 
       .out_alu (alu),
+      .out_word(word_flag),
       .out_ben (idu_rnu.uop.ben),
       .out_jen (idu_rnu.uop.jen),
       .out_jren(idu_rnu.uop.jren),
@@ -120,17 +128,22 @@ module ysyx_idu #(
       .out_fence_i   (idu_rnu.uop.f_i),
       .out_fence_time(idu_rnu.uop.f_time),
 
-      .out_imm(idu_rnu.uop.imm),
+      .out_imm(dec_imm),
       .out_rd (rd),
       .out_csr(csr),
 
-      .out_op1(idu_rnu.op1),
-      .out_op2(idu_rnu.op2),
+      .out_op1(dec_op1),
+      .out_op2(dec_op2),
       .out_rs1(rs1),
       .out_rs2(rs2),
 
       .reset(reset)
   );
+
+  // Truncate 64-bit decoder outputs to XLEN
+  assign idu_rnu.uop.imm = dec_imm[XLEN-1:0];
+  assign idu_rnu.op1     = dec_op1[XLEN-1:0];
+  assign idu_rnu.op2     = dec_op2[XLEN-1:0];
 
   // ================================================================
   // Illegality Detection
@@ -157,38 +170,33 @@ module ysyx_idu #(
       `YSYX_CSR_MSCRATCH, `YSYX_CSR_MEPC___,  `YSYX_CSR_MCAUSE_,  `YSYX_CSR_MTVAL__,
       `YSYX_CSR_MIP____,
       // Machine Counters
-      `YSYX_CSR_MCYCLE_,  `YSYX_CSR_MCYCLEH, `YSYX_CSR_CYCLE__,
-      `YSYX_CSR_TIME___,  `YSYX_CSR_TIMEH__,
+      `YSYX_CSR_MCYCLE_, `YSYX_CSR_MCYCLEH, `YSYX_CSR_CYCLE__, `YSYX_CSR_TIME___, `YSYX_CSR_TIMEH__,
       // Machine Information
       `YSYX_CSR_MVENDORID, `YSYX_CSR_MARCHID__, `YSYX_CSR_IMPID____, `YSYX_CSR_MHARTID__:
-        return 1'b1;
-      default:
-        return 1'b0;
+      return 1'b1;
+      default: return 1'b0;
     endcase
   endfunction
 
   // ================================================================
   // UOP Output Assembly
   // ================================================================
-  assign idu_rnu.uop.c       = is_c;
-  assign idu_rnu.uop.alu     = alu;
+  assign idu_rnu.uop.c            = is_c;
+  assign idu_rnu.uop.word         = word_flag;
+  assign idu_rnu.uop.alu          = alu;
   assign idu_rnu.uop.rd[RLEN-1:0] = is_illegal ? '0 : rd[RLEN-1:0];
-  assign idu_rnu.uop.csr_csw = csr_csw;
+  assign idu_rnu.uop.csr_csw      = csr_csw;
 
   // Trap aggregation: IFU traps (e.g., page fault) or decode-time illegality
-  assign idu_rnu.uop.trap  = ifu_trap || is_illegal;
-  assign idu_rnu.uop.tval  = ifu_trap   ? pc_idu
-                            : is_illegal ? inst_idu
-                            :              '0;
-  assign idu_rnu.uop.cause = ifu_trap   ? ifu_cause
-                            : is_illegal ? 'h2
-                            :              '0;
+  assign idu_rnu.uop.trap         = ifu_trap || is_illegal;
+  assign idu_rnu.uop.tval         = ifu_trap ? pc_idu : is_illegal ? inst_idu : '0;
+  assign idu_rnu.uop.cause        = ifu_trap ? ifu_cause : is_illegal ? 'h2 : '0;
 
-  assign idu_rnu.uop.pnpc = pnpc_idu;
-  assign idu_rnu.uop.inst = inst_idu;
-  assign idu_rnu.uop.pc   = pc_idu;
+  assign idu_rnu.uop.pnpc         = pnpc_idu;
+  assign idu_rnu.uop.inst         = inst_idu;
+  assign idu_rnu.uop.pc           = pc_idu;
 
-  assign idu_rnu.rs1[RLEN-1:0] = rs1[RLEN-1:0];
-  assign idu_rnu.rs2[RLEN-1:0] = rs2[RLEN-1:0];
+  assign idu_rnu.rs1[RLEN-1:0]    = rs1[RLEN-1:0];
+  assign idu_rnu.rs2[RLEN-1:0]    = rs2[RLEN-1:0];
 
 endmodule

@@ -115,29 +115,32 @@ static inline void host_write(void *addr, word_t data, int len)
     }
 }
 
-extern "C" void sdram_read(uint32_t addr, uint8_t *data)
+extern "C" void sdram_read(word_t addr, uint8_t *data)
 {
-    uint32_t offset = (addr - SDRAM_BASE);
+    uint32_t offset = ((uint32_t)addr - SDRAM_BASE);
     *data = memory.sdram[offset];
-    // Log(" sdram raddr: 0x%x, rdata: 0x%02x, offest: 0x%02x", addr, *data, offset);
+    // Log(" sdram raddr: 0x%x, rdata: 0x%02x, offest: 0x%02x", (uint32_t)addr, *data, offset);
 }
 
-extern "C" void sdram_write(uint32_t addr, uint8_t data)
+extern "C" void sdram_write(word_t addr, uint8_t data, uint8_t wmask)
 {
-    uint32_t offset = (addr - SDRAM_BASE);
+    uint32_t offset = ((uint32_t)addr - SDRAM_BASE);
     memory.sdram[offset] = data;
-    // Log("sdram waddr: 0x%x, wdata: 0x%02x, offest: 0x%02x", addr, data, offset);
+    // Log("sdram waddr: 0x%x, wdata: 0x%02x, offest: 0x%02x", (uint32_t)addr, data, offset);
 }
 
-extern "C" void pmem_read(word_t raddr, word_t *data)
+extern "C" void pmem_read(word_t raddr, word_t *rdata)
 {
-    // Log("raddr: " FMT_WORD_NO_PREFIX, raddr);
+    word_t addr = raddr;
+    word_t data = 0;
+    // Log("raddr: " FMT_WORD_NO_PREFIX, addr);
 #ifdef CONFIG_SOFT_MMIO
     if (raddr == RTC_ADDR_ + 4)
     {
         uint64_t t = get_time();
         memory.rtc_port_base[0] = (uint32_t)(t >> 32);
-        *data = memory.rtc_port_base[0];
+        data = memory.rtc_port_base[0];
+        *rdata = data;
         difftest_skip_ref();
         return;
     }
@@ -145,74 +148,79 @@ extern "C" void pmem_read(word_t raddr, word_t *data)
     {
         uint64_t t = get_time();
         memory.rtc_port_base[1] = (uint32_t)(t);
-        *data = memory.rtc_port_base[1];
+        data = memory.rtc_port_base[1];
+        *rdata = data;
         difftest_skip_ref();
         return;
     }
 #endif
-    if (mmio_check_and_handle(raddr, 0, 0, false, data))
+    if (mmio_check_and_handle(addr, 0, 0, false, &data))
     {
         // Log("  MMIO read: addr = " FMT_WORD ", data = " FMT_WORD,
-        //     raddr, *data);
+        //     addr, data);
+        *rdata = data;
         return;
     }
-    uint8_t *host_addr = guest_to_host(raddr);
-    host_addr = (uint8_t *)((size_t)host_addr & ~0x3);
+    uint8_t *host_addr = guest_to_host(addr);
+    host_addr = (uint8_t *)((size_t)host_addr & ~(size_t)(sizeof(word_t) - 1));
     if (host_addr == NULL)
     {
-        Log(FMT_RED("Invalid read: addr = " FMT_WORD), raddr);
+        Log(FMT_RED("Invalid read: addr = " FMT_WORD), addr);
         npc_abort();
         return;
     }
-    *data = host_read(host_addr, 4);
+    data = host_read(host_addr, sizeof(word_t));
+    *rdata = data;
     // Log("raddr: " FMT_WORD_NO_PREFIX ", data: " FMT_WORD_NO_PREFIX,
-    //     raddr, *data);
+    //     addr, data);
 }
 
 extern "C" void pmem_write(word_t waddr, word_t wdata, char wmask)
 {
-    // Log("waddr: 0x%08x, wdata: 0x%08x, wmask = 0x%02x",
-    //     waddr, wdata, wmask & 0xff);
+    word_t addr = waddr;
+    word_t data = wdata;
+    // Log("waddr: " FMT_WORD ", wdata: " FMT_WORD ", wmask = 0x%02x",
+    //     addr, data, wmask & 0xff);
 #ifdef CONFIG_SOFT_MMIO
     // SERIAL_MMIO: hex "MMIO address of the serial controller"
-    if (waddr == SERIAL_PORT)
+    if (addr == SERIAL_PORT)
     {
-        putchar(wdata);
+        putchar(data);
         difftest_skip_ref();
         return;
     }
 #endif
-    if (mmio_check_and_handle(waddr, wdata, wmask, true, NULL))
+    if (mmio_check_and_handle(addr, data, wmask, true, NULL))
     {
         // Log("MMIO write: addr = " FMT_WORD ", data = " FMT_WORD ", mask = %02x",
-        //     waddr, wdata, wmask & 0xff);
+        //     addr, data, wmask & 0xff);
         return;
     }
-    uint8_t *host_addr = guest_to_host(waddr);
+    uint8_t *host_addr = guest_to_host(addr);
     if (host_addr == NULL)
     {
         Log(FMT_RED("Invalid write: addr = " FMT_WORD ", data = " FMT_WORD ", mask = %02x"),
-            waddr, wdata, wmask & 0xff);
+            addr, data, wmask & 0xff);
         npc_abort();
         return;
     }
     switch (wmask)
     {
     case 0x1:
-        host_write(host_addr, wdata, 1);
+        host_write(host_addr, data, 1);
         break;
     case 0x3:
-        host_write(host_addr, wdata, 2);
+        host_write(host_addr, data, 2);
         break;
     case 0xf:
-        host_write(host_addr, wdata, 4);
+        host_write(host_addr, data, 4);
         break;
-    // case 0xff:
-    //     host_write(pmem + waddr - MBASE, wdata, 8);
-    //     break;
+    case (char)0xff:
+        host_write(host_addr, data, 8);
+        break;
     default:
         Log(FMT_RED("Invalid write: addr = " FMT_WORD ", data = " FMT_WORD ", mask = %02x"),
-            waddr, wdata, wmask & 0xff);
+            addr, data, wmask & 0xff);
         break;
     }
 }

@@ -52,9 +52,9 @@ void isa_reg_display()
 {
   csr_t reg_mstatus = {.val = cpu.sr[CSR_MSTATUS]};
   csr_t reg_mie = {.val = cpu.sr[CSR_MIE]};
-  printf(" pc: " FMT_WORD_NO_PREFIX ", num: %ld , inst: " FMT_WORD "\n",
+  printf(" pc: " FMT_WORD_NO_PREFIX ", num: %ld , inst: %08x\n",
          cpu.pc, (long int)g_nr_guest_inst, cpu.inst);
-  printf(" cpu.inst: %x, cpu.priv: %d, cpu.intr: %d\n",
+  printf(" cpu.inst: %08x, cpu.priv: %d, cpu.intr: %d\n",
          cpu.inst, cpu.priv, cpu.intr);
   printf(" mstatus.mie: %d, mie.mtie: %d, mstatus.sie: %d, mie.stie: %d\n",
          reg_mstatus.mstatus.mie, reg_mie.mie.mtie, reg_mstatus.mstatus.sie, reg_mie.mie.stie);

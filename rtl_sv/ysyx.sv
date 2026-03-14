@@ -75,7 +75,7 @@ module ysyx #(
 
     output            io_master_wlast,
     output [XLEN-1:0] io_master_wdata,
-    output [     3:0] io_master_wstrb,
+    output [XLEN/8-1:0] io_master_wstrb,
     output            io_master_wvalid,
     input             io_master_wready,
 

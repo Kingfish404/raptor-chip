@@ -49,7 +49,11 @@ typedef enum
   TYPE_N,
 } Inst_type;
 
+#if defined(CONFIG_RV64)
+#define CSR_MISA_VALUE 0x8000000000141105ULL
+#else
 #define CSR_MISA_VALUE 0x40141105
+#endif
 
 enum CSR
 {
@@ -108,8 +112,73 @@ enum CSR_MSTATUS
 };
 
 #if defined(CONFIG_RV64)
-#error "RV64 is not supported"
 #define XLEN 64
+// !important: only Little-Endian is supported
+typedef union
+{
+  struct
+  {
+    word_t rev1 : 1;
+    word_t sie : 1;
+    word_t rev2 : 1;
+    word_t mie : 1;
+    word_t rev3 : 1;
+    word_t spie : 1;
+    word_t ube : 1;
+    word_t mpie : 1;
+    word_t spp : 1;
+    word_t vs : 2;
+    word_t mpp : 2;
+    word_t fs : 2;
+    word_t xs : 2;
+    word_t mprv : 1;
+    word_t sum : 1;
+    word_t mxr : 1;
+    word_t tvm : 1;
+    word_t tw : 1;
+    word_t tsr : 1;
+    word_t rev4 : 9;
+    word_t uxl : 2;
+    word_t sxl : 2;
+    word_t sbe : 1;
+    word_t mbe : 1;
+    word_t rev5 : 25;
+    word_t sd : 1;
+  } mstatus;
+  struct
+  {
+    word_t ppn : 44;
+    word_t asid : 16;
+    word_t mode : 4;
+  } satp;
+  struct
+  {
+    word_t rev1 : 1;
+    word_t ssie : 1;
+    word_t rev2 : 3;
+    word_t stie : 1;
+    word_t rev3 : 3;
+    word_t seie : 1;
+    word_t rev4 : 3;
+    word_t lcofie : 1;
+  } sie;
+  struct
+  {
+    word_t rev1 : 1;
+    word_t ssie : 1;
+    word_t rev2 : 3;
+    word_t stie : 1;
+    word_t vstie : 1;
+    word_t mtie : 1;
+    word_t rev3 : 1;
+    word_t seie : 1;
+    word_t vseie : 1;
+    word_t mteie : 1;
+    word_t sgeie : 1;
+    word_t lcofie : 1;
+  } mie;
+  word_t val;
+} csr_t;
 #else
 #define XLEN 32
 // !important: only Little-Endian is supported
@@ -176,19 +245,10 @@ typedef union
 #endif
 
 // Machine cause register (mcause) values after trap.
+#define MCA_INTR_BIT ((word_t)1 << (XLEN - 1))
+
 enum MCAUSE
 {
-  MCA_SUP_SOF_INT = 0x1 | (1 << (XLEN - 1)),
-  MCA_MAC_SOF_INT = 0x3 | (1 << (XLEN - 1)),
-
-  MCA_SUP_TIM_INT = 0x5 | (1 << (XLEN - 1)),
-  MCA_MAC_TIM_INT = 0x7 | (1 << (XLEN - 1)),
-
-  MCA_SUP_EXT_INT = 0x9 | (1 << (XLEN - 1)),
-  MCA_MAC_EXT_INT = 0xb | (1 << (XLEN - 1)),
-
-  MCA_COU_OVE_INT = 0xd | (1 << (XLEN - 1)),
-
   MCA_INS_ADD_MIS = 0x0,
   MCA_INS_ACC_FAU = 0x1,
   MCA_ILLEGAL_INS = 0x2,
@@ -212,15 +272,17 @@ enum MCAUSE
   MCA_HAR_ERR = 0x13,
 };
 
+#define MCA_SUP_SOF_INT (MCA_INTR_BIT | 0x1)
+#define MCA_MAC_SOF_INT (MCA_INTR_BIT | 0x3)
+#define MCA_SUP_TIM_INT (MCA_INTR_BIT | 0x5)
+#define MCA_MAC_TIM_INT (MCA_INTR_BIT | 0x7)
+#define MCA_SUP_EXT_INT (MCA_INTR_BIT | 0x9)
+#define MCA_MAC_EXT_INT (MCA_INTR_BIT | 0xb)
+#define MCA_COU_OVE_INT (MCA_INTR_BIT | 0xd)
+
 // Supervisor cause register (scause) values after trap.
 enum SCAUSE
 {
-  SCA_SUP_SOF_INT = 1 | (1 << (XLEN - 1)),
-  SCA_SUP_TIM_INT = 5 | (1 << (XLEN - 1)),
-
-  SCA_SUP_EXT_INT = 9 | (1 << (XLEN - 1)),
-  SCA_COU_OVE_INT = 11 | (1 << (XLEN - 1)),
-
   SCA_INS_ADD_MIS = 0x0,
   SCA_INS_ACC_FAU = 0x1,
   SCA_ILLEGAL_INS = 0x2,
@@ -243,6 +305,11 @@ enum SCAUSE
   SCA_SOF_CHE = 0x12,
   SCA_HAR_ERR = 0x13,
 };
+
+#define SCA_SUP_SOF_INT (MCA_INTR_BIT | 1)
+#define SCA_SUP_TIM_INT (MCA_INTR_BIT | 5)
+#define SCA_SUP_EXT_INT (MCA_INTR_BIT | 9)
+#define SCA_COU_OVE_INT (MCA_INTR_BIT | 11)
 
 #define CSR_SET__(REG, BIT_MASK) \
   {                              \

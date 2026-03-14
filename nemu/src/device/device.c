@@ -16,7 +16,7 @@
 #include <common.h>
 #include <utils.h>
 #include <device/alarm.h>
-#ifndef CONFIG_TARGET_AM
+#if !defined(CONFIG_TARGET_AM) && defined(CONFIG_VGA_SHOW_SCREEN)
 #include <SDL.h>
 #endif
 
@@ -35,8 +35,17 @@ void init_intr();
 void send_key(uint8_t, bool);
 void vga_update_screen();
 
+#ifdef CONFIG_SERIAL_INPUT_FIFO
+void serial_poll_stdin(void);
+#endif
+
 void device_update()
 {
+  static uint64_t skip_count = 0;
+  if (++skip_count < 65536)
+    return;
+  skip_count = 0;
+
   static uint64_t last = 0;
   uint64_t now = get_time();
   if (now - last < 1000000 / TIMER_HZ)
@@ -47,7 +56,11 @@ void device_update()
 
   IFDEF(CONFIG_HAS_VGA, vga_update_screen());
 
-#ifndef CONFIG_TARGET_AM
+#ifdef CONFIG_SERIAL_INPUT_FIFO
+  serial_poll_stdin();
+#endif
+
+#if !defined(CONFIG_TARGET_AM) && defined(CONFIG_VGA_SHOW_SCREEN)
   SDL_Event event;
   while (SDL_PollEvent(&event))
   {
@@ -76,7 +89,7 @@ void device_update()
 
 void sdl_clear_event_queue()
 {
-#ifndef CONFIG_TARGET_AM
+#if !defined(CONFIG_TARGET_AM) && defined(CONFIG_VGA_SHOW_SCREEN)
   SDL_Event event;
   while (SDL_PollEvent(&event))
     ;

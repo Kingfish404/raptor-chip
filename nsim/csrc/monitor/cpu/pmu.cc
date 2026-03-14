@@ -108,6 +108,10 @@ void perf_sample_per_cycle()
   bool lsu_l1d_hit = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, l1d_cache__DOT__tag_hit));
   uint32_t lsu_sq_valid = *(uint32_t *)&(CONCAT(VERILOG_PREFIX, lsu__DOT__sq_valid));
   bool lsu_sq_ready = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, lsu__DOT__sq_ready));
+  bool lsu_fwd_hit = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, lsu__DOT__fwd_hit));
+  bool lsu_load_in_sq = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, lsu__DOT__load_in_sq));
+  bool lsu_stq_conflict = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, lsu__DOT__stq_addr_conflict));
+  bool lsu_raddr_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, lsu__DOT__raddr_valid));
   bool wbu_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, cmu__DOT__valid));
   uint8_t l1i_state = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, l1i_cache__DOT__l1i_state));
   static uint32_t ifu_pc = 0;
@@ -131,6 +135,9 @@ void perf_sample_per_cycle()
   }
   pmu.lsu_l1d_stall_cycle += ((l1d_state == 2) && !lsu_l1d_hit) ? 1 : 0;
   pmu.lsu_sq_stall_cycle += !lsu_sq_ready ? 1 : 0;
+  pmu.lsu_fwd_cnt += (lsu_raddr_valid && lsu_fwd_hit) ? 1 : 0;
+  pmu.lsu_sq_conflict_cnt += (lsu_raddr_valid && lsu_load_in_sq) ? 1 : 0;
+  pmu.lsu_stq_conflict_cnt += (lsu_raddr_valid && lsu_stq_conflict) ? 1 : 0;
   if (!wbu_valid)
   {
     pmu.wbu_stall_cycle++;
@@ -309,6 +316,8 @@ void perf()
   Log("hazard cycle of ifu_sys: %6lld,%2.0f%%, rou_cycle: %6lld,%2.0f%% (structural)",
       pmu.ifu_sys_hazard_cycle, percentage(pmu.ifu_sys_hazard_cycle, pmu.active_cycle),
       pmu.rou_hazard_cycle, percentage(pmu.rou_hazard_cycle, pmu.active_cycle));
+  Log("LSU fwd: %lld, sq_conflict: %lld, stq_conflict: %lld",
+      pmu.lsu_fwd_cnt, pmu.lsu_sq_conflict_cnt, pmu.lsu_stq_conflict_cnt);
   assert(
       pmu.instr_cnt ==
       (pmu.ld_inst_cnt + pmu.st_inst_cnt + pmu.alu_inst_cnt +
@@ -350,13 +359,13 @@ void statistic()
   double time_s = g_timer / 1e6;
   double frequency = pmu.active_cycle / time_s;
   Log("Simulate time:"
-      " %d us, %d ms, Freq: %5.3f MHz, Inst: %6.0f I/s, %5.3f MIPS",
-      g_timer, (int)(g_timer / 1e3),
+      " " FMT_WORD_NO_PREFIX " us, " FMT_WORD_NO_PREFIX " ms, Freq: %5.3f MHz, Inst: %6.0f I/s, %5.3f MIPS",
+      (word_t)g_timer, (word_t)(g_timer / 1000),
       (double)(frequency * 1.0 / 1e6),
       pmu.instr_cnt / time_s, pmu.instr_cnt / time_s / 1e6);
   Log("%s at pc: " FMT_WORD_NO_PREFIX ", inst: " FMT_WORD_NO_PREFIX,
       (*npc.ret == 0 && npc.state != NPC_ABORT ? FMT_GREEN("HIT GOOD TRAP")
        : (npc.state == NPC_QUIT)               ? FMT_BLUE("NPC QUIT")
                                                : FMT_RED("HIT BAD TRAP")),
-      *(npc.pc), *(npc.inst));
+      (word_t)(*(npc.pc)), (word_t)(*(npc.inst)));
 }

@@ -10,21 +10,22 @@
 
 All commands run from the **project root**. No `source env.sh` needed.
 
-| Task | Command |
-|------|---------|
-| Show all targets | `make help` |
-| Setup environment | `make setup` |
-| Generate RTL | `make verilog` |
-| Build & run NEMU | `make nemu-run` |
-| Full NPC simulation | `make npc-sim` |
-| NPC simulation (batch, no wave) | `make npc-run ARGS="-b -n"` |
-| Run CoreMark on NPC | `make coremark ARGS="-b -n"` |
-| Run MicroBench on NPC | `make microbench ARGS="-b -n"` |
-| Run nanos-lite on NEMU | `make nanos-nemu` |
-| Boot Linux on NEMU | `make linux-boot` |
-| FPGA synthesis | `make fpga-syn` |
-| Pack SV / Lint / STA | `make pack` / `make lint` / `make sta` |
-| Clean all | `make clean` |
+| Task                            | Command                                |
+| ------------------------------- | -------------------------------------- |
+| Show all targets                | `make help`                            |
+| Setup environment               | `make setup`                           |
+| Generate RTL                    | `make verilog`                         |
+| Build & run NEMU                | `make run-nemu32`                      |
+| Full NPC simulation             | `make sim-npc32`                       |
+| NPC simulation (batch, no wave) | `make run-npc32 ARGS="-b -n"`          |
+| **NPC RV64 mode**               | `make run-npc64 ARGS="-b -n"`          |
+| Run CoreMark on NPC             | `make coremark ARGS="-b -n"`           |
+| Run MicroBench on NPC           | `make microbench ARGS="-b -n"`         |
+| Run nanos-lite on NEMU          | `make nanos-nemu32`                    |
+| Boot Linux on NEMU              | `make linux-boot`                      |
+| FPGA synthesis                  | `make fpga-syn`                        |
+| Pack SV / Lint / STA            | `make pack` / `make lint` / `make sta` |
+| Clean all                       | `make clean`                           |
 
 ## Project Structure
 

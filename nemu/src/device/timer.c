@@ -13,6 +13,7 @@
  * See the Mulan PSL v2 for more details.
  ***************************************************************************************/
 
+#include <isa.h>
 #include <device/map.h>
 #include <device/alarm.h>
 #include <utils.h>
@@ -37,12 +38,25 @@ static void rtc_io_handler(uint32_t offset, int len, bool is_write)
 
 static void clint_io_handler(uint32_t offset, int len, bool is_write)
 {
-  // printf("clint_io_handler: offset: " FMT_WORD ", len: %d, is_write: %d\n", offset, len, is_write);
-  if (!is_write)
+  if (is_write)
   {
-    uint64_t us = get_time();
-    clint_base[offset] = (uint32_t)us;
-    clint_base[offset] = us >> 32;
+    // When kernel writes to mtimecmp, update the cached value
+    if (offset >= MTIMECMP_BASE && offset < MTIMECMP_BASE + 8)
+    {
+      uint8_t *p = (uint8_t *)clint_base;
+      uint32_t lo = *(uint32_t *)(p + MTIMECMP_BASE);
+      uint32_t hi = *(uint32_t *)(p + MTIMECMP_BASE + 4);
+      cpu.mtimecmp = ((uint64_t)hi << 32) | lo;
+    }
+  }
+  else
+  {
+    // Update mtime when any read hits the CLINT region
+    // Scale to 10MHz (matching DTS timebase-frequency)
+    uint64_t ticks = get_time() * 10;
+    uint8_t *p = (uint8_t *)clint_base;
+    *(uint32_t *)(p + MTIME_BASE) = (uint32_t)ticks;
+    *(uint32_t *)(p + MTIME_BASE + 4) = (uint32_t)(ticks >> 32);
   }
 }
 
@@ -59,13 +73,20 @@ static void timer_intr()
 
 uint64_t get_mtimecmp()
 {
-  return ((uint64_t)clint_base[MTIMECMP_BASE + 4] << 32) | clint_base[MTIMECMP_BASE];
+  uint8_t *p = (uint8_t *)clint_base;
+  uint32_t lo = *(uint32_t *)(p + MTIMECMP_BASE);
+  uint32_t hi = *(uint32_t *)(p + MTIMECMP_BASE + 4);
+  return ((uint64_t)hi << 32) | lo;
 }
 
 void init_timer()
 {
   rtc_port_base = (uint32_t *)new_space(8);
   clint_base = (uint32_t *)new_space(0x000c0000);
+  /* Initialize mtimecmp to max so timer doesn't fire until software programs it */
+  uint8_t *p = (uint8_t *)clint_base;
+  *(uint32_t *)(p + MTIMECMP_BASE) = 0xFFFFFFFF;
+  *(uint32_t *)(p + MTIMECMP_BASE + 4) = 0xFFFFFFFF;
 #ifdef CONFIG_HAS_PORT_IO
   add_pio_map("rtc", CONFIG_RTC_PORT, rtc_port_base, 8, rtc_io_handler);
 #else

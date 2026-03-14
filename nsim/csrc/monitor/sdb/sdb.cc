@@ -65,12 +65,16 @@ extern "C" void npc_exu_ebreak()
 #endif
 }
 
-void npc_difftest_skip_ref()
+extern "C" void npc_difftest_skip_ref()
 {
   difftest_skip_ref();
 }
 
-void npc_difftest_mem_diff(int waddr, int wdata, char wstrb)
+#ifdef CONFIG_ISA64
+extern "C" void npc_difftest_mem_diff(long long waddr, long long wdata, char wstrb)
+#else
+extern "C" void npc_difftest_mem_diff(int waddr, int wdata, char wstrb)
+#endif
 {
   npc.vwaddr = (word_t)waddr;
   npc.pwaddr = (word_t)waddr;

@@ -26,7 +26,9 @@ SRCS-$(CONFIG_HAS_SDCARD) += src/device/sdcard.c
 SRCS-BLACKLIST-$(CONFIG_TARGET_AM) += src/device/alarm.c
 
 ifdef CONFIG_DEVICE
+ifdef CONFIG_VGA_SHOW_SCREEN
 ifndef CONFIG_TARGET_AM
 LIBS += $(shell sdl2-config --libs)
+endif
 endif
 endif

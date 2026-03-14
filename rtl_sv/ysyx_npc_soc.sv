@@ -22,7 +22,7 @@ module ysyxSoC #(
   logic auto_master_out_wready;
   logic auto_master_out_wvalid;
   logic [XLEN-1:0] auto_master_out_wdata;
-  logic [3:0] auto_master_out_wstrb;
+  logic [XLEN/8-1:0] auto_master_out_wstrb;
   logic auto_master_out_wlast;
   logic auto_master_out_bready;
   logic auto_master_out_bvalid;
@@ -174,7 +174,7 @@ module ysyx_npc_soc #(
 
     input wlast,
     input [XLEN-1:0] wdata,
-    input [3:0] wstrb,
+    input [XLEN/8-1:0] wstrb,
     input wvalid,
     output logic out_wready,
 
@@ -199,7 +199,7 @@ module ysyx_npc_soc #(
 
   logic [3:0] rid;
   logic [XLEN-1:0] awaddr_buf;
-  logic [31:0] mem_rdata_buf;
+  logic [XLEN-1:0] mem_rdata_buf;  // matches DPI-C pmem_read output width
   state_r_t state_r;
   state_w_t state_w;
 
@@ -218,8 +218,11 @@ module ysyx_npc_soc #(
     ({{8{awsize == 3'b000}} & 8'h1 }) |
     ({{8{awsize == 3'b001}} & 8'h3 }) |
     ({{8{awsize == 3'b010}} & 8'hf }) |
+    ({{8{awsize == 3'b011}} & 8'hff}) |
     (8'h00)
   );
+
+  localparam [XLEN-1:0] ALIGN_MASK = ~(XLEN/8 - 1);
 
   always @(posedge clock) begin
     if (reset) begin
@@ -231,18 +234,9 @@ module ysyx_npc_soc #(
         WIDLE: begin
           if (awvalid) begin
             if (wvalid) begin
-              begin
-                if (wstrb[0]) begin
-                  `YSYX_DPI_C_PMEM_WRITE((awaddr & ~'h3) + 0, {wdata >>  0}[31:0], 1);
-                end
-                if (wstrb[1]) begin
-                  `YSYX_DPI_C_PMEM_WRITE((awaddr & ~'h3) + 1, {wdata >>  8}[31:0], 1);
-                end
-                if (wstrb[2]) begin
-                  `YSYX_DPI_C_PMEM_WRITE((awaddr & ~'h3) + 2, {wdata >> 16}[31:0], 1);
-                end
-                if (wstrb[3]) begin
-                  `YSYX_DPI_C_PMEM_WRITE((awaddr & ~'h3) + 3, {wdata >> 24}[31:0], 1);
+              for (int i = 0; i < XLEN/8; i++) begin
+                if (wstrb[i]) begin
+                  `YSYX_DPI_C_PMEM_WRITE((awaddr & ALIGN_MASK) + i, {wdata >> (i*8)}[XLEN-1:0], 1);
                 end
               end
             end
@@ -256,18 +250,9 @@ module ysyx_npc_soc #(
         end
         WDWRITE: begin
           if (wvalid) begin
-            begin
-              if (wstrb[0]) begin
-                `YSYX_DPI_C_PMEM_WRITE((awaddr_buf & ~'h3) + 0, {wdata >>  0}[31:0], 1);
-              end
-              if (wstrb[1]) begin
-                `YSYX_DPI_C_PMEM_WRITE((awaddr_buf & ~'h3) + 1, {wdata >>  8}[31:0], 1);
-              end
-              if (wstrb[2]) begin
-                `YSYX_DPI_C_PMEM_WRITE((awaddr_buf & ~'h3) + 2, {wdata >> 16}[31:0], 1);
-              end
-              if (wstrb[3]) begin
-                `YSYX_DPI_C_PMEM_WRITE((awaddr_buf & ~'h3) + 3, {wdata >> 24}[31:0], 1);
+            for (int i = 0; i < XLEN/8; i++) begin
+              if (wstrb[i]) begin
+                `YSYX_DPI_C_PMEM_WRITE((awaddr_buf & ALIGN_MASK) + i, {wdata >> (i*8)}[XLEN-1:0], 1);
               end
             end
           end

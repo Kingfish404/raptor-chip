@@ -6,11 +6,17 @@
  * @param YSYX_I_EXTENSION: I Extension
  * @param YSYX_M_EXTENSION: M Extension
  */
+// To select RV64: define YSYX_RV64 via compiler flag (-DYSYX_RV64)
+// Default is RV32 when YSYX_RV64 is not defined
+`ifdef YSYX_RV64
+`define YSYX_XLEN 64
+`define YSYX_MISA 'h8000000000141105
+`else
 `define YSYX_XLEN 32
+`define YSYX_MISA 'h40141105
+`endif
 `define YSYX_I_EXTENSION 'h1
 `define YSYX_M_EXTENSION 'h1
-
-`define YSYX_MISA 'h40141105
 
 /**
  * Microarchitecture (uarch) Parameters

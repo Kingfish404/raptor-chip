@@ -32,6 +32,10 @@
 `define YSYX_OP_S_TYPE_ 7'b0100011
 `define YSYX_OP_B_TYPE_ 7'b1100011
 
+// RV64 opcodes
+`define YSYX_OP_RW_TYPE 7'b0111011
+`define YSYX_OP_IW_TYPE 7'b0011011
+
 `define YSYX_SIGN_EXTEND(x, l, n) ({{n-l{x[l-1]}}, x})
 `define YSYX_ZERO_EXTEND(x, l, n) ({{n-l{1'b0}}, x})
 `define YSYX_LAMBDA(x) (x)
@@ -69,14 +73,18 @@
 `define YSYX_ALU_LW__ 'b00010
 `define YSYX_ALU_LBU_ 'b00100
 `define YSYX_ALU_LHU_ 'b00101
+`define YSYX_ALU_LWU_ 'b00110
+`define YSYX_ALU_LD__ 'b00011
 
 `define YSYX_ALU_SB__ 'b00000
 `define YSYX_ALU_SH__ 'b00001
 `define YSYX_ALU_SW__ 'b00010
+`define YSYX_ALU_SD__ 'b00011
 
 `define YSYX_SB_WSTRB 'b00001
 `define YSYX_SH_WSTRB 'b00011
 `define YSYX_SW_WSTRB 'b01111
+`define YSYX_SD_WSTRB 'b11111
 
 `define YSYX_ATO_LR__ 'b00000
 `define YSYX_ATO_SC__ 'b00001
@@ -90,9 +98,10 @@
 `define YSYX_ATO_MINU 'b01100
 `define YSYX_ATO_MAXU 'b01010
 
-`define YSYX_WSTRB_SB 'b00001
-`define YSYX_WSTRB_SH 'b00011
-`define YSYX_WSTRB_SW 'b11111
+`define YSYX_WSTRB_SB 'b00000001
+`define YSYX_WSTRB_SH 'b00000011
+`define YSYX_WSTRB_SW 'b00001111
+`define YSYX_WSTRB_SD 'b11111111
 
 // Privilege Levels
 `define YSYX_PRIV_U 2'h0
@@ -113,7 +122,12 @@
 `define YSYX_CSR_SIP____ 'h144
 `define YSYX_CSR_SATP___ 'h180
 
+// SATP mode bit position: RV32 bit 31, RV64 bit 63
+`ifdef YSYX_RV64
+`define YSYX_CSR_SATP_MODE_ 63
+`else
 `define YSYX_CSR_SATP_MODE_ 31
+`endif
 `define YSYX_CSR_MSTATUS_MPRV 17
 
 // Machine Trap Settup

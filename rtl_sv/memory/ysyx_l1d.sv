@@ -39,10 +39,12 @@ module ysyx_l1d #(
 
   // Tag and valid arrays (kept as registers for multi-port read and fast bulk invalidation)
   logic [L1D_SIZE-1:0] l1d_valid;
-  logic [32-{{3'b0}, L1D_LEN}-2-1:0] l1d_tag[L1D_SIZE];
+  localparam OFFSET_BITS = $clog2(XLEN/8);  // 2 for RV32, 3 for RV64
+  localparam L1D_TAG_W = XLEN - L1D_LEN - OFFSET_BITS;
+  logic [L1D_TAG_W-1:0] l1d_tag[L1D_SIZE];
   logic [7:0] rstrb;
 
-  logic [32-{{3'b0}, L1D_LEN}-2-1:0] addr_tag;
+  logic [L1D_TAG_W-1:0] addr_tag;
   logic [L1D_LEN-1:0] addr_idx;
   logic tag_hit;   // tag comparison result (combinational, from register arrays)
   logic data_hit;  // SRAM data ready after 1-cycle read latency
@@ -50,7 +52,7 @@ module ysyx_l1d #(
   logic cacheable_r;
   logic cacheable_w;
 
-  logic [32-{{3'b0}, L1D_LEN}-2-1:0] waddr_tag;
+  logic [L1D_TAG_W-1:0] waddr_tag;
   logic [L1D_LEN-1:0] waddr_idx;
   logic hit_w;
 
@@ -81,6 +83,15 @@ module ysyx_l1d #(
   logic [XLEN-1+2:0] ppn_a;
   /* verilator lint_on UNUSEDSIGNAL */
 
+`ifdef YSYX_RV64
+  // For Sv32 PTW on RV64: PTEs are 4 bytes. pmem_read returns 8 bytes from
+  // the 8-byte-aligned address. Select the correct 32-bit half using ppn_a[2].
+  logic [31:0] l1d_ptw_data;
+  assign l1d_ptw_data = ppn_a[2] ? l1d_bus.rdata[63:32] : l1d_bus.rdata[31:0];
+`else
+  wire [31:0] l1d_ptw_data = l1d_bus.rdata[31:0];
+`endif
+
   // mis-alignment check
   logic mis_align_load;
   logic mis_align_store;
@@ -88,17 +99,17 @@ module ysyx_l1d #(
   logic l1d_update;
   logic [XLEN-1:0] l1d_data_u;
   logic l1d_valid_u;
-  logic [32-{{3'b0}, L1D_LEN}-2-1:0] l1d_tag_u;
+  logic [L1D_TAG_W-1:0] l1d_tag_u;
   logic [L1D_LEN-1:0] l1d_idx;
 
   // Speculative SRAM read: when IDLE with a pending load, drive the *incoming*
   // virtual index directly instead of waiting for l1d_addr to be registered.
-  // Safe because L1D_LEN+2 = 9 < 12 (page offset), so virt_idx == phys_idx
+  // Safe because L1D_LEN+OFFSET_BITS < 12 (page offset), so virt_idx == phys_idx
   // (VIPT constraint satisfied). PTW paths are also safe: l1d_addr holds the
   // virtual address during PTW, whose index equals the final physical index.
   logic [L1D_LEN-1:0] sram_raddr;
   assign sram_raddr = (l1d_state == IDLE && lsu_l1d.rvalid && !cmu_bcast.flush_pipe)
-      ? lsu_l1d.raddr[L1D_LEN+2-1:2]
+      ? lsu_l1d.raddr[L1D_LEN+OFFSET_BITS-1:OFFSET_BITS]
       : addr_idx;
 
   // Data SRAM — read port serves cache hit path, write port serves fill/store update
@@ -129,10 +140,14 @@ module ysyx_l1d #(
     | ({8{l1d_ralu == `YSYX_ALU_LH__}} & 8'h3)
     | ({8{l1d_ralu == `YSYX_ALU_LHU_}} & 8'h3)
     | ({8{l1d_ralu == `YSYX_ALU_LW__}} & 8'hf)
+`ifdef YSYX_RV64
+    | ({8{l1d_ralu == `YSYX_ALU_LWU_}} & 8'hf)
+    | ({8{l1d_ralu == `YSYX_ALU_LD__}} & 8'hff)
+`endif
     );
 
-  assign addr_tag = l1d_addr[XLEN-1:L1D_LEN+2];
-  assign addr_idx = l1d_addr[L1D_LEN+2-1:0+2];
+  assign addr_tag = l1d_addr[XLEN-1:L1D_LEN+OFFSET_BITS];
+  assign addr_idx = l1d_addr[L1D_LEN+OFFSET_BITS-1:OFFSET_BITS];
 
   // tag_hit: combinational tag match in LD_A (tags in registers, no SRAM latency)
   assign tag_hit = (l1d_state == LD_A)
@@ -142,8 +157,8 @@ module ysyx_l1d #(
   assign data_hit = (l1d_state == LD_A) && tag_hit;
   assign l1d_data = data_sram_rdata;
 
-  assign waddr_tag = lsu_l1d.waddr[XLEN-1:L1D_LEN+2];
-  assign waddr_idx = lsu_l1d.waddr[L1D_LEN+2-1:0+2];
+  assign waddr_tag = lsu_l1d.waddr[XLEN-1:L1D_LEN+OFFSET_BITS];
+  assign waddr_idx = lsu_l1d.waddr[L1D_LEN+OFFSET_BITS-1:OFFSET_BITS];
   assign hit_w = (l1d_valid[waddr_idx] == 1'b1) && (l1d_tag[waddr_idx] == waddr_tag);
 
   assign cacheable_r = ((0)  //
@@ -163,10 +178,17 @@ module ysyx_l1d #(
        ((lsu_l1d.ralu == `YSYX_ALU_LH__) && (lsu_l1d.raddr[0] != 1'b0))
     || ((lsu_l1d.ralu == `YSYX_ALU_LHU_) && (lsu_l1d.raddr[0] != 1'b0))
     || ((lsu_l1d.ralu == `YSYX_ALU_LW__) && (lsu_l1d.raddr[1:0] != 2'b00))
+`ifdef YSYX_RV64
+    || ((lsu_l1d.ralu == `YSYX_ALU_LWU_) && (lsu_l1d.raddr[1:0] != 2'b00))
+    || ((lsu_l1d.ralu == `YSYX_ALU_LD__) && (lsu_l1d.raddr[2:0] != 3'b000))
+`endif
   );
   assign mis_align_store = (
        ((exu_l1d.walu == `YSYX_SH_WSTRB) && (exu_l1d.vaddr[0] != 1'b0))
     || ((exu_l1d.walu == `YSYX_SW_WSTRB) && (exu_l1d.vaddr[1:0] != 2'b00))
+`ifdef YSYX_RV64
+    || ((exu_l1d.walu == `YSYX_SD_WSTRB) && (exu_l1d.vaddr[2:0] != 3'b000))
+`endif
   );
 
   // read channel
@@ -174,7 +196,7 @@ module ysyx_l1d #(
     ? 1'b1
     : (l1d_state == LD_A) && !tag_hit && !cmu_bcast.flush_pipe;
   assign l1d_bus.araddr = (l1d_state == PTW1 || l1d_state == PTW0) ? ppn_a[XLEN-1:0] : l1d_addr;
-  assign l1d_bus.rstrb = (cacheable_r || (l1d_state == PTW1 || l1d_state == PTW0)) ? 8'hf : rstrb;
+  assign l1d_bus.rstrb = (cacheable_r || (l1d_state == PTW1 || l1d_state == PTW0)) ? {{XLEN/8{1'b1}}} : rstrb;
 
   assign lsu_l1d.rdata = data_hit ? l1d_data : l1d_bus.rdata;
   assign lsu_l1d.trap = (l1d_state == TRAP) && (rec_addr == lsu_l1d.raddr);
@@ -189,7 +211,13 @@ module ysyx_l1d #(
   // write channel
   assign l1d_bus.awvalid = lsu_l1d.wvalid;
   assign l1d_bus.awaddr = lsu_l1d.waddr;
-  assign l1d_bus.wstrb[3:0] = lsu_l1d.walu[3:0];
+`ifdef YSYX_RV64
+  // Decode walu (5-bit store mask) to full 8-bit wstrb for RV64
+  // SB: 5'b00001→8'h01, SH: 5'b00011→8'h03, SW: 5'b01111→8'h0f, SD: 5'b11111→8'hff
+  assign l1d_bus.wstrb = (lsu_l1d.walu == 5'b11111) ? 8'hff : {3'b0, lsu_l1d.walu[4:0]};
+`else
+  assign l1d_bus.wstrb = {4'b0, lsu_l1d.walu[3:0]};
+`endif
   assign l1d_bus.wvalid = lsu_l1d.wvalid;
   assign l1d_bus.wdata = lsu_l1d.wdata;
 
@@ -197,10 +225,10 @@ module ysyx_l1d #(
 
   // store page table walk
   assign store_paddr = l1d_state == PTW0
-    ? {l1d_bus.rdata[31:10], stlb_offset}[XLEN-1:0]
-    : {l1d_bus.rdata[31:20], vpn[0], stlb_offset}[XLEN-1:0];
+    ? XLEN'({l1d_ptw_data[31:10], stlb_offset})
+    : XLEN'({l1d_ptw_data[31:20], vpn[0], stlb_offset});
   assign exu_l1d.paddr = stlb_hit
-    ? {stlb_ptag, stlb_offset}[XLEN-1:0]
+    ? XLEN'({stlb_ptag, stlb_offset})
     : store_paddr;
   assign exu_l1d.trap = (l1d_state == TRAP) && (rec_addr == exu_l1d.vaddr);
   assign exu_l1d.cause = cause;
@@ -210,7 +238,7 @@ module ysyx_l1d #(
     || (stlb_mmu
       && (l1d_bus.rvalid)
       && (l1d_state == PTW0
-        || (l1d_state == PTW1 && (l1d_bus.rdata[2] == 'b1 || l1d_bus.rdata[1] == 'b1)))));
+        || (l1d_state == PTW1 && (l1d_ptw_data[2] == 'b1 || l1d_ptw_data[1] == 'b1)))));
 
   always @(posedge clock) begin
     if (reset) begin
@@ -298,31 +326,31 @@ module ysyx_l1d #(
           if (mmu_en) begin
             if (l1d_bus.rvalid) begin
               // $display("[PTW1] vpn1: %h, vpn0: %h, ppn_a: %h, pte1: %h",
-              //   vpn[1], vpn[0], ppn_a, l1d_bus.rdata);
-              if (l1d_bus.rdata == 0) begin
+              //   vpn[1], vpn[0], ppn_a, l1d_ptw_data);
+              if (l1d_ptw_data == 0) begin
                 l1d_state <= TRAP;
                 cause <= 'hd; // load page fault
-              end else if (l1d_bus.rdata[2] == 'b1 || l1d_bus.rdata[1] == 'b1) begin
+              end else if (l1d_ptw_data[2] == 'b1 || l1d_ptw_data[1] == 'b1) begin
                 if (stlb_mmu) begin
                   // store page table walk finish
                   // $display("[PTW1] STLB miss addr: %h, paddr: %h, ptag: %h",
-                  //       exu_l1d.vaddr, exu_l1d.paddr, {l1d_bus.rdata[31:20], vpn[1]});
+                  //       exu_l1d.vaddr, exu_l1d.paddr, {l1d_ptw_data[31:20], vpn[1]});
                   stlb_mmu <= 'b0;
                   stlb_valid <= 1'b1;
-                  stlb_ptag <= {l1d_bus.rdata[31:20], vpn[0]};
+                  stlb_ptag <= {l1d_ptw_data[31:20], vpn[0]};
                   stlb_vtag <= {vpn[1], vpn[0]};
                   l1d_state <= IDLE;
                 end else begin
                   // load page table walk finish
-                  l1d_addr <= {l1d_bus.rdata[31:20], vpn[0], tlb_offset}[XLEN-1:0];
-                  tlb_ptag <= {l1d_bus.rdata[31:20], vpn[0]};
+                  l1d_addr <= XLEN'({l1d_ptw_data[31:20], vpn[0], tlb_offset});
+                  tlb_ptag <= {l1d_ptw_data[31:20], vpn[0]};
                   tlb_vtag <= {vpn[1], vpn[0]};
                   tlb_valid <= 'b1;
                   l1d_state <= LD_A;
                 end
                 // `YSYX_DPI_C_NPC_EXU_EBREAK
               end else begin
-                ppn_a <= {l1d_bus.rdata[31:10], 12'b0} + (vpn[0] * 4);
+                ppn_a <= {l1d_ptw_data[31:10], 12'b0} + (vpn[0] * 4);
                 l1d_state <= PTW0;
               end
             end
@@ -334,20 +362,20 @@ module ysyx_l1d #(
           if (mmu_en) begin
             if (l1d_bus.rvalid) begin
               // $display("[PTW0] pte0: %h, paddr: %h",
-              //  l1d_bus.rdata, {l1d_bus.rdata[31:10], tlb_offset});
+              //  l1d_ptw_data, {l1d_ptw_data[31:10], tlb_offset});
               if (stlb_mmu) begin
                 // store page table walk finish
                 // $display("[PTW1] STLB miss addr: %h, paddr: %h, ptag: %h",
-                //       exu_l1d.vaddr, exu_l1d.paddr, {l1d_bus.rdata[31:10]});
+                //       exu_l1d.vaddr, exu_l1d.paddr, {l1d_ptw_data[31:10]});
                 stlb_mmu <= 'b0;
                 stlb_valid <= 1'b1;
-                stlb_ptag <= {l1d_bus.rdata[31:10]};
+                stlb_ptag <= {l1d_ptw_data[31:10]};
                 stlb_vtag <= {vpn[1], vpn[0]};
                 l1d_state <= IDLE;
               end else begin
                 // load page table walk finish
-                l1d_addr <= {l1d_bus.rdata[31:10], tlb_offset}[XLEN-1:0];
-                tlb_ptag <= l1d_bus.rdata[31:10];
+                l1d_addr <= XLEN'({l1d_ptw_data[31:10], tlb_offset});
+                tlb_ptag <= l1d_ptw_data[31:10];
                 tlb_vtag <= {vpn[1], vpn[0]};
                 tlb_valid <= 'b1;
                 l1d_state <= LD_A;
@@ -391,8 +419,28 @@ module ysyx_l1d #(
         end
       endcase
 
+      // l1d_update CLEAR: consume pending update (write tag/valid registers).
+      // Must be textually BEFORE the SET block so that when both fire on the
+      // same cycle (e.g. load-fill completes, then store write-through arrives
+      // next cycle while l1d_update is still high), the SET's NBA wins and the
+      // new update is not lost.
+      if (cmu_bcast.fence_time) begin
+        l1d_valid <= 0;
+      end else if (l1d_update) begin
+        // Data write handled by u_data_sram (wen=l1d_update)
+        l1d_tag[l1d_idx] <= l1d_tag_u;
+        l1d_valid[l1d_idx] <= l1d_valid_u;
+        l1d_update <= 0;
+      end
+
+      // l1d_update SET: request a new SRAM + tag/valid write next cycle.
+      // Textually last so its NBA to l1d_update wins over the CLEAR above.
       if (lsu_l1d.wvalid && l1d_bus.wready && cacheable_w) begin
+`ifdef YSYX_RV64
+        if (lsu_l1d.walu == `YSYX_SD_WSTRB) begin
+`else
         if (lsu_l1d.walu == `YSYX_SW_WSTRB) begin
+`endif
           l1d_update <= 1'b1;
           l1d_data_u <= lsu_l1d.wdata;
           l1d_valid_u <= 1'b1;
@@ -416,15 +464,6 @@ module ysyx_l1d #(
             l1d_idx <= addr_idx;
           end
         end
-      end
-
-      if (cmu_bcast.fence_time) begin
-        l1d_valid <= 0;
-      end else if (l1d_update) begin
-        // Data write handled by u_data_sram (wen=l1d_update)
-        l1d_tag[l1d_idx] <= l1d_tag_u;
-        l1d_valid[l1d_idx] <= l1d_valid_u;
-        l1d_update <= 0;
       end
     end
   end

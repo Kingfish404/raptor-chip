@@ -17,7 +17,10 @@
 #include <cpu/cpu.h>
 #include <cpu/decode.h>
 #include <cpu/difftest.h>
+#include <isa.h>
 #include <locale.h>
+#include <unistd.h>
+#include <fcntl.h>
 
 /* The assembly code of instructions executed is only output to the screen
  * when the number of instructions executed is less than this value.
@@ -42,6 +45,102 @@ uint64_t iringhead = 0;
 void device_update();
 
 bool wp_check_changed();
+
+uint64_t get_time();
+
+static uint64_t nemu_start_timer = 0;
+
+static void nemu_save_status_to_file(const char *filename)
+{
+  if (filename == NULL)
+    return;
+  if (nemu_start_timer == 0)
+    nemu_start_timer = get_time();
+  fflush(stdout);
+
+  int saved_stdout = dup(fileno(stdout));
+  int fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+  if (fd < 0)
+    return;
+  dup2(fd, fileno(stdout));
+  close(fd);
+
+  uint64_t current_time = get_time();
+  printf(" Simulated Time: %.3f s\n", (current_time - nemu_start_timer) / 1000000.0);
+  printf("Simulated Speed: %.3f MIPS\n",
+         (g_nr_guest_inst / 1000000.0) / ((current_time - nemu_start_timer) / 1000000.0));
+  printf("\n");
+
+  isa_reg_display();
+  printf("\n");
+
+  cpu_show_itrace();
+
+  fflush(stdout);
+  dup2(saved_stdout, fileno(stdout));
+  close(saved_stdout);
+}
+
+static int nemu_save_uarch_state(const char *filename)
+{
+  if (filename == NULL)
+    return -1;
+  FILE *fp = fopen(filename, "w");
+  if (fp == NULL)
+    return -1;
+
+  int gpr_num = MUXDEF(CONFIG_RVE, 16, 32);
+
+  fprintf(fp, "{\n");
+  fprintf(fp, "  \"pc\": \"" FMT_WORD "\",\n", cpu.pc);
+  fprintf(fp, "  \"priv\": %d,\n", cpu.priv);
+  fprintf(fp, "  \"inst_cnt\": %" PRIu64 ",\n", g_nr_guest_inst);
+  fprintf(fp, "  \"gpr\": [\n");
+  for (int i = 0; i < gpr_num; i++)
+  {
+    fprintf(fp, "    \"" FMT_WORD "\"%s\n", cpu.gpr[i], (i == gpr_num - 1) ? "" : ",");
+  }
+  fprintf(fp, "  ],\n");
+  fprintf(fp, "  \"csr\": {\n");
+  fprintf(fp, "    \"sstatus\": \"" FMT_WORD "\",\n", cpu.sr[CSR_SSTATUS]);
+  fprintf(fp, "    \"sie\": \"" FMT_WORD "\",\n", cpu.sr[CSR_SIE]);
+  fprintf(fp, "    \"stvec\": \"" FMT_WORD "\",\n", cpu.sr[CSR_STVEC]);
+  fprintf(fp, "    \"sscratch\": \"" FMT_WORD "\",\n", cpu.sr[CSR_SSCRATCH]);
+  fprintf(fp, "    \"sepc\": \"" FMT_WORD "\",\n", cpu.sr[CSR_SEPC]);
+  fprintf(fp, "    \"scause\": \"" FMT_WORD "\",\n", cpu.sr[CSR_SCAUSE]);
+  fprintf(fp, "    \"stval\": \"" FMT_WORD "\",\n", cpu.sr[CSR_STVAL]);
+  fprintf(fp, "    \"sip\": \"" FMT_WORD "\",\n", cpu.sr[CSR_SIP]);
+  fprintf(fp, "    \"satp\": \"" FMT_WORD "\",\n", cpu.sr[CSR_SATP]);
+  fprintf(fp, "    \"mstatus\": \"" FMT_WORD "\",\n", cpu.sr[CSR_MSTATUS]);
+  fprintf(fp, "    \"medeleg\": \"" FMT_WORD "\",\n", cpu.sr[CSR_MEDELEG]);
+  fprintf(fp, "    \"mideleg\": \"" FMT_WORD "\",\n", cpu.sr[CSR_MIDELEG]);
+  fprintf(fp, "    \"mie\": \"" FMT_WORD "\",\n", cpu.sr[CSR_MIE]);
+  fprintf(fp, "    \"mtvec\": \"" FMT_WORD "\",\n", cpu.sr[CSR_MTVEC]);
+  fprintf(fp, "    \"mscratch\": \"" FMT_WORD "\",\n", cpu.sr[CSR_MSCRATCH]);
+  fprintf(fp, "    \"mepc\": \"" FMT_WORD "\",\n", cpu.sr[CSR_MEPC]);
+  fprintf(fp, "    \"mcause\": \"" FMT_WORD "\",\n", cpu.sr[CSR_MCAUSE]);
+  fprintf(fp, "    \"mtval\": \"" FMT_WORD "\",\n", cpu.sr[CSR_MTVAL]);
+  fprintf(fp, "    \"mip\": \"" FMT_WORD "\"\n", cpu.sr[CSR_MIP]);
+  fprintf(fp, "  }\n");
+  fprintf(fp, "}");
+  fclose(fp);
+  return 0;
+}
+
+static void nemu_periodic_save(void)
+{
+  if ((g_nr_guest_inst % 1000000) == 0)
+  {
+    const char *home = getenv("NEMU_HOME");
+    if (!home)
+      return;
+    char path[512];
+    snprintf(path, sizeof(path), "%s/../data/nemu-status.log", home);
+    nemu_save_status_to_file(path);
+    snprintf(path, sizeof(path), "%s/../data/nemu-uarch_state.json", home);
+    nemu_save_uarch_state(path);
+  }
+}
 
 static void trace_and_difftest(Decode *_this, vaddr_t dnpc)
 {
@@ -153,11 +252,12 @@ static void execute(uint64_t n)
     {
       // Log("nemu: intr %x at pc = " FMT_WORD, intr, cpu.pc);
       cpu.pc = isa_raise_intr(intr, cpu.pc);
-      difftest_skip_ref();
+      IFDEF(CONFIG_DIFFTEST, ref_difftest_raise_intr(intr));
     }
     exec_once(&s, cpu.pc);
 
     g_nr_guest_inst++;
+    nemu_periodic_save();
     trace_and_difftest(&s, cpu.pc);
     if (nemu_state.state != NEMU_RUNNING)
     {

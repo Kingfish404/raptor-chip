@@ -165,6 +165,34 @@ static inline uint32_t dec_clw_csw_imm(uint16_t inst)
   return imm;
 }
 
+// decode immediate of C.LD and C.SD (doubleword, scaled by 8)
+static inline uint32_t dec_cld_csd_imm(uint16_t inst)
+{
+  uint32_t imm = 0;
+  imm |= (inst & 0x1C00) >> 7;  // inst[12:10] → offset[5:3]
+  imm |= (inst & 0x0060) << 1;  // inst[6:5] → offset[7:6]
+  return imm;
+}
+
+// decode CI-format instruction immediate for C.LDSP (doubleword, scaled by 8)
+static inline uint32_t dec_ci_offset_ldsp(uint16_t inst)
+{
+  uint32_t offset = 0;
+  offset |= (inst & 0x1000) >> 7;  // inst[12] → offset[5]
+  offset |= (inst & 0x0060) >> 2;  // inst[6:5] → offset[4:3]
+  offset |= (inst & 0x001c) << 4;  // inst[4:2] → offset[8:6]
+  return offset;
+}
+
+// decode CSS-format instruction immediate for C.SDSP (doubleword, scaled by 8)
+static inline uint32_t dec_css_imm_sd(uint16_t inst)
+{
+  uint32_t imm = 0;
+  imm |= (inst & 0x1C00) >> 7;  // inst[12:10] → offset[5:3]
+  imm |= (inst & 0x0380) >> 1;  // inst[9:7] → offset[8:6]
+  return imm;
+}
+
 // decode CS-format instruction funct6 field
 static inline uint32_t dec_cs_funct6(uint16_t inst)
 {

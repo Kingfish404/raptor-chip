@@ -94,7 +94,7 @@ paddr_t isa_mmu_translate(vaddr_t vaddr, int len, int type)
   addr_t pte = {.val = 0};
   if (0 && type == MEM_TYPE_WRITE && vaddr == 0x0000beaf)
   {
-    printf(">[%c]va: %x, vpn[1,0]: [%3x, %3x], ",
+    printf(">[%c]va: " FMT_WORD ", vpn[1,0]: [" FMT_WORD ", " FMT_WORD "], ",
            type == MEM_TYPE_IFETCH ? 'I' : (type == MEM_TYPE_READ ? 'R' : 'W'), vaddr, vpn[1], vpn[0]);
   }
   for (int i = 1; i >= 0; i--)
@@ -107,7 +107,7 @@ paddr_t isa_mmu_translate(vaddr_t vaddr, int len, int type)
                   : (type == MEM_TYPE_READ ? MCA_LOA_PAG_FAU : MCA_STO_PAG_FAU);
       if (0 && type == MEM_TYPE_WRITE && vaddr == 0x0000beaf)
       {
-        printf("[%c]va: %x, vpn[%d]: %x, pte_addr is NULL\n",
+        printf("[%c]va: " FMT_WORD ", vpn[%d]: " FMT_WORD ", pte_addr is NULL\n",
                type == MEM_TYPE_IFETCH ? 'I' : (type == MEM_TYPE_READ ? 'R' : 'W'), vaddr, i, vpn[i]);
       }
       longjmp(exec_jmp_buf, 1);
@@ -115,7 +115,7 @@ paddr_t isa_mmu_translate(vaddr_t vaddr, int len, int type)
     pte.val = paddr_read(pte_addr, 4);
     if (0 && type == MEM_TYPE_WRITE && vaddr == 0x0000beaf)
     {
-      printf("[%x]addr: %x, pte: %x, ", i, pte_addr, pte.val);
+      printf("[%x]addr: " FMT_WORD ", pte: " FMT_WORD ", ", i, pte_addr, pte.val);
     }
     if (pte.pte.v == 0)
     {
@@ -152,7 +152,7 @@ paddr_t isa_mmu_translate(vaddr_t vaddr, int len, int type)
   }
   if (0 && type == MEM_TYPE_WRITE && vaddr == 0x0000beaf)
   {
-    printf("[paddr]: %x\n", (pte.pte_ppn.ppn * 4096) | offset);
+    printf("[paddr]: " FMT_WORD "\n", (pte.pte_ppn.ppn * 4096) | offset);
   }
   word_t paddr = (pte.pte_ppn.ppn * 4096) | offset;
   return paddr;

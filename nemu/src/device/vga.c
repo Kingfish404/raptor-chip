@@ -70,6 +70,9 @@ static inline void update_screen() {
   io_write(AM_GPU_FBDRAW, 0, 0, vmem, screen_width(), screen_height(), true);
 }
 #endif
+#else
+// VGA_SHOW_SCREEN disabled: no-op screen update
+static inline void update_screen() {}
 #endif
 
 void vga_update_screen() {

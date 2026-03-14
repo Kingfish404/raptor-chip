@@ -50,7 +50,7 @@ static void checkmem(uint8_t *ref, uint8_t *dut, size_t n)
     if (ref[i] != dut[i])
     {
       printf(FMT_RED("[ERROR]") " mem[%zx] is different! ref = " FMT_WORD_NO_PREFIX ", dut = " FMT_WORD_NO_PREFIX "\n",
-             i, ref[i], dut[i]);
+              i, (word_t)ref[i], (word_t)dut[i]);
       printf("mem_dut: ");
       for (int j = 0; j < 16; j++)
       {
@@ -135,7 +135,7 @@ static void checkregs(NPCState *ref, vaddr_t pc)
   if ((uint32_t)(*(ref->inst)) != *npc.inst)
   {
     printf(FMT_RED("[ERROR]") "    inst is different! ref = " FMT_WORD_NO_PREFIX ", dut = " FMT_WORD_NO_PREFIX "\n",
-           *(ref->inst), *npc.inst);
+           (word_t)(*(ref->inst)), (word_t)(*npc.inst));
     is_same = false;
   }
   for (int i = 0; i < GPR_SIZE; i++)
@@ -233,12 +233,12 @@ void difftest_step(vaddr_t pc)
     if ((npc.vwaddr != ref_r.vwaddr) || (align_wdata != ref_wdata))
     {
       printf("[npc.vwaddr: " FMT_WORD_NO_PREFIX ", wdata: " FMT_WORD_NO_PREFIX "], "
-             "rawdta: " FMT_WORD_NO_PREFIX ", wstrb: %x, pc: " FMT_WORD_NO_PREFIX "\n",
+              "rawdta: " FMT_WORD_NO_PREFIX ", wstrb: " FMT_WORD_NO_PREFIX ", pc: " FMT_WORD_NO_PREFIX "\n",
              (word_t)npc.vwaddr, align_wdata, (word_t)npc.wdata,
-             npc.wstrb, *npc.rpc);
+              (word_t)npc.wstrb, (word_t)(*npc.rpc));
       printf("[ref.vwaddr: " FMT_WORD_NO_PREFIX ", wdata: " FMT_WORD_NO_PREFIX "], "
-             "pwaddr: " FMT_WORD_NO_PREFIX ",   len: %x, pc: " FMT_WORD_NO_PREFIX "\n",
-             (ref_r.vwaddr), ref_wdata, ref_r.pwaddr, ref_r.len, *ref_r.rpc);
+              "pwaddr: " FMT_WORD_NO_PREFIX ",   len: " FMT_WORD_NO_PREFIX ", pc: " FMT_WORD_NO_PREFIX "\n",
+              (word_t)(ref_r.vwaddr), ref_wdata, (word_t)(ref_r.pwaddr), (word_t)(ref_r.len), (word_t)(*ref_r.rpc));
       reg_display(32);
       npc.state = NPC_ABORT;
     }
