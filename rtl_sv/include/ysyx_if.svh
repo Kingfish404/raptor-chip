@@ -24,6 +24,7 @@ interface lsu_l1d_if #(
   logic [XLEN-1:0] rdata;
   logic trap;
   logic [XLEN-1:0] cause;
+  logic difftest_skip;
   logic rready;
 
   logic [XLEN-1:0] waddr;
@@ -34,13 +35,13 @@ interface lsu_l1d_if #(
 
   modport master(
       output raddr, ralu, rvalid, atomic_lock,
-      input rdata, trap, cause, rready,
+      input rdata, trap, cause, difftest_skip, rready,
       output waddr, walu, wvalid, wdata,
       input wready
   );
   modport slave(
       input raddr, ralu, rvalid, atomic_lock,
-      output rdata, trap, cause, rready,
+      output rdata, trap, cause, difftest_skip, rready,
       input waddr, walu, wvalid, wdata,
       output wready
   );
@@ -53,14 +54,15 @@ interface l1i_bus_if #(
   // load
   logic arvalid;
   logic [XLEN-1:0] araddr;
+  logic arburst;  // request 2-beat INCR burst (SDRAM)
   logic rready;
 
   logic [XLEN-1:0] rdata;
   logic rvalid;
   logic rlast;
 
-  modport master(output arvalid, araddr, input rready, rdata, rvalid, rlast);
-  modport slave(input arvalid, araddr, output rready, rdata, rvalid, rlast);
+  modport master(output arvalid, araddr, arburst, input rready, rdata, rvalid, rlast);
+  modport slave(input arvalid, araddr, arburst, output rready, rdata, rvalid, rlast);
 endinterface
 
 // data cache interface
@@ -76,6 +78,7 @@ interface l1d_bus_if #(
   logic [XLEN-1:0] rdata;
   logic rvalid;
   logic rlast;
+  logic difftest_skip;
 
   // store
   logic awvalid;
@@ -88,7 +91,7 @@ interface l1d_bus_if #(
   modport master(
       output arvalid, araddr, rstrb,
       input rready,
-      input rdata, rvalid, rlast,
+      input rdata, rvalid, rlast, difftest_skip,
 
       output awvalid, awaddr, wvalid, wdata, wstrb,
       input wready
@@ -96,7 +99,7 @@ interface l1d_bus_if #(
   modport slave(
       input arvalid, araddr, rstrb,
       output rready,
-      output rdata, rvalid, rlast,
+      output rdata, rvalid, rlast, difftest_skip,
 
       input awvalid, awaddr, wvalid, wdata, wstrb,
       output wready

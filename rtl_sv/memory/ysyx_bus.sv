@@ -32,11 +32,11 @@ module ysyx_bus #(
     output            axi_awvalid,  // reqired
     input             axi_awready,  // reqired
 
-    output            axi_wlast,   // reqired
-    output [XLEN-1:0] axi_wdata,   // reqired
+    output              axi_wlast,   // reqired
+    output [  XLEN-1:0] axi_wdata,   // reqired
     output [XLEN/8-1:0] axi_wstrb,
-    output            axi_wvalid,  // reqired
-    input             axi_wready,  // reqired
+    output              axi_wvalid,  // reqired
+    input               axi_wready,  // reqired
 
     /* verilator lint_off UNUSEDSIGNAL */
     input  [3:0] axi_bid,
@@ -78,11 +78,13 @@ module ysyx_bus #(
   logic is_clint;
   logic [3:0] arid;
   logic [3:0] awid;
-  logic clint_arvalid;
   logic [XLEN-1:0] clint_rdata;
   logic [XLEN-1:0] bus_araddr;
   logic arburst;
   logic [2:0] arsize;
+
+  // Difftest: latch MMIO flag for L1D load requests
+  logic l1d_load_is_mmio;
 
   assign axi_arid = arid;
   assign axi_awburst = 0;
@@ -107,6 +109,7 @@ module ysyx_bus #(
     || (l1d_bus.araddr == `YSYX_BUS_RTC_ADDR_UP);
   assign l1d_bus.rdata = is_clint ? clint_rdata : axi_rdata;
   assign l1d_bus.rvalid = ((axi_rid == L1D) && axi_rvalid) || is_clint;
+  assign l1d_bus.difftest_skip = is_clint || l1d_load_is_mmio;
 
   assign axi_arburst = arburst ? 2'b01 : 2'b00;
   assign axi_arsize = arsize;
@@ -118,6 +121,7 @@ module ysyx_bus #(
   always @(posedge clock) begin
     if (reset) begin
       state_load <= LD_A;
+      l1d_load_is_mmio <= 1'b0;
     end else begin
       unique case (state_load)
         LD_A: begin
@@ -128,6 +132,12 @@ module ysyx_bus #(
               bus_araddr <= l1d_bus.araddr;
               arid <= L1D;
               state_load_source <= L1D;
+              l1d_load_is_mmio <= (0)
+              || (l1d_bus.araddr >= 'h10001000 && l1d_bus.araddr <= 'h10001fff) // uart
+              || (l1d_bus.araddr >= 'h10002000 && l1d_bus.araddr <= 'h1000200f)  // ? gpio
+              || (l1d_bus.araddr >= 'h10011000 && l1d_bus.araddr <= 'h10012000)  // clint
+              || (l1d_bus.araddr >= 'h21000000 && l1d_bus.araddr <= 'h211fffff)  // ? vga
+              || (l1d_bus.araddr >= 'hc0000000);  // ? memory-mapped I/O in ysyxSoC
               arsize <= (
                 ({3{l1d_bus.rstrb == 8'h1}} & 3'b000) |
                 ({3{l1d_bus.rstrb == 8'h3}} & 3'b001) |
@@ -139,11 +149,9 @@ module ysyx_bus #(
           end else if (l1i_bus.arvalid) begin
             bus_araddr <= l1i_bus.araddr;
             state_load <= LD_AS;
-            arburst <= ((`YSYX_I_SDRAM_ARBURST)
-              && (l1i_bus.araddr >= 'ha0000000)
-              && (l1i_bus.araddr <= 'hc0000000));
+            arburst <= l1i_bus.arburst;
             arid <= L1I;
-            arsize <= 3'b010; // always 4-byte: instructions are 32-bit
+            arsize <= 3'b010;  // always 4-byte: instructions are 32-bit
             state_load_source <= L1I;
           end
         end
@@ -155,11 +163,11 @@ module ysyx_bus #(
           end
         end
         LD_D: begin
-          // TODO: remove while preventing ysyxSoC rresp==3
-          if (axi_rvalid) begin
+          if (axi_rvalid && axi_rlast) begin
             state_load <= LD_A;
             arburst <= 0;
             bus_araddr <= 'h0;
+            l1d_load_is_mmio <= 1'b0;
           end
         end
         default: state_load <= LD_A;
@@ -167,12 +175,10 @@ module ysyx_bus #(
     end
   end
 
-  assign clint_arvalid = (l1d_bus.arvalid && is_clint);
   assign io_trap_o = clint_trap && csr_bcast.interrupt_en;
   ysyx_clint clint (
       .clock(clock),
       .araddr(l1d_bus.araddr),
-      .arvalid(clint_arvalid),
       .out_rdata(clint_rdata),
 
       .io_trap_o(clint_trap),
@@ -196,11 +202,11 @@ module ysyx_bus #(
 
   localparam ADDR_LO_BITS = $clog2(XLEN / 8);  // 2 for RV32, 3 for RV64
   logic [ADDR_LO_BITS-1:0] awaddr_lo;
-  assign awaddr_lo = axi_awaddr[ADDR_LO_BITS-1:0];
-  assign axi_wdata = l1d_bus.wdata << (awaddr_lo * 8);
+  assign awaddr_lo  = axi_awaddr[ADDR_LO_BITS-1:0];
+  assign axi_wdata  = l1d_bus.wdata << (awaddr_lo * 8);
   assign axi_wvalid = ((l1d_bus.wvalid) && !write_done);
-  assign axi_wlast = axi_wvalid && axi_wready;
-  assign axi_wstrb = l1d_bus.wstrb[XLEN/8-1:0] << awaddr_lo;
+  assign axi_wlast  = axi_wvalid && axi_wready;
+  assign axi_wstrb  = l1d_bus.wstrb[XLEN/8-1:0] << awaddr_lo;
 
   assign axi_bready = (state_store == LS_S_W);
 
@@ -237,32 +243,6 @@ module ysyx_bus #(
   always @(posedge clock) begin
     `YSYX_ASSERT(axi_rresp == 2'b00, "rresp == 2'b00");
     `YSYX_ASSERT(axi_bresp == 2'b00, "bresp == 2'b00");
-    if (axi_awvalid) begin
-      if ((0)
-          // || (axi_awaddr >= 'h10000000 && axi_awaddr <= 'h10000005)
-          || (axi_awaddr >= 'h10001000 && axi_awaddr <= 'h10001fff)
-          || (axi_awaddr >= 'h10002000 && axi_awaddr <= 'h1000200f)
-          || (axi_awaddr >= 'h10011000 && axi_awaddr <= 'h10012000)
-          || (axi_awaddr >= 'h21000000 && axi_awaddr <= 'h211fffff)
-          || (axi_awaddr >= 'hc0000000))
-        begin
-        `YSYX_DPI_C_NPC_DIFFTEST_SKIP_REF
-        // $display("DIFFTEST: skip ref at aw: %h", axi_awaddr);
-      end
-    end
-    if (axi_arvalid) begin
-      if ((0)
-          // || (axi_araddr >= 'h10000000 && axi_araddr <= 'h10000010)
-          || (axi_araddr >= 'h10001000 && axi_araddr <= 'h10001fff)
-          || (axi_araddr >= 'h10002000 && axi_araddr <= 'h1000200f)
-          || (axi_araddr >= 'h10011000 && axi_araddr <= 'h10012000)
-          || (axi_araddr >= 'h21000000 && axi_araddr <= 'h211fffff)
-          || (axi_araddr >= 'hc0000000))
-        begin
-        `YSYX_DPI_C_NPC_DIFFTEST_SKIP_REF
-        // $display("DIFFTEST: skip ref at ar: %h", axi_araddr);
-      end
-    end
   end
 
 endmodule

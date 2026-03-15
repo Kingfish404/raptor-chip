@@ -35,10 +35,11 @@ interface exu_lsu_if #(
   logic [XLEN-1:0] rdata;
   logic trap;
   logic [XLEN-1:0] cause;
+  logic difftest_skip;
   logic rready;
 
-  modport master(output rvalid, raddr, ralu, atomic_lock, pc, input rdata, trap, cause, rready);
-  modport slave(input rvalid, raddr, ralu, atomic_lock, pc, output rdata, trap, cause, rready);
+  modport master(output rvalid, raddr, ralu, atomic_lock, pc, input rdata, trap, cause, difftest_skip, rready);
+  modport slave(input rvalid, raddr, ralu, atomic_lock, pc, output rdata, trap, cause, difftest_skip, rready);
 endinterface
 
 
@@ -87,6 +88,8 @@ interface exu_rou_if #(
   logic [XLEN-1:0] tval;
   logic [XLEN-1:0] cause;
 
+  logic difftest_skip;
+
   logic valid;
 
   modport in(
@@ -95,6 +98,7 @@ interface exu_rou_if #(
       input prd, rd,
       input csr_wen, csr_wdata, csr_addr, ecall, mret, sret,
       input trap, tval, cause,
+      input difftest_skip,
       input valid
   );
   modport out(
@@ -103,6 +107,7 @@ interface exu_rou_if #(
       output prd, rd,
       output csr_wen, csr_wdata, csr_addr, ecall, mret, sret,
       output trap, tval, cause,
+      output difftest_skip,
       output valid
   );
 endinterface
@@ -149,6 +154,8 @@ interface exu_ioq_bcast_if #(
   logic [XLEN-1:0] cause;
   logic [31:0] inst;
 
+  logic difftest_skip;
+
   logic valid;
 
   modport in(
@@ -157,6 +164,7 @@ interface exu_ioq_bcast_if #(
       input prd, rd,
       input wen, alu, sq_waddr, sq_wdata,
       input trap, tval, cause, inst,
+      input difftest_skip,
       input valid
   );
   modport out(
@@ -165,6 +173,7 @@ interface exu_ioq_bcast_if #(
       output prd, rd,
       output wen, alu, sq_waddr, sq_wdata,
       output trap, tval, cause, inst,
+      output difftest_skip,
       output valid
   );
 endinterface

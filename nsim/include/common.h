@@ -153,6 +153,12 @@ typedef struct
   word_t wstrb;
   word_t len;
 
+  // for load diff
+  word_t rvaddr;
+  word_t rpaddr;
+  word_t rdata;
+  word_t rlen;
+
   // for iomm
   word_t iomm_addr;
   word_t skip;

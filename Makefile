@@ -213,6 +213,10 @@ config-npc32-linux:
 	$(MAKE) -C $(NSIM_HOME) o2linux_defconfig
 	$(MAKE) -C $(NSIM_HOME) -j$(NPROC)
 
+config-npc32-linux-difftest:
+	$(MAKE) -C $(NSIM_HOME) o2linux_difftest_defconfig
+	$(MAKE) -C $(NSIM_HOME) -j$(NPROC)
+
 config-npc32-ysyxsoc:
 	$(MAKE) -C $(NSIM_HOME) o2soc_defconfig
 	$(MAKE) -C $(NSIM_HOME) -j$(NPROC)
@@ -273,6 +277,12 @@ am-tests-nemu32: build-nemu32
 
 am-tests-npc32: build-npc32
 	$(MAKE) -C $(AM_KERNELS)/tests/am-tests ARCH=$(NPC_ARCH) run ARGS="$(ARGS)" mainargs="i" VME=1
+
+cpu-tests-nemu32: build-nemu32
+	$(MAKE) -C $(AM_KERNELS)/tests/cpu-tests ARCH=riscv32-nemu run ARGS="$(ARGS)" mainargs="i" VME=1
+
+cpu-tests-npc32: build-npc32
+	$(MAKE) -C $(AM_KERNELS)/tests/cpu-tests ARCH=$(NPC_ARCH) run ARGS="$(ARGS)" mainargs="i" VME=1
 
 coremark-npc32: $(AM_KERNELS) config-npc32
 	$(MAKE) -C $(AM_KERNELS)/benchmarks/coremark_eembc ARCH=$(NPC_ARCH) run ARGS="$(ARGS)"
@@ -368,6 +378,10 @@ linux-boot-nemu32: config-nemu32-linux
 	$(MAKE) -C $(NEMU_HOME) run IMG=$(OPENSBI_PAYLOAD) ARGS="$(ARGS)"
 
 linux-boot-npc32: config-npc32-linux
+	$(MAKE) -C $(NSIM_HOME) -j$(NPROC)
+	$(MAKE) -C $(NSIM_HOME) run IMG=$(OPENSBI_PAYLOAD) ARGS="$(ARGS)"
+
+linux-boot-npc32-difftest: config-npc32-linux-difftest
 	$(MAKE) -C $(NSIM_HOME) -j$(NPROC)
 	$(MAKE) -C $(NSIM_HOME) run IMG=$(OPENSBI_PAYLOAD) ARGS="$(ARGS)"
 

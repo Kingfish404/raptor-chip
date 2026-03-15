@@ -62,6 +62,8 @@ extern "C" void npc_exu_ebreak()
   contextp->gotFinish(true);
   Log("EBREAK at pc = " FMT_WORD_NO_PREFIX "", *npc.pc);
   npc.state = NPC_END;
+#elif defined(CONFIG_DIFFTEST)
+  difftest_skip_ref();
 #endif
 }
 

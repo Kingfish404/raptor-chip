@@ -42,9 +42,13 @@ The core supports configurable **RV32** and **RV64** modes via a compile-time sw
  │ LSU  — Load/Store Unit                                  │
  │   ├─ STQ  (store temp queue, speculative, SQ_SIZE)      │
  │   ├─ SQ   (store queue, committed, SQ_SIZE)             │
- │   └─ Store-to-load forwarding (CAM)                     │
- │ L1D  — Data Cache (direct-mapped, TLB, Sv32 PTW)        │
+ │   └─ Store-to-load forwarding (CAM, virtual address)    │
+ │ L1D  — Data Cache (direct-mapped, banked SRAM, RMW)     │
  │   └─ Reservation register (LR/SC atomics)               │
+ │ TLB  — Translation Lookaside Buffer (reusable module)   │
+ │   ├─ ITLB (L1I), DTLB (L1D load), DSTLB (L1D store)   │
+ │ PTW  — Page Table Walker (Sv32, reusable module)        │
+ │   ├─ IPTW (L1I), DPTW (L1D)                            │
  │ BUS  — AXI4 master bridge (L1I/L1D arbitration)         │
  │   └─ CLINT (mtime timer, periodic interrupt)            │
  └─────────────────────────────────────────────────────────┘
@@ -78,8 +82,10 @@ The core supports configurable **RV32** and **RV64** modes via a compile-time sw
           ║ exu_lsu_if, rou_lsu_if, lsu_l1d_if
  ┌─ memory subsystem ──────────────────────────────────────┐
  │  LSU[stq] (speculative store temp queue)                │
- │  LSU[sq ] (committed store queue ─> L1D/BUS)            │
- │  L1D[tlb,ptw] ─> BUS ─> AXI4 (write-through)            │
+ │  LSU[sq ] (committed store queue → L1D/BUS)             │
+ │  L1D[dtlb,dstlb,dptw] → BUS → AXI4 (write-through)     │
+ │  TLB (reusable: itlb, dtlb, dstlb)                      │
+ │  PTW (reusable: iptw, dptw — Sv32 walker)                │
  └─────────────────────────────────────────────────────────┘
 ```
 
@@ -113,12 +119,12 @@ The core supports configurable **RV32** and **RV64** modes via a compile-time sw
 - **SRAM data readiness**: `pc_ifu_d1` register tracks PC stability; `sram_data_ready = (pc_ifu_d1 == pc_ifu)` ensures SRAM output matches the current fetch address before asserting `valid`
 - **Tag/Valid**: Register arrays (multi-port read, fast bulk invalidation)
 - **IFQ**: 2-entry instruction fetch queue for outstanding requests
-- **TLB**: Single-entry ITLB (vtag→ptag)
-- **Sv32 PTW**: 2-level page table walk (PTW1→PTW0) with trap on page fault
+- **ITLB**: `ysyx_tlb` instance (`u_itlb`, default 4 entries, ASID-aware, combinational lookup)
+- **PTW**: `ysyx_ptw` instance (`u_iptw`), shares AXI read channel with cache fill; `ptw_req` issued on TLB miss in IDLE
+- Address validation via `ysyx_pkg::addr_valid()`
 - Supports 16-bit alignment for RVC (cross-word fetch)
-- Burst reads for SDRAM region
 - `fence.i` invalidation support
-- **FSM**: 10-state (`IDLE`, `PTW0`, `PTW1`, `TRAP`, `RD_A`, `RD_0`, `WAIT`, `RD_1`, `FINA`, `NULL`)
+- **FSM**: 7-state (`IDLE`, `PTWAIT`, `TRAP`, `RD_A`, `RD_0`, `RD_1`, `FINA`)
 
 #### IDU — Instruction Decode Unit (`ysyx_idu.sv`)
 
@@ -185,6 +191,7 @@ The core supports configurable **RV32** and **RV64** modes via a compile-time sw
   - Iterative: Booth's multiplication (33/65 cycles), restoring division (32 cycles)
 - **Atomics**: Full AMO support — LR/SC with reservation, AMOSWAP/ADD/XOR/AND/OR/MIN/MAX
 - **Store MMU**: Address translation via `exu_l1d_if`
+- **Difftest skip detection**: RS detects CSR reads from TIME/TIMEH/CYCLE/MCYCLE/MCYCLEH; IOQ detects MMIO store addresses and load `difftest_skip` from LSU. Propagated via `exu_rou.difftest_skip` and `exu_ioq_bcast.difftest_skip` to ROB.
 
 #### CMU — Commit Unit (`ysyx_cmu.sv`)
 
@@ -192,6 +199,7 @@ The core supports configurable **RV32** and **RV64** modes via a compile-time sw
 - Broadcasts: `rpc` (retire PC), `cpc` (correct/redirect PC), branch resolution, `flush_pipe`, `fence_i`, `fence_time`, `time_trap`
 - Tracks instruction retire count (`pmu_inst_retire`)
 - DPI-C hooks for difftest and ebreak
+- **Difftest skip**: Issues `YSYX_DPI_C_NPC_DIFFTEST_SKIP_REF` at commit time when `rou_cmu.difftest_skip` is set (MMIO loads/stores, CSR time reads)
 
 #### CSR — Control & Status Registers (`ysyx_csr.sv`)
 
@@ -207,29 +215,53 @@ The core supports configurable **RV32** and **RV64** modes via a compile-time sw
 
 #### LSU — Load/Store Unit (`ysyx_lsu.sv`)
 
-- **STQ** (Store Temporary Queue): `SQ_SIZE` entries, speculative stores before commit
-- **SQ** (Store Queue): `SQ_SIZE` entries, committed stores pending L1D write
+- **STQ** (Store Temporary Queue): `SQ_SIZE` entries, speculative stores before commit; stores virtual address (`stq_waddr`) for forwarding comparison
+- **SQ** (Store Queue): `SQ_SIZE` entries, committed stores pending L1D write; tracks both physical address (`sq_waddr` for bus write-through) and virtual address (`sq_vaddr` for forwarding)
 - **Store FSM**: 2-state (`LS_S_V`, `LS_S_R`)
-- **Store-to-load forwarding**: CAM search of SQ by address
+- **Store-to-load forwarding**: CAM search of SQ by virtual address (`sq_vaddr`), age-ordered youngest-match-wins
 - Load data alignment/sign-extension (LB/LBU/LH/LHU/LW)
 - Loads blocked while SQ/STQ non-empty (memory ordering)
-- Address validation via hardcoded memory map ranges
+- `difftest_skip` propagated from L1D through to EXU
 
 #### L1D — Data Cache (`ysyx_l1d.sv`)
 
-- Direct-mapped, `2^L1D_LEN` entries (default 128, 7-bit index)
-- **Data storage**: `ysyx_sram_1r1w` instance for cache data with synchronous read (1-cycle latency)
-- **Tag/Valid**: Register arrays (multi-port read for simultaneous load/store hit check, fast fence invalidation)
-- **Hit logic**: Split into `tag_hit` (combinational from register tags in `LD_A`) and `data_hit` (SRAM data ready in `LD_HIT`). Bus requests suppressed by `tag_hit`; load data returned by `data_hit`.
-- Write-through policy: full-word writes update cache, sub-word writes invalidate
-- **Load TLB**: Single-entry (vtag→ptag)
-- **Store TLB (STLB)**: Separate single-entry TLB for store address translation
-- **Sv32 PTW**: 2-level page table walk for both loads and stores
+- Direct-mapped, `2^L1D_LEN` sets (default 64, 6-bit index)
+- Line size: `2^L1D_LINE_LEN` words per line (default 2), parameterized
+- **Data storage**: Banked `ysyx_sram_1r1w` instances (one per word position via `gen_data_bank` generate loop) with synchronous read (1-cycle latency)
+- **Tag/Valid**: Per-word register arrays (`l1d_valid[set][word]`, `l1d_tag[set][word]`), enabling simultaneous load/store hit check and fast fence invalidation
+- **Hit logic**: Split into `tag_hit` (combinational from register tags in `LD_A`, guarded by `sram_bypass_r` to prevent write-first bypass corruption) and `data_hit` (SRAM data ready). Bus requests suppressed by `tag_hit`; load data returned by `data_hit`.
+- Write-through policy: full-word writes update cache; partial stores (SB/SH) use **Read-Modify-Write (RMW)** — 2-cycle merge: read old SRAM word, byte-lane merge, write back (`l1d_rmw`, `rmw_merged_data`). RMW only fires in IDLE when SRAM read port is free (`partial_store_rmw`). Falls back to invalidation when read port is busy.
+- **Speculative SRAM read**: In IDLE with a pending load, drives incoming virtual index directly (VIPT safe: `L1D_LEN+L1D_LINE_LEN+OFFSET_BITS < 12`). RMW steers `sram_raddr` to store's set when active.
+- **Load TLB**: `ysyx_tlb` instance (`u_dtlb`, default 4 entries, ASID-aware, combinational lookup)
+- **Store TLB (STLB)**: Separate `ysyx_tlb` instance (`u_dstlb`) for store address translation
+- **PTW**: Shared `ysyx_ptw` instance (`u_dptw`) for both load and store TLB misses; `ptw_req` issued on TLB miss in IDLE, `stlb_mmu` flag distinguishes store vs load PTW
 - **Reservation register**: For LR/SC atomics
 - Misalignment detection for loads/stores
-- Cacheability determined by address ranges
+- Cacheability via `ysyx_pkg::addr_cacheable()`
 - `fence_time` invalidates entire cache
-- **FSM**: 7-state (`IDLE`, `PTW0`, `PTW1`, `TRAP`, `LD_A`, `LD_HIT`, `LD_D`)
+- **FSM**: 5-state (`IDLE`, `PTWAIT`, `TRAP`, `LD_A`, `LD_D`)
+
+#### TLB — Translation Lookaside Buffer (`ysyx_tlb.sv`)
+
+- Reusable fully-associative TLB module for Sv32 page translation
+- Parameterized entry count (`ENTRIES`, default 4), ASID-aware
+- **Lookup**: Combinational — matches `lookup_vtag` + `lookup_asid` against all entries simultaneously
+- **Fill**: Sequential on `fill_valid` (posedge clock), only fills on miss (no duplicate entries)
+- **Replacement**: Round-robin (`rr_ptr`)
+- **Flush**: Bulk invalidation via `flush` input (used by `fence_time`)
+- Instantiated as: `u_itlb` (L1I), `u_dtlb` (L1D load), `u_dstlb` (L1D store)
+
+#### PTW — Page Table Walker (`ysyx_ptw.sv`)
+
+- Reusable Sv32 two-level page table walker module
+- **FSM**: 3-state (`IDLE` → `LVL1` → `LVL0`)
+  - `LVL1`: Reads first-level PTE using `vpn[1]`
+  - `LVL0`: Reads second-level PTE using `vpn[0]` (if LVL1 was non-leaf)
+- Leaf detection: `PTE.R || PTE.X` → superpage (LVL1 leaf) or regular page (LVL0 leaf)
+- **Outputs**: `done` (translation complete), `fault` (page fault), `result_ptag`/`result_vtag` (for TLB fill)
+- Shares AXI read channel with cache fill (`bus_arvalid`/`bus_araddr`/`bus_rdata`)
+- RV64-aware: selects correct 32-bit PTE half from 64-bit bus read (`ppn_a[2]`)
+- Instantiated as: `u_iptw` (L1I), `u_dptw` (L1D)
 
 #### BUS — AXI4 Bus Bridge (`ysyx_bus.sv`)
 
@@ -238,9 +270,9 @@ The core supports configurable **RV32** and **RV64** modes via a compile-time sw
 - **Read FSM**: 3-state (`LD_A`, `LD_AS`, `LD_D`)
 - **Write FSM**: 3-state (`LS_S_A`, `LS_S_W`, `LS_S_B`)
 - Load source tracking: `L1I` / `L1D` / `TLBI` / `TLBD`
-- SDRAM burst support (AXI INCR mode for I-cache)
+- L1I issues individual word reads (no burst)
 - CLINT reads handled locally (not sent over AXI)
-- DPI-C difftest skip for MMIO regions
+- **Difftest**: MMIO detection via `l1d_load_is_mmio` flag (latched on L1D load request), propagated via `l1d_bus.difftest_skip` to commit stage
 
 #### CLINT — Core Local Interrupt Controller (`ysyx_clint.sv`)
 
@@ -302,7 +334,8 @@ The core supports configurable **RV32** and **RV64** modes via a compile-time sw
 | `YSYX_RS_SIZE` | 4 | Reservation station entries |
 | `YSYX_IOQ_SIZE` | 4 | In-order queue entries |
 | `YSYX_SQ_SIZE` | 8 | Store queue entries |
-| `YSYX_L1D_LEN` | 7 | L1D entries: 2^7 = 128 |
+| `YSYX_L1D_LINE_LEN` | 1 | L1D line: 2^1 = 2 words per line |
+| `YSYX_L1D_LEN` | 6 | L1D sets: 2^6 = 64 |
 | `YSYX_ISSUE_WIDTH` | 1 | Instructions dispatched per cycle |
 | `YSYX_REG_SIZE` | 32 | Architectural registers |
 | `YSYX_PHY_SIZE` | 64 | Physical registers |
@@ -314,7 +347,9 @@ The core supports configurable **RV32** and **RV64** modes via a compile-time sw
 | `uop_t` | Micro-op: decoded instruction fields (alu, branch, mem, CSR, trap, pc, inst, imm) |
 | `prd_t` | Physical register descriptor: op1/op2 values + pr1/pr2/prd/prs mappings |
 | `rob_state_t` | ROB entry state enum: `ROB_CM` (committed), `ROB_WB` (written-back), `ROB_EX` (executing) |
-| `rob_entry_t` | Full ROB entry: phys regs, arch rd, state, branch/jump, memory, atomics, CSR, trap, fence, inst/PC |
+| `rob_entry_t` | Full ROB entry: phys regs, arch rd, state, branch/jump, memory, atomics, CSR, trap, fence, difftest_skip, inst/PC |
+| `addr_cacheable()` | Function: returns true if address is in a cacheable region (mrom, flash, psram, sdram) |
+| `addr_valid()` | Function: returns true if address is in any valid memory-mapped region |
 
 ## Mermaid Diagram
 
@@ -324,7 +359,7 @@ mermaid [^1] diagram [^2] of the uarch:
 flowchart TD
  subgraph FE["Frontend (in-order)"]
         IFU["IFU (3-state FSM)"]
-        L1I["L1I (direct-mapped, TLB, Sv32 PTW)"]
+        L1I["L1I (direct-mapped, ITLB, PTW)"]
         IFQ["IFQ (2-entry)"]
         IDU["IDU (RVC + decoder)"]
         BPU["BPU (PHT/BTB/GHR/RSB)"]
@@ -347,7 +382,9 @@ flowchart TD
   end
  subgraph MEM["Memory Subsystem"]
         LSU["LSU (STQ + SQ, forwarding)"]
-        L1D["L1D (direct-mapped, TLB, Sv32 PTW)"]
+        L1D["L1D (direct-mapped, banked SRAM, RMW)"]
+        TLB["TLB (reusable: ITLB, DTLB, DSTLB)"]
+        PTW["PTW (reusable: IPTW, DPTW)"]
         BUS["BUS (AXI4 bridge)"]
         CLINT["CLINT (mtime, timer IRQ)"]
   end
@@ -374,6 +411,8 @@ flowchart TD
     CMU -->|"cmu_bcast_if"| IFU & BPU
     LSU -->|"lsu_l1d_if"| L1D
     EXU -->|"exu_l1d_if"| L1D
+    L1I --- TLB & PTW
+    L1D --- TLB & PTW
     L1I -->|"l1i_bus_if"| BUS
     L1D -->|"l1d_bus_if"| BUS
     BUS <-->|"AXI4"| AXI["AXI4 Master"]

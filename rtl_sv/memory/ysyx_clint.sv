@@ -1,6 +1,5 @@
 `include "ysyx.svh"
 `include "ysyx_soc.svh"
-`include "ysyx_dpi_c.svh"
 
 // Core Local INTerrupt controller
 module ysyx_clint #(
@@ -9,7 +8,6 @@ module ysyx_clint #(
     input clock,
 
     input [XLEN-1:0] araddr,
-    input arvalid,
 
     output [XLEN-1:0] out_rdata,
 
@@ -35,9 +33,6 @@ module ysyx_clint #(
         trap <= 1;
       end else if (io_trap_received_i) begin
         trap <= 0;
-      end
-      if (arvalid) begin
-        `YSYX_DPI_C_NPC_DIFFTEST_SKIP_REF
       end
     end
   end

@@ -51,7 +51,8 @@ module ysyx_lsu #(
   logic [$clog2(SQ_SIZE)-1:0] sq_tail;
   logic [SQ_SIZE-1:0] sq_valid;
   logic [4:0] sq_alu[SQ_SIZE];
-  logic [XLEN-1:0] sq_waddr[SQ_SIZE];
+  logic [XLEN-1:0] sq_waddr[SQ_SIZE];  // physical — for bus write-through
+  logic [XLEN-1:0] sq_vaddr[SQ_SIZE];  // virtual  — for forwarding comparison
   logic [XLEN-1:0] sq_wdata[SQ_SIZE];
   logic [XLEN-1:0] sq_pc[SQ_SIZE];
   // === Store Queue (SQ) ===
@@ -99,7 +100,7 @@ module ysyx_lsu #(
           stq_valid[stq_tail] <= 1;
 
           stq_alu[stq_tail] <= exu_ioq_bcast.alu;
-          stq_waddr[stq_tail] <= exu_ioq_bcast.sq_waddr;
+          stq_waddr[stq_tail] <= exu_ioq_bcast.tval;  // virtual addr for forwarding
           stq_wdata[stq_tail] <= exu_ioq_bcast.sq_wdata;
           stq_tail <= stq_tail + 1;
         end
@@ -114,6 +115,7 @@ module ysyx_lsu #(
 
         sq_alu[sq_tail] <= rou_lsu.alu;
         sq_waddr[sq_tail] <= rou_lsu.sq_waddr;
+        sq_vaddr[sq_tail] <= stq_waddr[stq_head];  // virtual addr from STQ
         sq_wdata[sq_tail] <= rou_lsu.sq_wdata;
         sq_pc[sq_tail] <= rou_lsu.pc;
 
@@ -135,6 +137,7 @@ module ysyx_lsu #(
 
   // SQ address conflict + store-to-load forwarding.
   // Iterate from oldest (sq_head) to youngest; last match wins.
+  // Uses sq_vaddr (virtual) for comparison against virtual load address.
   always_comb begin
     load_in_sq = 0;
     load_in_sq_idx = 0;
@@ -142,7 +145,7 @@ module ysyx_lsu #(
     sq_fwd_data = 0;
     for (int j = 0; j < SQ_SIZE; j++) begin
       if (sq_valid[sq_head + j[$clog2(SQ_SIZE)-1:0]]
-          && sq_waddr[sq_head + j[$clog2(SQ_SIZE)-1:0]][XLEN-1:$clog2(XLEN/8)] == raddr[XLEN-1:$clog2(XLEN/8)]) begin
+          && sq_vaddr[sq_head + j[$clog2(SQ_SIZE)-1:0]][XLEN-1:$clog2(XLEN/8)] == raddr[XLEN-1:$clog2(XLEN/8)]) begin
         load_in_sq = 1;
         load_in_sq_idx = sq_head + j[$clog2(SQ_SIZE)-1:0];
         if (sq_alu[sq_head + j[$clog2(SQ_SIZE)-1:0]] ==
@@ -225,6 +228,7 @@ module ysyx_lsu #(
 
   assign rdata_unalign = (raddr_valid && fwd_hit) ? fwd_data : lsu_l1d.rdata;
   assign rdata = (rdata_unalign >> (raddr[$clog2(XLEN/8)-1:0] * 8));
+
   assign exu_lsu.rdata = (
       ({XLEN{ralu == `YSYX_ALU_LB__}} & {{XLEN-8{rdata[7]}}, rdata[7:0]})
     | ({XLEN{ralu == `YSYX_ALU_LBU_}} & {{XLEN-8{1'b0}}, rdata[7:0]})
@@ -240,6 +244,7 @@ module ysyx_lsu #(
     );
   assign exu_lsu.trap = (raddr_valid && fwd_hit) ? 1'b0 : lsu_l1d.trap;
   assign exu_lsu.cause = lsu_l1d.cause;
+  assign exu_lsu.difftest_skip = (raddr_valid && fwd_hit) ? 1'b0 : lsu_l1d.difftest_skip;
   assign exu_lsu.rready = (raddr_valid && fwd_hit) || lsu_l1d.rready;
 
   always @(posedge clock) begin

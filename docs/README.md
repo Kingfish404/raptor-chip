@@ -19,10 +19,12 @@ All commands run from the **project root**. No `source env.sh` needed.
 | Full NPC simulation             | `make sim-npc32`                       |
 | NPC simulation (batch, no wave) | `make run-npc32 ARGS="-b -n"`          |
 | **NPC RV64 mode**               | `make run-npc64 ARGS="-b -n"`          |
+| CPU tests on NPC                | `make cpu-tests-npc32 ARGS="-b -n"`    |
 | Run CoreMark on NPC             | `make coremark ARGS="-b -n"`           |
 | Run MicroBench on NPC           | `make microbench ARGS="-b -n"`         |
 | Run nanos-lite on NEMU          | `make nanos-nemu32`                    |
 | Boot Linux on NEMU              | `make linux-boot`                      |
+| Boot Linux on NPC w/ difftest   | `make linux-boot-npc32-difftest`       |
 | FPGA synthesis                  | `make fpga-syn`                        |
 | Pack SV / Lint / STA            | `make pack` / `make lint` / `make sta` |
 | Clean all                       | `make clean`                           |
@@ -44,7 +46,7 @@ raptor-chip/
 │   ├── ysyx.sv            # Top-level core (pure wiring, instantiates all stages + PRF)
 │   ├── frontend/         # IFU, IDU (RVC + csr_addr_valid), BPU (PHT/BTB/GHR/RSB), CSR* (M/S-mode)
 │   ├── backend/          # RNU (RNQ + freelist + maptable), PRF (2R/2W), ROU (UOQ + ROB), EXU (RS + IOQ + ALU + MUL), CMU
-│   ├── memory/           # LSU (STQ + SQ), L1I (TLB, Sv32 PTW), L1D (TLB, STLB, Sv32 PTW), BUS (AXI4), CLINT
+│   ├── memory/           # LSU (STQ + SQ), L1I, L1D (banked SRAM, RMW), TLB (reusable), PTW (Sv32, reusable), BUS (AXI4), CLINT
 │   └── generated/        # Chisel-generated decoders
 │   # *CSR lives in frontend/ on disk but architecturally belongs to the backend
 ├── nemu/                 # NEMU software emulator (RISC-V ISS)

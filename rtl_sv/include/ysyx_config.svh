@@ -51,7 +51,8 @@
 `define YSYX_IOQ_SIZE 4
 
 `define YSYX_SQ_SIZE 8
-`define YSYX_L1D_LEN 7
+`define YSYX_L1D_LINE_LEN 1
+`define YSYX_L1D_LEN 6
 
 // Issue width (number of instructions dispatched per cycle)
 // Set to 1 for single-issue; increase for multi-issue

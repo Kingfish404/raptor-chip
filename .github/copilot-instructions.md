@@ -12,7 +12,7 @@ IFU → IDU → RNU (rename) → ROU (ROB/dispatch) → EXU (RS/IOQ) → CMU (co
                                               LSU ↔ L1D ↔ BUS ↔ AXI4
 ```
 
-- **Frontend** (`rtl_sv/frontend/`): IFU (3-state FSM, fetch + PC mux), L1I (direct-mapped + TLB + IFQ + Sv32 PTW), BPU (bimodal PHT + BTB + GHR + RSB), IDU (RVC expansion + Chisel decoders, `csr_addr_valid()`)
+- **Frontend** (`rtl_sv/frontend/`): IFU (3-state FSM, fetch + PC mux), L1I (direct-mapped + ITLB + IFQ + PTW), BPU (bimodal PHT + BTB + GHR + RSB), IDU (RVC expansion + Chisel decoders, `csr_addr_valid()`)
 - **Backend** (`rtl_sv/backend/` + `rtl_sv/frontend/ysyx_csr.sv`):
   - **RNU** (rename): pure rename stage (`ysyx_rnu.sv`) + RNQ (circular, `RIQ_SIZE`) + 2 sub-modules:
     - `ysyx_rnu_freelist.sv` - physical register free list (circular FIFO, `rnu_fl_if`, flush recovery via in-flight count rewind)
@@ -22,9 +22,9 @@ IFU → IDU → RNU (rename) → ROU (ROB/dispatch) → EXU (RS/IOQ) → CMU (co
   - **EXU**: RS (`RS_SIZE`, priority issue, operand forwarding) + IOQ (`IOQ_SIZE`, in-order, for ld/st/amo/Zicsr) + ALU (combinational RV32I/RV64I, W-variant sign-extension for RV64) + MUL (Booth's / iterative div, or fast single-cycle mode; W-variants for RV64)
   - **CMU** (commit): lightweight broadcast unit (retire PC, branch resolution, flush, fence)
   - **CSR** (`ysyx_csr.sv`): M/S-mode CSR file, trap delegation, privilege transitions, MMU broadcasts (`immu_en`/`dmmu_en`, `satp_ppn`, `tvec`)
-- **Memory** (`rtl_sv/memory/`): LSU (STQ + SQ, store-to-load forwarding CAM), L1I (direct-mapped, ITLB, Sv32 PTW, IFQ, banked SRAM data storage via `ysyx_sram_1r1w`, `sram_data_ready` for synchronous read timing), L1D (direct-mapped, load TLB + store STLB, Sv32 PTW, write-through, LR/SC reservation, SRAM data storage via `ysyx_sram_1r1w`, 7-state FSM with `LD_HIT` for SRAM read latency, split `tag_hit`/`data_hit`), BUS (AXI4 bridge, L1D priority, CLINT internal), CLINT (64-bit mtime, periodic timer interrupt), SRAM wrapper (`ysyx_sram_1r1w.sv` — synchronous-read behavioral model with write-first bypass, `YSYX_USE_SRAM_MACRO` ifdef for foundry macro swap, matches ASIC SRAM timing and FPGA Block RAM inference)
+- **Memory** (`rtl_sv/memory/`): LSU (STQ + SQ, store-to-load forwarding CAM), L1I (direct-mapped, IFQ, banked SRAM data storage via `ysyx_sram_1r1w`, `sram_data_ready` for synchronous read timing), L1D (direct-mapped, write-through, LR/SC reservation, banked SRAM data storage via `ysyx_sram_1r1w` with per-word valid tracking, `L1D_LINE_LEN`-configurable words per line, 5-state FSM, split `tag_hit`/`data_hit`), TLB (`ysyx_tlb.sv` — fully-associative, multi-entry with ASID, round-robin replacement, shared by L1I/L1D), PTW (`ysyx_ptw.sv` — Sv32 two-level page table walker, IDLE/LVL1/LVL0 FSM, shared AXI read channel), BUS (AXI4 bridge, L1D priority, CLINT internal), CLINT (64-bit mtime, periodic timer interrupt), SRAM wrapper (`ysyx_sram_1r1w.sv` — synchronous-read behavioral model with write-first bypass, `YSYX_USE_SRAM_MACRO` ifdef for foundry macro swap, matches ASIC SRAM timing and FPGA Block RAM inference)
 - **Top-level**: `rtl_sv/ysyx.sv` (bare core, pure wiring — instantiates all stages + PRF), `rtl_sv/ysyx_npc_soc.sv` (SoC wrapper for Verilator sim)
-- **Config/types**: `rtl_sv/include/ysyx_config.svh` (params incl. `YSYX_ISSUE_WIDTH`, cache/BPU/queue sizes), `rtl_sv/ysyx_pkg.sv` (`uop_t`, `prd_t`, `rob_entry_t`, `rob_state_t` types)
+- **Config/types**: `rtl_sv/include/ysyx_config.svh` (params incl. `YSYX_ISSUE_WIDTH`, cache/BPU/queue sizes), `rtl_sv/ysyx_pkg.sv` (`uop_t`, `prd_t`, `rob_entry_t`, `rob_state_t` types, `addr_cacheable()`/`addr_valid()` functions)
 - **Interfaces**: `rtl_sv/include/ysyx_*_if.svh` (inter-module: `ifu_idu_if`, `idu_rnu_if`, `rnu_rou_if`, `rou_exu_if`, `exu_rou_if`, `exu_ioq_bcast_if`, `exu_prf_if`, `exu_lsu_if`, `exu_csr_if`, `exu_l1d_if`, `rou_cmu_if`, `rou_csr_if`, `rou_lsu_if`, `cmu_bcast_if`, `csr_bcast_if`, `lsu_l1d_if`, `l1i_bus_if`, `l1d_bus_if`), `rtl_sv/include/ysyx_rnu_internal_if.svh` (`rnu_fl_if`, `rnu_mt_if`)
 
 ## Key Commands (all from project root)
@@ -67,7 +67,7 @@ Switching between RV32 and RV64 (`make run-npc32` vs `make run-npc64`) automatic
 - DPI-C function signatures are **conditional on YSYX_RV64**: `longint` params for RV64, `int` for RV32 (see `ysyx_dpi_c.sv`)
 - C-side counterparts use `#ifdef CONFIG_ISA64` for matching `long long` vs `int` signatures
 - **Differential testing** (difftest) compares NPC vs NEMU instruction-by-instruction; enabled by default
-- Simulator config uses **Kconfig** in `nsim/configs/` - profiles: `o2_defconfig` (standalone), `o2linux_defconfig`, `o2soc_defconfig`
+- Simulator config uses **Kconfig** in `nsim/configs/` - profiles: `o2_defconfig` (standalone), `o2linux_defconfig`, `o2linux_difftest_defconfig`, `o2soc_defconfig`
 
 ## Chisel (Scala) - Decoder Only
 
@@ -77,7 +77,7 @@ Switching between RV32 and RV64 (`make run-npc32` vs `make run-npc64`) automatic
 
 Microarchitecture tunables are in `rtl_sv/include/ysyx_config.svh`:
 - **XLEN**: 32 (default) or 64 (when `YSYX_RV64` is defined)
-- **Cache**: `L1I_LINE_LEN` (line words), `L1I_LEN` (index bits, 2^6=64 entries), `L1D_LEN` (index bits, 2^7=128 entries)
+- **Cache**: `L1I_LINE_LEN` (line words), `L1I_LEN` (index bits, 2^6=64 entries), `L1D_LINE_LEN` (line words, 1), `L1D_LEN` (index bits, 2^6=64 entries)
 - **BPU**: `PHT_SIZE` (512), `BTB_SIZE` (64), `RSB_SIZE` (8)
 - **OoO queues**: `RIQ_SIZE` (rename queue, 4), `IIQ_SIZE` (dispatch queue, 4), `ROB_SIZE` (8), `RS_SIZE` (4), `IOQ_SIZE` (4), `SQ_SIZE` (store queue, 8)
 - **Registers**: `PHY_SIZE` (64 physical), `REG_SIZE` (32 architectural)

@@ -122,6 +122,8 @@ interface rou_cmu_if #(
   logic flush_pipe;
   logic time_trap;
 
+  logic difftest_skip;
+
   logic valid;
 
   modport out(
@@ -129,6 +131,7 @@ interface rou_cmu_if #(
       output btaken, npc, ben, jen, jren, atomic_sc,
       output prd, prs,
       output ebreak, fence_time, fence_i, flush_pipe, time_trap,
+      output difftest_skip,
       output valid
   );
   modport in(
@@ -136,6 +139,7 @@ interface rou_cmu_if #(
       input btaken, npc, ben, jen, jren, atomic_sc,
       input prd, prs,
       input ebreak, fence_time, fence_i, flush_pipe, time_trap,
+      input difftest_skip,
       input valid
   );
 endinterface

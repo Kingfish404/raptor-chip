@@ -70,6 +70,12 @@ typedef struct
   word_t wstrb;
   word_t len;
 
+  // for load diff
+  word_t rvaddr;
+  word_t rpaddr;
+  word_t rdata;
+  word_t rlen;
+
   // for iomm
   word_t iomm_addr;
   word_t skip;
@@ -175,6 +181,11 @@ __EXPORT void difftest_regcpy(void *dut, bool direction)
     npc->wdata = cpu.wdata;
     npc->len = cpu.len;
     npc->skip = cpu.skip;
+
+    npc->rvaddr = cpu.rvaddr;
+    npc->rpaddr = cpu.rpaddr;
+    npc->rdata = cpu.rdata;
+    npc->rlen = cpu.rlen;
   }
   // isa_reg_display();
   // vaddr_show(cpu.pc, 0x2c);

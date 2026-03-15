@@ -132,6 +132,9 @@ make linux-boot-nemu32
 # Boot Linux on NPC
 make linux-boot-npc32
 
+# Boot Linux on NPC with difftest (vs NEMU reference)
+make linux-boot-npc32-difftest
+
 # See detailed instructions
 # docs/linux_kernel.md, linux/README.md
 ```

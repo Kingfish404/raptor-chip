@@ -207,6 +207,7 @@ module ysyx_npc_soc #(
   assign out_arready = (state_r == RIDLE);
   assign out_rdata = mem_rdata_buf;
   assign out_rvalid = (state_r == RVALID);
+  assign out_rlast = out_rvalid;
   assign out_rid = rid;
 
   // write transaction

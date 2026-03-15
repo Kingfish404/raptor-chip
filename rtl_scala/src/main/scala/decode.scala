@@ -318,7 +318,8 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
       FENCE____ -> BitPat("b" + "0" + "0"), // N
       FENCE_TSO -> BitPat("b" + "0" + "0"), // N
       FENCE_I__ -> BitPat("b" + "0" + "1"), // N
-      FENCE_TIM -> BitPat("b" + "1" + "1")  // N
+      FENCE_TIM -> BitPat("b" + "1" + "1"), // N
+      SFENCE_VM -> BitPat("b" + "1" + "1")  // N — flush TLBs + I-cache
     ),
     BitPat("b" + "0" + "0")
   )

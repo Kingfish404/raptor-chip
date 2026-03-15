@@ -436,6 +436,17 @@ module ysyx_exu #(
   assign exu_ioq_bcast.cause = ioq_ren[ioq_head] ? exu_lsu.cause : ioq_cause[ioq_head];
   assign exu_ioq_bcast.inst = exu_lsu.trap || ioq_trap[ioq_head] ? 'h13 : ioq_inst[ioq_head];
 
+  // Difftest: detect MMIO access for loads (from LSU) and stores (by address check)
+  assign exu_ioq_bcast.difftest_skip =
+      (ioq_ren[ioq_head] && exu_lsu.difftest_skip)
+    || (ioq_wen[ioq_head] && ((0)
+        || (exu_ioq_bcast.sq_waddr >= 'h10001000 && exu_ioq_bcast.sq_waddr <= 'h10001fff)
+        || (exu_ioq_bcast.sq_waddr >= 'h10002000 && exu_ioq_bcast.sq_waddr <= 'h1000200f)
+        || (exu_ioq_bcast.sq_waddr >= 'h10011000 && exu_ioq_bcast.sq_waddr <= 'h10012000)
+        || (exu_ioq_bcast.sq_waddr >= 'h21000000 && exu_ioq_bcast.sq_waddr <= 'h211fffff)
+        || (exu_ioq_bcast.sq_waddr >= 'hc0000000)
+    ));
+
   assign ioq_valid_found = (ioq_valid[ioq_head]
     && ioq_pr1[ioq_head] == 0 && ioq_pr2[ioq_head] == 0
     && (ioq_ren[ioq_head]
@@ -496,6 +507,15 @@ module ysyx_exu #(
   assign exu_rou.trap = rs_trap[valid_idx];
   assign exu_rou.tval = rs_tval[valid_idx];
   assign exu_rou.cause = rs_cause[valid_idx];
+
+  // Difftest: CSR reads from TIME/TIMEH/MCYCLE/MCYCLEH need skip
+  assign exu_rou.difftest_skip = |rs_csr_csw[valid_idx] && (
+      rs_imm[valid_idx][11:0] == `YSYX_CSR_TIME___
+    || rs_imm[valid_idx][11:0] == `YSYX_CSR_TIMEH__
+    || rs_imm[valid_idx][11:0] == `YSYX_CSR_CYCLE__
+    || rs_imm[valid_idx][11:0] == `YSYX_CSR_MCYCLE_
+    || rs_imm[valid_idx][11:0] == `YSYX_CSR_MCYCLEH
+  );
 
   assign exu_rou.valid = valid_found;
   // } Write back (RS)

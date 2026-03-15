@@ -21,17 +21,14 @@ module ysyx_l1i #(
 
     input reset
 );
-  typedef enum logic [3:0] {
-    IDLE = 'b0000,
-
-    PTW0 = 'b1000,
-    PTW1 = 'b1001,
-    TRAP = 'b1010,
-
-    RD_A = 'b0001,  // re-check hit after PTW/MMU before issuing AXI fetch
-    RD_0 = 'b0010,
-    RD_1 = 'b0110,
-    FINA = 'b0111
+  typedef enum logic [2:0] {
+    IDLE  = 3'b000,
+    PTWAIT = 3'b100,  // waiting for PTW to complete
+    TRAP  = 3'b101,
+    RD_A  = 3'b001,   // re-check hit after PTW/MMU
+    RD_0  = 3'b010,
+    RD_1  = 3'b110,
+    FINA  = 3'b111
   } l1i_state_t;
 
   l1i_state_t l1i_state;
@@ -75,17 +72,11 @@ module ysyx_l1i #(
   logic wait_invalid;
 
   logic mmu_en;
-  logic [XLEN-1:10] tlb_ptag;
-  logic [XLEN-1:12] tlb_vtag;
-  logic tlb_valid;
   logic tlb_hit;
+  logic [XLEN-1:10] itlb_ptag;
   logic [11:0] tlb_offset;
 
   logic [XLEN-1:0] cause;
-
-  // page table walk
-  logic [9:0] vpn[2];
-  logic [XLEN-1+2:0] ppn_a;
 
   logic [$clog2(IFQ_SIZE)-1:0] ifq_head;
   logic [$clog2(IFQ_SIZE)-1:0] ifq_tail;
@@ -93,14 +84,23 @@ module ysyx_l1i #(
   logic [XLEN-1:0] ifq_raddr[IFQ_SIZE];
   /* verilator lint_on UNUSEDSIGNAL */
 
+  // PTW instance signals
+  logic ptw_req;
+  /* verilator lint_off UNUSEDSIGNAL */
+  logic ptw_busy;
+  /* verilator lint_on UNUSEDSIGNAL */
+  logic ptw_done, ptw_fault;
+  logic ptw_arvalid;
+  logic [XLEN-1:0] ptw_araddr;
+  logic [XLEN-1:10] ptw_result_ptag;
+  logic [XLEN-1:12] ptw_result_vtag;
+
   assign mmu_en = csr_bcast.immu_en;
-  assign pc_ifu = mmu_en ? {tlb_ptag, tlb_offset}[XLEN-1:0] : ifu_l1i.pc;
+  assign pc_ifu = mmu_en ? {itlb_ptag, tlb_offset}[XLEN-1:0] : ifu_l1i.pc;
   assign invalid_l1i = ifu_l1i.invalid;
   assign pc_ifu_next = pc_ifu + 2;
 
-  // page table walk
   assign tlb_offset = ifu_l1i.pc[11:0];
-  assign tlb_hit = tlb_valid && (tlb_vtag == ifu_l1i.pc[XLEN-1:12]);
 
   assign addr_tag = pc_ifu[XLEN-1:L1I_LEN+L1I_LINE_LEN+2];
   assign addr_idx = pc_ifu[L1I_LEN+L1I_LINE_LEN+2-1:L1I_LINE_LEN+2];
@@ -115,23 +115,15 @@ module ysyx_l1i #(
   assign offset_fetch = fetch_addr[L1I_LINE_LEN+2-1:2];
   assign idx_fetch = fetch_addr[L1I_LEN+L1I_LINE_LEN+2-1:L1I_LINE_LEN+2];
 
-  assign raddr_valid = csr_bcast.immu_en || ((0)
-    || (l1i_addr >= 'h02000048 && l1i_addr < 'h02000050)  // clint
-    || (l1i_addr >= 'h0f000000 && l1i_addr < 'h0f002000)  // sram
-    || (l1i_addr >= 'h10000000 && l1i_addr < 'h10001000)  // uart/ns16550
-    || (l1i_addr >= 'h10010000 && l1i_addr < 'h10011900)  // liteuart0/csr
-    || (l1i_addr >= 'h20000000 && l1i_addr < 'h20400000)  // mrom
-    || (l1i_addr >= 'h30000000 && l1i_addr < 'h40000000)  // flash
-    || (l1i_addr >= 'h80000000 && l1i_addr < 'h88000000)  // psram
-    || (l1i_addr >= 'ha0000000 && l1i_addr < 'ha2000000)  // sdram
-  );
+  assign raddr_valid = csr_bcast.immu_en || ysyx_pkg::addr_valid(l1i_addr);
 
-  assign l1i_bus.araddr = (l1i_state == PTW1 || l1i_state == PTW0)
-    ? ppn_a[XLEN-1:0]
+  // Bus mux: PTW takes priority over cache fill
+  assign l1i_bus.araddr = ptw_arvalid
+    ? ptw_araddr
     : (l1i_state == RD_0)
       ? (l1i_addr & ~'h4)
       : (l1i_addr | 'h4);
-  assign l1i_bus.arvalid = (l1i_state == PTW1 || l1i_state == PTW0)
+  assign l1i_bus.arvalid = ptw_arvalid
     ? 1'b1
     : raddr_valid && (ifu_sdram_arburst
       ? (l1i_state == RD_0)
@@ -149,27 +141,54 @@ module ysyx_l1i #(
   assign ifu_sdram_arburst = (`YSYX_I_SDRAM_ARBURST)
     && (l1i_addr >= 'ha0000000)
     && (l1i_addr <= 'hc0000000);
+  assign l1i_bus.arburst = ifu_sdram_arburst;
 
   // Fill write condition — suppress during PTW states where the bus is used for
   // page table reads (IFQ is always empty during PTW, but be explicit)
   logic l1i_fill_en;
   assign l1i_fill_en = l1i_bus.rvalid && ifq_valid[ifq_tail]
-    && (l1i_state != PTW0 && l1i_state != PTW1);
+    && (l1i_state != PTWAIT);
 
 `ifdef YSYX_RV64
-  // For RV64, pmem_read returns an 8-byte naturally-aligned word. L1I always
-  // does 4-byte reads (arsize=010), so we must select the correct 32-bit half
-  // based on bit[2] of the requested address.
-  // - Fill path: fetch_addr[2] tracks which word was requested
-  // - PTW path: ppn_a[2] is the PTE address bit[2]
   logic [31:0] l1i_fill_data;
   assign l1i_fill_data = fetch_addr[2] ? l1i_bus.rdata[63:32] : l1i_bus.rdata[31:0];
-  logic [31:0] l1i_ptw_data;
-  assign l1i_ptw_data = ppn_a[2] ? l1i_bus.rdata[63:32] : l1i_bus.rdata[31:0];
 `else
   wire [31:0] l1i_fill_data = l1i_bus.rdata[31:0];
-  wire [31:0] l1i_ptw_data = l1i_bus.rdata[31:0];
 `endif
+
+  // --- ITLB ---
+  ysyx_tlb #(.XLEN(XLEN)) u_itlb (
+      .clock(clock),
+      .reset(reset),
+      .flush(cmu_bcast.fence_time),
+      .lookup_vtag(ifu_l1i.pc[XLEN-1:12]),
+      .lookup_asid(csr_bcast.satp_asid),
+      .hit(tlb_hit),
+      .ptag(itlb_ptag),
+      .fill_valid((l1i_state == PTWAIT) && ptw_done),
+      .fill_ptag(ptw_result_ptag),
+      .fill_vtag(ptw_result_vtag),
+      .fill_asid(csr_bcast.satp_asid)
+  );
+
+  // --- PTW ---
+  ysyx_ptw #(.XLEN(XLEN)) u_iptw (
+      .clock(clock),
+      .reset(reset),
+      .req_valid(ptw_req),
+      .vaddr(ifu_l1i.pc),
+      .satp_ppn(csr_bcast.satp_ppn),
+      .mmu_en(mmu_en),
+      .bus_arvalid(ptw_arvalid),
+      .bus_araddr(ptw_araddr),
+      .bus_rvalid(l1i_bus.rvalid),
+      .bus_rdata(l1i_bus.rdata),
+      .done(ptw_done),
+      .fault(ptw_fault),
+      .result_ptag(ptw_result_ptag),
+      .result_vtag(ptw_result_vtag),
+      .busy(ptw_busy)
+  );
 
   // Data SRAM bank instantiation and address routing
   // Each bank stores one word position of every cache set.
@@ -239,6 +258,12 @@ module ysyx_l1i #(
   assign ifu_l1i.valid = l1i_state == TRAP ? rec_addr == ifu_l1i.pc
     : (hit && sram_data_ready && (hit_next || is_c) && !wait_invalid);
 
+  // PTW request: TLB miss in IDLE when MMU enabled and address is nonzero
+  assign ptw_req = (l1i_state == IDLE) && mmu_en && !tlb_hit
+      && !invalid_l1i && !wait_invalid && !cmu_bcast.flush_pipe
+      && !ptw_busy
+      && (ifu_l1i.pc != 0);
+
   always @(posedge clock) begin
     if (reset) begin
       l1i_state <= IDLE;
@@ -247,41 +272,30 @@ module ysyx_l1i #(
 
       l1i_valid <= 0;
       ifq_tail  <= 0;
-
-      tlb_valid <= 0;
     end else begin
       unique case (l1i_state)
         IDLE: begin
           if (!invalid_l1i && !wait_invalid && !cmu_bcast.flush_pipe) begin
             if (mmu_en) begin
-              // tlb lookup
               if (tlb_hit) begin
-                // $display("[I] MMU hit pc: %h", ifu_l1i.pc);
                 rec_addr <= ifu_l1i.pc;
                 if (!hit) begin
-                  // Current line missing: enter RD_A to re-check after registering
-                  // rec_addr (handles race where a concurrent fill completes)
                   l1i_addr <= pc_ifu;
                   l1i_state <= RD_A;
                 end else if (!hit_next) begin
-                  // Current line hits, next line missing: address is known, skip RD_A
                   l1i_addr <= pc_ifu_next;
                   l1i_state <= RD_0;
                 end
               end else begin
-                // $display("[I] MMU miss pc: %h", ifu_l1i.pc);
                 if (ifu_l1i.pc == 0) begin
                   rec_addr <= 0;
-                  cause <= 'h1; // instruction page fault
+                  cause <= 'h1; // instruction access fault
                   l1i_state <= TRAP;
-                end else begin
-                  // page table walk
-                  vpn[1] <= ifu_l1i.pc[31:22];
-                  vpn[0] <= ifu_l1i.pc[21:12];
-                  ppn_a <= {{csr_bcast.satp_ppn}, 12'b0} + (ifu_l1i.pc[31:22] * 4);
+                end else if (!ptw_busy) begin
+                  // PTW request issued via ptw_req
                   l1i_addr <= ifu_l1i.pc;
                   rec_addr <= ifu_l1i.pc;
-                  l1i_state <= PTW1;
+                  l1i_state <= PTWAIT;
                 end
               end
             end else begin
@@ -296,54 +310,19 @@ module ysyx_l1i #(
             end
           end
         end
-        PTW1: begin
-          if (mmu_en) begin
-            if (l1i_bus.rvalid) begin
-              // $display("[I-PTW1] vpn1: %h, vpn0: %h, ppn_a: %h, pte1: %h",
-              //   vpn[1], vpn[0], ppn_a, l1i_ptw_data);
-              if (l1i_ptw_data == 0) begin
-                l1i_state <= TRAP;
-                cause <= 'hc; // instruction page fault
-              end else if (l1i_ptw_data[2] == 'b1 || l1i_ptw_data[1] == 'b1) begin
-                // inst page table walk finish
-                l1i_addr <= XLEN'({l1i_ptw_data[31:20], vpn[0], tlb_offset});
-                tlb_ptag <= {l1i_ptw_data[31:20], vpn[0]};
-                tlb_vtag <= {vpn[1], vpn[0]};
-                tlb_valid <= 'b1;
-                l1i_state <= RD_A;
-              end else begin
-                ppn_a <= {l1i_ptw_data[31:10], 12'b0} + (vpn[0] * 4);
-                l1i_state <= PTW0;
-              end
-            end
-          end else begin
+        PTWAIT: begin
+          if (cmu_bcast.flush_pipe) begin
             l1i_state <= IDLE;
-          end
-        end
-        PTW0: begin
-          if (mmu_en) begin
-            if (l1i_bus.rvalid) begin
-              // $display("[I-PTW0] pte0: %h, paddr: %h",
-              //  l1i_ptw_data, {l1i_ptw_data[31:10], tlb_offset});
-              if (l1i_ptw_data == 0) begin
-                l1i_state <= TRAP;
-                cause <= 'hc; // instruction page fault
-              end else begin
-                // inst page table walk finish
-                l1i_addr <= XLEN'({l1i_ptw_data[31:10], tlb_offset});
-                tlb_ptag <= l1i_ptw_data[31:10];
-                tlb_vtag <= {vpn[1], vpn[0]};
-                tlb_valid <= 'b1;
-                l1i_state <= RD_A;
-              end
-            end
-          end else begin
-            l1i_state <= IDLE;
+          end else if (ptw_done) begin
+            // PTW completed — TLB filled by u_itlb, compute physical address
+            l1i_addr <= XLEN'({ptw_result_ptag, tlb_offset});
+            l1i_state <= RD_A;
+          end else if (ptw_fault) begin
+            cause <= 'hc; // instruction page fault
+            l1i_state <= TRAP;
           end
         end
         TRAP: begin
-          // trap due to page table walk fail
-          // $display("[I-TRAP] pc: %h, cause: %d", ifu_l1i.pc, cause);
           l1i_state <= IDLE;
         end
         RD_A: begin

@@ -237,16 +237,9 @@ module ysyx_csr #(
         csr[MCYCLEH] <= csr[MCYCLEH] + 1;
       end
       if (rou_csr.valid) begin
-        if (raddr_reg == TIME___
-         || raddr_reg == TIMEH__
-         || raddr_reg == MCYCLE_
-         || raddr_reg == MCYCLEH
-        ) begin
-          `YSYX_DPI_C_NPC_DIFFTEST_SKIP_REF
-        end
         if (rou_csr.csr_wen) begin
           if (waddr_reg == MEDELEG) begin
-            csr[waddr_reg] <= (rou_csr.csr_wdata & 'hf4bfff);
+            csr[waddr_reg] <= (rou_csr.csr_wdata & 'hf4bffe);
           end else begin
             csr[waddr_reg] <= (rou_csr.csr_wdata);
             if (waddr_reg == MSTATUS) begin

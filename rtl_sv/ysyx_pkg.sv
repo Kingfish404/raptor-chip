@@ -62,57 +62,76 @@ package ysyx_pkg;
   // ROB entry - aggregates all per-entry fields for clarity
   typedef struct packed {
     // Physical register mapping
-    logic [PLEN-1:0]  prd;
-    logic [PLEN-1:0]  prs;
+    logic [PLEN-1:0] prd;
+    logic [PLEN-1:0] prs;
 
     // Architectural register
-    logic [RLEN-1:0]  rd;
-    rob_state_t       state;
-    logic             busy;
+    logic [RLEN-1:0] rd;
+    rob_state_t      state;
+    logic            busy;
 
     // Branch / jump
-    logic             ben;
-    logic             jen;
-    logic             jren;
-    logic             btaken;
-    logic [XLEN-1:0]  npc;
-    logic [XLEN-1:0]  pnpc;
+    logic            ben;
+    logic            jen;
+    logic            jren;
+    logic            btaken;
+    logic [XLEN-1:0] npc;
+    logic [XLEN-1:0] pnpc;
 
     // Memory
-    logic             wen;
-    logic             word;  // RV64 W-variant flag
-    logic [4:0]       alu;
-    logic [XLEN-1:0]  sq_waddr;
-    logic [XLEN-1:0]  sq_wdata;
+    logic            wen;
+    logic            word;      // RV64 W-variant flag
+    logic [4:0]      alu;
+    logic [XLEN-1:0] sq_waddr;
+    logic [XLEN-1:0] sq_wdata;
 
     // Atomics
-    logic             atom;
-    logic             atom_sc;
+    logic atom;
+    logic atom_sc;
 
     // System
-    logic             sys;
-    logic             ecall;
-    logic             ebreak;
-    logic             mret;
-    logic             sret;
+    logic sys;
+    logic ecall;
+    logic ebreak;
+    logic mret;
+    logic sret;
 
     // CSR
-    logic             csr_wen;
-    logic [XLEN-1:0]  csr_wdata;
-    logic [11:0]      csr_addr;
+    logic            csr_wen;
+    logic [XLEN-1:0] csr_wdata;
+    logic [11:0]     csr_addr;
 
     // Trap
-    logic             trap;
-    logic [XLEN-1:0]  tval;
-    logic [XLEN-1:0]  cause;
+    logic            trap;
+    logic [XLEN-1:0] tval;
+    logic [XLEN-1:0] cause;
 
     // Fence
-    logic             f_i;
-    logic             f_time;
+    logic f_i;
+    logic f_time;
+
+    // Difftest
+    logic difftest_skip;
 
     // Instruction info
-    logic [31:0]      inst;
-    logic [XLEN-1:0]  pc;
+    logic [31:0]     inst;
+    logic [XLEN-1:0] pc;
   } rob_entry_t;
+
+  // Shared address classification functions for L1I/L1D
+  function automatic logic addr_cacheable(input logic [XLEN-1:0] addr);
+    return (addr >= 'h20000000 && addr < 'h20400000)  // mrom
+    || (addr >= 'h30000000 && addr < 'h40000000)  // flash
+    || (addr >= 'h80000000 && addr < 'h88000000)  // psram
+    || (addr >= 'ha0000000 && addr < 'ha2000000);  // sdram
+  endfunction
+
+  function automatic logic addr_valid(input logic [XLEN-1:0] addr);
+    return (addr >= 'h02000048 && addr < 'h02000050)  // clint
+        || (addr >= 'h0f000000 && addr < 'h0f002000)  // sram
+        || (addr >= 'h10000000 && addr < 'h10001000)  // uart/ns16550
+        || (addr >= 'h10010000 && addr < 'h10011900)  // liteuart0/csr
+        || addr_cacheable(addr);
+  endfunction
 
 endpackage

@@ -232,6 +232,7 @@ module ysyx_rou #(
         rob_entry[wb_dest_ioq].tval   <= exu_ioq_bcast.tval;
         rob_entry[wb_dest_ioq].cause  <= exu_ioq_bcast.cause;
         rob_entry[wb_dest_ioq].inst   <= exu_ioq_bcast.inst;
+        rob_entry[wb_dest_ioq].difftest_skip <= exu_ioq_bcast.difftest_skip;
       end
 
       // ---- Write-back from EXU (ALU/branch completion) ----
@@ -252,6 +253,7 @@ module ysyx_rou #(
         rob_entry[wb_dest_exu].trap      <= exu_rou.trap;
         rob_entry[wb_dest_exu].tval      <= exu_rou.tval;
         rob_entry[wb_dest_exu].cause     <= exu_rou.cause;
+        rob_entry[wb_dest_exu].difftest_skip <= exu_rou.difftest_skip;
       end
 
       // ---- Commit: retire ROB head ----
@@ -317,6 +319,7 @@ module ysyx_rou #(
   assign rou_cmu.fence_i    = head_valid && rob_entry[h].f_i;
   assign rou_cmu.flush_pipe = flush_pipe;
   assign rou_cmu.time_trap  = recieved_trap;
+  assign rou_cmu.difftest_skip = !recieved_trap && rob_entry[h].difftest_skip;
   assign rou_cmu.valid      = recieved_trap ? 1'b0 : head_valid;
 
   // ---- CSR interface ----
@@ -329,7 +332,7 @@ module ysyx_rou #(
   assign rou_csr.mret      = recieved_trap ? 1'b0    : rob_entry[h].mret;
   assign rou_csr.sret      = recieved_trap ? 1'b0    : rob_entry[h].sret;
   assign rou_csr.trap      = recieved_trap || rob_entry[h].trap;
-  assign rou_csr.tval      = recieved_trap ? trap_pc : rob_entry[h].tval;
+  assign rou_csr.tval      = recieved_trap ? '0      : rob_entry[h].tval;
   assign rou_csr.cause     = recieved_trap
       ? ((csr_bcast.priv == `YSYX_PRIV_M) ? 'h7 : 'h5) + ('b1 << (XLEN - 1))
       : rob_entry[h].cause;

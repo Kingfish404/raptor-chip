@@ -68,6 +68,8 @@ word_t vaddr_ifetch(vaddr_t addr, int len)
 word_t vaddr_read(vaddr_t addr, int len)
 {
   g_vaddr = addr;
+  cpu.rvaddr = addr;
+  cpu.rlen = len;
   if ((addr % len) != 0)
   {
     cause = MCA_LOA_ADD_MIS;
@@ -87,7 +89,9 @@ word_t vaddr_read(vaddr_t addr, int len)
     // printf("dr: addr = " FMT_WORD "\n", addr);
     paddr = isa_mmu_translate(addr, len, MEM_TYPE_READ);
   }
-  return paddr_read(paddr, len);
+  cpu.rpaddr = paddr;
+  cpu.rdata = paddr_read(paddr, len);
+  return cpu.rdata;
 }
 
 void vaddr_write(vaddr_t addr, int len, word_t data)

@@ -41,7 +41,7 @@ BUILD_DIR = ./build
 DATA_DIR = ./data
 OBJ_DIR = $(BUILD_DIR)/obj_dir
 BIN = $(BUILD_DIR)/$(VTARGET)-$(CONFIG_MODE)
-VERILATOR_FLAG =--prof-c --prof-cfuncs --prof-exec \
+VERILATOR_FLAG =--prof-c --prof-cfuncs \
 	--public \
 	--autoflush --timescale "1ns/1ns" --no-timing \
 	-Wno-WIDTHEXPAND -Wno-WIDTHTRUNC # -Wall -Wno-DECLFILENAME -Wno-UNUSED

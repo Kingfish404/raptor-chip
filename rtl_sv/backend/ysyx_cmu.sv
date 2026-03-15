@@ -54,6 +54,9 @@ module ysyx_cmu #(
         if (rou_cmu.ebreak) begin
           `YSYX_DPI_C_NPC_EXU_EBREAK
         end
+        if (rou_cmu.difftest_skip) begin
+          `YSYX_DPI_C_NPC_DIFFTEST_SKIP_REF
+        end
         rpc  <= rou_cmu.pc;
         npc  <= rou_cmu.npc;
         inst <= rou_cmu.inst;
