@@ -22,9 +22,9 @@ CFLAGS = -g -O2 -MMD -Wall \
 	-fno-asynchronous-unwind-tables -fno-builtin -fno-stack-protector \
 	-nostartfiles -ffreestanding $(COMMON_CFLAGS) -nostdlib
 
-all: $(IMAGE).elf $(IMAGE).bin
+all: $(IMAGE).elf $(IMAGE).bin ## Build MROM data (elf + bin)
 
-dtb.c: raptor.dts spike-rv32ima.dts
+dtb.c: raptor.dts spike-rv32ima.dts ## Generate DTB C source
 	# brew install dtc
 	dtc spike-rv32ima.dts -o raptor.dtb
 	xxd -i raptor.dtb > dtb.c
@@ -37,5 +37,5 @@ $(IMAGE).bin: $(IMAGE).elf
 	$(OBJDUMP) -d $(IMAGE).elf > $(IMAGE).txt
 	$(OBJCOPY) -S --set-section-flags .bss=alloc,contents -O binary $(IMAGE).elf $(IMAGE).bin
 
-clean:
+clean: ## Clean build artifacts
 	rm -rf ./build/

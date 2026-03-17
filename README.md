@@ -1,6 +1,7 @@
 # Raptor Project
 
 [![build & eval](https://github.com/Kingfish404/raptor-chip/actions/workflows/build.yaml/badge.svg)](https://github.com/Kingfish404/raptor-chip/actions/workflows/build.yaml)
+[![cpu tests](https://github.com/Kingfish404/raptor-chip/actions/workflows/test.yaml/badge.svg)](https://github.com/Kingfish404/raptor-chip/actions/workflows/test.yaml)
 [![Ubuntu](https://img.shields.io/badge/Ubuntu-E95420?style=flat&logo=ubuntu&logoColor=white)](https://en.wikipedia.org/wiki/Ubuntu)
 [![macOS](https://img.shields.io/badge/macOS-000000?style=flat&logo=apple&logoColor=white)](https://en.wikipedia.org/wiki/MacOS)
 [![Github](https://img.shields.io/badge/GitHub-181717?style=flat&logo=github&logoColor=white)](https://github.dev/Kingfish404/raptor-chip)
@@ -59,11 +60,11 @@ make menuconfig-nemu32
 ### 2. NPC Simulation (Verilator)
 
 ```shell
-# Full pipeline: generate RTL → configure → build → run
+# Full pipeline: generate RTL -> configure -> build -> run
 make sim-npc32
 
 # Or step by step
-make verilog              # Chisel → SystemVerilog
+make verilog              # Chisel -> SystemVerilog
 make config-npc32         # configure (o2_defconfig)
 make build-npc32          # build Verilator simulator
 make run-npc32            # run simulation
@@ -79,7 +80,7 @@ make menuconfig-npc32
 
 #### RV64 Mode
 
-The processor supports RV64 via a compile-time switch (`-DYSYX_RV64`). Switching between RV32 and RV64 automatically invalidates the build cache — no manual `make clean` needed.
+The processor supports RV64 via a compile-time switch (`-DYSYX_RV64`). Switching between RV32 and RV64 automatically invalidates the build cache, no manual `make clean` needed.
 
 ```shell
 # Build and run in RV64 mode (convenience targets)

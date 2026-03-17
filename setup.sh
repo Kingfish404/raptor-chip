@@ -48,12 +48,12 @@ apt_install() {
 repo_clone() {
   mkdir -p third_party/NJU-ProjectN
   mkdir -p third_party/kingfish404
-  git clone https://github.com/kingfish404/am-kernels
-  git clone https://github.com/Kingfish404/ysyxSoC third_party/kingfish404/ysyxSoC
-  git clone https://github.com/NJU-ProjectN/nvboard third_party/NJU-ProjectN/nvboard
+  [ -d am-kernels ] || git clone --depth 1 https://github.com/kingfish404/am-kernels
+  [ -d third_party/kingfish404/ysyxSoC ] || git clone --depth 1 https://github.com/Kingfish404/ysyxSoC third_party/kingfish404/ysyxSoC
+  [ -d third_party/NJU-ProjectN/nvboard ] || git clone --depth 1 https://github.com/NJU-ProjectN/nvboard third_party/NJU-ProjectN/nvboard
 
   mkdir -p third_party/riscv-software-src/
-  git clone https://github.com/riscv-software-src/opensbi third_party/riscv-software-src/opensbi
+  [ -d third_party/riscv-software-src/opensbi ] || git clone --depth 1 https://github.com/riscv-software-src/opensbi third_party/riscv-software-src/opensbi
 }
 
 repo_init() {
@@ -83,7 +83,11 @@ brew_init
 
 step=$((step + 1))
 echo "Step $step: Installing development tools..."
-brew_install
+if command -v verilator &> /dev/null; then
+  echo "Development tools already installed, skipping brew_install"
+else
+  brew_install
+fi
 
 step=$((step + 1))
 echo "Step $step: Cloning repositories..."
@@ -91,7 +95,11 @@ repo_clone
 
 step=$((step + 1))
 source ./env.sh
-make -C ./rtl_scala verilog -j`nproc`
+if [ -d rtl_sv/generated ] && [ "$(ls -A rtl_sv/generated 2>/dev/null)" ]; then
+  echo "Step $step: rtl_sv/generated/ exists, skipping Chisel verilog generation"
+else
+  make -C ./rtl_scala verilog -j`nproc`
+fi
 make -C ./nsim pack
 echo "Step $step: Build environment setup complete."
 

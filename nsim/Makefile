@@ -52,7 +52,7 @@ CXXFLAGS = -Wall -Werror \
 LDFLAGS = -lreadline -ldl
 
 # RV64 support: pass VFLAGS="-DYSYX_RV64" to enable 64-bit mode
-VFLAGS ?=
+VFLAGS ?= ## Enable RV64 mode (-DYSYX_RV64)
 ifneq (,$(findstring DYSYX_RV64,$(VFLAGS)))
 CXXFLAGS += -DCONFIG_ISA64
 ISA64 = 1
@@ -90,7 +90,7 @@ endif
 $(NSIM_HOME)/csrc/mem/mrom-data/build/mrom-data.bin:
 	$(MAKE) -C $(NSIM_HOME)/csrc/mem/mrom-data ISA64=$(ISA64)
 
-all: $(BIN)
+all: $(BIN) ## Build NPC simulator
 
 ifeq ($(CONFIG_NVBoard),y) # rules for NVBoard
 include $(NVBOARD_HOME)/scripts/nvboard.mk
@@ -120,19 +120,19 @@ DIFF_REF_SO = -d $(abspath $(NEMU_HOME)/build/riscv64-nemu-interpreter-so)
 else
 DIFF_REF_SO = -d $(abspath $(NEMU_HOME)/build/riscv32-nemu-interpreter-so)
 endif
-IMG ?=
+IMG ?= ## Custom image to load
 NPC_EXEC := $(BIN) $(ARGS) $(DIFF_REF_SO) -m $(MROM_IMG) $(IMG)
 
-verilog:
+verilog: ## Generate SystemVerilog from Chisel
 	make -C ssrc verilog
 
-run: $(BIN) $(MROM_IMG)
+run: $(BIN) $(MROM_IMG) ## Run NPC simulation
 	$(NPC_EXEC)
 
-run_log: $(BIN) $(MROM_IMG)
+run_log: $(BIN) $(MROM_IMG) ## Run NPC and log output
 	$(NPC_EXEC) 2>&1 | tee $(DATA_DIR)/npc.log
 
-sim: $(BIN)
+sim: $(BIN) ## Run NPC binary directly
 	@$^
 
 AM_KERNEL = $(YSYX_HOME)/third_party/kingfish404/am-kernels
@@ -141,7 +141,7 @@ AM_KERNEL:
 	mkdir -p $(abspath $(AM_KERNEL))
 	git clone https://github.com/kingfish404/am-kernels $(YSYX_HOME)/am-kernels
 
-perf:
+perf: ## Run microbenchmark for performance testing
 	if [ ! -d $(AM_KERNEL) ]; then make AM_KERNEL; fi
 	make -s -C $(AM_KERNEL)/benchmarks/microbench/ ARCH=riscv32-ysyxsoc ARGS='-b -n' mainargs=test run
 
@@ -149,31 +149,31 @@ YOSYS_OPENSTA = $(YSYX_HOME)/third_party/yosys-opensta
 
 YOSYS_OPENSTA:
 	git clone https://github.com/Kingfish404/yosys-opensta $(YOSYS_OPENSTA)
-	make -C $(YOSYS_OPENSTA) init init_opensta
+	make -C $(YOSYS_OPENSTA) setup-opensta setup-nangate45
 
-pack: $(VSRCS) $(VHSRCS)
+pack: $(VSRCS) $(VHSRCS) ## Pack all SV files into one
 	mkdir -p $(BUILD_DIR)
 	verilator -E -P $(addprefix -I, $(INC_PATH)) $(VSRCS) > $(BUILD_DIR)/ysyx_pack.sv
 	verilator -E -P --dump-defines $(addprefix -I, $(INC_PATH)) $(VSRCS) > $(BUILD_DIR)/ysyx_pack.svh
 
-sta: pack
+sta: pack ## Static timing analysis
 	echo $(MAKECMDGOALS)
 	if [ ! -d $(YOSYS_OPENSTA) ]; then make YOSYS_OPENSTA; fi
 	make -C $(YOSYS_OPENSTA) sta show \
 		DESIGN=ysyx \
 		RTL_FILES="$(abspath $(BUILD_DIR)/ysyx_pack.sv)"
 
-sta_local: pack
-	make -C $(YOSYS_OPENSTA) sta_local show \
+sta-detail: pack ## Detailed static timing analysis
+	make -C $(YOSYS_OPENSTA) sta-detail show \
 		DESIGN=ysyx \
 		RTL_FILES="$(abspath $(BUILD_DIR)/ysyx_pack.sv)"
 
-sta_show: pack
+sta_show: pack ## Show timing analysis results
 	make -C $(YOSYS_OPENSTA) show \
 		DESIGN=ysyx \
 		RTL_FILES="$(abspath $(BUILD_DIR)/ysyx_pack.sv)"
 
-lint:
+lint: ## Lint RTL with Verilator
 	$(VERILATOR) --lint-only -Wall $(VSRCS) $(INCFLAGS) $(VFLAGS) --top-module $(VTARGET)
 
 test:
@@ -181,8 +181,38 @@ test:
 
 include ../Makefile
 
+help: ## Show this help message
+	@echo "Usage: make <target> [VAR=value ...]"
+	@awk '\
+		BEGIN { state=0; pending=""; first_target=1 } \
+		/^# =+$$/ { \
+			if (state==0) state=1; \
+			else if (state==2) { pending=section; state=0 } \
+			else state=0; next } \
+		state==1 && /^# .+/ { section=substr($$0,3); state=2; next } \
+		{ if (state==1) state=0 } \
+		/^[a-zA-Z0-9_-]+:.*## / { \
+			if (pending!="") { printf "\n%s:\n", pending; pending="" } \
+			else if (first_target) printf "\nTargets:\n"; \
+			first_target=0; \
+			target=$$0; sub(/:.*/, "", target); \
+			desc=$$0; sub(/.*## /, "", desc); \
+			printf "  %-20s %s\n", target, desc }' $(firstword $(MAKEFILE_LIST))
+	@echo ""
+	@echo "Variables (override with VAR=value):"
+	@grep -hE '^[A-Z_]+\s*\?=' $(firstword $(MAKEFILE_LIST)) | \
+		awk '{ \
+			if (match($$0, /## /)) { \
+				name=$$0; sub(/\s*\?=.*/, "", name); \
+				desc=substr($$0, RSTART+3); \
+				printf "  %-20s %s\n", name, desc } \
+			else { \
+				split($$0, a, "\\?="); \
+				gsub(/^[ \t]+|[ \t]+$$/, "", a[1]); gsub(/^[ \t]+|[ \t]+$$/, "", a[2]); \
+				printf "  %-20s %s\n", a[1], a[2] } }'
+
 maintainer-copy::
-clean mostlyclean distclean maintainer-clean::
+clean mostlyclean distclean maintainer-clean:: ## Clean build artifacts
 	-rm -rf obj_dir *.log *.dmp *.vpd core $(BUILD_DIR)
 
 include ./scripts/config.mk

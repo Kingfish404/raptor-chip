@@ -17,6 +17,24 @@ INC_PATH ?=
 
 $(shell mkdir -p $(BUILD_DIR))
 
+help: ## Show this help message
+	@echo "Usage: make <target> [VAR=value ...]"
+	@awk '\
+		BEGIN { state=0; pending=""; first_target=1 } \
+		/^# =+$$/ { \
+			if (state==0) state=1; \
+			else if (state==2) { pending=section; state=0 } \
+			else state=0; next } \
+		state==1 && /^# .+/ { section=substr($$0,3); state=2; next } \
+		{ if (state==1) state=0 } \
+		/^[a-zA-Z0-9_-]+:.*## / { \
+			if (pending!="") { printf "\n%s:\n", pending; pending="" } \
+			else if (first_target) printf "\nTargets:\n"; \
+			first_target=0; \
+			target=$$0; sub(/:.*/, "", target); \
+			desc=$$0; sub(/.*## /, "", desc); \
+			printf "  %-20s %s\n", target, desc }' $(MAKEFILE_LIST)
+
 VSRCS = $(shell find $(abspath ./src) -name "*.v")
 CSRCS = $(shell find $(abspath ./src/csrc) -name "*.c" -or -name "*.cc")
 
@@ -31,23 +49,23 @@ $(BIN): $(VSRCS) $(CSRCS)
 		$(addprefix -CFLAGS , $(CXXFLAGS)) $(addprefix -LDFLAGS , $(LDFLAGS)) \
 		--Mdir $(OBJ_DIR) --exe -o $(abspath $(BIN))
 
-all:
+all: ## Build Verilator simulation
 	$(MAKE) $(BIN)
 
-sim: $(BIN)
+sim: $(BIN) ## Run Verilator simulation
 	$(BIN)
 
 test:
 	echo $(VTARGET)
 
-syn:
+syn: ## Synthesize for Gowin FPGA
 	mkdir -p impl/syn
 	yosys -p "read_verilog -sv -I src/include \
 		src/*.v src/gowin_rpll/*.v; \
 		synth_gowin -json impl/syn/fpga.json" \
 		| tee impl/syn/fpga-synth.log
 
-pnr:
+pnr: ## Place and route for Gowin FPGA
 	nextpnr-himbaechel \
 		--json impl/syn/fpga.json \
 		--write impl/syn/pnrfpga.json \
@@ -60,12 +78,12 @@ pnr:
 	gowin_pack -d GW2AR-LV18QN88C8/I7 \
 		-o impl/syn/fpga.fs \impl/syn/pnrfpga.json
 
-program_flash:
+program_flash: ## Program FPGA flash
 	openFPGALoader -b tangnano20k -f impl/pnr/fpga.fs
 
-program_sdram:
+program_sdram: ## Program FPGA SDRAM
 	openFPGALoader -b tangnano20k impl/pnr/fpga.fs
 
 maintainer-copy::
-clean mostlyclean distclean maintainer-clean::
+clean mostlyclean distclean maintainer-clean:: ## Clean build artifacts
 	-rm -rf obj_dir *.log *.dmp *.vpd core $(BUILD_DIR)

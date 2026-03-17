@@ -1,7 +1,25 @@
 PWD_DIR=$(abspath .)
 KERNEL_VERSION:=6.17.7
 
-all:
+help: ## Show this help message
+	@echo "Usage: make <target> [VAR=value ...]"
+	@awk '\
+		BEGIN { state=0; pending=""; first_target=1 } \
+		/^# =+$$/ { \
+			if (state==0) state=1; \
+			else if (state==2) { pending=section; state=0 } \
+			else state=0; next } \
+		state==1 && /^# .+/ { section=substr($$0,3); state=2; next } \
+		{ if (state==1) state=0 } \
+		/^[a-zA-Z0-9_-]+:.*## / { \
+			if (pending!="") { printf "\n%s:\n", pending; pending="" } \
+			else if (first_target) printf "\nTargets:\n"; \
+			first_target=0; \
+			target=$$0; sub(/:.*/, "", target); \
+			desc=$$0; sub(/.*## /, "", desc); \
+			printf "  %-20s %s\n", target, desc }' $(MAKEFILE_LIST)
+
+all: ## Show usage information
 	echo "PWD: $(PWD_DIR)"
 	echo "Kernel Version: $(KERNEL_VERSION)"
 	echo "Help: you should make one of the targets to build linux kernel and related files."
@@ -13,13 +31,13 @@ all:
 	echo "  - install_initramfs: Configure Linux kernel to use the created initramfs"
 	echo "  - build_opensbi_with_kernel: Build OpenSBI with the Linux kernel as payload"
 
-linux:
+linux: ## Download Linux kernel source
 	wget https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-$(KERNEL_VERSION).tar.xz
 	tar -xf linux-$(KERNEL_VERSION).tar.xz
 	mv linux-$(KERNEL_VERSION) linux
 	rm linux-$(KERNEL_VERSION).tar.xz
 
-build_linux: linux
+build_linux: linux ## Build Linux kernel for RISC-V 32-bit
 	make -C linux ARCH=riscv -j`nproc` defconfig
 
 	cd linux && \
@@ -39,7 +57,7 @@ build_linux: linux
 
 	make -C linux ARCH=riscv -j`nproc`
 
-make_initramfs:
+make_initramfs: ## Create initramfs image
 	mkdir initramfs && \
 		cd initramfs && \
  		mkdir --parents {bin,dev,etc,lib,lib64,mnt/root,proc,root/init-linux,sbin,sys,run} && \
@@ -49,26 +67,26 @@ make_initramfs:
 		sudo mknod dev/sda b 8 0
 	(cd initramfs && find . | cpio -o --format=newc | gzip > ../initramfs.cpio.gz)
 
-build_init:
+build_init: ## Build init process payload
 	make -C payload init_loop install
 
-install_initramfs:
+install_initramfs: ## Configure kernel to use initramfs
 # -> General setup -> Initial RAM filesystem and RAM disk (initramfs/initrd) support
 # -> [*] Initramfs source file(s) -> [PATH of initramfs] (e.g. `/home/[username]/initramfs`)
 	cd linux && ./scripts/config --set-str CONFIG_INITRAMFS_SOURCE $(PWD_DIR)/initramfs
 	make -C linux ARCH=riscv -j`nproc` olddefconfig
 
-opensbi:
+opensbi: ## Clone OpenSBI
 	git clone https://github.com/riscv-software-src/opensbi
 
-build_opensbi: opensbi
+build_opensbi: opensbi ## Build OpenSBI standalone
 	make -C opensbi PLATFORM_RISCV_ISA=rv32imac_zicntr_zicsr_zifencei \
 		CROSS_COMPILE=riscv64-linux-gnu- PLATFORM_RISCV_XLEN=32 PLATFORM=generic -j`nproc`
 
-build_opensbi_with_kernel: opensbi
+build_opensbi_with_kernel: opensbi ## Build OpenSBI with Linux kernel as payload
 	make -C opensbi PLATFORM_RISCV_ISA=rv32imac_zicntr_zicsr_zifencei \
 		CROSS_COMPILE=riscv64-linux-gnu- PLATFORM_RISCV_XLEN=32 PLATFORM=generic \
 		FW_PAYLOAD_PATH=$(PWD_DIR)/linux/arch/riscv/boot/Image -j`nproc`
 
-clean:
+clean: ## Clean all build artifacts
 	rm -rf linux initramfs initramfs.cpio.gz opensbi payload/build

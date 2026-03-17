@@ -17,6 +17,8 @@
 !setup.sh
 !env.sh
 !/.github/*
+!/.github/*/*
+!/.github/*/*/*
 !Dockerfile
 !*.v
 !*.vh
