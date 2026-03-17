@@ -149,7 +149,7 @@ YOSYS_OPENSTA = $(YSYX_HOME)/third_party/yosys-opensta
 
 YOSYS_OPENSTA:
 	git clone https://github.com/Kingfish404/yosys-opensta $(YOSYS_OPENSTA)
-	make -C $(YOSYS_OPENSTA) init init_opensta
+	make -C $(YOSYS_OPENSTA) setup-opensta setup-nangate45
 
 pack: $(VSRCS) $(VHSRCS)
 	mkdir -p $(BUILD_DIR)
@@ -163,8 +163,8 @@ sta: pack
 		DESIGN=ysyx \
 		RTL_FILES="$(abspath $(BUILD_DIR)/ysyx_pack.sv)"
 
-sta_local: pack
-	make -C $(YOSYS_OPENSTA) sta_local show \
+sta_detail: pack
+	make -C $(YOSYS_OPENSTA) sta_detail show \
 		DESIGN=ysyx \
 		RTL_FILES="$(abspath $(BUILD_DIR)/ysyx_pack.sv)"
 

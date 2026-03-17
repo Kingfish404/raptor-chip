@@ -1,6 +1,7 @@
 # Raptor Project
 
 [![build & eval](https://github.com/Kingfish404/raptor-chip/actions/workflows/build.yaml/badge.svg)](https://github.com/Kingfish404/raptor-chip/actions/workflows/build.yaml)
+[![cpu tests](https://github.com/Kingfish404/raptor-chip/actions/workflows/test.yaml/badge.svg)](https://github.com/Kingfish404/raptor-chip/actions/workflows/test.yaml)
 [![Ubuntu](https://img.shields.io/badge/Ubuntu-E95420?style=flat&logo=ubuntu&logoColor=white)](https://en.wikipedia.org/wiki/Ubuntu)
 [![macOS](https://img.shields.io/badge/macOS-000000?style=flat&logo=apple&logoColor=white)](https://en.wikipedia.org/wiki/MacOS)
 [![Github](https://img.shields.io/badge/GitHub-181717?style=flat&logo=github&logoColor=white)](https://github.dev/Kingfish404/raptor-chip)

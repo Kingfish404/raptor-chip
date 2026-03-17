@@ -410,7 +410,10 @@ lint:
 	$(MAKE) -C $(NSIM_HOME) lint VFLAGS="$(VFLAGS)"
 
 sta:
-	$(MAKE) -C $(NSIM_HOME) sta_local
+	$(MAKE) -C $(NSIM_HOME) sta
+
+sta_detail:
+	$(MAKE) -C $(NSIM_HOME) sta_detail
 
 clean-npc:
 	$(MAKE) -C $(NSIM_HOME) clean

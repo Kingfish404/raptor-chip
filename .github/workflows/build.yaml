@@ -13,20 +13,68 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build Docker image
         run: docker build . --file Dockerfile --tag sta:latest --build-arg CACHEBUST=$(date +%s)
-      - name: Show microbench riscv32-npc payload result (IPC, Mark)
-        run: docker run --rm sta:latest bash -c "make o2_defconfig && make -C /workspaces/raptor-chip/am-kernels/benchmarks/microbench ARCH=riscv32-npc run mainargs="test" ARGS="-b -n""
-      - name: Show microbench riscv32e-npc payload result (IPC, Mark)
-        run: docker run --rm sta:latest bash -c "make o2_defconfig && make -C /workspaces/raptor-chip/am-kernels/benchmarks/microbench ARCH=riscv32e-npc run mainargs="test" ARGS="-b -n""
-      - name: Show coremark riscv32-npc payload result (IPC, Mark)
-        run: docker run --rm sta:latest bash -c "make o2_defconfig && make -C /workspaces/raptor-chip/am-kernels/benchmarks/coremark_eembc ARCH=riscv32-npc run mainargs="test" ARGS="-b -n""
-      - name: Show coremark riscv32e-npc payload result (IPC, Mark)
-        run: docker run --rm sta:latest bash -c "make o2_defconfig && make -C /workspaces/raptor-chip/am-kernels/benchmarks/coremark_eembc ARCH=riscv32e-npc run mainargs="test" ARGS="-b -n""
-      - name: Show RISC-V Architecture Test result riscv32-npclinux-npc-test
-        run: docker run --rm sta:latest bash -c "make o2_defconfig && make -C /workspaces/raptor-chip/riscv-arch-test-am ARCH=riscv32-npc run ARGS="-b -n""
-      - name: Show RISC-V Architecture Test result riscv32e-npc
-        run: docker run --rm sta:latest bash -c "make o2_defconfig && make -C /workspaces/raptor-chip/riscv-arch-test-am ARCH=riscv32e-npc run ARGS="-b -n""
-      - name: Show STA result (Power, Frequency, Area)
-        run: docker run --rm sta:latest bash -c "make sta_local 2>&1 | tail -256"
+
+      - name: Run microbench riscv32-npc
+        run: |
+          mkdir -p .github/results
+          docker run --rm sta:latest bash -c \
+            "make o2_defconfig && make -C /workspaces/raptor-chip/am-kernels/benchmarks/microbench ARCH=riscv32-npc run mainargs=\"test\" ARGS=\"-b -n\"" \
+            2>&1 | tee /tmp/microbench-npc.log
+          bash .github/scripts/parse-benchmark.sh microbench /tmp/microbench-npc.log > .github/results/microbench-npc.txt
+
+      - name: Run microbench riscv32e-npc
+        run: |
+          docker run --rm sta:latest bash -c \
+            "make o2_defconfig && make -C /workspaces/raptor-chip/am-kernels/benchmarks/microbench ARCH=riscv32e-npc run mainargs=\"test\" ARGS=\"-b -n\"" \
+            2>&1 | tee /tmp/microbench-npce.log
+          bash .github/scripts/parse-benchmark.sh microbench /tmp/microbench-npce.log > .github/results/microbench-npce.txt
+
+      - name: Run coremark riscv32-npc
+        run: |
+          docker run --rm sta:latest bash -c \
+            "make o2_defconfig && make -C /workspaces/raptor-chip/am-kernels/benchmarks/coremark_eembc ARCH=riscv32-npc run mainargs=\"test\" ARGS=\"-b -n\"" \
+            2>&1 | tee /tmp/coremark-npc.log
+          bash .github/scripts/parse-benchmark.sh coremark /tmp/coremark-npc.log > .github/results/coremark-npc.txt
+
+      - name: Run coremark riscv32e-npc
+        run: |
+          docker run --rm sta:latest bash -c \
+            "make o2_defconfig && make -C /workspaces/raptor-chip/am-kernels/benchmarks/coremark_eembc ARCH=riscv32e-npc run mainargs=\"test\" ARGS=\"-b -n\"" \
+            2>&1 | tee /tmp/coremark-npce.log
+          bash .github/scripts/parse-benchmark.sh coremark /tmp/coremark-npce.log > .github/results/coremark-npce.txt
+
+      - name: Run RISC-V Architecture Test riscv32-npc
+        run: |
+          docker run --rm sta:latest bash -c \
+            "make o2_defconfig && make -C /workspaces/raptor-chip/riscv-arch-test-am ARCH=riscv32-npc run ARGS=\"-b -n\"" \
+            2>&1 | tee /tmp/archtest-npc.log
+          bash .github/scripts/parse-benchmark.sh archtest /tmp/archtest-npc.log > .github/results/archtest-npc.txt
+
+      - name: Run RISC-V Architecture Test riscv32e-npc
+        run: |
+          docker run --rm sta:latest bash -c \
+            "make o2_defconfig && make -C /workspaces/raptor-chip/riscv-arch-test-am ARCH=riscv32e-npc run ARGS=\"-b -n\"" \
+            2>&1 | tee /tmp/archtest-npce.log
+          bash .github/scripts/parse-benchmark.sh archtest /tmp/archtest-npce.log > .github/results/archtest-npce.txt
+
+      - name: Run STA (Power, Frequency, Area)
+        run: |
+          docker run --rm sta:latest bash -c "make sta_local 2>&1" | tee /tmp/sta.log | tail -256
+          bash .github/scripts/parse-benchmark.sh sta /tmp/sta.log > .github/results/sta.txt
+
+      - name: Generate benchmark summary
+        run: bash .github/scripts/generate-summary.sh .github/results .github/benchmark-results.json "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results-${{ github.sha }}
+          path: |
+            .github/benchmark-results.json
+            .github/results/
+          retention-days: 90
+          overwrite: true
+
       - name: Clean up
         run: docker rmi sta:latest
 
@@ -51,7 +99,21 @@ jobs:
         run: wget https://github.com/user-attachments/files/23468431/linux-6.12.57.zip && unzip linux-6.12.57.zip
       - name: Boot Linux
         shell: bash -l {0}
-        run: timeout 2700s make -C nsim run IMG=../linux-6.12.57/fw_payload.bin ARGS="-b -n" || true
+        run: timeout 2700s make -C nsim run IMG=../linux-6.12.57/fw_payload.bin ARGS="-b -n" 2>&1 | tee /tmp/linux-boot.log || true
+      - name: Linux boot summary
+        run: |
+          BOOT_OK="no"
+          grep -q "Freeing unused kernel memory" /tmp/linux-boot.log && BOOT_OK="yes"
+          LOGIN="no"
+          grep -q "login:" /tmp/linux-boot.log && LOGIN="yes"
+          {
+            echo ""
+            echo "## Linux Boot Test (NPC)"
+            echo "| Check | Status |"
+            echo "|-------|--------|"
+            echo "| Kernel boot | $([ "$BOOT_OK" = "yes" ] && echo '✅ OK' || echo '❌ FAIL') |"
+            echo "| Reaches login | $([ "$LOGIN" = "yes" ] && echo '✅ OK' || echo '❌ FAIL') |"
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Pack RTL into single file
         shell: bash -l {0}
         run: make pack
@@ -111,16 +173,36 @@ jobs:
         run: make -C $NEMU_HOME riscv32_ref_defconfig && make -C $NEMU_HOME
       - name: Show microbench riscv32-ysyxsoc payload result
         shell: bash -l {0}
-        run: make -C $YSYX_HOME/am-kernels/benchmarks/microbench ARCH=riscv32-ysyxsoc run mainargs="test" ARGS="-b -n"
+        run: |
+          make -C $YSYX_HOME/am-kernels/benchmarks/microbench ARCH=riscv32-ysyxsoc run mainargs="test" ARGS="-b -n" 2>&1 | tee /tmp/mb-soc.log
       - name: Show microbench riscv32e-ysyxsoc payload result
         shell: bash -l {0}
-        run: make -C $YSYX_HOME/am-kernels/benchmarks/microbench ARCH=riscv32e-ysyxsoc run mainargs="test" ARGS="-b -n"
+        run: |
+          make -C $YSYX_HOME/am-kernels/benchmarks/microbench ARCH=riscv32e-ysyxsoc run mainargs="test" ARGS="-b -n" 2>&1 | tee /tmp/mb-soce.log
       - name: Show coremark riscv32-ysyxsoc payload result
         shell: bash -l {0}
-        run: make -C $YSYX_HOME/am-kernels/benchmarks/coremark_eembc ARCH=riscv32-ysyxsoc run ARGS="-b -n"
+        run: |
+          make -C $YSYX_HOME/am-kernels/benchmarks/coremark_eembc ARCH=riscv32-ysyxsoc run ARGS="-b -n" 2>&1 | tee /tmp/cm-soc.log
       - name: Show coremark riscv32e-ysyxsoc payload result
         shell: bash -l {0}
-        run: make -C $YSYX_HOME/am-kernels/benchmarks/coremark_eembc ARCH=riscv32e-ysyxsoc run ARGS="-b -n"
+        run: |
+          make -C $YSYX_HOME/am-kernels/benchmarks/coremark_eembc ARCH=riscv32e-ysyxsoc run ARGS="-b -n" 2>&1 | tee /tmp/cm-soce.log
+      - name: ysyxSoC benchmark summary
+        shell: bash -l {0}
+        run: |
+          extract_ipc() { grep -oP 'IPC:\s*\K[0-9.]+' "$1" 2>/dev/null | head -1 || echo "N/A"; }
+          extract_score() { grep -oP '\d+(?=(/1000)? Marks)' "$1" 2>/dev/null | head -1 || echo "N/A"; }
+          extract_trap() { grep -oE 'HIT (GOOD|BAD) TRAP' "$1" 2>/dev/null | head -1 || echo "N/A"; }
+          {
+            echo ""
+            echo "## ysyxSoC Benchmark Results"
+            echo "| Benchmark | Target | Score | IPC | Status |"
+            echo "|-----------|--------|-------|-----|--------|"
+            echo "| CoreMark  | riscv32-ysyxsoc  | $(extract_score /tmp/cm-soc.log) | $(extract_ipc /tmp/cm-soc.log) | $(extract_trap /tmp/cm-soc.log) |"
+            echo "| CoreMark  | riscv32e-ysyxsoc | $(extract_score /tmp/cm-soce.log) | $(extract_ipc /tmp/cm-soce.log) | $(extract_trap /tmp/cm-soce.log) |"
+            echo "| MicroBench | riscv32-ysyxsoc  | $(extract_score /tmp/mb-soc.log) | $(extract_ipc /tmp/mb-soc.log) | $(extract_trap /tmp/mb-soc.log) |"
+            echo "| MicroBench | riscv32e-ysyxsoc | $(extract_score /tmp/mb-soce.log) | $(extract_ipc /tmp/mb-soce.log) | $(extract_trap /tmp/mb-soce.log) |"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   litex-test:
     runs-on: ubuntu-latest

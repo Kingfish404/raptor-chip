@@ -29,22 +29,7 @@ RUN make o2_defconfig && sed -i 's/-Werror//' Makefile
 
 # Prepare STA env: https://github.com/parallaxsw/OpenSTA
 WORKDIR /workspaces/raptor-chip/third_party/yosys-opensta/
-RUN wget https://raw.githubusercontent.com/davidkebo/cudd/main/cudd_versions/cudd-3.0.0.tar.gz && \
-    tar -xvf cudd-3.0.0.tar.gz && \
-    rm cudd-3.0.0.tar.gz
-# Build CUDD
-RUN cd cudd-3.0.0 && \
-    mkdir ../cudd && \
-    ./configure && \
-    make -j`nproc`
-# Get NANGATE45
-RUN make init && git clone https://github.com/parallaxsw/OpenSTA.git
-
-WORKDIR /workspaces/raptor-chip/third_party/yosys-opensta/OpenSTA/
-RUN cmake -DCUDD_DIR=../cudd-3.0.0 -B build . && cmake --build build -j`nproc`
-
-RUN git clone --recursive https://github.com/povik/yosys-slang \
-    && cd yosys-slang && make -j`nproc` && make install
+RUN make setup-opensta
 
 WORKDIR /workspaces/raptor-chip/nemu
 RUN make riscv32_linux_defconfig && make -j
