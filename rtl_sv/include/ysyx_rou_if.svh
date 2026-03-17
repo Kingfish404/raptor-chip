@@ -100,47 +100,55 @@ interface rou_cmu_if #(
     parameter unsigned RLEN = `YSYX_REG_LEN,
     parameter int XLEN = `YSYX_XLEN
 );
-  logic [RLEN-1:0] rd;
+  // Commit slot A (ROB head)
+  logic [RLEN-1:0] rd_a;
+  logic [31:0] inst_a;
+  logic [XLEN-1:0] pc_a;
+  logic [PLEN-1:0] prd_a;
+  logic [PLEN-1:0] prs_a;
+  logic [XLEN-1:0] npc_a;
+  logic ebreak_a;
+  logic difftest_skip_a;
+  logic valid_a;
 
-  logic [31:0] inst;
-  logic [XLEN-1:0] pc;
+  // Commit slot B (ROB head+1, dual commit)
+  logic [RLEN-1:0] rd_b;
+  logic [31:0] inst_b;
+  logic [XLEN-1:0] pc_b;
+  logic [PLEN-1:0] prd_b;
+  logic [PLEN-1:0] prs_b;
+  logic [XLEN-1:0] npc_b;
+  logic ebreak_b;
+  logic difftest_skip_b;
+  logic valid_b;
 
-  logic [PLEN-1:0] prd;
-  logic [PLEN-1:0] prs;
-
+  // Shared commit signals (merged from active slot)
   logic btaken;
-  logic [XLEN-1:0] npc;
   logic ben;
   logic jen;
   logic jren;
   logic atomic_sc;
 
-  logic ebreak;
   logic fence_time;
   logic fence_i;
-
   logic flush_pipe;
   logic time_trap;
 
-  logic difftest_skip;
-
-  logic valid;
-
   modport out(
-      output rd, inst, pc,
-      output btaken, npc, ben, jen, jren, atomic_sc,
-      output prd, prs,
-      output ebreak, fence_time, fence_i, flush_pipe, time_trap,
-      output difftest_skip,
-      output valid
+      output rd_a, inst_a, pc_a, prd_a, prs_a, npc_a,
+      output ebreak_a, difftest_skip_a, valid_a,
+      output rd_b, inst_b, pc_b, prd_b, prs_b, npc_b,
+      output ebreak_b, difftest_skip_b, valid_b,
+      output btaken, ben, jen, jren, atomic_sc,
+      output fence_time, fence_i, flush_pipe, time_trap
   );
   modport in(
-      input rd, inst, pc,
-      input btaken, npc, ben, jen, jren, atomic_sc,
-      input prd, prs,
-      input ebreak, fence_time, fence_i, flush_pipe, time_trap,
-      input difftest_skip,
-      input valid
+      input rd_a, inst_a, pc_a, prd_a, prs_a, npc_a,
+      input ebreak_a, difftest_skip_a, valid_a,
+      input rd_b, inst_b, pc_b, prd_b, prs_b, npc_b,
+      input ebreak_b, difftest_skip_b, valid_b,
+      input btaken, ben, jen, jren, atomic_sc,
+      input fence_time, fence_i, flush_pipe, time_trap
   );
 endinterface
 

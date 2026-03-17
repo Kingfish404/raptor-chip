@@ -82,22 +82,23 @@ void perf_sample_per_cycle()
     return;
   }
   pmu.active_cycle++;
-  bool j = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, cmu__DOT__jen));
-  bool b = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, cmu__DOT__ben));
+  // BPU — use registered ben_r/jen_r/flush_pipe_r from CMU for correct timing
+  // alignment with the registered 'valid' signal (all sampled at the same posedge)
+  bool b = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, cmu__DOT__ben_r));
+  bool j = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, cmu__DOT__jen_r));
   bool wb_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, cmu__DOT__valid));
   if (wb_valid)
   {
     bool is_br = b || j;
-    bool br_predict_fail = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, rou__DOT__flush_pipe));
+    bool br_predict_fail = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, cmu__DOT__flush_pipe_r));
     pmu.bpu_cnt += is_br ? 1 : 0;
     pmu.bpu_fail_cnt += is_br && br_predict_fail ? 1 : 0;
     pmu.bpu_b_fail += br_predict_fail && b ? 1 : 0;
     pmu.bpu_j_fail += br_predict_fail && j ? 1 : 0;
   }
-  bool ifu_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, ifu__DOT__valid));
   bool ifu_hazard = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, ifu__DOT__ifu_hazard));
-
-  bool idu_ready = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, idu__DOT__ready));
+  bool ifu_fetch_fire = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, ifu__DOT__pmu_fetch_fire));
+  bool ifu_stall = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, ifu__DOT__pmu_ifu_stall));
 
   bool rou_ready = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, rou__DOT__ready));
   uint32_t exu_ooo_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, exu__DOT__rs_valid));
@@ -106,25 +107,25 @@ void perf_sample_per_cycle()
   bool exu_ioq_valid_found = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, exu__DOT__ioq_valid_found));
   uint8_t l1d_state = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, l1d_cache__DOT__l1d_state));
   bool lsu_l1d_hit = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, l1d_cache__DOT__tag_hit));
-  uint32_t lsu_sq_valid = *(uint32_t *)&(CONCAT(VERILOG_PREFIX, lsu__DOT__sq_valid));
-  bool lsu_sq_ready = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, lsu__DOT__sq_ready));
   bool lsu_fwd_hit = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, lsu__DOT__fwd_hit));
   bool lsu_load_in_sq = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, lsu__DOT__load_in_sq));
   bool lsu_stq_conflict = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, lsu__DOT__stq_addr_conflict));
   bool lsu_raddr_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, lsu__DOT__raddr_valid));
   bool wbu_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, cmu__DOT__valid));
+  bool wbu_valid_b = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, cmu__DOT__valid_b));
   uint8_t l1i_state = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, l1i_cache__DOT__l1i_state));
-  static uint32_t ifu_pc = 0;
-  if (ifu_valid && idu_ready)
+  if (ifu_fetch_fire)
   {
     pmu.ifu_fetch_cnt++;
   }
-  if (!ifu_valid && idu_ready)
-  {
-    pmu.ifu_stall_cycle++;
-  }
+  // IFU stall: IDU was ready but IFU had no instruction (registered for correct timing)
+  pmu.ifu_stall_cycle += ifu_stall ? 1 : 0;
   pmu.ifu_sys_hazard_cycle += ifu_hazard ? 1 : 0;
-  pmu.rou_hazard_cycle += !rou_ready ? 1 : 0;
+  // ROU structural hazard: RNU has a renamed uop but dispatch queue (UOQ) is full
+  uint8_t rnq_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, rnu__DOT__rnq_valid));
+  uint8_t rnq_tail = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, rnu__DOT__rnq_tail));
+  bool rnu_valid = (rnq_valid >> rnq_tail) & 1;
+  pmu.rou_hazard_cycle += (rnu_valid && !rou_ready) ? 1 : 0;
   if (exu_ooo_valid && !exu_ooo_valid_found)
   {
     pmu.exu_ooo_stall_cycle++;
@@ -134,34 +135,39 @@ void perf_sample_per_cycle()
     pmu.exu_ioq_stall_cycle++;
   }
   pmu.lsu_l1d_stall_cycle += ((l1d_state == 2) && !lsu_l1d_hit) ? 1 : 0;
-  pmu.lsu_sq_stall_cycle += !lsu_sq_ready ? 1 : 0;
+  // SQ stall: only count when a ready store at ROB head is blocked by full SQ
+  bool rou_sq_stall = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, rou__DOT__pmu_sq_stall));
+  pmu.lsu_sq_stall_cycle += rou_sq_stall ? 1 : 0;
   pmu.lsu_fwd_cnt += (lsu_raddr_valid && lsu_fwd_hit) ? 1 : 0;
   pmu.lsu_sq_conflict_cnt += (lsu_raddr_valid && lsu_load_in_sq) ? 1 : 0;
   pmu.lsu_stq_conflict_cnt += (lsu_raddr_valid && lsu_stq_conflict) ? 1 : 0;
+  pmu.dual_commit_cnt += (wbu_valid && wbu_valid_b) ? 1 : 0;
   if (!wbu_valid)
   {
     pmu.wbu_stall_cycle++;
   }
-  // cache sample
-  static bool i_fetching = false;
-  if (i_fetching == false)
+  // L1I cache sample — state-transition-based tracking
+  // L1I FSM states: IDLE=000, RD_A=001, RD_0=010, PTWAIT=100, TRAP=101, RD_1=110, FINA=111
+  static uint8_t prev_l1i_state = 0;
+  bool l1i_busy = (l1i_state == 0b001)     // RD_A
+                  || (l1i_state == 0b010)  // RD_0
+                  || (l1i_state == 0b110)  // RD_1
+                  || (l1i_state == 0b111)  // FINA
+                  || (l1i_state == 0b100); // PTWAIT
+
+  // Miss: L1I transitions from IDLE to a busy state (cache miss or TLB miss)
+  if (prev_l1i_state == 0b000 && l1i_busy)
   {
-    if (!(ifu_valid && idu_ready) && l1i_state == 0b000)
-    {
-      i_fetching = true;
-      pmu.l1i_cache_miss_cnt++;
-      pmu.l1i_cache_hit_cnt = pmu.ifu_fetch_cnt - pmu.l1i_cache_miss_cnt;
-      pmu.l1i_cache_hit_cycle = pmu.l1i_cache_hit_cnt;
-    }
+    pmu.l1i_cache_miss_cnt++;
   }
-  else
+  // Miss cycles: accumulate while L1I is in any fetching/PTW state
+  if (l1i_busy)
   {
-    if (ifu_valid && l1i_state == 0b011)
-    {
-      i_fetching = false;
-    }
     pmu.l1i_cache_miss_cycle++;
   }
+  // Hit count and hit cycles are computed at report time:
+  //   hit_cnt = ifu_fetch_cnt - miss_cnt,  hit_cycle ≈ hit_cnt (1 SRAM cycle/hit)
+  prev_l1i_state = l1i_state;
   // tlb & page table walk sample
   char stlb_mmu = *(char *)&(CONCAT(VERILOG_PREFIX, l1d_cache__DOT__stlb_mmu));
   bool i_ptw = (l1i_state & 0b1000) != 0;
@@ -318,6 +324,9 @@ void perf()
       pmu.rou_hazard_cycle, percentage(pmu.rou_hazard_cycle, pmu.active_cycle));
   Log("LSU fwd: %lld, sq_conflict: %lld, stq_conflict: %lld",
       pmu.lsu_fwd_cnt, pmu.lsu_sq_conflict_cnt, pmu.lsu_stq_conflict_cnt);
+  Log("Dual commit: %lld / %lld commits (%2.1f%%)",
+      pmu.dual_commit_cnt, pmu.instr_cnt,
+      percentage(pmu.dual_commit_cnt, pmu.instr_cnt - pmu.dual_commit_cnt));
   assert(
       pmu.instr_cnt ==
       (pmu.ld_inst_cnt + pmu.st_inst_cnt + pmu.alu_inst_cnt +
@@ -325,18 +334,23 @@ void perf()
        pmu.jal_inst_cnt + pmu.jalr_inst_cnt));
   Log("======== Cache Analysis ========");
   // AMAT: Average Memory Access Time
+  // Compute hit count at report time: hits = total fetches - misses
+  long long int l1i_hit_cnt = pmu.ifu_fetch_cnt - pmu.l1i_cache_miss_cnt;
+  if (l1i_hit_cnt < 0)
+    l1i_hit_cnt = 0;
+  long long int l1i_hit_cycle = l1i_hit_cnt; // ~1 SRAM cycle per hit
   Log("|%6s, %%|%8s, %%|%8s, %%|%8s,  %%|%13s|%13s|%13s|",
       "L1I HIT", "L1I MISS", "HIT CYC", "MISS CYC", "HIT Cost AVG", "MISS Cost AVG", "AMAT");
-  double l1i_hit_rate = percentage(pmu.l1i_cache_hit_cnt, pmu.l1i_cache_hit_cnt + pmu.l1i_cache_miss_cnt);
-  double l1i_access_time = pmu.l1i_cache_hit_cycle / (pmu.l1i_cache_hit_cnt + 1.0);
-  double l1i_miss_penalty = pmu.l1i_cache_miss_cycle / (pmu.l1i_cache_miss_cnt + 1.0);
+  double l1i_hit_rate = percentage(l1i_hit_cnt, l1i_hit_cnt + pmu.l1i_cache_miss_cnt);
+  double l1i_access_time = l1i_hit_cnt > 0 ? (double)l1i_hit_cycle / l1i_hit_cnt : 0;
+  double l1i_miss_penalty = pmu.l1i_cache_miss_cnt > 0 ? (double)pmu.l1i_cache_miss_cycle / pmu.l1i_cache_miss_cnt : 0;
   Log("|%6.0e,%3.0f|%8.0e,%2.0f|%8.0e,%2.0f|%8.0e,%3.0f|%13lld|%13lld|%13.1f|",
-      (double)pmu.l1i_cache_hit_cnt, l1i_hit_rate,
+      (double)l1i_hit_cnt, l1i_hit_rate,
       (double)pmu.l1i_cache_miss_cnt, 100 - l1i_hit_rate,
-      (double)pmu.l1i_cache_hit_cycle,
-      percentage(pmu.l1i_cache_hit_cycle, pmu.l1i_cache_hit_cycle + pmu.l1i_cache_miss_cycle),
+      (double)l1i_hit_cycle,
+      percentage(l1i_hit_cycle, l1i_hit_cycle + pmu.l1i_cache_miss_cycle),
       (double)pmu.l1i_cache_miss_cycle,
-      percentage(pmu.l1i_cache_miss_cycle, pmu.l1i_cache_hit_cycle + pmu.l1i_cache_miss_cycle),
+      percentage(pmu.l1i_cache_miss_cycle, l1i_hit_cycle + pmu.l1i_cache_miss_cycle),
       (long long)l1i_access_time, (long long)l1i_miss_penalty,
       l1i_access_time + (100 - l1i_hit_rate) / 100.0 * l1i_miss_penalty);
   // assert((pmu.l1i_cache_hit_cnt + pmu.l1i_cache_miss_cnt) == pmu.ifu_fetch_cnt);

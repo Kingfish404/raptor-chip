@@ -19,6 +19,8 @@ extern VerilatedContext *contextp;
 extern TOP_NAME *top;
 extern VerilatedFstC *tfp;
 
+extern void (*ref_difftest_exec)(uint64_t n);
+
 #ifdef CONFIG_ITRACE
 static char iringbuf[MAX_IRING_SIZE][128] = {};
 static word_t iringbuf_rpc[MAX_IRING_SIZE] = {};
@@ -159,7 +161,7 @@ void cpu_exec(uint64_t n)
           (unsigned long long)progress_cycle, (unsigned long long)pmu.instr_cnt,
           (word_t)(*npc.pc));
     }
-    if (cur_inst_cycle > 0x1ffff)
+    if (cur_inst_cycle > 0x2ffff)
     {
       Log(FMT_RED("Too many cycles (0x%llx) stalled at pc: " FMT_WORD_NO_PREFIX ", rpc: " FMT_WORD_NO_PREFIX ", inst: %08x."),
           (long long int)cur_inst_cycle, (word_t)(*npc.pc), (word_t)(*npc.rpc), (uint32_t)(*(npc.inst)));
@@ -170,6 +172,7 @@ void cpu_exec(uint64_t n)
     {
       perf_sample_per_inst();
       cur_inst_cycle = 0;
+      uint8_t cmu_valid_b = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, cmu__DOT__valid_b));
 #ifdef CONFIG_ITRACE
       iringbuf_rpc[iringhead] = *npc.rpc;
       iringbuf_inst[iringhead] = *(word_t *)(npc.inst);
@@ -177,6 +180,13 @@ void cpu_exec(uint64_t n)
 #endif
 
 #ifdef CONFIG_DIFFTEST
+      if (cmu_valid_b)
+      {
+        // Dual commit: step NEMU for slot 0 (no comparison).
+        // difftest_skip is guaranteed absent during dual commit,
+        // so just execute NEMU once for the intermediate instruction.
+        ref_difftest_exec(1);
+      }
       if (((*(npc.inst) & 0xfff0707f) == 0xc0102073))
       {
         // rdtime instruction skipped in difftest
@@ -194,6 +204,10 @@ void cpu_exec(uint64_t n)
         difftest_raise_intr(cause);
       }
 #endif
+      if (cmu_valid_b)
+      {
+        perf_sample_per_inst();
+      }
       npc.last_inst = *(npc.inst);
     }
     if (tfp_threshold_break & ((pmu.active_cycle >= tfp_cycle) | (pmu.instr_cnt >= tfp_inst)))

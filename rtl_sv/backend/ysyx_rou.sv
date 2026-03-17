@@ -43,36 +43,45 @@ module ysyx_rou #(
     input reset
 );
   logic valid, ready;
-  logic flush_pipe;
-  logic fence_time;
+  logic            flush_pipe;
+  logic            fence_time;
 
   // Async trap state
-  logic           recieved_trap;
+  logic            recieved_trap;
   logic [XLEN-1:0] trap_pc;
 
   // Forward declarations (used across sections)
   logic [$clog2(ROB_SIZE)-1:0] rob_head, rob_tail;
-  ysyx_pkg::rob_entry_t rob_entry [ROB_SIZE];
+  ysyx_pkg::rob_entry_t rob_entry[ROB_SIZE];
   logic head_br_p_fail;
   logic head_valid;
+
+  logic dual_commit;
+
+  // ================================================================
+  // 4. Commit Logic — dual commit (up to 2 per cycle)
+  // ================================================================
+  // Aliases for ROB head entries
+  wire [$clog2(ROB_SIZE)-1:0] h = rob_head;
+  wire [$clog2(ROB_SIZE)-1:0] h1 = rob_head + 1;
 
   // ================================================================
   // 1. Dispatch Queue (UOQ)
   // ================================================================
   logic [$clog2(IIQ_SIZE)-1:0] uoq_head, uoq_tail;
-  logic [IIQ_SIZE-1:0]        uoq_valid;
+  logic           [IIQ_SIZE-1:0] uoq_valid;
 
-  ysyx_pkg::uop_t             uoq_uops [IIQ_SIZE];
-  logic [PLEN-1:0]            uoq_pr1  [IIQ_SIZE];
-  logic [PLEN-1:0]            uoq_pr2  [IIQ_SIZE];
-  logic [PLEN-1:0]            uoq_prd  [IIQ_SIZE];
-  logic [PLEN-1:0]            uoq_prs  [IIQ_SIZE];
-  logic [XLEN-1:0]            uoq_op1  [IIQ_SIZE];
-  logic [XLEN-1:0]            uoq_op2  [IIQ_SIZE];
+  ysyx_pkg::uop_t                uoq_uops  [IIQ_SIZE];
+  logic           [    PLEN-1:0] uoq_pr1   [IIQ_SIZE];
+  logic           [    PLEN-1:0] uoq_pr2   [IIQ_SIZE];
+  logic           [    PLEN-1:0] uoq_prd   [IIQ_SIZE];
+  logic           [    PLEN-1:0] uoq_prs   [IIQ_SIZE];
+  logic           [    XLEN-1:0] uoq_op1   [IIQ_SIZE];
+  logic           [    XLEN-1:0] uoq_op2   [IIQ_SIZE];
 
   logic uoq_enq_fire, uoq_deq_fire;
-  assign uoq_enq_fire = rnu_rou.valid && !uoq_valid[uoq_head];
-  assign uoq_deq_fire = rou_exu.ready && uoq_valid[uoq_tail] && !rob_entry[rob_tail].busy;
+  assign uoq_enq_fire  = rnu_rou.valid && !uoq_valid[uoq_head];
+  assign uoq_deq_fire  = rou_exu.ready && uoq_valid[uoq_tail] && !rob_entry[rob_tail].busy;
 
   assign valid         = uoq_valid[uoq_tail] && !rob_entry[rob_tail].busy;
   assign ready         = !uoq_valid[uoq_head];
@@ -177,50 +186,51 @@ module ysyx_rou #(
       if (uoq_deq_fire) begin
         rob_tail <= rob_tail + 1;
 
-        rob_entry[rob_tail].prd    <= uoq_prd[uoq_tail];
-        rob_entry[rob_tail].prs    <= uoq_prs[uoq_tail];
-        rob_entry[rob_tail].busy   <= 1'b1;
-        rob_entry[rob_tail].state  <= ROB_EX;
-        rob_entry[rob_tail].rd     <= uoq_uops[uoq_tail].rd;
+        rob_entry[rob_tail].prd <= uoq_prd[uoq_tail];
+        rob_entry[rob_tail].prs <= uoq_prs[uoq_tail];
+        rob_entry[rob_tail].busy <= 1'b1;
+        rob_entry[rob_tail].state <= ROB_EX;
+        rob_entry[rob_tail].rd <= uoq_uops[uoq_tail].rd;
 
-        rob_entry[rob_tail].ben    <= uoq_uops[uoq_tail].ben;
-        rob_entry[rob_tail].jen    <= uoq_uops[uoq_tail].jen;
-        rob_entry[rob_tail].jren   <= uoq_uops[uoq_tail].jren;
-        rob_entry[rob_tail].pnpc   <= uoq_uops[uoq_tail].pnpc;
+        rob_entry[rob_tail].ben <= uoq_uops[uoq_tail].ben;
+        rob_entry[rob_tail].jen <= uoq_uops[uoq_tail].jen;
+        rob_entry[rob_tail].jren <= uoq_uops[uoq_tail].jren;
+        rob_entry[rob_tail].pnpc <= uoq_uops[uoq_tail].pnpc;
 
-        rob_entry[rob_tail].wen    <= uoq_uops[uoq_tail].wen;
-        rob_entry[rob_tail].word   <= uoq_uops[uoq_tail].word;
-        rob_entry[rob_tail].alu    <= uoq_uops[uoq_tail].atom ? `YSYX_WSTRB_SW
-                                                               : uoq_uops[uoq_tail].alu;
+        rob_entry[rob_tail].wen <= uoq_uops[uoq_tail].wen;
+        rob_entry[rob_tail].word <= uoq_uops[uoq_tail].word;
+        rob_entry[rob_tail].alu <= uoq_uops[uoq_tail].atom ?
+        `YSYX_WSTRB_SW
+        : uoq_uops[uoq_tail].alu;
 
-        rob_entry[rob_tail].sys    <= uoq_uops[uoq_tail].system;
-        rob_entry[rob_tail].atom   <= uoq_uops[uoq_tail].atom;
+        rob_entry[rob_tail].sys <= uoq_uops[uoq_tail].system;
+        rob_entry[rob_tail].atom <= uoq_uops[uoq_tail].atom;
         rob_entry[rob_tail].atom_sc <= uoq_uops[uoq_tail].atom
                                     && (uoq_uops[uoq_tail].alu == `YSYX_ATO_SC__);
 
-        rob_entry[rob_tail].f_i    <= uoq_uops[uoq_tail].f_i;
+        rob_entry[rob_tail].f_i <= uoq_uops[uoq_tail].f_i;
         rob_entry[rob_tail].f_time <= uoq_uops[uoq_tail].f_time;
 
-        rob_entry[rob_tail].ecall  <= uoq_uops[uoq_tail].ecall;
+        rob_entry[rob_tail].ecall <= uoq_uops[uoq_tail].ecall;
         rob_entry[rob_tail].ebreak <= uoq_uops[uoq_tail].ebreak;
-        rob_entry[rob_tail].mret   <= uoq_uops[uoq_tail].mret;
-        rob_entry[rob_tail].sret   <= uoq_uops[uoq_tail].sret;
+        rob_entry[rob_tail].mret <= uoq_uops[uoq_tail].mret;
+        rob_entry[rob_tail].sret <= uoq_uops[uoq_tail].sret;
 
-        rob_entry[rob_tail].trap   <= uoq_uops[uoq_tail].trap;
-        rob_entry[rob_tail].tval   <= uoq_uops[uoq_tail].tval;
-        rob_entry[rob_tail].cause  <= uoq_uops[uoq_tail].cause;
+        rob_entry[rob_tail].trap <= uoq_uops[uoq_tail].trap;
+        rob_entry[rob_tail].tval <= uoq_uops[uoq_tail].tval;
+        rob_entry[rob_tail].cause <= uoq_uops[uoq_tail].cause;
 
-        rob_entry[rob_tail].inst   <= uoq_uops[uoq_tail].inst;
-        rob_entry[rob_tail].pc     <= uoq_uops[uoq_tail].pc;
+        rob_entry[rob_tail].inst <= uoq_uops[uoq_tail].inst;
+        rob_entry[rob_tail].pc <= uoq_uops[uoq_tail].pc;
       end
 
       // ---- Write-back from IOQ (load/store completion) ----
       if (exu_ioq_bcast.valid) begin
-        rob_entry[wb_dest_ioq].state     <= ROB_WB;
-        rob_entry[wb_dest_ioq].npc       <= exu_ioq_bcast.npc;
-        rob_entry[wb_dest_ioq].wen       <= exu_ioq_bcast.wen;
-        rob_entry[wb_dest_ioq].sq_waddr  <= exu_ioq_bcast.sq_waddr;
-        rob_entry[wb_dest_ioq].sq_wdata  <= exu_ioq_bcast.sq_wdata;
+        rob_entry[wb_dest_ioq].state    <= ROB_WB;
+        rob_entry[wb_dest_ioq].npc      <= exu_ioq_bcast.npc;
+        rob_entry[wb_dest_ioq].wen      <= exu_ioq_bcast.wen;
+        rob_entry[wb_dest_ioq].sq_waddr <= exu_ioq_bcast.sq_waddr;
+        rob_entry[wb_dest_ioq].sq_wdata <= exu_ioq_bcast.sq_wdata;
 
         if (exu_ioq_bcast.trap) begin
           rob_entry[wb_dest_ioq].rd   <= '0;
@@ -228,37 +238,37 @@ module ysyx_rou #(
           rob_entry[wb_dest_ioq].wen  <= 1'b0;
         end
 
-        rob_entry[wb_dest_ioq].trap   <= exu_ioq_bcast.trap;
-        rob_entry[wb_dest_ioq].tval   <= exu_ioq_bcast.tval;
-        rob_entry[wb_dest_ioq].cause  <= exu_ioq_bcast.cause;
-        rob_entry[wb_dest_ioq].inst   <= exu_ioq_bcast.inst;
+        rob_entry[wb_dest_ioq].trap <= exu_ioq_bcast.trap;
+        rob_entry[wb_dest_ioq].tval <= exu_ioq_bcast.tval;
+        rob_entry[wb_dest_ioq].cause <= exu_ioq_bcast.cause;
+        rob_entry[wb_dest_ioq].inst <= exu_ioq_bcast.inst;
         rob_entry[wb_dest_ioq].difftest_skip <= exu_ioq_bcast.difftest_skip;
       end
 
       // ---- Write-back from EXU (ALU/branch completion) ----
       if (exu_rou.valid) begin
-        rob_entry[wb_dest_exu].state     <= ROB_WB;
-        rob_entry[wb_dest_exu].btaken    <= exu_rou.btaken;
-        rob_entry[wb_dest_exu].npc       <= exu_rou.npc;
+        rob_entry[wb_dest_exu].state         <= ROB_WB;
+        rob_entry[wb_dest_exu].btaken        <= exu_rou.btaken;
+        rob_entry[wb_dest_exu].npc           <= exu_rou.npc;
 
-        rob_entry[wb_dest_exu].csr_wen   <= exu_rou.csr_wen;
-        rob_entry[wb_dest_exu].csr_wdata <= exu_rou.csr_wdata;
-        rob_entry[wb_dest_exu].csr_addr  <= exu_rou.csr_addr;
+        rob_entry[wb_dest_exu].csr_wen       <= exu_rou.csr_wen;
+        rob_entry[wb_dest_exu].csr_wdata     <= exu_rou.csr_wdata;
+        rob_entry[wb_dest_exu].csr_addr      <= exu_rou.csr_addr;
 
-        rob_entry[wb_dest_exu].ecall     <= exu_rou.ecall;
-        rob_entry[wb_dest_exu].ebreak    <= exu_rou.ebreak;
-        rob_entry[wb_dest_exu].mret      <= exu_rou.mret;
-        rob_entry[wb_dest_exu].sret      <= exu_rou.sret;
+        rob_entry[wb_dest_exu].ecall         <= exu_rou.ecall;
+        rob_entry[wb_dest_exu].ebreak        <= exu_rou.ebreak;
+        rob_entry[wb_dest_exu].mret          <= exu_rou.mret;
+        rob_entry[wb_dest_exu].sret          <= exu_rou.sret;
 
-        rob_entry[wb_dest_exu].trap      <= exu_rou.trap;
-        rob_entry[wb_dest_exu].tval      <= exu_rou.tval;
-        rob_entry[wb_dest_exu].cause     <= exu_rou.cause;
+        rob_entry[wb_dest_exu].trap          <= exu_rou.trap;
+        rob_entry[wb_dest_exu].tval          <= exu_rou.tval;
+        rob_entry[wb_dest_exu].cause         <= exu_rou.cause;
         rob_entry[wb_dest_exu].difftest_skip <= exu_rou.difftest_skip;
       end
 
-      // ---- Commit: retire ROB head ----
+      // ---- Commit: retire ROB entries (up to 2 per cycle) ----
       if (head_valid) begin
-        rob_head <= rob_head + 1;
+        rob_head                     <= dual_commit ? rob_head + 2 : rob_head + 1;
 
         rob_entry[rob_head].busy     <= 1'b0;
         rob_entry[rob_head].state    <= ROB_CM;
@@ -273,27 +283,36 @@ module ysyx_rou #(
         rob_entry[rob_head].sq_waddr <= '0;
         rob_entry[rob_head].sq_wdata <= '0;
 
+        if (dual_commit) begin
+          rob_entry[h1].busy     <= 1'b0;
+          rob_entry[h1].state    <= ROB_CM;
+          rob_entry[h1].inst     <= '0;
+          rob_entry[h1].csr_wen  <= 1'b0;
+          rob_entry[h1].sys      <= 1'b0;
+          rob_entry[h1].ecall    <= 1'b0;
+          rob_entry[h1].ebreak   <= 1'b0;
+          rob_entry[h1].mret     <= 1'b0;
+          rob_entry[h1].trap     <= 1'b0;
+          rob_entry[h1].wen      <= 1'b0;
+          rob_entry[h1].sq_waddr <= '0;
+          rob_entry[h1].sq_wdata <= '0;
+        end
+
         recieved_trap <= clint_trap;
-        trap_pc       <= rob_entry[rob_head].npc;
+        trap_pc       <= dual_commit ? rob_entry[h1].npc : rob_entry[rob_head].npc;
       end
     end
   end
 
-  // ================================================================
-  // 4. Commit Logic
-  // ================================================================
-  // Aliases for ROB head entry (readability)
-  wire [$clog2(ROB_SIZE)-1:0] h = rob_head;
-
+  // ---- Slot 0 (head) ----
   assign head_br_p_fail = rob_entry[h].npc != rob_entry[h].pnpc;
   assign head_valid     = recieved_trap || (
       rob_entry[h].busy
       && rob_entry[h].state == ROB_WB
       && (rou_lsu.sq_ready || !rob_entry[h].wen));
 
-  // ---- Flush determination ----
-  assign fence_time = head_valid && rob_entry[h].f_time;
-  assign flush_pipe = recieved_trap || (head_valid && (
+  logic head0_flush;
+  assign head0_flush = recieved_trap || (head_valid && (
       rob_entry[h].f_i
       || head_br_p_fail
       || rob_entry[h].trap
@@ -301,49 +320,118 @@ module ysyx_rou #(
       || rob_entry[h].atom
   ));
 
-  // ---- CMU interface ----
-  assign rou_cmu.rd         = recieved_trap ? '0          : rob_entry[h].rd;
-  assign rou_cmu.inst       = rob_entry[h].inst;
-  assign rou_cmu.pc         = recieved_trap ? trap_pc     : rob_entry[h].pc;
-  assign rou_cmu.prd        = rob_entry[h].prd;
-  assign rou_cmu.prs        = rob_entry[h].prs;
-  assign rou_cmu.btaken     = rob_entry[h].btaken;
-  assign rou_cmu.npc        = (recieved_trap || rob_entry[h].trap) ? csr_bcast.tvec
-                                                                   : rob_entry[h].npc;
-  assign rou_cmu.ben        = rob_entry[h].ben;
-  assign rou_cmu.jen        = rob_entry[h].jen;
-  assign rou_cmu.jren       = rob_entry[h].jren;
-  assign rou_cmu.atomic_sc  = rob_entry[h].atom_sc;
-  assign rou_cmu.ebreak     = head_valid && rob_entry[h].ebreak;
-  assign rou_cmu.fence_time = fence_time;
-  assign rou_cmu.fence_i    = head_valid && rob_entry[h].f_i;
-  assign rou_cmu.flush_pipe = flush_pipe;
-  assign rou_cmu.time_trap  = recieved_trap;
-  assign rou_cmu.difftest_skip = !recieved_trap && rob_entry[h].difftest_skip;
-  assign rou_cmu.valid      = recieved_trap ? 1'b0 : head_valid;
+  // ---- Slot 1 (head+1) — only considered when slot 0 doesn't flush ----
+  logic head1_br_p_fail;
+  logic head1_valid;
+  assign head1_br_p_fail = rob_entry[h1].npc != rob_entry[h1].pnpc;
+  assign head1_valid     = rob_entry[h1].busy
+      && rob_entry[h1].state == ROB_WB
+      && (rou_lsu.sq_ready || !rob_entry[h1].wen);
 
-  // ---- CSR interface ----
-  assign rou_csr.pc        = recieved_trap ? trap_pc : rob_entry[h].pc;
-  assign rou_csr.csr_wen   = recieved_trap ? 1'b0   : rob_entry[h].csr_wen;
-  assign rou_csr.csr_wdata = rob_entry[h].csr_wdata;
-  assign rou_csr.csr_addr  = rob_entry[h].csr_addr;
-  assign rou_csr.ecall     = recieved_trap ? 1'b0    : rob_entry[h].ecall;
-  assign rou_csr.ebreak    = recieved_trap ? 1'b0    : rob_entry[h].ebreak;
-  assign rou_csr.mret      = recieved_trap ? 1'b0    : rob_entry[h].mret;
-  assign rou_csr.sret      = recieved_trap ? 1'b0    : rob_entry[h].sret;
-  assign rou_csr.trap      = recieved_trap || rob_entry[h].trap;
-  assign rou_csr.tval      = recieved_trap ? '0      : rob_entry[h].tval;
+  // Dual commit: slot 0 doesn't flush, isn't a store, and slot 1 ready.
+  // Also guard against difftest_skip to simplify simulation infrastructure.
+`ifdef YSYX_DUAL_COMMIT
+  assign dual_commit = head_valid && !head0_flush
+      && !rob_entry[h].wen && head1_valid
+      && !rob_entry[h].difftest_skip && !rob_entry[h1].difftest_skip;
+`else
+  assign dual_commit = 1'b0;
+`endif
+
+  // Slot 1 flush
+  logic head1_flush;
+  assign head1_flush = dual_commit && (
+      rob_entry[h1].f_i
+      || head1_br_p_fail
+      || rob_entry[h1].trap
+      || rob_entry[h1].sys
+      || rob_entry[h1].atom
+  );
+
+  // ---- Global flush / fence ----
+  assign fence_time = (head_valid && rob_entry[h].f_time) || (dual_commit && rob_entry[h1].f_time);
+  assign flush_pipe = head0_flush || head1_flush;
+
+  // PMU — SQ-specific commit stall (ROB head is a ready store blocked by full SQ)
+  /* verilator lint_off UNUSEDSIGNAL */
+  logic pmu_sq_stall;
+  assign pmu_sq_stall = !recieved_trap
+      && rob_entry[h].busy && rob_entry[h].state == ROB_WB
+      && rob_entry[h].wen  && !rou_lsu.sq_ready;
+  /* verilator lint_on UNUSEDSIGNAL */
+
+  // ---- CMU interface (slot A) ----
+  assign rou_cmu.rd_a = recieved_trap ? '0 : rob_entry[h].rd;
+  assign rou_cmu.inst_a = rob_entry[h].inst;
+  assign rou_cmu.pc_a = recieved_trap ? trap_pc : rob_entry[h].pc;
+  assign rou_cmu.prd_a = rob_entry[h].prd;
+  assign rou_cmu.prs_a = rob_entry[h].prs;
+  // Branch signals: when dual committing, use slot 1 (BPU trains on rpc which is slot 1's PC)
+  assign rou_cmu.btaken = dual_commit ? rob_entry[h1].btaken : rob_entry[h].btaken;
+  assign rou_cmu.npc_a       = dual_commit
+      ? (rob_entry[h1].trap ? csr_bcast.tvec : rob_entry[h1].npc)
+      : (recieved_trap || rob_entry[h].trap) ? csr_bcast.tvec
+      : rob_entry[h].npc;
+  assign rou_cmu.ben = dual_commit ? rob_entry[h1].ben : rob_entry[h].ben;
+  assign rou_cmu.jen = dual_commit ? rob_entry[h1].jen : rob_entry[h].jen;
+  assign rou_cmu.jren = dual_commit ? rob_entry[h1].jren : rob_entry[h].jren;
+  assign rou_cmu.atomic_sc = dual_commit ? rob_entry[h1].atom_sc : rob_entry[h].atom_sc;
+  assign rou_cmu.ebreak_a = head_valid && rob_entry[h].ebreak;
+  assign rou_cmu.fence_time = fence_time;
+  assign rou_cmu.fence_i = (head_valid && rob_entry[h].f_i) || (dual_commit && rob_entry[h1].f_i);
+  assign rou_cmu.flush_pipe = flush_pipe;
+  assign rou_cmu.time_trap = recieved_trap;
+  assign rou_cmu.difftest_skip_a = !recieved_trap && rob_entry[h].difftest_skip;
+  assign rou_cmu.valid_a = recieved_trap ? 1'b0 : head_valid;
+
+  // ---- CMU interface (slot B — dual commit) ----
+  assign rou_cmu.rd_b = rob_entry[h1].rd;
+  assign rou_cmu.inst_b = rob_entry[h1].inst;
+  assign rou_cmu.pc_b = rob_entry[h1].pc;
+  assign rou_cmu.prd_b = rob_entry[h1].prd;
+  assign rou_cmu.prs_b = rob_entry[h1].prs;
+  assign rou_cmu.npc_b = rob_entry[h1].trap ? csr_bcast.tvec : rob_entry[h1].npc;
+  assign rou_cmu.ebreak_b = dual_commit && rob_entry[h1].ebreak;
+  assign rou_cmu.difftest_skip_b = rob_entry[h1].difftest_skip;
+  assign rou_cmu.valid_b = dual_commit;
+
+  // ---- CSR interface (MUX slot 0 / slot 1) ----
+  // Slot 0 never has sys/trap during dual commit (they cause flush).
+  // When dual committing, route slot 1's CSR/sys info if present.
+  logic csr_from_h1;
+  assign csr_from_h1 = dual_commit && (rob_entry[h1].sys || rob_entry[h1].trap);
+
+  assign rou_csr.pc = recieved_trap ? trap_pc : csr_from_h1 ? rob_entry[h1].pc : rob_entry[h].pc;
+  assign rou_csr.csr_wen   = recieved_trap ? 1'b0
+                           : csr_from_h1   ? rob_entry[h1].csr_wen
+                           :                 rob_entry[h].csr_wen;
+  assign rou_csr.csr_wdata = csr_from_h1 ? rob_entry[h1].csr_wdata : rob_entry[h].csr_wdata;
+  assign rou_csr.csr_addr = csr_from_h1 ? rob_entry[h1].csr_addr : rob_entry[h].csr_addr;
+  assign rou_csr.ecall     = recieved_trap ? 1'b0
+                           : csr_from_h1   ? rob_entry[h1].ecall
+                           :                 rob_entry[h].ecall;
+  assign rou_csr.ebreak    = recieved_trap ? 1'b0
+                           : csr_from_h1   ? rob_entry[h1].ebreak
+                           :                 rob_entry[h].ebreak;
+  assign rou_csr.mret = recieved_trap ? 1'b0 : csr_from_h1 ? rob_entry[h1].mret : rob_entry[h].mret;
+  assign rou_csr.sret = recieved_trap ? 1'b0 : csr_from_h1 ? rob_entry[h1].sret : rob_entry[h].sret;
+  assign rou_csr.trap = recieved_trap || (csr_from_h1 ? rob_entry[h1].trap : rob_entry[h].trap);
+  assign rou_csr.tval = recieved_trap ? '0 : csr_from_h1 ? rob_entry[h1].tval : rob_entry[h].tval;
   assign rou_csr.cause     = recieved_trap
       ? ((csr_bcast.priv == `YSYX_PRIV_M) ? 'h7 : 'h5) + ('b1 << (XLEN - 1))
-      : rob_entry[h].cause;
-  assign rou_csr.valid     = recieved_trap || (head_valid && (rob_entry[h].sys || rob_entry[h].trap));
+      : csr_from_h1 ? rob_entry[h1].cause
+      :               rob_entry[h].cause;
+  assign rou_csr.valid     = recieved_trap
+      || (head_valid && (rob_entry[h].sys || rob_entry[h].trap))
+      || csr_from_h1;
 
-  // ---- LSU interface (store commit) ----
-  assign rou_lsu.store     = recieved_trap ? 1'b0 : rob_entry[h].wen;
-  assign rou_lsu.alu       = rob_entry[h].alu;
-  assign rou_lsu.sq_waddr  = rob_entry[h].sq_waddr;
-  assign rou_lsu.sq_wdata  = rob_entry[h].sq_wdata;
-  assign rou_lsu.pc        = rob_entry[h].pc;
-  assign rou_lsu.valid     = head_valid;
+  // ---- LSU interface (store commit — MUX slot 0 / slot 1) ----
+  // During dual commit, slot 0 is guaranteed non-store; route slot 1.
+  assign rou_lsu.store = recieved_trap ? 1'b0 : dual_commit ? rob_entry[h1].wen : rob_entry[h].wen;
+  assign rou_lsu.alu = dual_commit ? rob_entry[h1].alu : rob_entry[h].alu;
+  assign rou_lsu.sq_waddr = dual_commit ? rob_entry[h1].sq_waddr : rob_entry[h].sq_waddr;
+  assign rou_lsu.sq_wdata = dual_commit ? rob_entry[h1].sq_wdata : rob_entry[h].sq_wdata;
+  assign rou_lsu.pc = dual_commit ? rob_entry[h1].pc : rob_entry[h].pc;
+  assign rou_lsu.valid = head_valid;
 
 endmodule

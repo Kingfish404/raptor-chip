@@ -131,7 +131,6 @@ interface cmu_bcast_if #(
 );
   logic [XLEN-1:0] rpc;
   logic [XLEN-1:0] cpc;
-  logic [RLEN-1:0] rd;
 
   logic ben;
   logic jen;
@@ -144,13 +143,20 @@ interface cmu_bcast_if #(
   logic flush_pipe;
   logic time_trap;
 
+  // Per-slot commit info (dual commit)
+  logic [RLEN-1:0] rd_a;
+  logic [RLEN-1:0] rd_b;
+  logic valid_b;
+
   modport in(
-      input rpc, cpc, rd, ben, jen, jren, btaken,
-      input fence_time, fence_i, flush_pipe, time_trap
+      input rpc, cpc, rd_a, ben, jen, jren, btaken,
+      input fence_time, fence_i, flush_pipe, time_trap,
+      input rd_b, valid_b
   );
   modport out(
-      output rpc, cpc, rd, ben, jen, jren, btaken,
-      output fence_time, fence_i, flush_pipe, time_trap
+      output rpc, cpc, rd_a, ben, jen, jren, btaken,
+      output fence_time, fence_i, flush_pipe, time_trap,
+      output rd_b, valid_b
   );
 endinterface
 

@@ -36,7 +36,7 @@
  */
 
 `define YSYX_M_FAST 'h1
-`define YSYX_L1I_LINE_LEN 1
+`define YSYX_L1I_LINE_LEN 2
 `define YSYX_L1I_LEN 6
 
 `define YSYX_PHT_SIZE 512
@@ -53,6 +53,10 @@
 `define YSYX_SQ_SIZE 8
 `define YSYX_L1D_LINE_LEN 1
 `define YSYX_L1D_LEN 6
+
+// Dual commit: retire up to 2 consecutive ROB entries per cycle.
+// Comment out or undefine to disable for A/B benchmarking.
+`define YSYX_DUAL_COMMIT
 
 // Issue width (number of instructions dispatched per cycle)
 // Set to 1 for single-issue; increase for multi-issue

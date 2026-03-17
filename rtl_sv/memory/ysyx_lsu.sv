@@ -136,66 +136,85 @@ module ysyx_lsu #(
   end
 
   // SQ address conflict + store-to-load forwarding.
-  // Iterate from oldest (sq_head) to youngest; last match wins.
-  // Uses sq_vaddr (virtual) for comparison against virtual load address.
+  // Phase 1: parallel match vector (all comparisons fire simultaneously)
+  // Phase 2: age-ordered priority select (youngest match wins)
+  logic [SQ_SIZE-1:0] sq_match_vec;
+  logic [SQ_SIZE-1:0] sq_full_vec;  // full-width store (can forward)
   always_comb begin
-    load_in_sq = 0;
-    load_in_sq_idx = 0;
+    for (int j = 0; j < SQ_SIZE; j++) begin
+      automatic logic [$clog2(SQ_SIZE)-1:0] idx = sq_head + j[$clog2(SQ_SIZE)-1:0];
+      sq_match_vec[j] = sq_valid[idx]
+          && (sq_vaddr[idx][XLEN-1:$clog2(XLEN/8)] == raddr[XLEN-1:$clog2(XLEN/8)]);
+      sq_full_vec[j] = sq_match_vec[j] && (sq_alu[idx] ==
+`ifdef YSYX_RV64
+          `YSYX_SD_WSTRB
+`else
+          `YSYX_SW_WSTRB
+`endif
+      );
+    end
+  end
+
+  // Youngest match wins: highest j in age order (last set bit)
+  always_comb begin
+    load_in_sq = |sq_match_vec;
+    load_in_sq_idx = sq_head;
     sq_fwd_ok = 0;
     sq_fwd_data = 0;
     for (int j = 0; j < SQ_SIZE; j++) begin
-      if (sq_valid[sq_head + j[$clog2(SQ_SIZE)-1:0]]
-          && sq_vaddr[sq_head + j[$clog2(SQ_SIZE)-1:0]][XLEN-1:$clog2(XLEN/8)] == raddr[XLEN-1:$clog2(XLEN/8)]) begin
-        load_in_sq = 1;
+      if (sq_match_vec[j]) begin
         load_in_sq_idx = sq_head + j[$clog2(SQ_SIZE)-1:0];
-        if (sq_alu[sq_head + j[$clog2(SQ_SIZE)-1:0]] ==
-`ifdef YSYX_RV64
-            `YSYX_SD_WSTRB
-`else
-            `YSYX_SW_WSTRB
-`endif
-        ) begin
-          sq_fwd_ok = 1;
-          sq_fwd_data = sq_wdata[sq_head + j[$clog2(SQ_SIZE)-1:0]];
-        end else begin
-          sq_fwd_ok = 0;
-        end
+        sq_fwd_ok = sq_full_vec[j];
+        sq_fwd_data = sq_wdata[sq_head + j[$clog2(SQ_SIZE)-1:0]];
       end
     end
-    store_in_sq = 0;
-    store_in_sq_idx = 0;
+  end
+
+  // Store address conflict detection (first match)
+  logic [SQ_SIZE-1:0] store_match_vec;
+  always_comb begin
     for (int i = 0; i < SQ_SIZE; i++) begin
-      if (sq_waddr[i] == (rou_lsu.sq_waddr) && sq_valid[i] && !store_in_sq) begin
-        store_in_sq = 1;
+      store_match_vec[i] = sq_valid[i] && (sq_waddr[i] == rou_lsu.sq_waddr);
+    end
+  end
+  always_comb begin
+    store_in_sq = |store_match_vec;
+    store_in_sq_idx = 0;
+    for (int i = SQ_SIZE - 1; i >= 0; i--) begin
+      if (store_match_vec[i]) begin
         store_in_sq_idx = i[$clog2(SQ_SIZE)-1:0];
       end
     end
   end
 
-  // STQ address conflict + store-to-load forwarding
+  // STQ address conflict + store-to-load forwarding (parallel match)
   logic stq_addr_conflict;
   logic stq_fwd_ok;
   logic [XLEN-1:0] stq_fwd_data;
+  logic [SQ_SIZE-1:0] stq_match_vec;
+  logic [SQ_SIZE-1:0] stq_full_vec;
   always_comb begin
-    stq_addr_conflict = 0;
+    for (int j = 0; j < SQ_SIZE; j++) begin
+      automatic logic [$clog2(SQ_SIZE)-1:0] idx = stq_head + j[$clog2(SQ_SIZE)-1:0];
+      stq_match_vec[j] = stq_valid[idx]
+          && (stq_waddr[idx][XLEN-1:$clog2(XLEN/8)] == raddr[XLEN-1:$clog2(XLEN/8)]);
+      stq_full_vec[j] = stq_match_vec[j] && (stq_alu[idx] ==
+`ifdef YSYX_RV64
+          `YSYX_SD_WSTRB
+`else
+          `YSYX_SW_WSTRB
+`endif
+      );
+    end
+  end
+  always_comb begin
+    stq_addr_conflict = |stq_match_vec;
     stq_fwd_ok = 0;
     stq_fwd_data = 0;
     for (int j = 0; j < SQ_SIZE; j++) begin
-      if (stq_valid[stq_head + j[$clog2(SQ_SIZE)-1:0]]
-          && stq_waddr[stq_head + j[$clog2(SQ_SIZE)-1:0]][XLEN-1:$clog2(XLEN/8)] == raddr[XLEN-1:$clog2(XLEN/8)]) begin
-        stq_addr_conflict = 1;
-        if (stq_alu[stq_head + j[$clog2(SQ_SIZE)-1:0]] ==
-`ifdef YSYX_RV64
-            `YSYX_SD_WSTRB
-`else
-            `YSYX_SW_WSTRB
-`endif
-        ) begin
-          stq_fwd_ok = 1;
-          stq_fwd_data = stq_wdata[stq_head + j[$clog2(SQ_SIZE)-1:0]];
-        end else begin
-          stq_fwd_ok = 0;
-        end
+      if (stq_match_vec[j]) begin
+        stq_fwd_ok = stq_full_vec[j];
+        stq_fwd_data = stq_wdata[stq_head + j[$clog2(SQ_SIZE)-1:0]];
       end
     end
   end

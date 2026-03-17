@@ -221,6 +221,9 @@ typedef struct
   long long int itlb_ptw_cycle;
   long long int stlb_ptw_cycle;
   long long int ltlb_ptw_cycle;
+
+  // dual commit
+  long long int dual_commit_cnt;
 } PMUState;
 
 #define panic(format, ...) Assert(0, format, ##__VA_ARGS__)

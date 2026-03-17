@@ -92,7 +92,10 @@ module ysyx_rnu #(
   // Commit signals (shared by freelist, maptable, PRF)
   // ================================================================
   logic commit_dealloc;
-  assign commit_dealloc = rou_cmu.valid && rou_cmu.rd != 0;
+  assign commit_dealloc = rou_cmu.valid_a && rou_cmu.rd_a != 0;
+
+  logic commit_dealloc_b;
+  assign commit_dealloc_b = rou_cmu.valid_b && rou_cmu.rd_b != 0;
 
   // ================================================================
   // Internal interface instances
@@ -104,10 +107,13 @@ module ysyx_rnu #(
   // Free List - interface drive
   // ================================================================
   assign fl_bus.flush_pipe  = cmu_bcast.flush_pipe;
-  assign fl_bus.flush_rd    = cmu_bcast.rd;
+  assign fl_bus.flush_rd_a  = cmu_bcast.rd_a;
+  assign fl_bus.flush_rd_b  = cmu_bcast.valid_b ? cmu_bcast.rd_b : '0;
   assign fl_bus.alloc_req   = rnq_deq_fire && !fl_bus.alloc_empty && rnq_rd[rnq_tail] != 0;
-  assign fl_bus.dealloc_req = commit_dealloc;
-  assign fl_bus.dealloc_pr  = rou_cmu.prs;
+  assign fl_bus.dealloc_req_a = commit_dealloc;
+  assign fl_bus.dealloc_pr_a  = rou_cmu.prs_a;
+  assign fl_bus.dealloc_req_b = commit_dealloc_b;
+  assign fl_bus.dealloc_pr_b  = rou_cmu.prs_b;
 
   ysyx_rnu_freelist #(
       .RNUM(RNUM), .PNUM(PNUM), .PLEN(PLEN), .RLEN(RLEN)
@@ -130,10 +136,14 @@ module ysyx_rnu #(
   assign mt_bus.map_raddr_b = rnq_rs2[rnq_tail];
   // Speculative read: rd old mapping (prs for ROB dealloc)
   assign mt_bus.map_raddr_c = rnq_rd[rnq_tail];
-  // Committed write
-  assign mt_bus.rat_wen     = commit_dealloc;
-  assign mt_bus.rat_waddr   = rou_cmu.rd;
-  assign mt_bus.rat_wdata   = rou_cmu.prd;
+  // Committed write A
+  assign mt_bus.rat_wen_a   = commit_dealloc;
+  assign mt_bus.rat_waddr_a = rou_cmu.rd_a;
+  assign mt_bus.rat_wdata_a = rou_cmu.prd_a;
+  // Committed write B (dual commit)
+  assign mt_bus.rat_wen_b   = commit_dealloc_b;
+  assign mt_bus.rat_waddr_b = rou_cmu.rd_b;
+  assign mt_bus.rat_wdata_b = rou_cmu.prd_b;
 
   logic [PLEN-1:0] mt_rat_snapshot [RNUM];
   logic [PLEN-1:0] mt_map_snapshot [RNUM];

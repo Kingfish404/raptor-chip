@@ -371,7 +371,7 @@ module ysyx_l1d #(
     end else begin
       if ((lsu_l1d.wvalid && lsu_l1d.waddr[XLEN-1:2] == reservation[XLEN-1:2])
         || exu_l1d.valid && exu_l1d.vaddr[XLEN-1:2] == reservation[XLEN-1:2]
-        || rou_cmu.valid && rou_cmu.atomic_sc) begin
+        || rou_cmu.valid_a && rou_cmu.atomic_sc) begin
         reservation <= 'h0;
       end
       // if (l1d_bus.awvalid && csr_bcast.dmmu_en) begin

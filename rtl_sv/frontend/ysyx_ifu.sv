@@ -42,6 +42,12 @@ module ysyx_ifu #(
   logic recv_ready;
   logic valid;
 
+  // PMU — registered signals for accurate cycle-level sampling
+  /* verilator lint_off UNUSEDSIGNAL */
+  logic pmu_fetch_fire;
+  logic pmu_ifu_stall;
+  /* verilator lint_on UNUSEDSIGNAL */
+
   logic [XLEN-1:0] inst;
   logic trap;
   logic [XLEN-1:0] cause;
@@ -84,8 +90,12 @@ module ysyx_ifu #(
   always @(posedge clock) begin
     if (reset) begin
       pc_ifu <= `YSYX_PC_INIT;
-      trap   <= 0;
+      trap <= 0;
+      pmu_fetch_fire <= 0;
+      pmu_ifu_stall <= 0;
     end else begin
+      pmu_fetch_fire <= valid && ifu_idu.ready;
+      pmu_ifu_stall  <= !valid && ifu_idu.ready;
       unique case (state_ifu)
         IDLE: begin
           if (cmu_bcast.flush_pipe) begin

@@ -26,20 +26,20 @@ module ysyx_prf #(
     exu_ioq_bcast_if.in exu_ioq_bcast,
 
     // Commit / dealloc / flush
-    rou_cmu_if.in  rou_cmu,
+    rou_cmu_if.in   rou_cmu,
     cmu_bcast_if.in cmu_bcast,
 
     // Rename map snapshots (from RNU, for debug register view)
-    input [PLEN-1:0] map_snapshot [RNUM],
-    input [PLEN-1:0] rat_snapshot [RNUM],
+    input [PLEN-1:0] map_snapshot[RNUM],
+    input [PLEN-1:0] rat_snapshot[RNUM],
 
     // Debug: architectural register view (committed / speculative)
-    output [XLEN-1:0] rf     [RNUM],
-    output [XLEN-1:0] rf_map [RNUM]
+    output [XLEN-1:0] rf    [RNUM],
+    output [XLEN-1:0] rf_map[RNUM]
 );
-  logic [XLEN-1:0]  prf       [PNUM];
-  logic [PNUM-1:0]  prf_valid;
-  logic [PNUM-1:0]  prf_transient;
+  logic [XLEN-1:0] prf           [PNUM];
+  logic [PNUM-1:0] prf_valid;
+  logic [PNUM-1:0] prf_transient;
 
   // ---- Read ports (combinational) ----
   assign prf_rd.pv1       = prf[prf_rd.pr1];
@@ -48,23 +48,46 @@ module ysyx_prf #(
   assign prf_rd.pv2_valid = prf_valid[prf_rd.pr2];
 
   // ---- Write port extraction ----
-  logic             wr_a_en;
-  logic [PLEN-1:0]  wr_a_addr;
-  logic [XLEN-1:0]  wr_a_data;
+  logic            wr_a_en;
+  logic [PLEN-1:0] wr_a_addr;
+  logic [XLEN-1:0] wr_a_data;
   assign wr_a_en   = exu_rou.valid && exu_rou.rd != 0;
   assign wr_a_addr = exu_rou.prd;
   assign wr_a_data = exu_rou.result;
 
-  logic             wr_b_en;
-  logic [PLEN-1:0]  wr_b_addr;
-  logic [XLEN-1:0]  wr_b_data;
+  logic            wr_b_en;
+  logic [PLEN-1:0] wr_b_addr;
+  logic [XLEN-1:0] wr_b_data;
   assign wr_b_en   = exu_ioq_bcast.valid && exu_ioq_bcast.rd != 0;
   assign wr_b_addr = exu_ioq_bcast.prd;
   assign wr_b_data = exu_ioq_bcast.result;
 
   // ---- Commit / dealloc ----
   logic commit_dealloc;
-  assign commit_dealloc = rou_cmu.valid && rou_cmu.rd != 0;
+  assign commit_dealloc = rou_cmu.valid_a && rou_cmu.rd_a != 0;
+
+  logic commit_dealloc_b;
+  assign commit_dealloc_b = rou_cmu.valid_b && rou_cmu.rd_b != 0;
+
+  // Pre-decode addresses to one-hot vectors (shared decoders, reduce per-entry fanin)
+  logic [PNUM-1:0] dealloc_prs_oh, dealloc_prs_b_oh;
+  logic [PNUM-1:0] settle_prd_oh, settle_prd_b_oh;
+  logic [PNUM-1:0] wr_a_oh, wr_b_oh;
+
+  always_comb begin
+    dealloc_prs_oh   = '0;
+    dealloc_prs_b_oh = '0;
+    settle_prd_oh    = '0;
+    settle_prd_b_oh  = '0;
+    wr_a_oh          = '0;
+    wr_b_oh          = '0;
+    if (commit_dealloc_b) dealloc_prs_b_oh[rou_cmu.prs_b] = 1'b1;
+    if (commit_dealloc) dealloc_prs_oh[rou_cmu.prs_a] = 1'b1;
+    if (commit_dealloc_b) settle_prd_b_oh[rou_cmu.prd_b] = 1'b1;
+    if (commit_dealloc) settle_prd_oh[rou_cmu.prd_a] = 1'b1;
+    if (wr_a_en) wr_a_oh[wr_a_addr] = 1'b1;
+    if (wr_b_en) wr_b_oh[wr_b_addr] = 1'b1;
+  end
 
   // ---- Write / state update ----
   always @(posedge clock) begin
@@ -72,26 +95,30 @@ module ysyx_prf #(
       for (integer i = 0; i < PNUM; i = i + 1) begin
         prf[i] <= '0;
       end
-      prf_valid     <= {{(PNUM - RNUM){1'b0}}, {RNUM{1'b1}}};
+      prf_valid     <= {{(PNUM - RNUM) {1'b0}}, {RNUM{1'b1}}};
       prf_transient <= '0;
     end else begin
       for (integer i = 0; i < PNUM; i = i + 1) begin
-        if (commit_dealloc && rou_cmu.prs == i[PLEN-1:0]) begin
-          // Old physical register freed → invalidate
+        // Free old physical register (prs): slot 1 then slot 0 priority
+        if (dealloc_prs_b_oh[i]) begin
           prf_valid[i] <= 1'b0;
-        end else if (commit_dealloc && rou_cmu.prd == i[PLEN-1:0]) begin
-          // Committed → no longer transient
+        end else if (dealloc_prs_oh[i]) begin
+          prf_valid[i] <= 1'b0;
+          // Settle committed register (prd): no longer transient
+        end else if (settle_prd_b_oh[i]) begin
+          prf_transient[i] <= 1'b0;
+        end else if (settle_prd_oh[i]) begin
           prf_transient[i] <= 1'b0;
         end else if (cmu_bcast.flush_pipe && prf_transient[i]) begin
           // Flush: discard speculative writes
           prf_valid[i]     <= 1'b0;
           prf_transient[i] <= 1'b0;
           prf[i]           <= '0;
-        end else if (!cmu_bcast.flush_pipe && wr_a_en && wr_a_addr == i[PLEN-1:0]) begin
+        end else if (!cmu_bcast.flush_pipe && wr_a_oh[i]) begin
           prf[i]           <= wr_a_data;
           prf_valid[i]     <= 1'b1;
           prf_transient[i] <= 1'b1;
-        end else if (!cmu_bcast.flush_pipe && wr_b_en && wr_b_addr == i[PLEN-1:0]) begin
+        end else if (!cmu_bcast.flush_pipe && wr_b_oh[i]) begin
           prf[i]           <= wr_b_data;
           prf_valid[i]     <= 1'b1;
           prf_transient[i] <= 1'b1;

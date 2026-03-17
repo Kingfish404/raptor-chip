@@ -2,9 +2,9 @@
 
 ## Overview
 
-Raptor is an out-of-order, single-issue RISC-V processor core with register renaming, a reorder buffer (ROB), reservation stations, and virtual memory support.
+Raptor is an out-of-order, single-issue RISC-V processor core with register renaming, a reorder buffer (ROB), reservation stations, and virtual memory support. The commit stage supports **dual commit** — up to 2 instructions can retire from the ROB per cycle when consecutive entries are both ready.
 
-**ISA**: RV32/RV64 I + M (mul/div) + A (atomics: LR/SC, AMO) + C (compressed) + Zicsr + Sv32 MMU
+**ISA**: RV32/RV64 I + M (mul/div) + A (atomics: LR/SC, AMO) + C (compressed) + Zicsr + Zifencei + Sv32 MMU
 
 The core supports configurable **RV32** and **RV64** modes via a compile-time switch (`YSYX_RV64`). When `YSYX_RV64` is defined, XLEN=64 and all datapath, register file, AXI bus, and DPI-C interfaces widen to 64 bits. RV64 adds W-variant instructions (ADDIW, SLLIW, etc.) with 32-bit result sign-extension.
 
@@ -114,7 +114,7 @@ The core supports configurable **RV32** and **RV64** modes via a compile-time sw
 #### L1I — Instruction Cache (`ysyx_l1i.sv`)
 
 - Direct-mapped, `2^L1I_LEN` entries (default 64, 6-bit index)
-- Line size: `2^L1I_LINE_LEN` words (default 2 words per line)
+- Line size: `2^L1I_LINE_LEN` words (default 4 words per line)
 - **Data storage**: Banked `ysyx_sram_1r1w` instances (one per word position) with synchronous read (1-cycle latency)
 - **SRAM data readiness**: `pc_ifu_d1` register tracks PC stability; `sram_data_ready = (pc_ifu_d1 == pc_ifu)` ensures SRAM output matches the current fetch address before asserting `valid`
 - **Tag/Valid**: Register arrays (multi-port read, fast bulk invalidation)
@@ -323,7 +323,7 @@ The core supports configurable **RV32** and **RV64** modes via a compile-time sw
 | `YSYX_I_EXTENSION` | 1 | RV32I base |
 | `YSYX_M_EXTENSION` | 1 | M extension (mul/div) |
 | `YSYX_M_FAST` | 1 | Single-cycle mul/div (sim mode) |
-| `YSYX_L1I_LINE_LEN` | 1 | L1I line: 2^1 = 2 words |
+| `YSYX_L1I_LINE_LEN` | 2 | L1I line: 2^2 = 4 words |
 | `YSYX_L1I_LEN` | 6 | L1I entries: 2^6 = 64 |
 | `YSYX_PHT_SIZE` | 512 | PHT entries |
 | `YSYX_BTB_SIZE` | 64 | BTB entries |
@@ -336,6 +336,7 @@ The core supports configurable **RV32** and **RV64** modes via a compile-time sw
 | `YSYX_SQ_SIZE` | 8 | Store queue entries |
 | `YSYX_L1D_LINE_LEN` | 1 | L1D line: 2^1 = 2 words per line |
 | `YSYX_L1D_LEN` | 6 | L1D sets: 2^6 = 64 |
+| `YSYX_DUAL_COMMIT` | defined | Dual commit: retire up to 2 ROB entries/cycle |
 | `YSYX_ISSUE_WIDTH` | 1 | Instructions dispatched per cycle |
 | `YSYX_REG_SIZE` | 32 | Architectural registers |
 | `YSYX_PHY_SIZE` | 64 | Physical registers |

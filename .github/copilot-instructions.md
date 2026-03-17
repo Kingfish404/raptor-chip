@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Out-of-order RISC-V (RV32/RV64 IMAC_Zicsr) processor core ("raptor") with register renaming, ROB, reservation stations, and Sv32 virtual memory. Features LR/SC + AMO atomics, compressed instructions (RVC), and boots Linux 6.12 via OpenSBI. Supports configurable **RV32** and **RV64** modes via compile-time `YSYX_RV64` define. The RTL is hand-written **SystemVerilog** with Chisel used only for decoder generation. Verification uses Verilator simulation with differential testing against NEMU (a reference ISA emulator).
+Out-of-order RISC-V (RV32/RV64 IMAC_Zicsr_Zifencei) processor core ("raptor") with register renaming, ROB, reservation stations, and Sv32 virtual memory. Features LR/SC + AMO atomics, compressed instructions (RVC), and boots Linux 6.12 via OpenSBI. Supports configurable **RV32** and **RV64** modes via compile-time `YSYX_RV64` define. The RTL is hand-written **SystemVerilog** with Chisel used only for decoder generation. Verification uses Verilator simulation with differential testing against NEMU (a reference ISA emulator).
 
 ## Architecture (Pipeline Stages)
 
@@ -20,9 +20,9 @@ IFU → IDU → RNU (rename) → ROU (ROB/dispatch) → EXU (RS/IOQ) → CMU (co
   - **PRF** (`ysyx_prf.sv`): multi-ported physical register file (2R/2W), instantiated at top level (`ysyx.sv`) — valid + transient tracking, flush invalidates transient entries. Write port A: `exu_rou_if`, Write port B: `exu_ioq_bcast_if`, Read: `exu_prf_if`
   - **ROU** (ROB/dispatch): UOQ (dispatch queue, `IIQ_SIZE`) + ROB (`rob_entry_t[]`, `ROB_SIZE`, states: `ROB_EX`→`ROB_WB`→`ROB_CM`), operand bypass (PRF > IOQ > EXU), async trap from CLINT
   - **EXU**: RS (`RS_SIZE`, priority issue, operand forwarding) + IOQ (`IOQ_SIZE`, in-order, for ld/st/amo/Zicsr) + ALU (combinational RV32I/RV64I, W-variant sign-extension for RV64) + MUL (Booth's / iterative div, or fast single-cycle mode; W-variants for RV64)
-  - **CMU** (commit): lightweight broadcast unit (retire PC, branch resolution, flush, fence)
+  - **CMU** (commit): lightweight broadcast unit (retire PC, branch resolution, flush, fence). Supports **dual commit** — retires up to 2 consecutive ROB entries per cycle when both are in WB state, slot 0 doesn't cause flush or store.
   - **CSR** (`ysyx_csr.sv`): M/S-mode CSR file, trap delegation, privilege transitions, MMU broadcasts (`immu_en`/`dmmu_en`, `satp_ppn`, `tvec`)
-- **Memory** (`rtl_sv/memory/`): LSU (STQ + SQ, store-to-load forwarding CAM), L1I (direct-mapped, IFQ, banked SRAM data storage via `ysyx_sram_1r1w`, `sram_data_ready` for synchronous read timing), L1D (direct-mapped, write-through, LR/SC reservation, banked SRAM data storage via `ysyx_sram_1r1w` with per-word valid tracking, `L1D_LINE_LEN`-configurable words per line, 5-state FSM, split `tag_hit`/`data_hit`), TLB (`ysyx_tlb.sv` — fully-associative, multi-entry with ASID, round-robin replacement, shared by L1I/L1D), PTW (`ysyx_ptw.sv` — Sv32 two-level page table walker, IDLE/LVL1/LVL0 FSM, shared AXI read channel), BUS (AXI4 bridge, L1D priority, CLINT internal), CLINT (64-bit mtime, periodic timer interrupt), SRAM wrapper (`ysyx_sram_1r1w.sv` — synchronous-read behavioral model with write-first bypass, `YSYX_USE_SRAM_MACRO` ifdef for foundry macro swap, matches ASIC SRAM timing and FPGA Block RAM inference)
+- **Memory** (`rtl_sv/memory/`): LSU (STQ + SQ, store-to-load forwarding CAM), L1I (direct-mapped, IFQ, banked SRAM data storage via `ysyx_sram_1r1w`, `sram_data_ready` for synchronous read timing), L1D (direct-mapped, write-through, LR/SC reservation, banked SRAM data storage via `ysyx_sram_1r1w` with per-word valid tracking, `L1D_LINE_LEN`-configurable words per line, 5-state FSM, split `tag_hit`/`data_hit`), TLB (`ysyx_tlb.sv` — fully-associative, multi-entry with ASID, round-robin replacement, shared by L1I/L1D), PTW (`ysyx_ptw.sv` — Sv32 two-level page table walker, IDLE/LVL1/LVL0 FSM, shared AXI read channel), BUS (AXI4 bridge, L1D priority, L1I burst support via `arburst`, CLINT internal), CLINT (64-bit mtime, periodic timer interrupt), SRAM wrapper (`ysyx_sram_1r1w.sv` — synchronous-read behavioral model with write-first bypass, `YSYX_USE_SRAM_MACRO` ifdef for foundry macro swap, matches ASIC SRAM timing and FPGA Block RAM inference)
 - **Top-level**: `rtl_sv/ysyx.sv` (bare core, pure wiring — instantiates all stages + PRF), `rtl_sv/ysyx_npc_soc.sv` (SoC wrapper for Verilator sim)
 - **Config/types**: `rtl_sv/include/ysyx_config.svh` (params incl. `YSYX_ISSUE_WIDTH`, cache/BPU/queue sizes), `rtl_sv/ysyx_pkg.sv` (`uop_t`, `prd_t`, `rob_entry_t`, `rob_state_t` types, `addr_cacheable()`/`addr_valid()` functions)
 - **Interfaces**: `rtl_sv/include/ysyx_*_if.svh` (inter-module: `ifu_idu_if`, `idu_rnu_if`, `rnu_rou_if`, `rou_exu_if`, `exu_rou_if`, `exu_ioq_bcast_if`, `exu_prf_if`, `exu_lsu_if`, `exu_csr_if`, `exu_l1d_if`, `rou_cmu_if`, `rou_csr_if`, `rou_lsu_if`, `cmu_bcast_if`, `csr_bcast_if`, `lsu_l1d_if`, `l1i_bus_if`, `l1d_bus_if`), `rtl_sv/include/ysyx_rnu_internal_if.svh` (`rnu_fl_if`, `rnu_mt_if`)
@@ -67,7 +67,7 @@ Switching between RV32 and RV64 (`make run-npc32` vs `make run-npc64`) automatic
 - DPI-C function signatures are **conditional on YSYX_RV64**: `longint` params for RV64, `int` for RV32 (see `ysyx_dpi_c.sv`)
 - C-side counterparts use `#ifdef CONFIG_ISA64` for matching `long long` vs `int` signatures
 - **Differential testing** (difftest) compares NPC vs NEMU instruction-by-instruction; enabled by default
-- Simulator config uses **Kconfig** in `nsim/configs/` - profiles: `o2_defconfig` (standalone), `o2linux_defconfig`, `o2linux_difftest_defconfig`, `o2soc_defconfig`
+- Simulator config uses **Kconfig** in `nsim/configs/` - profiles: `o2_defconfig` (standalone), `o2_difftest_defconfig` (difftest), `o2linux_defconfig`, `o2linux_difftest_defconfig`, `o2soc_defconfig`
 
 ## Chisel (Scala) - Decoder Only
 
@@ -77,12 +77,13 @@ Switching between RV32 and RV64 (`make run-npc32` vs `make run-npc64`) automatic
 
 Microarchitecture tunables are in `rtl_sv/include/ysyx_config.svh`:
 - **XLEN**: 32 (default) or 64 (when `YSYX_RV64` is defined)
-- **Cache**: `L1I_LINE_LEN` (line words), `L1I_LEN` (index bits, 2^6=64 entries), `L1D_LINE_LEN` (line words, 1), `L1D_LEN` (index bits, 2^6=64 entries)
+- **Cache**: `L1I_LINE_LEN` (line words, 2), `L1I_LEN` (index bits, 2^6=64 entries), `L1D_LINE_LEN` (line words, 1), `L1D_LEN` (index bits, 2^6=64 entries)
 - **BPU**: `PHT_SIZE` (512), `BTB_SIZE` (64), `RSB_SIZE` (8)
 - **OoO queues**: `RIQ_SIZE` (rename queue, 4), `IIQ_SIZE` (dispatch queue, 4), `ROB_SIZE` (8), `RS_SIZE` (4), `IOQ_SIZE` (4), `SQ_SIZE` (store queue, 8)
 - **Registers**: `PHY_SIZE` (64 physical), `REG_SIZE` (32 architectural)
 - **Issue**: `YSYX_ISSUE_WIDTH` (1, single-issue)
 - **MUL mode**: `YSYX_M_FAST` (1 = single-cycle for sim, 0 = iterative Booth's)
+- **Dual commit**: `YSYX_DUAL_COMMIT` (defined = retire up to 2 consecutive ROB entries/cycle)
 
 Interface `parameter` declarations default to these macros.
 

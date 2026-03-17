@@ -20,28 +20,35 @@ interface rnu_fl_if #(
 );
   // Flush recovery
   logic             flush_pipe;
-  logic [RLEN-1:0]  flush_rd;
+  logic [RLEN-1:0]  flush_rd_a;
+  logic [RLEN-1:0]  flush_rd_b;
 
   // Allocate port (rename stage → freelist)
   logic             alloc_req;
   logic [PLEN-1:0]  alloc_pr;
   logic             alloc_empty;
 
-  // Deallocate port (commit stage → freelist)
-  logic             dealloc_req;
-  logic [PLEN-1:0]  dealloc_pr;
+  // Deallocate port A (commit slot A → freelist)
+  logic             dealloc_req_a;
+  logic [PLEN-1:0]  dealloc_pr_a;
+
+  // Deallocate port B (commit slot B, dual commit)
+  logic             dealloc_req_b;
+  logic [PLEN-1:0]  dealloc_pr_b;
 
   modport master(
-      output flush_pipe, flush_rd,
+      output flush_pipe, flush_rd_a, flush_rd_b,
       output alloc_req,
       input  alloc_pr, alloc_empty,
-      output dealloc_req, dealloc_pr
+      output dealloc_req_a, dealloc_pr_a,
+      output dealloc_req_b, dealloc_pr_b
   );
   modport slave(
-      input  flush_pipe, flush_rd,
+      input  flush_pipe, flush_rd_a, flush_rd_b,
       input  alloc_req,
       output alloc_pr, alloc_empty,
-      input  dealloc_req, dealloc_pr
+      input  dealloc_req_a, dealloc_pr_a,
+      input  dealloc_req_b, dealloc_pr_b
   );
 endinterface
 
@@ -75,10 +82,15 @@ interface rnu_mt_if #(
   logic [RLEN-1:0]  map_raddr_c;
   logic [PLEN-1:0]  map_rdata_c;
 
-  // Committed write (on ROB commit)
-  logic             rat_wen;
-  logic [RLEN-1:0]  rat_waddr;
-  logic [PLEN-1:0]  rat_wdata;
+  // Committed write A (commit slot A)
+  logic             rat_wen_a;
+  logic [RLEN-1:0]  rat_waddr_a;
+  logic [PLEN-1:0]  rat_wdata_a;
+
+  // Committed write B (commit slot B, dual commit)
+  logic             rat_wen_b;
+  logic [RLEN-1:0]  rat_waddr_b;
+  logic [PLEN-1:0]  rat_wdata_b;
 
   modport master(
       output flush_pipe,
@@ -86,7 +98,8 @@ interface rnu_mt_if #(
       output map_raddr_a, input map_rdata_a,
       output map_raddr_b, input map_rdata_b,
       output map_raddr_c, input map_rdata_c,
-      output rat_wen, rat_waddr, rat_wdata
+      output rat_wen_a, rat_waddr_a, rat_wdata_a,
+      output rat_wen_b, rat_waddr_b, rat_wdata_b
   );
   modport slave(
       input  flush_pipe,
@@ -94,7 +107,8 @@ interface rnu_mt_if #(
       input  map_raddr_a, output map_rdata_a,
       input  map_raddr_b, output map_rdata_b,
       input  map_raddr_c, output map_rdata_c,
-      input  rat_wen, rat_waddr, rat_wdata
+      input  rat_wen_a, rat_waddr_a, rat_wdata_a,
+      input  rat_wen_b, rat_waddr_b, rat_wdata_b
   );
 endinterface
 

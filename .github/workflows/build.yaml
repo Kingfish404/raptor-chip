@@ -21,7 +21,7 @@ jobs:
         run: docker run --rm sta:latest bash -c "make o2_defconfig && make -C /workspaces/raptor-chip/am-kernels/benchmarks/coremark_eembc ARCH=riscv32-npc run mainargs="test" ARGS="-b -n""
       - name: Show coremark riscv32e-npc payload result (IPC, Mark)
         run: docker run --rm sta:latest bash -c "make o2_defconfig && make -C /workspaces/raptor-chip/am-kernels/benchmarks/coremark_eembc ARCH=riscv32e-npc run mainargs="test" ARGS="-b -n""
-      - name: Show RISC-V Architecture Test result riscv32-npc
+      - name: Show RISC-V Architecture Test result riscv32-npclinux-npc-test
         run: docker run --rm sta:latest bash -c "make o2_defconfig && make -C /workspaces/raptor-chip/riscv-arch-test-am ARCH=riscv32-npc run ARGS="-b -n""
       - name: Show RISC-V Architecture Test result riscv32e-npc
         run: docker run --rm sta:latest bash -c "make o2_defconfig && make -C /workspaces/raptor-chip/riscv-arch-test-am ARCH=riscv32e-npc run ARGS="-b -n""
@@ -71,29 +71,9 @@ jobs:
           path: dist/
           retention-days: 90
           overwrite: true
-      - name: Delete existing nightly release if same branch
+      - name: Delete existing nightly release
         if: github.event_name == 'push'
-        run: |
-          # Only delete if the existing rtl-nightly release was created from the
-          # same branch (ref_name). This avoids a re-run of an older amended
-          # commit clobbering a newer release on the same branch, while still
-          # allowing the normal rolling-nightly update.
-          EXISTING=$(gh release view rtl-nightly --json tagName,body -q '.body' 2>/dev/null || true)
-          if [ -z "$EXISTING" ]; then
-            echo "No existing nightly release, will create."
-          else
-            EXISTING_SHA=$(echo "$EXISTING" | grep -oP '(?<=commit `)[0-9a-f]+(?=`)' | head -1 || true)
-            # Allow overwrite if: no SHA found, same SHA, or current SHA is a
-            # descendant of the existing one (i.e. the branch moved forward or
-            # was amended).
-            if [ -z "$EXISTING_SHA" ] || git merge-base --is-ancestor "$EXISTING_SHA" "${{ github.sha }}" 2>/dev/null || [ "$EXISTING_SHA" = "${{ github.sha }}" ]; then
-              echo "Existing nightly is from same branch lineage, deleting."
-              gh release delete rtl-nightly --yes --cleanup-tag 2>/dev/null || true
-            else
-              echo "Existing nightly is from a different/newer commit ($EXISTING_SHA), skipping delete."
-              exit 0
-            fi
-          fi
+        run: gh release delete rtl-nightly --yes --cleanup-tag 2>/dev/null || true
         env:
           GH_TOKEN: ${{ github.token }}
       - name: Create nightly RTL release

@@ -37,25 +37,32 @@ module ysyx_rnu_freelist #(
     end else begin
       // --- Head pointer & in-flight tracking ---
       if (fl.flush_pipe) begin
-        // Rewind head by in-flight count, accounting for one possible dealloc
-        head            <= head - inflight_pr_num + (fl.flush_rd != 0 ? 1 : 0);
+        // Rewind head by in-flight count, accounting for commits during flush
+        head            <= head - inflight_pr_num
+                         + (fl.flush_rd_a != 0 ? 1 : 0)
+                         + (fl.flush_rd_b != 0 ? 1 : 0);
         inflight_pr_num <= '0;
       end else begin
         if (do_alloc) begin
           head <= head + 1;
         end
-        // Update in-flight count
-        if (do_alloc && !fl.dealloc_req) begin
-          inflight_pr_num <= inflight_pr_num + 1;
-        end else if (!do_alloc && fl.dealloc_req) begin
-          inflight_pr_num <= inflight_pr_num - 1;
-        end
-        // else: both or neither → no change
+        // Update in-flight count: +1 for alloc, -1 per dealloc
+        inflight_pr_num <= inflight_pr_num
+            + (do_alloc ? 1 : 0)
+            - (fl.dealloc_req_a ? 1 : 0)
+            - (fl.dealloc_req_b ? 1 : 0);
       end
 
       // --- Tail pointer (dealloc always proceeds, even during flush) ---
-      if (fl.dealloc_req) begin
-        fifo[tail[PLEN-1:0]] <= fl.dealloc_pr;
+      if (fl.dealloc_req_a && fl.dealloc_req_b) begin
+        fifo[tail[PLEN-1:0]]     <= fl.dealloc_pr_a;
+        fifo[tail[PLEN-1:0] + 1] <= fl.dealloc_pr_b;
+        tail                     <= tail + 2;
+      end else if (fl.dealloc_req_a) begin
+        fifo[tail[PLEN-1:0]] <= fl.dealloc_pr_a;
+        tail                 <= tail + 1;
+      end else if (fl.dealloc_req_b) begin
+        fifo[tail[PLEN-1:0]] <= fl.dealloc_pr_b;
         tail                 <= tail + 1;
       end
     end
