@@ -23,9 +23,16 @@ module ysyx_cmu #(
   logic ben, jen, jren;
   logic [XLEN-1:0] pmu_inst_retire;
 
+  // Call/return detection from committed instruction word
+  /* verilator lint_off UNUSEDSIGNAL */
+  logic [31:0] bcast_inst;
+  /* verilator lint_on UNUSEDSIGNAL */
+  logic [4:0] bcast_rd, bcast_rs1;
+  logic is_link_rd, is_link_rs1;
+
   // PMU — registered branch/flush signals aligned with 'valid'
   /* verilator lint_off UNUSEDSIGNAL */
-  logic ben_r, jen_r, flush_pipe_r;
+  logic ben_r, jen_r, jren_r, flush_pipe_r;
   /* verilator lint_on UNUSEDSIGNAL */
 
   assign prev_valid = rou_cmu.valid_a;
@@ -46,6 +53,9 @@ module ysyx_cmu #(
   assign cmu_bcast.jen = prev_valid && jen;
   assign cmu_bcast.jren = prev_valid && jren;
   assign cmu_bcast.btaken = prev_valid && rou_cmu.btaken;
+  assign cmu_bcast.call = prev_valid && (jen || jren) && is_link_rd;
+  assign cmu_bcast.ret  = prev_valid && jren && is_link_rs1 && !is_link_rd;
+  assign cmu_bcast.rvc  = prev_valid && (bcast_inst[1:0] != 2'b11);
   assign cmu_bcast.time_trap = rou_cmu.time_trap;
 
   assign cmu_bcast.fence_time = rou_cmu.fence_time;
@@ -56,6 +66,12 @@ module ysyx_cmu #(
   assign cmu_bcast.rd_b = rou_cmu.rd_b;
   assign cmu_bcast.valid_b = rou_cmu.valid_b;
 
+  assign bcast_inst = use_slot1 ? rou_cmu.inst_b : rou_cmu.inst_a;
+  assign bcast_rd   = bcast_inst[11:7];
+  assign bcast_rs1  = bcast_inst[19:15];
+  assign is_link_rd  = (bcast_rd == 5'd1) || (bcast_rd == 5'd5);
+  assign is_link_rs1 = (bcast_rs1 == 5'd1) || (bcast_rs1 == 5'd5);
+
   always @(posedge clock) begin
     if (reset) begin
       valid <= 0;
@@ -63,11 +79,13 @@ module ysyx_cmu #(
       pmu_inst_retire <= 0;
       ben_r <= 0;
       jen_r <= 0;
+      jren_r <= 0;
       flush_pipe_r <= 0;
       `YSYX_DPI_C_NPC_DIFFTEST_SKIP_REF
     end else begin
       ben_r <= ben;
       jen_r <= jen;
+      jren_r <= jren;
       flush_pipe_r <= rou_cmu.flush_pipe;
       if (rou_cmu.valid_a) begin
         // Debug & Difftest — slot 0

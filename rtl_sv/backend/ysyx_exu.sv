@@ -114,34 +114,45 @@ module ysyx_exu #(
   logic [$clog2(RS_SIZE)-1:0] mul_rs_idx;
   logic free_found, valid_found, mul_found, ioq_valid_found;
 
-  always_comb begin
-    free_found = 0;
-    valid_found = 0;
-    mul_found = 0;
+  // One-hot match vectors for priority encoding (replaces for-loop traversal)
+  logic [RS_SIZE-1:0] rs_free_vec;
+  logic [RS_SIZE-1:0] rs_ready_vec;
+  logic [RS_SIZE-1:0] rs_mul_vec;
 
-    free_idx = 0;
-    valid_idx = 0;
-    mul_rs_idx = 0;
-    for (bit [XLEN-1:0] i = 0; i < RS_SIZE; i++) begin
-      if (rs_valid[i] == 0 && !free_found) begin
-        free_idx   = i[$clog2(RS_SIZE)-1:0];
-        free_found = 1;
-      end
+  always_comb begin
+    for (int i = 0; i < RS_SIZE; i++) begin
+      rs_free_vec[i]  = !rs_valid[i];
+      rs_ready_vec[i] = rs_valid[i] && rs_pr1[i] == 0 && rs_pr2[i] == 0
+                       && (rs_alu[i][4:4] == 0 || rs_mul_ready[i]);
+      rs_mul_vec[i]   = rs_valid[i] && rs_alu[i][4:4];
     end
-    for (bit [XLEN-1:0] i = 0; i < RS_SIZE; i++) begin
-      if (!valid_found && rs_valid[i] && rs_pr1[i] == 0 && rs_pr2[i] == 0) begin
-        if (rs_alu[i][4:4] == 0 || rs_mul_ready[i]) begin
-          valid_idx   = i[$clog2(RS_SIZE)-1:0];
-          valid_found = 1;
-        end
-      end
-    end
-    for (bit [XLEN-1:0] i = 0; i < RS_SIZE; i++) begin
-      if (rs_valid[i] == 1 && rs_alu[i][4:4] == 1 && !mul_found) begin
-        mul_rs_idx = i[$clog2(RS_SIZE)-1:0];
-        mul_found  = 1;
-      end
-    end
+  end
+
+  // Priority encode: lowest-index-first via casez on one-hot vectors
+  always_comb begin
+    casez (rs_free_vec)
+      4'b???1: begin free_idx = 2'd0; free_found = 1; end
+      4'b??10: begin free_idx = 2'd1; free_found = 1; end
+      4'b?100: begin free_idx = 2'd2; free_found = 1; end
+      4'b1000: begin free_idx = 2'd3; free_found = 1; end
+      default: begin free_idx = 2'd0; free_found = 0; end
+    endcase
+
+    casez (rs_ready_vec)
+      4'b???1: begin valid_idx = 2'd0; valid_found = 1; end
+      4'b??10: begin valid_idx = 2'd1; valid_found = 1; end
+      4'b?100: begin valid_idx = 2'd2; valid_found = 1; end
+      4'b1000: begin valid_idx = 2'd3; valid_found = 1; end
+      default: begin valid_idx = 2'd0; valid_found = 0; end
+    endcase
+
+    casez (rs_mul_vec)
+      4'b???1: begin mul_rs_idx = 2'd0; mul_found = 1; end
+      4'b??10: begin mul_rs_idx = 2'd1; mul_found = 1; end
+      4'b?100: begin mul_rs_idx = 2'd2; mul_found = 1; end
+      4'b1000: begin mul_rs_idx = 2'd3; mul_found = 1; end
+      default: begin mul_rs_idx = 2'd0; mul_found = 0; end
+    endcase
   end
 
   assign exu_lsu.rvalid = (ioq_valid[ioq_head]

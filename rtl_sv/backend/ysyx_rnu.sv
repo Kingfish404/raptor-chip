@@ -53,11 +53,26 @@ module ysyx_rnu #(
   logic [RLEN-1:0]             rnq_rs1   [RIQ_SIZE];
   logic [RLEN-1:0]             rnq_rs2   [RIQ_SIZE];
 
+  // ================================================================
+  // Rename Pipeline Register (2-sub-stage rename)
+  // Stage 1: Read maptable + freelist allocate (combinational)
+  // Stage 2: Present registered results to ROU
+  // ================================================================
+  logic rn_pipe_valid;
+  ysyx_pkg::uop_t rn_pipe_uop;
+  logic [PLEN-1:0] rn_pipe_pr1, rn_pipe_pr2, rn_pipe_prd, rn_pipe_prs;
+  logic [XLEN-1:0] rn_pipe_op1, rn_pipe_op2;
+
+  // Stage 1 fires when RNQ has entry AND pipeline register is free (or being consumed)
+  logic rn_pipe_ready;
+  assign rn_pipe_ready = !rn_pipe_valid || rnu_rou.ready;
+
   logic rnq_enq_fire, rnq_deq_fire;
   assign rnq_enq_fire = idu_rnu.valid && !rnq_valid[rnq_head];
-  assign rnq_deq_fire = rnu_rou.ready && rnq_valid[rnq_tail];
+  assign rnq_deq_fire = rn_pipe_ready && rnq_valid[rnq_tail];
 
-  assign rnu_rou.valid = rnq_valid[rnq_tail];
+  // Output uses pipeline register (stage 2)
+  assign rnu_rou.valid = rn_pipe_valid;
   assign idu_rnu.ready = !rnq_valid[rnq_head];
 
   always @(posedge clock) begin
@@ -65,6 +80,7 @@ module ysyx_rnu #(
       rnq_head  <= '0;
       rnq_tail  <= '0;
       rnq_valid <= '0;
+      rn_pipe_valid <= 1'b0;
     end else begin
       if (rnq_enq_fire) begin
         rnq_head            <= rnq_head + 1;
@@ -79,14 +95,26 @@ module ysyx_rnu #(
       if (rnq_deq_fire) begin
         rnq_tail            <= rnq_tail + 1;
         rnq_valid[rnq_tail] <= 1'b0;
+
+        // Stage 1 → Stage 2: register rename results
+        rn_pipe_valid <= 1'b1;
+        rn_pipe_uop   <= rnq_uops[rnq_tail];
+        rn_pipe_op1   <= rnq_op1[rnq_tail];
+        rn_pipe_op2   <= rnq_op2[rnq_tail];
+        rn_pipe_pr1   <= mt_bus.map_rdata_a;
+        rn_pipe_pr2   <= mt_bus.map_rdata_b;
+        rn_pipe_prd   <= (rnq_rd[rnq_tail] != 0) ? fl_bus.alloc_pr : '0;
+        rn_pipe_prs   <= mt_bus.map_rdata_c;
+      end else if (rnu_rou.ready) begin
+        rn_pipe_valid <= 1'b0;
       end
     end
   end
 
-  // RNQ read-side outputs
-  assign rnu_rou.uop = rnq_uops[rnq_tail];
-  assign rnu_rou.op1 = rnq_op1[rnq_tail];
-  assign rnu_rou.op2 = rnq_op2[rnq_tail];
+  // RNQ read-side outputs (stage 2 — from pipeline register)
+  assign rnu_rou.uop = rn_pipe_uop;
+  assign rnu_rou.op1 = rn_pipe_op1;
+  assign rnu_rou.op2 = rn_pipe_op2;
 
   // ================================================================
   // Commit signals (shared by freelist, maptable, PRF)
@@ -168,12 +196,12 @@ module ysyx_rnu #(
   endgenerate
 
   // ================================================================
-  // Register Renaming outputs
+  // Register Renaming outputs (stage 2 — from pipeline register)
   // ================================================================
-  assign rnu_rou.pr1 = mt_bus.map_rdata_a;
-  assign rnu_rou.pr2 = mt_bus.map_rdata_b;
-  assign rnu_rou.prd = (rnq_rd[rnq_tail] != 0) ? fl_bus.alloc_pr : '0;
+  assign rnu_rou.pr1 = rn_pipe_pr1;
+  assign rnu_rou.pr2 = rn_pipe_pr2;
+  assign rnu_rou.prd = rn_pipe_prd;
   // prs = old physical mapping for rd (before rename), needed by ROB for dealloc
-  assign rnu_rou.prs = mt_bus.map_rdata_c;
+  assign rnu_rou.prs = rn_pipe_prs;
 
 endmodule

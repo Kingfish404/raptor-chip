@@ -33,6 +33,12 @@ module ysyx_ifu #(
   logic [XLEN-1:0] seqpc;
   logic [XLEN-1:0] nextpc;
 
+  // Pre-registered sequential PC candidates: computed from nextpc at the
+  // same edge as pc_ifu, so seqpc is a simple MUX of registered values
+  // instead of a 32-bit adder on the critical pc_ifu self-loop.
+  logic [XLEN-1:0] seq2;
+  logic [XLEN-1:0] seq4;
+
   logic ifu_hazard;
   logic pre_is_c;
   logic is_c;
@@ -66,6 +72,8 @@ module ysyx_ifu #(
   assign valid = state_ifu == VALID;
 
   assign ifu_bpu.pc = pc_ifu;
+  assign ifu_bpu.nextpc = nextpc;
+  assign ifu_bpu.pc_update = recv_ready || cmu_bcast.flush_pipe || ifu_idu.resteer;
 
   assign ifu_l1i.pc = pc_ifu;
   assign ifu_l1i.invalid = cmu_bcast.fence_i;
@@ -79,8 +87,10 @@ module ysyx_ifu #(
 
   assign ifu_idu.valid = valid;
 
-  assign seqpc = pc_ifu + (pre_is_c ? 'h2 : 'h4);
-  assign nextpc = (cmu_bcast.flush_pipe ? cmu_bcast.cpc : ifu_bpu.taken ? ifu_bpu.npc : seqpc);
+  assign seqpc = pre_is_c ? seq2 : seq4;
+  assign nextpc = (cmu_bcast.flush_pipe ? cmu_bcast.cpc
+                 : ifu_idu.resteer ? ifu_idu.resteer_pc
+                 : ifu_bpu.taken ? ifu_bpu.npc : seqpc);
 
   assign recv_ready = (ifu_l1i.valid && (ifu_idu.ready || (state_ifu == IDLE)));
 
@@ -90,6 +100,8 @@ module ysyx_ifu #(
   always @(posedge clock) begin
     if (reset) begin
       pc_ifu <= `YSYX_PC_INIT;
+      seq2 <= `YSYX_PC_INIT + 'h2;
+      seq4 <= `YSYX_PC_INIT + 'h4;
       trap <= 0;
       pmu_fetch_fire <= 0;
       pmu_ifu_stall <= 0;
@@ -100,12 +112,16 @@ module ysyx_ifu #(
         IDLE: begin
           if (cmu_bcast.flush_pipe) begin
             state_ifu <= IDLE;
+          end else if (ifu_idu.resteer) begin
+            state_ifu <= IDLE;
           end else if (ifu_l1i.valid) begin
             state_ifu <= VALID;
           end
         end
         VALID: begin
           if (cmu_bcast.flush_pipe) begin
+            state_ifu <= IDLE;
+          end else if (ifu_idu.resteer) begin
             state_ifu <= IDLE;
           end else if (ifu_idu.ready) begin
             if (is_sys || is_atomic || trap) begin
@@ -127,8 +143,10 @@ module ysyx_ifu #(
           state_ifu <= IDLE;
         end
       endcase
-      if (recv_ready || cmu_bcast.flush_pipe) begin
+      if (recv_ready || cmu_bcast.flush_pipe || ifu_idu.resteer) begin
         pc_ifu <= nextpc;
+        seq2   <= nextpc + 'h2;
+        seq4   <= nextpc + 'h4;
       end
       if (recv_ready) begin
         inst <= ifu_l1i.inst;

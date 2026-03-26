@@ -136,6 +136,9 @@ interface cmu_bcast_if #(
   logic jen;
   logic jren;
   logic btaken;
+  logic call;
+  logic ret;
+  logic rvc;
 
   logic fence_time;
   logic fence_i;
@@ -149,12 +152,12 @@ interface cmu_bcast_if #(
   logic valid_b;
 
   modport in(
-      input rpc, cpc, rd_a, ben, jen, jren, btaken,
+      input rpc, cpc, rd_a, ben, jen, jren, btaken, call, ret, rvc,
       input fence_time, fence_i, flush_pipe, time_trap,
       input rd_b, valid_b
   );
   modport out(
-      output rpc, cpc, rd_a, ben, jen, jren, btaken,
+      output rpc, cpc, rd_a, ben, jen, jren, btaken, call, ret, rvc,
       output fence_time, fence_i, flush_pipe, time_trap,
       output rd_b, valid_b
   );

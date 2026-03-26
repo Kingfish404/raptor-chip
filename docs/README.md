@@ -33,31 +33,31 @@ All commands run from the **project root**. No `source env.sh` needed.
 
 ```
 raptor-chip/
-├── Makefile              # Top-level Makefile (one-line commands)
-├── env.sh                # Environment variables (auto-sourced by Makefile)
-├── setup.sh              # Dependency installation script
-├── rtl_scala/            # Chisel (Scala) → SystemVerilog generation
-├── rtl_sv/               # Generated & handwritten SystemVerilog RTL
-│   ├── include/          # Config, interfaces, DPI-C macros
-│   │   ├── ysyx_config.svh          # Microarch params (ISSUE_WIDTH, ROB_SIZE, cache, BPU, …)
-│   │   ├── ysyx_rnu_internal_if.svh # RNU internal interfaces (rnu_fl_if, rnu_mt_if)
-│   │   └── ysyx_*_if.svh            # Inter-module interfaces (ifu/idu/rnu/rou/exu)
-│   ├── ysyx_pkg.sv       # Types: uop_t, prd_t, rob_entry_t, rob_state_t
-│   ├── ysyx.sv            # Top-level core (pure wiring, instantiates all stages + PRF)
-│   ├── frontend/         # IFU, IDU (RVC + csr_addr_valid), BPU (PHT/BTB/GHR/RSB), CSR* (M/S-mode)
-│   ├── backend/          # RNU (RNQ + freelist + maptable), PRF (2R/2W), ROU (UOQ + ROB), EXU (RS + IOQ + ALU + MUL), CMU
-│   ├── memory/           # LSU (STQ + SQ), L1I, L1D (banked SRAM, RMW), TLB (reusable), PTW (Sv32, reusable), BUS (AXI4), CLINT
-│   └── generated/        # Chisel-generated decoders
-│   # *CSR lives in frontend/ on disk but architecturally belongs to the backend
-├── nemu/                 # NEMU software emulator (RISC-V ISS)
-├── nsim/                 # NPC simulator (Verilator testbench)
-├── abstract-machine/     # Abstract Machine runtime framework
-├── navy-apps/            # Navy applications (for nanos-lite)
-├── nanos-lite/           # NanoS-lite simple OS
-├── linux/                # Linux kernel build scripts
-├── fpga/                 # FPGA targets (Gowin Tang Nano 20K)
-├── third_party/          # Third-party dependencies
-└── docs/                 # Documentation (this directory)
++-- Makefile              # Top-level Makefile (one-line commands)
++-- env.sh                # Environment variables (auto-sourced by Makefile)
++-- setup.sh              # Dependency installation script
++-- rtl_scala/            # Chisel (Scala) -> SystemVerilog generation
++-- rtl_sv/               # Generated & handwritten SystemVerilog RTL
+|   +-- include/          # Config, interfaces, DPI-C macros
+|   |   +-- ysyx_config.svh          # Microarch params (ISSUE_WIDTH, ROB_SIZE, cache, BPU, ...)
+|   |   +-- ysyx_rnu_internal_if.svh # RNU internal interfaces (rnu_fl_if, rnu_mt_if)
+|   |   +-- ysyx_*_if.svh            # Inter-module interfaces (ifu/idu/rnu/rou/exu)
+|   +-- ysyx_pkg.sv       # Types: uop_t, prd_t, rob_entry_t, rob_state_t
+|   +-- ysyx.sv            # Top-level core (pure wiring, instantiates all stages + PRF)
+|   +-- frontend/         # IFU, IDU (RVC + csr_addr_valid), BPU (PHT/BTB/GHR/RSB), CSR* (M/S-mode)
+|   +-- backend/          # RNU (RNQ + freelist + maptable), PRF (2R/2W), ROU (UOQ + ROB), EXU (RS + IOQ + ALU + MUL), CMU
+|   +-- memory/           # LSU (STQ + SQ), L1I, L1D (banked SRAM, RMW), TLB (reusable), PTW (Sv32, reusable), BUS (AXI4), CLINT
+|   +-- generated/        # Chisel-generated decoders
+|   # *CSR lives in frontend/ on disk but architecturally belongs to the backend
++-- nemu/                 # NEMU software emulator (RISC-V ISS)
++-- nsim/                 # NPC simulator (Verilator testbench)
++-- abstract-machine/     # Abstract Machine runtime framework
++-- navy-apps/            # Navy applications (for nanos-lite)
++-- nanos-lite/           # NanoS-lite simple OS
++-- linux/                # Linux kernel build scripts
++-- fpga/                 # FPGA targets (Gowin Tang Nano 20K)
++-- third_party/          # Third-party dependencies
++-- docs/                 # Documentation (this directory)
 ```
 
 ## Code Style and Conventions
@@ -136,7 +136,7 @@ static const MemMapEntry virt_memmap[] = {
 
 ## npc
 
-npc (npc_soc) 包含的外围设备和相应的地址空间如下：
+npc (npc_soc) 包含的外围设备和相应的地址空间如下:
 
 | 设备      | 地址空间                  |
 | --------- | ------------------------- |
@@ -144,11 +144,11 @@ npc (npc_soc) 包含的外围设备和相应的地址空间如下：
 | UART16550 | `0x1000_0000~0x1000_0fff` |
 | PSRAM     | `0x8000_0000~0x9fff_ffff` |
 
-PC_INIT 为 `0x8000_0000`，即 PSRAM 的起始地址。
+PC_INIT 为 `0x8000_0000`,即 PSRAM 的起始地址.
 
 ## ysyxSoC
 
-ysyxSoC 包含的外围设备和相应的地址空间如下：
+ysyxSoC 包含的外围设备和相应的地址空间如下:
 
 | 设备          | 地址空间                  |
 | ------------- | ------------------------- |
@@ -167,4 +167,4 @@ ysyxSoC 包含的外围设备和相应的地址空间如下：
 | ChipLink MEM  | `0xc000_0000~0xffff_ffff` |
 | Reverse       | 其他                      |
 
-PC_INIT 为 `0x3000_0000`，即 Flash 的起始地址。需要通过FSBL（First Stage Boot Loader）和SSBL（Second Stage Boot Loader）将程序加载到 SRAM 中运行，详情见`trm.c`。
+PC_INIT 为 `0x3000_0000`,即 Flash 的起始地址.需要通过FSBL(First Stage Boot Loader)和SSBL(Second Stage Boot Loader)将程序加载到 SRAM 中运行,详情见`trm.c`.

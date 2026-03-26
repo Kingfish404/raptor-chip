@@ -198,6 +198,7 @@ typedef struct
   long long int bpu_fail_cnt;
   long long int bpu_b_fail;
   long long int bpu_j_fail;
+  long long int bpu_jr_fail;
 
   // for inst
   long long int ld_inst_cnt;
@@ -224,6 +225,9 @@ typedef struct
 
   // dual commit
   long long int dual_commit_cnt;
+
+  // early resteer (IDU detects BPU alias on non-branch)
+  long long int early_resteer_cnt;
 } PMUState;
 
 #define panic(format, ...) Assert(0, format, ##__VA_ARGS__)

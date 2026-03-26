@@ -79,6 +79,12 @@ module ysyx_rou #(
   logic           [    XLEN-1:0] uoq_op1   [IIQ_SIZE];
   logic           [    XLEN-1:0] uoq_op2   [IIQ_SIZE];
 
+  // PRF pre-read: latched at enqueue, updated by broadcast forwarding
+  logic           [    XLEN-1:0] uoq_pv1   [IIQ_SIZE];
+  logic           [    XLEN-1:0] uoq_pv2   [IIQ_SIZE];
+  logic           [IIQ_SIZE-1:0] uoq_pv1_valid;
+  logic           [IIQ_SIZE-1:0] uoq_pv2_valid;
+
   logic uoq_enq_fire, uoq_deq_fire;
   assign uoq_enq_fire  = rnu_rou.valid && !uoq_valid[uoq_head];
   assign uoq_deq_fire  = rou_exu.ready && uoq_valid[uoq_tail] && !rob_entry[rob_tail].busy;
@@ -90,9 +96,11 @@ module ysyx_rou #(
 
   always @(posedge clock) begin
     if (reset || flush_pipe) begin
-      uoq_head  <= '0;
-      uoq_tail  <= '0;
-      uoq_valid <= '0;
+      uoq_head      <= '0;
+      uoq_tail      <= '0;
+      uoq_valid     <= '0;
+      uoq_pv1_valid <= '0;
+      uoq_pv2_valid <= '0;
     end else begin
       if (uoq_enq_fire) begin
         uoq_head            <= uoq_head + 1;
@@ -104,10 +112,57 @@ module ysyx_rou #(
         uoq_prs[uoq_head]   <= rnu_rou.prs;
         uoq_op1[uoq_head]   <= rnu_rou.op1;
         uoq_op2[uoq_head]   <= rnu_rou.op2;
+
+        // PRF pre-read with same-cycle bypass at enqueue
+        if (|rnu_rou.pr1 && exu_rou.valid && exu_rou.prd == rnu_rou.pr1) begin
+          uoq_pv1[uoq_head]            <= exu_rou.result;
+          uoq_pv1_valid[uoq_head]      <= 1'b1;
+        end else if (|rnu_rou.pr1 && exu_ioq_bcast.valid && exu_ioq_bcast.prd == rnu_rou.pr1) begin
+          uoq_pv1[uoq_head]            <= exu_ioq_bcast.result;
+          uoq_pv1_valid[uoq_head]      <= 1'b1;
+        end else begin
+          uoq_pv1[uoq_head]            <= exu_prf.pv1;
+          uoq_pv1_valid[uoq_head]      <= exu_prf.pv1_valid;
+        end
+
+        if (|rnu_rou.pr2 && exu_rou.valid && exu_rou.prd == rnu_rou.pr2) begin
+          uoq_pv2[uoq_head]            <= exu_rou.result;
+          uoq_pv2_valid[uoq_head]      <= 1'b1;
+        end else if (|rnu_rou.pr2 && exu_ioq_bcast.valid && exu_ioq_bcast.prd == rnu_rou.pr2) begin
+          uoq_pv2[uoq_head]            <= exu_ioq_bcast.result;
+          uoq_pv2_valid[uoq_head]      <= 1'b1;
+        end else begin
+          uoq_pv2[uoq_head]            <= exu_prf.pv2;
+          uoq_pv2_valid[uoq_head]      <= exu_prf.pv2_valid;
+        end
       end
       if (uoq_deq_fire) begin
         uoq_tail            <= uoq_tail + 1;
         uoq_valid[uoq_tail] <= 1'b0;
+      end
+
+      // Broadcast forwarding: update pre-read values during UOQ residence
+      for (int i = 0; i < IIQ_SIZE; i++) begin
+        if (uoq_valid[i]) begin
+          if (|uoq_pr1[i] && !uoq_pv1_valid[i]) begin
+            if (exu_rou.valid && exu_rou.prd == uoq_pr1[i]) begin
+              uoq_pv1[i]       <= exu_rou.result;
+              uoq_pv1_valid[i] <= 1'b1;
+            end else if (exu_ioq_bcast.valid && exu_ioq_bcast.prd == uoq_pr1[i]) begin
+              uoq_pv1[i]       <= exu_ioq_bcast.result;
+              uoq_pv1_valid[i] <= 1'b1;
+            end
+          end
+          if (|uoq_pr2[i] && !uoq_pv2_valid[i]) begin
+            if (exu_rou.valid && exu_rou.prd == uoq_pr2[i]) begin
+              uoq_pv2[i]       <= exu_rou.result;
+              uoq_pv2_valid[i] <= 1'b1;
+            end else if (exu_ioq_bcast.valid && exu_ioq_bcast.prd == uoq_pr2[i]) begin
+              uoq_pv2[i]       <= exu_ioq_bcast.result;
+              uoq_pv2_valid[i] <= 1'b1;
+            end
+          end
+        end
       end
     end
   end
@@ -115,39 +170,39 @@ module ysyx_rou #(
   // ================================================================
   // 2. Operand Bypass & Dispatch
   // ================================================================
-  // PRF read addresses
-  assign exu_prf.pr1 = uoq_pr1[uoq_tail];
-  assign exu_prf.pr2 = uoq_pr2[uoq_tail];
+  // PRF pre-read: drive read ports from enqueue-side rename results
+  assign exu_prf.pr1 = rnu_rou.pr1;
+  assign exu_prf.pr2 = rnu_rou.pr2;
 
-  // Bypass: check EXU and IOQ broadcast for operand forwarding
-  logic pr1_from_prf, pr1_from_ioq, pr1_from_exu;
-  logic pr2_from_prf, pr2_from_ioq, pr2_from_exu;
+  // Bypass: use UOQ pre-read values + same-cycle broadcast forwarding
+  logic pr1_from_uoq, pr1_from_ioq, pr1_from_exu;
+  logic pr2_from_uoq, pr2_from_ioq, pr2_from_exu;
 
-  assign pr1_from_prf = exu_prf.pv1_valid;
+  assign pr1_from_uoq = uoq_pv1_valid[uoq_tail];
   assign pr1_from_ioq = exu_ioq_bcast.valid && (exu_ioq_bcast.prd == uoq_pr1[uoq_tail]);
   assign pr1_from_exu = exu_rou.valid && (exu_rou.prd == uoq_pr1[uoq_tail]);
 
-  assign pr2_from_prf = exu_prf.pv2_valid;
+  assign pr2_from_uoq = uoq_pv2_valid[uoq_tail];
   assign pr2_from_ioq = exu_ioq_bcast.valid && (exu_ioq_bcast.prd == uoq_pr2[uoq_tail]);
   assign pr2_from_exu = exu_rou.valid && (exu_rou.prd == uoq_pr2[uoq_tail]);
 
   logic pr1_ready, pr2_ready;
-  assign pr1_ready = pr1_from_prf || pr1_from_ioq || pr1_from_exu;
-  assign pr2_ready = pr2_from_prf || pr2_from_ioq || pr2_from_exu;
+  assign pr1_ready = pr1_from_uoq || pr1_from_ioq || pr1_from_exu;
+  assign pr2_ready = pr2_from_uoq || pr2_from_ioq || pr2_from_exu;
 
   always_comb begin
     rou_exu.uop = uoq_uops[uoq_tail];
 
-    // Operand 1 selection (priority: PRF > IOQ bypass > EXU bypass > immediate)
+    // Operand 1 selection (priority: UOQ pre-read > IOQ bypass > EXU bypass > immediate)
     rou_exu.op1 = (uoq_pr1[uoq_tail] != 0)
-        ? (pr1_from_prf ? exu_prf.pv1
+        ? (pr1_from_uoq ? uoq_pv1[uoq_tail]
          : pr1_from_ioq ? exu_ioq_bcast.result
          :                exu_rou.result)
         : uoq_op1[uoq_tail];
 
     // Operand 2 selection
     rou_exu.op2 = (uoq_pr2[uoq_tail] != 0)
-        ? (pr2_from_prf ? exu_prf.pv2
+        ? (pr2_from_uoq ? uoq_pv2[uoq_tail]
          : pr2_from_ioq ? exu_ioq_bcast.result
          :                exu_rou.result)
         : uoq_op2[uoq_tail];

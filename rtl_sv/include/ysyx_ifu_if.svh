@@ -12,12 +12,14 @@ interface ifu_bpu_if #(
     parameter int RSB_SIZE = `YSYX_RSB_SIZE
 );
   logic [XLEN-1:0] pc;
+  logic [XLEN-1:0] nextpc;
+  logic             pc_update;
 
   logic [XLEN-1:0] npc;
   logic taken;
 
-  modport out(output pc, input npc, taken);
-  modport in(input pc, output npc, taken);
+  modport out(output pc, nextpc, pc_update, input npc, taken);
+  modport in(input pc, nextpc, pc_update, output npc, taken);
 endinterface
 
 interface ifu_l1i_if #(
@@ -50,8 +52,12 @@ interface ifu_idu_if #(
 
   logic ready;
 
-  modport master(output inst, pc, pnpc, trap, cause, valid, input ready);
-  modport slave(input inst, pc, pnpc, trap, cause, valid, output ready);
+  // Early resteer: IDU detected BPU misprediction on non-branch instruction
+  logic resteer;
+  logic [XLEN-1:0] resteer_pc;
+
+  modport master(output inst, pc, pnpc, trap, cause, valid, input ready, resteer, resteer_pc);
+  modport slave(input inst, pc, pnpc, trap, cause, valid, output ready, resteer, resteer_pc);
 endinterface
 
 /* verilator lint_on UNUSEDSIGNAL */

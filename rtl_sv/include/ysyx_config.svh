@@ -38,9 +38,11 @@
 `define YSYX_M_FAST 'h1
 `define YSYX_L1I_LINE_LEN 2
 `define YSYX_L1I_LEN 6
+`define YSYX_L1I_N_WAYS 1
 
 `define YSYX_PHT_SIZE 512
-`define YSYX_BTB_SIZE 64
+`define YSYX_BTB_SIZE 128
+`define YSYX_BTB_WAYS 2
 `define YSYX_RSB_SIZE 8
 
 `define YSYX_RIQ_SIZE 4
@@ -52,7 +54,8 @@
 
 `define YSYX_SQ_SIZE 8
 `define YSYX_L1D_LINE_LEN 1
-`define YSYX_L1D_LEN 6
+`define YSYX_L1D_LEN 5
+`define YSYX_L1D_N_WAYS 2
 
 // Dual commit: retire up to 2 consecutive ROB entries per cycle.
 // Comment out or undefine to disable for A/B benchmarking.

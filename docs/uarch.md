@@ -2,116 +2,198 @@
 
 ## Overview
 
-Raptor is an out-of-order, single-issue RISC-V processor core with register renaming, a reorder buffer (ROB), reservation stations, and virtual memory support. The commit stage supports **dual commit** — up to 2 instructions can retire from the ROB per cycle when consecutive entries are both ready.
+Raptor is an out-of-order, single-issue RISC-V processor core with register renaming, a reorder buffer (ROB), reservation stations, and virtual memory support. The commit stage supports **dual commit** -- up to 2 instructions can retire from the ROB per cycle when consecutive entries are both ready.
 
 **ISA**: RV32/RV64 I + M (mul/div) + A (atomics: LR/SC, AMO) + C (compressed) + Zicsr + Zifencei + Sv32 MMU
 
 The core supports configurable **RV32** and **RV64** modes via a compile-time switch (`YSYX_RV64`). When `YSYX_RV64` is defined, XLEN=64 and all datapath, register file, AXI bus, and DPI-C interfaces widen to 64 bits. RV64 adds W-variant instructions (ADDIW, SLLIW, etc.) with 32-bit result sign-extension.
 
 ```text
- Pipeline Overview — 3 major partitions
+ Pipeline Overview -- 3 major partitions
 
- ┌─ FRONTEND (in-order, speculative) ──────────────────────┐
- │ IFU  — Instruction Fetch Unit (3-state FSM)             │
- │   ├─ L1I  (direct-mapped I-cache, TLB, Sv32 PTW, IFQ)   │
- │   └─ BPU  (bimodal PHT, BTB, GHR, RSB)                  │
- │ IDU  — Instruction Decode Unit                          │
- │   └─ RVC expansion + Chisel-generated decoders          │
- └─────────────────────────────────────────────────────────┘
+ +- FRONTEND (in-order, speculative) ----------------------+
+ | IFU  -- Instruction Fetch Unit (3-state FSM)            |
+ |   +- L1I  (direct-mapped I-cache, TLB, Sv32 PTW, IFQ)   |
+ |   +- BPU  (bimodal PHT, BTB, GHR, RSB)                  |
+ | IDU  -- Instruction Decode Unit                         |
+ |   +- RVC expansion + Chisel-generated decoders          |
+ +---------------------------------------------------------+
 
- ┌─ BACKEND (rename → dispatch → execute → commit) ────────┐
- │ RNU  — Register Naming Unit (pure rename)               │
- │   ├─ RNQ     (rename queue, circular, RIQ_SIZE)         │
- │   ├─ Freelist (rnu_fl_if, circular FIFO, PHY_SIZE)      │
- │   └─ MapTable (rnu_mt_if, spec MAP + committed RAT)     │
- │ PRF  — Physical Register File (top-level, 2R/2W)        │
- │ ROU  — Re-Order Unit (ROB + dispatch)                   │
- │   ├─ UOQ  (dispatch queue, circular, IIQ_SIZE)          │
- │   ├─ ROB  (rob_entry_t[], ROB_SIZE, head/tail)          │
- │   └─ Operand bypass (EXU/IOQ → dispatch)                │
- │ EXU  — Execution Unit (out-of-order)                    │
- │   ├─ RS   (reservation station, RS_SIZE)                │
- │   │   ├─ ALU  (RV32I combinational)                     │
- │   │   └─ MUL  (RV32M, Booth's / iterative div)          │
- │   └─ IOQ  (in-order queue, IOQ_SIZE, for ld/st/amo)     │
- │ CMU  — Commit Unit (broadcast retire info, in-order)    │
- │ CSR  — M/S-mode CSR file + trap/interrupt handling      │
- └─────────────────────────────────────────────────────────┘
+ +- BACKEND (rename -> dispatch -> execute -> commit) -----+
+ | RNU  -- Register Naming Unit (pure rename)              |
+ |   +- RNQ     (rename queue, circular, RIQ_SIZE)         |
+ |   +- Freelist (rnu_fl_if, circular FIFO, PHY_SIZE)      |
+ |   +- MapTable (rnu_mt_if, spec MAP + committed RAT)     |
+ | PRF  -- Physical Register File (top-level, 2R/2W)       |
+ | ROU  -- Re-Order Unit (ROB + dispatch)                  |
+ |   +- UOQ  (dispatch queue, circular, IIQ_SIZE)          |
+ |   +- ROB  (rob_entry_t[], ROB_SIZE, head/tail)          |
+ |   +- Operand bypass (EXU/IOQ -> dispatch)               |
+ | EXU  -- Execution Unit (out-of-order)                   |
+ |   +- RS   (reservation station, RS_SIZE)                |
+ |   |   +- ALU  (RV32I combinational)                     |
+ |   |   +- MUL  (RV32M, Booth's / iterative div)          |
+ |   +- IOQ  (in-order queue, IOQ_SIZE, for ld/st/amo)     |
+ | CMU  -- Commit Unit (broadcast retire info, in-order)   |
+ | CSR  -- M/S-mode CSR file + trap/interrupt handling     |
+ +---------------------------------------------------------+
 
- ┌─ MEMORY SUBSYSTEM ──────────────────────────────────────┐
- │ LSU  — Load/Store Unit                                  │
- │   ├─ STQ  (store temp queue, speculative, SQ_SIZE)      │
- │   ├─ SQ   (store queue, committed, SQ_SIZE)             │
- │   └─ Store-to-load forwarding (CAM, virtual address)    │
- │ L1D  — Data Cache (direct-mapped, banked SRAM, RMW)     │
- │   └─ Reservation register (LR/SC atomics)               │
- │ TLB  — Translation Lookaside Buffer (reusable module)   │
- │   ├─ ITLB (L1I), DTLB (L1D load), DSTLB (L1D store)   │
- │ PTW  — Page Table Walker (Sv32, reusable module)        │
- │   ├─ IPTW (L1I), DPTW (L1D)                            │
- │ BUS  — AXI4 master bridge (L1I/L1D arbitration)         │
- │   └─ CLINT (mtime timer, periodic interrupt)            │
- └─────────────────────────────────────────────────────────┘
+ +- MEMORY SUBSYSTEM --------------------------------------+
+ | LSU  -- Load/Store Unit                                 |
+ |   +- STQ  (store temp queue, speculative, SQ_SIZE)      |
+ |   +- SQ   (store queue, committed, SQ_SIZE)             |
+ |   +- Store-to-load forwarding (CAM, virtual address)    |
+ | L1D  -- Data Cache (2-way set-assoc, banked SRAM, RMW)  |
+ |   +- Reservation register (LR/SC atomics)               |
+ | TLB  -- Translation Lookaside Buffer (reusable module)  |
+ |   +- ITLB (L1I), DTLB (L1D load), DSTLB (L1D store)     |
+ | PTW  -- Page Table Walker (Sv32, reusable module)       |
+ |   +- IPTW (L1I), DPTW (L1D)                             |
+ | BUS  -- AXI4 master bridge (L1I/L1D arbitration)        |
+ |   +- CLINT (mtime timer, periodic interrupt)            |
+ +---------------------------------------------------------+
 ```
+
+## Pipeline Flow
+
+The processor has a variable-depth pipeline with **8 logical stages** in the common case (L1I hit, ALU instruction, no dependency stall). All stage boundaries use valid/ready handshaking; queues (RNQ, UOQ, RS, IOQ, ROB) decouple stages and absorb backpressure.
+
+```text
+ IF0     IF1      ID      RN       DI       IS/EX    WB      CM
++-----++------++------++-------++--------++-------++-----++------+
+|L1I  ||IFU   ||IDU   ||RNU    ||ROU     ||EXU    ||ROB  ||CMU   |
+|SRAM ||FSM   ||decode||RNQ->   ||UOQ->    ||RS->ALU ||->WB  ||bcast |
+|read ||latch ||latch ||rename ||dispatch||issue  ||state||retire|
+|(spec)|      |       | pipe   | +ROB    |        |      |       |
++--+--++--+---++--+---++--+----++---+----++--+----++--+--++--+---+
+   |      |       |       |         |        |       |      |
+   v      v       v       v         v        v       v      v
+ 1 cyc  1 cyc   1 cyc   1 cyc    1 cyc    1 cyc   0 cyc  1 cyc
+```
+
+### Stage Description
+
+| Stage     | Module | Register boundary                          |
+| --------- | ------ | ------------------------------------------ |
+| **IF0**   | L1I    | SRAM address latched                       |
+| **IF1**   | IFU    | `inst`, `pc`, `pc_ifu` registered          |
+| **ID**    | IDU    | `uop_t`, operands registered               |
+| **RN**    | RNU    | `rn_pipe_{pr1,pr2,prd,prs,uop}` registered |
+| **DI**    | ROU    | UOQ consumed, ROB entry allocated          |
+| **IS/EX** | EXU    | RS/IOQ entries updated                     |
+| **WB**    | ROB    | ROB state -> `ROB_WB`                      |
+| **CM**    | CMU    | Architectural state committed              |
+
+### Cycle Count (Common Case: L1I Hit, ALU, No Stall)
+
+```text
+Cycle 0: IF0 -- L1I SRAM speculative read (pc_ifu -> banks)
+Cycle 1: IF1 -- IFU latches instruction (L1I hit, tag match)
+Cycle 2: ID  -- IDU decodes, latches uop_t
+Cycle 3: RN  -- RNU: RNQ enqueue + rename comb logic
+Cycle 4: RN  -- RNU: rename pipe register latched (rn_pipe_valid)
+Cycle 5: DI  -- ROU: UOQ enqueue + PRF pre-read + bypass
+Cycle 6: DI  -- ROU: UOQ dequeue -> dispatch to EXU + ROB alloc
+Cycle 7: EX  -- EXU: RS issue + ALU (comb) -> writeback (ROB_EX->ROB_WB)
+Cycle 8: CM  -- CMU: commit (ROB_WB, head ready) -> retire + broadcast
+```
+
+**Instruction latency**: ~9 cycles (first instruction, empty pipeline)
+**Throughput**: 1 IPC (single-issue, fully pipelined with all queues flowing)
+
+### Load Hit Latency
+
+Loads go through the IOQ path and interact with L1D:
+
+```text
+Cycle N+0: DI  -- IOQ enqueue (load dispatched from UOQ)
+Cycle N+1: IS  -- IOQ head ready, drives exu_lsu.raddr -> L1D SRAM spec read
+Cycle N+2: EX  -- L1D tag match (LD_A), SRAM data ready -> data_hit
+Cycle N+3: WB  -- exu_ioq_bcast.valid -> ROB_WB, PRF written, result broadcast
+```
+
+**Load-use latency**: 3 cycles from IOQ issue to result broadcast (L1D hit)
+
+### Store Flow
+
+Stores are split across execution and commit:
+
+```text
+Execute: IOQ computes store address + data -> STQ buffer (speculative)
+Commit:  ROB head retires store -> SQ enqueue (committed)
+Drain:   SQ head -> L1D write-through -> BUS -> AXI4 (background)
+```
+
+Store-to-load forwarding: loads check STQ (speculative) then SQ (committed) via virtual address CAM, youngest-match-wins.
+
+### Branch Misprediction Penalty
+
+On misprediction detected at commit (CM stage):
+- `cmu_bcast.flush_pipe=1` -> all speculative state purged
+- IFU redirected to `cmu_bcast.cpc` (correct PC)
+- RNU: freelist rewinds head, maptable MAP<-RAT
+- PRF: transient entries invalidated
+- **Penalty**: full pipeline drain (~8 cycles)
+
 
 ## Pipeline Data Flow
 
 ```text
- ┌─ frontend (in-order, speculative) ──────────────────────┐
- │      v─ [BUS <─load─ AXI4]                              │
- │  IFU[l1i,tlb,ifq] ═issue═> IDU                          │
- │      ^─ bpu[btb(COND/DIRE/INDR/RETU),pht,ghr,rsb]       │
- └─────────────────────────────────────────────────────────┘
-          ║ ifu_idu_if
- ┌─ backend (rename → dispatch → execute → commit) ────────┐
- │  IDU ═issue═> RNU[rnq,freelist,maptable]                │
- │  RNU ═rename═> ROU[uoq]                                 │
- │  ROU[uoq] ─dispatch─> ROU[rob(rob_entry_t)]             │
- │           ═dispatch═> EXU[rs] / EXU[ioq]                │
- │                                                         │
- │  EXU[rs] ═writeback═> ROU[rob]   (via exu_rou_if)       │
- │      ^─ ALU :alu ops                                    │
- │      ├─ MUL :mult/div (Booth's / iterative)             │
- │  EXU[ioq] ═writeback═> ROU[rob]  (via exu_ioq_bcast_if) │
- │      ^─ CSR :Zicsr read                                 │
- │      ├─ AMO :atomics (LR/SC/AMO*)                       │
- │                                                         │
- │  ROU[rob] ═commit═> CMU & LSU[sq] & CSR                 │
- │  CMU ═broadcast═> frontend: IFU[pc], BPU[update]        │
- └─────────────────────────────────────────────────────────┘
-          ║ exu_lsu_if, rou_lsu_if, lsu_l1d_if
- ┌─ memory subsystem ──────────────────────────────────────┐
- │  LSU[stq] (speculative store temp queue)                │
- │  LSU[sq ] (committed store queue → L1D/BUS)             │
- │  L1D[dtlb,dstlb,dptw] → BUS → AXI4 (write-through)     │
- │  TLB (reusable: itlb, dtlb, dstlb)                      │
- │  PTW (reusable: iptw, dptw — Sv32 walker)                │
- └─────────────────────────────────────────────────────────┘
+ +- frontend (in-order, speculative) ----------------------+
+ |      v- [BUS <-load- AXI4]                              |
+ |  IFU[l1i,tlb,ifq] =issue=> IDU                          |
+ |      ^- bpu[btb(COND/DIRE/INDR/RETU),pht,ghr,rsb]       |
+ +---------------------------------------------------------+
+          | ifu_idu_if
+ +- backend (rename -> dispatch -> execute -> commit) -----+
+ |  IDU =issue=> RNU[rnq,freelist,maptable]                |
+ |  RNU =rename=> ROU[uoq]                                 |
+ |  ROU[uoq] -dispatch-> ROU[rob(rob_entry_t)]             |
+ |           =dispatch=> EXU[rs] / EXU[ioq]                |
+ |                                                         |
+ |  EXU[rs] =writeback=> ROU[rob]   (via exu_rou_if)       |
+ |      ^- ALU :alu ops                                    |
+ |      +- MUL :mult/div (Booth's / iterative)             |
+ |  EXU[ioq] =writeback=> ROU[rob]  (via exu_ioq_bcast_if) |
+ |      ^- CSR :Zicsr read                                 |
+ |      +- AMO :atomics (LR/SC/AMO*)                       |
+ |                                                         |
+ |  ROU[rob] =commit=> CMU & LSU[sq] & CSR                 |
+ |  CMU =broadcast=> frontend: IFU[pc], BPU[update]        |
+ +---------------------------------------------------------+
+          | exu_lsu_if, rou_lsu_if, lsu_l1d_if
+ +- memory subsystem --------------------------------------+
+ |  LSU[stq] (speculative store temp queue)                |
+ |  LSU[sq ] (committed store queue -> L1D/BUS)            |
+ |  L1D[dtlb,dstlb,dptw] -> BUS -> AXI4 (write-through)    |
+ |  TLB (reusable: itlb, dtlb, dstlb)                      |
+ |  PTW (reusable: iptw, dptw -- Sv32 walker)              |
+ +---------------------------------------------------------+
 ```
 
 ## Module Details
 
 ### Frontend
 
-#### IFU — Instruction Fetch Unit (`ysyx_ifu.sv`)
+#### IFU -- Instruction Fetch Unit (`ysyx_ifu.sv`)
 
-- **FSM**: 3-state (`IDLE` → `VALID` → `STALL`)
+- **FSM**: 3-state (`IDLE` -> `VALID` -> `STALL`)
 - Sends PC to L1I cache and BPU in parallel
 - Next-PC mux priority: flush redirect > BPU taken > sequential (PC+2/+4)
 - Pre-decodes compressed instruction bit for PC stride (2 vs 4)
 - Stalls pipeline on system/atomic/trap instructions until flush completes
 
-#### BPU — Branch Prediction Unit (`ysyx_bpu.sv`)
+#### BPU -- Branch Prediction Unit (`ysyx_bpu.sv`)
 
 - **PHT**: 2-bit saturating counters, `PHT_SIZE` entries (default 512), bimodal indexing
 - **GHR**: Global History Register, 11 bits
-- **BTB**: `BTB_SIZE` entries (default 64), 7-bit tag, XOR-hash index
+- **BTB**: 2-way set-associative, `BTB_SIZE` total entries (default 128 = 64 sets x 2 ways), 7-bit tag, XOR-hash index, 1-bit LRU replacement per set
   - Entry types: `COND` (conditional), `DIRE` (direct jump), `INDR` (indirect), `RETU` (return)
 - **RSB**: Return Stack Buffer, `RSB_SIZE` entries (default 8)
 - Updates: PHT on committed branches, BTB on flushes
 - Reset: PHT/BTB invalidated on `fence_time`
 
-#### L1I — Instruction Cache (`ysyx_l1i.sv`)
+#### L1I -- Instruction Cache (`ysyx_l1i.sv`)
 
 - Direct-mapped, `2^L1I_LEN` entries (default 64, 6-bit index)
 - Line size: `2^L1I_LINE_LEN` words (default 4 words per line)
@@ -126,19 +208,20 @@ The core supports configurable **RV32** and **RV64** modes via a compile-time sw
 - `fence.i` invalidation support
 - **FSM**: 7-state (`IDLE`, `PTWAIT`, `TRAP`, `RD_A`, `RD_0`, `RD_1`, `FINA`)
 
-#### IDU — Instruction Decode Unit (`ysyx_idu.sv`)
+#### IDU -- Instruction Decode Unit (`ysyx_idu.sv`)
 
 - **FSM**: 2-state (`IDLE`, `VALID`) with valid/ready handshake
 - Instantiates `ysyx_idu_decoder_c` (RVC expansion) and `ysyx_idu_decoder` (Chisel-generated)
 - `csr_addr_valid()` function validates all M-mode + S-mode CSR addresses
 - Aggregates traps from IFU (page faults) and decode-time errors (illegal inst/CSR)
+- **Early resteer**: detects BTB alias mispredictions where BPU predicted taken on a non-branch instruction (`pnpc != pc + inst_len && !ben && !jen && !jren`). Sends one-shot `resteer` pulse + `resteer_pc` back to IFU via `ifu_idu_if`, corrects `pnpc` in the downstream UOP to avoid redundant commit-time flush
 - Outputs full `uop_t` micro-op struct
 
 ### Backend
 
-#### RNU — Register Naming Unit (`ysyx_rnu.sv`)
+#### RNU -- Register Naming Unit (`ysyx_rnu.sv`)
 
-- Pure rename stage: maps architectural registers → physical registers
+- Pure rename stage: maps architectural registers -> physical registers
 - **RNQ**: Circular rename queue, `RIQ_SIZE` entries (default 4), buffers uops from IDU
 - **Freelist** (`ysyx_rnu_freelist.sv`): Circular FIFO, `PHY_SIZE` entries (default 64)
   - Allocates physical register on rename, deallocates on commit
@@ -147,10 +230,10 @@ The core supports configurable **RV32** and **RV64** modes via a compile-time sw
 - **MapTable** (`ysyx_rnu_maptable.sv`): Dual-table design
   - **MAP**: Speculative rename map, 3 read ports (rs1, rs2, rd\_old)
   - **RAT**: Committed architectural map, written on ROB commit
-  - Flush recovery: MAP ← RAT (with concurrent commit write forwarding)
+  - Flush recovery: MAP <- RAT (with concurrent commit write forwarding)
 - Outputs: `map_snapshot` / `rat_snapshot` for PRF debug view
 
-#### PRF — Physical Register File (`ysyx_prf.sv`)
+#### PRF -- Physical Register File (`ysyx_prf.sv`)
 
 - `PHY_SIZE` entries (default 64), 2 read ports + 2 write ports
 - Instantiated at top level (`ysyx.sv`), shared resource
@@ -164,11 +247,11 @@ The core supports configurable **RV32** and **RV64** modes via a compile-time sw
 - Read port: `exu_prf_if` (operand fetch for ROU dispatch)
 - Debug: `rf[]` (committed view via RAT), `rf_map[]` (speculative view via MAP)
 
-#### ROU — Re-Order Unit (`ysyx_rou.sv`)
+#### ROU -- Re-Order Unit (`ysyx_rou.sv`)
 
 - **UOQ**: Circular dispatch queue, `IIQ_SIZE` entries (default 4)
 - **ROB**: `rob_entry_t` struct array, `ROB_SIZE` entries (default 8), head/tail pointers
-  - States: `ROB_EX` (executing) → `ROB_WB` (written back) → `ROB_CM` (committed)
+  - States: `ROB_EX` (executing) -> `ROB_WB` (written back) -> `ROB_CM` (committed)
 - **Operand bypass**: Forwards from EXU/IOQ broadcasts to dispatch operands
   - Priority: PRF > IOQ broadcast > EXU broadcast
 - **Commit**: In-order, waits for ROB head `ROB_WB` + store queue ready
@@ -176,7 +259,7 @@ The core supports configurable **RV32** and **RV64** modes via a compile-time sw
 - **Async trap**: Timer interrupt from CLINT (`clint_trap`)
 - Interfaces: `rou_exu_if` (dispatch to EXU), `rou_csr_if` (CSR commit), `rou_lsu_if` (store commit)
 
-#### EXU — Execution Unit (`ysyx_exu.sv`)
+#### EXU -- Execution Unit (`ysyx_exu.sv`)
 
 - **RS** (Reservation Station): `RS_SIZE` entries (default 4)
   - Operand forwarding from both EXU and IOQ broadcasts
@@ -189,11 +272,11 @@ The core supports configurable **RV32** and **RV64** modes via a compile-time sw
 - **MUL** (`ysyx_exu_mul.sv`): RV32M ops with two modes:
   - Fast mode (`YSYX_M_FAST`): single-cycle (for simulation)
   - Iterative: Booth's multiplication (33/65 cycles), restoring division (32 cycles)
-- **Atomics**: Full AMO support — LR/SC with reservation, AMOSWAP/ADD/XOR/AND/OR/MIN/MAX
+- **Atomics**: Full AMO support -- LR/SC with reservation, AMOSWAP/ADD/XOR/AND/OR/MIN/MAX
 - **Store MMU**: Address translation via `exu_l1d_if`
 - **Difftest skip detection**: RS detects CSR reads from TIME/TIMEH/CYCLE/MCYCLE/MCYCLEH; IOQ detects MMIO store addresses and load `difftest_skip` from LSU. Propagated via `exu_rou.difftest_skip` and `exu_ioq_bcast.difftest_skip` to ROB.
 
-#### CMU — Commit Unit (`ysyx_cmu.sv`)
+#### CMU -- Commit Unit (`ysyx_cmu.sv`)
 
 - Lightweight broadcast unit: receives commit info from ROU, broadcasts to pipeline
 - Broadcasts: `rpc` (retire PC), `cpc` (correct/redirect PC), branch resolution, `flush_pipe`, `fence_i`, `fence_time`, `time_trap`
@@ -201,19 +284,19 @@ The core supports configurable **RV32** and **RV64** modes via a compile-time sw
 - DPI-C hooks for difftest and ebreak
 - **Difftest skip**: Issues `YSYX_DPI_C_NPC_DIFFTEST_SKIP_REF` at commit time when `rou_cmu.difftest_skip` is set (MMIO loads/stores, CSR time reads)
 
-#### CSR — Control & Status Registers (`ysyx_csr.sv`)
+#### CSR -- Control & Status Registers (`ysyx_csr.sv`)
 
 - 32-entry CSR register file, M-mode + S-mode
 - Handles trap entry/exit: `ecall`, `ebreak`, `mret`, `sret`
 - Privilege mode transitions (M/S/U)
 - Trap delegation (`medeleg` / `mideleg`)
-- `MSTATUS` ↔ `SSTATUS` mirroring
+- `MSTATUS` <-> `SSTATUS` mirroring
 - `mcycle` / `time` counters
 - Broadcasts: `priv`, `satp_ppn`, `satp_asid`, `immu_en`/`dmmu_en`, `tvec`, `interrupt_en`
 
 ### Memory Subsystem
 
-#### LSU — Load/Store Unit (`ysyx_lsu.sv`)
+#### LSU -- Load/Store Unit (`ysyx_lsu.sv`)
 
 - **STQ** (Store Temporary Queue): `SQ_SIZE` entries, speculative stores before commit; stores virtual address (`stq_waddr`) for forwarding comparison
 - **SQ** (Store Queue): `SQ_SIZE` entries, committed stores pending L1D write; tracks both physical address (`sq_waddr` for bus write-through) and virtual address (`sq_vaddr` for forwarding)
@@ -223,14 +306,14 @@ The core supports configurable **RV32** and **RV64** modes via a compile-time sw
 - Loads blocked while SQ/STQ non-empty (memory ordering)
 - `difftest_skip` propagated from L1D through to EXU
 
-#### L1D — Data Cache (`ysyx_l1d.sv`)
+#### L1D -- Data Cache (`ysyx_l1d.sv`)
 
-- Direct-mapped, `2^L1D_LEN` sets (default 64, 6-bit index)
+- 2-way set-associative, `2^L1D_LEN` sets (default 32, 5-bit index)
 - Line size: `2^L1D_LINE_LEN` words per line (default 2), parameterized
 - **Data storage**: Banked `ysyx_sram_1r1w` instances (one per word position via `gen_data_bank` generate loop) with synchronous read (1-cycle latency)
 - **Tag/Valid**: Per-word register arrays (`l1d_valid[set][word]`, `l1d_tag[set][word]`), enabling simultaneous load/store hit check and fast fence invalidation
 - **Hit logic**: Split into `tag_hit` (combinational from register tags in `LD_A`, guarded by `sram_bypass_r` to prevent write-first bypass corruption) and `data_hit` (SRAM data ready). Bus requests suppressed by `tag_hit`; load data returned by `data_hit`.
-- Write-through policy: full-word writes update cache; partial stores (SB/SH) use **Read-Modify-Write (RMW)** — 2-cycle merge: read old SRAM word, byte-lane merge, write back (`l1d_rmw`, `rmw_merged_data`). RMW only fires in IDLE when SRAM read port is free (`partial_store_rmw`). Falls back to invalidation when read port is busy.
+- Write-through policy: full-word writes update cache; partial stores (SB/SH) use **Read-Modify-Write (RMW)** -- 2-cycle merge: read old SRAM word, byte-lane merge, write back (`l1d_rmw`, `rmw_merged_data`). RMW only fires in IDLE when SRAM read port is free (`partial_store_rmw`). Falls back to invalidation when read port is busy.
 - **Speculative SRAM read**: In IDLE with a pending load, drives incoming virtual index directly (VIPT safe: `L1D_LEN+L1D_LINE_LEN+OFFSET_BITS < 12`). RMW steers `sram_raddr` to store's set when active.
 - **Load TLB**: `ysyx_tlb` instance (`u_dtlb`, default 4 entries, ASID-aware, combinational lookup)
 - **Store TLB (STLB)**: Separate `ysyx_tlb` instance (`u_dstlb`) for store address translation
@@ -241,29 +324,29 @@ The core supports configurable **RV32** and **RV64** modes via a compile-time sw
 - `fence_time` invalidates entire cache
 - **FSM**: 5-state (`IDLE`, `PTWAIT`, `TRAP`, `LD_A`, `LD_D`)
 
-#### TLB — Translation Lookaside Buffer (`ysyx_tlb.sv`)
+#### TLB -- Translation Lookaside Buffer (`ysyx_tlb.sv`)
 
 - Reusable fully-associative TLB module for Sv32 page translation
 - Parameterized entry count (`ENTRIES`, default 4), ASID-aware
-- **Lookup**: Combinational — matches `lookup_vtag` + `lookup_asid` against all entries simultaneously
+- **Lookup**: Combinational -- matches `lookup_vtag` + `lookup_asid` against all entries simultaneously
 - **Fill**: Sequential on `fill_valid` (posedge clock), only fills on miss (no duplicate entries)
 - **Replacement**: Round-robin (`rr_ptr`)
 - **Flush**: Bulk invalidation via `flush` input (used by `fence_time`)
 - Instantiated as: `u_itlb` (L1I), `u_dtlb` (L1D load), `u_dstlb` (L1D store)
 
-#### PTW — Page Table Walker (`ysyx_ptw.sv`)
+#### PTW -- Page Table Walker (`ysyx_ptw.sv`)
 
 - Reusable Sv32 two-level page table walker module
-- **FSM**: 3-state (`IDLE` → `LVL1` → `LVL0`)
+- **FSM**: 3-state (`IDLE` -> `LVL1` -> `LVL0`)
   - `LVL1`: Reads first-level PTE using `vpn[1]`
   - `LVL0`: Reads second-level PTE using `vpn[0]` (if LVL1 was non-leaf)
-- Leaf detection: `PTE.R || PTE.X` → superpage (LVL1 leaf) or regular page (LVL0 leaf)
+- Leaf detection: `PTE.R || PTE.X` -> superpage (LVL1 leaf) or regular page (LVL0 leaf)
 - **Outputs**: `done` (translation complete), `fault` (page fault), `result_ptag`/`result_vtag` (for TLB fill)
 - Shares AXI read channel with cache fill (`bus_arvalid`/`bus_araddr`/`bus_rdata`)
 - RV64-aware: selects correct 32-bit PTE half from 64-bit bus read (`ppn_a[2]`)
 - Instantiated as: `u_iptw` (L1I), `u_dptw` (L1D)
 
-#### BUS — AXI4 Bus Bridge (`ysyx_bus.sv`)
+#### BUS -- AXI4 Bus Bridge (`ysyx_bus.sv`)
 
 - Arbitrates L1I and L1D requests to single AXI4 master port
 - L1D has priority over L1I for reads
@@ -274,7 +357,7 @@ The core supports configurable **RV32** and **RV64** modes via a compile-time sw
 - CLINT reads handled locally (not sent over AXI)
 - **Difftest**: MMIO detection via `l1d_load_is_mmio` flag (latched on L1D load request), propagated via `l1d_bus.difftest_skip` to commit stage
 
-#### CLINT — Core Local Interrupt Controller (`ysyx_clint.sv`)
+#### CLINT -- Core Local Interrupt Controller (`ysyx_clint.sv`)
 
 - 64-bit `mtime` counter
 - Periodic timer interrupt every 262144 cycles (`mtime[18:0] == 0x40000`)
@@ -285,72 +368,74 @@ The core supports configurable **RV32** and **RV64** modes via a compile-time sw
 
 ### Inter-module interfaces (`ysyx_if.svh`, `ysyx_*_if.svh`)
 
-| Interface | Direction | Description |
-|-----------|-----------|-------------|
-| `ifu_bpu_if` | IFU → BPU | PC for prediction, NPC + taken back |
-| `ifu_l1i_if` | IFU → L1I | PC fetch request, inst + trap response |
-| `ifu_idu_if` | IFU → IDU | Fetched instruction + PC + predicted NPC |
-| `idu_rnu_if` | IDU → RNU | Decoded uop + operands + arch reg IDs |
-| `rnu_rou_if` | RNU → ROU | Renamed uop + physical reg mappings |
-| `rou_exu_if` | ROU → EXU | Dispatched uop + operands + ROB dest |
-| `rou_lsu_if` | ROU → LSU | Store commit (addr/data/alu) |
-| `rou_csr_if` | ROU → CSR | CSR write + trap/system on commit |
-| `rou_cmu_if` | ROU → CMU | Commit info (PC, branch, fence, flush) |
-| `exu_rou_if` | EXU → ROU | RS writeback (result, branch, CSR, trap) |
-| `exu_ioq_bcast_if` | EXU → ROU/PRF/LSU | IOQ broadcast (ld/st/CSR result) |
-| `exu_prf_if` | ROU → PRF | Operand read (2 ports, valid check) |
-| `exu_lsu_if` | EXU(IOQ) → LSU | Load request (addr/alu/atomic) |
-| `exu_csr_if` | EXU → CSR | CSR read port |
-| `exu_l1d_if` | EXU → L1D | Store MMU + SC reservation check |
-| `cmu_bcast_if` | CMU → all | Retire broadcast (flush, fence, branch) |
-| `csr_bcast_if` | CSR → all | Priv mode, SATP, MMU enable, tvec |
-| `lsu_l1d_if` | LSU → L1D | Load/store data path |
-| `l1i_bus_if` | L1I → BUS | I-cache miss read |
-| `l1d_bus_if` | L1D → BUS | D-cache miss read + write-through |
+| Interface          | Direction          | Description                              |
+| ------------------ | ------------------ | ---------------------------------------- |
+| `ifu_bpu_if`       | IFU -> BPU         | PC for prediction, NPC + taken back      |
+| `ifu_l1i_if`       | IFU -> L1I         | PC fetch request, inst + trap response   |
+| `ifu_idu_if`       | IFU <-> IDU        | Forward: inst + PC + predicted NPC; Backward: early resteer (resteer + resteer_pc) |
+| `idu_rnu_if`       | IDU -> RNU         | Decoded uop + operands + arch reg IDs    |
+| `rnu_rou_if`       | RNU -> ROU         | Renamed uop + physical reg mappings      |
+| `rou_exu_if`       | ROU -> EXU         | Dispatched uop + operands + ROB dest     |
+| `rou_lsu_if`       | ROU -> LSU         | Store commit (addr/data/alu)             |
+| `rou_csr_if`       | ROU -> CSR         | CSR write + trap/system on commit        |
+| `rou_cmu_if`       | ROU -> CMU         | Commit info (PC, branch, fence, flush)   |
+| `exu_rou_if`       | EXU -> ROU         | RS writeback (result, branch, CSR, trap) |
+| `exu_ioq_bcast_if` | EXU -> ROU/PRF/LSU | IOQ broadcast (ld/st/CSR result)         |
+| `exu_prf_if`       | ROU -> PRF         | Operand read (2 ports, valid check)      |
+| `exu_lsu_if`       | EXU(IOQ) -> LSU    | Load request (addr/alu/atomic)           |
+| `exu_csr_if`       | EXU -> CSR         | CSR read port                            |
+| `exu_l1d_if`       | EXU -> L1D         | Store MMU + SC reservation check         |
+| `cmu_bcast_if`     | CMU -> all         | Retire broadcast (flush, fence, branch)  |
+| `csr_bcast_if`     | CSR -> all         | Priv mode, SATP, MMU enable, tvec        |
+| `lsu_l1d_if`       | LSU -> L1D         | Load/store data path                     |
+| `l1i_bus_if`       | L1I -> BUS         | I-cache miss read                        |
+| `l1d_bus_if`       | L1D -> BUS         | D-cache miss read + write-through        |
 
 ### RNU internal interfaces (`ysyx_rnu_internal_if.svh`)
 
-| Interface | Description |
-|-----------|-------------|
-| `rnu_fl_if` | Freelist: alloc\_req/alloc\_pr (rename), dealloc (commit), flush recovery |
+| Interface   | Description                                                                      |
+| ----------- | -------------------------------------------------------------------------------- |
+| `rnu_fl_if` | Freelist: alloc\_req/alloc\_pr (rename), dealloc (commit), flush recovery        |
 | `rnu_mt_if` | MapTable: 3 read ports (rs1, rs2, rd\_old), spec write (MAP), commit write (RAT) |
 
 ## Configuration Parameters (`ysyx_config.svh`)
 
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `YSYX_XLEN` | 32 | Register width |
-| `YSYX_I_EXTENSION` | 1 | RV32I base |
-| `YSYX_M_EXTENSION` | 1 | M extension (mul/div) |
-| `YSYX_M_FAST` | 1 | Single-cycle mul/div (sim mode) |
-| `YSYX_L1I_LINE_LEN` | 2 | L1I line: 2^2 = 4 words |
-| `YSYX_L1I_LEN` | 6 | L1I entries: 2^6 = 64 |
-| `YSYX_PHT_SIZE` | 512 | PHT entries |
-| `YSYX_BTB_SIZE` | 64 | BTB entries |
-| `YSYX_RSB_SIZE` | 8 | Return stack entries |
-| `YSYX_RIQ_SIZE` | 4 | Rename queue (RNQ) entries |
-| `YSYX_IIQ_SIZE` | 4 | Dispatch queue (UOQ) entries |
-| `YSYX_ROB_SIZE` | 8 | Reorder buffer entries |
-| `YSYX_RS_SIZE` | 4 | Reservation station entries |
-| `YSYX_IOQ_SIZE` | 4 | In-order queue entries |
-| `YSYX_SQ_SIZE` | 8 | Store queue entries |
-| `YSYX_L1D_LINE_LEN` | 1 | L1D line: 2^1 = 2 words per line |
-| `YSYX_L1D_LEN` | 6 | L1D sets: 2^6 = 64 |
-| `YSYX_DUAL_COMMIT` | defined | Dual commit: retire up to 2 ROB entries/cycle |
-| `YSYX_ISSUE_WIDTH` | 1 | Instructions dispatched per cycle |
-| `YSYX_REG_SIZE` | 32 | Architectural registers |
-| `YSYX_PHY_SIZE` | 64 | Physical registers |
+| Parameter           | Default | Description                                   |
+| ------------------- | ------- | --------------------------------------------- |
+| `YSYX_XLEN`         | 32      | Register width                                |
+| `YSYX_I_EXTENSION`  | 1       | RV32I base                                    |
+| `YSYX_M_EXTENSION`  | 1       | M extension (mul/div)                         |
+| `YSYX_M_FAST`       | 1       | Single-cycle mul/div (sim mode)               |
+| `YSYX_L1I_LINE_LEN` | 2       | L1I line: 2^2 = 4 words                       |
+| `YSYX_L1I_LEN`      | 6       | L1I entries: 2^6 = 64                         |
+| `YSYX_L1I_N_WAYS`   | 1       | L1I ways (1 = direct-mapped)                  |
+| `YSYX_PHT_SIZE`     | 512     | PHT entries                                   |
+| `YSYX_BTB_SIZE`     | 128     | BTB total entries (64 sets x 2 ways)          |
+| `YSYX_RSB_SIZE`     | 8       | Return stack entries                          |
+| `YSYX_RIQ_SIZE`     | 4       | Rename queue (RNQ) entries                    |
+| `YSYX_IIQ_SIZE`     | 4       | Dispatch queue (UOQ) entries                  |
+| `YSYX_ROB_SIZE`     | 8       | Reorder buffer entries                        |
+| `YSYX_RS_SIZE`      | 4       | Reservation station entries                   |
+| `YSYX_IOQ_SIZE`     | 4       | In-order queue entries                        |
+| `YSYX_SQ_SIZE`      | 8       | Store queue entries                           |
+| `YSYX_L1D_LINE_LEN` | 1       | L1D line: 2^1 = 2 words per line              |
+| `YSYX_L1D_LEN`      | 5       | L1D sets: 2^5 = 32                            |
+| `YSYX_L1D_N_WAYS`   | 2       | L1D ways (2-way set-associative)              |
+| `YSYX_DUAL_COMMIT`  | defined | Dual commit: retire up to 2 ROB entries/cycle |
+| `YSYX_ISSUE_WIDTH`  | 1       | Instructions dispatched per cycle             |
+| `YSYX_REG_SIZE`     | 32      | Architectural registers                       |
+| `YSYX_PHY_SIZE`     | 64      | Physical registers                            |
 
 ## Key Types (`ysyx_pkg.sv`)
 
-| Type | Description |
-|------|-------------|
-| `uop_t` | Micro-op: decoded instruction fields (alu, branch, mem, CSR, trap, pc, inst, imm) |
-| `prd_t` | Physical register descriptor: op1/op2 values + pr1/pr2/prd/prs mappings |
-| `rob_state_t` | ROB entry state enum: `ROB_CM` (committed), `ROB_WB` (written-back), `ROB_EX` (executing) |
-| `rob_entry_t` | Full ROB entry: phys regs, arch rd, state, branch/jump, memory, atomics, CSR, trap, fence, difftest_skip, inst/PC |
-| `addr_cacheable()` | Function: returns true if address is in a cacheable region (mrom, flash, psram, sdram) |
-| `addr_valid()` | Function: returns true if address is in any valid memory-mapped region |
+| Type               | Description                                                                                                       |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------- |
+| `uop_t`            | Micro-op: decoded instruction fields (alu, branch, mem, CSR, trap, pc, inst, imm)                                 |
+| `prd_t`            | Physical register descriptor: op1/op2 values + pr1/pr2/prd/prs mappings                                           |
+| `rob_state_t`      | ROB entry state enum: `ROB_CM` (committed), `ROB_WB` (written-back), `ROB_EX` (executing)                         |
+| `rob_entry_t`      | Full ROB entry: phys regs, arch rd, state, branch/jump, memory, atomics, CSR, trap, fence, difftest_skip, inst/PC |
+| `addr_cacheable()` | Function: returns true if address is in a cacheable region (mrom, flash, psram, sdram)                            |
+| `addr_valid()`     | Function: returns true if address is in any valid memory-mapped region                                            |
 
 ## Mermaid Diagram
 
@@ -365,7 +450,7 @@ flowchart TD
         IDU["IDU (RVC + decoder)"]
         BPU["BPU (PHT/BTB/GHR/RSB)"]
   end
- subgraph BE["Backend (rename → dispatch → execute → commit)"]
+ subgraph BE["Backend (rename -> dispatch -> execute -> commit)"]
         subgraph RNU_TOP["RNU (pure rename)"]
             RNQ["RNQ (RIQ_SIZE)"]
             FL["Freelist (rnu_fl_if)"]
@@ -383,7 +468,7 @@ flowchart TD
   end
  subgraph MEM["Memory Subsystem"]
         LSU["LSU (STQ + SQ, forwarding)"]
-        L1D["L1D (direct-mapped, banked SRAM, RMW)"]
+        L1D["L1D (2-way, banked SRAM, RMW)"]
         TLB["TLB (reusable: ITLB, DTLB, DSTLB)"]
         PTW["PTW (reusable: IPTW, DPTW)"]
         BUS["BUS (AXI4 bridge)"]

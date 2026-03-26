@@ -8,7 +8,7 @@ module ysyx_l1i #(
     parameter bit [`YSYX_L1I_LEN:0] L1I_LINE_LEN = `YSYX_L1I_LINE_LEN,
     parameter bit [`YSYX_L1I_LEN:0] L1I_LINE_SIZE = 2 ** L1I_LINE_LEN,
     parameter bit [`YSYX_L1I_LEN:0] L1I_LEN = `YSYX_L1I_LEN,
-    parameter bit [`YSYX_L1I_LEN:0] L1I_SIZE = 2 ** L1I_LEN
+    parameter unsigned L1I_N_WAYS = `YSYX_L1I_N_WAYS
 ) (
     input clock,
 
@@ -45,15 +45,27 @@ module ysyx_l1i #(
   logic [XLEN-1:0] l1i_addr;
   logic [XLEN-1:0] rec_addr;
   logic [XLEN-1:0] fetch_addr;
-  // Tag and valid arrays (kept as registers for multi-port read and fast bulk invalidation)
-  logic [L1I_SIZE-1:0] l1i_valid;
+  // Cache size/tag parameters and per-way valid arrays (registers for bulk clear on fence_i)
+  localparam L1I_SIZE = 2 ** L1I_LEN;
   localparam L1I_TAG_W = XLEN - L1I_LEN - L1I_LINE_LEN - 2;  // 2 = $clog2(4), instruction word size
-  logic [L1I_TAG_W-1:0] l1i_tag[L1I_SIZE][L1I_LINE_SIZE];
+  localparam L1I_WAY_W = L1I_N_WAYS > 1 ? $clog2(L1I_N_WAYS) : 1;
+  logic [L1I_SIZE-1:0] l1i_valid [L1I_N_WAYS];
 
-  // Data SRAM bank signals — one bank per word position in cache line
-  logic [31:0] data_bank_rdata [L1I_LINE_SIZE];
-  logic [L1I_LEN-1:0] data_bank_raddr [L1I_LINE_SIZE];
-  logic data_bank_wen [L1I_LINE_SIZE];
+  // Per-way Data/Tag SRAM bank signals
+  logic [31:0] data_bank_rdata [L1I_N_WAYS][L1I_LINE_SIZE];
+  logic [L1I_LEN-1:0] data_bank_raddr [L1I_LINE_SIZE];  // shared across ways
+  logic [L1I_TAG_W-1:0] tag_bank_rdata [L1I_N_WAYS][L1I_LINE_SIZE];
+
+  // Way hit logic
+  logic [L1I_N_WAYS-1:0] way_hit, way_hit_next;
+  /* verilator lint_off UNUSEDSIGNAL */
+  logic [L1I_WAY_W-1:0] hit_way_sel, hit_next_way_sel;
+  /* verilator lint_on UNUSEDSIGNAL */
+
+  // Replacement: 1-bit per set (toggle on fill); fill picks invalid way first
+  logic [L1I_SIZE-1:0] replace_bit;
+  logic [L1I_WAY_W-1:0] fill_way_r;
+  logic [L1I_WAY_W-1:0] fill_way_calc, fill_way_next_calc;
 
   logic [L1I_TAG_W-1:0] addr_tag;
   logic [L1I_LEN-1:0] addr_idx;
@@ -95,6 +107,8 @@ module ysyx_l1i #(
   logic [XLEN-1:10] ptw_result_ptag;
   logic [XLEN-1:12] ptw_result_vtag;
 
+  logic l1i_fill_en;
+
   assign mmu_en = csr_bcast.immu_en;
   assign pc_ifu = mmu_en ? {itlb_ptag, tlb_offset}[XLEN-1:0] : ifu_l1i.pc;
   assign invalid_l1i = ifu_l1i.invalid;
@@ -117,6 +131,46 @@ module ysyx_l1i #(
 
   assign raddr_valid = csr_bcast.immu_en || ysyx_pkg::addr_valid(l1i_addr);
 
+  // --- L1I Tag Comparison (N-way set-associative, SRAM tags) ---
+  generate
+    for (genvar w = 0; w < L1I_N_WAYS; w++) begin : gen_way_hit
+      assign way_hit[w] = l1i_valid[w][addr_idx]
+        && (tag_bank_rdata[w][addr_offset] == addr_tag);
+      assign way_hit_next[w] = l1i_valid[w][addr_idx_next]
+        && (tag_bank_rdata[w][addr_offset_next] == addr_tag_next);
+    end
+  endgenerate
+  always_comb begin
+    hit_way_sel = '0;
+    for (int w = int'(L1I_N_WAYS)-1; w >= 0; w--)
+      if (way_hit[w]) hit_way_sel = w[L1I_WAY_W-1:0];
+    hit_next_way_sel = '0;
+    for (int w = int'(L1I_N_WAYS)-1; w >= 0; w--)
+      if (way_hit_next[w]) hit_next_way_sel = w[L1I_WAY_W-1:0];
+  end
+  // Fill way: prefer invalid way, then random toggle
+  generate
+    if (L1I_N_WAYS > 1) begin : gen_fill_multi
+      assign fill_way_calc = !l1i_valid[0][addr_idx] ? 1'b0
+        : !l1i_valid[1][addr_idx] ? 1'b1
+        : replace_bit[addr_idx];
+      assign fill_way_next_calc = !l1i_valid[0][addr_idx_next] ? 1'b0
+        : !l1i_valid[1][addr_idx_next] ? 1'b1
+        : replace_bit[addr_idx_next];
+    end else begin : gen_fill_dm
+      assign fill_way_calc = '0;
+      assign fill_way_next_calc = '0;
+    end
+  endgenerate
+
+  assign hit = (!invalid_l1i && !wait_invalid)
+    && (mmu_en ? tlb_hit : 1'b1)
+    && (l1i_state == IDLE || rec_addr == ifu_l1i.pc)
+    && |way_hit;
+  assign hit_next = (!invalid_l1i && !wait_invalid)
+    && (mmu_en ? tlb_hit : 1'b1)
+    && |way_hit_next;
+
   // Bus mux: PTW takes priority over cache fill
   assign l1i_bus.araddr = ptw_arvalid
     ? ptw_araddr
@@ -129,15 +183,6 @@ module ysyx_l1i #(
       ? (l1i_state == RD_0)
       : (l1i_state == RD_0 || l1i_state == RD_1));
 
-  assign hit = (!invalid_l1i && !wait_invalid)
-    && (mmu_en ? tlb_hit : 1'b1)
-    && (l1i_state == IDLE || rec_addr == ifu_l1i.pc)
-    && (l1i_valid[addr_idx] == 1'b1)
-    && (l1i_tag[addr_idx][addr_offset] == addr_tag);
-  assign hit_next = (!invalid_l1i && !wait_invalid)
-    && (mmu_en ? tlb_hit : 1'b1)
-    && (l1i_valid[addr_idx_next] == 1'b1)
-    && (l1i_tag[addr_idx_next][addr_offset_next] == addr_tag_next);
   assign ifu_sdram_arburst = (`YSYX_I_SDRAM_ARBURST)
     && (l1i_addr >= 'ha0000000)
     && (l1i_addr <= 'hc0000000);
@@ -145,7 +190,6 @@ module ysyx_l1i #(
 
   // Fill write condition — suppress during PTW states where the bus is used for
   // page table reads (IFQ is always empty during PTW, but be explicit)
-  logic l1i_fill_en;
   assign l1i_fill_en = l1i_bus.rvalid && ifq_valid[ifq_tail]
     && (l1i_state != PTWAIT);
 
@@ -190,29 +234,45 @@ module ysyx_l1i #(
       .busy(ptw_busy)
   );
 
-  // Data SRAM bank instantiation and address routing
-  // Each bank stores one word position of every cache set.
-  // When pc[1]=1 (halfword-misaligned), inst_lo and inst_hi read from different
-  // banks, avoiding read port conflicts. Fill writes target one bank at a time.
+  // SRAM address routing (shared across all ways)
   generate
-    for (genvar gi = 0; gi < L1I_LINE_SIZE; gi++) begin : gen_data_bank
+    for (genvar gi = 0; gi < L1I_LINE_SIZE; gi++) begin : gen_addr
       assign data_bank_raddr[gi] =
           (addr_offset == gi[L1I_LINE_LEN-1:0]) ? addr_idx : addr_idx_next;
-      assign data_bank_wen[gi] =
-          l1i_fill_en && (offset_fetch == gi[L1I_LINE_LEN-1:0]);
+    end
+  endgenerate
 
-      ysyx_sram_1r1w #(
-          .ADDR_WIDTH(L1I_LEN),
-          .DATA_WIDTH(32)
-      ) u_data_sram (
-          .clock(clock),
-          .ren  (1'b1),
-          .raddr(data_bank_raddr[gi]),
-          .rdata(data_bank_rdata[gi]),
-          .wen  (data_bank_wen[gi]),
-          .waddr(idx_fetch),
-          .wdata(l1i_fill_data)
-      );
+  // Per-way Data + Tag SRAM banks
+  generate
+    for (genvar w = 0; w < L1I_N_WAYS; w++) begin : gen_way
+      for (genvar gi = 0; gi < L1I_LINE_SIZE; gi++) begin : gen_bank
+        ysyx_sram_1r1w #(
+            .ADDR_WIDTH(L1I_LEN),
+            .DATA_WIDTH(32)
+        ) u_data_sram (
+            .clock(clock),
+            .ren  (1'b1),
+            .raddr(data_bank_raddr[gi]),
+            .rdata(data_bank_rdata[w][gi]),
+            .wen  (l1i_fill_en && (offset_fetch == gi[L1I_LINE_LEN-1:0])
+                   && (fill_way_r == w[L1I_WAY_W-1:0])),
+            .waddr(idx_fetch),
+            .wdata(l1i_fill_data)
+        );
+        ysyx_sram_1r1w #(
+            .ADDR_WIDTH(L1I_LEN),
+            .DATA_WIDTH(L1I_TAG_W)
+        ) u_tag_sram (
+            .clock(clock),
+            .ren  (1'b1),
+            .raddr(data_bank_raddr[gi]),
+            .rdata(tag_bank_rdata[w][gi]),
+            .wen  (l1i_fill_en && (offset_fetch == gi[L1I_LINE_LEN-1:0])
+                   && (fill_way_r == w[L1I_WAY_W-1:0])),
+            .waddr(idx_fetch),
+            .wdata(tag_fetch)
+        );
+      end
     end
   endgenerate
 
@@ -220,8 +280,8 @@ module ysyx_l1i #(
   /* verilator lint_off UNUSEDSIGNAL */
   logic [31:0] l1i_word_current, l1i_word_next;
   /* verilator lint_on UNUSEDSIGNAL */
-  assign l1i_word_current = data_bank_rdata[addr_offset];
-  assign l1i_word_next = data_bank_rdata[addr_offset_next];
+  assign l1i_word_current = data_bank_rdata[hit_way_sel][addr_offset];
+  assign l1i_word_next = data_bank_rdata[hit_next_way_sel][addr_offset_next];
 
   assign inst_lo = pc_ifu[1] ? l1i_word_current[31:16] : l1i_word_current[15:0];
   assign inst_hi = pc_ifu[1] ? l1i_word_next[15:0] : l1i_word_current[31:16];
@@ -269,8 +329,9 @@ module ysyx_l1i #(
       l1i_state <= IDLE;
       ifq_head  <= 0;
       ifq_valid <= 0;
-
-      l1i_valid <= 0;
+      l1i_valid <= '{default: '0};
+      replace_bit <= 0;
+      fill_way_r <= 0;
       ifq_tail  <= 0;
     end else begin
       unique case (l1i_state)
@@ -279,12 +340,15 @@ module ysyx_l1i #(
             if (mmu_en) begin
               if (tlb_hit) begin
                 rec_addr <= ifu_l1i.pc;
-                if (!hit) begin
-                  l1i_addr <= pc_ifu;
-                  l1i_state <= RD_A;
-                end else if (!hit_next) begin
-                  l1i_addr <= pc_ifu_next;
-                  l1i_state <= RD_0;
+                if (sram_data_ready) begin
+                  if (!hit) begin
+                    l1i_addr <= pc_ifu;
+                    l1i_state <= RD_A;
+                  end else if (!hit_next) begin
+                    l1i_addr <= pc_ifu_next;
+                    l1i_state <= RD_0;
+                    fill_way_r <= fill_way_next_calc;
+                  end
                 end
               end else begin
                 if (ifu_l1i.pc == 0) begin
@@ -300,12 +364,16 @@ module ysyx_l1i #(
               end
             end else begin
               rec_addr <= ifu_l1i.pc;
-              if (!hit) begin
-                l1i_addr  <= pc_ifu;
-                l1i_state <= RD_0;
-              end else if (!hit_next) begin
-                l1i_addr  <= pc_ifu_next;
-                l1i_state <= RD_0;
+              if (sram_data_ready) begin
+                if (!hit) begin
+                  l1i_addr  <= pc_ifu;
+                  l1i_state <= RD_0;
+                  fill_way_r <= fill_way_calc;
+                end else if (!hit_next) begin
+                  l1i_addr  <= pc_ifu_next;
+                  l1i_state <= RD_0;
+                  fill_way_r <= fill_way_next_calc;
+                end
               end
             end
           end
@@ -326,14 +394,18 @@ module ysyx_l1i #(
           l1i_state <= IDLE;
         end
         RD_A: begin
-          if (!hit) begin
-            l1i_addr  <= pc_ifu;
-            l1i_state <= RD_0;
-          end else if (!hit_next) begin
-            l1i_addr  <= pc_ifu_next;
-            l1i_state <= RD_0;
-          end else begin
-            l1i_state <= IDLE;
+          if (sram_data_ready) begin
+            if (!hit) begin
+              l1i_addr  <= pc_ifu;
+              l1i_state <= RD_0;
+              fill_way_r <= fill_way_calc;
+            end else if (!hit_next) begin
+              l1i_addr  <= pc_ifu_next;
+              l1i_state <= RD_0;
+              fill_way_r <= fill_way_next_calc;
+            end else begin
+              l1i_state <= IDLE;
+            end
           end
         end
         RD_0: begin
@@ -377,17 +449,18 @@ module ysyx_l1i #(
 
     if (invalid_l1i || wait_invalid) begin
       if (l1i_state == IDLE) begin
-        l1i_valid <= 0;
+        l1i_valid <= '{default: '0};
         wait_invalid <= 0;
       end else begin
         wait_invalid <= 1;
       end
     end
+    // Valid + IFQ update on cache line arrival (tag fill handled by SRAM wen)
+    // Valid + IFQ update on cache line arrival (tag fill handled by SRAM wen)
     if (l1i_fill_en) begin
-      // Data write handled by SRAM banks (wen driven by l1i_fill_en)
-      l1i_tag[idx_fetch][offset_fetch] <= tag_fetch;
       if (ifq_valid[0] == 0) begin
-        l1i_valid[idx_fetch] <= 1'b1;
+        l1i_valid[fill_way_r][idx_fetch] <= 1'b1;
+        replace_bit[idx_fetch] <= ~replace_bit[idx_fetch];
       end
       ifq_valid[ifq_tail] <= 0;
       ifq_tail <= ifq_tail + 1;

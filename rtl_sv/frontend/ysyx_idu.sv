@@ -30,6 +30,20 @@ module ysyx_idu #(
   state_idu_t state_idu;
 
   logic valid, ready;
+
+  // ================================================================
+  // Early Resteer: detect BPU misprediction on non-branch instructions
+  // ================================================================
+  // If BPU predicted taken (pnpc != pc + inst_len) but the decoded
+  // instruction is not a branch/jump, resteer IFU to the correct
+  // sequential address immediately, avoiding a full pipeline flush
+  // at commit time.
+  logic [XLEN-1:0] correct_npc;
+  logic bpu_predicted_taken;
+  logic is_branch_or_jump;
+  logic early_resteer_cond;
+  logic resteer_sent;
+
   assign valid = (state_idu == VALID);
   assign ready = (state_idu == IDLE) || idu_rnu.ready;
   assign idu_rnu.valid = valid;
@@ -57,16 +71,23 @@ module ysyx_idu #(
         VALID: begin
           if (cmu_bcast.flush_pipe) begin
             state_idu <= IDLE;
+          end else if (ifu_idu.resteer) begin
+            // Early resteer fired: IFU output is from the mispredicted path.
+            // Go IDLE even if IFU appears valid — that instruction must be
+            // discarded. The resteered IFU will provide the correct one later.
+            if (idu_rnu.ready) state_idu <= IDLE;
           end else if (idu_rnu.ready && !ifu_idu.valid) begin
             state_idu <= IDLE;
           end
-          // If idu_rnu.ready && ifu_idu.valid => stay VALID (back-to-back)
+          // If idu_rnu.ready && ifu_idu.valid && !resteer => stay VALID (back-to-back)
         end
         default: ;
       endcase
 
-      // Latch IFU data when pipeline slot is available
-      if (ready && ifu_idu.valid) begin
+      // Latch IFU data when pipeline slot is available.
+      // Block latch when resteer fires — IFU output that cycle is from
+      // the mispredicted path and must be discarded.
+      if (ready && ifu_idu.valid && !ifu_idu.resteer) begin
         inst      <= ifu_idu.inst;
         pc_idu    <= ifu_idu.pc;
         pnpc_idu  <= ifu_idu.pnpc;
@@ -192,11 +213,42 @@ module ysyx_idu #(
   assign idu_rnu.uop.tval         = ifu_trap ? pc_idu : is_illegal ? inst_idu : '0;
   assign idu_rnu.uop.cause        = ifu_trap ? ifu_cause : is_illegal ? 'h2 : '0;
 
-  assign idu_rnu.uop.pnpc         = pnpc_idu;
-  assign idu_rnu.uop.inst         = inst_idu;
-  assign idu_rnu.uop.pc           = pc_idu;
+  assign correct_npc              = pc_idu + (is_c ? XLEN'('d2) : XLEN'('d4));
+  assign bpu_predicted_taken      = (pnpc_idu != correct_npc);
+  assign is_branch_or_jump        = idu_rnu.uop.ben || idu_rnu.uop.jen || idu_rnu.uop.jren;
+  assign early_resteer_cond       = valid && bpu_predicted_taken && !is_branch_or_jump && !ifu_trap;
 
-  assign idu_rnu.rs1[RLEN-1:0]    = rs1[RLEN-1:0];
-  assign idu_rnu.rs2[RLEN-1:0]    = rs2[RLEN-1:0];
+  // One-shot pulse: only fire resteer on the first cycle of detection
+  always @(posedge clock) begin
+    if (reset || cmu_bcast.flush_pipe) begin
+      resteer_sent <= 0;
+    end else if (state_idu == IDLE) begin
+      resteer_sent <= 0;
+    end else if (early_resteer_cond && !resteer_sent) begin
+      resteer_sent <= 1;
+    end
+  end
+
+  assign ifu_idu.resteer    = early_resteer_cond && !resteer_sent;
+  assign ifu_idu.resteer_pc = correct_npc;
+
+  // PMU: registered resteer pulse for C++ sampling
+  /* verilator lint_off UNUSEDSIGNAL */
+  logic pmu_early_resteer;
+  /* verilator lint_on UNUSEDSIGNAL */
+  always @(posedge clock) begin
+    if (reset) pmu_early_resteer <= 0;
+    else pmu_early_resteer <= ifu_idu.resteer;
+  end
+
+  // Correct pnpc before sending downstream: if resteer detected,
+  // replace the wrong BPU prediction with the correct sequential address
+  // so that ROU commit won't see a spurious npc != pnpc mismatch.
+  assign idu_rnu.uop.pnpc      = early_resteer_cond ? correct_npc : pnpc_idu;
+  assign idu_rnu.uop.inst      = inst_idu;
+  assign idu_rnu.uop.pc        = pc_idu;
+
+  assign idu_rnu.rs1[RLEN-1:0] = rs1[RLEN-1:0];
+  assign idu_rnu.rs2[RLEN-1:0] = rs2[RLEN-1:0];
 
 endmodule

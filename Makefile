@@ -326,7 +326,7 @@ linux-boot-npc32: config-npc32-linux ## Boot Linux on NPC (riscv32)
 	$(MAKE) -C $(NSIM_HOME) -j$(NPROC)
 	$(MAKE) -C $(NSIM_HOME) run IMG=$(OPENSBI_PAYLOAD) ARGS="$(ARGS)"
 
-linux-boot-npc32-difftest: config-npc32-linux-difftest ## Boot Linux on NPC with difftest
+linux-boot-npc32-difftest: config-npc32-linux-difftest config-nemu32-ref ## Boot Linux on NPC with difftest
 	$(MAKE) -C $(NSIM_HOME) -j$(NPROC)
 	$(MAKE) -C $(NSIM_HOME) run IMG=$(OPENSBI_PAYLOAD) ARGS="$(ARGS)"
 

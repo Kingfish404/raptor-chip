@@ -7,7 +7,8 @@ module ysyx_l1d #(
     parameter bit [`YSYX_L1D_LEN:0] L1D_LINE_SIZE = 2 ** L1D_LINE_LEN,
     parameter bit [`YSYX_L1D_LEN:0] L1D_LEN = `YSYX_L1D_LEN,
     parameter bit [`YSYX_L1D_LEN:0] L1D_SIZE = 2 ** `YSYX_L1D_LEN,
-    parameter bit [7:0] XLEN = `YSYX_XLEN
+    parameter bit [7:0] XLEN = `YSYX_XLEN,
+    parameter unsigned L1D_N_WAYS = `YSYX_L1D_N_WAYS
 ) (
     input clock,
 
@@ -40,8 +41,9 @@ module ysyx_l1d #(
   // Per-word valid: each word in a cache line has independent valid tracking
   localparam OFFSET_BITS = $clog2(XLEN/8);  // 2 for RV32, 3 for RV64
   localparam L1D_TAG_W = XLEN - L1D_LEN - L1D_LINE_LEN - OFFSET_BITS;
-  logic [L1D_LINE_SIZE-1:0] l1d_valid[L1D_SIZE];
-  logic [L1D_TAG_W-1:0] l1d_tag[L1D_SIZE][L1D_LINE_SIZE];
+  localparam L1D_WAY_W = L1D_N_WAYS > 1 ? $clog2(L1D_N_WAYS) : 1;
+  logic [L1D_LINE_SIZE-1:0] l1d_valid[L1D_N_WAYS][L1D_SIZE];
+  logic [L1D_TAG_W-1:0] l1d_tag[L1D_N_WAYS][L1D_SIZE][L1D_LINE_SIZE];
   logic [7:0] rstrb;
 
   logic [L1D_TAG_W-1:0] addr_tag;
@@ -94,6 +96,9 @@ module ysyx_l1d #(
   logic [L1D_TAG_W-1:0] l1d_tag_u;
   logic [L1D_LEN-1:0] l1d_idx;
   logic [L1D_LINE_LEN-1:0] l1d_off;
+  logic [L1D_WAY_W-1:0] l1d_way;           // which way for pending l1d_update
+  logic [L1D_WAY_W-1:0] ld_fill_way_r;     // registered fill way for load miss
+  logic [L1D_SIZE-1:0] d_replace_bit;      // random replacement toggle per set
 
   // Read-Modify-Write (RMW) for partial store cache updates.
   // When a partial store (SB/SH, or SW in RV64) hits in cache, instead of
@@ -139,22 +144,24 @@ module ysyx_l1d #(
       ? lsu_l1d.raddr[L1D_LEN+L1D_LINE_LEN+OFFSET_BITS-1:L1D_LINE_LEN+OFFSET_BITS]
       : addr_idx;
 
-  // Data SRAM banks — one bank per word position in cache line
-  logic [XLEN-1:0] data_bank_rdata[L1D_LINE_SIZE];
+  // Data SRAM banks — per-way, one bank per word position in cache line
+  logic [XLEN-1:0] data_bank_rdata[L1D_N_WAYS][L1D_LINE_SIZE];
   generate
-    for (genvar gi = 0; gi < L1D_LINE_SIZE; gi++) begin : gen_data_bank
-      ysyx_sram_1r1w #(
-          .ADDR_WIDTH(L1D_LEN),
-          .DATA_WIDTH(XLEN)
-      ) u_data_sram (
-          .clock(clock),
-          .ren  (1'b1),
-          .raddr(sram_raddr),
-          .rdata(data_bank_rdata[gi]),
-          .wen  (l1d_update && (l1d_off == gi[L1D_LINE_LEN-1:0])),
-          .waddr(l1d_idx),
-          .wdata(l1d_data_u)
-      );
+    for (genvar w = 0; w < L1D_N_WAYS; w++) begin : gen_way
+      for (genvar gi = 0; gi < L1D_LINE_SIZE; gi++) begin : gen_data_bank
+        ysyx_sram_1r1w #(
+            .ADDR_WIDTH(L1D_LEN),
+            .DATA_WIDTH(XLEN)
+        ) u_data_sram (
+            .clock(clock),
+            .ren  (1'b1),
+            .raddr(sram_raddr),
+            .rdata(data_bank_rdata[w][gi]),
+            .wen  (l1d_update && (l1d_off == gi[L1D_LINE_LEN-1:0]) && (l1d_way == w[L1D_WAY_W-1:0])),
+            .waddr(l1d_idx),
+            .wdata(l1d_data_u)
+        );
+      end
     end
   endgenerate
 
@@ -175,7 +182,7 @@ module ysyx_l1d #(
     end
   end
   assign rmw_data_shifted = l1d_rmw_wdata << (l1d_rmw_waddr_lo * 8);
-  assign rmw_merged_data = (data_bank_rdata[l1d_off] & ~rmw_bit_mask)
+  assign rmw_merged_data = (data_bank_rdata[l1d_way][l1d_off] & ~rmw_bit_mask)
                          | (rmw_data_shifted & rmw_bit_mask);
 
   assign mmu_en = csr_bcast.dmmu_en;
@@ -277,6 +284,26 @@ module ysyx_l1d #(
   assign sram_rd_offset = load_speculate
       ? lsu_l1d.raddr[L1D_LINE_LEN+OFFSET_BITS-1:OFFSET_BITS]
       : addr_offset;
+  // Parallel tag comparison: pre-compute hit for ALL line offsets,
+  // then select by addr_offset (removes addr_offset from tag comparison path).
+  logic [L1D_N_WAYS-1:0] way_tag_hit [L1D_LINE_SIZE];
+  logic [L1D_LINE_SIZE-1:0] tag_hit_vec;
+  generate
+    for (genvar gi = 0; gi < L1D_LINE_SIZE; gi++) begin : gen_tag_cmp
+      for (genvar w = 0; w < L1D_N_WAYS; w++) begin : gen_way_cmp
+        assign way_tag_hit[gi][w] = (l1d_valid[w][addr_idx][gi] == 1'b1)
+                                  && (l1d_tag[w][addr_idx][gi] == addr_tag);
+      end
+      assign tag_hit_vec[gi] = |way_tag_hit[gi];
+    end
+  endgenerate
+  logic [L1D_WAY_W-1:0] load_hit_way;
+  always_comb begin
+    load_hit_way = '0;
+    for (int w = int'(L1D_N_WAYS)-1; w >= 0; w--)
+      if (way_tag_hit[addr_offset][w]) load_hit_way = w[L1D_WAY_W-1:0];
+  end
+
   logic sram_bypass_r;
   always_ff @(posedge clock) begin
     if (reset) sram_bypass_r <= 1'b0;
@@ -285,16 +312,64 @@ module ysyx_l1d #(
   end
   assign tag_hit = (l1d_state == LD_A)
     && !sram_bypass_r
-    && (l1d_valid[addr_idx][addr_offset] == 1'b1) && (l1d_tag[addr_idx][addr_offset] == addr_tag);
+    && tag_hit_vec[addr_offset];
   // data_hit: SRAM data ready in LD_A — the speculative read in the preceding
   // IDLE (or PTW-wait) cycle guarantees data_bank_rdata is valid on LD_A entry.
   assign data_hit = (l1d_state == LD_A) && tag_hit;
-  assign l1d_data = data_bank_rdata[addr_offset];
+  assign l1d_data = data_bank_rdata[load_hit_way][addr_offset];
 
   assign waddr_tag = lsu_l1d.waddr[XLEN-1:L1D_LEN+L1D_LINE_LEN+OFFSET_BITS];
   assign waddr_idx = lsu_l1d.waddr[L1D_LEN+L1D_LINE_LEN+OFFSET_BITS-1:L1D_LINE_LEN+OFFSET_BITS];
   assign waddr_offset = lsu_l1d.waddr[L1D_LINE_LEN+OFFSET_BITS-1:OFFSET_BITS];
-  assign hit_w = (l1d_valid[waddr_idx][waddr_offset] == 1'b1) && (l1d_tag[waddr_idx][waddr_offset] == waddr_tag);
+  // Parallel write-side tag comparison
+  logic [L1D_N_WAYS-1:0] way_whit [L1D_LINE_SIZE];
+  logic [L1D_LINE_SIZE-1:0] whit_vec;
+  generate
+    for (genvar gi = 0; gi < L1D_LINE_SIZE; gi++) begin : gen_wtag_cmp
+      for (genvar w = 0; w < L1D_N_WAYS; w++) begin : gen_wway_cmp
+        assign way_whit[gi][w] = (l1d_valid[w][waddr_idx][gi] == 1'b1)
+                               && (l1d_tag[w][waddr_idx][gi] == waddr_tag);
+      end
+      assign whit_vec[gi] = |way_whit[gi];
+    end
+  endgenerate
+  assign hit_w = whit_vec[waddr_offset];
+  logic [L1D_WAY_W-1:0] store_hit_way;
+  always_comb begin
+    store_hit_way = '0;
+    for (int w = int'(L1D_N_WAYS)-1; w >= 0; w--)
+      if (way_whit[waddr_offset][w]) store_hit_way = w[L1D_WAY_W-1:0];
+  end
+  // Fill way selection for store miss (full-word write-allocate)
+  logic [L1D_WAY_W-1:0] store_fill_way;
+  // Fill way selection for load miss
+  logic [L1D_WAY_W-1:0] ld_fill_way;
+  generate
+    if (L1D_N_WAYS > 1) begin : gen_fill_multi
+      // Duplicate-tag prevention: if the tag already exists in a way (from a
+      // previous fill that was forced-miss by sram_bypass_r), reuse that way
+      // instead of allocating a new one.  Without this check, a conservative
+      // sram_bypass_r miss creates duplicate tags across ways; a subsequent
+      // store updates only one copy, leaving the other stale — and when the
+      // updated copy is later evicted, a load hits the stale duplicate.
+      logic ld_tag_dup0, ld_tag_dup1;
+      assign ld_tag_dup0 = l1d_valid[0][addr_idx][addr_offset]
+                         && (l1d_tag[0][addr_idx][addr_offset] == addr_tag);
+      assign ld_tag_dup1 = l1d_valid[1][addr_idx][addr_offset]
+                         && (l1d_tag[1][addr_idx][addr_offset] == addr_tag);
+      assign store_fill_way = !l1d_valid[0][waddr_idx][waddr_offset] ? 1'b0
+                            : !l1d_valid[1][waddr_idx][waddr_offset] ? 1'b1
+                            : d_replace_bit[waddr_idx];
+      assign ld_fill_way = ld_tag_dup0 ? 1'b0
+                         : ld_tag_dup1 ? 1'b1
+                         : !l1d_valid[0][addr_idx][addr_offset] ? 1'b0
+                         : !l1d_valid[1][addr_idx][addr_offset] ? 1'b1
+                         : d_replace_bit[addr_idx];
+    end else begin : gen_fill_dm
+      assign store_fill_way = '0;
+      assign ld_fill_way = '0;
+    end
+  endgenerate
 
   assign cacheable_r = ysyx_pkg::addr_cacheable(l1d_addr);
   assign cacheable_w = ysyx_pkg::addr_cacheable(lsu_l1d.waddr);
@@ -363,9 +438,13 @@ module ysyx_l1d #(
   always @(posedge clock) begin
     if (reset) begin
       l1d_state  <= IDLE;
-      for (int i = 0; i < int'(L1D_SIZE); i++) l1d_valid[i] <= '0;
+      for (int w = 0; w < int'(L1D_N_WAYS); w++)
+        for (int i = 0; i < int'(L1D_SIZE); i++) l1d_valid[w][i] <= '0;
       l1d_update <= 0;
       l1d_rmw    <= 0;
+      d_replace_bit <= '0;
+      ld_fill_way_r <= '0;
+      l1d_way <= '0;
 
       reservation <= 'h0;
     end else begin
@@ -465,6 +544,7 @@ module ysyx_l1d #(
           end else begin
             if (l1d_bus.rready) begin
               l1d_state <= LD_D;
+              ld_fill_way_r <= ld_fill_way;
             end
           end
         end
@@ -488,12 +568,13 @@ module ysyx_l1d #(
       // next cycle while l1d_update is still high), the SET's NBA wins and the
       // new update is not lost.
       if (cmu_bcast.fence_time) begin
-        for (int i = 0; i < int'(L1D_SIZE); i++) l1d_valid[i] <= '0;
+        for (int w = 0; w < int'(L1D_N_WAYS); w++)
+          for (int i = 0; i < int'(L1D_SIZE); i++) l1d_valid[w][i] <= '0;
         l1d_rmw <= 0;
       end else if (l1d_update) begin
-        // Data write handled by SRAM banks (wen gated by l1d_off)
-        l1d_tag[l1d_idx][l1d_off] <= l1d_tag_u;
-        l1d_valid[l1d_idx][l1d_off] <= l1d_valid_u;
+        // Data write handled by SRAM banks (wen gated by l1d_off + l1d_way)
+        l1d_tag[l1d_way][l1d_idx][l1d_off] <= l1d_tag_u;
+        l1d_valid[l1d_way][l1d_idx][l1d_off] <= l1d_valid_u;
         l1d_update <= 0;
       end
 
@@ -519,6 +600,8 @@ module ysyx_l1d #(
           l1d_tag_u <= waddr_tag;
           l1d_idx <= waddr_idx;
           l1d_off <= waddr_offset;
+          l1d_way <= hit_w ? store_hit_way : store_fill_way;
+          if (!hit_w) d_replace_bit[waddr_idx] <= ~d_replace_bit[waddr_idx];
         end else begin
           if (hit_w) begin
             if (partial_store_rmw) begin
@@ -530,12 +613,14 @@ module ysyx_l1d #(
               l1d_tag_u <= waddr_tag;
               l1d_idx <= waddr_idx;
               l1d_off <= waddr_offset;
+              l1d_way <= store_hit_way;
             end else begin
               // Fallback: invalidate (SRAM read port busy)
               l1d_update <= 1'b1;
               l1d_valid_u <= 0;
               l1d_idx <= waddr_idx;
               l1d_off <= waddr_offset;
+              l1d_way <= store_hit_way;
             end
           end
         end
@@ -548,6 +633,8 @@ module ysyx_l1d #(
             l1d_tag_u <= addr_tag;
             l1d_idx <= addr_idx;
             l1d_off <= addr_offset;
+            l1d_way <= ld_fill_way_r;
+            d_replace_bit[addr_idx] <= ~d_replace_bit[addr_idx];
           end
         end
       end

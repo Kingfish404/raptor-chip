@@ -1,6 +1,6 @@
 # NPC 性能评估结果
 
-使用`am-kernels`中的`microbench`测试程序进行性能测试。
+使用`am-kernels`中的`microbench`测试程序进行性能测试.
 
 ```shell
 cd nsim
@@ -35,9 +35,9 @@ SoC Frequency: 100 MHz
 | 4c5d3bc | rv32im[^6]  | 19567694 | 470947 | 0.024 | 421        | 9.792e-03  | 45844       | 13175979, 67 | 13458303, 69 | 5591408,1187 | 69829,15  | 56912,12 | 230465,49 | 62206,13  | 3, 0   | 9854,  2 | 29852, 6 | 11826, 3 |
 | 4c5d3bc | rv32i       | 21314593 | 846426 | 0.025 | 541        | 7.567e-03  | 36946       | 14542641, 68 | 13288154, 62 | 6196033,732  | 83256,10  | 68505, 8 | 446226,53 | 189466,22 | 3, 0   | 9820,  1 | 33628, 4 | 15522, 2 |
 
-[^1]: icache line size 修改为 8B，现在 icache size 为 8x8B，L1I Cache 的 SDRAM 部分修改为 arburst，一次传输 8B。
-[^2]: `046eea8e` 及之前的版本中，npc 的频率设置为 466 MHz，之后的版本中，npc 的频率设置为 500 MHz。
-[^3]: 从 3 周期 cpu 变为 4 周期 cpu，为之后的流水线设计做准备。
+[^1]: icache line size 修改为 8B,现在 icache size 为 8x8B,L1I Cache 的 SDRAM 部分修改为 arburst,一次传输 8B.
+[^2]: `046eea8e` 及之前的版本中,npc 的频率设置为 466 MHz,之后的版本中,npc 的频率设置为 500 MHz.
+[^3]: 从 3 周期 cpu 变为 4 周期 cpu,为之后的流水线设计做准备.
 [^4]: exu forward, fix pmu and axi store load separate
 [^5]: using one cycle fast m extension
 [^6]: change to using multi cycle m extension (booth's and restoring division)

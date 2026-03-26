@@ -86,15 +86,17 @@ void perf_sample_per_cycle()
   // alignment with the registered 'valid' signal (all sampled at the same posedge)
   bool b = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, cmu__DOT__ben_r));
   bool j = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, cmu__DOT__jen_r));
+  bool jr = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, cmu__DOT__jren_r));
   bool wb_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, cmu__DOT__valid));
   if (wb_valid)
   {
-    bool is_br = b || j;
+    bool is_br = b || j || jr;
     bool br_predict_fail = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, cmu__DOT__flush_pipe_r));
     pmu.bpu_cnt += is_br ? 1 : 0;
     pmu.bpu_fail_cnt += is_br && br_predict_fail ? 1 : 0;
     pmu.bpu_b_fail += br_predict_fail && b ? 1 : 0;
     pmu.bpu_j_fail += br_predict_fail && j ? 1 : 0;
+    pmu.bpu_jr_fail += br_predict_fail && jr ? 1 : 0;
   }
   bool ifu_hazard = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, ifu__DOT__ifu_hazard));
   bool ifu_fetch_fire = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, ifu__DOT__pmu_fetch_fire));
@@ -138,6 +140,9 @@ void perf_sample_per_cycle()
   // SQ stall: only count when a ready store at ROB head is blocked by full SQ
   bool rou_sq_stall = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, rou__DOT__pmu_sq_stall));
   pmu.lsu_sq_stall_cycle += rou_sq_stall ? 1 : 0;
+  // IDU early resteer: BPU predicted taken on non-branch instruction
+  bool early_resteer = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, idu__DOT__pmu_early_resteer));
+  pmu.early_resteer_cnt += early_resteer ? 1 : 0;
   pmu.lsu_fwd_cnt += (lsu_raddr_valid && lsu_fwd_hit) ? 1 : 0;
   pmu.lsu_sq_conflict_cnt += (lsu_raddr_valid && lsu_load_in_sq) ? 1 : 0;
   pmu.lsu_stq_conflict_cnt += (lsu_raddr_valid && lsu_stq_conflict) ? 1 : 0;
@@ -314,10 +319,10 @@ void perf()
       (double)pmu.lsu_l1d_stall_cycle, percentage(pmu.lsu_l1d_stall_cycle, pmu.active_cycle),
       (double)pmu.lsu_sq_stall_cycle, percentage(pmu.lsu_sq_stall_cycle, pmu.active_cycle),
       (double)pmu.wbu_stall_cycle, percentage(pmu.wbu_stall_cycle, pmu.active_cycle));
-  Log("BPU Success: %lld, Fail: %lld, Rate: %2.1f%% (b: %lld, j: %lld), call: %lld, ret: %lld",
+  Log("BPU Success: %lld, Fail: %lld, Rate: %2.1f%% (b: %lld, j: %lld, jr: %lld), call: %lld, ret: %lld",
       pmu.bpu_cnt - pmu.bpu_fail_cnt, pmu.bpu_fail_cnt,
       percentage(pmu.bpu_cnt - pmu.bpu_fail_cnt, pmu.bpu_cnt),
-      pmu.bpu_b_fail, pmu.bpu_j_fail,
+      pmu.bpu_b_fail, pmu.bpu_j_fail, pmu.bpu_jr_fail,
       pmu.call_inst_cnt, pmu.ret_inst_cnt);
   Log("hazard cycle of ifu_sys: %6lld,%2.0f%%, rou_cycle: %6lld,%2.0f%% (structural)",
       pmu.ifu_sys_hazard_cycle, percentage(pmu.ifu_sys_hazard_cycle, pmu.active_cycle),
@@ -327,6 +332,8 @@ void perf()
   Log("Dual commit: %lld / %lld commits (%2.1f%%)",
       pmu.dual_commit_cnt, pmu.instr_cnt,
       percentage(pmu.dual_commit_cnt, pmu.instr_cnt - pmu.dual_commit_cnt));
+  Log("Early resteer: %lld events",
+      pmu.early_resteer_cnt);
   assert(
       pmu.instr_cnt ==
       (pmu.ld_inst_cnt + pmu.st_inst_cnt + pmu.alu_inst_cnt +
