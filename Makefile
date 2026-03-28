@@ -140,8 +140,8 @@ run-nemu64-linux-device: ## Run NEMU RV64 with VGA screen + keyboard
 # NPC Simulation Targets
 # ============================================================================
 NPC_DEFCONFIG ?= o2_defconfig ## NPC simulator defconfig profile
-NPC_ARCH ?= riscv32e-npc ## Override ARCH for AM targets
-YSYXSOC_ARCH ?= riscv32e-ysyxsoc ## Override ARCH for ysyxSoC targets
+NPC_ARCH ?= riscv32-npc ## Override ARCH for AM targets
+YSYXSOC_ARCH ?= riscv32-ysyxsoc ## Override ARCH for ysyxSoC targets
 
 # RV64 mode: set via `make run-npc64` or explicitly `make run-npc32 VFLAGS="-DYSYX_RV64"`
 VFLAGS ?= ## Enable RV64 mode (-DYSYX_RV64)
@@ -284,7 +284,6 @@ nanos-npc32: ## Build and run nanos-lite on NPC
 # ============================================================================
 # Linux Kernel Boot (via OpenSBI on NEMU)
 # ============================================================================
-OPENSBI_PAYLOAD ?= $(YSYX_HOME)/third_party/riscv-software-src/opensbi/build/platform/generic/firmware/fw_payload.bin ## OpenSBI firmware payload path
 
 # Pre-built Linux kernel downloads (from https://github.com/Kingfish404/linux-build/releases)
 LINUX_BUILD_VERSION ?= v6.18.15 ## Pre-built Linux kernel version
@@ -320,17 +319,20 @@ linux-download: linux-download-rv32 linux-download-rv64 ## Download pre-built Li
 
 linux-boot-nemu32: config-nemu32-linux ## Boot Linux on NEMU (riscv32)
 	$(MAKE) -C $(NEMU_HOME) -j$(NPROC)
-	$(MAKE) -C $(NEMU_HOME) run IMG=$(OPENSBI_PAYLOAD) ARGS="$(ARGS)"
+	$(MAKE) -C $(NEMU_HOME) run IMG=$(LINUX_RV32_PAYLOAD) ARGS="$(ARGS)"
 
 linux-boot-npc32: config-npc32-linux ## Boot Linux on NPC (riscv32)
 	$(MAKE) -C $(NSIM_HOME) -j$(NPROC)
-	$(MAKE) -C $(NSIM_HOME) run IMG=$(OPENSBI_PAYLOAD) ARGS="$(ARGS)"
+	$(MAKE) -C $(NSIM_HOME) run IMG=$(LINUX_RV32_PAYLOAD) ARGS="$(ARGS)"
 
 linux-boot-npc32-difftest: config-npc32-linux-difftest config-nemu32-ref ## Boot Linux on NPC with difftest
 	$(MAKE) -C $(NSIM_HOME) -j$(NPROC)
-	$(MAKE) -C $(NSIM_HOME) run IMG=$(OPENSBI_PAYLOAD) ARGS="$(ARGS)"
+	$(MAKE) -C $(NSIM_HOME) run IMG=$(LINUX_RV32_PAYLOAD) ARGS="$(ARGS)"
 
 linux-boot-nemu32-device: config-nemu32-linux-device $(LINUX_RV32_DIR)/fw_payload.bin ## Boot Linux on NEMU RV32 (auto-download)
+	$(MAKE) -C $(NEMU_HOME) run IMG=$(LINUX_RV32_PAYLOAD) ARGS="$(DEVICE_ARGS)"
+
+linux-boot-nemu32-device-difftest: config-nemu32-linux-device $(LINUX_RV32_DIR)/fw_payload.bin ## Boot Linux on NEMU RV32 (auto-download)
 	$(MAKE) -C $(NEMU_HOME) run IMG=$(LINUX_RV32_PAYLOAD) ARGS="$(DEVICE_ARGS)"
 
 linux-boot-nemu64-device: config-nemu64-linux-device $(LINUX_RV64_DIR)/fw_payload.bin ## Boot Linux on NEMU RV64 (auto-download)

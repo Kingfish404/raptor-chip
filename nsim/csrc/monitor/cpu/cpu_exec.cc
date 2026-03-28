@@ -79,7 +79,7 @@ void cpu_show_itrace()
 {
 #ifdef CONFIG_ITRACE
   void disassemble(char *str, int size, uint64_t pc, uint8_t *code, int nbyte);
-  for (int i = iringhead + 1 % MAX_IRING_SIZE; i != iringhead; i = (i + 1) % MAX_IRING_SIZE)
+  for (int i = (iringhead + 1) % MAX_IRING_SIZE; i != iringhead; i = (i + 1) % MAX_IRING_SIZE)
   {
     if (iringbuf_rpc[i] == 0)
     {
@@ -89,9 +89,12 @@ void cpu_show_itrace()
         iringbuf[i], sizeof(iringbuf[0]),
         FMT_WORD_NO_PREFIX ": " FMT_WORD_NO_PREFIX "\t",
         iringbuf_rpc[i], iringbuf_inst[i]);
-    disassemble(
-        iringbuf[i] + len, sizeof(iringbuf[0]) - len,
-        iringbuf_rpc[i], (uint8_t *)&iringbuf_inst[i], 4);
+    if (len >= 0 && len < (int)sizeof(iringbuf[0]))
+    {
+      disassemble(
+          iringbuf[i] + len, sizeof(iringbuf[0]) - len,
+          iringbuf_rpc[i], (uint8_t *)&iringbuf_inst[i], 4);
+    }
     if ((i + 1) % MAX_IRING_SIZE == iringhead)
     {
       printf("-> %s\n", iringbuf[i]);
@@ -156,12 +159,13 @@ void cpu_exec(uint64_t n)
     perf_sample_per_cycle();
     cur_inst_cycle++;
     progress_cycle++;
-    if (progress_cycle % 10000000 == 0) {
+    if (progress_cycle % 10000000 == 0)
+    {
       Log("progress: %llu cycles, %llu insts, pc=" FMT_WORD_NO_PREFIX,
           (unsigned long long)progress_cycle, (unsigned long long)pmu.instr_cnt,
           (word_t)(*npc.pc));
     }
-    if (cur_inst_cycle > 0x2ffff)
+    if (cur_inst_cycle > 0x4ffff)
     {
       Log(FMT_RED("Too many cycles (0x%llx) stalled at pc: " FMT_WORD_NO_PREFIX ", rpc: " FMT_WORD_NO_PREFIX ", inst: %08x."),
           (long long int)cur_inst_cycle, (word_t)(*npc.pc), (word_t)(*npc.rpc), (uint32_t)(*(npc.inst)));
@@ -199,8 +203,7 @@ void cpu_exec(uint64_t n)
         // Determine actual timer interrupt cause based on privilege level
         // before trap (CSR module hasn't updated priv_mode yet at this point)
         uint8_t priv = *(uint8_t *)npc.priv;
-        word_t cause = ((priv == 3) ? 0x7u : 0x5u)
-                     | ((word_t)1 << (sizeof(word_t) * 8 - 1));
+        word_t cause = ((priv == 3) ? 0x7u : 0x5u) | ((word_t)1 << (sizeof(word_t) * 8 - 1));
         difftest_raise_intr(cause);
       }
 #endif

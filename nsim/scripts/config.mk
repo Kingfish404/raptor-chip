@@ -41,11 +41,11 @@ $(MCONF):
 $(FIXDEP):
 	$(Q)$(MAKE) $(silent) -C $(FIXDEP_PATH)
 
-menuconfig: $(MCONF) $(CONF) $(FIXDEP)
+menuconfig: $(MCONF) $(CONF) $(FIXDEP) ## Update current config utilising a menu based program
 	$(Q)$(MCONF) $(Kconfig)
 	$(Q)$(CONF) $(silent) --syncconfig $(Kconfig)
 
-savedefconfig: $(CONF)
+savedefconfig: $(CONF) ## Save current config as configs/defconfig (minimal config)
 	$(Q)$< $(silent) --$@=configs/defconfig $(Kconfig)
 
 %defconfig: $(CONF) $(FIXDEP)
@@ -54,15 +54,10 @@ savedefconfig: $(CONF)
 
 .PHONY: menuconfig savedefconfig defconfig
 
-# Help text used by make help
-help:
-	@echo  '  menuconfig	  - Update current config utilising a menu based program'
-	@echo  '  savedefconfig   - Save current config as configs/defconfig (minimal config)'
-
 distclean:: clean
 	-@rm -rf $(rm-distclean)
 
-.PHONY: help distclean
+.PHONY: distclean
 
 define call_fixdep
 	@$(FIXDEP) $(1) $(2) unused > $(1).tmp

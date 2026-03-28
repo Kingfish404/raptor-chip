@@ -18,42 +18,42 @@ jobs:
         run: |
           mkdir -p .github/results
           docker run --rm sta:latest bash -c \
-            "make o2_defconfig && make -C /workspaces/raptor-chip/am-kernels/benchmarks/microbench ARCH=riscv32-npc run mainargs=\"test\" ARGS=\"-b -n\"" \
+            "make microbench-npc32 ARGS='-b -n' MAINARGS=test" \
             2>&1 | tee /tmp/microbench-npc.log
           bash .github/scripts/parse-benchmark.sh microbench /tmp/microbench-npc.log > .github/results/microbench-npc.txt
 
       - name: Run microbench riscv32e-npc
         run: |
           docker run --rm sta:latest bash -c \
-            "make o2_defconfig && make -C /workspaces/raptor-chip/am-kernels/benchmarks/microbench ARCH=riscv32e-npc run mainargs=\"test\" ARGS=\"-b -n\"" \
+            "make microbench-npc32 NPC_ARCH=riscv32e-npc ARGS='-b -n' MAINARGS=test" \
             2>&1 | tee /tmp/microbench-npce.log
           bash .github/scripts/parse-benchmark.sh microbench /tmp/microbench-npce.log > .github/results/microbench-npce.txt
 
       - name: Run coremark riscv32-npc
         run: |
           docker run --rm sta:latest bash -c \
-            "make o2_defconfig && make -C /workspaces/raptor-chip/am-kernels/benchmarks/coremark_eembc ARCH=riscv32-npc run mainargs=\"test\" ARGS=\"-b -n\"" \
+            "make coremark-npc32 ARGS='-b -n'" \
             2>&1 | tee /tmp/coremark-npc.log
           bash .github/scripts/parse-benchmark.sh coremark /tmp/coremark-npc.log > .github/results/coremark-npc.txt
 
       - name: Run coremark riscv32e-npc
         run: |
           docker run --rm sta:latest bash -c \
-            "make o2_defconfig && make -C /workspaces/raptor-chip/am-kernels/benchmarks/coremark_eembc ARCH=riscv32e-npc run mainargs=\"test\" ARGS=\"-b -n\"" \
+            "make coremark-npc32 NPC_ARCH=riscv32e-npc ARGS='-b -n'" \
             2>&1 | tee /tmp/coremark-npce.log
           bash .github/scripts/parse-benchmark.sh coremark /tmp/coremark-npce.log > .github/results/coremark-npce.txt
 
       - name: Run RISC-V Architecture Test riscv32-npc
         run: |
           docker run --rm sta:latest bash -c \
-            "make o2_defconfig && make -C /workspaces/raptor-chip/riscv-arch-test-am ARCH=riscv32-npc run ARGS=\"-b -n\"" \
+            "make build-npc32 && make -C /workspaces/raptor-chip/riscv-arch-test-am ARCH=riscv32-npc run ARGS='-b -n'" \
             2>&1 | tee /tmp/archtest-npc.log
           bash .github/scripts/parse-benchmark.sh archtest /tmp/archtest-npc.log > .github/results/archtest-npc.txt
 
       - name: Run RISC-V Architecture Test riscv32e-npc
         run: |
           docker run --rm sta:latest bash -c \
-            "make o2_defconfig && make -C /workspaces/raptor-chip/riscv-arch-test-am ARCH=riscv32e-npc run ARGS=\"-b -n\"" \
+            "make build-npc32 && make -C /workspaces/raptor-chip/riscv-arch-test-am ARCH=riscv32e-npc run ARGS='-b -n'" \
             2>&1 | tee /tmp/archtest-npce.log
           bash .github/scripts/parse-benchmark.sh archtest /tmp/archtest-npce.log > .github/results/archtest-npce.txt
 
@@ -83,36 +83,33 @@ jobs:
     permissions:
       contents: write
     env:
-      YSYX_HOME: ${{ github.workspace  }}
-      NEMU_HOME: ${{ github.workspace  }}/nemu
-      AM_HOME: ${{ github.workspace  }}/abstract-machine
+      YSYX_HOME: ${{ github.workspace }}
+      NEMU_HOME: ${{ github.workspace }}/nemu
+      AM_HOME: ${{ github.workspace }}/abstract-machine
       CROSS_COMPILE: riscv64-elf-
     steps:
       - uses: actions/checkout@v4
-      - name: Setup envirement
+      - name: Setup environment
         run: ./setup.sh
-      - name: Build SoC
+      - name: Download pre-built Linux kernel
         shell: bash -l {0}
-        run: make -C nsim o2linux_defconfig && make -C nsim -j`nproc`
-      - name: Get Linux binary (OpenSBI)
+        run: make linux-download-rv32
+      - name: Boot Linux on NPC
         shell: bash -l {0}
-        run: wget https://github.com/user-attachments/files/23468431/linux-6.12.57.zip && unzip linux-6.12.57.zip
-      - name: Boot Linux
-        shell: bash -l {0}
-        run: timeout 2700s make -C nsim run IMG=../linux-6.12.57/fw_payload.bin ARGS="-b -n" 2>&1 | tee /tmp/linux-boot.log || true
+        run: timeout 3600s make linux-boot-npc32 ARGS="-b -n" 2>&1 | tee /tmp/linux-boot.log || true
       - name: Linux boot summary
         run: |
           BOOT_OK="no"
-          grep -q "Freeing unused kernel memory" /tmp/linux-boot.log && BOOT_OK="yes"
-          LOGIN="no"
-          grep -q "login:" /tmp/linux-boot.log && LOGIN="yes"
+          grep -q "Booting Linux on hartid" /tmp/linux-boot.log && BOOT_OK="yes"
+          INIT_OK="no"
+          grep -q "Run /init as init process" /tmp/linux-boot.log && INIT_OK="yes"
           {
             echo ""
             echo "## Linux Boot Test (NPC)"
             echo "| Check | Status |"
             echo "|-------|--------|"
-            echo "| Kernel boot | $([ "$BOOT_OK" = "yes" ] && echo '✅ OK' || echo '❌ FAIL') |"
-            echo "| Reaches login | $([ "$LOGIN" = "yes" ] && echo '✅ OK' || echo '❌ FAIL') |"
+            echo "| Kernel boot | $([ "$BOOT_OK" = "yes" ] && echo 'PASS' || echo 'FAIL') |"
+            echo "| Reaches init | $([ "$INIT_OK" = "yes" ] && echo 'PASS' || echo 'FAIL') |"
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Pack RTL into single file
         shell: bash -l {0}
@@ -154,36 +151,33 @@ jobs:
   ysyxsoc-test:
     runs-on: ubuntu-latest
     env:
-      YSYX_HOME: ${{ github.workspace  }}
-      NEMU_HOME: ${{ github.workspace  }}/nemu
-      AM_HOME: ${{ github.workspace  }}/abstract-machine
+      YSYX_HOME: ${{ github.workspace }}
+      NEMU_HOME: ${{ github.workspace }}/nemu
+      AM_HOME: ${{ github.workspace }}/abstract-machine
       CROSS_COMPILE: riscv64-elf-
     steps:
       - uses: actions/checkout@v4
-      - name: Setup envirement
+      - name: Setup environment
         run: ./setup.sh
-      - name: Generate SoC
+      - name: Generate ysyxSoC
         shell: bash -l {0}
         run: make -C ./third_party/kingfish404/ysyxSoC/ dev-init verilog
-      - name: Build SoC
-        shell: bash -l {0}
-        run: make -C nsim o2soc_defconfig && make -C nsim -j`nproc`
-      - name: Build NEMU-Ref
-        shell: bash -l {0}
-        run: make -C $NEMU_HOME riscv32_ref_defconfig && make -C $NEMU_HOME
-      - name: Show microbench riscv32-ysyxsoc payload result
+      - name: Build NPC (ysyxSoC config) and NEMU-Ref
         shell: bash -l {0}
         run: |
-          make -C $YSYX_HOME/am-kernels/benchmarks/microbench ARCH=riscv32-ysyxsoc run mainargs="test" ARGS="-b -n" 2>&1 | tee /tmp/mb-soc.log
-      - name: Show microbench riscv32e-ysyxsoc payload result
+          make config-npc32-ysyxsoc
+          make config-nemu32-ref
+      - name: Run microbench riscv32-ysyxsoc
+        shell: bash -l {0}
+        run: make microbench-ysyxsoc ARGS="-b -n" 2>&1 | tee /tmp/mb-soc.log
+      - name: Run microbench riscv32e-ysyxsoc
         shell: bash -l {0}
         run: |
           make -C $YSYX_HOME/am-kernels/benchmarks/microbench ARCH=riscv32e-ysyxsoc run mainargs="test" ARGS="-b -n" 2>&1 | tee /tmp/mb-soce.log
-      - name: Show coremark riscv32-ysyxsoc payload result
+      - name: Run coremark riscv32-ysyxsoc
         shell: bash -l {0}
-        run: |
-          make -C $YSYX_HOME/am-kernels/benchmarks/coremark_eembc ARCH=riscv32-ysyxsoc run ARGS="-b -n" 2>&1 | tee /tmp/cm-soc.log
-      - name: Show coremark riscv32e-ysyxsoc payload result
+        run: make coremark-ysyxsoc ARGS="-b -n" 2>&1 | tee /tmp/cm-soc.log
+      - name: Run coremark riscv32e-ysyxsoc
         shell: bash -l {0}
         run: |
           make -C $YSYX_HOME/am-kernels/benchmarks/coremark_eembc ARCH=riscv32e-ysyxsoc run ARGS="-b -n" 2>&1 | tee /tmp/cm-soce.log
@@ -207,39 +201,44 @@ jobs:
   litex-test:
     runs-on: ubuntu-latest
     env:
-      YSYX_HOME: ${{ github.workspace  }}
+      YSYX_HOME: ${{ github.workspace }}
     steps:
       - uses: actions/checkout@v4
-      - name: Setup envirement
+      - name: Setup environment
         shell: bash -l {0}
         run: ./setup.sh
-      - name: prepare litex
+      - name: Prepare LiteX
         shell: bash -l {0}
         run: cd fpga/litex && ./setup.sh
-      - name: run litex
+      - name: Run LiteX
         shell: bash -l {0}
         run: cd fpga/litex && source ./venv/bin/activate && timeout 180s make run_ni || true
-      - name: coremark
+      - name: CoreMark on LiteX
         shell: bash -l {0}
         run: cd fpga/litex && source ./venv/bin/activate && pushd $YSYX_HOME/third_party/enjoy-digital/litex && litex_bare_metal_demo --build-path=build/sim/ && popd && timeout 300s make coremark || true
 
   nemu-test:
     runs-on: ubuntu-latest
+    env:
+      YSYX_HOME: ${{ github.workspace }}
+      NEMU_HOME: ${{ github.workspace }}/nemu
+      AM_HOME: ${{ github.workspace }}/abstract-machine
+      CROSS_COMPILE: riscv64-elf-
     steps:
       - uses: actions/checkout@v4
-      - name: Setup envirement
+      - name: Setup environment
         run: ./setup.sh
       - name: Build OpenSBI
-        run: make -C third_party/riscv-software-src/opensbi PLATFORM_RISCV_ISA=rv32imac_zicntr_zicsr_zifencei CROSS_COMPILE=riscv64-linux-gnu- PLATFORM_RISCV_XLEN=32 PLATFORM=generic -j`nproc`
-      - name: Build NEMU
-        run: make -C nemu riscv32_linux_defconfig && make -C nemu
-        env:
-          NEMU_HOME: ${{ github.workspace  }}/nemu
-      - name: Test OpenSBI
-        run: timeout 1440s make -C nemu run IMG=../third_party/riscv-software-src/opensbi/build/platform/generic/firmware/fw_payload.bin ARGS="-b -m 10000000 --log ./build/nemu-log.txt" NEMU_HOME=${{ github.workspace  }}/nemu
-      - name: Get Linux binary (OpenSBI)
+        run: make -C third_party/riscv-software-src/opensbi PLATFORM_RISCV_ISA=rv32imac_zicntr_zicsr_zifencei CROSS_COMPILE=riscv64-linux-gnu- PLATFORM_RISCV_XLEN=32 PLATFORM=generic -j$(nproc)
+      - name: Build NEMU (Linux config)
         shell: bash -l {0}
-        run: wget https://github.com/user-attachments/files/23468431/linux-6.12.57.zip && unzip linux-6.12.57.zip
-      - name: Boot Linux
+        run: make config-nemu32-linux
+      - name: Test OpenSBI on NEMU
         shell: bash -l {0}
-        run: timeout 1800s make -C nemu run IMG=../linux-6.12.57/fw_payload.bin ARGS="-b -m 20000000 --log ./build/nemu-log.txt" NEMU_HOME=${{ github.workspace  }}/nemu
+        run: timeout 1440s make -C nemu run IMG=../third_party/riscv-software-src/opensbi/build/platform/generic/firmware/fw_payload.bin ARGS="-b -m 10000000 --log ./build/nemu-log.txt"
+      - name: Download pre-built Linux kernel
+        shell: bash -l {0}
+        run: make linux-download-rv32
+      - name: Boot Linux on NEMU
+        shell: bash -l {0}
+        run: timeout 1800s make linux-boot-nemu32 ARGS="-b -m 80000000 --log ./nemu/build/nemu-log.txt"

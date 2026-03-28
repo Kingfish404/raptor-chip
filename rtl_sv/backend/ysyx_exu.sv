@@ -463,6 +463,7 @@ module ysyx_exu #(
     && (ioq_ren[ioq_head]
         ? exu_lsu.rready
         : ioq_mmu_en[ioq_head] == 0)
+    && (!ioq_wen[ioq_head] || ioq_mmu_en[ioq_head] == 0)
   );
   assign exu_ioq_bcast.valid = ioq_valid_found;
   // } Write back (IOQ)

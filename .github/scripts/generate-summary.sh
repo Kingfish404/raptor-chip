@@ -183,7 +183,7 @@ echo "Wrote results JSON to $OUTPUT_JSON"
 # Generate GitHub Job Summary markdown
 cat >> "$STEP_SUMMARY" << ENDMD
 
-## 🏆 Raptor Chip — Benchmark Results
+## Raptor Chip — Benchmark Results
 
 > Commit: \`$COMMIT_SHORT\` | Updated: $TIMESTAMP
 

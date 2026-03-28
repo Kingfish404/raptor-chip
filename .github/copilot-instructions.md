@@ -1,113 +1,88 @@
-# Copilot Instructions - Raptor Chip
+# Raptor Chip — Copilot Instructions
 
-## Project Overview
+Out-of-order RISC-V processor (RV32/RV64 IMAC_Zicsr_Zifencei) with register renaming, ROB, and reservation stations. Hand-written SystemVerilog RTL; Chisel (Scala) used only for decoder generation. Boots Linux 6.12 via OpenSBI.
 
-Out-of-order RISC-V (RV32/RV64 IMAC_Zicsr_Zifencei) processor core ("raptor") with register renaming, ROB, reservation stations, and Sv32 virtual memory. Features LR/SC + AMO atomics, compressed instructions (RVC), and boots Linux 6.12 via OpenSBI. Supports configurable **RV32** and **RV64** modes via compile-time `YSYX_RV64` define. The RTL is hand-written **SystemVerilog** with Chisel used only for decoder generation. Verification uses Verilator simulation with differential testing against NEMU (a reference ISA emulator).
+## Quick Command Reference
 
-## Architecture (Pipeline Stages)
-
-```
-IFU -> IDU -> RNU (rename) -> ROU (ROB/dispatch) -> EXU (RS/IOQ) -> CMU (commit)
-                                                    |
-                                              LSU <-> L1D <-> BUS <-> AXI4
-```
-
-- **Frontend** (`rtl_sv/frontend/`): IFU (3-state FSM, fetch + PC mux, early resteer from IDU), L1I (direct-mapped + ITLB + IFQ + PTW), BPU (bimodal PHT + 2-way BTB + GHR + RSB, JALR entry creation in BTB via `wen_entry`, `wen_type` guard prevents LRU victim type corruption, `pred_valid` gates speculative GHR/RSB updates), IDU (RVC expansion + Chisel decoders, `csr_addr_valid()`, early resteer detection for BTB alias mispredictions on non-branch instructions)
-- **Backend** (`rtl_sv/backend/` + `rtl_sv/frontend/ysyx_csr.sv`):
-  - **RNU** (rename): pure rename stage (`ysyx_rnu.sv`) + RNQ (circular, `RIQ_SIZE`) + 2 sub-modules:
-    - `ysyx_rnu_freelist.sv` - physical register free list (circular FIFO, `rnu_fl_if`, flush recovery via in-flight count rewind)
-    - `ysyx_rnu_maptable.sv` - speculative MAP + committed RAT (`rnu_mt_if`, 3 read ports, flush: MAP<-RAT, exposes `map_snapshot`/`rat_snapshot`)
-  - **PRF** (`ysyx_prf.sv`): multi-ported physical register file (2R/2W), instantiated at top level (`ysyx.sv`) -- valid + transient tracking, flush invalidates transient entries. Write port A: `exu_rou_if`, Write port B: `exu_ioq_bcast_if`, Read: `exu_prf_if`
-  - **ROU** (ROB/dispatch): UOQ (dispatch queue, `IIQ_SIZE`) + ROB (`rob_entry_t[]`, `ROB_SIZE`, states: `ROB_EX`->`ROB_WB`->`ROB_CM`), operand bypass (PRF > IOQ > EXU), async trap from CLINT
-  - **EXU**: RS (`RS_SIZE`, priority issue, operand forwarding) + IOQ (`IOQ_SIZE`, in-order, for ld/st/amo/Zicsr) + ALU (combinational RV32I/RV64I, W-variant sign-extension for RV64) + MUL (Booth's / iterative div, or fast single-cycle mode; W-variants for RV64)
-  - **CMU** (commit): lightweight broadcast unit (retire PC, branch resolution, flush, fence, call/ret/rvc detection from committed instruction word for RSB training). Supports **dual commit** -- retires up to 2 consecutive ROB entries per cycle when both are in WB state, slot 0 doesn't cause flush or store.
-  - **CSR** (`ysyx_csr.sv`): M/S-mode CSR file, trap delegation, privilege transitions, MMU broadcasts (`immu_en`/`dmmu_en`, `satp_ppn`, `tvec`)
-- **Memory** (`rtl_sv/memory/`): LSU (STQ + SQ, store-to-load forwarding CAM), L1I (direct-mapped, IFQ, banked SRAM data storage via `ysyx_sram_1r1w`, tag+valid in `ysyx_l1i_tagmem.sv` sub-module with `(* keep_hierarchy *)`, `sram_data_ready` for synchronous read timing), L1D (2-way set-associative, write-through, LR/SC reservation, banked SRAM data storage via `ysyx_sram_1r1w` with per-word valid tracking, `L1D_LINE_LEN`-configurable words per line, 5-state FSM, split `tag_hit`/`data_hit`), TLB (`ysyx_tlb.sv` -- fully-associative, multi-entry with ASID, round-robin replacement, shared by L1I/L1D), PTW (`ysyx_ptw.sv` -- Sv32 two-level page table walker, IDLE/LVL1/LVL0 FSM, shared AXI read channel), BUS (AXI4 bridge, L1D priority, L1I burst support via `arburst`, CLINT internal), CLINT (64-bit mtime, periodic timer interrupt), SRAM wrapper (`ysyx_sram_1r1w.sv` -- synchronous-read behavioral model with write-first bypass, `YSYX_USE_SRAM_MACRO` ifdef for foundry macro swap, matches ASIC SRAM timing and FPGA Block RAM inference)
-- **Top-level**: `rtl_sv/ysyx.sv` (bare core, pure wiring -- instantiates all stages + PRF), `rtl_sv/ysyx_npc_soc.sv` (SoC wrapper for Verilator sim)
-- **Config/types**: `rtl_sv/include/ysyx_config.svh` (params incl. `YSYX_ISSUE_WIDTH`, cache/BPU/queue sizes), `rtl_sv/ysyx_pkg.sv` (`uop_t`, `prd_t`, `rob_entry_t`, `rob_state_t` types, `addr_cacheable()`/`addr_valid()` functions)
-- **Interfaces**: `rtl_sv/include/ysyx_*_if.svh` (inter-module: `ifu_idu_if`, `idu_rnu_if`, `rnu_rou_if`, `rou_exu_if`, `exu_rou_if`, `exu_ioq_bcast_if`, `exu_prf_if`, `exu_lsu_if`, `exu_csr_if`, `exu_l1d_if`, `rou_cmu_if`, `rou_csr_if`, `rou_lsu_if`, `cmu_bcast_if`, `csr_bcast_if`, `lsu_l1d_if`, `l1i_bus_if`, `l1d_bus_if`), `rtl_sv/include/ysyx_rnu_internal_if.svh` (`rnu_fl_if`, `rnu_mt_if`)
-
-## Key Commands (all from project root)
+All commands run from **project root**. No `source env.sh` needed — the Makefile exports everything.
 
 ```shell
-make help              # Show all targets
-make verilog           # Chisel -> SV decoders (output: rtl_sv/generated/)
-make sim-npc32         # Full pipeline: verilog + config + build + run
-make run-npc32 ARGS="-b -n"  # Run NPC sim (batch, no wave)
-make run-npc64 ARGS="-b -n" # Run NPC sim in RV64 mode
-make run-nemu32          # Build & run NEMU reference emulator
-make coremark-npc32 ARGS="-b -n" # CoreMark on NPC
-make lint              # Verilator lint
-make lint-npc64        # Verilator lint (RV64 mode)
-make sta               # Static timing analysis (Yosys + OpenSTA)
-make pack              # Pack all SV into single file
-make clean-npc         # Clean NPC build only
+make help                              # Show all targets
+make setup                             # Install dependencies
+make verilog                           # Chisel → SystemVerilog (rtl_sv/generated/)
+make sim-npc32                         # Full pipeline: verilog → config → build → run
+make run-npc32 ARGS="-b -n"            # RV32 batch, no wave trace
+make run-npc64 ARGS="-b -n"            # RV64 mode (auto-invalidates build cache)
+make lint                              # Verilator lint (RV32)
+make lint-npc64                        # Verilator lint (RV64)
+make cpu-tests-npc32 ARGS="-b -n"     # ISA compliance tests
+make coremark-npc32 ARGS="-b -n"      # CoreMark benchmark
+make microbench-npc32 ARGS="-b -n"    # MicroBench benchmark
+make linux-boot-npc32-difftest         # Linux boot with difftest
+make sta                               # Static timing analysis
+make clean                             # Clean all build artifacts
 ```
 
-No `source env.sh` needed - the Makefile exports all environment variables automatically.
-Switching between RV32 and RV64 (`make run-npc32` vs `make run-npc64`) automatically invalidates the build cache.
+Key overridable variables: `ARGS` (runtime), `VFLAGS` (RTL defines), `IMG` (custom binary), `MAINARGS` (benchmark mode).
+
+## Project Layout
+
+```
+rtl_sv/                 # SystemVerilog RTL (hand-written)
+  ysyx_pkg.sv           #   Types: uop_t, prd_t, rob_entry_t, rob_state_t
+  ysyx.sv               #   Top-level core (pure wiring)
+  include/              #   Config (ysyx_config.svh), interfaces (*_if.svh), DPI-C
+  frontend/             #   IFU, IDU, BPU (PHT/BTB/GHR/RSB), CSR
+  backend/              #   RNU (freelist + maptable), PRF, ROU (UOQ + ROB), EXU (RS + IOQ + ALU + MUL), CMU
+  memory/               #   LSU (STQ + SQ), L1I, L1D (banked SRAM), TLB, PTW (Sv32), BUS (AXI4), CLINT
+  generated/            #   Chisel-generated decoders (do not edit)
+rtl_scala/              # Chisel/Scala source for decoder generation
+nsim/                   # NPC Verilator simulator (C++ testbench, Kconfig)
+nemu/                   # NEMU software ISS (reference model for difftest)
+abstract-machine/       # AM runtime framework
+am-kernels/             # Test suites (cpu-tests, alu-tests, cache-tests, am-tests, soc-tests)
+nanos-lite/             # NanoS-lite simple OS
+navy-apps/              # Applications for nanos-lite
+linux/                  # Linux kernel build scripts + payload
+fpga/                   # FPGA targets (Gowin Tang Nano 20K, LiteX)
+```
 
 ## SystemVerilog Conventions
 
-- **All modules/defines use `ysyx_` prefix**: `ysyx_ifu`, `ysyx_exu`, `YSYX_OP_LUI___`, `YSYX_ALU_ADD_`
-- **Interfaces for inter-module signals**, named `<src>_<dst>_if` (e.g., `ifu_idu_if`, `exu_rou_if`). Modports: `master`/`slave` for request/response, `in`/`out` for broadcasts
-- **Internal sub-module interfaces** in `ysyx_rnu_internal_if.svh`, named `rnu_<component>_if` (e.g., `rnu_fl_if`, `rnu_mt_if`)
-- **Valid/ready handshaking** on all interfaces
-- Use `logic` (not `reg`/`wire`), `always_comb`, `always_ff`, `typedef enum logic` for FSMs, `typedef struct packed` for bundles (e.g., `rob_entry_t` for ROB entries)
-- **State machines**: `unique case` with named enum states (`IDLE`, `VALID`, `STALL`)
-- **Sequential**: `always @(posedge clock)` with synchronous reset inside the block
-- **Named port connections** only (`.port(signal)`), never positional
-- RTL must be **synthesizable by Yosys** (with yosys-slang plugin)
+- **Module prefix**: All modules and defines use `ysyx_` prefix
+- **Naming**: `ysyx_<component>` or `ysyx_<component>_<subunit>` (e.g., `ysyx_bpu`, `ysyx_bpu_btb`)
+- **Types**: `typedef struct packed` with `_t` suffix (`uop_t`, `rob_entry_t`). `typedef enum` for FSMs
+- **Interfaces**: `interface` with `<src>_<dst>_if` naming and `modport master/slave`
+- **Signals**: `logic` only (never `reg`/`wire`). `always_comb`/`always_ff`/`always_latch` (never `always @`)
+- **Ports**: Named connections only (`.port(signal)`), never positional
+- **Package**: Global definitions in `ysyx_pkg` — import via `import ysyx_pkg::*`
+- **Synthesizability**: RTL must be synthesizable by Yosys (with [yosys-slang](https://github.com/povik/yosys-slang))
 
-## DPI-C & Simulation
+## Architecture Essentials
 
-- DPI-C calls are **macro-wrapped** (e.g., `` `YSYX_DPI_C_PMEM_READ``), defined in two variants:
-  - `rtl_sv/include/dpic/ysyx_dpi_c.svh` - real calls for Verilator simulation
-  - `rtl_sv/include/dpic_mock/ysyx_dpi_c.svh` - no-ops for synthesis/formal
-- DPI-C function signatures are **conditional on YSYX_RV64**: `longint` params for RV64, `int` for RV32 (see `ysyx_dpi_c.sv`)
-- C-side counterparts use `#ifdef CONFIG_ISA64` for matching `long long` vs `int` signatures
-- **Differential testing** (difftest) compares NPC vs NEMU instruction-by-instruction; enabled by default
-- Simulator config uses **Kconfig** in `nsim/configs/` - profiles: `o2_defconfig` (standalone), `o2_difftest_defconfig` (difftest), `o2linux_defconfig`, `o2linux_difftest_defconfig`, `o2soc_defconfig`
+- **Pipeline**: IF0 → IF1 → ID → RN → DI → IS/EX → WB → CM (8 logical stages, single-issue OoO)
+- **ROB states**: `ROB_CM=2'b00` (committed/empty), `ROB_WB=2'b01` (written back), `ROB_EX=2'b10` (executing)
+- **Operand forwarding priority**: PRF > IOQ > EXU
+- **RV64 switch**: `-DYSYX_RV64` (SV) / `CONFIG_ISA64` (C++) / `ISA64=1` (Make). Switching auto-invalidates build cache
+- **Config system**: Kconfig-based (`nsim/configs/`). Key presets: `o2_defconfig`, `o2_difftest_defconfig`, `o2linux_defconfig`
+- **SRAM**: Synchronous read with write-first bypass (essential for L1I fills)
+- **CSR**: Lives in `frontend/` on disk but architecturally belongs to the backend commit path
 
-## Chisel (Scala) - Decoder Only
+## Key Pitfalls
 
-`rtl_scala/src/main/scala/` generates only the instruction decoders (`ysyx_idu_decoder.sv`, `ysyx_idu_decoder_c.sv`). All other RTL is hand-written SV. Run `make verilog` to regenerate; output goes to `rtl_sv/generated/`.
+- **Difftest** significantly reduces simulation performance — only enable for correctness verification
+- **NEMU must be built first** if using difftest (`DIFF_REF_SO` points to `nemu/build/riscv3{2,4}-nemu-interpreter-so`)
+- **Build paths must not contain spaces** (GNU Make limitation)
+- **Chisel elaboration** (`sbt`) can be slow; generated SV is cached in `rtl_sv/generated/`
+- **Single `.config`** — can't have simultaneous RV32 and RV64 configs; rebuild to switch
+- **Verilator lint warnings** for UNUSED/DECLFILENAME from generated decoders are pre-existing and expected
 
-## Configuration & Parameters
+## Documentation
 
-Microarchitecture tunables are in `rtl_sv/include/ysyx_config.svh`:
-- **XLEN**: 32 (default) or 64 (when `YSYX_RV64` is defined)
-- **Cache**: `L1I_LINE_LEN` (line words, 2), `L1I_LEN` (index bits, 2^6=64 sets), `L1I_N_WAYS` (1, direct-mapped), `L1D_LINE_LEN` (line words, 1), `L1D_LEN` (index bits, 2^5=32 sets), `L1D_N_WAYS` (2, 2-way set-associative)
-- **BPU**: `PHT_SIZE` (512), `BTB_SIZE` (128, 2-way set-associative = 64 sets x 2 ways), `RSB_SIZE` (8)
-- **OoO queues**: `RIQ_SIZE` (rename queue, 4), `IIQ_SIZE` (dispatch queue, 4), `ROB_SIZE` (8), `RS_SIZE` (4), `IOQ_SIZE` (4), `SQ_SIZE` (store queue, 8)
-- **Registers**: `PHY_SIZE` (64 physical), `REG_SIZE` (32 architectural)
-- **Issue**: `YSYX_ISSUE_WIDTH` (1, single-issue)
-- **MUL mode**: `YSYX_M_FAST` (1 = single-cycle for sim, 0 = iterative Booth's)
-- **Dual commit**: `YSYX_DUAL_COMMIT` (defined = retire up to 2 consecutive ROB entries/cycle)
-
-Interface `parameter` declarations default to these macros.
-
-**MROM**: boot stub in `nsim/csrc/mem/mrom-data/` auto-builds for RV32 or RV64 (controlled by `ISA64` variable, auto-detected from `VFLAGS`).
-
-## CI / Testing
-
-CI runs 5 parallel jobs: PPA eval (benchmarks + STA), Linux boot on NPC, ysyxSoC integration, LiteX SoC, and NEMU Linux boot. Key verification methods:
-- **Difftest**: instruction-level comparison vs NEMU reference
-- **Benchmarks**: CoreMark and microbench on `riscv32-npc` and `riscv32e-npc` variants
-- **RISC-V Architecture Tests**: compliance suite
-- **Linux boot**: end-to-end test booting Linux 6.12 via OpenSBI
-
-## Workflow - Code & Documentation Consistency
-
-After completing any code modification (new modules, interface changes, refactoring, parameter additions, etc.), **always** perform a final consistency check:
-
-1. **Review changed modules/interfaces** - identify all files that were created, deleted, or modified.
-2. **Update documentation** - ensure the following docs accurately reflect the changes:
-   - `.github/copilot-instructions.md` - Architecture, conventions, config sections
-   - `docs/uarch.md` - pipeline diagrams, module descriptions
-   - `docs/README.md` - project structure, code style notes
-   - `README.md` - top-level project overview (if architecture/build commands changed)
-3. **Verify consistency** - confirm that module names, interface names, type names, parameter names, and file paths mentioned in documentation match the actual codebase.
-4. **Run verification** - after documentation updates, run:
-   - `make lint` and `make run-npc32 ARGS="-b -n"` to ensure nothing is broken
-   - For **microarchitecture / performance-related changes**, also run `make coremark ARGS="-b -n"` and `make microbench ARGS="-b -n"`, then append a new row to `docs/perf-iterations.md` recording the commit, change description, IPC, cycle count, and stall breakdown.
+Detailed docs live in [docs/](docs/) — link to them, don't duplicate:
+- [docs/uarch.md](docs/uarch.md) — Microarchitecture pipeline details
+- [docs/linux_kernel.md](docs/linux_kernel.md) — Linux boot procedures
+- [docs/PROFILE.md](docs/PROFILE.md) — Performance evaluation (IPC, stall breakdown, PPA)
+- [docs/perf-iterations.md](docs/perf-iterations.md) — Performance tracking across commits
+- [reference/memory-subsystem.md](reference/memory-subsystem.md) — Memory subsystem design
+- [reference/roadmap.md](reference/roadmap.md) — Feature roadmap

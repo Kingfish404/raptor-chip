@@ -263,11 +263,24 @@ module ysyx_csr #(
           };
         end else if (rou_csr.sret) begin
           priv_mode <= csr[MSTATUS][`YSYX_CSR_MSTATUS_SPP_] == 1'b1 ? `YSYX_PRIV_S : `YSYX_PRIV_U;
-          csr[MSTATUS][`YSYX_CSR_MSTATUS_SIE_] <= 'b1;
-          csr[SSTATUS][`YSYX_CSR_MSTATUS_SIE_] <= 'b1;
-
-          csr[MSTATUS][`YSYX_CSR_MSTATUS_SPP_] <= 'b0;
-          csr[SSTATUS][`YSYX_CSR_MSTATUS_SPP_] <= 'b0;
+          csr[MSTATUS] <= {
+            csr[MSTATUS][XLEN-1:9],
+            1'b0,  // SPP = 0
+            csr[MSTATUS][7:6],  // preserve MPIE, bit 6
+            1'b1,  // SPIE = 1
+            csr[MSTATUS][4:2],  // preserve MIE, bits 4,2
+            csr[MSTATUS][`YSYX_CSR_MSTATUS_SPIE],  // SIE <- SPIE
+            csr[MSTATUS][0]
+          };
+          csr[SSTATUS] <= {
+            csr[SSTATUS][XLEN-1:9],
+            1'b0,  // SPP = 0
+            csr[SSTATUS][7:6],
+            1'b1,  // SPIE = 1
+            csr[SSTATUS][4:2],
+            csr[SSTATUS][`YSYX_CSR_MSTATUS_SPIE],  // SIE <- SPIE
+            csr[SSTATUS][0]
+          };
         end else if (rou_csr.ebreak) begin
           priv_mode <= `YSYX_PRIV_M;
           csr[MCAUSE_] <= 'h3;

@@ -16,6 +16,7 @@
 #include <setjmp.h>
 #include <isa.h>
 #include <memory/paddr.h>
+#include <memory/tlb.h>
 
 extern jmp_buf exec_jmp_buf;
 extern int cause;
@@ -23,6 +24,21 @@ extern int cause;
 extern FILE *mem_trace;
 
 word_t g_vaddr = 0;
+
+/* Software TLB arrays — direct-mapped, separate per access type */
+soft_tlb_entry_t soft_tlb_ifetch[SOFT_TLB_ENTRIES];
+soft_tlb_entry_t soft_tlb_load[SOFT_TLB_ENTRIES];
+soft_tlb_entry_t soft_tlb_store[SOFT_TLB_ENTRIES];
+
+void soft_tlb_flush(void)
+{
+  for (unsigned i = 0; i < SOFT_TLB_ENTRIES; i++)
+  {
+    soft_tlb_ifetch[i].vpn = SOFT_TLB_INVALID_TAG;
+    soft_tlb_load[i].vpn = SOFT_TLB_INVALID_TAG;
+    soft_tlb_store[i].vpn = SOFT_TLB_INVALID_TAG;
+  }
+}
 
 word_t get_paddr(vaddr_t addr, int len)
 {
@@ -59,8 +75,12 @@ word_t vaddr_ifetch(vaddr_t addr, int len)
   }
   else
   {
-    // printf("ir = " FMT_WORD "\n", addr);
+    if (soft_tlb_lookup(soft_tlb_ifetch, addr, &paddr))
+    {
+      return paddr_read(paddr, len);
+    }
     paddr = isa_mmu_translate(addr, len, MEM_TYPE_IFETCH);
+    soft_tlb_refill(soft_tlb_ifetch, addr, paddr);
   }
   return paddr_read(paddr, len);
 }
@@ -86,8 +106,14 @@ word_t vaddr_read(vaddr_t addr, int len)
   }
   else
   {
-    // printf("dr: addr = " FMT_WORD "\n", addr);
+    if (soft_tlb_lookup(soft_tlb_load, addr, &paddr))
+    {
+      cpu.rpaddr = paddr;
+      cpu.rdata = paddr_read(paddr, len);
+      return cpu.rdata;
+    }
     paddr = isa_mmu_translate(addr, len, MEM_TYPE_READ);
+    soft_tlb_refill(soft_tlb_load, addr, paddr);
   }
   cpu.rpaddr = paddr;
   cpu.rdata = paddr_read(paddr, len);
@@ -116,8 +142,18 @@ void vaddr_write(vaddr_t addr, int len, word_t data)
   }
   else
   {
-    // printf("dw:  addr = " FMT_WORD "\n", addr);
+    if (soft_tlb_lookup(soft_tlb_store, addr, &paddr))
+    {
+      cpu.pwaddr = paddr;
+      paddr_write(paddr, len, data);
+      if ((cpu.reservation & ~0x3) == (paddr & ~0x3))
+      {
+        cpu.reservation = 0;
+      }
+      return;
+    }
     paddr = isa_mmu_translate(addr, len, MEM_TYPE_WRITE);
+    soft_tlb_refill(soft_tlb_store, addr, paddr);
   }
   cpu.pwaddr = paddr;
   paddr_write(paddr, len, data);

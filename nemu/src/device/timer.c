@@ -53,7 +53,13 @@ static void clint_io_handler(uint32_t offset, int len, bool is_write)
   {
     // Update mtime when any read hits the CLINT region
     // Scale to 10MHz (matching DTS timebase-frequency)
+#if defined(CONFIG_TIMER_CYCLE)
+    // 1GHz / 10MHz = 100 cycles per tick
+    extern uint64_t g_nr_guest_inst;
+    uint64_t ticks = g_nr_guest_inst / 100;
+#else
     uint64_t ticks = get_time() * 10;
+#endif
     uint8_t *p = (uint8_t *)clint_base;
     *(uint32_t *)(p + MTIME_BASE) = (uint32_t)ticks;
     *(uint32_t *)(p + MTIME_BASE + 4) = (uint32_t)(ticks >> 32);

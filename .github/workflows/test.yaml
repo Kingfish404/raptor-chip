@@ -10,50 +10,48 @@ jobs:
   npc-cpu-tests:
     runs-on: ubuntu-latest
     env:
-      YSYX_HOME: ${{ github.workspace  }}
-      NEMU_HOME: ${{ github.workspace  }}/nemu
-      AM_HOME: ${{ github.workspace  }}/abstract-machine
+      YSYX_HOME: ${{ github.workspace }}
+      NEMU_HOME: ${{ github.workspace }}/nemu
+      AM_HOME: ${{ github.workspace }}/abstract-machine
       CROSS_COMPILE: riscv64-elf-
     steps:
       - uses: actions/checkout@v4
-      - name: Setup envirement
+      - name: Setup environment
         run: ./setup.sh
-      - name: Build SoC
+      - name: Build NPC with difftest and NEMU-Ref
         shell: bash -l {0}
-        run: make -C nsim o2_defconfig && make -C nsim -j`nproc`
-      - name: Build NEMU-Ref
+        run: |
+          make config-npc32-difftest
+          make config-nemu32-ref
+      - name: cpu-tests riscv32e-npc
         shell: bash -l {0}
-        run: make -C $NEMU_HOME riscv32_ref_defconfig && make -C $NEMU_HOME
-      - name: cpu-tests of riscv32-npc payload result
+        run: make cpu-tests-npc32 NPC_ARCH=riscv32e-npc ARGS="-b -n"
+      - name: cpu-tests riscv32-npc
         shell: bash -l {0}
-        run: make -C $YSYX_HOME/am-kernels/tests/cpu-tests ARCH=riscv32-npc run ARGS="-b -n"
-      - name: cpu-tests of riscv32e-npc
-        shell: bash -l {0}
-        run: make -C $YSYX_HOME/am-kernels/tests/cpu-tests ARCH=riscv32e-npc run ARGS="-b -n"
+        run: make cpu-tests-npc32 NPC_ARCH=riscv32-npc ARGS="-b -n"
 
   ysyxsoc-cpu-tests:
     runs-on: ubuntu-latest
     env:
-      YSYX_HOME: ${{ github.workspace  }}
-      NEMU_HOME: ${{ github.workspace  }}/nemu
-      AM_HOME: ${{ github.workspace  }}/abstract-machine
+      YSYX_HOME: ${{ github.workspace }}
+      NEMU_HOME: ${{ github.workspace }}/nemu
+      AM_HOME: ${{ github.workspace }}/abstract-machine
       CROSS_COMPILE: riscv64-elf-
     steps:
       - uses: actions/checkout@v4
-      - name: Setup envirement
+      - name: Setup environment
         run: ./setup.sh
-      - name: Generate SoC
+      - name: Generate ysyxSoC
         shell: bash -l {0}
         run: make -C ./third_party/kingfish404/ysyxSoC/ dev-init verilog
-      - name: Build SoC
+      - name: Build NPC (ysyxSoC config) and NEMU-Ref
         shell: bash -l {0}
-        run: make -C nsim o2soc_defconfig && make -C nsim -j`nproc`
-      - name: Build NEMU-Ref
-        shell: bash -l {0}
-        run: make -C $NEMU_HOME riscv32_ref_defconfig && make -C $NEMU_HOME
-      - name: cpu-tests of riscv32-ysyxsoc
+        run: |
+          make config-npc32-ysyxsoc
+          make config-nemu32-ref
+      - name: cpu-tests riscv32-ysyxsoc
         shell: bash -l {0}
         run: make -C $YSYX_HOME/am-kernels/tests/cpu-tests ARCH=riscv32-ysyxsoc run ARGS="-b -n"
-      - name: cpu-tests of riscv32e-ysyxsoc
+      - name: cpu-tests riscv32e-ysyxsoc
         shell: bash -l {0}
         run: make -C $YSYX_HOME/am-kernels/tests/cpu-tests ARCH=riscv32e-ysyxsoc run ARGS="-b -n"

@@ -211,6 +211,12 @@ config TIMER_GETTIMEOFDAY
   bool "gettimeofday"
 config TIMER_CLOCK_GETTIME
   bool "clock_gettime"
+config TIMER_CYCLE
+  bool "cycle-based (assume 1GHz CPU)"
+  help
+    Use instruction count as time source. Assumes 1 inst = 1 cycle at 1GHz.
+    This avoids wall-clock skew when NEMU runs much slower than real time,
+    preventing RCU stalls and scheduling anomalies during Linux boot.
 endchoice
 
 config RT_CHECK

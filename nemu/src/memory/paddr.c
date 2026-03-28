@@ -17,6 +17,7 @@
 #include <isa.h>
 #include <memory/host.h>
 #include <memory/paddr.h>
+#include <memory/tlb.h>
 #include <device/mmio.h>
 #include <cpu/difftest.h>
 
@@ -94,6 +95,7 @@ void init_mem()
   Log("physical memory area [" FMT_PADDR ", " FMT_PADDR "]", PMEM_LEFT, PMEM_RIGHT);
   memset(sram, 0, sizeof(sram));
   memset(mrom, 0, sizeof(mrom));
+  soft_tlb_flush();
 
 #if defined(CONFIG_ROM)
   // refer spike:riscv/sim.cc
