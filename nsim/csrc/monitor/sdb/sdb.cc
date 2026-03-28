@@ -12,6 +12,8 @@
 extern NPCState npc;
 extern PMUState pmu;
 
+long long int max_inst = -1;
+
 void difftest_skip_ref();
 void difftest_should_diff_mem();
 
@@ -111,7 +113,7 @@ void soc_show_sram()
 
 int cmd_c(char *args)
 {
-  cpu_exec(-1);
+  cpu_exec(max_inst);
   return 0;
 }
 
@@ -253,6 +255,13 @@ void sdb_mainloop()
   if (is_batch_mode)
   {
     cmd_c(NULL);
+    if (npc.state == NPC_STOP && max_inst != (long long int)-1)
+    {
+      Log("Reached maximum instruction limit (%lld).", max_inst);
+      npc.state = NPC_QUIT;
+      void statistic();
+      statistic();
+    }
     return;
   }
 

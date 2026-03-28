@@ -9,57 +9,74 @@ on:
 jobs:
   ppa-npc-eval:
     runs-on: ubuntu-latest
+    env:
+      YSYX_HOME: ${{ github.workspace }}
+      NEMU_HOME: ${{ github.workspace }}/nemu
+      AM_HOME: ${{ github.workspace }}/abstract-machine
+      CROSS_COMPILE: riscv64-elf-
     steps:
       - uses: actions/checkout@v4
-      - name: Build Docker image
-        run: docker build . --file Dockerfile --tag sta:latest --build-arg CACHEBUST=$(date +%s)
+      - name: Setup environment
+        run: ./setup.sh
+      - name: Build NEMU (ref) and NPC
+        shell: bash -l {0}
+        run: |
+          make config-nemu32-ref
+          make build-npc32
 
       - name: Run microbench riscv32-npc
+        shell: bash -l {0}
         run: |
           mkdir -p .github/results
-          docker run --rm sta:latest bash -c \
-            "make microbench-npc32 ARGS='-b -n' MAINARGS=test" \
+          make microbench-npc32 ARGS="-b -n" MAINARGS=test \
             2>&1 | tee /tmp/microbench-npc.log
           bash .github/scripts/parse-benchmark.sh microbench /tmp/microbench-npc.log > .github/results/microbench-npc.txt
 
       - name: Run microbench riscv32e-npc
+        shell: bash -l {0}
         run: |
-          docker run --rm sta:latest bash -c \
-            "make microbench-npc32 NPC_ARCH=riscv32e-npc ARGS='-b -n' MAINARGS=test" \
+          make microbench-npc32 NPC_ARCH=riscv32e-npc ARGS="-b -n" MAINARGS=test \
             2>&1 | tee /tmp/microbench-npce.log
           bash .github/scripts/parse-benchmark.sh microbench /tmp/microbench-npce.log > .github/results/microbench-npce.txt
 
       - name: Run coremark riscv32-npc
+        shell: bash -l {0}
         run: |
-          docker run --rm sta:latest bash -c \
-            "make coremark-npc32 ARGS='-b -n'" \
+          make coremark-npc32 ARGS="-b -n" \
             2>&1 | tee /tmp/coremark-npc.log
           bash .github/scripts/parse-benchmark.sh coremark /tmp/coremark-npc.log > .github/results/coremark-npc.txt
 
       - name: Run coremark riscv32e-npc
+        shell: bash -l {0}
         run: |
-          docker run --rm sta:latest bash -c \
-            "make coremark-npc32 NPC_ARCH=riscv32e-npc ARGS='-b -n'" \
+          make coremark-npc32 NPC_ARCH=riscv32e-npc ARGS="-b -n" \
             2>&1 | tee /tmp/coremark-npce.log
           bash .github/scripts/parse-benchmark.sh coremark /tmp/coremark-npce.log > .github/results/coremark-npce.txt
 
       - name: Run RISC-V Architecture Test riscv32-npc
+        shell: bash -l {0}
         run: |
-          docker run --rm sta:latest bash -c \
-            "make build-npc32 && make -C /workspaces/raptor-chip/riscv-arch-test-am ARCH=riscv32-npc run ARGS='-b -n'" \
+          make archtest-npc32 ARGS="-b -n" \
             2>&1 | tee /tmp/archtest-npc.log
           bash .github/scripts/parse-benchmark.sh archtest /tmp/archtest-npc.log > .github/results/archtest-npc.txt
 
       - name: Run RISC-V Architecture Test riscv32e-npc
+        shell: bash -l {0}
         run: |
-          docker run --rm sta:latest bash -c \
-            "make build-npc32 && make -C /workspaces/raptor-chip/riscv-arch-test-am ARCH=riscv32e-npc run ARGS='-b -n'" \
+          make archtest-npc32e ARGS="-b -n" \
             2>&1 | tee /tmp/archtest-npce.log
           bash .github/scripts/parse-benchmark.sh archtest /tmp/archtest-npce.log > .github/results/archtest-npce.txt
 
-      - name: Run STA (Power, Frequency, Area)
+      - name: Setup STA tools
+        shell: bash -l {0}
         run: |
-          docker run --rm sta:latest bash -c "make sta 2>&1" | tee /tmp/sta.log | tail -256
+          [ -d third_party/yosys-opensta ] || git clone --depth 1 https://github.com/Kingfish404/yosys-opensta third_party/yosys-opensta
+          make -C third_party/yosys-opensta setup-opensta setup-nangate45
+
+      - name: Run STA (Power, Frequency, Area)
+        shell: bash -l {0}
+        run: |
+          make sta 2>&1 | tee /tmp/sta.log | tail -256
           bash .github/scripts/parse-benchmark.sh sta /tmp/sta.log > .github/results/sta.txt
 
       - name: Generate benchmark summary
@@ -74,9 +91,6 @@ jobs:
             .github/results/
           retention-days: 90
           overwrite: true
-
-      - name: Clean up
-        run: docker rmi sta:latest
 
   linux-npc-test:
     runs-on: ubuntu-latest
@@ -96,13 +110,18 @@ jobs:
         run: make linux-download-rv32
       - name: Boot Linux on NPC
         shell: bash -l {0}
-        run: timeout 3600s make linux-boot-npc32 ARGS="-b -n" 2>&1 | tee /tmp/linux-boot.log || true
+        run: |
+          make linux-boot-npc32 ARGS="-b -n" MAX_INST=300000000 \
+            2>&1 | tee /tmp/linux-boot.log || true
       - name: Linux boot summary
         run: |
           BOOT_OK="no"
           grep -q "Booting Linux on hartid" /tmp/linux-boot.log && BOOT_OK="yes"
           INIT_OK="no"
           grep -q "Run /init as init process" /tmp/linux-boot.log && INIT_OK="yes"
+          IPC=$(grep -oP 'IPC:\s*\K[0-9.]+' /tmp/linux-boot.log | head -1 || echo "N/A")
+          INSTS=$(grep -oP '#inst:\s*\K\d+' /tmp/linux-boot.log | head -1 || echo "N/A")
+          CYCLES=$(grep -oP 'cycle:\s*\K\d+' /tmp/linux-boot.log | head -1 || echo "N/A")
           {
             echo ""
             echo "## Linux Boot Test (NPC)"
@@ -110,6 +129,12 @@ jobs:
             echo "|-------|--------|"
             echo "| Kernel boot | $([ "$BOOT_OK" = "yes" ] && echo 'PASS' || echo 'FAIL') |"
             echo "| Reaches init | $([ "$INIT_OK" = "yes" ] && echo 'PASS' || echo 'FAIL') |"
+            echo ""
+            echo "| Metric | Value |"
+            echo "|--------|-------|"
+            echo "| IPC | $IPC |"
+            echo "| Instructions | $INSTS |"
+            echo "| Cycles | $CYCLES |"
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Pack RTL into single file
         shell: bash -l {0}
@@ -235,10 +260,10 @@ jobs:
         run: make config-nemu32-linux
       - name: Test OpenSBI on NEMU
         shell: bash -l {0}
-        run: timeout 1440s make -C nemu run IMG=../third_party/riscv-software-src/opensbi/build/platform/generic/firmware/fw_payload.bin ARGS="-b -m 10000000 --log ./build/nemu-log.txt"
+        run: make -C nemu run IMG=../third_party/riscv-software-src/opensbi/build/platform/generic/firmware/fw_payload.bin ARGS="-b -m 10000000 --log ./build/nemu-log.txt"
       - name: Download pre-built Linux kernel
         shell: bash -l {0}
         run: make linux-download-rv32
       - name: Boot Linux on NEMU
         shell: bash -l {0}
-        run: timeout 1800s make linux-boot-nemu32 ARGS="-b -m 80000000 --log ./nemu/build/nemu-log.txt"
+        run: make linux-boot-nemu32 ARGS="-b --log ./nemu/build/nemu-log.txt" MAX_INST=600000000

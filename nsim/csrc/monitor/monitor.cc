@@ -49,6 +49,8 @@ static const uint32_t img_char_test[] = {
 
 void isa_parser_elf(char *filename);
 
+extern long long int max_inst;
+
 void sdb_set_batch_mode();
 
 void sdb_set_vcd(bool status);
@@ -120,18 +122,19 @@ static int parse_args(int argc, char *argv[])
       {"help", no_argument, NULL, 'h'},
       {"batch", no_argument, NULL, 'b'},
       {"no-vcd", no_argument, NULL, 'n'},
-      {"mrom", required_argument, NULL, 'm'},
+      {"mrom", required_argument, NULL, 'r'},
       {"log", required_argument, NULL, 'l'},
-      {"cycle threshold for wave", required_argument, NULL, 'c'},
-      {"instr threshold for wave", required_argument, NULL, 'i'},
+      {"cycle", required_argument, NULL, 'c'},
+      {"instr", required_argument, NULL, 'i'},
       {"diff", required_argument, NULL, 'd'},
       {"port", required_argument, NULL, 'p'},
       {"elf", required_argument, NULL, 'e'},
+      {"maximum", required_argument, NULL, 'm'},
       {0, 0, NULL, 0},
   };
   int o;
   size_t cycle_threshold = -1, instr_threshold = -1;
-  while ((o = getopt_long(argc, argv, "-hbnm:l:c:i:d:p:e:", table, NULL)) != -1)
+  while ((o = getopt_long(argc, argv, "-hbnr:l:c:i:d:p:e:m:", table, NULL)) != -1)
   {
     switch (o)
     {
@@ -141,7 +144,7 @@ static int parse_args(int argc, char *argv[])
     case 'n':
       sdb_set_vcd(false);
       break;
-    case 'm':
+    case 'r':
       mrom_img_file = optarg;
       break;
     case 'l':
@@ -176,21 +179,26 @@ static int parse_args(int argc, char *argv[])
     case 'e':
       isa_parser_elf(optarg);
       break;
+    case 'm':
+      sscanf(optarg, "%lld", &max_inst);
+      break;
     case 1:
       img_file = optarg;
       break;
     default:
       printf("Usage: %s [OPTION...] IMAGE [args]\n\n", argv[0]);
       printf("Options:\n");
-      printf("\t-b,--batch              run with batch mode\n");
-      printf("\t-n,--no-vcd             disable VCD output\n");
-      printf("\t-m,--mrom=FILE          load MROM image from FILE\n");
-      printf("\t-l,--log=FILE           output log to FILE\n");
-      printf("\t-c,--cycle=THRESHOLD    set cycle threshold for waveform dump\n");
-      printf("\t-i,--instr=THRESHOLD    set instruction threshold for waveform dump\n");
-      printf("\t-d,--diff=REF_SO        run DiffTest with reference REF_SO\n");
-      printf("\t-p,--port=PORT          run DiffTest with port PORT\n");
-      printf("\t-e,--elf=ELF_FILE       add ELF_FILE for ftrace\n");
+      printf("  -b, --batch              run with batch mode\n");
+      printf("  -n, --no-vcd             disable VCD output\n");
+      printf("  -r, --mrom=FILE          load MROM image from FILE\n");
+      printf("  -l, --log=FILE           output log to FILE\n");
+      printf("  -c, --cycle=THRESHOLD    set cycle threshold for waveform dump\n");
+      printf("  -i, --instr=THRESHOLD    set instruction threshold for waveform dump\n");
+      printf("  -d, --diff=REF_SO        run DiffTest with reference REF_SO\n");
+      printf("  -p, --port=PORT          run DiffTest with port PORT\n");
+      printf("  -e, --elf=ELF_FILE       add ELF_FILE for ftrace\n");
+      printf("  -m, --maximum=NUM        set the maximum number of instructions to execute\n");
+      printf("  -h, --help               display this help and exit\n");
       printf("\n");
       exit(0);
     }

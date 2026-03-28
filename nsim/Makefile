@@ -20,6 +20,8 @@ NSIM_HOME = $(abspath .)
 VSRC_PATH ?= $(abspath ../rtl_sv)
 INC_PATH ?= $(abspath ./include) $(abspath $(VSRC_PATH)/include)
 
+remove_quote = $(patsubst "%",%,$(1))
+
 ifeq ($(CONFIG_MODE), "soc")
 SOC_HOME  = $(abspath $(YSYX_HOME)/third_party/kingfish404/ysyxSoC)
 INC_PATH += $(abspath $(SOC_HOME)/perip/uart16550/rtl) $(abspath $(SOC_HOME)/perip/spi/rtl)
@@ -40,7 +42,9 @@ endif
 BUILD_DIR = ./build
 DATA_DIR = ./data
 OBJ_DIR = $(BUILD_DIR)/obj_dir
-BIN = $(BUILD_DIR)/$(VTARGET)-$(CONFIG_MODE)
+ISA_NAME = $(if $(findstring DYSYX_RV64,$(VFLAGS)),riscv64,riscv32)
+NPC_MODE = $(if $(findstring soc,$(call remove_quote,$(CONFIG_MODE))),soc,sim)
+BIN = $(BUILD_DIR)/$(ISA_NAME)-npc-$(NPC_MODE)
 VERILATOR_FLAG =--prof-c --prof-cfuncs \
 	--public \
 	--autoflush --timescale "1ns/1ns" --no-timing \
@@ -70,10 +74,20 @@ $(shell mkdir -p $(DATA_DIR))
 VFLAGS_STAMP := $(BUILD_DIR)/.vflags_stamp
 VFLAGS_PREV  := $(shell cat $(VFLAGS_STAMP) 2>/dev/null)
 ifneq ($(VFLAGS),$(VFLAGS_PREV))
-$(shell rm -rf $(OBJ_DIR) $(BIN) $(VFLAGS_STAMP))
+$(shell rm -rf $(OBJ_DIR) $(BUILD_DIR)/riscv*-npc-* $(VFLAGS_STAMP))
 $(info [nsim] VFLAGS changed: '$(VFLAGS_PREV)' -> '$(VFLAGS)', rebuilding...)
 endif
 $(shell printf '%s' '$(VFLAGS)' > $(VFLAGS_STAMP))
+
+# Auto-invalidate build when Kconfig changes (e.g., switching between o2/o2linux)
+CONFIG_STAMP := $(BUILD_DIR)/.config_stamp
+CONFIG_SIG   := $(shell md5sum .config 2>/dev/null || md5 -q .config 2>/dev/null || echo none)
+CONFIG_PREV  := $(shell cat $(CONFIG_STAMP) 2>/dev/null)
+ifneq ($(CONFIG_SIG),$(CONFIG_PREV))
+$(shell rm -rf $(OBJ_DIR) $(BUILD_DIR)/riscv*-npc-* $(CONFIG_STAMP))
+$(info [nsim] Config changed, rebuilding...)
+endif
+$(shell printf '%s' '$(CONFIG_SIG)' > $(CONFIG_STAMP))
 
 VSRCS = \
 	$(shell find $(VSRC_PATH) -name "*.sv") \
@@ -121,7 +135,7 @@ else
 DIFF_REF_SO = -d $(abspath $(NEMU_HOME)/build/riscv32-nemu-interpreter-so)
 endif
 IMG ?= ## Custom image to load
-NPC_EXEC := $(BIN) $(ARGS) $(DIFF_REF_SO) -m $(MROM_IMG) $(IMG)
+NPC_EXEC := $(BIN) $(ARGS) $(DIFF_REF_SO) -r $(MROM_IMG) $(IMG)
 
 verilog: ## Generate SystemVerilog from Chisel
 	make -C ssrc verilog

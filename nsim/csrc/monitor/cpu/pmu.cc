@@ -173,14 +173,33 @@ void perf_sample_per_cycle()
   // Hit count and hit cycles are computed at report time:
   //   hit_cnt = ifu_fetch_cnt - miss_cnt,  hit_cycle ≈ hit_cnt (1 SRAM cycle/hit)
   prev_l1i_state = l1i_state;
+  // L1D cache sample — state-transition-based tracking (load path only)
+  // L1D FSM states: IDLE=000, LD_A=001, LD_D=010, PTWAIT=100, TRAP=101
+  static uint8_t prev_l1d_state = 0;
+  // Hit: LD_A with tag_hit (1-cycle load hit)
+  if (l1d_state == 0b001 && lsu_l1d_hit)
+  {
+    pmu.l1d_cache_hit_cnt++;
+  }
+  // Miss: transition from LD_A to LD_D (tag miss, going to memory)
+  if (prev_l1d_state == 0b001 && l1d_state == 0b010)
+  {
+    pmu.l1d_cache_miss_cnt++;
+  }
+  // Miss cycles: accumulate while L1D is fetching from memory
+  if (l1d_state == 0b010) // LD_D
+  {
+    pmu.l1d_cache_miss_cycle++;
+  }
+  prev_l1d_state = l1d_state;
   // tlb & page table walk sample
   char stlb_mmu = *(char *)&(CONCAT(VERILOG_PREFIX, l1d_cache__DOT__stlb_mmu));
-  bool i_ptw = (l1i_state & 0b1000) != 0;
+  bool i_ptw = (l1i_state == 0b100); // PTWAIT
   if (i_ptw)
   {
     pmu.itlb_ptw_cycle++;
   }
-  bool dtlb_ptw = (l1d_state & 0b1000) != 0;
+  bool dtlb_ptw = (l1d_state == 0b100); // PTWAIT
   if (dtlb_ptw)
   {
     if (stlb_mmu)
@@ -360,7 +379,23 @@ void perf()
       percentage(pmu.l1i_cache_miss_cycle, l1i_hit_cycle + pmu.l1i_cache_miss_cycle),
       (long long)l1i_access_time, (long long)l1i_miss_penalty,
       l1i_access_time + (100 - l1i_hit_rate) / 100.0 * l1i_miss_penalty);
-  // assert((pmu.l1i_cache_hit_cnt + pmu.l1i_cache_miss_cnt) == pmu.ifu_fetch_cnt);
+  // L1D cache (load path only; stores are write-through and don't stall)
+  long long int l1d_total = pmu.l1d_cache_hit_cnt + pmu.l1d_cache_miss_cnt;
+  long long int l1d_hit_cycle = pmu.l1d_cache_hit_cnt; // ~1 SRAM cycle per hit
+  Log("|%6s, %%|%8s, %%|%8s, %%|%8s,  %%|%13s|%13s|%13s|",
+      "L1D HIT", "L1D MISS", "HIT CYC", "MISS CYC", "HIT Cost AVG", "MISS Cost AVG", "AMAT");
+  double l1d_hit_rate = percentage(pmu.l1d_cache_hit_cnt, l1d_total);
+  double l1d_access_time = pmu.l1d_cache_hit_cnt > 0 ? (double)l1d_hit_cycle / pmu.l1d_cache_hit_cnt : 0;
+  double l1d_miss_penalty = pmu.l1d_cache_miss_cnt > 0 ? (double)pmu.l1d_cache_miss_cycle / pmu.l1d_cache_miss_cnt : 0;
+  Log("|%6.0e,%3.0f|%8.0e,%2.0f|%8.0e,%2.0f|%8.0e,%3.0f|%13lld|%13lld|%13.1f|",
+      (double)pmu.l1d_cache_hit_cnt, l1d_hit_rate,
+      (double)pmu.l1d_cache_miss_cnt, 100 - l1d_hit_rate,
+      (double)l1d_hit_cycle,
+      percentage(l1d_hit_cycle, l1d_hit_cycle + pmu.l1d_cache_miss_cycle),
+      (double)pmu.l1d_cache_miss_cycle,
+      percentage(pmu.l1d_cache_miss_cycle, l1d_hit_cycle + pmu.l1d_cache_miss_cycle),
+      (long long)l1d_access_time, (long long)l1d_miss_penalty,
+      l1d_access_time + (100 - l1d_hit_rate) / 100.0 * l1d_miss_penalty);
   // tlb & page table walk
   Log("|======= TLB & Page Table Walk Analysis ========");
   Log("|%8s, %%|%8s, %%|%8s, %%|",
@@ -385,8 +420,8 @@ void statistic()
       (double)(frequency * 1.0 / 1e6),
       pmu.instr_cnt / time_s, pmu.instr_cnt / time_s / 1e6);
   Log("%s at pc: " FMT_WORD_NO_PREFIX ", inst: " FMT_WORD_NO_PREFIX,
-      (*npc.ret == 0 && npc.state != NPC_ABORT ? FMT_GREEN("HIT GOOD TRAP")
-       : (npc.state == NPC_QUIT)               ? FMT_BLUE("NPC QUIT")
-                                               : FMT_RED("HIT BAD TRAP")),
+      ((npc.state == NPC_QUIT) ? FMT_BLUE("NPC QUIT")
+                               : (*npc.ret == 0 && npc.state != NPC_ABORT ? FMT_GREEN("HIT GOOD TRAP")
+                                                                          : FMT_RED("HIT BAD TRAP"))),
       (word_t)(*(npc.pc)), (word_t)(*(npc.inst)));
 }

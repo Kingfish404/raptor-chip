@@ -84,14 +84,17 @@ static long load_img()
 void usage(int argc, char *argv[])
 {
   printf("Usage: %s [OPTION...] IMAGE [args]\n\n", argv[0]);
-  printf("\t-b,--batch              run with batch mode\n");
-  printf("\t-l,--log=FILE           output log to FILE\n");
-  printf("\t-d,--diff=REF_SO        run DiffTest with reference REF_SO\n");
-  printf("\t-p,--port=PORT          run DiffTest with port PORT\n");
-  printf("\t-e,--elf=ELF_FILE       add ELF_FILE for ftrace\n");
-  printf("\t-t,--tree=BTB_FILE      add BTB_FILE for rom\n");
-  printf("\t-m,--maximum=NUM        set the maximum number of instructions to execute\n");
-  printf("\t-n,--none               do nothing\n");
+  printf("Options:\n");
+  printf("  -b, --batch              run with batch mode\n");
+  printf("  -f, --flash              boot from flash\n");
+  printf("  -l, --log=FILE           output log to FILE\n");
+  printf("  -d, --diff=REF_SO        run DiffTest with reference REF_SO\n");
+  printf("  -p, --port=PORT          run DiffTest with port PORT\n");
+  printf("  -e, --elf=ELF_FILE       add ELF_FILE for ftrace\n");
+  printf("  -t, --tree=BTB_FILE      add BTB_FILE for rom\n");
+  printf("  -m, --maximum=NUM        set the maximum number of instructions to execute\n");
+  printf("  -n, --none               do nothing\n");
+  printf("  -h, --help               display this help and exit\n");
   printf("\n");
 }
 
@@ -105,6 +108,7 @@ static int parse_args(int argc, char *argv[])
       {"port", required_argument, NULL, 'p'},
       {"elf", required_argument, NULL, 'e'},
       {"tree", required_argument, NULL, 't'},
+      {"maximum", required_argument, NULL, 'm'},
       {"none", no_argument, NULL, 'n'},
       {"help", no_argument, NULL, 'h'},
       {0, 0, NULL, 0},

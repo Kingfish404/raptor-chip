@@ -12,6 +12,7 @@ export CROSS_COMPILE ?= riscv64-elf-
 # Default to batch mode (no interactive prompt). Override with ARGS="" to disable.
 ARGS ?= -b ## Pass args to runner (-b: batch, -n: no wave)
 IMG ?= ## Custom image to load
+MAX_INST ?= ## Max instructions to execute (-m N)
 
 # ============================================================================
 # Guard: only define project-level targets when invoked from root directory.
@@ -266,6 +267,18 @@ microbench-npc32-difftest: $(AM_KERNELS) config-npc32-difftest config-nemu32-ref
 microbench-ysyxsoc: $(AM_KERNELS) config-npc32-ysyxsoc config-nemu32-ref ## Run MicroBench on ysyxSoC
 	$(MAKE) -C $(AM_KERNELS)/benchmarks/microbench ARCH=$(YSYXSOC_ARCH) run ARGS="$(ARGS)" mainargs=test
 
+# --- RISC-V Architecture Tests ---
+RISCV_ARCH_TEST ?= $(YSYX_HOME)/third_party/kingfish404/riscv-arch-test-am
+
+$(RISCV_ARCH_TEST):
+	git clone --depth 1 https://github.com/Kingfish404/riscv-arch-test-am $@
+
+archtest-npc32: build-npc32 $(RISCV_ARCH_TEST) ## Run RISC-V Architecture Test on NPC (riscv32)
+	$(MAKE) -C $(RISCV_ARCH_TEST) ARCH=$(NPC_ARCH) run ARGS="$(ARGS)"
+
+archtest-npc32e: build-npc32 $(RISCV_ARCH_TEST) ## Run RISC-V Architecture Test on NPC (riscv32e)
+	$(MAKE) -C $(RISCV_ARCH_TEST) ARCH=riscv32e-npc run ARGS="$(ARGS)"
+
 # ============================================================================
 # Nanos-lite OS
 # ============================================================================
@@ -319,15 +332,15 @@ linux-download: linux-download-rv32 linux-download-rv64 ## Download pre-built Li
 
 linux-boot-nemu32: config-nemu32-linux ## Boot Linux on NEMU (riscv32)
 	$(MAKE) -C $(NEMU_HOME) -j$(NPROC)
-	$(MAKE) -C $(NEMU_HOME) run IMG=$(LINUX_RV32_PAYLOAD) ARGS="$(ARGS)"
+	$(MAKE) -C $(NEMU_HOME) run IMG=$(LINUX_RV32_PAYLOAD) ARGS="$(ARGS) $(if $(MAX_INST),-m $(MAX_INST))"
 
 linux-boot-npc32: config-npc32-linux ## Boot Linux on NPC (riscv32)
 	$(MAKE) -C $(NSIM_HOME) -j$(NPROC)
-	$(MAKE) -C $(NSIM_HOME) run IMG=$(LINUX_RV32_PAYLOAD) ARGS="$(ARGS)"
+	$(MAKE) -C $(NSIM_HOME) run IMG=$(LINUX_RV32_PAYLOAD) ARGS="$(ARGS) $(if $(MAX_INST),-m $(MAX_INST))"
 
 linux-boot-npc32-difftest: config-npc32-linux-difftest config-nemu32-ref ## Boot Linux on NPC with difftest
 	$(MAKE) -C $(NSIM_HOME) -j$(NPROC)
-	$(MAKE) -C $(NSIM_HOME) run IMG=$(LINUX_RV32_PAYLOAD) ARGS="$(ARGS)"
+	$(MAKE) -C $(NSIM_HOME) run IMG=$(LINUX_RV32_PAYLOAD) ARGS="$(ARGS) $(if $(MAX_INST),-m $(MAX_INST))"
 
 linux-boot-nemu32-device: config-nemu32-linux-device $(LINUX_RV32_DIR)/fw_payload.bin ## Boot Linux on NEMU RV32 (auto-download)
 	$(MAKE) -C $(NEMU_HOME) run IMG=$(LINUX_RV32_PAYLOAD) ARGS="$(DEVICE_ARGS)"
@@ -377,6 +390,7 @@ clean: ## Clean all build artifacts
 	build-npc64 run-npc64 lint-npc64 \
 	coremark-npc32 coremark-npc64 coremark-npc32-difftest coremark-ysyxsoc microbench-npc32 microbench-npc64 microbench-npc32-difftest microbench-ysyxsoc \
 	coremark-nemu32 microbench-nemu32 coremark-nemu64 microbench-nemu64 \
+	archtest-npc32 archtest-npc32e \
 	nanos-nemu32 nanos-npc32 \
 	linux-download linux-download-rv32 linux-download-rv64 \
 	linux-boot-nemu32 linux-boot-npc32 linux-boot-nemu32-device linux-boot-nemu64-device \

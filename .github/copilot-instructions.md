@@ -1,6 +1,6 @@
 # Raptor Chip — Copilot Instructions
 
-Out-of-order RISC-V processor (RV32/RV64 IMAC_Zicsr_Zifencei) with register renaming, ROB, and reservation stations. Hand-written SystemVerilog RTL; Chisel (Scala) used only for decoder generation. Boots Linux 6.12 via OpenSBI.
+Out-of-order RISC-V processor (RV32/RV64 IMAC_Zicsr_Zifencei) with register renaming, ROB, and reservation stations. Hand-written SystemVerilog RTL; Chisel (Scala) used only for decoder generation. Boots Linux v6.18 via OpenSBI.
 
 ## Quick Command Reference
 

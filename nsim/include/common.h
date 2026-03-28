@@ -217,6 +217,9 @@ typedef struct
   long long int l1i_cache_hit_cycle;
   long long int l1i_cache_miss_cnt;
   long long int l1i_cache_miss_cycle;
+  long long int l1d_cache_hit_cnt;
+  long long int l1d_cache_miss_cnt;
+  long long int l1d_cache_miss_cycle;
 
   // for tlb & page table walk
   long long int itlb_ptw_cycle;

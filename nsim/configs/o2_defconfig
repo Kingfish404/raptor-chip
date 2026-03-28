@@ -13,7 +13,7 @@ CONFIG_CC_OPT="-O2"
 #
 CONFIG_DEBUG=y
 # CONFIG_WTRACE is not set
-# CONFIG_ITRACE is not set
+CONFIG_ITRACE=y
 # CONFIG_DIFFTEST is not set
 # end of Testing and Debugging
 
