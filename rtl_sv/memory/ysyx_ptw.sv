@@ -1,7 +1,7 @@
 `include "ysyx.svh"
 
 // Sv32 two-level page table walker.
-// Walks vpn[1] → vpn[0] via AXI read channel, produces physical tag or fault.
+// Walks vpn[1] -> vpn[0] via AXI read channel, produces physical tag or fault.
 module ysyx_ptw #(
     parameter bit [7:0] XLEN = `YSYX_XLEN
 ) (

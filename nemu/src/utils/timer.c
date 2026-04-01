@@ -28,7 +28,7 @@ static uint64_t boot_time = 0;
 #endif
 
 #if defined(CONFIG_TIMER_CYCLE)
-// Cycle-based timer: 1GHz CPU → 1 inst = 1 cycle = 1ns → 1000 cycles/µs
+// Cycle-based timer: 1GHz CPU -> 1 inst = 1 cycle = 1ns -> 1000 cycles/µs
 extern uint64_t g_nr_guest_inst;
 #endif
 

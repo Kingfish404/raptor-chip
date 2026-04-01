@@ -50,6 +50,7 @@ static const uint32_t img_char_test[] = {
 void isa_parser_elf(char *filename);
 
 extern long long int max_inst;
+extern long long int max_timeout;
 
 void sdb_set_batch_mode();
 
@@ -130,11 +131,12 @@ static int parse_args(int argc, char *argv[])
       {"port", required_argument, NULL, 'p'},
       {"elf", required_argument, NULL, 'e'},
       {"maximum", required_argument, NULL, 'm'},
+      {"timeout", required_argument, NULL, 't'},
       {0, 0, NULL, 0},
   };
   int o;
   size_t cycle_threshold = -1, instr_threshold = -1;
-  while ((o = getopt_long(argc, argv, "-hbnr:l:c:i:d:p:e:m:", table, NULL)) != -1)
+  while ((o = getopt_long(argc, argv, "-hbnr:l:c:i:d:p:e:m:t:", table, NULL)) != -1)
   {
     switch (o)
     {
@@ -182,6 +184,9 @@ static int parse_args(int argc, char *argv[])
     case 'm':
       sscanf(optarg, "%lld", &max_inst);
       break;
+    case 't':
+      sscanf(optarg, "%lld", &max_timeout);
+      break;
     case 1:
       img_file = optarg;
       break;
@@ -198,6 +203,7 @@ static int parse_args(int argc, char *argv[])
       printf("  -p, --port=PORT          run DiffTest with port PORT\n");
       printf("  -e, --elf=ELF_FILE       add ELF_FILE for ftrace\n");
       printf("  -m, --maximum=NUM        set the maximum number of instructions to execute\n");
+      printf("  -t, --timeout=SECONDS    set wall-clock timeout in seconds\n");
       printf("  -h, --help               display this help and exit\n");
       printf("\n");
       exit(0);

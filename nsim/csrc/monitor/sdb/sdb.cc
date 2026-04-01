@@ -13,6 +13,7 @@ extern NPCState npc;
 extern PMUState pmu;
 
 long long int max_inst = -1;
+long long int max_timeout = -1; // wall-clock timeout in seconds, -1 = disabled
 
 void difftest_skip_ref();
 void difftest_should_diff_mem();

@@ -1,5 +1,5 @@
 /***************************************************************************************
- * Software TLB for NEMU — caches vaddr→paddr translations to skip page table walks.
+ * Software TLB for NEMU — caches vaddr->paddr translations to skip page table walks.
  *
  * Direct-mapped, separate arrays for ifetch / load / store.
  * Flushed on sfence.vma and satp writes.

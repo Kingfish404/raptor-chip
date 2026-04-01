@@ -23,14 +23,20 @@ help: ## Show this help message
 			printf "  %-20s %s\n", target, desc }' $(MAKEFILE_LIST)
 
 $(LITEX_PATH)/README.md:
+	$(MAKE) install
+
+install:
 	mkdir -p $(YSYX_HOME)/third_party/enjoy-digital/
-	git clone https://github.com/enjoy-digital/litex/ $(LITEX_PATH)
+	if [ ! -d $(LITEX_PATH) ]; then git clone https://github.com/enjoy-digital/litex/ $(LITEX_PATH); fi
 	cd $(LITEX_PATH) && python3 ./litex_setup.py --init --install
-	make link
+	$(MAKE) link
 
 link: ## Link ysyx CPU core into LiteX
 	ln -sf $(abspath cores/cpu/ysyx) $(LITEX_PATH)/litex/soc/cores/cpu/
 	ln -sf $(abspath software/coremark) $(LITEX_PATH)/litex/soc/software/
+
+init: $(LITEX_PATH)/README.md ## Init LiteX
+	cd $(LITEX_PATH) && python3 ./litex_setup.py --init
 
 update: $(LITEX_PATH)/README.md ## Update LiteX dependencies
 	cd $(LITEX_PATH) && python3 ./litex_setup.py --update
@@ -60,18 +66,24 @@ liftoff: $(LITEX_PATH)/README.md ## Run LiteX with demo binary
 			python3 ./litex/tools/litex_sim.py --cpu-type=ysyx \
 			--ram-init=demo.bin --integrated-main-ram-size=0x10000
 
+LITEX_COREMARK_FLAGS = --cpu-type=ysyx --integrated-main-ram-size=0x10000 --bios-format=double
+
 coremark: $(LITEX_PATH)/README.md ## Run CoreMark on LiteX
 	cd $(LITEX_PATH) \
+		&& python3 ./litex/tools/litex_sim.py $(LITEX_COREMARK_FLAGS) \
+			--no-compile-gateware \
 		&& python3 ./litex/soc/software/coremark/coremark.py \
 			--build-path=build/sim/ \
-		&& python3 ./litex/tools/litex_sim.py --cpu-type=ysyx \
+		&& python3 ./litex/tools/litex_sim.py $(LITEX_COREMARK_FLAGS) \
 			--non-interactive \
-			--ram-init=coremark.bin --integrated-main-ram-size=0x10000
+			--ram-init=coremark.bin
 
 coremark_wave: $(LITEX_PATH)/README.md ## Run CoreMark on LiteX with waveform
 	cd $(LITEX_PATH) \
+		&& python3 ./litex/tools/litex_sim.py $(LITEX_COREMARK_FLAGS) \
+			--no-compile-gateware \
 		&& python3 ./litex/soc/software/coremark/coremark.py \
 			--build-path=build/sim/ \
-		&& python3 ./litex/tools/litex_sim.py --cpu-type=ysyx \
+		&& python3 ./litex/tools/litex_sim.py $(LITEX_COREMARK_FLAGS) \
 			--non-interactive --gtkwave-savefile --trace --trace-fst \
-			--ram-init=coremark.bin --integrated-main-ram-size=0x10000
+			--ram-init=coremark.bin

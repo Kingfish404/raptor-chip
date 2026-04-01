@@ -413,7 +413,7 @@ module ysyx_l1d #(
   assign l1d_bus.awaddr = lsu_l1d.waddr;
 `ifdef YSYX_RV64
   // Decode walu (5-bit store mask) to full 8-bit wstrb for RV64
-  // SB: 5'b00001→8'h01, SH: 5'b00011→8'h03, SW: 5'b01111→8'h0f, SD: 5'b11111→8'hff
+  // SB: 5'b00001->8'h01, SH: 5'b00011->8'h03, SW: 5'b01111->8'h0f, SD: 5'b11111->8'hff
   assign l1d_bus.wstrb = (lsu_l1d.walu == 5'b11111) ? 8'hff : {3'b0, lsu_l1d.walu[4:0]};
 `else
   assign l1d_bus.wstrb = {4'b0, lsu_l1d.walu[3:0]};

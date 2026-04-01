@@ -9,7 +9,7 @@ The LiteX framework provides a convenient and efficient infrastructure to create
 ```shell
 # prepare envirement
 ./setup.sh
-source ./venv/bin/activate
+source .venv/bin/activate
 # or using conda: `conda activate base`
 
 # run default

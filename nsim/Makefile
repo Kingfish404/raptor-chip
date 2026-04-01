@@ -122,7 +122,7 @@ endif
 
 $(BIN): $(VSRCS) $(VHSRCS) $(CCSRCS) $(CHSRCS) $(NVBOARD_ARCHIVE)
 	$(VERILATOR) --trace-fst -cc --exe --build -j $(shell nproc) $(VERILATOR_FLAG) $^ \
-		--threads 2 --trace-threads 1 \
+		--threads 1 --trace-threads 1 \
 		--top-module $(VTARGET) \
 		$(addprefix -CFLAGS , $(CXXFLAGS)) $(addprefix -LDFLAGS , $(LDFLAGS)) \
 		$(addprefix -I, $(INC_PATH)) \

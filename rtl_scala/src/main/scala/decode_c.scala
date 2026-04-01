@@ -193,13 +193,13 @@ class ysyx_idu_decoder_c extends Module with Instr {
   var cinst = io.cinst
   val is_rv64 = io.is_rv64.asBool
 
-  // RV64C: C.LD  → ld  rd', offset(rs1')  (opcode=0000011, funct3=011)
-  // RV64C: C.SD  → sd  rs2', offset(rs1') (opcode=0100011, funct3=011)
-  // RV64C: C.LDSP → ld rd, offset(x2)
-  // RV64C: C.SDSP → sd rs2, offset(x2)
-  // RV64C: C.ADDIW → addiw rd, rd, imm   (opcode=0011011, funct3=000)
-  // RV64C: C.SUBW  → subw  rd', rd', rs2' (opcode=0111011, funct7=0100000, funct3=000)
-  // RV64C: C.ADDW  → addw  rd', rd', rs2' (opcode=0111011, funct7=0000000, funct3=000)
+  // RV64C: C.LD  -> ld  rd', offset(rs1')  (opcode=0000011, funct3=011)
+  // RV64C: C.SD  -> sd  rs2', offset(rs1') (opcode=0100011, funct3=011)
+  // RV64C: C.LDSP -> ld rd, offset(x2)
+  // RV64C: C.SDSP -> sd rs2, offset(x2)
+  // RV64C: C.ADDIW -> addiw rd, rd, imm   (opcode=0011011, funct3=000)
+  // RV64C: C.SUBW  -> subw  rd', rd', rs2' (opcode=0111011, funct7=0100000, funct3=000)
+  // RV64C: C.ADDW  -> addw  rd', rd', rs2' (opcode=0111011, funct7=0000000, funct3=000)
   val c_ld_inst   = itype(decCldCsdImm(cinst), decRs1Short(cinst), "b011".U(3.W), decRdShort(cinst), "b0000011".U(7.W))
   val c_sd_inst   = stype(decCldCsdImm(cinst), decRs2Short(cinst), decRs1Short(cinst), "b011".U(3.W), "b0100011".U(7.W))
   val c_ldsp_inst = itype(decCiOffsetLdsp(cinst), 2.U(5.W), "b011".U(3.W), decRd(cinst), "b0000011".U(7.W))
@@ -228,7 +228,7 @@ class ysyx_idu_decoder_c extends Module with Instr {
     C_ADDI     -> List(Mux(decRd(cinst) === 0.U || decCiImm(cinst) === 0.U, cNop,
                      itype(decCiImm(cinst), decRd(cinst), "b000".U(3.W), decRd(cinst), "b0010011".U(7.W)))),
     C_JAL_     -> List(jtype(decCjImm(cinst), 1.U(5.W), "b1101111".U(7.W))), // rv32 only; rv64 uses C_ADDIW
-    C_ADDIW    -> List(c_addiw_inst), // rv64: C.ADDIW → addiw rd, rd, imm
+    C_ADDIW    -> List(c_addiw_inst), // rv64: C.ADDIW -> addiw rd, rd, imm
     C_LI__     -> List(Mux(decRdShort(cinst) === 0.U, cNop, itype(decCiImm(cinst), 0.U(5.W), "b000".U(3.W), decRd(cinst), "b0010011".U(7.W)))),
     
     C_ADDI16sp -> List(Mux(decCiNzimmAddi16sp(cinst) === 0.U, cNop,
@@ -243,8 +243,8 @@ class ysyx_idu_decoder_c extends Module with Instr {
     C_XOR_   -> List(rtype(0b0000000.U(7.W), decRs2Short(cinst), decRs1Short(cinst), "b100".U(3.W), decRs1Short(cinst), "b0110011".U(7.W))),
     C_OR__   -> List(rtype(0b0000000.U(7.W), decRs2Short(cinst), decRs1Short(cinst), "b110".U(3.W), decRs1Short(cinst), "b0110011".U(7.W))),
     C_AND_   -> List(rtype(0b0000000.U(7.W), decRs2Short(cinst), decRs1Short(cinst), "b111".U(3.W), decRs1Short(cinst), "b0110011".U(7.W))),
-    C_SUBW   -> List(c_subw_inst), // rv64: C.SUBW → subw
-    C_ADDW   -> List(c_addw_inst), // rv64: C.ADDW → addw
+    C_SUBW   -> List(c_subw_inst), // rv64: C.SUBW -> subw
+    C_ADDW   -> List(c_addw_inst), // rv64: C.ADDW -> addw
     C_REV0   -> List(0.U),
     C_REV1   -> List(0.U),
     C_J___   -> List(jtype(decCjImm(cinst), 0.U(5.W), "b1101111".U(7.W))),
@@ -257,7 +257,7 @@ class ysyx_idu_decoder_c extends Module with Instr {
     C_LQSP   -> List(0.U),
     C_LWSP   -> List(itype(decCiOffsetLwsp(cinst), 2.U(5.W), "b010".U(3.W), decRd(cinst), "b0000011".U(7.W))), // res,rd=0
     C_FLWSP  -> List(0.U),         // RV32: C.FLWSP (F ext); RV64: handled via C_LDSP
-    C_LDSP   -> List(c_ldsp_inst), // RV64: C.LDSP → ld rd, offset(x2)
+    C_LDSP   -> List(c_ldsp_inst), // RV64: C.LDSP -> ld rd, offset(x2)
     C_JR__   -> List(itype(0.U, decRs1(cinst), "b000".U(3.W), 0.U(5.W), "b1100111".U(7.W))), // res,rs1=0
     C_MV__   -> List(Mux(decRd(cinst) === 0.U || decRs2(cinst) === 0.U, cNop,
                      rtype(0b0000000.U(7.W), decRs2(cinst), 0.U(5.W), "b000".U(3.W), decRd(cinst), "b0110011".U(7.W)))), // hint,rd=0
@@ -269,7 +269,7 @@ class ysyx_idu_decoder_c extends Module with Instr {
     C_SQSP   -> List(stype(decCssImm(cinst), decRs2(cinst), 2.U(5.W), "b010".U(3.W), "b0100011".U(7.W))), // rv128
     C_SWSP   -> List(stype(decCssImm(cinst), decRs2(cinst), 2.U(5.W), "b010".U(3.W), "b0100011".U(7.W))),
     C_FSWSP  -> List(stype(decCssImm(cinst), decRs2(cinst), 2.U(5.W), "b010".U(3.W), "b0100011".U(7.W))), // rv32
-    C_SDSP   -> List(c_sdsp_inst) // rv64: C.SDSP → sd rs2, offset(x2)
+    C_SDSP   -> List(c_sdsp_inst) // rv64: C.SDSP -> sd rs2, offset(x2)
   )
   val var_decoder = ListLookup(io.cinst, List(0.U), op_table)
 
@@ -284,20 +284,20 @@ class ysyx_idu_decoder_c extends Module with Instr {
   val funct3   = cinst(15, 13)
 
   val fixed_inst = MuxCase(raw_inst, Seq(
-    // Q0, funct3=011: RV32→C.FLW(unsupported), RV64→C.LD
+    // Q0, funct3=011: RV32->C.FLW(unsupported), RV64->C.LD
     (quadrant === "b00".U && funct3 === "b011".U) ->
       Mux(is_rv64, c_ld_inst, 0.U(32.W)),
-    // Q0, funct3=111: RV32→C.FSW(unsupported), RV64→C.SD
+    // Q0, funct3=111: RV32->C.FSW(unsupported), RV64->C.SD
     (quadrant === "b00".U && funct3 === "b111".U) ->
       Mux(is_rv64, c_sd_inst, 0.U(32.W)),
-    // Q1, funct3=001: RV32→C.JAL, RV64→C.ADDIW
+    // Q1, funct3=001: RV32->C.JAL, RV64->C.ADDIW
     (quadrant === "b01".U && funct3 === "b001".U) ->
       Mux(is_rv64, c_addiw_inst,
         jtype(decCjImm(cinst), 1.U(5.W), "b1101111".U(7.W))),
-    // Q2, funct3=011: RV32→C.FLWSP(unsupported), RV64→C.LDSP
+    // Q2, funct3=011: RV32->C.FLWSP(unsupported), RV64->C.LDSP
     (quadrant === "b10".U && funct3 === "b011".U) ->
       Mux(is_rv64, c_ldsp_inst, 0.U(32.W)),
-    // Q2, funct3=111: RV32→C.FSWSP(sw), RV64→C.SDSP
+    // Q2, funct3=111: RV32->C.FSWSP(sw), RV64->C.SDSP
     (quadrant === "b10".U && funct3 === "b111".U) ->
       Mux(is_rv64, c_sdsp_inst,
         stype(decCssImm(cinst), decRs2(cinst), 2.U(5.W), "b010".U(3.W), "b0100011".U(7.W)))

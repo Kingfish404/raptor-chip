@@ -64,7 +64,7 @@ static void plic_update_mip(void)
         }
         if (ctx == 0)
         {
-            // Context 0 → MEIP (bit 11 of MIP)
+            // Context 0 -> MEIP (bit 11 of MIP)
             if (has_irq)
                 cpu.sr[CSR_MIP] |= (1u << 11);
             else
@@ -72,7 +72,7 @@ static void plic_update_mip(void)
         }
         else
         {
-            // Context 1 → SEIP (bit 9 of MIP and SIP)
+            // Context 1 -> SEIP (bit 9 of MIP and SIP)
             if (has_irq)
             {
                 cpu.sr[CSR_MIP] |= (1u << 9);

@@ -20,6 +20,7 @@ extern TOP_NAME *top;
 extern VerilatedFstC *tfp;
 
 extern void (*ref_difftest_exec)(uint64_t n);
+extern long long int max_timeout;
 
 #ifdef CONFIG_ITRACE
 static char iringbuf[MAX_IRING_SIZE][128] = {};
@@ -146,6 +147,7 @@ void cpu_exec(uint64_t n)
   uint64_t now = get_time();
   uint64_t cur_inst_cycle = 0;
   uint64_t progress_cycle = 0;
+  uint64_t timeout_us = (max_timeout > 0) ? (uint64_t)max_timeout * 1000000 : 0;
   while (!contextp->gotFinish() && npc.state == NPC_RUNNING && n-- > 0)
   {
     cpu_exec_one_cycle();
@@ -161,9 +163,21 @@ void cpu_exec(uint64_t n)
     progress_cycle++;
     if (progress_cycle % 10000000 == 0)
     {
-      Log("progress: %llu cycles, %llu insts, pc=" FMT_WORD_NO_PREFIX,
+      Log("progress: %016llu cycles, %016llu insts, pc=" FMT_WORD_NO_PREFIX,
           (unsigned long long)progress_cycle, (unsigned long long)pmu.instr_cnt,
           (word_t)(*npc.pc));
+    }
+    if (timeout_us && (progress_cycle % 1000000 == 0))
+    {
+      uint64_t elapsed = get_time() - now;
+      if (elapsed > timeout_us)
+      {
+        Log(FMT_RED("Wall-clock timeout (%llds) exceeded at pc: " FMT_WORD_NO_PREFIX ", %llu cycles, %llu insts."),
+            max_timeout, (word_t)(*npc.pc),
+            (unsigned long long)progress_cycle, (unsigned long long)pmu.instr_cnt);
+        npc.state = NPC_ABORT;
+        break;
+      }
     }
     if (cur_inst_cycle > 0x4ffff)
     {
