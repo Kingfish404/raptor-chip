@@ -223,7 +223,7 @@ module ysyx_npc_soc #(
     (8'h00)
   );
 
-  localparam [XLEN-1:0] ALIGN_MASK = ~(XLEN/8 - 1);
+  localparam logic [XLEN-1:0] AlignMask = ~(XLEN / 8 - 1);
 
   always @(posedge clock) begin
     if (reset) begin
@@ -235,9 +235,9 @@ module ysyx_npc_soc #(
         WIDLE: begin
           if (awvalid) begin
             if (wvalid) begin
-              for (int i = 0; i < XLEN/8; i++) begin
+              for (int i = 0; i < XLEN / 8; i++) begin
                 if (wstrb[i]) begin
-                  `YSYX_DPI_C_PMEM_WRITE((awaddr & ALIGN_MASK) + i, {wdata >> (i*8)}[XLEN-1:0], 1);
+                  `YSYX_DPI_C_PMEM_WRITE((awaddr & AlignMask) + i, {wdata >> (i*8)}[XLEN-1:0], 1);
                 end
               end
             end
@@ -251,9 +251,9 @@ module ysyx_npc_soc #(
         end
         WDWRITE: begin
           if (wvalid) begin
-            for (int i = 0; i < XLEN/8; i++) begin
+            for (int i = 0; i < XLEN / 8; i++) begin
               if (wstrb[i]) begin
-                `YSYX_DPI_C_PMEM_WRITE((awaddr_buf & ALIGN_MASK) + i, {wdata >> (i*8)}[XLEN-1:0], 1);
+                `YSYX_DPI_C_PMEM_WRITE((awaddr_buf & AlignMask) + i, {wdata >> (i*8)}[XLEN-1:0], 1);
               end
             end
           end

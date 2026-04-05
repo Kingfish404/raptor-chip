@@ -379,3 +379,12 @@ endmodule
 // verilator lint_on UNDRIVEN
 // verilator lint_on DECLFILENAME
 // verilator lint_on UNUSEDSIGNAL
+
+// placeholder for top-level module, which can be used for testing or integration
+module wrap_rnp_soc #(
+) (
+    input clock,
+    input reset
+);
+
+endmodule

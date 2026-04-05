@@ -122,6 +122,11 @@ module ysyx_bus #(
     if (reset) begin
       state_load <= LD_A;
       l1d_load_is_mmio <= 1'b0;
+      arsize <= 3'b000;
+      arburst <= 1'b0;
+      bus_araddr <= '0;
+      arid <= '0;
+      state_load_source <= L1I;
     end else begin
       unique case (state_load)
         LD_A: begin
@@ -200,9 +205,9 @@ module ysyx_bus #(
   assign axi_awaddr = l1d_bus.awvalid ? l1d_bus.awaddr : 'h0;
   assign axi_awvalid = (state_store == LS_S_A) && (l1d_bus.awvalid);
 
-  localparam ADDR_LO_BITS = $clog2(XLEN / 8);  // 2 for RV32, 3 for RV64
-  logic [ADDR_LO_BITS-1:0] awaddr_lo;
-  assign awaddr_lo  = axi_awaddr[ADDR_LO_BITS-1:0];
+  localparam logic [31:0] ADDR2BITS = $clog2(XLEN / 8);  // 2 for RV32, 3 for RV64
+  logic [ADDR2BITS-1:0] awaddr_lo;
+  assign awaddr_lo  = axi_awaddr[ADDR2BITS-1:0];
   assign axi_wdata  = l1d_bus.wdata << (awaddr_lo * 8);
   assign axi_wvalid = ((l1d_bus.wvalid) && !write_done);
   assign axi_wlast  = axi_wvalid && axi_wready;

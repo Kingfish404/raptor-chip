@@ -71,7 +71,7 @@ module axi2rnp #(
   assign rnp_arvalid = axi_arvalid;
   // assign axi_arready = rnp_arready;
 
-  assign axi_rid = 0;
+  assign axi_rid = axi_arid;
   assign axi_rlast = rnp_rvalid && axi_rready;
   assign axi_rdata = rnp_mdata;
   assign axi_rresp = 0;
@@ -83,10 +83,12 @@ module axi2rnp #(
 
 
   assign rnp_wstrb = axi_wstrb;
-  assign rnp_wvalid = axi_wvalid;
+  // Suppress W when AW is active: rnp_cdata carries the address during AW phase,
+  // so forwarding wvalid would cause rnp2axi to see the address as write data.
+  assign rnp_wvalid = axi_wvalid && !axi_awvalid;
   // assign axi_wready = rnp_wready;
 
-  assign axi_bid = 0;
+  assign axi_bid = axi_awid;
   assign axi_bresp = 0;
   // assign axi_bvalid = rnp_bvalid;
   assign rnp_bready = axi_bready;
@@ -319,5 +321,14 @@ module rnp2axi #(
       end
     endcase
   end
+
+endmodule
+
+// placeholder for top-level module, which can be used for testing or integration
+module wrap_rnp #(
+) (
+    input clk,
+    input reset
+);
 
 endmodule
