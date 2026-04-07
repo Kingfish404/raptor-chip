@@ -112,8 +112,7 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
       EBREAK -> BitPat("b" + "00" + "0???0"), // N
 
     // format: off
-   FENCE____ -> BitPat("b" + "00" + "0???0"), // N
-   FENCE_TSO -> BitPat("b" + "00" + "0???0"), // N
+   FENCE____ -> BitPat("b" + "00" + "0???0"), // N (also covers FENCE.TSO)
    FENCE_I__ -> BitPat("b" + "00" + "0???0"), // N
    FENCE_TIM -> BitPat("b" + "00" + "0???0"), // N
 
@@ -280,8 +279,7 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
       EBREAK -> BitPat("b" + "000 0  0  1  0  1"), // N
 
     // format: off
-   FENCE____ -> BitPat("b" + "000 0  0  0  0  1"), // N
-   FENCE_TSO -> BitPat("b" + "000 0  0  0  0  1"), // N
+   FENCE____ -> BitPat("b" + "000 0  0  0  0  1"), // N (also covers FENCE.TSO)
    FENCE_I__ -> BitPat("b" + "000 0  0  0  0  1"), // N
    FENCE_TIM -> BitPat("b" + "000 0  0  0  0  1"), // N
 
@@ -315,8 +313,7 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
 
   val fence_table   = TruthTable(
     Map( //                      ftime iflush
-      FENCE____ -> BitPat("b" + "0" + "0"), // N
-      FENCE_TSO -> BitPat("b" + "0" + "0"), // N
+      FENCE____ -> BitPat("b" + "0" + "0"), // N (also covers FENCE.TSO)
       FENCE_I__ -> BitPat("b" + "0" + "1"), // N
       FENCE_TIM -> BitPat("b" + "1" + "1"), // N
       SFENCE_VM -> BitPat("b" + "1" + "1")  // N — flush TLBs + I-cache
@@ -379,8 +376,7 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
     ECALL_ -> List(0.U, MCAUSE,   0.U,   0.U, 0.U, 0.U), // N
     EBREAK -> List(0.U,    0.U,   0.U,   0.U, 0.U, 0.U), // N
 
-    FENCE____ -> List(0.U, 0.U,   0.U,   0.U, 0.U, 0.U), // N
-    FENCE_TSO -> List(0.U, 0.U,   0.U,   0.U, 0.U, 0.U), // N
+    FENCE____ -> List(0.U, 0.U,   0.U,   0.U, 0.U, 0.U), // N (also covers FENCE.TSO)
     FENCE_I__ -> List(0.U, 0.U,   0.U,   0.U, 0.U, 0.U), // N
     FENCE_TIM -> List(0.U, 0.U,   0.U,   0.U, 0.U, 0.U), // N
 

@@ -1,0 +1,6 @@
+*.*
+*
+!*.sby
+!*.sv
+!Makefile
+!.gitignore

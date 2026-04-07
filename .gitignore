@@ -1,34 +1,46 @@
-*.*
+# ==============================================================================
+# Strategy: deny-all + whitelist.
+# All files ignored by default; directories allowed for traversal.
+# Self-contained subdirs (nemu, nsim, abstract-machine, am-kernels,
+# nanos-lite, navy-apps, fpga/) have their own deny-all .gitignore.
+# Non-self-contained subdirs are whitelisted below.
+# ==============================================================================
+
+# Ignore all files, allow directory traversal
 *
-.DS_Store
 !*/
-!/nemu/*
-!/nexus-am/*
-!/nanos-lite/*
-!/navy-apps/*
-!/nsim/*
-!/rtl_*/*
-!/docs/*
-!/linux/*
+
+# ---- Root-level files ----
+!.gitignore
 !Makefile
 !README.md
-!.gitignore
-!init.sh
-!setup.sh
 !env.sh
-!/.github/*
-!/.github/*/*
-!/.github/*/*/*
-!Dockerfile
+!setup.sh
+
+# ---- GitHub CI/CD ----
+!/.github/**
+/.github/*.md
+
+# ---- HDL sources (global whitelist for rtl_sv/) ----
 !*.v
 !*.vh
 !*.sv
 !*.svh
-/rtl_*/generated
-code
-build
-reference
 
-!/fpga
+# ---- Non-self-contained directories (need root whitelist) ----
+!/docs/*
+!/linux/*
+!/rtl_scala/*
+!/rtl_sv/*
+!/verify/*
 
-/third_party
+# ---- Re-ignore: generated, third-party, synthesis, local config ----
+/rtl_sv/generated/
+/rtl_scala/target/
+/third_party/
+/reference/
+/syn/
+Makefile.local
+
+# ---- OS artifacts ----
+.DS_Store

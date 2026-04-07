@@ -49,6 +49,7 @@ VERILATOR_FLAG =--prof-c --prof-cfuncs \
 	--public \
 	--autoflush --timescale "1ns/1ns" --no-timing \
 	-Wno-WIDTHEXPAND -Wno-WIDTHTRUNC # -Wall -Wno-DECLFILENAME -Wno-UNUSED
+VERILATOR_EXTRA ?= ## Extra Verilator CLI flags (e.g. --coverage-line --coverage-toggle)
 CXXFLAGS = -Wall -Werror \
 	-Wno-bool-operation -Wno-implicit-fallthrough -Wno-macro-redefined \
 	-Wno-parentheses-equality -Wno-unused-variable \
@@ -89,8 +90,10 @@ $(info [nsim] Config changed, rebuilding...)
 endif
 $(shell printf '%s' '$(CONFIG_SIG)' > $(CONFIG_STAMP))
 
-VSRCS = \
-	$(shell find $(VSRC_PATH) -name "*.sv") \
+VSRCS_RAW = $(shell find $(VSRC_PATH) -name "*.sv")
+# Ensure ysyx_pkg.sv comes first (DC requires package before import)
+VSRCS_PKG = $(filter %/ysyx_pkg.sv, $(VSRCS_RAW))
+VSRCS = $(VSRCS_PKG) $(filter-out %/ysyx_pkg.sv, $(VSRCS_RAW)) \
 	$(SOC_SOURCE)
 VHSRCS = $(shell find $(VSRC_PATH) -name "*.svh")
 CSRCS = $(shell find $(abspath ./csrc) -name "*.c")
@@ -121,7 +124,7 @@ INC_PATH += $(abspath $(VSRC_PATH)/include/dpic)
 endif
 
 $(BIN): $(VSRCS) $(VHSRCS) $(CCSRCS) $(CHSRCS) $(NVBOARD_ARCHIVE)
-	$(VERILATOR) --trace-fst -cc --exe --build -j $(shell nproc) $(VERILATOR_FLAG) $^ \
+	$(VERILATOR) --trace-fst -cc --exe --build -j $(shell nproc) $(VERILATOR_FLAG) $(VERILATOR_EXTRA) $^ \
 		--threads 1 --trace-threads 1 \
 		--top-module $(VTARGET) \
 		$(addprefix -CFLAGS , $(CXXFLAGS)) $(addprefix -LDFLAGS , $(LDFLAGS)) \
@@ -170,25 +173,35 @@ pack: $(VSRCS) $(VHSRCS) ## Pack all SV files into one
 	verilator -E -P $(addprefix -I, $(INC_PATH)) $(VSRCS) > $(BUILD_DIR)/ysyx_pack.sv
 	verilator -E -P --dump-defines $(addprefix -I, $(INC_PATH)) $(VSRCS) > $(BUILD_DIR)/ysyx_pack.svh
 
+STA_PLATFORM ?= nangate45 ## STA platform: nangate45, asap7
+
 sta: pack ## Static timing analysis
 	echo $(MAKECMDGOALS)
 	if [ ! -d $(YOSYS_OPENSTA) ]; then make YOSYS_OPENSTA; fi
 	make -C $(YOSYS_OPENSTA) sta show \
 		DESIGN=ysyx \
+		PLATFORM=$(STA_PLATFORM) \
 		RTL_FILES="$(abspath $(BUILD_DIR)/ysyx_pack.sv)"
 
 sta-detail: pack ## Detailed static timing analysis
 	make -C $(YOSYS_OPENSTA) sta-detail show \
 		DESIGN=ysyx \
+		PLATFORM=$(STA_PLATFORM) \
 		RTL_FILES="$(abspath $(BUILD_DIR)/ysyx_pack.sv)"
 
 sta_show: pack ## Show timing analysis results
 	make -C $(YOSYS_OPENSTA) show \
 		DESIGN=ysyx \
+		PLATFORM=$(STA_PLATFORM) \
 		RTL_FILES="$(abspath $(BUILD_DIR)/ysyx_pack.sv)"
 
 lint: ## Lint RTL with Verilator
 	$(VERILATOR) --lint-only -Wall $(VSRCS) $(INCFLAGS) $(VFLAGS) --top-module $(VTARGET)
+
+VSRCS_LINT = $(filter-out $(abspath $(VSRC_PATH)/generated/%) $(abspath $(SOC_HOME)/perip/%.v), $(VSRCS))
+
+lint-verible: ## Lint RTL with Verible
+	verible-verilog-lint $(VSRCS_LINT)
 
 test:
 	echo $(CXXFLAGS)

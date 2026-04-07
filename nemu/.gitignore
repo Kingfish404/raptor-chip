@@ -1,13 +1,17 @@
-*.*
+# Deny all, whitelist sources
 *
 !*/
+
+# Source & config files
 !Makefile
-!*.mk
+!Kconfig
+!README.md
+!.gitignore
 !*.[cSh]
 !*.cc
-!.gitignore
+!*.mk
 !/sim/*
-!README.md
-!Kconfig
+
+# Build artifacts (Kconfig generated)
 include/config
 include/generated

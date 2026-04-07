@@ -1,5 +1,3 @@
-`include "ysyx.svh"
-
 module formal_exu_mul #(
     parameter bit [7:0] XLEN = `YSYX_XLEN
 ) (
@@ -14,42 +12,42 @@ module formal_exu_mul #(
 
     input reset
 );
-  wire [XLEN-1:0] s1 = in_a;
-  wire [XLEN-1:0] s2 = in_b;
-
   ysyx_exu_mul mul (
       .clock(clock),
-      .in_a(s1),
-      .in_b(s2),
+      .in_a(in_a),
+      .in_b(in_b),
       .in_op(in_op),
+      .in_word(1'b0),
       .in_valid(in_valid),
       .out_r(out_r),
       .out_valid(out_valid)
   );
 
   reg start = 0;
-  reg [XLEN-1:0] s1 = 0, s2 = 0, r = 0;
+  reg [XLEN-1:0] ref_s1 = 0, ref_s2 = 0, r = 0;
   reg [4:0] op = 0;
 
-  assign mulh = {{32{s1[31]}}, s1} * {{32{s2[31]}}, s2};
-  assign muls = {{32{s1[31]}}, s1} * {{32'b0}, s2};
-  assign mulu = {({{32'b0}, s1}) * ({{32'b0}, s2})};
+  wire [2*XLEN-1:0] mulh = {{XLEN{in_a[XLEN-1]}}, in_a} * {{XLEN{in_b[XLEN-1]}}, in_b};
+  wire [2*XLEN-1:0] muls = {{XLEN{in_a[XLEN-1]}}, in_a} * {{XLEN{1'b0}}, in_b};
+  wire [2*XLEN-1:0] mulu = {{XLEN{1'b0}}, in_a} * {{XLEN{1'b0}}, in_b};
 
   always @(posedge clock) begin
     if (in_valid) begin
       op <= in_op;
       start <= 1;
+      ref_s1 <= in_a;
+      ref_s2 <= in_b;
       unique case (in_op)
         // RV32M
         // verilog_format: off
-      `YSYX_ALU_MUL___: begin r <= s1 * s2;      end
-      `YSYX_ALU_MULH__: begin r <= mulh[63:32];  end
-      `YSYX_ALU_MULHSU: begin r <= muls[63:32];  end
-      `YSYX_ALU_MULHU_: begin r <= mulu[63:32];  end
-      `YSYX_ALU_DIV___: begin r <= s2 != 0 ? $signed($signed(s1) / $signed(s2)): -1; end
-      `YSYX_ALU_DIVU__: begin r <= s2 != 0 ? (s1) / (s2) : -1; end
-      `YSYX_ALU_REM___: begin r <= s2 != 0 ? $signed($signed(s1) % $signed(s2)): s1; end
-      `YSYX_ALU_REMU__: begin r <= s2 != 0 ? (s1) % (s2) : s1; end
+      `YSYX_ALU_MUL___: begin r <= in_a * in_b;      end
+      `YSYX_ALU_MULH__: begin r <= mulh[2*XLEN-1:XLEN];  end
+      `YSYX_ALU_MULHSU: begin r <= muls[2*XLEN-1:XLEN];  end
+      `YSYX_ALU_MULHU_: begin r <= mulu[2*XLEN-1:XLEN];  end
+      `YSYX_ALU_DIV___: begin r <= in_b != 0 ? $signed($signed(in_a) / $signed(in_b)): -1; end
+      `YSYX_ALU_DIVU__: begin r <= in_b != 0 ? (in_a) / (in_b) : -1; end
+      `YSYX_ALU_REM___: begin r <= in_b != 0 ? $signed($signed(in_a) % $signed(in_b)): in_a; end
+      `YSYX_ALU_REMU__: begin r <= in_b != 0 ? (in_a) % (in_b) : in_a; end
                default: begin r = 0; end
         // verilog_format: on
       endcase

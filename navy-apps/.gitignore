@@ -1,16 +1,17 @@
-*.*
+# Deny all, whitelist sources
 *
-!*.S
 !*/
+
+# Source & config files
+!*.S
+!*.[cSh]
+!*.cpp
 !Makefile
 !README.md
 !.gitignore
-!*.[cSh]
-!*.cpp
 !scripts/**/*.mk
-build/
-repo/
-libs/libc/
+
+# Whitelisted resources
 !/fsimg/share/files/num
 !/fsimg/share/fonts/Courier-*.bdf
 !/fsimg/share/music/little-star.ogg
@@ -18,6 +19,11 @@ libs/libc/
 !/fsimg/share/music/rhythm/Re.ogg
 !/fsimg/share/music/rhythm/Mi.ogg
 !/fsimg/share/music/rhythm/Fa.ogg
+
+# Build artifacts & external repos
+build/
+repo/
+libs/libc/
 !/fsimg/share/music/rhythm/So.ogg
 !/fsimg/share/music/rhythm/La.ogg
 !/fsimg/share/music/rhythm/Si.ogg

@@ -54,8 +54,8 @@ trait Instr {
   def ECALL_ = BitPat("b0000000 00000 00000 000 00000 1110011")
   def EBREAK = BitPat("b0000000 00001 00000 000 00000 1110011")
 
-  def FENCE____ = BitPat("b0000??? ????? 00000 000 00000 0001111")
-  def FENCE_TSO = BitPat("b1000001 10011 00000 000 00000 0011111")
+  def FENCE____ = BitPat("b??????? ????? ????? 000 ????? 0001111")
+  def FENCE_TSO = BitPat("b1000001 10011 00000 000 00000 0001111")
   // Zifencei               imm[11:0]   rs1 func3  rd  opcode
   def FENCE_I__ = BitPat("b??????? ????? ????? 001 ????? 0001111")
   // Zifencetime

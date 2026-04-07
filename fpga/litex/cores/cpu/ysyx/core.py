@@ -19,7 +19,7 @@ from litex.soc.cores.cpu import CPU, CPU_GCC_TRIPLE_RISCV32
 # Variants -----------------------------------------------------------------------------------------
 
 CPU_VARIANTS = {
-    "standard": "bird",
+    "standard": "raptor",
 }
 RISCV_ARCH = "rv32imac_zicntr_zicsr_zifencei"
 
@@ -86,7 +86,7 @@ class ysyx(CPU):
         axi_if = axi.AXIInterface(data_width=32, address_width=32, id_width=4)
         self.periph_buses = [axi_if]
 
-        # Bird Instance.
+        # Raptor Instance.
         # -----------------
         self.cpu_params = dict(
             # Clk / Rst.

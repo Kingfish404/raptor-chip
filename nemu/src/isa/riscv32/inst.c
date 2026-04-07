@@ -254,16 +254,13 @@ static int decode_exec(Decode *s)
   INSTPAT("0000001 ????? ????? 111 ????? 01110 11", remuw, R, R(rd) = SEXT((uint32_t)src1 % (uint32_t)src2, 32));
   INSTPAT_CASE_END(grp_op32)
 
-  INSTPAT_CASE(0b00011, grp_miscmem)                               // MISC-MEM (fence, fence.i, fence.time, pause)
+  INSTPAT_CASE(0b00011, grp_miscmem)                               // MISC-MEM (fence, fence.i, fence.time, fence.tso, pause)
   INSTPAT("0000000 10000 00000 000 00000 00011 11", pause, N, {}); // hint instruction (include in fence)
-  INSTPAT("0000??? ????? 00000 000 00000 00011 11", fence, N, {});
+  INSTPAT("1000001 10011 00000 000 00000 00011 11", fence_tso, N, {}); // fence.tso: inst[6:2]=0b00011, same MISC-MEM group
+  INSTPAT("??????? ????? ????? 000 ????? 00011 11", fence, N, {});
   INSTPAT("??????? ????? ????? 001 ????? 00011 11", fence_i, I, {});
   INSTPAT("0000000 00000 00000 010 00000 00011 11", fence.time, N, {});
   INSTPAT_CASE_END(grp_miscmem)
-
-  INSTPAT_CASE(0b00111, grp_fencetso) // fence.tso (different opcode group)
-  INSTPAT("1000001 10011 00000 000 00000 00111 11", fence_tso, N, {});
-  INSTPAT_CASE_END(grp_fencetso)
 
   INSTPAT_CASE(0b11100, grp_system) // SYSTEM (ecall, ebreak, sfence.vma, mret, sret, wfi, CSRs)
   INSTPAT("0000000 00000 00000 000 00000 11100 11", ecall, N,

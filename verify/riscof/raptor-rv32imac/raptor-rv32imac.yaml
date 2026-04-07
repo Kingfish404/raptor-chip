@@ -1,0 +1,110 @@
+# yaml-language-server: $schema=../../../../external/riscv-unified-db/spec/schemas/config_schema.json
+
+# UDB Architecture Configuration for Raptor Chip — RV32IMAC
+---
+$schema: config_schema.json#
+kind: architecture configuration
+type: fully configured
+name: raptor-rv32imac
+description: Raptor Chip dual-issue OoO RISC-V processor — RV32IMAC_Zicsr_Zifencei
+implemented_extensions:
+  - { name: I, version: "= 2.1" }
+  - { name: M, version: "= 2.0" }
+  - { name: A, version: "= 2.1.0" }
+  - { name: C, version: "= 2.0" }
+  - { name: Zca, version: "= 1.0.0" }
+  - { name: Zicsr, version: "= 2.0" }
+  - { name: Zicntr, version: "= 2.0" }
+  - { name: Zifencei, version: "= 2.0" }
+  - { name: Zaamo, version: "= 1.0.0" }
+  - { name: Zalrsc, version: "= 1.0.0" }
+  - { name: Sm, version: "= 1.12.0" }
+  # Smhpm is a fake extension for UDB purposes, due to be deleted soon.
+  - { name: Smhpm, version: "= 1.12" }
+
+params:
+  # XLEN
+  MXLEN: 32
+  PHYS_ADDR_WIDTH: 32
+
+  # MISA
+  MUTABLE_MISA_M: false
+  MUTABLE_MISA_C: false
+  MUTABLE_MISA_A: false
+  MISA_CSR_IMPLEMENTED: true
+
+  # Endianness
+  M_MODE_ENDIANNESS: little
+
+  # Precise exceptions
+  PRECISE_SYNCHRONOUS_EXCEPTIONS: true
+
+  # Trap/exception behavior
+  TRAP_ON_ECALL_FROM_M: true
+  TRAP_ON_EBREAK: true
+  TRAP_ON_UNIMPLEMENTED_INSTRUCTION: true
+  TRAP_ON_RESERVED_INSTRUCTION: true
+  TRAP_ON_UNIMPLEMENTED_CSR: false
+  TRAP_ON_ILLEGAL_WLRL: false
+
+  # MTVAL reporting
+  REPORT_VA_IN_MTVAL_ON_BREAKPOINT: true
+  REPORT_VA_IN_MTVAL_ON_LOAD_MISALIGNED: true
+  REPORT_VA_IN_MTVAL_ON_STORE_AMO_MISALIGNED: true
+  REPORT_VA_IN_MTVAL_ON_INSTRUCTION_MISALIGNED: true
+  REPORT_VA_IN_MTVAL_ON_LOAD_ACCESS_FAULT: true
+  REPORT_VA_IN_MTVAL_ON_STORE_AMO_ACCESS_FAULT: true
+  REPORT_VA_IN_MTVAL_ON_INSTRUCTION_ACCESS_FAULT: true
+  REPORT_ENCODING_IN_MTVAL_ON_ILLEGAL_INSTRUCTION: true
+  MTVAL_WIDTH: 32
+
+  # Misaligned access
+  MISALIGNED_LDST: false
+  MISALIGNED_AMO: false
+  MISALIGNED_LDST_EXCEPTION_PRIORITY: low
+
+  # A extension
+  LRSC_RESERVATION_STRATEGY: "reserve exactly enough to cover the access"
+  LRSC_FAIL_ON_VA_SYNONYM: false
+  LRSC_MISALIGNED_BEHAVIOR: "always raise misaligned exception"
+  LRSC_FAIL_ON_NON_EXACT_LRSC: false
+
+  # Zicntr
+  TIME_CSR_IMPLEMENTED: true
+
+  # Smhpm — Raptor has no HPM counters; provide minimal config
+  HPM_COUNTER_EN:
+    [
+      false, false, false,
+      false, false, false, false, false, false, false, false,
+      false, false, false, false, false, false, false, false,
+      false, false, false, false, false, false, false, false,
+      false, false, false, false, false,
+    ]
+  HPM_EVENTS: [0]
+  COUNTINHIBIT_EN:
+    [
+      true, false, true,
+      false, false, false, false, false, false, false, false,
+      false, false, false, false, false, false, false, false,
+      false, false, false, false, false, false, false, false,
+      false, false, false, false, false,
+    ]
+
+  # MTVEC
+  MTVEC_ACCESS: rw
+  MTVEC_MODES: [0, 1]
+  MTVEC_BASE_ALIGNMENT_DIRECT: 4
+  MTVEC_BASE_ALIGNMENT_VECTORED: 4
+  MTVEC_ILLEGAL_WRITE_BEHAVIOR: retain
+
+  # Implementation IDs
+  MARCHID_IMPLEMENTED: false
+  MIMPID_IMPLEMENTED: true
+  IMP_ID_VALUE: 0
+  VENDOR_ID_BANK: 0
+  VENDOR_ID_OFFSET: 0
+
+  # Misc
+  CONFIG_PTR_ADDRESS: 0
+  PMA_GRANULARITY: 3

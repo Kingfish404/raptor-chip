@@ -369,11 +369,16 @@ pack: ## Pack all SV files into one
 lint: ## Lint RTL with Verilator
 	$(MAKE) -C $(NSIM_HOME) lint VFLAGS="$(VFLAGS)"
 
+lint-verible: ## Lint RTL with Verible
+	$(MAKE) -C $(NSIM_HOME) lint-verible
+
+STA_PLATFORM ?= nangate45 ## STA platform: nangate45, asap7
+
 sta: ## Static timing analysis
-	$(MAKE) -C $(NSIM_HOME) sta
+	$(MAKE) -C $(NSIM_HOME) sta STA_PLATFORM=$(STA_PLATFORM)
 
 sta-detail: ## Detailed static timing analysis
-	$(MAKE) -C $(NSIM_HOME) sta-detail
+	$(MAKE) -C $(NSIM_HOME) sta-detail STA_PLATFORM=$(STA_PLATFORM)
 
 clean-npc: ## Clean NPC build only
 	$(MAKE) -C $(NSIM_HOME) clean
@@ -382,6 +387,36 @@ clean: ## Clean all build artifacts
 	-$(MAKE) -C $(NEMU_HOME) clean 2>/dev/null || true
 	-$(MAKE) -C $(NSIM_HOME) clean 2>/dev/null || true
 	-$(MAKE) -C $(YSYX_HOME)/rtl_scala clean 2>/dev/null || true
+	-$(MAKE) -C $(YSYX_HOME)/verify clean 2>/dev/null || true
+
+# ============================================================================
+# Verification Suite (verify/)
+# ============================================================================
+VERIFY_HOME := $(YSYX_HOME)/verify
+
+verify-fuzz: ## Random instruction fuzz with difftest
+	$(MAKE) -C $(VERIFY_HOME) fuzz
+
+verify-fuzz-inf: ## Continuous fuzz until Ctrl-C or failure
+	$(MAKE) -C $(VERIFY_HOME) fuzz-inf
+
+verify-fuzz-replay: ## Replay the last failing fuzz-inf batch
+	$(MAKE) -C $(VERIFY_HOME) fuzz-replay
+
+verify-sigtest: ## Signature-based ISA corner-case tests
+	$(MAKE) -C $(VERIFY_HOME) sigtest
+
+verify-riscof: ## RISCOF official compliance tests
+	$(MAKE) -C $(VERIFY_HOME) riscof
+
+verify-coverage: ## Verilator line/toggle coverage
+	$(MAKE) -C $(VERIFY_HOME) coverage
+
+verify-all: ## Run all verification targets
+	$(MAKE) -C $(VERIFY_HOME) all
+
+verify-clean: ## Clean verification artifacts
+	$(MAKE) -C $(VERIFY_HOME) clean
 
 .PHONY: help setup verilog \
 	config-nemu32 config-nemu32-linux config-nemu32-ref config-nemu32-linux-device menuconfig-nemu32 build-nemu32 run-nemu32 run-nemu32-linux run-nemu32-linux-device \
@@ -394,6 +429,13 @@ clean: ## Clean all build artifacts
 	nanos-nemu32 nanos-npc32 \
 	linux-download linux-download-rv32 linux-download-rv64 \
 	linux-boot-nemu32 linux-boot-npc32 linux-boot-nemu32-device linux-boot-nemu64-device \
-	fpga-syn fpga-pnr pack lint sta clean-npc clean
+	fpga-syn fpga-pnr pack lint sta clean-npc clean \
+	verify-fuzz verify-fuzz-inf verify-fuzz-replay verify-sigtest verify-riscof verify-coverage verify-all verify-clean
+
+# ============================================================================
+# Local overrides (private synthesis targets, not tracked by Git)
+# ============================================================================
+# Copy Makefile.local.example → Makefile.local and fill in site-specific values.
+-include Makefile.local
 
 endif # Guard: root-only targets

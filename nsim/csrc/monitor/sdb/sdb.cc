@@ -377,6 +377,14 @@ void engine_free()
     delete tfp;
   }
 
+#if VM_COVERAGE
+  // Persist line/toggle coverage collected during simulation.
+  if (contextp && contextp->coveragep())
+  {
+    contextp->coveragep()->write("coverage.dat");
+  }
+#endif
+
   delete top;
   delete contextp;
 }

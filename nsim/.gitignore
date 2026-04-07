@@ -1,18 +1,20 @@
-*.*
+# Deny all, whitelist sources
 *
-*.dot
-*.vcd
 !*/
+
+# Source & config files
 !Makefile
-!*.mk
+!Kconfig
+!README.md
+!.gitignore
 !*.[cSh]
 !*.cc
 !*.cpp
-!.gitignore
-!README.md
-!Kconfig
+!*.mk
 !configs/*
 !scripts/*.sh
+
+# Build artifacts
 build/
 tmp/
 /obj_dir

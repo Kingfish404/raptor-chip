@@ -1,0 +1,20 @@
+[tasks]
+basic bmc
+basic: default
+
+[options]
+bmc:
+mode bmc
+depth 3
+
+[engines]
+smtbmc
+
+[script]
+plugin -i slang
+read_slang --single-unit -DFORMAL -DYSYX_XLEN=32 -DYSYX_REG_SIZE=32 -DYSYX_REG_LEN=5 -DYSYX_ALU_MUL___=5'b11000 -DYSYX_ALU_MULH__=5'b11001 -DYSYX_ALU_MULHSU=5'b11010 -DYSYX_ALU_MULHU_=5'b11011 -DYSYX_ALU_DIV___=5'b11100 -DYSYX_ALU_DIVU__=5'b11101 -DYSYX_ALU_REM___=5'b11110 -DYSYX_ALU_REMU__=5'b11111 formal_exu_mul.sv ysyx_pack.sv
+prep -top formal_exu_mul
+
+[files]
+formal_exu_mul.sv
+ysyx_pack.sv ./../../nsim/build/ysyx_pack.sv

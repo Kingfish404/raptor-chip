@@ -1,9 +1,11 @@
-*.*
+# Deny all, whitelist sources
 *
-!*.S
 !*/
-!Makefile*
+
+# Source & config files
+!*.S
 !*.[cSh]
-!.gitignore
+!Makefile*
 !README.md
+!.gitignore
 !resources/logo.txt

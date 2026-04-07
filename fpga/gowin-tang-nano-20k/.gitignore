@@ -1,20 +1,24 @@
-/impl
-/.mypy_cache
-/__pycache__
-*.vcd
-*.gprj.user
-*.log
-/build
+# ---- Whitelist sources ----
 !/src/*.v
-!*.cc
 !/src/gowin_rpll/*
 !/app/*
-ysyx.v
-*.svh
-*.gtkw
-
+!*.cc
 !*.py
 !*.cst
 !*.gprj
 !*.md
 !*.lushay.json
+
+# ---- Build artifacts ----
+/impl/
+/build/
+ysyx.v
+*.vcd
+*.gprj.user
+*.log
+*.gtkw
+*.svh
+
+# ---- Python cache ----
+/.mypy_cache/
+/__pycache__/
