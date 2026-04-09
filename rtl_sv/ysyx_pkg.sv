@@ -2,13 +2,13 @@
 package ysyx_pkg;
   `include "ysyx.svh"
 
-  parameter int XLEN = `YSYX_XLEN;
+  localparam int XLEN = `YSYX_XLEN;
 
-  parameter unsigned RNUM = `YSYX_REG_SIZE;
-  parameter unsigned RLEN = `YSYX_REG_LEN;
+  localparam unsigned RNUM = `YSYX_REG_SIZE;
+  localparam unsigned RLEN = `YSYX_REG_LEN;
 
-  parameter unsigned PNUM = `YSYX_PHY_SIZE;
-  parameter unsigned PLEN = `YSYX_PHY_LEN;
+  localparam unsigned PNUM = `YSYX_PHY_SIZE;
+  localparam unsigned PLEN = `YSYX_PHY_LEN;
 
   typedef struct packed {
     logic       c;

@@ -5,7 +5,7 @@
 module ysyx_csr #(
     parameter bit [7:0] XLEN = `YSYX_XLEN,
     parameter bit [7:0] R_W = 12,
-    parameter bit [7:0] REG_W = 5,
+    parameter bit [7:0] REG_W = 6,
     parameter bit [XLEN-1:0] RESET_VAL = 0
 ) (
     input clock,
@@ -49,6 +49,8 @@ module ysyx_csr #(
 
     MCYCLE_,
     MCYCLEH,
+    MINSTRET,
+    MINSTRETH,
     TIME___,
     TIMEH__,
 
@@ -59,7 +61,7 @@ module ysyx_csr #(
   } csr_t;
 
   logic [1:0] priv_mode;
-  logic [XLEN-1:0] csr[32];
+  logic [XLEN-1:0] csr[64];
   logic mstatus_mie;
   csr_t waddr_reg, raddr_reg;
   logic [R_W-1:0] raddr;
@@ -73,27 +75,29 @@ module ysyx_csr #(
   assign raddr = exu_csr.raddr;
   always_comb begin
     case (rou_csr.csr_addr)
-      `YSYX_CSR_SSTATUS:  waddr_reg = SSTATUS;
-      `YSYX_CSR_SIE____:  waddr_reg = SIE____;
-      `YSYX_CSR_STVEC__:  waddr_reg = STVEC__;
-      `YSYX_CSR_SCOUNTE:  waddr_reg = SCOUNTE;
-      `YSYX_CSR_SSCRATC:  waddr_reg = SSCRATC;
-      `YSYX_CSR_SEPC___:  waddr_reg = SEPC___;
-      `YSYX_CSR_SCAUSE_:  waddr_reg = SCAUSE_;
-      `YSYX_CSR_STVAL__:  waddr_reg = STVAL__;
-      `YSYX_CSR_SIP____:  waddr_reg = SIP____;
-      `YSYX_CSR_SATP___:  waddr_reg = SATP___;
-      `YSYX_CSR_MSTATUS:  waddr_reg = MSTATUS;
-      `YSYX_CSR_MEDELEG:  waddr_reg = MEDELEG;
-      `YSYX_CSR_MIDELEG:  waddr_reg = MIDELEG;
-      `YSYX_CSR_MIE____:  waddr_reg = MIE____;
-      `YSYX_CSR_MTVEC__:  waddr_reg = MTVEC__;
-      `YSYX_CSR_MSCRATCH: waddr_reg = MSCRATCH;
-      `YSYX_CSR_MEPC___:  waddr_reg = MEPC___;
-      `YSYX_CSR_MCAUSE_:  waddr_reg = MCAUSE_;
-      `YSYX_CSR_MTVAL__:  waddr_reg = MTVAL__;
-      `YSYX_CSR_MIP____:  waddr_reg = MIP____;
-      default:            waddr_reg = MNONE__;
+      `YSYX_CSR_SSTATUS:   waddr_reg = SSTATUS;
+      `YSYX_CSR_SIE____:   waddr_reg = SIE____;
+      `YSYX_CSR_STVEC__:   waddr_reg = STVEC__;
+      `YSYX_CSR_SCOUNTE:   waddr_reg = SCOUNTE;
+      `YSYX_CSR_SSCRATC:   waddr_reg = SSCRATC;
+      `YSYX_CSR_SEPC___:   waddr_reg = SEPC___;
+      `YSYX_CSR_SCAUSE_:   waddr_reg = SCAUSE_;
+      `YSYX_CSR_STVAL__:   waddr_reg = STVAL__;
+      `YSYX_CSR_SIP____:   waddr_reg = SIP____;
+      `YSYX_CSR_SATP___:   waddr_reg = SATP___;
+      `YSYX_CSR_MSTATUS:   waddr_reg = MSTATUS;
+      `YSYX_CSR_MEDELEG:   waddr_reg = MEDELEG;
+      `YSYX_CSR_MIDELEG:   waddr_reg = MIDELEG;
+      `YSYX_CSR_MIE____:   waddr_reg = MIE____;
+      `YSYX_CSR_MTVEC__:   waddr_reg = MTVEC__;
+      `YSYX_CSR_MSCRATCH:  waddr_reg = MSCRATCH;
+      `YSYX_CSR_MEPC___:   waddr_reg = MEPC___;
+      `YSYX_CSR_MCAUSE_:   waddr_reg = MCAUSE_;
+      `YSYX_CSR_MTVAL__:   waddr_reg = MTVAL__;
+      `YSYX_CSR_MIP____:   waddr_reg = MIP____;
+      `YSYX_CSR_MINSTRET:  waddr_reg = MINSTRET;
+      `YSYX_CSR_MINSTRETH: waddr_reg = MINSTRETH;
+      default:             waddr_reg = MNONE__;
     endcase
   end
   always_comb begin
@@ -124,6 +128,10 @@ module ysyx_csr #(
       `YSYX_CSR_CYCLE__:   raddr_reg = MCYCLE_;
       `YSYX_CSR_TIME___:   raddr_reg = TIME___;
       `YSYX_CSR_TIMEH__:   raddr_reg = TIMEH__;
+      `YSYX_CSR_MINSTRET:  raddr_reg = MINSTRET;
+      `YSYX_CSR_MINSTRETH: raddr_reg = MINSTRETH;
+      `YSYX_CSR_INSTRET_:  raddr_reg = MINSTRET;
+      `YSYX_CSR_INSTRETH:  raddr_reg = MINSTRETH;
       `YSYX_CSR_MVENDORID: raddr_reg = MVENDORID;
       `YSYX_CSR_MARCHID__: raddr_reg = MARCHID;
       `YSYX_CSR_IMPID____: raddr_reg = IMPID__;
@@ -159,6 +167,8 @@ module ysyx_csr #(
       MCYCLEH:   exu_csr.rdata = csr[MCYCLEH];
       TIME___:   exu_csr.rdata = csr[TIME___];
       TIMEH__:   exu_csr.rdata = csr[TIMEH__];
+      MINSTRET:  exu_csr.rdata = csr[MINSTRET];
+      MINSTRETH: exu_csr.rdata = csr[MINSTRETH];
       MVENDORID: exu_csr.rdata = 'h79737978;
       MARCHID:   exu_csr.rdata = 'h015fde77;
       IMPID__:   exu_csr.rdata = '0;
@@ -218,6 +228,8 @@ module ysyx_csr #(
       csr[MSTATUS] <= RESET_VAL;
       csr[TIME___] <= RESET_VAL;
       csr[TIMEH__] <= RESET_VAL;
+      csr[MINSTRET] <= RESET_VAL;
+      csr[MINSTRETH] <= RESET_VAL;
     end else begin
       csr[TIME___] <= csr[TIME___] + 1;
       if (csr[TIME___] == ~'h0) begin
@@ -226,6 +238,10 @@ module ysyx_csr #(
       csr[MCYCLE_] <= csr[MCYCLE_] + 1;
       if (csr[MCYCLE_] == ~'h0) begin
         csr[MCYCLEH] <= csr[MCYCLEH] + 1;
+      end
+      csr[MINSTRET] <= csr[MINSTRET] + XLEN'(rou_csr.retire_a) + XLEN'(rou_csr.retire_b);
+      if (csr[MINSTRET] + XLEN'(rou_csr.retire_a) + XLEN'(rou_csr.retire_b) < csr[MINSTRET]) begin
+        csr[MINSTRETH] <= csr[MINSTRETH] + 1;
       end
       if (rou_csr.valid) begin
         if (rou_csr.csr_wen) begin

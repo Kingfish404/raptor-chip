@@ -45,7 +45,7 @@ raptor-chip/
 |   +-- ysyx_pkg.sv       # Types: uop_t, prd_t, rob_entry_t, rob_state_t
 |   +-- ysyx.sv            # Top-level core (pure wiring, instantiates all stages + PRF)
 |   +-- frontend/         # IFU, IDU (RVC + csr_addr_valid), BPU (PHT/BTB/GHR/RSB), CSR* (M/S-mode)
-|   +-- backend/          # RNU (RNQ + freelist + maptable), PRF (2R/2W), ROU (UOQ + ROB), EXU (RS + IOQ + ALU + MUL), CMU
+|   +-- backend/          # RNU (RNQ + freelist + maptable), PRF (4R/2W), ROU (UOQ + ROB), EXU (RS + IOQ + ALU + MUL), CMU
 |   +-- memory/           # LSU (STQ + SQ), L1I, L1D (banked SRAM, RMW), TLB (reusable), PTW (Sv32, reusable), BUS (AXI4), CLINT
 |   +-- generated/        # Chisel-generated decoders
 |   # *CSR lives in frontend/ on disk but architecturally belongs to the backend

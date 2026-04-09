@@ -17,34 +17,35 @@ module ysyx_l1i_tagmem #(
     input logic reset,
 
     // Combinational read — hit outputs available same cycle
-    input  logic [L1I_LEN-1:0]      addr_idx,
+    input  logic [     L1I_LEN-1:0] addr_idx,
     input  logic [L1I_LINE_LEN-1:0] addr_offset,
-    input  logic [TAG_W-1:0]        addr_tag,
-    input  logic [L1I_LEN-1:0]      addr_idx_next,
+    input  logic [       TAG_W-1:0] addr_tag,
+    input  logic [     L1I_LEN-1:0] addr_idx_next,
     input  logic [L1I_LINE_LEN-1:0] addr_offset_next,
-    input  logic [TAG_W-1:0]        addr_tag_next,
-    output logic                     hit,
-    output logic                     hit_next,
+    input  logic [       TAG_W-1:0] addr_tag_next,
+    output logic                    hit,
+    output logic                    hit_next,
 
     // Write port: tag fill from bus
-    input  logic                    wen,
-    input  logic [L1I_LEN-1:0]     waddr_idx,
-    input  logic [L1I_LINE_LEN-1:0] waddr_offset,
-    input  logic [TAG_W-1:0]       wtag,
+    input logic                    wen,
+    input logic [     L1I_LEN-1:0] waddr_idx,
+    input logic [L1I_LINE_LEN-1:0] waddr_offset,
+    input logic [       TAG_W-1:0] wtag,
 
     // Valid set (one-hot per fill when IFQ drains)
-    input  logic                    valid_set,
-    input  logic [L1I_LEN-1:0]     valid_set_idx,
+    input logic               valid_set,
+    input logic [L1I_LEN-1:0] valid_set_idx,
 
     // Bulk invalidate
-    input  logic                    inv
+    input logic inv
 );
   logic [TAG_W-1:0] tags[L1I_SIZE][L1I_LINE_SIZE];
   logic [L1I_SIZE-1:0] valid;
 
   // Combinational hit — same semantics as inline arrays
-  assign hit      = valid[addr_idx]      && (tags[addr_idx][addr_offset]           == addr_tag);
-  assign hit_next = valid[addr_idx_next] && (tags[addr_idx_next][addr_offset_next] == addr_tag_next);
+  assign hit = (valid[addr_idx] && (tags[addr_idx][addr_offset] == addr_tag));
+  assign hit_next = (valid[addr_idx_next]
+    && (tags[addr_idx_next][addr_offset_next] == addr_tag_next));
 
   always @(posedge clock) begin
     if (reset) begin

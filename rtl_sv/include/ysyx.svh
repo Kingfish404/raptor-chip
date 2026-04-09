@@ -148,10 +148,17 @@
 `define YSYX_CSR_MIP____ 'h344
 
 `define YSYX_CSR_MCYCLE_ 'hb00
+`define YSYX_CSR_MINSTRET 'hb02
 `define YSYX_CSR_MCYCLEH 'hb80
+`define YSYX_CSR_MINSTRETH 'hb82
+
 `define YSYX_CSR_CYCLE__ 'hc00
 `define YSYX_CSR_TIME___ 'hc01
+`define YSYX_CSR_INSTRET_ 'hc02
+
+`define YSYX_CSR_CYCLEH_ 'hc80
 `define YSYX_CSR_TIMEH__ 'hc81
+`define YSYX_CSR_INSTRETH 'hc82
 
 // Machine Information Registers
 `define YSYX_CSR_MVENDORID 'hf11

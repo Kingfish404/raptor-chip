@@ -121,7 +121,7 @@ jobs:
       - name: Boot Linux on NPC
         shell: bash -l {0}
         run: |
-          make linux-boot-npc32 ARGS="-b -n" MAX_INST=300000000 \
+          make linux-boot-npc32 ARGS="-b -n" MAX_INST=250000000 \
             2>&1 | tee /tmp/linux-boot.log || true
       - name: Linux boot summary
         run: |
@@ -309,4 +309,4 @@ jobs:
         run: make linux-download-rv32
       - name: Boot Linux on NEMU
         shell: bash -l {0}
-        run: make linux-boot-nemu32 ARGS="-b --log ./nemu/build/nemu-log.txt" MAX_INST=600000000
+        run: make linux-boot-nemu32 ARGS="-b --log ./nemu/build/nemu-log.txt" MAX_INST=1200000000

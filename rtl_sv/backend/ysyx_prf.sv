@@ -42,10 +42,17 @@ module ysyx_prf #(
   logic [PNUM-1:0] prf_transient;
 
   // ---- Read ports (combinational) ----
-  assign prf_rd.pv1       = prf[prf_rd.pr1];
-  assign prf_rd.pv1_valid = prf_valid[prf_rd.pr1];
-  assign prf_rd.pv2       = prf[prf_rd.pr2];
-  assign prf_rd.pv2_valid = prf_valid[prf_rd.pr2];
+  assign prf_rd.pv1_a       = prf[prf_rd.pr1_a];
+  assign prf_rd.pv1_a_valid = prf_valid[prf_rd.pr1_a];
+  assign prf_rd.pv2_a       = prf[prf_rd.pr2_a];
+  assign prf_rd.pv2_a_valid = prf_valid[prf_rd.pr2_a];
+
+`ifdef YSYX_DUAL_ISSUE
+  assign prf_rd.pv1_b       = prf[prf_rd.pr1_b];
+  assign prf_rd.pv1_b_valid = prf_valid[prf_rd.pr1_b];
+  assign prf_rd.pv2_b       = prf[prf_rd.pr2_b];
+  assign prf_rd.pv2_b_valid = prf_valid[prf_rd.pr2_b];
+`endif
 
   // ---- Write port extraction ----
   logic            wr_a_en;

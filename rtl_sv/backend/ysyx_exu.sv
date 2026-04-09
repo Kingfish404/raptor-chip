@@ -109,10 +109,16 @@ module ysyx_exu #(
 
   logic reservation_match;
 
-  logic [$clog2(RS_SIZE)-1:0] free_idx;
+  logic [$clog2(RS_SIZE)-1:0] free_idx_a;
+  logic free_found_a;
+`ifdef YSYX_DUAL_ISSUE
+  logic [$clog2(RS_SIZE)-1:0] free_idx_b;
+  logic free_found_b;
+`endif
+
   logic [$clog2(RS_SIZE)-1:0] valid_idx;
   logic [$clog2(RS_SIZE)-1:0] mul_rs_idx;
-  logic free_found, valid_found, mul_found, ioq_valid_found;
+  logic valid_found, mul_found, ioq_valid_found;
 
   // One-hot match vectors for priority encoding (replaces for-loop traversal)
   logic [RS_SIZE-1:0] rs_free_vec;
@@ -128,32 +134,50 @@ module ysyx_exu #(
     end
   end
 
-  // Priority encode: lowest-index-first via casez on one-hot vectors
+  // Priority encode: lowest-index-first (parameterized for RS_SIZE)
   always_comb begin
-    casez (rs_free_vec)
-      4'b???1: begin free_idx = 2'd0; free_found = 1; end
-      4'b??10: begin free_idx = 2'd1; free_found = 1; end
-      4'b?100: begin free_idx = 2'd2; free_found = 1; end
-      4'b1000: begin free_idx = 2'd3; free_found = 1; end
-      default: begin free_idx = 2'd0; free_found = 0; end
-    endcase
+    free_idx_a = '0;
+    free_found_a = 0;
+    for (int i = 0; i < RS_SIZE; i++) begin
+      if (!free_found_a && rs_free_vec[i]) begin
+        free_idx_a = i[$clog2(RS_SIZE)-1:0];
+        free_found_a = 1;
+      end
+    end
 
-    casez (rs_ready_vec)
-      4'b???1: begin valid_idx = 2'd0; valid_found = 1; end
-      4'b??10: begin valid_idx = 2'd1; valid_found = 1; end
-      4'b?100: begin valid_idx = 2'd2; valid_found = 1; end
-      4'b1000: begin valid_idx = 2'd3; valid_found = 1; end
-      default: begin valid_idx = 2'd0; valid_found = 0; end
-    endcase
+    valid_idx = '0;
+    valid_found = 0;
+    for (int i = 0; i < RS_SIZE; i++) begin
+      if (!valid_found && rs_ready_vec[i]) begin
+        valid_idx = i[$clog2(RS_SIZE)-1:0];
+        valid_found = 1;
+      end
+    end
 
-    casez (rs_mul_vec)
-      4'b???1: begin mul_rs_idx = 2'd0; mul_found = 1; end
-      4'b??10: begin mul_rs_idx = 2'd1; mul_found = 1; end
-      4'b?100: begin mul_rs_idx = 2'd2; mul_found = 1; end
-      4'b1000: begin mul_rs_idx = 2'd3; mul_found = 1; end
-      default: begin mul_rs_idx = 2'd0; mul_found = 0; end
-    endcase
+    mul_rs_idx = '0;
+    mul_found = 0;
+    for (int i = 0; i < RS_SIZE; i++) begin
+      if (!mul_found && rs_mul_vec[i]) begin
+        mul_rs_idx = i[$clog2(RS_SIZE)-1:0];
+        mul_found = 1;
+      end
+    end
   end
+
+`ifdef YSYX_DUAL_ISSUE
+  // Second free RS entry (for dual RS dispatch)
+  always_comb begin
+    free_idx_b = '0;
+    free_found_b = 0;
+    for (int i = 0; i < RS_SIZE; i++) begin
+      if (!free_found_b
+        && rs_free_vec[i] && !(free_found_a && i[$clog2(RS_SIZE)-1:0] == free_idx_a)) begin
+        free_idx_b = i[$clog2(RS_SIZE)-1:0];
+        free_found_b = 1;
+      end
+    end
+  end
+`endif
 
   assign exu_lsu.rvalid = (ioq_valid[ioq_head]
     && ioq_ren[ioq_head]
@@ -168,8 +192,40 @@ module ysyx_exu #(
   assign ioq_ready = ioq_valid[ioq_tail] == 0;
   assign rs_ready = ((rou_exu.uop.wen || rou_exu.uop.ren)
     ? ioq_ready
-    : free_found && !(mul_found && rou_exu.uop.alu[4:4]));
+    : free_found_a && !(mul_found && rou_exu.uop.alu[4:4]));
   assign rou_exu.ready = rs_ready;
+
+`ifdef YSYX_DUAL_ISSUE
+  // Slot B readiness: depends on slot A's target queue
+  logic [$clog2(IOQ_SIZE)-1:0] ioq_tail_b;
+  assign ioq_tail_b = ioq_tail + 1;
+
+  logic a_to_ioq, b_to_ioq;
+  assign a_to_ioq = (rou_exu.uop.wen || rou_exu.uop.ren);
+  assign b_to_ioq = (rou_exu.uop_b.wen || rou_exu.uop_b.ren);
+
+  logic rs_ready_b;
+  always_comb begin
+    if (b_to_ioq) begin
+      // Slot B goes to IOQ
+      if (a_to_ioq)
+        rs_ready_b = (ioq_valid[ioq_tail] == 0) && (ioq_valid[ioq_tail_b] == 0);
+      else
+        rs_ready_b = ioq_ready;
+    end else begin
+      // Slot B goes to RS
+      if (a_to_ioq)
+        rs_ready_b = free_found_a && !(mul_found && rou_exu.uop_b.alu[4:4]);
+      else
+        rs_ready_b = free_found_b && !(mul_found && rou_exu.uop_b.alu[4:4]);
+    end
+  end
+  assign rou_exu.ready_b = rs_ready_b;
+
+  // Index for slot B RS dispatch: if A->IOQ, B takes first free; if A->RS, B takes second free
+  logic [$clog2(RS_SIZE)-1:0] b_rs_idx;
+  assign b_rs_idx = a_to_ioq ? free_idx_a : free_idx_b;
+`endif
 
   ysyx_exu_alu gen_alu (
       .s1(rs_vj[valid_idx]),
@@ -179,6 +235,7 @@ module ysyx_exu #(
       .out_r(alu_result)
   );
   logic muling;
+  logic [$clog2(RS_SIZE)-1:0] mul_target_idx;  // RS entry whose multiply is in-flight
 
   always @(posedge clock) begin
     if (reset || cmu_bcast.flush_pipe) begin
@@ -195,7 +252,7 @@ module ysyx_exu #(
     end else begin
       // In-Order Queue (IOQ)
       if (rou_exu.valid && ioq_ready && (rou_exu.uop.wen || rou_exu.uop.ren)) begin
-        // Dispatch send of IOQ
+        // Dispatch slot A to IOQ
         ioq_valid[ioq_tail] <= 1;
 
         ioq_inst[ioq_tail] <= rou_exu.uop.inst;
@@ -221,8 +278,69 @@ module ysyx_exu #(
         ioq_atom[ioq_tail] <= rou_exu.uop.atom;
         ioq_trap[ioq_tail] <= rou_exu.uop.trap;
 
+`ifdef YSYX_DUAL_ISSUE
+        // Check if slot B also goes to IOQ
+        if (rou_exu.valid_b && rs_ready_b && b_to_ioq) begin
+          ioq_valid[ioq_tail_b] <= 1;
+          ioq_inst[ioq_tail_b] <= rou_exu.uop_b.inst;
+
+          ioq_pc[ioq_tail_b] <= rou_exu.uop_b.pc;
+          ioq_pr1[ioq_tail_b] <= rou_exu.pr1_b;
+          ioq_pr2[ioq_tail_b] <= rou_exu.pr2_b;
+          ioq_prd[ioq_tail_b] <= rou_exu.prd_b;
+          ioq_rd[ioq_tail_b] <= rou_exu.uop_b.rd;
+
+          ioq_c[ioq_tail_b] <= rou_exu.uop_b.c;
+          ioq_word[ioq_tail_b] <= rou_exu.uop_b.word;
+          ioq_alu[ioq_tail_b] <= rou_exu.uop_b.alu;
+          ioq_vj[ioq_tail_b] <= rou_exu.op1_b;
+          ioq_vk[ioq_tail_b] <= rou_exu.op2_b;
+          ioq_dest[ioq_tail_b] <= rou_exu.dest_b;
+
+          ioq_imm[ioq_tail_b] <= rou_exu.uop_b.imm;
+
+          ioq_wen[ioq_tail_b] <= rou_exu.uop_b.wen;
+          ioq_mmu_en[ioq_tail_b] <= csr_bcast.dmmu_en;
+          ioq_ren[ioq_tail_b] <= rou_exu.uop_b.ren;
+          ioq_atom[ioq_tail_b] <= rou_exu.uop_b.atom;
+          ioq_trap[ioq_tail_b] <= rou_exu.uop_b.trap;
+          ioq_tail <= (ioq_tail + 2);
+        end else begin
+          ioq_tail <= (ioq_tail + 1);
+        end
+`else
+        ioq_tail <= (ioq_tail + 1);
+`endif
+      end
+`ifdef YSYX_DUAL_ISSUE
+      // Slot B -> IOQ when slot A -> RS (slot A didn't go to IOQ)
+      else if (rou_exu.valid_b && rs_ready_b && b_to_ioq && !a_to_ioq) begin
+        ioq_valid[ioq_tail] <= 1;
+        ioq_inst[ioq_tail] <= rou_exu.uop_b.inst;
+
+        ioq_pc[ioq_tail] <= rou_exu.uop_b.pc;
+        ioq_pr1[ioq_tail] <= rou_exu.pr1_b;
+        ioq_pr2[ioq_tail] <= rou_exu.pr2_b;
+        ioq_prd[ioq_tail] <= rou_exu.prd_b;
+        ioq_rd[ioq_tail] <= rou_exu.uop_b.rd;
+
+        ioq_c[ioq_tail] <= rou_exu.uop_b.c;
+        ioq_word[ioq_tail] <= rou_exu.uop_b.word;
+        ioq_alu[ioq_tail] <= rou_exu.uop_b.alu;
+        ioq_vj[ioq_tail] <= rou_exu.op1_b;
+        ioq_vk[ioq_tail] <= rou_exu.op2_b;
+        ioq_dest[ioq_tail] <= rou_exu.dest_b;
+
+        ioq_imm[ioq_tail] <= rou_exu.uop_b.imm;
+
+        ioq_wen[ioq_tail] <= rou_exu.uop_b.wen;
+        ioq_mmu_en[ioq_tail] <= csr_bcast.dmmu_en;
+        ioq_ren[ioq_tail] <= rou_exu.uop_b.ren;
+        ioq_atom[ioq_tail] <= rou_exu.uop_b.atom;
+        ioq_trap[ioq_tail] <= rou_exu.uop_b.trap;
         ioq_tail <= (ioq_tail + 1);
       end
+`endif
       if (exu_l1d.ready && ioq_mmu_en[ioq_head]) begin
         ioq_paddr[ioq_head]  <= exu_l1d.paddr;
         ioq_mmu_en[ioq_head] <= 0;
@@ -268,50 +386,53 @@ module ysyx_exu #(
       end
       // Reservation Station (RS)
       for (bit [XLEN-1:0] i = 0; i < RS_SIZE; i++) begin
-        if (free_found && i[$clog2(RS_SIZE)-1:0] == free_idx) begin
+        if (free_found_a && i[$clog2(RS_SIZE)-1:0] == free_idx_a) begin
           if (rou_exu.valid && rs_ready && !(rou_exu.uop.wen || rou_exu.uop.ren)) begin
-            // Dispatch receive
-            rs_valid[free_idx] <= 1;
-            rs_alu[free_idx] <= rou_exu.uop.alu;
-            rs_vj[free_idx] <= rou_exu.op1;
-            rs_vk[free_idx] <= rou_exu.op2;
-            rs_dest[free_idx] <= rou_exu.dest;
+            // Dispatch slot A to RS
+            rs_valid[free_idx_a] <= 1;
+            rs_alu[free_idx_a] <= rou_exu.uop.alu;
+            rs_vj[free_idx_a] <= rou_exu.op1;
+            rs_vk[free_idx_a] <= rou_exu.op2;
+            rs_dest[free_idx_a] <= rou_exu.dest;
 
-            rs_pr1[free_idx] <= rou_exu.pr1;
-            rs_pr2[free_idx] <= rou_exu.pr2;
-            rs_prd[free_idx] <= rou_exu.prd;
-            rs_rd[free_idx] <= rou_exu.uop.rd;
+            rs_pr1[free_idx_a] <= rou_exu.pr1;
+            rs_pr2[free_idx_a] <= rou_exu.pr2;
+            rs_prd[free_idx_a] <= rou_exu.prd;
+            rs_rd[free_idx_a] <= rou_exu.uop.rd;
 
-            rs_c[free_idx] <= rou_exu.uop.c;
-            rs_word[free_idx] <= rou_exu.uop.word;
-            rs_jen[free_idx] <= rou_exu.uop.jen;
-            rs_br_jmp[free_idx] <= (rou_exu.uop.jen || rou_exu.uop.ecall || rou_exu.uop.mret);
-            rs_br_cond[free_idx] <= (rou_exu.uop.ben);
-            rs_jump[free_idx] <= (rou_exu.uop.jen);
-            rs_imm[free_idx] <= rou_exu.uop.imm;
-            rs_pc[free_idx] <= rou_exu.uop.pc;
-            rs_inst[free_idx] <= rou_exu.uop.inst;
+            rs_c[free_idx_a] <= rou_exu.uop.c;
+            rs_word[free_idx_a] <= rou_exu.uop.word;
+            rs_jen[free_idx_a] <= rou_exu.uop.jen;
+            rs_br_jmp[free_idx_a] <= (rou_exu.uop.jen || rou_exu.uop.ecall || rou_exu.uop.mret);
+            rs_br_cond[free_idx_a] <= (rou_exu.uop.ben);
+            rs_jump[free_idx_a] <= (rou_exu.uop.jen);
+            rs_imm[free_idx_a] <= rou_exu.uop.imm;
+            rs_pc[free_idx_a] <= rou_exu.uop.pc;
+            rs_inst[free_idx_a] <= rou_exu.uop.inst;
 
-            rs_system[free_idx] <= rou_exu.uop.system;
-            rs_ecall[free_idx] <= rou_exu.uop.ecall;
-            rs_ebreak[free_idx] <= rou_exu.uop.ebreak;
-            rs_mret[free_idx] <= rou_exu.uop.mret;
-            rs_sret[free_idx] <= rou_exu.uop.sret;
-            rs_csr_csw[free_idx] <= rou_exu.uop.csr_csw;
+            rs_system[free_idx_a] <= rou_exu.uop.system;
+            rs_ecall[free_idx_a] <= rou_exu.uop.ecall;
+            rs_ebreak[free_idx_a] <= rou_exu.uop.ebreak;
+            rs_mret[free_idx_a] <= rou_exu.uop.mret;
+            rs_sret[free_idx_a] <= rou_exu.uop.sret;
+            rs_csr_csw[free_idx_a] <= rou_exu.uop.csr_csw;
 
-            rs_trap[free_idx] <= rou_exu.uop.trap;
-            rs_tval[free_idx] <= rou_exu.uop.tval;
-            rs_cause[free_idx] <= rou_exu.uop.cause;
+            rs_trap[free_idx_a] <= rou_exu.uop.trap;
+            rs_tval[free_idx_a] <= rou_exu.uop.tval;
+            rs_cause[free_idx_a] <= rou_exu.uop.cause;
           end
         end else if (rs_valid[i] && rs_pr1[i] == 0 && rs_pr2[i] == 0) begin
           // Mul
           if (rs_alu[i][4:4]) begin
-            if (rs_mul_ready[i] == 0 && muling == 0) begin
-              // Mul start
+            if (rs_mul_ready[i] == 0 && muling == 0
+                && i[$clog2(RS_SIZE)-1:0] == mul_rs_idx) begin
+              // Mul start — only the entry selected by the priority encoder
               muling <= 1;
+              mul_target_idx <= i[$clog2(RS_SIZE)-1:0];
             end
-            if (muling == 1 && mul_valid) begin
-              // Mul result is ready
+            if (i[$clog2(RS_SIZE)-1:0] == mul_target_idx
+                && muling == 1 && mul_valid) begin
+              // Mul result is ready — deliver only to the entry that started it
               rs_mul_ready[i] <= 1;
               muling <= 0;
               rs_mul_a[i] <= reg_wdata_mul;
@@ -345,6 +466,43 @@ module ysyx_exu #(
           end
         end
       end
+`ifdef YSYX_DUAL_ISSUE
+      // Slot B -> RS dispatch (standalone block, targets b_rs_idx)
+      if (rou_exu.valid_b && rs_ready_b && !b_to_ioq) begin
+        rs_valid[b_rs_idx] <= 1;
+        rs_alu[b_rs_idx] <= rou_exu.uop_b.alu;
+        rs_vj[b_rs_idx] <= rou_exu.op1_b;
+        rs_vk[b_rs_idx] <= rou_exu.op2_b;
+        rs_dest[b_rs_idx] <= rou_exu.dest_b;
+
+        rs_pr1[b_rs_idx] <= rou_exu.pr1_b;
+        rs_pr2[b_rs_idx] <= rou_exu.pr2_b;
+        rs_prd[b_rs_idx] <= rou_exu.prd_b;
+        rs_rd[b_rs_idx] <= rou_exu.uop_b.rd;
+
+        rs_c[b_rs_idx] <= rou_exu.uop_b.c;
+        rs_word[b_rs_idx] <= rou_exu.uop_b.word;
+        rs_jen[b_rs_idx] <= rou_exu.uop_b.jen;
+        rs_br_jmp[b_rs_idx] <= (rou_exu.uop_b.jen || rou_exu.uop_b.ecall || rou_exu.uop_b.mret);
+        rs_br_cond[b_rs_idx] <= (rou_exu.uop_b.ben);
+        rs_jump[b_rs_idx] <= (rou_exu.uop_b.jen);
+
+        rs_imm[b_rs_idx] <= rou_exu.uop_b.imm;
+
+        rs_pc[b_rs_idx] <= rou_exu.uop_b.pc;
+        rs_inst[b_rs_idx] <= rou_exu.uop_b.inst;
+        rs_system[b_rs_idx] <= rou_exu.uop_b.system;
+        rs_ecall[b_rs_idx] <= rou_exu.uop_b.ecall;
+        rs_ebreak[b_rs_idx] <= rou_exu.uop_b.ebreak;
+        rs_mret[b_rs_idx] <= rou_exu.uop_b.mret;
+        rs_sret[b_rs_idx] <= rou_exu.uop_b.sret;
+        rs_csr_csw[b_rs_idx] <= rou_exu.uop_b.csr_csw;
+
+        rs_trap[b_rs_idx] <= rou_exu.uop_b.trap;
+        rs_tval[b_rs_idx] <= rou_exu.uop_b.tval;
+        rs_cause[b_rs_idx] <= rou_exu.uop_b.cause;
+      end
+`endif
     end
   end
 
@@ -374,16 +532,16 @@ module ysyx_exu #(
             ioq_data[i] = ioq_vk[i] | exu_lsu.rdata;
           end
           `YSYX_ATO_MIN_: begin
-            ioq_data[i] = exu_lsu.rdata < ioq_vk[i] ? exu_lsu.rdata : ioq_vk[i];
+            ioq_data[i] = $signed(exu_lsu.rdata) < $signed(ioq_vk[i]) ? exu_lsu.rdata : ioq_vk[i];
           end
           `YSYX_ATO_MAX_: begin
-            ioq_data[i] = exu_lsu.rdata > ioq_vk[i] ? exu_lsu.rdata : ioq_vk[i];
+            ioq_data[i] = $signed(exu_lsu.rdata) > $signed(ioq_vk[i]) ? exu_lsu.rdata : ioq_vk[i];
           end
           `YSYX_ATO_MINU: begin
-            ioq_data[i] = exu_lsu.rdata < ioq_vk[i] ? ioq_vk[i] : exu_lsu.rdata;
+            ioq_data[i] = exu_lsu.rdata < ioq_vk[i] ? exu_lsu.rdata : ioq_vk[i];
           end
           `YSYX_ATO_MAXU: begin
-            ioq_data[i] = exu_lsu.rdata > ioq_vk[i] ? ioq_vk[i] : exu_lsu.rdata;
+            ioq_data[i] = exu_lsu.rdata > ioq_vk[i] ? exu_lsu.rdata : ioq_vk[i];
           end
           default: begin
             ioq_data[i] = 'b0;
@@ -478,11 +636,25 @@ module ysyx_exu #(
     (0)
   );
 
+  // instret correction: account for in-flight ROB entries before this CSR read
+  logic [$clog2(ROB_SIZE)-1:0] instret_correction;
+  logic is_instret_read;
+  assign instret_correction = (rs_dest[valid_idx][$clog2(ROB_SIZE)-1:0]
+                             - cmu_bcast.rob_head[$clog2(ROB_SIZE)-1:0]);
+  assign is_instret_read = (rs_imm[valid_idx][11:0] == `YSYX_CSR_INSTRET_
+                         || rs_imm[valid_idx][11:0] == `YSYX_CSR_MINSTRET);
+
+  // CSR read data with instret correction for OoO timing
+  logic [XLEN-1:0] csr_rdata_corrected;
+  assign csr_rdata_corrected = is_instret_read
+    ? (exu_csr.rdata + XLEN'(instret_correction))
+    : exu_csr.rdata;
+
   // { Write back (RS)
   assign exu_rou.dest = rs_dest[valid_idx];
   assign exu_rou.result = (rs_alu[valid_idx][4:4] == 0
     ? (rs_system[valid_idx]
-      ? exu_csr.rdata
+      ? csr_rdata_corrected
       : rs_jen[valid_idx]
         ? rs_pc[valid_idx] + (rs_c[valid_idx] ? 2 : 4)
         : alu_result)

@@ -10,12 +10,9 @@ import ysyx_pkg::*;
 //   - Free List: allocates / deallocates physical registers
 //   - Map Table: speculative (MAP) + committed (RAT) rename maps
 //
-// PRF (Physical Register File) has been moved to the top level (ysyx.sv)
-// because it is a shared resource accessed by EXU (write), ROU (read),
-// and CMU (commit), with RNU having no direct read/write interaction.
-//
-// Sub-modules are connected via interfaces (rnu_fl_if, rnu_mt_if)
-// for clean modularity and multi-issue scaling.
+// Dual-issue: renames up to 2 instructions per cycle with RAW dependency
+// handling between the two rename slots (slot B sees slot A's rename result
+// when they share the same architectural register).
 module ysyx_rnu #(
     parameter unsigned RIQ_SIZE = `YSYX_RIQ_SIZE,
     parameter unsigned RNUM = `YSYX_REG_SIZE,
@@ -28,93 +25,212 @@ module ysyx_rnu #(
 ) (
     input clock,
 
-    rou_cmu_if.in  rou_cmu,
+    rou_cmu_if.in   rou_cmu,
     cmu_bcast_if.in cmu_bcast,
 
     idu_rnu_if.slave  idu_rnu,
     rnu_rou_if.master rnu_rou,
 
     // Debug: MAP and RAT snapshots for architectural register view
-    output [PLEN-1:0] map_snapshot [RNUM],
-    output [PLEN-1:0] rat_snapshot [RNUM],
+    output [PLEN-1:0] map_snapshot[RNUM],
+    output [PLEN-1:0] rat_snapshot[RNUM],
 
     input reset
 );
   // ================================================================
-  // Rename Queue (RNQ) - single-entry pipeline buffer
+  // Rename Queue (RNQ)
   // ================================================================
-  logic [$clog2(RIQ_SIZE)-1:0] rnq_head, rnq_tail;
-  logic [RIQ_SIZE-1:0]         rnq_valid;
+  logic [$clog2(RIQ_SIZE)-1:0] rnq_head_a, rnq_tail_a;
+  logic           [RIQ_SIZE-1:0] rnq_valid;
 
-  ysyx_pkg::uop_t              rnq_uops  [RIQ_SIZE];
-  logic [RLEN-1:0]             rnq_rd    [RIQ_SIZE];
-  logic [XLEN-1:0]             rnq_op1   [RIQ_SIZE];
-  logic [XLEN-1:0]             rnq_op2   [RIQ_SIZE];
-  logic [RLEN-1:0]             rnq_rs1   [RIQ_SIZE];
-  logic [RLEN-1:0]             rnq_rs2   [RIQ_SIZE];
+  ysyx_pkg::uop_t                rnq_uops        [RIQ_SIZE];
+  logic           [    RLEN-1:0] rnq_rd          [RIQ_SIZE];
+  logic           [    XLEN-1:0] rnq_op1         [RIQ_SIZE];
+  logic           [    XLEN-1:0] rnq_op2         [RIQ_SIZE];
+  logic           [    RLEN-1:0] rnq_rs1         [RIQ_SIZE];
+  logic           [    RLEN-1:0] rnq_rs2         [RIQ_SIZE];
 
   // ================================================================
-  // Rename Pipeline Register (2-sub-stage rename)
+  // Rename Pipeline Registers (2-sub-stage rename)
   // Stage 1: Read maptable + freelist allocate (combinational)
   // Stage 2: Present registered results to ROU
   // ================================================================
-  logic rn_pipe_valid;
-  ysyx_pkg::uop_t rn_pipe_uop;
-  logic [PLEN-1:0] rn_pipe_pr1, rn_pipe_pr2, rn_pipe_prd, rn_pipe_prs;
-  logic [XLEN-1:0] rn_pipe_op1, rn_pipe_op2;
+  // Slot A
+  logic                          rn_pipe_valid_a;
+  ysyx_pkg::uop_t                rn_pipe_uop_a;
+  logic [PLEN-1:0] rn_pipe_pr1_a, rn_pipe_pr2_a, rn_pipe_prd_a, rn_pipe_prs_a;
+  logic [XLEN-1:0] rn_pipe_op1_a, rn_pipe_op2_a;
+
+`ifdef YSYX_DUAL_ISSUE
+  // Slot B
+  logic rn_pipe_valid_b;
+  ysyx_pkg::uop_t rn_pipe_uop_b;
+  logic [PLEN-1:0] rn_pipe_pr1_b, rn_pipe_pr2_b, rn_pipe_prd_b, rn_pipe_prs_b;
+  logic [XLEN-1:0] rn_pipe_op1_b, rn_pipe_op2_b;
+`endif
+  // Second RNQ enqueue (when IDU provides 2 instructions)
+  logic [$clog2(RIQ_SIZE)-1:0] rnq_head_b;
 
   // Stage 1 fires when RNQ has entry AND pipeline register is free (or being consumed)
   logic rn_pipe_ready;
-  assign rn_pipe_ready = !rn_pipe_valid || rnu_rou.ready;
+  assign rn_pipe_ready = !rn_pipe_valid_a || rnu_rou.ready;
 
-  logic rnq_enq_fire, rnq_deq_fire;
-  assign rnq_enq_fire = idu_rnu.valid && !rnq_valid[rnq_head];
-  assign rnq_deq_fire = rn_pipe_ready && rnq_valid[rnq_tail];
+  logic rnq_enq_fire_a, rnq_deq_fire_a;
+`ifdef YSYX_DUAL_ISSUE
+  // When valid_b is set, both RNQ slots must be free to enqueue.
+  // This prevents slot A from enqueuing without slot B, avoiding duplication.
+  assign rnq_enq_fire_a = idu_rnu.valid_a && !rnq_valid[rnq_head_a]
+      && (!idu_rnu.valid_b || !rnq_valid[rnq_head_b]);
+`else
+  assign rnq_enq_fire_a = idu_rnu.valid_a && !rnq_valid[rnq_head_a];
+`endif
+  assign rnq_deq_fire_a = rn_pipe_ready && rnq_valid[rnq_tail_a];
+
+`ifdef YSYX_DUAL_ISSUE
+  // Second RNQ dequeue: can dequeue slot B if slot A fires, next entry valid,
+  // is actually a dual-pair B-slot, and freelist has enough registers.
+  logic [$clog2(RIQ_SIZE)-1:0] rnq_tail_b;
+  assign rnq_tail_b = rnq_tail_a + 1;
+  logic [RIQ_SIZE-1:0] rnq_is_pair;
+  logic rnq_deq_fire_b;
+  assign rnq_deq_fire_b = rnq_deq_fire_a && rnq_is_pair[rnq_tail_b]
+      && rnq_valid[rnq_tail_b]
+      && (rnq_rd[rnq_tail_b] == 0 || !fl_bus.alloc_empty_b);
+
+  assign rnq_head_b = rnq_head_a + 1;
+  logic rnq_enq_fire_b;
+  assign rnq_enq_fire_b = idu_rnu.valid_b && rnq_enq_fire_a && !rnq_valid[rnq_head_b];
+`endif
 
   // Output uses pipeline register (stage 2)
-  assign rnu_rou.valid = rn_pipe_valid;
-  assign idu_rnu.ready = !rnq_valid[rnq_head];
+  assign rnu_rou.valid_a = rn_pipe_valid_a;
+`ifdef YSYX_DUAL_ISSUE
+  // When IDU sends valid_b, RNQ must have room for both entries.
+  // If only head is free but head_b isn't, reject to avoid dropping slot B.
+  assign idu_rnu.ready = !rnq_valid[rnq_head_a] && (!idu_rnu.valid_b || !rnq_valid[rnq_head_b]);
+`else
+  assign idu_rnu.ready = !rnq_valid[rnq_head_a];
+`endif
+
+`ifdef YSYX_DUAL_ISSUE
+  assign rnu_rou.valid_b = rn_pipe_valid_b;
+`endif
+
+  // ================================================================
+  // Dual-issue rename dependency detection (combinational)
+  // Slot B must see slot A's rename result when they share arch registers.
+  // ================================================================
+`ifdef YSYX_DUAL_ISSUE
+  logic slot_a_writes_rd;
+  assign slot_a_writes_rd = rnq_deq_fire_a && (rnq_rd[rnq_tail_a] != 0);
+
+  // RAW bypass: slot B's source registers match slot A's destination
+  logic dep_b_rs1_from_a;
+  logic dep_b_rs2_from_a;
+  logic dep_b_rdold_from_a;
+  assign dep_b_rs1_from_a   = slot_a_writes_rd && (rnq_rs1[rnq_tail_b] == rnq_rd[rnq_tail_a]);
+  assign dep_b_rs2_from_a   = slot_a_writes_rd && (rnq_rs2[rnq_tail_b] == rnq_rd[rnq_tail_a]);
+  assign dep_b_rdold_from_a = slot_a_writes_rd && (rnq_rd[rnq_tail_b] == rnq_rd[rnq_tail_a]);
+`endif
 
   always @(posedge clock) begin
     if (reset || cmu_bcast.flush_pipe) begin
-      rnq_head  <= '0;
-      rnq_tail  <= '0;
+      rnq_head_a <= '0;
+      rnq_tail_a <= '0;
       rnq_valid <= '0;
-      rn_pipe_valid <= 1'b0;
+      rn_pipe_valid_a <= 1'b0;
+`ifdef YSYX_DUAL_ISSUE
+      rn_pipe_valid_b <= 1'b0;
+      rnq_is_pair <= '0;
+`endif
     end else begin
-      if (rnq_enq_fire) begin
-        rnq_head            <= rnq_head + 1;
-        rnq_valid[rnq_head] <= 1'b1;
-        rnq_uops[rnq_head]  <= idu_rnu.uop;
-        rnq_rd[rnq_head]    <= idu_rnu.uop.rd;
-        rnq_op1[rnq_head]   <= idu_rnu.op1;
-        rnq_op2[rnq_head]   <= idu_rnu.op2;
-        rnq_rs1[rnq_head]   <= idu_rnu.rs1;
-        rnq_rs2[rnq_head]   <= idu_rnu.rs2;
+      // ---- RNQ Enqueue ----
+      if (rnq_enq_fire_a) begin
+        rnq_valid[rnq_head_a] <= 1'b1;
+        rnq_uops[rnq_head_a]  <= idu_rnu.uop_a;
+        rnq_rd[rnq_head_a]    <= idu_rnu.uop_a.rd;
+        rnq_op1[rnq_head_a]   <= idu_rnu.op1_a;
+        rnq_op2[rnq_head_a]   <= idu_rnu.op2_a;
+        rnq_rs1[rnq_head_a]   <= idu_rnu.rs1_a;
+        rnq_rs2[rnq_head_a]   <= idu_rnu.rs2_a;
+`ifdef YSYX_DUAL_ISSUE
+        if (rnq_enq_fire_b) begin
+          rnq_is_pair[rnq_head_a]   <= 1'b0;
+          rnq_is_pair[rnq_head_b] <= 1'b1;
+          rnq_valid[rnq_head_b] <= 1'b1;
+          rnq_uops[rnq_head_b]  <= idu_rnu.uop_b;
+          rnq_rd[rnq_head_b]    <= idu_rnu.uop_b.rd;
+          rnq_op1[rnq_head_b]   <= idu_rnu.op1_b;
+          rnq_op2[rnq_head_b]   <= idu_rnu.op2_b;
+          rnq_rs1[rnq_head_b]   <= idu_rnu.rs1_b;
+          rnq_rs2[rnq_head_b]   <= idu_rnu.rs2_b;
+          rnq_head_a <= rnq_head_a + 2;
+        end else begin
+          // Clear stale is_pair flag from a previous epoch that used this
+          // index as a B-slot.  Without this, a later dequeue could falsely
+          // treat an adjacent single entry as the B-slot of a pair.
+          rnq_is_pair[rnq_head_a] <= 1'b0;
+          rnq_head_a <= rnq_head_a + 1;
+        end
+`else
+        rnq_head_a <= rnq_head_a + 1;
+`endif
       end
-      if (rnq_deq_fire) begin
-        rnq_tail            <= rnq_tail + 1;
-        rnq_valid[rnq_tail] <= 1'b0;
 
-        // Stage 1 → Stage 2: register rename results
-        rn_pipe_valid <= 1'b1;
-        rn_pipe_uop   <= rnq_uops[rnq_tail];
-        rn_pipe_op1   <= rnq_op1[rnq_tail];
-        rn_pipe_op2   <= rnq_op2[rnq_tail];
-        rn_pipe_pr1   <= mt_bus.map_rdata_a;
-        rn_pipe_pr2   <= mt_bus.map_rdata_b;
-        rn_pipe_prd   <= (rnq_rd[rnq_tail] != 0) ? fl_bus.alloc_pr : '0;
-        rn_pipe_prs   <= mt_bus.map_rdata_c;
+      // ---- RNQ Dequeue + Rename Stage 1 -> Stage 2 ----
+      if (rnq_deq_fire_a) begin
+        rnq_valid[rnq_tail_a] <= 1'b0;
+
+        // Slot A: register rename results
+        rn_pipe_valid_a <= 1'b1;
+        rn_pipe_uop_a <= rnq_uops[rnq_tail_a];
+        rn_pipe_op1_a <= rnq_op1[rnq_tail_a];
+        rn_pipe_op2_a <= rnq_op2[rnq_tail_a];
+        rn_pipe_pr1_a <= mt_bus.map_rdata_a;
+        rn_pipe_pr2_a <= mt_bus.map_rdata_b;
+        rn_pipe_prd_a <= (rnq_rd[rnq_tail_a] != 0) ? fl_bus.alloc_pr_a : '0;
+        rn_pipe_prs_a <= mt_bus.map_rdata_c;
+
+`ifdef YSYX_DUAL_ISSUE
+        if (rnq_deq_fire_b) begin
+          rnq_valid[rnq_tail_b] <= 1'b0;
+          rnq_is_pair[rnq_tail_b] <= 1'b0;
+          rnq_tail_a <= rnq_tail_a + 2;
+
+          // Slot B: rename with RAW dependency bypass from slot A
+          rn_pipe_valid_b <= 1'b1;
+          rn_pipe_uop_b <= rnq_uops[rnq_tail_b];
+          rn_pipe_op1_b <= rnq_op1[rnq_tail_b];
+          rn_pipe_op2_b <= rnq_op2[rnq_tail_b];
+          // rs1_b: bypass from slot A if dependency
+          rn_pipe_pr1_b <= dep_b_rs1_from_a ? fl_bus.alloc_pr_a : mt_bus.map_rdata_d;
+          // rs2_b: bypass from slot A if dependency
+          rn_pipe_pr2_b <= dep_b_rs2_from_a ? fl_bus.alloc_pr_a : mt_bus.map_rdata_e;
+          // prd_b: new physical register from freelist slot B
+          rn_pipe_prd_b <= (rnq_rd[rnq_tail_b] != 0) ? fl_bus.alloc_pr_b : '0;
+          // prs_b: old mapping — bypass from slot A if same rd
+          rn_pipe_prs_b <= dep_b_rdold_from_a ? fl_bus.alloc_pr_a : mt_bus.map_rdata_f;
+        end else begin
+          rnq_tail_a <= rnq_tail_a + 1;
+          rnq_is_pair[rnq_tail_a] <= 1'b0;
+          rn_pipe_valid_b <= 1'b0;
+        end
+`else
+        rnq_tail_a <= rnq_tail_a + 1;
+`endif
       end else if (rnu_rou.ready) begin
-        rn_pipe_valid <= 1'b0;
+        rn_pipe_valid_a <= 1'b0;
+`ifdef YSYX_DUAL_ISSUE
+        rn_pipe_valid_b <= 1'b0;
+`endif
       end
     end
   end
 
   // RNQ read-side outputs (stage 2 — from pipeline register)
-  assign rnu_rou.uop = rn_pipe_uop;
-  assign rnu_rou.op1 = rn_pipe_op1;
-  assign rnu_rou.op2 = rn_pipe_op2;
+  assign rnu_rou.uop_a = rn_pipe_uop_a;
+  assign rnu_rou.op1_a = rn_pipe_op1_a;
+  assign rnu_rou.op2_a = rn_pipe_op2_a;
 
   // ================================================================
   // Commit signals (shared by freelist, maptable, PRF)
@@ -128,8 +244,8 @@ module ysyx_rnu #(
   // ================================================================
   // Internal interface instances
   // ================================================================
-  rnu_fl_if      fl_bus  ();    // RNU ↔ Free List
-  rnu_mt_if      mt_bus  ();    // RNU ↔ Map Table
+  rnu_fl_if fl_bus ();  // RNU ↔ Free List
+  rnu_mt_if mt_bus ();  // RNU ↔ Map Table
 
   // ================================================================
   // Free List - interface drive
@@ -137,33 +253,51 @@ module ysyx_rnu #(
   assign fl_bus.flush_pipe  = cmu_bcast.flush_pipe;
   assign fl_bus.flush_rd_a  = cmu_bcast.rd_a;
   assign fl_bus.flush_rd_b  = cmu_bcast.valid_b ? cmu_bcast.rd_b : '0;
-  assign fl_bus.alloc_req   = rnq_deq_fire && !fl_bus.alloc_empty && rnq_rd[rnq_tail] != 0;
+  assign fl_bus.alloc_req_a = rnq_deq_fire_a && !fl_bus.alloc_empty_a && rnq_rd[rnq_tail_a] != 0;
+`ifdef YSYX_DUAL_ISSUE
+  assign fl_bus.alloc_req_b = rnq_deq_fire_b && !fl_bus.alloc_empty_b && rnq_rd[rnq_tail_b] != 0;
+`endif
   assign fl_bus.dealloc_req_a = commit_dealloc;
   assign fl_bus.dealloc_pr_a  = rou_cmu.prs_a;
   assign fl_bus.dealloc_req_b = commit_dealloc_b;
   assign fl_bus.dealloc_pr_b  = rou_cmu.prs_b;
 
   ysyx_rnu_freelist #(
-      .RNUM(RNUM), .PNUM(PNUM), .PLEN(PLEN), .RLEN(RLEN)
+      .RNUM(RNUM),
+      .PNUM(PNUM),
+      .PLEN(PLEN),
+      .RLEN(RLEN)
   ) u_freelist (
-      .clock (clock),
-      .reset (reset),
-      .fl    (fl_bus)
+      .clock(clock),
+      .reset(reset),
+      .fl   (fl_bus)
   );
 
   // ================================================================
   // Map Table - interface drive
   // ================================================================
   assign mt_bus.flush_pipe  = cmu_bcast.flush_pipe;
-  // Speculative write (on allocation)
-  assign mt_bus.map_wen     = fl_bus.alloc_req;
-  assign mt_bus.map_waddr   = rnq_rd[rnq_tail];
-  assign mt_bus.map_wdata   = fl_bus.alloc_pr;
+  // Speculative write A (on allocation)
+  assign mt_bus.map_wen_a   = fl_bus.alloc_req_a;
+  assign mt_bus.map_waddr_a = rnq_rd[rnq_tail_a];
+  assign mt_bus.map_wdata_a = fl_bus.alloc_pr_a;
   // Speculative read: rs1, rs2
-  assign mt_bus.map_raddr_a = rnq_rs1[rnq_tail];
-  assign mt_bus.map_raddr_b = rnq_rs2[rnq_tail];
+  assign mt_bus.map_raddr_a = rnq_rs1[rnq_tail_a];
+  assign mt_bus.map_raddr_b = rnq_rs2[rnq_tail_a];
   // Speculative read: rd old mapping (prs for ROB dealloc)
-  assign mt_bus.map_raddr_c = rnq_rd[rnq_tail];
+  assign mt_bus.map_raddr_c = rnq_rd[rnq_tail_a];
+
+`ifdef YSYX_DUAL_ISSUE
+  // Speculative write B (slot B allocation — younger, wins on conflict)
+  assign mt_bus.map_wen_b   = fl_bus.alloc_req_b;
+  assign mt_bus.map_waddr_b = rnq_rd[rnq_tail_b];
+  assign mt_bus.map_wdata_b = fl_bus.alloc_pr_b;
+  // Speculative read slot B: rs1_b, rs2_b, rd_old_b
+  assign mt_bus.map_raddr_d = rnq_rs1[rnq_tail_b];
+  assign mt_bus.map_raddr_e = rnq_rs2[rnq_tail_b];
+  assign mt_bus.map_raddr_f = rnq_rd[rnq_tail_b];
+`endif
+
   // Committed write A
   assign mt_bus.rat_wen_a   = commit_dealloc;
   assign mt_bus.rat_waddr_a = rou_cmu.rd_a;
@@ -173,17 +307,19 @@ module ysyx_rnu #(
   assign mt_bus.rat_waddr_b = rou_cmu.rd_b;
   assign mt_bus.rat_wdata_b = rou_cmu.prd_b;
 
-  logic [PLEN-1:0] mt_rat_snapshot [RNUM];
-  logic [PLEN-1:0] mt_map_snapshot [RNUM];
+  logic [PLEN-1:0] mt_rat_snapshot[RNUM];
+  logic [PLEN-1:0] mt_map_snapshot[RNUM];
 
   ysyx_rnu_maptable #(
-      .RNUM(RNUM), .RLEN(RLEN), .PLEN(PLEN)
+      .RNUM(RNUM),
+      .RLEN(RLEN),
+      .PLEN(PLEN)
   ) u_maptable (
-      .clock        (clock),
-      .reset        (reset),
-      .mt           (mt_bus),
-      .map_snapshot (mt_map_snapshot),
-      .rat_snapshot (mt_rat_snapshot)
+      .clock       (clock),
+      .reset       (reset),
+      .mt          (mt_bus),
+      .map_snapshot(mt_map_snapshot),
+      .rat_snapshot(mt_rat_snapshot)
   );
 
   // Expose snapshots to top level
@@ -198,10 +334,20 @@ module ysyx_rnu #(
   // ================================================================
   // Register Renaming outputs (stage 2 — from pipeline register)
   // ================================================================
-  assign rnu_rou.pr1 = rn_pipe_pr1;
-  assign rnu_rou.pr2 = rn_pipe_pr2;
-  assign rnu_rou.prd = rn_pipe_prd;
+  assign rnu_rou.pr1_a = rn_pipe_pr1_a;
+  assign rnu_rou.pr2_a = rn_pipe_pr2_a;
+  assign rnu_rou.prd_a = rn_pipe_prd_a;
   // prs = old physical mapping for rd (before rename), needed by ROB for dealloc
-  assign rnu_rou.prs = rn_pipe_prs;
+  assign rnu_rou.prs_a = rn_pipe_prs_a;
+
+`ifdef YSYX_DUAL_ISSUE
+  assign rnu_rou.uop_b = rn_pipe_uop_b;
+  assign rnu_rou.op1_b = rn_pipe_op1_b;
+  assign rnu_rou.op2_b = rn_pipe_op2_b;
+  assign rnu_rou.pr1_b = rn_pipe_pr1_b;
+  assign rnu_rou.pr2_b = rn_pipe_pr2_b;
+  assign rnu_rou.prd_b = rn_pipe_prd_b;
+  assign rnu_rou.prs_b = rn_pipe_prs_b;
+`endif
 
 endmodule

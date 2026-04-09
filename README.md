@@ -18,7 +18,7 @@ Candidate ip core name: `raptor-falcon-0.1.0` (`rf-0.1.0`).
 
 **[Core Documentation](./docs/README.md)**
 
-## Build Setup
+## Setup & Quick Start
 
 Suggest install `tmux` for better terminal management. [`surfer`][^surfer] for wave viewer. [`colima`][^colima] for Linux container.
 
@@ -29,15 +29,6 @@ Suggest install `tmux` for better terminal management. [`surfer`][^surfer] for w
 # One-line setup (installs all dependencies)
 make setup
 
-# Optional: install espresso if you need
-wget https://github.com/chipsalliance/espresso/releases/download/v2.4/arm64-apple-macos11-espresso
-```
-
-## Quick Start
-
-All commands run from the project root. (No need to `source env.sh` - the Makefile exports all environment variables automatically.)
-
-```shell
 # Show all available targets
 make help
 ```
@@ -69,11 +60,9 @@ make config-npc32         # configure (o2_defconfig)
 make build-npc32          # build Verilator simulator
 make run-npc32            # run simulation
 
-
 # Run with args
 make run-npc32 ARGS="-b -n"    # -b: batch mode [default], -n: no wave trace
 make run-npc32 IMG=path/to.bin  # load custom image
-
 # Interactive menuconfig
 make menuconfig-npc32
 ```
@@ -86,10 +75,8 @@ The processor supports RV64 via a compile-time switch (`-DYSYX_RV64`). Switching
 # Build and run in RV64 mode (convenience targets)
 make build-npc64
 make run-npc64 ARGS="-b -n"
-
 # Or explicitly pass VFLAGS
 make run-npc32 VFLAGS="-DYSYX_RV64" ARGS="-b -n"
-
 # Lint in RV64 mode
 make lint-npc64
 ```
@@ -100,15 +87,12 @@ make lint-npc64
 # Run on NPC (riscv32e-npc)
 make coremark-npc32 ARGS="-b -n"
 make microbench-npc32 ARGS="-b -n"
-
 # Run on NPC with difftest (vs NEMU reference)
 make coremark-npc32-difftest ARGS="-b -n"
 make microbench-npc32-difftest ARGS="-b -n"
-
 # Run on ysyxSoC
 make coremark-ysyxsoc ARGS="-b -n"
 make microbench-ysyxsoc ARGS="-b -n"
-
 # Run on NEMU (riscv32-nemu)
 make coremark-nemu32 ARGS="-b -n"
 make microbench-nemu32 ARGS="-b -n"
@@ -119,7 +103,6 @@ make microbench-nemu32 ARGS="-b -n"
 ```shell
 # Run nanos-lite on NEMU
 make nanos-nemu32
-
 # Run nanos-lite on NPC
 make nanos-npc32
 ```
@@ -129,13 +112,10 @@ make nanos-npc32
 ```shell
 # Boot Linux on NEMU (requires OpenSBI payload built first)
 make linux-boot-nemu32
-
 # Boot Linux on NPC
 make linux-boot-npc32
-
 # Boot Linux on NPC with difftest (vs NEMU reference)
 make linux-boot-npc32-difftest
-
 # See detailed instructions
 # docs/linux_kernel.md, linux/README.md
 ```
@@ -157,13 +137,10 @@ make fpga-pnr
 ```shell
 # Pack all SV into one file
 make pack
-
 # Lint RTL
 make lint
-
 # Static timing analysis
 make sta
-
 # Clean all build artifacts
 make clean
 ```

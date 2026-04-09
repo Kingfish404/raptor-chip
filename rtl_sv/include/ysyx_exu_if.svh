@@ -11,16 +11,41 @@ interface exu_prf_if #(
     parameter unsigned XLEN = `YSYX_XLEN
 );
   ysyx_pkg::prd_t prd;
-  logic [PLEN-1:0] pr1;
-  logic [PLEN-1:0] pr2;
+  logic [PLEN-1:0] pr1_a;
+  logic [PLEN-1:0] pr2_a;
 
-  logic [XLEN-1:0] pv1;
-  logic [XLEN-1:0] pv2;
-  logic pv1_valid;
-  logic pv2_valid;
+  logic [XLEN-1:0] pv1_a;
+  logic [XLEN-1:0] pv2_a;
+  logic pv1_a_valid;
+  logic pv2_a_valid;
 
-  modport master(output pr1, pr2, input pv1, pv1_valid, pv2, pv2_valid);
-  modport slave(input pr1, pr2, output pv1, pv1_valid, pv2, pv2_valid);
+`ifdef YSYX_DUAL_ISSUE
+  // Slot B read ports (dual issue)
+  logic [PLEN-1:0] pr1_b;
+  logic [PLEN-1:0] pr2_b;
+
+  logic [XLEN-1:0] pv1_b;
+  logic [XLEN-1:0] pv2_b;
+  logic pv1_b_valid;
+  logic pv2_b_valid;
+`endif
+
+  modport master(
+      output pr1_a, pr2_a,
+      input pv1_a, pv1_a_valid, pv2_a, pv2_a_valid
+`ifdef YSYX_DUAL_ISSUE
+      , output pr1_b, pr2_b
+      , input pv1_b, pv1_b_valid, pv2_b, pv2_b_valid
+`endif
+  );
+  modport slave(
+      input pr1_a, pr2_a,
+      output pv1_a, pv1_a_valid, pv2_a, pv2_a_valid
+`ifdef YSYX_DUAL_ISSUE
+      , input pr1_b, pr2_b
+      , output pv1_b, pv1_b_valid, pv2_b, pv2_b_valid
+`endif
+  );
 endinterface
 
 interface exu_lsu_if #(

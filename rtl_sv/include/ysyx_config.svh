@@ -61,9 +61,17 @@
 // Comment out or undefine to disable for A/B benchmarking.
 `define YSYX_DUAL_COMMIT
 
+// Dual issue: dispatch up to 2 instructions per cycle through the pipeline.
+// Widens IFU, IDU, RNU, ROU, EXU dispatch paths. Comment out to revert to single-issue.
+`define YSYX_DUAL_ISSUE
+
 // Issue width (number of instructions dispatched per cycle)
 // Set to 1 for single-issue; increase for multi-issue
+`ifdef YSYX_DUAL_ISSUE
+`define YSYX_ISSUE_WIDTH 2
+`else
 `define YSYX_ISSUE_WIDTH 1
+`endif
 
 `ifdef YSYX_I_EXTENSION
 `define YSYX_REG_SIZE 32 // 32 registers

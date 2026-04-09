@@ -157,7 +157,7 @@ module ysyx_l1d #(
             .ren  (1'b1),
             .raddr(sram_raddr),
             .rdata(data_bank_rdata[w][gi]),
-            .wen  (l1d_update && (l1d_off == gi[L1D_LINE_LEN-1:0]) && (l1d_way == w[L1D_WAY_W-1:0])),
+            .wen  (l1d_update && (l1d_off == L1D_LINE_LEN'(gi)) && (l1d_way == L1D_WAY_W'(w))),
             .waddr(l1d_idx),
             .wdata(l1d_data_u)
         );
@@ -301,7 +301,7 @@ module ysyx_l1d #(
   always_comb begin
     load_hit_way = '0;
     for (int w = int'(L1D_N_WAYS)-1; w >= 0; w--)
-      if (way_tag_hit[addr_offset][w]) load_hit_way = w[L1D_WAY_W-1:0];
+      if (way_tag_hit[addr_offset][w]) load_hit_way = L1D_WAY_W'(w);
   end
 
   logic sram_bypass_r;
@@ -338,7 +338,7 @@ module ysyx_l1d #(
   always_comb begin
     store_hit_way = '0;
     for (int w = int'(L1D_N_WAYS)-1; w >= 0; w--)
-      if (way_whit[waddr_offset][w]) store_hit_way = w[L1D_WAY_W-1:0];
+      if (way_whit[waddr_offset][w]) store_hit_way = L1D_WAY_W'(w);
   end
   // Fill way selection for store miss (full-word write-allocate)
   logic [L1D_WAY_W-1:0] store_fill_way;
@@ -448,9 +448,7 @@ module ysyx_l1d #(
 
       reservation <= 'h0;
     end else begin
-      if ((lsu_l1d.wvalid && lsu_l1d.waddr[XLEN-1:2] == reservation[XLEN-1:2])
-        || exu_l1d.valid && exu_l1d.vaddr[XLEN-1:2] == reservation[XLEN-1:2]
-        || rou_cmu.valid_a && rou_cmu.atomic_sc) begin
+      if (rou_cmu.valid_a && rou_cmu.atomic_sc) begin
         reservation <= 'h0;
       end
       // if (l1d_bus.awvalid && csr_bcast.dmmu_en) begin
@@ -484,7 +482,7 @@ module ysyx_l1d #(
                   rec_addr <= lsu_l1d.raddr;
                   l1d_state <= TRAP;
                 end else if (tlb_hit) begin
-                  l1d_addr <= {dtlb_ptag, lsu_l1d.raddr[11:0]}[XLEN-1:0];
+                  l1d_addr <= XLEN'({dtlb_ptag, lsu_l1d.raddr[11:0]});
                   rec_addr <= lsu_l1d.raddr;
                   l1d_ralu  <= lsu_l1d.ralu;
                   l1d_state <= LD_A;

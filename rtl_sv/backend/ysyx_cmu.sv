@@ -62,6 +62,8 @@ module ysyx_cmu #(
   assign cmu_bcast.fence_i = rou_cmu.fence_i;
   assign cmu_bcast.flush_pipe = rou_cmu.flush_pipe;
 
+  assign cmu_bcast.rob_head = rou_cmu.rob_head;
+
   // Second commit slot info for freelist flush recovery
   assign cmu_bcast.rd_b = rou_cmu.rd_b;
   assign cmu_bcast.valid_b = rou_cmu.valid_b;

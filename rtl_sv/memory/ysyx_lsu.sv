@@ -21,7 +21,7 @@ module ysyx_lsu #(
     input reset
 );
   /* verilator lint_off UNUSEDSIGNAL */
-  typedef enum {
+  typedef enum logic {
     LS_S_V = 0,
     LS_S_R = 1
   } state_store_t;
@@ -227,7 +227,7 @@ module ysyx_lsu #(
   assign fwd_data = (stq_addr_conflict && stq_fwd_ok) ? stq_fwd_data : sq_fwd_data;
 
   assign raddr_valid = exu_lsu.rvalid && ((0)
-      || csr_bcast.dmmu_en                             // MMU on: all VAs valid (TLB/PTW handles faults)
+      || csr_bcast.dmmu_en  // MMU on: all VAs valid (TLB/PTW handles faults)
       || (raddr >= 'h02000048 && raddr < 'h02000050)  // clint
       || (raddr >= 'h0f000000 && raddr < 'h0f002000)  // sram
       || (raddr >= 'h10000000 && raddr < 'h10001000)  // uart/ns16550

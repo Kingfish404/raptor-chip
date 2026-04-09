@@ -125,7 +125,7 @@ void perf_sample_per_cycle()
   pmu.ifu_sys_hazard_cycle += ifu_hazard ? 1 : 0;
   // ROU structural hazard: RNU has a renamed uop but dispatch queue (UOQ) is full
   uint8_t rnq_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, rnu__DOT__rnq_valid));
-  uint8_t rnq_tail = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, rnu__DOT__rnq_tail));
+  uint8_t rnq_tail = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, rnu__DOT__rnq_tail_a));
   bool rnu_valid = (rnq_valid >> rnq_tail) & 1;
   pmu.rou_hazard_cycle += (rnu_valid && !rou_ready) ? 1 : 0;
   if (exu_ooo_valid && !exu_ooo_valid_found)

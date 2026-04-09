@@ -146,6 +146,8 @@ interface cmu_bcast_if #(
   logic flush_pipe;
   logic time_trap;
 
+  logic [$clog2(`YSYX_ROB_SIZE):0] rob_head;
+
   // Per-slot commit info (dual commit)
   logic [RLEN-1:0] rd_a;
   logic [RLEN-1:0] rd_b;
@@ -154,12 +156,14 @@ interface cmu_bcast_if #(
   modport in(
       input rpc, cpc, rd_a, ben, jen, jren, btaken, call, ret, rvc,
       input fence_time, fence_i, flush_pipe, time_trap,
-      input rd_b, valid_b
+      input rd_b, valid_b,
+      input rob_head
   );
   modport out(
       output rpc, cpc, rd_a, ben, jen, jren, btaken, call, ret, rvc,
       output fence_time, fence_i, flush_pipe, time_trap,
-      output rd_b, valid_b
+      output rd_b, valid_b,
+      output rob_head
   );
 endinterface
 

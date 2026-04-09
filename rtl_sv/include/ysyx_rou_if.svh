@@ -26,17 +26,22 @@ interface rou_csr_if #(
 
   logic valid;
 
+  logic retire_a;
+  logic retire_b;
+
   modport in(
       input pc,
       input csr_wen, csr_wdata, csr_addr, ecall, ebreak, mret, sret,
       input trap, tval, cause,
-      input valid
+      input valid,
+      input retire_a, retire_b
   );
   modport out(
       output pc,
       output csr_wen, csr_wdata, csr_addr, ecall, ebreak, mret, sret,
       output trap, tval, cause,
-      output valid
+      output valid,
+      output retire_a, retire_b
   );
 endinterface
 
@@ -46,6 +51,7 @@ interface rou_exu_if #(
     parameter unsigned RLEN = `YSYX_REG_LEN,
     parameter unsigned XLEN = `YSYX_XLEN
 );
+  // Slot A (always present)
   ysyx_pkg::uop_t uop;
 
   logic [XLEN-1:0] op1;
@@ -61,20 +67,38 @@ interface rou_exu_if #(
   logic valid;
   logic ready;
 
+`ifdef YSYX_DUAL_ISSUE
+  // Slot B (dual issue — younger instruction)
+  ysyx_pkg::uop_t uop_b;
+
+  logic [XLEN-1:0] op1_b;
+  logic [XLEN-1:0] op2_b;
+
+  logic [PLEN-1:0] pr1_b;
+  logic [PLEN-1:0] pr2_b;
+  logic [PLEN-1:0] prd_b;
+  logic [PLEN-1:0] prs_b;
+
+  logic [$clog2(`YSYX_ROB_SIZE):0] dest_b;
+
+  logic valid_b;
+  logic ready_b;
+`endif
+
   modport master(
-      output uop,
-      output op1, op2,
-      output pr1, pr2, prd, prs,
-      output dest,
-      output valid,
+      output uop, op1, op2, pr1, pr2, prd, prs, dest, valid,
+`ifdef YSYX_DUAL_ISSUE
+      output uop_b, op1_b, op2_b, pr1_b, pr2_b, prd_b, prs_b, dest_b, valid_b,
+      input ready_b,
+`endif
       input ready
   );
   modport slave(
-      input uop,
-      input op1, op2,
-      input pr1, pr2, prd, prs,
-      input dest,
-      input valid,
+      input uop, op1, op2, pr1, pr2, prd, prs, dest, valid,
+`ifdef YSYX_DUAL_ISSUE
+      input uop_b, op1_b, op2_b, pr1_b, pr2_b, prd_b, prs_b, dest_b, valid_b,
+      output ready_b,
+`endif
       output ready
   );
 endinterface
@@ -134,13 +158,16 @@ interface rou_cmu_if #(
   logic flush_pipe;
   logic time_trap;
 
+  logic [$clog2(`YSYX_ROB_SIZE):0] rob_head;
+
   modport out(
       output rd_a, inst_a, pc_a, prd_a, prs_a, npc_a,
       output ebreak_a, difftest_skip_a, valid_a,
       output rd_b, inst_b, pc_b, prd_b, prs_b, npc_b,
       output ebreak_b, difftest_skip_b, valid_b,
       output btaken, ben, jen, jren, atomic_sc,
-      output fence_time, fence_i, flush_pipe, time_trap
+      output fence_time, fence_i, flush_pipe, time_trap,
+      output rob_head
   );
   modport in(
       input rd_a, inst_a, pc_a, prd_a, prs_a, npc_a,
@@ -148,7 +175,8 @@ interface rou_cmu_if #(
       input rd_b, inst_b, pc_b, prd_b, prs_b, npc_b,
       input ebreak_b, difftest_skip_b, valid_b,
       input btaken, ben, jen, jren, atomic_sc,
-      input fence_time, fence_i, flush_pipe, time_trap
+      input fence_time, fence_i, flush_pipe, time_trap,
+      input rob_head
   );
 endinterface
 
