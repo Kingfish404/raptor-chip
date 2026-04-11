@@ -4,7 +4,7 @@
 
 Raptor is an out-of-order, dual-issue RISC-V processor core with register renaming, a reorder buffer (ROB), reservation stations, and virtual memory support. The pipeline fetches, decodes, renames, and dispatches up to **2 instructions per cycle** (`YSYX_DUAL_ISSUE`). The commit stage supports **dual commit** -- up to 2 instructions can retire from the ROB per cycle when consecutive entries are both ready.
 
-**ISA**: RV32/RV64 I + M (mul/div) + A (atomics: LR/SC, AMO) + C (compressed) + Zicsr + Zifencei + Sv32 MMU
+**ISA**: RV32/RV64 I + M (mul/div) + A (atomics: LR/SC, AMO) + C (compressed) + Zicntr (base counters) + Zicond (conditional zero) + Zicsr + Zifencei + Zba (address generation) + Zbb (basic bit-manipulation) + Zbs (single-bit operations) + Sv32 MMU
 
 The core supports configurable **RV32** and **RV64** modes via a compile-time switch (`YSYX_RV64`). When `YSYX_RV64` is defined, XLEN=64 and all datapath, register file, AXI bus, and DPI-C interfaces widen to 64 bits. RV64 adds W-variant instructions (ADDIW, SLLIW, etc.) with 32-bit result sign-extension.
 
@@ -188,28 +188,28 @@ AXI4 master bridge arbitrating L1I/L1D (L1D priority). Read FSM: 3-state (`LD_A`
 
 ### Inter-module (`ysyx_if.svh`, `ysyx_*_if.svh`)
 
-| Interface          | Direction        | Description                                       |
-| ------------------ | ---------------- | ------------------------------------------------- |
-| `ifu_bpu_if`       | IFU<->BPU        | PC for prediction; NPC + taken back               |
+| Interface          | Direction        | Description                                             |
+| ------------------ | ---------------- | ------------------------------------------------------- |
+| `ifu_bpu_if`       | IFU<->BPU        | PC for prediction; NPC + taken back                     |
 | `ifu_l1i_if`       | IFU<->L1I        | PC fetch request; `inst_n0` + `inst_n1` + trap response |
-| `ifu_idu_if`       | IFU<->IDU        | inst_a/b + PC_a/b + pnpc; early resteer back      |
-| `idu_rnu_if`       | IDU->RNU         | uop_a/b + operands + arch reg IDs                 |
-| `rnu_rou_if`       | RNU->ROU         | uop_a/b + physical reg mappings                   |
-| `rou_exu_if`       | ROU->EXU         | uop/uop_b + operands + ROB dest (dual dispatch)   |
-| `rou_lsu_if`       | ROU->LSU         | Store commit (addr/data/alu)                      |
-| `rou_csr_if`       | ROU->CSR         | CSR write + trap/system on commit                 |
-| `rou_cmu_if`       | ROU->CMU         | Commit info slot A/B (PC, branch, fence, flush)   |
-| `exu_rou_if`       | EXU->ROU         | RS writeback (result, branch, CSR, trap)          |
-| `exu_ioq_bcast_if` | EXU->ROU/PRF/LSU | IOQ broadcast (ld/st/CSR result)                  |
-| `exu_prf_if`       | ROU->PRF         | Operand read (4 ports: 2 per slot)                |
-| `exu_lsu_if`       | EXU->LSU         | Load request (addr/alu/atomic)                    |
-| `exu_csr_if`       | EXU->CSR         | CSR read port                                     |
-| `exu_l1d_if`       | EXU->L1D         | Store MMU + SC reservation check                  |
-| `cmu_bcast_if`     | CMU->all         | Retire broadcast (flush, fence, branch, call/ret) |
-| `csr_bcast_if`     | CSR->all         | Priv, SATP, MMU enable, tvec                      |
-| `lsu_l1d_if`       | LSU->L1D         | Load/store data path                              |
-| `l1i_bus_if`       | L1I->BUS         | I-cache miss read                                 |
-| `l1d_bus_if`       | L1D->BUS         | D-cache miss read + write-through                 |
+| `ifu_idu_if`       | IFU<->IDU        | inst_a/b + PC_a/b + pnpc; early resteer back            |
+| `idu_rnu_if`       | IDU->RNU         | uop_a/b + operands + arch reg IDs                       |
+| `rnu_rou_if`       | RNU->ROU         | uop_a/b + physical reg mappings                         |
+| `rou_exu_if`       | ROU->EXU         | uop/uop_b + operands + ROB dest (dual dispatch)         |
+| `rou_lsu_if`       | ROU->LSU         | Store commit (addr/data/alu)                            |
+| `rou_csr_if`       | ROU->CSR         | CSR write + trap/system on commit                       |
+| `rou_cmu_if`       | ROU->CMU         | Commit info slot A/B (PC, branch, fence, flush)         |
+| `exu_rou_if`       | EXU->ROU         | RS writeback (result, branch, CSR, trap)                |
+| `exu_ioq_bcast_if` | EXU->ROU/PRF/LSU | IOQ broadcast (ld/st/CSR result)                        |
+| `exu_prf_if`       | ROU->PRF         | Operand read (4 ports: 2 per slot)                      |
+| `exu_lsu_if`       | EXU->LSU         | Load request (addr/alu/atomic)                          |
+| `exu_csr_if`       | EXU->CSR         | CSR read port                                           |
+| `exu_l1d_if`       | EXU->L1D         | Store MMU + SC reservation check                        |
+| `cmu_bcast_if`     | CMU->all         | Retire broadcast (flush, fence, branch, call/ret)       |
+| `csr_bcast_if`     | CSR->all         | Priv, SATP, MMU enable, tvec                            |
+| `lsu_l1d_if`       | LSU->L1D         | Load/store data path                                    |
+| `l1i_bus_if`       | L1I->BUS         | I-cache miss read                                       |
+| `l1d_bus_if`       | L1D->BUS         | D-cache miss read + write-through                       |
 
 ### RNU internal (`ysyx_rnu_internal_if.svh`)
 

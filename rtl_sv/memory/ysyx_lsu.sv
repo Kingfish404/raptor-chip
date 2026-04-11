@@ -99,7 +99,7 @@ module ysyx_lsu #(
         if (exu_ioq_bcast.valid && exu_ioq_bcast.wen) begin
           stq_valid[stq_tail] <= 1;
 
-          stq_alu[stq_tail] <= exu_ioq_bcast.alu;
+          stq_alu[stq_tail] <= exu_ioq_bcast.alu[4:0];
           stq_waddr[stq_tail] <= exu_ioq_bcast.tval;  // virtual addr for forwarding
           stq_wdata[stq_tail] <= exu_ioq_bcast.sq_wdata;
           stq_tail <= stq_tail + 1;
@@ -113,7 +113,7 @@ module ysyx_lsu #(
         // Store Commit
         sq_valid[sq_tail] <= 1;
 
-        sq_alu[sq_tail] <= rou_lsu.alu;
+        sq_alu[sq_tail] <= rou_lsu.alu[4:0];
         sq_waddr[sq_tail] <= rou_lsu.sq_waddr;
         sq_vaddr[sq_tail] <= stq_waddr[stq_head];  // virtual addr from STQ
         sq_wdata[sq_tail] <= rou_lsu.sq_wdata;

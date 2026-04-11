@@ -1,4 +1,4 @@
-CFLAGS=-march=rv32ima_zicsr_zifencei_zicntr -mabi=ilp32 -nostdlib
+CFLAGS=-march=rv32ima_zicntr_zicond_zicsr_zifencei_zba_zbb_zbs -mabi=ilp32 -nostdlib
 
 help: ## Show this help message
 	@echo "Usage: make <target> [VAR=value ...]"

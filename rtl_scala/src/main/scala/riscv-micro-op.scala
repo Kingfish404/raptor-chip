@@ -4,59 +4,93 @@ import chisel3._
 import chisel3.util._
 
 trait MicroOP {
-  def ALU_ILL_ = "01001"
+  def ALU_ILL_ = "001001"
 
-  def ALU_ADD_ = "00000"
-  def ALU_SUB_ = "01000"
-  def ALU_EQ__ = "01100"
-  def ALU_SLT_ = "00010"
-  def ALU_SLE_ = "01010"
-  def ALU_SGE_ = "01110"
-  def ALU_SLTU = "00011"
-  def ALU_SLEU = "01011"
-  def ALU_SGEU = "01111"
-  def ALU_XOR_ = "00100"
-  def ALU_OR__ = "00110"
-  def ALU_AND_ = "00111"
+  def ALU_ADD_ = "000000"
+  def ALU_SUB_ = "001000"
+  def ALU_EQ__ = "001100"
+  def ALU_SLT_ = "000010"
+  def ALU_SLE_ = "001010"
+  def ALU_SGE_ = "001110"
+  def ALU_SLTU = "000011"
+  def ALU_SLEU = "001011"
+  def ALU_SGEU = "001111"
+  def ALU_XOR_ = "000100"
+  def ALU_OR__ = "000110"
+  def ALU_AND_ = "000111"
 
-  def ALU_SLL_ = "00001"
-  def ALU_SRL_ = "00101"
-  def ALU_SRA_ = "01101"
+  def ALU_SLL_ = "000001"
+  def ALU_SRL_ = "000101"
+  def ALU_SRA_ = "001101"
 
-  def ALU_MUL_ = "11000"
-  def ALU_MULH = "11001"
-  def ALU_MULS = "11010"
-  def ALU_MULU = "11011"
-  def ALU_DIV_ = "11100"
-  def ALU_DIVU = "11101"
-  def ALU_REM_ = "11110"
-  def ALU_REMU = "11111"
+  def ALU_MUL_ = "011000"
+  def ALU_MULH = "011001"
+  def ALU_MULS = "011010"
+  def ALU_MULU = "011011"
+  def ALU_DIV_ = "011100"
+  def ALU_DIVU = "011101"
+  def ALU_REM_ = "011110"
+  def ALU_REMU = "011111"
+
+  // Zba (Address Generation)
+  def ALU_SH1ADD = "100000"
+  def ALU_SH2ADD = "100001"
+  def ALU_SH3ADD = "100010"
+
+  // Zbb (Basic Bit-manipulation)
+  def ALU_ANDN  = "100011"
+  def ALU_ORN   = "100100"
+  def ALU_XNOR  = "100101"
+  def ALU_CLZ   = "100110"
+  def ALU_CTZ   = "100111"
+  def ALU_CPOP  = "101000"
+  def ALU_MAX   = "101001"
+  def ALU_MAXU  = "101010"
+  def ALU_MIN   = "101011"
+  def ALU_MINU  = "101100"
+  def ALU_SEXTB = "101101"
+  def ALU_SEXTH = "101110"
+  def ALU_ZEXTH = "101111"
+  def ALU_REV8  = "110000"
+  def ALU_ORCB  = "110001"
+  def ALU_ROL   = "110010"
+  def ALU_ROR   = "110011"
+
+  // Zbs (Single-bit Operations)
+  def ALU_BCLR = "110100"
+  def ALU_BEXT = "110101"
+  def ALU_BINV = "110110"
+  def ALU_BSET = "110111"
+
+  // Zicond (Conditional Operations)
+  def ALU_CZERO_EQZ = "111000"
+  def ALU_CZERO_NEZ = "111001"
 
   // w: word 32, h: half 16, b: byte 8, d: doubleword 64
-  def LSU_LB_ = "00000"
-  def LSU_LH_ = "00001"
-  def LSU_LW_ = "00010"
-  def LSU_LBU = "00100"
-  def LSU_LHU = "00101"
-  def LSU_LWU = "00110"
-  def LSU_LD_ = "00011"
+  def LSU_LB_ = "000000"
+  def LSU_LH_ = "000001"
+  def LSU_LW_ = "000010"
+  def LSU_LBU = "000100"
+  def LSU_LHU = "000101"
+  def LSU_LWU = "000110"
+  def LSU_LD_ = "000011"
 
-  def LSU_SB_ = "00001" // alu_op to axi wstrb
-  def LSU_SH_ = "00011" // alu_op to axi wstrb
-  def LSU_SW_ = "01111" // alu_op to axi wstrb
-  def LSU_SD_ = "11111" // alu_op to axi wstrb (8 bytes)
+  def LSU_SB_ = "000001" // alu_op to axi wstrb
+  def LSU_SH_ = "000011" // alu_op to axi wstrb
+  def LSU_SW_ = "001111" // alu_op to axi wstrb
+  def LSU_SD_ = "011111" // alu_op to axi wstrb (8 bytes)
 
-  def ATO_LR__ = "00000"
-  def ATO_SC__ = "00001"
-  def ATO_SWAP = "00010"
-  def ATO_ADD_ = "00011"
-  def ATO_XOR_ = "00100"
-  def ATO_AND_ = "00101"
-  def ATO_OR__ = "00110"
-  def ATO_MIN_ = "00111"
-  def ATO_MAX_ = "01000"
-  def ATO_MINU = "01100"
-  def ATO_MAXU = "01010"
+  def ATO_LR__ = "000000"
+  def ATO_SC__ = "000001"
+  def ATO_SWAP = "000010"
+  def ATO_ADD_ = "000011"
+  def ATO_XOR_ = "000100"
+  def ATO_AND_ = "000101"
+  def ATO_OR__ = "000110"
+  def ATO_MIN_ = "000111"
+  def ATO_MAX_ = "001000"
+  def ATO_MINU = "001100"
+  def ATO_MAXU = "001010"
 
   // Supervisor-level CSR
   def SSTATUS = "h100".U(12.W)

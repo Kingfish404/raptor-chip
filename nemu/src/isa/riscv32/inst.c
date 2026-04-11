@@ -209,6 +209,57 @@ static int decode_exec(Decode *s)
   INSTPAT("000000? ????? ????? 001 ????? 00100 11", slli, I, R(rd) = src1 << (imm & 0x3f));
   INSTPAT("000000? ????? ????? 101 ????? 00100 11", srli, I, R(rd) = (word_t)src1 >> (imm & 0x3f));
   INSTPAT("010000? ????? ????? 101 ????? 00100 11", srai, I, R(rd) = (sword_t)src1 >> (imm & 0x3f));
+
+  // Zbb Extension (OP-IMM encoded)
+  INSTPAT("0110000 00000 ????? 001 ????? 00100 11", clz, I, {
+    word_t x = src1; unsigned count = sizeof(word_t) * 8;
+    for (int i = sizeof(word_t) * 8 - 1; i >= 0; i--) { if ((x >> i) & 1) { count = sizeof(word_t) * 8 - 1 - i; break; } }
+    R(rd) = count; });
+  INSTPAT("0110000 00001 ????? 001 ????? 00100 11", ctz, I, {
+    word_t x = src1; unsigned count = sizeof(word_t) * 8;
+    for (unsigned i = 0; i < sizeof(word_t) * 8; i++) { if ((x >> i) & 1) { count = i; break; } }
+    R(rd) = count; });
+  INSTPAT("0110000 00010 ????? 001 ????? 00100 11", cpop, I, {
+    word_t x = src1; unsigned count = 0;
+    for (unsigned i = 0; i < sizeof(word_t) * 8; i++) { if ((x >> i) & 1) count++; }
+    R(rd) = count; });
+  INSTPAT("0110000 00100 ????? 001 ????? 00100 11", sext.b, I, R(rd) = SEXT(src1 & 0xff, 8));
+  INSTPAT("0110000 00101 ????? 001 ????? 00100 11", sext.h, I, R(rd) = SEXT(src1 & 0xffff, 16));
+#ifndef CONFIG_RV64
+  INSTPAT("0110100 11000 ????? 101 ????? 00100 11", rev8, I, {
+    word_t x = src1, result = 0;
+    result |= (x & 0xff) << 24; result |= ((x >> 8) & 0xff) << 16;
+    result |= ((x >> 16) & 0xff) << 8; result |= ((x >> 24) & 0xff);
+    R(rd) = result; });
+  INSTPAT("0110000 ????? ????? 101 ????? 00100 11", rori, I, {
+    unsigned shamt = imm & 0x1f;
+    R(rd) = ((word_t)src1 >> shamt) | (src1 << ((32 - shamt) & 31)); });
+
+  // Zbs Extension (OP-IMM encoded, RV32)
+  INSTPAT("0100100 ????? ????? 001 ????? 00100 11", bclri, I, R(rd) = src1 & ~((word_t)1 << (imm & 0x1f)));
+  INSTPAT("0100100 ????? ????? 101 ????? 00100 11", bexti, I, R(rd) = ((word_t)src1 >> (imm & 0x1f)) & 1);
+  INSTPAT("0110100 ????? ????? 001 ????? 00100 11", binvi, I, R(rd) = src1 ^ ((word_t)1 << (imm & 0x1f)));
+  INSTPAT("0010100 ????? ????? 001 ????? 00100 11", bseti, I, R(rd) = src1 | ((word_t)1 << (imm & 0x1f)));
+#else
+  INSTPAT("0110101 11000 ????? 101 ????? 00100 11", rev8, I, {
+    word_t x = src1, result = 0;
+    for (int i = 0; i < 8; i++) result |= ((x >> (i * 8)) & 0xff) << ((7 - i) * 8);
+    R(rd) = result; });
+  INSTPAT("011000? ????? ????? 101 ????? 00100 11", rori, I, {
+    unsigned shamt = imm & 0x3f;
+    R(rd) = ((word_t)src1 >> shamt) | (src1 << ((64 - shamt) & 63)); });
+  // Zbs Extension (OP-IMM encoded, RV64)
+  INSTPAT("010010? ????? ????? 001 ????? 00100 11", bclri, I, R(rd) = src1 & ~((word_t)1 << (imm & 0x3f)));
+  INSTPAT("010010? ????? ????? 101 ????? 00100 11", bexti, I, R(rd) = ((word_t)src1 >> (imm & 0x3f)) & 1);
+  INSTPAT("011010? ????? ????? 001 ????? 00100 11", binvi, I, R(rd) = src1 ^ ((word_t)1 << (imm & 0x3f)));
+  INSTPAT("001010? ????? ????? 001 ????? 00100 11", bseti, I, R(rd) = src1 | ((word_t)1 << (imm & 0x3f)));
+#endif
+  INSTPAT("0010100 00111 ????? 101 ????? 00100 11", orc.b, I, {
+    word_t x = src1, result = 0;
+    for (unsigned i = 0; i < sizeof(word_t); i++) {
+      if ((x >> (i * 8)) & 0xff) result |= (word_t)0xff << (i * 8);
+    }
+    R(rd) = result; });
   INSTPAT_CASE_END(grp_opimm)
 
   INSTPAT_CASE(0b01100, grp_op) // OP + RV32M
@@ -231,13 +282,65 @@ static int decode_exec(Decode *s)
   INSTPAT("0000001 ????? ????? 101 ????? 01100 11", divu, R, R(rd) = ((word_t)src2 == 0) ? ~0 : (word_t)src1 / (word_t)src2);
   INSTPAT("0000001 ????? ????? 110 ????? 01100 11", rem, R, R(rd) = (sword_t)src1 % (sword_t)src2);
   INSTPAT("0000001 ????? ????? 111 ????? 01100 11", remu, R, R(rd) = (word_t)src1 % (word_t)src2);
+
+  // Zba Extension
+  INSTPAT("0010000 ????? ????? 010 ????? 01100 11", sh1add, R, R(rd) = (src1 << 1) + src2);
+  INSTPAT("0010000 ????? ????? 100 ????? 01100 11", sh2add, R, R(rd) = (src1 << 2) + src2);
+  INSTPAT("0010000 ????? ????? 110 ????? 01100 11", sh3add, R, R(rd) = (src1 << 3) + src2);
+
+  // Zbb Extension
+  INSTPAT("0100000 ????? ????? 111 ????? 01100 11", andn, R, R(rd) = src1 & ~src2);
+  INSTPAT("0100000 ????? ????? 110 ????? 01100 11", orn, R, R(rd) = src1 | ~src2);
+  INSTPAT("0100000 ????? ????? 100 ????? 01100 11", xnor, R, R(rd) = src1 ^ ~src2);
+  INSTPAT("0000101 ????? ????? 110 ????? 01100 11", max, R, R(rd) = ((sword_t)src1 > (sword_t)src2) ? src1 : src2);
+  INSTPAT("0000101 ????? ????? 111 ????? 01100 11", maxu, R, R(rd) = ((word_t)src1 > (word_t)src2) ? src1 : src2);
+  INSTPAT("0000101 ????? ????? 100 ????? 01100 11", min, R, R(rd) = ((sword_t)src1 < (sword_t)src2) ? src1 : src2);
+  INSTPAT("0000101 ????? ????? 101 ????? 01100 11", minu, R, R(rd) = ((word_t)src1 < (word_t)src2) ? src1 : src2);
+  INSTPAT("0110000 ????? ????? 001 ????? 01100 11", rol, R, {
+    unsigned shamt = src2 & (sizeof(word_t) * 8 - 1);
+    R(rd) = (src1 << shamt) | ((word_t)src1 >> ((sizeof(word_t) * 8 - shamt) & (sizeof(word_t) * 8 - 1))); });
+  INSTPAT("0110000 ????? ????? 101 ????? 01100 11", ror, R, {
+    unsigned shamt = src2 & (sizeof(word_t) * 8 - 1);
+    R(rd) = ((word_t)src1 >> shamt) | (src1 << ((sizeof(word_t) * 8 - shamt) & (sizeof(word_t) * 8 - 1))); });
+#ifndef CONFIG_RV64
+  INSTPAT("0000100 00000 ????? 100 ????? 01100 11", zext.h, R, R(rd) = (word_t)(uint16_t)src1);
+#endif
+
+  // Zbs Extension
+  INSTPAT("0100100 ????? ????? 001 ????? 01100 11", bclr, R, R(rd) = src1 & ~((word_t)1 << (src2 & (sizeof(word_t) * 8 - 1))));
+  INSTPAT("0100100 ????? ????? 101 ????? 01100 11", bext, R, R(rd) = ((word_t)src1 >> (src2 & (sizeof(word_t) * 8 - 1))) & 1);
+  INSTPAT("0110100 ????? ????? 001 ????? 01100 11", binv, R, R(rd) = src1 ^ ((word_t)1 << (src2 & (sizeof(word_t) * 8 - 1))));
+  INSTPAT("0010100 ????? ????? 001 ????? 01100 11", bset, R, R(rd) = src1 | ((word_t)1 << (src2 & (sizeof(word_t) * 8 - 1))));
+
+  // Zicond (Conditional Operations)
+  INSTPAT("0000111 ????? ????? 101 ????? 01100 11", czero.eqz, R, R(rd) = (src2 == 0) ? 0 : src1);
+  INSTPAT("0000111 ????? ????? 111 ????? 01100 11", czero.nez, R, R(rd) = (src2 != 0) ? 0 : src1);
   INSTPAT_CASE_END(grp_op)
 
+  // RV64I OP-IMM-32 and OP-32 (overrides RV32 versions when CONFIG_RV64)
   INSTPAT_CASE(0b00110, grp_opimm32) // OP-IMM-32 (RV64 only)
   INSTPAT("??????? ????? ????? 000 ????? 00110 11", addiw, I, R(rd) = SEXT((uint32_t)src1 + imm, 32));
   INSTPAT("0000000 ????? ????? 001 ????? 00110 11", slliw, I, R(rd) = SEXT((uint32_t)src1 << (imm & 0x1f), 32));
   INSTPAT("0000000 ????? ????? 101 ????? 00110 11", srliw, I, R(rd) = SEXT((uint32_t)src1 >> (imm & 0x1f), 32));
   INSTPAT("0100000 ????? ????? 101 ????? 00110 11", sraiw, I, R(rd) = SEXT((int32_t)src1 >> (imm & 0x1f), 32));
+  // Zba Extension (RV64 only)
+  INSTPAT("000010? ????? ????? 001 ????? 00110 11", slli.uw, I, R(rd) = (word_t)(uint32_t)src1 << (imm & 0x3f));
+  // Zbb Extension (RV64 only)
+  INSTPAT("0110000 00000 ????? 001 ????? 00110 11", clzw, I, {
+    uint32_t x = (uint32_t)src1; unsigned count = 32;
+    for (int i = 31; i >= 0; i--) { if ((x >> i) & 1) { count = 31 - i; break; } }
+    R(rd) = count; });
+  INSTPAT("0110000 00001 ????? 001 ????? 00110 11", ctzw, I, {
+    uint32_t x = (uint32_t)src1; unsigned count = 32;
+    for (unsigned i = 0; i < 32; i++) { if ((x >> i) & 1) { count = i; break; } }
+    R(rd) = count; });
+  INSTPAT("0110000 00010 ????? 001 ????? 00110 11", cpopw, I, {
+    uint32_t x = (uint32_t)src1; unsigned count = 0;
+    for (unsigned i = 0; i < 32; i++) { if ((x >> i) & 1) count++; }
+    R(rd) = count; });
+  INSTPAT("0110000 ????? ????? 101 ????? 00110 11", roriw, I, {
+    uint32_t x = (uint32_t)src1; unsigned shamt = imm & 0x1f;
+    R(rd) = SEXT((x >> shamt) | (x << ((32 - shamt) & 31)), 32); });
   INSTPAT_CASE_END(grp_opimm32)
 
   INSTPAT_CASE(0b01110, grp_op32) // OP-32 + RV64M (RV64 only)
@@ -252,10 +355,23 @@ static int decode_exec(Decode *s)
   INSTPAT("0000001 ????? ????? 101 ????? 01110 11", divuw, R, R(rd) = SEXT((uint32_t)src1 / (uint32_t)src2, 32));
   INSTPAT("0000001 ????? ????? 110 ????? 01110 11", remw, R, R(rd) = SEXT((int32_t)src1 % (int32_t)src2, 32));
   INSTPAT("0000001 ????? ????? 111 ????? 01110 11", remuw, R, R(rd) = SEXT((uint32_t)src1 % (uint32_t)src2, 32));
+  // Zba Extension (RV64 only)
+  INSTPAT("0010000 ????? ????? 010 ????? 01110 11", sh1add.uw, R, R(rd) = ((word_t)(uint32_t)src1 << 1) + src2);
+  INSTPAT("0010000 ????? ????? 100 ????? 01110 11", sh2add.uw, R, R(rd) = ((word_t)(uint32_t)src1 << 2) + src2);
+  INSTPAT("0010000 ????? ????? 110 ????? 01110 11", sh3add.uw, R, R(rd) = ((word_t)(uint32_t)src1 << 3) + src2);
+  INSTPAT("0000100 ????? ????? 000 ????? 01110 11", add.uw, R, R(rd) = (word_t)(uint32_t)src1 + src2);
+  // Zbb Extension (RV64 only)
+  INSTPAT("0000100 00000 ????? 100 ????? 01110 11", zext.h, R, R(rd) = (word_t)(uint16_t)src1);
+  INSTPAT("0110000 ????? ????? 001 ????? 01110 11", rolw, R, {
+    uint32_t x = (uint32_t)src1; unsigned shamt = src2 & 31;
+    R(rd) = SEXT((x << shamt) | (x >> ((32 - shamt) & 31)), 32); });
+  INSTPAT("0110000 ????? ????? 101 ????? 01110 11", rorw, R, {
+    uint32_t x = (uint32_t)src1; unsigned shamt = src2 & 31;
+    R(rd) = SEXT((x >> shamt) | (x << ((32 - shamt) & 31)), 32); });
   INSTPAT_CASE_END(grp_op32)
 
-  INSTPAT_CASE(0b00011, grp_miscmem)                               // MISC-MEM (fence, fence.i, fence.time, fence.tso, pause)
-  INSTPAT("0000000 10000 00000 000 00000 00011 11", pause, N, {}); // hint instruction (include in fence)
+  INSTPAT_CASE(0b00011, grp_miscmem)                                   // MISC-MEM (fence, fence.i, fence.time, fence.tso, pause)
+  INSTPAT("0000000 10000 00000 000 00000 00011 11", pause, N, {});     // hint instruction (include in fence)
   INSTPAT("1000001 10011 00000 000 00000 00011 11", fence_tso, N, {}); // fence.tso: inst[6:2]=0b00011, same MISC-MEM group
   INSTPAT("??????? ????? ????? 000 ????? 00011 11", fence, N, {});
   INSTPAT("??????? ????? ????? 001 ????? 00011 11", fence_i, I, {});
@@ -383,6 +499,8 @@ static int decode_exec(Decode *s)
 
   CSR(CSR_CYCLE_) = CSR(CSR_CYCLE_) + 0x1;
   CSR(CSR_MCYCLE) = CSR(CSR_MCYCLE) + 0x1;
+  CSR(CSR_INSTRET) = CSR(CSR_INSTRET) + 0x1;
+  CSR(CSR_MINSTRET) = CSR(CSR_INSTRET);
   // CSR_TIME scaled to 10MHz (matching DTS timebase-frequency)
 #if defined(CONFIG_TIMER_CYCLE)
   // 1GHz / 10MHz = 100 cycles per tick

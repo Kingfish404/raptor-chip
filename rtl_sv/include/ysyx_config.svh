@@ -10,10 +10,10 @@
 // Default is RV32 when YSYX_RV64 is not defined
 `ifdef YSYX_RV64
 `define YSYX_XLEN 64
-`define YSYX_MISA 'h8000000000141105
+`define YSYX_MISA 'h8000000000141107
 `else
 `define YSYX_XLEN 32
-`define YSYX_MISA 'h40141105
+`define YSYX_MISA 'h40141107
 `endif
 `define YSYX_I_EXTENSION 'h1
 `define YSYX_M_EXTENSION 'h1

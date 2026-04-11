@@ -46,8 +46,8 @@ build_linux: linux ## Build Linux kernel for RISC-V 32-bit
 		./scripts/config --enable CONFIG_ARCH_RV32I && \
 		./scripts/config --disable CONFIG_FPU && \
 		./scripts/config --disable CONFIG_RISCV_ISA_ZAWRS && \
-		./scripts/config --disable CONFIG_RISCV_ISA_ZBA && \
-		./scripts/config --disable CONFIG_RISCV_ISA_ZBB && \
+		./scripts/config --enable CONFIG_RISCV_ISA_ZBA && \
+		./scripts/config --enable CONFIG_RISCV_ISA_ZBB && \
 		./scripts/config --disable CONFIG_RISCV_ISA_ZBC && \
 		./scripts/config --disable CONFIG_RISCV_ISA_ZICBOM && \
 		./scripts/config --disable CONFIG_RISCV_ISA_ZICBOZ && \
@@ -80,11 +80,11 @@ opensbi: ## Clone OpenSBI
 	git clone https://github.com/riscv-software-src/opensbi
 
 build_opensbi: opensbi ## Build OpenSBI standalone
-	make -C opensbi PLATFORM_RISCV_ISA=rv32imac_zicntr_zicsr_zifencei \
+	make -C opensbi PLATFORM_RISCV_ISA=rv32imac_zicntr_zicond_zicsr_zifencei_zba_zbb_zbs \
 		CROSS_COMPILE=riscv64-linux-gnu- PLATFORM_RISCV_XLEN=32 PLATFORM=generic -j`nproc`
 
 build_opensbi_with_kernel: opensbi ## Build OpenSBI with Linux kernel as payload
-	make -C opensbi PLATFORM_RISCV_ISA=rv32imac_zicntr_zicsr_zifencei \
+	make -C opensbi PLATFORM_RISCV_ISA=rv32imac_zicntr_zicond_zicsr_zifencei_zba_zbb_zbs \
 		CROSS_COMPILE=riscv64-linux-gnu- PLATFORM_RISCV_XLEN=32 PLATFORM=generic \
 		FW_PAYLOAD_PATH=$(PWD_DIR)/linux/arch/riscv/boot/Image -j`nproc`
 

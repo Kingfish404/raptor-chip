@@ -107,7 +107,7 @@ interface rou_lsu_if #(
     parameter int XLEN = `YSYX_XLEN
 );
   logic store;
-  logic [4:0] alu;
+  logic [5:0] alu;
   logic [XLEN-1:0] sq_waddr;
   logic [XLEN-1:0] sq_wdata;
   logic [XLEN-1:0] pc;

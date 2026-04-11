@@ -68,7 +68,7 @@ module ysyx_rnu_freelist #(
             - (fl.dealloc_req_a ? 1 : 0)
             - (fl.dealloc_req_b ? 1 : 0);
 `else
-        if (do_alloc) begin
+        if (do_alloc_a) begin
           head <= head + 1;
         end
         // Update in-flight count: +1 for alloc, -1 per dealloc

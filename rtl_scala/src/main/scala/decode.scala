@@ -10,7 +10,7 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
     val pc   = Input(UInt(64.W))
   })
   val out     = IO(new Bundle {
-    val alu  = Output(UInt(5.W))
+    val alu  = Output(UInt(6.W))
     val word = Output(UInt(1.W))
     val ben  = Output(UInt(1.W))
     val jen  = Output(UInt(1.W))
@@ -108,23 +108,23 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
       OR____ -> BitPat("b" + "00" + ALU_OR__), // R
       AND___ -> BitPat("b" + "00" + ALU_AND_), // R
 
-      ECALL_ -> BitPat("b" + "00" + "0???0"), // N
-      EBREAK -> BitPat("b" + "00" + "0???0"), // N
+      ECALL_ -> BitPat("b" + "00" + ALU_ADD_), // N
+      EBREAK -> BitPat("b" + "00" + ALU_ADD_), // N
 
     // format: off
-   FENCE____ -> BitPat("b" + "00" + "0???0"), // N (also covers FENCE.TSO)
-   FENCE_I__ -> BitPat("b" + "00" + "0???0"), // N
-   FENCE_TIM -> BitPat("b" + "00" + "0???0"), // N
+   FENCE____ -> BitPat("b" + "00" + ALU_ADD_), // N (also covers FENCE.TSO)
+   FENCE_I__ -> BitPat("b" + "00" + ALU_ADD_), // N
+   FENCE_TIM -> BitPat("b" + "00" + ALU_ADD_), // N
 
-   SFENCE_VM -> BitPat("b" + "00" + "0???0"), // N
+   SFENCE_VM -> BitPat("b" + "00" + ALU_ADD_), // N
     // format: on
 
-      CSRRW_ -> BitPat("b" + "00" + "0???0"), // CSR
-      CSRRS_ -> BitPat("b" + "00" + "0???0"), // CSR
-      CSRRC_ -> BitPat("b" + "00" + "0???0"), // CSR
-      CSRRWI -> BitPat("b" + "00" + "0???0"), // CSR
-      CSRRSI -> BitPat("b" + "00" + "0???0"), // CSR
-      CSRRCI -> BitPat("b" + "00" + "0???0"), // CSR
+      CSRRW_ -> BitPat("b" + "00" + ALU_ADD_), // CSR
+      CSRRS_ -> BitPat("b" + "00" + ALU_ADD_), // CSR
+      CSRRC_ -> BitPat("b" + "00" + ALU_ADD_), // CSR
+      CSRRWI -> BitPat("b" + "00" + ALU_ADD_), // CSR
+      CSRRSI -> BitPat("b" + "00" + ALU_ADD_), // CSR
+      CSRRCI -> BitPat("b" + "00" + ALU_ADD_), // CSR
 
       MUL___ -> BitPat("b" + "00" + ALU_MUL_), // R
       MULH__ -> BitPat("b" + "00" + ALU_MULH), // R
@@ -160,15 +160,15 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
       // RV64A
       LR_D__    -> BitPat("b" + "10" + ATO_LR__), // R
       SC_D__    -> BitPat("b" + "01" + ATO_SC__), // R
-   AMOSWAP_D -> BitPat("b" + "11" + ATO_SWAP), // R
-   AMOADD_D_ -> BitPat("b" + "11" + ATO_ADD_), // R
-   AMOXOR_D_ -> BitPat("b" + "11" + ATO_XOR_), // R
-   AMOAND_D_ -> BitPat("b" + "11" + ATO_AND_), // R
-   AMOOR_D__ -> BitPat("b" + "11" + ATO_OR__), // R
-   AMOMIN_D_ -> BitPat("b" + "11" + ATO_MIN_), // R
-   AMOMAX_D_ -> BitPat("b" + "11" + ATO_MAX_), // R
-   AMOMINU_D -> BitPat("b" + "11" + ATO_MINU), // R
-   AMOMAXU_D -> BitPat("b" + "11" + ATO_MAXU), // R
+      AMOSWAP_D -> BitPat("b" + "11" + ATO_SWAP), // R
+      AMOADD_D_ -> BitPat("b" + "11" + ATO_ADD_), // R
+      AMOXOR_D_ -> BitPat("b" + "11" + ATO_XOR_), // R
+      AMOAND_D_ -> BitPat("b" + "11" + ATO_AND_), // R
+      AMOOR_D__ -> BitPat("b" + "11" + ATO_OR__), // R
+      AMOMIN_D_ -> BitPat("b" + "11" + ATO_MIN_), // R
+      AMOMAX_D_ -> BitPat("b" + "11" + ATO_MAX_), // R
+      AMOMINU_D -> BitPat("b" + "11" + ATO_MINU), // R
+      AMOMAXU_D -> BitPat("b" + "11" + ATO_MAXU), // R
 
       // TODO: add reservation for lr/sc
       // format: off
@@ -185,18 +185,74 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
    AMOMAXU_W -> BitPat("b" + "11" + ATO_MAXU), // R
       // format: on
 
-      MRET__ -> BitPat("b" + "00" + "0???0"), // N
-      SRET__ -> BitPat("b" + "00" + "0???0"), // N
+      MRET__ -> BitPat("b" + "00" + ALU_ADD_), // N
+      SRET__ -> BitPat("b" + "00" + ALU_ADD_), // N
 
-      WFI___ -> BitPat("b" + "00" + ALU_ADD_) // N
+      WFI___ -> BitPat("b" + "00" + ALU_ADD_), // N
+
+      // Zba (Address Generation)
+      SH1ADD -> BitPat("b" + "00" + ALU_SH1ADD), // R
+      SH2ADD -> BitPat("b" + "00" + ALU_SH2ADD), // R
+      SH3ADD -> BitPat("b" + "00" + ALU_SH3ADD), // R
+
+      // Zbb (Basic Bit-manipulation)
+      ANDN__  -> BitPat("b" + "00" + ALU_ANDN),  // R
+      ORN___  -> BitPat("b" + "00" + ALU_ORN),   // R
+      XNOR__  -> BitPat("b" + "00" + ALU_XNOR),  // R
+      CLZ___  -> BitPat("b" + "00" + ALU_CLZ),   // I (unary)
+      CTZ___  -> BitPat("b" + "00" + ALU_CTZ),   // I (unary)
+      CPOP__  -> BitPat("b" + "00" + ALU_CPOP),  // I (unary)
+      MAX___  -> BitPat("b" + "00" + ALU_MAX),   // R
+      MAXU__  -> BitPat("b" + "00" + ALU_MAXU),  // R
+      MIN___  -> BitPat("b" + "00" + ALU_MIN),   // R
+      MINU__  -> BitPat("b" + "00" + ALU_MINU),  // R
+      SEXTB_  -> BitPat("b" + "00" + ALU_SEXTB), // I (unary)
+      SEXTH_  -> BitPat("b" + "00" + ALU_SEXTH), // I (unary)
+      ZEXTH_  -> BitPat("b" + "00" + ALU_ZEXTH), // R (PACK rd,rs1,x0)
+      REV8_32 -> BitPat("b" + "00" + ALU_REV8),  // I (unary, RV32)
+      REV8_64 -> BitPat("b" + "00" + ALU_REV8),  // I (unary, RV64)
+      ORC_B_  -> BitPat("b" + "00" + ALU_ORCB),  // I (unary)
+      ROL___  -> BitPat("b" + "00" + ALU_ROL),   // R
+      ROR___  -> BitPat("b" + "00" + ALU_ROR),   // R
+      RORI__  -> BitPat("b" + "00" + ALU_ROR),   // I (shift imm)
+
+      // Zbs (Single-bit Operations)
+      BCLR__ -> BitPat("b" + "00" + ALU_BCLR), // R
+      BCLRI_ -> BitPat("b" + "00" + ALU_BCLR), // I (shift imm)
+      BEXT__ -> BitPat("b" + "00" + ALU_BEXT), // R
+      BEXTI_ -> BitPat("b" + "00" + ALU_BEXT), // I (shift imm)
+      BINV__ -> BitPat("b" + "00" + ALU_BINV), // R
+      BINVI_ -> BitPat("b" + "00" + ALU_BINV), // I (shift imm)
+      BSET__ -> BitPat("b" + "00" + ALU_BSET), // R
+      BSETI_ -> BitPat("b" + "00" + ALU_BSET), // I (shift imm)
+
+      // Zicond (Conditional Operations)
+      CZERO_EQZ -> BitPat("b" + "00" + ALU_CZERO_EQZ), // R
+      CZERO_NEZ -> BitPat("b" + "00" + ALU_CZERO_NEZ), // R
+
+      // RV64 Zba
+      SH1ADDUW -> BitPat("b" + "00" + ALU_SH1ADD), // R (W-variant)
+      SH2ADDUW -> BitPat("b" + "00" + ALU_SH2ADD), // R (W-variant)
+      SH3ADDUW -> BitPat("b" + "00" + ALU_SH3ADD), // R (W-variant)
+      ADD_UW__ -> BitPat("b" + "00" + ALU_ADD_),   // R (W-variant, uses ADD)
+      SLLI_UW_ -> BitPat("b" + "00" + ALU_SLL_),   // I (W-variant, uses SLL)
+
+      // RV64 Zbb W-variants
+      CLZW__  -> BitPat("b" + "00" + ALU_CLZ),  // I (W-variant)
+      CTZW__  -> BitPat("b" + "00" + ALU_CTZ),  // I (W-variant)
+      CPOPW_  -> BitPat("b" + "00" + ALU_CPOP), // I (W-variant)
+      ROLW__  -> BitPat("b" + "00" + ALU_ROL),  // R (W-variant)
+      RORW__  -> BitPat("b" + "00" + ALU_ROR),  // R (W-variant)
+      RORIW_  -> BitPat("b" + "00" + ALU_ROR),  // I (W-variant)
+      ZEXTH64 -> BitPat("b" + "00" + ALU_ZEXTH) // R (W-variant)
       //                      rw  |  alu op |
     ),
     BitPat("b" + "00" + ALU_ILL_)
   )
   val inst_decoded = decoder(in.inst, type_table)
-  out.alu := inst_decoded(4, 0)
-  out.wen := inst_decoded(5)
-  out.ren := inst_decoded(6)
+  out.alu := inst_decoded(5, 0)
+  out.wen := inst_decoded(6)
+  out.ren := inst_decoded(7)
 
   val branch_table   = TruthTable(
     Map( //                retu,indi,dire,cond
@@ -251,22 +307,36 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
   out.atom := atom_decoded(0)
 
   // RV64 W-variant (word) flag decode table
-  val word_table = TruthTable(
+  val word_table   = TruthTable(
     Map(
-      ADDIW_ -> BitPat("b" + "1"), // W
-      SLLIW_ -> BitPat("b" + "1"), // W
-      SRLIW_ -> BitPat("b" + "1"), // W
-      SRAIW_ -> BitPat("b" + "1"), // W
-      ADDW__ -> BitPat("b" + "1"), // W
-      SUBW__ -> BitPat("b" + "1"), // W
-      SLLW__ -> BitPat("b" + "1"), // W
-      SRLW__ -> BitPat("b" + "1"), // W
-      SRAW__ -> BitPat("b" + "1"), // W
-      MULW__ -> BitPat("b" + "1"), // W
-      DIVW__ -> BitPat("b" + "1"), // W
-      DIVUW_ -> BitPat("b" + "1"), // W
-      REMW__ -> BitPat("b" + "1"), // W
-      REMUW_ -> BitPat("b" + "1")  // W
+      ADDIW_   -> BitPat("b" + "1"), // W
+      SLLIW_   -> BitPat("b" + "1"), // W
+      SRLIW_   -> BitPat("b" + "1"), // W
+      SRAIW_   -> BitPat("b" + "1"), // W
+      ADDW__   -> BitPat("b" + "1"), // W
+      SUBW__   -> BitPat("b" + "1"), // W
+      SLLW__   -> BitPat("b" + "1"), // W
+      SRLW__   -> BitPat("b" + "1"), // W
+      SRAW__   -> BitPat("b" + "1"), // W
+      MULW__   -> BitPat("b" + "1"), // W
+      DIVW__   -> BitPat("b" + "1"), // W
+      DIVUW_   -> BitPat("b" + "1"), // W
+      REMW__   -> BitPat("b" + "1"), // W
+      REMUW_   -> BitPat("b" + "1"), // W
+      // RV64 Zba W-variants
+      SH1ADDUW -> BitPat("b" + "1"), // W
+      SH2ADDUW -> BitPat("b" + "1"), // W
+      SH3ADDUW -> BitPat("b" + "1"), // W
+      ADD_UW__ -> BitPat("b" + "1"), // W
+      SLLI_UW_ -> BitPat("b" + "1"), // W
+      // RV64 Zbb W-variants
+      CLZW__   -> BitPat("b" + "1"), // W
+      CTZW__   -> BitPat("b" + "1"), // W
+      CPOPW_   -> BitPat("b" + "1"), // W
+      ROLW__   -> BitPat("b" + "1"), // W
+      RORW__   -> BitPat("b" + "1"), // W
+      RORIW_   -> BitPat("b" + "1"), // W
+      ZEXTH64  -> BitPat("b" + "1")  // W
     ),
     BitPat("b" + "0")
   )
@@ -448,7 +518,63 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
     MRET__ -> List( rd,MSTATUS,   0.U,   0.U, 0.U, 0.U), // N
     SRET__ -> List( rd,SSTATUS,   0.U,   0.U, 0.U, 0.U), // N
 
-    WFI___ -> List(0.U,    0.U,   0.U,   0.U, 0.U, 0.U) // N
+    WFI___ -> List(0.U,    0.U,   0.U,   0.U, 0.U, 0.U), // N
+
+    // Zba (Address Generation) — R-type: rd = (rs1 << N) + rs2
+    SH1ADD -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
+    SH2ADD -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
+    SH3ADD -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
+
+    // Zbb (Basic Bit-manipulation)
+    ANDN__ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
+    ORN___ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
+    XNOR__ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
+    CLZ___ -> List( rd,    0.U,   0.U,   0.U, rs1, 0.U), // I (unary)
+    CTZ___ -> List( rd,    0.U,   0.U,   0.U, rs1, 0.U), // I (unary)
+    CPOP__ -> List( rd,    0.U,   0.U,   0.U, rs1, 0.U), // I (unary)
+    MAX___ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
+    MAXU__ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
+    MIN___ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
+    MINU__ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
+    SEXTB_ -> List( rd,    0.U,   0.U,   0.U, rs1, 0.U), // I (unary)
+    SEXTH_ -> List( rd,    0.U,   0.U,   0.U, rs1, 0.U), // I (unary)
+    ZEXTH_ -> List( rd,    0.U,   0.U,   0.U, rs1, 0.U), // R (PACK rd,rs1,x0)
+    REV8_32 -> List(rd,    0.U,   0.U,   0.U, rs1, 0.U), // I (unary, RV32)
+    REV8_64 -> List(rd,    0.U,   0.U,   0.U, rs1, 0.U), // I (unary, RV64)
+    ORC_B_ -> List( rd,    0.U,   0.U,   0.U, rs1, 0.U), // I (unary)
+    ROL___ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
+    ROR___ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
+    RORI__ -> List( rd,  imm_i,   0.U, imm_i, rs1, 0.U), // I (shift imm)
+
+    // Zbs (Single-bit Operations)
+    BCLR__ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
+    BCLRI_ -> List( rd,  imm_i,   0.U, imm_i, rs1, 0.U), // I (shift imm)
+    BEXT__ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
+    BEXTI_ -> List( rd,  imm_i,   0.U, imm_i, rs1, 0.U), // I (shift imm)
+    BINV__ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
+    BINVI_ -> List( rd,  imm_i,   0.U, imm_i, rs1, 0.U), // I (shift imm)
+    BSET__ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
+    BSETI_ -> List( rd,  imm_i,   0.U, imm_i, rs1, 0.U), // I (shift imm)
+
+    // Zicond (Conditional Operations)
+    CZERO_EQZ -> List(rd,  0.U,   0.U,   0.U, rs1, rs2), // R
+    CZERO_NEZ -> List(rd,  0.U,   0.U,   0.U, rs1, rs2), // R
+
+    // RV64 Zba W-variants
+    SH1ADDUW -> List(rd,   0.U,   0.U,   0.U, rs1, rs2), // R (W-variant)
+    SH2ADDUW -> List(rd,   0.U,   0.U,   0.U, rs1, rs2), // R (W-variant)
+    SH3ADDUW -> List(rd,   0.U,   0.U,   0.U, rs1, rs2), // R (W-variant)
+    ADD_UW__ -> List(rd,   0.U,   0.U,   0.U, rs1, rs2), // R (W-variant)
+    SLLI_UW_ -> List(rd, imm_i,   0.U, imm_i, rs1, 0.U), // I (W-variant)
+
+    // RV64 Zbb W-variants
+    CLZW__ -> List( rd,    0.U,   0.U,   0.U, rs1, 0.U), // I (W-variant)
+    CTZW__ -> List( rd,    0.U,   0.U,   0.U, rs1, 0.U), // I (W-variant)
+    CPOPW_ -> List( rd,    0.U,   0.U,   0.U, rs1, 0.U), // I (W-variant)
+    ROLW__ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R (W-variant)
+    RORW__ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R (W-variant)
+    RORIW_ -> List( rd,  imm_i,   0.U, imm_i, rs1, 0.U), // I (W-variant)
+    ZEXTH64 -> List(rd,    0.U,   0.U,   0.U, rs1, 0.U)  // R (W-variant)
   )
   val var_decoder = ListLookup(in.inst,
               List(0.U, 0.U, 0.U, 0.U, 0.U, 0.U), op_table)

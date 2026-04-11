@@ -26,7 +26,9 @@ class nemu_ref(pluginTemplate):
         self.nemu_so = os.environ.get("NEMU_SO", "")
         self.cc = os.environ.get("CC", "riscv64-elf-gcc")
         self.objcopy = os.environ.get("OBJCOPY", "riscv64-elf-objcopy")
-        self.march = os.environ.get("MARCH", "rv32imac_zicsr_zifencei")
+        self.march = os.environ.get(
+            "MARCH", "rv32imac_zicntr_zicond_zicsr_zifencei_zba_zbb_zbs"
+        )
         self.mabi = os.environ.get("MABI", "ilp32")
 
         self.isa_spec = os.path.abspath(config.get("ispec", ""))
@@ -37,7 +39,7 @@ class nemu_ref(pluginTemplate):
             for line in f:
                 line = line.strip()
                 if line.startswith("export ") and "=" in line:
-                    kv = line[len("export "):]
+                    kv = line[len("export ") :]
                     key, _, val = kv.partition("=")
                     val = val.strip('"').strip("'")
                     val = os.path.expandvars(val)
@@ -50,7 +52,7 @@ class nemu_ref(pluginTemplate):
 
     def build(self, isa_yaml, platform_yaml):
         ispec = utils.load_yaml(isa_yaml)["hart0"]
-        self.xlen = ("64" if 64 in ispec["supported_xlen"] else "32")
+        self.xlen = "64" if 64 in ispec["supported_xlen"] else "32"
 
     def runTests(self, testList):
         """
@@ -70,11 +72,11 @@ class nemu_ref(pluginTemplate):
 
             # Compile (same flags as DUT)
             compile_cmd = (
-                f'{self.cc} -march={self.march} -mabi={self.mabi} '
-                f'-static -mcmodel=medany -fvisibility=hidden -nostdlib -nostartfiles '
+                f"{self.cc} -march={self.march} -mabi={self.mabi} "
+                f"-static -mcmodel=medany -fvisibility=hidden -nostdlib -nostartfiles "
                 f'-T {os.path.join(os.path.dirname(self.pluginpath), "raptor_dut", "link.ld")} '
-                f'{asm_file} -I {self.archtest_env} '
-                f'-o {elf_file}'
+                f"{asm_file} -I {self.archtest_env} "
+                f"-o {elf_file}"
             )
             logger.debug(f"REF compile: {compile_cmd}")
             try:
@@ -88,9 +90,15 @@ class nemu_ref(pluginTemplate):
             # Extract signature
             try:
                 subprocess.run(
-                    [self.objcopy, "--dump-section",
-                     ".data.signature=" + sig_file, elf_file],
-                    capture_output=True, text=True, check=True
+                    [
+                        self.objcopy,
+                        "--dump-section",
+                        ".data.signature=" + sig_file,
+                        elf_file,
+                    ],
+                    capture_output=True,
+                    text=True,
+                    check=True,
                 )
             except Exception:
                 with open(sig_file, "w") as f:

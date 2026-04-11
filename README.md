@@ -6,17 +6,23 @@
 [![macOS](https://img.shields.io/badge/macOS-000000?style=flat&logo=apple&logoColor=white)](https://en.wikipedia.org/wiki/MacOS)
 [![Github](https://img.shields.io/badge/GitHub-181717?style=flat&logo=github&logoColor=white)](https://github.dev/Kingfish404/raptor-chip)
 
-**Out-of-order RISC-V (RV32/RV64 IMAC\_Zicsr\_Zifencei) processor core** with register renaming, ROB, and reservation stations. The RTL is described by `SystemVerilog` with `Chisel` (`Scala`) used only for decoder generation. Features Sv32 virtual memory (MMU/TLB), LR/SC + AMO atomics, compressed instructions (RVC), and boots Linux v6.18 via OpenSBI. Supports configurable **RV32** and **RV64** modes via compile-time switch.
+> It is possible to invent a single machine which can be used to compute any computable sequence. — Alan Turing, 1936
+
+Welcome to the Raptor Project! Here is an all-in-one repository for exploring, designing, developing, optimizing, and verifying a RISC-V core. Aiming at high-performance & quality, full Linux support, FPGA implementation, and ASIC readiness.
+
+Core description: **Super-scalar, Out-of-order [RISC-V][^RISC-V] core** with register renaming, ROB, and reservation stations. The RTL is described by `SystemVerilog` with `Chisel` (`Scala`) used only for decoder generation. Features Sv32 virtual memory (MMU/TLB), LR/SC + AMO atomics, compressed instructions (RVC), and boots Linux v6.18 via OpenSBI. Supports configurable **RV32** and **RV64** modes via compile-time switch.
+
+ISA strings: `rv32imac_zicntr_zicond_zicsr_zifencei_zba_zbb_zbs`
 
 Candidate ip core name: `raptor-falcon-0.1.0` (`rf-0.1.0`).
 
-[RISC-V]: https://riscv.org/
+[^RISC-V]: https://riscv.org/
+
+### [Documentation](./docs/README.md)
 
 ## Microarchitecture
 
-![](./docs/assets/npc-rv32.svg)
-
-**[Core Documentation](./docs/README.md)**
+![](./docs/assets/raptor-rv.svg)
 
 ## Setup & Quick Start
 

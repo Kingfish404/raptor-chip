@@ -50,9 +50,9 @@ typedef enum
 } Inst_type;
 
 #if defined(CONFIG_RV64)
-#define CSR_MISA_VALUE 0x8000000000141105ULL
+#define CSR_MISA_VALUE 0x8000000000141107ULL
 #else
-#define CSR_MISA_VALUE 0x40141105
+#define CSR_MISA_VALUE 0x40141107
 #endif
 
 enum CSR
@@ -89,10 +89,14 @@ enum CSR
   CSR_MIP = 0x344,
 
   CSR_MCYCLE = 0xb00,
+  CSR_MINSTRET = 0xb02,
   CSR_MCYCLEH = 0xb80,
+  CSR_MINSTRETH = 0xb82,
   CSR_CYCLE_ = 0xc00,
   CSR_TIME = 0xc01,
+  CSR_INSTRET = 0xc02,
   CSR_TIMEH = 0xc81,
+  CSR_INSTRETH = 0xc82,
 
   // Machine Information Registers
   CSR_MVENDORID = 0xf11,

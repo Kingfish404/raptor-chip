@@ -49,14 +49,14 @@ AM_KERNELS := $(YSYX_HOME)/am-kernels
 ifeq ($(ISA),rv64)
   NPC_BIN  := $(NPC_BIN_64)
   NEMU_SO  := $(NEMU_SO_64)
-  MARCH    := rv64imac_zicsr_zifencei
+  MARCH    := rv64imac_zicntr_zicond_zicsr_zifencei_zba_zbb_zbs
   MABI     := lp64
   VFLAGS   := -DYSYX_RV64
   ISA_XLEN := 64
 else
   NPC_BIN  := $(NPC_BIN_32)
   NEMU_SO  := $(NEMU_SO_32)
-  MARCH    := rv32imac_zicsr_zifencei
+  MARCH    := rv32imac_zicntr_zicond_zicsr_zifencei_zba_zbb_zbs
   MABI     := ilp32
   VFLAGS   :=
   ISA_XLEN := 32

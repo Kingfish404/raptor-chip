@@ -451,7 +451,12 @@ module ysyx_l1i #(
           l1i_state <= IDLE;
         end
         RD_A: begin
-          if (sram_data_ready) begin
+          // Guard: abort if pipeline flush or TLB invalidated (sfence.vma /
+          // satp switch) — pc_ifu depends on itlb_ptag which is 0 on TLB miss,
+          // producing a garbage physical address (e.g. 0x68a).
+          if (cmu_bcast.flush_pipe || (mmu_en && !tlb_hit)) begin
+            l1i_state <= IDLE;
+          end else if (sram_data_ready) begin
             if (!hit) begin
               l1i_addr   <= pc_ifu;
               l1i_state  <= RD_0;

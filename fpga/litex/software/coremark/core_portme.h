@@ -20,7 +20,7 @@
 #define COMPILER_FLAGS ""
 
 #ifndef ITERATIONS
-#define ITERATIONS 20
+#define ITERATIONS 40
 #endif
 #define MEM_METHOD MEM_STATIC
 

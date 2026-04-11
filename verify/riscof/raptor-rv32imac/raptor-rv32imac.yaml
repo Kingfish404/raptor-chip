@@ -6,7 +6,7 @@ $schema: config_schema.json#
 kind: architecture configuration
 type: fully configured
 name: raptor-rv32imac
-description: Raptor Chip dual-issue OoO RISC-V processor — RV32IMAC_Zicsr_Zifencei
+description: Raptor Chip dual-issue OoO RISC-V processor — RV32IMAC_Zicond_Zicsr_Zifencei_Zba_Zbb_Zbs
 implemented_extensions:
   - { name: I, version: "= 2.1" }
   - { name: M, version: "= 2.0" }
@@ -18,6 +18,9 @@ implemented_extensions:
   - { name: Zifencei, version: "= 2.0" }
   - { name: Zaamo, version: "= 1.0.0" }
   - { name: Zalrsc, version: "= 1.0.0" }
+  - { name: Zba, version: "= 1.0.0" }
+  - { name: Zbb, version: "= 1.0.0" }
+  - { name: Zbs, version: "= 1.0.0" }
   - { name: Sm, version: "= 1.12.0" }
   # Smhpm is a fake extension for UDB purposes, due to be deleted soon.
   - { name: Smhpm, version: "= 1.12" }
@@ -75,20 +78,74 @@ params:
   # Smhpm — Raptor has no HPM counters; provide minimal config
   HPM_COUNTER_EN:
     [
-      false, false, false,
-      false, false, false, false, false, false, false, false,
-      false, false, false, false, false, false, false, false,
-      false, false, false, false, false, false, false, false,
-      false, false, false, false, false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
     ]
   HPM_EVENTS: [0]
   COUNTINHIBIT_EN:
     [
-      true, false, true,
-      false, false, false, false, false, false, false, false,
-      false, false, false, false, false, false, false, false,
-      false, false, false, false, false, false, false, false,
-      false, false, false, false, false,
+      true,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
     ]
 
   # MTVEC

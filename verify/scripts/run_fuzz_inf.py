@@ -427,7 +427,9 @@ def main():
     parser.add_argument("--cc", default="riscv64-elf-gcc", help="Cross compiler")
     parser.add_argument("--objcopy", default="riscv64-elf-objcopy", help="objcopy tool")
     parser.add_argument(
-        "--march", default="rv32imac_zicsr_zifencei", help="Target -march"
+        "--march",
+        default="rv32imac_zicntr_zicond_zicsr_zifencei_zba_zbb_zbs",
+        help="Target -march",
     )
     parser.add_argument("--mabi", default="ilp32", help="Target -mabi")
     parser.add_argument("--xlen", type=int, default=32, help="XLEN (32 or 64)")

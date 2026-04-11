@@ -59,6 +59,40 @@
 `define YSYX_ALU_SRL_ 'b00101
 `define YSYX_ALU_SRA_ 'b01101
 
+// Zba (Address Generation)
+`define YSYX_ALU_SH1ADD 'b100000
+`define YSYX_ALU_SH2ADD 'b100001
+`define YSYX_ALU_SH3ADD 'b100010
+
+// Zbb (Basic Bit-manipulation)
+`define YSYX_ALU_ANDN 'b100011
+`define YSYX_ALU_ORN_ 'b100100
+`define YSYX_ALU_XNOR 'b100101
+`define YSYX_ALU_CLZ_ 'b100110
+`define YSYX_ALU_CTZ_ 'b100111
+`define YSYX_ALU_CPOP 'b101000
+`define YSYX_ALU_MAX_ 'b101001
+`define YSYX_ALU_MAXU 'b101010
+`define YSYX_ALU_MIN_ 'b101011
+`define YSYX_ALU_MINU 'b101100
+`define YSYX_ALU_SEXTB 'b101101
+`define YSYX_ALU_SEXTH 'b101110
+`define YSYX_ALU_ZEXTH 'b101111
+`define YSYX_ALU_REV8 'b110000
+`define YSYX_ALU_ORCB 'b110001
+`define YSYX_ALU_ROL_ 'b110010
+`define YSYX_ALU_ROR_ 'b110011
+
+// Zbs (Single-bit Operations)
+`define YSYX_ALU_BCLR 'b110100
+`define YSYX_ALU_BEXT 'b110101
+`define YSYX_ALU_BINV 'b110110
+`define YSYX_ALU_BSET 'b110111
+
+// Zicond (Conditional Operations)
+`define YSYX_ALU_CZERO_EQZ 'b111000
+`define YSYX_ALU_CZERO_NEZ 'b111001
+
 `define YSYX_ALU_MUL___ 'b11000
 `define YSYX_ALU_MULH__ 'b11001
 `define YSYX_ALU_MULHSU 'b11010
@@ -177,12 +211,5 @@
 // CSR_MIE FLAGS
 `define YSYX_CSR_MIE_STIE 5
 `define YSYX_CSR_MIE_MTIE 7
-
-// Macros
-`define ASSERT(signal, str) \
-  if (signal == 'h0) begin \
-    $write("ASSERTION FAILED in %m, %s\n", str); \
-    $finish; \
-  end
 
 `endif

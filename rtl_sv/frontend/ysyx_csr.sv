@@ -126,6 +126,7 @@ module ysyx_csr #(
       `YSYX_CSR_MCYCLE_:   raddr_reg = MCYCLE_;
       `YSYX_CSR_MCYCLEH:   raddr_reg = MCYCLEH;
       `YSYX_CSR_CYCLE__:   raddr_reg = MCYCLE_;
+      `YSYX_CSR_CYCLEH_:   raddr_reg = MCYCLEH;
       `YSYX_CSR_TIME___:   raddr_reg = TIME___;
       `YSYX_CSR_TIMEH__:   raddr_reg = TIMEH__;
       `YSYX_CSR_MINSTRET:  raddr_reg = MINSTRET;

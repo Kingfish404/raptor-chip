@@ -124,7 +124,7 @@ module ysyx_idu #(
   // Instruction Decoding (combinational)
   // Solt A: main instruction (could be compressed or regular)
   // ================================================================
-  logic [ 4:0] alu_a;
+  logic [ 5:0] alu_a;
   logic        word_flag_a;
   logic [11:0] csr_a;
   logic [ 2:0] csr_csw_a;
@@ -139,7 +139,7 @@ module ysyx_idu #(
   // Slot B: Second Instruction Decode (dual-issue)
   // ================================================================
   // Slot B can be compressed or regular 32-bit (generalized dual-fetch).
-  logic [ 4:0] alu_b;
+  logic [ 5:0] alu_b;
   logic        word_flag_b;
   logic [11:0] csr_b;
   logic [ 2:0] csr_csw_b;

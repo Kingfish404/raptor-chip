@@ -30,7 +30,9 @@ class raptor_dut(pluginTemplate):
         self.mrom_img = os.environ.get("MROM_IMG", "")
         self.cc = os.environ.get("CC", "riscv64-elf-gcc")
         self.objcopy = os.environ.get("OBJCOPY", "riscv64-elf-objcopy")
-        self.march = os.environ.get("MARCH", "rv32imac_zicsr_zifencei")
+        self.march = os.environ.get(
+            "MARCH", "rv32imac_zicntr_zicond_zicsr_zifencei_zba_zbb_zbs"
+        )
         self.mabi = os.environ.get("MABI", "ilp32")
 
         self.isa_spec = os.path.abspath(config.get("ispec", ""))
@@ -43,7 +45,7 @@ class raptor_dut(pluginTemplate):
             for line in f:
                 line = line.strip()
                 if line.startswith("export ") and "=" in line:
-                    kv = line[len("export "):]
+                    kv = line[len("export ") :]
                     key, _, val = kv.partition("=")
                     val = val.strip('"').strip("'")
                     val = os.path.expandvars(val)
@@ -54,21 +56,21 @@ class raptor_dut(pluginTemplate):
         self.work_dir = work_dir
         self.archtest_env = archtest_env
         self.compile_cmd = (
-            f'{self.cc} -march={self.march} -mabi={self.mabi} '
-            f'-static -mcmodel=medany -fvisibility=hidden -nostdlib -nostartfiles '
-            f'-T {self.pluginpath}/link.ld '
-            f'{{asm_file}} -I {archtest_env} -I {self.pluginpath} '
-            f'-o {{elf_file}}'
+            f"{self.cc} -march={self.march} -mabi={self.mabi} "
+            f"-static -mcmodel=medany -fvisibility=hidden -nostdlib -nostartfiles "
+            f"-T {self.pluginpath}/link.ld "
+            f"{{asm_file}} -I {archtest_env} -I {self.pluginpath} "
+            f"-o {{elf_file}}"
         )
 
     def build(self, isa_yaml, platform_yaml):
         ispec = utils.load_yaml(isa_yaml)["hart0"]
-        self.xlen = ("64" if 64 in ispec["supported_xlen"] else "32")
+        self.xlen = "64" if 64 in ispec["supported_xlen"] else "32"
         self.isa = ispec["ISA"]
         # Collect test list from the RISCOF framework
         if "32" in self.xlen:
             self.compile_cmd = self.compile_cmd.replace(
-                self.march, "rv32imac_zicsr_zifencei"
+                self.march, "rv32imac_zicntr_zicond_zicsr_zifencei_zba_zbb_zbs"
             )
 
     def runTests(self, testList):
@@ -89,16 +91,16 @@ class raptor_dut(pluginTemplate):
             utils.shellCommand(cmd).run(cwd=test_dir)
 
             # Create binary
-            utils.shellCommand(
-                f"{self.objcopy} -O binary {elf_file} {bin_file}"
-            ).run(cwd=test_dir)
+            utils.shellCommand(f"{self.objcopy} -O binary {elf_file} {bin_file}").run(
+                cwd=test_dir
+            )
 
             # Run on NPC simulator with difftest
             run_cmd = (
-                f'{self.npc_bin} -b -n '
-                f'-d {self.nemu_so} '
-                f'-r {self.mrom_img} '
-                f'{bin_file}'
+                f"{self.npc_bin} -b -n "
+                f"-d {self.nemu_so} "
+                f"-r {self.mrom_img} "
+                f"{bin_file}"
             )
             logger.debug(f"DUT run: {run_cmd}")
             try:
@@ -114,8 +116,14 @@ class raptor_dut(pluginTemplate):
         try:
             # Use objdump to find signature section
             result = subprocess.run(
-                [self.objcopy, "--dump-section", ".data.signature=" + sig_file, elf_file],
-                capture_output=True, text=True
+                [
+                    self.objcopy,
+                    "--dump-section",
+                    ".data.signature=" + sig_file,
+                    elf_file,
+                ],
+                capture_output=True,
+                text=True,
             )
             if result.returncode != 0:
                 # Fallback: empty signature

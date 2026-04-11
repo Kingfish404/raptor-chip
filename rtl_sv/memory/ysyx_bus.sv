@@ -246,8 +246,8 @@ module ysyx_bus #(
   end
 
   always @(posedge clock) begin
-    `YSYX_ASSERT(axi_rresp == 2'b00, "rresp == 2'b00");
-    `YSYX_ASSERT(axi_bresp == 2'b00, "bresp == 2'b00");
+    `YSYX_ASSERT(!axi_rvalid || axi_rresp == 2'b00, ("rresp error: " + axi_rresp));
+    `YSYX_ASSERT(!axi_bvalid || axi_bresp == 2'b00, ("bresp error: " + axi_bresp));
   end
 
 endmodule

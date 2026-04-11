@@ -297,7 +297,7 @@ jobs:
       - name: Setup environment
         run: ./setup.sh
       - name: Build OpenSBI
-        run: make -C third_party/riscv-software-src/opensbi PLATFORM_RISCV_ISA=rv32imac_zicntr_zicsr_zifencei CROSS_COMPILE=riscv64-linux-gnu- PLATFORM_RISCV_XLEN=32 PLATFORM=generic -j$(nproc)
+        run: make -C third_party/riscv-software-src/opensbi PLATFORM_RISCV_ISA=rv32imac_zicntr_zicond_zicsr_zifencei_zba_zbb_zbs CROSS_COMPILE=riscv64-linux-gnu- PLATFORM_RISCV_XLEN=32 PLATFORM=generic -j$(nproc)
       - name: Build NEMU (Linux config)
         shell: bash -l {0}
         run: make config-nemu32-linux

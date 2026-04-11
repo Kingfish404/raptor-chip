@@ -21,7 +21,7 @@ from litex.soc.cores.cpu import CPU, CPU_GCC_TRIPLE_RISCV32
 CPU_VARIANTS = {
     "standard": "raptor",
 }
-RISCV_ARCH = "rv32imac_zicntr_zicsr_zifencei"
+RISCV_ARCH = "rv32imac_zicntr_zicsr_zifencei_zba_zbb_zbs"
 
 # GCC Flags ----------------------------------------------------------------------------------------
 

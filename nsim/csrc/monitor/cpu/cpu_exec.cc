@@ -210,6 +210,20 @@ void cpu_exec(uint64_t n)
         // rdtime instruction skipped in difftest
         npc_difftest_skip_ref();
       }
+      // Skip difftest for Zicntr counter CSR accesses (instret, cycle, etc.)
+      {
+        uint32_t inst = *(uint32_t *)(npc.inst);
+        if ((inst & 0x7f) == 0x73 && ((inst >> 12) & 0x7) != 0)
+        {
+          uint16_t csr = (inst >> 20) & 0xfff;
+          if (csr == 0xC00 || csr == 0xC02 ||
+              csr == 0xC80 || csr == 0xC81 || csr == 0xC82 ||
+              csr == 0xB00 || csr == 0xB02 || csr == 0xB80 || csr == 0xB82)
+          {
+            npc_difftest_skip_ref();
+          }
+        }
+      }
       difftest_step(*npc.rpc);
       char interrupt = *(char *)&(CONCAT(VERILOG_PREFIX, rou__DOT__recieved_trap));
       if (interrupt)

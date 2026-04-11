@@ -185,6 +185,10 @@ module ysyx_npc_soc #(
 
     input reset
 );
+  // AXI4 response encoding
+  localparam logic [1:0] AXIRespOKAY = 2'b00;
+  localparam logic [1:0] AXIRespDecerr = 2'b11;
+
   typedef enum logic [2:0] {
     WIDLE   = 'b000,
     WAREADY = 'b001,
@@ -198,10 +202,30 @@ module ysyx_npc_soc #(
   } state_r_t;
 
   logic [3:0] rid;
+  logic [3:0] wid;
+  logic [1:0] rresp_buf;
+  logic [1:0] bresp_buf;
   logic [XLEN-1:0] awaddr_buf;
   logic [XLEN-1:0] mem_rdata_buf;  // matches DPI-C pmem_read output width
   state_r_t state_r;
   state_w_t state_w;
+
+  // Address range validation: check if address falls within any known region
+  function automatic logic addr_valid(input logic [XLEN-1:0] addr);
+    return (addr >= 'h02000000 && addr < 'h020c0000)  // CLINT
+    || (addr >= 'h0c000000 && addr < 'h0d000000)  // PLIC
+    || (addr >= 'h0f000000 && addr < 'h0f002000)  // SRAM
+    || (addr >= 'h10000000 && addr < 'h10012000)  // serial / peripherals
+    || (addr >= 'h20000000 && addr < 'h20010000)  // MROM
+    || (addr >= 'h30000000 && addr < 'h40000000)  // FLASH
+    || (addr >= 'h80000000 && addr < 'h88000000)  // PMEM (main memory)
+    || (addr >= 'ha0000000 && addr < 'ha2000000);  // SDRAM
+  endfunction
+
+  // Timeout watchdog: force-complete stuck transactions
+  logic [19:0] r_timeout_cnt;
+  logic [19:0] w_timeout_cnt;
+  localparam logic [19:0] AXITimeout = 20'hf_ffff;  // ~1M cycles
 
   // read transaction
   assign out_arready = (state_r == RIDLE);
@@ -209,11 +233,14 @@ module ysyx_npc_soc #(
   assign out_rvalid = (state_r == RVALID);
   assign out_rlast = out_rvalid;
   assign out_rid = rid;
+  assign out_rresp = rresp_buf;
 
   // write transaction
   assign out_awready = (state_w == WIDLE);
   assign out_wready = ((state_w == WIDLE || state_w == WDREADY || state_w == WDWRITE) && wvalid);
   assign out_bvalid = (state_w == WFINISH);
+  assign out_bid = wid;
+  assign out_bresp = bresp_buf;
   logic [7:0] wmask;
   assign wmask = (
     ({{8{awsize == 3'b000}} & 8'h1 }) |
@@ -229,17 +256,53 @@ module ysyx_npc_soc #(
     if (reset) begin
       state_w <= WIDLE;
       state_r <= RIDLE;
+      rresp_buf <= AXIRespOKAY;
+      bresp_buf <= AXIRespOKAY;
+      wid <= '0;
+      r_timeout_cnt <= '0;
+      w_timeout_cnt <= '0;
     end else begin
+      // ---- Timeout watchdog ----
+      if (state_r != RIDLE) begin
+        r_timeout_cnt <= r_timeout_cnt + 1;
+        if (r_timeout_cnt >= AXITimeout) begin
+          $display("NPC_SOC: [ERROR] AXI read timeout, forcing RIDLE (rid=%0d)", rid);
+          state_r <= RIDLE;
+          rresp_buf <= AXIRespDecerr;
+          r_timeout_cnt <= '0;
+        end
+      end else begin
+        r_timeout_cnt <= '0;
+      end
+      if (state_w != WIDLE && state_w != WFINISH) begin
+        w_timeout_cnt <= w_timeout_cnt + 1;
+        if (w_timeout_cnt >= AXITimeout) begin
+          $display("NPC_SOC: [ERROR] AXI write timeout, forcing WFINISH (wid=%0d)", wid);
+          state_w <= WFINISH;
+          bresp_buf <= AXIRespDecerr;
+          w_timeout_cnt <= '0;
+        end
+      end else begin
+        w_timeout_cnt <= '0;
+      end
+
       // AXI4 write transaction
       unique case (state_w)
         WIDLE: begin
           if (awvalid) begin
-            if (wvalid) begin
-              for (int i = 0; i < XLEN / 8; i++) begin
-                if (wstrb[i]) begin
-                  `YSYX_DPI_C_PMEM_WRITE((awaddr & AlignMask) + i, {wdata >> (i*8)}[XLEN-1:0], 1);
+            wid <= awid;
+            if (addr_valid(awaddr)) begin
+              bresp_buf <= AXIRespOKAY;
+              if (wvalid) begin
+                for (int i = 0; i < XLEN / 8; i++) begin
+                  if (wstrb[i]) begin
+                    `YSYX_DPI_C_PMEM_WRITE((awaddr & AlignMask) + i, {wdata >> (i*8)}[XLEN-1:0], 1);
+                  end
                 end
               end
+            end else begin
+              bresp_buf <= AXIRespDecerr;
+              $display("NPC_SOC: [ERROR] AXI write to invalid addr=%0h, awid=%0d", awaddr, awid);
             end
             if (wlast) begin
               state_w <= WFINISH;
@@ -251,9 +314,12 @@ module ysyx_npc_soc #(
         end
         WDWRITE: begin
           if (wvalid) begin
-            for (int i = 0; i < XLEN / 8; i++) begin
-              if (wstrb[i]) begin
-                `YSYX_DPI_C_PMEM_WRITE((awaddr_buf & AlignMask) + i, {wdata >> (i*8)}[XLEN-1:0], 1);
+            if (bresp_buf == AXIRespOKAY) begin
+              for (int i = 0; i < XLEN / 8; i++) begin
+                if (wstrb[i]) begin
+                  `YSYX_DPI_C_PMEM_WRITE(  // handle burst writes by using buffered address + offset
+                      (awaddr_buf & AlignMask) + i, {wdata >> (i*8)}[XLEN-1:0], 1);
+                end
               end
             end
           end
@@ -281,13 +347,19 @@ module ysyx_npc_soc #(
           if (arvalid) begin
             state_r <= RVALID;
             rid <= arid;
-            if (araddr > 'h1000) begin
+            if (addr_valid(araddr)) begin
+              rresp_buf <= AXIRespOKAY;
               `YSYX_DPI_C_PMEM_READ((araddr), mem_rdata_buf);
+            end else begin
+              rresp_buf <= AXIRespDecerr;
+              mem_rdata_buf <= '0;
+              $display("NPC_SOC: [ERROR] AXI read from invalid addr=%0h, arid=%0d", araddr, arid);
             end
           end
         end
         RVALID: begin
-          state_r <= RIDLE;
+          state_r   <= RIDLE;
+          rresp_buf <= AXIRespOKAY;  // clear stale DECERR
         end
         default: begin
           state_r <= RIDLE;

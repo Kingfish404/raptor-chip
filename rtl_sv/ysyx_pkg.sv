@@ -13,7 +13,7 @@ package ysyx_pkg;
   typedef struct packed {
     logic       c;
     logic       word;  // RV64 W-variant: operate on lower 32 bits, sign-extend result
-    logic [4:0] alu;
+    logic [5:0] alu;
     logic       ben;
     logic       jen;
     logic       jren;
@@ -81,7 +81,7 @@ package ysyx_pkg;
     // Memory
     logic            wen;
     logic            word;      // RV64 W-variant flag
-    logic [4:0]      alu;
+    logic [5:0]      alu;
     logic [XLEN-1:0] sq_waddr;
     logic [XLEN-1:0] sq_wdata;
 

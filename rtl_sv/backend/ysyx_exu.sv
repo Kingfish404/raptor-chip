@@ -41,7 +41,7 @@ module ysyx_exu #(
 
   logic rs_c[RS_SIZE];
   logic rs_word[RS_SIZE];
-  logic [4:0] rs_alu[RS_SIZE];
+  logic [5:0] rs_alu[RS_SIZE];
   logic [XLEN-1:0] rs_vj[RS_SIZE];
   logic [XLEN-1:0] rs_vk[RS_SIZE];
   logic [$clog2(ROB_SIZE):0] rs_dest[RS_SIZE];
@@ -88,7 +88,7 @@ module ysyx_exu #(
 
   logic ioq_c[IOQ_SIZE];
   logic ioq_word[IOQ_SIZE];
-  logic [4:0] ioq_alu[IOQ_SIZE];
+  logic [5:0] ioq_alu[IOQ_SIZE];
   logic [XLEN-1:0] ioq_vj[IOQ_SIZE];
   logic [XLEN-1:0] ioq_vk[IOQ_SIZE];
   logic [$clog2(ROB_SIZE):0] ioq_dest[IOQ_SIZE];
@@ -129,8 +129,8 @@ module ysyx_exu #(
     for (int i = 0; i < RS_SIZE; i++) begin
       rs_free_vec[i]  = !rs_valid[i];
       rs_ready_vec[i] = rs_valid[i] && rs_pr1[i] == 0 && rs_pr2[i] == 0
-                       && (rs_alu[i][4:4] == 0 || rs_mul_ready[i]);
-      rs_mul_vec[i]   = rs_valid[i] && rs_alu[i][4:4];
+                       && (rs_alu[i][5:4] != 2'b01 || rs_mul_ready[i]);
+      rs_mul_vec[i]   = rs_valid[i] && rs_alu[i][5:4] == 2'b01;
     end
   end
 
@@ -185,14 +185,14 @@ module ysyx_exu #(
   assign exu_lsu.raddr = ioq_atom[ioq_head]
     ? ioq_vj[ioq_head]
     : ioq_vj[ioq_head] + ioq_imm[ioq_head];
-  assign exu_lsu.ralu = ioq_atom[ioq_head] ? `YSYX_ALU_LW__ : ioq_alu[ioq_head];
+  assign exu_lsu.ralu = ioq_atom[ioq_head] ? `YSYX_ALU_LW__ : ioq_alu[ioq_head][4:0];
   assign exu_lsu.atomic_lock = ioq_atom[ioq_head] && ioq_alu[ioq_head] == `YSYX_ATO_LR__;
   assign exu_lsu.pc = ioq_pc[ioq_head];
 
   assign ioq_ready = ioq_valid[ioq_tail] == 0;
   assign rs_ready = ((rou_exu.uop.wen || rou_exu.uop.ren)
     ? ioq_ready
-    : free_found_a && !(mul_found && rou_exu.uop.alu[4:4]));
+    : free_found_a && !(mul_found && rou_exu.uop.alu[5:4] == 2'b01));
   assign rou_exu.ready = rs_ready;
 
 `ifdef YSYX_DUAL_ISSUE
@@ -215,9 +215,9 @@ module ysyx_exu #(
     end else begin
       // Slot B goes to RS
       if (a_to_ioq)
-        rs_ready_b = free_found_a && !(mul_found && rou_exu.uop_b.alu[4:4]);
+        rs_ready_b = free_found_a && !(mul_found && rou_exu.uop_b.alu[5:4] == 2'b01);
       else
-        rs_ready_b = free_found_b && !(mul_found && rou_exu.uop_b.alu[4:4]);
+        rs_ready_b = free_found_b && !(mul_found && rou_exu.uop_b.alu[5:4] == 2'b01);
     end
   end
   assign rou_exu.ready_b = rs_ready_b;
@@ -423,7 +423,7 @@ module ysyx_exu #(
           end
         end else if (rs_valid[i] && rs_pr1[i] == 0 && rs_pr2[i] == 0) begin
           // Mul
-          if (rs_alu[i][4:4]) begin
+          if (rs_alu[i][5:4] == 2'b01) begin
             if (rs_mul_ready[i] == 0 && muling == 0
                 && i[$clog2(RS_SIZE)-1:0] == mul_rs_idx) begin
               // Mul start — only the entry selected by the priority encoder
@@ -559,7 +559,7 @@ module ysyx_exu #(
     && ioq_pr1[ioq_head] == 0
     && ioq_pr2[ioq_head] == 0);
   assign exu_l1d.vaddr = ioq_vj[ioq_head] + ioq_imm[ioq_head];
-  assign exu_l1d.walu = ioq_alu[ioq_head];
+  assign exu_l1d.walu = ioq_alu[ioq_head][4:0];
   assign exu_l1d.valid = (ioq_wen[ioq_head] && ioq_pr1[ioq_head] == 0 && ioq_pr2[ioq_head] == 0);
 
   // Branch
@@ -652,13 +652,13 @@ module ysyx_exu #(
 
   // { Write back (RS)
   assign exu_rou.dest = rs_dest[valid_idx];
-  assign exu_rou.result = (rs_alu[valid_idx][4:4] == 0
-    ? (rs_system[valid_idx]
-      ? csr_rdata_corrected
+  assign exu_rou.result = (rs_system[valid_idx]
+    ? csr_rdata_corrected
+    : (rs_alu[valid_idx][5:4] == 2'b01
+      ? rs_mul_a[valid_idx]
       : rs_jen[valid_idx]
         ? rs_pc[valid_idx] + (rs_c[valid_idx] ? 2 : 4)
-        : alu_result)
-    : rs_mul_a[valid_idx]);
+        : alu_result));
 
   assign exu_rou.npc = (
     (rs_ecall[valid_idx] || rs_ebreak[valid_idx])
