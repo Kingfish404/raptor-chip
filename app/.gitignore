@@ -1,0 +1,10 @@
+!benchmarks/**
+!pk/**
+!runtime/**
+!tests/**
+!lib/**
+!*.mk
+
+build
+build/**
+.stamp

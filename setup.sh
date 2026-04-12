@@ -29,6 +29,7 @@ brew_init() {
 brew_install() {
   brew install verilator yosys mill sbt openjdk@17
   brew link --force --overwrite openjdk@17
+  brew install bazelisk ninja
   brew install riscv64-elf-binutils riscv64-elf-gcc
   brew install ncurses readline flex bison
   if [ "$(uname)" == "Darwin" ]; then
@@ -39,6 +40,7 @@ brew_install() {
 
 apt_install() {
   sudo apt install -y gcc-riscv64-linux-gnu
+  sudo apt install -y gcc-riscv64-unknown-elf picolibc-riscv64-unknown-elf
   sudo apt install -y libsdl2-dev libsdl2-image-dev libsdl2-ttf-dev
   sudo apt install -y libreadline-dev libncurses5-dev
   sudo apt install -y tcl-dev tcl-tclreadline libeigen3-dev \

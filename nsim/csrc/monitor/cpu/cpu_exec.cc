@@ -161,13 +161,13 @@ void cpu_exec(uint64_t n)
     perf_sample_per_cycle();
     cur_inst_cycle++;
     progress_cycle++;
-    if (progress_cycle % 10000000 == 0)
+    if (progress_cycle % 40000000 == 0)
     {
       Log("progress: %016llu cycles, %016llu insts, pc=" FMT_WORD_NO_PREFIX,
           (unsigned long long)progress_cycle, (unsigned long long)pmu.instr_cnt,
           (word_t)(*npc.pc));
     }
-    if (timeout_us && (progress_cycle % 1000000 == 0))
+    if (timeout_us && (progress_cycle % 800000 == 0))
     {
       uint64_t elapsed = get_time() - now;
       if (elapsed > timeout_us)

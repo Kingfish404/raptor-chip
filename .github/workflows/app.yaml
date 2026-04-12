@@ -1,0 +1,119 @@
+name: app tests (pk + newlib)
+
+on:
+  push:
+    branches: ["master", "main"]
+    paths:
+      - "app/**"
+      - "rtl_sv/**"
+      - "nsim/**"
+      - ".github/workflows/app.yaml"
+  pull_request:
+    branches: ["master", "main"]
+    paths:
+      - "app/**"
+      - "rtl_sv/**"
+      - "nsim/**"
+      - ".github/workflows/app.yaml"
+
+jobs:
+  app-pk-tests:
+    runs-on: ubuntu-latest
+    env:
+      YSYX_HOME: ${{ github.workspace }}
+      NEMU_HOME: ${{ github.workspace }}/nemu
+      AM_HOME: ${{ github.workspace }}/abstract-machine
+      CROSS_COMPILE: riscv64-unknown-elf-
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup base environment
+        run: |
+          ./setup.sh
+          ${CROSS_COMPILE}gcc --version | head -1
+
+      - name: Clone riscv-pk
+        run: |
+          mkdir -p third_party/riscv-software-src
+          [ -d third_party/riscv-software-src/riscv-pk ] || \
+            git clone --depth 1 https://github.com/riscv-software-src/riscv-pk \
+              third_party/riscv-software-src/riscv-pk
+
+      - name: Build NPC simulator
+        shell: bash -l {0}
+        run: make build-npc32
+
+      - name: Build pk
+        shell: bash -l {0}
+        run: make --no-print-directory -C app pk-build
+
+      # ---- Hello world ----
+      - name: Run hello
+        shell: bash -l {0}
+        run: |
+          mkdir -p .github/results
+          make app-hello-npc32 ARGS="-b -n" 2>&1 | tee /tmp/app-hello.log
+
+      # ---- CoreMark ----
+      - name: Run CoreMark
+        shell: bash -l {0}
+        run: |
+          make app-coremark-npc32 ARGS="-b -n" 2>&1 | tee /tmp/app-coremark.log
+
+      # ---- Embench-IoT ----
+      - name: Run Embench-IoT
+        shell: bash -l {0}
+        run: |
+          make app-embench-npc32 ARGS="-b -n" 2>&1 | tee /tmp/app-embench.log
+
+      # ---- Summary ----
+      - name: Generate summary
+        if: always()
+        run: |
+          # ---- Parse hello ----
+          HELLO_TRAP=$(grep -oE 'HIT (GOOD|BAD) TRAP' /tmp/app-hello.log | head -1 || echo "UNKNOWN")
+          HELLO_OK=$( [ "$HELLO_TRAP" = "HIT GOOD TRAP" ] && echo "PASS" || echo "FAIL" )
+          HELLO_IPC=$(grep -oP 'IPC:\s*\K[0-9.]+' /tmp/app-hello.log | head -1 || echo "N/A")
+
+          # ---- Parse CoreMark ----
+          CM_VALID=$(grep -oP 'Correct operation validated' /tmp/app-coremark.log | head -1 || echo "")
+          CM_SCORE=$(grep -oP 'CoreMark 1.0 : \K[0-9.]+' /tmp/app-coremark.log | head -1 || echo "N/A")
+          CM_ITERS=$(grep -oP 'Iterations\s*:\s*\K\d+' /tmp/app-coremark.log | head -1 || echo "N/A")
+          CM_IPC=$(grep -oP 'IPC:\s*\K[0-9.]+' /tmp/app-coremark.log | head -1 || echo "N/A")
+          CM_TRAP=$(grep -oE 'HIT (GOOD|BAD) TRAP' /tmp/app-coremark.log | head -1 || echo "UNKNOWN")
+          CM_OK=$( [ "$CM_TRAP" = "HIT GOOD TRAP" ] && echo "PASS" || echo "FAIL" )
+
+          # ---- Parse Embench ----
+          EMBENCH_PASS=$(grep -c 'HIT GOOD TRAP' /tmp/app-embench.log || echo "0")
+          EMBENCH_FAIL=$(grep -c 'HIT BAD TRAP' /tmp/app-embench.log || echo "0")
+          EMBENCH_TOTAL=$((EMBENCH_PASS + EMBENCH_FAIL))
+
+          # ---- Write summary ----
+          {
+            echo "## App Tests (pk + newlib on NPC)"
+            echo ""
+            echo "| Test | Status | IPC | Details |"
+            echo "|------|--------|-----|---------|"
+            echo "| Hello | ${HELLO_OK} | ${HELLO_IPC} | ${HELLO_TRAP} |"
+            echo "| CoreMark | ${CM_OK} | ${CM_IPC} | score=${CM_SCORE}, iters=${CM_ITERS} |"
+            echo "| Embench-IoT | ${EMBENCH_PASS}/${EMBENCH_TOTAL} pass | - | ${EMBENCH_PASS} pass, ${EMBENCH_FAIL} fail |"
+            echo ""
+            if [ -n "$CM_VALID" ]; then
+              echo "> CoreMark: Correct operation validated."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # PMU details
+          bash .github/scripts/parse-pmu.sh \
+            "Hello (pk)" /tmp/app-hello.log \
+            "CoreMark (pk)" /tmp/app-coremark.log \
+            >> "$GITHUB_STEP_SUMMARY" || true
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-test-logs-${{ github.sha }}
+          path: /tmp/app-*.log
+          retention-days: 30
+          overwrite: true

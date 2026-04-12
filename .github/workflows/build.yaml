@@ -256,7 +256,7 @@ jobs:
         run: cd fpga/litex && ./setup.sh
       - name: Run LiteX
         shell: bash -l {0}
-        run: cd fpga/litex && source .venv/bin/activate && timeout 180s make run_ni || true
+        run: cd fpga/litex && source .venv/bin/activate && timeout 240s make run_ni || true
       - name: CoreMark on LiteX
         shell: bash -l {0}
         run: |

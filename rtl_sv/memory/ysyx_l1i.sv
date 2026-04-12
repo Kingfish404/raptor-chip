@@ -47,7 +47,7 @@ module ysyx_l1i #(
   logic [XLEN-1:0] fetch_addr;
   // Cache size/tag parameters and per-way valid arrays (registers for bulk clear on fence_i)
   localparam unsigned L1iSize = 2 ** L1I_LEN;
-  localparam unsigned L1iTagW = XLEN - L1I_LEN - L1I_LINE_LEN - 2;  // 2 = $clog2(4), instruction word size
+  localparam unsigned L1iTagW = XLEN - L1I_LEN - L1I_LINE_LEN - 2;  // 2 = $clog2(4), word size
   localparam unsigned L1iWayW = L1I_N_WAYS > 1 ? $clog2(L1I_N_WAYS) : 1;
   logic [L1iSize-1:0] l1i_valid[L1I_N_WAYS];
 

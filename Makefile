@@ -148,7 +148,7 @@ YSYXSOC_ARCH ?= riscv32-ysyxsoc ## Override ARCH for ysyxSoC targets
 VFLAGS ?= ## Enable RV64 mode (-DYSYX_RV64)
 
 config-npc32: ## Configure NPC simulator (o2 default)
-	$(MAKE) -C $(NSIM_HOME) $(NPC_DEFCONFIG)
+	@$(MAKE) --no-print-directory -C $(NSIM_HOME) $(NPC_DEFCONFIG)
 
 config-npc32-difftest:
 	$(MAKE) -C $(NSIM_HOME) o2_difftest_defconfig
@@ -177,7 +177,8 @@ $(GENERATED_DIR):
 	$(MAKE) verilog
 
 build-npc32: config-npc32 | $(GENERATED_DIR) ## Build NPC simulator
-	$(MAKE) -C $(NSIM_HOME) -j$(NPROC) VFLAGS="$(VFLAGS)"
+	@$(MAKE) --no-print-directory -q -C $(NSIM_HOME) VFLAGS="$(VFLAGS)" 2>/dev/null \
+		|| $(MAKE) --no-print-directory -C $(NSIM_HOME) -j$(NPROC) VFLAGS="$(VFLAGS)"
 
 run-npc32: build-npc32 ## Build and run NPC simulator
 	$(MAKE) -C $(NSIM_HOME) run ARGS="$(ARGS)" VFLAGS="$(VFLAGS)" $(if $(IMG),IMG=$(IMG))
@@ -388,6 +389,7 @@ clean: ## Clean all build artifacts
 	-$(MAKE) -C $(NSIM_HOME) clean 2>/dev/null || true
 	-$(MAKE) -C $(YSYX_HOME)/rtl_scala clean 2>/dev/null || true
 	-$(MAKE) -C $(YSYX_HOME)/verify clean 2>/dev/null || true
+	-$(MAKE) -C $(YSYX_HOME)/app clean 2>/dev/null || true
 
 # ============================================================================
 # Verification Suite (verify/)
@@ -418,6 +420,32 @@ verify-all: ## Run all verification targets
 verify-clean: ## Clean verification artifacts
 	$(MAKE) -C $(VERIFY_HOME) clean
 
+# ============================================================================
+# Standard Toolchain (app/ — riscv-pk + newlib)
+# ============================================================================
+APP_HOME := $(YSYX_HOME)/app
+
+app-run: build-npc32 ## [app] Run USER_ELF via pk on NPC
+	@$(MAKE) --no-print-directory -C $(APP_HOME) pk-run USER_ELF=$(USER_ELF) ARGS="$(ARGS)"
+
+app-bbl-linux: build-npc32 ## [app] Boot Linux via BBL on NPC
+	@$(MAKE) --no-print-directory -C $(APP_HOME) bbl-linux ARGS="$(ARGS)"
+
+app-hello-npc32: build-npc32 ## [app] Hello world test via pk (rv32)
+	@$(MAKE) --no-print-directory -C $(APP_HOME) hello ARGS="$(ARGS)"
+
+app-coremark-npc32: build-npc32 ## [app] CoreMark via pk (rv32)
+	@$(MAKE) --no-print-directory -C $(APP_HOME) coremark ARGS="$(ARGS)"
+
+app-embench-npc32: build-npc32 ## [app] Embench-IoT via pk (rv32)
+	@$(MAKE) --no-print-directory -C $(APP_HOME) embench ARGS="$(ARGS)"
+
+app-pk-build: ## [app] Build riscv-pk
+	@$(MAKE) --no-print-directory -C $(APP_HOME) pk-build
+
+app-clean: ## [app] Clean app build artifacts
+	@$(MAKE) --no-print-directory -C $(APP_HOME) clean
+
 .PHONY: help setup verilog \
 	config-nemu32 config-nemu32-linux config-nemu32-ref config-nemu32-linux-device menuconfig-nemu32 build-nemu32 run-nemu32 run-nemu32-linux run-nemu32-linux-device \
 	config-nemu64 config-nemu64-ref config-nemu64-linux-device build-nemu64 run-nemu64 run-nemu64-linux-device \
@@ -430,12 +458,14 @@ verify-clean: ## Clean verification artifacts
 	linux-download linux-download-rv32 linux-download-rv64 \
 	linux-boot-nemu32 linux-boot-npc32 linux-boot-nemu32-device linux-boot-nemu64-device \
 	fpga-syn fpga-pnr pack lint sta clean-npc clean \
-	verify-fuzz verify-fuzz-inf verify-fuzz-replay verify-sigtest verify-riscof verify-coverage verify-all verify-clean
+	verify-fuzz verify-fuzz-inf verify-fuzz-replay verify-sigtest verify-riscof verify-coverage verify-all verify-clean \
+	app-hello-npc32 app-coremark-npc32 app-embench-npc32 app-pk-build app-clean \
+	run-pk bbl-linux
 
 # ============================================================================
 # Local overrides (private synthesis targets, not tracked by Git)
 # ============================================================================
-# Copy Makefile.local.example → Makefile.local and fill in site-specific values.
+# Copy Makefile.local.example -> Makefile.local and fill in site-specific values.
 -include Makefile.local
 
 endif # Guard: root-only targets
