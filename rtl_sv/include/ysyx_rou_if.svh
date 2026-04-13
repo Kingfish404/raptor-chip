@@ -156,6 +156,7 @@ interface rou_cmu_if #(
   logic fence_time;
   logic fence_i;
   logic flush_pipe;
+  logic sys_resume;
   logic time_trap;
 
   logic [$clog2(`YSYX_ROB_SIZE):0] rob_head;
@@ -166,7 +167,7 @@ interface rou_cmu_if #(
       output rd_b, inst_b, pc_b, prd_b, prs_b, npc_b,
       output ebreak_b, difftest_skip_b, valid_b,
       output btaken, ben, jen, jren, atomic_sc,
-      output fence_time, fence_i, flush_pipe, time_trap,
+      output fence_time, fence_i, flush_pipe, sys_resume, time_trap,
       output rob_head
   );
   modport in(
@@ -175,7 +176,7 @@ interface rou_cmu_if #(
       input rd_b, inst_b, pc_b, prd_b, prs_b, npc_b,
       input ebreak_b, difftest_skip_b, valid_b,
       input btaken, ben, jen, jren, atomic_sc,
-      input fence_time, fence_i, flush_pipe, time_trap,
+      input fence_time, fence_i, flush_pipe, sys_resume, time_trap,
       input rob_head
   );
 endinterface

@@ -54,13 +54,14 @@ module ysyx_cmu #(
   assign cmu_bcast.jren = prev_valid && jren;
   assign cmu_bcast.btaken = prev_valid && rou_cmu.btaken;
   assign cmu_bcast.call = prev_valid && (jen || jren) && is_link_rd;
-  assign cmu_bcast.ret  = prev_valid && jren && is_link_rs1 && !is_link_rd;
-  assign cmu_bcast.rvc  = prev_valid && (bcast_inst[1:0] != 2'b11);
+  assign cmu_bcast.ret = prev_valid && jren && is_link_rs1 && !is_link_rd;
+  assign cmu_bcast.rvc = prev_valid && (bcast_inst[1:0] != 2'b11);
   assign cmu_bcast.time_trap = rou_cmu.time_trap;
 
   assign cmu_bcast.fence_time = rou_cmu.fence_time;
   assign cmu_bcast.fence_i = rou_cmu.fence_i;
   assign cmu_bcast.flush_pipe = rou_cmu.flush_pipe;
+  assign cmu_bcast.sys_resume = rou_cmu.sys_resume;
 
   assign cmu_bcast.rob_head = rou_cmu.rob_head;
 
@@ -69,9 +70,9 @@ module ysyx_cmu #(
   assign cmu_bcast.valid_b = rou_cmu.valid_b;
 
   assign bcast_inst = use_slot1 ? rou_cmu.inst_b : rou_cmu.inst_a;
-  assign bcast_rd   = bcast_inst[11:7];
-  assign bcast_rs1  = bcast_inst[19:15];
-  assign is_link_rd  = (bcast_rd == 5'd1) || (bcast_rd == 5'd5);
+  assign bcast_rd = bcast_inst[11:7];
+  assign bcast_rs1 = bcast_inst[19:15];
+  assign is_link_rd = (bcast_rd == 5'd1) || (bcast_rd == 5'd5);
   assign is_link_rs1 = (bcast_rs1 == 5'd1) || (bcast_rs1 == 5'd5);
 
   always @(posedge clock) begin

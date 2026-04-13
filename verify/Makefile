@@ -263,31 +263,25 @@ riscof-setup: ## Clone ACT4 repo and check prerequisites
 	@echo "[act4] Checking prerequisites..."
 	@command -v uv >/dev/null 2>&1 \
 		&& echo "[act4] uv: $$(uv --version)" \
-		|| echo "[act4] WARN: 'uv' not found. Install: curl -LsSf https://astral.sh/uv/install.sh | sh"
+		|| { echo "[act4] ERROR: 'uv' not found. Install: curl -LsSf https://astral.sh/uv/install.sh | sh"; exit 1; }
 	@command -v sail_riscv_sim >/dev/null 2>&1 \
 		&& echo "[act4] sail: $$(sail_riscv_sim --version 2>&1 | head -1)" \
 		|| { echo "[act4] WARN: 'sail_riscv_sim' not found (needed for riscof-gen)."; \
-		echo "  Linux:  curl -L https://github.com/riscv/sail-riscv/releases/download/0.10/sail-riscv-Linux-$$(arch).tar.gz | sudo tar xz -C /usr/local --strip-components=1"; \
-		echo "  macOS:  build from source: see https://github.com/riscv/sail-riscv#building"; }
+		echo "  Install: see https://github.com/riscv/sail-riscv/releases"; }
 	@echo "[act4] Setup complete.  Config: $(ACT4_CONFIG)"
-	$(MAKE) -C $(YSYX_HOME) run-npc32
 
 riscof-gen: ## Generate self-checking ELFs via ACT4 framework
 	@test -d "$(ACT4_REPO)" || { echo "[act4] ERROR: repo not found. Run 'make riscof-setup' first."; exit 1; }
 	@test -f "$(ACT4_CONFIG)" || { echo "[act4] ERROR: config not found: $(ACT4_CONFIG)"; exit 1; }
-	@# Patch UDB setup: podman "images --format table | grep" is broken on macOS;
-	@# replace with portable "image inspect" check.  Idempotent: safe to re-run.
-	@sed -i '' 's#images "$$REGISTRY/$$OWNER/udb:$${CONTAINER_TAG}" --format table | grep -q udb#image inspect "$$REGISTRY/$$OWNER/udb:$${CONTAINER_TAG}" >/dev/null 2>\&1#' \
-		"$(ACT4_REPO)/external/riscv-unified-db/bin/setup" 2>/dev/null || true
 	@echo "[act4] Generating self-checking ELFs..."
 	@echo "  Config:  $(ACT4_CONFIG)"
 	@echo "  Workdir: $(ACT4_WORKDIR)"
 	@mkdir -p "$(ACT4_WORKDIR)"
+	@# Touch extensions.txt so the act tool skips UDB/Ruby (extensions list is static)
+	@mkdir -p "$(dir $(ACT4_ELF_DIR))"
+	@touch "$(dir $(ACT4_ELF_DIR))extensions.txt"
 	cd "$(ACT4_REPO)" && \
-		export BUNDLE_PATH="$(ACT4_WORKDIR)/.bundle" && \
-		export BUNDLE_GEMFILE="$(ACT4_REPO)/framework/src/act/data/Gemfile" && \
-		bundle install && \
-		bundle exec $(MAKE) elfs \
+		$(MAKE) elfs \
 		CONFIG_FILES="$(ACT4_CONFIG)" \
 		WORKDIR="$(ACT4_WORKDIR)" \
 		EXCLUDE_EXTENSIONS="$(ACT4_EXCLUDE)" \

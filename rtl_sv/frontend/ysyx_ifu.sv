@@ -160,7 +160,8 @@ module ysyx_ifu #(
 
   assign ifu_bpu.pc = pc_ifu;
   assign ifu_bpu.nextpc = nextpc;
-  assign ifu_bpu.pc_update = recv_ready || cmu_bcast.flush_pipe || ifu_idu.resteer;
+  assign ifu_bpu.pc_update = (recv_ready
+    || cmu_bcast.flush_pipe || cmu_bcast.sys_resume || ifu_idu.resteer);
 
   assign ifu_l1i.pc = pc_ifu;
   assign ifu_l1i.invalid = cmu_bcast.fence_i;
@@ -184,9 +185,10 @@ module ysyx_ifu #(
   assign seqpc = pre_is_c_a ? seq2 : seq4;
 `endif
   assign nextpc = (cmu_bcast.flush_pipe ? cmu_bcast.cpc
+                 : cmu_bcast.sys_resume ? cmu_bcast.cpc
                  : ifu_idu.resteer ? ifu_idu.resteer_pc
                  : ifu_bpu.taken ? ifu_bpu.npc : seqpc);
-  assign recv_ready = (ifu_l1i.valid && (ifu_idu.ready || (state_ifu == IDLE)));
+  assign recv_ready = (ifu_l1i.valid && (ifu_idu.ready || (state_ifu == IDLE))) && !ifu_hazard;
 
   assign pc_stride = pc_ifu - pc_a;
   assign pred_stride = nextpc - pc_ifu;
@@ -238,13 +240,15 @@ module ysyx_ifu #(
           if (cmu_bcast.flush_pipe) begin
             state_ifu <= IDLE;
             trap <= 0;
+          end else if (cmu_bcast.sys_resume) begin
+            state_ifu <= IDLE;
           end
         end
         default: begin
           state_ifu <= IDLE;
         end
       endcase
-      if (recv_ready || cmu_bcast.flush_pipe || ifu_idu.resteer) begin
+      if (recv_ready || cmu_bcast.flush_pipe || cmu_bcast.sys_resume || ifu_idu.resteer) begin
         pc_ifu <= nextpc;
         seq2   <= nextpc + 'h2;
         seq4   <= nextpc + 'h4;

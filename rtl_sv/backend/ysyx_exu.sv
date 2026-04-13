@@ -636,24 +636,13 @@ module ysyx_exu #(
     (0)
   );
 
-  // instret correction: account for in-flight ROB entries before this CSR read
-  logic [$clog2(ROB_SIZE)-1:0] instret_correction;
-  logic is_instret_read;
-  assign instret_correction = (rs_dest[valid_idx][$clog2(ROB_SIZE)-1:0]
-                             - cmu_bcast.rob_head[$clog2(ROB_SIZE)-1:0]);
-  assign is_instret_read = (rs_imm[valid_idx][11:0] == `YSYX_CSR_INSTRET_
-                         || rs_imm[valid_idx][11:0] == `YSYX_CSR_MINSTRET);
-
-  // CSR read data with instret correction for OoO timing
-  logic [XLEN-1:0] csr_rdata_corrected;
-  assign csr_rdata_corrected = is_instret_read
-    ? (exu_csr.rdata + XLEN'(instret_correction))
-    : exu_csr.rdata;
+  // instret correction no longer needed: pipeline drain ensures ROB is empty
+  // when CSR instructions execute, so the CSR read value is already precise.
 
   // { Write back (RS)
   assign exu_rou.dest = rs_dest[valid_idx];
   assign exu_rou.result = (rs_system[valid_idx]
-    ? csr_rdata_corrected
+    ? exu_csr.rdata
     : (rs_alu[valid_idx][5:4] == 2'b01
       ? rs_mul_a[valid_idx]
       : rs_jen[valid_idx]

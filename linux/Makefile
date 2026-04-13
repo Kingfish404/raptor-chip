@@ -1,5 +1,23 @@
 PWD_DIR=$(abspath .)
+YSYX_HOME ?= $(abspath ..)
 KERNEL_VERSION:=6.17.7
+
+# ==============================================================================
+# Pre-built Linux kernel downloads
+# ==============================================================================
+# From https://github.com/Kingfish404/linux-build/releases
+LINUX_BUILD_VERSION ?= v6.18.15
+LINUX_BUILD_VERSION := $(strip $(LINUX_BUILD_VERSION))
+LINUX_BUILD_DIR     := $(PWD_DIR)/build
+LINUX_BUILD_URL     := https://github.com/Kingfish404/linux-build/releases/download/$(LINUX_BUILD_VERSION)
+LINUX_RV32_DIR      := $(LINUX_BUILD_DIR)/linux-riscv-rv32-$(LINUX_BUILD_VERSION)
+LINUX_RV64_DIR      := $(LINUX_BUILD_DIR)/linux-riscv-rv64-$(LINUX_BUILD_VERSION)
+LINUX_RV32_PAYLOAD  ?= $(LINUX_RV32_DIR)/fw_payload.bin
+LINUX_RV64_PAYLOAD  ?= $(LINUX_RV64_DIR)/fw_payload.bin
+
+# Exported for consumers (root Makefile, fpga/litex/Makefile)
+export LINUX_RV32_PAYLOAD
+export LINUX_RV64_PAYLOAD
 
 help: ## Show this help message
 	@echo "Usage: make <target> [VAR=value ...]"
@@ -18,6 +36,42 @@ help: ## Show this help message
 			target=$$0; sub(/:.*/, "", target); \
 			desc=$$0; sub(/.*## /, "", desc); \
 			printf "  %-20s %s\n", target, desc }' $(MAKEFILE_LIST)
+
+# ==============================================================================
+# Pre-built download targets
+# ==============================================================================
+
+$(LINUX_RV32_DIR)/fw_payload.bin:
+	@mkdir -p $(LINUX_BUILD_DIR)
+	curl -L -o $(LINUX_BUILD_DIR)/linux-riscv-rv32-$(LINUX_BUILD_VERSION).tar.gz \
+		$(LINUX_BUILD_URL)/linux-riscv-rv32-$(LINUX_BUILD_VERSION).tar.gz
+	tar xzf $(LINUX_BUILD_DIR)/linux-riscv-rv32-$(LINUX_BUILD_VERSION).tar.gz -C $(LINUX_BUILD_DIR)
+	@echo "RV32 Linux build extracted to $(LINUX_RV32_DIR)"
+
+$(LINUX_RV64_DIR)/fw_payload.bin:
+	@mkdir -p $(LINUX_BUILD_DIR)
+	curl -L -o $(LINUX_BUILD_DIR)/linux-riscv-rv64-$(LINUX_BUILD_VERSION).tar.gz \
+		$(LINUX_BUILD_URL)/linux-riscv-rv64-$(LINUX_BUILD_VERSION).tar.gz
+	tar xzf $(LINUX_BUILD_DIR)/linux-riscv-rv64-$(LINUX_BUILD_VERSION).tar.gz -C $(LINUX_BUILD_DIR)
+	@echo "RV64 Linux build extracted to $(LINUX_RV64_DIR)"
+
+download-rv32: $(LINUX_RV32_DIR)/fw_payload.bin ## Download pre-built Linux (RV32)
+download-rv64: $(LINUX_RV64_DIR)/fw_payload.bin ## Download pre-built Linux (RV64)
+download: download-rv32 download-rv64 ## Download pre-built Linux (RV32 + RV64)
+	@echo "Downloaded Linux $(LINUX_BUILD_VERSION) for RV32 and RV64"
+	@echo "  RV32: $(LINUX_RV32_DIR)/"
+	@echo "  RV64: $(LINUX_RV64_DIR)/"
+	@cat $(LINUX_RV32_DIR)/README.md
+
+# Helper targets for querying paths from other Makefiles (e.g. fpga/litex/Makefile).
+print-rv32-payload: ## Print RV32 fw_payload.bin path
+	@echo $(LINUX_RV32_PAYLOAD)
+print-rv64-payload: ## Print RV64 fw_payload.bin path
+	@echo $(LINUX_RV64_PAYLOAD)
+
+# ==============================================================================
+# Build from source
+# ==============================================================================
 
 all: ## Show usage information
 	echo "PWD: $(PWD_DIR)"
@@ -76,17 +130,37 @@ install_initramfs: ## Configure kernel to use initramfs
 	cd linux && ./scripts/config --set-str CONFIG_INITRAMFS_SOURCE $(PWD_DIR)/initramfs
 	make -C linux ARCH=riscv -j`nproc` olddefconfig
 
-opensbi: ## Clone OpenSBI
-	git clone https://github.com/riscv-software-src/opensbi
+OPENSBI_DIR     := $(PWD_DIR)/opensbi
+OPENSBI_FW_DIR  := $(OPENSBI_DIR)/build/platform/generic/firmware
+OPENSBI_PAYLOAD := $(OPENSBI_FW_DIR)/fw_payload.bin
+export OPENSBI_PAYLOAD
 
-build_opensbi: opensbi ## Build OpenSBI standalone
-	make -C opensbi PLATFORM_RISCV_ISA=rv32imac_zicntr_zicond_zicsr_zifencei_zba_zbb_zbs \
-		CROSS_COMPILE=riscv64-linux-gnu- PLATFORM_RISCV_XLEN=32 PLATFORM=generic -j`nproc`
+$(OPENSBI_DIR)/README.md:
+	git clone https://github.com/riscv-software-src/opensbi $(OPENSBI_DIR)
 
-build_opensbi_with_kernel: opensbi ## Build OpenSBI with Linux kernel as payload
-	make -C opensbi PLATFORM_RISCV_ISA=rv32imac_zicntr_zicond_zicsr_zifencei_zba_zbb_zbs \
-		CROSS_COMPILE=riscv64-linux-gnu- PLATFORM_RISCV_XLEN=32 PLATFORM=generic \
-		FW_PAYLOAD_PATH=$(PWD_DIR)/linux/arch/riscv/boot/Image -j`nproc`
+OPENSBI_COMMON_FLAGS = \
+	PLATFORM_RISCV_ISA=rv32imac_zicntr_zicond_zicsr_zifencei_zba_zbb_zbs \
+	PLATFORM_RISCV_XLEN=32 PLATFORM=generic -j$(shell nproc)
+
+opensbi: $(OPENSBI_DIR)/README.md ## Build OpenSBI (standalone, Clang/LLVM)
+	make -C $(OPENSBI_DIR) LLVM=1 \
+		platform-cflags-y="-Wno-gnu-designator" \
+		$(OPENSBI_COMMON_FLAGS)
+
+opensbi-gnu: $(OPENSBI_DIR)/README.md ## Build OpenSBI (GNU toolchain)
+	make -C $(OPENSBI_DIR) CROSS_COMPILE=riscv64-linux-gnu- \
+		$(OPENSBI_COMMON_FLAGS)
+
+opensbi-with-kernel: $(OPENSBI_DIR)/README.md ## Build OpenSBI with Linux kernel as payload
+	make -C $(OPENSBI_DIR) CROSS_COMPILE=riscv64-linux-gnu- \
+		FW_PAYLOAD_PATH=$(PWD_DIR)/linux/arch/riscv/boot/Image \
+		$(OPENSBI_COMMON_FLAGS)
+
+opensbi-clean: ## Clean OpenSBI build artifacts
+	make -C $(OPENSBI_DIR) clean
+
+print-opensbi-payload: ## Print OpenSBI fw_payload.bin path
+	@echo $(OPENSBI_PAYLOAD)
 
 clean: ## Clean all build artifacts
 	rm -rf linux initramfs initramfs.cpio.gz opensbi payload/build

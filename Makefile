@@ -299,57 +299,46 @@ nanos-npc32: ## Build and run nanos-lite on NPC
 # Linux Kernel Boot (via OpenSBI on NEMU)
 # ============================================================================
 
-# Pre-built Linux kernel downloads (from https://github.com/Kingfish404/linux-build/releases)
-LINUX_BUILD_VERSION ?= v6.18.15 ## Pre-built Linux kernel version
-LINUX_BUILD_VERSION := $(strip $(LINUX_BUILD_VERSION))
-LINUX_BUILD_DIR     := $(YSYX_HOME)/linux/build
-LINUX_BUILD_URL     := https://github.com/Kingfish404/linux-build/releases/download/$(LINUX_BUILD_VERSION)
-LINUX_RV32_DIR      := $(LINUX_BUILD_DIR)/linux-riscv-rv32-$(LINUX_BUILD_VERSION)
-LINUX_RV64_DIR      := $(LINUX_BUILD_DIR)/linux-riscv-rv64-$(LINUX_BUILD_VERSION)
-LINUX_RV32_PAYLOAD  ?= $(LINUX_RV32_DIR)/fw_payload.bin
-LINUX_RV64_PAYLOAD  ?= $(LINUX_RV64_DIR)/fw_payload.bin
+# Delegate download/version management to linux/Makefile (single source of truth).
+LINUX_HOME          := $(YSYX_HOME)/linux
+LINUX_BUILD_VERSION ?= v6.18.15
+LINUX_RV32_PAYLOAD  ?= $(LINUX_HOME)/build/linux-riscv-rv32-$(strip $(LINUX_BUILD_VERSION))/fw_payload.bin
+LINUX_RV64_PAYLOAD  ?= $(LINUX_HOME)/build/linux-riscv-rv64-$(strip $(LINUX_BUILD_VERSION))/fw_payload.bin
 
-$(LINUX_RV32_DIR)/fw_payload.bin:
-	@mkdir -p $(LINUX_BUILD_DIR)
-	curl -L -o $(LINUX_BUILD_DIR)/linux-riscv-rv32-$(LINUX_BUILD_VERSION).tar.gz \
-		$(LINUX_BUILD_URL)/linux-riscv-rv32-$(LINUX_BUILD_VERSION).tar.gz
-	tar xzf $(LINUX_BUILD_DIR)/linux-riscv-rv32-$(LINUX_BUILD_VERSION).tar.gz -C $(LINUX_BUILD_DIR)
-	@echo "RV32 Linux build extracted to $(LINUX_RV32_DIR)"
+linux-download-rv32: ## Download pre-built Linux (RV32 only)
+	$(MAKE) -C $(LINUX_HOME) download-rv32 LINUX_BUILD_VERSION=$(LINUX_BUILD_VERSION)
 
-$(LINUX_RV64_DIR)/fw_payload.bin:
-	@mkdir -p $(LINUX_BUILD_DIR)
-	curl -L -o $(LINUX_BUILD_DIR)/linux-riscv-rv64-$(LINUX_BUILD_VERSION).tar.gz \
-		$(LINUX_BUILD_URL)/linux-riscv-rv64-$(LINUX_BUILD_VERSION).tar.gz
-	tar xzf $(LINUX_BUILD_DIR)/linux-riscv-rv64-$(LINUX_BUILD_VERSION).tar.gz -C $(LINUX_BUILD_DIR)
-	@echo "RV64 Linux build extracted to $(LINUX_RV64_DIR)"
+linux-download-rv64: ## Download pre-built Linux (RV64 only)
+	$(MAKE) -C $(LINUX_HOME) download-rv64 LINUX_BUILD_VERSION=$(LINUX_BUILD_VERSION)
 
-linux-download-rv32: $(LINUX_RV32_DIR)/fw_payload.bin ## Download pre-built Linux (RV32 only)
-linux-download-rv64: $(LINUX_RV64_DIR)/fw_payload.bin ## Download pre-built Linux (RV64 only)
-linux-download: linux-download-rv32 linux-download-rv64 ## Download pre-built Linux (RV32 + RV64)
-	@echo "Downloaded Linux $(LINUX_BUILD_VERSION) for RV32 and RV64"
-	@echo "  RV32: $(LINUX_RV32_DIR)/"
-	@echo "  RV64: $(LINUX_RV64_DIR)/"
-	@cat $(LINUX_RV32_DIR)/README.md
+linux-download: ## Download pre-built Linux (RV32 + RV64)
+	$(MAKE) -C $(LINUX_HOME) download LINUX_BUILD_VERSION=$(LINUX_BUILD_VERSION)
 
 linux-boot-nemu32: config-nemu32-linux ## Boot Linux on NEMU (riscv32)
+	$(MAKE) -C $(LINUX_HOME) download-rv32 LINUX_BUILD_VERSION=$(LINUX_BUILD_VERSION)
 	$(MAKE) -C $(NEMU_HOME) -j$(NPROC)
 	$(MAKE) -C $(NEMU_HOME) run IMG=$(LINUX_RV32_PAYLOAD) ARGS="$(ARGS) $(if $(MAX_INST),-m $(MAX_INST))"
 
 linux-boot-npc32: config-npc32-linux ## Boot Linux on NPC (riscv32)
+	$(MAKE) -C $(LINUX_HOME) download-rv32 LINUX_BUILD_VERSION=$(LINUX_BUILD_VERSION)
 	$(MAKE) -C $(NSIM_HOME) -j$(NPROC)
 	$(MAKE) -C $(NSIM_HOME) run IMG=$(LINUX_RV32_PAYLOAD) ARGS="$(ARGS) $(if $(MAX_INST),-m $(MAX_INST))"
 
 linux-boot-npc32-difftest: config-npc32-linux-difftest config-nemu32-ref ## Boot Linux on NPC with difftest
+	$(MAKE) -C $(LINUX_HOME) download-rv32 LINUX_BUILD_VERSION=$(LINUX_BUILD_VERSION)
 	$(MAKE) -C $(NSIM_HOME) -j$(NPROC)
 	$(MAKE) -C $(NSIM_HOME) run IMG=$(LINUX_RV32_PAYLOAD) ARGS="$(ARGS) $(if $(MAX_INST),-m $(MAX_INST))"
 
-linux-boot-nemu32-device: config-nemu32-linux-device $(LINUX_RV32_DIR)/fw_payload.bin ## Boot Linux on NEMU RV32 (auto-download)
+linux-boot-nemu32-device: config-nemu32-linux-device ## Boot Linux on NEMU RV32 (auto-download)
+	$(MAKE) -C $(LINUX_HOME) download-rv32 LINUX_BUILD_VERSION=$(LINUX_BUILD_VERSION)
 	$(MAKE) -C $(NEMU_HOME) run IMG=$(LINUX_RV32_PAYLOAD) ARGS="$(DEVICE_ARGS)"
 
-linux-boot-nemu32-device-difftest: config-nemu32-linux-device $(LINUX_RV32_DIR)/fw_payload.bin ## Boot Linux on NEMU RV32 (auto-download)
+linux-boot-nemu32-device-difftest: config-nemu32-linux-device ## Boot Linux on NEMU RV32 (auto-download)
+	$(MAKE) -C $(LINUX_HOME) download-rv32 LINUX_BUILD_VERSION=$(LINUX_BUILD_VERSION)
 	$(MAKE) -C $(NEMU_HOME) run IMG=$(LINUX_RV32_PAYLOAD) ARGS="$(DEVICE_ARGS)"
 
-linux-boot-nemu64-device: config-nemu64-linux-device $(LINUX_RV64_DIR)/fw_payload.bin ## Boot Linux on NEMU RV64 (auto-download)
+linux-boot-nemu64-device: config-nemu64-linux-device ## Boot Linux on NEMU RV64 (auto-download)
+	$(MAKE) -C $(LINUX_HOME) download-rv64 LINUX_BUILD_VERSION=$(LINUX_BUILD_VERSION)
 	$(MAKE) -C $(NEMU_HOME) run IMG=$(LINUX_RV64_PAYLOAD) ARGS="$(DEVICE_ARGS)"
 
 # ============================================================================

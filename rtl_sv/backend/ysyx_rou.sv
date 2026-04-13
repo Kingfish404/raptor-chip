@@ -89,6 +89,10 @@ module ysyx_rou #(
 `ifdef YSYX_DUAL_ISSUE
   // Dual-issue UOQ pointers
   logic [$clog2(IIQ_SIZE)-1:0] uoq_head_b, uoq_tail_b;
+
+  // Lightweight resume for pure CSR: no flush, just unblock IFU and clear drain
+  logic sys_resume;
+
   assign uoq_head_b = uoq_head + 1;
   assign uoq_tail_b = uoq_tail + 1;
 
@@ -99,7 +103,24 @@ module ysyx_rou #(
 `else
   assign uoq_enq_fire_a = rnu_rou.valid_a && !uoq_valid[uoq_head];
 `endif
-  assign uoq_deq_fire_a = rou_exu.ready && uoq_valid[uoq_tail] && !rob_entry[rob_tail].busy;
+
+  // Pipeline drain: serializing instructions (CSR/fence/ecall/mret/sret)
+  // must wait for ROB to empty before dispatch, and block subsequent dispatch
+  // until committed. This eliminates OoO timing hacks (e.g. instret correction).
+  logic uoq_tail_is_serializing;
+  assign uoq_tail_is_serializing = uoq_valid[uoq_tail] && (
+      uoq_uops[uoq_tail].system
+      || uoq_uops[uoq_tail].f_i
+      || uoq_uops[uoq_tail].f_time);
+
+  logic rob_empty;
+  assign rob_empty = (rob_head == rob_tail) && !rob_entry[rob_head].busy;
+
+  logic serialize_in_flight;
+
+  assign uoq_deq_fire_a = rou_exu.ready && uoq_valid[uoq_tail] && !rob_entry[rob_tail].busy
+      && !serialize_in_flight
+      && (!uoq_tail_is_serializing || rob_empty);
 
 `ifdef YSYX_DUAL_ISSUE
   logic uoq_enq_fire_b, uoq_deq_fire_b;
@@ -118,8 +139,10 @@ module ysyx_rou #(
       && rou_exu.ready_b;
 `endif
 
-  assign valid         = uoq_valid[uoq_tail] && !rob_entry[rob_tail].busy;
-  assign ready         = !uoq_valid[uoq_head];
+  assign valid         = uoq_valid[uoq_tail] && !rob_entry[rob_tail].busy
+      && !serialize_in_flight
+      && (!uoq_tail_is_serializing || rob_empty);
+  assign ready = !uoq_valid[uoq_head];
   assign rou_exu.valid = valid;
 `ifdef YSYX_DUAL_ISSUE
   // When RNU sends a dual pair (valid_b), both UOQ slots must be free.
@@ -136,14 +159,15 @@ module ysyx_rou #(
 
   always @(posedge clock) begin
     if (reset || flush_pipe) begin
-      uoq_head      <= '0;
-      uoq_tail      <= '0;
-      uoq_valid     <= '0;
-      uoq_pv1_valid <= '0;
-      uoq_pv2_valid <= '0;
-`ifdef YSYX_DUAL_ISSUE
-      uoq_is_pair <= '0;
-`endif
+      uoq_head            <= '0;
+      uoq_tail            <= '0;
+      uoq_valid           <= '0;
+      uoq_pv1_valid       <= '0;
+      uoq_pv2_valid       <= '0;
+      serialize_in_flight <= 1'b0;
+    end else if (sys_resume) begin
+      // Pipeline already drained; just clear the serialize lock
+      serialize_in_flight <= 1'b0;
     end else begin
       if (uoq_enq_fire_a) begin
         uoq_valid[uoq_head] <= 1'b1;
@@ -228,6 +252,10 @@ module ysyx_rou #(
 `endif
       end
       if (uoq_deq_fire_a) begin
+        // Track serializing instruction dispatch for pipeline drain
+        if (uoq_tail_is_serializing) begin
+          serialize_in_flight <= 1'b1;
+        end
 `ifdef YSYX_DUAL_ISSUE
         if (uoq_deq_fire_b) begin
           uoq_tail <= uoq_tail + 2;
@@ -561,14 +589,22 @@ module ysyx_rou #(
       && rob_entry[h0].state == ROB_WB
       && (rou_lsu.sq_ready || !rob_entry[h0].wen));
 
+  // Pure CSR: sys instruction without ecall/ebreak/mret/sret (no redirect needed)
+  logic head0_sys_pure;
+  assign head0_sys_pure = rob_entry[h0].sys
+      && !rob_entry[h0].ecall && !rob_entry[h0].ebreak
+      && !rob_entry[h0].mret  && !rob_entry[h0].sret;
+
   logic head0_flush;
   assign head0_flush = recieved_trap || (head_valid && (
       rob_entry[h0].f_i
       || head_br_p_fail
       || rob_entry[h0].trap
-      || rob_entry[h0].sys
+      || (rob_entry[h0].sys && !head0_sys_pure)
       || rob_entry[h0].atom
   ));
+
+  assign sys_resume = head_valid && head0_sys_pure && !head0_flush;
 
   // ---- Slot 1 (head+1): only considered when slot 0 doesn't flush ----
   logic head1_br_p_fail;
@@ -630,6 +666,7 @@ module ysyx_rou #(
   assign rou_cmu.fence_time = fence_time;
   assign rou_cmu.fence_i = (head_valid && rob_entry[h0].f_i) || (dual_commit && rob_entry[h1].f_i);
   assign rou_cmu.flush_pipe = flush_pipe;
+  assign rou_cmu.sys_resume = sys_resume;
   assign rou_cmu.time_trap = recieved_trap;
   assign rou_cmu.rob_head = rob_head;
   assign rou_cmu.difftest_skip_a = !recieved_trap && rob_entry[h0].difftest_skip;
@@ -645,6 +682,17 @@ module ysyx_rou #(
   assign rou_cmu.ebreak_b = dual_commit && rob_entry[h1].ebreak;
   assign rou_cmu.difftest_skip_b = rob_entry[h1].difftest_skip;
   assign rou_cmu.valid_b = dual_commit;
+
+`ifdef YSYX_RVFI
+  // ---- RVFI per-slot data ----
+  assign rou_cmu.rvfi_trap_a = !recieved_trap && rob_entry[h0].trap;
+  assign rou_cmu.rvfi_trap_b = rob_entry[h1].trap;
+  assign rou_cmu.rvfi_npc_a  = rob_entry[h0].trap ? csr_bcast.tvec : rob_entry[h0].npc;
+  assign rou_cmu.rvfi_sq_waddr_a = rob_entry[h0].sq_waddr;
+  assign rou_cmu.rvfi_sq_waddr_b = rob_entry[h1].sq_waddr;
+  assign rou_cmu.rvfi_sq_wdata_a = rob_entry[h0].sq_wdata;
+  assign rou_cmu.rvfi_sq_wdata_b = rob_entry[h1].sq_wdata;
+`endif
 
   // ---- CSR interface (MUX slot 0 / slot 1) ----
   // Slot 0 never has sys/trap during dual commit (they cause flush).
