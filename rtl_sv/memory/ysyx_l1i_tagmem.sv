@@ -1,7 +1,7 @@
 `include "ysyx.svh"
 
 // L1I tag + valid memory behind (* keep_hierarchy *).
-// Combinational read — functionally identical to inline register arrays.
+// Combinational read: functionally identical to inline register arrays.
 // The module boundary prevents Yosys from merging these arrays into the
 // parent's fan-out tree, forcing separate buffer insertion for addr_idx
 // and reducing the root pc_ifu BUF delay on the critical path.
@@ -16,7 +16,7 @@ module ysyx_l1i_tagmem #(
     input logic clock,
     input logic reset,
 
-    // Combinational read — hit outputs available same cycle
+    // Combinational read: hit outputs available same cycle
     input  logic [     L1I_LEN-1:0] addr_idx,
     input  logic [L1I_LINE_LEN-1:0] addr_offset,
     input  logic [       TAG_W-1:0] addr_tag,
@@ -42,7 +42,7 @@ module ysyx_l1i_tagmem #(
   logic [TAG_W-1:0] tags[L1I_SIZE][L1I_LINE_SIZE];
   logic [L1I_SIZE-1:0] valid;
 
-  // Combinational hit — same semantics as inline arrays
+  // Combinational hit: same semantics as inline arrays
   assign hit = (valid[addr_idx] && (tags[addr_idx][addr_offset] == addr_tag));
   assign hit_next = (valid[addr_idx_next]
     && (tags[addr_idx_next][addr_offset_next] == addr_tag_next));

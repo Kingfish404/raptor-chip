@@ -65,7 +65,7 @@ module ysyx_bpu #(
   // Read addresses computed from nextpc; registered inside sub-modules on
   // pc_update. The keep_hierarchy attribute prevents Yosys from flattening
   // the sub-modules, so the internal read-address registers stay separate
-  // from pc_ifu — eliminating the ~2800-fanout critical path.
+  // from pc_ifu: eliminating the ~2800-fanout critical path.
 
   logic [PHT_LEN-1:0] fpht_raddr;
   logic [BTB_LEN-1:0] fbtb_raddr;
@@ -112,7 +112,7 @@ module ysyx_bpu #(
       .rd_target(btb_rd_target),
       .rd_type(btb_rd_type),
       .rd_tag_match(btb_rd_tag_match),
-      // JALR entry creation: write target+tag+valid on JALR flush (bug fix — baseline
+      // JALR entry creation: write target+tag+valid on JALR flush (bug fix: baseline
       // only wrote entries for JAL and taken-branches, leaving JALR without BTB entries)
       .wen_entry(cmu_bcast.flush_pipe && (cmu_bcast.jen || cmu_bcast.jren || rbtaken)),
       .waddr(rbtb_idx),
@@ -123,7 +123,7 @@ module ysyx_bpu #(
       .init(cmu_bcast.fence_time)
   );
 
-  // Prediction logic — all inputs are registered sub-module outputs,
+  // Prediction logic: all inputs are registered sub-module outputs,
   // NO combinational dependency on pc_ifu/fpc.
   assign is_b = (btb_rd_type == COND);
   assign btaken = (btb_rd_type == COND && pht_rdata[1:1]);

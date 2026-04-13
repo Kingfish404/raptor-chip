@@ -148,7 +148,7 @@ def gen_branch(rng):
     """Generate a short forward branch (skip 1-3 instructions)."""
     op = rng.choice(BRANCH_OPS)
     rs1, rs2 = rand_reg(rng), rand_reg(rng)
-    # Generate a label name — we'll resolve it later with a local label
+    # Generate a label name: we'll resolve it later with a local label
     return op, rs1, rs2
 
 
@@ -174,7 +174,7 @@ def generate_program(rng, length, xlen):
     # Set up scratch memory pointer (SP -> _scratch)
     lines.append("  la sp, _scratch")
 
-    # Initialize some registers with diverse values (skip x10/a0 — reserved for exit)
+    # Initialize some registers with diverse values (skip x10/a0: reserved for exit)
     for i in range(3, 16):
         if i == 10:
             continue  # a0 is reserved for ebreak exit code
@@ -191,7 +191,7 @@ def generate_program(rng, length, xlen):
 
     # Weighted instruction mix
     #   ALU: 45%, M-ext: 15%, Load: 15%, Store: 10%, Branch: 10%, LUI/AUIPC: 5%
-    #   CSR reads removed — they can trap depending on privilege config
+    #   CSR reads removed: they can trap depending on privilege config
     categories = (
         [("r", 30)]
         + [("i", 15)]

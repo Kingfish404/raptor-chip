@@ -1,5 +1,5 @@
 /* ============================================================================
- * core_portme.c — CoreMark port implementation for RISC-V on NPC (via pk + newlib)
+ * core_portme.c: CoreMark port implementation for RISC-V on NPC (via pk)
  * ============================================================================ */
 
 #include "coremark.h"

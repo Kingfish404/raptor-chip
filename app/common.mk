@@ -1,5 +1,5 @@
 # ============================================================================
-# app/common.mk — Shared definitions for app/ build system
+# app/common.mk: Shared definitions for app/ build system
 #
 # Set APP_HOME before including this file.
 # ============================================================================

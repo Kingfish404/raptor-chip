@@ -68,7 +68,7 @@ interface rou_exu_if #(
   logic ready;
 
 `ifdef YSYX_DUAL_ISSUE
-  // Slot B (dual issue — younger instruction)
+  // Slot B (dual issue: younger instruction)
   ysyx_pkg::uop_t uop_b;
 
   logic [XLEN-1:0] op1_b;

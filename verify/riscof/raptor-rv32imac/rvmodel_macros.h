@@ -1,4 +1,4 @@
-/* rvmodel_macros.h — Raptor Chip DUT-specific macros for ACT4 */
+/* rvmodel_macros.h: Raptor Chip DUT-specific macros for ACT4 */
 /* SPDX-License-Identifier: Apache-2.0 */
 
 #ifndef _COMPLIANCE_MODEL_H

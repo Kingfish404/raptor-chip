@@ -1,5 +1,5 @@
 # ============================================================================
-# app/pk/Makefile — Build riscv-pk (proxy kernel + BBL) for NPC
+# app/pk/Makefile: Build riscv-pk (proxy kernel + BBL) for NPC
 # ============================================================================
 
 APP_HOME := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/..)

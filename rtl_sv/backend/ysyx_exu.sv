@@ -426,13 +426,13 @@ module ysyx_exu #(
           if (rs_alu[i][5:4] == 2'b01) begin
             if (rs_mul_ready[i] == 0 && muling == 0
                 && i[$clog2(RS_SIZE)-1:0] == mul_rs_idx) begin
-              // Mul start — only the entry selected by the priority encoder
+              // Mul start: only the entry selected by the priority encoder
               muling <= 1;
               mul_target_idx <= i[$clog2(RS_SIZE)-1:0];
             end
             if (i[$clog2(RS_SIZE)-1:0] == mul_target_idx
                 && muling == 1 && mul_valid) begin
-              // Mul result is ready — deliver only to the entry that started it
+              // Mul result is ready: deliver only to the entry that started it
               rs_mul_ready[i] <= 1;
               muling <= 0;
               rs_mul_a[i] <= reg_wdata_mul;

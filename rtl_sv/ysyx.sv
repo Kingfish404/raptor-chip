@@ -185,7 +185,7 @@ module ysyx #(
       .reset(reset)
   );
 
-  // RNU (Re-naming Unit) — pure rename: RNQ + freelist + maptable
+  // RNU (Re-naming Unit): pure rename: RNQ + freelist + maptable
   logic [`YSYX_PHY_LEN-1:0] rnu_map_snapshot [`YSYX_REG_SIZE];
   logic [`YSYX_PHY_LEN-1:0] rnu_rat_snapshot [`YSYX_REG_SIZE];
 
@@ -204,7 +204,7 @@ module ysyx #(
       .reset(reset)
   );
 
-  // PRF (Physical Register File) — top-level shared resource
+  // PRF (Physical Register File): top-level shared resource
   // Debug: architectural register view (committed + speculative)
   /* verilator lint_off UNUSEDSIGNAL */
   logic [XLEN-1:0] rf     [`YSYX_REG_SIZE];

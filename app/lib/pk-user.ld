@@ -1,5 +1,5 @@
 /*
- * pk-user.ld — Linker script for user ELFs running under riscv-pk
+ * pk-user.ld: Linker script for user ELFs running under riscv-pk
  *
  * Uses standard userspace addresses (starting at 0x10000) instead of
  * picolibc's bare-metal layout (0x80000000) which conflicts with pk.

@@ -91,13 +91,13 @@ module ysyx_rnu_maptable #(
     end
   end
 
-  // Speculative read ports — slot A (rs1, rs2, rd_old)
+  // Speculative read ports: slot A (rs1, rs2, rd_old)
   assign mt.map_rdata_a = map[mt.map_raddr_a];
   assign mt.map_rdata_b = map[mt.map_raddr_b];
   assign mt.map_rdata_c = map[mt.map_raddr_c];
 
 `ifdef YSYX_DUAL_ISSUE
-  // Speculative read ports — slot B (rs1_b, rs2_b, rd_old_b)
+  // Speculative read ports: slot B (rs1_b, rs2_b, rd_old_b)
   // Note: RAW dependency bypass (slot B seeing slot A's write) is done in RNU,
   // not here. These reads return the pre-write maptable state.
   assign mt.map_rdata_d = map[mt.map_raddr_d];

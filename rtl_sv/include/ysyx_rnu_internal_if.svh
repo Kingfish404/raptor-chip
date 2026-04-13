@@ -29,7 +29,7 @@ interface rnu_fl_if #(
   logic             alloc_empty_a;
 
 `ifdef YSYX_DUAL_ISSUE
-  // Allocate port B (dual issue — second rename slot)
+  // Allocate port B (dual issue: second rename slot)
   logic             alloc_req_b;
   logic [PLEN-1:0]  alloc_pr_b;
   logic             alloc_empty_b;  // true if < 2 free registers
@@ -98,7 +98,7 @@ interface rnu_mt_if #(
   logic [PLEN-1:0]  map_rdata_c;
 
 `ifdef YSYX_DUAL_ISSUE
-  // Speculative rename write B (dual issue — younger instruction)
+  // Speculative rename write B (dual issue: younger instruction)
   logic             map_wen_b;
   logic [RLEN-1:0]  map_waddr_b;
   logic [PLEN-1:0]  map_wdata_b;

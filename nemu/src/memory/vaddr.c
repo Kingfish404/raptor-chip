@@ -25,7 +25,7 @@ extern FILE *mem_trace;
 
 word_t g_vaddr = 0;
 
-/* Software TLB arrays — direct-mapped, separate per access type */
+/* Software TLB arrays: direct-mapped, separate per access type */
 soft_tlb_entry_t soft_tlb_ifetch[SOFT_TLB_ENTRIES];
 soft_tlb_entry_t soft_tlb_load[SOFT_TLB_ENTRIES];
 soft_tlb_entry_t soft_tlb_store[SOFT_TLB_ENTRIES];

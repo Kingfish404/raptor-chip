@@ -61,7 +61,7 @@ module ysyx_exu_mul #(
   assign ws1 = {{XLEN - 32{s1[31]}}, s1[31:0]};
   assign ws2 = {{XLEN - 32{s2[31]}}, s2[31:0]};
 
-  // Combinational MUL result (no division logic — removes critical path)
+  // Combinational MUL result (no division logic: removes critical path)
   always_comb begin
     unique case (op)
       // verilog_format: off
@@ -118,7 +118,7 @@ module ysyx_exu_mul #(
     end else if (div_active) begin
       // Iterative restoring division: XLEN cycles
       if (div_counter == XLEN[$clog2(XLEN+1)-1:0]) begin
-        // Division complete — apply sign correction and output
+        // Division complete: apply sign correction and output
         div_active <= 0;
         unique case (op)
           `YSYX_ALU_DIV___: begin

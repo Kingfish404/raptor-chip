@@ -118,7 +118,7 @@ module ysyx_l1d #(
   // speculative SRAM read that feeds the LD_A hit path.  In PTWAIT/LD_D
   // the SRAM read port may be redirected, and if the FSM transitions to
   // LD_A on the same cycle, data_bank_rdata would contain the store's set
-  // data instead of the load's — causing silent data corruption.
+  // data instead of the load's: causing silent data corruption.
   logic partial_store_rmw;
   logic load_speculate;
   assign load_speculate = (l1d_state == IDLE && lsu_l1d.rvalid && !cmu_bcast.flush_pipe);
@@ -144,7 +144,7 @@ module ysyx_l1d #(
       ? lsu_l1d.raddr[L1D_LEN+L1D_LINE_LEN+OFFSET_BITS-1:L1D_LINE_LEN+OFFSET_BITS]
       : addr_idx;
 
-  // Data SRAM banks — per-way, one bank per word position in cache line
+  // Data SRAM banks: per-way, one bank per word position in cache line
   logic [XLEN-1:0] data_bank_rdata[L1D_N_WAYS][L1D_LINE_SIZE];
   generate
     for (genvar w = 0; w < L1D_N_WAYS; w++) begin : gen_way
@@ -187,7 +187,7 @@ module ysyx_l1d #(
 
   assign mmu_en = csr_bcast.dmmu_en;
 
-  // Load/Store TLB fill — from shared PTW, only while PTWAIT is active
+  // Load/Store TLB fill: from shared PTW, only while PTWAIT is active
   logic dtlb_fill, dstlb_fill;
   assign dtlb_fill  = (l1d_state == PTWAIT) && ptw_done && !stlb_mmu;
   assign dstlb_fill = (l1d_state == PTWAIT) && ptw_done &&  stlb_mmu;
@@ -220,7 +220,7 @@ module ysyx_l1d #(
       .fill_asid(csr_bcast.satp_asid)
   );
 
-  // Shared PTW — serves both load and store TLB misses
+  // Shared PTW: serves both load and store TLB misses
   wire store_tlb_miss = exu_l1d.mmu_en && exu_l1d.valid && !stlb_hit && !mis_align_store;
   assign ptw_vaddr = store_tlb_miss ? exu_l1d.vaddr : lsu_l1d.raddr;
 
@@ -278,7 +278,7 @@ module ysyx_l1d #(
   //
   // When load_speculate is active, addr_offset still reflects the stale
   // l1d_addr from the previous operation.  Use the incoming load's word
-  // offset (from the virtual address — safe due to VIPT: the offset bits
+  // offset (from the virtual address: safe due to VIPT: the offset bits
   // lie within the page offset, so virt == phys).
   logic [L1D_LINE_LEN-1:0] sram_rd_offset;
   assign sram_rd_offset = load_speculate
@@ -313,7 +313,7 @@ module ysyx_l1d #(
   assign tag_hit = (l1d_state == LD_A)
     && !sram_bypass_r
     && tag_hit_vec[addr_offset];
-  // data_hit: SRAM data ready in LD_A — the speculative read in the preceding
+  // data_hit: SRAM data ready in LD_A: the speculative read in the preceding
   // IDLE (or PTW-wait) cycle guarantees data_bank_rdata is valid on LD_A entry.
   assign data_hit = (l1d_state == LD_A) && tag_hit;
   assign l1d_data = data_bank_rdata[load_hit_way][addr_offset];
@@ -350,7 +350,7 @@ module ysyx_l1d #(
       // previous fill that was forced-miss by sram_bypass_r), reuse that way
       // instead of allocating a new one.  Without this check, a conservative
       // sram_bypass_r miss creates duplicate tags across ways; a subsequent
-      // store updates only one copy, leaving the other stale — and when the
+      // store updates only one copy, leaving the other stale: and when the
       // updated copy is later evicted, a load hits the stale duplicate.
       logic ld_tag_dup0, ld_tag_dup1;
       assign ld_tag_dup0 = l1d_valid[0][addr_idx][addr_offset]
@@ -391,7 +391,7 @@ module ysyx_l1d #(
 `endif
   );
 
-  // read channel — PTW takes priority over cache miss reads
+  // read channel: PTW takes priority over cache miss reads
   assign l1d_bus.arvalid = ptw_arvalid
     ? 1'b1
     : (l1d_state == LD_A) && !tag_hit && !cmu_bcast.flush_pipe;
@@ -423,7 +423,7 @@ module ysyx_l1d #(
 
   assign lsu_l1d.wready = l1d_bus.wready;
 
-  // store address translation — stlb_hit uses TLB, otherwise wait for PTW
+  // store address translation: stlb_hit uses TLB, otherwise wait for PTW
   assign store_paddr = XLEN'({ptw_result_ptag, exu_l1d.vaddr[11:0]});
   assign exu_l1d.paddr = stlb_hit
     ? XLEN'({dstlb_ptag, exu_l1d.vaddr[11:0]})
@@ -511,11 +511,11 @@ module ysyx_l1d #(
             l1d_state <= IDLE;
           end else if (ptw_done) begin
             if (stlb_mmu) begin
-              // Store PTW done — TLB filled by u_dstlb
+              // Store PTW done: TLB filled by u_dstlb
               stlb_mmu <= 'b0;
               l1d_state <= IDLE;
             end else begin
-              // Load PTW done — TLB filled by u_dtlb, compute physical address
+              // Load PTW done: TLB filled by u_dtlb, compute physical address
               l1d_addr <= XLEN'({ptw_result_ptag, l1d_addr[11:0]});
               l1d_state <= LD_A;
             end

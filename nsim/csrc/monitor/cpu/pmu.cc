@@ -82,7 +82,7 @@ void perf_sample_per_cycle()
     return;
   }
   pmu.active_cycle++;
-  // BPU — use registered ben_r/jen_r/flush_pipe_r from CMU for correct timing
+  // BPU: use registered ben_r/jen_r/flush_pipe_r from CMU for correct timing
   // alignment with the registered 'valid' signal (all sampled at the same posedge)
   bool b = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, cmu__DOT__ben_r));
   bool j = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, cmu__DOT__jen_r));
@@ -151,7 +151,7 @@ void perf_sample_per_cycle()
   {
     pmu.wbu_stall_cycle++;
   }
-  // L1I cache sample — state-transition-based tracking
+  // L1I cache sample: state-transition-based tracking
   // L1I FSM states: IDLE=000, RD_A=001, RD_0=010, PTWAIT=100, TRAP=101, RD_1=110, FINA=111
   static uint8_t prev_l1i_state = 0;
   bool l1i_busy = (l1i_state == 0b001)     // RD_A
@@ -173,7 +173,7 @@ void perf_sample_per_cycle()
   // Hit count and hit cycles are computed at report time:
   //   hit_cnt = ifu_fetch_cnt - miss_cnt,  hit_cycle ≈ hit_cnt (1 SRAM cycle/hit)
   prev_l1i_state = l1i_state;
-  // L1D cache sample — state-transition-based tracking (load path only)
+  // L1D cache sample: state-transition-based tracking (load path only)
   // L1D FSM states: IDLE=000, LD_A=001, LD_D=010, PTWAIT=100, TRAP=101
   static uint8_t prev_l1d_state = 0;
   // Hit: LD_A with tag_hit (1-cycle load hit)

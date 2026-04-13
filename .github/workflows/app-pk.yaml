@@ -1,20 +1,22 @@
-name: app tests (pk + newlib)
+name: App tests (pk)
 
 on:
   push:
     branches: ["master", "main"]
     paths:
-      - "app/**"
       - "rtl_sv/**"
+      - "rtl_scala/**"
       - "nsim/**"
-      - ".github/workflows/app.yaml"
+      - "app/**"
+      - ".github/workflows/app-*.yaml"
   pull_request:
     branches: ["master", "main"]
     paths:
-      - "app/**"
       - "rtl_sv/**"
+      - "rtl_scala/**"
       - "nsim/**"
-      - ".github/workflows/app.yaml"
+      - "app/**"
+      - ".github/workflows/app-*.yaml"
 
 jobs:
   app-pk-tests:
@@ -90,7 +92,7 @@ jobs:
 
           # ---- Write summary ----
           {
-            echo "## App Tests (pk + newlib on NPC)"
+            echo "## App Tests (pk on NPC)"
             echo ""
             echo "| Test | Status | IPC | Details |"
             echo "|------|--------|-----|---------|"

@@ -1,4 +1,4 @@
-/* rvtest_config.h — Raptor Chip ACT4 coverage configuration */
+/* rvtest_config.h: Raptor Chip ACT4 coverage configuration */
 /* SPDX-License-Identifier: Apache-2.0 */
 
 #define XLEN 32

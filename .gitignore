@@ -16,6 +16,8 @@
 !README.md
 !env.sh
 !setup.sh
+!LICENSE
+!NOTICE
 
 # ---- GitHub CI/CD ----
 !/.github/**

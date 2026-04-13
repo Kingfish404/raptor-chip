@@ -47,7 +47,7 @@ module ysyx_ifu #(
   logic valid;
 
 
-  // PMU — registered signals for accurate cycle-level sampling
+  // PMU: registered signals for accurate cycle-level sampling
   /* verilator lint_off UNUSEDSIGNAL */
   logic pmu_fetch_fire;
   logic pmu_ifu_stall;
@@ -82,8 +82,8 @@ module ysyx_ifu #(
   // Supports C+C, C+R32, R32+C, R32+R32 (aligned PC only for R32+R32).
   //
   // Data sources:
-  //   ifu_l1i.inst[31:0]     — 32 bits assembled starting from PC
-  //   ifu_l1i.inst_n1[31:0]  — next 4-byte-aligned word from L1I
+  //   ifu_l1i.inst[31:0]    : 32 bits assembled starting from PC
+  //   ifu_l1i.inst_n1[31:0] : next 4-byte-aligned word from L1I
   //     pc[1]=0: {hw@pc+6, hw@pc+4}   pc[1]=1: {hw@pc+4, hw@pc+2}
   logic [15:0] hw_pc4;
   logic [15:0] inst_b_lo_pre;
@@ -118,7 +118,7 @@ module ysyx_ifu #(
       || (ifu_l1i.inst_n0[6:0] == `YSYX_OP_AMO___));
 
   // Slot B pre-decode: suppress dual-fetch for branches/jumps/serialization.
-  // Slot B has no BPU prediction — branches would always be mispredicted.
+  // Slot B has no BPU prediction: branches would always be mispredicted.
   assign pre_is_branch_b = pre_is_c_b
     ? (((inst_b_lo_pre[1:0] == 2'b01)
           && ((inst_b_lo_pre[15] && inst_b_lo_pre[14])

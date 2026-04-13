@@ -59,7 +59,7 @@ module ysyx_rou #(
   logic dual_commit;
 
   // ================================================================
-  // 4. Commit Logic — dual commit (up to 2 per cycle)
+  // 4. Commit Logic: dual commit (up to 2 per cycle)
   // ================================================================
   // Aliases for ROB head entries
   wire [$clog2(ROB_SIZE)-1:0] h0 = rob_head;
@@ -570,7 +570,7 @@ module ysyx_rou #(
       || rob_entry[h0].atom
   ));
 
-  // ---- Slot 1 (head+1) — only considered when slot 0 doesn't flush ----
+  // ---- Slot 1 (head+1): only considered when slot 0 doesn't flush ----
   logic head1_br_p_fail;
   logic head1_valid;
   assign head1_br_p_fail = rob_entry[h1].npc != rob_entry[h1].pnpc;
@@ -602,7 +602,7 @@ module ysyx_rou #(
   assign fence_time = (head_valid && rob_entry[h0].f_time) || (dual_commit && rob_entry[h1].f_time);
   assign flush_pipe = head0_flush || head1_flush;
 
-  // PMU — SQ-specific commit stall (ROB head is a ready store blocked by full SQ)
+  // PMU: SQ-specific commit stall (ROB head is a ready store blocked by full SQ)
   /* verilator lint_off UNUSEDSIGNAL */
   logic pmu_sq_stall;
   assign pmu_sq_stall = !recieved_trap
@@ -635,7 +635,7 @@ module ysyx_rou #(
   assign rou_cmu.difftest_skip_a = !recieved_trap && rob_entry[h0].difftest_skip;
   assign rou_cmu.valid_a = recieved_trap ? 1'b0 : head_valid;
 
-  // ---- CMU interface (slot B — dual commit) ----
+  // ---- CMU interface (slot B: dual commit) ----
   assign rou_cmu.rd_b = rob_entry[h1].rd;
   assign rou_cmu.inst_b = rob_entry[h1].inst;
   assign rou_cmu.pc_b = rob_entry[h1].pc;
@@ -678,7 +678,7 @@ module ysyx_rou #(
       || (head_valid && (rob_entry[h0].sys || rob_entry[h0].trap))
       || csr_from_h1;
 
-  // ---- LSU interface (store commit — MUX slot 0 / slot 1) ----
+  // ---- LSU interface (store commit: MUX slot 0 / slot 1) ----
   // During dual commit, slot 0 is guaranteed non-store; route slot 1.
   assign rou_lsu.store = recieved_trap ? 1'b0 : dual_commit ? rob_entry[h1].wen : rob_entry[h0].wen;
   assign rou_lsu.alu = dual_commit ? rob_entry[h1].alu : rob_entry[h0].alu;

@@ -90,28 +90,28 @@ module ysyx_exu_alu #(
       `YSYX_ALU_SH2ADD: begin alu_r = (s1 << 2) + s2; end
       `YSYX_ALU_SH3ADD: begin alu_r = (s1 << 3) + s2; end
 
-      // Zbb (Basic Bit-manipulation) — logic
+      // Zbb (Basic Bit-manipulation): logic
       `YSYX_ALU_ANDN: begin alu_r = s1 & ~s2; end
       `YSYX_ALU_ORN_:  begin alu_r = s1 | ~s2; end
       `YSYX_ALU_XNOR: begin alu_r = ~(s1 ^ s2); end
 
-      // Zbb — count
+      // Zbb: count
       `YSYX_ALU_CLZ_:  begin alu_r = XLEN'(fn_clz(s1, word)); end
       `YSYX_ALU_CTZ_:  begin alu_r = XLEN'(fn_ctz(s1, word)); end
       `YSYX_ALU_CPOP: begin alu_r = XLEN'(fn_cpop(s1, word)); end
 
-      // Zbb — compare-and-select
+      // Zbb: compare-and-select
       `YSYX_ALU_MAX_:  begin alu_r = ($signed(s1) >= $signed(s2)) ? s1 : s2; end
       `YSYX_ALU_MAXU: begin alu_r = (s1 >= s2) ? s1 : s2; end
       `YSYX_ALU_MIN_:  begin alu_r = ($signed(s1) < $signed(s2)) ? s1 : s2; end
       `YSYX_ALU_MINU: begin alu_r = (s1 < s2) ? s1 : s2; end
 
-      // Zbb — sign/zero extension
+      // Zbb: sign/zero extension
       `YSYX_ALU_SEXTB: begin alu_r = {{XLEN-8{s1[7]}}, s1[7:0]}; end
       `YSYX_ALU_SEXTH: begin alu_r = {{XLEN-16{s1[15]}}, s1[15:0]}; end
       `YSYX_ALU_ZEXTH: begin alu_r = {{XLEN-16{1'b0}}, s1[15:0]}; end
 
-      // Zbb — byte-level operations
+      // Zbb: byte-level operations
       `YSYX_ALU_REV8: begin
         for (int i = 0; i < XLEN; i += 8)
           alu_r[i+:8] = s1[XLEN-8-i+:8];
@@ -121,7 +121,7 @@ module ysyx_exu_alu #(
           alu_r[i+:8] = {8{|s1[i+:8]}};
       end
 
-      // Zbb — rotate
+      // Zbb: rotate
       `YSYX_ALU_ROL_: begin
         if (word && XLEN > 32) begin
           logic [31:0] rot32;

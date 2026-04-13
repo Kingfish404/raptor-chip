@@ -193,7 +193,7 @@ module ysyx_l1i #(
     && (l1i_addr <= 'hc0000000);
   assign l1i_bus.arburst = ifu_sdram_arburst;
 
-  // Fill write condition — suppress during PTW states where the bus is used for
+  // Fill write condition: suppress during PTW states where the bus is used for
   // page table reads (IFQ is always empty during PTW, but be explicit)
   assign l1i_fill_en = l1i_bus.rvalid && ifq_valid[ifq_tail] && (l1i_state != PTWAIT);
 
@@ -309,7 +309,7 @@ module ysyx_l1i #(
   assign inst_hi = pc_ifu[1] ? l1i_word_next[15:0] : l1i_word_current[31:16];
   assign is_c = !(inst_lo[1:0] == 2'b11);
 
-  // SRAM data readiness — per-bank address tracking.
+  // SRAM data readiness: per-bank address tracking.
   //
   // Each bank gi drives raddr = addr_idx when addr_offset==gi, else addr_idx_next.
   // Non-current banks pre-read the next set every cycle, so for sequential fetch
@@ -439,7 +439,7 @@ module ysyx_l1i #(
           if (cmu_bcast.flush_pipe) begin
             l1i_state <= IDLE;
           end else if (ptw_done) begin
-            // PTW completed — TLB filled by u_itlb, compute physical address
+            // PTW completed: TLB filled by u_itlb, compute physical address
             l1i_addr  <= XLEN'({ptw_result_ptag, tlb_offset});
             l1i_state <= RD_A;
           end else if (ptw_fault) begin
@@ -452,7 +452,7 @@ module ysyx_l1i #(
         end
         RD_A: begin
           // Guard: abort if pipeline flush or TLB invalidated (sfence.vma /
-          // satp switch) — pc_ifu depends on itlb_ptag which is 0 on TLB miss,
+          // satp switch): pc_ifu depends on itlb_ptag which is 0 on TLB miss,
           // producing a garbage physical address (e.g. 0x68a).
           if (cmu_bcast.flush_pipe || (mmu_en && !tlb_hit)) begin
             l1i_state <= IDLE;

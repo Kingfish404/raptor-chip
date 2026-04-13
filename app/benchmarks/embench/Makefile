@@ -1,5 +1,5 @@
 # ============================================================================
-# app/benchmarks/embench/Makefile — Build Embench-IoT as standard ELFs
+# app/benchmarks/embench/Makefile: Build Embench-IoT as standard ELFs
 # ============================================================================
 
 _THIS_DIR   := $(dir $(lastword $(MAKEFILE_LIST)))

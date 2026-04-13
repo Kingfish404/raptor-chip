@@ -1,5 +1,5 @@
 /***************************************************************************************
- * Software TLB for NEMU — caches vaddr->paddr translations to skip page table walks.
+ * Software TLB for NEMU: caches vaddr->paddr translations to skip page table walks.
  *
  * Direct-mapped, separate arrays for ifetch / load / store.
  * Flushed on sfence.vma and satp writes.
@@ -11,7 +11,7 @@
 #include <common.h>
 #include <memory/vaddr.h>
 
-/* 256 entries per TLB — power-of-two, direct-mapped by VPN */
+/* 256 entries per TLB: power-of-two, direct-mapped by VPN */
 #define SOFT_TLB_BITS 8
 #define SOFT_TLB_ENTRIES (1u << SOFT_TLB_BITS)
 #define SOFT_TLB_MASK (SOFT_TLB_ENTRIES - 1)
@@ -25,7 +25,7 @@ typedef struct
   paddr_t ppn; /* physical page base  (paddr with offset=0)             */
 } soft_tlb_entry_t;
 
-/* Three separate TLBs — mirrors Spike's design for permission separation */
+/* Three separate TLBs: mirrors Spike's design for permission separation */
 extern soft_tlb_entry_t soft_tlb_ifetch[SOFT_TLB_ENTRIES];
 extern soft_tlb_entry_t soft_tlb_load[SOFT_TLB_ENTRIES];
 extern soft_tlb_entry_t soft_tlb_store[SOFT_TLB_ENTRIES];

@@ -1,7 +1,8 @@
 # Raptor Project
 
-[![build & eval](https://github.com/Kingfish404/raptor-chip/actions/workflows/build.yaml/badge.svg)](https://github.com/Kingfish404/raptor-chip/actions/workflows/build.yaml)
-[![cpu tests](https://github.com/Kingfish404/raptor-chip/actions/workflows/test.yaml/badge.svg)](https://github.com/Kingfish404/raptor-chip/actions/workflows/test.yaml)
+[![AM CPU ISA tests (difftest)](https://github.com/Kingfish404/raptor-chip/actions/workflows/am-test-cpu.yaml/badge.svg)](https://github.com/Kingfish404/raptor-chip/actions/workflows/am-test-cpu.yaml)
+[![AM benchmarks & STA](https://github.com/Kingfish404/raptor-chip/actions/workflows/am-benchmark.yaml/badge.svg)](https://github.com/Kingfish404/raptor-chip/actions/workflows/am-benchmark.yaml)
+[![App tests (pk)](https://github.com/Kingfish404/raptor-chip/actions/workflows/app-pk.yaml/badge.svg)](https://github.com/Kingfish404/raptor-chip/actions/workflows/app-pk.yaml)
 [![Ubuntu](https://img.shields.io/badge/Ubuntu-E95420?style=flat&logo=ubuntu&logoColor=white)](https://en.wikipedia.org/wiki/Ubuntu)
 [![macOS](https://img.shields.io/badge/macOS-000000?style=flat&logo=apple&logoColor=white)](https://en.wikipedia.org/wiki/MacOS)
 [![Github](https://img.shields.io/badge/GitHub-181717?style=flat&logo=github&logoColor=white)](https://github.dev/Kingfish404/raptor-chip)
@@ -104,16 +105,20 @@ make coremark-nemu32 ARGS="-b -n"
 make microbench-nemu32 ARGS="-b -n"
 ```
 
-### 4. Nanos-lite OS
+### 4. Applications running on riscv-pk
 
 ```shell
-# Run nanos-lite on NEMU
-make nanos-nemu32
-# Run nanos-lite on NPC
-make nanos-npc32
+# Build and run hello world on NPC
+make app-hello-npc32
+# Build and run CoreMark on NPC
+make app-coremark-npc32 ARGS="-b -n"
+# Build and run Embench-IoT on NPC
+make app-embench-npc32 ARGS="-b -n"
+# Build riscv-pk (opensbi + pk)
+make app-pk-build
+# Clean app build artifacts
+make app-clean
 ```
-
-### 5. Linux Kernel
 
 ```shell
 # Boot Linux on NEMU (requires OpenSBI payload built first)

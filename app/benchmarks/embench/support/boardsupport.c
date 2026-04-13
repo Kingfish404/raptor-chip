@@ -1,5 +1,5 @@
 /* ============================================================================
- * boardsupport.c — Embench-IoT board support for RISC-V on NPC (via pk + newlib)
+ * boardsupport.c: Embench-IoT board support for RISC-V on NPC (via pk)
  * ============================================================================ */
 
 #include <stdio.h>

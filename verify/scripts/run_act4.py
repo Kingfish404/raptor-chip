@@ -70,7 +70,7 @@ def run_one(
         )
     except subprocess.CalledProcessError as e:
         print(
-            f"  {red('CERR')} {bold(elf.name)} — objcopy failed: {e.stderr.decode()[:200]}"
+            f"  {red('CERR')} {bold(elf.name)}: objcopy failed: {e.stderr.decode()[:200]}"
         )
         return True
 
@@ -91,7 +91,7 @@ def run_one(
         )
         output = result.stdout + result.stderr
     except subprocess.TimeoutExpired:
-        print(f"  {red('TIME')} {bold(elf.name)} — timeout after {timeout}s")
+        print(f"  {red('TIME')} {bold(elf.name)}: timeout after {timeout}s")
         return True
     finally:
         try:
@@ -112,20 +112,20 @@ def run_one(
 
     if failed or sigrun:
         reason = "FAILED" if failed else "SIGRUN"
-        print(f"  {red('FAIL')} {bold(elf.name)} — {reason}")
+        print(f"  {red('FAIL')} {bold(elf.name)}: {reason}")
         print(f"         Log: {dim(str(log_file))}")
         return True
     elif no_summary:
         if result.returncode != 0:
             print(
-                f"  {red('FAIL')} {bold(elf.name)} — exit {result.returncode}, no RVCP-SUMMARY"
+                f"  {red('FAIL')} {bold(elf.name)}: exit {result.returncode}, no RVCP-SUMMARY"
             )
         else:
-            print(f"  {red('FAIL')} {bold(elf.name)} — no RVCP-SUMMARY line")
+            print(f"  {red('FAIL')} {bold(elf.name)}: no RVCP-SUMMARY line")
         print(f"         Log: {dim(str(log_file))}")
         return True
     elif result.returncode != 0:
-        print(f"  {red('FAIL')} {bold(elf.name)} — PASSED but exit {result.returncode}")
+        print(f"  {red('FAIL')} {bold(elf.name)}: PASSED but exit {result.returncode}")
         print(f"         Log: {dim(str(log_file))}")
         return True
 

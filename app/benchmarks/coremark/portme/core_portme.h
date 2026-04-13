@@ -1,5 +1,5 @@
 /* ============================================================================
- * core_portme.h — CoreMark port header for RISC-V on NPC (via pk + newlib)
+ * core_portme.h: CoreMark port header for RISC-V on NPC (via pk)
  * ============================================================================ */
 
 #ifndef CORE_PORTME_H
@@ -61,13 +61,13 @@ static inline unsigned long long _rdtime(void)
 #endif
 }
 
-/* CLINT timebase: 10 MHz (from DTS timebase-frequency) */
+/* CLINT timebase: 1 MHz (from DTS timebase-frequency) */
 #define CORETIMETYPE unsigned long long
 #define GETMYTIME(_t) (*(_t) = _rdtime())
 #define MYTIMEDIFF(fin, ini) ((fin) - (ini))
 #define TIMER_RES_DIVIDER 1
 #define SAMPLE_TIME_IMPLEMENTATION 1
-#define EE_TICKS_PER_SEC 10000000ULL
+#define EE_TICKS_PER_SEC 1000000ULL
 
 /* ---- Data types ---- */
 typedef int16_t ee_s16;

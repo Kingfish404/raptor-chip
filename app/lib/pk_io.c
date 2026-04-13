@@ -1,5 +1,5 @@
 /*
- * pk_io.c — Picolibc startup + I/O stubs for programs running under riscv-pk
+ * pk_io.c: Picolibc startup + I/O stubs for programs running under riscv-pk
  *
  * When the toolchain ships picolibc (e.g. Ubuntu's riscv64-unknown-elf-gcc)
  * instead of classic newlib, two things are needed:
@@ -48,6 +48,7 @@ __attribute__((naked, section(".text.startup"))) void _start(void)
 #define SYS_read 63
 #define SYS_write 64
 #define SYS_exit 93
+#define SYS_times 153
 
 static inline long _pk_ecall(long n, long a0, long a1, long a2)
 {
@@ -77,6 +78,14 @@ void _exit(int status)
 {
   _pk_ecall(SYS_exit, status, 0, 0);
   __builtin_unreachable();
+}
+
+/* ---- times() stub for picolibc's clock() ---- */
+#include <sys/times.h>
+
+clock_t times(struct tms *buf)
+{
+  return (clock_t)_pk_ecall(SYS_times, (long)buf, 0, 0);
 }
 
 /* ---- picolibc tinystdio FILE objects ---- */

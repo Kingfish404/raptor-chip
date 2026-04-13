@@ -1,5 +1,5 @@
 # ============================================================================
-# Raptor Chip — Formal Verification Makefile
+# Raptor Chip: Formal Verification Makefile
 # ============================================================================
 # Uses SymbiYosys (sby) from oss-cad-suite for formal verification.
 # Run `make setup` to download oss-cad-suite if not already present.

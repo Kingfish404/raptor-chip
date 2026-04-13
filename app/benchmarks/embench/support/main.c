@@ -1,5 +1,5 @@
 /* ============================================================================
- * main.c — Embench-IoT main wrapper for bare-metal RISC-V on NPC
+ * main.c: Embench-IoT main wrapper for bare-metal RISC-V on NPC
  *
  * Replaces embench-iot/support/main.c with NPC board support.
  * ============================================================================ */

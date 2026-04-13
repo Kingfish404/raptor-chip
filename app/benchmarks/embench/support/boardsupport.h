@@ -1,5 +1,5 @@
 /* ============================================================================
- * boardsupport.h — Embench-IoT board support for bare-metal RISC-V on NPC
+ * boardsupport.h: Embench-IoT board support for bare-metal RISC-V on NPC
  *
  * Declares board-level init, trigger start/stop for cycle counting.
  * ============================================================================ */

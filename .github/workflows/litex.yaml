@@ -1,0 +1,60 @@
+name: LiteX integration
+
+on:
+  push:
+    branches: ["master", "main"]
+    paths:
+      - "rtl_sv/**"
+      - "rtl_scala/**"
+      - "fpga/litex/**"
+      - ".github/workflows/litex*.yaml"
+  pull_request:
+    branches: ["master", "main"]
+    paths:
+      - "rtl_sv/**"
+      - "rtl_scala/**"
+      - "fpga/litex/**"
+      - ".github/workflows/litex*.yaml"
+
+jobs:
+  litex-test:
+    runs-on: ubuntu-latest
+    env:
+      YSYX_HOME: ${{ github.workspace }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup environment
+        run: ./setup.sh
+      - name: Prepare LiteX
+        shell: bash -l {0}
+        run: cd fpga/litex && ./setup.sh
+      - name: Run LiteX
+        shell: bash -l {0}
+        run: cd fpga/litex && source .venv/bin/activate && timeout 240s make run_ni || true
+      - name: CoreMark on LiteX
+        shell: bash -l {0}
+        run: |
+          cd fpga/litex && source .venv/bin/activate
+          pushd $YSYX_HOME/third_party/enjoy-digital/litex && litex_bare_metal_demo --build-path=build/sim/ && popd
+          timeout 300s make coremark 2>&1 | tee /tmp/litex-coremark.log || true
+      - name: LiteX summary
+        run: |
+          LOG=/tmp/litex-coremark.log
+          CM_SCORE=$(grep -oP 'Iterations/Sec\s*:\s*\K[0-9.]+' "$LOG" 2>/dev/null | head -1 || echo "N/A")
+          CM_ITERS=$(grep -oP 'Iterations\s*:\s*\K[0-9]+' "$LOG" 2>/dev/null | head -1 || echo "N/A")
+          CM_TICKS=$(grep -oP 'Total ticks\s*:\s*\K[0-9]+' "$LOG" 2>/dev/null | head -1 || echo "N/A")
+          CM_TIME=$(grep -oP 'Total time \(secs\):\s*\K[0-9.]+' "$LOG" 2>/dev/null | head -1 || echo "N/A")
+          CPU_INFO=$(grep -oP 'CPU:\s*\K.+' "$LOG" 2>/dev/null | head -1 || echo "N/A")
+          CM_VALID=$(grep -q 'Correct operation validated' "$LOG" 2>/dev/null && echo "PASS" || echo "FAIL")
+          {
+            echo ""
+            echo "## LiteX CoreMark Results"
+            echo "| Metric | Value |"
+            echo "|--------|-------|"
+            echo "| CPU | $CPU_INFO |"
+            echo "| CoreMark Score (Iter/s) | $CM_SCORE |"
+            echo "| Iterations | $CM_ITERS |"
+            echo "| Total Ticks | $CM_TICKS |"
+            echo "| Total Time (s) | $CM_TIME |"
+            echo "| Validation | $CM_VALID |"
+          } >> "$GITHUB_STEP_SUMMARY"

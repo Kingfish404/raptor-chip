@@ -1,7 +1,7 @@
-# Raptor Chip — Verification Suite
+# Raptor Chip: Verification Suite
 
 Unified verification infrastructure for the Raptor Chip RISC-V processor.
-**Zero RTL modifications required** — all tools reuse the existing Verilator
+**Zero RTL modifications required**: all tools reuse the existing Verilator
 simulator (`nsim/`) and NEMU difftest reference model.
 
 ## Quick Start

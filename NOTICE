@@ -1,0 +1,38 @@
+Raptor Chip
+Copyright 2024-2026 Yu Jin
+
+This product includes software and hardware designs developed at
+https://github.com/Kingfish404/raptor-chip
+
+===============================================================================
+Third-Party Components
+===============================================================================
+
+This project incorporates code from the following third-party projects.
+Each component retains its original license.
+
+-------------------------------------------------------------------------------
+AbstractMachine (abstract-machine/, am-kernels/)
+  Copyright (c) 2018-2021 Yanyan Jiang and Zihao Yu
+  License: MIT
+  https://github.com/NJU-ProjectN/abstract-machine
+
+-------------------------------------------------------------------------------
+NEMU (nemu/)
+  Copyright (c) 2014-2022 Zihao Yu, Nanjing University
+  License: Mulan PSL v2
+  https://github.com/NJU-ProjectN/nemu
+
+  Mulan PSL v2 is a weak copyleft license. Modifications to files
+  originally licensed under Mulan PSL v2 must be distributed under
+  the same license.
+
+-------------------------------------------------------------------------------
+LiteX Ecosystem (fpga/litex/, third_party/enjoy-digital/)
+  Copyright (c) Enjoy-Digital & contributors
+  License: BSD-2-Clause
+  https://github.com/enjoy-digital/litex
+
+  Includes: litex, litex-boards, litedram, liteeth, litespi,
+  litescope, litesdcard, litesata, litepcie, liteiclink,
+  litejesd204b, litei2c, migen, and associated pythondata packages.

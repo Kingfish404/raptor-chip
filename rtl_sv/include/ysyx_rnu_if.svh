@@ -25,7 +25,7 @@ interface rnu_rou_if #(
   logic valid_a;
 
 `ifdef YSYX_DUAL_ISSUE
-  // Slot B (dual issue — younger instruction)
+  // Slot B (dual issue: younger instruction)
   ysyx_pkg::uop_t uop_b;
 
   logic [PLEN-1:0] pr1_b;

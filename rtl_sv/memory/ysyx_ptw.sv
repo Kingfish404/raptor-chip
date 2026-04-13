@@ -14,7 +14,7 @@ module ysyx_ptw #(
     input logic [    21:0] satp_ppn,   // root page table PPN from satp
     input logic            mmu_en,     // MMU enabled (guard)
 
-    // AXI read channel (shared with cache — active only while busy)
+    // AXI read channel (shared with cache: active only while busy)
     output logic            bus_arvalid,
     output logic [XLEN-1:0] bus_araddr,
     input  logic            bus_rvalid,

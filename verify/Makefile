@@ -88,7 +88,7 @@ help: ## Show this help message
 	@echo "  COV_MICROBENCH_ARGS=<s> Microbench mainargs in coverage-run (default: test)"
 
 # ============================================================================
-# Prerequisites — ensure simulator and NEMU are built
+# Prerequisites: ensure simulator and NEMU are built
 # ============================================================================
 $(NPC_BIN):
 	@echo "[verify] Building NPC simulator (difftest enabled)..."
@@ -168,13 +168,13 @@ fuzz-run: check-prereqs ## Run fuzz tests in FUZZ_SRC_DIR with difftest
 		rc=$$?; set -e; \
 		if [ $$rc -eq 0 ]; then \
 			if grep -qiE "BAD TRAP|ABORT" "$$log"; then \
-				echo "  [FAIL] $$name — BAD TRAP"; FAIL=$$((FAIL+1)); FAIL_LIST="$$FAIL_LIST $$name"; \
+				echo "  [FAIL] $$name: BAD TRAP"; FAIL=$$((FAIL+1)); FAIL_LIST="$$FAIL_LIST $$name"; \
 				tail -3 "$$log" | sed 's/^/         /'; \
 			else echo "  [PASS] $$name"; PASS=$$((PASS+1)); fi; \
 		elif [ $$rc -eq 124 ]; then \
 			echo "  [TIME] $$name"; FAIL=$$((FAIL+1)); FAIL_LIST="$$FAIL_LIST $$name(timeout)"; \
 		else \
-			echo "  [FAIL] $$name — exit $$rc"; FAIL=$$((FAIL+1)); FAIL_LIST="$$FAIL_LIST $$name"; \
+			echo "  [FAIL] $$name: exit $$rc"; FAIL=$$((FAIL+1)); FAIL_LIST="$$FAIL_LIST $$name"; \
 			tail -5 "$$log" | sed 's/^/         /'; \
 		fi; \
 	done < "$(FUZZ_SRC_DIR)/manifest.txt"; \
@@ -268,7 +268,7 @@ riscof-setup: ## Clone ACT4 repo and check prerequisites
 		&& echo "[act4] sail: $$(sail_riscv_sim --version 2>&1 | head -1)" \
 		|| { echo "[act4] WARN: 'sail_riscv_sim' not found (needed for riscof-gen)."; \
 		echo "  Linux:  curl -L https://github.com/riscv/sail-riscv/releases/download/0.10/sail-riscv-Linux-$$(arch).tar.gz | sudo tar xz -C /usr/local --strip-components=1"; \
-		echo "  macOS:  build from source — see https://github.com/riscv/sail-riscv#building"; }
+		echo "  macOS:  build from source: see https://github.com/riscv/sail-riscv#building"; }
 	@echo "[act4] Setup complete.  Config: $(ACT4_CONFIG)"
 	$(MAKE) -C $(YSYX_HOME) run-npc32
 
@@ -276,14 +276,18 @@ riscof-gen: ## Generate self-checking ELFs via ACT4 framework
 	@test -d "$(ACT4_REPO)" || { echo "[act4] ERROR: repo not found. Run 'make riscof-setup' first."; exit 1; }
 	@test -f "$(ACT4_CONFIG)" || { echo "[act4] ERROR: config not found: $(ACT4_CONFIG)"; exit 1; }
 	@# Patch UDB setup: podman "images --format table | grep" is broken on macOS;
-	@# replace with portable "image inspect" check.  Idempotent — safe to re-run.
+	@# replace with portable "image inspect" check.  Idempotent: safe to re-run.
 	@sed -i '' 's#images "$$REGISTRY/$$OWNER/udb:$${CONTAINER_TAG}" --format table | grep -q udb#image inspect "$$REGISTRY/$$OWNER/udb:$${CONTAINER_TAG}" >/dev/null 2>\&1#' \
 		"$(ACT4_REPO)/external/riscv-unified-db/bin/setup" 2>/dev/null || true
 	@echo "[act4] Generating self-checking ELFs..."
 	@echo "  Config:  $(ACT4_CONFIG)"
 	@echo "  Workdir: $(ACT4_WORKDIR)"
 	@mkdir -p "$(ACT4_WORKDIR)"
-	cd "$(ACT4_REPO)" && $(MAKE) elfs \
+	cd "$(ACT4_REPO)" && \
+		export BUNDLE_PATH="$(ACT4_WORKDIR)/.bundle" && \
+		export BUNDLE_GEMFILE="$(ACT4_REPO)/framework/src/act/data/Gemfile" && \
+		bundle install && \
+		bundle exec $(MAKE) elfs \
 		CONFIG_FILES="$(ACT4_CONFIG)" \
 		WORKDIR="$(ACT4_WORKDIR)" \
 		EXCLUDE_EXTENSIONS="$(ACT4_EXCLUDE)" \
@@ -325,6 +329,7 @@ COV_MICROBENCH_ARGS ?= test## Microbench mainargs used by coverage-run
 
 define RUN_AND_SAVE_COVERAGE
 	@echo "[coverage] Running $(1) workload..."
+	@mkdir -p $(COV_DIR)
 	@rm -f $(NSIM_HOME)/coverage*.dat $(VERIFY_HOME)/coverage*.dat
 	-$(2) 2>&1 | tee "$(COV_DIR)/$(1).log"
 	@if [ -f "$(NSIM_HOME)/coverage.dat" ]; then \
@@ -426,7 +431,7 @@ sigtest-run: check-prereqs ## Run signature tests with difftest
 		if [ ! -f "$$src" ]; then echo "  [SKIP] $$name"; ERR=$$((ERR+1)); continue; fi; \
 		if ! $(CC) -march=$(MARCH) -mabi=$(MABI) -nostdlib -nostartfiles \
 			-T $(SIGTEST_LINKER) -o "$$elf" "$$src" 2>"$(SIGTEST_DIR)/$${name}.compile.log"; then \
-			echo "  [CERR] $$name — compilation failed"; \
+			echo "  [CERR] $$name: compilation failed"; \
 			head -5 "$(SIGTEST_DIR)/$${name}.compile.log" | sed 's/^/         /'; \
 			ERR=$$((ERR+1)); continue; fi; \
 		$(OBJCOPY) -O binary "$$elf" "$$bin"; \
@@ -434,7 +439,7 @@ sigtest-run: check-prereqs ## Run signature tests with difftest
 		rc=$$?; set -e; \
 		if [ $$rc -eq 0 ]; then \
 			if grep -qiE "BAD TRAP|ABORT" "$$log"; then \
-				echo "  [FAIL] $$name — BAD TRAP"; FAIL=$$((FAIL+1)); FAIL_LIST="$$FAIL_LIST $$name"; \
+				echo "  [FAIL] $$name: BAD TRAP"; FAIL=$$((FAIL+1)); FAIL_LIST="$$FAIL_LIST $$name"; \
 				tail -3 "$$log" | sed 's/^/         /'; \
 			else echo "  [PASS] $$name"; PASS=$$((PASS+1)); fi; \
 		elif [ $$rc -eq 124 ]; then \

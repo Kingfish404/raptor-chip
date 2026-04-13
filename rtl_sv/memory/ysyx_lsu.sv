@@ -51,8 +51,8 @@ module ysyx_lsu #(
   logic [$clog2(SQ_SIZE)-1:0] sq_tail;
   logic [SQ_SIZE-1:0] sq_valid;
   logic [4:0] sq_alu[SQ_SIZE];
-  logic [XLEN-1:0] sq_waddr[SQ_SIZE];  // physical — for bus write-through
-  logic [XLEN-1:0] sq_vaddr[SQ_SIZE];  // virtual  — for forwarding comparison
+  logic [XLEN-1:0] sq_waddr[SQ_SIZE];  // physical: for bus write-through
+  logic [XLEN-1:0] sq_vaddr[SQ_SIZE];  // virtual : for forwarding comparison
   logic [XLEN-1:0] sq_wdata[SQ_SIZE];
   logic [XLEN-1:0] sq_pc[SQ_SIZE];
   // === Store Queue (SQ) ===

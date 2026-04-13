@@ -30,7 +30,7 @@ module ysyx_cmu #(
   logic [4:0] bcast_rd, bcast_rs1;
   logic is_link_rd, is_link_rs1;
 
-  // PMU — registered branch/flush signals aligned with 'valid'
+  // PMU: registered branch/flush signals aligned with 'valid'
   /* verilator lint_off UNUSEDSIGNAL */
   logic ben_r, jen_r, jren_r, flush_pipe_r;
   /* verilator lint_on UNUSEDSIGNAL */
@@ -90,7 +90,7 @@ module ysyx_cmu #(
       jren_r <= jren;
       flush_pipe_r <= rou_cmu.flush_pipe;
       if (rou_cmu.valid_a) begin
-        // Debug & Difftest — slot 0
+        // Debug & Difftest: slot 0
         valid <= 1;
         valid_b <= rou_cmu.valid_b;
         pmu_inst_retire <= pmu_inst_retire + 1 + (rou_cmu.valid_b ? 1 : 0);

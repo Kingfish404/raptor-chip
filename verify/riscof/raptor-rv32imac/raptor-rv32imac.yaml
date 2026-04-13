@@ -75,7 +75,7 @@ params:
   # Zicntr
   TIME_CSR_IMPLEMENTED: true
 
-  # Smhpm — Raptor has no HPM counters; provide minimal config
+  # Smhpm: Raptor has no HPM counters; provide minimal config
   HPM_COUNTER_EN:
     [
       false,

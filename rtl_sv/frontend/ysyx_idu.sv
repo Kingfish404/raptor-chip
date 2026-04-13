@@ -91,7 +91,7 @@ module ysyx_idu #(
 `endif
           end else if (ifu_idu.resteer) begin
             // Early resteer fired: IFU output is from the mispredicted path.
-            // Go IDLE even if IFU appears valid — that instruction must be
+            // Go IDLE even if IFU appears valid: that instruction must be
             // discarded. The resteered IFU will provide the correct one later.
             if (idu_rnu.ready) state_idu <= IDLE;
           end else if (idu_rnu.ready && !ifu_idu.valid_a) begin
@@ -103,7 +103,7 @@ module ysyx_idu #(
       endcase
 
       // Latch IFU data when pipeline slot is available.
-      // Block latch when resteer fires — IFU output that cycle is from
+      // Block latch when resteer fires: IFU output that cycle is from
       // the mispredicted path and must be discarded.
       if (ready && ifu_idu.valid_a && !ifu_idu.resteer) begin
         inst_a    <= ifu_idu.inst_a;

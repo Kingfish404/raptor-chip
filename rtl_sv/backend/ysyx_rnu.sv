@@ -4,7 +4,7 @@
 `include "ysyx_dpi_c.svh"
 import ysyx_pkg::*;
 
-// Rename Unit (RNU) — pure rename stage.
+// Rename Unit (RNU): pure rename stage.
 // Contains:
 //   - Rename Queue (RNQ): buffers decoded uops before renaming
 //   - Free List: allocates / deallocates physical registers
@@ -208,7 +208,7 @@ module ysyx_rnu #(
           rn_pipe_pr2_b <= dep_b_rs2_from_a ? fl_bus.alloc_pr_a : mt_bus.map_rdata_e;
           // prd_b: new physical register from freelist slot B
           rn_pipe_prd_b <= (rnq_rd[rnq_tail_b] != 0) ? fl_bus.alloc_pr_b : '0;
-          // prs_b: old mapping — bypass from slot A if same rd
+          // prs_b: old mapping: bypass from slot A if same rd
           rn_pipe_prs_b <= dep_b_rdold_from_a ? fl_bus.alloc_pr_a : mt_bus.map_rdata_f;
         end else begin
           rnq_tail_a <= rnq_tail_a + 1;
@@ -227,7 +227,7 @@ module ysyx_rnu #(
     end
   end
 
-  // RNQ read-side outputs (stage 2 — from pipeline register)
+  // RNQ read-side outputs (stage 2: from pipeline register)
   assign rnu_rou.uop_a = rn_pipe_uop_a;
   assign rnu_rou.op1_a = rn_pipe_op1_a;
   assign rnu_rou.op2_a = rn_pipe_op2_a;
@@ -288,7 +288,7 @@ module ysyx_rnu #(
   assign mt_bus.map_raddr_c = rnq_rd[rnq_tail_a];
 
 `ifdef YSYX_DUAL_ISSUE
-  // Speculative write B (slot B allocation — younger, wins on conflict)
+  // Speculative write B (slot B allocation: younger, wins on conflict)
   assign mt_bus.map_wen_b   = fl_bus.alloc_req_b;
   assign mt_bus.map_waddr_b = rnq_rd[rnq_tail_b];
   assign mt_bus.map_wdata_b = fl_bus.alloc_pr_b;
@@ -332,7 +332,7 @@ module ysyx_rnu #(
   endgenerate
 
   // ================================================================
-  // Register Renaming outputs (stage 2 — from pipeline register)
+  // Register Renaming outputs (stage 2: from pipeline register)
   // ================================================================
   assign rnu_rou.pr1_a = rn_pipe_pr1_a;
   assign rnu_rou.pr2_a = rn_pipe_pr2_a;

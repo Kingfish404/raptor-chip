@@ -1,4 +1,4 @@
-// rvtest_config.svh — Raptor Chip ACT4 coverage configuration
+// rvtest_config.svh: Raptor Chip ACT4 coverage configuration
 // SPDX-License-Identifier: Apache-2.0
 
 `define XLEN32

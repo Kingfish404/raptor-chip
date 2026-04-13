@@ -1,5 +1,5 @@
 # ============================================================================
-# app/benchmarks/coremark/Makefile — Build CoreMark as standard ELF
+# app/benchmarks/coremark/Makefile: Build CoreMark as standard ELF
 # ============================================================================
 
 _THIS_DIR  := $(dir $(lastword $(MAKEFILE_LIST)))
@@ -12,7 +12,7 @@ BUILD_DIR    := $(APP_HOME)/build/rv$(XLEN)/coremark
 PORTME_DIR   := $(_THIS_DIR)portme
 
 # ---- CoreMark config ----
-ITERATIONS ?= 512
+ITERATIONS ?= 64
 CFLAGS := $(CFLAGS_COMMON) -std=gnu99 \
           -I$(COREMARK_DIR) -I$(PORTME_DIR) \
           -DITERATIONS=$(ITERATIONS) -DPERFORMANCE_RUN=1 \

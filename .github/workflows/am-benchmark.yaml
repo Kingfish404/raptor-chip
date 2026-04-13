@@ -1,10 +1,28 @@
-name: build & eval
+name: AM benchmarks & STA
 
 on:
   push:
     branches: ["master", "main"]
+    paths:
+      - "rtl_sv/**"
+      - "rtl_scala/**"
+      - "nsim/**"
+      - "abstract-machine/**"
+      - "am-kernels/benchmarks/**"
+      - "am-kernels/tests/**"
+      - ".github/scripts/**"
+      - ".github/workflows/am-*.yaml"
   pull_request:
     branches: ["master", "main"]
+    paths:
+      - "rtl_sv/**"
+      - "rtl_scala/**"
+      - "nsim/**"
+      - "abstract-machine/**"
+      - "am-kernels/benchmarks/**"
+      - "am-kernels/tests/**"
+      - ".github/scripts/**"
+      - ".github/workflows/am-*.yaml"
 
 jobs:
   ppa-npc-eval:
@@ -102,91 +120,7 @@ jobs:
           retention-days: 90
           overwrite: true
 
-  linux-npc-test:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    env:
-      YSYX_HOME: ${{ github.workspace }}
-      NEMU_HOME: ${{ github.workspace }}/nemu
-      AM_HOME: ${{ github.workspace }}/abstract-machine
-      CROSS_COMPILE: riscv64-elf-
-    steps:
-      - uses: actions/checkout@v4
-      - name: Setup environment
-        run: ./setup.sh
-      - name: Download pre-built Linux kernel
-        shell: bash -l {0}
-        run: make linux-download-rv32
-      - name: Boot Linux on NPC
-        shell: bash -l {0}
-        run: |
-          make linux-boot-npc32 ARGS="-b -n" MAX_INST=250000000 \
-            2>&1 | tee /tmp/linux-boot.log || true
-      - name: Linux boot summary
-        run: |
-          BOOT_OK="no"
-          grep -q "Booting Linux on hartid" /tmp/linux-boot.log && BOOT_OK="yes"
-          INIT_OK="no"
-          grep -q "Run /init as init process" /tmp/linux-boot.log && INIT_OK="yes"
-          IPC=$(grep -oP 'IPC:\s*\K[0-9.]+' /tmp/linux-boot.log | head -1 || echo "N/A")
-          INSTS=$(grep -oP '#inst:\s*\K\d+' /tmp/linux-boot.log | head -1 || echo "N/A")
-          CYCLES=$(grep -oP 'cycle:\s*\K\d+' /tmp/linux-boot.log | head -1 || echo "N/A")
-          {
-            echo ""
-            echo "## Linux Boot Test (NPC)"
-            echo "| Check | Status |"
-            echo "|-------|--------|"
-            echo "| Kernel boot | $([ "$BOOT_OK" = "yes" ] && echo 'PASS' || echo 'FAIL') |"
-            echo "| Reaches init | $([ "$INIT_OK" = "yes" ] && echo 'PASS' || echo 'FAIL') |"
-            echo ""
-            echo "| Metric | Value |"
-            echo "|--------|-------|"
-            echo "| IPC | $IPC |"
-            echo "| Instructions | $INSTS |"
-            echo "| Cycles | $CYCLES |"
-          } >> "$GITHUB_STEP_SUMMARY"
-          bash .github/scripts/parse-pmu.sh \
-            "Linux Boot NPC" /tmp/linux-boot.log \
-            >> "$GITHUB_STEP_SUMMARY"
-      - name: Pack RTL into single file
-        shell: bash -l {0}
-        run: make pack
-      - name: Collect release artifacts
-        run: |
-          mkdir -p dist/rtl_sv
-          cp nsim/build/ysyx_pack.sv dist/
-          cp nsim/build/ysyx_pack.svh dist/
-          cp -r rtl_sv/. dist/rtl_sv/
-          printf "commit: %s\nref: %s\ndate: %s\n" \
-            "${{ github.sha }}" "${{ github.ref_name }}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > dist/VERSION
-          cd dist && zip -r ../raptor-chip-rtl.zip .
-      - name: Upload RTL artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: raptor-chip-rtl-${{ github.sha }}
-          path: dist/
-          retention-days: 90
-          overwrite: true
-      - name: Delete existing nightly release
-        if: github.event_name == 'push'
-        run: gh release delete rtl-nightly --yes --cleanup-tag 2>/dev/null || true
-        env:
-          GH_TOKEN: ${{ github.token }}
-      - name: Create nightly RTL release
-        if: github.event_name == 'push'
-        run: |
-          gh release create rtl-nightly \
-            --title "RTL Nightly (${{ github.ref_name }}, $(date -u +%Y-%m-%d))" \
-            --notes "Auto-generated RTL release from commit \`${{ github.sha }}\`." \
-            --prerelease \
-            "nsim/build/ysyx_pack.sv#ysyx_pack.sv (single-file packed RTL)" \
-            "nsim/build/ysyx_pack.svh#ysyx_pack.svh (macro definitions)" \
-            "raptor-chip-rtl.zip#raptor-chip-rtl.zip (full RTL source)"
-        env:
-          GH_TOKEN: ${{ github.token }}
-
-  ysyxsoc-test:
+  ysyxsoc-benchmark:
     runs-on: ubuntu-latest
     env:
       YSYX_HOME: ${{ github.workspace }}
@@ -241,72 +175,3 @@ jobs:
             "MicroBench riscv32-ysyxsoc" /tmp/mb-soc.log \
             "MicroBench riscv32e-ysyxsoc" /tmp/mb-soce.log \
             >> "$GITHUB_STEP_SUMMARY"
-
-  litex-test:
-    runs-on: ubuntu-latest
-    env:
-      YSYX_HOME: ${{ github.workspace }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: Setup environment
-        shell: bash -l {0}
-        run: ./setup.sh
-      - name: Prepare LiteX
-        shell: bash -l {0}
-        run: cd fpga/litex && ./setup.sh
-      - name: Run LiteX
-        shell: bash -l {0}
-        run: cd fpga/litex && source .venv/bin/activate && timeout 240s make run_ni || true
-      - name: CoreMark on LiteX
-        shell: bash -l {0}
-        run: |
-          cd fpga/litex && source .venv/bin/activate
-          pushd $YSYX_HOME/third_party/enjoy-digital/litex && litex_bare_metal_demo --build-path=build/sim/ && popd
-          timeout 300s make coremark 2>&1 | tee /tmp/litex-coremark.log || true
-      - name: LiteX summary
-        run: |
-          LOG=/tmp/litex-coremark.log
-          CM_SCORE=$(grep -oP 'Iterations/Sec\s*:\s*\K[0-9.]+' "$LOG" 2>/dev/null | head -1 || echo "N/A")
-          CM_ITERS=$(grep -oP 'Iterations\s*:\s*\K[0-9]+' "$LOG" 2>/dev/null | head -1 || echo "N/A")
-          CM_TICKS=$(grep -oP 'Total ticks\s*:\s*\K[0-9]+' "$LOG" 2>/dev/null | head -1 || echo "N/A")
-          CM_TIME=$(grep -oP 'Total time \(secs\):\s*\K[0-9.]+' "$LOG" 2>/dev/null | head -1 || echo "N/A")
-          CPU_INFO=$(grep -oP 'CPU:\s*\K.+' "$LOG" 2>/dev/null | head -1 || echo "N/A")
-          CM_VALID=$(grep -q 'Correct operation validated' "$LOG" 2>/dev/null && echo "PASS" || echo "FAIL")
-          {
-            echo ""
-            echo "## LiteX CoreMark Results"
-            echo "| Metric | Value |"
-            echo "|--------|-------|"
-            echo "| CPU | $CPU_INFO |"
-            echo "| CoreMark Score (Iter/s) | $CM_SCORE |"
-            echo "| Iterations | $CM_ITERS |"
-            echo "| Total Ticks | $CM_TICKS |"
-            echo "| Total Time (s) | $CM_TIME |"
-            echo "| Validation | $CM_VALID |"
-          } >> "$GITHUB_STEP_SUMMARY"
-
-  nemu-test:
-    runs-on: ubuntu-latest
-    env:
-      YSYX_HOME: ${{ github.workspace }}
-      NEMU_HOME: ${{ github.workspace }}/nemu
-      AM_HOME: ${{ github.workspace }}/abstract-machine
-      CROSS_COMPILE: riscv64-elf-
-    steps:
-      - uses: actions/checkout@v4
-      - name: Setup environment
-        run: ./setup.sh
-      - name: Build OpenSBI
-        run: make -C third_party/riscv-software-src/opensbi PLATFORM_RISCV_ISA=rv32imac_zicntr_zicond_zicsr_zifencei_zba_zbb_zbs CROSS_COMPILE=riscv64-linux-gnu- PLATFORM_RISCV_XLEN=32 PLATFORM=generic -j$(nproc)
-      - name: Build NEMU (Linux config)
-        shell: bash -l {0}
-        run: make config-nemu32-linux
-      - name: Test OpenSBI on NEMU
-        shell: bash -l {0}
-        run: make -C nemu run IMG=../third_party/riscv-software-src/opensbi/build/platform/generic/firmware/fw_payload.bin ARGS="-b -m 10000000 --log ./build/nemu-log.txt"
-      - name: Download pre-built Linux kernel
-        shell: bash -l {0}
-        run: make linux-download-rv32
-      - name: Boot Linux on NEMU
-        shell: bash -l {0}
-        run: make linux-boot-nemu32 ARGS="-b --log ./nemu/build/nemu-log.txt" MAX_INST=1200000000

@@ -1,10 +1,22 @@
-name: verify
+name: Verification coverage
 
 on:
   push:
     branches: ["master", "main"]
+    paths:
+      - "rtl_sv/**"
+      - "rtl_scala/**"
+      - "nsim/**"
+      - "verify/**"
+      - ".github/workflows/verify-*.yaml"
   pull_request:
     branches: ["master", "main"]
+    paths:
+      - "rtl_sv/**"
+      - "rtl_scala/**"
+      - "nsim/**"
+      - "verify/**"
+      - ".github/workflows/verify-*.yaml"
 
 jobs:
   fuzztest-sigtest-and-coverage:

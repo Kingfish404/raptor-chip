@@ -1,5 +1,5 @@
 # ============================================================================
-# app/Makefile — Standard RISC-V ELF build system (pk + newlib)
+# app/Makefile: Standard RISC-V ELF build system (pk)
 #
 # Builds standard ELFs with riscv64-unknown-elf-gcc (newlib), runs them on
 # NPC via riscv-pk (proxy kernel).

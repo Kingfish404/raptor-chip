@@ -421,7 +421,7 @@ verify-clean: ## Clean verification artifacts
 	$(MAKE) -C $(VERIFY_HOME) clean
 
 # ============================================================================
-# Standard Toolchain (app/ — riscv-pk + newlib)
+# Standard Toolchain (app/, riscv-pk)
 # ============================================================================
 APP_HOME := $(YSYX_HOME)/app
 

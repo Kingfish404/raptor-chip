@@ -1,4 +1,4 @@
-# app/tests/hello/Makefile — Build hello world as standard ELF
+# app/tests/hello/Makefile: Build hello world as standard ELF
 
 _THIS_DIR := $(dir $(lastword $(MAKEFILE_LIST)))
 APP_HOME  := $(abspath $(_THIS_DIR)/../..)
