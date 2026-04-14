@@ -171,6 +171,8 @@
 `define YSYX_CSR_MIDELEG 'h303
 `define YSYX_CSR_MIE____ 'h304
 `define YSYX_CSR_MTVEC__ 'h305
+`define YSYX_CSR_MCOUNTE 'h306
+`define YSYX_CSR_MENVCFG 'h30a
 
 `define YSYX_CSR_MSTATUSH 'h310
 
@@ -209,7 +211,37 @@
 `define YSYX_CSR_MSTATUS_SIE_ 1
 
 // CSR_MIE FLAGS
+`define YSYX_CSR_MIE_SSIE 1
+`define YSYX_CSR_MIE_MSIE 3
 `define YSYX_CSR_MIE_STIE 5
 `define YSYX_CSR_MIE_MTIE 7
+`define YSYX_CSR_MIE_SEIE 9
+`define YSYX_CSR_MIE_MEIE 11
+
+// PMP CSR address ranges
+`define YSYX_CSR_PMPCFG0 'h3a0
+`define YSYX_CSR_PMPCFG3 'h3a3
+`define YSYX_CSR_PMPADDR0 'h3b0
+`define YSYX_CSR_PMPADDR15 'h3bf
+
+// Exception Cause Codes (synchronous)
+`define YSYX_CAUSE_ILLEGAL_INST 'h2
+`define YSYX_CAUSE_BREAKPOINT 'h3
+`define YSYX_CAUSE_ECALL_U 'h8
+`define YSYX_CAUSE_ECALL_S 'h9
+`define YSYX_CAUSE_ECALL_M 'hb
+
+// Interrupt Cause Codes (bit index, without MSB interrupt flag)
+`define YSYX_CAUSE_SSI 'h1
+`define YSYX_CAUSE_MSI 'h3
+`define YSYX_CAUSE_STI 'h5
+`define YSYX_CAUSE_MTI 'h7
+
+// CSR Write Masks
+`define YSYX_CSR_MEDELEG_WMASK 'hf4bffe
+`define YSYX_CSR_MSTATUS_WMASK 32'h007FF9EA
+`define YSYX_CSR_MSTATUS_SD 32'h80000000
+`define YSYX_CSR_SSTATUS_WMASK 32'h000DE162
+`define YSYX_CSR_SSTATUS_CMASK 32'h800DE162
 
 `endif

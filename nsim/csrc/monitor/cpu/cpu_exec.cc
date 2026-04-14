@@ -186,11 +186,11 @@ void cpu_exec(uint64_t n)
       npc.state = NPC_ABORT;
       break;
     }
-    if (*(uint8_t *)&(CONCAT(VERILOG_PREFIX, cmu__DOT__valid)))
+    if (*(uint8_t *)&VERILOG_CPU(cmu__DOT__valid))
     {
       perf_sample_per_inst();
       cur_inst_cycle = 0;
-      uint8_t cmu_valid_b = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, cmu__DOT__valid_b));
+      uint8_t cmu_valid_b = *(uint8_t *)&VERILOG_CPU(cmu__DOT__valid_b);
 #ifdef CONFIG_ITRACE
       iringbuf_rpc[iringhead] = *npc.rpc;
       iringbuf_inst[iringhead] = *(word_t *)(npc.inst);
@@ -225,13 +225,18 @@ void cpu_exec(uint64_t n)
         }
       }
       difftest_step(*npc.rpc);
-      char interrupt = *(char *)&(CONCAT(VERILOG_PREFIX, rou__DOT__recieved_trap));
+      char interrupt = *(char *)&VERILOG_ROU(recieved_trap);
       if (interrupt)
       {
-        // Determine actual timer interrupt cause based on privilege level
+        // Determine interrupt cause based on trap type and privilege level
         // before trap (CSR module hasn't updated priv_mode yet at this point)
         uint8_t priv = *(uint8_t *)npc.priv;
-        word_t cause = ((priv == 3) ? 0x7u : 0x5u) | ((word_t)1 << (sizeof(word_t) * 8 - 1));
+        char sw_trap = *(char *)&VERILOG_ROU(recieved_sw_trap);
+        word_t cause;
+        if (sw_trap)
+          cause = ((priv == 3) ? 0x3u : 0x1u) | ((word_t)1 << (sizeof(word_t) * 8 - 1));
+        else
+          cause = ((priv == 3) ? 0x7u : 0x5u) | ((word_t)1 << (sizeof(word_t) * 8 - 1));
         difftest_raise_intr(cause);
       }
 #endif

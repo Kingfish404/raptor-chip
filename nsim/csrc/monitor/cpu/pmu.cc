@@ -84,38 +84,38 @@ void perf_sample_per_cycle()
   pmu.active_cycle++;
   // BPU: use registered ben_r/jen_r/flush_pipe_r from CMU for correct timing
   // alignment with the registered 'valid' signal (all sampled at the same posedge)
-  bool b = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, cmu__DOT__ben_r));
-  bool j = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, cmu__DOT__jen_r));
-  bool jr = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, cmu__DOT__jren_r));
-  bool wb_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, cmu__DOT__valid));
+  bool b = *(uint8_t *)&VERILOG_CPU(cmu__DOT__ben_r);
+  bool j = *(uint8_t *)&VERILOG_CPU(cmu__DOT__jen_r);
+  bool jr = *(uint8_t *)&VERILOG_CPU(cmu__DOT__jren_r);
+  bool wb_valid = *(uint8_t *)&VERILOG_CPU(cmu__DOT__valid);
   if (wb_valid)
   {
     bool is_br = b || j || jr;
-    bool br_predict_fail = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, cmu__DOT__flush_pipe_r));
+    bool br_predict_fail = *(uint8_t *)&VERILOG_CPU(cmu__DOT__flush_pipe_r);
     pmu.bpu_cnt += is_br ? 1 : 0;
     pmu.bpu_fail_cnt += is_br && br_predict_fail ? 1 : 0;
     pmu.bpu_b_fail += br_predict_fail && b ? 1 : 0;
     pmu.bpu_j_fail += br_predict_fail && j ? 1 : 0;
     pmu.bpu_jr_fail += br_predict_fail && jr ? 1 : 0;
   }
-  bool ifu_hazard = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, ifu__DOT__ifu_hazard));
-  bool ifu_fetch_fire = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, ifu__DOT__pmu_fetch_fire));
-  bool ifu_stall = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, ifu__DOT__pmu_ifu_stall));
+  bool ifu_hazard = *(uint8_t *)&VERILOG_CPU(ifu__DOT__ifu_hazard);
+  bool ifu_fetch_fire = *(uint8_t *)&VERILOG_CPU(ifu__DOT__pmu_fetch_fire);
+  bool ifu_stall = *(uint8_t *)&VERILOG_CPU(ifu__DOT__pmu_ifu_stall);
 
-  bool rou_ready = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, rou__DOT__ready));
-  uint32_t exu_ooo_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, exu__DOT__rs_valid));
-  bool exu_ooo_valid_found = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, exu__DOT__valid_found));
-  uint32_t exu_ioq_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, exu__DOT__ioq_valid));
-  bool exu_ioq_valid_found = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, exu__DOT__ioq_valid_found));
-  uint8_t l1d_state = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, l1d_cache__DOT__l1d_state));
-  bool lsu_l1d_hit = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, l1d_cache__DOT__tag_hit));
-  bool lsu_fwd_hit = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, lsu__DOT__fwd_hit));
-  bool lsu_load_in_sq = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, lsu__DOT__load_in_sq));
-  bool lsu_stq_conflict = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, lsu__DOT__stq_addr_conflict));
-  bool lsu_raddr_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, lsu__DOT__raddr_valid));
-  bool wbu_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, cmu__DOT__valid));
-  bool wbu_valid_b = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, cmu__DOT__valid_b));
-  uint8_t l1i_state = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, l1i_cache__DOT__l1i_state));
+  bool rou_ready = *(uint8_t *)&VERILOG_ROU(ready);
+  uint32_t exu_ooo_valid = *(uint8_t *)&VERILOG_CPU(exu__DOT__rs_valid);
+  bool exu_ooo_valid_found = *(uint8_t *)&VERILOG_CPU(exu__DOT__valid_found);
+  uint32_t exu_ioq_valid = *(uint8_t *)&VERILOG_CPU(exu__DOT__ioq_valid);
+  bool exu_ioq_valid_found = *(uint8_t *)&VERILOG_CPU(exu__DOT__ioq_valid_found);
+  uint8_t l1d_state = *(uint8_t *)&VERILOG_CPU(l1d_cache__DOT__l1d_state);
+  bool lsu_l1d_hit = *(uint8_t *)&VERILOG_CPU(l1d_cache__DOT__tag_hit);
+  bool lsu_fwd_hit = *(uint8_t *)&VERILOG_CPU(lsu__DOT__fwd_hit);
+  bool lsu_load_in_sq = *(uint8_t *)&VERILOG_CPU(lsu__DOT__load_in_sq);
+  bool lsu_stq_conflict = *(uint8_t *)&VERILOG_CPU(lsu__DOT__stq_addr_conflict);
+  bool lsu_raddr_valid = *(uint8_t *)&VERILOG_CPU(lsu__DOT__raddr_valid);
+  bool wbu_valid = *(uint8_t *)&VERILOG_CPU(cmu__DOT__valid);
+  bool wbu_valid_b = *(uint8_t *)&VERILOG_CPU(cmu__DOT__valid_b);
+  uint8_t l1i_state = *(uint8_t *)&VERILOG_CPU(l1i_cache__DOT__l1i_state);
   if (ifu_fetch_fire)
   {
     pmu.ifu_fetch_cnt++;
@@ -124,8 +124,8 @@ void perf_sample_per_cycle()
   pmu.ifu_stall_cycle += ifu_stall ? 1 : 0;
   pmu.ifu_sys_hazard_cycle += ifu_hazard ? 1 : 0;
   // ROU structural hazard: RNU has a renamed uop but dispatch queue (UOQ) is full
-  uint8_t rnq_valid = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, rnu__DOT__rnq_valid));
-  uint8_t rnq_tail = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, rnu__DOT__rnq_tail_a));
+  uint8_t rnq_valid = *(uint8_t *)&VERILOG_CPU(rnu__DOT__rnq_valid);
+  uint8_t rnq_tail = *(uint8_t *)&VERILOG_CPU(rnu__DOT__rnq_tail_a);
   bool rnu_valid = (rnq_valid >> rnq_tail) & 1;
   pmu.rou_hazard_cycle += (rnu_valid && !rou_ready) ? 1 : 0;
   if (exu_ooo_valid && !exu_ooo_valid_found)
@@ -138,10 +138,10 @@ void perf_sample_per_cycle()
   }
   pmu.lsu_l1d_stall_cycle += ((l1d_state == 2) && !lsu_l1d_hit) ? 1 : 0;
   // SQ stall: only count when a ready store at ROB head is blocked by full SQ
-  bool rou_sq_stall = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, rou__DOT__pmu_sq_stall));
+  bool rou_sq_stall = *(uint8_t *)&VERILOG_ROU(pmu_sq_stall);
   pmu.lsu_sq_stall_cycle += rou_sq_stall ? 1 : 0;
   // IDU early resteer: BPU predicted taken on non-branch instruction
-  bool early_resteer = *(uint8_t *)&(CONCAT(VERILOG_PREFIX, idu__DOT__pmu_early_resteer));
+  bool early_resteer = *(uint8_t *)&VERILOG_CPU(idu__DOT__pmu_early_resteer);
   pmu.early_resteer_cnt += early_resteer ? 1 : 0;
   pmu.lsu_fwd_cnt += (lsu_raddr_valid && lsu_fwd_hit) ? 1 : 0;
   pmu.lsu_sq_conflict_cnt += (lsu_raddr_valid && lsu_load_in_sq) ? 1 : 0;
@@ -193,7 +193,7 @@ void perf_sample_per_cycle()
   }
   prev_l1d_state = l1d_state;
   // tlb & page table walk sample
-  char stlb_mmu = *(char *)&(CONCAT(VERILOG_PREFIX, l1d_cache__DOT__stlb_mmu));
+  char stlb_mmu = *(char *)&VERILOG_CPU(l1d_cache__DOT__stlb_mmu);
   bool i_ptw = (l1i_state == 0b100); // PTWAIT
   if (i_ptw)
   {
@@ -305,7 +305,7 @@ void perf_sample_per_inst()
 void perf()
 {
   Log("======== Instruction Analysis ========");
-  uint64_t time_clint = *(uint64_t *)&(CONCAT(VERILOG_PREFIX, bus__DOT__clint__DOT__mtime));
+  uint64_t time_clint = *(uint64_t *)&VERILOG_CPU(bus__DOT__clint__DOT__mtime);
   long long int time_clint_us = time_clint / 2;
   float IPC = (1.0 * pmu.instr_cnt / pmu.active_cycle);
   float MIPS = (double)((pmu.instr_cnt / 1e6) / (time_clint_us / 1e6));

@@ -22,8 +22,64 @@
 #define MTIMECMP_BASE 0x4000
 #define MTIME_BASE 0xbff8
 
+// MIP bit positions for CLINT-controlled interrupts
+#define MIP_MSIP_BIT (1u << 3)  // Machine Software Interrupt Pending
+#define MIP_MTIP_BIT (1u << 7)  // Machine Timer Interrupt Pending
+
 static uint32_t *rtc_port_base = NULL;
 static uint32_t *clint_base = NULL;
+static uint32_t clint_msip = 0; // MSIP register (only bit 0 used)
+
+static uint64_t clint_get_ticks(void)
+{
+#if defined(CONFIG_TIMER_CYCLE)
+  // 1GHz / 10MHz = 100 cycles per tick
+  extern uint64_t g_nr_guest_inst;
+  return g_nr_guest_inst / 100;
+#else
+  return get_time() * 10;
+#endif
+}
+
+// Update MIP.MTIP and MIP.MSIP based on current CLINT state.
+// Called after every instruction (from decode_exec) and on CLINT MMIO writes.
+void clint_update_mip(void)
+{
+#if !defined(CONFIG_TARGET_SHARE)
+  uint64_t ticks = clint_get_ticks();
+
+  // MTIP: mtime >= mtimecmp (level-triggered, same as RTL CLINT)
+  if (ticks >= cpu.mtimecmp)
+    cpu.sr[CSR_MIP] |= MIP_MTIP_BIT;
+  else
+    cpu.sr[CSR_MIP] &= ~MIP_MTIP_BIT;
+
+  // MSIP: software interrupt from CLINT MSIP register
+  if (clint_msip & 1u)
+    cpu.sr[CSR_MIP] |= MIP_MSIP_BIT;
+  else
+    cpu.sr[CSR_MIP] &= ~MIP_MSIP_BIT;
+#endif
+}
+
+// WFI acceleration: advance time to mtimecmp so the next instruction sees MTIP.
+// Returns true if time was advanced.
+bool clint_wfi_advance(void)
+{
+#if !defined(CONFIG_TARGET_SHARE) && defined(CONFIG_TIMER_CYCLE)
+  uint64_t ticks = clint_get_ticks();
+  // Only advance if timer interrupt is not already pending
+  if (ticks < cpu.mtimecmp)
+  {
+    // Advance g_nr_guest_inst so that ticks reaches mtimecmp
+    extern uint64_t g_nr_guest_inst;
+    g_nr_guest_inst = cpu.mtimecmp * 100;
+    clint_update_mip();
+    return true;
+  }
+#endif
+  return false;
+}
 
 static void rtc_io_handler(uint32_t offset, int len, bool is_write)
 {
@@ -40,29 +96,40 @@ static void clint_io_handler(uint32_t offset, int len, bool is_write)
 {
   if (is_write)
   {
-    // When kernel writes to mtimecmp, update the cached value
-    if (offset >= MTIMECMP_BASE && offset < MTIMECMP_BASE + 8)
+    // MSIP register (offset 0x0, only bit 0)
+    if (offset >= MSIP_BASE && offset < MSIP_BASE + 4)
+    {
+      uint8_t *p = (uint8_t *)clint_base;
+      clint_msip = *(uint32_t *)(p + MSIP_BASE) & 1u;
+      clint_update_mip();
+    }
+    // mtimecmp register (offset 0x4000, 64-bit)
+    else if (offset >= MTIMECMP_BASE && offset < MTIMECMP_BASE + 8)
     {
       uint8_t *p = (uint8_t *)clint_base;
       uint32_t lo = *(uint32_t *)(p + MTIMECMP_BASE);
       uint32_t hi = *(uint32_t *)(p + MTIMECMP_BASE + 4);
       cpu.mtimecmp = ((uint64_t)hi << 32) | lo;
+      // Immediately recalculate MTIP (writing mtimecmp often clears timer interrupt)
+      clint_update_mip();
     }
   }
   else
   {
-    // Update mtime when any read hits the CLINT region
-    // Scale to 10MHz (matching DTS timebase-frequency)
-#if defined(CONFIG_TIMER_CYCLE)
-    // 1GHz / 10MHz = 100 cycles per tick
-    extern uint64_t g_nr_guest_inst;
-    uint64_t ticks = g_nr_guest_inst / 100;
-#else
-    uint64_t ticks = get_time() * 10;
-#endif
-    uint8_t *p = (uint8_t *)clint_base;
-    *(uint32_t *)(p + MTIME_BASE) = (uint32_t)ticks;
-    *(uint32_t *)(p + MTIME_BASE + 4) = (uint32_t)(ticks >> 32);
+    // MSIP read
+    if (offset >= MSIP_BASE && offset < MSIP_BASE + 4)
+    {
+      uint8_t *p = (uint8_t *)clint_base;
+      *(uint32_t *)(p + MSIP_BASE) = clint_msip & 1u;
+    }
+    // mtime read: update mtime from ticks
+    else
+    {
+      uint64_t ticks = clint_get_ticks();
+      uint8_t *p = (uint8_t *)clint_base;
+      *(uint32_t *)(p + MTIME_BASE) = (uint32_t)ticks;
+      *(uint32_t *)(p + MTIME_BASE + 4) = (uint32_t)(ticks >> 32);
+    }
   }
 }
 
@@ -71,8 +138,8 @@ static void timer_intr()
 {
   if (nemu_state.state == NEMU_RUNNING)
   {
-    extern void dev_raise_intr();
-    dev_raise_intr();
+    // Legacy alarm path: update MIP from CLINT state
+    clint_update_mip();
   }
 }
 #endif
@@ -89,6 +156,7 @@ void init_timer()
 {
   rtc_port_base = (uint32_t *)new_space(8);
   clint_base = (uint32_t *)new_space(0x000c0000);
+  clint_msip = 0;
   /* Initialize mtimecmp to max so timer doesn't fire until software programs it */
   uint8_t *p = (uint8_t *)clint_base;
   *(uint32_t *)(p + MTIMECMP_BASE) = 0xFFFFFFFF;

@@ -138,7 +138,7 @@ module ysyx_l1i #(
   assign offset_fetch = fetch_addr[L1I_LINE_LEN+2-1:2];
   assign idx_fetch = fetch_addr[L1I_LEN+L1I_LINE_LEN+2-1:L1I_LINE_LEN+2];
 
-  assign raddr_valid = csr_bcast.immu_en || ysyx_pkg::addr_valid(l1i_addr);
+  assign raddr_valid = csr_bcast.immu_en || ysyx_pkg::addr_cacheable(l1i_addr);
 
   // --- L1I Tag Comparison (N-way set-associative, SRAM tags) ---
   generate

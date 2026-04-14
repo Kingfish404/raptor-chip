@@ -10,15 +10,28 @@
 #include CONCAT_HEAD(CONCAT(TOP_NAME, __Dpi))
 
 #ifdef YSYX_SOC
-#define VERILOG_PREFIX top->rootp->ysyxSoCFull__DOT__asic__DOT__cpu__DOT__cpu__DOT__
-#define VERILOG_RESET top->rootp->ysyxSoCFull__DOT__asic__DOT__cpu_reset_chain__DOT__output_chain__DOT__sync_0
+// Verilator 5.x hierarchical cell access: rootp -> ysyxSoCFull -> asic -> cpu -> cpu (ysyx)
+#include CONCAT_HEAD(CONCAT(TOP_NAME, _ysyxSoCFull))
+#include CONCAT_HEAD(CONCAT(TOP_NAME, _ysyxSoCASIC))
+#include CONCAT_HEAD(CONCAT(TOP_NAME, _CPU))
+#include CONCAT_HEAD(CONCAT(TOP_NAME, _ysyx))
+#include CONCAT_HEAD(CONCAT(TOP_NAME, _ysyx_rou))
+#define VERILOG_CPU(m) (top->rootp->ysyxSoCFull->asic->cpu->cpu->m)
+#define VERILOG_ROU(m) (top->rootp->ysyxSoCFull->asic->cpu->cpu->rou->m)
+#define VERILOG_RESET (top->rootp->ysyxSoCFull->asic->cpu_reset_chain__DOT__output_chain__DOT__sync_0)
 #else
 
 #ifdef CONFIG_wrapBus
-#define VERILOG_PREFIX top->rootp->wrapSoC__DOT__chip__DOT__cpu__DOT__
+#define VERILOG_CPU(m) CONCAT(top->rootp->wrapSoC__DOT__chip__DOT__cpu__DOT__, m)
+#define VERILOG_ROU(m) CONCAT(top->rootp->wrapSoC__DOT__chip__DOT__cpu__DOT__rou__DOT__, m)
 #define VERILOG_RESET top->reset
 #else
-#define VERILOG_PREFIX top->rootp->ysyxSoC__DOT__cpu__DOT__
+// NPC mode: Verilator 5.x hierarchical classes — navigate via cell pointers
+#include CONCAT_HEAD(CONCAT(TOP_NAME, _ysyxSoC))
+#include CONCAT_HEAD(CONCAT(TOP_NAME, _ysyx))
+#include CONCAT_HEAD(CONCAT(TOP_NAME, _ysyx_rou))
+#define VERILOG_CPU(m) (top->rootp->ysyxSoC->cpu->m)
+#define VERILOG_ROU(m) (top->rootp->ysyxSoC->cpu->rou->m)
 #define VERILOG_RESET top->reset
 #endif
 
@@ -27,14 +40,14 @@
 static inline void verilog_connect(TOP_NAME *top, NPCState *npc)
 {
   // for difftest
-  npc->inst = (uint32_t *)&(CONCAT(VERILOG_PREFIX, cmu__DOT__inst));
+  npc->inst = (uint32_t *)&VERILOG_CPU(cmu__DOT__inst);
 
-  npc->gpr = (word_t *)&CONCAT(VERILOG_PREFIX, rf);
-  npc->rpc = (word_t *)&CONCAT(VERILOG_PREFIX, cmu__DOT__rpc);
+  npc->gpr = (word_t *)&VERILOG_CPU(rf);
+  npc->rpc = (word_t *)&VERILOG_CPU(cmu__DOT__rpc);
   npc->ret = npc->gpr + reg_str2idx("a0");
-  npc->pc = (word_t *)&CONCAT(VERILOG_PREFIX, cmu__DOT__npc);
-  npc->priv = (char *)&CONCAT(VERILOG_PREFIX, csrs__DOT__priv_mode);
-  word_t *csr = (word_t *)&CONCAT(VERILOG_PREFIX, csrs__DOT__csr);
+  npc->pc = (word_t *)&VERILOG_CPU(cmu__DOT__npc);
+  npc->priv = (char *)&VERILOG_CPU(csrs__DOT__priv_mode);
+  word_t *csr = (word_t *)&VERILOG_CPU(csrs__DOT__csr);
 
   npc->state = NPC_RUNNING;
 

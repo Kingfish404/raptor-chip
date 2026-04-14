@@ -89,10 +89,43 @@ pk-build: ## Build riscv-pk
 	@$(MAKE) $(Q) -C $(APP_HOME)/pk pk-build
 
 pk-run: ## Run USER_ELF via pk on NPC
-	@$(MAKE) $(Q) -C $(APP_HOME)/pk pk-run USER_ELF=$(USER_ELF)
+	@$(MAKE) $(Q) -C $(APP_HOME)/pk pk-run USER_ELF=$(abspath $(USER_ELF))
+
+nemu-run: ## Run USER_ELF via pk on NEMU
+	@$(MAKE) $(Q) -C $(APP_HOME)/pk nemu-run USER_ELF=$(abspath $(USER_ELF))
 
 bbl-linux: ## Boot Linux via BBL
 	@$(MAKE) $(Q) -C $(APP_HOME)/pk bbl-linux
+
+# ============================================================================
+# Runner helpers: _PK_RUN_CMD / _PK_RUN_CMD_SUITE
+#   RUN_ON = npc (default) | nemu
+#   These are internal macros used by all run targets below.
+# ============================================================================
+RUN_ON ?= npc ## Runtime: npc or nemu
+
+ifeq ($(RUN_ON),nemu)
+  _PK_RUN_TARGET := nemu-run
+else
+  _PK_RUN_TARGET := pk-run
+endif
+
+# Run a single ELF: $(call _pk_run,<elf-path>)
+define _pk_run
+	$(MAKE) $(Q) -C $(APP_HOME)/pk $(_PK_RUN_TARGET) USER_ELF=$(1)
+endef
+
+# Run a list of ELFs: $(call _pk_run_suite,<suite-name>,<elf-dir>,<test-list>)
+define _pk_run_suite
+	@echo "=== Running $(1) ($(RUN_ON)) ==="
+	@for t in $(3); do \
+		echo "--- $$t ---"; \
+		$(MAKE) $(Q) -C $(APP_HOME)/pk $(_PK_RUN_TARGET) \
+			USER_ELF=$(2)/$$t.elf \
+			|| true; \
+	done
+	@echo "=== $(1) complete ==="
+endef
 
 # ============================================================================
 # CoreMark
@@ -101,8 +134,7 @@ coremark-build: ## Build CoreMark ELF
 	@$(MAKE) $(Q) -C $(APP_HOME)/benchmarks/coremark build
 
 coremark: coremark-build ## Build and run CoreMark via pk
-	@$(MAKE) $(Q) -C $(APP_HOME)/pk pk-run \
-		USER_ELF=$(APP_HOME)/build/rv$(XLEN)/coremark/coremark.elf
+	@$(call _pk_run,$(APP_HOME)/build/rv$(XLEN)/coremark/coremark.elf)
 
 # ============================================================================
 # Embench-IoT
@@ -116,10 +148,10 @@ embench-build: ## Build all Embench ELFs
 	@$(MAKE) $(Q) -C $(APP_HOME)/benchmarks/embench build
 
 embench: embench-build ## Build and run all Embench benchmarks via pk
-	@echo "=== Running Embench-IoT benchmarks ==="
+	@echo "=== Running Embench-IoT benchmarks ($(RUN_ON)) ==="
 	@for bench in $(EMBENCH_BENCHMARKS); do \
 		echo "--- $$bench ---"; \
-		$(MAKE) $(Q) -C $(APP_HOME)/pk pk-run \
+		$(MAKE) $(Q) -C $(APP_HOME)/pk $(_PK_RUN_TARGET) \
 			USER_ELF=$(APP_HOME)/build/rv$(XLEN)/embench/$$bench/$$bench.elf \
 			|| true; \
 	done
@@ -132,8 +164,63 @@ hello-build: ## Build hello ELF
 	@$(MAKE) $(Q) -C $(APP_HOME)/tests/hello build
 
 hello: hello-build ## Build and run hello via pk
-	@$(MAKE) $(Q) -C $(APP_HOME)/pk pk-run \
-		USER_ELF=$(APP_HOME)/build/rv$(XLEN)/tests/hello/hello.elf
+	@$(call _pk_run,$(APP_HOME)/build/rv$(XLEN)/tests/hello/hello.elf)
+
+# ============================================================================
+# ISA correctness tests
+# ============================================================================
+isa-tests-build: ## Build ISA verification tests
+	@$(MAKE) $(Q) -C $(APP_HOME)/tests/isa build
+
+ISA_TESTS := rv_add rv_shift rv_logic rv_mul_div rv_branch rv_slt rv_bitmanip rv_compressed rv_zicond
+
+isa-tests: isa-tests-build ## Build and run all ISA tests via pk
+	$(call _pk_run_suite,ISA tests,$(APP_HOME)/build/rv$(XLEN)/tests/isa,$(ISA_TESTS))
+
+# ============================================================================
+# Memory subsystem tests
+# ============================================================================
+memory-tests-build: ## Build memory tests
+	@$(MAKE) $(Q) -C $(APP_HOME)/tests/memory build
+
+MEMORY_TESTS := load_store memory_pattern stack_test
+
+memory-tests: memory-tests-build ## Build and run all memory tests via pk
+	$(call _pk_run_suite,Memory tests,$(APP_HOME)/build/rv$(XLEN)/tests/memory,$(MEMORY_TESTS))
+
+# ============================================================================
+# Algorithm tests
+# ============================================================================
+algo-tests-build: ## Build algorithm tests
+	@$(MAKE) $(Q) -C $(APP_HOME)/tests/algo build
+
+ALGO_TESTS := sorting crc32 math_test string_ops
+
+algo-tests: algo-tests-build ## Build and run all algorithm tests via pk
+	$(call _pk_run_suite,Algorithm tests,$(APP_HOME)/build/rv$(XLEN)/tests/algo,$(ALGO_TESTS))
+
+# ============================================================================
+# All tests
+# ============================================================================
+tests-build: hello-build isa-tests-build memory-tests-build algo-tests-build ## Build all tests
+
+tests: hello isa-tests memory-tests algo-tests ## Run all tests via pk
+
+# ============================================================================
+# Demo programs
+# ============================================================================
+demos-build: ## Build demo programs
+	@$(MAKE) $(Q) -C $(APP_HOME)/demos build
+
+DEMOS := donut cmatrix langton life hanoi mandelbrot sysinfo
+
+demos: demos-build ## Build and run all demos via pk
+	$(call _pk_run_suite,Demo programs,$(APP_HOME)/build/rv$(XLEN)/demos,$(DEMOS))
+
+# ============================================================================
+# Build all
+# ============================================================================
+all: tests-build demos-build coremark-build embench-build ## Build everything
 
 # ============================================================================
 # Clean
@@ -141,6 +228,12 @@ hello: hello-build ## Build and run hello via pk
 clean: ## Clean all build artifacts
 	rm -rf $(APP_HOME)/build
 
-.PHONY: help env-check setup pk-build run-pk bbl-linux \
+.PHONY: help env-check setup pk-build pk-run nemu-run bbl-linux \
         coremark-build coremark embench-build embench \
-        hello-build hello clean
+        hello-build hello \
+        isa-tests-build isa-tests \
+        memory-tests-build memory-tests \
+        algo-tests-build algo-tests \
+        tests-build tests \
+        demos-build demos \
+        all clean

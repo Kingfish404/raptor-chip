@@ -118,10 +118,11 @@ interface csr_bcast_if #(
 
   logic [XLEN-1:0] mtvec;
   logic [XLEN-1:0] tvec;
-  logic interrupt_en;
+  logic timer_int_en;
+  logic sw_int_en;
 
-  modport in(input priv, satp_ppn, satp_asid, input immu_en, dmmu_en, mtvec, tvec, interrupt_en);
-  modport out(output priv, satp_ppn, satp_asid, output immu_en, dmmu_en, mtvec, tvec, interrupt_en);
+  modport in(input priv, satp_ppn, satp_asid, input immu_en, dmmu_en, mtvec, tvec, timer_int_en, sw_int_en);
+  modport out(output priv, satp_ppn, satp_asid, output immu_en, dmmu_en, mtvec, tvec, timer_int_en, sw_int_en);
 endinterface
 
 // final commit boardcast

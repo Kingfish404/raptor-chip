@@ -75,9 +75,10 @@
 			reg-shift = <0x00>;
 			reg-io-width = <0x01>;
 		};
-	};
 
-	htif {
-		compatible = "ucb,htif0";
+		test@100000 {
+			compatible = "sifive,test0";
+			reg = <0x00 0x100000 0x00 0x1000>;
+		};
 	};
 };

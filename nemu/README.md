@@ -4,10 +4,10 @@
 
 ```shell
 # get trace with log for cpu-tests
-$NEMU_HOME/build/riscv32-nemu-interpreter -b -f -l $NEMU_HOME/build/nemu-log.txt $YSYX_HOME/am-kernels/tests/cpu-tests/build/dummy-riscv32e-ysyxsoc.bin
+$NEMU_HOME/build/riscv32-nemu-interpreter -b -f -l $NEMU_HOME/build/nemu-log.txt $YSYX_HOME/abstract-machine/app/am-kernels/tests/cpu-tests/build/dummy-riscv32e-ysyxsoc.bin
 
 # get trace with log for microbench
-$NEMU_HOME/build/riscv32-nemu-interpreter -b -f -l $NEMU_HOME/build/nemu-log.txt $YSYX_HOME/am-kernels/benchmarks/microbench/build/microbench-riscv32e-ysyxsoc.bin
+$NEMU_HOME/build/riscv32-nemu-interpreter -b -f -l $NEMU_HOME/build/nemu-log.txt $YSYX_HOME/abstract-machine/app/am-kernels/benchmarks/microbench/build/microbench-riscv32e-ysyxsoc.bin
 ```
 
 ## Introduction

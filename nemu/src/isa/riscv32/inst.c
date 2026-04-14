@@ -40,11 +40,29 @@ typedef uint64_t udword_t;
 uint64_t get_mtimecmp();
 uint64_t get_time();
 word_t get_paddr(vaddr_t addr, int len);
+void clint_update_mip(void);
+bool clint_wfi_advance(void);
 
 void ftrace_add(word_t pc, word_t npc, word_t inst);
 
-bool csr_valid(Decode *s, uint16_t csr)
+bool csr_valid(Decode *s, uint16_t csr, bool is_write)
 {
+  csr = csr & 0xfff;
+  // Privilege check: CSR addr[9:8] encodes minimum privilege level
+  uint8_t csr_priv = (csr >> 8) & 0x3;
+  if (csr_priv > cpu.priv)
+  {
+    s->dnpc = isa_raise_intr(MCA_ILLEGAL_INS, s->pc);
+    difftest_skip_ref();
+    return false;
+  }
+  // Read-only check: CSR addr[11:10]==2'b11 means read-only
+  if (is_write && ((csr >> 10) & 0x3) == 0x3)
+  {
+    s->dnpc = isa_raise_intr(MCA_ILLEGAL_INS, s->pc);
+    difftest_skip_ref();
+    return false;
+  }
   CSR_status csr_status = check_csr_exist(csr);
   switch (csr_status)
   {
@@ -390,12 +408,12 @@ static int decode_exec(Decode *s)
 #endif
   INSTPAT("0001001 ????? ????? 000 00000 11100 11", sfence.vma, N, { soft_tlb_flush(); });
   // RV32/RV64 Zicsr Extension
-  INSTPAT("??????? ????? ????? 001 ????? 11100 11", csrrw, I, { if (csr_valid(s, imm)) {R(rd) = CSR(imm); CSR(imm) = src1; } });
-  INSTPAT("??????? ????? ????? 010 ????? 11100 11", csrrs, I, { if (csr_valid(s, imm)) {R(rd) = CSR(imm); if (rs1 != 0) { CSR(imm) = CSR(imm) | src1;}; } });
-  INSTPAT("??????? ????? ????? 011 ????? 11100 11", csrrc, I, { if (csr_valid(s, imm)) {R(rd) = CSR(imm); if (rs1 != 0) { CSR(imm) = CSR(imm) & ~src1;}; } });
-  INSTPAT("??????? ????? ????? 101 ????? 11100 11", csrrwi, I_I, { if (csr_valid(s, imm)) { R(rd) = CSR(imm); CSR(imm) = src1;} });
-  INSTPAT("??????? ????? ????? 110 ????? 11100 11", csrrsi, I_I, { if (csr_valid(s, imm)) { R(rd) = CSR(imm); if (rs1 != 0) { CSR(imm) = CSR(imm) | src1; };} });
-  INSTPAT("??????? ????? ????? 111 ????? 11100 11", csrrci, I_I, { if (csr_valid(s, imm)) { R(rd) = CSR(imm); if (rs1 != 0) { CSR(imm) = CSR(imm) & ~src1; };} });
+  INSTPAT("??????? ????? ????? 001 ????? 11100 11", csrrw, I, { if (csr_valid(s, imm, true)) {R(rd) = CSR(imm); CSR(imm) = src1; } });
+  INSTPAT("??????? ????? ????? 010 ????? 11100 11", csrrs, I, { if (csr_valid(s, imm, rs1 != 0)) {R(rd) = CSR(imm); if (rs1 != 0) { CSR(imm) = CSR(imm) | src1;}; } });
+  INSTPAT("??????? ????? ????? 011 ????? 11100 11", csrrc, I, { if (csr_valid(s, imm, rs1 != 0)) {R(rd) = CSR(imm); if (rs1 != 0) { CSR(imm) = CSR(imm) & ~src1;}; } });
+  INSTPAT("??????? ????? ????? 101 ????? 11100 11", csrrwi, I_I, { if (csr_valid(s, imm, true)) { R(rd) = CSR(imm); CSR(imm) = src1;} });
+  INSTPAT("??????? ????? ????? 110 ????? 11100 11", csrrsi, I_I, { if (csr_valid(s, imm, rs1 != 0)) { R(rd) = CSR(imm); if (rs1 != 0) { CSR(imm) = CSR(imm) | src1; };} });
+  INSTPAT("??????? ????? ????? 111 ????? 11100 11", csrrci, I_I, { if (csr_valid(s, imm, rs1 != 0)) { R(rd) = CSR(imm); if (rs1 != 0) { CSR(imm) = CSR(imm) & ~src1; };} });
   // Trap-Return Instructions
   INSTPAT("0011000 00010 00000 000 00000 11100 11", mret, N, s->dnpc = CSR(CSR_MEPC);
           csr_t reg = {.val = CSR(CSR_MSTATUS)};
@@ -414,7 +432,15 @@ static int decode_exec(Decode *s)
           reg.mstatus.spp = 0;
           CSR(CSR_SSTATUS) = reg.val;);
   // Interrupt-Management Instructions
-  INSTPAT("0001000 00101 00000 000 00000 11100 11", wfi, N, { difftest_skip_ref(); });
+  INSTPAT("0001000 00101 00000 000 00000 11100 11", wfi, N, {
+#if !defined(CONFIG_TARGET_SHARE)
+    // WFI acceleration: if no interrupt pending, advance time to mtimecmp
+    word_t pending = cpu.sr[CSR_MIP] & cpu.sr[CSR_MIE];
+    if (pending == 0)
+      clint_wfi_advance();
+#endif
+    difftest_skip_ref();
+  });
   INSTPAT_CASE_END(grp_system)
 
   INSTPAT_CASE(0b01011, grp_amo) // AMO (RV32A + RV64A)
@@ -459,14 +485,26 @@ static int decode_exec(Decode *s)
     } });
   INSTPAT_SWITCH_END();
 
+  // mstatus write mask: clear non-writable bits.
+  // SD (bit 31/63) is read-only (computed below); VS (bits 10:9) hardwired 0 (no V ext).
 #ifdef CONFIG_RV64
-  CSR(CSR_MSTATUS) = CSR(CSR_MSTATUS) & 0x800000FF007FFFEA;
+#define MSTATUS_WMASK 0x000000FF007FF9EAULL
 #else
-  CSR(CSR_MSTATUS) = CSR(CSR_MSTATUS) & 0x807FFFEA;
+#define MSTATUS_WMASK 0x007FF9EA
 #endif
+  CSR(CSR_MSTATUS) = CSR(CSR_MSTATUS) & MSTATUS_WMASK;
   CSR(CSR_MISA) = CSR_MISA_VALUE;
   CSR(CSR_MEDELEG) &= 0xf4bffe; // bit 0 (insn addr misaligned) hardwired 0 with C ext
-  if ((cpu.last_inst_priv == PRV_S && cpu.priv != PRV_M) || cpu.priv == PRV_S)
+  // sstatus/sie are architecturally views of mstatus/mie (not separate regs).
+  // Propagate direct writes back to mstatus/mie at any privilege level.
+  // sstatus read mask: includes SD (computed), excludes VS.
+#ifdef CONFIG_RV64
+#define SSTATUS_RMASK 0x80000003000DE162ULL
+#else
+#define SSTATUS_RMASK 0x800de162
+#endif
+#define SIE_RMASK 0x2666
+  if ((cpu.last_inst_priv == PRV_S && cpu.priv != PRV_M) || cpu.priv == PRV_S || CSR(CSR_SSTATUS) != (CSR(CSR_MSTATUS) & SSTATUS_RMASK) || CSR(CSR_SIE) != (CSR(CSR_MIE) & SIE_RMASK))
   {
     csr_t reg_mstatus = {.val = CSR(CSR_MSTATUS)};
     csr_t reg_sstatus = {.val = CSR(CSR_SSTATUS)};
@@ -479,8 +517,8 @@ static int decode_exec(Decode *s)
     reg_mstatus.mstatus.xs = reg_sstatus.mstatus.xs;
     reg_mstatus.mstatus.sum = reg_sstatus.mstatus.sum;
     reg_mstatus.mstatus.mxr = reg_sstatus.mstatus.mxr;
-    reg_mstatus.mstatus.sd = reg_sstatus.mstatus.sd;
-    CSR(CSR_MSTATUS) = reg_mstatus.val;
+    // Re-mask after propagation to clear VS/SD reintroduced from sstatus
+    CSR(CSR_MSTATUS) = reg_mstatus.val & MSTATUS_WMASK;
     csr_t reg_mie = {.val = CSR(CSR_MIE)};
     csr_t reg_sie = {.val = CSR(CSR_SIE)};
     reg_mie.mie.ssie = reg_sie.sie.ssie;
@@ -489,11 +527,25 @@ static int decode_exec(Decode *s)
     reg_mie.mie.lcofie = reg_sie.sie.lcofie;
     CSR(CSR_MIE) = reg_mie.val;
   }
+  // Compute SD (read-only): set when FS, VS, or XS is Dirty (== 3)
+  {
+    word_t fs = (CSR(CSR_MSTATUS) >> 13) & 3;
+    word_t vs = (CSR(CSR_MSTATUS) >> 9) & 3;
+    word_t xs = (CSR(CSR_MSTATUS) >> 15) & 3;
 #ifdef CONFIG_RV64
-  CSR(CSR_SSTATUS) = CSR(CSR_MSTATUS) & 0x80000003000DE762ULL;
+    if (fs == 3 || vs == 3 || xs == 3)
+      CSR(CSR_MSTATUS) |= (1ULL << 63);
+#else
+    if (fs == 3 || vs == 3 || xs == 3)
+      CSR(CSR_MSTATUS) |= 0x80000000u;
+#endif
+  }
+  // Derive sstatus/sie from mstatus/mie
+#ifdef CONFIG_RV64
+  CSR(CSR_SSTATUS) = CSR(CSR_MSTATUS) & SSTATUS_RMASK;
   CSR(CSR_SIE) = CSR(CSR_MIE) & 0x2666;
 #else
-  CSR(CSR_SSTATUS) = CSR(CSR_MSTATUS) & 0x800de762;
+  CSR(CSR_SSTATUS) = CSR(CSR_MSTATUS) & SSTATUS_RMASK;
   CSR(CSR_SIE) = CSR(CSR_MIE) & 0x2666;
 #endif
 
@@ -514,21 +566,10 @@ static int decode_exec(Decode *s)
   CSR(CSR_TIMEH) = (uint32_t)(ticks >> 32);
 #endif
 #if !defined(CONFIG_TARGET_SHARE)
-  csr_t reg_mie = {.val = CSR(CSR_MIE)};
-  csr_t reg_mstatus = {.val = CSR(CSR_MSTATUS)};
-  if (ticks >= cpu.mtimecmp &&
-      reg_mstatus.mstatus.mie)
-  {
-    if (cpu.priv == PRV_M && reg_mie.mie.mtie)
-    {
-      cpu.intr = 1;
-    }
-    if (cpu.priv == PRV_S &&
-        reg_mie.mie.stie && reg_mstatus.mstatus.sie)
-    {
-      cpu.intr = 1;
-    }
-  }
+  // Update MIP.MTIP and MIP.MSIP from CLINT hardware state
+  clint_update_mip();
+  // Sync SIP from MIP (SIP is a restricted view of MIP for S-mode bits)
+  CSR(CSR_SIP) = CSR(CSR_MIP) & 0x222; // bits 1 (SSIP), 5 (STIP), 9 (SEIP)
 #endif
 
   R(0) = 0; // reset $zero to 0

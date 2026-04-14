@@ -12,7 +12,7 @@ This project incorporates code from the following third-party projects.
 Each component retains its original license.
 
 -------------------------------------------------------------------------------
-AbstractMachine (abstract-machine/, am-kernels/)
+AbstractMachine (abstract-machine/, abstract-machine/app/am-kernels/)
   Copyright (c) 2018-2021 Yanyan Jiang and Zihao Yu
   License: MIT
   https://github.com/NJU-ProjectN/abstract-machine

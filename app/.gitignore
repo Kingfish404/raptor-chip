@@ -3,6 +3,7 @@
 !runtime/**
 !tests/**
 !lib/**
+!demos/**
 !*.mk
 
 build

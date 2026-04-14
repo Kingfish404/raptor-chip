@@ -226,17 +226,7 @@ module ysyx_lsu #(
                 || (!stq_addr_conflict && load_in_sq && sq_fwd_ok);
   assign fwd_data = (stq_addr_conflict && stq_fwd_ok) ? stq_fwd_data : sq_fwd_data;
 
-  assign raddr_valid = exu_lsu.rvalid && ((0)
-      || csr_bcast.dmmu_en  // MMU on: all VAs valid (TLB/PTW handles faults)
-      || (raddr >= 'h02000048 && raddr < 'h02000050)  // clint
-      || (raddr >= 'h0f000000 && raddr < 'h0f002000)  // sram
-      || (raddr >= 'h10000000 && raddr < 'h10001000)  // uart/ns16550
-      || (raddr >= 'h10010000 && raddr < 'h10011900)  // liteuart0/csr
-      || (raddr >= 'h20000000 && raddr < 'h20400000)  // mrom
-      || (raddr >= 'h30000000 && raddr < 'h40000000)  // flash
-      || (raddr >= 'h80000000 && raddr < 'h88000000)  // psram
-      || (raddr >= 'ha0000000 && raddr < 'ha2000000)  // sdram
-      );
+  assign raddr_valid = exu_lsu.rvalid;
 
   // logic [7:0] wstrb;
   // assign wstrb = (

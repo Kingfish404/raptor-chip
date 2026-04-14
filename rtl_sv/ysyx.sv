@@ -8,6 +8,41 @@ module ysyx #(
 ) (
     input clock,
 
+    // AXI4 Master
+    output [     1:0] io_master_arburst,
+    output [     2:0] io_master_arsize,
+    output [     7:0] io_master_arlen,
+    output [     3:0] io_master_arid,
+    output [XLEN-1:0] io_master_araddr,
+    output            io_master_arvalid,
+    input             io_master_arready,
+
+    input  [     3:0] io_master_rid,
+    input             io_master_rlast,
+    input  [XLEN-1:0] io_master_rdata,
+    input  [     1:0] io_master_rresp,
+    input             io_master_rvalid,
+    output            io_master_rready,
+
+    output [     1:0] io_master_awburst,
+    output [     2:0] io_master_awsize,
+    output [     7:0] io_master_awlen,
+    output [     3:0] io_master_awid,
+    output [XLEN-1:0] io_master_awaddr,
+    output            io_master_awvalid,
+    input             io_master_awready,
+
+    output              io_master_wlast,
+    output [  XLEN-1:0] io_master_wdata,
+    output [XLEN/8-1:0] io_master_wstrb,
+    output              io_master_wvalid,
+    input               io_master_wready,
+
+    input  [3:0] io_master_bid,
+    input  [1:0] io_master_bresp,
+    input        io_master_bvalid,
+    output       io_master_bready,
+
 `ifdef YSYX_USE_SLAVE
     // AXI4 Slave
     // verilator lint_off UNDRIVEN
@@ -49,40 +84,30 @@ module ysyx #(
     // verilator lint_on UNUSEDSIGNAL
 `endif
 
-    // AXI4 Master
-    output [     1:0] io_master_arburst,
-    output [     2:0] io_master_arsize,
-    output [     7:0] io_master_arlen,
-    output [     3:0] io_master_arid,
-    output [XLEN-1:0] io_master_araddr,
-    output            io_master_arvalid,
-    input             io_master_arready,
-
-    input  [     3:0] io_master_rid,
-    input             io_master_rlast,
-    input  [XLEN-1:0] io_master_rdata,
-    input  [     1:0] io_master_rresp,
-    input             io_master_rvalid,
-    output            io_master_rready,
-
-    output [     1:0] io_master_awburst,
-    output [     2:0] io_master_awsize,
-    output [     7:0] io_master_awlen,
-    output [     3:0] io_master_awid,
-    output [XLEN-1:0] io_master_awaddr,
-    output            io_master_awvalid,
-    input             io_master_awready,
-
-    output            io_master_wlast,
-    output [XLEN-1:0] io_master_wdata,
-    output [XLEN/8-1:0] io_master_wstrb,
-    output            io_master_wvalid,
-    input             io_master_wready,
-
-    input  [3:0] io_master_bid,
-    input  [1:0] io_master_bresp,
-    input        io_master_bvalid,
-    output       io_master_bready,
+`ifdef YSYX_RVFI
+    // RISC-V Formal Interface (RVFI) outputs — NRET=2 channels
+    output [1:0] rvfi_valid,
+    output [127:0] rvfi_order,
+    output [63:0] rvfi_insn,
+    output [1:0] rvfi_trap,
+    output [1:0] rvfi_halt,
+    output [1:0] rvfi_intr,
+    output [3:0] rvfi_mode,
+    output [3:0] rvfi_ixl,
+    output [9:0] rvfi_rs1_addr,
+    output [9:0] rvfi_rs2_addr,
+    output [2*XLEN-1:0] rvfi_rs1_rdata,
+    output [2*XLEN-1:0] rvfi_rs2_rdata,
+    output [9:0] rvfi_rd_addr,
+    output [2*XLEN-1:0] rvfi_rd_wdata,
+    output [2*XLEN-1:0] rvfi_pc_rdata,
+    output [2*XLEN-1:0] rvfi_pc_wdata,
+    output [2*XLEN-1:0] rvfi_mem_addr,
+    output [2*(XLEN/8)-1:0] rvfi_mem_rmask,
+    output [2*(XLEN/8)-1:0] rvfi_mem_wmask,
+    output [2*XLEN-1:0] rvfi_mem_rdata,
+    output [2*XLEN-1:0] rvfi_mem_wdata,
+`endif
 
     // verilator lint_off UNDRIVEN
     // verilator lint_off UNUSEDSIGNAL
@@ -135,7 +160,8 @@ module ysyx #(
   // CSR
   csr_bcast_if csr_bcast ();
 
-  logic clint_trap;
+  logic clint_timer_trap;
+  logic clint_sw_trap;
 
   ysyx_bpu bpu (
       .clock(clock),
@@ -178,6 +204,7 @@ module ysyx #(
       .clock(clock),
 
       .cmu_bcast(cmu_bcast),
+      .csr_bcast(csr_bcast),
 
       .ifu_idu(ifu_idu),
       .idu_rnu(idu_rnu),
@@ -186,8 +213,8 @@ module ysyx #(
   );
 
   // RNU (Re-naming Unit): pure rename: RNQ + freelist + maptable
-  logic [`YSYX_PHY_LEN-1:0] rnu_map_snapshot [`YSYX_REG_SIZE];
-  logic [`YSYX_PHY_LEN-1:0] rnu_rat_snapshot [`YSYX_REG_SIZE];
+  logic [`YSYX_PHY_LEN-1:0] rnu_map_snapshot[`YSYX_REG_SIZE];
+  logic [`YSYX_PHY_LEN-1:0] rnu_rat_snapshot[`YSYX_REG_SIZE];
 
   ysyx_rnu rnu (
       .clock(clock),
@@ -207,26 +234,36 @@ module ysyx #(
   // PRF (Physical Register File): top-level shared resource
   // Debug: architectural register view (committed + speculative)
   /* verilator lint_off UNUSEDSIGNAL */
-  logic [XLEN-1:0] rf     [`YSYX_REG_SIZE];
-  logic [XLEN-1:0] rf_map [`YSYX_REG_SIZE];
+  logic [XLEN-1:0] rf    [`YSYX_REG_SIZE];
+  logic [XLEN-1:0] rf_map[`YSYX_REG_SIZE];
   /* verilator lint_on UNUSEDSIGNAL */
 
+`ifdef YSYX_RVFI
+  logic [XLEN-1:0] rvfi_rd_wdata_a_w;
+  logic [XLEN-1:0] rvfi_rd_wdata_b_w;
+`endif
+
   ysyx_prf prf (
-      .clock    (clock),
-      .reset    (reset),
+      .clock(clock),
+      .reset(reset),
 
-      .prf_rd   (exu_prf),
+      .prf_rd(exu_prf),
 
-      .exu_rou       (exu_rou),
-      .exu_ioq_bcast (exu_ioq_bcast),
-      .rou_cmu       (rou_cmu),
-      .cmu_bcast     (cmu_bcast),
+      .exu_rou      (exu_rou),
+      .exu_ioq_bcast(exu_ioq_bcast),
+      .rou_cmu      (rou_cmu),
+      .cmu_bcast    (cmu_bcast),
 
-      .map_snapshot  (rnu_map_snapshot),
-      .rat_snapshot  (rnu_rat_snapshot),
+      .map_snapshot(rnu_map_snapshot),
+      .rat_snapshot(rnu_rat_snapshot),
 
-      .rf     (rf),
-      .rf_map (rf_map)
+      .rf    (rf),
+      .rf_map(rf_map)
+
+`ifdef YSYX_RVFI,
+        .rvfi_rd_wdata_a(rvfi_rd_wdata_a_w)
+      , .rvfi_rd_wdata_b(rvfi_rd_wdata_b_w)
+`endif
   );
 
   // ROU (Re-Order Unit)
@@ -242,8 +279,9 @@ module ysyx #(
       .exu_rou(exu_rou),
       .exu_ioq_bcast(exu_ioq_bcast),
 
-      .csr_bcast (csr_bcast),
-      .clint_trap(clint_trap),
+      .csr_bcast(csr_bcast),
+      .clint_timer_trap(clint_timer_trap),
+      .clint_sw_trap(clint_sw_trap),
 
       .rou_cmu(rou_cmu),
       .rou_csr(rou_csr),
@@ -368,9 +406,50 @@ module ysyx #(
 
       .csr_bcast(csr_bcast),
       .cmu_bcast(cmu_bcast),
-      .io_trap_o(clint_trap),
+      .io_timer_trap_o(clint_timer_trap),
+      .io_sw_trap_o(clint_sw_trap),
 
       .reset(reset)
   );
+
+`ifdef YSYX_RVFI
+  // RVFI (RISC-V Formal Interface) output generation
+  ysyx_rvfi rvfi_inst (
+      .clock(clock),
+      .reset(reset),
+
+      .rou_cmu  (rou_cmu),
+      .csr_bcast(csr_bcast),
+      .rf       (rf),
+
+      .rvfi_rd_wdata_a(rvfi_rd_wdata_a_w),
+      .rvfi_rd_wdata_b(rvfi_rd_wdata_b_w),
+
+      .rvfi_valid(rvfi_valid),
+      .rvfi_order(rvfi_order),
+      .rvfi_insn (rvfi_insn),
+      .rvfi_trap (rvfi_trap),
+      .rvfi_halt (rvfi_halt),
+      .rvfi_intr (rvfi_intr),
+      .rvfi_mode (rvfi_mode),
+      .rvfi_ixl  (rvfi_ixl),
+
+      .rvfi_rs1_addr (rvfi_rs1_addr),
+      .rvfi_rs2_addr (rvfi_rs2_addr),
+      .rvfi_rs1_rdata(rvfi_rs1_rdata),
+      .rvfi_rs2_rdata(rvfi_rs2_rdata),
+      .rvfi_rd_addr  (rvfi_rd_addr),
+      .rvfi_rd_wdata (rvfi_rd_wdata),
+
+      .rvfi_pc_rdata(rvfi_pc_rdata),
+      .rvfi_pc_wdata(rvfi_pc_wdata),
+
+      .rvfi_mem_addr (rvfi_mem_addr),
+      .rvfi_mem_rmask(rvfi_mem_rmask),
+      .rvfi_mem_wmask(rvfi_mem_wmask),
+      .rvfi_mem_rdata(rvfi_mem_rdata),
+      .rvfi_mem_wdata(rvfi_mem_wdata)
+  );
+`endif
 
 endmodule

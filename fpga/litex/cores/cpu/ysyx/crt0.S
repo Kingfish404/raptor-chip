@@ -1,6 +1,9 @@
 #define MIE_MEIE 	0x800
 
-	.global _start
+.global main
+.global isr
+.global _start
+
 _start:
 	j reset_vector
 
@@ -29,6 +32,10 @@ reset_vector:
 	addi t0, t0, 4
 	j 1b
 3:
+	// Sync instruction cache after .data copy (self-modifying code safety).
+	fence.i
+	fence
+
 	// enable external interrupts
 	li t0, MIE_MEIE
 	csrs mie, t0

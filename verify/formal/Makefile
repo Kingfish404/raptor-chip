@@ -102,7 +102,7 @@ check-tools: ## Verify sby and yosys are available
 # ============================================================================
 # Formal Verification Targets
 # ============================================================================
-all: formal_exu_mul formal_bus ## Run all formal verification
+all: formal_exu_mul formal_bus ## Run all formal verification (excludes RVFI)
 
 formal_bus: check-tools ## Verify AXI bus
 	sby -f bus.sby
@@ -112,3 +112,62 @@ formal_exu_mul: check-tools ## Verify EXU multiplier
 
 formal_gui: check-tools ## Open sby GUI
 	sby-gui
+
+# ============================================================================
+# riscv-formal (RVFI) Verification
+# ============================================================================
+# riscv-formal is an external repository; cloned automatically when needed.
+# Raptor-specific files (wrapper.sv, checks.cfg) live in rvfi/ (project-owned).
+
+RISCV_FORMAL_REPO   := https://github.com/YosysHQ/riscv-formal.git
+RISCV_FORMAL_COMMIT := 2aa7b49
+RISCV_FORMAL_DIR    := riscv-formal
+
+RVFI_SRC_DIR  := rvfi
+RVFI_CORE_DIR := $(RISCV_FORMAL_DIR)/cores/raptor
+RVFI_CHECKS   := $(RVFI_CORE_DIR)/checks
+RVFI_PACK     := build/ysyx_pack_rvfi.sv
+VSRC_PATH     := $(YSYX_HOME)/rtl_sv
+# Core-only sources: exclude SoC wrappers, DPI-C, and include-dir files
+VSRCS_RVFI_PKG  := $(filter %/ysyx_pkg.sv, $(shell find $(VSRC_PATH) -name "*.sv"))
+VSRCS_RVFI_EXCL := %/ysyx_pkg.sv %/wrap_rnp_soc.sv %/wrap_rnp.sv %/ysyx_npc_soc.sv %/ysyx_dpi_c.sv
+VSRCS_RVFI      := $(VSRCS_RVFI_PKG) $(filter-out $(VSRCS_RVFI_EXCL), $(shell find $(VSRC_PATH) -name "*.sv" ! -path "*/include/*"))
+
+# --- Auto-clone riscv-formal ---
+$(RISCV_FORMAL_DIR)/checks/genchecks.py:
+	@echo "[formal] Cloning riscv-formal ($(RISCV_FORMAL_COMMIT))..."
+	git clone --no-checkout $(RISCV_FORMAL_REPO) $(RISCV_FORMAL_DIR)
+	cd $(RISCV_FORMAL_DIR) && git checkout $(RISCV_FORMAL_COMMIT)
+
+# --- Symlink project-owned files into riscv-formal tree ---
+$(RVFI_CORE_DIR)/checks.cfg: $(RVFI_SRC_DIR)/checks.cfg $(RVFI_SRC_DIR)/wrapper.sv $(RISCV_FORMAL_DIR)/checks/genchecks.py
+	@mkdir -p $(RVFI_CORE_DIR)
+	ln -sf $(abspath $(RVFI_SRC_DIR))/checks.cfg $(RVFI_CORE_DIR)/checks.cfg
+	ln -sf $(abspath $(RVFI_SRC_DIR))/wrapper.sv $(RVFI_CORE_DIR)/wrapper.sv
+
+# --- Generate RVFI pack file ---
+$(RVFI_PACK): $(VSRCS_RVFI)
+	@mkdir -p build
+	@echo "[formal] Generating RVFI-enabled pack: $@"
+	verilator -E -P -DYSYX_RVFI \
+		-I$(VSRC_PATH)/include -I$(VSRC_PATH)/include/npc -I$(VSRC_PATH)/include/dpic_mock \
+		$(VSRCS_RVFI) > $@
+
+# --- Generate checks from config ---
+$(RVFI_CHECKS)/Makefile: $(RVFI_CORE_DIR)/checks.cfg $(RVFI_PACK)
+	@echo "[formal] Generating riscv-formal checks..."
+	cd $(RVFI_CORE_DIR) && python3 ../../checks/genchecks.py checks
+	@echo "[formal] Patching .sby files for abc engine (removing unsupported 'skip' option)..."
+	@sed -i.bak '/^skip /d' $(RVFI_CHECKS)/*.sby && rm -f $(RVFI_CHECKS)/*.sby.bak
+
+formal_rvfi_gen: $(RVFI_CHECKS)/Makefile ## Generate riscv-formal check .sby files
+
+formal_rvfi: check-tools $(RVFI_CHECKS)/Makefile ## Run all riscv-formal checks
+	$(MAKE) -C $(RVFI_CHECKS) -j$$(nproc)
+
+formal_rvfi_check: check-tools $(RVFI_CHECKS)/Makefile ## Run a single check (CHECK=insn_add_ch0)
+	@test -n "$(CHECK)" || { echo "Usage: make formal_rvfi_check CHECK=insn_add_ch0"; exit 1; }
+	cd $(RVFI_CHECKS) && sby -f $(CHECK).sby
+
+formal_rvfi_clean: ## Clean generated riscv-formal checks
+	rm -rf $(RVFI_CHECKS) $(RVFI_PACK)

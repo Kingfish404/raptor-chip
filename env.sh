@@ -18,7 +18,7 @@ export NEMU_HOME=$YSYX_HOME/nemu
 export NSIM_HOME=$YSYX_HOME/nsim
 
 export AM_HOME=$YSYX_HOME/abstract-machine
-export NAVY_HOME=$YSYX_HOME/navy-apps
+export NAVY_HOME=$YSYX_HOME/abstract-machine/app/navy-apps
 export NVBOARD_HOME=$YSYX_HOME/third_party/NJU-ProjectN/nvboard
 
 export CROSS_COMPILE=riscv64-elf-

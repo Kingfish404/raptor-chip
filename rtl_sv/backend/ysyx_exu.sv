@@ -179,9 +179,15 @@ module ysyx_exu #(
   end
 `endif
 
+  // Uncacheable loads (MMIO) defer to ROB head (non-speculative) when MMU is off.
+  // When MMU is on, TLB handles address gating inside L1D.
+  logic ioq_at_rob_head;
+  assign ioq_at_rob_head = (ioq_dest[ioq_head] == cmu_bcast.rob_head + 1);
+
   assign exu_lsu.rvalid = (ioq_valid[ioq_head]
     && ioq_ren[ioq_head]
-    && ioq_pr1[ioq_head] == 0 && ioq_pr2[ioq_head] == 0);
+    && ioq_pr1[ioq_head] == 0 && ioq_pr2[ioq_head] == 0
+    && (csr_bcast.dmmu_en || ysyx_pkg::addr_cacheable(exu_lsu.raddr) || ioq_at_rob_head));
   assign exu_lsu.raddr = ioq_atom[ioq_head]
     ? ioq_vj[ioq_head]
     : ioq_vj[ioq_head] + ioq_imm[ioq_head];
@@ -608,13 +614,7 @@ module ysyx_exu #(
   // Difftest: detect MMIO access for loads (from LSU) and stores (by address check)
   assign exu_ioq_bcast.difftest_skip =
       (ioq_ren[ioq_head] && exu_lsu.difftest_skip)
-    || (ioq_wen[ioq_head] && ((0)
-        || (exu_ioq_bcast.sq_waddr >= 'h10001000 && exu_ioq_bcast.sq_waddr <= 'h10001fff)
-        || (exu_ioq_bcast.sq_waddr >= 'h10002000 && exu_ioq_bcast.sq_waddr <= 'h1000200f)
-        || (exu_ioq_bcast.sq_waddr >= 'h10011000 && exu_ioq_bcast.sq_waddr <= 'h10012000)
-        || (exu_ioq_bcast.sq_waddr >= 'h21000000 && exu_ioq_bcast.sq_waddr <= 'h211fffff)
-        || (exu_ioq_bcast.sq_waddr >= 'hc0000000)
-    ));
+    || (ioq_wen[ioq_head] && ysyx_pkg::addr_mmio(exu_ioq_bcast.sq_waddr));
 
   assign ioq_valid_found = (ioq_valid[ioq_head]
     && ioq_pr1[ioq_head] == 0 && ioq_pr2[ioq_head] == 0
@@ -636,13 +636,24 @@ module ysyx_exu #(
     (0)
   );
 
-  // instret correction no longer needed: pipeline drain ensures ROB is empty
-  // when CSR instructions execute, so the CSR read value is already precise.
+  // instret correction: account for in-flight ROB entries before this CSR read
+  logic [$clog2(ROB_SIZE)-1:0] instret_correction;
+  logic is_instret_read;
+  assign instret_correction = (rs_dest[valid_idx][$clog2(ROB_SIZE)-1:0]
+                             - cmu_bcast.rob_head[$clog2(ROB_SIZE)-1:0]);
+  assign is_instret_read = (rs_imm[valid_idx][11:0] == `YSYX_CSR_INSTRET_
+                         || rs_imm[valid_idx][11:0] == `YSYX_CSR_MINSTRET);
+
+  // CSR read data with instret correction for OoO timing
+  logic [XLEN-1:0] csr_rdata_corrected;
+  assign csr_rdata_corrected = is_instret_read
+    ? (exu_csr.rdata + XLEN'(instret_correction))
+    : exu_csr.rdata;
 
   // { Write back (RS)
   assign exu_rou.dest = rs_dest[valid_idx];
   assign exu_rou.result = (rs_system[valid_idx]
-    ? exu_csr.rdata
+    ? csr_rdata_corrected
     : (rs_alu[valid_idx][5:4] == 2'b01
       ? rs_mul_a[valid_idx]
       : rs_jen[valid_idx]

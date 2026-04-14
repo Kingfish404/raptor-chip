@@ -57,6 +57,10 @@
 `define YSYX_L1D_LEN 5
 `define YSYX_L1D_N_WAYS 2
 
+// RVFI: RISC-V Formal Interface for formal verification.
+// Adds RVFI output ports to the core; enable only for riscv-formal checks.
+// `define YSYX_RVFI
+
 // Dual commit: retire up to 2 consecutive ROB entries per cycle.
 // Comment out or undefine to disable for A/B benchmarking.
 `define YSYX_DUAL_COMMIT

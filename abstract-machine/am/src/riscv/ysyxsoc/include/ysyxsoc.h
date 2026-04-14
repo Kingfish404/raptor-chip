@@ -15,7 +15,7 @@
 
 #define KBD_ADDR_ 0x10011000
 
-#define RTC_ADDR_ 0x02000048
+#define RTC_ADDR_ 0x0200BFF8
 
 #define VGACTL_WIDTH 640
 #define VGACTL_HEIGHT 480

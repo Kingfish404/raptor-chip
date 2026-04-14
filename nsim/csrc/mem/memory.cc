@@ -1,9 +1,20 @@
 #include <stdint.h>
 #include <common.h>
 #include <utils.h>
+#include <verilated.h>
 
 void difftest_skip_ref();
 void npc_abort();
+
+extern NPCState npc;
+extern VerilatedContext *contextp;
+
+// QEMU virt finisher (sifive,test) constants
+#define FINISHER_BASE 0x100000
+#define FINISHER_SIZE 0x1000
+#define FINISHER_PASS 0x5555
+#define FINISHER_FAIL 0x3333
+#define FINISHER_RESET 0x7777
 
 static struct
 {
@@ -46,6 +57,33 @@ uint8_t *guest_to_host(paddr_t addr)
 uint8_t mmio_check_and_handle(
     paddr_t addr, word_t wdata, char wmask, bool is_write, word_t *data)
 {
+    // sifive,test finisher @ 0x100000 (QEMU virt compatible)
+    if (addr >= FINISHER_BASE && addr < FINISHER_BASE + FINISHER_SIZE)
+    {
+        if (is_write && (addr == FINISHER_BASE))
+        {
+            uint32_t val = (uint32_t)wdata;
+            uint16_t cmd = val & 0xffff;
+            if (cmd == FINISHER_PASS)
+            {
+                Log("Finisher: poweroff (0x%x)", val);
+                contextp->gotFinish(true);
+                npc.state = NPC_END;
+            }
+            else if (cmd == FINISHER_FAIL)
+            {
+                Log("Finisher: fail (0x%x)", val);
+                npc_abort();
+            }
+            else if (cmd == FINISHER_RESET)
+            {
+                Log("Finisher: reset requested (0x%x) — not supported, aborting", val);
+                npc_abort();
+            }
+        }
+        difftest_skip_ref();
+        return 1;
+    }
     // TODO: implement clint, plic, and serial
     if (addr >= 0x2000000 && addr < 0x2000000 + 0xc0000)
     {

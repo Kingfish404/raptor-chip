@@ -170,8 +170,8 @@ module ysyx_csr #(
       TIMEH__:   exu_csr.rdata = csr[TIMEH__];
       MINSTRET:  exu_csr.rdata = csr[MINSTRET];
       MINSTRETH: exu_csr.rdata = csr[MINSTRETH];
-      MVENDORID: exu_csr.rdata = 'h79737978;
-      MARCHID:   exu_csr.rdata = 'h015fde77;
+      MVENDORID: exu_csr.rdata = '0;
+      MARCHID:   exu_csr.rdata = 'd50;
       IMPID__:   exu_csr.rdata = '0;
       MHARTID:   exu_csr.rdata = '0;
       default:   exu_csr.rdata = '0;
@@ -192,6 +192,15 @@ module ysyx_csr #(
     && (smode_medeleg || smode_mideleg)
   );
 
+  // ecall/ebreak delegation: check medeleg for the specific cause
+  // ecall causes: U=8, S=9, M=11; ebreak cause: 3
+  logic [XLEN-1:0] ecall_cause_idx;
+  logic ecall_deleg, ebreak_deleg;
+  assign ecall_cause_idx = (priv_mode == `YSYX_PRIV_U) ? (XLEN'(1) << 8) :
+                           (priv_mode == `YSYX_PRIV_S) ? (XLEN'(1) << 9) : '0;
+  assign ecall_deleg = (priv_mode != `YSYX_PRIV_M) && |(csr[MEDELEG] & ecall_cause_idx);
+  assign ebreak_deleg = (priv_mode != `YSYX_PRIV_M) && csr[MEDELEG][3];
+
   assign csr_bcast.priv = priv_mode;
   assign csr_bcast.satp_ppn = csr[SATP___][21:0];
   assign csr_bcast.satp_asid = csr[SATP___][30:22];
@@ -210,9 +219,12 @@ module ysyx_csr #(
           : 'b1
   );
   assign csr_bcast.mtvec = csr[MTVEC__];
-  assign csr_bcast.tvec = smode_handle ? csr[STVEC__] : csr[MTVEC__];
+  assign csr_bcast.tvec = (smode_handle
+    || (rou_csr.ecall && ecall_deleg)
+    || (rou_csr.ebreak && ebreak_deleg))
+    ? csr[STVEC__] : csr[MTVEC__];
 
-  assign csr_bcast.interrupt_en = (
+  assign csr_bcast.timer_int_en = (
       (priv_mode == `YSYX_PRIV_M)
         ? csr[MSTATUS][`YSYX_CSR_MSTATUS_MIE_] && csr[MIE____][`YSYX_CSR_MIE_MTIE]
     : (priv_mode == `YSYX_PRIV_S)
@@ -220,13 +232,23 @@ module ysyx_csr #(
     : 'b0
   );
 
-  always @(posedge clock) begin
+  assign csr_bcast.sw_int_en = (
+      (priv_mode == `YSYX_PRIV_M)
+        ? csr[MSTATUS][`YSYX_CSR_MSTATUS_MIE_] && csr[MIE____][`YSYX_CSR_MIE_MSIE]
+    : (priv_mode == `YSYX_PRIV_S)
+        ? csr[SSTATUS][`YSYX_CSR_MSTATUS_SIE_] && csr[MIE____][`YSYX_CSR_MIE_SSIE]
+    : 'b0
+  );
+
+  always_ff @(posedge clock) begin
     if (reset) begin
       priv_mode <= `YSYX_PRIV_M;
       csr[MCAUSE_] <= RESET_VAL;
       csr[MEPC___] <= RESET_VAL;
       csr[MTVEC__] <= RESET_VAL;
       csr[MSTATUS] <= RESET_VAL;
+      csr[MCYCLE_] <= RESET_VAL;
+      csr[MCYCLEH] <= RESET_VAL;
       csr[TIME___] <= RESET_VAL;
       csr[TIMEH__] <= RESET_VAL;
       csr[MINSTRET] <= RESET_VAL;
@@ -247,26 +269,57 @@ module ysyx_csr #(
       if (rou_csr.valid) begin
         if (rou_csr.csr_wen) begin
           if (waddr_reg == MEDELEG) begin
-            csr[waddr_reg] <= (rou_csr.csr_wdata & 'hf4bffe);
+            csr[waddr_reg] <= (rou_csr.csr_wdata & `YSYX_CSR_MEDELEG_WMASK);
+          end else if (waddr_reg == MSTATUS) begin
+            // Write mask: exclude SD(31, read-only) and VS(10:9, hardwired 0 — no V ext)
+            // SD recomputed from FS dirty (14:13==2'b11) or XS dirty (16:15==2'b11)
+            csr[MSTATUS] <= (rou_csr.csr_wdata & `YSYX_CSR_MSTATUS_WMASK)
+                          | ((rou_csr.csr_wdata[14:13] == 2'b11
+                            || rou_csr.csr_wdata[16:15] == 2'b11) ? `YSYX_CSR_MSTATUS_SD : 32'h0);
+            csr[SSTATUS] <= (rou_csr.csr_wdata & `YSYX_CSR_SSTATUS_WMASK)
+                          | ((rou_csr.csr_wdata[14:13] == 2'b11
+                            || rou_csr.csr_wdata[16:15] == 2'b11) ? `YSYX_CSR_MSTATUS_SD : 32'h0);
+          end else if (waddr_reg == SSTATUS) begin
+            // sstatus-writable fields: SIE(1) SPIE(5) UBE(6) SPP(8) FS(14:13) XS(16:15) SUM(18) MXR(19)
+            csr[SSTATUS] <= (rou_csr.csr_wdata & `YSYX_CSR_SSTATUS_WMASK)
+                          | ((rou_csr.csr_wdata[14:13] == 2'b11
+                            || rou_csr.csr_wdata[16:15] == 2'b11) ? `YSYX_CSR_MSTATUS_SD : 32'h0);
+            csr[MSTATUS] <= (csr[MSTATUS] & ~`YSYX_CSR_SSTATUS_CMASK)
+                          | (rou_csr.csr_wdata & `YSYX_CSR_SSTATUS_WMASK)
+                          | ((rou_csr.csr_wdata[14:13] == 2'b11
+                            || csr[MSTATUS][16:15] == 2'b11) ? `YSYX_CSR_MSTATUS_SD : 32'h0);
+          end else if (waddr_reg == SIE____) begin
+            csr[waddr_reg] <= (rou_csr.csr_wdata);
+            csr[MIE____]   <= csr[MIE____] | (rou_csr.csr_wdata);
           end else begin
             csr[waddr_reg] <= (rou_csr.csr_wdata);
-            if (waddr_reg == MSTATUS) begin
-              csr[SSTATUS] <= rou_csr.csr_wdata & 'h800de762;
-            end else if (waddr_reg == SIE____) begin
-              csr[MIE____] <= csr[MIE____] | (rou_csr.csr_wdata);
-            end else if (waddr_reg == SSTATUS) begin
-              csr[MSTATUS] <= (csr[MSTATUS] & ~'h800DE752) | (rou_csr.csr_wdata & 'h800DE752);
-            end
           end
         end
         if (rou_csr.ecall) begin
-          priv_mode <= `YSYX_PRIV_M;
-          csr[MCAUSE_] <= priv_mode == `YSYX_PRIV_M ? 'hb : priv_mode == `YSYX_PRIV_S ? 'h9 : 'h8;
-          csr[MSTATUS][`YSYX_CSR_MSTATUS_MPP_] <= priv_mode;
-          csr[MSTATUS][`YSYX_CSR_MSTATUS_MPIE] <= mstatus_mie;
-          csr[MSTATUS][`YSYX_CSR_MSTATUS_MIE_] <= 1'b0;
-          csr[MEPC___] <= rou_csr.pc;
-          csr[MTVAL__] <= 0;
+          if (ecall_deleg) begin
+            // Delegate to S-mode
+            csr[SEPC___] <= rou_csr.pc;
+            csr[SCAUSE_] <= priv_mode == `YSYX_PRIV_S ? `YSYX_CAUSE_ECALL_S : `YSYX_CAUSE_ECALL_U;
+            csr[STVAL__] <= 0;
+            csr[MSTATUS][`YSYX_CSR_MSTATUS_SPIE] <= csr[MSTATUS][`YSYX_CSR_MSTATUS_SIE_];
+            csr[SSTATUS][`YSYX_CSR_MSTATUS_SPIE] <= csr[SSTATUS][`YSYX_CSR_MSTATUS_SIE_];
+            csr[MSTATUS][`YSYX_CSR_MSTATUS_SIE_] <= 'h0;
+            csr[SSTATUS][`YSYX_CSR_MSTATUS_SIE_] <= 'h0;
+            if (priv_mode == `YSYX_PRIV_S) begin
+              csr[MSTATUS][`YSYX_CSR_MSTATUS_SPP_] <= 'h1;
+              csr[SSTATUS][`YSYX_CSR_MSTATUS_SPP_] <= 'h1;
+            end
+            priv_mode <= `YSYX_PRIV_S;
+          end else begin
+            // Handle in M-mode
+            priv_mode <= `YSYX_PRIV_M;
+            csr[MCAUSE_] <= priv_mode == `YSYX_PRIV_M ? `YSYX_CAUSE_ECALL_M : priv_mode == `YSYX_PRIV_S ? `YSYX_CAUSE_ECALL_S : `YSYX_CAUSE_ECALL_U;
+            csr[MSTATUS][`YSYX_CSR_MSTATUS_MPP_] <= priv_mode;
+            csr[MSTATUS][`YSYX_CSR_MSTATUS_MPIE] <= mstatus_mie;
+            csr[MSTATUS][`YSYX_CSR_MSTATUS_MIE_] <= 1'b0;
+            csr[MEPC___] <= rou_csr.pc;
+            csr[MTVAL__] <= 0;
+          end
         end else if (rou_csr.mret) begin
           priv_mode <= csr[MSTATUS][`YSYX_CSR_MSTATUS_MPP_];
           csr[MSTATUS] <= {
@@ -299,13 +352,30 @@ module ysyx_csr #(
             csr[SSTATUS][0]
           };
         end else if (rou_csr.ebreak) begin
-          priv_mode <= `YSYX_PRIV_M;
-          csr[MCAUSE_] <= 'h3;
-          csr[MSTATUS][`YSYX_CSR_MSTATUS_MPP_] <= priv_mode;
-          csr[MSTATUS][`YSYX_CSR_MSTATUS_MPIE] <= mstatus_mie;
-          csr[MSTATUS][`YSYX_CSR_MSTATUS_MIE_] <= 1'b0;
-          csr[MEPC___] <= rou_csr.pc;
-          csr[MTVAL__] <= rou_csr.pc;
+          if (ebreak_deleg) begin
+            // Delegate to S-mode
+            csr[SEPC___] <= rou_csr.pc;
+            csr[SCAUSE_] <= `YSYX_CAUSE_BREAKPOINT;
+            csr[STVAL__] <= rou_csr.pc;
+            csr[MSTATUS][`YSYX_CSR_MSTATUS_SPIE] <= csr[MSTATUS][`YSYX_CSR_MSTATUS_SIE_];
+            csr[SSTATUS][`YSYX_CSR_MSTATUS_SPIE] <= csr[SSTATUS][`YSYX_CSR_MSTATUS_SIE_];
+            csr[MSTATUS][`YSYX_CSR_MSTATUS_SIE_] <= 'h0;
+            csr[SSTATUS][`YSYX_CSR_MSTATUS_SIE_] <= 'h0;
+            if (priv_mode == `YSYX_PRIV_S) begin
+              csr[MSTATUS][`YSYX_CSR_MSTATUS_SPP_] <= 'h1;
+              csr[SSTATUS][`YSYX_CSR_MSTATUS_SPP_] <= 'h1;
+            end
+            priv_mode <= `YSYX_PRIV_S;
+          end else begin
+            // Handle in M-mode
+            priv_mode <= `YSYX_PRIV_M;
+            csr[MCAUSE_] <= `YSYX_CAUSE_BREAKPOINT;
+            csr[MSTATUS][`YSYX_CSR_MSTATUS_MPP_] <= priv_mode;
+            csr[MSTATUS][`YSYX_CSR_MSTATUS_MPIE] <= mstatus_mie;
+            csr[MSTATUS][`YSYX_CSR_MSTATUS_MIE_] <= 1'b0;
+            csr[MEPC___] <= rou_csr.pc;
+            csr[MTVAL__] <= rou_csr.pc;
+          end
         end else if (rou_csr.trap) begin
           if (smode_handle) begin
             csr[STVAL__] <= rou_csr.tval;

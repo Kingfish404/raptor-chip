@@ -124,12 +124,15 @@ void plic_raise_irq(int irq)
 }
 
 // Keep the old timer-interrupt API for backward compatibility.
+// With the new CLINT implementation, timer interrupts are delivered via MIP.MTIP
+// rather than this flag. This function is now only used as a fallback for the
+// alarm-based timer path (non-cycle-based mode).
 void dev_raise_intr(void)
 {
-    if (!cpu.intr)
-    {
-        cpu.intr = true;
-    }
+  // In the new model, CLINT directly maintains MIP.MTIP.
+  // Call clint_update_mip() to refresh MIP from current timer state.
+  extern void clint_update_mip(void);
+  clint_update_mip();
 }
 
 // ---------------------------------------------------------------------------

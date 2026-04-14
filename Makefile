@@ -5,7 +5,7 @@ export YSYX_HOME := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 export NEMU_HOME := $(YSYX_HOME)/nemu
 export NSIM_HOME := $(YSYX_HOME)/nsim
 export AM_HOME   := $(YSYX_HOME)/abstract-machine
-export NAVY_HOME := $(YSYX_HOME)/navy-apps
+export NAVY_HOME := $(YSYX_HOME)/abstract-machine/app/navy-apps
 export NVBOARD_HOME := $(YSYX_HOME)/third_party/NJU-ProjectN/nvboard
 export CROSS_COMPILE ?= riscv64-elf-
 
@@ -199,10 +199,11 @@ lint-npc64: lint ## Lint RTL in RV64 mode
 # ============================================================================
 # AM Kernels / Benchmarks
 # ============================================================================
-AM_KERNELS = $(YSYX_HOME)/am-kernels
+AM_KERNELS = $(YSYX_HOME)/abstract-machine/app/am-kernels
 
 $(AM_KERNELS):
-	git clone https://github.com/kingfish404/am-kernels $@
+	mkdir -p $(abspath $(AM_KERNELS))
+	git clone --depth 1 https://github.com/kingfish404/am-kernels $(AM_KERNELS)
 
 MAINARGS ?= test ## Benchmark arguments (test/train/ref)
 
@@ -288,12 +289,12 @@ ISA ?= riscv32 ## ISA for nanos-lite targets
 nanos-nemu32: ## Build and run nanos-lite on NEMU
 	$(MAKE) -C $(NAVY_HOME) ISA=$(ISA) fsimg
 	$(MAKE) -C $(NAVY_HOME)/apps/menu ISA=$(ISA) install
-	$(MAKE) -C $(YSYX_HOME)/nanos-lite ARCH=$(ISA)-nemu update run
+	$(MAKE) -C $(YSYX_HOME)/abstract-machine/app/nanos-lite ARCH=$(ISA)-nemu update run
 
 nanos-npc32: ## Build and run nanos-lite on NPC
 	$(MAKE) -C $(NAVY_HOME) ISA=$(ISA) fsimg
 	$(MAKE) -C $(NAVY_HOME)/apps/menu ISA=$(ISA) install
-	$(MAKE) -C $(YSYX_HOME)/nanos-lite ARCH=$(ISA)-npc update run
+	$(MAKE) -C $(YSYX_HOME)/abstract-machine/app/nanos-lite ARCH=$(ISA)-npc update run
 
 # ============================================================================
 # Linux Kernel Boot (via OpenSBI on NEMU)
@@ -417,6 +418,9 @@ APP_HOME := $(YSYX_HOME)/app
 app-run: build-npc32 ## [app] Run USER_ELF via pk on NPC
 	@$(MAKE) --no-print-directory -C $(APP_HOME) pk-run USER_ELF=$(USER_ELF) ARGS="$(ARGS)"
 
+app-run-nemu: build-nemu32 ## [app] Run USER_ELF via pk on NEMU
+	@$(MAKE) --no-print-directory -C $(APP_HOME) nemu-run USER_ELF=$(USER_ELF) ARGS="$(ARGS)"
+
 app-bbl-linux: build-npc32 ## [app] Boot Linux via BBL on NPC
 	@$(MAKE) --no-print-directory -C $(APP_HOME) bbl-linux ARGS="$(ARGS)"
 
@@ -428,6 +432,23 @@ app-coremark-npc32: build-npc32 ## [app] CoreMark via pk (rv32)
 
 app-embench-npc32: build-npc32 ## [app] Embench-IoT via pk (rv32)
 	@$(MAKE) --no-print-directory -C $(APP_HOME) embench ARGS="$(ARGS)"
+
+# --- app tests/demos on NPC ---
+app-tests-npc32: build-npc32 ## [app] All tests via pk on NPC (rv32)
+	@$(MAKE) --no-print-directory -C $(APP_HOME) tests ARGS="$(ARGS)"
+
+app-tests-npc32-difftest: config-npc32-difftest config-nemu32-ref ## [app] All tests via pk on NPC with difftest
+	@$(MAKE) --no-print-directory -C $(APP_HOME) tests ARGS="$(ARGS)"
+
+app-demos-npc32: build-npc32 ## [app] All demos via pk on NPC (rv32)
+	@$(MAKE) --no-print-directory -C $(APP_HOME) demos ARGS="$(ARGS)"
+
+# --- app tests/demos on NEMU (default: with difftest) ---
+app-tests-nemu32: config-nemu32 ## [app] All tests via pk on NEMU (rv32)
+	@$(MAKE) --no-print-directory -C $(APP_HOME) tests RUN_ON=nemu ARGS="$(ARGS)"
+
+app-demos-nemu32: config-nemu32 ## [app] All demos via pk on NEMU (rv32)
+	@$(MAKE) --no-print-directory -C $(APP_HOME) demos RUN_ON=nemu ARGS="$(ARGS)"
 
 app-pk-build: ## [app] Build riscv-pk
 	@$(MAKE) --no-print-directory -C $(APP_HOME) pk-build
@@ -448,7 +469,10 @@ app-clean: ## [app] Clean app build artifacts
 	linux-boot-nemu32 linux-boot-npc32 linux-boot-nemu32-device linux-boot-nemu64-device \
 	fpga-syn fpga-pnr pack lint sta clean-npc clean \
 	verify-fuzz verify-fuzz-inf verify-fuzz-replay verify-sigtest verify-riscof verify-coverage verify-all verify-clean \
-	app-hello-npc32 app-coremark-npc32 app-embench-npc32 app-pk-build app-clean \
+	app-hello-npc32 app-coremark-npc32 app-embench-npc32 \
+	app-tests-npc32 app-tests-npc32-difftest app-demos-npc32 \
+	app-tests-nemu32 app-demos-nemu32 \
+	app-run app-run-nemu app-pk-build app-clean \
 	run-pk bbl-linux
 
 # ============================================================================

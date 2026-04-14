@@ -50,7 +50,8 @@ module ysyx_bus #(
 
     csr_bcast_if.in csr_bcast,
     cmu_bcast_if.in cmu_bcast,
-    output io_trap_o,
+    output io_timer_trap_o,
+    output io_sw_trap_o,
 
     input reset
 );
@@ -73,9 +74,11 @@ module ysyx_bus #(
 
   logic write_done;
 
-  logic clint_trap;
+  logic clint_timer_int;
+  logic clint_sw_int;
 
   logic is_clint;
+  logic is_clint_write;
   logic [3:0] arid;
   logic [3:0] awid;
   logic [XLEN-1:0] clint_rdata;
@@ -105,8 +108,14 @@ module ysyx_bus #(
 
   // lsu read
   assign l1d_bus.rready = (state_load == LD_A && load_bridge == L1D);
-  assign is_clint = (l1d_bus.araddr == `YSYX_BUS_RTC_ADDR)
+  assign is_clint = (l1d_bus.araddr == `YSYX_CLINT_MSIP)
+    || (l1d_bus.araddr == `YSYX_CLINT_MTIMECMP)
+    || (l1d_bus.araddr == `YSYX_CLINT_MTIMECMP_UP)
+    || (l1d_bus.araddr == `YSYX_BUS_RTC_ADDR)
     || (l1d_bus.araddr == `YSYX_BUS_RTC_ADDR_UP);
+  assign is_clint_write = (l1d_bus.awaddr == `YSYX_CLINT_MSIP)
+    || (l1d_bus.awaddr == `YSYX_CLINT_MTIMECMP)
+    || (l1d_bus.awaddr == `YSYX_CLINT_MTIMECMP_UP);
   assign l1d_bus.rdata = is_clint ? clint_rdata : axi_rdata;
   assign l1d_bus.rvalid = ((axi_rid == L1D) && axi_rvalid) || is_clint;
   assign l1d_bus.difftest_skip = is_clint || l1d_load_is_mmio;
@@ -137,12 +146,7 @@ module ysyx_bus #(
               bus_araddr <= l1d_bus.araddr;
               arid <= L1D;
               state_load_source <= L1D;
-              l1d_load_is_mmio <= (0)
-              || (l1d_bus.araddr >= 'h10001000 && l1d_bus.araddr <= 'h10001fff) // uart
-              || (l1d_bus.araddr >= 'h10002000 && l1d_bus.araddr <= 'h1000200f)  // ? gpio
-              || (l1d_bus.araddr >= 'h10011000 && l1d_bus.araddr <= 'h10012000)  // clint
-              || (l1d_bus.araddr >= 'h21000000 && l1d_bus.araddr <= 'h211fffff)  // ? vga
-              || (l1d_bus.araddr >= 'hc0000000);  // ? memory-mapped I/O in ysyxSoC
+              l1d_load_is_mmio <= ysyx_pkg::addr_mmio(l1d_bus.araddr);
               arsize <= (
                 ({3{l1d_bus.rstrb == 8'h1}} & 3'b000) |
                 ({3{l1d_bus.rstrb == 8'h3}} & 3'b001) |
@@ -180,21 +184,25 @@ module ysyx_bus #(
     end
   end
 
-  assign io_trap_o = clint_trap && csr_bcast.interrupt_en;
+  assign io_timer_trap_o = clint_timer_int && csr_bcast.timer_int_en;
+  assign io_sw_trap_o    = clint_sw_int    && csr_bcast.sw_int_en;
   ysyx_clint clint (
       .clock(clock),
       .araddr(l1d_bus.araddr),
       .out_rdata(clint_rdata),
-
-      .io_trap_o(clint_trap),
-      .io_trap_received_i(cmu_bcast.time_trap),
-
+      .awaddr(l1d_bus.awaddr),
+      .wdata(l1d_bus.wdata),
+      .wvalid(l1d_bus.awvalid && is_clint_write),
+      .timer_int(clint_timer_int),
+      .sw_int(clint_sw_int),
       .reset(reset)
   );
 
   state_store_t state_store;
   // lsu write
-  assign l1d_bus.wready = axi_bvalid;
+  // CLINT writes complete immediately without going through AXI
+  assign l1d_bus.wready = axi_bvalid
+    || (state_store == LS_S_A && l1d_bus.awvalid && is_clint_write);
 
   assign axi_awsize = l1d_bus.awvalid
     ? (({3{l1d_bus.wstrb == 8'h1}} & 3'b000)
@@ -203,7 +211,7 @@ module ysyx_bus #(
       |({3{l1d_bus.wstrb == 8'hff}} & 3'b011))
     : 3'b000;
   assign axi_awaddr = l1d_bus.awvalid ? l1d_bus.awaddr : 'h0;
-  assign axi_awvalid = (state_store == LS_S_A) && (l1d_bus.awvalid);
+  assign axi_awvalid = (state_store == LS_S_A) && l1d_bus.awvalid && !is_clint_write;
 
   localparam logic [31:0] ADDR2BITS = $clog2(XLEN / 8);  // 2 for RV32, 3 for RV64
   logic [ADDR2BITS-1:0] awaddr_lo;
@@ -223,7 +231,7 @@ module ysyx_bus #(
     end else begin
       unique case (state_store)
         LS_S_A: begin
-          if (l1d_bus.awvalid && axi_awready) begin
+          if (l1d_bus.awvalid && axi_awready && !is_clint_write) begin
             state_store <= LS_S_W;
             if (axi_wready) begin
               write_done <= 1;
@@ -246,7 +254,6 @@ module ysyx_bus #(
   end
 
   always @(posedge clock) begin
-    `YSYX_ASSERT(!axi_rvalid || axi_rresp == 2'b00, ("rresp error: " + axi_rresp));
     `YSYX_ASSERT(!axi_bvalid || axi_bresp == 2'b00, ("bresp error: " + axi_bresp));
   end
 

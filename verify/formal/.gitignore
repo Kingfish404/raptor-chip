@@ -1,6 +1,8 @@
 *.*
 *
-!*.sby
-!*.sv
 !Makefile
 !.gitignore
+!rvfi/
+!rvfi/**
+
+build/**

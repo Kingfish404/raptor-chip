@@ -44,7 +44,7 @@ ISA      ?= rv32## rv32 or rv64
 BUILD_DIR := $(VERIFY_HOME)/build
 FUZZ_DIR  := $(BUILD_DIR)/fuzz
 COV_DIR   := $(BUILD_DIR)/coverage
-AM_KERNELS := $(YSYX_HOME)/am-kernels
+AM_KERNELS := $(YSYX_HOME)/abstract-machine/app/am-kernels
 
 ifeq ($(ISA),rv64)
   NPC_BIN  := $(NPC_BIN_64)
@@ -247,8 +247,10 @@ ACT4_ELF_DIR    = $(ACT4_WORKDIR)/raptor-rv32imac/elfs
 ifeq ($(ISA),rv64)
   ACT4_ELF_DIR  = $(ACT4_WORKDIR)/raptor-rv64imac/elfs
 endif
-# Extensions to exclude (see ACT4 Makefile for reasons)
-ACT4_EXCLUDE   ?= Sm,S,InterruptsSm,ExceptionsZalrsc,ExceptionsZaamo,PMPSm,PMPZca,PMPmisaligned,Sv,Svade,Svadu,SvaduPMP,SvPMP,SvZicbo
+# Only generate tests for implemented extensions (positive filter).
+# Using EXTENSIONS instead of EXCLUDE_EXTENSIONS avoids generating tests for
+# F/D/Zfh/etc which bloats tests/ by ~600MB and wastes Sail simulation time.
+ACT4_EXTENSIONS ?= I,M,Zca,Zicsr,Zicntr,Zifencei,Zaamo,Zalrsc,Zba,Zbb,Zbs
 
 .PHONY: riscof riscof-setup riscof-gen riscof-run riscof-clean
 
@@ -284,7 +286,8 @@ riscof-gen: ## Generate self-checking ELFs via ACT4 framework
 		$(MAKE) elfs \
 		CONFIG_FILES="$(ACT4_CONFIG)" \
 		WORKDIR="$(ACT4_WORKDIR)" \
-		EXCLUDE_EXTENSIONS="$(ACT4_EXCLUDE)" \
+		EXTENSIONS="$(ACT4_EXTENSIONS)" \
+		FAST=1 \
 		--jobs $(NPROC)
 	@echo "[act4] ELFs generated in $(ACT4_ELF_DIR)"
 
@@ -454,11 +457,45 @@ sigtest-clean: ## Clean sigtest artifacts
 	rm -rf $(SIGTEST_DIR)
 
 # ============================================================================
+# Formal Verification (delegates to formal/Makefile)
+# ============================================================================
+FORMAL_DIR := $(VERIFY_HOME)/formal
+
+.PHONY: formal formal-setup formal-bus formal-exu-mul \
+	formal-rvfi formal-rvfi-gen formal-rvfi-check formal-rvfi-clean formal-clean
+
+formal-setup: ## Install oss-cad-suite (yosys, sby, solvers)
+	$(MAKE) -C $(FORMAL_DIR) setup
+
+formal-bus: ## Formal: verify AXI bus properties
+	$(MAKE) -C $(FORMAL_DIR) formal_bus
+
+formal-exu-mul: ## Formal: verify EXU multiplier
+	$(MAKE) -C $(FORMAL_DIR) formal_exu_mul
+
+formal: formal-bus formal-exu-mul ## Run all standalone formal checks
+
+formal-rvfi-gen: ## Formal: generate riscv-formal checks (auto-clones repo)
+	$(MAKE) -C $(FORMAL_DIR) formal_rvfi_gen
+
+formal-rvfi: ## Formal: run all 150 riscv-formal RVFI checks
+	$(MAKE) -C $(FORMAL_DIR) formal_rvfi
+
+formal-rvfi-check: ## Formal: run single RVFI check (CHECK=insn_add_ch0)
+	$(MAKE) -C $(FORMAL_DIR) formal_rvfi_check CHECK=$(CHECK)
+
+formal-rvfi-clean: ## Formal: clean generated RVFI checks
+	$(MAKE) -C $(FORMAL_DIR) formal_rvfi_clean
+
+formal-clean: ## Formal: clean all formal artifacts
+	$(MAKE) -C $(FORMAL_DIR) formal_rvfi_clean
+
+# ============================================================================
 # All-in-one
 # ============================================================================
 .PHONY: all clean
 
 all: fuzz sigtest ## Run all lightweight verification
 
-clean: fuzz-clean riscof-clean coverage-clean sigtest-clean ## Clean all verify artifacts
+clean: fuzz-clean riscof-clean coverage-clean sigtest-clean formal-clean ## Clean all verify artifacts
 	rm -rf $(BUILD_DIR)

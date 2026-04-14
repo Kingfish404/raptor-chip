@@ -17,6 +17,14 @@ BBL_BUILD  := $(APP_HOME)/build/bbl-build-rv$(XLEN)
 # ---- NPC runner ----
 NPC_RUN = $(MAKE) $(Q) -C $(NSIM_HOME) ISA=riscv$(XLEN) run ARGS="$(ARGS)" VFLAGS="$(VFLAGS)"
 
+# ---- NEMU runner ----
+# Invoke the NEMU executable directly (not via NEMU Makefile's `run` target)
+# to avoid picking up the -so binary when NEMU is configured for difftest.
+NEMU_BIN := $(NEMU_HOME)/build/riscv$(XLEN)-nemu-interpreter
+# Difftest reference SO (spike-diff); auto-detected, pass --diff= only if file exists
+NEMU_DIFF_REF := $(NEMU_HOME)/tools/spike-diff/build/riscv$(XLEN)-spike-so
+NEMU_DIFF_ARG := $(if $(wildcard $(NEMU_DIFF_REF)),--diff=$(NEMU_DIFF_REF),)
+
 MEM_START := 0x80000000
 
 # Derive --host triplet from CROSS_COMPILE (strip trailing dash)
@@ -93,40 +101,6 @@ $(PK_STAGING)/.stamp: $(PK_SRC_DIR)/configure \
 	# Add .payload section to pk linker script (before .data)
 	@cd $(PK_STAGING)/pk && \
 		awk '/_fdata/{print "  .payload : { *(.payload) }"; print "  . = ALIGN(0x1000);"} {print}' pk.lds > pk.lds.tmp && mv pk.lds.tmp pk.lds
-	# Patch poweroff() in mtrap.c: add ebreak fallback before wfi loop
-	@cd $(PK_STAGING)/machine && \
-		sed 's/send_ipi_many(0, IPI_HALT);/asm volatile("ebreak"); send_ipi_many(0, IPI_HALT);/' mtrap.c > mtrap.c.tmp && mv mtrap.c.tmp mtrap.c
-	# Patch mtrap.c machine_page_fault: redirect non-MPRV page faults to S-mode
-	# NPC bug: exceptions from S/U go to M-mode, land on trap_table[13]=trap_from_machine_mode
-	@cd $(PK_STAGING)/machine && \
-		awk '/^fail:/{print; getline; \
-		  print "  /* NPC workaround: redirect page faults from S/U mode to S-mode */"; \
-		  print "  {"; \
-		  print "    uintptr_t mpp = (read_csr(mstatus) >> 11) & 3;"; \
-		  print "    if (mpp != 3)"; \
-		  print "      redirect_trap(mepc, read_csr(mstatus), read_csr(mtval));"; \
-		  print "  }"; \
-		  print $$0; next} {print}' mtrap.c > mtrap.c.tmp && mv mtrap.c.tmp mtrap.c
-	# Patch mentry.S: redirect delegatable exceptions to S-mode via pmp_trap
-	# NPC RTL bug: exceptions always trap to M-mode even when medeleg delegates them
-	@cd $(PK_STAGING)/machine && \
-		sed -e 's|/\* 00 \*/ \.dc\.a bad_trap|/* 00 */ .dc.a pmp_trap|' \
-		    -e 's|/\* 03 \*/ \.dc\.a bad_trap|/* 03 */ .dc.a pmp_trap|' \
-		    -e 's|/\* 08 \*/ \.dc\.a bad_trap|/* 08 */ .dc.a pmp_trap|' \
-		    -e 's|/\* 12 \*/ \.dc\.a bad_trap|/* 12 */ .dc.a pmp_trap|' \
-		    -e 's|/\* 15 \*/ \.dc\.a bad_trap|/* 15 */ .dc.a pmp_trap|' \
-		    mentry.S > mentry.S.tmp && mv mentry.S.tmp mentry.S
-	# Patch minit.c: fix missing CSRs, force NS16550 UART, disable HTIF
-	@cd $(PK_STAGING)/machine && \
-		awk '/write_csr\(mcounteren/{print "  // " $$0 " // NPC/NEMU lack mcounteren"; next} \
-		/write_csr\(menvcfg/{print "  // " $$0 " // NPC/NEMU lack menvcfg"; next} \
-		/^  query_htif\(dtb\);/{print; \
-		  print "  htif = 0;"; \
-		  print "  if (!uart16550) uart16550 = (volatile uint8_t*)0x10000000UL;"; next} \
-		{print}' minit.c > minit.c.tmp && mv minit.c.tmp minit.c
-	# Patch uart16550_putchar: skip LSR check for NPC simulated UART
-	@cd $(PK_STAGING)/machine && \
-		awk '/void uart16550_putchar/{p=1} p && /uart16550\[UART_REG_LSR/{$$0="  // LSR check skipped for NPC sim"; p=0} {print}' uart16550.c > uart16550.c.tmp && mv uart16550.c.tmp uart16550.c
 	touch $@
 
 # ============================================================================
@@ -181,6 +155,25 @@ endif
 	@$(NPC_RUN) IMG=$(PK_BUILD)/pk.bin
 
 # ============================================================================
+# Run USER_ELF via pk on NEMU
+# ============================================================================
+nemu-run: $(PK_BUILD)/Makefile ## Run USER_ELF via pk on NEMU
+ifeq ($(strip $(USER_ELF)),)
+	$(error Usage: make nemu-run USER_ELF=<path-to-elf> [ARGS="..."])
+endif
+	@test -x $(NEMU_BIN) || { echo "ERROR: NEMU executable not found: $(NEMU_BIN)"; \
+		echo "  Run 'make config-nemu32' from project root first."; exit 1; }
+	@echo "=== Embedding $(notdir $(_ABS_USER_ELF)) into pk ==="
+	@cp $(_ABS_USER_ELF) $(PK_BUILD)/payload.elf
+	@rm -f $(PK_BUILD)/pk_payload.o $(PK_BUILD)/pk
+	@env -u CFLAGS -u CPPFLAGS -u LDFLAGS $(MAKE) $(Q) -C $(PK_BUILD) -j$(NPROC) > /dev/null
+	@$(OBJCOPY) -S -O binary $(PK_BUILD)/pk $(PK_BUILD)/pk.bin
+	@$(SIZE) $(PK_BUILD)/pk
+	@echo "=== Running on NEMU ==="
+	@$(MAKE) -s -C $(NEMU_HOME)/src/memory/rom build_dtb 2>/dev/null || true
+	cd $(NEMU_HOME) && $(NEMU_BIN) $(ARGS) $(NEMU_DIFF_ARG) --log=$(NEMU_HOME)/build/nemu-log.txt $(PK_BUILD)/pk.bin
+
+# ============================================================================
 # BBL + Linux boot
 # ============================================================================
 LINUX_IMAGE ?= $(YSYX_HOME)/linux/build/arch/riscv/boot/Image ## Linux kernel Image path
@@ -209,4 +202,4 @@ bbl-linux: $(PK_STAGING)/.stamp ## Build BBL with Linux payload, run on NPC
 clean: ## Clean staging and build directories
 	rm -rf $(PK_STAGING) $(PK_BUILD) $(BBL_BUILD)
 
-.PHONY: help pk-build pk-run bbl-linux clean
+.PHONY: help pk-build pk-run nemu-run bbl-linux clean

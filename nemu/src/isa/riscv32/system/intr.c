@@ -123,65 +123,80 @@ word_t isa_raise_intr(word_t NO, vaddr_t epc)
   return ret_pc;
 }
 
+#if !defined(CONFIG_TARGET_SHARE)
+// Helper: check if an interrupt (given its MIP bit position) can be taken,
+// considering delegation, privilege level, and global interrupt enables.
+static inline bool can_take_interrupt(int bit, csr_t reg_mstatus)
+{
+  word_t deleg = cpu.sr[CSR_MIDELEG] & ((word_t)1 << bit);
+  if (deleg)
+    return (cpu.priv < PRV_S) ||
+           (cpu.priv == PRV_S && reg_mstatus.mstatus.sie);
+  else
+    return (cpu.priv < PRV_M) ||
+           (cpu.priv == PRV_M && reg_mstatus.mstatus.mie);
+}
+#endif
+
 word_t isa_query_intr()
 {
+#if defined(CONFIG_TARGET_SHARE)
+  // In reference model mode, all interrupts are injected externally
+  // via difftest_raise_intr(). Do not auto-detect from MIP bits.
+  return INTR_EMPTY;
+#else
   csr_t reg_mstatus = {.val = cpu.sr[CSR_MSTATUS]};
-  csr_t reg_mie = {.val = cpu.sr[CSR_MIE]};
-  csr_t reg_mip = {.val = cpu.sr[CSR_MIP]};
+  word_t mip = cpu.sr[CSR_MIP];
+  word_t mie = cpu.sr[CSR_MIE];
+  word_t pending = mip & mie;
+
+  if (pending == 0)
+    return INTR_EMPTY;
 
   // RISC-V interrupt priority (highest first): MEI > MSI > MTI > SEI > SSI > STI
 
   // --- Machine External Interrupt (MEIP, bit 11) ---
-  if (reg_mip.mie.mteie && reg_mie.mie.mteie)
+  if (pending & (1u << 11))
   {
-    word_t deleg = cpu.sr[CSR_MIDELEG] & (1u << 11);
-    bool can_take;
-    if (deleg)
-      can_take = (cpu.priv < PRV_S) ||
-                 (cpu.priv == PRV_S && reg_mstatus.mstatus.sie);
-    else
-      can_take = (cpu.priv < PRV_M) ||
-                 (cpu.priv == PRV_M && reg_mstatus.mstatus.mie);
-    if (can_take)
+    if (can_take_interrupt(11, reg_mstatus))
       return MCA_MAC_EXT_INT;
   }
 
-  // --- Machine Timer Interrupt (existing cpu.intr flag from CLINT alarm) ---
-  if (cpu.intr)
+  // --- Machine Software Interrupt (MSIP, bit 3) ---
+  if (pending & (1u << 3))
   {
-    if (cpu.priv == PRV_M &&
-        (reg_mstatus.mstatus.mie == 1 &&
-         reg_mie.mie.mtie == 1))
-    {
-      cpu.intr = false;
+    if (can_take_interrupt(3, reg_mstatus))
+      return MCA_MAC_SOF_INT;
+  }
+
+  // --- Machine Timer Interrupt (MTIP, bit 7) ---
+  if (pending & (1u << 7))
+  {
+    if (can_take_interrupt(7, reg_mstatus))
       return MCA_MAC_TIM_INT;
-    }
-    if (cpu.priv == PRV_S &&
-        (reg_mstatus.mstatus.sie == 1 &&
-         reg_mie.mie.stie == 1))
-    {
-      cpu.intr = false;
-      return MCA_SUP_TIM_INT;
-    }
   }
 
   // --- Supervisor External Interrupt (SEIP, bit 9) ---
-  if (reg_mip.mie.seie && reg_mie.mie.seie)
+  if (pending & (1u << 9))
   {
-    word_t deleg = cpu.sr[CSR_MIDELEG] & (1u << 9);
-    bool can_take;
-    if (deleg)
-      can_take = (cpu.priv < PRV_S) ||
-                 (cpu.priv == PRV_S && reg_mstatus.mstatus.sie);
-    else
-      can_take = (cpu.priv < PRV_M) ||
-                 (cpu.priv == PRV_M && reg_mstatus.mstatus.mie);
-    if (can_take)
+    if (can_take_interrupt(9, reg_mstatus))
       return MCA_SUP_EXT_INT;
   }
 
-#if defined(CONFIG_TARGET_SHARE)
-  cpu.intr = false;
-#endif
+  // --- Supervisor Software Interrupt (SSIP, bit 1) ---
+  if (pending & (1u << 1))
+  {
+    if (can_take_interrupt(1, reg_mstatus))
+      return MCA_SUP_SOF_INT;
+  }
+
+  // --- Supervisor Timer Interrupt (STIP, bit 5) ---
+  if (pending & (1u << 5))
+  {
+    if (can_take_interrupt(5, reg_mstatus))
+      return MCA_SUP_TIM_INT;
+  }
+
   return INTR_EMPTY;
+#endif
 }

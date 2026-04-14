@@ -4,29 +4,68 @@
 
 The LiteX framework provides a convenient and efficient infrastructure to create FPGA Cores/SoCs, to explore various digital design architectures and create full FPGA based systems.
 
+## CPU Variants
+
+| Variant    | Description                                    | Use Case               |
+| ---------- | ---------------------------------------------- | ---------------------- |
+| `standard` | Dual-issue OoO, default caches, Sv32 MMU       | BIOS, bare-metal apps  |
+| `linux`    | Same RTL + OpenSBI region + DTS cache metadata | Linux boot via OpenSBI |
+
 ## Getting Started
 
 ```shell
-# prepare envirement
+# Prepare environment
 ./setup.sh
 source .venv/bin/activate
 # or using conda: `conda activate base`
 
-# run default
+# Run default BIOS simulation (standard variant)
 make run
 
-# liftoff demo payload
+# Liftoff demo payload
 pushd $YSYX_HOME/third_party/enjoy-digital/litex && \
   litex_bare_metal_demo --build-path=build/sim/ && popd
 make liftoff
 
-# coremark payload
+# CoreMark payload
 make link
 pushd $YSYX_HOME/third_party/enjoy-digital/litex && \
   python3 ./litex/soc/software/coremark_litex/coremark.py --build-path=build/sim/
 make coremark
-# add patch below at `CoreMark` to see mark result.
+# Add patch below at `CoreMark` to see mark result.
 ```
+
+## Linux Boot (Verilator Simulation)
+
+The `linux` variant sets up the SoC for OpenSBI + Linux boot:
+
+```shell
+# 1. Build SoC and generate device tree (no gateware compile)
+make linux_build
+make linux_dts
+
+# 2. Build OpenSBI (FW_PAYLOAD) with the generated DTS.
+#    See docs/linux_kernel.md for cross-compilation instructions.
+#    Place the resulting `Image` file in the LiteX directory.
+
+# 3. Run Linux simulation
+make linux_sim        # interactive (with UART console)
+make linux_sim_ni     # non-interactive
+```
+
+### Boot Flow
+
+```
+LiteX BIOS (ROM) → loads Image to main_ram → boot_helper
+  → OpenSBI (M-mode, FW_PAYLOAD at main_ram+0x00f00000)
+    → Linux kernel (S-mode)
+```
+
+### Device Tree
+
+`make linux_dts` generates the DTS from the SoC's CSR JSON. The generated
+DTS includes cache parameters (L1I/L1D size, ways, block size) and the
+standard CLINT/PLIC memory regions required by OpenSBI and Linux.
 
 ## [LiteX](https://github.com/enjoy-digital/litex)
 
@@ -42,9 +81,9 @@ make coremark
 |LiteX Cores Ecosystem +-->           |
 +----------------------+  +-^-------^-+
  (Eth, SATA, DRAM, US B,     |       |
-  PCIe, Video, etc...)      +       +
-                           board   target
-                           file    file
+  PCIe, Video, etc...)       +       +
+                            board   target
+                            file    file
 ```
 
 ## [CoreMark](https://github.com/eembc/coremark)

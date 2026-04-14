@@ -120,18 +120,24 @@ package ysyx_pkg;
 
   // Shared address classification functions for L1I/L1D
   function automatic logic addr_cacheable(input logic [XLEN-1:0] addr);
-    return (addr >= 'h20000000 && addr < 'h20400000)  // mrom
+    return (0)  // --- IGNORE ---
+    || (addr >= 'h0f000000 && addr < 'h0f010000)  // sram (litex + ysyxSoC)
+    || (addr >= 'h20000000 && addr < 'h20010000)  // mrom (64KB)
     || (addr >= 'h30000000 && addr < 'h40000000)  // flash
-    || (addr >= 'h80000000 && addr < 'h88000000)  // psram
-    || (addr >= 'ha0000000 && addr < 'ha2000000);  // sdram
+    || (addr >= 'h80000000 && addr < 'h90000000)  // psram (256MB, covers 128MB & 256MB configs)
+    || (addr >= 'ha0000000 && addr < 'ha2000000)  // sdram
+    ;
   endfunction
 
-  function automatic logic addr_valid(input logic [XLEN-1:0] addr);
-    return (addr >= 'h02000048 && addr < 'h02000050)  // clint
-        || (addr >= 'h0f000000 && addr < 'h0f002000)  // sram
-        || (addr >= 'h10000000 && addr < 'h10001000)  // uart/ns16550
-        || (addr >= 'h10010000 && addr < 'h10011900)  // liteuart0/csr
-        || addr_cacheable(addr);
+  // MMIO regions for difftest skip (not modelled in reference ISS)
+  function automatic logic addr_mmio(input logic [XLEN-1:0] addr);
+    return (0)  // --- IGNORE ---
+    || (addr >= 'h00100000 && addr <= 'h00100fff)  // finisher (sifive,test)
+    || (addr >= 'h10001000 && addr <= 'h10001fff)  // uart
+    || (addr >= 'h10002000 && addr <= 'h1000200f)  // gpio
+    || (addr >= 'h10011000 && addr <= 'h10012000)  // clint
+    || (addr >= 'h21000000 && addr <= 'h211fffff)  // vga
+    || (addr >= 'hc0000000);  // ysyxSoC memory-mapped I/O
   endfunction
 
 endpackage

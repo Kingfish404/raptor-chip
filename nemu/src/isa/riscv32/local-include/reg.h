@@ -94,7 +94,12 @@ static inline CSR_status check_csr_exist(uint16_t csr)
           csr == CSR_MVENDORID ||
           csr == CSR_MARCHID ||
           csr == CSR_IMPID ||
-          csr == CSR_MHARTID))
+          csr == CSR_MHARTID ||
+
+          csr == 0x306 ||  // mcounteren
+          csr == 0x30a ||  // menvcfg
+          (csr >= 0x3a0 && csr <= 0x3a3) ||  // pmpcfg0-3
+          (csr >= 0x3b0 && csr <= 0x3bf)))    // pmpaddr0-15
   {
     if ((0) //
         || csr == CSR_MISA
@@ -113,6 +118,11 @@ static inline CSR_status check_csr_exist(uint16_t csr)
         || (csr == CSR_MARCHID)   //
         || (csr == CSR_IMPID)     //
         || (csr == CSR_MHARTID)   //
+
+        || csr == 0x306   // mcounteren
+        || csr == 0x30a   // menvcfg
+        || (csr >= 0x3a0 && csr <= 0x3a3)  // pmpcfg (no PMP impl)
+        || (csr >= 0x3b0 && csr <= 0x3bf)  // pmpaddr (no PMP impl)
     )
     {
       return CSR_EXIST_DIFF_SKIP;

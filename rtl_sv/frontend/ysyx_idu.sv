@@ -13,6 +13,7 @@ module ysyx_idu #(
     input clock,
 
     cmu_bcast_if.in cmu_bcast,
+    csr_bcast_if.in csr_bcast,
 
     ifu_idu_if.slave  ifu_idu,
     idu_rnu_if.master idu_rnu,
@@ -218,12 +219,23 @@ module ysyx_idu #(
   logic illegal_inst_b, illegal_csr_b, is_illegal_b;
 
   assign illegal_inst_a = (alu_a == `YSYX_ALU_ILL_);
-  assign illegal_csr_a  = (csr_csw_a != 3'b000) && !csr_addr_valid(csr_a);
-  assign is_illegal_a   = illegal_inst_a || illegal_csr_a;
+  // CSR write attempt: CSRRW/CSRRWI always write; CSRRS/C/SI/CI write if rs1/uimm != 0
+  logic csr_write_a;
+  assign csr_write_a = (csr_csw_a[1:0] == 2'b01) || (rs1_a != 5'b0);
+  assign illegal_csr_a = (csr_csw_a != 3'b000) && (!csr_addr_valid(
+      csr_a
+  )  // unknown CSR address
+  || (csr_a[9:8] > csr_bcast.priv)  // insufficient privilege
+  || (csr_a[11:10] == 2'b11 && csr_write_a)  // write to read-only CSR
+  );
+  assign is_illegal_a = illegal_inst_a || illegal_csr_a;
 
   // CSR address validity check - returns 1 if the CSR address is legal.
   // Extend this function when adding new CSR registers.
   function automatic logic csr_addr_valid(input logic [11:0] addr);
+    // PMP CSRs: read-as-zero, write-ignored (no PMP implemented)
+    if (addr >= `YSYX_CSR_PMPCFG0 && addr <= `YSYX_CSR_PMPCFG3) return 1'b1;  // pmpcfg0-3
+    if (addr >= `YSYX_CSR_PMPADDR0 && addr <= `YSYX_CSR_PMPADDR15) return 1'b1;  // pmpaddr0-15
     case (addr)
       // Supervisor-level CSRs
       `YSYX_CSR_SSTATUS,  `YSYX_CSR_SIE____,  `YSYX_CSR_STVEC__,  `YSYX_CSR_SCOUNTE,
@@ -231,7 +243,8 @@ module ysyx_idu #(
       `YSYX_CSR_SIP____,  `YSYX_CSR_SATP___,
       // Machine Trap Setup
       `YSYX_CSR_MSTATUS,  `YSYX_CSR_MISA___,  `YSYX_CSR_MEDELEG,  `YSYX_CSR_MIDELEG,
-      `YSYX_CSR_MIE____,  `YSYX_CSR_MTVEC__,  `YSYX_CSR_MSTATUSH,
+      `YSYX_CSR_MIE____,  `YSYX_CSR_MTVEC__,  `YSYX_CSR_MCOUNTE,  `YSYX_CSR_MSTATUSH,
+      `YSYX_CSR_MENVCFG,
       // Machine Trap Handling
       `YSYX_CSR_MSCRATCH, `YSYX_CSR_MEPC___,  `YSYX_CSR_MCAUSE_,  `YSYX_CSR_MTVAL__,
       `YSYX_CSR_MIP____,
@@ -249,16 +262,16 @@ module ysyx_idu #(
   // ================================================================
   // UOP Output Assembly
   // ================================================================
-  assign idu_rnu.uop_a.c            = is_c_a;
-  assign idu_rnu.uop_a.word         = word_flag_a;
-  assign idu_rnu.uop_a.alu          = alu_a;
+  assign idu_rnu.uop_a.c = is_c_a;
+  assign idu_rnu.uop_a.word = word_flag_a;
+  assign idu_rnu.uop_a.alu = alu_a;
   assign idu_rnu.uop_a.rd[RLEN-1:0] = is_illegal_a ? '0 : rd_a[RLEN-1:0];
-  assign idu_rnu.uop_a.csr_csw      = csr_csw_a;
+  assign idu_rnu.uop_a.csr_csw = csr_csw_a;
 
   // Trap aggregation: IFU traps (e.g., page fault) or decode-time illegality
-  assign idu_rnu.uop_a.trap         = ifu_trap || is_illegal_a;
-  assign idu_rnu.uop_a.tval         = ifu_trap ? pc_idu_a : is_illegal_a ? inst_idu_a : '0;
-  assign idu_rnu.uop_a.cause        = ifu_trap ? ifu_cause : is_illegal_a ? 'h2 : '0;
+  assign idu_rnu.uop_a.trap = ifu_trap || is_illegal_a;
+  assign idu_rnu.uop_a.tval = ifu_trap ? pc_idu_a : is_illegal_a ? inst_idu_a : '0;
+  assign idu_rnu.uop_a.cause = ifu_trap ? ifu_cause : is_illegal_a ? `YSYX_CAUSE_ILLEGAL_INST : '0;
 
 `ifdef YSYX_DUAL_ISSUE
   // When dual-issuing, correct_npc is after BOTH instructions (group end)
@@ -360,35 +373,39 @@ module ysyx_idu #(
       .reset(reset)
   );
 
-  assign illegal_inst_b             = (alu_b == `YSYX_ALU_ILL_);
-  assign illegal_csr_b              = (csr_csw_b != 3'b000) && !csr_addr_valid(csr_b);
-  assign is_illegal_b               = illegal_inst_b || illegal_csr_b;
+  assign illegal_inst_b = (alu_b == `YSYX_ALU_ILL_);
+  logic csr_write_b;
+  assign csr_write_b = (csr_csw_b[1:0] == 2'b01) || (rs1_b != 5'b0);
+  assign illegal_csr_b = (csr_csw_b != 3'b000) && (!csr_addr_valid(
+      csr_b
+  ) || (csr_b[9:8] > csr_bcast.priv) || (csr_b[11:10] == 2'b11 && csr_write_b));
+  assign is_illegal_b = illegal_inst_b || illegal_csr_b;
 
   // Slot B UOP assembly
-  assign idu_rnu.uop_b.c            = is_c_b;
-  assign idu_rnu.uop_b.word         = word_flag_b;
-  assign idu_rnu.uop_b.alu          = alu_b;
+  assign idu_rnu.uop_b.c = is_c_b;
+  assign idu_rnu.uop_b.word = word_flag_b;
+  assign idu_rnu.uop_b.alu = alu_b;
   assign idu_rnu.uop_b.rd[RLEN-1:0] = is_illegal_b ? '0 : rd_b[RLEN-1:0];
-  assign idu_rnu.uop_b.csr_csw      = csr_csw_b;
+  assign idu_rnu.uop_b.csr_csw = csr_csw_b;
 
-  assign idu_rnu.uop_b.trap         = is_illegal_b;
-  assign idu_rnu.uop_b.tval         = is_illegal_b ? inst_idu_b : '0;
-  assign idu_rnu.uop_b.cause        = is_illegal_b ? 'h2 : '0;
+  assign idu_rnu.uop_b.trap = is_illegal_b;
+  assign idu_rnu.uop_b.tval = is_illegal_b ? inst_idu_b : '0;
+  assign idu_rnu.uop_b.cause = is_illegal_b ? `YSYX_CAUSE_ILLEGAL_INST : '0;
 
-  assign idu_rnu.uop_b.pnpc         = pc_idu_b + (is_c_b ? XLEN'('d2) : XLEN'('d4));
-  assign idu_rnu.uop_b.inst         = inst_idu_b;
-  assign idu_rnu.uop_b.pc           = pc_idu_b;
+  assign idu_rnu.uop_b.pnpc = pc_idu_b + (is_c_b ? XLEN'('d2) : XLEN'('d4));
+  assign idu_rnu.uop_b.inst = inst_idu_b;
+  assign idu_rnu.uop_b.pc = pc_idu_b;
 
-  assign idu_rnu.uop_b.imm          = dec_imm_b[XLEN-1:0];
-  assign idu_rnu.op1_b              = dec_op1_b[XLEN-1:0];
-  assign idu_rnu.op2_b              = dec_op2_b[XLEN-1:0];
+  assign idu_rnu.uop_b.imm = dec_imm_b[XLEN-1:0];
+  assign idu_rnu.op1_b = dec_op1_b[XLEN-1:0];
+  assign idu_rnu.op2_b = dec_op2_b[XLEN-1:0];
 
-  assign idu_rnu.rs1_b[RLEN-1:0]    = rs1_b[RLEN-1:0];
-  assign idu_rnu.rs2_b[RLEN-1:0]    = rs2_b[RLEN-1:0];
+  assign idu_rnu.rs1_b[RLEN-1:0] = rs1_b[RLEN-1:0];
+  assign idu_rnu.rs2_b[RLEN-1:0] = rs2_b[RLEN-1:0];
 
   // Slot B valid: IFU provided a second instruction AND slot A is not a trap
   // or branch/jump (branches in slot A could skip slot B on the taken path).
-  assign idu_rnu.valid_b            = valid && ifu_valid_b && !ifu_trap && !is_branch_or_jump;
+  assign idu_rnu.valid_b = valid && ifu_valid_b && !ifu_trap && !is_branch_or_jump;
 `endif
 
 endmodule

@@ -52,8 +52,9 @@ raptor-chip/
 +-- nemu/                 # NEMU software emulator (RISC-V ISS)
 +-- nsim/                 # NPC simulator (Verilator testbench)
 +-- abstract-machine/     # Abstract Machine runtime framework
-+-- navy-apps/            # Navy applications (for nanos-lite)
-+-- nanos-lite/           # NanoS-lite simple OS
+|   +-- app/
+|       +-- nanos-lite/   # NanoS-lite simple OS
+|       +-- navy-apps/    # Navy applications (for nanos-lite)
 +-- linux/                # Linux kernel build scripts
 +-- fpga/                 # FPGA targets (Gowin Tang Nano 20K)
 +-- third_party/          # Third-party dependencies

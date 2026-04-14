@@ -152,11 +152,11 @@ run_log: $(BIN) $(MROM_IMG) ## Run NPC and log output
 sim: $(BIN) ## Run NPC binary directly
 	@$^
 
-AM_KERNEL = $(YSYX_HOME)/third_party/kingfish404/am-kernels
+AM_KERNEL = $(YSYX_HOME)/abstract-machine/app/am-kernels
 
 AM_KERNEL:
 	mkdir -p $(abspath $(AM_KERNEL))
-	git clone https://github.com/kingfish404/am-kernels $(YSYX_HOME)/am-kernels
+	git clone https://github.com/kingfish404/am-kernels $(YSYX_HOME)/abstract-machine/app/am-kernels
 
 perf: ## Run microbenchmark for performance testing
 	if [ ! -d $(AM_KERNEL) ]; then make AM_KERNEL; fi

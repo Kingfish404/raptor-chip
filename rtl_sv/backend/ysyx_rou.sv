@@ -33,7 +33,8 @@ module ysyx_rou #(
 
     // interrupt
     csr_bcast_if.in csr_bcast,
-    input clint_trap,
+    input clint_timer_trap,
+    input clint_sw_trap,
 
     // commit
     rou_cmu_if.out rou_cmu,
@@ -48,6 +49,7 @@ module ysyx_rou #(
 
   // Async trap state
   logic            recieved_trap;
+  logic            recieved_sw_trap /* verilator public */;
   logic [XLEN-1:0] trap_pc;
 
   // Forward declarations (used across sections)
@@ -408,6 +410,7 @@ module ysyx_rou #(
       rob_head      <= '0;
       rob_tail      <= '0;
       recieved_trap <= 1'b0;
+      recieved_sw_trap <= 1'b0;
       for (int i = 0; i < ROB_SIZE; i++) begin
         rob_entry[i].busy  <= 1'b0;
         rob_entry[i].state <= ROB_CM;
@@ -576,7 +579,8 @@ module ysyx_rou #(
           rob_entry[h1].sq_wdata <= '0;
         end
 
-        recieved_trap <= clint_trap;
+        recieved_trap <= clint_sw_trap || clint_timer_trap;
+        recieved_sw_trap <= clint_sw_trap;
         trap_pc       <= dual_commit ? rob_entry[h1].npc : rob_entry[rob_head].npc;
       end
     end
@@ -604,7 +608,9 @@ module ysyx_rou #(
       || rob_entry[h0].atom
   ));
 
-  assign sys_resume = head_valid && head0_sys_pure && !head0_flush;
+  // Resume: lightweight pipeline unblock for serializing instructions that
+  // don't need a redirect (pure CSR read/write, sfence.vma).
+  assign sys_resume = head_valid && (head0_sys_pure || rob_entry[h0].f_time) && !head0_flush;
 
   // ---- Slot 1 (head+1): only considered when slot 0 doesn't flush ----
   logic head1_br_p_fail;
@@ -655,8 +661,11 @@ module ysyx_rou #(
   // Branch signals: when dual committing, use slot 1 (BPU trains on rpc which is slot 1's PC)
   assign rou_cmu.btaken = dual_commit ? rob_entry[h1].btaken : rob_entry[h0].btaken;
   assign rou_cmu.npc_a       = dual_commit
-      ? (rob_entry[h1].trap ? csr_bcast.tvec : rob_entry[h1].npc)
-      : (recieved_trap || rob_entry[h0].trap) ? csr_bcast.tvec
+      ? ((rob_entry[h1].trap || rob_entry[h1].ecall || rob_entry[h1].ebreak)
+          ? csr_bcast.tvec : rob_entry[h1].npc)
+      : (recieved_trap || rob_entry[h0].trap
+          || rob_entry[h0].ecall || rob_entry[h0].ebreak)
+          ? csr_bcast.tvec
       : rob_entry[h0].npc;
   assign rou_cmu.ben = dual_commit ? rob_entry[h1].ben : rob_entry[h0].ben;
   assign rou_cmu.jen = dual_commit ? rob_entry[h1].jen : rob_entry[h0].jen;
@@ -678,7 +687,8 @@ module ysyx_rou #(
   assign rou_cmu.pc_b = rob_entry[h1].pc;
   assign rou_cmu.prd_b = rob_entry[h1].prd;
   assign rou_cmu.prs_b = rob_entry[h1].prs;
-  assign rou_cmu.npc_b = rob_entry[h1].trap ? csr_bcast.tvec : rob_entry[h1].npc;
+  assign rou_cmu.npc_b = (rob_entry[h1].trap || rob_entry[h1].ecall || rob_entry[h1].ebreak)
+      ? csr_bcast.tvec : rob_entry[h1].npc;
   assign rou_cmu.ebreak_b = dual_commit && rob_entry[h1].ebreak;
   assign rou_cmu.difftest_skip_b = rob_entry[h1].difftest_skip;
   assign rou_cmu.valid_b = dual_commit;
@@ -687,7 +697,8 @@ module ysyx_rou #(
   // ---- RVFI per-slot data ----
   assign rou_cmu.rvfi_trap_a = !recieved_trap && rob_entry[h0].trap;
   assign rou_cmu.rvfi_trap_b = rob_entry[h1].trap;
-  assign rou_cmu.rvfi_npc_a  = rob_entry[h0].trap ? csr_bcast.tvec : rob_entry[h0].npc;
+  assign rou_cmu.rvfi_npc_a  = (rob_entry[h0].trap || rob_entry[h0].ecall || rob_entry[h0].ebreak)
+      ? csr_bcast.tvec : rob_entry[h0].npc;
   assign rou_cmu.rvfi_sq_waddr_a = rob_entry[h0].sq_waddr;
   assign rou_cmu.rvfi_sq_waddr_b = rob_entry[h1].sq_waddr;
   assign rou_cmu.rvfi_sq_wdata_a = rob_entry[h0].sq_wdata;
@@ -719,7 +730,9 @@ module ysyx_rou #(
   assign rou_csr.trap = recieved_trap || (csr_from_h1 ? rob_entry[h1].trap : rob_entry[h0].trap);
   assign rou_csr.tval = recieved_trap ? '0 : csr_from_h1 ? rob_entry[h1].tval : rob_entry[h0].tval;
   assign rou_csr.cause     = recieved_trap
-      ? ((csr_bcast.priv == `YSYX_PRIV_M) ? 'h7 : 'h5) + ('b1 << (XLEN - 1))
+      ? (recieved_sw_trap
+          ? (((csr_bcast.priv == `YSYX_PRIV_M) ? `YSYX_CAUSE_MSI : `YSYX_CAUSE_SSI) + ('b1 << (XLEN - 1)))
+          : (((csr_bcast.priv == `YSYX_PRIV_M) ? `YSYX_CAUSE_MTI : `YSYX_CAUSE_STI) + ('b1 << (XLEN - 1))))
       : csr_from_h1 ? rob_entry[h1].cause
       :               rob_entry[h0].cause;
   assign rou_csr.valid     = recieved_trap

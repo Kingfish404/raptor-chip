@@ -212,7 +212,9 @@ module ysyx_npc_soc #(
 
   // Address range validation: check if address falls within any known region
   function automatic logic addr_valid(input logic [XLEN-1:0] addr);
-    return (addr >= 'h02000000 && addr < 'h020c0000)  // CLINT
+    return (0)  // --- IGNORE ---
+    || (addr >= 'h00100000 && addr < 'h00101000)  // sifive,test finisher
+    || (addr >= 'h02000000 && addr < 'h020c0000)  // CLINT
     || (addr >= 'h0c000000 && addr < 'h0d000000)  // PLIC
     || (addr >= 'h0f000000 && addr < 'h0f002000)  // SRAM
     || (addr >= 'h10000000 && addr < 'h10012000)  // serial / peripherals
@@ -351,7 +353,10 @@ module ysyx_npc_soc #(
               rresp_buf <= AXIRespOKAY;
               `YSYX_DPI_C_PMEM_READ((araddr), mem_rdata_buf);
             end else begin
-              rresp_buf <= AXIRespDecerr;
+              // Speculative reads to unmapped addresses (e.g. L1I prefetch of
+              // user-space VAs before TLB translation) — return zero silently.
+              // Writes to invalid addresses still report errors.
+              rresp_buf <= AXIRespOKAY;
               mem_rdata_buf <= '0;
               $display("NPC_SOC: [ERROR] AXI read from invalid addr=%0h, arid=%0d", araddr, arid);
             end

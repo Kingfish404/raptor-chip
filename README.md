@@ -181,19 +181,19 @@ cd $NSIM_HOME && make menuconfig && make ARCH=riscv32e-npc run
 ## n. running nanos-lite on nemu
 cd $NAVY_HOME && make ISA=$ISA fsimg
 cd $NAVY_HOME/apps/menu && make ISA=$ISA install
-cd $YSYX_HOME/nanos-lite && make ARCH=$ISA-nemu update run
-cd $YSYX_HOME/nanos-lite && make ARCH=$ISA-nemu run
+cd $YSYX_HOME/abstract-machine/app/nanos-lite && make ARCH=$ISA-nemu update run
+cd $YSYX_HOME/abstract-machine/app/nanos-lite && make ARCH=$ISA-nemu run
 ## n.vme running nanos-lite on nemu with VME
-cd $YSYX_HOME/nanos-lite && make ARCH=$ISA-nemu update run ARGS="-b" VME=1
+cd $YSYX_HOME/abstract-machine/app/nanos-lite && make ARCH=$ISA-nemu update run ARGS="-b" VME=1
 
 ## n+1. running busybox on nemu (Linux required)
 cd $NAVY_HOME/apps/busybox && colima ssh # login to Linux container
 make ARCH=riscv32-nemu install
 
 ## 2n. running microbench/coremark on npc
-cd $YSYX_HOME/am-kernels/benchmarks/coremark_eembc && \
+cd $YSYX_HOME/abstract-machine/app/am-kernels/benchmarks/coremark_eembc && \
     make ARCH=riscv32e-npc run ARGS="-b -n"
-cd $YSYX_HOME/am-kernels/benchmarks/microbench && \
+cd $YSYX_HOME/abstract-machine/app/am-kernels/benchmarks/microbench && \
     make ARCH=riscv32e-npc run ARGS="-b -n"
 # ARGS="-b -n" is optional, -b is for batch mode [default], -n is for no wave trace
 

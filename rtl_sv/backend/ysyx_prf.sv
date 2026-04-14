@@ -36,10 +36,21 @@ module ysyx_prf #(
     // Debug: architectural register view (committed / speculative)
     output [XLEN-1:0] rf    [RNUM],
     output [XLEN-1:0] rf_map[RNUM]
+
+`ifdef YSYX_RVFI
+    // RVFI: read destination register values at commit time
+    , output [XLEN-1:0] rvfi_rd_wdata_a
+    , output [XLEN-1:0] rvfi_rd_wdata_b
+`endif
 );
   logic [XLEN-1:0] prf           [PNUM];
   logic [PNUM-1:0] prf_valid;
   logic [PNUM-1:0] prf_transient;
+
+`ifdef YSYX_RVFI
+  assign rvfi_rd_wdata_a = (rou_cmu.rd_a != 0) ? prf[rou_cmu.prd_a] : '0;
+  assign rvfi_rd_wdata_b = (rou_cmu.rd_b != 0) ? prf[rou_cmu.prd_b] : '0;
+`endif
 
   // ---- Read ports (combinational) ----
   assign prf_rd.pv1_a       = prf[prf_rd.pr1_a];

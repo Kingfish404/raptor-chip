@@ -1,8 +1,8 @@
 # ==============================================================================
 # Strategy: deny-all + whitelist.
 # All files ignored by default; directories allowed for traversal.
-# Self-contained subdirs (nemu, nsim, abstract-machine, am-kernels,
-# nanos-lite, navy-apps, fpga/) have their own deny-all .gitignore.
+# Self-contained subdirs (nemu, nsim, abstract-machine, fpga/)
+# have their own deny-all .gitignore.
 # Non-self-contained subdirs are whitelisted below.
 # ==============================================================================
 
@@ -40,7 +40,7 @@
 /rtl_sv/generated/
 /rtl_scala/target/
 /third_party/
-/reference/
+/docs-ref/
 /syn/
 Makefile.local
 

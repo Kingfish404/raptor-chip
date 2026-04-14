@@ -31,6 +31,12 @@ verify/
 │   ├── raptor-rv32imac/  # RV32 test config, UDB config, model macros
 │   └── riscv-arch-test/  # ACT4 repo (cloned on setup, gitignored)
 ├── formal/             # Formal verification (SymbiYosys)
+│   ├── rvfi/             # Raptor riscv-formal config (project-owned)
+│   │   ├── checks.cfg     # riscv-formal check configuration
+│   │   └── wrapper.sv     # RVFI wrapper with unconstrained AXI4
+│   ├── riscv-formal/     # riscv-formal repo (auto-cloned, gitignored)
+│   ├── bus.sby           # AXI bus formal property
+│   └── exu_mul.sby       # Multiplier formal property
 └── build/              # Generated artifacts (gitignored)
 ```
 
@@ -101,12 +107,65 @@ for this mode). `coverage-run` drives the instrumented NPC using
 rebuilds from root targets). Coverage data is written to `coverage.dat` on
 simulator exit and then merged/reported via `verilator_coverage`.
 
+### 5. Formal Verification (`make -C formal`)
+
+Uses [SymbiYosys](https://github.com/YosysHQ/sby) for bounded model checking.
+Runs from the `formal/` subdirectory.
+
+**Setup:**
+```bash
+make -C formal setup      # Download oss-cad-suite (yosys, sby, solvers)
+```
+
+**Standalone property checks:**
+```bash
+make -C formal formal_bus       # AXI bus protocol properties
+make -C formal formal_exu_mul   # Multiplier correctness properties
+```
+
+#### riscv-formal (RVFI)
+
+[riscv-formal](https://github.com/YosysHQ/riscv-formal) performs per-instruction
+formal verification via the RVFI (RISC-V Formal Interface). The Raptor core
+exposes RVFI signals through `rtl_sv/backend/ysyx_rvfi.sv` (enabled by
+`-DYSYX_RVFI`), with NRET=2 for dual-commit.
+
+The riscv-formal repository is **auto-cloned** on first use. Project-owned
+configuration lives in `formal/rvfi/` (tracked in git); the cloned repo is
+gitignored.
+
+**150 checks** are generated covering RV32IMC instructions (70 insns × 2
+channels) plus consistency checks (reg, pc_fwd, pc_bwd, unique, causal).
+
+```bash
+# Generate checks (auto-clones riscv-formal if needed)
+make -C formal formal_rvfi_gen
+
+# Run a single check
+make -C formal formal_rvfi_check CHECK=insn_add_ch0
+
+# Run all 150 checks in parallel
+make -C formal formal_rvfi
+
+# Clean generated artifacts
+make -C formal formal_rvfi_clean
+```
+
+**Engine:** Uses `abc bmc3` (AIGER-based BMC) instead of SMT-based solvers to
+avoid a false-positive combinational loop detection in the `write_smt2` backend.
+Each check takes ~70 seconds with depth 5.
+
+**Configuration files** (`formal/rvfi/`):
+- `checks.cfg` — ISA, nret, solver, depth, yosys-slang script
+- `wrapper.sv` — Instantiates `ysyx` with unconstrained AXI4 responses via
+  `rvformal_rand_reg`, exposing only RVFI outputs to the testbench
+
 ## Integration with Root Makefile
 
 From the project root:
 ```bash
-make verify-fuzz          # Shortcut for verify/ fuzz
-make verify-sigtest       # Shortcut for verify/ sigtest
+make verify-fuzz          # Shortcut for fuzz
+make verify-sigtest       # Shortcut for sigtest
 make verify-all           # Run all verify targets
 ```
 

@@ -64,6 +64,16 @@ config PLIC_MMIO
   hex "MMIO address of the PLIC"
   default 0x0c000000
 
+menuconfig HAS_FINISHER
+  bool "Enable finisher (sifive,test / syscon-poweroff)"
+  default y
+
+if HAS_FINISHER
+config FINISHER_MMIO
+  hex "MMIO address of the finisher"
+  default 0x00100000
+endif # HAS_FINISHER
+
 menuconfig HAS_KEYBOARD
   bool "Enable keyboard"
   default y

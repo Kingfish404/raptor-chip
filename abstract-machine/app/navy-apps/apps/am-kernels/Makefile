@@ -1,4 +1,4 @@
-AM_KERNELS_PATH = $(AM_HOME)/../am-kernels
+AM_KERNELS_PATH = $(AM_HOME)/app/am-kernels
 ifeq ($(wildcard $(AM_KERNELS_PATH)/tests/am-tests/src),)
   $(error Please set $$AM_KERNELS_PATH in the Makefile to a valid path of an am-kernels repo)
 endif

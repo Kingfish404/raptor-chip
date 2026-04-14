@@ -88,6 +88,14 @@ enum CSR
   CSR_MTVAL = 0x343,
   CSR_MIP = 0x344,
 
+  // PMP Configuration (read-as-zero, no PMP implemented)
+  CSR_PMPCFG0 = 0x3a0,
+  CSR_PMPCFG1 = 0x3a1,
+  CSR_PMPCFG2 = 0x3a2,
+  CSR_PMPCFG3 = 0x3a3,
+  CSR_PMPADDR0 = 0x3b0,
+  CSR_PMPADDR15 = 0x3bf,
+
   CSR_MCYCLE = 0xb00,
   CSR_MINSTRET = 0xb02,
   CSR_MCYCLEH = 0xb80,

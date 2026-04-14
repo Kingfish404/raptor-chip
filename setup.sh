@@ -50,7 +50,7 @@ apt_install() {
 repo_clone() {
   mkdir -p third_party/NJU-ProjectN
   mkdir -p third_party/kingfish404
-  [ -d am-kernels ] || git clone --depth 1 https://github.com/kingfish404/am-kernels
+  [ -d abstract-machine/app/am-kernels ] || git clone --depth 1 https://github.com/kingfish404/am-kernels abstract-machine/app/am-kernels
   [ -d third_party/kingfish404/ysyxSoC ] || git clone --depth 1 https://github.com/Kingfish404/ysyxSoC third_party/kingfish404/ysyxSoC
   [ -d third_party/NJU-ProjectN/nvboard ] || git clone --depth 1 https://github.com/NJU-ProjectN/nvboard third_party/NJU-ProjectN/nvboard
 

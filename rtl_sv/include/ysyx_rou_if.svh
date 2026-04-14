@@ -161,6 +161,19 @@ interface rou_cmu_if #(
 
   logic [$clog2(`YSYX_ROB_SIZE):0] rob_head;
 
+`ifdef YSYX_RVFI
+  // RVFI per-slot trap flag
+  logic rvfi_trap_a;
+  logic rvfi_trap_b;
+  // RVFI per-slot resolved NPC (slot A; slot B reuses npc_b)
+  logic [XLEN-1:0] rvfi_npc_a;
+  // RVFI memory info per-slot
+  logic [XLEN-1:0] rvfi_sq_waddr_a;
+  logic [XLEN-1:0] rvfi_sq_waddr_b;
+  logic [XLEN-1:0] rvfi_sq_wdata_a;
+  logic [XLEN-1:0] rvfi_sq_wdata_b;
+`endif
+
   modport out(
       output rd_a, inst_a, pc_a, prd_a, prs_a, npc_a,
       output ebreak_a, difftest_skip_a, valid_a,
@@ -169,6 +182,12 @@ interface rou_cmu_if #(
       output btaken, ben, jen, jren, atomic_sc,
       output fence_time, fence_i, flush_pipe, sys_resume, time_trap,
       output rob_head
+`ifdef YSYX_RVFI
+      , output rvfi_trap_a, rvfi_trap_b,
+      output rvfi_npc_a,
+      output rvfi_sq_waddr_a, rvfi_sq_waddr_b,
+      output rvfi_sq_wdata_a, rvfi_sq_wdata_b
+`endif
   );
   modport in(
       input rd_a, inst_a, pc_a, prd_a, prs_a, npc_a,
@@ -178,6 +197,12 @@ interface rou_cmu_if #(
       input btaken, ben, jen, jren, atomic_sc,
       input fence_time, fence_i, flush_pipe, sys_resume, time_trap,
       input rob_head
+`ifdef YSYX_RVFI
+      , input rvfi_trap_a, rvfi_trap_b,
+      input rvfi_npc_a,
+      input rvfi_sq_waddr_a, rvfi_sq_waddr_b,
+      input rvfi_sq_wdata_a, rvfi_sq_wdata_b
+`endif
   );
 endinterface
 
