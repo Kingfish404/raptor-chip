@@ -13,7 +13,7 @@ Welcome to the Raptor Project! Here is an all-in-one repository for exploring, d
 
 Core description: **Super-scalar, Out-of-order [RISC-V][^RISC-V] core** with register renaming, ROB, and reservation stations. The RTL is described by `SystemVerilog` with `Chisel` (`Scala`) used only for decoder generation. Features Sv32 virtual memory (MMU/TLB), LR/SC + AMO atomics, compressed instructions (RVC), and boots Linux v6.18 via OpenSBI. Supports configurable **RV32** and **RV64** modes via compile-time switch.
 
-ISA strings: `rv32imac_zicntr_zicond_zicsr_zifencei_zba_zbb_zbs`
+ISA strings: `rv32imac_zicntr_zicond_zicsr_zifencei_zba_zbb_zbc_zbs`
 
 Candidate ip core name: `raptor-falcon-0.1.0` (`rf-0.1.0`).
 

@@ -200,11 +200,23 @@ algo-tests: algo-tests-build ## Build and run all algorithm tests via pk
 	$(call _pk_run_suite,Algorithm tests,$(APP_HOME)/build/rv$(XLEN)/tests/algo,$(ALGO_TESTS))
 
 # ============================================================================
+# Security / side-channel tests
+# ============================================================================
+security-tests-build: ## Build security / side-channel tests
+	@$(MAKE) $(Q) -C $(APP_HOME)/tests/security build
+
+SECURITY_TESTS := cache-timing fence-timing bpu-collision \
+                  spectre-v1 spectre-v2 spec-store-bypass
+
+security-tests: security-tests-build ## Build and run all security tests via pk
+	$(call _pk_run_suite,Security tests,$(APP_HOME)/build/rv$(XLEN)/tests/security,$(SECURITY_TESTS))
+
+# ============================================================================
 # All tests
 # ============================================================================
-tests-build: hello-build isa-tests-build memory-tests-build algo-tests-build ## Build all tests
+tests-build: hello-build isa-tests-build memory-tests-build algo-tests-build security-tests-build ## Build all tests
 
-tests: hello isa-tests memory-tests algo-tests ## Run all tests via pk
+tests: hello isa-tests memory-tests algo-tests security-tests ## Run all tests via pk
 
 # ============================================================================
 # Demo programs
@@ -234,6 +246,7 @@ clean: ## Clean all build artifacts
         isa-tests-build isa-tests \
         memory-tests-build memory-tests \
         algo-tests-build algo-tests \
+        security-tests-build security-tests \
         tests-build tests \
         demos-build demos \
         all clean

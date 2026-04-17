@@ -49,14 +49,14 @@ AM_KERNELS := $(YSYX_HOME)/abstract-machine/app/am-kernels
 ifeq ($(ISA),rv64)
   NPC_BIN  := $(NPC_BIN_64)
   NEMU_SO  := $(NEMU_SO_64)
-  MARCH    := rv64imac_zicntr_zicond_zicsr_zifencei_zba_zbb_zbs
+  MARCH    := rv64imac_zicntr_zicond_zicsr_zifencei_zba_zbb_zbc_zbs
   MABI     := lp64
   VFLAGS   := -DYSYX_RV64
   ISA_XLEN := 64
 else
   NPC_BIN  := $(NPC_BIN_32)
   NEMU_SO  := $(NEMU_SO_32)
-  MARCH    := rv32imac_zicntr_zicond_zicsr_zifencei_zba_zbb_zbs
+  MARCH    := rv32imac_zicntr_zicond_zicsr_zifencei_zba_zbb_zbc_zbs
   MABI     := ilp32
   VFLAGS   :=
   ISA_XLEN := 32
@@ -250,7 +250,7 @@ endif
 # Only generate tests for implemented extensions (positive filter).
 # Using EXTENSIONS instead of EXCLUDE_EXTENSIONS avoids generating tests for
 # F/D/Zfh/etc which bloats tests/ by ~600MB and wastes Sail simulation time.
-ACT4_EXTENSIONS ?= I,M,Zca,Zicsr,Zicntr,Zifencei,Zaamo,Zalrsc,Zba,Zbb,Zbs
+ACT4_EXTENSIONS ?= I,M,Zca,Zicsr,Zicntr,Zifencei,Zaamo,Zalrsc,Zba,Zbb,Zbc,Zbs
 
 .PHONY: riscof riscof-setup riscof-gen riscof-run riscof-clean
 

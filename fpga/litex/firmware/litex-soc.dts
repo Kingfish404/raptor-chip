@@ -1,0 +1,65 @@
+/*
+ * Device Tree for Raptor LiteX SoC (Verilator simulation)
+ *
+ * CLINT at 0x02000000 is internal to the Raptor CPU (intercepted in
+ * ysyx_bus.sv before AXI4). We still declare it here so OpenSBI's
+ * fdt_timer_mtimer driver can discover mtime/mtimecmp addresses.
+ *
+ * UART is the LiteX sim UART (serial2console) at CSR base 0xf0001800.
+ */
+/dts-v1/;
+
+/ {
+	#address-cells = <1>;
+	#size-cells = <1>;
+	compatible = "raptor,litex-soc";
+	model = "Raptor LiteX SoC";
+
+	chosen {
+		stdout-path = "/soc/serial@f0001800";
+	};
+
+	cpus {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		timebase-frequency = <50000000>;
+
+		cpu@0 {
+			device_type = "cpu";
+			compatible = "riscv";
+			riscv,isa = "rv32imac_zicsr_zifencei_zba_zbb_zbc_zbs";
+			mmu-type = "riscv,sv32";
+			reg = <0>;
+
+			cpu0_intc: interrupt-controller {
+				#interrupt-cells = <1>;
+				compatible = "riscv,cpu-intc";
+				interrupt-controller;
+			};
+		};
+	};
+
+	soc {
+		#address-cells = <1>;
+		#size-cells = <1>;
+		compatible = "simple-bus";
+		ranges;
+
+		clint@2000000 {
+			compatible = "riscv,clint0";
+			reg = <0x02000000 0x10000>;
+			interrupts-extended = <&cpu0_intc 3>,
+					      <&cpu0_intc 7>;
+		};
+
+		serial@f0001800 {
+			compatible = "litex,liteuart";
+			reg = <0xf0001800 0x100>;
+		};
+	};
+
+	memory@80000000 {
+		device_type = "memory";
+		reg = <0x80000000 0x00800000>;
+	};
+};

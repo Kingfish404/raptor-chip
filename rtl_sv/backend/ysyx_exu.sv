@@ -44,7 +44,8 @@ module ysyx_exu #(
   logic [5:0] rs_alu[RS_SIZE];
   logic [XLEN-1:0] rs_vj[RS_SIZE];
   logic [XLEN-1:0] rs_vk[RS_SIZE];
-  logic [$clog2(ROB_SIZE):0] rs_dest[RS_SIZE];
+  // ROB destination index (0-indexed, directly maps to rob_entry[]).
+  logic [$clog2(ROB_SIZE)-1:0] rs_dest[RS_SIZE];
 
   logic [PLEN-1:0] rs_pr1[RS_SIZE];
   logic [PLEN-1:0] rs_pr2[RS_SIZE];
@@ -91,7 +92,8 @@ module ysyx_exu #(
   logic [5:0] ioq_alu[IOQ_SIZE];
   logic [XLEN-1:0] ioq_vj[IOQ_SIZE];
   logic [XLEN-1:0] ioq_vk[IOQ_SIZE];
-  logic [$clog2(ROB_SIZE):0] ioq_dest[IOQ_SIZE];
+  // ROB destination index (0-indexed, directly maps to rob_entry[]).
+  logic [$clog2(ROB_SIZE)-1:0] ioq_dest[IOQ_SIZE];
   logic [XLEN-1:0] ioq_imm[IOQ_SIZE];
 
   logic [XLEN-1:0] ioq_data[IOQ_SIZE];
@@ -181,8 +183,10 @@ module ysyx_exu #(
 
   // Uncacheable loads (MMIO) defer to ROB head (non-speculative) when MMU is off.
   // When MMU is on, TLB handles address gating inside L1D.
+  // ioq_dest is the 0-indexed ROB slot, so the head-of-ROB test is a direct
+  // compare with rob_head (no +1 offset, no width mismatch).
   logic ioq_at_rob_head;
-  assign ioq_at_rob_head = (ioq_dest[ioq_head] == cmu_bcast.rob_head + 1);
+  assign ioq_at_rob_head = (ioq_dest[ioq_head] == cmu_bcast.rob_head);
 
   assign exu_lsu.rvalid = (ioq_valid[ioq_head]
     && ioq_ren[ioq_head]
@@ -636,11 +640,14 @@ module ysyx_exu #(
     (0)
   );
 
-  // instret correction: account for in-flight ROB entries before this CSR read
+  // instret correction: account for in-flight ROB entries before this CSR read.
+  // dest is now 0-indexed so we add 1 to preserve the original numeric value
+  // (previous encoding had dest = rob_tail + 1).
   logic [$clog2(ROB_SIZE)-1:0] instret_correction;
   logic is_instret_read;
-  assign instret_correction = (rs_dest[valid_idx][$clog2(ROB_SIZE)-1:0]
-                             - cmu_bcast.rob_head[$clog2(ROB_SIZE)-1:0]);
+  assign instret_correction = (rs_dest[valid_idx]
+                             - cmu_bcast.rob_head
+                             + 1'b1);
   assign is_instret_read = (rs_imm[valid_idx][11:0] == `YSYX_CSR_INSTRET_
                          || rs_imm[valid_idx][11:0] == `YSYX_CSR_MINSTRET);
 

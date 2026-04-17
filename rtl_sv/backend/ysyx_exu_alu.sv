@@ -150,6 +150,23 @@ module ysyx_exu_alu #(
       // Zicond (Conditional Operations)
       `YSYX_ALU_CZERO_EQZ: begin alu_r = (s2 == '0) ? '0 : s1; end
       `YSYX_ALU_CZERO_NEZ: begin alu_r = (s2 != '0) ? '0 : s1; end
+
+      // Zbc (Carry-less Multiplication)
+      `YSYX_ALU_CLMUL_: begin
+        alu_r = '0;
+        for (int i = 0; i < XLEN; i++)
+          if (s2[i]) alu_r = alu_r ^ (s1 << i);
+      end
+      `YSYX_ALU_CLMULH: begin
+        alu_r = '0;
+        for (int i = 1; i < XLEN; i++)
+          if (s2[i]) alu_r = alu_r ^ (s1 >> (XLEN - i));
+      end
+      `YSYX_ALU_CLMULR: begin
+        alu_r = '0;
+        for (int i = 0; i < XLEN; i++)
+          if (s2[i]) alu_r = alu_r ^ (s1 >> (XLEN - 1 - i));
+      end
       // verilog_format: on
       default: begin
         alu_r = 'h0;

@@ -36,6 +36,7 @@ brew_install() {
     brew install sdl2 sdl2_image sdl2_ttf
   fi
   brew install gnu-sed wget dtc cmake automake
+  brew install libevent json-c
 }
 
 apt_install() {
@@ -45,6 +46,7 @@ apt_install() {
   sudo apt install -y libreadline-dev libncurses5-dev
   sudo apt install -y tcl-dev tcl-tclreadline libeigen3-dev \
     swig autotools-dev libncursesw5-dev device-tree-compiler xxd
+  sudo apt install -y libevent-dev libjson-c-dev
 }
 
 repo_clone() {

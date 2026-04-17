@@ -62,6 +62,11 @@ trait MicroOP {
   def ALU_BINV = "110110"
   def ALU_BSET = "110111"
 
+  // Zbc (Carry-less Multiplication)
+  def ALU_CLMUL  = "111010"
+  def ALU_CLMULH = "111011"
+  def ALU_CLMULR = "111100"
+
   // Zicond (Conditional Operations)
   def ALU_CZERO_EQZ = "111000"
   def ALU_CZERO_NEZ = "111001"

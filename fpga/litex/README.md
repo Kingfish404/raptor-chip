@@ -1,107 +1,95 @@
-# LiteX Support
+# Raptor LiteX SoC Integration
 
-[LiteX](https://github.com/enjoy-digital/litex)
+LiteX SoC integration for the [Raptor](../../) dual-issue out-of-order RISC-V core.
 
-The LiteX framework provides a convenient and efficient infrastructure to create FPGA Cores/SoCs, to explore various digital design architectures and create full FPGA based systems.
+## Quick Start
+
+```bash
+# 1. Install LiteX environment
+make setup
+
+# 2. Pack RTL
+make pack
+
+# 3. Run Verilator simulation (BIOS serial)
+make sim
+
+# 4. Run CoreMark benchmark
+make coremark
+```
+
+## Directory Structure
+
+```
+fpga/litex/
+├── Makefile            # Build system (run 'make help')
+├── setup_env.sh        # Environment setup (venv + LiteX install)
+├── raptor_soc.py       # LiteX SoC definition + sim entry point
+├── README.md           # This file
+└── cores/cpu/raptor/   # LiteX CPU integration files
+    ├── __init__.py     # Python package marker
+    ├── core.py         # CPU class (AXI4 bus, variants, sources)
+    ├── crt0.S          # Startup assembly (trap, .data/.bss init)
+    ├── boot-helper.S   # Boot jump helper
+    ├── system.h        # Cache flush, CSR macros
+    ├── irq.h           # Interrupt management API
+    └── csr-defs.h      # CSR address definitions
+```
 
 ## CPU Variants
 
-| Variant    | Description                                    | Use Case               |
-| ---------- | ---------------------------------------------- | ---------------------- |
-| `standard` | Dual-issue OoO, default caches, Sv32 MMU       | BIOS, bare-metal apps  |
-| `linux`    | Same RTL + OpenSBI region + DTS cache metadata | Linux boot via OpenSBI |
+| Variant    | Issue | ROB | L1I  | L1D   | Use Case   |
+| ---------- | ----- | --- | ---- | ----- | ---------- |
+| `standard` | 2     | 8   | 1 KB | 512 B | Sim & FPGA |
+| `linux`    | 2     | 16  | 8 KB | 4 KB  | Linux boot |
 
-## Getting Started
+Select variant: `make sim VARIANT=linux`
 
-```shell
-# Prepare environment
-./setup.sh
-source .venv/bin/activate
-# or using conda: `conda activate base`
+## Commands
 
-# Run default BIOS simulation (standard variant)
-make run
+| Command          | Description                         |
+| ---------------- | ----------------------------------- |
+| `make setup`     | Install LiteX + register Raptor CPU |
+| `make pack`      | Pack RTL into single .sv            |
+| `make sim`       | Verilator simulation                |
+| `make sim-trace` | Simulation with FST waveform        |
+| `make coremark`  | Build + run CoreMark in sim         |
+| `make linux`     | Build + run Linux payload in sim    |
+| `make clean`     | Remove build artifacts              |
+| `make help`      | Show all targets                    |
 
-# Liftoff demo payload
-pushd $YSYX_HOME/third_party/enjoy-digital/litex && \
-  litex_bare_metal_demo --build-path=build/sim/ && popd
-make liftoff
-
-# CoreMark payload
-make link
-pushd $YSYX_HOME/third_party/enjoy-digital/litex && \
-  python3 ./litex/soc/software/coremark_litex/coremark.py --build-path=build/sim/
-make coremark
-# Add patch below at `CoreMark` to see mark result.
-```
-
-## Linux Boot (Verilator Simulation)
-
-The `linux` variant sets up the SoC for OpenSBI + Linux boot:
-
-```shell
-# 1. Build SoC and generate device tree (no gateware compile)
-make linux_build
-make linux_dts
-
-# 2. Build OpenSBI (FW_PAYLOAD) with the generated DTS.
-#    See docs/linux_kernel.md for cross-compilation instructions.
-#    Place the resulting `Image` file in the LiteX directory.
-
-# 3. Run Linux simulation
-make linux_sim        # interactive (with UART console)
-make linux_sim_ni     # non-interactive
-```
-
-### Boot Flow
+## Architecture
 
 ```
-LiteX BIOS (ROM) → loads Image to main_ram → boot_helper
-  → OpenSBI (M-mode, FW_PAYLOAD at main_ram+0x00f00000)
-    → Linux kernel (S-mode)
+┌────────────────────────────────────────────┐
+│  Raptor Core (ysyx.sv)                     │
+│  ├─ Dual-issue OoO, RV32IMAC + Zb*         │
+│  └─ AXI4 Master (32-bit addr, 32-bit data) │
+└─────────┬──────────────────────────────────┘
+          │ AXI4 Full
+          ▼
+┌────────────────────────────────────────────┐
+│  LiteX SoC Interconnect                    │
+│  ├─ AXI → Wishbone converter               │
+│  ├─ UART (serial console)                  │
+│  ├─ Timer                                  │
+│  ├─ SRAM (integrated)                      │
+│  └─ LiteDRAM (FPGA targets)                │
+└────────────────────────────────────────────┘
 ```
 
-### Device Tree
+## Environment Variables
 
-`make linux_dts` generates the DTS from the SoC's CSR JSON. The generated
-DTS includes cache parameters (L1I/L1D size, ways, block size) and the
-standard CLINT/PLIC memory regions required by OpenSBI and Linux.
+| Variable      | Description                     | Default       |
+| ------------- | ------------------------------- | ------------- |
+| `RAPTOR_HOME` | Root of raptor-chip repo        | Auto-detected |
+| `VARIANT`     | CPU variant                     | `standard`    |
+| `SYS_CLK`     | System clock frequency (Hz)     | `50000000`    |
+| `EXTRA_FLAGS` | Extra flags for `raptor_soc.py` | (empty)       |
 
-## [LiteX](https://github.com/enjoy-digital/litex)
+## Dependencies
 
-```
-                        +---------------+
-                        |FPGA toolchains|
-                        +----^-----+----+
-                             |     |
-         +-------+        +--+-----v--+
-         | Migen +-------->           |        Your design
-         +-------+        |   LiteX   +---> ready to be used!
-+----------------------+  |           |
-|LiteX Cores Ecosystem +-->           |
-+----------------------+  +-^-------^-+
- (Eth, SATA, DRAM, US B,     |       |
-  PCIe, Video, etc...)       +       +
-                            board   target
-                            file    file
-```
-
-## [CoreMark](https://github.com/eembc/coremark)
-
-`enjoy-digital/pythondata-software-picolibc/pythondata_software_picolibc/data/newlib/libc/tinystdio/vfiprintf.c`
-
-```patch
-diff --git a/newlib/libc/tinystdio/vfiprintf.c b/newlib/libc/tinystdio/vfiprintf.c
-index abbd68b82..f0782f030 100644
---- a/newlib/libc/tinystdio/vfiprintf.c
-+++ b/newlib/libc/tinystdio/vfiprintf.c
-@@ -30,7 +30,7 @@
- 
- */
- 
--#define PRINTF_LEVEL PRINTF_STD
-+#define PRINTF_LEVEL PRINTF_FLT
- #ifndef FORMAT_DEFAULT_INTEGER
- #define vfprintf __i_vfprintf
- #endif
-```
+- Python 3.8+
+- Verilator 5.0+ (for simulation)
+- RISC-V GCC toolchain (`riscv64-unknown-elf-gcc`)
+- LiteX (installed via `make setup`)

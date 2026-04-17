@@ -49,7 +49,7 @@ module ysyx_rou #(
 
   // Async trap state
   logic            recieved_trap;
-  logic            recieved_sw_trap /* verilator public */;
+  logic            recieved_sw_trap  /* verilator public */;
   logic [XLEN-1:0] trap_pc;
 
   // Forward declarations (used across sections)
@@ -351,8 +351,8 @@ module ysyx_rou #(
     rou_exu.prd = uoq_prd[uoq_tail];
     rou_exu.prs = uoq_prs[uoq_tail];
 
-    // ROB destination tag (1-indexed)
-    rou_exu.dest = {{1'b0}, rob_tail} + 1;
+    // ROB destination tag: directly the slot this uop will occupy.
+    rou_exu.dest = rob_tail;
   end
 
 `ifdef YSYX_DUAL_ISSUE
@@ -392,7 +392,7 @@ module ysyx_rou #(
     rou_exu.prd_b = uoq_prd[uoq_tail_b];
     rou_exu.prs_b = uoq_prs[uoq_tail_b];
 
-    rou_exu.dest_b = {{1'b0}, rob_tail} + 2;
+    rou_exu.dest_b = rob_tail_b;
   end
 `endif
 
@@ -400,16 +400,16 @@ module ysyx_rou #(
   // 3. Reorder Buffer (ROB) - uses rob_entry_t struct array
   // ================================================================
 
-  // Write-back destination index decoding
+  // Write-back destination index decoding (dest is already 0-indexed ROB slot)
   logic [$clog2(ROB_SIZE)-1:0] wb_dest_exu, wb_dest_ioq;
-  assign wb_dest_exu = exu_rou.dest[$clog2(ROB_SIZE)-1:0] - 1;
-  assign wb_dest_ioq = exu_ioq_bcast.dest[$clog2(ROB_SIZE)-1:0] - 1;
+  assign wb_dest_exu = exu_rou.dest;
+  assign wb_dest_ioq = exu_ioq_bcast.dest;
 
   always @(posedge clock) begin
     if (reset || flush_pipe) begin
-      rob_head      <= '0;
-      rob_tail      <= '0;
-      recieved_trap <= 1'b0;
+      rob_head         <= '0;
+      rob_tail         <= '0;
+      recieved_trap    <= 1'b0;
       recieved_sw_trap <= 1'b0;
       for (int i = 0; i < ROB_SIZE; i++) begin
         rob_entry[i].busy  <= 1'b0;
@@ -579,9 +579,9 @@ module ysyx_rou #(
           rob_entry[h1].sq_wdata <= '0;
         end
 
-        recieved_trap <= clint_sw_trap || clint_timer_trap;
+        recieved_trap    <= clint_sw_trap || clint_timer_trap;
         recieved_sw_trap <= clint_sw_trap;
-        trap_pc       <= dual_commit ? rob_entry[h1].npc : rob_entry[rob_head].npc;
+        trap_pc          <= dual_commit ? rob_entry[h1].npc : rob_entry[rob_head].npc;
       end
     end
   end
@@ -731,8 +731,10 @@ module ysyx_rou #(
   assign rou_csr.tval = recieved_trap ? '0 : csr_from_h1 ? rob_entry[h1].tval : rob_entry[h0].tval;
   assign rou_csr.cause     = recieved_trap
       ? (recieved_sw_trap
-          ? (((csr_bcast.priv == `YSYX_PRIV_M) ? `YSYX_CAUSE_MSI : `YSYX_CAUSE_SSI) + ('b1 << (XLEN - 1)))
-          : (((csr_bcast.priv == `YSYX_PRIV_M) ? `YSYX_CAUSE_MTI : `YSYX_CAUSE_STI) + ('b1 << (XLEN - 1))))
+          ? (((csr_bcast.priv == `YSYX_PRIV_M)
+            ? `YSYX_CAUSE_MSI : `YSYX_CAUSE_SSI) + ('b1 << (XLEN - 1)))
+          : (((csr_bcast.priv == `YSYX_PRIV_M)
+            ? `YSYX_CAUSE_MTI : `YSYX_CAUSE_STI) + ('b1 << (XLEN - 1))))
       : csr_from_h1 ? rob_entry[h1].cause
       :               rob_entry[h0].cause;
   assign rou_csr.valid     = recieved_trap

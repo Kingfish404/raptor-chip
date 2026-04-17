@@ -121,8 +121,14 @@ interface csr_bcast_if #(
   logic timer_int_en;
   logic sw_int_en;
 
-  modport in(input priv, satp_ppn, satp_asid, input immu_en, dmmu_en, mtvec, tvec, timer_int_en, sw_int_en);
-  modport out(output priv, satp_ppn, satp_asid, output immu_en, dmmu_en, mtvec, tvec, timer_int_en, sw_int_en);
+  modport in(
+      input priv, satp_ppn, satp_asid,
+      input immu_en, dmmu_en, mtvec, tvec, timer_int_en, sw_int_en
+  );
+  modport out(
+      output priv, satp_ppn, satp_asid,
+      output immu_en, dmmu_en, mtvec, tvec, timer_int_en, sw_int_en
+  );
 endinterface
 
 // final commit boardcast
@@ -148,7 +154,7 @@ interface cmu_bcast_if #(
   logic sys_resume;
   logic time_trap;
 
-  logic [$clog2(`YSYX_ROB_SIZE):0] rob_head;
+  logic [$clog2(`YSYX_ROB_SIZE)-1:0] rob_head;
 
   // Per-slot commit info (dual commit)
   logic [RLEN-1:0] rd_a;

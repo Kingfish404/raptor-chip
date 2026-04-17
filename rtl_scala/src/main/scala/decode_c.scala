@@ -233,7 +233,7 @@ class ysyx_idu_decoder_c extends Module with Instr {
     
     C_ADDI16sp -> List(Mux(decCiNzimmAddi16sp(cinst) === 0.U, cNop,
                      itype(decCiNzimmAddi16sp(cinst), 2.U(5.W), "b000".U(3.W), 2.U(5.W), "b0010011".U(7.W)))), // res,imm=0
-    C_LUI_   -> List(Mux(decRd(cinst) === 0.U, cNop, utype(decCiNzimmLui(cinst), decRd(cinst), "b0110111".U(7.W)))),
+    C_LUI_   -> List(Mux(decRd(cinst) === 0.U || decCiNzimmLui(cinst) === 0.U, cNop, utype(decCiNzimmLui(cinst), decRd(cinst), "b0110111".U(7.W)))), // Zcmop: nzimm=0 -> NOP
     C_SRLI   -> List(itype(Cat(0.U(6.W), decCshamtFull(cinst)), decRs1Short(cinst), "b101".U(3.W), decRs1Short(cinst), "b0010011".U(7.W))), // hint,rd=0;rv32 custom,uimm[5]=1
     C_SRLI64 -> List(0.U), // rv128; rv32/64 hint;hint,rd=0
     C_SRAI   -> List(itype(Cat("b010000".U(6.W), decCshamtFull(cinst)), decRs1Short(cinst), "b101".U(3.W), decRs1Short(cinst), "b0010011".U(7.W))), // rv32 custom,uimm[5]=1

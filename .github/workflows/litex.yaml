@@ -27,16 +27,15 @@ jobs:
         run: ./setup.sh
       - name: Prepare LiteX
         shell: bash -l {0}
-        run: cd fpga/litex && ./setup.sh
-      - name: Run LiteX
+        run: cd fpga/litex && make setup
+      - name: Run LiteX BIOS
         shell: bash -l {0}
-        run: cd fpga/litex && source .venv/bin/activate && timeout 240s make run_ni || true
+        run: cd fpga/litex && timeout 240s make run-litex SIM_TIMEOUT=0 || true
       - name: CoreMark on LiteX
         shell: bash -l {0}
         run: |
-          cd fpga/litex && source .venv/bin/activate
-          pushd $YSYX_HOME/third_party/enjoy-digital/litex && litex_bare_metal_demo --build-path=build/sim/ && popd
-          timeout 300s make coremark 2>&1 | tee /tmp/litex-coremark.log || true
+          cd fpga/litex
+          timeout 300s make coremark SIM_TIMEOUT=0 2>&1 | tee /tmp/litex-coremark.log || true
       - name: LiteX summary
         run: |
           LOG=/tmp/litex-coremark.log

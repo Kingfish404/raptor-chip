@@ -93,6 +93,11 @@
 `define YSYX_ALU_CZERO_EQZ 'b111000
 `define YSYX_ALU_CZERO_NEZ 'b111001
 
+// Zbc (Carry-less Multiplication)
+`define YSYX_ALU_CLMUL_ 'b111010
+`define YSYX_ALU_CLMULH 'b111011
+`define YSYX_ALU_CLMULR 'b111100
+
 `define YSYX_ALU_MUL___ 'b11000
 `define YSYX_ALU_MULH__ 'b11001
 `define YSYX_ALU_MULHSU 'b11010

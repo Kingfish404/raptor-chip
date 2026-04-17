@@ -330,6 +330,24 @@ static int decode_exec(Decode *s)
   INSTPAT("0110100 ????? ????? 001 ????? 01100 11", binv, R, R(rd) = src1 ^ ((word_t)1 << (src2 & (sizeof(word_t) * 8 - 1))));
   INSTPAT("0010100 ????? ????? 001 ????? 01100 11", bset, R, R(rd) = src1 | ((word_t)1 << (src2 & (sizeof(word_t) * 8 - 1))));
 
+  // Zbc Extension (Carry-less Multiplication)
+  INSTPAT("0000101 ????? ????? 001 ????? 01100 11", clmul, R, {
+    word_t a = src1, b = src2, result = 0;
+    for (unsigned i = 0; i < sizeof(word_t) * 8; i++)
+      if ((b >> i) & 1) result ^= a << i;
+    R(rd) = result; });
+  INSTPAT("0000101 ????? ????? 011 ????? 01100 11", clmulh, R, {
+    word_t a = src1, b = src2;
+    word_t result = 0;
+    for (unsigned i = 1; i < sizeof(word_t) * 8; i++)
+      if ((b >> i) & 1) result ^= a >> (sizeof(word_t) * 8 - i);
+    R(rd) = result; });
+  INSTPAT("0000101 ????? ????? 010 ????? 01100 11", clmulr, R, {
+    word_t a = src1, b = src2, result = 0;
+    for (unsigned i = 0; i < sizeof(word_t) * 8; i++)
+      if ((b >> i) & 1) result ^= a >> (sizeof(word_t) * 8 - 1 - i);
+    R(rd) = result; });
+
   // Zicond (Conditional Operations)
   INSTPAT("0000111 ????? ????? 101 ????? 01100 11", czero.eqz, R, R(rd) = (src2 == 0) ? 0 : src1);
   INSTPAT("0000111 ????? ????? 111 ????? 01100 11", czero.nez, R, R(rd) = (src2 != 0) ? 0 : src1);

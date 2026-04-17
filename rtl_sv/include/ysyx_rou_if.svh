@@ -62,7 +62,8 @@ interface rou_exu_if #(
   logic [PLEN-1:0] prd;
   logic [PLEN-1:0] prs;
 
-  logic [$clog2(`YSYX_ROB_SIZE):0] dest;
+  // ROB destination index (0-indexed, directly maps to rob_entry[]).
+  logic [$clog2(`YSYX_ROB_SIZE)-1:0] dest;
 
   logic valid;
   logic ready;
@@ -79,7 +80,7 @@ interface rou_exu_if #(
   logic [PLEN-1:0] prd_b;
   logic [PLEN-1:0] prs_b;
 
-  logic [$clog2(`YSYX_ROB_SIZE):0] dest_b;
+  logic [$clog2(`YSYX_ROB_SIZE)-1:0] dest_b;
 
   logic valid_b;
   logic ready_b;
@@ -159,7 +160,7 @@ interface rou_cmu_if #(
   logic sys_resume;
   logic time_trap;
 
-  logic [$clog2(`YSYX_ROB_SIZE):0] rob_head;
+  logic [$clog2(`YSYX_ROB_SIZE)-1:0] rob_head;
 
 `ifdef YSYX_RVFI
   // RVFI per-slot trap flag

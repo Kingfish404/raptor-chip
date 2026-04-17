@@ -93,7 +93,8 @@ interface exu_rou_if #(
   logic [XLEN-1:0] npc;
   logic btaken;
 
-  logic [$clog2(`YSYX_ROB_SIZE):0] dest;
+  // ROB destination index (0-indexed, directly maps to rob_entry[]).
+  logic [$clog2(`YSYX_ROB_SIZE)-1:0] dest;
   logic [XLEN-1:0] result;
 
   logic [PLEN-1:0] prd;
@@ -164,7 +165,8 @@ interface exu_ioq_bcast_if #(
   logic [XLEN-1:0] npc;
 
   logic [XLEN-1:0] result;
-  logic [$clog2(`YSYX_ROB_SIZE):0] dest;
+  // ROB destination index (0-indexed, directly maps to rob_entry[]).
+  logic [$clog2(`YSYX_ROB_SIZE)-1:0] dest;
 
   logic [PLEN-1:0] prd;
   logic [RLEN-1:0] rd;

@@ -122,12 +122,9 @@ static uint32_t clui_to_lui(uint32_t inst)
   nzimm |= (inst & (CI_MASK_6_4 | CI_MASK_3_2)) << 10;
   nzimm = sign_extend(nzimm, 17);
 
-  // ensure nzimm != 0
-  // assert(nzimm != 0)
-  if (!(nzimm != 0))
-  {
-    return 0;
-  }
+  // nzimm == 0: Zcmop (c.mop.N) for odd rd, reserved/HINT otherwise; treat as nop
+  if (nzimm == 0)
+    return nop();
 
   // if rd == 0, marked as HINT, implement as nop
   if (rd == 0)

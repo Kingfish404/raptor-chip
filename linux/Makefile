@@ -100,12 +100,8 @@ build_linux: linux ## Build Linux kernel for RISC-V 32-bit
 		./scripts/config --enable CONFIG_ARCH_RV32I && \
 		./scripts/config --disable CONFIG_FPU && \
 		./scripts/config --disable CONFIG_RISCV_ISA_ZAWRS && \
-		./scripts/config --enable CONFIG_RISCV_ISA_ZBA && \
-		./scripts/config --enable CONFIG_RISCV_ISA_ZBB && \
-		./scripts/config --disable CONFIG_RISCV_ISA_ZBC && \
 		./scripts/config --disable CONFIG_RISCV_ISA_ZICBOM && \
-		./scripts/config --disable CONFIG_RISCV_ISA_ZICBOZ && \
-		./scripts/config --disable CONFIG_RISCV_ISA_ZICBOM
+		./scripts/config --disable CONFIG_RISCV_ISA_ZICBOZ
 
 	make -C linux ARCH=riscv -j`nproc` olddefconfig
 

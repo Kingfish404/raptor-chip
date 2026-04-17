@@ -1,8 +1,450 @@
-ifeq ($(wildcard $(YSYX_HOME)/nsim/Makefile),)
-  $(error YSYX_HOME=$(YSYX_HOME) is not a YSYX repo)
+# ============================================================================
+# fpga/litex/Makefile — Raptor LiteX SoC build system
+# ============================================================================
+# Run `make help` for the full target + variable list.
+#
+# Conventions follow the project-wide Makefile style (see root Makefile and
+# docs-ref/dev.makefile-conventions.md):
+#   * Targets carry inline `## description` for help extraction.
+#   * Variables use `VAR ?= default ## description`.
+#   * Section headers `# ====...` + `# Title` + `# ====...` group targets in
+#     `make help` output.
+#   * All `.PHONY` targets are collected in a single block at the bottom.
+
+SHELL         := /bin/bash
+.DEFAULT_GOAL := help
+
+# --- Paths ---
+LITEX_DIR   := $(abspath .)
+RAPTOR_HOME := $(abspath ../..)
+NSIM_DIR    := $(RAPTOR_HOME)/nsim
+RTL_DIR     := $(RAPTOR_HOME)/rtl_sv
+BUILD_DIR   := $(LITEX_DIR)/build
+VENV_DIR    := $(LITEX_DIR)/.venv
+PYTHON      := $(VENV_DIR)/bin/python3
+PIP         := $(VENV_DIR)/bin/pip
+
+export RAPTOR_HOME
+
+# --- CPU variant ---
+VARIANT     ?= standard ## CPU variant (standard|linux)
+SYS_CLK     ?= 50000000 ## System clock in Hz
+SIM_TIMEOUT ?= 30 ## Simulation timeout in seconds (0=unlimited)
+
+# --- Verilator parallel threading ---
+# Verilator multi-threaded simulation (biggest lever for OpenSBI/Linux boot time
+# in Verilator). LiteX passes --threads=N through to the verilator invocation,
+# which enables coarse-grained parallel evaluation (OpenMP-based). A value of 1
+# disables threading. Practical speedups are typically 1.5-2.5x on 4-8 host
+# cores; benefit diminishes above ~4 threads for a single-core RISC-V SoC.
+#
+# Override at the command line:  make sim SIM_THREADS=8
+SIM_THREADS ?= 4 ## Verilator simulation threads (1=off)
+
+# --- Wave / trace ---
+# Off by default — tracing is a huge perf hit. Enable on demand:
+#   make sim     TRACE=fst     # FST (compact binary, ~5-10x smaller & faster than VCD)
+#   make sim     TRACE=vcd     # VCD (universal text format, slowest + largest)
+#   make test-fib TRACE=fst    # works for any run target
+# Wave files land in $(GW_DIR)/sim.{fst,vcd} (LiteX default).
+# Changing TRACE re-hashes build_sim.sh → triggers Verilator rebuild.
+# Partial files from Ctrl+C / timeout are viewable (LiteX flushes each tick).
+TRACE ?= none ## Wave dump mode (none|fst|vcd)
+
+# Windowed tracing (exact clock cycles, not ps).
+# Default: TRACE_START=0 (dump from t=0), TRACE_END=-1 (no end).
+TRACE_START ?= 0 ## Start dump at cycle N (0=from t=0)
+TRACE_END   ?= -1 ## Stop dump at cycle N (-1=no end)
+
+# Inline `## description` comments above leave trailing whitespace in the value.
+# Strip before using in ifeq/ifneq (exact-match) comparisons.
+VARIANT     := $(strip $(VARIANT))
+SYS_CLK     := $(strip $(SYS_CLK))
+SIM_TIMEOUT := $(strip $(SIM_TIMEOUT))
+SIM_THREADS := $(strip $(SIM_THREADS))
+TRACE       := $(strip $(TRACE))
+TRACE_START := $(strip $(TRACE_START))
+TRACE_END   := $(strip $(TRACE_END))
+
+ifeq ($(TRACE),fst)
+  TRACE_FLAGS := --trace --trace-fst
+  TRACE_MSG   := FST tracing ON
+else ifeq ($(TRACE),vcd)
+  TRACE_FLAGS := --trace
+  TRACE_MSG   := VCD tracing ON (consider TRACE=fst for ~5-10x less overhead)
+else ifeq ($(TRACE),none)
+  TRACE_FLAGS :=
+  TRACE_MSG   :=
+else
+  $(error Invalid TRACE='$(TRACE)'. Use TRACE=fst, TRACE=vcd, or TRACE=none)
 endif
 
-LITEX_PATH = $(YSYX_HOME)/third_party/enjoy-digital/litex
+# Pass cycle-based TRACE_START/TRACE_END to raptor_soc.py, which gates
+# LiteX's `sim_trace` pin with an internal cycle counter.
+ifneq ($(TRACE),none)
+	TRACE_FLAGS += --trace-start-cycle=$(TRACE_START)
+	TRACE_MSG   := $(TRACE_MSG) [start @ cycle $(TRACE_START)]
+	ifneq ($(TRACE_END),-1)
+		TRACE_FLAGS += --trace-end-cycle=$(TRACE_END)
+		TRACE_MSG   := $(TRACE_MSG) [end(exclusive) @ cycle $(TRACE_END)]
+	endif
+endif
+
+# --- Derived paths (per-variant) ---
+GW_DIR      := $(BUILD_DIR)/$(VARIANT)/gateware
+SIM_V       := $(GW_DIR)/sim.v
+VSIM        := $(GW_DIR)/obj_dir/Vsim
+
+# --- Extra flags (user-overridable) ---
+EXTRA_FLAGS ?= ## Extra flags passed to raptor_soc.py
+
+# ==============================================================================
+# Environment
+# ==============================================================================
+
+setup: ## Install LiteX environment + register Raptor CPU
+	@bash setup_env.sh
+
+setup-skip: ## Activate venv without reinstalling
+	@bash setup_env.sh --skip-install
+
+$(VENV_DIR)/bin/activate:
+	@echo "[INFO] Run 'make setup' first to create the virtual environment."
+	@exit 1
+
+# ==============================================================================
+# RTL Packing
+# ==============================================================================
+
+PACK_SV := $(NSIM_DIR)/build/ysyx_pack.sv
+
+# All hand-written RTL sources + headers. Any change must trigger re-pack.
+# Chisel-generated sources under rtl_sv/generated/ are regenerated by
+# `make verilog` in the top-level Makefile; we include them as deps too so
+# an upstream decoder change is picked up.
+RTL_SOURCES := $(shell find $(RTL_DIR) -type f \( -name '*.sv' -o -name '*.svh' -o -name '*.v' -o -name '*.vh' \) 2>/dev/null)
+
+pack: ## Pack all RTL into single preprocessed SV file
+	$(MAKE) -C $(NSIM_DIR) pack
+
+# Re-pack whenever any RTL file is newer than the packed output.
+$(PACK_SV): $(RTL_SOURCES)
+	$(MAKE) -C $(NSIM_DIR) pack
+
+# ==============================================================================
+# Firmware (minimal boot ROM)
+# ==============================================================================
+
+CROSS     ?= riscv64-unknown-elf-
+FW_SRC    := $(LITEX_DIR)/firmware
+FW_DIR    := $(BUILD_DIR)/firmware
+FW_BIN    := $(FW_DIR)/boot.bin
+FW_ELF    := $(FW_DIR)/boot.elf
+FW_DTB    := $(FW_DIR)/litex-soc.dtb
+FW_DTS    := $(FW_SRC)/litex-soc.dts
+
+$(FW_DIR):
+	@mkdir -p $@
+
+$(FW_DTB): $(FW_DTS) | $(FW_DIR)
+	dtc -I dts -O dtb -o $@ $<
+
+$(FW_ELF): $(FW_SRC)/boot.S $(FW_SRC)/link.ld $(FW_DTB) | $(FW_DIR)
+	$(CROSS)gcc -march=rv32imac -mabi=ilp32 -nostdlib -nostartfiles \
+		-T $(FW_SRC)/link.ld -I$(FW_DIR) -o $@ $(FW_SRC)/boot.S
+
+$(FW_BIN): $(FW_ELF)
+	$(CROSS)objcopy -O binary $< $@
+
+firmware: $(FW_BIN) ## Build minimal boot firmware (-> build/firmware/)
+
+firmware-clean:
+	rm -rf $(FW_DIR)
+	@# Legacy in-tree artifacts from older versions of this Makefile:
+	rm -f $(FW_SRC)/boot.elf $(FW_SRC)/boot.bin $(FW_SRC)/litex-soc.dtb
+
+# ==============================================================================
+# Verilator Simulation
+# ==============================================================================
+
+# --- Parameterized core helpers ---
+# Three composable building blocks. Each takes a parameter so targets with
+# different output directories / SoC configurations share the same logic.
+# Eliminates the copy-paste that previously existed in run-litex and linux.
+
+# $(call _soc_gen,<all raptor_soc.py flags>)
+# Activates venv and invokes raptor_soc.py.
+define _soc_gen
+	source $(VENV_DIR)/bin/activate && \
+	$(PYTHON) raptor_soc.py $(1) $(EXTRA_FLAGS)
+endef
+
+# Presets: common flags shared by most targets.
+_BASE_FLAGS = --sys-clk-freq=$(SYS_CLK) --threads=$(SIM_THREADS) $(TRACE_FLAGS)
+_STD_FLAGS  = --cpu-variant=$(VARIANT) --output-dir=$(BUILD_DIR)/$(VARIANT) \
+	--no-compile-software --integrated-rom-init=$(FW_BIN) $(_BASE_FLAGS)
+
+# $(call _compile_if_needed,<gw_dir>)
+# Compiles the Verilator binary only when sim.v + sim_init.cpp + build_sim.sh
+# content has changed (hash-based). sim_init.cpp is included because LiteX
+# bakes trace window parameters into it.
+define _compile_if_needed
+	@mkdir -p $(1)
+	@SIM_V_HASH=$$({ \
+		grep -v -e '^// Date' -e '^//  Auto-Generated by LiteX on' $(1)/sim.v 2>/dev/null; \
+		cat $(1)/sim_init.cpp 2>/dev/null; \
+		cat $(1)/build_sim.sh 2>/dev/null; \
+	} | md5 -q 2>/dev/null || { \
+		grep -v -e '^// Date' -e '^//  Auto-Generated by LiteX on' $(1)/sim.v 2>/dev/null; \
+		cat $(1)/sim_init.cpp 2>/dev/null; \
+		cat $(1)/build_sim.sh 2>/dev/null; \
+	} | md5sum | cut -d' ' -f1); \
+	OLD_HASH=$$(cat $(1)/.sim_v_hash 2>/dev/null || echo ""); \
+	if [ ! -f $(1)/obj_dir/Vsim ] || [ "$$SIM_V_HASH" != "$$OLD_HASH" ]; then \
+		echo "[INFO] Compiling Verilator simulation (this may take several minutes)..."; \
+		cd $(1) && bash build_sim.sh; \
+		echo "$$SIM_V_HASH" > $(1)/.sim_v_hash; \
+		echo "[INFO] Verilator compilation complete."; \
+	else \
+		echo "[INFO] Verilator binary up to date, skipping compilation."; \
+	fi
+endef
+
+# $(call _run_vsim,<gw_dir>)
+# Runs Vsim with timeout + Ctrl+C/SIGTERM handling + wave summary.
+define _run_vsim
+	@if [ ! -f $(1)/obj_dir/Vsim ]; then \
+		echo "[ERR] No sim binary at $(1). Run 'make sim-build' first."; exit 1; fi
+	@echo "[INFO] Running sim (timeout=$(SIM_TIMEOUT)s, Ctrl+C to stop)"
+	@if [ -n "$(TRACE_MSG)" ]; then echo "[INFO] $(TRACE_MSG) — wave -> $(1)/sim.$(TRACE)"; fi
+	@cd $(1) && \
+		timeout --foreground $(SIM_TIMEOUT) obj_dir/Vsim; \
+		rc=$$?; \
+		if [ $$rc -eq 124 ]; then \
+			echo ""; echo "[INFO] Simulation timed out after $(SIM_TIMEOUT)s."; \
+		elif [ $$rc -eq 130 ] || [ $$rc -eq 143 ]; then \
+			echo ""; echo "[INFO] Simulation interrupted (Ctrl+C / SIGTERM)."; \
+		elif [ $$rc -ne 0 ]; then \
+			exit $$rc; \
+		fi
+	@if [ -n "$(TRACE_MSG)" ] && [ -f $(1)/sim.$(TRACE) ]; then \
+		sz=$$(wc -c < $(1)/sim.$(TRACE)); \
+		echo "[INFO] Wave: $(1)/sim.$(TRACE) ($$sz bytes)"; \
+	fi
+endef
+
+# --- Top-level sim targets ---
+
+sim-gen: $(PACK_SV) $(FW_BIN) ## Generate SoC Verilog (no compile, no run)
+	$(call _soc_gen,$(_STD_FLAGS))
+
+sim-build: sim-gen ## Generate SoC + compile Verilator binary
+	$(call _compile_if_needed,$(GW_DIR))
+	@echo ""
+	@echo "========================================="
+	@echo " Simulation binary ready."
+	@echo " Run: make sim-run"
+	@echo "========================================="
+
+sim: sim-build ## Build + run simulation (no payload, boot firmware only)
+	$(call _run_vsim,$(GW_DIR))
+
+sim-run: ## Run already-built simulation
+	$(call _run_vsim,$(GW_DIR))
+
+sim-trace: ## Build + run simulation with FST trace (alias for: make sim TRACE=fst)
+	@$(MAKE) --no-print-directory sim TRACE=fst
+
+sim-trace-vcd: ## Build + run simulation with VCD trace (slower/larger than FST)
+	@$(MAKE) --no-print-directory sim TRACE=vcd
+
+# ==============================================================================
+# LiteX default BIOS (logo + memtest + interactive prompt)
+# ==============================================================================
+# Uses LiteX's upstream BIOS (built from litex/soc/software/bios) as the boot
+# ROM instead of our minimal custom firmware. Shows the familiar LiteX
+# banner/logo, runs memory tests, and drops into the `litex>` prompt.
+#
+# Isolated build dir (build/litex-bios/) so its ROM-init hash doesn't clobber
+# the `standard` variant's Verilator cache.
+#
+# Picolibc path compat patch
+# --------------------------
+# Newer `pythondata-software-picolibc` (>=1.7) relocates sources under
+# `newlib/libc/` and splits tinystdio into `newlib/libc/tinystdio/`. LiteX's
+# libc/common.mak still reference the old `libc/...` layout, so we patch the
+# two LiteX files in-place (and restore via `git checkout` on exit) — mirroring
+# the `_patch_sim_c` / `_litex_libc_patch` pattern. No venv mutation.
+LITEX_PATH       := $(RAPTOR_HOME)/third_party/enjoy-digital/litex
+define _litex_picolibc_patch
+	$(PYTHON) $(LITEX_DIR)/scripts/patch_litex_picolibc.py $(LITEX_PATH)
+endef
+define _litex_picolibc_restore
+	cd $(LITEX_PATH) && git checkout -- litex/soc/software/common.mak litex/soc/software/libc/Makefile 2>/dev/null || true
+endef
+
+LITEX_BIOS_DIR    := $(BUILD_DIR)/litex-bios
+LITEX_BIOS_GW_DIR := $(LITEX_BIOS_DIR)/gateware
+
+run-litex: $(PACK_SV) ## Build + run sim with default LiteX BIOS (logo + memtest)
+	$(call _litex_picolibc_patch)
+	@trap '$(call _litex_picolibc_restore)' EXIT; \
+	$(call _soc_gen,--cpu-variant=$(VARIANT) --output-dir=$(LITEX_BIOS_DIR) $(_BASE_FLAGS))
+	$(call _compile_if_needed,$(LITEX_BIOS_GW_DIR))
+	$(call _run_vsim,$(LITEX_BIOS_GW_DIR))
+
+run-litex-clean: ## Remove LiteX-BIOS sim build artifacts
+	rm -rf $(LITEX_BIOS_DIR)
+
+# ==============================================================================
+# Payloads
+# ==============================================================================
+# Workflow: generate SoC (ROM firmware + payload in main_ram) → compile if
+# sim.v changed → run. Subsequent runs with the same SoC topology skip
+# recompilation (~10 min saved).
+
+# --- Helper: generate + compile + run with payload ---
+# Usage: $(call _payload_sim,<--ram-init=path>)
+define _payload_sim
+	$(call _soc_gen,$(_STD_FLAGS) $(1))
+	$(call _compile_if_needed,$(GW_DIR))
+	$(call _run_vsim,$(GW_DIR))
+endef
+
+# --- CoreMark ---
+COREMARK_BENCH := $(LITEX_DIR)/benchmarks/coremark
+COREMARK_BIN   := $(COREMARK_BENCH)/build/coremark.bin
+
+coremark-build: ## Build CoreMark binary (clone + compile)
+	$(MAKE) -C $(COREMARK_BENCH) build
+
+coremark: $(PACK_SV) $(FW_BIN) coremark-build ## Build + run CoreMark in sim
+	$(call _payload_sim,--ram-init=$(COREMARK_BIN))
+
+coremark-clean: ## Remove CoreMark build artifacts (keep cloned source)
+	$(MAKE) -C $(COREMARK_BENCH) clean
+
+# --- MicroBench ---
+MICROBENCH_DIR := $(RAPTOR_HOME)/abstract-machine/app/am-kernels/benchmarks/microbench
+MICROBENCH_BIN := $(MICROBENCH_DIR)/build/microbench-riscv32-npc.bin
+
+microbench-build: ## Build MicroBench binary
+	$(MAKE) -C $(MICROBENCH_DIR) ARCH=riscv32-npc
+
+microbench: $(PACK_SV) $(FW_BIN) microbench-build ## Build + run MicroBench in sim
+	$(call _payload_sim,--ram-init=$(MICROBENCH_BIN))
+
+# --- Self-contained C microbenchmarks (fpga/litex/tests) ---
+# Standalone payloads that do NOT depend on AM / nanos-lite / libc. They talk
+# directly to LiteX UART (0xf000_1800) and read `rdcycle`, so they exercise the
+# core and memory system without any build-cache or MMIO-map pitfalls. Ideal
+# for quickly smoke-testing a LiteX build after RTL / soc.py changes.
+TESTS_DIR       := $(LITEX_DIR)/tests
+TESTS_BUILD_DIR := $(BUILD_DIR)/tests
+TEST_NAMES      := hello text fib prime memcpy mul
+TEST_TARGETS    := $(addprefix test-,$(TEST_NAMES))
+
+
+tests: ## Build all standalone C microbenchmarks (build/tests/*.bin)
+	$(MAKE) -C $(TESTS_DIR) BUILD_DIR=$(TESTS_BUILD_DIR)
+
+tests-clean: ## Clean standalone microbenchmark build artifacts
+	$(MAKE) -C $(TESTS_DIR) BUILD_DIR=$(TESTS_BUILD_DIR) clean
+
+# Static pattern rule (not an implicit pattern rule): make DOES resolve these
+# for phony targets. `make test-fib` → builds sim + test + runs it.
+$(TEST_TARGETS): test-%: $(PACK_SV) $(FW_BIN) tests ## Run a single standalone test (e.g. test-hello)
+	@if [ ! -f $(TESTS_BUILD_DIR)/$*.bin ]; then \
+		echo "[ERR] $(TESTS_BUILD_DIR)/$*.bin not found"; exit 1; fi
+	$(call _payload_sim,--ram-init=$(TESTS_BUILD_DIR)/$*.bin)
+
+tests-run: $(PACK_SV) $(FW_BIN) tests ## Run every standalone test sequentially
+	@set -e; for t in $(TEST_NAMES); do \
+		echo "================================================================"; \
+		echo "[tests-run] Running test-$$t"; \
+		echo "================================================================"; \
+		$(MAKE) --no-print-directory test-$$t SIM_TIMEOUT=$(SIM_TIMEOUT) || exit 1; \
+	done
+	@echo "[tests-run] All tests completed."
+
+# --- OpenSBI (standalone test payload) ---
+LINUX_DIR      := $(RAPTOR_HOME)/linux
+OPENSBI_FW_DIR := $(LINUX_DIR)/opensbi/build/platform/generic/firmware
+OPENSBI_BIN    := $(OPENSBI_FW_DIR)/fw_payload.bin
+
+opensbi-build: ## Build OpenSBI (standalone, from linux/opensbi)
+	$(MAKE) -C $(LINUX_DIR) opensbi
+
+opensbi: $(PACK_SV) $(FW_BIN) opensbi-build ## Build + run OpenSBI in sim
+	@if [ ! -f $(OPENSBI_BIN) ]; then \
+		echo "[ERR] OpenSBI fw_payload.bin not found. Run 'make opensbi-build' first."; exit 1; fi
+	$(call _payload_sim,--ram-init=$(OPENSBI_BIN))
+
+opensbi-clean: ## Clean OpenSBI build artifacts
+	$(MAKE) -C $(LINUX_DIR) opensbi-clean
+
+# --- Custom payload ---
+# Usage: make payload IMG=/path/to/binary.bin
+IMG ?= ## Custom payload binary (for 'make payload')
+
+payload: $(PACK_SV) $(FW_BIN) ## Run custom binary in sim (IMG=/path/to.bin)
+	@if [ -z "$(IMG)" ]; then echo "[ERR] Set IMG=/path/to/binary.bin"; exit 1; fi
+	$(call _payload_sim,--ram-init=$(IMG))
+
+# --- Linux (OpenSBI + Kernel) ---
+LINUX_IMG     = $(wildcard $(LINUX_DIR)/build/linux-riscv-rv32-*/fw_payload.bin)
+
+linux-build: ## Download pre-built Linux payload (if needed)
+	$(MAKE) -s -C $(LINUX_DIR) download-rv32
+
+LINUX_GW_DIR := $(BUILD_DIR)/linux/gateware
+
+linux: $(PACK_SV) $(FW_BIN) linux-build ## Build + run Linux payload in sim
+	@if [ -z "$(LINUX_IMG)" ]; then echo "[ERR] Linux payload not found. Run 'make linux-build' first."; exit 1; fi
+	@echo "[INFO] Using Linux payload: $(LINUX_IMG)"
+	$(call _soc_gen,--cpu-variant=linux --output-dir=$(BUILD_DIR)/linux --no-compile-software --integrated-rom-init=$(FW_BIN) --ram-init=$(LINUX_IMG) $(_BASE_FLAGS))
+	$(call _compile_if_needed,$(LINUX_GW_DIR))
+	$(call _run_vsim,$(LINUX_GW_DIR))
+
+# ==============================================================================
+# FPGA Targets (future — placeholder)
+# ==============================================================================
+
+tang-nano-20k: $(PACK_SV) ## Build for Tang Nano 20K (Gowin GW2AR-18)
+	@echo "[INFO] Tang Nano 20K target — use fpga/gowin-tang-nano-20k/ for direct Gowin flow"
+	@echo "       LiteX board target is planned but not yet implemented."
+
+# ==============================================================================
+# Utilities
+# ==============================================================================
+
+clean: ## Remove build artifacts
+	rm -rf $(BUILD_DIR)
+	@echo "Build artifacts cleaned."
+
+sim-clean: ## Force next sim-build to recompile (clear verilator cache)
+	@rm -f $(GW_DIR)/.sim_v_hash $(LINUX_GW_DIR)/.sim_v_hash
+	@rm -rf $(GW_DIR)/obj_dir $(LINUX_GW_DIR)/obj_dir
+	@echo "Verilator binary + hash cache cleared ($(VARIANT) + linux variant)."
+
+clean-all: clean firmware-clean ## Remove build artifacts + firmware + venv
+	rm -rf $(VENV_DIR)
+	@echo "Virtual environment removed."
+
+lint: ## Lint RTL (via nsim)
+	$(MAKE) -C $(RAPTOR_HOME) lint
+
+info: ## Show configuration info
+	@echo "RAPTOR_HOME  = $(RAPTOR_HOME)"
+	@echo "LITEX_DIR    = $(LITEX_DIR)"
+	@echo "VARIANT      = $(VARIANT)"
+	@echo "SYS_CLK      = $(SYS_CLK)"
+	@echo "SIM_TIMEOUT  = $(SIM_TIMEOUT)"
+	@echo "PACK_SV      = $(PACK_SV)"
+	@echo "BUILD_DIR    = $(BUILD_DIR)"
+	@echo "GW_DIR       = $(GW_DIR)"
+	@echo "VSIM         = $(VSIM) (exists: $(shell test -f $(VSIM) && echo yes || echo no))"
+	@echo "PYTHON       = $(PYTHON)"
 
 help: ## Show this help message
 	@echo "Usage: make <target> [VAR=value ...]"
@@ -21,207 +463,33 @@ help: ## Show this help message
 			target=$$0; sub(/:.*/, "", target); \
 			desc=$$0; sub(/.*## /, "", desc); \
 			printf "  %-20s %s\n", target, desc }' $(MAKEFILE_LIST)
-
-$(LITEX_PATH)/README.md:
-	$(MAKE) install
-
-install:
-	mkdir -p $(YSYX_HOME)/third_party/enjoy-digital/
-	if [ ! -d $(LITEX_PATH) ]; then git clone https://github.com/enjoy-digital/litex/ $(LITEX_PATH); fi
-	cd $(LITEX_PATH) && python3 ./litex_setup.py --init --install
-	$(MAKE) link
-
-link: ## Link ysyx CPU core into LiteX
-	ln -sf $(abspath cores/cpu/ysyx) $(LITEX_PATH)/litex/soc/cores/cpu/
-	ln -sf $(abspath software/coremark) $(LITEX_PATH)/litex/soc/software/
-
-init: $(LITEX_PATH)/README.md ## Init LiteX
-	cd $(LITEX_PATH) && python3 ./litex_setup.py --init
-
-update: $(LITEX_PATH)/README.md ## Update LiteX dependencies
-	cd $(LITEX_PATH) && python3 ./litex_setup.py --update
+	@echo ""
+	@echo "Variables (override with VAR=value):"
+	@grep -hE '^[A-Z_][A-Z_0-9]*\s*\?=' $(MAKEFILE_LIST) | \
+		awk '!seen[$$1]++ { \
+			if (match($$0, /## /)) { \
+				name=$$0; sub(/\s*\?=.*/, "", name); \
+				desc=substr($$0, RSTART+3); \
+				printf "  %-20s %s\n", name, desc } \
+			else { \
+				split($$0, a, "\\?="); \
+				gsub(/^[ \t]+|[ \t]+$$/, "", a[1]); gsub(/^[ \t]+|[ \t]+$$/, "", a[2]); \
+				if (a[2] != "") printf "  %-20s (default: %s)\n", a[1], a[2] } }'
+	@echo ""
 
 # ==============================================================================
-# Simulation (standard variant)
+# PHONY declarations
 # ==============================================================================
-
-build: ## Build LiteX SoC (no gateware compile)
-	cd $(LITEX_PATH) && \
-	python3 ./litex/tools/litex_sim.py --cpu-type=ysyx \
-		--integrated-main-ram-size 0x10000 \
-		--no-compile-gateware
-
-run: $(LITEX_PATH)/README.md ## Run LiteX simulation
-	cd $(LITEX_PATH) && \
-		python3 ./litex/tools/litex_sim.py --cpu-type=ysyx \
-			--integrated-main-ram-size 0x10000
-
-run_ni: $(LITEX_PATH)/README.md ## Run LiteX simulation (non-interactive)
-	cd $(LITEX_PATH) && \
-		python3 ./litex/tools/litex_sim.py --cpu-type=ysyx \
-			--non-interactive \
-			--integrated-main-ram-size 0x10000
-
-# ==============================================================================
-# Linux boot (linux variant)
-# ==============================================================================
-
-LINUX_SIM_FLAGS = --cpu-type=ysyx --cpu-variant=linux \
-	--integrated-main-ram-size=0x04000000 \
-	--timer-uptime
-
-# Pre-built OpenSBI+Linux payload (managed by linux/Makefile).
-LINUX_HOME     := $(YSYX_HOME)/linux
-LINUX_PAYLOAD  ?= $(shell $(MAKE) -s -C $(LINUX_HOME) print-rv32-payload 2>/dev/null || \
-	echo $(LINUX_HOME)/build/linux-riscv-rv32-v6.18.15/fw_payload.bin)
-
-linux_build: $(LITEX_PATH)/README.md ## Build LiteX SoC for Linux (no gateware)
-	cd $(LITEX_PATH) && \
-		python3 ./litex/tools/litex_sim.py $(LINUX_SIM_FLAGS) \
-			--no-compile-gateware
-
-LITEX_SIM_DTS := $(LITEX_PATH)/build/sim/litex_sim.dts
-LITEX_SIM_DTB := $(LITEX_PATH)/build/sim/litex_sim.dtb
-
-linux_dts: linux_build ## Generate Linux device tree from SoC config
-	cd $(LITEX_PATH) && \
-		python3 -c " \
-		from litex.tools.litex_json2dts_linux import *; \
-		import json; \
-		d = json.load(open('build/sim/csr.json')); \
-		open('build/sim/litex_sim.dts','w').write(generate_dts(d))"
-	@# Patch DTS for runtime FDT boot:
-	@#  - Use SBI earlycon (works regardless of kernel liteuart driver)
-	@#  - Remove initrd hints (kernel has built-in initramfs)
-	sed -i '' \
-		's|earlycon=liteuart,[^ "]*|earlycon=sbi|' \
-		$(LITEX_SIM_DTS)
-	sed -i '' \
-		'/linux,initrd-start/d; /linux,initrd-end/d' \
-		$(LITEX_SIM_DTS)
-	cd $(LITEX_PATH) && \
-		dtc -I dts -O dtb -o build/sim/litex_sim.dtb build/sim/litex_sim.dts
-	@echo "DTB written to $(LITEX_SIM_DTB)"
-
-# ------------------------------------------------------------------------------
-# Runtime FDT combined images
-# ------------------------------------------------------------------------------
-# boot-helper.S passes DTB address (MAIN_RAM_BASE + DTB_OFFSET) in a1 to
-# OpenSBI.  The combined image recipe pads the payload to DTB_OFFSET bytes
-# then appends the DTB.  36 MiB accommodates both the ~4 MiB standalone
-# OpenSBI test payload and the ~34 MiB pre-built OpenSBI+Linux payload.
-DTB_OFFSET := 0x02400000
-
-# Local OpenSBI payload (built from linux/opensbi source).
-OPENSBI_PAYLOAD   ?= $(LINUX_HOME)/opensbi/build/platform/generic/firmware/fw_payload.bin
-OPENSBI_COMBINED  := $(LITEX_PATH)/build/sim/opensbi_combined.bin
-LINUX_COMBINED    := $(LITEX_PATH)/build/sim/linux_combined.bin
-
-# Helper: create combined image  $(call CREATE_COMBINED,<payload>,<output>)
-define CREATE_COMBINED
-	python3 -c "\
-	payload = open('$(1)', 'rb').read(); \
-	dtb = open('$(LITEX_SIM_DTB)', 'rb').read(); \
-	offset = $(DTB_OFFSET); \
-	assert len(payload) <= offset, \
-	    f'payload ({len(payload):#x} B) exceeds DTB offset ({offset:#x} B)'; \
-	open('$(2)', 'wb').write(payload.ljust(offset, b'\x00') + dtb)"
-endef
-
-opensbi_build: ## Rebuild standalone OpenSBI (no FDT baked in)
-	$(MAKE) -C $(LINUX_HOME) opensbi
-
-$(OPENSBI_COMBINED): $(OPENSBI_PAYLOAD) $(LITEX_SIM_DTB)
-	@echo "Creating OpenSBI combined image: payload + DTB @ offset $(DTB_OFFSET)"
-	$(call CREATE_COMBINED,$(OPENSBI_PAYLOAD),$(OPENSBI_COMBINED))
-	@echo "  -> $(OPENSBI_COMBINED) ($$(stat -f%z '$(OPENSBI_COMBINED)') bytes)"
-
-opensbi_sim: opensbi_build linux_dts $(OPENSBI_COMBINED) ## Run LiteX sim with OpenSBI + runtime FDT
-	cd $(LITEX_PATH) && \
-		python3 ./litex/tools/litex_sim.py $(LINUX_SIM_FLAGS) \
-			--ram-init=$(OPENSBI_COMBINED)
-
-opensbi_sim_ni: opensbi_build linux_dts $(OPENSBI_COMBINED) ## Run LiteX OpenSBI sim (non-interactive)
-	cd $(LITEX_PATH) && \
-		python3 ./litex/tools/litex_sim.py $(LINUX_SIM_FLAGS) \
-			--non-interactive \
-			--ram-init=$(OPENSBI_COMBINED)
-
-# ------------------------------------------------------------------------------
-# Linux boot
-# ------------------------------------------------------------------------------
-
-$(LINUX_PAYLOAD):
-	$(MAKE) -C $(LINUX_HOME) download-rv32
-
-$(LINUX_COMBINED): $(LINUX_PAYLOAD) $(LITEX_SIM_DTB)
-	@echo "Creating Linux combined image: payload + DTB @ offset $(DTB_OFFSET)"
-	$(call CREATE_COMBINED,$(LINUX_PAYLOAD),$(LINUX_COMBINED))
-	@echo "  -> $(LINUX_COMBINED) ($$(stat -f%z '$(LINUX_COMBINED)') bytes)"
-
-linux_sim: linux_dts $(LINUX_COMBINED) ## Run LiteX Linux simulation (Verilator)
-	cd $(LITEX_PATH) && \
-		python3 ./litex/tools/litex_sim.py $(LINUX_SIM_FLAGS) \
-			--ram-init=$(LINUX_COMBINED)
-
-linux_sim_ni: linux_dts $(LINUX_COMBINED) ## Run LiteX Linux sim (non-interactive)
-	cd $(LITEX_PATH) && \
-		python3 ./litex/tools/litex_sim.py $(LINUX_SIM_FLAGS) \
-			--non-interactive \
-			--ram-init=$(LINUX_COMBINED)
-
-# ==============================================================================
-# Device Tree
-# ==============================================================================
-
-linux_btb: build ## Generate Linux device tree (legacy alias)
-	litex_json2dts_linux $(LITEX_PATH)/build/sim/csr.json > $(LITEX_PATH)/build/ysyx.dts
-
-# ==============================================================================
-# Demos / Benchmarks
-# ==============================================================================
-
-liftoff: $(LITEX_PATH)/README.md ## Run LiteX with demo binary
-	cd $(LITEX_PATH) && \
-			python3 ./litex/tools/litex_sim.py --cpu-type=ysyx \
-			--ram-init=demo.bin --integrated-main-ram-size=0x10000
-
-LITEX_COREMARK_FLAGS = --cpu-type=ysyx --integrated-main-ram-size=0x10000 --bios-format=double
-
-# Workaround: litex minimal picolibc build is missing *tox_engine.c needed by
-# %a (hex-float) code path in vfprintf.  Patch before build, restore after.
-# Remove once https://github.com/enjoy-digital/litex/commit/00639b68d is fixed upstream.
-LITEX_LIBC_MK = $(LITEX_PATH)/litex/soc/software/libc/Makefile
-define _litex_libc_patch
-	python3 -c "p='$(LITEX_LIBC_MK)';t=open(p).read();\
-	t=t.replace('dtoa_engine.c \\\\\\n','dtoa_engine.c \\\\\\n\t\$$(PICOLIBC_SRC_DIR)/libc/stdio/dtox_engine.c \\\\\\n') if 'dtox_engine' not in t else t;\
-	t=t.replace('ftoa_engine.c\\n','ftoa_engine.c \\\\\\n\t\$$(PICOLIBC_SRC_DIR)/libc/stdio/ftox_engine.c\\n') if 'ftox_engine' not in t else t;\
-	open(p,'w').write(t)"
-endef
-define _litex_libc_restore
-	cd $(LITEX_PATH) && git checkout -- litex/soc/software/libc/Makefile 2>/dev/null || true
-endef
-
-coremark: $(LITEX_PATH)/README.md ## Run CoreMark on LiteX
-	$(call _litex_libc_patch)
-	@trap '$(call _litex_libc_restore)' EXIT; \
-	cd $(LITEX_PATH) \
-		&& python3 ./litex/tools/litex_sim.py $(LITEX_COREMARK_FLAGS) \
-			--no-compile-gateware \
-		&& python3 ./litex/soc/software/coremark/coremark.py \
-			--build-path=build/sim/ \
-		&& python3 ./litex/tools/litex_sim.py $(LITEX_COREMARK_FLAGS) \
-			--non-interactive \
-			--ram-init=coremark.bin
-
-coremark_wave: $(LITEX_PATH)/README.md ## Run CoreMark on LiteX with waveform
-	$(call _litex_libc_patch)
-	@trap '$(call _litex_libc_restore)' EXIT; \
-	cd $(LITEX_PATH) \
-		&& python3 ./litex/tools/litex_sim.py $(LITEX_COREMARK_FLAGS) \
-			--no-compile-gateware \
-		&& python3 ./litex/soc/software/coremark/coremark.py \
-			--build-path=build/sim/ \
-		&& python3 ./litex/tools/litex_sim.py $(LITEX_COREMARK_FLAGS) \
-			--non-interactive --gtkwave-savefile --trace --trace-fst \
-			--ram-init=coremark.bin
+.PHONY: help setup setup-skip \
+	pack \
+	firmware firmware-clean \
+	sim-gen sim-build sim sim-run sim-trace sim-trace-vcd sim-clean \
+	run-litex run-litex-clean \
+	coremark coremark-build coremark-clean \
+	microbench microbench-build \
+	tests tests-clean tests-run $(TEST_TARGETS) \
+	opensbi opensbi-build opensbi-clean \
+	payload \
+	linux linux-build \
+	tang-nano-20k \
+	lint info clean clean-all

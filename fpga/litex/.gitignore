@@ -1,2 +1,18 @@
-!cores/cpu/ysyx/*
-!software/coremark/*
+
+!*.py
+!*.sh
+!*.S
+!*.h
+!*.c
+!*.ld
+!*.dts
+!Makefile
+
+# LiteX build artifacts
+build/
+.venv/
+__pycache__
+
+# Cloned external sources
+benchmarks/coremark/coremark/
+benchmarks/coremark/build/

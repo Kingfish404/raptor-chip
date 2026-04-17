@@ -226,6 +226,11 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
       BSET__ -> BitPat("b" + "00" + ALU_BSET), // R
       BSETI_ -> BitPat("b" + "00" + ALU_BSET), // I (shift imm)
 
+      // Zbc (Carry-less Multiplication)
+      CLMUL_  -> BitPat("b" + "00" + ALU_CLMUL),  // R
+      CLMULH_ -> BitPat("b" + "00" + ALU_CLMULH), // R
+      CLMULR_ -> BitPat("b" + "00" + ALU_CLMULR), // R
+
       // Zicond (Conditional Operations)
       CZERO_EQZ -> BitPat("b" + "00" + ALU_CZERO_EQZ), // R
       CZERO_NEZ -> BitPat("b" + "00" + ALU_CZERO_NEZ), // R
@@ -555,6 +560,11 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
     BINVI_ -> List( rd,  imm_i,   0.U, imm_i, rs1, 0.U), // I (shift imm)
     BSET__ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
     BSETI_ -> List( rd,  imm_i,   0.U, imm_i, rs1, 0.U), // I (shift imm)
+
+    // Zbc (Carry-less Multiplication)
+    CLMUL_  -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
+    CLMULH_ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
+    CLMULR_ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
 
     // Zicond (Conditional Operations)
     CZERO_EQZ -> List(rd,  0.U,   0.U,   0.U, rs1, rs2), // R
