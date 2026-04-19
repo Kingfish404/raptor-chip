@@ -36,6 +36,7 @@ OSS_CAD_URL     := $(OSS_CAD_REPO)/$(OSS_CAD_VERSION)/$(OSS_CAD_TARBALL)
 
 # Prepend oss-cad-suite/bin to PATH for all recipes
 export PATH := $(OSS_CAD_BIN):$(PATH)
+NPROC ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 
 # ============================================================================
 # Help
@@ -163,7 +164,7 @@ $(RVFI_CHECKS)/Makefile: $(RVFI_CORE_DIR)/checks.cfg $(RVFI_PACK)
 formal_rvfi_gen: $(RVFI_CHECKS)/Makefile ## Generate riscv-formal check .sby files
 
 formal_rvfi: check-tools $(RVFI_CHECKS)/Makefile ## Run all riscv-formal checks
-	$(MAKE) -C $(RVFI_CHECKS) -j$$(nproc)
+	$(MAKE) -C $(RVFI_CHECKS) -j$(NPROC)
 
 formal_rvfi_check: check-tools $(RVFI_CHECKS)/Makefile ## Run a single check (CHECK=insn_add_ch0)
 	@test -n "$(CHECK)" || { echo "Usage: make formal_rvfi_check CHECK=insn_add_ch0"; exit 1; }

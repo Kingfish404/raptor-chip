@@ -38,12 +38,15 @@ module ysyx_l1d #(
   logic [XLEN-1:0] rec_addr;
 
   // Tag and valid arrays (kept as registers for multi-port read and fast bulk invalidation)
-  // Per-word valid: each word in a cache line has independent valid tracking
+  // Per-line tag + per-word valid: one tag per (way, set); each word in a
+  // cache line has independent valid tracking so partial fills / invalidates
+  // don't require whole-line eviction.  When a new tag is installed in a
+  // line (tag mismatch), all valid bits except the new target are cleared.
   localparam OFFSET_BITS = $clog2(XLEN/8);  // 2 for RV32, 3 for RV64
   localparam L1D_TAG_W = XLEN - L1D_LEN - L1D_LINE_LEN - OFFSET_BITS;
   localparam L1D_WAY_W = L1D_N_WAYS > 1 ? $clog2(L1D_N_WAYS) : 1;
   logic [L1D_LINE_SIZE-1:0] l1d_valid[L1D_N_WAYS][L1D_SIZE];
-  logic [L1D_TAG_W-1:0] l1d_tag[L1D_N_WAYS][L1D_SIZE][L1D_LINE_SIZE];
+  logic [L1D_TAG_W-1:0] l1d_tag[L1D_N_WAYS][L1D_SIZE];
   logic [7:0] rstrb;
 
   logic [L1D_TAG_W-1:0] addr_tag;
@@ -284,15 +287,18 @@ module ysyx_l1d #(
   assign sram_rd_offset = load_speculate
       ? lsu_l1d.raddr[L1D_LINE_LEN+OFFSET_BITS-1:OFFSET_BITS]
       : addr_offset;
-  // Parallel tag comparison: pre-compute hit for ALL line offsets,
-  // then select by addr_offset (removes addr_offset from tag comparison path).
+  // Parallel tag comparison: with per-line tag, compare once per way; then
+  // AND with per-word valid bits to yield per-offset hit vectors.
+  logic [L1D_N_WAYS-1:0] way_tag_match;
   logic [L1D_N_WAYS-1:0] way_tag_hit [L1D_LINE_SIZE];
   logic [L1D_LINE_SIZE-1:0] tag_hit_vec;
   generate
+    for (genvar w = 0; w < L1D_N_WAYS; w++) begin : gen_line_tag_cmp
+      assign way_tag_match[w] = (l1d_tag[w][addr_idx] == addr_tag);
+    end
     for (genvar gi = 0; gi < L1D_LINE_SIZE; gi++) begin : gen_tag_cmp
       for (genvar w = 0; w < L1D_N_WAYS; w++) begin : gen_way_cmp
-        assign way_tag_hit[gi][w] = (l1d_valid[w][addr_idx][gi] == 1'b1)
-                                  && (l1d_tag[w][addr_idx][gi] == addr_tag);
+        assign way_tag_hit[gi][w] = l1d_valid[w][addr_idx][gi] & way_tag_match[w];
       end
       assign tag_hit_vec[gi] = |way_tag_hit[gi];
     end
@@ -321,14 +327,17 @@ module ysyx_l1d #(
   assign waddr_tag = lsu_l1d.waddr[XLEN-1:L1D_LEN+L1D_LINE_LEN+OFFSET_BITS];
   assign waddr_idx = lsu_l1d.waddr[L1D_LEN+L1D_LINE_LEN+OFFSET_BITS-1:L1D_LINE_LEN+OFFSET_BITS];
   assign waddr_offset = lsu_l1d.waddr[L1D_LINE_LEN+OFFSET_BITS-1:OFFSET_BITS];
-  // Parallel write-side tag comparison
+  // Parallel write-side tag comparison (per-line tag)
+  logic [L1D_N_WAYS-1:0] way_wtag_match;
   logic [L1D_N_WAYS-1:0] way_whit [L1D_LINE_SIZE];
   logic [L1D_LINE_SIZE-1:0] whit_vec;
   generate
+    for (genvar w = 0; w < L1D_N_WAYS; w++) begin : gen_line_wtag_cmp
+      assign way_wtag_match[w] = (l1d_tag[w][waddr_idx] == waddr_tag);
+    end
     for (genvar gi = 0; gi < L1D_LINE_SIZE; gi++) begin : gen_wtag_cmp
       for (genvar w = 0; w < L1D_N_WAYS; w++) begin : gen_wway_cmp
-        assign way_whit[gi][w] = (l1d_valid[w][waddr_idx][gi] == 1'b1)
-                               && (l1d_tag[w][waddr_idx][gi] == waddr_tag);
+        assign way_whit[gi][w] = l1d_valid[w][waddr_idx][gi] & way_wtag_match[w];
       end
       assign whit_vec[gi] = |way_whit[gi];
     end
@@ -352,11 +361,11 @@ module ysyx_l1d #(
       // sram_bypass_r miss creates duplicate tags across ways; a subsequent
       // store updates only one copy, leaving the other stale: and when the
       // updated copy is later evicted, a load hits the stale duplicate.
+      // With per-line tags, "tag exists" means any word in the line is valid
+      // AND the line's tag matches.
       logic ld_tag_dup0, ld_tag_dup1;
-      assign ld_tag_dup0 = l1d_valid[0][addr_idx][addr_offset]
-                         && (l1d_tag[0][addr_idx][addr_offset] == addr_tag);
-      assign ld_tag_dup1 = l1d_valid[1][addr_idx][addr_offset]
-                         && (l1d_tag[1][addr_idx][addr_offset] == addr_tag);
+      assign ld_tag_dup0 = (|l1d_valid[0][addr_idx]) && way_tag_match[0];
+      assign ld_tag_dup1 = (|l1d_valid[1][addr_idx]) && way_tag_match[1];
       assign store_fill_way = !l1d_valid[0][waddr_idx][waddr_offset] ? 1'b0
                             : !l1d_valid[1][waddr_idx][waddr_offset] ? 1'b1
                             : d_replace_bit[waddr_idx];
@@ -570,9 +579,24 @@ module ysyx_l1d #(
           for (int i = 0; i < int'(L1D_SIZE); i++) l1d_valid[w][i] <= '0;
         l1d_rmw <= 0;
       end else if (l1d_update) begin
-        // Data write handled by SRAM banks (wen gated by l1d_off + l1d_way)
-        l1d_tag[l1d_way][l1d_idx][l1d_off] <= l1d_tag_u;
-        l1d_valid[l1d_way][l1d_idx][l1d_off] <= l1d_valid_u;
+        // Per-line tag + per-word valid semantics:
+        //   valid_u=1 (install word):
+        //     - If incoming tag matches existing line tag: preserve valid bits,
+        //       set target bit.
+        //     - If tag mismatch (new line install): clear all valid bits and
+        //       set only the target bit; overwrite tag.
+        //   valid_u=0 (partial-store invalidate fallback): clear target bit
+        //     only; do not disturb tag or other valid bits.
+        if (l1d_valid_u) begin
+          l1d_tag[l1d_way][l1d_idx] <= l1d_tag_u;
+          if (l1d_tag[l1d_way][l1d_idx] == l1d_tag_u) begin
+            l1d_valid[l1d_way][l1d_idx][l1d_off] <= 1'b1;
+          end else begin
+            l1d_valid[l1d_way][l1d_idx] <= (L1D_LINE_SIZE'(1) << l1d_off);
+          end
+        end else begin
+          l1d_valid[l1d_way][l1d_idx][l1d_off] <= 1'b0;
+        end
         l1d_update <= 0;
       end
 

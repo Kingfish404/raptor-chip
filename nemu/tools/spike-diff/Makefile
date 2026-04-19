@@ -21,14 +21,15 @@ endif
 
 REPO_BUILD_PATH = $(REPO_PATH)/build
 REPO_MAKEFILE = $(REPO_BUILD_PATH)/Makefile
+NPROC := $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 $(REPO_MAKEFILE):
 	@mkdir -p $(@D)
 	cd $(@D) && $(abspath $(REPO_PATH))/configure
-	sed -i -e 's/-g -O2/-O2/' $@
+	sed -i.bak -e 's/-g -O2/-O2/' $@ && rm -f $@.bak
 
 SPIKE = $(REPO_BUILD_PATH)/spike
 $(SPIKE): $(REPO_MAKEFILE)
-	$(MAKE) -C $(^D) -j$(shell nproc) \
+	$(MAKE) -C $(^D) -j$(NPROC) \
 		CFLAGS="-fvisibility=hidden" CXXFLAGS="-fvisibility=hidden"
 
 BUILD_DIR = ./build

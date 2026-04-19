@@ -1,6 +1,7 @@
 PWD_DIR=$(abspath .)
 YSYX_HOME ?= $(abspath ..)
 KERNEL_VERSION:=6.18.22
+NPROC := $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 
 # ==============================================================================
 # Pre-built Linux kernel downloads
@@ -77,22 +78,22 @@ all: ## Show usage information
 	echo "PWD: $(PWD_DIR)"
 	echo "Kernel Version: $(KERNEL_VERSION)"
 	echo "Help: you should make one of the targets to build linux kernel and related files."
-	echo "Example: make build_linux make_initramfs build_init install_initramfs build_opensbi_with_kernel"
+	echo "Example: make build_linux make_initramfs build_init install_initramfs opensbi-with-kernel"
 	echo "Targets:"
 	echo "  - build_linux: Build Linux kernel for RISC-V 32-bit architecture"
 	echo "  - make_initramfs: Create a simple initramfs image"
 	echo "  - build_init: Build the init process payload"
 	echo "  - install_initramfs: Configure Linux kernel to use the created initramfs"
-	echo "  - build_opensbi_with_kernel: Build OpenSBI with the Linux kernel as payload"
+	echo "  - opensbi-with-kernel: Build OpenSBI with the Linux kernel as payload"
 
 linux: ## Download Linux kernel source
-	wget https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-$(KERNEL_VERSION).tar.xz
+	curl -L -o linux-$(KERNEL_VERSION).tar.xz https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-$(KERNEL_VERSION).tar.xz
 	tar -xf linux-$(KERNEL_VERSION).tar.xz
 	mv linux-$(KERNEL_VERSION) linux
 	rm linux-$(KERNEL_VERSION).tar.xz
 
 build_linux: linux ## Build Linux kernel for RISC-V 32-bit
-	make -C linux ARCH=riscv -j`nproc` defconfig
+	make -C linux ARCH=riscv -j$(NPROC) defconfig
 
 	cd linux && \
 		./scripts/config --enable CONFIG_NONPORTABLE && \
@@ -103,19 +104,19 @@ build_linux: linux ## Build Linux kernel for RISC-V 32-bit
 		./scripts/config --disable CONFIG_RISCV_ISA_ZICBOM && \
 		./scripts/config --disable CONFIG_RISCV_ISA_ZICBOZ
 
-	make -C linux ARCH=riscv -j`nproc` olddefconfig
+	make -C linux ARCH=riscv -j$(NPROC) olddefconfig
 
-	make -C linux ARCH=riscv -j`nproc`
+	make -C linux ARCH=riscv -j$(NPROC)
 
 make_initramfs: ## Create initramfs image
-	mkdir initramfs && \
-		cd initramfs && \
- 		mkdir --parents {bin,dev,etc,lib,lib64,mnt/root,proc,root/init-linux,sbin,sys,run} && \
-		mkdir dev && \
-		sudo mknod dev/console c 5 1 && \
-		sudo mknod dev/null c 1 3 && \
-		sudo mknod dev/sda b 8 0
-	(cd initramfs && find . | cpio -o --format=newc | gzip > ../initramfs.cpio.gz)
+	mkdir -p initramfs/bin initramfs/dev initramfs/etc initramfs/lib initramfs/lib64 \
+		initramfs/mnt/root initramfs/proc initramfs/root/init-linux initramfs/run \
+		initramfs/sbin initramfs/sys
+	(cd initramfs && \
+		[ -e dev/console ] || sudo mknod dev/console c 5 1; \
+		[ -e dev/null ] || sudo mknod dev/null c 1 3; \
+		[ -e dev/sda ] || sudo mknod dev/sda b 8 0)
+	(cd initramfs && find . | cpio -o -H newc | gzip > ../initramfs.cpio.gz)
 
 build_init: ## Build init process payload
 	make -C payload init_loop install
@@ -124,7 +125,7 @@ install_initramfs: ## Configure kernel to use initramfs
 # -> General setup -> Initial RAM filesystem and RAM disk (initramfs/initrd) support
 # -> [*] Initramfs source file(s) -> [PATH of initramfs] (e.g. `/home/[username]/initramfs`)
 	cd linux && ./scripts/config --set-str CONFIG_INITRAMFS_SOURCE $(PWD_DIR)/initramfs
-	make -C linux ARCH=riscv -j`nproc` olddefconfig
+	make -C linux ARCH=riscv -j$(NPROC) olddefconfig
 
 OPENSBI_DIR     := $(PWD_DIR)/opensbi
 OPENSBI_FW_DIR  := $(OPENSBI_DIR)/build/platform/generic/firmware
@@ -136,7 +137,7 @@ $(OPENSBI_DIR)/README.md:
 
 OPENSBI_COMMON_FLAGS = \
 	PLATFORM_RISCV_ISA=rv32imac_zicntr_zicond_zicsr_zifencei_zcb_zba_zbb_zbs \
-	PLATFORM_RISCV_XLEN=32 PLATFORM=generic -j$(shell nproc)
+	PLATFORM_RISCV_XLEN=32 PLATFORM=generic -j$(NPROC)
 
 opensbi: $(OPENSBI_DIR)/README.md ## Build OpenSBI (standalone, Clang/LLVM)
 	make -C $(OPENSBI_DIR) LLVM=1 \

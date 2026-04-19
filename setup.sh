@@ -2,6 +2,10 @@
 echo "Setting up build environment..."
 step=0
 
+host_nproc() {
+  nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4
+}
+
 brew_init() {
   # Check if Homebrew is installed
   if ! command -v brew &> /dev/null; then
@@ -35,7 +39,7 @@ brew_install() {
   if [ "$(uname)" == "Darwin" ]; then
     brew install sdl2 sdl2_image sdl2_ttf
   fi
-  brew install gnu-sed wget dtc cmake automake
+  brew install dtc cmake automake
   brew install libevent json-c
 }
 
@@ -102,7 +106,7 @@ source ./env.sh
 if [ -d rtl_sv/generated ] && [ "$(ls -A rtl_sv/generated 2>/dev/null)" ]; then
   echo "Step $step: rtl_sv/generated/ exists, skipping Chisel verilog generation"
 else
-  make -C ./rtl_scala verilog -j`nproc`
+  make -C ./rtl_scala verilog -j"$(host_nproc)"
 fi
 make -C ./nsim pack
 echo "Step $step: Build environment setup complete."

@@ -43,6 +43,10 @@ module ysyx_rou #(
     rou_csr_if.out rou_csr,
     rou_lsu_if.out rou_lsu,
 
+    // Dispatch-only uop payload snapshot (cold side-channel for RS issue-read
+    // and ioq trap-inst display). Indexed by ROB destination.
+    output ysyx_pkg::uop_payload_t uop_pl[`YSYX_ROB_SIZE],
+
     input reset
 );
   logic valid_a, ready_a;
@@ -163,8 +167,8 @@ module ysyx_rou #(
 
   always @(posedge clock) begin
     if (reset || flush_pipe) begin
-      uoq_head_a            <= '0;
-      uoq_tail_a            <= '0;
+      uoq_head_a          <= '0;
+      uoq_tail_a          <= '0;
       uoq_valid           <= '0;
       uoq_pv1_valid       <= '0;
       uoq_pv2_valid       <= '0;
@@ -437,13 +441,12 @@ module ysyx_rou #(
   always @(posedge clock) begin
     if (reset || flush_pipe) begin
       rob_head         <= '0;
-      rob_tail_a         <= '0;
+      rob_tail_a       <= '0;
       recieved_trap    <= 1'b0;
       recieved_sw_trap <= 1'b0;
       for (int i = 0; i < ROB_SIZE; i++) begin
         rob_entry[i].busy  <= 1'b0;
         rob_entry[i].state <= ROB_CM;
-        rob_entry[i].inst  <= '0;
       end
     end else begin
       // ---- Dispatch: insert into ROB tail ----
@@ -471,25 +474,27 @@ module ysyx_rou #(
         `YSYX_WSTRB_SW
         : uoq_uops[uoq_tail_a].alu;
 
-        rob_entry[rob_tail_a].sys <= uoq_uops[uoq_tail_a].system;
         rob_entry[rob_tail_a].atom <= uoq_uops[uoq_tail_a].atom;
         rob_entry[rob_tail_a].atom_sc <= uoq_uops[uoq_tail_a].atom
                                     && (uoq_uops[uoq_tail_a].alu == `YSYX_ATO_SC__);
-
-        rob_entry[rob_tail_a].f_i <= uoq_uops[uoq_tail_a].f_i;
-        rob_entry[rob_tail_a].f_time <= uoq_uops[uoq_tail_a].f_time;
-
-        rob_entry[rob_tail_a].ecall <= uoq_uops[uoq_tail_a].ecall;
-        rob_entry[rob_tail_a].ebreak <= uoq_uops[uoq_tail_a].ebreak;
-        rob_entry[rob_tail_a].mret <= uoq_uops[uoq_tail_a].mret;
-        rob_entry[rob_tail_a].sret <= uoq_uops[uoq_tail_a].sret;
 
         rob_entry[rob_tail_a].trap <= uoq_uops[uoq_tail_a].trap;
         rob_entry[rob_tail_a].tval <= uoq_uops[uoq_tail_a].tval;
         rob_entry[rob_tail_a].cause <= uoq_uops[uoq_tail_a].cause;
 
-        rob_entry[rob_tail_a].inst <= uoq_uops[uoq_tail_a].inst;
         rob_entry[rob_tail_a].pc <= uoq_uops[uoq_tail_a].pc;
+
+        // Cold dispatch-only payload (RS issue + commit display)
+        uop_pl[rob_tail_a].sys <= uoq_uops[uoq_tail_a].system;
+        uop_pl[rob_tail_a].ecall <= uoq_uops[uoq_tail_a].ecall;
+        uop_pl[rob_tail_a].ebreak <= uoq_uops[uoq_tail_a].ebreak;
+        uop_pl[rob_tail_a].mret <= uoq_uops[uoq_tail_a].mret;
+        uop_pl[rob_tail_a].sret <= uoq_uops[uoq_tail_a].sret;
+        uop_pl[rob_tail_a].f_i <= uoq_uops[uoq_tail_a].f_i;
+        uop_pl[rob_tail_a].f_time <= uoq_uops[uoq_tail_a].f_time;
+        uop_pl[rob_tail_a].csr_addr <= uoq_uops[uoq_tail_a].imm[11:0];
+        uop_pl[rob_tail_a].csr_csw <= uoq_uops[uoq_tail_a].csr_csw;
+        uop_pl[rob_tail_a].inst <= uoq_uops[uoq_tail_a].inst;
 
 `ifdef YSYX_DUAL_ISSUE
         // ---- Dispatch slot B: insert into ROB tail+1 ----
@@ -511,25 +516,27 @@ module ysyx_rou #(
           `YSYX_WSTRB_SW
           : uoq_uops[uoq_tail_b].alu;
 
-          rob_entry[rob_tail_b].sys <= uoq_uops[uoq_tail_b].system;
           rob_entry[rob_tail_b].atom <= uoq_uops[uoq_tail_b].atom;
           rob_entry[rob_tail_b].atom_sc <= uoq_uops[uoq_tail_b].atom
                                         && (uoq_uops[uoq_tail_b].alu == `YSYX_ATO_SC__);
-
-          rob_entry[rob_tail_b].f_i <= uoq_uops[uoq_tail_b].f_i;
-          rob_entry[rob_tail_b].f_time <= uoq_uops[uoq_tail_b].f_time;
-
-          rob_entry[rob_tail_b].ecall <= uoq_uops[uoq_tail_b].ecall;
-          rob_entry[rob_tail_b].ebreak <= uoq_uops[uoq_tail_b].ebreak;
-          rob_entry[rob_tail_b].mret <= uoq_uops[uoq_tail_b].mret;
-          rob_entry[rob_tail_b].sret <= uoq_uops[uoq_tail_b].sret;
 
           rob_entry[rob_tail_b].trap <= uoq_uops[uoq_tail_b].trap;
           rob_entry[rob_tail_b].tval <= uoq_uops[uoq_tail_b].tval;
           rob_entry[rob_tail_b].cause <= uoq_uops[uoq_tail_b].cause;
 
-          rob_entry[rob_tail_b].inst <= uoq_uops[uoq_tail_b].inst;
           rob_entry[rob_tail_b].pc <= uoq_uops[uoq_tail_b].pc;
+
+          // Cold dispatch-only payload (RS issue + commit display)
+          uop_pl[rob_tail_b].sys <= uoq_uops[uoq_tail_b].system;
+          uop_pl[rob_tail_b].ecall <= uoq_uops[uoq_tail_b].ecall;
+          uop_pl[rob_tail_b].ebreak <= uoq_uops[uoq_tail_b].ebreak;
+          uop_pl[rob_tail_b].mret <= uoq_uops[uoq_tail_b].mret;
+          uop_pl[rob_tail_b].sret <= uoq_uops[uoq_tail_b].sret;
+          uop_pl[rob_tail_b].f_i <= uoq_uops[uoq_tail_b].f_i;
+          uop_pl[rob_tail_b].f_time <= uoq_uops[uoq_tail_b].f_time;
+          uop_pl[rob_tail_b].csr_addr <= uoq_uops[uoq_tail_b].imm[11:0];
+          uop_pl[rob_tail_b].csr_csw <= uoq_uops[uoq_tail_b].csr_csw;
+          uop_pl[rob_tail_b].inst <= uoq_uops[uoq_tail_b].inst;
         end
 `endif
       end
@@ -543,15 +550,13 @@ module ysyx_rou #(
         rob_entry[wb_dest_ioq].sq_wdata <= exu_ioq_bcast.sq_wdata;
 
         if (exu_ioq_bcast.trap) begin
-          rob_entry[wb_dest_ioq].rd   <= '0;
-          rob_entry[wb_dest_ioq].inst <= 'h13;
-          rob_entry[wb_dest_ioq].wen  <= 1'b0;
+          rob_entry[wb_dest_ioq].rd  <= '0;
+          rob_entry[wb_dest_ioq].wen <= 1'b0;
         end
 
         rob_entry[wb_dest_ioq].trap <= exu_ioq_bcast.trap;
         rob_entry[wb_dest_ioq].tval <= exu_ioq_bcast.tval;
         rob_entry[wb_dest_ioq].cause <= exu_ioq_bcast.cause;
-        rob_entry[wb_dest_ioq].inst <= exu_ioq_bcast.inst;
         rob_entry[wb_dest_ioq].difftest_skip <= exu_ioq_bcast.difftest_skip;
       end
 
@@ -563,12 +568,6 @@ module ysyx_rou #(
 
         rob_entry[wb_dest_exu].csr_wen       <= exu_rou.csr_wen;
         rob_entry[wb_dest_exu].csr_wdata     <= exu_rou.csr_wdata;
-        rob_entry[wb_dest_exu].csr_addr      <= exu_rou.csr_addr;
-
-        rob_entry[wb_dest_exu].ecall         <= exu_rou.ecall;
-        rob_entry[wb_dest_exu].ebreak        <= exu_rou.ebreak;
-        rob_entry[wb_dest_exu].mret          <= exu_rou.mret;
-        rob_entry[wb_dest_exu].sret          <= exu_rou.sret;
 
         rob_entry[wb_dest_exu].trap          <= exu_rou.trap;
         rob_entry[wb_dest_exu].tval          <= exu_rou.tval;
@@ -605,12 +604,7 @@ module ysyx_rou #(
 
         rob_entry[rob_head].busy     <= 1'b0;
         rob_entry[rob_head].state    <= ROB_CM;
-        rob_entry[rob_head].inst     <= '0;
         rob_entry[rob_head].csr_wen  <= 1'b0;
-        rob_entry[rob_head].sys      <= 1'b0;
-        rob_entry[rob_head].ecall    <= 1'b0;
-        rob_entry[rob_head].ebreak   <= 1'b0;
-        rob_entry[rob_head].mret     <= 1'b0;
         rob_entry[rob_head].trap     <= 1'b0;
         rob_entry[rob_head].wen      <= 1'b0;
         rob_entry[rob_head].sq_waddr <= '0;
@@ -619,12 +613,7 @@ module ysyx_rou #(
         if (dual_commit) begin
           rob_entry[h1].busy     <= 1'b0;
           rob_entry[h1].state    <= ROB_CM;
-          rob_entry[h1].inst     <= '0;
           rob_entry[h1].csr_wen  <= 1'b0;
-          rob_entry[h1].sys      <= 1'b0;
-          rob_entry[h1].ecall    <= 1'b0;
-          rob_entry[h1].ebreak   <= 1'b0;
-          rob_entry[h1].mret     <= 1'b0;
           rob_entry[h1].trap     <= 1'b0;
           rob_entry[h1].wen      <= 1'b0;
           rob_entry[h1].sq_waddr <= '0;
@@ -647,22 +636,22 @@ module ysyx_rou #(
 
   // Pure CSR: sys instruction without ecall/ebreak/mret/sret (no redirect needed)
   logic head0_sys_pure;
-  assign head0_sys_pure = rob_entry[h0].sys
-      && !rob_entry[h0].ecall && !rob_entry[h0].ebreak
-      && !rob_entry[h0].mret  && !rob_entry[h0].sret;
+  assign head0_sys_pure = uop_pl[h0].sys
+      && !uop_pl[h0].ecall && !uop_pl[h0].ebreak
+      && !uop_pl[h0].mret  && !uop_pl[h0].sret;
 
   logic head0_flush;
   assign head0_flush = recieved_trap || (head0_valid && (
-      rob_entry[h0].f_i
+      uop_pl[h0].f_i
       || head0_br_p_fail
       || rob_entry[h0].trap
-      || (rob_entry[h0].sys && !head0_sys_pure)
+      || (uop_pl[h0].sys && !head0_sys_pure)
       || rob_entry[h0].atom
   ));
 
   // Resume: lightweight pipeline unblock for serializing instructions that
   // don't need a redirect (pure CSR read/write, sfence.vma).
-  assign sys_resume = head0_valid && (head0_sys_pure || rob_entry[h0].f_time) && !head0_flush;
+  assign sys_resume = head0_valid && (head0_sys_pure || uop_pl[h0].f_time) && !head0_flush;
 
   // ---- Slot 1 (head+1): only considered when slot 0 doesn't flush ----
   logic head1_br_p_fail;
@@ -685,15 +674,15 @@ module ysyx_rou #(
   // Slot 1 flush
   logic head1_flush;
   assign head1_flush = dual_commit && (
-      rob_entry[h1].f_i
+      uop_pl[h1].f_i
       || head1_br_p_fail
       || rob_entry[h1].trap
-      || rob_entry[h1].sys
+      || uop_pl[h1].sys
       || rob_entry[h1].atom
   );
 
   // ---- Global flush / fence ----
-  assign fence_time = (head0_valid && rob_entry[h0].f_time) || (dual_commit && rob_entry[h1].f_time);
+  assign fence_time = (head0_valid && uop_pl[h0].f_time) || (dual_commit && uop_pl[h1].f_time);
   assign flush_pipe = head0_flush || head1_flush;
 
   // PMU: SQ-specific commit stall (ROB head is a ready store blocked by full SQ)
@@ -706,26 +695,27 @@ module ysyx_rou #(
 
   // ---- CMU interface (slot A) ----
   assign rou_cmu.rd_a = recieved_trap ? '0 : rob_entry[h0].rd;
-  assign rou_cmu.inst_a = rob_entry[h0].inst;
+  // Trap entries surface as NOP (0x13) to downstream (difftest / RVFI)
+  assign rou_cmu.inst_a = rob_entry[h0].trap ? 32'h13 : uop_pl[h0].inst;
   assign rou_cmu.pc_a = recieved_trap ? trap_pc : rob_entry[h0].pc;
   assign rou_cmu.prd_a = rob_entry[h0].prd;
   assign rou_cmu.prs_a = rob_entry[h0].prs;
   // Branch signals: when dual committing, use slot 1 (BPU trains on rpc which is slot 1's PC)
   assign rou_cmu.btaken = dual_commit ? rob_entry[h1].btaken : rob_entry[h0].btaken;
   assign rou_cmu.npc_a       = dual_commit
-      ? ((rob_entry[h1].trap || rob_entry[h1].ecall || rob_entry[h1].ebreak)
+      ? ((rob_entry[h1].trap || uop_pl[h1].ecall || uop_pl[h1].ebreak)
           ? csr_bcast.tvec : rob_entry[h1].npc)
       : (recieved_trap || rob_entry[h0].trap
-          || rob_entry[h0].ecall || rob_entry[h0].ebreak)
+          || uop_pl[h0].ecall || uop_pl[h0].ebreak)
           ? csr_bcast.tvec
       : rob_entry[h0].npc;
   assign rou_cmu.ben = dual_commit ? rob_entry[h1].ben : rob_entry[h0].ben;
   assign rou_cmu.jen = dual_commit ? rob_entry[h1].jen : rob_entry[h0].jen;
   assign rou_cmu.jren = dual_commit ? rob_entry[h1].jren : rob_entry[h0].jren;
   assign rou_cmu.atomic_sc = dual_commit ? rob_entry[h1].atom_sc : rob_entry[h0].atom_sc;
-  assign rou_cmu.ebreak_a = head0_valid && rob_entry[h0].ebreak;
+  assign rou_cmu.ebreak_a = head0_valid && uop_pl[h0].ebreak;
   assign rou_cmu.fence_time = fence_time;
-  assign rou_cmu.fence_i = (head0_valid && rob_entry[h0].f_i) || (dual_commit && rob_entry[h1].f_i);
+  assign rou_cmu.fence_i = (head0_valid && uop_pl[h0].f_i) || (dual_commit && uop_pl[h1].f_i);
   assign rou_cmu.flush_pipe = flush_pipe;
   assign rou_cmu.sys_resume = sys_resume;
   assign rou_cmu.time_trap = recieved_trap;
@@ -735,13 +725,13 @@ module ysyx_rou #(
 
   // ---- CMU interface (slot B: dual commit) ----
   assign rou_cmu.rd_b = rob_entry[h1].rd;
-  assign rou_cmu.inst_b = rob_entry[h1].inst;
+  assign rou_cmu.inst_b = rob_entry[h1].trap ? 32'h13 : uop_pl[h1].inst;
   assign rou_cmu.pc_b = rob_entry[h1].pc;
   assign rou_cmu.prd_b = rob_entry[h1].prd;
   assign rou_cmu.prs_b = rob_entry[h1].prs;
-  assign rou_cmu.npc_b = (rob_entry[h1].trap || rob_entry[h1].ecall || rob_entry[h1].ebreak)
+  assign rou_cmu.npc_b = (rob_entry[h1].trap || uop_pl[h1].ecall || uop_pl[h1].ebreak)
       ? csr_bcast.tvec : rob_entry[h1].npc;
-  assign rou_cmu.ebreak_b = dual_commit && rob_entry[h1].ebreak;
+  assign rou_cmu.ebreak_b = dual_commit && uop_pl[h1].ebreak;
   assign rou_cmu.difftest_skip_b = rob_entry[h1].difftest_skip;
   assign rou_cmu.valid_b = dual_commit;
 
@@ -749,7 +739,7 @@ module ysyx_rou #(
   // ---- RVFI per-slot data ----
   assign rou_cmu.rvfi_trap_a = !recieved_trap && rob_entry[h0].trap;
   assign rou_cmu.rvfi_trap_b = rob_entry[h1].trap;
-  assign rou_cmu.rvfi_npc_a  = (rob_entry[h0].trap || rob_entry[h0].ecall || rob_entry[h0].ebreak)
+  assign rou_cmu.rvfi_npc_a  = (rob_entry[h0].trap || uop_pl[h0].ecall || uop_pl[h0].ebreak)
       ? csr_bcast.tvec : rob_entry[h0].npc;
   assign rou_cmu.rvfi_sq_waddr_a = rob_entry[h0].sq_waddr;
   assign rou_cmu.rvfi_sq_waddr_b = rob_entry[h1].sq_waddr;
@@ -761,24 +751,20 @@ module ysyx_rou #(
   // Slot 0 never has sys/trap during dual commit (they cause flush).
   // When dual committing, route slot 1's CSR/sys info if present.
   logic csr_from_h1;
-  assign csr_from_h1 = dual_commit && (rob_entry[h1].sys || rob_entry[h1].trap);
+  assign csr_from_h1 = dual_commit && (uop_pl[h1].sys || rob_entry[h1].trap);
 
   assign rou_csr.pc = recieved_trap ? trap_pc : csr_from_h1 ? rob_entry[h1].pc : rob_entry[h0].pc;
   assign rou_csr.csr_wen   = recieved_trap ? 1'b0
                            : csr_from_h1   ? rob_entry[h1].csr_wen
                            :                 rob_entry[h0].csr_wen;
   assign rou_csr.csr_wdata = csr_from_h1 ? rob_entry[h1].csr_wdata : rob_entry[h0].csr_wdata;
-  assign rou_csr.csr_addr = csr_from_h1 ? rob_entry[h1].csr_addr : rob_entry[h0].csr_addr;
-  assign rou_csr.ecall     = recieved_trap ? 1'b0
-                           : csr_from_h1   ? rob_entry[h1].ecall
-                           :                 rob_entry[h0].ecall;
+  assign rou_csr.csr_addr = csr_from_h1 ? uop_pl[h1].csr_addr : uop_pl[h0].csr_addr;
+  assign rou_csr.ecall = recieved_trap ? 1'b0 : csr_from_h1 ? uop_pl[h1].ecall : uop_pl[h0].ecall;
   assign rou_csr.ebreak    = recieved_trap ? 1'b0
-                           : csr_from_h1   ? rob_entry[h1].ebreak
-                           :                 rob_entry[h0].ebreak;
-  assign rou_csr.mret = recieved_trap
-    ? 1'b0 : csr_from_h1 ? rob_entry[h1].mret : rob_entry[h0].mret;
-  assign rou_csr.sret = recieved_trap
-    ? 1'b0 : csr_from_h1 ? rob_entry[h1].sret : rob_entry[h0].sret;
+                           : csr_from_h1   ? uop_pl[h1].ebreak
+                           :                 uop_pl[h0].ebreak;
+  assign rou_csr.mret = recieved_trap ? 1'b0 : csr_from_h1 ? uop_pl[h1].mret : uop_pl[h0].mret;
+  assign rou_csr.sret = recieved_trap ? 1'b0 : csr_from_h1 ? uop_pl[h1].sret : uop_pl[h0].sret;
   assign rou_csr.trap = recieved_trap || (csr_from_h1 ? rob_entry[h1].trap : rob_entry[h0].trap);
   assign rou_csr.tval = recieved_trap ? '0 : csr_from_h1 ? rob_entry[h1].tval : rob_entry[h0].tval;
   assign rou_csr.cause     = recieved_trap
@@ -790,7 +776,7 @@ module ysyx_rou #(
       : csr_from_h1 ? rob_entry[h1].cause
       :               rob_entry[h0].cause;
   assign rou_csr.valid     = recieved_trap
-      || (head0_valid && (rob_entry[h0].sys || rob_entry[h0].trap))
+      || (head0_valid && (uop_pl[h0].sys || rob_entry[h0].trap))
       || csr_from_h1;
 
   // ---- LSU interface (store commit: MUX slot 0 / slot 1) ----

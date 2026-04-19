@@ -39,7 +39,10 @@ module ysyx_exu #(
     exu_csr_if.master exu_csr,
 
     csr_bcast_if.in   csr_bcast,
-    exu_l1d_if.master exu_l1d
+    exu_l1d_if.master exu_l1d,
+
+    // Dispatch-only uop payload snapshot from ROU (read by RS at issue time)
+    input ysyx_pkg::uop_payload_t uop_pl [ROB_SIZE]
 );
 
   // === Sub-module dispatch handshakes ===
@@ -134,7 +137,8 @@ module ysyx_exu #(
       .exu_csr      (exu_csr),
       .exu_rou      (exu_rou),
       .exu_rou_b    (exu_rou_b),
-      .exu_rou_c    (exu_rou_c)
+      .exu_rou_c    (exu_rou_c),
+      .uop_pl       (uop_pl)
   );
 
   ysyx_exu_ioq #(

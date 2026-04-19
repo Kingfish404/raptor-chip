@@ -227,9 +227,19 @@ uint32_t decompress_c(uint32_t inst)
 #ifndef CONFIG_RV64
   uint32_t decompress_c_ref(uint32_t inst);
   uint32_t di_func = decompress_c_ref(inst);
-  if (di_func != di && di_func != 0)
+  // Suppress Zcb mismatches (ref decoder predates Zcb).
+  uint32_t op = s & 0x3;
+  uint32_t f3 = (s >> 13) & 0x7;
+  int is_zcb = 0;
+  if (op == 0x0 && f3 == 0x4) is_zcb = 1; // Q0 funct3=100: c.lbu/c.lhu/c.lh/c.sb/c.sh
+  if (op == 0x1 && f3 == 0x4) {
+    uint32_t b12_10 = (s >> 10) & 0x7;
+    uint32_t b6_5 = (s >> 5) & 0x3;
+    if (b12_10 == 0x7 && (b6_5 == 0x2 || b6_5 == 0x3))
+      is_zcb = 1; // Q1 funct6=100111, funct2=10/11: c.mul/c.zext.*/c.sext.*/c.not
+  }
+  if (di_func != di && di_func != 0 && !is_zcb)
   {
-    // Suppress Zcb mismatches (ref decoder predates Zcb).
     printf("Decompressed mismatch: %04x -> %08x (gt) != %08x\n", s, di_func, di);
   }
 #endif

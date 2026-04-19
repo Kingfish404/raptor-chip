@@ -45,19 +45,26 @@ module ysyx_l1i #(
   logic [XLEN-1:0] l1i_addr;
   logic [XLEN-1:0] rec_addr;
   logic [XLEN-1:0] fetch_addr;
-  // Cache size/tag parameters and per-way valid arrays (registers for bulk clear on fence_i)
+  // Cache size/tag parameters and per-way line-level tag arrays.
   localparam unsigned L1iSize = 2 ** L1I_LEN;
   localparam unsigned L1iTagW = XLEN - L1I_LEN - L1I_LINE_LEN - 2;  // 2 = $clog2(4), word size
   localparam unsigned L1iWayW = L1I_N_WAYS > 1 ? $clog2(L1I_N_WAYS) : 1;
-  logic [L1iSize-1:0] l1i_valid[L1I_N_WAYS];
+  logic [L1I_LINE_SIZE-1:0] l1i_valid[L1I_N_WAYS][L1iSize];
 
-  // Per-way Data/Tag SRAM bank signals
+  // Per-way data SRAM bank signals.
   logic [31:0] data_bank_rdata[L1I_N_WAYS][L1I_LINE_SIZE];
   logic [L1I_LEN-1:0] data_bank_raddr[L1I_LINE_SIZE];  // shared across ways
-  logic [L1iTagW-1:0] tag_bank_rdata[L1I_N_WAYS][L1I_LINE_SIZE];
+
+  // Per-way tag mirrors: one copy for the current line, one for pc+4.
+  logic [L1iTagW-1:0] tag_rdata_curr[L1I_N_WAYS];
+  logic [L1iTagW-1:0] tag_rdata_next4[L1I_N_WAYS];
+  logic [L1I_N_WAYS-1:0] tag_valid_curr, tag_valid_next4;
+  logic [L1I_N_WAYS-1:0] fill_tag_match;
+  logic [L1I_LINE_SIZE-1:0] fill_word_mask;
 
   // Way hit logic
   logic [L1I_N_WAYS-1:0] way_hit, way_hit_next;
+  logic [L1I_N_WAYS-1:0] way_tag_match, way_tag_match_next;
   /* verilator lint_off UNUSEDSIGNAL */
   logic [L1iWayW-1:0] hit_way_sel, hit_next_way_sel;
   /* verilator lint_on UNUSEDSIGNAL */
@@ -74,6 +81,8 @@ module ysyx_l1i #(
   logic [L1iTagW-1:0] addr_tag_next;
   logic [L1I_LEN-1:0] addr_idx_next;
   logic [L1I_LINE_LEN-1:0] addr_offset_next;
+
+  logic [L1iTagW-1:0] addr_tag_next4;
 
   logic [L1iTagW-1:0] tag_fetch;
   logic [L1I_LEN-1:0] idx_fetch;
@@ -108,6 +117,8 @@ module ysyx_l1i #(
   logic [XLEN-1:12] ptw_result_vtag;
 
   logic l1i_fill_en;
+  logic l1i_tag_valid_set;
+  logic l1i_tag_inv;
 
   assign mmu_en = csr_bcast.immu_en;
   assign pc_ifu = mmu_en ? XLEN'({itlb_ptag, tlb_offset}) : ifu_l1i.pc;
@@ -132,6 +143,7 @@ module ysyx_l1i #(
   assign addr_tag_next = pc_ifu_next[XLEN-1:L1I_LEN+L1I_LINE_LEN+2];
   assign addr_idx_next = pc_ifu_next[L1I_LEN+L1I_LINE_LEN+2-1:L1I_LINE_LEN+2];
   assign addr_offset_next = pc_ifu_next[L1I_LINE_LEN+2-1:2];
+  assign addr_tag_next4 = pc_ifu_next4[XLEN-1:L1I_LEN+L1I_LINE_LEN+2];
 
   assign fetch_addr = ifq_raddr[ifq_tail];
   assign tag_fetch = fetch_addr[XLEN-1:L1I_LEN+L1I_LINE_LEN+2];
@@ -140,12 +152,15 @@ module ysyx_l1i #(
 
   assign raddr_valid = csr_bcast.immu_en || ysyx_pkg::addr_cacheable(l1i_addr);
 
-  // --- L1I Tag Comparison (N-way set-associative, SRAM tags) ---
+  // --- L1I Tag Comparison (N-way set-associative, line-level tags) ---
   generate
     for (genvar w = 0; w < L1I_N_WAYS; w++) begin : gen_way_hit
-      assign way_hit[w] = l1i_valid[w][addr_idx] && (tag_bank_rdata[w][addr_offset] == addr_tag);
-      assign way_hit_next[w] = l1i_valid[w][addr_idx_next]
-        && (tag_bank_rdata[w][addr_offset_next] == addr_tag_next);
+      assign way_tag_match[w] = tag_valid_curr[w] && (tag_rdata_curr[w] == addr_tag);
+      assign way_tag_match_next[w] = (pc_ifu[1] ? tag_valid_next4[w] : tag_valid_curr[w])
+        && ((pc_ifu[1] ? tag_rdata_next4[w] : tag_rdata_curr[w]) == addr_tag_next);
+      assign way_hit[w] = way_tag_match[w] && l1i_valid[w][addr_idx][addr_offset];
+      assign way_hit_next[w] = way_tag_match_next[w]
+        && l1i_valid[w][addr_idx_next][addr_offset_next];
     end
   endgenerate
   always_comb begin
@@ -158,11 +173,15 @@ module ysyx_l1i #(
   // Fill way: prefer invalid way, then random toggle
   generate
     if (L1I_N_WAYS > 1) begin : gen_fill_multi
-      assign fill_way_calc = !l1i_valid[0][addr_idx] ? 1'b0
-        : !l1i_valid[1][addr_idx] ? 1'b1
+      assign fill_way_calc = way_tag_match[0] ? 1'b0
+        : way_tag_match[1] ? 1'b1
+        : !tag_valid_curr[0] ? 1'b0
+        : !tag_valid_curr[1] ? 1'b1
         : replace_bit[addr_idx];
-      assign fill_way_next_calc = !l1i_valid[0][addr_idx_next] ? 1'b0
-        : !l1i_valid[1][addr_idx_next] ? 1'b1
+      assign fill_way_next_calc = way_tag_match_next[0] ? 1'b0
+        : way_tag_match_next[1] ? 1'b1
+        : !(pc_ifu[1] ? tag_valid_next4[0] : tag_valid_curr[0]) ? 1'b0
+        : !(pc_ifu[1] ? tag_valid_next4[1] : tag_valid_curr[1]) ? 1'b1
         : replace_bit[addr_idx_next];
     end else begin : gen_fill_dm
       assign fill_way_calc = '0;
@@ -196,6 +215,9 @@ module ysyx_l1i #(
   // Fill write condition: suppress during PTW states where the bus is used for
   // page table reads (IFQ is always empty during PTW, but be explicit)
   assign l1i_fill_en = l1i_bus.rvalid && ifq_valid[ifq_tail] && (l1i_state != PTWAIT);
+  assign l1i_tag_valid_set = l1i_fill_en && (ifq_valid[0] == 0);
+  assign l1i_tag_inv = (invalid_l1i || wait_invalid) && (l1i_state == IDLE);
+  assign fill_word_mask = {{L1I_LINE_SIZE - 1{1'b0}}, 1'b1} << offset_fetch;
 
 `ifdef YSYX_RV64
   logic [31:0] l1i_fill_data;
@@ -266,7 +288,35 @@ module ysyx_l1i #(
     end
   endgenerate
 
-  // Per-way Data + Tag SRAM banks
+  // Per-way independent line-level tag memories. The second mirror always
+  // tracks the line containing pc+4, which also covers pc+2 when pc[1]==1.
+  generate
+    for (genvar w = 0; w < L1I_N_WAYS; w++) begin : gen_way_tag
+      ysyx_l1i_tagmem #(
+          .L1I_LEN(L1I_LEN),
+          .TAG_W(L1iTagW),
+          .L1I_SIZE(L1iSize)
+      ) u_tagmem (
+          .clock(clock),
+          .reset(reset),
+          .raddr_curr(addr_idx),
+          .rtag_curr(tag_rdata_curr[w]),
+          .rvalid_curr(tag_valid_curr[w]),
+          .raddr_next4(addr_idx_next4),
+          .rtag_next4(tag_rdata_next4[w]),
+          .rvalid_next4(tag_valid_next4[w]),
+          .wen(l1i_fill_en && (fill_way_r == L1iWayW'(w))),
+          .waddr_idx(idx_fetch),
+          .wtag(tag_fetch),
+          .wtag_match(fill_tag_match[w]),
+          .valid_set(l1i_tag_valid_set && (fill_way_r == L1iWayW'(w))),
+          .valid_set_idx(idx_fetch),
+          .inv(l1i_tag_inv)
+      );
+    end
+  endgenerate
+
+  // Per-way data SRAM banks
   generate
     for (genvar w = 0; w < L1I_N_WAYS; w++) begin : gen_way
       for (genvar gi = 0; gi < L1I_LINE_SIZE; gi++) begin : gen_bank
@@ -281,18 +331,6 @@ module ysyx_l1i #(
             .wen(l1i_fill_en && (offset_fetch == L1I_LINE_LEN'(gi)) && (fill_way_r == L1iWayW'(w))),
             .waddr(idx_fetch),
             .wdata(l1i_fill_data)
-        );
-        ysyx_sram_1r1w #(
-            .ADDR_WIDTH(L1I_LEN),
-            .DATA_WIDTH(L1iTagW)
-        ) u_tag_sram (
-            .clock(clock),
-            .ren(1'b1),
-            .raddr(data_bank_raddr[gi]),
-            .rdata(tag_bank_rdata[w][gi]),
-            .wen(l1i_fill_en && (offset_fetch == L1I_LINE_LEN'(gi)) && (fill_way_r == L1iWayW'(w))),
-            .waddr(idx_fetch),
-            .wdata(tag_fetch)
         );
       end
     end
@@ -343,7 +381,6 @@ module ysyx_l1i #(
   // When pc[1]=0: bank[addr_offset+1] holds the word at pc+4.
   // When pc[1]=1: bank[addr_offset_next] already has pc+2..pc+5; reuse l1i_word_next.
   logic [L1I_LINE_LEN-1:0] addr_offset_n1;
-  logic [L1iTagW-1:0] addr_tag_next4;
   logic [L1I_N_WAYS-1:0] way_hit_n1;
   logic [L1iWayW-1:0] hit_n1_way_sel;
   logic hit_n1;
@@ -351,12 +388,12 @@ module ysyx_l1i #(
   logic sram_n1_ready;
 
   assign addr_offset_n1 = addr_offset + L1I_LINE_LEN'(1);
-  assign addr_tag_next4 = pc_ifu_next4[XLEN-1:L1I_LEN+L1I_LINE_LEN+2];
 
   generate
     for (genvar w = 0; w < L1I_N_WAYS; w++) begin : gen_way_hit_n1
-      assign way_hit_n1[w] = l1i_valid[w][addr_idx_next4]
-        && (tag_bank_rdata[w][addr_offset_n1] == addr_tag_next4);
+      assign way_hit_n1[w] = tag_valid_next4[w]
+        && (tag_rdata_next4[w] == addr_tag_next4)
+        && l1i_valid[w][addr_idx_next4][addr_offset_n1];
     end
   endgenerate
 
@@ -384,9 +421,11 @@ module ysyx_l1i #(
   always @(posedge clock) begin
     if (reset) begin
       l1i_state <= IDLE;
-      ifq_head <= 0;
+      ifq_head  <= 0;
       ifq_valid <= 0;
-      l1i_valid <= '{default: '0};
+      for (int w = 0; w < int'(L1I_N_WAYS); w++) begin
+        for (int i = 0; i < int'(L1iSize); i++) l1i_valid[w][i] <= '0;
+      end
       replace_bit <= 0;
       fill_way_r <= 0;
       ifq_tail <= 0;
@@ -508,7 +547,9 @@ module ysyx_l1i #(
 
     if (invalid_l1i || wait_invalid) begin
       if (l1i_state == IDLE) begin
-        l1i_valid <= '{default: '0};
+        for (int w = 0; w < int'(L1I_N_WAYS); w++) begin
+          for (int i = 0; i < int'(L1iSize); i++) l1i_valid[w][i] <= '0;
+        end
         wait_invalid <= 0;
       end else begin
         wait_invalid <= 1;
@@ -517,8 +558,10 @@ module ysyx_l1i #(
     // Valid + IFQ update on cache line arrival (tag fill handled by SRAM wen)
     // Valid + IFQ update on cache line arrival (tag fill handled by SRAM wen)
     if (l1i_fill_en) begin
+      l1i_valid[fill_way_r][idx_fetch] <= fill_tag_match[fill_way_r]
+        ? (l1i_valid[fill_way_r][idx_fetch] | fill_word_mask)
+        : fill_word_mask;
       if (ifq_valid[0] == 0) begin
-        l1i_valid[fill_way_r][idx_fetch] <= 1'b1;
         replace_bit[idx_fetch] <= ~replace_bit[idx_fetch];
       end
       ifq_valid[ifq_tail] <= 0;

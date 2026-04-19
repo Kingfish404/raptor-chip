@@ -139,6 +139,9 @@ module ysyx #(
 
   rou_csr_if rou_csr ();
 
+  // Dispatch-only uop payload snapshot (ROU -> EXU/RS)
+  ysyx_pkg::uop_payload_t uop_pl [`YSYX_ROB_SIZE];
+
   // EXU stage
   exu_rou_if exu_rou ();  // Execute & Writeback => Commit
   exu_rou_b_if exu_rou_b ();  // Second ALU writeback (pure arithmetic)
@@ -292,6 +295,8 @@ module ysyx #(
       .rou_csr(rou_csr),
       .rou_lsu(rou_lsu),
 
+      .uop_pl(uop_pl),
+
       .reset(reset)
   );
 
@@ -313,6 +318,8 @@ module ysyx #(
 
       .csr_bcast(csr_bcast),
       .exu_l1d  (exu_l1d),
+
+      .uop_pl(uop_pl),
 
       .reset(reset)
   );

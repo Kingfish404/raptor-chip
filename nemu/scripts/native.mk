@@ -45,7 +45,7 @@ gdb: run-env
 lldb: run-env
 	lldb $(BINARY) -- $(NEMU_EXEC)
 
-clean-tools = $(dir $(shell find ./tools -maxdepth 2 -mindepth 2 -name "Makefile"))
+clean-tools = $(dir $(wildcard ./tools/*/Makefile))
 $(clean-tools):
 	-@$(MAKE) -s -C $@ clean
 clean-tools: $(clean-tools)

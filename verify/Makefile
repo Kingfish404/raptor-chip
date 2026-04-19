@@ -26,6 +26,17 @@ OBJCOPY := $(CROSS_COMPILE)objcopy
 OBJDUMP := $(CROSS_COMPILE)objdump
 
 NPROC := $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
+TIMEOUT_BIN := $(shell command -v timeout 2>/dev/null || command -v gtimeout 2>/dev/null)
+PYTHON := $(shell command -v python3 2>/dev/null || command -v python 2>/dev/null)
+
+ifeq ($(strip $(TIMEOUT_BIN)),)
+	ifeq ($(strip $(PYTHON)),)
+		$(error Neither timeout/gtimeout nor python3/python is available)
+	endif
+	TIMEOUT_RUN := $(PYTHON) $(VERIFY_HOME)/scripts/run_with_timeout.py
+else
+	TIMEOUT_RUN := $(TIMEOUT_BIN)
+endif
 
 # --- Paths to existing build artifacts ---
 NPC_BIN_32  := $(NSIM_HOME)/build/riscv32-npc-sim
@@ -164,7 +175,7 @@ fuzz-run: check-prereqs ## Run fuzz tests in FUZZ_SRC_DIR with difftest
 			-T $(FUZZ_LINKER) -o "$$elf" "$$src" 2>"$(FUZZ_SRC_DIR)/$${name}.compile.log"; then \
 			echo "  [CERR] $$name"; ERR=$$((ERR+1)); continue; fi; \
 		$(OBJCOPY) -O binary "$$elf" "$$bin"; \
-		set +e; timeout $(TIMEOUT) $(NPC_BIN) -b -n -d $(NEMU_SO) -r $(MROM_IMG) "$$bin" >"$$log" 2>&1; \
+		set +e; $(TIMEOUT_RUN) $(TIMEOUT) -- $(NPC_BIN) -b -n -d $(NEMU_SO) -r $(MROM_IMG) "$$bin" >"$$log" 2>&1; \
 		rc=$$?; set -e; \
 		if [ $$rc -eq 0 ]; then \
 			if grep -qiE "BAD TRAP|ABORT" "$$log"; then \
@@ -432,7 +443,7 @@ sigtest-run: check-prereqs ## Run signature tests with difftest
 			head -5 "$(SIGTEST_DIR)/$${name}.compile.log" | sed 's/^/         /'; \
 			ERR=$$((ERR+1)); continue; fi; \
 		$(OBJCOPY) -O binary "$$elf" "$$bin"; \
-		set +e; timeout $(TIMEOUT) $(NPC_BIN) -b -n -d $(NEMU_SO) -r $(MROM_IMG) "$$bin" >"$$log" 2>&1; \
+		set +e; $(TIMEOUT_RUN) $(TIMEOUT) -- $(NPC_BIN) -b -n -d $(NEMU_SO) -r $(MROM_IMG) "$$bin" >"$$log" 2>&1; \
 		rc=$$?; set -e; \
 		if [ $$rc -eq 0 ]; then \
 			if grep -qiE "BAD TRAP|ABORT" "$$log"; then \

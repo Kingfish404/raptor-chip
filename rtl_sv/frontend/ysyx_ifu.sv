@@ -32,9 +32,18 @@ module ysyx_ifu #(
   logic [XLEN-1:0] seqpc;
   logic [XLEN-1:0] nextpc;
 
-  // Pre-registered sequential PC candidates: computed from nextpc at the
-  // same edge as pc_ifu, so seqpc is a simple MUX of registered values
-  // instead of a 32-bit adder on the critical pc_ifu self-loop.
+  // Sequential PC candidates derived combinationally from pc_ifu.
+  //
+  // Previously these were registered from (nextpc + N) to avoid a pc_ifu
+  // self-loop through the adder. But STA showed the BTB r_raddr fanout cone
+  // drives nextpc with a >10 ns delay, and the +4 adder sitting between
+  // nextpc and the seq4/D register turned the BTB path into the chip's
+  // global critical path terminating at ifu.seq4[28].
+  //
+  // Phase A': compute seq* combinationally from the registered pc_ifu. This
+  // moves the +2/+4/+6/+8 adders out of the BTB -> nextpc cone. The new
+  // pc_ifu self-loop (pc_ifu/Q -> +N -> seqpc mux -> nextpc mux -> pc_ifu/D)
+  // is short (~3 ns) because it no longer involves the BTB mux tree.
   logic [XLEN-1:0] seq2;
   logic [XLEN-1:0] seq4;
 `ifdef YSYX_DUAL_ISSUE
@@ -193,15 +202,17 @@ module ysyx_ifu #(
   assign pc_stride = pc_ifu - pc_a;
   assign pred_stride = nextpc - pc_ifu;
 
+  // Combinational sequential-PC candidates (see declaration for rationale).
+  assign seq2 = pc_ifu + 'h2;
+  assign seq4 = pc_ifu + 'h4;
+`ifdef YSYX_DUAL_ISSUE
+  assign seq6 = pc_ifu + 'h6;
+  assign seq8 = pc_ifu + 'h8;
+`endif
+
   always @(posedge clock) begin
     if (reset) begin
       pc_ifu <= `YSYX_PC_INIT;
-      seq2   <= `YSYX_PC_INIT + 'h2;
-      seq4   <= `YSYX_PC_INIT + 'h4;
-`ifdef YSYX_DUAL_ISSUE
-      seq6 <= `YSYX_PC_INIT + 'h6;
-      seq8 <= `YSYX_PC_INIT + 'h8;
-`endif
       trap <= 0;
       pmu_fetch_fire <= 0;
       pmu_ifu_stall <= 0;
@@ -250,12 +261,6 @@ module ysyx_ifu #(
       endcase
       if (recv_ready || cmu_bcast.flush_pipe || cmu_bcast.sys_resume || ifu_idu.resteer) begin
         pc_ifu <= nextpc;
-        seq2   <= nextpc + 'h2;
-        seq4   <= nextpc + 'h4;
-`ifdef YSYX_DUAL_ISSUE
-        seq6 <= nextpc + 'h6;
-        seq8 <= nextpc + 'h8;
-`endif
       end
       if (recv_ready) begin
         pc_a   <= pc_ifu;

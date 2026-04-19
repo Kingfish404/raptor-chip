@@ -88,7 +88,6 @@ interface exu_rou_if #(
     parameter unsigned RLEN = `YSYX_REG_LEN,
     parameter int XLEN = `YSYX_XLEN
 );
-  logic [31:0] inst;
   logic [XLEN-1:0] pc;
   logic [XLEN-1:0] npc;
   logic btaken;
@@ -100,15 +99,9 @@ interface exu_rou_if #(
   logic [PLEN-1:0] prd;
   logic [RLEN-1:0] rd;
 
-  // csr
+  // csr (WB-written; csr_addr lives in uop_pl, not here)
   logic csr_wen;
   logic [XLEN-1:0] csr_wdata;
-  logic [11:0] csr_addr;
-
-  logic ecall;
-  logic ebreak;
-  logic mret;
-  logic sret;
 
   logic trap;
   logic [XLEN-1:0] tval;
@@ -119,19 +112,19 @@ interface exu_rou_if #(
   logic valid;
 
   modport in(
-      input inst, pc, npc, btaken,
-      input dest, result, ebreak,
+      input pc, npc, btaken,
+      input dest, result,
       input prd, rd,
-      input csr_wen, csr_wdata, csr_addr, ecall, mret, sret,
+      input csr_wen, csr_wdata,
       input trap, tval, cause,
       input difftest_skip,
       input valid
   );
   modport out(
-      output inst, pc, npc, btaken,
-      output dest, result, ebreak,
+      output pc, npc, btaken,
+      output dest, result,
       output prd, rd,
-      output csr_wen, csr_wdata, csr_addr, ecall, mret, sret,
+      output csr_wen, csr_wdata,
       output trap, tval, cause,
       output difftest_skip,
       output valid
@@ -146,7 +139,6 @@ interface exu_rou_b_if #(
     parameter unsigned RLEN = `YSYX_REG_LEN,
     parameter int XLEN = `YSYX_XLEN
 );
-  logic [31:0] inst;
   logic [XLEN-1:0] pc;
   logic [XLEN-1:0] npc;
   logic btaken;
@@ -161,14 +153,14 @@ interface exu_rou_b_if #(
   logic valid;
 
   modport in(
-      input inst, pc, npc, btaken,
+      input pc, npc, btaken,
       input dest, result,
       input prd, rd,
       input difftest_skip,
       input valid
   );
   modport out(
-      output inst, pc, npc, btaken,
+      output pc, npc, btaken,
       output dest, result,
       output prd, rd,
       output difftest_skip,
@@ -183,7 +175,6 @@ endinterface
 interface exu_rou_c_if #(
     parameter int XLEN = `YSYX_XLEN
 );
-  logic [31:0] inst;
   logic [XLEN-1:0] pc;
   logic [XLEN-1:0] npc;
   logic btaken;
@@ -194,13 +185,13 @@ interface exu_rou_c_if #(
   logic valid;
 
   modport in(
-      input inst, pc, npc, btaken,
+      input pc, npc, btaken,
       input dest,
       input difftest_skip,
       input valid
   );
   modport out(
-      output inst, pc, npc, btaken,
+      output pc, npc, btaken,
       output dest,
       output difftest_skip,
       output valid
@@ -302,7 +293,6 @@ interface exu_ioq_bcast_if #(
   logic trap;
   logic [XLEN-1:0] tval;
   logic [XLEN-1:0] cause;
-  logic [31:0] inst;
 
   logic difftest_skip;
 
@@ -313,7 +303,7 @@ interface exu_ioq_bcast_if #(
       input result, dest,
       input prd, rd,
       input wen, alu, sq_waddr, sq_wdata,
-      input trap, tval, cause, inst,
+      input trap, tval, cause,
       input difftest_skip,
       input valid
   );
@@ -322,7 +312,7 @@ interface exu_ioq_bcast_if #(
       output result, dest,
       output prd, rd,
       output wen, alu, sq_waddr, sq_wdata,
-      output trap, tval, cause, inst,
+      output trap, tval, cause,
       output difftest_skip,
       output valid
   );

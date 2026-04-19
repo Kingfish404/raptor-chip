@@ -21,6 +21,7 @@ VSRC_PATH ?= $(abspath ../rtl_sv)
 INC_PATH ?= $(abspath ./include) $(abspath $(VSRC_PATH)/include)
 
 remove_quote = $(patsubst "%",%,$(1))
+NPROC ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 
 ifeq ($(CONFIG_MODE), "soc")
 SOC_HOME  = $(abspath $(YSYX_HOME)/third_party/kingfish404/ysyxSoC)
@@ -126,7 +127,7 @@ INC_PATH += $(abspath $(VSRC_PATH)/include/dpic)
 endif
 
 $(BIN): $(VSRCS) $(VHSRCS) $(CCSRCS) $(CHSRCS) $(NVBOARD_ARCHIVE)
-	$(VERILATOR) --trace-fst -cc --exe --build -j $(shell nproc) $(VERILATOR_FLAG) $(VERILATOR_EXTRA) $^ \
+	$(VERILATOR) --trace-fst -cc --exe --build -j $(NPROC) $(VERILATOR_FLAG) $(VERILATOR_EXTRA) $^ \
 		--threads 1 --trace-threads 1 \
 		--top-module $(VTARGET) \
 		$(addprefix -CFLAGS , $(CXXFLAGS)) $(addprefix -LDFLAGS , $(LDFLAGS)) \

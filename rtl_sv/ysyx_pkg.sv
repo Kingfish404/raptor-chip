@@ -59,7 +59,31 @@ package ysyx_pkg;
     ROB_EX = 2'b10   // Executing
   } rob_state_t;
 
-  // ROB entry - aggregates all per-entry fields for clarity
+  // UOP payload: dispatch-write-only, never modified during RS/ROB residence.
+  // Stored in a separate `uop_pl[ROB_SIZE]` array (flop) indexed by ROB
+  // destination. Read by RS at issue time and by commit path, eliminating
+  // duplicated copies that previously lived in both `rob_entry_t` and RS.
+  typedef struct packed {
+    // System / trap dispatch classification
+    logic sys;     // CSR access (former rob_entry.sys / uop.system)
+    logic ecall;
+    logic ebreak;
+    logic mret;
+    logic sret;
+    logic f_i;
+    logic f_time;
+
+    // CSR access
+    logic [11:0] csr_addr;  // equals uop.imm[11:0]
+    logic [2:0]  csr_csw;   // CSR write strobes (W/S/C)
+
+    // Original instruction (debug / RVFI / difftest). On commit, a trap
+    // entry is surfaced as `'h13` (NOP) via a read-side mux.
+    logic [31:0] inst;
+  } uop_payload_t;
+
+  // ROB entry - control + WB-mutable fields only. Cold, dispatch-only
+  // fields live in `uop_payload_t` above.
   typedef struct packed {
     // Physical register mapping
     logic [PLEN-1:0] prd;
@@ -89,32 +113,19 @@ package ysyx_pkg;
     logic atom;
     logic atom_sc;
 
-    // System
-    logic sys;
-    logic ecall;
-    logic ebreak;
-    logic mret;
-    logic sret;
-
-    // CSR
+    // CSR (WB-written)
     logic            csr_wen;
     logic [XLEN-1:0] csr_wdata;
-    logic [11:0]     csr_addr;
 
-    // Trap
+    // Trap (WB-mutable by EXU port-A and IOQ)
     logic            trap;
     logic [XLEN-1:0] tval;
     logic [XLEN-1:0] cause;
 
-    // Fence
-    logic f_i;
-    logic f_time;
-
     // Difftest
     logic difftest_skip;
 
-    // Instruction info
-    logic [31:0]     inst;
+    // PC (commit path)
     logic [XLEN-1:0] pc;
   } rob_entry_t;
 

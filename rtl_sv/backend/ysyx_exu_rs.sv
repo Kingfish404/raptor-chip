@@ -42,14 +42,17 @@ module ysyx_exu_rs #(
     // Writebacks (ROB)
     exu_rou_if.out   exu_rou,
     exu_rou_b_if.out exu_rou_b,
-    exu_rou_c_if.out exu_rou_c
+    exu_rou_c_if.out exu_rou_c,
+
+    // Dispatch-only uop payload snapshot (indexed by ROB destination).
+    // Read at issue time by slot A to source `ecall/ebreak/mret/sret/csr_*/inst`.
+    input ysyx_pkg::uop_payload_t uop_pl [ROB_SIZE]
 );
   localparam unsigned ROBLen = $clog2(ROB_SIZE);
   localparam unsigned RSLen = $clog2(RS_SIZE);
 
   // === RS state ===
   logic [RS_SIZE-1:0] rs_valid;
-  logic [       31:0] rs_inst       [RS_SIZE];
   logic [   XLEN-1:0] rs_pc         [RS_SIZE];
   logic               rs_c          [RS_SIZE];
   logic               rs_word       [RS_SIZE];
@@ -60,6 +63,12 @@ module ysyx_exu_rs #(
 
   logic [   PLEN-1:0] rs_pr1        [RS_SIZE];
   logic [   PLEN-1:0] rs_pr2        [RS_SIZE];
+  // Per-entry operand busy flags. Latched at dispatch from `|pr1` / `|pr2`
+  // and cleared on CDB match. Collapses the former 6-bit `rs_pr*[i] == 0`
+  // zero-check into a single bit read in every eligibility vector, shaving
+  // gate levels from the wakeup -> select cone.
+  logic [RS_SIZE-1:0] rs_pr1_busy;
+  logic [RS_SIZE-1:0] rs_pr2_busy;
   logic [   PLEN-1:0] rs_prd        [RS_SIZE];
   logic [   RLEN-1:0] rs_rd         [RS_SIZE];
 
@@ -73,16 +82,22 @@ module ysyx_exu_rs #(
   logic [RS_SIZE-1:0] rs_jump;
   logic [   XLEN-1:0] rs_imm        [RS_SIZE];
 
-  logic [RS_SIZE-1:0] rs_system;
-  logic [RS_SIZE-1:0] rs_ecall;
-  logic [RS_SIZE-1:0] rs_ebreak;
-  logic [RS_SIZE-1:0] rs_mret;
-  logic [RS_SIZE-1:0] rs_sret;
-  logic [        2:0] rs_csr_csw    [RS_SIZE];
+  // Consolidated slot-B ineligibility flag, latched at dispatch. Collapses
+  // the previous `rs_system|rs_trap|rs_ecall|rs_ebreak|rs_mret|rs_sret|
+  // (rs_csr_csw != 0)` disjunction into one bit per entry to keep the
+  // eligibility cone short after moving the underlying fields to `uop_pl`.
+  logic [RS_SIZE-1:0] rs_b_block;
 
   logic               rs_trap       [RS_SIZE];
   logic [   XLEN-1:0] rs_tval       [RS_SIZE];
   logic [   XLEN-1:0] rs_cause      [RS_SIZE];
+
+  // Per-slot aliases into the dispatch-only payload snapshot. `rs_dest`
+  // maps each RS entry to its ROB destination; dereference gives the
+  // original uop fields without duplicating them in RS. Only slot A
+  // currently needs a view (system / ecall / mret / sret / csr_* live in
+  // payload); slots B/C never carry those control bits.
+  ysyx_pkg::uop_payload_t rs_pl_a;
 
   // === Selection ===
   logic [  RSLen-1:0] valid_idx_a;
@@ -90,6 +105,8 @@ module ysyx_exu_rs #(
   logic [  RSLen-1:0] valid_idx_c;
   logic [  RSLen-1:0] mul_rs_idx;
   logic valid_found_a, valid_found_b, valid_found_c, mul_found;
+
+  assign rs_pl_a = uop_pl[rs_dest[valid_idx_a]];
 
   logic [RSLen-1:0] free_idx_a;
   logic             free_found_a;
@@ -106,27 +123,27 @@ module ysyx_exu_rs #(
   logic [RS_SIZE-1:0] sel_a_onehot;
 
   // === Eligibility vectors ===
+  logic [RS_SIZE-1:0] rs_pr_ready;
   always_comb begin
     for (int i = 0; i < RS_SIZE; i++) begin
+      rs_pr_ready[i] = ~(rs_pr1_busy[i] | rs_pr2_busy[i]);
       rs_free_vec[i] = !rs_valid[i];
       // Slot A: everything except conditional branches (port C handles ben).
-      rs_ready_vec[i] = rs_valid[i] && rs_pr1[i] == 0 && rs_pr2[i] == 0
+      rs_ready_vec[i] = rs_valid[i] && rs_pr_ready[i]
                        && (rs_alu[i][5:4] != 2'b01 || rs_mul_ready[i])
                        && !rs_br_cond[i];
       // MUL FU eligibility: ready operands, not yet issued/completed.
       rs_mul_vec[i]   = rs_valid[i] && rs_alu[i][5:4] == 2'b01
-                       && rs_pr1[i] == 0 && rs_pr2[i] == 0
+                       && rs_pr_ready[i]
                        && !rs_mul_issued[i] && !rs_mul_ready[i];
       // Slot B: simple arithmetic + jen (no CSR/system/trap/mul/ben).
-      rs_simple_b_vec[i] = rs_valid[i] && rs_pr1[i] == 0 && rs_pr2[i] == 0
+      rs_simple_b_vec[i] = rs_valid[i] && rs_pr_ready[i]
                        && rs_alu[i][5:4] != 2'b01
-                       && !rs_system[i] && !rs_trap[i]
-                       && !rs_ecall[i] && !rs_ebreak[i]
-                       && !rs_mret[i]  && !rs_sret[i]
+                       && !rs_trap[i]
                        && !rs_br_cond[i]
-                       && (rs_csr_csw[i] == 0);
+                       && !rs_b_block[i];
       // Port C (BRU): conditional branches only.
-      rs_bru_vec[i] = rs_valid[i] && rs_pr1[i] == 0 && rs_pr2[i] == 0 && rs_br_cond[i];
+      rs_bru_vec[i] = rs_valid[i] && rs_pr_ready[i] && rs_br_cond[i];
     end
   end
 
@@ -166,6 +183,9 @@ module ysyx_exu_rs #(
   assign disp.mul_found    = mul_found;
 
   // === Age-matrix transpose for column lookups ===
+  // `age_col[i]` = set of entries strictly older than i. A ready entry is
+  // the oldest of a subset S iff no older entry is also in S, i.e.
+  // `(age_col[i] & S) == 0`.
   always_comb begin
     for (int j = 0; j < RS_SIZE; j++) begin
       for (int i = 0; i < RS_SIZE; i++) begin
@@ -174,14 +194,49 @@ module ysyx_exu_rs #(
     end
   end
 
-  // ---- Slot A: oldest ready entry ----
+  // -------------------------------------------------------------------
+  // Age-based select helpers
+  //
+  // `age_oldest_oh(vec)` returns the one-hot pick of the oldest entry in
+  // `vec`. Each bit is computed in parallel (3-level tree on top of 8-bit
+  // AND + zero-check). Safe because the age matrix is a strict partial
+  // order, so at most one element of any non-empty subset satisfies the
+  // `no older member present` predicate.
+  //
+  // `oh2bin(oh)` collapses a one-hot into its binary index with a
+  // $clog2-stage OR tree (each output bit ORs the one-hot positions whose
+  // index has that bit set).
+  //
+  // Used for MUL / slot-B / port-C picks where the consumer sees the idx
+  // but not a wide data mux. Slot A uses a different form (see below)
+  // because its idx feeds RS-wide data muxes (`rs_vj[idx]` etc.) -- a
+  // linear priority encoder there lets the synthesizer fold early-out
+  // comparisons into the mux select cones, which empirically gives
+  // better PPA than the onehot form.
+  // -------------------------------------------------------------------
+  function automatic logic [RS_SIZE-1:0] age_oldest_oh(input logic [RS_SIZE-1:0] vec);
+    logic [RS_SIZE-1:0] oh;
+    for (int i = 0; i < RS_SIZE; i++) oh[i] = vec[i] && ((age_col[i] & vec) == '0);
+    return oh;
+  endfunction
+
+  function automatic logic [RSLen-1:0] oh2bin(input logic [RS_SIZE-1:0] oh);
+    logic [RSLen-1:0] bin;
+    bin = '0;
+    for (int i = 0; i < RS_SIZE; i++) begin
+      if (oh[i]) bin = bin | i[RSLen-1:0];
+    end
+    return bin;
+  endfunction
+
+  // ---- Slot A: oldest ready entry (linear PE for crit-path PPA) ----
   always_comb begin
     valid_idx_a   = '0;
     valid_found_a = 1'b0;
     sel_a_onehot  = '0;
     for (int i = 0; i < RS_SIZE; i++) begin
       if (!valid_found_a && rs_ready_vec[i] && ((age_col[i] & rs_ready_vec) == '0)) begin
-        valid_idx_a   = i[$clog2(RS_SIZE)-1:0];
+        valid_idx_a   = i[RSLen-1:0];
         valid_found_a = 1'b1;
       end
     end
@@ -189,41 +244,23 @@ module ysyx_exu_rs #(
   end
 
   // ---- MUL FU pick ----
-  always_comb begin
-    mul_rs_idx = '0;
-    mul_found  = 1'b0;
-    for (int i = 0; i < RS_SIZE; i++) begin
-      if (!mul_found && rs_mul_vec[i] && ((age_col[i] & rs_mul_vec) == '0)) begin
-        mul_rs_idx = i[$clog2(RS_SIZE)-1:0];
-        mul_found  = 1'b1;
-      end
-    end
-  end
+  logic [RS_SIZE-1:0] sel_mul_onehot;
+  assign sel_mul_onehot = age_oldest_oh(rs_mul_vec);
+  assign mul_found      = |sel_mul_onehot;
+  assign mul_rs_idx     = oh2bin(sel_mul_onehot);
 
   // ---- Slot B: oldest simple-ALU entry distinct from slot A ----
-  always_comb begin
-    sel_b_msk     = rs_simple_b_vec & ~sel_a_onehot;
-    valid_idx_b   = '0;
-    valid_found_b = 1'b0;
-    for (int i = 0; i < RS_SIZE; i++) begin
-      if (!valid_found_b && sel_b_msk[i] && ((age_col[i] & sel_b_msk) == '0)) begin
-        valid_idx_b   = i[$clog2(RS_SIZE)-1:0];
-        valid_found_b = 1'b1;
-      end
-    end
-  end
+  logic [RS_SIZE-1:0] sel_b_onehot;
+  assign sel_b_msk     = rs_simple_b_vec & ~sel_a_onehot;
+  assign sel_b_onehot  = age_oldest_oh(sel_b_msk);
+  assign valid_found_b = |sel_b_onehot;
+  assign valid_idx_b   = oh2bin(sel_b_onehot);
 
   // ---- Port C (BRU): oldest ready conditional branch ----
-  always_comb begin
-    valid_idx_c   = '0;
-    valid_found_c = 1'b0;
-    for (int i = 0; i < RS_SIZE; i++) begin
-      if (!valid_found_c && rs_bru_vec[i] && ((age_col[i] & rs_bru_vec) == '0)) begin
-        valid_idx_c   = i[$clog2(RS_SIZE)-1:0];
-        valid_found_c = 1'b1;
-      end
-    end
-  end
+  logic [RS_SIZE-1:0] sel_c_onehot;
+  assign sel_c_onehot  = age_oldest_oh(rs_bru_vec);
+  assign valid_found_c = |sel_c_onehot;
+  assign valid_idx_c   = oh2bin(sel_c_onehot);
 
   // === ALU & MUL function units ===
   logic [           XLEN-1:0] alu_result_a;
@@ -287,6 +324,8 @@ module ysyx_exu_rs #(
   always @(posedge clock) begin
     if (reset || cmu_bcast.flush_pipe) begin
       rs_valid      <= '0;
+      rs_pr1_busy   <= '0;
+      rs_pr2_busy   <= '0;
       rs_mul_ready  <= '0;
       rs_mul_issued <= '0;
       for (int i = 0; i < RS_SIZE; i++) age_mat[i] <= '0;
@@ -303,6 +342,8 @@ module ysyx_exu_rs #(
             rs_dest[free_idx_a]    <= rou_exu.dest;
             rs_pr1[free_idx_a]     <= rou_exu.pr1;
             rs_pr2[free_idx_a]     <= rou_exu.pr2;
+            rs_pr1_busy[free_idx_a] <= |rou_exu.pr1;
+            rs_pr2_busy[free_idx_a] <= |rou_exu.pr2;
             rs_prd[free_idx_a]     <= rou_exu.prd;
             rs_rd[free_idx_a]      <= rou_exu.uop.rd;
             rs_c[free_idx_a]       <= rou_exu.uop.c;
@@ -313,18 +354,15 @@ module ysyx_exu_rs #(
             rs_jump[free_idx_a]    <= (rou_exu.uop.jen);
             rs_imm[free_idx_a]     <= rou_exu.uop.imm;
             rs_pc[free_idx_a]      <= rou_exu.uop.pc;
-            rs_inst[free_idx_a]    <= rou_exu.uop.inst;
-            rs_system[free_idx_a]  <= rou_exu.uop.system;
-            rs_ecall[free_idx_a]   <= rou_exu.uop.ecall;
-            rs_ebreak[free_idx_a]  <= rou_exu.uop.ebreak;
-            rs_mret[free_idx_a]    <= rou_exu.uop.mret;
-            rs_sret[free_idx_a]    <= rou_exu.uop.sret;
-            rs_csr_csw[free_idx_a] <= rou_exu.uop.csr_csw;
+            rs_b_block[free_idx_a] <= (rou_exu.uop.system || rou_exu.uop.trap
+                                    || rou_exu.uop.ecall  || rou_exu.uop.ebreak
+                                    || rou_exu.uop.mret   || rou_exu.uop.sret
+                                    || (rou_exu.uop.csr_csw != 0));
             rs_trap[free_idx_a]    <= rou_exu.uop.trap;
             rs_tval[free_idx_a]    <= rou_exu.uop.tval;
             rs_cause[free_idx_a]   <= rou_exu.uop.cause;
           end
-        end else if (rs_valid[i] && rs_pr1[i] == 0 && rs_pr2[i] == 0) begin
+        end else if (rs_valid[i] && !rs_pr1_busy[i] && !rs_pr2_busy[i]) begin
           // MUL FU bookkeeping (tag-based completion).
           if (rs_alu[i][5:4] == 2'b01) begin
             if (mul_found && mul_ready && i[$clog2(
@@ -348,31 +386,36 @@ module ysyx_exu_rs #(
               )-1:0])) begin
             rs_valid[i]      <= 1'b0;
             rs_alu[i]        <= '0;
-            rs_inst[i]       <= '0;
             rs_mul_ready[i]  <= 1'b0;
             rs_mul_issued[i] <= 1'b0;
           end
         end else if (rs_valid[i]) begin
           // Operand forwarding.
-          if (|rs_pr1[i] && exu_ioq_bcast.valid && exu_ioq_bcast.prd == rs_pr1[i]) begin
-            rs_vj[i]  <= exu_ioq_bcast.result;
-            rs_pr1[i] <= '0;
-          end else if (|rs_pr1[i] && exu_rou.valid && exu_rou.prd == rs_pr1[i]) begin
-            rs_vj[i]  <= exu_rou.result;
-            rs_pr1[i] <= '0;
-          end else if (|rs_pr1[i] && exu_rou_b.valid && exu_rou_b.prd == rs_pr1[i]) begin
-            rs_vj[i]  <= exu_rou_b.result;
-            rs_pr1[i] <= '0;
+          if (rs_pr1_busy[i] && exu_ioq_bcast.valid && exu_ioq_bcast.prd == rs_pr1[i]) begin
+            rs_vj[i]       <= exu_ioq_bcast.result;
+            rs_pr1[i]      <= '0;
+            rs_pr1_busy[i] <= 1'b0;
+          end else if (rs_pr1_busy[i] && exu_rou.valid && exu_rou.prd == rs_pr1[i]) begin
+            rs_vj[i]       <= exu_rou.result;
+            rs_pr1[i]      <= '0;
+            rs_pr1_busy[i] <= 1'b0;
+          end else if (rs_pr1_busy[i] && exu_rou_b.valid && exu_rou_b.prd == rs_pr1[i]) begin
+            rs_vj[i]       <= exu_rou_b.result;
+            rs_pr1[i]      <= '0;
+            rs_pr1_busy[i] <= 1'b0;
           end
-          if (|rs_pr2[i] && exu_ioq_bcast.valid && exu_ioq_bcast.prd == rs_pr2[i]) begin
-            rs_vk[i]  <= exu_ioq_bcast.result;
-            rs_pr2[i] <= '0;
-          end else if (|rs_pr2[i] && exu_rou.valid && exu_rou.prd == rs_pr2[i]) begin
-            rs_vk[i]  <= exu_rou.result;
-            rs_pr2[i] <= '0;
-          end else if (|rs_pr2[i] && exu_rou_b.valid && exu_rou_b.prd == rs_pr2[i]) begin
-            rs_vk[i]  <= exu_rou_b.result;
-            rs_pr2[i] <= '0;
+          if (rs_pr2_busy[i] && exu_ioq_bcast.valid && exu_ioq_bcast.prd == rs_pr2[i]) begin
+            rs_vk[i]       <= exu_ioq_bcast.result;
+            rs_pr2[i]      <= '0;
+            rs_pr2_busy[i] <= 1'b0;
+          end else if (rs_pr2_busy[i] && exu_rou.valid && exu_rou.prd == rs_pr2[i]) begin
+            rs_vk[i]       <= exu_rou.result;
+            rs_pr2[i]      <= '0;
+            rs_pr2_busy[i] <= 1'b0;
+          end else if (rs_pr2_busy[i] && exu_rou_b.valid && exu_rou_b.prd == rs_pr2[i]) begin
+            rs_vk[i]       <= exu_rou_b.result;
+            rs_pr2[i]      <= '0;
+            rs_pr2_busy[i] <= 1'b0;
           end
         end
       end
@@ -386,6 +429,8 @@ module ysyx_exu_rs #(
         rs_dest[disp.b_rs_idx] <= rou_exu.dest_b;
         rs_pr1[disp.b_rs_idx] <= rou_exu.pr1_b;
         rs_pr2[disp.b_rs_idx] <= rou_exu.pr2_b;
+        rs_pr1_busy[disp.b_rs_idx] <= |rou_exu.pr1_b;
+        rs_pr2_busy[disp.b_rs_idx] <= |rou_exu.pr2_b;
         rs_prd[disp.b_rs_idx] <= rou_exu.prd_b;
         rs_rd[disp.b_rs_idx] <= rou_exu.uop_b.rd;
         rs_c[disp.b_rs_idx] <= rou_exu.uop_b.c;
@@ -396,13 +441,10 @@ module ysyx_exu_rs #(
         rs_jump[disp.b_rs_idx] <= (rou_exu.uop_b.jen);
         rs_imm[disp.b_rs_idx] <= rou_exu.uop_b.imm;
         rs_pc[disp.b_rs_idx] <= rou_exu.uop_b.pc;
-        rs_inst[disp.b_rs_idx] <= rou_exu.uop_b.inst;
-        rs_system[disp.b_rs_idx] <= rou_exu.uop_b.system;
-        rs_ecall[disp.b_rs_idx] <= rou_exu.uop_b.ecall;
-        rs_ebreak[disp.b_rs_idx] <= rou_exu.uop_b.ebreak;
-        rs_mret[disp.b_rs_idx] <= rou_exu.uop_b.mret;
-        rs_sret[disp.b_rs_idx] <= rou_exu.uop_b.sret;
-        rs_csr_csw[disp.b_rs_idx] <= rou_exu.uop_b.csr_csw;
+        rs_b_block[disp.b_rs_idx] <= (rou_exu.uop_b.system || rou_exu.uop_b.trap
+                                    || rou_exu.uop_b.ecall  || rou_exu.uop_b.ebreak
+                                    || rou_exu.uop_b.mret   || rou_exu.uop_b.sret
+                                    || (rou_exu.uop_b.csr_csw != 0));
         rs_trap[disp.b_rs_idx] <= rou_exu.uop_b.trap;
         rs_tval[disp.b_rs_idx] <= rou_exu.uop_b.tval;
         rs_cause[disp.b_rs_idx] <= rou_exu.uop_b.cause;
@@ -443,9 +485,9 @@ module ysyx_exu_rs #(
 
   assign exu_csr.raddr = rs_imm[valid_idx_a][11:0];
   assign csr_wdata_a = (
-      ({XLEN{rs_csr_csw[valid_idx_a][0]}} & rs_vj[valid_idx_a]) |
-      ({XLEN{rs_csr_csw[valid_idx_a][1]}} & (exu_csr.rdata | rs_vj[valid_idx_a])) |
-      ({XLEN{rs_csr_csw[valid_idx_a][2]}} & (exu_csr.rdata & ~rs_vj[valid_idx_a])) |
+      ({XLEN{rs_pl_a.csr_csw[0]}} & rs_vj[valid_idx_a]) |
+      ({XLEN{rs_pl_a.csr_csw[1]}} & (exu_csr.rdata | rs_vj[valid_idx_a])) |
+      ({XLEN{rs_pl_a.csr_csw[2]}} & (exu_csr.rdata & ~rs_vj[valid_idx_a])) |
       (0)
   );
 
@@ -462,7 +504,7 @@ module ysyx_exu_rs #(
       : exu_csr.rdata;
 
   assign exu_rou.dest = rs_dest[valid_idx_a];
-  assign exu_rou.result  = (rs_system[valid_idx_a]
+  assign exu_rou.result  = (rs_pl_a.sys
       ? csr_rdata_corrected_a
       : (rs_alu[valid_idx_a][5:4] == 2'b01
           ? rs_mul_a[valid_idx_a]
@@ -470,33 +512,27 @@ module ysyx_exu_rs #(
               ? rs_pc[valid_idx_a] + (rs_c[valid_idx_a] ? 2 : 4)
               : alu_result_a));
   assign exu_rou.npc = (
-      (rs_ecall[valid_idx_a] || rs_ebreak[valid_idx_a])
+      (rs_pl_a.ecall || rs_pl_a.ebreak)
       ? csr_bcast.mtvec
       : rs_trap[valid_idx_a]
           ? csr_bcast.tvec
-          : rs_mret[valid_idx_a]
+          : rs_pl_a.mret
               ? exu_csr.mepc
-              : rs_sret[valid_idx_a]
+              : rs_pl_a.sret
                   ? exu_csr.sepc
                   : (rs_br_jmp[valid_idx_a]) || (rs_br_cond[valid_idx_a] && |alu_result_a)
                       ? addr_exu_a
                       : (rs_pc[valid_idx_a] + (rs_c[valid_idx_a] ? 2 : 4)));
-  assign exu_rou.ebreak = rs_ebreak[valid_idx_a];
   assign exu_rou.btaken = (rs_br_cond[valid_idx_a] && |alu_result_a);
   assign exu_rou.prd = rs_prd[valid_idx_a];
   assign exu_rou.rd = rs_rd[valid_idx_a];
-  assign exu_rou.inst = rs_inst[valid_idx_a];
   assign exu_rou.pc = rs_pc[valid_idx_a];
-  assign exu_rou.csr_wen = |rs_csr_csw[valid_idx_a];
+  assign exu_rou.csr_wen = |rs_pl_a.csr_csw;
   assign exu_rou.csr_wdata = csr_wdata_a;
-  assign exu_rou.csr_addr = rs_imm[valid_idx_a][11:0];
-  assign exu_rou.ecall = rs_ecall[valid_idx_a];
-  assign exu_rou.mret = rs_mret[valid_idx_a];
-  assign exu_rou.sret = rs_sret[valid_idx_a];
   assign exu_rou.trap = rs_trap[valid_idx_a];
   assign exu_rou.tval = rs_tval[valid_idx_a];
   assign exu_rou.cause = rs_cause[valid_idx_a];
-  assign exu_rou.difftest_skip = |rs_csr_csw[valid_idx_a] && (rs_imm[valid_idx_a][11:0] ==
+  assign exu_rou.difftest_skip = |rs_pl_a.csr_csw && (rs_imm[valid_idx_a][11:0] ==
       `YSYX_CSR_TIME___
       || rs_imm[valid_idx_a][11:0] ==
       `YSYX_CSR_TIMEH__
@@ -526,7 +562,6 @@ module ysyx_exu_rs #(
       ? addr_exu_b
       : rs_pc[valid_idx_b] + (rs_c[valid_idx_b] ? 2 : 4);
   assign exu_rou_b.btaken = (rs_br_cond[valid_idx_b] && |alu_result_b);
-  assign exu_rou_b.inst = rs_inst[valid_idx_b];
   assign exu_rou_b.difftest_skip = 1'b0;
 
   // === Port-C writeback (BRU only) ===
@@ -540,7 +575,6 @@ module ysyx_exu_rs #(
       ? addr_exu_c
       : rs_pc[valid_idx_c] + (rs_c[valid_idx_c] ? 2 : 4);
   assign exu_rou_c.btaken = |alu_result_c;
-  assign exu_rou_c.inst = rs_inst[valid_idx_c];
   assign exu_rou_c.difftest_skip = 1'b0;
 
 endmodule

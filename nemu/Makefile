@@ -37,9 +37,10 @@ FILELIST_MK = $(shell find -L ./src -name "filelist.mk")
 include $(FILELIST_MK)
 
 # Filter out directories and files in blacklist to obtain the final set of source files
+find_c_files = $(if $(strip $(1)),$(shell find -L $(strip $(1)) -name "*.c"))
 DIRS-BLACKLIST-y += $(DIRS-BLACKLIST)
-SRCS-BLACKLIST-y += $(SRCS-BLACKLIST) $(shell find -L $(DIRS-BLACKLIST-y) -name "*.c")
-SRCS-y += $(shell find -L $(DIRS-y) -name "*.c")
+SRCS-BLACKLIST-y += $(SRCS-BLACKLIST) $(call find_c_files,$(DIRS-BLACKLIST-y))
+SRCS-y += $(call find_c_files,$(DIRS-y))
 SRCS = $(filter-out $(SRCS-BLACKLIST-y),$(SRCS-y))
 
 # Extract compiler and options from menuconfig

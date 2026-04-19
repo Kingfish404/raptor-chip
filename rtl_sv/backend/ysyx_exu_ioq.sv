@@ -48,7 +48,6 @@ module ysyx_exu_ioq #(
   logic [  IOQLen-1:0] ioq_tail_a;
   logic [  IOQLen-1:0] ioq_head;
 
-  logic [        31:0] ioq_inst            [IOQ_SIZE];
   logic [    XLEN-1:0] ioq_pc              [IOQ_SIZE];
 
   logic [    PLEN-1:0] ioq_pr1             [IOQ_SIZE];
@@ -294,7 +293,6 @@ module ysyx_exu_ioq #(
       ? ioq_eff_addr[ioq_head]
       : ioq_vj[ioq_head] + ioq_imm[ioq_head];
   assign exu_ioq_bcast.cause = ioq_ren[ioq_head] ? head_cause_lsu : ioq_cause[ioq_head];
-  assign exu_ioq_bcast.inst = head_trap_lsu || ioq_trap[ioq_head] ? 'h13 : ioq_inst[ioq_head];
   assign exu_ioq_bcast.difftest_skip =
       (ioq_ren[ioq_head] && head_skip_lsu)
       || (ioq_wen[ioq_head] && ysyx_pkg::addr_mmio(
@@ -327,7 +325,6 @@ module ysyx_exu_ioq #(
       // ---- Enqueue slot A ----
       if (disp.accept_a) begin
         ioq_valid[ioq_tail_a]     <= 1'b1;
-        ioq_inst[ioq_tail_a]      <= rou_exu.uop.inst;
         ioq_pc[ioq_tail_a]        <= rou_exu.uop.pc;
         ioq_pr1[ioq_tail_a]       <= rou_exu.pr1;
         ioq_pr2[ioq_tail_a]       <= rou_exu.pr2;
@@ -353,7 +350,6 @@ module ysyx_exu_ioq #(
       // ---- Enqueue slot B paired with A (uses ioq_tail_a+1) ----
       if (disp.accept_b_paired) begin
         ioq_valid[ioq_tail_b]     <= 1'b1;
-        ioq_inst[ioq_tail_b]      <= rou_exu.uop_b.inst;
         ioq_pc[ioq_tail_b]        <= rou_exu.uop_b.pc;
         ioq_pr1[ioq_tail_b]       <= rou_exu.pr1_b;
         ioq_pr2[ioq_tail_b]       <= rou_exu.pr2_b;
@@ -378,7 +374,6 @@ module ysyx_exu_ioq #(
       // ---- Enqueue slot B alone (A went to RS, uses ioq_tail_a) ----
       if (disp.accept_b_alone) begin
         ioq_valid[ioq_tail_a]     <= 1'b1;
-        ioq_inst[ioq_tail_a]      <= rou_exu.uop_b.inst;
         ioq_pc[ioq_tail_a]        <= rou_exu.uop_b.pc;
         ioq_pr1[ioq_tail_a]       <= rou_exu.pr1_b;
         ioq_pr2[ioq_tail_a]       <= rou_exu.pr2_b;
@@ -420,7 +415,6 @@ module ysyx_exu_ioq #(
 
       // ---- Head retire ----
       if (ioq_valid_found) begin
-        ioq_inst[ioq_head]   <= '0;
         ioq_wen[ioq_head]    <= 1'b0;
         ioq_mmu_en[ioq_head] <= 1'b0;
         ioq_trap[ioq_head]   <= 1'b0;

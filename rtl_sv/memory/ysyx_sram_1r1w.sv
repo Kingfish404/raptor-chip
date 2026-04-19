@@ -18,6 +18,14 @@
  *   DATA_WIDTH - Data width in bits
  */
 /* verilator lint_off WIDTHEXPAND */
+// (* keep_hierarchy *) prevents yosys from flattening every SRAM instance and
+// CSE-merging their internal retimed raddr registers into one shared DFF.
+// When multiple banks share the same combinational raddr net (e.g. L1D data
+// SRAMs across ways/banks), the merged DFF ends up driving every bank's read
+// mux cone, producing a multi-ns BUF-only fanout delay. keep_hierarchy keeps
+// each instance's raddr register local, so each raddr bit only fans out to
+// its own bank's DEPTH x DATA_WIDTH mux.
+(* keep_hierarchy *)
 module ysyx_sram_1r1w #(
     parameter int ADDR_WIDTH = 7,
     parameter int DATA_WIDTH = 32
@@ -72,13 +80,35 @@ module ysyx_sram_1r1w #(
     end
   end
 
-  // Synchronous read with write-first bypass
+  // Explicit per-instance registered read port.
+  //
+  // Original RTL used `rdata <= mem[raddr]` which yosys retimes by moving
+  // the rdata DFF backward, creating an implicit raddr register. The
+  // retimed register is then CSE-merged across bank/way SRAM instances
+  // that share the same combinational raddr driver (e.g. L1D data array:
+  // 2 ways x L1D_LINE_SIZE banks sharing one `sram_raddr`). The merged DFF
+  // drives every bank's DEPTH x DATA_WIDTH read mux, producing an ~11 ns
+  // BUF-only fanout on r_raddr[0]/Q (observed chip critical path).
+  //
+  // Making raddr_r / bypass_en_r / wdata_r explicit and (* keep = "true" *)
+  // prevents CSE merging: each SRAM instance owns its own read-address DFF
+  // and its fanout is capped at one bank's mux cone.
+  (* keep = "true" *)logic [ADDR_WIDTH-1:0] raddr_r;
+  (* keep = "true" *)logic                  bypass_en_r;
+  (* keep = "true" *)logic [DATA_WIDTH-1:0] wdata_r;
+
   always_ff @(posedge clock) begin
     if (ren) begin
-      if (wen && waddr == raddr) rdata <= wdata;  // write-first bypass
-      else rdata <= mem[raddr];
+      raddr_r     <= raddr;
+      bypass_en_r <= wen && (waddr == raddr);
+      wdata_r     <= wdata;
     end
   end
+
+  // Combinational read: bypass_en_r selects registered write data for
+  // write-first semantics, otherwise read from memory using the
+  // per-instance registered address.
+  assign rdata = bypass_en_r ? wdata_r : mem[raddr_r];
 `endif
 
 endmodule
