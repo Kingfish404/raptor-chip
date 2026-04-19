@@ -31,7 +31,7 @@ class raptor_dut(pluginTemplate):
         self.cc = os.environ.get("CC", "riscv64-elf-gcc")
         self.objcopy = os.environ.get("OBJCOPY", "riscv64-elf-objcopy")
         self.march = os.environ.get(
-            "MARCH", "rv32imac_zicntr_zicond_zicsr_zifencei_zba_zbb_zbc_zbs"
+            "MARCH", "rv32imac_zicntr_zicond_zicsr_zifencei_zcb_zba_zbb_zbc_zbs"
         )
         self.mabi = os.environ.get("MABI", "ilp32")
 
@@ -70,7 +70,7 @@ class raptor_dut(pluginTemplate):
         # Collect test list from the RISCOF framework
         if "32" in self.xlen:
             self.compile_cmd = self.compile_cmd.replace(
-                self.march, "rv32imac_zicntr_zicond_zicsr_zifencei_zba_zbb_zbc_zbs"
+                self.march, "rv32imac_zicntr_zicond_zicsr_zifencei_zcb_zba_zbb_zbc_zbs"
             )
 
     def runTests(self, testList):

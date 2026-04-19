@@ -1,6 +1,6 @@
 include $(AM_HOME)/scripts/isa/riscv.mk
 include $(AM_HOME)/scripts/platform/npc.mk
-COMMON_CFLAGS += -march=rv64imac_zicntr_zicond_zicsr_zifencei_zba_zbb_zbc_zbs -mabi=lp64  # overwrite
+COMMON_CFLAGS += -march=rv64imac_zicntr_zicond_zicsr_zifencei_zcb_zba_zbb_zbc_zbs -mabi=lp64  # overwrite
 LDFLAGS       += -melf64lriscv                    # overwrite
 
 AM_SRCS += riscv/npc/libgcc/div.S \

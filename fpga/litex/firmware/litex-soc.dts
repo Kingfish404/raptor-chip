@@ -27,7 +27,7 @@
 		cpu@0 {
 			device_type = "cpu";
 			compatible = "riscv";
-			riscv,isa = "rv32imac_zicsr_zifencei_zba_zbb_zbc_zbs";
+			riscv,isa = "rv32imac_zicsr_zifencei_zcb_zba_zbb_zbc_zbs";
 			mmu-type = "riscv,sv32";
 			reg = <0>;
 

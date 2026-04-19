@@ -29,6 +29,8 @@ module ysyx_rou #(
     rou_exu_if.master rou_exu,
 
     exu_rou_if.in exu_rou,
+    exu_rou_b_if.in exu_rou_b,
+    exu_rou_c_if.in exu_rou_c,
     exu_ioq_bcast_if.in exu_ioq_bcast,
 
     // interrupt
@@ -43,7 +45,7 @@ module ysyx_rou #(
 
     input reset
 );
-  logic valid, ready;
+  logic valid_a, ready_a;
   logic            flush_pipe;
   logic            fence_time;
 
@@ -53,10 +55,10 @@ module ysyx_rou #(
   logic [XLEN-1:0] trap_pc;
 
   // Forward declarations (used across sections)
-  logic [$clog2(ROB_SIZE)-1:0] rob_head, rob_tail;
+  logic [$clog2(ROB_SIZE)-1:0] rob_head, rob_tail_a;
   ysyx_pkg::rob_entry_t rob_entry[ROB_SIZE];
-  logic head_br_p_fail;
-  logic head_valid;
+  logic head0_br_p_fail;
+  logic head0_valid;
 
   logic dual_commit;
 
@@ -70,7 +72,7 @@ module ysyx_rou #(
   // ================================================================
   // 1. Dispatch Queue (UOQ)
   // ================================================================
-  logic [$clog2(IIQ_SIZE)-1:0] uoq_head, uoq_tail;
+  logic [$clog2(IIQ_SIZE)-1:0] uoq_head_a, uoq_tail_a;
   logic           [IIQ_SIZE-1:0] uoq_valid;
 
   ysyx_pkg::uop_t                uoq_uops      [IIQ_SIZE];
@@ -95,34 +97,34 @@ module ysyx_rou #(
   // Lightweight resume for pure CSR: no flush, just unblock IFU and clear drain
   logic sys_resume;
 
-  assign uoq_head_b = uoq_head + 1;
-  assign uoq_tail_b = uoq_tail + 1;
+  assign uoq_head_b = uoq_head_a + 1;
+  assign uoq_tail_b = uoq_tail_a + 1;
 
   // When valid_b is set, both UOQ slots must be free to enqueue.
   // This prevents slot A from enqueuing without slot B, avoiding duplication.
-  assign uoq_enq_fire_a  = rnu_rou.valid_a && !uoq_valid[uoq_head]
+  assign uoq_enq_fire_a  = rnu_rou.valid_a && !uoq_valid[uoq_head_a]
       && (!rnu_rou.valid_b || !uoq_valid[uoq_head_b]);
 `else
-  assign uoq_enq_fire_a = rnu_rou.valid_a && !uoq_valid[uoq_head];
+  assign uoq_enq_fire_a = rnu_rou.valid_a && !uoq_valid[uoq_head_a];
 `endif
 
   // Pipeline drain: serializing instructions (CSR/fence/ecall/mret/sret)
   // must wait for ROB to empty before dispatch, and block subsequent dispatch
   // until committed. This eliminates OoO timing hacks (e.g. instret correction).
-  logic uoq_tail_is_serializing;
-  assign uoq_tail_is_serializing = uoq_valid[uoq_tail] && (
-      uoq_uops[uoq_tail].system
-      || uoq_uops[uoq_tail].f_i
-      || uoq_uops[uoq_tail].f_time);
+  logic uoq_tail_a_is_serializing;
+  assign uoq_tail_a_is_serializing = uoq_valid[uoq_tail_a] && (
+      uoq_uops[uoq_tail_a].system
+      || uoq_uops[uoq_tail_a].f_i
+      || uoq_uops[uoq_tail_a].f_time);
 
   logic rob_empty;
-  assign rob_empty = (rob_head == rob_tail) && !rob_entry[rob_head].busy;
+  assign rob_empty = (rob_head == rob_tail_a) && !rob_entry[rob_head].busy;
 
   logic serialize_in_flight;
 
-  assign uoq_deq_fire_a = rou_exu.ready && uoq_valid[uoq_tail] && !rob_entry[rob_tail].busy
+  assign uoq_deq_fire_a = rou_exu.ready && uoq_valid[uoq_tail_a] && !rob_entry[rob_tail_a].busy
       && !serialize_in_flight
-      && (!uoq_tail_is_serializing || rob_empty);
+      && (!uoq_tail_a_is_serializing || rob_empty);
 
 `ifdef YSYX_DUAL_ISSUE
   logic uoq_enq_fire_b, uoq_deq_fire_b;
@@ -134,23 +136,23 @@ module ysyx_rou #(
 
   // ROB tail+1 must also be free for dual dispatch
   logic [$clog2(ROB_SIZE)-1:0] rob_tail_b;
-  assign rob_tail_b = rob_tail + 1;
+  assign rob_tail_b = rob_tail_a + 1;
   assign uoq_deq_fire_b = uoq_deq_fire_a && uoq_is_pair[uoq_tail_b]
       && uoq_valid[uoq_tail_b]
       && !rob_entry[rob_tail_b].busy
       && rou_exu.ready_b;
 `endif
 
-  assign valid         = uoq_valid[uoq_tail] && !rob_entry[rob_tail].busy
+  assign valid_a         = uoq_valid[uoq_tail_a] && !rob_entry[rob_tail_a].busy
       && !serialize_in_flight
-      && (!uoq_tail_is_serializing || rob_empty);
-  assign ready = !uoq_valid[uoq_head];
-  assign rou_exu.valid = valid;
+      && (!uoq_tail_a_is_serializing || rob_empty);
+  assign ready_a = !uoq_valid[uoq_head_a];
+  assign rou_exu.valid = valid_a;
 `ifdef YSYX_DUAL_ISSUE
   // When RNU sends a dual pair (valid_b), both UOQ slots must be free.
-  assign rnu_rou.ready = !uoq_valid[uoq_head] && (!rnu_rou.valid_b || !uoq_valid[uoq_head_b]);
+  assign rnu_rou.ready = !uoq_valid[uoq_head_a] && (!rnu_rou.valid_b || !uoq_valid[uoq_head_b]);
 `else
-  assign rnu_rou.ready = ready;
+  assign rnu_rou.ready = ready_a;
 `endif
 
 `ifdef YSYX_DUAL_ISSUE
@@ -161,8 +163,8 @@ module ysyx_rou #(
 
   always @(posedge clock) begin
     if (reset || flush_pipe) begin
-      uoq_head            <= '0;
-      uoq_tail            <= '0;
+      uoq_head_a            <= '0;
+      uoq_tail_a            <= '0;
       uoq_valid           <= '0;
       uoq_pv1_valid       <= '0;
       uoq_pv2_valid       <= '0;
@@ -172,43 +174,49 @@ module ysyx_rou #(
       serialize_in_flight <= 1'b0;
     end else begin
       if (uoq_enq_fire_a) begin
-        uoq_valid[uoq_head] <= 1'b1;
-        uoq_uops[uoq_head]  <= rnu_rou.uop_a;
-        uoq_pr1[uoq_head]   <= rnu_rou.pr1_a;
-        uoq_pr2[uoq_head]   <= rnu_rou.pr2_a;
-        uoq_prd[uoq_head]   <= rnu_rou.prd_a;
-        uoq_prs[uoq_head]   <= rnu_rou.prs_a;
-        uoq_op1[uoq_head]   <= rnu_rou.op1_a;
-        uoq_op2[uoq_head]   <= rnu_rou.op2_a;
+        uoq_valid[uoq_head_a] <= 1'b1;
+        uoq_uops[uoq_head_a]  <= rnu_rou.uop_a;
+        uoq_pr1[uoq_head_a]   <= rnu_rou.pr1_a;
+        uoq_pr2[uoq_head_a]   <= rnu_rou.pr2_a;
+        uoq_prd[uoq_head_a]   <= rnu_rou.prd_a;
+        uoq_prs[uoq_head_a]   <= rnu_rou.prs_a;
+        uoq_op1[uoq_head_a]   <= rnu_rou.op1_a;
+        uoq_op2[uoq_head_a]   <= rnu_rou.op2_a;
 
         // PRF pre-read with same-cycle bypass at enqueue
         if (|rnu_rou.pr1_a && exu_rou.valid && exu_rou.prd == rnu_rou.pr1_a) begin
-          uoq_pv1[uoq_head]       <= exu_rou.result;
-          uoq_pv1_valid[uoq_head] <= 1'b1;
+          uoq_pv1[uoq_head_a]       <= exu_rou.result;
+          uoq_pv1_valid[uoq_head_a] <= 1'b1;
+        end else if (|rnu_rou.pr1_a && exu_rou_b.valid && exu_rou_b.prd == rnu_rou.pr1_a) begin
+          uoq_pv1[uoq_head_a]       <= exu_rou_b.result;
+          uoq_pv1_valid[uoq_head_a] <= 1'b1;
         end else if (|rnu_rou.pr1_a
           && exu_ioq_bcast.valid && exu_ioq_bcast.prd == rnu_rou.pr1_a) begin
-          uoq_pv1[uoq_head]       <= exu_ioq_bcast.result;
-          uoq_pv1_valid[uoq_head] <= 1'b1;
+          uoq_pv1[uoq_head_a]       <= exu_ioq_bcast.result;
+          uoq_pv1_valid[uoq_head_a] <= 1'b1;
         end else begin
-          uoq_pv1[uoq_head]       <= exu_prf.pv1_a;
-          uoq_pv1_valid[uoq_head] <= exu_prf.pv1_a_valid;
+          uoq_pv1[uoq_head_a]       <= exu_prf.pv1_a;
+          uoq_pv1_valid[uoq_head_a] <= exu_prf.pv1_a_valid;
         end
 
         if (|rnu_rou.pr2_a && exu_rou.valid && exu_rou.prd == rnu_rou.pr2_a) begin
-          uoq_pv2[uoq_head]       <= exu_rou.result;
-          uoq_pv2_valid[uoq_head] <= 1'b1;
+          uoq_pv2[uoq_head_a]       <= exu_rou.result;
+          uoq_pv2_valid[uoq_head_a] <= 1'b1;
+        end else if (|rnu_rou.pr2_a && exu_rou_b.valid && exu_rou_b.prd == rnu_rou.pr2_a) begin
+          uoq_pv2[uoq_head_a]       <= exu_rou_b.result;
+          uoq_pv2_valid[uoq_head_a] <= 1'b1;
         end else if (|rnu_rou.pr2_a
           && exu_ioq_bcast.valid && exu_ioq_bcast.prd == rnu_rou.pr2_a) begin
-          uoq_pv2[uoq_head]       <= exu_ioq_bcast.result;
-          uoq_pv2_valid[uoq_head] <= 1'b1;
+          uoq_pv2[uoq_head_a]       <= exu_ioq_bcast.result;
+          uoq_pv2_valid[uoq_head_a] <= 1'b1;
         end else begin
-          uoq_pv2[uoq_head]       <= exu_prf.pv2_a;
-          uoq_pv2_valid[uoq_head] <= exu_prf.pv2_a_valid;
+          uoq_pv2[uoq_head_a]       <= exu_prf.pv2_a;
+          uoq_pv2_valid[uoq_head_a] <= exu_prf.pv2_a_valid;
         end
 
 `ifdef YSYX_DUAL_ISSUE
         if (uoq_enq_fire_b) begin
-          uoq_is_pair[uoq_head] <= 1'b0;
+          uoq_is_pair[uoq_head_a] <= 1'b0;
           uoq_is_pair[uoq_head_b] <= 1'b1;
           uoq_valid[uoq_head_b] <= 1'b1;
           uoq_uops[uoq_head_b] <= rnu_rou.uop_b;
@@ -223,6 +231,9 @@ module ysyx_rou #(
           if (|rnu_rou.pr1_b && exu_rou.valid && exu_rou.prd == rnu_rou.pr1_b) begin
             uoq_pv1[uoq_head_b]       <= exu_rou.result;
             uoq_pv1_valid[uoq_head_b] <= 1'b1;
+          end else if (|rnu_rou.pr1_b && exu_rou_b.valid && exu_rou_b.prd == rnu_rou.pr1_b) begin
+            uoq_pv1[uoq_head_b]       <= exu_rou_b.result;
+            uoq_pv1_valid[uoq_head_b] <= 1'b1;
           end else if (|rnu_rou.pr1_b
             && exu_ioq_bcast.valid && exu_ioq_bcast.prd == rnu_rou.pr1_b) begin
             uoq_pv1[uoq_head_b]       <= exu_ioq_bcast.result;
@@ -235,6 +246,9 @@ module ysyx_rou #(
           if (|rnu_rou.pr2_b && exu_rou.valid && exu_rou.prd == rnu_rou.pr2_b) begin
             uoq_pv2[uoq_head_b]       <= exu_rou.result;
             uoq_pv2_valid[uoq_head_b] <= 1'b1;
+          end else if (|rnu_rou.pr2_b && exu_rou_b.valid && exu_rou_b.prd == rnu_rou.pr2_b) begin
+            uoq_pv2[uoq_head_b]       <= exu_rou_b.result;
+            uoq_pv2_valid[uoq_head_b] <= 1'b1;
           end else if (|rnu_rou.pr2_b
             && exu_ioq_bcast.valid && exu_ioq_bcast.prd == rnu_rou.pr2_b) begin
             uoq_pv2[uoq_head_b]       <= exu_ioq_bcast.result;
@@ -244,34 +258,34 @@ module ysyx_rou #(
             uoq_pv2_valid[uoq_head_b] <= exu_prf.pv2_b_valid;
           end
 
-          uoq_head <= uoq_head + 2;
+          uoq_head_a <= uoq_head_a + 2;
         end else begin
-          uoq_is_pair[uoq_head] <= 1'b0;
-          uoq_head <= uoq_head + 1;
+          uoq_is_pair[uoq_head_a] <= 1'b0;
+          uoq_head_a <= uoq_head_a + 1;
         end
 `else
-        uoq_head <= uoq_head + 1;
+        uoq_head_a <= uoq_head_a + 1;
 `endif
       end
       if (uoq_deq_fire_a) begin
         // Track serializing instruction dispatch for pipeline drain
-        if (uoq_tail_is_serializing) begin
+        if (uoq_tail_a_is_serializing) begin
           serialize_in_flight <= 1'b1;
         end
 `ifdef YSYX_DUAL_ISSUE
         if (uoq_deq_fire_b) begin
-          uoq_tail <= uoq_tail + 2;
-          uoq_valid[uoq_tail] <= 1'b0;
+          uoq_tail_a <= uoq_tail_a + 2;
+          uoq_valid[uoq_tail_a] <= 1'b0;
           uoq_valid[uoq_tail_b] <= 1'b0;
           uoq_is_pair[uoq_tail_b] <= 1'b0;
         end else begin
-          uoq_tail              <= uoq_tail + 1;
-          uoq_valid[uoq_tail]   <= 1'b0;
-          uoq_is_pair[uoq_tail] <= 1'b0;
+          uoq_tail_a              <= uoq_tail_a + 1;
+          uoq_valid[uoq_tail_a]   <= 1'b0;
+          uoq_is_pair[uoq_tail_a] <= 1'b0;
         end
 `else
-        uoq_tail            <= uoq_tail + 1;
-        uoq_valid[uoq_tail] <= 1'b0;
+        uoq_tail_a            <= uoq_tail_a + 1;
+        uoq_valid[uoq_tail_a] <= 1'b0;
 `endif
       end
 
@@ -282,6 +296,9 @@ module ysyx_rou #(
             if (exu_rou.valid && exu_rou.prd == uoq_pr1[i]) begin
               uoq_pv1[i]       <= exu_rou.result;
               uoq_pv1_valid[i] <= 1'b1;
+            end else if (exu_rou_b.valid && exu_rou_b.prd == uoq_pr1[i]) begin
+              uoq_pv1[i]       <= exu_rou_b.result;
+              uoq_pv1_valid[i] <= 1'b1;
             end else if (exu_ioq_bcast.valid && exu_ioq_bcast.prd == uoq_pr1[i]) begin
               uoq_pv1[i]       <= exu_ioq_bcast.result;
               uoq_pv1_valid[i] <= 1'b1;
@@ -290,6 +307,9 @@ module ysyx_rou #(
           if (|uoq_pr2[i] && !uoq_pv2_valid[i]) begin
             if (exu_rou.valid && exu_rou.prd == uoq_pr2[i]) begin
               uoq_pv2[i]       <= exu_rou.result;
+              uoq_pv2_valid[i] <= 1'b1;
+            end else if (exu_rou_b.valid && exu_rou_b.prd == uoq_pr2[i]) begin
+              uoq_pv2[i]       <= exu_rou_b.result;
               uoq_pv2_valid[i] <= 1'b1;
             end else if (exu_ioq_bcast.valid && exu_ioq_bcast.prd == uoq_pr2[i]) begin
               uoq_pv2[i]       <= exu_ioq_bcast.result;
@@ -313,64 +333,70 @@ module ysyx_rou #(
 `endif
 
   // Bypass: use UOQ pre-read values + same-cycle broadcast forwarding
-  logic pr1_from_uoq, pr1_from_ioq, pr1_from_exu;
-  logic pr2_from_uoq, pr2_from_ioq, pr2_from_exu;
+  logic pr1_a_from_uoq, pr1_a_from_ioq, pr1_a_from_exu, pr1_a_from_exu_b;
+  logic pr2_a_from_uoq, pr2_a_from_ioq, pr2_a_from_exu, pr2_a_from_exu_b;
 
-  assign pr1_from_uoq = uoq_pv1_valid[uoq_tail];
-  assign pr1_from_ioq = exu_ioq_bcast.valid && (exu_ioq_bcast.prd == uoq_pr1[uoq_tail]);
-  assign pr1_from_exu = exu_rou.valid && (exu_rou.prd == uoq_pr1[uoq_tail]);
+  assign pr1_a_from_uoq   = uoq_pv1_valid[uoq_tail_a];
+  assign pr1_a_from_ioq   = exu_ioq_bcast.valid && (exu_ioq_bcast.prd == uoq_pr1[uoq_tail_a]);
+  assign pr1_a_from_exu   = exu_rou.valid && (exu_rou.prd == uoq_pr1[uoq_tail_a]);
+  assign pr1_a_from_exu_b = exu_rou_b.valid && (exu_rou_b.prd == uoq_pr1[uoq_tail_a]);
 
-  assign pr2_from_uoq = uoq_pv2_valid[uoq_tail];
-  assign pr2_from_ioq = exu_ioq_bcast.valid && (exu_ioq_bcast.prd == uoq_pr2[uoq_tail]);
-  assign pr2_from_exu = exu_rou.valid && (exu_rou.prd == uoq_pr2[uoq_tail]);
+  assign pr2_a_from_uoq   = uoq_pv2_valid[uoq_tail_a];
+  assign pr2_a_from_ioq   = exu_ioq_bcast.valid && (exu_ioq_bcast.prd == uoq_pr2[uoq_tail_a]);
+  assign pr2_a_from_exu   = exu_rou.valid && (exu_rou.prd == uoq_pr2[uoq_tail_a]);
+  assign pr2_a_from_exu_b = exu_rou_b.valid && (exu_rou_b.prd == uoq_pr2[uoq_tail_a]);
 
-  logic pr1_ready, pr2_ready;
-  assign pr1_ready = pr1_from_uoq || pr1_from_ioq || pr1_from_exu;
-  assign pr2_ready = pr2_from_uoq || pr2_from_ioq || pr2_from_exu;
+  logic pr1_a_ready, pr2_a_ready;
+  assign pr1_a_ready = pr1_a_from_uoq || pr1_a_from_ioq || pr1_a_from_exu || pr1_a_from_exu_b;
+  assign pr2_a_ready = pr2_a_from_uoq || pr2_a_from_ioq || pr2_a_from_exu || pr2_a_from_exu_b;
 
   always_comb begin
-    rou_exu.uop = uoq_uops[uoq_tail];
+    rou_exu.uop = uoq_uops[uoq_tail_a];
 
-    // Operand 1 selection (priority: UOQ pre-read > IOQ bypass > EXU bypass > immediate)
-    rou_exu.op1 = (uoq_pr1[uoq_tail] != 0)
-        ? (pr1_from_uoq ? uoq_pv1[uoq_tail]
-         : pr1_from_ioq ? exu_ioq_bcast.result
-         :                exu_rou.result)
-        : uoq_op1[uoq_tail];
+    // Operand 1 selection (priority: UOQ pre-read > IOQ > EXU-A > EXU-B > immediate)
+    rou_exu.op1 = (uoq_pr1[uoq_tail_a] != 0)
+        ? (pr1_a_from_uoq ? uoq_pv1[uoq_tail_a]
+         : pr1_a_from_ioq ? exu_ioq_bcast.result
+         : pr1_a_from_exu ? exu_rou.result
+         :                exu_rou_b.result)
+        : uoq_op1[uoq_tail_a];
 
     // Operand 2 selection
-    rou_exu.op2 = (uoq_pr2[uoq_tail] != 0)
-        ? (pr2_from_uoq ? uoq_pv2[uoq_tail]
-         : pr2_from_ioq ? exu_ioq_bcast.result
-         :                exu_rou.result)
-        : uoq_op2[uoq_tail];
+    rou_exu.op2 = (uoq_pr2[uoq_tail_a] != 0)
+        ? (pr2_a_from_uoq ? uoq_pv2[uoq_tail_a]
+         : pr2_a_from_ioq ? exu_ioq_bcast.result
+         : pr2_a_from_exu ? exu_rou.result
+         :                exu_rou_b.result)
+        : uoq_op2[uoq_tail_a];
 
     // Physical register IDs (zero if operand is ready = no scoreboard stall)
-    rou_exu.pr1 = pr1_ready ? '0 : uoq_pr1[uoq_tail];
-    rou_exu.pr2 = pr2_ready ? '0 : uoq_pr2[uoq_tail];
-    rou_exu.prd = uoq_prd[uoq_tail];
-    rou_exu.prs = uoq_prs[uoq_tail];
+    rou_exu.pr1 = pr1_a_ready ? '0 : uoq_pr1[uoq_tail_a];
+    rou_exu.pr2 = pr2_a_ready ? '0 : uoq_pr2[uoq_tail_a];
+    rou_exu.prd = uoq_prd[uoq_tail_a];
+    rou_exu.prs = uoq_prs[uoq_tail_a];
 
     // ROB destination tag: directly the slot this uop will occupy.
-    rou_exu.dest = rob_tail;
+    rou_exu.dest = rob_tail_a;
   end
 
 `ifdef YSYX_DUAL_ISSUE
   // ---- Slot B dispatch bypass & operand mux ----
-  logic pr1_b_from_uoq, pr1_b_from_ioq, pr1_b_from_exu;
-  logic pr2_b_from_uoq, pr2_b_from_ioq, pr2_b_from_exu;
+  logic pr1_b_from_uoq, pr1_b_from_ioq, pr1_b_from_exu, pr1_b_from_exu_b;
+  logic pr2_b_from_uoq, pr2_b_from_ioq, pr2_b_from_exu, pr2_b_from_exu_b;
 
-  assign pr1_b_from_uoq = uoq_pv1_valid[uoq_tail_b];
-  assign pr1_b_from_ioq = exu_ioq_bcast.valid && (exu_ioq_bcast.prd == uoq_pr1[uoq_tail_b]);
-  assign pr1_b_from_exu = exu_rou.valid && (exu_rou.prd == uoq_pr1[uoq_tail_b]);
+  assign pr1_b_from_uoq   = uoq_pv1_valid[uoq_tail_b];
+  assign pr1_b_from_ioq   = exu_ioq_bcast.valid && (exu_ioq_bcast.prd == uoq_pr1[uoq_tail_b]);
+  assign pr1_b_from_exu   = exu_rou.valid && (exu_rou.prd == uoq_pr1[uoq_tail_b]);
+  assign pr1_b_from_exu_b = exu_rou_b.valid && (exu_rou_b.prd == uoq_pr1[uoq_tail_b]);
 
-  assign pr2_b_from_uoq = uoq_pv2_valid[uoq_tail_b];
-  assign pr2_b_from_ioq = exu_ioq_bcast.valid && (exu_ioq_bcast.prd == uoq_pr2[uoq_tail_b]);
-  assign pr2_b_from_exu = exu_rou.valid && (exu_rou.prd == uoq_pr2[uoq_tail_b]);
+  assign pr2_b_from_uoq   = uoq_pv2_valid[uoq_tail_b];
+  assign pr2_b_from_ioq   = exu_ioq_bcast.valid && (exu_ioq_bcast.prd == uoq_pr2[uoq_tail_b]);
+  assign pr2_b_from_exu   = exu_rou.valid && (exu_rou.prd == uoq_pr2[uoq_tail_b]);
+  assign pr2_b_from_exu_b = exu_rou_b.valid && (exu_rou_b.prd == uoq_pr2[uoq_tail_b]);
 
   logic pr1_b_ready, pr2_b_ready;
-  assign pr1_b_ready = pr1_b_from_uoq || pr1_b_from_ioq || pr1_b_from_exu;
-  assign pr2_b_ready = pr2_b_from_uoq || pr2_b_from_ioq || pr2_b_from_exu;
+  assign pr1_b_ready = pr1_b_from_uoq || pr1_b_from_ioq || pr1_b_from_exu || pr1_b_from_exu_b;
+  assign pr2_b_ready = pr2_b_from_uoq || pr2_b_from_ioq || pr2_b_from_exu || pr2_b_from_exu_b;
 
   always_comb begin
     rou_exu.uop_b = uoq_uops[uoq_tail_b];
@@ -378,13 +404,15 @@ module ysyx_rou #(
     rou_exu.op1_b = (uoq_pr1[uoq_tail_b] != 0)
         ? (pr1_b_from_uoq ? uoq_pv1[uoq_tail_b]
          : pr1_b_from_ioq ? exu_ioq_bcast.result
-         :                  exu_rou.result)
+         : pr1_b_from_exu ? exu_rou.result
+         :                  exu_rou_b.result)
         : uoq_op1[uoq_tail_b];
 
     rou_exu.op2_b = (uoq_pr2[uoq_tail_b] != 0)
         ? (pr2_b_from_uoq ? uoq_pv2[uoq_tail_b]
          : pr2_b_from_ioq ? exu_ioq_bcast.result
-         :                  exu_rou.result)
+         : pr2_b_from_exu ? exu_rou.result
+         :                  exu_rou_b.result)
         : uoq_op2[uoq_tail_b];
 
     rou_exu.pr1_b = pr1_b_ready ? '0 : uoq_pr1[uoq_tail_b];
@@ -401,14 +429,15 @@ module ysyx_rou #(
   // ================================================================
 
   // Write-back destination index decoding (dest is already 0-indexed ROB slot)
-  logic [$clog2(ROB_SIZE)-1:0] wb_dest_exu, wb_dest_ioq;
-  assign wb_dest_exu = exu_rou.dest;
-  assign wb_dest_ioq = exu_ioq_bcast.dest;
+  logic [$clog2(ROB_SIZE)-1:0] wb_dest_exu, wb_dest_exu_b, wb_dest_ioq;
+  assign wb_dest_exu   = exu_rou.dest;
+  assign wb_dest_exu_b = exu_rou_b.dest;
+  assign wb_dest_ioq   = exu_ioq_bcast.dest;
 
   always @(posedge clock) begin
     if (reset || flush_pipe) begin
       rob_head         <= '0;
-      rob_tail         <= '0;
+      rob_tail_a         <= '0;
       recieved_trap    <= 1'b0;
       recieved_sw_trap <= 1'b0;
       for (int i = 0; i < ROB_SIZE; i++) begin
@@ -420,47 +449,47 @@ module ysyx_rou #(
       // ---- Dispatch: insert into ROB tail ----
       if (uoq_deq_fire_a) begin
 `ifdef YSYX_DUAL_ISSUE
-        rob_tail <= uoq_deq_fire_b ? rob_tail + 2 : rob_tail + 1;
+        rob_tail_a <= uoq_deq_fire_b ? rob_tail_a + 2 : rob_tail_a + 1;
 `else
-        rob_tail <= rob_tail + 1;
+        rob_tail_a <= rob_tail_a + 1;
 `endif
 
-        rob_entry[rob_tail].prd <= uoq_prd[uoq_tail];
-        rob_entry[rob_tail].prs <= uoq_prs[uoq_tail];
-        rob_entry[rob_tail].busy <= 1'b1;
-        rob_entry[rob_tail].state <= ROB_EX;
-        rob_entry[rob_tail].rd <= uoq_uops[uoq_tail].rd;
+        rob_entry[rob_tail_a].prd <= uoq_prd[uoq_tail_a];
+        rob_entry[rob_tail_a].prs <= uoq_prs[uoq_tail_a];
+        rob_entry[rob_tail_a].busy <= 1'b1;
+        rob_entry[rob_tail_a].state <= ROB_EX;
+        rob_entry[rob_tail_a].rd <= uoq_uops[uoq_tail_a].rd;
 
-        rob_entry[rob_tail].ben <= uoq_uops[uoq_tail].ben;
-        rob_entry[rob_tail].jen <= uoq_uops[uoq_tail].jen;
-        rob_entry[rob_tail].jren <= uoq_uops[uoq_tail].jren;
-        rob_entry[rob_tail].pnpc <= uoq_uops[uoq_tail].pnpc;
+        rob_entry[rob_tail_a].ben <= uoq_uops[uoq_tail_a].ben;
+        rob_entry[rob_tail_a].jen <= uoq_uops[uoq_tail_a].jen;
+        rob_entry[rob_tail_a].jren <= uoq_uops[uoq_tail_a].jren;
+        rob_entry[rob_tail_a].pnpc <= uoq_uops[uoq_tail_a].pnpc;
 
-        rob_entry[rob_tail].wen <= uoq_uops[uoq_tail].wen;
-        rob_entry[rob_tail].word <= uoq_uops[uoq_tail].word;
-        rob_entry[rob_tail].alu <= uoq_uops[uoq_tail].atom ?
+        rob_entry[rob_tail_a].wen <= uoq_uops[uoq_tail_a].wen;
+        rob_entry[rob_tail_a].word <= uoq_uops[uoq_tail_a].word;
+        rob_entry[rob_tail_a].alu <= uoq_uops[uoq_tail_a].atom ?
         `YSYX_WSTRB_SW
-        : uoq_uops[uoq_tail].alu;
+        : uoq_uops[uoq_tail_a].alu;
 
-        rob_entry[rob_tail].sys <= uoq_uops[uoq_tail].system;
-        rob_entry[rob_tail].atom <= uoq_uops[uoq_tail].atom;
-        rob_entry[rob_tail].atom_sc <= uoq_uops[uoq_tail].atom
-                                    && (uoq_uops[uoq_tail].alu == `YSYX_ATO_SC__);
+        rob_entry[rob_tail_a].sys <= uoq_uops[uoq_tail_a].system;
+        rob_entry[rob_tail_a].atom <= uoq_uops[uoq_tail_a].atom;
+        rob_entry[rob_tail_a].atom_sc <= uoq_uops[uoq_tail_a].atom
+                                    && (uoq_uops[uoq_tail_a].alu == `YSYX_ATO_SC__);
 
-        rob_entry[rob_tail].f_i <= uoq_uops[uoq_tail].f_i;
-        rob_entry[rob_tail].f_time <= uoq_uops[uoq_tail].f_time;
+        rob_entry[rob_tail_a].f_i <= uoq_uops[uoq_tail_a].f_i;
+        rob_entry[rob_tail_a].f_time <= uoq_uops[uoq_tail_a].f_time;
 
-        rob_entry[rob_tail].ecall <= uoq_uops[uoq_tail].ecall;
-        rob_entry[rob_tail].ebreak <= uoq_uops[uoq_tail].ebreak;
-        rob_entry[rob_tail].mret <= uoq_uops[uoq_tail].mret;
-        rob_entry[rob_tail].sret <= uoq_uops[uoq_tail].sret;
+        rob_entry[rob_tail_a].ecall <= uoq_uops[uoq_tail_a].ecall;
+        rob_entry[rob_tail_a].ebreak <= uoq_uops[uoq_tail_a].ebreak;
+        rob_entry[rob_tail_a].mret <= uoq_uops[uoq_tail_a].mret;
+        rob_entry[rob_tail_a].sret <= uoq_uops[uoq_tail_a].sret;
 
-        rob_entry[rob_tail].trap <= uoq_uops[uoq_tail].trap;
-        rob_entry[rob_tail].tval <= uoq_uops[uoq_tail].tval;
-        rob_entry[rob_tail].cause <= uoq_uops[uoq_tail].cause;
+        rob_entry[rob_tail_a].trap <= uoq_uops[uoq_tail_a].trap;
+        rob_entry[rob_tail_a].tval <= uoq_uops[uoq_tail_a].tval;
+        rob_entry[rob_tail_a].cause <= uoq_uops[uoq_tail_a].cause;
 
-        rob_entry[rob_tail].inst <= uoq_uops[uoq_tail].inst;
-        rob_entry[rob_tail].pc <= uoq_uops[uoq_tail].pc;
+        rob_entry[rob_tail_a].inst <= uoq_uops[uoq_tail_a].inst;
+        rob_entry[rob_tail_a].pc <= uoq_uops[uoq_tail_a].pc;
 
 `ifdef YSYX_DUAL_ISSUE
         // ---- Dispatch slot B: insert into ROB tail+1 ----
@@ -547,8 +576,31 @@ module ysyx_rou #(
         rob_entry[wb_dest_exu].difftest_skip <= exu_rou.difftest_skip;
       end
 
+      // ---- Write-back from EXU slot B (pure ALU + BRU completion) ----
+      // Slot B handles arithmetic and branches (jen / ben). It never carries
+      // CSR/trap/system/mul, so dispatch-time fields (csr_wen, ecall, mret,
+      // trap, ...) stay at their defaults (0). We update state/npc/btaken/
+      // inst/difftest_skip; btaken is required for BPU updates on commit.
+      if (exu_rou_b.valid) begin
+        rob_entry[wb_dest_exu_b].state         <= ROB_WB;
+        rob_entry[wb_dest_exu_b].npc           <= exu_rou_b.npc;
+        rob_entry[wb_dest_exu_b].btaken        <= exu_rou_b.btaken;
+        rob_entry[wb_dest_exu_b].difftest_skip <= exu_rou_b.difftest_skip;
+      end
+
+      // ---- Write-back from EXU port C (dedicated BRU, ben only) ----
+      // Conditional branches don't write rd, so no result/prd update is
+      // needed; only state + npc + btaken + difftest_skip are written so
+      // commit/BPU can resolve the branch.
+      if (exu_rou_c.valid) begin
+        rob_entry[exu_rou_c.dest].state         <= ROB_WB;
+        rob_entry[exu_rou_c.dest].npc           <= exu_rou_c.npc;
+        rob_entry[exu_rou_c.dest].btaken        <= exu_rou_c.btaken;
+        rob_entry[exu_rou_c.dest].difftest_skip <= exu_rou_c.difftest_skip;
+      end
+
       // ---- Commit: retire ROB entries (up to 2 per cycle) ----
-      if (head_valid) begin
+      if (head0_valid) begin
         rob_head                     <= dual_commit ? rob_head + 2 : rob_head + 1;
 
         rob_entry[rob_head].busy     <= 1'b0;
@@ -587,8 +639,8 @@ module ysyx_rou #(
   end
 
   // ---- Slot 0 (head) ----
-  assign head_br_p_fail = rob_entry[h0].npc != rob_entry[h0].pnpc;
-  assign head_valid     = recieved_trap || (
+  assign head0_br_p_fail = rob_entry[h0].npc != rob_entry[h0].pnpc;
+  assign head0_valid     = recieved_trap || (
       rob_entry[h0].busy
       && rob_entry[h0].state == ROB_WB
       && (rou_lsu.sq_ready || !rob_entry[h0].wen));
@@ -600,9 +652,9 @@ module ysyx_rou #(
       && !rob_entry[h0].mret  && !rob_entry[h0].sret;
 
   logic head0_flush;
-  assign head0_flush = recieved_trap || (head_valid && (
+  assign head0_flush = recieved_trap || (head0_valid && (
       rob_entry[h0].f_i
-      || head_br_p_fail
+      || head0_br_p_fail
       || rob_entry[h0].trap
       || (rob_entry[h0].sys && !head0_sys_pure)
       || rob_entry[h0].atom
@@ -610,7 +662,7 @@ module ysyx_rou #(
 
   // Resume: lightweight pipeline unblock for serializing instructions that
   // don't need a redirect (pure CSR read/write, sfence.vma).
-  assign sys_resume = head_valid && (head0_sys_pure || rob_entry[h0].f_time) && !head0_flush;
+  assign sys_resume = head0_valid && (head0_sys_pure || rob_entry[h0].f_time) && !head0_flush;
 
   // ---- Slot 1 (head+1): only considered when slot 0 doesn't flush ----
   logic head1_br_p_fail;
@@ -623,7 +675,7 @@ module ysyx_rou #(
   // Dual commit: slot 0 doesn't flush, isn't a store, and slot 1 ready.
   // Also guard against difftest_skip to simplify simulation infrastructure.
 `ifdef YSYX_DUAL_COMMIT
-  assign dual_commit = head_valid && !head0_flush
+  assign dual_commit = head0_valid && !head0_flush
       && !rob_entry[h0].wen && head1_valid
       && !rob_entry[h0].difftest_skip && !rob_entry[h1].difftest_skip;
 `else
@@ -641,7 +693,7 @@ module ysyx_rou #(
   );
 
   // ---- Global flush / fence ----
-  assign fence_time = (head_valid && rob_entry[h0].f_time) || (dual_commit && rob_entry[h1].f_time);
+  assign fence_time = (head0_valid && rob_entry[h0].f_time) || (dual_commit && rob_entry[h1].f_time);
   assign flush_pipe = head0_flush || head1_flush;
 
   // PMU: SQ-specific commit stall (ROB head is a ready store blocked by full SQ)
@@ -671,15 +723,15 @@ module ysyx_rou #(
   assign rou_cmu.jen = dual_commit ? rob_entry[h1].jen : rob_entry[h0].jen;
   assign rou_cmu.jren = dual_commit ? rob_entry[h1].jren : rob_entry[h0].jren;
   assign rou_cmu.atomic_sc = dual_commit ? rob_entry[h1].atom_sc : rob_entry[h0].atom_sc;
-  assign rou_cmu.ebreak_a = head_valid && rob_entry[h0].ebreak;
+  assign rou_cmu.ebreak_a = head0_valid && rob_entry[h0].ebreak;
   assign rou_cmu.fence_time = fence_time;
-  assign rou_cmu.fence_i = (head_valid && rob_entry[h0].f_i) || (dual_commit && rob_entry[h1].f_i);
+  assign rou_cmu.fence_i = (head0_valid && rob_entry[h0].f_i) || (dual_commit && rob_entry[h1].f_i);
   assign rou_cmu.flush_pipe = flush_pipe;
   assign rou_cmu.sys_resume = sys_resume;
   assign rou_cmu.time_trap = recieved_trap;
   assign rou_cmu.rob_head = rob_head;
   assign rou_cmu.difftest_skip_a = !recieved_trap && rob_entry[h0].difftest_skip;
-  assign rou_cmu.valid_a = recieved_trap ? 1'b0 : head_valid;
+  assign rou_cmu.valid_a = recieved_trap ? 1'b0 : head0_valid;
 
   // ---- CMU interface (slot B: dual commit) ----
   assign rou_cmu.rd_b = rob_entry[h1].rd;
@@ -738,7 +790,7 @@ module ysyx_rou #(
       : csr_from_h1 ? rob_entry[h1].cause
       :               rob_entry[h0].cause;
   assign rou_csr.valid     = recieved_trap
-      || (head_valid && (rob_entry[h0].sys || rob_entry[h0].trap))
+      || (head0_valid && (rob_entry[h0].sys || rob_entry[h0].trap))
       || csr_from_h1;
 
   // ---- LSU interface (store commit: MUX slot 0 / slot 1) ----
@@ -748,10 +800,10 @@ module ysyx_rou #(
   assign rou_lsu.sq_waddr = dual_commit ? rob_entry[h1].sq_waddr : rob_entry[h0].sq_waddr;
   assign rou_lsu.sq_wdata = dual_commit ? rob_entry[h1].sq_wdata : rob_entry[h0].sq_wdata;
   assign rou_lsu.pc = dual_commit ? rob_entry[h1].pc : rob_entry[h0].pc;
-  assign rou_lsu.valid = head_valid;
+  assign rou_lsu.valid = head0_valid;
 
   // ---- Retire count for instret CSR ----
-  assign rou_csr.retire_a = head_valid;
+  assign rou_csr.retire_a = head0_valid;
   assign rou_csr.retire_b = dual_commit;
 
 endmodule

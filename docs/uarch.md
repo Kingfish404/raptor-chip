@@ -4,7 +4,7 @@
 
 Raptor is an out-of-order, dual-issue RISC-V processor core with register renaming, a reorder buffer (ROB), reservation stations, and virtual memory support. The pipeline fetches, decodes, renames, and dispatches up to **2 instructions per cycle** (`YSYX_DUAL_ISSUE`). The commit stage supports **dual commit** -- up to 2 instructions can retire from the ROB per cycle when consecutive entries are both ready.
 
-**ISA**: RV32/RV64 I + M (mul/div) + A (atomics: LR/SC, AMO) + C (compressed) + Zicntr (base counters) + Zicond (conditional zero) + Zicsr + Zifencei + Zba (address generation) + Zbb (basic bit-manipulation) + Zbs (single-bit operations) + Sv32 MMU
+**ISA**: RV32/RV64 I + M (mul/div) + A (atomics: LR/SC, AMO) + C (compressed) + Zba (address generation, incl. RV64 `.UW` variants) + Zbb (basic bit-manipulation) + Zbc (carry-less multiply) + Zbs (single-bit) + Zcb (additional compressed ops) + Zicntr (base counters) + Zicond (conditional zero) + Zicsr + Zifencei + Zimop / Zcmop (may-be-ops / compressed may-be-ops, decoded as NOPs) + Zihintpause / Zihintntl / Zicbop (hint NOPs) + Sv32 MMU
 
 The core supports configurable **RV32** and **RV64** modes via a compile-time switch (`YSYX_RV64`). When `YSYX_RV64` is defined, XLEN=64 and all datapath, register file, AXI bus, and DPI-C interfaces widen to 64 bits. RV64 adds W-variant instructions (ADDIW, SLLIW, etc.) with 32-bit result sign-extension.
 
@@ -114,7 +114,7 @@ N-way set-associative I-cache (`L1I_N_WAYS`, default 1). `2^L1I_LEN` sets (64), 
 
 Pure rename: maps arch -> physical registers. Dual-rename with RAW dependency handling (slot B sees slot A's result when they share an arch register).
 
-- **RNQ**: Circular queue, `RIQ_SIZE` entries (4). Dual-issue enqueues atomically; paired via `rnq_is_pair`.
+- **RNQ**: Circular queue, `RIQ_SIZE` entries (8). Dual-issue enqueues atomically; paired via `rnq_is_pair`.
 - **Freelist** (`ysyx_rnu_freelist.sv`): Circular FIFO, `PHY_SIZE` entries (64). Dual alloc ports (B reads `head+1`). Dual dealloc for dual commit. Flush: rewinds head by in-flight count.
 - **MapTable** (`ysyx_rnu_maptable.sv`): MAP (6R + 2W, B wins conflict) + RAT (2W, B wins). Flush: MAP←RAT with concurrent commit forwarding.
 
@@ -126,8 +126,8 @@ Pure rename: maps arch -> physical registers. Dual-rename with RAW dependency ha
 
 Dispatch queue + reorder buffer + commit logic.
 
-- **UOQ**: Circular, `IIQ_SIZE` entries (4). Dual enqueue/dequeue with `uoq_is_pair` tracking.
-- **ROB**: `rob_entry_t[]`, `ROB_SIZE` entries (8). States: `ROB_EX`->`ROB_WB`->`ROB_CM`. Dual dispatch inserts 2 entries at tail/tail+1.
+- **UOQ**: Circular, `IIQ_SIZE` entries (8). Dual enqueue/dequeue with `uoq_is_pair` tracking.
+- **ROB**: `rob_entry_t[]`, `ROB_SIZE` entries (16). States: `ROB_EX`->`ROB_WB`->`ROB_CM`. Dual dispatch inserts 2 entries at tail/tail+1.
 - **Operand bypass**: UOQ pre-read > IOQ broadcast > EXU broadcast. Broadcast forwarding continues during UOQ residence.
 - **Dual commit**: slot 0 commits; slot 1 joins if slot 0 doesn't flush/store, neither has `difftest_skip`, and slot 1 is ready. BPU trains on slot 1's branch info during dual commit.
 - **Flush triggers**: fence\_i, branch mispredict, trap, system op, atomic (from either slot).
@@ -135,8 +135,8 @@ Dispatch queue + reorder buffer + commit logic.
 
 #### EXU (`ysyx_exu.sv`)
 
-- **RS**: `RS_SIZE` entries (4). Lowest-index-first priority issue. Dual dispatch finds `free_idx` + `free_idx_b`. Submodules: `ysyx_exu_alu` (combinational), `ysyx_exu_mul` (fast or iterative Booth/restoring-div). `mul_target_idx` register tracks which RS entry's operands are in the multiplier, ensuring the result is delivered only to that entry (prevents cross-contamination when multiple MUL instructions occupy the RS simultaneously).
-- **IOQ**: `IOQ_SIZE` entries (4), circular FIFO for ld/st/amo/CSR. In-order issue with operand forwarding. Dual dispatch: 2 IOQ entries or 1 IOQ + 1 RS per cycle.
+- **RS**: `RS_SIZE` entries (8). Lowest-index-first priority issue. Dual ALU writeback: primary ALU on `exu_rou` (any op), secondary ALU on `exu_rou_b` restricted to simple-ALU (no branch/CSR/system/trap/mul). Dual dispatch finds `free_idx_a` + `free_idx_b`. Submodules: `ysyx_exu_alu` (combinational, x2; 6-bit opcode, 64 operations including dedicated ALU ops for RV64 Zba `.UW` variants -- `ADD_UW`/`SLLI_UW`/`SH[1-3]ADD` zero-extend rs1[31:0] and produce a full 64-bit result, bypassing the W-variant output sign-extension), `ysyx_exu_mul` (pipelined fast-multiply + iterative restoring divider). Pipelined MUL with tag-based completion (`mul_out_tag` matches the originating RS entry), allowing multiple MULs in flight without cross-contamination.
+- **IOQ**: `IOQ_SIZE` entries (8), circular FIFO for ld/st/amo/CSR -- now with **out-of-order load issue to L1D**. A younger ready load can drive L1D ahead of an older pending store/load when safe: (a) per-entry completion state (`ioq_complete`/`ioq_rdata`/`ioq_load_trap`/`ioq_load_cause`/`ioq_load_skip`); (b) oldest-ready priority encoder over `ioq_load_issue_vec`; (c) older-store blocker mask holds a load if any older IOQ store has unresolved base reg (`pr1!=0`), pending MMU translation, or word-address conflict; (d) `oo_pending` FSM locks `active_idx` across multi-cycle L1D misses so the response latches into the originating entry; (e) commit mux at `ioq_head` consumes either the live L1D response (when `active_idx==head`) or pre-latched `ioq_rdata[head]`; (f) atomics (LR/SC/AMO) and uncacheable MMIO stay gated to ROB head for memory ordering. Single outstanding L1D request.
 - **Atomics**: LR/SC with reservation register, full AMO set.
 - **Store MMU**: address translation via `exu_l1d_if`.
 
@@ -231,11 +231,11 @@ AXI4 master bridge arbitrating L1I/L1D (L1D priority). Read FSM: 3-state (`LD_A`
 | `YSYX_BTB_SIZE`     | 128     | BTB entries (64 sets × 2 ways)             |
 | `YSYX_BTB_WAYS`     | 2       | BTB associativity                          |
 | `YSYX_RSB_SIZE`     | 8       | Return stack entries                       |
-| `YSYX_RIQ_SIZE`     | 4       | Rename queue (RNQ) entries                 |
-| `YSYX_IIQ_SIZE`     | 4       | Dispatch queue (UOQ) entries               |
-| `YSYX_ROB_SIZE`     | 8       | Reorder buffer entries                     |
-| `YSYX_RS_SIZE`      | 4       | Reservation station entries                |
-| `YSYX_IOQ_SIZE`     | 4       | In-order queue entries                     |
+| `YSYX_RIQ_SIZE`     | 8       | Rename queue (RNQ) entries                 |
+| `YSYX_IIQ_SIZE`     | 8       | Dispatch queue (UOQ) entries               |
+| `YSYX_ROB_SIZE`     | 16      | Reorder buffer entries                     |
+| `YSYX_RS_SIZE`      | 8       | Reservation station entries                |
+| `YSYX_IOQ_SIZE`     | 8       | In-order queue entries                     |
 | `YSYX_SQ_SIZE`      | 8       | Store queue entries                        |
 | `YSYX_L1D_LINE_LEN` | 1       | L1D line: 2¹ = 2 words/line                |
 | `YSYX_L1D_LEN`      | 5       | L1D sets: 2⁵ = 32                          |

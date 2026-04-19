@@ -1,178 +1,249 @@
 `include "ysyx.svh"
 
 module ysyx_exu_mul #(
-    parameter bit [7:0] XLEN = `YSYX_XLEN
+    parameter bit [7:0] XLEN = `YSYX_XLEN,
+    parameter unsigned TAG_W = 1
 ) (
     input clock,
+    input reset,
+    input flush,
     input [XLEN-1:0] in_a,
     input [XLEN-1:0] in_b,
     input [4:0] in_op,
     input in_word,  // RV64 W-variant: operate on lower 32 bits, sign-extend result
+    input [TAG_W-1:0] in_tag,
     input in_valid,
+    output logic in_ready,
     output logic [XLEN-1:0] out_r,
+    output logic [TAG_W-1:0] out_tag,
     output logic out_valid
 );
-  logic [XLEN-1:0] s1, s2;
-  logic [4:0] op;
-  logic word_r;
-  logic valid;
-
-  assign out_valid = valid;
 
 `ifdef YSYX_M_FAST
   // Hybrid fast MUL + iterative DIV/REM:
-  //   MUL/MULH/MULHSU/MULHU: combinational multiply, 2-cycle pipeline
-  //   DIV/DIVU/REM/REMU: iterative restoring divider, XLEN+1 cycles
-  // This avoids the ~14 ns combinational divider on the critical path.
+  //   MUL/MULH/MULHSU/MULHU: fully pipelined (2-cycle latency, 1/cycle throughput)
+  //   DIV/DIVU/REM/REMU: iterative restoring divider, XLEN+1 cycles (serial)
+  //
+  // MUL and DIV datapaths are split: MUL has its own 2-stage pipe (m1_*, m2_*)
+  // with tag pass-through; DIV runs serial in (div_*) state and blocks new
+  // accepts via `in_ready`. Output mux gives DIV priority (rare emission) to
+  // avoid collisions — MUL stage-B emission cannot coincide with DIV done
+  // because `in_ready=0` during div_active drains the MUL pipeline first.
 
-  logic [XLEN-1:0] mul_r;
-  /* verilator lint_off UNUSEDSIGNAL */
-  logic [2*XLEN-1:0] mulh;
-  logic [2*XLEN:0] muls;
-  logic [2*XLEN-1:0] mulu;
-  /* verilator lint_on UNUSEDSIGNAL */
+  // ---------------- DIV path (serial) ----------------
+  logic [XLEN-1:0] div_s1, div_s2;
+  logic [               4:0] div_op;
+  logic                      div_word;
+  logic [         TAG_W-1:0] div_tag;
 
-  logic [XLEN-1:0] r_pipe;
-  logic pipe_valid;
-  logic is_div;  // 1 = DIV/REM path (iterative), 0 = MUL path (fast)
-
-  // Iterative divider state
-  logic [XLEN-1:0] div_quotient;
-  logic [XLEN:0] div_remainder;
-  logic [XLEN-1:0] div_divisor;
-  logic [XLEN-1:0] div_dividend_shifted;
+  logic [          XLEN-1:0] div_quotient;
+  logic [            XLEN:0] div_remainder;
+  logic [          XLEN-1:0] div_divisor;
+  logic [          XLEN-1:0] div_dividend_shifted;
   logic [$clog2(XLEN+1)-1:0] div_counter;
-  logic [1:0] div_sign;  // {sign_a, sign_b}
-  logic div_active;
+  logic [               1:0] div_sign;
+  logic                      div_active;
 
-  // Pre-computed signed correction for DIV/REM results
-  logic [XLEN-1:0] div_q_signed;
-  logic [XLEN-1:0] div_r_signed;
+  logic [XLEN-1:0] div_q_signed, div_r_signed;
   assign div_q_signed = (div_sign == 2'b00 || div_sign == 2'b11) ? div_quotient : -div_quotient;
   assign div_r_signed = (div_sign[1] == 1'b0) ? div_remainder[XLEN:1] : -div_remainder[XLEN:1];
 
-  // Sign/zero extend to 2*XLEN for high-word multiply
-  assign mulh = {{XLEN{s1[XLEN-1]}}, s1} * {{XLEN{s2[XLEN-1]}}, s2};
-  assign muls = {{XLEN{s1[XLEN-1]}}, s1} * {{XLEN{1'b0}}, s2};
-  assign mulu = {({{XLEN{1'b0}}, s1}) * ({{XLEN{1'b0}}, s2})};
-
-  // W-variant: use lower 32-bit operands
-  logic [XLEN-1:0] ws1, ws2;
-  assign ws1 = {{XLEN - 32{s1[31]}}, s1[31:0]};
-  assign ws2 = {{XLEN - 32{s2[31]}}, s2[31:0]};
-
-  // Combinational MUL result (no division logic: removes critical path)
-  always_comb begin
-    unique case (op)
-      // verilog_format: off
-      `YSYX_ALU_MUL___: begin
-          if (word_r) begin
-            logic [31:0] mul32; mul32 = ws1[31:0] * ws2[31:0];
-            mul_r = {{XLEN-32{mul32[31]}}, mul32};
-          end else
-            mul_r = s1 * s2;
-        end
-      `YSYX_ALU_MULH__: begin mul_r = mulh[2*XLEN-1:XLEN];  end
-      `YSYX_ALU_MULHSU: begin mul_r = muls[2*XLEN-1:XLEN];  end
-      `YSYX_ALU_MULHU_: begin mul_r = mulu[2*XLEN-1:XLEN];  end
-               default: begin mul_r = 0; end
-      // verilog_format: on
-    endcase
-  end
-
-  // Detect signed DIV/REM for operand negation
   logic signed_div;
   assign signed_div = (in_op == `YSYX_ALU_DIV___ || in_op == `YSYX_ALU_REM___);
   logic [XLEN-1:0] abs_a, abs_b;
   assign abs_a = (signed_div && in_a[XLEN-1]) ? -in_a : in_a;
   assign abs_b = (signed_div && in_b[XLEN-1]) ? -in_b : in_b;
 
-  // Detect if incoming op is DIV/REM
   logic in_is_div;
   assign in_is_div = (in_op == `YSYX_ALU_DIV___ || in_op ==
       `YSYX_ALU_DIVU__
       || in_op == `YSYX_ALU_REM___ || in_op == `YSYX_ALU_REMU__);
 
-  always_ff @(posedge clock) begin
-    if (in_valid) begin
-      op <= in_op;
-      s1 <= in_a;
-      s2 <= in_b;
-      word_r <= in_word;
-      valid <= 0;
-      pipe_valid <= 0;
-      is_div <= in_is_div;
+  // DIV result register (held one cycle for output emission)
+  logic [ XLEN-1:0] div_out_r;
+  logic [TAG_W-1:0] div_out_tag;
+  logic             div_out_valid;
 
-      if (in_is_div) begin
-        // Initialize iterative divider with absolute values
-        div_quotient <= 0;
-        div_remainder <= {{XLEN{1'b0}}, abs_a[XLEN-1]};
-        div_divisor <= abs_b;
-        div_dividend_shifted <= abs_a << 1;
-        div_counter <= 0;
-        div_sign <= {in_a[XLEN-1], in_b[XLEN-1]};
-        div_active <= 1;
-      end else begin
-        div_active <= 0;
-      end
-    end else if (div_active) begin
-      // Iterative restoring division: XLEN cycles
-      if (div_counter == XLEN[$clog2(XLEN+1)-1:0]) begin
-        // Division complete: apply sign correction and output
-        div_active <= 0;
-        unique case (op)
-          `YSYX_ALU_DIV___: begin
-            if (s2 == 0) out_r <= ~'h0;
-            else if (s1 == ('b1 << (XLEN - 1)) && s2 == ~'h0) out_r <= 'b1 << (XLEN - 1);
-            else if (word_r) out_r <= {{XLEN - 32{div_q_signed[31]}}, div_q_signed[31:0]};
-            else out_r <= div_q_signed;
-          end
-          `YSYX_ALU_DIVU__: begin
-            if (s2 == 0) out_r <= ~'h0;
-            else if (word_r) out_r <= {{XLEN - 32{1'b0}}, div_quotient[31:0]};
-            else out_r <= div_quotient;
-          end
-          `YSYX_ALU_REM___: begin
-            if (s2 == 0) out_r <= s1;
-            else if (word_r) out_r <= {{XLEN - 32{div_r_signed[31]}}, div_r_signed[31:0]};
-            else out_r <= div_r_signed;
-          end
-          `YSYX_ALU_REMU__: begin
-            if (s2 == 0) out_r <= s1;
-            else if (word_r) out_r <= {{XLEN - 32{1'b0}}, div_remainder[31:1]};
-            else out_r <= div_remainder[XLEN:1];
-          end
-          default: out_r <= 0;
-        endcase
-        valid <= 1;
-      end else begin
-        // One iteration of restoring division
-        if (div_remainder >= {{1'b0}, div_divisor}) begin
-          div_quotient <= div_quotient | ('b1 << (XLEN[$clog2(XLEN+1)-1:0] - 1 - div_counter));
-          div_remainder <= ((div_remainder - {{1'b0}, div_divisor}) << 1)
-                         + {{XLEN{1'b0}}, div_dividend_shifted[XLEN-1]};
-        end else begin
-          div_remainder <= (div_remainder << 1) + {{XLEN{1'b0}}, div_dividend_shifted[XLEN-1]};
+  // ---------------- MUL path (pipelined) ----------------
+  // Stage 1: operand latch
+  logic [XLEN-1:0] m1_s1, m1_s2;
+  logic [       4:0] m1_op;
+  logic              m1_word;
+  logic [ TAG_W-1:0] m1_tag;
+  logic              m1_v;
+
+  // Stage 2: registered combinational result
+  logic [  XLEN-1:0] m2_r;
+  logic [ TAG_W-1:0] m2_tag;
+  logic              m2_v;
+
+  /* verilator lint_off UNUSEDSIGNAL */
+  logic [2*XLEN-1:0] mulh;
+  logic [  2*XLEN:0] muls;
+  logic [2*XLEN-1:0] mulu;
+  /* verilator lint_on UNUSEDSIGNAL */
+
+  // Sign/zero extend to 2*XLEN for high-word multiply (stage-1 operands)
+  assign mulh = {{XLEN{m1_s1[XLEN-1]}}, m1_s1} * {{XLEN{m1_s2[XLEN-1]}}, m1_s2};
+  assign muls = {{XLEN{m1_s1[XLEN-1]}}, m1_s1} * {{XLEN{1'b0}}, m1_s2};
+  assign mulu = {({{XLEN{1'b0}}, m1_s1}) * ({{XLEN{1'b0}}, m1_s2})};
+
+  // W-variant: use lower 32-bit operands
+  logic [XLEN-1:0] m1_ws1, m1_ws2;
+  assign m1_ws1 = {{XLEN - 32{m1_s1[31]}}, m1_s1[31:0]};
+  assign m1_ws2 = {{XLEN - 32{m1_s2[31]}}, m1_s2[31:0]};
+
+  logic [XLEN-1:0] mul_r_comb;
+  always_comb begin
+    unique case (m1_op)
+      // verilog_format: off
+      `YSYX_ALU_MUL___: begin
+          if (m1_word) begin
+            logic [31:0] mul32; mul32 = m1_ws1[31:0] * m1_ws2[31:0];
+            mul_r_comb = {{XLEN-32{mul32[31]}}, mul32};
+          end else
+            mul_r_comb = m1_s1 * m1_s2;
         end
-        div_dividend_shifted <= div_dividend_shifted << 1;
-        div_counter <= div_counter + 1;
-      end
-    end else if (op[4] && !pipe_valid && !is_div) begin
-      // MUL path: register combinational result (stage 1)
-      r_pipe <= mul_r;
-      pipe_valid <= 1;
-      op <= 0;
-    end else if (pipe_valid) begin
-      // MUL path: present registered result (stage 2)
-      out_r <= r_pipe;
-      valid <= 1;
-      pipe_valid <= 0;
+      `YSYX_ALU_MULH__: begin mul_r_comb = mulh[2*XLEN-1:XLEN]; end
+      `YSYX_ALU_MULHSU: begin mul_r_comb = muls[2*XLEN-1:XLEN]; end
+      `YSYX_ALU_MULHU_: begin mul_r_comb = mulu[2*XLEN-1:XLEN]; end
+               default: begin mul_r_comb = '0; end
+      // verilog_format: on
+    endcase
+  end
+
+  // Accept logic: MUL stream accepts every cycle unless DIV is iterating.
+  assign in_ready = !div_active;
+
+  logic accept_mul, accept_div;
+  assign accept_mul = in_valid && in_ready && !in_is_div;
+  assign accept_div = in_valid && in_ready && in_is_div;
+
+  // ---- Output mux (DIV has priority; see note above) ----
+  always_comb begin
+    if (div_out_valid) begin
+      out_r     = div_out_r;
+      out_tag   = div_out_tag;
+      out_valid = 1'b1;
+    end else if (m2_v) begin
+      out_r     = m2_r;
+      out_tag   = m2_tag;
+      out_valid = 1'b1;
     end else begin
-      valid <= 0;
+      out_r     = '0;
+      out_tag   = '0;
+      out_valid = 1'b0;
+    end
+  end
+
+  // ---- Sequential logic ----
+  always_ff @(posedge clock) begin
+    if (reset || flush) begin
+      m1_v          <= 1'b0;
+      m2_v          <= 1'b0;
+      div_active    <= 1'b0;
+      div_out_valid <= 1'b0;
+    end else begin
+      // ===== MUL stage-1 load =====
+      if (accept_mul) begin
+        m1_s1   <= in_a;
+        m1_s2   <= in_b;
+        m1_op   <= in_op;
+        m1_word <= in_word;
+        m1_tag  <= in_tag;
+        m1_v    <= 1'b1;
+      end else begin
+        m1_v <= 1'b0;
+      end
+
+      // ===== MUL stage-1 -> stage-2 =====
+      if (m1_v) begin
+        m2_r   <= mul_r_comb;
+        m2_tag <= m1_tag;
+        m2_v   <= 1'b1;
+      end else begin
+        m2_v <= 1'b0;
+      end
+
+      // ===== DIV start =====
+      if (accept_div) begin
+        div_op               <= in_op;
+        div_s1               <= in_a;
+        div_s2               <= in_b;
+        div_word             <= in_word;
+        div_tag              <= in_tag;
+
+        div_quotient         <= 0;
+        div_remainder        <= {{XLEN{1'b0}}, abs_a[XLEN-1]};
+        div_divisor          <= abs_b;
+        div_dividend_shifted <= abs_a << 1;
+        div_counter          <= 0;
+        div_sign             <= {in_a[XLEN-1], in_b[XLEN-1]};
+        div_active           <= 1'b1;
+        div_out_valid        <= 1'b0;
+      end else if (div_active) begin
+        if (div_counter == XLEN[$clog2(XLEN+1)-1:0]) begin
+          // Division complete: apply sign correction and emit
+          div_active    <= 1'b0;
+          div_out_valid <= 1'b1;
+          div_out_tag   <= div_tag;
+          unique case (div_op)
+            `YSYX_ALU_DIV___: begin
+              if (div_s2 == 0) div_out_r <= ~'h0;
+              else if (div_s1 == ('b1 << (XLEN - 1)) && div_s2 == ~'h0)
+                div_out_r <= 'b1 << (XLEN - 1);
+              else if (div_word) div_out_r <= {{XLEN - 32{div_q_signed[31]}}, div_q_signed[31:0]};
+              else div_out_r <= div_q_signed;
+            end
+            `YSYX_ALU_DIVU__: begin
+              if (div_s2 == 0) div_out_r <= ~'h0;
+              else if (div_word) div_out_r <= {{XLEN - 32{1'b0}}, div_quotient[31:0]};
+              else div_out_r <= div_quotient;
+            end
+            `YSYX_ALU_REM___: begin
+              if (div_s2 == 0) div_out_r <= div_s1;
+              else if (div_word) div_out_r <= {{XLEN - 32{div_r_signed[31]}}, div_r_signed[31:0]};
+              else div_out_r <= div_r_signed;
+            end
+            `YSYX_ALU_REMU__: begin
+              if (div_s2 == 0) div_out_r <= div_s1;
+              else if (div_word) div_out_r <= {{XLEN - 32{1'b0}}, div_remainder[31:1]};
+              else div_out_r <= div_remainder[XLEN:1];
+            end
+            default: div_out_r <= 0;
+          endcase
+        end else begin
+          // One iteration of restoring division
+          if (div_remainder >= {{1'b0}, div_divisor}) begin
+            div_quotient <= div_quotient | ('b1 << (XLEN[$clog2(XLEN+1)-1:0] - 1 - div_counter));
+            div_remainder <= ((div_remainder - {{1'b0}, div_divisor}) << 1)
+                           + {{XLEN{1'b0}}, div_dividend_shifted[XLEN-1]};
+          end else begin
+            div_remainder <= (div_remainder << 1) + {{XLEN{1'b0}}, div_dividend_shifted[XLEN-1]};
+          end
+          div_dividend_shifted <= div_dividend_shifted << 1;
+          div_counter          <= div_counter + 1;
+        end
+      end else begin
+        // No DIV pending: clear any held DIV emission after one cycle.
+        div_out_valid <= 1'b0;
+      end
     end
   end
 
 `else
+  // Non-fast (fully iterative) fallback: serial MUL *and* DIV.
+  // Pipelining not supported in this variant; in_ready deasserts while busy.
+
+  logic [XLEN-1:0] s1, s2;
+  logic [4:0] op;
+  logic word_r;
+  logic valid;
+  logic [TAG_W-1:0] tag_r;
+
+  assign out_valid = valid;
+  assign out_tag   = tag_r;
+  assign in_ready  = (op == 0 && !valid);
 
   logic [XLEN-1:0] p, s, quotient;
   logic [$clog2(2*XLEN+2)-1:0] counter;
@@ -190,9 +261,14 @@ module ysyx_exu_mul #(
   logic [1:0] sign;
 
   always_ff @(posedge clock) begin
-    if (in_valid) begin
+    if (reset || flush) begin
+      op      <= 0;
+      valid   <= 0;
+      counter <= 0;
+    end else if (in_valid && in_ready) begin
       op <= in_op;
       word_r <= in_word;
+      tag_r <= in_tag;
       s1 <= s1_signed;
       s2 <= (signed_op && in_b[XLEN-1]) ? -in_b : in_b;
       ss1 <= (in_op != `YSYX_ALU_MULHU_) ? {{XLEN{in_a[XLEN-1]}}, in_a} : {{XLEN{1'b0}}, in_a};
@@ -216,6 +292,7 @@ module ysyx_exu_mul #(
           if (counter == XLEN + 1) begin
             out_r <= p;
             valid <= 1;
+            op    <= 0;
           end else begin
             valid <= 0;
           end
@@ -224,6 +301,7 @@ module ysyx_exu_mul #(
           if (counter == 2 * XLEN + 1) begin
             out_r <= pp[2*XLEN-1:XLEN];
             valid <= 1;
+            op    <= 0;
           end else begin
             valid <= 0;
           end
@@ -232,6 +310,7 @@ module ysyx_exu_mul #(
           if (s2 == 0 && counter == 0) begin
             out_r <= -1;
             valid <= 1;
+            op    <= 0;
           end else if (op == `YSYX_ALU_DIV___ && counter == XLEN) begin
             out_r <= (sign == 'b00 || sign == 'b11) ? quotient : ~quotient + 1;
             op <= 0;
@@ -239,6 +318,7 @@ module ysyx_exu_mul #(
           end else if (op == `YSYX_ALU_DIVU__ && counter == XLEN) begin
             out_r <= quotient;
             valid <= 1;
+            op    <= 0;
           end else begin
             valid <= 0;
           end
@@ -247,6 +327,7 @@ module ysyx_exu_mul #(
           if (counter == XLEN) begin
             out_r <= (sign == 'b00 || sign == 'b01) ? reh[XLEN:1] : ~reh[XLEN:1] + 1;
             valid <= 1;
+            op    <= 0;
           end else begin
             valid <= 0;
           end
@@ -255,6 +336,7 @@ module ysyx_exu_mul #(
           if (counter == XLEN) begin
             out_r <= reh[XLEN:1];
             valid <= 1;
+            op    <= 0;
           end else begin
             valid <= 0;
           end

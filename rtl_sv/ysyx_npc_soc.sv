@@ -210,18 +210,30 @@ module ysyx_npc_soc #(
   state_r_t state_r;
   state_w_t state_w;
 
-  // Address range validation: check if address falls within any known region
+  // Address range validation: check if address falls within any known region.
+  // In RV64 mode with `-mcmodel=medany`, code linked at 0x80000000 is loaded
+  // so that `lui`-materialised addresses are sign-extended (e.g. a5 = 0xffffffff80000000).
+  // The physical memory map is 32-bit, so compare the low 32 bits only and
+  // require the upper bits to be either all-zero or all-one (canonical sign-extension).
   function automatic logic addr_valid(input logic [XLEN-1:0] addr);
-    return (0)  // --- IGNORE ---
-    || (addr >= 'h00100000 && addr < 'h00101000)  // sifive,test finisher
-    || (addr >= 'h02000000 && addr < 'h020c0000)  // CLINT
-    || (addr >= 'h0c000000 && addr < 'h0d000000)  // PLIC
-    || (addr >= 'h0f000000 && addr < 'h0f002000)  // SRAM
-    || (addr >= 'h10000000 && addr < 'h10012000)  // serial / peripherals
-    || (addr >= 'h20000000 && addr < 'h20010000)  // MROM
-    || (addr >= 'h30000000 && addr < 'h40000000)  // FLASH
-    || (addr >= 'h80000000 && addr < 'h88000000)  // PMEM (main memory)
-    || (addr >= 'ha0000000 && addr < 'ha2000000);  // SDRAM
+    logic [31:0] a = addr[31:0];
+    logic        upper_ok;
+`ifdef YSYX_RV64
+    upper_ok = (addr[XLEN-1:32] == '0) || (&addr[XLEN-1:32]);
+`else
+    upper_ok = 1'b1;
+`endif
+    return upper_ok && (
+       (0)  // --- IGNORE ---
+    || (a >= 32'h00100000 && a < 32'h00101000)  // sifive,test finisher
+    || (a >= 32'h02000000 && a < 32'h020c0000)  // CLINT
+    || (a >= 32'h0c000000 && a < 32'h0d000000)  // PLIC
+    || (a >= 32'h0f000000 && a < 32'h0f002000)  // SRAM
+    || (a >= 32'h10000000 && a < 32'h10012000)  // serial / peripherals
+    || (a >= 32'h20000000 && a < 32'h20010000)  // MROM
+    || (a >= 32'h30000000 && a < 32'h40000000)  // FLASH
+    || (a >= 32'h80000000 && a < 32'h88000000)  // PMEM (main memory)
+    || (a >= 32'ha0000000 && a < 32'ha2000000));  // SDRAM
   endfunction
 
   // Timeout watchdog: force-complete stuck transactions

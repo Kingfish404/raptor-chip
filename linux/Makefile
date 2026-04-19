@@ -1,17 +1,17 @@
 PWD_DIR=$(abspath .)
 YSYX_HOME ?= $(abspath ..)
-KERNEL_VERSION:=6.17.7
+KERNEL_VERSION:=6.18.22
 
 # ==============================================================================
 # Pre-built Linux kernel downloads
 # ==============================================================================
 # From https://github.com/Kingfish404/linux-build/releases
-LINUX_BUILD_VERSION ?= v6.18.15
+LINUX_BUILD_VERSION ?= v6.18.22
 LINUX_BUILD_VERSION := $(strip $(LINUX_BUILD_VERSION))
 LINUX_BUILD_DIR     := $(PWD_DIR)/build
-LINUX_BUILD_URL     := https://github.com/Kingfish404/linux-build/releases/download/$(LINUX_BUILD_VERSION)
-LINUX_RV32_DIR      := $(LINUX_BUILD_DIR)/linux-riscv-rv32-$(LINUX_BUILD_VERSION)
-LINUX_RV64_DIR      := $(LINUX_BUILD_DIR)/linux-riscv-rv64-$(LINUX_BUILD_VERSION)
+LINUX_BUILD_URL     := https://github.com/Kingfish404/linux-build/releases/download/rv-$(LINUX_BUILD_VERSION)
+LINUX_RV32_DIR      := $(LINUX_BUILD_DIR)/linux-riscv-qemu-rv32-m-$(LINUX_BUILD_VERSION)
+LINUX_RV64_DIR      := $(LINUX_BUILD_DIR)/linux-riscv-qemu-rv64-m-$(LINUX_BUILD_VERSION)
 LINUX_RV32_PAYLOAD  ?= $(LINUX_RV32_DIR)/fw_payload.bin
 LINUX_RV64_PAYLOAD  ?= $(LINUX_RV64_DIR)/fw_payload.bin
 
@@ -43,16 +43,16 @@ help: ## Show this help message
 
 $(LINUX_RV32_DIR)/fw_payload.bin:
 	@mkdir -p $(LINUX_BUILD_DIR)
-	curl -L -o $(LINUX_BUILD_DIR)/linux-riscv-rv32-$(LINUX_BUILD_VERSION).tar.gz \
-		$(LINUX_BUILD_URL)/linux-riscv-rv32-$(LINUX_BUILD_VERSION).tar.gz
-	tar xzf $(LINUX_BUILD_DIR)/linux-riscv-rv32-$(LINUX_BUILD_VERSION).tar.gz -C $(LINUX_BUILD_DIR)
+	curl -L -o $(LINUX_BUILD_DIR)/linux-riscv-qemu-rv32-m-$(LINUX_BUILD_VERSION).tar.gz \
+		$(LINUX_BUILD_URL)/linux-riscv-qemu-rv32-m-$(LINUX_BUILD_VERSION).tar.gz
+	tar xzf $(LINUX_BUILD_DIR)/linux-riscv-qemu-rv32-m-$(LINUX_BUILD_VERSION).tar.gz -C $(LINUX_BUILD_DIR)
 	@echo "RV32 Linux build extracted to $(LINUX_RV32_DIR)"
 
 $(LINUX_RV64_DIR)/fw_payload.bin:
 	@mkdir -p $(LINUX_BUILD_DIR)
-	curl -L -o $(LINUX_BUILD_DIR)/linux-riscv-rv64-$(LINUX_BUILD_VERSION).tar.gz \
-		$(LINUX_BUILD_URL)/linux-riscv-rv64-$(LINUX_BUILD_VERSION).tar.gz
-	tar xzf $(LINUX_BUILD_DIR)/linux-riscv-rv64-$(LINUX_BUILD_VERSION).tar.gz -C $(LINUX_BUILD_DIR)
+	curl -L -o $(LINUX_BUILD_DIR)/linux-riscv-qemu-rv64-m-$(LINUX_BUILD_VERSION).tar.gz \
+		$(LINUX_BUILD_URL)/linux-riscv-qemu-rv64-m-$(LINUX_BUILD_VERSION).tar.gz
+	tar xzf $(LINUX_BUILD_DIR)/linux-riscv-qemu-rv64-m-$(LINUX_BUILD_VERSION).tar.gz -C $(LINUX_BUILD_DIR)
 	@echo "RV64 Linux build extracted to $(LINUX_RV64_DIR)"
 
 download-rv32: $(LINUX_RV32_DIR)/fw_payload.bin ## Download pre-built Linux (RV32)
@@ -135,7 +135,7 @@ $(OPENSBI_DIR)/README.md:
 	git clone https://github.com/riscv-software-src/opensbi $(OPENSBI_DIR)
 
 OPENSBI_COMMON_FLAGS = \
-	PLATFORM_RISCV_ISA=rv32imac_zicntr_zicond_zicsr_zifencei_zba_zbb_zbs \
+	PLATFORM_RISCV_ISA=rv32imac_zicntr_zicond_zicsr_zifencei_zcb_zba_zbb_zbs \
 	PLATFORM_RISCV_XLEN=32 PLATFORM=generic -j$(shell nproc)
 
 opensbi: $(OPENSBI_DIR)/README.md ## Build OpenSBI (standalone, Clang/LLVM)

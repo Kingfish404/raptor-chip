@@ -224,20 +224,25 @@ void cpu_exec(uint64_t n)
           }
         }
       }
+      // Asynchronous CLINT interrupts: when recieved_trap and cmu.valid both
+      // fire on the same cycle, the committing instruction triggered the trap.
+      // REF must first step for that instruction, then take the interrupt so
+      // that sepc correctly points at the following PC (= stvec target on next
+      // commit). Order: difftest_step() -> difftest_raise_intr().
       difftest_step(*npc.rpc);
-      char interrupt = *(char *)&VERILOG_ROU(recieved_trap);
-      if (interrupt)
       {
-        // Determine interrupt cause based on trap type and privilege level
-        // before trap (CSR module hasn't updated priv_mode yet at this point)
-        uint8_t priv = *(uint8_t *)npc.priv;
-        char sw_trap = *(char *)&VERILOG_ROU(recieved_sw_trap);
-        word_t cause;
-        if (sw_trap)
-          cause = ((priv == 3) ? 0x3u : 0x1u) | ((word_t)1 << (sizeof(word_t) * 8 - 1));
-        else
-          cause = ((priv == 3) ? 0x7u : 0x5u) | ((word_t)1 << (sizeof(word_t) * 8 - 1));
-        difftest_raise_intr(cause);
+        uint8_t cur_recieved_trap = *(uint8_t *)&VERILOG_ROU(recieved_trap);
+        if (cur_recieved_trap)
+        {
+          uint8_t priv = *(uint8_t *)npc.priv;
+          char sw_trap = *(char *)&VERILOG_ROU(recieved_sw_trap);
+          word_t cause;
+          if (sw_trap)
+            cause = ((priv == 3) ? 0x3u : 0x1u) | ((word_t)1 << (sizeof(word_t) * 8 - 1));
+          else
+            cause = ((priv == 3) ? 0x7u : 0x5u) | ((word_t)1 << (sizeof(word_t) * 8 - 1));
+          difftest_raise_intr(cause);
+        }
       }
 #endif
       if (cmu_valid_b)

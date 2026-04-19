@@ -172,7 +172,8 @@ hello: hello-build ## Build and run hello via pk
 isa-tests-build: ## Build ISA verification tests
 	@$(MAKE) $(Q) -C $(APP_HOME)/tests/isa build
 
-ISA_TESTS := rv_add rv_shift rv_logic rv_mul_div rv_branch rv_slt rv_bitmanip rv_compressed rv_zicond
+ISA_TESTS := rv_add rv_shift rv_logic rv_mul_div rv_branch rv_slt rv_bitmanip rv_compressed \
+             rv_zicond rv_zicsr rv_zifencei rv_zcb rv_zimop
 
 isa-tests: isa-tests-build ## Build and run all ISA tests via pk
 	$(call _pk_run_suite,ISA tests,$(APP_HOME)/build/rv$(XLEN)/tests/isa,$(ISA_TESTS))

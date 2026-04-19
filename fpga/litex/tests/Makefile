@@ -24,7 +24,7 @@ OBJCOPY := $(CROSS)objcopy
 OBJDUMP := $(CROSS)objdump
 
 # Match the CPU variant's ISA (rv32imac_zicsr_zifencei + Zba/Zbb/Zbc/Zbs).
-MARCH   := rv32imac_zicsr_zifencei_zba_zbb_zbc_zbs
+MARCH   := rv32imac_zicsr_zifencei_zcb_zba_zbb_zbc_zbs
 MABI    := ilp32
 
 SRC_DIR   := $(abspath .)

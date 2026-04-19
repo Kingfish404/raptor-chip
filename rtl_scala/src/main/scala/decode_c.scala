@@ -160,6 +160,16 @@ object RVCUtil {
     signExtend(raw, 5)
   }
 
+  /** Zcb byte immediate (C.LBU/C.SB): uimm = {inst[5], inst[6]} */
+  def decZcbImmB(inst: UInt): UInt = {
+    Cat(0.U(30.W), inst(5), inst(6))
+  }
+
+  /** Zcb halfword immediate (C.LHU/C.LH/C.SH): uimm = {inst[5], 1'b0} */
+  def decZcbImmH(inst: UInt): UInt = {
+    Cat(0.U(30.W), inst(5), 0.U(1.W))
+  }
+
   // 32‑bit instruction encoders (match the base ISA encoding)
   def rtype(funct7: UInt, rs2: UInt, rs1: UInt, funct3: UInt, rd: UInt, opcode: UInt): UInt =
     Cat(funct7, rs2, rs1, funct3, rd, opcode)
@@ -217,7 +227,13 @@ class ysyx_idu_decoder_c extends Module with Instr {
     C_LW__     -> List(itype(decClwCswImm(cinst), decRs1Short(cinst), "b010".U(3.W), decRdShort(cinst), "b0000011".U(7.W))),
     C_FLW_     -> List(0.U),           // RV32: C.FLW (F ext, unsupported); RV64: handled via C_LD__
     C_LD__     -> List(c_ld_inst),     // RV64: C.LD
-    C_REV_     -> List(0.U),
+    // Zcb Q0 byte/halfword loads and stores (funct3=100)
+    C_LBU_     -> List(itype(decZcbImmB(cinst), decRs1Short(cinst), "b100".U(3.W), decRdShort(cinst), "b0000011".U(7.W))),
+    C_LHU_     -> List(itype(decZcbImmH(cinst), decRs1Short(cinst), "b101".U(3.W), decRdShort(cinst), "b0000011".U(7.W))),
+    C_LH__     -> List(itype(decZcbImmH(cinst), decRs1Short(cinst), "b001".U(3.W), decRdShort(cinst), "b0000011".U(7.W))),
+    C_SB__     -> List(stype(decZcbImmB(cinst), decRs2Short(cinst), decRs1Short(cinst), "b000".U(3.W), "b0100011".U(7.W))),
+    C_SH__     -> List(stype(decZcbImmH(cinst), decRs2Short(cinst), decRs1Short(cinst), "b001".U(3.W), "b0100011".U(7.W))),
+    C_ZCB_R    -> List(0.U),
     C_FSD_     -> List(0.U),
     C_SQ__     -> List(0.U),
     C_SW__     -> List(stype(decClwCswImm(cinst), decRs2Short(cinst), decRs1Short(cinst), "b010".U(3.W), "b0100011".U(7.W))),
@@ -245,8 +261,18 @@ class ysyx_idu_decoder_c extends Module with Instr {
     C_AND_   -> List(rtype(0b0000000.U(7.W), decRs2Short(cinst), decRs1Short(cinst), "b111".U(3.W), decRs1Short(cinst), "b0110011".U(7.W))),
     C_SUBW   -> List(c_subw_inst), // rv64: C.SUBW -> subw
     C_ADDW   -> List(c_addw_inst), // rv64: C.ADDW -> addw
-    C_REV0   -> List(0.U),
-    C_REV1   -> List(0.U),
+    // Zcb Q1 (funct6=100111): C.MUL (funct2=10), and ZEXT/SEXT/NOT/ZEXT.W (funct2=11)
+    C_MUL_   -> List(rtype(0b0000001.U(7.W), decRs2Short(cinst), decRs1Short(cinst), "b000".U(3.W), decRs1Short(cinst), "b0110011".U(7.W))),
+    C_ZEXTB  -> List(itype(0xff.U(12.W), decRs1Short(cinst), "b111".U(3.W), decRs1Short(cinst), "b0010011".U(7.W))),
+    C_SEXTB  -> List(rtype(0b0110000.U(7.W), 0b00100.U(5.W), decRs1Short(cinst), "b001".U(3.W), decRs1Short(cinst), "b0010011".U(7.W))),
+    // C_ZEXTH: RV32 uses opcode 0110011, RV64 uses 0111011 — handled in fixed_inst mux below (use RV32 form here)
+    C_ZEXTH  -> List(rtype(0b0000100.U(7.W), 0b00000.U(5.W), decRs1Short(cinst), "b100".U(3.W), decRs1Short(cinst), "b0110011".U(7.W))),
+    C_SEXTH  -> List(rtype(0b0110000.U(7.W), 0b00101.U(5.W), decRs1Short(cinst), "b001".U(3.W), decRs1Short(cinst), "b0010011".U(7.W))),
+    // C_ZEXTW: RV64 only (add.uw rd', rs1', x0); RV32 is reserved — handled in fixed_inst mux
+    C_ZEXTW  -> List(rtype(0b0000100.U(7.W), 0b00000.U(5.W), decRs1Short(cinst), "b000".U(3.W), decRs1Short(cinst), "b0111011".U(7.W))),
+    C_NOT_   -> List(itype("hfff".U(12.W), decRs1Short(cinst), "b100".U(3.W), decRs1Short(cinst), "b0010011".U(7.W))),
+    C_ZCBQ1R0 -> List(0.U),
+    C_ZCBQ1R1 -> List(0.U),
     C_J___   -> List(jtype(decCjImm(cinst), 0.U(5.W), "b1101111".U(7.W))),
     C_BEQZ   -> List(btype(decBranchImm(cinst), 0.U(5.W), decRs1Short(cinst), "b000".U(3.W), "b1100011".U(7.W))),
     C_BNEZ   -> List(btype(decBranchImm(cinst), 0.U(5.W), decRs1Short(cinst), "b001".U(3.W), "b1100011".U(7.W))),
@@ -283,6 +309,8 @@ class ysyx_idu_decoder_c extends Module with Instr {
   val quadrant = cinst(1, 0)
   val funct3   = cinst(15, 13)
 
+  // Zcb: precompute the RV64 form of C.ZEXT.H (add.uw-like opcode 0111011)
+  val c_zexth_rv64 = rtype(0b0000100.U(7.W), 0b00000.U(5.W), decRs1Short(cinst), "b100".U(3.W), decRs1Short(cinst), "b0111011".U(7.W))
   val fixed_inst = MuxCase(raw_inst, Seq(
     // Q0, funct3=011: RV32->C.FLW(unsupported), RV64->C.LD
     (quadrant === "b00".U && funct3 === "b011".U) ->
@@ -300,7 +328,13 @@ class ysyx_idu_decoder_c extends Module with Instr {
     // Q2, funct3=111: RV32->C.FSWSP(sw), RV64->C.SDSP
     (quadrant === "b10".U && funct3 === "b111".U) ->
       Mux(is_rv64, c_sdsp_inst,
-        stype(decCssImm(cinst), decRs2(cinst), 2.U(5.W), "b010".U(3.W), "b0100011".U(7.W)))
+        stype(decCssImm(cinst), decRs2(cinst), 2.U(5.W), "b010".U(3.W), "b0100011".U(7.W))),
+    // Zcb Q1 funct6=100111 funct2=11: C.ZEXT.H (inst[4:2]=010): RV64 opcode differs from RV32
+    (quadrant === "b01".U && funct3 === "b100".U && cinst(12, 10) === "b111".U &&
+      cinst(6, 5) === "b11".U && cinst(4, 2) === "b010".U) -> Mux(is_rv64, c_zexth_rv64, raw_inst),
+    // Zcb Q1 funct6=100111 funct2=11: C.ZEXT.W (inst[4:2]=100): RV64 only; reserved on RV32
+    (quadrant === "b01".U && funct3 === "b100".U && cinst(12, 10) === "b111".U &&
+      cinst(6, 5) === "b11".U && cinst(4, 2) === "b100".U) -> Mux(is_rv64, raw_inst, 0.U(32.W))
   ))
 
   io.inst := fixed_inst

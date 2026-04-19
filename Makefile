@@ -252,7 +252,7 @@ coremark-npc64: $(AM_KERNELS) config-npc32 ## Run CoreMark on NPC (riscv64)
 	$(MAKE) -C $(AM_KERNELS)/benchmarks/coremark_eembc ARCH=riscv64-npc run ARGS="$(ARGS)" VFLAGS="$(VFLAGS)"
 
 coremark-npc64-difftest: VFLAGS := -DYSYX_RV64
-coremark-npc64-difftest: $(AM_KERNELS) config-npc32-difftest config-nemu32-ref ## Run CoreMark on NPC (riscv64) with difftest
+coremark-npc64-difftest: $(AM_KERNELS) config-npc32-difftest config-nemu64-ref ## Run CoreMark on NPC (riscv64) with difftest
 	$(MAKE) -C $(AM_KERNELS)/benchmarks/coremark_eembc ARCH=riscv64-npc run ARGS="$(ARGS)" VFLAGS="$(VFLAGS)"
 
 microbench-npc64: VFLAGS := -DYSYX_RV64
@@ -260,7 +260,7 @@ microbench-npc64: $(AM_KERNELS) config-npc32 ## Run MicroBench on NPC (riscv64)
 	$(MAKE) -C $(AM_KERNELS)/benchmarks/microbench ARCH=riscv64-npc run ARGS="$(ARGS)" VFLAGS="$(VFLAGS)" mainargs=$(MAINARGS)
 
 microbench-npc64-difftest: VFLAGS := -DYSYX_RV64
-microbench-npc64-difftest: $(AM_KERNELS) config-npc32-difftest config-nemu32-ref ## Run MicroBench on NPC (riscv64) with difftest
+microbench-npc64-difftest: $(AM_KERNELS) config-npc32-difftest config-nemu64-ref ## Run MicroBench on NPC (riscv64) with difftest
 	$(MAKE) -C $(AM_KERNELS)/benchmarks/microbench ARCH=riscv64-npc run ARGS="$(ARGS)" VFLAGS="$(VFLAGS)" mainargs=$(MAINARGS)
 
 microbench-npc32-difftest: $(AM_KERNELS) config-npc32-difftest config-nemu32-ref ## Run MicroBench on NPC with difftest
@@ -302,8 +302,8 @@ nanos-npc32: ## Build and run nanos-lite on NPC
 
 # Delegate download/version management to linux/Makefile (single source of truth).
 LINUX_HOME          := $(YSYX_HOME)/linux
-LINUX_BUILD_VERSION ?= v6.18.15
-LINUX_RV32_PAYLOAD  ?= $(LINUX_HOME)/build/linux-riscv-rv32-$(strip $(LINUX_BUILD_VERSION))/fw_payload.bin
+LINUX_BUILD_VERSION ?= v6.18.22
+LINUX_RV32_PAYLOAD  ?= $(LINUX_HOME)/build/linux-riscv-qemu-rv32-m-$(strip $(LINUX_BUILD_VERSION))/fw_payload.bin
 LINUX_RV64_PAYLOAD  ?= $(LINUX_HOME)/build/linux-riscv-rv64-$(strip $(LINUX_BUILD_VERSION))/fw_payload.bin
 
 linux-download-rv32: ## Download pre-built Linux (RV32 only)
@@ -355,7 +355,7 @@ fpga-pnr: ## Place and route for FPGA
 # Utilities
 # ============================================================================
 pack: ## Pack all SV files into one
-	$(MAKE) -C $(NSIM_HOME) pack
+	$(MAKE) -C $(NSIM_HOME) pack VFLAGS="$(VFLAGS)"
 
 lint: ## Lint RTL with Verilator
 	$(MAKE) -C $(NSIM_HOME) lint VFLAGS="$(VFLAGS)"
@@ -365,11 +365,18 @@ lint-verible: ## Lint RTL with Verible
 
 STA_PLATFORM ?= nangate45 ## STA platform: nangate45, asap7
 
-sta: ## Static timing analysis
-	$(MAKE) -C $(NSIM_HOME) sta STA_PLATFORM=$(STA_PLATFORM)
+sta: ## Static timing analysis (VFLAGS="-DYSYX_RV64" for RV64)
+	$(MAKE) -C $(NSIM_HOME) sta STA_PLATFORM=$(STA_PLATFORM) VFLAGS="$(VFLAGS)"
 
-sta-detail: ## Detailed static timing analysis
-	$(MAKE) -C $(NSIM_HOME) sta-detail STA_PLATFORM=$(STA_PLATFORM)
+sta-detail: ## Detailed static timing analysis (VFLAGS="-DYSYX_RV64" for RV64)
+	$(MAKE) -C $(NSIM_HOME) sta-detail STA_PLATFORM=$(STA_PLATFORM) VFLAGS="$(VFLAGS)"
+
+# RV64 convenience targets for STA
+sta-rv64: VFLAGS := -DYSYX_RV64
+sta-rv64: sta ## Static timing analysis in RV64 mode
+
+sta-detail-rv64: VFLAGS := -DYSYX_RV64
+sta-detail-rv64: sta-detail ## Detailed static timing analysis in RV64 mode
 
 clean-npc: ## Clean NPC build only
 	$(MAKE) -C $(NSIM_HOME) clean

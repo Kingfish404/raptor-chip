@@ -102,6 +102,15 @@ interface rou_exu_if #(
 `endif
       output ready
   );
+  // Read-only view for sub-modules of the EXU. Top-level remains the sole
+  // driver of `ready` / `ready_b`; RS and IOQ submodules use this modport
+  // to consume dispatch fields without violating single-driver rules.
+  modport monitor(
+      input uop, op1, op2, pr1, pr2, prd, prs, dest, valid
+`ifdef YSYX_DUAL_ISSUE
+      , input uop_b, op1_b, op2_b, pr1_b, pr2_b, prd_b, prs_b, dest_b, valid_b
+`endif
+  );
 endinterface
 
 interface rou_lsu_if #(

@@ -104,6 +104,8 @@ ifeq ($(MROM_IMG),)
 MROM_IMG ?= $(NSIM_HOME)/csrc/mem/mrom-data/build/mrom-data.bin
 endif
 
+# Always descend so mrom-data's Makefile can rebuild when ISA64 changes
+.PHONY: $(NSIM_HOME)/csrc/mem/mrom-data/build/mrom-data.bin
 $(NSIM_HOME)/csrc/mem/mrom-data/build/mrom-data.bin:
 	$(MAKE) -C $(NSIM_HOME)/csrc/mem/mrom-data ISA64=$(ISA64)
 
@@ -170,8 +172,8 @@ YOSYS_OPENSTA:
 
 pack: $(VSRCS) $(VHSRCS) ## Pack all SV files into one
 	mkdir -p $(BUILD_DIR)
-	verilator -E -P $(addprefix -I, $(INC_PATH)) $(VSRCS) > $(BUILD_DIR)/ysyx_pack.sv
-	verilator -E -P --dump-defines $(addprefix -I, $(INC_PATH)) $(VSRCS) > $(BUILD_DIR)/ysyx_pack.svh
+	verilator -E -P $(VFLAGS) $(addprefix -I, $(INC_PATH)) $(VSRCS) > $(BUILD_DIR)/ysyx_pack.sv
+	verilator -E -P --dump-defines $(VFLAGS) $(addprefix -I, $(INC_PATH)) $(VSRCS) > $(BUILD_DIR)/ysyx_pack.svh
 
 STA_PLATFORM ?= nangate45 ## STA platform: nangate45, asap7
 

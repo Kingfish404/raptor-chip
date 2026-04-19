@@ -190,6 +190,10 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
 
       WFI___ -> BitPat("b" + "00" + ALU_ADD_), // N
 
+      // Zimop: MOP.r.n / MOP.rr.n — architecturally rd <- 0
+      MOP_R_  -> BitPat("b" + "00" + ALU_ADD_), // I-like
+      MOP_RR_ -> BitPat("b" + "00" + ALU_ADD_), // R-like
+
       // Zba (Address Generation)
       SH1ADD -> BitPat("b" + "00" + ALU_SH1ADD), // R
       SH2ADD -> BitPat("b" + "00" + ALU_SH2ADD), // R
@@ -239,8 +243,8 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
       SH1ADDUW -> BitPat("b" + "00" + ALU_SH1ADD), // R (W-variant)
       SH2ADDUW -> BitPat("b" + "00" + ALU_SH2ADD), // R (W-variant)
       SH3ADDUW -> BitPat("b" + "00" + ALU_SH3ADD), // R (W-variant)
-      ADD_UW__ -> BitPat("b" + "00" + ALU_ADD_),   // R (W-variant, uses ADD)
-      SLLI_UW_ -> BitPat("b" + "00" + ALU_SLL_),   // I (W-variant, uses SLL)
+      ADD_UW__ -> BitPat("b" + "00" + ALU_ADD_UW),  // R (RV64 Zba .UW: zext.w(rs1)+rs2)
+      SLLI_UW_ -> BitPat("b" + "00" + ALU_SLLI_UW), // I (RV64 Zba .UW: zext.w(rs1)<<shamt)
 
       // RV64 Zbb W-variants
       CLZW__  -> BitPat("b" + "00" + ALU_CLZ),  // I (W-variant)
@@ -329,11 +333,11 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
       REMW__   -> BitPat("b" + "1"), // W
       REMUW_   -> BitPat("b" + "1"), // W
       // RV64 Zba W-variants
-      SH1ADDUW -> BitPat("b" + "1"), // W
+      SH1ADDUW -> BitPat("b" + "1"), // W (uses ALU_SH1ADD + word=1 -> zext.w(rs1))
       SH2ADDUW -> BitPat("b" + "1"), // W
       SH3ADDUW -> BitPat("b" + "1"), // W
-      ADD_UW__ -> BitPat("b" + "1"), // W
-      SLLI_UW_ -> BitPat("b" + "1"), // W
+      // ADD_UW and SLLI_UW use dedicated ALU ops (ALU_ADD_UW / ALU_SLLI_UW);
+      // they do NOT set word=1 because their result is full 64-bit (no trunc+sext).
       // RV64 Zbb W-variants
       CLZW__   -> BitPat("b" + "1"), // W
       CTZW__   -> BitPat("b" + "1"), // W
@@ -524,6 +528,10 @@ class ysyx_idu_decoder extends Module with Instr with MicroOP {
     SRET__ -> List( rd,SSTATUS,   0.U,   0.U, 0.U, 0.U), // N
 
     WFI___ -> List(0.U,    0.U,   0.U,   0.U, 0.U, 0.U), // N
+
+    // Zimop: rd <- 0 + 0 (ALU_ADD with zero operands)
+    MOP_R_  -> List( rd,    0.U,   0.U,   0.U, 0.U, 0.U), // I-like
+    MOP_RR_ -> List( rd,    0.U,   0.U,   0.U, 0.U, 0.U), // R-like
 
     // Zba (Address Generation): R-type: rd = (rs1 << N) + rs2
     SH1ADD -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R

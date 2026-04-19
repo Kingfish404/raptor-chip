@@ -71,6 +71,10 @@ trait MicroOP {
   def ALU_CZERO_EQZ = "111000"
   def ALU_CZERO_NEZ = "111001"
 
+  // RV64 Zba .UW variants (dedicated opcodes; semantics differ from ADDW/SLLW)
+  def ALU_ADD_UW  = "111101"
+  def ALU_SLLI_UW = "111110"
+
   // w: word 32, h: half 16, b: byte 8, d: doubleword 64
   def LSU_LB_ = "000000"
   def LSU_LH_ = "000001"

@@ -14,6 +14,14 @@ module ysyx_exu_alu #(
   localparam int ShamtW = $clog2(XLEN);  // 5 for RV32, 6 for RV64
   logic [XLEN-1:0] alu_r;
 
+  // zext.w(rs1): zero-extend low 32 bits for RV64 Zba .UW variants
+  logic [XLEN-1:0] s1_uw;
+  assign s1_uw = (XLEN > 32) ? {{(XLEN - 32) {1'b0}}, s1[31:0]} : s1;
+
+  // `word_uw`: for SH1/2/3ADD, when word=1 it means .UW semantics (zext.w(rs1));
+  // for ADD.UW and SLLI.UW we use dedicated opcodes below.
+  wire is_sh_uw = word && (XLEN > 32);
+
   // CLZ helper: count leading zeros
   function automatic logic [ShamtW:0] fn_clz(input logic [XLEN-1:0] val, input logic w);
     logic [ShamtW:0] cnt;
@@ -85,10 +93,16 @@ module ysyx_exu_alu #(
       `YSYX_ALU_SRA_: begin alu_r = word
         ? $signed({{XLEN-32{s1[31]}}, s1[31:0]}) >>> s2[4:0] : $signed(s1) >>> s2[ShamtW-1:0]; end
 
-      // Zba (Address Generation)
-      `YSYX_ALU_SH1ADD: begin alu_r = (s1 << 1) + s2; end
-      `YSYX_ALU_SH2ADD: begin alu_r = (s1 << 2) + s2; end
-      `YSYX_ALU_SH3ADD: begin alu_r = (s1 << 3) + s2; end
+      // Zba (Address Generation). For RV64, when `word`=1 these are the .UW
+      // variants (sh1add.uw / sh2add.uw / sh3add.uw): zero-extend rs1[31:0]
+      // before the shift-add. Output sign-ext is suppressed below for SH*ADD.
+      `YSYX_ALU_SH1ADD: begin alu_r = ((is_sh_uw ? s1_uw : s1) << 1) + s2; end
+      `YSYX_ALU_SH2ADD: begin alu_r = ((is_sh_uw ? s1_uw : s1) << 2) + s2; end
+      `YSYX_ALU_SH3ADD: begin alu_r = ((is_sh_uw ? s1_uw : s1) << 3) + s2; end
+
+      // RV64 Zba dedicated .UW opcodes (full 64-bit result, no trunc+sext).
+      `YSYX_ALU_ADD_UW:  begin alu_r = s2 + s1_uw; end
+      `YSYX_ALU_SLLI_UW: begin alu_r = s1_uw << s2[ShamtW-1:0]; end
 
       // Zbb (Basic Bit-manipulation): logic
       `YSYX_ALU_ANDN: begin alu_r = s1 & ~s2; end
@@ -152,7 +166,7 @@ module ysyx_exu_alu #(
       `YSYX_ALU_CZERO_NEZ: begin alu_r = (s2 != '0) ? '0 : s1; end
 
       // Zbc (Carry-less Multiplication)
-      `YSYX_ALU_CLMUL_: begin
+      `YSYX_ALU_CLMUL: begin
         alu_r = '0;
         for (int i = 0; i < XLEN; i++)
           if (s2[i]) alu_r = alu_r ^ (s1 << i);
@@ -174,10 +188,17 @@ module ysyx_exu_alu #(
     endcase
   end
 
-  // W-variant: sign-extend lower 32-bit result to XLEN
+  // W-variant: sign-extend lower 32-bit result to XLEN.
+  // .UW variants (ALU_ADD_UW / ALU_SLLI_UW and SH*ADD+word=1) produce a full
+  // 64-bit result and must NOT be truncated/sign-extended here.
+  wire is_uw_op = (op == `YSYX_ALU_ADD_UW)
+               || (op == `YSYX_ALU_SLLI_UW)
+               || (op == `YSYX_ALU_SH1ADD)
+               || (op == `YSYX_ALU_SH2ADD)
+               || (op == `YSYX_ALU_SH3ADD);
   generate
     if (XLEN > 32) begin : gen_word_ext
-      assign out_r = word ? {{XLEN - 32{alu_r[31]}}, alu_r[31:0]} : alu_r;
+      assign out_r = (word && !is_uw_op) ? {{XLEN - 32{alu_r[31]}}, alu_r[31:0]} : alu_r;
     end else begin : gen_no_word
       assign out_r = alu_r;
     end

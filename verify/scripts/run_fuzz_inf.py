@@ -428,7 +428,7 @@ def main():
     parser.add_argument("--objcopy", default="riscv64-elf-objcopy", help="objcopy tool")
     parser.add_argument(
         "--march",
-        default="rv32imac_zicntr_zicond_zicsr_zifencei_zba_zbb_zbc_zbs",
+        default="rv32imac_zicntr_zicond_zicsr_zifencei_zcb_zba_zbb_zbc_zbs",
         help="Target -march",
     )
     parser.add_argument("--mabi", default="ilp32", help="Target -mabi")

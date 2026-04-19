@@ -38,10 +38,13 @@ fpga/litex/
 
 ## CPU Variants
 
-| Variant    | Issue | ROB | L1I  | L1D   | Use Case   |
-| ---------- | ----- | --- | ---- | ----- | ---------- |
-| `standard` | 2     | 8   | 1 KB | 512 B | Sim & FPGA |
-| `linux`    | 2     | 16  | 8 KB | 4 KB  | Linux boot |
+Both variants wrap the same RTL (configured via `rtl_sv/include/ysyx_config.svh`). The
+variant label is passed to LiteX purely to select SoC-level defaults.
+
+| Variant    | Use Case                                |
+| ---------- | --------------------------------------- |
+| `standard` | Sim & FPGA (BIOS-only, no Linux image)  |
+| `linux`    | Linux boot (integrates OpenSBI + Image) |
 
 Select variant: `make sim VARIANT=linux`
 

@@ -30,6 +30,12 @@ static struct
 
 uint8_t *guest_to_host(paddr_t addr)
 {
+#ifdef CONFIG_ISA64
+    // In RV64 mode, `lui`/`auipc` on a 0x80000000-linked image produces
+    // sign-extended addresses (0xffffffff8xxxxxxx). Physical memory is 32-bit,
+    // so canonicalise by keeping only the low 32 bits.
+    addr = (paddr_t)((uint32_t)addr);
+#endif
     if (addr >= MBASE && addr <= MBASE + MSIZE)
     {
         return memory.pmem + addr - MBASE;
@@ -169,6 +175,10 @@ extern "C" void sdram_write(word_t addr, uint8_t data, uint8_t wmask)
 
 extern "C" void pmem_read(word_t raddr, word_t *rdata)
 {
+#ifdef CONFIG_ISA64
+    // Canonicalise RV64 sign-extended physical addresses (0xffffffff8xxxxxxx)
+    raddr = (word_t)((uint32_t)raddr);
+#endif
     word_t addr = raddr;
     word_t data = 0;
     // Log("raddr: " FMT_WORD_NO_PREFIX, addr);
@@ -215,6 +225,9 @@ extern "C" void pmem_read(word_t raddr, word_t *rdata)
 
 extern "C" void pmem_write(word_t waddr, word_t wdata, char wmask)
 {
+#ifdef CONFIG_ISA64
+    waddr = (word_t)((uint32_t)waddr);
+#endif
     word_t addr = waddr;
     word_t data = wdata;
     // Log("waddr: " FMT_WORD ", wdata: " FMT_WORD ", wmask = 0x%02x",

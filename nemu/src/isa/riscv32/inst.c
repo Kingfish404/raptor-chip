@@ -63,6 +63,12 @@ bool csr_valid(Decode *s, uint16_t csr, bool is_write)
     difftest_skip_ref();
     return false;
   }
+  // PMP CSRs: force read-as-zero by clearing the sr[] entry before the
+  // CSR instruction body reads it.  Writes will store a value but it is
+  // cleared again on the next access, so PMP is effectively hardwired to 0.
+  if (is_pmp_csr(csr))
+    cpu.sr[csr] = 0;
+
   CSR_status csr_status = check_csr_exist(csr);
   switch (csr_status)
   {
@@ -459,6 +465,12 @@ static int decode_exec(Decode *s)
 #endif
     difftest_skip_ref();
   });
+  // Zimop: May-Be-Operations. Architecturally write 0 to rd; semantics
+  // reserved for future repurposing. Currently decode as NOP + rd<-0.
+  // MOP.r.n  : 1-00--0111-- sssss 100 ddddd 1110011  (32 MOPs)
+  INSTPAT("1?00??0111?? ????? 100 ????? 11100 11", mop.r, I, R(rd) = 0);
+  // MOP.rr.n : 1-00--1 rs2 rs1 100 rd 1110011  (8 MOPs)
+  INSTPAT("1?00??1 ????? ????? 100 ????? 11100 11", mop.rr, R, R(rd) = 0);
   INSTPAT_CASE_END(grp_system)
 
   INSTPAT_CASE(0b01011, grp_amo) // AMO (RV32A + RV64A)

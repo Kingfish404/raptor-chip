@@ -22,6 +22,9 @@ module ysyx_prf #(
     // Write source A: EXU ALU result
     exu_rou_if.in exu_rou,
 
+    // Write source C: EXU ALU slot-B (pure arithmetic)
+    exu_rou_b_if.in exu_rou_b,
+
     // Write source B: IOQ broadcast (LSU/CSR)
     exu_ioq_bcast_if.in exu_ioq_bcast,
 
@@ -80,6 +83,13 @@ module ysyx_prf #(
   assign wr_b_addr = exu_ioq_bcast.prd;
   assign wr_b_data = exu_ioq_bcast.result;
 
+  logic            wr_c_en;
+  logic [PLEN-1:0] wr_c_addr;
+  logic [XLEN-1:0] wr_c_data;
+  assign wr_c_en   = exu_rou_b.valid && exu_rou_b.rd != 0;
+  assign wr_c_addr = exu_rou_b.prd;
+  assign wr_c_data = exu_rou_b.result;
+
   // ---- Commit / dealloc ----
   logic commit_dealloc;
   assign commit_dealloc = rou_cmu.valid_a && rou_cmu.rd_a != 0;
@@ -90,7 +100,7 @@ module ysyx_prf #(
   // Pre-decode addresses to one-hot vectors (shared decoders, reduce per-entry fanin)
   logic [PNUM-1:0] dealloc_prs_oh, dealloc_prs_b_oh;
   logic [PNUM-1:0] settle_prd_oh, settle_prd_b_oh;
-  logic [PNUM-1:0] wr_a_oh, wr_b_oh;
+  logic [PNUM-1:0] wr_a_oh, wr_b_oh, wr_c_oh;
 
   always_comb begin
     dealloc_prs_oh   = '0;
@@ -99,12 +109,14 @@ module ysyx_prf #(
     settle_prd_b_oh  = '0;
     wr_a_oh          = '0;
     wr_b_oh          = '0;
+    wr_c_oh          = '0;
     if (commit_dealloc_b) dealloc_prs_b_oh[rou_cmu.prs_b] = 1'b1;
     if (commit_dealloc) dealloc_prs_oh[rou_cmu.prs_a] = 1'b1;
     if (commit_dealloc_b) settle_prd_b_oh[rou_cmu.prd_b] = 1'b1;
     if (commit_dealloc) settle_prd_oh[rou_cmu.prd_a] = 1'b1;
     if (wr_a_en) wr_a_oh[wr_a_addr] = 1'b1;
     if (wr_b_en) wr_b_oh[wr_b_addr] = 1'b1;
+    if (wr_c_en) wr_c_oh[wr_c_addr] = 1'b1;
   end
 
   // ---- Write / state update ----
@@ -138,6 +150,10 @@ module ysyx_prf #(
           prf_transient[i] <= 1'b1;
         end else if (!cmu_bcast.flush_pipe && wr_b_oh[i]) begin
           prf[i]           <= wr_b_data;
+          prf_valid[i]     <= 1'b1;
+          prf_transient[i] <= 1'b1;
+        end else if (!cmu_bcast.flush_pipe && wr_c_oh[i]) begin
+          prf[i]           <= wr_c_data;
           prf_valid[i]     <= 1'b1;
           prf_transient[i] <= 1'b1;
         end

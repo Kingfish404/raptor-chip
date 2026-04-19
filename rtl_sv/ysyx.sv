@@ -141,6 +141,8 @@ module ysyx #(
 
   // EXU stage
   exu_rou_if exu_rou ();  // Execute & Writeback => Commit
+  exu_rou_b_if exu_rou_b ();  // Second ALU writeback (pure arithmetic)
+  exu_rou_c_if exu_rou_c ();  // Dedicated BRU writeback (conditional branches)
 
   exu_prf_if exu_prf ();
   exu_ioq_bcast_if exu_ioq_bcast ();
@@ -250,6 +252,7 @@ module ysyx #(
       .prf_rd(exu_prf),
 
       .exu_rou      (exu_rou),
+      .exu_rou_b    (exu_rou_b),
       .exu_ioq_bcast(exu_ioq_bcast),
       .rou_cmu      (rou_cmu),
       .cmu_bcast    (cmu_bcast),
@@ -277,6 +280,8 @@ module ysyx #(
       .rou_exu(rou_exu),
 
       .exu_rou(exu_rou),
+      .exu_rou_b(exu_rou_b),
+      .exu_rou_c(exu_rou_c),
       .exu_ioq_bcast(exu_ioq_bcast),
 
       .csr_bcast(csr_bcast),
@@ -299,6 +304,8 @@ module ysyx #(
       .rou_exu(rou_exu),
 
       .exu_rou(exu_rou),
+      .exu_rou_b(exu_rou_b),
+      .exu_rou_c(exu_rou_c),
       .exu_ioq_bcast(exu_ioq_bcast),
 
       .exu_lsu(exu_lsu),

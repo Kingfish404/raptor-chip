@@ -94,9 +94,14 @@
 `define YSYX_ALU_CZERO_NEZ 'b111001
 
 // Zbc (Carry-less Multiplication)
-`define YSYX_ALU_CLMUL_ 'b111010
+`define YSYX_ALU_CLMUL 'b111010
 `define YSYX_ALU_CLMULH 'b111011
 `define YSYX_ALU_CLMULR 'b111100
+
+// RV64 Zba .UW variants (dedicated opcodes; semantics differ from ADDW/SLLW:
+// zero-extend rs1[31:0], produce full 64-bit result, no trunc+sext)
+`define YSYX_ALU_ADD_UW 'b111101
+`define YSYX_ALU_SLLI_UW 'b111110
 
 `define YSYX_ALU_MUL___ 'b11000
 `define YSYX_ALU_MULH__ 'b11001

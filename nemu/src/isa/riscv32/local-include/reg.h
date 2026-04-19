@@ -36,6 +36,15 @@ static inline int check_sr_idx(int idx)
 
 #define sr(idx) (cpu.sr[check_sr_idx(idx)])
 
+// PMP is not implemented: pmpcfg0..3 (0x3a0-0x3a3) and pmpaddr0..15 (0x3b0-0x3bf)
+// are hardwired to 0 (reads return 0, writes are ignored). This matches the NPC
+// DUT and keeps difftest consistent when OpenSBI probes PMP with `csrw/csrr`.
+static inline bool is_pmp_csr(uint16_t csr)
+{
+  csr = csr & 0xfff;
+  return (csr >= 0x3a0 && csr <= 0x3a3) || (csr >= 0x3b0 && csr <= 0x3bf);
+}
+
 static inline const char *reg_name(int idx)
 {
   extern const char *regs[];

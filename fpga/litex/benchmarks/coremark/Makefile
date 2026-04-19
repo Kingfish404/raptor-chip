@@ -27,7 +27,7 @@ OBJCOPY := $(CROSS_COMPILE)objcopy
 SIZE    := $(CROSS_COMPILE)size
 
 # ---- Architecture ----
-ARCH   := rv32imac_zicsr_zifencei_zba_zbb_zbc_zbs
+ARCH   := rv32imac_zicntr_zicond_zicsr_zifencei_zcb_zba_zbb_zbc_zbs
 ABI    := ilp32
 
 # ---- Directories ----

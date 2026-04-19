@@ -18,6 +18,15 @@ LDFLAGS       =
 IMAGE = ./build/mrom-data
 SOURCE = rom.c dtb.c
 
+# Auto-invalidate build when ISA64 flag changes (e.g., switching RV32<->RV64)
+ISA64 ?= 0
+ISA_STAMP := ./build/.isa_stamp
+ISA_PREV  := $(shell cat $(ISA_STAMP) 2>/dev/null)
+ifneq ($(ISA64),$(ISA_PREV))
+$(shell rm -rf ./build)
+$(shell mkdir -p ./build && printf '%s' '$(ISA64)' > $(ISA_STAMP))
+endif
+
 CFLAGS = -g -O2 -MMD -Wall \
 	-fno-asynchronous-unwind-tables -fno-builtin -fno-stack-protector \
 	-nostartfiles -ffreestanding $(COMMON_CFLAGS) -nostdlib

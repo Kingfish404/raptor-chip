@@ -45,12 +45,16 @@
 `define YSYX_BTB_WAYS 2
 `define YSYX_RSB_SIZE 8
 
-`define YSYX_RIQ_SIZE 4
-`define YSYX_IIQ_SIZE 4
-`define YSYX_ROB_SIZE 8
+// OoO window sizing. Rationale: dual-issue rename/commit were throttled by
+// an 8-entry ROB and 4-entry RS; with 2-ALU + pipelined MUL + OoO LSU the
+// in-flight window becomes the new bottleneck, so ROB/PRF are grown to
+// reduce dispatch stall.
+`define YSYX_RIQ_SIZE 8
+`define YSYX_IIQ_SIZE 8
+`define YSYX_ROB_SIZE 16
 
-`define YSYX_RS_SIZE 4
-`define YSYX_IOQ_SIZE 4
+`define YSYX_RS_SIZE 8
+`define YSYX_IOQ_SIZE 8
 
 `define YSYX_SQ_SIZE 8
 `define YSYX_L1D_LINE_LEN 1
@@ -85,7 +89,7 @@
 
 `define YSYX_REG_LEN $clog2(`YSYX_REG_SIZE) // Register Length
 
-`define YSYX_PHY_SIZE 64 // physical register number
+`define YSYX_PHY_SIZE 64 // physical register number (must be power of 2)
 `define YSYX_PHY_LEN $clog2(`YSYX_PHY_SIZE)
 
 `endif

@@ -93,8 +93,29 @@ uint32_t decompress_c(uint32_t inst)
 #else
   INSTPAT("011 ???????? ??? 00", c.flw, L, { di = 0; }); // rv32
 #endif
-  INSTPAT("011 ???????? ??? 00", c.ld, L, { di = 0; });  // rv64/128 fallback
-  INSTPAT("100 ???????? ??? 00", c.rev, N, { di = 0; }); // Reserved
+  INSTPAT("011 ???????? ??? 00", c.ld, L, { di = 0; }); // rv64/128 fallback
+  // Zcb: byte/halfword compressed loads/stores (Q0, funct3=100)
+  INSTPAT("100 000 ??? ?? ??? 00", c.lbu, L, {
+    uint32_t uimm = dec_zcb_imm_b(s);
+    di = itype(uimm, rs1, 0b100, rd, 0b0000011);
+  });
+  INSTPAT("100 001 ??? 0? ??? 00", c.lhu, L, {
+    uint32_t uimm = dec_zcb_imm_h(s);
+    di = itype(uimm, rs1, 0b101, rd, 0b0000011);
+  });
+  INSTPAT("100 001 ??? 1? ??? 00", c.lh, L, {
+    uint32_t uimm = dec_zcb_imm_h(s);
+    di = itype(uimm, rs1, 0b001, rd, 0b0000011);
+  });
+  INSTPAT("100 010 ??? ?? ??? 00", c.sb, S, {
+    uint32_t uimm = dec_zcb_imm_b(s);
+    di = stype(uimm, rs2, rs1, 0b000, 0b0100011);
+  });
+  INSTPAT("100 011 ??? 0? ??? 00", c.sh, S, {
+    uint32_t uimm = dec_zcb_imm_h(s);
+    di = stype(uimm, rs2, rs1, 0b001, 0b0100011);
+  });
+  INSTPAT("100 ???????? ??? 00", c.rev, N, { di = 0; }); // Reserved (Q0 funct3=100 fallback)
   INSTPAT("101 ???????? ??? 00", c.fsd, S, { di = 0; }); // rv32/64
   INSTPAT("101 ???????? ??? 00", c.sq, S, { di = 0; });  // rv128
   INSTPAT("110 ???????? ??? 00", c.sw, S, { di = stype(imm, rs2, rs1, 0b010, 0b0100011); });
@@ -103,19 +124,19 @@ uint32_t decompress_c(uint32_t inst)
 #else
   INSTPAT("111 ???????? ??? 00", c.fsw, S, { di = 0; }); // rv32
 #endif
-  INSTPAT("111 ???????? ??? 00", c.sd, S, { di = 0; });  // rv64/128 fallback
+  INSTPAT("111 ???????? ??? 00", c.sd, S, { di = 0; }); // rv64/128 fallback
   // Instruction listing for RVC, Quadrant 1
-  INSTPAT("000 ?00000?? ??? 01", c.nop, I, { di = itype(imm, 0, 0b000, 0, 0b0010011); });                                     // hint,imm=0
-  INSTPAT("000 ???????? ??? 01", c.addi, I, { di = (rd == 0 || imm == 0) ? nop() : itype(imm, rd, 0b000, rd, 0b0010011); });  // hint,imm=0
+  INSTPAT("000 ?00000?? ??? 01", c.nop, I, { di = itype(imm, 0, 0b000, 0, 0b0010011); });                                    // hint,imm=0
+  INSTPAT("000 ???????? ??? 01", c.addi, I, { di = (rd == 0 || imm == 0) ? nop() : itype(imm, rd, 0b000, rd, 0b0010011); }); // hint,imm=0
 #ifdef CONFIG_RV64
   INSTPAT("001 ???????? ??? 01", c.addiw, I, { di = (rd == 0) ? nop() : itype(imm, rd, 0b000, rd, 0b0011011); }); // rv64: addiw
 #else
-  INSTPAT("001 ???????? ??? 01", c.jal, J, { di = jtype(imm, 1, 0b1101111); });                                               // rv32
+  INSTPAT("001 ???????? ??? 01", c.jal, J, { di = jtype(imm, 1, 0b1101111); }); // rv32
 #endif
   INSTPAT("001 ???????? ??? 01", c.addiw, I, { di = (rd == 0 || imm == 0) ? nop() : itype(imm, rd, 0b000, rd, 0b0010011); }); // rv64/128 fallback;res,rd=0
   INSTPAT("010 ???????? ??? 01", c.li, I, { di = (rd == 0) ? nop() : itype(imm, 0, 0b000, rd, 0b0010011); });
   INSTPAT("011 ?00010?? ??? 01", c.addi16sp, I, { di = (nzimm_addi16sp == 0) ? nop() : itype(nzimm_addi16sp, 2, 0b000, 2, 0b0010011); }); // res,imm=0
-  INSTPAT("011 ???????? ??? 01", c.lui, I, { di = (rd == 0 || nzimm_lui == 0) ? nop() : utype(nzimm_lui, rd, 0b0110111); });                                // Zcmop: nzimm=0 -> NOP;hint,rd=0
+  INSTPAT("011 ???????? ??? 01", c.lui, I, { di = (rd == 0 || nzimm_lui == 0) ? nop() : utype(nzimm_lui, rd, 0b0110111); });              // Zcmop: nzimm=0 -> NOP;hint,rd=0
   INSTPAT("100 ?00????? ??? 01", c.srli, B, { di = rtype(0b0000000, shamt, rs1, 0b101, rs1, 0b0010011); });                               // rv32 custom,uimm[5]=1
   INSTPAT("100 000???00 000 01", c.srli64, B, { di = 0; });                                                                               // rv128; rv32/64 hint
   INSTPAT("100 ?01????? ??? 01", c.srai, B, { di = rtype(0b0100000, shamt, rs1, 0b101, rs1, 0b0010011); });                               // rv32 custom,uimm[5]=1
@@ -132,21 +153,57 @@ uint32_t decompress_c(uint32_t inst)
   INSTPAT("100 111???00 ??? 01", c.subw, A, { di = 0; }); // rv64/128;rv32 res
   INSTPAT("100 111???01 ??? 01", c.addw, A, { di = 0; }); // rv64/128;rv32 res
 #endif
-  INSTPAT("100 111???10 ??? 01", c.rev, N, { di = 0; });  // Reserved
-  INSTPAT("100 111???11 ??? 01", c.rev, N, { di = 0; });  // Reserved
+  // Zcb: C.MUL (Q1, funct6=100111, funct2=10)
+  INSTPAT("100 111???10 ??? 01", c.mul, A, {
+    di = rtype(0b0000001, rs2, rs1, 0b000, rs1, 0b0110011);
+  });
+  // Zcb: Q1 funct6=100111 funct2=11 — sub-encoded by inst[4:2]
+  INSTPAT("100 111???11 000 01", c.zext.b, A, {
+    di = itype(0xff, rs1, 0b111, rs1, 0b0010011); // andi rd', rs1', 0xff
+  });
+  INSTPAT("100 111???11 001 01", c.sext.b, A, {
+    // sext.b rd', rs1' (Zbb): funct7=0110000, rs2=00100, funct3=001, opcode=0010011
+    di = rtype(0b0110000, 0b00100, rs1, 0b001, rs1, 0b0010011);
+  });
+  INSTPAT("100 111???11 010 01", c.zext.h, A, {
+#ifdef CONFIG_RV64
+    // zext.h (RV64): funct7=0000100, rs2=00000, funct3=100, opcode=0111011
+    di = rtype(0b0000100, 0b00000, rs1, 0b100, rs1, 0b0111011);
+#else
+    // zext.h (RV32): funct7=0000100, rs2=00000, funct3=100, opcode=0110011
+    di = rtype(0b0000100, 0b00000, rs1, 0b100, rs1, 0b0110011);
+#endif
+  });
+  INSTPAT("100 111???11 011 01", c.sext.h, A, {
+    // sext.h rd', rs1' (Zbb): funct7=0110000, rs2=00101, funct3=001, opcode=0010011
+    di = rtype(0b0110000, 0b00101, rs1, 0b001, rs1, 0b0010011);
+  });
+#ifdef CONFIG_RV64
+  INSTPAT("100 111???11 100 01", c.zext.w, A, {
+    // zext.w = add.uw rd, rs1, x0 (Zba RV64): funct7=0000100, rs2=00000, funct3=000, opcode=0111011
+    di = rtype(0b0000100, 0b00000, rs1, 0b000, rs1, 0b0111011);
+  });
+#else
+  INSTPAT("100 111???11 100 01", c.rev, N, { di = 0; }); // RV32: reserved
+#endif
+  INSTPAT("100 111???11 101 01", c.not, A, {
+    di = itype(0xfff, rs1, 0b100, rs1, 0b0010011); // xori rd', rs1', -1
+  });
+  INSTPAT("100 111???11 110 01", c.rev, N, { di = 0; }); // Reserved
+  INSTPAT("100 111???11 111 01", c.rev, N, { di = 0; }); // Reserved
   INSTPAT("101 ???????? ??? 01", c.j, J, { di = jtype(imm, 0, 0b1101111); });
   INSTPAT("110 ???????? ??? 01", c.beqz, B, { di = btype(imm, 0, rs1, 0b000, 0b1100011); });
   INSTPAT("111 ???????? ??? 01", c.bnez, B, { di = btype(imm, 0, rs1, 0b001, 0b1100011); });
   // Instruction listing for RVC, Quadrant 2
-  INSTPAT("000 ???????? ??? 10", c.slli, I, { di = itype(imm, rd, 0b001, rd, 0b0010011); });                                         // hint,rd=0;rv32 custom,uimm[5]=1
-  INSTPAT("000 0??????? 000 10", c.slli64, I, { di = 0; });                                                                          // rv128;rv32/64 hint;hint,rd=0
-  INSTPAT("001 ???????? ??? 10", c.fldsp, I, { di = 0; });                                                                           // rv32/64
-  INSTPAT("001 ???????? ??? 10", c.lqsp, I, { di = 0; });                                                                            // rv128;res,rd=0
-  INSTPAT("010 ???????? ??? 10", c.lwsp, I, { di = itype(offset_lwsp, 2, 0b010, rd, 0b0000011); });                                  // res,rd=0
+  INSTPAT("000 ???????? ??? 10", c.slli, I, { di = itype(shamt, rd, 0b001, rd, 0b0010011); });      // shamt is zero-extended (not sign-extended like ci_imm); hint,rd=0
+  INSTPAT("000 0??????? 000 10", c.slli64, I, { di = 0; });                                         // rv128;rv32/64 hint;hint,rd=0
+  INSTPAT("001 ???????? ??? 10", c.fldsp, I, { di = 0; });                                          // rv32/64
+  INSTPAT("001 ???????? ??? 10", c.lqsp, I, { di = 0; });                                           // rv128;res,rd=0
+  INSTPAT("010 ???????? ??? 10", c.lwsp, I, { di = itype(offset_lwsp, 2, 0b010, rd, 0b0000011); }); // res,rd=0
 #ifdef CONFIG_RV64
-  INSTPAT("011 ???????? ??? 10", c.ldsp, I, { di = itype(offset_ldsp, 2, 0b011, rd, 0b0000011); });                                 // rv64
+  INSTPAT("011 ???????? ??? 10", c.ldsp, I, { di = itype(offset_ldsp, 2, 0b011, rd, 0b0000011); }); // rv64
 #else
-  INSTPAT("011 ???????? ??? 10", c.flwsp, I, { di = 0; });                                                                           // rv32
+  INSTPAT("011 ???????? ??? 10", c.flwsp, I, { di = 0; }); // rv32
 #endif
   INSTPAT("011 ???????? ??? 10", c.ldsp, I, { di = 0; });                                                                            // rv128 fallback;res,rd=0
   INSTPAT("100 0?????00 000 10", c.jr, R, { di = rtype(0b0000000, 0, rs1, 0b000, 0, 0b1100111); });                                  // res,rs1=0
@@ -158,11 +215,11 @@ uint32_t decompress_c(uint32_t inst)
   INSTPAT("101 ???????? ??? 10", c.sqsp, SS, { di = stype(imm, rs2, 2, 0b010, 0b0100011); });                              // rv128
   INSTPAT("110 ???????? ??? 10", c.swsp, SS, { di = stype(imm, rs2, 2, 0b010, 0b0100011); });
 #ifdef CONFIG_RV64
-  INSTPAT("111 ???????? ??? 10", c.sdsp, SS, { di = stype(imm_sd_sp, rs2, 2, 0b011, 0b0100011); });  // rv64
+  INSTPAT("111 ???????? ??? 10", c.sdsp, SS, { di = stype(imm_sd_sp, rs2, 2, 0b011, 0b0100011); }); // rv64
 #else
   INSTPAT("111 ???????? ??? 10", c.fswsp, SS, { di = stype(imm, rs2, 2, 0b010, 0b0100011); }); // rv32
 #endif
-  INSTPAT("111 ???????? ??? 10", c.sdsp, SS, { di = stype(imm, rs2, 2, 0b010, 0b0100011); });  // rv128 fallback
+  INSTPAT("111 ???????? ??? 10", c.sdsp, SS, { di = stype(imm, rs2, 2, 0b010, 0b0100011); }); // rv128 fallback
 
   INSTPAT("??? ???????? ??? ??", c.inv, N, { di = 0; });
   INSTPAT_END();
@@ -170,8 +227,9 @@ uint32_t decompress_c(uint32_t inst)
 #ifndef CONFIG_RV64
   uint32_t decompress_c_ref(uint32_t inst);
   uint32_t di_func = decompress_c_ref(inst);
-  if (di_func != di)
+  if (di_func != di && di_func != 0)
   {
+    // Suppress Zcb mismatches (ref decoder predates Zcb).
     printf("Decompressed mismatch: %04x -> %08x (gt) != %08x\n", s, di_func, di);
   }
 #endif

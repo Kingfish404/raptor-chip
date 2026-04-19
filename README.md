@@ -11,13 +11,20 @@
 
 Welcome to the Raptor Project! Here is an all-in-one repository for exploring, designing, developing, optimizing, and verifying a RISC-V core. Aiming at high-performance & quality, full Linux support, FPGA implementation, and ASIC readiness.
 
-Core description: **Super-scalar, Out-of-order [RISC-V][^RISC-V] core** with register renaming, ROB, and reservation stations. The RTL is described by `SystemVerilog` with `Chisel` (`Scala`) used only for decoder generation. Features Sv32 virtual memory (MMU/TLB), LR/SC + AMO atomics, compressed instructions (RVC), and boots Linux v6.18 via OpenSBI. Supports configurable **RV32** and **RV64** modes via compile-time switch.
+Core description: **Super-scalar, Out-of-order RISC-V core** with register renaming, ROB, and reservation stations. The RTL is described by `SystemVerilog` with `Chisel` (`Scala`) used only for decoder generation. Features Sv32 virtual memory (MMU/TLB), LR/SC + AMO atomics, compressed instructions (RVC), and boots Linux v6.18 via OpenSBI. Supports configurable **RV32** and **RV64** modes via compile-time switch.
 
-ISA strings: `rv32imac_zicntr_zicond_zicsr_zifencei_zba_zbb_zbc_zbs`
+```
+Core name:  raptor-falcon (M/S/U + Sv32, Linux-capable)
+ISA:        rv32imac_zicntr_zicond_zicsr_zifencei_zimop_zcb_zba_zbb_zbc_zbs
+Modes:      Machine, Supervisor, User
+MMU:        riscv,sv32 (RV32) / riscv,none (RV64, Bare)
+Interrupts: CLINT (mtime, mtimecmp, msip)
+Profile:    n/a (closest peer: RVM23U32 / RVA20S64)
 
-Candidate ip core name: `raptor-falcon-0.1.0` (`rf-0.1.0`).
+Bus Interface:  AXI4, XLEN-bit data/addr, 4-bit ID, burst
 
-[^RISC-V]: https://riscv.org/
+Verifying:  RVFI (RISC-V Formal Interface) compliant
+```
 
 ### [Documentation](./docs/README.md)
 

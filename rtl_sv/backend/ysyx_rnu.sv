@@ -72,8 +72,8 @@ module ysyx_rnu #(
   logic [$clog2(RIQ_SIZE)-1:0] rnq_head_b;
 
   // Stage 1 fires when RNQ has entry AND pipeline register is free (or being consumed)
-  logic rn_pipe_ready;
-  assign rn_pipe_ready = !rn_pipe_valid_a || rnu_rou.ready;
+  logic rn_pipe_ready_a;
+  assign rn_pipe_ready_a = !rn_pipe_valid_a || rnu_rou.ready;
 
   logic rnq_enq_fire_a, rnq_deq_fire_a;
 `ifdef YSYX_DUAL_ISSUE
@@ -84,7 +84,7 @@ module ysyx_rnu #(
 `else
   assign rnq_enq_fire_a = idu_rnu.valid_a && !rnq_valid[rnq_head_a];
 `endif
-  assign rnq_deq_fire_a = rn_pipe_ready && rnq_valid[rnq_tail_a];
+  assign rnq_deq_fire_a = rn_pipe_ready_a && rnq_valid[rnq_tail_a];
 
 `ifdef YSYX_DUAL_ISSUE
   // Second RNQ dequeue: can dequeue slot B if slot A fires, next entry valid,

@@ -102,11 +102,11 @@ void perf_sample_per_cycle()
   bool ifu_fetch_fire = *(uint8_t *)&VERILOG_CPU(ifu__DOT__pmu_fetch_fire);
   bool ifu_stall = *(uint8_t *)&VERILOG_CPU(ifu__DOT__pmu_ifu_stall);
 
-  bool rou_ready = *(uint8_t *)&VERILOG_ROU(ready);
-  uint32_t exu_ooo_valid = *(uint8_t *)&VERILOG_CPU(exu__DOT__rs_valid);
-  bool exu_ooo_valid_found = *(uint8_t *)&VERILOG_CPU(exu__DOT__valid_found);
-  uint32_t exu_ioq_valid = *(uint8_t *)&VERILOG_CPU(exu__DOT__ioq_valid);
-  bool exu_ioq_valid_found = *(uint8_t *)&VERILOG_CPU(exu__DOT__ioq_valid_found);
+  bool rou_ready = *(uint8_t *)&VERILOG_ROU(ready_a);
+  uint32_t exu_ooo_valid = *(uint8_t *)&VERILOG_CPU(exu__DOT__u_rs__DOT__rs_valid);
+  bool exu_ooo_valid_found = *(uint8_t *)&VERILOG_CPU(exu__DOT__u_rs__DOT__valid_found_a);
+  uint32_t exu_ioq_valid = *(uint8_t *)&VERILOG_CPU(exu__DOT__u_ioq__DOT__ioq_valid);
+  bool exu_ioq_valid_found = *(uint8_t *)&VERILOG_CPU(exu__DOT__u_ioq__DOT__ioq_valid_found);
   uint8_t l1d_state = *(uint8_t *)&VERILOG_CPU(l1d_cache__DOT__l1d_state);
   bool lsu_l1d_hit = *(uint8_t *)&VERILOG_CPU(l1d_cache__DOT__tag_hit);
   bool lsu_fwd_hit = *(uint8_t *)&VERILOG_CPU(lsu__DOT__fwd_hit);
