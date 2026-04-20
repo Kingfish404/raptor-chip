@@ -12,10 +12,10 @@ EMBENCH_DIR := $(APP_HOME)/build/src/embench-iot
 BUILD_DIR   := $(APP_HOME)/build/rv$(XLEN)/embench
 
 # ---- Embench benchmark list ----
-BENCHMARKS := aha-mont64 crc32 edn matmult-int \
-              md5sum nettle-aes nettle-sha256 \
-              nsichneu picojpeg qrduino \
-              sglib-combined slre statemate tarfind
+BENCHMARKS := aha-mont64 crc32 depthconv edn huffbench matmult-int \
+              md5sum nettle-aes nettle-sha256 nsichneu picojpeg \
+              qrduino sglib-combined slre statemate tarfind ud \
+              wikisort xgboost
 
 CFLAGS := $(CFLAGS_COMMON) -std=gnu99 \
           -DHAVE_BOARDSUPPORT_H -DGLOBAL_SCALE_FACTOR=1 -DWARMUP_HEAT=1 \
@@ -58,7 +58,7 @@ $$(BUILD_DIR)/$(1)/%.o: $$($(1)_SRC_DIR)/%.c
 
 $$($(1)_ELF): $$($(1)_OBJS) $$(SUPPORT_OBJS)
 	@mkdir -p $$(dir $$@)
-	$$(CC) $$(CFLAGS) $$^ $$(_PICOLIBC_IO) -o $$@
+	$$(CC) $$(CFLAGS) $$^ $$(_PICOLIBC_IO) -lm -o $$@
 endef
 
 $(foreach b,$(BENCHMARKS),$(eval $(call BENCH_TEMPLATE,$(b))))

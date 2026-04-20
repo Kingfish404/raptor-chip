@@ -139,22 +139,44 @@ coremark: coremark-build ## Build and run CoreMark via pk
 # ============================================================================
 # Embench-IoT
 # ============================================================================
-EMBENCH_BENCHMARKS := aha-mont64 crc32 edn matmult-int \
-                      md5sum nettle-aes nettle-sha256 \
-                      nsichneu picojpeg qrduino \
-                      sglib-combined slre statemate tarfind
+EMBENCH_BENCHMARKS := aha-mont64 crc32 depthconv edn huffbench matmult-int \
+					  md5sum nettle-aes nettle-sha256 nsichneu picojpeg \
+					  qrduino sglib-combined slre statemate tarfind ud \
+					  wikisort xgboost
+
+EMBENCH_JOBS ?= $(NPROC) ## Parallel NPC sim instances for embench
+PK_BUILD     = $(APP_HOME)/build/pk-build-rv$(XLEN)
 
 embench-build: ## Build all Embench ELFs
 	@$(MAKE) $(Q) -C $(APP_HOME)/benchmarks/embench build
 
-embench: embench-build ## Build and run all Embench benchmarks via pk
-	@echo "=== Running Embench-IoT benchmarks ($(RUN_ON)) ==="
+# Pre-embed each ELF into pk, producing per-bench .bin files.
+# Sequential (shares PK_BUILD dir), but each relink is fast (~1s).
+embench-pk-bins: embench-build
+	@$(MAKE) $(Q) -C $(APP_HOME)/pk $(PK_BUILD)/Makefile
 	@for bench in $(EMBENCH_BENCHMARKS); do \
-		echo "--- $$bench ---"; \
-		$(MAKE) $(Q) -C $(APP_HOME)/pk $(_PK_RUN_TARGET) \
-			USER_ELF=$(APP_HOME)/build/rv$(XLEN)/embench/$$bench/$$bench.elf \
-			|| true; \
+		elf=$(APP_HOME)/build/rv$(XLEN)/embench/$$bench/$$bench.elf; \
+		bin=$(APP_HOME)/build/rv$(XLEN)/embench/$$bench/$$bench.bin; \
+		if [ ! -f "$$elf" ]; then echo "[embench] SKIP $$bench (no ELF)"; continue; fi; \
+		cp "$$elf" $(PK_BUILD)/payload.elf; \
+		rm -f $(PK_BUILD)/pk_payload.o $(PK_BUILD)/pk; \
+		env -u CFLAGS -u CPPFLAGS -u LDFLAGS $(MAKE) $(Q) -C $(PK_BUILD) -j$(NPROC) > /dev/null; \
+		$(OBJCOPY) -S -O binary $(PK_BUILD)/pk "$$bin"; \
 	done
+
+embench: embench-pk-bins ## Build and run all Embench benchmarks via pk (parallel)
+	@echo "=== Running Embench-IoT ($(RUN_ON), JOBS=$(EMBENCH_JOBS)) ==="
+	@NPC_CMD=$$($(MAKE) --no-print-directory -C $(NSIM_HOME) ISA=riscv$(XLEN) \
+		VFLAGS="$(VFLAGS)" print-npc-exec 2>/dev/null) || \
+		{ echo "ERROR: cannot resolve NPC command"; exit 1; }; \
+	export NPC_CMD NSIM_HOME="$(NSIM_HOME)" BENCH_DIR="$(APP_HOME)/build/rv$(XLEN)/embench" \
+		NPC_ARGS="$(ARGS)"; \
+	for bench in $(EMBENCH_BENCHMARKS); do \
+		[ -f "$$BENCH_DIR/$$bench/$$bench.bin" ] && printf '%s\n' "$$bench"; \
+	done | xargs -P $(EMBENCH_JOBS) -I{} sh -c ' \
+		echo "--- {} ---"; \
+		cd "$$NSIM_HOME" && $$NPC_CMD $$NPC_ARGS "$$BENCH_DIR/{}/{}.bin" \
+			|| true'
 	@echo "=== Embench-IoT complete ==="
 
 # ============================================================================

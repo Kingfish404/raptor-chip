@@ -2,7 +2,7 @@ name: App tests (pk)
 
 on:
   push:
-    branches: ["master", "main"]
+    branches: [ "master", "main" ]
     paths:
       - "rtl_sv/**"
       - "rtl_scala/**"
@@ -10,7 +10,7 @@ on:
       - "app/**"
       - ".github/workflows/app-*.yaml"
   pull_request:
-    branches: ["master", "main"]
+    branches: [ "master", "main" ]
     paths:
       - "rtl_sv/**"
       - "rtl_scala/**"
@@ -77,35 +77,201 @@ jobs:
           HELLO_OK=$( [ "$HELLO_TRAP" = "HIT GOOD TRAP" ] && echo "PASS" || echo "FAIL" )
           HELLO_IPC=$(grep -oP 'IPC:\s*\K[0-9.]+' /tmp/app-hello.log | head -1 || echo "N/A")
 
-          # ---- Parse CoreMark ----
-          CM_VALID=$(grep -oP 'Correct operation validated' /tmp/app-coremark.log | head -1 || echo "")
-          CM_SCORE=$(grep -oP 'CoreMark 1.0 : \K[0-9.]+' /tmp/app-coremark.log | head -1 || echo "N/A")
-          CM_ITERS=$(grep -oP 'Iterations\s*:\s*\K\d+' /tmp/app-coremark.log | head -1 || echo "N/A")
+          # ---- Parse CoreMark (bare-metal pk port) ----
+          # The bare-metal port prints:
+          #   CoreMark Size    : 666
+          #   Total ticks      : <N>
+          #   Total time (secs): <s>
+          #   Iterations/Sec   : <n>     (integer-truncated)
+          #   Iterations       : <n>
+          # So we compute the standard CoreMark/MHz metric from PMU cycles:
+          #   CoreMark/MHz = iterations * 1e6 / cycles
+          CM_VALID=$(grep -cE 'Correct operation validated' /tmp/app-coremark.log || echo "0")
+          CM_ITERS=$(grep -oP '^Iterations\s*:\s*\K\d+' /tmp/app-coremark.log | head -1 || echo "")
+          CM_TICKS=$(grep -oP '^Total ticks\s*:\s*\K\d+' /tmp/app-coremark.log | head -1 || echo "")
+          CM_SECS=$(grep -oP '^Total time \(secs\):\s*\K\d+' /tmp/app-coremark.log | head -1 || echo "")
+          CM_ITERSEC=$(grep -oP '^Iterations/Sec\s*:\s*\K\d+' /tmp/app-coremark.log | head -1 || echo "")
           CM_IPC=$(grep -oP 'IPC:\s*\K[0-9.]+' /tmp/app-coremark.log | head -1 || echo "N/A")
+          CM_CYCLES=$(grep -oP 'cycle:\s*\K\d+' /tmp/app-coremark.log | head -1 || echo "")
+          CM_INSTS=$(grep -oP '#inst:\s*\K\d+' /tmp/app-coremark.log | head -1 || echo "")
           CM_TRAP=$(grep -oE 'HIT (GOOD|BAD) TRAP' /tmp/app-coremark.log | head -1 || echo "UNKNOWN")
-          CM_OK=$( [ "$CM_TRAP" = "HIT GOOD TRAP" ] && echo "PASS" || echo "FAIL" )
+          CM_OK=$( [ "$CM_TRAP" = "HIT GOOD TRAP" ] && [ "$CM_VALID" -ge 1 ] && echo "PASS" || echo "FAIL" )
 
-          # ---- Parse Embench ----
-          EMBENCH_PASS=$(grep -c 'HIT GOOD TRAP' /tmp/app-embench.log || echo "0")
-          EMBENCH_FAIL=$(grep -c 'HIT BAD TRAP' /tmp/app-embench.log || echo "0")
+          CM_CMARK_PER_MHZ="N/A"
+          if [ -n "$CM_ITERS" ] && [ -n "$CM_CYCLES" ] && [ "$CM_CYCLES" -gt 0 ]; then
+            CM_CMARK_PER_MHZ=$(awk -v i="$CM_ITERS" -v c="$CM_CYCLES" \
+              'BEGIN{ printf "%.3f", i*1e6/c }')
+          fi
+
+          # ---- Parse Embench (per-benchmark) ----
+          # Splits the log at each "--- <name> ---" marker emitted by the
+          # Makefile's `embench` target and extracts PMU metrics + Ticks.
+          # Also computes the official Embench Score relative to the
+          # Cortex-M4 @ 16 MHz reference (baseline-data/speed.json upstream):
+          #   speed_i = ref_ms[i] * 1000 / measured_cycles_i       (our gsf=1, ref gsf=16 cancels with ref_ms being ms on M4@16MHz)
+          #   Embench Score = geomean_i(speed_i)
+          REF_JSON=".github/data/embench-m4-ref.json"
+          mkdir -p /tmp/embench-summary
+          awk '
+            /^--- [a-zA-Z0-9_.+-]+ ---$/ {
+              name=$2; file="/tmp/embench-summary/" name ".log";
+              print > file; next
+            }
+            file { print >> file }
+          ' /tmp/app-embench.log || true
+
+          EMBENCH_ROWS=""
+          EMBENCH_PASS=0
+          EMBENCH_FAIL=0
+          # Aggregates (awk-friendly, space-separated floats/ints)
+          AGG_CYCLES=""     # for geomean + total
+          AGG_INSTS=""      # for total
+          AGG_TICKS=""      # for geomean
+          AGG_IPC=""        # for arithmetic mean
+          AGG_DUAL=""       # for arithmetic mean
+          AGG_BPU=""        # for arithmetic mean
+          AGG_SPEED=""      # for Embench Score geomean
+          AGG_TOPSTALL=""   # newline-separated stall category names
+
+          for f in /tmp/embench-summary/*.log; do
+            [ -f "$f" ] || continue
+            name=$(basename "$f" .log)
+            trap=$(grep -oE 'HIT (GOOD|BAD) TRAP' "$f" | head -1 || echo "")
+            ticks=$(grep -oP '^Ticks:\s*\K\d+' "$f" | head -1 || echo "")
+            ipc=$(grep -oP 'IPC:\s*\K[0-9.]+' "$f" | head -1 || echo "")
+            cycles=$(grep -oP 'cycle:\s*\K\d+' "$f" | head -1 || echo "")
+            insts=$(grep -oP '#inst:\s*\K\d+' "$f" | head -1 || echo "")
+            bpu=$(grep -oP 'BPU Success.*Rate:\s*\K[0-9.]+' "$f" | head -1 || echo "")
+            dual=$(grep -oP 'Dual commit.*\(\K[0-9.]+' "$f" | head -1 || echo "")
+
+            # ---- Embench Score vs Cortex-M4 reference ----
+            # Extract ref_ms from JSON via grep (avoids multi-line heredoc).
+            ref_ms=$(grep -oE "\"${name}\"[[:space:]]*:[[:space:]]*[0-9]+" "$REF_JSON" 2>/dev/null \
+              | grep -oE '[0-9]+$' | head -1 || echo "")
+            speed="N/A"
+            if [ -n "$ref_ms" ] && [ -n "$cycles" ] && [ "$cycles" -gt 0 ]; then
+              speed=$(awk -v r="$ref_ms" -v c="$cycles" 'BEGIN{printf "%.3f", r*1000.0/c}')
+              AGG_SPEED="$AGG_SPEED $speed"
+            fi
+
+            # ---- Top stall category (highest %) ----
+            # PMU line format (the values row directly follows the header row):
+            #  |   IFU, %| EX|RS, %|EX|IoQ, %|   L1D, %|    SQ, %|Bubble, %|
+            #  | 7e+06,28| 8e+06,31| 1e+07,55| 8e+05, 3| 9e+03, 0| 1e+07,38|
+            topstall=$(awk '
+              /\|  *IFU, %\|/ { has=1; next }
+              has==1 {
+                n=split($0, cells, "|")
+                labels[1]="IFU"; labels[2]="RS"; labels[3]="IoQ"; labels[4]="L1D"; labels[5]="SQ"; labels[6]="Bubble"
+                best=-1; bestlbl="N/A"
+                # Leading | produces empty cells[1]; data cells are 2..7
+                for (i=2; i<=7; i++) {
+                  split(cells[i], parts, ",")
+                  p=parts[2]+0
+                  if (p>best) { best=p; bestlbl=labels[i-1] }
+                }
+                printf "%s(%d%%)", bestlbl, best
+                exit
+              }
+            ' "$f")
+            [ -z "$topstall" ] && topstall="N/A"
+
+            if [ "$trap" = "HIT GOOD TRAP" ]; then
+              status="PASS"; EMBENCH_PASS=$((EMBENCH_PASS+1))
+            else
+              status="FAIL"; EMBENCH_FAIL=$((EMBENCH_FAIL+1))
+            fi
+
+            [ -n "$ticks" ]  && AGG_TICKS="$AGG_TICKS $ticks"
+            [ -n "$cycles" ] && AGG_CYCLES="$AGG_CYCLES $cycles"
+            [ -n "$insts" ]  && AGG_INSTS="$AGG_INSTS $insts"
+            [ -n "$ipc" ]    && AGG_IPC="$AGG_IPC $ipc"
+            [ -n "$dual" ]   && AGG_DUAL="$AGG_DUAL $dual"
+            [ -n "$bpu" ]    && AGG_BPU="$AGG_BPU $bpu"
+            AGG_TOPSTALL="$AGG_TOPSTALL"$'\n'"$topstall"
+
+            EMBENCH_ROWS+="| ${name} | ${status} | ${speed} | ${ticks:-N/A} | ${ipc:-N/A} | ${cycles:-N/A} | ${insts:-N/A} | ${dual:-N/A}% | ${bpu:-N/A}% | ${topstall} |"$'\n'
+          done
           EMBENCH_TOTAL=$((EMBENCH_PASS + EMBENCH_FAIL))
+
+          # ---- Aggregate stats ----
+          _geomean() { awk -v xs="$1" 'BEGIN{n=0;s=0; k=split(xs,a," "); for(i=1;i<=k;i++){ if(a[i]+0>0){ s+=log(a[i]); n++ } } if(n==0){print "N/A"} else printf "%.3f", exp(s/n)}'; }
+          _amean()   { awk -v xs="$1" 'BEGIN{n=0;s=0; k=split(xs,a," "); for(i=1;i<=k;i++){ s+=a[i]; n++ } if(n==0){print "N/A"} else printf "%.3f", s/n}'; }
+          _sum()     { awk -v xs="$1" 'BEGIN{s=0; k=split(xs,a," "); for(i=1;i<=k;i++) s+=a[i]; printf "%d", s}'; }
+
+          EMBENCH_SCORE=$(_geomean "$AGG_SPEED")
+          GEO_TICKS=$(_geomean "$AGG_TICKS")
+          GEO_CYCLES=$(_geomean "$AGG_CYCLES")
+          AVG_IPC=$(_amean "$AGG_IPC")
+          AVG_DUAL=$(_amean "$AGG_DUAL")
+          AVG_BPU=$(_amean "$AGG_BPU")
+          SUM_CYCLES=$(_sum "$AGG_CYCLES")
+          SUM_INSTS=$(_sum "$AGG_INSTS")
+          AGG_IPC_TOTAL=$(awk -v i="$SUM_INSTS" -v c="$SUM_CYCLES" 'BEGIN{ if(c+0>0) printf "%.3f", i/c; else print "N/A" }')
+
+          # Most common top-stall category
+          WORST_STALL=$(printf '%s\n' "$AGG_TOPSTALL" \
+            | sed -E 's/\(.*$//' | grep -v '^$' | grep -v '^N/A$' \
+            | sort | uniq -c | sort -rn | awk 'NR==1{print $2" (x"$1")"}')
+          [ -z "$WORST_STALL" ] && WORST_STALL="N/A"
+
 
           # ---- Write summary ----
           {
             echo "## App Tests (pk on NPC)"
             echo ""
+            echo "### Overview"
+            echo ""
             echo "| Test | Status | IPC | Details |"
             echo "|------|--------|-----|---------|"
             echo "| Hello | ${HELLO_OK} | ${HELLO_IPC} | ${HELLO_TRAP} |"
-            echo "| CoreMark | ${CM_OK} | ${CM_IPC} | score=${CM_SCORE}, iters=${CM_ITERS} |"
-            echo "| Embench-IoT | ${EMBENCH_PASS}/${EMBENCH_TOTAL} pass | - | ${EMBENCH_PASS} pass, ${EMBENCH_FAIL} fail |"
+            echo "| CoreMark | ${CM_OK} | ${CM_IPC} | ${CM_CMARK_PER_MHZ} CoreMark/MHz, iters=${CM_ITERS:-N/A} |"
+            echo "| Embench-IoT | ${EMBENCH_PASS}/${EMBENCH_TOTAL} pass | ${AGG_IPC_TOTAL} | Score=**${EMBENCH_SCORE}** (vs Cortex-M4@16MHz), dual=${AVG_DUAL}%, BPU=${AVG_BPU}% |"
             echo ""
-            if [ -n "$CM_VALID" ]; then
-              echo "> CoreMark: Correct operation validated."
-            fi
+
+            # ---- CoreMark detail ----
+            echo "### CoreMark"
+            echo ""
+            echo "| Metric | Value |"
+            echo "|--------|-------|"
+            echo "| CoreMark/MHz (iters*1e6/cycles) | **${CM_CMARK_PER_MHZ}** |"
+            echo "| Iterations | ${CM_ITERS:-N/A} |"
+            echo "| Cycles | ${CM_CYCLES:-N/A} |"
+            echo "| Instructions | ${CM_INSTS:-N/A} |"
+            echo "| IPC | ${CM_IPC} |"
+            echo "| Reported Total ticks | ${CM_TICKS:-N/A} |"
+            echo "| Reported Total time (secs) | ${CM_SECS:-N/A} |"
+            echo "| Reported Iterations/Sec | ${CM_ITERSEC:-N/A} |"
+            echo "| Validation | $( [ "$CM_VALID" -ge 1 ] && echo 'Correct operation validated' || echo 'NOT VALIDATED' ) |"
+            echo ""
+
+            # ---- Embench detail ----
+            echo "### Embench-IoT (per benchmark)"
+            echo ""
+            echo "Embench Score is the geometric mean of per-benchmark speed relative to"
+            echo "Cortex-M4 @ 16 MHz (Embench v2.0 reference baseline, \`gsf=1\` here)."
+            echo "Higher is better; **1.0 = parity with the M4 reference**."
+            echo ""
+            echo "| Benchmark | Status | Speed (vs M4) | Ticks | IPC | Cycles | Instructions | Dual% | BPU% | Top stall |"
+            echo "|-----------|--------|--------------:|------:|----:|-------:|-------------:|------:|-----:|:----------|"
+            printf '%s' "$EMBENCH_ROWS"
+            echo ""
+            echo "**Aggregates (${EMBENCH_PASS}/${EMBENCH_TOTAL} pass)**"
+            echo ""
+            echo "| Metric | Value |"
+            echo "|--------|-------|"
+            echo "| **Embench Score (geomean speed vs M4@16MHz)** | **${EMBENCH_SCORE}** |"
+            echo "| Geomean Ticks | ${GEO_TICKS} |"
+            echo "| Geomean Cycles | ${GEO_CYCLES} |"
+            echo "| Aggregate IPC (total inst / total cycles) | ${AGG_IPC_TOTAL} |"
+            echo "| Avg per-bench IPC | ${AVG_IPC} |"
+            echo "| Avg Dual-issue commit % | ${AVG_DUAL}% |"
+            echo "| Avg BPU hit rate % | ${AVG_BPU}% |"
+            echo "| Most frequent top stall | ${WORST_STALL} |"
+            echo ""
           } >> "$GITHUB_STEP_SUMMARY"
 
-          # PMU details
+          # PMU details (collapsed)
           bash .github/scripts/parse-pmu.sh \
             "Hello (pk)" /tmp/app-hello.log \
             "CoreMark (pk)" /tmp/app-coremark.log \

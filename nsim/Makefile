@@ -149,6 +149,9 @@ verilog: ## Generate SystemVerilog from Chisel
 run: $(BIN) $(MROM_IMG) ## Run NPC simulation
 	$(NPC_EXEC)
 
+print-npc-exec: ## Print NPC run command (without ARGS and IMG, for parallel callers)
+	@echo $(abspath $(BIN)) $(DIFF_REF_SO) -r $(abspath $(MROM_IMG))
+
 run_log: $(BIN) $(MROM_IMG) ## Run NPC and log output
 	$(NPC_EXEC) 2>&1 | tee $(DATA_DIR)/npc.log
 

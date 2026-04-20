@@ -15,4 +15,4 @@ __pycache__
 
 # Cloned external sources
 benchmarks/coremark/coremark/
-benchmarks/coremark/build/
+benchmarks/embench/embench/

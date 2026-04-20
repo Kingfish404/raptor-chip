@@ -23,8 +23,21 @@ BUILD_DIR   := $(LITEX_DIR)/build
 VENV_DIR    := $(LITEX_DIR)/.venv
 PYTHON      := $(VENV_DIR)/bin/python3
 PIP         := $(VENV_DIR)/bin/pip
+HOST_PYTHON := $(shell if [ -x "$(PYTHON)" ]; then echo "$(PYTHON)"; elif command -v python3 >/dev/null 2>&1; then command -v python3; elif command -v python >/dev/null 2>&1; then command -v python; fi)
+TIMEOUT_BIN := $(shell command -v timeout 2>/dev/null || command -v gtimeout 2>/dev/null)
 
 export RAPTOR_HOME
+
+ifeq ($(strip $(TIMEOUT_BIN)),)
+	ifeq ($(strip $(HOST_PYTHON)),)
+		$(error Neither timeout/gtimeout nor python3/python is available)
+	endif
+	TIMEOUT_RUN := $(HOST_PYTHON) $(LITEX_DIR)/scripts/run_with_timeout.py
+	TIMEOUT_FOREGROUND :=
+else
+	TIMEOUT_RUN := $(TIMEOUT_BIN)
+	TIMEOUT_FOREGROUND := --foreground
+endif
 
 # --- CPU variant ---
 VARIANT     ?= standard ## CPU variant (standard|linux)
@@ -218,7 +231,7 @@ define _run_vsim
 	@echo "[INFO] Running sim (timeout=$(SIM_TIMEOUT)s, Ctrl+C to stop)"
 	@if [ -n "$(TRACE_MSG)" ]; then echo "[INFO] $(TRACE_MSG) — wave -> $(1)/sim.$(TRACE)"; fi
 	@cd $(1) && \
-		timeout --foreground $(SIM_TIMEOUT) obj_dir/Vsim; \
+		$(TIMEOUT_RUN) $(TIMEOUT_FOREGROUND) $(SIM_TIMEOUT) obj_dir/Vsim; \
 		rc=$$?; \
 		if [ $$rc -eq 124 ]; then \
 			echo ""; echo "[INFO] Simulation timed out after $(SIM_TIMEOUT)s."; \
@@ -324,6 +337,45 @@ coremark: $(PACK_SV) $(FW_BIN) coremark-build ## Build + run CoreMark in sim
 coremark-clean: ## Remove CoreMark build artifacts (keep cloned source)
 	$(MAKE) -C $(COREMARK_BENCH) clean
 
+# --- Embench-IoT ---
+EMBENCH_BENCH    := $(LITEX_DIR)/benchmarks/embench
+EMBENCH_BENCHES  := aha-mont64 crc32 depthconv edn huffbench matmult-int \
+					md5sum nettle-aes nettle-sha256 nsichneu picojpeg \
+					qrduino sglib-combined slre statemate tarfind ud \
+					wikisort xgboost
+EMBENCH_LOG_DIR  := $(BUILD_DIR)/embench-logs
+EMBENCH_TARGETS  := $(addprefix embench-run-,$(EMBENCH_BENCHES))
+
+embench-build: ## Build all Embench-IoT benchmarks (one BIN per bench)
+	$(MAKE) -C $(EMBENCH_BENCH) build SYS_CLK_HZ=$(SYS_CLK)
+
+embench-build-one: ## Build one Embench bench (BENCH=<name>)
+	@if [ -z "$(BENCH)" ]; then echo "[ERR] Set BENCH=<name>"; exit 1; fi
+	$(MAKE) -C $(EMBENCH_BENCH) build BENCH=$(BENCH) SYS_CLK_HZ=$(SYS_CLK)
+
+# Per-bench runner: builds that single bench then runs it in sim.
+# Usage: make embench-run-crc32  (or: make embench-run BENCH=crc32)
+$(EMBENCH_TARGETS): embench-run-%: $(PACK_SV) $(FW_BIN) ## Run one Embench bench in sim
+	$(MAKE) -C $(EMBENCH_BENCH) build BENCH=$* SYS_CLK_HZ=$(SYS_CLK)
+	@if [ ! -f $(EMBENCH_BENCH)/build/$*/$*.bin ]; then \
+		echo "[ERR] Embench bin for '$*' not built"; exit 1; fi
+	$(call _payload_sim,--ram-init=$(EMBENCH_BENCH)/build/$*/$*.bin)
+
+embench-run: ## Run one Embench bench (BENCH=<name>) in sim
+	@if [ -z "$(BENCH)" ]; then echo "[ERR] Set BENCH=<name>"; exit 1; fi
+	$(MAKE) --no-print-directory embench-run-$(BENCH)
+
+embench: $(PACK_SV) $(FW_BIN) sim-build ## Build + run all Embench benches (parallel) + Embench Score report
+	@mkdir -p $(EMBENCH_LOG_DIR)
+	@bash $(EMBENCH_BENCH)/run-embench.sh
+
+embench-report: ## Re-run Embench Score report from existing logs
+	@bash $(EMBENCH_BENCH)/report-embench.sh $(EMBENCH_LOG_DIR)
+
+embench-clean: ## Remove Embench build artifacts and run logs
+	$(MAKE) -C $(EMBENCH_BENCH) clean
+	rm -rf $(EMBENCH_LOG_DIR)
+
 # --- MicroBench ---
 MICROBENCH_DIR := $(RAPTOR_HOME)/abstract-machine/app/am-kernels/benchmarks/microbench
 MICROBENCH_BIN := $(MICROBENCH_DIR)/build/microbench-riscv32-npc.bin
@@ -410,9 +462,7 @@ linux: $(PACK_SV) $(FW_BIN) linux-build ## Build + run Linux payload in sim
 # FPGA Targets (future — placeholder)
 # ==============================================================================
 
-tang-nano-20k: $(PACK_SV) ## Build for Tang Nano 20K (Gowin GW2AR-18)
-	@echo "[INFO] Tang Nano 20K target — use fpga/gowin-tang-nano-20k/ for direct Gowin flow"
-	@echo "       LiteX board target is planned but not yet implemented."
+
 
 # ==============================================================================
 # Utilities
@@ -486,6 +536,8 @@ help: ## Show this help message
 	sim-gen sim-build sim sim-run sim-trace sim-trace-vcd sim-clean \
 	run-litex run-litex-clean \
 	coremark coremark-build coremark-clean \
+	embench embench-build embench-build-one embench-run embench-report embench-clean \
+	$(EMBENCH_TARGETS) \
 	microbench microbench-build \
 	tests tests-clean tests-run $(TEST_TARGETS) \
 	opensbi opensbi-build opensbi-clean \
