@@ -9,6 +9,6 @@ object Elaborate extends App {
     ).reduce(_ + "," + _),
     "--disable-layers=Verification"
   )
-  circt.stage.ChiselStage.emitSystemVerilogFile(new npc.ysyx_idu_decoder(), args, firtoolOptions)
-  circt.stage.ChiselStage.emitSystemVerilogFile(new npc.ysyx_idu_decoder_c(), args, firtoolOptions)
+  circt.stage.ChiselStage.emitSystemVerilogFile(new npc.rapt_idu_decoder(), args, firtoolOptions)
+  circt.stage.ChiselStage.emitSystemVerilogFile(new npc.rapt_idu_decoder_c(), args, firtoolOptions)
 }

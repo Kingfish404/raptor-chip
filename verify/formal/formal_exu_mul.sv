@@ -1,5 +1,5 @@
 module formal_exu_mul #(
-    parameter bit [7:0] XLEN = `YSYX_XLEN
+    parameter bit [7:0] XLEN = `RAPT_XLEN
 ) (
     input clock,
 
@@ -12,7 +12,7 @@ module formal_exu_mul #(
 
     input reset
 );
-  ysyx_exu_mul mul (
+  rapt_exu_mul mul (
       .clock(clock),
       .in_a(in_a),
       .in_b(in_b),
@@ -40,14 +40,14 @@ module formal_exu_mul #(
       unique case (in_op)
         // RV32M
         // verilog_format: off
-      `YSYX_ALU_MUL___: begin r <= in_a * in_b;      end
-      `YSYX_ALU_MULH__: begin r <= mulh[2*XLEN-1:XLEN];  end
-      `YSYX_ALU_MULHSU: begin r <= muls[2*XLEN-1:XLEN];  end
-      `YSYX_ALU_MULHU_: begin r <= mulu[2*XLEN-1:XLEN];  end
-      `YSYX_ALU_DIV___: begin r <= in_b != 0 ? $signed($signed(in_a) / $signed(in_b)): -1; end
-      `YSYX_ALU_DIVU__: begin r <= in_b != 0 ? (in_a) / (in_b) : -1; end
-      `YSYX_ALU_REM___: begin r <= in_b != 0 ? $signed($signed(in_a) % $signed(in_b)): in_a; end
-      `YSYX_ALU_REMU__: begin r <= in_b != 0 ? (in_a) % (in_b) : in_a; end
+      `RAPT_ALU_MUL___: begin r <= in_a * in_b;      end
+      `RAPT_ALU_MULH__: begin r <= mulh[2*XLEN-1:XLEN];  end
+      `RAPT_ALU_MULHSU: begin r <= muls[2*XLEN-1:XLEN];  end
+      `RAPT_ALU_MULHU_: begin r <= mulu[2*XLEN-1:XLEN];  end
+      `RAPT_ALU_DIV___: begin r <= in_b != 0 ? $signed($signed(in_a) / $signed(in_b)): -1; end
+      `RAPT_ALU_DIVU__: begin r <= in_b != 0 ? (in_a) / (in_b) : -1; end
+      `RAPT_ALU_REM___: begin r <= in_b != 0 ? $signed($signed(in_a) % $signed(in_b)): in_a; end
+      `RAPT_ALU_REMU__: begin r <= in_b != 0 ? (in_a) % (in_b) : in_a; end
                default: begin r = 0; end
         // verilog_format: on
       endcase
@@ -60,14 +60,14 @@ module formal_exu_mul #(
       unique case (op)
         // RV32M
         // verilog_format: off
-      `YSYX_ALU_MUL___: begin  mul_assert: assert(out_r == r); end
-      `YSYX_ALU_MULH__: begin mulh_assert: assert(out_r == r); end
-      `YSYX_ALU_MULHSU: begin muls_assert: assert(out_r == r); end
-      `YSYX_ALU_MULHU_: begin mulu_assert: assert(out_r == r); end
-      `YSYX_ALU_DIV___: begin  div_assert: assert(out_r == r); end
-      `YSYX_ALU_DIVU__: begin divu_assert: assert(out_r == r); end
-      `YSYX_ALU_REM___: begin  rem_assert: assert(out_r == r); end
-      `YSYX_ALU_REMU__: begin remu_assert: assert(out_r == r); end
+      `RAPT_ALU_MUL___: begin  mul_assert: assert(out_r == r); end
+      `RAPT_ALU_MULH__: begin mulh_assert: assert(out_r == r); end
+      `RAPT_ALU_MULHSU: begin muls_assert: assert(out_r == r); end
+      `RAPT_ALU_MULHU_: begin mulu_assert: assert(out_r == r); end
+      `RAPT_ALU_DIV___: begin  div_assert: assert(out_r == r); end
+      `RAPT_ALU_DIVU__: begin divu_assert: assert(out_r == r); end
+      `RAPT_ALU_REM___: begin  rem_assert: assert(out_r == r); end
+      `RAPT_ALU_REMU__: begin remu_assert: assert(out_r == r); end
                default: begin  def_assert: assert(out_r == r); end
         // verilog_format: on
       endcase

@@ -1,6 +1,6 @@
 // RVFI formal verification wrapper for Raptor Chip
 //
-// Provides unconstrained AXI4 responses to the ysyx core, exposing only
+// Provides unconstrained AXI4 responses to the rapt core, exposing only
 // the RVFI output signals for riscv-formal checks.
 
 module rvfi_wrapper (
@@ -46,7 +46,7 @@ module rvfi_wrapper (
 	(* keep *) wire        m_wvalid;
 	(* keep *) wire        m_bready;
 
-	ysyx uut (
+	rapt uut (
 		.clock             (clock),
 		.reset             (reset),
 

@@ -8,8 +8,8 @@
 SHELL := /bin/bash
 
 # --- Paths ---
-YSYX_HOME    ?= $(abspath ../..)
-OSS_CAD_DIR  := $(YSYX_HOME)/third_party/oss-cad-suite
+RAPTOR_HOME    ?= $(abspath ../..)
+OSS_CAD_DIR  := $(RAPTOR_HOME)/third_party/oss-cad-suite
 OSS_CAD_BIN  := $(OSS_CAD_DIR)/bin
 
 # oss-cad-suite release to download when running `make setup`
@@ -75,10 +75,10 @@ setup: ## Download and install oss-cad-suite (sby, yosys, solvers)
 	else \
 		echo "[formal] Downloading oss-cad-suite $(OSS_CAD_VERSION) for $(OSS_CAD_PLATFORM)..."; \
 		echo "  URL: $(OSS_CAD_URL)"; \
-		mkdir -p "$(YSYX_HOME)/third_party"; \
+		mkdir -p "$(RAPTOR_HOME)/third_party"; \
 		curl -L --fail --progress-bar -o "/tmp/$(OSS_CAD_TARBALL)" "$(OSS_CAD_URL)"; \
-		echo "[formal] Extracting to $(YSYX_HOME)/third_party/ ..."; \
-		tar -xzf "/tmp/$(OSS_CAD_TARBALL)" -C "$(YSYX_HOME)/third_party/"; \
+		echo "[formal] Extracting to $(RAPTOR_HOME)/third_party/ ..."; \
+		tar -xzf "/tmp/$(OSS_CAD_TARBALL)" -C "$(RAPTOR_HOME)/third_party/"; \
 		rm -f "/tmp/$(OSS_CAD_TARBALL)"; \
 		if [ "$(UNAME_S)" = "Darwin" ]; then \
 			echo "[formal] Removing macOS quarantine flags (may require sudo)..."; \
@@ -127,11 +127,11 @@ RISCV_FORMAL_DIR    := riscv-formal
 RVFI_SRC_DIR  := rvfi
 RVFI_CORE_DIR := $(RISCV_FORMAL_DIR)/cores/raptor
 RVFI_CHECKS   := $(RVFI_CORE_DIR)/checks
-RVFI_PACK     := build/ysyx_pack_rvfi.sv
-VSRC_PATH     := $(YSYX_HOME)/rtl_sv
+RVFI_PACK     := build/rapt_pack_rvfi.sv
+VSRC_PATH     := $(RAPTOR_HOME)/rtl_sv
 # Core-only sources: exclude SoC wrappers, DPI-C, and include-dir files
-VSRCS_RVFI_PKG  := $(filter %/ysyx_pkg.sv, $(shell find $(VSRC_PATH) -name "*.sv"))
-VSRCS_RVFI_EXCL := %/ysyx_pkg.sv %/wrap_rnp_soc.sv %/wrap_rnp.sv %/ysyx_npc_soc.sv %/ysyx_dpi_c.sv
+VSRCS_RVFI_PKG  := $(filter %/rapt_pkg.sv, $(shell find $(VSRC_PATH) -name "*.sv"))
+VSRCS_RVFI_EXCL := %/rapt_pkg.sv %/wrap_rnp_soc.sv %/wrap_rnp.sv %/rapt_npc_soc.sv %/rapt_dpi_c.sv
 VSRCS_RVFI      := $(VSRCS_RVFI_PKG) $(filter-out $(VSRCS_RVFI_EXCL), $(shell find $(VSRC_PATH) -name "*.sv" ! -path "*/include/*"))
 
 # --- Auto-clone riscv-formal ---
@@ -150,7 +150,7 @@ $(RVFI_CORE_DIR)/checks.cfg: $(RVFI_SRC_DIR)/checks.cfg $(RVFI_SRC_DIR)/wrapper.
 $(RVFI_PACK): $(VSRCS_RVFI)
 	@mkdir -p build
 	@echo "[formal] Generating RVFI-enabled pack: $@"
-	verilator -E -P -DYSYX_RVFI \
+	verilator -E -P -DRAPT_RVFI \
 		-I$(VSRC_PATH)/include -I$(VSRC_PATH)/include/npc -I$(VSRC_PATH)/include/dpic_mock \
 		$(VSRCS_RVFI) > $@
 

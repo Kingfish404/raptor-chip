@@ -13,6 +13,7 @@
 /impl/
 /build/
 ysyx.v
+rapt.v
 *.vcd
 *.gprj.user
 *.log

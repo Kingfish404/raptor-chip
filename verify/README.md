@@ -40,6 +40,23 @@ verify/
 └── build/              # Generated artifacts (gitignored)
 ```
 
+## In-RTL Assertions (SVA)
+
+Raptor ships inline SVA guarded by `RAPT_ASSERT_EN` for zero default overhead.
+The assertion macros (`RAPT_SVA`, `RAPT_SVA_IMPLY`, `RAPT_SVA_NEXT`, `RAPT_COVER`, ...)
+are defined in [rtl_sv/include/rapt_sva.svh](../rtl_sv/include/rapt_sva.svh) and
+auto-included via `rapt.svh`.
+
+```shell
+# Enable assertions for any simulation target
+make sim-npc32                VFLAGS="-DRAPT_ASSERT_EN"
+make microbench-ysyxsoc       VFLAGS="-DRAPT_ASSERT_EN"
+make cpu-tests-npc32 ARGS="-b -n" VFLAGS="-DRAPT_ASSERT_EN"
+```
+
+Failure format: `[<time>] SVA FAIL: <hier>.<LABEL> (<ante>) |-> (<cons>)`
+followed by `$fatal`.
+
 ## Verification Methods
 
 ### 1. Random Instruction Fuzzing (`make fuzz`)

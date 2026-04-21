@@ -22,7 +22,7 @@ jobs:
   npc-cpu-tests:
     runs-on: ubuntu-latest
     env:
-      YSYX_HOME: ${{ github.workspace }}
+      RAPTOR_HOME: ${{ github.workspace }}
       NEMU_HOME: ${{ github.workspace }}/nemu
       AM_HOME: ${{ github.workspace }}/abstract-machine
       CROSS_COMPILE: riscv64-elf-
@@ -45,7 +45,7 @@ jobs:
   ysyxsoc-cpu-tests:
     runs-on: ubuntu-latest
     env:
-      YSYX_HOME: ${{ github.workspace }}
+      RAPTOR_HOME: ${{ github.workspace }}
       NEMU_HOME: ${{ github.workspace }}/nemu
       AM_HOME: ${{ github.workspace }}/abstract-machine
       CROSS_COMPILE: riscv64-elf-
@@ -63,7 +63,7 @@ jobs:
           make config-nemu32-ref
       - name: cpu-tests riscv32-ysyxsoc
         shell: bash -l {0}
-        run: make -C $YSYX_HOME/abstract-machine/app/am-kernels/tests/cpu-tests ARCH=riscv32-ysyxsoc run ARGS="-b -n"
+        run: make -C $RAPTOR_HOME/abstract-machine/app/am-kernels/tests/cpu-tests ARCH=riscv32-ysyxsoc run ARGS="-b -n"
       - name: cpu-tests riscv32e-ysyxsoc
         shell: bash -l {0}
-        run: make -C $YSYX_HOME/abstract-machine/app/am-kernels/tests/cpu-tests ARCH=riscv32e-ysyxsoc run ARGS="-b -n"
+        run: make -C $RAPTOR_HOME/abstract-machine/app/am-kernels/tests/cpu-tests ARCH=riscv32e-ysyxsoc run ARGS="-b -n"

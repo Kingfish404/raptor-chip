@@ -5,9 +5,14 @@ import sys
 
 
 def main() -> int:
-    if len(sys.argv) < 4 or sys.argv[2] != "--":
+    # Accept both "run_with_timeout.py <seconds> -- <cmd> [args...]"
+    # and        "run_with_timeout.py <seconds> <cmd> [args...]".
+    # The "--" separator is optional; GNU timeout on some distros treats it
+    # as a positional argument, so the Makefile now omits it and we mirror
+    # that behaviour here for consistency.
+    if len(sys.argv) < 3:
         print(
-            "usage: run_with_timeout.py <seconds> -- <command> [args...]",
+            "usage: run_with_timeout.py <seconds> [--] <command> [args...]",
             file=sys.stderr,
         )
         return 2
@@ -21,7 +26,13 @@ def main() -> int:
     if timeout <= 0:
         timeout = None
 
-    command = sys.argv[3:]
+    rest = sys.argv[2:]
+    if rest and rest[0] == "--":
+        rest = rest[1:]
+    if not rest:
+        print("run_with_timeout.py: missing command", file=sys.stderr)
+        return 2
+    command = rest
 
     try:
         return subprocess.run(command, timeout=timeout).returncode

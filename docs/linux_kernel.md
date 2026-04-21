@@ -27,7 +27,7 @@ Both `QEMU` and `Spike` device tree tables are supported and listed in `nemu/src
 ## Device Tree
 
 ```shell
-cd $YSYX_HOME/nemu/src/memory/rom
+cd $RAPTOR_HOME/nemu/src/memory/rom
 dtc spike-rv32ima.dts -o spike-rv32ima.dtb
 # or hack to Spike to dump Spike DTB
 ```
@@ -84,4 +84,4 @@ make run IMG=../third_party/riscv-software-src/opensbi/build/platform/generic/fi
 ## References
 
 - [Build mini linux for your own RISC-V emulator!](https://github.com/CmdBlockZQG/rvcore-mini-linux)
-- [给NEMU移植Linux Kernel!](https://github.com/Seeker0472/ysyx-linux)
+- [给NEMU移植Linux Kernel!](https://github.com/Seeker0472/rapt-linux)

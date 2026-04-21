@@ -47,7 +47,7 @@ class Raptor(CPU):
     # main_ram at 0x80000000 must NOT be in io_regions (it's cacheable RAM).
     io_regions = {0xC000_0000: 0x4000_0000}  # Origin, Length
 
-    # Memory Mapping (ROM at 0x20000000 matches RTL YSYX_PC_INIT).
+    # Memory Mapping (ROM at 0x20000000 matches RTL RAPT_PC_INIT).
     @property
     def mem_map(self):
         return {
@@ -135,11 +135,11 @@ class Raptor(CPU):
 
         # Pack all SV into a single preprocessed file for synthesis tools.
         pack_dir = os.path.join(raptor_home, "nsim", "build")
-        pack_sv = os.path.join(pack_dir, "ysyx_pack.sv")
+        pack_sv = os.path.join(pack_dir, "rapt_pack.sv")
 
         vflags = ""
         if variant == "linux":
-            vflags = "VFLAGS='-DYSYX_LINUX'"
+            vflags = "VFLAGS='-DRAPT_LINUX'"
 
         if not os.path.exists(pack_sv):
             os.makedirs(pack_dir, exist_ok=True)
@@ -174,4 +174,4 @@ class Raptor(CPU):
     def do_finalize(self):
         assert hasattr(self, "reset_address")
         self.add_sources(self.platform, self.variant)
-        self.specials += Instance("ysyx", **self.cpu_params)
+        self.specials += Instance("rapt", **self.cpu_params)

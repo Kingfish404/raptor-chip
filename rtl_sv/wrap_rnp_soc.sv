@@ -1,10 +1,10 @@
-`include "ysyx.svh"
-`include "ysyx_soc.svh"
-`include "ysyx_dpi_c.svh"
+`include "rapt.svh"
+`include "rapt_soc.svh"
+`include "rapt_dpi_c.svh"
 
 
 module rng_chip #(
-    parameter bit [7:0] XLEN = `YSYX_XLEN
+    parameter bit [7:0] XLEN = `RAPT_XLEN
 ) (
     input clock,
 
@@ -111,7 +111,7 @@ module rng_chip #(
       .rnp_rwstate(rnp_rwstate)
   );
 
-  ysyx cpu (  // src/CPU.scala:38:21
+  rapt cpu (  // src/CPU.scala:38:21
       .clock            (clock),
       .io_interrupt     (1'h0),
       .io_master_awready(auto_master_out_awready_cpu),
@@ -148,7 +148,7 @@ module rng_chip #(
       .io_master_rlast  (auto_master_out_rlast_cpu),
 
 
-`ifdef YSYX_USE_SLAVE
+`ifdef RAPT_USE_SLAVE
       .io_slave_awready(  /* unused */),
       .io_slave_awvalid(1'h0),
       .io_slave_awid   (4'h0),
@@ -190,7 +190,7 @@ endmodule
 // verilator lint_off DECLFILENAME
 // verilator lint_off UNUSEDSIGNAL
 module wrapSoC #(
-    parameter bit [7:0] XLEN = `YSYX_XLEN
+    parameter bit [7:0] XLEN = `RAPT_XLEN
 ) (
     input clock,
     input reset
@@ -339,7 +339,7 @@ module wrapSoC #(
   );
 
 
-  ysyx_npc_soc perip (
+  rapt_npc_soc perip (
       .clock(clock),
       .arburst(auto_master_out_arburst_soc),
       .arsize(auto_master_out_arsize_soc),

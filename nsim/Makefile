@@ -27,7 +27,7 @@ ifeq ($(CONFIG_MODE), "soc")
 SOC_HOME  = $(abspath $(YSYX_HOME)/third_party/kingfish404/ysyxSoC)
 INC_PATH += $(abspath $(SOC_HOME)/perip/uart16550/rtl) $(abspath $(SOC_HOME)/perip/spi/rtl)
 VTARGET=ysyxSoCFull
-SOC_DEFINE=-DYSYX_SOC
+SOC_DEFINE=-DRAPT_SOC
 SOC_SOURCE=$(shell find $(abspath $(SOC_HOME)/perip) -name "*.v") \
     $(SOC_HOME)/build/ysyxSoCFull.v
 INC_PATH +=	$(abspath $(VSRC_PATH)/include/ysyxsoc)
@@ -35,7 +35,7 @@ else
 ifeq ($(CONFIG_wrapBus), y)
 VTARGET=wrapSoC
 else
-VTARGET=ysyxSoC
+VTARGET=raptSoC
 endif
 SOC_SOURCE=
 INC_PATH +=	$(abspath $(VSRC_PATH)/include/npc)
@@ -43,7 +43,7 @@ endif
 BUILD_DIR = ./build
 DATA_DIR = ./data
 OBJ_DIR = $(BUILD_DIR)/obj_dir
-ISA_NAME = $(if $(findstring DYSYX_RV64,$(VFLAGS)),riscv64,riscv32)
+ISA_NAME = $(if $(findstring DRAPT_RV64,$(VFLAGS)),riscv64,riscv32)
 NPC_MODE = $(if $(findstring soc,$(call remove_quote,$(CONFIG_MODE))),soc,sim)
 BIN = $(BUILD_DIR)/$(ISA_NAME)-npc-$(NPC_MODE)
 VERILATOR_FLAG =--prof-c --prof-cfuncs \
@@ -57,9 +57,9 @@ CXXFLAGS = -Wall -Werror \
 	$(call remove_quote,$(CONFIG_CC_OPT))
 LDFLAGS = -lreadline -ldl
 
-# RV64 support: pass VFLAGS="-DYSYX_RV64" to enable 64-bit mode
-VFLAGS ?= ## Enable RV64 mode (-DYSYX_RV64)
-ifneq (,$(findstring DYSYX_RV64,$(VFLAGS)))
+# RV64 support: pass VFLAGS="-DRAPT_RV64" to enable 64-bit mode
+VFLAGS ?= ## Enable RV64 mode (-DRAPT_RV64)
+ifneq (,$(findstring DRAPT_RV64,$(VFLAGS)))
 CXXFLAGS += -DCONFIG_ISA64
 ISA64 = 1
 else
@@ -92,9 +92,9 @@ endif
 $(shell printf '%s' '$(CONFIG_SIG)' > $(CONFIG_STAMP))
 
 VSRCS_RAW = $(shell find $(VSRC_PATH) -name "*.sv")
-# Ensure ysyx_pkg.sv comes first (DC requires package before import)
-VSRCS_PKG = $(filter %/ysyx_pkg.sv, $(VSRCS_RAW))
-VSRCS = $(VSRCS_PKG) $(filter-out %/ysyx_pkg.sv, $(VSRCS_RAW)) \
+# Ensure rapt_pkg.sv comes first (DC requires package before import)
+VSRCS_PKG = $(filter %/rapt_pkg.sv, $(VSRCS_RAW))
+VSRCS = $(VSRCS_PKG) $(filter-out %/rapt_pkg.sv, $(VSRCS_RAW)) \
 	$(SOC_SOURCE)
 VHSRCS = $(shell find $(VSRC_PATH) -name "*.svh")
 CSRCS = $(shell find $(abspath ./csrc) -name "*.c")
@@ -176,8 +176,8 @@ YOSYS_OPENSTA:
 
 pack: $(VSRCS) $(VHSRCS) ## Pack all SV files into one
 	mkdir -p $(BUILD_DIR)
-	verilator -E -P $(VFLAGS) $(addprefix -I, $(INC_PATH)) $(VSRCS) > $(BUILD_DIR)/ysyx_pack.sv
-	verilator -E -P --dump-defines $(VFLAGS) $(addprefix -I, $(INC_PATH)) $(VSRCS) > $(BUILD_DIR)/ysyx_pack.svh
+	verilator -E -P $(VFLAGS) $(addprefix -I, $(INC_PATH)) $(VSRCS) > $(BUILD_DIR)/rapt_pack.sv
+	verilator -E -P --dump-defines $(VFLAGS) $(addprefix -I, $(INC_PATH)) $(VSRCS) > $(BUILD_DIR)/rapt_pack.svh
 
 STA_PLATFORM ?= nangate45 ## STA platform: nangate45, asap7
 
@@ -185,21 +185,21 @@ sta: pack ## Static timing analysis
 	echo $(MAKECMDGOALS)
 	if [ ! -d $(YOSYS_OPENSTA) ]; then make YOSYS_OPENSTA; fi
 	make -C $(YOSYS_OPENSTA) sta show \
-		DESIGN=ysyx \
+		DESIGN=rapt \
 		PLATFORM=$(STA_PLATFORM) \
-		RTL_FILES="$(abspath $(BUILD_DIR)/ysyx_pack.sv)"
+		RTL_FILES="$(abspath $(BUILD_DIR)/rapt_pack.sv)"
 
 sta-detail: pack ## Detailed static timing analysis
 	make -C $(YOSYS_OPENSTA) sta-detail show \
-		DESIGN=ysyx \
+		DESIGN=rapt \
 		PLATFORM=$(STA_PLATFORM) \
-		RTL_FILES="$(abspath $(BUILD_DIR)/ysyx_pack.sv)"
+		RTL_FILES="$(abspath $(BUILD_DIR)/rapt_pack.sv)"
 
 sta_show: pack ## Show timing analysis results
 	make -C $(YOSYS_OPENSTA) show \
-		DESIGN=ysyx \
+		DESIGN=rapt \
 		PLATFORM=$(STA_PLATFORM) \
-		RTL_FILES="$(abspath $(BUILD_DIR)/ysyx_pack.sv)"
+		RTL_FILES="$(abspath $(BUILD_DIR)/rapt_pack.sv)"
 
 lint: ## Lint RTL with Verilator
 	$(VERILATOR) --lint-only -Wall $(VSRCS) $(INCFLAGS) $(VFLAGS) --top-module $(VTARGET)

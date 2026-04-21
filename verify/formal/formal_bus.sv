@@ -1,5 +1,5 @@
 module formal_bus #(
-    parameter bit [7:0] XLEN = `YSYX_XLEN
+    parameter bit [7:0] XLEN = `RAPT_XLEN
 ) (
     input clock,
     input reset,
@@ -105,7 +105,7 @@ module formal_bus #(
 
   wire io_trap_o;
 
-  ysyx_bus bus (
+  rapt_bus bus (
       .clock(clock),
 
       .axi_arburst(io_master_arburst),

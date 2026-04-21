@@ -9,13 +9,13 @@
 #include CONCAT_HEAD(CONCAT(TOP_NAME, ___024root))
 #include CONCAT_HEAD(CONCAT(TOP_NAME, __Dpi))
 
-#ifdef YSYX_SOC
-// Verilator 5.x hierarchical cell access: rootp -> ysyxSoCFull -> asic -> cpu -> cpu (ysyx)
+#ifdef RAPT_SOC
+// Verilator 5.x hierarchical cell access: rootp -> ysyxSoCFull -> asic -> cpu -> cpu (rapt)
 #include CONCAT_HEAD(CONCAT(TOP_NAME, _ysyxSoCFull))
 #include CONCAT_HEAD(CONCAT(TOP_NAME, _ysyxSoCASIC))
 #include CONCAT_HEAD(CONCAT(TOP_NAME, _CPU))
-#include CONCAT_HEAD(CONCAT(TOP_NAME, _ysyx))
-#include CONCAT_HEAD(CONCAT(TOP_NAME, _ysyx_rou))
+#include CONCAT_HEAD(CONCAT(TOP_NAME, _rapt))
+#include CONCAT_HEAD(CONCAT(TOP_NAME, _rapt_rou))
 #define VERILOG_CPU(m) (top->rootp->ysyxSoCFull->asic->cpu->cpu->m)
 #define VERILOG_ROU(m) (top->rootp->ysyxSoCFull->asic->cpu->cpu->rou->m)
 #define VERILOG_RESET (top->rootp->ysyxSoCFull->asic->cpu_reset_chain__DOT__output_chain__DOT__sync_0)
@@ -27,11 +27,11 @@
 #define VERILOG_RESET top->reset
 #else
 // NPC mode: Verilator 5.x hierarchical classes — navigate via cell pointers
-#include CONCAT_HEAD(CONCAT(TOP_NAME, _ysyxSoC))
-#include CONCAT_HEAD(CONCAT(TOP_NAME, _ysyx))
-#include CONCAT_HEAD(CONCAT(TOP_NAME, _ysyx_rou))
-#define VERILOG_CPU(m) (top->rootp->ysyxSoC->cpu->m)
-#define VERILOG_ROU(m) (top->rootp->ysyxSoC->cpu->rou->m)
+#include CONCAT_HEAD(CONCAT(TOP_NAME, _raptSoC))
+#include CONCAT_HEAD(CONCAT(TOP_NAME, _rapt))
+#include CONCAT_HEAD(CONCAT(TOP_NAME, _rapt_rou))
+#define VERILOG_CPU(m) (top->rootp->raptSoC->cpu->m)
+#define VERILOG_ROU(m) (top->rootp->raptSoC->cpu->rou->m)
 #define VERILOG_RESET top->reset
 #endif
 

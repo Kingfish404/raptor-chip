@@ -22,7 +22,7 @@ jobs:
   app-pk-tests:
     runs-on: ubuntu-latest
     env:
-      YSYX_HOME: ${{ github.workspace }}
+      RAPTOR_HOME: ${{ github.workspace }}
       NEMU_HOME: ${{ github.workspace }}/nemu
       AM_HOME: ${{ github.workspace }}/abstract-machine
       CROSS_COMPILE: riscv64-unknown-elf-

@@ -1,1 +1,11 @@
-!assets/*
+!assets/**
+!_layouts/**
+
+# Jekyll / local preview artifacts
+_site/
+.jekyll-cache/
+.sass-cache/
+vendor/
+Gemfile.lock
+.bundle/
+.jekyll-metadata

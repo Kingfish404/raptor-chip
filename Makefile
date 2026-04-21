@@ -1,16 +1,18 @@
 # ============================================================================
 # Environment variables (auto-sourced from env.sh, no manual `source` needed)
 # ============================================================================
-export YSYX_HOME := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
-export NEMU_HOME := $(YSYX_HOME)/nemu
-export NSIM_HOME := $(YSYX_HOME)/nsim
-export AM_HOME   := $(YSYX_HOME)/abstract-machine
-export NAVY_HOME := $(YSYX_HOME)/abstract-machine/app/navy-apps
-export NVBOARD_HOME := $(YSYX_HOME)/third_party/NJU-ProjectN/nvboard
+export RAPTOR_HOME := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
+# YSYX_HOME is kept as a back-compat alias of RAPTOR_HOME.
+export YSYX_HOME := $(RAPTOR_HOME)
+export NEMU_HOME := $(RAPTOR_HOME)/nemu
+export NSIM_HOME := $(RAPTOR_HOME)/nsim
+export AM_HOME   := $(RAPTOR_HOME)/abstract-machine
+export NAVY_HOME := $(RAPTOR_HOME)/abstract-machine/app/navy-apps
+export NVBOARD_HOME := $(RAPTOR_HOME)/third_party/NJU-ProjectN/nvboard
 export CROSS_COMPILE ?= riscv64-elf-
 
 # Default to batch mode (no interactive prompt). Override with ARGS="" to disable.
-ARGS ?= -b ## Pass args to runner (-b: batch, -n: no wave)
+ARGS ?= -b -n ## Pass args to runner (-b: batch, -n: no wave)
 IMG ?= ## Custom image to load
 MAX_INST ?= ## Max instructions to execute (-m N)
 
@@ -18,7 +20,7 @@ MAX_INST ?= ## Max instructions to execute (-m N)
 # Guard: only define project-level targets when invoked from root directory.
 # Subprojects (nsim, nemu) include this file for env vars only.
 # ============================================================================
-ifeq ($(abspath $(dir $(firstword $(MAKEFILE_LIST)))),$(YSYX_HOME))
+ifeq ($(abspath $(dir $(firstword $(MAKEFILE_LIST)))),$(RAPTOR_HOME))
 
 NPROC := $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 
@@ -68,7 +70,7 @@ setup: ## Install dependencies and initialize workspace
 # RTL Generation (Chisel -> SystemVerilog)
 # ============================================================================
 verilog: ## Generate SystemVerilog from Chisel (Scala)
-	$(MAKE) -C $(YSYX_HOME)/rtl_scala verilog
+	$(MAKE) -C $(RAPTOR_HOME)/rtl_scala verilog
 
 # ============================================================================
 # NEMU Targets
@@ -144,8 +146,8 @@ NPC_DEFCONFIG ?= o2_defconfig ## NPC simulator defconfig profile
 NPC_ARCH ?= riscv32-npc ## Override ARCH for AM targets
 YSYXSOC_ARCH ?= riscv32-ysyxsoc ## Override ARCH for ysyxSoC targets
 
-# RV64 mode: set via `make run-npc64` or explicitly `make run-npc32 VFLAGS="-DYSYX_RV64"`
-VFLAGS ?= ## Enable RV64 mode (-DYSYX_RV64)
+# RV64 mode: set via `make run-npc64` or explicitly `make run-npc32 VFLAGS="-DRAPT_RV64"`
+VFLAGS ?= ## Enable RV64 mode (-DRAPT_RV64)
 
 config-npc32: ## Configure NPC simulator (o2 default)
 	@$(MAKE) --no-print-directory -C $(NSIM_HOME) $(NPC_DEFCONFIG)
@@ -171,7 +173,7 @@ menuconfig-npc32: ## Open NPC menuconfig
 	$(MAKE) -C $(NSIM_HOME) -j$(NPROC)
 
 # Auto-generate RTL from Chisel if generated/ doesn't exist
-GENERATED_DIR := $(YSYX_HOME)/rtl_sv/generated
+GENERATED_DIR := $(RAPTOR_HOME)/rtl_sv/generated
 
 $(GENERATED_DIR):
 	$(MAKE) verilog
@@ -186,20 +188,20 @@ run-npc32: build-npc32 ## Build and run NPC simulator
 sim-npc32: verilog config-npc32 build-npc32 ## Full pipeline: verilog + config + build + run
 	$(MAKE) -C $(NSIM_HOME) run ARGS="$(ARGS)" VFLAGS="$(VFLAGS)" $(if $(IMG),IMG=$(IMG))
 
-# --- RV64 convenience targets (equivalent to VFLAGS="-DYSYX_RV64") ---
-build-npc64: VFLAGS := -DYSYX_RV64
+# --- RV64 convenience targets (equivalent to VFLAGS="-DRAPT_RV64") ---
+build-npc64: VFLAGS := -DRAPT_RV64
 build-npc64: build-npc32 ## Build NPC in RV64 mode
 
-run-npc64: VFLAGS := -DYSYX_RV64
+run-npc64: VFLAGS := -DRAPT_RV64
 run-npc64: run-npc32 ## Build and run NPC in RV64 mode
 
-lint-npc64: VFLAGS := -DYSYX_RV64
+lint-npc64: VFLAGS := -DRAPT_RV64
 lint-npc64: lint ## Lint RTL in RV64 mode
 
 # ============================================================================
 # AM Kernels / Benchmarks
 # ============================================================================
-AM_KERNELS = $(YSYX_HOME)/abstract-machine/app/am-kernels
+AM_KERNELS = $(RAPTOR_HOME)/abstract-machine/app/am-kernels
 
 $(AM_KERNELS):
 	mkdir -p $(abspath $(AM_KERNELS))
@@ -247,19 +249,19 @@ micorbench-npc32-difftest: $(AM_KERNELS) config-npc32-difftest config-nemu32-ref
 	$(MAKE) -C $(AM_KERNELS)/benchmarks/microbench ARCH=$(NPC_ARCH) run ARGS="$(ARGS)" mainargs=$(MAINARGS)
 
 # --- RV64 benchmark targets ---
-coremark-npc64: VFLAGS := -DYSYX_RV64
+coremark-npc64: VFLAGS := -DRAPT_RV64
 coremark-npc64: $(AM_KERNELS) config-npc32 ## Run CoreMark on NPC (riscv64)
 	$(MAKE) -C $(AM_KERNELS)/benchmarks/coremark_eembc ARCH=riscv64-npc run ARGS="$(ARGS)" VFLAGS="$(VFLAGS)"
 
-coremark-npc64-difftest: VFLAGS := -DYSYX_RV64
+coremark-npc64-difftest: VFLAGS := -DRAPT_RV64
 coremark-npc64-difftest: $(AM_KERNELS) config-npc32-difftest config-nemu64-ref ## Run CoreMark on NPC (riscv64) with difftest
 	$(MAKE) -C $(AM_KERNELS)/benchmarks/coremark_eembc ARCH=riscv64-npc run ARGS="$(ARGS)" VFLAGS="$(VFLAGS)"
 
-microbench-npc64: VFLAGS := -DYSYX_RV64
+microbench-npc64: VFLAGS := -DRAPT_RV64
 microbench-npc64: $(AM_KERNELS) config-npc32 ## Run MicroBench on NPC (riscv64)
 	$(MAKE) -C $(AM_KERNELS)/benchmarks/microbench ARCH=riscv64-npc run ARGS="$(ARGS)" VFLAGS="$(VFLAGS)" mainargs=$(MAINARGS)
 
-microbench-npc64-difftest: VFLAGS := -DYSYX_RV64
+microbench-npc64-difftest: VFLAGS := -DRAPT_RV64
 microbench-npc64-difftest: $(AM_KERNELS) config-npc32-difftest config-nemu64-ref ## Run MicroBench on NPC (riscv64) with difftest
 	$(MAKE) -C $(AM_KERNELS)/benchmarks/microbench ARCH=riscv64-npc run ARGS="$(ARGS)" VFLAGS="$(VFLAGS)" mainargs=$(MAINARGS)
 
@@ -270,7 +272,7 @@ microbench-ysyxsoc: $(AM_KERNELS) config-npc32-ysyxsoc config-nemu32-ref ## Run 
 	$(MAKE) -C $(AM_KERNELS)/benchmarks/microbench ARCH=$(YSYXSOC_ARCH) run ARGS="$(ARGS)" mainargs=test
 
 # --- RISC-V Architecture Tests ---
-RISCV_ARCH_TEST ?= $(YSYX_HOME)/third_party/kingfish404/riscv-arch-test-am
+RISCV_ARCH_TEST ?= $(RAPTOR_HOME)/third_party/kingfish404/riscv-arch-test-am
 
 $(RISCV_ARCH_TEST):
 	git clone --depth 1 https://github.com/Kingfish404/riscv-arch-test-am $@
@@ -289,19 +291,19 @@ ISA ?= riscv32 ## ISA for nanos-lite targets
 nanos-nemu32: ## Build and run nanos-lite on NEMU
 	$(MAKE) -C $(NAVY_HOME) ISA=$(ISA) fsimg
 	$(MAKE) -C $(NAVY_HOME)/apps/menu ISA=$(ISA) install
-	$(MAKE) -C $(YSYX_HOME)/abstract-machine/app/nanos-lite ARCH=$(ISA)-nemu update run
+	$(MAKE) -C $(RAPTOR_HOME)/abstract-machine/app/nanos-lite ARCH=$(ISA)-nemu update run
 
 nanos-npc32: ## Build and run nanos-lite on NPC
 	$(MAKE) -C $(NAVY_HOME) ISA=$(ISA) fsimg
 	$(MAKE) -C $(NAVY_HOME)/apps/menu ISA=$(ISA) install
-	$(MAKE) -C $(YSYX_HOME)/abstract-machine/app/nanos-lite ARCH=$(ISA)-npc update run
+	$(MAKE) -C $(RAPTOR_HOME)/abstract-machine/app/nanos-lite ARCH=$(ISA)-npc update run
 
 # ============================================================================
 # Linux Kernel Boot (via OpenSBI on NEMU)
 # ============================================================================
 
 # Delegate download/version management to linux/Makefile (single source of truth).
-LINUX_HOME          := $(YSYX_HOME)/linux
+LINUX_HOME          := $(RAPTOR_HOME)/linux
 LINUX_BUILD_VERSION ?= v6.18.22
 LINUX_RV32_PAYLOAD  ?= $(LINUX_HOME)/build/linux-riscv-qemu-rv32-m-$(strip $(LINUX_BUILD_VERSION))/fw_payload.bin
 LINUX_RV64_PAYLOAD  ?= $(LINUX_HOME)/build/linux-riscv-rv64-$(strip $(LINUX_BUILD_VERSION))/fw_payload.bin
@@ -346,10 +348,10 @@ linux-boot-nemu64-device: config-nemu64-linux-device ## Boot Linux on NEMU RV64 
 # FPGA Targets
 # ============================================================================
 fpga-syn: ## Synthesize for Gowin Tang Nano 20K
-	$(MAKE) -C $(YSYX_HOME)/fpga/gowin-tang-nano-20k syn
+	$(MAKE) -C $(RAPTOR_HOME)/fpga/gowin-tang-nano-20k syn
 
 fpga-pnr: ## Place and route for FPGA
-	$(MAKE) -C $(YSYX_HOME)/fpga/gowin-tang-nano-20k pnr
+	$(MAKE) -C $(RAPTOR_HOME)/fpga/gowin-tang-nano-20k pnr
 
 # ============================================================================
 # Utilities
@@ -365,17 +367,17 @@ lint-verible: ## Lint RTL with Verible
 
 STA_PLATFORM ?= nangate45 ## STA platform: nangate45, asap7
 
-sta: ## Static timing analysis (VFLAGS="-DYSYX_RV64" for RV64)
+sta: ## Static timing analysis (VFLAGS="-DRAPT_RV64" for RV64)
 	$(MAKE) -C $(NSIM_HOME) sta STA_PLATFORM=$(STA_PLATFORM) VFLAGS="$(VFLAGS)"
 
-sta-detail: ## Detailed static timing analysis (VFLAGS="-DYSYX_RV64" for RV64)
+sta-detail: ## Detailed static timing analysis (VFLAGS="-DRAPT_RV64" for RV64)
 	$(MAKE) -C $(NSIM_HOME) sta-detail STA_PLATFORM=$(STA_PLATFORM) VFLAGS="$(VFLAGS)"
 
 # RV64 convenience targets for STA
-sta-rv64: VFLAGS := -DYSYX_RV64
+sta-rv64: VFLAGS := -DRAPT_RV64
 sta-rv64: sta ## Static timing analysis in RV64 mode
 
-sta-detail-rv64: VFLAGS := -DYSYX_RV64
+sta-detail-rv64: VFLAGS := -DRAPT_RV64
 sta-detail-rv64: sta-detail ## Detailed static timing analysis in RV64 mode
 
 clean-npc: ## Clean NPC build only
@@ -384,14 +386,14 @@ clean-npc: ## Clean NPC build only
 clean: ## Clean all build artifacts
 	-$(MAKE) -C $(NEMU_HOME) clean 2>/dev/null || true
 	-$(MAKE) -C $(NSIM_HOME) clean 2>/dev/null || true
-	-$(MAKE) -C $(YSYX_HOME)/rtl_scala clean 2>/dev/null || true
-	-$(MAKE) -C $(YSYX_HOME)/verify clean 2>/dev/null || true
-	-$(MAKE) -C $(YSYX_HOME)/app clean 2>/dev/null || true
+	-$(MAKE) -C $(RAPTOR_HOME)/rtl_scala clean 2>/dev/null || true
+	-$(MAKE) -C $(RAPTOR_HOME)/verify clean 2>/dev/null || true
+	-$(MAKE) -C $(RAPTOR_HOME)/app clean 2>/dev/null || true
 
 # ============================================================================
 # Verification Suite (verify/)
 # ============================================================================
-VERIFY_HOME := $(YSYX_HOME)/verify
+VERIFY_HOME := $(RAPTOR_HOME)/verify
 
 verify-fuzz: ## Random instruction fuzz with difftest
 	$(MAKE) -C $(VERIFY_HOME) fuzz
@@ -420,7 +422,7 @@ verify-clean: ## Clean verification artifacts
 # ============================================================================
 # Standard Toolchain (app/, riscv-pk)
 # ============================================================================
-APP_HOME := $(YSYX_HOME)/app
+APP_HOME := $(RAPTOR_HOME)/app
 
 app-run: build-npc32 ## [app] Run USER_ELF via pk on NPC
 	@$(MAKE) --no-print-directory -C $(APP_HOME) pk-run USER_ELF=$(USER_ELF) ARGS="$(ARGS)"

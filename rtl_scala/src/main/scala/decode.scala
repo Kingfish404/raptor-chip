@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import chisel3.util.experimental.decode._
 
-class ysyx_idu_decoder extends Module with Instr with MicroOP {
+class rapt_idu_decoder extends Module with Instr with MicroOP {
   val in      = IO(new Bundle {
     val inst = Input(UInt(32.W))
     val pc   = Input(UInt(64.W))

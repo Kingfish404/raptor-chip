@@ -302,10 +302,18 @@ static int decode_exec(Decode *s)
   INSTPAT("0000001 ????? ????? 001 ????? 01100 11", mulh, R, R(rd) = ((dword_t)(sword_t)src1 * (dword_t)(sword_t)src2) >> MULH_SHIFT);
   INSTPAT("0000001 ????? ????? 010 ????? 01100 11", mulhsu, R, R(rd) = ((dword_t)(sword_t)src1 * (dword_t)(word_t)src2) >> MULH_SHIFT);
   INSTPAT("0000001 ????? ????? 011 ????? 01100 11", mulhu, R, R(rd) = ((udword_t)(word_t)src1 * (udword_t)(word_t)src2) >> MULH_SHIFT);
-  INSTPAT("0000001 ????? ????? 100 ????? 01100 11", div, R, R(rd) = ((sword_t)src2 == 0) ? ~0 : (sword_t)src1 / (sword_t)src2);
-  INSTPAT("0000001 ????? ????? 101 ????? 01100 11", divu, R, R(rd) = ((word_t)src2 == 0) ? ~0 : (word_t)src1 / (word_t)src2);
-  INSTPAT("0000001 ????? ????? 110 ????? 01100 11", rem, R, R(rd) = (sword_t)src1 % (sword_t)src2);
-  INSTPAT("0000001 ????? ????? 111 ????? 01100 11", remu, R, R(rd) = (word_t)src1 % (word_t)src2);
+  // RISC-V spec: div-by-zero and signed overflow (INT_MIN/-1) have defined results
+  INSTPAT("0000001 ????? ????? 100 ????? 01100 11", div, R,
+          R(rd) = ((sword_t)src2 == 0)                                  ? (word_t)~0
+                  : ((sword_t)src1 == INT32_MIN && (sword_t)src2 == -1) ? (word_t)INT32_MIN
+                                                                        : (word_t)((sword_t)src1 / (sword_t)src2));
+  INSTPAT("0000001 ????? ????? 101 ????? 01100 11", divu, R,
+          R(rd) = ((word_t)src2 == 0) ? (word_t)~0 : (word_t)src1 / (word_t)src2);
+  INSTPAT("0000001 ????? ????? 110 ????? 01100 11", rem, R,
+          R(rd) = ((sword_t)src2 == 0)                                  ? src1
+                  : ((sword_t)src1 == INT32_MIN && (sword_t)src2 == -1) ? 0
+                                                                        : (word_t)((sword_t)src1 % (sword_t)src2));
+  INSTPAT("0000001 ????? ????? 111 ????? 01100 11", remu, R, R(rd) = ((word_t)src2 == 0) ? src1 : (word_t)src1 % (word_t)src2);
 
   // Zba Extension
   INSTPAT("0010000 ????? ????? 010 ????? 01100 11", sh1add, R, R(rd) = (src1 << 1) + src2);

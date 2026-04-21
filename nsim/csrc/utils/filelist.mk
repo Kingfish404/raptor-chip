@@ -9,9 +9,9 @@ else
   $(error Unsupported OS)
 endif
 
-LIBCAPSTONE = $(YSYX_HOME)/nemu/tools/capstone/repo/libcapstone.$(suffix)
-CXXFLAGS += -I $(YSYX_HOME)/nemu/tools/capstone/repo/include
-$(YSYX_HOME)/nsim/csrc/utils/disasm.cc: $(LIBCAPSTONE)
+LIBCAPSTONE = $(RAPTOR_HOME)/nemu/tools/capstone/repo/libcapstone.$(suffix)
+CXXFLAGS += -I $(RAPTOR_HOME)/nemu/tools/capstone/repo/include
+$(RAPTOR_HOME)/nsim/csrc/utils/disasm.cc: $(LIBCAPSTONE)
 $(LIBCAPSTONE):
-	$(MAKE) -C $(YSYX_HOME)/nemu/tools/capstone
+	$(MAKE) -C $(RAPTOR_HOME)/nemu/tools/capstone
 endif

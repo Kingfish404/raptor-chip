@@ -48,6 +48,8 @@ jobs:
         shell: bash -l {0}
         run: |
           make -C verify coverage-run-coremark
+          make -C verify coverage-run-hello-pk
+          make -C verify coverage-run-isa-tests-pk
           make -C verify coverage-run-microbench
           make -C verify coverage-run-fuzz TIMEOUT=10
           make -C verify coverage-run-sigtest TIMEOUT=10

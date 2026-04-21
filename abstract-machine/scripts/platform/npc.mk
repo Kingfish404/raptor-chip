@@ -1,4 +1,4 @@
-NSIM_HOME = $(abspath $(YSYX_HOME)/nsim)
+NSIM_HOME = $(abspath $(RAPTOR_HOME)/nsim)
 AM_SRCS := riscv/npc/start.S \
            riscv/npc/trm.c \
            riscv/npc/ioe.c \

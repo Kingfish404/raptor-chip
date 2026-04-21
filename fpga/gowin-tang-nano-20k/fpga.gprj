@@ -13,7 +13,7 @@
         <File path="src/UartRx.v" type="file.verilog" enable="1"/>
         <File path="src/UartTx.v" type="file.verilog" enable="1"/>
         <File path="src/gowin_rpll/gowin_rpll.v" type="file.verilog" enable="1"/>
-        <File path="src/ysyx.v" type="file.verilog" enable="1"/>
+        <File path="src/rapt.v" type="file.verilog" enable="1"/>
         <File path="fpga.cst" type="file.cst" enable="1"/>
     </FileList>
 </Project>

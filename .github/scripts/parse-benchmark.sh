@@ -48,7 +48,7 @@ case "$TYPE" in
   sta)
     # Extract frequency: "core_clock period_min = 13.83 fmax = 72.28"
     FREQ=$(grep -oP 'fmax\s*=\s*\K[0-9.]+' "$LOG" | head -1 || echo "N/A")
-    # Extract area: "Chip area for module '\ysyx': 533288.770000"
+    # Extract area: "Chip area for module '\rapt': 533288.770000"
     AREA=$(grep -oP 'Chip area for module.*?:\s*\K[0-9.]+' "$LOG" | head -1 || echo "N/A")
     # Extract total power: "Total  2.67e+00  2.56e+00  1.23e-02  5.25e+00 100.0%"
     POWER=$(grep -oP '^Total\s+\S+\s+\S+\s+\S+\s+\K\S+' "$LOG" | head -1 || echo "N/A")

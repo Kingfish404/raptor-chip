@@ -62,6 +62,7 @@ repo_clone() {
 
   mkdir -p third_party/riscv-software-src/
   [ -d third_party/riscv-software-src/opensbi ] || git clone --depth 1 https://github.com/riscv-software-src/opensbi third_party/riscv-software-src/opensbi
+  [ -d third_party/riscv-software-src/riscv-pk ] || git clone --depth 1 https://github.com/riscv-software-src/riscv-pk third_party/riscv-software-src/riscv-pk
 }
 
 repo_init() {

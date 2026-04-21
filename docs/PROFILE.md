@@ -1,4 +1,4 @@
-# NPC 性能评估结果
+# Performance Profile
 
 使用`am-kernels`中的`microbench`测试程序进行性能测试.
 
@@ -94,20 +94,20 @@ Net Switch Power   ==    0.000e+00 (0.000%)
 Cell Internal Power   ==    6.704e-03 (88.590%)
 Cell Leakage Power   ==    8.634e-04 (11.410%)
 Total Power   ==  7.567e-03
-   Chip area for module '\ysyx': 53.466000
-   Chip area for module '\ysyx_bus': 944.300000
-   Chip area for module '\ysyx_clint': 978.348000
-   Chip area for module '\ysyx_exu$interfaces$idu_pipe_if': 3414.908000
-   Chip area for module '\ysyx_exu_alu': 1682.450000
-   Chip area for module '\ysyx_exu_csr': 1933.820000
-   Chip area for module '\ysyx_idu$interfaces$idu_pipe_if': 1255.520000
-   Chip area for module '\ysyx_idu_decoder': 1772.092000
-   Chip area for module '\ysyx_ifu': 2550.142000
-   Chip area for module '\ysyx_ifu_l1i': 4952.920000
-   Chip area for module '\ysyx_lsu': 2197.958000
-   Chip area for module '\ysyx_reg': 14876.316000
-   Chip area for module '\ysyx_wbu': 333.830000
-   Chip area for top module '\ysyx': 36946.070000
+   Chip area for module '\rapt': 53.466000
+   Chip area for module '\rapt_bus': 944.300000
+   Chip area for module '\rapt_clint': 978.348000
+   Chip area for module '\rapt_exu$interfaces$idu_pipe_if': 3414.908000
+   Chip area for module '\rapt_exu_alu': 1682.450000
+   Chip area for module '\rapt_exu_csr': 1933.820000
+   Chip area for module '\rapt_idu$interfaces$idu_pipe_if': 1255.520000
+   Chip area for module '\rapt_idu_decoder': 1772.092000
+   Chip area for module '\rapt_ifu': 2550.142000
+   Chip area for module '\rapt_ifu_l1i': 4952.920000
+   Chip area for module '\rapt_lsu': 2197.958000
+   Chip area for module '\rapt_reg': 14876.316000
+   Chip area for module '\rapt_wbu': 333.830000
+   Chip area for top module '\rapt': 36946.070000
 # rv32em
 | Endpoint           | Clock Group | Delay Type | Path Delay | Path Required | CPPR  | Slack  | Freq(MHz) |
 | exu/mul/_09860_:D  | core_clock  | max        | 2.334f     | 1.961         | 0.000 | -0.373 | 421.381   |
@@ -125,21 +125,21 @@ Net Switch Power   ==    0.000e+00 (0.000%)
 Cell Internal Power   ==    7.011e-03 (89.101%)
 Cell Leakage Power   ==    8.575e-04 (10.899%)
 Total Power   ==  7.868e-03
-   Chip area for module '\ysyx': 53.466000
-   Chip area for module '\ysyx_bus': 917.966000
-   Chip area for module '\ysyx_clint': 978.348000
-   Chip area for module '\ysyx_exu$interfaces$idu_pipe_if': 3514.126000
-   Chip area for module '\ysyx_exu_alu': 1702.400000
-   Chip area for module '\ysyx_exu_csr': 1911.476000
-   Chip area for module '\ysyx_exu_mul': 8679.846000
-   Chip area for module '\ysyx_idu$interfaces$idu_pipe_if': 1100.176000
-   Chip area for module '\ysyx_idu_decoder': 1772.092000
-   Chip area for module '\ysyx_ifu': 2533.916000
-   Chip area for module '\ysyx_ifu_l1i': 4952.920000
-   Chip area for module '\ysyx_lsu': 2030.644000
-   Chip area for module '\ysyx_reg': 6914.670000
-   Chip area for module '\ysyx_wbu': 333.830000
-   Chip area for top module '\ysyx': 37395.876000
+   Chip area for module '\rapt': 53.466000
+   Chip area for module '\rapt_bus': 917.966000
+   Chip area for module '\rapt_clint': 978.348000
+   Chip area for module '\rapt_exu$interfaces$idu_pipe_if': 3514.126000
+   Chip area for module '\rapt_exu_alu': 1702.400000
+   Chip area for module '\rapt_exu_csr': 1911.476000
+   Chip area for module '\rapt_exu_mul': 8679.846000
+   Chip area for module '\rapt_idu$interfaces$idu_pipe_if': 1100.176000
+   Chip area for module '\rapt_idu_decoder': 1772.092000
+   Chip area for module '\rapt_ifu': 2533.916000
+   Chip area for module '\rapt_ifu_l1i': 4952.920000
+   Chip area for module '\rapt_lsu': 2030.644000
+   Chip area for module '\rapt_reg': 6914.670000
+   Chip area for module '\rapt_wbu': 333.830000
+   Chip area for top module '\rapt': 37395.876000
 # rv32im
 | Endpoint           | Clock Group | Delay Type | Path Delay | Path Required | CPPR  | Slack  | Freq(MHz) |
 | exu/mul/_09756_:D  | core_clock  | max        | 2.343r     | 1.969         | 0.000 | -0.374 | 421.252   |
@@ -157,33 +157,33 @@ Net Switch Power   ==    0.000e+00 (0.000%)
 Cell Internal Power   ==    8.700e-03 (88.847%)
 Cell Leakage Power   ==    1.092e-03 (11.153%)
 Total Power   ==  9.792e-03
-   Chip area for module '\ysyx': 53.466000
-   Chip area for module '\ysyx_bus': 946.960000
-   Chip area for module '\ysyx_clint': 978.348000
-   Chip area for module '\ysyx_exu$interfaces$idu_pipe_if': 3529.820000
-   Chip area for module '\ysyx_exu_alu': 1702.400000
-   Chip area for module '\ysyx_exu_csr': 1978.242000
-   Chip area for module '\ysyx_exu_mul': 8607.760000
-   Chip area for module '\ysyx_idu$interfaces$idu_pipe_if': 1255.520000
-   Chip area for module '\ysyx_idu_decoder': 1772.092000
-   Chip area for module '\ysyx_ifu': 2602.012000
-   Chip area for module '\ysyx_ifu_l1i': 4946.536000
-   Chip area for module '\ysyx_lsu': 2182.796000
-   Chip area for module '\ysyx_reg': 14954.254000
-   Chip area for module '\ysyx_wbu': 333.830000
-   Chip area for top module '\ysyx': 45844.036000
+   Chip area for module '\rapt': 53.466000
+   Chip area for module '\rapt_bus': 946.960000
+   Chip area for module '\rapt_clint': 978.348000
+   Chip area for module '\rapt_exu$interfaces$idu_pipe_if': 3529.820000
+   Chip area for module '\rapt_exu_alu': 1702.400000
+   Chip area for module '\rapt_exu_csr': 1978.242000
+   Chip area for module '\rapt_exu_mul': 8607.760000
+   Chip area for module '\rapt_idu$interfaces$idu_pipe_if': 1255.520000
+   Chip area for module '\rapt_idu_decoder': 1772.092000
+   Chip area for module '\rapt_ifu': 2602.012000
+   Chip area for module '\rapt_ifu_l1i': 4946.536000
+   Chip area for module '\rapt_lsu': 2182.796000
+   Chip area for module '\rapt_reg': 14954.254000
+   Chip area for module '\rapt_wbu': 333.830000
+   Chip area for top module '\rapt': 45844.036000
 ```
 
 ### ysyxsoc simulation result
 
 ```log
-./build/ysyxSoCFull -b -n -d /Users/yujin/Developer/c-projects/raptor-chip/nemu/build/riscv32-nemu-interpreter-so -m /Users/yujin/Developer/c-projects/raptor-chip/nsim/csrc/mem/mrom-data/build/mrom-data.bin /Users/yujin/Developer/c-projects/raptor-chip/am-kernels/benchmarks/microbench/build/microbench-riscv32e-ysyxsoc.bin
+./build/raptSoCFull -b -n -d /Users/yujin/Developer/c-projects/raptor-chip/nemu/build/riscv32-nemu-interpreter-so -m /Users/yujin/Developer/c-projects/raptor-chip/nsim/csrc/mem/mrom-data/build/mrom-data.bin /Users/yujin/Developer/c-projects/raptor-chip/am-kernels/benchmarks/microbench/build/microbench-riscv32e-ysyxsoc.bin
 npc monitor.cc:74 load_file image: /Users/yujin/Developer/c-projects/raptor-chip/am-kernels/benchmarks/microbench/build/microbench-riscv32e-ysyxsoc.bin, size: 22925
 npc monitor.cc:105 load_img Load MROM image from /Users/yujin/Developer/c-projects/raptor-chip/nsim/csrc/mem/mrom-data/build/mrom-data.bin
 npc monitor.cc:74 load_file image: /Users/yujin/Developer/c-projects/raptor-chip/nsim/csrc/mem/mrom-data/build/mrom-data.bin, size: 24
 [src/memory/paddr.c:64 init_mem] physical memory area [0x80000000, 0x87ffffff]
-2024-12-23 11:49:51.354 ysyxSoCFull[59576:16288533] +[IMKClient subclass]: chose IMKClient_Modern
-2024-12-23 11:49:51.354 ysyxSoCFull[59576:16288533] +[IMKInputSession subclass]: chose IMKInputSession_Modern
+2024-12-23 11:49:51.354 raptSoCFull[59576:16288533] +[IMKClient subclass]: chose IMKClient_Modern
+2024-12-23 11:49:51.354 raptSoCFull[59576:16288533] +[IMKInputSession subclass]: chose IMKInputSession_Modern
 FSBL: 63160, SSBL: 718841|655681
 Init: 747215|28374, mvendorid: 0x79737978, marchid: 23060087
 ======= Running MicroBench [input *test*] =======

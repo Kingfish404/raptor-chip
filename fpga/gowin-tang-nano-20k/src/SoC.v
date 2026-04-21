@@ -46,7 +46,7 @@ module SoC #(
   wire [1:0] auto_master_out_rresp;
   wire auto_master_out_rlast;
 
-  ysyx cpu (  // src/CPU.scala:38:21
+  rapt cpu (  // src/CPU.scala:38:21
       .clock            (clk),
       .reset            (rst),
       .io_interrupt     (1'h0),
@@ -111,7 +111,7 @@ module SoC #(
   );
 
 
-  ysyx_soc_perip #(
+  rapt_soc_perip #(
       .CLK_FREQ(CLK_FREQ),
       .RAM_FILE(`RAM_FILE),
       .RAM_ADDR_WIDTH(`RAM_ADDR_WIDTH),
@@ -159,7 +159,7 @@ endmodule
 
 
 // Memory and Universal Asynchronous Receiver-Transmitter (UART)
-module ysyx_soc_perip #(
+module rapt_soc_perip #(
     parameter bit[1023:0] RAM_FILE = "",
     parameter bit[31:0] CLK_FREQ = 50_000_000,
     parameter bit[31:0] BAUD_RATE = 9600,
@@ -380,7 +380,7 @@ module ysyx_soc_perip #(
       endcase
     end
   end
-endmodule  //ysyx_MEM_SRAM
+endmodule  //rapt_MEM_SRAM
 
 
 

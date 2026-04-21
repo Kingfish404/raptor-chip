@@ -47,7 +47,7 @@ ifeq ($(ISA64),1)
   ARCH   := rv64imac_zicntr_zicond_zicsr_zifencei_zcb_zba_zbb_zbc_zbs
   ABI    := lp64
   XLEN   := 64
-  VFLAGS := -DYSYX_RV64
+  VFLAGS := -DRAPT_RV64
 else
   ARCH   := rv32imac_zicntr_zicond_zicsr_zifencei_zcb_zba_zbb_zbc_zbs
   ABI    := ilp32

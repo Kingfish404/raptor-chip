@@ -1,0 +1,127 @@
+# Ecosystem
+
+Simulators, FPGA boards, ASIC flow, software stack, and memory maps.
+
+## Supported Targets
+
+| Target      | Purpose                           | Entry                                                         |
+| ----------- | --------------------------------- | ------------------------------------------------------------- |
+| NEMU        | Software ISS (difftest reference) | `nemu/README.md`                                              |
+| NPC         | Verilator simulator               | `nsim/README.md`                                              |
+| ysyxSoC     | Chisel SoC for testing            | [memory map](#ysyxsoc-memory-map)                             |
+| FPGA        | Gowin Tang Nano 20K, LiteX        | `fpga/gowin-tang-nano-20k/README.md`, `fpga/litex/README.md`  |
+| ASIC (open) | Yosys + OpenSTA flow              | [yosys-opensta](https://github.com/Kingfish404/yosys-opensta) |
+
+## Simulators
+
+| Simulator   | Role                                 | Entry                        |
+| ----------- | ------------------------------------ | ---------------------------- |
+| **NEMU**    | Software ISS, reference model        | `make run-nemu32`, `nemu/`   |
+| **NPC**     | Verilator, cycle-accurate, waveform  | `make sim-npc32`, `nsim/`    |
+| **raptSoC** | Chisel SoC wrapping Raptor + devices | `make coremark-ysyxsoc` etc. |
+
+NPC is the primary development simulator. NEMU acts as the difftest reference for every commit.
+
+## FPGA Targets
+
+| Board / Flow                   | Status                          | Entry                                        |
+| ------------------------------ | ------------------------------- | -------------------------------------------- |
+| **Gowin Tang Nano 20K**        | Supported (synth + P&R)         | `fpga/gowin-tang-nano-20k/`, `make fpga-syn` |
+| **LiteX SoC** (Digilent, etc.) | Supported via LiteX integration | `fpga/litex/`                                |
+
+See [`fpga/litex/README.md`](../fpga/litex/README.md) for the LiteX BIOS + Linux flow.
+
+## ASIC Flow
+
+- **Synthesis**: [Yosys](https://github.com/YosysHQ/yosys) with
+  [yosys-slang](https://github.com/povik/yosys-slang) front-end for SystemVerilog.
+- **STA**: [yosys-opensta](https://github.com/Kingfish404/yosys-opensta) — open-source
+  static timing analysis (`make sta`).
+- **PDK**: open-source cell libraries; PPA results published under
+  [openppa](https://github.com/Kingfish404/openppa).
+
+See **[PROFILE.md](./PROFILE.md)** for the latest Freq / Power / Area results and
+**[REFERENCE.md](./REFERENCE.md)** for the PPA benchmark framework.
+
+## Software Stack
+
+| Layer      | Component                                          | Notes                                              |
+| ---------- | -------------------------------------------------- | -------------------------------------------------- |
+| App        | CoreMark, MicroBench, Embench-IoT, busybox, demos  | `app/`, `abstract-machine/app/`                    |
+| User OS    | nanos-lite (simple OS), Linux v6.18 userspace      | `abstract-machine/app/nanos-lite`                  |
+| ABI / libc | riscv-pk (proxy kernel), AM runtime, newlib, glibc | `app/pk/`, `abstract-machine/`                     |
+| Kernel     | Linux v6.12.57 / v6.18.15                          | `linux/`, see [linux_kernel.md](./linux_kernel.md) |
+| Firmware   | OpenSBI (v1.8.1)                                   | `linux/opensbi/`                                   |
+| Bootrom    | NPC / raptSoC reset vector                         | `nemu/src/memory/rom/`                             |
+
+## NPC Memory Map
+
+`npc_soc` peripherals and address ranges:
+
+| Device     | Range                       |
+| ---------- | --------------------------- |
+| CLINT      | `0x0200_0000 – 0x0200_ffff` |
+| UART 16550 | `0x1000_0000 – 0x1000_0fff` |
+| PSRAM      | `0x8000_0000 – 0x9fff_ffff` |
+
+Reset vector `PC_INIT` = `0x8000_0000` (start of PSRAM).
+
+## raptSoC Memory Map
+
+| Device        | Range                       |
+| ------------- | --------------------------- |
+| CLINT         | `0x0200_0000 – 0x0200_ffff` |
+| SRAM          | `0x0f00_0000 – 0x0fff_ffff` |
+| UART 16550    | `0x1000_0000 – 0x1000_0fff` |
+| SPI master    | `0x1000_1000 – 0x1000_1fff` |
+| GPIO          | `0x1000_2000 – 0x1000_200f` |
+| PS/2          | `0x1001_1000 – 0x1001_1007` |
+| MROM          | `0x2000_0000 – 0x2000_0fff` |
+| VGA           | `0x2100_0000 – 0x211f_ffff` |
+| Flash         | `0x3000_0000 – 0x3fff_ffff` |
+| ChipLink MMIO | `0x4000_0000 – 0x7fff_ffff` |
+| PSRAM         | `0x8000_0000 – 0x9fff_ffff` |
+| SDRAM         | `0xa000_0000 – 0xbfff_ffff` |
+| ChipLink MEM  | `0xc000_0000 – 0xffff_ffff` |
+
+Reset vector `PC_INIT` = `0x3000_0000` (Flash). A First-Stage / Second-Stage Bootloader
+(FSBL/SSBL) copies the program into SRAM before running it — see `trm.c`.
+
+## Reference Device Trees
+
+### Spike
+
+Source: [`riscv-isa-sim/riscv/platform.h`](https://github.com/riscv-software-src/riscv-isa-sim/blob/master/riscv/platform.h)
+
+```c
+#define DEFAULT_RSTVEC     0x00001000
+#define DEFAULT_ISA        "rv64imafdc_zicntr_zihpm"
+#define DEFAULT_PRIV       "MSU"
+#define CLINT_BASE         0x02000000
+#define CLINT_SIZE         0x000c0000
+#define PLIC_BASE          0x0c000000
+#define PLIC_SIZE          0x01000000
+#define NS16550_BASE       0x10000000
+#define NS16550_SIZE       0x100
+#define DRAM_BASE          0x80000000
+```
+
+### QEMU (`virt`)
+
+Source: [`hw/riscv/virt.c`](https://github.com/qemu/qemu/blob/master/hw/riscv/virt.c)
+
+```c
+[VIRT_CLINT]  = { 0x02000000, 0x00010000 },
+[VIRT_PLIC]   = { 0x0c000000, VIRT_PLIC_SIZE(...) },
+[VIRT_UART0]  = { 0x10000000, 0x00000100 },
+[VIRT_FLASH]  = { 0x20000000, 0x04000000 },
+[VIRT_DRAM]   = { 0x80000000, 0x00000000 },
+```
+
+## Upstream & Related Projects
+
+- [NJU-ProjectN/NEMU](https://github.com/NJU-ProjectN/nemu) — reference ISS.
+- [NJU-ProjectN/abstract-machine](https://github.com/NJU-ProjectN/abstract-machine) — AM runtime.
+- [riscv-software-src/opensbi](https://github.com/riscv-software-src/opensbi) — SBI firmware.
+- [enjoy-digital/litex](https://github.com/enjoy-digital/litex) — FPGA SoC framework.
+- [OpenXiangShan/XiangShan](https://github.com/OpenXiangShan/XiangShan) — inspirational reference.

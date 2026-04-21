@@ -12,14 +12,16 @@ fi
 BASE_DIR=$(cd "$env_dir" && pwd)
 echo "BASE_DIR => $BASE_DIR"
 
-export YSYX_HOME=$BASE_DIR
+export RAPTOR_HOME=$BASE_DIR
+# YSYX_HOME is kept as a back-compat alias of RAPTOR_HOME.
+export YSYX_HOME=$RAPTOR_HOME
 
-export NEMU_HOME=$YSYX_HOME/nemu
-export NSIM_HOME=$YSYX_HOME/nsim
+export NEMU_HOME=$RAPTOR_HOME/nemu
+export NSIM_HOME=$RAPTOR_HOME/nsim
 
-export AM_HOME=$YSYX_HOME/abstract-machine
-export NAVY_HOME=$YSYX_HOME/abstract-machine/app/navy-apps
-export NVBOARD_HOME=$YSYX_HOME/third_party/NJU-ProjectN/nvboard
+export AM_HOME=$RAPTOR_HOME/abstract-machine
+export NAVY_HOME=$RAPTOR_HOME/abstract-machine/app/navy-apps
+export NVBOARD_HOME=$RAPTOR_HOME/third_party/NJU-ProjectN/nvboard
 
 export CROSS_COMPILE=riscv64-elf-
 

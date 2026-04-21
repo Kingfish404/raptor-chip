@@ -20,7 +20,7 @@ jobs:
   litex-test:
     runs-on: ubuntu-latest
     env:
-      YSYX_HOME: ${{ github.workspace }}
+      RAPTOR_HOME: ${{ github.workspace }}
     steps:
       - uses: actions/checkout@v4
       - name: Setup environment
@@ -61,7 +61,7 @@ jobs:
   litex-embench:
     runs-on: ubuntu-latest
     env:
-      YSYX_HOME: ${{ github.workspace }}
+      RAPTOR_HOME: ${{ github.workspace }}
     steps:
       - uses: actions/checkout@v4
       - name: Setup environment
@@ -74,7 +74,7 @@ jobs:
         shell: bash -l {0}
         run: |
           cd fpga/litex
-          make embench SIM_TIMEOUT=600 2>&1 | tee /tmp/litex-embench.log || true
+          make embench SIM_TIMEOUT=1500 2>&1 | tee /tmp/litex-embench.log || true
 
       - name: Generate Embench summary
         if: always()

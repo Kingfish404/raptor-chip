@@ -1,12 +1,27 @@
-# Microarchitecture (uarch)
+# Microarchitecture
 
 ## Overview
 
-Raptor is an out-of-order, dual-issue RISC-V processor core with register renaming, a reorder buffer (ROB), reservation stations, and virtual memory support. The pipeline fetches, decodes, renames, and dispatches up to **2 instructions per cycle** (`YSYX_DUAL_ISSUE`). The commit stage supports **dual commit** -- up to 2 instructions can retire from the ROB per cycle when consecutive entries are both ready.
+Raptor is an out-of-order, super-scalar RISC-V processor core with register renaming, a reorder buffer (ROB), reservation stations, and virtual memory support. The pipeline fetches, decodes, renames, and dispatches up to **2 instructions per cycle** (`RAPT_DUAL_ISSUE`). The commit stage supports **dual commit** -- up to 2 instructions can retire from the ROB per cycle when consecutive entries are both ready.
 
 **ISA**: RV32/RV64 I + M (mul/div) + A (atomics: LR/SC, AMO) + C (compressed) + Zba (address generation, incl. RV64 `.UW` variants) + Zbb (basic bit-manipulation) + Zbc (carry-less multiply) + Zbs (single-bit) + Zcb (additional compressed ops) + Zicntr (base counters) + Zicond (conditional zero) + Zicsr + Zifencei + Zimop / Zcmop (may-be-ops / compressed may-be-ops, decoded as NOPs) + Zihintpause / Zihintntl / Zicbop (hint NOPs) + Sv32 MMU
 
-The core supports configurable **RV32** and **RV64** modes via a compile-time switch (`YSYX_RV64`). When `YSYX_RV64` is defined, XLEN=64 and all datapath, register file, AXI bus, and DPI-C interfaces widen to 64 bits. RV64 adds W-variant instructions (ADDIW, SLLIW, etc.) with 32-bit result sign-extension.
+The core supports configurable **RV32** and **RV64** modes via a compile-time switch (`RAPT_RV64`). When `RAPT_RV64` is defined, XLEN=64 and all datapath, register file, AXI bus, and DPI-C interfaces widen to 64 bits. RV64 adds W-variant instructions (ADDIW, SLLIW, etc.) with 32-bit result sign-extension.
+
+### ISA breakdown
+
+- Base: `RV32I` / `RV64I`, selected at compile time via `-DRAPT_RV64`.
+- Standard: `M` (mul/div), `A` (LR/SC, AMO), `C` (compressed), `Zicsr`,
+  `Zifencei`, `Zicntr`.
+- Bit-manipulation: `Zba` (address generation, incl. RV64 `.UW` variants),
+  `Zbb` (basic bit-manipulation), `Zbc` (carry-less multiply), `Zbs`
+  (single-bit), `Zcb` (additional compressed ops).
+- Conditional: `Zicond` (`czero.{eqz,nez}`).
+- Hints / may-be-ops (decoded as NOPs): `Zihintpause`, `Zihintntl`, `Zicbop`,
+  `Zimop`, `Zcmop`.
+- Privileged: M, S (with Sv32 MMU), U.
+
+Closest RISC-V profile peer: RVM23U32 / RVA20S64.
 
 ## Pipeline
 
@@ -73,56 +88,56 @@ The core supports configurable **RV32** and **RV64** modes via a compile-time sw
 
 ### Frontend
 
-#### IFU (`ysyx_ifu.sv`)
+#### IFU (`rapt_ifu.sv`)
 
 3-state FSM (`IDLE`->`VALID`->`STALL`). Sends PC to L1I and BPU in parallel. Next-PC priority: flush > early resteer > BPU taken > sequential (PC+2/+4/+6/+8). Pre-registered `seq2`/`seq4`/`seq6`/`seq8` avoid adder on critical `pc_ifu` loop.
 
 **Dual-fetch**: delivers two instructions from L1I via `ifu_idu_if.{inst_b, pc_b, valid_b}`. Supports all combinations: C+C, C+R32, R32+C, R32+R32. Uses `inst_n0` (current assembled word) and `inst_n1` (next 4-byte-aligned word from L1I) for assembling slot B. Suppressed when either slot is branch/jump, BPU predicts taken, L1I trap, or `inst_n1` data unavailable. R32+R32 at unaligned PC (`pc[1]=1`) excluded (would span 3 words). Stalls on system/atomic/trap until flush.
 
-#### BPU (`ysyx_bpu.sv`)
+#### BPU (`rapt_bpu.sv`)
 
 | Component                   | Implementation                                | Key details                                          |
 | --------------------------- | --------------------------------------------- | ---------------------------------------------------- |
-| **PHT** (`ysyx_bpu_pht.sv`) | 2-bit saturating, `PHT_SIZE` entries (512)    | `(* keep_hierarchy *)`, sync read, bimodal           |
-| **BTB** (`ysyx_bpu_btb.sv`) | 2-way SA, `BTB_SIZE` entries (128), 7-bit tag | `(* keep_hierarchy *)`, sync read, XOR-hash, LRU     |
+| **PHT** (`rapt_bpu_pht.sv`) | 2-bit saturating, `PHT_SIZE` entries (512)    | `(* keep_hierarchy *)`, sync read, bimodal           |
+| **BTB** (`rapt_bpu_btb.sv`) | 2-way SA, `BTB_SIZE` entries (128), 7-bit tag | `(* keep_hierarchy *)`, sync read, XOR-hash, LRU     |
 | **GHR**                     | 11-bit global history                         | Updated on committed branches / spec predictions     |
 | **RSB**                     | `RSB_SIZE` entries (8)                        | Committed + speculative pointers, link-reg detection |
 
 BTB entry types: `COND`, `DIRE`, `INDR`, `RETU`. PHT updated on committed branches; BTB on flushes (including JALR). Both invalidated on `fence_time`.
 
-#### L1I (`ysyx_l1i.sv`)
+#### L1I (`rapt_l1i.sv`)
 
 N-way set-associative I-cache (`L1I_N_WAYS`, default 1). `2^L1I_LEN` sets (64), `2^L1I_LINE_LEN` words/line (4). 7-state FSM (`IDLE`, `PTWAIT`, `TRAP`, `RD_A`, `RD_0`, `RD_1`, `FINA`).
 
 | Storage | Implementation                                                                       |
 | ------- | ------------------------------------------------------------------------------------ |
-| Data    | Banked `ysyx_sram_1r1w` per way per word (sync read)                                 |
-| Tags    | Banked `ysyx_sram_1r1w` per way per word (combinational compare from SRAM output)    |
+| Data    | Banked `rapt_sram_1r1w` per way per word (sync read)                                 |
+| Tags    | Banked `rapt_sram_1r1w` per way per word (combinational compare from SRAM output)    |
 | Valid   | Register arrays per way (`l1i_valid[way][set]`) for fast `fence.i` bulk invalidation |
 
 3-tier pre-read: current bank reads `addr_idx`, next bank reads `addr_idx_next` (+2), remaining banks read `addr_idx_next4` (+4). This eliminates SRAM bubbles on sequential fetch and provides `inst_n1` (next 4-byte-aligned word) for generalized dual-fetch. Way replacement: first invalid, then toggle `replace_bit` per set. IFQ (2-entry) for outstanding requests. ITLB + IPTW for Sv32 translation.
 
-#### IDU (`ysyx_idu.sv`)
+#### IDU (`rapt_idu.sv`)
 
-2-state FSM (`IDLE`/`VALID`). Dual decode: slot A has `ysyx_idu_decoder_c` + `ysyx_idu_decoder`; slot B has its own pair (`ysyx_idu_decoder_c` + `ysyx_idu_decoder`), handling both C-type and R32 instructions. Slot B suppressed on slot A branch/jump/trap.
+2-state FSM (`IDLE`/`VALID`). Dual decode: slot A has `rapt_idu_decoder_c` + `rapt_idu_decoder`; slot B has its own pair (`rapt_idu_decoder_c` + `rapt_idu_decoder`), handling both C-type and R32 instructions. Slot B suppressed on slot A branch/jump/trap.
 
 **Early resteer**: detects BPU misprediction on non-branch (`pnpc ≠ pc + inst_len && !branch`), sends one-shot `resteer` pulse + corrected PC back to IFU, patches `pnpc` in downstream UOP.
 
 ### Backend
 
-#### RNU (`ysyx_rnu.sv`)
+#### RNU (`rapt_rnu.sv`)
 
 Pure rename: maps arch -> physical registers. Dual-rename with RAW dependency handling (slot B sees slot A's result when they share an arch register).
 
 - **RNQ**: Circular queue, `RIQ_SIZE` entries (8). Dual-issue enqueues atomically; paired via `rnq_is_pair`.
-- **Freelist** (`ysyx_rnu_freelist.sv`): Circular FIFO, `PHY_SIZE` entries (64). Dual alloc ports (B reads `head+1`). Dual dealloc for dual commit. Flush: rewinds head by in-flight count.
-- **MapTable** (`ysyx_rnu_maptable.sv`): MAP (6R + 2W, B wins conflict) + RAT (2W, B wins). Flush: MAP←RAT with concurrent commit forwarding.
+- **Freelist** (`rapt_rnu_freelist.sv`): Circular FIFO, `PHY_SIZE` entries (64). Dual alloc ports (B reads `head+1`). Dual dealloc for dual commit. Flush: rewinds head by in-flight count.
+- **MapTable** (`rapt_rnu_maptable.sv`): MAP (6R + 2W, B wins conflict) + RAT (2W, B wins). Flush: MAP←RAT with concurrent commit forwarding.
 
-#### PRF (`ysyx_prf.sv`)
+#### PRF (`rapt_prf.sv`)
 
 `PHY_SIZE` entries (64). 4 read ports (2 per dispatch slot) + 2 write ports (ALU writeback + IOQ broadcast). `prf_valid[]` + `prf_transient[]` tracking. Flush: transient entries invalidated. Commit: transient cleared. Dealloc: valid cleared.
 
-#### ROU (`ysyx_rou.sv`)
+#### ROU (`rapt_rou.sv`)
 
 Dispatch queue + reorder buffer + commit logic.
 
@@ -133,60 +148,60 @@ Dispatch queue + reorder buffer + commit logic.
 - **Flush triggers**: fence\_i, branch mispredict, trap, system op, atomic (from either slot).
 - **Async trap**: CLINT timer interrupt (`clint_trap`).
 
-#### EXU (`ysyx_exu.sv`)
+#### EXU (`rapt_exu.sv`)
 
-- **RS**: `RS_SIZE` entries (8). Lowest-index-first priority issue. Dual ALU writeback: primary ALU on `exu_rou` (any op), secondary ALU on `exu_rou_b` restricted to simple-ALU (no branch/CSR/system/trap/mul). Dual dispatch finds `free_idx_a` + `free_idx_b`. Submodules: `ysyx_exu_alu` (combinational, x2; 6-bit opcode, 64 operations including dedicated ALU ops for RV64 Zba `.UW` variants -- `ADD_UW`/`SLLI_UW`/`SH[1-3]ADD` zero-extend rs1[31:0] and produce a full 64-bit result, bypassing the W-variant output sign-extension), `ysyx_exu_mul` (pipelined fast-multiply + iterative restoring divider). Pipelined MUL with tag-based completion (`mul_out_tag` matches the originating RS entry), allowing multiple MULs in flight without cross-contamination.
+- **RS**: `RS_SIZE` entries (8). Lowest-index-first priority issue. Dual ALU writeback: primary ALU on `exu_rou` (any op), secondary ALU on `exu_rou_b` restricted to simple-ALU (no branch/CSR/system/trap/mul). Dual dispatch finds `free_idx_a` + `free_idx_b`. Submodules: `rapt_exu_alu` (combinational, x2; 6-bit opcode, 64 operations including dedicated ALU ops for RV64 Zba `.UW` variants -- `ADD_UW`/`SLLI_UW`/`SH[1-3]ADD` zero-extend rs1[31:0] and produce a full 64-bit result, bypassing the W-variant output sign-extension), `rapt_exu_mul` (pipelined fast-multiply + iterative restoring divider). Pipelined MUL with tag-based completion (`mul_out_tag` matches the originating RS entry), allowing multiple MULs in flight without cross-contamination.
 - **IOQ**: `IOQ_SIZE` entries (8), circular FIFO for ld/st/amo/CSR -- now with **out-of-order load issue to L1D**. A younger ready load can drive L1D ahead of an older pending store/load when safe: (a) per-entry completion state (`ioq_complete`/`ioq_rdata`/`ioq_load_trap`/`ioq_load_cause`/`ioq_load_skip`); (b) oldest-ready priority encoder over `ioq_load_issue_vec`; (c) older-store blocker mask holds a load if any older IOQ store has unresolved base reg (`pr1!=0`), pending MMU translation, or word-address conflict; (d) `oo_pending` FSM locks `active_idx` across multi-cycle L1D misses so the response latches into the originating entry; (e) commit mux at `ioq_head` consumes either the live L1D response (when `active_idx==head`) or pre-latched `ioq_rdata[head]`; (f) atomics (LR/SC/AMO) and uncacheable MMIO stay gated to ROB head for memory ordering. Single outstanding L1D request.
 - **Atomics**: LR/SC with reservation register, full AMO set.
 - **Store MMU**: address translation via `exu_l1d_if`.
 
-#### CMU (`ysyx_cmu.sv`)
+#### CMU (`rapt_cmu.sv`)
 
 Broadcast unit. Outputs: `rpc`, `cpc`, branch resolution, `flush_pipe`, `fence_i`, `fence_time`, `time_trap`. Dual-commit broadcasts slot 1's branch info; call/return detection via link register (`rd/rs1 == x1|x5`). Per-slot `rd_a`/`rd_b`/`valid_b` for freelist recovery.
 
-#### CSR (`ysyx_csr.sv`)
+#### CSR (`rapt_csr.sv`)
 
 32-entry register file, M/S-mode. Trap entry/exit (`ecall`/`ebreak`/`mret`/`sret`), privilege transitions (M/S/U), delegation (`medeleg`/`mideleg`), `MSTATUS`<->`SSTATUS` mirroring, `mcycle`/`time` counters. Broadcasts: `priv`, `satp`, MMU enables, `tvec`.
 
 ### Memory Subsystem
 
-#### LSU (`ysyx_lsu.sv`)
+#### LSU (`rapt_lsu.sv`)
 
 - **STQ**: `SQ_SIZE` entries, speculative stores (virtual address for forwarding)
 - **SQ**: `SQ_SIZE` entries, committed stores (physical + virtual address)
 - Store FSM: 2-state (`LS_S_V`/`LS_S_R`)
 - Store-to-load forwarding: SQ + STQ CAM by virtual address, youngest-match-wins
 
-#### L1D (`ysyx_l1d.sv`)
+#### L1D (`rapt_l1d.sv`)
 
 2-way set-associative. `2^L1D_LEN` sets (32), `2^L1D_LINE_LEN` words/line (2). 5-state FSM (`IDLE`, `PTWAIT`, `TRAP`, `LD_A`, `LD_D`).
 
 | Storage   | Implementation                                                                      |
 | --------- | ----------------------------------------------------------------------------------- |
-| Data      | Banked `ysyx_sram_1r1w` per word (sync read)                                        |
+| Data      | Banked `rapt_sram_1r1w` per word (sync read)                                        |
 | Tag/Valid | Per-word register arrays for simultaneous ld/st hit check + fast fence invalidation |
 
 Write-through policy. Partial stores (SB/SH): read-modify-write (RMW) 2-cycle merge in IDLE. Speculative SRAM read: VIPT-safe virtual index in IDLE. Separate DTLB + DSTLB instances; shared DPTW for both. Reservation register for LR/SC. Cacheability via `addr_cacheable()`.
 
-#### TLB (`ysyx_tlb.sv`)
+#### TLB (`rapt_tlb.sv`)
 
 Reusable fully-associative Sv32 TLB. `ENTRIES` param (default 4), ASID-aware. Combinational lookup, sequential fill (no duplicates), round-robin replacement, bulk flush. Instantiated as: `u_itlb` (L1I), `u_dtlb` (L1D load), `u_dstlb` (L1D store).
 
-#### PTW (`ysyx_ptw.sv`)
+#### PTW (`rapt_ptw.sv`)
 
 Reusable Sv32 two-level walker. 3-state FSM (`IDLE`->`LVL1`->`LVL0`). Leaf detection via `PTE.R||PTE.X` (superpage at LVL1). Shares AXI read channel with cache fill. RV64-aware (selects correct 32-bit PTE half). Instantiated as: `u_iptw` (L1I), `u_dptw` (L1D).
 
-#### BUS (`ysyx_bus.sv`)
+#### BUS (`rapt_bus.sv`)
 
 AXI4 master bridge arbitrating L1I/L1D (L1D priority). Read FSM: 3-state (`LD_A`/`LD_AS`/`LD_D`). Write FSM: 3-state (`LS_S_A`/`LS_S_W`/`LS_S_B`). Load source tracking: `L1I`/`L1D`/`TLBI`/`TLBD`. CLINT reads handled locally.
 
-#### CLINT (`ysyx_clint.sv`)
+#### CLINT (`rapt_clint.sv`)
 
 64-bit `mtime` counter. Timer interrupt every 262144 cycles (`mtime[18:0] == 0x40000`). Instantiated inside BUS.
 
 ## Interfaces
 
-### Inter-module (`ysyx_if.svh`, `ysyx_*_if.svh`)
+### Inter-module (`rapt_if.svh`, `rapt_*_if.svh`)
 
 | Interface          | Direction        | Description                                             |
 | ------------------ | ---------------- | ------------------------------------------------------- |
@@ -211,41 +226,41 @@ AXI4 master bridge arbitrating L1I/L1D (L1D priority). Read FSM: 3-state (`LD_A`
 | `l1i_bus_if`       | L1I->BUS         | I-cache miss read                                       |
 | `l1d_bus_if`       | L1D->BUS         | D-cache miss read + write-through                       |
 
-### RNU internal (`ysyx_rnu_internal_if.svh`)
+### RNU internal (`rapt_rnu_internal_if.svh`)
 
 | Interface   | Description                                              |
 | ----------- | -------------------------------------------------------- |
 | `rnu_fl_if` | Freelist: dual alloc (A/B), dual dealloc, flush recovery |
 | `rnu_mt_if` | MapTable: 6R + 2W (MAP), 2W (RAT)                        |
 
-## Configuration (`ysyx_config.svh`)
+## Configuration (`rapt_config.svh`)
 
 | Parameter           | Default | Description                                |
 | ------------------- | ------- | ------------------------------------------ |
-| `YSYX_XLEN`         | 32      | Register width (64 with `YSYX_RV64`)       |
-| `YSYX_M_FAST`       | 1       | Single-cycle mul/div (sim mode)            |
-| `YSYX_L1I_LINE_LEN` | 2       | L1I line: 2² = 4 words                     |
-| `YSYX_L1I_LEN`      | 6       | L1I sets: 2⁶ = 64                          |
-| `YSYX_L1I_N_WAYS`   | 1       | L1I ways (1 = direct-mapped)               |
-| `YSYX_PHT_SIZE`     | 512     | PHT entries                                |
-| `YSYX_BTB_SIZE`     | 128     | BTB entries (64 sets × 2 ways)             |
-| `YSYX_BTB_WAYS`     | 2       | BTB associativity                          |
-| `YSYX_RSB_SIZE`     | 8       | Return stack entries                       |
-| `YSYX_RIQ_SIZE`     | 8       | Rename queue (RNQ) entries                 |
-| `YSYX_IIQ_SIZE`     | 8       | Dispatch queue (UOQ) entries               |
-| `YSYX_ROB_SIZE`     | 16      | Reorder buffer entries                     |
-| `YSYX_RS_SIZE`      | 8       | Reservation station entries                |
-| `YSYX_IOQ_SIZE`     | 8       | In-order queue entries                     |
-| `YSYX_SQ_SIZE`      | 8       | Store queue entries                        |
-| `YSYX_L1D_LINE_LEN` | 1       | L1D line: 2¹ = 2 words/line                |
-| `YSYX_L1D_LEN`      | 5       | L1D sets: 2⁵ = 32                          |
-| `YSYX_L1D_N_WAYS`   | 2       | L1D ways (2-way SA)                        |
-| `YSYX_DUAL_COMMIT`  | defined | Retire up to 2 ROB entries/cycle           |
-| `YSYX_DUAL_ISSUE`   | defined | Dual-issue: 2 insts/cycle through pipeline |
-| `YSYX_ISSUE_WIDTH`  | 2       | Dispatch width (2 when dual-issue, else 1) |
-| `YSYX_PHY_SIZE`     | 64      | Physical registers                         |
+| `RAPT_XLEN`         | 32      | Register width (64 with `RAPT_RV64`)       |
+| `RAPT_M_FAST`       | 1       | Single-cycle mul/div (sim mode)            |
+| `RAPT_L1I_LINE_LEN` | 2       | L1I line: 2² = 4 words                     |
+| `RAPT_L1I_LEN`      | 6       | L1I sets: 2⁶ = 64                          |
+| `RAPT_L1I_N_WAYS`   | 1       | L1I ways (1 = direct-mapped)               |
+| `RAPT_PHT_SIZE`     | 512     | PHT entries                                |
+| `RAPT_BTB_SIZE`     | 128     | BTB entries (64 sets × 2 ways)             |
+| `RAPT_BTB_WAYS`     | 2       | BTB associativity                          |
+| `RAPT_RSB_SIZE`     | 8       | Return stack entries                       |
+| `RAPT_RIQ_SIZE`     | 8       | Rename queue (RNQ) entries                 |
+| `RAPT_IIQ_SIZE`     | 8       | Dispatch queue (UOQ) entries               |
+| `RAPT_ROB_SIZE`     | 16      | Reorder buffer entries                     |
+| `RAPT_RS_SIZE`      | 8       | Reservation station entries                |
+| `RAPT_IOQ_SIZE`     | 8       | In-order queue entries                     |
+| `RAPT_SQ_SIZE`      | 8       | Store queue entries                        |
+| `RAPT_L1D_LINE_LEN` | 1       | L1D line: 2¹ = 2 words/line                |
+| `RAPT_L1D_LEN`      | 5       | L1D sets: 2⁵ = 32                          |
+| `RAPT_L1D_N_WAYS`   | 2       | L1D ways (2-way SA)                        |
+| `RAPT_DUAL_COMMIT`  | defined | Retire up to 2 ROB entries/cycle           |
+| `RAPT_DUAL_ISSUE`   | defined | Dual-issue: 2 insts/cycle through pipeline |
+| `RAPT_ISSUE_WIDTH`  | 2       | Dispatch width (2 when dual-issue, else 1) |
+| `RAPT_PHY_SIZE`     | 64      | Physical registers                         |
 
-## Key Types (`ysyx_pkg.sv`)
+## Key Types (`rapt_pkg.sv`)
 
 | Type               | Description                                                                                   |
 | ------------------ | --------------------------------------------------------------------------------------------- |

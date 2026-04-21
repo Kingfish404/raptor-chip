@@ -12,11 +12,19 @@ SHELL := /bin/bash
 .DEFAULT_GOAL := help
 
 # --- Environment (inherited from root Makefile or set manually) ---
-YSYX_HOME   ?= $(abspath ..)
-NSIM_HOME   := $(YSYX_HOME)/nsim
-NEMU_HOME   := $(YSYX_HOME)/nemu
-AM_HOME     := $(YSYX_HOME)/abstract-machine
+RAPTOR_HOME   ?= $(abspath ..)
+NSIM_HOME   := $(RAPTOR_HOME)/nsim
+NEMU_HOME   := $(RAPTOR_HOME)/nemu
+AM_HOME     := $(RAPTOR_HOME)/abstract-machine
 VERIFY_HOME := $(abspath .)
+
+# Export vars that sub-Makefiles (nsim/, nemu/) expect. YSYX_HOME is a
+# back-compat alias of RAPTOR_HOME required by nsim/Makefile's repo guard.
+export RAPTOR_HOME
+export YSYX_HOME := $(RAPTOR_HOME)
+export NSIM_HOME
+export NEMU_HOME
+export AM_HOME
 
 CROSS_COMPILE ?= riscv64-elf-
 CC  := $(CROSS_COMPILE)gcc
@@ -55,14 +63,14 @@ ISA      ?= rv32## rv32 or rv64
 BUILD_DIR := $(VERIFY_HOME)/build
 FUZZ_DIR  := $(BUILD_DIR)/fuzz
 COV_DIR   := $(BUILD_DIR)/coverage
-AM_KERNELS := $(YSYX_HOME)/abstract-machine/app/am-kernels
+AM_KERNELS := $(RAPTOR_HOME)/abstract-machine/app/am-kernels
 
 ifeq ($(ISA),rv64)
   NPC_BIN  := $(NPC_BIN_64)
   NEMU_SO  := $(NEMU_SO_64)
   MARCH    := rv64imac_zicntr_zicond_zicsr_zifencei_zcb_zba_zbb_zbc_zbs
   MABI     := lp64
-  VFLAGS   := -DYSYX_RV64
+  VFLAGS   := -DRAPT_RV64
   ISA_XLEN := 64
 else
   NPC_BIN  := $(NPC_BIN_32)
@@ -103,15 +111,15 @@ help: ## Show this help message
 # ============================================================================
 $(NPC_BIN):
 	@echo "[verify] Building NPC simulator (difftest enabled)..."
-	$(MAKE) -C $(YSYX_HOME) config-npc32-difftest
+	$(MAKE) -C $(RAPTOR_HOME) config-npc32-difftest
 	$(MAKE) -C $(NSIM_HOME) -j$(NPROC) VFLAGS="$(VFLAGS)"
 
 $(NEMU_SO):
 	@echo "[verify] Building NEMU reference SO..."
 ifeq ($(ISA),rv64)
-	$(MAKE) -C $(YSYX_HOME) config-nemu64-ref
+	$(MAKE) -C $(RAPTOR_HOME) config-nemu64-ref
 else
-	$(MAKE) -C $(YSYX_HOME) config-nemu32-ref
+	$(MAKE) -C $(RAPTOR_HOME) config-nemu32-ref
 endif
 
 $(MROM_IMG):
@@ -120,8 +128,8 @@ $(MROM_IMG):
 .PHONY: check-prereqs
 check-prereqs: $(MROM_IMG) ## Verify all prerequisites are built
 	@echo "[verify] Checking prerequisites..."
-	@test -f $(NPC_BIN)  || (echo "ERROR: NPC binary not found: $(NPC_BIN)"  && echo "  Run: make -C $(YSYX_HOME) build-npc32" && exit 1)
-	@test -f $(NEMU_SO)  || (echo "ERROR: NEMU SO not found: $(NEMU_SO)"    && echo "  Run: make -C $(YSYX_HOME) config-nemu32-ref" && exit 1)
+	@test -f $(NPC_BIN)  || (echo "ERROR: NPC binary not found: $(NPC_BIN)"  && echo "  Run: make -C $(RAPTOR_HOME) build-npc32" && exit 1)
+	@test -f $(NEMU_SO)  || (echo "ERROR: NEMU SO not found: $(NEMU_SO)"    && echo "  Run: make -C $(RAPTOR_HOME) config-nemu32-ref" && exit 1)
 	@echo "[verify] All prerequisites OK."
 
 # ============================================================================
@@ -175,7 +183,7 @@ fuzz-run: check-prereqs ## Run fuzz tests in FUZZ_SRC_DIR with difftest
 			-T $(FUZZ_LINKER) -o "$$elf" "$$src" 2>"$(FUZZ_SRC_DIR)/$${name}.compile.log"; then \
 			echo "  [CERR] $$name"; ERR=$$((ERR+1)); continue; fi; \
 		$(OBJCOPY) -O binary "$$elf" "$$bin"; \
-		set +e; $(TIMEOUT_RUN) $(TIMEOUT) -- $(NPC_BIN) -b -n -d $(NEMU_SO) -r $(MROM_IMG) "$$bin" >"$$log" 2>&1; \
+		set +e; $(TIMEOUT_RUN) $(TIMEOUT) $(NPC_BIN) -b -n -d $(NEMU_SO) -r $(MROM_IMG) "$$bin" >"$$log" 2>&1; \
 		rc=$$?; set -e; \
 		if [ $$rc -eq 0 ]; then \
 			if grep -qiE "BAD TRAP|ABORT" "$$log"; then \
@@ -290,9 +298,6 @@ riscof-gen: ## Generate self-checking ELFs via ACT4 framework
 	@echo "  Config:  $(ACT4_CONFIG)"
 	@echo "  Workdir: $(ACT4_WORKDIR)"
 	@mkdir -p "$(ACT4_WORKDIR)"
-	@# Touch extensions.txt so the act tool skips UDB/Ruby (extensions list is static)
-	@mkdir -p "$(dir $(ACT4_ELF_DIR))"
-	@touch "$(dir $(ACT4_ELF_DIR))extensions.txt"
 	cd "$(ACT4_REPO)" && \
 		$(MAKE) elfs \
 		CONFIG_FILES="$(ACT4_CONFIG)" \
@@ -352,6 +357,7 @@ define RUN_AND_SAVE_COVERAGE
 endef
 
 .PHONY: coverage coverage-build coverage-run coverage-run-coremark \
+	coverage-run-coremark-pk coverage-run-hello-pk coverage-run-isa-tests-pk \
 	coverage-run-microbench coverage-run-fuzz coverage-run-sigtest \
 	coverage-report coverage-clean
 
@@ -374,14 +380,30 @@ coverage-run: ## Run test suite to collect coverage
 	@echo "  Output: $(COV_DIR)"
 	@echo "================================================================"
 	$(MAKE) --no-print-directory coverage-run-coremark
+	$(MAKE) --no-print-directory coverage-run-coremark-pk
+	$(MAKE) --no-print-directory coverage-run-hello-pk
+	$(MAKE) --no-print-directory coverage-run-isa-tests-pk
 	$(MAKE) --no-print-directory coverage-run-microbench
 	$(MAKE) --no-print-directory coverage-run-fuzz
 	$(MAKE) --no-print-directory coverage-run-sigtest
 	@echo "[coverage] Data collection complete."
 	@ls -la "$(COV_DIR)/"coverage_*.dat 2>/dev/null || echo "[coverage] No coverage_*.dat files found (coverage build may be needed)"
 
+# app/ (pk mode) ISA64 flag: rv64 -> 1, rv32 -> empty (unset)
+APP_ISA64 := $(if $(filter rv64,$(ISA)),1,)
+
 coverage-run-coremark: ## Run only coremark coverage workload
 	$(call RUN_AND_SAVE_COVERAGE,coremark,$(MAKE) -C $(AM_KERNELS)/benchmarks/coremark_eembc ARCH=$(NPC_ARCH_COV) run ARGS="-b -n" VFLAGS="$(VFLAGS)")
+
+coverage-run-coremark-pk: ## Run coremark under pk (app/) for coverage
+	$(call RUN_AND_SAVE_COVERAGE,coremark-pk,$(MAKE) -C $(RAPTOR_HOME)/app coremark ISA64=$(APP_ISA64) ARGS="-b -n" VFLAGS="$(VFLAGS)")
+
+coverage-run-hello-pk: ## Run hello under pk (app/) for coverage
+	$(call RUN_AND_SAVE_COVERAGE,hello-pk,$(MAKE) -C $(RAPTOR_HOME)/app hello ISA64=$(APP_ISA64) ARGS="-b -n" VFLAGS="$(VFLAGS)")
+
+coverage-run-isa-tests-pk: ## Run ISA tests under pk (app/) for coverage
+	$(call RUN_AND_SAVE_COVERAGE,isa-tests-pk,$(MAKE) -C $(RAPTOR_HOME)/app isa-tests ISA64=$(APP_ISA64) ARGS="-b -n" VFLAGS="$(VFLAGS)")
+
 
 coverage-run-microbench: ## Run only microbench coverage workload
 	$(call RUN_AND_SAVE_COVERAGE,microbench,$(MAKE) -C $(AM_KERNELS)/benchmarks/microbench ARCH=$(NPC_ARCH_COV) run ARGS="-b -n" mainargs=$(COV_MICROBENCH_ARGS) VFLAGS="$(VFLAGS)")
@@ -443,7 +465,7 @@ sigtest-run: check-prereqs ## Run signature tests with difftest
 			head -5 "$(SIGTEST_DIR)/$${name}.compile.log" | sed 's/^/         /'; \
 			ERR=$$((ERR+1)); continue; fi; \
 		$(OBJCOPY) -O binary "$$elf" "$$bin"; \
-		set +e; $(TIMEOUT_RUN) $(TIMEOUT) -- $(NPC_BIN) -b -n -d $(NEMU_SO) -r $(MROM_IMG) "$$bin" >"$$log" 2>&1; \
+		set +e; $(TIMEOUT_RUN) $(TIMEOUT) $(NPC_BIN) -b -n -d $(NEMU_SO) -r $(MROM_IMG) "$$bin" >"$$log" 2>&1; \
 		rc=$$?; set -e; \
 		if [ $$rc -eq 0 ]; then \
 			if grep -qiE "BAD TRAP|ABORT" "$$log"; then \

@@ -24,7 +24,7 @@ jobs:
   ppa-npc-eval:
     runs-on: ubuntu-latest
     env:
-      YSYX_HOME: ${{ github.workspace }}
+      RAPTOR_HOME: ${{ github.workspace }}
       NEMU_HOME: ${{ github.workspace }}/nemu
       AM_HOME: ${{ github.workspace }}/abstract-machine
       CROSS_COMPILE: riscv64-elf-
@@ -119,7 +119,7 @@ jobs:
   ysyxsoc-benchmark:
     runs-on: ubuntu-latest
     env:
-      YSYX_HOME: ${{ github.workspace }}
+      RAPTOR_HOME: ${{ github.workspace }}
       NEMU_HOME: ${{ github.workspace }}/nemu
       AM_HOME: ${{ github.workspace }}/abstract-machine
       CROSS_COMPILE: riscv64-elf-
@@ -141,14 +141,14 @@ jobs:
       - name: Run microbench riscv32e-ysyxsoc
         shell: bash -l {0}
         run: |
-          make -C $YSYX_HOME/abstract-machine/app/am-kernels/benchmarks/microbench ARCH=riscv32e-ysyxsoc run mainargs="test" ARGS="-b -n" 2>&1 | tee /tmp/mb-soce.log
+          make -C $RAPTOR_HOME/abstract-machine/app/am-kernels/benchmarks/microbench ARCH=riscv32e-ysyxsoc run mainargs="test" ARGS="-b -n" 2>&1 | tee /tmp/mb-soce.log
       - name: Run coremark riscv32-ysyxsoc
         shell: bash -l {0}
         run: make coremark-ysyxsoc ARGS="-b -n" 2>&1 | tee /tmp/cm-soc.log
       - name: Run coremark riscv32e-ysyxsoc
         shell: bash -l {0}
         run: |
-          make -C $YSYX_HOME/abstract-machine/app/am-kernels/benchmarks/coremark_eembc ARCH=riscv32e-ysyxsoc run ARGS="-b -n" 2>&1 | tee /tmp/cm-soce.log
+          make -C $RAPTOR_HOME/abstract-machine/app/am-kernels/benchmarks/coremark_eembc ARCH=riscv32e-ysyxsoc run ARGS="-b -n" 2>&1 | tee /tmp/cm-soce.log
       - name: ysyxSoC benchmark summary
         shell: bash -l {0}
         run: |

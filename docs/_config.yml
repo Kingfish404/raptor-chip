@@ -1,0 +1,39 @@
+title: Raptor
+description: A super-scalar, out-of-order RISC-V processor core
+# Jekyll processing is enabled by default; set `markdown: kramdown` for tables etc.
+markdown: kramdown
+kramdown:
+  input: GFM
+  hard_wrap: false
+  syntax_highlighter: rouge
+plugins:
+  - jekyll-relative-links
+  - jekyll-optional-front-matter
+  - jekyll-readme-index
+relative_links:
+  enabled: true
+  collections: true
+optional_front_matter:
+  remove_originals: true
+readme_index:
+  remove_originals: true
+  with_frontmatter: true
+
+# Apply the theme layout + `relative_links` processing to every .md file
+# without requiring YAML front-matter on each one.
+defaults:
+  - scope:
+      path: ""
+    values:
+      layout: "default"
+
+include:
+  - README.md
+exclude:
+  - ref.tmp
+  - .gitignore
+  - Makefile
+  - Gemfile
+  - Gemfile.lock
+  - vendor
+  - .bundle

@@ -12,9 +12,9 @@ smtbmc
 
 [script]
 plugin -i slang
-read_slang --single-unit -DFORMAL -DYSYX_XLEN=32 -DYSYX_REG_SIZE=32 -DYSYX_REG_LEN=5 formal_bus.sv ysyx_pack.sv
+read_slang --single-unit -DFORMAL -DRAPT_XLEN=32 -DRAPT_REG_SIZE=32 -DRAPT_REG_LEN=5 formal_bus.sv rapt_pack.sv
 prep -top formal_bus
 
 [files]
 formal_bus.sv
-ysyx_pack.sv ./../../nsim/build/ysyx_pack.sv
+rapt_pack.sv ./../../nsim/build/rapt_pack.sv

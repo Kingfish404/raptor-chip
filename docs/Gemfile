@@ -1,0 +1,20 @@
+source "https://rubygems.org"
+
+# Minimal Jekyll stack that matches docs/_config.yml.
+# (Using `jekyll` directly instead of the heavy `github-pages` meta-gem so this
+# runs on a wider range of Ruby versions. GitHub Pages still builds the site
+# itself using its own pinned `github-pages` gem in CI.)
+gem "jekyll", "~> 4.3"
+
+group :jekyll_plugins do
+  gem "jekyll-relative-links"
+  gem "jekyll-optional-front-matter"
+  gem "jekyll-readme-index"
+end
+
+# Windows / JRuby compatibility shims (harmless elsewhere).
+gem "tzinfo-data", platforms: [:mingw, :mswin, :x64_mingw, :jruby]
+gem "wdm", "~> 0.1.1", platforms: [:mingw, :mswin, :x64_mingw]
+
+# macOS 14+ dropped `webrick` from the stdlib; Jekyll's built-in server needs it.
+gem "webrick", "~> 1.8"
