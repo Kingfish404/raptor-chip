@@ -9,7 +9,7 @@ include $(APP_HOME)/common.mk
 ARGS ?= -b ## NPC simulator args (-b: batch, -n: no wave)
 
 # ---- Directories ----
-PK_SRC_DIR := $(YSYX_HOME)/third_party/riscv-software-src/riscv-pk
+PK_SRC_DIR := $(RAPTOR_HOME)/third_party/riscv-software-src/riscv-pk
 PK_STAGING := $(APP_HOME)/build/pk-staging-rv$(XLEN)
 PK_BUILD   := $(APP_HOME)/build/pk-build-rv$(XLEN)
 BBL_BUILD  := $(APP_HOME)/build/bbl-build-rv$(XLEN)
@@ -176,11 +176,11 @@ endif
 # ============================================================================
 # BBL + Linux boot
 # ============================================================================
-LINUX_IMAGE ?= $(YSYX_HOME)/linux/build/arch/riscv/boot/Image ## Linux kernel Image path
+LINUX_IMAGE ?= $(RAPTOR_HOME)/linux/build/arch/riscv/boot/Image ## Linux kernel Image path
 
 bbl-linux: $(PK_STAGING)/.stamp ## Build BBL with Linux payload, run on NPC
 	@test -f $(LINUX_IMAGE) || (echo "ERROR: Linux Image not found at $(LINUX_IMAGE)" && \
-		echo "  Build it: make -C $(YSYX_HOME)/linux build_linux" && exit 1)
+		echo "  Build it: make -C $(RAPTOR_HOME)/linux build_linux" && exit 1)
 	rm -rf $(BBL_BUILD)
 	@mkdir -p $(BBL_BUILD)
 	cd $(BBL_BUILD) && CC="$(PK_CC)" $(PK_STAGING)/configure \

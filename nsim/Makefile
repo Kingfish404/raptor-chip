@@ -2,8 +2,11 @@ ifneq ($(words $(CURDIR)),1)
  $(error Unsupported: GNU Make cannot build in directories containing spaces, build elsewhere: '$(CURDIR)')
 endif
 
-ifeq ($(wildcard $(YSYX_HOME)/nsim/Makefile),)
-  $(error YSYX_HOME=$(YSYX_HOME) is not a YSYX repo)
+# Keep RAPTOR_HOME as the canonical repo root.
+RAPTOR_HOME ?= $(abspath $(CURDIR)/..)
+
+ifeq ($(wildcard $(RAPTOR_HOME)/nsim/Makefile),)
+	$(error RAPTOR_HOME=$(RAPTOR_HOME) is not a raptor-chip repo)
 endif
 
 ifeq ($(VERILATOR_ROOT),)
@@ -24,7 +27,7 @@ remove_quote = $(patsubst "%",%,$(1))
 NPROC ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 
 ifeq ($(CONFIG_MODE), "soc")
-SOC_HOME  = $(abspath $(YSYX_HOME)/third_party/kingfish404/ysyxSoC)
+SOC_HOME  = $(abspath $(RAPTOR_HOME)/third_party/kingfish404/ysyxSoC)
 INC_PATH += $(abspath $(SOC_HOME)/perip/uart16550/rtl) $(abspath $(SOC_HOME)/perip/spi/rtl)
 VTARGET=ysyxSoCFull
 SOC_DEFINE=-DRAPT_SOC
@@ -158,17 +161,17 @@ run_log: $(BIN) $(MROM_IMG) ## Run NPC and log output
 sim: $(BIN) ## Run NPC binary directly
 	@$^
 
-AM_KERNEL = $(YSYX_HOME)/abstract-machine/app/am-kernels
+AM_KERNEL = $(RAPTOR_HOME)/abstract-machine/app/am-kernels
 
 AM_KERNEL:
 	mkdir -p $(abspath $(AM_KERNEL))
-	git clone https://github.com/kingfish404/am-kernels $(YSYX_HOME)/abstract-machine/app/am-kernels
+	git clone https://github.com/kingfish404/am-kernels $(AM_KERNEL)
 
 perf: ## Run microbenchmark for performance testing
 	if [ ! -d $(AM_KERNEL) ]; then make AM_KERNEL; fi
 	make -s -C $(AM_KERNEL)/benchmarks/microbench/ ARCH=riscv32-ysyxsoc ARGS='-b -n' mainargs=test run
 
-YOSYS_OPENSTA = $(YSYX_HOME)/third_party/yosys-opensta
+YOSYS_OPENSTA = $(RAPTOR_HOME)/third_party/yosys-opensta
 
 YOSYS_OPENSTA:
 	git clone https://github.com/Kingfish404/yosys-opensta $(YOSYS_OPENSTA)

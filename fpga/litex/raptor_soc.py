@@ -2,9 +2,6 @@
 #
 # raptor_soc.py — LiteX SoC with Raptor CPU
 #
-# Copyright (c) 2024-2026 Yujin Wang
-# SPDX-License-Identifier: BSD-2-Clause
-#
 # Usage:
 #   python3 raptor_soc.py --cpu-variant=standard           # Verilator sim
 #   python3 raptor_soc.py --cpu-variant=standard --build    # Build bitstream
@@ -34,46 +31,9 @@ from litex.build.sim.verilator import verilator_build_args, verilator_build_argd
 from litex.soc.cores.cpu import CPUS
 from litex.soc.integration.soc_core import SoCCore
 from litex.soc.integration.builder import Builder, builder_args, builder_argdict
-from litex.soc.integration.soc import SoCRegion
-from litex.soc.interconnect import wishbone
 
 # Register Raptor CPU in LiteX.
 CPUS["raptor"] = Raptor
-
-# AM Serial Shim (maps AM SERIAL_PORT 0x10000000 to $write for Verilator) -------------------------
-
-
-class AMSerialShim(Module):
-    """Wishbone slave that prints bytes written to it via $write (Verilator stdout).
-
-    AM binaries use ``outb(0x10000000, ch)`` for console output. This shim
-    intercepts those writes and forwards them to Verilator's stdout so
-    serial2console-style output appears without modifying the AM source.
-    """
-
-    def __init__(self, platform):
-        self.bus = wishbone.Interface(data_width=32, adr_width=30)
-
-        wr_valid = Signal()
-        wr_data = Signal(8)
-
-        # Wishbone ack (single-cycle).
-        self.sync += self.bus.ack.eq(self.bus.cyc & self.bus.stb & ~self.bus.ack)
-        self.comb += [
-            self.bus.dat_r.eq(0),
-            wr_valid.eq(self.bus.cyc & self.bus.stb & self.bus.we & ~self.bus.ack),
-            wr_data.eq(self.bus.dat_w[:8]),
-        ]
-
-        # Verilog blackbox: $write("%c", data) on valid write.
-        self.specials += Instance(
-            "am_serial_shim",
-            i_clk=ClockSignal(),
-            i_wr_valid=wr_valid,
-            i_wr_data=wr_data,
-        )
-        platform.add_source(os.path.join(_here, "cores", "am_serial_shim.v"))
-
 
 # Sim IOs (minimal for Verilator) ------------------------------------------------------------------
 
@@ -130,18 +90,6 @@ class RaptorSoC(SoCCore):
 
         # CRG (Clock Reset Generator).
         self.crg = CRG(platform.request("sys_clk"))
-
-        # AM Serial Shim: bridge AM's outb(0x10000000, ch) to Verilator stdout.
-        # SRAM has been moved to 0x0f000000, so 0x10000000 is free.
-        # Note: cached=True satisfies LiteX region check; hardware does NOT cache
-        # this address (0x10000000 is outside RTL addr_cacheable).
-        am_serial = AMSerialShim(platform)
-        self.submodules.am_serial = am_serial
-        self.bus.add_slave(
-            "am_serial",
-            am_serial.bus,
-            SoCRegion(origin=0x1000_0000, size=0x1000, cached=True),
-        )
 
         # Enable waveform tracing with exact cycle windowing.
         # LiteX's SimPlatform always requests a `sim_trace` pin; the C testbench

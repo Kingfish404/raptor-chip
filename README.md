@@ -42,9 +42,13 @@ Suggest install `tmux` for better terminal management. [`surfer`][^surfer] for w
 ```shell
 # One-line setup (installs all dependencies)
 make setup
+# or if just want to setup RTL workspace
+make setup-rtl
 
 # Show all available targets
 make help
+# or pack all SV files into one
+make verilog pack
 ```
 
 ### 1. NEMU (Software Emulator)

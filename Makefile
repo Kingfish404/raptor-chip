@@ -2,8 +2,6 @@
 # Environment variables (auto-sourced from env.sh, no manual `source` needed)
 # ============================================================================
 export RAPTOR_HOME := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
-# YSYX_HOME is kept as a back-compat alias of RAPTOR_HOME.
-export YSYX_HOME := $(RAPTOR_HOME)
 export NEMU_HOME := $(RAPTOR_HOME)/nemu
 export NSIM_HOME := $(RAPTOR_HOME)/nsim
 export AM_HOME   := $(RAPTOR_HOME)/abstract-machine
@@ -65,6 +63,9 @@ help: ## Show this help message
 # ============================================================================
 setup: ## Install dependencies and initialize workspace
 	bash ./setup.sh
+
+setup-rtl: ## Install dependencies and initialize RTL workspace
+	bash ./setup-rtl.sh
 
 # ============================================================================
 # RTL Generation (Chisel -> SystemVerilog)

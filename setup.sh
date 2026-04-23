@@ -1,39 +1,15 @@
 #!/usr/bin/env bash
+
+set -euo pipefail
+
 echo "Setting up build environment..."
 step=0
 
-host_nproc() {
-  nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4
-}
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$ROOT_DIR/setup-rtl.sh"
 
-brew_init() {
-  # Check if Homebrew is installed
-  if ! command -v brew &> /dev/null; then
-    echo "Homebrew not found, installing..."
-    # https://brew.sh/
-    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-    if [ "$(uname)" == "Linux" ]; then
-      echo 'eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"' >> ~/.bash_profile
-      eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
-      if [ -f ~/.zshrc ]; then
-        echo 'eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"' >> ~/.zshrc
-      fi
-    else
-      echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> ~/.bash_profile
-      eval "$(/opt/homebrew/bin/brew shellenv)"
-      if [ -f ~/.zshrc ]; then
-        echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zshrc
-      fi
-    fi
-  else
-    echo "Homebrew is already installed"
-  fi
-}
-
-brew_install() {
-  brew install verilator yosys mill sbt openjdk@17
-  brew link --force --overwrite openjdk@17
-  brew install bazelisk ninja
+brew_dep_install() {
+  brew install yosys bazelisk ninja
   brew install riscv64-elf-binutils riscv64-elf-gcc
   brew install ncurses readline flex bison
   if [ "$(uname)" == "Darwin" ]; then
@@ -71,14 +47,13 @@ repo_init() {
 
 if [ "$(uname)" == "Linux" ]; then
   echo "Linux detected"
-  # Check if the system is Ubuntu/Debian
-  if [ -f /etc/os-release ]; then
-    echo "Debian/Ubuntu detected"
+  if command -v apt >/dev/null 2>&1; then
+    echo "apt-based Linux detected"
     sudo apt update
-    sudo apt install -y build-essential git curl gcc
+    sudo apt install -y build-essential git curl
     apt_install
   else
-    echo "Non-Debian Linux detected, please install dependencies manually."
+    echo "Non-apt Linux detected, please install dependencies manually."
   fi
 elif [ "$(uname)" == "Darwin" ]; then
   echo "macOS detected"
@@ -92,24 +67,16 @@ brew_init
 
 step=$((step + 1))
 echo "Step $step: Installing development tools..."
-if command -v verilator &> /dev/null; then
-  echo "Development tools already installed, skipping brew_install"
-else
-  brew_install
-fi
+brew_dep_install
+
+step=$((step + 1))
+echo "Step $step: Running RTL setup pipeline..."
+run_setup_rtl
 
 step=$((step + 1))
 echo "Step $step: Cloning repositories..."
 repo_clone
 
-step=$((step + 1))
-source ./env.sh
-if [ -d rtl_sv/generated ] && [ "$(ls -A rtl_sv/generated 2>/dev/null)" ]; then
-  echo "Step $step: rtl_sv/generated/ exists, skipping Chisel verilog generation"
-else
-  make -C ./rtl_scala verilog -j"$(host_nproc)"
-fi
-make -C ./nsim pack
 echo "Step $step: Build environment setup complete."
 
 # step=$((step + 1))

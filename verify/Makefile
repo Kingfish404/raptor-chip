@@ -18,10 +18,8 @@ NEMU_HOME   := $(RAPTOR_HOME)/nemu
 AM_HOME     := $(RAPTOR_HOME)/abstract-machine
 VERIFY_HOME := $(abspath .)
 
-# Export vars that sub-Makefiles (nsim/, nemu/) expect. YSYX_HOME is a
-# back-compat alias of RAPTOR_HOME required by nsim/Makefile's repo guard.
+# Export vars that sub-Makefiles (nsim/, nemu/) expect.
 export RAPTOR_HOME
-export YSYX_HOME := $(RAPTOR_HOME)
 export NSIM_HOME
 export NEMU_HOME
 export AM_HOME

@@ -145,7 +145,7 @@ make -C formal formal_exu_mul   # Multiplier correctness properties
 [riscv-formal](https://github.com/YosysHQ/riscv-formal) performs per-instruction
 formal verification via the RVFI (RISC-V Formal Interface). The Raptor core
 exposes RVFI signals through `rtl_sv/backend/ysyx_rvfi.sv` (enabled by
-`-DYSYX_RVFI`), with NRET=2 for dual-commit.
+`-DRAPT_RVFI`), with NRET=2 for dual-commit.
 
 The riscv-formal repository is **auto-cloned** on first use. Project-owned
 configuration lives in `formal/rvfi/` (tracked in git); the cloned repo is
@@ -194,7 +194,7 @@ make fuzz ISA=rv64
 make sigtest ISA=rv64
 ```
 
-This automatically sets the correct march/mabi and passes `-DYSYX_RV64` to
+This automatically sets the correct march/mabi and passes `-DRAPT_RV64` to
 the build system.
 
 ## Adding New Tests

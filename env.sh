@@ -13,8 +13,6 @@ BASE_DIR=$(cd "$env_dir" && pwd)
 echo "BASE_DIR => $BASE_DIR"
 
 export RAPTOR_HOME=$BASE_DIR
-# YSYX_HOME is kept as a back-compat alias of RAPTOR_HOME.
-export YSYX_HOME=$RAPTOR_HOME
 
 export NEMU_HOME=$RAPTOR_HOME/nemu
 export NSIM_HOME=$RAPTOR_HOME/nsim

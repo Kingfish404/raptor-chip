@@ -4,8 +4,8 @@
 # Set APP_HOME before including this file.
 # ============================================================================
 
-YSYX_HOME ?= $(abspath $(APP_HOME)/..)
-NSIM_HOME ?= $(YSYX_HOME)/nsim
+RAPTOR_HOME ?= $(abspath $(APP_HOME)/..)
+NSIM_HOME ?= $(RAPTOR_HOME)/nsim
 
 # ---- Toolchain auto-detection ----
 # app/ needs a libc-capable toolchain (newlib or glibc), NOT bare-metal riscv64-elf-.

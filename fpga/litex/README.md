@@ -18,6 +18,19 @@ make sim
 make coremark
 ```
 
+## Tang Mega 138K Hardware Flow
+
+```bash
+# Install LiteX environment
+make setup
+# Build the real-FPGA bitstream
+make fpga-build
+# Load it to the connected board over USB
+make fpga-load
+# Open the UART console
+make fpga-console
+```
+
 ## Directory Structure
 
 ```
@@ -50,16 +63,20 @@ Select variant: `make sim VARIANT=linux`
 
 ## Commands
 
-| Command          | Description                         |
-| ---------------- | ----------------------------------- |
-| `make setup`     | Install LiteX + register Raptor CPU |
-| `make pack`      | Pack RTL into single .sv            |
-| `make sim`       | Verilator simulation                |
-| `make sim-trace` | Simulation with FST waveform        |
-| `make coremark`  | Build + run CoreMark in sim         |
-| `make linux`     | Build + run Linux payload in sim    |
-| `make clean`     | Remove build artifacts              |
-| `make help`      | Show all targets                    |
+| Command             | Description                             |
+| ------------------- | --------------------------------------- |
+| `make setup`        | Install LiteX + register Raptor CPU     |
+| `make pack`         | Pack RTL into single .sv                |
+| `make sim`          | Verilator simulation                    |
+| `make sim-trace`    | Simulation with FST waveform            |
+| `make coremark`     | Build + run CoreMark in sim             |
+| `make linux`        | Build + run Linux payload in sim        |
+| `make fpga-build`   | Build Tang Mega 138K hardware bitstream |
+| `make fpga-load`    | Load Tang Mega 138K SRAM bitstream      |
+| `make fpga-flash`   | Flash Tang Mega 138K external SPI flash |
+| `make fpga-console` | Open Tang Mega 138K UART console        |
+| `make clean`        | Remove build artifacts                  |
+| `make help`         | Show all targets                        |
 
 ## Architecture
 
@@ -83,12 +100,16 @@ Select variant: `make sim VARIANT=linux`
 
 ## Environment Variables
 
-| Variable      | Description                     | Default       |
-| ------------- | ------------------------------- | ------------- |
-| `RAPTOR_HOME` | Root of raptor-chip repo        | Auto-detected |
-| `VARIANT`     | CPU variant                     | `standard`    |
-| `SYS_CLK`     | System clock frequency (Hz)     | `50000000`    |
-| `EXTRA_FLAGS` | Extra flags for `raptor_soc.py` | (empty)       |
+| Variable            | Description                     | Default       |
+| ------------------- | ------------------------------- | ------------- |
+| `RAPTOR_HOME`       | Root of raptor-chip repo        | Auto-detected |
+| `VARIANT`           | CPU variant                     | `standard`    |
+| `SYS_CLK`           | System clock frequency (Hz)     | `50000000`    |
+| `FPGA_SYS_CLK`      | Tang Mega hardware clock (Hz)   | `15000000`    |
+| `FPGA_BOOT_MODE`    | Tang Mega boot ROM source       | `bios`        |
+| `FPGA_SYNTH_MAXFAN` | Gowin synthesis maxfan guide    | `48`          |
+| `FPGA_ROUTE_MAXFAN` | Gowin route maxfan guide        | `12`          |
+| `EXTRA_FLAGS`       | Extra flags for `raptor_soc.py` | (empty)       |
 
 ## Dependencies
 

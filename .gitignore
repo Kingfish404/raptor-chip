@@ -16,6 +16,7 @@
 !README.md
 !env.sh
 !setup.sh
+!setup-rtl.sh
 !LICENSE
 !NOTICE
 
@@ -40,7 +41,7 @@
 /rtl_sv/generated/
 /rtl_scala/target/
 /third_party/
-/docs-ref/
+/docs-*/
 /syn/
 Makefile.local
 

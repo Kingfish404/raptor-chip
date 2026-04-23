@@ -1,9 +1,6 @@
 #
 # Raptor CPU — LiteX integration
 #
-# Copyright (c) 2024-2026 Yujin Wang
-# SPDX-License-Identifier: BSD-2-Clause
-#
 # Dual-issue out-of-order RISC-V core (RV32/RV64 IMAC + Zb* extensions).
 # AXI4 master bus, single external interrupt input.
 

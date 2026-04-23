@@ -54,6 +54,10 @@ ARCHTEST_NPCE_FAIL=$(read_val "$RESULTS_DIR/archtest-npce.txt" "fail" "0")
 STA_FREQ=$(read_val "$RESULTS_DIR/sta.txt" "freq_mhz")
 STA_AREA=$(read_val "$RESULTS_DIR/sta.txt" "area")
 STA_POWER=$(read_val "$RESULTS_DIR/sta.txt" "power")
+HAS_STA=0
+if [[ -f "$RESULTS_DIR/sta.txt" ]]; then
+  HAS_STA=1
+fi
 
 COMMIT_SHA="${GITHUB_SHA:-$(git rev-parse --short HEAD 2>/dev/null || echo 'unknown')}"
 COMMIT_SHORT="${COMMIT_SHA:0:8}"
@@ -208,6 +212,10 @@ cat >> "$STEP_SUMMARY" << ENDMD
 | riscv32-npc  | $ARCHTEST_NPC_PASS  | $ARCHTEST_NPC_FAIL  |
 | riscv32e-npc | $ARCHTEST_NPCE_PASS | $ARCHTEST_NPCE_FAIL |
 
+ENDMD
+
+if [[ "$HAS_STA" == "1" ]]; then
+  cat >> "$STEP_SUMMARY" << ENDMD
 ### PPA (Synthesis)
 
 | Metric | Value |
@@ -217,5 +225,6 @@ cat >> "$STEP_SUMMARY" << ENDMD
 | Power  | $STA_POWER W |
 
 ENDMD
+fi
 
 echo "Wrote Job Summary to $STEP_SUMMARY"

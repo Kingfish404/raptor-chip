@@ -43,6 +43,18 @@ endif
 VARIANT     ?= standard ## CPU variant (standard|linux)
 SYS_CLK     ?= 50000000 ## System clock in Hz
 SIM_TIMEOUT ?= 30 ## Simulation timeout in seconds (0=unlimited)
+FPGA_VARIANT ?= standard ## CPU variant for Tang Mega 138K FPGA build (standard|linux)
+FPGA_SYS_CLK ?= 10000000 ## Tang Mega 138K system clock in Hz
+FPGA_BOOT_MODE ?= bios ## Tang Mega 138K boot ROM source (bios|custom)
+GOWIN_APP   ?= $(firstword $(wildcard /Applications/GowinIDE.app /Applications/GowinIDE.edu.app)) ## Gowin IDE app bundle path on macOS
+FPGA_DEVICE ?= GW5AST-138C ## Gowin device variant for Tang Mega 138K AC1/I0 boards
+FPGA_PROGRAM_FREQ ?= 10MHz ## programmer_cli JTAG frequency
+FPGA_CABLE_INDEX ?= auto ## programmer_cli cable index, or 'auto' to probe the first working cable
+FPGA_FLASH_ADDR ?= 0x00000 ## SPI flash offset used by fpga-flash
+FPGA_SYNTH_MAXFAN ?= 48 ## Gowin synthesis maxfan guideline for Tang Mega build
+FPGA_ROUTE_MAXFAN ?= 12 ## Gowin PnR route maxfan guideline for Tang Mega build
+UART_PORT   ?= $(shell ls -1 /dev/tty.usbserial* /dev/tty.wchusbserial* /dev/tty.usbmodem* 2>/dev/null | sort | tail -n 1) ## Serial device for fpga-console
+UART_BAUD   ?= 115200 ## Serial console baud rate
 
 # --- Verilator parallel threading ---
 # Verilator multi-threaded simulation (biggest lever for OpenSBI/Linux boot time
@@ -74,10 +86,30 @@ TRACE_END   ?= -1 ## Stop dump at cycle N (-1=no end)
 VARIANT     := $(strip $(VARIANT))
 SYS_CLK     := $(strip $(SYS_CLK))
 SIM_TIMEOUT := $(strip $(SIM_TIMEOUT))
+FPGA_VARIANT := $(strip $(FPGA_VARIANT))
+FPGA_SYS_CLK := $(strip $(FPGA_SYS_CLK))
+FPGA_BOOT_MODE := $(strip $(FPGA_BOOT_MODE))
+GOWIN_APP := $(strip $(GOWIN_APP))
+FPGA_DEVICE := $(strip $(FPGA_DEVICE))
+FPGA_PROGRAM_FREQ := $(strip $(FPGA_PROGRAM_FREQ))
+FPGA_CABLE_INDEX := $(strip $(FPGA_CABLE_INDEX))
+FPGA_FLASH_ADDR := $(strip $(FPGA_FLASH_ADDR))
+FPGA_SYNTH_MAXFAN := $(strip $(FPGA_SYNTH_MAXFAN))
+FPGA_ROUTE_MAXFAN := $(strip $(FPGA_ROUTE_MAXFAN))
+UART_PORT := $(strip $(UART_PORT))
+UART_BAUD := $(strip $(UART_BAUD))
 SIM_THREADS := $(strip $(SIM_THREADS))
 TRACE       := $(strip $(TRACE))
 TRACE_START := $(strip $(TRACE_START))
 TRACE_END   := $(strip $(TRACE_END))
+
+ifeq ($(filter GW5A-% GW5AS-% GW5AT-% GW5AST-%,$(FPGA_DEVICE)),)
+FPGA_FLASH_OP ?= 36
+else
+FPGA_FLASH_OP ?= 53
+endif
+
+FPGA_FLASH_OP := $(strip $(FPGA_FLASH_OP))
 
 ifeq ($(TRACE),fst)
   TRACE_FLAGS := --trace --trace-fst
@@ -110,6 +142,65 @@ VSIM        := $(GW_DIR)/obj_dir/Vsim
 
 # --- Extra flags (user-overridable) ---
 EXTRA_FLAGS ?= ## Extra flags passed to raptor_soc.py
+
+# --- FPGA hardware flow ---
+GOWIN_IDE_BIN        := $(GOWIN_APP)/Contents/Resources/Gowin_EDA/IDE/bin
+GOWIN_PROGRAMMER_BIN := $(GOWIN_APP)/Contents/Resources/Gowin_EDA/Programmer/bin
+FPGA_OUT_DIR         := $(BUILD_DIR)/tang_mega_138k
+FPGA_GW_DIR          := $(FPGA_OUT_DIR)/gateware
+FPGA_FS              := $(FPGA_GW_DIR)/sipeed_tang_mega_138k.fs
+FPGA_FW_DIR          := $(BUILD_DIR)/fpga-firmware
+FPGA_FW_ELF          := $(FPGA_FW_DIR)/fpga_boot.elf
+FPGA_FW_BIN          := $(FPGA_FW_DIR)/fpga_boot.bin
+FPGA_BUILD_DEPS      = $(PACK_SV)
+FPGA_BOOT_ARGS       = --boot-mode=$(FPGA_BOOT_MODE)
+
+ifeq ($(FPGA_BOOT_MODE),custom)
+FPGA_BUILD_DEPS += fpga-firmware
+FPGA_BOOT_ARGS  += --integrated-rom-init=$(FPGA_FW_BIN)
+else ifeq ($(FPGA_BOOT_MODE),bios)
+else
+$(error Invalid FPGA_BOOT_MODE='$(FPGA_BOOT_MODE)'. Use bios or custom)
+endif
+
+define _ensure_gowin
+	@if [ -z "$(GOWIN_APP)" ]; then \
+		echo "[ERR] Gowin IDE not found. Set GOWIN_APP=/Applications/GowinIDE.app"; \
+		exit 1; \
+	fi
+	@if [ ! -x "$(GOWIN_IDE_BIN)/gw_sh" ]; then \
+		echo "[ERR] gw_sh not found at $(GOWIN_IDE_BIN)/gw_sh"; \
+		exit 1; \
+	fi
+	@if [ ! -x "$(GOWIN_PROGRAMMER_BIN)/programmer_cli" ]; then \
+		echo "[ERR] programmer_cli not found at $(GOWIN_PROGRAMMER_BIN)/programmer_cli"; \
+		exit 1; \
+	fi
+endef
+
+define _with_gowin_env
+	export PATH="$$PATH:$(GOWIN_IDE_BIN):$(GOWIN_PROGRAMMER_BIN)" && $(1)
+endef
+
+define _resolve_gowin_cable_index
+	cable_index="$(FPGA_CABLE_INDEX)"; \
+	if [ -z "$$cable_index" ] || [ "$$cable_index" = "auto" ]; then \
+		cable_index=""; \
+		for idx in 0 1 2 3; do \
+			probe_output="$$(./programmer_cli --device "$(FPGA_DEVICE)" --operation_index 0 --cable-index "$$idx" 2>&1 || true)"; \
+			if printf '%s\n' "$$probe_output" | grep -q "ID Code is:"; then \
+				cable_index="$$idx"; \
+				break; \
+			fi; \
+		done; \
+		if [ -z "$$cable_index" ]; then \
+			echo "[ERR] Could not find a usable Gowin cable for $(FPGA_DEVICE)."; \
+			./programmer_cli --scan-cables F || true; \
+			exit 1; \
+		fi; \
+		echo "[INFO] Auto-detected Gowin cable index $$cable_index"; \
+	fi
+endef
 
 # ==============================================================================
 # Environment
@@ -169,12 +260,27 @@ $(FW_ELF): $(FW_SRC)/boot.S $(FW_SRC)/link.ld $(FW_DTB) | $(FW_DIR)
 $(FW_BIN): $(FW_ELF)
 	$(CROSS)objcopy -O binary $< $@
 
+$(FPGA_FW_DIR):
+	@mkdir -p $@
+
+$(FPGA_FW_ELF): $(FW_SRC)/fpga_boot.S $(FW_SRC)/fpga_link.ld | $(FPGA_FW_DIR)
+	$(CROSS)gcc -march=rv32imac -mabi=ilp32 -nostdlib -nostartfiles \
+		-T $(FW_SRC)/fpga_link.ld -o $@ $(FW_SRC)/fpga_boot.S
+
+$(FPGA_FW_BIN): $(FPGA_FW_ELF)
+	$(CROSS)objcopy -O binary $< $@
+
 firmware: $(FW_BIN) ## Build minimal boot firmware (-> build/firmware/)
+
+fpga-firmware: $(FPGA_FW_BIN) ## Build minimal Tang Mega 138K bring-up ROM
 
 firmware-clean:
 	rm -rf $(FW_DIR)
 	@# Legacy in-tree artifacts from older versions of this Makefile:
 	rm -f $(FW_SRC)/boot.elf $(FW_SRC)/boot.bin $(FW_SRC)/litex-soc.dtb
+
+fpga-firmware-clean:
+	rm -rf $(FPGA_FW_DIR)
 
 # ==============================================================================
 # Verilator Simulation
@@ -459,8 +565,67 @@ linux: $(PACK_SV) $(FW_BIN) linux-build ## Build + run Linux payload in sim
 	$(call _run_vsim,$(LINUX_GW_DIR))
 
 # ==============================================================================
-# FPGA Targets (future — placeholder)
+# FPGA Targets
 # ==============================================================================
+
+fpga-build: $(FPGA_BUILD_DEPS) ## Build Tang Mega 138K bitstream for real hardware
+	$(call _ensure_gowin)
+	@set +e; \
+		if [ "$(FPGA_BOOT_MODE)" = "bios" ]; then \
+			$(call _litex_picolibc_patch); \
+			trap '$(call _litex_picolibc_restore)' EXIT INT TERM; \
+		fi; \
+		$(call _with_gowin_env,source $(VENV_DIR)/bin/activate && $(PYTHON) raptor_tang_mega_138k.py --build --output-dir=$(FPGA_OUT_DIR) --cpu-variant=$(FPGA_VARIANT) --sys-clk-freq=$(FPGA_SYS_CLK) --synth-maxfan=$(FPGA_SYNTH_MAXFAN) --route-maxfan=$(FPGA_ROUTE_MAXFAN) $(FPGA_BOOT_ARGS)); \
+		rc=$$?; \
+		exit $$rc
+	@echo ""
+	@echo "========================================="
+	@echo " FPGA bitstream ready: $(FPGA_FS)"
+	@echo " Load: make fpga-load"
+	@echo "========================================="
+
+fpga-load: ## Load current Tang Mega 138K bitstream into FPGA SRAM
+	$(call _ensure_gowin)
+	@cd "$(GOWIN_PROGRAMMER_BIN)" && \
+		$(call _resolve_gowin_cable_index) && \
+		./programmer_cli \
+		--device "$(FPGA_DEVICE)" \
+		--fsFile "$(FPGA_FS)" \
+		--cable-index "$$cable_index" \
+		--frequency "$(FPGA_PROGRAM_FREQ)" \
+		--operation_index 2
+
+fpga-flash: ## Flash current Tang Mega 138K bitstream to external SPI flash
+	$(call _ensure_gowin)
+	@cd "$(GOWIN_PROGRAMMER_BIN)" && \
+		$(call _resolve_gowin_cable_index) && \
+		echo "[INFO] Using programmer_cli operation $(FPGA_FLASH_OP) for $(FPGA_DEVICE)" && \
+		./programmer_cli \
+		--device "$(FPGA_DEVICE)" \
+		--fsFile "$(FPGA_FS)" \
+		--spiaddr "$(FPGA_FLASH_ADDR)" \
+		--cable-index "$$cable_index" \
+		--frequency "$(FPGA_PROGRAM_FREQ)" \
+		--operation_index "$(FPGA_FLASH_OP)"
+
+fpga: fpga-load ## Build and load Tang Mega 138K bitstream to FPGA SRAM
+
+tang-mega-138k: fpga ## Alias for build + load on Tang Mega 138K
+
+fpga-console: ## Open serial console for the Tang Mega 138K UART
+	@if [ -z "$(UART_PORT)" ]; then \
+		echo "[ERR] Could not auto-detect a serial device. Set UART_PORT=/dev/cu...."; \
+		exit 1; \
+	fi
+	@if ! command -v screen >/dev/null 2>&1; then \
+		echo "[ERR] 'screen' is required for fpga-console on macOS."; \
+		exit 1; \
+	fi
+	@echo "[INFO] Opening $(UART_PORT) @ $(UART_BAUD) (quit: Ctrl-A, K)"
+	@screen $(UART_PORT) $(UART_BAUD)
+
+fpga-clean: ## Remove Tang Mega 138K FPGA build artifacts
+	rm -rf $(FPGA_OUT_DIR) $(FPGA_FW_DIR)
 
 
 
@@ -489,6 +654,17 @@ info: ## Show configuration info
 	@echo "LITEX_DIR    = $(LITEX_DIR)"
 	@echo "VARIANT      = $(VARIANT)"
 	@echo "SYS_CLK      = $(SYS_CLK)"
+	@echo "FPGA_VARIANT = $(FPGA_VARIANT)"
+	@echo "FPGA_SYS_CLK = $(FPGA_SYS_CLK)"
+	@echo "FPGA_BOOT_MODE = $(FPGA_BOOT_MODE)"
+	@echo "GOWIN_APP    = $(GOWIN_APP)"
+	@echo "FPGA_DEVICE  = $(FPGA_DEVICE)"
+	@echo "FPGA_CABLE_INDEX = $(FPGA_CABLE_INDEX)"
+	@echo "FPGA_FLASH_OP = $(FPGA_FLASH_OP)"
+	@echo "FPGA_SYNTH_MAXFAN = $(FPGA_SYNTH_MAXFAN)"
+	@echo "FPGA_ROUTE_MAXFAN = $(FPGA_ROUTE_MAXFAN)"
+	@echo "FPGA_FS      = $(FPGA_FS) (exists: $(shell test -f $(FPGA_FS) && echo yes || echo no))"
+	@echo "UART_PORT    = $(UART_PORT)"
 	@echo "SIM_TIMEOUT  = $(SIM_TIMEOUT)"
 	@echo "PACK_SV      = $(PACK_SV)"
 	@echo "BUILD_DIR    = $(BUILD_DIR)"
@@ -532,7 +708,7 @@ help: ## Show this help message
 # ==============================================================================
 .PHONY: help setup setup-skip \
 	pack \
-	firmware firmware-clean \
+	firmware firmware-clean fpga-firmware fpga-firmware-clean \
 	sim-gen sim-build sim sim-run sim-trace sim-trace-vcd sim-clean \
 	run-litex run-litex-clean \
 	coremark coremark-build coremark-clean \
@@ -543,5 +719,5 @@ help: ## Show this help message
 	opensbi opensbi-build opensbi-clean \
 	payload \
 	linux linux-build \
-	tang-nano-20k \
+	fpga-build fpga-load fpga-flash fpga fpga-console fpga-clean tang-mega-138k \
 	lint info clean clean-all

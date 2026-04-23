@@ -1,5 +1,5 @@
 PWD_DIR=$(abspath .)
-YSYX_HOME ?= $(abspath ..)
+RAPTOR_HOME ?= $(abspath ..)
 KERNEL_VERSION:=6.18.22
 NPROC := $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 

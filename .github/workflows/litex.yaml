@@ -74,7 +74,7 @@ jobs:
         shell: bash -l {0}
         run: |
           cd fpga/litex
-          make embench SIM_TIMEOUT=1500 2>&1 | tee /tmp/litex-embench.log || true
+          make embench SIM_TIMEOUT=1800 2>&1 | tee /tmp/litex-embench.log || true
 
       - name: Generate Embench summary
         if: always()
