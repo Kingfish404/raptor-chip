@@ -60,7 +60,14 @@ void difftest_skip_dut(int nr_ref, int nr_dut) {
 }
 
 void init_difftest(char *ref_so_file, long img_size, int port) {
-  assert(ref_so_file != NULL);
+  if (ref_so_file == NULL) {
+    /* Difftest not requested: run NEMU standalone without a reference
+     * model.  This is used by the RISCOF-NEMU flow and by simple
+     * manual runs (`make run-nemu32`). */
+    Log("Differential testing: %s (no --diff reference given)",
+        ANSI_FMT("OFF", ANSI_FG_YELLOW));
+    return;
+  }
 
   void *handle;
   handle = dlopen(ref_so_file, RTLD_LAZY);
@@ -100,6 +107,9 @@ static void checkregs(CPU_state *ref, vaddr_t pc) {
 
 void difftest_step(vaddr_t pc, vaddr_t npc) {
   CPU_state ref_r;
+
+  /* Gracefully skip difftest when no reference was loaded (standalone mode). */
+  if (ref_difftest_regcpy == NULL) return;
 
   if (skip_dut_nr_inst > 0) {
     ref_difftest_regcpy(&ref_r, DIFFTEST_TO_DUT);

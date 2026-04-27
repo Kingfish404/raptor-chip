@@ -198,6 +198,17 @@ void cpu_exec(uint64_t n)
 #endif
 
 #ifdef CONFIG_DIFFTEST
+      // Mirror live external IRQ line into REF's mip[MEIP] before stepping,
+      // so software reads of mip stay consistent across DUT/REF. The line is
+      // hardwired 0 in the npc soc wrapper today, but this future-proofs the
+      // path when an interrupt source gets wired in.
+      {
+        extern void (*ref_difftest_set_meip)(uint8_t);
+        if (ref_difftest_set_meip) {
+          uint8_t live = *(uint8_t *)&VERILOG_CPU(io_interrupt);
+          ref_difftest_set_meip(live & 1u);
+        }
+      }
       if (cmu_valid_b)
       {
         // Dual commit: step NEMU for slot 0 (no comparison).
@@ -234,13 +245,12 @@ void cpu_exec(uint64_t n)
         uint8_t cur_recieved_trap = *(uint8_t *)&VERILOG_ROU(recieved_trap);
         if (cur_recieved_trap)
         {
-          uint8_t priv = *(uint8_t *)npc.priv;
-          char sw_trap = *(char *)&VERILOG_ROU(recieved_sw_trap);
-          word_t cause;
-          if (sw_trap)
-            cause = ((priv == 3) ? 0x3u : 0x1u) | ((word_t)1 << (sizeof(word_t) * 8 - 1));
-          else
-            cause = ((priv == 3) ? 0x7u : 0x5u) | ((word_t)1 << (sizeof(word_t) * 8 - 1));
+          // Use the registered trap_cause from RTL: it carries the proper
+          // interrupt cause (MSI/MTI for M-mode CLINT, or SSI/STI/SEI for
+          // S-mode delegated interrupts). Forwarding it directly avoids the
+          // ambiguity of reconstructing cause from priv (priv==S does NOT
+          // imply S-level cause when mideleg leaves the bit at M-level).
+          word_t cause = *(word_t *)&VERILOG_ROU(trap_cause);
           difftest_raise_intr(cause);
         }
       }
@@ -268,12 +278,12 @@ void cpu_exec(uint64_t n)
     npc.state = NPC_STOP;
     break;
   case NPC_END:
-    if (*npc.ret != 0)
+    if (!npc.host_exit_ok && *npc.ret != 0)
     {
       Log("a0 = " FMT_RED(FMT_WORD), *npc.ret);
     }
   case NPC_ABORT:
-    if (npc.state == NPC_ABORT || *npc.ret != 0)
+    if (npc.state == NPC_ABORT || (!npc.host_exit_ok && *npc.ret != 0))
     {
       Log("Program execution has aborted.");
       cpu_show_itrace();

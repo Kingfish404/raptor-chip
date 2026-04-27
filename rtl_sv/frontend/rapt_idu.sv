@@ -65,6 +65,7 @@ module rapt_idu #(
   logic [XLEN-1:0] pnpc_idu;
   logic            ifu_trap;
   logic [XLEN-1:0] ifu_cause;
+  logic [XLEN-1:0] ifu_tval;
 
   always @(posedge clock) begin
     if (reset) begin
@@ -112,6 +113,7 @@ module rapt_idu #(
         pnpc_idu  <= ifu_idu.pnpc;
         ifu_trap  <= ifu_idu.trap;
         ifu_cause <= ifu_idu.cause;
+        ifu_tval  <= ifu_idu.tval;
 `ifdef RAPT_DUAL_ISSUE
         inst_b      <= ifu_idu.inst_b;
         pc_idu_b    <= ifu_idu.pc_b;
@@ -228,12 +230,55 @@ module rapt_idu #(
   || (csr_a[9:8] > csr_bcast.priv)  // insufficient privilege
   || (csr_a[11:10] == 2'b11 && csr_write_a)  // write to read-only CSR
   );
-  assign is_illegal_a = illegal_inst_a || illegal_csr_a;
+
+  // Privileged system-instruction gating (TSR/TVM/TW + counteren).
+  //   WFI: illegal in U-mode always, illegal in S-mode when mstatus.TW=1.
+  //   SRET: illegal in U-mode, illegal in S-mode when mstatus.TSR=1.
+  //   SFENCE.VMA: illegal in U-mode; illegal in S-mode when mstatus.TVM=1.
+  //   satp: illegal in S-mode when mstatus.TVM=1 (generic priv check catches U).
+  //   cycle/time/instret (+h): read from S or U needs mcounteren bit;
+  //     read from U additionally needs scounteren bit.
+  logic is_wfi_a, is_sfence_vma_a;
+  logic wfi_illegal_a, sret_illegal_a, sfence_vma_illegal_a, satp_illegal_a;
+  logic counter_illegal_a;
+  logic [2:0] counter_sel_a;
+  assign is_wfi_a = (inst_idu_a == 32'h10500073);
+  assign is_sfence_vma_a = (inst_idu_a[31:25] == 7'b0001001)
+                        && (inst_idu_a[14:12] == 3'b000)
+                        && (inst_idu_a[11:7]  == 5'b0)
+                        && (inst_idu_a[6:0]   == 7'b1110011);
+  assign wfi_illegal_a = is_wfi_a
+      && ((csr_bcast.priv == `RAPT_PRIV_U)
+       || (csr_bcast.priv == `RAPT_PRIV_S && csr_bcast.tw));
+  assign sret_illegal_a = idu_rnu.uop_a.sret
+      && ((csr_bcast.priv == `RAPT_PRIV_U)
+       || (csr_bcast.priv == `RAPT_PRIV_S && csr_bcast.tsr));
+  assign sfence_vma_illegal_a = is_sfence_vma_a
+      && ((csr_bcast.priv == `RAPT_PRIV_U)
+       || (csr_bcast.priv == `RAPT_PRIV_S && csr_bcast.tvm));
+  assign satp_illegal_a = (csr_csw_a != 3'b000) && (csr_a == `RAPT_CSR_SATP___)
+      && (csr_bcast.priv == `RAPT_PRIV_S) && csr_bcast.tvm;
+  assign counter_sel_a = (csr_a == `RAPT_CSR_CYCLE__ || csr_a == `RAPT_CSR_CYCLEH_)   ? 3'b001
+                      : (csr_a == `RAPT_CSR_TIME___ || csr_a == `RAPT_CSR_TIMEH__)   ? 3'b010
+                      : (csr_a == `RAPT_CSR_INSTRET_|| csr_a == `RAPT_CSR_INSTRETH)  ? 3'b100
+                      : 3'b000;
+  assign counter_illegal_a = (csr_csw_a != 3'b000) && (counter_sel_a != 3'b000)
+      && ((csr_bcast.priv ==
+      `RAPT_PRIV_U
+      && (((counter_sel_a & csr_bcast.mcounteren) == 3'b0) ||
+          ((counter_sel_a & csr_bcast.scounteren) == 3'b0))) || (csr_bcast.priv ==
+      `RAPT_PRIV_S
+      && ((counter_sel_a & csr_bcast.mcounteren) == 3'b0)));
+
+  assign is_illegal_a = illegal_inst_a || illegal_csr_a
+      || wfi_illegal_a || sret_illegal_a || sfence_vma_illegal_a
+      || satp_illegal_a || counter_illegal_a;
 
   // CSR address validity check - returns 1 if the CSR address is legal.
   // Extend this function when adding new CSR registers.
   function automatic logic csr_addr_valid(input logic [11:0] addr);
-    // PMP CSRs: read-as-zero, write-ignored (no PMP implemented)
+    // PMP CSRs: 8 active entries (pmpcfg0/1, pmpaddr0..7) backed by rapt_csr;
+    // pmpcfg2/3 and pmpaddr8..15 are WARL-hardwired to zero but remain legal addresses.
     if (addr >= `RAPT_CSR_PMPCFG0 && addr <= `RAPT_CSR_PMPCFG3) return 1'b1;  // pmpcfg0-3
     if (addr >= `RAPT_CSR_PMPADDR0 && addr <= `RAPT_CSR_PMPADDR15) return 1'b1;  // pmpaddr0-15
     case (addr)
@@ -270,7 +315,7 @@ module rapt_idu #(
 
   // Trap aggregation: IFU traps (e.g., page fault) or decode-time illegality
   assign idu_rnu.uop_a.trap = ifu_trap || is_illegal_a;
-  assign idu_rnu.uop_a.tval = ifu_trap ? pc_idu_a : is_illegal_a ? inst_idu_a : '0;
+  assign idu_rnu.uop_a.tval = ifu_trap ? ifu_tval : is_illegal_a ? inst_idu_a : '0;
   assign idu_rnu.uop_a.cause = ifu_trap ? ifu_cause : is_illegal_a ? `RAPT_CAUSE_ILLEGAL_INST : '0;
 
 `ifdef RAPT_DUAL_ISSUE
@@ -379,7 +424,43 @@ module rapt_idu #(
   assign illegal_csr_b = (csr_csw_b != 3'b000) && (!csr_addr_valid(
       csr_b
   ) || (csr_b[9:8] > csr_bcast.priv) || (csr_b[11:10] == 2'b11 && csr_write_b));
-  assign is_illegal_b = illegal_inst_b || illegal_csr_b;
+
+  // Slot B privileged-mode gating (mirrors slot A).
+  logic is_wfi_b, is_sfence_vma_b;
+  logic wfi_illegal_b, sret_illegal_b, sfence_vma_illegal_b, satp_illegal_b;
+  logic counter_illegal_b;
+  logic [2:0] counter_sel_b;
+  assign is_wfi_b = (inst_idu_b == 32'h10500073);
+  assign is_sfence_vma_b = (inst_idu_b[31:25] == 7'b0001001)
+                        && (inst_idu_b[14:12] == 3'b000)
+                        && (inst_idu_b[11:7]  == 5'b0)
+                        && (inst_idu_b[6:0]   == 7'b1110011);
+  assign wfi_illegal_b = is_wfi_b
+      && ((csr_bcast.priv == `RAPT_PRIV_U)
+       || (csr_bcast.priv == `RAPT_PRIV_S && csr_bcast.tw));
+  assign sret_illegal_b = idu_rnu.uop_b.sret
+      && ((csr_bcast.priv == `RAPT_PRIV_U)
+       || (csr_bcast.priv == `RAPT_PRIV_S && csr_bcast.tsr));
+  assign sfence_vma_illegal_b = is_sfence_vma_b
+      && ((csr_bcast.priv == `RAPT_PRIV_U)
+       || (csr_bcast.priv == `RAPT_PRIV_S && csr_bcast.tvm));
+  assign satp_illegal_b = (csr_csw_b != 3'b000) && (csr_b == `RAPT_CSR_SATP___)
+      && (csr_bcast.priv == `RAPT_PRIV_S) && csr_bcast.tvm;
+  assign counter_sel_b = (csr_b == `RAPT_CSR_CYCLE__ || csr_b == `RAPT_CSR_CYCLEH_)   ? 3'b001
+                      : (csr_b == `RAPT_CSR_TIME___ || csr_b == `RAPT_CSR_TIMEH__)   ? 3'b010
+                      : (csr_b == `RAPT_CSR_INSTRET_|| csr_b == `RAPT_CSR_INSTRETH)  ? 3'b100
+                      : 3'b000;
+  assign counter_illegal_b = (csr_csw_b != 3'b000) && (counter_sel_b != 3'b000)
+      && ((csr_bcast.priv ==
+      `RAPT_PRIV_U
+      && (((counter_sel_b & csr_bcast.mcounteren) == 3'b0) ||
+          ((counter_sel_b & csr_bcast.scounteren) == 3'b0))) || (csr_bcast.priv ==
+      `RAPT_PRIV_S
+      && ((counter_sel_b & csr_bcast.mcounteren) == 3'b0)));
+
+  assign is_illegal_b = illegal_inst_b || illegal_csr_b
+      || wfi_illegal_b || sret_illegal_b || sfence_vma_illegal_b
+      || satp_illegal_b || counter_illegal_b;
 
   // Slot B UOP assembly
   assign idu_rnu.uop_b.c = is_c_b;

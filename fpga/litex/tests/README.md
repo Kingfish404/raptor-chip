@@ -15,7 +15,7 @@ These tests:
 
 - Use only the **LiteX sim UART** (`0xf0001800`) for I/O.
 - Use only the **CLINT mtime register** (`0x0200BFF8`) or the
-  `rdcycle` CSR for timing — both are intercepted in `ysyx_bus.sv`
+  `rdcycle` CSR for timing — both are intercepted in `rapt_bus.sv`
   and never touch AXI.
 - Are short enough to run to completion on Verilator sim within the
   default `SIM_TIMEOUT=30s` budget.

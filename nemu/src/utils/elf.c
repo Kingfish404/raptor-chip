@@ -199,10 +199,20 @@ void ftrace_add(word_t pc, word_t npc, word_t inst)
   }
   if (ftracedepth < 0)
   {
-    cpu_show_ftrace();
-    Log(ANSI_FMT("ftrace depth negative (%d)", ANSI_FG_RED),
-        ftracedepth);
-    exit(0);
+    /* Many standalone programs (incl. RISCOF compliance tests) don't
+     * maintain a balanced call/ret pattern — they tail-call into trap
+     * handlers, ret out of M-mode startup via mret, etc.  Instead of
+     * hard-exiting on depth<0, clamp to 0 and continue.  This was
+     * previously an exit(0) that silently killed NEMU before signature
+     * dump or finisher processing could run. */
+    static int warned = 0;
+    if (!warned)
+    {
+      Log(ANSI_FMT("ftrace depth negative (%d); clamping to 0 (future warnings suppressed)", ANSI_FG_YELLOW),
+          ftracedepth);
+      warned = 1;
+    }
+    ftracedepth = 0;
   }
 #else
 #error "Unsupported ISA"

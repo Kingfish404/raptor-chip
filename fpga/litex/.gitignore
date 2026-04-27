@@ -6,6 +6,7 @@
 !*.c
 !*.ld
 !*.dts
+!*.html
 !Makefile
 
 # LiteX build artifacts

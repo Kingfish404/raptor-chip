@@ -85,24 +85,35 @@ endif
 help: ## Show this help message
 	@echo "Raptor Chip Verification Suite"
 	@echo "=============================="
+	@echo "Usage: make <target> [VAR=value ...]"
+	@awk '\
+		BEGIN { state=0; pending=""; first_target=1 } \
+		/^# =+$$/ { \
+			if (state==0) state=1; \
+			else if (state==2) { pending=section; state=0 } \
+			else state=0; next } \
+		state==1 && /^# .+/ { section=substr($$0,3); state=2; next } \
+		{ if (state==1) state=0 } \
+		/^[a-zA-Z0-9_-]+:.*## / { \
+			if (pending!="") { printf "\n%s:\n", pending; pending="" } \
+			else if (first_target) printf "\nTargets:\n"; \
+			first_target=0; \
+			target=$$0; sub(/:.*/, "", target); \
+			desc=$$0; sub(/.*## /, "", desc); \
+			printf "  %-24s %s\n", target, desc }' $(MAKEFILE_LIST)
 	@echo ""
-	@echo "Targets:"
-	@grep -E '^[a-zA-Z0-9_-]+:.*## ' $(MAKEFILE_LIST) | \
-		awk 'BEGIN {FS=":.*## "}; {printf "  %-24s %s\n", $$1, $$2}'
+	@echo "Variables (override with VAR=value):"
+	@grep -hE '^[A-Z_]+\s*\?=' $(MAKEFILE_LIST) | \
+		awk '{ \
+			if (match($$0, /## /)) { \
+				name=$$0; sub(/\s*\?=.*/, "", name); \
+				desc=substr($$0, RSTART+3); \
+				printf "  %-24s %s\n", name, desc } \
+			else { \
+				split($$0, a, "\\?="); \
+				gsub(/^[ \t]+|[ \t]+$$/, "", a[1]); gsub(/^[ \t]+|[ \t]+$$/, "", a[2]); \
+				printf "  %-24s %s\n", a[1], a[2] } }'
 	@echo ""
-	@echo "Variables:"
-	@echo "  ISA=rv32|rv64           Target ISA (default: rv32)"
-	@echo "  SEED=<int>              Random seed for fuzz (default: timestamp)"
-	@echo "  FUZZ_NUM=<int>          Number of fuzz programs (default: 20)"
-	@echo "  FUZZ_LEN=<int>          Instructions per program (default: 200)"
-	@echo "  TIMEOUT=<int>           Per-test timeout in seconds (default: 30)"
-	@echo "  FUZZ_INF_BATCH=<int>    Programs per batch in fuzz-inf (default: 20)"
-	@echo "  FUZZ_STALE_LIMIT=<int>  Stop fuzz-inf after N stale batches (default: 10, 0=off)"
-	@echo "  FUZZ_SRC_DIR=<dir>      Directory for fuzz-run (default: build/fuzz/)"
-	@echo "  SRC=<file>              Single .S file for fuzz-run-one"
-	@echo "  COV_FUZZ_NUM=<int>      Fuzz test count in coverage-run (default: 40)"
-	@echo "  COV_FUZZ_LEN=<int>      Fuzz length in coverage-run (default: 200)"
-	@echo "  COV_MICROBENCH_ARGS=<s> Microbench mainargs in coverage-run (default: test)"
 
 # ============================================================================
 # Prerequisites: ensure simulator and NEMU are built
@@ -324,6 +335,151 @@ riscof-run: check-prereqs ## Run ACT4 ELFs on Raptor NPC
 
 riscof-clean: ## Clean ACT4 artifacts
 	rm -rf $(ACT4_WORKDIR)
+
+# ============================================================================
+# Classic RISCOF (upstream riscv-arch-test main branch, sail reference model)
+# ============================================================================
+# Independent of ACT4: runs the stock RISCOF framework with a Raptor DUT plugin
+# that drives `nsim` via the new --sig signature dump option. Serves as a
+# cross-check against the ACT4 flow and is closer to how most RISC-V projects
+# (e.g. neorv32, hazard3) exercise RISCOF.
+# ============================================================================
+RISCOF_CLASSIC_DIR      := $(VERIFY_HOME)/riscof/classic
+RISCOF_CLASSIC_SUITE    := $(RISCOF_CLASSIC_DIR)/riscv-arch-test
+RISCOF_CLASSIC_WORKDIR  := $(BUILD_DIR)/riscof-classic
+# Use old-framework-3.x: the upstream 'main' branch was replaced by the ACT4
+# layout, which drops riscv-test-suite/ in favour of a Makefile+Python flow.
+# The classic RISCOF driver still expects the 3.x layout.
+RISCOF_CLASSIC_BRANCH   ?= old-framework-3.x
+
+.PHONY: riscof-classic riscof-classic-setup riscof-classic-run riscof-classic-clean riscof-classic-build-npc
+
+riscof-classic: riscof-classic-setup riscof-classic-run ## Run classic RISCOF compliance flow
+
+riscof-classic-build-npc: ## (Re)build NPC simulator without difftest for RISCOF
+	@# RISCOF's DUT plugin invokes nsim without `--diff`, so the simulator
+	@# must be built with the plain (non-difftest) config; otherwise
+	@# init_difftest aborts with `ref_so_file != NULL`.
+	@if [ ! -f $(NPC_BIN) ] || grep -q '^CONFIG_DIFFTEST=y' $(NSIM_HOME)/.config 2>/dev/null; then \
+		echo "[riscof-classic] (Re)building NPC without difftest..."; \
+		$(MAKE) -C $(NSIM_HOME) o2_defconfig; \
+		$(MAKE) -C $(NSIM_HOME) -j$(NPROC) VFLAGS="$(VFLAGS)"; \
+	else \
+		echo "[riscof-classic] NPC binary OK (no difftest)."; \
+	fi
+	@test -f $(NPC_BIN) || { echo "[riscof-classic] ERROR: NPC build failed: $(NPC_BIN)"; exit 1; }
+
+riscof-classic-setup: ## Clone upstream riscv-arch-test suite
+	@if [ ! -d "$(RISCOF_CLASSIC_SUITE)" ]; then \
+		echo "[riscof-classic] Cloning riscv-non-isa/riscv-arch-test ($(RISCOF_CLASSIC_BRANCH))..."; \
+		mkdir -p "$(RISCOF_CLASSIC_DIR)"; \
+		git clone --depth 1 -b $(RISCOF_CLASSIC_BRANCH) https://github.com/riscv-non-isa/riscv-arch-test.git "$(RISCOF_CLASSIC_SUITE)"; \
+	else echo "[riscof-classic] Suite already present at $(RISCOF_CLASSIC_SUITE)"; fi
+	@command -v riscof         >/dev/null 2>&1 || { echo "[riscof-classic] ERROR: 'riscof' not found. Install: pip install git+https://github.com/riscv/riscof.git"; exit 1; }
+	@command -v sail_riscv_sim >/dev/null 2>&1 || { echo "[riscof-classic] ERROR: 'sail_riscv_sim' not found. Install from https://github.com/riscv/sail-riscv/releases"; exit 1; }
+	@echo "[riscof-classic] Setup complete."
+
+riscof-classic-run: $(MROM_IMG) riscof-classic-build-npc ## Execute classic RISCOF flow
+	@test -d "$(RISCOF_CLASSIC_SUITE)" || { echo "[riscof-classic] ERROR: suite not found. Run 'make riscof-classic-setup' first."; exit 1; }
+	@mkdir -p "$(RISCOF_CLASSIC_WORKDIR)"
+	@echo "================================================================"
+	@echo "[riscof-classic] Running classic RISCOF flow"
+	@echo "  NPC:     $(NPC_BIN)"
+	@echo "  Suite:   $(RISCOF_CLASSIC_SUITE)"
+	@echo "  Workdir: $(RISCOF_CLASSIC_WORKDIR)"
+	@echo "================================================================"
+	cd "$(RISCOF_CLASSIC_DIR)" && \
+		NPC_BIN="$(NPC_BIN)" \
+		MROM_IMG="$(MROM_IMG)" \
+		NSIM_HOME="$(NSIM_HOME)" \
+		RAPT_TIMEOUT="$(TIMEOUT)" \
+		riscof run \
+			--config=config.ini \
+			--suite=$(RISCOF_CLASSIC_SUITE)/riscv-test-suite/ \
+			--env=$(RISCOF_CLASSIC_SUITE)/riscv-test-suite/env \
+			--work-dir="$(RISCOF_CLASSIC_WORKDIR)" \
+			--no-browser
+	@if grep -q '>0[Ff]ailed<' "$(RISCOF_CLASSIC_WORKDIR)/report.html" 2>/dev/null; then \
+		echo "[riscof-classic] PASS"; \
+	else \
+		echo "[riscof-classic] FAIL (see $(RISCOF_CLASSIC_WORKDIR)/report.html)"; \
+		exit 1; \
+	fi
+
+riscof-classic-clean: ## Clean classic RISCOF artifacts
+	rm -rf $(RISCOF_CLASSIC_WORKDIR)
+
+# ============================================================================
+# Classic RISCOF (NEMU as DUT)
+# ============================================================================
+# Runs the same riscv-arch-test compliance suite through NEMU (standalone
+# executable) rather than the Raptor nsim simulator.  This verifies that
+# NEMU itself passes the RISCOF suite and produces signatures byte-identical
+# to sail_cSim, giving us confidence in the difftest reference model.
+# Test suite is shared with the classic flow via symlink; workdir is
+# separate so the two flows don't overwrite each other's results.
+# ============================================================================
+RISCOF_CLASSIC_NEMU_DIR     := $(VERIFY_HOME)/riscof/classic-nemu
+RISCOF_CLASSIC_NEMU_SUITE   := $(RISCOF_CLASSIC_NEMU_DIR)/riscv-arch-test
+RISCOF_CLASSIC_NEMU_WORKDIR := $(BUILD_DIR)/riscof-classic-nemu
+NEMU_BIN_32  := $(NEMU_HOME)/build/riscv32-nemu-interpreter
+NEMU_BIN_64  := $(NEMU_HOME)/build/riscv64-nemu-interpreter
+
+ifeq ($(ISA),rv64)
+  NEMU_BIN := $(NEMU_BIN_64)
+else
+  NEMU_BIN := $(NEMU_BIN_32)
+endif
+
+.PHONY: riscof-classic-nemu riscof-classic-nemu-setup riscof-classic-nemu-run riscof-classic-nemu-clean
+
+$(NEMU_BIN_32):
+	@echo "[riscof-classic-nemu] Building NEMU standalone executable (rv32)..."
+	$(MAKE) -C $(RAPTOR_HOME) config-nemu32
+
+$(NEMU_BIN_64):
+	@echo "[riscof-classic-nemu] Building NEMU standalone executable (rv64)..."
+	$(MAKE) -C $(NEMU_HOME) riscv64_defconfig
+	$(MAKE) -C $(NEMU_HOME) -j$(NPROC)
+
+riscof-classic-nemu: riscof-classic-nemu-setup riscof-classic-nemu-run ## Run classic RISCOF flow against NEMU
+
+riscof-classic-nemu-setup: riscof-classic-setup $(NEMU_BIN) ## Ensure NEMU and the arch-test suite are ready
+	@test -L "$(RISCOF_CLASSIC_NEMU_SUITE)" || { \
+		echo "[riscof-classic-nemu] ERROR: missing symlink $(RISCOF_CLASSIC_NEMU_SUITE) -> ../classic/riscv-arch-test"; \
+		exit 1; }
+	@command -v riscof         >/dev/null 2>&1 || { echo "[riscof-classic-nemu] ERROR: 'riscof' not found."; exit 1; }
+	@command -v sail_riscv_sim >/dev/null 2>&1 || { echo "[riscof-classic-nemu] ERROR: 'sail_riscv_sim' not found."; exit 1; }
+	@echo "[riscof-classic-nemu] Setup complete. NEMU_BIN=$(NEMU_BIN)"
+
+riscof-classic-nemu-run: $(NEMU_BIN) ## Execute classic RISCOF flow with NEMU as DUT
+	@test -d "$(RISCOF_CLASSIC_NEMU_SUITE)" || { echo "[riscof-classic-nemu] ERROR: suite not found. Run 'make riscof-classic-setup' first."; exit 1; }
+	@mkdir -p "$(RISCOF_CLASSIC_NEMU_WORKDIR)"
+	@echo "================================================================"
+	@echo "[riscof-classic-nemu] Running classic RISCOF flow (NEMU as DUT)"
+	@echo "  NEMU:    $(NEMU_BIN)"
+	@echo "  Suite:   $(RISCOF_CLASSIC_NEMU_SUITE)"
+	@echo "  Workdir: $(RISCOF_CLASSIC_NEMU_WORKDIR)"
+	@echo "================================================================"
+	cd "$(RISCOF_CLASSIC_NEMU_DIR)" && \
+		NEMU_BIN="$(NEMU_BIN)" \
+		NEMU_HOME="$(NEMU_HOME)" \
+		RAPT_TIMEOUT="$(TIMEOUT)" \
+		riscof run \
+			--config=config.ini \
+			--suite=$(RISCOF_CLASSIC_NEMU_SUITE)/riscv-test-suite/ \
+			--env=$(RISCOF_CLASSIC_NEMU_SUITE)/riscv-test-suite/env \
+			--work-dir="$(RISCOF_CLASSIC_NEMU_WORKDIR)" \
+			--no-browser
+	@if grep -q '>0Failed<' "$(RISCOF_CLASSIC_NEMU_WORKDIR)/report.html" 2>/dev/null; then \
+		echo "[riscof-classic-nemu] PASS"; \
+	else \
+		echo "[riscof-classic-nemu] FAIL (see $(RISCOF_CLASSIC_NEMU_WORKDIR)/report.html)"; \
+		exit 1; \
+	fi
+
+riscof-classic-nemu-clean: ## Clean classic-nemu RISCOF artifacts
+	rm -rf $(RISCOF_CLASSIC_NEMU_WORKDIR)
 
 # ============================================================================
 # Verilator Coverage

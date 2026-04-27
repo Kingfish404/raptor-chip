@@ -10,6 +10,7 @@ typedef enum
     STVEC__,
 
     SCOUNTE,
+    MCOUNTE,
 
     SSCRATCH,
     SEPC___,
@@ -34,8 +35,16 @@ typedef enum
     MIP____,
 
     MCYCLE_,
+    MCYCLEH,
+    MINSTRET,
+    MINSTRETH,
     TIME___,
-    TIMEH__
+    TIMEH__,
+
+    MVENDORID,
+    MARCHID,
+    IMPID__,
+    MHARTID
 } csr_t;
 
 void cpu_exec_init();

@@ -72,6 +72,7 @@ module rapt_ifu #(
 
   logic trap;
   logic [XLEN-1:0] cause;
+  logic [XLEN-1:0] tval;
 
   // debug signals
   logic [XLEN-1:0] pc_stride;
@@ -183,6 +184,7 @@ module rapt_ifu #(
 
   assign ifu_idu.trap = trap;
   assign ifu_idu.cause = cause;
+  assign ifu_idu.tval = tval;
 
 
 `ifdef RAPT_DUAL_ISSUE
@@ -214,6 +216,7 @@ module rapt_ifu #(
     if (reset) begin
       pc_ifu <= `RAPT_PC_INIT;
       trap <= 0;
+      tval <= 0;
       pmu_fetch_fire <= 0;
       pmu_ifu_stall <= 0;
 `ifdef RAPT_DUAL_ISSUE
@@ -267,6 +270,7 @@ module rapt_ifu #(
         inst_a <= ifu_l1i.inst_n0;
         trap   <= ifu_l1i.trap;
         cause  <= ifu_l1i.cause;
+        tval   <= ifu_l1i.tval;
 `ifdef RAPT_DUAL_ISSUE
         pc_b         <= pc_ifu + (pre_is_c_a ? XLEN'('d2) : XLEN'('d4));
         inst_b_raw   <= inst_b_pre;

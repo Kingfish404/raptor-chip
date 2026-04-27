@@ -60,13 +60,18 @@ static inline unsigned long long _rdtime(void)
 #endif
 }
 
-/* CLINT timebase: 1 MHz */
+/* CLINT timebase: configurable, defaults to 10 MHz (Raptor LiteX FPGA target).
+ * The Raptor CLINT increments mtime once per sys_clk cycle (see rapt_clint.sv),
+ * so this MUST equal the build's SYS_CLK. The Makefile passes SYS_CLK_HZ via
+ * -DEE_TICKS_PER_SEC at compile time. */
 #define CORETIMETYPE        unsigned long long
 #define GETMYTIME(_t)       (*(_t) = _rdtime())
 #define MYTIMEDIFF(fin,ini) ((fin) - (ini))
 #define TIMER_RES_DIVIDER   1
 #define SAMPLE_TIME_IMPLEMENTATION 1
-#define EE_TICKS_PER_SEC    1000000ULL
+#ifndef EE_TICKS_PER_SEC
+#define EE_TICKS_PER_SEC    10000000ULL
+#endif
 
 /* ---- Data types ---- */
 typedef int16_t   ee_s16;

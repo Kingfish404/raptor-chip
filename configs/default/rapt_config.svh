@@ -10,10 +10,10 @@
 // Default is RV32 when RAPT_RV64 is not defined
 `ifdef RAPT_RV64
 `define RAPT_XLEN 64
-`define RAPT_MISA 'h8000000000141107
+`define RAPT_MISA 'h8000000000141105
 `else
 `define RAPT_XLEN 32
-`define RAPT_MISA 'h40141107
+`define RAPT_MISA 'h40141105
 `endif
 `define RAPT_I_EXTENSION 'h1
 `define RAPT_M_EXTENSION 'h1

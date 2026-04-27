@@ -35,8 +35,14 @@ module rapt_rou #(
 
     // interrupt
     csr_bcast_if.in csr_bcast,
+    // Async trap inputs: timer, software, external, and S-mode delegated
     input clint_timer_trap,
     input clint_sw_trap,
+    input clint_ext_trap,
+
+    // S-mode delegated interrupt (level): cause is supplied by csr.
+    input                  s_int_pending,
+    input [`RAPT_XLEN-1:0] s_int_cause,
 
     // commit
     rou_cmu_if.out rou_cmu,
@@ -57,6 +63,7 @@ module rapt_rou #(
   logic            recieved_trap;
   logic            recieved_sw_trap  /* verilator public */;
   logic [XLEN-1:0] trap_pc;
+  logic [XLEN-1:0] trap_cause  /* verilator public */;
 
   // Forward declarations (used across sections)
   logic [$clog2(ROB_SIZE)-1:0] rob_head, rob_tail_a;
@@ -94,12 +101,12 @@ module rapt_rou #(
   logic           [IIQ_SIZE-1:0] uoq_pv2_valid;
 
   logic uoq_enq_fire_a, uoq_deq_fire_a;
+  logic sys_resume;
 `ifdef RAPT_DUAL_ISSUE
   // Dual-issue UOQ pointers
   logic [$clog2(IIQ_SIZE)-1:0] uoq_head_b, uoq_tail_b;
 
   // Lightweight resume for pure CSR: no flush, just unblock IFU and clear drain
-  logic sys_resume;
 
   assign uoq_head_b = uoq_head_a + 1;
   assign uoq_tail_b = uoq_tail_a + 1;
@@ -444,6 +451,7 @@ module rapt_rou #(
       rob_tail_a       <= '0;
       recieved_trap    <= 1'b0;
       recieved_sw_trap <= 1'b0;
+      trap_cause       <= '0;
       for (int i = 0; i < ROB_SIZE; i++) begin
         rob_entry[i].busy  <= 1'b0;
         rob_entry[i].state <= ROB_CM;
@@ -620,9 +628,15 @@ module rapt_rou #(
           rob_entry[h1].sq_wdata <= '0;
         end
 
-        recieved_trap    <= clint_sw_trap || clint_timer_trap;
+        recieved_trap    <= clint_sw_trap || clint_timer_trap || clint_ext_trap || s_int_pending;
         recieved_sw_trap <= clint_sw_trap;
-        trap_pc          <= dual_commit ? rob_entry[h1].npc : rob_entry[rob_head].npc;
+        // Cause priority: MEI > MSI > MTI > S-mode delegated
+        // (RISC-V Priv §3.1.9 ordering for M-mode sources, then S-level).
+        if (clint_ext_trap) trap_cause <= XLEN'(`RAPT_CAUSE_MEI) | (XLEN'(1) << (XLEN - 1));
+        else if (clint_sw_trap) trap_cause <= XLEN'(`RAPT_CAUSE_MSI) | (XLEN'(1) << (XLEN - 1));
+        else if (clint_timer_trap) trap_cause <= XLEN'(`RAPT_CAUSE_MTI) | (XLEN'(1) << (XLEN - 1));
+        else if (s_int_pending) trap_cause <= s_int_cause;
+        trap_pc <= dual_commit ? rob_entry[h1].npc : rob_entry[rob_head].npc;
       end
     end
   end
@@ -695,8 +709,10 @@ module rapt_rou #(
 
   // ---- CMU interface (slot A) ----
   assign rou_cmu.rd_a = recieved_trap ? '0 : rob_entry[h0].rd;
-  // Trap entries surface as NOP (0x13) to downstream (difftest / RVFI)
-  assign rou_cmu.inst_a = rob_entry[h0].trap ? 32'h13 : uop_pl[h0].inst;
+  // Surface the real fetched instruction, even on traps (for difftest/RVFI).
+  // The architectural state (mcause/mepc/mtval) reflects the trap; downstream
+  // consumers use `inst` only for trace/diff reporting.
+  assign rou_cmu.inst_a = uop_pl[h0].inst;
   assign rou_cmu.pc_a = recieved_trap ? trap_pc : rob_entry[h0].pc;
   assign rou_cmu.prd_a = rob_entry[h0].prd;
   assign rou_cmu.prs_a = rob_entry[h0].prs;
@@ -725,7 +741,8 @@ module rapt_rou #(
 
   // ---- CMU interface (slot B: dual commit) ----
   assign rou_cmu.rd_b = rob_entry[h1].rd;
-  assign rou_cmu.inst_b = rob_entry[h1].trap ? 32'h13 : uop_pl[h1].inst;
+  // Surface the real fetched instruction, even on traps (for difftest/RVFI).
+  assign rou_cmu.inst_b = uop_pl[h1].inst;
   assign rou_cmu.pc_b = rob_entry[h1].pc;
   assign rou_cmu.prd_b = rob_entry[h1].prd;
   assign rou_cmu.prs_b = rob_entry[h1].prs;
@@ -753,26 +770,31 @@ module rapt_rou #(
   logic csr_from_h1;
   assign csr_from_h1 = dual_commit && (uop_pl[h1].sys || rob_entry[h1].trap);
 
+  // An illegal-inst or IFU page-fault may set trap=1 on a uop that still
+  // carries decoded sret/mret/ecall/ebreak/csr_wen bits. Gate these so the
+  // trap handler (rou_csr.trap path) is the sole side effect.
+  logic commit_trap;
+  assign commit_trap = csr_from_h1 ? rob_entry[h1].trap : rob_entry[h0].trap;
+
   assign rou_csr.pc = recieved_trap ? trap_pc : csr_from_h1 ? rob_entry[h1].pc : rob_entry[h0].pc;
-  assign rou_csr.csr_wen   = recieved_trap ? 1'b0
+  assign rou_csr.csr_wen   = (recieved_trap || commit_trap) ? 1'b0
                            : csr_from_h1   ? rob_entry[h1].csr_wen
                            :                 rob_entry[h0].csr_wen;
   assign rou_csr.csr_wdata = csr_from_h1 ? rob_entry[h1].csr_wdata : rob_entry[h0].csr_wdata;
   assign rou_csr.csr_addr = csr_from_h1 ? uop_pl[h1].csr_addr : uop_pl[h0].csr_addr;
-  assign rou_csr.ecall = recieved_trap ? 1'b0 : csr_from_h1 ? uop_pl[h1].ecall : uop_pl[h0].ecall;
-  assign rou_csr.ebreak    = recieved_trap ? 1'b0
+  assign rou_csr.ecall     = (recieved_trap || commit_trap) ? 1'b0
+                           : csr_from_h1 ? uop_pl[h1].ecall : uop_pl[h0].ecall;
+  assign rou_csr.ebreak    = (recieved_trap || commit_trap) ? 1'b0
                            : csr_from_h1   ? uop_pl[h1].ebreak
                            :                 uop_pl[h0].ebreak;
-  assign rou_csr.mret = recieved_trap ? 1'b0 : csr_from_h1 ? uop_pl[h1].mret : uop_pl[h0].mret;
-  assign rou_csr.sret = recieved_trap ? 1'b0 : csr_from_h1 ? uop_pl[h1].sret : uop_pl[h0].sret;
-  assign rou_csr.trap = recieved_trap || (csr_from_h1 ? rob_entry[h1].trap : rob_entry[h0].trap);
+  assign rou_csr.mret      = (recieved_trap || commit_trap) ? 1'b0
+                           : csr_from_h1 ? uop_pl[h1].mret : uop_pl[h0].mret;
+  assign rou_csr.sret      = (recieved_trap || commit_trap) ? 1'b0
+                           : csr_from_h1 ? uop_pl[h1].sret : uop_pl[h0].sret;
+  assign rou_csr.trap = recieved_trap || commit_trap;
   assign rou_csr.tval = recieved_trap ? '0 : csr_from_h1 ? rob_entry[h1].tval : rob_entry[h0].tval;
   assign rou_csr.cause     = recieved_trap
-      ? (recieved_sw_trap
-          ? (((csr_bcast.priv == `RAPT_PRIV_M)
-            ? `RAPT_CAUSE_MSI : `RAPT_CAUSE_SSI) + ('b1 << (XLEN - 1)))
-          : (((csr_bcast.priv == `RAPT_PRIV_M)
-            ? `RAPT_CAUSE_MTI : `RAPT_CAUSE_STI) + ('b1 << (XLEN - 1))))
+      ? trap_cause
       : csr_from_h1 ? rob_entry[h1].cause
       :               rob_entry[h0].cause;
   assign rou_csr.valid     = recieved_trap
@@ -799,25 +821,20 @@ module rapt_rou #(
 
   // COMMIT_DURABLE: when committing a store, the ROB entry at the commit slot
   // must have non-X vaddr/waddr (writeback already captured them).
-  `RAPT_SVA_IMPLY(clock, reset, ROB_STORE_HAS_ADDR,
-      (rou_lsu.valid && rou_lsu.store),
-      (!$isunknown(rou_lsu.sq_vaddr) && !$isunknown(rou_lsu.sq_waddr)))
+  `RAPT_SVA_IMPLY(clock, reset, ROB_STORE_HAS_ADDR, (rou_lsu.valid && rou_lsu.store), (!$isunknown
+                  (rou_lsu.sq_vaddr) && !$isunknown(rou_lsu.sq_waddr)))
 
   // DUAL_COMMIT_SEMANTICS: slot 0 cannot be a store when dual-committing
   // (hard microarchitectural invariant; slot 1 carries the store).
-  `RAPT_SVA_IMPLY(clock, reset, ROB_DUAL_COMMIT_SLOT0_NO_STORE,
-      (dual_commit),
-      (!rob_entry[h0].wen))
+  `RAPT_SVA_IMPLY(clock, reset, ROB_DUAL_COMMIT_SLOT0_NO_STORE, (dual_commit), (!rob_entry[h0].wen))
 
   // COMMIT_DURABLE: a valid commit requires the ROB head entry to be busy
   // (holding a uop) — prevents retiring an empty slot.
-  `RAPT_SVA_IMPLY(clock, reset, ROB_COMMIT_NEEDS_BUSY,
-      (head0_valid && !recieved_trap),
-      (rob_entry[h0].busy))
+  `RAPT_SVA_IMPLY(clock, reset, ROB_COMMIT_NEEDS_BUSY, (head0_valid && !recieved_trap),
+                  (rob_entry[h0].busy))
 
   // Coverage: flush events happen (sanity that the DUT actually exercises
   // flush paths during tests — guards against accidentally disabling flush).
-  `RAPT_COVER(clock, reset, ROB_FLUSH_EVENT,
-      cmu_bcast.flush_pipe)
+  `RAPT_COVER(clock, reset, ROB_FLUSH_EVENT, cmu_bcast.flush_pipe)
 
 endmodule

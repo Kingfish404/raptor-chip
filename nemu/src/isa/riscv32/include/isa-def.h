@@ -52,7 +52,7 @@ typedef enum
 #if defined(CONFIG_RV64)
 #define CSR_MISA_VALUE 0x8000000000141107ULL
 #else
-#define CSR_MISA_VALUE 0x40141107
+#define CSR_MISA_VALUE 0x40141105
 #endif
 
 enum CSR
@@ -356,6 +356,7 @@ typedef struct
   bool intr;
   word_t raise_intr;
   uint32_t last_inst_priv;
+  uint16_t last_csr_wr;
   uint64_t mtimecmp;
   vaddr_t reservation;
 

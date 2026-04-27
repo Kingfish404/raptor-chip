@@ -94,6 +94,7 @@ void usage(int argc, char *argv[])
   printf("  -t, --tree=BTB_FILE      add BTB_FILE for rom\n");
   printf("  -m, --maximum=NUM        set the maximum number of instructions to execute\n");
   printf("  -n, --none               do nothing\n");
+  printf("      --sig=SPEC           dump RISCOF signature (SPEC=<hex_begin>-<hex_end>:<path>)\n");
   printf("  -h, --help               display this help and exit\n");
   printf("\n");
 }
@@ -111,6 +112,7 @@ static int parse_args(int argc, char *argv[])
       {"maximum", required_argument, NULL, 'm'},
       {"none", no_argument, NULL, 'n'},
       {"help", no_argument, NULL, 'h'},
+      {"sig", required_argument, NULL, 256},
       {0, 0, NULL, 0},
   };
   int o;
@@ -149,6 +151,16 @@ static int parse_args(int argc, char *argv[])
       break;
     case 'n':
       break;
+    case 256:
+    {
+      int sig_set_range(const char *spec);
+      if (sig_set_range(optarg) != 0)
+      {
+        printf("ERROR: invalid --sig spec: %s (expected <hex_begin>-<hex_end>:<path>)\n", optarg);
+        exit(1);
+      }
+      break;
+    }
     case 1:
       img_file = optarg;
       return 0;

@@ -37,18 +37,19 @@ interface ifu_l1i_if #(
 `endif
   logic trap;
   logic [XLEN-1:0] cause;
+  logic [XLEN-1:0] tval;
   logic valid;
 
   modport master(output pc, invalid, input inst_n0,
 `ifdef RAPT_DUAL_ISSUE
     input inst_n1, inst_n1_valid,
 `endif
-    input trap, cause, valid);
+    input trap, cause, tval, valid);
   modport slave(input pc, invalid, output inst_n0,
 `ifdef RAPT_DUAL_ISSUE
     output inst_n1, inst_n1_valid,
 `endif
-    output trap, cause, valid);
+    output trap, cause, tval, valid);
 endinterface
 
 interface ifu_idu_if #(
@@ -67,6 +68,7 @@ interface ifu_idu_if #(
 
   logic trap;
   logic [XLEN-1:0] cause;
+  logic [XLEN-1:0] tval;
   logic [XLEN-1:0] pnpc;
   logic ready;
 
@@ -79,7 +81,7 @@ interface ifu_idu_if #(
 `ifdef RAPT_DUAL_ISSUE
       output inst_b, pc_b, valid_b,
 `endif
-      output pnpc, trap, cause,
+      output pnpc, trap, cause, tval,
       input ready, resteer, resteer_pc
   );
   modport slave(
@@ -87,7 +89,7 @@ interface ifu_idu_if #(
 `ifdef RAPT_DUAL_ISSUE
       input inst_b, pc_b, valid_b,
 `endif
-      input pnpc, trap, cause,
+      input pnpc, trap, cause, tval,
       output ready, resteer, resteer_pc
   );
 endinterface

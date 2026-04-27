@@ -21,7 +21,20 @@ endif
 
 NSIM_HOME = $(abspath .)
 VSRC_PATH ?= $(abspath ../rtl_sv)
-INC_PATH ?= $(abspath ./include) $(abspath $(VSRC_PATH)/include)
+
+# Configuration preset selection. Each preset lives in
+# `$(RAPTOR_HOME)/configs/<name>/rapt_config.svh` and is picked up first via
+# include path so it takes precedence over any older copy. Override at the
+# command line: `make pack RAPT_CONFIG=small`.
+RAPT_CONFIG ?= default
+CONFIG_DIR  := $(abspath $(RAPTOR_HOME)/configs/$(RAPT_CONFIG))
+ifeq ($(wildcard $(CONFIG_DIR)/rapt_config.svh),)
+$(error RAPT_CONFIG='$(RAPT_CONFIG)' but $(CONFIG_DIR)/rapt_config.svh does not exist. \
+Available: $(notdir $(wildcard $(RAPTOR_HOME)/configs/*)))
+endif
+
+# Config dir MUST come before rtl_sv/include so its rapt_config.svh wins.
+INC_PATH ?= $(CONFIG_DIR) $(abspath ./include) $(abspath $(VSRC_PATH)/include)
 
 remove_quote = $(patsubst "%",%,$(1))
 NPROC ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
@@ -84,6 +97,15 @@ $(info [nsim] VFLAGS changed: '$(VFLAGS_PREV)' -> '$(VFLAGS)', rebuilding...)
 endif
 $(shell printf '%s' '$(VFLAGS)' > $(VFLAGS_STAMP))
 
+# Auto-invalidate build when RAPT_CONFIG changes (default <-> small etc.)
+RAPT_CONFIG_STAMP := $(BUILD_DIR)/.rapt_config_stamp
+RAPT_CONFIG_PREV  := $(shell cat $(RAPT_CONFIG_STAMP) 2>/dev/null)
+ifneq ($(RAPT_CONFIG),$(RAPT_CONFIG_PREV))
+$(shell rm -rf $(OBJ_DIR) $(BUILD_DIR)/riscv*-npc-* $(BUILD_DIR)/rapt_pack.sv $(BUILD_DIR)/rapt_pack.svh $(RAPT_CONFIG_STAMP))
+$(info [nsim] RAPT_CONFIG changed: '$(RAPT_CONFIG_PREV)' -> '$(RAPT_CONFIG)', rebuilding...)
+endif
+$(shell printf '%s' '$(RAPT_CONFIG)' > $(RAPT_CONFIG_STAMP))
+
 # Auto-invalidate build when Kconfig changes (e.g., switching between o2/o2linux)
 CONFIG_STAMP := $(BUILD_DIR)/.config_stamp
 CONFIG_SIG   := $(shell md5sum .config 2>/dev/null || md5 -q .config 2>/dev/null || echo none)
@@ -131,7 +153,7 @@ endif
 
 $(BIN): $(VSRCS) $(VHSRCS) $(CCSRCS) $(CHSRCS) $(NVBOARD_ARCHIVE)
 	$(VERILATOR) --trace-fst -cc --exe --build -j $(NPROC) $(VERILATOR_FLAG) $(VERILATOR_EXTRA) $^ \
-		--threads 1 --trace-threads 1 \
+		--threads 1 \
 		--top-module $(VTARGET) \
 		$(addprefix -CFLAGS , $(CXXFLAGS)) $(addprefix -LDFLAGS , $(LDFLAGS)) \
 		$(addprefix -I, $(INC_PATH)) \

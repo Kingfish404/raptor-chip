@@ -17,6 +17,7 @@
 #include <isa-def.h>
 #include <stdio.h>
 #include <cpu/difftest.h>
+#include <memory/tlb.h>
 
 #if defined(CONFIG_ISA64)
 // for riscv64
@@ -42,6 +43,13 @@ word_t isa_raise_intr(word_t NO, vaddr_t epc)
     {
     case MCA_ILLEGAL_INS:
       tval = cpu.inst;
+      break;
+    case MCA_INS_ADD_MIS:
+    case MCA_INS_ACC_FAU:
+      /* For cross-boundary PMP faults, g_vaddr was set to the faulting byte
+       * address in vaddr_ifetch. For other INS_ACC_FAU paths, g_vaddr equals
+       * epc (set at entry to vaddr_ifetch). Matches sail mtval convention. */
+      tval = g_vaddr ? g_vaddr : epc;
       break;
     case MCA_BREAK_POINT:
       tval = epc;
@@ -103,7 +111,18 @@ word_t isa_raise_intr(word_t NO, vaddr_t epc)
 
       cpu.last_inst_priv = cpu.priv;
       cpu.priv = PRV_S;
-      ret_pc = cpu.sr[CSR_STVEC];
+      soft_tlb_flush();
+      {
+        word_t stvec = cpu.sr[CSR_STVEC];
+        word_t base  = stvec & ~(word_t)0x3;
+        word_t mode  = stvec & 0x3;
+        bool   is_int = (NO & ((word_t)1 << (XLEN - 1))) != 0;
+        if (mode == 1 && is_int) {
+          ret_pc = base + (word_t)((NO & ~((word_t)1 << (XLEN - 1))) * 4);
+        } else {
+          ret_pc = base;
+        }
+      }
       return ret_pc;
     }
   }
@@ -119,7 +138,20 @@ word_t isa_raise_intr(word_t NO, vaddr_t epc)
   cpu.last_inst_priv = cpu.priv;
   cpu.raise_intr = NO;
   cpu.priv = PRV_M;
-  ret_pc = cpu.sr[CSR_MTVEC];
+  soft_tlb_flush();
+  {
+    word_t mtvec = cpu.sr[CSR_MTVEC];
+    word_t base  = mtvec & ~(word_t)0x3;
+    word_t mode  = mtvec & 0x3;
+    bool   is_int = (NO & ((word_t)1 << (XLEN - 1))) != 0;
+    /* Mode 01 = Vectored: base + 4*cause for interrupts; base for exceptions.
+     * Mode 00 = Direct: always base.  Reserved modes coerced at CSR-write time. */
+    if (mode == 1 && is_int) {
+      ret_pc = base + (word_t)((NO & ~((word_t)1 << (XLEN - 1))) * 4);
+    } else {
+      ret_pc = base;
+    }
+  }
   return ret_pc;
 }
 

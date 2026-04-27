@@ -21,9 +21,11 @@ module rapt_lsu #(
     input reset
 );
   /* verilator lint_off UNUSEDSIGNAL */
-  typedef enum logic {
-    LS_S_V = 0,
-    LS_S_R = 1
+  typedef enum logic [1:0] {
+    LS_S_V    = 2'b00,  // present lo beat, wait for wready
+    LS_S_R    = 2'b01,  // lo beat retired; aligned case completes here
+    LS_S_HI_V = 2'b10,  // misaligned: present hi beat, wait for wready
+    LS_S_HI_R = 2'b11   // hi beat retired; SQ entry released next cycle
   } state_store_t;
 
   state_store_t state_store;
@@ -126,7 +128,17 @@ module rapt_lsu #(
         `RAPT_DPI_C_NPC_DIFFTEST_MEM_DIFF(rou_lsu.sq_waddr, rou_lsu.sq_wdata, {{3'b0}, rou_lsu.alu})
       end
       if (state_store == LS_S_R && sq_valid[sq_head]) begin
-        // Store Finished
+        // Store Finished (aligned case — released after single beat).
+        sq_valid[sq_head] <= 0;
+
+        sq_alu[sq_head] <= 0;
+        sq_waddr[sq_head] <= 0;
+        sq_wdata[sq_head] <= 0;
+
+        sq_head <= sq_head + 1;
+      end
+      if (state_store == LS_S_HI_R && sq_valid[sq_head]) begin
+        // Store Finished (misaligned case — released after hi beat).
         sq_valid[sq_head] <= 0;
 
         sq_alu[sq_head] <= 0;
@@ -231,6 +243,109 @@ module rapt_lsu #(
 
   assign raddr_valid = exu_lsu.rvalid;
 
+  // ==========================================================================
+  //  Misaligned load support
+  //    Splits a load that crosses a word (RV32) / dword (RV64) boundary into
+  //    two aligned cache/bus transactions, then merges the two halves into a
+  //    single XLEN-wide result before handing it back to the EXU.
+  //    Covers LH[U] crossing (raddr[1:0]==3), LW[U] at any non-zero low-bit
+  //    alignment, and (RV64) LD with raddr[2:0]!=0.
+  // ==========================================================================
+  localparam int OFFW = $clog2(XLEN/8);  // 2 for RV32, 3 for RV64
+  typedef enum logic [1:0] {
+    MA_IDLE = 2'b00,  // normal aligned flow
+    MA_HI   = 2'b01,  // lo half latched, requesting hi half
+    MA_DONE = 2'b10   // both halves latched, presenting merged rdata
+  } ma_state_t;
+  ma_state_t ma_state;
+  logic [XLEN-1:0] ma_lo_data;
+  logic [XLEN-1:0] ma_hi_data;
+
+  // Detect a misaligned access that must be split into two beats.
+  logic ma_span;
+  assign ma_span =
+       ((ralu == `RAPT_ALU_LH__ || ralu == `RAPT_ALU_LHU_) && raddr[1:0] == 2'b11)
+    || ((ralu == `RAPT_ALU_LW__) && (raddr[1:0] != 2'b00))
+`ifdef RAPT_RV64
+    || ((ralu == `RAPT_ALU_LWU_) && (raddr[1:0] != 2'b00))
+    || ((ralu == `RAPT_ALU_LD__) && (raddr[OFFW-1:0] != '0))
+`endif
+  ;
+  // Only engage the split for requests that actually reach the cache
+  // (no SQ forward, no STQ conflict).  Forwarded loads keep the single-shot
+  // path; the store queue does not straddle word boundaries today.
+  logic ma_load_req;
+  assign ma_load_req = raddr_valid && ma_span && !fwd_hit
+                    && !load_in_sq && !stq_addr_conflict
+                    && !pmp_load_fault_lsu;
+
+  // --- Pre-split PMP check on the ORIGINAL misaligned address ---
+  // The MA-split path below turns a misaligned load into two aligned
+  // requests; L1D's PMP sees only those aligned addresses and cannot
+  // detect a partial-region violation that straddles a PMP boundary.
+  // Check the un-split access here so partial matches trap correctly.
+  logic [1:0] lsu_eff_priv;
+  assign lsu_eff_priv = (csr_bcast.priv == `RAPT_PRIV_M && csr_bcast.mprv)
+                        ? csr_bcast.mpp : csr_bcast.priv;
+  logic [3:0] lsu_load_size_m1;
+  always_comb begin
+    unique case (ralu[1:0])
+      2'b00:   lsu_load_size_m1 = 4'd0;
+      2'b01:   lsu_load_size_m1 = 4'd1;
+      2'b10:   lsu_load_size_m1 = 4'd3;
+      2'b11:   lsu_load_size_m1 = 4'd7;
+      default: lsu_load_size_m1 = 4'd3;
+    endcase
+  end
+  logic pmp_load_fault_lsu;
+  rapt_pmp #(.XLEN(XLEN)) u_pmp_load_lsu (
+      .addr   (raddr),
+      .size_m1(lsu_load_size_m1),
+      .priv   (lsu_eff_priv),
+      .op_r   (1'b1),
+      .op_w   (1'b0),
+      .op_x   (1'b0),
+      .pmpcfg (csr_bcast.pmpcfg),
+      .pmpaddr(csr_bcast.pmpaddr),
+      .fault  (pmp_load_fault_lsu)
+  );
+
+  // Aligned low and high request addresses for the two beats.
+  logic [XLEN-1:0] ma_raddr_lo, ma_raddr_hi;
+  assign ma_raddr_lo = {raddr[XLEN-1:OFFW], {OFFW{1'b0}}};
+  assign ma_raddr_hi = ma_raddr_lo + XLEN'(XLEN/8);
+
+  // Merge the two halves into a single XLEN-wide value positioned so that
+  // byte 0 of the merged word corresponds to `raddr`.  Concatenate hi:lo
+  // into a double-wide vector and shift right by the byte offset in bits;
+  // the shift amount is guaranteed non-zero on the MA path (raddr[OFFW-1:0]
+  // is non-zero whenever ma_span is asserted).
+  logic [2*XLEN-1:0] ma_cat;
+  logic [XLEN-1:0]   ma_merged;
+  logic [$clog2(2*XLEN)-1:0] ma_shift;
+  assign ma_shift  = {{($clog2(2*XLEN)-OFFW-3){1'b0}}, raddr[OFFW-1:0], 3'b000};
+  assign ma_cat    = {ma_hi_data, ma_lo_data};
+  assign ma_merged = ma_cat[ma_shift +: XLEN];
+
+  // Address/rvalid muxing toward the L1D interface.
+  logic [XLEN-1:0] ma_req_addr;
+  logic [4:0]      ma_req_alu;
+  assign ma_req_addr = (ma_state == MA_HI) ? ma_raddr_hi
+                     : (ma_load_req)        ? ma_raddr_lo
+                     :                        raddr;
+  // Force an aligned word/dword load opcode during the split so the L1D
+  // never sees a "misaligned" request.
+  assign ma_req_alu = (ma_state == MA_HI || ma_load_req)
+`ifdef RAPT_RV64
+                    ? `RAPT_ALU_LD__
+`else
+                    ? `RAPT_ALU_LW__
+`endif
+                    : ralu;
+
+  // ==========================================================================
+  //  Load data path — uses the split-merge result when ma_state == MA_DONE.
+  // ==========================================================================
   // logic [7:0] wstrb;
   // assign wstrb = (
   //          ({8{ralu == `RAPT_ALU_SB}} & 8'h1) |
@@ -238,8 +353,14 @@ module rapt_lsu #(
   //          ({8{ralu == `RAPT_ALU_SW}} & 8'hf)
   //        );
 
-  assign rdata_unalign = (raddr_valid && fwd_hit) ? fwd_data : lsu_l1d.rdata;
-  assign rdata = (rdata_unalign >> (raddr[$clog2(XLEN/8)-1:0] * 8));
+  assign rdata_unalign = (raddr_valid && fwd_hit) ? fwd_data
+                      : (ma_state == MA_DONE)     ? ma_merged
+                      :                             lsu_l1d.rdata;
+  // For the split path the merged word already starts at byte 0, so skip the
+  // single-shot alignment shift.
+  assign rdata = (ma_state == MA_DONE)
+               ? rdata_unalign
+               : (rdata_unalign >> (raddr[OFFW-1:0] * 8));
 
   assign exu_lsu.rdata = (
       ({XLEN{ralu == `RAPT_ALU_LB__}} & {{XLEN-8{rdata[7]}}, rdata[7:0]})
@@ -254,10 +375,34 @@ module rapt_lsu #(
     | ({XLEN{ralu == `RAPT_ALU_LW__}} & rdata)
 `endif
     );
-  assign exu_lsu.trap = (raddr_valid && fwd_hit) ? 1'b0 : lsu_l1d.trap;
-  assign exu_lsu.cause = lsu_l1d.cause;
-  assign exu_lsu.difftest_skip = (raddr_valid && fwd_hit) ? 1'b0 : lsu_l1d.difftest_skip;
-  assign exu_lsu.rready = (raddr_valid && fwd_hit) || lsu_l1d.rready;
+  // Swallow per-beat traps on the MA split path (we never issue a misaligned
+  // address to the cache, so any L1D-raised trap on the beats is spurious).
+  logic ma_active;
+  assign ma_active = (ma_state != MA_IDLE) || ma_load_req;
+  // Raise the pre-split PMP trap on the cycle the request is seen, so the
+  // IOQ retires the load as a trap without touching the cache.
+  logic lsu_pmp_trap;
+  assign lsu_pmp_trap = raddr_valid && ma_span && pmp_load_fault_lsu
+                     && !fwd_hit && !load_in_sq && !stq_addr_conflict
+                     && (ma_state == MA_IDLE);
+  assign exu_lsu.trap = lsu_pmp_trap ? 1'b1
+                      : (raddr_valid && fwd_hit) ? 1'b0
+                      : ma_active             ? 1'b0
+                      :                         lsu_l1d.trap;
+  assign exu_lsu.cause = lsu_pmp_trap ? `RAPT_CAUSE_LOAD_ACC_FAULT
+                                       : lsu_l1d.cause;
+  assign exu_lsu.difftest_skip = (raddr_valid && fwd_hit) ? 1'b0
+                              : ma_active             ? 1'b1
+                              :                         lsu_l1d.difftest_skip;
+  // rready contract:
+  //  - aligned hit / forward: one-cycle rready pulse (as before)
+  //  - MA split:              hold rready low during LO/HI beats; raise it
+  //                           once merged data is parked in MA_DONE.
+  //  - pre-split PMP trap:    pulse rready immediately so IOQ retires.
+  assign exu_lsu.rready = lsu_pmp_trap
+                       || (raddr_valid && fwd_hit)
+                       || (ma_state == MA_DONE)
+                       || (lsu_l1d.rready && !ma_load_req && ma_state == MA_IDLE);
 
   always @(posedge clock) begin
     if (reset) begin
@@ -267,11 +412,21 @@ module rapt_lsu #(
         LS_S_V: begin
           if (wvalid) begin
             if (lsu_l1d.wready) begin
-              state_store <= LS_S_R;
+              // Lo beat accepted. If the store straddles a word/dword boundary
+              // we still owe a high beat; otherwise retire.
+              state_store <= ma_store_span ? LS_S_HI_V : LS_S_R;
             end
           end
         end
         LS_S_R: begin
+          state_store <= LS_S_V;
+        end
+        LS_S_HI_V: begin
+          if (lsu_l1d.wready) begin
+            state_store <= LS_S_HI_R;
+          end
+        end
+        LS_S_HI_R: begin
           state_store <= LS_S_V;
         end
         default: begin
@@ -281,17 +436,110 @@ module rapt_lsu #(
     end
   end
 
-  assign lsu_l1d.raddr = raddr;
-  assign lsu_l1d.ralu = ralu;
-  assign lsu_l1d.rvalid = raddr_valid && !load_in_sq && !stq_addr_conflict;
+  assign lsu_l1d.raddr = ma_req_addr;
+  assign lsu_l1d.ralu = ma_req_alu;
+  assign lsu_l1d.rvalid = (ma_state == MA_HI)
+                       || (raddr_valid && !load_in_sq && !stq_addr_conflict
+                                       && (ma_state == MA_IDLE));
   assign lsu_l1d.atomic_lock = exu_lsu.atomic_lock;
+
+  // Misalign-split FSM.
+  always_ff @(posedge clock) begin
+    if (reset) begin
+      ma_state <= MA_IDLE;
+      ma_lo_data <= '0;
+      ma_hi_data <= '0;
+    end else if (cmu_bcast.flush_pipe) begin
+      ma_state <= MA_IDLE;
+    end else begin
+      unique case (ma_state)
+        MA_IDLE: begin
+          if (ma_load_req && lsu_l1d.rready) begin
+            ma_lo_data <= lsu_l1d.rdata;
+            ma_state <= MA_HI;
+          end
+        end
+        MA_HI: begin
+          if (lsu_l1d.rready) begin
+            ma_hi_data <= lsu_l1d.rdata;
+            ma_state <= MA_DONE;
+          end
+        end
+        MA_DONE: begin
+          // EXU consumes the merged word when rvalid drops.
+          if (!exu_lsu.rvalid) begin
+            ma_state <= MA_IDLE;
+          end
+        end
+        default: ma_state <= MA_IDLE;
+      endcase
+    end
+  end
 
   /* verilator lint_on UNUSEDSIGNAL */
 
-  assign lsu_l1d.waddr = waddr;
-  assign lsu_l1d.walu = walu;
-  assign lsu_l1d.wvalid = wvalid && state_store == LS_S_V;
-  assign lsu_l1d.wdata = wdata;
+  // ==========================================================================
+  //  Misaligned store support
+  //    SW/SH at `waddr[OFFW-1:0]` crossing a word (RV32) / dword (RV64)
+  //    boundary is split into two aligned beats.  Beat 0 drives the original
+  //    waddr/walu/wdata — the BUS already shifts wstrb/wdata by `waddr_lo * 8`
+  //    and truncates, so the lo word naturally gets the correct partial
+  //    write.  Beat 1 drives the next word-aligned address with the bytes
+  //    that spilled past the word boundary, shifted down to live at byte 0.
+  // ==========================================================================
+  logic ma_store_span;
+  logic [XLEN-1:0] ma_waddr_hi;
+  logic [4:0]      ma_walu_hi;
+  logic [XLEN-1:0] ma_wdata_hi;
+  logic [OFFW:0]   ma_w_off;       // byte offset into the aligned word (extra bit)
+  logic [OFFW:0]   ma_w_size;      // store size in bytes, 1/2/4/(8)
+  /* verilator lint_off UNUSEDSIGNAL */
+  logic [2*XLEN/8-1:0]   ma_wstrb_wide;  // low half unused (bus path handles lo)
+  logic [2*XLEN-1:0]     ma_wdata_wide;  // low half unused (bus path handles lo)
+  /* verilator lint_on UNUSEDSIGNAL */
+  logic [$clog2(2*XLEN)-1:0] ma_w_shift;
+
+  assign ma_w_off  = {1'b0, waddr[OFFW-1:0]};
+  // Compute store size from walu byte mask.
+  always_comb begin
+    unique case (walu)
+      `RAPT_SB_WSTRB: ma_w_size = (OFFW+1)'(1);
+      `RAPT_SH_WSTRB: ma_w_size = (OFFW+1)'(2);
+      `RAPT_SW_WSTRB: ma_w_size = (OFFW+1)'(4);
+`ifdef RAPT_RV64
+      `RAPT_SD_WSTRB: ma_w_size = (OFFW+1)'(8);
+`endif
+      default:        ma_w_size = (OFFW+1)'(0);
+    endcase
+  end
+  // Misaligned cross-word if off + size > word size.
+  assign ma_store_span = (ma_w_size != '0)
+                      && ((ma_w_off + ma_w_size) > (OFFW+1)'(XLEN/8));
+
+  /* verilator lint_off UNUSEDSIGNAL */
+  /* verilator lint_off WIDTHTRUNC */
+  assign ma_wstrb_wide = {{(XLEN/8){1'b0}}, walu[XLEN/8-1:0]} << ma_w_off;
+  assign ma_w_shift    = {{($clog2(2*XLEN)-OFFW-3){1'b0}}, waddr[OFFW-1:0], 3'b000};
+  assign ma_wdata_wide = {{XLEN{1'b0}}, wdata} << ma_w_shift;
+  assign ma_wdata_hi   = ma_wdata_wide[2*XLEN-1:XLEN];
+  /* verilator lint_on WIDTHTRUNC */
+  /* verilator lint_on UNUSEDSIGNAL */
+  assign ma_waddr_hi = {waddr[XLEN-1:OFFW], {OFFW{1'b0}}} + XLEN'(XLEN/8);
+`ifdef RAPT_RV64
+  // walu is 5-bit; XLEN/8 == 8.  Only the low 5 bits of the overflow can
+  // possibly be set (SD has at most 7 spill bytes, so <= 0x7f; but even SW
+  // overflow fits in 3 bits).  Zero-extend safely.
+  assign ma_walu_hi = {1'b0, ma_wstrb_wide[2*XLEN/8-1:XLEN/8][3:0]};
+`else
+  assign ma_walu_hi = {{(5-XLEN/8){1'b0}}, ma_wstrb_wide[2*XLEN/8-1:XLEN/8]};
+`endif
+
+  // L1D drive muxing.
+  assign lsu_l1d.waddr  = (state_store == LS_S_HI_V) ? ma_waddr_hi : waddr;
+  assign lsu_l1d.walu   = (state_store == LS_S_HI_V) ? ma_walu_hi  : walu;
+  assign lsu_l1d.wvalid = (state_store == LS_S_V && wvalid)
+                       || (state_store == LS_S_HI_V);
+  assign lsu_l1d.wdata  = (state_store == LS_S_HI_V) ? ma_wdata_hi : wdata;
 
   // ==========================================================================
   //  Assertions (enable with +define+RAPT_ASSERT_EN)

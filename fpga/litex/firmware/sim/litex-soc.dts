@@ -2,7 +2,7 @@
  * Device Tree for Raptor LiteX SoC (Verilator simulation)
  *
  * CLINT at 0x02000000 is internal to the Raptor CPU (intercepted in
- * ysyx_bus.sv before AXI4). We still declare it here so OpenSBI's
+ * rapt_bus.sv before AXI4). We still declare it here so OpenSBI's
  * fdt_timer_mtimer driver can discover mtime/mtimecmp addresses.
  *
  * UART is the LiteX sim UART (serial2console) at CSR base 0xf0001800.

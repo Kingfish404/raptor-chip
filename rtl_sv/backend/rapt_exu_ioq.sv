@@ -221,6 +221,47 @@ module rapt_exu_ioq #(
   assign exu_l1d.walu = ioq_alu[ioq_head][4:0];
   assign exu_l1d.valid = (ioq_wen[ioq_head] && ioq_pr1[ioq_head] == 0 && ioq_pr2[ioq_head] == 0);
 
+  // === PMP check for bare-mode (non-MMU) stores at head ===
+  // MMU-mode stores are PMP-checked in L1D on the translated paddr.
+  // Bare-mode stores never reach L1D's MMU handshake, so check here on
+  // the virtual==physical address.  MPRV is ignored for bare mode since
+  // paging is off (SATP=0) in the most common arch-test setups; MSTATUS.
+  // MPRV still takes effect on effective privilege for memory accesses.
+  logic [1:0] ioq_store_eff_priv;
+  logic       pmp_store_bare_fault;
+  assign ioq_store_eff_priv = (csr_bcast.priv == `RAPT_PRIV_M && csr_bcast.mprv)
+                              ? csr_bcast.mpp
+                              : csr_bcast.priv;
+  logic [3:0] store_bare_size_m1;
+  always_comb begin
+    unique case (ioq_alu[ioq_head][4:0])
+      `RAPT_SB_WSTRB: store_bare_size_m1 = 4'd0;
+      `RAPT_SH_WSTRB: store_bare_size_m1 = 4'd1;
+      `RAPT_SW_WSTRB: store_bare_size_m1 = 4'd3;
+      `RAPT_SD_WSTRB: store_bare_size_m1 = 4'd7;
+      default:        store_bare_size_m1 = 4'd3;
+    endcase
+  end
+  rapt_pmp u_pmp_store_bare (
+      .addr   (ioq_vj[ioq_head] + ioq_imm[ioq_head]),
+      .size_m1(store_bare_size_m1),
+      .priv   (ioq_store_eff_priv),
+      .op_r   (1'b0),
+      .op_w   (1'b1),
+      .op_x   (1'b0),
+      .pmpcfg (csr_bcast.pmpcfg),
+      .pmpaddr(csr_bcast.pmpaddr),
+      .fault  (pmp_store_bare_fault)
+  );
+  logic store_bare_pmp_trap;
+  assign store_bare_pmp_trap = ioq_wen[ioq_head]
+                               && !ioq_mmu_en[ioq_head]
+                               && !csr_bcast.dmmu_en
+                               && (pmp_store_bare_fault
+                                   || !rapt_pkg::addr_mapped(
+      ioq_vj[ioq_head] + ioq_imm[ioq_head]
+  ));
+
   assign reservation_match = exu_l1d.reservation == (csr_bcast.dmmu_en
       ? ioq_paddr[ioq_head]
       : (ioq_vj[ioq_head] + ioq_imm[ioq_head]));
@@ -288,11 +329,26 @@ module rapt_exu_ioq #(
       ? ioq_paddr[ioq_head]
       : ioq_vj[ioq_head] + ioq_imm[ioq_head];
   assign exu_ioq_bcast.sq_wdata = ioq_atom[ioq_head] ? head_amo_wdata : ioq_data[ioq_head];
-  assign exu_ioq_bcast.trap = ioq_ren[ioq_head] ? head_trap_lsu : ioq_trap[ioq_head];
+  // For AMO RW (atomic with both R and W), PMP/page fault on either side
+  // is reported as a store access fault per RISC-V spec.  LR is treated as a
+  // pure load; SC as a pure store (PMP store path).
+  logic head_is_amo_rw;
+  assign head_is_amo_rw = ioq_atom[ioq_head]
+                          && (ioq_alu[ioq_head] != `RAPT_ATO_LR__)
+                          && (ioq_alu[ioq_head] != `RAPT_ATO_SC__);
+  assign exu_ioq_bcast.trap = ioq_ren[ioq_head]
+      ? (head_trap_lsu || (head_is_amo_rw && store_bare_pmp_trap))
+      : (ioq_trap[ioq_head] || store_bare_pmp_trap);
   assign exu_ioq_bcast.tval     = ioq_ren[ioq_head]
       ? ioq_eff_addr[ioq_head]
       : ioq_vj[ioq_head] + ioq_imm[ioq_head];
-  assign exu_ioq_bcast.cause = ioq_ren[ioq_head] ? head_cause_lsu : ioq_cause[ioq_head];
+  assign exu_ioq_bcast.cause = ioq_ren[ioq_head]
+      ? (head_is_amo_rw && (head_trap_lsu || store_bare_pmp_trap)
+          ?
+      `RAPT_CAUSE_STORE_ACC_FAULT
+      : head_cause_lsu) : (ioq_trap[ioq_head] ? ioq_cause[ioq_head] : (store_bare_pmp_trap ?
+      `RAPT_CAUSE_STORE_ACC_FAULT
+      : ioq_cause[ioq_head]));
   assign exu_ioq_bcast.difftest_skip =
       (ioq_ren[ioq_head] && head_skip_lsu)
       || (ioq_wen[ioq_head] && rapt_pkg::addr_mmio(

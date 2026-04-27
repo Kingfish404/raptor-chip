@@ -13,6 +13,8 @@
  * See the Mulan PSL v2 for more details.
  ***************************************************************************************/
 
+// DUT: Device Under Test
+
 #include <isa.h>
 #include <cpu/difftest.h>
 #include "../local-include/reg.h"

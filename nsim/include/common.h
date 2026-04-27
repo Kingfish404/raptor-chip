@@ -108,6 +108,7 @@ typedef enum
 typedef struct
 {
   NPC_STATE_CODE state;
+  uint8_t host_exit_ok;
   word_t *gpr;
   word_t *ret;
   word_t *pc;

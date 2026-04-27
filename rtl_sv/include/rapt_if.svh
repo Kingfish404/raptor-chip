@@ -120,14 +120,46 @@ interface csr_bcast_if #(
   logic [XLEN-1:0] tvec;
   logic timer_int_en;
   logic sw_int_en;
+  logic ext_int_en;
+
+  // MPRV/MPP for load/store effective privilege
+  logic mprv;
+  logic [1:0] mpp;
+
+  // mstatus.SUM (Supervisor User Memory access) / MXR (Make eXecutable Readable)
+  logic sum;
+  logic mxr;
+
+  // mstatush.SBE: when set, implicit page-table accesses read big-endian PTEs.
+  logic sbe;
+
+  // mstatus privileged-mode guard bits (TSR/TVM/TW) for illegal-inst checks.
+  logic tsr;  // trap sret in S-mode when set
+  logic tvm;  // trap satp / sfence.vma in S-mode when set
+  logic tw;   // trap wfi in U/S when set
+
+  // mcounteren / scounteren low 3 bits (CY/TM/IR) for U/S counter reads.
+  logic [2:0] mcounteren;
+  logic [2:0] scounteren;
+
+  // PMP state (8 active entries). pmpaddr is the raw CSR value
+  // (byte address >> 2); pmpcfg is the 8-bit layout L[7] 0[6:5] A[4:3] X[2] W[1] R[0].
+  logic [7:0] pmpcfg [`RAPT_PMP_NUM];
+  logic [XLEN-1:0] pmpaddr [`RAPT_PMP_NUM];
 
   modport in(
       input priv, satp_ppn, satp_asid,
-      input immu_en, dmmu_en, mtvec, tvec, timer_int_en, sw_int_en
+      input immu_en, dmmu_en, mtvec, tvec, timer_int_en, sw_int_en, ext_int_en,
+      input mprv, mpp, pmpcfg, pmpaddr,
+      input tsr, tvm, tw, mcounteren, scounteren,
+      input sum, mxr, sbe
   );
   modport out(
       output priv, satp_ppn, satp_asid,
-      output immu_en, dmmu_en, mtvec, tvec, timer_int_en, sw_int_en
+      output immu_en, dmmu_en, mtvec, tvec, timer_int_en, sw_int_en, ext_int_en,
+      output mprv, mpp, pmpcfg, pmpaddr,
+      output tsr, tvm, tw, mcounteren, scounteren,
+      output sum, mxr, sbe
   );
 endinterface
 

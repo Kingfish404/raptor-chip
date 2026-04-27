@@ -144,7 +144,7 @@ make -C formal formal_exu_mul   # Multiplier correctness properties
 
 [riscv-formal](https://github.com/YosysHQ/riscv-formal) performs per-instruction
 formal verification via the RVFI (RISC-V Formal Interface). The Raptor core
-exposes RVFI signals through `rtl_sv/backend/ysyx_rvfi.sv` (enabled by
+exposes RVFI signals through `rtl_sv/backend/rapt_rvfi.sv` (enabled by
 `-DRAPT_RVFI`), with NRET=2 for dual-commit.
 
 The riscv-formal repository is **auto-cloned** on first use. Project-owned
@@ -174,7 +174,7 @@ Each check takes ~70 seconds with depth 5.
 
 **Configuration files** (`formal/rvfi/`):
 - `checks.cfg` — ISA, nret, solver, depth, yosys-slang script
-- `wrapper.sv` — Instantiates `ysyx` with unconstrained AXI4 responses via
+- `wrapper.sv` — Instantiates `rapt` with unconstrained AXI4 responses via
   `rvformal_rand_reg`, exposing only RVFI outputs to the testbench
 
 ## Integration with Root Makefile

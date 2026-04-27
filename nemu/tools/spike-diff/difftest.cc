@@ -163,8 +163,6 @@ public:
     state->mtval->write(ctx->sr[CSR_MTVAL]);
     state->csrmap[CSR_MIP]->write(ctx->sr[CSR_MIP]);
 
-    state->misa->write(ctx->sr[CSR_MISA]);
-
     state->prv = ctx->priv;
   }
 

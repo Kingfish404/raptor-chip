@@ -1,7 +1,15 @@
 `include "rapt.svh"
 
 // Sv32 two-level page table walker.
-// Walks vpn[1] -> vpn[0] via AXI read channel, produces physical tag or fault.
+// Walks vpn[1] -> vpn[0] via AXI read channel, produces physical tag + PTE
+// permission flags or a page fault.  This module only detects structural
+// faults intrinsic to the walk itself:
+//   * PTE.V = 0                          (invalid)
+//   * PTE.R = 0 && PTE.W = 1             (reserved W-only encoding)
+//   * level-1 leaf with non-zero vpn[0]  (misaligned superpage)
+// Permission/A/D checks against the access type and current privilege are
+// performed at the requester (L1I / L1D) using the returned pte_flags so that
+// the same checks apply on TLB hits.
 module rapt_ptw #(
     parameter bit [7:0] XLEN = `RAPT_XLEN
 ) (
@@ -13,6 +21,7 @@ module rapt_ptw #(
     input logic [XLEN-1:0] vaddr,      // virtual address to translate
     input logic [    21:0] satp_ppn,   // root page table PPN from satp
     input logic            mmu_en,     // MMU enabled (guard)
+    input logic            sbe,        // mstatush.SBE: PTEs are big-endian
 
     // AXI read channel (shared with cache: active only while busy)
     output logic            bus_arvalid,
@@ -25,6 +34,8 @@ module rapt_ptw #(
     output logic             fault,        // page fault
     output logic [XLEN-1:10] result_ptag,  // physical tag for TLB fill
     output logic [XLEN-1:12] result_vtag,  // virtual tag for TLB fill
+    // pte flags: {D,A,G,U,X,W,R} (bits 7..1 of PTE); valid when done=1
+    output logic [      6:0] result_pte,
 
     // Status
     output logic busy  // PTW is in-flight
@@ -46,18 +57,29 @@ module rapt_ptw #(
 `ifdef RAPT_RV64
   // Sv32 PTEs are 4 bytes; pmem_read returns 8 bytes on RV64.
   // Select correct 32-bit half using ppn_a[2].
-  logic [31:0] pte_data;
-  assign pte_data = ppn_a[2] ? bus_rdata[63:32] : bus_rdata[31:0];
+  logic [31:0] pte_raw;
+  assign pte_raw = ppn_a[2] ? bus_rdata[63:32] : bus_rdata[31:0];
 `else
-  wire [31:0] pte_data = bus_rdata[31:0];
+  wire [31:0] pte_raw = bus_rdata[31:0];
 `endif
+  // SBE: WARL-zero. We keep the `sbe` port for interface stability but
+  // do not byte-swap PTEs (matches the reference sail semantics).
+  /* verilator lint_off UNUSEDSIGNAL */
+  wire _unused_sbe = sbe;
+  /* verilator lint_on UNUSEDSIGNAL */
+  wire [31:0] pte_data = pte_raw;
 
   assign busy = (state != IDLE);
   assign bus_arvalid = (state == LVL1 || state == LVL0);
   assign bus_araddr = ppn_a[XLEN-1:0];
 
-  // Leaf detection: PTE.R or PTE.X set means leaf
-  wire pte_leaf = (pte_data[2] || pte_data[1]);
+  // PTE bit decode
+  wire pte_v    = pte_data[0];
+  wire pte_r    = pte_data[1];
+  wire pte_w    = pte_data[2];
+  wire pte_x    = pte_data[3];
+  wire pte_leaf = pte_r || pte_x;  // R or X set means leaf
+  wire pte_reserved = pte_w && !pte_r;  // W=1,R=0 reserved
 
   // Physical tag from PTE
   wire [XLEN-1:10] ptag_lvl1 = {pte_data[31:20], vpn0};
@@ -87,18 +109,28 @@ module rapt_ptw #(
           if (!mmu_en) begin
             state <= IDLE;
           end else if (bus_rvalid) begin
-            if (pte_data == 0) begin
+            if (!pte_v || pte_reserved) begin
               fault <= 1'b1;
               state <= IDLE;
             end else if (pte_leaf) begin
-              // Superpage (level-1 leaf)
-              result_ptag <= ptag_lvl1;
-              done <= 1'b1;
+              // Superpage (level-1 leaf): ppn[0] (pte[19:10]) must be zero.
+              if (pte_data[19:10] != 10'h0) begin
+                fault <= 1'b1;
+              end else begin
+                result_ptag <= ptag_lvl1;
+                result_pte  <= pte_data[7:1];
+                done <= 1'b1;
+              end
               state <= IDLE;
             end else begin
-              // Non-leaf: descend to level 0
-              ppn_a <= {pte_data[31:10], 12'b0} + (vpn0 * 4);
-              state <= LVL0;
+              // Non-leaf: A/D/U must be zero per spec; otherwise reserved.
+              if (pte_data[6:4] != 3'h0) begin
+                fault <= 1'b1;
+                state <= IDLE;
+              end else begin
+                ppn_a <= {pte_data[31:10], 12'b0} + (vpn0 * 4);
+                state <= LVL0;
+              end
             end
           end
         end
@@ -106,10 +138,11 @@ module rapt_ptw #(
           if (!mmu_en) begin
             state <= IDLE;
           end else if (bus_rvalid) begin
-            if (pte_data == 0) begin
+            if (!pte_v || pte_reserved || !pte_leaf) begin
               fault <= 1'b1;
             end else begin
               result_ptag <= ptag_lvl0;
+              result_pte  <= pte_data[7:1];
               done <= 1'b1;
             end
             state <= IDLE;

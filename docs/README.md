@@ -42,7 +42,11 @@ for detailed numbers and the change history.
 - Difftest — every retired instruction compared against NEMU.
 - Architectural tests — 35 / 35 `cpu-tests` pass on RV32 and RV64.
 - [RISCOF](https://github.com/riscv-software-src/riscof) running
-  [riscv-arch-test](https://github.com/riscv-non-isa/riscv-arch-test); RVFI trace.
+  [riscv-arch-test](https://github.com/riscv-non-isa/riscv-arch-test):
+  pass against `sail_c_simulator` on both the RTL DUT
+  (`make riscof-classic`) and NEMU (`make riscof-classic-nemu`).
+  Coverage: rv32i_m/{I, M, A, B (Zba/Zbb/Zbc/Zbs), C, Zcb hints, Zicond,
+  Zifencei, privilege, pmp, vm_sv32, vm_pmp}.
 - Benchmarks: CoreMark, MicroBench, Embench-IoT, under both bare-metal and difftest.
 - System software: nanos-lite, riscv-pk, OpenSBI + Linux boot
   (see [Linux Kernel Boot](./linux_kernel.md)).

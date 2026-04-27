@@ -36,9 +36,10 @@ static inline int check_sr_idx(int idx)
 
 #define sr(idx) (cpu.sr[check_sr_idx(idx)])
 
-// PMP is not implemented: pmpcfg0..3 (0x3a0-0x3a3) and pmpaddr0..15 (0x3b0-0x3bf)
-// are hardwired to 0 (reads return 0, writes are ignored). This matches the NPC
-// DUT and keeps difftest consistent when OpenSBI probes PMP with `csrw/csrr`.
+// PMP (pmpcfg0..3 @ 0x3a0-0x3a3, pmpaddr0..15 @ 0x3b0-0x3bf) is now
+// implemented in nemu/src/isa/riscv32/system/pmp.c.  CSR reads go through
+// cpu.sr[] directly; writes are routed through pmp_csr_write() which
+// enforces WARL masking and L-bit lockdown.
 static inline bool is_pmp_csr(uint16_t csr)
 {
   csr = csr & 0xfff;
@@ -130,8 +131,6 @@ static inline CSR_status check_csr_exist(uint16_t csr)
 
         || csr == 0x306   // mcounteren
         || csr == 0x30a   // menvcfg
-        || (csr >= 0x3a0 && csr <= 0x3a3)  // pmpcfg (no PMP impl)
-        || (csr >= 0x3b0 && csr <= 0x3bf)  // pmpaddr (no PMP impl)
     )
     {
       return CSR_EXIST_DIFF_SKIP;

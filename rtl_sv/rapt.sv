@@ -109,11 +109,7 @@ module rapt #(
     output [2*XLEN-1:0] rvfi_mem_wdata,
 `endif
 
-    // verilator lint_off UNDRIVEN
-    // verilator lint_off UNUSEDSIGNAL
     input io_interrupt,
-    // verilator lint_on UNDRIVEN
-    // verilator lint_on UNUSEDSIGNAL
 
     input reset
 );
@@ -167,6 +163,12 @@ module rapt #(
 
   logic clint_timer_trap;
   logic clint_sw_trap;
+  logic clint_ext_trap;
+  logic s_int_pending;
+  logic [`RAPT_XLEN-1:0] s_int_cause;
+
+  // External M-mode interrupt: gated level (PLIC line AND'd with mie.MEIE / mstatus.MIE).
+  assign clint_ext_trap = io_interrupt && csr_bcast.ext_int_en;
 
   rapt_bpu bpu (
       .clock(clock),
@@ -290,6 +292,9 @@ module rapt #(
       .csr_bcast(csr_bcast),
       .clint_timer_trap(clint_timer_trap),
       .clint_sw_trap(clint_sw_trap),
+      .clint_ext_trap(clint_ext_trap),
+      .s_int_pending(s_int_pending),
+      .s_int_cause(s_int_cause),
 
       .rou_cmu(rou_cmu),
       .rou_csr(rou_csr),
@@ -341,6 +346,11 @@ module rapt #(
       .exu_csr(exu_csr),
 
       .csr_bcast(csr_bcast),
+
+      .s_int_pending(s_int_pending),
+      .s_int_cause(s_int_cause),
+
+      .ext_irq_i(io_interrupt),
 
       .reset(reset)
   );

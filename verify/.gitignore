@@ -8,6 +8,7 @@
 !*.py
 !*.h
 !*.c
+!*.ini
 
 __pycache__/
 build/

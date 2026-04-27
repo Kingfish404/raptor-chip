@@ -1,15 +1,42 @@
 # ============================================================================
 # fpga/litex/Makefile — Raptor LiteX SoC build system
 # ============================================================================
-# Run `make help` for the full target + variable list.
 #
-# Conventions follow the project-wide Makefile style (see root Makefile and
-# docs-ref/dev.makefile-conventions.md):
-#   * Targets carry inline `## description` for help extraction.
-#   * Variables use `VAR ?= default ## description`.
-#   * Section headers `# ====...` + `# Title` + `# ====...` group targets in
-#     `make help` output.
-#   * All `.PHONY` targets are collected in a single block at the bottom.
+# QUICK REFERENCE
+# ---------------
+#   make help                      # full target + variable list
+#
+# FLOW TAXONOMY
+# -------------
+#   The sim path is parameterized via three orthogonal knobs (ROM/SOC/PAYLOAD)
+#   that fully determine the build dir + binary contents. See the header above
+#   the "Verilator Simulation" section for the full matrix.
+#
+#     standard       sim asm trampoline  full sim topology     payload via --ram-init
+#     ROM=fpga       fpga C firmware     full sim topology     no payload
+#     ROM=bios       LiteX BIOS          full sim topology     no payload
+#     ROM=bios SOC=fpga LiteX BIOS       FPGA topology         no payload
+#     PAYLOAD=linux  sim asm trampoline  full sim topology     OpenSBI+kernel
+#     <fpga_board>   custom OR LiteX BIOS FPGA topology         (Gowin gateware)
+#
+# NAMING CONVENTION
+# -----------------
+#   <flow>           build + run in one shot (most common entry point)
+#   <flow>-gen       generate SoC sources only (no Verilator compile, no run)
+#   <flow>-build     gen + compile Verilator binary
+#   <flow>-run       run already-compiled binary
+#   <flow>-trace     same as <flow> but with FST waves enabled
+#   <flow>-clean     remove that flow's artifacts only
+#
+# AUTHORING CONVENTIONS
+# ---------------------
+#   * Targets carry an inline `## description` for `make help` extraction.
+#   * Variables use `VAR ?= default ## description` (overridable on CLI).
+#   * Section markers are `# ===...` + `# Title` + `# ===...` (3 lines).
+#   * All `.PHONY` targets are collected at the bottom in a single block.
+#   * Inline `## description` leaves trailing whitespace in $(VAR); strip
+#     before any `ifeq`/`ifneq` exact-match comparison (see strip block below).
+# ============================================================================
 
 SHELL         := /bin/bash
 .DEFAULT_GOAL := help
@@ -41,18 +68,24 @@ endif
 
 # --- CPU variant ---
 VARIANT     ?= standard ## CPU variant (standard|linux)
-SYS_CLK     ?= 50000000 ## System clock in Hz
+SYS_CLK     ?= 10000000 ## System clock in Hz
 SIM_TIMEOUT ?= 30 ## Simulation timeout in seconds (0=unlimited)
-FPGA_VARIANT ?= standard ## CPU variant for Tang Mega 138K FPGA build (standard|linux)
-FPGA_SYS_CLK ?= 10000000 ## Tang Mega 138K system clock in Hz
-FPGA_BOOT_MODE ?= bios ## Tang Mega 138K boot ROM source (bios|custom)
-GOWIN_APP   ?= $(firstword $(wildcard /Applications/GowinIDE.app /Applications/GowinIDE.edu.app)) ## Gowin IDE app bundle path on macOS
-FPGA_DEVICE ?= GW5AST-138C ## Gowin device variant for Tang Mega 138K AC1/I0 boards
-FPGA_PROGRAM_FREQ ?= 10MHz ## programmer_cli JTAG frequency
-FPGA_CABLE_INDEX ?= auto ## programmer_cli cable index, or 'auto' to probe the first working cable
-FPGA_FLASH_ADDR ?= 0x00000 ## SPI flash offset used by fpga-flash
-FPGA_SYNTH_MAXFAN ?= 48 ## Gowin synthesis maxfan guideline for Tang Mega build
-FPGA_ROUTE_MAXFAN ?= 12 ## Gowin PnR route maxfan guideline for Tang Mega build
+# Raptor uarch preset (configs/<name>/rapt_config.svh).
+#   * sim/coremark/...             default to 'default' (full uarch).
+#   * fpga-* targets               default to 'small' (single-issue) for PnR fit.
+# User CLI override (`make fpga-build RAPT_CONFIG=default`) wins because `?=`
+# only sets when the variable is undefined.
+FPGA_GOALS := fpga-detect fpga-gen fpga-build fpga-build-force fpga-load fpga-flash fpga \
+              fpga-console fpga-upload fpga-clean tang-mega-138k-pro
+ifneq (,$(filter $(FPGA_GOALS),$(MAKECMDGOALS)))
+RAPT_CONFIG ?= small ## Raptor uarch config preset (default|small|...)
+else
+RAPT_CONFIG ?= default ## Raptor uarch config preset (default|small|...)
+endif
+RAPT_CONFIG := $(strip $(RAPT_CONFIG))
+export RAPT_CONFIG
+GOWIN_APP   ?= $(firstword $(wildcard /Applications/GowinIDE.app /Applications/GowinIDE.edu.app)) ## Gowin IDE app bundle path on macOS. Synthesis/PnR only; load/flash use openFPGALoader.
+WITH_LED_CHASER ?= 0 ## Set to 1 to add LedChaser to fpga-build (off by default on the Pro for PnR density relief)
 UART_PORT   ?= $(shell ls -1 /dev/tty.usbserial* /dev/tty.wchusbserial* /dev/tty.usbmodem* 2>/dev/null | sort | tail -n 1) ## Serial device for fpga-console
 UART_BAUD   ?= 115200 ## Serial console baud rate
 
@@ -71,7 +104,7 @@ SIM_THREADS ?= 4 ## Verilator simulation threads (1=off)
 #   make sim     TRACE=fst     # FST (compact binary, ~5-10x smaller & faster than VCD)
 #   make sim     TRACE=vcd     # VCD (universal text format, slowest + largest)
 #   make test-fib TRACE=fst    # works for any run target
-# Wave files land in $(GW_DIR)/sim.{fst,vcd} (LiteX default).
+# Wave files land in $(SIM_GW_DIR)/sim.{fst,vcd} (LiteX default).
 # Changing TRACE re-hashes build_sim.sh → triggers Verilator rebuild.
 # Partial files from Ctrl+C / timeout are viewable (LiteX flushes each tick).
 TRACE ?= none ## Wave dump mode (none|fst|vcd)
@@ -86,16 +119,8 @@ TRACE_END   ?= -1 ## Stop dump at cycle N (-1=no end)
 VARIANT     := $(strip $(VARIANT))
 SYS_CLK     := $(strip $(SYS_CLK))
 SIM_TIMEOUT := $(strip $(SIM_TIMEOUT))
-FPGA_VARIANT := $(strip $(FPGA_VARIANT))
-FPGA_SYS_CLK := $(strip $(FPGA_SYS_CLK))
-FPGA_BOOT_MODE := $(strip $(FPGA_BOOT_MODE))
 GOWIN_APP := $(strip $(GOWIN_APP))
-FPGA_DEVICE := $(strip $(FPGA_DEVICE))
-FPGA_PROGRAM_FREQ := $(strip $(FPGA_PROGRAM_FREQ))
-FPGA_CABLE_INDEX := $(strip $(FPGA_CABLE_INDEX))
-FPGA_FLASH_ADDR := $(strip $(FPGA_FLASH_ADDR))
-FPGA_SYNTH_MAXFAN := $(strip $(FPGA_SYNTH_MAXFAN))
-FPGA_ROUTE_MAXFAN := $(strip $(FPGA_ROUTE_MAXFAN))
+WITH_LED_CHASER := $(strip $(WITH_LED_CHASER))
 UART_PORT := $(strip $(UART_PORT))
 UART_BAUD := $(strip $(UART_BAUD))
 SIM_THREADS := $(strip $(SIM_THREADS))
@@ -103,13 +128,6 @@ TRACE       := $(strip $(TRACE))
 TRACE_START := $(strip $(TRACE_START))
 TRACE_END   := $(strip $(TRACE_END))
 
-ifeq ($(filter GW5A-% GW5AS-% GW5AT-% GW5AST-%,$(FPGA_DEVICE)),)
-FPGA_FLASH_OP ?= 36
-else
-FPGA_FLASH_OP ?= 53
-endif
-
-FPGA_FLASH_OP := $(strip $(FPGA_FLASH_OP))
 
 ifeq ($(TRACE),fst)
   TRACE_FLAGS := --trace --trace-fst
@@ -135,72 +153,19 @@ ifneq ($(TRACE),none)
 	endif
 endif
 
-# --- Derived paths (per-variant) ---
-GW_DIR      := $(BUILD_DIR)/$(VARIANT)/gateware
-SIM_V       := $(GW_DIR)/sim.v
-VSIM        := $(GW_DIR)/obj_dir/Vsim
-
 # --- Extra flags (user-overridable) ---
 EXTRA_FLAGS ?= ## Extra flags passed to raptor_soc.py
 
-# --- FPGA hardware flow ---
-GOWIN_IDE_BIN        := $(GOWIN_APP)/Contents/Resources/Gowin_EDA/IDE/bin
-GOWIN_PROGRAMMER_BIN := $(GOWIN_APP)/Contents/Resources/Gowin_EDA/Programmer/bin
-FPGA_OUT_DIR         := $(BUILD_DIR)/tang_mega_138k
-FPGA_GW_DIR          := $(FPGA_OUT_DIR)/gateware
-FPGA_FS              := $(FPGA_GW_DIR)/sipeed_tang_mega_138k.fs
-FPGA_FW_DIR          := $(BUILD_DIR)/fpga-firmware
-FPGA_FW_ELF          := $(FPGA_FW_DIR)/fpga_boot.elf
-FPGA_FW_BIN          := $(FPGA_FW_DIR)/fpga_boot.bin
-FPGA_BUILD_DEPS      = $(PACK_SV)
-FPGA_BOOT_ARGS       = --boot-mode=$(FPGA_BOOT_MODE)
-
-ifeq ($(FPGA_BOOT_MODE),custom)
-FPGA_BUILD_DEPS += fpga-firmware
-FPGA_BOOT_ARGS  += --integrated-rom-init=$(FPGA_FW_BIN)
-else ifeq ($(FPGA_BOOT_MODE),bios)
+# Integrated BSRAM-backed main_ram at 0x80000000. Required for `serialboot`
+# upload workflow (rebuild bitstream once, then iterate firmware via
+# `litex_term --kernel=<bin>`). 256 KB fits easily on Tang Mega 138K Pro
+# (BSRAM was at ~6% with no main_ram). Set to 0 to disable.
+INTEGRATED_MAIN_RAM_SIZE ?= 0x80000 ## BSRAM-backed main_ram size at 0x80000000 (default 512 KB; 0=disabled)
+ifneq ($(INTEGRATED_MAIN_RAM_SIZE),0)
+_MAIN_RAM_FLAG := --integrated-main-ram-size=$(INTEGRATED_MAIN_RAM_SIZE)
 else
-$(error Invalid FPGA_BOOT_MODE='$(FPGA_BOOT_MODE)'. Use bios or custom)
+_MAIN_RAM_FLAG :=
 endif
-
-define _ensure_gowin
-	@if [ -z "$(GOWIN_APP)" ]; then \
-		echo "[ERR] Gowin IDE not found. Set GOWIN_APP=/Applications/GowinIDE.app"; \
-		exit 1; \
-	fi
-	@if [ ! -x "$(GOWIN_IDE_BIN)/gw_sh" ]; then \
-		echo "[ERR] gw_sh not found at $(GOWIN_IDE_BIN)/gw_sh"; \
-		exit 1; \
-	fi
-	@if [ ! -x "$(GOWIN_PROGRAMMER_BIN)/programmer_cli" ]; then \
-		echo "[ERR] programmer_cli not found at $(GOWIN_PROGRAMMER_BIN)/programmer_cli"; \
-		exit 1; \
-	fi
-endef
-
-define _with_gowin_env
-	export PATH="$$PATH:$(GOWIN_IDE_BIN):$(GOWIN_PROGRAMMER_BIN)" && $(1)
-endef
-
-define _resolve_gowin_cable_index
-	cable_index="$(FPGA_CABLE_INDEX)"; \
-	if [ -z "$$cable_index" ] || [ "$$cable_index" = "auto" ]; then \
-		cable_index=""; \
-		for idx in 0 1 2 3; do \
-			probe_output="$$(./programmer_cli --device "$(FPGA_DEVICE)" --operation_index 0 --cable-index "$$idx" 2>&1 || true)"; \
-			if printf '%s\n' "$$probe_output" | grep -q "ID Code is:"; then \
-				cable_index="$$idx"; \
-				break; \
-			fi; \
-		done; \
-		if [ -z "$$cable_index" ]; then \
-			echo "[ERR] Could not find a usable Gowin cable for $(FPGA_DEVICE)."; \
-			./programmer_cli --scan-cables F || true; \
-			exit 1; \
-		fi; \
-		echo "[INFO] Auto-detected Gowin cable index $$cable_index"; \
-	fi
-endef
 
 # ==============================================================================
 # Environment
@@ -228,85 +193,304 @@ PACK_SV := $(NSIM_DIR)/build/rapt_pack.sv
 # an upstream decoder change is picked up.
 RTL_SOURCES := $(shell find $(RTL_DIR) -type f \( -name '*.sv' -o -name '*.svh' -o -name '*.v' -o -name '*.vh' \) 2>/dev/null)
 
-pack: ## Pack all RTL into single preprocessed SV file
-	$(MAKE) -C $(NSIM_DIR) pack
+# Stamp file recording the last RAPT_CONFIG used here. Switching presets
+# (default <-> small) doesn't touch RTL files, so the bare $(RTL_SOURCES)
+# dependency would not re-pack. The stamp's mtime forces re-pack; nsim's
+# own Makefile additionally clears its caches when RAPT_CONFIG changes.
+RAPT_CONFIG_STAMP := $(BUILD_DIR)/.rapt_config_stamp
+RAPT_CONFIG_PREV  := $(shell cat $(RAPT_CONFIG_STAMP) 2>/dev/null)
+ifneq ($(RAPT_CONFIG),$(RAPT_CONFIG_PREV))
+$(shell mkdir -p $(BUILD_DIR) && printf '%s' '$(RAPT_CONFIG)' > $(RAPT_CONFIG_STAMP))
+$(info [litex] RAPT_CONFIG changed: '$(RAPT_CONFIG_PREV)' -> '$(RAPT_CONFIG)', re-packing...)
+endif
 
-# Re-pack whenever any RTL file is newer than the packed output.
-$(PACK_SV): $(RTL_SOURCES)
-	$(MAKE) -C $(NSIM_DIR) pack
+pack: ## Pack all RTL into single preprocessed SV file
+	$(MAKE) -C $(NSIM_DIR) pack RAPT_CONFIG=$(RAPT_CONFIG)
+
+# Re-pack whenever any RTL file is newer than the packed output, OR the
+# RAPT_CONFIG preset has just changed (stamp file mtime tracks this).
+$(PACK_SV): $(RTL_SOURCES) $(RAPT_CONFIG_STAMP)
+	$(MAKE) -C $(NSIM_DIR) pack RAPT_CONFIG=$(RAPT_CONFIG)
 
 # ==============================================================================
 # Firmware (minimal boot ROM)
 # ==============================================================================
+# Two separate firmware images for the two flows; both compile to the same
+# `boot.bin` filename pattern but have different sources and link rules:
+#   * firmware/sim/  — assembly-only stub: detects a payload at 0x80000000
+#                      (placed there by --ram-init=...) and jumps to it,
+#                      embeds DTB for OpenSBI/Linux. Used by sim-* / payload
+#                      / coremark / opensbi / linux / etc.
+#   * firmware/fpga/ — boot.S + main.c bring-up: clears .bss, copies .data,
+#                      hands off to a C `main()` that talks to the LiteX
+#                      liteuart for "is the FPGA alive?" diagnostics.
+# Each variant has its own build dir under build/firmware/<variant>/ so the
+# two flows never overwrite each other's artifacts.
 
 CROSS     ?= riscv64-unknown-elf-
-FW_SRC    := $(LITEX_DIR)/firmware
-FW_DIR    := $(BUILD_DIR)/firmware
-FW_BIN    := $(FW_DIR)/boot.bin
-FW_ELF    := $(FW_DIR)/boot.elf
-FW_DTB    := $(FW_DIR)/litex-soc.dtb
-FW_DTS    := $(FW_SRC)/litex-soc.dts
+FW_BASE   := $(LITEX_DIR)/firmware
 
-$(FW_DIR):
+# --- Sim firmware (assembly + embedded DTB) ---
+FW_SIM_SRC := $(FW_BASE)/sim
+FW_SIM_DIR := $(BUILD_DIR)/firmware/sim
+FW_SIM_BIN := $(FW_SIM_DIR)/boot.bin
+FW_SIM_ELF := $(FW_SIM_DIR)/boot.elf
+FW_SIM_DTB := $(FW_SIM_DIR)/litex-soc.dtb
+FW_SIM_DTS := $(FW_SIM_SRC)/litex-soc.dts
+
+$(FW_SIM_DIR):
 	@mkdir -p $@
 
-$(FW_DTB): $(FW_DTS) | $(FW_DIR)
+$(FW_SIM_DTB): $(FW_SIM_DTS) | $(FW_SIM_DIR)
 	dtc -I dts -O dtb -o $@ $<
 
-$(FW_ELF): $(FW_SRC)/boot.S $(FW_SRC)/link.ld $(FW_DTB) | $(FW_DIR)
+$(FW_SIM_ELF): $(FW_SIM_SRC)/boot.S $(FW_SIM_SRC)/link.ld $(FW_SIM_DTB) | $(FW_SIM_DIR)
 	$(CROSS)gcc -march=rv32imac -mabi=ilp32 -nostdlib -nostartfiles \
-		-T $(FW_SRC)/link.ld -I$(FW_DIR) -o $@ $(FW_SRC)/boot.S
+		-T $(FW_SIM_SRC)/link.ld -I$(FW_SIM_DIR) -o $@ $(FW_SIM_SRC)/boot.S
 
-$(FW_BIN): $(FW_ELF)
+$(FW_SIM_BIN): $(FW_SIM_ELF)
 	$(CROSS)objcopy -O binary $< $@
 
-$(FPGA_FW_DIR):
+# --- FPGA firmware (boot.S + main.c, UART hello) ---
+# FW_FPGA_TARGET selects which main.c is linked against the shared
+# boot.S/link.ld. Default `main` = full bring-up shell. `irqtest` = minimal
+# IRQ probe used to bisect Raptor's IRQ delivery / mret bug. Adding new
+# targets is just dropping main_<name>.c in firmware/fpga/.
+#
+# FW_FPGA_LOAD selects the link script:
+#   rom       link.ld          — runs from integrated ROM @ 0x20000000 (default)
+#   main_ram  link_main_ram.ld — runs from main_ram @ 0x80000000 (for serialboot upload)
+FW_FPGA_TARGET ?= main ## firmware/fpga/main_<TARGET>.c (or main.c when =main)
+FW_FPGA_LOAD   ?= rom  ## Link target: rom (integrated ROM) or main_ram (uploadable via serialboot)
+MAIN_RAM_BASE  ?= 0x80000000 ## main_ram base addr (must match raptor_soc.py mem_map; serialboot upload target)
+FW_FPGA_TARGET := $(strip $(FW_FPGA_TARGET))
+FW_FPGA_LOAD   := $(strip $(FW_FPGA_LOAD))
+FW_FPGA_SRC := $(FW_BASE)/fpga
+FW_FPGA_DIR := $(BUILD_DIR)/firmware/fpga/$(FW_FPGA_TARGET)-$(FW_FPGA_LOAD)
+FW_FPGA_BIN := $(FW_FPGA_DIR)/boot.bin
+FW_FPGA_ELF := $(FW_FPGA_DIR)/boot.elf
+ifeq ($(FW_FPGA_TARGET),main)
+FW_FPGA_MAIN_SRC := $(FW_FPGA_SRC)/main.c
+else
+FW_FPGA_MAIN_SRC := $(FW_FPGA_SRC)/main_$(FW_FPGA_TARGET).c
+endif
+ifeq ($(FW_FPGA_LOAD),main_ram)
+FW_FPGA_LINK := $(FW_FPGA_SRC)/link_main_ram.ld
+else
+FW_FPGA_LINK := $(FW_FPGA_SRC)/link.ld
+endif
+FW_FPGA_OBJS := $(FW_FPGA_DIR)/boot.o $(FW_FPGA_DIR)/main.o
+
+$(FW_FPGA_DIR):
 	@mkdir -p $@
 
-$(FPGA_FW_ELF): $(FW_SRC)/fpga_boot.S $(FW_SRC)/fpga_link.ld | $(FPGA_FW_DIR)
-	$(CROSS)gcc -march=rv32imac -mabi=ilp32 -nostdlib -nostartfiles \
-		-T $(FW_SRC)/fpga_link.ld -o $@ $(FW_SRC)/fpga_boot.S
+FW_FPGA_CFLAGS := -march=rv32imac_zicsr -mabi=ilp32 -ffreestanding -nostdlib \
+	-nostartfiles -Os -ffunction-sections -fdata-sections \
+	-Wall -Wextra -Wno-unused-parameter
 
-$(FPGA_FW_BIN): $(FPGA_FW_ELF)
+$(FW_FPGA_DIR)/boot.o: $(FW_FPGA_SRC)/boot.S | $(FW_FPGA_DIR)
+	$(CROSS)gcc $(FW_FPGA_CFLAGS) -c -o $@ $<
+
+$(FW_FPGA_DIR)/main.o: $(FW_FPGA_MAIN_SRC) | $(FW_FPGA_DIR)
+	$(CROSS)gcc $(FW_FPGA_CFLAGS) -c -o $@ $<
+
+$(FW_FPGA_ELF): $(FW_FPGA_OBJS) $(FW_FPGA_LINK)
+	$(CROSS)gcc $(FW_FPGA_CFLAGS) -Wl,--gc-sections \
+		-T $(FW_FPGA_LINK) -o $@ $(FW_FPGA_OBJS)
+
+$(FW_FPGA_BIN): $(FW_FPGA_ELF)
 	$(CROSS)objcopy -O binary $< $@
 
-firmware: $(FW_BIN) ## Build minimal boot firmware (-> build/firmware/)
-
-fpga-firmware: $(FPGA_FW_BIN) ## Build minimal Tang Mega 138K bring-up ROM
+# --- Aggregates / aliases ---
+firmware: $(FW_SIM_BIN) $(FW_FPGA_BIN) ## Build both sim + fpga firmware images
+firmware-sim:  $(FW_SIM_BIN)  ## Build sim firmware only
+firmware-fpga: $(FW_FPGA_BIN) ## Build FPGA bring-up firmware only {FW_FPGA_TARGET,FW_FPGA_LOAD}
 
 firmware-clean:
-	rm -rf $(FW_DIR)
+	rm -rf $(BUILD_DIR)/firmware
 	@# Legacy in-tree artifacts from older versions of this Makefile:
-	rm -f $(FW_SRC)/boot.elf $(FW_SRC)/boot.bin $(FW_SRC)/litex-soc.dtb
-
-fpga-firmware-clean:
-	rm -rf $(FPGA_FW_DIR)
+	rm -f $(FW_SIM_SRC)/boot.elf $(FW_SIM_SRC)/boot.bin $(FW_SIM_SRC)/litex-soc.dtb
 
 # ==============================================================================
-# Verilator Simulation
+# Payload paths (declared early so the sim dispatch below can reference them)
 # ==============================================================================
+# Each payload type contributes a {bin path, build-target} pair. The actual
+# build rules + user-facing aliases live further down in "Payload aliases".
 
-# --- Parameterized core helpers ---
-# Three composable building blocks. Each takes a parameter so targets with
-# different output directories / SoC configurations share the same logic.
-# Eliminates the copy-paste that previously existed in run-litex and linux.
+# CoreMark
+COREMARK_BENCH  := $(LITEX_DIR)/benchmarks/coremark
+COREMARK_BIN    := $(COREMARK_BENCH)/build/coremark.bin
 
-# $(call _soc_gen,<all raptor_soc.py flags>)
-# Activates venv and invokes raptor_soc.py.
+# Embench-IoT
+EMBENCH_BENCH   := $(LITEX_DIR)/benchmarks/embench
+EMBENCH_BENCHES := aha-mont64 crc32 depthconv edn huffbench matmult-int \
+                   md5sum nettle-aes nettle-sha256 nsichneu picojpeg \
+                   qrduino sglib-combined slre statemate tarfind ud \
+                   wikisort xgboost
+EMBENCH_LOG_DIR := $(BUILD_DIR)/embench-logs
+
+# MicroBench (AM-based)
+MICROBENCH_DIR  := $(RAPTOR_HOME)/abstract-machine/app/am-kernels/benchmarks/microbench
+MICROBENCH_BIN  := $(MICROBENCH_DIR)/build/microbench-riscv32-npc.bin
+
+# Standalone C microbenchmarks (fpga/litex/tests)
+TESTS_DIR       := $(LITEX_DIR)/tests
+TESTS_BUILD_DIR := $(BUILD_DIR)/tests
+TEST_NAMES      := hello text fib prime memcpy mul
+
+# OpenSBI + Linux
+LINUX_DIR       := $(RAPTOR_HOME)/linux
+OPENSBI_FW_DIR  := $(LINUX_DIR)/opensbi/build/platform/generic/firmware
+OPENSBI_BIN     := $(OPENSBI_FW_DIR)/fw_payload.bin
+LINUX_IMG        = $(wildcard $(LINUX_DIR)/build/linux-riscv-rv32-*/fw_payload.bin)
+
+# Custom payload (set IMG=/path/to.bin on the cmdline)
+IMG ?= ## Custom payload binary (for 'make payload' / 'make sim PAYLOAD=img')
+
+# ==============================================================================
+# Verilator Simulation (unified ROM × SOC × PAYLOAD)
+# ==============================================================================
+# Three orthogonal knobs select what the sim builds and runs:
+#
+#   ROM      = sim | fpga | bios
+#     sim    asm trampoline (firmware/sim) — boot to payload at 0x80000000 (default)
+#     fpga   firmware/fpga C bring-up — same image used on FPGA hardware
+#     bios   upstream LiteX BIOS — drops to `litex>` prompt; auto-applies
+#            the BIOS picolibc + UART-polling + skip-memspeed patches
+#
+#   SOC      = default | fpga
+#     default  full sim topology (LiteX SimSoC defaults: 256 MB main_ram)
+#     fpga     match FPGA build (32 KB ROM, 8 KB SRAM, no main_ram)
+#
+#   PAYLOAD  = none | coremark | microbench | linux | opensbi
+#              | embench-<NAME> | test-<NAME> | img (with IMG=/path)
+#     Loaded into main_ram via --ram-init. PAYLOAD does NOT affect the
+#     Verilator build cache (only ROM/SOC do), so iterating on different
+#     payloads with the same ROM/SOC reuses the compiled Vsim binary.
+#
+# Output dir: build/sim/<variant>-<rom>-<soc>/gateware/
+#
+# Examples:
+#   make sim                                 # ROM=sim SOC=default PAYLOAD=none
+#   make sim TRACE=fst                       # add FST waves
+#   make sim ROM=bios                        # boot LiteX BIOS in full sim SoC
+#   make sim ROM=bios SOC=fpga               # BIOS in FPGA-style SoC
+#   make sim ROM=fpga                        # FPGA bring-up firmware in sim
+#   make sim PAYLOAD=coremark                # CoreMark payload
+#   make sim PAYLOAD=linux VARIANT=linux     # Linux boot
+#   make sim PAYLOAD=img IMG=/path/to.bin    # custom payload
+#   make sim PAYLOAD=embench-crc32           # one Embench bench
+#   make sim PAYLOAD=img IMG=$(FW_FPGA_BIN) ROM=bios  # debug FPGA payload via BIOS
+#
+# Convenience aliases (just recursive-make the right combination):
+#   coremark / microbench / opensbi / linux / payload / embench-run-<N> / test-<N>
+
+ROM     ?= sim ## Sim boot ROM (sim=asm trampoline, fpga=firmware/fpga C, bios=LiteX BIOS)
+SOC     ?= default ## Sim SoC topology (default=full main_ram, fpga=ROM-only matching FPGA build)
+PAYLOAD ?= none ## Payload at 0x80000000 (none|coremark|microbench|linux|opensbi|embench-NAME|test-NAME|img)
+ROM     := $(strip $(ROM))
+SOC     := $(strip $(SOC))
+PAYLOAD := $(strip $(PAYLOAD))
+
+# --- LiteX BIOS source patches ---
+# Three independent in-place patches to LiteX upstream (third_party/.../litex/),
+# all reverted via `git checkout` on EXIT trap. Required for any BIOS-compiling
+# target (`make sim ROM=bios` and `make fpga-build BOOT_MODE=bios`):
+#   1. picolibc layout (picolibc>=1.7 moved sources under newlib/)
+#   2. UART polling   (workaround Raptor IRQ/mret bug — IRQ-driven UART deadlocks)
+#   3. skip memspeed  (workaround Raptor fence/load-burst hang after memtest)
+LITEX_PATH := $(RAPTOR_HOME)/third_party/enjoy-digital/litex
+define _litex_bios_patches_apply
+	$(PYTHON) $(LITEX_DIR)/scripts/patch_litex_picolibc.py $(LITEX_PATH) && $(PYTHON) $(LITEX_DIR)/scripts/patch_litex_uart_polling.py $(LITEX_PATH) && $(PYTHON) $(LITEX_DIR)/scripts/patch_litex_skip_memspeed.py $(LITEX_PATH)
+endef
+define _litex_bios_patches_restore
+	cd $(LITEX_PATH) && git checkout -- litex/soc/software/common.mak litex/soc/software/libc/Makefile litex/soc/software/libbase/uart.c litex/soc/software/bios/main.c 2>/dev/null || true
+endef
+
+# --- ROM dispatch ---
+ifeq ($(ROM),sim)
+SIM_ROM_BIN  := $(FW_SIM_BIN)
+SIM_ROM_DEP  := $(FW_SIM_BIN)
+SIM_ROM_FLAGS := --no-compile-software --integrated-rom-init=$(SIM_ROM_BIN)
+SIM_NEEDS_BIOS_PATCHES := 0
+else ifeq ($(ROM),fpga)
+SIM_ROM_BIN  := $(FW_FPGA_BIN)
+SIM_ROM_DEP  := $(FW_FPGA_BIN)
+SIM_ROM_FLAGS := --no-compile-software --integrated-rom-init=$(SIM_ROM_BIN)
+SIM_NEEDS_BIOS_PATCHES := 0
+else ifeq ($(ROM),bios)
+SIM_ROM_BIN  :=
+SIM_ROM_DEP  :=
+SIM_ROM_FLAGS :=
+SIM_NEEDS_BIOS_PATCHES := 1
+else
+$(error Invalid ROM='$(ROM)'. Use ROM=sim|fpga|bios)
+endif
+
+# --- SOC dispatch ---
+ifeq ($(SOC),default)
+SIM_SOC_FLAGS :=
+else ifeq ($(SOC),fpga)
+SIM_SOC_FLAGS := --integrated-rom-size=0x8000 --integrated-sram-size=0x2000 --integrated-main-ram-size=0
+else
+$(error Invalid SOC='$(SOC)'. Use SOC=default|fpga)
+endif
+
+# --- PAYLOAD dispatch ---
+SIM_PAYLOAD_BIN   :=
+SIM_PAYLOAD_BUILD :=
+ifeq ($(PAYLOAD),none)
+# nothing
+else ifeq ($(PAYLOAD),coremark)
+SIM_PAYLOAD_BIN   := $(COREMARK_BIN)
+SIM_PAYLOAD_BUILD := coremark-build
+else ifeq ($(PAYLOAD),microbench)
+SIM_PAYLOAD_BIN   := $(MICROBENCH_BIN)
+SIM_PAYLOAD_BUILD := microbench-build
+else ifeq ($(PAYLOAD),opensbi)
+SIM_PAYLOAD_BIN   := $(OPENSBI_BIN)
+SIM_PAYLOAD_BUILD := opensbi-build
+else ifeq ($(PAYLOAD),linux)
+SIM_PAYLOAD_BIN    = $(LINUX_IMG)
+SIM_PAYLOAD_BUILD := linux-build
+else ifeq ($(PAYLOAD),img)
+ifndef IMG
+$(error PAYLOAD=img requires IMG=/path/to/binary.bin)
+endif
+SIM_PAYLOAD_BIN   := $(IMG)
+else ifneq (,$(filter embench-%,$(PAYLOAD)))
+_EMBENCH_NAME     := $(patsubst embench-%,%,$(PAYLOAD))
+SIM_PAYLOAD_BIN   := $(EMBENCH_BENCH)/build/$(_EMBENCH_NAME)/$(_EMBENCH_NAME).bin
+SIM_PAYLOAD_BUILD := embench-build-$(_EMBENCH_NAME)
+else ifneq (,$(filter test-%,$(PAYLOAD)))
+_TEST_NAME        := $(patsubst test-%,%,$(PAYLOAD))
+SIM_PAYLOAD_BIN   := $(TESTS_BUILD_DIR)/$(_TEST_NAME).bin
+SIM_PAYLOAD_BUILD := tests
+else
+$(error Invalid PAYLOAD='$(PAYLOAD)')
+endif
+ifneq ($(SIM_PAYLOAD_BIN),)
+SIM_PAYLOAD_FLAG = --ram-init=$(SIM_PAYLOAD_BIN)
+else
+SIM_PAYLOAD_FLAG :=
+endif
+
+# --- Output dir keyed by VARIANT-ROM-SOC ---
+SIM_DIR    := $(BUILD_DIR)/sim/$(VARIANT)-$(ROM)-$(SOC)
+SIM_GW_DIR := $(SIM_DIR)/gateware
+
+# --- Helpers ---
 define _soc_gen
 	source $(VENV_DIR)/bin/activate && \
 	$(PYTHON) raptor_soc.py $(1) $(EXTRA_FLAGS)
 endef
 
-# Presets: common flags shared by most targets.
 _BASE_FLAGS = --sys-clk-freq=$(SYS_CLK) --threads=$(SIM_THREADS) $(TRACE_FLAGS)
-_STD_FLAGS  = --cpu-variant=$(VARIANT) --output-dir=$(BUILD_DIR)/$(VARIANT) \
-	--no-compile-software --integrated-rom-init=$(FW_BIN) $(_BASE_FLAGS)
+SIM_FLAGS   = --output-dir=$(SIM_DIR) --cpu-variant=$(VARIANT) \
+              $(SIM_ROM_FLAGS) $(SIM_SOC_FLAGS) $(SIM_PAYLOAD_FLAG) $(_BASE_FLAGS)
 
-# $(call _compile_if_needed,<gw_dir>)
-# Compiles the Verilator binary only when sim.v + sim_init.cpp + build_sim.sh
-# content has changed (hash-based). sim_init.cpp is included because LiteX
-# bakes trace window parameters into it.
+# Compile Verilator binary only when sim.v + sim_init.cpp + build_sim.sh
+# content has changed (hash-based).
 define _compile_if_needed
 	@mkdir -p $(1)
 	@SIM_V_HASH=$$({ \
@@ -329,8 +513,7 @@ define _compile_if_needed
 	fi
 endef
 
-# $(call _run_vsim,<gw_dir>)
-# Runs Vsim with timeout + Ctrl+C/SIGTERM handling + wave summary.
+# Run Vsim with timeout + Ctrl+C/SIGTERM handling + wave summary.
 define _run_vsim
 	@if [ ! -f $(1)/obj_dir/Vsim ]; then \
 		echo "[ERR] No sim binary at $(1). Run 'make sim-build' first."; exit 1; fi
@@ -352,126 +535,78 @@ define _run_vsim
 	fi
 endef
 
-# --- Top-level sim targets ---
+# --- Top-level sim targets (parameterized via ROM/SOC/PAYLOAD) ---
 
-sim-gen: $(PACK_SV) $(FW_BIN) ## Generate SoC Verilog (no compile, no run)
-	$(call _soc_gen,$(_STD_FLAGS))
+sim-gen: $(PACK_SV) $(SIM_ROM_DEP) $(SIM_PAYLOAD_BUILD) ## Generate SoC Verilog (no compile, no run) {ROM,SOC,PAYLOAD,VARIANT,IMG}
+	@if [ "$(SIM_NEEDS_BIOS_PATCHES)" = "1" ]; then $(call _litex_bios_patches_apply); fi
+	@trap '[ "$(SIM_NEEDS_BIOS_PATCHES)" = "1" ] && { $(call _litex_bios_patches_restore); } || true' EXIT; \
+	$(call _soc_gen,$(SIM_FLAGS))
 
-sim-build: sim-gen ## Generate SoC + compile Verilator binary
-	$(call _compile_if_needed,$(GW_DIR))
-	@echo ""
-	@echo "========================================="
-	@echo " Simulation binary ready."
-	@echo " Run: make sim-run"
-	@echo "========================================="
+sim-build: sim-gen ## Generate SoC + compile Verilator binary {ROM,SOC,PAYLOAD,VARIANT,IMG}
+	$(call _compile_if_needed,$(SIM_GW_DIR))
 
-sim: sim-build ## Build + run simulation (no payload, boot firmware only)
-	$(call _run_vsim,$(GW_DIR))
+sim: sim-build ## Build + run sim {ROM,SOC,PAYLOAD,VARIANT,IMG,TRACE,SIM_TIMEOUT,SIM_THREADS}
+	$(call _run_vsim,$(SIM_GW_DIR))
 
-sim-run: ## Run already-built simulation
-	$(call _run_vsim,$(GW_DIR))
+sim-run: ## Run already-built sim (no rebuild) {ROM,SOC,PAYLOAD,VARIANT,SIM_TIMEOUT}
+	$(call _run_vsim,$(SIM_GW_DIR))
 
-sim-trace: ## Build + run simulation with FST trace (alias for: make sim TRACE=fst)
+sim-trace: ## Alias: make sim TRACE=fst
 	@$(MAKE) --no-print-directory sim TRACE=fst
 
-sim-trace-vcd: ## Build + run simulation with VCD trace (slower/larger than FST)
+sim-trace-vcd: ## Alias: make sim TRACE=vcd (slower/larger than FST)
 	@$(MAKE) --no-print-directory sim TRACE=vcd
 
 # ==============================================================================
-# LiteX default BIOS (logo + memtest + interactive prompt)
+# Payload aliases
 # ==============================================================================
-# Uses LiteX's upstream BIOS (built from litex/soc/software/bios) as the boot
-# ROM instead of our minimal custom firmware. Shows the familiar LiteX
-# banner/logo, runs memory tests, and drops into the `litex>` prompt.
+# Thin wrappers around `make sim PAYLOAD=<X>`. Each alias just dispatches a
+# recursive sub-make with the right PAYLOAD= value (and VARIANT= where the
+# payload requires a specific CPU variant). Use the alias for convenience;
+# use the full `sim` invocation when you need to combine payloads with non-
+# default ROM/SOC (e.g. `make sim PAYLOAD=coremark ROM=bios`).
 #
-# Isolated build dir (build/litex-bios/) so its ROM-init hash doesn't clobber
-# the `standard` variant's Verilator cache.
-#
-# Picolibc path compat patch
-# --------------------------
-# Newer `pythondata-software-picolibc` (>=1.7) relocates sources under
-# `newlib/libc/` and splits tinystdio into `newlib/libc/tinystdio/`. LiteX's
-# libc/common.mak still reference the old `libc/...` layout, so we patch the
-# two LiteX files in-place (and restore via `git checkout` on exit) — mirroring
-# the `_patch_sim_c` / `_litex_libc_patch` pattern. No venv mutation.
-LITEX_PATH       := $(RAPTOR_HOME)/third_party/enjoy-digital/litex
-define _litex_picolibc_patch
-	$(PYTHON) $(LITEX_DIR)/scripts/patch_litex_picolibc.py $(LITEX_PATH)
-endef
-define _litex_picolibc_restore
-	cd $(LITEX_PATH) && git checkout -- litex/soc/software/common.mak litex/soc/software/libc/Makefile 2>/dev/null || true
-endef
-
-LITEX_BIOS_DIR    := $(BUILD_DIR)/litex-bios
-LITEX_BIOS_GW_DIR := $(LITEX_BIOS_DIR)/gateware
-
-run-litex: $(PACK_SV) ## Build + run sim with default LiteX BIOS (logo + memtest)
-	$(call _litex_picolibc_patch)
-	@trap '$(call _litex_picolibc_restore)' EXIT; \
-	$(call _soc_gen,--cpu-variant=$(VARIANT) --output-dir=$(LITEX_BIOS_DIR) $(_BASE_FLAGS))
-	$(call _compile_if_needed,$(LITEX_BIOS_GW_DIR))
-	$(call _run_vsim,$(LITEX_BIOS_GW_DIR))
-
-run-litex-clean: ## Remove LiteX-BIOS sim build artifacts
-	rm -rf $(LITEX_BIOS_DIR)
-
-# ==============================================================================
-# Payloads
-# ==============================================================================
-# Workflow: generate SoC (ROM firmware + payload in main_ram) → compile if
-# sim.v changed → run. Subsequent runs with the same SoC topology skip
-# recompilation (~10 min saved).
-
-# --- Helper: generate + compile + run with payload ---
-# Usage: $(call _payload_sim,<--ram-init=path>)
-define _payload_sim
-	$(call _soc_gen,$(_STD_FLAGS) $(1))
-	$(call _compile_if_needed,$(GW_DIR))
-	$(call _run_vsim,$(GW_DIR))
-endef
+# Path variables (COREMARK_BIN, etc.) are declared earlier in "Payload paths".
 
 # --- CoreMark ---
-COREMARK_BENCH := $(LITEX_DIR)/benchmarks/coremark
-COREMARK_BIN   := $(COREMARK_BENCH)/build/coremark.bin
+COREMARK_ITERATIONS ?= 64 ## CoreMark loop iterations (FPGA: 1000+ recommended; sim: 64)
 
-coremark-build: ## Build CoreMark binary (clone + compile)
-	$(MAKE) -C $(COREMARK_BENCH) build
+coremark-build: ## Build CoreMark binary (clone + compile) {COREMARK_ITERATIONS,SYS_CLK}
+	$(MAKE) -C $(COREMARK_BENCH) build ITERATIONS=$(COREMARK_ITERATIONS) SYS_CLK_HZ=$(SYS_CLK)
 
-coremark: $(PACK_SV) $(FW_BIN) coremark-build ## Build + run CoreMark in sim
-	$(call _payload_sim,--ram-init=$(COREMARK_BIN))
+coremark: ## Alias: make sim PAYLOAD=coremark {COREMARK_ITERATIONS}
+	@$(MAKE) --no-print-directory sim PAYLOAD=coremark COREMARK_ITERATIONS=$(COREMARK_ITERATIONS)
+
+coremark-fpga: coremark-build ## Upload CoreMark to FPGA main_ram via BIOS serialboot {COREMARK_ITERATIONS,MAIN_RAM_BASE,UART_PORT,UART_BAUD}
+	@$(MAKE) --no-print-directory fpga-upload BIN=$(COREMARK_BIN)
 
 coremark-clean: ## Remove CoreMark build artifacts (keep cloned source)
 	$(MAKE) -C $(COREMARK_BENCH) clean
 
 # --- Embench-IoT ---
-EMBENCH_BENCH    := $(LITEX_DIR)/benchmarks/embench
-EMBENCH_BENCHES  := aha-mont64 crc32 depthconv edn huffbench matmult-int \
-					md5sum nettle-aes nettle-sha256 nsichneu picojpeg \
-					qrduino sglib-combined slre statemate tarfind ud \
-					wikisort xgboost
-EMBENCH_LOG_DIR  := $(BUILD_DIR)/embench-logs
-EMBENCH_TARGETS  := $(addprefix embench-run-,$(EMBENCH_BENCHES))
+EMBENCH_TARGETS := $(addprefix embench-run-,$(EMBENCH_BENCHES))
+EMBENCH_BUILDS  := $(addprefix embench-build-,$(EMBENCH_BENCHES))
 
 embench-build: ## Build all Embench-IoT benchmarks (one BIN per bench)
 	$(MAKE) -C $(EMBENCH_BENCH) build SYS_CLK_HZ=$(SYS_CLK)
 
-embench-build-one: ## Build one Embench bench (BENCH=<name>)
-	@if [ -z "$(BENCH)" ]; then echo "[ERR] Set BENCH=<name>"; exit 1; fi
-	$(MAKE) -C $(EMBENCH_BENCH) build BENCH=$(BENCH) SYS_CLK_HZ=$(SYS_CLK)
-
-# Per-bench runner: builds that single bench then runs it in sim.
-# Usage: make embench-run-crc32  (or: make embench-run BENCH=crc32)
-$(EMBENCH_TARGETS): embench-run-%: $(PACK_SV) $(FW_BIN) ## Run one Embench bench in sim
+# Per-bench build (used as prereq by `make sim PAYLOAD=embench-<NAME>`).
+$(EMBENCH_BUILDS): embench-build-%:
 	$(MAKE) -C $(EMBENCH_BENCH) build BENCH=$* SYS_CLK_HZ=$(SYS_CLK)
-	@if [ ! -f $(EMBENCH_BENCH)/build/$*/$*.bin ]; then \
-		echo "[ERR] Embench bin for '$*' not built"; exit 1; fi
-	$(call _payload_sim,--ram-init=$(EMBENCH_BENCH)/build/$*/$*.bin)
 
-embench-run: ## Run one Embench bench (BENCH=<name>) in sim
+embench-build-one: ## Build one Embench bench (BENCH=<name>) {BENCH}
 	@if [ -z "$(BENCH)" ]; then echo "[ERR] Set BENCH=<name>"; exit 1; fi
-	$(MAKE) --no-print-directory embench-run-$(BENCH)
+	@$(MAKE) --no-print-directory embench-build-$(BENCH)
 
-embench: $(PACK_SV) $(FW_BIN) sim-build ## Build + run all Embench benches (parallel) + Embench Score report
+# Per-bench run alias.
+$(EMBENCH_TARGETS): embench-run-%: ## Alias: make sim PAYLOAD=embench-<NAME>
+	@$(MAKE) --no-print-directory sim PAYLOAD=embench-$*
+
+embench-run: ## Run one Embench bench (BENCH=<name>) {BENCH}
+	@if [ -z "$(BENCH)" ]; then echo "[ERR] Set BENCH=<name>"; exit 1; fi
+	@$(MAKE) --no-print-directory sim PAYLOAD=embench-$(BENCH)
+
+embench: $(PACK_SV) $(FW_SIM_BIN) sim-build ## Build + run all Embench benches (parallel) + Embench Score report
 	@mkdir -p $(EMBENCH_LOG_DIR)
 	@bash $(EMBENCH_BENCH)/run-embench.sh
 
@@ -483,25 +618,17 @@ embench-clean: ## Remove Embench build artifacts and run logs
 	rm -rf $(EMBENCH_LOG_DIR)
 
 # --- MicroBench ---
-MICROBENCH_DIR := $(RAPTOR_HOME)/abstract-machine/app/am-kernels/benchmarks/microbench
-MICROBENCH_BIN := $(MICROBENCH_DIR)/build/microbench-riscv32-npc.bin
-
 microbench-build: ## Build MicroBench binary
 	$(MAKE) -C $(MICROBENCH_DIR) ARCH=riscv32-npc
 
-microbench: $(PACK_SV) $(FW_BIN) microbench-build ## Build + run MicroBench in sim
-	$(call _payload_sim,--ram-init=$(MICROBENCH_BIN))
+microbench: ## Alias: make sim PAYLOAD=microbench
+	@$(MAKE) --no-print-directory sim PAYLOAD=microbench
 
 # --- Self-contained C microbenchmarks (fpga/litex/tests) ---
 # Standalone payloads that do NOT depend on AM / nanos-lite / libc. They talk
 # directly to LiteX UART (0xf000_1800) and read `rdcycle`, so they exercise the
-# core and memory system without any build-cache or MMIO-map pitfalls. Ideal
-# for quickly smoke-testing a LiteX build after RTL / soc.py changes.
-TESTS_DIR       := $(LITEX_DIR)/tests
-TESTS_BUILD_DIR := $(BUILD_DIR)/tests
-TEST_NAMES      := hello text fib prime memcpy mul
-TEST_TARGETS    := $(addprefix test-,$(TEST_NAMES))
-
+# core and memory system without any build-cache or MMIO-map pitfalls.
+TEST_TARGETS := $(addprefix test-,$(TEST_NAMES))
 
 tests: ## Build all standalone C microbenchmarks (build/tests/*.bin)
 	$(MAKE) -C $(TESTS_DIR) BUILD_DIR=$(TESTS_BUILD_DIR)
@@ -509,125 +636,261 @@ tests: ## Build all standalone C microbenchmarks (build/tests/*.bin)
 tests-clean: ## Clean standalone microbenchmark build artifacts
 	$(MAKE) -C $(TESTS_DIR) BUILD_DIR=$(TESTS_BUILD_DIR) clean
 
-# Static pattern rule (not an implicit pattern rule): make DOES resolve these
-# for phony targets. `make test-fib` → builds sim + test + runs it.
-$(TEST_TARGETS): test-%: $(PACK_SV) $(FW_BIN) tests ## Run a single standalone test (e.g. test-hello)
-	@if [ ! -f $(TESTS_BUILD_DIR)/$*.bin ]; then \
-		echo "[ERR] $(TESTS_BUILD_DIR)/$*.bin not found"; exit 1; fi
-	$(call _payload_sim,--ram-init=$(TESTS_BUILD_DIR)/$*.bin)
+# Per-test alias.
+$(TEST_TARGETS): test-%: ## Alias: make sim PAYLOAD=test-<NAME>
+	@$(MAKE) --no-print-directory sim PAYLOAD=test-$*
 
-tests-run: $(PACK_SV) $(FW_BIN) tests ## Run every standalone test sequentially
+tests-run: tests ## Run every standalone test sequentially
 	@set -e; for t in $(TEST_NAMES); do \
 		echo "================================================================"; \
 		echo "[tests-run] Running test-$$t"; \
 		echo "================================================================"; \
-		$(MAKE) --no-print-directory test-$$t SIM_TIMEOUT=$(SIM_TIMEOUT) || exit 1; \
+		$(MAKE) --no-print-directory sim PAYLOAD=test-$$t SIM_TIMEOUT=$(SIM_TIMEOUT) || exit 1; \
 	done
 	@echo "[tests-run] All tests completed."
 
 # --- OpenSBI (standalone test payload) ---
-LINUX_DIR      := $(RAPTOR_HOME)/linux
-OPENSBI_FW_DIR := $(LINUX_DIR)/opensbi/build/platform/generic/firmware
-OPENSBI_BIN    := $(OPENSBI_FW_DIR)/fw_payload.bin
-
 opensbi-build: ## Build OpenSBI (standalone, from linux/opensbi)
 	$(MAKE) -C $(LINUX_DIR) opensbi
 
-opensbi: $(PACK_SV) $(FW_BIN) opensbi-build ## Build + run OpenSBI in sim
-	@if [ ! -f $(OPENSBI_BIN) ]; then \
-		echo "[ERR] OpenSBI fw_payload.bin not found. Run 'make opensbi-build' first."; exit 1; fi
-	$(call _payload_sim,--ram-init=$(OPENSBI_BIN))
+opensbi: ## Alias: make sim PAYLOAD=opensbi
+	@$(MAKE) --no-print-directory sim PAYLOAD=opensbi
 
 opensbi-clean: ## Clean OpenSBI build artifacts
 	$(MAKE) -C $(LINUX_DIR) opensbi-clean
 
 # --- Custom payload ---
-# Usage: make payload IMG=/path/to/binary.bin
-IMG ?= ## Custom payload binary (for 'make payload')
-
-payload: $(PACK_SV) $(FW_BIN) ## Run custom binary in sim (IMG=/path/to.bin)
+payload: ## Alias: make sim PAYLOAD=img IMG=/path/to.bin {IMG,TRACE,SIM_TIMEOUT}
 	@if [ -z "$(IMG)" ]; then echo "[ERR] Set IMG=/path/to/binary.bin"; exit 1; fi
-	$(call _payload_sim,--ram-init=$(IMG))
+	@$(MAKE) --no-print-directory sim PAYLOAD=img IMG=$(IMG)
 
 # --- Linux (OpenSBI + Kernel) ---
-LINUX_IMG     = $(wildcard $(LINUX_DIR)/build/linux-riscv-rv32-*/fw_payload.bin)
-
 linux-build: ## Download pre-built Linux payload (if needed)
 	$(MAKE) -s -C $(LINUX_DIR) download-rv32
 
-LINUX_GW_DIR := $(BUILD_DIR)/linux/gateware
+linux: ## Alias: make sim PAYLOAD=linux VARIANT=linux
+	@$(MAKE) --no-print-directory sim PAYLOAD=linux VARIANT=linux
 
-linux: $(PACK_SV) $(FW_BIN) linux-build ## Build + run Linux payload in sim
-	@if [ -z "$(LINUX_IMG)" ]; then echo "[ERR] Linux payload not found. Run 'make linux-build' first."; exit 1; fi
-	@echo "[INFO] Using Linux payload: $(LINUX_IMG)"
-	$(call _soc_gen,--cpu-variant=linux --output-dir=$(BUILD_DIR)/linux --no-compile-software --integrated-rom-init=$(FW_BIN) --ram-init=$(LINUX_IMG) $(_BASE_FLAGS))
-	$(call _compile_if_needed,$(LINUX_GW_DIR))
-	$(call _run_vsim,$(LINUX_GW_DIR))
+# --- LiteX BIOS in sim (compiles BIOS into integrated_rom; applies BIOS patches) ---
+bios: ## Alias: make sim ROM=bios (run LiteX BIOS in sim) {SOC,PAYLOAD,TRACE,SIM_TIMEOUT}
+	@$(MAKE) --no-print-directory sim ROM=bios SOC=$(SOC) PAYLOAD=$(PAYLOAD)
 
 # ==============================================================================
 # FPGA Targets
 # ==============================================================================
+# Hardware target: Sipeed Tang Mega 138K Pro (Gowin GW5AST-LV138FPG676AES).
+#
+# Toolchain prerequisites:
+#   * Gowin IDE  — synthesis + place&route (gw_sh from GowinIDE.app/.edu.app)
+#   * openFPGALoader — bitstream upload + SPI flashing (Homebrew formula)
+#
+# Common workflow:
+#   make fpga-build                   # generate + synthesise + P&R -> bitstream
+#   make fpga-load                    # load bitstream into FPGA SRAM (volatile)
+#   make fpga-flash                   # write bitstream to on-board SPI flash
+#   make fpga-console                 # open serial terminal on the dock UART
+#
+# Pass extra flags through EXTRA_FLAGS, e.g.:
+#   make fpga-build EXTRA_FLAGS="--integrated-main-ram-size=0x8000"
 
-fpga-build: $(FPGA_BUILD_DEPS) ## Build Tang Mega 138K bitstream for real hardware
-	$(call _ensure_gowin)
-	@set +e; \
-		if [ "$(FPGA_BOOT_MODE)" = "bios" ]; then \
-			$(call _litex_picolibc_patch); \
-			trap '$(call _litex_picolibc_restore)' EXIT INT TERM; \
-		fi; \
-		$(call _with_gowin_env,source $(VENV_DIR)/bin/activate && $(PYTHON) raptor_tang_mega_138k.py --build --output-dir=$(FPGA_OUT_DIR) --cpu-variant=$(FPGA_VARIANT) --sys-clk-freq=$(FPGA_SYS_CLK) --synth-maxfan=$(FPGA_SYNTH_MAXFAN) --route-maxfan=$(FPGA_ROUTE_MAXFAN) $(FPGA_BOOT_ARGS)); \
-		rc=$$?; \
-		exit $$rc
+FPGA_BOARD     ?= tang_mega_138k_pro ## Target FPGA board
+FPGA_BOARD     := $(strip $(FPGA_BOARD))
+
+# Boot ROM contents on the FPGA. Declared early because FPGA_DIR includes
+# $(BOOT_MODE) in its path so `custom` and `bios` builds coexist without
+# invalidating each other's PnR cache (switching is then free).
+#   * BOOT_MODE=custom (default) — use firmware/fpga/ (boot.S + main.c) as the
+#     ROM image; the SoC is built with `--no-compile-software`.
+#   * BOOT_MODE=bios              — let LiteX compile + bake its own BIOS into
+#     the ROM; produces the familiar `litex>` prompt over UART.
+# Override on the command line, e.g.:  make fpga-build BOOT_MODE=bios
+BOOT_MODE      ?= custom ## FPGA boot ROM source (custom=firmware/fpga, bios=LiteX BIOS)
+BOOT_MODE      := $(strip $(BOOT_MODE))
+ifneq ($(BOOT_MODE),custom)
+ifneq ($(BOOT_MODE),bios)
+$(error Invalid BOOT_MODE='$(BOOT_MODE)'. Use BOOT_MODE=custom or BOOT_MODE=bios)
+endif
+endif
+
+# Per-BOOT_MODE output dir so `custom` and `bios` builds coexist and switching
+# between them costs nothing (no cache invalidation, no re-PnR). Bitstream
+# layout: build/<board>/<boot_mode>/gateware/<...>.fs
+FPGA_DIR       := $(BUILD_DIR)/$(FPGA_BOARD)/$(BOOT_MODE)
+FPGA_GW_DIR    := $(FPGA_DIR)/gateware
+# LiteX names the bitstream after the platform module ("sipeed_<board>.fs").
+FPGA_BITSTREAM := $(FPGA_GW_DIR)/sipeed_$(FPGA_BOARD).fs
+
+# Resolve gw_sh from the Gowin IDE bundle (macOS .app layout).
+ifneq ($(strip $(GOWIN_APP)),)
+	GOWIN_BIN_DIR := $(GOWIN_APP)/Contents/Resources/Gowin_EDA/IDE/bin
+	export PATH   := $(GOWIN_BIN_DIR):$(PATH)
+endif
+
+# openFPGALoader cable. Tang Mega 138K Pro ships with an FT2232-based debugger.
+OFL          ?= openFPGALoader ## openFPGALoader binary
+OFL_CABLE    ?= ft2232 ## openFPGALoader cable (ft2232 for Tang Mega Pro on-board debugger)
+OFL := $(strip $(OFL))
+OFL_CABLE := $(strip $(OFL_CABLE))
+
+# Optional LedChaser (off by default to keep PnR density low on the Pro).
+WITH_LED_CHASER_FLAG := $(if $(filter 1 yes true on,$(WITH_LED_CHASER)),--with-led-chaser,)
+
+# FPGA SoC generator. Sim and FPGA flows live in separate scripts so each one
+# only pulls in its own toolchain dependencies (Verilator vs. Gowin):
+#   * raptor_soc.py                     — sim only (SimPlatform + Verilator)
+#   * raptor_tang_mega_138k_pro.py      — Tang Mega 138K Pro only
+FPGA_PY    := raptor_tang_mega_138k_pro.py
+
+ifeq ($(BOOT_MODE),custom)
+_FPGA_BOOT_FLAGS := --boot-mode=custom --integrated-rom-init=$(FW_FPGA_BIN)
+_FPGA_FW_DEP     := $(FW_FPGA_BIN)
+else
+_FPGA_BOOT_FLAGS := --boot-mode=bios
+_FPGA_FW_DEP     :=
+endif
+
+_FPGA_FLAGS = --output-dir=$(FPGA_DIR) \
+	--cpu-variant=$(VARIANT) --sys-clk-freq=$(SYS_CLK) \
+	$(_FPGA_BOOT_FLAGS) \
+	$(_MAIN_RAM_FLAG) \
+	$(WITH_LED_CHASER_FLAG) $(EXTRA_FLAGS)
+
+# Content-hash skip for fpga-build (avoid re-running 10+ minute Gowin PnR
+# when nothing the bitstream depends on has changed). The hash covers:
+#   * the packed RTL ($(PACK_SV))
+#   * the FPGA-side firmware bin ($(FW_FPGA_BIN), only used when BOOT_MODE=custom)
+#   * all flags that flow into _FPGA_FLAGS (board, variant, clock, boot mode,
+#     extra Python args)
+# Stored at $(FPGA_DIR)/.bitstream_stamp; if it matches and the .fs exists,
+# fpga-build short-circuits with a one-line "[INFO] up-to-date" message.
+#
+# Why content-hash instead of mtime: switching git branches or re-packing RTL
+# can leave the .fs newer than its inputs even though the inputs would
+# regenerate identical content. The hash catches both directions.
+#
+# Tip: when iterating *only* on payloads (programs that run in main_ram,
+# not the boot ROM), you don't need to rebuild the bitstream at all.
+# Burn the bitstream once with `BOOT_MODE=bios`, then upload payloads via
+# `litex_term --kernel=<bin>` over UART (LiteX BIOS `serialboot`). This
+# requires `--integrated-main-ram-size=...` in EXTRA_FLAGS, which is
+# currently disabled on the Pro for PnR-density reasons.
+FPGA_STAMP    := $(FPGA_DIR)/.bitstream_stamp
+ifeq ($(BOOT_MODE),custom)
+_FPGA_HASH_INPUTS = $(PACK_SV) $(FW_FPGA_BIN)
+else
+_FPGA_HASH_INPUTS = $(PACK_SV)
+endif
+# `_FPGA_HASH_KEY` mixes file content + flags so any change forces a rebuild.
+_FPGA_HASH_KEY = $(shell { cat $(_FPGA_HASH_INPUTS) 2>/dev/null; printf '%s' '$(_FPGA_FLAGS)'; } | shasum 2>/dev/null | cut -d' ' -f1)
+
+fpga-detect: ## Detect connected Gowin/Sipeed FPGA via openFPGALoader {OFL,OFL_CABLE}
+	@command -v $(OFL) >/dev/null 2>&1 || { echo "[ERR] openFPGALoader not found (install via brew install openfpgaloader)"; exit 1; }
+	$(OFL) --detect --cable $(OFL_CABLE)
+
+fpga-gen: $(PACK_SV) $(_FPGA_FW_DEP) ## Generate FPGA SoC sources only (no PnR) {BOOT_MODE,FPGA_BOARD,RAPT_CONFIG,INTEGRATED_MAIN_RAM_SIZE}
+	source $(VENV_DIR)/bin/activate && \
+	$(PYTHON) $(FPGA_PY) $(_FPGA_FLAGS) --build --no-compile-gateware
+	@echo "[INFO] Sources generated under $(FPGA_GW_DIR) (BOOT_MODE=$(BOOT_MODE))"
+
+fpga-build: $(PACK_SV) $(_FPGA_FW_DEP) ## Build FPGA bitstream (synth + P&R) {BOOT_MODE,FPGA_BOARD,RAPT_CONFIG,INTEGRATED_MAIN_RAM_SIZE,WITH_LED_CHASER}
+	@if [ -z "$(strip $(GOWIN_APP))" ]; then \
+		echo "[ERR] GOWIN_APP is empty — install GowinIDE.app or set GOWIN_APP=/path/to/GowinIDE.app"; exit 1; fi
+	@if [ ! -x "$(GOWIN_BIN_DIR)/gw_sh" ]; then \
+		echo "[ERR] gw_sh not found at $(GOWIN_BIN_DIR)/gw_sh"; exit 1; fi
+	@mkdir -p $(FPGA_DIR)
+	@OLD_HASH=$$(cat $(FPGA_STAMP) 2>/dev/null || echo ""); \
+	NEW_HASH="$(_FPGA_HASH_KEY)"; \
+	if [ -f "$(FPGA_BITSTREAM)" ] && [ "$$OLD_HASH" = "$$NEW_HASH" ]; then \
+		echo "[INFO] Bitstream up to date (BOOT_MODE=$(BOOT_MODE), hash=$${NEW_HASH:0:12})"; \
+		echo "[INFO]   $(FPGA_BITSTREAM)"; \
+		echo "[INFO] Force rebuild with: make fpga-build-force"; \
+		$(MAKE) --no-print-directory fpga-reports-index; \
+		exit 0; \
+	fi; \
+	echo "[INFO] Bitstream stale (old=$${OLD_HASH:0:12} new=$${NEW_HASH:0:12}); running Gowin..."; \
+	if [ "$(BOOT_MODE)" = "bios" ]; then $(call _litex_bios_patches_apply); fi; \
+	trap '[ "$(BOOT_MODE)" = "bios" ] && { $(call _litex_bios_patches_restore); } || true' EXIT; \
+	source $(VENV_DIR)/bin/activate && \
+	$(PYTHON) $(FPGA_PY) $(_FPGA_FLAGS) --build && \
+	printf '%s' "$$NEW_HASH" > $(FPGA_STAMP)
+	@$(MAKE) --no-print-directory fpga-reports-index
 	@echo ""
 	@echo "========================================="
-	@echo " FPGA bitstream ready: $(FPGA_FS)"
-	@echo " Load: make fpga-load"
+	@echo " Bitstream ready: $(FPGA_BITSTREAM)"
+	@echo " Load (volatile):  make fpga-load"
+	@echo " Flash (persist):  make fpga-flash"
+	@echo " Reports index:    $(FPGA_GW_DIR)/impl/index.html"
 	@echo "========================================="
 
-fpga-load: ## Load current Tang Mega 138K bitstream into FPGA SRAM
-	$(call _ensure_gowin)
-	@cd "$(GOWIN_PROGRAMMER_BIN)" && \
-		$(call _resolve_gowin_cable_index) && \
-		./programmer_cli \
-		--device "$(FPGA_DEVICE)" \
-		--fsFile "$(FPGA_FS)" \
-		--cable-index "$$cable_index" \
-		--frequency "$(FPGA_PROGRAM_FREQ)" \
-		--operation_index 2
+# Aggregated HTML dashboard for all Gowin synth/PnR reports. Lets you open one
+# file (impl/reports.html) and switch between syn / PnR / timing / power / pin
+# reports via a sidebar, instead of hunting them down individually.
+FPGA_REPORTS_INDEX_SRC := $(LITEX_DIR)/scripts/reports_index.html
+FPGA_REPORTS_INDEX_DST := $(FPGA_GW_DIR)/impl/index.html
 
-fpga-flash: ## Flash current Tang Mega 138K bitstream to external SPI flash
-	$(call _ensure_gowin)
-	@cd "$(GOWIN_PROGRAMMER_BIN)" && \
-		$(call _resolve_gowin_cable_index) && \
-		echo "[INFO] Using programmer_cli operation $(FPGA_FLASH_OP) for $(FPGA_DEVICE)" && \
-		./programmer_cli \
-		--device "$(FPGA_DEVICE)" \
-		--fsFile "$(FPGA_FS)" \
-		--spiaddr "$(FPGA_FLASH_ADDR)" \
-		--cable-index "$$cable_index" \
-		--frequency "$(FPGA_PROGRAM_FREQ)" \
-		--operation_index "$(FPGA_FLASH_OP)"
+fpga-reports-index: ## Install aggregated HTML report dashboard at impl/index.html
+	@if [ -d "$(FPGA_GW_DIR)/impl" ]; then \
+		cp $(FPGA_REPORTS_INDEX_SRC) $(FPGA_REPORTS_INDEX_DST); \
+		echo "[INFO] Reports index: $(FPGA_REPORTS_INDEX_DST)"; \
+	else \
+		echo "[WARN] $(FPGA_GW_DIR)/impl not found — run 'make fpga-build' first."; \
+	fi
 
-fpga: fpga-load ## Build and load Tang Mega 138K bitstream to FPGA SRAM
+fpga-build-force: ## Force full re-PnR (ignore content-hash cache) {BOOT_MODE,FPGA_BOARD,RAPT_CONFIG,INTEGRATED_MAIN_RAM_SIZE}
+	@rm -f $(FPGA_STAMP)
+	@$(MAKE) --no-print-directory fpga-build
 
-tang-mega-138k: fpga ## Alias for build + load on Tang Mega 138K
+fpga-load: ## Load bitstream into FPGA SRAM (volatile, lost on power-cycle) {OFL,OFL_CABLE,BOOT_MODE,FPGA_BOARD}
+	@if [ ! -f "$(FPGA_BITSTREAM)" ]; then \
+		echo "[ERR] $(FPGA_BITSTREAM) not found — run 'make fpga-build' first."; exit 1; fi
+	@command -v $(OFL) >/dev/null 2>&1 || { echo "[ERR] openFPGALoader not found"; exit 1; }
+	$(OFL) --cable $(OFL_CABLE) --bitstream $(FPGA_BITSTREAM)
 
-fpga-console: ## Open serial console for the Tang Mega 138K UART
+fpga-flash: ## Write bitstream to external SPI flash (persists across power cycles) {OFL,OFL_CABLE,BOOT_MODE,FPGA_BOARD}
+	@if [ ! -f "$(FPGA_BITSTREAM)" ]; then \
+		echo "[ERR] $(FPGA_BITSTREAM) not found — run 'make fpga-build' first."; exit 1; fi
+	@command -v $(OFL) >/dev/null 2>&1 || { echo "[ERR] openFPGALoader not found"; exit 1; }
+	$(OFL) --cable $(OFL_CABLE) --write-flash --external-flash --bitstream $(FPGA_BITSTREAM)
+
+fpga: fpga-build fpga-load ## Build + load (volatile) in one shot
+
+fpga-console: ## Open serial terminal on the FPGA UART (Ctrl-A K to quit) {UART_PORT,UART_BAUD}
 	@if [ -z "$(UART_PORT)" ]; then \
-		echo "[ERR] Could not auto-detect a serial device. Set UART_PORT=/dev/cu...."; \
-		exit 1; \
-	fi
-	@if ! command -v screen >/dev/null 2>&1; then \
-		echo "[ERR] 'screen' is required for fpga-console on macOS."; \
-		exit 1; \
-	fi
-	@echo "[INFO] Opening $(UART_PORT) @ $(UART_BAUD) (quit: Ctrl-A, K)"
-	@screen $(UART_PORT) $(UART_BAUD)
+		echo "[ERR] UART_PORT empty — plug in the board or set UART_PORT=/dev/tty.usbserial-XXXX"; exit 1; fi
+	@command -v lm.flterm >/dev/null 2>&1 || command -v litex_term >/dev/null 2>&1 || true
+	@echo "[INFO] Opening $(UART_PORT) @ $(UART_BAUD) baud (Ctrl-A K = quit)"
+	source $(VENV_DIR)/bin/activate && \
+	litex_term --speed=$(UART_BAUD) $(UART_PORT)
 
-fpga-clean: ## Remove Tang Mega 138K FPGA build artifacts
-	rm -rf $(FPGA_OUT_DIR) $(FPGA_FW_DIR)
+# Upload a binary into main_ram via LiteX BIOS `serialboot` and run it.
+# Requires:
+#   * BOOT_MODE=bios bitstream flashed (LiteX BIOS in ROM)
+#   * INTEGRATED_MAIN_RAM_SIZE > 0 in that bitstream (default 512 KB)
+#   * Firmware linked at 0x80000000 (use FW_FPGA_LOAD=main_ram)
+#
+# `litex_term --kernel=BIN` keeps the console open and intercepts the BIOS
+# `Booting from serial...` prompt to send the binary via SFL, after which
+# the BIOS jumps to MAIN_RAM_BASE. Saves a full PnR (~10 min) for every
+# firmware iteration.
+#
+# Usage:
+#   make firmware-fpga FW_FPGA_TARGET=irqtest FW_FPGA_LOAD=main_ram
+#   make fpga-upload   FW_FPGA_TARGET=irqtest FW_FPGA_LOAD=main_ram
+# Or override the binary directly:
+#   make fpga-upload   BIN=/path/to/firmware.bin
+fpga-upload: ## Upload a firmware bin to main_ram via BIOS serialboot (no PnR) {FW_FPGA_TARGET,FW_FPGA_LOAD,MAIN_RAM_BASE,UART_PORT,UART_BAUD}
+	@if [ -z "$(UART_PORT)" ]; then \
+		echo "[ERR] UART_PORT empty — set UART_PORT=/dev/tty.usbserial-XXXX"; exit 1; fi
+	@bin="$(BIN)"; [ -z "$$bin" ] && bin="$(FW_FPGA_BIN)"; \
+	if [ ! -f "$$bin" ]; then \
+		echo "[ERR] $$bin not found — build it first (e.g. 'make firmware-fpga FW_FPGA_TARGET=$(FW_FPGA_TARGET) FW_FPGA_LOAD=main_ram')"; exit 1; fi; \
+	echo "[INFO] Uploading $$bin to MAIN_RAM ($(MAIN_RAM_BASE)) via BIOS serialboot on $(UART_PORT)"; \
+	echo "[INFO] Power-cycle / press the reboot button on the board if the BIOS prompt has timed out."; \
+	source $(VENV_DIR)/bin/activate && \
+	litex_term --speed=$(UART_BAUD) --kernel="$$bin" --kernel-adr=$(MAIN_RAM_BASE) $(UART_PORT)
 
-
+fpga-clean: ## Remove FPGA build artifacts
+	rm -rf $(FPGA_DIR)
 
 # ==============================================================================
 # Utilities
@@ -637,10 +900,9 @@ clean: ## Remove build artifacts
 	rm -rf $(BUILD_DIR)
 	@echo "Build artifacts cleaned."
 
-sim-clean: ## Force next sim-build to recompile (clear verilator cache)
-	@rm -f $(GW_DIR)/.sim_v_hash $(LINUX_GW_DIR)/.sim_v_hash
-	@rm -rf $(GW_DIR)/obj_dir $(LINUX_GW_DIR)/obj_dir
-	@echo "Verilator binary + hash cache cleared ($(VARIANT) + linux variant)."
+sim-clean: ## Force next sim-build to recompile (clear all verilator caches under build/sim/)
+	@rm -rf $(BUILD_DIR)/sim
+	@echo "Verilator binary + hash cache cleared (all VARIANT-ROM-SOC combinations)."
 
 clean-all: clean firmware-clean ## Remove build artifacts + firmware + venv
 	rm -rf $(VENV_DIR)
@@ -654,28 +916,44 @@ info: ## Show configuration info
 	@echo "LITEX_DIR    = $(LITEX_DIR)"
 	@echo "VARIANT      = $(VARIANT)"
 	@echo "SYS_CLK      = $(SYS_CLK)"
-	@echo "FPGA_VARIANT = $(FPGA_VARIANT)"
-	@echo "FPGA_SYS_CLK = $(FPGA_SYS_CLK)"
-	@echo "FPGA_BOOT_MODE = $(FPGA_BOOT_MODE)"
+	@echo "RAPT_CONFIG  = $(RAPT_CONFIG)"
 	@echo "GOWIN_APP    = $(GOWIN_APP)"
-	@echo "FPGA_DEVICE  = $(FPGA_DEVICE)"
-	@echo "FPGA_CABLE_INDEX = $(FPGA_CABLE_INDEX)"
-	@echo "FPGA_FLASH_OP = $(FPGA_FLASH_OP)"
-	@echo "FPGA_SYNTH_MAXFAN = $(FPGA_SYNTH_MAXFAN)"
-	@echo "FPGA_ROUTE_MAXFAN = $(FPGA_ROUTE_MAXFAN)"
-	@echo "FPGA_FS      = $(FPGA_FS) (exists: $(shell test -f $(FPGA_FS) && echo yes || echo no))"
+	@echo "GOWIN_BIN_DIR= $(GOWIN_BIN_DIR)"
+	@echo "OFL          = $(OFL)"
+	@echo "OFL_CABLE    = $(OFL_CABLE)"
 	@echo "UART_PORT    = $(UART_PORT)"
 	@echo "SIM_TIMEOUT  = $(SIM_TIMEOUT)"
 	@echo "PACK_SV      = $(PACK_SV)"
 	@echo "BUILD_DIR    = $(BUILD_DIR)"
-	@echo "GW_DIR       = $(GW_DIR)"
-	@echo "VSIM         = $(VSIM) (exists: $(shell test -f $(VSIM) && echo yes || echo no))"
+	@echo "---- sim ----"
+	@echo "ROM          = $(ROM)"
+	@echo "SOC          = $(SOC)"
+	@echo "PAYLOAD      = $(PAYLOAD)"
+	@echo "SIM_DIR      = $(SIM_DIR)"
+	@echo "SIM_GW_DIR   = $(SIM_GW_DIR)"
+	@echo "VSIM         = $(SIM_GW_DIR)/obj_dir/Vsim (exists: $(shell test -f $(SIM_GW_DIR)/obj_dir/Vsim && echo yes || echo no))"
+	@echo "---- fpga ----"
+	@echo "FPGA_BOARD   = $(FPGA_BOARD)"
+	@echo "FPGA_DIR     = $(FPGA_DIR)"
+	@echo "FPGA_BITSTRM = $(FPGA_BITSTREAM) (exists: $(shell test -f $(FPGA_BITSTREAM) && echo yes || echo no))"
+	@echo "BOOT_MODE    = $(BOOT_MODE)"
+	@echo "FPGA_STAMP   = $(FPGA_STAMP) (cached: $(shell test -f $(FPGA_STAMP) && echo yes || echo no))"
 	@echo "PYTHON       = $(PYTHON)"
 
 help: ## Show this help message
 	@echo "Usage: make <target> [VAR=value ...]"
-	@awk '\
-		BEGIN { state=0; pending=""; first_target=1 } \
+	@awk -v file="$(MAKEFILE_LIST)" 'BEGIN { \
+			while ((getline line < file) > 0) { \
+				if (match(line, /^[A-Z_][A-Z_0-9]*[ \t]*\?=/)) { \
+					name = substr(line, 1, RLENGTH); sub(/[ \t]*\?=$$/, "", name); \
+					rest = substr(line, RLENGTH+1); \
+					sub(/^[ \t]+/, "", rest); sub(/[ \t]*##.*/, "", rest); sub(/[ \t]+$$/, "", rest); \
+					if (!(name in defaults)) defaults[name] = rest; \
+				} \
+			} \
+			close(file); \
+			state=0; pending=""; first_target=1 \
+		} \
 		/^# =+$$/ { \
 			if (state==0) state=1; \
 			else if (state==2) { pending=section; state=0 } \
@@ -688,6 +966,20 @@ help: ## Show this help message
 			first_target=0; \
 			target=$$0; sub(/:.*/, "", target); \
 			desc=$$0; sub(/.*## /, "", desc); \
+			vars=""; \
+			if (match(desc, /\{[^}]+\}[ \t]*$$/)) { \
+				vars=substr(desc, RSTART+1, RLENGTH-2); sub(/[ \t]+$$/, "", vars); \
+				desc=substr(desc, 1, RSTART-1); sub(/[ \t]+$$/, "", desc); \
+				out="["; n=split(vars, vlist, /[ \t]*,[ \t]*/); \
+				for (i=1; i<=n; i++) { \
+					v=vlist[i]; def=(v in defaults) ? defaults[v] : ""; \
+					if (def ~ /^\$$\(shell/) def="<auto>"; \
+					if (i>1) out=out" "; \
+					out=out v "=" def; \
+				} \
+				out=out"]"; \
+				desc=desc " " out; \
+			} \
 			printf "  %-20s %s\n", target, desc }' $(MAKEFILE_LIST)
 	@echo ""
 	@echo "Variables (override with VAR=value):"
@@ -708,16 +1000,17 @@ help: ## Show this help message
 # ==============================================================================
 .PHONY: help setup setup-skip \
 	pack \
-	firmware firmware-clean fpga-firmware fpga-firmware-clean \
+	firmware firmware-sim firmware-fpga firmware-clean \
 	sim-gen sim-build sim sim-run sim-trace sim-trace-vcd sim-clean \
-	run-litex run-litex-clean \
-	coremark coremark-build coremark-clean \
+	coremark coremark-build coremark-clean coremark-fpga \
 	embench embench-build embench-build-one embench-run embench-report embench-clean \
-	$(EMBENCH_TARGETS) \
+	$(EMBENCH_TARGETS) $(EMBENCH_BUILDS) \
 	microbench microbench-build \
 	tests tests-clean tests-run $(TEST_TARGETS) \
 	opensbi opensbi-build opensbi-clean \
 	payload \
 	linux linux-build \
-	fpga-build fpga-load fpga-flash fpga fpga-console fpga-clean tang-mega-138k \
+	bios \
+	fpga-gen fpga-build fpga-build-force fpga-load fpga-flash fpga fpga-console fpga-upload fpga-clean fpga-detect fpga-reports-index \
+	tang-mega-138k-pro \
 	lint info clean clean-all

@@ -18,7 +18,7 @@ make sim
 make coremark
 ```
 
-## Tang Mega 138K Hardware Flow
+## Tang Mega 138K Pro Hardware Flow
 
 ```bash
 # Install LiteX environment
@@ -51,7 +51,7 @@ fpga/litex/
 
 ## CPU Variants
 
-Both variants wrap the same RTL (configured via `rtl_sv/include/ysyx_config.svh`). The
+Both variants wrap the same RTL (configured via `rtl_sv/include/rapt_config.svh`). The
 variant label is passed to LiteX purely to select SoC-level defaults.
 
 | Variant    | Use Case                                |
@@ -63,26 +63,26 @@ Select variant: `make sim VARIANT=linux`
 
 ## Commands
 
-| Command             | Description                             |
-| ------------------- | --------------------------------------- |
-| `make setup`        | Install LiteX + register Raptor CPU     |
-| `make pack`         | Pack RTL into single .sv                |
-| `make sim`          | Verilator simulation                    |
-| `make sim-trace`    | Simulation with FST waveform            |
-| `make coremark`     | Build + run CoreMark in sim             |
-| `make linux`        | Build + run Linux payload in sim        |
-| `make fpga-build`   | Build Tang Mega 138K hardware bitstream |
-| `make fpga-load`    | Load Tang Mega 138K SRAM bitstream      |
-| `make fpga-flash`   | Flash Tang Mega 138K external SPI flash |
-| `make fpga-console` | Open Tang Mega 138K UART console        |
-| `make clean`        | Remove build artifacts                  |
-| `make help`         | Show all targets                        |
+| Command             | Description                                 |
+| ------------------- | ------------------------------------------- |
+| `make setup`        | Install LiteX + register Raptor CPU         |
+| `make pack`         | Pack RTL into single .sv                    |
+| `make sim`          | Verilator simulation                        |
+| `make sim-trace`    | Simulation with FST waveform                |
+| `make coremark`     | Build + run CoreMark in sim                 |
+| `make linux`        | Build + run Linux payload in sim            |
+| `make fpga-build`   | Build Tang Mega 138K Pro hardware bitstream |
+| `make fpga-load`    | Load Tang Mega 138K Pro SRAM bitstream      |
+| `make fpga-flash`   | Flash Tang Mega 138K Pro external SPI flash |
+| `make fpga-console` | Open Tang Mega 138K Pro UART console        |
+| `make clean`        | Remove build artifacts                      |
+| `make help`         | Show all targets                            |
 
 ## Architecture
 
 ```
 ┌────────────────────────────────────────────┐
-│  Raptor Core (ysyx.sv)                     │
+│  Raptor Core (rapt.sv)                     │
 │  ├─ Dual-issue OoO, RV32IMAC + Zb*         │
 │  └─ AXI4 Master (32-bit addr, 32-bit data) │
 └─────────┬──────────────────────────────────┘

@@ -14,6 +14,11 @@ ARGS ?= -b -n ## Pass args to runner (-b: batch, -n: no wave)
 IMG ?= ## Custom image to load
 MAX_INST ?= ## Max instructions to execute (-m N)
 
+# Raptor uarch config preset (selects configs/<name>/rapt_config.svh).
+# Exported so it propagates through chained sub-makes (nsim, am-kernels, app, ...).
+RAPT_CONFIG ?= default ## Raptor uarch config preset (default|small|...)
+export RAPT_CONFIG
+
 # ============================================================================
 # Guard: only define project-level targets when invoked from root directory.
 # Subprojects (nsim, nemu) include this file for env vars only.
@@ -407,6 +412,12 @@ verify-fuzz-replay: ## Replay the last failing fuzz-inf batch
 
 verify-sigtest: ## Signature-based ISA corner-case tests
 	$(MAKE) -C $(VERIFY_HOME) sigtest
+
+verify-riscof-classic: ## RISCOF classic compliance tests (legacy, no difftest)
+	$(MAKE) -C $(VERIFY_HOME) riscof-classic
+
+verify-riscof-classic-nemu: ## RISCOF classic compliance tests on NEMU reference
+	$(MAKE) -C $(VERIFY_HOME) riscof-classic-nemu
 
 verify-riscof: ## RISCOF official compliance tests
 	$(MAKE) -C $(VERIFY_HOME) riscof

@@ -15,18 +15,21 @@ module rapt_tlb #(
     input  logic [      8:0] lookup_asid,
     output logic             hit,
     output logic [XLEN-1:10] ptag,
+    output logic [      6:0] pte_flags,  // {D,A,G,U,X,W,R}
 
     // Fill (sequential, latched on posedge clock)
     input logic             fill_valid,
     input logic [XLEN-1:10] fill_ptag,
     input logic [XLEN-1:12] fill_vtag,
-    input logic [      8:0] fill_asid
+    input logic [      8:0] fill_asid,
+    input logic [      6:0] fill_pte
 );
 
   logic [        ENTRIES-1:0] valid;
   logic [          XLEN-1:12] vtags     [ENTRIES];
   logic [          XLEN-1:10] ptags     [ENTRIES];
   logic [                8:0] asids     [ENTRIES];
+  logic [                6:0] ptes      [ENTRIES];
 
   // Round-robin replacement pointer
   logic [$clog2(ENTRIES)-1:0] rr_ptr;
@@ -36,11 +39,13 @@ module rapt_tlb #(
   always_comb begin
     hit  = 1'b0;
     ptag = '0;
+    pte_flags = '0;
     for (int i = 0; i < ENTRIES; i++) begin
       match_vec[i] = valid[i] && (vtags[i] == lookup_vtag) && (asids[i] == lookup_asid);
       if (match_vec[i]) begin
         hit  = 1'b1;
         ptag = ptags[i];
+        pte_flags = ptes[i];
       end
     end
   end
@@ -54,6 +59,7 @@ module rapt_tlb #(
       vtags[rr_ptr] <= fill_vtag;
       ptags[rr_ptr] <= fill_ptag;
       asids[rr_ptr] <= fill_asid;
+      ptes[rr_ptr]  <= fill_pte;
       rr_ptr <= rr_ptr + 1;
     end
   end

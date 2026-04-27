@@ -44,6 +44,7 @@ module rapt_l1i #(
   logic [XLEN-1:0] pc_ifu_next;
   logic [XLEN-1:0] l1i_addr;
   logic [XLEN-1:0] rec_addr;
+  logic [XLEN-1:0] rec_tval;
   logic [XLEN-1:0] fetch_addr;
   // Cache size/tag parameters and per-way line-level tag arrays.
   localparam unsigned L1iSize = 2 ** L1I_LEN;
@@ -95,6 +96,7 @@ module rapt_l1i #(
   logic mmu_en;
   logic tlb_hit;
   logic [XLEN-1:10] itlb_ptag;
+  logic [6:0] itlb_pte;
   logic [11:0] tlb_offset;
 
   logic [XLEN-1:0] cause;
@@ -115,6 +117,8 @@ module rapt_l1i #(
   logic [XLEN-1:0] ptw_araddr;
   logic [XLEN-1:10] ptw_result_ptag;
   logic [XLEN-1:12] ptw_result_vtag;
+  logic [6:0] ptw_result_pte;
+  logic pmp_iptw_fault;  // forward-declared; driven by u_pmp_iptw below
 
   logic l1i_fill_en;
   logic l1i_tag_valid_set;
@@ -202,7 +206,7 @@ module rapt_l1i #(
       ? (l1i_addr & ~'h4)
       : (l1i_addr | 'h4);
   assign l1i_bus.arvalid = ptw_arvalid
-    ? 1'b1
+    ? !pmp_iptw_fault
     : raddr_valid && (ifu_sdram_arburst
       ? (l1i_state == RD_0)
       : (l1i_state == RD_0 || l1i_state == RD_1));
@@ -237,10 +241,12 @@ module rapt_l1i #(
       .lookup_asid(csr_bcast.satp_asid),
       .hit(tlb_hit),
       .ptag(itlb_ptag),
+      .pte_flags(itlb_pte),
       .fill_valid((l1i_state == PTWAIT) && ptw_done),
       .fill_ptag(ptw_result_ptag),
       .fill_vtag(ptw_result_vtag),
-      .fill_asid(csr_bcast.satp_asid)
+      .fill_asid(csr_bcast.satp_asid),
+      .fill_pte(ptw_result_pte)
   );
 
   // --- PTW ---
@@ -253,6 +259,7 @@ module rapt_l1i #(
       .vaddr(ifu_l1i.pc),
       .satp_ppn(csr_bcast.satp_ppn),
       .mmu_en(mmu_en),
+      .sbe(csr_bcast.sbe),
       .bus_arvalid(ptw_arvalid),
       .bus_araddr(ptw_araddr),
       .bus_rvalid(l1i_bus.rvalid),
@@ -261,7 +268,42 @@ module rapt_l1i #(
       .fault(ptw_fault),
       .result_ptag(ptw_result_ptag),
       .result_vtag(ptw_result_vtag),
+      .result_pte(ptw_result_pte),
       .busy(ptw_busy)
+  );
+
+  // Sv32 fetch permission check: execute must be allowed for current priv.
+  // itlb_pte = {D,A,G,U,X,W,R}
+  function automatic logic pte_fault_fetch(
+      input logic [6:0] pte,
+      input logic [1:0] priv_i
+  );
+      logic x, u, a;
+      logic fault;
+      x = pte[2]; u = pte[3]; a = pte[5];
+      fault = 1'b0;
+      if (!x) fault = 1'b1;
+      if (!a) fault = 1'b1;  // unaccessed: fault so SW sets A
+      if (priv_i == `RAPT_PRIV_U && !u) fault = 1'b1;
+      if (priv_i == `RAPT_PRIV_S &&  u) fault = 1'b1;  // no SUM on fetch
+      return fault;
+  endfunction
+
+  logic pf_fetch_tlb, pf_fetch_ptw;
+  assign pf_fetch_tlb = tlb_hit && pte_fault_fetch(itlb_pte, csr_bcast.priv);
+  assign pf_fetch_ptw = pte_fault_fetch(ptw_result_pte, csr_bcast.priv);
+
+  // --- PMP check on PTW memory (PTE) reads for instruction translation ---
+  rapt_pmp #(.XLEN(XLEN)) u_pmp_iptw (
+      .addr   (ptw_araddr),
+      .size_m1(4'd3),
+      .priv   (csr_bcast.priv),
+      .op_r   (1'b1),
+      .op_w   (1'b0),
+      .op_x   (1'b0),
+      .pmpcfg (csr_bcast.pmpcfg),
+      .pmpaddr(csr_bcast.pmpaddr),
+      .fault  (pmp_iptw_fault)
   );
 
   // SRAM address routing (shared across all ways)
@@ -373,8 +415,12 @@ module rapt_l1i #(
   assign ifu_l1i.inst_n0 = (l1i_state == TRAP) ? 'h00000013 : {{inst_hi}, {inst_lo}};
   assign ifu_l1i.trap = (l1i_state == TRAP && rec_addr == ifu_l1i.pc);
   assign ifu_l1i.cause = cause;
+  assign ifu_l1i.tval = rec_tval;
+  // PMP must gate cache-hit delivery as well: without this, a hit in IDLE
+  // streams the instruction to IFU the same cycle the FSM transitions to
+  // TRAP, letting the forbidden fetch execute.
   assign ifu_l1i.valid = l1i_state == TRAP ? rec_addr == ifu_l1i.pc
-    : (hit && sram_data_ready && (hit_next || is_c) && !wait_invalid);
+    : (!pmp_fetch_fault && hit && sram_data_ready && (hit_next || is_c) && !wait_invalid);
 
 `ifdef RAPT_DUAL_ISSUE
   // --- Dual-issue: next-word output for generalized dual-fetch ---
@@ -418,6 +464,58 @@ module rapt_l1i #(
       && !ptw_busy
       && (ifu_l1i.pc != 0);
 
+  // --- PMP check on fetch physical address (instruction access-fault) ---
+  // `pc_ifu` already multiplexes between the bare PC and the MMU-translated
+  // physical address (post-TLB-hit), so we can pass it directly.  The FSM
+  // only samples `pmp_fetch_fault` in states where `pc_ifu` is meaningful
+  // (bare mode: always; MMU: after tlb_hit).
+  logic pmp_fetch_fault_lo;
+  logic pmp_fetch_fault_hi;
+  logic pmp_fetch_fault;
+  // Lower halfword check (always required, covers compressed instructions).
+  rapt_pmp #(
+      .XLEN(XLEN)
+  ) u_pmp_fetch (
+      .addr   (pc_ifu),
+      .size_m1(4'd1),
+      .priv   (csr_bcast.priv),
+      .op_r   (1'b0),
+      .op_w   (1'b0),
+      .op_x   (1'b1),
+      .pmpcfg (csr_bcast.pmpcfg),
+      .pmpaddr(csr_bcast.pmpaddr),
+      .fault  (pmp_fetch_fault_lo)
+  );
+  // Upper halfword check (PC+2): only effective when the instruction is
+  // 32-bit (non-compressed). Required so that a 4-byte instruction whose
+  // upper half spills into a no-X PMP region faults on this fetch (RISC-V
+  // PMP requires the entire instruction byte range to satisfy permissions).
+  rapt_pmp #(
+      .XLEN(XLEN)
+  ) u_pmp_fetch_hi (
+      .addr   (pc_ifu + XLEN'(2)),
+      .size_m1(4'd1),
+      .priv   (csr_bcast.priv),
+      .op_r   (1'b0),
+      .op_w   (1'b0),
+      .op_x   (1'b1),
+      .pmpcfg (csr_bcast.pmpcfg),
+      .pmpaddr(csr_bcast.pmpaddr),
+      .fault  (pmp_fetch_fault_hi)
+  );
+  // Suppress upper-half fault when we already know the instruction is
+  // compressed (only valid once `sram_data_ready` so `inst_lo` is meaningful).
+  // When data isn't ready yet, conservatively assume non-compressed; the FSM
+  // will only sample `pmp_fetch_fault` once the instruction is observable.
+  // Also treat fetches from unmapped physical addresses as access faults
+  // (matches bus-error semantics required by sail / arch-test PMP tests).
+  logic fetch_unmapped_fault;
+  assign fetch_unmapped_fault = !rapt_pkg::addr_mapped(pc_ifu);
+  assign pmp_fetch_fault = pmp_fetch_fault_lo
+    || (pmp_fetch_fault_hi && sram_data_ready && !is_c)
+    || fetch_unmapped_fault;
+
+
   always @(posedge clock) begin
     if (reset) begin
       l1i_state <= IDLE;
@@ -435,21 +533,34 @@ module rapt_l1i #(
           if (!invalid_l1i && !wait_invalid && !cmu_bcast.flush_pipe) begin
             if (mmu_en) begin
               if (tlb_hit) begin
-                rec_addr <= ifu_l1i.pc;
-                if (sram_data_ready) begin
-                  if (!hit) begin
-                    l1i_addr  <= pc_ifu;
-                    l1i_state <= RD_A;
-                  end else if (!hit_next) begin
-                    l1i_addr   <= pc_ifu_next;
-                    l1i_state  <= RD_0;
-                    fill_way_r <= fill_way_next_calc;
+                if (pf_fetch_tlb) begin
+                  rec_addr <= ifu_l1i.pc;
+                  rec_tval <= ifu_l1i.pc;
+                  cause <= `RAPT_CAUSE_INSTR_PAGE_FAULT;
+                  l1i_state <= TRAP;
+                end else if (pmp_fetch_fault) begin
+                  rec_addr <= ifu_l1i.pc;
+                  rec_tval <= (pmp_fetch_fault_lo || fetch_unmapped_fault) ? ifu_l1i.pc : (ifu_l1i.pc + XLEN'(2));
+                  cause <= `RAPT_CAUSE_INSTR_ACC_FAULT;
+                  l1i_state <= TRAP;
+                end else begin
+                  rec_addr <= ifu_l1i.pc;
+                  if (sram_data_ready) begin
+                    if (!hit) begin
+                      l1i_addr  <= pc_ifu;
+                      l1i_state <= RD_A;
+                    end else if (!hit_next) begin
+                      l1i_addr   <= pc_ifu_next;
+                      l1i_state  <= RD_0;
+                      fill_way_r <= fill_way_next_calc;
+                    end
                   end
                 end
               end else begin
                 if (ifu_l1i.pc == 0) begin
                   rec_addr <= 0;
-                  cause <= 'h1;  // instruction access fault
+                  rec_tval <= 0;
+                  cause <= `RAPT_CAUSE_INSTR_ACC_FAULT;
                   l1i_state <= TRAP;
                 end else if (!ptw_busy) begin
                   // PTW request issued via ptw_req
@@ -459,16 +570,23 @@ module rapt_l1i #(
                 end
               end
             end else begin
-              rec_addr <= ifu_l1i.pc;
-              if (sram_data_ready) begin
-                if (!hit) begin
-                  l1i_addr   <= pc_ifu;
-                  l1i_state  <= RD_0;
-                  fill_way_r <= fill_way_calc;
-                end else if (!hit_next) begin
-                  l1i_addr   <= pc_ifu_next;
-                  l1i_state  <= RD_0;
-                  fill_way_r <= fill_way_next_calc;
+              if (pmp_fetch_fault) begin
+                rec_addr <= ifu_l1i.pc;
+                rec_tval <= (pmp_fetch_fault_lo || fetch_unmapped_fault) ? ifu_l1i.pc : (ifu_l1i.pc + XLEN'(2));
+                cause <= `RAPT_CAUSE_INSTR_ACC_FAULT;
+                l1i_state <= TRAP;
+              end else begin
+                rec_addr <= ifu_l1i.pc;
+                if (sram_data_ready) begin
+                  if (!hit) begin
+                    l1i_addr   <= pc_ifu;
+                    l1i_state  <= RD_0;
+                    fill_way_r <= fill_way_calc;
+                  end else if (!hit_next) begin
+                    l1i_addr   <= pc_ifu_next;
+                    l1i_state  <= RD_0;
+                    fill_way_r <= fill_way_next_calc;
+                  end
                 end
               end
             end
@@ -477,12 +595,23 @@ module rapt_l1i #(
         PTWAIT: begin
           if (cmu_bcast.flush_pipe) begin
             l1i_state <= IDLE;
+          end else if (ptw_arvalid && pmp_iptw_fault) begin
+            cause <= `RAPT_CAUSE_INSTR_ACC_FAULT;
+            rec_tval <= ifu_l1i.pc;
+            l1i_state <= TRAP;
           end else if (ptw_done) begin
-            // PTW completed: TLB filled by u_itlb, compute physical address
-            l1i_addr  <= XLEN'({ptw_result_ptag, tlb_offset});
-            l1i_state <= RD_A;
+            if (pf_fetch_ptw) begin
+              cause <= `RAPT_CAUSE_INSTR_PAGE_FAULT;
+              rec_tval <= ifu_l1i.pc;
+              l1i_state <= TRAP;
+            end else begin
+              // PTW completed: TLB filled by u_itlb, compute physical address
+              l1i_addr  <= XLEN'({ptw_result_ptag, tlb_offset});
+              l1i_state <= RD_A;
+            end
           end else if (ptw_fault) begin
-            cause <= 'hc;  // instruction page fault
+            cause <= `RAPT_CAUSE_INSTR_PAGE_FAULT;
+            rec_tval <= ifu_l1i.pc;
             l1i_state <= TRAP;
           end
         end
@@ -495,6 +624,13 @@ module rapt_l1i #(
           // producing a garbage physical address (e.g. 0x68a).
           if (cmu_bcast.flush_pipe || (mmu_en && !tlb_hit)) begin
             l1i_state <= IDLE;
+          end else if (pmp_fetch_fault) begin
+            // Post-PTW PMP check: page was translated but target PA is outside
+            // any permitted PMP region for the current privilege level.
+            rec_addr <= ifu_l1i.pc;
+            rec_tval <= (pmp_fetch_fault_lo || fetch_unmapped_fault) ? ifu_l1i.pc : (ifu_l1i.pc + XLEN'(2));
+            cause <= `RAPT_CAUSE_INSTR_ACC_FAULT;
+            l1i_state <= TRAP;
           end else if (sram_data_ready) begin
             if (!hit) begin
               l1i_addr   <= pc_ifu;

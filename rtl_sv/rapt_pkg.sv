@@ -140,6 +140,25 @@ package rapt_pkg;
     ;
   endfunction
 
+  // Any physical address that corresponds to a real bus target
+  // (cacheable memory or MMIO).  Accesses outside of this predicate
+  // are unmapped and must raise an access-fault trap to mimic sail /
+  // real-hardware bus-error behaviour.
+  function automatic logic addr_mapped(input logic [XLEN-1:0] addr);
+    return (0)  // --- IGNORE ---
+    || (addr >= 'h00100000 && addr < 'h00101000)  // sifive,test finisher
+    || (addr >= 'h02000000 && addr < 'h020c0000)  // CLINT
+    || (addr >= 'h0c000000 && addr < 'h0d000000)  // PLIC
+    || (addr >= 'h0f000000 && addr < 'h0f010000)  // SRAM
+    || (addr >= 'h10000000 && addr < 'h10012000)  // UART / GPIO / peripherals
+    || (addr >= 'h20000000 && addr < 'h20010000)  // MROM
+    || (addr >= 'h21000000 && addr < 'h21200000)  // VGA
+    || (addr >= 'h30000000 && addr < 'h40000000)  // FLASH
+    || (addr >= 'h80000000 && addr < 'h90000000)  // PMEM / PSRAM
+    || (addr >= 'ha0000000 && addr < 'ha2000000)  // SDRAM
+    || (addr >= 'hc0000000);  // raptSoC MMIO window
+  endfunction
+
   // MMIO regions for difftest skip (not modelled in reference ISS)
   function automatic logic addr_mmio(input logic [XLEN-1:0] addr);
     return (0)  // --- IGNORE ---

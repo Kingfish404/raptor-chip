@@ -11,19 +11,20 @@
 
 Welcome to the Raptor Project! Here is an all-in-one repository for exploring, designing, developing, optimizing, and verifying a RISC-V core. Aiming at high-performance & quality, full Linux support, FPGA implementation, and ASIC readiness.
 
-Core description: **Super-scalar, Out-of-order RISC-V core** with register renaming, ROB, and reservation stations. The RTL is described by `SystemVerilog` with `Chisel` (`Scala`) used only for decoder generation. Features Sv32 virtual memory (MMU/TLB), LR/SC + AMO atomics, compressed instructions (RVC), and boots Linux v6.18 via OpenSBI. Supports configurable **RV32** and **RV64** modes via compile-time switch.
+Core description: **Super-scalar, Out-of-order RISC-V core** with register renaming, ROB, and reservation stations. The RTL is described by `SystemVerilog` with `Chisel` (`Scala`) used only for decoder generation. Features Sv32 virtual memory (MMU/TLB), 16-entry PMP (TOR/NA4/NAPOT), LR/SC + AMO atomics, compressed instructions (RVC), and boots Linux v6.18 via OpenSBI. Supports configurable **RV32** and **RV64** modes via compile-time switch.
 
 ```
-Core name:  raptor-falcon (M/S/U + Sv32, Linux-capable)
-ISA:        rv32imac_zicntr_zicond_zicsr_zifencei_zimop_zcb_zba_zbb_zbc_zbs
+Core name:  raptor-falcon (M/S/U + Sv32 + PMP, Linux-capable)
+ISA:        rv32/rv64 imac_zicbop_zicntr_zicond_zicsr_zifencei_zihintntl_zihintpause_zimop_zcb_zcmop_zba_zbb_zbc_zbs
 Modes:      Machine, Supervisor, User
 MMU:        riscv,sv32 (RV32) / riscv,none (RV64, Bare)
+PMP:        16 entries, TOR / NA4 / NAPOT, L-bit lockable
 Interrupts: CLINT (mtime, mtimecmp, msip)
 Profile:    n/a (closest peer: RVM23U32 / RVA20S64)
 
 Bus Interface:  AXI4, XLEN-bit data/addr, 4-bit ID, burst
 
-Verifying:  RVFI (RISC-V Formal Interface) compliant
+Verifying:  RISCOF (riscv-arch-test), RVFI
 ```
 
 ### [Documentation](./docs/README.md)
@@ -95,8 +96,6 @@ make build-npc64
 make run-npc64 ARGS="-b -n"
 # Or explicitly pass VFLAGS
 make run-npc32 VFLAGS="-DRAPT_RV64" ARGS="-b -n"
-# Lint in RV64 mode
-make lint-npc64
 ```
 
 ### 3. Benchmarks
@@ -131,6 +130,8 @@ make app-pk-build
 make app-clean
 ```
 
+### 5. Linux Kernel Boot
+
 ```shell
 # Boot Linux on NEMU (requires OpenSBI payload built first)
 make linux-boot-nemu32
@@ -142,29 +143,44 @@ make linux-boot-npc32-difftest
 # docs/linux_kernel.md, linux/README.md
 ```
 
-### 6. FPGA
+### 6. Verification
 
 ```shell
-# Synthesize for Gowin Tang Nano 20K
-make fpga-syn
-
-# Place and route
-make fpga-pnr
-
-# See fpga/gowin-tang-nano-20k/README.md for details
+# Random instruction fuzzing with difftest (NPC vs NEMU)
+make verify-fuzz
+make verify-fuzz-inf      # continuous until Ctrl-C / failure
+# Signature-based ISA corner-case tests
+make verify-sigtest
+# RISCOF classic compliance tests (legacy, no difftest)
+make verify-riscof-classic
+make verify-riscof-classic-nemu
+# Official RISCOF compliance (riscv-arch-test, sail reference)
+make verify-riscof
+# Verilator line/toggle coverage
+make verify-coverage
+# Run everything
+make verify-all
+# See verify/README.md for SVA, formal (RVFI), and ACT4 details
 ```
 
-### 7. Utilities
+### 7. FPGA
 
 ```shell
-# Pack all SV into one file
-make pack
-# Lint RTL
-make lint
-# Static timing analysis
-make sta
-# Clean all build artifacts
-make clean
+# --- LiteX SoC ---
+cd fpga/litex
+make setup                          # one-time: install LiteX + register Raptor CPU
+make pack                           # pack RTL into single .sv
+make sim                            # Verilator sim with LiteX BIOS
+make coremark                       # build + run CoreMark in sim
+make embench                        # build + run all Embench-IoT benches
+make linux                          # build + run Linux payload in sim
+
+# Tang Mega 138K Pro hardware flow
+make fpga-build                     # synth + P&R bitstream
+make fpga-load                      # load to SRAM (volatile)
+make fpga-flash                     # write to external SPI flash
+make fpga-console                   # open UART console
+# See fpga/litex/README.md for full target/variant matrix
 ```
 
 ## Build and Run (Manual)
@@ -207,9 +223,6 @@ cd $RAPTOR_HOME/abstract-machine/app/am-kernels/benchmarks/coremark_eembc && \
 cd $RAPTOR_HOME/abstract-machine/app/am-kernels/benchmarks/microbench && \
     make ARCH=riscv32e-npc run ARGS="-b -n"
 # ARGS="-b -n" is optional, -b is for batch mode [default], -n is for no wave trace
-
-## fpga. running on gowin-tang-nano-20k
-### follow `fpga/gowin-tang-nano-20k/README.md`
 
 ## package all sv files into one
 cd nsim && make pack

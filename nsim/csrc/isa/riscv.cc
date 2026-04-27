@@ -5,6 +5,7 @@
 
 NPCState npc = {
     .state = NPC_RUNNING,
+    .host_exit_ok = 0,
     .gpr = NULL,
     .ret = NULL,
     .pc = NULL,

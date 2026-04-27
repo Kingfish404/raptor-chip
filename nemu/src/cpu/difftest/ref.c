@@ -201,6 +201,23 @@ __EXPORT void difftest_raise_intr(word_t NO)
   cpu.pc = isa_raise_intr(NO, cpu.pc);
 }
 
+// Mirror an external M-mode interrupt line (MEIP, mip bit 11) into ref state.
+// Called every difftest step from nsim with the live `io_interrupt` value
+// from the DUT, so that software reads of mip[11] match between DUT and ref.
+// MEIP is hardware-controlled (read-only to software per Priv §3.1.9), so
+// writing storage directly here mirrors the DUT's hardwired behaviour.
+__EXPORT void difftest_set_meip(uint8_t val)
+{
+#ifdef CSR_MIP
+  if (val)
+    cpu.sr[CSR_MIP] |=  (1u << 11);
+  else
+    cpu.sr[CSR_MIP] &= ~(1u << 11);
+#else
+  (void)val;
+#endif
+}
+
 __EXPORT void difftest_init(int port)
 {
   void init_mem();

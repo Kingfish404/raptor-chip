@@ -24,6 +24,39 @@
 
 #define R(i) gpr(i)
 #define CSR(i) sr(i)
+/* CSR write with PMP hook: routes writes to pmpcfg/pmpaddr through
+ * pmp_csr_write() which enforces WARL masking and L-bit lockdown.  All
+ * other CSRs fall through to the raw cpu.sr[] store. */
+int pmp_csr_write(uint16_t csr, word_t val);
+/* WARL coercion for tvec/epc CSRs, mirroring rapt_csr.sv:
+ *   - mtvec/stvec: if wdata[1]==1 (reserved MODE 10/11), mode bits -> 00.
+ *   - mepc/sepc:   bit 0 always 0 (IALIGN enforcement). */
+static inline word_t csrw_warl(uint16_t c, word_t v)
+{
+  c &= 0xfff;
+  if (c == CSR_MTVEC || c == CSR_STVEC)
+  {
+    return (v & ~(word_t)0x3) | ((v & 0x2) ? 0 : (v & 0x3));
+  }
+  if (c == CSR_MEPC || c == CSR_SEPC)
+  {
+    return v & ~(word_t)0x1;
+  }
+  return v;
+}
+#define CSRW(i, v)                          \
+  do                                        \
+  {                                         \
+    uint16_t _c = (uint16_t)((i) & 0xfff);  \
+    word_t _v = csrw_warl(_c, (word_t)(v)); \
+    if (!pmp_csr_write(_c, _v))             \
+      sr(_c) = _v;                          \
+    cpu.last_csr_wr = _c;                   \
+    /* Flush soft TLB on writes to CSRs that affect address translation */ \
+    if (_c == CSR_SATP || _c == CSR_MSTATUS || _c == CSR_SSTATUS ||        \
+        _c == CSR_MSTATUSH)                                                \
+      soft_tlb_flush();                                                    \
+  } while (0)
 #define Mr vaddr_read
 #define Mw vaddr_write
 
@@ -63,11 +96,19 @@ bool csr_valid(Decode *s, uint16_t csr, bool is_write)
     difftest_skip_ref();
     return false;
   }
-  // PMP CSRs: force read-as-zero by clearing the sr[] entry before the
-  // CSR instruction body reads it.  Writes will store a value but it is
-  // cleared again on the next access, so PMP is effectively hardwired to 0.
-  if (is_pmp_csr(csr))
-    cpu.sr[csr] = 0;
+  // TVM: if mstatus.TVM=1 and priv==S, access to satp traps illegal-instruction.
+  if (csr == CSR_SATP && cpu.priv == PRV_S)
+  {
+    csr_t ms = {.val = cpu.sr[CSR_MSTATUS]};
+    if (ms.mstatus.tvm)
+    {
+      s->dnpc = isa_raise_intr(MCA_ILLEGAL_INS, s->pc);
+      difftest_skip_ref();
+      return false;
+    }
+  }
+  // PMP CSRs are fully implemented in system/pmp.c; no special-case needed
+  // here.  Writes are routed through pmp_csr_write() below.
 
   CSR_status csr_status = check_csr_exist(csr);
   switch (csr_status)
@@ -434,18 +475,39 @@ static int decode_exec(Decode *s)
               ((cpu.priv == PRV_U) ? MCA_ENV_CAL_UMO : ((cpu.priv == PRV_S) ? MCA_ENV_CAL_SMO : MCA_ENV_CAL_MMO)),
               s->pc));
 #if defined(CONFIG_DEBUG)
-  INSTPAT("0000000 00001 00000 000 00000 11100 11", ebreak, N, NEMUTRAP(s->pc, R(10))); // R(10) is $a0
+  INSTPAT("0000000 00001 00000 000 00000 11100 11", ebreak, N, {
+    extern int sig_is_enabled(void);
+    if (sig_is_enabled())
+    {
+      s->dnpc = isa_raise_intr(MCA_BREAK_POINT, s->pc);
+    }
+    else
+    {
+      NEMUTRAP(s->pc, R(10));
+    }
+  }); // R(10) is $a0
 #else
   INSTPAT("0000000 00001 00000 000 00000 11100 11", ebreak, N, { s->dnpc = isa_raise_intr(MCA_BREAK_POINT, s->pc); });
 #endif
-  INSTPAT("0001001 ????? ????? 000 00000 11100 11", sfence.vma, N, { soft_tlb_flush(); });
+  INSTPAT("0001001 ????? ????? 000 00000 11100 11", sfence.vma, N, {
+    csr_t ms = {.val = CSR(CSR_MSTATUS)};
+    if (cpu.priv == PRV_U || (cpu.priv == PRV_S && ms.mstatus.tvm))
+    {
+      s->dnpc = isa_raise_intr(MCA_ILLEGAL_INS, s->pc);
+      difftest_skip_ref();
+    }
+    else
+    {
+      soft_tlb_flush();
+    }
+  });
   // RV32/RV64 Zicsr Extension
-  INSTPAT("??????? ????? ????? 001 ????? 11100 11", csrrw, I, { if (csr_valid(s, imm, true)) {R(rd) = CSR(imm); CSR(imm) = src1; } });
-  INSTPAT("??????? ????? ????? 010 ????? 11100 11", csrrs, I, { if (csr_valid(s, imm, rs1 != 0)) {R(rd) = CSR(imm); if (rs1 != 0) { CSR(imm) = CSR(imm) | src1;}; } });
-  INSTPAT("??????? ????? ????? 011 ????? 11100 11", csrrc, I, { if (csr_valid(s, imm, rs1 != 0)) {R(rd) = CSR(imm); if (rs1 != 0) { CSR(imm) = CSR(imm) & ~src1;}; } });
-  INSTPAT("??????? ????? ????? 101 ????? 11100 11", csrrwi, I_I, { if (csr_valid(s, imm, true)) { R(rd) = CSR(imm); CSR(imm) = src1;} });
-  INSTPAT("??????? ????? ????? 110 ????? 11100 11", csrrsi, I_I, { if (csr_valid(s, imm, rs1 != 0)) { R(rd) = CSR(imm); if (rs1 != 0) { CSR(imm) = CSR(imm) | src1; };} });
-  INSTPAT("??????? ????? ????? 111 ????? 11100 11", csrrci, I_I, { if (csr_valid(s, imm, rs1 != 0)) { R(rd) = CSR(imm); if (rs1 != 0) { CSR(imm) = CSR(imm) & ~src1; };} });
+  INSTPAT("??????? ????? ????? 001 ????? 11100 11", csrrw, I, { if (csr_valid(s, imm, true)) {R(rd) = CSR(imm); CSRW(imm, src1); } });
+  INSTPAT("??????? ????? ????? 010 ????? 11100 11", csrrs, I, { if (csr_valid(s, imm, rs1 != 0)) {R(rd) = CSR(imm); if (rs1 != 0) { CSRW(imm, CSR(imm) | src1);}; } });
+  INSTPAT("??????? ????? ????? 011 ????? 11100 11", csrrc, I, { if (csr_valid(s, imm, rs1 != 0)) {R(rd) = CSR(imm); if (rs1 != 0) { CSRW(imm, CSR(imm) & ~src1);}; } });
+  INSTPAT("??????? ????? ????? 101 ????? 11100 11", csrrwi, I_I, { if (csr_valid(s, imm, true)) { R(rd) = CSR(imm); CSRW(imm, src1);} });
+  INSTPAT("??????? ????? ????? 110 ????? 11100 11", csrrsi, I_I, { if (csr_valid(s, imm, rs1 != 0)) { R(rd) = CSR(imm); if (rs1 != 0) { CSRW(imm, CSR(imm) | src1); };} });
+  INSTPAT("??????? ????? ????? 111 ????? 11100 11", csrrci, I_I, { if (csr_valid(s, imm, rs1 != 0)) { R(rd) = CSR(imm); if (rs1 != 0) { CSRW(imm, CSR(imm) & ~src1); };} });
   // Trap-Return Instructions
   INSTPAT("0011000 00010 00000 000 00000 11100 11", mret, N, s->dnpc = CSR(CSR_MEPC);
           csr_t reg = {.val = CSR(CSR_MSTATUS)};
@@ -454,7 +516,8 @@ static int decode_exec(Decode *s)
           reg.mstatus.mie = reg.mstatus.mpie;
           reg.mstatus.mpie = 1;
           reg.mstatus.mpp = PRV_U;
-          CSR(CSR_MSTATUS) = reg.val;);
+          CSR(CSR_MSTATUS) = reg.val;
+          soft_tlb_flush(););
   INSTPAT("0001000 00010 00000 000 00000 11100 11", sret, N, s->dnpc = CSR(CSR_SEPC);
           csr_t reg = {.val = CSR(CSR_MSTATUS)};
           cpu.last_inst_priv = cpu.priv;
@@ -462,7 +525,11 @@ static int decode_exec(Decode *s)
           reg.mstatus.sie = reg.mstatus.spie;
           reg.mstatus.spie = 1;
           reg.mstatus.spp = 0;
-          CSR(CSR_SSTATUS) = reg.val;);
+          /* sret returning to priv != M clears MPRV (spec). */
+          if (cpu.priv != PRV_M) reg.mstatus.mprv = 0;
+          CSR(CSR_MSTATUS) = reg.val;
+          /* SSTATUS view will be re-derived by post-instruction code. */
+          soft_tlb_flush(););
   // Interrupt-Management Instructions
   INSTPAT("0001000 00101 00000 000 00000 11100 11", wfi, N, {
 #if !defined(CONFIG_TARGET_SHARE)
@@ -482,33 +549,54 @@ static int decode_exec(Decode *s)
   INSTPAT_CASE_END(grp_system)
 
   INSTPAT_CASE(0b01011, grp_amo) // AMO (RV32A + RV64A)
+  /* AMO_PRECHECK: AMOs must report store/AMO-access-fault (cause=7) on ANY
+   * PMP violation (load OR store side), per RISC-V priv spec 3.7.  Without
+   * this precheck, NEMU's Mr-then-Mw sequence would emit load-fault (5)
+   * when only the R bit is clear, diverging from sail/RTL. */
+  extern bool pmp_check(paddr_t addr, int size, uint32_t priv, bool op_r, bool op_w, bool op_x);
+  extern uint32_t pmp_effective_priv_ls(void);
+  extern jmp_buf exec_jmp_buf;
+  extern int cause;
+  extern word_t g_vaddr;
+  extern word_t pmp_last_fault_addr;
+#define AMO_PRECHECK(addr, len)                                    \
+  do                                                               \
+  {                                                                \
+    if (pmp_check((paddr_t)(addr), (len), pmp_effective_priv_ls(), \
+                  true, true, false))                              \
+    {                                                              \
+      g_vaddr = pmp_last_fault_addr;                               \
+      cause = MCA_STO_ACC_FAU;                                     \
+      longjmp(exec_jmp_buf, 24);                                   \
+    }                                                              \
+  } while (0)
   // RV32A Extension
   INSTPAT("00010?? 00000 ????? 010 ????? 01011 11", lr.w, R, { R(rd) = Mr(src1, 4); cpu.reservation = get_paddr(src1, 4); });
   INSTPAT("00011?? ????? ????? 010 ????? 01011 11", sc.w, R, {
     if (cpu.reservation == get_paddr(src1, 4)) { R(rd) = 0; Mw(src1, 4, src2); } else { R(rd) = 1; }; cpu.reservation = 0; });
-  INSTPAT("00001?? ????? ????? 010 ????? 01011 11", amoswap.w, R, {sword_t tmp = Mr(src1, 4); Mw(src1, 4, src2); R(rd) = tmp; });
-  INSTPAT("00000?? ????? ????? 010 ????? 01011 11", amoadd.w, R, {sword_t  tmp = Mr(src1, 4); Mw(src1, 4, src2 + tmp); R(rd) = SEXT(tmp, 32); });
-  INSTPAT("00100?? ????? ????? 010 ????? 01011 11", amoxor.w, R, { sword_t tmp = Mr(src1, 4); Mw(src1, 4, src2 ^ tmp); R(rd) = SEXT(tmp, 32); });
-  INSTPAT("01100?? ????? ????? 010 ????? 01011 11", amoand.w, R, { sword_t tmp = Mr(src1, 4); Mw(src1, 4, src2 & tmp); R(rd) = SEXT(tmp, 32); });
-  INSTPAT("01000?? ????? ????? 010 ????? 01011 11", amoor.w, R, { sword_t  tmp = Mr(src1, 4); Mw(src1, 4, src2 | tmp); R(rd) = SEXT(tmp, 32); });
-  INSTPAT("10000?? ????? ????? 010 ????? 01011 11", amomin.w, R, {sword_t  tmp = Mr(src1, 4); Mw(src1, 4, (tmp < src2) ? tmp : src2);R(rd) = SEXT(tmp, 32); });
-  INSTPAT("10100?? ????? ????? 010 ????? 01011 11", amomax.w, R, {sword_t  tmp = Mr(src1, 4); Mw(src1, 4, (tmp > src2) ? tmp : src2);R(rd) = SEXT(tmp, 32); });
-  INSTPAT("11000?? ????? ????? 010 ????? 01011 11", amominu.w, R, {sword_t tmp = Mr(src1, 4); Mw(src1, 4, (tmp < src2) ? src2 : tmp);R(rd) = SEXT(tmp, 32); });
-  INSTPAT("11100?? ????? ????? 010 ????? 01011 11", amomaxu.w, R, {sword_t tmp = Mr(src1, 4); Mw(src1, 4, (tmp > src2) ? src2 : tmp);R(rd) = SEXT(tmp, 32); });
+  INSTPAT("00001?? ????? ????? 010 ????? 01011 11", amoswap.w, R, {AMO_PRECHECK(src1, 4); sword_t tmp = Mr(src1, 4); Mw(src1, 4, src2); R(rd) = tmp; });
+  INSTPAT("00000?? ????? ????? 010 ????? 01011 11", amoadd.w, R, {AMO_PRECHECK(src1, 4); sword_t  tmp = Mr(src1, 4); Mw(src1, 4, src2 + tmp); R(rd) = SEXT(tmp, 32); });
+  INSTPAT("00100?? ????? ????? 010 ????? 01011 11", amoxor.w, R, { AMO_PRECHECK(src1, 4); sword_t tmp = Mr(src1, 4); Mw(src1, 4, src2 ^ tmp); R(rd) = SEXT(tmp, 32); });
+  INSTPAT("01100?? ????? ????? 010 ????? 01011 11", amoand.w, R, { AMO_PRECHECK(src1, 4); sword_t tmp = Mr(src1, 4); Mw(src1, 4, src2 & tmp); R(rd) = SEXT(tmp, 32); });
+  INSTPAT("01000?? ????? ????? 010 ????? 01011 11", amoor.w, R, { AMO_PRECHECK(src1, 4); sword_t  tmp = Mr(src1, 4); Mw(src1, 4, src2 | tmp); R(rd) = SEXT(tmp, 32); });
+  INSTPAT("10000?? ????? ????? 010 ????? 01011 11", amomin.w, R, {AMO_PRECHECK(src1, 4); sword_t  tmp = Mr(src1, 4); Mw(src1, 4, (tmp < (sword_t)src2) ? tmp : src2);R(rd) = SEXT(tmp, 32); });
+  INSTPAT("10100?? ????? ????? 010 ????? 01011 11", amomax.w, R, {AMO_PRECHECK(src1, 4); sword_t  tmp = Mr(src1, 4); Mw(src1, 4, (tmp > (sword_t)src2) ? tmp : src2);R(rd) = SEXT(tmp, 32); });
+  INSTPAT("11000?? ????? ????? 010 ????? 01011 11", amominu.w, R, {AMO_PRECHECK(src1, 4); word_t tmp = Mr(src1, 4); Mw(src1, 4, (tmp < (uint32_t)src2) ? tmp : src2);R(rd) = SEXT(tmp, 32); });
+  INSTPAT("11100?? ????? ????? 010 ????? 01011 11", amomaxu.w, R, {AMO_PRECHECK(src1, 4); word_t tmp = Mr(src1, 4); Mw(src1, 4, (tmp > (uint32_t)src2) ? tmp : src2);R(rd) = SEXT(tmp, 32); });
   // RV64A Extension
   INSTPAT("00010?? 00000 ????? 011 ????? 01011 11", lr.d, R, {
     R(rd) = Mr(src1, 8); cpu.reservation = get_paddr(src1, 8); });
   INSTPAT("00011?? ????? ????? 011 ????? 01011 11", sc.d, R, {
     if (cpu.reservation == get_paddr(src1, 8)) { R(rd) = 0; Mw(src1, 8, src2); } else { R(rd) = 1; }; cpu.reservation = 0; });
-  INSTPAT("00001?? ????? ????? 011 ????? 01011 11", amoswap.d, R, {sword_t tmp = Mr(src1, 8);Mw(src1, 8, src2);R(rd) = tmp; });
-  INSTPAT("00000?? ????? ????? 011 ????? 01011 11", amoadd.d, R, {sword_t tmp = Mr(src1, 8);Mw(src1, 8, src2 + tmp);R(rd) = tmp; });
-  INSTPAT("00100?? ????? ????? 011 ????? 01011 11", amoxor.d, R, {sword_t tmp = Mr(src1, 8);Mw(src1, 8, src2 ^ tmp);R(rd) = tmp; });
-  INSTPAT("01100?? ????? ????? 011 ????? 01011 11", amoand.d, R, {sword_t tmp = Mr(src1, 8);Mw(src1, 8, src2 & tmp);R(rd) = tmp; });
-  INSTPAT("01000?? ????? ????? 011 ????? 01011 11", amoor.d, R, {sword_t tmp = Mr(src1, 8);Mw(src1, 8, src2 | tmp);R(rd) = tmp; });
-  INSTPAT("10000?? ????? ????? 011 ????? 01011 11", amomin.d, R, {sword_t tmp = Mr(src1, 8);Mw(src1, 8, (tmp < src2) ? tmp : src2);R(rd) = tmp; });
-  INSTPAT("10100?? ????? ????? 011 ????? 01011 11", amomax.d, R, {sword_t tmp = Mr(src1, 8);Mw(src1, 8, (tmp > src2) ? tmp : src2);R(rd) = tmp; });
-  INSTPAT("11000?? ????? ????? 011 ????? 01011 11", amominu.d, R, {sword_t tmp = Mr(src1, 8);Mw(src1, 8, (tmp < src2) ? src2 : tmp);R(rd) = tmp; });
-  INSTPAT("11100?? ????? ????? 011 ????? 01011 11", amomaxu.d, R, {sword_t tmp = Mr(src1, 8);Mw(src1, 8, (tmp > src2) ? src2 : tmp);R(rd) = tmp; });
+  INSTPAT("00001?? ????? ????? 011 ????? 01011 11", amoswap.d, R, {AMO_PRECHECK(src1, 8); sword_t tmp = Mr(src1, 8);Mw(src1, 8, src2);R(rd) = tmp; });
+  INSTPAT("00000?? ????? ????? 011 ????? 01011 11", amoadd.d, R, {AMO_PRECHECK(src1, 8); sword_t tmp = Mr(src1, 8);Mw(src1, 8, src2 + tmp);R(rd) = tmp; });
+  INSTPAT("00100?? ????? ????? 011 ????? 01011 11", amoxor.d, R, {AMO_PRECHECK(src1, 8); sword_t tmp = Mr(src1, 8);Mw(src1, 8, src2 ^ tmp);R(rd) = tmp; });
+  INSTPAT("01100?? ????? ????? 011 ????? 01011 11", amoand.d, R, {AMO_PRECHECK(src1, 8); sword_t tmp = Mr(src1, 8);Mw(src1, 8, src2 & tmp);R(rd) = tmp; });
+  INSTPAT("01000?? ????? ????? 011 ????? 01011 11", amoor.d, R, {AMO_PRECHECK(src1, 8); sword_t tmp = Mr(src1, 8);Mw(src1, 8, src2 | tmp);R(rd) = tmp; });
+  INSTPAT("10000?? ????? ????? 011 ????? 01011 11", amomin.d, R, {AMO_PRECHECK(src1, 8); sword_t tmp = Mr(src1, 8);Mw(src1, 8, (tmp < src2) ? tmp : src2);R(rd) = tmp; });
+  INSTPAT("10100?? ????? ????? 011 ????? 01011 11", amomax.d, R, {AMO_PRECHECK(src1, 8); sword_t tmp = Mr(src1, 8);Mw(src1, 8, (tmp > src2) ? tmp : src2);R(rd) = tmp; });
+  INSTPAT("11000?? ????? ????? 011 ????? 01011 11", amominu.d, R, {AMO_PRECHECK(src1, 8); sword_t tmp = Mr(src1, 8);Mw(src1, 8, (tmp < src2) ? src2 : tmp);R(rd) = tmp; });
+  INSTPAT("11100?? ????? ????? 011 ????? 01011 11", amomaxu.d, R, {AMO_PRECHECK(src1, 8); AMO_PRECHECK(src1, 8); sword_t tmp = Mr(src1, 8);Mw(src1, 8, (tmp > src2) ? src2 : tmp);R(rd) = tmp; });
   INSTPAT_CASE_END(grp_amo)
 
   INSTPAT_DEFAULT()
@@ -542,29 +630,22 @@ static int decode_exec(Decode *s)
 #define SSTATUS_RMASK 0x800de162
 #endif
 #define SIE_RMASK 0x2666
-  if ((cpu.last_inst_priv == PRV_S && cpu.priv != PRV_M) || cpu.priv == PRV_S || CSR(CSR_SSTATUS) != (CSR(CSR_MSTATUS) & SSTATUS_RMASK) || CSR(CSR_SIE) != (CSR(CSR_MIE) & SIE_RMASK))
+  /* SSTATUS/SIE are architectural views of MSTATUS/MIE.  If the last CSR
+   * write targeted SSTATUS/SIE, propagate the (masked) value into the real
+   * MSTATUS/MIE.  Otherwise, SSTATUS/SIE are always re-derived below from
+   * MSTATUS/MIE, so there is nothing else to sync. */
+  if (cpu.last_csr_wr == CSR_SSTATUS)
   {
-    csr_t reg_mstatus = {.val = CSR(CSR_MSTATUS)};
-    csr_t reg_sstatus = {.val = CSR(CSR_SSTATUS)};
-    reg_mstatus.mstatus.sie = reg_sstatus.mstatus.sie;
-    reg_mstatus.mstatus.spie = reg_sstatus.mstatus.spie;
-    reg_mstatus.mstatus.ube = reg_sstatus.mstatus.ube;
-    reg_mstatus.mstatus.spp = reg_sstatus.mstatus.spp;
-    reg_mstatus.mstatus.vs = reg_sstatus.mstatus.vs;
-    reg_mstatus.mstatus.fs = reg_sstatus.mstatus.fs;
-    reg_mstatus.mstatus.xs = reg_sstatus.mstatus.xs;
-    reg_mstatus.mstatus.sum = reg_sstatus.mstatus.sum;
-    reg_mstatus.mstatus.mxr = reg_sstatus.mstatus.mxr;
-    // Re-mask after propagation to clear VS/SD reintroduced from sstatus
-    CSR(CSR_MSTATUS) = reg_mstatus.val & MSTATUS_WMASK;
-    csr_t reg_mie = {.val = CSR(CSR_MIE)};
-    csr_t reg_sie = {.val = CSR(CSR_SIE)};
-    reg_mie.mie.ssie = reg_sie.sie.ssie;
-    reg_mie.mie.stie = reg_sie.sie.stie;
-    reg_mie.mie.seie = reg_sie.sie.seie;
-    reg_mie.mie.lcofie = reg_sie.sie.lcofie;
-    CSR(CSR_MIE) = reg_mie.val;
+    word_t ms_bits = CSR(CSR_SSTATUS) & SSTATUS_RMASK;
+    CSR(CSR_MSTATUS) = (CSR(CSR_MSTATUS) & ~SSTATUS_RMASK) | ms_bits;
+    CSR(CSR_MSTATUS) &= MSTATUS_WMASK;
   }
+  if (cpu.last_csr_wr == CSR_SIE)
+  {
+    word_t mie_bits = CSR(CSR_SIE) & SIE_RMASK;
+    CSR(CSR_MIE) = (CSR(CSR_MIE) & ~SIE_RMASK) | mie_bits;
+  }
+  cpu.last_csr_wr = 0;
   // Compute SD (read-only): set when FS, VS, or XS is Dirty (== 3)
   {
     word_t fs = (CSR(CSR_MSTATUS) >> 13) & 3;

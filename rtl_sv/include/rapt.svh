@@ -220,6 +220,28 @@
 `define RAPT_CSR_MSTATUS_SPIE 5
 `define RAPT_CSR_MSTATUS_MIE_ 3
 `define RAPT_CSR_MSTATUS_SIE_ 1
+`define RAPT_CSR_MSTATUS_TVM_ 20
+`define RAPT_CSR_MSTATUS_TW__ 21
+`define RAPT_CSR_MSTATUS_TSR_ 22
+`define RAPT_CSR_MSTATUS_SUM_ 18
+`define RAPT_CSR_MSTATUS_MXR_ 19
+`define RAPT_CSR_MSTATUS_UBE_ 6
+`define RAPT_CSR_MSTATUSH_SBE 4
+`define RAPT_CSR_MSTATUSH_MBE 5
+
+// CSR_MCOUNTEREN / SCOUNTEREN bit positions (CY/TM/IR are bits 0/1/2).
+`define RAPT_CSR_COUNTEREN_CY 0
+`define RAPT_CSR_COUNTEREN_TM 1
+`define RAPT_CSR_COUNTEREN_IR 2
+// WARL write mask: only CY/TM/IR are supported (no HPM counters).
+`define RAPT_CSR_COUNTEREN_WMASK 32'h00000007
+
+// mideleg WARL: only SSI(1)/STI(5)/SEI(9) delegatable.
+`define RAPT_CSR_MIDELEG_WMASK 32'h00000222
+
+// tvec MODE field encodings
+`define RAPT_TVEC_MODE_DIRECT 2'b00
+`define RAPT_TVEC_MODE_VECTORED 2'b01
 
 // CSR_MIE FLAGS
 `define RAPT_CSR_MIE_SSIE 1
@@ -231,22 +253,47 @@
 
 // PMP CSR address ranges
 `define RAPT_CSR_PMPCFG0 'h3a0
+`define RAPT_CSR_PMPCFG1 'h3a1
+`define RAPT_CSR_PMPCFG2 'h3a2
 `define RAPT_CSR_PMPCFG3 'h3a3
 `define RAPT_CSR_PMPADDR0 'h3b0
 `define RAPT_CSR_PMPADDR15 'h3bf
 
+// PMP parameters: 16 entries (pmpcfg0/1/2/3 all active).
+// pmp_granularity = 4 bytes → G=0, NA4 legal, all pmpaddr bits writable.
+`define RAPT_PMP_NUM 16
+// pmpcfg byte field positions
+`define RAPT_PMPCFG_R_ 0
+`define RAPT_PMPCFG_W_ 1
+`define RAPT_PMPCFG_X_ 2
+`define RAPT_PMPCFG_A_ 4:3
+`define RAPT_PMPCFG_L_ 7
+// pmpcfg A encodings
+`define RAPT_PMP_A_OFF 2'd0
+`define RAPT_PMP_A_TOR 2'd1
+`define RAPT_PMP_A_NA4 2'd2
+`define RAPT_PMP_A_NAPOT 2'd3
+
 // Exception Cause Codes (synchronous)
+`define RAPT_CAUSE_INSTR_ACC_FAULT 'h1
 `define RAPT_CAUSE_ILLEGAL_INST 'h2
 `define RAPT_CAUSE_BREAKPOINT 'h3
+`define RAPT_CAUSE_LOAD_ACC_FAULT 'h5
+`define RAPT_CAUSE_STORE_ACC_FAULT 'h7
 `define RAPT_CAUSE_ECALL_U 'h8
 `define RAPT_CAUSE_ECALL_S 'h9
 `define RAPT_CAUSE_ECALL_M 'hb
+`define RAPT_CAUSE_INSTR_PAGE_FAULT 'hc
+`define RAPT_CAUSE_LOAD_PAGE_FAULT  'hd
+`define RAPT_CAUSE_STORE_PAGE_FAULT 'hf
 
 // Interrupt Cause Codes (bit index, without MSB interrupt flag)
 `define RAPT_CAUSE_SSI 'h1
 `define RAPT_CAUSE_MSI 'h3
 `define RAPT_CAUSE_STI 'h5
 `define RAPT_CAUSE_MTI 'h7
+`define RAPT_CAUSE_SEI 'h9
+`define RAPT_CAUSE_MEI 'hb
 
 // CSR Write Masks
 `define RAPT_CSR_MEDELEG_WMASK 'hf4bffe

@@ -1,0 +1,152 @@
+name: RISC-V Architecture Compatibility Tests
+
+# Cross-validates the Raptor core against the upstream riscv-non-isa/riscv-arch-test
+# suite via the classic RISCOF flow (sail-riscv reference). Complements the
+# ACT4-based `verify-riscof.yaml` workflow; any divergence between the two
+# flows is a strong signal of an ISA bug or an environment mismatch.
+
+on:
+  schedule:
+    - cron: "0 5 * * 0"
+  push:
+    branches: [ "master", "main" ]
+    paths:
+      - "rtl_sv/**"
+      - "rtl_scala/**"
+      - "nsim/**"
+      - "verify/riscof/classic/**"
+      - "verify/Makefile"
+      - ".github/workflows/riscv-arch-test.yaml"
+  pull_request:
+    branches: [ "master", "main" ]
+    paths:
+      - "rtl_sv/**"
+      - "rtl_scala/**"
+      - "nsim/**"
+      - "verify/riscof/classic/**"
+      - "verify/Makefile"
+      - ".github/workflows/riscv-arch-test.yaml"
+  workflow_dispatch:
+
+jobs:
+  riscof-classic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      RAPTOR_HOME: ${{ github.workspace }}
+      NEMU_HOME: ${{ github.workspace }}/nemu
+      AM_HOME: ${{ github.workspace }}/abstract-machine
+      CROSS_COMPILE: riscv64-elf-
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Python 3.11
+        # Pin Python to 3.11 to match the neorv32 RISC-V arch-test workflow
+        # (the pinned RISCOF fork at d38859f has known issues on 3.12+).
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Setup environment
+        run: |
+          set -euo pipefail
+          ./setup.sh
+
+      - name: Install sail-riscv reference model
+        run: |
+          set -euo pipefail
+          # Tarball contains a top-level sail-riscv-Linux-x86_64/ directory
+          # with bin/, include/, share/. Strip it so binary lands directly in
+          # $GITHUB_WORKSPACE/sail-riscv/bin/sail_riscv_sim.
+          mkdir -p "$GITHUB_WORKSPACE/sail-riscv"
+          curl -L https://github.com/riscv/sail-riscv/releases/download/0.11/sail-riscv-Linux-x86_64.tar.gz \
+            | tar -xz -C "$GITHUB_WORKSPACE/sail-riscv" --strip-components=1
+          ls -al "$GITHUB_WORKSPACE/sail-riscv/bin"
+          echo "$GITHUB_WORKSPACE/sail-riscv/bin" >> "$GITHUB_PATH"
+
+      - name: Install RISCOF (pinned fork)
+        # Upstream RISCOF is broken on Python 3.12; use the maintained fork
+        # commit also used by neorv32's compatibility workflow.
+        # https://github.com/riscv-software-src/riscof/issues/122
+        run: |
+          set -euo pipefail
+          python3 -m pip install --upgrade pip
+          pip3 install git+https://github.com/riscv/riscof.git@d38859f85fe407bcacddd2efcd355ada4683aee4
+
+      - name: Build NPC (no difftest) and MROM image
+        shell: bash -l {0}
+        run: |
+          make config-npc32
+          make -C nsim -j$(nproc)
+          make -C nsim/csrc/mem/mrom-data
+
+      - name: Cache riscv-arch-test suite
+        uses: actions/cache@v4
+        with:
+          path: verify/riscof/classic/riscv-arch-test
+          key: riscv-arch-test-main-${{ hashFiles('verify/riscof/classic/plugins/**',
+            '.github/workflows/riscv-arch-test.yaml') }}
+
+      - name: “Sanity check | sail + toolchain”
+        shell: bash -l {0}
+        run: |
+          set -e
+          echo "=== python ==="
+          python3 -V
+          echo "=== sail_riscv_sim ==="
+          command -v sail_riscv_sim
+          sail_riscv_sim --version || true
+          echo "=== riscv64-elf-gcc ==="
+          command -v riscv64-elf-gcc
+          riscv64-elf-gcc --version | head -1
+          echo "=== riscof ==="
+          command -v riscof
+          riscof --version || true
+
+      - name: Run classic RISCOF compliance tests
+        shell: bash -l {0}
+        run: make -C verify riscof-classic TIMEOUT=30
+
+      - name: Diagnose missing reference signatures
+        if: failure()
+        shell: bash -l {0}
+        run: |
+          set +e
+          WD=verify/build/riscof-classic
+          echo "## Tests with missing Reference signatures"
+          MISSING=0
+          while IFS= read -r d; do
+            sig=$(ls "$d"/Reference-*.signature 2>/dev/null | head -1)
+            if [ -z "$sig" ]; then
+              MISSING=$((MISSING+1))
+              echo "---- MISSING: $d ----"
+              ls "$d" 2>/dev/null
+              for log in "$d"/*.log; do
+                [ -f "$log" ] || continue
+                echo "------ $log (tail) ------"
+                tail -40 "$log"
+              done
+            fi
+          done < <(find "$WD" -type d -name ref 2>/dev/null | sort)
+          echo "Total tests missing ref signatures: $MISSING"
+
+      - name: Upload RISCOF report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: riscof-classic-report
+          path: |
+            verify/build/riscof-classic/report.html
+            verify/build/riscof-classic/style.css
+          if-no-files-found: warn
+
+      - name: Upload RISCOF workdir on failure (postmortem)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: riscof-classic-workdir-${{ github.sha }}
+          path: |
+            verify/build/riscof-classic/
+            !verify/build/riscof-classic/**/*.elf
+          if-no-files-found: warn
+          retention-days: 14

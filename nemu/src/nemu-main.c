@@ -20,6 +20,7 @@ void init_monitor(int, char *[]);
 void am_init_monitor();
 void engine_start();
 int is_exit_status_bad();
+int sig_dump_if_enabled(void);
 
 int main(int argc, char *argv[])
 {
@@ -32,6 +33,9 @@ int main(int argc, char *argv[])
 
   /* Start engine. */
   engine_start();
+
+  /* Dump RISCOF signature if --sig was provided. */
+  sig_dump_if_enabled();
 
   return is_exit_status_bad();
 }

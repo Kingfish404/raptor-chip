@@ -421,7 +421,8 @@ void statistic()
       pmu.instr_cnt / time_s, pmu.instr_cnt / time_s / 1e6);
   Log("%s at pc: " FMT_WORD_NO_PREFIX ", inst: " FMT_WORD_NO_PREFIX,
       ((npc.state == NPC_QUIT) ? FMT_BLUE("NPC QUIT")
-                               : (*npc.ret == 0 && npc.state != NPC_ABORT ? FMT_GREEN("HIT GOOD TRAP")
-                                                                          : FMT_RED("HIT BAD TRAP"))),
+                               : ((npc.host_exit_ok || *npc.ret == 0) && npc.state != NPC_ABORT
+                                      ? FMT_GREEN("HIT GOOD TRAP")
+                                      : FMT_RED("HIT BAD TRAP"))),
       (word_t)(*(npc.pc)), (word_t)(*(npc.inst)));
 }

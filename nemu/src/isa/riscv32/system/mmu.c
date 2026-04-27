@@ -22,6 +22,13 @@
 extern jmp_buf exec_jmp_buf;
 extern int cause;
 
+/* PMP check (implemented in system/pmp.c).  PTE reads always use M-mode
+ * privilege since they are performed by the hart for its own translation.
+ * The faulting cause is access-fault of the access type being translated. */
+bool pmp_check(paddr_t addr, int size, uint32_t priv,
+               bool op_r, bool op_w, bool op_x);
+uint32_t pmp_effective_priv_ls(void);
+
 // !important: only Little-Endian is supported
 typedef union // 32-bit vaddr for page table walk
 {
@@ -68,9 +75,13 @@ int isa_mmu_check(vaddr_t vaddr, int len, int type)
   {
     return MMU_DIRECT;
   }
-  if ((cpu.priv == PRV_M) &&
-      (((cpu.sr[CSR_MSTATUS] & CSR_MSTATUS_MPRV) == 0) ||
-       (type == MEM_TYPE_IFETCH)))
+  // Effective privilege for translation decision:
+  //   fetches always use cpu.priv;
+  //   loads/stores in M-mode with MPRV=1 use MPP instead.
+  uint32_t eff_priv = (type == MEM_TYPE_IFETCH)
+                          ? cpu.priv
+                          : pmp_effective_priv_ls();
+  if (eff_priv == PRV_M)
   {
     return MMU_DIRECT;
   }
@@ -92,68 +103,134 @@ paddr_t isa_mmu_translate(vaddr_t vaddr, int len, int type)
   word_t vpn[2] = {addr.vaddr.vpn0, addr.vaddr.vpn1};
   word_t a = reg.satp.ppn * 4096;
   addr_t pte = {.val = 0};
-  if (0 && type == MEM_TYPE_WRITE && vaddr == 0x0000beaf)
-  {
-    printf(">[%c]va: " FMT_WORD ", vpn[1,0]: [" FMT_WORD ", " FMT_WORD "], ",
-           type == MEM_TYPE_IFETCH ? 'I' : (type == MEM_TYPE_READ ? 'R' : 'W'), vaddr, vpn[1], vpn[0]);
-  }
-  for (int i = 1; i >= 0; i--)
+  // Effective privilege for permission checks: fetches always use cpu.priv;
+  // explicit loads/stores use MPRV/MPP override if in M with MPRV=1.
+  csr_t mstatus_for_prm = {.val = cpu.sr[CSR_MSTATUS]};
+  uint32_t eff_priv = (type == MEM_TYPE_IFETCH)
+                          ? cpu.priv
+                          : pmp_effective_priv_ls();
+  int pf_cause = type == MEM_TYPE_IFETCH
+                     ? MCA_INS_PAG_FAU
+                     : (type == MEM_TYPE_READ ? MCA_LOA_PAG_FAU : MCA_STO_PAG_FAU);
+  int i;
+  for (i = 1; i >= 0; i--)
   {
     word_t pte_addr = a + (vpn[i] * 4);
     if (pte_addr == 0)
     {
-      cause = type == MEM_TYPE_IFETCH
-                  ? MCA_INS_PAG_FAU
-                  : (type == MEM_TYPE_READ ? MCA_LOA_PAG_FAU : MCA_STO_PAG_FAU);
-      if (0 && type == MEM_TYPE_WRITE && vaddr == 0x0000beaf)
-      {
-        printf("[%c]va: " FMT_WORD ", vpn[%d]: " FMT_WORD ", pte_addr is NULL\n",
-               type == MEM_TYPE_IFETCH ? 'I' : (type == MEM_TYPE_READ ? 'R' : 'W'), vaddr, i, vpn[i]);
-      }
+      cause = pf_cause;
       longjmp(exec_jmp_buf, 1);
     }
     pte.val = paddr_read(pte_addr, 4);
-    if (0 && type == MEM_TYPE_WRITE && vaddr == 0x0000beaf)
     {
-      printf("[%x]addr: " FMT_WORD ", pte: " FMT_WORD ", ", i, pte_addr, pte.val);
+      uint32_t ptw_priv = (type == MEM_TYPE_IFETCH) ? cpu.priv : pmp_effective_priv_ls();
+      if (pmp_check(pte_addr, 4, ptw_priv, true, false, false))
+      {
+        cause = type == MEM_TYPE_IFETCH
+                    ? MCA_INS_ACC_FAU
+                    : (type == MEM_TYPE_READ ? MCA_LOA_ACC_FAU : MCA_STO_ACC_FAU);
+        longjmp(exec_jmp_buf, 25);
+      }
     }
-    if (pte.pte.v == 0)
+    // Invalid PTE: v=0, or (w=1 && r=0) reserved encoding.
+    if (pte.pte.v == 0 || (pte.pte.w == 1 && pte.pte.r == 0))
     {
-      cause = type == MEM_TYPE_IFETCH
-                  ? MCA_INS_PAG_FAU
-                  : (type == MEM_TYPE_READ ? MCA_LOA_PAG_FAU : MCA_STO_PAG_FAU);
+      cause = pf_cause;
       longjmp(exec_jmp_buf, 2);
     }
     if ((pte.pte.r == 1) || (pte.pte.x == 1))
     {
-      if (i > 0 && ((pte.pte.ppn0 & 0x1) != 0))
+      if (i > 0 && ((pte.pte.ppn0 & 0x3ff) != 0))
       {
-        cause = type == MEM_TYPE_IFETCH
-                    ? MCA_INS_PAG_FAU
-                    : (type == MEM_TYPE_READ ? MCA_LOA_PAG_FAU : MCA_STO_PAG_FAU);
+        // Misaligned superpage: pte.ppn[i-1:0] != 0 must fault.
+        cause = pf_cause;
         longjmp(exec_jmp_buf, 3);
       }
       if (i > 0)
       {
-        // If i>0, then this is a superpage translation and
-        // pa.ppn[i-1:0] = va.vpn[i-1:0].
+        // Superpage translation: pa.ppn[i-1:0] = va.vpn[i-1:0].
         pte.pte.ppn0 = vpn[0];
       }
       break;
     }
-    if ((i - 1) < -1)
+    // Non-leaf PTE: must not set u/a/d/g per spec.
+    if (pte.pte.u == 1 || pte.pte.a == 1 || pte.pte.d == 1)
     {
-      cause = type == MEM_TYPE_IFETCH
-                  ? MCA_INS_PAG_FAU
-                  : (type == MEM_TYPE_READ ? MCA_LOA_PAG_FAU : MCA_STO_PAG_FAU);
+      cause = pf_cause;
+      longjmp(exec_jmp_buf, 2);
+    }
+    if (i == 0)
+    {
+      // No leaf found at lowest level.
+      cause = pf_cause;
       longjmp(exec_jmp_buf, 4);
     }
     a = pte.pte_ppn.ppn * 4096;
   }
-  if (0 && type == MEM_TYPE_WRITE && vaddr == 0x0000beaf)
+
+  // Permission checks (leaf pte).
+  // - U-bit vs. effective privilege:
+  //     fetch: S-mode cannot execute U-pages (regardless of SUM).
+  //     load/store from S-mode: if pte.u=1, require SUM=1.
+  //     U-mode: pte.u must be 1.
+  bool is_fetch = (type == MEM_TYPE_IFETCH);
+  bool is_write = (type == MEM_TYPE_WRITE);
+  bool is_read  = (type == MEM_TYPE_READ);
+  if (eff_priv == PRV_S)
   {
-    printf("[paddr]: " FMT_WORD "\n", (pte.pte_ppn.ppn * 4096) | offset);
+    if (pte.pte.u == 1)
+    {
+      if (is_fetch)
+      {
+        cause = pf_cause;
+        longjmp(exec_jmp_buf, 5);
+      }
+      if (mstatus_for_prm.mstatus.sum == 0)
+      {
+        cause = pf_cause;
+        longjmp(exec_jmp_buf, 6);
+      }
+    }
   }
+  else if (eff_priv == PRV_U)
+  {
+    if (pte.pte.u == 0)
+    {
+      cause = pf_cause;
+      longjmp(exec_jmp_buf, 7);
+    }
+  }
+
+  // R/W/X permission check (with MXR: X implies R on loads when MXR=1).
+  if (is_fetch && pte.pte.x == 0)
+  {
+    cause = pf_cause;
+    longjmp(exec_jmp_buf, 8);
+  }
+  if (is_read)
+  {
+    bool readable = (pte.pte.r == 1) ||
+                    (mstatus_for_prm.mstatus.mxr == 1 && pte.pte.x == 1);
+    if (!readable)
+    {
+      cause = pf_cause;
+      longjmp(exec_jmp_buf, 9);
+    }
+  }
+  if (is_write && pte.pte.w == 0)
+  {
+    cause = pf_cause;
+    longjmp(exec_jmp_buf, 10);
+  }
+
+  // A/D-bit check (Svade-style: fault on A=0, or on store with D=0).
+  // This matches the sail reference used by riscv-arch-test vm_sv32 suite.
+  if (pte.pte.a == 0 || (is_write && pte.pte.d == 0))
+  {
+    cause = pf_cause;
+    longjmp(exec_jmp_buf, 11);
+  }
+
   word_t paddr = (pte.pte_ppn.ppn * 4096) | offset;
   return paddr;
 }

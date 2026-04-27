@@ -23,6 +23,12 @@ extern int cause;
 
 extern FILE *mem_trace;
 
+/* PMP check (implemented in src/isa/<isa>/system/pmp.c) */
+bool pmp_check(paddr_t addr, int size, uint32_t priv,
+               bool op_r, bool op_w, bool op_x);
+uint32_t pmp_effective_priv_ls(void);
+extern word_t pmp_last_fault_addr;
+
 word_t g_vaddr = 0;
 
 /* Software TLB arrays: direct-mapped, separate per access type */
@@ -69,18 +75,31 @@ word_t vaddr_ifetch(vaddr_t addr, int len)
     cause = MCA_INS_ACC_FAU;
     longjmp(exec_jmp_buf, 20);
   }
+  bool mmu_on = false;
   if (isa_mmu_check(addr, len, MEM_TYPE_IFETCH) == MMU_DIRECT)
   {
     paddr = addr;
   }
   else
   {
+    mmu_on = true;
     if (soft_tlb_lookup(soft_tlb_ifetch, addr, &paddr))
     {
+      if (pmp_check(paddr, len, cpu.priv, false, false, true))
+      {
+        cause = MCA_INS_ACC_FAU;
+        longjmp(exec_jmp_buf, 22);
+      }
       return paddr_read(paddr, len);
     }
     paddr = isa_mmu_translate(addr, len, MEM_TYPE_IFETCH);
     soft_tlb_refill(soft_tlb_ifetch, addr, paddr);
+  }
+  if (pmp_check(paddr, len, cpu.priv, false, false, true))
+  {
+    if (!mmu_on) g_vaddr = pmp_last_fault_addr;
+    cause = MCA_INS_ACC_FAU;
+    longjmp(exec_jmp_buf, 22);
   }
   return paddr_read(paddr, len);
 }
@@ -90,30 +109,43 @@ word_t vaddr_read(vaddr_t addr, int len)
   g_vaddr = addr;
   cpu.rvaddr = addr;
   cpu.rlen = len;
-  if ((addr % len) != 0)
-  {
-    cause = MCA_LOA_ADD_MIS;
-    longjmp(exec_jmp_buf, 21);
-  }
+  /* Misaligned accesses are allowed (matches sail/RTL Zicclsm behaviour).
+   * Fall through to byte-wise emulation when straddling page/PMP region
+   * boundaries is not required; the underlying paddr_read in NEMU handles
+   * any alignment transparently. */
   if (mem_trace != NULL)
   {
     fprintf(mem_trace, FMT_WORD_NO_PREFIX "-%c\n", addr, 'r');
   }
   paddr_t paddr = addr;
+  bool mmu_on = false;
   if (isa_mmu_check(addr, len, MEM_TYPE_READ) == MMU_DIRECT)
   {
     paddr = addr;
   }
   else
   {
+    mmu_on = true;
     if (soft_tlb_lookup(soft_tlb_load, addr, &paddr))
     {
+      if (pmp_check(paddr, len, pmp_effective_priv_ls(), true, false, false))
+      {
+        if (!mmu_on) g_vaddr = pmp_last_fault_addr;
+        cause = MCA_LOA_ACC_FAU;
+        longjmp(exec_jmp_buf, 23);
+      }
       cpu.rpaddr = paddr;
       cpu.rdata = paddr_read(paddr, len);
       return cpu.rdata;
     }
     paddr = isa_mmu_translate(addr, len, MEM_TYPE_READ);
     soft_tlb_refill(soft_tlb_load, addr, paddr);
+  }
+  if (pmp_check(paddr, len, pmp_effective_priv_ls(), true, false, false))
+  {
+    if (!mmu_on) g_vaddr = pmp_last_fault_addr;
+    cause = MCA_LOA_ACC_FAU;
+    longjmp(exec_jmp_buf, 23);
   }
   cpu.rpaddr = paddr;
   cpu.rdata = paddr_read(paddr, len);
@@ -126,24 +158,28 @@ void vaddr_write(vaddr_t addr, int len, word_t data)
   cpu.vwaddr = addr;
   cpu.wdata = data;
   cpu.len = len;
-  if ((addr % len) != 0)
-  {
-    cause = MCA_STO_ADD_MIS;
-    longjmp(exec_jmp_buf, 21);
-  }
+  /* Misaligned stores allowed (see vaddr_read comment). */
   if (mem_trace != NULL)
   {
     fprintf(mem_trace, FMT_WORD_NO_PREFIX "-%c\n", addr, 'w');
   }
   paddr_t paddr = 0;
+  bool mmu_on = false;
   if (isa_mmu_check(addr, len, MEM_TYPE_WRITE) == MMU_DIRECT)
   {
     paddr = addr;
   }
   else
   {
+    mmu_on = true;
     if (soft_tlb_lookup(soft_tlb_store, addr, &paddr))
     {
+      if (pmp_check(paddr, len, pmp_effective_priv_ls(), false, true, false))
+      {
+        if (!mmu_on) g_vaddr = pmp_last_fault_addr;
+        cause = MCA_STO_ACC_FAU;
+        longjmp(exec_jmp_buf, 24);
+      }
       cpu.pwaddr = paddr;
       paddr_write(paddr, len, data);
       if ((cpu.reservation & ~0x3) == (paddr & ~0x3))
@@ -154,6 +190,12 @@ void vaddr_write(vaddr_t addr, int len, word_t data)
     }
     paddr = isa_mmu_translate(addr, len, MEM_TYPE_WRITE);
     soft_tlb_refill(soft_tlb_store, addr, paddr);
+  }
+  if (pmp_check(paddr, len, pmp_effective_priv_ls(), false, true, false))
+  {
+    if (!mmu_on) g_vaddr = pmp_last_fault_addr;
+    cause = MCA_STO_ACC_FAU;
+    longjmp(exec_jmp_buf, 24);
   }
   cpu.pwaddr = paddr;
   paddr_write(paddr, len, data);

@@ -4,7 +4,7 @@
 
 Raptor is an out-of-order, super-scalar RISC-V processor core with register renaming, a reorder buffer (ROB), reservation stations, and virtual memory support. The pipeline fetches, decodes, renames, and dispatches up to **2 instructions per cycle** (`RAPT_DUAL_ISSUE`). The commit stage supports **dual commit** -- up to 2 instructions can retire from the ROB per cycle when consecutive entries are both ready.
 
-**ISA**: RV32/RV64 I + M (mul/div) + A (atomics: LR/SC, AMO) + C (compressed) + Zba (address generation, incl. RV64 `.UW` variants) + Zbb (basic bit-manipulation) + Zbc (carry-less multiply) + Zbs (single-bit) + Zcb (additional compressed ops) + Zicntr (base counters) + Zicond (conditional zero) + Zicsr + Zifencei + Zimop / Zcmop (may-be-ops / compressed may-be-ops, decoded as NOPs) + Zihintpause / Zihintntl / Zicbop (hint NOPs) + Sv32 MMU
+**ISA**: RV32/RV64 I + M (mul/div) + A (atomics: LR/SC, AMO) + C (compressed) + Zba (address generation, incl. RV64 `.UW` variants) + Zbb (basic bit-manipulation) + Zbc (carry-less multiply) + Zbs (single-bit) + Zcb (additional compressed ops) + Zicntr (base counters) + Zicond (conditional zero) + Zicsr + Zifencei + Zimop / Zcmop (may-be-ops / compressed may-be-ops, decoded as NOPs) + Zihintpause / Zihintntl / Zicbop (hint NOPs) + Sv32 MMU + 16-entry PMP
 
 The core supports configurable **RV32** and **RV64** modes via a compile-time switch (`RAPT_RV64`). When `RAPT_RV64` is defined, XLEN=64 and all datapath, register file, AXI bus, and DPI-C interfaces widen to 64 bits. RV64 adds W-variant instructions (ADDIW, SLLIW, etc.) with 32-bit result sign-extension.
 
@@ -19,7 +19,7 @@ The core supports configurable **RV32** and **RV64** modes via a compile-time sw
 - Conditional: `Zicond` (`czero.{eqz,nez}`).
 - Hints / may-be-ops (decoded as NOPs): `Zihintpause`, `Zihintntl`, `Zicbop`,
   `Zimop`, `Zcmop`.
-- Privileged: M, S (with Sv32 MMU), U.
+- Privileged: M, S (with Sv32 MMU), U; 16-entry PMP (TOR/NA4/NAPOT, L-bit WARL) checked on fetch, load/store, and PTW PTE loads.
 
 Closest RISC-V profile peer: RVM23U32 / RVA20S64.
 
@@ -161,7 +161,11 @@ Broadcast unit. Outputs: `rpc`, `cpc`, branch resolution, `flush_pipe`, `fence_i
 
 #### CSR (`rapt_csr.sv`)
 
-32-entry register file, M/S-mode. Trap entry/exit (`ecall`/`ebreak`/`mret`/`sret`), privilege transitions (M/S/U), delegation (`medeleg`/`mideleg`), `MSTATUS`<->`SSTATUS` mirroring, `mcycle`/`time` counters. Broadcasts: `priv`, `satp`, MMU enables, `tvec`.
+32-entry register file, M/S-mode. Trap entry/exit (`ecall`/`ebreak`/`mret`/`sret`), privilege transitions (M/S/U), delegation (`medeleg`/`mideleg`), `MSTATUS`<->`SSTATUS` mirroring, `mcycle`/`time` counters. Broadcasts: `priv`, `satp`, MMU enables, `tvec`, and `pmpcfg`/`pmpaddr` shadow arrays for PMP.
+
+#### PMP (`rapt_pmp.sv`)
+
+16 PMP entries (`RAPT_PMP_NUM=16`). Combinational match logic supporting TOR / NA4 / NAPOT modes, with locked (`L` bit) entries enforced even in M-mode. CSR file owns the architectural `pmpcfg[0..3]` / `pmpaddr[0..15]` registers (WARL on reserved A-mode encodings) and broadcasts them through `csr_bcast_if`. Checks are wired into three sites: IFU instruction fetch (raises instruction access-fault, `mtval` = faulting byte address for cross-boundary fetches), L1D load/store (raises load/store access-fault, MPRV-aware effective privilege), and PTW PTE-load path (raises access-fault on the failing PTE address). Empty PMP table allows all accesses in M-mode and denies all accesses in S/U-mode, matching the privileged spec.
 
 ### Memory Subsystem
 

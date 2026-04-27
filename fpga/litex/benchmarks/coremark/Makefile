@@ -36,14 +36,21 @@ BUILD_DIR    := $(_THIS_DIR)build
 PORTME_DIR   := $(_THIS_DIR)portme
 
 # ---- CoreMark config ----
+# ITERATIONS: tuneable from parent (FPGA is fast — 1000+ is reasonable).
+# SYS_CLK_HZ: must match the bitstream's sys_clk; rdtime ticks once per cycle
+#   (rapt_clint.sv: mtime <= mtime + 1). Default 10 MHz for Tang Mega 138K Pro.
+# Changing ITERATIONS or SYS_CLK_HZ triggers a full rebuild via the stamp.
 ITERATIONS ?= 64
+SYS_CLK_HZ ?= 10000000
+ITER_STAMP := $(BUILD_DIR)/.iterations
 CFLAGS := -march=$(ARCH) -mabi=$(ABI) -mcmodel=medany \
           -O2 -Wall -g \
           -ffreestanding -nostdlib -nostdinc \
           -isystem $(shell $(CC) -print-file-name=include) \
           -I$(PORTME_DIR) -I$(COREMARK_DIR) \
           -DITERATIONS=$(ITERATIONS) -DPERFORMANCE_RUN=1 \
-          -DHAS_STDIO=0 -DHAS_PRINTF=0 \
+          -DHAS_STDIO=0 -DHAS_PRINTF=0 -DHAS_FLOAT=1 \
+          -DEE_TICKS_PER_SEC=$(SYS_CLK_HZ)ULL \
           -DCOMPILER_FLAGS=\""$(ARCH)"\"
 
 LDFLAGS := -march=$(ARCH) -mabi=$(ABI) -mcmodel=medany \
@@ -69,19 +76,34 @@ OBJS += $(BUILD_DIR)/crt0.o
 ELF  := $(BUILD_DIR)/coremark.elf
 BIN  := $(BUILD_DIR)/coremark.bin
 
-$(BUILD_DIR)/crt0.o: $(PORTME_DIR)/crt0.S
+# Force-rebuild all objects when ITERATIONS changes. The stamp's content is
+# the current value; if it differs from the requested ITERATIONS, the rule
+# rewrites the stamp (which is a prereq of every object).
+.PHONY: $(ITER_STAMP).check
+$(ITER_STAMP).check:
+	@mkdir -p $(BUILD_DIR)
+	@cur=$$(cat $(ITER_STAMP) 2>/dev/null || echo ""); \
+	 want="$(ITERATIONS):$(SYS_CLK_HZ)"; \
+	 if [ "$$cur" != "$$want" ]; then \
+	   echo "[INFO] coremark config changed ($$cur -> $$want); forcing rebuild."; \
+	   echo "$$want" > $(ITER_STAMP); \
+	 fi
+$(ITER_STAMP): $(ITER_STAMP).check
+	@test -f $@ || echo "$(ITERATIONS):$(SYS_CLK_HZ)" > $@
+
+$(BUILD_DIR)/crt0.o: $(PORTME_DIR)/crt0.S $(ITER_STAMP)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/core_portme.o: $(PORTME_DIR)/core_portme.c
+$(BUILD_DIR)/core_portme.o: $(PORTME_DIR)/core_portme.c $(ITER_STAMP)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/minilib.o: $(PORTME_DIR)/minilib.c
+$(BUILD_DIR)/minilib.o: $(PORTME_DIR)/minilib.c $(ITER_STAMP)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/%.o: $(COREMARK_DIR)/%.c
+$(BUILD_DIR)/%.o: $(COREMARK_DIR)/%.c $(ITER_STAMP)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
@@ -104,9 +126,9 @@ endif # coremark source exists
 
 clone: $(COREMARK_DIR)/core_main.c ## Clone CoreMark repository
 
-build: ## Build coremark ELF + BIN
+build: ## Build coremark ELF + BIN (override ITERATIONS=N, SYS_CLK_HZ=Hz)
 	@$(MAKE) --no-print-directory $(COREMARK_DIR)/core_main.c
-	@$(MAKE) --no-print-directory _build
+	@$(MAKE) --no-print-directory _build ITERATIONS=$(ITERATIONS) SYS_CLK_HZ=$(SYS_CLK_HZ)
 
 clean: ## Remove build artifacts
 	rm -rf $(BUILD_DIR)

@@ -13,25 +13,24 @@ from migen.genlib.resetsync import AsyncResetSynchronizer
 
 from litex.gen import *
 from litex.build.parser import LiteXArgumentParser
-from litex.build.gowin.programmer import GowinProgrammer
 from litex.soc.cores.clock.gowin_gw5a import GW5APLL
 from litex.soc.cores.cpu import CPUS
 from litex.soc.cores.led import LedChaser
 from litex.soc.integration.builder import Builder
 from litex.soc.integration.soc_core import SoCCore
 
-from litex_boards.platforms import sipeed_tang_mega_138k
+from litex_boards.platforms import sipeed_tang_mega_138k_pro
 
 
 CPUS["raptor"] = Raptor
 
 DEFAULT_FPGA_SYS_CLK = int(10e6)
-DEFAULT_FPGA_SYNTH_MAXFAN = 48
-DEFAULT_FPGA_ROUTE_MAXFAN = 12
+DEFAULT_FPGA_SYNTH_MAXFAN = 24
+DEFAULT_FPGA_ROUTE_MAXFAN = 8
 DEFAULT_FPGA_BOOT_MODE = "bios"
 
 
-class Platform(sipeed_tang_mega_138k.Platform):
+class Platform(sipeed_tang_mega_138k_pro.Platform):
     def __init__(
         self,
         toolchain="gowin",
@@ -39,10 +38,12 @@ class Platform(sipeed_tang_mega_138k.Platform):
         route_maxfan=DEFAULT_FPGA_ROUTE_MAXFAN,
     ):
         super().__init__(toolchain=toolchain)
-        self.name = "sipeed_tang_mega_138k"
-        # Tang Mega 138K AC1/I0 boards need the C variant when small inferred
-        # RAMs are present in the synthesized design.
-        self.devicename = "GW5AST-138C"
+        self.name = "sipeed_tang_mega_138k_pro"
+        # NOTE: Tang Mega 138K Pro uses the GW5AST-LV138FPG676AES package; the
+        # 138C variant override that works on the non-Pro PBGA484 part is
+        # rejected by gw_sh `set_device` here. Keep the platform default
+        # (GW5AST-138B). PnR density on the Pro must be addressed via
+        # design-side levers (see docs-ref/uarch.memory-subsystem.md).
         # Gowin's Tcl frontend accepts `verilog_std=sysv2017`; without it, the
         # default LiteX flow falls back to Verilog 2001 and rejects the
         # SystemVerilog packages/packed structs in rapt_pack.sv.
@@ -52,13 +53,15 @@ class Platform(sipeed_tang_mega_138k.Platform):
         # and produced PR0004 unrouted nets during PnR. Tighten the fanout
         # guidance so replication happens earlier and these nets stay off the
         # scarce global clock network.
+        # NOTE: Gowin V1.9.x exposes no `globalclkmaxnum`-style cap (verified
+        # against the IDE option catalog under data/options); the only fanout
+        # knobs are -maxfan and -route_maxfan. Address PRIMARY exhaustion via
+        # design-side levers (e.g. with_led_chaser=False, smaller ROB/RS/BTB)
+        # rather than synthesis options.
         self.toolchain.options["maxfan"] = int(synth_maxfan)
         self.toolchain.options["route_maxfan"] = int(route_maxfan)
         self.toolchain.options["print_all_synthesis_warning"] = 1
         self.toolchain.options["show_all_warn"] = 1
-
-    def create_programmer(self, kit="gowin"):
-        return GowinProgrammer(self.devicename)
 
 
 class _CRG(LiteXModule):
@@ -93,7 +96,7 @@ class RaptorTangMega138KSoC(SoCCore):
         sys_clk_freq=DEFAULT_FPGA_SYS_CLK,
         synth_maxfan=DEFAULT_FPGA_SYNTH_MAXFAN,
         route_maxfan=DEFAULT_FPGA_ROUTE_MAXFAN,
-        with_led_chaser=True,
+        with_led_chaser=False,
         **kwargs,
     ):
         platform = Platform(
@@ -104,11 +107,11 @@ class RaptorTangMega138KSoC(SoCCore):
 
         kwargs["cpu_type"] = "raptor"
         kwargs.setdefault("cpu_variant", "standard")
-        kwargs.setdefault("ident", "Raptor LiteX SoC on Tang Mega 138K")
+        kwargs.setdefault("ident", "Raptor LiteX SoC on Tang Mega 138K Pro")
         kwargs.setdefault("ident_version", True)
         kwargs.setdefault("uart_name", "serial")
         kwargs.setdefault("uart_baudrate", 115200)
-        kwargs.setdefault("integrated_rom_size", 0x10000)
+        kwargs.setdefault("integrated_rom_size", 0x8000)
         kwargs.setdefault("integrated_sram_size", 0x2000)
         kwargs.setdefault("integrated_main_ram_size", 0)
 
@@ -117,8 +120,12 @@ class RaptorTangMega138KSoC(SoCCore):
         self.crg = _CRG(platform, sys_clk_freq)
 
         if with_led_chaser:
+            # Pro platform exposes active-low LEDs as `led_n`. Off by default
+            # because the chaser eats CLS and adds clock-fanout pressure on
+            # an already-dense Pro PnR (PRIMARY 100%). Enable explicitly via
+            # `--with-led-chaser` (Make: `WITH_LED_CHASER=1`).
             self.leds = LedChaser(
-                pads=platform.request_all("led"),
+                pads=platform.request_all("led_n"),
                 sys_clk_freq=sys_clk_freq,
             )
 
@@ -126,12 +133,7 @@ class RaptorTangMega138KSoC(SoCCore):
 def main():
     parser = LiteXArgumentParser(
         platform=Platform,
-        description="Raptor LiteX SoC on Tang Mega 138K.",
-    )
-    parser.add_target_argument(
-        "--flash",
-        action="store_true",
-        help="Flash bitstream to external SPI flash.",
+        description="Raptor LiteX SoC on Tang Mega 138K Pro.",
     )
     parser.add_target_argument(
         "--sys-clk-freq",
@@ -157,6 +159,11 @@ def main():
         choices=["bios", "custom"],
         help="Boot image source for the integrated ROM.",
     )
+    parser.add_target_argument(
+        "--with-led-chaser",
+        action="store_true",
+        help="Enable LedChaser (off by default on the Pro to relieve PnR density).",
+    )
     parser.set_defaults(cpu_type="raptor", cpu_variant="standard")
 
     args = parser.parse_args()
@@ -180,21 +187,14 @@ def main():
         sys_clk_freq=int(args.sys_clk_freq),
         synth_maxfan=args.synth_maxfan,
         route_maxfan=args.route_maxfan,
+        with_led_chaser=args.with_led_chaser,
         **soc_kwargs,
     )
 
     builder = Builder(soc, **builder_kwargs)
 
     if args.build:
-        builder.build(build_name="sipeed_tang_mega_138k", **parser.toolchain_argdict)
-
-    if args.load:
-        prog = soc.platform.create_programmer()
-        prog.load_bitstream(builder.get_bitstream_filename(mode="sram"))
-
-    if args.flash:
-        prog = soc.platform.create_programmer()
-        prog.flash(0, builder.get_bitstream_filename(mode="flash", ext=".fs"), external=True)
+        builder.build(build_name="sipeed_tang_mega_138k_pro", **parser.toolchain_argdict)
 
 
 if __name__ == "__main__":

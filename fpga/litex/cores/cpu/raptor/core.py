@@ -134,17 +134,30 @@ class Raptor(CPU):
         pack_dir = os.path.join(raptor_home, "nsim", "build")
         pack_sv = os.path.join(pack_dir, "rapt_pack.sv")
 
-        vflags = ""
-        if variant == "linux":
-            vflags = "VFLAGS='-DRAPT_LINUX'"
+        # Allow the integrator (e.g. FPGA target) to override RTL preprocessor
+        # defines via env. nsim/Makefile auto-invalidates the pack when VFLAGS
+        # changes, so switching presets just works.
+        env_vflags = os.environ.get("RAPT_PACK_VFLAGS", "")
+        if variant == "linux" and "-DRAPT_LINUX" not in env_vflags:
+            env_vflags = (env_vflags + " -DRAPT_LINUX").strip()
+        vflags_arg = f"VFLAGS='{env_vflags}'" if env_vflags else ""
 
+        # Allow the integrator to pick a config preset (configs/<name>/).
+        config_arg = ""
+        env_config = os.environ.get("RAPT_CONFIG", "")
+        if env_config:
+            config_arg = f"RAPT_CONFIG={env_config}"
+
+        # Always re-invoke the pack rule; the underlying Makefile uses file
+        # mtimes plus a VFLAGS / RAPT_CONFIG stamp to skip the no-op case.
+        os.makedirs(pack_dir, exist_ok=True)
+        ret = os.system(
+            f"make -C {os.path.join(raptor_home, 'nsim')} pack {vflags_arg} {config_arg}"
+        )
+        if ret != 0:
+            raise RuntimeError(f"Failed to pack RTL (exit code {ret})")
         if not os.path.exists(pack_sv):
-            os.makedirs(pack_dir, exist_ok=True)
-            ret = os.system(
-                f"make -C {os.path.join(raptor_home, 'nsim')} pack {vflags}"
-            )
-            if ret != 0:
-                raise RuntimeError(f"Failed to pack RTL (exit code {ret})")
+            raise RuntimeError(f"Pack succeeded but {pack_sv} missing")
 
         platform.add_source(pack_sv)
 

@@ -15,6 +15,18 @@ module rapt_csr #(
 
     csr_bcast_if.out csr_bcast,
 
+    // S-mode delegated interrupt pending signal to rou (level).
+    // Asserts when (mip & mie & mideleg) has any bit set AND the interrupt is
+    // globally enabled for S-mode (priv<S, or priv==S && sstatus.SIE).
+    // s_int_cause carries the interrupt cause code (with MSB set), priority
+    // SEI(9) > SSI(1) > STI(5) per RISC-V Priv §3.1.9.
+    output logic            s_int_pending,
+    output logic [XLEN-1:0] s_int_cause,
+
+    // External M-mode interrupt line (level, from PLIC / SoC integrator).
+    // Visible as mip.MEIP read-only; combined with mie.MEIE -> ext_int_en.
+    input ext_irq_i,
+
     input reset
 );
   typedef enum logic [REG_W-1:0] {
@@ -24,6 +36,7 @@ module rapt_csr #(
     STVEC__,
 
     SCOUNTE,
+    MCOUNTE,
 
     SSCRATC,
     SEPC___,
@@ -66,6 +79,12 @@ module rapt_csr #(
   csr_t waddr_reg, raddr_reg;
   logic [R_W-1:0] raddr;
 
+  // PMP state: 8 active entries (pmpcfg0/pmpcfg1; pmpcfg2/3 hardwired 0).
+  // Reserved bits [6:5] of each cfg byte are WARL-zero (mask 8'h9F).
+  // pmpaddr is stored in its raw CSR form (byte_addr >> 2).
+  logic [7:0]      pmpcfg_r [`RAPT_PMP_NUM];
+  logic [XLEN-1:0] pmpaddr_r[`RAPT_PMP_NUM];
+
   // trap handle
   logic [XLEN-1:0] cause_idx;
   logic smode_medeleg;
@@ -90,6 +109,8 @@ module rapt_csr #(
       `RAPT_CSR_MIDELEG:   waddr_reg = MIDELEG;
       `RAPT_CSR_MIE____:   waddr_reg = MIE____;
       `RAPT_CSR_MTVEC__:   waddr_reg = MTVEC__;
+      `RAPT_CSR_MCOUNTE:   waddr_reg = MCOUNTE;
+      `RAPT_CSR_MSTATUSH:  waddr_reg = MSTATUSH;
       `RAPT_CSR_MSCRATCH:  waddr_reg = MSCRATCH;
       `RAPT_CSR_MEPC___:   waddr_reg = MEPC___;
       `RAPT_CSR_MCAUSE_:   waddr_reg = MCAUSE_;
@@ -117,7 +138,9 @@ module rapt_csr #(
       `RAPT_CSR_MEDELEG:   raddr_reg = MEDELEG;
       `RAPT_CSR_MIDELEG:   raddr_reg = MIDELEG;
       `RAPT_CSR_MIE____:   raddr_reg = MIE____;
+      `RAPT_CSR_MCOUNTE:   raddr_reg = MCOUNTE;
       `RAPT_CSR_MTVEC__:   raddr_reg = MTVEC__;
+      `RAPT_CSR_MSTATUSH:  raddr_reg = MSTATUSH;
       `RAPT_CSR_MSCRATCH:  raddr_reg = MSCRATCH;
       `RAPT_CSR_MEPC___:   raddr_reg = MEPC___;
       `RAPT_CSR_MCAUSE_:   raddr_reg = MCAUSE_;
@@ -147,6 +170,7 @@ module rapt_csr #(
       SIE____:   exu_csr.rdata = csr[SIE____];
       STVEC__:   exu_csr.rdata = csr[STVEC__];
       SCOUNTE:   exu_csr.rdata = csr[SCOUNTE];
+      MCOUNTE:   exu_csr.rdata = csr[MCOUNTE];
       SSCRATC:   exu_csr.rdata = csr[SSCRATC];
       SEPC___:   exu_csr.rdata = csr[SEPC___];
       SCAUSE_:   exu_csr.rdata = csr[SCAUSE_];
@@ -159,11 +183,12 @@ module rapt_csr #(
       MIDELEG:   exu_csr.rdata = csr[MIDELEG];
       MIE____:   exu_csr.rdata = csr[MIE____];
       MTVEC__:   exu_csr.rdata = csr[MTVEC__];
+      MSTATUSH:  exu_csr.rdata = csr[MSTATUSH];
       MSCRATCH:  exu_csr.rdata = csr[MSCRATCH];
       MEPC___:   exu_csr.rdata = csr[MEPC___];
       MCAUSE_:   exu_csr.rdata = csr[MCAUSE_];
       MTVAL__:   exu_csr.rdata = csr[MTVAL__];
-      MIP____:   exu_csr.rdata = csr[MIP____];
+      MIP____:   exu_csr.rdata = mip_eff;
       MCYCLE_:   exu_csr.rdata = csr[MCYCLE_];
       MCYCLEH:   exu_csr.rdata = csr[MCYCLEH];
       TIME___:   exu_csr.rdata = csr[TIME___];
@@ -174,7 +199,23 @@ module rapt_csr #(
       MARCHID:   exu_csr.rdata = 'd50;
       IMPID__:   exu_csr.rdata = '0;
       MHARTID:   exu_csr.rdata = '0;
-      default:   exu_csr.rdata = '0;
+      default: begin
+        // PMP CSR reads: pmpcfg0..3 each packs four cfg bytes;
+        // pmpaddr0..15 from register file.
+        if (raddr == `RAPT_CSR_PMPCFG0)
+          exu_csr.rdata = {pmpcfg_r[3], pmpcfg_r[2], pmpcfg_r[1], pmpcfg_r[0]};
+        else if (raddr == `RAPT_CSR_PMPCFG1)
+          exu_csr.rdata = {pmpcfg_r[7], pmpcfg_r[6], pmpcfg_r[5], pmpcfg_r[4]};
+        else if (raddr == `RAPT_CSR_PMPCFG2)
+          exu_csr.rdata = {pmpcfg_r[11], pmpcfg_r[10], pmpcfg_r[9], pmpcfg_r[8]};
+        else if (raddr == `RAPT_CSR_PMPCFG3)
+          exu_csr.rdata = {pmpcfg_r[15], pmpcfg_r[14], pmpcfg_r[13], pmpcfg_r[12]};
+        else if (raddr >= `RAPT_CSR_PMPADDR0
+              && raddr <= `RAPT_CSR_PMPADDR15)
+          exu_csr.rdata = pmpaddr_r[raddr[3:0]];
+        else
+          exu_csr.rdata = '0;
+      end
     endcase
   end
 
@@ -211,34 +252,105 @@ module rapt_csr #(
         ? 'b0
         : 'b1
   );
+  // Data MMU: on for S/U modes; and on for M-mode when MPRV=1 AND MPP!=M
+  // (MPRV with MPP=M does not enable translation per spec §3.1.6.3).
   assign csr_bcast.dmmu_en = (
       (csr[SATP___][`RAPT_CSR_SATP_MODE_] == 0)
       ? 'b0
-      : (priv_mode == `RAPT_PRIV_M) && (csr[MSTATUS][`RAPT_CSR_MSTATUS_MPRV] == 0)
-          ? 'b0
+      : (priv_mode == `RAPT_PRIV_M)
+          ? (csr[MSTATUS][`RAPT_CSR_MSTATUS_MPRV]
+             && (csr[MSTATUS][`RAPT_CSR_MSTATUS_MPP_] != `RAPT_PRIV_M))
           : 'b1
   );
   assign csr_bcast.mtvec = csr[MTVEC__];
-  assign csr_bcast.tvec = (smode_handle
+  // Trap target PC:
+  //   - Exceptions (cause[MSB]=0) always go to BASE (MODE ignored).
+  //   - Interrupts in Vectored mode (MODE=01) go to BASE + 4*cause[30:0].
+  //   - Reserved MODE values coerced to Direct by the tvec write mask.
+  // BASE is tvec with [1:0] stripped (4-byte aligned).
+  logic [XLEN-1:0] mtvec_base, stvec_base;
+  logic [1:0]      mtvec_mode, stvec_mode;
+  logic [XLEN-1:0] vec_offset;
+  logic            is_interrupt;
+  logic            use_smode_tvec;
+  assign mtvec_base     = {csr[MTVEC__][XLEN-1:2], 2'b00};
+  assign stvec_base     = {csr[STVEC__][XLEN-1:2], 2'b00};
+  assign mtvec_mode     = csr[MTVEC__][1:0];
+  assign stvec_mode     = csr[STVEC__][1:0];
+  assign is_interrupt   = rou_csr.cause[XLEN-1];
+  assign vec_offset     = {rou_csr.cause[XLEN-3:0], 2'b00};
+  assign use_smode_tvec = smode_handle
     || (rou_csr.ecall && ecall_deleg)
-    || (rou_csr.ebreak && ebreak_deleg))
-    ? csr[STVEC__] : csr[MTVEC__];
+    || (rou_csr.ebreak && ebreak_deleg);
+  assign csr_bcast.tvec = use_smode_tvec
+    ? (is_interrupt && (stvec_mode == `RAPT_TVEC_MODE_VECTORED)
+        ? (stvec_base + vec_offset) : stvec_base)
+    : (is_interrupt && (mtvec_mode == `RAPT_TVEC_MODE_VECTORED)
+        ? (mtvec_base + vec_offset) : mtvec_base);
 
-  assign csr_bcast.timer_int_en = (
-      (priv_mode == `RAPT_PRIV_M)
-        ? csr[MSTATUS][`RAPT_CSR_MSTATUS_MIE_] && csr[MIE____][`RAPT_CSR_MIE_MTIE]
-    : (priv_mode == `RAPT_PRIV_S)
-        ? csr[SSTATUS][`RAPT_CSR_MSTATUS_SIE_] && csr[MIE____][`RAPT_CSR_MIE_STIE]
-    : 'b0
+  // Interrupt eligibility (RISC-V priv spec 1.12 §3.1.9):
+  //   An M-mode interrupt i is taken iff mip[i] && mie[i] && !mideleg[i]
+  //   AND (priv < M) OR (priv == M && mstatus.MIE).
+  //   M-timer/M-sw are NOT delegatable (WARL 0 in mideleg), so the
+  //   source-level is always M.
+  // CLINT drives only MTIP/MSIP (no S-timer source); we gate them here.
+  logic m_int_mask;
+  assign m_int_mask = (priv_mode != `RAPT_PRIV_M)
+                   || (priv_mode == `RAPT_PRIV_M
+                       && csr[MSTATUS][`RAPT_CSR_MSTATUS_MIE_]);
+  assign csr_bcast.timer_int_en = m_int_mask && csr[MIE____][`RAPT_CSR_MIE_MTIE];
+  assign csr_bcast.sw_int_en    = m_int_mask && csr[MIE____][`RAPT_CSR_MIE_MSIE];
+  assign csr_bcast.ext_int_en   = m_int_mask && csr[MIE____][`RAPT_CSR_MIE_MEIE];
+
+  // mip read-back: mip.MEIP is hardwired to the live external IRQ line
+  // (PLIC / SoC interrupt controller); software writes to mip[11] are ignored.
+  // SSIP/STIP remain software-writable (OpenSBI emulates S-timer via mip.STIP).
+  logic [XLEN-1:0] mip_eff;
+  assign mip_eff = (csr[MIP____] & ~(XLEN'(1) << 11))
+                 | ({{(XLEN-1){1'b0}}, ext_irq_i} << 11);
+
+  // ----- S-mode delegated interrupt evaluation (Priv §3.1.9) --------------
+  // An S-mode interrupt i fires iff: mip[i] && mie[i] && mideleg[i] && enable,
+  // where enable = (priv<S) || (priv==S && sstatus.SIE).
+  // M-mode is never preempted by S-mode (handled by mask: priv==M -> disabled).
+  // Note: with sstc absent, OpenSBI manually sets mip.STIP from M-mode to
+  // signal pending S-timer. mip is software-writable here (full-width else
+  // branch in the always_ff), so OpenSBI's csrs/csrc on mip.STIP/SSIP work.
+  logic            s_int_global_en;
+  logic [XLEN-1:0] s_int_active;
+  assign s_int_global_en = (priv_mode == `RAPT_PRIV_U)
+      || ((priv_mode == `RAPT_PRIV_S) && csr[MSTATUS][`RAPT_CSR_MSTATUS_SIE_]);
+  assign s_int_active = csr[MIP____] & csr[MIE____] & csr[MIDELEG]
+                      & {XLEN{s_int_global_en}};
+  assign s_int_pending = |s_int_active;
+  // Priority SEI > SSI > STI (matches Priv §3.1.9 order for S-level sources).
+  assign s_int_cause   = (XLEN'(1) << (XLEN-1)) | (
+      s_int_active[9] ? XLEN'(9)
+    : s_int_active[1] ? XLEN'(1)
+    :                   XLEN'(5)
   );
 
-  assign csr_bcast.sw_int_en = (
-      (priv_mode == `RAPT_PRIV_M)
-        ? csr[MSTATUS][`RAPT_CSR_MSTATUS_MIE_] && csr[MIE____][`RAPT_CSR_MIE_MSIE]
-    : (priv_mode == `RAPT_PRIV_S)
-        ? csr[SSTATUS][`RAPT_CSR_MSTATUS_SIE_] && csr[MIE____][`RAPT_CSR_MIE_SSIE]
-    : 'b0
-  );
+  // MPRV / MPP broadcast (consumed by L1D effective-privilege logic)
+  assign csr_bcast.mprv = csr[MSTATUS][`RAPT_CSR_MSTATUS_MPRV];
+  assign csr_bcast.mpp  = csr[MSTATUS][`RAPT_CSR_MSTATUS_MPP_];
+
+  // mstatus privileged guard bits for illegal-inst checks.
+  assign csr_bcast.tsr        = csr[MSTATUS][`RAPT_CSR_MSTATUS_TSR_];
+  assign csr_bcast.tvm        = csr[MSTATUS][`RAPT_CSR_MSTATUS_TVM_];
+  assign csr_bcast.tw         = csr[MSTATUS][`RAPT_CSR_MSTATUS_TW__];
+  assign csr_bcast.mcounteren = csr[MCOUNTE][2:0];
+  assign csr_bcast.scounteren = csr[SCOUNTE][2:0];
+  assign csr_bcast.sum        = csr[MSTATUS][`RAPT_CSR_MSTATUS_SUM_];
+  assign csr_bcast.mxr        = csr[MSTATUS][`RAPT_CSR_MSTATUS_MXR_];
+  assign csr_bcast.sbe        = csr[MSTATUSH][`RAPT_CSR_MSTATUSH_SBE];
+
+  // PMP broadcast
+  always_comb begin
+    for (int gi = 0; gi < `RAPT_PMP_NUM; gi++) begin
+      csr_bcast.pmpcfg[gi]  = pmpcfg_r[gi];
+      csr_bcast.pmpaddr[gi] = pmpaddr_r[gi];
+    end
+  end
 
   always_ff @(posedge clock) begin
     if (reset) begin
@@ -253,6 +365,14 @@ module rapt_csr #(
       csr[TIMEH__] <= RESET_VAL;
       csr[MINSTRET] <= RESET_VAL;
       csr[MINSTRETH] <= RESET_VAL;
+      csr[MSTATUSH] <= '0;
+      csr[MCOUNTE] <= '0;
+      csr[SCOUNTE] <= '0;
+      csr[MIDELEG] <= '0;
+      for (int i = 0; i < `RAPT_PMP_NUM; i++) begin
+        pmpcfg_r[i]  <= '0;
+        pmpaddr_r[i] <= '0;
+      end
     end else begin
       csr[TIME___] <= csr[TIME___] + 1;
       if (csr[TIME___] == ~'h0) begin
@@ -268,8 +388,57 @@ module rapt_csr #(
       end
       if (rou_csr.valid) begin
         if (rou_csr.csr_wen) begin
-          if (waddr_reg == MEDELEG) begin
+          if (rou_csr.csr_addr == `RAPT_CSR_PMPCFG0) begin
+            // pmpcfg0 packs entries 0..3 (byte i => entry i).
+            // L-bit locked cfgs ignore further writes (until reset).
+            // Reserved bits [6:5] are WARL-zero (mask 8'h9F).
+            for (int pi = 0; pi < 4; pi++) begin
+              if (!pmpcfg_r[pi][`RAPT_PMPCFG_L_]) begin
+                pmpcfg_r[pi] <= rou_csr.csr_wdata[pi*8 +: 8] & 8'h9F;
+              end
+            end
+          end else if (rou_csr.csr_addr == `RAPT_CSR_PMPCFG1) begin
+            for (int pi = 0; pi < 4; pi++) begin
+              if (!pmpcfg_r[pi + 4][`RAPT_PMPCFG_L_]) begin
+                pmpcfg_r[pi + 4] <= rou_csr.csr_wdata[pi*8 +: 8] & 8'h9F;
+              end
+            end
+          end else if (rou_csr.csr_addr == `RAPT_CSR_PMPCFG2) begin
+            for (int pi = 0; pi < 4; pi++) begin
+              if (!pmpcfg_r[pi + 8][`RAPT_PMPCFG_L_]) begin
+                pmpcfg_r[pi + 8] <= rou_csr.csr_wdata[pi*8 +: 8] & 8'h9F;
+              end
+            end
+          end else if (rou_csr.csr_addr == `RAPT_CSR_PMPCFG3) begin
+            for (int pi = 0; pi < 4; pi++) begin
+              if (!pmpcfg_r[pi + 12][`RAPT_PMPCFG_L_]) begin
+                pmpcfg_r[pi + 12] <= rou_csr.csr_wdata[pi*8 +: 8] & 8'h9F;
+              end
+            end
+          end else if (rou_csr.csr_addr >= `RAPT_CSR_PMPADDR0
+                    && rou_csr.csr_addr <= `RAPT_CSR_PMPADDR15) begin
+            // pmpaddr[i] writable unless entry i is locked OR the next entry
+            // is locked AND its A-mode is TOR (entry i then forms TOR's lower bound).
+            automatic logic [3:0] pidx = rou_csr.csr_addr[3:0];
+            automatic logic self_locked = pmpcfg_r[pidx][`RAPT_PMPCFG_L_];
+            automatic logic tor_locked  = (pidx < 4'(`RAPT_PMP_NUM - 1))
+                ? (pmpcfg_r[pidx + 4'd1][`RAPT_PMPCFG_L_]
+                   && (pmpcfg_r[pidx + 4'd1][`RAPT_PMPCFG_A_] == `RAPT_PMP_A_TOR))
+                : 1'b0;
+            if (!self_locked && !tor_locked) begin
+              pmpaddr_r[pidx] <= rou_csr.csr_wdata;
+            end
+          end else if (waddr_reg == MEDELEG) begin
             csr[waddr_reg] <= (rou_csr.csr_wdata & `RAPT_CSR_MEDELEG_WMASK);
+          end else if (waddr_reg == MIDELEG) begin
+            // Only SSI(1)/STI(5)/SEI(9) are delegatable.
+            csr[waddr_reg] <= (rou_csr.csr_wdata & `RAPT_CSR_MIDELEG_WMASK);
+          end else if (waddr_reg == MCOUNTE || waddr_reg == SCOUNTE) begin
+            // Only CY/TM/IR (bits [2:0]) modeled; HPM bits WARL-zero.
+            csr[waddr_reg] <= (rou_csr.csr_wdata & `RAPT_CSR_COUNTEREN_WMASK);
+          end else if (waddr_reg == MSTATUSH) begin
+            // SBE/MBE are WARL-zero (little-endian only).
+            csr[MSTATUSH] <= '0;
           end else if (waddr_reg == MSTATUS) begin
             // Write mask: exclude SD(31, read-only) and VS(10:9, hardwired 0 — no V ext)
             // SD recomputed from FS dirty (14:13==2'b11) or XS dirty (16:15==2'b11)
@@ -291,6 +460,17 @@ module rapt_csr #(
           end else if (waddr_reg == SIE____) begin
             csr[waddr_reg] <= (rou_csr.csr_wdata);
             csr[MIE____]   <= csr[MIE____] | (rou_csr.csr_wdata);
+          end else if (waddr_reg == MTVEC__ || waddr_reg == STVEC__) begin
+            // WARL on MODE field [1:0]: only Direct(00) and Vectored(01) are
+            // defined; reserved values (10/11) coerce to Direct(00).
+            // BASE field [XLEN-1:2] is fully writable (must be 4-byte aligned).
+            csr[waddr_reg] <= {rou_csr.csr_wdata[XLEN-1:2],
+                               rou_csr.csr_wdata[1] ? 2'b00 : rou_csr.csr_wdata[1:0]};
+          end else if (waddr_reg == MEPC___ || waddr_reg == SEPC___) begin
+            // WARL: mepc/sepc bit [0] is always 0 per RISC-V priv spec.
+            // With C-ext, bit [1] is writable (2-byte alignment). Without C,
+            // hardware may also clear bit [1] but keeping it is spec-legal.
+            csr[waddr_reg] <= {rou_csr.csr_wdata[XLEN-1:1], 1'b0};
           end else begin
             csr[waddr_reg] <= (rou_csr.csr_wdata);
           end
@@ -404,6 +584,9 @@ module rapt_csr #(
             csr[MEPC___] <= rou_csr.pc;
             csr[MTVAL__] <= rou_csr.tval;
             priv_mode <= `RAPT_PRIV_M;
+`ifdef RAPT_DEBUG_PMP
+            $display("[%0t] CSR_TRAP_M cause=%h mepc=%h mtval=%h", $time, rou_csr.cause, rou_csr.pc, rou_csr.tval);
+`endif
           end
         end
       end

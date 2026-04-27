@@ -24,6 +24,14 @@ VerilatedFstC *tfp = NULL;
 
 static bool is_batch_mode = false;
 static bool enable_vcd = true;
+/* When true, committed `ebreak` instructions do NOT terminate the
+ * simulation via the DPI hook; the RTL's own trap handler (via mtvec)
+ * runs as it would on real hardware. Used by RISCOF compliance tests
+ * that deliberately execute `ebreak` (e.g. rv32i_m/privilege/src/ebreak.S,
+ * rv32i_m/C/src/cebreak-01.S) and halt via the sifive,test finisher MMIO. */
+static bool trap_on_ebreak = false;
+
+void sdb_set_trap_on_ebreak(bool v) { trap_on_ebreak = v; }
 
 /* We use the `readline' library to provide more flexibility to read from stdin. */
 static char *rl_gets()
@@ -56,14 +64,21 @@ void reset(TOP_NAME *top, int n)
 void npc_abort()
 {
   contextp->gotFinish(true);
+  npc.host_exit_ok = 0;
   npc.state = NPC_ABORT;
 }
 
 extern "C" void npc_exu_ebreak()
 {
 #if defined(CONFIG_DEBUG)
+  if (trap_on_ebreak)
+  {
+    // Let the RTL trap handler take the exception.
+    return;
+  }
   contextp->gotFinish(true);
   Log("EBREAK at pc = " FMT_WORD_NO_PREFIX "", *npc.pc);
+  npc.host_exit_ok = 0;
   npc.state = NPC_END;
 #elif defined(CONFIG_DIFFTEST)
   difftest_skip_ref();

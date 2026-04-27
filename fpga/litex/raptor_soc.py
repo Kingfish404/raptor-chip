@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 #
-# raptor_soc.py — LiteX SoC with Raptor CPU
+# raptor_soc.py — LiteX SoC with Raptor CPU (Verilator simulation only)
 #
 # Usage:
-#   python3 raptor_soc.py --cpu-variant=standard           # Verilator sim
-#   python3 raptor_soc.py --cpu-variant=standard --build    # Build bitstream
-#   python3 raptor_soc.py --build --load                    # Build + load FPGA
+#   python3 raptor_soc.py            # build sim
+#   python3 raptor_soc.py --run      # build + run sim
+#
 
 import os
 import sys
@@ -31,6 +31,7 @@ from litex.build.sim.verilator import verilator_build_args, verilator_build_argd
 from litex.soc.cores.cpu import CPUS
 from litex.soc.integration.soc_core import SoCCore
 from litex.soc.integration.builder import Builder, builder_args, builder_argdict
+from litex.gen import LiteXModule
 
 # Register Raptor CPU in LiteX.
 CPUS["raptor"] = Raptor
@@ -60,7 +61,8 @@ _sim_io = [
 class RaptorSoC(SoCCore):
     def __init__(
         self,
-        sys_clk_freq=int(50e6),
+        platform=None,
+        sys_clk_freq=int(10e6),
         trace=False,
         trace_start_cycle=0,
         trace_end_cycle=-1,
@@ -69,7 +71,9 @@ class RaptorSoC(SoCCore):
         # Force Raptor CPU.
         kwargs["cpu_type"] = "raptor"
 
-        # Use sim UART for Verilator simulation.
+        # Sim-only: always SimPlatform with sim UART.
+        if platform is None:
+            platform = SimPlatform("sim", _sim_io)
         if kwargs.get("uart_name", "serial") == "serial":
             kwargs["uart_name"] = "sim"
 
@@ -82,13 +86,10 @@ class RaptorSoC(SoCCore):
         kwargs.setdefault("ident", "Raptor LiteX SoC")
         kwargs.setdefault("ident_version", True)
 
-        # Platform (Verilator sim by default).
-        platform = SimPlatform("sim", _sim_io)
-
         # SoCCore (includes CPU, bus, SRAM, UART, timer).
         SoCCore.__init__(self, platform, sys_clk_freq, **kwargs)
 
-        # CRG (Clock Reset Generator).
+        # Sim CRG.
         self.crg = CRG(platform.request("sys_clk"))
 
         # Enable waveform tracing with exact cycle windowing.
@@ -128,9 +129,9 @@ def main():
     # Raptor-specific options.
     parser.add_argument(
         "--sys-clk-freq",
-        default=50e6,
+        default=10e6,
         type=float,
-        help="System clock frequency (default: 50 MHz)",
+        help="System clock frequency (default: 10 MHz)",
     )
     parser.add_argument(
         "--ram-init",
@@ -188,6 +189,9 @@ def main():
             offset=0x8000_0000,
         )
 
+    # ------------------------------------------------------------------
+    # Sim path: Verilator.
+    # ------------------------------------------------------------------
     soc = RaptorSoC(
         sys_clk_freq=int(args.sys_clk_freq),
         trace=args.trace,

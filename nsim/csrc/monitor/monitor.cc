@@ -132,6 +132,8 @@ static int parse_args(int argc, char *argv[])
       {"elf", required_argument, NULL, 'e'},
       {"maximum", required_argument, NULL, 'm'},
       {"timeout", required_argument, NULL, 't'},
+      {"sig", required_argument, NULL, 256},
+      {"trap-on-ebreak", no_argument, NULL, 257},
       {0, 0, NULL, 0},
   };
   int o;
@@ -187,6 +189,22 @@ static int parse_args(int argc, char *argv[])
     case 't':
       sscanf(optarg, "%lld", &max_timeout);
       break;
+    case 256:
+    {
+      int sig_set_range(const char *spec);
+      if (sig_set_range(optarg) != 0)
+      {
+        printf("ERROR: invalid --sig spec: %s (expected <hex_begin>-<hex_end>:<path>)\n", optarg);
+        exit(1);
+      }
+      break;
+    }
+    case 257:
+    {
+      void sdb_set_trap_on_ebreak(bool v);
+      sdb_set_trap_on_ebreak(true);
+      break;
+    }
     case 1:
       img_file = optarg;
       break;
@@ -204,6 +222,8 @@ static int parse_args(int argc, char *argv[])
       printf("  -e, --elf=ELF_FILE       add ELF_FILE for ftrace\n");
       printf("  -m, --maximum=NUM        set the maximum number of instructions to execute\n");
       printf("  -t, --timeout=SECONDS    set wall-clock timeout in seconds\n");
+      printf("      --sig=SPEC           dump RISCOF signature (SPEC=<hex_begin>-<hex_end>:<path>)\n");
+      printf("      --trap-on-ebreak     don't halt on ebreak; let RTL take the exception\n");
       printf("  -h, --help               display this help and exit\n");
       printf("\n");
       exit(0);
