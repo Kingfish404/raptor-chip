@@ -17,10 +17,10 @@
  * Outcomes
  * --------
  *   * Type a key over UART:
- *     - "IRQ#1 rx=0xNN" appears, then more on each keypress  → IRQ path OK.
- *     - "IRQ#1 ..." then hang on second key                  → mret bug.
- *     - hang on first key (CPU never reaches ISR)            → entry bug.
- *     - hang at boot (before any key)                        → setup bug
+ *     - "IRQ#1 rx=0xNN" appears, then more on each keypress  -> IRQ path OK.
+ *     - "IRQ#1 ..." then hang on second key                  -> mret bug.
+ *     - hang on first key (CPU never reaches ISR)            -> entry bug.
+ *     - hang at boot (before any key)                        -> setup bug
  *       (e.g. wfi never wakes — interrupt[0] line not pulsing).
  *
  * Build:  make firmware-fpga FW_FPGA_TARGET=irqtest

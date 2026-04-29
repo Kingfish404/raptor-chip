@@ -27,7 +27,11 @@ _start:
     li      a1, 0
     call    main
 
-    /* Halt after main returns */
-3:  j       3b
+    /* main() returned. We deliberately do NOT trigger a SoC reset here:
+     * litex_term --kernel re-uploads the binary on every SFL magic, so a
+     * reset would loop. Halt cleanly; user can re-flash or press the
+     * board reset button to return to the BIOS `litex>` prompt. */
+3:  wfi
+    j       3b
 
 .size _start, . - _start

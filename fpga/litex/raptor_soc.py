@@ -85,6 +85,10 @@ class RaptorSoC(SoCCore):
         # Set defaults (don't override if already provided by CLI).
         kwargs.setdefault("ident", "Raptor LiteX SoC")
         kwargs.setdefault("ident_version", True)
+        # bus-timeout watchdog. Tightens default 1e6 to 4096 so unmapped
+        # bus accesses raise wb.err -> AXI SLVERR -> in-CPU access-fault (P1)
+        # promptly. See `cores/cpu/raptor/crt0.S` for the BIOS recovery path.
+        kwargs.setdefault("bus_timeout", 4096)
 
         # SoCCore (includes CPU, bus, SRAM, UART, timer).
         SoCCore.__init__(self, platform, sys_clk_freq, **kwargs)
@@ -177,7 +181,7 @@ def main():
         if payload_size > current_size:
             new_size = ((payload_size + 0x3F_FFFF) >> 22) << 22  # Round up to 4MB
             print(
-                f"[INFO] Expanding main_ram: {current_size//(1024*1024)}MB → "
+                f"[INFO] Expanding main_ram: {current_size//(1024*1024)}MB -> "
                 f"{new_size//(1024*1024)}MB (payload: {payload_size/(1024*1024):.1f}MB)"
             )
             soc_kwargs["integrated_main_ram_size"] = new_size

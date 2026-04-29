@@ -24,7 +24,19 @@ _ncpu=$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)
 JOBS="${JOBS:-$(( _ncpu / 2 > 0 ? _ncpu / 2 : 1 ))}"
 
 VARIANT="${VARIANT:-standard}"
-GW_DIR="$LITEX_DIR/build/$VARIANT/gateware"
+ROM="${ROM:-sim}"
+SOC="${SOC:-default}"
+
+# Keep path logic in sync with fpga/litex/Makefile:
+#   SIM_DIR := build/sim/<variant>-<rom>-<soc>
+SIM_GW_DIR_DEFAULT="$LITEX_DIR/build/sim/${VARIANT}-${ROM}-${SOC}/gateware"
+# Backward-compatible fallback for older layouts.
+SIM_GW_DIR_LEGACY="$LITEX_DIR/build/$VARIANT/gateware"
+
+GW_DIR="${SIM_GW_DIR:-$SIM_GW_DIR_DEFAULT}"
+if [[ ! -x "$GW_DIR/obj_dir/Vsim" && -x "$SIM_GW_DIR_LEGACY/obj_dir/Vsim" ]]; then
+    GW_DIR="$SIM_GW_DIR_LEGACY"
+fi
 VSIM="$GW_DIR/obj_dir/Vsim"
 WORKDIR="$LITEX_DIR/build/embench-work"
 
@@ -41,7 +53,9 @@ fi
 
 # ---- Ensure sim binary (when called standalone, outside `make embench`) ----
 if [[ "${NO_RUN:-0}" != "1" && ! -x "$VSIM" ]]; then
-    echo "[embench] Vsim not found — run 'make sim-build' in fpga/litex first." >&2
+    echo "[embench] Vsim not found at: $VSIM" >&2
+    echo "[embench] Expected gateware dir: $GW_DIR" >&2
+    echo "[embench] Build it first: make sim-build (or make embench) in fpga/litex." >&2
     exit 1
 fi
 

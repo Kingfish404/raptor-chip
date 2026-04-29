@@ -14,6 +14,7 @@
  ***************************************************************************************/
 
 #include <setjmp.h>
+#include <stdlib.h>
 #include <isa.h>
 #include <isa-def.h>
 #include <memory/vaddr.h>
@@ -113,9 +114,10 @@ paddr_t isa_mmu_translate(vaddr_t vaddr, int len, int type)
                      ? MCA_INS_PAG_FAU
                      : (type == MEM_TYPE_READ ? MCA_LOA_PAG_FAU : MCA_STO_PAG_FAU);
   int i;
+  word_t pte_addr = 0;
   for (i = 1; i >= 0; i--)
   {
-    word_t pte_addr = a + (vpn[i] * 4);
+    pte_addr = a + (vpn[i] * 4);
     if (pte_addr == 0)
     {
       cause = pf_cause;
@@ -223,13 +225,30 @@ paddr_t isa_mmu_translate(vaddr_t vaddr, int len, int type)
     longjmp(exec_jmp_buf, 10);
   }
 
-  // A/D-bit check (Svade-style: fault on A=0, or on store with D=0).
-  // This matches the sail reference used by riscv-arch-test vm_sv32 suite.
+  // A/D-bit handling.
+  //   CONFIG_RV_SVADE  : Svade-style hardware faults on A=0 or write+D=0
+  //                      (matches sail / riscv-arch-test vm_sv32 suite).
+  //   default (Svadu)  : hardware atomically sets A (and D for stores)
+  //                      and writes the PTE back, never raising a fault.
+  //                      Required for Linux 6.x boot (kernel never sets A/D
+  //                      explicitly, relies on hw update).
+#ifdef CONFIG_RV_SVADE
   if (pte.pte.a == 0 || (is_write && pte.pte.d == 0))
   {
     cause = pf_cause;
     longjmp(exec_jmp_buf, 11);
   }
+#else
+  {
+    bool need_update = false;
+    if (pte.pte.a == 0) { pte.pte.a = 1; need_update = true; }
+    if (is_write && pte.pte.d == 0) { pte.pte.d = 1; need_update = true; }
+    if (need_update && pte_addr != 0)
+    {
+      paddr_write(pte_addr, 4, pte.val);
+    }
+  }
+#endif
 
   word_t paddr = (pte.pte_ppn.ppn * 4096) | offset;
   return paddr;

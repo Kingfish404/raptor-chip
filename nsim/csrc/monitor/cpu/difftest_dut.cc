@@ -181,6 +181,39 @@ static void checkregs(NPCState *ref, vaddr_t pc)
     uint32_t inst = *npc.inst;
     uint32_t opcode = inst & 0x7f;
 
+    // Instruction memory dump: when inst differs, compare DUT vs NEMU memory
+    // at the failing PC's physical address. Distinguishes L1I staleness from
+    // memory-side divergence. Linux kernel mapping for this build: virtual
+    // 0xc0000000 -> physical 0x80400000 (PAGE_OFFSET=0xc0000000, kernel
+    // physical base 0x80400000 because OpenSBI reserves the first 4MB).
+    if ((uint32_t)(*(ref->inst)) != *npc.inst)
+    {
+      paddr_t pc_paddr = (paddr_t)pc;
+      if ((pc & 0xc0000000u) == 0xc0000000u)
+      {
+        pc_paddr = (paddr_t)(pc - 0x3FC00000u);
+      }
+      if (pc_paddr >= MBASE && pc_paddr + 16 <= MBASE + MSIZE)
+      {
+        uint8_t ref_mem[16] = {};
+        uint8_t *npc_mem = (uint8_t *)guest_to_host(pc_paddr & ~(paddr_t)0xf);
+        ref_difftest_memcpy(pc_paddr & ~(paddr_t)0xf, ref_mem, 16, DIFFTEST_TO_DUT);
+        printf(FMT_RED("[INST MEM DUMP]") " vpc=" FMT_WORD_NO_PREFIX " ppc=" FMT_WORD_NO_PREFIX
+                                          " (aligned to 16)\n",
+               (word_t)pc, (word_t)(pc_paddr & ~(paddr_t)0xf));
+        printf("  npc_mem (DUT): ");
+        for (int j = 0; j < 16; j++)
+          printf("%02x ", npc_mem[j]);
+        printf("\n");
+        printf("  ref_mem (REF): ");
+        for (int j = 0; j < 16; j++)
+          printf("%02x ", ref_mem[j]);
+        printf("\n");
+        printf("  -> If npc_mem matches ref_mem: L1I cache staleness (fence.i bug).\n");
+        printf("  -> If they differ: memory-side store divergence.\n");
+      }
+    }
+
     // Check if the instruction is a load (opcode 0000011 = 0x03)
     if (opcode == 0x03)
     {

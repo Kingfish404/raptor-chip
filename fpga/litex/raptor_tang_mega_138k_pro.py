@@ -111,9 +111,23 @@ class RaptorTangMega138KSoC(SoCCore):
         kwargs.setdefault("ident_version", True)
         kwargs.setdefault("uart_name", "serial")
         kwargs.setdefault("uart_baudrate", 115200)
+        # Larger RX FIFO gives the IRQ-driven LiteX UART driver more slack
+        # vs. our trap-entry latency (~32 GPR save/restore + dispatch). Keeps
+        # back-to-back 64B SFL frames from overflowing the HW FIFO. Default
+        # was 16 (1.4 ms @ 115200) — bump to 64 (5.6 ms).
+        kwargs.setdefault("uart_fifo_depth", 64)
         kwargs.setdefault("integrated_rom_size", 0x8000)
         kwargs.setdefault("integrated_sram_size", 0x2000)
         kwargs.setdefault("integrated_main_ram_size", 0)
+        # Tighten the wishbone interconnect timeout so that an access to
+        # an unmapped address (e.g. a stray `mem_read 0xdeadbeef` from BIOS)
+        # raises wb.err quickly. The AXI<->Wishbone bridge translates wb.err
+        # to AXI SLVERR; combined with the in-CPU bus-error -> access-fault
+        # path (P1) and the BIOS exception recovery (P2), an erroneous access
+        # is reported and the BIOS prompt is restored without deadlock.
+        # Default is 1e6 cycles (~100 ms @ 10 MHz); 4096 cycles (~410 us)
+        # is plenty for any real slave on this SoC.
+        kwargs.setdefault("bus_timeout", 4096)
 
         SoCCore.__init__(self, platform, sys_clk_freq, **kwargs)
 

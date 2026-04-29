@@ -243,15 +243,25 @@ module rapt_exu_ioq #(
     endcase
   end
   rapt_pmp u_pmp_store_bare (
-      .addr   (ioq_vj[ioq_head] + ioq_imm[ioq_head]),
-      .size_m1(store_bare_size_m1),
-      .priv   (ioq_store_eff_priv),
-      .op_r   (1'b0),
-      .op_w   (1'b1),
-      .op_x   (1'b0),
-      .pmpcfg (csr_bcast.pmpcfg),
-      .pmpaddr(csr_bcast.pmpaddr),
-      .fault  (pmp_store_bare_fault)
+      .addr          (ioq_vj[ioq_head] + ioq_imm[ioq_head]),
+      .size_m1       (store_bare_size_m1),
+      .priv          (ioq_store_eff_priv),
+      .op_r          (1'b0),
+      .op_w          (1'b1),
+      .op_x          (1'b0),
+      .pmp_napot_mask(csr_bcast.pmp_napot_mask),
+      .pmp_napot_base(csr_bcast.pmp_napot_base),
+      .pmp_tor_lo    (csr_bcast.pmp_tor_lo),
+      .pmp_tor_hi    (csr_bcast.pmp_tor_hi),
+      .pmp_cfg_r     (csr_bcast.pmp_cfg_r),
+      .pmp_cfg_w     (csr_bcast.pmp_cfg_w),
+      .pmp_cfg_x     (csr_bcast.pmp_cfg_x),
+      .pmp_cfg_l     (csr_bcast.pmp_cfg_l),
+      .pmp_mode_off  (csr_bcast.pmp_mode_off),
+      .pmp_mode_tor  (csr_bcast.pmp_mode_tor),
+      .pmp_mode_na4  (csr_bcast.pmp_mode_na4),
+      .pmp_mode_napot(csr_bcast.pmp_mode_napot),
+      .fault         (pmp_store_bare_fault)
   );
   logic store_bare_pmp_trap;
   assign store_bare_pmp_trap = ioq_wen[ioq_head]

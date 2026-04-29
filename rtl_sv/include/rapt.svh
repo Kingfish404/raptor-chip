@@ -260,7 +260,7 @@
 `define RAPT_CSR_PMPADDR15 'h3bf
 
 // PMP parameters: 16 entries (pmpcfg0/1/2/3 all active).
-// pmp_granularity = 4 bytes → G=0, NA4 legal, all pmpaddr bits writable.
+// pmp_granularity = 4 bytes -> G=0, NA4 legal, all pmpaddr bits writable.
 `define RAPT_PMP_NUM 16
 // pmpcfg byte field positions
 `define RAPT_PMPCFG_R_ 0

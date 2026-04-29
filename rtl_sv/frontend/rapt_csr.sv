@@ -85,11 +85,35 @@ module rapt_csr #(
   logic [7:0]      pmpcfg_r [`RAPT_PMP_NUM];
   logic [XLEN-1:0] pmpaddr_r[`RAPT_PMP_NUM];
 
+  // PMP shadow registers (precomputed every clock from pmpcfg_r/pmpaddr_r).
+  // Allows the combinational rapt_pmp module to skip the per-entry NAPOT
+  // decode (XOR + AND), TOR neighbour fetch, and bit-slice extraction.
+  // 1-cycle latency vs raw CSR — the pipeline already flushes on PMP CSR
+  // writes (via fence/csrrw side-effects), so by the time the next L/S
+  // executes the shadow has caught up.
+  logic [XLEN-1:0]          pmp_napot_mask_r[`RAPT_PMP_NUM];
+  logic [XLEN-1:0]          pmp_napot_base_r[`RAPT_PMP_NUM];
+  logic [XLEN-1:0]          pmp_tor_lo_r    [`RAPT_PMP_NUM];
+  logic [XLEN-1:0]          pmp_tor_hi_r    [`RAPT_PMP_NUM];
+  logic [`RAPT_PMP_NUM-1:0] pmp_cfg_r_r;
+  logic [`RAPT_PMP_NUM-1:0] pmp_cfg_w_r;
+  logic [`RAPT_PMP_NUM-1:0] pmp_cfg_x_r;
+  logic [`RAPT_PMP_NUM-1:0] pmp_cfg_l_r;
+  logic [`RAPT_PMP_NUM-1:0] pmp_mode_off_r;
+  logic [`RAPT_PMP_NUM-1:0] pmp_mode_tor_r;
+  logic [`RAPT_PMP_NUM-1:0] pmp_mode_na4_r;
+  logic [`RAPT_PMP_NUM-1:0] pmp_mode_napot_r;
+
   // trap handle
   logic [XLEN-1:0] cause_idx;
   logic smode_medeleg;
   logic smode_mideleg;
   logic smode_handle;
+
+  // mip read-back: mip.MEIP is hardwired to the live external IRQ line
+  // (PLIC / SoC interrupt controller); software writes to mip[11] are ignored.
+  // SSIP/STIP remain software-writable (OpenSBI emulates S-timer via mip.STIP).
+  logic [XLEN-1:0] mip_eff;
 
   assign raddr = exu_csr.raddr;
   always_comb begin
@@ -302,10 +326,6 @@ module rapt_csr #(
   assign csr_bcast.sw_int_en    = m_int_mask && csr[MIE____][`RAPT_CSR_MIE_MSIE];
   assign csr_bcast.ext_int_en   = m_int_mask && csr[MIE____][`RAPT_CSR_MIE_MEIE];
 
-  // mip read-back: mip.MEIP is hardwired to the live external IRQ line
-  // (PLIC / SoC interrupt controller); software writes to mip[11] are ignored.
-  // SSIP/STIP remain software-writable (OpenSBI emulates S-timer via mip.STIP).
-  logic [XLEN-1:0] mip_eff;
   assign mip_eff = (csr[MIP____] & ~(XLEN'(1) << 11))
                  | ({{(XLEN-1){1'b0}}, ext_irq_i} << 11);
 
@@ -349,6 +369,58 @@ module rapt_csr #(
     for (int gi = 0; gi < `RAPT_PMP_NUM; gi++) begin
       csr_bcast.pmpcfg[gi]  = pmpcfg_r[gi];
       csr_bcast.pmpaddr[gi] = pmpaddr_r[gi];
+      csr_bcast.pmp_napot_mask[gi] = pmp_napot_mask_r[gi];
+      csr_bcast.pmp_napot_base[gi] = pmp_napot_base_r[gi];
+      csr_bcast.pmp_tor_lo[gi]     = pmp_tor_lo_r[gi];
+      csr_bcast.pmp_tor_hi[gi]     = pmp_tor_hi_r[gi];
+    end
+    csr_bcast.pmp_cfg_r      = pmp_cfg_r_r;
+    csr_bcast.pmp_cfg_w      = pmp_cfg_w_r;
+    csr_bcast.pmp_cfg_x      = pmp_cfg_x_r;
+    csr_bcast.pmp_cfg_l      = pmp_cfg_l_r;
+    csr_bcast.pmp_mode_off   = pmp_mode_off_r;
+    csr_bcast.pmp_mode_tor   = pmp_mode_tor_r;
+    csr_bcast.pmp_mode_na4   = pmp_mode_na4_r;
+    csr_bcast.pmp_mode_napot = pmp_mode_napot_r;
+  end
+
+  // PMP shadow registers — derived from pmpcfg_r/pmpaddr_r every clock.
+  // Updates 1 cycle after the underlying CSR write, which is invisible to
+  // software because the PMP CSR write itself triggers a pipeline flush
+  // and any subsequent load/store is at least 2 cycles downstream.
+  always_ff @(posedge clock) begin
+    if (reset) begin
+      for (int i = 0; i < `RAPT_PMP_NUM; i++) begin
+        pmp_napot_mask_r[i] <= '0;
+        pmp_napot_base_r[i] <= '0;
+        pmp_tor_lo_r[i]     <= '0;
+        pmp_tor_hi_r[i]     <= '0;
+      end
+      pmp_cfg_r_r      <= '0;
+      pmp_cfg_w_r      <= '0;
+      pmp_cfg_x_r      <= '0;
+      pmp_cfg_l_r      <= '0;
+      pmp_mode_off_r   <= '1;  // OFF by default
+      pmp_mode_tor_r   <= '0;
+      pmp_mode_na4_r   <= '0;
+      pmp_mode_napot_r <= '0;
+    end else begin
+      for (int i = 0; i < `RAPT_PMP_NUM; i++) begin
+        // NAPOT closed-form: mask = pmpaddr ^ (pmpaddr + 1), base = pmpaddr & ~mask.
+        // Computed on the fast pmpaddr_r -> FF path, kept off the LSU/L1D critical path.
+        pmp_napot_mask_r[i] <= pmpaddr_r[i] ^ (pmpaddr_r[i] + {{(XLEN-1){1'b0}}, 1'b1});
+        pmp_napot_base_r[i] <= pmpaddr_r[i] & ~(pmpaddr_r[i] ^ (pmpaddr_r[i] + {{(XLEN-1){1'b0}}, 1'b1}));
+        pmp_tor_lo_r[i]     <= (i == 0) ? '0 : pmpaddr_r[i-1];
+        pmp_tor_hi_r[i]     <= pmpaddr_r[i];
+        pmp_cfg_r_r[i]      <= pmpcfg_r[i][`RAPT_PMPCFG_R_];
+        pmp_cfg_w_r[i]      <= pmpcfg_r[i][`RAPT_PMPCFG_W_];
+        pmp_cfg_x_r[i]      <= pmpcfg_r[i][`RAPT_PMPCFG_X_];
+        pmp_cfg_l_r[i]      <= pmpcfg_r[i][`RAPT_PMPCFG_L_];
+        pmp_mode_off_r[i]   <= (pmpcfg_r[i][`RAPT_PMPCFG_A_] == `RAPT_PMP_A_OFF);
+        pmp_mode_tor_r[i]   <= (pmpcfg_r[i][`RAPT_PMPCFG_A_] == `RAPT_PMP_A_TOR);
+        pmp_mode_na4_r[i]   <= (pmpcfg_r[i][`RAPT_PMPCFG_A_] == `RAPT_PMP_A_NA4);
+        pmp_mode_napot_r[i] <= (pmpcfg_r[i][`RAPT_PMPCFG_A_] == `RAPT_PMP_A_NAPOT);
+      end
     end
   end
 

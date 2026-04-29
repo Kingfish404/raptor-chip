@@ -77,7 +77,7 @@ int main(void)
         long v0;
         asm volatile("c.lh %0, 0(%1)" : "=r"(r) : "r"(p));
         v0 = r;
-        /* Halfword = 0x8000 → sign-extended negative. */
+        /* Halfword = 0x8000 -> sign-extended negative. */
         CHECK(v0 == (long)(int16_t)0x8000, "c.lh: sign-extended halfword");
     }
 

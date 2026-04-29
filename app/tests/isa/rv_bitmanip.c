@@ -231,7 +231,7 @@ int main(void) {
     {
         long a = 0x1, b = 0x1, c;
         asm volatile("clmulr %0, %1, %2" : "=r"(c) : "r"(a), "r"(b));
-        /* clmulr(1,1): bit 0 of rs2 set → rs1 >> (XLEN-1-0) = 1 >> (XLEN-1) = 0 */
+        /* clmulr(1,1): bit 0 of rs2 set -> rs1 >> (XLEN-1-0) = 1 >> (XLEN-1) = 0 */
         CHECK(c == 0, "clmulr(1, 1) = 0");
     }
 
@@ -268,11 +268,11 @@ int main(void) {
 
     /* Zcmop: C.MOP.n — NOP hints in compressed C.LUI space with nzimm=0 */
     {
-        /* C.MOP.1: C.LUI x1, 0 → encoding 0x6081 (011 0 00001 00000 01) */
+        /* C.MOP.1: C.LUI x1, 0 -> encoding 0x6081 (011 0 00001 00000 01) */
         asm volatile(".2byte 0x6081"); /* C.MOP.1 */
-        /* C.MOP.3: C.LUI x3, 0 → encoding 0x6181 (011 0 00011 00000 01) */
+        /* C.MOP.3: C.LUI x3, 0 -> encoding 0x6181 (011 0 00011 00000 01) */
         asm volatile(".2byte 0x6181"); /* C.MOP.3 */
-        /* C.MOP.5: C.LUI x5, 0 → encoding 0x6281 (011 0 00101 00000 01) */
+        /* C.MOP.5: C.LUI x5, 0 -> encoding 0x6281 (011 0 00101 00000 01) */
         asm volatile(".2byte 0x6281"); /* C.MOP.5 */
         pass++; /* if we get here, Zcmop C.MOP.n hints are handled */
     }

@@ -35,18 +35,18 @@ make fpga-console
 
 ```
 fpga/litex/
-├── Makefile            # Build system (run 'make help')
-├── setup_env.sh        # Environment setup (venv + LiteX install)
-├── raptor_soc.py       # LiteX SoC definition + sim entry point
-├── README.md           # This file
-└── cores/cpu/raptor/   # LiteX CPU integration files
-    ├── __init__.py     # Python package marker
-    ├── core.py         # CPU class (AXI4 bus, variants, sources)
-    ├── crt0.S          # Startup assembly (trap, .data/.bss init)
-    ├── boot-helper.S   # Boot jump helper
-    ├── system.h        # Cache flush, CSR macros
-    ├── irq.h           # Interrupt management API
-    └── csr-defs.h      # CSR address definitions
++-- Makefile            # Build system (run 'make help')
++-- setup_env.sh        # Environment setup (venv + LiteX install)
++-- raptor_soc.py       # LiteX SoC definition + sim entry point
++-- README.md           # This file
+\-- cores/cpu/raptor/   # LiteX CPU integration files
+    +-- __init__.py     # Python package marker
+    +-- core.py         # CPU class (AXI4 bus, variants, sources)
+    +-- crt0.S          # Startup assembly (trap, .data/.bss init)
+    +-- boot-helper.S   # Boot jump helper
+    +-- system.h        # Cache flush, CSR macros
+    +-- irq.h           # Interrupt management API
+    \-- csr-defs.h      # CSR address definitions
 ```
 
 ## CPU Variants
@@ -63,39 +63,69 @@ Select variant: `make sim VARIANT=linux`
 
 ## Commands
 
-| Command             | Description                                 |
-| ------------------- | ------------------------------------------- |
-| `make setup`        | Install LiteX + register Raptor CPU         |
-| `make pack`         | Pack RTL into single .sv                    |
-| `make sim`          | Verilator simulation                        |
-| `make sim-trace`    | Simulation with FST waveform                |
-| `make coremark`     | Build + run CoreMark in sim                 |
-| `make linux`        | Build + run Linux payload in sim            |
-| `make fpga-build`   | Build Tang Mega 138K Pro hardware bitstream |
-| `make fpga-load`    | Load Tang Mega 138K Pro SRAM bitstream      |
-| `make fpga-flash`   | Flash Tang Mega 138K Pro external SPI flash |
-| `make fpga-console` | Open Tang Mega 138K Pro UART console        |
-| `make clean`        | Remove build artifacts                      |
-| `make help`         | Show all targets                            |
+| Command              | Description                                 |
+| -------------------- | ------------------------------------------- |
+| `make setup`         | Install LiteX + register Raptor CPU         |
+| `make pack`          | Pack RTL into single .sv                    |
+| `make sim`           | Verilator simulation                        |
+| `make sim-trace`     | Simulation with FST waveform                |
+| `make coremark`      | Build + run CoreMark in sim                 |
+| `make linux`         | Build + run Linux payload in sim            |
+| `make fpga-build`    | Build Tang Mega 138K Pro hardware bitstream |
+| `make fpga-load`     | Load Tang Mega 138K Pro SRAM bitstream      |
+| `make fpga-flash`    | Flash Tang Mega 138K Pro external SPI flash |
+| `make fpga-console`  | Open Tang Mega 138K Pro UART console        |
+| `make main-fpga`     | Build + upload FPGA main firmware           |
+| `make irqtest-fpga`  | Build + upload minimal IRQ test firmware    |
+| `make coremark-fpga` | CoreMark to FPGA main_ram via serialboot    |
+| `make clean`         | Remove build artifacts                      |
+| `make help`          | Show all targets                            |
+
+## FPGA Firmware Upload (via BIOS serialboot)
+
+The `main-fpga`, `donut-fpga`, and `irqtest-fpga` targets enable rapid firmware iteration on the Tang Mega 138K Pro without rebuilding the FPGA bitstream (~10 min). Firmware is compiled to main_ram (@ 0x80000000) and uploaded via BIOS serialboot.
+
+**Prerequisites:**
+1. Flashed BIOS bitstream: `make fpga-flash BOOT_MODE=bios` (one-time setup)
+2. INTEGRATED_MAIN_RAM_SIZE > 0 in the bitstream (default 512 KB)
+3. UART connected @ 115200 baud
+
+**Usage:**
+```bash
+# Build + upload main interactive shell (includes donut, primes, memtest, etc.)
+make main-fpga
+
+# Quick alias for main-fpga
+make donut-fpga
+
+# Upload minimal IRQ test firmware
+make irqtest-fpga
+
+# Explicit UART port (if auto-detection fails)
+make main-fpga UART_PORT=/dev/tty.usbserial-20250303171 UART_BAUD=115200
+
+# Build only (no upload)
+make main-fpga-build
+```
 
 ## Architecture
 
 ```
-┌────────────────────────────────────────────┐
-│  Raptor Core (rapt.sv)                     │
-│  ├─ Dual-issue OoO, RV32IMAC + Zb*         │
-│  └─ AXI4 Master (32-bit addr, 32-bit data) │
-└─────────┬──────────────────────────────────┘
-          │ AXI4 Full
-          ▼
-┌────────────────────────────────────────────┐
-│  LiteX SoC Interconnect                    │
-│  ├─ AXI → Wishbone converter               │
-│  ├─ UART (serial console)                  │
-│  ├─ Timer                                  │
-│  ├─ SRAM (integrated)                      │
-│  └─ LiteDRAM (FPGA targets)                │
-└────────────────────────────────────────────┘
++--------------------------------------------+
+|  Raptor Core (rapt.sv)                     |
+|  +- Dual-issue OoO, RV32IMAC + Zb*         |
+|  \- AXI4 Master (32-bit addr, 32-bit data) |
++---------+----------------------------------+
+          | AXI4 Full
+          v
++--------------------------------------------+
+|  LiteX SoC Interconnect                    |
+|  +- AXI -> Wishbone converter              |
+|  +- UART (serial console)                  |
+|  +- Timer                                  |
+|  +- SRAM (integrated)                      |
+|  \- LiteDRAM (FPGA targets)                |
++--------------------------------------------+
 ```
 
 ## Environment Variables

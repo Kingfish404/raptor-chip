@@ -736,6 +736,8 @@ module rapt_rou #(
   assign rou_cmu.sys_resume = sys_resume;
   assign rou_cmu.time_trap = recieved_trap;
   assign rou_cmu.rob_head = rob_head;
+  // Per-cycle ROB head advance: matches the rob_head update logic at L611
+  // (dual_commit ? +2 : +1 when head0_valid commits this cycle, else 0).
   assign rou_cmu.difftest_skip_a = !recieved_trap && rob_entry[h0].difftest_skip;
   assign rou_cmu.valid_a = recieved_trap ? 1'b0 : head0_valid;
 

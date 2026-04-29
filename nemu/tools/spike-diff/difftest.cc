@@ -212,7 +212,7 @@ extern "C"
   __EXPORT void difftest_init(int port)
   {
     difftest_htif_args.push_back("");
-    const char *isa = "RV" MUXDEF(CONFIG_RV64, "64", "32") MUXDEF(CONFIG_RVE, "E", "I") "MAC_zicbop_zicntr_zicond_zicsr_zifencei_zihintntl_zihintpause_zimop_zcb_zcmop_zba_zbb_zbc_zbs";
+    const char *isa = "RV" MUXDEF(CONFIG_RV64, "64", "32") MUXDEF(CONFIG_RVE, "E", "I") "MAC_zicbop_zicclsm_zicntr_zicond_zicsr_zifencei_zihintntl_zihintpause_zimop_zcb_zcmop_zba_zbb_zbc_zbs";
     cfg.initrd_bounds = std::make_pair((reg_t)0, (reg_t)0);
     cfg.bootargs = nullptr;
     cfg.isa = isa;

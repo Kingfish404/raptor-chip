@@ -135,6 +135,16 @@ module rapt_l1i #(
   // SRAM-ready bubble that otherwise occurs at every cache-line crossing.
   logic [XLEN-1:0] pc_ifu_next4;
   logic [L1I_LEN-1:0] addr_idx_next4;
+
+  // --- PMP check on fetch physical address (instruction access-fault) ---
+  // `pc_ifu` already multiplexes between the bare PC and the MMU-translated
+  // physical address (post-TLB-hit), so we can pass it directly.  The FSM
+  // only samples `pmp_fetch_fault` in states where `pc_ifu` is meaningful
+  // (bare mode: always; MMU: after tlb_hit).
+  logic pmp_fetch_fault_lo;
+  logic pmp_fetch_fault_hi;
+  logic pmp_fetch_fault;
+
   assign pc_ifu_next4 = pc_ifu + 4;
   assign addr_idx_next4 = pc_ifu_next4[L1I_LEN+L1I_LINE_LEN+2-1:L1I_LINE_LEN+2];
 
@@ -274,19 +284,18 @@ module rapt_l1i #(
 
   // Sv32 fetch permission check: execute must be allowed for current priv.
   // itlb_pte = {D,A,G,U,X,W,R}
-  function automatic logic pte_fault_fetch(
-      input logic [6:0] pte,
-      input logic [1:0] priv_i
-  );
-      logic x, u, a;
-      logic fault;
-      x = pte[2]; u = pte[3]; a = pte[5];
-      fault = 1'b0;
-      if (!x) fault = 1'b1;
-      if (!a) fault = 1'b1;  // unaccessed: fault so SW sets A
-      if (priv_i == `RAPT_PRIV_U && !u) fault = 1'b1;
-      if (priv_i == `RAPT_PRIV_S &&  u) fault = 1'b1;  // no SUM on fetch
-      return fault;
+  function automatic logic pte_fault_fetch(input logic [6:0] pte, input logic [1:0] priv_i);
+    logic x, u, a;
+    logic fault;
+    x = pte[2];
+    u = pte[3];
+    a = pte[5];
+    fault = 1'b0;
+    if (!x) fault = 1'b1;
+    if (!a) fault = 1'b1;  // unaccessed: fault so SW sets A
+    if (priv_i == `RAPT_PRIV_U && !u) fault = 1'b1;
+    if (priv_i == `RAPT_PRIV_S && u) fault = 1'b1;  // no SUM on fetch
+    return fault;
   endfunction
 
   logic pf_fetch_tlb, pf_fetch_ptw;
@@ -294,16 +303,28 @@ module rapt_l1i #(
   assign pf_fetch_ptw = pte_fault_fetch(ptw_result_pte, csr_bcast.priv);
 
   // --- PMP check on PTW memory (PTE) reads for instruction translation ---
-  rapt_pmp #(.XLEN(XLEN)) u_pmp_iptw (
-      .addr   (ptw_araddr),
-      .size_m1(4'd3),
-      .priv   (csr_bcast.priv),
-      .op_r   (1'b1),
-      .op_w   (1'b0),
-      .op_x   (1'b0),
-      .pmpcfg (csr_bcast.pmpcfg),
-      .pmpaddr(csr_bcast.pmpaddr),
-      .fault  (pmp_iptw_fault)
+  rapt_pmp #(
+      .XLEN(XLEN)
+  ) u_pmp_iptw (
+      .addr          (ptw_araddr),
+      .size_m1       (4'd3),
+      .priv          (csr_bcast.priv),
+      .op_r          (1'b1),
+      .op_w          (1'b0),
+      .op_x          (1'b0),
+      .pmp_napot_mask(csr_bcast.pmp_napot_mask),
+      .pmp_napot_base(csr_bcast.pmp_napot_base),
+      .pmp_tor_lo    (csr_bcast.pmp_tor_lo),
+      .pmp_tor_hi    (csr_bcast.pmp_tor_hi),
+      .pmp_cfg_r     (csr_bcast.pmp_cfg_r),
+      .pmp_cfg_w     (csr_bcast.pmp_cfg_w),
+      .pmp_cfg_x     (csr_bcast.pmp_cfg_x),
+      .pmp_cfg_l     (csr_bcast.pmp_cfg_l),
+      .pmp_mode_off  (csr_bcast.pmp_mode_off),
+      .pmp_mode_tor  (csr_bcast.pmp_mode_tor),
+      .pmp_mode_na4  (csr_bcast.pmp_mode_na4),
+      .pmp_mode_napot(csr_bcast.pmp_mode_napot),
+      .fault         (pmp_iptw_fault)
   );
 
   // SRAM address routing (shared across all ways)
@@ -464,27 +485,29 @@ module rapt_l1i #(
       && !ptw_busy
       && (ifu_l1i.pc != 0);
 
-  // --- PMP check on fetch physical address (instruction access-fault) ---
-  // `pc_ifu` already multiplexes between the bare PC and the MMU-translated
-  // physical address (post-TLB-hit), so we can pass it directly.  The FSM
-  // only samples `pmp_fetch_fault` in states where `pc_ifu` is meaningful
-  // (bare mode: always; MMU: after tlb_hit).
-  logic pmp_fetch_fault_lo;
-  logic pmp_fetch_fault_hi;
-  logic pmp_fetch_fault;
   // Lower halfword check (always required, covers compressed instructions).
   rapt_pmp #(
       .XLEN(XLEN)
   ) u_pmp_fetch (
-      .addr   (pc_ifu),
-      .size_m1(4'd1),
-      .priv   (csr_bcast.priv),
-      .op_r   (1'b0),
-      .op_w   (1'b0),
-      .op_x   (1'b1),
-      .pmpcfg (csr_bcast.pmpcfg),
-      .pmpaddr(csr_bcast.pmpaddr),
-      .fault  (pmp_fetch_fault_lo)
+      .addr          (pc_ifu),
+      .size_m1       (4'd1),
+      .priv          (csr_bcast.priv),
+      .op_r          (1'b0),
+      .op_w          (1'b0),
+      .op_x          (1'b1),
+      .pmp_napot_mask(csr_bcast.pmp_napot_mask),
+      .pmp_napot_base(csr_bcast.pmp_napot_base),
+      .pmp_tor_lo    (csr_bcast.pmp_tor_lo),
+      .pmp_tor_hi    (csr_bcast.pmp_tor_hi),
+      .pmp_cfg_r     (csr_bcast.pmp_cfg_r),
+      .pmp_cfg_w     (csr_bcast.pmp_cfg_w),
+      .pmp_cfg_x     (csr_bcast.pmp_cfg_x),
+      .pmp_cfg_l     (csr_bcast.pmp_cfg_l),
+      .pmp_mode_off  (csr_bcast.pmp_mode_off),
+      .pmp_mode_tor  (csr_bcast.pmp_mode_tor),
+      .pmp_mode_na4  (csr_bcast.pmp_mode_na4),
+      .pmp_mode_napot(csr_bcast.pmp_mode_napot),
+      .fault         (pmp_fetch_fault_lo)
   );
   // Upper halfword check (PC+2): only effective when the instruction is
   // 32-bit (non-compressed). Required so that a 4-byte instruction whose
@@ -493,15 +516,25 @@ module rapt_l1i #(
   rapt_pmp #(
       .XLEN(XLEN)
   ) u_pmp_fetch_hi (
-      .addr   (pc_ifu + XLEN'(2)),
-      .size_m1(4'd1),
-      .priv   (csr_bcast.priv),
-      .op_r   (1'b0),
-      .op_w   (1'b0),
-      .op_x   (1'b1),
-      .pmpcfg (csr_bcast.pmpcfg),
-      .pmpaddr(csr_bcast.pmpaddr),
-      .fault  (pmp_fetch_fault_hi)
+      .addr          (pc_ifu + XLEN'(2)),
+      .size_m1       (4'd1),
+      .priv          (csr_bcast.priv),
+      .op_r          (1'b0),
+      .op_w          (1'b0),
+      .op_x          (1'b1),
+      .pmp_napot_mask(csr_bcast.pmp_napot_mask),
+      .pmp_napot_base(csr_bcast.pmp_napot_base),
+      .pmp_tor_lo    (csr_bcast.pmp_tor_lo),
+      .pmp_tor_hi    (csr_bcast.pmp_tor_hi),
+      .pmp_cfg_r     (csr_bcast.pmp_cfg_r),
+      .pmp_cfg_w     (csr_bcast.pmp_cfg_w),
+      .pmp_cfg_x     (csr_bcast.pmp_cfg_x),
+      .pmp_cfg_l     (csr_bcast.pmp_cfg_l),
+      .pmp_mode_off  (csr_bcast.pmp_mode_off),
+      .pmp_mode_tor  (csr_bcast.pmp_mode_tor),
+      .pmp_mode_na4  (csr_bcast.pmp_mode_na4),
+      .pmp_mode_napot(csr_bcast.pmp_mode_napot),
+      .fault         (pmp_fetch_fault_hi)
   );
   // Suppress upper-half fault when we already know the instruction is
   // compressed (only valid once `sram_data_ready` so `inst_lo` is meaningful).
@@ -528,6 +561,7 @@ module rapt_l1i #(
       fill_way_r <= 0;
       ifq_tail <= 0;
     end else begin
+
       unique case (l1i_state)
         IDLE: begin
           if (!invalid_l1i && !wait_invalid && !cmu_bcast.flush_pipe) begin
@@ -649,22 +683,44 @@ module rapt_l1i #(
           if (!raddr_valid) begin
             l1i_state <= IDLE;
           end else if (l1i_bus.rready) begin
-            l1i_state <= RD_1;
+            // Bus error on the first beat → fetch access-fault. Gated on the
+            // same handshake condition that consumes the beat, so a glitchy /
+            // stale `rerr` in any other cycle is ignored.
+            if (l1i_bus.rerr) begin
+              rec_addr  <= ifu_l1i.pc;
+              rec_tval  <= ifu_l1i.pc;
+              cause     <= `RAPT_CAUSE_INSTR_ACC_FAULT;
+              ifq_valid <= '0;
+              l1i_state <= TRAP;
+            end else begin
+              l1i_state <= RD_1;
 
-            ifq_raddr[ifq_head] <= l1i_bus.araddr;
-            ifq_valid[ifq_head] <= 1'b1;
-            ifq_head <= ifq_head + 1;
+              ifq_raddr[ifq_head] <= l1i_bus.araddr;
+              ifq_valid[ifq_head] <= 1'b1;
+              ifq_head <= ifq_head + 1;
+            end
           end
         end
         RD_1: begin
           if (!raddr_valid) begin
             l1i_state <= IDLE;
           end else if (ifu_sdram_arburst || l1i_bus.rready) begin
-            l1i_state <= FINA;
+            // Same handshake-gated bus-error check as RD_0. For the burst
+            // path (`ifu_sdram_arburst`), the second beat is implicit and
+            // any bus error would have been latched on beat 1 in RD_0.
+            if (l1i_bus.rready && l1i_bus.rerr) begin
+              rec_addr  <= ifu_l1i.pc;
+              rec_tval  <= ifu_l1i.pc;
+              cause     <= `RAPT_CAUSE_INSTR_ACC_FAULT;
+              ifq_valid <= '0;
+              l1i_state <= TRAP;
+            end else begin
+              l1i_state <= FINA;
 
-            ifq_raddr[ifq_head] <= l1i_bus.araddr;
-            ifq_valid[ifq_head] <= 1'b1;
-            ifq_head <= ifq_head + 1;
+              ifq_raddr[ifq_head] <= l1i_bus.araddr;
+              ifq_valid[ifq_head] <= 1'b1;
+              ifq_head <= ifq_head + 1;
+            end
           end
         end
         FINA: begin

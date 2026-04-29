@@ -271,6 +271,7 @@ module rapt_lsu #(
     || ((ralu == `RAPT_ALU_LD__) && (raddr[OFFW-1:0] != '0))
 `endif
   ;
+  logic pmp_load_fault_lsu;
   // Only engage the split for requests that actually reach the cache
   // (no SQ forward, no STQ conflict).  Forwarded loads keep the single-shot
   // path; the store queue does not straddle word boundaries today.
@@ -288,6 +289,28 @@ module rapt_lsu #(
   assign lsu_eff_priv = (csr_bcast.priv == `RAPT_PRIV_M && csr_bcast.mprv)
                         ? csr_bcast.mpp : csr_bcast.priv;
   logic [3:0] lsu_load_size_m1;
+
+  // ==========================================================================
+  //  Misaligned store support
+  //    SW/SH at `waddr[OFFW-1:0]` crossing a word (RV32) / dword (RV64)
+  //    boundary is split into two aligned beats.  Beat 0 drives the original
+  //    waddr/walu/wdata — the BUS already shifts wstrb/wdata by `waddr_lo * 8`
+  //    and truncates, so the lo word naturally gets the correct partial
+  //    write.  Beat 1 drives the next word-aligned address with the bytes
+  //    that spilled past the word boundary, shifted down to live at byte 0.
+  // ==========================================================================
+  logic ma_store_span;
+  logic [XLEN-1:0] ma_waddr_hi;
+  logic [4:0]      ma_walu_hi;
+  logic [XLEN-1:0] ma_wdata_hi;
+  logic [OFFW:0]   ma_w_off;       // byte offset into the aligned word (extra bit)
+  logic [OFFW:0]   ma_w_size;      // store size in bytes, 1/2/4/(8)
+  /* verilator lint_off UNUSEDSIGNAL */
+  logic [2*XLEN/8-1:0]   ma_wstrb_wide;  // low half unused (bus path handles lo)
+  logic [2*XLEN-1:0]     ma_wdata_wide;  // low half unused (bus path handles lo)
+  /* verilator lint_on UNUSEDSIGNAL */
+  logic [$clog2(2*XLEN)-1:0] ma_w_shift;
+
   always_comb begin
     unique case (ralu[1:0])
       2'b00:   lsu_load_size_m1 = 4'd0;
@@ -297,7 +320,6 @@ module rapt_lsu #(
       default: lsu_load_size_m1 = 4'd3;
     endcase
   end
-  logic pmp_load_fault_lsu;
   rapt_pmp #(.XLEN(XLEN)) u_pmp_load_lsu (
       .addr   (raddr),
       .size_m1(lsu_load_size_m1),
@@ -305,8 +327,18 @@ module rapt_lsu #(
       .op_r   (1'b1),
       .op_w   (1'b0),
       .op_x   (1'b0),
-      .pmpcfg (csr_bcast.pmpcfg),
-      .pmpaddr(csr_bcast.pmpaddr),
+      .pmp_napot_mask (csr_bcast.pmp_napot_mask),
+      .pmp_napot_base (csr_bcast.pmp_napot_base),
+      .pmp_tor_lo     (csr_bcast.pmp_tor_lo),
+      .pmp_tor_hi     (csr_bcast.pmp_tor_hi),
+      .pmp_cfg_r      (csr_bcast.pmp_cfg_r),
+      .pmp_cfg_w      (csr_bcast.pmp_cfg_w),
+      .pmp_cfg_x      (csr_bcast.pmp_cfg_x),
+      .pmp_cfg_l      (csr_bcast.pmp_cfg_l),
+      .pmp_mode_off   (csr_bcast.pmp_mode_off),
+      .pmp_mode_tor   (csr_bcast.pmp_mode_tor),
+      .pmp_mode_na4   (csr_bcast.pmp_mode_na4),
+      .pmp_mode_napot (csr_bcast.pmp_mode_napot),
       .fault  (pmp_load_fault_lsu)
   );
 
@@ -477,27 +509,6 @@ module rapt_lsu #(
   end
 
   /* verilator lint_on UNUSEDSIGNAL */
-
-  // ==========================================================================
-  //  Misaligned store support
-  //    SW/SH at `waddr[OFFW-1:0]` crossing a word (RV32) / dword (RV64)
-  //    boundary is split into two aligned beats.  Beat 0 drives the original
-  //    waddr/walu/wdata — the BUS already shifts wstrb/wdata by `waddr_lo * 8`
-  //    and truncates, so the lo word naturally gets the correct partial
-  //    write.  Beat 1 drives the next word-aligned address with the bytes
-  //    that spilled past the word boundary, shifted down to live at byte 0.
-  // ==========================================================================
-  logic ma_store_span;
-  logic [XLEN-1:0] ma_waddr_hi;
-  logic [4:0]      ma_walu_hi;
-  logic [XLEN-1:0] ma_wdata_hi;
-  logic [OFFW:0]   ma_w_off;       // byte offset into the aligned word (extra bit)
-  logic [OFFW:0]   ma_w_size;      // store size in bytes, 1/2/4/(8)
-  /* verilator lint_off UNUSEDSIGNAL */
-  logic [2*XLEN/8-1:0]   ma_wstrb_wide;  // low half unused (bus path handles lo)
-  logic [2*XLEN-1:0]     ma_wdata_wide;  // low half unused (bus path handles lo)
-  /* verilator lint_on UNUSEDSIGNAL */
-  logic [$clog2(2*XLEN)-1:0] ma_w_shift;
 
   assign ma_w_off  = {1'b0, waddr[OFFW-1:0]};
   // Compute store size from walu byte mask.

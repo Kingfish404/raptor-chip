@@ -5,7 +5,7 @@
 // `configs/<RAPT_CONFIG>` to the include path so this file is picked up
 // instead of `configs/default/rapt_config.svh`.
 //
-
+//
 
 // ---------- Architecture (arch) ----------
 `ifdef RAPT_RV64
@@ -21,12 +21,12 @@
 // ---------- Microarchitecture (uarch) ----------
 `define RAPT_M_FAST 'h1
 
-// L1I — keep functionally identical to default; cache RAM lives in BSRAM.
+// L1I
 `define RAPT_L1I_LINE_LEN 2
-`define RAPT_L1I_LEN 4
+`define RAPT_L1I_LEN 5
 `define RAPT_L1I_N_WAYS 1
 
-// Branch predictor — shrink for FPGA fit.
+// Branch predictor
 `define RAPT_PHT_SIZE 16
 `define RAPT_BTB_SIZE 16
 `define RAPT_BTB_WAYS 2
@@ -44,10 +44,12 @@
 `define RAPT_SQ_SIZE 4
 `define RAPT_L1D_LINE_LEN 1
 `define RAPT_L1D_LEN 3
-`define RAPT_L1D_N_WAYS 1
+`define RAPT_L1D_N_WAYS 2
 
-// Issue / commit width — disabled for FPGA: dual-issue is the dominant
+// Issue width
 // `define RAPT_DUAL_COMMIT
+
+// Commit width
 // `define RAPT_DUAL_ISSUE
 
 `ifdef RAPT_DUAL_ISSUE
@@ -57,17 +59,14 @@
 `endif
 
 `ifdef RAPT_I_EXTENSION
-`define RAPT_REG_SIZE 32 // 32 architectural registers
+`define RAPT_REG_SIZE 32 // 32 registers
 `else
-`define RAPT_REG_SIZE 16
+`define RAPT_REG_SIZE 16 // 16 registers
 `endif
 
-`define RAPT_REG_LEN $clog2(`RAPT_REG_SIZE)
+`define RAPT_REG_LEN $clog2(`RAPT_REG_SIZE) // Register Length
 
-// Physical register file — power-of-two; must be > RAPT_REG_SIZE (32).
-// 64 was sized for dual-issue rename; with single-issue the smaller file
-// is sufficient and saves a substantial amount of CLS in the PRF read mux.
-`define RAPT_PHY_SIZE 64
+`define RAPT_PHY_SIZE 64 // physical register number (must be power of 2)
 `define RAPT_PHY_LEN $clog2(`RAPT_PHY_SIZE)
 
 `endif

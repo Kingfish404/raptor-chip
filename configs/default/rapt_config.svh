@@ -36,10 +36,13 @@
  */
 
 `define RAPT_M_FAST 'h1
+
+// L1I
 `define RAPT_L1I_LINE_LEN 2
 `define RAPT_L1I_LEN 6
 `define RAPT_L1I_N_WAYS 1
 
+// Branch predictor
 `define RAPT_PHT_SIZE 256
 `define RAPT_BTB_SIZE 128
 `define RAPT_BTB_WAYS 2

@@ -54,14 +54,18 @@ word_t get_paddr(vaddr_t addr, int len)
     cause = MCA_INS_ACC_FAU;
     longjmp(exec_jmp_buf, 20);
   }
-  if (isa_mmu_check(addr, len, MEM_TYPE_IFETCH) == MMU_DIRECT)
+  // Used by LR/SC to compute the reservation address. These are loads/stores,
+  // not instruction fetches, so use MEM_TYPE_READ semantics (R=1 needed). Using
+  // MEM_TYPE_IFETCH here incorrectly required X=1 and faulted on every LR/SC
+  // targeting a data page (kernel heap/stack/spinlocks), causing difftest
+  // divergence vs the RTL which correctly classifies LR/SC as data ops.
+  if (isa_mmu_check(addr, len, MEM_TYPE_READ) == MMU_DIRECT)
   {
     paddr = addr;
   }
   else
   {
-    // printf("ir = " FMT_WORD "\n", addr);
-    paddr = isa_mmu_translate(addr, len, MEM_TYPE_IFETCH);
+    paddr = isa_mmu_translate(addr, len, MEM_TYPE_READ);
   }
   return paddr;
 }
@@ -109,10 +113,10 @@ word_t vaddr_read(vaddr_t addr, int len)
   g_vaddr = addr;
   cpu.rvaddr = addr;
   cpu.rlen = len;
-  /* Misaligned accesses are allowed (matches sail/RTL Zicclsm behaviour).
-   * Fall through to byte-wise emulation when straddling page/PMP region
-   * boundaries is not required; the underlying paddr_read in NEMU handles
-   * any alignment transparently. */
+  /* Misaligned ordinary loads are allowed (Zicclsm). The rapt RTL LSU
+   * splits misaligned beats via the MA_HI / LS_S_HI_V FSM, and the
+   * spike-diff reference is configured with `zicclsm` so it permits
+   * misaligned silently as well. Do NOT trap here. */
   if (mem_trace != NULL)
   {
     fprintf(mem_trace, FMT_WORD_NO_PREFIX "-%c\n", addr, 'r');
@@ -158,7 +162,7 @@ void vaddr_write(vaddr_t addr, int len, word_t data)
   cpu.vwaddr = addr;
   cpu.wdata = data;
   cpu.len = len;
-  /* Misaligned stores allowed (see vaddr_read comment). */
+  /* Misaligned ordinary stores are allowed (Zicclsm); see vaddr_read note. */
   if (mem_trace != NULL)
   {
     fprintf(mem_trace, FMT_WORD_NO_PREFIX "-%c\n", addr, 'w');

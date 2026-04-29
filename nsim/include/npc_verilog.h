@@ -12,7 +12,7 @@
 #ifdef RAPT_SOC
 // Verilator 5.x hierarchical cell access: rootp -> ysyxSoCFull -> asic -> cpu -> cpu (rapt)
 #include CONCAT_HEAD(CONCAT(TOP_NAME, _ysyxSoCFull))
-#include CONCAT_HEAD(CONCAT(TOP_NAME, _ysyxSoCASIC))
+#include CONCAT_HEAD(CONCAT(TOP_NAME, _ysyxSoCASIC__pi1))
 #include CONCAT_HEAD(CONCAT(TOP_NAME, _CPU))
 #include CONCAT_HEAD(CONCAT(TOP_NAME, _rapt))
 #include CONCAT_HEAD(CONCAT(TOP_NAME, _rapt_rou))

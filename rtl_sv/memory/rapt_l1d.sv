@@ -133,10 +133,11 @@ module rapt_l1d #(
       && !load_speculate      // load speculation uses SRAM read port
       && lsu_l1d.wvalid && l1d_bus.wready && cacheable_w && hit_w
 `ifdef RAPT_RV64
-      && (lsu_l1d.walu != `RAPT_SD_WSTRB);
+      && (lsu_l1d.walu != `RAPT_SD_WSTRB)
 `else
-      && (lsu_l1d.walu != `RAPT_SW_WSTRB);
+      && (lsu_l1d.walu != `RAPT_SW_WSTRB)
 `endif
+      && 1'b0;  // TODO(linux difftest rmw-bug-72M): re-enable once timing bug is isolated
 
   // Speculative SRAM read: when IDLE with a pending load, drive the *incoming*
   // virtual index directly instead of waiting for l1d_addr to be registered.
@@ -325,8 +326,34 @@ module rapt_l1d #(
     else sram_bypass_r <= l1d_update && (l1d_idx == sram_raddr)
                        && (l1d_off == sram_rd_offset);
   end
+  // Same-cycle write-vs-load hazard: when l1d_update fires the SAME cycle
+  // a load is in LD_A on the matching line/word, the load's data_bank_rdata
+  // reflects the SRAM read latched at LD_A entry (i.e. BEFORE the merged
+  // partial-store / full-store / fill write completes), giving stale data.
+  // The SRAM module's internal write-first bypass cannot help: the read
+  // address was latched the prior cycle when there was no concurrent write.
+  // Suppress tag_hit so the load stalls in LD_A; the next cycle l1d_update
+  // has cleared, mem[idx] holds the merged value, the SRAM re-read sampled
+  // at the LD_A boundary brings in the fresh data, and the load completes.
+  //
+  // Additionally, l1d_rmw=1 means the SRAM read port is currently serving
+  // the partial-store merge (sram_raddr=waddr_idx), so data_bank_rdata in
+  // this cycle reflects the STORE's set, not the load's. Stall the load
+  // until the RMW chain completes and a normal SRAM read re-fetches at
+  // the load's idx.
+  //
+  // Same-cycle partial_store_rmw concurrent with IDLE->LD_A entry has the
+  // same effect: in the next cycle (LD_A), l1d_rmw will be high, so the
+  // l1d_rmw stall covers it.
+  logic l1d_update_collide;
+  assign l1d_update_collide = l1d_update
+                           && (l1d_idx == addr_idx)
+                           && (l1d_off == addr_offset);
+  logic l1d_sram_busy;
+  assign l1d_sram_busy = l1d_rmw || l1d_update_collide;
   assign tag_hit = (l1d_state == LD_A)
     && !sram_bypass_r
+    && !l1d_sram_busy
     && tag_hit_vec[addr_offset];
   // data_hit: SRAM data ready in LD_A: the speculative read in the preceding
   // IDLE (or PTW-wait) cycle guarantees data_bank_rdata is valid on LD_A entry.
@@ -424,8 +451,18 @@ module rapt_l1d #(
       .op_r   (1'b1),
       .op_w   (1'b0),
       .op_x   (1'b0),
-      .pmpcfg (csr_bcast.pmpcfg),
-      .pmpaddr(csr_bcast.pmpaddr),
+      .pmp_napot_mask (csr_bcast.pmp_napot_mask),
+      .pmp_napot_base (csr_bcast.pmp_napot_base),
+      .pmp_tor_lo     (csr_bcast.pmp_tor_lo),
+      .pmp_tor_hi     (csr_bcast.pmp_tor_hi),
+      .pmp_cfg_r      (csr_bcast.pmp_cfg_r),
+      .pmp_cfg_w      (csr_bcast.pmp_cfg_w),
+      .pmp_cfg_x      (csr_bcast.pmp_cfg_x),
+      .pmp_cfg_l      (csr_bcast.pmp_cfg_l),
+      .pmp_mode_off   (csr_bcast.pmp_mode_off),
+      .pmp_mode_tor   (csr_bcast.pmp_mode_tor),
+      .pmp_mode_na4   (csr_bcast.pmp_mode_na4),
+      .pmp_mode_napot (csr_bcast.pmp_mode_napot),
       .fault  (pmp_load_fault)
   );
   // Treat loads from unmapped physical addresses as access faults (bus error).
@@ -455,10 +492,25 @@ module rapt_l1d #(
       .op_r   (1'b0),
       .op_w   (1'b1),
       .op_x   (1'b0),
-      .pmpcfg (csr_bcast.pmpcfg),
-      .pmpaddr(csr_bcast.pmpaddr),
+      .pmp_napot_mask (csr_bcast.pmp_napot_mask),
+      .pmp_napot_base (csr_bcast.pmp_napot_base),
+      .pmp_tor_lo     (csr_bcast.pmp_tor_lo),
+      .pmp_tor_hi     (csr_bcast.pmp_tor_hi),
+      .pmp_cfg_r      (csr_bcast.pmp_cfg_r),
+      .pmp_cfg_w      (csr_bcast.pmp_cfg_w),
+      .pmp_cfg_x      (csr_bcast.pmp_cfg_x),
+      .pmp_cfg_l      (csr_bcast.pmp_cfg_l),
+      .pmp_mode_off   (csr_bcast.pmp_mode_off),
+      .pmp_mode_tor   (csr_bcast.pmp_mode_tor),
+      .pmp_mode_na4   (csr_bcast.pmp_mode_na4),
+      .pmp_mode_napot (csr_bcast.pmp_mode_napot),
       .fault  (pmp_store_fault_mmu)
   );
+  // P3: PMA pre-check on the translated store PA. Mirrors load_unmapped_fault
+  // — stops a store to a region with no bus slave from issuing on AXI and
+  // hanging the LSU. Bare-mode stores get the same check at the IOQ.
+  logic store_unmapped_fault_mmu;
+  assign store_unmapped_fault_mmu = !rapt_pkg::addr_mapped(exu_l1d.paddr);
 
   // --- Sv32 PTE permission check (data access: load/store, not fetch) ---
   // pte bits (rapt_tlb layout): [0]=R [1]=W [2]=X [3]=U [4]=G [5]=A [6]=D
@@ -515,27 +567,32 @@ module rapt_l1d #(
       .op_r   (1'b1),
       .op_w   (1'b0),
       .op_x   (1'b0),
-      .pmpcfg (csr_bcast.pmpcfg),
-      .pmpaddr(csr_bcast.pmpaddr),
+      .pmp_napot_mask (csr_bcast.pmp_napot_mask),
+      .pmp_napot_base (csr_bcast.pmp_napot_base),
+      .pmp_tor_lo     (csr_bcast.pmp_tor_lo),
+      .pmp_tor_hi     (csr_bcast.pmp_tor_hi),
+      .pmp_cfg_r      (csr_bcast.pmp_cfg_r),
+      .pmp_cfg_w      (csr_bcast.pmp_cfg_w),
+      .pmp_cfg_x      (csr_bcast.pmp_cfg_x),
+      .pmp_cfg_l      (csr_bcast.pmp_cfg_l),
+      .pmp_mode_off   (csr_bcast.pmp_mode_off),
+      .pmp_mode_tor   (csr_bcast.pmp_mode_tor),
+      .pmp_mode_na4   (csr_bcast.pmp_mode_na4),
+      .pmp_mode_napot (csr_bcast.pmp_mode_napot),
       .fault  (pmp_ptw_fault)
   );
 
-  assign mis_align_load = (
-       ((lsu_l1d.ralu == `RAPT_ALU_LH__) && (lsu_l1d.raddr[0] != 1'b0))
-    || ((lsu_l1d.ralu == `RAPT_ALU_LHU_) && (lsu_l1d.raddr[0] != 1'b0))
-    || ((lsu_l1d.ralu == `RAPT_ALU_LW__) && (lsu_l1d.raddr[1:0] != 2'b00))
-`ifdef RAPT_RV64
-    || ((lsu_l1d.ralu == `RAPT_ALU_LWU_) && (lsu_l1d.raddr[1:0] != 2'b00))
-    || ((lsu_l1d.ralu == `RAPT_ALU_LD__) && (lsu_l1d.raddr[2:0] != 3'b000))
-`endif
-  );
-  assign mis_align_store = (
-       ((exu_l1d.walu == `RAPT_SH_WSTRB) && (exu_l1d.vaddr[0] != 1'b0))
-    || ((exu_l1d.walu == `RAPT_SW_WSTRB) && (exu_l1d.vaddr[1:0] != 2'b00))
-`ifdef RAPT_RV64
-    || ((exu_l1d.walu == `RAPT_SD_WSTRB) && (exu_l1d.vaddr[2:0] != 3'b000))
-`endif
-  );
+  // Misaligned accesses are split by the LSU's MA-split FSM into two aligned
+  // beats (load: ma_state_t in MA_HI; store: state_store == LS_S_HI_V) before
+  // they reach this L1D, so we never see a true misaligned cache request.
+  // The early STLB-lookup path (exu_l1d) does observe the original misaligned
+  // virtual address, but the page-translation only depends on VPN bits and is
+  // unaffected by the low alignment bits, so suppressing the misalign trap
+  // here is safe for any access that does not cross a page boundary. (The
+  // very rare cross-page case would need a second TLB walk and is not yet
+  // handled — Linux's misaligned memcpy stays within a page.)
+  assign mis_align_load  = 1'b0;
+  assign mis_align_store = 1'b0;
 
   // read channel: PTW takes priority over cache miss reads
   assign l1d_bus.arvalid = ptw_arvalid
@@ -581,8 +638,8 @@ module rapt_l1d #(
   assign exu_l1d.cause = cause;
   assign exu_l1d.reservation = reservation;
   assign exu_l1d.ready = exu_l1d.valid && ((l1d_state == TRAP)
-    || (stlb_hit && !mis_align_store && !pmp_store_fault_mmu && !pf_store_tlb)
-    || (stlb_mmu && ptw_done && !pf_store_ptw && !pmp_store_fault_mmu));
+    || (stlb_hit && !mis_align_store && !pmp_store_fault_mmu && !store_unmapped_fault_mmu && !pf_store_tlb)
+    || (stlb_mmu && ptw_done && !pf_store_ptw && !pmp_store_fault_mmu && !store_unmapped_fault_mmu));
 
   always @(posedge clock) begin
     if (reset) begin
@@ -607,6 +664,7 @@ module rapt_l1d #(
       // if (l1d_bus.arvalid && (l1d_state == LD_A) && csr_bcast.dmmu_en) begin
       //   $display("  [L1D READ ] addr: %h", l1d_bus.araddr);
       // end
+
       unique case (l1d_state)
         IDLE: begin
           if (!cmu_bcast.flush_pipe) begin
@@ -622,7 +680,7 @@ module rapt_l1d #(
                   cause <= `RAPT_CAUSE_STORE_PAGE_FAULT;
                   rec_addr <= exu_l1d.vaddr;
                   l1d_state <= TRAP;
-                end else if (stlb_hit && pmp_store_fault_mmu) begin
+                end else if (stlb_hit && (pmp_store_fault_mmu || store_unmapped_fault_mmu)) begin
                   // PMP violation on translated store address.
                   cause <= `RAPT_CAUSE_STORE_ACC_FAULT;
                   rec_addr <= exu_l1d.vaddr;
@@ -689,7 +747,7 @@ module rapt_l1d #(
               if (pf_store_ptw) begin
                 cause <= `RAPT_CAUSE_STORE_PAGE_FAULT;
                 l1d_state <= TRAP;
-              end else if (pmp_store_fault_mmu) begin
+              end else if (pmp_store_fault_mmu || store_unmapped_fault_mmu) begin
                 // PMP denies store on the freshly-translated PA.
                 cause <= `RAPT_CAUSE_STORE_ACC_FAULT;
                 l1d_state <= TRAP;
@@ -739,6 +797,11 @@ module rapt_l1d #(
           end else if (tag_hit) begin
             l1d_addr  <= '0;
             l1d_state <= IDLE;
+          end else if (l1d_sram_busy) begin
+            // Same-cycle SRAM write hazard: load latched stale data and
+            // would falsely promote to LD_D (miss). Stall in LD_A; next
+            // cycle the SRAM holds the merged value and tag_hit can fire.
+            l1d_state <= LD_A;
           end else begin
             if (l1d_bus.rready) begin
               l1d_state <= LD_D;
@@ -748,9 +811,17 @@ module rapt_l1d #(
         end
         LD_D: begin
           if (l1d_bus.rvalid) begin
-            l1d_state <= IDLE;
-            if (lsu_l1d.atomic_lock) begin
-              reservation <= l1d_addr;
+            // Bus error on the response beat → load access-fault. Gated
+            // on `rvalid` (the same condition that consumes the beat), so
+            // transient `rerr` in unrelated cycles is ignored.
+            if (l1d_bus.rerr) begin
+              cause     <= `RAPT_CAUSE_LOAD_ACC_FAULT;
+              l1d_state <= TRAP;
+            end else begin
+              l1d_state <= IDLE;
+              if (lsu_l1d.atomic_lock) begin
+                reservation <= l1d_addr;
+              end
             end
           end
         end

@@ -60,9 +60,12 @@ interface l1i_bus_if #(
   logic [XLEN-1:0] rdata;
   logic rvalid;
   logic rlast;
+  // Bus-error indicator: AXI rresp != OKAY for the routed response beat.
+  // Asserted in the same cycle as `rvalid`; treat as fetch access-fault.
+  logic rerr;
 
-  modport master(output arvalid, araddr, arburst, input rready, rdata, rvalid, rlast);
-  modport slave(input arvalid, araddr, arburst, output rready, rdata, rvalid, rlast);
+  modport master(output arvalid, araddr, arburst, input rready, rdata, rvalid, rlast, rerr);
+  modport slave(input arvalid, araddr, arburst, output rready, rdata, rvalid, rlast, rerr);
 endinterface
 
 // data cache interface
@@ -79,6 +82,9 @@ interface l1d_bus_if #(
   logic rvalid;
   logic rlast;
   logic difftest_skip;
+  // Bus-error indicator on the read channel (AXI rresp != OKAY).
+  // Asserted in the same cycle as `rvalid`; treated as load access-fault.
+  logic rerr;
 
   // store
   logic awvalid;
@@ -87,22 +93,28 @@ interface l1d_bus_if #(
   logic [XLEN-1:0] wdata;
   logic [7:0] wstrb;
   logic wready;
+  // Bus-error indicator on the write response channel (AXI bresp != OKAY).
+  // Asserted in the same cycle as the store handshake (`wready` pulse).
+  // Currently logged only — store access-faults are caught in IOQ via
+  // bare-mode PMA / PMP / MMU PMP before reaching the bus, so a runtime
+  // werr indicates a configuration mismatch worth flagging in waves.
+  logic werr;
 
   modport master(
       output arvalid, araddr, rstrb,
       input rready,
-      input rdata, rvalid, rlast, difftest_skip,
+      input rdata, rvalid, rlast, difftest_skip, rerr,
 
       output awvalid, awaddr, wvalid, wdata, wstrb,
-      input wready
+      input wready, werr
   );
   modport slave(
       input arvalid, araddr, rstrb,
       output rready,
-      output rdata, rvalid, rlast, difftest_skip,
+      output rdata, rvalid, rlast, difftest_skip, rerr,
 
       input awvalid, awaddr, wvalid, wdata, wstrb,
-      output wready
+      output wready, werr
   );
 endinterface
 
@@ -110,47 +122,73 @@ endinterface
 interface csr_bcast_if #(
     parameter int XLEN = `RAPT_XLEN
 );
-  logic [1:0] priv;
-  logic [21:0] satp_ppn;
-  logic [8:0] satp_asid;
-  logic immu_en;
-  logic dmmu_en;
+  logic [              1:0] priv;
+  logic [             21:0] satp_ppn;
+  logic [              8:0] satp_asid;
+  logic                     immu_en;
+  logic                     dmmu_en;
 
-  logic [XLEN-1:0] mtvec;
-  logic [XLEN-1:0] tvec;
-  logic timer_int_en;
-  logic sw_int_en;
-  logic ext_int_en;
+  logic [         XLEN-1:0] mtvec;
+  logic [         XLEN-1:0] tvec;
+  logic                     timer_int_en;
+  logic                     sw_int_en;
+  logic                     ext_int_en;
 
   // MPRV/MPP for load/store effective privilege
-  logic mprv;
-  logic [1:0] mpp;
+  logic                     mprv;
+  logic [              1:0] mpp;
 
   // mstatus.SUM (Supervisor User Memory access) / MXR (Make eXecutable Readable)
-  logic sum;
-  logic mxr;
+  logic                     sum;
+  logic                     mxr;
 
   // mstatush.SBE: when set, implicit page-table accesses read big-endian PTEs.
-  logic sbe;
+  logic                     sbe;
 
   // mstatus privileged-mode guard bits (TSR/TVM/TW) for illegal-inst checks.
-  logic tsr;  // trap sret in S-mode when set
-  logic tvm;  // trap satp / sfence.vma in S-mode when set
-  logic tw;   // trap wfi in U/S when set
+  logic                     tsr;  // trap sret in S-mode when set
+  logic                     tvm;  // trap satp / sfence.vma in S-mode when set
+  logic                     tw;  // trap wfi in U/S when set
 
   // mcounteren / scounteren low 3 bits (CY/TM/IR) for U/S counter reads.
-  logic [2:0] mcounteren;
-  logic [2:0] scounteren;
+  logic [              2:0] mcounteren;
+  logic [              2:0] scounteren;
 
-  // PMP state (8 active entries). pmpaddr is the raw CSR value
-  // (byte address >> 2); pmpcfg is the 8-bit layout L[7] 0[6:5] A[4:3] X[2] W[1] R[0].
-  logic [7:0] pmpcfg [`RAPT_PMP_NUM];
-  logic [XLEN-1:0] pmpaddr [`RAPT_PMP_NUM];
+  // PMP raw state. pmpaddr is the raw CSR value (byte address >> 2);
+  // pmpcfg is the 8-bit layout L[7] 0[6:5] A[4:3] X[2] W[1] R[0].
+  // Used for software CSR reads (rapt_csr.sv).
+  logic [              7:0] pmpcfg                                            [`RAPT_PMP_NUM];
+  logic [         XLEN-1:0] pmpaddr                                           [`RAPT_PMP_NUM];
+
+  // PMP shadow registers, precomputed in rapt_csr on every CSR write.
+  // These break the long combinational chain inside rapt_pmp:
+  //   * napot_mask/base : closed-form NAPOT decode (XOR + AND)
+  //   * tor_lo/tor_hi   : pmpaddr[i-1] / pmpaddr[i] for TOR comparison
+  //   * cfg_r/w/x/l     : per-entry permission bit-vectors (one-hot AND-OR friendly)
+  //   * mode_off/tor/na4/napot : per-entry mode one-hot vectors
+  // 1-cycle latency vs raw pmpcfg/pmpaddr — RISC-V spec requires sfence.vma
+  // (or a pipeline flush, which CSR writes already trigger) before PMP
+  // changes take effect, so software always sees the new values in time.
+  logic [         XLEN-1:0] pmp_napot_mask                                    [`RAPT_PMP_NUM];
+  logic [         XLEN-1:0] pmp_napot_base                                    [`RAPT_PMP_NUM];
+  logic [         XLEN-1:0] pmp_tor_lo                                        [`RAPT_PMP_NUM];
+  logic [         XLEN-1:0] pmp_tor_hi                                        [`RAPT_PMP_NUM];
+  logic [`RAPT_PMP_NUM-1:0] pmp_cfg_r;
+  logic [`RAPT_PMP_NUM-1:0] pmp_cfg_w;
+  logic [`RAPT_PMP_NUM-1:0] pmp_cfg_x;
+  logic [`RAPT_PMP_NUM-1:0] pmp_cfg_l;
+  logic [`RAPT_PMP_NUM-1:0] pmp_mode_off;
+  logic [`RAPT_PMP_NUM-1:0] pmp_mode_tor;
+  logic [`RAPT_PMP_NUM-1:0] pmp_mode_na4;
+  logic [`RAPT_PMP_NUM-1:0] pmp_mode_napot;
 
   modport in(
       input priv, satp_ppn, satp_asid,
       input immu_en, dmmu_en, mtvec, tvec, timer_int_en, sw_int_en, ext_int_en,
       input mprv, mpp, pmpcfg, pmpaddr,
+      input pmp_napot_mask, pmp_napot_base, pmp_tor_lo, pmp_tor_hi,
+      input pmp_cfg_r, pmp_cfg_w, pmp_cfg_x, pmp_cfg_l,
+      input pmp_mode_off, pmp_mode_tor, pmp_mode_na4, pmp_mode_napot,
       input tsr, tvm, tw, mcounteren, scounteren,
       input sum, mxr, sbe
   );
@@ -158,6 +196,9 @@ interface csr_bcast_if #(
       output priv, satp_ppn, satp_asid,
       output immu_en, dmmu_en, mtvec, tvec, timer_int_en, sw_int_en, ext_int_en,
       output mprv, mpp, pmpcfg, pmpaddr,
+      output pmp_napot_mask, pmp_napot_base, pmp_tor_lo, pmp_tor_hi,
+      output pmp_cfg_r, pmp_cfg_w, pmp_cfg_x, pmp_cfg_l,
+      output pmp_mode_off, pmp_mode_tor, pmp_mode_na4, pmp_mode_napot,
       output tsr, tvm, tw, mcounteren, scounteren,
       output sum, mxr, sbe
   );

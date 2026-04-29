@@ -5,6 +5,7 @@
 # AXI4 master bus, single external interrupt input.
 
 import os
+import subprocess
 
 from migen import *
 from litex.gen import *
@@ -140,22 +141,25 @@ class Raptor(CPU):
         env_vflags = os.environ.get("RAPT_PACK_VFLAGS", "")
         if variant == "linux" and "-DRAPT_LINUX" not in env_vflags:
             env_vflags = (env_vflags + " -DRAPT_LINUX").strip()
-        vflags_arg = f"VFLAGS='{env_vflags}'" if env_vflags else ""
 
         # Allow the integrator to pick a config preset (configs/<name>/).
-        config_arg = ""
         env_config = os.environ.get("RAPT_CONFIG", "")
-        if env_config:
-            config_arg = f"RAPT_CONFIG={env_config}"
 
         # Always re-invoke the pack rule; the underlying Makefile uses file
         # mtimes plus a VFLAGS / RAPT_CONFIG stamp to skip the no-op case.
         os.makedirs(pack_dir, exist_ok=True)
-        ret = os.system(
-            f"make -C {os.path.join(raptor_home, 'nsim')} pack {vflags_arg} {config_arg}"
-        )
-        if ret != 0:
-            raise RuntimeError(f"Failed to pack RTL (exit code {ret})")
+        # Use subprocess instead of os.system: avoids shell injection on the
+        # VFLAGS / RAPT_CONFIG pass-through and silences the Pylance
+        # `os.system is deprecated` notice.
+        cmd = ["make", "-C", os.path.join(raptor_home, "nsim"), "pack"]
+        if env_vflags:
+            cmd.append(f"VFLAGS={env_vflags}")
+        if env_config:
+            cmd.append(f"RAPT_CONFIG={env_config}")
+        try:
+            subprocess.run(cmd, check=True)
+        except subprocess.CalledProcessError as exc:
+            raise RuntimeError(f"Failed to pack RTL (exit code {exc.returncode})") from exc
         if not os.path.exists(pack_sv):
             raise RuntimeError(f"Pack succeeded but {pack_sv} missing")
 

@@ -1,15 +1,24 @@
 # Raptor Project
 
-[![AM CPU ISA tests (difftest)](https://github.com/Kingfish404/raptor-chip/actions/workflows/am-test-cpu.yaml/badge.svg)](https://github.com/Kingfish404/raptor-chip/actions/workflows/am-test-cpu.yaml)
-[![AM benchmarks & STA](https://github.com/Kingfish404/raptor-chip/actions/workflows/am-benchmark.yaml/badge.svg)](https://github.com/Kingfish404/raptor-chip/actions/workflows/am-benchmark.yaml)
+[![RISC-V Architecture Compatibility Tests](https://github.com/Kingfish404/raptor-chip/actions/workflows/riscv-arch-test.yaml/badge.svg)](https://github.com/Kingfish404/raptor-chip/actions/workflows/riscv-arch-test.yaml)
+[![AM tests & benchmarks & STA](https://github.com/Kingfish404/raptor-chip/actions/workflows/am-benchmark.yaml/badge.svg)](https://github.com/Kingfish404/raptor-chip/actions/workflows/am-benchmark.yaml)
 [![App tests (pk)](https://github.com/Kingfish404/raptor-chip/actions/workflows/app-pk.yaml/badge.svg)](https://github.com/Kingfish404/raptor-chip/actions/workflows/app-pk.yaml)
+[![Linux boot & RTL release](https://github.com/Kingfish404/raptor-chip/actions/workflows/linux-boot.yaml/badge.svg)](https://github.com/Kingfish404/raptor-chip/actions/workflows/linux-boot.yaml)
+
+[![ISA](https://img.shields.io/badge/ISA-RV32%2F64IMAC__Zb*-192f60?longCache=true&style=flat&logo=riscv&logoColor=white&colorA=192f60&colorB=660874)](./docs/uarch.md)
+[![marchID](https://img.shields.io/badge/marchID-0x32-660874?longCache=true&style=flat&colorA=192f60&colorB=660874)](https://github.com/riscv/riscv-isa-manual)
+[![Privilege](https://img.shields.io/badge/Priv-M%2FS%2FU%20%2B%20Sv32%20%2B%20PMP-660874?longCache=true&style=flat&colorA=192f60&colorB=660874)](./docs/uarch.md)
+[![Microarchitecture](https://img.shields.io/badge/uArch-Superscalar%20OoO-192f60?longCache=true&style=flat&colorA=192f60&colorB=660874)](./docs/uarch.md)
+[![FPGA](https://img.shields.io/badge/FPGA-LiteX-192f60?longCache=true&style=flat&colorA=192f60&colorB=660874)](./fpga/)
+[![License](https://img.shields.io/github/license/Kingfish404/raptor-chip?label=License&longCache=true&style=flat&logo=apache&logoColor=white&colorA=192f60&colorB=660874)](./LICENSE)
+
 [![Ubuntu](https://img.shields.io/badge/Ubuntu-E95420?style=flat&logo=ubuntu&logoColor=white)](https://en.wikipedia.org/wiki/Ubuntu)
 [![macOS](https://img.shields.io/badge/macOS-000000?style=flat&logo=apple&logoColor=white)](https://en.wikipedia.org/wiki/MacOS)
 [![Github](https://img.shields.io/badge/GitHub-181717?style=flat&logo=github&logoColor=white)](https://github.dev/Kingfish404/raptor-chip)
 
 > It is possible to invent a single machine which can be used to compute any computable sequence. — Alan Turing, 1936
 
-Welcome to the Raptor Project! Here is an all-in-one repository for exploring, designing, developing, optimizing, and verifying a RISC-V core. Aiming at high-performance & quality, full Linux support, FPGA implementation, and ASIC readiness.
+Welcome to the Raptor Project! Here is an all-in-one repository for exploring, developing, optimizing, and verifying a RISC-V core. Aiming at high-performance & quality, full Linux support, FPGA implementation, and ASIC readiness.
 
 Core description: **Super-scalar, Out-of-order RISC-V core** with register renaming, ROB, and reservation stations. The RTL is described by `SystemVerilog` with `Chisel` (`Scala`) used only for decoder generation. Features Sv32 virtual memory (MMU/TLB), 16-entry PMP (TOR/NA4/NAPOT), LR/SC + AMO atomics, compressed instructions (RVC), and boots Linux v6.18 via OpenSBI. Supports configurable **RV32** and **RV64** modes via compile-time switch.
 

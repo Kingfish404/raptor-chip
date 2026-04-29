@@ -11,6 +11,7 @@ CONFIG_ISA="riscv64"
 #
 CONFIG_RV64=y
 # CONFIG_RVE is not set
+CONFIG_RV_SVADE=y
 # end of ISA-dependent Options for riscv
 
 CONFIG_ENGINE_INTERPRETER=y

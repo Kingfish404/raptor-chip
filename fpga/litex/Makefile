@@ -105,7 +105,7 @@ SIM_THREADS ?= 4 ## Verilator simulation threads (1=off)
 #   make sim     TRACE=vcd     # VCD (universal text format, slowest + largest)
 #   make test-fib TRACE=fst    # works for any run target
 # Wave files land in $(SIM_GW_DIR)/sim.{fst,vcd} (LiteX default).
-# Changing TRACE re-hashes build_sim.sh → triggers Verilator rebuild.
+# Changing TRACE re-hashes build_sim.sh -> triggers Verilator rebuild.
 # Partial files from Ctrl+C / timeout are viewable (LiteX flushes each tick).
 TRACE ?= none ## Wave dump mode (none|fst|vcd)
 
@@ -393,15 +393,25 @@ SOC     := $(strip $(SOC))
 PAYLOAD := $(strip $(PAYLOAD))
 
 # --- LiteX BIOS source patches ---
-# Three independent in-place patches to LiteX upstream (third_party/.../litex/),
-# all reverted via `git checkout` on EXIT trap. Required for any BIOS-compiling
-# target (`make sim ROM=bios` and `make fpga-build BOOT_MODE=bios`):
+# In-place patch to LiteX upstream (third_party/.../litex/), reverted via
+# `git checkout` on EXIT trap. Required for any BIOS-compiling target
+# (`make sim ROM=bios` and `make fpga-build BOOT_MODE=bios`):
 #   1. picolibc layout (picolibc>=1.7 moved sources under newlib/)
-#   2. UART polling   (workaround Raptor IRQ/mret bug — IRQ-driven UART deadlocks)
-#   3. skip memspeed  (workaround Raptor fence/load-burst hang after memtest)
+#   2. UART polling mode — bypass the IRQ/ring-buffer driven path
+# NOTES (2026-04-27):
+#   - patch_litex_uart_polling.py REINSTATED: the IRQ-driven UART path
+#     in libbase/uart.c (`uart_isr` ring buffer + irq.h mscratch shadow
+#     for emulating LiteX's per-peripheral mask convention on standard
+#     RISC-V mie) loses RX bytes during back-to-back 64B SFL frames.
+#     Polling mode is robust and adds negligible BIOS-time cost. The
+#     interactive shell (login prompt, paste, commands) and `serialboot`
+#     all work in polling mode. To investigate the IRQ path further,
+#     drop this patch and add a litescope on the UART event interface.
+#   - patch_litex_skip_memspeed.py dropped: was masking the same IRQ
+#     hang; polling path completes mem_speed correctly.
 LITEX_PATH := $(RAPTOR_HOME)/third_party/enjoy-digital/litex
 define _litex_bios_patches_apply
-	$(PYTHON) $(LITEX_DIR)/scripts/patch_litex_picolibc.py $(LITEX_PATH) && $(PYTHON) $(LITEX_DIR)/scripts/patch_litex_uart_polling.py $(LITEX_PATH) && $(PYTHON) $(LITEX_DIR)/scripts/patch_litex_skip_memspeed.py $(LITEX_PATH)
+	$(PYTHON) $(LITEX_DIR)/scripts/patch_litex_picolibc.py $(LITEX_PATH) && $(PYTHON) $(LITEX_DIR)/scripts/patch_litex_uart_polling.py $(LITEX_PATH)
 endef
 define _litex_bios_patches_restore
 	cd $(LITEX_PATH) && git checkout -- litex/soc/software/common.mak litex/soc/software/libc/Makefile litex/soc/software/libbase/uart.c litex/soc/software/bios/main.c 2>/dev/null || true
@@ -582,6 +592,24 @@ coremark-fpga: coremark-build ## Upload CoreMark to FPGA main_ram via BIOS seria
 
 coremark-clean: ## Remove CoreMark build artifacts (keep cloned source)
 	$(MAKE) -C $(COREMARK_BENCH) clean
+
+# --- FPGA Bring-up firmware (main.c with interactive shell: donut, primes, etc.) ---
+# Run the firmware main shell on FPGA main_ram via BIOS serialboot.
+
+main-fpga-build: ## Build FPGA main firmware (uploadable via serialboot to main_ram) {UART_PORT,UART_BAUD}
+	$(MAKE) -C $(LITEX_DIR) firmware-fpga FW_FPGA_TARGET=main FW_FPGA_LOAD=main_ram
+	@echo "[INFO] FPGA main firmware ready: $(BUILD_DIR)/firmware/fpga/main-main_ram/boot.bin"
+
+main-fpga: main-fpga-build ## Build + upload FPGA main firmware to main_ram {UART_PORT,UART_BAUD}
+	@$(MAKE) --no-print-directory fpga-upload BIN=$(BUILD_DIR)/firmware/fpga/main-main_ram/boot.bin
+
+# IRQ test firmware (minimal interrupt probe)
+irqtest-fpga: ## Build + upload minimal IRQ test firmware {UART_PORT,UART_BAUD}
+	$(MAKE) -C $(LITEX_DIR) firmware-fpga FW_FPGA_TARGET=irqtest FW_FPGA_LOAD=main_ram
+	@$(MAKE) --no-print-directory fpga-upload BIN=$(BUILD_DIR)/firmware/fpga/irqtest-main_ram/boot.bin
+
+main-fpga-clean: ## Remove FPGA firmware build artifacts
+	rm -rf $(BUILD_DIR)/firmware/fpga/main-main_ram $(BUILD_DIR)/firmware/fpga/irqtest-main_ram
 
 # --- Embench-IoT ---
 EMBENCH_TARGETS := $(addprefix embench-run-,$(EMBENCH_BENCHES))
@@ -1003,6 +1031,7 @@ help: ## Show this help message
 	firmware firmware-sim firmware-fpga firmware-clean \
 	sim-gen sim-build sim sim-run sim-trace sim-trace-vcd sim-clean \
 	coremark coremark-build coremark-clean coremark-fpga \
+	main-fpga-build main-fpga donut-fpga irqtest-fpga main-fpga-clean \
 	embench embench-build embench-build-one embench-run embench-report embench-clean \
 	$(EMBENCH_TARGETS) $(EMBENCH_BUILDS) \
 	microbench microbench-build \

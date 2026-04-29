@@ -7,4 +7,13 @@ config RV64
 config RVE
   bool "Use E extension"
   default n
+
+config RV_SVADE
+  bool "Svade: A/D bits faulted by hardware (instead of Svadu auto-update)"
+  default n
+  help
+    Default off => Svadu behavior: hardware silently sets PTE.A on access
+    and PTE.D on write, never raising A/D faults. This matches Linux's
+    expectation. Enable to keep the legacy Svade behavior used by the
+    riscv-arch-test vm_sv32 suite (faults on A=0 or store with D=0).
 endmenu
