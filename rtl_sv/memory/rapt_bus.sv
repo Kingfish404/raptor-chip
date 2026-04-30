@@ -4,7 +4,7 @@
 `include "rapt_dpi_c.svh"
 
 module rapt_bus #(
-    parameter bit [7:0] XLEN = `RAPT_XLEN
+    parameter int XLEN = `RAPT_XLEN
 ) (
     input clock,
 
@@ -135,7 +135,7 @@ module rapt_bus #(
   assign axi_arvalid = (state_load == LD_AS);
   assign axi_rready = 1;
 
-  always @(posedge clock) begin
+  always_ff @(posedge clock) begin
     if (reset) begin
       state_load <= LD_A;
       l1d_load_is_mmio <= 1'b0;
@@ -236,7 +236,7 @@ module rapt_bus #(
   // contract back to LSU (no per-store trap path on the write side today).
   assign l1d_bus.werr = axi_bvalid && (axi_bresp != 2'b00);
 
-  always @(posedge clock) begin
+  always_ff @(posedge clock) begin
     if (reset) begin
       state_store <= LS_S_A;
       write_done <= 0;
@@ -272,7 +272,7 @@ module rapt_bus #(
   // when assertions are explicitly enabled, so synthesis & default sim still
   // ride through the error via the new `werr` reporting path.
 `ifdef RAPT_ASSERT_EN
-  always @(posedge clock) begin
+  always_ff @(posedge clock) begin
     `RAPT_ASSERT(!axi_bvalid || axi_bresp == 2'b00, ("bresp error: " + axi_bresp));
   end
 `endif

@@ -191,7 +191,7 @@ object RVCUtil {
   def cNop:    UInt = itype(0.U, 0.U(5.W), "b000".U(3.W), 0.U(5.W), "b0010011".U) // addi x0,x0,0
 }
 
-class rapt_idu_decoder_c extends Module with Instr {
+class rapt_idu_decoder_c extends RawModule with Instr {
   import RVCUtil._
 
   val io = IO(new Bundle {

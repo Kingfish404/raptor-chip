@@ -2,7 +2,6 @@
 `include "rapt_if.svh"
 `include "rapt_rnu_internal_if.svh"
 `include "rapt_dpi_c.svh"
-import rapt_pkg::*;
 
 // Rename Unit (RNU): pure rename stage.
 // Contains:
@@ -133,7 +132,7 @@ module rapt_rnu #(
   assign dep_b_rdold_from_a = slot_a_writes_rd && (rnq_rd[rnq_tail_b] == rnq_rd[rnq_tail_a]);
 `endif
 
-  always @(posedge clock) begin
+  always_ff @(posedge clock) begin
     if (reset || cmu_bcast.flush_pipe) begin
       rnq_head_a <= '0;
       rnq_tail_a <= '0;
@@ -312,7 +311,6 @@ module rapt_rnu #(
 
   rapt_rnu_maptable #(
       .RNUM(RNUM),
-      .RLEN(RLEN),
       .PLEN(PLEN)
   ) u_maptable (
       .clock       (clock),

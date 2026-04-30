@@ -1,7 +1,7 @@
 `include "rapt.svh"
 
 module rapt_exu_alu #(
-    parameter bit [7:0] XLEN = `RAPT_XLEN
+    parameter int XLEN = `RAPT_XLEN
 ) (
     input        [XLEN-1:0] s1,
     input        [XLEN-1:0] s2,
@@ -9,8 +9,7 @@ module rapt_exu_alu #(
     input                   word,  // RV64 W-variant: operate on lower 32 bits, sign-extend result
     output logic [XLEN-1:0] out_r
 );
-  // Shift amount mask: 5-bit for RV32 or W-variants, 6-bit for RV64 base
-  localparam int ShamtMask = XLEN - 1;  // 31 for RV32, 63 for RV64
+  // Shift amount width: 5-bit for RV32, 6-bit for RV64 base (W-variants use 5 bits)
   localparam int ShamtW = $clog2(XLEN);  // 5 for RV32, 6 for RV64
   logic [XLEN-1:0] alu_r;
 
@@ -191,13 +190,13 @@ module rapt_exu_alu #(
   // W-variant: sign-extend lower 32-bit result to XLEN.
   // .UW variants (ALU_ADD_UW / ALU_SLLI_UW and SH*ADD+word=1) produce a full
   // 64-bit result and must NOT be truncated/sign-extended here.
-  wire is_uw_op = (op == `RAPT_ALU_ADD_UW)
-               || (op == `RAPT_ALU_SLLI_UW)
-               || (op == `RAPT_ALU_SH1ADD)
-               || (op == `RAPT_ALU_SH2ADD)
-               || (op == `RAPT_ALU_SH3ADD);
   generate
     if (XLEN > 32) begin : gen_word_ext
+      wire is_uw_op = (op == `RAPT_ALU_ADD_UW)
+                   || (op == `RAPT_ALU_SLLI_UW)
+                   || (op == `RAPT_ALU_SH1ADD)
+                   || (op == `RAPT_ALU_SH2ADD)
+                   || (op == `RAPT_ALU_SH3ADD);
       assign out_r = (word && !is_uw_op) ? {{XLEN - 32{alu_r[31]}}, alu_r[31:0]} : alu_r;
     end else begin : gen_no_word
       assign out_r = alu_r;

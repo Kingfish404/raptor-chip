@@ -7,7 +7,7 @@ module rapt_ifu #(
     parameter bit [$clog2(`RAPT_PHT_SIZE):0] PHT_SIZE = `RAPT_PHT_SIZE,
     parameter bit [$clog2(`RAPT_BTB_SIZE):0] BTB_SIZE = `RAPT_BTB_SIZE,
     parameter bit [$clog2(`RAPT_RSB_SIZE):0] RSB_SIZE = `RAPT_RSB_SIZE,
-    parameter bit [7:0] XLEN = `RAPT_XLEN
+    parameter int XLEN = `RAPT_XLEN
 ) (
     input clock,
 
@@ -73,10 +73,6 @@ module rapt_ifu #(
   logic trap;
   logic [XLEN-1:0] cause;
   logic [XLEN-1:0] tval;
-
-  // debug signals
-  logic [XLEN-1:0] pc_stride;
-  logic [XLEN-1:0] pred_stride;
 
   assign ifu_hazard = state_ifu == STALL;
   assign pre_is_c_a = !(ifu_l1i.inst_n0[1:0] == 2'b11);
@@ -201,9 +197,6 @@ module rapt_ifu #(
                  : ifu_bpu.taken ? ifu_bpu.npc : seqpc);
   assign recv_ready = (ifu_l1i.valid && (ifu_idu.ready || (state_ifu == IDLE))) && !ifu_hazard;
 
-  assign pc_stride = pc_ifu - pc_a;
-  assign pred_stride = nextpc - pc_ifu;
-
   // Combinational sequential-PC candidates (see declaration for rationale).
   assign seq2 = pc_ifu + 'h2;
   assign seq4 = pc_ifu + 'h4;
@@ -212,7 +205,7 @@ module rapt_ifu #(
   assign seq8 = pc_ifu + 'h8;
 `endif
 
-  always @(posedge clock) begin
+  always_ff @(posedge clock) begin
     if (reset) begin
       pc_ifu <= `RAPT_PC_INIT;
       trap <= 0;

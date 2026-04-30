@@ -338,6 +338,27 @@ linux-boot-npc32-difftest: config-npc32-linux-difftest config-nemu32-ref ## Boot
 	$(MAKE) -C $(NSIM_HOME) -j$(NPROC)
 	$(MAKE) -C $(NSIM_HOME) run IMG=$(LINUX_RV32_PAYLOAD) ARGS="$(ARGS) $(if $(MAX_INST),-m $(MAX_INST))"
 
+# ----------------------------------------------------------------------------
+# Linux boot checkpoint save/restore (architectural snapshot of nsim).
+# Saves arch state + memory at a chosen cycle, restores via an MROM trampoline
+# that re-runs through real lw/csrw/mret instructions. Pure architectural
+# checkpoint — survives RTL/microarch changes.
+# ----------------------------------------------------------------------------
+CKPT_DIR   ?= $(RAPTOR_HOME)/nsim/data/ckpt-linux-rv32 ## Checkpoint directory (save target / load source)
+CKPT_CYCLE ?= 1000000 ## Cycle at which to take the checkpoint
+
+linux-boot-npc32-ckpt-save: config-npc32-linux ## Boot Linux on NPC, save checkpoint at CKPT_CYCLE -> CKPT_DIR
+	$(MAKE) -C $(LINUX_HOME) download-rv32 LINUX_BUILD_VERSION=$(LINUX_BUILD_VERSION)
+	$(MAKE) -C $(NSIM_HOME) -j$(NPROC)
+	rm -rf $(CKPT_DIR)
+	$(MAKE) -C $(NSIM_HOME) run IMG=$(LINUX_RV32_PAYLOAD) \
+		ARGS="$(ARGS) --ckpt-cycle=$(CKPT_CYCLE) --ckpt-save=$(CKPT_DIR) --ckpt-save-exit"
+
+linux-boot-npc32-ckpt-load: config-npc32-linux ## Resume Linux boot on NPC from CKPT_DIR
+	$(MAKE) -C $(NSIM_HOME) -j$(NPROC)
+	$(MAKE) -C $(NSIM_HOME) run IMG=$(LINUX_RV32_PAYLOAD) \
+		ARGS="$(ARGS) --ckpt-load=$(CKPT_DIR) $(if $(MAX_INST),-m $(MAX_INST))"
+
 linux-boot-nemu32-device: config-nemu32-linux-device ## Boot Linux on NEMU RV32 (auto-download)
 	$(MAKE) -C $(LINUX_HOME) download-rv32 LINUX_BUILD_VERSION=$(LINUX_BUILD_VERSION)
 	$(MAKE) -C $(NEMU_HOME) run IMG=$(LINUX_RV32_PAYLOAD) ARGS="$(DEVICE_ARGS)"
@@ -370,6 +391,14 @@ lint: ## Lint RTL with Verilator
 
 lint-verible: ## Lint RTL with Verible
 	$(MAKE) -C $(NSIM_HOME) lint-verible
+
+ide-setup: compile-commands ## Generate compile_commands.json for IDE/LSP setup
+	@echo "[ide-setup] compile_commands.json refreshed at $(RAPTOR_HOME)/compile_commands.json"
+	@echo "[ide-setup] clangd-based editors will pick it up via .clangd"
+	@echo "[ide-setup] VS Code can open raptor-chip.code-workspace"
+
+compile-commands: ## Generate root compile_commands.json from real NEMU+NSIM build commands
+	bash $(RAPTOR_HOME)/.github/scripts/gen_compile_commands.sh
 
 STA_PLATFORM ?= nangate45 ## STA platform: nangate45, asap7
 
@@ -488,7 +517,7 @@ app-clean: ## [app] Clean app build artifacts
 	nanos-nemu32 nanos-npc32 \
 	linux-download linux-download-rv32 linux-download-rv64 \
 	linux-boot-nemu32 linux-boot-npc32 linux-boot-nemu32-device linux-boot-nemu64-device \
-	fpga-syn fpga-pnr pack lint sta clean-npc clean \
+	fpga-syn fpga-pnr pack lint ide-setup compile-commands sta clean-npc clean \
 	verify-fuzz verify-fuzz-inf verify-fuzz-replay verify-sigtest verify-riscof verify-coverage verify-all verify-clean \
 	app-hello-npc32 app-coremark-npc32 app-embench-npc32 \
 	app-tests-npc32 app-tests-npc32-difftest app-demos-npc32 \

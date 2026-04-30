@@ -1,3 +1,4 @@
+/* verilator lint_off DECLFILENAME */
 `ifndef RAPT_RNU_INTERNAL_IF_SVH
 `define RAPT_RNU_INTERNAL_IF_SVH
 `include "rapt.svh"

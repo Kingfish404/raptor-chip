@@ -76,8 +76,8 @@ jobs:
       - name: Collect release artifacts
         run: |
           mkdir -p dist/rtl_sv
-          cp nsim/build/rapt_pack.sv dist/
-          cp nsim/build/rapt_pack.svh dist/
+          cp nsim/build/default/rapt_pack.sv dist/
+          cp nsim/build/default/rapt_pack.svh dist/
           cp -r rtl_sv/. dist/rtl_sv/
           printf "commit: %s\nref: %s\ndate: %s\n" \
             "${{ github.sha }}" "${{ github.ref_name }}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > dist/VERSION
@@ -101,8 +101,8 @@ jobs:
             --title "RTL Nightly (${{ github.ref_name }}, $(date -u +%Y-%m-%d))" \
             --notes "Auto-generated RTL release from commit \`${{ github.sha }}\`." \
             --prerelease \
-            "nsim/build/rapt_pack.sv#rapt_pack.sv (single-file packed RTL)" \
-            "nsim/build/rapt_pack.svh#rapt_pack.svh (macro definitions)" \
+            "nsim/build/default/rapt_pack.sv#rapt_pack.sv (single-file packed RTL)" \
+            "nsim/build/default/rapt_pack.svh#rapt_pack.svh (macro definitions)" \
             "raptor-chip-rtl.zip#raptor-chip-rtl.zip (full RTL source)"
         env:
           GH_TOKEN: ${{ github.token }}

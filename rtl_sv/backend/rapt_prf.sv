@@ -46,25 +46,25 @@ module rapt_prf #(
     , output [XLEN-1:0] rvfi_rd_wdata_b
 `endif
 );
-  logic [XLEN-1:0] prf           [PNUM];
+  logic [XLEN-1:0] prf_arr           [PNUM];
   logic [PNUM-1:0] prf_valid;
   logic [PNUM-1:0] prf_transient;
 
 `ifdef RAPT_RVFI
-  assign rvfi_rd_wdata_a = (rou_cmu.rd_a != 0) ? prf[rou_cmu.prd_a] : '0;
-  assign rvfi_rd_wdata_b = (rou_cmu.rd_b != 0) ? prf[rou_cmu.prd_b] : '0;
+  assign rvfi_rd_wdata_a = (rou_cmu.rd_a != 0) ? prf_arr[rou_cmu.prd_a] : '0;
+  assign rvfi_rd_wdata_b = (rou_cmu.rd_b != 0) ? prf_arr[rou_cmu.prd_b] : '0;
 `endif
 
   // ---- Read ports (combinational) ----
-  assign prf_rd.pv1_a       = prf[prf_rd.pr1_a];
+  assign prf_rd.pv1_a       = prf_arr[prf_rd.pr1_a];
   assign prf_rd.pv1_a_valid = prf_valid[prf_rd.pr1_a];
-  assign prf_rd.pv2_a       = prf[prf_rd.pr2_a];
+  assign prf_rd.pv2_a       = prf_arr[prf_rd.pr2_a];
   assign prf_rd.pv2_a_valid = prf_valid[prf_rd.pr2_a];
 
 `ifdef RAPT_DUAL_ISSUE
-  assign prf_rd.pv1_b       = prf[prf_rd.pr1_b];
+  assign prf_rd.pv1_b       = prf_arr[prf_rd.pr1_b];
   assign prf_rd.pv1_b_valid = prf_valid[prf_rd.pr1_b];
-  assign prf_rd.pv2_b       = prf[prf_rd.pr2_b];
+  assign prf_rd.pv2_b       = prf_arr[prf_rd.pr2_b];
   assign prf_rd.pv2_b_valid = prf_valid[prf_rd.pr2_b];
 `endif
 
@@ -120,10 +120,10 @@ module rapt_prf #(
   end
 
   // ---- Write / state update ----
-  always @(posedge clock) begin
+  always_ff @(posedge clock) begin
     if (reset) begin
       for (integer i = 0; i < PNUM; i = i + 1) begin
-        prf[i] <= '0;
+        prf_arr[i] <= '0;
       end
       prf_valid     <= {{(PNUM - RNUM) {1'b0}}, {RNUM{1'b1}}};
       prf_transient <= '0;
@@ -143,17 +143,17 @@ module rapt_prf #(
           // Flush: discard speculative writes
           prf_valid[i]     <= 1'b0;
           prf_transient[i] <= 1'b0;
-          prf[i]           <= '0;
+          prf_arr[i]           <= '0;
         end else if (!cmu_bcast.flush_pipe && wr_a_oh[i]) begin
-          prf[i]           <= wr_a_data;
+          prf_arr[i]           <= wr_a_data;
           prf_valid[i]     <= 1'b1;
           prf_transient[i] <= 1'b1;
         end else if (!cmu_bcast.flush_pipe && wr_b_oh[i]) begin
-          prf[i]           <= wr_b_data;
+          prf_arr[i]           <= wr_b_data;
           prf_valid[i]     <= 1'b1;
           prf_transient[i] <= 1'b1;
         end else if (!cmu_bcast.flush_pipe && wr_c_oh[i]) begin
-          prf[i]           <= wr_c_data;
+          prf_arr[i]           <= wr_c_data;
           prf_valid[i]     <= 1'b1;
           prf_transient[i] <= 1'b1;
         end
@@ -165,8 +165,8 @@ module rapt_prf #(
   genvar gi;
   generate
     for (gi = 0; gi < RNUM; gi = gi + 1) begin : gen_rf_debug
-      assign rf[gi]     = prf[rat_snapshot[gi]];
-      assign rf_map[gi] = prf[map_snapshot[gi]];
+      assign rf[gi]     = prf_arr[rat_snapshot[gi]];
+      assign rf_map[gi] = prf_arr[map_snapshot[gi]];
     end
   endgenerate
 endmodule

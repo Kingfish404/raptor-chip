@@ -8,7 +8,7 @@
 // CSR validity is checked via a dedicated function for maintainability.
 module rapt_idu #(
     parameter unsigned RLEN = `RAPT_REG_LEN,
-    parameter bit [7:0] XLEN = `RAPT_XLEN
+    parameter int XLEN = `RAPT_XLEN
 ) (
     input clock,
 
@@ -67,7 +67,7 @@ module rapt_idu #(
   logic [XLEN-1:0] ifu_cause;
   logic [XLEN-1:0] ifu_tval;
 
-  always @(posedge clock) begin
+  always_ff @(posedge clock) begin
     if (reset) begin
       state_idu <= IDLE;
 `ifdef RAPT_DUAL_ISSUE
@@ -162,17 +162,12 @@ module rapt_idu #(
   assign is_c_a     = (inst_a[1:0] != 2'b11);
   assign inst_idu_a = is_c_a ? inst_de_a : inst_a;
 
-  rapt_idu_decoder_c idu_de_c (
-      .clock     (clock),
-      .io_cinst  (inst_a[15:0]),
+  rapt_idu_decoder_c idu_de_c (.io_cinst  (inst_a[15:0]),
       .io_is_rv64(XLEN == 64 ? 1'b1 : 1'b0),
-      .io_inst   (inst_de_a),
-      .reset     (reset)
+      .io_inst   (inst_de_a)
   );
 
-  rapt_idu_decoder idu_de (
-      .clock  (clock),
-      .in_pc  ({{(64 - XLEN) {1'b0}}, pc_idu_a}),
+  rapt_idu_decoder idu_de (.in_pc  ({{(64 - XLEN) {1'b0}}, pc_idu_a}),
       .in_inst(inst_idu_a),
 
       .out_alu (alu_a),
@@ -201,9 +196,7 @@ module rapt_idu #(
       .out_op1(dec_op1_a),
       .out_op2(dec_op2_a),
       .out_rs1(rs1_a),
-      .out_rs2(rs2_a),
-
-      .reset(reset)
+      .out_rs2(rs2_a)
   );
 
   // Truncate 64-bit decoder outputs to XLEN
@@ -331,7 +324,7 @@ module rapt_idu #(
   assign early_resteer_cond  = valid && bpu_predicted_taken && !is_branch_or_jump && !ifu_trap;
 
   // One-shot pulse: only fire resteer on the first cycle of detection
-  always @(posedge clock) begin
+  always_ff @(posedge clock) begin
     if (reset || cmu_bcast.flush_pipe) begin
       resteer_sent <= 0;
     end else if (state_idu == IDLE) begin
@@ -348,7 +341,7 @@ module rapt_idu #(
   /* verilator lint_off UNUSEDSIGNAL */
   logic pmu_early_resteer;
   /* verilator lint_on UNUSEDSIGNAL */
-  always @(posedge clock) begin
+  always_ff @(posedge clock) begin
     if (reset) pmu_early_resteer <= 0;
     else pmu_early_resteer <= ifu_idu.resteer;
   end
@@ -374,17 +367,12 @@ module rapt_idu #(
   assign is_c_b     = (inst_b[1:0] != 2'b11);
   assign inst_idu_b = is_c_b ? inst_de_b : inst_b;
 
-  rapt_idu_decoder_c idu_de_c_b (
-      .clock     (clock),
-      .io_cinst  (inst_b[15:0]),
+  rapt_idu_decoder_c idu_de_c_b (.io_cinst  (inst_b[15:0]),
       .io_is_rv64(XLEN == 64 ? 1'b1 : 1'b0),
-      .io_inst   (inst_de_b),
-      .reset     (reset)
+      .io_inst   (inst_de_b)
   );
 
-  rapt_idu_decoder idu_de_b (
-      .clock  (clock),
-      .in_pc  ({{(64 - XLEN) {1'b0}}, pc_idu_b}),
+  rapt_idu_decoder idu_de_b (.in_pc  ({{(64 - XLEN) {1'b0}}, pc_idu_b}),
       .in_inst(inst_idu_b),
 
       .out_alu (alu_b),
@@ -413,9 +401,7 @@ module rapt_idu #(
       .out_op1(dec_op1_b),
       .out_op2(dec_op2_b),
       .out_rs1(rs1_b),
-      .out_rs2(rs2_b),
-
-      .reset(reset)
+      .out_rs2(rs2_b)
   );
 
   assign illegal_inst_b = (alu_b == `RAPT_ALU_ILL_);

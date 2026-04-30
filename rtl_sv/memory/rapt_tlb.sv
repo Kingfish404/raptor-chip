@@ -3,7 +3,7 @@
 // Fully-associative TLB for Sv32 page translation with ASID support.
 // Combinational lookup, sequential fill, FIFO replacement.
 module rapt_tlb #(
-    parameter bit [7:0] XLEN = `RAPT_XLEN,
+    parameter int XLEN = `RAPT_XLEN,
     parameter int unsigned ENTRIES = 4
 ) (
     input clock,

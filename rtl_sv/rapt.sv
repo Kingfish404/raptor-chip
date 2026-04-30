@@ -4,7 +4,7 @@
 `include "rapt_dpi_c.svh"
 
 module rapt #(
-    parameter bit [7:0] XLEN = `RAPT_XLEN
+    parameter int XLEN = `RAPT_XLEN
 ) (
     input clock,
 
@@ -136,7 +136,7 @@ module rapt #(
   rou_csr_if rou_csr ();
 
   // Dispatch-only uop payload snapshot (ROU -> EXU/RS)
-  rapt_pkg::uop_payload_t uop_pl [`RAPT_ROB_SIZE];
+  rapt_pkg::uop_payload_t uop_pl[`RAPT_ROB_SIZE];
 
   // EXU stage
   exu_rou_if exu_rou ();  // Execute & Writeback => Commit
@@ -348,7 +348,7 @@ module rapt #(
       .csr_bcast(csr_bcast),
 
       .s_int_pending(s_int_pending),
-      .s_int_cause(s_int_cause),
+      .s_int_cause  (s_int_cause),
 
       .ext_irq_i(io_interrupt),
 

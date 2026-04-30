@@ -44,14 +44,14 @@ static inline word_t csrw_warl(uint16_t c, word_t v)
   }
   return v;
 }
-#define CSRW(i, v)                          \
-  do                                        \
-  {                                         \
-    uint16_t _c = (uint16_t)((i) & 0xfff);  \
-    word_t _v = csrw_warl(_c, (word_t)(v)); \
-    if (!pmp_csr_write(_c, _v))             \
-      sr(_c) = _v;                          \
-    cpu.last_csr_wr = _c;                   \
+#define CSRW(i, v)                                                         \
+  do                                                                       \
+  {                                                                        \
+    uint16_t _c = (uint16_t)((i) & 0xfff);                                 \
+    word_t _v = csrw_warl(_c, (word_t)(v));                                \
+    if (!pmp_csr_write(_c, _v))                                            \
+      sr(_c) = _v;                                                         \
+    cpu.last_csr_wr = _c;                                                  \
     /* Flush soft TLB on writes to CSRs that affect address translation */ \
     if (_c == CSR_SATP || _c == CSR_MSTATUS || _c == CSR_SSTATUS ||        \
         _c == CSR_MSTATUSH)                                                \

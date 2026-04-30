@@ -74,8 +74,11 @@ module rapt_bpu #(
   assign fbtb_raddr = ifu_bpu.nextpc[BTB_LEN-1+1:1] ^ ifu_bpu.nextpc[2*BTB_LEN-1+1:BTB_LEN+1];
   assign fbtb_rtag  = ifu_bpu.nextpc[BTB_LEN+1+BTB_TAG_LEN-1:BTB_LEN+1];
 
-  // PHT (synchronous read, saturating counter update)
+  // PHT (synchronous read, saturating counter update). Only the MSB (taken bit)
+  // is consumed for the prediction; the LSB participates in the saturating
+  // update path inside `rapt_bpu_pht` and is opaque from the PHT consumer side.
   logic [1:0] pht_rdata;
+  wire _unused_pht_lsb = pht_rdata[0];
   rapt_bpu_pht #(
       .DEPTH(PHT_SIZE)
   ) u_pht (
@@ -153,7 +156,7 @@ module rapt_bpu #(
                              cmu_bcast.ret  ? (rsb_cmt_idx - 1'b1) :
                              rsb_cmt_idx;
 
-  always @(posedge clock) begin
+  always_ff @(posedge clock) begin
     if (reset) begin
       rsb_cmt_idx  <= '0;
       rsb_spec_idx <= '0;

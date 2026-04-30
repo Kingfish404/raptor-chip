@@ -27,6 +27,10 @@ VSRC_PATH ?= $(abspath ../rtl_sv)
 # include path so it takes precedence over any older copy. Override at the
 # command line: `make pack RAPT_CONFIG=small`.
 RAPT_CONFIG ?= default
+# Defensive strip: top-level Makefiles use `?= default ## help text` style;
+# GNU make's `#` comment can leave trailing whitespace in the value, which
+# corrupts BUILD_DIR (e.g. `./build/default ` with a trailing space).
+RAPT_CONFIG := $(strip $(RAPT_CONFIG))
 CONFIG_DIR  := $(abspath $(RAPTOR_HOME)/configs/$(RAPT_CONFIG))
 ifeq ($(wildcard $(CONFIG_DIR)/rapt_config.svh),)
 $(error RAPT_CONFIG='$(RAPT_CONFIG)' but $(CONFIG_DIR)/rapt_config.svh does not exist. \
@@ -56,7 +60,11 @@ endif
 SOC_SOURCE=
 INC_PATH +=	$(abspath $(VSRC_PATH)/include/npc)
 endif
-BUILD_DIR = ./build
+# Scope all build artifacts under $(BUILD_ROOT)/$(RAPT_CONFIG) so that
+# different presets (default/small/...) and parallel runs don't stomp on
+# each other's outputs (objects, binary, packed RTL, stamps).
+BUILD_ROOT = ./build
+BUILD_DIR = $(BUILD_ROOT)/$(RAPT_CONFIG)
 DATA_DIR = ./data
 OBJ_DIR = $(BUILD_DIR)/obj_dir
 ISA_NAME = $(if $(findstring DRAPT_RV64,$(VFLAGS)),riscv64,riscv32)
@@ -89,6 +97,7 @@ $(shell mkdir -p $(BUILD_DIR))
 $(shell mkdir -p $(DATA_DIR))
 
 # Auto-invalidate build when VFLAGS changes (e.g., switching between RV32/RV64)
+# Stamp lives inside the per-config BUILD_DIR so each RAPT_CONFIG tracks its own VFLAGS.
 VFLAGS_STAMP := $(BUILD_DIR)/.vflags_stamp
 VFLAGS_PREV  := $(shell cat $(VFLAGS_STAMP) 2>/dev/null)
 ifneq ($(VFLAGS),$(VFLAGS_PREV))
@@ -97,14 +106,9 @@ $(info [nsim] VFLAGS changed: '$(VFLAGS_PREV)' -> '$(VFLAGS)', rebuilding...)
 endif
 $(shell printf '%s' '$(VFLAGS)' > $(VFLAGS_STAMP))
 
-# Auto-invalidate build when RAPT_CONFIG changes (default <-> small etc.)
-RAPT_CONFIG_STAMP := $(BUILD_DIR)/.rapt_config_stamp
-RAPT_CONFIG_PREV  := $(shell cat $(RAPT_CONFIG_STAMP) 2>/dev/null)
-ifneq ($(RAPT_CONFIG),$(RAPT_CONFIG_PREV))
-$(shell rm -rf $(OBJ_DIR) $(BUILD_DIR)/riscv*-npc-* $(BUILD_DIR)/rapt_pack.sv $(BUILD_DIR)/rapt_pack.svh $(RAPT_CONFIG_STAMP))
-$(info [nsim] RAPT_CONFIG changed: '$(RAPT_CONFIG_PREV)' -> '$(RAPT_CONFIG)', rebuilding...)
-endif
-$(shell printf '%s' '$(RAPT_CONFIG)' > $(RAPT_CONFIG_STAMP))
+# RAPT_CONFIG no longer needs its own invalidation stamp: BUILD_DIR is now
+# rooted at $(BUILD_ROOT)/$(RAPT_CONFIG), so each preset has its own artifact
+# tree and switching presets just selects a different directory.
 
 # Auto-invalidate build when Kconfig changes (e.g., switching between o2/o2linux)
 CONFIG_STAMP := $(BUILD_DIR)/.config_stamp
@@ -270,8 +274,8 @@ help: ## Show this help message
 				printf "  %-20s %s\n", a[1], a[2] } }'
 
 maintainer-copy::
-clean mostlyclean distclean maintainer-clean:: ## Clean build artifacts
-	-rm -rf obj_dir *.log *.dmp *.vpd core $(BUILD_DIR)
+clean mostlyclean distclean maintainer-clean:: ## Clean build artifacts (all configs)
+	-rm -rf obj_dir *.log *.dmp *.vpd core $(BUILD_ROOT)
 
 include ./scripts/config.mk
 

@@ -2,9 +2,9 @@
 `include "rapt_soc.svh"
 `include "rapt_dpi_c.svh"
 
-
+/* verilator lint_off DECLFILENAME */
 module rng_chip #(
-    parameter bit [7:0] XLEN = `RAPT_XLEN
+    parameter int XLEN = `RAPT_XLEN
 ) (
     input clock,
 
@@ -190,7 +190,7 @@ endmodule
 // verilator lint_off DECLFILENAME
 // verilator lint_off UNUSEDSIGNAL
 module wrapSoC #(
-    parameter bit [7:0] XLEN = `RAPT_XLEN
+    parameter int XLEN = `RAPT_XLEN
 ) (
     input clock,
     input reset

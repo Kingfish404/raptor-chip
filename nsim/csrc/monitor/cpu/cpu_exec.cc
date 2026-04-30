@@ -1,4 +1,5 @@
 #include <common.h>
+#include <checkpoint.h>
 #include <difftest.h>
 #include <readline/readline.h>
 #include <readline/history.h>
@@ -159,6 +160,14 @@ void cpu_exec(uint64_t n)
     }
     // Simulate the performance monitor unit
     perf_sample_per_cycle();
+    // Checkpoint save: trigger when active_cycle reaches the configured
+    // value. If --ckpt-save-exit was passed, terminate the run cleanly.
+    if (checkpoint_save_tick())
+    {
+      Log("checkpoint: --ckpt-save-exit set, ending simulation.");
+      npc.state = NPC_QUIT;
+      break;
+    }
     cur_inst_cycle++;
     progress_cycle++;
     if (progress_cycle % 40000000 == 0)
@@ -191,6 +200,10 @@ void cpu_exec(uint64_t n)
       perf_sample_per_inst();
       cur_inst_cycle = 0;
       uint8_t cmu_valid_b = *(uint8_t *)&VERILOG_CPU(cmu__DOT__valid_b);
+      /* Checkpoint load: deferred post-trampoline fixup (no-op if not in
+       * load mode or already consumed). Use rpc (= committed PC) so we
+       * fire on the first cmu_valid retire of an instruction at ckpt_pc. */
+      checkpoint_load_post_trampoline_tick(*npc.rpc);
 #ifdef CONFIG_ITRACE
       iringbuf_rpc[iringhead] = *npc.rpc;
       iringbuf_inst[iringhead] = *(word_t *)(npc.inst);
@@ -204,7 +217,8 @@ void cpu_exec(uint64_t n)
       // path when an interrupt source gets wired in.
       {
         extern void (*ref_difftest_set_meip)(uint8_t);
-        if (ref_difftest_set_meip) {
+        if (ref_difftest_set_meip)
+        {
           uint8_t live = *(uint8_t *)&VERILOG_CPU(io_interrupt);
           ref_difftest_set_meip(live & 1u);
         }

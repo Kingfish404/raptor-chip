@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import chisel3.util.experimental.decode._
 
-class rapt_idu_decoder extends Module with Instr with MicroOP {
+class rapt_idu_decoder extends RawModule with Instr with MicroOP {
   val in      = IO(new Bundle {
     val inst = Input(UInt(32.W))
     val pc   = Input(UInt(64.W))
@@ -240,9 +240,9 @@ class rapt_idu_decoder extends Module with Instr with MicroOP {
       CZERO_NEZ -> BitPat("b" + "00" + ALU_CZERO_NEZ), // R
 
       // RV64 Zba
-      SH1ADDUW -> BitPat("b" + "00" + ALU_SH1ADD), // R (W-variant)
-      SH2ADDUW -> BitPat("b" + "00" + ALU_SH2ADD), // R (W-variant)
-      SH3ADDUW -> BitPat("b" + "00" + ALU_SH3ADD), // R (W-variant)
+      SH1ADDUW -> BitPat("b" + "00" + ALU_SH1ADD),  // R (W-variant)
+      SH2ADDUW -> BitPat("b" + "00" + ALU_SH2ADD),  // R (W-variant)
+      SH3ADDUW -> BitPat("b" + "00" + ALU_SH3ADD),  // R (W-variant)
       ADD_UW__ -> BitPat("b" + "00" + ALU_ADD_UW),  // R (RV64 Zba .UW: zext.w(rs1)+rs2)
       SLLI_UW_ -> BitPat("b" + "00" + ALU_SLLI_UW), // I (RV64 Zba .UW: zext.w(rs1)<<shamt)
 

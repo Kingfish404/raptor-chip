@@ -5,7 +5,7 @@
 /* verilator lint_off VARHIDDEN */
 
 module axi2rnp #(
-    parameter bit [7:0] XLEN = 32
+    parameter int XLEN = 32
 ) (
     input clk,
     input reset,
@@ -102,7 +102,7 @@ module axi2rnp #(
   reg [19:0] state_rst_cnt;
   logic state_rst_cnt_rst;
 
-  always @(posedge clk) begin
+  always_ff @(posedge clk) begin
     if (reset || state_rst_cnt_rst) begin
       state_rst_cnt <= 0;
     end else begin
@@ -112,7 +112,7 @@ module axi2rnp #(
 
   assign state_rst = &state_rst_cnt;
 
-  always @(posedge clk) begin
+  always_ff @(posedge clk) begin
     if (reset || state_rst) begin
       rwstate_last <= 2'b00;
     end else begin
@@ -202,7 +202,7 @@ module axi2rnp #(
 endmodule
 
 module rnp2axi #(
-    parameter bit [7:0] XLEN = 32
+    parameter int XLEN = 32
 ) (
     input clk,
     input reset,

@@ -12,7 +12,7 @@
 //   timer_int = (mtime >= mtimecmp)
 //   sw_int    = msip[0]
 module rapt_clint #(
-    parameter bit [7:0] XLEN = `RAPT_XLEN
+    parameter int XLEN = `RAPT_XLEN
 ) (
     input clock,
 

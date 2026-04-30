@@ -12,8 +12,10 @@
 
 # ---- Root-level files ----
 !.gitignore
+!.clangd
 !Makefile
 !README.md
+!raptor-chip.code-workspace
 !env.sh
 !setup.sh
 !setup-rtl.sh
@@ -31,6 +33,7 @@
 !*.svh
 
 # ---- Non-self-contained directories (need root whitelist) ----
+!/configs/*
 !/docs/*
 !/linux/*
 !/rtl_scala/*

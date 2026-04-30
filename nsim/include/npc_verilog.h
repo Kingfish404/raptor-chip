@@ -56,6 +56,7 @@ static inline void verilog_connect(TOP_NAME *top, NPCState *npc)
   npc->stvec__ = csr + STVEC__;
 
   npc->scounte = csr + SCOUNTE;
+  npc->mcounte = csr + MCOUNTE;
 
   npc->sscratch = csr + SSCRATCH;
   npc->sepc___ = csr + SEPC___;
@@ -70,11 +71,34 @@ static inline void verilog_connect(TOP_NAME *top, NPCState *npc)
   npc->mie____ = csr + MIE____;
   npc->mtvec__ = csr + MTVEC__;
 
+  npc->mstatush = csr + MSTATUSH;
+
   npc->mscratch = csr + MSCRATCH;
   npc->mepc___ = csr + MEPC___;
   npc->mcause_ = csr + MCAUSE_;
   npc->mtval__ = csr + MTVAL__;
   npc->mip____ = csr + MIP____;
+
+  npc->mcycle_ = csr + MCYCLE_;
+  npc->mcycleh = csr + MCYCLEH;
+  npc->minstret = csr + MINSTRET;
+  npc->minstreth = csr + MINSTRETH;
+  npc->time___ = csr + TIME___;
+  npc->timeh__ = csr + TIMEH__;
+
+  npc->clint_mtime = (uint64_t *)&VERILOG_CPU(bus__DOT__clint__DOT__mtime);
+  npc->clint_mtimecmp = (uint64_t *)&VERILOG_CPU(bus__DOT__clint__DOT__mtimecmp);
+  npc->clint_msip = (uint8_t *)&VERILOG_CPU(bus__DOT__clint__DOT__msip_reg);
+
+  npc->pmpcfg = (uint8_t *)&VERILOG_CPU(csrs__DOT__pmpcfg_r);
+  npc->pmpaddr = (word_t *)&VERILOG_CPU(csrs__DOT__pmpaddr_r);
+
+  /* Pipeline quiesce probes (for checkpoint save: defer until SQ/STQ/ROB are
+   * empty so in-flight stores don't get truncated by host-side memory dump).
+   * Use valid-bitvectors / dedicated empty signal — head==tail is ambiguous. */
+  npc->rob_empty = (uint8_t *)&VERILOG_ROU(rob_empty);
+  npc->sq_valid = (uint8_t *)&VERILOG_CPU(lsu__DOT__sq_valid);
+  npc->stq_valid = (uint8_t *)&VERILOG_CPU(lsu__DOT__stq_valid);
 }
 
 #endif // __NPC_VERILOG_H__

@@ -38,7 +38,7 @@ module rapt_rnu_freelist #(
   assign do_alloc_b = fl.alloc_req_b && !fl.alloc_empty_b;
 `endif
 
-  always @(posedge clock) begin
+  always_ff @(posedge clock) begin
     if (reset) begin
       for (integer i = 0; i < PNUM; i = i + 1) begin
         fifo[i] <= PLEN'(i);

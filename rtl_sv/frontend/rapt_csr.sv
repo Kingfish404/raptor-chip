@@ -3,7 +3,7 @@
 `include "rapt_dpi_c.svh"
 
 module rapt_csr #(
-    parameter bit [7:0] XLEN = `RAPT_XLEN,
+    parameter int XLEN = `RAPT_XLEN,
     parameter bit [7:0] R_W = 12,
     parameter bit [7:0] REG_W = 6,
     parameter bit [XLEN-1:0] RESET_VAL = 0
@@ -250,7 +250,12 @@ module rapt_csr #(
   assign mstatus_mie = csr[MSTATUS][`RAPT_CSR_MSTATUS_MIE_];
 
   assign cause_idx = 'b1 << (rou_csr.cause & 'h1f);
-  assign smode_medeleg = |(csr[MEDELEG] & cause_idx);
+  // medeleg only applies to synchronous exceptions (cause MSB=0); mideleg only
+  // to asynchronous interrupts (cause MSB=1). Without the MSB guard the same
+  // low-5-bit index is shared between exception and interrupt cause spaces,
+  // which would mis-delegate e.g. M-timer interrupt (cause=0x8000_0007) to
+  // S-mode whenever medeleg[7] (store/AMO access fault) was set.
+  assign smode_medeleg = !rou_csr.cause[XLEN-1] && |(csr[MEDELEG] & cause_idx);
   assign smode_mideleg = rou_csr.cause[XLEN-1] && |(csr[MIDELEG] & cause_idx);
   assign smode_handle = (
     (priv_mode == `RAPT_PRIV_S || priv_mode == `RAPT_PRIV_U)
@@ -409,7 +414,9 @@ module rapt_csr #(
         // NAPOT closed-form: mask = pmpaddr ^ (pmpaddr + 1), base = pmpaddr & ~mask.
         // Computed on the fast pmpaddr_r -> FF path, kept off the LSU/L1D critical path.
         pmp_napot_mask_r[i] <= pmpaddr_r[i] ^ (pmpaddr_r[i] + {{(XLEN-1){1'b0}}, 1'b1});
-        pmp_napot_base_r[i] <= pmpaddr_r[i] & ~(pmpaddr_r[i] ^ (pmpaddr_r[i] + {{(XLEN-1){1'b0}}, 1'b1}));
+        pmp_napot_base_r[i] <= pmpaddr_r[i]
+          & ~(pmpaddr_r[i]
+          ^ (pmpaddr_r[i] + {{(XLEN-1){1'b0}}, 1'b1}));
         pmp_tor_lo_r[i]     <= (i == 0) ? '0 : pmpaddr_r[i-1];
         pmp_tor_hi_r[i]     <= pmpaddr_r[i];
         pmp_cfg_r_r[i]      <= pmpcfg_r[i][`RAPT_PMPCFG_R_];
@@ -565,7 +572,10 @@ module rapt_csr #(
           end else begin
             // Handle in M-mode
             priv_mode <= `RAPT_PRIV_M;
-            csr[MCAUSE_] <= priv_mode == `RAPT_PRIV_M ? `RAPT_CAUSE_ECALL_M : priv_mode == `RAPT_PRIV_S ? `RAPT_CAUSE_ECALL_S : `RAPT_CAUSE_ECALL_U;
+            csr[MCAUSE_] <= priv_mode == `RAPT_PRIV_M
+              ? `RAPT_CAUSE_ECALL_M
+              : priv_mode == `RAPT_PRIV_S
+                ? `RAPT_CAUSE_ECALL_S : `RAPT_CAUSE_ECALL_U;
             csr[MSTATUS][`RAPT_CSR_MSTATUS_MPP_] <= priv_mode;
             csr[MSTATUS][`RAPT_CSR_MSTATUS_MPIE] <= mstatus_mie;
             csr[MSTATUS][`RAPT_CSR_MSTATUS_MIE_] <= 1'b0;
@@ -657,7 +667,9 @@ module rapt_csr #(
             csr[MTVAL__] <= rou_csr.tval;
             priv_mode <= `RAPT_PRIV_M;
 `ifdef RAPT_DEBUG_PMP
-            $display("[%0t] CSR_TRAP_M cause=%h mepc=%h mtval=%h", $time, rou_csr.cause, rou_csr.pc, rou_csr.tval);
+            $display(
+              "[%0t] CSR_TRAP_M cause=%h mepc=%h mtval=%h",
+              $time, rou_csr.cause, rou_csr.pc, rou_csr.tval);
 `endif
           end
         end

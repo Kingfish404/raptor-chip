@@ -11,14 +11,16 @@
 // performed at the requester (L1I / L1D) using the returned pte_flags so that
 // the same checks apply on TLB hits.
 module rapt_ptw #(
-    parameter bit [7:0] XLEN = `RAPT_XLEN
+    parameter int XLEN = `RAPT_XLEN
 ) (
     input clock,
     input reset,
 
     // Request interface
     input logic            req_valid,  // pulse to start PTW
-    input logic [XLEN-1:0] vaddr,      // virtual address to translate
+    /* verilator lint_off UNUSEDSIGNAL */
+    input logic [XLEN-1:0] vaddr,      // virtual address to translate (bits[11:0] = page offset)
+    /* verilator lint_on UNUSEDSIGNAL */
     input logic [    21:0] satp_ppn,   // root page table PPN from satp
     input logic            mmu_en,     // MMU enabled (guard)
     input logic            sbe,        // mstatush.SBE: PTEs are big-endian
@@ -50,8 +52,10 @@ module rapt_ptw #(
   ptw_state_t state;
 
   logic [9:0] vpn1, vpn0;
+  // Sv32 PA is 34 bits; we keep all 34 bits so addition can't overflow.
+  // The upper 2 bits are truncated at bus_araddr (host bus is XLEN-wide).
   /* verilator lint_off UNUSEDSIGNAL */
-  logic [XLEN-1+2:0] ppn_a;
+  logic [XLEN+1:0] ppn_a;
   /* verilator lint_on UNUSEDSIGNAL */
 
 `ifdef RAPT_RV64
@@ -67,7 +71,10 @@ module rapt_ptw #(
   /* verilator lint_off UNUSEDSIGNAL */
   wire _unused_sbe = sbe;
   /* verilator lint_on UNUSEDSIGNAL */
+  /* verilator lint_off UNUSEDSIGNAL */
+  // pte_data[9:8] = RSW (reserved-for-supervisor) bits, not consumed.
   wire [31:0] pte_data = pte_raw;
+  /* verilator lint_on UNUSEDSIGNAL */
 
   assign busy = (state != IDLE);
   assign bus_arvalid = (state == LVL1 || state == LVL0);
@@ -118,7 +125,7 @@ module rapt_ptw #(
                 fault <= 1'b1;
               end else begin
                 result_ptag <= ptag_lvl1;
-                result_pte  <= pte_data[7:1];
+                result_pte <= pte_data[7:1];
                 done <= 1'b1;
               end
               state <= IDLE;
@@ -142,7 +149,7 @@ module rapt_ptw #(
               fault <= 1'b1;
             end else begin
               result_ptag <= ptag_lvl0;
-              result_pte  <= pte_data[7:1];
+              result_pte <= pte_data[7:1];
               done <= 1'b1;
             end
             state <= IDLE;

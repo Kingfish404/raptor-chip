@@ -1,0 +1,58 @@
+{
+  "folders": [
+    {
+      "path": "."
+    }
+  ],
+  "settings": {
+    "C_Cpp.default.compileCommands": "${workspaceFolder}/compile_commands.json",
+    "clangd.arguments": [
+      "--compile-commands-dir=${workspaceFolder}"
+    ],
+    "files.associations": {
+      "*.sv": "systemverilog",
+      "*.svh": "systemverilog"
+    },
+    // Hide / skip gitignored vendored SV (riscv-arch-test, third_party, build outputs, ...)
+    // so the SV linter / language server doesn't pick them up.
+    "files.exclude": {
+      "**/.git": true,
+      "**/riscv-arch-test": true,
+      "**/third_party": true,
+      "**/build": true,
+      "**/generated": false
+    },
+    "files.watcherExclude": {
+      "**/.git": true,
+      "**/riscv-arch-test": true,
+      "**/third_party": true,
+      "**/build": true,
+      "**/generated": false
+    },
+    "search.exclude": {
+      "**/.git": true,
+      "**/riscv-arch-test": true,
+      "**/third_party": true,
+      "**/build": true,
+      "**/generated": false
+    },
+    "search.useIgnoreFiles": true,
+    // Limit SV language servers / linters to the in-tree RTL only.
+    // (Settings cover the popular extensions: svlangserver, verible, mshr-h.veriloghdl.)
+    "systemverilog.includeIndexing": [
+      "rtl_sv/**/*.{sv,svh}",
+      "configs/**/*.{sv,svh}"
+    ],
+    "systemverilog.excludeIndexing": [
+      "**/riscv-arch-test/**",
+      "**/third_party/**",
+      "**/build/**",
+      "**/generated/**"
+    ],
+    "verilog.linting.linter": "verilator",
+    "verilog.linting.path": "",
+    "verilog.linting.verilator.runAtFileLocation": false,
+    "verilog.linting.verilator.useWSL": false,
+    "verilog.languageServer.svls.enabled": true
+  }
+}

@@ -3,11 +3,11 @@
 `include "rapt_soc.svh"
 
 module rapt_l1i #(
-    parameter bit [7:0] XLEN = `RAPT_XLEN,
+    parameter int XLEN = `RAPT_XLEN,
     parameter unsigned IFQ_SIZE = 2,
-    parameter bit [`RAPT_L1I_LEN:0] L1I_LINE_LEN = `RAPT_L1I_LINE_LEN,
+    parameter int L1I_LINE_LEN = `RAPT_L1I_LINE_LEN,
     parameter bit [`RAPT_L1I_LEN:0] L1I_LINE_SIZE = 2 ** L1I_LINE_LEN,
-    parameter bit [`RAPT_L1I_LEN:0] L1I_LEN = `RAPT_L1I_LEN,
+    parameter int L1I_LEN = `RAPT_L1I_LEN,
     parameter unsigned L1I_N_WAYS = `RAPT_L1I_N_WAYS
 ) (
     input clock,
@@ -133,7 +133,11 @@ module rapt_l1i #(
   // the SRAM bank that will be needed next cycle is the one for pc+4, not
   // pc+2.  Pre-reading this address in idle banks eliminates the 1-cycle
   // SRAM-ready bubble that otherwise occurs at every cache-line crossing.
+  // Only the index/tag bits of pc_ifu_next4 are consumed; the byte-offset
+  // bits feed nothing because the SRAM banks are word-aligned by construction.
+  /* verilator lint_off UNUSEDSIGNAL */
   logic [XLEN-1:0] pc_ifu_next4;
+  /* verilator lint_on UNUSEDSIGNAL */
   logic [L1I_LEN-1:0] addr_idx_next4;
 
   // --- PMP check on fetch physical address (instruction access-fault) ---
@@ -283,8 +287,10 @@ module rapt_l1i #(
   );
 
   // Sv32 fetch permission check: execute must be allowed for current priv.
-  // itlb_pte = {D,A,G,U,X,W,R}
+  // itlb_pte = {D,A,G,U,X,W,R}; only X/U/A bits influence fetch fault.
+  /* verilator lint_off UNUSEDSIGNAL */
   function automatic logic pte_fault_fetch(input logic [6:0] pte, input logic [1:0] priv_i);
+  /* verilator lint_on UNUSEDSIGNAL */
     logic x, u, a;
     logic fault;
     x = pte[2];
@@ -549,7 +555,7 @@ module rapt_l1i #(
     || fetch_unmapped_fault;
 
 
-  always @(posedge clock) begin
+  always_ff @(posedge clock) begin
     if (reset) begin
       l1i_state <= IDLE;
       ifq_head  <= 0;
@@ -574,7 +580,8 @@ module rapt_l1i #(
                   l1i_state <= TRAP;
                 end else if (pmp_fetch_fault) begin
                   rec_addr <= ifu_l1i.pc;
-                  rec_tval <= (pmp_fetch_fault_lo || fetch_unmapped_fault) ? ifu_l1i.pc : (ifu_l1i.pc + XLEN'(2));
+                  rec_tval <= (pmp_fetch_fault_lo || fetch_unmapped_fault)
+                    ? ifu_l1i.pc : (ifu_l1i.pc + XLEN'(2));
                   cause <= `RAPT_CAUSE_INSTR_ACC_FAULT;
                   l1i_state <= TRAP;
                 end else begin
@@ -606,7 +613,8 @@ module rapt_l1i #(
             end else begin
               if (pmp_fetch_fault) begin
                 rec_addr <= ifu_l1i.pc;
-                rec_tval <= (pmp_fetch_fault_lo || fetch_unmapped_fault) ? ifu_l1i.pc : (ifu_l1i.pc + XLEN'(2));
+                rec_tval <= (pmp_fetch_fault_lo || fetch_unmapped_fault)
+                  ? ifu_l1i.pc : (ifu_l1i.pc + XLEN'(2));
                 cause <= `RAPT_CAUSE_INSTR_ACC_FAULT;
                 l1i_state <= TRAP;
               end else begin
@@ -662,7 +670,8 @@ module rapt_l1i #(
             // Post-PTW PMP check: page was translated but target PA is outside
             // any permitted PMP region for the current privilege level.
             rec_addr <= ifu_l1i.pc;
-            rec_tval <= (pmp_fetch_fault_lo || fetch_unmapped_fault) ? ifu_l1i.pc : (ifu_l1i.pc + XLEN'(2));
+            rec_tval <= (pmp_fetch_fault_lo || fetch_unmapped_fault)
+              ? ifu_l1i.pc : (ifu_l1i.pc + XLEN'(2));
             cause <= `RAPT_CAUSE_INSTR_ACC_FAULT;
             l1i_state <= TRAP;
           end else if (sram_data_ready) begin

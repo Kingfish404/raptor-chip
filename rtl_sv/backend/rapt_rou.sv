@@ -1,6 +1,5 @@
 `include "rapt.svh"
 `include "rapt_if.svh"
-import rapt_pkg::*;
 
 // Re-Order Unit (ROU) - dispatch queue + reorder buffer + commit.
 //
@@ -55,7 +54,12 @@ module rapt_rou #(
 
     input reset
 );
+  // ready_a is consumed by the testbench (--public) for hazard observation,
+  // and only by RTL when !RAPT_DUAL_ISSUE; mark it as intentionally unused
+  // by the synthesis tool.
+  /* verilator lint_off UNUSEDSIGNAL */
   logic valid_a, ready_a;
+  /* verilator lint_on UNUSEDSIGNAL */
   logic            flush_pipe;
   logic            fence_time;
 
@@ -172,7 +176,7 @@ module rapt_rou #(
       && !rob_entry[rob_tail_b].busy;
 `endif
 
-  always @(posedge clock) begin
+  always_ff @(posedge clock) begin
     if (reset || flush_pipe) begin
       uoq_head_a          <= '0;
       uoq_tail_a          <= '0;
@@ -445,7 +449,7 @@ module rapt_rou #(
   assign wb_dest_exu_b = exu_rou_b.dest;
   assign wb_dest_ioq   = exu_ioq_bcast.dest;
 
-  always @(posedge clock) begin
+  always_ff @(posedge clock) begin
     if (reset || flush_pipe) begin
       rob_head         <= '0;
       rob_tail_a       <= '0;
@@ -454,7 +458,7 @@ module rapt_rou #(
       trap_cause       <= '0;
       for (int i = 0; i < ROB_SIZE; i++) begin
         rob_entry[i].busy  <= 1'b0;
-        rob_entry[i].state <= ROB_CM;
+        rob_entry[i].state <= rapt_pkg::ROB_CM;
       end
     end else begin
       // ---- Dispatch: insert into ROB tail ----
@@ -468,7 +472,7 @@ module rapt_rou #(
         rob_entry[rob_tail_a].prd <= uoq_prd[uoq_tail_a];
         rob_entry[rob_tail_a].prs <= uoq_prs[uoq_tail_a];
         rob_entry[rob_tail_a].busy <= 1'b1;
-        rob_entry[rob_tail_a].state <= ROB_EX;
+        rob_entry[rob_tail_a].state <= rapt_pkg::ROB_EX;
         rob_entry[rob_tail_a].rd <= uoq_uops[uoq_tail_a].rd;
 
         rob_entry[rob_tail_a].ben <= uoq_uops[uoq_tail_a].ben;
@@ -510,7 +514,7 @@ module rapt_rou #(
           rob_entry[rob_tail_b].prd <= uoq_prd[uoq_tail_b];
           rob_entry[rob_tail_b].prs <= uoq_prs[uoq_tail_b];
           rob_entry[rob_tail_b].busy <= 1'b1;
-          rob_entry[rob_tail_b].state <= ROB_EX;
+          rob_entry[rob_tail_b].state <= rapt_pkg::ROB_EX;
           rob_entry[rob_tail_b].rd <= uoq_uops[uoq_tail_b].rd;
 
           rob_entry[rob_tail_b].ben <= uoq_uops[uoq_tail_b].ben;
@@ -551,7 +555,7 @@ module rapt_rou #(
 
       // ---- Write-back from IOQ (load/store completion) ----
       if (exu_ioq_bcast.valid) begin
-        rob_entry[wb_dest_ioq].state    <= ROB_WB;
+        rob_entry[wb_dest_ioq].state    <= rapt_pkg::ROB_WB;
         rob_entry[wb_dest_ioq].npc      <= exu_ioq_bcast.npc;
         rob_entry[wb_dest_ioq].wen      <= exu_ioq_bcast.wen;
         rob_entry[wb_dest_ioq].sq_waddr <= exu_ioq_bcast.sq_waddr;
@@ -570,7 +574,7 @@ module rapt_rou #(
 
       // ---- Write-back from EXU (ALU/branch completion) ----
       if (exu_rou.valid) begin
-        rob_entry[wb_dest_exu].state         <= ROB_WB;
+        rob_entry[wb_dest_exu].state         <= rapt_pkg::ROB_WB;
         rob_entry[wb_dest_exu].btaken        <= exu_rou.btaken;
         rob_entry[wb_dest_exu].npc           <= exu_rou.npc;
 
@@ -589,7 +593,7 @@ module rapt_rou #(
       // trap, ...) stay at their defaults (0). We update state/npc/btaken/
       // inst/difftest_skip; btaken is required for BPU updates on commit.
       if (exu_rou_b.valid) begin
-        rob_entry[wb_dest_exu_b].state         <= ROB_WB;
+        rob_entry[wb_dest_exu_b].state         <= rapt_pkg::ROB_WB;
         rob_entry[wb_dest_exu_b].npc           <= exu_rou_b.npc;
         rob_entry[wb_dest_exu_b].btaken        <= exu_rou_b.btaken;
         rob_entry[wb_dest_exu_b].difftest_skip <= exu_rou_b.difftest_skip;
@@ -600,7 +604,7 @@ module rapt_rou #(
       // needed; only state + npc + btaken + difftest_skip are written so
       // commit/BPU can resolve the branch.
       if (exu_rou_c.valid) begin
-        rob_entry[exu_rou_c.dest].state         <= ROB_WB;
+        rob_entry[exu_rou_c.dest].state         <= rapt_pkg::ROB_WB;
         rob_entry[exu_rou_c.dest].npc           <= exu_rou_c.npc;
         rob_entry[exu_rou_c.dest].btaken        <= exu_rou_c.btaken;
         rob_entry[exu_rou_c.dest].difftest_skip <= exu_rou_c.difftest_skip;
@@ -611,7 +615,7 @@ module rapt_rou #(
         rob_head                     <= dual_commit ? rob_head + 2 : rob_head + 1;
 
         rob_entry[rob_head].busy     <= 1'b0;
-        rob_entry[rob_head].state    <= ROB_CM;
+        rob_entry[rob_head].state    <= rapt_pkg::ROB_CM;
         rob_entry[rob_head].csr_wen  <= 1'b0;
         rob_entry[rob_head].trap     <= 1'b0;
         rob_entry[rob_head].wen      <= 1'b0;
@@ -620,7 +624,7 @@ module rapt_rou #(
 
         if (dual_commit) begin
           rob_entry[h1].busy     <= 1'b0;
-          rob_entry[h1].state    <= ROB_CM;
+          rob_entry[h1].state    <= rapt_pkg::ROB_CM;
           rob_entry[h1].csr_wen  <= 1'b0;
           rob_entry[h1].trap     <= 1'b0;
           rob_entry[h1].wen      <= 1'b0;
@@ -645,7 +649,7 @@ module rapt_rou #(
   assign head0_br_p_fail = rob_entry[h0].npc != rob_entry[h0].pnpc;
   assign head0_valid     = recieved_trap || (
       rob_entry[h0].busy
-      && rob_entry[h0].state == ROB_WB
+      && rob_entry[h0].state == rapt_pkg::ROB_WB
       && (rou_lsu.sq_ready || !rob_entry[h0].wen));
 
   // Pure CSR: sys instruction without ecall/ebreak/mret/sret (no redirect needed)
@@ -672,7 +676,7 @@ module rapt_rou #(
   logic head1_valid;
   assign head1_br_p_fail = rob_entry[h1].npc != rob_entry[h1].pnpc;
   assign head1_valid     = rob_entry[h1].busy
-      && rob_entry[h1].state == ROB_WB
+      && rob_entry[h1].state == rapt_pkg::ROB_WB
       && (rou_lsu.sq_ready || !rob_entry[h1].wen);
 
   // Dual commit: slot 0 doesn't flush, isn't a store, and slot 1 ready.
@@ -703,7 +707,7 @@ module rapt_rou #(
   /* verilator lint_off UNUSEDSIGNAL */
   logic pmu_sq_stall;
   assign pmu_sq_stall = !recieved_trap
-      && rob_entry[h0].busy && rob_entry[h0].state == ROB_WB
+      && rob_entry[h0].busy && rob_entry[h0].state == rapt_pkg::ROB_WB
       && rob_entry[h0].wen  && !rou_lsu.sq_ready;
   /* verilator lint_on UNUSEDSIGNAL */
 

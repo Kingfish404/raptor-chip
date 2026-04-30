@@ -28,34 +28,34 @@
 //   mode_off/tor/na4/napot[i]    : per-entry mode one-hot vectors
 
 module rapt_pmp #(
-    parameter bit [7:0] XLEN = `RAPT_XLEN
+    parameter int XLEN = `RAPT_XLEN
 ) (
     /* verilator lint_off UNUSEDSIGNAL */
-    input  logic [XLEN-1:0] addr,
-    input  logic [     3:0] size_m1,
+    input logic [XLEN-1:0] addr,
+    input logic [     3:0] size_m1,
     /* verilator lint_on UNUSEDSIGNAL */
-    input  logic [     1:0] priv,
-    input  logic            op_r,
-    input  logic            op_w,
-    input  logic            op_x,
+    input logic [     1:0] priv,
+    input logic            op_r,
+    input logic            op_w,
+    input logic            op_x,
 
     // Shadow inputs from csr_bcast.pmp_*
-    input  logic [XLEN-1:0]              pmp_napot_mask  [`RAPT_PMP_NUM],
-    input  logic [XLEN-1:0]              pmp_napot_base  [`RAPT_PMP_NUM],
-    input  logic [XLEN-1:0]              pmp_tor_lo      [`RAPT_PMP_NUM],
-    input  logic [XLEN-1:0]              pmp_tor_hi      [`RAPT_PMP_NUM],
-    input  logic [`RAPT_PMP_NUM-1:0]     pmp_cfg_r,
-    input  logic [`RAPT_PMP_NUM-1:0]     pmp_cfg_w,
-    input  logic [`RAPT_PMP_NUM-1:0]     pmp_cfg_x,
-    input  logic [`RAPT_PMP_NUM-1:0]     pmp_cfg_l,
+    input logic [         XLEN-1:0] pmp_napot_mask[`RAPT_PMP_NUM],
+    input logic [         XLEN-1:0] pmp_napot_base[`RAPT_PMP_NUM],
+    input logic [         XLEN-1:0] pmp_tor_lo    [`RAPT_PMP_NUM],
+    input logic [         XLEN-1:0] pmp_tor_hi    [`RAPT_PMP_NUM],
+    input logic [`RAPT_PMP_NUM-1:0] pmp_cfg_r,
+    input logic [`RAPT_PMP_NUM-1:0] pmp_cfg_w,
+    input logic [`RAPT_PMP_NUM-1:0] pmp_cfg_x,
+    input logic [`RAPT_PMP_NUM-1:0] pmp_cfg_l,
     /* verilator lint_off UNUSEDSIGNAL */
-    input  logic [`RAPT_PMP_NUM-1:0]     pmp_mode_off,
+    input logic [`RAPT_PMP_NUM-1:0] pmp_mode_off,
     /* verilator lint_on UNUSEDSIGNAL */
-    input  logic [`RAPT_PMP_NUM-1:0]     pmp_mode_tor,
-    input  logic [`RAPT_PMP_NUM-1:0]     pmp_mode_na4,
-    input  logic [`RAPT_PMP_NUM-1:0]     pmp_mode_napot,
+    input logic [`RAPT_PMP_NUM-1:0] pmp_mode_tor,
+    input logic [`RAPT_PMP_NUM-1:0] pmp_mode_na4,
+    input logic [`RAPT_PMP_NUM-1:0] pmp_mode_napot,
 
-    output logic                         fault
+    output logic fault
 );
   localparam int N = `RAPT_PMP_NUM;
 
@@ -63,24 +63,22 @@ module rapt_pmp #(
   logic [N-1:0] entry_match_lo;
   logic [N-1:0] entry_match_hi;
 
-  logic [XLEN-1:0] addr_hi;
-  assign addr_hi = addr + {{(XLEN - 4) {1'b0}}, size_m1};
-
-  // pmpaddr granularity = words (G=0 -> byte_addr >> 2).
+  // pmpaddr granularity = words (G=0 -> byte_addr >> 2). We compute
+  // addr_hi_w directly via (addr + size_m1) >> 2 to avoid carrying the
+  // unused byte-offset bits of the sum.
   logic [XLEN-1:0] addr_lo_w;
   logic [XLEN-1:0] addr_hi_w;
   assign addr_lo_w = {2'b00, addr[XLEN-1:2]};
-  assign addr_hi_w = {2'b00, addr_hi[XLEN-1:2]};
-
+  assign addr_hi_w = (addr + {{(XLEN - 4) {1'b0}}, size_m1}) >> 2;
   for (genvar i = 0; i < N; i++) begin : gen_entry
     logic match_tor_lo, match_na4_lo, match_napot_lo;
     logic match_tor_hi, match_na4_hi, match_napot_hi;
     /* verilator lint_off UNSIGNED */
-    assign match_tor_lo   = (addr_lo_w >= pmp_tor_lo[i]) && (addr_lo_w < pmp_tor_hi[i]);
-    assign match_tor_hi   = (addr_hi_w >= pmp_tor_lo[i]) && (addr_hi_w < pmp_tor_hi[i]);
+    assign match_tor_lo = (addr_lo_w >= pmp_tor_lo[i]) && (addr_lo_w < pmp_tor_hi[i]);
+    assign match_tor_hi = (addr_hi_w >= pmp_tor_lo[i]) && (addr_hi_w < pmp_tor_hi[i]);
     /* verilator lint_on UNSIGNED */
-    assign match_na4_lo   = (addr_lo_w == pmp_tor_hi[i]);                       // tor_hi == pmpaddr[i]
-    assign match_na4_hi   = (addr_hi_w == pmp_tor_hi[i]);
+    assign match_na4_lo = (addr_lo_w == pmp_tor_hi[i]);  // tor_hi == pmpaddr[i]
+    assign match_na4_hi = (addr_hi_w == pmp_tor_hi[i]);
     assign match_napot_lo = ((addr_lo_w & ~pmp_napot_mask[i]) == pmp_napot_base[i]);
     assign match_napot_hi = ((addr_hi_w & ~pmp_napot_mask[i]) == pmp_napot_base[i]);
 
@@ -98,8 +96,8 @@ module rapt_pmp #(
   // Lowest-set-bit one-hot priority encoder.
   // Carry-chain isolates the LSB -> ~1 LUT level vs N-deep priority chain.
   logic [N-1:0] fm_lo, fm_hi;
-  assign fm_lo = entry_match_lo & ((~entry_match_lo) + {{(N-1){1'b0}}, 1'b1});
-  assign fm_hi = entry_match_hi & ((~entry_match_hi) + {{(N-1){1'b0}}, 1'b1});
+  assign fm_lo = entry_match_lo & ((~entry_match_lo) + {{(N - 1) {1'b0}}, 1'b1});
+  assign fm_hi = entry_match_hi & ((~entry_match_hi) + {{(N - 1) {1'b0}}, 1'b1});
 
   logic any_match_lo, any_match_hi;
   assign any_match_lo = |entry_match_lo;

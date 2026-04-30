@@ -30,7 +30,7 @@ module rapt_bpu_pht #(
 
   assign rdata = mem[r_raddr];
 
-  always @(posedge clock) begin
+  always_ff @(posedge clock) begin
     if (reset || init) begin
       for (int i = 0; i < DEPTH; i++) mem[i] <= 2'b00;
       r_raddr <= '0;

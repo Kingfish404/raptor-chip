@@ -4,7 +4,7 @@
 
 module rapt_lsu #(
     parameter unsigned SQ_SIZE = `RAPT_SQ_SIZE,
-    parameter bit [7:0] XLEN = `RAPT_XLEN
+    parameter int XLEN = `RAPT_XLEN
 ) (
     input clock,
 
@@ -20,7 +20,6 @@ module rapt_lsu #(
 
     input reset
 );
-  /* verilator lint_off UNUSEDSIGNAL */
   typedef enum logic [1:0] {
     LS_S_V    = 2'b00,  // present lo beat, wait for wready
     LS_S_R    = 2'b01,  // lo beat retired; aligned case completes here
@@ -35,7 +34,6 @@ module rapt_lsu #(
   logic [4:0] ralu;
   logic [XLEN-1:0] rdata_unalign;
   logic [XLEN-1:0] rdata;
-  logic rready;
 
   // === Store Temporary Queue (STQ) ===
   logic [$clog2(SQ_SIZE)-1:0] stq_head;
@@ -56,13 +54,16 @@ module rapt_lsu #(
   logic [XLEN-1:0] sq_waddr[SQ_SIZE];  // physical: for bus write-through
   logic [XLEN-1:0] sq_vaddr[SQ_SIZE];  // virtual : for forwarding comparison
   logic [XLEN-1:0] sq_wdata[SQ_SIZE];
-  logic [XLEN-1:0] sq_pc[SQ_SIZE];
   // === Store Queue (SQ) ===
 
+  // SQ index helpers (debug/waveform only; outputs feed sq_fwd_data lookup
+  // directly via sq_head + j arithmetic).
+  /* verilator lint_off UNUSEDSIGNAL */
   logic load_in_sq;
   logic [$clog2(SQ_SIZE)-1:0] load_in_sq_idx;
   logic store_in_sq;
   logic [$clog2(SQ_SIZE)-1:0] store_in_sq_idx;
+  /* verilator lint_on UNUSEDSIGNAL */
 
   // Store-to-load forwarding from SQ
   logic sq_fwd_ok;
@@ -83,7 +84,7 @@ module rapt_lsu #(
   assign waddr = sq_waddr[sq_head];
   assign walu = sq_alu[sq_head];
 
-  always @(posedge clock) begin
+  always_ff @(posedge clock) begin
     if (reset) begin
       sq_head   <= 0;
       sq_tail   <= 0;
@@ -122,10 +123,9 @@ module rapt_lsu #(
         // whereas STQ entries can be clobbered by post-flush re-enqueues.
         sq_vaddr[sq_tail] <= rou_lsu.sq_vaddr;
         sq_wdata[sq_tail] <= rou_lsu.sq_wdata;
-        sq_pc[sq_tail] <= rou_lsu.pc;
 
         sq_tail <= sq_tail + 1;
-        `RAPT_DPI_C_NPC_DIFFTEST_MEM_DIFF(rou_lsu.sq_waddr, rou_lsu.sq_wdata, {{3'b0}, rou_lsu.alu})
+        `RAPT_DPI_C_NPC_DIFFTEST_MEM_DIFF(rou_lsu.sq_waddr, rou_lsu.sq_wdata, {{2'b0}, rou_lsu.alu})
       end
       if (state_store == LS_S_R && sq_valid[sq_head]) begin
         // Store Finished (aligned case — released after single beat).
@@ -436,7 +436,7 @@ module rapt_lsu #(
                        || (ma_state == MA_DONE)
                        || (lsu_l1d.rready && !ma_load_req && ma_state == MA_IDLE);
 
-  always @(posedge clock) begin
+  always_ff @(posedge clock) begin
     if (reset) begin
       state_store <= LS_S_V;
     end else begin
@@ -508,7 +508,6 @@ module rapt_lsu #(
     end
   end
 
-  /* verilator lint_on UNUSEDSIGNAL */
 
   assign ma_w_off  = {1'b0, waddr[OFFW-1:0]};
   // Compute store size from walu byte mask.
@@ -527,14 +526,12 @@ module rapt_lsu #(
   assign ma_store_span = (ma_w_size != '0)
                       && ((ma_w_off + ma_w_size) > (OFFW+1)'(XLEN/8));
 
-  /* verilator lint_off UNUSEDSIGNAL */
   /* verilator lint_off WIDTHTRUNC */
   assign ma_wstrb_wide = {{(XLEN/8){1'b0}}, walu[XLEN/8-1:0]} << ma_w_off;
   assign ma_w_shift    = {{($clog2(2*XLEN)-OFFW-3){1'b0}}, waddr[OFFW-1:0], 3'b000};
   assign ma_wdata_wide = {{XLEN{1'b0}}, wdata} << ma_w_shift;
   assign ma_wdata_hi   = ma_wdata_wide[2*XLEN-1:XLEN];
   /* verilator lint_on WIDTHTRUNC */
-  /* verilator lint_on UNUSEDSIGNAL */
   assign ma_waddr_hi = {waddr[XLEN-1:OFFW], {OFFW{1'b0}}} + XLEN'(XLEN/8);
 `ifdef RAPT_RV64
   // walu is 5-bit; XLEN/8 == 8.  Only the low 5 bits of the overflow can

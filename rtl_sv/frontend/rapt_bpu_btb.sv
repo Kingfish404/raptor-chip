@@ -87,7 +87,7 @@ module rapt_bpu_btb #(
 
   assign w_sel = |w_way_match ? w_way_match[1] : lru[waddr];
 
-  always @(posedge clock) begin
+  always_ff @(posedge clock) begin
     if (reset || init) begin
       for (int i = 0; i < DEPTH; i++) begin
         for (int w = 0; w < WAYS; w++) itype[w][i] <= 2'b00;

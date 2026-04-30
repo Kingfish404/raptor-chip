@@ -7,7 +7,7 @@
 // verilator lint_off DECLFILENAME
 // verilator lint_off UNUSEDSIGNAL
 module raptSoC #(
-    parameter bit [7:0] XLEN = `RAPT_XLEN
+    parameter int XLEN = `RAPT_XLEN
 ) (
     input clock,
     input reset
@@ -145,7 +145,7 @@ module raptSoC #(
 endmodule
 
 module rapt_npc_soc #(
-    parameter bit [7:0] XLEN = `RAPT_XLEN
+    parameter int XLEN = `RAPT_XLEN
 ) (
     input clock,
 
@@ -223,8 +223,7 @@ module rapt_npc_soc #(
 `else
     upper_ok = 1'b1;
 `endif
-    return upper_ok && (
-       (0)  // --- IGNORE ---
+    return upper_ok && ((0)  // --- IGNORE ---
     || (a >= 32'h00100000 && a < 32'h00101000)  // sifive,test finisher
     || (a >= 32'h02000000 && a < 32'h020c0000)  // CLINT
     || (a >= 32'h0c000000 && a < 32'h0d000000)  // PLIC
@@ -266,7 +265,7 @@ module rapt_npc_soc #(
 
   localparam logic [XLEN-1:0] AlignMask = ~(XLEN / 8 - 1);
 
-  always @(posedge clock) begin
+  always_ff @(posedge clock) begin
     if (reset) begin
       state_w <= WIDLE;
       state_r <= RIDLE;

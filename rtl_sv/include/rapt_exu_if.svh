@@ -1,7 +1,7 @@
+/* verilator lint_off DECLFILENAME */
 `ifndef RAPT_EX_IF_SVH
 `define RAPT_EX_IF_SVH
 `include "rapt.svh"
-import rapt_pkg::*;
 
 /* verilator lint_off UNUSEDSIGNAL */
 /* verilator lint_off UNUSEDPARAM */
@@ -63,14 +63,18 @@ interface exu_lsu_if #(
   logic difftest_skip;
   logic rready;
 
-  modport master(output rvalid, raddr, ralu, atomic_lock, pc, input rdata, trap, cause, difftest_skip, rready);
-  modport slave(input rvalid, raddr, ralu, atomic_lock, pc, output rdata, trap, cause, difftest_skip, rready);
+  modport master(
+    output rvalid, raddr, ralu, atomic_lock, pc,
+    input rdata, trap, cause, difftest_skip, rready);
+  modport slave(
+    input rvalid, raddr, ralu, atomic_lock, pc,
+    output rdata, trap, cause, difftest_skip, rready);
 endinterface
 
 
 interface exu_csr_if #(
     parameter bit [7:0] R_W  = 12,
-    parameter bit [7:0] XLEN = `RAPT_XLEN
+    parameter int XLEN = `RAPT_XLEN
 );
   logic [ R_W-1:0] raddr;
 
@@ -275,6 +279,12 @@ interface exu_ioq_bcast_if #(
     parameter unsigned RLEN = `RAPT_REG_LEN,
     parameter int XLEN = `RAPT_XLEN
 );
+  // `pc` is broadcast for trap reporting / debug paths only; some consumers
+  // (PMP store-bare) do not sample it. `alu` bit[5] selects mul/div family
+  // and is unused by non-EXU consumers. The file-wide UNUSEDSIGNAL pragma at
+  // the top doesn't reach interface-bundle instance scope, so we re-disable
+  // here.
+  /* verilator lint_off UNUSEDSIGNAL */
   logic [XLEN-1:0] pc;
   logic [XLEN-1:0] npc;
 

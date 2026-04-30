@@ -23,6 +23,7 @@ typedef word_t paddr_t;
 typedef word_t vaddr_t;
 
 #define GPR_SIZE 32
+#define NPC_PMP_NUM 16
 
 #define MBASE 0x80000000
 #define MSIZE 0x08000000
@@ -120,6 +121,7 @@ typedef struct
   word_t *stvec__;
 
   word_t *scounte;
+  word_t *mcounte;
 
   word_t *sscratch;
   word_t *sepc___;
@@ -144,6 +146,9 @@ typedef struct
   word_t *mip____;
 
   word_t *mcycle_;
+  word_t *mcycleh;
+  word_t *minstret;
+  word_t *minstreth;
   word_t *time___;
   word_t *timeh__;
 
@@ -171,6 +176,23 @@ typedef struct
 
   // for soc
   uint8_t *soc_sram;
+
+  // for CLINT checkpoint persistence
+  uint64_t *clint_mtime;
+  uint64_t *clint_mtimecmp;
+  uint8_t *clint_msip;
+
+  // for PMP checkpoint persistence
+  uint8_t *pmpcfg;
+  word_t *pmpaddr;
+
+  // for checkpoint quiesce check (pipeline drain detection before save).
+  // For ring buffers, head==tail is ambiguous (full vs empty), so we use
+  // the valid bitvector directly (sq_valid/stq_valid==0 means empty).
+  // ROB exposes a dedicated rob_empty signal.
+  uint8_t *rob_empty;
+  uint8_t *sq_valid; // raw byte view of [SQ_SIZE-1:0]; SQ empty when all-0
+  uint8_t *stq_valid;
 } NPCState;
 
 typedef struct

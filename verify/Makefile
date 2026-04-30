@@ -45,8 +45,11 @@ else
 endif
 
 # --- Paths to existing build artifacts ---
-NPC_BIN_32  := $(NSIM_HOME)/build/riscv32-npc-sim
-NPC_BIN_64  := $(NSIM_HOME)/build/riscv64-npc-sim
+# nsim now scopes outputs per RAPT_CONFIG (configs/<name>/). Keep this in
+# sync with nsim/Makefile; default preset is 'default'.
+RAPT_CONFIG ?= default
+NPC_BIN_32  := $(NSIM_HOME)/build/$(RAPT_CONFIG)/riscv32-npc-sim
+NPC_BIN_64  := $(NSIM_HOME)/build/$(RAPT_CONFIG)/riscv64-npc-sim
 NEMU_SO_32  := $(NEMU_HOME)/build/riscv32-nemu-interpreter-so
 NEMU_SO_64  := $(NEMU_HOME)/build/riscv64-nemu-interpreter-so
 MROM_IMG    := $(NSIM_HOME)/csrc/mem/mrom-data/build/mrom-data.bin
@@ -519,7 +522,7 @@ coverage: coverage-build coverage-run coverage-report ## Full coverage flow
 
 coverage-build: ## Build NPC with coverage instrumentation
 	@echo "[coverage] Building NPC with --coverage..."
-	@rm -rf $(NSIM_HOME)/build/obj_dir $(NSIM_HOME)/build/riscv*-npc-*
+	@rm -rf $(NSIM_HOME)/build/$(RAPT_CONFIG)/obj_dir $(NSIM_HOME)/build/$(RAPT_CONFIG)/riscv*-npc-*
 	$(MAKE) -C $(NSIM_HOME) o2_difftest_defconfig
 	$(MAKE) -C $(NSIM_HOME) -j$(NPROC) VFLAGS="$(VFLAGS)" \
 		VERILATOR_EXTRA="--coverage --coverage-line --coverage-toggle -Wno-UNOPTFLAT"

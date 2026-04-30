@@ -7,7 +7,6 @@
 // on same-address conflicts. RAW dependency between slots is handled in RNU (bypass).
 module rapt_rnu_maptable #(
     parameter unsigned RNUM = `RAPT_REG_SIZE,
-    parameter unsigned RLEN = `RAPT_REG_LEN,
     parameter unsigned PLEN = `RAPT_PHY_LEN
 ) (
     input clock,
@@ -23,7 +22,7 @@ module rapt_rnu_maptable #(
   // ---- Committed Map (RAT) ----
   logic [PLEN-1:0] rat[RNUM];
 
-  always @(posedge clock) begin
+  always_ff @(posedge clock) begin
     if (reset) begin
       for (integer i = 0; i < RNUM; i = i + 1) begin
         rat[i] <= PLEN'(i);
@@ -51,7 +50,7 @@ module rapt_rnu_maptable #(
     if (mt.rat_wen_b) rat_wen_b_oh[mt.rat_waddr_b] = 1'b1;
   end
 
-  always @(posedge clock) begin
+  always_ff @(posedge clock) begin
     if (reset) begin
       for (integer i = 0; i < RNUM; i = i + 1) begin
         map[i] <= PLEN'(i);

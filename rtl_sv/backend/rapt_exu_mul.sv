@@ -1,7 +1,7 @@
 `include "rapt.svh"
 
 module rapt_exu_mul #(
-    parameter bit [7:0] XLEN = `RAPT_XLEN,
+    parameter int XLEN = `RAPT_XLEN,
     parameter unsigned TAG_W = 1
 ) (
     input clock,
@@ -207,7 +207,7 @@ module rapt_exu_mul #(
             end
             `RAPT_ALU_REMU__: begin
               if (div_s2 == 0) div_out_r <= div_s1;
-              else if (div_word) div_out_r <= {{XLEN - 32{1'b0}}, div_remainder[31:1]};
+              else if (div_word) div_out_r <= {{XLEN - 31{1'b0}}, div_remainder[31:1]};
               else div_out_r <= div_remainder[XLEN:1];
             end
             default: div_out_r <= 0;

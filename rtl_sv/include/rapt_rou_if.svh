@@ -1,7 +1,7 @@
+/* verilator lint_off DECLFILENAME */
 `ifndef RAPT_RO_IF_SVH
 `define RAPT_RO_IF_SVH
 `include "rapt.svh"
-import rapt_pkg::*;
 
 /* verilator lint_off UNUSEDSIGNAL */
 /* verilator lint_off UNUSEDPARAM */

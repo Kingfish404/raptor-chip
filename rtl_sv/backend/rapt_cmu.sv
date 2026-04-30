@@ -75,7 +75,7 @@ module rapt_cmu #(
   assign is_link_rd  = (bcast_rd == 5'd1) || (bcast_rd == 5'd5);
   assign is_link_rs1 = (bcast_rs1 == 5'd1) || (bcast_rs1 == 5'd5);
 
-  always @(posedge clock) begin
+  always_ff @(posedge clock) begin
     if (reset) begin
       valid <= 0;
       valid_b <= 0;

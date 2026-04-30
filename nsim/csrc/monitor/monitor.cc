@@ -1,4 +1,5 @@
 #include <common.h>
+#include <checkpoint.h>
 #include <difftest.h>
 #include <memory.h>
 #include <getopt.h>
@@ -134,10 +135,18 @@ static int parse_args(int argc, char *argv[])
       {"timeout", required_argument, NULL, 't'},
       {"sig", required_argument, NULL, 256},
       {"trap-on-ebreak", no_argument, NULL, 257},
+      {"ckpt-save", required_argument, NULL, 258},
+      {"ckpt-cycle", required_argument, NULL, 259},
+      {"ckpt-save-exit", no_argument, NULL, 260},
+      {"ckpt-load", required_argument, NULL, 261},
       {0, 0, NULL, 0},
   };
   int o;
   size_t cycle_threshold = -1, instr_threshold = -1;
+  const char *ckpt_save_dir = NULL;
+  const char *ckpt_load_dir = NULL;
+  uint64_t ckpt_save_cycle = 0;
+  bool ckpt_save_exit = false;
   while ((o = getopt_long(argc, argv, "-hbnr:l:c:i:d:p:e:m:t:", table, NULL)) != -1)
   {
     switch (o)
@@ -205,6 +214,21 @@ static int parse_args(int argc, char *argv[])
       sdb_set_trap_on_ebreak(true);
       break;
     }
+    case 258:
+      ckpt_save_dir = optarg;
+      break;
+    case 259:
+      if (optarg[0] == '0' && (optarg[1] == 'x' || optarg[1] == 'X'))
+        sscanf(optarg, "%llx", (unsigned long long *)&ckpt_save_cycle);
+      else
+        sscanf(optarg, "%llu", (unsigned long long *)&ckpt_save_cycle);
+      break;
+    case 260:
+      ckpt_save_exit = true;
+      break;
+    case 261:
+      ckpt_load_dir = optarg;
+      break;
     case 1:
       img_file = optarg;
       break;
@@ -224,6 +248,10 @@ static int parse_args(int argc, char *argv[])
       printf("  -t, --timeout=SECONDS    set wall-clock timeout in seconds\n");
       printf("      --sig=SPEC           dump RISCOF signature (SPEC=<hex_begin>-<hex_end>:<path>)\n");
       printf("      --trap-on-ebreak     don't halt on ebreak; let RTL take the exception\n");
+      printf("      --ckpt-save=DIR      save checkpoint (arch state + memory) at --ckpt-cycle to DIR\n");
+      printf("      --ckpt-cycle=N       cycle at which to trigger checkpoint save (default 0)\n");
+      printf("      --ckpt-save-exit     exit simulator immediately after writing the checkpoint\n");
+      printf("      --ckpt-load=DIR      restore architectural state from checkpoint DIR before run\n");
       printf("  -h, --help               display this help and exit\n");
       printf("\n");
       exit(0);
@@ -234,8 +262,21 @@ static int parse_args(int argc, char *argv[])
   {
     cpu_exec_set_threshold(cycle_threshold, instr_threshold);
   }
+  if (ckpt_save_dir != NULL)
+  {
+    checkpoint_configure_save(ckpt_save_cycle, ckpt_save_dir, ckpt_save_exit);
+  }
+  /* ckpt_load_dir handling is deferred — see init_monitor() below. */
+  if (ckpt_load_dir != NULL)
+  {
+    /* Stash via a static so init_monitor can pick it up after load_img(). */
+    extern const char *_pending_ckpt_load_dir;
+    _pending_ckpt_load_dir = ckpt_load_dir;
+  }
   return 0;
 }
+
+const char *_pending_ckpt_load_dir = NULL;
 
 void init_monitor(int argc, char *argv[])
 {
@@ -243,7 +284,21 @@ void init_monitor(int argc, char *argv[])
 
   long img_size = load_img();
 
+  /* Apply checkpoint memory load AFTER load_img() so the captured snapshot
+   * overrides any image just loaded. The MROM trampoline written here will
+   * survive into RTL execution because mrom_read() reads from the same host
+   * buffer that checkpoint_configure_load() populated. */
+  if (_pending_ckpt_load_dir != NULL)
+  {
+    checkpoint_configure_load(_pending_ckpt_load_dir);
+  }
+
   sdb_sim_init(argc, argv);
+
+  /* RTL is now post-reset and npc.* pointers are valid. Inject GPRs/CSRs
+   * into the live register file. The MROM trampoline (already in mrom
+   * buffer) will be fetched on first cycle and mret to ckpt_pc. */
+  checkpoint_inject_after_reset();
 
   init_mem();
 

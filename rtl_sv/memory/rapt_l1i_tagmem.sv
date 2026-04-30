@@ -11,7 +11,7 @@
 // parallel hit checks needed by the zero-bubble fetch path.
 (* keep_hierarchy *)
 module rapt_l1i_tagmem #(
-    parameter int L1I_LEN  = 32'(`RAPT_L1I_LEN),
+    parameter int L1I_LEN  = `RAPT_L1I_LEN,
     parameter int TAG_W    = 22,
     parameter int L1I_SIZE = 2 ** L1I_LEN
 ) (

@@ -132,7 +132,10 @@ class Raptor(CPU):
         rtl_dir = os.path.join(raptor_home, "rtl_sv")
 
         # Pack all SV into a single preprocessed file for synthesis tools.
-        pack_dir = os.path.join(raptor_home, "nsim", "build")
+        # nsim/Makefile scopes its build outputs per RAPT_CONFIG, so mirror
+        # that layout here when locating the packed RTL.
+        env_config_for_path = os.environ.get("RAPT_CONFIG", "") or "default"
+        pack_dir = os.path.join(raptor_home, "nsim", "build", env_config_for_path)
         pack_sv = os.path.join(pack_dir, "rapt_pack.sv")
 
         # Allow the integrator (e.g. FPGA target) to override RTL preprocessor

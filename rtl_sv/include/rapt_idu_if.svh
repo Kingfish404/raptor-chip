@@ -1,7 +1,7 @@
+/* verilator lint_off DECLFILENAME */
 `ifndef RAPT_PIPE_IF_SVH
 `define RAPT_PIPE_IF_SVH
 `include "rapt.svh"
-import rapt_pkg::*;
 
 interface idu_rnu_if #(
     parameter unsigned RLEN = `RAPT_REG_LEN,

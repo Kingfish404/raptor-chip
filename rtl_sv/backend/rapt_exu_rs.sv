@@ -46,64 +46,67 @@ module rapt_exu_rs #(
 
     // Dispatch-only uop payload snapshot (indexed by ROB destination).
     // Read at issue time by slot A to source `ecall/ebreak/mret/sret/csr_*/inst`.
-    input rapt_pkg::uop_payload_t uop_pl [ROB_SIZE]
+    input rapt_pkg::uop_payload_t uop_pl[ROB_SIZE]
 );
   localparam unsigned ROBLen = $clog2(ROB_SIZE);
   localparam unsigned RSLen = $clog2(RS_SIZE);
 
   // === RS state ===
-  logic [RS_SIZE-1:0] rs_valid;
-  logic [   XLEN-1:0] rs_pc         [RS_SIZE];
-  logic               rs_c          [RS_SIZE];
-  logic               rs_word       [RS_SIZE];
-  logic [        5:0] rs_alu        [RS_SIZE];
-  logic [   XLEN-1:0] rs_vj         [RS_SIZE];
-  logic [   XLEN-1:0] rs_vk         [RS_SIZE];
-  logic [ ROBLen-1:0] rs_dest       [RS_SIZE];
+  logic                   [RS_SIZE-1:0] rs_valid;
+  logic                   [   XLEN-1:0] rs_pc         [RS_SIZE];
+  logic                                 rs_c          [RS_SIZE];
+  logic                                 rs_word       [RS_SIZE];
+  logic                   [        5:0] rs_alu        [RS_SIZE];
+  logic                   [   XLEN-1:0] rs_vj         [RS_SIZE];
+  logic                   [   XLEN-1:0] rs_vk         [RS_SIZE];
+  logic                   [ ROBLen-1:0] rs_dest       [RS_SIZE];
 
-  logic [   PLEN-1:0] rs_pr1        [RS_SIZE];
-  logic [   PLEN-1:0] rs_pr2        [RS_SIZE];
+  logic                   [   PLEN-1:0] rs_pr1        [RS_SIZE];
+  logic                   [   PLEN-1:0] rs_pr2        [RS_SIZE];
   // Per-entry operand busy flags. Latched at dispatch from `|pr1` / `|pr2`
   // and cleared on CDB match. Collapses the former 6-bit `rs_pr*[i] == 0`
   // zero-check into a single bit read in every eligibility vector, shaving
   // gate levels from the wakeup -> select cone.
-  logic [RS_SIZE-1:0] rs_pr1_busy;
-  logic [RS_SIZE-1:0] rs_pr2_busy;
-  logic [   PLEN-1:0] rs_prd        [RS_SIZE];
-  logic [   RLEN-1:0] rs_rd         [RS_SIZE];
+  logic                   [RS_SIZE-1:0] rs_pr1_busy;
+  logic                   [RS_SIZE-1:0] rs_pr2_busy;
+  logic                   [   PLEN-1:0] rs_prd        [RS_SIZE];
+  logic                   [   RLEN-1:0] rs_rd         [RS_SIZE];
 
-  logic [RS_SIZE-1:0] rs_mul_ready;
-  logic [RS_SIZE-1:0] rs_mul_issued;
-  logic [   XLEN-1:0] rs_mul_a      [RS_SIZE];
+  logic                   [RS_SIZE-1:0] rs_mul_ready;
+  logic                   [RS_SIZE-1:0] rs_mul_issued;
+  logic                   [   XLEN-1:0] rs_mul_a      [RS_SIZE];
 
-  logic [RS_SIZE-1:0] rs_jen;
-  logic [RS_SIZE-1:0] rs_br_jmp;
-  logic [RS_SIZE-1:0] rs_br_cond;
-  logic [RS_SIZE-1:0] rs_jump;
-  logic [   XLEN-1:0] rs_imm        [RS_SIZE];
+  logic                   [RS_SIZE-1:0] rs_jen;
+  logic                   [RS_SIZE-1:0] rs_br_jmp;
+  logic                   [RS_SIZE-1:0] rs_br_cond;
+  logic                   [RS_SIZE-1:0] rs_jump;
+  logic                   [   XLEN-1:0] rs_imm        [RS_SIZE];
 
   // Consolidated slot-B ineligibility flag, latched at dispatch. Collapses
   // the previous `rs_system|rs_trap|rs_ecall|rs_ebreak|rs_mret|rs_sret|
   // (rs_csr_csw != 0)` disjunction into one bit per entry to keep the
   // eligibility cone short after moving the underlying fields to `uop_pl`.
-  logic [RS_SIZE-1:0] rs_b_block;
+  logic                   [RS_SIZE-1:0] rs_b_block;
 
-  logic               rs_trap       [RS_SIZE];
-  logic [   XLEN-1:0] rs_tval       [RS_SIZE];
-  logic [   XLEN-1:0] rs_cause      [RS_SIZE];
+  logic                                 rs_trap       [RS_SIZE];
+  logic                   [   XLEN-1:0] rs_tval       [RS_SIZE];
+  logic                   [   XLEN-1:0] rs_cause      [RS_SIZE];
 
   // Per-slot aliases into the dispatch-only payload snapshot. `rs_dest`
   // maps each RS entry to its ROB destination; dereference gives the
   // original uop fields without duplicating them in RS. Only slot A
   // currently needs a view (system / ecall / mret / sret / csr_* live in
-  // payload); slots B/C never carry those control bits.
-  rapt_pkg::uop_payload_t rs_pl_a;
+  // payload); slots B/C never carry those control bits. Only the system/
+  // ecall/mret/sret/csr_* sub-fields of the snapshot are consumed.
+  /* verilator lint_off UNUSEDSIGNAL */
+  rapt_pkg::uop_payload_t               rs_pl_a;
+  /* verilator lint_on UNUSEDSIGNAL */
 
   // === Selection ===
-  logic [  RSLen-1:0] valid_idx_a;
-  logic [  RSLen-1:0] valid_idx_b;
-  logic [  RSLen-1:0] valid_idx_c;
-  logic [  RSLen-1:0] mul_rs_idx;
+  logic                   [  RSLen-1:0] valid_idx_a;
+  logic                   [  RSLen-1:0] valid_idx_b;
+  logic                   [  RSLen-1:0] valid_idx_c;
+  logic                   [  RSLen-1:0] mul_rs_idx;
   logic valid_found_a, valid_found_b, valid_found_c, mul_found;
 
   assign rs_pl_a = uop_pl[rs_dest[valid_idx_a]];
@@ -304,7 +307,7 @@ module rapt_exu_rs #(
       .flush(cmu_bcast.flush_pipe),
       .in_a(rs_vj[mul_rs_idx]),
       .in_b(rs_vk[mul_rs_idx]),
-      .in_op(rs_alu[mul_rs_idx]),
+      .in_op(rs_alu[mul_rs_idx][4:0]),
       .in_word(rs_word[mul_rs_idx]),
       .in_tag(mul_rs_idx),
       .in_valid(mul_found && mul_ready),
@@ -321,7 +324,7 @@ module rapt_exu_rs #(
 `endif
 
   // === Sequential: alloc / forward / writeback-clear / MUL completion ===
-  always @(posedge clock) begin
+  always_ff @(posedge clock) begin
     if (reset || cmu_bcast.flush_pipe) begin
       rs_valid      <= '0;
       rs_pr1_busy   <= '0;
@@ -335,32 +338,32 @@ module rapt_exu_rs #(
         if (free_found_a && i[$clog2(RS_SIZE)-1:0] == free_idx_a) begin
           // Slot-A allocation lands here when accepted by top.
           if (disp.accept_a) begin
-            rs_valid[free_idx_a]   <= 1'b1;
-            rs_alu[free_idx_a]     <= rou_exu.uop.alu;
-            rs_vj[free_idx_a]      <= rou_exu.op1;
-            rs_vk[free_idx_a]      <= rou_exu.op2;
-            rs_dest[free_idx_a]    <= rou_exu.dest;
-            rs_pr1[free_idx_a]     <= rou_exu.pr1;
-            rs_pr2[free_idx_a]     <= rou_exu.pr2;
+            rs_valid[free_idx_a] <= 1'b1;
+            rs_alu[free_idx_a] <= rou_exu.uop.alu;
+            rs_vj[free_idx_a] <= rou_exu.op1;
+            rs_vk[free_idx_a] <= rou_exu.op2;
+            rs_dest[free_idx_a] <= rou_exu.dest;
+            rs_pr1[free_idx_a] <= rou_exu.pr1;
+            rs_pr2[free_idx_a] <= rou_exu.pr2;
             rs_pr1_busy[free_idx_a] <= |rou_exu.pr1;
             rs_pr2_busy[free_idx_a] <= |rou_exu.pr2;
-            rs_prd[free_idx_a]     <= rou_exu.prd;
-            rs_rd[free_idx_a]      <= rou_exu.uop.rd;
-            rs_c[free_idx_a]       <= rou_exu.uop.c;
-            rs_word[free_idx_a]    <= rou_exu.uop.word;
-            rs_jen[free_idx_a]     <= rou_exu.uop.jen;
-            rs_br_jmp[free_idx_a]  <= (rou_exu.uop.jen || rou_exu.uop.ecall || rou_exu.uop.mret);
+            rs_prd[free_idx_a] <= rou_exu.prd;
+            rs_rd[free_idx_a] <= rou_exu.uop.rd;
+            rs_c[free_idx_a] <= rou_exu.uop.c;
+            rs_word[free_idx_a] <= rou_exu.uop.word;
+            rs_jen[free_idx_a] <= rou_exu.uop.jen;
+            rs_br_jmp[free_idx_a] <= (rou_exu.uop.jen || rou_exu.uop.ecall || rou_exu.uop.mret);
             rs_br_cond[free_idx_a] <= (rou_exu.uop.ben);
-            rs_jump[free_idx_a]    <= (rou_exu.uop.jen);
-            rs_imm[free_idx_a]     <= rou_exu.uop.imm;
-            rs_pc[free_idx_a]      <= rou_exu.uop.pc;
+            rs_jump[free_idx_a] <= (rou_exu.uop.jen);
+            rs_imm[free_idx_a] <= rou_exu.uop.imm;
+            rs_pc[free_idx_a] <= rou_exu.uop.pc;
             rs_b_block[free_idx_a] <= (rou_exu.uop.system || rou_exu.uop.trap
                                     || rou_exu.uop.ecall  || rou_exu.uop.ebreak
                                     || rou_exu.uop.mret   || rou_exu.uop.sret
                                     || (rou_exu.uop.csr_csw != 0));
-            rs_trap[free_idx_a]    <= rou_exu.uop.trap;
-            rs_tval[free_idx_a]    <= rou_exu.uop.tval;
-            rs_cause[free_idx_a]   <= rou_exu.uop.cause;
+            rs_trap[free_idx_a] <= rou_exu.uop.trap;
+            rs_tval[free_idx_a] <= rou_exu.uop.tval;
+            rs_cause[free_idx_a] <= rou_exu.uop.cause;
           end
         end else if (rs_valid[i] && !rs_pr1_busy[i] && !rs_pr2_busy[i]) begin
           // MUL FU bookkeeping (tag-based completion).
@@ -436,7 +439,8 @@ module rapt_exu_rs #(
         rs_c[disp.b_rs_idx] <= rou_exu.uop_b.c;
         rs_word[disp.b_rs_idx] <= rou_exu.uop_b.word;
         rs_jen[disp.b_rs_idx] <= rou_exu.uop_b.jen;
-        rs_br_jmp[disp.b_rs_idx]  <= (rou_exu.uop_b.jen || rou_exu.uop_b.ecall || rou_exu.uop_b.mret);
+        rs_br_jmp[disp.b_rs_idx]  <= (
+          rou_exu.uop_b.jen || rou_exu.uop_b.ecall || rou_exu.uop_b.mret);
         rs_br_cond[disp.b_rs_idx] <= (rou_exu.uop_b.ben);
         rs_jump[disp.b_rs_idx] <= (rou_exu.uop_b.jen);
         rs_imm[disp.b_rs_idx] <= rou_exu.uop_b.imm;

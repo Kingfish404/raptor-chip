@@ -3,11 +3,11 @@
 `include "rapt_soc.svh"
 
 module rapt_l1d #(
-    parameter bit [`RAPT_L1D_LEN:0] L1D_LINE_LEN = `RAPT_L1D_LINE_LEN,
+    parameter int L1D_LINE_LEN = `RAPT_L1D_LINE_LEN,
     parameter bit [`RAPT_L1D_LEN:0] L1D_LINE_SIZE = 2 ** L1D_LINE_LEN,
-    parameter bit [`RAPT_L1D_LEN:0] L1D_LEN = `RAPT_L1D_LEN,
+    parameter int L1D_LEN = `RAPT_L1D_LEN,
     parameter bit [`RAPT_L1D_LEN:0] L1D_SIZE = 2 ** `RAPT_L1D_LEN,
-    parameter bit [7:0] XLEN = `RAPT_XLEN,
+    parameter int XLEN = `RAPT_XLEN,
     parameter unsigned L1D_N_WAYS = `RAPT_L1D_N_WAYS
 ) (
     input clock,
@@ -42,14 +42,14 @@ module rapt_l1d #(
   // cache line has independent valid tracking so partial fills / invalidates
   // don't require whole-line eviction.  When a new tag is installed in a
   // line (tag mismatch), all valid bits except the new target are cleared.
-  localparam OFFSET_BITS = $clog2(XLEN/8);  // 2 for RV32, 3 for RV64
-  localparam L1D_TAG_W = XLEN - L1D_LEN - L1D_LINE_LEN - OFFSET_BITS;
-  localparam L1D_WAY_W = L1D_N_WAYS > 1 ? $clog2(L1D_N_WAYS) : 1;
+  localparam unsigned L1dOffsetBits = $clog2(XLEN/8);  // 2 for RV32, 3 for RV64
+  localparam unsigned L1dTagW = XLEN - L1D_LEN - L1D_LINE_LEN - L1dOffsetBits;
+  localparam unsigned L1dWayW = L1D_N_WAYS > 1 ? $clog2(L1D_N_WAYS) : 1;
   logic [L1D_LINE_SIZE-1:0] l1d_valid[L1D_N_WAYS][L1D_SIZE];
-  logic [L1D_TAG_W-1:0] l1d_tag[L1D_N_WAYS][L1D_SIZE];
+  logic [L1dTagW-1:0] l1d_tag[L1D_N_WAYS][L1D_SIZE];
   logic [7:0] rstrb;
 
-  logic [L1D_TAG_W-1:0] addr_tag;
+  logic [L1dTagW-1:0] addr_tag;
   logic [L1D_LEN-1:0] addr_idx;
   logic [L1D_LINE_LEN-1:0] addr_offset;
   logic tag_hit;   // tag comparison result (combinational, from register arrays)
@@ -58,7 +58,7 @@ module rapt_l1d #(
   logic cacheable_r;
   logic cacheable_w;
 
-  logic [L1D_TAG_W-1:0] waddr_tag;
+  logic [L1dTagW-1:0] waddr_tag;
   logic [L1D_LEN-1:0] waddr_idx;
   logic [L1D_LINE_LEN-1:0] waddr_offset;
   logic hit_w;
@@ -99,11 +99,11 @@ module rapt_l1d #(
   logic l1d_update;
   logic [XLEN-1:0] l1d_data_u;
   logic l1d_valid_u;
-  logic [L1D_TAG_W-1:0] l1d_tag_u;
+  logic [L1dTagW-1:0] l1d_tag_u;
   logic [L1D_LEN-1:0] l1d_idx;
   logic [L1D_LINE_LEN-1:0] l1d_off;
-  logic [L1D_WAY_W-1:0] l1d_way;           // which way for pending l1d_update
-  logic [L1D_WAY_W-1:0] ld_fill_way_r;     // registered fill way for load miss
+  logic [L1dWayW-1:0] l1d_way;           // which way for pending l1d_update
+  logic [L1dWayW-1:0] ld_fill_way_r;     // registered fill way for load miss
   logic [L1D_SIZE-1:0] d_replace_bit;      // random replacement toggle per set
 
   // Read-Modify-Write (RMW) for partial store cache updates.
@@ -114,7 +114,7 @@ module rapt_l1d #(
   //   Cycle N+1: SRAM data available, compute merge, set l1d_update for write
   logic l1d_rmw;
   logic [XLEN-1:0] l1d_rmw_wdata;
-  logic [OFFSET_BITS-1:0] l1d_rmw_waddr_lo;
+  logic [L1dOffsetBits-1:0] l1d_rmw_waddr_lo;
   /* verilator lint_off UNUSEDSIGNAL */
   logic [4:0] l1d_rmw_walu;
   /* verilator lint_on UNUSEDSIGNAL */
@@ -141,14 +141,14 @@ module rapt_l1d #(
 
   // Speculative SRAM read: when IDLE with a pending load, drive the *incoming*
   // virtual index directly instead of waiting for l1d_addr to be registered.
-  // Safe because L1D_LEN+L1D_LINE_LEN+OFFSET_BITS < 12 (page offset), so
+    // Safe because L1D_LEN+L1D_LINE_LEN+L1dOffsetBits < 12 (page offset), so
   // virt_idx == phys_idx (VIPT constraint satisfied). PTW paths are also safe:
   // l1d_addr holds the virtual address during PTW, whose index equals the
   // final physical index.
   logic [L1D_LEN-1:0] sram_raddr;
   assign sram_raddr = partial_store_rmw ? waddr_idx
       : load_speculate
-      ? lsu_l1d.raddr[L1D_LEN+L1D_LINE_LEN+OFFSET_BITS-1:L1D_LINE_LEN+OFFSET_BITS]
+      ? lsu_l1d.raddr[L1D_LEN+L1D_LINE_LEN+L1dOffsetBits-1:L1D_LINE_LEN+L1dOffsetBits]
       : addr_idx;
 
   // Data SRAM banks: per-way, one bank per word position in cache line
@@ -164,7 +164,7 @@ module rapt_l1d #(
             .ren  (1'b1),
             .raddr(sram_raddr),
             .rdata(data_bank_rdata[w][gi]),
-            .wen  (l1d_update && (l1d_off == L1D_LINE_LEN'(gi)) && (l1d_way == L1D_WAY_W'(w))),
+            .wen  (l1d_update && (l1d_off == L1D_LINE_LEN'(gi)) && (l1d_way == L1dWayW'(w))),
             .waddr(l1d_idx),
             .wdata(l1d_data_u)
         );
@@ -273,9 +273,9 @@ module rapt_l1d #(
 `endif
     );
 
-  assign addr_tag = l1d_addr[XLEN-1:L1D_LEN+L1D_LINE_LEN+OFFSET_BITS];
-  assign addr_idx = l1d_addr[L1D_LEN+L1D_LINE_LEN+OFFSET_BITS-1:L1D_LINE_LEN+OFFSET_BITS];
-  assign addr_offset = l1d_addr[L1D_LINE_LEN+OFFSET_BITS-1:OFFSET_BITS];
+  assign addr_tag = l1d_addr[XLEN-1:L1D_LEN+L1D_LINE_LEN+L1dOffsetBits];
+  assign addr_idx = l1d_addr[L1D_LEN+L1D_LINE_LEN+L1dOffsetBits-1:L1D_LINE_LEN+L1dOffsetBits];
+  assign addr_offset = l1d_addr[L1D_LINE_LEN+L1dOffsetBits-1:L1dOffsetBits];
 
   // tag_hit: combinational tag match in LD_A (per-word tags in registers, no SRAM latency)
   //
@@ -295,7 +295,7 @@ module rapt_l1d #(
   // lie within the page offset, so virt == phys).
   logic [L1D_LINE_LEN-1:0] sram_rd_offset;
   assign sram_rd_offset = load_speculate
-      ? lsu_l1d.raddr[L1D_LINE_LEN+OFFSET_BITS-1:OFFSET_BITS]
+      ? lsu_l1d.raddr[L1D_LINE_LEN+L1dOffsetBits-1:L1dOffsetBits]
       : addr_offset;
   // Parallel tag comparison: with per-line tag, compare once per way; then
   // AND with per-word valid bits to yield per-offset hit vectors.
@@ -313,11 +313,11 @@ module rapt_l1d #(
       assign tag_hit_vec[gi] = |way_tag_hit[gi];
     end
   endgenerate
-  logic [L1D_WAY_W-1:0] load_hit_way;
+  logic [L1dWayW-1:0] load_hit_way;
   always_comb begin
     load_hit_way = '0;
     for (int w = int'(L1D_N_WAYS)-1; w >= 0; w--)
-      if (way_tag_hit[addr_offset][w]) load_hit_way = L1D_WAY_W'(w);
+      if (way_tag_hit[addr_offset][w]) load_hit_way = L1dWayW'(w);
   end
 
   logic sram_bypass_r;
@@ -360,9 +360,9 @@ module rapt_l1d #(
   assign data_hit = (l1d_state == LD_A) && tag_hit;
   assign l1d_data = data_bank_rdata[load_hit_way][addr_offset];
 
-  assign waddr_tag = lsu_l1d.waddr[XLEN-1:L1D_LEN+L1D_LINE_LEN+OFFSET_BITS];
-  assign waddr_idx = lsu_l1d.waddr[L1D_LEN+L1D_LINE_LEN+OFFSET_BITS-1:L1D_LINE_LEN+OFFSET_BITS];
-  assign waddr_offset = lsu_l1d.waddr[L1D_LINE_LEN+OFFSET_BITS-1:OFFSET_BITS];
+  assign waddr_tag = lsu_l1d.waddr[XLEN-1:L1D_LEN+L1D_LINE_LEN+L1dOffsetBits];
+  assign waddr_idx = lsu_l1d.waddr[L1D_LEN+L1D_LINE_LEN+L1dOffsetBits-1:L1D_LINE_LEN+L1dOffsetBits];
+  assign waddr_offset = lsu_l1d.waddr[L1D_LINE_LEN+L1dOffsetBits-1:L1dOffsetBits];
   // Parallel write-side tag comparison (per-line tag)
   logic [L1D_N_WAYS-1:0] way_wtag_match;
   logic [L1D_N_WAYS-1:0] way_whit [L1D_LINE_SIZE];
@@ -379,16 +379,16 @@ module rapt_l1d #(
     end
   endgenerate
   assign hit_w = whit_vec[waddr_offset];
-  logic [L1D_WAY_W-1:0] store_hit_way;
+  logic [L1dWayW-1:0] store_hit_way;
   always_comb begin
     store_hit_way = '0;
     for (int w = int'(L1D_N_WAYS)-1; w >= 0; w--)
-      if (way_whit[waddr_offset][w]) store_hit_way = L1D_WAY_W'(w);
+      if (way_whit[waddr_offset][w]) store_hit_way = L1dWayW'(w);
   end
   // Fill way selection for store miss (full-word write-allocate)
-  logic [L1D_WAY_W-1:0] store_fill_way;
+  logic [L1dWayW-1:0] store_fill_way;
   // Fill way selection for load miss
-  logic [L1D_WAY_W-1:0] ld_fill_way;
+  logic [L1dWayW-1:0] ld_fill_way;
   generate
     if (L1D_N_WAYS > 1) begin : gen_fill_multi
       // Duplicate-tag prevention: if the tag already exists in a way (from a
@@ -430,9 +430,10 @@ module rapt_l1d #(
   // (set in IDLE for bare/TLB-hit, or from ptw_result_ptag after ptw_done).
   // Use the latched `l1d_ralu` for size (lsu_l1d.ralu may already be pointing
   // at the next request once we leave IDLE).  ralu[1:0] encodes transfer
-  // size: 0=byte, 1=half, 2=word, 3=double.
-  logic [4:0] eff_ralu;
-  assign eff_ralu = (l1d_state == IDLE) ? lsu_l1d.ralu : l1d_ralu;
+  // size: 0=byte, 1=half, 2=word, 3=double; upper bits select sign/aux op
+  // and are not consumed here.
+  logic [1:0] eff_ralu;
+  assign eff_ralu = (l1d_state == IDLE) ? lsu_l1d.ralu[1:0] : l1d_ralu[1:0];
   logic [3:0] load_size_m1;
   always_comb begin
     unique case (eff_ralu[1:0])
@@ -513,7 +514,9 @@ module rapt_l1d #(
   assign store_unmapped_fault_mmu = !rapt_pkg::addr_mapped(exu_l1d.paddr);
 
   // --- Sv32 PTE permission check (data access: load/store, not fetch) ---
-  // pte bits (rapt_tlb layout): [0]=R [1]=W [2]=X [3]=U [4]=G [5]=A [6]=D
+  // pte bits (rapt_tlb layout): [0]=R [1]=W [2]=X [3]=U [4]=G [5]=A [6]=D.
+  // Bit [4]=G (global) does not affect data fault and is not consumed below.
+  /* verilator lint_off UNUSEDSIGNAL */
   function automatic logic pte_fault_data(
       input logic [6:0] pte,
       input logic       is_store,
@@ -543,6 +546,7 @@ module rapt_l1d #(
       end
       return fault;
   endfunction
+  /* verilator lint_on UNUSEDSIGNAL */
 
   // Perm-fault signals evaluated against currently-visible PTEs.
   logic pf_load_tlb, pf_store_tlb, pf_load_ptw, pf_store_ptw;
@@ -597,9 +601,12 @@ module rapt_l1d #(
   // read channel: PTW takes priority over cache miss reads
   assign l1d_bus.arvalid = ptw_arvalid
     ? !pmp_ptw_fault
-    : (l1d_state == LD_A) && !tag_hit && !(pmp_load_fault || load_unmapped_fault) && !cmu_bcast.flush_pipe;
+    : (l1d_state == LD_A)
+      && !tag_hit
+      && !(pmp_load_fault || load_unmapped_fault)
+      && !cmu_bcast.flush_pipe;
   assign l1d_bus.araddr = ptw_arvalid ? ptw_araddr : l1d_addr;
-  assign l1d_bus.rstrb = (cacheable_r || ptw_arvalid) ? {{XLEN/8{1'b1}}} : rstrb;
+  assign l1d_bus.rstrb = (cacheable_r || ptw_arvalid) ? 8'($unsigned({XLEN/8{1'b1}})) : rstrb;
 
   assign lsu_l1d.rdata = data_hit ? l1d_data : l1d_bus.rdata;
   assign lsu_l1d.trap = (l1d_state == TRAP) && (rec_addr == lsu_l1d.raddr);
@@ -608,7 +615,10 @@ module rapt_l1d #(
   // complete the rready/rdata handshake the same cycle the FSM transitions
   // to TRAP, letting the forbidden data propagate.
   assign lsu_l1d.rready = (l1d_state == TRAP)
-      || (data_hit && !(pmp_load_fault || load_unmapped_fault) && lsu_l1d.rvalid && rec_addr == lsu_l1d.raddr)
+      || (data_hit
+        && !(pmp_load_fault || load_unmapped_fault)
+        && lsu_l1d.rvalid
+        && rec_addr == lsu_l1d.raddr)
       || ((l1d_state == LD_D)
           && (lsu_l1d.rvalid)
           && (l1d_bus.rvalid)
@@ -638,10 +648,17 @@ module rapt_l1d #(
   assign exu_l1d.cause = cause;
   assign exu_l1d.reservation = reservation;
   assign exu_l1d.ready = exu_l1d.valid && ((l1d_state == TRAP)
-    || (stlb_hit && !mis_align_store && !pmp_store_fault_mmu && !store_unmapped_fault_mmu && !pf_store_tlb)
-    || (stlb_mmu && ptw_done && !pf_store_ptw && !pmp_store_fault_mmu && !store_unmapped_fault_mmu));
+    || (stlb_hit
+      && !mis_align_store
+      && !pmp_store_fault_mmu
+      && !store_unmapped_fault_mmu && !pf_store_tlb)
+    || (stlb_mmu
+      && ptw_done
+      && !pf_store_ptw
+      && !pmp_store_fault_mmu
+      && !store_unmapped_fault_mmu));
 
-  always @(posedge clock) begin
+  always_ff @(posedge clock) begin
     if (reset) begin
       l1d_state  <= IDLE;
       for (int w = 0; w < int'(L1D_N_WAYS); w++)
@@ -878,10 +895,10 @@ module rapt_l1d #(
         // updated as if the natural-aligned word/dword was fully written,
         // because the BUS shifts wstrb/wdata by waddr_lo.
         if (lsu_l1d.walu == `RAPT_SD_WSTRB
-            && lsu_l1d.waddr[OFFSET_BITS-1:0] == '0) begin
+            && lsu_l1d.waddr[L1dOffsetBits-1:0] == '0) begin
 `else
         if (lsu_l1d.walu == `RAPT_SW_WSTRB
-            && lsu_l1d.waddr[OFFSET_BITS-1:0] == '0) begin
+            && lsu_l1d.waddr[L1dOffsetBits-1:0] == '0) begin
 `endif
           l1d_update <= 1'b1;
           l1d_data_u <= lsu_l1d.wdata;
@@ -897,7 +914,7 @@ module rapt_l1d #(
               // Partial store hit, SRAM read port free: initiate RMW
               l1d_rmw <= 1'b1;
               l1d_rmw_wdata <= lsu_l1d.wdata;
-              l1d_rmw_waddr_lo <= lsu_l1d.waddr[OFFSET_BITS-1:0];
+              l1d_rmw_waddr_lo <= lsu_l1d.waddr[L1dOffsetBits-1:0];
               l1d_rmw_walu <= lsu_l1d.walu;
               l1d_tag_u <= waddr_tag;
               l1d_idx <= waddr_idx;

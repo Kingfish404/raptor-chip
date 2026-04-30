@@ -374,7 +374,7 @@ module rapt_exu_ioq #(
   assign exu_ioq_bcast.valid = ioq_valid_found;
 
   // === Sequential: enqueue / dequeue / forwarding / OoO LSU FSM ===
-  always @(posedge clock) begin
+  always_ff @(posedge clock) begin
     if (reset || cmu_bcast.flush_pipe) begin
       ioq_ren        <= '0;
       ioq_wen        <= '0;

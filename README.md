@@ -18,7 +18,7 @@
 
 > It is possible to invent a single machine which can be used to compute any computable sequence. — Alan Turing, 1936
 
-Welcome to the Raptor Project! Here is an all-in-one repository for exploring, developing, optimizing, and verifying a RISC-V core. Aiming at high-performance & quality, full Linux support, FPGA implementation, and ASIC readiness.
+Welcome to the Raptor Project! Here is an all-in-one repository for exploring, developing, optimizing, and verifying a RISC-V core. Aiming at high quality, full Linux support, FPGA implementation, and ASIC readiness.
 
 Core description: **Super-scalar, Out-of-order RISC-V core** with register renaming, ROB, and reservation stations. The RTL is described by `SystemVerilog` with `Chisel` (`Scala`) used only for decoder generation. Features Sv32 virtual memory (MMU/TLB), 16-entry PMP (TOR/NA4/NAPOT), LR/SC + AMO atomics, compressed instructions (RVC), and boots Linux v6.18 via OpenSBI. Supports configurable **RV32** and **RV64** modes via compile-time switch.
 
@@ -59,6 +59,9 @@ make setup-rtl
 make help
 # or pack all SV files into one
 make verilog pack
+
+# Setup for IDE/LSP support
+make ide-setup
 ```
 
 ### 1. NEMU (Software Emulator)

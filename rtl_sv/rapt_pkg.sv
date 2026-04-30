@@ -2,13 +2,13 @@
 package rapt_pkg;
   `include "rapt.svh"
 
-  localparam int XLEN = `RAPT_XLEN;
+  localparam int XLENPkg = `RAPT_XLEN;
 
-  localparam unsigned RNUM = `RAPT_REG_SIZE;
-  localparam unsigned RLEN = `RAPT_REG_LEN;
+  localparam unsigned RNUMPkg = `RAPT_REG_SIZE;
+  localparam unsigned RLENPkg = `RAPT_REG_LEN;
 
-  localparam unsigned PNUM = `RAPT_PHY_SIZE;
-  localparam unsigned PLEN = `RAPT_PHY_LEN;
+  localparam unsigned PNUMPkg = `RAPT_PHY_SIZE;
+  localparam unsigned PLENPkg = `RAPT_PHY_LEN;
 
   typedef struct packed {
     logic       c;
@@ -31,25 +31,25 @@ package rapt_pkg;
     logic [2:0] csr_csw;
 
     logic trap;
-    logic [XLEN-1:0] tval;
-    logic [XLEN-1:0] cause;
+    logic [XLENPkg-1:0] tval;
+    logic [XLENPkg-1:0] cause;
 
-    logic [RLEN-1:0] rd;
-    logic [XLEN-1:0] imm;
+    logic [RLENPkg-1:0] rd;
+    logic [XLENPkg-1:0] imm;
 
-    logic [XLEN-1:0] pnpc;
+    logic [XLENPkg-1:0] pnpc;
     logic [31:0] inst;
-    logic [XLEN-1:0] pc;
+    logic [XLENPkg-1:0] pc;
   } uop_t;
 
   typedef struct packed {
-    logic [XLEN-1:0] op1;
-    logic [XLEN-1:0] op2;
+    logic [XLENPkg-1:0] op1;
+    logic [XLENPkg-1:0] op2;
 
-    logic [PLEN-1:0] pr1;
-    logic [PLEN-1:0] pr2;
-    logic [PLEN-1:0] prd;
-    logic [PLEN-1:0] prs;
+    logic [PLENPkg-1:0] pr1;
+    logic [PLENPkg-1:0] pr2;
+    logic [PLENPkg-1:0] prd;
+    logic [PLENPkg-1:0] prs;
   } prd_t;
 
   // ROB entry state
@@ -86,51 +86,51 @@ package rapt_pkg;
   // fields live in `uop_payload_t` above.
   typedef struct packed {
     // Physical register mapping
-    logic [PLEN-1:0] prd;
-    logic [PLEN-1:0] prs;
+    logic [PLENPkg-1:0] prd;
+    logic [PLENPkg-1:0] prs;
 
     // Architectural register
-    logic [RLEN-1:0] rd;
-    rob_state_t      state;
-    logic            busy;
+    logic [RLENPkg-1:0] rd;
+    rob_state_t         state;
+    logic               busy;
 
     // Branch / jump
-    logic            ben;
-    logic            jen;
-    logic            jren;
-    logic            btaken;
-    logic [XLEN-1:0] npc;
-    logic [XLEN-1:0] pnpc;
+    logic               ben;
+    logic               jen;
+    logic               jren;
+    logic               btaken;
+    logic [XLENPkg-1:0] npc;
+    logic [XLENPkg-1:0] pnpc;
 
     // Memory
-    logic            wen;
-    logic            word;      // RV64 W-variant flag
-    logic [5:0]      alu;
-    logic [XLEN-1:0] sq_waddr;
-    logic [XLEN-1:0] sq_wdata;
+    logic               wen;
+    logic               word;      // RV64 W-variant flag
+    logic [5:0]         alu;
+    logic [XLENPkg-1:0] sq_waddr;
+    logic [XLENPkg-1:0] sq_wdata;
 
     // Atomics
     logic atom;
     logic atom_sc;
 
     // CSR (WB-written)
-    logic            csr_wen;
-    logic [XLEN-1:0] csr_wdata;
+    logic               csr_wen;
+    logic [XLENPkg-1:0] csr_wdata;
 
     // Trap (WB-mutable by EXU port-A and IOQ)
-    logic            trap;
-    logic [XLEN-1:0] tval;
-    logic [XLEN-1:0] cause;
+    logic               trap;
+    logic [XLENPkg-1:0] tval;
+    logic [XLENPkg-1:0] cause;
 
     // Difftest
     logic difftest_skip;
 
     // PC (commit path)
-    logic [XLEN-1:0] pc;
+    logic [XLENPkg-1:0] pc;
   } rob_entry_t;
 
   // Shared address classification functions for L1I/L1D
-  function automatic logic addr_cacheable(input logic [XLEN-1:0] addr);
+  function automatic logic addr_cacheable(input logic [XLENPkg-1:0] addr);
     return (0)  // --- IGNORE ---
     || (addr >= 'h0f000000 && addr < 'h0f010000)  // sram (litex + raptSoC)
     || (addr >= 'h20000000 && addr < 'h20010000)  // mrom (64KB)
@@ -144,7 +144,7 @@ package rapt_pkg;
   // (cacheable memory or MMIO).  Accesses outside of this predicate
   // are unmapped and must raise an access-fault trap to mimic sail /
   // real-hardware bus-error behaviour.
-  function automatic logic addr_mapped(input logic [XLEN-1:0] addr);
+  function automatic logic addr_mapped(input logic [XLENPkg-1:0] addr);
     return (0)  // --- IGNORE ---
     || (addr >= 'h00100000 && addr < 'h00101000)  // sifive,test finisher
     || (addr >= 'h02000000 && addr < 'h020c0000)  // CLINT
@@ -160,7 +160,7 @@ package rapt_pkg;
   endfunction
 
   // MMIO regions for difftest skip (not modelled in reference ISS)
-  function automatic logic addr_mmio(input logic [XLEN-1:0] addr);
+  function automatic logic addr_mmio(input logic [XLENPkg-1:0] addr);
     return (0)  // --- IGNORE ---
     || (addr >= 'h00100000 && addr <= 'h00100fff)  // finisher (sifive,test)
     || (addr >= 'h10001000 && addr <= 'h10001fff)  // uart
