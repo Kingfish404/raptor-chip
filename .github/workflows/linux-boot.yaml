@@ -1,4 +1,4 @@
-name: Linux boot & RTL release
+name: Linux boot
 
 on:
   push:

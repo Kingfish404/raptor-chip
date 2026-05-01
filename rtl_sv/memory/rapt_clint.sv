@@ -12,7 +12,11 @@
 //   timer_int = (mtime >= mtimecmp)
 //   sw_int    = msip[0]
 module rapt_clint #(
-    parameter int XLEN = `RAPT_XLEN
+    parameter int XLEN = `RAPT_XLEN,
+    // Pace mtime so it ticks at RAPT_MTIME_FREQ_MHZ (DTS timebase-frequency).
+    // Override via VFLAGS="-DRAPT_MTIME_FREQ_MHZ=..." or by passing MTIME_DIV at
+    // instantiation. See rtl_sv/include/npc/rapt_soc.svh.
+    parameter int MTIME_DIV = `RAPT_MTIME_DIV
 ) (
     input clock,
 
@@ -34,6 +38,8 @@ module rapt_clint #(
   logic [63:0] mtime;
   logic [63:0] mtimecmp;
   logic        msip_reg;
+  localparam int MTIMEdivW = (MTIME_DIV <= 1) ? 1 : $clog2(MTIME_DIV);
+  logic [MTIMEdivW-1:0] mtime_div_cnt;
 
   // --- Interrupt generation (level-triggered) ---
   assign timer_int = (mtime >= mtimecmp);
@@ -62,8 +68,16 @@ module rapt_clint #(
       mtime    <= 64'h0;
       mtimecmp <= 64'hFFFF_FFFF_FFFF_FFFF;
       msip_reg <= 1'b0;
+      mtime_div_cnt <= '0;
     end else begin
-      mtime <= mtime + 64'h1;
+      if (MTIME_DIV <= 1) begin
+        mtime <= mtime + 64'h1;
+      end else if (mtime_div_cnt == MTIMEdivW'(MTIME_DIV - 1)) begin
+        mtime <= mtime + 64'h1;
+        mtime_div_cnt <= '0;
+      end else begin
+        mtime_div_cnt <= mtime_div_cnt + MTIMEdivW'(1);
+      end
       if (wvalid) begin
         case (awaddr)
           `RAPT_CLINT_MSIP: msip_reg <= wdata[0];

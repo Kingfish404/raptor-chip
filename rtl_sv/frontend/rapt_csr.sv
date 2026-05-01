@@ -1,6 +1,7 @@
 `include "rapt.svh"
 `include "rapt_if.svh"
 `include "rapt_dpi_c.svh"
+`include "rapt_soc.svh"  // RAPT_MTIME_DIV (CSR `time` paces with CLINT mtime)
 
 module rapt_csr #(
     parameter int XLEN = `RAPT_XLEN,
@@ -78,6 +79,18 @@ module rapt_csr #(
   logic mstatus_mie;
   csr_t waddr_reg, raddr_reg;
   logic [R_W-1:0] raddr;
+
+  // CSR `time` MUST advance in lockstep with CLINT `mtime` (RV Priv §10).
+  // Both are paced by RAPT_MTIME_DIV = RAPT_CORE_CLOCK_MHZ / RAPT_MTIME_FREQ_MHZ
+  // so the kernel sees the same Hz the DTS declared. Override via VFLAGS or by
+  // re-defining RAPT_MTIME_FREQ_MHZ in rapt_soc.svh.
+  localparam int RAPTTimeDIV  = `RAPT_MTIME_DIV;
+  localparam int RAPTTimeDIVW = (RAPTTimeDIV <= 1) ? 1 : $clog2(RAPTTimeDIV);
+  logic [RAPTTimeDIVW-1:0] time_div_cnt;
+  logic                    time_tick;
+  assign time_tick = (RAPTTimeDIV <= 1)
+                   ? 1'b1
+                   : (time_div_cnt == RAPTTimeDIVW'(RAPTTimeDIV - 1));
 
   // PMP state: 8 active entries (pmpcfg0/pmpcfg1; pmpcfg2/3 hardwired 0).
   // Reserved bits [6:5] of each cfg byte are WARL-zero (mask 8'h9F).
@@ -452,10 +465,16 @@ module rapt_csr #(
         pmpcfg_r[i]  <= '0;
         pmpaddr_r[i] <= '0;
       end
+      time_div_cnt <= '0;
     end else begin
-      csr[TIME___] <= csr[TIME___] + 1;
-      if (csr[TIME___] == ~'h0) begin
-        csr[TIMEH__] <= csr[TIMEH__] + 1;
+      if (time_tick) begin
+        csr[TIME___] <= csr[TIME___] + 1;
+        if (csr[TIME___] == ~'h0) begin
+          csr[TIMEH__] <= csr[TIMEH__] + 1;
+        end
+        time_div_cnt <= '0;
+      end else begin
+        time_div_cnt <= time_div_cnt + RAPTTimeDIVW'(1);
       end
       csr[MCYCLE_] <= csr[MCYCLE_] + 1;
       if (csr[MCYCLE_] == ~'h0) begin

@@ -1,4 +1,4 @@
-name: App tests (pk)
+name: App (pk)
 
 on:
   push:

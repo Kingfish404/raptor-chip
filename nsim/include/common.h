@@ -25,6 +25,14 @@ typedef word_t vaddr_t;
 #define GPR_SIZE 32
 #define NPC_PMP_NUM 16
 
+// CLINT `mtime` tick rate (MHz). MUST match RAPT_MTIME_FREQ_MHZ in
+// rtl_sv/include/<soc>/rapt_soc.svh and the DTS `timebase-frequency`
+// (which is in Hz, so multiply by 1_000_000).
+// Override at build time with -DRAPT_MTIME_FREQ_MHZ=...
+#ifndef RAPT_MTIME_FREQ_MHZ
+#define RAPT_MTIME_FREQ_MHZ 10ULL
+#endif
+
 #define MBASE 0x80000000
 #define MSIZE 0x08000000
 

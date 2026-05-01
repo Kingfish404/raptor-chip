@@ -12,6 +12,27 @@
 `define RAPT_BUS_RTC_ADDR 'h0200BFF8
 `define RAPT_BUS_RTC_ADDR_UP 'h0200BFFC
 
+// --- Timer / clock model -----------------------------------------------------
+// Nominal core clock frequency assumed by the simulator's cycle model. The DTS
+// `timebase-frequency` (RAPT_MTIME_FREQ_MHZ * 1_000_000) MUST match the rate
+// at which CLINT `mtime` and CSR `time` advance. The divider derived below
+// paces both so that the kernel-visible time matches what device tree /
+// OpenSBI declared.
+//
+// Override on the verilator/synthesis command line, e.g.:
+//   VFLAGS="-DRAPT_MTIME_FREQ_MHZ=50"
+//   VFLAGS="-DRAPT_CORE_CLOCK_MHZ=500 -DRAPT_MTIME_FREQ_MHZ=10"
+// Remember to also rebuild the DTS / opensbi platform with the matching value.
+`ifndef RAPT_CORE_CLOCK_MHZ
+`define RAPT_CORE_CLOCK_MHZ 1000
+`endif
+`ifndef RAPT_MTIME_FREQ_MHZ
+`define RAPT_MTIME_FREQ_MHZ 10
+`endif
+`ifndef RAPT_MTIME_DIV
+`define RAPT_MTIME_DIV (`RAPT_CORE_CLOCK_MHZ / `RAPT_MTIME_FREQ_MHZ)
+`endif
+
 `define RAPT_BUS_SERIAL_PORT 'h10000000
 `define RAPT_BUS_NS16550_ADDR 'h10000000
 

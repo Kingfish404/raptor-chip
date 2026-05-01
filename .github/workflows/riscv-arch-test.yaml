@@ -1,4 +1,4 @@
-name: RISC-V Architecture Compatibility Tests
+name: RISC-V Compatibility
 
 # Cross-validates the Raptor core against the upstream riscv-non-isa/riscv-arch-test
 # suite via the classic RISCOF flow (sail-riscv reference). Complements the

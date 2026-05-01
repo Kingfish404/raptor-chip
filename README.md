@@ -1,9 +1,12 @@
 # Raptor Project
 
-[![RISC-V Architecture Compatibility Tests](https://github.com/Kingfish404/raptor-chip/actions/workflows/riscv-arch-test.yaml/badge.svg)](https://github.com/Kingfish404/raptor-chip/actions/workflows/riscv-arch-test.yaml)
-[![AM tests & benchmarks & STA](https://github.com/Kingfish404/raptor-chip/actions/workflows/am-benchmark.yaml/badge.svg)](https://github.com/Kingfish404/raptor-chip/actions/workflows/am-benchmark.yaml)
-[![App tests (pk)](https://github.com/Kingfish404/raptor-chip/actions/workflows/app-pk.yaml/badge.svg)](https://github.com/Kingfish404/raptor-chip/actions/workflows/app-pk.yaml)
-[![Linux boot & RTL release](https://github.com/Kingfish404/raptor-chip/actions/workflows/linux-boot.yaml/badge.svg)](https://github.com/Kingfish404/raptor-chip/actions/workflows/linux-boot.yaml)
+[![RISC-V Compatibility](https://github.com/Kingfish404/raptor-chip/actions/workflows/riscv-arch-test.yaml/badge.svg)](https://github.com/Kingfish404/raptor-chip/actions/workflows/riscv-arch-test.yaml)
+[![AM benchmark & STA](https://github.com/Kingfish404/raptor-chip/actions/workflows/am-benchmark.yaml/badge.svg)](https://github.com/Kingfish404/raptor-chip/actions/workflows/am-benchmark.yaml)
+[![App (pk)](https://github.com/Kingfish404/raptor-chip/actions/workflows/app-pk.yaml/badge.svg)](https://github.com/Kingfish404/raptor-chip/actions/workflows/app-pk.yaml)
+[![Linux boot](https://github.com/Kingfish404/raptor-chip/actions/workflows/linux-boot.yaml/badge.svg)](https://github.com/Kingfish404/raptor-chip/actions/workflows/linux-boot.yaml)
+[![Ubuntu](https://img.shields.io/badge/Ubuntu-E95420?style=flat&logo=ubuntu&logoColor=white)](https://en.wikipedia.org/wiki/Ubuntu)
+[![macOS](https://img.shields.io/badge/macOS-000000?style=flat&logo=apple&logoColor=white)](https://en.wikipedia.org/wiki/MacOS)
+[![Github](https://img.shields.io/badge/GitHub-181717?style=flat&logo=github&logoColor=white)](https://github.dev/Kingfish404/raptor-chip)
 
 [![ISA](https://img.shields.io/badge/ISA-RV32%2F64IMAC__Zb*-192f60?longCache=true&style=flat&logo=riscv&logoColor=white&colorA=192f60&colorB=660874)](./docs/uarch.md)
 [![marchID](https://img.shields.io/badge/marchID-0x32-660874?longCache=true&style=flat&colorA=192f60&colorB=660874)](https://github.com/riscv/riscv-isa-manual)
@@ -11,10 +14,6 @@
 [![Microarchitecture](https://img.shields.io/badge/uArch-Superscalar%20OoO-192f60?longCache=true&style=flat&colorA=192f60&colorB=660874)](./docs/uarch.md)
 [![FPGA](https://img.shields.io/badge/FPGA-LiteX-192f60?longCache=true&style=flat&colorA=192f60&colorB=660874)](./fpga/)
 [![License](https://img.shields.io/github/license/Kingfish404/raptor-chip?label=License&longCache=true&style=flat&logo=apache&logoColor=white&colorA=192f60&colorB=660874)](./LICENSE)
-
-[![Ubuntu](https://img.shields.io/badge/Ubuntu-E95420?style=flat&logo=ubuntu&logoColor=white)](https://en.wikipedia.org/wiki/Ubuntu)
-[![macOS](https://img.shields.io/badge/macOS-000000?style=flat&logo=apple&logoColor=white)](https://en.wikipedia.org/wiki/MacOS)
-[![Github](https://img.shields.io/badge/GitHub-181717?style=flat&logo=github&logoColor=white)](https://github.dev/Kingfish404/raptor-chip)
 
 > It is possible to invent a single machine which can be used to compute any computable sequence. — Alan Turing, 1936
 

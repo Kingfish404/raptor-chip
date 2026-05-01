@@ -12,6 +12,17 @@
 `define RAPT_BUS_RTC_ADDR 'h0200BFF8
 `define RAPT_BUS_RTC_ADDR_UP 'h0200BFFC
 
+// --- Timer / clock model (see rtl_sv/include/npc/rapt_soc.svh for details) ---
+`ifndef RAPT_CORE_CLOCK_MHZ
+`define RAPT_CORE_CLOCK_MHZ 1000
+`endif
+`ifndef RAPT_MTIME_FREQ_MHZ
+`define RAPT_MTIME_FREQ_MHZ 10
+`endif
+`ifndef RAPT_MTIME_DIV
+`define RAPT_MTIME_DIV (`RAPT_CORE_CLOCK_MHZ / `RAPT_MTIME_FREQ_MHZ)
+`endif
+
 `define RAPT_BUS_SERIAL_PORT 'h10000000
 `define RAPT_BUS_NS16550_ADDR 'h10000000
 

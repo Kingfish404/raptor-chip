@@ -306,7 +306,8 @@ void perf()
 {
   Log("======== Instruction Analysis ========");
   uint64_t time_clint = *(uint64_t *)&VERILOG_CPU(bus__DOT__clint__DOT__mtime);
-  long long int time_clint_us = time_clint / 2;
+  // Convert mtime (ticking at RAPT_MTIME_FREQ_MHZ) to microseconds.
+  long long int time_clint_us = (long long int)(time_clint / RAPT_MTIME_FREQ_MHZ);
   float IPC = (1.0 * pmu.instr_cnt / pmu.active_cycle);
   float MIPS = (double)((pmu.instr_cnt / 1e6) / (time_clint_us / 1e6));
   Log("#inst: %lld, cycle: %llu, "
