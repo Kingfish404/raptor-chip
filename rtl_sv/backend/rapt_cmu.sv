@@ -18,6 +18,12 @@ module rapt_cmu #(
   logic prev_valid;
   logic [31:0] inst;
   logic [XLEN-1:0] rpc, npc;
+`ifdef VERILATOR
+  // Simulation-only commit-slot snapshot for NSIM reverse flow checking.
+  // Keep it out of FPGA/ASIC synthesis so verification hooks do not add
+  // architectural flops or timing load.
+  logic [XLEN-1:0] rpc_a, rpc_b, npc_a, npc_b;
+`endif
   /* verilator lint_on UNUSEDSIGNAL */
 
   logic ben, jen, jren;
@@ -54,8 +60,8 @@ module rapt_cmu #(
   assign cmu_bcast.jren = prev_valid && jren;
   assign cmu_bcast.btaken = prev_valid && rou_cmu.btaken;
   assign cmu_bcast.call = prev_valid && (jen || jren) && is_link_rd;
-  assign cmu_bcast.ret  = prev_valid && jren && is_link_rs1 && !is_link_rd;
-  assign cmu_bcast.rvc  = prev_valid && (bcast_inst[1:0] != 2'b11);
+  assign cmu_bcast.ret = prev_valid && jren && is_link_rs1 && !is_link_rd;
+  assign cmu_bcast.rvc = prev_valid && (bcast_inst[1:0] != 2'b11);
   assign cmu_bcast.time_trap = rou_cmu.time_trap;
 
   assign cmu_bcast.fence_time = rou_cmu.fence_time;
@@ -70,15 +76,21 @@ module rapt_cmu #(
   assign cmu_bcast.valid_b = rou_cmu.valid_b;
 
   assign bcast_inst = use_slot1 ? rou_cmu.inst_b : rou_cmu.inst_a;
-  assign bcast_rd   = bcast_inst[11:7];
-  assign bcast_rs1  = bcast_inst[19:15];
-  assign is_link_rd  = (bcast_rd == 5'd1) || (bcast_rd == 5'd5);
+  assign bcast_rd = bcast_inst[11:7];
+  assign bcast_rs1 = bcast_inst[19:15];
+  assign is_link_rd = (bcast_rd == 5'd1) || (bcast_rd == 5'd5);
   assign is_link_rs1 = (bcast_rs1 == 5'd1) || (bcast_rs1 == 5'd5);
 
   always_ff @(posedge clock) begin
     if (reset) begin
-      valid <= 0;
+      valid   <= 0;
       valid_b <= 0;
+`ifdef VERILATOR
+      rpc_a <= '0;
+      rpc_b <= '0;
+      npc_a <= '0;
+      npc_b <= '0;
+`endif
       pmu_inst_retire <= 0;
       ben_r <= 0;
       jen_r <= 0;
@@ -113,6 +125,12 @@ module rapt_cmu #(
         rpc  <= rou_cmu.valid_b ? rou_cmu.pc_b : rou_cmu.pc_a;
         npc  <= rou_cmu.valid_b ? rou_cmu.npc_b : rou_cmu.npc_a;
         inst <= rou_cmu.valid_b ? rou_cmu.inst_b : rou_cmu.inst_a;
+`ifdef VERILATOR
+        rpc_a <= rou_cmu.pc_a;
+        rpc_b <= rou_cmu.pc_b;
+        npc_a <= rou_cmu.npc_a;
+        npc_b <= rou_cmu.npc_b;
+`endif
       end else begin
         valid   <= 0;
         valid_b <= 0;

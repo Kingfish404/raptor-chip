@@ -65,8 +65,27 @@ interface l1i_bus_if #(
   // Asserted in the same cycle as `rvalid`; treat as fetch access-fault.
   logic rerr;
 
-  modport master(output arvalid, araddr, arburst, input rready, rdata, rvalid, rlast, rerr);
-  modport slave(input arvalid, araddr, arburst, output rready, rdata, rvalid, rlast, rerr);
+  // Store path used only by IPTW hardware A-bit updates.
+  logic awvalid;
+  logic [XLEN-1:0] awaddr;
+  logic wvalid;
+  logic [XLEN-1:0] wdata;
+  logic [7:0] wstrb;
+  logic wready;
+  logic werr;
+
+  modport master(
+      output arvalid, araddr, arburst,
+      input rready, rdata, rvalid, rlast, rerr,
+      output awvalid, awaddr, wvalid, wdata, wstrb,
+      input wready, werr
+  );
+  modport slave(
+      input arvalid, araddr, arburst,
+      output rready, rdata, rvalid, rlast, rerr,
+      input awvalid, awaddr, wvalid, wdata, wstrb,
+      output wready, werr
+  );
 endinterface
 
 // data cache interface
@@ -123,43 +142,43 @@ endinterface
 interface csr_bcast_if #(
     parameter int XLEN = `RAPT_XLEN
 );
-  logic [              1:0] priv;
-  logic [             21:0] satp_ppn;
-  logic [              8:0] satp_asid;
-  logic                     immu_en;
-  logic                     dmmu_en;
+  logic [1:0] priv;
+  logic [`RAPT_CSR_SATP_PPN_W-1:0] satp_ppn;
+  logic [8:0] satp_asid;
+  logic immu_en;
+  logic dmmu_en;
 
-  logic [         XLEN-1:0] mtvec;
-  logic [         XLEN-1:0] tvec;
-  logic                     timer_int_en;
-  logic                     sw_int_en;
-  logic                     ext_int_en;
+  logic [XLEN-1:0] mtvec;
+  logic [XLEN-1:0] tvec;
+  logic timer_int_en;
+  logic sw_int_en;
+  logic ext_int_en;
 
   // MPRV/MPP for load/store effective privilege
-  logic                     mprv;
-  logic [              1:0] mpp;
+  logic mprv;
+  logic [1:0] mpp;
 
   // mstatus.SUM (Supervisor User Memory access) / MXR (Make eXecutable Readable)
-  logic                     sum;
-  logic                     mxr;
+  logic sum;
+  logic mxr;
 
   // mstatush.SBE: when set, implicit page-table accesses read big-endian PTEs.
-  logic                     sbe;
+  logic sbe;
 
   // mstatus privileged-mode guard bits (TSR/TVM/TW) for illegal-inst checks.
-  logic                     tsr;  // trap sret in S-mode when set
-  logic                     tvm;  // trap satp / sfence.vma in S-mode when set
-  logic                     tw;  // trap wfi in U/S when set
+  logic tsr;  // trap sret in S-mode when set
+  logic tvm;  // trap satp / sfence.vma in S-mode when set
+  logic tw;  // trap wfi in U/S when set
 
   // mcounteren / scounteren low 3 bits (CY/TM/IR) for U/S counter reads.
-  logic [              2:0] mcounteren;
-  logic [              2:0] scounteren;
+  logic [2:0] mcounteren;
+  logic [2:0] scounteren;
 
   // PMP raw state. pmpaddr is the raw CSR value (byte address >> 2);
   // pmpcfg is the 8-bit layout L[7] 0[6:5] A[4:3] X[2] W[1] R[0].
   // Used for software CSR reads (rapt_csr.sv).
-  logic [              7:0] pmpcfg                                            [`RAPT_PMP_NUM];
-  logic [         XLEN-1:0] pmpaddr                                           [`RAPT_PMP_NUM];
+  logic [7:0] pmpcfg[`RAPT_PMP_NUM];
+  logic [XLEN-1:0] pmpaddr[`RAPT_PMP_NUM];
 
   // PMP shadow registers, precomputed in rapt_csr on every CSR write.
   // These break the long combinational chain inside rapt_pmp:
@@ -170,10 +189,10 @@ interface csr_bcast_if #(
   // 1-cycle latency vs raw pmpcfg/pmpaddr — RISC-V spec requires sfence.vma
   // (or a pipeline flush, which CSR writes already trigger) before PMP
   // changes take effect, so software always sees the new values in time.
-  logic [         XLEN-1:0] pmp_napot_mask                                    [`RAPT_PMP_NUM];
-  logic [         XLEN-1:0] pmp_napot_base                                    [`RAPT_PMP_NUM];
-  logic [         XLEN-1:0] pmp_tor_lo                                        [`RAPT_PMP_NUM];
-  logic [         XLEN-1:0] pmp_tor_hi                                        [`RAPT_PMP_NUM];
+  logic [XLEN-1:0] pmp_napot_mask[`RAPT_PMP_NUM];
+  logic [XLEN-1:0] pmp_napot_base[`RAPT_PMP_NUM];
+  logic [XLEN-1:0] pmp_tor_lo[`RAPT_PMP_NUM];
+  logic [XLEN-1:0] pmp_tor_hi[`RAPT_PMP_NUM];
   logic [`RAPT_PMP_NUM-1:0] pmp_cfg_r;
   logic [`RAPT_PMP_NUM-1:0] pmp_cfg_w;
   logic [`RAPT_PMP_NUM-1:0] pmp_cfg_x;

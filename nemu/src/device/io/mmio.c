@@ -15,6 +15,8 @@
 
 #include <device/map.h>
 #include <memory/paddr.h>
+#include <stdio.h>
+#include <inttypes.h>
 
 #define NR_MAP 16
 
@@ -24,6 +26,41 @@ static int nr_map = 0;
 static IOMap* fetch_mmio_map(paddr_t addr) {
   int mapid = find_mapid_by_addr(maps, nr_map, addr);
   return (mapid == -1 ? NULL : &maps[mapid]);
+}
+
+bool mmio_map_contains(paddr_t addr) {
+  for (int i = 0; i < nr_map; i++) {
+    if (map_inside(&maps[i], addr)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+int mmio_map_count(void) {
+  return nr_map;
+}
+
+void print_mmio_maps(FILE *out) {
+  if (out == NULL) {
+    out = stdout;
+  }
+  bool printed[NR_MAP] = {false};
+  for (int printed_count = 0; printed_count < nr_map; printed_count++) {
+    int best = -1;
+    for (int i = 0; i < nr_map; i++) {
+      if (printed[i]) {
+        continue;
+      }
+      if (best < 0 || maps[i].low < maps[best].low) {
+        best = i;
+      }
+    }
+    printed[best] = true;
+    fprintf(out, "  %-6s %-18s 0x%08" PRIx64 "  0x%08" PRIx64 "  0x%08" PRIx64 "\n",
+        "mmio", maps[best].name, (uint64_t)maps[best].low, (uint64_t)maps[best].high,
+        (uint64_t)(maps[best].high - maps[best].low + 1));
+  }
 }
 
 static void report_mmio_overlap(const char *name1, paddr_t l1, paddr_t r1,

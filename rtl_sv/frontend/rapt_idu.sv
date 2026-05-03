@@ -43,12 +43,13 @@ module rapt_idu #(
   logic bpu_predicted_taken;
   logic is_branch_or_jump;
   logic early_resteer_cond;
+  logic idu_redirect_event;
   logic resteer_sent;
 
   assign valid = (state_idu == VALID);
   assign ready = (state_idu == IDLE) || idu_rnu.ready;
   assign idu_rnu.valid_a = valid;
-  assign ifu_idu.ready = ready;
+  assign ifu_idu.ready = ready && !early_resteer_cond && !idu_redirect_event;
 
   // Pipeline latch: capture from IFU when ready
   // Slot A pipeline latch
@@ -76,7 +77,7 @@ module rapt_idu #(
     end else begin
       unique case (state_idu)
         IDLE: begin
-          if (cmu_bcast.flush_pipe) begin
+          if (idu_redirect_event) begin
             // Stay IDLE on flush
 `ifdef RAPT_DUAL_ISSUE
             ifu_valid_b <= 0;
@@ -86,15 +87,14 @@ module rapt_idu #(
           end
         end
         VALID: begin
-          if (cmu_bcast.flush_pipe) begin
+          if (idu_redirect_event) begin
             state_idu <= IDLE;
 `ifdef RAPT_DUAL_ISSUE
             ifu_valid_b <= 0;
 `endif
-          end else if (ifu_idu.resteer) begin
-            // Early resteer fired: IFU output is from the mispredicted path.
-            // Go IDLE even if IFU appears valid: that instruction must be
-            // discarded. The resteered IFU will provide the correct one later.
+          end else if (early_resteer_cond) begin
+            // Discard wrong-path IFU output while the decoded early-resteer
+            // condition is still visible; the resteer pulse itself is one-shot.
             if (idu_rnu.ready) state_idu <= IDLE;
           end else if (idu_rnu.ready && !ifu_idu.valid_a) begin
             state_idu <= IDLE;
@@ -105,9 +105,9 @@ module rapt_idu #(
       endcase
 
       // Latch IFU data when pipeline slot is available.
-      // Block latch when resteer fires: IFU output that cycle is from
-      // the mispredicted path and must be discarded.
-      if (ready && ifu_idu.valid_a && !ifu_idu.resteer) begin
+      // Block latch while early-resteer condition is visible: this IFU output
+      // is still from the mispredicted path and must be discarded.
+      if (ready && ifu_idu.valid_a && !early_resteer_cond && !idu_redirect_event) begin
         inst_a    <= ifu_idu.inst_a;
         pc_idu_a    <= ifu_idu.pc_a;
         pnpc_idu  <= ifu_idu.pnpc;
@@ -278,7 +278,7 @@ module rapt_idu #(
       // Supervisor-level CSRs
       `RAPT_CSR_SSTATUS,  `RAPT_CSR_SIE____,  `RAPT_CSR_STVEC__,  `RAPT_CSR_SCOUNTE,
       `RAPT_CSR_SSCRATC,  `RAPT_CSR_SEPC___,  `RAPT_CSR_SCAUSE_,  `RAPT_CSR_STVAL__,
-      `RAPT_CSR_SIP____,  `RAPT_CSR_SATP___,
+      `RAPT_CSR_SIP____,  `RAPT_CSR_STIMECMP, `RAPT_CSR_STIMECMPH, `RAPT_CSR_SATP___,
       // Machine Trap Setup
       `RAPT_CSR_MSTATUS,  `RAPT_CSR_MISA___,  `RAPT_CSR_MEDELEG,  `RAPT_CSR_MIDELEG,
       `RAPT_CSR_MIE____,  `RAPT_CSR_MTVEC__,  `RAPT_CSR_MCOUNTE,  `RAPT_CSR_MSTATUSH,
@@ -322,6 +322,7 @@ module rapt_idu #(
   assign bpu_predicted_taken = (pnpc_idu != correct_npc);
   assign is_branch_or_jump   = idu_rnu.uop_a.ben || idu_rnu.uop_a.jen || idu_rnu.uop_a.jren;
   assign early_resteer_cond  = valid && bpu_predicted_taken && !is_branch_or_jump && !ifu_trap;
+  assign idu_redirect_event  = cmu_bcast.flush_pipe || cmu_bcast.sys_resume;
 
   // One-shot pulse: only fire resteer on the first cycle of detection
   always_ff @(posedge clock) begin
@@ -473,6 +474,36 @@ module rapt_idu #(
   // Slot B valid: IFU provided a second instruction AND slot A is not a trap
   // or branch/jump (branches in slot A could skip slot B on the taken path).
   assign idu_rnu.valid_b = valid && ifu_valid_b && !ifu_trap && !is_branch_or_jump;
+`endif
+
+  // ==========================================================================
+  //  Assertions (enable with +define+RAPT_ASSERT_EN)
+  // ==========================================================================
+
+  // HANDSHAKE: redirect windows must not advertise IFU consumption. This guards
+  // the Linux early-resteer bug where IDU discarded a wrong-path fetch locally
+  // but still let IFU consume it through ready.
+  `RAPT_SVA_IMPLY(clock, reset, IDU_EARLY_RESTEER_NOT_IFU_READY,
+                  early_resteer_cond, !ifu_idu.ready)
+
+  `RAPT_SVA_IMPLY(clock, reset, IDU_REDIRECT_NOT_IFU_READY,
+                  idu_redirect_event, !ifu_idu.ready)
+
+  // COMMIT_DURABLE: the uop that caused early-resteer must carry the corrected
+  // sequential pnpc so ROB commit does not later see a false branch mismatch.
+  `RAPT_SVA_IMPLY(clock, reset, IDU_EARLY_RESTEER_CORRECTS_PNPC,
+                  early_resteer_cond, idu_rnu.uop_a.pnpc == correct_npc)
+
+  `RAPT_COVER(clock, reset, IDU_EARLY_RESTEER_EVENT, ifu_idu.resteer)
+
+`ifdef RAPT_DUAL_ISSUE
+  // DUAL_COMMIT_SEMANTICS: slot B is intentionally limited to non-control,
+  // non-serializing uops because only slot A carries frontend prediction state.
+  `RAPT_SVA_IMPLY(clock, reset, IDU_SLOT_B_NO_CONTROL,
+                  idu_rnu.valid_b,
+                  !(idu_rnu.uop_b.ben || idu_rnu.uop_b.jen || idu_rnu.uop_b.jren
+                    || idu_rnu.uop_b.system || idu_rnu.uop_b.f_i
+                    || idu_rnu.uop_b.f_time || idu_rnu.uop_b.atom))
 `endif
 
 endmodule

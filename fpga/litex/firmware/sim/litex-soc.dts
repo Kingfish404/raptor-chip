@@ -52,6 +52,16 @@
 					      <&cpu0_intc 7>;
 		};
 
+		plic: interrupt-controller@c000000 {
+			compatible = "riscv,plic0";
+			#interrupt-cells = <1>;
+			interrupt-controller;
+			reg = <0x0c000000 0x04000000>;
+			riscv,ndev = <31>;
+			interrupts-extended = <&cpu0_intc 11>,
+					      <&cpu0_intc 9>;
+		};
+
 		serial@f0001800 {
 			compatible = "litex,liteuart";
 			reg = <0xf0001800 0x100>;
@@ -60,6 +70,6 @@
 
 	memory@80000000 {
 		device_type = "memory";
-		reg = <0x80000000 0x00800000>;
+		reg = <0x80000000 0x04000000>;
 	};
 };

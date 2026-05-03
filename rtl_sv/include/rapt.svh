@@ -165,13 +165,19 @@
 `define RAPT_CSR_SCAUSE_ 'h142
 `define RAPT_CSR_STVAL__ 'h143
 `define RAPT_CSR_SIP____ 'h144
+`define RAPT_CSR_STIMECMP 'h14d
+`define RAPT_CSR_STIMECMPH 'h15d
 `define RAPT_CSR_SATP___ 'h180
 
 // SATP mode bit position: RV32 bit 31, RV64 bit 63
 `ifdef RAPT_RV64
 `define RAPT_CSR_SATP_MODE_ 63
+`define RAPT_CSR_SATP_PPN_W 44
+`define RAPT_CSR_SATP_ASID_LSB 44
 `else
 `define RAPT_CSR_SATP_MODE_ 31
+`define RAPT_CSR_SATP_PPN_W 22
+`define RAPT_CSR_SATP_ASID_LSB 22
 `endif
 `define RAPT_CSR_MSTATUS_MPRV 17
 
@@ -238,6 +244,23 @@
 
 // mideleg WARL: only SSI(1)/STI(5)/SEI(9) delegatable.
 `define RAPT_CSR_MIDELEG_WMASK 32'h00000222
+
+// sip/sie are restricted views of mip/mie (Priv spec §3.1.9). The S-mode
+// visible bits are SSIP/STIP/SEIP (and matching mie). Reads return mip/mie
+// masked by SIE_RMASK; writes update the underlying mip/mie bits within
+// the writable mask (SSIP only on sip; SSIE/STIE/SEIE on sie).
+`define RAPT_CSR_SIE_RMASK 32'h00000222
+`define RAPT_CSR_SIE_WMASK 32'h00000222
+`define RAPT_CSR_SIP_RMASK 32'h00000222
+`define RAPT_CSR_SIP_WMASK 32'h00000002
+`define RAPT_CSR_MIP_WMASK 32'h00000222
+
+`ifdef RAPT_RV64
+`define RAPT_CSR_MENVCFG_STCE 63
+`define RAPT_CSR_MENVCFG_WMASK 64'h8000_0000_0000_0000
+`else
+`define RAPT_CSR_MENVCFG_WMASK 32'h0000_0000
+`endif
 
 // tvec MODE field encodings
 `define RAPT_TVEC_MODE_DIRECT 2'b00

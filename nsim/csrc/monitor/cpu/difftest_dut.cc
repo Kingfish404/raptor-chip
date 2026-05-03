@@ -13,6 +13,7 @@ void (*ref_difftest_regcpy)(void *dut, bool direction) = NULL;
 void (*ref_difftest_exec)(uint64_t n) = NULL;
 void (*ref_difftest_raise_intr)(uint64_t NO) = NULL;
 void (*ref_difftest_set_meip)(uint8_t val) = NULL;
+void (*ref_difftest_plic_raise)(uint32_t src) = NULL;
 
 static bool is_skip_ref = false;
 static bool should_diff_mem = false;
@@ -94,6 +95,7 @@ void init_difftest(char *ref_so_file, long img_size, int port)
 
   // Optional: present in newer NEMU builds; absent in older refs (skip if missing).
   ref_difftest_set_meip = (void (*)(uint8_t))dlsym(handle, "difftest_set_meip");
+  ref_difftest_plic_raise = (void (*)(uint32_t))dlsym(handle, "difftest_plic_raise");
 
   void (*ref_difftest_init)(int) = (void (*)(int))dlsym(handle, "difftest_init");
   assert(ref_difftest_init);

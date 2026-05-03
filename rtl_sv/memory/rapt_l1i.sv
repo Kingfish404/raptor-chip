@@ -115,6 +115,11 @@ module rapt_l1i #(
   logic ptw_done, ptw_fault;
   logic ptw_arvalid;
   logic [XLEN-1:0] ptw_araddr;
+  logic ptw_awvalid;
+  logic [XLEN-1:0] ptw_awaddr;
+  logic ptw_wvalid;
+  logic [XLEN-1:0] ptw_wdata;
+  logic [7:0] ptw_wstrb;
   logic [XLEN-1:10] ptw_result_ptag;
   logic [XLEN-1:12] ptw_result_vtag;
   logic [6:0] ptw_result_pte;
@@ -229,6 +234,11 @@ module rapt_l1i #(
     && (l1i_addr >= 'ha0000000)
     && (l1i_addr <= 'hc0000000);
   assign l1i_bus.arburst = ifu_sdram_arburst;
+  assign l1i_bus.awvalid = ptw_awvalid;
+  assign l1i_bus.awaddr  = ptw_awaddr;
+  assign l1i_bus.wvalid  = ptw_wvalid;
+  assign l1i_bus.wdata   = ptw_wdata;
+  assign l1i_bus.wstrb   = ptw_wstrb;
 
   // Fill write condition: suppress during PTW states where the bus is used for
   // page table reads (IFQ is always empty during PTW, but be explicit)
@@ -274,10 +284,18 @@ module rapt_l1i #(
       .satp_ppn(csr_bcast.satp_ppn),
       .mmu_en(mmu_en),
       .sbe(csr_bcast.sbe),
+      .req_store(1'b0),
       .bus_arvalid(ptw_arvalid),
       .bus_araddr(ptw_araddr),
       .bus_rvalid(l1i_bus.rvalid),
       .bus_rdata(l1i_bus.rdata),
+      .bus_awvalid(ptw_awvalid),
+      .bus_awaddr(ptw_awaddr),
+      .bus_wvalid(ptw_wvalid),
+      .bus_wdata(ptw_wdata),
+      .bus_wstrb(ptw_wstrb),
+      .bus_wready(l1i_bus.wready),
+      .bus_werr(l1i_bus.werr),
       .done(ptw_done),
       .fault(ptw_fault),
       .result_ptag(ptw_result_ptag),
@@ -286,7 +304,7 @@ module rapt_l1i #(
       .busy(ptw_busy)
   );
 
-  // Sv32 fetch permission check: execute must be allowed for current priv.
+  // Sv32/Sv39 fetch permission check: execute must be allowed for current priv.
   // itlb_pte = {D,A,G,U,X,W,R}; only X/U/A bits influence fetch fault.
   /* verilator lint_off UNUSEDSIGNAL */
   function automatic logic pte_fault_fetch(input logic [6:0] pte, input logic [1:0] priv_i);
@@ -298,7 +316,7 @@ module rapt_l1i #(
     a = pte[5];
     fault = 1'b0;
     if (!x) fault = 1'b1;
-    if (!a) fault = 1'b1;  // unaccessed: fault so SW sets A
+    if (!a) fault = 1'b1;
     if (priv_i == `RAPT_PRIV_U && !u) fault = 1'b1;
     if (priv_i == `RAPT_PRIV_S && u) fault = 1'b1;  // no SUM on fetch
     return fault;

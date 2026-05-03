@@ -4,7 +4,14 @@
 !tests/**
 !lib/**
 !demos/**
+!tinyos/Makefile
+!tinyos/README.md
+!tinyos/patches/**
+!tinyos/scripts/**
 !*.mk
+
+tinyos/egos-2000/
+tinyos/xv6-riscv/
 
 build
 build/**

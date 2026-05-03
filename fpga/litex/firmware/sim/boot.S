@@ -18,14 +18,24 @@
 .equ UART_TXFULL, 0xf0001804
 .equ DTB_DEST,  0x80700000   # DTB copy destination near top of main_ram
 
+.macro li_addr reg, val
+    li      \reg, (((\val) >> 24) & 0xff)
+    slli    \reg, \reg, 8
+    ori     \reg, \reg, (((\val) >> 16) & 0xff)
+    slli    \reg, \reg, 8
+    ori     \reg, \reg, (((\val) >> 8) & 0xff)
+    slli    \reg, \reg, 8
+    ori     \reg, \reg, ((\val) & 0xff)
+.endm
+
 .section .text
 .global _start
 _start:
     # Set up stack pointer (end of SRAM at 0x0f002000)
-    li      sp, 0x0f002000
+    li_addr sp, 0x0f002000
 
     # Check if main_ram has a payload (first word != 0).
-    li      t0, MAIN_RAM
+    li_addr t0, MAIN_RAM
     lw      t1, 0(t0)
     beqz    t1, .Lno_payload
 
@@ -37,7 +47,7 @@ _start:
     # _dtb_end marks the exact end of the embedded DTB.
     la      t0, _dtb            # source (ROM)
     la      t4, _dtb_end        # end of DTB
-    li      t1, DTB_DEST        # destination (main_ram)
+    li_addr t1, DTB_DEST        # destination (main_ram)
 .Lcopy_dtb:
     lw      t3, 0(t0)
     sw      t3, 0(t1)
@@ -46,8 +56,8 @@ _start:
     blt     t0, t4, .Lcopy_dtb
 
     li      a0, 0               # a0 = hartid (required by OpenSBI/Linux)
-    li      a1, DTB_DEST        # a1 = DTB address (main_ram copy)
-    li      t0, MAIN_RAM
+    li_addr a1, DTB_DEST        # a1 = DTB address (main_ram copy)
+    li_addr t0, MAIN_RAM
     jr      t0
 
 .Lno_payload:
@@ -59,8 +69,8 @@ _start:
 
 # puts: print null-terminated string at a0
 puts:
-    li      t0, UART_RXTX
-    li      t1, UART_TXFULL
+    li_addr t0, UART_RXTX
+    li_addr t1, UART_TXFULL
 .Lputs_loop:
     lbu     t2, 0(a0)           # Load byte
     beqz    t2, .Lputs_done     # Null terminator?

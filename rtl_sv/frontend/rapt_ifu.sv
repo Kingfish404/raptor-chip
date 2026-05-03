@@ -53,6 +53,7 @@ module rapt_ifu #(
 
   logic ifu_hazard;
   logic recv_ready;
+  logic redirect_event;
   logic valid;
 
 
@@ -166,8 +167,8 @@ module rapt_ifu #(
 
   assign ifu_bpu.pc = pc_ifu;
   assign ifu_bpu.nextpc = nextpc;
-  assign ifu_bpu.pc_update = (recv_ready
-    || cmu_bcast.flush_pipe || cmu_bcast.sys_resume || ifu_idu.resteer);
+  assign redirect_event = cmu_bcast.flush_pipe || cmu_bcast.sys_resume || ifu_idu.resteer;
+  assign ifu_bpu.pc_update = recv_ready || redirect_event;
 
   assign ifu_l1i.pc = pc_ifu;
   assign ifu_l1i.invalid = cmu_bcast.fence_i;
@@ -195,7 +196,8 @@ module rapt_ifu #(
                  : cmu_bcast.sys_resume ? cmu_bcast.cpc
                  : ifu_idu.resteer ? ifu_idu.resteer_pc
                  : ifu_bpu.taken ? ifu_bpu.npc : seqpc);
-  assign recv_ready = (ifu_l1i.valid && (ifu_idu.ready || (state_ifu == IDLE))) && !ifu_hazard;
+  assign recv_ready = ifu_l1i.valid && (ifu_idu.ready || (state_ifu == IDLE)) && !ifu_hazard
+                    && !redirect_event;
 
   // Combinational sequential-PC candidates (see declaration for rationale).
   assign seq2 = pc_ifu + 'h2;
@@ -220,18 +222,14 @@ module rapt_ifu #(
       pmu_ifu_stall  <= !valid && ifu_idu.ready;
       unique case (state_ifu)
         IDLE: begin
-          if (cmu_bcast.flush_pipe) begin
-            state_ifu <= IDLE;
-          end else if (ifu_idu.resteer) begin
+          if (redirect_event) begin
             state_ifu <= IDLE;
           end else if (ifu_l1i.valid) begin
             state_ifu <= VALID;
           end
         end
         VALID: begin
-          if (cmu_bcast.flush_pipe) begin
-            state_ifu <= IDLE;
-          end else if (ifu_idu.resteer) begin
+          if (redirect_event) begin
             state_ifu <= IDLE;
           end else if (ifu_idu.ready) begin
             if (is_sys_a || is_atomic_a || trap) begin
@@ -244,18 +242,16 @@ module rapt_ifu #(
           end
         end
         STALL: begin
-          if (cmu_bcast.flush_pipe) begin
+          if (redirect_event) begin
             state_ifu <= IDLE;
             trap <= 0;
-          end else if (cmu_bcast.sys_resume) begin
-            state_ifu <= IDLE;
           end
         end
         default: begin
           state_ifu <= IDLE;
         end
       endcase
-      if (recv_ready || cmu_bcast.flush_pipe || cmu_bcast.sys_resume || ifu_idu.resteer) begin
+      if (recv_ready || redirect_event) begin
         pc_ifu <= nextpc;
       end
       if (recv_ready) begin
@@ -274,5 +270,23 @@ module rapt_ifu #(
   end
   /* verilator lint_on UNUSEDPARAM */
   /* verilator lint_on UNUSEDSIGNAL */
+
+  // ==========================================================================
+  //  Assertions (enable with +define+RAPT_ASSERT_EN)
+  // ==========================================================================
+
+  // HANDSHAKE: no L1I response may be consumed in the same cycle as a redirect.
+  // Redirect priority is pc-only; accepting instruction data here can create
+  // ghost frontend uops from the pre-redirect path.
+  `RAPT_SVA_IMPLY(clock, reset, IFU_REDIRECT_NOT_RECV_READY,
+                  redirect_event, !recv_ready)
+
+`ifdef RAPT_DUAL_ISSUE
+  `RAPT_SVA_IMPLY(clock, reset, IFU_SLOT_B_IMPLIES_SLOT_A,
+                  ifu_idu.valid_b, ifu_idu.valid_a)
+`endif
+
+  `RAPT_COVER(clock, reset, IFU_RESTEER_EVENT, ifu_idu.resteer)
+  `RAPT_COVER(clock, reset, IFU_SYS_RESUME_EVENT, cmu_bcast.sys_resume)
 
 endmodule

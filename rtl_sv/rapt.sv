@@ -1,10 +1,39 @@
 `include "rapt.svh"
 `include "rapt_if.svh"
 `include "rapt_soc.svh"
+`include "rapt_soc_if.svh"
 `include "rapt_dpi_c.svh"
 
+// rapt: cluster-level top. Aggregates one or more `rapt_core` instances and
+// the cluster-shared peripherals that, per the RISC-V platform spec, must be
+// shared across all harts (CLINT and PLIC today; IMSIC in the future). The
+// external port set is identical to the historical single-core top so all
+// existing testbenches, SoC wrappers and FPGA targets continue to work
+// without changes.
+//
+// Today (NR_HARTS = 1) the cluster instantiates a single core; the structure
+// is laid out with multi-core scaling in mind:
+//   - CLINT lives here (was previously inside rapt_bus). A single CLINT
+//     services all harts so `mtime` stays globally coherent and IPI / timer
+//     interrupts have a single arbitration point.
+//   - CLINT register accesses arrive via the regular AXI master port of each
+//     core. A small 1-master / 3-target AXI router below decodes the CLINT
+//     and PLIC address windows and dispatches transactions to on-cluster
+//     peripherals or the off-chip `io_master` port. The per-core bus is
+//     therefore entirely SoC-memory-map agnostic.
+//   - When multi-core / IMSIC arrive, the router grows to N×M and the
+//     interrupt fabric scales from the existing single-hart CLINT/PLIC base.
 module rapt #(
-    parameter int XLEN = `RAPT_XLEN
+    parameter int XLEN   = `RAPT_XLEN,
+    // Number of hart contexts in this cluster. Currently fixed at 1; the
+    // value is threaded through CSR `mhartid`, the CLINT msip/mtimecmp
+    // arrays, and PLIC NCTX so that scaling to N>1 only requires (a) a
+    // generate block around `rapt_core`, (b) per-hart CLINT register
+    // banks (already parameterised inside rapt_clint), and (c) an N×M
+    // AXI router (today 1×3). Do NOT raise this without those follow-ups.
+    /* verilator lint_off UNUSEDPARAM */
+    parameter int NHARTS = 1
+    /* verilator lint_on UNUSEDPARAM */
 ) (
     input clock,
 
@@ -44,7 +73,8 @@ module rapt #(
     output       io_master_bready,
 
 `ifdef RAPT_USE_SLAVE
-    // AXI4 Slave
+    // AXI4 Slave (currently unused; preserved for backwards-compat with the
+    // historical top-level port list).
     // verilator lint_off UNDRIVEN
     // verilator lint_off UNUSEDSIGNAL
     input  [     1:0] io_slave_arburst,
@@ -111,344 +141,119 @@ module rapt #(
 
     input io_interrupt,
 
+    // Per-source external interrupt lines into the cluster PLIC. Source 0
+    // is reserved by the PLIC spec, so external aggregators feed sources
+    // 1..NDEV. Wrappers that don't have peripherals tie this to '0.
+    input [`RAPT_PLIC_NDEV:1] ext_irq_i,
+
     input reset
 );
-  // L1I Cache
-  l1i_bus_if l1i_bus ();
 
-  // IFU stage
-  ifu_idu_if ifu_idu ();  // Fetch => Decode
+  // ------------------------------------------------------------------
+  // Per-core AXI master signals (internal).
+  // The cluster-level router muxes these between cluster-internal slaves
+  // and the external io_master port.
+  // ------------------------------------------------------------------
+  axi4_if #(.XLEN(XLEN)) core_axi ();
+  axi4_if #(.XLEN(XLEN)) offchip_axi ();
 
-  ifu_bpu_if ifu_bpu ();
-  ifu_l1i_if ifu_l1i ();
+  assign io_master_arburst = offchip_axi.arburst;
+  assign io_master_arsize = offchip_axi.arsize;
+  assign io_master_arlen = offchip_axi.arlen;
+  assign io_master_arid = offchip_axi.arid;
+  assign io_master_araddr = offchip_axi.araddr;
+  assign io_master_arvalid = offchip_axi.arvalid;
+  assign offchip_axi.arready = io_master_arready;
 
-  // IDU stage
-  idu_rnu_if idu_rnu ();  // Decode => Re-naming
+  assign offchip_axi.rid = io_master_rid;
+  assign offchip_axi.rlast = io_master_rlast;
+  assign offchip_axi.rdata = io_master_rdata;
+  assign offchip_axi.rresp = io_master_rresp;
+  assign offchip_axi.rvalid = io_master_rvalid;
+  assign io_master_rready = offchip_axi.rready;
 
-  // RNU stage
-  rnu_rou_if rnu_rou ();  // Re-naming => Issue
+  assign io_master_awburst = offchip_axi.awburst;
+  assign io_master_awsize = offchip_axi.awsize;
+  assign io_master_awlen = offchip_axi.awlen;
+  assign io_master_awid = offchip_axi.awid;
+  assign io_master_awaddr = offchip_axi.awaddr;
+  assign io_master_awvalid = offchip_axi.awvalid;
+  assign offchip_axi.awready = io_master_awready;
 
-  // ROU stage
-  rou_exu_if rou_exu ();  // Issue => Execute
-  rou_lsu_if rou_lsu ();  // Commit
-  rou_cmu_if rou_cmu ();  // Commit
+  assign io_master_wlast = offchip_axi.wlast;
+  assign io_master_wdata = offchip_axi.wdata;
+  assign io_master_wstrb = offchip_axi.wstrb;
+  assign io_master_wvalid = offchip_axi.wvalid;
+  assign offchip_axi.wready = io_master_wready;
 
-  rou_csr_if rou_csr ();
+  assign offchip_axi.bid = io_master_bid;
+  assign offchip_axi.bresp = io_master_bresp;
+  assign offchip_axi.bvalid = io_master_bvalid;
+  assign io_master_bready = offchip_axi.bready;
 
-  // Dispatch-only uop payload snapshot (ROU -> EXU/RS)
-  rapt_pkg::uop_payload_t uop_pl[`RAPT_ROB_SIZE];
+  // ------------------------------------------------------------------
+  // Cluster-shared CLINT
+  // ------------------------------------------------------------------
+  clint_bus_if #(.XLEN(XLEN)) clint_bus ();
 
-  // EXU stage
-  exu_rou_if exu_rou ();  // Execute & Writeback => Commit
-  exu_rou_b_if exu_rou_b ();  // Second ALU writeback (pure arithmetic)
-  exu_rou_c_if exu_rou_c ();  // Dedicated BRU writeback (conditional branches)
-
-  exu_prf_if exu_prf ();
-  exu_ioq_bcast_if exu_ioq_bcast ();
-  exu_csr_if exu_csr ();
-  exu_lsu_if exu_lsu ();
-  exu_l1d_if exu_l1d ();
-
-  // CMU
-  cmu_bcast_if cmu_bcast ();  // Difftest & Debug
-
-  // LSU
-  lsu_l1d_if lsu_l1d ();
-
-  // L1D Cache
-  l1d_bus_if l1d_bus ();
-
-  // CSR
-  csr_bcast_if csr_bcast ();
-
-  logic clint_timer_trap;
-  logic clint_sw_trap;
-  logic clint_ext_trap;
-  logic s_int_pending;
-  logic [`RAPT_XLEN-1:0] s_int_cause;
-
-  // External M-mode interrupt: gated level (PLIC line AND'd with mie.MEIE / mstatus.MIE).
-  assign clint_ext_trap = io_interrupt && csr_bcast.ext_int_en;
-
-  rapt_bpu bpu (
+  rapt_clint clint_inst (
       .clock(clock),
 
-      .cmu_bcast(cmu_bcast),
-
-      .ifu_bpu(ifu_bpu),
+      .clint_bus(clint_bus),
 
       .reset(reset)
   );
 
-  // IFU (Instruction Fetch Unit)
-  rapt_ifu ifu (
-      .clock(clock),
+  // ------------------------------------------------------------------
+  // Cluster-shared PLIC
+  // ------------------------------------------------------------------
+  // Source 0 is hardwired to 0 per spec; the cluster aggregates external
+  // sources from `ext_irq_i[NDEV:1]` and additionally exposes the legacy
+  // single-bit `io_interrupt` port as PLIC source 1. This means software
+  // that programs the PLIC sees the same external IRQ that the legacy
+  // single-line MEIP path would have seen, while the core's MEIP is now
+  // driven exclusively by the PLIC claim/complete handshake (no bypass).
+  plic_bus_if #(.XLEN(XLEN)) plic_bus ();
 
-      .cmu_bcast(cmu_bcast),
+  always_comb begin
+    plic_bus.ext_irq = '0;
+    plic_bus.ext_irq[`RAPT_PLIC_NDEV:1] = ext_irq_i;
+    plic_bus.ext_irq[1] = ext_irq_i[1] | io_interrupt;
+  end
 
-      .ifu_bpu(ifu_bpu),
-      .ifu_l1i(ifu_l1i),
-      .ifu_idu(ifu_idu),
-
-      .reset(reset)
-  );
-
-  rapt_l1i l1i_cache (
-      .clock(clock),
-
-      .cmu_bcast(cmu_bcast),
-
-      .ifu_l1i(ifu_l1i),
-      .l1i_bus(l1i_bus),
-
-      .csr_bcast(csr_bcast),
-
-      .reset(reset)
-  );
-
-  // IDU (Instruction Decode Unit)
-  rapt_idu idu (
-      .clock(clock),
-
-      .cmu_bcast(cmu_bcast),
-      .csr_bcast(csr_bcast),
-
-      .ifu_idu(ifu_idu),
-      .idu_rnu(idu_rnu),
-
-      .reset(reset)
-  );
-
-  // RNU (Re-naming Unit): pure rename: RNQ + freelist + maptable
-  logic [`RAPT_PHY_LEN-1:0] rnu_map_snapshot[`RAPT_REG_SIZE];
-  logic [`RAPT_PHY_LEN-1:0] rnu_rat_snapshot[`RAPT_REG_SIZE];
-
-  rapt_rnu rnu (
-      .clock(clock),
-
-      .rou_cmu  (rou_cmu),
-      .cmu_bcast(cmu_bcast),
-
-      .idu_rnu(idu_rnu),
-      .rnu_rou(rnu_rou),
-
-      .map_snapshot(rnu_map_snapshot),
-      .rat_snapshot(rnu_rat_snapshot),
-
-      .reset(reset)
-  );
-
-  // PRF (Physical Register File): top-level shared resource
-  // Debug: architectural register view (committed + speculative)
-  /* verilator lint_off UNUSEDSIGNAL */
-  logic [XLEN-1:0] rf    [`RAPT_REG_SIZE];
-  logic [XLEN-1:0] rf_map[`RAPT_REG_SIZE];
-  /* verilator lint_on UNUSEDSIGNAL */
-
-`ifdef RAPT_RVFI
-  logic [XLEN-1:0] rvfi_rd_wdata_a_w;
-  logic [XLEN-1:0] rvfi_rd_wdata_b_w;
-`endif
-
-  rapt_prf prf (
+  rapt_plic plic (
       .clock(clock),
       .reset(reset),
 
-      .prf_rd(exu_prf),
-
-      .exu_rou      (exu_rou),
-      .exu_rou_b    (exu_rou_b),
-      .exu_ioq_bcast(exu_ioq_bcast),
-      .rou_cmu      (rou_cmu),
-      .cmu_bcast    (cmu_bcast),
-
-      .map_snapshot(rnu_map_snapshot),
-      .rat_snapshot(rnu_rat_snapshot),
-
-      .rf    (rf),
-      .rf_map(rf_map)
-
-`ifdef RAPT_RVFI,
-        .rvfi_rd_wdata_a(rvfi_rd_wdata_a_w)
-      , .rvfi_rd_wdata_b(rvfi_rd_wdata_b_w)
-`endif
+      .plic_bus(plic_bus)
   );
 
-  // ROU (Re-Order Unit)
-  rapt_rou rou (
-      .clock(clock),
-
-      .rnu_rou(rnu_rou),
-
-      // issue
-      .exu_prf(exu_prf),
-      .rou_exu(rou_exu),
-
-      .exu_rou(exu_rou),
-      .exu_rou_b(exu_rou_b),
-      .exu_rou_c(exu_rou_c),
-      .exu_ioq_bcast(exu_ioq_bcast),
-
-      .csr_bcast(csr_bcast),
-      .clint_timer_trap(clint_timer_trap),
-      .clint_sw_trap(clint_sw_trap),
-      .clint_ext_trap(clint_ext_trap),
-      .s_int_pending(s_int_pending),
-      .s_int_cause(s_int_cause),
-
-      .rou_cmu(rou_cmu),
-      .rou_csr(rou_csr),
-      .rou_lsu(rou_lsu),
-
-      .uop_pl(uop_pl),
-
-      .reset(reset)
-  );
-
-  // EXU (EXecution Unit)
-  rapt_exu exu (
-      .clock(clock),
-
-      .cmu_bcast(cmu_bcast),
-
-      .rou_exu(rou_exu),
-
-      .exu_rou(exu_rou),
-      .exu_rou_b(exu_rou_b),
-      .exu_rou_c(exu_rou_c),
-      .exu_ioq_bcast(exu_ioq_bcast),
-
-      .exu_lsu(exu_lsu),
-      .exu_csr(exu_csr),
-
-      .csr_bcast(csr_bcast),
-      .exu_l1d  (exu_l1d),
-
-      .uop_pl(uop_pl),
-
-      .reset(reset)
-  );
-
-  // CMU (ComMit Unit)
-  rapt_cmu cmu (
-      .clock(clock),
-
-      .rou_cmu  (rou_cmu),
-      .cmu_bcast(cmu_bcast),
-
-      .reset(reset)
-  );
-
-  rapt_csr csrs (
-      .clock(clock),
-
-      .rou_csr(rou_csr),
-      .exu_csr(exu_csr),
-
-      .csr_bcast(csr_bcast),
-
-      .s_int_pending(s_int_pending),
-      .s_int_cause  (s_int_cause),
-
-      .ext_irq_i(io_interrupt),
-
-      .reset(reset)
-  );
-
-  // LSU (Load/Store Unit)
-  rapt_lsu lsu (
-      .clock(clock),
-
-      .cmu_bcast(cmu_bcast),
-
-      .lsu_l1d(lsu_l1d),
-
-      .exu_lsu(exu_lsu),
-      .exu_ioq_bcast(exu_ioq_bcast),
-      .rou_lsu(rou_lsu),
-
-      .csr_bcast(csr_bcast),
-
-      .reset(reset)
-  );
-
-  rapt_l1d l1d_cache (
-      .clock(clock),
-
-      .cmu_bcast(cmu_bcast),
-
-      .lsu_l1d(lsu_l1d),
-      .l1d_bus(l1d_bus),
-
-      .csr_bcast(csr_bcast),
-
-      .exu_l1d(exu_l1d),
-      .rou_cmu(rou_cmu),
-
-      .reset(reset)
-  );
-
-  rapt_bus bus (
-      .clock(clock),
-
-      .axi_arburst(io_master_arburst),
-      .axi_arsize(io_master_arsize),
-      .axi_arlen(io_master_arlen),
-      .axi_arid(io_master_arid),
-      .axi_araddr(io_master_araddr),
-      .axi_arvalid(io_master_arvalid),
-      .axi_arready(io_master_arready),
-
-      .axi_rid(io_master_rid),
-      .axi_rlast(io_master_rlast),
-      .axi_rdata(io_master_rdata),
-      .axi_rresp(io_master_rresp),
-      .axi_rvalid(io_master_rvalid),
-      .axi_rready(io_master_rready),
-
-      .axi_awburst(io_master_awburst),
-      .axi_awsize(io_master_awsize),
-      .axi_awlen(io_master_awlen),
-      .axi_awid(io_master_awid),
-      .axi_awaddr(io_master_awaddr),
-      .axi_awvalid(io_master_awvalid),
-      .axi_awready(io_master_awready),
-
-      .axi_wlast (io_master_wlast),
-      .axi_wdata (io_master_wdata),
-      .axi_wstrb (io_master_wstrb),
-      .axi_wvalid(io_master_wvalid),
-      .axi_wready(io_master_wready),
-
-      .axi_bid(io_master_bid),
-      .axi_bresp(io_master_bresp),
-      .axi_bvalid(io_master_bvalid),
-      .axi_bready(io_master_bready),
-
-      .l1i_bus(l1i_bus),
-      .l1d_bus(l1d_bus),
-
-      .csr_bcast(csr_bcast),
-      .cmu_bcast(cmu_bcast),
-      .io_timer_trap_o(clint_timer_trap),
-      .io_sw_trap_o(clint_sw_trap),
-
-      .reset(reset)
-  );
-
-`ifdef RAPT_RVFI
-  // RVFI (RISC-V Formal Interface) output generation
-  rapt_rvfi rvfi_inst (
+  rapt_router #(
+      .XLEN(XLEN)
+  ) axi_router (
       .clock(clock),
       .reset(reset),
 
-      .rou_cmu  (rou_cmu),
-      .csr_bcast(csr_bcast),
-      .rf       (rf),
+      .core_axi(core_axi),
+      .offchip_axi(offchip_axi),
+      .clint_bus(clint_bus),
+      .plic_bus(plic_bus)
+  );
 
-      .rvfi_rd_wdata_a(rvfi_rd_wdata_a_w),
-      .rvfi_rd_wdata_b(rvfi_rd_wdata_b_w),
+  // ------------------------------------------------------------------
+  // CPU core (single hart today; instantiate-per-hart loop in the future).
+  // ------------------------------------------------------------------
+  rapt_core #(
+      .XLEN(XLEN)
+  ) core (
+      .clock(clock),
 
+      .io_master(core_axi),
+
+      .clint_timer_int_i(clint_bus.timer_int),
+      .clint_sw_int_i   (clint_bus.sw_int),
+
+`ifdef RAPT_RVFI
       .rvfi_valid(rvfi_valid),
       .rvfi_order(rvfi_order),
       .rvfi_insn (rvfi_insn),
@@ -472,8 +277,33 @@ module rapt #(
       .rvfi_mem_rmask(rvfi_mem_rmask),
       .rvfi_mem_wmask(rvfi_mem_wmask),
       .rvfi_mem_rdata(rvfi_mem_rdata),
-      .rvfi_mem_wdata(rvfi_mem_wdata)
+      .rvfi_mem_wdata(rvfi_mem_wdata),
+`endif
+
+      .io_interrupt(plic_bus.meip[0]),
+      .s_ext_irq_i (plic_bus.seip[0]),
+
+      // Hart 0; multi-core build will replace with a generate index.
+      .hart_id_i({XLEN{1'b0}}),
+
+      .reset(reset)
   );
+
+`ifdef RAPT_USE_SLAVE
+  // Tie off the unused AXI4 slave port at the cluster boundary. The legacy
+  // top kept these in the port list but never wired them; preserving the
+  // behaviour avoids surprises for any external consumer.
+  assign io_slave_arready = 1'b0;
+  assign io_slave_rid     = '0;
+  assign io_slave_rlast   = 1'b0;
+  assign io_slave_rdata   = '0;
+  assign io_slave_rresp   = 2'b00;
+  assign io_slave_rvalid  = 1'b0;
+  assign io_slave_awready = 1'b0;
+  assign io_slave_wready  = 1'b0;
+  assign io_slave_bid     = '0;
+  assign io_slave_bresp   = 2'b00;
+  assign io_slave_bvalid  = 1'b0;
 `endif
 
 endmodule

@@ -115,6 +115,11 @@ void sdb_set_batch_mode()
   is_batch_mode = true;
 }
 
+bool sdb_is_batch_mode()
+{
+  return is_batch_mode;
+}
+
 void soc_show_sram()
 {
   if (npc.soc_sram != NULL)

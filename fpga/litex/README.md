@@ -63,23 +63,25 @@ Select variant: `make sim VARIANT=linux`
 
 ## Commands
 
-| Command              | Description                                 |
-| -------------------- | ------------------------------------------- |
-| `make setup`         | Install LiteX + register Raptor CPU         |
-| `make pack`          | Pack RTL into single .sv                    |
-| `make sim`           | Verilator simulation                        |
-| `make sim-trace`     | Simulation with FST waveform                |
-| `make coremark`      | Build + run CoreMark in sim                 |
-| `make linux`         | Build + run Linux payload in sim            |
-| `make fpga-build`    | Build Tang Mega 138K Pro hardware bitstream |
-| `make fpga-load`     | Load Tang Mega 138K Pro SRAM bitstream      |
-| `make fpga-flash`    | Flash Tang Mega 138K Pro external SPI flash |
-| `make fpga-console`  | Open Tang Mega 138K Pro UART console        |
-| `make main-fpga`     | Build + upload FPGA main firmware           |
-| `make irqtest-fpga`  | Build + upload minimal IRQ test firmware    |
-| `make coremark-fpga` | CoreMark to FPGA main_ram via serialboot    |
-| `make clean`         | Remove build artifacts                      |
-| `make help`          | Show all targets                            |
+| Command                   | Description                                        |
+| ------------------------- | -------------------------------------------------- |
+| `make setup`              | Install LiteX + register Raptor CPU                |
+| `make pack`               | Pack RTL into single .sv                           |
+| `make sim`                | Verilator simulation                               |
+| `make sim-trace`          | Simulation with FST waveform                       |
+| `make coremark`           | Build + run CoreMark in sim                        |
+| `make linux`              | Build + run Linux payload in sim                   |
+| `make fpga-build`         | Build Tang Mega 138K Pro hardware bitstream        |
+| `make fpga-load`          | Load Tang Mega 138K Pro SRAM bitstream             |
+| `make fpga-flash`         | Flash Tang Mega 138K Pro external SPI flash        |
+| `make fpga-console`       | Open Tang Mega 138K Pro UART console               |
+| `make main-fpga`          | Build + upload FPGA main firmware                  |
+| `make irqtest-fpga`       | Build + upload minimal IRQ test firmware           |
+| `make coremark-fpga`      | CoreMark to FPGA main_ram via serialboot           |
+| `make app-llm-infer`      | app/ LLM inference benchmark in LiteX sim          |
+| `make app-llm-infer-fpga` | app/ LLM benchmark to FPGA main_ram via serialboot |
+| `make clean`              | Remove build artifacts                             |
+| `make help`               | Show all targets                                   |
 
 ## FPGA Firmware Upload (via BIOS serialboot)
 
@@ -101,12 +103,52 @@ make donut-fpga
 # Upload minimal IRQ test firmware
 make irqtest-fpga
 
+# Upload RLLMBench payloads
+make app-llm-ops-fpga
+make app-llm-infer-fpga
+make app-llm-train-fpga
+
 # Explicit UART port (if auto-detection fails)
 make main-fpga UART_PORT=/dev/tty.usbserial-20250303171 UART_BAUD=115200
 
 # Build only (no upload)
 make main-fpga-build
 ```
+
+## app/ Payloads
+
+The `app/` tree can produce LiteX-native flat binaries when a program links
+against `app/lib/litex/start.S`, `app/lib/litex/link.ld`, and
+`app/lib/litex/runtime.c`. This is the preferred route for running app tests on
+FPGA: build or load a BIOS bitstream once, then use BIOS serialboot instead of
+re-running Gowin PnR for every payload.
+
+Current first-class app payloads are the RLLMBench fixed-point LLM workloads.
+They print `RLLMBENCH_RESULT` and `RLLMBENCH_SCORE` lines on the UART, matching
+the pk/NPC report format used by `make -C app llm-bench-report-npc`.
+
+```bash
+# LiteX simulation
+make app-llm-ops
+make app-llm-infer
+make app-llm-train
+
+# Override when the SoC time CSR is not 1 MHz
+make app-llm-infer RLLMBENCH_TIMEBASE_HZ=50000000
+
+# FPGA upload via BIOS serialboot
+make app-llm-fpga BENCH=infer UART_PORT=/dev/tty.usbserial-...
+
+# Generic prebuilt app payload upload
+make app-fpga-upload APP_FPGA_BIN=/path/to/app.bin UART_PORT=/dev/tty.usbserial-...
+```
+
+RLLMBench uses `rdtime` by default and reports `score_per_sec` from physical
+seconds only. Set `RLLMBENCH_TIMEBASE_HZ` to the real `time` CSR frequency so
+LiteX simulation, FPGA boards, pk/NPC, and native ports remain directly
+comparable. When producing reports from copied serial logs, pass the board or
+simulation core clock as `--core-clock-mhz <MHz>` to `report.py` to derive
+`score_per_mhz`, the CoreMark/MHz-style work-per-million-core-cycles metric.
 
 ## Architecture
 
@@ -130,16 +172,18 @@ make main-fpga-build
 
 ## Environment Variables
 
-| Variable            | Description                     | Default       |
-| ------------------- | ------------------------------- | ------------- |
-| `RAPTOR_HOME`       | Root of raptor-chip repo        | Auto-detected |
-| `VARIANT`           | CPU variant                     | `standard`    |
-| `SYS_CLK`           | System clock frequency (Hz)     | `50000000`    |
-| `FPGA_SYS_CLK`      | Tang Mega hardware clock (Hz)   | `15000000`    |
-| `FPGA_BOOT_MODE`    | Tang Mega boot ROM source       | `bios`        |
-| `FPGA_SYNTH_MAXFAN` | Gowin synthesis maxfan guide    | `48`          |
-| `FPGA_ROUTE_MAXFAN` | Gowin route maxfan guide        | `12`          |
-| `EXTRA_FLAGS`       | Extra flags for `raptor_soc.py` | (empty)       |
+| Variable                   | Description                          | Default       |
+| -------------------------- | ------------------------------------ | ------------- |
+| `RAPTOR_HOME`              | Root of raptor-chip repo             | Auto-detected |
+| `VARIANT`                  | CPU variant                          | `standard`    |
+| `SYS_CLK`                  | System clock frequency (Hz)          | `50000000`    |
+| `FPGA_SYS_CLK`             | Tang Mega hardware clock (Hz)        | `15000000`    |
+| `FPGA_BOOT_MODE`           | Tang Mega boot ROM source            | `bios`        |
+| `FPGA_SYNTH_MAXFAN`        | Gowin synthesis maxfan guide         | `48`          |
+| `FPGA_ROUTE_MAXFAN`        | Gowin route maxfan guide             | `12`          |
+| `RLLMBENCH_TIMEBASE_HZ`    | RLLMBench `time` CSR frequency in Hz | `1000000`     |
+| `RLLMBENCH_CORE_CLOCK_MHZ` | Core clock for score/MHz reports     | `SYS_CLK/1e6` |
+| `EXTRA_FLAGS`              | Extra flags for `raptor_soc.py`      | (empty)       |
 
 ## Dependencies
 

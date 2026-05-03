@@ -87,6 +87,12 @@ module rapt_l1d #(
   logic ptw_done, ptw_fault;
   logic ptw_arvalid;
   logic [XLEN-1:0] ptw_araddr;
+  logic ptw_awvalid;
+  logic [XLEN-1:0] ptw_awaddr;
+  logic ptw_wvalid;
+  logic [XLEN-1:0] ptw_wdata;
+  logic [7:0] ptw_wstrb;
+  logic ptw_wready;
   logic [XLEN-1:0] ptw_vaddr;
   logic [XLEN-1:10] ptw_result_ptag;
   logic [XLEN-1:12] ptw_result_vtag;
@@ -249,10 +255,18 @@ module rapt_l1d #(
       .satp_ppn(csr_bcast.satp_ppn),
       .mmu_en(mmu_en),
       .sbe(csr_bcast.sbe),
+      .req_store(store_tlb_miss),
       .bus_arvalid(ptw_arvalid),
       .bus_araddr(ptw_araddr),
       .bus_rvalid(l1d_bus.rvalid),
       .bus_rdata(l1d_bus.rdata),
+      .bus_awvalid(ptw_awvalid),
+      .bus_awaddr(ptw_awaddr),
+      .bus_wvalid(ptw_wvalid),
+      .bus_wdata(ptw_wdata),
+      .bus_wstrb(ptw_wstrb),
+      .bus_wready(ptw_wready),
+      .bus_werr(l1d_bus.werr),
       .done(ptw_done),
       .fault(ptw_fault),
       .result_ptag(ptw_result_ptag),
@@ -513,7 +527,7 @@ module rapt_l1d #(
   logic store_unmapped_fault_mmu;
   assign store_unmapped_fault_mmu = !rapt_pkg::addr_mapped(exu_l1d.paddr);
 
-  // --- Sv32 PTE permission check (data access: load/store, not fetch) ---
+  // --- Sv32/Sv39 PTE permission check (data access: load/store, not fetch) ---
   // pte bits (rapt_tlb layout): [0]=R [1]=W [2]=X [3]=U [4]=G [5]=A [6]=D.
   // Bit [4]=G (global) does not affect data fault and is not consumed below.
   /* verilator lint_off UNUSEDSIGNAL */
@@ -625,19 +639,21 @@ module rapt_l1d #(
           && (rec_addr == lsu_l1d.raddr));
 
   // write channel
-  assign l1d_bus.awvalid = lsu_l1d.wvalid;
-  assign l1d_bus.awaddr = lsu_l1d.waddr;
+  assign l1d_bus.awvalid = ptw_awvalid ? 1'b1 : lsu_l1d.wvalid;
+  assign l1d_bus.awaddr = ptw_awvalid ? ptw_awaddr : lsu_l1d.waddr;
 `ifdef RAPT_RV64
   // Decode walu (5-bit store mask) to full 8-bit wstrb for RV64
   // SB: 5'b00001->8'h01, SH: 5'b00011->8'h03, SW: 5'b01111->8'h0f, SD: 5'b11111->8'hff
-  assign l1d_bus.wstrb = (lsu_l1d.walu == 5'b11111) ? 8'hff : {3'b0, lsu_l1d.walu[4:0]};
+  assign l1d_bus.wstrb = ptw_wvalid ? ptw_wstrb
+    : (lsu_l1d.walu == 5'b11111) ? 8'hff : {3'b0, lsu_l1d.walu[4:0]};
 `else
-  assign l1d_bus.wstrb = {4'b0, lsu_l1d.walu[3:0]};
+  assign l1d_bus.wstrb = ptw_wvalid ? ptw_wstrb : {4'b0, lsu_l1d.walu[3:0]};
 `endif
-  assign l1d_bus.wvalid = lsu_l1d.wvalid;
-  assign l1d_bus.wdata = lsu_l1d.wdata;
+  assign l1d_bus.wvalid = ptw_wvalid ? 1'b1 : lsu_l1d.wvalid;
+  assign l1d_bus.wdata = ptw_wvalid ? ptw_wdata : lsu_l1d.wdata;
 
-  assign lsu_l1d.wready = l1d_bus.wready;
+  assign ptw_wready = ptw_wvalid && l1d_bus.wready;
+  assign lsu_l1d.wready = !ptw_wvalid && l1d_bus.wready;
 
   // store address translation: stlb_hit uses TLB, otherwise wait for PTW
   assign store_paddr = XLEN'({ptw_result_ptag, exu_l1d.vaddr[11:0]});
@@ -681,7 +697,6 @@ module rapt_l1d #(
       // if (l1d_bus.arvalid && (l1d_state == LD_A) && csr_bcast.dmmu_en) begin
       //   $display("  [L1D READ ] addr: %h", l1d_bus.araddr);
       // end
-
       unique case (l1d_state)
         IDLE: begin
           if (!cmu_bcast.flush_pipe) begin
@@ -693,7 +708,7 @@ module rapt_l1d #(
                   rec_addr <= exu_l1d.vaddr;
                   l1d_state <= TRAP;
                 end else if (stlb_hit && pf_store_tlb) begin
-                  // Sv32 PTE permission denies store.
+                  // PTE permission denies store.
                   cause <= `RAPT_CAUSE_STORE_PAGE_FAULT;
                   rec_addr <= exu_l1d.vaddr;
                   l1d_state <= TRAP;

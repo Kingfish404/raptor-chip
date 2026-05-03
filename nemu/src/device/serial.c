@@ -16,43 +16,86 @@
 #include <utils.h>
 #include <device/map.h>
 
-#ifdef CONFIG_SERIAL_INPUT_FIFO
+#ifndef CONFIG_TARGET_AM
+#include <stdio.h>
+#endif
+
+#if defined(CONFIG_SERIAL_INPUT_FIFO) && !defined(CONFIG_TARGET_AM)
+#include <errno.h>
 #include <fcntl.h>
+#include <signal.h>
 #include <unistd.h>
 #include <termios.h>
+#define SERIAL_HOST_INPUT 1
 
-static struct termios orig_termios;
-static bool termios_saved = false;
+static struct termios stdin_saved_termios;
+static bool stdin_termios_saved = false;
+static int stdin_saved_flags = 0;
+static bool stdin_flags_saved = false;
+static bool stdin_cleanup_registered = false;
 
-static void serial_restore_term(void) {
-  if (termios_saved) {
-    tcsetattr(STDIN_FILENO, TCSANOW, &orig_termios);
+static void serial_restore_stdin(void) {
+  if (stdin_termios_saved) {
+    tcsetattr(STDIN_FILENO, TCSANOW, &stdin_saved_termios);
+  }
+  if (stdin_flags_saved) {
+    fcntl(STDIN_FILENO, F_SETFL, stdin_saved_flags);
   }
 }
 
-static void serial_set_raw_term(void) {
-  if (!isatty(STDIN_FILENO)) return;
-  if (tcgetattr(STDIN_FILENO, &orig_termios) < 0) return;
-  termios_saved = true;
-  atexit(serial_restore_term);
+static void serial_signal_restore(int signo) {
+  serial_restore_stdin();
+  signal(signo, SIG_DFL);
+  raise(signo);
+}
 
-  struct termios raw = orig_termios;
+static void serial_register_cleanup(void) {
+  if (stdin_cleanup_registered) return;
+  atexit(serial_restore_stdin);
+  signal(SIGINT, serial_signal_restore);
+  signal(SIGTERM, serial_signal_restore);
+  signal(SIGHUP, serial_signal_restore);
+  stdin_cleanup_registered = true;
+}
+
+static void serial_configure_stdin(void) {
+  serial_register_cleanup();
+
+  int flags = fcntl(STDIN_FILENO, F_GETFL, 0);
+  if (flags >= 0) {
+    if (!stdin_flags_saved) {
+      stdin_saved_flags = flags;
+      stdin_flags_saved = true;
+    }
+    fcntl(STDIN_FILENO, F_SETFL, stdin_saved_flags | O_NONBLOCK);
+  }
+
+  if (!isatty(STDIN_FILENO)) return;
+  if (tcgetattr(STDIN_FILENO, &stdin_saved_termios) < 0) return;
+  stdin_termios_saved = true;
+
+  struct termios raw = stdin_saved_termios;
   raw.c_lflag &= ~(ICANON | ECHO);
   raw.c_cc[VMIN] = 0;
   raw.c_cc[VTIME] = 0;
   tcsetattr(STDIN_FILENO, TCSANOW, &raw);
-
-  // Also set stdin non-blocking
-  int flags = fcntl(STDIN_FILENO, F_GETFL, 0);
-  fcntl(STDIN_FILENO, F_SETFL, flags | O_NONBLOCK);
 }
 
 #define SERIAL_RX_FIFO_SIZE 256
 static uint8_t serial_rx_fifo[SERIAL_RX_FIFO_SIZE];
 static int serial_rx_head = 0, serial_rx_tail = 0;
+static bool serial_lf_to_cr = false;
+
+void serial_set_lf_to_cr(bool enable) {
+  serial_lf_to_cr = enable;
+}
 
 static inline int serial_rx_count(void) {
   return (serial_rx_tail - serial_rx_head + SERIAL_RX_FIFO_SIZE) % SERIAL_RX_FIFO_SIZE;
+}
+
+static inline int serial_rx_free(void) {
+  return SERIAL_RX_FIFO_SIZE - 1 - serial_rx_count();
 }
 
 static void serial_rx_enqueue(uint8_t ch) {
@@ -71,25 +114,44 @@ static int serial_rx_dequeue(void) {
 
 static bool raw_term_inited = false;
 
-static void serial_ensure_raw_term(void) {
+static void serial_update_irq(void);
+
+static void serial_ensure_host_stdin(void) {
   if (raw_term_inited) return;
   raw_term_inited = true;
-  serial_set_raw_term();
+  serial_configure_stdin();
 }
 
 void serial_poll_stdin(void) {
-  serial_ensure_raw_term();
+  serial_ensure_host_stdin();
   uint8_t buf[64];
-  ssize_t n = read(STDIN_FILENO, buf, sizeof(buf));
-  if (n > 0) {
-    for (ssize_t i = 0; i < n; i++) {
-      serial_rx_enqueue(buf[i]);
+  while (serial_rx_free() > 0) {
+    size_t max_read = serial_rx_free() < (int)sizeof(buf)
+        ? (size_t)serial_rx_free() : sizeof(buf);
+    ssize_t n = read(STDIN_FILENO, buf, max_read);
+    if (n > 0) {
+      for (ssize_t i = 0; i < n; i++) {
+        if (serial_lf_to_cr && buf[i] == '\n') {
+          buf[i] = '\r';
+        }
+        serial_rx_enqueue(buf[i]);
+      }
+      serial_update_irq();
+      continue;
     }
-    // Raise PLIC external interrupt for UART (source 1)
-    extern void plic_raise_irq(int irq);
-    plic_raise_irq(1);
+    if (n == 0) return;
+    if (errno == EINTR) continue;
+    if (errno == EAGAIN || errno == EWOULDBLOCK) return;
+    return;
   }
 }
+#elif defined(CONFIG_SERIAL_INPUT_FIFO)
+void serial_poll_stdin(void) {}
+#ifndef CONFIG_TARGET_AM
+void serial_set_lf_to_cr(bool enable) { (void)enable; }
+#endif
+#elif !defined(CONFIG_TARGET_AM)
+void serial_set_lf_to_cr(bool enable) { (void)enable; }
 #endif /* CONFIG_SERIAL_INPUT_FIFO */
 
 /* http://en.wikibooks.org/wiki/Serial_Programming/8250_UART_Programming */
@@ -103,9 +165,15 @@ void serial_poll_stdin(void) {
 static uint8_t *serial_base = NULL;
 static uint8_t *serial_us16550_base = NULL;
 
-static void serial_putc(char ch)
+static void serial_putc(uint8_t ch)
 {
-  MUXDEF(CONFIG_TARGET_AM, putch(ch), putc(ch, stderr));
+#ifdef CONFIG_TARGET_AM
+  putch((char)ch);
+#else
+  if (fputc((int)ch, stderr) != EOF) {
+    fflush(stderr);
+  }
+#endif
 }
 
 __attribute__((__unused__)) static void serial_io_handler(uint32_t offset, int len, bool is_write)
@@ -133,6 +201,7 @@ __attribute__((__unused__)) static void serial_io_handler(uint32_t offset, int l
 
 // https://github.com/riscv-software-src/riscv-isa-sim/blob/master/riscv/ns16550.cc
 #define UART_QUEUE_SIZE 64
+#define UART_IRQ 10
 
 #define UART_RX 0 /* In:  Receive buffer */
 #define UART_TX 0 /* Out: Transmit buffer */
@@ -200,6 +269,19 @@ __attribute__((__unused__)) static void serial_io_handler(uint32_t offset, int l
 
 static uint32_t fcr, lcr, mcr, ier, scr;
 static uint32_t dll, dlm;
+static bool tx_irq_pending;
+
+extern void plic_raise_irq(int irq);
+
+static void serial_update_irq(void)
+{
+#ifdef SERIAL_HOST_INPUT
+  if ((ier & UART_IER_RDI) && serial_rx_count() > 0)
+    plic_raise_irq(UART_IRQ);
+#endif
+  if ((ier & UART_IER_THRI) && tx_irq_pending)
+    plic_raise_irq(UART_IRQ);
+}
 
 __attribute__((__unused__)) static void serial_io_handler_ns16550(uint32_t offset, int len, bool is_write)
 {
@@ -220,7 +302,9 @@ __attribute__((__unused__)) static void serial_io_handler_ns16550(uint32_t offse
       {
         break;
       }
-      serial_putc(val);
+      serial_putc((uint8_t)val);
+      tx_irq_pending = true;
+      serial_update_irq();
     }
     else
     {
@@ -230,7 +314,8 @@ __attribute__((__unused__)) static void serial_io_handler_ns16550(uint32_t offse
       }
       else
       {
-#ifdef CONFIG_SERIAL_INPUT_FIFO
+#ifdef SERIAL_HOST_INPUT
+  serial_poll_stdin();
         int ch = serial_rx_dequeue();
         val = (ch >= 0) ? (uint8_t)ch : 0;
 #else
@@ -245,13 +330,7 @@ __attribute__((__unused__)) static void serial_io_handler_ns16550(uint32_t offse
       if (!(lcr & UART_LCR_DLAB))
       {
         ier = val & 0x0f;
-#ifdef CONFIG_SERIAL_INPUT_FIFO
-        // Re-evaluate PLIC IRQ when interrupt enables change
-        if ((ier & UART_IER_RDI) && serial_rx_count() > 0) {
-          extern void plic_raise_irq(int irq);
-          plic_raise_irq(1);
-        }
-#endif
+        serial_update_irq();
       }
       else
       {
@@ -279,13 +358,17 @@ __attribute__((__unused__)) static void serial_io_handler_ns16550(uint32_t offse
     {
       // Compute IIR dynamically based on UART state
       uint8_t iir_type = (fcr & UART_FCR_ENABLE_FIFO) ? UART_IIR_TYPE_BITS : 0;
-#ifdef CONFIG_SERIAL_INPUT_FIFO
+#ifdef SERIAL_HOST_INPUT
+  serial_poll_stdin();
       if ((ier & UART_IER_RDI) && serial_rx_count() > 0)
         val = UART_IIR_RDI | iir_type;
       else
 #endif
-      if (ier & UART_IER_THRI)
+      if ((ier & UART_IER_THRI) && tx_irq_pending)
+      {
         val = UART_IIR_THRI | iir_type;
+        tx_irq_pending = false;
+      }
       else
         val = UART_IIR_NO_INT | iir_type;
     }
@@ -306,7 +389,8 @@ __attribute__((__unused__)) static void serial_io_handler_ns16550(uint32_t offse
     if (!is_write)
     {
       val = UART_LSR_TEMT | UART_LSR_THRE;
-#ifdef CONFIG_SERIAL_INPUT_FIFO
+#ifdef SERIAL_HOST_INPUT
+  serial_poll_stdin();
       if (serial_rx_count() > 0)
         val |= UART_LSR_DR;
 #endif
@@ -336,6 +420,7 @@ void init_serial()
   serial_us16550_base[UART_LSR] = UART_LSR_TEMT | UART_LSR_THRE;
   serial_us16550_base[UART_MSR] = UART_MSR_DCD | UART_MSR_DSR | UART_MSR_CTS;
   serial_us16550_base[UART_MCR] = UART_MCR_OUT2;
+  tx_irq_pending = false;
 #ifdef CONFIG_HAS_PORT_IO
   add_pio_map("serial", CONFIG_SERIAL_PORT, serial_base, 8, serial_io_handler);
 #else

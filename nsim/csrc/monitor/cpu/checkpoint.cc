@@ -20,9 +20,21 @@ static int save_enabled = 0;
 static int load_enabled = 0;
 static int save_done = 0;
 static int save_exit_after = 0;
+static int save_triggered = 0;
+static int save_cycle_valid = 0;
+static int save_instr_valid = 0;
+static int save_pc_valid = 0;
+static int save_pc_seen = 0;
 static uint64_t save_cycle = 0;
+static uint64_t save_instr = 0;
+static word_t save_pc = 0;
+static char save_trigger_desc[128] = {0};
 static char save_dir[1024] = {0};
 static char load_dir[1024] = {0};
+static uint64_t resume_pmu_cycle_base = 0;
+static uint64_t resume_pmu_instr_base = 0;
+static int resume_ready = 1;
+static uint64_t quiesce_wait_cycles = 0;
 
 /* Snapshot of arch state captured from disk; injected after reset. */
 typedef struct
@@ -50,6 +62,11 @@ typedef struct
   uint64_t clint_mtime;
   uint64_t clint_mtimecmp;
   uint8_t clint_msip;
+  uint8_t plic_priority[NPC_PLIC_NDEV + 1];
+  uint32_t plic_pending;
+  uint32_t plic_enable[NPC_PLIC_NCTX];
+  uint8_t plic_threshold[NPC_PLIC_NCTX];
+  uint32_t plic_ext_irq;
   uint64_t cycle, instr;
 } arch_snapshot_t;
 
@@ -112,16 +129,92 @@ static int mkdir_p(const char *path)
 /* ---------------------------------------------------------------------------
  * Save
  * ------------------------------------------------------------------------ */
-void checkpoint_configure_save(uint64_t cycle, const char *dir, bool exit_after)
+static uint64_t current_pmu_cycle(void)
+{
+  return (pmu.active_cycle < 0) ? 0 : (uint64_t)pmu.active_cycle;
+}
+
+static uint64_t current_pmu_instr(void)
+{
+  return (pmu.instr_cnt < 0) ? 0 : (uint64_t)pmu.instr_cnt;
+}
+
+static uint64_t run_cycle_delta(void)
+{
+  uint64_t now = current_pmu_cycle();
+  if (load_enabled && resume_ready && now >= resume_pmu_cycle_base)
+    return now - resume_pmu_cycle_base;
+  return load_enabled ? 0 : now;
+}
+
+static uint64_t run_instr_delta(void)
+{
+  uint64_t now = current_pmu_instr();
+  if (load_enabled && resume_ready && now >= resume_pmu_instr_base)
+    return now - resume_pmu_instr_base;
+  return load_enabled ? 0 : now;
+}
+
+static uint64_t checkpoint_total_cycle(void)
+{
+  return load_enabled ? loaded_snap.cycle + run_cycle_delta() : current_pmu_cycle();
+}
+
+static uint64_t checkpoint_total_instr(void)
+{
+  return load_enabled ? loaded_snap.instr + run_instr_delta() : current_pmu_instr();
+}
+
+static void set_trigger_desc(const char *kind, uint64_t target, uint64_t actual)
+{
+  snprintf(save_trigger_desc, sizeof(save_trigger_desc),
+           "%s target=%llu actual=%llu",
+           kind, (unsigned long long)target, (unsigned long long)actual);
+}
+
+void checkpoint_configure_save(bool has_cycle, uint64_t cycle,
+                               bool has_instr, uint64_t instr,
+                               bool has_pc, word_t pc,
+                               const char *dir, bool exit_after)
 {
   save_enabled = 1;
+  save_done = 0;
+  save_triggered = 0;
+  save_cycle_valid = has_cycle ? 1 : 0;
+  save_instr_valid = has_instr ? 1 : 0;
+  save_pc_valid = has_pc ? 1 : 0;
+  save_pc_seen = 0;
   save_cycle = cycle;
+  save_instr = instr;
+  save_pc = pc;
   save_exit_after = exit_after ? 1 : 0;
+  quiesce_wait_cycles = 0;
+  save_trigger_desc[0] = '\0';
+  if (!save_cycle_valid && !save_instr_valid && !save_pc_valid)
+  {
+    save_cycle_valid = 1;
+    save_cycle = 0;
+  }
   strncpy(save_dir, dir, sizeof(save_dir) - 1);
   save_dir[sizeof(save_dir) - 1] = '\0';
 }
 
 int checkpoint_save_configured(void) { return save_enabled; }
+
+void checkpoint_note_commit(word_t committed_pc)
+{
+  if (!save_enabled || save_done || !save_pc_valid || save_triggered)
+    return;
+  if (load_enabled && !resume_ready)
+    return;
+  if (committed_pc == save_pc)
+  {
+    save_pc_seen = 1;
+    snprintf(save_trigger_desc, sizeof(save_trigger_desc),
+             "pc target=" FMT_WORD_NO_PREFIX " actual=" FMT_WORD_NO_PREFIX,
+             save_pc, committed_pc);
+  }
+}
 
 static void write_state_txt(const char *path)
 {
@@ -138,8 +231,20 @@ static void write_state_txt(const char *path)
 #else
   fprintf(fp, "xlen=32\n");
 #endif
-  fprintf(fp, "cycle=%llu\n", (unsigned long long)pmu.active_cycle);
-  fprintf(fp, "instr=%llu\n", (unsigned long long)pmu.instr_cnt);
+  fprintf(fp, "cycle=%llu\n", (unsigned long long)checkpoint_total_cycle());
+  fprintf(fp, "instr=%llu\n", (unsigned long long)checkpoint_total_instr());
+  fprintf(fp, "sim_cycle=%llu\n", (unsigned long long)current_pmu_cycle());
+  fprintf(fp, "sim_instr=%llu\n", (unsigned long long)current_pmu_instr());
+  fprintf(fp, "run_cycle_delta=%llu\n", (unsigned long long)run_cycle_delta());
+  fprintf(fp, "run_instr_delta=%llu\n", (unsigned long long)run_instr_delta());
+  if (load_enabled)
+  {
+    fprintf(fp, "parent_cycle=%llu\n", (unsigned long long)loaded_snap.cycle);
+    fprintf(fp, "parent_instr=%llu\n", (unsigned long long)loaded_snap.instr);
+    fprintf(fp, "parent_checkpoint=%s\n", load_dir);
+  }
+  if (save_trigger_desc[0] != '\0')
+    fprintf(fp, "save_trigger=%s\n", save_trigger_desc);
   fprintf(fp, "pc=" FMT_WORD "\n", *npc.pc);
   fprintf(fp, "rpc=" FMT_WORD "\n", *npc.rpc);
   fprintf(fp, "priv=%d\n", (int)*npc.priv);
@@ -204,6 +309,26 @@ static void write_state_txt(const char *path)
     fprintf(fp, "clint_mtime=0x%016llx\n", (unsigned long long)mtime);
     fprintf(fp, "clint_mtimecmp=0x%016llx\n", (unsigned long long)mtimecmp);
     fprintf(fp, "clint_msip=0x%02x\n", (unsigned int)(msip & 0x1u));
+  }
+
+  /* PLIC device state. Claim/complete has no extra architectural storage; the
+   * priority/pending/enable/threshold registers plus ext_irq edge latch fully
+   * describe this RTL instance. */
+  if (npc.plic_priority != NULL && npc.plic_pending != NULL &&
+      npc.plic_enable != NULL && npc.plic_threshold != NULL &&
+      npc.plic_ext_irq != NULL)
+  {
+    fprintf(fp, "plic_pending=0x%08x\n", (unsigned int)(*npc.plic_pending));
+    fprintf(fp, "plic_ext_irq=0x%08x\n", (unsigned int)(*npc.plic_ext_irq));
+    for (int i = 0; i <= NPC_PLIC_NDEV; i++)
+      fprintf(fp, "plic_priority%d=0x%02x\n", i,
+              (unsigned int)(npc.plic_priority[i] & 0x7u));
+    for (int c = 0; c < NPC_PLIC_NCTX; c++)
+    {
+      fprintf(fp, "plic_enable%d=0x%08x\n", c, (unsigned int)npc.plic_enable[c]);
+      fprintf(fp, "plic_threshold%d=0x%02x\n", c,
+              (unsigned int)(npc.plic_threshold[c] & 0x7u));
+    }
   }
   fclose(fp);
 }
@@ -318,8 +443,9 @@ static void do_save(void)
   Log("checkpoint: wrote %s", path);
   for (size_t i = 0; i < NR_REGIONS; i++)
     write_region(save_dir, &kRegions[i]);
-  Log(FMT_GREEN("checkpoint: SAVED at cycle %llu, pc=" FMT_WORD_NO_PREFIX " -> %s"),
-      (unsigned long long)pmu.active_cycle, *npc.pc, save_dir);
+  Log(FMT_GREEN("checkpoint: SAVED at cycle %llu instr %llu, pc=" FMT_WORD_NO_PREFIX " -> %s"),
+      (unsigned long long)checkpoint_total_cycle(),
+      (unsigned long long)checkpoint_total_instr(), *npc.pc, save_dir);
   save_done = 1;
 }
 
@@ -327,8 +453,37 @@ bool checkpoint_save_tick(void)
 {
   if (!save_enabled || save_done)
     return false;
-  if ((uint64_t)pmu.active_cycle < save_cycle)
+  if (load_enabled && !resume_ready)
     return false;
+
+  if (!save_triggered)
+  {
+    uint64_t cycle_delta = run_cycle_delta();
+    uint64_t instr_delta = run_instr_delta();
+    if (save_cycle_valid && cycle_delta >= save_cycle)
+    {
+      save_triggered = 1;
+      set_trigger_desc("cycle", save_cycle, cycle_delta);
+    }
+    else if (save_instr_valid && instr_delta >= save_instr)
+    {
+      save_triggered = 1;
+      set_trigger_desc("instr", save_instr, instr_delta);
+    }
+    else if (save_pc_valid && save_pc_seen)
+    {
+      save_triggered = 1;
+      if (save_trigger_desc[0] == '\0')
+        snprintf(save_trigger_desc, sizeof(save_trigger_desc),
+                 "pc target=" FMT_WORD_NO_PREFIX, save_pc);
+    }
+    if (!save_triggered)
+      return false;
+
+    quiesce_wait_cycles = 0;
+    Log("checkpoint: trigger hit (%s), waiting for pipeline quiesce",
+        save_trigger_desc[0] ? save_trigger_desc : "manual");
+  }
 
   /* Defer save until pipeline is quiesced so committed stores have drained
    * from SQ → bus → host backing buffer. Otherwise mem_pmem.bin loses the
@@ -339,7 +494,6 @@ bool checkpoint_save_tick(void)
    * Note: SQ_SIZE=8 so sq_valid is one byte (uint8_t); STQ same.
    * If quiesce never happens (defensive cap of 100k cycles), force-save
    * with a warning so we don't hang the run forever. */
-  static uint64_t quiesce_wait_cycles = 0;
   bool rob_q = (npc.rob_empty != NULL) ? (*npc.rob_empty != 0) : true;
   bool sq_q = (npc.sq_valid != NULL) ? (*npc.sq_valid == 0) : true;
   bool stq_q = (npc.stq_valid != NULL) ? (*npc.stq_valid == 0) : true;
@@ -414,6 +568,30 @@ static int read_state_txt(const char *path, arch_snapshot_t *s)
       int idx = atoi(key + 7);
       if (idx >= 0 && idx < NPC_PMP_NUM && parse_word(val, &w) == 0)
         s->pmpaddr[idx] = w;
+      continue;
+    }
+    if (strncmp(key, "plic_priority", 13) == 0)
+    {
+      int idx = atoi(key + 13);
+      unsigned int v = 0;
+      if (idx >= 0 && idx <= NPC_PLIC_NDEV && sscanf(val, "%x", &v) == 1)
+        s->plic_priority[idx] = (uint8_t)(v & 0x7u);
+      continue;
+    }
+    if (strncmp(key, "plic_enable", 11) == 0)
+    {
+      int idx = atoi(key + 11);
+      unsigned int v = 0;
+      if (idx >= 0 && idx < NPC_PLIC_NCTX && sscanf(val, "%x", &v) == 1)
+        s->plic_enable[idx] = (uint32_t)v;
+      continue;
+    }
+    if (strncmp(key, "plic_threshold", 14) == 0)
+    {
+      int idx = atoi(key + 14);
+      unsigned int v = 0;
+      if (idx >= 0 && idx < NPC_PLIC_NCTX && sscanf(val, "%x", &v) == 1)
+        s->plic_threshold[idx] = (uint8_t)(v & 0x7u);
       continue;
     }
     if (strcmp(key, "pc") == 0)
@@ -509,6 +687,18 @@ static int read_state_txt(const char *path, arch_snapshot_t *s)
       unsigned int v = 0;
       if (sscanf(val, "%x", &v) == 1)
         s->clint_msip = (uint8_t)(v & 0x1u);
+    }
+    else if (strcmp(key, "plic_pending") == 0)
+    {
+      unsigned int v = 0;
+      if (sscanf(val, "%x", &v) == 1)
+        s->plic_pending = (uint32_t)v;
+    }
+    else if (strcmp(key, "plic_ext_irq") == 0)
+    {
+      unsigned int v = 0;
+      if (sscanf(val, "%x", &v) == 1)
+        s->plic_ext_irq = (uint32_t)v;
     }
   }
   fclose(fp);
@@ -877,6 +1067,10 @@ static void build_trampoline(uint8_t *mrom, const arch_snapshot_t *s)
 void checkpoint_configure_load(const char *dir)
 {
   load_enabled = 1;
+  resume_ready = 0;
+  resume_pmu_cycle_base = 0;
+  resume_pmu_instr_base = 0;
+  memset(&loaded_snap, 0, sizeof(loaded_snap));
   strncpy(load_dir, dir, sizeof(load_dir) - 1);
   load_dir[sizeof(load_dir) - 1] = '\0';
 
@@ -889,6 +1083,7 @@ void checkpoint_configure_load(const char *dir)
   {
     Error("checkpoint: failed to read state from %s", path);
     load_enabled = 0;
+    resume_ready = 1;
     return;
   }
   Log("checkpoint: loaded arch state from %s (saved at cycle %llu, pc=" FMT_WORD_NO_PREFIX ")", path,
@@ -905,6 +1100,7 @@ void checkpoint_configure_load(const char *dir)
   {
     Error("checkpoint: MROM has no host backing — cannot install trampoline");
     load_enabled = 0;
+    resume_ready = 1;
     return;
   }
   memset(mrom, 0, 256); /* clear leading region; trampoline is < 256 bytes */
@@ -965,6 +1161,22 @@ void checkpoint_inject_after_reset(void)
   if (npc.clint_msip != NULL)
     *npc.clint_msip = (uint8_t)(loaded_snap.clint_msip & 0x1u);
 
+  if (npc.plic_priority != NULL && npc.plic_pending != NULL &&
+      npc.plic_enable != NULL && npc.plic_threshold != NULL &&
+      npc.plic_ext_irq != NULL)
+  {
+    *npc.plic_pending = loaded_snap.plic_pending & ~1u;
+    *npc.plic_ext_irq = loaded_snap.plic_ext_irq & ~1u;
+    for (int i = 0; i <= NPC_PLIC_NDEV; i++)
+      npc.plic_priority[i] = (uint8_t)(loaded_snap.plic_priority[i] & 0x7u);
+    npc.plic_priority[0] = 0;
+    for (int c = 0; c < NPC_PLIC_NCTX; c++)
+    {
+      npc.plic_enable[c] = loaded_snap.plic_enable[c] & ~1u;
+      npc.plic_threshold[c] = (uint8_t)(loaded_snap.plic_threshold[c] & 0x7u);
+    }
+  }
+
   if (npc.pmpcfg != NULL && npc.pmpaddr != NULL)
   {
     for (int i = 0; i < NPC_PMP_NUM; i++)
@@ -1010,6 +1222,14 @@ void checkpoint_inject_after_reset(void)
         (unsigned int)loaded_snap.pmpcfg[0], loaded_snap.pmpaddr[0]);
   }
 
+  if (npc.plic_pending != NULL && npc.plic_enable != NULL)
+  {
+    Log("checkpoint: restored PLIC state pending=0x%08x enable0=0x%08x enable1=0x%08x",
+        (unsigned int)(*npc.plic_pending),
+        (unsigned int)npc.plic_enable[0],
+        (NPC_PLIC_NCTX > 1) ? (unsigned int)npc.plic_enable[1] : 0u);
+  }
+
   /* Arm the deferred fixup; consumed at first commit @ ckpt_pc. */
   post_trampoline_pending = 1;
 }
@@ -1045,7 +1265,13 @@ void checkpoint_load_post_trampoline_tick(word_t committed_pc)
   if (npc.mepc___ != NULL)
     *npc.mepc___ = loaded_snap.mepc;
 
+  resume_pmu_cycle_base = current_pmu_cycle();
+  resume_pmu_instr_base = current_pmu_instr();
+  if (resume_pmu_instr_base > 0)
+    resume_pmu_instr_base--;
+  resume_ready = 1;
+
   Log("checkpoint: post-trampoline fixup applied at pc=" FMT_WORD_NO_PREFIX
-      " (mepc/counters restored from snapshot)",
+      " (mepc/counters restored from snapshot, relative triggers armed)",
       committed_pc);
 }

@@ -81,8 +81,20 @@ CXXFLAGS = -Wall -Werror \
 	$(call remove_quote,$(CONFIG_CC_OPT))
 LDFLAGS = -lreadline -ldl
 
-# RV64 support: pass VFLAGS="-DRAPT_RV64" to enable 64-bit mode
-VFLAGS ?= ## Enable RV64 mode (-DRAPT_RV64)
+# RV64 support: pass VFLAGS="-DRAPT_RV64" to enable 64-bit mode.
+# Simulation assertions are enabled by default for Verilator builds only;
+# pack/STA/synthesis still use raw VFLAGS and therefore do not pick up the
+# default assertion define.
+VFLAGS ?= ## Extra RTL defines for NPC (-DRAPT_RV64, etc.)
+RAPT_SIM_ASSERT ?= 1## Enable RTL SVA assertions by default in Verilator simulation (1=on, 0=off)
+RAPT_SIM_ASSERT := $(strip $(RAPT_SIM_ASSERT))
+SIM_ASSERT_VFLAGS :=
+ifneq ($(RAPT_SIM_ASSERT),0)
+ifeq (,$(findstring DRAPT_ASSERT_EN,$(VFLAGS)))
+SIM_ASSERT_VFLAGS := -DRAPT_ASSERT_EN
+endif
+endif
+SIM_VFLAGS := $(strip $(VFLAGS) $(SIM_ASSERT_VFLAGS))
 ifneq (,$(findstring DRAPT_RV64,$(VFLAGS)))
 CXXFLAGS += -DCONFIG_ISA64
 ISA64 = 1
@@ -96,15 +108,24 @@ include $(FILELIST_MK)
 $(shell mkdir -p $(BUILD_DIR))
 $(shell mkdir -p $(DATA_DIR))
 
-# Auto-invalidate build when VFLAGS changes (e.g., switching between RV32/RV64)
-# Stamp lives inside the per-config BUILD_DIR so each RAPT_CONFIG tracks its own VFLAGS.
+# Auto-invalidate simulator build when effective simulation RTL flags change
+# (e.g., switching RV32/RV64 or enabling/disabling default assertions). Only do
+# this for Verilator simulator goals; pack/STA use raw VFLAGS and must not mark
+# the simulator binary as having been rebuilt with SIM_VFLAGS.
+SIM_STAMP_GOALS := all run run_log sim print-npc-exec lint
+SIM_STAMP_ACTIVE := $(if $(MAKECMDGOALS),$(filter $(SIM_STAMP_GOALS),$(MAKECMDGOALS)),all)
+SIM_STAMP_QUIET := $(filter print-npc-exec,$(MAKECMDGOALS))
 VFLAGS_STAMP := $(BUILD_DIR)/.vflags_stamp
+ifneq ($(SIM_STAMP_ACTIVE),)
 VFLAGS_PREV  := $(shell cat $(VFLAGS_STAMP) 2>/dev/null)
-ifneq ($(VFLAGS),$(VFLAGS_PREV))
+ifneq ($(SIM_VFLAGS),$(VFLAGS_PREV))
 $(shell rm -rf $(OBJ_DIR) $(BUILD_DIR)/riscv*-npc-* $(VFLAGS_STAMP))
-$(info [nsim] VFLAGS changed: '$(VFLAGS_PREV)' -> '$(VFLAGS)', rebuilding...)
+ifeq ($(SIM_STAMP_QUIET),)
+$(info [nsim] SIM_VFLAGS changed: '$(VFLAGS_PREV)' -> '$(SIM_VFLAGS)', rebuilding...)
 endif
-$(shell printf '%s' '$(VFLAGS)' > $(VFLAGS_STAMP))
+endif
+$(shell printf '%s' '$(SIM_VFLAGS)' > $(VFLAGS_STAMP))
+endif
 
 # RAPT_CONFIG no longer needs its own invalidation stamp: BUILD_DIR is now
 # rooted at $(BUILD_ROOT)/$(RAPT_CONFIG), so each preset has its own artifact
@@ -116,7 +137,9 @@ CONFIG_SIG   := $(shell md5sum .config 2>/dev/null || md5 -q .config 2>/dev/null
 CONFIG_PREV  := $(shell cat $(CONFIG_STAMP) 2>/dev/null)
 ifneq ($(CONFIG_SIG),$(CONFIG_PREV))
 $(shell rm -rf $(OBJ_DIR) $(BUILD_DIR)/riscv*-npc-* $(CONFIG_STAMP))
+ifeq ($(SIM_STAMP_QUIET),)
 $(info [nsim] Config changed, rebuilding...)
+endif
 endif
 $(shell printf '%s' '$(CONFIG_SIG)' > $(CONFIG_STAMP))
 
@@ -161,7 +184,7 @@ $(BIN): $(VSRCS) $(VHSRCS) $(CCSRCS) $(CHSRCS) $(NVBOARD_ARCHIVE)
 		--top-module $(VTARGET) \
 		$(addprefix -CFLAGS , $(CXXFLAGS)) $(addprefix -LDFLAGS , $(LDFLAGS)) \
 		$(addprefix -I, $(INC_PATH)) \
-		$(VFLAGS) \
+		$(SIM_VFLAGS) \
 		--Mdir $(OBJ_DIR) --exe -o $(abspath $(BIN))
 
 ifeq ($(ISA64),1)
@@ -170,7 +193,9 @@ else
 DIFF_REF_SO = -d $(abspath $(NEMU_HOME)/build/riscv32-nemu-interpreter-so)
 endif
 IMG ?= ## Custom image to load
-NPC_EXEC := $(BIN) $(ARGS) $(DIFF_REF_SO) -r $(MROM_IMG) $(IMG)
+DISK ?= ## Virtio block disk image to load with --disk
+SDCARD ?= ## QEMU SDHCI SD-card image to load with --sdcard
+NPC_EXEC := $(BIN) $(ARGS) $(if $(DISK),--disk $(DISK),) $(if $(SDCARD),--sdcard $(SDCARD),) $(DIFF_REF_SO) -r $(MROM_IMG) $(IMG)
 
 verilog: ## Generate SystemVerilog from Chisel
 	make -C ssrc verilog
@@ -178,7 +203,9 @@ verilog: ## Generate SystemVerilog from Chisel
 run: $(BIN) $(MROM_IMG) ## Run NPC simulation
 	$(NPC_EXEC)
 
-print-npc-exec: ## Print NPC run command (without ARGS and IMG, for parallel callers)
+
+print-npc-exec: ## Print NPC run command (without ARGS/IMG/DISK, for parallel callers)
+	@$(MAKE) --no-print-directory $(BIN) $(MROM_IMG) >/dev/null
 	@echo $(abspath $(BIN)) $(DIFF_REF_SO) -r $(abspath $(MROM_IMG))
 
 run_log: $(BIN) $(MROM_IMG) ## Run NPC and log output
@@ -231,7 +258,7 @@ sta_show: pack ## Show timing analysis results
 		RTL_FILES="$(abspath $(BUILD_DIR)/rapt_pack.sv)"
 
 lint: ## Lint RTL with Verilator
-	$(VERILATOR) --lint-only -Wall $(VSRCS) $(INCFLAGS) $(VFLAGS) --top-module $(VTARGET)
+	$(VERILATOR) --lint-only -Wall $(VSRCS) $(INCFLAGS) $(SIM_VFLAGS) --top-module $(VTARGET)
 
 VSRCS_LINT = $(filter-out $(abspath $(VSRC_PATH)/generated/%) $(abspath $(SOC_HOME)/perip/%.v), $(VSRCS))
 

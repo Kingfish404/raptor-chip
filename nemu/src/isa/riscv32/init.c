@@ -53,6 +53,8 @@ static void restart()
   cpu.last_inst_priv = PRV_M;
   cpu.reservation = 0;
   cpu.mtimecmp = ~(uint64_t)0;
+  cpu.sr[0x14d] = ~(word_t)0; // stimecmp
+  cpu.sr[0x15d] = ~(word_t)0; // stimecmph
 
 #if defined(CONFIG_RV64)
   /* Set SXL=2, UXL=2 (XLEN=64 for S-mode and U-mode) */

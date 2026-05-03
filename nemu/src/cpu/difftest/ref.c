@@ -36,6 +36,7 @@ typedef struct
   word_t *stvec__;
 
   word_t *scounte;
+  word_t *mcounte;
 
   word_t *sscratch;
   word_t *sepc___;
@@ -215,6 +216,28 @@ __EXPORT void difftest_set_meip(uint8_t val)
     cpu.sr[CSR_MIP] &= ~(1u << 11);
 #else
   (void)val;
+#endif
+}
+
+// Forward an external IRQ source rising edge into NEMU's PLIC, keeping the
+// reference PLIC pending bits functionally aligned with the DUT's PLIC. SW
+// configuration writes (priority/enable/threshold) are already replayed via
+// the regular MMIO path, so as long as the mirrored source events match
+// 1:1, both PLICs produce the same claim/complete behaviour. Difftest skips
+// the PLIC MMIO range on loads (claim has destructive side effects), so
+// pending-bit divergence between DUT and ref is invisible to comparison;
+// this mirror is what keeps it from drifting in the first place.
+//
+// When the ref is built with CONFIG_DEVICE disabled (the usual SHARE/ref
+// build), the PLIC peripheral is absent and this function is a no-op; the
+// nsim mirror still calls it but no state changes.
+__EXPORT void difftest_plic_raise(uint32_t src)
+{
+#ifdef CONFIG_DEVICE
+  extern void plic_raise_irq(int irq);
+  plic_raise_irq((int)src);
+#else
+  (void)src;
 #endif
 }
 

@@ -1,6 +1,7 @@
 #include <common.h>
 #include <checkpoint.h>
 #include <difftest.h>
+#include <flow_check.h>
 #include <readline/readline.h>
 #include <readline/history.h>
 #include <npc_verilog.h>
@@ -19,6 +20,7 @@ extern word_t g_timer;
 extern VerilatedContext *contextp;
 extern TOP_NAME *top;
 extern VerilatedFstC *tfp;
+void serial_tick();
 
 extern void (*ref_difftest_exec)(uint64_t n);
 extern long long int max_timeout;
@@ -127,6 +129,7 @@ void cpu_exec_init()
   }
 #endif
   memset(&pmu, 0, sizeof(pmu));
+  flow_check_init();
 }
 
 void cpu_exec(uint64_t n)
@@ -160,8 +163,9 @@ void cpu_exec(uint64_t n)
     }
     // Simulate the performance monitor unit
     perf_sample_per_cycle();
-    // Checkpoint save: trigger when active_cycle reaches the configured
-    // value. If --ckpt-save-exit was passed, terminate the run cleanly.
+    flow_check_redirect_gap();
+    // Checkpoint save: trigger on configured cycle/instr/PC, then wait for
+    // quiesce before dumping. If --ckpt-save-exit was passed, terminate cleanly.
     if (checkpoint_save_tick())
     {
       Log("checkpoint: --ckpt-save-exit set, ending simulation.");
@@ -170,6 +174,8 @@ void cpu_exec(uint64_t n)
     }
     cur_inst_cycle++;
     progress_cycle++;
+    if ((progress_cycle & 0x3ffu) == 0)
+      serial_tick();
     if (progress_cycle % 40000000 == 0)
     {
       Log("progress: %016llu cycles, %016llu insts, pc=" FMT_WORD_NO_PREFIX,
@@ -200,10 +206,27 @@ void cpu_exec(uint64_t n)
       perf_sample_per_inst();
       cur_inst_cycle = 0;
       uint8_t cmu_valid_b = *(uint8_t *)&VERILOG_CPU(cmu__DOT__valid_b);
-      /* Checkpoint load: deferred post-trampoline fixup (no-op if not in
-       * load mode or already consumed). Use rpc (= committed PC) so we
-       * fire on the first cmu_valid retire of an instruction at ckpt_pc. */
-      checkpoint_load_post_trampoline_tick(*npc.rpc);
+      word_t cmu_rpc_a = *(word_t *)&VERILOG_CPU(cmu__DOT__rpc_a);
+      word_t cmu_rpc_b = *(word_t *)&VERILOG_CPU(cmu__DOT__rpc_b);
+      word_t cmu_npc_a = *(word_t *)&VERILOG_CPU(cmu__DOT__npc_a);
+      word_t cmu_npc_b = *(word_t *)&VERILOG_CPU(cmu__DOT__npc_b);
+      word_t flow_next_a = cmu_valid_b ? cmu_rpc_b : cmu_npc_a;
+      /* Checkpoint load/PC trigger hooks use registered per-slot commit PCs
+       * so dual-commit slot 0 is visible to the simulator. */
+      checkpoint_load_post_trampoline_tick(cmu_rpc_a);
+      checkpoint_note_commit(cmu_rpc_a);
+      flow_check_commit(cmu_rpc_a, flow_next_a, 'A');
+      if (npc.state != NPC_RUNNING)
+        break;
+      if (cmu_valid_b)
+      {
+        checkpoint_load_post_trampoline_tick(cmu_rpc_b);
+        checkpoint_note_commit(cmu_rpc_b);
+        flow_check_commit(cmu_rpc_b, cmu_npc_b, 'B');
+        if (npc.state != NPC_RUNNING)
+          break;
+      }
+      flow_check_async_redirect_after_sample();
 #ifdef CONFIG_ITRACE
       iringbuf_rpc[iringhead] = *npc.rpc;
       iringbuf_inst[iringhead] = *(word_t *)(npc.inst);
@@ -222,6 +245,20 @@ void cpu_exec(uint64_t n)
           uint8_t live = *(uint8_t *)&VERILOG_CPU(io_interrupt);
           ref_difftest_set_meip(live & 1u);
         }
+        // Mirror rising edges of the cluster-level external IRQ line into
+        // NEMU's PLIC source 1 so both PLICs see identical source events.
+        // (DUT routes the cluster `io_interrupt` port into PLIC source 1
+        //  internally; we mirror the same edge here.)
+        extern void (*ref_difftest_plic_raise)(uint32_t);
+        static uint8_t s_prev_ext_irq = 0;
+#ifdef VERILOG_CLUSTER
+        uint8_t cur_ext_irq = *(uint8_t *)&VERILOG_CLUSTER(io_interrupt);
+#else
+        uint8_t cur_ext_irq = *(uint8_t *)&VERILOG_CPU(io_interrupt);
+#endif
+        if (ref_difftest_plic_raise && cur_ext_irq && !s_prev_ext_irq)
+          ref_difftest_plic_raise(1u);
+        s_prev_ext_irq = cur_ext_irq;
       }
       if (cmu_valid_b)
       {
@@ -274,6 +311,12 @@ void cpu_exec(uint64_t n)
         perf_sample_per_inst();
       }
       npc.last_inst = *(npc.inst);
+    }
+    if (checkpoint_save_tick())
+    {
+      Log("checkpoint: --ckpt-save-exit set, ending simulation.");
+      npc.state = NPC_QUIT;
+      break;
     }
     if (tfp_threshold_break & ((pmu.active_cycle >= tfp_cycle) | (pmu.instr_cnt >= tfp_inst)))
     {

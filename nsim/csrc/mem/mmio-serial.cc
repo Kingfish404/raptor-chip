@@ -1,7 +1,15 @@
 #include <common.h>
 
+#include <errno.h>
+#include <fcntl.h>
+#include <signal.h>
+#include <stdio.h>
+#include <termios.h>
+#include <unistd.h>
+
 // https://github.com/riscv-software-src/riscv-isa-sim/blob/master/riscv/ns16550.cc
 #define UART_QUEUE_SIZE 64
+#define UART_IRQ 10u
 
 #define UART_RX 0 /* In:  Receive buffer */
 #define UART_TX 0 /* Out: Transmit buffer */
@@ -69,25 +77,176 @@
 
 static uint32_t fcr, lcr, mcr, ier, scr;
 static uint32_t dll, dlm;
+static uint8_t rx_buf[UART_QUEUE_SIZE];
+static uint8_t rx_head, rx_tail, rx_count;
+static bool tx_irq_pending;
+static bool stdin_flags_saved;
+static int stdin_saved_flags;
+static bool stdin_termios_saved;
+static struct termios stdin_saved_termios;
+static bool stdin_cleanup_registered;
+static bool serial_lf_to_cr;
 
-static uint8_t serial_us16550_base[0x100] = {0};
+void nsim_plic_raise(uint32_t irq);
+bool sdb_is_batch_mode();
+
+static void serial_restore_stdin()
+{
+    if (stdin_termios_saved)
+        tcsetattr(STDIN_FILENO, TCSANOW, &stdin_saved_termios);
+    if (stdin_flags_saved)
+        fcntl(STDIN_FILENO, F_SETFL, stdin_saved_flags);
+}
+
+static void serial_signal_restore(int signo)
+{
+    serial_restore_stdin();
+    signal(signo, SIG_DFL);
+    raise(signo);
+}
+
+static void serial_register_cleanup()
+{
+    if (stdin_cleanup_registered)
+        return;
+    atexit(serial_restore_stdin);
+    signal(SIGINT, serial_signal_restore);
+    signal(SIGTERM, serial_signal_restore);
+    signal(SIGHUP, serial_signal_restore);
+    stdin_cleanup_registered = true;
+}
+
+static void serial_configure_stdin()
+{
+    serial_register_cleanup();
+
+    int flags = fcntl(STDIN_FILENO, F_GETFL, 0);
+    if (flags >= 0)
+    {
+        if (!stdin_flags_saved)
+        {
+            stdin_saved_flags = flags;
+            stdin_flags_saved = true;
+        }
+        fcntl(STDIN_FILENO, F_SETFL, stdin_saved_flags | O_NONBLOCK);
+    }
+
+    if (!sdb_is_batch_mode() || !isatty(STDIN_FILENO))
+        return;
+
+    if (!stdin_termios_saved)
+    {
+        if (tcgetattr(STDIN_FILENO, &stdin_saved_termios) != 0)
+            return;
+        stdin_termios_saved = true;
+    }
+
+    struct termios term = stdin_saved_termios;
+    term.c_lflag &= ~(ECHO | ICANON);
+    term.c_cc[VMIN] = 0;
+    term.c_cc[VTIME] = 0;
+    tcsetattr(STDIN_FILENO, TCSANOW, &term);
+}
+
+static bool serial_read_host_byte(uint8_t *ch)
+{
+    for (;;)
+    {
+        ssize_t nread = read(STDIN_FILENO, ch, 1);
+        if (nread == 1)
+        {
+            if (serial_lf_to_cr && *ch == '\n')
+                *ch = '\r';
+            return true;
+        }
+        if (nread == 0)
+            return false;
+        if (errno == EINTR)
+            continue;
+        return false;
+    }
+}
+
+void serial_set_lf_to_cr(bool enable)
+{
+    serial_lf_to_cr = enable;
+}
+
+static void serial_write_host_byte(uint8_t ch)
+{
+    if (fputc((int)ch, stderr) != EOF)
+        fflush(stderr);
+}
+
+static void serial_update_irq()
+{
+    if ((ier & UART_IER_RDI) && rx_count != 0)
+        nsim_plic_raise(UART_IRQ);
+    if ((ier & UART_IER_THRI) && tx_irq_pending)
+        nsim_plic_raise(UART_IRQ);
+}
+
+static void rx_push(uint8_t ch)
+{
+    if (rx_count == UART_QUEUE_SIZE)
+        return;
+    rx_buf[rx_tail] = ch;
+    rx_tail = (rx_tail + 1) % UART_QUEUE_SIZE;
+    rx_count++;
+}
+
+static bool rx_pop(uint8_t *ch)
+{
+    if (rx_count == 0)
+        return false;
+    *ch = rx_buf[rx_head];
+    rx_head = (rx_head + 1) % UART_QUEUE_SIZE;
+    rx_count--;
+    return true;
+}
+
+static void serial_poll_stdin()
+{
+    uint8_t ch;
+    while (rx_count < UART_QUEUE_SIZE)
+    {
+        if (serial_read_host_byte(&ch))
+        {
+            rx_push(ch);
+            serial_update_irq();
+            continue;
+        }
+        if (errno == EAGAIN || errno == EWOULDBLOCK)
+            return;
+        return;
+    }
+}
 
 void init_serial()
 {
-    memset(serial_us16550_base, 0, 0x100);
-    serial_us16550_base[UART_IIR] = UART_IIR_NO_INT;
-    serial_us16550_base[UART_LSR] = UART_LSR_TEMT | UART_LSR_THRE;
-    serial_us16550_base[UART_MSR] = UART_MSR_DCD | UART_MSR_DSR | UART_MSR_CTS;
-    serial_us16550_base[UART_MCR] = UART_MCR_OUT2;
+    fcr = 0;
+    lcr = 0;
+    mcr = UART_MCR_OUT2;
+    ier = 0;
+    scr = 0;
+    dll = 0;
+    dlm = 0;
+    rx_head = 0;
+    rx_tail = 0;
+    rx_count = 0;
+    tx_irq_pending = false;
+
+    serial_configure_stdin();
 }
 
 void mmio_serial_handle(paddr_t offset, word_t wdata, bool is_write, word_t *data)
 {
-    uint8_t word_offset = offset & 0x3;
-    uint32_t val = serial_us16550_base[offset];
+    uint8_t word_offset = offset & (sizeof(word_t) - 1);
+    offset &= 0xff;
+    uint32_t val = 0;
     if (is_write)
     {
-        val = wdata;
+        val = wdata & 0xff;
     }
     switch (offset)
     {
@@ -103,7 +262,9 @@ void mmio_serial_handle(paddr_t offset, word_t wdata, bool is_write, word_t *dat
             {
                 break;
             }
-            putc(wdata, stderr);
+            serial_write_host_byte((uint8_t)val);
+            tx_irq_pending = true;
+            serial_update_irq();
         }
         else
         {
@@ -113,8 +274,90 @@ void mmio_serial_handle(paddr_t offset, word_t wdata, bool is_write, word_t *dat
             }
             else
             {
-                val = 0;
+                uint8_t ch;
+                serial_poll_stdin();
+                val = rx_pop(&ch) ? ch : 0;
+                serial_update_irq();
             }
+        }
+        break;
+    case UART_IER:
+        if (is_write)
+        {
+            if (lcr & UART_LCR_DLAB)
+            {
+                dlm = val;
+            }
+            else
+            {
+                ier = val;
+                serial_update_irq();
+            }
+        }
+        else
+        {
+            val = (lcr & UART_LCR_DLAB) ? dlm : ier;
+        }
+        break;
+    case UART_IIR:
+        if (is_write)
+        {
+            fcr = val;
+        }
+        else
+        {
+            serial_poll_stdin();
+            if ((ier & UART_IER_RDI) && rx_count != 0)
+            {
+                val = UART_IIR_RDI;
+            }
+            else if ((ier & UART_IER_THRI) && tx_irq_pending)
+            {
+                val = UART_IIR_THRI;
+                tx_irq_pending = false;
+            }
+            else
+            {
+                val = UART_IIR_NO_INT;
+            }
+            val |= (fcr & UART_FCR_ENABLE_FIFO) ? UART_IIR_TYPE_BITS : 0;
+        }
+        break;
+    case UART_LCR:
+        if (is_write)
+        {
+            lcr = val;
+        }
+        else
+        {
+            val = lcr;
+        }
+        break;
+    case UART_MCR:
+        if (is_write)
+        {
+            mcr = val;
+        }
+        else
+        {
+            val = mcr;
+        }
+        break;
+    case UART_LSR:
+        serial_poll_stdin();
+        val = UART_LSR_TEMT | UART_LSR_THRE | (rx_count != 0 ? UART_LSR_DR : 0);
+        break;
+    case UART_MSR:
+        val = UART_MSR_DCD | UART_MSR_DSR | UART_MSR_CTS;
+        break;
+    case UART_SCR:
+        if (is_write)
+        {
+            scr = val;
+        }
+        else
+        {
+            val = scr;
         }
         break;
     default:
@@ -122,6 +365,12 @@ void mmio_serial_handle(paddr_t offset, word_t wdata, bool is_write, word_t *dat
     }
     if (!is_write)
     {
-        *data = serial_us16550_base[offset] << (word_offset * 8);
+        *data = word_t(val) << (word_offset * 8);
     }
+}
+
+void serial_tick()
+{
+    serial_poll_stdin();
+    serial_update_irq();
 }

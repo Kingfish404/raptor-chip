@@ -1,6 +1,6 @@
 `include "rapt.svh"
 
-// Fully-associative TLB for Sv32 page translation with ASID support.
+// Fully-associative TLB for Sv32/Sv39 page translation with ASID support.
 // Combinational lookup, sequential fill, FIFO replacement.
 module rapt_tlb #(
     parameter int XLEN = `RAPT_XLEN,

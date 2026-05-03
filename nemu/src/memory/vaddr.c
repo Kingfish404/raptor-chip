@@ -74,11 +74,6 @@ word_t vaddr_ifetch(vaddr_t addr, int len)
 {
   g_vaddr = addr;
   paddr_t paddr = addr;
-  if (paddr == 0)
-  {
-    cause = MCA_INS_ACC_FAU;
-    longjmp(exec_jmp_buf, 20);
-  }
   bool mmu_on = false;
   if (isa_mmu_check(addr, len, MEM_TYPE_IFETCH) == MMU_DIRECT)
   {
@@ -98,6 +93,11 @@ word_t vaddr_ifetch(vaddr_t addr, int len)
     }
     paddr = isa_mmu_translate(addr, len, MEM_TYPE_IFETCH);
     soft_tlb_refill(soft_tlb_ifetch, addr, paddr);
+  }
+  if (!mmu_on && paddr == 0)
+  {
+    cause = MCA_INS_ACC_FAU;
+    longjmp(exec_jmp_buf, 20);
   }
   if (pmp_check(paddr, len, cpu.priv, false, false, true))
   {

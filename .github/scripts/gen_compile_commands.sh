@@ -86,7 +86,9 @@ echo "[compile-commands] Generating NEMU database..."
   make -C "${NEMU_HOME}" -B -j"${NPROC}" CONFIG_CC=
 
 echo "[compile-commands] Generating NSIM database..."
-NSIM_LOG="$(mktemp "${TMPDIR:-/tmp}/nsim-cdb.XXXXXX.log")"
+TMP_PARENT="${TMPDIR:-/tmp}"
+TMP_PARENT="${TMP_PARENT%/}"
+NSIM_LOG="$(mktemp "${TMP_PARENT}/nsim-cdb.XXXXXX")"
 make -C "${NSIM_HOME}" -B -j"${NPROC}" >"${NSIM_LOG}" 2>&1
 
 # Verilator's nested build emits the real C++ compile lines in obj_dir.

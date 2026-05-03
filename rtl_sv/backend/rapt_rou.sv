@@ -184,6 +184,9 @@ module rapt_rou #(
       uoq_pv1_valid       <= '0;
       uoq_pv2_valid       <= '0;
       serialize_in_flight <= 1'b0;
+`ifdef RAPT_DUAL_ISSUE
+      uoq_is_pair <= '0;
+`endif
     end else if (sys_resume) begin
       // Pipeline already drained; just clear the serialize lock
       serialize_in_flight <= 1'b0;
@@ -663,12 +666,14 @@ module rapt_rou #(
       uop_pl[h0].f_i
       || head0_br_p_fail
       || rob_entry[h0].trap
-      || (uop_pl[h0].sys && !head0_sys_pure)
+      || uop_pl[h0].sys
+      || uop_pl[h0].f_time
       || rob_entry[h0].atom
   ));
 
-  // Resume: lightweight pipeline unblock for serializing instructions that
-  // don't need a redirect (pure CSR read/write, sfence.vma).
+  // Kept as a distinct broadcast path for interface compatibility. Pure
+  // CSR/f_time currently take the full flush path above so any younger
+  // speculative uops are discarded before dispatch resumes.
   assign sys_resume = head0_valid && (head0_sys_pure || uop_pl[h0].f_time) && !head0_flush;
 
   // ---- Slot 1 (head+1): only considered when slot 0 doesn't flush ----
@@ -696,6 +701,7 @@ module rapt_rou #(
       || head1_br_p_fail
       || rob_entry[h1].trap
       || uop_pl[h1].sys
+      || uop_pl[h1].f_time
       || rob_entry[h1].atom
   );
 
@@ -838,6 +844,12 @@ module rapt_rou #(
   // (holding a uop) — prevents retiring an empty slot.
   `RAPT_SVA_IMPLY(clock, reset, ROB_COMMIT_NEEDS_BUSY, (head0_valid && !recieved_trap),
                   (rob_entry[h0].busy))
+
+  `RAPT_SVA_IMPLY(clock, reset, ROB_SYS_SERIALIZING_FLUSH,
+                  (head0_valid && (uop_pl[h0].sys || uop_pl[h0].f_time)), flush_pipe)
+
+  `RAPT_SVA_IMPLY(clock, reset, ROB_DUAL_SERIALIZING_FLUSH,
+                  (dual_commit && (uop_pl[h1].sys || uop_pl[h1].f_time)), flush_pipe)
 
   // Coverage: flush events happen (sanity that the DUT actually exercises
   // flush paths during tests — guards against accidentally disabling flush).

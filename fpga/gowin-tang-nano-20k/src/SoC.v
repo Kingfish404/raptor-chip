@@ -50,6 +50,7 @@ module SoC #(
       .clock            (clk),
       .reset            (rst),
       .io_interrupt     (1'h0),
+      .ext_irq_i        ('0),
       .io_master_awready(auto_master_out_awready),
       .io_master_awvalid(auto_master_out_awvalid),
       .io_master_awid   (auto_master_out_awid),

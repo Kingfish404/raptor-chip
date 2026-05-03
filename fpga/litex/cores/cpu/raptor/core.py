@@ -18,6 +18,7 @@ from litex.soc.integration.soc import SoCRegion
 CPU_VARIANTS = {
     "standard": "raptor",
     "linux": "raptor",
+    "linux64": "raptor",
 }
 
 # GCC Flags ----------------------------------------------------------------------------------------
@@ -25,6 +26,7 @@ CPU_VARIANTS = {
 GCC_FLAGS = {
     "standard": "-march=rv32imac_zicntr_zicond_zicsr_zifencei_zcb_zba_zbb_zbc_zbs -mabi=ilp32",
     "linux": "-march=rv32imac_zicntr_zicond_zicsr_zifencei_zcb_zba_zbb_zbc_zbs -mabi=ilp32",
+    "linux64": "-march=rv64imac_zicntr_zicond_zicsr_zifencei_zcb_zba_zbb_zbc_zbs -mabi=lp64",
 }
 
 # Raptor -------------------------------------------------------------------------------------------
@@ -66,11 +68,19 @@ class Raptor(CPU):
         self.platform = platform
         self.variant = variant
         self.human_name = f"Raptor ({variant})"
+        if variant == "linux64":
+            self.data_width = 64
+            self.gcc_triple = CPU_GCC_TRIPLE_RISCV64
+            self.linker_output_format = "elf64-littleriscv"
+        else:
+            self.data_width = 32
+            self.gcc_triple = CPU_GCC_TRIPLE_RISCV32
+            self.linker_output_format = "elf32-littleriscv"
         self.reset = Signal()
         self.interrupt = Signal(32)
 
         # AXI4 master peripheral bus (connected to main SoC bus).
-        axi_if = axi.AXIInterface(data_width=32, address_width=32, id_width=4)
+        axi_if = axi.AXIInterface(data_width=self.data_width, address_width=32, id_width=4)
         self.periph_buses = [axi_if]
         self.memory_buses = []
 
@@ -83,6 +93,7 @@ class Raptor(CPU):
             i_reset=ResetSignal("sys") | self.reset,
             # Interrupt.
             i_io_interrupt=self.interrupt[0],
+            i_ext_irq_i=0,
             # AXI4 Master — Write Address Channel.
             o_io_master_awvalid=axi_if.aw.valid,
             i_io_master_awready=axi_if.aw.ready,
@@ -142,8 +153,10 @@ class Raptor(CPU):
         # defines via env. nsim/Makefile auto-invalidates the pack when VFLAGS
         # changes, so switching presets just works.
         env_vflags = os.environ.get("RAPT_PACK_VFLAGS", "")
-        if variant == "linux" and "-DRAPT_LINUX" not in env_vflags:
+        if variant in ("linux", "linux64") and "-DRAPT_LINUX" not in env_vflags:
             env_vflags = (env_vflags + " -DRAPT_LINUX").strip()
+        if variant == "linux64" and "-DRAPT_RV64" not in env_vflags:
+            env_vflags = (env_vflags + " -DRAPT_RV64").strip()
 
         # Allow the integrator to pick a config preset (configs/<name>/).
         env_config = os.environ.get("RAPT_CONFIG", "")
@@ -173,7 +186,7 @@ class Raptor(CPU):
         soc.add_config("CPU_HAS_ICACHE")
 
         # Cache parameters for Device Tree.
-        if self.variant == "linux":
+        if self.variant in ("linux", "linux64"):
             soc.add_config("CPU_DCACHE_SIZE", 4096)
             soc.add_config("CPU_DCACHE_WAYS", 4)
             soc.add_config("CPU_DCACHE_BLOCK_SIZE", 8)

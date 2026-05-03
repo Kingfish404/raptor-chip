@@ -153,7 +153,9 @@ package rapt_pkg;
     || (addr >= 'h10000000 && addr < 'h10012000)  // UART / GPIO / peripherals
     || (addr >= 'h20000000 && addr < 'h20010000)  // MROM
     || (addr >= 'h21000000 && addr < 'h21200000)  // VGA
+    || (addr >= 'h30008000 && addr < 'h30009000)  // QEMU SDHCI PCI ECAM stub
     || (addr >= 'h30000000 && addr < 'h40000000)  // FLASH
+    || (addr >= 'h40000000 && addr < 'h40000100)  // QEMU SDHCI controller
     || (addr >= 'h80000000 && addr < 'h90000000)  // PMEM / PSRAM
     || (addr >= 'ha0000000 && addr < 'ha2000000)  // SDRAM
     || (addr >= 'hc0000000);  // raptSoC MMIO window
@@ -163,9 +165,13 @@ package rapt_pkg;
   function automatic logic addr_mmio(input logic [XLENPkg-1:0] addr);
     return (0)  // --- IGNORE ---
     || (addr >= 'h00100000 && addr <= 'h00100fff)  // finisher (sifive,test)
+    || (addr >= 'h02000000 && addr <= 'h020bffff)  // CLINT (mtime / mtimecmp / msip)
+    || (addr >= 'h0c000000 && addr <= 'h0cffffff)  // PLIC (claim/complete RMW)
+    || (addr >= 'h30008000 && addr <= 'h30008fff)  // QEMU SDHCI PCI ECAM stub
+    || (addr >= 'h40000000 && addr <= 'h400000ff)  // QEMU SDHCI controller
     || (addr >= 'h10001000 && addr <= 'h10001fff)  // uart
     || (addr >= 'h10002000 && addr <= 'h1000200f)  // gpio
-    || (addr >= 'h10011000 && addr <= 'h10012000)  // clint
+    || (addr >= 'h10011000 && addr <= 'h10012000)  // legacy ysyxSoC clint (kept for back-compat)
     || (addr >= 'h21000000 && addr <= 'h211fffff)  // vga
     || (addr >= 'hc0000000);  // raptSoC memory-mapped I/O
   endfunction

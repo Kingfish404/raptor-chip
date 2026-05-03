@@ -50,7 +50,12 @@ static inline word_t csrw_warl(uint16_t c, word_t v)
     uint16_t _c = (uint16_t)((i) & 0xfff);                                 \
     word_t _v = csrw_warl(_c, (word_t)(v));                                \
     if (!pmp_csr_write(_c, _v))                                            \
-      sr(_c) = _v;                                                         \
+    {                                                                      \
+      if (_c == CSR_MIP)                                                   \
+        sr(_c) = (sr(_c) & ~(word_t)0x222) | (_v & (word_t)0x222);         \
+      else                                                                 \
+        sr(_c) = _v;                                                       \
+    }                                                                      \
     cpu.last_csr_wr = _c;                                                  \
     /* Flush soft TLB on writes to CSRs that affect address translation */ \
     if (_c == CSR_SATP || _c == CSR_MSTATUS || _c == CSR_SSTATUS ||        \
@@ -75,6 +80,7 @@ uint64_t get_time();
 word_t get_paddr(vaddr_t addr, int len);
 void clint_update_mip(void);
 bool clint_wfi_advance(void);
+extern uint64_t g_nr_guest_inst;
 
 void ftrace_add(word_t pc, word_t npc, word_t inst);
 
@@ -513,6 +519,7 @@ static int decode_exec(Decode *s)
           csr_t reg = {.val = CSR(CSR_MSTATUS)};
           cpu.last_inst_priv = cpu.priv;
           cpu.priv = reg.mstatus.mpp;
+          if (cpu.priv != PRV_M) reg.mstatus.mprv = 0;
           reg.mstatus.mie = reg.mstatus.mpie;
           reg.mstatus.mpie = 1;
           reg.mstatus.mpp = PRV_U;
@@ -621,6 +628,7 @@ static int decode_exec(Decode *s)
   CSR(CSR_MSTATUS) = CSR(CSR_MSTATUS) & MSTATUS_WMASK;
   CSR(CSR_MISA) = CSR_MISA_VALUE;
   CSR(CSR_MEDELEG) &= 0xf4bffe; // bit 0 (insn addr misaligned) hardwired 0 with C ext
+  CSR(CSR_MIDELEG) &= 0x222;
   // sstatus/sie are architecturally views of mstatus/mie (not separate regs).
   // Propagate direct writes back to mstatus/mie at any privilege level.
   // sstatus read mask: includes SD (computed), excludes VS.
@@ -629,7 +637,9 @@ static int decode_exec(Decode *s)
 #else
 #define SSTATUS_RMASK 0x800de162
 #endif
-#define SIE_RMASK 0x2666
+#define SIE_RMASK 0x222
+#define SIP_RMASK 0x222
+#define SIP_WMASK 0x2
   /* SSTATUS/SIE are architectural views of MSTATUS/MIE.  If the last CSR
    * write targeted SSTATUS/SIE, propagate the (masked) value into the real
    * MSTATUS/MIE.  Otherwise, SSTATUS/SIE are always re-derived below from
@@ -644,6 +654,11 @@ static int decode_exec(Decode *s)
   {
     word_t mie_bits = CSR(CSR_SIE) & SIE_RMASK;
     CSR(CSR_MIE) = (CSR(CSR_MIE) & ~SIE_RMASK) | mie_bits;
+  }
+  if (cpu.last_csr_wr == CSR_SIP)
+  {
+    word_t mip_bits = CSR(CSR_SIP) & SIP_WMASK;
+    CSR(CSR_MIP) = (CSR(CSR_MIP) & ~SIP_WMASK) | mip_bits;
   }
   cpu.last_csr_wr = 0;
   // Compute SD (read-only): set when FS, VS, or XS is Dirty (== 3)
@@ -662,21 +677,21 @@ static int decode_exec(Decode *s)
   // Derive sstatus/sie from mstatus/mie
 #ifdef CONFIG_RV64
   CSR(CSR_SSTATUS) = CSR(CSR_MSTATUS) & SSTATUS_RMASK;
-  CSR(CSR_SIE) = CSR(CSR_MIE) & 0x2666;
+  CSR(CSR_SIE) = CSR(CSR_MIE) & SIE_RMASK;
 #else
   CSR(CSR_SSTATUS) = CSR(CSR_MSTATUS) & SSTATUS_RMASK;
-  CSR(CSR_SIE) = CSR(CSR_MIE) & 0x2666;
+  CSR(CSR_SIE) = CSR(CSR_MIE) & SIE_RMASK;
 #endif
 
-  CSR(CSR_CYCLE_) = CSR(CSR_CYCLE_) + 0x1;
-  CSR(CSR_MCYCLE) = CSR(CSR_MCYCLE) + 0x1;
-  CSR(CSR_INSTRET) = CSR(CSR_INSTRET) + 0x1;
+  uint64_t inst_advance = 1;
+  CSR(CSR_CYCLE_) = CSR(CSR_CYCLE_) + inst_advance;
+  CSR(CSR_MCYCLE) = CSR(CSR_MCYCLE) + inst_advance;
+  CSR(CSR_INSTRET) = CSR(CSR_INSTRET) + inst_advance;
   CSR(CSR_MINSTRET) = CSR(CSR_INSTRET);
   // CSR_TIME scaled to 10MHz (matching DTS timebase-frequency)
 #if defined(CONFIG_TIMER_CYCLE)
   // 1GHz / 10MHz = 100 cycles per tick
-  extern uint64_t g_nr_guest_inst;
-  uint64_t ticks = g_nr_guest_inst / 100;
+  uint64_t ticks = (g_nr_guest_inst + inst_advance) / 100;
 #else
   uint64_t ticks = get_time() * 10;
 #endif
@@ -688,7 +703,7 @@ static int decode_exec(Decode *s)
   // Update MIP.MTIP and MIP.MSIP from CLINT hardware state
   clint_update_mip();
   // Sync SIP from MIP (SIP is a restricted view of MIP for S-mode bits)
-  CSR(CSR_SIP) = CSR(CSR_MIP) & 0x222; // bits 1 (SSIP), 5 (STIP), 9 (SEIP)
+  CSR(CSR_SIP) = CSR(CSR_MIP) & SIP_RMASK; // bits 1 (SSIP), 5 (STIP), 9 (SEIP)
 #endif
 
   R(0) = 0; // reset $zero to 0

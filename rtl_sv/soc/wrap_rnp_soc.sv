@@ -114,6 +114,7 @@ module rng_chip #(
   rapt cpu (  // src/CPU.scala:38:21
       .clock            (clock),
       .io_interrupt     (1'h0),
+      .ext_irq_i        ('0),
       .io_master_awready(auto_master_out_awready_cpu),
       .io_master_awvalid(auto_master_out_awvalid_cpu),
       .io_master_awid   (auto_master_out_awid_cpu),

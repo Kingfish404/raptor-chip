@@ -12,6 +12,15 @@
 `define RAPT_BUS_RTC_ADDR 'h0200BFF8
 `define RAPT_BUS_RTC_ADDR_UP 'h0200BFFC
 
+// --- PLIC (Platform-Level Interrupt Controller) -----------------------------
+// 16 MB window starting at 0x0C00_0000, matching the standard RISC-V layout
+// and NEMU's reference model (see nemu/src/device/intr.c). Anything that
+// satisfies `(addr[31:24] == 8'h0c)` is considered a PLIC access.
+`define RAPT_PLIC_BASE 'h0c000000
+`define RAPT_PLIC_SIZE 'h01000000
+`define RAPT_PLIC_NDEV 31           // sources 1..31; source 0 reserved
+`define RAPT_PLIC_NCTX 2            // ctx0 = M-mode hart 0, ctx1 = S-mode hart 0
+
 // --- Timer / clock model -----------------------------------------------------
 // Nominal core clock frequency assumed by the simulator's cycle model. The DTS
 // `timebase-frequency` (RAPT_MTIME_FREQ_MHZ * 1_000_000) MUST match the rate

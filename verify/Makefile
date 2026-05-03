@@ -350,6 +350,9 @@ riscof-clean: ## Clean ACT4 artifacts
 RISCOF_CLASSIC_DIR      := $(VERIFY_HOME)/riscof/classic
 RISCOF_CLASSIC_SUITE    := $(RISCOF_CLASSIC_DIR)/riscv-arch-test
 RISCOF_CLASSIC_WORKDIR  := $(BUILD_DIR)/riscof-classic
+RISCOF_CLASSIC_TESTLIST := $(RISCOF_CLASSIC_WORKDIR)/test_list.yaml
+RISCOF_CLASSIC_FILTERED_TESTLIST := $(BUILD_DIR)/riscof-classic.raptor-test_list.yaml
+RISCOF_CLASSIC_ENV_PATCH := $(VERIFY_HOME)/scripts/patch_riscof_classic_env.py
 # Use old-framework-3.x: the upstream 'main' branch was replaced by the ACT4
 # layout, which drops riscv-test-suite/ in favour of a Makefile+Python flow.
 # The classic RISCOF driver still expects the 3.x layout.
@@ -391,7 +394,22 @@ riscof-classic-run: $(MROM_IMG) riscof-classic-build-npc ## Execute classic RISC
 	@echo "  Suite:   $(RISCOF_CLASSIC_SUITE)"
 	@echo "  Workdir: $(RISCOF_CLASSIC_WORKDIR)"
 	@echo "================================================================"
+	@$(PYTHON) "$(RISCOF_CLASSIC_ENV_PATCH)" \
+		--env="$(RISCOF_CLASSIC_SUITE)/riscv-test-suite/env"
 	cd "$(RISCOF_CLASSIC_DIR)" && \
+		NPC_BIN="$(NPC_BIN)" \
+		MROM_IMG="$(MROM_IMG)" \
+		NSIM_HOME="$(NSIM_HOME)" \
+		RAPT_TIMEOUT="$(TIMEOUT)" \
+		riscof testlist \
+			--config=config.ini \
+			--suite=$(RISCOF_CLASSIC_SUITE)/riscv-test-suite/ \
+			--env=$(RISCOF_CLASSIC_SUITE)/riscv-test-suite/env \
+			--work-dir="$(RISCOF_CLASSIC_WORKDIR)" && \
+		$(PYTHON) "$(VERIFY_HOME)/scripts/filter_riscof_testlist.py" \
+			--input="$(RISCOF_CLASSIC_TESTLIST)" \
+			--output="$(RISCOF_CLASSIC_FILTERED_TESTLIST)" \
+			--drop-legacy-ad && \
 		NPC_BIN="$(NPC_BIN)" \
 		MROM_IMG="$(MROM_IMG)" \
 		NSIM_HOME="$(NSIM_HOME)" \
@@ -400,6 +418,7 @@ riscof-classic-run: $(MROM_IMG) riscof-classic-build-npc ## Execute classic RISC
 			--config=config.ini \
 			--suite=$(RISCOF_CLASSIC_SUITE)/riscv-test-suite/ \
 			--env=$(RISCOF_CLASSIC_SUITE)/riscv-test-suite/env \
+			--testfile="$(RISCOF_CLASSIC_FILTERED_TESTLIST)" \
 			--work-dir="$(RISCOF_CLASSIC_WORKDIR)" \
 			--no-browser
 	@if grep -q '>0[Ff]ailed<' "$(RISCOF_CLASSIC_WORKDIR)/report.html" 2>/dev/null; then \
@@ -425,6 +444,8 @@ riscof-classic-clean: ## Clean classic RISCOF artifacts
 RISCOF_CLASSIC_NEMU_DIR     := $(VERIFY_HOME)/riscof/classic-nemu
 RISCOF_CLASSIC_NEMU_SUITE   := $(RISCOF_CLASSIC_NEMU_DIR)/riscv-arch-test
 RISCOF_CLASSIC_NEMU_WORKDIR := $(BUILD_DIR)/riscof-classic-nemu
+RISCOF_CLASSIC_NEMU_TESTLIST := $(RISCOF_CLASSIC_NEMU_WORKDIR)/test_list.yaml
+RISCOF_CLASSIC_NEMU_FILTERED_TESTLIST := $(BUILD_DIR)/riscof-classic-nemu.raptor-test_list.yaml
 NEMU_BIN_32  := $(NEMU_HOME)/build/riscv32-nemu-interpreter
 NEMU_BIN_64  := $(NEMU_HOME)/build/riscv64-nemu-interpreter
 
@@ -434,7 +455,7 @@ else
   NEMU_BIN := $(NEMU_BIN_32)
 endif
 
-.PHONY: riscof-classic-nemu riscof-classic-nemu-setup riscof-classic-nemu-run riscof-classic-nemu-clean
+.PHONY: riscof-classic-nemu riscof-classic-nemu-setup riscof-classic-nemu-run riscof-classic-nemu-clean riscof-classic-build-nemu
 
 $(NEMU_BIN_32):
 	@echo "[riscof-classic-nemu] Building NEMU standalone executable (rv32)..."
@@ -445,9 +466,20 @@ $(NEMU_BIN_64):
 	$(MAKE) -C $(NEMU_HOME) riscv64_defconfig
 	$(MAKE) -C $(NEMU_HOME) -j$(NPROC)
 
+riscof-classic-build-nemu: ## Build NEMU standalone executable for classic RISCOF
+ifeq ($(ISA),rv64)
+	@echo "[riscof-classic-nemu] Building NEMU standalone executable (rv64)..."
+	$(MAKE) -C $(NEMU_HOME) riscv64_defconfig
+	$(MAKE) -C $(NEMU_HOME) -j$(NPROC)
+else
+	@echo "[riscof-classic-nemu] Building NEMU standalone executable (rv32)..."
+	$(MAKE) -C $(RAPTOR_HOME) config-nemu32
+endif
+	@test -f $(NEMU_BIN) || { echo "[riscof-classic-nemu] ERROR: NEMU build failed: $(NEMU_BIN)"; exit 1; }
+
 riscof-classic-nemu: riscof-classic-nemu-setup riscof-classic-nemu-run ## Run classic RISCOF flow against NEMU
 
-riscof-classic-nemu-setup: riscof-classic-setup $(NEMU_BIN) ## Ensure NEMU and the arch-test suite are ready
+riscof-classic-nemu-setup: riscof-classic-setup riscof-classic-build-nemu ## Ensure NEMU and the arch-test suite are ready
 	@test -L "$(RISCOF_CLASSIC_NEMU_SUITE)" || { \
 		echo "[riscof-classic-nemu] ERROR: missing symlink $(RISCOF_CLASSIC_NEMU_SUITE) -> ../classic/riscv-arch-test"; \
 		exit 1; }
@@ -464,7 +496,21 @@ riscof-classic-nemu-run: $(NEMU_BIN) ## Execute classic RISCOF flow with NEMU as
 	@echo "  Suite:   $(RISCOF_CLASSIC_NEMU_SUITE)"
 	@echo "  Workdir: $(RISCOF_CLASSIC_NEMU_WORKDIR)"
 	@echo "================================================================"
+	@$(PYTHON) "$(RISCOF_CLASSIC_ENV_PATCH)" \
+		--env="$(RISCOF_CLASSIC_NEMU_SUITE)/riscv-test-suite/env"
 	cd "$(RISCOF_CLASSIC_NEMU_DIR)" && \
+		NEMU_BIN="$(NEMU_BIN)" \
+		NEMU_HOME="$(NEMU_HOME)" \
+		RAPT_TIMEOUT="$(TIMEOUT)" \
+		riscof testlist \
+			--config=config.ini \
+			--suite=$(RISCOF_CLASSIC_NEMU_SUITE)/riscv-test-suite/ \
+			--env=$(RISCOF_CLASSIC_NEMU_SUITE)/riscv-test-suite/env \
+			--work-dir="$(RISCOF_CLASSIC_NEMU_WORKDIR)" && \
+		$(PYTHON) "$(VERIFY_HOME)/scripts/filter_riscof_testlist.py" \
+			--input="$(RISCOF_CLASSIC_NEMU_TESTLIST)" \
+			--output="$(RISCOF_CLASSIC_NEMU_FILTERED_TESTLIST)" \
+			--drop-legacy-ad && \
 		NEMU_BIN="$(NEMU_BIN)" \
 		NEMU_HOME="$(NEMU_HOME)" \
 		RAPT_TIMEOUT="$(TIMEOUT)" \
@@ -472,6 +518,7 @@ riscof-classic-nemu-run: $(NEMU_BIN) ## Execute classic RISCOF flow with NEMU as
 			--config=config.ini \
 			--suite=$(RISCOF_CLASSIC_NEMU_SUITE)/riscv-test-suite/ \
 			--env=$(RISCOF_CLASSIC_NEMU_SUITE)/riscv-test-suite/env \
+			--testfile="$(RISCOF_CLASSIC_NEMU_FILTERED_TESTLIST)" \
 			--work-dir="$(RISCOF_CLASSIC_NEMU_WORKDIR)" \
 			--no-browser
 	@if grep -q '>0Failed<' "$(RISCOF_CLASSIC_NEMU_WORKDIR)/report.html" 2>/dev/null; then \

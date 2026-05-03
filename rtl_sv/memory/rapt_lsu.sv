@@ -20,6 +20,9 @@ module rapt_lsu #(
 
     input reset
 );
+  localparam int WordOffBits = $clog2(XLEN / 8);
+  localparam int PageOffBits = 12;
+
   typedef enum logic [1:0] {
     LS_S_V    = 2'b00,  // present lo beat, wait for wready
     LS_S_R    = 2'b01,  // lo beat retired; aligned case completes here
@@ -305,6 +308,7 @@ module rapt_lsu #(
   logic [XLEN-1:0] ma_wdata_hi;
   logic [OFFW:0]   ma_w_off;       // byte offset into the aligned word (extra bit)
   logic [OFFW:0]   ma_w_size;      // store size in bytes, 1/2/4/(8)
+  logic [XLEN/8-1:0] ma_wstrb_lo;
   /* verilator lint_off UNUSEDSIGNAL */
   logic [2*XLEN/8-1:0]   ma_wstrb_wide;  // low half unused (bus path handles lo)
   logic [2*XLEN-1:0]     ma_wdata_wide;  // low half unused (bus path handles lo)
@@ -434,7 +438,8 @@ module rapt_lsu #(
   assign exu_lsu.rready = lsu_pmp_trap
                        || (raddr_valid && fwd_hit)
                        || (ma_state == MA_DONE)
-                       || (lsu_l1d.rready && !ma_load_req && ma_state == MA_IDLE);
+                       || (lsu_l1d.rvalid && lsu_l1d.rready
+                                        && !ma_load_req && ma_state == MA_IDLE);
 
   always_ff @(posedge clock) begin
     if (reset) begin
@@ -526,8 +531,14 @@ module rapt_lsu #(
   assign ma_store_span = (ma_w_size != '0)
                       && ((ma_w_off + ma_w_size) > (OFFW+1)'(XLEN/8));
 
+`ifdef RAPT_RV64
+  assign ma_wstrb_lo = (walu == `RAPT_SD_WSTRB) ? 8'hff : {3'b0, walu};
+`else
+  assign ma_wstrb_lo = walu[XLEN/8-1:0];
+`endif
+
   /* verilator lint_off WIDTHTRUNC */
-  assign ma_wstrb_wide = {{(XLEN/8){1'b0}}, walu[XLEN/8-1:0]} << ma_w_off;
+  assign ma_wstrb_wide = {{(XLEN/8){1'b0}}, ma_wstrb_lo} << ma_w_off;
   assign ma_w_shift    = {{($clog2(2*XLEN)-OFFW-3){1'b0}}, waddr[OFFW-1:0], 3'b000};
   assign ma_wdata_wide = {{XLEN{1'b0}}, wdata} << ma_w_shift;
   assign ma_wdata_hi   = ma_wdata_wide[2*XLEN-1:XLEN];
@@ -558,13 +569,16 @@ module rapt_lsu #(
   //    FLUSH_SURVIVE  : SQ keeps older-than-flush entries (no flush of SQ)
   // ==========================================================================
 
-  // COMMIT_DURABLE: vaddr and waddr at SQ commit must address the same word.
-  // This is the invariant that the sq-vaddr-flush bug violated.
-  `RAPT_SVA_IMPLY(clock, reset, LSU_SQ_COMMIT_ADDR_ALIGN,
+    // COMMIT_DURABLE: vaddr and waddr at SQ commit must describe the same word.
+    // With DMMU enabled only the page offset is invariant across translation.
+    `RAPT_SVA_IMPLY(clock, reset, LSU_SQ_COMMIT_ADDR_PAGE_OFFSET,
       (rou_lsu.valid && rou_lsu.store && sq_ready
        && !$isunknown(rou_lsu.sq_vaddr) && !$isunknown(rou_lsu.sq_waddr)),
-      (rou_lsu.sq_vaddr[XLEN-1:$clog2(XLEN/8)]
-         == rou_lsu.sq_waddr[XLEN-1:$clog2(XLEN/8)]))
+      (csr_bcast.dmmu_en
+       ? (rou_lsu.sq_vaddr[PageOffBits-1:WordOffBits]
+         == rou_lsu.sq_waddr[PageOffBits-1:WordOffBits])
+       : (rou_lsu.sq_vaddr[XLEN-1:WordOffBits]
+         == rou_lsu.sq_waddr[XLEN-1:WordOffBits])))
 
   // HANDSHAKE: SQ commit requires a free slot at sq_tail (sq_ready).
   `RAPT_SVA_IMPLY(clock, reset, LSU_SQ_COMMIT_NEEDS_READY,
@@ -575,6 +589,12 @@ module rapt_lsu #(
   `RAPT_SVA_IMPLY(clock, reset, LSU_SQ_DRAIN_VALID,
       (state_store == LS_S_R),
       (sq_valid[sq_head]))
+
+    // HANDSHAKE: a load/AMO blocked by an older partial store must not complete
+    // via a stale L1D rready from a request that was never issued.
+    `RAPT_SVA_IMPLY(clock, reset, LSU_BLOCKED_LOAD_NOT_READY,
+      (raddr_valid && (load_in_sq || stq_addr_conflict) && !fwd_hit),
+      (!exu_lsu.rready))
 
   // FLUSH_CLEAR: STQ head/tail/valid must be zero the cycle after flush.
   `RAPT_SVA_NEXT(clock, reset, LSU_STQ_FLUSH_CLEAR,

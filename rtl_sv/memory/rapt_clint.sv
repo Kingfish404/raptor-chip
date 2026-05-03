@@ -1,5 +1,6 @@
 `include "rapt.svh"
 `include "rapt_soc.svh"
+`include "rapt_soc_if.svh"
 
 // Core Local INTerrupt controller (standard CLINT layout)
 //
@@ -20,18 +21,7 @@ module rapt_clint #(
 ) (
     input clock,
 
-    // Read port (active when bus detects CLINT address on load)
-    input [XLEN-1:0] araddr,
-    output logic [XLEN-1:0] out_rdata,
-
-    // Write port (active when bus detects CLINT address on store)
-    input [XLEN-1:0] awaddr,
-    input [XLEN-1:0] wdata,
-    input wvalid,
-
-    // Level-triggered interrupt outputs
-    output timer_int,
-    output sw_int,
+    clint_bus_if.slave clint_bus,
 
     input reset
 );
@@ -42,23 +32,23 @@ module rapt_clint #(
   logic [MTIMEdivW-1:0] mtime_div_cnt;
 
   // --- Interrupt generation (level-triggered) ---
-  assign timer_int = (mtime >= mtimecmp);
-  assign sw_int    = msip_reg;
+  assign clint_bus.timer_int = (mtime >= mtimecmp);
+  assign clint_bus.sw_int    = msip_reg;
 
   // --- Read mux ---
   always_comb begin
-    out_rdata = '0;
-    case (araddr)
-      `RAPT_CLINT_MSIP:     out_rdata = {{(XLEN - 1) {1'b0}}, msip_reg};
-      `RAPT_CLINT_MTIMECMP: out_rdata = mtimecmp[XLEN-1:0];
+    clint_bus.rdata = '0;
+    case (clint_bus.araddr)
+      `RAPT_CLINT_MSIP:     clint_bus.rdata = {{(XLEN - 1) {1'b0}}, msip_reg};
+      `RAPT_CLINT_MTIMECMP: clint_bus.rdata = mtimecmp[XLEN-1:0];
       `RAPT_CLINT_MTIMECMP_UP: begin
-        if (XLEN == 32) out_rdata = mtimecmp[63:32];
+        if (XLEN == 32) clint_bus.rdata = mtimecmp[63:32];
       end
-      `RAPT_BUS_RTC_ADDR:   out_rdata = mtime[XLEN-1:0];
+      `RAPT_BUS_RTC_ADDR:   clint_bus.rdata = mtime[XLEN-1:0];
       `RAPT_BUS_RTC_ADDR_UP: begin
-        if (XLEN == 32) out_rdata = mtime[63:32];
+        if (XLEN == 32) clint_bus.rdata = mtime[63:32];
       end
-      default:              out_rdata = '0;
+      default:              clint_bus.rdata = '0;
     endcase
   end
 
@@ -78,12 +68,12 @@ module rapt_clint #(
       end else begin
         mtime_div_cnt <= mtime_div_cnt + MTIMEdivW'(1);
       end
-      if (wvalid) begin
-        case (awaddr)
-          `RAPT_CLINT_MSIP: msip_reg <= wdata[0];
-          `RAPT_CLINT_MTIMECMP: mtimecmp[XLEN-1:0] <= wdata;
+      if (clint_bus.wvalid) begin
+        case (clint_bus.awaddr)
+          `RAPT_CLINT_MSIP: msip_reg <= clint_bus.wdata[0];
+          `RAPT_CLINT_MTIMECMP: mtimecmp[XLEN-1:0] <= clint_bus.wdata;
           `RAPT_CLINT_MTIMECMP_UP: begin
-            if (XLEN == 32) mtimecmp[63:32] <= wdata;
+            if (XLEN == 32) mtimecmp[63:32] <= clint_bus.wdata;
           end
           default: ;
         endcase

@@ -9,29 +9,52 @@
 #include CONCAT_HEAD(CONCAT(TOP_NAME, ___024root))
 #include CONCAT_HEAD(CONCAT(TOP_NAME, __Dpi))
 
+// As of the rapt cluster split (rapt.sv = cluster, rapt_core.sv = single
+// hart), the per-core sub-cells (rou, cmu, csrs, ...) live one extra level
+// deeper inside the `core` instance of `rapt_core` instantiated in `rapt`.
+// All hierarchical accessors below thread through that extra `core->` step.
 #ifdef RAPT_SOC
-// Verilator 5.x hierarchical cell access: rootp -> ysyxSoCFull -> asic -> cpu -> cpu (rapt)
+// Verilator 5.x hierarchical cell access:
+//   rootp -> ysyxSoCFull -> asic -> cpu -> cpu (rapt) -> core (rapt_core)
 #include CONCAT_HEAD(CONCAT(TOP_NAME, _ysyxSoCFull))
 #include CONCAT_HEAD(CONCAT(TOP_NAME, _ysyxSoCASIC__pi1))
 #include CONCAT_HEAD(CONCAT(TOP_NAME, _CPU))
 #include CONCAT_HEAD(CONCAT(TOP_NAME, _rapt))
+#include CONCAT_HEAD(CONCAT(TOP_NAME, _rapt_core))
 #include CONCAT_HEAD(CONCAT(TOP_NAME, _rapt_rou))
-#define VERILOG_CPU(m) (top->rootp->ysyxSoCFull->asic->cpu->cpu->m)
-#define VERILOG_ROU(m) (top->rootp->ysyxSoCFull->asic->cpu->cpu->rou->m)
+#define VERILOG_CPU(m) (top->rootp->ysyxSoCFull->asic->cpu->cpu->core->m)
+#define VERILOG_ROU(m) (top->rootp->ysyxSoCFull->asic->cpu->cpu->core->rou->m)
+// CLINT lives at the cluster level (rapt). Verilator inlines the small
+// rapt_clint module, so its registers are reached via the __DOT__ name
+// from the parent `rapt` cell rather than a dedicated cell pointer.
+#define VERILOG_CLINT(m) CONCAT(top->rootp->ysyxSoCFull->asic->cpu->cpu->clint_inst__DOT__, m)
+#define VERILOG_PLIC(m) CONCAT(top->rootp->ysyxSoCFull->asic->cpu->cpu->plic__DOT__, m)
+#define VERILOG_CLUSTER(m) (top->rootp->ysyxSoCFull->asic->cpu->cpu->m)
 #define VERILOG_RESET (top->rootp->ysyxSoCFull->asic->cpu_reset_chain__DOT__output_chain__DOT__sync_0)
 #else
 
 #ifdef CONFIG_wrapBus
-#define VERILOG_CPU(m) CONCAT(top->rootp->wrapSoC__DOT__chip__DOT__cpu__DOT__, m)
-#define VERILOG_ROU(m) CONCAT(top->rootp->wrapSoC__DOT__chip__DOT__cpu__DOT__rou__DOT__, m)
+#define VERILOG_CPU(m) CONCAT(top->rootp->wrapSoC__DOT__chip__DOT__cpu__DOT__core__DOT__, m)
+#define VERILOG_ROU(m) CONCAT(top->rootp->wrapSoC__DOT__chip__DOT__cpu__DOT__core__DOT__rou__DOT__, m)
+#define VERILOG_CLINT(m) CONCAT(top->rootp->wrapSoC__DOT__chip__DOT__cpu__DOT__clint_inst__DOT__, m)
+#define VERILOG_PLIC(m) CONCAT(top->rootp->wrapSoC__DOT__chip__DOT__cpu__DOT__plic__DOT__, m)
+#define VERILOG_CLUSTER(m) CONCAT(top->rootp->wrapSoC__DOT__chip__DOT__cpu__DOT__, m)
 #define VERILOG_RESET top->reset
 #else
-// NPC mode: Verilator 5.x hierarchical classes — navigate via cell pointers
+// NPC mode: Verilator 5.x hierarchical classes — navigate via cell pointers.
+// raptSoC -> cpu (rapt) -> core (rapt_core) -> sub-cells.
+// CLINT lives at the cluster level (rapt.clint_inst), shared across harts.
+// rapt_clint is inlined by Verilator, so its registers are reached via the
+// __DOT__ name from the parent `rapt` cell (`cpu`).
 #include CONCAT_HEAD(CONCAT(TOP_NAME, _raptSoC))
 #include CONCAT_HEAD(CONCAT(TOP_NAME, _rapt))
+#include CONCAT_HEAD(CONCAT(TOP_NAME, _rapt_core))
 #include CONCAT_HEAD(CONCAT(TOP_NAME, _rapt_rou))
-#define VERILOG_CPU(m) (top->rootp->raptSoC->cpu->m)
-#define VERILOG_ROU(m) (top->rootp->raptSoC->cpu->rou->m)
+#define VERILOG_CPU(m) (top->rootp->raptSoC->cpu->core->m)
+#define VERILOG_ROU(m) (top->rootp->raptSoC->cpu->core->rou->m)
+#define VERILOG_CLINT(m) CONCAT(top->rootp->raptSoC->cpu->clint_inst__DOT__, m)
+#define VERILOG_PLIC(m) CONCAT(top->rootp->raptSoC->cpu->plic__DOT__, m)
+#define VERILOG_CLUSTER(m) (top->rootp->raptSoC->cpu->m)
 #define VERILOG_RESET top->reset
 #endif
 
@@ -66,6 +89,7 @@ static inline void verilog_connect(TOP_NAME *top, NPCState *npc)
   npc->satp___ = csr + SATP___;
 
   npc->mstatus = csr + MSTATUS;
+  npc->misa___ = csr + MISA___;
   npc->medeleg = csr + MEDELEG;
   npc->mideleg = csr + MIDELEG;
   npc->mie____ = csr + MIE____;
@@ -86,9 +110,15 @@ static inline void verilog_connect(TOP_NAME *top, NPCState *npc)
   npc->time___ = csr + TIME___;
   npc->timeh__ = csr + TIMEH__;
 
-  npc->clint_mtime = (uint64_t *)&VERILOG_CPU(bus__DOT__clint__DOT__mtime);
-  npc->clint_mtimecmp = (uint64_t *)&VERILOG_CPU(bus__DOT__clint__DOT__mtimecmp);
-  npc->clint_msip = (uint8_t *)&VERILOG_CPU(bus__DOT__clint__DOT__msip_reg);
+  npc->clint_mtime = (uint64_t *)&VERILOG_CLINT(mtime);
+  npc->clint_mtimecmp = (uint64_t *)&VERILOG_CLINT(mtimecmp);
+  npc->clint_msip = (uint8_t *)&VERILOG_CLINT(msip_reg);
+
+  npc->plic_priority = (uint8_t *)&VERILOG_PLIC(priority_q)[0];
+  npc->plic_pending = (uint32_t *)&VERILOG_PLIC(pending_q);
+  npc->plic_enable = (uint32_t *)&VERILOG_PLIC(enable_q)[0];
+  npc->plic_threshold = (uint8_t *)&VERILOG_PLIC(threshold_q)[0];
+  npc->plic_ext_irq = (uint32_t *)&VERILOG_PLIC(ext_irq_q);
 
   npc->pmpcfg = (uint8_t *)&VERILOG_CPU(csrs__DOT__pmpcfg_r);
   npc->pmpaddr = (word_t *)&VERILOG_CPU(csrs__DOT__pmpaddr_r);

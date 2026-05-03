@@ -163,13 +163,17 @@ word_t paddr_read(paddr_t addr, int len)
 #endif
 
   if (likely(
+          IFDEF(CONFIG_DEVICE, mmio_map_contains(addr) ||)
           in_pmem(addr) ||
           in_rom(addr) ||
           in_sdram(addr) ||
           in_sram(addr) ||
           in_mrom(addr) ||
           in_flash(addr)))
+  {
+    IFDEF(CONFIG_DEVICE, if (mmio_map_contains(addr)) return mmio_read(addr, len));
     return pmem_read(addr, len);
+  }
 #if defined(CONFIG_TARGET_SHARE)
   if (ref_paddr_io(addr))
   {
@@ -188,8 +192,10 @@ void paddr_write(paddr_t addr, int len, word_t data)
 #endif
 
   if (likely(
+          IFDEF(CONFIG_DEVICE, mmio_map_contains(addr) ||)
           in_pmem(addr) || in_sdram(addr) || in_sram(addr)))
   {
+    IFDEF(CONFIG_DEVICE, if (mmio_map_contains(addr)) { mmio_write(addr, len, data); return; });
     pmem_write(addr, len, data);
     return;
   }

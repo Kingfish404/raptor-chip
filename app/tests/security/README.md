@@ -21,13 +21,13 @@ From the project root:
 
 ```bash
 # Build + run all security tests on NPC (RV32) via pk
-make -C app security-tests
+make -C app security-tests-npc
 
 # RV64 mode
-make -C app security-tests ISA64=1
+make -C app security-tests-npc ISA64=1
 
-# Run on NEMU instead of NPC
-make -C app security-tests RUN_ON=nemu
+# Run on NEMU
+make -C app security-tests-nemu
 
 # Just build (no run)
 make -C app security-tests-build

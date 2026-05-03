@@ -106,6 +106,8 @@ static inline CSR_status check_csr_exist(uint16_t csr)
           csr == CSR_IMPID ||
           csr == CSR_MHARTID ||
 
+          csr == 0x14d ||  // stimecmp
+          csr == 0x15d ||  // stimecmph (RV32 view; harmless in RV64 table)
           csr == 0x306 ||  // mcounteren
           csr == 0x30a ||  // menvcfg
           (csr >= 0x3a0 && csr <= 0x3a3) ||  // pmpcfg0-3
@@ -129,6 +131,8 @@ static inline CSR_status check_csr_exist(uint16_t csr)
         || (csr == CSR_IMPID)     //
         || (csr == CSR_MHARTID)   //
 
+        || csr == 0x14d   // stimecmp
+        || csr == 0x15d   // stimecmph
         || csr == 0x306   // mcounteren
         || csr == 0x30a   // menvcfg
     )

@@ -11,6 +11,11 @@ module rapt_csr #(
 ) (
     input clock,
 
+    // Hart identifier injected by the cluster top. Returned verbatim by
+    // CSR reads of `mhartid` (RV Priv §3.1.5). Tied to '0 today since the
+    // cluster only instantiates one core; the multi-core wiring is in place.
+    input [XLEN-1:0] hart_id_i,
+
     rou_csr_if.out   rou_csr,
     exu_csr_if.slave exu_csr,
 
@@ -24,9 +29,12 @@ module rapt_csr #(
     output logic            s_int_pending,
     output logic [XLEN-1:0] s_int_cause,
 
-    // External M-mode interrupt line (level, from PLIC / SoC integrator).
-    // Visible as mip.MEIP read-only; combined with mie.MEIE -> ext_int_en.
-    input ext_irq_i,
+    // Interrupt controller level inputs. These drive the hardware-pending
+    // bits in mip/sip; trap eligibility is still gated by mie/mstatus below.
+    input timer_irq_i,
+    input sw_irq_i,
+    input m_ext_irq_i,
+    input s_ext_irq_i,
 
     input reset
 );
@@ -44,6 +52,8 @@ module rapt_csr #(
     SCAUSE_,
     STVAL__,
     SIP____,
+    STIMECMP,
+    STIMECMPH,
     SATP___,
 
     MSTATUS,
@@ -54,6 +64,7 @@ module rapt_csr #(
     MTVEC__,
 
     MSTATUSH,
+  MENVCFG,
 
     MSCRATCH,
     MEPC___,
@@ -88,9 +99,28 @@ module rapt_csr #(
   localparam int RAPTTimeDIVW = (RAPTTimeDIV <= 1) ? 1 : $clog2(RAPTTimeDIV);
   logic [RAPTTimeDIVW-1:0] time_div_cnt;
   logic                    time_tick;
+  logic [63:0]             time64;
+  logic [63:0]             stimecmp;
+  logic                    sstc_en;
+  logic                    stime_irq;
   assign time_tick = (RAPTTimeDIV <= 1)
                    ? 1'b1
                    : (time_div_cnt == RAPTTimeDIVW'(RAPTTimeDIV - 1));
+
+  generate
+    if (XLEN == 64) begin : gen_time64_rv64
+      assign time64 = csr[TIME___][63:0];
+    end else begin : gen_time64_rv32
+      assign time64 = {csr[TIMEH__][31:0], csr[TIME___][31:0]};
+    end
+  endgenerate
+
+`ifdef RAPT_RV64
+  assign sstc_en = csr[MENVCFG][`RAPT_CSR_MENVCFG_STCE];
+`else
+  assign sstc_en = 1'b0;
+`endif
+  assign stime_irq = sstc_en && (time64 >= stimecmp);
 
   // PMP state: 8 active entries (pmpcfg0/pmpcfg1; pmpcfg2/3 hardwired 0).
   // Reserved bits [6:5] of each cfg byte are WARL-zero (mask 8'h9F).
@@ -123,9 +153,10 @@ module rapt_csr #(
   logic smode_mideleg;
   logic smode_handle;
 
-  // mip read-back: mip.MEIP is hardwired to the live external IRQ line
-  // (PLIC / SoC interrupt controller); software writes to mip[11] are ignored.
-  // SSIP/STIP remain software-writable (OpenSBI emulates S-timer via mip.STIP).
+  // mip read-back: CLINT and PLIC levels are reflected as hardware-pending
+  // bits. SSIP/STIP/SEIP remain software-writable in csr[MIP____]; SEIP is
+  // ORed with the PLIC S-context line so M-mode can still inject S external
+  // interrupts if needed.
   logic [XLEN-1:0] mip_eff;
 
   assign raddr = exu_csr.raddr;
@@ -140,6 +171,8 @@ module rapt_csr #(
       `RAPT_CSR_SCAUSE_:   waddr_reg = SCAUSE_;
       `RAPT_CSR_STVAL__:   waddr_reg = STVAL__;
       `RAPT_CSR_SIP____:   waddr_reg = SIP____;
+      `RAPT_CSR_STIMECMP:  waddr_reg = STIMECMP;
+      `RAPT_CSR_STIMECMPH: waddr_reg = STIMECMPH;
       `RAPT_CSR_SATP___:   waddr_reg = SATP___;
       `RAPT_CSR_MSTATUS:   waddr_reg = MSTATUS;
       `RAPT_CSR_MEDELEG:   waddr_reg = MEDELEG;
@@ -147,6 +180,7 @@ module rapt_csr #(
       `RAPT_CSR_MIE____:   waddr_reg = MIE____;
       `RAPT_CSR_MTVEC__:   waddr_reg = MTVEC__;
       `RAPT_CSR_MCOUNTE:   waddr_reg = MCOUNTE;
+      `RAPT_CSR_MENVCFG:   waddr_reg = MENVCFG;
       `RAPT_CSR_MSTATUSH:  waddr_reg = MSTATUSH;
       `RAPT_CSR_MSCRATCH:  waddr_reg = MSCRATCH;
       `RAPT_CSR_MEPC___:   waddr_reg = MEPC___;
@@ -169,6 +203,8 @@ module rapt_csr #(
       `RAPT_CSR_SCAUSE_:   raddr_reg = SCAUSE_;
       `RAPT_CSR_STVAL__:   raddr_reg = STVAL__;
       `RAPT_CSR_SIP____:   raddr_reg = SIP____;
+      `RAPT_CSR_STIMECMP:  raddr_reg = STIMECMP;
+      `RAPT_CSR_STIMECMPH: raddr_reg = STIMECMPH;
       `RAPT_CSR_SATP___:   raddr_reg = SATP___;
       `RAPT_CSR_MSTATUS:   raddr_reg = MSTATUS;
       `RAPT_CSR_MISA___:   raddr_reg = MISA___;
@@ -176,6 +212,7 @@ module rapt_csr #(
       `RAPT_CSR_MIDELEG:   raddr_reg = MIDELEG;
       `RAPT_CSR_MIE____:   raddr_reg = MIE____;
       `RAPT_CSR_MCOUNTE:   raddr_reg = MCOUNTE;
+      `RAPT_CSR_MENVCFG:   raddr_reg = MENVCFG;
       `RAPT_CSR_MTVEC__:   raddr_reg = MTVEC__;
       `RAPT_CSR_MSTATUSH:  raddr_reg = MSTATUSH;
       `RAPT_CSR_MSCRATCH:  raddr_reg = MSCRATCH;
@@ -204,7 +241,7 @@ module rapt_csr #(
   always_comb begin
     case (raddr_reg)
       SSTATUS:   exu_csr.rdata = csr[SSTATUS];
-      SIE____:   exu_csr.rdata = csr[SIE____];
+      SIE____:   exu_csr.rdata = csr[MIE____] & `RAPT_CSR_SIE_RMASK;
       STVEC__:   exu_csr.rdata = csr[STVEC__];
       SCOUNTE:   exu_csr.rdata = csr[SCOUNTE];
       MCOUNTE:   exu_csr.rdata = csr[MCOUNTE];
@@ -212,7 +249,9 @@ module rapt_csr #(
       SEPC___:   exu_csr.rdata = csr[SEPC___];
       SCAUSE_:   exu_csr.rdata = csr[SCAUSE_];
       STVAL__:   exu_csr.rdata = csr[STVAL__];
-      SIP____:   exu_csr.rdata = csr[SIP____];
+      SIP____:   exu_csr.rdata = mip_eff & `RAPT_CSR_SIP_RMASK;
+      STIMECMP:  exu_csr.rdata = XLEN'(stimecmp[XLEN-1:0]);
+      STIMECMPH: exu_csr.rdata = (XLEN == 32) ? XLEN'(stimecmp[63:32]) : '0;
       SATP___:   exu_csr.rdata = csr[SATP___];
       MSTATUS:   exu_csr.rdata = csr[MSTATUS];
       MISA___:   exu_csr.rdata = `RAPT_MISA;
@@ -220,6 +259,7 @@ module rapt_csr #(
       MIDELEG:   exu_csr.rdata = csr[MIDELEG];
       MIE____:   exu_csr.rdata = csr[MIE____];
       MTVEC__:   exu_csr.rdata = csr[MTVEC__];
+      MENVCFG:   exu_csr.rdata = csr[MENVCFG];
       MSTATUSH:  exu_csr.rdata = csr[MSTATUSH];
       MSCRATCH:  exu_csr.rdata = csr[MSCRATCH];
       MEPC___:   exu_csr.rdata = csr[MEPC___];
@@ -235,7 +275,7 @@ module rapt_csr #(
       MVENDORID: exu_csr.rdata = '0;
       MARCHID:   exu_csr.rdata = 'd50;
       IMPID__:   exu_csr.rdata = '0;
-      MHARTID:   exu_csr.rdata = '0;
+      MHARTID:   exu_csr.rdata = hart_id_i;
       default: begin
         // PMP CSR reads: pmpcfg0..3 each packs four cfg bytes;
         // pmpaddr0..15 from register file.
@@ -285,8 +325,8 @@ module rapt_csr #(
   assign ebreak_deleg = (priv_mode != `RAPT_PRIV_M) && csr[MEDELEG][3];
 
   assign csr_bcast.priv = priv_mode;
-  assign csr_bcast.satp_ppn = csr[SATP___][21:0];
-  assign csr_bcast.satp_asid = csr[SATP___][30:22];
+  assign csr_bcast.satp_ppn = csr[SATP___][`RAPT_CSR_SATP_PPN_W-1:0];
+  assign csr_bcast.satp_asid = csr[SATP___][`RAPT_CSR_SATP_ASID_LSB +: 9];
   assign csr_bcast.immu_en = (
       (csr[SATP___][`RAPT_CSR_SATP_MODE_] == 0)
       ? 'b0
@@ -344,8 +384,15 @@ module rapt_csr #(
   assign csr_bcast.sw_int_en    = m_int_mask && csr[MIE____][`RAPT_CSR_MIE_MSIE];
   assign csr_bcast.ext_int_en   = m_int_mask && csr[MIE____][`RAPT_CSR_MIE_MEIE];
 
-  assign mip_eff = (csr[MIP____] & ~(XLEN'(1) << 11))
-                 | ({{(XLEN-1){1'b0}}, ext_irq_i} << 11);
+  assign mip_eff = (csr[MIP____]
+                    & ~((XLEN'(1) << `RAPT_CSR_MIE_MSIE)
+                      | (XLEN'(1) << `RAPT_CSR_MIE_MTIE)
+                      | (XLEN'(1) << `RAPT_CSR_MIE_MEIE)))
+                 | ({{(XLEN-1){1'b0}}, sw_irq_i} << `RAPT_CSR_MIE_MSIE)
+                 | ({{(XLEN-1){1'b0}}, timer_irq_i} << `RAPT_CSR_MIE_MTIE)
+                 | ({{(XLEN-1){1'b0}}, stime_irq} << `RAPT_CSR_MIE_STIE)
+                 | ({{(XLEN-1){1'b0}}, m_ext_irq_i} << `RAPT_CSR_MIE_MEIE)
+                 | ({{(XLEN-1){1'b0}}, s_ext_irq_i} << `RAPT_CSR_MIE_SEIE);
 
   // ----- S-mode delegated interrupt evaluation (Priv §3.1.9) --------------
   // An S-mode interrupt i fires iff: mip[i] && mie[i] && mideleg[i] && enable,
@@ -358,7 +405,7 @@ module rapt_csr #(
   logic [XLEN-1:0] s_int_active;
   assign s_int_global_en = (priv_mode == `RAPT_PRIV_U)
       || ((priv_mode == `RAPT_PRIV_S) && csr[MSTATUS][`RAPT_CSR_MSTATUS_SIE_]);
-  assign s_int_active = csr[MIP____] & csr[MIE____] & csr[MIDELEG]
+  assign s_int_active = mip_eff & csr[MIE____] & csr[MIDELEG]
                       & {XLEN{s_int_global_en}};
   assign s_int_pending = |s_int_active;
   // Priority SEI > SSI > STI (matches Priv §3.1.9 order for S-level sources).
@@ -458,9 +505,11 @@ module rapt_csr #(
       csr[MINSTRET] <= RESET_VAL;
       csr[MINSTRETH] <= RESET_VAL;
       csr[MSTATUSH] <= '0;
+      csr[MENVCFG] <= '0;
       csr[MCOUNTE] <= '0;
       csr[SCOUNTE] <= '0;
       csr[MIDELEG] <= '0;
+      stimecmp <= 64'hFFFF_FFFF_FFFF_FFFF;
       for (int i = 0; i < `RAPT_PMP_NUM; i++) begin
         pmpcfg_r[i]  <= '0;
         pmpaddr_r[i] <= '0;
@@ -534,6 +583,18 @@ module rapt_csr #(
           end else if (waddr_reg == MCOUNTE || waddr_reg == SCOUNTE) begin
             // Only CY/TM/IR (bits [2:0]) modeled; HPM bits WARL-zero.
             csr[waddr_reg] <= (rou_csr.csr_wdata & `RAPT_CSR_COUNTEREN_WMASK);
+          end else if (waddr_reg == MENVCFG) begin
+            csr[MENVCFG] <= (rou_csr.csr_wdata & `RAPT_CSR_MENVCFG_WMASK);
+          end else if (waddr_reg == STIMECMP) begin
+            if (XLEN == 64) begin
+              stimecmp <= 64'(rou_csr.csr_wdata);
+            end else begin
+              stimecmp[31:0] <= rou_csr.csr_wdata[31:0];
+            end
+          end else if (waddr_reg == STIMECMPH) begin
+            if (XLEN == 32) begin
+              stimecmp[63:32] <= rou_csr.csr_wdata[31:0];
+            end
           end else if (waddr_reg == MSTATUSH) begin
             // SBE/MBE are WARL-zero (little-endian only).
             csr[MSTATUSH] <= '0;
@@ -556,8 +617,16 @@ module rapt_csr #(
                           | ((rou_csr.csr_wdata[14:13] == 2'b11
                             || csr[MSTATUS][16:15] == 2'b11) ? `RAPT_CSR_MSTATUS_SD : 32'h0);
           end else if (waddr_reg == SIE____) begin
-            csr[waddr_reg] <= (rou_csr.csr_wdata);
-            csr[MIE____]   <= csr[MIE____] | (rou_csr.csr_wdata);
+            // sie is a restricted view of mie; write only the SIE-visible bits.
+            csr[MIE____] <= (csr[MIE____] & ~`RAPT_CSR_SIE_WMASK)
+                          | (rou_csr.csr_wdata & `RAPT_CSR_SIE_WMASK);
+          end else if (waddr_reg == SIP____) begin
+            // sip is a restricted view of mip; only SSIP (bit 1) is software-writable.
+            csr[MIP____] <= (csr[MIP____] & ~`RAPT_CSR_SIP_WMASK)
+                          | (rou_csr.csr_wdata & `RAPT_CSR_SIP_WMASK);
+          end else if (waddr_reg == MIP____) begin
+            csr[MIP____] <= (csr[MIP____] & ~`RAPT_CSR_MIP_WMASK)
+                          | (rou_csr.csr_wdata & `RAPT_CSR_MIP_WMASK);
           end else if (waddr_reg == MTVEC__ || waddr_reg == STVEC__) begin
             // WARL on MODE field [1:0]: only Direct(00) and Vectored(01) are
             // defined; reserved values (10/11) coerce to Direct(00).
@@ -583,10 +652,8 @@ module rapt_csr #(
             csr[SSTATUS][`RAPT_CSR_MSTATUS_SPIE] <= csr[SSTATUS][`RAPT_CSR_MSTATUS_SIE_];
             csr[MSTATUS][`RAPT_CSR_MSTATUS_SIE_] <= 'h0;
             csr[SSTATUS][`RAPT_CSR_MSTATUS_SIE_] <= 'h0;
-            if (priv_mode == `RAPT_PRIV_S) begin
-              csr[MSTATUS][`RAPT_CSR_MSTATUS_SPP_] <= 'h1;
-              csr[SSTATUS][`RAPT_CSR_MSTATUS_SPP_] <= 'h1;
-            end
+            csr[MSTATUS][`RAPT_CSR_MSTATUS_SPP_] <= (priv_mode == `RAPT_PRIV_S);
+            csr[SSTATUS][`RAPT_CSR_MSTATUS_SPP_] <= (priv_mode == `RAPT_PRIV_S);
             priv_mode <= `RAPT_PRIV_S;
           end else begin
             // Handle in M-mode
@@ -612,6 +679,9 @@ module rapt_csr #(
             csr[MSTATUS][`RAPT_CSR_MSTATUS_MPIE],
             csr[MSTATUS][2:0]
           };
+          if (csr[MSTATUS][`RAPT_CSR_MSTATUS_MPP_] != `RAPT_PRIV_M) begin
+            csr[MSTATUS][`RAPT_CSR_MSTATUS_MPRV] <= 1'b0;
+          end
         end else if (rou_csr.sret) begin
           priv_mode <= csr[MSTATUS][`RAPT_CSR_MSTATUS_SPP_] == 1'b1 ? `RAPT_PRIV_S : `RAPT_PRIV_U;
           csr[MSTATUS] <= {
@@ -632,6 +702,7 @@ module rapt_csr #(
             csr[SSTATUS][`RAPT_CSR_MSTATUS_SPIE],  // SIE <- SPIE
             csr[SSTATUS][0]
           };
+          csr[MSTATUS][`RAPT_CSR_MSTATUS_MPRV] <= 1'b0;
         end else if (rou_csr.ebreak) begin
           if (ebreak_deleg) begin
             // Delegate to S-mode
@@ -642,10 +713,8 @@ module rapt_csr #(
             csr[SSTATUS][`RAPT_CSR_MSTATUS_SPIE] <= csr[SSTATUS][`RAPT_CSR_MSTATUS_SIE_];
             csr[MSTATUS][`RAPT_CSR_MSTATUS_SIE_] <= 'h0;
             csr[SSTATUS][`RAPT_CSR_MSTATUS_SIE_] <= 'h0;
-            if (priv_mode == `RAPT_PRIV_S) begin
-              csr[MSTATUS][`RAPT_CSR_MSTATUS_SPP_] <= 'h1;
-              csr[SSTATUS][`RAPT_CSR_MSTATUS_SPP_] <= 'h1;
-            end
+            csr[MSTATUS][`RAPT_CSR_MSTATUS_SPP_] <= (priv_mode == `RAPT_PRIV_S);
+            csr[SSTATUS][`RAPT_CSR_MSTATUS_SPP_] <= (priv_mode == `RAPT_PRIV_S);
             priv_mode <= `RAPT_PRIV_S;
           end else begin
             // Handle in M-mode
@@ -669,10 +738,8 @@ module rapt_csr #(
             csr[MSTATUS][`RAPT_CSR_MSTATUS_SPIE] <= csr[MSTATUS][`RAPT_CSR_MSTATUS_SIE_];
             csr[SSTATUS][`RAPT_CSR_MSTATUS_SPIE] <= csr[SSTATUS][`RAPT_CSR_MSTATUS_SIE_];
 
-            if (priv_mode == `RAPT_PRIV_S) begin
-              csr[MSTATUS][`RAPT_CSR_MSTATUS_SPP_] <= 'h1;
-              csr[SSTATUS][`RAPT_CSR_MSTATUS_SPP_] <= 'h1;
-            end
+            csr[MSTATUS][`RAPT_CSR_MSTATUS_SPP_] <= (priv_mode == `RAPT_PRIV_S);
+            csr[SSTATUS][`RAPT_CSR_MSTATUS_SPP_] <= (priv_mode == `RAPT_PRIV_S);
 
             priv_mode <= `RAPT_PRIV_S;
           end else begin

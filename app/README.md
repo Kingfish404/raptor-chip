@@ -8,18 +8,20 @@ Standalone RISC-V programs that compile to standard ELFs and run on any RISC-V L
 # Build everything
 make all
 
-# Build and run specific test suites via pk on NPC (default)
-make isa-tests        # ISA correctness verification
-make memory-tests     # Memory subsystem tests
-make algo-tests       # Algorithm correctness tests
-make demos            # Demo programs
-make coremark         # CoreMark benchmark
-make embench          # Embench-IoT benchmarks
+# Build and run specific test suites via pk on NPC/nsim
+make isa-tests-npc        # ISA correctness verification
+make memory-tests-npc     # Memory subsystem tests
+make algo-tests-npc       # Algorithm correctness tests
+make demos-npc            # Demo programs
+make coremark-npc         # CoreMark benchmark
+make embench-npc          # Embench-IoT benchmarks
+make llm-bench-report-npc # RLLMBench: LLM operator/infer/train benchmark + report
+make llm-native-test  # RLLMBench host-native build/run/report smoke test
 
-# Run on NEMU instead of NPC
-make isa-tests   RUN_ON=nemu
-make tests       RUN_ON=nemu
-make demos       RUN_ON=nemu
+# Run on NEMU
+make isa-tests-nemu
+make tests-nemu
+make demos-nemu
 
 # Build only (no run)
 make tests-build
@@ -48,7 +50,8 @@ app/
 ├── demos/            # Interactive demo programs
 ├── benchmarks/       # Performance benchmarks
 │   ├── coremark/     #   CoreMark (auto-cloned from EEMBC)
-│   └── embench/      #   Embench-IoT (auto-cloned)
+│   ├── embench/      #   Embench-IoT (auto-cloned)
+│   └── llm/          #   Fixed-point LLM operator/infer/train benchmarks
 ├── lib/              # Picolibc I/O stubs (Linux toolchain only)
 ├── pk/               # riscv-pk proxy kernel (for running on NPC)
 └── build/            # Build outputs (rv32/ or rv64/)
@@ -130,7 +133,7 @@ Programs run on the Raptor NPC simulator via riscv-pk proxy kernel:
 make pk-run USER_ELF=app/build/rv32/tests/isa/rv_add.elf
 
 # Run all tests on NPC
-make tests ARGS="-b -n"
+make tests-npc ARGS="-b -n"
 
 # Run all tests on NPC with difftest (from project root)
 make app-tests-npc32-difftest ARGS="-b -n"
@@ -138,14 +141,14 @@ make app-tests-npc32-difftest ARGS="-b -n"
 
 ## Running on NEMU (via pk)
 
-The same pk+ELF images can also run on NEMU (software ISS). Use `RUN_ON=nemu` to switch the runtime:
+The same pk+ELF images can also run on NEMU (software ISS). Use the explicit `*-nemu` targets:
 
 ```bash
 # Run a single test on NEMU
 make nemu-run USER_ELF=app/build/rv32/tests/isa/rv_add.elf ARGS="-b"
 
 # Run all tests on NEMU
-make tests RUN_ON=nemu ARGS="-b"
+make tests-nemu ARGS="-b"
 
 # From project root (auto-configures and builds NEMU)
 make app-tests-nemu32 ARGS="-b"
@@ -154,6 +157,69 @@ make app-demos-nemu32 ARGS="-b"
 
 > **Note:** NEMU must be configured first (e.g., `make config-nemu32` from project root).
 > Tests running on NEMU can optionally use Spike as a difftest reference (via NEMU's own Kconfig).
+
+## RLLMBench
+
+`benchmarks/llm` contains RLLMBench, a fixed-point AI benchmark suite inspired
+by the operator mix in Karpathy's `llama2.c` and `llm.c`: q8 matmul, causal
+attention, RMSNorm, AdamW-style updates, tiny decoder inference, and tiny
+next-token training. It avoids model files, malloc, and floating point so RV32IMAC
+and FPGA payload runs stay practical.
+
+```bash
+make llm-bench-build
+make llm-ops-npc
+make llm-infer-npc
+make llm-train-npc
+make llm-bench-report-npc
+make llm-native-test
+
+# Reports from the full suite
+ls build/rv32/benchmarks/llm/reports/
+ls build/native/benchmarks/llm/reports/
+
+# Tune workload size
+make llm-bench-report-npc LLM_OP_ITERS=16 LLM_GEN_TOKENS=16 LLM_TRAIN_STEPS=8
+```
+
+The profile name encodes the workload knobs as
+`ops<LLM_OP_ITERS>-gen<LLM_GEN_TOKENS>-train<LLM_TRAIN_STEPS>`; the default
+comparable profile is `ops8-gen12-train4`. `make llm-bench-report-npc` and
+`make llm-bench-report-nemu` keep per-run logs
+and emits Markdown/CSV/JSON reports. The headline metric is `score_per_sec`:
+benchmark work items per physical second, higher is better. Reports use only
+elapsed physical seconds and do not expose cycles, implementation-specific
+ticks, or IPC. When a core clock is supplied, reports also include
+`score_per_mhz = score_per_sec / core_clock_mhz`, a CoreMark/MHz-style metric
+equivalent to work items per million core cycles. Deterministic checksums are emitted for each mode. The benchmark itself emits stable
+`RLLMBENCH_RESULT` / `RLLMBENCH_SCORE` lines so results are easy to grep, paste
+into issue reports, or compare with CoreMark and Embench dashboards.
+
+For native host comparisons, use a larger profile so the timed regions are long
+enough on modern CPUs:
+
+```bash
+make llm-native-test LLM_OP_ITERS=8192 LLM_GEN_TOKENS=16 LLM_TRAIN_STEPS=4096
+```
+
+The port layer is the single header `benchmarks/llm/rllmbench_port.h`. New
+bare-metal RISC-V ports normally only set `RLLMBENCH_TIMEBASE_HZ` to the real
+`time` CSR rate; unusual platforms can override `RLLMBENCH_READ_TIME_US()` to
+return monotonic physical microseconds.
+For NPC comparisons, `make llm-bench-report-npc` defaults to `RLLMBENCH_TIMEBASE_HZ=10000000`
+and `RLLMBENCH_CORE_CLOCK_MHZ=1000`, matching the current RTL timer/core-clock
+model. Override `RLLMBENCH_CORE_CLOCK_MHZ` for FPGA or ASIC reports when the
+core frequency differs.
+
+The same source can also be linked as a LiteX-native flat binary:
+
+```bash
+make llm-litex-build
+```
+
+From `fpga/litex`, use `make app-llm-infer` for LiteX simulation or
+`make app-llm-infer-fpga UART_PORT=/dev/tty.usbserial-...` to upload via BIOS
+serialboot.
 
 ## Toolchain
 
@@ -180,3 +246,11 @@ sudo apt install gcc-riscv64-linux-gnu    # glibc
 3. For a new test category, add the ELF name to the list in `app/Makefile` and add a run loop
 4. Programs should use only standard C library functions (`stdio.h`, `stdlib.h`, `string.h`, `stdint.h`)
 5. Tests should print pass/fail summary and return `EXIT_FAILURE` on any failure
+
+## LiteX-Native App Payloads
+
+For FPGA-facing app code, prefer a dual-build pattern: keep the algorithm in
+ordinary C, then add a Makefile path that links it with `app/lib/litex/start.S`,
+`app/lib/litex/link.ld`, and `app/lib/litex/runtime.c`. That produces a flat
+`.bin` loaded at `0x80000000`, avoiding pk/newlib and avoiding a bitstream
+rebuild for every test. The LLM benchmark Makefile is the reference pattern.

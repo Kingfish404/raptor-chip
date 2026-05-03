@@ -6,9 +6,9 @@
 [![Linux boot](https://github.com/Kingfish404/raptor-chip/actions/workflows/linux-boot.yaml/badge.svg)](https://github.com/Kingfish404/raptor-chip/actions/workflows/linux-boot.yaml)
 
 Raptor is a dual-issue, out-of-order RISC-V core with register renaming, a
-reorder buffer, reservation stations, branch prediction, and Sv32 virtual
-memory. The RTL is written in hand-written SystemVerilog; Chisel is used only
-to generate instruction decoders.
+reorder buffer, reservation stations, branch prediction, and Sv32/Sv39 virtual
+memory support for RV32/RV64. The RTL is written in hand-written SystemVerilog;
+Chisel is used only to generate instruction decoders.
 
 The repository also bundles the NEMU software ISS (used as a difftest
 reference), a Verilator-based simulator (NPC), an AbstractMachine runtime,
@@ -18,17 +18,17 @@ Repository: <https://github.com/Kingfish404/raptor-chip>
 
 ## Core Summary
 
-| Item                 | Value                                                                |
-| -------------------- | -------------------------------------------------------------------- |
-| ISA                  | `rv32/64imac_zicntr_zicond_zicsr_zifencei_zimop_zcb_zba_zbb_zbc_zbs` |
-| Privilege modes      | M, S, U                                                              |
-| MMU                  | Sv32 (RV32) / Bare (RV64)                                            |
-| Interrupts           | CLINT (`mtime`, `mtimecmp`, `msip`)                                  |
-| Issue / commit width | 2 / 2                                                                |
-| ROB / RS / IOQ / SQ  | 16 / 8 / 8 / 8                                                       |
-| L1I / L1D            | 4-word lines; L1D 2-way, banked SRAM                                 |
-| Bus                  | AXI4, XLEN-bit data/addr, 4-bit ID                                   |
-| Verification         | RVFI-compliant; difftest against NEMU                                |
+| Item                 | Value                                                                 |
+| -------------------- | --------------------------------------------------------------------- |
+| ISA                  | `rv32/64imac_zicntr_zicond_zicsr_zifencei_zimop_zcb_zba_zbb_zbc_zbs`  |
+| Privilege modes      | M, S, U                                                               |
+| MMU                  | Sv32 (RV32) / Sv39 PTW path (RV64 xv6 bring-up) / Bare                |
+| Interrupts           | CLINT (`mtime`, `mtimecmp`, `msip`) + PLIC (31 sources, M/S contexts) |
+| Issue / commit width | 2 / 2                                                                 |
+| ROB / RS / IOQ / SQ  | 16 / 8 / 8 / 8                                                        |
+| L1I / L1D            | 4-word lines; L1D 2-way, banked SRAM                                  |
+| Bus                  | AXI4, XLEN-bit data/addr, 4-bit ID                                    |
+| Verification         | Difftest against NEMU; RVFI/riscv-formal; SVA;                        |
 
 See [Microarchitecture](./uarch.md) for the complete pipeline description.
 
@@ -44,12 +44,12 @@ for detailed numbers and the change history.
 - [RISCOF](https://github.com/riscv-software-src/riscof) running
   [riscv-arch-test](https://github.com/riscv-non-isa/riscv-arch-test):
   pass against `sail_c_simulator` on both the RTL DUT
-  (`make riscof-classic`) and NEMU (`make riscof-classic-nemu`).
+  (`make verify-riscof-classic`) and NEMU (`make verify-riscof-classic-nemu`).
   Coverage: rv32i_m/{I, M, A, B (Zba/Zbb/Zbc/Zbs), C, Zcb hints, Zicond,
   Zifencei, privilege, pmp, vm_sv32, vm_pmp}.
-- Benchmarks: CoreMark, MicroBench, Embench-IoT, under both bare-metal and difftest.
+- Benchmarks: CoreMark, MicroBench, Embench-IoT, and RLLMBench/LLM-style fixed-point workloads under NPC/NEMU and selected native/LiteX paths.
 - System software: nanos-lite, riscv-pk, OpenSBI + Linux boot
-  (see [Linux Kernel Boot](./linux_kernel.md)).
+  (see [Linux Kernel Boot](./linux_kernel.md)); upstream xv6-riscv and egos-2000 CLI smoke paths are available through `app/tinyos`.
 
 ## Documentation
 
@@ -69,11 +69,12 @@ raptor-chip/
 ├── env.sh                environment variables (auto-sourced by Makefile)
 ├── rtl_scala/            Chisel (decoder generation only)
 ├── rtl_sv/               hand-written SystemVerilog RTL
-│   ├── rapt.sv           top-level core
+│   ├── rapt.sv           cluster-level top (core + CLINT + PLIC + router)
+│   ├── rapt_core.sv      single-hart CPU body
 │   ├── rapt_pkg.sv       shared types (uop_t, rob_entry_t, ...)
 │   ├── frontend/         IFU, IDU, BPU, CSR
 │   ├── backend/          RNU, PRF, ROU, EXU, CMU
-│   ├── memory/           LSU, L1I/L1D, TLB, PTW, AXI4 bus, CLINT
+│   ├── memory/           LSU, L1I/L1D, TLB, PTW, AXI4 bus, CLINT, PLIC
 │   ├── include/          config, interfaces, DPI-C
 │   └── generated/        Chisel-generated decoders
 ├── nemu/                 NEMU reference ISS

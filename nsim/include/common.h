@@ -24,6 +24,8 @@ typedef word_t vaddr_t;
 
 #define GPR_SIZE 32
 #define NPC_PMP_NUM 16
+#define NPC_PLIC_NDEV 31
+#define NPC_PLIC_NCTX 2
 
 // CLINT `mtime` tick rate (MHz). MUST match RAPT_MTIME_FREQ_MHZ in
 // rtl_sv/include/<soc>/rapt_soc.svh and the DTS `timebase-frequency`
@@ -189,6 +191,13 @@ typedef struct
   uint64_t *clint_mtime;
   uint64_t *clint_mtimecmp;
   uint8_t *clint_msip;
+
+  // for PLIC checkpoint persistence
+  uint8_t *plic_priority; // [NPC_PLIC_NDEV + 1]
+  uint32_t *plic_pending;
+  uint32_t *plic_enable;   // [NPC_PLIC_NCTX]
+  uint8_t *plic_threshold; // [NPC_PLIC_NCTX]
+  uint32_t *plic_ext_irq;
 
   // for PMP checkpoint persistence
   uint8_t *pmpcfg;

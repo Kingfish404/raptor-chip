@@ -2,6 +2,9 @@
 #include <common.h>
 #include <utils.h>
 #include <verilated.h>
+#include <inttypes.h>
+#include <stdlib.h>
+#include <string.h>
 
 void difftest_skip_ref();
 void npc_abort();
@@ -16,6 +19,21 @@ extern VerilatedContext *contextp;
 #define FINISHER_FAIL 0x3333
 #define FINISHER_RESET 0x7777
 
+#define CLINT_BASE 0x02000000u
+#define CLINT_SIZE 0x000c0000u
+#define PLIC_BASE 0x0c000000u
+#define PLIC_SIZE 0x01000000u
+#define NS16550_BASE 0x10000000u
+#define NS16550_SIZE 0x100u
+#define VIRTIO_BLK_BASE 0x10001000u
+#define VIRTIO_BLK_SIZE 0x1000u
+#define LITEUART_BASE 0x10011800u
+#define LITEUART_SIZE 0x100u
+#define QEMU_SDHCI_PCI_ECAM_BASE 0x30008000u
+#define QEMU_SDHCI_PCI_ECAM_SIZE 0x1000u
+#define QEMU_SDHCI_BASE 0x40000000u
+#define QEMU_SDHCI_SIZE 0x100u
+
 static struct
 {
     uint8_t pmem[MSIZE];
@@ -28,34 +46,212 @@ static struct
 #endif
 } memory;
 
-uint8_t *guest_to_host(paddr_t addr)
+typedef struct
+{
+    const char *name;
+    paddr_t base;
+    paddr_t size;
+    uint8_t *host;
+    const char *desc;
+} host_map_t;
+
+typedef struct
+{
+    const char *name;
+    paddr_t base;
+    paddr_t size;
+    const char *desc;
+    bool skip_difftest;
+    void (*handler)(paddr_t addr, word_t wdata, char wmask, bool is_write, word_t *data);
+} mmio_map_t;
+
+typedef struct
+{
+    const char *name;
+    paddr_t base;
+    paddr_t size;
+    const char *desc;
+} map_print_entry_t;
+
+static paddr_t canonical_paddr(paddr_t addr)
 {
 #ifdef CONFIG_ISA64
-    // In RV64 mode, `lui`/`auipc` on a 0x80000000-linked image produces
-    // sign-extended addresses (0xffffffff8xxxxxxx). Physical memory is 32-bit,
-    // so canonicalise by keeping only the low 32 bits.
-    addr = (paddr_t)((uint32_t)addr);
+    return (paddr_t)((uint32_t)addr);
+#else
+    return addr;
 #endif
-    if (addr >= MBASE && addr <= MBASE + MSIZE)
+}
+
+static host_map_t host_maps[] = {
+    {"pmem", MBASE, MSIZE, memory.pmem, "main memory / QEMU virt DRAM"},
+    {"sdram", SDRAM_BASE, SDRAM_SIZE, memory.sdram, "external SDRAM window"},
+    {"sram", SRAM_BASE, SRAM_SIZE, memory.sram, "on-chip SRAM window"},
+    {"mrom", MROM_BASE, MROM_SIZE, memory.mrom, "mask ROM / boot trampoline"},
+    {"flash", FLASH_BASE, FLASH_SIZE, memory.flash, "flash image mirror"},
+};
+
+static bool map_contains(paddr_t addr, paddr_t base, paddr_t size)
+{
+    return addr >= base && addr < base + size;
+}
+
+static const host_map_t *find_host_map(paddr_t addr)
+{
+    for (size_t i = 0; i < ARRLEN(host_maps); i++)
     {
-        return memory.pmem + addr - MBASE;
+        if (map_contains(addr, host_maps[i].base, host_maps[i].size))
+            return &host_maps[i];
     }
-    if (addr >= MROM_BASE && addr < MROM_BASE + MROM_SIZE)
+    return NULL;
+}
+
+static void finisher_handle(paddr_t addr, word_t wdata, char wmask, bool is_write, word_t *data)
+{
+    (void)wmask;
+    (void)data;
+    if (is_write && (addr == FINISHER_BASE))
     {
-        return memory.mrom + addr - MROM_BASE;
+        uint32_t val = (uint32_t)wdata;
+        uint16_t cmd = val & 0xffff;
+        if (cmd == FINISHER_PASS)
+        {
+            Log("Finisher: poweroff (0x%x)", val);
+            contextp->gotFinish(true);
+            npc.host_exit_ok = 1;
+            npc.state = NPC_END;
+        }
+        else if (cmd == FINISHER_FAIL)
+        {
+            Log("Finisher: fail (0x%x)", val);
+            npc.host_exit_ok = 0;
+            npc_abort();
+        }
+        else if (cmd == FINISHER_RESET)
+        {
+            Log("Finisher: reset requested (0x%x) — not supported, aborting", val);
+            npc.host_exit_ok = 0;
+            npc_abort();
+        }
     }
-    if (addr >= SRAM_BASE && addr < SRAM_BASE + SRAM_SIZE)
+}
+
+static void serial_handle(paddr_t addr, word_t wdata, char wmask, bool is_write, word_t *data)
+{
+    (void)wmask;
+    void mmio_serial_handle(paddr_t addr, word_t wdata, bool is_write, word_t *data);
+    mmio_serial_handle(addr - NS16550_BASE, wdata, is_write, data);
+}
+
+static void virtio_blk_handle(paddr_t addr, word_t wdata, char wmask, bool is_write, word_t *data)
+{
+    (void)wmask;
+    void mmio_virtio_blk_handle(paddr_t addr, word_t wdata, bool is_write, word_t *data);
+    mmio_virtio_blk_handle(addr - VIRTIO_BLK_BASE, wdata, is_write, data);
+}
+
+static void sdhci_handle(paddr_t addr, word_t wdata, char wmask, bool is_write, word_t *data)
+{
+    void mmio_sdhci_handle(paddr_t addr, word_t wdata, char wmask, bool is_write, word_t *data);
+    mmio_sdhci_handle(addr, wdata, wmask, is_write, data);
+}
+
+static mmio_map_t mmio_maps[] = {
+    {"finisher", FINISHER_BASE, FINISHER_SIZE, "SiFive test / syscon poweroff", true, finisher_handle},
+    {"clint", CLINT_BASE, CLINT_SIZE, "QEMU virt CLINT sink", false, NULL},
+    {"plic", PLIC_BASE, PLIC_SIZE, "QEMU virt PLIC sink", false, NULL},
+    {"serial_ns16550", NS16550_BASE, NS16550_SIZE, "QEMU virt NS16550 UART", false, serial_handle},
+    {"virtio-blk", VIRTIO_BLK_BASE, VIRTIO_BLK_SIZE, "QEMU virtio-mmio block device", true, virtio_blk_handle},
+    {"sdhci-pci-ecam", QEMU_SDHCI_PCI_ECAM_BASE, QEMU_SDHCI_PCI_ECAM_SIZE, "QEMU SDHCI PCI ECAM stub", true, sdhci_handle},
+    {"sdhci", QEMU_SDHCI_BASE, QEMU_SDHCI_SIZE, "QEMU SDHCI SD-card controller", true, sdhci_handle},
+    {"liteuart0", LITEUART_BASE, LITEUART_SIZE, "LiteX UART sink", false, NULL},
+};
+
+static const mmio_map_t *find_mmio_map(paddr_t addr)
+{
+    for (size_t i = 0; i < ARRLEN(mmio_maps); i++)
     {
-        return memory.sram + addr - SRAM_BASE;
+        if (map_contains(addr, mmio_maps[i].base, mmio_maps[i].size))
+            return &mmio_maps[i];
     }
-    if (addr >= FLASH_BASE && addr < FLASH_BASE + FLASH_SIZE)
+    return NULL;
+}
+
+static void print_map_entry(FILE *out, const char *kind, const char *name,
+                            paddr_t base, paddr_t size, const char *desc)
+{
+    uint64_t low = (uint64_t)base;
+    uint64_t high = (size == 0) ? low : low + (uint64_t)size - 1;
+    fprintf(out, "  %-6s %-18s 0x%08" PRIx64 "  0x%08" PRIx64 "  0x%08" PRIx64,
+            kind, name, low, high, (uint64_t)size);
+    if (desc != NULL && desc[0] != '\0')
+        fprintf(out, "  %s", desc);
+    fprintf(out, "\n");
+}
+
+static int compare_map_print_entry(const void *lhs_ptr, const void *rhs_ptr)
+{
+    const map_print_entry_t *lhs = (const map_print_entry_t *)lhs_ptr;
+    const map_print_entry_t *rhs = (const map_print_entry_t *)rhs_ptr;
+    if (lhs->base < rhs->base)
+        return -1;
+    if (lhs->base > rhs->base)
+        return 1;
+    if (lhs->size < rhs->size)
+        return -1;
+    if (lhs->size > rhs->size)
+        return 1;
+    return strcmp(lhs->name, rhs->name);
+}
+
+static void print_map_entries_sorted(FILE *out, const char *kind,
+                                     map_print_entry_t *entries, size_t count)
+{
+    qsort(entries, count, sizeof(entries[0]), compare_map_print_entry);
+    for (size_t i = 0; i < count; i++)
+        print_map_entry(out, kind, entries[i].name, entries[i].base,
+                        entries[i].size, entries[i].desc);
+}
+
+void print_nsim_memory_map(FILE *out)
+{
+    if (out == NULL)
+        out = stdout;
+
+    fprintf(out, "Memory map (current nsim build; MMIO has priority over host-backed overlays):\n");
+    fprintf(out, "  %-6s %-18s %-10s  %-10s  %-10s  %s\n",
+            "kind", "name", "base", "end", "size", "description");
+
+    map_print_entry_t mem_entries[ARRLEN(host_maps)];
+    for (size_t i = 0; i < ARRLEN(host_maps); i++)
     {
-        return memory.flash + addr - FLASH_BASE;
+        mem_entries[i] = (map_print_entry_t){host_maps[i].name, host_maps[i].base,
+                                             host_maps[i].size, host_maps[i].desc};
     }
-    if (addr >= SDRAM_BASE && addr < SDRAM_BASE + SDRAM_SIZE)
+    print_map_entries_sorted(out, "mem", mem_entries, ARRLEN(mem_entries));
+
+    map_print_entry_t mmio_entries[ARRLEN(mmio_maps) + 2];
+    size_t mmio_count = 0;
+    for (size_t i = 0; i < ARRLEN(mmio_maps); i++)
     {
-        return memory.sdram + addr - SDRAM_BASE;
+        mmio_entries[mmio_count++] = (map_print_entry_t){mmio_maps[i].name, mmio_maps[i].base,
+                                                         mmio_maps[i].size, mmio_maps[i].desc};
     }
+#ifdef CONFIG_SOFT_MMIO
+    mmio_entries[mmio_count++] = (map_print_entry_t){"soft-rtc", RTC_ADDR_, 8,
+                                                     "legacy CONFIG_SOFT_MMIO RTC"};
+    mmio_entries[mmio_count++] = (map_print_entry_t){"soft-serial", SERIAL_PORT, 1,
+                                                     "legacy CONFIG_SOFT_MMIO serial byte port"};
+#endif
+    print_map_entries_sorted(out, "mmio", mmio_entries, mmio_count);
+    fprintf(out, "\n");
+}
+
+uint8_t *guest_to_host(paddr_t addr)
+{
+    addr = canonical_paddr(addr);
+    const host_map_t *map = find_host_map(addr);
+    if (map != NULL)
+        return map->host + addr - map->base;
     // Assert(0, "Invalid guest address: " FMT_WORD, addr);
     return NULL;
 }
@@ -63,65 +259,31 @@ uint8_t *guest_to_host(paddr_t addr)
 uint8_t mmio_check_and_handle(
     paddr_t addr, word_t wdata, char wmask, bool is_write, word_t *data)
 {
-    // sifive,test finisher @ 0x100000 (QEMU virt compatible)
-    if (addr >= FINISHER_BASE && addr < FINISHER_BASE + FINISHER_SIZE)
-    {
-        if (is_write && (addr == FINISHER_BASE))
-        {
-            uint32_t val = (uint32_t)wdata;
-            uint16_t cmd = val & 0xffff;
-            if (cmd == FINISHER_PASS)
-            {
-                Log("Finisher: poweroff (0x%x)", val);
-                contextp->gotFinish(true);
-                npc.host_exit_ok = 1;
-                npc.state = NPC_END;
-            }
-            else if (cmd == FINISHER_FAIL)
-            {
-                Log("Finisher: fail (0x%x)", val);
-                npc.host_exit_ok = 0;
-                npc_abort();
-            }
-            else if (cmd == FINISHER_RESET)
-            {
-                Log("Finisher: reset requested (0x%x) — not supported, aborting", val);
-                npc.host_exit_ok = 0;
-                npc_abort();
-            }
-        }
+    addr = canonical_paddr(addr);
+    const mmio_map_t *map = find_mmio_map(addr);
+    if (map == NULL)
+        return 0;
+
+    if (map->handler != NULL)
+        map->handler(addr, wdata, wmask, is_write, data);
+
+    if (map->skip_difftest)
         difftest_skip_ref();
-        return 1;
-    }
-    // TODO: implement clint, plic, and serial
-    if (addr >= 0x2000000 && addr < 0x2000000 + 0xc0000)
-    {
-        // clint@2000000
-        return 1;
-    }
-    if (addr >= 0xc000000 && addr < 0xc000000 + 0x1000000)
-    {
-        // plic@c000000
-        return 1;
-    }
-    if (addr >= 0x10000000 && addr < 0x10000000 + 0x100)
-    {
-        // ns16550@10000000
-        void mmio_serial_handle(paddr_t addr, word_t wdata, bool is_write, word_t *data);
-        mmio_serial_handle(addr - 0x10000000, wdata, is_write, data);
-        return 1;
-    }
-    if (addr >= 0x10011800 && addr < 0x10011800 + 0x100)
-    {
-        // liteuart0: serial@10011800
-        return 1;
-    }
-    return 0;
+
+    return 1;
 }
 
 paddr_t host_to_guest(uint8_t *addr)
 {
-    return addr + MBASE - memory.pmem;
+    uintptr_t host = (uintptr_t)addr;
+    for (size_t i = 0; i < ARRLEN(host_maps); i++)
+    {
+        uintptr_t base = (uintptr_t)host_maps[i].host;
+        uintptr_t limit = base + (uintptr_t)host_maps[i].size;
+        if (host >= base && host < limit)
+            return host_maps[i].base + (paddr_t)(host - base);
+    }
+    return MBASE + (paddr_t)(addr - memory.pmem);
 }
 
 static inline word_t host_read(void *addr, int len)
@@ -329,4 +491,8 @@ void init_mem()
 {
     void init_serial();
     init_serial();
+    void init_virtio_blk();
+    init_virtio_blk();
+    void init_sdhci();
+    init_sdhci();
 }

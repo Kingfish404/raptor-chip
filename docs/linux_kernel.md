@@ -1,85 +1,101 @@
-# Boot Linux Kernel (NEMU)
+# Linux Kernel Boot
 
-- Boot Linux: firmware (rom) -> openSBI -> Linux
-- [RISC-V Open Source Supervisor Binary Interface](https://github.com/riscv-software-src/opensbi)
-  - Tested: v1.8.1
-- [The Linux Kernel Archives](https://www.kernel.org/)
-  - Tested: v6.12.57, v6.18.15
+Raptor boots Linux through an OpenSBI `fw_payload.bin` image:
 
-## openSBI
-
-```shell
-git clone https://github.com/riscv-software-src/opensbi
-
-make PLATFORM_RISCV_ISA=rv32imac_zicntr_zicond_zicsr_zifencei_zcb_zba_zbb_zbc_zbs PLATFORM_RISCV_XLEN=32 PLATFORM=generic -j`nproc`
-# or build with Linux Image as payload
-make PLATFORM_RISCV_ISA=rv32imac_zicntr_zicond_zicsr_zifencei_zcb_zba_zbb_zbc_zbs PLATFORM_RISCV_XLEN=32 PLATFORM=generic -j`nproc` FW_PAYLOAD_PATH=~/linux/linux-6.18.15/arch/riscv/boot/Image
-
-# or build using llvm + clang
-brew install llvm lld
-make LLVM=1 PLATFORM_RISCV_ISA=rv32imac_zicntr_zicond_zicsr_zifencei_zcb_zba_zbb_zbc_zbs PLATFORM_RISCV_XLEN=32 PLATFORM=generic -j`nproc`
-# with Linux Image as payload
-make LLVM=1 PLATFORM_RISCV_ISA=rv32imac_zicntr_zicond_zicsr_zifencei_zcb_zba_zbb_zbc_zbs PLATFORM_RISCV_XLEN=32 PLATFORM=generic -j`nproc` FW_PAYLOAD_PATH=~/linux/linux-6.18.15/arch/riscv/boot/Image
+```text
+reset/MROM -> OpenSBI (M-mode) -> Linux (S-mode) -> init/userspace
 ```
 
-Both `QEMU` and `Spike` device tree tables are supported and listed in `nemu/src/memory/rom`.
+The top-level Makefile is the preferred entry point. It downloads prebuilt
+OpenSBI + Linux payloads from `Kingfish404/linux-build` and keeps NEMU/NPC
+configuration in sync. The default `LINUX_BUILD_VERSION` is `v6.18.22`.
+
+## Quick Commands
+
+```shell
+# Download prebuilt RV32 + RV64 payloads
+make linux-download
+
+# RV32 Linux through NEMU / NPC
+make linux-boot-nemu32 ARGS="-b -n"
+make linux-boot-npc32 ARGS="-b -n"
+
+# RV32 NPC with NEMU difftest reference
+make linux-boot-npc32-difftest ARGS="-b -n"
+
+# RV64 prebuilt payload path is available; the top-level device helper is NEMU-only today
+make linux-download-rv64
+make linux-boot-nemu64-device
+```
+
+Useful overrides:
+
+```shell
+make linux-boot-npc32 LINUX_BUILD_VERSION=v6.18.22 MAX_INST=100000000 ARGS="-b -n"
+make linux-boot-npc32 LINUX_RV32_PAYLOAD=/path/to/fw_payload.bin ARGS="-b -n"
+```
+
+## Supported Modes
+
+| Mode | RTL path | Status |
+| ---- | -------- | ------ |
+| RV32 Linux | Sv32 PTW/TLB + PMP + CLINT/PLIC | Primary NPC/NEMU flow |
+| RV64 Linux payloads | Payload download + NEMU device helper | Available in tooling |
+| RV64 xv6 smoke path | Sv39 PTW/TLB + A/D writeback | Available via `app/tinyos` helpers |
+
+See [linux/README.md](../linux/README.md) and [app/tinyos/README.md](../app/tinyos/README.md) for the lower-level payload and xv6/egos helpers.
+
+## Payload Paths
+
+The downloaded payloads live under `linux/build/`:
+
+```text
+linux/build/linux-riscv-qemu-rv32-m-<version>/fw_payload.bin
+linux/build/linux-riscv-qemu-rv64-m-<version>/fw_payload.bin
+```
+
+Use the `linux/Makefile` helpers when another flow needs the exact path:
+
+```shell
+make -C linux print-rv32-payload
+make -C linux print-rv64-payload
+```
 
 ## Device Tree
 
-```shell
-cd $RAPTOR_HOME/nemu/src/memory/rom
-dtc spike-rv32ima.dts -o spike-rv32ima.dtb
-# or hack to Spike to dump Spike DTB
-```
+NPC/NEMU Linux payloads use the platform device-tree data packaged with the
+payload and simulator ROM flow. The RTL-visible platform devices are:
 
-### Dump DTB from Spike
+- CLINT at `0x0200_0000` (standard 0x000c_0000 window)
+- PLIC at `0x0c00_0000` (16 MB window, 31 sources, M/S contexts)
+- UART/peripheral window at `0x1000_0000`
+- Memory at `0x8000_0000` and related platform windows documented in [Ecosystem](./ecosystem.md)
 
-```patch
-diff --git a/riscv/sim.cc b/riscv/sim.cc
-index fd1c6fb1..63b8418c 100644
---- a/riscv/sim.cc
-+++ b/riscv/sim.cc
-@@ -398,6 +398,15 @@ void sim_t::set_rom()
-   const int align = 0x1000;
-   rom.resize((rom.size() + align - 1) / align * align);
- 
-+  FILE* dtb_file = NULL;
-+  dtb_file = fopen("spike.dtb", "wb");
-+  if (dtb_file) {
-+    fwrite(dtb.c_str(), 1, dtb.size(), dtb_file);
-+    fclose(dtb_file);
-+  } else {
-+    fprintf(stderr, "Failed to open dtb.dtb for writing\n");
-+  }
-+
-   std::shared_ptr<rom_device_t> boot_rom(new rom_device_t(rom));
-   add_device(DEFAULT_RSTVEC, boot_rom);
- }
-```
+`RAPT_MTIME_FREQ_MHZ` / `RAPT_MTIME_DIV` must match the device-tree
+`timebase-frequency`, because CSR `time` and CLINT `mtime` are paced together.
 
-## Linux Kernel Setting and Build
+## Build From Source
 
 Get the Linux Kernel source code from [The Linux Kernel Archives](https://www.kernel.org/):
 
 ```shell
-wget https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.15.6.tar.xz
+wget https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.18.22.tar.xz
 
-tar -xf linux-6.15.6.tar.xz
-cd linux-6.15.6
+tar -xf linux-6.18.22.tar.xz
+cd linux-6.18.22
 ```
 
 See more details in [linux/README.md](../linux/README.md).
 
-## Run at `nemu`
+The repository also keeps source-build helpers in `linux/Makefile`:
 
 ```shell
-make riscv32_linux_defconfig
-
-make run IMG=../third_party/riscv-software-src/opensbi/build/platform/generic/firmware/fw_payload.bin
-
-# or batch mode
-make run IMG=../third_party/riscv-software-src/opensbi/build/platform/generic/firmware/fw_payload.bin ARGS="-b --log=build/nemu-log.txt"
+make -C linux build_linux
+make -C linux opensbi-with-kernel
 ```
+
+For day-to-day RTL validation, prefer the top-level `linux-boot-*` targets so
+the simulator config, payload path, and difftest reference stay aligned.
 
 ## References
 

@@ -4,9 +4,9 @@
 
 Raptor is an out-of-order, super-scalar RISC-V processor core with register renaming, a reorder buffer (ROB), reservation stations, and virtual memory support. The pipeline fetches, decodes, renames, and dispatches up to **2 instructions per cycle** (`RAPT_DUAL_ISSUE`). The commit stage supports **dual commit** -- up to 2 instructions can retire from the ROB per cycle when consecutive entries are both ready.
 
-**ISA**: RV32/RV64 I + M (mul/div) + A (atomics: LR/SC, AMO) + C (compressed) + Zba (address generation, incl. RV64 `.UW` variants) + Zbb (basic bit-manipulation) + Zbc (carry-less multiply) + Zbs (single-bit) + Zcb (additional compressed ops) + Zicntr (base counters) + Zicond (conditional zero) + Zicsr + Zifencei + Zimop / Zcmop (may-be-ops / compressed may-be-ops, decoded as NOPs) + Zihintpause / Zihintntl / Zicbop (hint NOPs) + Sv32 MMU + 16-entry PMP
+**ISA**: RV32/RV64 I + M (mul/div) + A (atomics: LR/SC, AMO) + C (compressed) + Zba (address generation, incl. RV64 `.UW` variants) + Zbb (basic bit-manipulation) + Zbc (carry-less multiply) + Zbs (single-bit) + Zcb (additional compressed ops) + Zicntr (base counters) + Zicond (conditional zero) + Zicsr + Zifencei + Zimop / Zcmop (may-be-ops / compressed may-be-ops, decoded as NOPs) + Zihintpause / Zihintntl / Zicbop (hint NOPs) + Sv32/Sv39 MMU + 16-entry PMP
 
-The core supports configurable **RV32** and **RV64** modes via a compile-time switch (`RAPT_RV64`). When `RAPT_RV64` is defined, XLEN=64 and all datapath, register file, AXI bus, and DPI-C interfaces widen to 64 bits. RV64 adds W-variant instructions (ADDIW, SLLIW, etc.) with 32-bit result sign-extension.
+The core supports configurable **RV32** and **RV64** modes via a compile-time switch (`RAPT_RV64`). When `RAPT_RV64` is defined, XLEN=64 and all datapath, register file, AXI bus, and DPI-C interfaces widen to 64 bits. RV64 adds W-variant instructions (ADDIW, SLLIW, etc.) with 32-bit result sign-extension and uses the Sv39 PTW/TLB path when `satp` enables translation.
 
 ### ISA breakdown
 
@@ -19,7 +19,7 @@ The core supports configurable **RV32** and **RV64** modes via a compile-time sw
 - Conditional: `Zicond` (`czero.{eqz,nez}`).
 - Hints / may-be-ops (decoded as NOPs): `Zihintpause`, `Zihintntl`, `Zicbop`,
   `Zimop`, `Zcmop`.
-- Privileged: M, S (with Sv32 MMU), U; 16-entry PMP (TOR/NA4/NAPOT, L-bit WARL) checked on fetch, load/store, and PTW PTE loads.
+- Privileged: M, S (Sv32 on RV32, Sv39 on RV64), U; 16-entry PMP (TOR/NA4/NAPOT, L-bit WARL) checked on fetch, load/store, and PTW PTE loads.
 
 Closest RISC-V profile peer: RVM23U32 / RVA20S64.
 
@@ -71,7 +71,7 @@ Closest RISC-V profile peer: RVM23U32 / RVA20S64.
  MEMORY SUBSYSTEM
    LSU[STQ(spec), SQ(committed)] --▸ L1D[DTLB,DSTLB,DPTW] --▸ BUS --▸ AXI4
    L1I[ITLB,IPTW] --▸ BUS --▸ AXI4
-   BUS ◂--▸ CLINT (mtime, timer IRQ)
+  BUS --AXI4--▸ cluster router --▸ CLINT / PLIC / off-chip AXI4
 ```
 
 ### Store & Load Ordering
@@ -98,7 +98,7 @@ Closest RISC-V profile peer: RVM23U32 / RVA20S64.
 
 | Component                   | Implementation                                | Key details                                          |
 | --------------------------- | --------------------------------------------- | ---------------------------------------------------- |
-| **PHT** (`rapt_bpu_pht.sv`) | 2-bit saturating, `PHT_SIZE` entries (512)    | `(* keep_hierarchy *)`, sync read, bimodal           |
+| **PHT** (`rapt_bpu_pht.sv`) | 2-bit saturating, `PHT_SIZE` entries (256)    | `(* keep_hierarchy *)`, sync read, bimodal           |
 | **BTB** (`rapt_bpu_btb.sv`) | 2-way SA, `BTB_SIZE` entries (128), 7-bit tag | `(* keep_hierarchy *)`, sync read, XOR-hash, LRU     |
 | **GHR**                     | 11-bit global history                         | Updated on committed branches / spec predictions     |
 | **RSB**                     | `RSB_SIZE` entries (8)                        | Committed + speculative pointers, link-reg detection |
@@ -115,7 +115,7 @@ N-way set-associative I-cache (`L1I_N_WAYS`, default 1). `2^L1I_LEN` sets (64), 
 | Tags    | Banked `rapt_sram_1r1w` per way per word (combinational compare from SRAM output)    |
 | Valid   | Register arrays per way (`l1i_valid[way][set]`) for fast `fence.i` bulk invalidation |
 
-3-tier pre-read: current bank reads `addr_idx`, next bank reads `addr_idx_next` (+2), remaining banks read `addr_idx_next4` (+4). This eliminates SRAM bubbles on sequential fetch and provides `inst_n1` (next 4-byte-aligned word) for generalized dual-fetch. Way replacement: first invalid, then toggle `replace_bit` per set. IFQ (2-entry) for outstanding requests. ITLB + IPTW for Sv32 translation.
+3-tier pre-read: current bank reads `addr_idx`, next bank reads `addr_idx_next` (+2), remaining banks read `addr_idx_next4` (+4). This eliminates SRAM bubbles on sequential fetch and provides `inst_n1` (next 4-byte-aligned word) for generalized dual-fetch. Way replacement: first invalid, then toggle `replace_bit` per set. IFQ (2-entry) for outstanding requests. ITLB + IPTW for Sv32/Sv39 translation.
 
 #### IDU (`rapt_idu.sv`)
 
@@ -146,7 +146,7 @@ Dispatch queue + reorder buffer + commit logic.
 - **Operand bypass**: UOQ pre-read > IOQ broadcast > EXU broadcast. Broadcast forwarding continues during UOQ residence.
 - **Dual commit**: slot 0 commits; slot 1 joins if slot 0 doesn't flush/store, neither has `difftest_skip`, and slot 1 is ready. BPU trains on slot 1's branch info during dual commit.
 - **Flush triggers**: fence\_i, branch mispredict, trap, system op, atomic (from either slot).
-- **Async trap**: CLINT timer interrupt (`clint_trap`).
+- **Async traps**: CLINT software/timer interrupts plus PLIC M/S external interrupts, gated by CSR enables and delegation state.
 
 #### EXU (`rapt_exu.sv`)
 
@@ -189,19 +189,23 @@ Write-through policy. Partial stores (SB/SH): read-modify-write (RMW) 2-cycle me
 
 #### TLB (`rapt_tlb.sv`)
 
-Reusable fully-associative Sv32 TLB. `ENTRIES` param (default 4), ASID-aware. Combinational lookup, sequential fill (no duplicates), round-robin replacement, bulk flush. Instantiated as: `u_itlb` (L1I), `u_dtlb` (L1D load), `u_dstlb` (L1D store).
+Reusable fully-associative Sv32/Sv39 TLB. `ENTRIES` param (default 4), ASID-aware. Combinational lookup, sequential fill (no duplicates), round-robin replacement, bulk flush. Instantiated as: `u_itlb` (L1I), `u_dtlb` (L1D load), `u_dstlb` (L1D store).
 
 #### PTW (`rapt_ptw.sv`)
 
-Reusable Sv32 two-level walker. 3-state FSM (`IDLE`->`LVL1`->`LVL0`). Leaf detection via `PTE.R||PTE.X` (superpage at LVL1). Shares AXI read channel with cache fill. RV64-aware (selects correct 32-bit PTE half). Instantiated as: `u_iptw` (L1I), `u_dptw` (L1D).
+Reusable page-table walker. RV32 uses a Sv32 two-level FSM (`IDLE`->`LVL1`->`LVL0`); RV64 uses a Sv39 three-level FSM (`IDLE`->`LVL2`->`LVL1`->`LVL0`). Leaf detection follows `PTE.R||PTE.X`, with hardware A/D-bit writeback before `done`. Instantiated as: `u_iptw` (L1I), `u_dptw` (L1D).
 
 #### BUS (`rapt_bus.sv`)
 
-AXI4 master bridge arbitrating L1I/L1D (L1D priority). Read FSM: 3-state (`LD_A`/`LD_AS`/`LD_D`). Write FSM: 3-state (`LS_S_A`/`LS_S_W`/`LS_S_B`). Load source tracking: `L1I`/`L1D`/`TLBI`/`TLBD`. CLINT reads handled locally.
+AXI4 master bridge arbitrating L1I/L1D (L1D priority). Read FSM: 3-state (`LD_A`/`LD_AS`/`LD_D`). Write FSM: 3-state (`LS_S_A`/`LS_S_W`/`LS_S_B`). Load source tracking: `L1I`/`L1D`/`TLBI`/`TLBD`. It is SoC-memory-map agnostic; the cluster-level `rapt_router.sv` decodes CLINT/PLIC MMIO and forwards all other transactions off chip.
 
 #### CLINT (`rapt_clint.sv`)
 
-64-bit `mtime` counter. Timer interrupt every 262144 cycles (`mtime[18:0] == 0x40000`). Instantiated inside BUS.
+Cluster-level 64-bit `mtime` counter with `mtimecmp` and `msip`. `mtime` is paced by `RAPT_MTIME_DIV`, and the timer interrupt is level-triggered when `mtime >= mtimecmp`. CLINT MMIO is decoded by `rapt_router.sv` beside the PLIC.
+
+#### PLIC (`rapt_plic.sv`)
+
+Cluster-level Platform-Level Interrupt Controller. Default `NDEV=31` sources and `NCTX=2` contexts (`ctx0` M-mode hart 0, `ctx1` S-mode hart 0). Implements priority, pending, enable, threshold, and claim/complete registers in the standard `0x0c00_0000` 16 MB window. The legacy single-bit `io_interrupt` input is merged into PLIC source 1, and the core consumes `meip/seip` from the PLIC context outputs.
 
 ## Interfaces
 
@@ -246,7 +250,7 @@ AXI4 master bridge arbitrating L1I/L1D (L1D priority). Read FSM: 3-state (`LD_A`
 | `RAPT_L1I_LINE_LEN` | 2       | L1I line: 2² = 4 words                     |
 | `RAPT_L1I_LEN`      | 6       | L1I sets: 2⁶ = 64                          |
 | `RAPT_L1I_N_WAYS`   | 1       | L1I ways (1 = direct-mapped)               |
-| `RAPT_PHT_SIZE`     | 512     | PHT entries                                |
+| `RAPT_PHT_SIZE`     | 256     | PHT entries                                |
 | `RAPT_BTB_SIZE`     | 128     | BTB entries (64 sets × 2 ways)             |
 | `RAPT_BTB_WAYS`     | 2       | BTB associativity                          |
 | `RAPT_RSB_SIZE`     | 8       | Return stack entries                       |
@@ -273,7 +277,8 @@ AXI4 master bridge arbitrating L1I/L1D (L1D priority). Read FSM: 3-state (`LD_A`
 | `rob_state_t`      | ROB state: `ROB_CM` (committed), `ROB_WB` (written-back), `ROB_EX` (executing)                |
 | `rob_entry_t`      | Full ROB entry: phys regs, arch rd, state, branch, memory, atomics, CSR, trap, fence, inst/PC |
 | `addr_cacheable()` | Returns true for cacheable regions (mrom, flash, psram, sdram)                                |
-| `addr_valid()`     | Returns true for any valid memory-mapped region                                               |
+| `addr_mapped()`    | Returns true for any mapped memory or MMIO region                                             |
+| `addr_mmio()`      | Returns true for MMIO regions that difftest should skip                                      |
 
 ## Diagram
 
@@ -305,9 +310,11 @@ flowchart LR
         LSU["LSU (STQ+SQ)"]
         L1D["L1D (2-way)"]
         TLB["TLB"]
-        PTW["PTW (Sv32)"]
-        BUS["BUS (AXI4)"]
+        PTW["PTW (Sv32/Sv39)"]
+        BUS["BUS (core AXI4 bridge)"]
+        ROUTER["rapt_router"]
         CLINT["CLINT"]
+        PLIC["PLIC"]
   end
     BPU -->|"npc,taken"| IFU
     IFU -->|"ifu_l1i_if"| L1I
@@ -335,7 +342,9 @@ flowchart LR
     L1D --- TLB & PTW
     L1I -->|"l1i_bus_if"| BUS
     L1D -->|"l1d_bus_if"| BUS
-    BUS <-->|"AXI4"| AXI["AXI4 Master"]
-    CLINT --- BUS
+    BUS -->|"AXI4"| ROUTER
+    ROUTER <-->|"off-chip"| AXI["AXI4 Master"]
+    ROUTER --- CLINT
+    ROUTER --- PLIC
     CSR -->|"csr_bcast_if"| L1I & L1D & EXU
 ```

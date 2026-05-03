@@ -24,7 +24,10 @@
 
 // MIP bit positions for CLINT-controlled interrupts
 #define MIP_MSIP_BIT (1u << 3)  // Machine Software Interrupt Pending
+#define MIP_STIP_BIT (1u << 5)  // Supervisor Timer Interrupt Pending
 #define MIP_MTIP_BIT (1u << 7)  // Machine Timer Interrupt Pending
+#define CSR_STIMECMP 0x14d
+#define CSR_STIMECMPH 0x15d
 
 static uint32_t *rtc_port_base = NULL;
 static uint32_t *clint_base = NULL;
@@ -41,6 +44,16 @@ static uint64_t clint_get_ticks(void)
 #endif
 }
 
+static uint64_t sstc_get_stimecmp(void)
+{
+#if defined(CONFIG_RV64)
+  return cpu.sr[CSR_STIMECMP];
+#else
+  return ((uint64_t)(uint32_t)cpu.sr[CSR_STIMECMPH] << 32) |
+         (uint32_t)cpu.sr[CSR_STIMECMP];
+#endif
+}
+
 // Update MIP.MTIP and MIP.MSIP based on current CLINT state.
 // Called after every instruction (from decode_exec) and on CLINT MMIO writes.
 void clint_update_mip(void)
@@ -53,6 +66,11 @@ void clint_update_mip(void)
     cpu.sr[CSR_MIP] |= MIP_MTIP_BIT;
   else
     cpu.sr[CSR_MIP] &= ~MIP_MTIP_BIT;
+
+  if (ticks >= sstc_get_stimecmp())
+    cpu.sr[CSR_MIP] |= MIP_STIP_BIT;
+  else
+    cpu.sr[CSR_MIP] &= ~MIP_STIP_BIT;
 
   // MSIP: software interrupt from CLINT MSIP register
   if (clint_msip & 1u)
@@ -68,12 +86,16 @@ bool clint_wfi_advance(void)
 {
 #if !defined(CONFIG_TARGET_SHARE) && defined(CONFIG_TIMER_CYCLE)
   uint64_t ticks = clint_get_ticks();
+  uint64_t next_cmp = cpu.mtimecmp;
+  uint64_t stimecmp = sstc_get_stimecmp();
+  if (stimecmp < next_cmp)
+    next_cmp = stimecmp;
   // Only advance if timer interrupt is not already pending
-  if (ticks < cpu.mtimecmp)
+  if (ticks < next_cmp)
   {
-    // Advance g_nr_guest_inst so that ticks reaches mtimecmp
+    // Advance g_nr_guest_inst so that ticks reaches the next timer compare.
     extern uint64_t g_nr_guest_inst;
-    g_nr_guest_inst = cpu.mtimecmp * 100;
+    g_nr_guest_inst = next_cmp * 100;
     clint_update_mip();
     return true;
   }

@@ -16,4 +16,6 @@ void vaddr_show(vaddr_t addr, int n);
 
 void init_mem();
 
+void print_nsim_memory_map(FILE *out);
+
 #endif /* __NPC_MEMORY_H__ */

@@ -13,7 +13,8 @@
  * the previous millions of cycles.
  *
  * Layout of a checkpoint directory:
- *   <dir>/state.txt       Plain text: PC, priv, GPRs, CSRs, cycle/instr counts
+ *   <dir>/state.txt       Plain text: PC, priv, GPRs, CSRs, device state,
+ *                         cumulative cycle/instr counts, trigger metadata
  *   <dir>/mem_pmem.bin    Binary dump of MBASE  region
  *   <dir>/mem_sdram.bin   Binary dump of SDRAM  region
  *   <dir>/mem_sram.bin    Binary dump of SRAM   region
@@ -27,11 +28,23 @@
  *   4. mret
  * All other GPRs and CSRs are injected by the C++ runtime via direct writes
  * to the RTL's register-file / CSR backing arrays before the trampoline runs.
+ * Non-RAM device state (CLINT/PLIC/PMP) is injected explicitly by the C++
+ * runtime after reset.
  */
 
-/* Configure save: trigger at active_cycle == cycle (cycle 0 means immediately
- * after reset). When `exit_after_save` is true, simulator exits after dump. */
-void checkpoint_configure_save(uint64_t cycle, const char *dir, bool exit_after_save);
+/* Configure save. Triggers are relative to the current reset/resume point:
+ *   - cycle: active cycles after reset or after checkpoint trampoline resume
+ *   - instr: committed guest instructions after reset/resume
+ *   - pc: first committed instruction whose PC equals `pc`
+ * If no trigger is enabled, save at cycle 0 for backward compatibility.
+ * When `exit_after_save` is true, simulator exits after dump. */
+void checkpoint_configure_save(bool has_cycle, uint64_t cycle,
+							   bool has_instr, uint64_t instr,
+							   bool has_pc, word_t pc,
+							   const char *dir, bool exit_after_save);
+
+/* Hook called on each committed instruction. Records PC-triggered save points. */
+void checkpoint_note_commit(word_t committed_pc);
 
 /* Configure load: read checkpoint dir and stash arch state to inject after
  * reset. Memory regions are loaded into the host buffers and an MROM

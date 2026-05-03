@@ -6,8 +6,9 @@
 //
 //  Goals:
 //   - One-line, extensible macros for concurrent assertions across modules.
-//   - Centrally toggleable: `+define+RAPT_ASSERT_EN` enables checks; otherwise
-//     all macros expand to nothing (no synthesis impact, zero sim cost).
+//   - Centrally toggleable: `+define+RAPT_ASSERT_EN` enables checks in
+//     non-synthesis builds; otherwise all macros expand to nothing (no
+//     synthesis impact, zero sim cost).
 //   - Consistent failure reporting: module hierarchy + assertion name +
 //     simulation time are always printed, so cross-module invariant
 //     violations are trivially attributable.
@@ -36,7 +37,16 @@
 //  drop it near the signals it guards. No central registry needed.
 // ============================================================================
 
+// Assertions/covers must never leak into FPGA/ASIC netlists. Most synthesis
+// frontends define SYNTHESIS; keep the real SVA expansion behind both the
+// explicit verification knob and the non-synthesis guard.
 `ifdef RAPT_ASSERT_EN
+`ifndef SYNTHESIS
+`define RAPT_SVA_ACTIVE
+`endif
+`endif
+
+`ifdef RAPT_SVA_ACTIVE
 
 // ---- Immediate (combinational) check inside always_comb/always_ff ----
 // Prefer `RAPT_SVA` for clocked checks; use this only inside procedural blocks.
@@ -83,7 +93,7 @@
     @(posedge clk) disable iff (rst) (expr)                             \
   );
 
-`else  // RAPT_ASSERT_EN not defined -> all expand to no-op
+`else  // assertions disabled or synthesis build -> all expand to no-op
 
 `define RAPT_SVA_IMM(name, cond)
 `define RAPT_SVA(clk, rst, name, expr)
@@ -91,6 +101,6 @@
 `define RAPT_SVA_NEXT(clk, rst, name, ante, cons)
 `define RAPT_COVER(clk, rst, name, expr)
 
-`endif  // RAPT_ASSERT_EN
+`endif  // RAPT_SVA_ACTIVE
 
 `endif  // RAPT_SVA_SVH

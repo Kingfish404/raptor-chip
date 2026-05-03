@@ -13,122 +13,182 @@
 * See the Mulan PSL v2 for more details.
 ***************************************************************************************/
 
+#include <common.h>
 #include <device/map.h>
-#include "mmc.h"
+#include <memory/paddr.h>
 
-// http://www.files.e-shop.co.il/pdastore/Tech-mmc-samsung/SEC%20MMC%20SPEC%20ver09.pdf
+#define QEMU_SDHCI_PCI_ECAM_BASE 0x30008000u
+#define QEMU_SDHCI_PCI_ECAM_SIZE 0x1000u
 
-// see page 26 of the manual above
-#define MEMORY_SIZE (16ull * 1024 * 1024 * 1024)  // 16GB
-#define READ_BL_LEN 15
-#define BLOCK_LEN (1 << READ_BL_LEN)
-#define NR_BLOCK (MEMORY_SIZE / BLOCK_LEN)
-#define C_SIZE_MULT 7  // only 3 bits
-#define MULT (1 << (C_SIZE_MULT + 2))
-#define C_SIZE (NR_BLOCK / MULT - 1)
+#define SDHCI_SIZE 0x100u
+#define SDHCI_DMA_ADDRESS 0x00u
+#define SDHCI_ARGUMENT 0x08u
+#define SDHCI_CMD_AND_MODE 0x0cu
+#define SDHCI_RESPONSE0 0x10u
+#define SDHCI_PRESENT_STATE 0x24u
+#define SDHCI_SOFTWARE_RESET 0x2fu
+#define SDHCI_INT_STAT 0x30u
 
-// This is a simple hardware implementation of linux/drivers/mmc/host/bcm2835.c
-// No DMA and IRQ is supported, so the driver must be modified to start PIO
-// right after sending the actual read/write commands.
+#define SDHCI_CMD_READ_SINGLE_BLOCK 17u
+#define SDHCI_BLOCK_SIZE 512u
 
-enum {
-  SDCMD, SDARG, SDTOUT, SDCDIV,
-  SDRSP0, SDRSP1, SDRSP2, SDRSP3,
-  SDHSTS, __PAD0, __PAD1, __PAD2,
-  SDVDD, SDEDM, SDHCFG, SDHBCT,
-  SDDATA, __PAD10, __PAD11, __PAD12,
-  SDHBLC
-};
+static const char *sdcard_runtime_img = NULL;
+static uint8_t *sdhci_space = NULL;
+static uint8_t *pci_ecam_space = NULL;
+static uint8_t *sdcard_image = NULL;
+static size_t sdcard_image_size = 0;
+static uint32_t sdhci_int_stat = 0;
+static bool warned_no_image = false;
 
-static FILE *fp = NULL;
-static uint32_t *base = NULL;
-static uint32_t blkcnt = 0;
-static long blk_addr = 0;
-static uint32_t addr = 0;
-static bool write_cmd = 0;
-static bool read_ext_csd = false;
-
-static void prepare_rw(int is_write) {
-  blk_addr = base[SDARG];
-  addr = 0;
-  if (fp) fseek(fp, blk_addr << 9, SEEK_SET);
-  write_cmd = is_write;
+static uint32_t load32(uint32_t offset)
+{
+  return (uint32_t)sdhci_space[offset] |
+         ((uint32_t)sdhci_space[offset + 1] << 8) |
+         ((uint32_t)sdhci_space[offset + 2] << 16) |
+         ((uint32_t)sdhci_space[offset + 3] << 24);
 }
 
-static void sdcard_handle_cmd(int cmd) {
-  switch (cmd) {
-    case MMC_GO_IDLE_STATE: break;
-    case MMC_SEND_OP_COND: base[SDRSP0] = 0x80ff8000; break;
-    case MMC_ALL_SEND_CID:
-      base[SDRSP0] = 0x00000001;
-      base[SDRSP1] = 0x00000000;
-      base[SDRSP2] = 0x00000000;
-      base[SDRSP3] = 0x15000000;
-      break;
-    case 52: // ???
-      break;
-    case MMC_SEND_CSD:
-      base[SDRSP0] = 0x92404001;
-      base[SDRSP1] = 0x124b97e3 | ((C_SIZE & 0x3) << 30);
-      base[SDRSP2] = 0x0f508000 | (C_SIZE >> 2) | (READ_BL_LEN << 16);
-      base[SDRSP3] = 0x9026012a;
-      break;
-    case MMC_SEND_EXT_CSD: read_ext_csd = true; addr = 0; break;
-    case MMC_SLEEP_AWAKE: break;
-    case MMC_APP_CMD: break;
-    case MMC_SET_RELATIVE_ADDR: break;
-    case MMC_SELECT_CARD: break;
-    case MMC_SET_BLOCK_COUNT: blkcnt = base[SDARG] & 0xffff; break;
-    case MMC_READ_MULTIPLE_BLOCK: prepare_rw(false); break;
-    case MMC_WRITE_MULTIPLE_BLOCK: prepare_rw(true); break;
-    case MMC_SEND_STATUS: base[SDRSP0] = 0x900; base[SDRSP1] = base[SDRSP2] = base[SDRSP3] = 0; break;
-    case MMC_STOP_TRANSMISSION: break;
-    default:
-      panic("unhandled command = %d", cmd);
+static void store32(uint32_t offset, uint32_t value)
+{
+  sdhci_space[offset] = (uint8_t)value;
+  sdhci_space[offset + 1] = (uint8_t)(value >> 8);
+  sdhci_space[offset + 2] = (uint8_t)(value >> 16);
+  sdhci_space[offset + 3] = (uint8_t)(value >> 24);
+}
+
+static bool overlaps(uint32_t offset, int len, uint32_t reg, uint32_t size)
+{
+  return offset < reg + size && offset + (uint32_t)len > reg;
+}
+
+static void dma_read_block()
+{
+  uint8_t block[SDHCI_BLOCK_SIZE];
+  memset(block, 0, sizeof(block));
+
+  uint32_t disk_offset = load32(SDHCI_ARGUMENT);
+  if (sdcard_image == NULL)
+  {
+    if (!warned_no_image)
+    {
+      Log("sdhci: no SD card image attached; reads return zeroes");
+      warned_no_image = true;
+    }
   }
-}
-
-static void sdcard_io_handler(uint32_t offset, int len, bool is_write) {
-  int idx = offset / 4;
-  switch (idx) {
-    case SDCMD: sdcard_handle_cmd(base[SDCMD] & 0x3f); break;
-    case SDARG:
-    case SDRSP0:
-    case SDRSP1:
-    case SDRSP2:
-    case SDRSP3:
-      break;
-    case SDDATA:
-       if (read_ext_csd) {
-         // See section 8.1 JEDEC Standard JED84-A441
-         uint32_t data;
-         switch (addr) {
-           case 192: data = 2; break; // EXT_CSD_REV
-           case 212: data = MEMORY_SIZE / 512; break;
-           default: data = 0;
-         }
-         base[SDDATA] = data;
-         if (addr == 512 - 4) read_ext_csd = false;
-       } else if (fp) {
-         __attribute__((unused)) int ret;
-         if (!write_cmd) { ret = fread(&base[SDDATA], 4, 1, fp); }
-         else { ret = fwrite(&base[SDDATA], 4, 1, fp); }
-       }
-       addr += 4;
-       break;
-    default:
-      Log("offset = 0x%x(idx = %d), is_write = %d, data = 0x%x", offset, idx, is_write, base[idx]);
-      panic("unhandle offset = %d", offset);
+  else if (disk_offset < sdcard_image_size)
+  {
+    size_t remain = sdcard_image_size - disk_offset;
+    size_t ncopy = remain < sizeof(block) ? remain : sizeof(block);
+    memcpy(block, sdcard_image + disk_offset, ncopy);
   }
+
+  uint32_t dma_addr = load32(SDHCI_DMA_ADDRESS);
+  memcpy(guest_to_host(dma_addr), block, sizeof(block));
 }
 
-void init_sdcard() {
-  base = (uint32_t *)new_space(0x80);
-  add_mmio_map("sdhci", CONFIG_SDCARD_CTL_MMIO, base, 0x80, sdcard_io_handler);
+static void complete_command()
+{
+  sdhci_int_stat |= 0x1u;
+  store32(SDHCI_INT_STAT, sdhci_int_stat);
+}
 
-  Assert(C_SIZE < (1 << 12), "shoule be fit in 12 bits");
+static void process_command()
+{
+  uint32_t cmd_mode = load32(SDHCI_CMD_AND_MODE);
+  uint32_t cmd_idx = (cmd_mode >> 24) & 0x3fu;
 
-  const char *img = CONFIG_SDCARD_IMG_PATH;
-  fp = fopen(img, "r+");
-  if (fp == NULL) Log("Can not find sdcard image: %s", img);
+  switch (cmd_idx)
+  {
+  case 3:
+    store32(SDHCI_RESPONSE0, 1u << 16);
+    break;
+  case SDHCI_CMD_READ_SINGLE_BLOCK:
+    dma_read_block();
+    break;
+  default:
+    break;
+  }
+
+  complete_command();
+}
+
+static void prepare_sdhci_read(void)
+{
+  sdhci_space[SDHCI_SOFTWARE_RESET] = 0;
+  store32(SDHCI_PRESENT_STATE, 0);
+  store32(SDHCI_INT_STAT, sdhci_int_stat);
+}
+
+static void sdhci_io_handler(uint32_t offset, int len, bool is_write)
+{
+  if (!is_write)
+  {
+    prepare_sdhci_read();
+    return;
+  }
+
+  if (overlaps(offset, len, SDHCI_INT_STAT, 4))
+  {
+    uint32_t clear = load32(SDHCI_INT_STAT);
+    sdhci_int_stat &= ~clear;
+    store32(SDHCI_INT_STAT, sdhci_int_stat);
+  }
+
+  sdhci_space[SDHCI_SOFTWARE_RESET] = 0;
+  store32(SDHCI_PRESENT_STATE, 0);
+
+  if (overlaps(offset, len, SDHCI_CMD_AND_MODE, 4))
+    process_command();
+}
+
+static void pci_ecam_io_handler(uint32_t offset, int len, bool is_write)
+{
+  (void)offset;
+  (void)len;
+  (void)is_write;
+}
+
+void sdcard_set_image(const char *path)
+{
+  sdcard_runtime_img = path;
+}
+
+static void load_sdcard_image(const char *path)
+{
+  if (path == NULL || path[0] == '\0')
+    return;
+
+  FILE *fp = fopen(path, "rb");
+  Assert(fp, "Can not open SD card image '%s'", path);
+  fseek(fp, 0, SEEK_END);
+  long size = ftell(fp);
+  Assert(size > 0, "Empty SD card image '%s'", path);
+  rewind(fp);
+
+  sdcard_image = malloc((size_t)size);
+  Assert(sdcard_image, "Failed to allocate SD card image buffer");
+  int ret = fread(sdcard_image, (size_t)size, 1, fp);
+  assert(ret == 1);
+  fclose(fp);
+
+  sdcard_image_size = (size_t)size;
+  Log("sdhci: loaded %s (%zu bytes, read-only)", path, sdcard_image_size);
+}
+
+void init_sdcard()
+{
+  sdhci_space = new_space(SDHCI_SIZE);
+  pci_ecam_space = new_space(QEMU_SDHCI_PCI_ECAM_SIZE);
+  add_mmio_map("sdhci", CONFIG_SDCARD_CTL_MMIO, sdhci_space, SDHCI_SIZE, sdhci_io_handler);
+  add_mmio_map("sdhci-pci-ecam", QEMU_SDHCI_PCI_ECAM_BASE, pci_ecam_space, QEMU_SDHCI_PCI_ECAM_SIZE, pci_ecam_io_handler);
+
+  memset(sdhci_space, 0, SDHCI_SIZE);
+  memset(pci_ecam_space, 0, QEMU_SDHCI_PCI_ECAM_SIZE);
+  sdhci_int_stat = 0;
+  warned_no_image = false;
+
+  const char *img = sdcard_runtime_img;
+  if (img == NULL || img[0] == '\0')
+    img = CONFIG_SDCARD_IMG_PATH;
+  load_sdcard_image(img);
 }

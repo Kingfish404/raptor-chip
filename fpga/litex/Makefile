@@ -329,6 +329,17 @@ EMBENCH_BENCHES := aha-mont64 crc32 depthconv edn huffbench matmult-int \
                    wikisort xgboost
 EMBENCH_LOG_DIR := $(BUILD_DIR)/embench-logs
 
+# app/ LLM-style benchmarks, linked as LiteX-native payloads so they run
+# without pk/newlib in LiteX sim and on FPGA via BIOS serialboot.
+APP_LLM_BENCH     := $(RAPTOR_HOME)/app/benchmarks/llm
+APP_LLM_BUILD_DIR := $(RAPTOR_HOME)/app/build/rv32/benchmarks/llm-litex
+APP_LLM_BENCHES   := ops infer train
+LLM_OP_ITERS      ?= 8## LLM operator benchmark repeat count
+LLM_GEN_TOKENS    ?= 12## LLM inference generated token count
+LLM_TRAIN_STEPS   ?= 4## LLM training benchmark steps
+RLLMBENCH_TIMEBASE_HZ ?= 1000000## RISC-V time CSR frequency in Hz
+RLLMBENCH_CORE_CLOCK_MHZ ?= $(shell awk 'BEGIN { printf "%.6g", $(SYS_CLK) / 1000000 }')## Core clock in MHz for RLLMBench score/MHz reports
+
 # MicroBench (AM-based)
 MICROBENCH_DIR  := $(RAPTOR_HOME)/abstract-machine/app/am-kernels/benchmarks/microbench
 MICROBENCH_BIN  := $(MICROBENCH_DIR)/build/microbench-riscv32-npc.bin
@@ -363,7 +374,8 @@ IMG ?= ## Custom payload binary (for 'make payload' / 'make sim PAYLOAD=img')
 #     fpga     match FPGA build (32 KB ROM, 8 KB SRAM, no main_ram)
 #
 #   PAYLOAD  = none | coremark | microbench | linux | opensbi
-#              | embench-<NAME> | test-<NAME> | img (with IMG=/path)
+#              | embench-<NAME> | app-llm-<NAME> | test-<NAME>
+#              | img (with IMG=/path)
 #     Loaded into main_ram via --ram-init. PAYLOAD does NOT affect the
 #     Verilator build cache (only ROM/SOC do), so iterating on different
 #     payloads with the same ROM/SOC reuses the compiled Vsim binary.
@@ -380,6 +392,7 @@ IMG ?= ## Custom payload binary (for 'make payload' / 'make sim PAYLOAD=img')
 #   make sim PAYLOAD=linux VARIANT=linux     # Linux boot
 #   make sim PAYLOAD=img IMG=/path/to.bin    # custom payload
 #   make sim PAYLOAD=embench-crc32           # one Embench bench
+#   make sim PAYLOAD=app-llm-infer           # app/ LLM E2E inference
 #   make sim PAYLOAD=img IMG=$(FW_FPGA_BIN) ROM=bios  # debug FPGA payload via BIOS
 #
 # Convenience aliases (just recursive-make the right combination):
@@ -472,6 +485,10 @@ else ifneq (,$(filter embench-%,$(PAYLOAD)))
 _EMBENCH_NAME     := $(patsubst embench-%,%,$(PAYLOAD))
 SIM_PAYLOAD_BIN   := $(EMBENCH_BENCH)/build/$(_EMBENCH_NAME)/$(_EMBENCH_NAME).bin
 SIM_PAYLOAD_BUILD := embench-build-$(_EMBENCH_NAME)
+else ifneq (,$(filter app-llm-%,$(PAYLOAD)))
+_APP_LLM_NAME     := $(patsubst app-llm-%,%,$(PAYLOAD))
+SIM_PAYLOAD_BIN   := $(APP_LLM_BUILD_DIR)/llm-$(_APP_LLM_NAME).bin
+SIM_PAYLOAD_BUILD := app-llm-build-$(_APP_LLM_NAME)
 else ifneq (,$(filter test-%,$(PAYLOAD)))
 _TEST_NAME        := $(patsubst test-%,%,$(PAYLOAD))
 SIM_PAYLOAD_BIN   := $(TESTS_BUILD_DIR)/$(_TEST_NAME).bin
@@ -644,6 +661,41 @@ embench-report: ## Re-run Embench Score report from existing logs
 embench-clean: ## Remove Embench build artifacts and run logs
 	$(MAKE) -C $(EMBENCH_BENCH) clean
 	rm -rf $(EMBENCH_LOG_DIR)
+
+# --- app/ LLM-style AI benchmarks ---
+APP_LLM_TARGETS := $(addprefix app-llm-,$(APP_LLM_BENCHES))
+APP_LLM_BUILDS  := $(addprefix app-llm-build-,$(APP_LLM_BENCHES))
+APP_LLM_FPGAS   := $(addsuffix -fpga,$(APP_LLM_TARGETS))
+APP_LLM_VARS    := LLM_OP_ITERS=$(LLM_OP_ITERS) \
+                   LLM_GEN_TOKENS=$(LLM_GEN_TOKENS) \
+				   LLM_TRAIN_STEPS=$(LLM_TRAIN_STEPS) \
+				   RLLMBENCH_TIMEBASE_HZ=$(RLLMBENCH_TIMEBASE_HZ) \
+				   RLLMBENCH_CORE_CLOCK_MHZ=$(RLLMBENCH_CORE_CLOCK_MHZ)
+
+app-llm-build: ## Build all app/ LLM benchmarks as LiteX-native payloads
+	$(MAKE) -C $(APP_LLM_BENCH) litex-build $(APP_LLM_VARS)
+
+$(APP_LLM_BUILDS): app-llm-build-%:
+	$(MAKE) -C $(APP_LLM_BENCH) litex-build-one BENCH=$* $(APP_LLM_VARS)
+
+$(APP_LLM_TARGETS): app-llm-%: ## Alias: make sim PAYLOAD=app-llm-<NAME>
+	@$(MAKE) --no-print-directory sim PAYLOAD=app-llm-$* $(APP_LLM_VARS)
+
+app-llm-run: ## Run one app/ LLM benchmark in LiteX sim (BENCH=ops|infer|train) {BENCH}
+	@if [ -z "$(BENCH)" ]; then echo "[ERR] Set BENCH=ops|infer|train"; exit 1; fi
+	@$(MAKE) --no-print-directory sim PAYLOAD=app-llm-$(BENCH) $(APP_LLM_VARS)
+
+$(APP_LLM_FPGAS): app-llm-%-fpga: app-llm-build-% ## Upload app/ LLM benchmark to FPGA via BIOS serialboot
+	@$(MAKE) --no-print-directory fpga-upload BIN=$(APP_LLM_BUILD_DIR)/llm-$*.bin
+
+app-llm-fpga: ## Upload one app/ LLM benchmark to FPGA (BENCH=ops|infer|train) {BENCH,UART_PORT,UART_BAUD}
+	@if [ -z "$(BENCH)" ]; then echo "[ERR] Set BENCH=ops|infer|train"; exit 1; fi
+	@$(MAKE) --no-print-directory app-llm-$(BENCH)-fpga $(APP_LLM_VARS)
+
+APP_FPGA_BIN ?= ## Custom app-built LiteX-native binary for app-fpga-upload
+app-fpga-upload: ## Upload a prebuilt app LiteX-native bin via BIOS serialboot {APP_FPGA_BIN,UART_PORT,UART_BAUD}
+	@if [ -z "$(APP_FPGA_BIN)" ]; then echo "[ERR] Set APP_FPGA_BIN=/path/to.bin"; exit 1; fi
+	@$(MAKE) --no-print-directory fpga-upload BIN=$(APP_FPGA_BIN)
 
 # --- MicroBench ---
 microbench-build: ## Build MicroBench binary
@@ -1034,6 +1086,8 @@ help: ## Show this help message
 	main-fpga-build main-fpga donut-fpga irqtest-fpga main-fpga-clean \
 	embench embench-build embench-build-one embench-run embench-report embench-clean \
 	$(EMBENCH_TARGETS) $(EMBENCH_BUILDS) \
+	app-llm-build app-llm-run app-llm-fpga app-fpga-upload \
+	$(APP_LLM_TARGETS) $(APP_LLM_BUILDS) $(APP_LLM_FPGAS) \
 	microbench microbench-build \
 	tests tests-clean tests-run $(TEST_TARGETS) \
 	opensbi opensbi-build opensbi-clean \

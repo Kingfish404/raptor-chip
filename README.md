@@ -10,7 +10,7 @@
 
 [![ISA](https://img.shields.io/badge/ISA-RV32%2F64IMAC__Zb*-192f60?longCache=true&style=flat&logo=riscv&logoColor=white&colorA=192f60&colorB=660874)](./docs/uarch.md)
 [![marchID](https://img.shields.io/badge/marchID-0x32-660874?longCache=true&style=flat&colorA=192f60&colorB=660874)](https://github.com/riscv/riscv-isa-manual)
-[![Privilege](https://img.shields.io/badge/Priv-M%2FS%2FU%20%2B%20Sv32%20%2B%20PMP-660874?longCache=true&style=flat&colorA=192f60&colorB=660874)](./docs/uarch.md)
+[![Privilege](https://img.shields.io/badge/Priv-M%2FS%2FU%20%2B%20Sv32%2FSv39%20%2B%20PMP-660874?longCache=true&style=flat&colorA=192f60&colorB=660874)](./docs/uarch.md)
 [![Microarchitecture](https://img.shields.io/badge/uArch-Superscalar%20OoO-192f60?longCache=true&style=flat&colorA=192f60&colorB=660874)](./docs/uarch.md)
 [![FPGA](https://img.shields.io/badge/FPGA-LiteX-192f60?longCache=true&style=flat&colorA=192f60&colorB=660874)](./fpga/)
 [![License](https://img.shields.io/github/license/Kingfish404/raptor-chip?label=License&longCache=true&style=flat&logo=apache&logoColor=white&colorA=192f60&colorB=660874)](./LICENSE)
@@ -19,20 +19,20 @@
 
 Welcome to the Raptor Project! Here is an all-in-one repository for exploring, developing, optimizing, and verifying a RISC-V core. Aiming at high quality, full Linux support, FPGA implementation, and ASIC readiness.
 
-Core description: **Super-scalar, Out-of-order RISC-V core** with register renaming, ROB, and reservation stations. The RTL is described by `SystemVerilog` with `Chisel` (`Scala`) used only for decoder generation. Features Sv32 virtual memory (MMU/TLB), 16-entry PMP (TOR/NA4/NAPOT), LR/SC + AMO atomics, compressed instructions (RVC), and boots Linux v6.18 via OpenSBI. Supports configurable **RV32** and **RV64** modes via compile-time switch.
+Core description: **Super-scalar, Out-of-order RISC-V core** with register renaming, ROB, and reservation stations. The RTL is described by `SystemVerilog` with `Chisel` (`Scala`) used only for decoder generation. Features Sv32 (RV32) / Sv39 (RV64) virtual memory (MMU/TLB/PTW), 16-entry PMP (TOR/NA4/NAPOT), LR/SC + AMO atomics, compressed instructions (RVC), CLINT/PLIC interrupts, and boots Linux v6.18.x via OpenSBI. Supports configurable **RV32** and **RV64** modes via compile-time switch.
 
 ```
-Core name:  raptor-falcon (M/S/U + Sv32 + PMP, Linux-capable)
+Core name:  raptor-falcon (M/S/U + Sv32/Sv39 + PMP, Linux-capable)
 ISA:        rv32/rv64 imac_zicbop_zicntr_zicond_zicsr_zifencei_zihintntl_zihintpause_zimop_zcb_zcmop_zba_zbb_zbc_zbs
 Modes:      Machine, Supervisor, User
-MMU:        riscv,sv32 (RV32) / riscv,none (RV64, Bare)
+MMU:        riscv,sv32 (RV32) / riscv,sv39 (RV64) / riscv,none (Bare)
 PMP:        16 entries, TOR / NA4 / NAPOT, L-bit lockable
-Interrupts: CLINT (mtime, mtimecmp, msip)
+Interrupts: CLINT (mtime, mtimecmp, msip) + PLIC (31 sources, M/S contexts)
 Profile:    n/a (closest peer: RVM23U32 / RVA20S64)
 
 Bus Interface:  AXI4, XLEN-bit data/addr, 4-bit ID, burst
 
-Verifying:  RISCOF (riscv-arch-test), RVFI
+Verifying:  RISCOF (riscv-arch-test), RVFI, SVA
 ```
 
 ### [Documentation](./docs/README.md)
@@ -112,7 +112,7 @@ make run-npc32 VFLAGS="-DRAPT_RV64" ARGS="-b -n"
 ### 3. Benchmarks
 
 ```shell
-# Run on NPC (riscv32e-npc)
+# Run on NPC (riscv32-npc)
 make coremark-npc32 ARGS="-b -n"
 make microbench-npc32 ARGS="-b -n"
 # Run on NPC with difftest (vs NEMU reference)
@@ -201,7 +201,7 @@ make fpga-console                   # open UART console
 
 ```shell
 
-# 0. environment variables at project root directory
+# 0. environment variables for direct subdirectory workflows
 source ./env.sh
 
 # 1. build and run NEMU
@@ -212,7 +212,7 @@ cd $NEMU_HOME && make riscv32_linux_defconfig && make && make run
 cd $RAPTOR_HOME/rtl_scala && make verilog
 cd $NSIM_HOME && make o2_defconfig && make && make run
 cd $NSIM_HOME && make o2linux_defconfig && make && make run
-cd $NSIM_HOME && make menuconfig && make ARCH=riscv32e-npc run
+cd $NSIM_HOME && make menuconfig && make ARCH=riscv32-npc run
 
 # 3. build and run the program you want
 
@@ -230,9 +230,9 @@ make ARCH=riscv32-nemu install
 
 ## 2n. running microbench/coremark on npc
 cd $RAPTOR_HOME/abstract-machine/app/am-kernels/benchmarks/coremark_eembc && \
-    make ARCH=riscv32e-npc run ARGS="-b -n"
+    make ARCH=riscv32-npc run ARGS="-b -n"
 cd $RAPTOR_HOME/abstract-machine/app/am-kernels/benchmarks/microbench && \
-    make ARCH=riscv32e-npc run ARGS="-b -n"
+    make ARCH=riscv32-npc run ARGS="-b -n"
 # ARGS="-b -n" is optional, -b is for batch mode [default], -n is for no wave trace
 
 ## package all sv files into one

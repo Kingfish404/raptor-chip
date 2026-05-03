@@ -1,0 +1,408 @@
+`include "rapt.svh"
+`include "rapt_if.svh"
+`include "rapt_soc.svh"
+`include "rapt_soc_if.svh"
+`include "rapt_dpi_c.svh"
+
+// rapt_core: single-hart CPU body. All previously top-level structures of the
+// `rapt` module live here so a cluster (`rapt.sv`) can instantiate one or
+// more cores alongside cluster-shared peripherals (CLINT/PLIC today,
+// multi-core in the future). External MMIO targeted at cluster-local CLINT or
+// PLIC register windows leaves through the standard AXI master interface; the
+// cluster router handles the decode, and the resulting timer/software/external
+// interrupt levels are gated locally by the per-hart CSR enables before
+// reaching the trap/commit logic.
+module rapt_core #(
+    parameter int XLEN = `RAPT_XLEN
+) (
+    input clock,
+
+    // AXI4 Master
+    axi4_if.master io_master,
+
+    // CLINT (cluster-level) interrupt levels. CLINT register accesses are
+    // routed through the standard AXI master port; the cluster's address
+    // decoder forwards them to the shared rapt_clint instance. Only the
+    // resulting timer/software interrupt levels need a dedicated wire back
+    // into the per-hart CSR/commit logic.
+    input clint_timer_int_i,
+    input clint_sw_int_i,
+
+`ifdef RAPT_RVFI
+    // RISC-V Formal Interface (RVFI) outputs — NRET=2 channels
+    output [1:0] rvfi_valid,
+    output [127:0] rvfi_order,
+    output [63:0] rvfi_insn,
+    output [1:0] rvfi_trap,
+    output [1:0] rvfi_halt,
+    output [1:0] rvfi_intr,
+    output [3:0] rvfi_mode,
+    output [3:0] rvfi_ixl,
+    output [9:0] rvfi_rs1_addr,
+    output [9:0] rvfi_rs2_addr,
+    output [2*XLEN-1:0] rvfi_rs1_rdata,
+    output [2*XLEN-1:0] rvfi_rs2_rdata,
+    output [9:0] rvfi_rd_addr,
+    output [2*XLEN-1:0] rvfi_rd_wdata,
+    output [2*XLEN-1:0] rvfi_pc_rdata,
+    output [2*XLEN-1:0] rvfi_pc_wdata,
+    output [2*XLEN-1:0] rvfi_mem_addr,
+    output [2*(XLEN/8)-1:0] rvfi_mem_rmask,
+    output [2*(XLEN/8)-1:0] rvfi_mem_wmask,
+    output [2*XLEN-1:0] rvfi_mem_rdata,
+    output [2*XLEN-1:0] rvfi_mem_wdata,
+`endif
+
+    // External M-mode interrupt line (level). In multi-hart cluster builds
+    // this is the per-hart slice of `plic_meip` driven by the cluster PLIC.
+    input io_interrupt,
+
+    // External S-mode interrupt line (level), normally PLIC S-context SEIP.
+    input s_ext_irq_i,
+
+    // Hart identifier driven by the cluster top. Used only to satisfy CSR
+    // reads of `mhartid`; no microarchitectural side-effects.
+    input [XLEN-1:0] hart_id_i,
+
+    input reset
+);
+  // L1I Cache
+  l1i_bus_if l1i_bus ();
+
+  // IFU stage
+  ifu_idu_if ifu_idu ();  // Fetch => Decode
+
+  ifu_bpu_if ifu_bpu ();
+  ifu_l1i_if ifu_l1i ();
+
+  // IDU stage
+  idu_rnu_if idu_rnu ();  // Decode => Re-naming
+
+  // RNU stage
+  rnu_rou_if rnu_rou ();  // Re-naming => Issue
+
+  // ROU stage
+  rou_exu_if rou_exu ();  // Issue => Execute
+  rou_lsu_if rou_lsu ();  // Commit
+  rou_cmu_if rou_cmu ();  // Commit
+
+  rou_csr_if rou_csr ();
+
+  // Dispatch-only uop payload snapshot (ROU -> EXU/RS)
+  rapt_pkg::uop_payload_t uop_pl[`RAPT_ROB_SIZE];
+
+  // EXU stage
+  exu_rou_if exu_rou ();  // Execute & Writeback => Commit
+  exu_rou_b_if exu_rou_b ();  // Second ALU writeback (pure arithmetic)
+  exu_rou_c_if exu_rou_c ();  // Dedicated BRU writeback (conditional branches)
+
+  exu_prf_if exu_prf ();
+  exu_ioq_bcast_if exu_ioq_bcast ();
+  exu_csr_if exu_csr ();
+  exu_lsu_if exu_lsu ();
+  exu_l1d_if exu_l1d ();
+
+  // CMU
+  cmu_bcast_if cmu_bcast ();  // Difftest & Debug
+
+  // LSU
+  lsu_l1d_if lsu_l1d ();
+
+  // L1D Cache
+  l1d_bus_if l1d_bus ();
+
+  // CSR
+  csr_bcast_if csr_bcast ();
+
+  logic clint_timer_trap;
+  logic clint_sw_trap;
+  logic clint_ext_trap;
+  logic s_int_pending;
+  logic [`RAPT_XLEN-1:0] s_int_cause;
+
+  // Per-hart interrupt gating. The cluster CLINT supplies raw
+  // timer/software interrupt levels; AND them with the per-hart CSR
+  // enables (mie / mstatus) before they reach the trap-decision logic in
+  // ROU. The external (PLIC) line is gated identically.
+  assign clint_timer_trap = clint_timer_int_i && csr_bcast.timer_int_en;
+  assign clint_sw_trap    = clint_sw_int_i && csr_bcast.sw_int_en;
+  assign clint_ext_trap   = io_interrupt && csr_bcast.ext_int_en;
+
+  rapt_bpu bpu (
+      .clock(clock),
+
+      .cmu_bcast(cmu_bcast),
+
+      .ifu_bpu(ifu_bpu),
+
+      .reset(reset)
+  );
+
+  // IFU (Instruction Fetch Unit)
+  rapt_ifu ifu (
+      .clock(clock),
+
+      .cmu_bcast(cmu_bcast),
+
+      .ifu_bpu(ifu_bpu),
+      .ifu_l1i(ifu_l1i),
+      .ifu_idu(ifu_idu),
+
+      .reset(reset)
+  );
+
+  rapt_l1i l1i_cache (
+      .clock(clock),
+
+      .cmu_bcast(cmu_bcast),
+
+      .ifu_l1i(ifu_l1i),
+      .l1i_bus(l1i_bus),
+
+      .csr_bcast(csr_bcast),
+
+      .reset(reset)
+  );
+
+  // IDU (Instruction Decode Unit)
+  rapt_idu idu (
+      .clock(clock),
+
+      .cmu_bcast(cmu_bcast),
+      .csr_bcast(csr_bcast),
+
+      .ifu_idu(ifu_idu),
+      .idu_rnu(idu_rnu),
+
+      .reset(reset)
+  );
+
+  // RNU (Re-naming Unit): pure rename: RNQ + freelist + maptable
+  logic [`RAPT_PHY_LEN-1:0] rnu_map_snapshot[`RAPT_REG_SIZE];
+  logic [`RAPT_PHY_LEN-1:0] rnu_rat_snapshot[`RAPT_REG_SIZE];
+
+  rapt_rnu rnu (
+      .clock(clock),
+
+      .rou_cmu  (rou_cmu),
+      .cmu_bcast(cmu_bcast),
+
+      .idu_rnu(idu_rnu),
+      .rnu_rou(rnu_rou),
+
+      .map_snapshot(rnu_map_snapshot),
+      .rat_snapshot(rnu_rat_snapshot),
+
+      .reset(reset)
+  );
+
+  // PRF (Physical Register File): top-level shared resource
+  // Debug: architectural register view (committed + speculative)
+  /* verilator lint_off UNUSEDSIGNAL */
+  logic [XLEN-1:0] rf    [`RAPT_REG_SIZE];
+  logic [XLEN-1:0] rf_map[`RAPT_REG_SIZE];
+  /* verilator lint_on UNUSEDSIGNAL */
+
+`ifdef RAPT_RVFI
+  logic [XLEN-1:0] rvfi_rd_wdata_a_w;
+  logic [XLEN-1:0] rvfi_rd_wdata_b_w;
+`endif
+
+  rapt_prf prf (
+      .clock(clock),
+      .reset(reset),
+
+      .prf_rd(exu_prf),
+
+      .exu_rou      (exu_rou),
+      .exu_rou_b    (exu_rou_b),
+      .exu_ioq_bcast(exu_ioq_bcast),
+      .rou_cmu      (rou_cmu),
+      .cmu_bcast    (cmu_bcast),
+
+      .map_snapshot(rnu_map_snapshot),
+      .rat_snapshot(rnu_rat_snapshot),
+
+      .rf    (rf),
+      .rf_map(rf_map)
+
+`ifdef RAPT_RVFI,
+        .rvfi_rd_wdata_a(rvfi_rd_wdata_a_w)
+      , .rvfi_rd_wdata_b(rvfi_rd_wdata_b_w)
+`endif
+  );
+
+  // ROU (Re-Order Unit)
+  rapt_rou rou (
+      .clock(clock),
+
+      .rnu_rou(rnu_rou),
+
+      // issue
+      .exu_prf(exu_prf),
+      .rou_exu(rou_exu),
+
+      .exu_rou(exu_rou),
+      .exu_rou_b(exu_rou_b),
+      .exu_rou_c(exu_rou_c),
+      .exu_ioq_bcast(exu_ioq_bcast),
+
+      .csr_bcast(csr_bcast),
+      .clint_timer_trap(clint_timer_trap),
+      .clint_sw_trap(clint_sw_trap),
+      .clint_ext_trap(clint_ext_trap),
+      .s_int_pending(s_int_pending),
+      .s_int_cause(s_int_cause),
+
+      .rou_cmu(rou_cmu),
+      .rou_csr(rou_csr),
+      .rou_lsu(rou_lsu),
+
+      .uop_pl(uop_pl),
+
+      .reset(reset)
+  );
+
+  // EXU (EXecution Unit)
+  rapt_exu exu (
+      .clock(clock),
+
+      .cmu_bcast(cmu_bcast),
+
+      .rou_exu(rou_exu),
+
+      .exu_rou(exu_rou),
+      .exu_rou_b(exu_rou_b),
+      .exu_rou_c(exu_rou_c),
+      .exu_ioq_bcast(exu_ioq_bcast),
+
+      .exu_lsu(exu_lsu),
+      .exu_csr(exu_csr),
+
+      .csr_bcast(csr_bcast),
+      .exu_l1d  (exu_l1d),
+
+      .uop_pl(uop_pl),
+
+      .reset(reset)
+  );
+
+  // CMU (ComMit Unit)
+  rapt_cmu cmu (
+      .clock(clock),
+
+      .rou_cmu  (rou_cmu),
+      .cmu_bcast(cmu_bcast),
+
+      .reset(reset)
+  );
+
+  rapt_csr csrs (
+      .clock(clock),
+
+      .hart_id_i(hart_id_i),
+
+      .rou_csr(rou_csr),
+      .exu_csr(exu_csr),
+
+      .csr_bcast(csr_bcast),
+
+      .s_int_pending(s_int_pending),
+      .s_int_cause  (s_int_cause),
+
+      .timer_irq_i(clint_timer_int_i),
+      .sw_irq_i   (clint_sw_int_i),
+      .m_ext_irq_i(io_interrupt),
+      .s_ext_irq_i(s_ext_irq_i),
+
+      .reset(reset)
+  );
+
+  // LSU (Load/Store Unit)
+  rapt_lsu lsu (
+      .clock(clock),
+
+      .cmu_bcast(cmu_bcast),
+
+      .lsu_l1d(lsu_l1d),
+
+      .exu_lsu(exu_lsu),
+      .exu_ioq_bcast(exu_ioq_bcast),
+      .rou_lsu(rou_lsu),
+
+      .csr_bcast(csr_bcast),
+
+      .reset(reset)
+  );
+
+  rapt_l1d l1d_cache (
+      .clock(clock),
+
+      .cmu_bcast(cmu_bcast),
+
+      .lsu_l1d(lsu_l1d),
+      .l1d_bus(l1d_bus),
+
+      .csr_bcast(csr_bcast),
+
+      .exu_l1d(exu_l1d),
+      .rou_cmu(rou_cmu),
+
+      .reset(reset)
+  );
+
+  rapt_bus bus (
+      .clock(clock),
+
+      .axi(io_master),
+
+      .l1i_bus(l1i_bus),
+      .l1d_bus(l1d_bus),
+
+      .csr_bcast(csr_bcast),
+      .cmu_bcast(cmu_bcast),
+
+      .reset(reset)
+  );
+
+`ifdef RAPT_RVFI
+  // RVFI (RISC-V Formal Interface) output generation
+  rapt_rvfi rvfi_inst (
+      .clock(clock),
+      .reset(reset),
+
+      .rou_cmu  (rou_cmu),
+      .csr_bcast(csr_bcast),
+      .rf       (rf),
+
+      .rvfi_rd_wdata_a(rvfi_rd_wdata_a_w),
+      .rvfi_rd_wdata_b(rvfi_rd_wdata_b_w),
+
+      .rvfi_valid(rvfi_valid),
+      .rvfi_order(rvfi_order),
+      .rvfi_insn (rvfi_insn),
+      .rvfi_trap (rvfi_trap),
+      .rvfi_halt (rvfi_halt),
+      .rvfi_intr (rvfi_intr),
+      .rvfi_mode (rvfi_mode),
+      .rvfi_ixl  (rvfi_ixl),
+
+      .rvfi_rs1_addr (rvfi_rs1_addr),
+      .rvfi_rs2_addr (rvfi_rs2_addr),
+      .rvfi_rs1_rdata(rvfi_rs1_rdata),
+      .rvfi_rs2_rdata(rvfi_rs2_rdata),
+      .rvfi_rd_addr  (rvfi_rd_addr),
+      .rvfi_rd_wdata (rvfi_rd_wdata),
+
+      .rvfi_pc_rdata(rvfi_pc_rdata),
+      .rvfi_pc_wdata(rvfi_pc_wdata),
+
+      .rvfi_mem_addr (rvfi_mem_addr),
+      .rvfi_mem_rmask(rvfi_mem_rmask),
+      .rvfi_mem_wmask(rvfi_mem_wmask),
+      .rvfi_mem_rdata(rvfi_mem_rdata),
+      .rvfi_mem_wdata(rvfi_mem_wdata)
+  );
+`endif
+
+endmodule

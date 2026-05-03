@@ -17,8 +17,12 @@
 #define __DEVICE_MMIO_H__
 
 #include <common.h>
+#include <stdio.h>
 
+bool mmio_map_contains(paddr_t addr);
 word_t mmio_read(paddr_t addr, int len);
 void mmio_write(paddr_t addr, int len, word_t data);
+int mmio_map_count(void);
+void print_mmio_maps(FILE *out);
 
 #endif

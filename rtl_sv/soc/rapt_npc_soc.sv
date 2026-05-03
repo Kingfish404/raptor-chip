@@ -45,6 +45,7 @@ module raptSoC #(
   rapt cpu (  // src/CPU.scala:38:21
       .clock            (clock),
       .io_interrupt     (1'h0),
+      .ext_irq_i        ('0),
       .io_master_awready(auto_master_out_awready),
       .io_master_awvalid(auto_master_out_awvalid),
       .io_master_awid   (auto_master_out_awid),
@@ -230,7 +231,9 @@ module rapt_npc_soc #(
     || (a >= 32'h0f000000 && a < 32'h0f002000)  // SRAM
     || (a >= 32'h10000000 && a < 32'h10012000)  // serial / peripherals
     || (a >= 32'h20000000 && a < 32'h20010000)  // MROM
+    || (a >= 32'h30008000 && a < 32'h30009000)  // QEMU SDHCI PCI ECAM stub
     || (a >= 32'h30000000 && a < 32'h40000000)  // FLASH
+    || (a >= 32'h40000000 && a < 32'h40000100)  // QEMU SDHCI controller
     || (a >= 32'h80000000 && a < 32'h88000000)  // PMEM (main memory)
     || (a >= 32'ha0000000 && a < 32'ha2000000));  // SDRAM
   endfunction

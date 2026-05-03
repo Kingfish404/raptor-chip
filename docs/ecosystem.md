@@ -45,44 +45,51 @@ See **[PROFILE.md](./PROFILE.md)** for the latest Freq / Power / Area results an
 
 ## Software Stack
 
-| Layer      | Component                                          | Notes                                              |
-| ---------- | -------------------------------------------------- | -------------------------------------------------- |
-| App        | CoreMark, MicroBench, Embench-IoT, busybox, demos  | `app/`, `abstract-machine/app/`                    |
-| User OS    | nanos-lite (simple OS), Linux v6.18 userspace      | `abstract-machine/app/nanos-lite`                  |
-| ABI / libc | riscv-pk (proxy kernel), AM runtime, newlib, glibc | `app/pk/`, `abstract-machine/`                     |
-| Kernel     | Linux v6.12.57 / v6.18.15                          | `linux/`, see [linux_kernel.md](./linux_kernel.md) |
-| Firmware   | OpenSBI (v1.8.1)                                   | `linux/opensbi/`                                   |
-| Bootrom    | NPC / raptSoC reset vector                         | `nemu/src/memory/rom/`                             |
+| Layer      | Component                                                    | Notes                                              |
+| ---------- | ------------------------------------------------------------ | -------------------------------------------------- |
+| App        | CoreMark, MicroBench, Embench-IoT, busybox, demos            | `app/`, `abstract-machine/app/`                    |
+| User OS    | nanos-lite (simple OS), Linux v6.18 userspace                | `abstract-machine/app/nanos-lite`                  |
+| ABI / libc | riscv-pk (proxy kernel), AM runtime, newlib, glibc           | `app/pk/`, `abstract-machine/`                     |
+| Kernel     | Linux v6.18.22 prebuilt by default; v6.12/v6.18 paths tested | `linux/`, see [linux_kernel.md](./linux_kernel.md) |
+| Firmware   | OpenSBI (v1.8.1)                                             | `linux/opensbi/`                                   |
+| Bootrom    | NPC / raptSoC reset vector                                   | `nemu/src/memory/rom/`                             |
 
 ## NPC Memory Map
 
 `npc_soc` peripherals and address ranges:
 
-| Device     | Range                       |
-| ---------- | --------------------------- |
-| CLINT      | `0x0200_0000 – 0x0200_ffff` |
-| UART 16550 | `0x1000_0000 – 0x1000_0fff` |
-| PSRAM      | `0x8000_0000 – 0x9fff_ffff` |
+| Device             | Range                       |
+| ------------------ | --------------------------- |
+| Finisher           | `0x0010_0000 – 0x0010_0fff` |
+| CLINT              | `0x0200_0000 – 0x020b_ffff` |
+| PLIC               | `0x0c00_0000 – 0x0cff_ffff` |
+| UART / peripherals | `0x1000_0000 – 0x1001_1fff` |
+| MROM               | `0x2000_0000 – 0x2000_ffff` |
+| Flash              | `0x3000_0000 – 0x3fff_ffff` |
+| PMEM / PSRAM       | `0x8000_0000 – 0x8fff_ffff` |
 
-Reset vector `PC_INIT` = `0x8000_0000` (start of PSRAM).
+Reset vector `PC_INIT` = `0x2000_0000` (MROM).
 
 ## raptSoC Memory Map
 
-| Device        | Range                       |
-| ------------- | --------------------------- |
-| CLINT         | `0x0200_0000 – 0x0200_ffff` |
-| SRAM          | `0x0f00_0000 – 0x0fff_ffff` |
-| UART 16550    | `0x1000_0000 – 0x1000_0fff` |
-| SPI master    | `0x1000_1000 – 0x1000_1fff` |
-| GPIO          | `0x1000_2000 – 0x1000_200f` |
-| PS/2          | `0x1001_1000 – 0x1001_1007` |
-| MROM          | `0x2000_0000 – 0x2000_0fff` |
-| VGA           | `0x2100_0000 – 0x211f_ffff` |
-| Flash         | `0x3000_0000 – 0x3fff_ffff` |
-| ChipLink MMIO | `0x4000_0000 – 0x7fff_ffff` |
-| PSRAM         | `0x8000_0000 – 0x9fff_ffff` |
-| SDRAM         | `0xa000_0000 – 0xbfff_ffff` |
-| ChipLink MEM  | `0xc000_0000 – 0xffff_ffff` |
+| Device            | Range                       |
+| ----------------- | --------------------------- |
+| Finisher          | `0x0010_0000 – 0x0010_0fff` |
+| CLINT             | `0x0200_0000 – 0x020b_ffff` |
+| PLIC              | `0x0c00_0000 – 0x0cff_ffff` |
+| SRAM              | `0x0f00_0000 – 0x0f00_ffff` |
+| UART 16550        | `0x1000_0000 – 0x1000_0fff` |
+| SPI master        | `0x1000_1000 – 0x1000_1fff` |
+| GPIO              | `0x1000_2000 – 0x1000_200f` |
+| Legacy ysyx CLINT | `0x1001_1000 – 0x1001_1fff` |
+| MROM              | `0x2000_0000 – 0x2000_ffff` |
+| VGA               | `0x2100_0000 – 0x211f_ffff` |
+| QEMU SDHCI ECAM   | `0x3000_8000 – 0x3000_8fff` |
+| Flash             | `0x3000_0000 – 0x3fff_ffff` |
+| QEMU SDHCI        | `0x4000_0000 – 0x4000_00ff` |
+| PMEM / PSRAM      | `0x8000_0000 – 0x8fff_ffff` |
+| SDRAM             | `0xa000_0000 – 0xa1ff_ffff` |
+| raptSoC MMIO      | `0xc000_0000 – 0xffff_ffff` |
 
 Reset vector `PC_INIT` = `0x3000_0000` (Flash). A First-Stage / Second-Stage Bootloader
 (FSBL/SSBL) copies the program into SRAM before running it — see `trm.c`.

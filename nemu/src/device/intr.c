@@ -159,12 +159,21 @@ static void plic_io_handler(uint32_t offset, int len, bool is_write)
         return;
     }
 
-    // Pending registers (read-only): 0x001000 .. 0x001000 + NWORDS*4
+    // Pending registers: spec is RO, but we expose a SW pending-set
+    // extension (SiFive-style) so bare-metal tests can inject IRQs without
+    // driving the level source. Writes OR into plic_pending; bit 0 is
+    // hardwired to 0. Mirrors rapt_plic.sv.
     if (offset >= PLIC_PENDING_BASE &&
         offset < PLIC_PENDING_BASE + PLIC_NWORDS * 4)
     {
         int w = (offset - PLIC_PENDING_BASE) / 4;
-        if (!is_write)
+        if (is_write)
+        {
+            uint32_t v = *(uint32_t *)(plic_base + offset);
+            if (w == 0) v &= ~1u; // source 0 hardwired
+            plic_pending[w] |= v;
+        }
+        else
         {
             *(uint32_t *)(plic_base + offset) = plic_pending[w];
         }
