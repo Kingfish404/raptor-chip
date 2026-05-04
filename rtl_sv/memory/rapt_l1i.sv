@@ -710,7 +710,7 @@ module rapt_l1i #(
           if (!raddr_valid) begin
             l1i_state <= IDLE;
           end else if (l1i_bus.rready) begin
-            // Bus error on the first beat → fetch access-fault. Gated on the
+            // Bus error on the first beat -> fetch access-fault. Gated on the
             // same handshake condition that consumes the beat, so a glitchy /
             // stale `rerr` in any other cycle is ignored.
             if (l1i_bus.rerr) begin

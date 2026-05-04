@@ -234,6 +234,15 @@ void cpu_exec(uint64_t n)
 #endif
 
 #ifdef CONFIG_DIFFTEST
+      // When `-d <ref.so>` was not provided, init_difftest() left REF
+      // function pointers NULL. Skip all REF interactions in that case so the
+      // simulator can still run pk-based / coverage workloads against REFs
+      // that don't model paging or delegation identically.
+      extern bool difftest_is_enabled();
+      if (!difftest_is_enabled()) {
+        // Still need to clear any pending memdiff bookkeeping below.
+        goto skip_difftest_block;
+      }
       // Mirror live external IRQ line into REF's mip[MEIP] before stepping,
       // so software reads of mip stay consistent across DUT/REF. The line is
       // hardwired 0 in the npc soc wrapper today, but this future-proofs the
@@ -305,6 +314,7 @@ void cpu_exec(uint64_t n)
           difftest_raise_intr(cause);
         }
       }
+    skip_difftest_block:;
 #endif
       if (cmu_valid_b)
       {

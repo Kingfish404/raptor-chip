@@ -843,7 +843,7 @@ module rapt_l1d #(
         end
         LD_D: begin
           if (l1d_bus.rvalid) begin
-            // Bus error on the response beat → load access-fault. Gated
+            // Bus error on the response beat -> load access-fault. Gated
             // on `rvalid` (the same condition that consumes the beat), so
             // transient `rerr` in unrelated cycles is ignored.
             if (l1d_bus.rerr) begin

@@ -181,6 +181,13 @@ module rng_chip #(
       .io_slave_rlast  (  /* unused */),
 `endif
 
+      // Tie off JTAG for this wrapper (no JTAG header on wrapBus); the
+      // jtag-selftest path uses raptSoC instead.
+      .jtag_trst_n(1'b0),
+      .jtag_tms   (1'b1),
+      .jtag_tdi   (1'b0),
+      .jtag_tdo   (  /* unused */),
+
       .reset(reset)
   );
 

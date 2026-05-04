@@ -188,9 +188,9 @@ $(BIN): $(VSRCS) $(VHSRCS) $(CCSRCS) $(CHSRCS) $(NVBOARD_ARCHIVE)
 		--Mdir $(OBJ_DIR) --exe -o $(abspath $(BIN))
 
 ifeq ($(ISA64),1)
-DIFF_REF_SO = -d $(abspath $(NEMU_HOME)/build/riscv64-nemu-interpreter-so)
+DIFF_REF_SO ?= -d $(abspath $(NEMU_HOME)/build/riscv64-nemu-interpreter-so)
 else
-DIFF_REF_SO = -d $(abspath $(NEMU_HOME)/build/riscv32-nemu-interpreter-so)
+DIFF_REF_SO ?= -d $(abspath $(NEMU_HOME)/build/riscv32-nemu-interpreter-so)
 endif
 IMG ?= ## Custom image to load
 DISK ?= ## Virtio block disk image to load with --disk
@@ -213,6 +213,18 @@ run_log: $(BIN) $(MROM_IMG) ## Run NPC and log output
 
 sim: $(BIN) ## Run NPC binary directly
 	@$^
+
+jtag-selftest: ## Build and run JTAG TAP/DTM/DM self-test (no NEMU needed)
+	$(MAKE) all
+	$(BIN) --jtag-selftest
+
+# JTAG OpenOCD bridge: spins the live RTL TAP and serves OpenOCD over its
+# `remote_bitbang` TCP protocol on 127.0.0.1:9824. Pair with
+# `openocd -f verify/jtag/openocd.cfg` in another shell.
+JTAG_PORT ?= 9824
+jtag-server: ## Build & launch nsim as an OpenOCD remote_bitbang server
+	$(MAKE) all
+	$(BIN) --jtag-server --jtag-port=$(JTAG_PORT)
 
 AM_KERNEL = $(RAPTOR_HOME)/abstract-machine/app/am-kernels
 

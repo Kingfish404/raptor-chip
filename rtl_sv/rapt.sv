@@ -146,6 +146,14 @@ module rapt #(
     // 1..NDEV. Wrappers that don't have peripherals tie this to '0.
     input [`RAPT_PLIC_NDEV:1] ext_irq_i,
 
+    // -----------------------------------------------------------------
+    // JTAG / RISC-V Debug Module ports (P0 — see docs-ref/dev.jtag.md)
+    // -----------------------------------------------------------------
+    input  logic jtag_trst_n,
+    input  logic jtag_tms,
+    input  logic jtag_tdi,
+    output logic jtag_tdo,
+
     input reset
 );
 
@@ -287,6 +295,56 @@ module rapt #(
       .hart_id_i({XLEN{1'b0}}),
 
       .reset(reset)
+  );
+
+  // -----------------------------------------------------------------
+  // Debug Transport Module + Debug Module (cluster-level).
+  // -----------------------------------------------------------------
+  logic        dmi_req;
+  logic        dmi_wr;
+  logic [ 6:0] dmi_addr;
+  logic [31:0] dmi_wdata;
+  logic [31:0] dmi_rdata;
+  logic [ 1:0] dmi_resp;
+  logic        dm_haltreq;
+  logic        dm_resumereq;
+  logic        dm_ndmreset;
+  /* verilator lint_off UNUSEDSIGNAL */
+  logic        dm_haltreq_unused;
+  logic        dm_resumereq_unused;
+  logic        dm_ndmreset_unused;
+  /* verilator lint_on UNUSEDSIGNAL */
+  assign dm_haltreq_unused   = dm_haltreq;
+  assign dm_resumereq_unused = dm_resumereq;
+  assign dm_ndmreset_unused  = dm_ndmreset;
+
+  rapt_dtm dtm_inst (
+      .clock    (clock),
+      .reset    (reset),
+      .trst_n   (jtag_trst_n),
+      .tms      (jtag_tms),
+      .tdi      (jtag_tdi),
+      .tdo      (jtag_tdo),
+      .dmi_req  (dmi_req),
+      .dmi_wr   (dmi_wr),
+      .dmi_addr (dmi_addr),
+      .dmi_wdata(dmi_wdata),
+      .dmi_rdata(dmi_rdata),
+      .dmi_resp (dmi_resp)
+  );
+
+  rapt_dm dm_inst (
+      .clock      (clock),
+      .reset      (reset),
+      .dmi_req    (dmi_req),
+      .dmi_wr     (dmi_wr),
+      .dmi_addr   (dmi_addr),
+      .dmi_wdata  (dmi_wdata),
+      .dmi_rdata  (dmi_rdata),
+      .dmi_resp   (dmi_resp),
+      .haltreq_o  (dm_haltreq),
+      .resumereq_o(dm_resumereq),
+      .ndmreset_o (dm_ndmreset)
   );
 
 `ifdef RAPT_USE_SLAVE

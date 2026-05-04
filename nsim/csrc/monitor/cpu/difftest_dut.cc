@@ -18,6 +18,13 @@ void (*ref_difftest_plic_raise)(uint32_t src) = NULL;
 static bool is_skip_ref = false;
 static bool should_diff_mem = false;
 static int skip_dut_nr_inst = 0;
+// When `-d <ref.so>` is not supplied, the simulator runs without comparing
+// against a reference. This is useful for coverage / pk-based workloads that
+// exercise paths the current REF doesn't model identically (e.g. Sv32 paging,
+// medeleg-driven exception delegation). Set in init_difftest().
+static bool difftest_enabled = false;
+
+bool difftest_is_enabled() { return difftest_enabled; }
 
 void difftest_should_diff_mem()
 {
@@ -31,6 +38,7 @@ void difftest_skip_ref()
 
 void difftest_skip_dut(int nr_ref, int nr_dut)
 {
+  if (!difftest_enabled) return;
   skip_dut_nr_inst += nr_dut;
 
   while (nr_ref-- > 0)
@@ -41,6 +49,7 @@ void difftest_skip_dut(int nr_ref, int nr_dut)
 
 void difftest_raise_intr(uint64_t NO)
 {
+  if (!difftest_enabled) return;
   ref_difftest_raise_intr(NO);
 }
 
@@ -75,7 +84,13 @@ static void checkmem(uint8_t *ref, uint8_t *dut, size_t n)
 void init_difftest(char *ref_so_file, long img_size, int port)
 {
 #ifdef CONFIG_DIFFTEST
-  assert(ref_so_file != NULL);
+  if (ref_so_file == NULL) {
+    printf("[difftest] DISABLED: no `-d <ref.so>` argument supplied; "
+           "register/CSR comparison against REF is skipped.\n");
+    difftest_enabled = false;
+    return;
+  }
+  difftest_enabled = true;
 
   void *handle;
   handle = dlopen(ref_so_file, RTLD_LAZY);
@@ -265,6 +280,7 @@ static void checkregs(NPCState *ref, vaddr_t pc)
 
 void difftest_step(vaddr_t pc)
 {
+  if (!difftest_enabled) return;
   NPCState ref_r;
 
   if (skip_dut_nr_inst > 0)

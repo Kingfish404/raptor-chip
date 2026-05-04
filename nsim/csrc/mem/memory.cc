@@ -95,6 +95,38 @@ static bool map_contains(paddr_t addr, paddr_t base, paddr_t size)
     return addr >= base && addr < base + size;
 }
 
+static bool map_range_offset(paddr_t addr, paddr_t base, paddr_t size,
+                             size_t len, size_t *offset)
+{
+    addr = canonical_paddr(addr);
+    if (!map_contains(addr, base, size))
+        return false;
+    uint64_t off = (uint64_t)(addr - base);
+    if (off + (uint64_t)len > (uint64_t)size)
+        return false;
+    if (offset != NULL)
+        *offset = (size_t)off;
+    return true;
+}
+
+static void report_invalid_host_access(const char *name, const char *op,
+                                       uint64_t addr, size_t len)
+{
+    static unsigned log_count = 0;
+    if (log_count < 16)
+    {
+        fprintf(stderr, "memory.cc: invalid %s %s at 0x%08" PRIx64 " len %zu\n",
+                name, op, addr, len);
+        fflush(stderr);
+    }
+    else if (log_count == 16)
+    {
+        fprintf(stderr, "memory.cc: suppressing further invalid memory access logs\n");
+        fflush(stderr);
+    }
+    log_count++;
+}
+
 static const host_map_t *find_host_map(paddr_t addr)
 {
     for (size_t i = 0; i < ARRLEN(host_maps); i++)
@@ -326,14 +358,25 @@ static inline void host_write(void *addr, word_t data, int len)
 
 extern "C" void sdram_read(word_t addr, uint8_t *data)
 {
-    uint32_t offset = ((uint32_t)addr - SDRAM_BASE);
+    size_t offset;
+    if (!map_range_offset(addr, SDRAM_BASE, SDRAM_SIZE, 1, &offset))
+    {
+        report_invalid_host_access("sdram", "read", (uint32_t)addr, 1);
+        *data = 0;
+        return;
+    }
     *data = memory.sdram[offset];
     // Log(" sdram raddr: 0x%x, rdata: 0x%02x, offest: 0x%02x", (uint32_t)addr, *data, offset);
 }
 
 extern "C" void sdram_write(word_t addr, uint8_t data, uint8_t wmask)
 {
-    uint32_t offset = ((uint32_t)addr - SDRAM_BASE);
+    size_t offset;
+    if (!map_range_offset(addr, SDRAM_BASE, SDRAM_SIZE, 1, &offset))
+    {
+        report_invalid_host_access("sdram", "write", (uint32_t)addr, 1);
+        return;
+    }
     memory.sdram[offset] = data;
     // Log("sdram waddr: 0x%x, wdata: 0x%02x, offest: 0x%02x", (uint32_t)addr, data, offset);
 }
@@ -375,7 +418,6 @@ extern "C" void pmem_read(word_t raddr, word_t *rdata)
         return;
     }
     uint8_t *host_addr = guest_to_host(addr);
-    host_addr = (uint8_t *)((size_t)host_addr & ~(size_t)(sizeof(word_t) - 1));
     if (host_addr == NULL)
     {
         // Unmapped physical read: return 0 silently so RTL can continue
@@ -384,6 +426,7 @@ extern "C" void pmem_read(word_t raddr, word_t *rdata)
         *rdata = 0;
         return;
     }
+    host_addr = (uint8_t *)((uintptr_t)host_addr & ~(uintptr_t)(sizeof(word_t) - 1));
     data = host_read(host_addr, sizeof(word_t));
     *rdata = data;
     // Log("raddr: " FMT_WORD_NO_PREFIX ", data: " FMT_WORD_NO_PREFIX,
@@ -444,15 +487,30 @@ extern "C" void pmem_write(word_t waddr, word_t wdata, char wmask)
 
 extern "C" void flash_read(uint32_t addr, uint32_t *data)
 {
-    uint32_t offset = addr;
-    *data = *((uint32_t *)(memory.flash + offset));
+    uint32_t flash_addr = addr;
+    if (flash_addr >= FLASH_BASE)
+        flash_addr -= FLASH_BASE;
+    if ((uint64_t)flash_addr + sizeof(uint32_t) > FLASH_SIZE)
+    {
+        report_invalid_host_access("flash", "read", addr, sizeof(uint32_t));
+        *data = 0;
+        return;
+    }
+    *data = host_read(memory.flash + flash_addr, sizeof(uint32_t));
     // Log("flash raddr: 0x%08x, rdata: 0x%08x, offest: 0x%08x", addr, *data, offset);
 }
 
 extern "C" void mrom_read(uint32_t addr, uint32_t *data)
 {
-    uint32_t offset = ((addr & 0xfffffffc) - MROM_BASE);
-    *data = *((uint32_t *)(memory.mrom + offset));
+    paddr_t aligned_addr = (paddr_t)(addr & 0xfffffffcu);
+    size_t offset;
+    if (!map_range_offset(aligned_addr, MROM_BASE, MROM_SIZE, sizeof(uint32_t), &offset))
+    {
+        report_invalid_host_access("mrom", "read", addr, sizeof(uint32_t));
+        *data = 0;
+        return;
+    }
+    *data = host_read(memory.mrom + offset, sizeof(uint32_t));
     // Log("mrom raddr: 0x%x, rdata: 0x%x, offest: 0x%x", addr, *data, offset);
 }
 

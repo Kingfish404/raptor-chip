@@ -128,6 +128,13 @@ class Raptor(CPU):
             i_io_master_rdata=axi_if.r.data,
             i_io_master_rresp=axi_if.r.resp,
             i_io_master_rlast=axi_if.r.last,
+            # JTAG (always-on at the cluster boundary). LiteX targets do not
+            # expose a JTAG header for the Raptor core today, so park the
+            # DTM in TLR by tying trst_n=0/tms=1/tdi=0; tdo is left floating.
+            i_jtag_trst_n=0,
+            i_jtag_tms=1,
+            i_jtag_tdi=0,
+            o_jtag_tdo=Signal(),
         )
 
     def set_reset_address(self, reset_address):

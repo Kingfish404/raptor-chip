@@ -22,9 +22,12 @@
 
 extern CPU_state cpu;
 
+/* IMPORTANT: This struct layout must stay in sync with the canonical
+ * NPCState defined in nsim/include/common.h. */
 typedef struct
 {
   int state;
+  uint8_t host_exit_ok;
   word_t *gpr;
   word_t *ret;
   word_t *pc;
@@ -61,6 +64,9 @@ typedef struct
   word_t *mip____;
 
   word_t *mcycle_;
+  word_t *mcycleh;
+  word_t *minstret;
+  word_t *minstreth;
   word_t *time___;
   word_t *timeh__;
 
@@ -83,11 +89,32 @@ typedef struct
 
   // for itrace
   uint32_t *inst;
-  word_t *cpc;
+  word_t *rpc;
   uint32_t last_inst;
 
   // for soc
   uint8_t *soc_sram;
+
+  // for CLINT checkpoint persistence
+  uint64_t *clint_mtime;
+  uint64_t *clint_mtimecmp;
+  uint8_t *clint_msip;
+
+  // for PLIC checkpoint persistence
+  uint8_t *plic_priority;
+  uint32_t *plic_pending;
+  uint32_t *plic_enable;
+  uint8_t *plic_threshold;
+  uint32_t *plic_ext_irq;
+
+  // for PMP checkpoint persistence
+  uint8_t *pmpcfg;
+  word_t *pmpaddr;
+
+  // for checkpoint quiesce check
+  uint8_t *rob_empty;
+  uint8_t *sq_valid;
+  uint8_t *stq_valid;
 } NPCState;
 
 __EXPORT void difftest_memcpy(paddr_t addr, void *buf, size_t n, bool direction)
@@ -148,7 +175,7 @@ __EXPORT void difftest_regcpy(void *dut, bool direction)
   }
   else if (direction == DIFFTEST_TO_DUT)
   {
-    npc->cpc = &cpu.cpc;
+    npc->rpc = &cpu.cpc;
     npc->inst = &cpu.inst;
     npc->gpr = cpu.gpr;
     npc->pc = &cpu.pc;
@@ -211,7 +238,7 @@ __EXPORT void difftest_set_meip(uint8_t val)
 {
 #ifdef CSR_MIP
   if (val)
-    cpu.sr[CSR_MIP] |=  (1u << 11);
+    cpu.sr[CSR_MIP] |= (1u << 11);
   else
     cpu.sr[CSR_MIP] &= ~(1u << 11);
 #else

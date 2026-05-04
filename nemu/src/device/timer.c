@@ -28,6 +28,11 @@
 #define MIP_MTIP_BIT (1u << 7)  // Machine Timer Interrupt Pending
 #define CSR_STIMECMP 0x14d
 #define CSR_STIMECMPH 0x15d
+#define CSR_MENVCFG  0x30a
+#define CSR_MENVCFGH 0x31a
+// menvcfg.STCE: bit 63. Enables Sstc-driven hardware MIP.STIP.
+// When STCE=0, MIP.STIP is software-writable (via M-mode); the CLINT
+// must NOT override it from stimecmp.
 
 static uint32_t *rtc_port_base = NULL;
 static uint32_t *clint_base = NULL;
@@ -54,6 +59,15 @@ static uint64_t sstc_get_stimecmp(void)
 #endif
 }
 
+static bool sstc_enabled(void)
+{
+#if defined(CONFIG_RV64)
+  return (cpu.sr[CSR_MENVCFG] >> 63) & 0x1;
+#else
+  return (cpu.sr[CSR_MENVCFGH] >> 31) & 0x1;
+#endif
+}
+
 // Update MIP.MTIP and MIP.MSIP based on current CLINT state.
 // Called after every instruction (from decode_exec) and on CLINT MMIO writes.
 void clint_update_mip(void)
@@ -67,10 +81,13 @@ void clint_update_mip(void)
   else
     cpu.sr[CSR_MIP] &= ~MIP_MTIP_BIT;
 
-  if (ticks >= sstc_get_stimecmp())
-    cpu.sr[CSR_MIP] |= MIP_STIP_BIT;
-  else
-    cpu.sr[CSR_MIP] &= ~MIP_STIP_BIT;
+  if (sstc_enabled())
+  {
+    if (ticks >= sstc_get_stimecmp())
+      cpu.sr[CSR_MIP] |= MIP_STIP_BIT;
+    else
+      cpu.sr[CSR_MIP] &= ~MIP_STIP_BIT;
+  }
 
   // MSIP: software interrupt from CLINT MSIP register
   if (clint_msip & 1u)

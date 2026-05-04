@@ -9,14 +9,17 @@ typedef enum
     SIE____,
     STVEC__,
 
-    SCOUNTE,
     MCOUNTE,
+    // Map it to MCOUNTE so indices stay aligned.
+    SCOUNTE = MCOUNTE,
 
     SSCRATCH,
     SEPC___,
     SCAUSE_,
     STVAL__,
     SIP____,
+    STIMECMP,
+    STIMECMPH,
     SATP___,
 
     MSTATUS,
@@ -27,6 +30,7 @@ typedef enum
     MTVEC__,
 
     MSTATUSH,
+    MENVCFG,
 
     MSCRATCH,
     MEPC___,

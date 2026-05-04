@@ -486,7 +486,7 @@ bool checkpoint_save_tick(void)
   }
 
   /* Defer save until pipeline is quiesced so committed stores have drained
-   * from SQ → bus → host backing buffer. Otherwise mem_pmem.bin loses the
+   * from SQ -> bus -> host backing buffer. Otherwise mem_pmem.bin loses the
    * tail of in-flight writes.
    *   - rob_empty            : ROB drained (head==tail && !head.busy)
    *   - sq_valid==0          : no post-commit store in flight
@@ -816,7 +816,7 @@ static void load_region(const char *dir, const ckpt_region_t *r)
  * Restoration is performed via real RISC-V instructions because the rapt
  * RTL's `rf[]` is a read-only continuous-assign debug shadow — direct C++
  * writes don't propagate to the live PRF. Real load instructions go through
- * rename → PRF write → maptable update, so they correctly re-establish
+ * rename -> PRF write -> maptable update, so they correctly re-establish
  * architectural register state regardless of microarchitectural changes.
  *
  * Sequence (skip x0; t0/x5 and t1/x6 are clobbered as scratch — restored last):

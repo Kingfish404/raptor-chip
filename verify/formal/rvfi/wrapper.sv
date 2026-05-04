@@ -114,7 +114,14 @@ module rvfi_wrapper (
       .rvfi_mem_rmask(rvfi_mem_rmask),
       .rvfi_mem_wmask(rvfi_mem_wmask),
       .rvfi_mem_rdata(rvfi_mem_rdata),
-      .rvfi_mem_wdata(rvfi_mem_wdata)
+      .rvfi_mem_wdata(rvfi_mem_wdata),
+
+      // JTAG (always-on at the cluster boundary). Tie to TLR-park values
+      // so the formal wrapper does not see DTM transitions.
+      .jtag_trst_n(1'b0),
+      .jtag_tms   (1'b1),
+      .jtag_tdi   (1'b0),
+      .jtag_tdo   (  /* unused */)
   );
 
 endmodule

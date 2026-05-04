@@ -96,10 +96,46 @@ LDFLAGS  += -z noexecstack
 ### Paste in arch-specific configurations (e.g., from `scripts/x86_64-qemu.mk`)
 -include $(AM_HOME)/scripts/$(ARCH).mk
 
-### Fall back to native gcc/binutils if there is no cross compiler
-ifeq ($(wildcard $(shell which $(CC))),)
-  $(info #  $(CC) not found; fall back to default gcc and binutils)
-  CROSS_COMPILE :=
+### For RISC-V targets, auto-detect a usable cross prefix if not provided.
+ifneq ($(filter riscv%,$(ISA)),)
+	ifeq ($(strip $(CROSS_COMPILE)),)
+		ifeq ($(shell command -v riscv64-elf-gcc >/dev/null 2>&1; echo $$?),0)
+			$(info #  CROSS_COMPILE is empty; using riscv64-elf-* toolchain)
+			CROSS_COMPILE := riscv64-elf-
+		else ifeq ($(shell command -v riscv64-unknown-elf-gcc >/dev/null 2>&1; echo $$?),0)
+			$(info #  CROSS_COMPILE is empty; using riscv64-unknown-elf-* toolchain)
+			CROSS_COMPILE := riscv64-unknown-elf-
+		else ifeq ($(shell command -v riscv64-linux-gnu-gcc >/dev/null 2>&1; echo $$?),0)
+			$(info #  CROSS_COMPILE is empty; using riscv64-linux-gnu-* toolchain)
+			CROSS_COMPILE := riscv64-linux-gnu-
+		else
+			$(error CROSS_COMPILE is empty and no RISC-V cross compiler detected (tried riscv64-elf-gcc, riscv64-unknown-elf-gcc, riscv64-linux-gnu-gcc))
+		endif
+	endif
+endif
+
+### Resolve toolchain: for RISC-V targets, try common installed prefixes first.
+### Never silently fall back to host gcc for cross targets.
+ifeq ($(shell command -v $(CC) >/dev/null 2>&1; echo $$?),1)
+	ifneq ($(strip $(CROSS_COMPILE)),)
+		ifneq ($(filter riscv%,$(ISA)),)
+			ifeq ($(shell command -v riscv64-elf-gcc >/dev/null 2>&1; echo $$?),0)
+				$(info #  $(CC) not found; using riscv64-elf-* toolchain)
+				CROSS_COMPILE := riscv64-elf-
+			else ifeq ($(shell command -v riscv64-unknown-elf-gcc >/dev/null 2>&1; echo $$?),0)
+				$(info #  $(CC) not found; using riscv64-unknown-elf-* toolchain)
+				CROSS_COMPILE := riscv64-unknown-elf-
+			else ifeq ($(shell command -v riscv64-linux-gnu-gcc >/dev/null 2>&1; echo $$?),0)
+				$(info #  $(CC) not found; using riscv64-linux-gnu-* toolchain)
+				CROSS_COMPILE := riscv64-linux-gnu-
+			else
+				$(error $(CC) not found and no RISC-V cross compiler detected (tried riscv64-elf-gcc, riscv64-unknown-elf-gcc, riscv64-linux-gnu-gcc))
+			endif
+		else
+			$(info #  $(CC) not found; fall back to default gcc and binutils)
+			CROSS_COMPILE :=
+		endif
+	endif
 endif
 
 ## 5. Compilation Rules

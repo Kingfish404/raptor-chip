@@ -177,6 +177,38 @@ Each check takes ~70 seconds with depth 5.
 - `wrapper.sv` — Instantiates `rapt` with unconstrained AXI4 responses via
   `rvformal_rand_reg`, exposing only RVFI outputs to the testbench
 
+### 6. JTAG / RISC-V Debug Verification (`make jtag`)
+
+Two-layer verification of the `rapt_dtm` + `rapt_dm` blocks introduced for
+the JTAG / RISC-V Debug Spec 1.0 P0 implementation. Lives in
+[verify/jtag/](./jtag/README.md) for full details.
+
+**Layer 1 — in-tree compliance probe (runs today):**
+
+```bash
+make jtag-selftest        # 23-point DTM/DM compliance probe (no NEMU)
+```
+
+Drives JTAG TCK/TMS/TDI directly into the Verilator-built RTL (no GDB / no
+OpenOCD) and exercises three phases: TAP/IR (IDCODE, BYPASS identity, DTMCS
+fields, soft-TLR), DM register file (dmcontrol RW + dmactive=0 quiesce,
+dmstatus, hartinfo, data0 RW, abstractcs static fields), abstract-command
+semantics (cmderr=2 on unsupported, W1C clear, dropped while !dmactive).
+
+**Layer 2 — upstream `riscv-tests/debug` (P1-blocked stub):**
+
+```bash
+make jtag-debug-tests-setup   # Clones riscv-software-src/riscv-tests
+make jtag-debug-tests         # Currently exits 1 with checklist
+```
+
+Stages the upstream GDB-driven debug-spec suite. The actual run is gated on
+(a) an OpenOCD `remote_bitbang` DPI bridge in `nsim/`, (b) halt/resume +
+dcsr/dpc CSRs in the core, (c) abstract `access_register`/`access_memory`
+in `rapt_dm`. None of these exists yet — the target prints the gap list and
+exits non-zero rather than silently passing. OpenOCD config scaffold lives
+at [verify/jtag/openocd.cfg](./jtag/openocd.cfg).
+
 ## Integration with Root Makefile
 
 From the project root:

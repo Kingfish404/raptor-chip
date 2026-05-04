@@ -10,7 +10,7 @@ source "$ROOT_DIR/setup-rtl.sh"
 
 brew_dep_install() {
   brew install yosys bazelisk ninja
-  brew install riscv64-elf-binutils riscv64-elf-gcc
+  brew install riscv64-elf-binutils riscv64-elf-gcc open-ocd
   brew install ncurses readline flex bison
   if [ "$(uname)" == "Darwin" ]; then
     brew install sdl2 sdl2_image sdl2_ttf

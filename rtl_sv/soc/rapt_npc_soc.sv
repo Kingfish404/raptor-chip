@@ -10,6 +10,11 @@ module raptSoC #(
     parameter int XLEN = `RAPT_XLEN
 ) (
     input clock,
+    // JTAG ports (P0). tck implicit = clock. Always present.
+    input  jtag_trst_n,
+    input  jtag_tms,
+    input  jtag_tdi,
+    output jtag_tdo,
     input reset
 );
   logic auto_master_out_awready;
@@ -107,6 +112,11 @@ module raptSoC #(
       .io_slave_rresp  (  /* unused */),
       .io_slave_rlast  (  /* unused */),
 `endif
+
+      .jtag_trst_n(jtag_trst_n),
+      .jtag_tms   (jtag_tms),
+      .jtag_tdi   (jtag_tdi),
+      .jtag_tdo   (jtag_tdo),
 
       .reset(reset)
   );

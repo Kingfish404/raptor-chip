@@ -2,10 +2,10 @@
 //`define DBG
 
 module SoC #(
-    parameter bit[1023:0] RAM_FILE = "",
-    parameter bit[31:0] CLK_FREQ = 50_000_000,
-    parameter bit[31:0] BAUD_RATE = 9600,
-    parameter bit[31:0] RAM_ADDR_WIDTH = 13  // RAM depth: 2^13 in 4 bytes words
+    parameter bit [1023:0] RAM_FILE = "",
+    parameter bit [31:0] CLK_FREQ = 50_000_000,
+    parameter bit [31:0] BAUD_RATE = 9600,
+    parameter bit [31:0] RAM_ADDR_WIDTH = 13  // RAM depth: 2^13 in 4 bytes words
 ) (
     input wire clk,
     input wire rst,
@@ -108,7 +108,13 @@ module SoC #(
       .io_slave_rid     (  /* unused */),
       .io_slave_rdata   (  /* unused */),
       .io_slave_rresp   (  /* unused */),
-      .io_slave_rlast   (  /* unused */)
+      .io_slave_rlast   (  /* unused */),
+      // JTAG (always-on at the cluster boundary). Gowin Tang Nano 20K has
+      // no separate JTAG header for the core today, so park the DTM in TLR.
+      .jtag_trst_n      (1'b0),
+      .jtag_tms         (1'b1),
+      .jtag_tdi         (1'b0),
+      .jtag_tdo         (  /* unused */)
   );
 
 
@@ -161,10 +167,10 @@ endmodule
 
 // Memory and Universal Asynchronous Receiver-Transmitter (UART)
 module rapt_soc_perip #(
-    parameter bit[1023:0] RAM_FILE = "",
-    parameter bit[31:0] CLK_FREQ = 50_000_000,
-    parameter bit[31:0] BAUD_RATE = 9600,
-    parameter bit[31:0] RAM_ADDR_WIDTH = 13  // RAM depth: 2^13 in 4 bytes words
+    parameter bit [1023:0] RAM_FILE = "",
+    parameter bit [31:0] CLK_FREQ = 50_000_000,
+    parameter bit [31:0] BAUD_RATE = 9600,
+    parameter bit [31:0] RAM_ADDR_WIDTH = 13  // RAM depth: 2^13 in 4 bytes words
 ) (
     input wire clk,
     input wire rst,

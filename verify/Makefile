@@ -23,8 +23,11 @@ export RAPTOR_HOME
 export NSIM_HOME
 export NEMU_HOME
 export AM_HOME
+export CROSS_COMPILE
 
-CROSS_COMPILE ?= riscv64-elf-
+ifeq ($(strip $(CROSS_COMPILE)),)
+CROSS_COMPILE := riscv64-elf-
+endif
 CC  := $(CROSS_COMPILE)gcc
 AS  := $(CROSS_COMPILE)as
 LD  := $(CROSS_COMPILE)ld
@@ -195,7 +198,7 @@ fuzz-run: check-prereqs ## Run fuzz tests in FUZZ_SRC_DIR with difftest
 			-T $(FUZZ_LINKER) -o "$$elf" "$$src" 2>"$(FUZZ_SRC_DIR)/$${name}.compile.log"; then \
 			echo "  [CERR] $$name"; ERR=$$((ERR+1)); continue; fi; \
 		$(OBJCOPY) -O binary "$$elf" "$$bin"; \
-		set +e; $(TIMEOUT_RUN) $(TIMEOUT) $(NPC_BIN) -b -n -d $(NEMU_SO) -r $(MROM_IMG) "$$bin" >"$$log" 2>&1; \
+		set +e; $(TIMEOUT_RUN) $(TIMEOUT) $(NPC_BIN) -b -n -d $(NEMU_SO) -r $(MROM_IMG) "$$bin" </dev/null >"$$log" 2>&1; \
 		rc=$$?; set -e; \
 		if [ $$rc -eq 0 ]; then \
 			if grep -qiE "BAD TRAP|ABORT" "$$log"; then \
@@ -548,7 +551,7 @@ define RUN_AND_SAVE_COVERAGE
 	@echo "[coverage] Running $(1) workload..."
 	@mkdir -p $(COV_DIR)
 	@rm -f $(NSIM_HOME)/coverage*.dat $(VERIFY_HOME)/coverage*.dat
-	-$(2) 2>&1 | tee "$(COV_DIR)/$(1).log"
+	-set +o pipefail; $(2) 2>&1 | tee "$(COV_DIR)/$(1).log"; true
 	@if [ -f "$(NSIM_HOME)/coverage.dat" ]; then \
 		cp "$(NSIM_HOME)/coverage.dat" "$(COV_DIR)/coverage_$(1).dat"; \
 		echo "[coverage] Saved: $(COV_DIR)/coverage_$(1).dat"; \
@@ -556,23 +559,28 @@ define RUN_AND_SAVE_COVERAGE
 		cp "$(VERIFY_HOME)/coverage.dat" "$(COV_DIR)/coverage_$(1).dat"; \
 		echo "[coverage] Saved: $(COV_DIR)/coverage_$(1).dat"; \
 	else \
-		echo "[coverage] WARN: $(1) did not produce coverage.dat"; \
+		echo "[coverage] WARN: $(1) did not produce coverage.dat (workload may have crashed; continuing)"; \
 	fi
 endef
 
 .PHONY: coverage coverage-build coverage-run coverage-run-coremark \
 	coverage-run-coremark-pk coverage-run-hello-pk coverage-run-isa-tests-pk \
 	coverage-run-microbench coverage-run-fuzz coverage-run-sigtest \
-	coverage-report coverage-clean
+	coverage-report coverage-clean check-coverage-bin
 
 coverage: coverage-build coverage-run coverage-report ## Full coverage flow
 
 coverage-build: ## Build NPC with coverage instrumentation
-	@echo "[coverage] Building NPC with --coverage..."
+	@echo "[coverage] Building NPC with --coverage-line..."
 	@rm -rf $(NSIM_HOME)/build/$(RAPT_CONFIG)/obj_dir $(NSIM_HOME)/build/$(RAPT_CONFIG)/riscv*-npc-*
 	$(MAKE) -C $(NSIM_HOME) o2_difftest_defconfig
-	$(MAKE) -C $(NSIM_HOME) -j$(NPROC) VFLAGS="$(VFLAGS)" \
-		VERILATOR_EXTRA="--coverage --coverage-line --coverage-toggle -Wno-UNOPTFLAT"
+	# Coverage build: disable RTL SVA (RAPT_SIM_ASSERT=0) and use line-only
+	# coverage. `--coverage-toggle` was observed to crash the simulator on CI
+	# during microbench (queen) due to combined memory pressure with toggle
+	# counters on a design that has UNOPTFLAT loops. Line coverage is enough
+	# to track structural coverage of RTL.
+	$(MAKE) -C $(NSIM_HOME) -j$(NPROC) VFLAGS="$(VFLAGS)" RAPT_SIM_ASSERT=0 \
+		VERILATOR_EXTRA="--coverage-line -Wno-UNOPTFLAT"
 
 coverage-run: ## Run test suite to collect coverage
 	@mkdir -p $(COV_DIR)
@@ -596,27 +604,51 @@ coverage-run: ## Run test suite to collect coverage
 # app/ (pk mode) ISA64 flag: rv64 -> 1, rv32 -> empty (unset)
 APP_ISA64 := $(if $(filter rv64,$(ISA)),1,)
 
-coverage-run-coremark: ## Run only coremark coverage workload
-	$(call RUN_AND_SAVE_COVERAGE,coremark,$(MAKE) -C $(AM_KERNELS)/benchmarks/coremark_eembc ARCH=$(NPC_ARCH_COV) run ARGS="-b -n" VFLAGS="$(VFLAGS)")
+# All coverage-run-* targets must propagate the same SIM_VFLAGS that
+# `coverage-build` used; otherwise nsim/Makefile's .vflags_stamp invalidates
+# and rebuilds the simulator WITHOUT `VERILATOR_EXTRA="--coverage-line ..."`,
+# losing both coverage instrumentation and (since SVA gets re-enabled by
+# default) potentially turning random-instruction workloads into SVA `$fatal`
+# crashes (manifesting as host SIGSEGV / exit 139 in some Verilator builds).
+# Pass `RAPT_SIM_ASSERT=0` to keep SIM_VFLAGS empty across all sub-makes.
+COV_PASS_ENV := RAPT_SIM_ASSERT=0
 
-coverage-run-coremark-pk: ## Run coremark under pk (app/) for coverage
-	$(call RUN_AND_SAVE_COVERAGE,coremark-pk,$(MAKE) -C $(RAPTOR_HOME)/app coremark ISA64=$(APP_ISA64) ARGS="-b -n" VFLAGS="$(VFLAGS)")
+# Sanity check that the expected NPC sim binary exists. The workload sub-make
+# (am-kernels / app) ultimately invokes `make -C nsim run`, which picks
+# whichever simulator variant is built per the current `nsim/.config`. If the
+# user has `CONFIG_ysyxSoC=y` left over from a previous session, only
+# `riscv32-npc-soc` exists and loading an `riscv32-npc` binary into it fails
+# (wrong memory map). Guard the per-workload runners so they fail fast.
+.PHONY: check-coverage-bin
+check-coverage-bin:
+	@if [ ! -x "$(NPC_BIN)" ]; then \
+		echo "[coverage] ERROR: simulator $(NPC_BIN) not found."; \
+		echo "[coverage]        Run 'make -C verify coverage-build' first"; \
+		echo "[coverage]        (the current nsim/.config may be a non-NPC variant, e.g. ysyxSoC)."; \
+		exit 1; \
+	fi
 
-coverage-run-hello-pk: ## Run hello under pk (app/) for coverage
-	$(call RUN_AND_SAVE_COVERAGE,hello-pk,$(MAKE) -C $(RAPTOR_HOME)/app hello ISA64=$(APP_ISA64) ARGS="-b -n" VFLAGS="$(VFLAGS)")
+coverage-run-coremark: check-coverage-bin ## Run only coremark coverage workload
+	$(call RUN_AND_SAVE_COVERAGE,coremark,$(MAKE) -C $(AM_KERNELS)/benchmarks/coremark_eembc ARCH=$(NPC_ARCH_COV) run ARGS="-b -n" VFLAGS="$(VFLAGS)" $(COV_PASS_ENV))
 
-coverage-run-isa-tests-pk: ## Run ISA tests under pk (app/) for coverage
-	$(call RUN_AND_SAVE_COVERAGE,isa-tests-pk,$(MAKE) -C $(RAPTOR_HOME)/app isa-tests ISA64=$(APP_ISA64) ARGS="-b -n" VFLAGS="$(VFLAGS)")
+coverage-run-coremark-pk: check-coverage-bin ## Run coremark under pk (app/) for coverage
+	$(call RUN_AND_SAVE_COVERAGE,coremark-pk,$(MAKE) -C $(RAPTOR_HOME)/app coremark-npc ISA64=$(APP_ISA64) ARGS="-b -n" VFLAGS="$(VFLAGS)" $(COV_PASS_ENV) DIFF_REF_SO=)
+
+coverage-run-hello-pk: check-coverage-bin ## Run hello under pk (app/) for coverage
+	$(call RUN_AND_SAVE_COVERAGE,hello-pk,$(MAKE) -C $(RAPTOR_HOME)/app hello-npc ISA64=$(APP_ISA64) ARGS="-b -n" VFLAGS="$(VFLAGS)" $(COV_PASS_ENV) DIFF_REF_SO=)
+
+coverage-run-isa-tests-pk: check-coverage-bin ## Run ISA tests under pk (app/) for coverage
+	$(call RUN_AND_SAVE_COVERAGE,isa-tests-pk,$(MAKE) -C $(RAPTOR_HOME)/app isa-tests-npc ISA64=$(APP_ISA64) ARGS="-b -n" VFLAGS="$(VFLAGS)" $(COV_PASS_ENV) DIFF_REF_SO=)
 
 
-coverage-run-microbench: ## Run only microbench coverage workload
-	$(call RUN_AND_SAVE_COVERAGE,microbench,$(MAKE) -C $(AM_KERNELS)/benchmarks/microbench ARCH=$(NPC_ARCH_COV) run ARGS="-b -n" mainargs=$(COV_MICROBENCH_ARGS) VFLAGS="$(VFLAGS)")
+coverage-run-microbench: check-coverage-bin ## Run only microbench coverage workload
+	$(call RUN_AND_SAVE_COVERAGE,microbench,$(MAKE) -C $(AM_KERNELS)/benchmarks/microbench ARCH=$(NPC_ARCH_COV) run ARGS="-b -n" mainargs=$(COV_MICROBENCH_ARGS) VFLAGS="$(VFLAGS)" $(COV_PASS_ENV))
 
-coverage-run-fuzz: ## Run only fuzz coverage workload
-	$(call RUN_AND_SAVE_COVERAGE,fuzz,$(MAKE) --no-print-directory fuzz SEED=$(COV_FUZZ_SEED) FUZZ_NUM=$(COV_FUZZ_NUM) FUZZ_LEN=$(COV_FUZZ_LEN) TIMEOUT=$(TIMEOUT))
+coverage-run-fuzz: check-coverage-bin ## Run only fuzz coverage workload
+	$(call RUN_AND_SAVE_COVERAGE,fuzz,$(MAKE) --no-print-directory fuzz SEED=$(COV_FUZZ_SEED) FUZZ_NUM=$(COV_FUZZ_NUM) FUZZ_LEN=$(COV_FUZZ_LEN) TIMEOUT=$(TIMEOUT) $(COV_PASS_ENV))
 
-coverage-run-sigtest: ## Run only sigtest coverage workload
-	$(call RUN_AND_SAVE_COVERAGE,sigtest,$(MAKE) --no-print-directory sigtest TIMEOUT=$(TIMEOUT))
+coverage-run-sigtest: check-coverage-bin ## Run only sigtest coverage workload
+	$(call RUN_AND_SAVE_COVERAGE,sigtest,$(MAKE) --no-print-directory sigtest TIMEOUT=$(TIMEOUT) $(COV_PASS_ENV))
 
 coverage-report: ## Generate coverage report
 	@echo "[coverage] Generating report..."
@@ -669,7 +701,7 @@ sigtest-run: check-prereqs ## Run signature tests with difftest
 			head -5 "$(SIGTEST_DIR)/$${name}.compile.log" | sed 's/^/         /'; \
 			ERR=$$((ERR+1)); continue; fi; \
 		$(OBJCOPY) -O binary "$$elf" "$$bin"; \
-		set +e; $(TIMEOUT_RUN) $(TIMEOUT) $(NPC_BIN) -b -n -d $(NEMU_SO) -r $(MROM_IMG) "$$bin" >"$$log" 2>&1; \
+		set +e; $(TIMEOUT_RUN) $(TIMEOUT) $(NPC_BIN) -b -n -d $(NEMU_SO) -r $(MROM_IMG) "$$bin" </dev/null >"$$log" 2>&1; \
 		rc=$$?; set -e; \
 		if [ $$rc -eq 0 ]; then \
 			if grep -qiE "BAD TRAP|ABORT" "$$log"; then \
@@ -728,11 +760,38 @@ formal-clean: ## Formal: clean all formal artifacts
 	$(MAKE) -C $(FORMAL_DIR) formal_rvfi_clean
 
 # ============================================================================
+# JTAG / RISC-V Debug verification
+# ============================================================================
+# Layer 1 (selftest)  - 23-point in-tree DTM/DM compliance probe (runs today).
+# Layer 2 (debug-tests) - upstream riscv-tests/debug GDB suite (P1-blocked;
+#                          target prints a checklist and exits 1 until the
+#                          OpenOCD bridge + halt/resume infra exists).
+# See verify/jtag/README.md for the full coverage matrix and gap list.
+JTAG_DIR := $(VERIFY_HOME)/jtag
+
+.PHONY: jtag jtag-selftest jtag-debug-tests-setup jtag-debug-tests jtag-clean
+
+jtag: jtag-selftest ## Run the JTAG default verification (= jtag-selftest)
+
+jtag-selftest: ## JTAG: 23-point DTM/DM compliance probe (no NEMU needed)
+	$(MAKE) -C $(JTAG_DIR) selftest
+
+jtag-debug-tests-setup: ## JTAG: clone upstream riscv-tests/debug suite
+	$(MAKE) -C $(JTAG_DIR) debug-tests-setup
+
+jtag-debug-tests: ## JTAG: run upstream debug suite (BLOCKED on P1 — see verify/jtag/README.md)
+	$(MAKE) -C $(JTAG_DIR) debug-tests
+
+jtag-clean: ## JTAG: clean cloned riscv-tests + scratch artifacts
+	$(MAKE) -C $(JTAG_DIR) clean
+
+
+# ============================================================================
 # All-in-one
 # ============================================================================
 .PHONY: all clean
 
 all: fuzz sigtest ## Run all lightweight verification
 
-clean: fuzz-clean riscof-clean coverage-clean sigtest-clean formal-clean ## Clean all verify artifacts
+clean: fuzz-clean riscof-clean coverage-clean sigtest-clean formal-clean jtag-clean ## Clean all verify artifacts
 	rm -rf $(BUILD_DIR)

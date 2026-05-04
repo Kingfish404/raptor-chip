@@ -1,8 +1,8 @@
 # RLLMBench
 
 RLLMBench is a fixed-point, self-contained RISC-V LLM benchmark suite. It is
-inspired by the operator mix in `third_party/karpathy/llama2.c/run.c` and
-`third_party/karpathy/llm.c/train_gpt2.c`, but avoids model files, malloc, and
+inspired by the operator mix in `karpathy/llama2.c` and
+`karpathy/llm.c`, but avoids model files, malloc, and
 floating point so the same workload can run through host-native builds, pk/NPC,
 NEMU, LiteX simulation, and FPGA serialboot payloads.
 
@@ -10,11 +10,11 @@ The profile name directly encodes the workload knobs as
 `ops<LLM_OP_ITERS>-gen<LLM_GEN_TOKENS>-train<LLM_TRAIN_STEPS>`. The default
 profile is `ops8-gen12-train4`:
 
-| Knob | Default | Meaning |
-| --- | ---: | --- |
-| `LLM_OP_ITERS` | 8 | operator benchmark repeat count |
-| `LLM_GEN_TOKENS` | 12 | generated tokens for inference |
-| `LLM_TRAIN_STEPS` | 4 | training/update steps |
+| Knob              | Default | Meaning                         |
+| ----------------- | ------: | ------------------------------- |
+| `LLM_OP_ITERS`    |       8 | operator benchmark repeat count |
+| `LLM_GEN_TOKENS`  |      12 | generated tokens for inference  |
+| `LLM_TRAIN_STEPS` |       4 | training/update steps           |
 
 Changing any knob is allowed for stress testing and automatically changes the
 reported profile string, for example `ops8192-gen16-train4096`. Use identical
@@ -105,11 +105,11 @@ make llm-native-test
 Report artifacts are written under `app/build/rv32/benchmarks/llm/reports/` by
 default:
 
-| File | Purpose |
-| --- | --- |
-| `rllmbench-npc.md` | human-readable summary table |
-| `rllmbench-npc.csv` | spreadsheet / dashboard import |
-| `rllmbench-npc.json` | machine-readable archive |
+| File                 | Purpose                        |
+| -------------------- | ------------------------------ |
+| `rllmbench-npc.md`   | human-readable summary table   |
+| `rllmbench-npc.csv`  | spreadsheet / dashboard import |
+| `rllmbench-npc.json` | machine-readable archive       |
 
 Recommended RISC-V comparison headline:
 
