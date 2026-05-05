@@ -38,7 +38,16 @@ module rapt_prf #(
 
     // Debug: architectural register view (committed / speculative)
     output [XLEN-1:0] rf    [RNUM],
-    output [XLEN-1:0] rf_map[RNUM]
+    output [XLEN-1:0] rf_map[RNUM],
+
+    // Debug write port (used by rapt_dm abstract access_register while
+    // the core is halted). Writes go to the committed mapping
+    // `prf_arr[rat_snapshot[dbg_addr_i]]`. x0 writes are silently dropped.
+    // Caller must guarantee halted_o is asserted before pulsing dbg_we_i,
+    // otherwise the write races with normal commit-time updates.
+    input  logic            dbg_we_i,
+    input  logic [4:0]      dbg_addr_i,
+    input  logic [XLEN-1:0] dbg_wdata_i
 
 `ifdef RAPT_RVFI
     // RVFI: read destination register values at commit time
@@ -156,6 +165,11 @@ module rapt_prf #(
           prf_arr[i]           <= wr_c_data;
           prf_valid[i]     <= 1'b1;
           prf_transient[i] <= 1'b1;
+        end else if (dbg_we_i && dbg_addr_i != 5'd0
+                     && rat_snapshot[dbg_addr_i] == PLEN'(i)) begin
+          // Halt-time abstract write: target the committed phys reg of
+          // architectural reg `dbg_addr_i`. Caller must hold halted=1.
+          prf_arr[i] <= dbg_wdata_i;
         end
       end
     end

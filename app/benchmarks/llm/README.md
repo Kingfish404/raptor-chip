@@ -7,18 +7,51 @@ floating point so the same workload can run through host-native builds, pk/NPC,
 NEMU, LiteX simulation, and FPGA serialboot payloads.
 
 The profile name directly encodes the workload knobs as
-`ops<LLM_OP_ITERS>-gen<LLM_GEN_TOKENS>-train<LLM_TRAIN_STEPS>`. The default
-profile is `ops8-gen12-train4`:
+`ops<LLM_OP_ITERS>-gen<LLM_GEN_TOKENS>x<LLM_INFER_REPEATS>-train<LLM_TRAIN_STEPS>`.
 
-| Knob              | Default | Meaning                         |
-| ----------------- | ------: | ------------------------------- |
-| `LLM_OP_ITERS`    |       8 | operator benchmark repeat count |
-| `LLM_GEN_TOKENS`  |      12 | generated tokens for inference  |
-| `LLM_TRAIN_STEPS` |       4 | training/update steps           |
+| Knob                | Meaning                                              |
+| ------------------- | ---------------------------------------------------- |
+| `LLM_OP_ITERS`      | operator benchmark repeat count                      |
+| `LLM_GEN_TOKENS`    | generated tokens for inference (max `SEQ_LEN`=16)    |
+| `LLM_INFER_REPEATS` | inference outer repeat count (extends infer wall)    |
+| `LLM_TRAIN_STEPS`   | training/update steps                                |
 
-Changing any knob is allowed for stress testing and automatically changes the
-reported profile string, for example `ops8192-gen16-train4096`. Use identical
-profile strings for published comparisons.
+Because `LLM_GEN_TOKENS` is capped at `SEQ_LEN`, scale infer wall-time via
+`LLM_INFER_REPEATS` rather than `LLM_GEN_TOKENS`.
+
+### Per-platform default profiles
+
+The top-level `app/Makefile` selects a different default profile per platform
+to keep each backend within an Embench-style ~1–5s wall-clock window. Per-mode
+defaults are picked automatically by target group; override any knob on the
+command line to force a fixed profile across platforms (recommended for
+published comparisons).
+
+| Backend                 | OP_ITERS | GEN_TOKENS | INFER_REPEATS | TRAIN_STEPS | Target wall  |
+| ----------------------- | -------: | ---------: | ------------: | ----------: | ------------ |
+| NPC RTL sim (`*-npc`)   |        8 |         12 |             1 |           4 | a few s      |
+| NEMU ISS (`*-nemu`)     |       64 |         16 |             2 |          16 | ~1–3 s       |
+| Native host             |  524 288 |         16 |       131 072 |     262 144 | ~3–5 s/mode  |
+| LiteX FPGA (`litex-build`) |     8 |         12 |             1 |           4 | (uses fallback; override per-board) |
+
+Example: force the legacy small profile on every backend for a quick smoke
+test, or pin a published profile across platforms:
+
+```shell
+# Quick smoke (fastest possible) on native:
+make -C app llm-native-test \
+    LLM_NATIVE_OP_ITERS=8 LLM_NATIVE_INFER_REPEATS=1 LLM_NATIVE_TRAIN_STEPS=4
+
+# Pin the same profile on NEMU and native (recommended for published numbers):
+make -C app llm-bench-report-nemu \
+    LLM_OP_ITERS=512 LLM_GEN_TOKENS=16 LLM_INFER_REPEATS=64 LLM_TRAIN_STEPS=128
+make -C app llm-native-test \
+    LLM_OP_ITERS=512 LLM_GEN_TOKENS=16 LLM_INFER_REPEATS=64 LLM_TRAIN_STEPS=128
+```
+
+Each profile gets its own build sub-directory
+(`build/.../llm/<profile-tag>/`), so switching profiles never reuses stale
+ELFs from a previous run.
 
 ## Benchmarks
 
@@ -33,7 +66,7 @@ profile strings for published comparisons.
 Every run prints stable, machine-readable records with a `RLLMBENCH_` prefix:
 
 ```text
-RLLMBENCH_INFO version=0.1 profile=ops8-gen12-train4 arch=... xlen=... target=... time_unit=s score=score_per_sec
+RLLMBENCH_INFO version=0.1 profile=ops8-gen12x1-train4 arch=... xlen=... target=... time_unit=s score=score_per_sec
 RLLMBENCH_RESULT name=q8_matmul class=kernel unit=mac work=65536 seconds=... score_per_sec=... checksum=0x...
 RLLMBENCH_SCORE mode=ops work=... seconds=... score_per_sec=... checksum=0x...
 RLLMBENCH_END mode=ops status=PASS sink=0x...
@@ -141,13 +174,16 @@ profile knobs when comparing machines:
 
 ```shell
 make llm-native-test HOST_CC=clang NATIVE_CFLAGS="-O3 -Wall -std=gnu99 -Wno-unused-function"
-make llm-native-test LLM_OP_ITERS=8192 LLM_GEN_TOKENS=16 LLM_TRAIN_STEPS=4096
+make llm-native-test \
+    LLM_OP_ITERS=8192 LLM_GEN_TOKENS=16 LLM_INFER_REPEATS=64 LLM_TRAIN_STEPS=4096
 ```
 
-Keep `ops8-gen12-train4` for checksum/portability smoke tests. Use a larger
-profile such as `ops8192-gen16-train4096` for native performance comparisons,
-because the default profile can finish in only tens of microseconds on modern
-hosts.
+The native target's per-platform default
+(`ops524288-gen16x131072-train262144`) is calibrated for ~3–5s wall-clock per
+mode on modern x86/Apple cores. Drop to a smaller profile (e.g.
+`LLM_NATIVE_OP_ITERS=8 LLM_NATIVE_INFER_REPEATS=1 LLM_NATIVE_TRAIN_STEPS=4`) to
+match the NPC checksum/portability smoke profile. Use the same explicit knobs
+on every backend when publishing comparisons.
 
 ## LiteX / FPGA
 

@@ -12,14 +12,60 @@ ARGS ?= -b -n## Simulator args for nsim/NEMU run targets (-b: batch, -n: no wave
 MAX_INST ?=## Optional maximum instruction limit for tinyos cli-nsim/cli-nemu
 TIMEOUT ?=## Optional wall-clock timeout in seconds for tinyos cli-nsim
 USER_ELF ?=## ELF binary for pk-run
-LLM_OP_ITERS ?= 8## LLM operator benchmark repeat count
-LLM_GEN_TOKENS ?= 12## LLM inference generated token count
-LLM_TRAIN_STEPS ?= 4## LLM training benchmark steps
+# ----------------------------------------------------------------------------
+# RLLMBench profile knobs.
+# Per-platform defaults below target ~1-5s wall-clock per mode (Embench-style)
+# while keeping RTL simulation tractable. Override any LLM_* knob on the
+# command line to force a fixed profile across platforms (recommended for
+# published comparisons, e.g. `make llm-... LLM_OP_ITERS=8192 LLM_GEN_TOKENS=16
+# LLM_INFER_REPEATS=512 LLM_TRAIN_STEPS=1024`).
+# ----------------------------------------------------------------------------
+# NPC RTL simulator (~kHz model time): smallest profile.
+LLM_NPC_OP_ITERS    ?= 8##  NPC operator iters
+LLM_NPC_GEN_TOKENS  ?= 12## NPC generated tokens (<=16)
+LLM_NPC_INFER_REPEATS ?= 1## NPC infer outer repeats
+LLM_NPC_TRAIN_STEPS ?= 4##  NPC training steps
+# NEMU software ISS (~100-500 MIPS): moderate profile.
+LLM_NEMU_OP_ITERS    ?= 64##  NEMU operator iters
+LLM_NEMU_GEN_TOKENS  ?= 16##  NEMU generated tokens (<=16)
+LLM_NEMU_INFER_REPEATS ?= 2## NEMU infer outer repeats
+LLM_NEMU_TRAIN_STEPS ?= 16##  NEMU training steps
+# Native host (~GHz): large profile, ~3-5s per mode wall-clock on modern cores.
+LLM_NATIVE_OP_ITERS    ?= 524288##  Native operator iters
+LLM_NATIVE_GEN_TOKENS  ?= 16##       Native generated tokens (<=16)
+LLM_NATIVE_INFER_REPEATS ?= 131072## Native infer outer repeats
+LLM_NATIVE_TRAIN_STEPS ?= 262144##   Native training steps
+# Generic fallback (also used for litex-build path); equivalent to NPC profile.
+LLM_OP_ITERS ?= $(LLM_NPC_OP_ITERS)## LLM operator benchmark repeat count
+LLM_GEN_TOKENS ?= $(LLM_NPC_GEN_TOKENS)## LLM inference generated token count
+LLM_INFER_REPEATS ?= $(LLM_NPC_INFER_REPEATS)## LLM inference outer repeat count
+LLM_TRAIN_STEPS ?= $(LLM_NPC_TRAIN_STEPS)## LLM training benchmark steps
 RLLMBENCH_NPC_TIMEBASE_HZ ?= 10000000## NPC RISC-V time CSR frequency in Hz
 RLLMBENCH_TIMEBASE_HZ ?= 1000000## RISC-V time CSR frequency in Hz
 RLLMBENCH_NPC_CORE_CLOCK_MHZ ?= 1000## NPC core clock model in MHz for RLLMBench score/MHz
 RLLMBENCH_CORE_CLOCK_MHZ ?= 0## Core clock in MHz for RLLMBench score/MHz (0=omit)
 RLLMBENCH_NATIVE_CORE_CLOCK_MHZ ?= 0## Native host core clock in MHz for RLLMBench score/MHz (0=omit)
+# ----------------------------------------------------------------------------
+# RAgentBench profile knobs (agentic-workload CPU benchmark).
+# Sized to keep NPC RTL sim tractable while remaining representative.
+# ----------------------------------------------------------------------------
+AGENT_NPC_TOOL_ITERS    ?= 16## NPC tool dispatch iterations (32 calls/iter)
+AGENT_NPC_RAG_QUERIES   ?= 16## NPC retrieval queries
+AGENT_NPC_FLOW_TURNS    ?= 16## NPC workflow agent loop turns
+AGENT_NEMU_TOOL_ITERS   ?= 64## NEMU tool dispatch iterations
+AGENT_NEMU_RAG_QUERIES  ?= 64## NEMU retrieval queries
+AGENT_NEMU_FLOW_TURNS   ?= 64## NEMU workflow agent loop turns
+AGENT_NATIVE_TOOL_ITERS  ?= 16384## Native tool dispatch iterations
+AGENT_NATIVE_RAG_QUERIES ?= 4096## Native retrieval queries
+AGENT_NATIVE_FLOW_TURNS  ?= 4096## Native workflow agent loop turns
+AGENT_TOOL_ITERS  ?= $(AGENT_NPC_TOOL_ITERS)## Tool dispatch iterations
+AGENT_RAG_QUERIES ?= $(AGENT_NPC_RAG_QUERIES)## Retrieval queries
+AGENT_FLOW_TURNS  ?= $(AGENT_NPC_FLOW_TURNS)## Workflow agent loop turns
+RAGENTBENCH_NPC_TIMEBASE_HZ ?= 10000000## NPC RISC-V time CSR frequency in Hz for RAgentBench
+RAGENTBENCH_TIMEBASE_HZ ?= 1000000## RISC-V time CSR frequency in Hz for RAgentBench
+RAGENTBENCH_NPC_CORE_CLOCK_MHZ ?= 1000## NPC core clock in MHz for RAgentBench score/MHz
+RAGENTBENCH_CORE_CLOCK_MHZ ?= 0## Core clock in MHz for RAgentBench score/MHz (0=omit)
+RAGENTBENCH_NATIVE_CORE_CLOCK_MHZ ?= 0## Native host core clock in MHz for RAgentBench score/MHz (0=omit)
 PYTHON ?= python3## Python interpreter for benchmark report generation
 
 ifneq ($(origin RUN_ON), undefined)
@@ -204,11 +250,16 @@ embench-nemu: embench-build ## Build and run all Embench benchmarks on NEMU via 
 # LLM-style AI benchmarks
 # ============================================================================
 LLM_BENCHMARKS := llm-ops llm-infer llm-train
-LLM_VARS := LLM_OP_ITERS=$(LLM_OP_ITERS) \
-            LLM_GEN_TOKENS=$(LLM_GEN_TOKENS) \
-			LLM_TRAIN_STEPS=$(LLM_TRAIN_STEPS) \
-			RLLMBENCH_TIMEBASE_HZ=$(RLLMBENCH_TIMEBASE_HZ)
-LLM_BUILD_DIR := $(APP_HOME)/build/rv$(XLEN)/benchmarks/llm
+# NOTE: LLM_VARS is intentionally deferred (=, not :=) so that target-specific
+# variable overrides for $(LLM_NPC_TARGETS) / $(LLM_NEMU_TARGETS) / native take
+# effect in the recursive sub-make.
+LLM_VARS = LLM_OP_ITERS=$(LLM_OP_ITERS) \
+           LLM_GEN_TOKENS=$(LLM_GEN_TOKENS) \
+           LLM_INFER_REPEATS=$(LLM_INFER_REPEATS) \
+           LLM_TRAIN_STEPS=$(LLM_TRAIN_STEPS) \
+           RLLMBENCH_TIMEBASE_HZ=$(RLLMBENCH_TIMEBASE_HZ)
+LLM_PROFILE_TAG = ops$(LLM_OP_ITERS)-gen$(LLM_GEN_TOKENS)x$(LLM_INFER_REPEATS)-train$(LLM_TRAIN_STEPS)
+LLM_BUILD_DIR = $(APP_HOME)/build/rv$(XLEN)/benchmarks/llm/$(LLM_PROFILE_TAG)
 LLM_LOG_DIR = $(LLM_BUILD_DIR)/logs/$(RLLMBENCH_BACKEND)
 LLM_REPORT_DIR := $(LLM_BUILD_DIR)/reports
 LLM_REPORT_MD = $(LLM_REPORT_DIR)/rllmbench-$(RLLMBENCH_BACKEND).md
@@ -221,9 +272,21 @@ LLM_NEMU_TARGETS := llm-ops-nemu llm-infer-nemu llm-train-nemu llm-bench-run-nem
 $(LLM_NPC_TARGETS): RLLMBENCH_BACKEND := npc
 $(LLM_NPC_TARGETS): RLLMBENCH_TIMEBASE_HZ := $(RLLMBENCH_NPC_TIMEBASE_HZ)
 $(LLM_NPC_TARGETS): RLLMBENCH_CORE_CLOCK_MHZ := $(RLLMBENCH_NPC_CORE_CLOCK_MHZ)
+$(LLM_NPC_TARGETS): LLM_OP_ITERS := $(LLM_NPC_OP_ITERS)
+$(LLM_NPC_TARGETS): LLM_GEN_TOKENS := $(LLM_NPC_GEN_TOKENS)
+$(LLM_NPC_TARGETS): LLM_INFER_REPEATS := $(LLM_NPC_INFER_REPEATS)
+$(LLM_NPC_TARGETS): LLM_TRAIN_STEPS := $(LLM_NPC_TRAIN_STEPS)
 $(LLM_NEMU_TARGETS): RLLMBENCH_BACKEND := nemu
 $(LLM_NEMU_TARGETS): RLLMBENCH_TIMEBASE_HZ := 1000000
 $(LLM_NEMU_TARGETS): RLLMBENCH_CORE_CLOCK_MHZ := 0
+$(LLM_NEMU_TARGETS): LLM_OP_ITERS := $(LLM_NEMU_OP_ITERS)
+$(LLM_NEMU_TARGETS): LLM_GEN_TOKENS := $(LLM_NEMU_GEN_TOKENS)
+$(LLM_NEMU_TARGETS): LLM_INFER_REPEATS := $(LLM_NEMU_INFER_REPEATS)
+$(LLM_NEMU_TARGETS): LLM_TRAIN_STEPS := $(LLM_NEMU_TRAIN_STEPS)
+llm-native-build llm-native-test: LLM_OP_ITERS := $(LLM_NATIVE_OP_ITERS)
+llm-native-build llm-native-test: LLM_GEN_TOKENS := $(LLM_NATIVE_GEN_TOKENS)
+llm-native-build llm-native-test: LLM_INFER_REPEATS := $(LLM_NATIVE_INFER_REPEATS)
+llm-native-build llm-native-test: LLM_TRAIN_STEPS := $(LLM_NATIVE_TRAIN_STEPS)
 
 llm-bench-build: ## Build LLM operator/infer/train benchmark ELFs
 	@$(MAKE) $(Q) -C $(APP_HOME)/benchmarks/llm build $(LLM_VARS)
@@ -242,7 +305,7 @@ define _llm_bench_report_with
 	@mkdir -p $(LLM_LOG_DIR) $(LLM_REPORT_DIR)
 	@find $(LLM_LOG_DIR) -type f -name '*.log' -delete
 	@rm -f $(LLM_REPORT_MD) $(LLM_REPORT_CSV) $(LLM_REPORT_JSON)
-	@echo "=== Running RLLMBench ($(RLLMBENCH_BACKEND), profile=ops$(LLM_OP_ITERS)-gen$(LLM_GEN_TOKENS)-train$(LLM_TRAIN_STEPS)) ==="
+	@echo "=== Running RLLMBench ($(RLLMBENCH_BACKEND), profile=ops$(LLM_OP_ITERS)-gen$(LLM_GEN_TOKENS)x$(LLM_INFER_REPEATS)-train$(LLM_TRAIN_STEPS)) ==="
 	@fail=0; for bench in $(LLM_BENCHMARKS); do \
 		elf=$(LLM_BUILD_DIR)/$$bench.elf; \
 		log=$(LLM_LOG_DIR)/$$bench.log; \
@@ -301,6 +364,119 @@ llm-bench-report-npc: llm-bench-build ## Build, run, log, and summarize RLLMBenc
 
 llm-bench-report-nemu: llm-bench-build ## Build, run, log, and summarize RLLMBench on NEMU
 	$(call _llm_bench_report_with,nemu-run)
+
+# ============================================================================
+# RAgentBench: agentic-workload CPU benchmarks
+# ============================================================================
+AGENT_BENCHMARKS := agent-tools agent-rag agent-workflow
+AGENT_VARS = AGENT_TOOL_ITERS=$(AGENT_TOOL_ITERS) \
+             AGENT_RAG_QUERIES=$(AGENT_RAG_QUERIES) \
+             AGENT_FLOW_TURNS=$(AGENT_FLOW_TURNS) \
+             RAGENTBENCH_TIMEBASE_HZ=$(RAGENTBENCH_TIMEBASE_HZ)
+AGENT_BUILD_DIR := $(APP_HOME)/build/rv$(XLEN)/benchmarks/agent
+AGENT_LOG_DIR = $(AGENT_BUILD_DIR)/logs/$(RAGENTBENCH_BACKEND)
+AGENT_REPORT_DIR := $(AGENT_BUILD_DIR)/reports
+AGENT_REPORT_MD = $(AGENT_REPORT_DIR)/ragentbench-$(RAGENTBENCH_BACKEND).md
+AGENT_REPORT_CSV = $(AGENT_REPORT_DIR)/ragentbench-$(RAGENTBENCH_BACKEND).csv
+AGENT_REPORT_JSON = $(AGENT_REPORT_DIR)/ragentbench-$(RAGENTBENCH_BACKEND).json
+AGENT_REPORT_SCRIPT := $(APP_HOME)/benchmarks/agent/report.py
+AGENT_NPC_TARGETS := agent-tools-npc agent-rag-npc agent-workflow-npc agent-bench-run-npc agent-bench-report-npc
+AGENT_NEMU_TARGETS := agent-tools-nemu agent-rag-nemu agent-workflow-nemu agent-bench-run-nemu agent-bench-report-nemu
+
+RAGENTBENCH_BACKEND := npc
+
+$(AGENT_NPC_TARGETS): RAGENTBENCH_BACKEND := npc
+$(AGENT_NPC_TARGETS): RAGENTBENCH_TIMEBASE_HZ := $(RAGENTBENCH_NPC_TIMEBASE_HZ)
+$(AGENT_NPC_TARGETS): RAGENTBENCH_CORE_CLOCK_MHZ := $(RAGENTBENCH_NPC_CORE_CLOCK_MHZ)
+$(AGENT_NPC_TARGETS): AGENT_TOOL_ITERS := $(AGENT_NPC_TOOL_ITERS)
+$(AGENT_NPC_TARGETS): AGENT_RAG_QUERIES := $(AGENT_NPC_RAG_QUERIES)
+$(AGENT_NPC_TARGETS): AGENT_FLOW_TURNS := $(AGENT_NPC_FLOW_TURNS)
+$(AGENT_NEMU_TARGETS): RAGENTBENCH_BACKEND := nemu
+$(AGENT_NEMU_TARGETS): RAGENTBENCH_TIMEBASE_HZ := 1000000
+$(AGENT_NEMU_TARGETS): RAGENTBENCH_CORE_CLOCK_MHZ := 0
+$(AGENT_NEMU_TARGETS): AGENT_TOOL_ITERS := $(AGENT_NEMU_TOOL_ITERS)
+$(AGENT_NEMU_TARGETS): AGENT_RAG_QUERIES := $(AGENT_NEMU_RAG_QUERIES)
+$(AGENT_NEMU_TARGETS): AGENT_FLOW_TURNS := $(AGENT_NEMU_FLOW_TURNS)
+agent-native-build agent-native-test: AGENT_TOOL_ITERS := $(AGENT_NATIVE_TOOL_ITERS)
+agent-native-build agent-native-test: AGENT_RAG_QUERIES := $(AGENT_NATIVE_RAG_QUERIES)
+agent-native-build agent-native-test: AGENT_FLOW_TURNS := $(AGENT_NATIVE_FLOW_TURNS)
+
+agent-bench-build: ## Build RAgentBench tools/rag/workflow benchmark ELFs
+	@$(MAKE) $(Q) -C $(APP_HOME)/benchmarks/agent build $(AGENT_VARS)
+
+agent-litex-build: ## Build RAgentBench benchmarks as LiteX-native flat binaries
+	@$(MAKE) $(Q) -C $(APP_HOME)/benchmarks/agent litex-build $(AGENT_VARS)
+
+agent-native-build: ## Build RAgentBench benchmarks as host-native executables
+	@$(MAKE) $(Q) -C $(APP_HOME)/benchmarks/agent native-build $(AGENT_VARS)
+
+agent-native-test: ## Build, run, and report host-native RAgentBench
+	@$(MAKE) $(Q) -C $(APP_HOME)/benchmarks/agent native-test $(AGENT_VARS) PYTHON=$(PYTHON) \
+		RAGENTBENCH_CORE_CLOCK_MHZ=$(RAGENTBENCH_NATIVE_CORE_CLOCK_MHZ)
+
+define _agent_bench_report_with
+	@mkdir -p $(AGENT_LOG_DIR) $(AGENT_REPORT_DIR)
+	@find $(AGENT_LOG_DIR) -type f -name '*.log' -delete
+	@rm -f $(AGENT_REPORT_MD) $(AGENT_REPORT_CSV) $(AGENT_REPORT_JSON)
+	@echo "=== Running RAgentBench ($(RAGENTBENCH_BACKEND), profile=tools$(AGENT_TOOL_ITERS)-rag$(AGENT_RAG_QUERIES)-flow$(AGENT_FLOW_TURNS)) ==="
+	@fail=0; for bench in $(AGENT_BENCHMARKS); do \
+		elf=$(AGENT_BUILD_DIR)/$$bench.elf; \
+		log=$(AGENT_LOG_DIR)/$$bench.log; \
+		echo "--- $$bench ---"; \
+		if $(MAKE) $(Q) -C $(APP_HOME)/pk $(1) USER_ELF=$$elf > $$log 2>&1; then \
+			grep -E '^(RAgentBench|RAGENTBENCH_|agent_bench_done)' $$log || cat $$log; \
+			if ! grep -q 'RAGENTBENCH_END .*status=PASS' $$log; then \
+				echo "[RAgentBench] $$bench log missing PASS marker"; fail=1; \
+			fi; \
+		else \
+			rc=$$?; cat $$log; echo "[RAgentBench] $$bench failed (exit $$rc)"; fail=1; \
+		fi; \
+	done; \
+	for bench in $(AGENT_BENCHMARKS); do \
+		log=$(AGENT_LOG_DIR)/$$bench.log; \
+		if [ ! -s $$log ]; then echo "[RAgentBench] missing or empty log: $$log"; fail=1; fi; \
+	done; \
+	$(PYTHON) $(AGENT_REPORT_SCRIPT) \
+		--log-dir $(AGENT_LOG_DIR) \
+		--markdown $(AGENT_REPORT_MD) \
+		--csv $(AGENT_REPORT_CSV) \
+		--json $(AGENT_REPORT_JSON) \
+		--core-clock-mhz $(RAGENTBENCH_CORE_CLOCK_MHZ) \
+		--suite RAgentBench; \
+	report_rc=$$?; \
+	if [ $$report_rc -ne 0 ]; then exit $$report_rc; fi; \
+	exit $$fail
+endef
+
+agent-tools-npc: agent-bench-build ## Build and run RAgentBench tool dispatch benchmark on NPC/nsim via pk
+	@$(call _pk_run_with,pk-run,$(APP_HOME)/build/rv$(XLEN)/benchmarks/agent/agent-tools.elf)
+
+agent-tools-nemu: agent-bench-build ## Build and run RAgentBench tool dispatch benchmark on NEMU via pk
+	@$(call _pk_run_with,nemu-run,$(APP_HOME)/build/rv$(XLEN)/benchmarks/agent/agent-tools.elf)
+
+agent-rag-npc: agent-bench-build ## Build and run RAgentBench RAG benchmark on NPC/nsim via pk
+	@$(call _pk_run_with,pk-run,$(APP_HOME)/build/rv$(XLEN)/benchmarks/agent/agent-rag.elf)
+
+agent-rag-nemu: agent-bench-build ## Build and run RAgentBench RAG benchmark on NEMU via pk
+	@$(call _pk_run_with,nemu-run,$(APP_HOME)/build/rv$(XLEN)/benchmarks/agent/agent-rag.elf)
+
+agent-workflow-npc: agent-bench-build ## Build and run RAgentBench workflow benchmark on NPC/nsim via pk
+	@$(call _pk_run_with,pk-run,$(APP_HOME)/build/rv$(XLEN)/benchmarks/agent/agent-workflow.elf)
+
+agent-workflow-nemu: agent-bench-build ## Build and run RAgentBench workflow benchmark on NEMU via pk
+	@$(call _pk_run_with,nemu-run,$(APP_HOME)/build/rv$(XLEN)/benchmarks/agent/agent-workflow.elf)
+
+agent-bench-run-npc: agent-bench-build ## Build and run all RAgentBench benchmarks on NPC/nsim via pk without report files
+	$(call _pk_run_suite_with,RAgentBench,npc,pk-run,$(AGENT_BUILD_DIR),$(AGENT_BENCHMARKS))
+
+agent-bench-run-nemu: agent-bench-build ## Build and run all RAgentBench benchmarks on NEMU via pk without report files
+	$(call _pk_run_suite_with,RAgentBench,nemu,nemu-run,$(AGENT_BUILD_DIR),$(AGENT_BENCHMARKS))
+
+agent-bench-report-npc: agent-bench-build ## Build, run, log, and summarize RAgentBench on NPC/nsim
+	$(call _agent_bench_report_with,pk-run)
+
+agent-bench-report-nemu: agent-bench-build ## Build, run, log, and summarize RAgentBench on NEMU
+	$(call _agent_bench_report_with,nemu-run)
 
 # ============================================================================
 # TinyOS / OS bring-up targets (delegate to tinyos/Makefile)
@@ -452,6 +628,9 @@ clean: ## Clean all build artifacts
 		llm-bench-build llm-litex-build llm-native-build llm-native-test \
 		llm-ops-npc llm-ops-nemu llm-infer-npc llm-infer-nemu llm-train-npc llm-train-nemu \
 		llm-bench-run-npc llm-bench-run-nemu llm-bench-report-npc llm-bench-report-nemu \
+		agent-bench-build agent-litex-build agent-native-build agent-native-test \
+		agent-tools-npc agent-tools-nemu agent-rag-npc agent-rag-nemu agent-workflow-npc agent-workflow-nemu \
+		agent-bench-run-npc agent-bench-run-nemu agent-bench-report-npc agent-bench-report-nemu \
 		tinyos-sync \
 		os-cli-qemu egos-cli-qemu xv6-cli-qemu \
 		os-cli-nsim os-cli-nemu egos-cli-nsim egos-cli-nemu xv6-cli-nsim xv6-cli-nemu \

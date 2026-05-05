@@ -1,5 +1,6 @@
 `include "rapt.svh"
 `include "rapt_if.svh"
+`include "rapt_soc.svh"
 
 // Re-Order Unit (ROU) - dispatch queue + reorder buffer + commit.
 //
@@ -51,6 +52,21 @@ module rapt_rou #(
     // Dispatch-only uop payload snapshot (cold side-channel for RS issue-read
     // and ioq trap-inst display). Indexed by ROB destination.
     output rapt_pkg::uop_payload_t uop_pl[`RAPT_ROB_SIZE],
+
+    // RISC-V Debug: external halt request from the cluster Debug Module.
+    // When asserted (level), block UOQ->ROB dispatch so the in-flight ROB
+    // drains naturally; once `rob_empty` we report `halted_o` to the DM.
+    // Resume happens automatically when `dm_haltreq_i` is deasserted.
+    input  logic            dm_haltreq_i,
+    output logic            halted_o,
+    // Next architectural PC at the halt boundary (= npc of the youngest
+    // committed instruction, or PC_RESET on cold halt). The DM samples
+    // this on the halted_o rising edge and uses it as dpc.
+    output logic [XLEN-1:0] halt_pc_o,
+    // Single-cycle pulse: at least one ROB entry retired this cycle
+    // (commit fire). Used by the DM to count instructions while
+    // dcsr.step=1 so single-step requests halt after exactly one retire.
+    output logic            commit_fire_o,
 
     input reset
 );
@@ -135,10 +151,34 @@ module rapt_rou #(
   logic rob_empty;
   assign rob_empty = (rob_head == rob_tail_a) && !rob_entry[rob_head].busy;
 
+  // External halt: drain ROB and stop dispatching new uops while haltreq is
+  // asserted. `halted_o` is the level the DM samples for dmstatus.allhalted.
+  assign halted_o  = dm_haltreq_i && rob_empty;
+
+  // Latched npc of the youngest committed instruction. Used as the resume
+  // PC reported to the Debug Module (dpc). Reset to PC_RESET so a halt
+  // before any commit shows the cold-boot vector instead of 0.
+  logic [XLEN-1:0] commit_npc_q;
+  always_ff @(posedge clock) begin
+    if (reset) begin
+      commit_npc_q <= XLEN'(`RAPT_PC_INIT);
+    end else if (head0_valid && !recieved_trap) begin
+      commit_npc_q <= dual_commit ? rob_entry[h1].npc : rob_entry[h0].npc;
+    end
+  end
+  assign halt_pc_o = commit_npc_q;
+
+  // Per-cycle commit-fire pulse for the Debug Module's single-step
+  // counter. Asserted iff at least one instruction commits this cycle
+  // (matches `head0_valid && !recieved_trap`, mirroring the rob_head
+  // increment logic in the always_ff block).
+  assign commit_fire_o = head0_valid && !recieved_trap;
+
   logic serialize_in_flight;
 
   assign uoq_deq_fire_a = rou_exu.ready && uoq_valid[uoq_tail_a] && !rob_entry[rob_tail_a].busy
       && !serialize_in_flight
+      && !dm_haltreq_i
       && (!uoq_tail_a_is_serializing || rob_empty);
 
 `ifdef RAPT_DUAL_ISSUE
@@ -160,6 +200,7 @@ module rapt_rou #(
 
   assign valid_a         = uoq_valid[uoq_tail_a] && !rob_entry[rob_tail_a].busy
       && !serialize_in_flight
+      && !dm_haltreq_i
       && (!uoq_tail_a_is_serializing || rob_empty);
   assign ready_a = !uoq_valid[uoq_head_a];
   assign rou_exu.valid = valid_a;

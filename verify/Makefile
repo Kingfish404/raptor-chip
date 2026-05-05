@@ -779,7 +779,7 @@ jtag-selftest: ## JTAG: 23-point DTM/DM compliance probe (no NEMU needed)
 jtag-debug-tests-setup: ## JTAG: clone upstream riscv-tests/debug suite
 	$(MAKE) -C $(JTAG_DIR) debug-tests-setup
 
-jtag-debug-tests: ## JTAG: run upstream debug suite (BLOCKED on P1 — see verify/jtag/README.md)
+jtag-debug-tests: ## JTAG: run upstream debug suite (BLOCKED, see verify/jtag/README.md)
 	$(MAKE) -C $(JTAG_DIR) debug-tests
 
 jtag-clean: ## JTAG: clean cloned riscv-tests + scratch artifacts

@@ -180,7 +180,7 @@ Each check takes ~70 seconds with depth 5.
 ### 6. JTAG / RISC-V Debug Verification (`make jtag`)
 
 Two-layer verification of the `rapt_dtm` + `rapt_dm` blocks introduced for
-the JTAG / RISC-V Debug Spec 1.0 P0 implementation. Lives in
+the JTAG / RISC-V Debug Spec 1.0 implementation. Lives in
 [verify/jtag/](./jtag/README.md) for full details.
 
 **Layer 1 — in-tree compliance probe (runs today):**

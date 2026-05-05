@@ -8,9 +8,12 @@ include $(APP_HOME)/common.mk
 
 BENCHES := ops infer train
 
-BUILD_DIR      := $(APP_HOME)/build/rv$(XLEN)/benchmarks/llm
-LITEX_BUILD_DIR := $(APP_HOME)/build/rv32/benchmarks/llm-litex
-NATIVE_BUILD_DIR := $(APP_HOME)/build/native/benchmarks/llm
+# Profile-tagged build dir: prevents stale ELFs when LLM_* knobs change between
+# invocations (e.g. switching from NPC to native profile).
+LLM_PROFILE_TAG := ops$(LLM_OP_ITERS)-gen$(LLM_GEN_TOKENS)x$(LLM_INFER_REPEATS)-train$(LLM_TRAIN_STEPS)
+BUILD_DIR      := $(APP_HOME)/build/rv$(XLEN)/benchmarks/llm/$(LLM_PROFILE_TAG)
+LITEX_BUILD_DIR := $(APP_HOME)/build/rv32/benchmarks/llm-litex/$(LLM_PROFILE_TAG)
+NATIVE_BUILD_DIR := $(APP_HOME)/build/native/benchmarks/llm/$(LLM_PROFILE_TAG)
 NATIVE_LOG_DIR   := $(NATIVE_BUILD_DIR)/logs/native
 NATIVE_REPORT_DIR := $(NATIVE_BUILD_DIR)/reports
 SRC            := $(_THIS_DIR)llm_bench.c
@@ -19,6 +22,7 @@ REPORT_SCRIPT  := $(_THIS_DIR)report.py
 
 LLM_OP_ITERS     ?= 8## Operator benchmark repeat count
 LLM_GEN_TOKENS   ?= 12## E2E inference generated token count (max 16)
+LLM_INFER_REPEATS ?= 1## E2E inference outer repeat count (extends infer wall-time beyond SEQ_LEN cap)
 LLM_TRAIN_STEPS  ?= 4## E2E training SGD steps
 RLLMBENCH_TIMEBASE_HZ ?= 10000000## RISC-V time CSR frequency in Hz
 RLLMBENCH_CORE_CLOCK_MHZ ?= 0## Core clock in MHz for score/MHz reports (0=omit)
@@ -36,6 +40,7 @@ CFLAGS := $(CFLAGS_COMMON) -std=gnu99 -I$(_THIS_DIR) \
           -DLLM_ARCH_STRING=\"$(ARCH)\" \
           -DLLM_OP_ITERS=$(LLM_OP_ITERS) \
           -DLLM_GEN_TOKENS=$(LLM_GEN_TOKENS) \
+          -DLLM_INFER_REPEATS=$(LLM_INFER_REPEATS) \
           -DLLM_TRAIN_STEPS=$(LLM_TRAIN_STEPS) \
 		  -DRLLMBENCH_TIMEBASE_HZ=$(RLLMBENCH_TIMEBASE_HZ) \
           -Wno-unused-function
@@ -58,6 +63,7 @@ LITEX_CFLAGS  := -march=$(LITEX_ARCH) -mabi=$(LITEX_ABI) -mcmodel=medany \
                  -DLLM_ARCH_STRING=\"$(LITEX_ARCH)\" \
                  -DLLM_OP_ITERS=$(LLM_OP_ITERS) \
                  -DLLM_GEN_TOKENS=$(LLM_GEN_TOKENS) \
+                 -DLLM_INFER_REPEATS=$(LLM_INFER_REPEATS) \
                  -DLLM_TRAIN_STEPS=$(LLM_TRAIN_STEPS) \
 				 -DRLLMBENCH_TIMEBASE_HZ=$(RLLMBENCH_TIMEBASE_HZ) \
                  -Wno-unused-function
@@ -93,6 +99,7 @@ $(NATIVE_BUILD_DIR)/llm-$(1): $(SRC) $(PORT_HDR)
 		-DLLM_ARCH_STRING=\"$$(NATIVE_ARCH_STRING)\" \
 		-DLLM_OP_ITERS=$$(LLM_OP_ITERS) \
 		-DLLM_GEN_TOKENS=$$(LLM_GEN_TOKENS) \
+		-DLLM_INFER_REPEATS=$$(LLM_INFER_REPEATS) \
 		-DLLM_TRAIN_STEPS=$$(LLM_TRAIN_STEPS) \
 		-DLLM_BENCH_MODE=$$(MODE_$(1)) \
 		$$(SRC) $$(NATIVE_LDFLAGS) -o $$@
@@ -126,7 +133,7 @@ native-run: native-build ## Run host-native RLLMBench without report files
 native-report: native-build ## Run host-native RLLMBench and emit reports
 	@mkdir -p $(NATIVE_LOG_DIR) $(NATIVE_REPORT_DIR)
 	@find $(NATIVE_LOG_DIR) -type f -name '*.log' -delete
-	@echo "=== Running native RLLMBench (profile=ops$(LLM_OP_ITERS)-gen$(LLM_GEN_TOKENS)-train$(LLM_TRAIN_STEPS)) ==="
+	@echo "=== Running native RLLMBench (profile=ops$(LLM_OP_ITERS)-gen$(LLM_GEN_TOKENS)x$(LLM_INFER_REPEATS)-train$(LLM_TRAIN_STEPS)) ==="
 	@fail=0; for bench in $(BENCHES); do \
 		exe=$(NATIVE_BUILD_DIR)/llm-$$bench; \
 		log=$(NATIVE_LOG_DIR)/llm-$$bench.log; \
@@ -151,7 +158,9 @@ native-report: native-build ## Run host-native RLLMBench and emit reports
 native-test: native-report ## Alias for host-native build/run/report smoke test
 
 clean:
-	rm -rf $(BUILD_DIR) $(LITEX_BUILD_DIR) $(NATIVE_BUILD_DIR)
+	rm -rf $(APP_HOME)/build/rv$(XLEN)/benchmarks/llm \
+	       $(APP_HOME)/build/rv32/benchmarks/llm-litex \
+	       $(APP_HOME)/build/native/benchmarks/llm
 
 .PRECIOUS: $(PK_ELFS) $(LITEX_ELFS) $(NATIVE_BINS)
 .PHONY: build litex-build litex-build-one native-build native-run native-report native-test clean

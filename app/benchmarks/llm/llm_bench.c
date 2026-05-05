@@ -25,6 +25,9 @@ int printf(const char *fmt, ...);
 #ifndef LLM_TRAIN_STEPS
 #define LLM_TRAIN_STEPS 4
 #endif
+#ifndef LLM_INFER_REPEATS
+#define LLM_INFER_REPEATS 1
+#endif
 #ifndef LLM_ARCH_STRING
 #define LLM_ARCH_STRING "unknown"
 #endif
@@ -46,7 +49,7 @@ int printf(const char *fmt, ...);
 
 #define LLM_STR_IMPL(x) #x
 #define LLM_STR(x) LLM_STR_IMPL(x)
-#define LLM_PROFILE "ops" LLM_STR(LLM_OP_ITERS) "-gen" LLM_STR(LLM_GEN_TOKENS) "-train" LLM_STR(LLM_TRAIN_STEPS)
+#define LLM_PROFILE "ops" LLM_STR(LLM_OP_ITERS) "-gen" LLM_STR(LLM_GEN_TOKENS) "x" LLM_STR(LLM_INFER_REPEATS) "-train" LLM_STR(LLM_TRAIN_STEPS)
 
 #define DIM 32
 #define HIDDEN 64
@@ -127,9 +130,9 @@ static void bench_mode_begin(const char *mode, const char *kind)
     g_mode_time_us = 0;
     g_mode_checksum = 0x811c9dc5U;
     printf("RLLMBENCH_BEGIN mode=%s kind=%s profile=%s\n", mode, kind, LLM_PROFILE);
-    printf("RLLMBENCH_CONFIG mode=%s arch=%s xlen=%d target=%s op_iters=%d gen_tokens=%d train_steps=%d dim=%d layers=%d heads=%d seq=%d vocab=%d\n",
+    printf("RLLMBENCH_CONFIG mode=%s arch=%s xlen=%d target=%s op_iters=%d gen_tokens=%d infer_repeats=%d train_steps=%d dim=%d layers=%d heads=%d seq=%d vocab=%d\n",
            mode, LLM_ARCH_STRING, LLM_TARGET_XLEN, RLLMBENCH_TARGET_STRING,
-           LLM_OP_ITERS, LLM_GEN_TOKENS,
+           LLM_OP_ITERS, LLM_GEN_TOKENS, LLM_INFER_REPEATS,
            LLM_TRAIN_STEPS, DIM, N_LAYERS, N_HEADS, SEQ_LEN, VOCAB);
 }
 
@@ -612,22 +615,25 @@ static int run_infer(void)
         tokens = SEQ_LEN;
     }
     init_infer_model();
-    printf("RLLMBench e2e inference: layers=%d dim=%d heads=%d seq=%d vocab=%d tokens=%d\n",
-           N_LAYERS, DIM, N_HEADS, SEQ_LEN, VOCAB, tokens);
+    printf("RLLMBench e2e inference: layers=%d dim=%d heads=%d seq=%d vocab=%d tokens=%d repeats=%d\n",
+           N_LAYERS, DIM, N_HEADS, SEQ_LEN, VOCAB, tokens, LLM_INFER_REPEATS);
     bench_mode_begin("infer", "e2e");
 
     uint64_t attention_work = (uint64_t)N_LAYERS * ((uint64_t)tokens * (tokens + 1ULL) / 2ULL) * 2ULL * DIM;
     uint64_t layer_work = (uint64_t)tokens * N_LAYERS * (4ULL * DIM * DIM + 3ULL * HIDDEN * DIM);
     uint64_t output_work = (uint64_t)tokens * VOCAB * DIM;
-    uint64_t infer_work = attention_work + layer_work + output_work;
+    uint64_t infer_work = (attention_work + layer_work + output_work) * (uint64_t)LLM_INFER_REPEATS;
 
     rllmbench_time_us_t start = rllmbench_get_time_us();
     int token = 7;
     uint32_t checksum = 0x31415926U;
-    for (int pos = 0; pos < tokens; pos++)
+    for (int rep = 0; rep < LLM_INFER_REPEATS; rep++)
     {
-        token = transformer_step(token, pos);
-        checksum = mix32(checksum ^ (uint32_t)token ^ (uint32_t)logits[token]);
+        for (int pos = 0; pos < tokens; pos++)
+        {
+            token = transformer_step(token, pos);
+            checksum = mix32(checksum ^ (uint32_t)token ^ (uint32_t)logits[token]);
+        }
     }
     bench_record("e2e_infer", "e2e", "work", infer_work, rllmbench_get_time_us() - start, checksum);
     printf("last_token=%d logit=%d\n", token, (int)logits[token]);

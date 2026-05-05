@@ -64,6 +64,28 @@ module rapt_core #(
     // reads of `mhartid`; no microarchitectural side-effects.
     input [XLEN-1:0] hart_id_i,
 
+    // RISC-V Debug: external halt request from the cluster Debug Module
+    // (level). The core stops dispatching new uops while asserted and
+    // reports `halted_o` once the ROB has drained.
+    input  logic            dm_haltreq_i,
+    output logic            halted_o,
+    // Resume PC reported to the DM (= npc of the youngest committed
+    // instruction). Sampled by rapt_dm into dpc on halt entry.
+    output logic [XLEN-1:0] halt_pc_o,
+    // Single-cycle pulse: at least one instruction retired this cycle.
+    // Sampled by rapt_dm to implement dcsr.step.
+    output logic            commit_fire_o,
+
+    // RISC-V Debug: abstract `access_register` GPR view (committed). Indexed
+    // by 5-bit architectural reg number; valid only while `halted_o` is
+    // asserted (otherwise rename state may be in flight).
+    output logic [XLEN-1:0] dbg_gpr_rdata_o[`RAPT_REG_SIZE],
+    // Debug GPR write back into the PRF (single-cycle pulse). Caller must
+    // guarantee `halted_o`. x0 writes are dropped inside rapt_prf.
+    input  logic            dbg_gpr_we_i,
+    input  logic [     4:0] dbg_gpr_addr_i,
+    input  logic [XLEN-1:0] dbg_gpr_wdata_i,
+
     input reset
 );
   // L1I Cache
@@ -203,6 +225,9 @@ module rapt_core #(
   logic [XLEN-1:0] rf_map[`RAPT_REG_SIZE];
   /* verilator lint_on UNUSEDSIGNAL */
 
+  // Expose committed GPR view to the cluster-level Debug Module.
+  assign dbg_gpr_rdata_o = rf;
+
 `ifdef RAPT_RVFI
   logic [XLEN-1:0] rvfi_rd_wdata_a_w;
   logic [XLEN-1:0] rvfi_rd_wdata_b_w;
@@ -224,7 +249,11 @@ module rapt_core #(
       .rat_snapshot(rnu_rat_snapshot),
 
       .rf    (rf),
-      .rf_map(rf_map)
+      .rf_map(rf_map),
+
+      .dbg_we_i   (dbg_gpr_we_i),
+      .dbg_addr_i (dbg_gpr_addr_i),
+      .dbg_wdata_i(dbg_gpr_wdata_i)
 
 `ifdef RAPT_RVFI,
         .rvfi_rd_wdata_a(rvfi_rd_wdata_a_w)
@@ -259,6 +288,11 @@ module rapt_core #(
       .rou_lsu(rou_lsu),
 
       .uop_pl(uop_pl),
+
+      .dm_haltreq_i (dm_haltreq_i),
+      .halted_o     (halted_o),
+      .halt_pc_o    (halt_pc_o),
+      .commit_fire_o(commit_fire_o),
 
       .reset(reset)
   );

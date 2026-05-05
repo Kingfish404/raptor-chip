@@ -9,7 +9,7 @@
 //   IR=0x11 DMI     : 41-bit DMI access {addr[6:0], data[31:0], op[1:0]}
 //   IR=0x1F BYPASS  : 1-bit shift through
 //
-// IMPORTANT: this is a *simulation-only* P0 implementation:
+// IMPORTANT: this is a *simulation-only* implementation:
 //   - tck is tied to `clock` externally; no CDC. This matches dev.jtag.md
 //     §5.5 RAPT_SIM_JTAG_SAMECLK.
 //   - DTMCS.dmistat is hardwired to 0 (no busy/sticky modelling).
@@ -17,7 +17,7 @@
 //     is captured next cycle. Result of an op-N read is visible in op-(N+1)'s
 //     Capture-DR (the standard "delayed-read" DMI pattern).
 //
-// Future P1 work: split tck/clk domains, add rapt_dmi_cdc.sv (4-phase
+// Future work: split tck/clk domains, add rapt_dmi_cdc.sv (4-phase
 // req/ack), add dtmcs.dmireset/dtmhardreset side-effects, model busy/sticky.
 //
 // verilator lint_off UNUSEDSIGNAL

@@ -165,6 +165,34 @@ module rapt #(
   axi4_if #(.XLEN(XLEN)) core_axi ();
   axi4_if #(.XLEN(XLEN)) offchip_axi ();
 
+  // -----------------------------------------------------------------
+  // Debug Transport Module + Debug Module (cluster-level).
+  // -----------------------------------------------------------------
+  logic            dmi_req;
+  logic            dmi_wr;
+  logic [     6:0] dmi_addr;
+  logic [    31:0] dmi_wdata;
+  logic [    31:0] dmi_rdata;
+  logic [     1:0] dmi_resp;
+  logic            dm_haltreq;
+  logic            dm_resumereq;
+  logic            dm_ndmreset;
+  logic            dm_halted;
+  logic [XLEN-1:0] dm_halt_pc;
+  logic            dm_commit_fire;
+  /* verilator lint_off UNUSEDSIGNAL */
+  logic            dm_resumereq_unused;
+  logic            dm_ndmreset_unused;
+  /* verilator lint_on UNUSEDSIGNAL */
+
+  // DM <-> core debug GPR bus (committed view + write port). x0 writes
+  // are dropped inside rapt_prf; caller must hold `dm_halted` before
+  // pulsing `dm_dbg_gpr_we`.
+  logic [XLEN-1:0] dm_dbg_gpr_rdata    [`RAPT_REG_SIZE];
+  logic            dm_dbg_gpr_we;
+  logic [     4:0] dm_dbg_gpr_addr;
+  logic [XLEN-1:0] dm_dbg_gpr_wdata;
+
   assign io_master_arburst = offchip_axi.arburst;
   assign io_master_arsize = offchip_axi.arsize;
   assign io_master_arlen = offchip_axi.arlen;
@@ -294,29 +322,22 @@ module rapt #(
       // Hart 0; multi-core build will replace with a generate index.
       .hart_id_i({XLEN{1'b0}}),
 
+      .dm_haltreq_i (dm_haltreq),
+      .halted_o     (dm_halted),
+      .halt_pc_o    (dm_halt_pc),
+      .commit_fire_o(dm_commit_fire),
+
+      .dbg_gpr_rdata_o(dm_dbg_gpr_rdata),
+      .dbg_gpr_we_i   (dm_dbg_gpr_we),
+      .dbg_gpr_addr_i (dm_dbg_gpr_addr),
+      .dbg_gpr_wdata_i(dm_dbg_gpr_wdata),
+
       .reset(reset)
   );
 
-  // -----------------------------------------------------------------
-  // Debug Transport Module + Debug Module (cluster-level).
-  // -----------------------------------------------------------------
-  logic        dmi_req;
-  logic        dmi_wr;
-  logic [ 6:0] dmi_addr;
-  logic [31:0] dmi_wdata;
-  logic [31:0] dmi_rdata;
-  logic [ 1:0] dmi_resp;
-  logic        dm_haltreq;
-  logic        dm_resumereq;
-  logic        dm_ndmreset;
-  /* verilator lint_off UNUSEDSIGNAL */
-  logic        dm_haltreq_unused;
-  logic        dm_resumereq_unused;
-  logic        dm_ndmreset_unused;
-  /* verilator lint_on UNUSEDSIGNAL */
-  assign dm_haltreq_unused   = dm_haltreq;
   assign dm_resumereq_unused = dm_resumereq;
   assign dm_ndmreset_unused  = dm_ndmreset;
+
 
   rapt_dtm dtm_inst (
       .clock    (clock),
@@ -334,17 +355,24 @@ module rapt #(
   );
 
   rapt_dm dm_inst (
-      .clock      (clock),
-      .reset      (reset),
-      .dmi_req    (dmi_req),
-      .dmi_wr     (dmi_wr),
-      .dmi_addr   (dmi_addr),
-      .dmi_wdata  (dmi_wdata),
-      .dmi_rdata  (dmi_rdata),
-      .dmi_resp   (dmi_resp),
-      .haltreq_o  (dm_haltreq),
-      .resumereq_o(dm_resumereq),
-      .ndmreset_o (dm_ndmreset)
+      .clock          (clock),
+      .reset          (reset),
+      .dmi_req        (dmi_req),
+      .dmi_wr         (dmi_wr),
+      .dmi_addr       (dmi_addr),
+      .dmi_wdata      (dmi_wdata),
+      .dmi_rdata      (dmi_rdata),
+      .dmi_resp       (dmi_resp),
+      .halted_i       (dm_halted),
+      .halt_pc_i      (dm_halt_pc),
+      .commit_fire_i  (dm_commit_fire),
+      .haltreq_o      (dm_haltreq),
+      .resumereq_o    (dm_resumereq),
+      .ndmreset_o     (dm_ndmreset),
+      .dbg_gpr_rdata_i(dm_dbg_gpr_rdata),
+      .dbg_gpr_we_o   (dm_dbg_gpr_we),
+      .dbg_gpr_addr_o (dm_dbg_gpr_addr),
+      .dbg_gpr_wdata_o(dm_dbg_gpr_wdata)
   );
 
 `ifdef RAPT_USE_SLAVE

@@ -17,6 +17,8 @@ make coremark-npc         # CoreMark benchmark
 make embench-npc          # Embench-IoT benchmarks
 make llm-bench-report-npc # RLLMBench: LLM operator/infer/train benchmark + report
 make llm-native-test  # RLLMBench host-native build/run/report smoke test
+make agent-bench-report-npc # RAgentBench: agentic-workload CPU benchmark + report
+make agent-native-test    # RAgentBench host-native build/run/report smoke test
 
 # Run on NEMU
 make isa-tests-nemu
@@ -220,6 +222,35 @@ make llm-litex-build
 From `fpga/litex`, use `make app-llm-infer` for LiteX simulation or
 `make app-llm-infer-fpga UART_PORT=/dev/tty.usbserial-...` to upload via BIOS
 serialboot.
+
+## RAgentBench
+
+`benchmarks/agent` contains RAgentBench, an agentic-workload CPU benchmark that
+stresses the irregular-control-flow regime typical of LLM-agent runtimes (tool
+dispatch, retrieval scoring, multi-turn policy loops). It is **complementary**
+to RLLMBench: RLLMBench measures dense int8/int16 GEMM-like behavior; RAgentBench
+measures branch-heavy switch-table dispatch, BM25-lite scoring, and FSM-driven
+agent loops. A core that wins one can lose the other.
+
+Like RLLMBench, RAgentBench is single-file C99, no malloc, no FP, deterministic,
+and portable across host-native, pk/NPC, NEMU, LiteX baremetal, and FPGA. Three
+modes: `tools`, `rag`, `workflow`. Headline metric `score_per_sec`. Log lines
+use the `RAGENTBENCH_*` prefix; profile string is
+`tools<N>-rag<N>-flow<N>` (default `tools16-rag16-flow16` on NPC).
+
+```bash
+make agent-bench-build      # cross-compile pk ELFs
+make agent-bench-report-npc # build + run + summarize on NPC/nsim
+make agent-bench-report-nemu
+make agent-litex-build      # LiteX flat binaries
+make agent-native-test      # host-native smoke test
+```
+
+> RAgentBench evaluates the **CPU/SoC**, not the LLM. There is no model and no
+> network. Reference inspirations: BFCL v3 (function-call dispatch), tau-bench
+> (multi-turn policy + state-based subchecks), TheAgentCompany (subcheckpoints),
+> MLCommons / Farama project standards (reproducibility framing). See
+> `benchmarks/agent/README.md` for the full design and log contract.
 
 ## Toolchain
 
