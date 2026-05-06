@@ -548,7 +548,7 @@ module rapt_lsu #(
   // walu is 5-bit; XLEN/8 == 8.  Only the low 5 bits of the overflow can
   // possibly be set (SD has at most 7 spill bytes, so <= 0x7f; but even SW
   // overflow fits in 3 bits).  Zero-extend safely.
-  assign ma_walu_hi = {1'b0, ma_wstrb_wide[2*XLEN/8-1:XLEN/8][3:0]};
+  assign ma_walu_hi = {1'b0, ma_wstrb_wide[XLEN/8+3:XLEN/8]};
 `else
   assign ma_walu_hi = {{(5-XLEN/8){1'b0}}, ma_wstrb_wide[2*XLEN/8-1:XLEN/8]};
 `endif

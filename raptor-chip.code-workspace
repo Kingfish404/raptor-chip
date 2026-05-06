@@ -5,6 +5,18 @@
     }
   ],
   "settings": {
+    // Repository-wide indentation: 2 spaces (Makefiles keep tabs via overrides below).
+    "editor.tabSize": 2,
+    "editor.insertSpaces": true,
+    "editor.detectIndentation": false,
+    "[makefile]": {
+      "editor.insertSpaces": false,
+      "editor.tabSize": 4
+    },
+    "[go]": {
+      "editor.insertSpaces": false,
+      "editor.tabSize": 4
+    },
     "C_Cpp.default.compileCommands": "${workspaceFolder}/compile_commands.json",
     "clangd.arguments": [
       "--compile-commands-dir=${workspaceFolder}"

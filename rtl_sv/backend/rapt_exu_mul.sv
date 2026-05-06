@@ -77,36 +77,50 @@ module rapt_exu_mul #(
   logic [ TAG_W-1:0] m2_tag;
   logic              m2_v;
 
+  // Single shared (XLEN+1)x(XLEN+1) signed multiplier. Operand sign-extension
+  // bit is op-dependent so MUL/MULH/MULHSU/MULHU all reuse the same datapath:
+  //   * MUL  : low XLEN bits — sign-extension irrelevant
+  //   * MULH : signed   x signed   — both extended with sign bit
+  //   * MULHSU: signed  x unsigned — only s1 extended
+  //   * MULHU: unsigned x unsigned — neither extended
+  // Replaces three independent 2*XLEN-wide multipliers (only one was ever
+  // used per cycle) with one 2*(XLEN+1)-wide signed multiplier.
+  logic              m1_sext_a;
+  logic              m1_sext_b;
+  always_comb begin
+    unique case (m1_op)
+      `RAPT_ALU_MULH__: begin m1_sext_a = 1'b1; m1_sext_b = 1'b1; end
+      `RAPT_ALU_MULHSU: begin m1_sext_a = 1'b1; m1_sext_b = 1'b0; end
+      `RAPT_ALU_MULHU_: begin m1_sext_a = 1'b0; m1_sext_b = 1'b0; end
+      // MUL (and any default) — low product is sign-agnostic.
+      default:          begin m1_sext_a = 1'b0; m1_sext_b = 1'b0; end
+    endcase
+  end
+
+  logic signed [XLEN:0]     mul_ext_a;
+  logic signed [XLEN:0]     mul_ext_b;
   /* verilator lint_off UNUSEDSIGNAL */
-  logic [2*XLEN-1:0] mulh;
-  logic [  2*XLEN:0] muls;
-  logic [2*XLEN-1:0] mulu;
+  logic signed [2*XLEN+1:0] mul_full;
   /* verilator lint_on UNUSEDSIGNAL */
-
-  // Sign/zero extend to 2*XLEN for high-word multiply (stage-1 operands)
-  assign mulh = {{XLEN{m1_s1[XLEN-1]}}, m1_s1} * {{XLEN{m1_s2[XLEN-1]}}, m1_s2};
-  assign muls = {{XLEN{m1_s1[XLEN-1]}}, m1_s1} * {{XLEN{1'b0}}, m1_s2};
-  assign mulu = {({{XLEN{1'b0}}, m1_s1}) * ({{XLEN{1'b0}}, m1_s2})};
-
-  // W-variant: use lower 32-bit operands
-  logic [XLEN-1:0] m1_ws1, m1_ws2;
-  assign m1_ws1 = {{XLEN - 32{m1_s1[31]}}, m1_s1[31:0]};
-  assign m1_ws2 = {{XLEN - 32{m1_s2[31]}}, m1_s2[31:0]};
+  assign mul_ext_a = $signed({m1_sext_a & m1_s1[XLEN-1], m1_s1});
+  assign mul_ext_b = $signed({m1_sext_b & m1_s2[XLEN-1], m1_s2});
+  assign mul_full  = mul_ext_a * mul_ext_b;
 
   logic [XLEN-1:0] mul_r_comb;
   always_comb begin
     unique case (m1_op)
       // verilog_format: off
       `RAPT_ALU_MUL___: begin
-          if (m1_word) begin
-            logic [31:0] mul32; mul32 = m1_ws1[31:0] * m1_ws2[31:0];
-            mul_r_comb = {{XLEN-32{mul32[31]}}, mul32};
-          end else
-            mul_r_comb = m1_s1 * m1_s2;
+          if (m1_word && XLEN > 32) begin
+            // RV64 MULW: 32-bit low product, sign-extended to XLEN.
+            mul_r_comb = {{XLEN-32{mul_full[31]}}, mul_full[31:0]};
+          end else begin
+            mul_r_comb = mul_full[XLEN-1:0];
+          end
         end
-      `RAPT_ALU_MULH__: begin mul_r_comb = mulh[2*XLEN-1:XLEN]; end
-      `RAPT_ALU_MULHSU: begin mul_r_comb = muls[2*XLEN-1:XLEN]; end
-      `RAPT_ALU_MULHU_: begin mul_r_comb = mulu[2*XLEN-1:XLEN]; end
+      `RAPT_ALU_MULH__,
+      `RAPT_ALU_MULHSU,
+      `RAPT_ALU_MULHU_: begin mul_r_comb = mul_full[2*XLEN-1:XLEN]; end
                default: begin mul_r_comb = '0; end
       // verilog_format: on
     endcase

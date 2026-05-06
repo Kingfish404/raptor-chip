@@ -1,9 +1,13 @@
-name: RISC-V Compatibility
+name: Verify (RISCOF compatibility + coverage)
 
-# Cross-validates the Raptor core against the upstream riscv-non-isa/riscv-arch-test
-# suite via the classic RISCOF flow (sail-riscv reference). Complements the
-# ACT4-based `verify-riscof.yaml` workflow; any divergence between the two
-# flows is a strong signal of an ISA bug or an environment mismatch.
+# Combined verification workflow:
+#   - riscof-classic: cross-validates the Raptor core against the upstream
+#     riscv-non-isa/riscv-arch-test suite via the classic RISCOF flow
+#     (sail-riscv reference). Complements the ACT4-based `verify-riscof.yaml`
+#     workflow; any divergence is a strong signal of an ISA bug or env mismatch.
+#   - fuzztest-sigtest-and-coverage: builds NPC with coverage instrumentation
+#     and runs the verify suite (coremark / hello-pk / isa-tests-pk / microbench
+#     / fuzz / sigtest) to produce a unified Verilator coverage report.
 
 on:
   schedule:
@@ -14,19 +18,21 @@ on:
       - "rtl_sv/**"
       - "rtl_scala/**"
       - "nsim/**"
-      - "verify/riscof/classic/**"
-      - "verify/Makefile"
-      - ".github/workflows/riscv-arch-test.yaml"
+      - "verify/**"
+      - ".github/workflows/verify.yaml"
   pull_request:
     branches: [ "master", "main" ]
     paths:
       - "rtl_sv/**"
       - "rtl_scala/**"
       - "nsim/**"
-      - "verify/riscof/classic/**"
-      - "verify/Makefile"
-      - ".github/workflows/riscv-arch-test.yaml"
+      - "verify/**"
+      - ".github/workflows/verify.yaml"
   workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   riscof-classic:
@@ -85,7 +91,7 @@ jobs:
         with:
           path: verify/riscof/classic/riscv-arch-test
           key: riscv-arch-test-main-${{ hashFiles('verify/riscof/classic/plugins/**',
-            '.github/workflows/riscv-arch-test.yaml') }}
+            '.github/workflows/verify.yaml') }}
 
       - name: “Sanity check | sail + toolchain”
         shell: bash -l {0}
@@ -150,3 +156,48 @@ jobs:
             !verify/build/riscof-classic/**/*.elf
           if-no-files-found: warn
           retention-days: 14
+
+  fuzztest-sigtest-and-coverage:
+    runs-on: ubuntu-latest
+    env:
+      RAPTOR_HOME: ${{ github.workspace }}
+      NEMU_HOME: ${{ github.workspace }}/nemu
+      AM_HOME: ${{ github.workspace }}/abstract-machine
+      CROSS_COMPILE: riscv64-elf-
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup environment
+        run: ./setup.sh
+      - name: Build NPC with difftest and NEMU-Ref
+        shell: bash -l {0}
+        run: |
+          make config-npc32-difftest
+          make config-nemu32-ref
+      # - name: Random instruction fuzz tests
+      #   shell: bash -l {0}
+      #   run: make -C verify fuzz SEED=42 FUZZ_NUM=20 FUZZ_LEN=200 TIMEOUT=10
+      # - name: Signature-based ISA tests
+      #   shell: bash -l {0}
+      #   run: make -C verify sigtest TIMEOUT=10
+      - name: Build NPC with coverage instrumentation
+        shell: bash -l {0}
+        run: make -C verify coverage-build
+      - name: Run fuzz + sigtest for coverage
+        shell: bash -l {0}
+        run: |
+          make -C verify coverage-run-coremark
+          make -C verify coverage-run-hello-pk
+          make -C verify coverage-run-isa-tests-pk
+          make -C verify coverage-run-microbench
+          make -C verify coverage-run-fuzz TIMEOUT=10
+          make -C verify coverage-run-sigtest TIMEOUT=10
+      - name: Generate coverage report
+        shell: bash -l {0}
+        run: make -C verify coverage-report
+      - name: Upload coverage artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: verify/build/coverage/
+          retention-days: 30

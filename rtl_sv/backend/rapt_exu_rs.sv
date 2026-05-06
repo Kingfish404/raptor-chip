@@ -77,9 +77,7 @@ module rapt_exu_rs #(
   logic                   [   XLEN-1:0] rs_mul_a      [RS_SIZE];
 
   logic                   [RS_SIZE-1:0] rs_jen;
-  logic                   [RS_SIZE-1:0] rs_br_jmp;
   logic                   [RS_SIZE-1:0] rs_br_cond;
-  logic                   [RS_SIZE-1:0] rs_jump;
   logic                   [   XLEN-1:0] rs_imm        [RS_SIZE];
 
   // Consolidated slot-B ineligibility flag, latched at dispatch. Collapses
@@ -268,7 +266,7 @@ module rapt_exu_rs #(
   // === ALU & MUL function units ===
   logic [           XLEN-1:0] alu_result_a;
   logic [           XLEN-1:0] alu_result_b;
-  logic [           XLEN-1:0] alu_result_c;
+  logic                       btaken_c;
   logic [           XLEN-1:0] reg_wdata_mul;
   logic                       mul_valid;
   logic                       mul_ready;
@@ -288,15 +286,28 @@ module rapt_exu_rs #(
       .word(rs_word[valid_idx_b]),
       .out_r(alu_result_b)
   );
-  // Port C reuses the full ALU; only branch comparison opcodes ever drive
-  // valid_idx_c, so synthesis can prune unreachable cones.
-  rapt_exu_alu gen_alu_c (
-      .s1(rs_vj[valid_idx_c]),
-      .s2(rs_vk[valid_idx_c]),
-      .op(rs_alu[valid_idx_c]),
-      .word(rs_word[valid_idx_c]),
-      .out_r(alu_result_c)
-  );
+  // Port C is a dedicated mini-BRU: only the 6 conditional-branch compare
+  // opcodes (BEQ/BNE/BLT/BGE/BLTU/BGEU -> ALU_EQ_/XOR_/SLT_/SGE_/SLTU/SGEU)
+  // ever schedule here (gated by rs_br_cond in rs_bru_vec). We compute a
+  // single taken/not-taken bit instead of a full XLEN-wide result, which
+  // removes one full-ALU consumer from rs_vj/vk[idx_c] fanout and shrinks
+  // op-driven cones (no shifter / Zbb / Zbs / CLMUL behind port C).
+  logic [XLEN-1:0] bru_s1, bru_s2;
+  logic [     5:0] bru_op;
+  assign bru_s1 = rs_vj[valid_idx_c];
+  assign bru_s2 = rs_vk[valid_idx_c];
+  assign bru_op = rs_alu[valid_idx_c];
+  always_comb begin
+    unique case (bru_op)
+      `RAPT_ALU_EQ__: btaken_c = (bru_s1 == bru_s2);                       // BEQ
+      `RAPT_ALU_XOR_: btaken_c = (bru_s1 != bru_s2);                       // BNE: |s1^s2
+      `RAPT_ALU_SLT_: btaken_c = ($signed(bru_s1) < $signed(bru_s2));      // BLT
+      `RAPT_ALU_SGE_: btaken_c = ($signed(bru_s1) >= $signed(bru_s2));     // BGE
+      `RAPT_ALU_SLTU: btaken_c = (bru_s1 < bru_s2);                        // BLTU
+      `RAPT_ALU_SGEU: btaken_c = (bru_s1 >= bru_s2);                       // BGEU
+      default:        btaken_c = 1'b0;
+    endcase
+  end
 
 `ifdef RAPT_M_EXTENSION
   rapt_exu_mul #(
@@ -352,9 +363,7 @@ module rapt_exu_rs #(
             rs_c[free_idx_a] <= rou_exu.uop.c;
             rs_word[free_idx_a] <= rou_exu.uop.word;
             rs_jen[free_idx_a] <= rou_exu.uop.jen;
-            rs_br_jmp[free_idx_a] <= (rou_exu.uop.jen || rou_exu.uop.ecall || rou_exu.uop.mret);
             rs_br_cond[free_idx_a] <= (rou_exu.uop.ben);
-            rs_jump[free_idx_a] <= (rou_exu.uop.jen);
             rs_imm[free_idx_a] <= rou_exu.uop.imm;
             rs_pc[free_idx_a] <= rou_exu.uop.pc;
             rs_b_block[free_idx_a] <= (rou_exu.uop.system || rou_exu.uop.trap
@@ -439,10 +448,7 @@ module rapt_exu_rs #(
         rs_c[disp.b_rs_idx] <= rou_exu.uop_b.c;
         rs_word[disp.b_rs_idx] <= rou_exu.uop_b.word;
         rs_jen[disp.b_rs_idx] <= rou_exu.uop_b.jen;
-        rs_br_jmp[disp.b_rs_idx]  <= (
-          rou_exu.uop_b.jen || rou_exu.uop_b.ecall || rou_exu.uop_b.mret);
         rs_br_cond[disp.b_rs_idx] <= (rou_exu.uop_b.ben);
-        rs_jump[disp.b_rs_idx] <= (rou_exu.uop_b.jen);
         rs_imm[disp.b_rs_idx] <= rou_exu.uop_b.imm;
         rs_pc[disp.b_rs_idx] <= rou_exu.uop_b.pc;
         rs_b_block[disp.b_rs_idx] <= (rou_exu.uop_b.system || rou_exu.uop_b.trap
@@ -483,7 +489,9 @@ module rapt_exu_rs #(
   // === Slot-A writeback (full path: ALU + CSR + system + trap) ===
   logic [XLEN-1:0] addr_exu_a;
   logic [XLEN-1:0] csr_wdata_a;
-  assign addr_exu_a = ((rs_jump[valid_idx_a]
+  // `rs_jen` doubles as the "jump base = vj" select; ecall/ebreak/mret/sret/
+  // trap are short-circuited above this expression, so jen is sufficient.
+  assign addr_exu_a = ((rs_jen[valid_idx_a]
       ? rs_vj[valid_idx_a]
       : rs_pc[valid_idx_a]) + rs_imm[valid_idx_a]) & ~'b1;
 
@@ -524,7 +532,7 @@ module rapt_exu_rs #(
               ? exu_csr.mepc
               : rs_pl_a.sret
                   ? exu_csr.sepc
-                  : (rs_br_jmp[valid_idx_a]) || (rs_br_cond[valid_idx_a] && |alu_result_a)
+                  : (rs_jen[valid_idx_a]) || (rs_br_cond[valid_idx_a] && |alu_result_a)
                       ? addr_exu_a
                       : (rs_pc[valid_idx_a] + (rs_c[valid_idx_a] ? 2 : 4)));
   assign exu_rou.btaken = (rs_br_cond[valid_idx_a] && |alu_result_a);
@@ -548,8 +556,11 @@ module rapt_exu_rs #(
   assign exu_rou.valid = valid_found_a;
 
   // === Slot-B writeback (pure ALU + jen) ===
+  // Slot B never schedules ecall/mret/trap (rs_b_block) and never schedules
+  // conditional branches (rs_simple_b_vec excludes rs_br_cond), so the only
+  // taken-redirect source is JAL/JALR (rs_jen).
   logic [XLEN-1:0] addr_exu_b;
-  assign addr_exu_b = ((rs_jump[valid_idx_b]
+  assign addr_exu_b = ((rs_jen[valid_idx_b]
       ? rs_vj[valid_idx_b]
       : rs_pc[valid_idx_b]) + rs_imm[valid_idx_b]) & ~'b1;
 
@@ -561,11 +572,12 @@ module rapt_exu_rs #(
   assign exu_rou_b.prd = rs_prd[valid_idx_b];
   assign exu_rou_b.rd = rs_rd[valid_idx_b];
   assign exu_rou_b.pc = rs_pc[valid_idx_b];
-  assign exu_rou_b.npc    =
-      (rs_br_jmp[valid_idx_b] || (rs_br_cond[valid_idx_b] && |alu_result_b))
+  // rs_br_cond[b] is always 0 at port-B issue (see rs_simple_b_vec); only
+  // unconditional jumps (rs_jen) redirect here.
+  assign exu_rou_b.npc    = rs_jen[valid_idx_b]
       ? addr_exu_b
       : rs_pc[valid_idx_b] + (rs_c[valid_idx_b] ? 2 : 4);
-  assign exu_rou_b.btaken = (rs_br_cond[valid_idx_b] && |alu_result_b);
+  assign exu_rou_b.btaken = 1'b0;
   assign exu_rou_b.difftest_skip = 1'b0;
 
   // === Port-C writeback (BRU only) ===
@@ -575,10 +587,10 @@ module rapt_exu_rs #(
   assign exu_rou_c.valid = valid_found_c;
   assign exu_rou_c.dest = rs_dest[valid_idx_c];
   assign exu_rou_c.pc = rs_pc[valid_idx_c];
-  assign exu_rou_c.npc    = (|alu_result_c)
+  assign exu_rou_c.npc    = btaken_c
       ? addr_exu_c
       : rs_pc[valid_idx_c] + (rs_c[valid_idx_c] ? 2 : 4);
-  assign exu_rou_c.btaken = |alu_result_c;
+  assign exu_rou_c.btaken = btaken_c;
   assign exu_rou_c.difftest_skip = 1'b0;
 
 endmodule

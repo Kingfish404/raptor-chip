@@ -65,8 +65,6 @@ module rapt_exu_ioq #(
   logic [  ROBLen-1:0] ioq_dest            [IOQ_SIZE];
   logic [    XLEN-1:0] ioq_imm             [IOQ_SIZE];
 
-  logic [    XLEN-1:0] ioq_data            [IOQ_SIZE];
-
   logic [IOQ_SIZE-1:0] ioq_wen;
   logic [IOQ_SIZE-1:0] ioq_mmu_en;
   logic [IOQ_SIZE-1:0] ioq_trap;
@@ -130,30 +128,10 @@ module rapt_exu_ioq #(
   end
 
   // === Atomic op staging ===
-  always_comb begin
-    for (bit [XLEN-1:0] i = 0; i < IOQ_SIZE; i++) begin
-      if (ioq_atom[i]) begin
-        case (ioq_alu[i])
-          `RAPT_ATO_LR__: ioq_data[i] = 'b0;
-          `RAPT_ATO_SC__: ioq_data[i] = ioq_vk[i];
-          `RAPT_ATO_SWAP: ioq_data[i] = ioq_vk[i];
-          `RAPT_ATO_ADD_: ioq_data[i] = ioq_vk[i] + exu_lsu.rdata;
-          `RAPT_ATO_XOR_: ioq_data[i] = ioq_vk[i] ^ exu_lsu.rdata;
-          `RAPT_ATO_AND_: ioq_data[i] = ioq_vk[i] & exu_lsu.rdata;
-          `RAPT_ATO_OR__: ioq_data[i] = ioq_vk[i] | exu_lsu.rdata;
-          `RAPT_ATO_MIN_:
-          ioq_data[i] = $signed(exu_lsu.rdata) < $signed(ioq_vk[i]) ? exu_lsu.rdata : ioq_vk[i];
-          `RAPT_ATO_MAX_:
-          ioq_data[i] = $signed(exu_lsu.rdata) > $signed(ioq_vk[i]) ? exu_lsu.rdata : ioq_vk[i];
-          `RAPT_ATO_MINU: ioq_data[i] = exu_lsu.rdata < ioq_vk[i] ? exu_lsu.rdata : ioq_vk[i];
-          `RAPT_ATO_MAXU: ioq_data[i] = exu_lsu.rdata > ioq_vk[i] ? exu_lsu.rdata : ioq_vk[i];
-          default: ioq_data[i] = 'b0;
-        endcase
-      end else begin
-        ioq_data[i] = ioq_vk[i];
-      end
-    end
-  end
+  // AMO write data is computed only at the head (see `head_amo_wdata`),
+  // using the live or captured load result. Per-entry pre-computation was
+  // removed to eliminate IOQ_SIZE atomic ALU instances and fix a stale
+  // `exu_lsu.rdata` capture for non-live writeback cycles.
 
   // === Issue eligibility & priority encoder ===
   logic ioq_at_rob_head;
@@ -327,7 +305,7 @@ module rapt_exu_ioq #(
           : ioq_pc[ioq_head] + (ioq_c[ioq_head] ? 2 : 4);
   assign exu_ioq_bcast.result   = (ioq_atom[ioq_head] && ioq_alu[ioq_head] == `RAPT_ATO_SC__)
       ? (reservation_match ? 0 : 1)
-      : (ioq_ren[ioq_head] ? head_rdata : ioq_data[ioq_head]);
+      : (ioq_ren[ioq_head] ? head_rdata : ioq_vk[ioq_head]);
   assign exu_ioq_bcast.dest = ioq_dest[ioq_head];
   assign exu_ioq_bcast.prd = ioq_prd[ioq_head];
   assign exu_ioq_bcast.rd = ioq_rd[ioq_head];
@@ -338,7 +316,7 @@ module rapt_exu_ioq #(
   assign exu_ioq_bcast.sq_waddr = csr_bcast.dmmu_en
       ? ioq_paddr[ioq_head]
       : ioq_vj[ioq_head] + ioq_imm[ioq_head];
-  assign exu_ioq_bcast.sq_wdata = ioq_atom[ioq_head] ? head_amo_wdata : ioq_data[ioq_head];
+  assign exu_ioq_bcast.sq_wdata = ioq_atom[ioq_head] ? head_amo_wdata : ioq_vk[ioq_head];
   // For AMO RW (atomic with both R and W), PMP/page fault on either side
   // is reported as a store access fault per RISC-V spec.  LR is treated as a
   // pure load; SC as a pure store (PMP store path).

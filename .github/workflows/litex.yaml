@@ -16,6 +16,10 @@ on:
       - "fpga/litex/**"
       - ".github/workflows/litex*.yaml"
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   litex-test:
     runs-on: ubuntu-latest

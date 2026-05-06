@@ -22,6 +22,10 @@ on:
       - ".github/scripts/**"
       - ".github/workflows/linux-*.yaml"
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   linux-npc-test:
     runs-on: ubuntu-latest

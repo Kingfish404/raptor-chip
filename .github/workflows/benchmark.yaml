@@ -1,4 +1,10 @@
-name: App (pk)
+name: Benchmark (AM + pk + ysyxSoC)
+
+# Combined performance / functional benchmark workflow:
+#   - npc-benchmark / npc-cpu-tests   : abstract-machine on the Raptor NPC
+#   - app-pk-tests                    : pk-hosted apps (hello/CoreMark/Embench)
+#   - ysyxsoc-benchmark / ysyxsoc-cpu-tests : ysyxSoC integration
+# STA / PPA evaluation lives in the dedicated `sta.yaml` workflow.
 
 on:
   push:
@@ -7,18 +13,219 @@ on:
       - "rtl_sv/**"
       - "rtl_scala/**"
       - "nsim/**"
+      - "abstract-machine/**"
       - "app/**"
-      - ".github/workflows/app-*.yaml"
+      - ".github/scripts/**"
+      - ".github/workflows/benchmark.yaml"
   pull_request:
     branches: [ "master", "main" ]
     paths:
       - "rtl_sv/**"
       - "rtl_scala/**"
       - "nsim/**"
+      - "abstract-machine/**"
       - "app/**"
-      - ".github/workflows/app-*.yaml"
+      - ".github/scripts/**"
+      - ".github/workflows/benchmark.yaml"
+  workflow_dispatch:
+
+# Cancel in-flight runs on the same ref/PR when a newer commit is pushed.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
+  npc-benchmark:
+    runs-on: ubuntu-latest
+    env:
+      RAPTOR_HOME: ${{ github.workspace }}
+      NEMU_HOME: ${{ github.workspace }}/nemu
+      AM_HOME: ${{ github.workspace }}/abstract-machine
+      CROSS_COMPILE: riscv64-elf-
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup environment
+        run: ./setup.sh
+      - name: Build NEMU (ref) and NPC
+        shell: bash -l {0}
+        run: |
+          make config-nemu32-ref
+          make build-npc32
+
+      - name: Run microbench riscv32-npc
+        shell: bash -l {0}
+        run: |
+          mkdir -p .github/results
+          make microbench-npc32 ARGS="-b -n" MAINARGS=test \
+            2>&1 | tee /tmp/microbench-npc.log
+          bash .github/scripts/parse-benchmark.sh microbench /tmp/microbench-npc.log > .github/results/microbench-npc.txt
+
+      - name: Run microbench riscv32e-npc
+        shell: bash -l {0}
+        run: |
+          make microbench-npc32 NPC_ARCH=riscv32e-npc ARGS="-b -n" MAINARGS=test \
+            2>&1 | tee /tmp/microbench-npce.log
+          bash .github/scripts/parse-benchmark.sh microbench /tmp/microbench-npce.log > .github/results/microbench-npce.txt
+
+      - name: Run coremark riscv32-npc
+        shell: bash -l {0}
+        run: |
+          make coremark-npc32 ARGS="-b -n" \
+            2>&1 | tee /tmp/coremark-npc.log
+          bash .github/scripts/parse-benchmark.sh coremark /tmp/coremark-npc.log > .github/results/coremark-npc.txt
+
+      - name: Run coremark riscv32e-npc
+        shell: bash -l {0}
+        run: |
+          make coremark-npc32 NPC_ARCH=riscv32e-npc ARGS="-b -n" \
+            2>&1 | tee /tmp/coremark-npce.log
+          bash .github/scripts/parse-benchmark.sh coremark /tmp/coremark-npce.log > .github/results/coremark-npce.txt
+
+      - name: Run RISC-V Architecture Test riscv32-npc
+        shell: bash -l {0}
+        run: |
+          make archtest-npc32 ARGS="-b -n" \
+            2>&1 | tee /tmp/archtest-npc.log
+          bash .github/scripts/parse-benchmark.sh archtest /tmp/archtest-npc.log > .github/results/archtest-npc.txt
+
+      - name: Run RISC-V Architecture Test riscv32e-npc
+        shell: bash -l {0}
+        run: |
+          make archtest-npc32e ARGS="-b -n" \
+            2>&1 | tee /tmp/archtest-npce.log
+          bash .github/scripts/parse-benchmark.sh archtest /tmp/archtest-npce.log > .github/results/archtest-npce.txt
+
+      - name: Generate benchmark summary
+        run: bash .github/scripts/generate-summary.sh .github/results
+          .github/benchmark-results.json "$GITHUB_STEP_SUMMARY"
+
+      - name: PMU details
+        if: always()
+        run: |
+          bash .github/scripts/parse-pmu.sh \
+            "CoreMark riscv32-npc" /tmp/coremark-npc.log \
+            "CoreMark riscv32e-npc" /tmp/coremark-npce.log \
+            "MicroBench riscv32-npc" /tmp/microbench-npc.log \
+            "MicroBench riscv32e-npc" /tmp/microbench-npce.log \
+            >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results-${{ github.sha }}
+          path: |
+            .github/benchmark-results.json
+            .github/results/
+          retention-days: 90
+          overwrite: true
+
+  npc-cpu-tests:
+    runs-on: ubuntu-latest
+    env:
+      RAPTOR_HOME: ${{ github.workspace }}
+      NEMU_HOME: ${{ github.workspace }}/nemu
+      AM_HOME: ${{ github.workspace }}/abstract-machine
+      CROSS_COMPILE: riscv64-elf-
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup environment
+        run: ./setup.sh
+      - name: Build NPC with difftest and NEMU-Ref
+        shell: bash -l {0}
+        run: |
+          make config-npc32-difftest
+          make config-nemu32-ref
+      - name: cpu-tests riscv32e-npc
+        shell: bash -l {0}
+        run: make cpu-tests-npc32 NPC_ARCH=riscv32e-npc ARGS="-b -n"
+      - name: cpu-tests riscv32-npc
+        shell: bash -l {0}
+        run: make cpu-tests-npc32 NPC_ARCH=riscv32-npc ARGS="-b -n"
+
+  ysyxsoc-benchmark:
+    runs-on: ubuntu-latest
+    env:
+      RAPTOR_HOME: ${{ github.workspace }}
+      NEMU_HOME: ${{ github.workspace }}/nemu
+      AM_HOME: ${{ github.workspace }}/abstract-machine
+      CROSS_COMPILE: riscv64-elf-
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup environment
+        run: ./setup.sh
+      - name: Generate ysyxSoC
+        shell: bash -l {0}
+        run: make -C ./third_party/kingfish404/ysyxSoC/ dev-init verilog
+      - name: Build NPC (ysyxSoC config) and NEMU-Ref
+        shell: bash -l {0}
+        run: |
+          make config-npc32-ysyxsoc
+          make config-nemu32-ref
+      - name: Run microbench riscv32-ysyxsoc
+        shell: bash -l {0}
+        run: make microbench-ysyxsoc ARGS="-b -n" 2>&1 | tee /tmp/mb-soc.log
+      - name: Run microbench riscv32e-ysyxsoc
+        shell: bash -l {0}
+        run: |
+          make -C $RAPTOR_HOME/abstract-machine/app/am-kernels/benchmarks/microbench ARCH=riscv32e-ysyxsoc run mainargs="test" ARGS="-b -n" 2>&1 | tee /tmp/mb-soce.log
+      - name: Run coremark riscv32-ysyxsoc
+        shell: bash -l {0}
+        run: make coremark-ysyxsoc ARGS="-b -n" 2>&1 | tee /tmp/cm-soc.log
+      - name: Run coremark riscv32e-ysyxsoc
+        shell: bash -l {0}
+        run: |
+          make -C $RAPTOR_HOME/abstract-machine/app/am-kernels/benchmarks/coremark_eembc ARCH=riscv32e-ysyxsoc run ARGS="-b -n" 2>&1 | tee /tmp/cm-soce.log
+      - name: ysyxSoC benchmark summary
+        shell: bash -l {0}
+        run: |
+          extract_ipc() { grep -oP 'IPC:\s*\K[0-9.]+' "$1" 2>/dev/null | head -1 || echo "N/A"; }
+          extract_score() { grep -oP '\d+(?=(/1000)? Marks)' "$1" 2>/dev/null | head -1 || echo "N/A"; }
+          extract_trap() { grep -oE 'HIT (GOOD|BAD) TRAP' "$1" 2>/dev/null | head -1 || echo "N/A"; }
+          {
+            echo ""
+            echo "## ysyxSoC Benchmark Results"
+            echo "| Benchmark | Target | Score | IPC | Status |"
+            echo "|-----------|--------|-------|-----|--------|"
+            echo "| CoreMark  | riscv32-ysyxsoc  | $(extract_score /tmp/cm-soc.log) | $(extract_ipc /tmp/cm-soc.log) | $(extract_trap /tmp/cm-soc.log) |"
+            echo "| CoreMark  | riscv32e-ysyxsoc | $(extract_score /tmp/cm-soce.log) | $(extract_ipc /tmp/cm-soce.log) | $(extract_trap /tmp/cm-soce.log) |"
+            echo "| MicroBench | riscv32-ysyxsoc  | $(extract_score /tmp/mb-soc.log) | $(extract_ipc /tmp/mb-soc.log) | $(extract_trap /tmp/mb-soc.log) |"
+            echo "| MicroBench | riscv32e-ysyxsoc | $(extract_score /tmp/mb-soce.log) | $(extract_ipc /tmp/mb-soce.log) | $(extract_trap /tmp/mb-soce.log) |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          bash .github/scripts/parse-pmu.sh \
+            "CoreMark riscv32-ysyxsoc" /tmp/cm-soc.log \
+            "CoreMark riscv32e-ysyxsoc" /tmp/cm-soce.log \
+            "MicroBench riscv32-ysyxsoc" /tmp/mb-soc.log \
+            "MicroBench riscv32e-ysyxsoc" /tmp/mb-soce.log \
+            >> "$GITHUB_STEP_SUMMARY"
+
+  ysyxsoc-cpu-tests:
+    runs-on: ubuntu-latest
+    env:
+      RAPTOR_HOME: ${{ github.workspace }}
+      NEMU_HOME: ${{ github.workspace }}/nemu
+      AM_HOME: ${{ github.workspace }}/abstract-machine
+      CROSS_COMPILE: riscv64-elf-
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup environment
+        run: ./setup.sh
+      - name: Generate ysyxSoC
+        shell: bash -l {0}
+        run: make -C ./third_party/kingfish404/ysyxSoC/ dev-init verilog
+      - name: Build NPC (ysyxSoC config) and NEMU-Ref
+        shell: bash -l {0}
+        run: |
+          make config-npc32-ysyxsoc
+          make config-nemu32-ref
+      - name: cpu-tests riscv32-ysyxsoc
+        shell: bash -l {0}
+        run: make -C $RAPTOR_HOME/abstract-machine/app/am-kernels/tests/cpu-tests
+          ARCH=riscv32-ysyxsoc run ARGS="-b -n"
+      - name: cpu-tests riscv32e-ysyxsoc
+        shell: bash -l {0}
+        run: make -C $RAPTOR_HOME/abstract-machine/app/am-kernels/tests/cpu-tests
+          ARCH=riscv32e-ysyxsoc run ARGS="-b -n"
+
   app-pk-tests:
     runs-on: ubuntu-latest
     env:

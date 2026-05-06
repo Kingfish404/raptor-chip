@@ -131,9 +131,11 @@ module rapt_prf #(
   // ---- Write / state update ----
   always_ff @(posedge clock) begin
     if (reset) begin
-      for (integer i = 0; i < PNUM; i = i + 1) begin
-        prf_arr[i] <= '0;
-      end
+      // Only valid/transient need a defined reset value; `prf_arr` data is
+      // don't-care because every read is gated by `prf_valid[]`. Skipping
+      // PNUM*XLEN data flop reset endpoints removes that fanout from the
+      // global reset network (helped STA recovery on reset's BUF_X1 hot
+      // path).
       prf_valid     <= {{(PNUM - RNUM) {1'b0}}, {RNUM{1'b1}}};
       prf_transient <= '0;
     end else begin
@@ -149,10 +151,12 @@ module rapt_prf #(
         end else if (settle_prd_oh[i]) begin
           prf_transient[i] <= 1'b0;
         end else if (cmu_bcast.flush_pipe && prf_transient[i]) begin
-          // Flush: discard speculative writes
+          // Flush: discard speculative writes. `prf_arr[i]` itself is left
+          // intact -- the read side filters with `prf_valid` so the data
+          // is don't-care. This avoids dragging `flush_pipe` into the
+          // PNUM*XLEN data-flop D mux fanin.
           prf_valid[i]     <= 1'b0;
           prf_transient[i] <= 1'b0;
-          prf_arr[i]           <= '0;
         end else if (!cmu_bcast.flush_pipe && wr_a_oh[i]) begin
           prf_arr[i]           <= wr_a_data;
           prf_valid[i]     <= 1'b1;

@@ -1,0 +1,112 @@
+name: STA (PPA matrix)
+
+# Static Timing Analysis across {rv32, rv64} × {nangate45, asap7}.
+# Runs weekly to keep PPA numbers fresh without bloating PR CI.
+# Manual dispatch is also supported via the Actions tab.
+
+on:
+  push:
+    branches: ["master", "main"]
+    paths:
+      - "rtl_sv/**"
+      - "rtl_scala/**"
+      - "nsim/**"
+      - ".github/scripts/**"
+      - ".github/workflows/sta.yaml"
+  pull_request:
+    branches: ["master", "main"]
+    paths:
+      - "rtl_sv/**"
+      - "rtl_scala/**"
+      - "nsim/**"
+      - ".github/scripts/**"
+      - ".github/workflows/sta.yaml"
+  schedule:
+    - cron: "0 6 * * 1" # Mondays 06:00 UTC
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sta-analysis:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - xlen: rv32
+            platform: nangate45
+            vflags: ""
+          - xlen: rv64
+            platform: nangate45
+            vflags: "-DRAPT_RV64"
+          - xlen: rv32
+            platform: asap7
+            vflags: ""
+          - xlen: rv64
+            platform: asap7
+            vflags: "-DRAPT_RV64"
+    name: sta-${{ matrix.xlen }}-${{ matrix.platform }}
+    env:
+      RAPTOR_HOME: ${{ github.workspace }}
+      NEMU_HOME: ${{ github.workspace }}/nemu
+      AM_HOME: ${{ github.workspace }}/abstract-machine
+      CROSS_COMPILE: riscv64-elf-
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup environment
+        run: ./setup.sh
+      - name: Setup STA tools (${{ matrix.platform }})
+        shell: bash -l {0}
+        run: |
+          mkdir -p .github/results
+          [ -d third_party/yosys-opensta ] || git clone --depth 1 https://github.com/Kingfish404/yosys-opensta third_party/yosys-opensta
+          make -C third_party/yosys-opensta setup-opensta setup-${{ matrix.platform }}
+
+      - name: Run STA (${{ matrix.xlen }}, ${{ matrix.platform }})
+        shell: bash -l {0}
+        run: |
+          mkdir -p .github/results
+          LOG=/tmp/sta-${{ matrix.xlen }}-${{ matrix.platform }}.log
+          OUT=.github/results/sta-${{ matrix.xlen }}-${{ matrix.platform }}
+          make sta STA_PLATFORM=${{ matrix.platform }} VFLAGS="${{ matrix.vflags }}" \
+            2>&1 | tee "$LOG" | tail -256
+          cp "$LOG" "${OUT}.log"
+          bash .github/scripts/parse-benchmark.sh sta "$LOG" > "${OUT}.txt"
+
+      - name: Generate STA summary (${{ matrix.xlen }}, ${{ matrix.platform }})
+        shell: bash -l {0}
+        run: |
+          OUT=.github/results/sta-${{ matrix.xlen }}-${{ matrix.platform }}.txt
+          read_val() {
+            local key="$1"
+            grep -oP "^${key}=\\K.*" "$OUT" 2>/dev/null || echo "N/A"
+          }
+
+          FREQ=$(read_val freq_mhz)
+          AREA=$(read_val area)
+          POWER=$(read_val power)
+
+          {
+            echo ""
+            echo "## STA Results (${{ matrix.xlen }} / ${{ matrix.platform }})"
+            echo "| Metric | Value |"
+            echo "|--------|-------|"
+            echo "| ISA    | ${{ matrix.xlen }} |"
+            echo "| PDK    | ${{ matrix.platform }} |"
+            echo "| Fmax   | ${FREQ} MHz |"
+            echo "| Area   | ${AREA} |"
+            echo "| Power  | ${POWER} W |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload STA results
+        uses: actions/upload-artifact@v4
+        with:
+          name: sta-results-${{ matrix.xlen }}-${{ matrix.platform }}-${{ github.sha }}
+          path: |
+            .github/results/sta-${{ matrix.xlen }}-${{ matrix.platform }}.txt
+            .github/results/sta-${{ matrix.xlen }}-${{ matrix.platform }}.log
+          retention-days: 90
+          overwrite: true

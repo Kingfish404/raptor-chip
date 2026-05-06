@@ -655,6 +655,12 @@ module rapt_rou #(
       end
 
       // ---- Commit: retire ROB entries (up to 2 per cycle) ----
+      // Note: data fields (sq_waddr/sq_wdata/csr_wdata/cause/...) are
+      // intentionally NOT cleared here. Reads are all gated by `busy` /
+      // `wen` / `trap` / `csr_wen`, so leaving stale data in place is safe
+      // and removes head0_valid from the ROB-wide data-flop D-mux fanin
+      // (significant for STA: head0_valid drives ~ROB_SIZE * (sq_waddr +
+      // sq_wdata + csr_wdata + ...) wide D ports otherwise).
       if (head0_valid) begin
         rob_head                     <= dual_commit ? rob_head + 2 : rob_head + 1;
 
@@ -663,8 +669,6 @@ module rapt_rou #(
         rob_entry[rob_head].csr_wen  <= 1'b0;
         rob_entry[rob_head].trap     <= 1'b0;
         rob_entry[rob_head].wen      <= 1'b0;
-        rob_entry[rob_head].sq_waddr <= '0;
-        rob_entry[rob_head].sq_wdata <= '0;
 
         if (dual_commit) begin
           rob_entry[h1].busy     <= 1'b0;
@@ -672,8 +676,6 @@ module rapt_rou #(
           rob_entry[h1].csr_wen  <= 1'b0;
           rob_entry[h1].trap     <= 1'b0;
           rob_entry[h1].wen      <= 1'b0;
-          rob_entry[h1].sq_waddr <= '0;
-          rob_entry[h1].sq_wdata <= '0;
         end
 
         recieved_trap    <= clint_sw_trap || clint_timer_trap || clint_ext_trap || s_int_pending;
