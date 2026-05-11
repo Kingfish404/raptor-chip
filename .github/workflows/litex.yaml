@@ -26,7 +26,7 @@ jobs:
     env:
       RAPTOR_HOME: ${{ github.workspace }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Setup environment
         run: ./setup.sh
       - name: Prepare LiteX
@@ -67,7 +67,7 @@ jobs:
     env:
       RAPTOR_HOME: ${{ github.workspace }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Setup environment
         run: ./setup.sh
       - name: Prepare LiteX
@@ -146,7 +146,7 @@ jobs:
 
       - name: Upload logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: litex-embench-logs-${{ github.sha }}
           path: |

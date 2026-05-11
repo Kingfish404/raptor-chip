@@ -22,7 +22,7 @@ on:
       - ".github/scripts/**"
       - ".github/workflows/sta.yaml"
   schedule:
-    - cron: "0 6 * * 1" # Mondays 06:00 UTC
+    - cron: "0 20 * * 0" # Sundays 20:00 UTC
   workflow_dispatch:
 
 concurrency:
@@ -39,15 +39,27 @@ jobs:
           - xlen: rv32
             platform: nangate45
             vflags: ""
+            clk_freq_mhz: 50
           - xlen: rv64
             platform: nangate45
             vflags: "-DRAPT_RV64"
+            clk_freq_mhz: 25
           - xlen: rv32
             platform: asap7
             vflags: ""
+            clk_freq_mhz: 50
           - xlen: rv64
             platform: asap7
             vflags: "-DRAPT_RV64"
+            clk_freq_mhz: 25
+          - xlen: rv32
+            platform: sky130hd
+            vflags: ""
+            clk_freq_mhz: 25
+          - xlen: rv64
+            platform: sky130hd
+            vflags: "-DRAPT_RV64"
+            clk_freq_mhz: 25
     name: sta-${{ matrix.xlen }}-${{ matrix.platform }}
     env:
       RAPTOR_HOME: ${{ github.workspace }}
@@ -55,7 +67,7 @@ jobs:
       AM_HOME: ${{ github.workspace }}/abstract-machine
       CROSS_COMPILE: riscv64-elf-
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Setup environment
         run: ./setup.sh
       - name: Setup STA tools (${{ matrix.platform }})
@@ -71,7 +83,7 @@ jobs:
           mkdir -p .github/results
           LOG=/tmp/sta-${{ matrix.xlen }}-${{ matrix.platform }}.log
           OUT=.github/results/sta-${{ matrix.xlen }}-${{ matrix.platform }}
-          make sta STA_PLATFORM=${{ matrix.platform }} VFLAGS="${{ matrix.vflags }}" \
+          make sta STA_PLATFORM=${{ matrix.platform }} CLK_FREQ_MHZ=${{ matrix.clk_freq_mhz }} VFLAGS="${{ matrix.vflags }}" \
             2>&1 | tee "$LOG" | tail -256
           cp "$LOG" "${OUT}.log"
           bash .github/scripts/parse-benchmark.sh sta "$LOG" > "${OUT}.txt"
@@ -102,7 +114,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload STA results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: sta-results-${{ matrix.xlen }}-${{ matrix.platform }}-${{ github.sha }}
           path: |

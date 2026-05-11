@@ -77,13 +77,30 @@ package rapt_pkg;
     logic [11:0] csr_addr;  // equals uop.imm[11:0]
     logic [2:0]  csr_csw;   // CSR write strobes (W/S/C)
 
+    // Branch / jump classification (dispatch-only; branch resolution at WB
+    // updates rob_entry.btaken / mispredict instead). Used by commit path
+    // to inform the BPU of the resolved direction.
+    logic ben;
+    logic jen;
+    logic jren;
+
+    // Atomic classification (dispatch-only; commit path uses `atom_sc` to
+    // mark SC writes and `atom` to enforce serializing flush).
+    logic atom;
+    logic atom_sc;
+
+    // Architectural PC (dispatch-only; the corresponding `npc` lives in
+    // `rob_entry_t` because it is WB-mutable).
+    logic [XLENPkg-1:0] pc;
+
     // Original instruction (debug / RVFI / difftest). On commit, a trap
     // entry is surfaced as `'h13` (NOP) via a read-side mux.
     logic [31:0] inst;
   } uop_payload_t;
 
   // ROB entry - control + WB-mutable fields only. Cold, dispatch-only
-  // fields live in `uop_payload_t` above.
+  // fields (pc / ben / jen / jren / atom / atom_sc / sys / csr_*) live in
+  // `uop_payload_t` above (`uop_pl[]`, indexed by ROB destination).
   typedef struct packed {
     // Physical register mapping
     logic [PLENPkg-1:0] prd;
@@ -94,13 +111,13 @@ package rapt_pkg;
     rob_state_t         state;
     logic               busy;
 
-    // Branch / jump
-    logic               ben;
-    logic               jen;
-    logic               jren;
+    // Branch / jump resolution (WB-written)
     logic               btaken;
     logic [XLENPkg-1:0] npc;
-    logic [XLENPkg-1:0] pnpc;
+    // 1-bit BPU mispredict flag (dispatch-init 0; WB sets when computed
+    // npc != predicted pnpc). Replaces an XLEN-wide `pnpc` field that was
+    // only ever consumed for the `npc != pnpc` comparison at commit.
+    logic               mispredict;
 
     // Memory
     logic               wen;
@@ -108,10 +125,6 @@ package rapt_pkg;
     logic [5:0]         alu;
     logic [XLENPkg-1:0] sq_waddr;
     logic [XLENPkg-1:0] sq_wdata;
-
-    // Atomics
-    logic atom;
-    logic atom_sc;
 
     // CSR (WB-written)
     logic               csr_wen;
@@ -124,9 +137,6 @@ package rapt_pkg;
 
     // Difftest
     logic difftest_skip;
-
-    // PC (commit path)
-    logic [XLENPkg-1:0] pc;
   } rob_entry_t;
 
   // Shared address classification functions for L1I/L1D

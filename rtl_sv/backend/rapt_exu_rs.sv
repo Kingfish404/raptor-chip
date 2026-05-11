@@ -79,6 +79,10 @@ module rapt_exu_rs #(
   logic                   [RS_SIZE-1:0] rs_jen;
   logic                   [RS_SIZE-1:0] rs_br_cond;
   logic                   [   XLEN-1:0] rs_imm        [RS_SIZE];
+  // Predicted next PC (BPU output). Carried per-RS-entry so each writeback
+  // port can compute `mispredict = (computed_npc != rs_pnpc[idx])` locally
+  // and forward 1 bit to ROB instead of XLEN-wide pnpc.
+  logic                   [   XLEN-1:0] rs_pnpc       [RS_SIZE];
 
   // Consolidated slot-B ineligibility flag, latched at dispatch. Collapses
   // the previous `rs_system|rs_trap|rs_ecall|rs_ebreak|rs_mret|rs_sret|
@@ -366,6 +370,7 @@ module rapt_exu_rs #(
             rs_br_cond[free_idx_a] <= (rou_exu.uop.ben);
             rs_imm[free_idx_a] <= rou_exu.uop.imm;
             rs_pc[free_idx_a] <= rou_exu.uop.pc;
+            rs_pnpc[free_idx_a] <= rou_exu.uop.pnpc;
             rs_b_block[free_idx_a] <= (rou_exu.uop.system || rou_exu.uop.trap
                                     || rou_exu.uop.ecall  || rou_exu.uop.ebreak
                                     || rou_exu.uop.mret   || rou_exu.uop.sret
@@ -451,6 +456,7 @@ module rapt_exu_rs #(
         rs_br_cond[disp.b_rs_idx] <= (rou_exu.uop_b.ben);
         rs_imm[disp.b_rs_idx] <= rou_exu.uop_b.imm;
         rs_pc[disp.b_rs_idx] <= rou_exu.uop_b.pc;
+        rs_pnpc[disp.b_rs_idx] <= rou_exu.uop_b.pnpc;
         rs_b_block[disp.b_rs_idx] <= (rou_exu.uop_b.system || rou_exu.uop_b.trap
                                     || rou_exu.uop_b.ecall  || rou_exu.uop_b.ebreak
                                     || rou_exu.uop_b.mret   || rou_exu.uop_b.sret
@@ -536,6 +542,7 @@ module rapt_exu_rs #(
                       ? addr_exu_a
                       : (rs_pc[valid_idx_a] + (rs_c[valid_idx_a] ? 2 : 4)));
   assign exu_rou.btaken = (rs_br_cond[valid_idx_a] && |alu_result_a);
+  assign exu_rou.mispredict = (exu_rou.npc != rs_pnpc[valid_idx_a]);
   assign exu_rou.prd = rs_prd[valid_idx_a];
   assign exu_rou.rd = rs_rd[valid_idx_a];
   assign exu_rou.pc = rs_pc[valid_idx_a];
@@ -578,6 +585,7 @@ module rapt_exu_rs #(
       ? addr_exu_b
       : rs_pc[valid_idx_b] + (rs_c[valid_idx_b] ? 2 : 4);
   assign exu_rou_b.btaken = 1'b0;
+  assign exu_rou_b.mispredict = (exu_rou_b.npc != rs_pnpc[valid_idx_b]);
   assign exu_rou_b.difftest_skip = 1'b0;
 
   // === Port-C writeback (BRU only) ===
@@ -591,6 +599,7 @@ module rapt_exu_rs #(
       ? addr_exu_c
       : rs_pc[valid_idx_c] + (rs_c[valid_idx_c] ? 2 : 4);
   assign exu_rou_c.btaken = btaken_c;
+  assign exu_rou_c.mispredict = (exu_rou_c.npc != rs_pnpc[valid_idx_c]);
   assign exu_rou_c.difftest_skip = 1'b0;
 
 endmodule

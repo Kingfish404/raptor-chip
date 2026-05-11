@@ -95,6 +95,9 @@ interface exu_rou_if #(
   logic [XLEN-1:0] pc;
   logic [XLEN-1:0] npc;
   logic btaken;
+  // BPU mispredict flag (1 = computed npc differs from predicted pnpc).
+  // Replaces the previous XLEN-wide `pnpc` field stored in rob_entry_t.
+  logic mispredict;
 
   // ROB destination index (0-indexed, directly maps to rob_entry[]).
   logic [$clog2(`RAPT_ROB_SIZE)-1:0] dest;
@@ -116,7 +119,7 @@ interface exu_rou_if #(
   logic valid;
 
   modport in(
-      input pc, npc, btaken,
+      input pc, npc, btaken, mispredict,
       input dest, result,
       input prd, rd,
       input csr_wen, csr_wdata,
@@ -125,7 +128,7 @@ interface exu_rou_if #(
       input valid
   );
   modport out(
-      output pc, npc, btaken,
+      output pc, npc, btaken, mispredict,
       output dest, result,
       output prd, rd,
       output csr_wen, csr_wdata,
@@ -146,6 +149,7 @@ interface exu_rou_b_if #(
   logic [XLEN-1:0] pc;
   logic [XLEN-1:0] npc;
   logic btaken;
+  logic mispredict;
 
   logic [$clog2(`RAPT_ROB_SIZE)-1:0] dest;
   logic [XLEN-1:0] result;
@@ -157,14 +161,14 @@ interface exu_rou_b_if #(
   logic valid;
 
   modport in(
-      input pc, npc, btaken,
+      input pc, npc, btaken, mispredict,
       input dest, result,
       input prd, rd,
       input difftest_skip,
       input valid
   );
   modport out(
-      output pc, npc, btaken,
+      output pc, npc, btaken, mispredict,
       output dest, result,
       output prd, rd,
       output difftest_skip,
@@ -182,6 +186,7 @@ interface exu_rou_c_if #(
   logic [XLEN-1:0] pc;
   logic [XLEN-1:0] npc;
   logic btaken;
+  logic mispredict;
 
   logic [$clog2(`RAPT_ROB_SIZE)-1:0] dest;
 
@@ -189,13 +194,13 @@ interface exu_rou_c_if #(
   logic valid;
 
   modport in(
-      input pc, npc, btaken,
+      input pc, npc, btaken, mispredict,
       input dest,
       input difftest_skip,
       input valid
   );
   modport out(
-      output pc, npc, btaken,
+      output pc, npc, btaken, mispredict,
       output dest,
       output difftest_skip,
       output valid

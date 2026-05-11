@@ -240,14 +240,15 @@ YOSYS_OPENSTA = $(RAPTOR_HOME)/third_party/yosys-opensta
 
 YOSYS_OPENSTA:
 	git clone https://github.com/Kingfish404/yosys-opensta $(YOSYS_OPENSTA)
-	make -C $(YOSYS_OPENSTA) setup-opensta setup-nangate45
+	make -C $(YOSYS_OPENSTA) setup-opensta setup-nangate45 setup-sky130hd
 
 pack: $(VSRCS) $(VHSRCS) ## Pack all SV files into one
 	mkdir -p $(BUILD_DIR)
 	verilator -E -P $(VFLAGS) $(addprefix -I, $(INC_PATH)) $(VSRCS) > $(BUILD_DIR)/rapt_pack.sv
 	verilator -E -P --dump-defines $(VFLAGS) $(addprefix -I, $(INC_PATH)) $(VSRCS) > $(BUILD_DIR)/rapt_pack.svh
 
-STA_PLATFORM ?= nangate45 ## STA platform: nangate45, asap7
+STA_PLATFORM ?= nangate45 ## STA platform: nangate45, asap7, sky130hd
+CLK_FREQ_MHZ ?= 50 ## Target clock frequency for STA (MHz)
 
 sta: pack ## Static timing analysis
 	echo $(MAKECMDGOALS)
@@ -255,18 +256,21 @@ sta: pack ## Static timing analysis
 	make -C $(YOSYS_OPENSTA) sta show \
 		DESIGN=rapt \
 		PLATFORM=$(STA_PLATFORM) \
+		CLK_FREQ_MHZ=$(CLK_FREQ_MHZ) \
 		RTL_FILES="$(abspath $(BUILD_DIR)/rapt_pack.sv)"
 
 sta-detail: pack ## Detailed static timing analysis
 	make -C $(YOSYS_OPENSTA) sta-detail show \
 		DESIGN=rapt \
 		PLATFORM=$(STA_PLATFORM) \
+		CLK_FREQ_MHZ=$(CLK_FREQ_MHZ) \
 		RTL_FILES="$(abspath $(BUILD_DIR)/rapt_pack.sv)"
 
 sta_show: pack ## Show timing analysis results
 	make -C $(YOSYS_OPENSTA) show \
 		DESIGN=rapt \
 		PLATFORM=$(STA_PLATFORM) \
+		CLK_FREQ_MHZ=$(CLK_FREQ_MHZ) \
 		RTL_FILES="$(abspath $(BUILD_DIR)/rapt_pack.sv)"
 
 lint: ## Lint RTL with Verilator

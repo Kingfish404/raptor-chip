@@ -37,7 +37,7 @@ jobs:
       AM_HOME: ${{ github.workspace }}/abstract-machine
       CROSS_COMPILE: riscv64-elf-
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Setup environment
         run: ./setup.sh
       - name: Download pre-built Linux kernel
@@ -87,7 +87,7 @@ jobs:
             "${{ github.sha }}" "${{ github.ref_name }}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > dist/VERSION
           cd dist && zip -r ../raptor-chip-rtl.zip .
       - name: Upload RTL artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: raptor-chip-rtl-${{ github.sha }}
           path: dist/
@@ -119,7 +119,7 @@ jobs:
       AM_HOME: ${{ github.workspace }}/abstract-machine
       CROSS_COMPILE: riscv64-elf-
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Setup environment
         run: ./setup.sh
       - name: Build OpenSBI

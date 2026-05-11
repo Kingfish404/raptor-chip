@@ -34,7 +34,51 @@ export RAPT_CONFIG
 # ============================================================================
 ifeq ($(abspath $(dir $(firstword $(MAKEFILE_LIST)))),$(RAPTOR_HOME))
 
+# Use bash for recipes so `set -o pipefail` (used by tee_* wrappers below)
+# works on systems where /bin/sh is dash (e.g. Ubuntu / GitHub Actions runners).
+SHELL := /bin/bash
+
 NPROC := $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
+
+# ============================================================================
+# Test/benchmark output logging (tee to nsim/build/<config>/logs/)
+#
+# All benchmark/test recipes pipe their output through `tee` to a per-target
+# log file under nsim/build/<RAPT_CONFIG>/logs/ (NPC) or nsim/build/nemu/logs/
+# (NEMU). This persists results so they can be inspected later without
+# re-running the simulator.
+#
+# Wrappers:
+#   $(call tee_npc,name)  -> ` 2>&1 | tee nsim/build/<config>/logs/<name>.log`
+#   $(call tee_nemu,name) -> ` 2>&1 | tee nsim/build/nemu/logs/<name>.log`
+#
+# Generic escape hatch for any target not pre-wrapped:
+#   make log TARGET=<existing-target> [LOG_NAME=<filename-stem>]
+# ============================================================================
+NPC_LOG_DIR  := $(NSIM_HOME)/build/$(RAPT_CONFIG)/logs
+NEMU_LOG_DIR := $(NSIM_HOME)/build/nemu/logs
+APP_LOG_DIR  := $(NSIM_HOME)/build/$(RAPT_CONFIG)/logs/app
+VERIFY_LOG_DIR := $(NSIM_HOME)/build/$(RAPT_CONFIG)/logs/verify
+export NPC_LOG_DIR NEMU_LOG_DIR APP_LOG_DIR VERIFY_LOG_DIR
+
+tee_npc    = 2>&1 | tee $(NPC_LOG_DIR)/$(1).log
+tee_nemu   = 2>&1 | tee $(NEMU_LOG_DIR)/$(1).log
+tee_app    = 2>&1 | tee $(APP_LOG_DIR)/$(1).log
+tee_verify = 2>&1 | tee $(VERIFY_LOG_DIR)/$(1).log
+
+log: ## Run TARGET=<target> with stdout/stderr tee'd to nsim/build/<config>/logs/$(LOG_NAME).log
+	@test -n "$(TARGET)" || { echo "Usage: make log TARGET=<target> [LOG_NAME=<stem>]"; exit 1; }
+	@mkdir -p $(NPC_LOG_DIR)
+	@stem="$(if $(LOG_NAME),$(LOG_NAME),$(TARGET))"; \
+	  echo "[log] $(NPC_LOG_DIR)/$$stem.log"; \
+	  set -o pipefail; $(MAKE) --no-print-directory $(TARGET) 2>&1 | tee "$(NPC_LOG_DIR)/$$stem.log"
+
+logs-show: ## List all persisted test/benchmark logs under nsim/build/
+	@find $(NSIM_HOME)/build -type f -name '*.log' 2>/dev/null | sort
+
+logs-clean: ## Remove all persisted test/benchmark logs
+	@rm -rf $(NPC_LOG_DIR) $(NEMU_LOG_DIR) $(APP_LOG_DIR) $(VERIFY_LOG_DIR)
+	@echo "[logs] cleared"
 
 # ============================================================================
 # Default target
@@ -233,28 +277,36 @@ $(AM_KERNELS):
 MAINARGS ?= test ## Benchmark arguments (test/train/ref)
 
 coremark-nemu32: $(AM_KERNELS) config-nemu32 ## Run CoreMark on NEMU (riscv32)
-	$(MAKE) -C $(AM_KERNELS)/benchmarks/coremark_eembc ARCH=riscv32-nemu run ARGS="$(ARGS)"
+	@mkdir -p $(NEMU_LOG_DIR)
+	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/coremark_eembc ARCH=riscv32-nemu run ARGS="$(ARGS)" $(call tee_nemu,coremark-nemu32)
 
 microbench-nemu32: $(AM_KERNELS) config-nemu32 ## Run MicroBench on NEMU (riscv32)
-	$(MAKE) -C $(AM_KERNELS)/benchmarks/microbench ARCH=riscv32-nemu run ARGS="$(ARGS)" mainargs=$(MAINARGS)
+	@mkdir -p $(NEMU_LOG_DIR)
+	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/microbench ARCH=riscv32-nemu run ARGS="$(ARGS)" mainargs=$(MAINARGS) $(call tee_nemu,microbench-nemu32-$(MAINARGS))
 
 coremark-nemu64: $(AM_KERNELS) config-nemu64 ## Run CoreMark on NEMU (riscv64)
-	$(MAKE) -C $(AM_KERNELS)/benchmarks/coremark_eembc ARCH=riscv64-nemu run ARGS="$(ARGS)"
+	@mkdir -p $(NEMU_LOG_DIR)
+	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/coremark_eembc ARCH=riscv64-nemu run ARGS="$(ARGS)" $(call tee_nemu,coremark-nemu64)
 
 microbench-nemu64: $(AM_KERNELS) config-nemu64 ## Run MicroBench on NEMU (riscv64)
-	$(MAKE) -C $(AM_KERNELS)/benchmarks/microbench ARCH=riscv64-nemu run ARGS="$(ARGS)" mainargs=$(MAINARGS)
+	@mkdir -p $(NEMU_LOG_DIR)
+	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/microbench ARCH=riscv64-nemu run ARGS="$(ARGS)" mainargs=$(MAINARGS) $(call tee_nemu,microbench-nemu64-$(MAINARGS))
 
 am-tests-nemu32: build-nemu32
-	$(MAKE) -C $(AM_KERNELS)/tests/am-tests ARCH=riscv32-nemu run ARGS="$(ARGS)" mainargs="i" VME=1
+	@mkdir -p $(NEMU_LOG_DIR)
+	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/tests/am-tests ARCH=riscv32-nemu run ARGS="$(ARGS)" mainargs="i" VME=1 $(call tee_nemu,am-tests-nemu32)
 
 am-tests-npc32: build-npc32
-	$(MAKE) -C $(AM_KERNELS)/tests/am-tests ARCH=$(NPC_ARCH) run ARGS="$(ARGS)" mainargs="i" VME=1
+	@mkdir -p $(NPC_LOG_DIR)
+	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/tests/am-tests ARCH=$(NPC_ARCH) run ARGS="$(ARGS)" mainargs="i" VME=1 $(call tee_npc,am-tests-npc32)
 
 cpu-tests-nemu32: build-nemu32
-	$(MAKE) -C $(AM_KERNELS)/tests/cpu-tests ARCH=riscv32-nemu run ARGS="$(ARGS)" mainargs="i" VME=1
+	@mkdir -p $(NEMU_LOG_DIR)
+	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/tests/cpu-tests ARCH=riscv32-nemu run ARGS="$(ARGS)" mainargs="i" VME=1 $(call tee_nemu,cpu-tests-nemu32)
 
 cpu-tests-npc32: build-npc32
-	$(MAKE) -C $(AM_KERNELS)/tests/cpu-tests ARCH=$(NPC_ARCH) run ARGS="$(ARGS)" mainargs="i" VME=1
+	@mkdir -p $(NPC_LOG_DIR)
+	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/tests/cpu-tests ARCH=$(NPC_ARCH) run ARGS="$(ARGS)" mainargs="i" VME=1 $(call tee_npc,cpu-tests-npc32)
 
 # --- Bare-metal IRQ tests (PLIC, etc) -------------------------------------
 # Each test is a standalone M-mode .bin loaded directly at 0x80000000 via
@@ -267,26 +319,28 @@ irq-tests-build: ## Build bare-metal PLIC IRQ tests
 	$(MAKE) -C $(RAPTOR_HOME)/app/tests/irq build
 
 irq-tests-npc32: build-npc32 irq-tests-build ## Build & run bare-metal PLIC IRQ tests on NPC
+	@mkdir -p $(NPC_LOG_DIR)
 	@echo "=== IRQ tests (bare-metal) ==="
-	@fail=0; for t in $(IRQ_TESTS); do \
+	@set -o pipefail; ( fail=0; for t in $(IRQ_TESTS); do \
 		echo "--- $$t ---"; \
 		$(MAKE) --no-print-directory -C $(NSIM_HOME) run \
 			ARGS="$(ARGS)" VFLAGS="$(VFLAGS)" \
 			IMG=$(IRQ_TESTS_DIR)/$$t.bin || fail=1; \
 	done; \
 	if [ "$$fail" = 0 ]; then echo "=== IRQ tests: ALL PASSED ==="; \
-	else echo "=== IRQ tests: FAILURES ==="; exit 1; fi
+	else echo "=== IRQ tests: FAILURES ==="; exit 1; fi ) $(call tee_npc,irq-tests-npc32)
 
 irq-tests-npc32-difftest: config-npc32-difftest config-nemu32-ref irq-tests-build ## Build & run bare-metal PLIC IRQ tests on NPC with difftest
+	@mkdir -p $(NPC_LOG_DIR)
 	@echo "=== IRQ tests (bare-metal, difftest) ==="
-	@fail=0; for t in $(IRQ_TESTS); do \
+	@set -o pipefail; ( fail=0; for t in $(IRQ_TESTS); do \
 		echo "--- $$t ---"; \
 		$(MAKE) --no-print-directory -C $(NSIM_HOME) run \
 			ARGS="$(ARGS)" VFLAGS="$(VFLAGS)" \
 			IMG=$(IRQ_TESTS_DIR)/$$t.bin || fail=1; \
 	done; \
 	if [ "$$fail" = 0 ]; then echo "=== IRQ tests (difftest): ALL PASSED ==="; \
-	else echo "=== IRQ tests (difftest): FAILURES ==="; exit 1; fi
+	else echo "=== IRQ tests (difftest): FAILURES ==="; exit 1; fi ) $(call tee_npc,irq-tests-npc32-difftest)
 
 # --- Minimal Linux-pattern repros -----------------------------------------
 REPRO_TESTS_DIR := $(RAPTOR_HOME)/app/build/rv32/tests/repro
@@ -300,42 +354,53 @@ linux-ticket-spinlock-repro-npc32: build-npc32 repro-tests-build ## Run Linux ti
 		IMG=$(REPRO_TESTS_DIR)/linux_ticket_spinlock.bin
 
 coremark-npc32: $(AM_KERNELS) config-npc32 ## Run CoreMark on NPC
-	$(MAKE) -C $(AM_KERNELS)/benchmarks/coremark_eembc ARCH=$(NPC_ARCH) run ARGS="$(ARGS)"
+	@mkdir -p $(NPC_LOG_DIR)
+	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/coremark_eembc ARCH=$(NPC_ARCH) run ARGS="$(ARGS)" $(call tee_npc,coremark-npc32)
 
 coremark-npc32-difftest: $(AM_KERNELS) config-npc32-difftest config-nemu32-ref ## Run CoreMark on NPC with difftest
-	$(MAKE) -C $(AM_KERNELS)/benchmarks/coremark_eembc ARCH=$(NPC_ARCH) run ARGS="$(ARGS)" mainargs=test
+	@mkdir -p $(NPC_LOG_DIR)
+	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/coremark_eembc ARCH=$(NPC_ARCH) run ARGS="$(ARGS)" mainargs=test $(call tee_npc,coremark-npc32-difftest)
 
 coremark-ysyxsoc: $(AM_KERNELS) config-npc32-ysyxsoc config-nemu32-ref ## Run CoreMark on ysyxSoC
-	$(MAKE) -C $(AM_KERNELS)/benchmarks/coremark_eembc ARCH=$(YSYXSOC_ARCH) run ARGS="$(ARGS)" mainargs=test
+	@mkdir -p $(NPC_LOG_DIR)
+	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/coremark_eembc ARCH=$(YSYXSOC_ARCH) run ARGS="$(ARGS)" mainargs=test $(call tee_npc,coremark-ysyxsoc)
 
 microbench-npc32: $(AM_KERNELS) config-npc32 ## Run MicroBench on NPC
-	$(MAKE) -C $(AM_KERNELS)/benchmarks/microbench ARCH=$(NPC_ARCH) run ARGS="$(ARGS)" mainargs=$(MAINARGS)
+	@mkdir -p $(NPC_LOG_DIR)
+	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/microbench ARCH=$(NPC_ARCH) run ARGS="$(ARGS)" mainargs=$(MAINARGS) $(call tee_npc,microbench-npc32-$(MAINARGS))
 
 micorbench-npc32-difftest: $(AM_KERNELS) config-npc32-difftest config-nemu32-ref ## Run MicroBench on NPC with difftest (typo compat)
-	$(MAKE) -C $(AM_KERNELS)/benchmarks/microbench ARCH=$(NPC_ARCH) run ARGS="$(ARGS)" mainargs=$(MAINARGS)
+	@mkdir -p $(NPC_LOG_DIR)
+	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/microbench ARCH=$(NPC_ARCH) run ARGS="$(ARGS)" mainargs=$(MAINARGS) $(call tee_npc,microbench-npc32-difftest-$(MAINARGS))
 
 # --- RV64 benchmark targets ---
 coremark-npc64: VFLAGS := -DRAPT_RV64
 coremark-npc64: $(AM_KERNELS) config-npc32 ## Run CoreMark on NPC (riscv64)
-	$(MAKE) -C $(AM_KERNELS)/benchmarks/coremark_eembc ARCH=riscv64-npc run ARGS="$(ARGS)" VFLAGS="$(VFLAGS)"
+	@mkdir -p $(NPC_LOG_DIR)
+	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/coremark_eembc ARCH=riscv64-npc run ARGS="$(ARGS)" VFLAGS="$(VFLAGS)" $(call tee_npc,coremark-npc64)
 
 coremark-npc64-difftest: VFLAGS := -DRAPT_RV64
 coremark-npc64-difftest: $(AM_KERNELS) config-npc32-difftest config-nemu64-ref ## Run CoreMark on NPC (riscv64) with difftest
-	$(MAKE) -C $(AM_KERNELS)/benchmarks/coremark_eembc ARCH=riscv64-npc run ARGS="$(ARGS)" VFLAGS="$(VFLAGS)"
+	@mkdir -p $(NPC_LOG_DIR)
+	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/coremark_eembc ARCH=riscv64-npc run ARGS="$(ARGS)" VFLAGS="$(VFLAGS)" $(call tee_npc,coremark-npc64-difftest)
 
 microbench-npc64: VFLAGS := -DRAPT_RV64
 microbench-npc64: $(AM_KERNELS) config-npc32 ## Run MicroBench on NPC (riscv64)
-	$(MAKE) -C $(AM_KERNELS)/benchmarks/microbench ARCH=riscv64-npc run ARGS="$(ARGS)" VFLAGS="$(VFLAGS)" mainargs=$(MAINARGS)
+	@mkdir -p $(NPC_LOG_DIR)
+	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/microbench ARCH=riscv64-npc run ARGS="$(ARGS)" VFLAGS="$(VFLAGS)" mainargs=$(MAINARGS) $(call tee_npc,microbench-npc64-$(MAINARGS))
 
 microbench-npc64-difftest: VFLAGS := -DRAPT_RV64
 microbench-npc64-difftest: $(AM_KERNELS) config-npc32-difftest config-nemu64-ref ## Run MicroBench on NPC (riscv64) with difftest
-	$(MAKE) -C $(AM_KERNELS)/benchmarks/microbench ARCH=riscv64-npc run ARGS="$(ARGS)" VFLAGS="$(VFLAGS)" mainargs=$(MAINARGS)
+	@mkdir -p $(NPC_LOG_DIR)
+	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/microbench ARCH=riscv64-npc run ARGS="$(ARGS)" VFLAGS="$(VFLAGS)" mainargs=$(MAINARGS) $(call tee_npc,microbench-npc64-difftest-$(MAINARGS))
 
 microbench-npc32-difftest: $(AM_KERNELS) config-npc32-difftest config-nemu32-ref ## Run MicroBench on NPC with difftest
-	$(MAKE) -C $(AM_KERNELS)/benchmarks/microbench ARCH=$(NPC_ARCH) run ARGS="$(ARGS)" mainargs=test
+	@mkdir -p $(NPC_LOG_DIR)
+	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/microbench ARCH=$(NPC_ARCH) run ARGS="$(ARGS)" mainargs=test $(call tee_npc,microbench-npc32-difftest)
 
 microbench-ysyxsoc: $(AM_KERNELS) config-npc32-ysyxsoc config-nemu32-ref ## Run MicroBench on ysyxSoC
-	$(MAKE) -C $(AM_KERNELS)/benchmarks/microbench ARCH=$(YSYXSOC_ARCH) run ARGS="$(ARGS)" mainargs=test
+	@mkdir -p $(NPC_LOG_DIR)
+	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/microbench ARCH=$(YSYXSOC_ARCH) run ARGS="$(ARGS)" mainargs=test $(call tee_npc,microbench-ysyxsoc)
 
 # --- RISC-V Architecture Tests ---
 RISCV_ARCH_TEST ?= $(RAPTOR_HOME)/third_party/kingfish404/riscv-arch-test-am
@@ -344,10 +409,12 @@ $(RISCV_ARCH_TEST):
 	git clone --depth 1 https://github.com/Kingfish404/riscv-arch-test-am $@
 
 archtest-npc32: build-npc32 $(RISCV_ARCH_TEST) ## Run RISC-V Architecture Test on NPC (riscv32)
-	$(MAKE) -C $(RISCV_ARCH_TEST) ARCH=$(NPC_ARCH) run ARGS="$(ARGS)"
+	@mkdir -p $(NPC_LOG_DIR)
+	@set -o pipefail; $(MAKE) -C $(RISCV_ARCH_TEST) ARCH=$(NPC_ARCH) run ARGS="$(ARGS)" $(call tee_npc,archtest-npc32)
 
 archtest-npc32e: build-npc32 $(RISCV_ARCH_TEST) ## Run RISC-V Architecture Test on NPC (riscv32e)
-	$(MAKE) -C $(RISCV_ARCH_TEST) ARCH=riscv32e-npc run ARGS="$(ARGS)"
+	@mkdir -p $(NPC_LOG_DIR)
+	@set -o pipefail; $(MAKE) -C $(RISCV_ARCH_TEST) ARCH=riscv32e-npc run ARGS="$(ARGS)" $(call tee_npc,archtest-npc32e)
 
 # ============================================================================
 # Nanos-lite OS
@@ -386,17 +453,20 @@ linux-download: ## Download pre-built Linux (RV32 + RV64)
 linux-boot-nemu32: config-nemu32-linux ## Boot Linux on NEMU (riscv32)
 	$(MAKE) -C $(LINUX_HOME) download-rv32 LINUX_BUILD_VERSION=$(LINUX_BUILD_VERSION)
 	$(MAKE) -C $(NEMU_HOME) -j$(NPROC)
-	$(MAKE) -C $(NEMU_HOME) run IMG=$(LINUX_RV32_PAYLOAD) ARGS="$(ARGS) $(if $(MAX_INST),-m $(MAX_INST))"
+	@mkdir -p $(NEMU_LOG_DIR)
+	@set -o pipefail; $(MAKE) -C $(NEMU_HOME) run IMG=$(LINUX_RV32_PAYLOAD) ARGS="$(ARGS) $(if $(MAX_INST),-m $(MAX_INST))" $(call tee_nemu,linux-boot-nemu32)
 
 linux-boot-npc32: config-npc32-linux ## Boot Linux on NPC (riscv32)
 	$(MAKE) -C $(LINUX_HOME) download-rv32 LINUX_BUILD_VERSION=$(LINUX_BUILD_VERSION)
 	$(MAKE) -C $(NSIM_HOME) -j$(NPROC)
-	$(MAKE) -C $(NSIM_HOME) run IMG=$(LINUX_RV32_PAYLOAD) ARGS="$(ARGS) $(if $(MAX_INST),-m $(MAX_INST))"
+	@mkdir -p $(NPC_LOG_DIR)
+	@set -o pipefail; $(MAKE) -C $(NSIM_HOME) run IMG=$(LINUX_RV32_PAYLOAD) ARGS="$(ARGS) $(if $(MAX_INST),-m $(MAX_INST))" $(call tee_npc,linux-boot-npc32)
 
 linux-boot-npc32-difftest: config-npc32-linux-difftest config-nemu32-ref ## Boot Linux on NPC with difftest
 	$(MAKE) -C $(LINUX_HOME) download-rv32 LINUX_BUILD_VERSION=$(LINUX_BUILD_VERSION)
 	$(MAKE) -C $(NSIM_HOME) -j$(NPROC)
-	$(MAKE) -C $(NSIM_HOME) run IMG=$(LINUX_RV32_PAYLOAD) ARGS="$(ARGS) $(if $(MAX_INST),-m $(MAX_INST))"
+	@mkdir -p $(NPC_LOG_DIR)
+	@set -o pipefail; $(MAKE) -C $(NSIM_HOME) run IMG=$(LINUX_RV32_PAYLOAD) ARGS="$(ARGS) $(if $(MAX_INST),-m $(MAX_INST))" $(call tee_npc,linux-boot-npc32-difftest)
 
 # ----------------------------------------------------------------------------
 # Linux boot checkpoint save/restore (architectural snapshot of nsim).
@@ -460,19 +530,22 @@ ide-setup: compile-commands ## Generate compile_commands.json for IDE/LSP setup
 compile-commands: ## Generate root compile_commands.json from real NEMU+NSIM build commands
 	bash $(RAPTOR_HOME)/.github/scripts/gen_compile_commands.sh
 
-STA_PLATFORM ?= nangate45 ## STA platform: nangate45, asap7
+STA_PLATFORM ?= nangate45 ## STA platform: nangate45, asap7, sky130hd
+CLK_FREQ_MHZ ?= 50 ## Target clock frequency for STA (MHz)
 
 sta: ## Static timing analysis (VFLAGS="-DRAPT_RV64" for RV64)
-	$(MAKE) -C $(NSIM_HOME) sta STA_PLATFORM=$(STA_PLATFORM) VFLAGS="$(VFLAGS)"
+	$(MAKE) -C $(NSIM_HOME) sta STA_PLATFORM=$(STA_PLATFORM) CLK_FREQ_MHZ=$(CLK_FREQ_MHZ) VFLAGS="$(VFLAGS)"
 
 sta-detail: ## Detailed static timing analysis (VFLAGS="-DRAPT_RV64" for RV64)
-	$(MAKE) -C $(NSIM_HOME) sta-detail STA_PLATFORM=$(STA_PLATFORM) VFLAGS="$(VFLAGS)"
+	$(MAKE) -C $(NSIM_HOME) sta-detail STA_PLATFORM=$(STA_PLATFORM) CLK_FREQ_MHZ=$(CLK_FREQ_MHZ) VFLAGS="$(VFLAGS)"
 
-# RV64 convenience targets for STA
+# RV64 convenience targets for STA (half clock target — RV64 datapath is wider/slower)
 sta-rv64: VFLAGS := -DRAPT_RV64
+sta-rv64: CLK_FREQ_MHZ := 25
 sta-rv64: sta ## Static timing analysis in RV64 mode
 
 sta-detail-rv64: VFLAGS := -DRAPT_RV64
+sta-detail-rv64: CLK_FREQ_MHZ := 25
 sta-detail-rv64: sta-detail ## Detailed static timing analysis in RV64 mode
 
 clean-npc: ## Clean NPC build only
@@ -491,31 +564,40 @@ clean: ## Clean all build artifacts
 VERIFY_HOME := $(RAPTOR_HOME)/verify
 
 verify-fuzz: ## Random instruction fuzz with difftest
-	$(MAKE) -C $(VERIFY_HOME) fuzz
+	@mkdir -p $(VERIFY_LOG_DIR)
+	@set -o pipefail; $(MAKE) -C $(VERIFY_HOME) fuzz $(call tee_verify,fuzz)
 
 verify-fuzz-inf: ## Continuous fuzz until Ctrl-C or failure
-	$(MAKE) -C $(VERIFY_HOME) fuzz-inf
+	@mkdir -p $(VERIFY_LOG_DIR)
+	@set -o pipefail; $(MAKE) -C $(VERIFY_HOME) fuzz-inf $(call tee_verify,fuzz-inf)
 
 verify-fuzz-replay: ## Replay the last failing fuzz-inf batch
-	$(MAKE) -C $(VERIFY_HOME) fuzz-replay
+	@mkdir -p $(VERIFY_LOG_DIR)
+	@set -o pipefail; $(MAKE) -C $(VERIFY_HOME) fuzz-replay $(call tee_verify,fuzz-replay)
 
 verify-sigtest: ## Signature-based ISA corner-case tests
-	$(MAKE) -C $(VERIFY_HOME) sigtest
+	@mkdir -p $(VERIFY_LOG_DIR)
+	@set -o pipefail; $(MAKE) -C $(VERIFY_HOME) sigtest $(call tee_verify,sigtest)
 
 verify-riscof-classic: ## RISCOF classic compliance tests (legacy, no difftest)
-	$(MAKE) -C $(VERIFY_HOME) riscof-classic
+	@mkdir -p $(VERIFY_LOG_DIR)
+	@set -o pipefail; $(MAKE) -C $(VERIFY_HOME) riscof-classic $(call tee_verify,riscof-classic)
 
 verify-riscof-classic-nemu: ## RISCOF classic compliance tests on NEMU reference
-	$(MAKE) -C $(VERIFY_HOME) riscof-classic-nemu
+	@mkdir -p $(VERIFY_LOG_DIR)
+	@set -o pipefail; $(MAKE) -C $(VERIFY_HOME) riscof-classic-nemu $(call tee_verify,riscof-classic-nemu)
 
 verify-riscof: ## RISCOF official compliance tests
-	$(MAKE) -C $(VERIFY_HOME) riscof
+	@mkdir -p $(VERIFY_LOG_DIR)
+	@set -o pipefail; $(MAKE) -C $(VERIFY_HOME) riscof $(call tee_verify,riscof)
 
 verify-coverage: ## Verilator line/toggle coverage
-	$(MAKE) -C $(VERIFY_HOME) coverage
+	@mkdir -p $(VERIFY_LOG_DIR)
+	@set -o pipefail; $(MAKE) -C $(VERIFY_HOME) coverage $(call tee_verify,coverage)
 
 verify-all: ## Run all verification targets
-	$(MAKE) -C $(VERIFY_HOME) all
+	@mkdir -p $(VERIFY_LOG_DIR)
+	@set -o pipefail; $(MAKE) -C $(VERIFY_HOME) all $(call tee_verify,all)
 
 verify-clean: ## Clean verification artifacts
 	$(MAKE) -C $(VERIFY_HOME) clean
@@ -535,42 +617,54 @@ app-bbl-linux: build-npc32 ## [app] Boot Linux via BBL on NPC
 	@$(MAKE) --no-print-directory -C $(APP_HOME) bbl-linux ARGS="$(ARGS)"
 
 app-hello-npc32: build-npc32 ## [app] Hello world test via pk (rv32)
-	@$(MAKE) --no-print-directory -C $(APP_HOME) hello-npc ARGS="$(ARGS)"
+	@mkdir -p $(APP_LOG_DIR)
+	@set -o pipefail; $(MAKE) --no-print-directory -C $(APP_HOME) hello-npc ARGS="$(ARGS)" $(call tee_app,hello-npc32)
 
 app-coremark-npc32: build-npc32 ## [app] CoreMark via pk (rv32)
-	@$(MAKE) --no-print-directory -C $(APP_HOME) coremark-npc ARGS="$(ARGS)"
+	@mkdir -p $(APP_LOG_DIR)
+	@set -o pipefail; $(MAKE) --no-print-directory -C $(APP_HOME) coremark-npc ARGS="$(ARGS)" $(call tee_app,coremark-npc32)
 
 app-coremark-nemu32: config-nemu32 ## [app] CoreMark via pk on NEMU (rv32)
-	@$(MAKE) --no-print-directory -C $(APP_HOME) coremark-nemu ARGS="$(ARGS)"
+	@mkdir -p $(APP_LOG_DIR)
+	@set -o pipefail; $(MAKE) --no-print-directory -C $(APP_HOME) coremark-nemu ARGS="$(ARGS)" $(call tee_app,coremark-nemu32)
 
 app-embench-npc32: build-npc32 ## [app] Embench-IoT via pk (rv32)
-	@$(MAKE) --no-print-directory -C $(APP_HOME) embench-npc ARGS="$(ARGS)"
+	@mkdir -p $(APP_LOG_DIR)
+	@set -o pipefail; $(MAKE) --no-print-directory -C $(APP_HOME) embench-npc ARGS="$(ARGS)" $(call tee_app,embench-npc32)
 
 app-embench-nemu32: config-nemu32 ## [app] Embench-IoT via pk on NEMU (rv32)
-	@$(MAKE) --no-print-directory -C $(APP_HOME) embench-nemu ARGS="$(ARGS)"
+	@mkdir -p $(APP_LOG_DIR)
+	@set -o pipefail; $(MAKE) --no-print-directory -C $(APP_HOME) embench-nemu ARGS="$(ARGS)" $(call tee_app,embench-nemu32)
 
 app-llm-npc32: build-npc32 ## [app] LLM operator/infer/train benchmarks via pk (rv32)
-	@$(MAKE) --no-print-directory -C $(APP_HOME) llm-bench-report-npc ARGS="$(ARGS)"
+	@mkdir -p $(APP_LOG_DIR)
+	@set -o pipefail; $(MAKE) --no-print-directory -C $(APP_HOME) llm-bench-report-npc ARGS="$(ARGS)" $(call tee_app,llm-npc32)
 
 app-llm-nemu32: config-nemu32 ## [app] LLM operator/infer/train benchmarks via pk on NEMU (rv32)
-	@$(MAKE) --no-print-directory -C $(APP_HOME) llm-bench-report-nemu ARGS="$(ARGS)"
+	@mkdir -p $(APP_LOG_DIR)
+	@set -o pipefail; $(MAKE) --no-print-directory -C $(APP_HOME) llm-bench-report-nemu ARGS="$(ARGS)" $(call tee_app,llm-nemu32)
 
 # --- app tests/demos on NPC ---
 app-tests-npc32: build-npc32 ## [app] All tests via pk on NPC (rv32)
-	@$(MAKE) --no-print-directory -C $(APP_HOME) tests-npc ARGS="$(ARGS)"
+	@mkdir -p $(APP_LOG_DIR)
+	@set -o pipefail; $(MAKE) --no-print-directory -C $(APP_HOME) tests-npc ARGS="$(ARGS)" $(call tee_app,tests-npc32)
 
 app-tests-npc32-difftest: config-npc32-difftest config-nemu32-ref ## [app] All tests via pk on NPC with difftest
-	@$(MAKE) --no-print-directory -C $(APP_HOME) tests-npc ARGS="$(ARGS)"
+	@mkdir -p $(APP_LOG_DIR)
+	@set -o pipefail; $(MAKE) --no-print-directory -C $(APP_HOME) tests-npc ARGS="$(ARGS)" $(call tee_app,tests-npc32-difftest)
 
 app-demos-npc32: build-npc32 ## [app] All demos via pk on NPC (rv32)
-	@$(MAKE) --no-print-directory -C $(APP_HOME) demos-npc ARGS="$(ARGS)"
+	@mkdir -p $(APP_LOG_DIR)
+	@set -o pipefail; $(MAKE) --no-print-directory -C $(APP_HOME) demos-npc ARGS="$(ARGS)" $(call tee_app,demos-npc32)
 
 # --- app tests/demos on NEMU (default: with difftest) ---
 app-tests-nemu32: config-nemu32 ## [app] All tests via pk on NEMU (rv32)
-	@$(MAKE) --no-print-directory -C $(APP_HOME) tests-nemu ARGS="$(ARGS)"
+	@mkdir -p $(APP_LOG_DIR)
+	@set -o pipefail; $(MAKE) --no-print-directory -C $(APP_HOME) tests-nemu ARGS="$(ARGS)" $(call tee_app,tests-nemu32)
 
 app-demos-nemu32: config-nemu32 ## [app] All demos via pk on NEMU (rv32)
-	@$(MAKE) --no-print-directory -C $(APP_HOME) demos-nemu ARGS="$(ARGS)"
+	@mkdir -p $(APP_LOG_DIR)
+	@set -o pipefail; $(MAKE) --no-print-directory -C $(APP_HOME) demos-nemu ARGS="$(ARGS)" $(call tee_app,demos-nemu32)
 
 # --- TinyOS / OS CLI helpers ---
 tinyos-sync: ## [app] Clone or update egos-2000 and xv6-riscv under app/tinyos
@@ -609,7 +703,7 @@ app-pk-build: ## [app] Build riscv-pk
 app-clean: ## [app] Clean app build artifacts
 	@$(MAKE) --no-print-directory -C $(APP_HOME) clean
 
-.PHONY: help setup verilog \
+.PHONY: help setup verilog log logs-show logs-clean \
 	config-nemu32 config-nemu32-linux config-nemu32-ref config-nemu32-linux-device menuconfig-nemu32 build-nemu32 run-nemu32 run-nemu32-linux run-nemu32-linux-device \
 	config-nemu64 config-nemu64-ref config-nemu64-linux-device build-nemu64 run-nemu64 run-nemu64-linux-device \
 	config-npc32 config-npc32-difftest config-npc32-linux config-npc32-ysyxsoc menuconfig-npc32 build-npc32 run-npc32 sim-npc32 \

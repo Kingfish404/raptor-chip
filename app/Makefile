@@ -77,6 +77,24 @@ RLLMBENCH_BACKEND := npc
 export ISA64 ARGS CROSS_COMPILE
 
 # ============================================================================
+# Test/benchmark output logging (tee to nsim/build/<config>/logs/app/)
+# Inherits NPC_LOG_DIR / NEMU_LOG_DIR / APP_LOG_DIR from the root Makefile when
+# invoked as `make -C app …` from root. Falls back to local defaults otherwise.
+# ============================================================================
+NSIM_HOME    ?= $(abspath $(APP_HOME)/../nsim)
+RAPT_CONFIG  ?= default
+APP_LOG_DIR  ?= $(NSIM_HOME)/build/$(RAPT_CONFIG)/logs/app
+NPC_LOG_DIR  ?= $(NSIM_HOME)/build/$(RAPT_CONFIG)/logs
+NEMU_LOG_DIR ?= $(NSIM_HOME)/build/nemu/logs
+
+log: ## Run TARGET=<target> with stdout/stderr tee'd to $(APP_LOG_DIR)/$(LOG_NAME).log
+	@test -n "$(TARGET)" || { echo "Usage: make -C app log TARGET=<target> [LOG_NAME=<stem>]"; exit 1; }
+	@mkdir -p $(APP_LOG_DIR)
+	@stem="$(if $(LOG_NAME),$(LOG_NAME),$(TARGET))"; \
+	  echo "[log] $(APP_LOG_DIR)/$$stem.log"; \
+	  set -o pipefail; $(MAKE) --no-print-directory $(TARGET) 2>&1 | tee "$(APP_LOG_DIR)/$$stem.log"
+
+# ============================================================================
 .DEFAULT_GOAL := help
 
 help: ## Show this help
@@ -623,7 +641,7 @@ all: tests-build demos-build coremark-build embench-build llm-bench-build ## Bui
 clean: ## Clean all build artifacts
 	rm -rf $(APP_HOME)/build
 
-.PHONY: help env-check setup pk-build pk-run nemu-run bbl-linux \
+.PHONY: help env-check setup pk-build pk-run nemu-run bbl-linux log \
 		coremark-build coremark-npc coremark-nemu embench-build embench-pk-bins embench-npc embench-nemu \
 		llm-bench-build llm-litex-build llm-native-build llm-native-test \
 		llm-ops-npc llm-ops-nemu llm-infer-npc llm-infer-nemu llm-train-npc llm-train-nemu \

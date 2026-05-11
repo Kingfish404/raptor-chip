@@ -43,7 +43,7 @@ jobs:
       AM_HOME: ${{ github.workspace }}/abstract-machine
       CROSS_COMPILE: riscv64-elf-
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Setup environment
         run: ./setup.sh
       - name: Build NEMU (ref) and NPC
@@ -110,7 +110,7 @@ jobs:
             >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload benchmark results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: benchmark-results-${{ github.sha }}
           path: |
@@ -127,7 +127,7 @@ jobs:
       AM_HOME: ${{ github.workspace }}/abstract-machine
       CROSS_COMPILE: riscv64-elf-
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Setup environment
         run: ./setup.sh
       - name: Build NPC with difftest and NEMU-Ref
@@ -150,7 +150,7 @@ jobs:
       AM_HOME: ${{ github.workspace }}/abstract-machine
       CROSS_COMPILE: riscv64-elf-
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Setup environment
         run: ./setup.sh
       - name: Generate ysyxSoC
@@ -206,7 +206,7 @@ jobs:
       AM_HOME: ${{ github.workspace }}/abstract-machine
       CROSS_COMPILE: riscv64-elf-
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Setup environment
         run: ./setup.sh
       - name: Generate ysyxSoC
@@ -234,7 +234,7 @@ jobs:
       AM_HOME: ${{ github.workspace }}/abstract-machine
       CROSS_COMPILE: riscv64-unknown-elf-
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup base environment
         run: |
@@ -486,7 +486,7 @@ jobs:
 
       - name: Upload logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: app-test-logs-${{ github.sha }}
           path: /tmp/app-*.log

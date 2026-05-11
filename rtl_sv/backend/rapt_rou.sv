@@ -217,6 +217,107 @@ module rapt_rou #(
       && !rob_entry[rob_tail_b].busy;
 `endif
 
+  // ================================================================
+  //  Helper tasks: factor out per-slot dispatch/enqueue duplication.
+  //  Same code path for slot A (always) and slot B (RAPT_DUAL_ISSUE).
+  // ================================================================
+
+  // Latch one renamed uop into a UOQ entry, applying same-cycle CDB
+  // bypass (EXU-A / EXU-B / IOQ broadcast) when the producer prd matches
+  // a non-zero pr1/pr2; otherwise capture the PRF pre-read result.
+  task automatic uoq_enqueue_slot(
+      input logic [$clog2(IIQ_SIZE)-1:0] idx,
+      input rapt_pkg::uop_t              u,
+      input logic [    PLEN-1:0]         pr1, pr2, pr_d, pr_s,
+      input logic [    XLEN-1:0]         im1, im2,
+      input logic [    XLEN-1:0]         prf_pv1, prf_pv2,
+      input logic                        prf_pv1_v, prf_pv2_v
+  );
+    uoq_valid[idx] <= 1'b1;
+    uoq_uops[idx]  <= u;
+    uoq_pr1[idx]   <= pr1;
+    uoq_pr2[idx]   <= pr2;
+    uoq_prd[idx]   <= pr_d;
+    uoq_prs[idx]   <= pr_s;
+    uoq_op1[idx]   <= im1;
+    uoq_op2[idx]   <= im2;
+
+    // Operand 1 bypass at enqueue
+    if (|pr1 && exu_rou.valid && exu_rou.prd == pr1) begin
+      uoq_pv1[idx]       <= exu_rou.result;
+      uoq_pv1_valid[idx] <= 1'b1;
+    end else if (|pr1 && exu_rou_b.valid && exu_rou_b.prd == pr1) begin
+      uoq_pv1[idx]       <= exu_rou_b.result;
+      uoq_pv1_valid[idx] <= 1'b1;
+    end else if (|pr1 && exu_ioq_bcast.valid && exu_ioq_bcast.prd == pr1) begin
+      uoq_pv1[idx]       <= exu_ioq_bcast.result;
+      uoq_pv1_valid[idx] <= 1'b1;
+    end else begin
+      uoq_pv1[idx]       <= prf_pv1;
+      uoq_pv1_valid[idx] <= prf_pv1_v;
+    end
+
+    // Operand 2 bypass at enqueue
+    if (|pr2 && exu_rou.valid && exu_rou.prd == pr2) begin
+      uoq_pv2[idx]       <= exu_rou.result;
+      uoq_pv2_valid[idx] <= 1'b1;
+    end else if (|pr2 && exu_rou_b.valid && exu_rou_b.prd == pr2) begin
+      uoq_pv2[idx]       <= exu_rou_b.result;
+      uoq_pv2_valid[idx] <= 1'b1;
+    end else if (|pr2 && exu_ioq_bcast.valid && exu_ioq_bcast.prd == pr2) begin
+      uoq_pv2[idx]       <= exu_ioq_bcast.result;
+      uoq_pv2_valid[idx] <= 1'b1;
+    end else begin
+      uoq_pv2[idx]       <= prf_pv2;
+      uoq_pv2_valid[idx] <= prf_pv2_v;
+    end
+  endtask
+
+  // Allocate a fresh ROB entry + cold uop_pl payload at `tail`.
+  // Hot WB-mutable fields (state/btaken/npc/sq_*/csr_w*) are intentionally
+  // left untouched here; reads are gated by busy/state and the WB path
+  // overwrites them before the entry is observed.
+  /* verilator lint_off UNUSEDSIGNAL */
+  task automatic dispatch_to_rob(
+      input logic [$clog2(ROB_SIZE)-1:0] tail,
+      input rapt_pkg::uop_t              u,
+      input logic [PLEN-1:0]             pr_d,
+      input logic [PLEN-1:0]             pr_s
+  );
+  /* verilator lint_on UNUSEDSIGNAL */
+    // ---- ROB entry: control + WB-mutable defaults ----
+    rob_entry[tail].prd        <= pr_d;
+    rob_entry[tail].prs        <= pr_s;
+    rob_entry[tail].busy       <= 1'b1;
+    rob_entry[tail].state      <= rapt_pkg::ROB_EX;
+    rob_entry[tail].rd         <= u.rd;
+    rob_entry[tail].mispredict <= 1'b0;
+    rob_entry[tail].wen        <= u.wen;
+    rob_entry[tail].word       <= u.word;
+    rob_entry[tail].alu        <= u.atom ? `RAPT_WSTRB_SW : u.alu;
+    rob_entry[tail].trap       <= u.trap;
+    rob_entry[tail].tval       <= u.tval;
+    rob_entry[tail].cause      <= u.cause;
+
+    // ---- Cold dispatch-only payload (RS issue + commit display) ----
+    uop_pl[tail].sys      <= u.system;
+    uop_pl[tail].ecall    <= u.ecall;
+    uop_pl[tail].ebreak   <= u.ebreak;
+    uop_pl[tail].mret     <= u.mret;
+    uop_pl[tail].sret     <= u.sret;
+    uop_pl[tail].f_i      <= u.f_i;
+    uop_pl[tail].f_time   <= u.f_time;
+    uop_pl[tail].csr_addr <= u.imm[11:0];
+    uop_pl[tail].csr_csw  <= u.csr_csw;
+    uop_pl[tail].ben      <= u.ben;
+    uop_pl[tail].jen      <= u.jen;
+    uop_pl[tail].jren     <= u.jren;
+    uop_pl[tail].atom     <= u.atom;
+    uop_pl[tail].atom_sc  <= u.atom && (u.alu == `RAPT_ATO_SC__);
+    uop_pl[tail].pc       <= u.pc;
+    uop_pl[tail].inst     <= u.inst;
+  endtask
+
   always_ff @(posedge clock) begin
     if (reset || flush_pipe) begin
       uoq_head_a          <= '0;
@@ -233,90 +334,22 @@ module rapt_rou #(
       serialize_in_flight <= 1'b0;
     end else begin
       if (uoq_enq_fire_a) begin
-        uoq_valid[uoq_head_a] <= 1'b1;
-        uoq_uops[uoq_head_a]  <= rnu_rou.uop_a;
-        uoq_pr1[uoq_head_a]   <= rnu_rou.pr1_a;
-        uoq_pr2[uoq_head_a]   <= rnu_rou.pr2_a;
-        uoq_prd[uoq_head_a]   <= rnu_rou.prd_a;
-        uoq_prs[uoq_head_a]   <= rnu_rou.prs_a;
-        uoq_op1[uoq_head_a]   <= rnu_rou.op1_a;
-        uoq_op2[uoq_head_a]   <= rnu_rou.op2_a;
-
-        // PRF pre-read with same-cycle bypass at enqueue
-        if (|rnu_rou.pr1_a && exu_rou.valid && exu_rou.prd == rnu_rou.pr1_a) begin
-          uoq_pv1[uoq_head_a]       <= exu_rou.result;
-          uoq_pv1_valid[uoq_head_a] <= 1'b1;
-        end else if (|rnu_rou.pr1_a && exu_rou_b.valid && exu_rou_b.prd == rnu_rou.pr1_a) begin
-          uoq_pv1[uoq_head_a]       <= exu_rou_b.result;
-          uoq_pv1_valid[uoq_head_a] <= 1'b1;
-        end else if (|rnu_rou.pr1_a
-          && exu_ioq_bcast.valid && exu_ioq_bcast.prd == rnu_rou.pr1_a) begin
-          uoq_pv1[uoq_head_a]       <= exu_ioq_bcast.result;
-          uoq_pv1_valid[uoq_head_a] <= 1'b1;
-        end else begin
-          uoq_pv1[uoq_head_a]       <= exu_prf.pv1_a;
-          uoq_pv1_valid[uoq_head_a] <= exu_prf.pv1_a_valid;
-        end
-
-        if (|rnu_rou.pr2_a && exu_rou.valid && exu_rou.prd == rnu_rou.pr2_a) begin
-          uoq_pv2[uoq_head_a]       <= exu_rou.result;
-          uoq_pv2_valid[uoq_head_a] <= 1'b1;
-        end else if (|rnu_rou.pr2_a && exu_rou_b.valid && exu_rou_b.prd == rnu_rou.pr2_a) begin
-          uoq_pv2[uoq_head_a]       <= exu_rou_b.result;
-          uoq_pv2_valid[uoq_head_a] <= 1'b1;
-        end else if (|rnu_rou.pr2_a
-          && exu_ioq_bcast.valid && exu_ioq_bcast.prd == rnu_rou.pr2_a) begin
-          uoq_pv2[uoq_head_a]       <= exu_ioq_bcast.result;
-          uoq_pv2_valid[uoq_head_a] <= 1'b1;
-        end else begin
-          uoq_pv2[uoq_head_a]       <= exu_prf.pv2_a;
-          uoq_pv2_valid[uoq_head_a] <= exu_prf.pv2_a_valid;
-        end
-
+        uoq_enqueue_slot(
+            uoq_head_a, rnu_rou.uop_a,
+            rnu_rou.pr1_a, rnu_rou.pr2_a, rnu_rou.prd_a, rnu_rou.prs_a,
+            rnu_rou.op1_a, rnu_rou.op2_a,
+            exu_prf.pv1_a, exu_prf.pv2_a,
+            exu_prf.pv1_a_valid, exu_prf.pv2_a_valid);
 `ifdef RAPT_DUAL_ISSUE
         if (uoq_enq_fire_b) begin
           uoq_is_pair[uoq_head_a] <= 1'b0;
           uoq_is_pair[uoq_head_b] <= 1'b1;
-          uoq_valid[uoq_head_b] <= 1'b1;
-          uoq_uops[uoq_head_b] <= rnu_rou.uop_b;
-          uoq_pr1[uoq_head_b] <= rnu_rou.pr1_b;
-          uoq_pr2[uoq_head_b] <= rnu_rou.pr2_b;
-          uoq_prd[uoq_head_b] <= rnu_rou.prd_b;
-          uoq_prs[uoq_head_b] <= rnu_rou.prs_b;
-          uoq_op1[uoq_head_b] <= rnu_rou.op1_b;
-          uoq_op2[uoq_head_b] <= rnu_rou.op2_b;
-
-          // PRF pre-read for slot B
-          if (|rnu_rou.pr1_b && exu_rou.valid && exu_rou.prd == rnu_rou.pr1_b) begin
-            uoq_pv1[uoq_head_b]       <= exu_rou.result;
-            uoq_pv1_valid[uoq_head_b] <= 1'b1;
-          end else if (|rnu_rou.pr1_b && exu_rou_b.valid && exu_rou_b.prd == rnu_rou.pr1_b) begin
-            uoq_pv1[uoq_head_b]       <= exu_rou_b.result;
-            uoq_pv1_valid[uoq_head_b] <= 1'b1;
-          end else if (|rnu_rou.pr1_b
-            && exu_ioq_bcast.valid && exu_ioq_bcast.prd == rnu_rou.pr1_b) begin
-            uoq_pv1[uoq_head_b]       <= exu_ioq_bcast.result;
-            uoq_pv1_valid[uoq_head_b] <= 1'b1;
-          end else begin
-            uoq_pv1[uoq_head_b]       <= exu_prf.pv1_b;
-            uoq_pv1_valid[uoq_head_b] <= exu_prf.pv1_b_valid;
-          end
-
-          if (|rnu_rou.pr2_b && exu_rou.valid && exu_rou.prd == rnu_rou.pr2_b) begin
-            uoq_pv2[uoq_head_b]       <= exu_rou.result;
-            uoq_pv2_valid[uoq_head_b] <= 1'b1;
-          end else if (|rnu_rou.pr2_b && exu_rou_b.valid && exu_rou_b.prd == rnu_rou.pr2_b) begin
-            uoq_pv2[uoq_head_b]       <= exu_rou_b.result;
-            uoq_pv2_valid[uoq_head_b] <= 1'b1;
-          end else if (|rnu_rou.pr2_b
-            && exu_ioq_bcast.valid && exu_ioq_bcast.prd == rnu_rou.pr2_b) begin
-            uoq_pv2[uoq_head_b]       <= exu_ioq_bcast.result;
-            uoq_pv2_valid[uoq_head_b] <= 1'b1;
-          end else begin
-            uoq_pv2[uoq_head_b]       <= exu_prf.pv2_b;
-            uoq_pv2_valid[uoq_head_b] <= exu_prf.pv2_b_valid;
-          end
-
+          uoq_enqueue_slot(
+              uoq_head_b, rnu_rou.uop_b,
+              rnu_rou.pr1_b, rnu_rou.pr2_b, rnu_rou.prd_b, rnu_rou.prs_b,
+              rnu_rou.op1_b, rnu_rou.op2_b,
+              exu_prf.pv1_b, exu_prf.pv2_b,
+              exu_prf.pv1_b_valid, exu_prf.pv2_b_valid);
           uoq_head_a <= uoq_head_a + 2;
         end else begin
           uoq_is_pair[uoq_head_a] <= 1'b0;
@@ -513,91 +546,21 @@ module rapt_rou #(
         rob_tail_a <= rob_tail_a + 1;
 `endif
 
-        rob_entry[rob_tail_a].prd <= uoq_prd[uoq_tail_a];
-        rob_entry[rob_tail_a].prs <= uoq_prs[uoq_tail_a];
-        rob_entry[rob_tail_a].busy <= 1'b1;
-        rob_entry[rob_tail_a].state <= rapt_pkg::ROB_EX;
-        rob_entry[rob_tail_a].rd <= uoq_uops[uoq_tail_a].rd;
-
-        rob_entry[rob_tail_a].ben <= uoq_uops[uoq_tail_a].ben;
-        rob_entry[rob_tail_a].jen <= uoq_uops[uoq_tail_a].jen;
-        rob_entry[rob_tail_a].jren <= uoq_uops[uoq_tail_a].jren;
-        rob_entry[rob_tail_a].pnpc <= uoq_uops[uoq_tail_a].pnpc;
-
-        rob_entry[rob_tail_a].wen <= uoq_uops[uoq_tail_a].wen;
-        rob_entry[rob_tail_a].word <= uoq_uops[uoq_tail_a].word;
-        rob_entry[rob_tail_a].alu <= uoq_uops[uoq_tail_a].atom ?
-        `RAPT_WSTRB_SW
-        : uoq_uops[uoq_tail_a].alu;
-
-        rob_entry[rob_tail_a].atom <= uoq_uops[uoq_tail_a].atom;
-        rob_entry[rob_tail_a].atom_sc <= uoq_uops[uoq_tail_a].atom
-                                    && (uoq_uops[uoq_tail_a].alu == `RAPT_ATO_SC__);
-
-        rob_entry[rob_tail_a].trap <= uoq_uops[uoq_tail_a].trap;
-        rob_entry[rob_tail_a].tval <= uoq_uops[uoq_tail_a].tval;
-        rob_entry[rob_tail_a].cause <= uoq_uops[uoq_tail_a].cause;
-
-        rob_entry[rob_tail_a].pc <= uoq_uops[uoq_tail_a].pc;
-
-        // Cold dispatch-only payload (RS issue + commit display)
-        uop_pl[rob_tail_a].sys <= uoq_uops[uoq_tail_a].system;
-        uop_pl[rob_tail_a].ecall <= uoq_uops[uoq_tail_a].ecall;
-        uop_pl[rob_tail_a].ebreak <= uoq_uops[uoq_tail_a].ebreak;
-        uop_pl[rob_tail_a].mret <= uoq_uops[uoq_tail_a].mret;
-        uop_pl[rob_tail_a].sret <= uoq_uops[uoq_tail_a].sret;
-        uop_pl[rob_tail_a].f_i <= uoq_uops[uoq_tail_a].f_i;
-        uop_pl[rob_tail_a].f_time <= uoq_uops[uoq_tail_a].f_time;
-        uop_pl[rob_tail_a].csr_addr <= uoq_uops[uoq_tail_a].imm[11:0];
-        uop_pl[rob_tail_a].csr_csw <= uoq_uops[uoq_tail_a].csr_csw;
-        uop_pl[rob_tail_a].inst <= uoq_uops[uoq_tail_a].inst;
+        dispatch_to_rob(rob_tail_a, uoq_uops[uoq_tail_a],
+                        uoq_prd[uoq_tail_a], uoq_prs[uoq_tail_a]);
 
 `ifdef RAPT_DUAL_ISSUE
         // ---- Dispatch slot B: insert into ROB tail+1 ----
         if (uoq_deq_fire_b) begin
-          rob_entry[rob_tail_b].prd <= uoq_prd[uoq_tail_b];
-          rob_entry[rob_tail_b].prs <= uoq_prs[uoq_tail_b];
-          rob_entry[rob_tail_b].busy <= 1'b1;
-          rob_entry[rob_tail_b].state <= rapt_pkg::ROB_EX;
-          rob_entry[rob_tail_b].rd <= uoq_uops[uoq_tail_b].rd;
-
-          rob_entry[rob_tail_b].ben <= uoq_uops[uoq_tail_b].ben;
-          rob_entry[rob_tail_b].jen <= uoq_uops[uoq_tail_b].jen;
-          rob_entry[rob_tail_b].jren <= uoq_uops[uoq_tail_b].jren;
-          rob_entry[rob_tail_b].pnpc <= uoq_uops[uoq_tail_b].pnpc;
-
-          rob_entry[rob_tail_b].wen <= uoq_uops[uoq_tail_b].wen;
-          rob_entry[rob_tail_b].word <= uoq_uops[uoq_tail_b].word;
-          rob_entry[rob_tail_b].alu <= uoq_uops[uoq_tail_b].atom ?
-          `RAPT_WSTRB_SW
-          : uoq_uops[uoq_tail_b].alu;
-
-          rob_entry[rob_tail_b].atom <= uoq_uops[uoq_tail_b].atom;
-          rob_entry[rob_tail_b].atom_sc <= uoq_uops[uoq_tail_b].atom
-                                        && (uoq_uops[uoq_tail_b].alu == `RAPT_ATO_SC__);
-
-          rob_entry[rob_tail_b].trap <= uoq_uops[uoq_tail_b].trap;
-          rob_entry[rob_tail_b].tval <= uoq_uops[uoq_tail_b].tval;
-          rob_entry[rob_tail_b].cause <= uoq_uops[uoq_tail_b].cause;
-
-          rob_entry[rob_tail_b].pc <= uoq_uops[uoq_tail_b].pc;
-
-          // Cold dispatch-only payload (RS issue + commit display)
-          uop_pl[rob_tail_b].sys <= uoq_uops[uoq_tail_b].system;
-          uop_pl[rob_tail_b].ecall <= uoq_uops[uoq_tail_b].ecall;
-          uop_pl[rob_tail_b].ebreak <= uoq_uops[uoq_tail_b].ebreak;
-          uop_pl[rob_tail_b].mret <= uoq_uops[uoq_tail_b].mret;
-          uop_pl[rob_tail_b].sret <= uoq_uops[uoq_tail_b].sret;
-          uop_pl[rob_tail_b].f_i <= uoq_uops[uoq_tail_b].f_i;
-          uop_pl[rob_tail_b].f_time <= uoq_uops[uoq_tail_b].f_time;
-          uop_pl[rob_tail_b].csr_addr <= uoq_uops[uoq_tail_b].imm[11:0];
-          uop_pl[rob_tail_b].csr_csw <= uoq_uops[uoq_tail_b].csr_csw;
-          uop_pl[rob_tail_b].inst <= uoq_uops[uoq_tail_b].inst;
+          dispatch_to_rob(rob_tail_b, uoq_uops[uoq_tail_b],
+                          uoq_prd[uoq_tail_b], uoq_prs[uoq_tail_b]);
         end
 `endif
       end
 
       // ---- Write-back from IOQ (load/store completion) ----
+      // Loads/stores never branch, so `mispredict` is left at its
+      // dispatch-init value of 0 (no IOQ field needed).
       if (exu_ioq_bcast.valid) begin
         rob_entry[wb_dest_ioq].state    <= rapt_pkg::ROB_WB;
         rob_entry[wb_dest_ioq].npc      <= exu_ioq_bcast.npc;
@@ -621,6 +584,7 @@ module rapt_rou #(
         rob_entry[wb_dest_exu].state         <= rapt_pkg::ROB_WB;
         rob_entry[wb_dest_exu].btaken        <= exu_rou.btaken;
         rob_entry[wb_dest_exu].npc           <= exu_rou.npc;
+        rob_entry[wb_dest_exu].mispredict    <= exu_rou.mispredict;
 
         rob_entry[wb_dest_exu].csr_wen       <= exu_rou.csr_wen;
         rob_entry[wb_dest_exu].csr_wdata     <= exu_rou.csr_wdata;
@@ -635,22 +599,24 @@ module rapt_rou #(
       // Slot B handles arithmetic and branches (jen / ben). It never carries
       // CSR/trap/system/mul, so dispatch-time fields (csr_wen, ecall, mret,
       // trap, ...) stay at their defaults (0). We update state/npc/btaken/
-      // inst/difftest_skip; btaken is required for BPU updates on commit.
+      // mispredict/difftest_skip.
       if (exu_rou_b.valid) begin
         rob_entry[wb_dest_exu_b].state         <= rapt_pkg::ROB_WB;
         rob_entry[wb_dest_exu_b].npc           <= exu_rou_b.npc;
         rob_entry[wb_dest_exu_b].btaken        <= exu_rou_b.btaken;
+        rob_entry[wb_dest_exu_b].mispredict    <= exu_rou_b.mispredict;
         rob_entry[wb_dest_exu_b].difftest_skip <= exu_rou_b.difftest_skip;
       end
 
       // ---- Write-back from EXU port C (dedicated BRU, ben only) ----
       // Conditional branches don't write rd, so no result/prd update is
-      // needed; only state + npc + btaken + difftest_skip are written so
-      // commit/BPU can resolve the branch.
+      // needed; only state + npc + btaken + mispredict + difftest_skip are
+      // written so commit/BPU can resolve the branch.
       if (exu_rou_c.valid) begin
         rob_entry[exu_rou_c.dest].state         <= rapt_pkg::ROB_WB;
         rob_entry[exu_rou_c.dest].npc           <= exu_rou_c.npc;
         rob_entry[exu_rou_c.dest].btaken        <= exu_rou_c.btaken;
+        rob_entry[exu_rou_c.dest].mispredict    <= exu_rou_c.mispredict;
         rob_entry[exu_rou_c.dest].difftest_skip <= exu_rou_c.difftest_skip;
       end
 
@@ -692,7 +658,7 @@ module rapt_rou #(
   end
 
   // ---- Slot 0 (head) ----
-  assign head0_br_p_fail = rob_entry[h0].npc != rob_entry[h0].pnpc;
+  assign head0_br_p_fail = rob_entry[h0].mispredict;
   assign head0_valid     = recieved_trap || (
       rob_entry[h0].busy
       && rob_entry[h0].state == rapt_pkg::ROB_WB
@@ -711,7 +677,7 @@ module rapt_rou #(
       || rob_entry[h0].trap
       || uop_pl[h0].sys
       || uop_pl[h0].f_time
-      || rob_entry[h0].atom
+      || uop_pl[h0].atom
   ));
 
   // Kept as a distinct broadcast path for interface compatibility. Pure
@@ -722,7 +688,7 @@ module rapt_rou #(
   // ---- Slot 1 (head+1): only considered when slot 0 doesn't flush ----
   logic head1_br_p_fail;
   logic head1_valid;
-  assign head1_br_p_fail = rob_entry[h1].npc != rob_entry[h1].pnpc;
+  assign head1_br_p_fail = rob_entry[h1].mispredict;
   assign head1_valid     = rob_entry[h1].busy
       && rob_entry[h1].state == rapt_pkg::ROB_WB
       && (rou_lsu.sq_ready || !rob_entry[h1].wen);
@@ -745,7 +711,7 @@ module rapt_rou #(
       || rob_entry[h1].trap
       || uop_pl[h1].sys
       || uop_pl[h1].f_time
-      || rob_entry[h1].atom
+      || uop_pl[h1].atom
   );
 
   // ---- Global flush / fence ----
@@ -766,7 +732,7 @@ module rapt_rou #(
   // The architectural state (mcause/mepc/mtval) reflects the trap; downstream
   // consumers use `inst` only for trace/diff reporting.
   assign rou_cmu.inst_a = uop_pl[h0].inst;
-  assign rou_cmu.pc_a = recieved_trap ? trap_pc : rob_entry[h0].pc;
+  assign rou_cmu.pc_a = recieved_trap ? trap_pc : uop_pl[h0].pc;
   assign rou_cmu.prd_a = rob_entry[h0].prd;
   assign rou_cmu.prs_a = rob_entry[h0].prs;
   // Branch signals: when dual committing, use slot 1 (BPU trains on rpc which is slot 1's PC)
@@ -778,10 +744,10 @@ module rapt_rou #(
           || uop_pl[h0].ecall || uop_pl[h0].ebreak)
           ? csr_bcast.tvec
       : rob_entry[h0].npc;
-  assign rou_cmu.ben = dual_commit ? rob_entry[h1].ben : rob_entry[h0].ben;
-  assign rou_cmu.jen = dual_commit ? rob_entry[h1].jen : rob_entry[h0].jen;
-  assign rou_cmu.jren = dual_commit ? rob_entry[h1].jren : rob_entry[h0].jren;
-  assign rou_cmu.atomic_sc = dual_commit ? rob_entry[h1].atom_sc : rob_entry[h0].atom_sc;
+  assign rou_cmu.ben = dual_commit ? uop_pl[h1].ben : uop_pl[h0].ben;
+  assign rou_cmu.jen = dual_commit ? uop_pl[h1].jen : uop_pl[h0].jen;
+  assign rou_cmu.jren = dual_commit ? uop_pl[h1].jren : uop_pl[h0].jren;
+  assign rou_cmu.atomic_sc = dual_commit ? uop_pl[h1].atom_sc : uop_pl[h0].atom_sc;
   assign rou_cmu.ebreak_a = head0_valid && uop_pl[h0].ebreak;
   assign rou_cmu.fence_time = fence_time;
   assign rou_cmu.fence_i = (head0_valid && uop_pl[h0].f_i) || (dual_commit && uop_pl[h1].f_i);
@@ -798,7 +764,7 @@ module rapt_rou #(
   assign rou_cmu.rd_b = rob_entry[h1].rd;
   // Surface the real fetched instruction, even on traps (for difftest/RVFI).
   assign rou_cmu.inst_b = uop_pl[h1].inst;
-  assign rou_cmu.pc_b = rob_entry[h1].pc;
+  assign rou_cmu.pc_b = uop_pl[h1].pc;
   assign rou_cmu.prd_b = rob_entry[h1].prd;
   assign rou_cmu.prs_b = rob_entry[h1].prs;
   assign rou_cmu.npc_b = (rob_entry[h1].trap || uop_pl[h1].ecall || uop_pl[h1].ebreak)
@@ -831,7 +797,7 @@ module rapt_rou #(
   logic commit_trap;
   assign commit_trap = csr_from_h1 ? rob_entry[h1].trap : rob_entry[h0].trap;
 
-  assign rou_csr.pc = recieved_trap ? trap_pc : csr_from_h1 ? rob_entry[h1].pc : rob_entry[h0].pc;
+  assign rou_csr.pc = recieved_trap ? trap_pc : csr_from_h1 ? uop_pl[h1].pc : uop_pl[h0].pc;
   assign rou_csr.csr_wen   = (recieved_trap || commit_trap) ? 1'b0
                            : csr_from_h1   ? rob_entry[h1].csr_wen
                            :                 rob_entry[h0].csr_wen;
@@ -863,7 +829,7 @@ module rapt_rou #(
   assign rou_lsu.sq_waddr = dual_commit ? rob_entry[h1].sq_waddr : rob_entry[h0].sq_waddr;
   assign rou_lsu.sq_vaddr = dual_commit ? rob_entry[h1].tval : rob_entry[h0].tval;
   assign rou_lsu.sq_wdata = dual_commit ? rob_entry[h1].sq_wdata : rob_entry[h0].sq_wdata;
-  assign rou_lsu.pc = dual_commit ? rob_entry[h1].pc : rob_entry[h0].pc;
+  assign rou_lsu.pc = dual_commit ? uop_pl[h1].pc : uop_pl[h0].pc;
   assign rou_lsu.valid = head0_valid;
 
   // ---- Retire count for instret CSR ----

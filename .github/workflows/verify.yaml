@@ -44,12 +44,12 @@ jobs:
       AM_HOME: ${{ github.workspace }}/abstract-machine
       CROSS_COMPILE: riscv64-elf-
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install Python 3.11
         # Pin Python to 3.11 to match the neorv32 RISC-V arch-test workflow
         # (the pinned RISCOF fork at d38859f has known issues on 3.12+).
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
@@ -87,7 +87,7 @@ jobs:
           make -C nsim/csrc/mem/mrom-data
 
       - name: Cache riscv-arch-test suite
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: verify/riscof/classic/riscv-arch-test
           key: riscv-arch-test-main-${{ hashFiles('verify/riscof/classic/plugins/**',
@@ -138,7 +138,7 @@ jobs:
 
       - name: Upload RISCOF report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: riscof-classic-report
           path: |
@@ -148,7 +148,7 @@ jobs:
 
       - name: Upload RISCOF workdir on failure (postmortem)
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: riscof-classic-workdir-${{ github.sha }}
           path: |
@@ -165,7 +165,7 @@ jobs:
       AM_HOME: ${{ github.workspace }}/abstract-machine
       CROSS_COMPILE: riscv64-elf-
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Setup environment
         run: ./setup.sh
       - name: Build NPC with difftest and NEMU-Ref
@@ -196,7 +196,7 @@ jobs:
         run: make -C verify coverage-report
       - name: Upload coverage artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-report
           path: verify/build/coverage/
