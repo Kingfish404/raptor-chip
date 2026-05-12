@@ -79,7 +79,7 @@ static void out_of_bound(paddr_t addr)
   if (cpu.sr[CSR_MTVEC] != 0 && cpu.priv == PRV_M)
   {
     cause = MCA_LOA_ACC_FAU;
-    longjmp(exec_jmp_buf, 10);
+    nemu_longjmp(exec_jmp_buf, 10);
   }
   panic("address = " FMT_PADDR " is out of bound of pmem [" FMT_PADDR ", " FMT_PADDR "] at pc = " FMT_WORD,
         addr, PMEM_LEFT, PMEM_RIGHT, cpu.pc);
@@ -162,16 +162,27 @@ word_t paddr_read(paddr_t addr, int len)
   printf("paddr_r: " FMT_PADDR ", size: %d\n", addr, len);
 #endif
 
-  if (likely(
-          IFDEF(CONFIG_DEVICE, mmio_map_contains(addr) ||)
-          in_pmem(addr) ||
-          in_rom(addr) ||
-          in_sdram(addr) ||
-          in_sram(addr) ||
-          in_mrom(addr) ||
-          in_flash(addr)))
+  /* Fast path: physical memory (DRAM / ROM / scratchpads). These are
+   * cheap inline range checks, and the overwhelmingly common case for
+   * any non-MMIO workload. Doing them first eliminates two linear
+   * mmio_map_contains scans (one in the guard, one in the dispatch).
+   *
+   * NOTE: in_flash() / in_rom() / in_mrom() are intentionally excluded
+   * from the fast path because their address ranges (in particular
+   * CONFIG_FLASH_BASE..+0x40000000) overlap with MMIO devices such as
+   * the sdhci controller at 0x40000000. The write path (paddr_write)
+   * also excludes them; keep the read path symmetric so MMIO reads are
+   * not silently satisfied from a zeroed backing buffer. */
+  if (likely(in_pmem(addr) || in_sdram(addr) || in_sram(addr)))
   {
-    IFDEF(CONFIG_DEVICE, if (mmio_map_contains(addr)) return mmio_read(addr, len));
+    return pmem_read(addr, len);
+  }
+#ifdef CONFIG_DEVICE
+  if (mmio_map_contains(addr))
+    return mmio_read(addr, len);
+#endif
+  if (in_rom(addr) || in_mrom(addr) || in_flash(addr))
+  {
     return pmem_read(addr, len);
   }
 #if defined(CONFIG_TARGET_SHARE)
@@ -191,14 +202,18 @@ void paddr_write(paddr_t addr, int len, word_t data)
   printf("paddr_w: " FMT_PADDR ", size: %d, data: " FMT_WORD "\n", addr, len, data);
 #endif
 
-  if (likely(
-          IFDEF(CONFIG_DEVICE, mmio_map_contains(addr) ||)
-          in_pmem(addr) || in_sdram(addr) || in_sram(addr)))
+  if (likely(in_pmem(addr) || in_sdram(addr) || in_sram(addr)))
   {
-    IFDEF(CONFIG_DEVICE, if (mmio_map_contains(addr)) { mmio_write(addr, len, data); return; });
     pmem_write(addr, len, data);
     return;
   }
+#ifdef CONFIG_DEVICE
+  if (mmio_map_contains(addr))
+  {
+    mmio_write(addr, len, data);
+    return;
+  }
+#endif
 #if defined(CONFIG_TARGET_SHARE)
   if (ref_paddr_io(addr))
   {

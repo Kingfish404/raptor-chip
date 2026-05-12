@@ -38,6 +38,17 @@ config SERIAL_MMIO_US16550
   hex "MMIO address of the serial controller (US16550)"
   default 0x10000000
 
+config SERIAL_PLIC_IRQ
+  int "PLIC interrupt source ID for the ns16550 UART"
+  default 1
+  help
+    PLIC source ID raised by the ns16550 model. Must match the
+    `interrupts = <N>` cell in the bundled DTB used by the guest
+    (see nemu/src/memory/rom/spike-rv*ima*.dts). Linux derives the
+    handler from the DTB, so a mismatch silently drops UART RX IRQs.
+    Bare-metal/tinyos workloads that poll LSR.DR are unaffected, but
+    avoid colliding with VIRTIO_BLK_PLIC_IRQ.
+
 endif # HAS_SERIAL
 
 menuconfig HAS_TIMER

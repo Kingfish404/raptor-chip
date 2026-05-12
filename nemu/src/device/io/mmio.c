@@ -1,17 +1,17 @@
 /***************************************************************************************
-* Copyright (c) 2014-2022 Zihao Yu, Nanjing University
-*
-* NEMU is licensed under Mulan PSL v2.
-* You can use this software according to the terms and conditions of the Mulan PSL v2.
-* You may obtain a copy of Mulan PSL v2 at:
-*          http://license.coscl.org.cn/MulanPSL2
-*
-* THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
-* EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-* MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-*
-* See the Mulan PSL v2 for more details.
-***************************************************************************************/
+ * Copyright (c) 2014-2022 Zihao Yu, Nanjing University
+ *
+ * NEMU is licensed under Mulan PSL v2.
+ * You can use this software according to the terms and conditions of the Mulan PSL v2.
+ * You may obtain a copy of Mulan PSL v2 at:
+ *          http://license.coscl.org.cn/MulanPSL2
+ *
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+ * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+ * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+ *
+ * See the Mulan PSL v2 for more details.
+ ***************************************************************************************/
 
 #include <device/map.h>
 #include <memory/paddr.h>
@@ -23,75 +23,101 @@
 static IOMap maps[NR_MAP] = {};
 static int nr_map = 0;
 
-static IOMap* fetch_mmio_map(paddr_t addr) {
+static IOMap *fetch_mmio_map(paddr_t addr)
+{
   int mapid = find_mapid_by_addr(maps, nr_map, addr);
   return (mapid == -1 ? NULL : &maps[mapid]);
 }
 
-bool mmio_map_contains(paddr_t addr) {
-  for (int i = 0; i < nr_map; i++) {
-    if (map_inside(&maps[i], addr)) {
+bool mmio_map_contains(paddr_t addr)
+{
+  /* Single-entry hint: UART polling, CLINT mtime reads, etc. tend to
+   * hammer the same MMIO region back-to-back. Caching the last-hit map
+   * index turns the common case from O(nr_map) to one compare. */
+  static int last_hit = -1;
+  if (last_hit >= 0 && last_hit < nr_map && map_inside(&maps[last_hit], addr))
+  {
+    return true;
+  }
+  for (int i = 0; i < nr_map; i++)
+  {
+    if (map_inside(&maps[i], addr))
+    {
+      last_hit = i;
       return true;
     }
   }
   return false;
 }
 
-int mmio_map_count(void) {
+int mmio_map_count(void)
+{
   return nr_map;
 }
 
-void print_mmio_maps(FILE *out) {
-  if (out == NULL) {
+void print_mmio_maps(FILE *out)
+{
+  if (out == NULL)
+  {
     out = stdout;
   }
   bool printed[NR_MAP] = {false};
-  for (int printed_count = 0; printed_count < nr_map; printed_count++) {
+  for (int printed_count = 0; printed_count < nr_map; printed_count++)
+  {
     int best = -1;
-    for (int i = 0; i < nr_map; i++) {
-      if (printed[i]) {
+    for (int i = 0; i < nr_map; i++)
+    {
+      if (printed[i])
+      {
         continue;
       }
-      if (best < 0 || maps[i].low < maps[best].low) {
+      if (best < 0 || maps[i].low < maps[best].low)
+      {
         best = i;
       }
     }
     printed[best] = true;
     fprintf(out, "  %-6s %-18s 0x%08" PRIx64 "  0x%08" PRIx64 "  0x%08" PRIx64 "\n",
-        "mmio", maps[best].name, (uint64_t)maps[best].low, (uint64_t)maps[best].high,
-        (uint64_t)(maps[best].high - maps[best].low + 1));
+            "mmio", maps[best].name, (uint64_t)maps[best].low, (uint64_t)maps[best].high,
+            (uint64_t)(maps[best].high - maps[best].low + 1));
   }
 }
 
 static void report_mmio_overlap(const char *name1, paddr_t l1, paddr_t r1,
-    const char *name2, paddr_t l2, paddr_t r2) {
+                                const char *name2, paddr_t l2, paddr_t r2)
+{
   panic("MMIO region %s@[" FMT_PADDR ", " FMT_PADDR "] is overlapped "
-               "with %s@[" FMT_PADDR ", " FMT_PADDR "]", name1, l1, r1, name2, l2, r2);
+        "with %s@[" FMT_PADDR ", " FMT_PADDR "]",
+        name1, l1, r1, name2, l2, r2);
 }
 
 /* device interface */
-void add_mmio_map(const char *name, paddr_t addr, void *space, uint32_t len, io_callback_t callback) {
+void add_mmio_map(const char *name, paddr_t addr, void *space, uint32_t len, io_callback_t callback)
+{
   assert(nr_map < NR_MAP);
   paddr_t left = addr, right = addr + len - 1;
-  if (in_pmem(left) || in_pmem(right)) {
+  if (in_pmem(left) || in_pmem(right))
+  {
     report_mmio_overlap(name, left, right, "pmem", PMEM_LEFT, PMEM_RIGHT);
   }
-  for (int i = 0; i < nr_map; i++) {
-    if (left <= maps[i].high && right >= maps[i].low) {
+  for (int i = 0; i < nr_map; i++)
+  {
+    if (left <= maps[i].high && right >= maps[i].low)
+    {
       report_mmio_overlap(name, left, right, maps[i].name, maps[i].low, maps[i].high);
     }
   }
 
-  maps[nr_map] = (IOMap){ .name = name, .low = addr, .high = addr + len - 1,
-    .space = space, .callback = callback };
+  maps[nr_map] = (IOMap){.name = name, .low = addr, .high = addr + len - 1, .space = space, .callback = callback};
   Log("Add mmio map '%s' at [" FMT_PADDR ", " FMT_PADDR "]",
       maps[nr_map].name, maps[nr_map].low, maps[nr_map].high);
 
-  nr_map ++;
+  nr_map++;
 }
 
 /* bus interface */
-word_t mmio_read(paddr_t addr, int len) {
+word_t mmio_read(paddr_t addr, int len)
+{
   IOMap *map = fetch_mmio_map(addr);
 #ifdef CONFIG_DTRACE
   printf("device_r: %s, addr: " FMT_WORD ", len: %d\n", map->name, addr, len);
@@ -99,7 +125,8 @@ word_t mmio_read(paddr_t addr, int len) {
   return map_read(addr, len, map);
 }
 
-void mmio_write(paddr_t addr, int len, word_t data) {
+void mmio_write(paddr_t addr, int len, word_t data)
+{
   IOMap *map = fetch_mmio_map(addr);
 #ifdef CONFIG_DTRACE
   printf("device_w: %s, addr: " FMT_WORD ", len: %d, data: " FMT_WORD "\n", map->name, addr, len, data);

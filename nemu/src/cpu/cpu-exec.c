@@ -42,6 +42,10 @@ static bool g_print_step = false;
 Decode iringbuf[MAX_IRING_SIZE];
 uint64_t iringhead = 0;
 
+#ifdef CONFIG_ITRACE
+extern bool log_enable(void);
+#endif
+
 void device_update();
 
 bool wp_check_changed();
@@ -129,7 +133,10 @@ static int nemu_save_uarch_state(const char *filename)
 
 static void nemu_periodic_save(void)
 {
-  if ((g_nr_guest_inst % 1000000) == 0)
+  /* Dump status / uarch JSON every 100M guest instructions. The fopen +
+   * multi-fprintf path was a top-5 host hotspot at the prior 1M cadence;
+   * 100M reduces it to noise while still giving periodic checkpoints. */
+  if ((g_nr_guest_inst % 100000000ULL) == 0)
   {
     const char *home = getenv("NEMU_HOME");
     if (!home)
@@ -142,10 +149,60 @@ static void nemu_periodic_save(void)
   }
 }
 
+#ifdef CONFIG_ITRACE
+/* Format a single iringbuf entry into `out` on demand. Splitting the
+ * snprintf+disassemble path out of `exec_once` avoids paying its (very
+ * heavy: capstone + multiple snprintf) cost on every executed instruction
+ * when its result would be discarded. We populate `s->logbuf` lazily, only
+ * when one of these consumers will actually read it:
+ *   1. log_enable()  — instruction trace file write window
+ *   2. g_print_step  — short interactive `si N` runs
+ *   3. cpu_show_itrace() on abort — formatted post-mortem
+ */
+static void itrace_format(Decode *s)
+{
+  /* Use s->epc (preserved executing PC) — s->pc has been clobbered to
+   * s->dnpc by decode_exec, so `s->snpc - s->pc` would be wildly wrong
+   * for taken branches and crash the snprintf/memset loop below. */
+  vaddr_t epc = s->epc;
+  char *p = s->logbuf;
+  p += snprintf(p, sizeof(s->logbuf), FMT_WORD ":", epc);
+  int ilen = (int)(s->snpc - epc);
+  if (ilen <= 0 || ilen > 4)
+  {
+    ilen = 4; /* defensive: only RV inst lengths */
+  }
+  uint8_t *inst = (uint8_t *)&s->isa.inst;
+  for (int i = ilen - 1; i >= 0; i--)
+  {
+    p += snprintf(p, 4, " %02x", inst[i]);
+  }
+  int ilen_max = 4;
+  int space_len = ilen_max - ilen;
+  if (space_len < 0)
+  {
+    space_len = 0;
+  }
+  space_len = space_len * 3 + 1;
+  memset(p, ' ', space_len);
+  p += space_len;
+  void disassemble(char *str, int size, uint64_t pc, uint8_t *code, int nbyte);
+  disassemble(p, s->logbuf + sizeof(s->logbuf) - p, epc, (uint8_t *)inst, ilen);
+}
+#endif
+
 static void trace_and_difftest(Decode *_this, vaddr_t dnpc)
 {
 #ifdef CONFIG_ITRACE_COND
-  if (ITRACE_COND)
+  /* Only format the disassembly when it will actually be consumed; this
+   * skips ~50% of NEMU's per-instruction cost (capstone + snprintf) on
+   * long benchmark runs where TRACE_END is reached early. */
+  bool _itrace_need = log_enable() || g_print_step;
+  if (_itrace_need)
+  {
+    itrace_format(_this);
+  }
+  if (ITRACE_COND && log_enable())
   {
     log_write("%s\n", _this->logbuf);
   }
@@ -170,6 +227,8 @@ static void exec_once(Decode *s, vaddr_t pc)
   cpu.cpc = pc;
   s->pc = pc;
   s->snpc = pc;
+  s->epc = pc; /* preserve executing PC for lazy itrace_format (s->pc gets
+                * clobbered to dnpc by decode_exec) */
   isa_exec_once(s);
   if (boot_from_flash)
   {
@@ -215,27 +274,15 @@ static void exec_once(Decode *s, vaddr_t pc)
     }
   }
 #ifdef CONFIG_ITRACE
-  char *p = s->logbuf;
-  p += snprintf(p, sizeof(s->logbuf), FMT_WORD ":", cpu.pc);
-  int ilen = s->snpc - cpu.pc;
-  int i;
-  uint8_t *inst = (uint8_t *)&s->isa.inst;
-  for (i = ilen - 1; i >= 0; i--)
-  {
-    p += snprintf(p, 4, " %02x", inst[i]);
-  }
-  int ilen_max = 4;
-  int space_len = ilen_max - ilen;
-  if (space_len < 0)
-    space_len = 0;
-  space_len = space_len * 3 + 1;
-  memset(p, ' ', space_len);
-  p += space_len;
-
-  void disassemble(char *str, int size, uint64_t pc, uint8_t *code, int nbyte);
-  disassemble(p, s->logbuf + sizeof(s->logbuf) - p, s->pc, (uint8_t *)&cpu.inst, ilen);
+  /* Lazy iringbuf: just snapshot the Decode struct (cheap struct copy).
+   * Heavy disassemble + snprintf is deferred to itrace_format(), called
+   * only when output is actually needed (log_enable / print_step / abort). */
   iringbuf[iringhead] = *s;
   iringhead = (iringhead + 1) % MAX_IRING_SIZE;
+  /* Mark the next-to-be-overwritten slot as "not yet formatted" so the
+   * lazy formatter can detect it. The just-written entry keeps whatever
+   * logbuf state it had (initially '\0'); cpu_show_itrace() reformats
+   * from saved (pc, snpc, isa.inst) anyway. */
   iringbuf[iringhead].logbuf[0] = '\0';
 #endif
   cpu.pc = s->pc;
@@ -252,7 +299,11 @@ static void execute(uint64_t n)
     {
       // Log("nemu: intr %x at pc = " FMT_WORD, intr, cpu.pc);
       cpu.pc = isa_raise_intr(intr, cpu.pc);
-      IFDEF(CONFIG_DIFFTEST, ref_difftest_raise_intr(intr));
+      /* ref_difftest_raise_intr is only resolved when a --diff reference
+       * .so is loaded; standalone runs (e.g. linux-boot-nemu32 without
+       * difftest, RISCOF) leave it NULL and would segfault on the first
+       * timer interrupt. Guard the call. */
+      IFDEF(CONFIG_DIFFTEST, if (ref_difftest_raise_intr) ref_difftest_raise_intr(intr));
     }
     exec_once(&s, cpu.pc);
 
@@ -335,10 +386,14 @@ void cpu_show_itrace()
 #ifdef CONFIG_ITRACE
   for (size_t i = 0; i < MAX_IRING_SIZE; i++)
   {
-    if (iringbuf[i].logbuf[0] == '\0')
+    /* Skip empty slots: epc==0 means we never executed this slot
+     * (initial zero-filled state) — real RV programs run from 0x1000+. */
+    if (iringbuf[i].epc == 0)
     {
       continue;
     }
+    /* Lazy disassembly: format the saved Decode now (post-mortem). */
+    itrace_format(&iringbuf[i]);
     iringbuf[i].logbuf[0] = ' ';
     iringbuf[i].logbuf[1] = ' ';
     if ((i + 1) % MAX_IRING_SIZE == iringhead)

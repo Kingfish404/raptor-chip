@@ -20,6 +20,7 @@
 #include <cpu/ifetch.h>
 #include <cpu/decode.h>
 #include <cpu/difftest.h>
+#include <cpu/icache.h>
 #include <memory/tlb.h>
 
 #define R(i) gpr(i)
@@ -205,8 +206,11 @@ static int decode_exec(Decode *s)
     // disassemble(p, 512, s->pc, (uint8_t *)(&s->isa.inst), 4);
     // printf("[C2I] %08x: %04x -> %08x, %s\n", s->pc, inst, s->isa.inst, p);
   }
-  else
+  else if (s->snpc <= s->pc)
   {
+    /* Cache-miss path: inst_fetch advanced snpc to pc+4 already. On a
+     * decode-cache hit the caller has pre-set snpc to pc+ilen, so we
+     * must not clobber it here. */
     s->snpc = s->pc + 4;
   }
   s->dnpc = s->snpc;
@@ -471,7 +475,7 @@ static int decode_exec(Decode *s)
   INSTPAT("0000000 10000 00000 000 00000 00011 11", pause, N, {});     // hint instruction (include in fence)
   INSTPAT("1000001 10011 00000 000 00000 00011 11", fence_tso, N, {}); // fence.tso: inst[6:2]=0b00011, same MISC-MEM group
   INSTPAT("??????? ????? ????? 000 ????? 00011 11", fence, N, {});
-  INSTPAT("??????? ????? ????? 001 ????? 00011 11", fence_i, I, {});
+  INSTPAT("??????? ????? ????? 001 ????? 00011 11", fence_i, I, icache_flush());
   INSTPAT("0000000 00000 00000 010 00000 00011 11", fence.time, N, {});
   INSTPAT_CASE_END(grp_miscmem)
 
@@ -574,7 +578,7 @@ static int decode_exec(Decode *s)
     {                                                              \
       g_vaddr = pmp_last_fault_addr;                               \
       cause = MCA_STO_ACC_FAU;                                     \
-      longjmp(exec_jmp_buf, 24);                                   \
+      nemu_longjmp(exec_jmp_buf, 24);                              \
     }                                                              \
   } while (0)
   // RV32A Extension
@@ -688,23 +692,28 @@ static int decode_exec(Decode *s)
   CSR(CSR_MCYCLE) = CSR(CSR_MCYCLE) + inst_advance;
   CSR(CSR_INSTRET) = CSR(CSR_INSTRET) + inst_advance;
   CSR(CSR_MINSTRET) = CSR(CSR_INSTRET);
-  // CSR_TIME scaled to 10MHz (matching DTS timebase-frequency)
+  /* See RV32 sibling for the deadlock-safety rationale of this gate. */
+#define TIMER_TICK_INTERVAL 1024u
+  if ((g_nr_guest_inst & (TIMER_TICK_INTERVAL - 1)) == 0)
+  {
 #if defined(CONFIG_TIMER_CYCLE)
-  // 1GHz / 10MHz = 100 cycles per tick
-  uint64_t ticks = (g_nr_guest_inst + inst_advance) / 100;
+    uint64_t ticks = (g_nr_guest_inst + inst_advance) / 100;
 #else
-  uint64_t ticks = get_time() * 10;
+    uint64_t ticks = get_time() * 10;
 #endif
-  CSR(CSR_TIME) = (word_t)ticks;
+    CSR(CSR_TIME) = (word_t)ticks;
 #ifndef CONFIG_RV64
-  CSR(CSR_TIMEH) = (uint32_t)(ticks >> 32);
+    CSR(CSR_TIMEH) = (uint32_t)(ticks >> 32);
 #endif
 #if !defined(CONFIG_TARGET_SHARE)
-  // Update MIP.MTIP and MIP.MSIP from CLINT hardware state
-  clint_update_mip();
-  // Sync SIP from MIP (SIP is a restricted view of MIP for S-mode bits)
-  CSR(CSR_SIP) = CSR(CSR_MIP) & SIP_RMASK; // bits 1 (SSIP), 5 (STIP), 9 (SEIP)
+    clint_update_mip();
 #endif
+  }
+  // sip is a restricted view of mip per the privileged spec; this mirror
+  // must run unconditionally (also under CONFIG_TARGET_SHARE difftest builds)
+  // so that M-mode writes to mip.STIP/SSIP/SEIP become visible via sip.
+  CSR(CSR_SIP) = CSR(CSR_MIP) & SIP_RMASK;
+#undef TIMER_TICK_INTERVAL
 
   R(0) = 0; // reset $zero to 0
 
@@ -720,27 +729,39 @@ int cause;
 
 int isa_exec_once(Decode *s)
 {
-  // instruction fetch
-  int jmp_value = setjmp(exec_jmp_buf);
+  // instruction fetch (skipped on decode-cache hit)
+  int jmp_value = nemu_setjmp(exec_jmp_buf);
   if (jmp_value)
   {
-    // printf("if longjmp(%d), cause: %d, pc: " FMT_WORD_NO_PREFIX "\n", jmp_value, cause, s->pc);
     s->pc = isa_raise_intr(cause, s->pc);
     s->isa.inst = 0x13; // addi x0, x0, 0; a.k.a. NOP
     return 0;
   }
-  s->isa.inst = inst_fetch(&s->snpc, 4);
+  icache_entry_t *e = icache_slot(s->pc);
+  if (icache_hit(e, s->pc))
+  {
+    s->isa.inst = e->inst;
+    s->snpc = s->pc + e->ilen;
+  }
+  else
+  {
+    s->isa.inst = inst_fetch(&s->snpc, 4); // advances snpc to pc+4
+  }
   cpu.inst = s->isa.inst;
 
   // instruction decode and execute
-  jmp_value = setjmp(exec_jmp_buf);
+  jmp_value = nemu_setjmp(exec_jmp_buf);
   if (jmp_value)
   {
-    // printf("de longjmp(%2d), cause: %d, pc: " FMT_WORD_NO_PREFIX ", inst: " FMT_WORD_NO_PREFIX "\n",
-    //        jmp_value, cause, s->pc, s->isa.inst);
     s->pc = isa_raise_intr(cause, s->pc);
     s->isa.inst = 0x13; // addi x0, x0, 0; a.k.a. NOP
     return 0;
   }
-  return decode_exec(s);
+  vaddr_t fill_pc = s->pc; // decode_exec will clobber s->pc <- dnpc
+  int ret = decode_exec(s);
+  if (!icache_hit(e, fill_pc))
+  {
+    icache_fill(e, fill_pc, s->isa.inst, (uint16_t)(s->snpc - fill_pc));
+  }
+  return ret;
 }

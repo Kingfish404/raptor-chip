@@ -28,7 +28,10 @@ typedef struct Ftrace
   word_t npc;
   word_t depth;
   word_t inst;
-  char logbuf[128];
+  /* Interrupt cause if this entry represents an intr entry, else
+   * INTR_EMPTY. Stored on the hot path; the human-readable text is
+   * built lazily by cpu_show_ftrace() to keep ftrace_add() Capstone-free. */
+  word_t intr_cause;
   bool ret;
 } Ftrace;
 
@@ -112,9 +115,14 @@ void ftrace_add(word_t pc, word_t npc, word_t inst)
 #if defined(CONFIG_ISA_riscv)
   uint32_t opcode = BITS(inst, 6, 0);
   int is_call = 0, is_ret = 0;
+  word_t intr_cause = INTR_EMPTY;
+
+  /* Fast classification. NOTE: no sprintf, no disassemble — those run
+   * lazily in cpu_show_ftrace(). The only state we keep here is what
+   * the call/ret depth tracking actually needs. */
   if (cpu.raise_intr != INTR_EMPTY)
   {
-    sprintf(ftracebuf[ftracehead].logbuf, "intr: " FMT_WORD, cpu.raise_intr);
+    intr_cause = cpu.raise_intr;
     is_call = 1;
     during_intr_trap = 1;
     cpu.raise_intr = INTR_EMPTY;
@@ -124,79 +132,60 @@ void ftrace_add(word_t pc, word_t npc, word_t inst)
     switch (inst)
     {
     case INST_ECALL:
-      sprintf(ftracebuf[ftracehead].logbuf, "ecall");
       is_call = 1;
       break;
     case INST_EBREAK:
-      sprintf(ftracebuf[ftracehead].logbuf, "ebreak");
       is_call = 1;
       break;
     case INST_RET_:
-      sprintf(ftracebuf[ftracehead].logbuf, "ret");
       is_ret = 1;
       break;
     case INST_MRET:
-      sprintf(ftracebuf[ftracehead].logbuf, "mret");
-      is_ret = during_intr_trap;
-      during_intr_trap = 0;
-      break;
     case INST_SRET:
-      sprintf(ftracebuf[ftracehead].logbuf, "sret");
       is_ret = during_intr_trap;
       during_intr_trap = 0;
       break;
     default:
+      /* Hot path's overwhelmingly common exit: the per-instruction
+       * branch into ftrace_add bottoms out here for non-call/ret ops. */
       switch (opcode)
       {
       case OP_JAL_:
-        sprintf(ftracebuf[ftracehead].logbuf, "jal");
         is_call = (inst & 0xfff) != 0x0000006f ? 1 : 0;
         break;
       case OP_JALR:
-        sprintf(ftracebuf[ftracehead].logbuf, "jalr");
         is_call = (inst & 0xfff) != 0x00000067 ? 1 : 0;
         break;
       default:
-        is_call = 0;
         break;
       }
       break;
     }
   }
+
   if (is_call || is_ret)
   {
-    ftracebuf[ftracehead].inst = inst;
-#ifdef CONFIG_ITRACE
-    char *p = ftracebuf[ftracehead].logbuf;
-    void disassemble(char *str, int size, uint64_t pc, uint8_t *code, int nbyte);
-    disassemble(p, ftracebuf[ftracehead].logbuf + sizeof(ftracebuf[ftracehead].logbuf) - p,
-                pc, (uint8_t *)&inst, 4);
-#endif
-  }
-  if (is_call)
-  {
-    ftracebuf[ftracehead].pc = pc;
-    ftracebuf[ftracehead].npc = npc;
-    ftracebuf[ftracehead].ret = false;
-    ftracebuf[ftracehead].depth = ftracedepth;
-    ftracedepth++;
-  }
-  else if (is_ret)
-  {
-    ftracebuf[ftracehead].pc = pc;
-    ftracebuf[ftracehead].npc = npc;
-    ftracebuf[ftracehead].ret = true;
-    ftracedepth--;
-    ftracebuf[ftracehead].depth = ftracedepth;
-  }
-  if (ftracedepth > ftracedepth_max)
-  {
-    ftracedepth_max = ftracedepth;
-  }
-  if (is_call || is_ret)
-  {
+    Ftrace *e = &ftracebuf[ftracehead];
+    e->pc = pc;
+    e->npc = npc;
+    e->inst = inst;
+    e->intr_cause = intr_cause;
+    e->ret = is_ret != 0;
+    if (is_call)
+    {
+      e->depth = ftracedepth;
+      ftracedepth++;
+    }
+    else
+    {
+      ftracedepth--;
+      e->depth = ftracedepth;
+    }
+    if (ftracedepth > ftracedepth_max)
+      ftracedepth_max = ftracedepth;
     ftracehead = (ftracehead + 1) % MAX_FTRACE_SIZE;
   }
+
   if (ftracedepth < 0)
   {
     /* Many standalone programs (incl. RISCOF compliance tests) don't
@@ -219,14 +208,72 @@ void ftrace_add(word_t pc, word_t npc, word_t inst)
 #endif
 }
 
+/* Lazy formatter: rebuild the short mnemonic + (if CONFIG_ITRACE)
+ * Capstone disassembly for one ftrace entry. Called only from
+ * cpu_show_ftrace(), so the per-instruction hot path stays free of
+ * sprintf and Capstone. */
+static void ftrace_format(const Ftrace *e, char *out, size_t out_sz)
+{
+  const char *mnem = "";
+  if (e->intr_cause != INTR_EMPTY)
+  {
+    snprintf(out, out_sz, "intr: " FMT_WORD, e->intr_cause);
+    return;
+  }
+  switch (e->inst)
+  {
+  case INST_ECALL:
+    mnem = "ecall";
+    break;
+  case INST_EBREAK:
+    mnem = "ebreak";
+    break;
+  case INST_RET_:
+    mnem = "ret";
+    break;
+  case INST_MRET:
+    mnem = "mret";
+    break;
+  case INST_SRET:
+    mnem = "sret";
+    break;
+  default:
+    switch ((uint32_t)(e->inst & 0x7f))
+    {
+    case OP_JAL_:
+      mnem = "jal";
+      break;
+    case OP_JALR:
+      mnem = "jalr";
+      break;
+    default:
+      mnem = "?";
+      break;
+    }
+    break;
+  }
+#ifdef CONFIG_ITRACE
+  int n = snprintf(out, out_sz, "%s ", mnem);
+  if (n < 0 || (size_t)n >= out_sz)
+    return;
+  void disassemble(char *str, int size, uint64_t pc, uint8_t *code, int nbyte);
+  uint32_t inst32 = (uint32_t)e->inst;
+  disassemble(out + n, (int)(out_sz - n), e->pc, (uint8_t *)&inst32, 4);
+#else
+  snprintf(out, out_sz, "%s", mnem);
+#endif
+}
+
 void cpu_show_ftrace(void)
 {
   Elf_Sym *sym = NULL;
   Ftrace *ftrace = NULL;
+  char buf[128];
   printf("ftrace max depth: %d\n", ftracedepth_max);
   for (size_t i = 0; i < ftracehead; i++)
   {
     ftrace = ftracebuf + i;
+    ftrace_format(ftrace, buf, sizeof(buf));
     printf("" FMT_WORD_NO_PREFIX
            " -> " FMT_WORD_NO_PREFIX ": ",
            ftrace->pc, ftrace->npc);
@@ -236,7 +283,7 @@ void cpu_show_ftrace(void)
     }
     printf("%u ", (uint32_t)ftrace->depth);
     printf("%c (" FMT_WORD_NO_PREFIX "): %s ", ftrace->ret ? '<' : '>',
-           ftrace->inst, ftrace->logbuf);
+           ftrace->inst, buf);
     if (elfshdr_symtab == NULL)
     {
       printf("\n");

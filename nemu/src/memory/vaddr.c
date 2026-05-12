@@ -17,6 +17,7 @@
 #include <isa.h>
 #include <memory/paddr.h>
 #include <memory/tlb.h>
+#include <cpu/icache.h>
 
 extern jmp_buf exec_jmp_buf;
 extern int cause;
@@ -36,13 +37,31 @@ soft_tlb_entry_t soft_tlb_ifetch[SOFT_TLB_ENTRIES];
 soft_tlb_entry_t soft_tlb_load[SOFT_TLB_ENTRIES];
 soft_tlb_entry_t soft_tlb_store[SOFT_TLB_ENTRIES];
 
+/* Start at 1 so the zero-initialized `epoch` field of a fresh entry never
+ * appears "valid" before the first explicit refill. */
+uint32_t soft_tlb_epoch = 1;
+
 void soft_tlb_flush(void)
 {
-  for (unsigned i = 0; i < SOFT_TLB_ENTRIES; i++)
+  /* Every event that invalidates an address translation (trap entry,
+   * satp write, sfence.vma, paddr/pmp remap) also invalidates the
+   * decoded-instruction cache: a stale entry would let us execute an
+   * inst that the new mapping might not even fetchable, or worse,
+   * skip a permission fault. Flush them together. */
+  icache_flush();
+  /* O(1) epoch bump. All previously-cached entries are filtered out by
+   * the `epoch == soft_tlb_epoch` check inside soft_tlb_lookup. On the
+   * (very rare) wrap to 0 we hard-reset all VPN tags to SOFT_TLB_INVALID_TAG
+   * to make sure no stale entry from epoch 0 is mistaken as valid. */
+  if (++soft_tlb_epoch == 0)
   {
-    soft_tlb_ifetch[i].vpn = SOFT_TLB_INVALID_TAG;
-    soft_tlb_load[i].vpn = SOFT_TLB_INVALID_TAG;
-    soft_tlb_store[i].vpn = SOFT_TLB_INVALID_TAG;
+    for (unsigned i = 0; i < SOFT_TLB_ENTRIES; i++)
+    {
+      soft_tlb_ifetch[i].vpn = SOFT_TLB_INVALID_TAG;
+      soft_tlb_load[i].vpn = SOFT_TLB_INVALID_TAG;
+      soft_tlb_store[i].vpn = SOFT_TLB_INVALID_TAG;
+    }
+    soft_tlb_epoch = 1;
   }
 }
 
@@ -52,7 +71,7 @@ word_t get_paddr(vaddr_t addr, int len)
   if (paddr == 0)
   {
     cause = MCA_INS_ACC_FAU;
-    longjmp(exec_jmp_buf, 20);
+    nemu_longjmp(exec_jmp_buf, 20);
   }
   // Used by LR/SC to compute the reservation address. These are loads/stores,
   // not instruction fetches, so use MEM_TYPE_READ semantics (R=1 needed). Using
@@ -87,7 +106,7 @@ word_t vaddr_ifetch(vaddr_t addr, int len)
       if (pmp_check(paddr, len, cpu.priv, false, false, true))
       {
         cause = MCA_INS_ACC_FAU;
-        longjmp(exec_jmp_buf, 22);
+        nemu_longjmp(exec_jmp_buf, 22);
       }
       return paddr_read(paddr, len);
     }
@@ -97,13 +116,16 @@ word_t vaddr_ifetch(vaddr_t addr, int len)
   if (!mmu_on && paddr == 0)
   {
     cause = MCA_INS_ACC_FAU;
-    longjmp(exec_jmp_buf, 20);
+    nemu_longjmp(exec_jmp_buf, 20);
   }
   if (pmp_check(paddr, len, cpu.priv, false, false, true))
   {
-    if (!mmu_on) g_vaddr = pmp_last_fault_addr;
+    if (!mmu_on)
+    {
+      g_vaddr = pmp_last_fault_addr;
+    }
     cause = MCA_INS_ACC_FAU;
-    longjmp(exec_jmp_buf, 22);
+    nemu_longjmp(exec_jmp_buf, 22);
   }
   return paddr_read(paddr, len);
 }
@@ -134,9 +156,12 @@ word_t vaddr_read(vaddr_t addr, int len)
     {
       if (pmp_check(paddr, len, pmp_effective_priv_ls(), true, false, false))
       {
-        if (!mmu_on) g_vaddr = pmp_last_fault_addr;
+        if (!mmu_on)
+        {
+          g_vaddr = pmp_last_fault_addr;
+        }
         cause = MCA_LOA_ACC_FAU;
-        longjmp(exec_jmp_buf, 23);
+        nemu_longjmp(exec_jmp_buf, 23);
       }
       cpu.rpaddr = paddr;
       cpu.rdata = paddr_read(paddr, len);
@@ -147,9 +172,12 @@ word_t vaddr_read(vaddr_t addr, int len)
   }
   if (pmp_check(paddr, len, pmp_effective_priv_ls(), true, false, false))
   {
-    if (!mmu_on) g_vaddr = pmp_last_fault_addr;
+    if (!mmu_on)
+    {
+      g_vaddr = pmp_last_fault_addr;
+    }
     cause = MCA_LOA_ACC_FAU;
-    longjmp(exec_jmp_buf, 23);
+    nemu_longjmp(exec_jmp_buf, 23);
   }
   cpu.rpaddr = paddr;
   cpu.rdata = paddr_read(paddr, len);
@@ -180,9 +208,12 @@ void vaddr_write(vaddr_t addr, int len, word_t data)
     {
       if (pmp_check(paddr, len, pmp_effective_priv_ls(), false, true, false))
       {
-        if (!mmu_on) g_vaddr = pmp_last_fault_addr;
+        if (!mmu_on)
+        {
+          g_vaddr = pmp_last_fault_addr;
+        }
         cause = MCA_STO_ACC_FAU;
-        longjmp(exec_jmp_buf, 24);
+        nemu_longjmp(exec_jmp_buf, 24);
       }
       cpu.pwaddr = paddr;
       paddr_write(paddr, len, data);
@@ -197,9 +228,12 @@ void vaddr_write(vaddr_t addr, int len, word_t data)
   }
   if (pmp_check(paddr, len, pmp_effective_priv_ls(), false, true, false))
   {
-    if (!mmu_on) g_vaddr = pmp_last_fault_addr;
+    if (!mmu_on)
+    {
+      g_vaddr = pmp_last_fault_addr;
+    }
     cause = MCA_STO_ACC_FAU;
-    longjmp(exec_jmp_buf, 24);
+    nemu_longjmp(exec_jmp_buf, 24);
   }
   cpu.pwaddr = paddr;
   paddr_write(paddr, len, data);

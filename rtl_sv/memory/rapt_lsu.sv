@@ -238,10 +238,13 @@ module rapt_lsu #(
   end
 
   // Store-to-load forwarding priority: STQ (youngest) > SQ (committed)
+  // NOTE: `fwd_hit` assignment is deferred until after `ma_span` is computed
+  // below, because misaligned loads that cross a word boundary cannot be
+  // satisfied by the word-granular SQ/STQ match (the high half lives in the
+  // next word, which the matched store does not cover).  See assign block
+  // immediately following the `ma_span` definition.
   logic fwd_hit;
   logic [XLEN-1:0] fwd_data;
-  assign fwd_hit = (stq_addr_conflict && stq_fwd_ok)
-                || (!stq_addr_conflict && load_in_sq && sq_fwd_ok);
   assign fwd_data = (stq_addr_conflict && stq_fwd_ok) ? stq_fwd_data : sq_fwd_data;
 
   assign raddr_valid = exu_lsu.rvalid;
@@ -274,6 +277,15 @@ module rapt_lsu #(
     || ((ralu == `RAPT_ALU_LD__) && (raddr[OFFW-1:0] != '0))
 `endif
   ;
+  // Misaligned loads that cross a word/dword boundary cannot use single-shot
+  // SQ/STQ forwarding: the word-granular `sq_match_vec` only covers the lo
+  // word, but the load also needs the byte(s) in the next word.  Suppress
+  // the forwarding hit so the request stalls (`ma_load_req` already requires
+  // `!load_in_sq && !stq_addr_conflict`) until the matching store drains to
+  // L1D, after which the misaligned-split path will fetch both halves.
+  assign fwd_hit = !ma_span
+                && ((stq_addr_conflict && stq_fwd_ok)
+                 || (!stq_addr_conflict && load_in_sq && sq_fwd_ok));
   logic pmp_load_fault_lsu;
   // Only engage the split for requests that actually reach the cache
   // (no SQ forward, no STQ conflict).  Forwarded loads keep the single-shot

@@ -89,6 +89,11 @@ static inline void verilog_connect(TOP_NAME *top, NPCState *npc)
   npc->satp___ = csr + SATP___;
 
   npc->mstatus = csr + MSTATUS;
+  // sie/sip live as restricted views of mie/mip in RTL; difftest reads them
+  // from dedicated combinational shadows kept in sync within the same eval
+  // (csr[SIE____]/csr[SIP____] storage slots are not maintained per-cycle).
+  npc->sie____ = (word_t *)&VERILOG_CPU(csrs__DOT__csr_sie_shadow);
+  npc->sip____ = (word_t *)&VERILOG_CPU(csrs__DOT__csr_sip_shadow);
   npc->misa___ = csr + MISA___;
   npc->medeleg = csr + MEDELEG;
   npc->mideleg = csr + MIDELEG;

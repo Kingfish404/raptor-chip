@@ -760,6 +760,20 @@ module rapt_csr #(
           end
         end
       end
+
     end
   end
+
+  // Difftest / external visibility shadow: keep csr[SIE____] and
+  // csr[SIP____] in lockstep with the masked M-side storage. The sie/sip
+  // CSRs are restricted views of mie/mip; software writes are redirected
+  // into csr[MIE____] / csr[MIP____] above, so the SIE/SIP slots would
+  // otherwise stay 0 and break difftest's pointer compare against NEMU
+  // (which mirrors `CSR_SIE = MIE & SIE_RMASK` after every insn). Use a
+  // dedicated combinational shadow (not csr[SIE____]/csr[SIP____] NBA)
+  // so the value is current within the same eval as the MIE write.
+  logic [XLEN-1:0] csr_sie_shadow /* verilator public_flat_rd */;
+  logic [XLEN-1:0] csr_sip_shadow /* verilator public_flat_rd */;
+  assign csr_sie_shadow = csr[MIE____] & `RAPT_CSR_SIE_RMASK;
+  assign csr_sip_shadow = mip_eff      & `RAPT_CSR_SIP_RMASK;
 endmodule

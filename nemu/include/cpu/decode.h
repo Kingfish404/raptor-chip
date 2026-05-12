@@ -23,6 +23,8 @@ typedef struct Decode
   vaddr_t pc;
   vaddr_t snpc; // static next pc
   vaddr_t dnpc; // dynamic next pc
+  vaddr_t epc;  // executing PC (= original pc; preserved across decode_exec
+                // which clobbers `pc` to dnpc: used by lazy itrace_format)
   ISADecodeInfo isa;
   IFDEF(CONFIG_ITRACE, char logbuf[128]);
 } Decode;

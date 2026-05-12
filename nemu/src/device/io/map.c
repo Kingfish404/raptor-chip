@@ -44,7 +44,7 @@ static void check_bound(IOMap *map, paddr_t addr, bool is_read)
     if (cpu.sr[CSR_MTVEC] != 0 && (cpu.priv == PRV_M || cpu.priv == PRV_S || cpu.priv == PRV_U))
     {
       cause = is_read ? MCA_LOA_ACC_FAU : MCA_STO_ACC_FAU;
-      longjmp(exec_jmp_buf, 20);
+      nemu_longjmp(exec_jmp_buf, 20);
     }
     Assert(map != NULL, "map.c > check_bound: address (" FMT_PADDR ") is out of bound at pc = " FMT_WORD_NO_PREFIX, addr, cpu.pc);
   }

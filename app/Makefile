@@ -8,6 +8,10 @@
 APP_HOME := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 include $(APP_HOME)/common.mk
 
+# Use bash so `set -o pipefail` works on systems where /bin/sh is dash
+# (e.g. Ubuntu / GitHub Actions runners). Required by NPC tee wrappers below.
+SHELL := /bin/bash
+
 ARGS ?= -b -n## Simulator args for nsim/NEMU run targets (-b: batch, -n: no wave)
 MAX_INST ?=## Optional maximum instruction limit for tinyos cli-nsim/cli-nemu
 TIMEOUT ?=## Optional wall-clock timeout in seconds for tinyos cli-nsim
@@ -181,19 +185,26 @@ bbl-linux: ## Boot Linux via BBL
 # ============================================================================
 # Runner helpers: explicit pk/NEMU targets
 #   These are internal macros used by all run targets below.
+#
+# NPC payload runs (pk-target=pk-run / backend=npc) tee stdout+stderr to
+# $(APP_LOG_DIR)/<elf-stem>.log so results are persisted alongside other
+# nsim/build/<config>/logs/ artifacts. NEMU runs stay unredirected because
+# they already log via NEMU's own --log facility.
 # ============================================================================
+# Strip directory + extension for log file naming.
+_log_stem = $(basename $(notdir $(1)))
+
 # Run a single ELF: $(call _pk_run_with,<pk-target>,<elf-path>)
 define _pk_run_with
-	$(MAKE) $(Q) -C $(APP_HOME)/pk $(1) USER_ELF=$(2)
+	$(if $(filter pk-run,$(1)),mkdir -p $(APP_LOG_DIR) && set -o pipefail && $(MAKE) $(Q) -C $(APP_HOME)/pk $(1) USER_ELF=$(2) 2>&1 | tee "$(APP_LOG_DIR)/$(call _log_stem,$(2)).log",$(MAKE) $(Q) -C $(APP_HOME)/pk $(1) USER_ELF=$(2))
 endef
 
 # Run a list of ELFs: $(call _pk_run_suite_with,<suite-name>,<backend>,<pk-target>,<elf-dir>,<test-list>)
 define _pk_run_suite_with
 	@echo "=== Running $(1) ($(2)) ==="
-	@for t in $(5); do \
+	@$(if $(filter npc,$(2)),mkdir -p $(APP_LOG_DIR);)for t in $(5); do \
 		echo "--- $$t ---"; \
-		$(MAKE) $(Q) -C $(APP_HOME)/pk $(3) \
-			USER_ELF=$(4)/$$t.elf \
+		$(if $(filter npc,$(2)),set -o pipefail && $(MAKE) $(Q) -C $(APP_HOME)/pk $(3) USER_ELF=$(4)/$$t.elf 2>&1 | tee "$(APP_LOG_DIR)/$$t.log",$(MAKE) $(Q) -C $(APP_HOME)/pk $(3) USER_ELF=$(4)/$$t.elf) \
 			|| true; \
 	done
 	@echo "=== $(1) complete ==="
@@ -570,7 +581,7 @@ isa-tests-nemu: isa-tests-build ## Build and run all ISA tests on NEMU via pk
 memory-tests-build: ## Build memory tests
 	@$(MAKE) $(Q) -C $(APP_HOME)/tests/memory build
 
-MEMORY_TESTS := load_store memory_pattern stack_test
+MEMORY_TESTS := load_store memory_pattern stack_test memtest
 
 memory-tests-npc: memory-tests-build ## Build and run all memory tests on NPC/nsim via pk
 	$(call _pk_run_suite_with,Memory tests,npc,pk-run,$(APP_HOME)/build/rv$(XLEN)/tests/memory,$(MEMORY_TESTS))

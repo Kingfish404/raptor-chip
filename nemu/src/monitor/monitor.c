@@ -43,8 +43,7 @@ static void welcome()
   Log("Build time: %s, %s", __TIME__, __DATE__);
   printf("Welcome to %s-NEMU!\n", ANSI_FMT(str(__GUEST_ISA__), ANSI_FG_YELLOW ANSI_BG_RED));
   printf("For help, type \"help or h\"\n");
-  // Log("Exercise: Please remove me in the source code and compile NEMU again.");
-  // assert(0);
+  fflush(stdout);
 }
 
 #ifndef CONFIG_TARGET_AM
@@ -96,7 +95,8 @@ static long load_img()
   return size;
 }
 
-typedef struct {
+typedef struct
+{
   const char *name;
   uint64_t base;
   uint64_t size;
@@ -108,37 +108,45 @@ static void print_map_entry(FILE *out, const char *kind, const char *name,
 {
   uint64_t high = (size == 0) ? base : base + size - 1;
   fprintf(out, "  %-6s %-18s 0x%08" PRIx64 "  0x%08" PRIx64 "  0x%08" PRIx64,
-      kind, name, base, high, size);
-  if (desc != NULL && desc[0] != '\0') {
+          kind, name, base, high, size);
+  if (desc != NULL && desc[0] != '\0')
+  {
     fprintf(out, "  %s", desc);
   }
   fprintf(out, "\n");
 }
 
-static int compare_map_print_entry(const void *lhs_ptr, const void *rhs_ptr) {
+static int compare_map_print_entry(const void *lhs_ptr, const void *rhs_ptr)
+{
   const map_print_entry_t *lhs = (const map_print_entry_t *)lhs_ptr;
   const map_print_entry_t *rhs = (const map_print_entry_t *)rhs_ptr;
-  if (lhs->base < rhs->base) {
+  if (lhs->base < rhs->base)
+  {
     return -1;
   }
-  if (lhs->base > rhs->base) {
+  if (lhs->base > rhs->base)
+  {
     return 1;
   }
-  if (lhs->size < rhs->size) {
+  if (lhs->size < rhs->size)
+  {
     return -1;
   }
-  if (lhs->size > rhs->size) {
+  if (lhs->size > rhs->size)
+  {
     return 1;
   }
   return strcmp(lhs->name, rhs->name);
 }
 
 static void print_map_entries_sorted(FILE *out, const char *kind,
-    map_print_entry_t *entries, size_t count) {
+                                     map_print_entry_t *entries, size_t count)
+{
   qsort(entries, count, sizeof(entries[0]), compare_map_print_entry);
-  for (size_t i = 0; i < count; i++) {
+  for (size_t i = 0; i < count; i++)
+  {
     print_map_entry(out, kind, entries[i].name, entries[i].base,
-        entries[i].size, entries[i].desc);
+                    entries[i].size, entries[i].desc);
   }
 }
 
@@ -195,13 +203,14 @@ static void print_configured_mmio_maps(FILE *out)
 
 void print_nemu_memory_map(FILE *out)
 {
-  if (out == NULL) {
+  if (out == NULL)
+  {
     out = stdout;
   }
 
   fprintf(out, "Memory map (current NEMU build; MMIO has priority over host-backed overlays):\n");
   fprintf(out, "  %-6s %-18s %-10s  %-10s  %-10s  %s\n",
-      "kind", "name", "base", "end", "size", "description");
+          "kind", "name", "base", "end", "size", "description");
   map_print_entry_t mem_entries[] = {
       {"rom", CONFIG_ROM_BASE, CONFIG_ROM_SIZE, "QEMU virt reset ROM / DTB"},
       {"sram", CONFIG_SRAM_BASE, CONFIG_SRAM_SIZE, "on-chip SRAM window"},
@@ -212,9 +221,12 @@ void print_nemu_memory_map(FILE *out)
   };
   print_map_entries_sorted(out, "mem", mem_entries, sizeof(mem_entries) / sizeof(mem_entries[0]));
 #ifdef CONFIG_DEVICE
-  if (mmio_map_count() > 0) {
+  if (mmio_map_count() > 0)
+  {
     print_mmio_maps(out);
-  } else {
+  }
+  else
+  {
     print_configured_mmio_maps(out);
   }
 #endif

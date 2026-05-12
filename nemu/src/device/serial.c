@@ -201,7 +201,14 @@ __attribute__((__unused__)) static void serial_io_handler(uint32_t offset, int l
 
 // https://github.com/riscv-software-src/riscv-isa-sim/blob/master/riscv/ns16550.cc
 #define UART_QUEUE_SIZE 64
-#define UART_IRQ 10
+// PLIC source raised by this ns16550 model. Linux derives its handler from
+// the DTB (`ns16550@10000000 { interrupts = <N>; }` in
+// nemu/src/memory/rom/spike-rv*ima*.dts) so the value here MUST match the
+// DTB used by the workload, otherwise RX IRQs are silently dropped and
+// tinysh appears unresponsive. xv6/egos poll LSR.DR and don't care.
+// Configurable via Kconfig (`CONFIG_SERIAL_PLIC_IRQ`) so different
+// defconfigs (Linux vs. tinyos vs. egos) can pick a non-colliding source.
+#define UART_IRQ CONFIG_SERIAL_PLIC_IRQ
 
 #define UART_RX 0 /* In:  Receive buffer */
 #define UART_TX 0 /* Out: Transmit buffer */
