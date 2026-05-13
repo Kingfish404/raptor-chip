@@ -4,7 +4,7 @@
 #
 # CONFIG_ISA_x86 is not set
 CONFIG_ISA_riscv=y
-CONFIG_ISA="riscv32"
+CONFIG_ISA="riscv"
 
 #
 # ISA-dependent Options for riscv

@@ -52,7 +52,7 @@ typedef enum
 #if defined(CONFIG_RV64)
 #define CSR_MISA_VALUE 0x8000000000141107ULL
 #else
-#define CSR_MISA_VALUE 0x40141105
+#define CSR_MISA_VALUE 0x40141107
 #endif
 
 enum CSR
@@ -373,13 +373,13 @@ typedef struct
 
   word_t iomm_addr; // for iomm
   word_t skip;      // for iomm
-} MUXDEF(CONFIG_RV64, riscv64_CPU_state, riscv32_CPU_state);
+} riscv_CPU_state;
 
 // decode
 typedef struct
 {
   uint32_t inst;
-} MUXDEF(CONFIG_RV64, riscv64_ISADecodeInfo, riscv32_ISADecodeInfo);
+} riscv_ISADecodeInfo;
 
 // #define isa_mmu_check(vaddr, len, type) (MMU_DIRECT)
 

@@ -112,7 +112,12 @@ void init_device()
   IFDEF(CONFIG_HAS_SDCARD, init_sdcard());
 
 #ifndef CONFIG_TARGET_SHARE
-  IFNDEF(CONFIG_TARGET_AM, init_alarm());
+  /* init_alarm() is intentionally deferred to monitor.c, after
+   * init_difftest(). The spike-diff reference forks `dtc` during
+   * sim_t construction and reads its output pipe with a raw read()
+   * that does not handle EINTR; if the 60 Hz virtual timer fires
+   * during that read, sim_t is left half-built and the next access
+   * segfaults. */
 #endif
 
   IFNDEF(CONFIG_TARGET_AM, init_intr(););

@@ -43,16 +43,28 @@
 
 static inline uint8_t pmp_cfg(int i)
 {
-  /* pmpcfgN packs entries [N*4 .. N*4+3] as bytes [0..3]. */
+#ifdef CONFIG_RV64
+  /* RV64: pmpcfg0 holds pmp0-7, pmpcfg2 holds pmp8-15 (odd regs illegal). */
+  word_t w = cpu.sr[CSR_PMPCFG0 + ((i >> 3) * 2)];
+  return (uint8_t)(w >> ((i & 7) * 8));
+#else
+  /* RV32: pmpcfgN holds entries N*4 .. N*4+3 as bytes 0..3. */
   word_t w = cpu.sr[CSR_PMPCFG0 + (i >> 2)];
   return (uint8_t)(w >> ((i & 3) * 8));
+#endif
 }
 
 static inline void pmp_cfg_set(int i, uint8_t byte)
 {
+#ifdef CONFIG_RV64
+  int off = (i & 7) * 8;
+  word_t m = ((word_t)0xff) << off;
+  word_t *p = &cpu.sr[CSR_PMPCFG0 + ((i >> 3) * 2)];
+#else
   int off = (i & 3) * 8;
   word_t m = ((word_t)0xff) << off;
   word_t *p = &cpu.sr[CSR_PMPCFG0 + (i >> 2)];
+#endif
   *p = (*p & ~m) | (((word_t)byte << off) & m);
 }
 
@@ -92,8 +104,16 @@ int pmp_csr_write(uint16_t csr, word_t val)
   csr &= 0xfff;
   if (csr >= CSR_PMPCFG0 && csr <= CSR_PMPCFG3)
   {
+#ifdef CONFIG_RV64
+    /* RV64: odd pmpcfg indices are illegal (fall through to illop). */
+    if (csr & 1) return 0;
+    /* Even pmpcfg holds 8 entries packed in 64 bits. */
+    int base = ((csr - CSR_PMPCFG0) / 2) * 8;
+    for (int pi = 0; pi < 8; pi++)
+#else
     int base = (csr - CSR_PMPCFG0) * 4;
     for (int pi = 0; pi < 4; pi++)
+#endif
     {
       uint8_t old = pmp_cfg(base + pi);
       if (old & (1u << PMPCFG_L_BIT))

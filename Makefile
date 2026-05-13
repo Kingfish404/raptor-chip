@@ -192,6 +192,10 @@ build-nemu64: config-nemu64 ## Build NEMU (riscv64)
 run-nemu64: build-nemu64 ## Build and run NEMU (riscv64)
 	$(MAKE) -C $(NEMU_HOME) run $(if $(IMG),IMG=$(IMG)) ARGS="$(ARGS) $(NEMU_DISK_ARG) $(NEMU_SDCARD_ARG)"
 
+config-nemu64-linux:
+	$(MAKE) -C $(NEMU_HOME) riscv64_linux_defconfig
+	$(MAKE) -C $(NEMU_HOME) -j$(NPROC)
+
 config-nemu64-linux-device:
 	$(MAKE) -C $(NEMU_HOME) riscv64_linux_device_defconfig
 	$(MAKE) -C $(NEMU_HOME) -j$(NPROC)
@@ -437,36 +441,72 @@ nanos-npc32: ## Build and run nanos-lite on NPC
 
 # Delegate download/version management to linux/Makefile (single source of truth).
 LINUX_HOME          := $(RAPTOR_HOME)/linux
-LINUX_BUILD_VERSION ?= v6.18.22
-LINUX_RV32_PAYLOAD  ?= $(LINUX_HOME)/build/linux-riscv-qemu-rv32-m-$(strip $(LINUX_BUILD_VERSION))/fw_payload.bin
-LINUX_RV64_PAYLOAD  ?= $(LINUX_HOME)/build/linux-riscv-qemu-rv64-m-$(strip $(LINUX_BUILD_VERSION))/fw_payload.bin
+include $(LINUX_HOME)/vars.mk
 
 linux-download-rv32: ## Download pre-built Linux (RV32 only)
-	$(MAKE) -C $(LINUX_HOME) download-rv32 LINUX_BUILD_VERSION=$(LINUX_BUILD_VERSION)
+	$(MAKE) -C $(LINUX_HOME) download-rv32
 
 linux-download-rv64: ## Download pre-built Linux (RV64 only)
-	$(MAKE) -C $(LINUX_HOME) download-rv64 LINUX_BUILD_VERSION=$(LINUX_BUILD_VERSION)
+	$(MAKE) -C $(LINUX_HOME) download-rv64
 
 linux-download: ## Download pre-built Linux (RV32 + RV64)
-	$(MAKE) -C $(LINUX_HOME) download LINUX_BUILD_VERSION=$(LINUX_BUILD_VERSION)
+	$(MAKE) -C $(LINUX_HOME) download
 
 linux-boot-nemu32: config-nemu32-linux ## Boot Linux on NEMU (riscv32)
-	$(MAKE) -C $(LINUX_HOME) download-rv32 LINUX_BUILD_VERSION=$(LINUX_BUILD_VERSION)
+	$(MAKE) -C $(LINUX_HOME) download-rv32
 	$(MAKE) -C $(NEMU_HOME) -j$(NPROC)
 	@mkdir -p $(NEMU_LOG_DIR)
 	@set -o pipefail; $(MAKE) -C $(NEMU_HOME) run IMG=$(LINUX_RV32_PAYLOAD) ARGS="$(ARGS) $(if $(MAX_INST),-m $(MAX_INST))" $(call tee_nemu,linux-boot-nemu32)
 
+linux-boot-nemu64: config-nemu64-linux ## Boot Linux on NEMU (riscv64)
+	$(MAKE) -C $(LINUX_HOME) download-rv64
+	$(MAKE) -C $(NEMU_HOME) -j$(NPROC)
+	@mkdir -p $(NEMU_LOG_DIR)
+	@set -o pipefail; $(MAKE) -C $(NEMU_HOME) run IMG=$(LINUX_RV64_PAYLOAD) ARGS="$(ARGS) $(if $(MAX_INST),-m $(MAX_INST))" $(call tee_nemu,linux-boot-nemu64)
+
 linux-boot-npc32: config-npc32-linux ## Boot Linux on NPC (riscv32)
-	$(MAKE) -C $(LINUX_HOME) download-rv32 LINUX_BUILD_VERSION=$(LINUX_BUILD_VERSION)
+	$(MAKE) -C $(LINUX_HOME) download-rv32
 	$(MAKE) -C $(NSIM_HOME) -j$(NPROC)
 	@mkdir -p $(NPC_LOG_DIR)
 	@set -o pipefail; $(MAKE) -C $(NSIM_HOME) run IMG=$(LINUX_RV32_PAYLOAD) ARGS="$(ARGS) $(if $(MAX_INST),-m $(MAX_INST))" $(call tee_npc,linux-boot-npc32)
 
 linux-boot-npc32-difftest: config-npc32-linux-difftest config-nemu32-ref ## Boot Linux on NPC with difftest
-	$(MAKE) -C $(LINUX_HOME) download-rv32 LINUX_BUILD_VERSION=$(LINUX_BUILD_VERSION)
+	$(MAKE) -C $(LINUX_HOME) download-rv32
 	$(MAKE) -C $(NSIM_HOME) -j$(NPROC)
 	@mkdir -p $(NPC_LOG_DIR)
 	@set -o pipefail; $(MAKE) -C $(NSIM_HOME) run IMG=$(LINUX_RV32_PAYLOAD) ARGS="$(ARGS) $(if $(MAX_INST),-m $(MAX_INST))" $(call tee_npc,linux-boot-npc32-difftest)
+
+linux-boot-npc64: VFLAGS := -DRAPT_RV64
+linux-boot-npc64: config-npc32-linux ## Boot Linux on NPC (riscv64)
+	$(MAKE) -C $(LINUX_HOME) download-rv64
+	$(MAKE) -C $(NSIM_HOME) -j$(NPROC) VFLAGS="$(VFLAGS)"
+	@mkdir -p $(NPC_LOG_DIR)
+	@set -o pipefail; $(MAKE) -C $(NSIM_HOME) run IMG=$(LINUX_RV64_PAYLOAD) ARGS="$(ARGS) $(if $(MAX_INST),-m $(MAX_INST))" VFLAGS="$(VFLAGS)" $(call tee_npc,linux-boot-npc64)
+
+linux-boot-npc64-difftest: VFLAGS := -DRAPT_RV64
+linux-boot-npc64-difftest: config-npc32-linux-difftest config-nemu64-ref ## Boot Linux on NPC RV64 with difftest
+	$(MAKE) -C $(LINUX_HOME) download-rv64
+	$(MAKE) -C $(NSIM_HOME) -j$(NPROC) VFLAGS="$(VFLAGS)"
+	@mkdir -p $(NPC_LOG_DIR)
+	@set -o pipefail; $(MAKE) -C $(NSIM_HOME) run IMG=$(LINUX_RV64_PAYLOAD) ARGS="$(ARGS) $(if $(MAX_INST),-m $(MAX_INST))" VFLAGS="$(VFLAGS)" $(call tee_npc,linux-boot-npc64-difftest)
+
+linux-boot-nemu32-device: config-nemu32-linux-device ## Boot Linux on NEMU RV32 (auto-download)
+	$(MAKE) -C $(LINUX_HOME) download-rv32
+	$(MAKE) -C $(NEMU_HOME) run IMG=$(LINUX_RV32_PAYLOAD) ARGS="$(DEVICE_ARGS)"
+
+linux-boot-nemu32-device-difftest: config-nemu32-linux-device ## Boot Linux on NEMU RV32 (auto-download)
+	$(MAKE) -C $(LINUX_HOME) download-rv32
+	$(MAKE) -C $(NEMU_HOME) run IMG=$(LINUX_RV32_PAYLOAD) ARGS="$(DEVICE_ARGS)"
+
+linux-boot-nemu64: config-nemu64-linux ## Boot Linux on NEMU (riscv64)
+	$(MAKE) -C $(LINUX_HOME) download-rv64
+	$(MAKE) -C $(NEMU_HOME) -j$(NPROC)
+	@mkdir -p $(NEMU_LOG_DIR)
+	@set -o pipefail; $(MAKE) -C $(NEMU_HOME) run IMG=$(LINUX_RV64_PAYLOAD) ARGS="$(ARGS) $(if $(MAX_INST),-m $(MAX_INST))" $(call tee_nemu,linux-boot-nemu64)
+
+linux-boot-nemu64-device: config-nemu64-linux-device ## Boot Linux on NEMU RV64 (auto-download)
+	$(MAKE) -C $(LINUX_HOME) download-rv64
+	$(MAKE) -C $(NEMU_HOME) run IMG=$(LINUX_RV64_PAYLOAD) ARGS="$(DEVICE_ARGS)"
 
 # ----------------------------------------------------------------------------
 # Linux boot checkpoint save/restore (architectural snapshot of nsim).
@@ -478,7 +518,7 @@ CKPT_DIR   ?= $(RAPTOR_HOME)/nsim/data/ckpt-linux-rv32 ## Checkpoint directory (
 CKPT_CYCLE ?= 1000000 ## Cycle at which to take the checkpoint
 
 linux-boot-npc32-ckpt-save: config-npc32-linux ## Boot Linux on NPC, save checkpoint at CKPT_CYCLE -> CKPT_DIR
-	$(MAKE) -C $(LINUX_HOME) download-rv32 LINUX_BUILD_VERSION=$(LINUX_BUILD_VERSION)
+	$(MAKE) -C $(LINUX_HOME) download-rv32
 	$(MAKE) -C $(NSIM_HOME) -j$(NPROC)
 	rm -rf $(CKPT_DIR)
 	$(MAKE) -C $(NSIM_HOME) run IMG=$(LINUX_RV32_PAYLOAD) \
@@ -488,18 +528,6 @@ linux-boot-npc32-ckpt-load: config-npc32-linux ## Resume Linux boot on NPC from 
 	$(MAKE) -C $(NSIM_HOME) -j$(NPROC)
 	$(MAKE) -C $(NSIM_HOME) run IMG=$(LINUX_RV32_PAYLOAD) \
 		ARGS="$(ARGS) --ckpt-load=$(CKPT_DIR) $(if $(MAX_INST),-m $(MAX_INST))"
-
-linux-boot-nemu32-device: config-nemu32-linux-device ## Boot Linux on NEMU RV32 (auto-download)
-	$(MAKE) -C $(LINUX_HOME) download-rv32 LINUX_BUILD_VERSION=$(LINUX_BUILD_VERSION)
-	$(MAKE) -C $(NEMU_HOME) run IMG=$(LINUX_RV32_PAYLOAD) ARGS="$(DEVICE_ARGS)"
-
-linux-boot-nemu32-device-difftest: config-nemu32-linux-device ## Boot Linux on NEMU RV32 (auto-download)
-	$(MAKE) -C $(LINUX_HOME) download-rv32 LINUX_BUILD_VERSION=$(LINUX_BUILD_VERSION)
-	$(MAKE) -C $(NEMU_HOME) run IMG=$(LINUX_RV32_PAYLOAD) ARGS="$(DEVICE_ARGS)"
-
-linux-boot-nemu64-device: config-nemu64-linux-device ## Boot Linux on NEMU RV64 (auto-download)
-	$(MAKE) -C $(LINUX_HOME) download-rv64 LINUX_BUILD_VERSION=$(LINUX_BUILD_VERSION)
-	$(MAKE) -C $(NEMU_HOME) run IMG=$(LINUX_RV64_PAYLOAD) ARGS="$(DEVICE_ARGS)"
 
 # ============================================================================
 # FPGA Targets
@@ -713,7 +741,7 @@ app-clean: ## [app] Clean app build artifacts
 	archtest-npc32 archtest-npc32e \
 	nanos-nemu32 nanos-npc32 \
 	linux-download linux-download-rv32 linux-download-rv64 \
-	linux-boot-nemu32 linux-boot-npc32 linux-boot-nemu32-device linux-boot-nemu64-device \
+	linux-boot-nemu32 linux-boot-npc32 linux-boot-npc32-difftest linux-boot-npc64 linux-boot-npc64-difftest linux-boot-nemu32-device linux-boot-nemu64-device \
 	fpga-syn fpga-pnr pack lint ide-setup compile-commands sta clean-npc clean \
 	verify-fuzz verify-fuzz-inf verify-fuzz-replay verify-sigtest verify-riscof verify-coverage verify-all verify-clean \
 	tinyos-sync os-cli-qemu egos-cli-qemu xv6-cli-qemu os-cli-nsim os-cli-nemu egos-cli-nsim egos-cli-nemu xv6-cli-nsim xv6-cli-nemu \

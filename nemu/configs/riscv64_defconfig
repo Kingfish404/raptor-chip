@@ -4,7 +4,7 @@
 #
 # CONFIG_ISA_x86 is not set
 CONFIG_ISA_riscv=y
-CONFIG_ISA="riscv64"
+CONFIG_ISA="riscv"
 
 #
 # ISA-dependent Options for riscv
@@ -58,7 +58,8 @@ CONFIG_DIFFTEST_REF_NAME="none"
 # Memory Configuration
 #
 CONFIG_ROM=y
-# CONFIG_ROM_DTB is not set
+CONFIG_ROM_DTB=y
+CONFIG_ROM_DTB_PATH="./src/memory/rom/spike-rv64ima.dtb"
 CONFIG_MBASE=0x80000000
 CONFIG_MSIZE=0x8000000
 CONFIG_PC_RESET_OFFSET=0

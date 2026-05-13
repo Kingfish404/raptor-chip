@@ -42,7 +42,9 @@ INC_PATH += -I$(NEMU_HOME)/src/isa/$(GUEST_ISA)/include
 lib_dependencies = libspike_main.a libriscv.a libdisasm.a libsoftfloat.a libfesvr.a libfdt.a
 INC_LIBS  = $(addprefix $(REPO_PATH)/build/, $(lib_dependencies))
 
-NAME = $(GUEST_ISA)-spike-so
+# Suffix the .so with 32/64 to match NEMU's binary naming, so RV32 and RV64
+# difftest references coexist and switching CONFIG_RV64 picks the right one.
+NAME = $(if $(filter riscv,$(GUEST_ISA)),$(GUEST_ISA)$(if $(CONFIG_RV64),64,32),$(GUEST_ISA))-spike-so
 BINARY = $(BUILD_DIR)/$(NAME)
 SRCS = difftest.cc repo/riscv/sim.cc
 

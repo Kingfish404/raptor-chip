@@ -37,7 +37,7 @@ static inline int check_sr_idx(int idx)
 #define sr(idx) (cpu.sr[check_sr_idx(idx)])
 
 // PMP (pmpcfg0..3 @ 0x3a0-0x3a3, pmpaddr0..15 @ 0x3b0-0x3bf) is now
-// implemented in nemu/src/isa/riscv32/system/pmp.c.  CSR reads go through
+// implemented in nemu/src/isa/riscv/system/pmp.c.  CSR reads go through
 // cpu.sr[] directly; writes are routed through pmp_csr_write() which
 // enforces WARL masking and L-bit lockdown.
 static inline bool is_pmp_csr(uint16_t csr)

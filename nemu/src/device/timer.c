@@ -207,6 +207,10 @@ void init_timer()
   // https://github.com/riscv-software-src/riscv-isa-sim/blob/master/riscv/platform.h
   // https://github.com/riscv-software-src/riscv-isa-sim/blob/master/riscv/clint.cc
   add_mmio_map("clint", CONFIG_RTC_MMIO_CLINT, clint_base, 0x000c0000, clint_io_handler);
+  // egos HARDWARE platform CLINT alias at 0xF0010000 (mvendorid==666 path).
+  // Shares the same backing storage and handler so MSIP/MTIMECMP/MTIME
+  // accesses route through identically.
+  add_mmio_map("clint-litex-alias", 0xF0010000u, clint_base, 0x10000, clint_io_handler);
 #endif
   IFNDEF(CONFIG_TARGET_AM, add_alarm_handle(timer_intr));
 }

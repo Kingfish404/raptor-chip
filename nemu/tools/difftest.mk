@@ -15,8 +15,11 @@
 
 ifdef CONFIG_DIFFTEST
 DIFF_REF_PATH = $(NEMU_HOME)/$(call remove_quote,$(CONFIG_DIFFTEST_REF_PATH))
-DIFF_REF_SO = $(DIFF_REF_PATH)/build/$(GUEST_ISA)-$(call remove_quote,$(CONFIG_DIFFTEST_REF_NAME))-so
-MKFLAGS = GUEST_ISA=$(GUEST_ISA) SHARE=1 ENGINE=interpreter
+# For RISC-V, suffix the reference .so with 32/64 so that switching XLEN does
+# not silently reuse a stale binary built for the other width.
+DIFF_REF_ISA = $(if $(filter riscv,$(GUEST_ISA)),$(GUEST_ISA)$(if $(CONFIG_RV64),64,32),$(GUEST_ISA))
+DIFF_REF_SO = $(DIFF_REF_PATH)/build/$(DIFF_REF_ISA)-$(call remove_quote,$(CONFIG_DIFFTEST_REF_NAME))-so
+MKFLAGS = GUEST_ISA=$(GUEST_ISA) SHARE=1 ENGINE=interpreter $(if $(CONFIG_RV64),CONFIG_RV64=y)
 ARGS_DIFF = --diff=$(DIFF_REF_SO)
 
 ifndef CONFIG_DIFFTEST_REF_NEMU

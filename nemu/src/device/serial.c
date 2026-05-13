@@ -417,6 +417,124 @@ __attribute__((__unused__)) static void serial_io_handler_ns16550(uint32_t offse
   serial_us16550_base[offset] = val;
 }
 
+// ---------------------------------------------------------------------------
+// LiteX UART model (egos HARDWARE platform). Register layout:
+//   0x00 RXTX     (read = pop, write = TX byte)
+//   0x04 TXFULL
+//   0x08 RXEMPTY
+//   0x0C EV_STATUS
+//   0x10 EV_PENDING (write-1-clear)
+//   0x14 EV_ENABLE
+// Shares the host stdin FIFO with the ns16550 model so a single keypress
+// is consumed by exactly one reader.
+// ---------------------------------------------------------------------------
+#define LITEX_UART_BASE   0xF0001000u
+#define LITEX_UART_SIZE   0x100u
+#define LITEX_UART_RXTX        0x00u
+#define LITEX_UART_TXFULL      0x04u
+#define LITEX_UART_RXEMPTY     0x08u
+#define LITEX_UART_EV_STATUS   0x0Cu
+#define LITEX_UART_EV_PENDING  0x10u
+#define LITEX_UART_EV_ENABLE   0x14u
+
+static uint8_t *litex_uart_space = NULL;
+static uint32_t litex_uart_ev_pending = 0;
+static uint32_t litex_uart_ev_enable = 0;
+
+static inline uint32_t litex_uart_load32(uint32_t off) {
+  return ((uint32_t)litex_uart_space[off]) |
+         ((uint32_t)litex_uart_space[off + 1] << 8) |
+         ((uint32_t)litex_uart_space[off + 2] << 16) |
+         ((uint32_t)litex_uart_space[off + 3] << 24);
+}
+
+static inline void litex_uart_store32(uint32_t off, uint32_t val) {
+  litex_uart_space[off]     = (uint8_t)val;
+  litex_uart_space[off + 1] = (uint8_t)(val >> 8);
+  litex_uart_space[off + 2] = (uint8_t)(val >> 16);
+  litex_uart_space[off + 3] = (uint8_t)(val >> 24);
+}
+
+static void litex_uart_io_handler(uint32_t offset, int len, bool is_write) {
+  (void)len;
+  uint32_t reg = offset & ~0x3u;
+
+  if (is_write) {
+    uint32_t val = litex_uart_load32(reg);
+    switch (reg) {
+    case LITEX_UART_RXTX:
+      serial_putc((uint8_t)val);
+      break;
+    case LITEX_UART_EV_PENDING:
+      // Write-1-clear (RX=bit1, TX=bit0).
+      litex_uart_ev_pending &= ~val;
+      break;
+    case LITEX_UART_EV_ENABLE:
+      litex_uart_ev_enable = val;
+      break;
+    default:
+      break;
+    }
+    return;
+  }
+
+  // Read path: refresh the requested register.
+  uint32_t val = 0;
+  switch (reg) {
+  case LITEX_UART_RXTX: {
+#ifdef SERIAL_HOST_INPUT
+    serial_poll_stdin();
+    int ch = serial_rx_dequeue();
+    val = (ch >= 0) ? (uint8_t)ch : 0;
+#else
+    val = 0;
+#endif
+    break;
+  }
+  case LITEX_UART_TXFULL:
+    val = 0;
+    break;
+  case LITEX_UART_RXEMPTY: {
+#ifdef SERIAL_HOST_INPUT
+    serial_poll_stdin();
+    val = (serial_rx_count() > 0) ? 0 : 1;
+#else
+    val = 1;
+#endif
+    break;
+  }
+  case LITEX_UART_EV_STATUS: {
+#ifdef SERIAL_HOST_INPUT
+    serial_poll_stdin();
+    val = (serial_rx_count() > 0) ? 2u : 0u;
+#else
+    val = 0;
+#endif
+    val |= 1u; // TX always ready.
+    break;
+  }
+  case LITEX_UART_EV_PENDING:
+    val = litex_uart_ev_pending;
+    break;
+  case LITEX_UART_EV_ENABLE:
+    val = litex_uart_ev_enable;
+    break;
+  default:
+    val = 0;
+    break;
+  }
+  litex_uart_store32(reg, val);
+}
+
+static void init_litex_uart(void) {
+  litex_uart_space = new_space(LITEX_UART_SIZE);
+  memset(litex_uart_space, 0, LITEX_UART_SIZE);
+  litex_uart_ev_pending = 0;
+  litex_uart_ev_enable = 0;
+  add_mmio_map("litex-uart", LITEX_UART_BASE, litex_uart_space,
+               LITEX_UART_SIZE, litex_uart_io_handler);
+}
+
 void init_serial()
 {
   serial_base = new_space(8);
@@ -435,6 +553,8 @@ void init_serial()
   // https://github.com/riscv-software-src/riscv-isa-sim/blob/master/riscv/platform.h
   // https://github.com/riscv-software-src/riscv-isa-sim/blob/master/riscv/ns16550.cc
   add_mmio_map("serial_ns16550", CONFIG_SERIAL_MMIO_US16550, serial_us16550_base, 0x100, serial_io_handler_ns16550);
+  // egos HARDWARE platform LiteX UART (mvendorid==666 path)
+  init_litex_uart();
 #endif
 
   // Raw terminal mode is deferred to first serial_poll_stdin() call,

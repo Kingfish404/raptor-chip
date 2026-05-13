@@ -19,6 +19,7 @@
 #include <inttypes.h>
 #include <stdlib.h>
 #include <string.h>
+#include <signal.h>
 
 extern char *btb_file;
 extern long long int max_inst;
@@ -378,8 +379,30 @@ void init_monitor(int argc, char *argv[])
   /* Load the image to memory. This will overwrite the built-in image. */
   long img_size = load_img();
 
-  /* Initialize differential testing. */
-  init_difftest(diff_so_file, img_size, difftest_port);
+  /* Initialize differential testing.
+   * Block SIGVTALRM during difftest init: the spike-diff reference forks
+   * `dtc` and reads its pipe with a raw read() that doesn't retry on
+   * EINTR. The 60 Hz virtual timer installed by init_device() above can
+   * interrupt that read and abort spike's sim_t construction, leaving a
+   * partially-built object that segfaults on the next access. */
+  {
+    sigset_t set_blk, set_old;
+    sigemptyset(&set_blk);
+    sigaddset(&set_blk, SIGVTALRM);
+    sigprocmask(SIG_BLOCK, &set_blk, &set_old);
+    init_difftest(diff_so_file, img_size, difftest_port);
+    sigprocmask(SIG_SETMASK, &set_old, NULL);
+  }
+
+  /* Arm the virtual timer only after difftest init has finished (see
+   * device.c). The timer handler list itself was filled during
+   * init_device(). */
+#if !defined(CONFIG_TARGET_AM) && !defined(CONFIG_TARGET_SHARE) && defined(CONFIG_DEVICE)
+  {
+    extern void init_alarm();
+    init_alarm();
+  }
+#endif
 
   /* Initialize the simple debugger. */
   init_sdb();

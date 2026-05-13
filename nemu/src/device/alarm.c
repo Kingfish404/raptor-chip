@@ -43,6 +43,13 @@ void init_alarm()
   struct sigaction s;
   memset(&s, 0, sizeof(s));
   s.sa_handler = alarm_sig_handler;
+  /* SA_RESTART: keep blocking syscalls (e.g. popen/fread in spike-diff's
+   * make_dtb -> dtc subprocess) from returning EINTR when our 60 Hz
+   * virtual timer fires during long-running initialization. Without this,
+   * RV64 difftest init can fail with "Failed to read dtc_output:
+   * Interrupted system call", leaving the sim_t half-constructed and
+   * crashing NEMU on the next dereference. */
+  s.sa_flags = SA_RESTART;
   int ret = sigaction(SIGVTALRM, &s, NULL);
   Assert(ret == 0, "Can not set signal handler");
 

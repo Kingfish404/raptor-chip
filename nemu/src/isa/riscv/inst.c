@@ -31,7 +31,21 @@
 int pmp_csr_write(uint16_t csr, word_t val);
 /* WARL coercion for tvec/epc CSRs, mirroring rapt_csr.sv:
  *   - mtvec/stvec: if wdata[1]==1 (reserved MODE 10/11), mode bits -> 00.
- *   - mepc/sepc:   bit 0 always 0 (IALIGN enforcement). */
+ *   - mepc/sepc:   bit 0 always 0 (IALIGN enforcement).
+ *   - satp:        if MODE field is unsupported, the entire write is dropped
+ *                  (caller must check the rejection flag). */
+static inline bool csrw_satp_accept(word_t v)
+{
+#ifdef CONFIG_RV64
+  /* RV64: MODE is bits [63:60].  Accept Bare(0) or Sv39(8) only. */
+  uint32_t mode = (uint32_t)((v >> 60) & 0xf);
+  return (mode == 0) || (mode == 8);
+#else
+  /* RV32: MODE is bit [31].  Both 0 (Bare) and 1 (Sv32) are valid. */
+  (void)v;
+  return true;
+#endif
+}
 static inline word_t csrw_warl(uint16_t c, word_t v)
 {
   c &= 0xfff;
@@ -50,6 +64,12 @@ static inline word_t csrw_warl(uint16_t c, word_t v)
   {                                                                        \
     uint16_t _c = (uint16_t)((i) & 0xfff);                                 \
     word_t _v = csrw_warl(_c, (word_t)(v));                                \
+    /* satp WARL: drop entire write if MODE is unsupported (Priv §10.6.1). */ \
+    if (_c == CSR_SATP && !csrw_satp_accept(_v))                           \
+    {                                                                      \
+      cpu.last_csr_wr = _c;                                                \
+      break;                                                               \
+    }                                                                      \
     if (!pmp_csr_write(_c, _v))                                            \
     {                                                                      \
       if (_c == CSR_MIP)                                                   \
@@ -257,17 +277,21 @@ static int decode_exec(Decode *s)
   INSTPAT("??????? ????? ????? 010 ????? 00000 11", lw, I, R(rd) = SEXT(Mr(src1 + imm, 4), 32));
   INSTPAT("??????? ????? ????? 100 ????? 00000 11", lbu, I, { R(rd) = Mr(src1 + imm, 1); });
   INSTPAT("??????? ????? ????? 101 ????? 00000 11", lhu, I, { R(rd) = Mr(src1 + imm, 2); });
-  // RV64I loads
+#ifdef CONFIG_RV64
+  // RV64I loads (RV32 leaves these encodings reserved → illegal-instruction)
   INSTPAT("??????? ????? ????? 110 ????? 00000 11", lwu, I, R(rd) = Mr(src1 + imm, 4));
   INSTPAT("??????? ????? ????? 011 ????? 00000 11", ld, I, R(rd) = Mr(src1 + imm, 8));
+#endif
   INSTPAT_CASE_END(grp_load)
 
   INSTPAT_CASE(0b01000, grp_store) // Store
   INSTPAT("??????? ????? ????? 000 ????? 01000 11", sb, S, Mw(src1 + imm, 1, src2));
   INSTPAT("??????? ????? ????? 001 ????? 01000 11", sh, S, Mw(src1 + imm, 2, src2));
   INSTPAT("??????? ????? ????? 010 ????? 01000 11", sw, S, Mw(src1 + imm, 4, src2));
-  // RV64I store
+#ifdef CONFIG_RV64
+  // RV64I store (RV32 reserved → illegal-instruction)
   INSTPAT("??????? ????? ????? 011 ????? 01000 11", sd, S, Mw(src1 + imm, 8, src2));
+#endif
   INSTPAT_CASE_END(grp_store)
 
   INSTPAT_CASE(0b00100, grp_opimm) // OP-IMM
@@ -340,12 +364,13 @@ static int decode_exec(Decode *s)
   INSTPAT_CASE(0b01100, grp_op) // OP + RV32M
   INSTPAT("0000000 ????? ????? 000 ????? 01100 11", add, R, R(rd) = src1 + src2);
   INSTPAT("0100000 ????? ????? 000 ????? 01100 11", sub, R, R(rd) = src1 - src2);
-  INSTPAT("0000000 ????? ????? 001 ????? 01100 11", sll, R, R(rd) = src1 << (src2 & 0x1f));
+  INSTPAT("0000000 ????? ????? 001 ????? 01100 11", sll, R, R(rd) = src1 << (src2 & (sizeof(word_t) * 8 - 1)));
   INSTPAT("0000000 ????? ????? 010 ????? 01100 11", slt, R, R(rd) = (sword_t)src1 < (sword_t)src2);
   INSTPAT("0000000 ????? ????? 011 ????? 01100 11", sltu, R, R(rd) = ((word_t)src1 < (word_t)src2) ? 1 : 0);
   INSTPAT("0000000 ????? ????? 100 ????? 01100 11", xor, R, R(rd) = src1 ^ src2);
-  INSTPAT("0000000 ????? ????? 101 ????? 01100 11", srl, R, R(rd) = src1 >> (src2 & 0x1f));
-  INSTPAT("0100000 ????? ????? 101 ????? 01100 11", sra, R, R(rd) = SEXT(src1, sizeof(word_t) * 8) >> (src2 & 0x1f));
+  INSTPAT("0000000 ????? ????? 101 ????? 01100 11", srl, R, R(rd) = src1 >> (src2 & (sizeof(word_t) * 8 - 1)));
+  // SRA: arithmetic right shift requires signed operand so `>>` is arithmetic, not logical
+  INSTPAT("0100000 ????? ????? 101 ????? 01100 11", sra, R, R(rd) = (sword_t)src1 >> (src2 & (sizeof(word_t) * 8 - 1)));
   INSTPAT("0000000 ????? ????? 110 ????? 01100 11", or, R, R(rd) = src1 | src2);
   INSTPAT("0000000 ????? ????? 111 ????? 01100 11", and, R, R(rd) = src1 & src2);
   // RV32M Extension
@@ -418,7 +443,9 @@ static int decode_exec(Decode *s)
   INSTPAT("0000111 ????? ????? 111 ????? 01100 11", czero.nez, R, R(rd) = (src2 != 0) ? 0 : src1);
   INSTPAT_CASE_END(grp_op)
 
-  // RV64I OP-IMM-32 and OP-32 (overrides RV32 versions when CONFIG_RV64)
+#ifdef CONFIG_RV64
+  // RV64I OP-IMM-32 and OP-32 (RV64-only opcode groups; in RV32 these encodings
+  // are reserved and must trap illegal-instruction, so the cases are omitted.)
   INSTPAT_CASE(0b00110, grp_opimm32) // OP-IMM-32 (RV64 only)
   INSTPAT("??????? ????? ????? 000 ????? 00110 11", addiw, I, R(rd) = SEXT((uint32_t)src1 + imm, 32));
   INSTPAT("0000000 ????? ????? 001 ????? 00110 11", slliw, I, R(rd) = SEXT((uint32_t)src1 << (imm & 0x1f), 32));
@@ -470,6 +497,7 @@ static int decode_exec(Decode *s)
     uint32_t x = (uint32_t)src1; unsigned shamt = src2 & 31;
     R(rd) = SEXT((x >> shamt) | (x << ((32 - shamt) & 31)), 32); });
   INSTPAT_CASE_END(grp_op32)
+#endif // CONFIG_RV64
 
   INSTPAT_CASE(0b00011, grp_miscmem)                                   // MISC-MEM (fence, fence.i, fence.time, fence.tso, pause)
   INSTPAT("0000000 10000 00000 000 00000 00011 11", pause, N, {});     // hint instruction (include in fence)
@@ -582,10 +610,10 @@ static int decode_exec(Decode *s)
     }                                                              \
   } while (0)
   // RV32A Extension
-  INSTPAT("00010?? 00000 ????? 010 ????? 01011 11", lr.w, R, { R(rd) = Mr(src1, 4); cpu.reservation = get_paddr(src1, 4); });
+  INSTPAT("00010?? 00000 ????? 010 ????? 01011 11", lr.w, R, { R(rd) = SEXT(Mr(src1, 4), 32); cpu.reservation = get_paddr(src1, 4); });
   INSTPAT("00011?? ????? ????? 010 ????? 01011 11", sc.w, R, {
     if (cpu.reservation == get_paddr(src1, 4)) { R(rd) = 0; Mw(src1, 4, src2); } else { R(rd) = 1; }; cpu.reservation = 0; });
-  INSTPAT("00001?? ????? ????? 010 ????? 01011 11", amoswap.w, R, {AMO_PRECHECK(src1, 4); sword_t tmp = Mr(src1, 4); Mw(src1, 4, src2); R(rd) = tmp; });
+  INSTPAT("00001?? ????? ????? 010 ????? 01011 11", amoswap.w, R, {AMO_PRECHECK(src1, 4); sword_t tmp = Mr(src1, 4); Mw(src1, 4, src2); R(rd) = SEXT(tmp, 32); });
   INSTPAT("00000?? ????? ????? 010 ????? 01011 11", amoadd.w, R, {AMO_PRECHECK(src1, 4); sword_t  tmp = Mr(src1, 4); Mw(src1, 4, src2 + tmp); R(rd) = SEXT(tmp, 32); });
   INSTPAT("00100?? ????? ????? 010 ????? 01011 11", amoxor.w, R, { AMO_PRECHECK(src1, 4); sword_t tmp = Mr(src1, 4); Mw(src1, 4, src2 ^ tmp); R(rd) = SEXT(tmp, 32); });
   INSTPAT("01100?? ????? ????? 010 ????? 01011 11", amoand.w, R, { AMO_PRECHECK(src1, 4); sword_t tmp = Mr(src1, 4); Mw(src1, 4, src2 & tmp); R(rd) = SEXT(tmp, 32); });
@@ -624,6 +652,8 @@ static int decode_exec(Decode *s)
 
   // mstatus write mask: clear non-writable bits.
   // SD (bit 31/63) is read-only (computed below); VS (bits 10:9) hardwired 0 (no V ext).
+  // RV64: SXL[35:34] and UXL[33:32] are WARL fields that hold XLEN==2 and are
+  // enforced below regardless of writes.
 #ifdef CONFIG_RV64
 #define MSTATUS_WMASK 0x000000FF007FF9EAULL
 #else
@@ -665,6 +695,11 @@ static int decode_exec(Decode *s)
     CSR(CSR_MIP) = (CSR(CSR_MIP) & ~SIP_WMASK) | mip_bits;
   }
   cpu.last_csr_wr = 0;
+#ifdef CONFIG_RV64
+  /* SXL/UXL are WARL: pin to XLEN=64 (encoding 2) after all MSTATUS writes.
+   * Must come after SSTATUS propagation which applies MSTATUS_WMASK again. */
+  CSR(CSR_MSTATUS) = (CSR(CSR_MSTATUS) & ~0xF00000000ULL) | 0xA00000000ULL;
+#endif
   // Compute SD (read-only): set when FS, VS, or XS is Dirty (== 3)
   {
     word_t fs = (CSR(CSR_MSTATUS) >> 13) & 3;

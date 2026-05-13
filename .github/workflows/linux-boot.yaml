@@ -132,7 +132,29 @@ jobs:
         run: make -C nemu run IMG=../third_party/riscv-software-src/opensbi/build/platform/generic/firmware/fw_payload.bin ARGS="-b -m 10000000 --log ./build/nemu-log.txt"
       - name: Download pre-built Linux kernel
         shell: bash -l {0}
-        run: make linux-download-rv32
-      - name: Boot Linux on NEMU
+        run: make linux-download-rv32 linux-download-rv64
+      - name: Boot Linux 32-bit on NEMU
         shell: bash -l {0}
-        run: make linux-boot-nemu32 ARGS="-b --log ./nemu/build/nemu-log.txt" MAX_INST=1200000000
+        run: make linux-boot-nemu32 ARGS="-b --log ./nemu/build/nemu-log.txt" MAX_INST=1400000000
+      - name: Boot Linux 64-bit on NEMU
+        shell: bash -l {0}
+        run: make linux-boot-nemu64 ARGS="-b --log ./nemu/build/nemu-log.txt" MAX_INST=1400000000
+      - name: NEMU Linux boot summary
+        run: |
+          BOOT32_OK="no"
+          grep -q "Booting Linux on hartid" ./nemu/build/nemu-log.txt && BOOT32_OK="yes"
+          INIT32_OK="no"
+          grep -q "Run /init as init process" ./nemu/build/nemu-log.txt && INIT32_OK="yes"
+          BOOT64_OK="no"
+          grep -q "Booting Linux on hartid" ./nemu/build/nemu-log.txt && BOOT64_OK="yes"
+          INIT64_OK="no"
+          grep -q "Run /init as init process" ./nemu/build/nemu-log.txt && INIT64_OK="yes"
+          {
+            echo ""
+            echo "## Linux Boot Test (NEMU)"
+            echo "| Check | 32-bit Status | 64-bit Status |"
+            echo "|-------|---------------|---------------|"
+            echo "| Kernel boot | $([ "$BOOT32_OK" = "yes" ] && echo 'PASS' || echo 'FAIL') | $([ "$BOOT64_OK" = "yes" ] && echo 'PASS' || echo 'FAIL') |"
+            echo "| Reaches init | $([ "$INIT32_OK" = "yes" ] && echo 'PASS' || echo 'FAIL') | $([ "$INIT64_OK" = "yes" ] && echo 'PASS' || echo 'FAIL') |"
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -4,21 +4,9 @@ KERNEL_VERSION:=6.18.22
 NPROC := $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 
 # ==============================================================================
-# Pre-built Linux kernel downloads
+# Pre-built Linux kernel variables (single source of truth: linux/vars.mk)
 # ==============================================================================
-# From https://github.com/Kingfish404/linux-build/releases
-LINUX_BUILD_VERSION ?= v6.18.22
-LINUX_BUILD_VERSION := $(strip $(LINUX_BUILD_VERSION))
-LINUX_BUILD_DIR     := $(PWD_DIR)/build
-LINUX_BUILD_URL     := https://github.com/Kingfish404/linux-build/releases/download/rv-$(LINUX_BUILD_VERSION)
-LINUX_RV32_DIR      := $(LINUX_BUILD_DIR)/linux-riscv-qemu-rv32-m-$(LINUX_BUILD_VERSION)
-LINUX_RV64_DIR      := $(LINUX_BUILD_DIR)/linux-riscv-qemu-rv64-m-$(LINUX_BUILD_VERSION)
-LINUX_RV32_PAYLOAD  ?= $(LINUX_RV32_DIR)/fw_payload.bin
-LINUX_RV64_PAYLOAD  ?= $(LINUX_RV64_DIR)/fw_payload.bin
-
-# Exported for consumers (root Makefile, fpga/litex/Makefile)
-export LINUX_RV32_PAYLOAD
-export LINUX_RV64_PAYLOAD
+include $(PWD_DIR)/vars.mk
 
 help: ## Show this help message
 	@echo "Usage: make <target> [VAR=value ...]"
@@ -44,16 +32,16 @@ help: ## Show this help message
 
 $(LINUX_RV32_DIR)/fw_payload.bin:
 	@mkdir -p $(LINUX_BUILD_DIR)
-	curl -L -o $(LINUX_BUILD_DIR)/linux-riscv-qemu-rv32-m-$(LINUX_BUILD_VERSION).tar.gz \
-		$(LINUX_BUILD_URL)/linux-riscv-qemu-rv32-m-$(LINUX_BUILD_VERSION).tar.gz
-	tar xzf $(LINUX_BUILD_DIR)/linux-riscv-qemu-rv32-m-$(LINUX_BUILD_VERSION).tar.gz -C $(LINUX_BUILD_DIR)
+	curl -L -o $(LINUX_BUILD_DIR)/$(LINUX_RV32_NAME).tar.gz \
+		$(LINUX_BUILD_URL)/$(LINUX_RV32_NAME).tar.gz
+	tar xzf $(LINUX_BUILD_DIR)/$(LINUX_RV32_NAME).tar.gz -C $(LINUX_BUILD_DIR)
 	@echo "RV32 Linux build extracted to $(LINUX_RV32_DIR)"
 
 $(LINUX_RV64_DIR)/fw_payload.bin:
 	@mkdir -p $(LINUX_BUILD_DIR)
-	curl -L -o $(LINUX_BUILD_DIR)/linux-riscv-qemu-rv64-m-$(LINUX_BUILD_VERSION).tar.gz \
-		$(LINUX_BUILD_URL)/linux-riscv-qemu-rv64-m-$(LINUX_BUILD_VERSION).tar.gz
-	tar xzf $(LINUX_BUILD_DIR)/linux-riscv-qemu-rv64-m-$(LINUX_BUILD_VERSION).tar.gz -C $(LINUX_BUILD_DIR)
+	curl -L -o $(LINUX_BUILD_DIR)/$(LINUX_RV64_NAME).tar.gz \
+		$(LINUX_BUILD_URL)/$(LINUX_RV64_NAME).tar.gz
+	tar xzf $(LINUX_BUILD_DIR)/$(LINUX_RV64_NAME).tar.gz -C $(LINUX_BUILD_DIR)
 	@echo "RV64 Linux build extracted to $(LINUX_RV64_DIR)"
 
 download-rv32: $(LINUX_RV32_DIR)/fw_payload.bin ## Download pre-built Linux (RV32)

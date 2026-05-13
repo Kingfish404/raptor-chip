@@ -18,7 +18,7 @@
 #include <stdio.h>
 #include <inttypes.h>
 
-#define NR_MAP 16
+#define NR_MAP 24
 
 static IOMap maps[NR_MAP] = {};
 static int nr_map = 0;

@@ -115,7 +115,7 @@ public:
     ctx->sr[CSR_SIP] = state->csrmap[CSR_SIP]->read();
     ctx->sr[CSR_SATP] = state->satp->read();
 
-    ctx->sr[CSR_MSTATUSH] = state->mstatush->read();
+    ctx->sr[CSR_MSTATUSH] = state->mstatush ? state->mstatush->read() : 0;
     ctx->sr[CSR_MSTATUS] = state->mstatus->read();
     ctx->sr[CSR_MEDELEG] = state->medeleg->read();
     ctx->sr[CSR_MIDELEG] = state->mideleg->read();
@@ -150,7 +150,7 @@ public:
     state->csrmap[CSR_SIP]->write(ctx->sr[CSR_SIP]);
     state->satp->write(ctx->sr[CSR_SATP]);
 
-    state->mstatush->write(ctx->sr[CSR_MSTATUSH]);
+    if (state->mstatush) state->mstatush->write(ctx->sr[CSR_MSTATUSH]);
     state->mstatus->write(ctx->sr[CSR_MSTATUS]);
     state->medeleg->write(ctx->sr[CSR_MEDELEG]);
     state->mideleg->write(ctx->sr[CSR_MIDELEG]);

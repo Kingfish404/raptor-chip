@@ -12,8 +12,7 @@ endchoice
 config ISA
   string
   default "x86" if ISA_x86
-  default "riscv32" if ISA_riscv && !RV64
-  default "riscv64" if ISA_riscv &&  RV64
+  default "riscv" if ISA_riscv
   default "none"
 
 config ISA64
@@ -22,7 +21,7 @@ config ISA64
   default y
 
 if ISA_riscv
-source "src/isa/riscv32/Kconfig"
+source "src/isa/riscv/Kconfig"
 endif
 
 choice

@@ -107,8 +107,8 @@ void init_mem()
       0x297,                                             // auipc  t0,0x0
       0x28593 + (reset_vec_size * 4 << 20),              // addi   a1, t0, &dtb
       0xf1402573,                                        // csrr   a0, mhartid
-      strcmp(CONFIG_ISA, "riscv32") == 0 ? 0x0182a283u : // lw     t0,24(t0)
-          0x0182b283u,                                   // ld     t0,24(t0)
+      MUXDEF(CONFIG_ISA64, 0x0182b283u,                  // ld     t0,24(t0)
+                           0x0182a283u),                 // lw     t0,24(t0)
       0x28067,                                           // jr     t0
       0,
       (uint32_t)(pc & 0xffffffff),
@@ -147,6 +147,9 @@ word_t ref_paddr_io(paddr_t addr)
   if ((addr >= 0x02000000 && addr < 0x020c0000) ||
       (addr >= 0x0c000000 && addr < 0x0d000000) ||
       (addr >= 0x10000000 && addr < 0x10000100) ||
+      (addr >= 0xf0001000 && addr < 0xf0001100) ||  // LiteX UART
+      (addr >= 0xf0008000 && addr < 0xf0008100) ||  // LiteX SPI SD
+      (addr >= 0xf0010000 && addr < 0xf0020000) ||  // CLINT alias (egos HARDWARE)
       (0))
   {
     cpu.iomm_addr = addr;
