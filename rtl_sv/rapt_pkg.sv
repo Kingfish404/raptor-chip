@@ -145,7 +145,7 @@ package rapt_pkg;
     || (addr >= 'h0f000000 && addr < 'h0f010000)  // sram (litex + raptSoC)
     || (addr >= 'h20000000 && addr < 'h20010000)  // mrom (64KB)
     || (addr >= 'h30000000 && addr < 'h40000000)  // flash
-    || (addr >= 'h80000000 && addr < 'h90000000)  // psram (256MB, covers 128MB & 256MB configs)
+    || (addr >= 'h80000000 && addr < 'h90000000)  // psram (cacheable)
     || (addr >= 'ha0000000 && addr < 'ha2000000)  // sdram
     ;
   endfunction
@@ -163,11 +163,12 @@ package rapt_pkg;
     || (addr >= 'h10000000 && addr < 'h10012000)  // UART / GPIO / peripherals
     || (addr >= 'h20000000 && addr < 'h20010000)  // MROM
     || (addr >= 'h21000000 && addr < 'h21200000)  // VGA
-    || (addr >= 'h30008000 && addr < 'h30009000)  // QEMU SDHCI PCI ECAM stub
     || (addr >= 'h30000000 && addr < 'h40000000)  // FLASH
-    || (addr >= 'h40000000 && addr < 'h40000100)  // QEMU SDHCI controller
     || (addr >= 'h80000000 && addr < 'h90000000)  // PMEM / PSRAM
     || (addr >= 'ha0000000 && addr < 'ha2000000)  // SDRAM
+    || (addr >= 'hf0008000 && addr < 'hf0008100)  // LiteX SPI SD-card controller
+    || (addr >= 'hf0001000 && addr < 'hf0001100)  // LiteX UART (egos HARDWARE)
+    || (addr >= 'hf0010000 && addr < 'hf0020000)  // CLINT alias (egos HARDWARE)
     || (addr >= 'hc0000000);  // raptSoC MMIO window
   endfunction
 
@@ -177,8 +178,9 @@ package rapt_pkg;
     || (addr >= 'h00100000 && addr <= 'h00100fff)  // finisher (sifive,test)
     || (addr >= 'h02000000 && addr <= 'h020bffff)  // CLINT (mtime / mtimecmp / msip)
     || (addr >= 'h0c000000 && addr <= 'h0cffffff)  // PLIC (claim/complete RMW)
-    || (addr >= 'h30008000 && addr <= 'h30008fff)  // QEMU SDHCI PCI ECAM stub
-    || (addr >= 'h40000000 && addr <= 'h400000ff)  // QEMU SDHCI controller
+    || (addr >= 'hf0008000 && addr <= 'hf00080ff)  // LiteX SPI SD-card controller
+    || (addr >= 'hf0001000 && addr <= 'hf00010ff)  // LiteX UART (egos HARDWARE)
+    || (addr >= 'hf0010000 && addr <= 'hf001ffff)  // CLINT alias (egos HARDWARE)
     || (addr >= 'h10001000 && addr <= 'h10001fff)  // uart
     || (addr >= 'h10002000 && addr <= 'h1000200f)  // gpio
     || (addr >= 'h10011000 && addr <= 'h10012000)  // legacy ysyxSoC clint (kept for back-compat)

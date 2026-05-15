@@ -143,12 +143,17 @@ endif
 endif
 $(shell printf '%s' '$(CONFIG_SIG)' > $(CONFIG_STAMP))
 
-VSRCS_RAW = $(shell find $(VSRC_PATH) -name "*.sv")
+# nsim-owned RTL: TB-only top-level wrappers (raptSoC / wrap_rnp_soc /
+# rapt_npc_soc) live under $(NSIM_HOME)/rtl/ so the simulation/test harness
+# can wire them without touching rtl_sv. They are still treated as RTL for
+# packing and verilation.
+NSIM_RTL_PATH := $(abspath ./rtl)
+VSRCS_RAW = $(shell find $(VSRC_PATH) $(NSIM_RTL_PATH) -name "*.sv")
 # Ensure rapt_pkg.sv comes first (DC requires package before import)
 VSRCS_PKG = $(filter %/rapt_pkg.sv, $(VSRCS_RAW))
 VSRCS = $(VSRCS_PKG) $(filter-out %/rapt_pkg.sv, $(VSRCS_RAW)) \
 	$(SOC_SOURCE)
-VHSRCS = $(shell find $(VSRC_PATH) -name "*.svh")
+VHSRCS = $(shell find $(VSRC_PATH) $(NSIM_RTL_PATH) -name "*.svh")
 CSRCS = $(shell find $(abspath ./csrc) -name "*.c")
 CCSRCS = $(shell find $(abspath ./csrc) -name "*.cc" -or -name "*.cpp")
 CHSRCS = $(shell find $(abspath ./csrc) -name "*.h" -or -name "*.hpp")
@@ -194,7 +199,7 @@ DIFF_REF_SO ?= -d $(abspath $(NEMU_HOME)/build/riscv32-nemu-interpreter-so)
 endif
 IMG ?= ## Custom image to load
 DISK ?= ## Virtio block disk image to load with --disk
-SDCARD ?= ## QEMU SDHCI SD-card image to load with --sdcard
+SDCARD ?= ## LiteX SPI SD-card image to load with --sdcard
 NPC_EXEC := $(BIN) $(ARGS) $(if $(DISK),--disk $(DISK),) $(if $(SDCARD),--sdcard $(SDCARD),) $(DIFF_REF_SO) -r $(MROM_IMG) $(IMG)
 
 verilog: ## Generate SystemVerilog from Chisel

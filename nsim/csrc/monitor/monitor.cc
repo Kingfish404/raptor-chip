@@ -135,8 +135,8 @@ static void usage(const char *prog)
   printf("  -n, --no-vcd             disable VCD output\n");
   printf("  -r, --mrom=FILE          load MROM image from FILE\n");
   printf("  -l, --log=FILE           output log to FILE\n");
-  printf("  -c, --cycle=THRESHOLD    set cycle threshold for waveform dump\n");
-  printf("  -i, --instr=THRESHOLD    set instruction threshold for waveform dump\n");
+  printf("  -c, --cycle=THRESHOLD    start waveform dump at active-cycle THRESHOLD (continues to end)\n");
+  printf("  -i, --instr=THRESHOLD    start waveform dump at instruction THRESHOLD (continues to end)\n");
   printf("  -d, --diff=REF_SO        run DiffTest with reference REF_SO\n");
   printf("  -p, --port=PORT          run DiffTest with port PORT\n");
   printf("  -e, --elf=ELF_FILE       add ELF_FILE for ftrace\n");
@@ -151,7 +151,7 @@ static void usage(const char *prog)
   printf("      --ckpt-save-exit     exit simulator immediately after writing the checkpoint\n");
   printf("      --ckpt-load=DIR      restore architectural state from checkpoint DIR before run\n");
   printf("      --disk=FILE          load FILE as virtio-mmio block disk image\n");
-  printf("      --sdcard=FILE        load FILE as QEMU SDHCI SD-card image\n");
+  printf("      --sdcard=FILE        load FILE as LiteX SPI SD-card image\n");
   printf("      --serial-lf-to-cr    translate host LF input to CR for CR-terminated monitors\n");
   printf("  -h, --help               display this help and exit\n");
   printf("\n");
@@ -339,8 +339,8 @@ void init_monitor(int argc, char *argv[])
 
   void virtio_blk_set_disk_image(const char *path);
   virtio_blk_set_disk_image(disk_img_file);
-  void sdhci_set_image(const char *path);
-  sdhci_set_image(sdcard_img_file);
+  void litex_spi_set_image(const char *path);
+  litex_spi_set_image(sdcard_img_file);
 
   /* Apply checkpoint memory load AFTER load_img() so the captured snapshot
    * overrides any image just loaded. The MROM trampoline written here will

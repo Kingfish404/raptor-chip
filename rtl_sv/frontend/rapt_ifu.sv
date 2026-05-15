@@ -60,7 +60,11 @@ module rapt_ifu #(
   // PMU: registered signals for accurate cycle-level sampling
   /* verilator lint_off UNUSEDSIGNAL */
   logic pmu_fetch_fire;
-  logic pmu_ifu_stall;
+  logic pmu_ifu_stall;  // Total stall (deprecated; use decomposed below)
+  // A1: Decomposed IFU stall root causes (mutually exclusive)
+  logic pmu_ifu_icache_stall;  // L1I miss/PTW (ifu_l1i.valid=0, IDU ready)
+  logic pmu_ifu_flush_stall;  // Redirect/flush bubble (IDLE state, IDU ready)
+  logic pmu_ifu_empty_stall;  // Serialization/trap (STALL state, IDU ready)
   /* verilator lint_on UNUSEDSIGNAL */
 
   logic [XLEN-1:0] pc_a;
@@ -219,7 +223,11 @@ module rapt_ifu #(
 `endif
     end else begin
       pmu_fetch_fire <= valid && ifu_idu.ready;
-      pmu_ifu_stall  <= !valid && ifu_idu.ready;
+      pmu_ifu_stall <= !valid && ifu_idu.ready;  // Total (sum of below)
+      // A1: Decomposed stall causes (mutually exclusive)
+      pmu_ifu_icache_stall <= !ifu_l1i.valid && ifu_idu.ready;  // L1I miss/PTW
+      pmu_ifu_flush_stall <= (state_ifu == IDLE) && ifu_idu.ready;  // Redirect bubble
+      pmu_ifu_empty_stall <= (state_ifu == STALL) && ifu_idu.ready;  // Serialization
       unique case (state_ifu)
         IDLE: begin
           if (redirect_event) begin
@@ -278,12 +286,10 @@ module rapt_ifu #(
   // HANDSHAKE: no L1I response may be consumed in the same cycle as a redirect.
   // Redirect priority is pc-only; accepting instruction data here can create
   // ghost frontend uops from the pre-redirect path.
-  `RAPT_SVA_IMPLY(clock, reset, IFU_REDIRECT_NOT_RECV_READY,
-                  redirect_event, !recv_ready)
+  `RAPT_SVA_IMPLY(clock, reset, IFU_REDIRECT_NOT_RECV_READY, redirect_event, !recv_ready)
 
 `ifdef RAPT_DUAL_ISSUE
-  `RAPT_SVA_IMPLY(clock, reset, IFU_SLOT_B_IMPLIES_SLOT_A,
-                  ifu_idu.valid_b, ifu_idu.valid_a)
+  `RAPT_SVA_IMPLY(clock, reset, IFU_SLOT_B_IMPLIES_SLOT_A, ifu_idu.valid_b, ifu_idu.valid_a)
 `endif
 
   `RAPT_COVER(clock, reset, IFU_RESTEER_EVENT, ifu_idu.resteer)

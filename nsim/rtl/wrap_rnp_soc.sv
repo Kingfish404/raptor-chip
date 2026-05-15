@@ -111,10 +111,28 @@ module rng_chip #(
       .rnp_rwstate(rnp_rwstate)
   );
 
+  // ---------------------------------------------------------------
+  // External IRQ delivery (replaces legacy backdoor pokes).
+  // See rapt_npc_soc.sv for the matching pattern; this wrapper carries
+  // its own copy because raptSoC and wrapSoC are independent top-level
+  // modules (different testbench harnesses share no state).
+  // ---------------------------------------------------------------
+  logic [31:0] ext_irq_pulse_q;
+  logic jtag_tdo_unused;
+  always_ff @(posedge clock) begin
+    if (reset) begin
+      ext_irq_pulse_q <= '0;
+    end else begin
+      automatic int tmp_irq;
+      `RAPT_DPI_C_NPC_GET_EXT_IRQ_VECTOR(tmp_irq);
+      ext_irq_pulse_q <= 32'(tmp_irq);
+    end
+  end
+
   rapt cpu (  // src/CPU.scala:38:21
       .clock            (clock),
       .io_interrupt     (1'h0),
-      .ext_irq_i        ('0),
+      .ext_irq_i        (ext_irq_pulse_q[`RAPT_PLIC_NDEV:1]),
       .io_master_awready(auto_master_out_awready_cpu),
       .io_master_awvalid(auto_master_out_awvalid_cpu),
       .io_master_awid   (auto_master_out_awid_cpu),
@@ -186,7 +204,7 @@ module rng_chip #(
       .jtag_trst_n(1'b0),
       .jtag_tms   (1'b1),
       .jtag_tdi   (1'b0),
-      .jtag_tdo   (  /* unused */),
+        .jtag_tdo   (jtag_tdo_unused),
 
       .reset(reset)
   );

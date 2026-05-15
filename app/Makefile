@@ -539,11 +539,19 @@ os-cli-nemu: ## Boot upstream OS image on NEMU where supported (OS=egos|xv6 or T
 egos-cli-nsim: ## Boot upstream egos image on NPC/nsim
 	@$(MAKE) $(Q) -C $(APP_HOME)/tinyos egos-cli-nsim ARGS="$(ARGS)" MAX_INST="$(MAX_INST)" TIMEOUT="$(TIMEOUT)"
 
+egos-cli-nsim-difftest: ## Boot upstream egos image on NPC/nsim with NEMU difftest (auto-configure nsim+ref)
+	@$(MAKE) $(Q) -C $(APP_HOME)/.. config-npc32-difftest config-nemu32-ref
+	@$(MAKE) $(Q) -C $(APP_HOME)/tinyos egos-cli-nsim-difftest ARGS="$(ARGS)" MAX_INST="$(MAX_INST)" TIMEOUT="$(TIMEOUT)"
+
 egos-cli-nemu: ## Boot upstream egos image on NEMU
 	@$(MAKE) $(Q) -C $(APP_HOME)/tinyos egos-cli-nemu ARGS="$(ARGS)" MAX_INST="$(MAX_INST)"
 
 xv6-cli-nsim: ## Boot upstream xv6-riscv on NPC/nsim
 	@$(MAKE) $(Q) -C $(APP_HOME)/tinyos xv6-cli-nsim ARGS="$(ARGS)" MAX_INST="$(MAX_INST)" TIMEOUT="$(TIMEOUT)"
+
+xv6-cli-nsim-difftest: ## Boot upstream xv6-riscv on NPC/nsim with NEMU difftest (auto-configure nsim+ref)
+	@$(MAKE) $(Q) -C $(APP_HOME)/.. config-npc32-difftest config-nemu64-ref
+	@$(MAKE) $(Q) -C $(APP_HOME)/tinyos xv6-cli-nsim-difftest ARGS="$(ARGS)" MAX_INST="$(MAX_INST)" TIMEOUT="$(TIMEOUT)"
 
 xv6-cli-nemu: ## Boot upstream xv6-riscv on NEMU
 	@$(MAKE) $(Q) -C $(APP_HOME)/tinyos xv6-cli-nemu ARGS="$(ARGS)" MAX_INST="$(MAX_INST)"
@@ -647,6 +655,163 @@ demos-nemu: demos-build ## Build and run all demos on NEMU via pk
 all: tests-build demos-build coremark-build embench-build llm-bench-build ## Build everything
 
 # ============================================================================
+# Architecture / difftest variants
+#
+# For every base <stem>-npc / <stem>-nemu target below, the following sized
+# variants are auto-generated via the _arch_variants template:
+#   <stem>-npc32             rv32 NPC (ISA64=0)
+#   <stem>-npc64             rv64 NPC (ISA64=1, VFLAGS=-DRAPT_RV64)
+#   <stem>-npc32-difftest    rv32 NPC + NEMU rv32 reference (difftest)
+#   <stem>-npc64-difftest    rv64 NPC + NEMU rv64 reference (difftest)
+#   <stem>-nemu32            NEMU rv32 (auto config-nemu32)
+#   <stem>-nemu64            NEMU rv64 (auto config-nemu64)
+#
+# Use these instead of the bare *-npc / *-nemu targets when you need an
+# explicit XLEN selection or difftest verification. The bare *-npc / *-nemu
+# targets still respect ISA64=0/1 if set on the command line.
+#
+# NOTE: auto-generated targets do not appear in `make help` (awk parses the
+# Makefile source). Use this comment block as the catalog.
+# ============================================================================
+
+# --- Generated variants (kept as literal targets so shell tab-completion works) ---
+coremark-npc32: ; @$(MAKE) $(Q) -C $(APP_HOME) coremark-npc ISA64=0
+coremark-npc64: ; @$(MAKE) $(Q) -C $(APP_HOME) coremark-npc ISA64=1
+coremark-npc32-difftest: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-npc32-difftest config-nemu32-ref && $(MAKE) $(Q) -C $(APP_HOME) coremark-npc ISA64=0
+coremark-npc64-difftest: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-npc32-difftest config-nemu64-ref && $(MAKE) $(Q) -C $(APP_HOME) coremark-npc ISA64=1
+coremark-nemu32: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-nemu32-difftest && $(MAKE) $(Q) -C $(APP_HOME) coremark-nemu ISA64=0
+coremark-nemu64: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-nemu64-difftest && $(MAKE) $(Q) -C $(APP_HOME) coremark-nemu ISA64=1
+embench-npc32: ; @$(MAKE) $(Q) -C $(APP_HOME) embench-npc ISA64=0
+embench-npc64: ; @$(MAKE) $(Q) -C $(APP_HOME) embench-npc ISA64=1
+embench-npc32-difftest: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-npc32-difftest config-nemu32-ref && $(MAKE) $(Q) -C $(APP_HOME) embench-npc ISA64=0
+embench-npc64-difftest: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-npc32-difftest config-nemu64-ref && $(MAKE) $(Q) -C $(APP_HOME) embench-npc ISA64=1
+embench-nemu32: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-nemu32-difftest && $(MAKE) $(Q) -C $(APP_HOME) embench-nemu ISA64=0
+embench-nemu64: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-nemu64-difftest && $(MAKE) $(Q) -C $(APP_HOME) embench-nemu ISA64=1
+llm-ops-npc32: ; @$(MAKE) $(Q) -C $(APP_HOME) llm-ops-npc ISA64=0
+llm-ops-npc64: ; @$(MAKE) $(Q) -C $(APP_HOME) llm-ops-npc ISA64=1
+llm-ops-npc32-difftest: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-npc32-difftest config-nemu32-ref && $(MAKE) $(Q) -C $(APP_HOME) llm-ops-npc ISA64=0
+llm-ops-npc64-difftest: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-npc32-difftest config-nemu64-ref && $(MAKE) $(Q) -C $(APP_HOME) llm-ops-npc ISA64=1
+llm-ops-nemu32: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-nemu32-difftest && $(MAKE) $(Q) -C $(APP_HOME) llm-ops-nemu ISA64=0
+llm-ops-nemu64: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-nemu64-difftest && $(MAKE) $(Q) -C $(APP_HOME) llm-ops-nemu ISA64=1
+llm-infer-npc32: ; @$(MAKE) $(Q) -C $(APP_HOME) llm-infer-npc ISA64=0
+llm-infer-npc64: ; @$(MAKE) $(Q) -C $(APP_HOME) llm-infer-npc ISA64=1
+llm-infer-npc32-difftest: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-npc32-difftest config-nemu32-ref && $(MAKE) $(Q) -C $(APP_HOME) llm-infer-npc ISA64=0
+llm-infer-npc64-difftest: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-npc32-difftest config-nemu64-ref && $(MAKE) $(Q) -C $(APP_HOME) llm-infer-npc ISA64=1
+llm-infer-nemu32: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-nemu32-difftest && $(MAKE) $(Q) -C $(APP_HOME) llm-infer-nemu ISA64=0
+llm-infer-nemu64: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-nemu64-difftest && $(MAKE) $(Q) -C $(APP_HOME) llm-infer-nemu ISA64=1
+llm-train-npc32: ; @$(MAKE) $(Q) -C $(APP_HOME) llm-train-npc ISA64=0
+llm-train-npc64: ; @$(MAKE) $(Q) -C $(APP_HOME) llm-train-npc ISA64=1
+llm-train-npc32-difftest: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-npc32-difftest config-nemu32-ref && $(MAKE) $(Q) -C $(APP_HOME) llm-train-npc ISA64=0
+llm-train-npc64-difftest: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-npc32-difftest config-nemu64-ref && $(MAKE) $(Q) -C $(APP_HOME) llm-train-npc ISA64=1
+llm-train-nemu32: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-nemu32-difftest && $(MAKE) $(Q) -C $(APP_HOME) llm-train-nemu ISA64=0
+llm-train-nemu64: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-nemu64-difftest && $(MAKE) $(Q) -C $(APP_HOME) llm-train-nemu ISA64=1
+llm-bench-run-npc32: ; @$(MAKE) $(Q) -C $(APP_HOME) llm-bench-run-npc ISA64=0
+llm-bench-run-npc64: ; @$(MAKE) $(Q) -C $(APP_HOME) llm-bench-run-npc ISA64=1
+llm-bench-run-npc32-difftest: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-npc32-difftest config-nemu32-ref && $(MAKE) $(Q) -C $(APP_HOME) llm-bench-run-npc ISA64=0
+llm-bench-run-npc64-difftest: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-npc32-difftest config-nemu64-ref && $(MAKE) $(Q) -C $(APP_HOME) llm-bench-run-npc ISA64=1
+llm-bench-run-nemu32: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-nemu32-difftest && $(MAKE) $(Q) -C $(APP_HOME) llm-bench-run-nemu ISA64=0
+llm-bench-run-nemu64: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-nemu64-difftest && $(MAKE) $(Q) -C $(APP_HOME) llm-bench-run-nemu ISA64=1
+llm-bench-report-npc32: ; @$(MAKE) $(Q) -C $(APP_HOME) llm-bench-report-npc ISA64=0
+llm-bench-report-npc64: ; @$(MAKE) $(Q) -C $(APP_HOME) llm-bench-report-npc ISA64=1
+llm-bench-report-npc32-difftest: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-npc32-difftest config-nemu32-ref && $(MAKE) $(Q) -C $(APP_HOME) llm-bench-report-npc ISA64=0
+llm-bench-report-npc64-difftest: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-npc32-difftest config-nemu64-ref && $(MAKE) $(Q) -C $(APP_HOME) llm-bench-report-npc ISA64=1
+llm-bench-report-nemu32: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-nemu32-difftest && $(MAKE) $(Q) -C $(APP_HOME) llm-bench-report-nemu ISA64=0
+llm-bench-report-nemu64: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-nemu64-difftest && $(MAKE) $(Q) -C $(APP_HOME) llm-bench-report-nemu ISA64=1
+agent-tools-npc32: ; @$(MAKE) $(Q) -C $(APP_HOME) agent-tools-npc ISA64=0
+agent-tools-npc64: ; @$(MAKE) $(Q) -C $(APP_HOME) agent-tools-npc ISA64=1
+agent-tools-npc32-difftest: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-npc32-difftest config-nemu32-ref && $(MAKE) $(Q) -C $(APP_HOME) agent-tools-npc ISA64=0
+agent-tools-npc64-difftest: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-npc32-difftest config-nemu64-ref && $(MAKE) $(Q) -C $(APP_HOME) agent-tools-npc ISA64=1
+agent-tools-nemu32: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-nemu32-difftest && $(MAKE) $(Q) -C $(APP_HOME) agent-tools-nemu ISA64=0
+agent-tools-nemu64: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-nemu64-difftest && $(MAKE) $(Q) -C $(APP_HOME) agent-tools-nemu ISA64=1
+agent-rag-npc32: ; @$(MAKE) $(Q) -C $(APP_HOME) agent-rag-npc ISA64=0
+agent-rag-npc64: ; @$(MAKE) $(Q) -C $(APP_HOME) agent-rag-npc ISA64=1
+agent-rag-npc32-difftest: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-npc32-difftest config-nemu32-ref && $(MAKE) $(Q) -C $(APP_HOME) agent-rag-npc ISA64=0
+agent-rag-npc64-difftest: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-npc32-difftest config-nemu64-ref && $(MAKE) $(Q) -C $(APP_HOME) agent-rag-npc ISA64=1
+agent-rag-nemu32: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-nemu32-difftest && $(MAKE) $(Q) -C $(APP_HOME) agent-rag-nemu ISA64=0
+agent-rag-nemu64: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-nemu64-difftest && $(MAKE) $(Q) -C $(APP_HOME) agent-rag-nemu ISA64=1
+agent-workflow-npc32: ; @$(MAKE) $(Q) -C $(APP_HOME) agent-workflow-npc ISA64=0
+agent-workflow-npc64: ; @$(MAKE) $(Q) -C $(APP_HOME) agent-workflow-npc ISA64=1
+agent-workflow-npc32-difftest: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-npc32-difftest config-nemu32-ref && $(MAKE) $(Q) -C $(APP_HOME) agent-workflow-npc ISA64=0
+agent-workflow-npc64-difftest: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-npc32-difftest config-nemu64-ref && $(MAKE) $(Q) -C $(APP_HOME) agent-workflow-npc ISA64=1
+agent-workflow-nemu32: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-nemu32-difftest && $(MAKE) $(Q) -C $(APP_HOME) agent-workflow-nemu ISA64=0
+agent-workflow-nemu64: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-nemu64-difftest && $(MAKE) $(Q) -C $(APP_HOME) agent-workflow-nemu ISA64=1
+agent-bench-run-npc32: ; @$(MAKE) $(Q) -C $(APP_HOME) agent-bench-run-npc ISA64=0
+agent-bench-run-npc64: ; @$(MAKE) $(Q) -C $(APP_HOME) agent-bench-run-npc ISA64=1
+agent-bench-run-npc32-difftest: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-npc32-difftest config-nemu32-ref && $(MAKE) $(Q) -C $(APP_HOME) agent-bench-run-npc ISA64=0
+agent-bench-run-npc64-difftest: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-npc32-difftest config-nemu64-ref && $(MAKE) $(Q) -C $(APP_HOME) agent-bench-run-npc ISA64=1
+agent-bench-run-nemu32: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-nemu32-difftest && $(MAKE) $(Q) -C $(APP_HOME) agent-bench-run-nemu ISA64=0
+agent-bench-run-nemu64: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-nemu64-difftest && $(MAKE) $(Q) -C $(APP_HOME) agent-bench-run-nemu ISA64=1
+agent-bench-report-npc32: ; @$(MAKE) $(Q) -C $(APP_HOME) agent-bench-report-npc ISA64=0
+agent-bench-report-npc64: ; @$(MAKE) $(Q) -C $(APP_HOME) agent-bench-report-npc ISA64=1
+agent-bench-report-npc32-difftest: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-npc32-difftest config-nemu32-ref && $(MAKE) $(Q) -C $(APP_HOME) agent-bench-report-npc ISA64=0
+agent-bench-report-npc64-difftest: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-npc32-difftest config-nemu64-ref && $(MAKE) $(Q) -C $(APP_HOME) agent-bench-report-npc ISA64=1
+agent-bench-report-nemu32: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-nemu32-difftest && $(MAKE) $(Q) -C $(APP_HOME) agent-bench-report-nemu ISA64=0
+agent-bench-report-nemu64: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-nemu64-difftest && $(MAKE) $(Q) -C $(APP_HOME) agent-bench-report-nemu ISA64=1
+hello-npc32: ; @$(MAKE) $(Q) -C $(APP_HOME) hello-npc ISA64=0
+hello-npc64: ; @$(MAKE) $(Q) -C $(APP_HOME) hello-npc ISA64=1
+hello-npc32-difftest: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-npc32-difftest config-nemu32-ref && $(MAKE) $(Q) -C $(APP_HOME) hello-npc ISA64=0
+hello-npc64-difftest: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-npc32-difftest config-nemu64-ref && $(MAKE) $(Q) -C $(APP_HOME) hello-npc ISA64=1
+hello-nemu32: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-nemu32-difftest && $(MAKE) $(Q) -C $(APP_HOME) hello-nemu ISA64=0
+hello-nemu64: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-nemu64-difftest && $(MAKE) $(Q) -C $(APP_HOME) hello-nemu ISA64=1
+isa-tests-npc32: ; @$(MAKE) $(Q) -C $(APP_HOME) isa-tests-npc ISA64=0
+isa-tests-npc64: ; @$(MAKE) $(Q) -C $(APP_HOME) isa-tests-npc ISA64=1
+isa-tests-npc32-difftest: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-npc32-difftest config-nemu32-ref && $(MAKE) $(Q) -C $(APP_HOME) isa-tests-npc ISA64=0
+isa-tests-npc64-difftest: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-npc32-difftest config-nemu64-ref && $(MAKE) $(Q) -C $(APP_HOME) isa-tests-npc ISA64=1
+isa-tests-nemu32: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-nemu32-difftest && $(MAKE) $(Q) -C $(APP_HOME) isa-tests-nemu ISA64=0
+isa-tests-nemu64: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-nemu64-difftest && $(MAKE) $(Q) -C $(APP_HOME) isa-tests-nemu ISA64=1
+memory-tests-npc32: ; @$(MAKE) $(Q) -C $(APP_HOME) memory-tests-npc ISA64=0
+memory-tests-npc64: ; @$(MAKE) $(Q) -C $(APP_HOME) memory-tests-npc ISA64=1
+memory-tests-npc32-difftest: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-npc32-difftest config-nemu32-ref && $(MAKE) $(Q) -C $(APP_HOME) memory-tests-npc ISA64=0
+memory-tests-npc64-difftest: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-npc32-difftest config-nemu64-ref && $(MAKE) $(Q) -C $(APP_HOME) memory-tests-npc ISA64=1
+memory-tests-nemu32: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-nemu32-difftest && $(MAKE) $(Q) -C $(APP_HOME) memory-tests-nemu ISA64=0
+memory-tests-nemu64: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-nemu64-difftest && $(MAKE) $(Q) -C $(APP_HOME) memory-tests-nemu ISA64=1
+algo-tests-npc32: ; @$(MAKE) $(Q) -C $(APP_HOME) algo-tests-npc ISA64=0
+algo-tests-npc64: ; @$(MAKE) $(Q) -C $(APP_HOME) algo-tests-npc ISA64=1
+algo-tests-npc32-difftest: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-npc32-difftest config-nemu32-ref && $(MAKE) $(Q) -C $(APP_HOME) algo-tests-npc ISA64=0
+algo-tests-npc64-difftest: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-npc32-difftest config-nemu64-ref && $(MAKE) $(Q) -C $(APP_HOME) algo-tests-npc ISA64=1
+algo-tests-nemu32: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-nemu32-difftest && $(MAKE) $(Q) -C $(APP_HOME) algo-tests-nemu ISA64=0
+algo-tests-nemu64: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-nemu64-difftest && $(MAKE) $(Q) -C $(APP_HOME) algo-tests-nemu ISA64=1
+security-tests-npc32: ; @$(MAKE) $(Q) -C $(APP_HOME) security-tests-npc ISA64=0
+security-tests-npc64: ; @$(MAKE) $(Q) -C $(APP_HOME) security-tests-npc ISA64=1
+security-tests-npc32-difftest: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-npc32-difftest config-nemu32-ref && $(MAKE) $(Q) -C $(APP_HOME) security-tests-npc ISA64=0
+security-tests-npc64-difftest: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-npc32-difftest config-nemu64-ref && $(MAKE) $(Q) -C $(APP_HOME) security-tests-npc ISA64=1
+security-tests-nemu32: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-nemu32-difftest && $(MAKE) $(Q) -C $(APP_HOME) security-tests-nemu ISA64=0
+security-tests-nemu64: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-nemu64-difftest && $(MAKE) $(Q) -C $(APP_HOME) security-tests-nemu ISA64=1
+tests-npc32: ; @$(MAKE) $(Q) -C $(APP_HOME) tests-npc ISA64=0
+tests-npc64: ; @$(MAKE) $(Q) -C $(APP_HOME) tests-npc ISA64=1
+tests-npc32-difftest: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-npc32-difftest config-nemu32-ref && $(MAKE) $(Q) -C $(APP_HOME) tests-npc ISA64=0
+tests-npc64-difftest: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-npc32-difftest config-nemu64-ref && $(MAKE) $(Q) -C $(APP_HOME) tests-npc ISA64=1
+tests-nemu32: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-nemu32-difftest && $(MAKE) $(Q) -C $(APP_HOME) tests-nemu ISA64=0
+tests-nemu64: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-nemu64-difftest && $(MAKE) $(Q) -C $(APP_HOME) tests-nemu ISA64=1
+demos-npc32: ; @$(MAKE) $(Q) -C $(APP_HOME) demos-npc ISA64=0
+demos-npc64: ; @$(MAKE) $(Q) -C $(APP_HOME) demos-npc ISA64=1
+demos-npc32-difftest: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-npc32-difftest config-nemu32-ref && $(MAKE) $(Q) -C $(APP_HOME) demos-npc ISA64=0
+demos-npc64-difftest: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-npc32-difftest config-nemu64-ref && $(MAKE) $(Q) -C $(APP_HOME) demos-npc ISA64=1
+demos-nemu32: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-nemu32-difftest && $(MAKE) $(Q) -C $(APP_HOME) demos-nemu ISA64=0
+demos-nemu64: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. config-nemu64-difftest && $(MAKE) $(Q) -C $(APP_HOME) demos-nemu ISA64=1
+
+.PHONY: \
+	coremark-npc32 coremark-npc64 coremark-npc32-difftest coremark-npc64-difftest coremark-nemu32 coremark-nemu64 \
+	embench-npc32 embench-npc64 embench-npc32-difftest embench-npc64-difftest embench-nemu32 embench-nemu64 \
+	llm-ops-npc32 llm-ops-npc64 llm-ops-npc32-difftest llm-ops-npc64-difftest llm-ops-nemu32 llm-ops-nemu64 \
+	llm-infer-npc32 llm-infer-npc64 llm-infer-npc32-difftest llm-infer-npc64-difftest llm-infer-nemu32 llm-infer-nemu64 \
+	llm-train-npc32 llm-train-npc64 llm-train-npc32-difftest llm-train-npc64-difftest llm-train-nemu32 llm-train-nemu64 \
+	llm-bench-run-npc32 llm-bench-run-npc64 llm-bench-run-npc32-difftest llm-bench-run-npc64-difftest llm-bench-run-nemu32 llm-bench-run-nemu64 \
+	llm-bench-report-npc32 llm-bench-report-npc64 llm-bench-report-npc32-difftest llm-bench-report-npc64-difftest llm-bench-report-nemu32 llm-bench-report-nemu64 \
+	agent-tools-npc32 agent-tools-npc64 agent-tools-npc32-difftest agent-tools-npc64-difftest agent-tools-nemu32 agent-tools-nemu64 \
+	agent-rag-npc32 agent-rag-npc64 agent-rag-npc32-difftest agent-rag-npc64-difftest agent-rag-nemu32 agent-rag-nemu64 \
+	agent-workflow-npc32 agent-workflow-npc64 agent-workflow-npc32-difftest agent-workflow-npc64-difftest agent-workflow-nemu32 agent-workflow-nemu64 \
+	agent-bench-run-npc32 agent-bench-run-npc64 agent-bench-run-npc32-difftest agent-bench-run-npc64-difftest agent-bench-run-nemu32 agent-bench-run-nemu64 \
+	agent-bench-report-npc32 agent-bench-report-npc64 agent-bench-report-npc32-difftest agent-bench-report-npc64-difftest agent-bench-report-nemu32 agent-bench-report-nemu64 \
+	hello-npc32 hello-npc64 hello-npc32-difftest hello-npc64-difftest hello-nemu32 hello-nemu64 \
+	isa-tests-npc32 isa-tests-npc64 isa-tests-npc32-difftest isa-tests-npc64-difftest isa-tests-nemu32 isa-tests-nemu64 \
+	memory-tests-npc32 memory-tests-npc64 memory-tests-npc32-difftest memory-tests-npc64-difftest memory-tests-nemu32 memory-tests-nemu64 \
+	algo-tests-npc32 algo-tests-npc64 algo-tests-npc32-difftest algo-tests-npc64-difftest algo-tests-nemu32 algo-tests-nemu64 \
+	security-tests-npc32 security-tests-npc64 security-tests-npc32-difftest security-tests-npc64-difftest security-tests-nemu32 security-tests-nemu64 \
+	tests-npc32 tests-npc64 tests-npc32-difftest tests-npc64-difftest tests-nemu32 tests-nemu64 \
+	demos-npc32 demos-npc64 demos-npc32-difftest demos-npc64-difftest demos-nemu32 demos-nemu64
+
+# ============================================================================
 # Clean
 # ============================================================================
 clean: ## Clean all build artifacts
@@ -662,7 +827,7 @@ clean: ## Clean all build artifacts
 		agent-bench-run-npc agent-bench-run-nemu agent-bench-report-npc agent-bench-report-nemu \
 		tinyos-sync \
 		os-cli-qemu egos-cli-qemu xv6-cli-qemu \
-		os-cli-nsim os-cli-nemu egos-cli-nsim egos-cli-nemu xv6-cli-nsim xv6-cli-nemu \
+		os-cli-nsim os-cli-nemu egos-cli-nsim egos-cli-nsim-difftest egos-cli-nemu xv6-cli-nsim xv6-cli-nsim-difftest xv6-cli-nemu \
 		hello-build hello-npc hello-nemu \
 		isa-tests-build isa-tests-npc isa-tests-nemu \
 		memory-tests-build memory-tests-npc memory-tests-nemu \

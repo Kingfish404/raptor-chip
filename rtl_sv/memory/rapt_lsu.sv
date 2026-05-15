@@ -18,6 +18,11 @@ module rapt_lsu #(
 
     csr_bcast_if.in csr_bcast,
 
+    // A2: PMU: one-cycle pulse when SQ becomes full
+    /* verilator lint_off UNUSEDSIGNAL */
+    output logic pmu_sq_full,
+    /* verilator lint_on UNUSEDSIGNAL */
+
     input reset
 );
   localparam int WordOffBits = $clog2(XLEN / 8);
@@ -57,6 +62,8 @@ module rapt_lsu #(
   logic [XLEN-1:0] sq_waddr[SQ_SIZE];  // physical: for bus write-through
   logic [XLEN-1:0] sq_vaddr[SQ_SIZE];  // virtual : for forwarding comparison
   logic [XLEN-1:0] sq_wdata[SQ_SIZE];
+  // A2: SQ full state tracker (for pmu_sq_full rising-edge detection)
+  logic sq_full_r;
   // === Store Queue (SQ) ===
 
   // SQ index helpers (debug/waveform only; outputs feed sq_fwd_data lookup
@@ -96,7 +103,11 @@ module rapt_lsu #(
       stq_head  <= 0;
       stq_tail  <= 0;
       stq_valid <= 0;
+      pmu_sq_full <= 1'b0;  // A2: Initialize full pulse
     end else begin
+      // A2: Latch current full status (rising-edge detection for pmu_sq_full)
+      pmu_sq_full <= (&sq_valid) && !sq_full_r;
+      sq_full_r <= (&sq_valid);  // Full when all SQ entries valid
       if (cmu_bcast.flush_pipe || cmu_bcast.fence_time) begin
         stq_head  <= 0;
         stq_tail  <= 0;

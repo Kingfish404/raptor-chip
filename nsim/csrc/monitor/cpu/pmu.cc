@@ -97,6 +97,19 @@ void perf_sample_per_cycle()
     pmu.bpu_b_fail += br_predict_fail && b ? 1 : 0;
     pmu.bpu_j_fail += br_predict_fail && j ? 1 : 0;
     pmu.bpu_jr_fail += br_predict_fail && jr ? 1 : 0;
+
+    // A7: RVC branch detection
+    // CMU holds the committed instruction for this cycle in cmu_inst_r
+    uint32_t inst = *(uint32_t *)&VERILOG_CPU(cmu__DOT__inst);
+    uint16_t inst_lo = inst & 0xFFFF; // Lower 16 bits for RVC decoding
+    if ((inst_lo & 0x0003) == 0x01)
+    { // C-type encoding (bits [1:0] = 01)
+      uint8_t funct3 = (inst_lo >> 13) & 0x7;
+      // C.BEQZ (funct3 = 3'b110), C.BNEZ (funct3 = 3'b111), C.J (funct3 = 3'b101)
+      bool is_c_branch = (funct3 == 0x6) || (funct3 == 0x7) || (funct3 == 0x5);
+      pmu.bpu_cnt += is_c_branch ? 1 : 0;
+      pmu.bpu_fail_cnt += is_c_branch && br_predict_fail ? 1 : 0;
+    }
   }
   bool ifu_hazard = *(uint8_t *)&VERILOG_CPU(ifu__DOT__ifu_hazard);
   bool ifu_fetch_fire = *(uint8_t *)&VERILOG_CPU(ifu__DOT__pmu_fetch_fire);
@@ -151,6 +164,84 @@ void perf_sample_per_cycle()
   {
     pmu.wbu_stall_cycle++;
   }
+
+  // -------------------------------------------------------------------
+  // Extended (gem5-aligned) PMU samples
+  // -------------------------------------------------------------------
+  // 1. IFU stall decomposition.  Uses L1I FSM busy + a small flush-drain timer.
+  static int flush_drain_window = 0;
+  bool flush_pipe_r = *(uint8_t *)&VERILOG_CPU(cmu__DOT__flush_pipe_r);
+  if (flush_pipe_r)
+    flush_drain_window = 5; // ~5 cycles for IF->ID bubble
+  else if (flush_drain_window > 0)
+    flush_drain_window--;
+
+  if (ifu_stall)
+  {
+    bool l1i_busy_now = (l1i_state == 0b001) || (l1i_state == 0b010) || (l1i_state == 0b110) || (l1i_state == 0b111) || (l1i_state == 0b100);
+    if (l1i_busy_now)
+      pmu.ifu_icache_miss_cycle++;
+    else if (flush_drain_window)
+      pmu.ifu_flush_cycle++;
+    else
+      pmu.ifu_empty_cycle++;
+  }
+
+  // 2. Structural full cycles + rising-edge events.
+  //    RS/IOQ are 8 entries each (RS_SIZE=IIQ_SIZE=8) -> full when uint8 == 0xFF.
+  //    ROB-full proxy: rnu has a renamed uop but UOQ/ROB cannot accept it.
+  //    SQ-full: scan npc.sq_valid bitvector (SQ_SIZE=8) -> 0xFF means all-occupied.
+  bool rs_full = (exu_ooo_valid == 0xFFu);
+  bool ioq_full = (exu_ioq_valid == 0xFFu);
+  bool rob_full = rnu_valid && !rou_ready;
+  bool sq_full = npc.sq_valid && (*npc.sq_valid == 0xFFu);
+  static bool prev_rs_full = false, prev_ioq_full = false;
+  static bool prev_rob_full = false, prev_sq_full = false;
+  if (rs_full)
+  {
+    pmu.rs_full_cycle++;
+    if (!prev_rs_full)
+      pmu.rs_full_events++;
+  }
+  if (ioq_full)
+  {
+    pmu.ioq_full_cycle++;
+    if (!prev_ioq_full)
+      pmu.ioq_full_events++;
+  }
+  if (rob_full)
+  {
+    pmu.rob_full_cycle++;
+    if (!prev_rob_full)
+      pmu.rob_full_events++;
+  }
+  if (sq_full)
+  {
+    pmu.sq_full_cycle++;
+    if (!prev_sq_full)
+      pmu.sq_full_events++;
+  }
+  prev_rs_full = rs_full;
+  prev_ioq_full = ioq_full;
+  prev_rob_full = rob_full;
+  prev_sq_full = sq_full;
+
+  // 3. Commit-width distribution (per cycle).
+  if (wbu_valid && wbu_valid_b)
+    pmu.commit_2_cycle++;
+  else if (wbu_valid)
+    pmu.commit_1_cycle++;
+  // commit_0_cycle implicitly == wbu_stall_cycle (already accumulated above).
+
+  // 4. Rename/dispatch status mix.
+  if (flush_drain_window)
+    pmu.dispatch_squash_cycle++;
+  else if (rnu_valid && rou_ready)
+    pmu.dispatch_running_cycle++;
+  else if (rnu_valid && !rou_ready)
+    pmu.dispatch_blocked_cycle++;
+  else
+    pmu.dispatch_idle_cycle++;
   // L1I cache sample: state-transition-based tracking
   // L1I FSM states: IDLE=000, RD_A=001, RD_0=010, PTWAIT=100, TRAP=101, RD_1=110, FINA=111
   static uint8_t prev_l1i_state = 0;
@@ -349,11 +440,65 @@ void perf()
       pmu.rou_hazard_cycle, percentage(pmu.rou_hazard_cycle, pmu.active_cycle));
   Log("LSU fwd: %lld, sq_conflict: %lld, stq_conflict: %lld",
       pmu.lsu_fwd_cnt, pmu.lsu_sq_conflict_cnt, pmu.lsu_stq_conflict_cnt);
-  Log("Dual commit: %lld / %lld commits (%2.1f%%)",
-      pmu.dual_commit_cnt, pmu.instr_cnt,
-      percentage(pmu.dual_commit_cnt, pmu.instr_cnt - pmu.dual_commit_cnt));
-  Log("Early resteer: %lld events",
+  // Dual-commit: report two perspectives consistent with gem5:
+  //   * fraction of commit cycles (i.e. cycles where >=1 inst committed)
+  //   * fraction of total instructions committed in dual mode (2*dual / instr)
+  long long int commit_cycles = pmu.commit_1_cycle + pmu.commit_2_cycle;
+  Log("Dual commit: %lld cycles, %2.1f%% of commit cycles, %2.1f%% of insts",
+      pmu.commit_2_cycle,
+      percentage(pmu.commit_2_cycle, commit_cycles),
+      percentage(2 * pmu.commit_2_cycle, pmu.instr_cnt));
+  Log("Early resteer: %lld events (BPU taken on non-branch, IDU-detected)",
       pmu.early_resteer_cnt);
+
+  // -------------------------------------------------------------------
+  // IFU stall decomposition  (gem5: fetch.icacheStallCycles / squashCycles)
+  // -------------------------------------------------------------------
+  Log("======== IFU Stall Decomposition ========");
+  Log("|%10s, %%|%10s, %%|%10s, %%|%10s, %%|",
+      "IFU TOTAL", "L1I/PTW", "FLUSH", "EMPTY");
+  Log("|%10.0e,%3.0f|%10.0e,%3.0f|%10.0e,%3.0f|%10.0e,%3.0f|",
+      (double)pmu.ifu_stall_cycle, percentage(pmu.ifu_stall_cycle, pmu.active_cycle),
+      (double)pmu.ifu_icache_miss_cycle, percentage(pmu.ifu_icache_miss_cycle, pmu.ifu_stall_cycle),
+      (double)pmu.ifu_flush_cycle, percentage(pmu.ifu_flush_cycle, pmu.ifu_stall_cycle),
+      (double)pmu.ifu_empty_cycle, percentage(pmu.ifu_empty_cycle, pmu.ifu_stall_cycle));
+
+  // -------------------------------------------------------------------
+  // Structural-full events  (gem5: iqFullEvents / robFullEvents / sqFullEvents)
+  // -------------------------------------------------------------------
+  Log("======== Structural Full (events / cycles, %% of total) ========");
+  Log("|%10s|%14s|%10s|%14s|%10s|%14s|%10s|%14s|",
+      "RS EVT", "RS CYC, %", "IOQ EVT", "IOQ CYC, %",
+      "ROB EVT", "ROB CYC, %", "SQ EVT", "SQ CYC, %");
+  Log("|%10lld|%8.0e,%4.1f|%10lld|%8.0e,%4.1f|%10lld|%8.0e,%4.1f|%10lld|%8.0e,%4.1f|",
+      pmu.rs_full_events, (double)pmu.rs_full_cycle, percentage(pmu.rs_full_cycle, pmu.active_cycle),
+      pmu.ioq_full_events, (double)pmu.ioq_full_cycle, percentage(pmu.ioq_full_cycle, pmu.active_cycle),
+      pmu.rob_full_events, (double)pmu.rob_full_cycle, percentage(pmu.rob_full_cycle, pmu.active_cycle),
+      pmu.sq_full_events, (double)pmu.sq_full_cycle, percentage(pmu.sq_full_cycle, pmu.active_cycle));
+
+  // -------------------------------------------------------------------
+  // Commit-width distribution  (gem5: commit.committed_per_cycle)
+  // -------------------------------------------------------------------
+  Log("======== Commit Width Distribution ========");
+  Log("|%12s, %%|%12s, %%|%12s, %%|  avg/cycle: %5.3f",
+      "0 (stall)", "1 (single)", "2 (dual)",
+      pmu.active_cycle ? (double)pmu.instr_cnt / pmu.active_cycle : 0.0);
+  Log("|%12.0e,%3.0f|%12.0e,%3.0f|%12.0e,%3.0f|",
+      (double)pmu.wbu_stall_cycle, percentage(pmu.wbu_stall_cycle, pmu.active_cycle),
+      (double)pmu.commit_1_cycle, percentage(pmu.commit_1_cycle, pmu.active_cycle),
+      (double)pmu.commit_2_cycle, percentage(pmu.commit_2_cycle, pmu.active_cycle));
+
+  // -------------------------------------------------------------------
+  // Rename / Dispatch status mix  (gem5: rename.status)
+  // -------------------------------------------------------------------
+  Log("======== Rename/Dispatch Status ========");
+  Log("|%12s, %%|%12s, %%|%12s, %%|%12s, %%|",
+      "Running", "Blocked", "Idle", "Squashing");
+  Log("|%12.0e,%3.0f|%12.0e,%3.0f|%12.0e,%3.0f|%12.0e,%3.0f|",
+      (double)pmu.dispatch_running_cycle, percentage(pmu.dispatch_running_cycle, pmu.active_cycle),
+      (double)pmu.dispatch_blocked_cycle, percentage(pmu.dispatch_blocked_cycle, pmu.active_cycle),
+      (double)pmu.dispatch_idle_cycle, percentage(pmu.dispatch_idle_cycle, pmu.active_cycle),
+      (double)pmu.dispatch_squash_cycle, percentage(pmu.dispatch_squash_cycle, pmu.active_cycle));
   assert(
       pmu.instr_cnt ==
       (pmu.ld_inst_cnt + pmu.st_inst_cnt + pmu.alu_inst_cnt +

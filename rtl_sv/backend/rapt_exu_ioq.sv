@@ -38,7 +38,12 @@ module rapt_exu_ioq #(
     // Outputs to memory subsystem & ROB writeback
     exu_lsu_if.master    exu_lsu,
     exu_l1d_if.master    exu_l1d,
-    exu_ioq_bcast_if.out exu_ioq_bcast
+    exu_ioq_bcast_if.out exu_ioq_bcast,
+
+    // A2: PMU: one-cycle pulse when IOQ becomes full
+    /* verilator lint_off UNUSEDSIGNAL */
+    output logic pmu_ioq_full
+    /* verilator lint_on UNUSEDSIGNAL */
 );
   localparam unsigned IOQLen = $clog2(IOQ_SIZE);
   localparam unsigned ROBLen = $clog2(ROB_SIZE);
@@ -187,16 +192,29 @@ module rapt_exu_ioq #(
   assign exu_lsu.raddr = ioq_atom[active_idx]
       ? ioq_vj[active_idx]
       : ioq_vj[active_idx] + ioq_imm[active_idx];
-  assign exu_lsu.ralu = ioq_atom[active_idx] ? `RAPT_ALU_LW__ : ioq_alu[active_idx][4:0];
+  assign exu_lsu.ralu = ioq_atom[active_idx]
+      ? (ioq_word[active_idx] ? `RAPT_ALU_LW__ : `RAPT_ALU_LD__)
+      : ioq_alu[active_idx][4:0];
   assign exu_lsu.atomic_lock = ioq_atom[active_idx] && ioq_alu[active_idx] == `RAPT_ATO_LR__;
   assign exu_lsu.pc = ioq_pc[active_idx];
+
+  // LSU/SQ store width expects SB/SH/SW/SD masks, while atomics carry
+  // RAPT_ATO_* opcodes in ioq_alu. Convert AMO/SC width from uop.word.
+  logic [4:0] head_store_walu;
+`ifdef RAPT_RV64
+  assign head_store_walu = ioq_atom[ioq_head]
+        ? (ioq_word[ioq_head] ? `RAPT_SW_WSTRB : `RAPT_SD_WSTRB)
+        : ioq_alu[ioq_head][4:0];
+`else
+  assign head_store_walu = ioq_atom[ioq_head] ? `RAPT_SW_WSTRB : ioq_alu[ioq_head][4:0];
+`endif
 
   // === MMU for Store at head ===
   assign exu_l1d.mmu_en = (ioq_wen[ioq_head]
       && ioq_mmu_en[ioq_head]
       && ioq_pr1[ioq_head] == 0 && ioq_pr2[ioq_head] == 0);
   assign exu_l1d.vaddr = ioq_vj[ioq_head] + ioq_imm[ioq_head];
-  assign exu_l1d.walu = ioq_alu[ioq_head][4:0];
+  assign exu_l1d.walu = head_store_walu;
   assign exu_l1d.valid = (ioq_wen[ioq_head] && ioq_pr1[ioq_head] == 0 && ioq_pr2[ioq_head] == 0);
 
   // === PMP check for bare-mode (non-MMU) stores at head ===
@@ -212,7 +230,7 @@ module rapt_exu_ioq #(
                               : csr_bcast.priv;
   logic [3:0] store_bare_size_m1;
   always_comb begin
-    unique case (ioq_alu[ioq_head][4:0])
+    unique case (head_store_walu)
       `RAPT_SB_WSTRB: store_bare_size_m1 = 4'd0;
       `RAPT_SH_WSTRB: store_bare_size_m1 = 4'd1;
       `RAPT_SW_WSTRB: store_bare_size_m1 = 4'd3;
@@ -312,7 +330,7 @@ module rapt_exu_ioq #(
   assign exu_ioq_bcast.wen      = (ioq_atom[ioq_head] && ioq_alu[ioq_head] == `RAPT_ATO_SC__)
       ? (reservation_match ? 1 : 0)
       : (ioq_wen[ioq_head]);
-  assign exu_ioq_bcast.alu = ioq_alu[ioq_head];
+  assign exu_ioq_bcast.alu = ioq_atom[ioq_head] ? {1'b0, head_store_walu} : ioq_alu[ioq_head];
   assign exu_ioq_bcast.sq_waddr = csr_bcast.dmmu_en
       ? ioq_paddr[ioq_head]
       : ioq_vj[ioq_head] + ioq_imm[ioq_head];
@@ -352,6 +370,8 @@ module rapt_exu_ioq #(
   assign exu_ioq_bcast.valid = ioq_valid_found;
 
   // === Sequential: enqueue / dequeue / forwarding / OoO LSU FSM ===
+  logic ioq_full_r;  // Previous cycle full state (for pmu_ioq_full rising-edge detection)
+
   always_ff @(posedge clock) begin
     if (reset || cmu_bcast.flush_pipe) begin
       ioq_ren        <= '0;
@@ -365,7 +385,10 @@ module rapt_exu_ioq #(
       ioq_load_skip  <= '0;
       oo_pending     <= 1'b0;
       oo_pending_idx <= '0;
+      ioq_full_r     <= 1'b0;  // A2: Initialize full state tracker
     end else begin
+      // A2: Latch current full status (rising-edge detection for pmu_ioq_full)
+      ioq_full_r <= (&ioq_valid);  // Full when all entries valid
       // ---- Enqueue slot A ----
       if (disp.accept_a) begin
         ioq_valid[ioq_tail_a]     <= 1'b1;
@@ -517,5 +540,8 @@ module rapt_exu_ioq #(
       end
     end
   end
+
+  // A2: PMU: one-cycle pulse on IOQ full rising edge
+  assign pmu_ioq_full = (&ioq_valid) && !ioq_full_r;
 
 endmodule

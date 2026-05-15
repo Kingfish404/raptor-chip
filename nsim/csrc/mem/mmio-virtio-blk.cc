@@ -8,6 +8,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+// Provided by difftest_dut.cc; NULL when difftest is not enabled.
+extern void (*ref_difftest_memcpy)(paddr_t addr, void *buf, size_t n, bool direction);
+
 #define VIRTIO_BLK_BASE 0x10001000u
 #define VIRTIO_BLK_SIZE 0x1000u
 #define VIRTIO_BLK_IRQ 1u
@@ -128,6 +131,14 @@ static bool guest_mem_write(uint64_t addr, const void *buf, size_t len)
         if (dst == NULL)
             return false;
         *dst = src[i];
+    }
+    // Mirror DMA writes into the difftest reference so subsequent CPU loads
+    // observe matching data on both sides.
+    if (ref_difftest_memcpy != NULL && len > 0)
+    {
+        uint8_t *host = guest_to_host((paddr_t)addr);
+        if (host != NULL)
+            ref_difftest_memcpy((paddr_t)addr, host, len, DIFFTEST_TO_REF);
     }
     return true;
 }

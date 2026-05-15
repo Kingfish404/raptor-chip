@@ -138,15 +138,29 @@ sync: ## Clone or update egos-2000 and xv6-riscv source repositories
 		bash $(_THIS_DIR)scripts/clone_sources.sh "$(TINYOS_DIR)" "$(EGOS_REPO_URL)" "$(XV6_REPO_URL)"; \
 	fi
 
-egos-nsim-prepare: sync ## Prepare egos source snapshot for NPC/nsim build
-	@rm -rf "$(EGOS_NSIM_DIR)" && mkdir -p "$(EGOS_NSIM_DIR)"
-	@git -C "$(TINYOS_DIR)/egos-2000" archive HEAD | tar -x -C "$(EGOS_NSIM_DIR)"
-	@echo "[tinyos] prepared egos nsim source copy: $(EGOS_NSIM_DIR)"
+# Clone-only helpers: ensure the upstream tree exists locally but never
+# fetch/pull updates. Run `make sync` (or set SYNC=1 explicitly) to refresh.
+egos-clone: ## Clone egos-2000 if missing (no fetch/pull)
+	@if [ ! -d "$(TINYOS_DIR)/egos-2000/.git" ]; then \
+		echo "[tinyos] clone: $(EGOS_REPO_URL) -> $(TINYOS_DIR)/egos-2000"; \
+		mkdir -p "$(TINYOS_DIR)"; \
+		git clone "$(EGOS_REPO_URL)" "$(TINYOS_DIR)/egos-2000"; \
+	fi
 
-xv6-nsim-prepare: sync ## Prepare xv6 source snapshot for NPC/nsim build
+xv6-clone: ## Clone xv6-riscv if missing (no fetch/pull)
+	@if [ ! -d "$(TINYOS_DIR)/xv6-riscv/.git" ]; then \
+		echo "[tinyos] clone: $(XV6_REPO_URL) -> $(TINYOS_DIR)/xv6-riscv"; \
+		mkdir -p "$(TINYOS_DIR)"; \
+		git clone "$(XV6_REPO_URL)" "$(TINYOS_DIR)/xv6-riscv"; \
+	fi
+
+egos-nsim-prepare: egos-clone
+	@rm -rf "$(EGOS_NSIM_DIR)" && mkdir -p "$(EGOS_NSIM_DIR)"
+	@tar -cf - --exclude=.git --exclude=build -C "$(TINYOS_DIR)/egos-2000" . | tar -x -C "$(EGOS_NSIM_DIR)"
+
+xv6-nsim-prepare: xv6-clone
 	@rm -rf "$(XV6_NSIM_DIR)" && mkdir -p "$(XV6_NSIM_DIR)"
-	@git -C "$(TINYOS_DIR)/xv6-riscv" archive HEAD | tar -x -C "$(XV6_NSIM_DIR)"
-	@echo "[tinyos] prepared xv6 nsim source copy: $(XV6_NSIM_DIR)"
+	@tar -cf - --exclude=.git -C "$(TINYOS_DIR)/xv6-riscv" . | tar -x -C "$(XV6_NSIM_DIR)"
 
 # ============================================================================
 # egos — RV32 / Sv32
@@ -166,6 +180,16 @@ egos-sim-image: egos-nsim-prepare ## Build egos binary for NPC/nsim/NEMU
 egos-cli-nsim: egos-sim-image ## Boot egos on NPC/nsim [RV32/Sv32]
 	@echo "[egos-cli-nsim] RV32 / Sv32 (egos-2000)"
 	@$(MAKE) $(Q) -C $(APP_HOME)/.. run-npc32 \
+		IMG=$(EGOS_SIM_IMAGE) SDCARD=$(EGOS_SIM_SDCARD) \
+		ARGS="$(ARGS) --serial-lf-to-cr $(SIM_LIMIT_ARGS)"
+
+# Difftest variant: assumes caller (top-level Makefile) already configured
+# nsim with o2_difftest_defconfig and built the NEMU reference shared object.
+# Bypasses run-npc32 (which would clobber the difftest config) by invoking
+# nsim's run target directly.
+egos-cli-nsim-difftest: egos-sim-image ## Boot egos on NPC/nsim with NEMU difftest [RV32/Sv32]
+	@echo "[egos-cli-nsim-difftest] RV32 / Sv32 (egos-2000) + NEMU difftest"
+	@$(MAKE) $(Q) -C $(NSIM_HOME) run \
 		IMG=$(EGOS_SIM_IMAGE) SDCARD=$(EGOS_SIM_SDCARD) \
 		ARGS="$(ARGS) --serial-lf-to-cr $(SIM_LIMIT_ARGS)"
 
@@ -189,6 +213,25 @@ egos-cli-qemu: ## Boot egos on QEMU [RV32/Sv32]
 # ============================================================================
 xv6-cli-nsim: xv6-nsim-prepare ## Boot xv6-riscv on NPC/nsim [RV64/Sv39]
 	$(call xv6-run-body,xv6-cli-nsim,xv6-nsim-fs,run-npc64,,$(SIM_LIMIT_ARGS))
+
+# Difftest variant: assumes caller (top-level Makefile) already configured
+# nsim with o2_difftest_defconfig (rebuilt with VFLAGS=-DRAPT_RV64) and
+# built the NEMU RV64 reference shared object. Bypasses run-npc64 (which
+# would clobber the difftest config) by invoking nsim's run target directly.
+xv6-cli-nsim-difftest: xv6-nsim-prepare ## Boot xv6-riscv on NPC/nsim with NEMU difftest [RV64/Sv39]
+	@[ -n "$(XV6_OBJCOPY)" ] || { echo "[ERR] Cannot find RV64 objcopy for xv6"; exit 1; }
+	@$(MAKE) $(Q) -C "$(XV6_NSIM_DIR)" kernel/kernel fs.img
+	@$(XV6_OBJCOPY) -O binary "$(XV6_NSIM_DIR)/kernel/kernel" "$(XV6_NSIM_DIR)/kernel/kernel.bin"
+	@tmp_fs=$$(mktemp "$${TMPDIR:-/tmp}/xv6-nsim-fs.XXXXXX"); \
+	cp "$(XV6_NSIM_DIR)/fs.img" "$$tmp_fs"; \
+	echo "[xv6-cli-nsim-difftest] RV64 / Sv39 (xv6-riscv) + NEMU difftest"; \
+	echo "[xv6-cli-nsim-difftest] kernel=$(XV6_NSIM_DIR)/kernel/kernel.bin"; \
+	echo "[xv6-cli-nsim-difftest] disk copy=$$tmp_fs"; \
+	trap 'rm -f "$$tmp_fs"' EXIT INT TERM; \
+	$(MAKE) $(Q) -C $(NSIM_HOME) run VFLAGS="-DRAPT_RV64" \
+		IMG="$(XV6_NSIM_DIR)/kernel/kernel.bin" DISK="$$tmp_fs" \
+		ARGS="$(ARGS) $(SIM_LIMIT_ARGS)"; \
+	rc=$$?; rm -f "$$tmp_fs"; exit $$rc
 
 xv6-cli-nemu: xv6-nsim-prepare ## Boot xv6-riscv on NEMU [RV64/Sv39]
 	$(call xv6-run-body,xv6-cli-nemu,xv6-nemu-fs,run-nemu64,NEMU64_DEFCONFIG=riscv64_tinyos_defconfig,$(NEMU_LIMIT_ARGS))
@@ -226,7 +269,8 @@ clean: ## Clean tinyos build artifacts
 	rm -rf $(NSIM_SRC_DIR)
 
 .PHONY: help sync \
+	egos-clone xv6-clone \
 	egos-toolchain-check egos-nsim-prepare xv6-nsim-prepare egos-sim-image \
-	egos-cli-nsim egos-cli-nemu egos-cli-qemu \
-	xv6-cli-nsim xv6-cli-nemu xv6-cli-qemu \
+	egos-cli-nsim egos-cli-nsim-difftest egos-cli-nemu egos-cli-qemu \
+	xv6-cli-nsim xv6-cli-nsim-difftest xv6-cli-nemu xv6-cli-qemu \
 	cli-nsim cli-nemu cli-qemu clean

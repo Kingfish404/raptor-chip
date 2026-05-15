@@ -374,3 +374,108 @@ void serial_tick()
     serial_poll_stdin();
     serial_update_irq();
 }
+
+// ----------------------------------------------------------------------------
+// LiteX UART model (used by egos-2000 HARDWARE platform at 0xf000_1000).
+// Register layout (from litex/soc/cores/uart.py and egos dev_tty.c):
+//   0x00 RXTX     : R=pop RX byte / W=push TX byte
+//   0x04 TXFULL   : R=1 if TX FIFO full
+//   0x08 RXEMPTY  : R=1 if RX FIFO empty
+//   0x0c EV_STATUS: R=event status (unused)
+//   0x10 EV_PENDING: R/W1C event pending (bit0=tx, bit1=rx)
+//   0x14 EV_ENABLE: R/W event enable
+// We model a single-byte RX latch fed lazily from stdin; TX writes go to host
+// stderr through the existing helpers. EVPEND/EVENABLE are stored but do not
+// drive any IRQ in this minimal model.
+// ----------------------------------------------------------------------------
+
+static uint8_t litex_uart_rx_byte;
+static bool    litex_uart_rx_valid;
+static uint8_t litex_uart_ev_pending;
+static uint8_t litex_uart_ev_enable;
+static bool    litex_uart_inited;
+
+static void litex_uart_refill_rx()
+{
+    if (litex_uart_rx_valid)
+        return;
+    // Pop from the shared NS16550 stdin queue so serial_tick()'s periodic
+    // drain (which fills `rx_buf`) is visible here.  Without this, bytes
+    // typed by the user (or piped via stdin) end up locked inside NS16550
+    // and never reach egos's LiteX UART.
+    serial_poll_stdin();
+    uint8_t ch;
+    if (rx_pop(&ch))
+    {
+        litex_uart_rx_byte = ch;
+        litex_uart_rx_valid = true;
+        litex_uart_ev_pending |= 0x2; // rx event pending
+    }
+}
+
+void mmio_litex_uart_handle(paddr_t offset, word_t wdata, bool is_write, word_t *data)
+{
+    if (!litex_uart_inited)
+    {
+        serial_configure_stdin();
+        litex_uart_inited = true;
+    }
+    uint8_t word_offset = offset & (sizeof(word_t) - 1);
+    offset &= 0xff;
+    uint32_t val = 0;
+    uint8_t  wval = is_write ? (uint8_t)(wdata & 0xff) : 0;
+    switch (offset & ~0x3u)
+    {
+    case 0x00: // RXTX
+        if (is_write)
+        {
+            serial_write_host_byte(wval);
+            litex_uart_ev_pending |= 0x1; // tx event pending
+        }
+        else
+        {
+            litex_uart_refill_rx();
+            if (litex_uart_rx_valid)
+            {
+                val = litex_uart_rx_byte;
+                litex_uart_rx_valid = false;
+            }
+        }
+        break;
+    case 0x04: // TXFULL
+        val = 0;
+        break;
+    case 0x08: // RXEMPTY
+        litex_uart_refill_rx();
+        val = litex_uart_rx_valid ? 0 : 1;
+        break;
+    case 0x0c: // EV_STATUS
+        val = (litex_uart_rx_valid ? 0x2 : 0) | 0x1; // tx always ready
+        break;
+    case 0x10: // EV_PENDING (W1C)
+        if (is_write)
+            litex_uart_ev_pending &= ~wval;
+        else
+            val = litex_uart_ev_pending;
+        break;
+    case 0x14: // EV_ENABLE
+        if (is_write)
+            litex_uart_ev_enable = wval;
+        else
+            val = litex_uart_ev_enable;
+        break;
+    default:
+        break;
+    }
+    if (!is_write)
+        *data = word_t(val) << (word_offset * 8);
+}
+
+void init_litex_uart()
+{
+    litex_uart_rx_byte    = 0;
+    litex_uart_rx_valid   = false;
+    litex_uart_ev_pending = 0;
+    litex_uart_ev_enable  = 0;
+    litex_uart_inited     = false;
+}

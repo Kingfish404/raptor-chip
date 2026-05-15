@@ -160,8 +160,15 @@ void rest_of_boot_loader_2(uintptr_t kstack_top)
   if (payload_size > 0) {
     load_elf_mem(&_payload_start, payload_size, &current);
 
-    static char progname[] = "payload";
-    static char *argv[] = { progname };
+    // NOTE: must NOT be `static`. After pk_vm_init enables Sv39 with only the
+    // high-half mapping (KVA_START -> MEM_START), a static `argv[]` would be
+    // emitted in .data and the linker would store the LINK-TIME LOW-HALF
+    // address of `progname` inside it. Dereferencing that pointer in S-mode
+    // would page-fault (the low half is unmapped). Stack-locals make the
+    // pointer be computed at runtime from sp (a high-half VA), which is
+    // mapped correctly. See riscv-pk pk_vm_init() in pk/mmap.c.
+    char progname[] = "payload";
+    char *argv[] = { progname };
     run_loaded_program(1, argv, kstack_top);
   } else {
     panic("no embedded payload (HTIF loading not supported on this platform)");

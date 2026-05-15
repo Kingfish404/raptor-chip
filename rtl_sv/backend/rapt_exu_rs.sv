@@ -46,7 +46,12 @@ module rapt_exu_rs #(
 
     // Dispatch-only uop payload snapshot (indexed by ROB destination).
     // Read at issue time by slot A to source `ecall/ebreak/mret/sret/csr_*/inst`.
-    input rapt_pkg::uop_payload_t uop_pl[ROB_SIZE]
+    input rapt_pkg::uop_payload_t uop_pl[ROB_SIZE],
+
+    // A2: PMU: one-cycle pulse when RS becomes full
+    /* verilator lint_off UNUSEDSIGNAL */
+    output logic pmu_rs_full
+    /* verilator lint_on UNUSEDSIGNAL */
 );
   localparam unsigned ROBLen = $clog2(ROB_SIZE);
   localparam unsigned RSLen = $clog2(RS_SIZE);
@@ -339,6 +344,8 @@ module rapt_exu_rs #(
 `endif
 
   // === Sequential: alloc / forward / writeback-clear / MUL completion ===
+  logic rs_full_r;  // Previous cycle full state (for pmu_rs_full rising-edge detection)
+
   always_ff @(posedge clock) begin
     if (reset || cmu_bcast.flush_pipe) begin
       rs_valid      <= '0;
@@ -346,8 +353,11 @@ module rapt_exu_rs #(
       rs_pr2_busy   <= '0;
       rs_mul_ready  <= '0;
       rs_mul_issued <= '0;
+      rs_full_r     <= 1'b0;  // A2: Initialize full state tracker
       for (int i = 0; i < RS_SIZE; i++) age_mat[i] <= '0;
     end else begin
+      // A2: Latch current full status (rising-edge detection for pmu_rs_full)
+      rs_full_r <= (&rs_valid);  // Full when all entries valid
       // ---- Per-entry state machine ----
       for (bit [XLEN-1:0] i = 0; i < RS_SIZE; i++) begin
         if (free_found_a && i[$clog2(RS_SIZE)-1:0] == free_idx_a) begin
@@ -491,6 +501,9 @@ module rapt_exu_rs #(
 `endif
     end
   end
+
+  // A2: PMU: one-cycle pulse on RS full rising edge
+  assign pmu_rs_full = (&rs_valid) && !rs_full_r;
 
   // === Slot-A writeback (full path: ALU + CSR + system + trap) ===
   logic [XLEN-1:0] addr_exu_a;

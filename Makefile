@@ -205,6 +205,36 @@ run-nemu64-linux-device: ## Run NEMU RV64 with VGA screen + keyboard
 	$(MAKE) -C $(NEMU_HOME) -j$(NPROC)
 	$(MAKE) -C $(NEMU_HOME) run $(if $(IMG),IMG=$(IMG)) ARGS="$(DEVICE_ARGS)"
 
+# --- Spike-diff reference (for NEMU --diff= self-difftest) ---
+# Builds tools/spike-diff/build/riscv{32,64}-spike-so. First-time build is slow
+# (clones riscv-isa-sim, compiles spike); subsequent invocations are cached.
+SPIKE_DIFF_SO32 := $(NEMU_HOME)/tools/spike-diff/build/riscv32-spike-so
+SPIKE_DIFF_SO64 := $(NEMU_HOME)/tools/spike-diff/build/riscv64-spike-so
+
+build-spike-diff32: ## Build spike-diff reference SO for RV32 (used by NEMU --diff)
+	@test -f $(SPIKE_DIFF_SO32) || \
+		$(MAKE) -C $(NEMU_HOME)/tools/spike-diff CONFIG_RV64= GUEST_ISA=riscv
+
+build-spike-diff64: ## Build spike-diff reference SO for RV64 (used by NEMU --diff)
+	@test -f $(SPIKE_DIFF_SO64) || \
+		$(MAKE) -C $(NEMU_HOME)/tools/spike-diff CONFIG_RV64=y GUEST_ISA=riscv
+
+# --- NEMU + spike-diff combined configs ---
+# Build NEMU as a standalone binary with CONFIG_DIFFTEST=y + CONFIG_DIFFTEST_REF_SPIKE=y
+# so that `--diff=…/riscv{32,64}-spike-so` is actually honored at runtime.
+# These targets also build the spike-diff SO so the wildcard auto-detect in
+# app/pk/Makefile finds it. Use these for `*-nemu{32,64}` runs that need
+# instruction-level cross-check against spike.
+config-nemu32-difftest: build-spike-diff32 ## Configure NEMU RV32 binary with spike-diff enabled
+	$(MAKE) -C $(NEMU_HOME) riscv32_difftest_defconfig
+	$(MAKE) -C $(NEMU_HOME) -j$(NPROC)
+
+config-nemu64-difftest: build-spike-diff64 ## Configure NEMU RV64 binary with spike-diff enabled
+	$(MAKE) -C $(NEMU_HOME) riscv64_difftest_defconfig
+	$(MAKE) -C $(NEMU_HOME) -j$(NPROC)
+
+.PHONY: build-spike-diff32 build-spike-diff64 config-nemu32-difftest config-nemu64-difftest
+
 # ============================================================================
 # NPC Simulation Targets
 # ============================================================================
@@ -497,12 +527,6 @@ linux-boot-nemu32-device: config-nemu32-linux-device ## Boot Linux on NEMU RV32 
 linux-boot-nemu32-device-difftest: config-nemu32-linux-device ## Boot Linux on NEMU RV32 (auto-download)
 	$(MAKE) -C $(LINUX_HOME) download-rv32
 	$(MAKE) -C $(NEMU_HOME) run IMG=$(LINUX_RV32_PAYLOAD) ARGS="$(DEVICE_ARGS)"
-
-linux-boot-nemu64: config-nemu64-linux ## Boot Linux on NEMU (riscv64)
-	$(MAKE) -C $(LINUX_HOME) download-rv64
-	$(MAKE) -C $(NEMU_HOME) -j$(NPROC)
-	@mkdir -p $(NEMU_LOG_DIR)
-	@set -o pipefail; $(MAKE) -C $(NEMU_HOME) run IMG=$(LINUX_RV64_PAYLOAD) ARGS="$(ARGS) $(if $(MAX_INST),-m $(MAX_INST))" $(call tee_nemu,linux-boot-nemu64)
 
 linux-boot-nemu64-device: config-nemu64-linux-device ## Boot Linux on NEMU RV64 (auto-download)
 	$(MAKE) -C $(LINUX_HOME) download-rv64

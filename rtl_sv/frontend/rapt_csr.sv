@@ -272,22 +272,31 @@ module rapt_csr #(
       TIMEH__:   exu_csr.rdata = csr[TIMEH__];
       MINSTRET:  exu_csr.rdata = csr[MINSTRET];
       MINSTRETH: exu_csr.rdata = csr[MINSTRETH];
-      MVENDORID: exu_csr.rdata = '0;
+      MVENDORID: exu_csr.rdata = XLEN'(32'd666);
       MARCHID:   exu_csr.rdata = 'd50;
       IMPID__:   exu_csr.rdata = '0;
       MHARTID:   exu_csr.rdata = hart_id_i;
       default: begin
-        // PMP CSR reads: pmpcfg0..3 each packs four cfg bytes;
-        // pmpaddr0..15 from register file.
-        if (raddr == `RAPT_CSR_PMPCFG0)
-          exu_csr.rdata = {pmpcfg_r[3], pmpcfg_r[2], pmpcfg_r[1], pmpcfg_r[0]};
-        else if (raddr == `RAPT_CSR_PMPCFG1)
-          exu_csr.rdata = {pmpcfg_r[7], pmpcfg_r[6], pmpcfg_r[5], pmpcfg_r[4]};
-        else if (raddr == `RAPT_CSR_PMPCFG2)
-          exu_csr.rdata = {pmpcfg_r[11], pmpcfg_r[10], pmpcfg_r[9], pmpcfg_r[8]};
-        else if (raddr == `RAPT_CSR_PMPCFG3)
-          exu_csr.rdata = {pmpcfg_r[15], pmpcfg_r[14], pmpcfg_r[13], pmpcfg_r[12]};
-        else if (raddr >= `RAPT_CSR_PMPADDR0
+        // PMP CSR reads. RV32: pmpcfg0..3 each packs 4 cfg bytes (entries 4*i..4*i+3).
+        // RV64: pmpcfg0 packs entries 0..7 (8 bytes), pmpcfg2 packs entries 8..15;
+        //       pmpcfg1/pmpcfg3 are reserved (read as 0).
+        if (raddr == `RAPT_CSR_PMPCFG0) begin
+          exu_csr.rdata = (XLEN == 64)
+                        ? XLEN'({pmpcfg_r[7], pmpcfg_r[6], pmpcfg_r[5], pmpcfg_r[4],
+                                 pmpcfg_r[3], pmpcfg_r[2], pmpcfg_r[1], pmpcfg_r[0]})
+                        : XLEN'({pmpcfg_r[3], pmpcfg_r[2], pmpcfg_r[1], pmpcfg_r[0]});
+        end else if (raddr == `RAPT_CSR_PMPCFG1) begin
+          exu_csr.rdata = (XLEN == 64) ? '0
+                        : {pmpcfg_r[7], pmpcfg_r[6], pmpcfg_r[5], pmpcfg_r[4]};
+        end else if (raddr == `RAPT_CSR_PMPCFG2) begin
+          exu_csr.rdata = (XLEN == 64)
+                        ? XLEN'({pmpcfg_r[15], pmpcfg_r[14], pmpcfg_r[13], pmpcfg_r[12],
+                                 pmpcfg_r[11], pmpcfg_r[10], pmpcfg_r[9],  pmpcfg_r[8]})
+                        : XLEN'({pmpcfg_r[11], pmpcfg_r[10], pmpcfg_r[9], pmpcfg_r[8]});
+        end else if (raddr == `RAPT_CSR_PMPCFG3) begin
+          exu_csr.rdata = (XLEN == 64) ? '0
+                        : {pmpcfg_r[15], pmpcfg_r[14], pmpcfg_r[13], pmpcfg_r[12]};
+        end else if (raddr >= `RAPT_CSR_PMPADDR0
               && raddr <= `RAPT_CSR_PMPADDR15)
           exu_csr.rdata = pmpaddr_r[raddr[3:0]];
         else
@@ -497,7 +506,8 @@ module rapt_csr #(
       csr[MCAUSE_] <= RESET_VAL;
       csr[MEPC___] <= RESET_VAL;
       csr[MTVEC__] <= RESET_VAL;
-      csr[MSTATUS] <= RESET_VAL;
+      csr[MSTATUS] <= RESET_VAL | `RAPT_CSR_MSTATUS_HW;
+      csr[SSTATUS] <= `RAPT_CSR_SSTATUS_HW;
       csr[MCYCLE_] <= RESET_VAL;
       csr[MCYCLEH] <= RESET_VAL;
       csr[TIME___] <= RESET_VAL;
@@ -536,27 +546,30 @@ module rapt_csr #(
       if (rou_csr.valid) begin
         if (rou_csr.csr_wen) begin
           if (rou_csr.csr_addr == `RAPT_CSR_PMPCFG0) begin
-            // pmpcfg0 packs entries 0..3 (byte i => entry i).
+            // pmpcfg0: RV32 packs entries 0..3 (4 bytes); RV64 packs entries 0..7 (8 bytes).
             // L-bit locked cfgs ignore further writes (until reset).
             // Reserved bits [6:5] are WARL-zero (mask 8'h9F).
-            for (int pi = 0; pi < 4; pi++) begin
+            for (int pi = 0; pi < (XLEN == 64 ? 8 : 4); pi++) begin
               if (!pmpcfg_r[pi][`RAPT_PMPCFG_L_]) begin
                 pmpcfg_r[pi] <= rou_csr.csr_wdata[pi*8 +: 8] & 8'h9F;
               end
             end
-          end else if (rou_csr.csr_addr == `RAPT_CSR_PMPCFG1) begin
+          end else if (rou_csr.csr_addr == `RAPT_CSR_PMPCFG1 && XLEN == 32) begin
+            // pmpcfg1 only exists on RV32. On RV64 it is reserved; ignore writes.
             for (int pi = 0; pi < 4; pi++) begin
               if (!pmpcfg_r[pi + 4][`RAPT_PMPCFG_L_]) begin
                 pmpcfg_r[pi + 4] <= rou_csr.csr_wdata[pi*8 +: 8] & 8'h9F;
               end
             end
           end else if (rou_csr.csr_addr == `RAPT_CSR_PMPCFG2) begin
-            for (int pi = 0; pi < 4; pi++) begin
+            // pmpcfg2: RV32 packs entries 8..11 (4 bytes); RV64 packs entries 8..15 (8 bytes).
+            for (int pi = 0; pi < (XLEN == 64 ? 8 : 4); pi++) begin
               if (!pmpcfg_r[pi + 8][`RAPT_PMPCFG_L_]) begin
                 pmpcfg_r[pi + 8] <= rou_csr.csr_wdata[pi*8 +: 8] & 8'h9F;
               end
             end
-          end else if (rou_csr.csr_addr == `RAPT_CSR_PMPCFG3) begin
+          end else if (rou_csr.csr_addr == `RAPT_CSR_PMPCFG3 && XLEN == 32) begin
+            // pmpcfg3 only exists on RV32.
             for (int pi = 0; pi < 4; pi++) begin
               if (!pmpcfg_r[pi + 12][`RAPT_PMPCFG_L_]) begin
                 pmpcfg_r[pi + 12] <= rou_csr.csr_wdata[pi*8 +: 8] & 8'h9F;
@@ -601,21 +614,26 @@ module rapt_csr #(
           end else if (waddr_reg == MSTATUS) begin
             // Write mask: exclude SD(31, read-only) and VS(10:9, hardwired 0 — no V ext)
             // SD recomputed from FS dirty (14:13==2'b11) or XS dirty (16:15==2'b11)
+            // SXL/UXL (RV64 only, bits 35:32) are hardwired to 2 (RV64) — OR back in.
             csr[MSTATUS] <= (rou_csr.csr_wdata & `RAPT_CSR_MSTATUS_WMASK)
                           | ((rou_csr.csr_wdata[14:13] == 2'b11
-                            || rou_csr.csr_wdata[16:15] == 2'b11) ? `RAPT_CSR_MSTATUS_SD : 32'h0);
+                            || rou_csr.csr_wdata[16:15] == 2'b11) ? `RAPT_CSR_MSTATUS_SD : 32'h0)
+                          | `RAPT_CSR_MSTATUS_HW;
             csr[SSTATUS] <= (rou_csr.csr_wdata & `RAPT_CSR_SSTATUS_WMASK)
                           | ((rou_csr.csr_wdata[14:13] == 2'b11
-                            || rou_csr.csr_wdata[16:15] == 2'b11) ? `RAPT_CSR_MSTATUS_SD : 32'h0);
+                            || rou_csr.csr_wdata[16:15] == 2'b11) ? `RAPT_CSR_MSTATUS_SD : 32'h0)
+                          | `RAPT_CSR_SSTATUS_HW;
           end else if (waddr_reg == SSTATUS) begin
             // sstatus-writable fields: SIE(1) SPIE(5) UBE(6) SPP(8) FS(14:13) XS(16:15) SUM(18) MXR(19)
             csr[SSTATUS] <= (rou_csr.csr_wdata & `RAPT_CSR_SSTATUS_WMASK)
                           | ((rou_csr.csr_wdata[14:13] == 2'b11
-                            || rou_csr.csr_wdata[16:15] == 2'b11) ? `RAPT_CSR_MSTATUS_SD : 32'h0);
+                            || rou_csr.csr_wdata[16:15] == 2'b11) ? `RAPT_CSR_MSTATUS_SD : 32'h0)
+                          | `RAPT_CSR_SSTATUS_HW;
             csr[MSTATUS] <= (csr[MSTATUS] & ~`RAPT_CSR_SSTATUS_CMASK)
                           | (rou_csr.csr_wdata & `RAPT_CSR_SSTATUS_WMASK)
                           | ((rou_csr.csr_wdata[14:13] == 2'b11
-                            || csr[MSTATUS][16:15] == 2'b11) ? `RAPT_CSR_MSTATUS_SD : 32'h0);
+                            || csr[MSTATUS][16:15] == 2'b11) ? `RAPT_CSR_MSTATUS_SD : 32'h0)
+                          | `RAPT_CSR_MSTATUS_HW;
           end else if (waddr_reg == SIE____) begin
             // sie is a restricted view of mie; write only the SIE-visible bits.
             csr[MIE____] <= (csr[MIE____] & ~`RAPT_CSR_SIE_WMASK)
@@ -638,6 +656,24 @@ module rapt_csr #(
             // With C-ext, bit [1] is writable (2-byte alignment). Without C,
             // hardware may also clear bit [1] but keeping it is spec-legal.
             csr[waddr_reg] <= {rou_csr.csr_wdata[XLEN-1:1], 1'b0};
+          end else if (waddr_reg == SATP___) begin
+            // WARL on satp.MODE: per RISC-V Priv §10.6.1, "If satp is written
+            // with an unsupported MODE, the entire write has no effect; no
+            // fields in satp are modified." We support Bare and a single
+            // translation mode (Sv32 in RV32, Sv39 in RV64). Linux probes
+            // Sv57/Sv48 by writing satp and reading back MODE; rejecting
+            // unsupported modes is required for that probe to converge.
+`ifdef RAPT_RV64
+            // RV64: MODE is bits [63:60]. Accept 0 (Bare) or 8 (Sv39) only.
+            if (rou_csr.csr_wdata[XLEN-1:XLEN-4] == 4'd0
+                || rou_csr.csr_wdata[XLEN-1:XLEN-4] == 4'd8) begin
+              csr[waddr_reg] <= rou_csr.csr_wdata;
+            end
+            // else: write rejected, satp unchanged
+`else
+            // RV32: MODE is bit [31]. Both 0 (Bare) and 1 (Sv32) are supported.
+            csr[waddr_reg] <= rou_csr.csr_wdata;
+`endif
           end else begin
             csr[waddr_reg] <= (rou_csr.csr_wdata);
           end

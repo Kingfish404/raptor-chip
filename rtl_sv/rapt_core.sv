@@ -89,6 +89,9 @@ module rapt_core #(
     input reset
 );
   // L1I Cache
+  // Optional PMU outputs from submodules are not consumed at core level.
+  logic pmu_rob_full_unused;
+  logic pmu_sq_full_unused;
   l1i_bus_if l1i_bus ();
 
   // IFU stage
@@ -99,6 +102,7 @@ module rapt_core #(
 
   // IDU stage
   idu_rnu_if idu_rnu ();  // Decode => Re-naming
+  idu_bpu_if idu_bpu ();  // Decode -> BPU BTB training (early-resteer)
 
   // RNU stage
   rnu_rou_if rnu_rou ();  // Re-naming => Issue
@@ -156,6 +160,7 @@ module rapt_core #(
       .cmu_bcast(cmu_bcast),
 
       .ifu_bpu(ifu_bpu),
+      .idu_bpu(idu_bpu),
 
       .reset(reset)
   );
@@ -194,6 +199,7 @@ module rapt_core #(
       .csr_bcast(csr_bcast),
 
       .ifu_idu(ifu_idu),
+      .idu_bpu(idu_bpu),
       .idu_rnu(idu_rnu),
 
       .reset(reset)
@@ -294,6 +300,8 @@ module rapt_core #(
       .halt_pc_o    (halt_pc_o),
       .commit_fire_o(commit_fire_o),
 
+      .pmu_rob_full(pmu_rob_full_unused),
+
       .reset(reset)
   );
 
@@ -365,6 +373,8 @@ module rapt_core #(
       .rou_lsu(rou_lsu),
 
       .csr_bcast(csr_bcast),
+
+      .pmu_sq_full(pmu_sq_full_unused),
 
       .reset(reset)
   );

@@ -1161,12 +1161,9 @@ void checkpoint_inject_after_reset(void)
   if (npc.clint_msip != NULL)
     *npc.clint_msip = (uint8_t)(loaded_snap.clint_msip & 0x1u);
 
-  if (npc.plic_priority != NULL && npc.plic_pending != NULL &&
-      npc.plic_enable != NULL && npc.plic_threshold != NULL &&
-      npc.plic_ext_irq != NULL)
+  if (npc.plic_priority != NULL && npc.plic_enable != NULL &&
+      npc.plic_threshold != NULL)
   {
-    *npc.plic_pending = loaded_snap.plic_pending & ~1u;
-    *npc.plic_ext_irq = loaded_snap.plic_ext_irq & ~1u;
     for (int i = 0; i <= NPC_PLIC_NDEV; i++)
       npc.plic_priority[i] = (uint8_t)(loaded_snap.plic_priority[i] & 0x7u);
     npc.plic_priority[0] = 0;
@@ -1174,6 +1171,16 @@ void checkpoint_inject_after_reset(void)
     {
       npc.plic_enable[c] = loaded_snap.plic_enable[c] & ~1u;
       npc.plic_threshold[c] = (uint8_t)(loaded_snap.plic_threshold[c] & 0x7u);
+    }
+
+    // Do not restore pending/ext_irq by directly poking RTL internal latches.
+    // Those are edge-detect/runtime states and must be regenerated via the
+    // synthesizable ext_irq_i[] delivery path.
+    if ((loaded_snap.plic_pending & ~1u) != 0u)
+    {
+      Log("checkpoint: NOTE plic_pending snapshot=0x%08x is not force-restored; "
+          "pending IRQ latches restart empty and will be re-driven by devices",
+          (unsigned int)(loaded_snap.plic_pending & ~1u));
     }
   }
 
@@ -1222,10 +1229,10 @@ void checkpoint_inject_after_reset(void)
         (unsigned int)loaded_snap.pmpcfg[0], loaded_snap.pmpaddr[0]);
   }
 
-  if (npc.plic_pending != NULL && npc.plic_enable != NULL)
+  if (npc.plic_enable != NULL)
   {
-    Log("checkpoint: restored PLIC state pending=0x%08x enable0=0x%08x enable1=0x%08x",
-        (unsigned int)(*npc.plic_pending),
+    Log("checkpoint: restored PLIC cfg enable0=0x%08x enable1=0x%08x "
+        "(pending/ext_irq latches reset)",
         (unsigned int)npc.plic_enable[0],
         (NPC_PLIC_NCTX > 1) ? (unsigned int)npc.plic_enable[1] : 0u);
   }

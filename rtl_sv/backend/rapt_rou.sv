@@ -68,6 +68,11 @@ module rapt_rou #(
     // dcsr.step=1 so single-step requests halt after exactly one retire.
     output logic            commit_fire_o,
 
+    // A2: PMU: one-cycle pulse when ROB becomes full
+    /* verilator lint_off UNUSEDSIGNAL */
+    output logic pmu_rob_full,
+    /* verilator lint_on UNUSEDSIGNAL */
+
     input reset
 );
   // ready_a is consumed by the testbench (--public) for hazard observation,
@@ -151,9 +156,16 @@ module rapt_rou #(
   logic rob_empty;
   assign rob_empty = (rob_head == rob_tail_a) && !rob_entry[rob_head].busy;
 
+  // A2: ROB full state tracker (for pmu_rob_full rising-edge detection)
+  logic rob_full_r;
+  logic [ROB_SIZE-1:0] rob_entry_busy;
+  for (genvar i = 0; i < ROB_SIZE; i++) begin : gen_rob_entry_busy
+    assign rob_entry_busy[i] = rob_entry[i].busy;
+  end
+
   // External halt: drain ROB and stop dispatching new uops while haltreq is
   // asserted. `halted_o` is the level the DM samples for dmstatus.allhalted.
-  assign halted_o  = dm_haltreq_i && rob_empty;
+  assign halted_o = dm_haltreq_i && rob_empty;
 
   // Latched npc of the youngest committed instruction. Used as the resume
   // PC reported to the Debug Module (dpc). Reset to PC_RESET so a halt
@@ -226,13 +238,10 @@ module rapt_rou #(
   // bypass (EXU-A / EXU-B / IOQ broadcast) when the producer prd matches
   // a non-zero pr1/pr2; otherwise capture the PRF pre-read result.
   task automatic uoq_enqueue_slot(
-      input logic [$clog2(IIQ_SIZE)-1:0] idx,
-      input rapt_pkg::uop_t              u,
-      input logic [    PLEN-1:0]         pr1, pr2, pr_d, pr_s,
-      input logic [    XLEN-1:0]         im1, im2,
-      input logic [    XLEN-1:0]         prf_pv1, prf_pv2,
-      input logic                        prf_pv1_v, prf_pv2_v
-  );
+      input logic [$clog2(IIQ_SIZE)-1:0] idx, input rapt_pkg::uop_t u, input logic [PLEN-1:0] pr1,
+      input logic [PLEN-1:0] pr2, input logic [PLEN-1:0] pr_d, input logic [PLEN-1:0] pr_s,
+      input logic [XLEN-1:0] im1, input logic [XLEN-1:0] im2, input logic [XLEN-1:0] prf_pv1,
+      input logic [XLEN-1:0] prf_pv2, input logic prf_pv1_v, input logic prf_pv2_v);
     uoq_valid[idx] <= 1'b1;
     uoq_uops[idx]  <= u;
     uoq_pr1[idx]   <= pr1;
@@ -278,13 +287,9 @@ module rapt_rou #(
   // left untouched here; reads are gated by busy/state and the WB path
   // overwrites them before the entry is observed.
   /* verilator lint_off UNUSEDSIGNAL */
-  task automatic dispatch_to_rob(
-      input logic [$clog2(ROB_SIZE)-1:0] tail,
-      input rapt_pkg::uop_t              u,
-      input logic [PLEN-1:0]             pr_d,
-      input logic [PLEN-1:0]             pr_s
-  );
-  /* verilator lint_on UNUSEDSIGNAL */
+  task automatic dispatch_to_rob(input logic [$clog2(ROB_SIZE)-1:0] tail, input rapt_pkg::uop_t u,
+                                 input logic [PLEN-1:0] pr_d, input logic [PLEN-1:0] pr_s);
+    /* verilator lint_on UNUSEDSIGNAL */
     // ---- ROB entry: control + WB-mutable defaults ----
     rob_entry[tail].prd        <= pr_d;
     rob_entry[tail].prs        <= pr_s;
@@ -294,10 +299,14 @@ module rapt_rou #(
     rob_entry[tail].mispredict <= 1'b0;
     rob_entry[tail].wen        <= u.wen;
     rob_entry[tail].word       <= u.word;
-    rob_entry[tail].alu        <= u.atom ? `RAPT_WSTRB_SW : u.alu;
-    rob_entry[tail].trap       <= u.trap;
-    rob_entry[tail].tval       <= u.tval;
-    rob_entry[tail].cause      <= u.cause;
+`ifdef RAPT_RV64
+    rob_entry[tail].alu <= u.atom ? (u.word ? 6'b001111 : 6'b011111) : u.alu;
+`else
+    rob_entry[tail].alu <= u.atom ? 6'b001111 : u.alu;
+`endif
+    rob_entry[tail].trap  <= u.trap;
+    rob_entry[tail].tval  <= u.tval;
+    rob_entry[tail].cause <= u.cause;
 
     // ---- Cold dispatch-only payload (RS issue + commit display) ----
     uop_pl[tail].sys      <= u.system;
@@ -334,22 +343,16 @@ module rapt_rou #(
       serialize_in_flight <= 1'b0;
     end else begin
       if (uoq_enq_fire_a) begin
-        uoq_enqueue_slot(
-            uoq_head_a, rnu_rou.uop_a,
-            rnu_rou.pr1_a, rnu_rou.pr2_a, rnu_rou.prd_a, rnu_rou.prs_a,
-            rnu_rou.op1_a, rnu_rou.op2_a,
-            exu_prf.pv1_a, exu_prf.pv2_a,
-            exu_prf.pv1_a_valid, exu_prf.pv2_a_valid);
+        uoq_enqueue_slot(uoq_head_a, rnu_rou.uop_a, rnu_rou.pr1_a, rnu_rou.pr2_a, rnu_rou.prd_a,
+                         rnu_rou.prs_a, rnu_rou.op1_a, rnu_rou.op2_a, exu_prf.pv1_a, exu_prf.pv2_a,
+                         exu_prf.pv1_a_valid, exu_prf.pv2_a_valid);
 `ifdef RAPT_DUAL_ISSUE
         if (uoq_enq_fire_b) begin
           uoq_is_pair[uoq_head_a] <= 1'b0;
           uoq_is_pair[uoq_head_b] <= 1'b1;
-          uoq_enqueue_slot(
-              uoq_head_b, rnu_rou.uop_b,
-              rnu_rou.pr1_b, rnu_rou.pr2_b, rnu_rou.prd_b, rnu_rou.prs_b,
-              rnu_rou.op1_b, rnu_rou.op2_b,
-              exu_prf.pv1_b, exu_prf.pv2_b,
-              exu_prf.pv1_b_valid, exu_prf.pv2_b_valid);
+          uoq_enqueue_slot(uoq_head_b, rnu_rou.uop_b, rnu_rou.pr1_b, rnu_rou.pr2_b, rnu_rou.prd_b,
+                           rnu_rou.prs_b, rnu_rou.op1_b, rnu_rou.op2_b, exu_prf.pv1_b,
+                           exu_prf.pv2_b, exu_prf.pv1_b_valid, exu_prf.pv2_b_valid);
           uoq_head_a <= uoq_head_a + 2;
         end else begin
           uoq_is_pair[uoq_head_a] <= 1'b0;
@@ -533,11 +536,16 @@ module rapt_rou #(
       recieved_trap    <= 1'b0;
       recieved_sw_trap <= 1'b0;
       trap_cause       <= '0;
+      pmu_rob_full     <= 1'b0;  // A2: Initialize full pulse
       for (int i = 0; i < ROB_SIZE; i++) begin
         rob_entry[i].busy  <= 1'b0;
         rob_entry[i].state <= rapt_pkg::ROB_CM;
       end
     end else begin
+      // A2: PMU: one-cycle pulse on ROB full rising edge
+      // Full means all ROB entries are busy (active or committed but not retired)
+      pmu_rob_full <= (&rob_entry_busy) && !rob_full_r;
+      rob_full_r   <= (&rob_entry_busy);
       // ---- Dispatch: insert into ROB tail ----
       if (uoq_deq_fire_a) begin
 `ifdef RAPT_DUAL_ISSUE
@@ -546,14 +554,13 @@ module rapt_rou #(
         rob_tail_a <= rob_tail_a + 1;
 `endif
 
-        dispatch_to_rob(rob_tail_a, uoq_uops[uoq_tail_a],
-                        uoq_prd[uoq_tail_a], uoq_prs[uoq_tail_a]);
+        dispatch_to_rob(rob_tail_a, uoq_uops[uoq_tail_a], uoq_prd[uoq_tail_a], uoq_prs[uoq_tail_a]);
 
 `ifdef RAPT_DUAL_ISSUE
         // ---- Dispatch slot B: insert into ROB tail+1 ----
         if (uoq_deq_fire_b) begin
-          dispatch_to_rob(rob_tail_b, uoq_uops[uoq_tail_b],
-                          uoq_prd[uoq_tail_b], uoq_prs[uoq_tail_b]);
+          dispatch_to_rob(rob_tail_b, uoq_uops[uoq_tail_b], uoq_prd[uoq_tail_b],
+                          uoq_prs[uoq_tail_b]);
         end
 `endif
       end
@@ -628,20 +635,20 @@ module rapt_rou #(
       // (significant for STA: head0_valid drives ~ROB_SIZE * (sq_waddr +
       // sq_wdata + csr_wdata + ...) wide D ports otherwise).
       if (head0_valid) begin
-        rob_head                     <= dual_commit ? rob_head + 2 : rob_head + 1;
+        rob_head                    <= dual_commit ? rob_head + 2 : rob_head + 1;
 
-        rob_entry[rob_head].busy     <= 1'b0;
-        rob_entry[rob_head].state    <= rapt_pkg::ROB_CM;
-        rob_entry[rob_head].csr_wen  <= 1'b0;
-        rob_entry[rob_head].trap     <= 1'b0;
-        rob_entry[rob_head].wen      <= 1'b0;
+        rob_entry[rob_head].busy    <= 1'b0;
+        rob_entry[rob_head].state   <= rapt_pkg::ROB_CM;
+        rob_entry[rob_head].csr_wen <= 1'b0;
+        rob_entry[rob_head].trap    <= 1'b0;
+        rob_entry[rob_head].wen     <= 1'b0;
 
         if (dual_commit) begin
-          rob_entry[h1].busy     <= 1'b0;
-          rob_entry[h1].state    <= rapt_pkg::ROB_CM;
-          rob_entry[h1].csr_wen  <= 1'b0;
-          rob_entry[h1].trap     <= 1'b0;
-          rob_entry[h1].wen      <= 1'b0;
+          rob_entry[h1].busy    <= 1'b0;
+          rob_entry[h1].state   <= rapt_pkg::ROB_CM;
+          rob_entry[h1].csr_wen <= 1'b0;
+          rob_entry[h1].trap    <= 1'b0;
+          rob_entry[h1].wen     <= 1'b0;
         end
 
         recieved_trap    <= clint_sw_trap || clint_timer_trap || clint_ext_trap || s_int_pending;

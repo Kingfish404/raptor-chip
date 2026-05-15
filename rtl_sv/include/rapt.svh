@@ -26,6 +26,36 @@
 `define RAPT_F3_CSRRWI 3'b101
 `define RAPT_F3_CSRRSI 3'b110
 `define RAPT_F3_CSRRCI 3'b111
+`define RAPT_F3_SYS___ 3'b000
+`define RAPT_F3_AMO_W_ 3'b010
+
+// AMO funct5 (inst[31:27]) - distinguishes LR/SC from RMW AMOs.
+`define RAPT_F5_AMO_LR 5'b00010
+`define RAPT_F5_AMO_SC 5'b00011
+
+// SYSTEM funct7 - used to recognize SFENCE.VMA without funct12 match.
+`define RAPT_F7_SFENCE_VMA 7'b0001001
+
+// Whole-instruction encodings for system uops decoded by exact match.
+`define RAPT_INST_WFI 32'h10500073
+
+// Page-table entry bits (Sv32 / Sv39 share the low-bit layout).
+`define RAPT_PTE_V_BIT 0
+`define RAPT_PTE_R_BIT 1
+`define RAPT_PTE_W_BIT 2
+`define RAPT_PTE_X_BIT 3
+`define RAPT_PTE_U_BIT 4
+`define RAPT_PTE_G_BIT 5
+`define RAPT_PTE_A_BIT 6
+`define RAPT_PTE_D_BIT 7
+`define RAPT_PTE_A_MASK 32'h0000_0040
+`define RAPT_PTE_D_MASK 32'h0000_0080
+
+`define RAPT_CSR_CSW_NONE 3'b000
+`define RAPT_CTR_SEL_NONE 3'b000
+`define RAPT_CTR_SEL_CY__ 3'b001
+`define RAPT_CTR_SEL_TM__ 3'b010
+`define RAPT_CTR_SEL_IR__ 3'b100
 
 `define RAPT_OP_R_TYPE_ 7'b0110011
 `define RAPT_OP_I_TYPE_ 7'b0010011
@@ -307,7 +337,7 @@
 `define RAPT_CAUSE_ECALL_S 'h9
 `define RAPT_CAUSE_ECALL_M 'hb
 `define RAPT_CAUSE_INSTR_PAGE_FAULT 'hc
-`define RAPT_CAUSE_LOAD_PAGE_FAULT  'hd
+`define RAPT_CAUSE_LOAD_PAGE_FAULT 'hd
 `define RAPT_CAUSE_STORE_PAGE_FAULT 'hf
 
 // Interrupt Cause Codes (bit index, without MSB interrupt flag)
@@ -324,5 +354,18 @@
 `define RAPT_CSR_MSTATUS_SD 32'h80000000
 `define RAPT_CSR_SSTATUS_WMASK 32'h000DE162
 `define RAPT_CSR_SSTATUS_CMASK 32'h800DE162
+
+// Hardwired mstatus/sstatus bits per RISC-V Priv §3.1.6: in RV64 the SXL/UXL
+// fields are WARL but our implementation only supports XLEN=64 in S/U modes,
+// so they are tied to MXL=2. mstatus.SXL[35:34]=2 and mstatus.UXL[33:32]=2
+// (=> 64'h0000_000A_0000_0000); sstatus only exposes UXL (=> 64'h0000_0002_0000_0000).
+// In RV32 these fields don't exist so the constants are zero.
+`ifdef RAPT_RV64
+`define RAPT_CSR_MSTATUS_HW 64'h0000_000A_0000_0000
+`define RAPT_CSR_SSTATUS_HW 64'h0000_0002_0000_0000
+`else
+`define RAPT_CSR_MSTATUS_HW 32'h0
+`define RAPT_CSR_SSTATUS_HW 32'h0
+`endif
 
 `endif

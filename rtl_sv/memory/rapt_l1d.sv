@@ -105,6 +105,11 @@ module rapt_l1d #(
   logic l1d_update;
   logic [XLEN-1:0] l1d_data_u;
   logic l1d_valid_u;
+  // When set together with valid_u==0, the update commit invalidates the
+  // selected (idx, off) word in EVERY way (broadcast invalidate).  Used for
+  // partial stores so that any duplicate-tag legacy line cannot keep stale
+  // data in a non-`store_hit_way` slot.
+  logic l1d_inv_all_ways;
   logic [L1dTagW-1:0] l1d_tag_u;
   logic [L1D_LEN-1:0] l1d_idx;
   logic [L1D_LINE_LEN-1:0] l1d_off;
@@ -416,7 +421,16 @@ module rapt_l1d #(
       logic ld_tag_dup0, ld_tag_dup1;
       assign ld_tag_dup0 = (|l1d_valid[0][addr_idx]) && way_tag_match[0];
       assign ld_tag_dup1 = (|l1d_valid[1][addr_idx]) && way_tag_match[1];
-      assign store_fill_way = !l1d_valid[0][waddr_idx][waddr_offset] ? 1'b0
+      // Same dup-tag check on the store side: without it, a full-word store
+      // miss could allocate a new way for a line that already exists in the
+      // other way, creating duplicate tags.  Subsequent partial stores then
+      // invalidate only one copy, leaving stale data in the other.
+      logic st_tag_dup0, st_tag_dup1;
+      assign st_tag_dup0 = (|l1d_valid[0][waddr_idx]) && way_wtag_match[0];
+      assign st_tag_dup1 = (|l1d_valid[1][waddr_idx]) && way_wtag_match[1];
+      assign store_fill_way = st_tag_dup0 ? 1'b0
+                            : st_tag_dup1 ? 1'b1
+                            : !l1d_valid[0][waddr_idx][waddr_offset] ? 1'b0
                             : !l1d_valid[1][waddr_idx][waddr_offset] ? 1'b1
                             : d_replace_bit[waddr_idx];
       assign ld_fill_way = ld_tag_dup0 ? 1'b0
@@ -623,6 +637,11 @@ module rapt_l1d #(
   assign l1d_bus.rstrb = (cacheable_r || ptw_arvalid) ? 8'($unsigned({XLEN/8{1'b1}})) : rstrb;
 
   assign lsu_l1d.rdata = data_hit ? l1d_data : l1d_bus.rdata;
+  // Difftest skip propagation for MMIO loads: cache-hit loads (data_hit=1) are
+  // by construction cacheable (and thus non-MMIO), so they don't need to skip
+  // the reference model. For misses that go to bus, mirror the bus-side mmio
+  // bit so the commit-time DPI can skip REF on the owning instruction.
+  assign lsu_l1d.difftest_skip = data_hit ? 1'b0 : l1d_bus.difftest_skip;
   assign lsu_l1d.trap = (l1d_state == TRAP) && (rec_addr == lsu_l1d.raddr);
   assign lsu_l1d.cause = cause;
   // Gate handshake with PMP fault: otherwise a cache-hit load in LD_A would
@@ -680,6 +699,7 @@ module rapt_l1d #(
       for (int w = 0; w < int'(L1D_N_WAYS); w++)
         for (int i = 0; i < int'(L1D_SIZE); i++) l1d_valid[w][i] <= '0;
       l1d_update <= 0;
+      l1d_inv_all_ways <= 0;
       l1d_rmw    <= 0;
       d_replace_bit <= '0;
       ld_fill_way_r <= '0;
@@ -879,8 +899,12 @@ module rapt_l1d #(
         //       set target bit.
         //     - If tag mismatch (new line install): clear all valid bits and
         //       set only the target bit; overwrite tag.
-        //   valid_u=0 (partial-store invalidate fallback): clear target bit
-        //     only; do not disturb tag or other valid bits.
+        //     - Also invalidate the same word in any OTHER way whose tag
+        //       matches `l1d_tag_u` to scrub legacy duplicates.
+        //   valid_u=0:
+        //     - If `l1d_inv_all_ways` (partial-store invalidate): clear the
+        //       target word in EVERY way at this index, regardless of tag.
+        //     - Else (legacy fallback): clear target bit in `l1d_way` only.
         if (l1d_valid_u) begin
           l1d_tag[l1d_way][l1d_idx] <= l1d_tag_u;
           if (l1d_tag[l1d_way][l1d_idx] == l1d_tag_u) begin
@@ -888,10 +912,27 @@ module rapt_l1d #(
           end else begin
             l1d_valid[l1d_way][l1d_idx] <= (L1D_LINE_SIZE'(1) << l1d_off);
           end
+          // Cross-way duplicate scrub on install: when the canonical copy
+          // for this tag now lives in `l1d_way`, invalidate the ENTIRE line
+          // in every other way that holds the same tag.  Scrubbing only the
+          // installed offset is insufficient: legacy duplicate ways may
+          // retain stale words at OTHER offsets of the same line, and a
+          // later load to those offsets would hit the stale duplicate.
+          for (int w = 0; w < int'(L1D_N_WAYS); w++) begin
+            if (w != int'(l1d_way)
+                && l1d_tag[w][l1d_idx] == l1d_tag_u) begin
+              l1d_valid[w][l1d_idx] <= '0;
+            end
+          end
+        end else if (l1d_inv_all_ways) begin
+          for (int w = 0; w < int'(L1D_N_WAYS); w++) begin
+            l1d_valid[w][l1d_idx][l1d_off] <= 1'b0;
+          end
         end else begin
           l1d_valid[l1d_way][l1d_idx][l1d_off] <= 1'b0;
         end
         l1d_update <= 0;
+        l1d_inv_all_ways <= 0;
       end
 
       // l1d_update SET: request a new SRAM + tag/valid write next cycle.
@@ -936,9 +977,13 @@ module rapt_l1d #(
               l1d_off <= waddr_offset;
               l1d_way <= store_hit_way;
             end else begin
-              // Fallback: invalidate (SRAM read port busy)
+              // Fallback: invalidate (SRAM read port busy).  Broadcast across
+              // all ways at this (idx, off) so duplicate-tag stale copies
+              // cannot survive in a non-store_hit_way slot.
               l1d_update <= 1'b1;
               l1d_valid_u <= 0;
+              l1d_inv_all_ways <= 1'b1;
+              l1d_tag_u <= waddr_tag;
               l1d_idx <= waddr_idx;
               l1d_off <= waddr_offset;
               l1d_way <= store_hit_way;

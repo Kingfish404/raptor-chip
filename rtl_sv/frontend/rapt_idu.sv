@@ -16,6 +16,7 @@ module rapt_idu #(
     csr_bcast_if.in csr_bcast,
 
     ifu_idu_if.slave  ifu_idu,
+    idu_bpu_if.out    idu_bpu,
     idu_rnu_if.master idu_rnu,
 
     input reset
@@ -42,6 +43,7 @@ module rapt_idu #(
   logic [XLEN-1:0] correct_npc;
   logic bpu_predicted_taken;
   logic is_branch_or_jump;
+  logic target_resolvable;
   logic early_resteer_cond;
   logic idu_redirect_event;
   logic resteer_sent;
@@ -162,12 +164,14 @@ module rapt_idu #(
   assign is_c_a     = (inst_a[1:0] != 2'b11);
   assign inst_idu_a = is_c_a ? inst_de_a : inst_a;
 
-  rapt_idu_decoder_c idu_de_c (.io_cinst  (inst_a[15:0]),
+  rapt_idu_decoder_c idu_de_c (
+      .io_cinst  (inst_a[15:0]),
       .io_is_rv64(XLEN == 64 ? 1'b1 : 1'b0),
       .io_inst   (inst_de_a)
   );
 
-  rapt_idu_decoder idu_de (.in_pc  ({{(64 - XLEN) {1'b0}}, pc_idu_a}),
+  rapt_idu_decoder idu_de (
+      .in_pc  ({{(64 - XLEN) {1'b0}}, pc_idu_a}),
       .in_inst(inst_idu_a),
 
       .out_alu (alu_a),
@@ -217,7 +221,7 @@ module rapt_idu #(
   // CSR write attempt: CSRRW/CSRRWI always write; CSRRS/C/SI/CI write if rs1/uimm != 0
   logic csr_write_a;
   assign csr_write_a = (csr_csw_a[1:0] == 2'b01) || (rs1_a != 5'b0);
-  assign illegal_csr_a = (csr_csw_a != 3'b000) && (!csr_addr_valid(
+  assign illegal_csr_a = (csr_csw_a != `RAPT_CSR_CSW_NONE) && (!csr_addr_valid(
       csr_a
   )  // unknown CSR address
   || (csr_a[9:8] > csr_bcast.priv)  // insufficient privilege
@@ -235,11 +239,11 @@ module rapt_idu #(
   logic wfi_illegal_a, sret_illegal_a, sfence_vma_illegal_a, satp_illegal_a;
   logic counter_illegal_a;
   logic [2:0] counter_sel_a;
-  assign is_wfi_a = (inst_idu_a == 32'h10500073);
-  assign is_sfence_vma_a = (inst_idu_a[31:25] == 7'b0001001)
-                        && (inst_idu_a[14:12] == 3'b000)
+  assign is_wfi_a = (inst_idu_a == `RAPT_INST_WFI);
+  assign is_sfence_vma_a = (inst_idu_a[31:25] == `RAPT_F7_SFENCE_VMA)
+                        && (inst_idu_a[14:12] == `RAPT_F3_SYS___)
                         && (inst_idu_a[11:7]  == 5'b0)
-                        && (inst_idu_a[6:0]   == 7'b1110011);
+                        && (inst_idu_a[6:0]   == `RAPT_OP_SYSTEM);
   assign wfi_illegal_a = is_wfi_a
       && ((csr_bcast.priv == `RAPT_PRIV_U)
        || (csr_bcast.priv == `RAPT_PRIV_S && csr_bcast.tw));
@@ -249,19 +253,25 @@ module rapt_idu #(
   assign sfence_vma_illegal_a = is_sfence_vma_a
       && ((csr_bcast.priv == `RAPT_PRIV_U)
        || (csr_bcast.priv == `RAPT_PRIV_S && csr_bcast.tvm));
-  assign satp_illegal_a = (csr_csw_a != 3'b000) && (csr_a == `RAPT_CSR_SATP___)
+  assign satp_illegal_a = (csr_csw_a != `RAPT_CSR_CSW_NONE) && (csr_a == `RAPT_CSR_SATP___)
       && (csr_bcast.priv == `RAPT_PRIV_S) && csr_bcast.tvm;
-  assign counter_sel_a = (csr_a == `RAPT_CSR_CYCLE__ || csr_a == `RAPT_CSR_CYCLEH_)   ? 3'b001
-                      : (csr_a == `RAPT_CSR_TIME___ || csr_a == `RAPT_CSR_TIMEH__)   ? 3'b010
-                      : (csr_a == `RAPT_CSR_INSTRET_|| csr_a == `RAPT_CSR_INSTRETH)  ? 3'b100
-                      : 3'b000;
-  assign counter_illegal_a = (csr_csw_a != 3'b000) && (counter_sel_a != 3'b000)
+  assign counter_sel_a = (csr_a ==
+      `RAPT_CSR_CYCLE__
+      || csr_a == `RAPT_CSR_CYCLEH_) ?
+      `RAPT_CTR_SEL_CY__
+      : (csr_a == `RAPT_CSR_TIME___ || csr_a == `RAPT_CSR_TIMEH__) ?
+      `RAPT_CTR_SEL_TM__
+      : (csr_a == `RAPT_CSR_INSTRET_ || csr_a == `RAPT_CSR_INSTRETH) ?
+      `RAPT_CTR_SEL_IR__
+      : `RAPT_CTR_SEL_NONE;
+  assign counter_illegal_a = (csr_csw_a != `RAPT_CSR_CSW_NONE)
+        && (counter_sel_a != `RAPT_CTR_SEL_NONE)
       && ((csr_bcast.priv ==
       `RAPT_PRIV_U
-      && (((counter_sel_a & csr_bcast.mcounteren) == 3'b0) ||
-          ((counter_sel_a & csr_bcast.scounteren) == 3'b0))) || (csr_bcast.priv ==
+      && (((counter_sel_a & csr_bcast.mcounteren) == `RAPT_CTR_SEL_NONE) ||
+          ((counter_sel_a & csr_bcast.scounteren) == `RAPT_CTR_SEL_NONE))) || (csr_bcast.priv ==
       `RAPT_PRIV_S
-      && ((counter_sel_a & csr_bcast.mcounteren) == 3'b0)));
+      && ((counter_sel_a & csr_bcast.mcounteren) == `RAPT_CTR_SEL_NONE)));
 
   assign is_illegal_a = illegal_inst_a || illegal_csr_a
       || wfi_illegal_a || sret_illegal_a || sfence_vma_illegal_a
@@ -301,7 +311,10 @@ module rapt_idu #(
   // UOP Output Assembly
   // ================================================================
   assign idu_rnu.uop_a.c = is_c_a;
-  assign idu_rnu.uop_a.word = word_flag_a;
+  // `out_word` doesn't include AMO.W/LR.W/SC.W in current decoder table.
+  // For atomics, use funct3=010 to mark 32-bit variant on RV64.
+  assign idu_rnu.uop_a.word = word_flag_a
+      || (idu_rnu.uop_a.atom && inst_idu_a[14:12] == `RAPT_F3_AMO_W_);
   assign idu_rnu.uop_a.alu = alu_a;
   assign idu_rnu.uop_a.rd[RLEN-1:0] = is_illegal_a ? '0 : rd_a[RLEN-1:0];
   assign idu_rnu.uop_a.csr_csw = csr_csw_a;
@@ -311,18 +324,82 @@ module rapt_idu #(
   assign idu_rnu.uop_a.tval = ifu_trap ? ifu_tval : is_illegal_a ? inst_idu_a : '0;
   assign idu_rnu.uop_a.cause = ifu_trap ? ifu_cause : is_illegal_a ? `RAPT_CAUSE_ILLEGAL_INST : '0;
 
+  // Group-sequential PC (= next PC if every slot in the group falls through).
+  // Per IFU pre-decode, dual-fetch suppresses on any control op, so slot B
+  // is non-control by construction (see IDU_SLOT_B_NO_CONTROL).
+  logic [XLEN-1:0] group_seq;
 `ifdef RAPT_DUAL_ISSUE
-  // When dual-issuing, correct_npc is after BOTH instructions (group end)
-  assign correct_npc              = ifu_valid_b
+  assign group_seq = ifu_valid_b
       ? (pc_idu_b + (is_c_b ? XLEN'('d2) : XLEN'('d4)))
       : (pc_idu_a + (is_c_a ? XLEN'('d2) : XLEN'('d4)));
 `else
-  assign correct_npc = pc_idu_a + (is_c_a ? XLEN'('d2) : XLEN'('d4));
+  assign group_seq = pc_idu_a + (is_c_a ? XLEN'('d2) : XLEN'('d4));
 `endif
-  assign bpu_predicted_taken = (pnpc_idu != correct_npc);
-  assign is_branch_or_jump   = idu_rnu.uop_a.ben || idu_rnu.uop_a.jen || idu_rnu.uop_a.jren;
-  assign early_resteer_cond  = valid && bpu_predicted_taken && !is_branch_or_jump && !ifu_trap;
-  assign idu_redirect_event  = cmu_bcast.flush_pipe || cmu_bcast.sys_resume;
+
+  // Static target derivation for slot A control instructions.
+  // Operates on inst_idu_a so compressed forms are pre-expanded by the
+  // RVC decoder upstream (`inst_de_a`).
+  //   JAL imm: inst[31|19:12|20|30:21] << 1     (signed 21-bit)
+  logic [20:0] jal_imm21_a;
+  logic [XLEN-1:0] jal_target_a;
+  assign jal_imm21_a = {inst_idu_a[31], inst_idu_a[19:12], inst_idu_a[20], inst_idu_a[30:21], 1'b0};
+  assign jal_target_a = pc_idu_a + {{(XLEN - 21) {jal_imm21_a[20]}}, jal_imm21_a};
+
+  assign is_branch_or_jump = idu_rnu.uop_a.ben || idu_rnu.uop_a.jen || idu_rnu.uop_a.jren;
+  assign bpu_predicted_taken = (pnpc_idu != group_seq);
+
+  // Resolve what the BPU *should* have predicted, when statically derivable.
+  // The BPU side-channel (`idu_bpu.train_*`) updates the BTB so a recurring
+  // mispredicted control op stops triggering the same resteer forever.
+  //
+  //  1. A=JAL with mismatch (pnpc != jal_target):
+  //     resteer to jal_target; train BTB with type=DIRE. Safe because JAL
+  //     is unconditional taken => uop_a.pnpc = jal_target_a leaves RS with
+  //     mispredict=0 unconditionally.
+  //  2. A=non-control with BPU-taken (BTB alias):
+  //     resteer to group_seq. BTB has no invalidate port today, so we do
+  //     NOT train; the alias re-fires on every encounter (rare; ~1 event
+  //     per CoreMark run empirically).
+  //  3. A=B-type with BPU-taken + wrong target: intentionally NOT handled.
+  //     Patching uop.pnpc to btype_target_a presumes runtime-taken; if the
+  //     branch turns out not-taken, we *introduce* a mispredict that wasn't
+  //     there before. The conservative behavior is to let commit-flush
+  //     update BTB on actual mispredict. (TODO: handle by not patching
+  //     uop.pnpc for B-type — but then BTB training races with commit's
+  //     authoritative training on the next encounter; needs careful study.)
+  //  4. A=JALR: target depends on rs1; unresolvable at IDU.
+  logic train_jal_a;
+  // Note: the decoder asserts `jen` for BOTH JAL and JALR. Gate strictly on
+  // `jen && !jren` so we only train/patch for true JAL (PC-relative,
+  // statically-resolvable target). JAL_imm21 bits would otherwise be
+  // garbage when applied to a JALR encoding.
+  assign train_jal_a = idu_rnu.uop_a.jen && !idu_rnu.uop_a.jren && (pnpc_idu != jal_target_a);
+
+  always_comb begin
+    if (train_jal_a) begin
+      target_resolvable = 1'b1;
+      correct_npc       = jal_target_a;
+    end else if (!is_branch_or_jump && bpu_predicted_taken) begin
+      target_resolvable = 1'b1;
+      correct_npc       = group_seq;
+    end else begin
+      target_resolvable = 1'b0;
+      correct_npc       = pnpc_idu;  // unused: gated by target_resolvable
+    end
+  end
+
+  assign early_resteer_cond = valid && !ifu_trap && target_resolvable && (pnpc_idu != correct_npc);
+  assign idu_redirect_event = cmu_bcast.flush_pipe || cmu_bcast.sys_resume;
+
+  // BPU training side-channel — fires only with the one-shot resteer pulse
+  // and only on the JAL case where BTB can be authoritatively updated from
+  // a statically-derived target with no direction ambiguity.
+  logic resteer_pulse;
+  assign resteer_pulse        = early_resteer_cond && !resteer_sent;
+  assign idu_bpu.train_en     = resteer_pulse && train_jal_a;
+  assign idu_bpu.train_pc     = pc_idu_a;
+  assign idu_bpu.train_target = correct_npc;
+  assign idu_bpu.train_type   = 2'b01;  // DIRE (JAL)
 
   // One-shot pulse: only fire resteer on the first cycle of detection
   always_ff @(posedge clock) begin
@@ -347,16 +424,27 @@ module rapt_idu #(
     else pmu_early_resteer <= ifu_idu.resteer;
   end
 
-  // Correct pnpc before sending downstream: if resteer detected,
-  // replace the wrong BPU prediction with the correct sequential address
-  // so that ROU commit won't see a spurious npc != pnpc mismatch.
-  // During dual-fetch, Slot A's sequential npc is pc_b (B-slot PC, P+2),
-  // not the IFU's next-group address (pnpc_idu = P+4).  Patch pnpc so
-  // that the ROB commit comparison (npc == pnpc) succeeds for Slot A.
+  // Correct pnpc before sending downstream so that downstream RS
+  // mispredict comparison (`computed_npc != uop.pnpc`) stays self-consistent
+  // with the resteer we just emitted. Without this, exec would observe a
+  // mismatch and trigger a commit-flush, undoing the IDU resteer plus its
+  // BTB training and forcing the same misprediction to repeat forever.
+  //
+  //   - A=JAL                    : unconditional taken     -> jal_target_a
+  //   - A=non-control alias case : sequential              -> group_seq
+  //   - dual-issue, B valid      : sequential to slot B PC -> pc_idu_b
+  //   - otherwise                : trust BPU's prediction  -> pnpc_idu
 `ifdef RAPT_DUAL_ISSUE
-  assign idu_rnu.uop_a.pnpc = early_resteer_cond ? correct_npc : ifu_valid_b ? pc_idu_b : pnpc_idu;
+  assign idu_rnu.uop_a.pnpc =
+      train_jal_a          ? jal_target_a
+    : early_resteer_cond   ? correct_npc
+    : ifu_valid_b          ? pc_idu_b
+    :                        pnpc_idu;
 `else
-  assign idu_rnu.uop_a.pnpc = early_resteer_cond ? correct_npc : pnpc_idu;
+  assign idu_rnu.uop_a.pnpc =
+      train_jal_a          ? jal_target_a
+    : early_resteer_cond   ? correct_npc
+    :                        pnpc_idu;
 `endif
   assign idu_rnu.uop_a.inst      = inst_idu_a;
   assign idu_rnu.uop_a.pc        = pc_idu_a;
@@ -368,12 +456,14 @@ module rapt_idu #(
   assign is_c_b     = (inst_b[1:0] != 2'b11);
   assign inst_idu_b = is_c_b ? inst_de_b : inst_b;
 
-  rapt_idu_decoder_c idu_de_c_b (.io_cinst  (inst_b[15:0]),
+  rapt_idu_decoder_c idu_de_c_b (
+      .io_cinst  (inst_b[15:0]),
       .io_is_rv64(XLEN == 64 ? 1'b1 : 1'b0),
       .io_inst   (inst_de_b)
   );
 
-  rapt_idu_decoder idu_de_b (.in_pc  ({{(64 - XLEN) {1'b0}}, pc_idu_b}),
+  rapt_idu_decoder idu_de_b (
+      .in_pc  ({{(64 - XLEN) {1'b0}}, pc_idu_b}),
       .in_inst(inst_idu_b),
 
       .out_alu (alu_b),
@@ -408,7 +498,7 @@ module rapt_idu #(
   assign illegal_inst_b = (alu_b == `RAPT_ALU_ILL_);
   logic csr_write_b;
   assign csr_write_b = (csr_csw_b[1:0] == 2'b01) || (rs1_b != 5'b0);
-  assign illegal_csr_b = (csr_csw_b != 3'b000) && (!csr_addr_valid(
+  assign illegal_csr_b = (csr_csw_b != `RAPT_CSR_CSW_NONE) && (!csr_addr_valid(
       csr_b
   ) || (csr_b[9:8] > csr_bcast.priv) || (csr_b[11:10] == 2'b11 && csr_write_b));
 
@@ -417,11 +507,11 @@ module rapt_idu #(
   logic wfi_illegal_b, sret_illegal_b, sfence_vma_illegal_b, satp_illegal_b;
   logic counter_illegal_b;
   logic [2:0] counter_sel_b;
-  assign is_wfi_b = (inst_idu_b == 32'h10500073);
-  assign is_sfence_vma_b = (inst_idu_b[31:25] == 7'b0001001)
-                        && (inst_idu_b[14:12] == 3'b000)
+  assign is_wfi_b = (inst_idu_b == `RAPT_INST_WFI);
+  assign is_sfence_vma_b = (inst_idu_b[31:25] == `RAPT_F7_SFENCE_VMA)
+                        && (inst_idu_b[14:12] == `RAPT_F3_SYS___)
                         && (inst_idu_b[11:7]  == 5'b0)
-                        && (inst_idu_b[6:0]   == 7'b1110011);
+                        && (inst_idu_b[6:0]   == `RAPT_OP_SYSTEM);
   assign wfi_illegal_b = is_wfi_b
       && ((csr_bcast.priv == `RAPT_PRIV_U)
        || (csr_bcast.priv == `RAPT_PRIV_S && csr_bcast.tw));
@@ -431,19 +521,25 @@ module rapt_idu #(
   assign sfence_vma_illegal_b = is_sfence_vma_b
       && ((csr_bcast.priv == `RAPT_PRIV_U)
        || (csr_bcast.priv == `RAPT_PRIV_S && csr_bcast.tvm));
-  assign satp_illegal_b = (csr_csw_b != 3'b000) && (csr_b == `RAPT_CSR_SATP___)
+  assign satp_illegal_b = (csr_csw_b != `RAPT_CSR_CSW_NONE) && (csr_b == `RAPT_CSR_SATP___)
       && (csr_bcast.priv == `RAPT_PRIV_S) && csr_bcast.tvm;
-  assign counter_sel_b = (csr_b == `RAPT_CSR_CYCLE__ || csr_b == `RAPT_CSR_CYCLEH_)   ? 3'b001
-                      : (csr_b == `RAPT_CSR_TIME___ || csr_b == `RAPT_CSR_TIMEH__)   ? 3'b010
-                      : (csr_b == `RAPT_CSR_INSTRET_|| csr_b == `RAPT_CSR_INSTRETH)  ? 3'b100
-                      : 3'b000;
-  assign counter_illegal_b = (csr_csw_b != 3'b000) && (counter_sel_b != 3'b000)
+  assign counter_sel_b = (csr_b ==
+      `RAPT_CSR_CYCLE__
+      || csr_b == `RAPT_CSR_CYCLEH_) ?
+      `RAPT_CTR_SEL_CY__
+      : (csr_b == `RAPT_CSR_TIME___ || csr_b == `RAPT_CSR_TIMEH__) ?
+      `RAPT_CTR_SEL_TM__
+      : (csr_b == `RAPT_CSR_INSTRET_ || csr_b == `RAPT_CSR_INSTRETH) ?
+      `RAPT_CTR_SEL_IR__
+      : `RAPT_CTR_SEL_NONE;
+  assign counter_illegal_b = (csr_csw_b != `RAPT_CSR_CSW_NONE)
+        && (counter_sel_b != `RAPT_CTR_SEL_NONE)
       && ((csr_bcast.priv ==
       `RAPT_PRIV_U
-      && (((counter_sel_b & csr_bcast.mcounteren) == 3'b0) ||
-          ((counter_sel_b & csr_bcast.scounteren) == 3'b0))) || (csr_bcast.priv ==
+      && (((counter_sel_b & csr_bcast.mcounteren) == `RAPT_CTR_SEL_NONE) ||
+          ((counter_sel_b & csr_bcast.scounteren) == `RAPT_CTR_SEL_NONE))) || (csr_bcast.priv ==
       `RAPT_PRIV_S
-      && ((counter_sel_b & csr_bcast.mcounteren) == 3'b0)));
+      && ((counter_sel_b & csr_bcast.mcounteren) == `RAPT_CTR_SEL_NONE)));
 
   assign is_illegal_b = illegal_inst_b || illegal_csr_b
       || wfi_illegal_b || sret_illegal_b || sfence_vma_illegal_b
@@ -451,7 +547,8 @@ module rapt_idu #(
 
   // Slot B UOP assembly
   assign idu_rnu.uop_b.c = is_c_b;
-  assign idu_rnu.uop_b.word = word_flag_b;
+  assign idu_rnu.uop_b.word = word_flag_b
+      || (idu_rnu.uop_b.atom && inst_idu_b[14:12] == `RAPT_F3_AMO_W_);
   assign idu_rnu.uop_b.alu = alu_b;
   assign idu_rnu.uop_b.rd[RLEN-1:0] = is_illegal_b ? '0 : rd_b[RLEN-1:0];
   assign idu_rnu.uop_b.csr_csw = csr_csw_b;
@@ -483,27 +580,23 @@ module rapt_idu #(
   // HANDSHAKE: redirect windows must not advertise IFU consumption. This guards
   // the Linux early-resteer bug where IDU discarded a wrong-path fetch locally
   // but still let IFU consume it through ready.
-  `RAPT_SVA_IMPLY(clock, reset, IDU_EARLY_RESTEER_NOT_IFU_READY,
-                  early_resteer_cond, !ifu_idu.ready)
+  `RAPT_SVA_IMPLY(clock, reset, IDU_EARLY_RESTEER_NOT_IFU_READY, early_resteer_cond, !ifu_idu.ready)
 
-  `RAPT_SVA_IMPLY(clock, reset, IDU_REDIRECT_NOT_IFU_READY,
-                  idu_redirect_event, !ifu_idu.ready)
+  `RAPT_SVA_IMPLY(clock, reset, IDU_REDIRECT_NOT_IFU_READY, idu_redirect_event, !ifu_idu.ready)
 
   // COMMIT_DURABLE: the uop that caused early-resteer must carry the corrected
   // sequential pnpc so ROB commit does not later see a false branch mismatch.
-  `RAPT_SVA_IMPLY(clock, reset, IDU_EARLY_RESTEER_CORRECTS_PNPC,
-                  early_resteer_cond, idu_rnu.uop_a.pnpc == correct_npc)
+  `RAPT_SVA_IMPLY(clock, reset, IDU_EARLY_RESTEER_CORRECTS_PNPC, early_resteer_cond,
+                  idu_rnu.uop_a.pnpc == correct_npc)
 
   `RAPT_COVER(clock, reset, IDU_EARLY_RESTEER_EVENT, ifu_idu.resteer)
 
 `ifdef RAPT_DUAL_ISSUE
   // DUAL_COMMIT_SEMANTICS: slot B is intentionally limited to non-control,
   // non-serializing uops because only slot A carries frontend prediction state.
-  `RAPT_SVA_IMPLY(clock, reset, IDU_SLOT_B_NO_CONTROL,
-                  idu_rnu.valid_b,
-                  !(idu_rnu.uop_b.ben || idu_rnu.uop_b.jen || idu_rnu.uop_b.jren
-                    || idu_rnu.uop_b.system || idu_rnu.uop_b.f_i
-                    || idu_rnu.uop_b.f_time || idu_rnu.uop_b.atom))
+  `RAPT_SVA_IMPLY(
+      clock, reset, IDU_SLOT_B_NO_CONTROL, idu_rnu.valid_b,
+      !(idu_rnu.uop_b.ben || idu_rnu.uop_b.jen || idu_rnu.uop_b.jren || idu_rnu.uop_b.system || idu_rnu.uop_b.f_i || idu_rnu.uop_b.f_time || idu_rnu.uop_b.atom))
 `endif
 
 endmodule

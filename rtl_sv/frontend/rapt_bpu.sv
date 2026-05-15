@@ -17,6 +17,7 @@ module rapt_bpu #(
     cmu_bcast_if.in cmu_bcast,
 
     ifu_bpu_if.in ifu_bpu,
+    idu_bpu_if.in idu_bpu,
 
     input reset
 );
@@ -98,8 +99,51 @@ module rapt_bpu #(
   logic [1:0] btb_rd_type;
   logic btb_rd_tag_match;
 
-  logic [1:0] btb_wd_type;
-  assign btb_wd_type = cmu_bcast.jren ? INDR : cmu_bcast.jen ? DIRE : COND;
+  // BTB write source arbitration: commit-flush has priority over IDU train.
+  // Commit-flush is rare and authoritative (carries true direction); IDU train
+  // fires alongside an IDU early-resteer (static target derivable from imm).
+  logic cmu_wen_entry, cmu_wen_type;
+  logic [            1:0] cmu_wd_type;
+  logic [       XLEN-1:1] cmu_wd_full;
+  logic [    BTB_LEN-1:0] cmu_waddr;
+  logic [BTB_TAG_LEN-1:0] cmu_wd_tag;
+  assign cmu_wen_entry = cmu_bcast.flush_pipe && (cmu_bcast.jen || cmu_bcast.jren || rbtaken);
+  assign cmu_wen_type  = cmu_bcast.jren || cmu_bcast.jen || (cmu_bcast.ben && rbtaken);
+  assign cmu_wd_type   = cmu_bcast.jren ? INDR : cmu_bcast.jen ? DIRE : COND;
+  assign cmu_wd_full   = cpc[XLEN-1:1];
+  assign cmu_waddr     = rbtb_idx;
+  assign cmu_wd_tag    = rbtb_tag;
+
+  // IDU training pulse: derive matching index/tag from train_pc.
+  logic                   idu_wen;
+  logic [    BTB_LEN-1:0] idu_waddr;
+  logic [BTB_TAG_LEN-1:0] idu_wd_tag;
+  assign idu_wen    = idu_bpu.train_en;
+  assign idu_waddr  = idu_bpu.train_pc[BTB_LEN-1+1:1] ^ idu_bpu.train_pc[2*BTB_LEN-1+1:BTB_LEN+1];
+  assign idu_wd_tag = idu_bpu.train_pc[BTB_LEN+1+BTB_TAG_LEN-1:BTB_LEN+1];
+
+  // Final mux: priority = commit-flush entry write > IDU train > commit
+  // type-only refresh. Rationale:
+  //   - cmu_wen_entry only fires on commit-flush (true mispredict) — must win;
+  //     it carries authoritative target/type to replace a stale entry.
+  //   - cmu_wen_type alone is just "refresh type of an existing matching
+  //     entry" on every committed control op; the entry was allocated with
+  //     the correct type, so dropping a refresh is a no-op.
+  //   - IDU train carries fresh target/tag/type for a new (or aliased) entry;
+  //     it should preempt the type-only refresh.
+  logic wen_entry_mux, wen_type_mux;
+  logic [    BTB_LEN-1:0] waddr_mux;
+  logic [       XLEN-1:1] wd_target_mux;
+  logic [BTB_TAG_LEN-1:0] wd_tag_mux;
+  logic [            1:0] wd_type_mux;
+  logic                   idu_grant;
+  assign idu_grant     = idu_wen && !cmu_wen_entry;
+  assign wen_entry_mux = cmu_wen_entry || idu_grant;
+  assign wen_type_mux  = (cmu_wen_type && !idu_grant) || idu_grant;
+  assign waddr_mux     = cmu_wen_entry ? cmu_waddr : idu_grant ? idu_waddr : cmu_waddr;
+  assign wd_target_mux = cmu_wen_entry ? cmu_wd_full : idu_bpu.train_target[XLEN-1:1];
+  assign wd_tag_mux    = cmu_wen_entry ? cmu_wd_tag : idu_grant ? idu_wd_tag : cmu_wd_tag;
+  assign wd_type_mux   = cmu_wen_entry ? cmu_wd_type : idu_grant ? idu_bpu.train_type : cmu_wd_type;
 
   rapt_bpu_btb #(
       .DEPTH(BTB_SIZE / BTB_WAYS),
@@ -117,12 +161,12 @@ module rapt_bpu #(
       .rd_tag_match(btb_rd_tag_match),
       // JALR entry creation: write target+tag+valid on JALR flush (bug fix: baseline
       // only wrote entries for JAL and taken-branches, leaving JALR without BTB entries)
-      .wen_entry(cmu_bcast.flush_pipe && (cmu_bcast.jen || cmu_bcast.jren || rbtaken)),
-      .waddr(rbtb_idx),
-      .wd_target(cpc[XLEN-1:1]),
-      .wd_tag(rbtb_tag),
-      .wen_type(cmu_bcast.jren || cmu_bcast.jen || (cmu_bcast.ben && rbtaken)),
-      .wd_type(btb_wd_type),
+      .wen_entry(wen_entry_mux),
+      .waddr(waddr_mux),
+      .wd_target(wd_target_mux),
+      .wd_tag(wd_tag_mux),
+      .wen_type(wen_type_mux),
+      .wd_type(wd_type_mux),
       .init(cmu_bcast.fence_time)
   );
 

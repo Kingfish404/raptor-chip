@@ -7,6 +7,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+// Provided by difftest_dut.cc; NULL when difftest is not enabled.
+extern void (*ref_difftest_memcpy)(paddr_t addr, void *buf, size_t n, bool direction);
+
 #define QEMU_SDHCI_PCI_ECAM_BASE 0x30008000u
 #define QEMU_SDHCI_PCI_ECAM_SIZE 0x1000u
 #define QEMU_SDHCI_BASE 0x40000000u
@@ -85,6 +88,17 @@ static void dma_read_block()
     uint32_t dma_addr = load32(SDHCI_DMA_ADDRESS);
     if (!guest_write_bytes(dma_addr, block, sizeof(block)))
         Log("sdhci: DMA target is unmapped: 0x%08x", dma_addr);
+    else
+    {
+        if (ref_difftest_memcpy != NULL)
+        {
+            // Mirror DMA-written bytes into the reference model so that later
+            // CPU loads from this region match between DUT and REF.
+            uint8_t *host = guest_to_host((paddr_t)dma_addr);
+            if (host != NULL)
+                ref_difftest_memcpy((paddr_t)dma_addr, host, sizeof(block), DIFFTEST_TO_REF);
+        }
+    }
 }
 
 static void complete_command()

@@ -129,9 +129,12 @@ RVFI_CORE_DIR := $(RISCV_FORMAL_DIR)/cores/raptor
 RVFI_CHECKS   := $(RVFI_CORE_DIR)/checks
 RVFI_PACK     := build/rapt_pack_rvfi.sv
 VSRC_PATH     := $(RAPTOR_HOME)/rtl_sv
-# Core-only sources: exclude SoC wrappers, DPI-C, and include-dir files
+# Core-only sources: exclude SoC wrappers, DPI-C, and include-dir files.
+# Note: rapt_npc_soc / wrap_rnp_soc were moved to $(RAPTOR_HOME)/nsim/rtl/
+# (TB-only); they are no longer found via $(VSRC_PATH), so excluding them is
+# only kept for documentation purposes.
 VSRCS_RVFI_PKG  := $(filter %/rapt_pkg.sv, $(shell find $(VSRC_PATH) -name "*.sv"))
-VSRCS_RVFI_EXCL := %/rapt_pkg.sv %/wrap_rnp_soc.sv %/wrap_rnp.sv %/rapt_npc_soc.sv %/rapt_dpi_c.sv
+VSRCS_RVFI_EXCL := %/rapt_pkg.sv %/wrap_rnp.sv %/rapt_dpi_c.sv
 VSRCS_RVFI      := $(VSRCS_RVFI_PKG) $(filter-out $(VSRCS_RVFI_EXCL), $(shell find $(VSRC_PATH) -name "*.sv" ! -path "*/include/*"))
 
 # --- Auto-clone riscv-formal ---

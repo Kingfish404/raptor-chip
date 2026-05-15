@@ -90,6 +90,8 @@ extern "C" void npc_difftest_skip_ref()
   difftest_skip_ref();
 }
 
+extern "C" int mmio_addr_skip_difftest(paddr_t addr);
+
 #ifdef CONFIG_ISA64
 extern "C" void npc_difftest_mem_diff(long long waddr, long long wdata, char wstrb)
 #else
@@ -100,6 +102,16 @@ extern "C" void npc_difftest_mem_diff(int waddr, int wdata, char wstrb)
   npc.pwaddr = (word_t)waddr;
   npc.wdata = (word_t)wdata;
   npc.wstrb = (word_t)wstrb;
+  // Commit-time MMIO-store skip: REF (NEMU) does not model device MMIO,
+  // so executing the store on REF would either error out or write into an
+  // unmapped region. Skip the REF step for this committing instruction.
+  // This replaces the racy issue-time skip that used to live in
+  // mmio_check_and_handle() (see memory.cc for rationale).
+  if (mmio_addr_skip_difftest((paddr_t)(word_t)waddr))
+  {
+    difftest_skip_ref();
+    return;
+  }
   difftest_should_diff_mem();
 }
 

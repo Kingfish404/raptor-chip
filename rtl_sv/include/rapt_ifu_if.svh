@@ -23,6 +23,33 @@ interface ifu_bpu_if #(
   modport in(input pc, nextpc, pc_update, output npc, taken);
 endinterface
 
+// IDU -> BPU BTB training side-channel.
+//
+// Fires alongside `ifu_idu.resteer` when the IDU detects a BPU prediction
+// failure that can be resolved with the *static* portion of the instruction:
+//   - JAL with wrong / missing BTB target (BPU not-taken, or wrong target)
+//   - B-type with BPU-taken but wrong BTB target (stale entry)
+//
+// Without this channel an IDU early-resteer would starve the BTB of the
+// flush-time training that normally fires on commit-flush, causing the same
+// resteer to repeat indefinitely on every recurrence of the offender.
+//
+// The non-control-alias case (BPU-taken on a regular ALU/LD/ST instruction)
+// is intentionally NOT trained here: the BTB has no invalidate port today,
+// so we let the alias persist and pay the IDU resteer cost on each hit
+// (rare in practice — empirically ~1 event over a CoreMark run).
+interface idu_bpu_if #(
+    parameter int XLEN = `RAPT_XLEN
+);
+  logic            train_en;     // 1-cycle pulse aligned with ifu_idu.resteer
+  logic [XLEN-1:0] train_pc;     // PC of the offending instruction
+  logic [XLEN-1:0] train_target; // Correct target PC
+  logic [1:0]      train_type;   // 00=COND, 01=DIRE (matches BPU enum)
+
+  modport out(output train_en, train_pc, train_target, train_type);
+  modport in (input  train_en, train_pc, train_target, train_type);
+endinterface
+
 interface ifu_l1i_if #(
     parameter int XLEN = `RAPT_XLEN,
     parameter int L1I_LEN = `RAPT_L1I_LEN,

@@ -40,12 +40,16 @@ void perf_sample_per_inst();
 
 void statistic();
 
-static uint64_t wave_cycle_thres = (0x10000);
-static uint64_t wave_inst_thres = (0x1000);
+static uint64_t tfp_cycle = UINT64_MAX;
+static uint64_t tfp_inst = UINT64_MAX;
 
-static int tfp_threshold_break = 0;
-static uint64_t tfp_cycle = 0;
-static uint64_t tfp_inst = 0;
+void cpu_exec_set_threshold(uint64_t cycle, uint64_t inst)
+{
+  // size_t(-1) sentinel from the CLI parser comes through as UINT64_MAX;
+  // preserve it so the unset axis never triggers the start-of-dump condition.
+  tfp_cycle = (cycle == 0) ? UINT64_MAX : cycle;
+  tfp_inst  = (inst  == 0) ? UINT64_MAX : inst;
+}
 
 static void cpu_exec_one_cycle()
 {
@@ -58,10 +62,11 @@ static void cpu_exec_one_cycle()
 
   top->clock = (top->clock == 0) ? 1 : 0;
   top->eval();
-  if ((tfp)                                                                                   //
-      &&                                                                                      //
-      ((pmu.active_cycle > (tfp_cycle > wave_cycle_thres ? tfp_cycle - wave_cycle_thres : 0)) //
-       | (pmu.instr_cnt > (tfp_inst > wave_inst_thres ? tfp_inst - wave_inst_thres : 0))))
+  // Dump-gating semantics: -c/-i specify the START point of waveform capture.
+  // Once either threshold is reached, dumping continues for the rest of the
+  // run.  An unset threshold is sentinel'd to UINT64_MAX so it never fires on
+  // its own; the surviving threshold drives the start trigger.
+  if ((tfp) && ((pmu.active_cycle >= tfp_cycle) | (pmu.instr_cnt >= tfp_inst)))
   {
     tfp->dump(contextp->time());
   }
@@ -69,10 +74,7 @@ static void cpu_exec_one_cycle()
 
   top->clock = (top->clock == 0) ? 1 : 0;
   top->eval();
-  if ((tfp)                                                                                   //
-      &&                                                                                      //
-      ((pmu.active_cycle > (tfp_cycle > wave_cycle_thres ? tfp_cycle - wave_cycle_thres : 0)) //
-       | (pmu.instr_cnt > (tfp_inst > wave_inst_thres ? tfp_inst - wave_inst_thres : 0))))
+  if ((tfp) && ((pmu.active_cycle >= tfp_cycle) | (pmu.instr_cnt >= tfp_inst)))
   {
     tfp->dump(contextp->time());
   }
@@ -111,13 +113,6 @@ void cpu_show_itrace()
 #else
   printf("itrace is not enabled\n");
 #endif
-}
-
-void cpu_exec_set_threshold(uint64_t cycle, uint64_t inst)
-{
-  tfp_threshold_break = 1;
-  tfp_cycle = cycle;
-  tfp_inst = inst;
 }
 
 void cpu_exec_init()
@@ -328,14 +323,8 @@ void cpu_exec(uint64_t n)
       npc.state = NPC_QUIT;
       break;
     }
-    if (tfp_threshold_break & ((pmu.active_cycle >= tfp_cycle) | (pmu.instr_cnt >= tfp_inst)))
-    {
-      void npc_exu_ebreak();
-      npc_exu_ebreak();
-      npc.state = NPC_END;
-      Log("Reached the stop point at pc: " FMT_WORD_NO_PREFIX ".", *npc.pc);
-      break;
-    }
+    // -c/-i thresholds only START waveform dumping; they no longer halt the
+    // simulator.  Use -m / --maximum to bound execution length explicitly.
   }
   g_timer += get_time() - now;
 

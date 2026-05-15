@@ -119,6 +119,10 @@ module rapt_exu #(
   assign disp_ioq.accept_b_alone  = 1'b0;
 `endif
 
+  // Tie off optional PMU outputs from submodules to avoid empty named-pin connects.
+  logic pmu_rs_full_unused;
+  logic pmu_ioq_full_unused;
+
   // === Sub-module instantiation ===
   rapt_exu_rs #(
       .RS_SIZE (RS_SIZE),
@@ -138,7 +142,8 @@ module rapt_exu #(
       .exu_rou      (exu_rou),
       .exu_rou_b    (exu_rou_b),
       .exu_rou_c    (exu_rou_c),
-      .uop_pl       (uop_pl)
+      .uop_pl       (uop_pl),
+        .pmu_rs_full  (pmu_rs_full_unused)
   );
 
   rapt_exu_ioq #(
@@ -158,7 +163,8 @@ module rapt_exu #(
       .exu_rou_b    (exu_rou_b),
       .exu_lsu      (exu_lsu),
       .exu_l1d      (exu_l1d),
-      .exu_ioq_bcast(exu_ioq_bcast)
+      .exu_ioq_bcast(exu_ioq_bcast),
+        .pmu_ioq_full (pmu_ioq_full_unused)
   );
 
 endmodule

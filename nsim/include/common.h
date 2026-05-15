@@ -271,6 +271,40 @@ typedef struct
 
   // early resteer (IDU detects BPU alias on non-branch)
   long long int early_resteer_cnt;
+
+  // -------------------------------------------------------------------
+  // Extended PMU counters (gem5-aligned). Sampled in perf_sample_per_cycle.
+  // -------------------------------------------------------------------
+  // Decomposition of ifu_stall_cycle:
+  //   ifu_stall_cycle = ifu_icache_miss_cycle + ifu_flush_cycle + ifu_empty_cycle
+  //                     (approximate; sampling races may cause +-1 cycle drift)
+  long long int ifu_icache_miss_cycle;   // !valid && L1I FSM busy (cache miss / PTW)
+  long long int ifu_flush_cycle;         // !valid during pipeline flush drain window
+  long long int ifu_empty_cycle;         // !valid otherwise (early resteer bubble, branch shadow)
+
+  // Structural-full events  (gem5: iqFullEvents / robFullEvents / sqFullEvents)
+  // *_cycle  = cycles spent fully occupied;  *_events = rising-edge count.
+  long long int rs_full_cycle;
+  long long int rs_full_events;
+  long long int ioq_full_cycle;
+  long long int ioq_full_events;
+  long long int rob_full_cycle;          // proxy: rnu_valid && !rou_ready
+  long long int rob_full_events;
+  long long int sq_full_cycle;
+  long long int sq_full_events;
+
+  // Commit-width distribution  (gem5: commit.committed_per_cycle / numIssuedDist)
+  //   commit_0_cycle == wbu_stall_cycle (no commit)
+  //   commit_1_cycle  = wbu_valid && !wbu_valid_b
+  //   commit_2_cycle == dual_commit_cnt  (kept separate for clarity)
+  long long int commit_1_cycle;
+  long long int commit_2_cycle;
+
+  // Rename/dispatch status mix  (gem5: rename.status::Running/Blocked/Idle/Squashing)
+  long long int dispatch_running_cycle;  // rnu_valid && rou_ready
+  long long int dispatch_blocked_cycle;  // rnu_valid && !rou_ready  (== rou_hazard_cycle)
+  long long int dispatch_idle_cycle;     // !rnu_valid && !squash
+  long long int dispatch_squash_cycle;   // flush_pipe_r drain window
 } PMUState;
 
 #define panic(format, ...) Assert(0, format, ##__VA_ARGS__)

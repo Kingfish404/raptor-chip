@@ -98,20 +98,20 @@ module rapt_rvfi #(
   // ----------------------------------------------------------------
   // Memory type detection from instruction opcode
   // ----------------------------------------------------------------
-  wire is_load_a  = (rou_cmu.inst_a[6:0] == 7'b0000011);
-  wire is_store_a = (rou_cmu.inst_a[6:0] == 7'b0100011);
-  wire is_amo_a   = (rou_cmu.inst_a[6:0] == 7'b0101111);
-  wire is_lr_a    = is_amo_a && (rou_cmu.inst_a[31:27] == 5'b00010);
-  wire is_sc_a    = is_amo_a && (rou_cmu.inst_a[31:27] == 5'b00011);
+  wire is_load_a  = (rou_cmu.inst_a[6:0] == `RAPT_OP_IL_TYPE);
+  wire is_store_a = (rou_cmu.inst_a[6:0] == `RAPT_OP_S_TYPE_);
+  wire is_amo_a   = (rou_cmu.inst_a[6:0] == `RAPT_OP_AMO___);
+  wire is_lr_a    = is_amo_a && (rou_cmu.inst_a[31:27] == `RAPT_F5_AMO_LR);
+  wire is_sc_a    = is_amo_a && (rou_cmu.inst_a[31:27] == `RAPT_F5_AMO_SC);
   wire is_amo_rw_a = is_amo_a && !is_lr_a && !is_sc_a;
   wire has_mem_read_a  = is_load_a || is_lr_a || is_amo_rw_a;
   wire has_mem_write_a = is_store_a || (is_sc_a && rvfi_rd_wdata_a == '0) || is_amo_rw_a;
 
-  wire is_load_b  = (rou_cmu.inst_b[6:0] == 7'b0000011);
-  wire is_store_b = (rou_cmu.inst_b[6:0] == 7'b0100011);
-  wire is_amo_b   = (rou_cmu.inst_b[6:0] == 7'b0101111);
-  wire is_lr_b    = is_amo_b && (rou_cmu.inst_b[31:27] == 5'b00010);
-  wire is_sc_b    = is_amo_b && (rou_cmu.inst_b[31:27] == 5'b00011);
+  wire is_load_b  = (rou_cmu.inst_b[6:0] == `RAPT_OP_IL_TYPE);
+  wire is_store_b = (rou_cmu.inst_b[6:0] == `RAPT_OP_S_TYPE_);
+  wire is_amo_b   = (rou_cmu.inst_b[6:0] == `RAPT_OP_AMO___);
+  wire is_lr_b    = is_amo_b && (rou_cmu.inst_b[31:27] == `RAPT_F5_AMO_LR);
+  wire is_sc_b    = is_amo_b && (rou_cmu.inst_b[31:27] == `RAPT_F5_AMO_SC);
   wire is_amo_rw_b = is_amo_b && !is_lr_b && !is_sc_b;
   wire has_mem_read_b  = is_load_b || is_lr_b || is_amo_rw_b;
   wire has_mem_write_b = is_store_b || (is_sc_b && rvfi_rd_wdata_b == '0) || is_amo_rw_b;
