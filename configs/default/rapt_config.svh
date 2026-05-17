@@ -46,7 +46,15 @@
 `define RAPT_PHT_SIZE 256
 `define RAPT_BTB_SIZE 128
 `define RAPT_BTB_WAYS 2
-`define RAPT_RSB_SIZE 8
+`define RAPT_RSB_SIZE 4
+
+// Direction-predictor (DIRP). The default is TAGE for the best IPC;
+// alternatives are kept for ablation / low-area builds.
+//   RAPT_BPU_DIRP_TAGE     — bimodal base + 3 tagged tables, history 8/16/64
+//   RAPT_BPU_DIRP_GSHARE   — PC XOR GHR indexed 2-bit counters
+//   RAPT_BPU_DIRP_BIMODAL  — PC-only 2-bit counters (default if none set)
+//   RAPT_BPU_DIRP_STATIC   — always-not-taken (control reference)
+`define RAPT_BPU_DIRP_TAGE
 
 // OoO window sizing. Rationale: dual-issue rename/commit were throttled by
 // an 8-entry ROB and 4-entry RS; with 2-ALU + pipelined MUL + OoO LSU the

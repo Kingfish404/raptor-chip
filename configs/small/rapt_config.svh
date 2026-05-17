@@ -31,6 +31,8 @@
 `define RAPT_BTB_SIZE 16
 `define RAPT_BTB_WAYS 2
 `define RAPT_RSB_SIZE 2
+// Small config: bimodal (lowest area).
+`define RAPT_BPU_DIRP_BIMODAL
 
 // OoO window — halve all queue depths to relieve CLS / clock-routing pressure.
 `define RAPT_RIQ_SIZE 2

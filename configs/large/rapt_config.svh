@@ -32,9 +32,10 @@
 
 // Branch predictor — large tables for high prediction accuracy.
 `define RAPT_PHT_SIZE 1024
+`define RAPT_BPU_DIRP_TAGE
 `define RAPT_BTB_SIZE 512
 `define RAPT_BTB_WAYS 2
-`define RAPT_RSB_SIZE 16
+`define RAPT_RSB_SIZE 4
 
 // OoO window — grow rename/dispatch/ROB to maximise in-flight ILP.
 `define RAPT_RIQ_SIZE 16

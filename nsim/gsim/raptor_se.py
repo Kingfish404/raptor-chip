@@ -46,13 +46,39 @@ scons build/RISCV/gem5.opt -j$(nproc)        # one-time, in gem5 tree
 ./build/RISCV/gem5.opt --outdir=m5out/cmk-large \
     raptor-chip/nsim/gsim/raptor_se.py \
     --preset large --rv64 --benchmark coremark
+
+Design-space exploration (ChampSim-style)
+-----------------------------------------
+The JSON override accepts a ChampSim-like schema: top-level `block_size`,
+`ooo_cpu`, `L1I`, `L1D`, `BTB`, `PHT`, `RAS`, `indirect_branch_predictor`,
+`physical_memory`, and `simulation` sections. It is normalized internally into
+the uarch/sim knobs used by this script. Config layering order (later wins):
+
+  1. `configs/<preset>/rapt_config.svh`  (or --config-svh)
+    2. `--json-config <file>`              (ChampSim-style JSON; see dse-config.json)
+    3. `--set ooo_cpu.0.rob_size=128 --set L1D.mshr_size=4 ...`
+  4. legacy CLI flags (--mshrs, --bp, --storeset, --clk-freq, ...) when
+     explicitly passed
+
+The effective merged config is always written to
+  <outdir>/raptor_se_effective.json
+for reproducibility, and can be replayed with `--json-config`.
+
+Sweep example:
+  for rob in 32 48 64 96 128; do
+    ./build/RISCV/gem5.opt --outdir=m5out/sweep/rob$rob \
+      raptor-chip/nsim/gsim/raptor_se.py \
+    --preset default --benchmark coremark \
+    --set ooo_cpu.0.rob_size=$rob \
+    --set ooo_cpu.0.scheduler_size=$((rob/2)) \
+    --set L1D.mshr_size=4
+  done
 """
 
 from __future__ import annotations
 
 import argparse
 import os
-import re
 import sys
 from pathlib import Path
 
@@ -64,9 +90,15 @@ from m5.objects import (
     BranchPredictor,
     Cache,
     Clint,
+    GshareBP,
     HiFiveBase,
     L2XBar,
+    LTAGE,
     LocalBP,
+    MultiperspectivePerceptron8KB,
+    MultiperspectivePerceptron64KB,
+    MultiperspectivePerceptronTAGE8KB,
+    MultiperspectivePerceptronTAGE64KB,
     Plic,
     Process,
     ReturnAddrStack,
@@ -78,188 +110,411 @@ from m5.objects import (
     Root,
     SEWorkload,
     SimpleBTB,
+    SimpleIndirectPredictor,
     SimpleMemory,
     SrcClockDomain,
     SystemXBar,
+    TAGE,
+    TAGE_SC_L_8KB,
+    TAGE_SC_L_64KB,
+    TournamentBP,
     VoltageDomain,
 )
 from m5.objects.IQUnit import IQUnit
+from m5.params import NULL
 
-
-# ----------------------------------------------------------------------------
-# rapt_config.svh parser
-# ----------------------------------------------------------------------------
-def _parse_int(tok: str) -> int:
-    """Accept decimal, hex (0x..), and Verilog literals like 'h1, 'h40141105."""
-    tok = tok.strip()
-    m = re.match(r"^'h([0-9a-fA-F_]+)$", tok)
-    if m:
-        return int(m.group(1).replace("_", ""), 16)
-    if tok.lower().startswith("0x"):
-        return int(tok, 16)
-    return int(tok)
-
-
-def parse_rapt_config(svh_path: Path, rv64: bool) -> dict:
-    """Extract `define RAPT_<KEY> <int>` from a rapt_config.svh.
-
-    Honors `ifdef RAPT_RV64` / `ifndef` blocks for the XLEN/MISA selection.
-    Boolean knobs (RAPT_DUAL_ISSUE, RAPT_DUAL_COMMIT) are tracked as flags
-    when defined without a value.
-    """
-    cfg: dict = {"RAPT_DUAL_ISSUE": False, "RAPT_DUAL_COMMIT": False}
-    define_re = re.compile(r"^\s*`define\s+(RAPT_\w+)(?:\s+(.*?))?\s*$")
-    cond_stack: list[bool] = [True]  # active flag per nested ifdef
-
-    def cond_active() -> bool:
-        return all(cond_stack)
-
-    with svh_path.open() as f:
-        for raw in f:
-            line = raw.split("//", 1)[0]  # strip line comments
-            stripped = line.strip()
-            if not stripped:
-                continue
-            if stripped.startswith("`ifdef"):
-                tok = stripped.split()[1]
-                cond_stack.append(rv64 if tok == "RAPT_RV64" else True)
-                continue
-            if stripped.startswith("`ifndef"):
-                tok = stripped.split()[1]
-                cond_stack.append(not rv64 if tok == "RAPT_RV64" else True)
-                continue
-            if stripped.startswith("`else"):
-                cond_stack[-1] = not cond_stack[-1]
-                continue
-            if stripped.startswith("`endif"):
-                if len(cond_stack) > 1:
-                    cond_stack.pop()
-                continue
-            if not cond_active():
-                continue
-
-            m = define_re.match(stripped)
-            if not m:
-                continue
-            key, val = m.group(1), m.group(2)
-            if val is None or val == "":
-                cfg[key] = True
-                continue
-            try:
-                cfg[key] = _parse_int(val.split()[0])
-            except ValueError:
-                # e.g. $clog2(...) — derive ourselves from PHY_SIZE/REG_SIZE.
-                cfg[key] = val.strip()
-    return cfg
-
-
-def derive_uarch(cfg: dict) -> dict:
-    """Translate a parsed rapt_config dict into gem5 O3 parameters.
-
-    C1: Instruction Queue (IQ) configuration.
-      RTL has two separate structures:
-        - RS (Reservation Station): 8-entry OoO scheduler for ALU/MUL/BR
-        - IOQ (In-Order Queue): 8-entry FIFO for LSU operations (strong ordering)
-      gem5 IQ is unified, so we model both as a single queue:
-        - iq_entries = RS_SIZE + IOQ_SIZE = 16
-      This abstraction is safe for performance modeling because gem5's scheduling
-      logic (waiting on operands) implicitly captures the OoO vs in-order split.
-      Verified: coremark IPC and stall distribution match RTL vs gem5 within 0.1%.
-    """
-
-    def cache_geom(line_len, sets_len, ways):
-        line_bytes = 4 << int(line_len)
-        sets = 1 << int(sets_len)
-        size = line_bytes * sets * int(ways)
-        return line_bytes, int(ways), size
-
-    l1i_line, l1i_assoc, l1i_size = cache_geom(
-        cfg["RAPT_L1I_LINE_LEN"], cfg["RAPT_L1I_LEN"], cfg["RAPT_L1I_N_WAYS"]
-    )
-    l1d_line, l1d_assoc, l1d_size = cache_geom(
-        cfg["RAPT_L1D_LINE_LEN"], cfg["RAPT_L1D_LEN"], cfg["RAPT_L1D_N_WAYS"]
-    )
-    # gem5 L1I/L1D must agree on cache line size — use max so both fit.
-    line_bytes = max(l1i_line, l1d_line)
-
-    issue_w = 2 if cfg.get("RAPT_DUAL_ISSUE") else 1
-    commit_w = 2 if cfg.get("RAPT_DUAL_COMMIT") else issue_w
-
-    iq_entries = int(cfg["RAPT_RS_SIZE"]) + int(cfg["RAPT_IOQ_SIZE"])
-    phys_int = int(cfg["RAPT_PHY_SIZE"])
-    # gem5 demands physRegs >= archRegs; coremark is integer-only but we
-    # still need >= 32 FP regs for the ISA to elaborate cleanly.
-    phys_fp = max(phys_int, 64)
-
-    return dict(
-        l1i_size=f"{l1i_size}B",
-        l1i_assoc=l1i_assoc,
-        l1d_size=f"{l1d_size}B",
-        l1d_assoc=l1d_assoc,
-        line_bytes=line_bytes,
-        rob=int(cfg["RAPT_ROB_SIZE"]),
-        iq=iq_entries,
-        sq=int(cfg["RAPT_SQ_SIZE"]),
-        lq=int(cfg["RAPT_SQ_SIZE"]),  # raptor unifies ld/st in LSU; mirror SQ
-        phys_int=phys_int,
-        phys_fp=phys_fp,
-        fetch_w=issue_w,
-        decode_w=issue_w,
-        rename_w=issue_w,
-        dispatch_w=issue_w,
-        issue_w=issue_w,
-        wb_w=issue_w,
-        commit_w=commit_w,
-        squash_w=issue_w,
-        btb_entries=int(cfg["RAPT_BTB_SIZE"]),
-        btb_assoc=int(cfg["RAPT_BTB_WAYS"]),
-        pht_size=int(cfg["RAPT_PHT_SIZE"]),
-        rsb_size=int(cfg["RAPT_RSB_SIZE"]),
-        m_fast=bool(cfg.get("RAPT_M_FAST", 0)),
-    )
+from raptor_dse import (
+    DEFAULT_SIM_CFG,
+    SUPPORTED_BP_INPUTS,
+    SUPPORTED_BP_KINDS,
+    _die,
+    apply_overrides,
+    canonical_bp_name,
+    derive_uarch,
+    dump_effective_config,
+    equalize_bp_budget,
+    load_json_config,
+    parse_rapt_config,
+    parse_set_flags,
+)
 
 
 # ----------------------------------------------------------------------------
 # CPU + cache builders
 # ----------------------------------------------------------------------------
-def build_branch_pred(u: dict, bp_kind: str = "local") -> BranchPredictor:
-    """Build a conditional branch predictor.
+def _as_gem5_value(val):
+    if isinstance(val, list):
+        return [_as_gem5_value(v) for v in val]
+    if isinstance(val, str) and val.lower().startswith("0x"):
+        return int(val, 16)
+    return val
+
+
+def _apply_bp_params(obj, cfg: dict, mapping: dict[str, str]) -> None:
+    for cfg_key, obj_key in mapping.items():
+        if cfg_key in cfg:
+            setattr(obj, obj_key, _as_gem5_value(cfg[cfg_key]))
+
+
+_TAGE_PARAM_MAP = {
+    "n_history_tables": "nHistoryTables",
+    "nHistoryTables": "nHistoryTables",
+    "min_history": "minHist",
+    "minHist": "minHist",
+    "max_history": "maxHist",
+    "maxHist": "maxHist",
+    "tag_table_tag_widths": "tagTableTagWidths",
+    "tagTableTagWidths": "tagTableTagWidths",
+    "log_table_sizes": "logTagTableSizes",
+    "logTagTableSizes": "logTagTableSizes",
+    "log_ratio_bimodal_hyst_entries": "logRatioBiModalHystEntries",
+    "logRatioBiModalHystEntries": "logRatioBiModalHystEntries",
+    "counter_bits": "tagTableCounterBits",
+    "tag_table_counter_bits": "tagTableCounterBits",
+    "tagTableCounterBits": "tagTableCounterBits",
+    "u_bits": "tagTableUBits",
+    "tag_table_u_bits": "tagTableUBits",
+    "tagTableUBits": "tagTableUBits",
+    "hist_buffer_size": "histBufferSize",
+    "histBufferSize": "histBufferSize",
+    "path_history_bits": "pathHistBits",
+    "pathHistBits": "pathHistBits",
+    "log_u_reset_period": "logUResetPeriod",
+    "logUResetPeriod": "logUResetPeriod",
+    "num_use_alt_on_na": "numUseAltOnNa",
+    "numUseAltOnNa": "numUseAltOnNa",
+    "initial_t_counter_value": "initialTCounterValue",
+    "initialTCounterValue": "initialTCounterValue",
+    "use_alt_on_na_bits": "useAltOnNaBits",
+    "useAltOnNaBits": "useAltOnNaBits",
+    "max_allocations": "maxNumAlloc",
+    "maxNumAlloc": "maxNumAlloc",
+    "no_skip": "noSkip",
+    "noSkip": "noSkip",
+    "log_table_size": "logTagTableSize",
+    "logTagTableSize": "logTagTableSize",
+    "short_tags_factor": "shortTagsTageFactor",
+    "shortTagsTageFactor": "shortTagsTageFactor",
+    "long_tags_factor": "longTagsTageFactor",
+    "longTagsTageFactor": "longTagsTageFactor",
+    "short_tag_bits": "shortTagsSize",
+    "shortTagsSize": "shortTagsSize",
+    "long_tag_bits": "longTagsSize",
+    "longTagsSize": "longTagsSize",
+    "first_long_tag_table": "firstLongTagTable",
+    "firstLongTagTable": "firstLongTagTable",
+    "truncate_path_history": "truncatePathHist",
+    "truncatePathHist": "truncatePathHist",
+    "tuned_history_lengths": "tunedHistoryLengths",
+    "tunedHistoryLengths": "tunedHistoryLengths",
+}
+
+
+_LOOP_PARAM_MAP = {
+    "log_size": "logSizeLoopPred",
+    "logSizeLoopPred": "logSizeLoopPred",
+    "with_loop_bits": "withLoopBits",
+    "withLoopBits": "withLoopBits",
+    "age_bits": "loopTableAgeBits",
+    "loopTableAgeBits": "loopTableAgeBits",
+    "confidence_bits": "loopTableConfidenceBits",
+    "loopTableConfidenceBits": "loopTableConfidenceBits",
+    "tag_bits": "loopTableTagBits",
+    "loopTableTagBits": "loopTableTagBits",
+    "iter_bits": "loopTableIterBits",
+    "loopTableIterBits": "loopTableIterBits",
+    "assoc_log": "logLoopTableAssoc",
+    "logLoopTableAssoc": "logLoopTableAssoc",
+    "use_speculation": "useSpeculation",
+    "useSpeculation": "useSpeculation",
+    "use_hashing": "useHashing",
+    "useHashing": "useHashing",
+    "use_direction_bit": "useDirectionBit",
+    "useDirectionBit": "useDirectionBit",
+    "restrict_allocation": "restrictAllocation",
+    "restrictAllocation": "restrictAllocation",
+    "initial_loop_iter": "initialLoopIter",
+    "initialLoopIter": "initialLoopIter",
+    "initial_loop_age": "initialLoopAge",
+    "initialLoopAge": "initialLoopAge",
+    "optional_age_reset": "optionalAgeReset",
+    "optionalAgeReset": "optionalAgeReset",
+}
+
+
+_SC_PARAM_MAP = {
+    "num_entries_first_local_histories": "numEntriesFirstLocalHistories",
+    "numEntriesFirstLocalHistories": "numEntriesFirstLocalHistories",
+    "num_entries_second_local_histories": "numEntriesSecondLocalHistories",
+    "numEntriesSecondLocalHistories": "numEntriesSecondLocalHistories",
+    "num_entries_third_local_histories": "numEntriesThirdLocalHistories",
+    "numEntriesThirdLocalHistories": "numEntriesThirdLocalHistories",
+    "log_bias": "logBias",
+    "logBias": "logBias",
+    "log_size_up": "logSizeUp",
+    "logSizeUp": "logSizeUp",
+    "chooser_conf_width": "chooserConfWidth",
+    "chooserConfWidth": "chooserConfWidth",
+    "update_threshold_width": "updateThresholdWidth",
+    "updateThresholdWidth": "updateThresholdWidth",
+    "p_update_threshold_width": "pUpdateThresholdWidth",
+    "pUpdateThresholdWidth": "pUpdateThresholdWidth",
+    "extra_weights_width": "extraWeightsWidth",
+    "extraWeightsWidth": "extraWeightsWidth",
+    "sc_counters_width": "scCountersWidth",
+    "scCountersWidth": "scCountersWidth",
+    "initial_update_threshold_value": "initialUpdateThresholdValue",
+    "initialUpdateThresholdValue": "initialUpdateThresholdValue",
+    "bwnb": "bwnb",
+    "bwm": "bwm",
+    "log_bwnb": "logBwnb",
+    "logBwnb": "logBwnb",
+    "bw_weight_init_value": "bwWeightInitValue",
+    "bwWeightInitValue": "bwWeightInitValue",
+    "lnb": "lnb",
+    "lm": "lm",
+    "log_lnb": "logLnb",
+    "logLnb": "logLnb",
+    "l_weight_init_value": "lWeightInitValue",
+    "lWeightInitValue": "lWeightInitValue",
+    "gnb": "gnb",
+    "gm": "gm",
+    "log_gnb": "logGnb",
+    "logGnb": "logGnb",
+    "pnb": "pnb",
+    "pm": "pm",
+    "log_pnb": "logPnb",
+    "logPnb": "logPnb",
+    "snb": "snb",
+    "sm": "sm",
+    "log_snb": "logSnb",
+    "logSnb": "logSnb",
+    "tnb": "tnb",
+    "tm": "tm",
+    "log_tnb": "logTnb",
+    "logTnb": "logTnb",
+    "inb": "inb",
+    "im": "im",
+    "log_inb": "logInb",
+    "logInb": "logInb",
+    "imnb": "imnb",
+    "imm": "imm",
+    "log_imnb": "logImnb",
+    "logImnb": "logImnb",
+}
+
+
+_PERCEPTRON_PARAM_MAP = {
+    "budget_bits": "budgetbits",
+    "budgetbits": "budgetbits",
+    "num_filter_entries": "num_filter_entries",
+    "num_local_histories": "num_local_histories",
+    "local_history_length": "local_history_length",
+    "block_size": "block_size",
+    "pcshift": "pcshift",
+    "threshold": "threshold",
+    "nbest": "nbest",
+    "tunebits": "tunebits",
+    "hshift": "hshift",
+    "imli_mask1": "imli_mask1",
+    "imli_mask4": "imli_mask4",
+    "recencypos_mask": "recencypos_mask",
+    "fudge": "fudge",
+    "n_sign_bits": "n_sign_bits",
+    "pcbit": "pcbit",
+    "decay": "decay",
+    "record_mask": "record_mask",
+    "hash_taken": "hash_taken",
+    "tuneonly": "tuneonly",
+    "extra_rounds": "extra_rounds",
+    "speed": "speed",
+    "initial_theta": "initial_theta",
+    "speculative_update": "speculative_update",
+    "initial_ghist_length": "initial_ghist_length",
+    "ignore_path_size": "ignore_path_size",
+}
+
+
+def _apply_common_bp_params(
+    cond_bp,
+    bp_params: dict,
+    *,
+    has_tage=False,
+    tage_sections=("tage",),
+) -> None:
+    if not isinstance(bp_params, dict):
+        return
+    if has_tage:
+        for tage_section in tage_sections:
+            if isinstance(bp_params.get(tage_section), dict):
+                _apply_bp_params(cond_bp.tage, bp_params[tage_section], _TAGE_PARAM_MAP)
+    if hasattr(cond_bp, "loop_predictor") and isinstance(bp_params.get("loop"), dict):
+        _apply_bp_params(cond_bp.loop_predictor, bp_params["loop"], _LOOP_PARAM_MAP)
+    if hasattr(cond_bp, "statistical_corrector") and isinstance(
+        bp_params.get("statistical_corrector"), dict
+    ):
+        _apply_bp_params(
+            cond_bp.statistical_corrector,
+            bp_params["statistical_corrector"],
+            _SC_PARAM_MAP,
+        )
+
+    perceptron_cfg = {}
+    if isinstance(bp_params.get("capacity"), dict):
+        perceptron_cfg.update(bp_params["capacity"])
+    if isinstance(bp_params.get("perceptron"), dict):
+        perceptron_cfg.update(bp_params["perceptron"])
+    if perceptron_cfg and "MultiperspectivePerceptron" in cond_bp.__class__.__name__:
+        _apply_bp_params(cond_bp, perceptron_cfg, _PERCEPTRON_PARAM_MAP)
+
+
+def build_branch_pred(u: dict, sim: dict) -> BranchPredictor:
+    """Build a branch predictor unit.
 
     Alignment with RTL (raptor-chip):
       RTL PHT: bimodal 2-bit counter table, size = RAPT_PHT_SIZE (default 256).
       RTL has NO global history register (GHR) mixing — pure PC-indexed table.
       RTL BPU predicts once per cycle for Slot A (Slot B is always not-taken).
 
-    bp_kind:
-      'local'  - LocalBP with a single-entry history table (effectively a
-                 bimodal table of `pht_size` 2-bit counters). Matches the
-                 raptor-chip RTL PHT (bimodal, no global history).
-      'bimode' - gem5's BiModeBP (global+choice, much stronger than RTL).
-                 Use only for reference; not representative of RTL behavior.
+    `sim["bp"]` selects the predictor family. The default `local` matches the
+    current raptor-chip RTL most closely. `use_ras` defaults on (matching RTL
+    RSB); `use_indirect` defaults off because the RTL does not model an indirect
+    target cache today.
     """
+    bp_kind = canonical_bp_name(sim["bp"])
+    if bp_kind not in SUPPORTED_BP_KINDS:
+        # NEVER use ``raise SystemExit(<string>)`` here: gem5 main casts the
+        # exit code via pybind11::cast<int> and aborts with cast_error. Use
+        # _die() which exits with an integer code.
+        _die(
+            f"[raptor_se] unsupported bp={sim['bp']!r} (canonical={bp_kind!r}); "
+            f"choose from {SUPPORTED_BP_INPUTS}"
+        )
+    # Equalize directional-predictor storage budget across BP families so
+    # bimodal / gshare / ltage / perceptron / ... runs are area-comparable
+    # to the default TAGE configuration (~5.4 Kbit). Disable via
+    # `--set sim.equalize_budget=false`. See raptor_dse.equalize_bp_budget
+    # for the per-family sizing rules.
+    equalize_bp_budget(u, sim)
+    bp_params = sim.get("bp_params", {})
+    ctr_bits = max(1, int(u.get("pht_ctr_bits", 2)))
+
+    ras = ReturnAddrStack(numEntries=u["rsb_size"]) if sim.get("use_ras", True) else NULL
+    indirect = NULL
+    if sim.get("use_indirect", False):
+        indirect = SimpleIndirectPredictor(
+            indirectSets=int(sim["indirect_sets"]),
+            indirectWays=int(sim["indirect_ways"]),
+            indirectTagSize=int(sim["indirect_tag_bits"]),
+            indirectPathLength=int(sim["indirect_path_length"]),
+            indirectGHRBits=int(sim["indirect_ghr_bits"]),
+            indirectHashGHR=bool(sim["indirect_hash_ghr"]),
+            indirectHashTargets=bool(sim["indirect_hash_targets"]),
+            instShiftAmt=1,
+        )
+
+    btb = SimpleBTB(
+        numEntries=u["btb_entries"],
+        associativity=u["btb_assoc"],
+        tagBits=int(u.get("btb_tag_bits", 16)),
+        instShiftAmt=1,
+    )
+
+    if bp_kind == "gshare":
+        # gem5 25.1 models GshareBP as a BranchPredictor subclass, but the
+        # Python SimObject still inherits BranchPredictor's required
+        # conditionalBranchPred param. Provide a small valid conditional
+        # predictor so configuration elaboration does not fail before the
+        # GshareBP object is constructed.
+        return GshareBP(
+            global_predictor_size=max(2, int(u["pht_size"])),
+            global_counter_bits=ctr_bits,
+            conditionalBranchPred=LocalBP(
+                localPredictorSize=max(2, int(u["pht_size"])),
+                localCtrBits=ctr_bits,
+            ),
+            btb=btb,
+            ras=ras,
+            indirectBranchPred=indirect,
+            instShiftAmt=1,
+        )
+
     if bp_kind == "bimode":
         cond_bp = BiModeBP(
-            globalPredictorSize=u["pht_size"],
-            choicePredictorSize=u["pht_size"],
+            globalPredictorSize=max(2, int(u["pht_size"])),
+            globalCtrBits=ctr_bits,
+            choicePredictorSize=max(2, int(u["pht_size"])),
+            choiceCtrBits=ctr_bits,
+        )
+    elif bp_kind == "tournament":
+        size = max(2, int(u["pht_size"]))
+        cond_bp = TournamentBP(
+            localPredictorSize=size,
+            localCtrBits=ctr_bits,
+            localHistoryTableSize=size,
+            globalPredictorSize=size,
+            globalCtrBits=ctr_bits,
+            choicePredictorSize=size,
+            choiceCtrBits=ctr_bits,
+        )
+    elif bp_kind == "tage":
+        cond_bp = TAGE()
+        _apply_common_bp_params(cond_bp, bp_params, has_tage=True)
+    elif bp_kind == "ltage":
+        cond_bp = LTAGE()
+        _apply_common_bp_params(cond_bp, bp_params, has_tage=True, tage_sections=("ltage",))
+    elif bp_kind == "tage_sc_l_8kb":
+        cond_bp = TAGE_SC_L_8KB()
+        _apply_common_bp_params(
+            cond_bp,
+            bp_params,
+            has_tage=True,
+            tage_sections=("tage_sc_l", "tage_sc_l_8kb"),
+        )
+    elif bp_kind == "tage_sc_l_64kb":
+        cond_bp = TAGE_SC_L_64KB()
+        _apply_common_bp_params(
+            cond_bp,
+            bp_params,
+            has_tage=True,
+            tage_sections=("tage_sc_l", "tage_sc_l_64kb"),
+        )
+    elif bp_kind == "mpp_8kb":
+        cond_bp = MultiperspectivePerceptron8KB()
+        _apply_common_bp_params(cond_bp, bp_params)
+    elif bp_kind == "mpp_64kb":
+        cond_bp = MultiperspectivePerceptron64KB()
+        _apply_common_bp_params(cond_bp, bp_params)
+    elif bp_kind == "mpp_tage_8kb":
+        cond_bp = MultiperspectivePerceptronTAGE8KB()
+        _apply_common_bp_params(
+            cond_bp,
+            bp_params,
+            has_tage=True,
+            tage_sections=("mpp_tage", "mpp_tage_8kb"),
+        )
+    elif bp_kind == "mpp_tage_64kb":
+        cond_bp = MultiperspectivePerceptronTAGE64KB()
+        _apply_common_bp_params(
+            cond_bp,
+            bp_params,
+            has_tage=True,
+            tage_sections=("mpp_tage", "mpp_tage_64kb"),
         )
     else:
-        # C4: BPU alignment
         # gem5's LocalBP is a simple PC-indexed 2-bit bimodal table — exactly
         # what raptor-chip's PHT implements (no GHR mixing).
-        # Note: gem5 computes `localPredictorSets = localPredictorSize / localCtrBits`,
-        # so localPredictorSize should equal pht_size when ctrBits=2 naturally,
-        # but due to gem5 implementation quirks we pass pht_size directly and let
-        # gem5's alignment handle the power-of-two rounding.
-        ctr_bits = 2
         size = max(2, int(u["pht_size"]))
         cond_bp = LocalBP(
             localPredictorSize=size,
             localCtrBits=ctr_bits,
         )
+
     bp = BranchPredictor(
-        btb=SimpleBTB(numEntries=u["btb_entries"], associativity=u["btb_assoc"]),
-        ras=ReturnAddrStack(numEntries=u["rsb_size"]),
+        btb=btb,
+        ras=ras,
         conditionalBranchPred=cond_bp,
+        indirectBranchPred=indirect,
         # RV instructions are aligned to 2 (with C ext); shift by 1 to dedupe.
         instShiftAmt=1,
     )
@@ -270,7 +525,7 @@ def build_o3_cpu(
     u: dict,
     rv64: bool,
     cpu_id: int = 0,
-    bp_kind: str = "local",
+    sim: dict | None = None,
     storeset: bool = False,
 ) -> RiscvO3CPU:
     """Build a RiscvO3CPU configured to match raptor-chip microarchitecture.
@@ -301,7 +556,7 @@ def build_o3_cpu(
     #   is unified and scheduling is implicitly hybrid (ready on operands),
     #   we model both as a single 16-entry queue. Performance-neutral for
     #   most workloads; validated against coremark baseline.
-    cpu.fetchBufferSize = u["line_bytes"]
+    cpu.fetchBufferSize = u.get("fetch_buffer_size", u["line_bytes"])
     cpu.fetchWidth = u["fetch_w"]
     cpu.decodeWidth = u["decode_w"]
     cpu.renameWidth = u["rename_w"]
@@ -316,7 +571,7 @@ def build_o3_cpu(
     cpu.LQEntries = u["lq"]
     cpu.SQEntries = u["sq"]
     cpu.instQueues = [IQUnit(numEntries=u["iq"])]
-    cpu.branchPred = build_branch_pred(u, bp_kind=bp_kind)
+    cpu.branchPred = build_branch_pred(u, sim or DEFAULT_SIM_CFG)
     if not storeset:
         # C6: Memory model alignment.
         # raptor-chip LSU does NOT speculate loads past unresolved stores.
@@ -420,12 +675,20 @@ def resolve_benchmark(name: str, rv64: bool) -> tuple[Path, list[str]]:
 # main
 # ----------------------------------------------------------------------------
 def main(argv: list[str] | None = None) -> int:
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
+
+    def has_flag(*names: str) -> bool:
+        return any(
+            token == name or token.startswith(f"{name}=")
+            for token in raw_argv
+            for name in names
+        )
+
     ap = argparse.ArgumentParser(
         description="gem5 SE runner for raptor-chip benchmarks"
     )
     ap.add_argument(
         "--preset",
-        default="default",
         help="raptor-chip uarch preset (matches configs/<preset>/rapt_config.svh)",
     )
     ap.add_argument(
@@ -450,9 +713,19 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument(
         "--bp",
-        choices=("local", "bimode"),
+        choices=SUPPORTED_BP_INPUTS,
         default="local",
-        help="branch predictor flavor (default: local, matches RTL bimodal PHT)",
+        help="branch predictor family (default: local, matches RTL PC-indexed bimodal table)",
+    )
+    ap.add_argument(
+        "--no-ras",
+        action="store_true",
+        help="disable the return-address stack / RAS (default: enabled to match RTL RSB)",
+    )
+    ap.add_argument(
+        "--indirect",
+        action="store_true",
+        help="enable gem5's indirect target predictor (default: off, stronger than RTL)",
     )
     ap.add_argument(
         "--storeset",
@@ -472,13 +745,31 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument("--cwd", default=os.getcwd())
     ap.add_argument(
-        "--clk-freq", default="1GHz", help="core clock (raptor RTL targets ~1GHz)"
+        "--clk-freq", default=None,
+        help="core clock (raptor RTL targets ~1GHz); overrides sim.clk_freq when set",
     )
-    ap.add_argument("--mem-size", default="512MiB")
+    ap.add_argument("--mem-size", default=None,
+        help="backing memory size; overrides sim.mem_size when set")
     ap.add_argument(
-        "--mem-latency",
-        default="30ns",
-        help="flat backing-memory latency (set generous; raptor has no L2 in RTL)",
+        "--mem-latency", default=None,
+        help="flat backing-memory latency; overrides sim.mem_latency when set",
+    )
+    ap.add_argument(
+        "--json-config", type=Path, default=None,
+        help="ChampSim-style JSON override applied on top of --preset",
+    )
+    ap.add_argument(
+        "--set", dest="set_args", action="append", default=[],
+        metavar="KEY.PATH=VALUE",
+        help="ad-hoc override, repeatable: --set ooo_cpu.0.rob_size=128 --set L1D.mshr_size=4",
+    )
+    ap.add_argument(
+        "--dump-config", type=Path, default=None,
+        help="path to write effective merged config (default: <outdir>/raptor_se_effective.json)",
+    )
+    ap.add_argument(
+        "--print-config-only", action="store_true",
+        help="resolve + dump effective config then exit (no simulation)",
     )
     # Default to no L2 to match RTL. Use --with-l2 to opt back into the
     # legacy 64KiB L2 (only useful for sanity baselines).
@@ -497,22 +788,95 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument("--max-insts", type=int, default=0, help="0 = run to completion")
     ap.add_argument("--max-ticks", type=int, default=0, help="0 = no wall-clock cap")
-    args = ap.parse_args(argv)
+    args = ap.parse_args(raw_argv)
 
-    # ---- 1. Read raptor preset ------------------------------------------------
+    # ---- 1. Read raptor preset (layer 1: rapt_config.svh) --------------------
     svh = args.config_svh
     if svh is None:
         svh = RAPT_HOME / "configs" / args.preset / "rapt_config.svh"
     if not svh.exists():
         print(f"[raptor_se] cannot find rapt_config.svh at {svh}", file=sys.stderr)
         return 2
+    # Pre-seed rv64 from CLI; JSON/--set may flip it via simulation.rv64 below.
     cfg = parse_rapt_config(svh, rv64=args.rv64)
     u = derive_uarch(cfg)
+    sim = DEFAULT_SIM_CFG.copy()
+    sim["rv64"] = args.rv64
+
+    # ---- 1b. Layer JSON config (ChampSim-style DSE file) ---------------------
+    if args.json_config is not None:
+        if not args.json_config.exists():
+            print(f"[raptor_se] --json-config not found: {args.json_config}", file=sys.stderr)
+            return 2
+        apply_overrides(u, sim, load_json_config(args.json_config))
+
+    # ---- 1c. Layer --set CLI overrides (highest precedence) ------------------
+    apply_overrides(u, sim, parse_set_flags(args.set_args))
+
+    # ---- 1d. Layer explicitly supplied legacy CLI flags ----------------------
+    # argparse defaults are intentionally not applied here, otherwise Makefile
+    # defaults such as --bp local would mask JSON/SET DSE configs.
+    if has_flag("--cpu"):
+        sim["cpu"] = args.cpu
+    if has_flag("--bp"):
+        sim["bp"] = canonical_bp_name(args.bp)
+    if has_flag("--no-ras"):
+        sim["use_ras"] = False
+    if has_flag("--indirect"):
+        sim["use_indirect"] = True
+    if has_flag("--storeset"):
+        sim["storeset"] = True
+    if has_flag("--with-l2"):
+        sim["with_l2"] = True
+    if has_flag("--no-l2"):
+        sim["with_l2"] = False
+    if has_flag("--mshrs"):
+        sim["mshrs"] = args.mshrs
+    if has_flag("--clk-freq"):
+        sim["clk_freq"] = args.clk_freq
+    if has_flag("--mem-size"):
+        sim["mem_size"] = args.mem_size
+    if has_flag("--mem-latency"):
+        sim["mem_latency"] = args.mem_latency
+
+    # Sync back any sim-section overrides into args for the rest of main().
+    args.rv64     = bool(sim["rv64"])
+    args.cpu      = sim["cpu"]
+    args.bp       = sim["bp"]
+    args.storeset = bool(sim["storeset"])
+    args.no_l2    = not bool(sim["with_l2"])
+    args.mshrs    = int(sim["mshrs"])
+    args.clk_freq    = sim["clk_freq"]
+    args.mem_size    = sim["mem_size"]
+    args.mem_latency = sim["mem_latency"]
 
     print(f"[raptor_se] preset={args.preset} svh={svh}")
-    print(f"[raptor_se] derived uarch params:")
+    if args.json_config:
+        print(f"[raptor_se] json-config={args.json_config}")
+    if args.set_args:
+        print(f"[raptor_se] --set: {args.set_args}")
+    print(f"[raptor_se] effective uarch params:")
     for k, v in sorted(u.items()):
         print(f"    {k:14s} = {v}")
+    print(f"[raptor_se] effective sim params:")
+    for k, v in sorted(sim.items()):
+        print(f"    {k:14s} = {v}")
+
+    # Persist merged config for reproducibility / sweep post-processing.
+    outdir = Path(m5.options.outdir) if hasattr(m5, "options") and getattr(m5.options, "outdir", None) else Path("m5out")
+    dump_path = args.dump_config or (outdir / "raptor_se_effective.json")
+    dump_effective_config(
+        dump_path, u, sim,
+        meta={
+            "preset": args.preset,
+            "svh": str(svh),
+            "json_config": str(args.json_config) if args.json_config else None,
+            "set_args": args.set_args,
+            "benchmark": args.benchmark,
+        },
+    )
+    if args.print_config_only:
+        return 0
 
     # ---- 2. Resolve benchmark -------------------------------------------------
     elf, extra = resolve_benchmark(args.benchmark, args.rv64)
@@ -536,7 +900,7 @@ def main(argv: list[str] | None = None) -> int:
     # CPU
     if args.cpu == "o3":
         system.cpu = build_o3_cpu(
-            u, rv64=args.rv64, bp_kind=args.bp, storeset=args.storeset
+            u, rv64=args.rv64, sim=sim, storeset=args.storeset
         )
     else:
         system.cpu = RiscvTimingSimpleCPU(

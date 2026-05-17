@@ -401,6 +401,18 @@ module rapt_idu #(
   assign idu_bpu.train_target = correct_npc;
   assign idu_bpu.train_type   = 2'b01;  // DIRE (JAL)
 
+  // Speculative RSB push: pulse on a CALL in slot A (jal/jalr with link rd).
+  // Slot B can never be a control op (see IDU_SLOT_B_NO_CONTROL), so handling
+  // slot A only is sufficient. Suppressed during early-resteer / trap so we
+  // don't push a wrong-path call. The pop side lives in `rapt_bpu`; flush
+  // recovery rewinds `rsb_spec_idx` to the architectural pointer.
+  logic is_link_rd_a;
+  assign is_link_rd_a    = (rd_a == 5'd1) || (rd_a == 5'd5);
+  assign idu_bpu.push_en = valid && !ifu_trap && !early_resteer_cond
+                            && (idu_rnu.uop_a.jen || idu_rnu.uop_a.jren)
+                            && is_link_rd_a;
+  assign idu_bpu.push_addr = pc_idu_a + (is_c_a ? XLEN'('d2) : XLEN'('d4));
+
   // One-shot pulse: only fire resteer on the first cycle of detection
   always_ff @(posedge clock) begin
     if (reset || cmu_bcast.flush_pipe) begin

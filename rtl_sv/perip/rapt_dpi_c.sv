@@ -27,6 +27,15 @@ import "DPI-C" function void pmem_write(
   input longint wdata,
   input byte    wmask
 );
+import "DPI-C" function void sdram_read(
+  input  longint raddr,
+  output byte    rdata
+);
+import "DPI-C" function void sdram_write(
+  input longint waddr,
+  input byte    wdata,
+  input byte    wmask
+);
 `else
 import "DPI-C" function void npc_difftest_mem_diff(
   input int  waddr,
@@ -40,6 +49,15 @@ import "DPI-C" function void pmem_read(
 import "DPI-C" function void pmem_write(
   input int  waddr,
   input int  wdata,
+  input byte wmask
+);
+import "DPI-C" function void sdram_read(
+  input  int  raddr,
+  output byte rdata
+);
+import "DPI-C" function void sdram_write(
+  input int  waddr,
+  input byte wdata,
   input byte wmask
 );
 `endif

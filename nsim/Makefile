@@ -86,6 +86,11 @@ LDFLAGS = -lreadline -ldl
 # pack/STA/synthesis still use raw VFLAGS and therefore do not pick up the
 # default assertion define.
 VFLAGS ?= ## Extra RTL defines for NPC (-DRAPT_RV64, etc.)
+# Propagate SOC_DEFINE (e.g. -DRAPT_SOC for ysyxSoC builds) to RTL VFLAGS so
+# bus-level `ifdef` workarounds can be conditionally enabled.
+ifneq ($(SOC_DEFINE),)
+VFLAGS += $(SOC_DEFINE)
+endif
 RAPT_SIM_ASSERT ?= 1## Enable RTL SVA assertions by default in Verilator simulation (1=on, 0=off)
 RAPT_SIM_ASSERT := $(strip $(RAPT_SIM_ASSERT))
 SIM_ASSERT_VFLAGS :=

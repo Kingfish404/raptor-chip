@@ -41,6 +41,18 @@ SHELL := /bin/bash
 NPROC := $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 
 # ============================================================================
+# Parallel multi-binary test runner
+# ----------------------------------------------------------------------------
+# Multi-binary test suites (cpu-tests, irq-tests, ...) historically ran their
+# member tests one-by-one. We parallelize the run phase across $(JOBS) sim
+# instances. Build phase stays sequential (cheap; shares AM lib state).
+#
+# Override `JOBS=N` to cap parallelism (default = NPROC).
+# Override `JOBS=1` to recover deterministic interleaved output.
+# ============================================================================
+JOBS ?= $(NPROC)## Parallel simulator instances for multi-binary test suites
+
+# ============================================================================
 # Test/benchmark output logging (tee to nsim/build/<config>/logs/)
 #
 # All benchmark/test recipes pipe their output through `tee` to a per-target
@@ -334,13 +346,58 @@ am-tests-npc32: build-npc32
 	@mkdir -p $(NPC_LOG_DIR)
 	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/tests/am-tests ARCH=$(NPC_ARCH) run ARGS="$(ARGS)" mainargs="i" VME=1 $(call tee_npc,am-tests-npc32)
 
-cpu-tests-nemu32: build-nemu32
+CPU_TESTS_DIR := $(AM_KERNELS)/tests/cpu-tests
+CPU_TESTS     := $(basename $(notdir $(wildcard $(CPU_TESTS_DIR)/tests/*.c)))
+
+# Parallel cpu-tests runner.
+# 1. Build all per-test .bin files sequentially (shares AM lib state).
+# 2. Run resulting .bin files concurrently via xargs -P $(JOBS).
+# Args (positional, all shell-quoted internally):
+#   $(1) suite label (e.g. npc32 / nemu32) - used in log header
+#   $(2) shell expression producing the simulator command (binary + base args)
+#   $(3) AM ARCH for the test build (riscv32-npc / riscv32-nemu / ...)
+#   $(4) absolute log file path for tee'ing aggregate output
+define run_cpu_tests_parallel
+	{ \
+	  arch="$(strip $(3))"; \
+	  echo "=== cpu-tests-$(1): building $(words $(CPU_TESTS)) tests (sequential) ==="; \
+	  cd $(CPU_TESTS_DIR); \
+	  for t in $(CPU_TESTS); do \
+	    printf 'NAME = %s\nSRCS = tests/%s.c\ninclude $${AM_HOME}/Makefile\n' "$$t" "$$t" > Makefile.$$t; \
+	    $(MAKE) -s -f Makefile.$$t ARCH=$$arch CROSS_COMPILE=$(CROSS_COMPILE) image >/dev/null 2>&1 \
+	      || echo "[cpu-tests-$(1)] BUILD FAIL: $$t"; \
+	  done; \
+	  rm -f Makefile.*; \
+	  SIM_CMD=$(2); \
+	  echo "=== cpu-tests-$(1): running in parallel (JOBS=$(JOBS)) ==="; \
+	  ( for t in $(CPU_TESTS); do \
+	      bin="$(CPU_TESTS_DIR)/build/$$t-$$arch.bin"; \
+	      [ -f "$$bin" ] && printf '%s|%s\n' "$$t" "$$bin"; \
+	    done ) \
+	  | SIM_CMD="$$SIM_CMD" SIM_ARGS="$(ARGS)" NSIM_HOME="$(NSIM_HOME)" \
+	    xargs -P $(JOBS) -n1 sh -c ' \
+	      line="$$1"; name="$${line%%|*}"; bin="$${line#*|}"; \
+	      out=$$(cd "$$NSIM_HOME" && $$SIM_CMD $$SIM_ARGS "$$bin" 2>&1); \
+	      rc=$$?; \
+	      if [ $$rc -eq 0 ] && echo "$$out" | grep -q "HIT GOOD TRAP"; then \
+	        printf "[%18s] \033[1;32mPASS\033[0m\n" "$$name"; \
+	      else \
+	        printf "[%18s] \033[1;31mFAIL\033[0m (rc=%d)\n" "$$name" $$rc; \
+	      fi' _; \
+	  echo "=== cpu-tests-$(1): done ==="; \
+	} 2>&1 | tee $(4)
+endef
+
+cpu-tests-nemu32: build-nemu32 ## Run AM cpu-tests on NEMU (sequential; NEMU is not concurrency-safe here)
 	@mkdir -p $(NEMU_LOG_DIR)
 	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/tests/cpu-tests ARCH=riscv32-nemu run ARGS="$(ARGS)" mainargs="i" VME=1 $(call tee_nemu,cpu-tests-nemu32)
 
-cpu-tests-npc32: build-npc32
+cpu-tests-npc32: build-npc32 ## Run AM cpu-tests on NPC (parallel)
 	@mkdir -p $(NPC_LOG_DIR)
-	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/tests/cpu-tests ARCH=$(NPC_ARCH) run ARGS="$(ARGS)" mainargs="i" VME=1 $(call tee_npc,cpu-tests-npc32)
+	@set -o pipefail; \
+	  NPC_CMD=$$($(MAKE) --no-print-directory -C $(NSIM_HOME) VFLAGS="$(VFLAGS)" print-npc-exec) \
+	    || { echo "[cpu-tests-npc32] ERROR: print-npc-exec failed"; exit 1; }; \
+	  $(call run_cpu_tests_parallel,npc32,"$$NPC_CMD",$(NPC_ARCH),$(NPC_LOG_DIR)/cpu-tests-npc32.log)
 
 # --- Bare-metal IRQ tests (PLIC, etc) -------------------------------------
 # Each test is a standalone M-mode .bin loaded directly at 0x80000000 via
@@ -352,29 +409,55 @@ IRQ_TESTS      := $(notdir $(basename $(wildcard $(IRQ_TESTS_SRC_DIR)/*.c)))
 irq-tests-build: ## Build bare-metal PLIC IRQ tests
 	$(MAKE) -C $(RAPTOR_HOME)/app/tests/irq build
 
-irq-tests-npc32: build-npc32 irq-tests-build ## Build & run bare-metal PLIC IRQ tests on NPC
+irq-tests-npc32: build-npc32 irq-tests-build ## Build & run bare-metal PLIC IRQ tests on NPC (parallel)
 	@mkdir -p $(NPC_LOG_DIR)
-	@echo "=== IRQ tests (bare-metal) ==="
-	@set -o pipefail; ( fail=0; for t in $(IRQ_TESTS); do \
-		echo "--- $$t ---"; \
-		$(MAKE) --no-print-directory -C $(NSIM_HOME) run \
-			ARGS="$(ARGS)" VFLAGS="$(VFLAGS)" \
-			IMG=$(IRQ_TESTS_DIR)/$$t.bin || fail=1; \
-	done; \
-	if [ "$$fail" = 0 ]; then echo "=== IRQ tests: ALL PASSED ==="; \
-	else echo "=== IRQ tests: FAILURES ==="; exit 1; fi ) $(call tee_npc,irq-tests-npc32)
+	@set -o pipefail; \
+	  NPC_CMD=$$($(MAKE) --no-print-directory -C $(NSIM_HOME) VFLAGS="$(VFLAGS)" print-npc-exec) \
+	    || { echo "[irq-tests-npc32] ERROR: print-npc-exec failed"; exit 1; }; \
+	  { \
+	    echo "=== IRQ tests (bare-metal, parallel JOBS=$(JOBS)) ==="; \
+	    ( for t in $(IRQ_TESTS); do printf '%s|%s\n' "$$t" "$(IRQ_TESTS_DIR)/$$t.bin"; done ) \
+	    | NPC_CMD="$$NPC_CMD" SIM_ARGS="$(ARGS)" NSIM_HOME="$(NSIM_HOME)" \
+	      xargs -P $(JOBS) -n1 sh -c ' \
+	        line="$$1"; name="$${line%%|*}"; bin="$${line#*|}"; \
+	        out=$$(cd "$$NSIM_HOME" && $$NPC_CMD $$SIM_ARGS "$$bin" 2>&1); \
+	        rc=$$?; \
+	        if [ $$rc -eq 0 ] && echo "$$out" | grep -q "HIT GOOD TRAP"; then \
+	          printf "[%30s] \033[1;32mPASS\033[0m\n" "$$name"; \
+	        else \
+	          printf "[%30s] \033[1;31mFAIL\033[0m (rc=%d)\n" "$$name" $$rc; \
+	          echo "$$out" | tail -10 | sed "s/^/    /"; \
+	          exit 1; \
+	        fi' _; \
+	    rc=$$?; \
+	    if [ $$rc -eq 0 ]; then echo "=== IRQ tests: ALL PASSED ==="; \
+	    else echo "=== IRQ tests: FAILURES ==="; exit $$rc; fi; \
+	  } $(call tee_npc,irq-tests-npc32)
 
-irq-tests-npc32-difftest: config-npc32-difftest config-nemu32-ref irq-tests-build ## Build & run bare-metal PLIC IRQ tests on NPC with difftest
+irq-tests-npc32-difftest: config-npc32-difftest config-nemu32-ref irq-tests-build ## Build & run bare-metal PLIC IRQ tests on NPC with difftest (parallel)
 	@mkdir -p $(NPC_LOG_DIR)
-	@echo "=== IRQ tests (bare-metal, difftest) ==="
-	@set -o pipefail; ( fail=0; for t in $(IRQ_TESTS); do \
-		echo "--- $$t ---"; \
-		$(MAKE) --no-print-directory -C $(NSIM_HOME) run \
-			ARGS="$(ARGS)" VFLAGS="$(VFLAGS)" \
-			IMG=$(IRQ_TESTS_DIR)/$$t.bin || fail=1; \
-	done; \
-	if [ "$$fail" = 0 ]; then echo "=== IRQ tests (difftest): ALL PASSED ==="; \
-	else echo "=== IRQ tests (difftest): FAILURES ==="; exit 1; fi ) $(call tee_npc,irq-tests-npc32-difftest)
+	@set -o pipefail; \
+	  NPC_CMD=$$($(MAKE) --no-print-directory -C $(NSIM_HOME) VFLAGS="$(VFLAGS)" print-npc-exec) \
+	    || { echo "[irq-tests-npc32-difftest] ERROR: print-npc-exec failed"; exit 1; }; \
+	  { \
+	    echo "=== IRQ tests (bare-metal, difftest, parallel JOBS=$(JOBS)) ==="; \
+	    ( for t in $(IRQ_TESTS); do printf '%s|%s\n' "$$t" "$(IRQ_TESTS_DIR)/$$t.bin"; done ) \
+	    | NPC_CMD="$$NPC_CMD" SIM_ARGS="$(ARGS)" NSIM_HOME="$(NSIM_HOME)" \
+	      xargs -P $(JOBS) -n1 sh -c ' \
+	        line="$$1"; name="$${line%%|*}"; bin="$${line#*|}"; \
+	        out=$$(cd "$$NSIM_HOME" && $$NPC_CMD $$SIM_ARGS "$$bin" 2>&1); \
+	        rc=$$?; \
+	        if [ $$rc -eq 0 ] && echo "$$out" | grep -q "HIT GOOD TRAP"; then \
+	          printf "[%30s] \033[1;32mPASS\033[0m\n" "$$name"; \
+	        else \
+	          printf "[%30s] \033[1;31mFAIL\033[0m (rc=%d)\n" "$$name" $$rc; \
+	          echo "$$out" | tail -10 | sed "s/^/    /"; \
+	          exit 1; \
+	        fi' _; \
+	    rc=$$?; \
+	    if [ $$rc -eq 0 ]; then echo "=== IRQ tests (difftest): ALL PASSED ==="; \
+	    else echo "=== IRQ tests (difftest): FAILURES ==="; exit $$rc; fi; \
+	  } $(call tee_npc,irq-tests-npc32-difftest)
 
 # --- Minimal Linux-pattern repros -----------------------------------------
 REPRO_TESTS_DIR := $(RAPTOR_HOME)/app/build/rv32/tests/repro

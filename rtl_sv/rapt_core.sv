@@ -224,6 +224,44 @@ module rapt_core #(
       .reset(reset)
   );
 
+  // ROU (Re-Order Unit)
+  rapt_rou rou (
+      .clock(clock),
+
+      .rnu_rou(rnu_rou),
+
+      // issue
+      .exu_prf(exu_prf),
+      .rou_exu(rou_exu),
+
+      .exu_rou(exu_rou),
+      .exu_rou_b(exu_rou_b),
+      .exu_rou_c(exu_rou_c),
+      .exu_ioq_bcast(exu_ioq_bcast),
+
+      .csr_bcast(csr_bcast),
+      .clint_timer_trap(clint_timer_trap),
+      .clint_sw_trap(clint_sw_trap),
+      .clint_ext_trap(clint_ext_trap),
+      .s_int_pending(s_int_pending),
+      .s_int_cause(s_int_cause),
+
+      .rou_cmu(rou_cmu),
+      .rou_csr(rou_csr),
+      .rou_lsu(rou_lsu),
+
+      .uop_pl(uop_pl),
+
+      .dm_haltreq_i (dm_haltreq_i),
+      .halted_o     (halted_o),
+      .halt_pc_o    (halt_pc_o),
+      .commit_fire_o(commit_fire_o),
+
+      .pmu_rob_full(pmu_rob_full_unused),
+
+      .reset(reset)
+  );
+
   // PRF (Physical Register File): top-level shared resource
   // Debug: architectural register view (committed + speculative)
   /* verilator lint_off UNUSEDSIGNAL */
@@ -265,44 +303,6 @@ module rapt_core #(
         .rvfi_rd_wdata_a(rvfi_rd_wdata_a_w)
       , .rvfi_rd_wdata_b(rvfi_rd_wdata_b_w)
 `endif
-  );
-
-  // ROU (Re-Order Unit)
-  rapt_rou rou (
-      .clock(clock),
-
-      .rnu_rou(rnu_rou),
-
-      // issue
-      .exu_prf(exu_prf),
-      .rou_exu(rou_exu),
-
-      .exu_rou(exu_rou),
-      .exu_rou_b(exu_rou_b),
-      .exu_rou_c(exu_rou_c),
-      .exu_ioq_bcast(exu_ioq_bcast),
-
-      .csr_bcast(csr_bcast),
-      .clint_timer_trap(clint_timer_trap),
-      .clint_sw_trap(clint_sw_trap),
-      .clint_ext_trap(clint_ext_trap),
-      .s_int_pending(s_int_pending),
-      .s_int_cause(s_int_cause),
-
-      .rou_cmu(rou_cmu),
-      .rou_csr(rou_csr),
-      .rou_lsu(rou_lsu),
-
-      .uop_pl(uop_pl),
-
-      .dm_haltreq_i (dm_haltreq_i),
-      .halted_o     (halted_o),
-      .halt_pc_o    (halt_pc_o),
-      .commit_fire_o(commit_fire_o),
-
-      .pmu_rob_full(pmu_rob_full_unused),
-
-      .reset(reset)
   );
 
   // EXU (EXecution Unit)

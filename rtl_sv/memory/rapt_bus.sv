@@ -48,6 +48,7 @@ module rapt_bus #(
   assign store_bridge = l1i_bus.awvalid ? L1I : L1D;
   assign store_current = (state_store == LS_S_A) ? store_bridge : store_source;
 
+`ifndef RAPT_SOC
   // =========================================================================
   // Multi-outstanding read AR pipeline.
   //
@@ -108,37 +109,43 @@ module rapt_bus #(
   assign l1d_bus.rready = l1d_push;
 
   // Downstream issue arbiter (L1D priority).
+  // (The RAPT_SOC variant uses the legacy single-outstanding FSM further down
+  // and does not reach this point — see the `\`else` branch.)
   logic issue_l1d, issue_l1i;
   assign issue_l1d = l1d_slot_busy && !l1d_slot_issued;
   assign issue_l1i = !issue_l1d && !l1i_q_empty;
 
   logic [XLEN-1:0] l1i_q_head_addr;
   logic            l1i_q_head_burst;
-  assign l1i_q_head_addr       = l1i_q_addr[l1i_q_rdptr];
-  assign l1i_q_head_burst      = l1i_q_burst[l1i_q_rdptr];
+  assign l1i_q_head_addr = l1i_q_addr[l1i_q_rdptr];
+  assign l1i_q_head_burst = l1i_q_burst[l1i_q_rdptr];
 
   // ifu read demux
-  assign l1i_bus.rdata         = axi.rdata;
-  assign l1i_bus.rvalid        = (axi.rid == L1I) && axi.rvalid;
-  assign l1i_bus.rlast         = (axi.rid == L1I) && axi.rlast;
-  assign l1i_bus.rerr          = (axi.rid == L1I) && axi.rvalid && (axi.rresp != 2'b00);
-  assign l1i_bus.wready        = (store_source == L1I) && axi.bvalid;
-  assign l1i_bus.werr          = (store_source == L1I) && axi.bvalid && (axi.bresp != 2'b00);
+  assign l1i_bus.rdata = axi.rdata;
+  assign l1i_bus.rvalid = (axi.rid == L1I) && axi.rvalid;
+  assign l1i_bus.rlast = (axi.rid == L1I) && axi.rlast;
+  assign l1i_bus.rerr = (axi.rid == L1I) && axi.rvalid && (axi.rresp != 2'b00);
+  assign l1i_bus.wready = (store_source == L1I) && axi.bvalid;
+  assign l1i_bus.werr = (store_source == L1I) && axi.bvalid && (axi.bresp != 2'b00);
 
   // lsu read demux
-  assign l1d_bus.rdata         = axi.rdata;
-  assign l1d_bus.rvalid        = (axi.rid == L1D) && axi.rvalid;
+  // Gate L1D response by slot_issued: do NOT forward axi.rvalid to L1D until
+  // our AR has been handed to the slave. This prevents accepting stale
+  // responses (e.g. ysyxSoC `sdram_axi` response-FIFO mis-sync) that arrive
+  // before our request has been issued.
+  assign l1d_bus.rdata = axi.rdata;
+  assign l1d_bus.rvalid = l1d_slot_issued && (axi.rid == L1D) && axi.rvalid;
   assign l1d_bus.difftest_skip = l1d_slot_busy && l1d_slot_mmio;
-  assign l1d_bus.rerr          = (axi.rid == L1D) && axi.rvalid && (axi.rresp != 2'b00);
+  assign l1d_bus.rerr = l1d_slot_issued && (axi.rid == L1D) && axi.rvalid && (axi.rresp != 2'b00);
 
   // Downstream AR drive (combinational; backed by registered slot/queue).
-  assign axi.arvalid           = issue_l1d || issue_l1i;
-  assign axi.arid              = issue_l1d ? 4'(L1D) : 4'(L1I);
-  assign axi.araddr            = issue_l1d ? l1d_slot_addr : l1i_q_head_addr;
-  assign axi.arsize            = issue_l1d ? l1d_slot_size : 3'b010;  // L1I: 4-byte
-  assign axi.arburst           = (issue_l1i && l1i_q_head_burst) ? 2'b01 : 2'b00;
-  assign axi.arlen             = (issue_l1i && l1i_q_head_burst) ? 8'h1 : 8'h0;
-  assign axi.rready            = 1'b1;
+  assign axi.arvalid = issue_l1d || issue_l1i;
+  assign axi.arid = issue_l1d ? 4'(L1D) : 4'(L1I);
+  assign axi.araddr = issue_l1d ? l1d_slot_addr : l1i_q_head_addr;
+  assign axi.arsize = issue_l1d ? l1d_slot_size : 3'b010;  // L1I: 4-byte
+  assign axi.arburst = (issue_l1i && l1i_q_head_burst) ? 2'b01 : 2'b00;
+  assign axi.arlen = (issue_l1i && l1i_q_head_burst) ? 8'h1 : 8'h0;
+  assign axi.rready = 1'b1;
 
   // L1D arsize from rstrb (matches original encoding).
   logic [2:0] l1d_arsize_enc;
@@ -201,13 +208,110 @@ module rapt_bus #(
       if (issue_l1d && axi.arready) begin
         l1d_slot_issued <= 1'b1;
       end
-      if (l1d_slot_busy && axi.rvalid && axi.rlast && (axi.rid == 4'(L1D))) begin
+      if (l1d_slot_busy && l1d_slot_issued && axi.rvalid && axi.rlast && (axi.rid == 4'(L1D))) begin
         l1d_slot_busy   <= 1'b0;
         l1d_slot_issued <= 1'b0;
         l1d_slot_mmio   <= 1'b0;
       end
     end
   end
+
+`else  // RAPT_SOC: legacy single-outstanding FSM (third-party ysyxSoC
+       // sdram_axi controller does not tolerate multi-outstanding ARs).
+  typedef enum logic [2:0] {
+    LD_A,
+    LD_AS,
+    LD_D
+  } state_load_t;
+
+  logic [3:0] arid;
+  logic [XLEN-1:0] bus_araddr;
+  logic arburst;
+  logic [2:0] arsize;
+  logic l1d_load_is_mmio;
+
+  state_load_t state_load;
+  state_lds_t state_load_source;
+  state_lds_t load_bridge;
+
+  assign axi.arid = arid;
+  assign load_bridge = l1d_bus.arvalid ? L1D : L1I;
+
+  assign l1i_bus.rready = (state_load == LD_A && load_bridge == L1I);
+  assign l1i_bus.rdata = axi.rdata;
+  assign l1i_bus.rvalid = (axi.rid == L1I) && axi.rvalid;
+  assign l1i_bus.rlast = (axi.rid == L1I) && axi.rlast;
+  assign l1i_bus.rerr = (axi.rid == L1I) && axi.rvalid && (axi.rresp != 2'b00);
+  assign l1i_bus.wready = (store_source == L1I) && axi.bvalid;
+  assign l1i_bus.werr = (store_source == L1I) && axi.bvalid && (axi.bresp != 2'b00);
+
+  assign l1d_bus.rready = (state_load == LD_A && load_bridge == L1D);
+  assign l1d_bus.rdata = axi.rdata;
+  assign l1d_bus.rvalid = (axi.rid == L1D) && axi.rvalid;
+  assign l1d_bus.difftest_skip = l1d_load_is_mmio;
+  assign l1d_bus.rerr = (axi.rid == L1D) && axi.rvalid && (axi.rresp != 2'b00);
+
+  assign axi.arburst = arburst ? 2'b01 : 2'b00;
+  assign axi.arsize = arsize;
+  assign axi.arlen = arburst ? 8'h1 : 8'h0;
+  assign axi.araddr = bus_araddr;
+  assign axi.arvalid = (state_load == LD_AS);
+  assign axi.rready = 1'b1;
+
+  always_ff @(posedge clock) begin
+    if (reset) begin
+      state_load <= LD_A;
+      l1d_load_is_mmio <= 1'b0;
+      arsize <= 3'b000;
+      arburst <= 1'b0;
+      bus_araddr <= '0;
+      arid <= '0;
+      state_load_source <= L1I;
+    end else begin
+      unique case (state_load)
+        LD_A: begin
+          if (l1d_bus.arvalid) begin
+            state_load <= LD_AS;
+            bus_araddr <= l1d_bus.araddr;
+            arid <= L1D;
+            state_load_source <= L1D;
+            l1d_load_is_mmio <= rapt_pkg::addr_mmio(l1d_bus.araddr);
+            arsize <= (
+              ({3{l1d_bus.rstrb == 8'h1}} & 3'b000) |
+              ({3{l1d_bus.rstrb == 8'h3}} & 3'b001) |
+              ({3{l1d_bus.rstrb == 8'hf}} & 3'b010) |
+              ({3{l1d_bus.rstrb == 8'hff}} & 3'b011) |
+              (3'b000)
+            );
+          end else if (l1i_bus.arvalid) begin
+            bus_araddr <= l1i_bus.araddr;
+            state_load <= LD_AS;
+            arburst <= l1i_bus.arburst;
+            arid <= L1I;
+            arsize <= 3'b010;
+            state_load_source <= L1I;
+          end
+        end
+        LD_AS: begin
+          if (axi.arready) begin
+            state_load <= LD_D;
+            arburst <= 1'b0;
+            bus_araddr <= '0;
+          end
+        end
+        LD_D: begin
+          if (axi.rvalid && axi.rlast) begin
+            state_load <= LD_A;
+            arburst <= 1'b0;
+            bus_araddr <= '0;
+            l1d_load_is_mmio <= 1'b0;
+          end
+        end
+        default: state_load <= LD_A;
+      endcase
+    end
+  end
+`endif  // RAPT_SOC
 
   logic [XLEN-1:0] store_awaddr;
   logic [XLEN-1:0] store_wdata;

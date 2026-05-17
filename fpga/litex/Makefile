@@ -84,6 +84,10 @@ RAPT_CONFIG ?= default ## Raptor uarch config preset (default|small|...)
 endif
 RAPT_CONFIG := $(strip $(RAPT_CONFIG))
 export RAPT_CONFIG
+# Log directory mirroring nsim/build/<config>/logs/litex/ — co-located with
+# coremark-npc32.log, microbench-npc32.log, etc. from the root Makefile.
+# Defined here (after the RAPT_CONFIG strip) so RAPT_CONFIG is already final.
+LITEX_LOG_DIR := $(NSIM_DIR)/build/$(RAPT_CONFIG)/logs/litex
 GOWIN_APP   ?= $(firstword $(wildcard /Applications/GowinIDE.app /Applications/GowinIDE.edu.app)) ## Gowin IDE app bundle path on macOS. Synthesis/PnR only; load/flash use openFPGALoader.
 WITH_LED_CHASER ?= 0 ## Set to 1 to add LedChaser to fpga-build (off by default on the Pro for PnR density relief)
 UART_PORT   ?= $(shell ls -1 /dev/tty.usbserial* /dev/tty.wchusbserial* /dev/tty.usbmodem* 2>/dev/null | sort | tail -n 1) ## Serial device for fpga-console
@@ -330,7 +334,9 @@ EMBENCH_BENCHES := aha-mont64 crc32 depthconv edn huffbench matmult-int \
                    md5sum nettle-aes nettle-sha256 nsichneu picojpeg \
                    qrduino sglib-combined slre statemate tarfind ud \
                    wikisort xgboost
-EMBENCH_LOG_DIR := $(BUILD_DIR)/embench-logs
+# Embench per-bench logs live inside LITEX_LOG_DIR so they are co-located with
+# coremark.log etc. (LITEX_LOG_DIR is declared right after the Paths block).
+EMBENCH_LOG_DIR := $(LITEX_LOG_DIR)/embench-logs
 
 # app/ LLM-style benchmarks, linked as LiteX-native payloads so they run
 # without pk/newlib in LiteX sim and on FPGA via BIOS serialboot.
@@ -604,8 +610,10 @@ COREMARK_ITERATIONS ?= 64 ## CoreMark loop iterations (FPGA: 1000+ recommended; 
 coremark-build: ## Build CoreMark binary (clone + compile) {COREMARK_ITERATIONS,SYS_CLK}
 	$(MAKE) -C $(COREMARK_BENCH) build ITERATIONS=$(COREMARK_ITERATIONS) SYS_CLK_HZ=$(SYS_CLK)
 
-coremark: ## Alias: make sim PAYLOAD=coremark {COREMARK_ITERATIONS}
-	@$(MAKE) --no-print-directory sim PAYLOAD=coremark COREMARK_ITERATIONS=$(COREMARK_ITERATIONS)
+coremark: ## Alias: make sim PAYLOAD=coremark — tees output to $(LITEX_LOG_DIR)/coremark.log
+	@mkdir -p $(LITEX_LOG_DIR)
+	@set -o pipefail; $(MAKE) --no-print-directory sim PAYLOAD=coremark COREMARK_ITERATIONS=$(COREMARK_ITERATIONS) \
+		2>&1 | tee $(LITEX_LOG_DIR)/coremark.log
 
 coremark-fpga: coremark-build ## Upload CoreMark to FPGA main_ram via BIOS serialboot {COREMARK_ITERATIONS,MAIN_RAM_BASE,UART_PORT,UART_BAUD}
 	@$(MAKE) --no-print-directory fpga-upload BIN=$(COREMARK_BIN)
@@ -656,7 +664,7 @@ embench-run: ## Run one Embench bench (BENCH=<name>) {BENCH}
 
 embench: $(PACK_SV) $(FW_SIM_BIN) sim-build ## Build + run all Embench benches (parallel) + Embench Score report
 	@mkdir -p $(EMBENCH_LOG_DIR)
-	@bash $(EMBENCH_BENCH)/run-embench.sh
+	@LOG_DIR=$(EMBENCH_LOG_DIR) bash $(EMBENCH_BENCH)/run-embench.sh 2>&1 | tee $(LITEX_LOG_DIR)/embench.log
 
 embench-report: ## Re-run Embench Score report from existing logs
 	@bash $(EMBENCH_BENCH)/report-embench.sh $(EMBENCH_LOG_DIR)
@@ -704,8 +712,10 @@ app-fpga-upload: ## Upload a prebuilt app LiteX-native bin via BIOS serialboot {
 microbench-build: ## Build MicroBench binary
 	$(MAKE) -C $(MICROBENCH_DIR) ARCH=riscv32-npc
 
-microbench: ## Alias: make sim PAYLOAD=microbench
-	@$(MAKE) --no-print-directory sim PAYLOAD=microbench
+microbench: ## Alias: make sim PAYLOAD=microbench — tees output to $(LITEX_LOG_DIR)/microbench.log
+	@mkdir -p $(LITEX_LOG_DIR)
+	@set -o pipefail; $(MAKE) --no-print-directory sim PAYLOAD=microbench \
+		2>&1 | tee $(LITEX_LOG_DIR)/microbench.log
 
 # --- Self-contained C microbenchmarks (fpga/litex/tests) ---
 # Standalone payloads that do NOT depend on AM / nanos-lite / libc. They talk
@@ -723,14 +733,15 @@ tests-clean: ## Clean standalone microbenchmark build artifacts
 $(TEST_TARGETS): test-%: ## Alias: make sim PAYLOAD=test-<NAME>
 	@$(MAKE) --no-print-directory sim PAYLOAD=test-$*
 
-tests-run: tests ## Run every standalone test sequentially
-	@set -e; for t in $(TEST_NAMES); do \
+tests-run: tests ## Run every standalone test sequentially — tees aggregate output to $(LITEX_LOG_DIR)/tests-run.log
+	@mkdir -p $(LITEX_LOG_DIR)
+	@{ set -e; for t in $(TEST_NAMES); do \
 		echo "================================================================"; \
 		echo "[tests-run] Running test-$$t"; \
 		echo "================================================================"; \
 		$(MAKE) --no-print-directory sim PAYLOAD=test-$$t SIM_TIMEOUT=$(SIM_TIMEOUT) || exit 1; \
-	done
-	@echo "[tests-run] All tests completed."
+	done; \
+	echo "[tests-run] All tests completed."; } 2>&1 | tee $(LITEX_LOG_DIR)/tests-run.log
 
 # --- OpenSBI (standalone test payload) ---
 opensbi-build: ## Build OpenSBI (standalone, from linux/opensbi)

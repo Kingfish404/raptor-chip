@@ -192,6 +192,25 @@ class Raptor(CPU):
         soc.add_config("CPU_HAS_DCACHE")
         soc.add_config("CPU_HAS_ICACHE")
 
+        # Pin the Raptor CLINT mtime tick rate to the LiteX sys_clk so that
+        # `rdtime` advances once per cycle (MTIME_DIV=1). Without this the
+        # RTL default (RAPT_CORE_CLOCK_MHZ=1000, RAPT_MTIME_FREQ_MHZ=10)
+        # gives MTIME_DIV=100 and any firmware that assumes
+        # `EE_TICKS_PER_SEC == sys_clk_freq` (e.g. CoreMark) reports
+        # wall-clock times that are 100x too small.
+        # Injected via RAPT_PACK_VFLAGS so it flows into the nsim pack rule
+        # (see add_sources below). Only set when the user hasn't already
+        # pinned the rate themselves.
+        sys_clk_mhz = max(1, int(round(soc.sys_clk_freq / 1_000_000)))
+        existing = os.environ.get("RAPT_PACK_VFLAGS", "")
+        extra = []
+        if "-DRAPT_CORE_CLOCK_MHZ=" not in existing:
+            extra.append(f"-DRAPT_CORE_CLOCK_MHZ={sys_clk_mhz}")
+        if "-DRAPT_MTIME_FREQ_MHZ=" not in existing:
+            extra.append(f"-DRAPT_MTIME_FREQ_MHZ={sys_clk_mhz}")
+        if extra:
+            os.environ["RAPT_PACK_VFLAGS"] = (existing + " " + " ".join(extra)).strip()
+
         # Cache parameters for Device Tree.
         if self.variant in ("linux", "linux64"):
             soc.add_config("CPU_DCACHE_SIZE", 4096)

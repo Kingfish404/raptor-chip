@@ -1,6 +1,7 @@
 `include "rapt.svh"
 `include "rapt_if.svh"
 
+/* verilator lint_off UNUSEDPARAM */
 module rapt_bpu #(
     parameter int PHT_SIZE = `RAPT_PHT_SIZE,
     parameter int PHT_LEN = $clog2(PHT_SIZE),
@@ -8,7 +9,12 @@ module rapt_bpu #(
     parameter int BTB_WAYS = 2,
     parameter int BTB_LEN = $clog2(BTB_SIZE / BTB_WAYS),
     parameter int BTB_TAG_LEN = 7,
-    parameter int GHR_LEN = 11,
+    // GHR_LEN widened to feed TAGE's longest geometric history (64 bits).
+    parameter int GHR_LEN = 64,
+    // PHR_LEN: path history register (Seznec's TAGE uses an 8-bit PHR
+    // formed by shifting in one PC bit per predicted branch). Differentiates
+    // contexts that share GHR but reach the branch via different call paths.
+    parameter int PHR_LEN = 8,
     parameter int RSB_SIZE = `RAPT_RSB_SIZE,
     parameter int XLEN = `RAPT_XLEN
 ) (
@@ -22,6 +28,7 @@ module rapt_bpu #(
     input reset
 );
   /* verilator lint_off UNUSEDSIGNAL */
+  /* verilator lint_off UNUSEDPARAM */
   typedef enum logic [1:0] {
     COND = 'b00,  // Conditional Branch
     DIRE = 'b01,  // Direct Jump
@@ -45,7 +52,12 @@ module rapt_bpu #(
 
   logic [GHR_LEN-1:0] rgshare;
   logic [GHR_LEN-1:0] gshare;
-  logic [PHT_LEN-1:0] rpht_idx;
+  // Path history registers: shift in one PC bit (PC[1] = first instr-word bit
+  // above the 16b-alignment) per predicted / committed branch. `phr` tracks
+  // the speculative stream (rewound on flush); `rphr` is the architectural
+  // companion of rgshare, both used for re-deriving the TAGE update index/tag.
+  logic [PHR_LEN-1:0] phr;
+  logic [PHR_LEN-1:0] rphr;
   logic [BTB_LEN-1:0] rbtb_idx;
   logic [BTB_TAG_LEN-1:0] rbtb_tag;
   logic is_b;
@@ -68,30 +80,51 @@ module rapt_bpu #(
   // the sub-modules, so the internal read-address registers stay separate
   // from pc_ifu: eliminating the ~2800-fanout critical path.
 
-  logic [PHT_LEN-1:0] fpht_raddr;
   logic [BTB_LEN-1:0] fbtb_raddr;
   logic [BTB_TAG_LEN-1:0] fbtb_rtag;
-  assign fpht_raddr = ifu_bpu.nextpc[PHT_LEN-1+1:1];
   assign fbtb_raddr = ifu_bpu.nextpc[BTB_LEN-1+1:1] ^ ifu_bpu.nextpc[2*BTB_LEN-1+1:BTB_LEN+1];
   assign fbtb_rtag  = ifu_bpu.nextpc[BTB_LEN+1+BTB_TAG_LEN-1:BTB_LEN+1];
 
-  // PHT (synchronous read, saturating counter update). Only the MSB (taken bit)
-  // is consumed for the prediction; the LSB participates in the saturating
-  // update path inside `rapt_bpu_pht` and is opaque from the PHT consumer side.
-  logic [1:0] pht_rdata;
-  wire _unused_pht_lsb = pht_rdata[0];
-  rapt_bpu_pht #(
-      .DEPTH(PHT_SIZE)
-  ) u_pht (
-      .clock(clock),
-      .reset(reset),
-      .ren(ifu_bpu.pc_update),
-      .raddr(fpht_raddr),
-      .rdata(pht_rdata),
-      .update_en(cmu_bcast.ben),
-      .update_taken(rbtaken),
-      .update_addr(rpht_idx),
-      .init(cmu_bcast.fence_time)
+  // ---------------- Direction predictor (pluggable) ----------------
+  // The conditional-direction predictor is selected at elaboration time via
+  // the `RAPT_BPU_DIRP_*` define (see rapt_config.svh). All flavors expose
+  // the uniform port set in `rapt_bpu_dirp_if.svh`. BTB / RSB / training
+  // logic is shared and lives in this wrapper.
+  logic dirp_taken;
+  wire  dirp_update_mispred = cmu_bcast.ben && cmu_bcast.flush_pipe;
+  // All DIRP flavors share an identical parameter list (XLEN, GHR_LEN,
+  // PHR_LEN, DEPTH) and port set (`RAPT_BPU_DIRP_PORTS`), so the only
+  // thing the `ifdef` switches is the module name. Keeps the parameter
+  // map and port map authoritative in a single place.
+`ifdef RAPT_BPU_DIRP_TAGE
+  rapt_bpu_tage
+`elsif RAPT_BPU_DIRP_GSHARE
+  rapt_bpu_gshare
+`elsif RAPT_BPU_DIRP_BIMODAL
+  rapt_bpu_pht
+`else  // RAPT_BPU_DIRP_STATIC (always-not-taken) predictor if no flavor defined.
+  rapt_bpu_static
+`endif
+      #(
+      .XLEN   (XLEN),
+      .GHR_LEN(GHR_LEN),
+      .PHR_LEN(PHR_LEN),
+      .DEPTH  (PHT_SIZE)
+  ) u_dirp (
+      .clock         (clock),
+      .reset         (reset),
+      .ren           (ifu_bpu.pc_update),
+      .raddr         (ifu_bpu.nextpc),
+      .r_ghr         (gshare),
+      .r_phr         (phr),
+      .rd_taken      (dirp_taken),
+      .update_en     (cmu_bcast.ben),
+      .update_pc     (rpc),
+      .update_ghr    (rgshare),
+      .update_phr    (rphr),
+      .update_taken  (rbtaken),
+      .update_mispred(dirp_update_mispred),
+      .init          (cmu_bcast.fence_time)
   );
 
   // BTB (synchronous read, separate entry/type writes)
@@ -109,7 +142,11 @@ module rapt_bpu #(
   logic [BTB_TAG_LEN-1:0] cmu_wd_tag;
   assign cmu_wen_entry = cmu_bcast.flush_pipe && (cmu_bcast.jen || cmu_bcast.jren || rbtaken);
   assign cmu_wen_type  = cmu_bcast.jren || cmu_bcast.jen || (cmu_bcast.ben && rbtaken);
-  assign cmu_wd_type   = cmu_bcast.jren ? INDR : cmu_bcast.jen ? DIRE : COND;
+  // RETU encoding for returns enables RSB-based target prediction (see
+  // npc/rsb_top_addr mux below). Non-ret jalr stays INDR.
+  assign cmu_wd_type   = cmu_bcast.ret  ? RETU :
+                         cmu_bcast.jren ? INDR :
+                         cmu_bcast.jen  ? DIRE : COND;
   assign cmu_wd_full   = cpc[XLEN-1:1];
   assign cmu_waddr     = rbtb_idx;
   assign cmu_wd_tag    = rbtb_tag;
@@ -173,13 +210,26 @@ module rapt_bpu #(
   // Prediction logic: all inputs are registered sub-module outputs,
   // NO combinational dependency on pc_ifu/fpc.
   assign is_b = (btb_rd_type == COND);
-  assign btaken = (btb_rd_type == COND && pht_rdata[1:1]);
+  assign btaken = (btb_rd_type == COND && dirp_taken);
   assign btb_tag_match = btb_rd_tag_match;
   assign taken = (btb_tag_match && ((btb_rd_type != COND) || btaken));
-  assign npc = {btb_rd_target, 1'b0};
+
+  // ---------------- RSB-based return prediction ----------------
+  // When BTB tags this PC as RETU (set by commit of a ret), override the
+  // BTB target with the RSB top entry. RSB pushes happen at commit
+  // (`cmu_bcast.call`); speculative pops happen on predicted-return below.
+  // Misprediction rewinds rsb_spec_idx to the committed pointer.
+  logic [$clog2(RSB_SIZE)-1:0] rsb_top_idx;
+  logic                        pred_is_ret;
+  logic                        pred_rsb_v;
+  logic [           XLEN-1:0]  rsb_top_addr;
+  assign rsb_top_idx  = rsb_spec_idx - 1'b1;
+  assign pred_is_ret  = btb_tag_match && (btb_rd_type == RETU);
+  assign pred_rsb_v   = pred_is_ret && rsb_v[rsb_top_idx];
+  assign rsb_top_addr = rsb[rsb_top_idx];
+  assign npc          = pred_rsb_v ? rsb_top_addr : {btb_rd_target, 1'b0};
 
   // Commit-path index computation
-  assign rpht_idx = rpc[PHT_LEN-1+1:1];
   assign rbtb_idx = rpc[BTB_LEN-1+1:1] ^ rpc[2*BTB_LEN-1+1:BTB_LEN+1];
   assign rbtb_tag = rpc[BTB_LEN+1+BTB_TAG_LEN-1:BTB_LEN+1];
 
@@ -190,15 +240,31 @@ module rapt_bpu #(
   assign rbtaken = cmu_bcast.btaken;
   assign cpc = cmu_bcast.cpc;
 
-  // Return address for RSB push (call PC + instruction length)
+  // Return address for RSB push (call PC + instruction length).
+  // Architectural (commit-side) push value retained for documentation /
+  // future asserts; the actual RSB data is now written by the IDU
+  // speculative-push channel below.
   logic [XLEN-1:0] rsb_push_addr;
   assign rsb_push_addr = rpc + (cmu_bcast.rvc ? XLEN'(2) : XLEN'(4));
+  /* verilator lint_off UNUSEDSIGNAL */
+  wire _unused_rsb_cmt_push_addr = |rsb_push_addr;
+  /* verilator lint_on UNUSEDSIGNAL */
 
   // Next committed RSB index (accounts for this cycle's commit)
   logic [$clog2(RSB_SIZE)-1:0] next_rsb_cmt_idx;
   assign next_rsb_cmt_idx = cmu_bcast.call ? (rsb_cmt_idx + 1'b1) :
                              cmu_bcast.ret  ? (rsb_cmt_idx - 1'b1) :
                              rsb_cmt_idx;
+
+  // Speculative push/pop bookkeeping
+  logic spec_push;
+  logic spec_pop;
+  logic [$clog2(RSB_SIZE)-1:0] rsb_push_idx;
+  assign spec_push    = idu_bpu.push_en;
+  assign spec_pop     = pred_valid && pred_rsb_v;
+  // When both push and pop fire in the same cycle, pop first so the push
+  // overwrites the popped slot (net spec_idx unchanged).
+  assign rsb_push_idx = spec_pop ? (rsb_spec_idx - 1'b1) : rsb_spec_idx;
 
   always_ff @(posedge clock) begin
     if (reset) begin
@@ -207,30 +273,46 @@ module rapt_bpu #(
       rsb_v        <= '0;
       gshare       <= '0;
       rgshare      <= '0;
+      phr          <= '0;
+      rphr         <= '0;
       pred_valid   <= 0;
     end else if (!cmu_bcast.fence_time) begin
       pred_valid <= ifu_bpu.pc_update;
 
-      // --- Committed RSB data + pointer ---
-      if (cmu_bcast.call) begin
-        rsb[rsb_cmt_idx]   <= rsb_push_addr;
-        rsb_v[rsb_cmt_idx] <= 1'b1;
-      end
+      // --- Architectural RSB pointer tracking (used as flush rewind point) ---
       rsb_cmt_idx <= next_rsb_cmt_idx;
 
+      // --- Speculative RSB data + valid (IDU-driven push) ---
+      if (spec_push) begin
+        rsb[rsb_push_idx]   <= idu_bpu.push_addr;
+        rsb_v[rsb_push_idx] <= 1'b1;
+      end
+
       // --- Speculative RSB pointer ---
+      // Flush has priority; otherwise update from push/pop deltas.
       if (cmu_bcast.flush_pipe) begin
         rsb_spec_idx <= next_rsb_cmt_idx;
+      end else begin
+        unique case ({spec_push, spec_pop})
+          2'b10:   rsb_spec_idx <= rsb_spec_idx + 1'b1;
+          2'b01:   rsb_spec_idx <= rsb_spec_idx - 1'b1;
+          default: rsb_spec_idx <= rsb_spec_idx;  // 00 or 11
+        endcase
       end
 
       // --- GHR update (preserved for future gshare with larger PHT) ---
       if (cmu_bcast.flush_pipe) begin
         gshare <= {rgshare[GHR_LEN-2:0], rbtaken};
+        // PHR rewinds to architectural value plus this committed branch's PC bit.
+        phr <= {rphr[PHR_LEN-2:0], rpc[1]};
       end else if (pred_valid && is_b && btb_tag_match) begin
         gshare <= {gshare[GHR_LEN-2:0], btaken};
+        // Shift in PC bit on each speculative COND prediction.
+        phr <= {phr[PHR_LEN-2:0], ifu_bpu.pc[1]};
       end
       if (cmu_bcast.ben) begin
         rgshare <= {rgshare[GHR_LEN-2:0], rbtaken};
+        rphr    <= {rphr[PHR_LEN-2:0], rpc[1]};
       end
     end
   end

@@ -46,8 +46,17 @@ interface idu_bpu_if #(
   logic [XLEN-1:0] train_target; // Correct target PC
   logic [1:0]      train_type;   // 00=COND, 01=DIRE (matches BPU enum)
 
-  modport out(output train_en, train_pc, train_target, train_type);
-  modport in (input  train_en, train_pc, train_target, train_type);
+  // Speculative RSB push channel: pulsed when IDU sees a CALL (jal/jalr with
+  // link rd) in either issue slot, so the BPU's RSB top is updated before
+  // the corresponding RET is predicted. Push address is the call's return
+  // address (pc + 4 or pc + 2 for compressed).
+  logic            push_en;
+  logic [XLEN-1:0] push_addr;
+
+  modport out(output train_en, train_pc, train_target, train_type,
+              push_en, push_addr);
+  modport in (input  train_en, train_pc, train_target, train_type,
+              push_en, push_addr);
 endinterface
 
 interface ifu_l1i_if #(
