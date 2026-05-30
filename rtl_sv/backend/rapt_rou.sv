@@ -325,6 +325,9 @@ module rapt_rou #(
     uop_pl[tail].atom_sc  <= u.atom && (u.alu == `RAPT_ATO_SC__);
     uop_pl[tail].pc       <= u.pc;
     uop_pl[tail].inst     <= u.inst;
+`ifdef RAPT_RVFI
+    uop_pl[tail].rvfi_inst <= u.rvfi_inst;
+`endif
   endtask
 
   always_ff @(posedge clock) begin
@@ -654,7 +657,7 @@ module rapt_rou #(
         recieved_trap    <= clint_sw_trap || clint_timer_trap || clint_ext_trap || s_int_pending;
         recieved_sw_trap <= clint_sw_trap;
         // Cause priority: MEI > MSI > MTI > S-mode delegated
-        // (RISC-V Priv §3.1.9 ordering for M-mode sources, then S-level).
+        // (RISC-V Priv Sec.3.1.9 ordering for M-mode sources, then S-level).
         if (clint_ext_trap) trap_cause <= XLEN'(`RAPT_CAUSE_MEI) | (XLEN'(1) << (XLEN - 1));
         else if (clint_sw_trap) trap_cause <= XLEN'(`RAPT_CAUSE_MSI) | (XLEN'(1) << (XLEN - 1));
         else if (clint_timer_trap) trap_cause <= XLEN'(`RAPT_CAUSE_MTI) | (XLEN'(1) << (XLEN - 1));
@@ -790,6 +793,9 @@ module rapt_rou #(
   assign rou_cmu.rvfi_sq_waddr_b = rob_entry[h1].sq_waddr;
   assign rou_cmu.rvfi_sq_wdata_a = rob_entry[h0].sq_wdata;
   assign rou_cmu.rvfi_sq_wdata_b = rob_entry[h1].sq_wdata;
+  // Original (compressed-aware) instruction word for RVFI reporting.
+  assign rou_cmu.rvfi_inst_a = uop_pl[h0].rvfi_inst;
+  assign rou_cmu.rvfi_inst_b = uop_pl[h1].rvfi_inst;
 `endif
 
   // ---- CSR interface (MUX slot 0 / slot 1) ----
@@ -857,7 +863,7 @@ module rapt_rou #(
   `RAPT_SVA_IMPLY(clock, reset, ROB_DUAL_COMMIT_SLOT0_NO_STORE, (dual_commit), (!rob_entry[h0].wen))
 
   // COMMIT_DURABLE: a valid commit requires the ROB head entry to be busy
-  // (holding a uop) — prevents retiring an empty slot.
+  // (holding a uop) -- prevents retiring an empty slot.
   `RAPT_SVA_IMPLY(clock, reset, ROB_COMMIT_NEEDS_BUSY, (head0_valid && !recieved_trap),
                   (rob_entry[h0].busy))
 
@@ -868,7 +874,7 @@ module rapt_rou #(
                   (dual_commit && (uop_pl[h1].sys || uop_pl[h1].f_time)), flush_pipe)
 
   // Coverage: flush events happen (sanity that the DUT actually exercises
-  // flush paths during tests — guards against accidentally disabling flush).
+  // flush paths during tests -- guards against accidentally disabling flush).
   `RAPT_COVER(clock, reset, ROB_FLUSH_EVENT, cmu_bcast.flush_pipe)
 
 endmodule

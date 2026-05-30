@@ -183,6 +183,9 @@ interface rou_cmu_if #(
   logic [XLEN-1:0] rvfi_sq_waddr_b;
   logic [XLEN-1:0] rvfi_sq_wdata_a;
   logic [XLEN-1:0] rvfi_sq_wdata_b;
+  // RVFI original instruction word (compressed-aware) per slot
+  logic [31:0] rvfi_inst_a;
+  logic [31:0] rvfi_inst_b;
 `endif
 
   modport out(
@@ -197,7 +200,8 @@ interface rou_cmu_if #(
       , output rvfi_trap_a, rvfi_trap_b,
       output rvfi_npc_a,
       output rvfi_sq_waddr_a, rvfi_sq_waddr_b,
-      output rvfi_sq_wdata_a, rvfi_sq_wdata_b
+      output rvfi_sq_wdata_a, rvfi_sq_wdata_b,
+      output rvfi_inst_a, rvfi_inst_b
 `endif
   );
   modport in(
@@ -212,7 +216,8 @@ interface rou_cmu_if #(
       , input rvfi_trap_a, rvfi_trap_b,
       input rvfi_npc_a,
       input rvfi_sq_waddr_a, rvfi_sq_waddr_b,
-      input rvfi_sq_wdata_a, rvfi_sq_wdata_b
+      input rvfi_sq_wdata_a, rvfi_sq_wdata_b,
+      input rvfi_inst_a, rvfi_inst_b
 `endif
   );
 endinterface

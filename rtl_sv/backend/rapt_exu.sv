@@ -1,7 +1,7 @@
 `include "rapt.svh"
 `include "rapt_if.svh"
 
-// Execution Unit (EXU) — top-level wiring & dispatch arbitration.
+// Execution Unit (EXU) -- top-level wiring & dispatch arbitration.
 //
 // This module is intentionally thin. It owns:
 //   * The arbitration policy that routes each renamed uop to either the
@@ -29,11 +29,11 @@ module rapt_exu #(
     rou_exu_if rou_exu,
 
     // No modport here: RS drives (.out) while IOQ reads (.in) for forwarding.
-    exu_rou_if           exu_rou,
-    exu_rou_b_if         exu_rou_b,
-    exu_rou_c_if.out     exu_rou_c,
+    exu_rou_if       exu_rou,
+    exu_rou_b_if     exu_rou_b,
+    exu_rou_c_if.out exu_rou_c,
     // No modport: IOQ drives (.out) while RS reads (.in) for forwarding.
-    exu_ioq_bcast_if     exu_ioq_bcast,
+    exu_ioq_bcast_if exu_ioq_bcast,
 
     exu_lsu_if.master exu_lsu,
     exu_csr_if.master exu_csr,
@@ -42,11 +42,11 @@ module rapt_exu #(
     exu_l1d_if.master exu_l1d,
 
     // Dispatch-only uop payload snapshot from ROU (read by RS at issue time)
-    input rapt_pkg::uop_payload_t uop_pl [ROB_SIZE]
+    input rapt_pkg::uop_payload_t uop_pl[ROB_SIZE]
 );
 
   // === Sub-module dispatch handshakes ===
-  exu_disp_rs_if  #(.RS_SIZE(RS_SIZE))   disp_rs  ();
+  exu_disp_rs_if #(.RS_SIZE(RS_SIZE)) disp_rs ();
   exu_disp_ioq_if #(.IOQ_SIZE(IOQ_SIZE)) disp_ioq ();
 
   // === Arbitration ===
@@ -74,7 +74,7 @@ module rapt_exu #(
   assign rou_exu.ready = rs_ready_a;
 
 `ifdef RAPT_DUAL_ISSUE
-  // Slot-B readiness — computed independently of slot A's queue check
+  // Slot-B readiness -- computed independently of slot A's queue check
   // (A's slot is already gated by `rs_ready_a`). For the paired-IOQ case we
   // only need B's own slot (`ready_b`); for B-alone-IOQ we need the head slot
   // (`ready`); RS allocation uses the next-free index appropriate for B.
@@ -91,7 +91,7 @@ module rapt_exu #(
       rs_ready_b = a_to_ioq ? disp_rs.free_found_a : disp_rs.free_found_b;
     end
   end
-  assign rou_exu.ready_b = rs_ready_b;
+  assign rou_exu.ready_b  = rs_ready_b;
 
   // RS index for slot-B allocation: A-to-IOQ frees free_idx_a for B.
   assign disp_rs.b_rs_idx = a_to_ioq ? disp_rs.free_idx_a : disp_rs.free_idx_b;
@@ -113,7 +113,7 @@ module rapt_exu #(
 `ifdef RAPT_DUAL_ISSUE
   assign disp_ioq.accept_b_paired = rou_exu.valid && rs_ready_a && a_to_ioq
                                     && rou_exu.valid_b && rs_ready_b && b_to_ioq;
-  assign disp_ioq.accept_b_alone  = rou_exu.valid_b && rs_ready_b && b_to_ioq && !a_to_ioq;
+  assign disp_ioq.accept_b_alone = rou_exu.valid_b && rs_ready_b && b_to_ioq && !a_to_ioq;
 `else
   assign disp_ioq.accept_b_paired = 1'b0;
   assign disp_ioq.accept_b_alone  = 1'b0;
@@ -143,7 +143,7 @@ module rapt_exu #(
       .exu_rou_b    (exu_rou_b),
       .exu_rou_c    (exu_rou_c),
       .uop_pl       (uop_pl),
-        .pmu_rs_full  (pmu_rs_full_unused)
+      .pmu_rs_full  (pmu_rs_full_unused)
   );
 
   rapt_exu_ioq #(
@@ -164,7 +164,7 @@ module rapt_exu #(
       .exu_lsu      (exu_lsu),
       .exu_l1d      (exu_l1d),
       .exu_ioq_bcast(exu_ioq_bcast),
-        .pmu_ioq_full (pmu_ioq_full_unused)
+      .pmu_ioq_full (pmu_ioq_full_unused)
   );
 
 endmodule

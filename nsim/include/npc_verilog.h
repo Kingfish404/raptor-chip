@@ -41,7 +41,7 @@
 #define VERILOG_CLUSTER(m) CONCAT(top->rootp->wrapSoC__DOT__chip__DOT__cpu__DOT__, m)
 #define VERILOG_RESET top->reset
 #else
-// NPC mode: Verilator 5.x hierarchical classes — navigate via cell pointers.
+// NPC mode: Verilator 5.x hierarchical classes -- navigate via cell pointers.
 // raptSoC -> cpu (rapt) -> core (rapt_core) -> sub-cells.
 // CLINT lives at the cluster level (rapt.clint_inst), shared across harts.
 // rapt_clint is inlined by Verilator, so its registers are reached via the
@@ -130,7 +130,7 @@ static inline void verilog_connect(TOP_NAME *top, NPCState *npc)
 
   /* Pipeline quiesce probes (for checkpoint save: defer until SQ/STQ/ROB are
    * empty so in-flight stores don't get truncated by host-side memory dump).
-   * Use valid-bitvectors / dedicated empty signal — head==tail is ambiguous. */
+   * Use valid-bitvectors / dedicated empty signal -- head==tail is ambiguous. */
   npc->rob_empty = (uint8_t *)&VERILOG_ROU(rob_empty);
   npc->sq_valid = (uint8_t *)&VERILOG_CPU(lsu__DOT__sq_valid);
   npc->stq_valid = (uint8_t *)&VERILOG_CPU(lsu__DOT__stq_valid);

@@ -59,7 +59,7 @@ module rapt_bus #(
   //   - L1I slot: 2-deep FIFO. The L1I miss FSM (rapt_l1i.sv RD_0->RD_1)
   //     issues two sequential ARs gated only on `l1i_bus.rready` pulses, so
   //     the bus must accept both back-to-back without waiting for the first
-  //     response. (A 1-deep slot drops the second AR — see
+  //     response. (A 1-deep slot drops the second AR -- see
   //     /memories/repo/rapt-router-multi-outstanding-2026-05-04.md.)
   //   - L1D slot: 1-deep, held until the response's `rlast` so the captured
   //     `l1d_load_is_mmio` flag stays valid across the round trip.
@@ -94,7 +94,7 @@ module rapt_bus #(
   // The L1I bus does not expose an arready back to the masters (L1I refill FSM
   // and PTW share `l1i_bus.arvalid`). Both masters hold arvalid high until they
   // observe a response, so a naive `arvalid && !full` push will FIFO the same
-  // address multiple times — causing the slave to deliver duplicate rvalid
+  // address multiple times -- causing the slave to deliver duplicate rvalid
   // beats that downstream consumers (PTW) interpret as later-level PTE results
   // (see /memories/session/ptw-multi-outstanding-stale-rvalid.md). Gate the
   // push to one capture per (arvalid window, araddr) pair using a "captured"
@@ -110,7 +110,7 @@ module rapt_bus #(
 
   // Downstream issue arbiter (L1D priority).
   // (The RAPT_SOC variant uses the legacy single-outstanding FSM further down
-  // and does not reach this point — see the `\`else` branch.)
+  // and does not reach this point -- see the `\`else` branch.)
   logic issue_l1d, issue_l1i;
   assign issue_l1d = l1d_slot_busy && !l1d_slot_issued;
   assign issue_l1i = !issue_l1d && !l1i_q_empty;
@@ -182,7 +182,7 @@ module rapt_bus #(
         l1i_captured             <= 1'b1;
         l1i_last_push_addr       <= l1i_bus.araddr;
       end else if (!l1i_bus.arvalid) begin
-        // arvalid dropped → window closed; reopen capture window.
+        // arvalid dropped -> window closed; reopen capture window.
         l1i_captured <= 1'b0;
       end
       if (l1i_pop) begin
@@ -351,7 +351,7 @@ module rapt_bus #(
   assign axi.bready = (state_store == LS_S_W);
   // Bus error on write response. Stores reaching the bus have already
   // passed bare-mode PMA / MMU PMP checks, so a runtime werr is a configuration
-  // hazard — surface it for waves but do not break the existing handshake
+  // hazard -- surface it for waves but do not break the existing handshake
   // contract back to LSU (no per-store trap path on the write side today).
   assign l1d_bus.werr = (store_source == L1D) && axi.bvalid && (axi.bresp != 2'b00);
 

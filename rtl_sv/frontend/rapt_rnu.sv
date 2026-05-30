@@ -243,8 +243,8 @@ module rapt_rnu #(
   // ================================================================
   // Internal interface instances
   // ================================================================
-  rnu_fl_if fl_bus ();  // RNU ↔ Free List
-  rnu_mt_if mt_bus ();  // RNU ↔ Map Table
+  rnu_fl_if fl_bus ();  // RNU <-> Free List
+  rnu_mt_if mt_bus ();  // RNU <-> Map Table
 
   // ================================================================
   // Free List - interface drive

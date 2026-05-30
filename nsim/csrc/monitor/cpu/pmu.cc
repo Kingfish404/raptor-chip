@@ -262,7 +262,7 @@ void perf_sample_per_cycle()
     pmu.l1i_cache_miss_cycle++;
   }
   // Hit count and hit cycles are computed at report time:
-  //   hit_cnt = ifu_fetch_cnt - miss_cnt,  hit_cycle ≈ hit_cnt (1 SRAM cycle/hit)
+  //   hit_cnt = ifu_fetch_cnt - miss_cnt,  hit_cycle ~= hit_cnt (1 SRAM cycle/hit)
   prev_l1i_state = l1i_state;
   // L1D cache sample: state-transition-based tracking (load path only)
   // L1D FSM states: IDLE=000, LD_A=001, LD_D=010, PTWAIT=100, TRAP=101

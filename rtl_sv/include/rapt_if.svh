@@ -115,7 +115,7 @@ interface l1d_bus_if #(
   logic wready;
   // Bus-error indicator on the write response channel (AXI bresp != OKAY).
   // Asserted in the same cycle as the store handshake (`wready` pulse).
-  // Currently logged only — store access-faults are caught in IOQ via
+  // Currently logged only -- store access-faults are caught in IOQ via
   // bare-mode PMA / PMP / MMU PMP before reaching the bus, so a runtime
   // werr indicates a configuration mismatch worth flagging in waves.
   logic werr;
@@ -186,7 +186,7 @@ interface csr_bcast_if #(
   //   * tor_lo/tor_hi   : pmpaddr[i-1] / pmpaddr[i] for TOR comparison
   //   * cfg_r/w/x/l     : per-entry permission bit-vectors (one-hot AND-OR friendly)
   //   * mode_off/tor/na4/napot : per-entry mode one-hot vectors
-  // 1-cycle latency vs raw pmpcfg/pmpaddr — RISC-V spec requires sfence.vma
+  // 1-cycle latency vs raw pmpcfg/pmpaddr -- RISC-V spec requires sfence.vma
   // (or a pipeline flush, which CSR writes already trigger) before PMP
   // changes take effect, so software always sees the new values in time.
   logic [XLEN-1:0] pmp_napot_mask[`RAPT_PMP_NUM];

@@ -27,7 +27,7 @@ module rapt_exu_mul #(
   // MUL and DIV datapaths are split: MUL has its own 2-stage pipe (m1_*, m2_*)
   // with tag pass-through; DIV runs serial in (div_*) state and blocks new
   // accepts via `in_ready`. Output mux gives DIV priority (rare emission) to
-  // avoid collisions — MUL stage-B emission cannot coincide with DIV done
+  // avoid collisions -- MUL stage-B emission cannot coincide with DIV done
   // because `in_ready=0` during div_active drains the MUL pipeline first.
 
   // ---------------- DIV path (serial) ----------------
@@ -79,10 +79,10 @@ module rapt_exu_mul #(
 
   // Single shared (XLEN+1)x(XLEN+1) signed multiplier. Operand sign-extension
   // bit is op-dependent so MUL/MULH/MULHSU/MULHU all reuse the same datapath:
-  //   * MUL  : low XLEN bits — sign-extension irrelevant
-  //   * MULH : signed   x signed   — both extended with sign bit
-  //   * MULHSU: signed  x unsigned — only s1 extended
-  //   * MULHU: unsigned x unsigned — neither extended
+  //   * MUL  : low XLEN bits -- sign-extension irrelevant
+  //   * MULH : signed   x signed   -- both extended with sign bit
+  //   * MULHSU: signed  x unsigned -- only s1 extended
+  //   * MULHU: unsigned x unsigned -- neither extended
   // Replaces three independent 2*XLEN-wide multipliers (only one was ever
   // used per cycle) with one 2*(XLEN+1)-wide signed multiplier.
   logic              m1_sext_a;
@@ -92,7 +92,7 @@ module rapt_exu_mul #(
       `RAPT_ALU_MULH__: begin m1_sext_a = 1'b1; m1_sext_b = 1'b1; end
       `RAPT_ALU_MULHSU: begin m1_sext_a = 1'b1; m1_sext_b = 1'b0; end
       `RAPT_ALU_MULHU_: begin m1_sext_a = 1'b0; m1_sext_b = 1'b0; end
-      // MUL (and any default) — low product is sign-agnostic.
+      // MUL (and any default) -- low product is sign-agnostic.
       default:          begin m1_sext_a = 1'b0; m1_sext_b = 1'b0; end
     endcase
   end

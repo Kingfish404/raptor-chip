@@ -365,7 +365,7 @@ module rapt_idu #(
   //     branch turns out not-taken, we *introduce* a mispredict that wasn't
   //     there before. The conservative behavior is to let commit-flush
   //     update BTB on actual mispredict. (TODO: handle by not patching
-  //     uop.pnpc for B-type — but then BTB training races with commit's
+  //     uop.pnpc for B-type -- but then BTB training races with commit's
   //     authoritative training on the next encounter; needs careful study.)
   //  4. A=JALR: target depends on rs1; unresolvable at IDU.
   logic train_jal_a;
@@ -391,7 +391,7 @@ module rapt_idu #(
   assign early_resteer_cond = valid && !ifu_trap && target_resolvable && (pnpc_idu != correct_npc);
   assign idu_redirect_event = cmu_bcast.flush_pipe || cmu_bcast.sys_resume;
 
-  // BPU training side-channel — fires only with the one-shot resteer pulse
+  // BPU training side-channel -- fires only with the one-shot resteer pulse
   // and only on the JAL case where BTB can be authoritatively updated from
   // a statically-derived target with no direction ambiguity.
   logic resteer_pulse;
@@ -459,6 +459,12 @@ module rapt_idu #(
     :                        pnpc_idu;
 `endif
   assign idu_rnu.uop_a.inst      = inst_idu_a;
+`ifdef RAPT_RVFI
+  // RVFI must report the original instruction word: compressed instructions
+  // are reported as the raw 16-bit encoding zero-extended (so `insn[1:0]!=2'b11`),
+  // not the decompressed 32-bit form used internally for decode/difftest.
+  assign idu_rnu.uop_a.rvfi_inst = is_c_a ? {16'b0, inst_a[15:0]} : inst_a;
+`endif
   assign idu_rnu.uop_a.pc        = pc_idu_a;
 
   assign idu_rnu.rs1_a[RLEN-1:0] = rs1_a[RLEN-1:0];
@@ -571,6 +577,9 @@ module rapt_idu #(
 
   assign idu_rnu.uop_b.pnpc = pc_idu_b + (is_c_b ? XLEN'('d2) : XLEN'('d4));
   assign idu_rnu.uop_b.inst = inst_idu_b;
+`ifdef RAPT_RVFI
+  assign idu_rnu.uop_b.rvfi_inst = is_c_b ? {16'b0, inst_b[15:0]} : inst_b;
+`endif
   assign idu_rnu.uop_b.pc = pc_idu_b;
 
   assign idu_rnu.uop_b.imm = dec_imm_b[XLEN-1:0];

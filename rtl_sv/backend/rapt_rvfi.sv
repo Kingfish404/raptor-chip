@@ -28,7 +28,7 @@ module rapt_rvfi #(
     input [XLEN-1:0] rvfi_rd_wdata_a,
     input [XLEN-1:0] rvfi_rd_wdata_b,
 
-    // RVFI outputs — flat, NRET channels concatenated
+    // RVFI outputs -- flat, NRET channels concatenated
     output logic [     NRET-1:0] rvfi_valid,
     output logic [  NRET*64-1:0] rvfi_order,
     output logic [NRET*ILEN-1:0] rvfi_insn,
@@ -169,11 +169,11 @@ module rapt_rvfi #(
   localparam logic [1:0] IXL = (XLEN == 64) ? 2'd2 : 2'd1;
 
   // ================================================================
-  // Channel 0 — Slot A (ROB head)
+  // Channel 0 -- Slot A (ROB head)
   // ================================================================
   assign rvfi_valid[0]                       = rou_cmu.valid_a;
   assign rvfi_order[63:0]                    = order_cnt;
-  assign rvfi_insn[ILEN-1:0]                 = rou_cmu.inst_a;
+  assign rvfi_insn[ILEN-1:0]                 = rou_cmu.rvfi_inst_a;
   assign rvfi_trap[0]                        = rou_cmu.valid_a && rou_cmu.rvfi_trap_a;
   assign rvfi_halt[0]                        = rou_cmu.ebreak_a;
   assign rvfi_intr[0]                        = rou_cmu.valid_a && intr_a;
@@ -200,11 +200,11 @@ module rapt_rvfi #(
   assign rvfi_mem_wdata[XLEN-1:0]            = has_mem_write_a ? rou_cmu.rvfi_sq_wdata_a : '0;
 
   // ================================================================
-  // Channel 1 — Slot B (ROB head+1, dual commit)
+  // Channel 1 -- Slot B (ROB head+1, dual commit)
   // ================================================================
   assign rvfi_valid[1]                       = rou_cmu.valid_b;
   assign rvfi_order[127:64]                  = order_cnt + 64'd1;
-  assign rvfi_insn[2*ILEN-1:ILEN]            = rou_cmu.inst_b;
+  assign rvfi_insn[2*ILEN-1:ILEN]            = rou_cmu.rvfi_inst_b;
   assign rvfi_trap[1]                        = rou_cmu.valid_b && rou_cmu.rvfi_trap_b;
   assign rvfi_halt[1]                        = rou_cmu.ebreak_b;
   assign rvfi_intr[1]                        = rou_cmu.valid_b && intr_b;

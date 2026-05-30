@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BSD-2-Clause OR Apache-2.0
 //
-// JTAG / RISC-V Debug DTM+DM compliance probe — drives TCK/TMS/TDI directly
+// JTAG / RISC-V Debug DTM+DM compliance probe -- drives TCK/TMS/TDI directly
 // against the rapt_dtm + rapt_dm RTL. Verifies (in order):
 //
 //   PHY      TAP FSM:  TLR-soft-reset, IDCODE persists across UPD-IR/UPD-DR
@@ -34,7 +34,7 @@ extern "C" int jtag_selftest_main(int /*argc*/, char * /*argv*/[])
   return 1;
 }
 
-#else // !RAPT_SOC — npc build with JTAG pins on the Verilator top
+#else // !RAPT_SOC -- npc build with JTAG pins on the Verilator top
 
 #include <cstdint>
 #include <cstdio>
@@ -51,7 +51,7 @@ namespace
 
   constexpr uint32_t kExpectedIdcode = 0x10001913u;
 
-  // DMI op encodings (Debug Spec 1.0 §dtm.adoc)
+  // DMI op encodings (Debug Spec 1.0 Sec.dtm.adoc)
   constexpr uint8_t kDmiOpNop = 0x0;
   constexpr uint8_t kDmiOpRead = 0x1;
   constexpr uint8_t kDmiOpWrite = 0x2;
@@ -125,7 +125,7 @@ namespace
     tap_step(0, 0);   // TLR -> RTI
   }
 
-  // Soft TLR via 5×TMS=1 (without driving TRSTn). Pre: anywhere. Post: RTI.
+  // Soft TLR via 5xTMS=1 (without driving TRSTn). Pre: anywhere. Post: RTI.
   void tap_soft_tlr_to_idle()
   {
     for (int i = 0; i < 5; ++i)
@@ -213,7 +213,7 @@ namespace
 
   void test_idcode_persists()
   {
-    // After power-on TLR the default IR is IDCODE — verify it shifts back the
+    // After power-on TLR the default IR is IDCODE -- verify it shifts back the
     // expected constant, and is preserved across an IR re-load to itself.
     uint32_t a = static_cast<uint32_t>(shift_dr(0, 32));
     CHECK(a == kExpectedIdcode,
@@ -319,7 +319,7 @@ namespace
 
     // Issue an abstract command (cmdtype=0, regno=0) while the core is
     // running -> rapt_dm sets cmderr=4 (halt/resume error per Debug Spec
-    // §3.6: hart was in the wrong state).
+    // Sec.3.6: hart was in the wrong state).
     dmi_write(kAddrCommand, 0x00000000);
     uint32_t a1 = dmi_read(kAddrAbstractcs);
     uint32_t cmderr1 = (a1 >> 8) & 0x7;
@@ -419,7 +419,7 @@ namespace
     dmi_write(kAddrDmcontrol, 0x00000001);
   }
 
-  // access_register command word (Debug Spec 1.0 §3.6).
+  // access_register command word (Debug Spec 1.0 Sec.3.6).
   //   cmdtype=0 (access_register), aarsize=2 (32-bit), no postinc/postexec.
   static inline uint32_t mk_acc_reg(uint16_t regno, bool write,
                                     bool transfer = true)
@@ -483,7 +483,7 @@ namespace
     uint32_t x5 = dmi_read(kAddrData0);
     CHECK(x5 == 0xCAFEF00D, "x5 round-trips 0xCAFEF00D (got 0x%08x)", x5);
 
-    // 3) MISA read (regno 0x301) — read-only constant.
+    // 3) MISA read (regno 0x301) -- read-only constant.
     dmi_write(kAddrCommand, mk_acc_reg(0x0301, /*write=*/false));
     uint32_t misa = dmi_read(kAddrData0);
     // RV32IMAC + extensions (RAPT_MISA = 0x40141105 for the default RV32 build).
@@ -547,7 +547,7 @@ namespace
     }
     CHECK(halted, "core halts after haltreq");
 
-    // Deassert haltreq (no resumereq) — DM should keep hart halted.
+    // Deassert haltreq (no resumereq) -- DM should keep hart halted.
     dmi_write(kAddrDmcontrol, 0x00000001);
     // Issue several cycles worth of polling DMI scans; allhalted must stay 1.
     bool stuck = true;
@@ -573,7 +573,7 @@ namespace
           "abstractcs=0x%08x)",
           err, cs);
 
-    // dpc should hold a plausible PC (= RAPT_PC_INIT or a fetched PC ≠ 0
+    // dpc should hold a plausible PC (= RAPT_PC_INIT or a fetched PC != 0
     // when the boot vector is non-zero; allow 0 only when RAPT_PC_INIT==0).
     dmi_write(kAddrCommand, 0x002207B1); // read dpc (regno=0x7B1)
     uint32_t cs_dpc = dmi_read(kAddrAbstractcs);
@@ -667,12 +667,12 @@ namespace
 
   void test_soft_tlr_recovers()
   {
-    // Take TAP through 5×TMS=1 from arbitrary state, expect IR = IDCODE again.
+    // Take TAP through 5xTMS=1 from arbitrary state, expect IR = IDCODE again.
     shift_ir(kIrDmi);
     tap_soft_tlr_to_idle();
     uint32_t v = static_cast<uint32_t>(shift_dr(0, 32));
     CHECK(v == kExpectedIdcode,
-          "5×TMS=1 soft reset reverts IR to IDCODE (got 0x%08x)", v);
+          "5xTMS=1 soft reset reverts IR to IDCODE (got 0x%08x)", v);
   }
 
 } // namespace

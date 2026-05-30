@@ -213,6 +213,7 @@ module rapt_ifu #(
 
   always_ff @(posedge clock) begin
     if (reset) begin
+      state_ifu <= IDLE;
       pc_ifu <= `RAPT_PC_INIT;
       trap <= 0;
       tval <= 0;

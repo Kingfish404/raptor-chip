@@ -148,7 +148,10 @@ module rapt_l1d #(
 `else
       && (lsu_l1d.walu != `RAPT_SW_WSTRB)
 `endif
-      && 1'b0;  // TODO(linux difftest rmw-bug-72M): re-enable once timing bug is isolated
+      ;  // partial-store RMW: SRAM read port is free in IDLE, capture the
+         // hit-line for byte-lane merge on next cycle. wready is gated by
+         // `!l1d_rmw` so an incoming store on the merge-write cycle is
+         // held one cycle (preventing silent drop).
 
   // Speculative SRAM read: when IDLE with a pending load, drive the *incoming*
   // virtual index directly instead of waiting for l1d_addr to be registered.
@@ -536,7 +539,7 @@ module rapt_l1d #(
       .fault  (pmp_store_fault_mmu)
   );
   // P3: PMA pre-check on the translated store PA. Mirrors load_unmapped_fault
-  // — stops a store to a region with no bus slave from issuing on AXI and
+  // -- stops a store to a region with no bus slave from issuing on AXI and
   // hanging the LSU. Bare-mode stores get the same check at the IOQ.
   logic store_unmapped_fault_mmu;
   assign store_unmapped_fault_mmu = !rapt_pkg::addr_mapped(exu_l1d.paddr);
@@ -622,7 +625,7 @@ module rapt_l1d #(
   // unaffected by the low alignment bits, so suppressing the misalign trap
   // here is safe for any access that does not cross a page boundary. (The
   // very rare cross-page case would need a second TLB walk and is not yet
-  // handled — Linux's misaligned memcpy stays within a page.)
+  // handled -- Linux's misaligned memcpy stays within a page.)
   assign mis_align_load  = 1'b0;
   assign mis_align_store = 1'b0;
 
@@ -672,7 +675,13 @@ module rapt_l1d #(
   assign l1d_bus.wdata = ptw_wvalid ? ptw_wdata : lsu_l1d.wdata;
 
   assign ptw_wready = ptw_wvalid && l1d_bus.wready;
-  assign lsu_l1d.wready = !ptw_wvalid && l1d_bus.wready;
+  // Gate lsu wready while an RMW is in its merge-write phase: the SET block
+  // below runs the `if (l1d_rmw)` branch this cycle, which means an incoming
+  // store would not be consumed by the `else if (lsu_l1d.wvalid ...)` branch
+  // and would be silently dropped if wready had fired. Stalling the store
+  // for one cycle lets the merge-write complete and the next-cycle SET will
+  // re-evaluate the new store.
+  assign lsu_l1d.wready = !ptw_wvalid && l1d_bus.wready && !l1d_rmw;
 
   // store address translation: stlb_hit uses TLB, otherwise wait for PTW
   assign store_paddr = XLEN'({ptw_result_ptag, exu_l1d.vaddr[11:0]});
@@ -841,7 +850,12 @@ module rapt_l1d #(
               l1d_addr  <= '0;
               l1d_state <= IDLE;
             end else begin
-              if (l1d_bus.rready) begin
+              // Only advance on OUR OWN cache-miss AR acceptance. The PTW
+              // shares this bus with read priority (see l1d_bus.arvalid mux),
+              // so an `l1d_bus.rready` (= AR-capture) pulse while ptw_arvalid
+              // is high belongs to the PTW, not this load. Advancing on it
+              // would make LD_D consume the PTW's read beat as fill data.
+              if (l1d_bus.rready && !ptw_arvalid) begin
                 l1d_state <= LD_D;
                 ld_fill_way_r <= ld_fill_way;
               end
@@ -855,7 +869,7 @@ module rapt_l1d #(
             // cycle the SRAM holds the merged value and tag_hit can fire.
             l1d_state <= LD_A;
           end else begin
-            if (l1d_bus.rready) begin
+            if (l1d_bus.rready && !ptw_arvalid) begin
               l1d_state <= LD_D;
               ld_fill_way_r <= ld_fill_way;
             end

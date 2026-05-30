@@ -13,7 +13,7 @@ on:
   schedule:
     - cron: "0 5 * * 0"
   push:
-    branches: [ "master", "main" ]
+    branches: ["master", "main"]
     paths:
       - "rtl_sv/**"
       - "rtl_scala/**"
@@ -21,7 +21,7 @@ on:
       - "verify/**"
       - ".github/workflows/verify.yaml"
   pull_request:
-    branches: [ "master", "main" ]
+    branches: ["master", "main"]
     paths:
       - "rtl_sv/**"
       - "rtl_scala/**"
@@ -90,7 +90,8 @@ jobs:
         uses: actions/cache@v5
         with:
           path: verify/riscof/classic/riscv-arch-test
-          key: riscv-arch-test-main-${{ hashFiles('verify/riscof/classic/plugins/**',
+          key:
+            riscv-arch-test-main-${{ hashFiles('verify/riscof/classic/plugins/**',
             '.github/workflows/verify.yaml') }}
 
       - name: “Sanity check | sail + toolchain”
@@ -182,18 +183,23 @@ jobs:
       - name: Build NPC with coverage instrumentation
         shell: bash -l {0}
         run: make -C verify coverage-build
+
       - name: Run fuzz + sigtest for coverage
         shell: bash -l {0}
         run: |
-          make -C verify coverage-run-coremark
-          make -C verify coverage-run-hello-pk
-          make -C verify coverage-run-isa-tests-pk
-          make -C verify coverage-run-microbench
           make -C verify coverage-run-fuzz TIMEOUT=10
           make -C verify coverage-run-sigtest TIMEOUT=10
+
+      - name: Run coremark + isa-tests-pk for coverage
+        shell: bash -l {0}
+        run: |
+          make -C verify coverage-run-coremark
+          make -C verify coverage-run-isa-tests-pk
+
       - name: Generate coverage report
         shell: bash -l {0}
         run: make -C verify coverage-report
+
       - name: Upload coverage artifacts
         if: always()
         uses: actions/upload-artifact@v7

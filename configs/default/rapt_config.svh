@@ -37,11 +37,6 @@
 
 `define RAPT_M_FAST 'h1
 
-// L1I
-`define RAPT_L1I_LINE_LEN 2
-`define RAPT_L1I_LEN 6
-`define RAPT_L1I_N_WAYS 1
-
 // Branch predictor
 `define RAPT_PHT_SIZE 256
 `define RAPT_BTB_SIZE 128
@@ -64,13 +59,11 @@
 `define RAPT_IIQ_SIZE 8
 `define RAPT_ROB_SIZE 16
 
+// Scheduler: RS / IOQ to feed both ALU pipes plus pipelined MUL.
 `define RAPT_RS_SIZE 8
 `define RAPT_IOQ_SIZE 8
 
 `define RAPT_SQ_SIZE 8
-`define RAPT_L1D_LINE_LEN 2
-`define RAPT_L1D_LEN 5
-`define RAPT_L1D_N_WAYS 2
 
 // RVFI: RISC-V Formal Interface for formal verification.
 // Adds RVFI output ports to the core; enable only for riscv-formal checks.
@@ -102,5 +95,33 @@
 
 `define RAPT_PHY_SIZE 64 // physical register number (must be power of 2)
 `define RAPT_PHY_LEN $clog2(`RAPT_PHY_SIZE)
+
+// L1I (Phase A baseline: 64 B line × 64 sets × 2-way = 8 KiB)
+`define RAPT_L1I_LINE_LEN 4
+`define RAPT_L1I_LEN 5
+`define RAPT_L1I_N_WAYS 2
+
+// L1D (Phase A baseline: 64 B line × 32 sets × 2-way = 4 KiB, VIPT-safe)
+`ifdef RAPT_RV64
+`define RAPT_L1D_LINE_LEN 3
+`else
+`define RAPT_L1D_LINE_LEN 4
+`endif
+`define RAPT_L1D_LEN 4
+`define RAPT_L1D_N_WAYS 2
+
+// L2 unified cache (between rapt_bus and io_master).
+// Disabled by default -- pass-through. Define `RAPT_L2_EN` to opt in.
+`define RAPT_L2_EN
+// Target is 2x(L1I+L1D). With direct-mapped + power-of-two sets,
+// default rounds up to 16 KiB (256 sets x 64B).
+`define RAPT_L2_LEN 8            // 256 sets
+// 64-byte line (16 × 4B @ RV32, 8 × 8B @ RV64).
+`ifdef RAPT_RV64
+`define RAPT_L2_LINE_LEN 3
+`else
+`define RAPT_L2_LINE_LEN 4
+`endif
+`define RAPT_L2_N_WAYS 1         // direct-mapped (only mode supported today)
 
 `endif

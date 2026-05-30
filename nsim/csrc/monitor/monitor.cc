@@ -319,7 +319,7 @@ static int parse_args(int argc, char *argv[])
                               ckpt_save_has_pc, ckpt_save_pc,
                               ckpt_save_dir, ckpt_save_exit);
   }
-  /* ckpt_load_dir handling is deferred — see init_monitor() below. */
+  /* ckpt_load_dir handling is deferred -- see init_monitor() below. */
   if (ckpt_load_dir != NULL)
   {
     /* Stash via a static so init_monitor can pick it up after load_img(). */

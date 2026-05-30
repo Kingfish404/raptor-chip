@@ -59,7 +59,7 @@ module rapt_router #(
   //
   //   1. Offchip path: AR is forwarded combinationally to `offchip_axi`
   //      (no FSM gating). The interconnect / memory may have any number
-  //      of in-flight reads — AXI4 only requires same-ID responses to
+  //      of in-flight reads -- AXI4 only requires same-ID responses to
   //      come back in order, which the slave/interconnect already
   //      guarantees. The router never reorders offchip beats.
   //
@@ -71,7 +71,7 @@ module rapt_router #(
   // R-channel arbitration: AXI4 forbids beat-interleaving WITHIN a
   // burst. We therefore lock the channel to the offchip stream for the
   // duration of a multi-beat burst. Single-beat bursts (the common
-  // case) impose no lock — when an offchip burst is not in progress,
+  // case) impose no lock -- when an offchip burst is not in progress,
   // the FIFO drains first (to keep CLINT / PLIC latency low and avoid
   // head-of-line blocking against an offchip burst that is still
   // waiting for data). Beat-level interleaving across IDs is therefore
@@ -125,7 +125,7 @@ module rapt_router #(
 
   // PLIC ar_commit is a 1-cycle pulse on the internal AR handshake
   // (used by PLIC to clear claim-side state). Matches the original
-  // semantics — fired exactly once per accepted internal AR.
+  // semantics -- fired exactly once per accepted internal AR.
   assign plic_bus.ar_commit = core_axi.arvalid && core_axi.arready
                               && (ar_int == INT_PLIC);
 
@@ -248,7 +248,7 @@ module rapt_router #(
   // before they will assert AWREADY. Gating WVALID strictly on the
   // AW handshake completing (W_IO_W) deadlocks against such slaves.
   // Forward WVALID combinationally to offchip whenever the upcoming
-  // (or in-flight) W beat is destined for offchip — i.e. either we
+  // (or in-flight) W beat is destined for offchip -- i.e. either we
   // have already entered W_IO_W, or we are still in W_IDLE with a
   // valid offchip AW request pending.
   assign offchip_axi.wvalid = ((w_state == W_IO_W) ||

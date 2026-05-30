@@ -29,7 +29,7 @@ module rapt_core #(
     input clint_sw_int_i,
 
 `ifdef RAPT_RVFI
-    // RISC-V Formal Interface (RVFI) outputs — NRET=2 channels
+    // RISC-V Formal Interface (RVFI) outputs -- NRET=2 channels
     output [1:0] rvfi_valid,
     output [127:0] rvfi_order,
     output [63:0] rvfi_insn,
@@ -395,10 +395,15 @@ module rapt_core #(
       .reset(reset)
   );
 
+  // L2 cache sits between the L1 bus arbiter and the external AXI4 master
+  // port. When RAPT_L2_EN is not defined the L2 collapses to a pure
+  // passthrough, so this wiring is a no-op for legacy / SoC flows.
+  axi4_if l2_axi ();
+
   rapt_bus bus (
       .clock(clock),
 
-      .axi(io_master),
+      .axi(l2_axi),
 
       .l1i_bus(l1i_bus),
       .l1d_bus(l1d_bus),
@@ -407,6 +412,14 @@ module rapt_core #(
       .cmu_bcast(cmu_bcast),
 
       .reset(reset)
+  );
+
+  rapt_l2 l2 (
+      .clock(clock),
+      .reset(reset),
+
+      .axi_s(l2_axi),
+      .axi_m(io_master)
   );
 
 `ifdef RAPT_RVFI

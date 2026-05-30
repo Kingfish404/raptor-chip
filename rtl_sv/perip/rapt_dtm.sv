@@ -11,7 +11,7 @@
 //
 // IMPORTANT: this is a *simulation-only* implementation:
 //   - tck is tied to `clock` externally; no CDC. This matches dev.jtag.md
-//     §5.5 RAPT_SIM_JTAG_SAMECLK.
+//     Sec.5.5 RAPT_SIM_JTAG_SAMECLK.
 //   - DTMCS.dmistat is hardwired to 0 (no busy/sticky modelling).
 //   - DMI requests are dispatched combinationally to the DM and the response
 //     is captured next cycle. Result of an op-N read is visible in op-(N+1)'s

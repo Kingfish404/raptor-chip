@@ -56,19 +56,19 @@ JOBS ?= $(NPROC)## Parallel simulator instances for multi-binary test suites
 # Test/benchmark output logging (tee to nsim/build/<config>/logs/)
 #
 # All benchmark/test recipes pipe their output through `tee` to a per-target
-# log file under nsim/build/<RAPT_CONFIG>/logs/ (NPC) or nsim/build/nemu/logs/
+# log file under nsim/build/<RAPT_CONFIG>/logs/ (NPC) or nemu/build/logs/
 # (NEMU). This persists results so they can be inspected later without
 # re-running the simulator.
 #
 # Wrappers:
 #   $(call tee_npc,name)  -> ` 2>&1 | tee nsim/build/<config>/logs/<name>.log`
-#   $(call tee_nemu,name) -> ` 2>&1 | tee nsim/build/nemu/logs/<name>.log`
+#   $(call tee_nemu,name) -> ` 2>&1 | tee nemu/build/logs/<name>.log`
 #
 # Generic escape hatch for any target not pre-wrapped:
 #   make log TARGET=<existing-target> [LOG_NAME=<filename-stem>]
 # ============================================================================
 NPC_LOG_DIR  := $(NSIM_HOME)/build/$(RAPT_CONFIG)/logs
-NEMU_LOG_DIR := $(NSIM_HOME)/build/nemu/logs
+NEMU_LOG_DIR := $(NEMU_HOME)/build/logs
 APP_LOG_DIR  := $(NSIM_HOME)/build/$(RAPT_CONFIG)/logs/app
 VERIFY_LOG_DIR := $(NSIM_HOME)/build/$(RAPT_CONFIG)/logs/verify
 export NPC_LOG_DIR NEMU_LOG_DIR APP_LOG_DIR VERIFY_LOG_DIR
@@ -85,8 +85,8 @@ log: ## Run TARGET=<target> with stdout/stderr tee'd to nsim/build/<config>/logs
 	  echo "[log] $(NPC_LOG_DIR)/$$stem.log"; \
 	  set -o pipefail; $(MAKE) --no-print-directory $(TARGET) 2>&1 | tee "$(NPC_LOG_DIR)/$$stem.log"
 
-logs-show: ## List all persisted test/benchmark logs under nsim/build/
-	@find $(NSIM_HOME)/build -type f -name '*.log' 2>/dev/null | sort
+logs-show: ## List all persisted test/benchmark logs under nsim/build/ and nemu/build/logs/
+	@find $(NSIM_HOME)/build $(NEMU_LOG_DIR) -type f -name '*.log' 2>/dev/null | sort
 
 logs-clean: ## Remove all persisted test/benchmark logs
 	@rm -rf $(NPC_LOG_DIR) $(NEMU_LOG_DIR) $(APP_LOG_DIR) $(VERIFY_LOG_DIR)
@@ -682,6 +682,33 @@ sta-rv64: sta ## Static timing analysis in RV64 mode
 sta-detail-rv64: VFLAGS := -DRAPT_RV64
 sta-detail-rv64: CLK_FREQ_MHZ := 25
 sta-detail-rv64: sta-detail ## Detailed static timing analysis in RV64 mode
+
+SRAM_PLATFORM ?= sky130 ## OpenRAM technology for SRAM macros (sky130, freepdk45)
+
+sram-macros: ## Compile OpenRAM SRAM macros for cache data arrays (see nsim/sram/README.md)
+	$(MAKE) -C $(NSIM_HOME) sram-macros SRAM_PLATFORM=$(SRAM_PLATFORM)
+
+sram-stubs: ## Generate behavioural SRAM .lib/.v stubs (placeholder timing, no PDK needed)
+	$(MAKE) -C $(NSIM_HOME) sram-stubs SRAM_PLATFORM=$(SRAM_PLATFORM)
+
+sram-doctor: ## Diagnose OpenRAM / PDK / docker prerequisites
+	$(MAKE) -C $(NSIM_HOME) sram-doctor SRAM_PLATFORM=$(SRAM_PLATFORM)
+
+sram-test: ## Validate SRAM macro integration (configs/blackbox/RTL/.lib consistency)
+	$(MAKE) -C $(NSIM_HOME)/sram test
+
+sram-test-sta: ## Opt-in SRAM STA smoke (needs yosys+slang+OpenSTA)
+	$(MAKE) -C $(NSIM_HOME)/sram test-sta
+
+sta-sram: ## STA with OpenRAM SRAM macros (vs flop-array default)
+	$(MAKE) -C $(NSIM_HOME) sta-sram \
+	    STA_PLATFORM=$(STA_PLATFORM) CLK_FREQ_MHZ=$(CLK_FREQ_MHZ) \
+	    SRAM_PLATFORM=$(SRAM_PLATFORM) VFLAGS="$(VFLAGS)"
+
+sta-sram-detail: ## Detailed STA with OpenRAM SRAM macros
+	$(MAKE) -C $(NSIM_HOME) sta-sram-detail \
+	    STA_PLATFORM=$(STA_PLATFORM) CLK_FREQ_MHZ=$(CLK_FREQ_MHZ) \
+	    SRAM_PLATFORM=$(SRAM_PLATFORM) VFLAGS="$(VFLAGS)"
 
 clean-npc: ## Clean NPC build only
 	$(MAKE) -C $(NSIM_HOME) clean

@@ -2,7 +2,7 @@
 `include "rapt_soc.svh"
 `include "rapt_soc_if.svh"
 
-// rapt_plic — Platform-Level Interrupt Controller (PLIC)
+// rapt_plic -- Platform-Level Interrupt Controller (PLIC)
 //
 // Reference:
 //   https://github.com/riscv/riscv-plic-spec/blob/master/riscv-plic-1.0.0.pdf
@@ -104,7 +104,7 @@ module rapt_plic #(
 
   // ---------------------------------------------------------------------
   // Read-side decoded signals (combinational from `plic_bus.araddr`). These feed
-  // the read mux and the claim atomic in the always_ff block — keeping
+  // the read mux and the claim atomic in the always_ff block -- keeping
   // those pure non-blocking.
   // ---------------------------------------------------------------------
   logic [31:0] r_off;
@@ -196,7 +196,7 @@ module rapt_plic #(
   end
 
   // ---------------------------------------------------------------------
-  // Sequential state — uses only non-blocking assignments. All address
+  // Sequential state -- uses only non-blocking assignments. All address
   // decoding is done above in always_comb blocks.
   // ---------------------------------------------------------------------
   logic [31:0] w_eoff;
@@ -241,7 +241,7 @@ module rapt_plic #(
           enable_q[w_ectx] <= {plic_bus.wdata[NDEV:1], 1'b0};
         end else if (w_cctx >= 0 && w_creg == 12'h0) begin
           threshold_q[w_cctx] <= plic_bus.wdata[2:0];
-          // w_creg == 12'h4 (complete): no extra state — pending was cleared
+          // w_creg == 12'h4 (complete): no extra state -- pending was cleared
           // on claim; level sources re-arm via the rising-edge detector.
         end
       end

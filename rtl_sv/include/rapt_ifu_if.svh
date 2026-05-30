@@ -37,7 +37,7 @@ endinterface
 // The non-control-alias case (BPU-taken on a regular ALU/LD/ST instruction)
 // is intentionally NOT trained here: the BTB has no invalidate port today,
 // so we let the alias persist and pay the IDU resteer cost on each hit
-// (rare in practice — empirically ~1 event over a CoreMark run).
+// (rare in practice -- empirically ~1 event over a CoreMark run).
 interface idu_bpu_if #(
     parameter int XLEN = `RAPT_XLEN
 );

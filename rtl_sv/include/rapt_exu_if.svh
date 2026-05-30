@@ -140,7 +140,7 @@ endinterface
 
 // Second writeback bus: pure ALU + BRU (branch/JAL/JALR).
 // Slot B handles arithmetic and branch-target/condition resolution but never
-// CSR / system / trap / MUL — those still go through exu_rou (slot A).
+// CSR / system / trap / MUL -- those still go through exu_rou (slot A).
 interface exu_rou_b_if #(
     parameter unsigned PLEN = `RAPT_PHY_LEN,
     parameter unsigned RLEN = `RAPT_REG_LEN,

@@ -99,7 +99,7 @@ module rapt_dm #(
   // Sticky resume-ack: latched when the core deasserts halted_i after a
   // resumereq pulse; cleared by the next haltreq=1 write.
   logic            resumeack_q;
-  // Sticky halted state inside the DM. Per Debug Spec 1.0 §3.5: once a
+  // Sticky halted state inside the DM. Per Debug Spec 1.0 Sec.3.5: once a
   // hart enters Debug Mode it stays halted independent of haltreq, until
   // a resumereq (or, equivalently here, dret in a real Debug Mode FSM).
   // Because we don't yet have a real Debug Mode FSM, we keep haltreq_o
@@ -110,7 +110,7 @@ module rapt_dm #(
   logic [    31:0] data0_q;
   logic [     2:0] cmderr_q;
 
-  // Debug-only CSR storage (RV-Debug 1.0 §4). Only written via abstract
+  // Debug-only CSR storage (RV-Debug 1.0 Sec.4). Only written via abstract
   // access_register; the running core never sees these via csrr/csrw
   // (no architectural Debug Mode entry implemented yet).
   logic [    31:0] dcsr_q;  // dcsr is fixed 32-bit per spec
@@ -128,7 +128,7 @@ module rapt_dm #(
   // ----------------------------------------------------------
   // Abstract command decode (combinational on the in-flight DMI write)
   // ----------------------------------------------------------
-  // Field layout from `command` per Debug Spec 1.0 §3.6:
+  // Field layout from `command` per Debug Spec 1.0 Sec.3.6:
   //   [31:24] cmdtype, [22:20] aarsize, [19] aarpostincrement,
   //   [18] postexec, [17] transfer, [16] write, [15:0] regno.
   logic [     7:0] cmd_cmdtype;
@@ -318,7 +318,7 @@ module rapt_dm #(
       if (step_pending_q && !halted_i && commit_fire_i) begin
         dm_halt_state_q <= 1'b1;
         step_pending_q  <= 1'b0;
-        // dcsr[8:6] = cause. 4 = step (Debug Spec 1.0 §4.8).
+        // dcsr[8:6] = cause. 4 = step (Debug Spec 1.0 Sec.4.8).
         dcsr_q[8:6]     <= 3'd4;
       end
     end

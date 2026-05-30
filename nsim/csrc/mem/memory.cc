@@ -160,7 +160,7 @@ static void finisher_handle(paddr_t addr, word_t wdata, char wmask, bool is_writ
     }
     else if (cmd == FINISHER_RESET)
     {
-      Log("Finisher: reset requested (0x%x) — not supported, aborting", val);
+      Log("Finisher: reset requested (0x%x) -- not supported, aborting", val);
       npc.host_exit_ok = 0;
       npc_abort();
     }

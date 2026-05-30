@@ -86,10 +86,11 @@ export ISA64 ARGS CROSS_COMPILE
 # invoked as `make -C app …` from root. Falls back to local defaults otherwise.
 # ============================================================================
 NSIM_HOME    ?= $(abspath $(APP_HOME)/../nsim)
+NEMU_HOME    ?= $(abspath $(APP_HOME)/../nemu)
 RAPT_CONFIG  ?= default
 APP_LOG_DIR  ?= $(NSIM_HOME)/build/$(RAPT_CONFIG)/logs/app
 NPC_LOG_DIR  ?= $(NSIM_HOME)/build/$(RAPT_CONFIG)/logs
-NEMU_LOG_DIR ?= $(NSIM_HOME)/build/nemu/logs
+NEMU_LOG_DIR ?= $(NEMU_HOME)/build/logs
 
 log: ## Run TARGET=<target> with stdout/stderr tee'd to $(APP_LOG_DIR)/$(LOG_NAME).log
 	@test -n "$(TARGET)" || { echo "Usage: make -C app log TARGET=<target> [LOG_NAME=<stem>]"; exit 1; }

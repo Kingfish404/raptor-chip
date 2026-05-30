@@ -2,7 +2,8 @@ name: Benchmark (AM + pk + ysyxSoC)
 
 # Combined performance / functional benchmark workflow:
 #   - npc-benchmark / npc-cpu-tests   : abstract-machine on the Raptor NPC
-#   - app-pk-tests                    : pk-hosted apps (hello/CoreMark/Embench)
+#   - app-pk-coremark                 : pk-hosted hello + CoreMark
+#   - app-pk-embench                  : pk-hosted Embench-IoT suite
 #   - ysyxsoc-benchmark / ysyxsoc-cpu-tests : ysyxSoC integration
 # STA / PPA evaluation lives in the dedicated `sta.yaml` workflow.
 
@@ -226,7 +227,7 @@ jobs:
         run: make -C $RAPTOR_HOME/abstract-machine/app/am-kernels/tests/cpu-tests
           ARCH=riscv32e-ysyxsoc run ARGS="-b -n"
 
-  app-pk-tests:
+  app-pk-coremark:
     runs-on: ubuntu-latest
     env:
       RAPTOR_HOME: ${{ github.workspace }}
@@ -269,12 +270,6 @@ jobs:
         run: |
           make app-coremark-npc32 ARGS="-b -n" 2>&1 | tee /tmp/app-coremark.log
 
-      # ---- Embench-IoT ----
-      - name: Run Embench-IoT
-        shell: bash -l {0}
-        run: |
-          make app-embench-npc32 ARGS="-b -n" 2>&1 | tee /tmp/app-embench.log
-
       # ---- Summary ----
       - name: Generate summary
         if: always()
@@ -310,6 +305,93 @@ jobs:
               'BEGIN{ printf "%.3f", i*1e6/c }')
           fi
 
+          # ---- Write summary ----
+          {
+            echo "## App Tests — CoreMark (pk on NPC)"
+            echo ""
+            echo "### Overview"
+            echo ""
+            echo "| Test | Status | IPC | Details |"
+            echo "|------|--------|-----|---------|"
+            echo "| Hello | ${HELLO_OK} | ${HELLO_IPC} | ${HELLO_TRAP} |"
+            echo "| CoreMark | ${CM_OK} | ${CM_IPC} | ${CM_CMARK_PER_MHZ} CoreMark/MHz, iters=${CM_ITERS:-N/A} |"
+            echo ""
+
+            # ---- CoreMark detail ----
+            echo "### CoreMark"
+            echo ""
+            echo "| Metric | Value |"
+            echo "|--------|-------|"
+            echo "| CoreMark/MHz (iters*1e6/cycles) | **${CM_CMARK_PER_MHZ}** |"
+            echo "| Iterations | ${CM_ITERS:-N/A} |"
+            echo "| Cycles | ${CM_CYCLES:-N/A} |"
+            echo "| Instructions | ${CM_INSTS:-N/A} |"
+            echo "| IPC | ${CM_IPC} |"
+            echo "| Reported Total ticks | ${CM_TICKS:-N/A} |"
+            echo "| Reported Total time (secs) | ${CM_SECS:-N/A} |"
+            echo "| Reported Iterations/Sec | ${CM_ITERSEC:-N/A} |"
+            echo "| Validation | $( [ "$CM_VALID" -ge 1 ] && echo 'Correct operation validated' || echo 'NOT VALIDATED' ) |"
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # PMU details (collapsed)
+          bash .github/scripts/parse-pmu.sh \
+            "Hello (pk)" /tmp/app-hello.log \
+            "CoreMark (pk)" /tmp/app-coremark.log \
+            >> "$GITHUB_STEP_SUMMARY" || true
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: app-coremark-logs-${{ github.sha }}
+          path: |
+            /tmp/app-hello.log
+            /tmp/app-coremark.log
+          retention-days: 30
+          overwrite: true
+
+  app-pk-embench:
+    runs-on: ubuntu-latest
+    env:
+      RAPTOR_HOME: ${{ github.workspace }}
+      NEMU_HOME: ${{ github.workspace }}/nemu
+      AM_HOME: ${{ github.workspace }}/abstract-machine
+      CROSS_COMPILE: riscv64-unknown-elf-
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup base environment
+        run: |
+          ./setup.sh
+          ${CROSS_COMPILE}gcc --version | head -1
+
+      - name: Clone riscv-pk
+        run: |
+          mkdir -p third_party/riscv-software-src
+          [ -d third_party/riscv-software-src/riscv-pk ] || \
+            git clone --depth 1 https://github.com/riscv-software-src/riscv-pk \
+              third_party/riscv-software-src/riscv-pk
+
+      - name: Build NPC simulator
+        shell: bash -l {0}
+        run: make build-npc32
+
+      - name: Build pk
+        shell: bash -l {0}
+        run: make --no-print-directory -C app pk-build
+
+      # ---- Embench-IoT ----
+      - name: Run Embench-IoT
+        shell: bash -l {0}
+        run: |
+          mkdir -p .github/results
+          make app-embench-npc32 ARGS="-b -n" 2>&1 | tee /tmp/app-embench.log
+
+      # ---- Summary ----
+      - name: Generate summary
+        if: always()
+        run: |
           # ---- Parse Embench (per-benchmark) ----
           # Splits the log at each "--- <name> ---" marker emitted by the
           # Makefile's `embench` target and extracts PMU metrics + Ticks.
@@ -318,6 +400,27 @@ jobs:
           #   speed_i = ref_ms[i] * 1000 / measured_cycles_i       (our gsf=1, ref gsf=16 cancels with ref_ms being ms on M4@16MHz)
           #   Embench Score = geomean_i(speed_i)
           REF_JSON=".github/data/embench-m4-ref.json"
+          mkdir -p /tmp/embench-summary
+          awk '
+            /^--- [a-zA-Z0-9_.+-]+ ---$/ {
+              name=$2; file="/tmp/embench-summary/" name ".log";
+              print > file; next
+            }
+            file { print >> file }
+          ' /tmp/app-embench.log || true
+
+          EMBENCH_ROWS=""
+          EMBENCH_PASS=0
+          EMBENCH_FAIL=0
+          # Aggregates (awk-friendly, space-separated floats/ints)
+          AGG_CYCLES=""     # for geomean + total
+          AGG_INSTS=""      # for total
+          AGG_TICKS=""      # for geomean
+          AGG_IPC=""        # for arithmetic mean
+          AGG_DUAL=""       # for arithmetic mean
+          AGG_BPU=""        # for arithmetic mean
+          AGG_SPEED=""      # for Embench Score geomean
+          AGG_TOPSTALL=""   # newline-separated stall category names
           mkdir -p /tmp/embench-summary
           awk '
             /^--- [a-zA-Z0-9_.+-]+ ---$/ {
@@ -425,31 +528,13 @@ jobs:
 
           # ---- Write summary ----
           {
-            echo "## App Tests (pk on NPC)"
+            echo "## App Tests — Embench-IoT (pk on NPC)"
             echo ""
             echo "### Overview"
             echo ""
             echo "| Test | Status | IPC | Details |"
             echo "|------|--------|-----|---------|"
-            echo "| Hello | ${HELLO_OK} | ${HELLO_IPC} | ${HELLO_TRAP} |"
-            echo "| CoreMark | ${CM_OK} | ${CM_IPC} | ${CM_CMARK_PER_MHZ} CoreMark/MHz, iters=${CM_ITERS:-N/A} |"
             echo "| Embench-IoT | ${EMBENCH_PASS}/${EMBENCH_TOTAL} pass | ${AGG_IPC_TOTAL} | Score=**${EMBENCH_SCORE}** (vs Cortex-M4@16MHz), dual=${AVG_DUAL}%, BPU=${AVG_BPU}% |"
-            echo ""
-
-            # ---- CoreMark detail ----
-            echo "### CoreMark"
-            echo ""
-            echo "| Metric | Value |"
-            echo "|--------|-------|"
-            echo "| CoreMark/MHz (iters*1e6/cycles) | **${CM_CMARK_PER_MHZ}** |"
-            echo "| Iterations | ${CM_ITERS:-N/A} |"
-            echo "| Cycles | ${CM_CYCLES:-N/A} |"
-            echo "| Instructions | ${CM_INSTS:-N/A} |"
-            echo "| IPC | ${CM_IPC} |"
-            echo "| Reported Total ticks | ${CM_TICKS:-N/A} |"
-            echo "| Reported Total time (secs) | ${CM_SECS:-N/A} |"
-            echo "| Reported Iterations/Sec | ${CM_ITERSEC:-N/A} |"
-            echo "| Validation | $( [ "$CM_VALID" -ge 1 ] && echo 'Correct operation validated' || echo 'NOT VALIDATED' ) |"
             echo ""
 
             # ---- Embench detail ----
@@ -478,17 +563,11 @@ jobs:
             echo ""
           } >> "$GITHUB_STEP_SUMMARY"
 
-          # PMU details (collapsed)
-          bash .github/scripts/parse-pmu.sh \
-            "Hello (pk)" /tmp/app-hello.log \
-            "CoreMark (pk)" /tmp/app-coremark.log \
-            >> "$GITHUB_STEP_SUMMARY" || true
-
       - name: Upload logs
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: app-test-logs-${{ github.sha }}
-          path: /tmp/app-*.log
+          name: app-embench-logs-${{ github.sha }}
+          path: /tmp/app-embench.log
           retention-days: 30
           overwrite: true

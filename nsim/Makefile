@@ -283,6 +283,70 @@ sta_show: pack ## Show timing analysis results
 		CLK_FREQ_MHZ=$(CLK_FREQ_MHZ) \
 		RTL_FILES="$(abspath $(BUILD_DIR)/rapt_pack.sv)"
 
+# =====================================================================
+#  STA with OpenRAM SRAM macros (rapt_sram_1r1w -> OpenRAM 1R1W blackbox)
+#  Workflow: see nsim/sram/README.md
+# =====================================================================
+RAPT_SRAM_DIR    := $(abspath $(NSIM_HOME)/sram)
+SRAM_PLATFORM    ?= sky130 ## OpenRAM tech (sky130, freepdk45)
+RAPT_SRAM_LIBS    = $(shell $(MAKE) -s -C $(RAPT_SRAM_DIR) print-libs PLATFORM=$(SRAM_PLATFORM))
+RAPT_SRAM_BB_V    = $(shell $(MAKE) -s -C $(RAPT_SRAM_DIR) print-blackbox)
+
+sram-macros: ## Compile OpenRAM SRAM macros (see nsim/sram/README.md)
+	$(MAKE) -C $(RAPT_SRAM_DIR) all PLATFORM=$(SRAM_PLATFORM)
+
+sram-stubs: ## Generate behavioural .lib/.v stubs (no OpenRAM/PDK needed)
+	$(MAKE) -C $(RAPT_SRAM_DIR) stubs PLATFORM=$(SRAM_PLATFORM)
+
+sram-doctor: ## Diagnose OpenRAM / PDK / docker prerequisites
+	$(MAKE) -C $(RAPT_SRAM_DIR) doctor PLATFORM=$(SRAM_PLATFORM)
+
+sram-test: ## Validate SRAM macro integration consistency (no external deps)
+	$(MAKE) -C $(RAPT_SRAM_DIR) test
+
+sram-test-sta: ## Opt-in SRAM STA smoke (needs yosys+slang+OpenSTA)
+	$(MAKE) -C $(RAPT_SRAM_DIR) test-sta
+
+# Pack RTL with RAPT_USE_SRAM_MACRO so rapt_sram_1r1w instantiates the
+# OpenRAM 1R1W blackbox declared in nsim/sram/wrappers/rapt_sram_blackbox.v.
+pack-sram: $(VSRCS) $(VHSRCS)
+	mkdir -p $(BUILD_DIR)
+	verilator -E -P $(VFLAGS) -DRAPT_USE_SRAM_MACRO $(addprefix -I, $(INC_PATH)) $(VSRCS) > $(BUILD_DIR)/rapt_pack_sram.sv
+
+sta-sram: pack-sram ## STA with OpenRAM SRAM macros (vs flop-array default)
+	if [ ! -d $(YOSYS_OPENSTA) ]; then $(MAKE) YOSYS_OPENSTA; fi
+	@echo ">>> EXTRA_LIB_FILES        = $(RAPT_SRAM_LIBS)"
+	@echo ">>> EXTRA_BLACKBOX_V_FILES = $(RAPT_SRAM_BB_V)"
+	@for lib in $(RAPT_SRAM_LIBS); do \
+	  if [ ! -f "$$lib" ]; then \
+	    echo "ERROR: $$lib missing."; \
+	    echo "  Fast path (no OpenRAM/PDK needed, placeholder timing):"; \
+	    echo "    make sram-stubs SRAM_PLATFORM=$(SRAM_PLATFORM)"; \
+	    echo "  Real OpenRAM-compiled macros (needs sky130A PDK + ngspice/klayout, or USE_DOCKER=1):"; \
+	    echo "    make sram-macros SRAM_PLATFORM=$(SRAM_PLATFORM)"; \
+	    echo "  Diagnose prerequisites:"; \
+	    echo "    make sram-doctor SRAM_PLATFORM=$(SRAM_PLATFORM)"; \
+	    exit 1; \
+	  fi; \
+	done
+	EXTRA_LIB_FILES="$(RAPT_SRAM_LIBS)" \
+	EXTRA_BLACKBOX_V_FILES="$(RAPT_SRAM_BB_V)" \
+	$(MAKE) -C $(YOSYS_OPENSTA) sta show \
+		DESIGN=rapt \
+		PLATFORM=$(STA_PLATFORM) \
+		CLK_FREQ_MHZ=$(CLK_FREQ_MHZ) \
+		RTL_FILES="$(abspath $(BUILD_DIR)/rapt_pack_sram.sv)"
+
+sta-sram-detail: pack-sram ## Detailed STA with OpenRAM SRAM macros
+	if [ ! -d $(YOSYS_OPENSTA) ]; then $(MAKE) YOSYS_OPENSTA; fi
+	EXTRA_LIB_FILES="$(RAPT_SRAM_LIBS)" \
+	EXTRA_BLACKBOX_V_FILES="$(RAPT_SRAM_BB_V)" \
+	$(MAKE) -C $(YOSYS_OPENSTA) sta-detail show \
+		DESIGN=rapt \
+		PLATFORM=$(STA_PLATFORM) \
+		CLK_FREQ_MHZ=$(CLK_FREQ_MHZ) \
+		RTL_FILES="$(abspath $(BUILD_DIR)/rapt_pack_sram.sv)"
+
 lint: ## Lint RTL with Verilator
 	$(VERILATOR) --lint-only -Wall $(VSRCS) $(INCFLAGS) $(SIM_VFLAGS) --top-module $(VTARGET)
 

@@ -21,7 +21,7 @@
 //     and PLIC address windows and dispatches transactions to on-cluster
 //     peripherals or the off-chip `io_master` port. The per-core bus is
 //     therefore entirely SoC-memory-map agnostic.
-//   - When multi-core / IMSIC arrive, the router grows to N×M and the
+//   - When multi-core / IMSIC arrive, the router grows to NxM and the
 //     interrupt fabric scales from the existing single-hart CLINT/PLIC base.
 module rapt #(
     parameter int XLEN   = `RAPT_XLEN,
@@ -29,8 +29,8 @@ module rapt #(
     // value is threaded through CSR `mhartid`, the CLINT msip/mtimecmp
     // arrays, and PLIC NCTX so that scaling to N>1 only requires (a) a
     // generate block around `rapt_core`, (b) per-hart CLINT register
-    // banks (already parameterised inside rapt_clint), and (c) an N×M
-    // AXI router (today 1×3). Do NOT raise this without those follow-ups.
+    // banks (already parameterised inside rapt_clint), and (c) an NxM
+    // AXI router (today 1x3). Do NOT raise this without those follow-ups.
     /* verilator lint_off UNUSEDPARAM */
     parameter int NHARTS = 1
     /* verilator lint_on UNUSEDPARAM */
@@ -115,7 +115,7 @@ module rapt #(
 `endif
 
 `ifdef RAPT_RVFI
-    // RISC-V Formal Interface (RVFI) outputs — NRET=2 channels
+    // RISC-V Formal Interface (RVFI) outputs -- NRET=2 channels
     output [1:0] rvfi_valid,
     output [127:0] rvfi_order,
     output [63:0] rvfi_insn,
@@ -147,7 +147,7 @@ module rapt #(
     input [`RAPT_PLIC_NDEV:1] ext_irq_i,
 
     // -----------------------------------------------------------------
-    // JTAG / RISC-V Debug Module ports (P0 — see docs-ref/dev.jtag.md)
+    // JTAG / RISC-V Debug Module ports (P0 -- see docs-ref/dev.jtag.md)
     // -----------------------------------------------------------------
     input  logic jtag_trst_n,
     input  logic jtag_tms,

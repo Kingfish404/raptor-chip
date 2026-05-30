@@ -498,9 +498,45 @@ module rapt_l1i #(
   assign sram_n1_ready = (data_bank_raddr_d1[addr_offset_n1] == addr_idx_next4);
 
   assign ifu_l1i.inst_n1 = pc_ifu[1] ? l1i_word_next : l1i_word_n1;
-  assign ifu_l1i.inst_n1_valid = pc_ifu[1]
-    ? (hit_next && (data_bank_raddr_d1[addr_offset_next] == addr_idx_next))
-    : (hit_n1 && sram_n1_ready);
+
+  // PMP execute-permission must also gate the dual-issue second instruction.
+  // Slot B's first halfword always lives at pc_ifu+4 (sourced from inst_n1).
+  // Without this gate, a legal inst_a at pc_ifu followed by a no-X inst_b at
+  // pc_ifu+4 (e.g. falling through from jalr->addr-4 into a no-X NA4/TOR
+  // region) would let the forbidden fetch execute, because pmp_fetch_fault
+  // only covers pc_ifu and pc_ifu+2.  Suppressing inst_n1_valid forces the
+  // offending instruction to be re-fetched as the primary fetch next cycle,
+  // where the existing TRAP machinery raises a precise instruction-access
+  // fault.
+  logic pmp_n1_fetch_fault;
+  rapt_pmp #(
+      .XLEN(XLEN)
+  ) u_pmp_fetch_n1 (
+      .addr          (pc_ifu + XLEN'(4)),
+      .size_m1       (4'd1),
+      .priv          (csr_bcast.priv),
+      .op_r          (1'b0),
+      .op_w          (1'b0),
+      .op_x          (1'b1),
+      .pmp_napot_mask(csr_bcast.pmp_napot_mask),
+      .pmp_napot_base(csr_bcast.pmp_napot_base),
+      .pmp_tor_lo    (csr_bcast.pmp_tor_lo),
+      .pmp_tor_hi    (csr_bcast.pmp_tor_hi),
+      .pmp_cfg_r     (csr_bcast.pmp_cfg_r),
+      .pmp_cfg_w     (csr_bcast.pmp_cfg_w),
+      .pmp_cfg_x     (csr_bcast.pmp_cfg_x),
+      .pmp_cfg_l     (csr_bcast.pmp_cfg_l),
+      .pmp_mode_off  (csr_bcast.pmp_mode_off),
+      .pmp_mode_tor  (csr_bcast.pmp_mode_tor),
+      .pmp_mode_na4  (csr_bcast.pmp_mode_na4),
+      .pmp_mode_napot(csr_bcast.pmp_mode_napot),
+      .fault         (pmp_n1_fetch_fault)
+  );
+
+  assign ifu_l1i.inst_n1_valid = !pmp_n1_fetch_fault
+    && (pc_ifu[1]
+      ? (hit_next && (data_bank_raddr_d1[addr_offset_next] == addr_idx_next))
+      : (hit_n1 && sram_n1_ready));
 `endif
 
   // PTW request: TLB miss in IDLE when MMU enabled and address is nonzero

@@ -275,7 +275,7 @@
 // mideleg WARL: only SSI(1)/STI(5)/SEI(9) delegatable.
 `define RAPT_CSR_MIDELEG_WMASK 32'h00000222
 
-// sip/sie are restricted views of mip/mie (Priv spec §3.1.9). The S-mode
+// sip/sie are restricted views of mip/mie (Priv spec Sec.3.1.9). The S-mode
 // visible bits are SSIP/STIP/SEIP (and matching mie). Reads return mip/mie
 // masked by SIE_RMASK; writes update the underlying mip/mie bits within
 // the writable mask (SSIP only on sip; SSIE/STIE/SEIE on sie).
@@ -355,7 +355,7 @@
 `define RAPT_CSR_SSTATUS_WMASK 32'h000DE162
 `define RAPT_CSR_SSTATUS_CMASK 32'h800DE162
 
-// Hardwired mstatus/sstatus bits per RISC-V Priv §3.1.6: in RV64 the SXL/UXL
+// Hardwired mstatus/sstatus bits per RISC-V Priv Sec.3.1.6: in RV64 the SXL/UXL
 // fields are WARL but our implementation only supports XLEN=64 in S/U modes,
 // so they are tied to MXL=2. mstatus.SXL[35:34]=2 and mstatus.UXL[33:32]=2
 // (=> 64'h0000_000A_0000_0000); sstatus only exposes UXL (=> 64'h0000_0002_0000_0000).

@@ -83,7 +83,7 @@ module rapt_pmp #(
     assign match_napot_hi = ((addr_hi_w & ~pmp_napot_mask[i]) == pmp_napot_base[i]);
 
     // OR-of-AND with mode one-hot vectors.  Equivalent to the previous
-    // unique-case but synthesises as 4×AND + OR-reduce instead of a
+    // unique-case but synthesises as 4xAND + OR-reduce instead of a
     // 4-way mux that may share priority logic with the rest of the chain.
     assign entry_match_lo[i] = (pmp_mode_tor[i]   & match_tor_lo)
                              | (pmp_mode_na4[i]   & match_na4_lo)

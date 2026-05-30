@@ -16,6 +16,13 @@
 !*.sv
 !gsim/*.json
 
+# SRAM macro integration sources (nsim/sram/**)
+!sram/scripts/*.py
+!sram/configs/*.py
+!sram/test/*.py
+!sram/test/*.sh
+!sram/wrappers/*.v
+
 # Build artifacts
 build/
 tmp/

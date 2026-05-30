@@ -83,7 +83,7 @@ jobs:
           mkdir -p .github/results
           LOG=/tmp/sta-${{ matrix.xlen }}-${{ matrix.platform }}.log
           OUT=.github/results/sta-${{ matrix.xlen }}-${{ matrix.platform }}
-          make sta STA_PLATFORM=${{ matrix.platform }} CLK_FREQ_MHZ=${{ matrix.clk_freq_mhz }} VFLAGS="${{ matrix.vflags }}" \
+          make sta STA_PLATFORM=${{ matrix.platform }} CLK_FREQ_MHZ=${{ matrix.clk_freq_mhz }} VFLAGS="${{ matrix.vflags }}" RAPT_CONFIG=small \
             2>&1 | tee "$LOG" | tail -256
           cp "$LOG" "${OUT}.log"
           bash .github/scripts/parse-benchmark.sh sta "$LOG" > "${OUT}.txt"

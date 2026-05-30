@@ -48,7 +48,7 @@ module rapt_bpu_btb #(
 
   // Registered read address and tag.
   //
-  // The raw r_raddr drives a ~1500-input mux cone (2 ways × 64 sets × 31-bit
+  // The raw r_raddr drives a ~1500-input mux cone (2 ways x 64 sets x 31-bit
   // target + 7-bit tag + 2-bit itype + valid). Previous STA showed this flop
   // output + a single BUF_X1 spending >10 ns on fanout alone, and ending up
   // as the chip's global critical path terminating at ifu.seq4.

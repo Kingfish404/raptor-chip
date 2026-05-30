@@ -129,6 +129,13 @@ RVFI_CORE_DIR := $(RISCV_FORMAL_DIR)/cores/raptor
 RVFI_CHECKS   := $(RVFI_CORE_DIR)/checks
 RVFI_PACK     := build/rapt_pack_rvfi.sv
 VSRC_PATH     := $(RAPTOR_HOME)/rtl_sv
+# uarch config preset providing rapt_config.svh (configs/<name>/rapt_config.svh).
+# Must precede rtl_sv/include on the verilator include path so its config wins.
+# The `formal` preset is a minimal-but-valid RV32IMC config (tiny caches, no L2,
+# bimodal BP, small ROB/RS) that keeps yosys prep/check and BMC tractable on the
+# full-cluster wrapper. Override with RAPT_CONFIG=default for a full-size proof.
+RAPT_CONFIG   ?= formal
+RVFI_CFG_DIR  := $(RAPTOR_HOME)/configs/$(RAPT_CONFIG)
 # Core-only sources: exclude SoC wrappers, DPI-C, and include-dir files.
 # Note: rapt_npc_soc / wrap_rnp_soc were moved to $(RAPTOR_HOME)/nsim/rtl/
 # (TB-only); they are no longer found via $(VSRC_PATH), so excluding them is
@@ -154,7 +161,7 @@ $(RVFI_PACK): $(VSRCS_RVFI)
 	@mkdir -p build
 	@echo "[formal] Generating RVFI-enabled pack: $@"
 	verilator -E -P -DRAPT_RVFI \
-		-I$(VSRC_PATH)/include -I$(VSRC_PATH)/include/npc -I$(VSRC_PATH)/include/dpic_mock \
+		-I$(RVFI_CFG_DIR) -I$(VSRC_PATH)/include -I$(VSRC_PATH)/include/npc -I$(VSRC_PATH)/include/dpic_mock \
 		$(VSRCS_RVFI) > $@
 
 # --- Generate checks from config ---

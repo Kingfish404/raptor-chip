@@ -14,6 +14,23 @@ SOFTWARE_AD_MACRO = "SOFTWARE_UPDATE_A_D=True"
 HARDWARE_AD_MACRO = "HARDWARE_UPDATE_A_D=True"
 
 CLASSIC_INCOMPAT_TESTS = {
+    # Big-endian (mstatus.SBE) VM tests: Raptor is little-endian only and
+    # hardwires mstatus.{M,S,U}BE to 0 (WARL, fully spec-compliant for a
+    # LE-only hart). These tests set mstatush.SBE and then run the whole
+    # VERIFICATION_RWX body in S-mode, where SBE=1 makes *both* the implicit
+    # page-table reads *and* the explicit S-mode load/store/signature accesses
+    # big-endian. The sail reference implements SBE, so its PTEs translate and
+    # its signature stores are byte-swapped to match. Passing these on Raptor
+    # would require implementing full big-endian explicit data accesses (a new
+    # MBE/SBE/UBE datapath across the LSU/L1D plus PTW PTE byte-swap), which
+    # directly contradicts the LE-only design decision and is not a bug fix.
+    # Genuinely incompatible by design; intentionally not un-quarantined.
+    "vm_mstatus_sbe_set_S_mode.S",
+    "vm_mstatus_sbe_set_sum_set_S_mode.S",
+    # U-mode Sv32 VM tests: the classic env's page-table / trap-save setup
+    # accesses low/unmapped physical addresses under Raptor's strict PMA after
+    # entering U-mode, producing a fault-sequence that diverges from the sail
+    # reference. Under investigation; quarantined for now.
     "vm_A_and_D_U_mode.S",
     "vm_U_Bit_set_U_mode.S",
     "vm_U_Bit_unset_U_mode.S",

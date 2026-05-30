@@ -43,7 +43,7 @@ typedef struct
   word_t rpc;
   int priv;
   word_t gpr[GPR_SIZE];
-  /* CSRs — keep in same logical groups as the live npc struct. */
+  /* CSRs -- keep in same logical groups as the live npc struct. */
   word_t sstatus, sie_, stvec, sscratch, sepc, scause, stval, sip, satp;
   word_t mstatus, medeleg, mideleg, mie_, mtvec;
   word_t mscratch, mepc, mcause, mtval, mip;
@@ -503,7 +503,7 @@ bool checkpoint_save_tick(void)
     if (quiesce_wait_cycles < 100000)
       return false;
     Log("checkpoint: quiesce wait exceeded 100k cycles "
-        "(rob_q=%d sq_q=%d stq_q=%d) — forcing save (memory may be inconsistent)",
+        "(rob_q=%d sq_q=%d stq_q=%d) -- forcing save (memory may be inconsistent)",
         rob_q, sq_q, stq_q);
   }
   else if (quiesce_wait_cycles > 0)
@@ -814,12 +814,12 @@ static void load_region(const char *dir, const ckpt_region_t *r)
  * with priv = ckpt_priv.
  *
  * Restoration is performed via real RISC-V instructions because the rapt
- * RTL's `rf[]` is a read-only continuous-assign debug shadow — direct C++
+ * RTL's `rf[]` is a read-only continuous-assign debug shadow -- direct C++
  * writes don't propagate to the live PRF. Real load instructions go through
  * rename -> PRF write -> maptable update, so they correctly re-establish
  * architectural register state regardless of microarchitectural changes.
  *
- * Sequence (skip x0; t0/x5 and t1/x6 are clobbered as scratch — restored last):
+ * Sequence (skip x0; t0/x5 and t1/x6 are clobbered as scratch -- restored last):
  *
  *   auipc t0, 0                       ; t0 = MROM_BASE
  *   addi  t0, t0, DATA_OFF            ; t0 -> data table
@@ -926,7 +926,7 @@ static const csr_entry_t kCsrRestoreList[] = {
     {CSR_MCOUNTEREN, &arch_snapshot_t::mcounteren, "mcounteren"},
     /* mstatush: RTL write path WARL-zeros it (SBE/MBE not implemented).
      * Restore via direct-host write below to be future-proof against RTL changes. */
-    /* mstatus written LAST via dedicated slot — see below. */
+    /* mstatus written LAST via dedicated slot -- see below. */
 };
 #define NR_CSR_RESTORE (sizeof(kCsrRestoreList) / sizeof(kCsrRestoreList[0]))
 
@@ -946,7 +946,7 @@ static void build_trampoline(uint8_t *mrom, const arch_snapshot_t *s)
    *   28                      (load 28 GPRs: skip x0/x5/x6)
    *   2                       (lw + csrw mstatus)
    *   2                       (lw t1; lw t0)
-   *   1                       (fence.i — flush stale prefetch of trampoline)
+   *   1                       (fence.i -- flush stale prefetch of trampoline)
    *   1                       (mret)
    */
   const int n_setup = 2;
@@ -1021,7 +1021,7 @@ static void build_trampoline(uint8_t *mrom, const arch_snapshot_t *s)
    *                                   1-2 cycle window between csrw mstatus
    *                                   and mret; otherwise a pending MIP bit
    *                                   would divert PC to mtvec instead of
-   *                                   ckpt_pc. mret restores MIE←MPIE so
+   *                                   ckpt_pc. mret restores MIE<-MPIE so
    *                                   architectural MIE post-resume is
    *                                   still saved value.)
    *   - other bits  = saved mstatus
@@ -1049,7 +1049,7 @@ static void build_trampoline(uint8_t *mrom, const arch_snapshot_t *s)
   }
   /* mstatus */
   put_word(data, SLOT_MSTATUS, mstatus_for_mret);
-  /* Other CSRs — for mepc slot, override with ckpt_pc so mret targets it. */
+  /* Other CSRs -- for mepc slot, override with ckpt_pc so mret targets it. */
   for (size_t k = 0; k < NR_CSR_RESTORE; k++)
   {
     word_t v = s->*(kCsrRestoreList[k].field);
@@ -1060,7 +1060,7 @@ static void build_trampoline(uint8_t *mrom, const arch_snapshot_t *s)
     put_word(data, SLOT_OTHER_CSR0 + (int)k, v);
   }
 
-  Log("checkpoint: trampoline built (%d insns, data @+%d) — mret -> pc=" FMT_WORD_NO_PREFIX ", priv=%d, mstatus_for_mret=" FMT_WORD_NO_PREFIX,
+  Log("checkpoint: trampoline built (%d insns, data @+%d) -- mret -> pc=" FMT_WORD_NO_PREFIX ", priv=%d, mstatus_for_mret=" FMT_WORD_NO_PREFIX,
       n_total, data_off, s->pc, s->priv, mstatus_for_mret);
 }
 
@@ -1093,12 +1093,12 @@ void checkpoint_configure_load(const char *dir)
     load_region(load_dir, &kRegions[i]);
 
   /* Rewrite MROM with the trampoline (overrides whatever mem_mrom.bin loaded
-   * — that copy is still useful for post-mortem inspection but we need MROM
+   * -- that copy is still useful for post-mortem inspection but we need MROM
    * to redirect PC back to ckpt_pc on first fetch). */
   uint8_t *mrom = guest_to_host(MROM_BASE);
   if (mrom == NULL)
   {
-    Error("checkpoint: MROM has no host backing — cannot install trampoline");
+    Error("checkpoint: MROM has no host backing -- cannot install trampoline");
     load_enabled = 0;
     resume_ready = 1;
     return;
@@ -1201,7 +1201,7 @@ void checkpoint_inject_after_reset(void)
 
   /* S-mode shadow CSRs (sstatus/sie/sip): RTL stores them as separate slots
    * from mstatus/mie/mip. csrw mstatus auto-mirrors into csr[SSTATUS], but
-   * csrw mie / csrw mip do NOT mirror to csr[SIE] / csr[SIP] — only csrw
+   * csrw mie / csrw mip do NOT mirror to csr[SIE] / csr[SIP] -- only csrw
    * sie / csrw sip update them. Since the trampoline restores via csrw mie /
    * csrw mip, csr[SIE]/csr[SIP] would otherwise stay at reset (0). Restore
    * them directly so S-mode reads see correct values. csr[SSTATUS] is
@@ -1256,7 +1256,7 @@ void checkpoint_load_post_trampoline_tick(word_t committed_pc)
    *   - mepc: trampoline wrote ckpt_pc into mepc to drive mret; saved mepc
    *           is recoverable now since mret has already consumed it.
    * Note: mret itself also forced mstatus.MPP/MPIE/MPRV per spec (architectural
-   * — no fixup needed; matches what would happen on any natural mret). */
+   * -- no fixup needed; matches what would happen on any natural mret). */
   if (npc.mcycle_ != NULL)
     *npc.mcycle_ = loaded_snap.mcycle;
   if (npc.mcycleh != NULL)

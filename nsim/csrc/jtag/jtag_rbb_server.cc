@@ -22,7 +22,7 @@
 //   * OpenOCD `scan_chain` returns IDCODE = 0x10001913 (verified end-to-end).
 //   * `riscv dmi_read 0x11` (dmstatus), `0x16` (abstractcs), `0x10`
 //     (dmcontrol), `0x04` (data0) all transact correctly.
-//   * `target halt` will *fail* — `haltreq_o` is wired but the core's
+//   * `target halt` will *fail* -- `haltreq_o` is wired but the core's
 //     CMU/IFU do not yet act on it. That is expected and is the next RTL
 //     milestone in docs-ref/dev.jtag.md.
 // =============================================================================
@@ -39,7 +39,7 @@ extern "C" int jtag_rbb_server_main(int /*argc*/, char * /*argv*/[]) {
   return 1;
 }
 
-#else  // !RAPT_SOC — npc build with JTAG pins on the Verilator top
+#else  // !RAPT_SOC -- npc build with JTAG pins on the Verilator top
 
 #include <arpa/inet.h>
 #include <cerrno>
@@ -113,7 +113,7 @@ bool apply_rbb_byte(uint8_t b, uint8_t *tdo_out) {
       *tdo_out = g_top->jtag_tdo & 1;
       return true;
     case 'r':  // System reset deassert (per OpenOCD convention)
-    case 's':  // System reset assert: ignored — we don't model SRST here.
+    case 's':  // System reset assert: ignored -- we don't model SRST here.
       return false;
     case 't':  // TRST deassert
       g_top->jtag_trst_n = 1;
@@ -198,7 +198,7 @@ int accept_one_client(int listener) {
         fprintf(stderr, "[jtag-server] accept(): %s\n", std::strerror(errno));
         return -1;
       }
-      // Disable Nagle so each TCK command round-trips immediately —
+      // Disable Nagle so each TCK command round-trips immediately --
       // remote_bitbang is latency-sensitive at small batch sizes.
       int one = 1;
       ::setsockopt(c, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
@@ -276,7 +276,7 @@ extern "C" int jtag_rbb_server_main(int argc, char *argv[]) {
         }
         if (++cycle_count > kMaxCycles) {
           fprintf(stderr,
-                  "[jtag-server] cycle cap (%llu) hit — closing client\n",
+                  "[jtag-server] cycle cap (%llu) hit -- closing client\n",
                   (unsigned long long)kMaxCycles);
           g_should_quit = 1;
           rc = 2;

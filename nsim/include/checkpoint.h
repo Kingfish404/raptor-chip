@@ -9,7 +9,7 @@
  * Plain-text architectural-state checkpoint with binary memory dumps. The
  * design intent is to let the user pause a long simulation (e.g. Linux boot)
  * at a chosen cycle, save the architectural state, modify RTL/microarch,
- * rebuild, and resume from the same architectural point — without rerunning
+ * rebuild, and resume from the same architectural point -- without rerunning
  * the previous millions of cycles.
  *
  * Layout of a checkpoint directory:

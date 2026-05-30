@@ -161,7 +161,7 @@ module rapt_bpu #(
 
   // Final mux: priority = commit-flush entry write > IDU train > commit
   // type-only refresh. Rationale:
-  //   - cmu_wen_entry only fires on commit-flush (true mispredict) — must win;
+  //   - cmu_wen_entry only fires on commit-flush (true mispredict) -- must win;
   //     it carries authoritative target/type to replace a stale entry.
   //   - cmu_wen_type alone is just "refresh type of an existing matching
   //     entry" on every committed control op; the entry was allocated with

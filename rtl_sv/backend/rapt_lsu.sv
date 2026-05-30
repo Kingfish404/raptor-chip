@@ -142,7 +142,7 @@ module rapt_lsu #(
         `RAPT_DPI_C_NPC_DIFFTEST_MEM_DIFF(rou_lsu.sq_waddr, rou_lsu.sq_wdata, {{2'b0}, rou_lsu.alu})
       end
       if (state_store == LS_S_R && sq_valid[sq_head]) begin
-        // Store Finished (aligned case — released after single beat).
+        // Store Finished (aligned case -- released after single beat).
         sq_valid[sq_head] <= 0;
 
         sq_alu[sq_head] <= 0;
@@ -152,7 +152,7 @@ module rapt_lsu #(
         sq_head <= sq_head + 1;
       end
       if (state_store == LS_S_HI_R && sq_valid[sq_head]) begin
-        // Store Finished (misaligned case — released after hi beat).
+        // Store Finished (misaligned case -- released after hi beat).
         sq_valid[sq_head] <= 0;
 
         sq_alu[sq_head] <= 0;
@@ -320,7 +320,7 @@ module rapt_lsu #(
   //  Misaligned store support
   //    SW/SH at `waddr[OFFW-1:0]` crossing a word (RV32) / dword (RV64)
   //    boundary is split into two aligned beats.  Beat 0 drives the original
-  //    waddr/walu/wdata — the BUS already shifts wstrb/wdata by `waddr_lo * 8`
+  //    waddr/walu/wdata -- the BUS already shifts wstrb/wdata by `waddr_lo * 8`
   //    and truncates, so the lo word naturally gets the correct partial
   //    write.  Beat 1 drives the next word-aligned address with the bytes
   //    that spilled past the word boundary, shifted down to live at byte 0.
@@ -403,7 +403,7 @@ module rapt_lsu #(
                     : ralu;
 
   // ==========================================================================
-  //  Load data path — uses the split-merge result when ma_state == MA_DONE.
+  //  Load data path -- uses the split-merge result when ma_state == MA_DONE.
   // ==========================================================================
   // logic [7:0] wstrb;
   // assign wstrb = (

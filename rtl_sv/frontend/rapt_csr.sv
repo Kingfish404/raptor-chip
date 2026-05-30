@@ -12,7 +12,7 @@ module rapt_csr #(
     input clock,
 
     // Hart identifier injected by the cluster top. Returned verbatim by
-    // CSR reads of `mhartid` (RV Priv §3.1.5). Tied to '0 today since the
+    // CSR reads of `mhartid` (RV Priv Sec.3.1.5). Tied to '0 today since the
     // cluster only instantiates one core; the multi-core wiring is in place.
     input [XLEN-1:0] hart_id_i,
 
@@ -25,7 +25,7 @@ module rapt_csr #(
     // Asserts when (mip & mie & mideleg) has any bit set AND the interrupt is
     // globally enabled for S-mode (priv<S, or priv==S && sstatus.SIE).
     // s_int_cause carries the interrupt cause code (with MSB set), priority
-    // SEI(9) > SSI(1) > STI(5) per RISC-V Priv §3.1.9.
+    // SEI(9) > SSI(1) > STI(5) per RISC-V Priv Sec.3.1.9.
     output logic            s_int_pending,
     output logic [XLEN-1:0] s_int_cause,
 
@@ -91,7 +91,7 @@ module rapt_csr #(
   csr_t waddr_reg, raddr_reg;
   logic [R_W-1:0] raddr;
 
-  // CSR `time` MUST advance in lockstep with CLINT `mtime` (RV Priv §10).
+  // CSR `time` MUST advance in lockstep with CLINT `mtime` (RV Priv Sec.10).
   // Both are paced by RAPT_MTIME_DIV = RAPT_CORE_CLOCK_MHZ / RAPT_MTIME_FREQ_MHZ
   // so the kernel sees the same Hz the DTS declared. Override via VFLAGS or by
   // re-defining RAPT_MTIME_FREQ_MHZ in rapt_soc.svh.
@@ -131,7 +131,7 @@ module rapt_csr #(
   // PMP shadow registers (precomputed every clock from pmpcfg_r/pmpaddr_r).
   // Allows the combinational rapt_pmp module to skip the per-entry NAPOT
   // decode (XOR + AND), TOR neighbour fetch, and bit-slice extraction.
-  // 1-cycle latency vs raw CSR — the pipeline already flushes on PMP CSR
+  // 1-cycle latency vs raw CSR -- the pipeline already flushes on PMP CSR
   // writes (via fence/csrrw side-effects), so by the time the next L/S
   // executes the shadow has caught up.
   logic [XLEN-1:0]          pmp_napot_mask_r[`RAPT_PMP_NUM];
@@ -344,7 +344,7 @@ module rapt_csr #(
         : 'b1
   );
   // Data MMU: on for S/U modes; and on for M-mode when MPRV=1 AND MPP!=M
-  // (MPRV with MPP=M does not enable translation per spec §3.1.6.3).
+  // (MPRV with MPP=M does not enable translation per spec Sec.3.1.6.3).
   assign csr_bcast.dmmu_en = (
       (csr[SATP___][`RAPT_CSR_SATP_MODE_] == 0)
       ? 'b0
@@ -379,7 +379,7 @@ module rapt_csr #(
     : (is_interrupt && (mtvec_mode == `RAPT_TVEC_MODE_VECTORED)
         ? (mtvec_base + vec_offset) : mtvec_base);
 
-  // Interrupt eligibility (RISC-V priv spec 1.12 §3.1.9):
+  // Interrupt eligibility (RISC-V priv spec 1.12 Sec.3.1.9):
   //   An M-mode interrupt i is taken iff mip[i] && mie[i] && !mideleg[i]
   //   AND (priv < M) OR (priv == M && mstatus.MIE).
   //   M-timer/M-sw are NOT delegatable (WARL 0 in mideleg), so the
@@ -403,7 +403,7 @@ module rapt_csr #(
                  | ({{(XLEN-1){1'b0}}, m_ext_irq_i} << `RAPT_CSR_MIE_MEIE)
                  | ({{(XLEN-1){1'b0}}, s_ext_irq_i} << `RAPT_CSR_MIE_SEIE);
 
-  // ----- S-mode delegated interrupt evaluation (Priv §3.1.9) --------------
+  // ----- S-mode delegated interrupt evaluation (Priv Sec.3.1.9) --------------
   // An S-mode interrupt i fires iff: mip[i] && mie[i] && mideleg[i] && enable,
   // where enable = (priv<S) || (priv==S && sstatus.SIE).
   // M-mode is never preempted by S-mode (handled by mask: priv==M -> disabled).
@@ -417,7 +417,7 @@ module rapt_csr #(
   assign s_int_active = mip_eff & csr[MIE____] & csr[MIDELEG]
                       & {XLEN{s_int_global_en}};
   assign s_int_pending = |s_int_active;
-  // Priority SEI > SSI > STI (matches Priv §3.1.9 order for S-level sources).
+  // Priority SEI > SSI > STI (matches Priv Sec.3.1.9 order for S-level sources).
   assign s_int_cause   = (XLEN'(1) << (XLEN-1)) | (
       s_int_active[9] ? XLEN'(9)
     : s_int_active[1] ? XLEN'(1)
@@ -458,7 +458,7 @@ module rapt_csr #(
     csr_bcast.pmp_mode_napot = pmp_mode_napot_r;
   end
 
-  // PMP shadow registers — derived from pmpcfg_r/pmpaddr_r every clock.
+  // PMP shadow registers -- derived from pmpcfg_r/pmpaddr_r every clock.
   // Updates 1 cycle after the underlying CSR write, which is invisible to
   // software because the PMP CSR write itself triggers a pipeline flush
   // and any subsequent load/store is at least 2 cycles downstream.
@@ -612,9 +612,9 @@ module rapt_csr #(
             // SBE/MBE are WARL-zero (little-endian only).
             csr[MSTATUSH] <= '0;
           end else if (waddr_reg == MSTATUS) begin
-            // Write mask: exclude SD(31, read-only) and VS(10:9, hardwired 0 — no V ext)
+            // Write mask: exclude SD(31, read-only) and VS(10:9, hardwired 0 -- no V ext)
             // SD recomputed from FS dirty (14:13==2'b11) or XS dirty (16:15==2'b11)
-            // SXL/UXL (RV64 only, bits 35:32) are hardwired to 2 (RV64) — OR back in.
+            // SXL/UXL (RV64 only, bits 35:32) are hardwired to 2 (RV64) -- OR back in.
             csr[MSTATUS] <= (rou_csr.csr_wdata & `RAPT_CSR_MSTATUS_WMASK)
                           | ((rou_csr.csr_wdata[14:13] == 2'b11
                             || rou_csr.csr_wdata[16:15] == 2'b11) ? `RAPT_CSR_MSTATUS_SD : 32'h0)
@@ -657,7 +657,7 @@ module rapt_csr #(
             // hardware may also clear bit [1] but keeping it is spec-legal.
             csr[waddr_reg] <= {rou_csr.csr_wdata[XLEN-1:1], 1'b0};
           end else if (waddr_reg == SATP___) begin
-            // WARL on satp.MODE: per RISC-V Priv §10.6.1, "If satp is written
+            // WARL on satp.MODE: per RISC-V Priv Sec.10.6.1, "If satp is written
             // with an unsupported MODE, the entire write has no effect; no
             // fields in satp are modified." We support Bare and a single
             // translation mode (Sv32 in RV32, Sv39 in RV64). Linux probes

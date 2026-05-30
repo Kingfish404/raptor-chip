@@ -44,19 +44,66 @@ module rapt_sram_1r1w #(
 
 `ifdef RAPT_USE_SRAM_MACRO
   // ============================================================
-  // Real SRAM macro instantiation (for tapeout)
+  // OpenRAM-generated 1R1W SRAM macro instantiation
   // ============================================================
-  // Replace this section with the target foundry SRAM macro.
-  // Example for TSMC/SMIC 1R1W SRAM:
+  // Selects a pre-characterised OpenRAM macro by (DEPTH, DATA_WIDTH) so
+  // that Yosys reads only a blackbox stub and OpenSTA gets timing from
+  // the OpenRAM-produced Liberty file. Macros are generated under
+  //   $(RAPTOR_HOME)/nsim/sram/build/<PLATFORM>/macro/
+  // and registered as blackboxes in
+  //   $(RAPTOR_HOME)/nsim/sram/wrappers/rapt_sram_blackbox.v
   //
-  //   S011HD1P_X32Y2D128 u_sram (
-  //     .CLK(clock), .A(waddr), .D(wdata), .Q(rdata),
-  //     .CEN(~(ren | wen)), .WEN(~wen), ...
-  //   );
+  // Naming follows OpenRAM convention for 1R1W ports:
+  //   <tech>_sram_<size>_1r1w_<word_size>x<num_words>_<write_size>
+  // and is aliased to the generic per-shape symbol used here:
+  //   rapt_openram_1r1w_<num_words>x<word_size>
   //
-  // Bypass logic for read-during-write should be added externally
-  // in the cache controller if the foundry macro is read-first.
+  // OpenRAM SRAMs are read-first; the bypass mux around the macro
+  // implements write-first semantics for the cache controller.
   // ============================================================
+  logic [DATA_WIDTH-1:0] macro_rdata;
+  (* keep = "true" *)logic                  bypass_en_r;
+  (* keep = "true" *)logic [DATA_WIDTH-1:0] wdata_r;
+
+  always_ff @(posedge clock) begin
+    if (ren) begin
+      bypass_en_r <= wen && (waddr == raddr);
+      wdata_r     <= wdata;
+    end
+  end
+
+  generate
+    if (DEPTH == 32 && DATA_WIDTH == 32) begin : g_32x32
+      rapt_openram_1r1w_32x32 u_sram (
+        .clk0(clock), .csb0(~wen), .web0(~wen),
+        .wmask0({(DATA_WIDTH/8){1'b1}}), .addr0(waddr), .din0(wdata),
+        .clk1(clock), .csb1(~ren), .addr1(raddr), .dout1(macro_rdata)
+      );
+    end else if (DEPTH == 16 && DATA_WIDTH == 32) begin : g_16x32
+      rapt_openram_1r1w_16x32 u_sram (
+        .clk0(clock), .csb0(~wen), .web0(~wen),
+        .wmask0({(DATA_WIDTH/8){1'b1}}), .addr0(waddr), .din0(wdata),
+        .clk1(clock), .csb1(~ren), .addr1(raddr), .dout1(macro_rdata)
+      );
+    end else if (DEPTH == 16 && DATA_WIDTH == 64) begin : g_16x64
+      rapt_openram_1r1w_16x64 u_sram (
+        .clk0(clock), .csb0(~wen), .web0(~wen),
+        .wmask0({(DATA_WIDTH/8){1'b1}}), .addr0(waddr), .din0(wdata),
+        .clk1(clock), .csb1(~ren), .addr1(raddr), .dout1(macro_rdata)
+      );
+    end else begin : g_unsupported
+      // No OpenRAM macro generated for this (DEPTH, DATA_WIDTH).
+      // Add a config under nsim/sram/configs/ and a stub in
+      // nsim/sram/wrappers/rapt_sram_blackbox.v, then extend this
+      // generate cascade. Until then, leave macro_rdata undriven so
+      // synthesis fails loudly instead of silently mis-mapping.
+      initial $fatal(1, "rapt_sram_1r1w: no OpenRAM macro for DEPTH=%0d WIDTH=%0d",
+                     DEPTH, DATA_WIDTH);
+      assign macro_rdata = '0;
+    end
+  endgenerate
+
+  assign rdata = bypass_en_r ? wdata_r : macro_rdata;
 
 `else
   // ============================================================

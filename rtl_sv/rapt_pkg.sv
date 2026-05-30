@@ -39,6 +39,12 @@ package rapt_pkg;
 
     logic [XLENPkg-1:0] pnpc;
     logic [31:0] inst;
+`ifdef RAPT_RVFI
+    // Original fetched encoding (compressed 16-bit zero-extended, or 32-bit).
+    // Used only by RVFI so `rvfi_insn` reports the architectural instruction
+    // word, while `inst` keeps the decompressed form for difftest/decode.
+    logic [31:0] rvfi_inst;
+`endif
     logic [XLENPkg-1:0] pc;
   } uop_t;
 
@@ -96,6 +102,10 @@ package rapt_pkg;
     // Original instruction (debug / RVFI / difftest). On commit, a trap
     // entry is surfaced as `'h13` (NOP) via a read-side mux.
     logic [31:0] inst;
+`ifdef RAPT_RVFI
+    // Original fetched encoding for RVFI (compressed 16-bit zero-extended).
+    logic [31:0] rvfi_inst;
+`endif
   } uop_payload_t;
 
   // ROB entry - control + WB-mutable fields only. Cold, dispatch-only

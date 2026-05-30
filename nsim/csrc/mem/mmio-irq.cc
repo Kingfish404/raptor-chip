@@ -18,7 +18,7 @@ extern NPCState npc;
 // rtl_sv RTL state, removing the cross-hierarchy poke and making the IRQ
 // path synthesizable end-to-end (the TB drives a real port).
 //
-// Bit indexing matches the PLIC: bit `i` ↔ source `i` (1..NDEV); bit 0 is
+// Bit indexing matches the PLIC: bit `i` <-> source `i` (1..NDEV); bit 0 is
 // reserved and ignored.
 static std::atomic<uint32_t> g_ext_irq_pending{0};
 
