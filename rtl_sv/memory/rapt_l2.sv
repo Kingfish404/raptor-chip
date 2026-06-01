@@ -73,7 +73,21 @@ module rapt_l2 #(
     axi4_if.master axi_m
 );
 
-`ifndef RAPT_L2_EN
+// The active L2 cache is only instantiated when explicitly enabled
+// (`RAPT_L2_EN`) AND the build does not target the third-party ysyxSoC
+// (`RAPT_SOC`). The ysyxSoC `sdram_axi` / xbar slaves cannot service the
+// L2's multi-beat burst line fills (the same incompatibility that forces
+// the legacy single-outstanding bus FSM under `RAPT_SOC`); an allocate on a
+// store/load miss never completes, hanging the SQ/ROB on the first SDRAM
+// store (e.g. `sb` to 0xa000_000a during the MROM->SDRAM copy loop). For
+// SoC builds the L2 therefore collapses to a pure passthrough.
+`ifdef RAPT_L2_EN
+`ifndef RAPT_SOC
+`define RAPT_L2_ACTIVE
+`endif
+`endif
+
+`ifndef RAPT_L2_ACTIVE
   // =====================================================================
   // Pure passthrough (L2 disabled). Kept lint-clean.
   // =====================================================================
@@ -691,7 +705,13 @@ module rapt_l2 #(
     end
   end
 
-`endif  // RAPT_L2_EN
+`endif  // RAPT_L2_ACTIVE
+
+// Scope the helper define to this module so it does not leak into other
+// translation-unit files in single-unit Verilator/Yosys compilation.
+`ifdef RAPT_L2_ACTIVE
+`undef RAPT_L2_ACTIVE
+`endif
 
 endmodule
 /* verilator lint_on UNUSEDPARAM */

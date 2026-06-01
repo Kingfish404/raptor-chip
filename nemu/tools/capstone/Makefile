@@ -28,7 +28,7 @@ endif
 
 CAPSTONE = $(REPO_PATH)/libcapstone.$(suffix)
 $(CAPSTONE):
-	cd $(REPO_PATH) && CAPSTONE_ARCHS="x86|mips|riscv|loongarch" bash make.sh
+	cd $(REPO_PATH) && CAPSTONE_ARCHS="x86|mips|riscv|loongarch" bash ./make.sh
 
 clean:
 	$(MAKE) -C $(REPO_PATH) clean

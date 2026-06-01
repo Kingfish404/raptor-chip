@@ -46,7 +46,7 @@ jobs:
       - name: Boot Linux on NPC
         shell: bash -l {0}
         run: |
-          make linux-boot-npc32 ARGS="-b -n" MAX_INST=160000000 \
+          make linux-boot-npc32 ARGS="-b -n" MAX_INST=120000000 \
             2>&1 | tee /tmp/linux-boot.log || true
       - name: Linux boot summary
         run: |

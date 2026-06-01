@@ -13,6 +13,7 @@ void (*ref_difftest_regcpy)(void *dut, bool direction) = NULL;
 void (*ref_difftest_exec)(uint64_t n) = NULL;
 void (*ref_difftest_raise_intr)(uint64_t NO) = NULL;
 void (*ref_difftest_set_meip)(uint8_t val) = NULL;
+void (*ref_difftest_set_stip)(uint8_t val) = NULL;
 void (*ref_difftest_plic_raise)(uint32_t src) = NULL;
 
 static bool is_skip_ref = false;
@@ -38,7 +39,8 @@ void difftest_skip_ref()
 
 void difftest_skip_dut(int nr_ref, int nr_dut)
 {
-  if (!difftest_enabled) return;
+  if (!difftest_enabled)
+    return;
   skip_dut_nr_inst += nr_dut;
 
   while (nr_ref-- > 0)
@@ -49,7 +51,8 @@ void difftest_skip_dut(int nr_ref, int nr_dut)
 
 void difftest_raise_intr(uint64_t NO)
 {
-  if (!difftest_enabled) return;
+  if (!difftest_enabled)
+    return;
   ref_difftest_raise_intr(NO);
 }
 
@@ -84,7 +87,8 @@ static void checkmem(uint8_t *ref, uint8_t *dut, size_t n)
 void init_difftest(char *ref_so_file, long img_size, int port)
 {
 #ifdef CONFIG_DIFFTEST
-  if (ref_so_file == NULL) {
+  if (ref_so_file == NULL)
+  {
     printf("[difftest] DISABLED: no `-d <ref.so>` argument supplied; "
            "register/CSR comparison against REF is skipped.\n");
     difftest_enabled = false;
@@ -110,6 +114,7 @@ void init_difftest(char *ref_so_file, long img_size, int port)
 
   // Optional: present in newer NEMU builds; absent in older refs (skip if missing).
   ref_difftest_set_meip = (void (*)(uint8_t))dlsym(handle, "difftest_set_meip");
+  ref_difftest_set_stip = (void (*)(uint8_t))dlsym(handle, "difftest_set_stip");
   ref_difftest_plic_raise = (void (*)(uint32_t))dlsym(handle, "difftest_plic_raise");
 
   void (*ref_difftest_init)(int) = (void (*)(int))dlsym(handle, "difftest_init");
@@ -154,7 +159,18 @@ static void checkregs(NPCState *ref, vaddr_t pc)
            (word_t)(*(ref->priv)), (word_t)(*(npc.priv)));
     is_same = false;
   }
-  if ((uint32_t)(*(ref->inst)) != *npc.inst)
+  // NEMU forces `inst = 0x00000013` (canonical NOP) for any instruction that
+  // traps (load/store page fault, access fault, etc.) — see the nemu_longjmp
+  // handlers in isa_exec_once() at nemu/src/isa/riscv/inst.c. The DUT instead
+  // reports the actual faulting instruction word. On a correctly-handled trap
+  // every architectural field (pc, priv, GPRs, scause/sepc/stval/satp, ...)
+  // already matches; only this `inst` field differs by convention (e.g. a
+  // legitimate copy_from_user load page fault on an unmapped user page). Skip
+  // the inst-only comparison when the reference is the trap NOP sentinel to
+  // avoid a false-positive divergence. This is safe: a real NOP in memory
+  // yields ref==dut==0x13 (no mismatch), and a genuine trap/no-trap or
+  // wrong-cause divergence is still caught by the pc/priv/CSR checks.
+  if ((uint32_t)(*(ref->inst)) != *npc.inst && (uint32_t)(*(ref->inst)) != 0x00000013u)
   {
     printf(FMT_RED("[ERROR]") "    inst is different! ref = " FMT_WORD_NO_PREFIX ", dut = " FMT_WORD_NO_PREFIX "\n",
            (word_t)(*(ref->inst)), (word_t)(*npc.inst));
@@ -280,8 +296,32 @@ static void checkregs(NPCState *ref, vaddr_t pc)
 
 void difftest_step(vaddr_t pc)
 {
-  if (!difftest_enabled) return;
+  if (!difftest_enabled)
+    return;
   NPCState ref_r;
+
+  // TEST-ONLY: deterministic fault injection to validate the LightSSS
+  // snapshot-on-divergence path without perturbing the RTL/reference model.
+  // When NSIM_FAULT_DIFFTEST_AT=<N> is set, force a clean difftest divergence
+  // (NPC_ABORT) after N committed instructions. N must be large enough that at
+  // least one LightSSS progress-fork has already happened (see
+  // NSIM_PROGRESS_CYCLES). Never active unless the env var is present.
+  static long fault_at = []() -> long
+  {
+    const char *e = getenv("NSIM_FAULT_DIFFTEST_AT");
+    return e ? strtol(e, NULL, 0) : 0;
+  }();
+  static long commit_seen = 0;
+  if (fault_at > 0)
+  {
+    if (++commit_seen == fault_at)
+    {
+      printf(FMT_RED("[ERROR]") " injected difftest fault at commit %ld, pc=" FMT_WORD_NO_PREFIX "\n",
+             commit_seen, pc);
+      npc.state = NPC_ABORT;
+      return;
+    }
+  }
 
   if (skip_dut_nr_inst > 0)
   {

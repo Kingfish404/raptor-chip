@@ -2,6 +2,7 @@
 #include <checkpoint.h>
 #include <difftest.h>
 #include <flow_check.h>
+#include <lightsss.h>
 #include <readline/readline.h>
 #include <readline/history.h>
 #include <npc_verilog.h>
@@ -48,7 +49,7 @@ void cpu_exec_set_threshold(uint64_t cycle, uint64_t inst)
   // size_t(-1) sentinel from the CLI parser comes through as UINT64_MAX;
   // preserve it so the unset axis never triggers the start-of-dump condition.
   tfp_cycle = (cycle == 0) ? UINT64_MAX : cycle;
-  tfp_inst  = (inst  == 0) ? UINT64_MAX : inst;
+  tfp_inst = (inst == 0) ? UINT64_MAX : inst;
 }
 
 static void cpu_exec_one_cycle()
@@ -79,6 +80,28 @@ static void cpu_exec_one_cycle()
     tfp->dump(contextp->time());
   }
   contextp->timeInc(1);
+}
+
+/* LightSSS hook: runs inside the throwaway snapshot child (a COW fork frozen
+ * at the last progress point). Drains the pipeline so committed stores have
+ * reached the host memory buffer, then writes a self-consistent checkpoint.
+ * The child diverging from the parent here is harmless -- it exits afterward. */
+void cpu_exec_lightsss_snapshot(const char *dir)
+{
+  /* Never dump waveform from the child: it would corrupt the parent's FST. */
+  tfp = NULL;
+  /* Drain until ROB/SQ/STQ are empty (bounded so we never hang). Difftest is
+   * intentionally not stepped during the drain -- we only advance the RTL. */
+  for (int i = 0; i < 200000; i++)
+  {
+    bool rob_q = (npc.rob_empty != NULL) ? (*npc.rob_empty != 0) : true;
+    bool sq_q = (npc.sq_valid != NULL) ? (*npc.sq_valid == 0) : true;
+    bool stq_q = (npc.stq_valid != NULL) ? (*npc.stq_valid == 0) : true;
+    if (rob_q && sq_q && stq_q)
+      break;
+    cpu_exec_one_cycle();
+  }
+  checkpoint_emergency_save(dir);
 }
 
 void cpu_show_itrace()
@@ -147,6 +170,19 @@ void cpu_exec(uint64_t n)
   uint64_t cur_inst_cycle = 0;
   uint64_t progress_cycle = 0;
   uint64_t timeout_us = (max_timeout > 0) ? (uint64_t)max_timeout * 1000000 : 0;
+  // Progress/LightSSS-fork interval. Defaults to 40M cycles; overridable via
+  // NSIM_PROGRESS_CYCLES (mainly to validate LightSSS without billion-cycle
+  // workloads).
+  uint64_t progress_interval = 40000000;
+  {
+    const char *iv = getenv("NSIM_PROGRESS_CYCLES");
+    if (iv != NULL)
+    {
+      uint64_t v = strtoull(iv, NULL, 0);
+      if (v != 0)
+        progress_interval = v;
+    }
+  }
   while (!contextp->gotFinish() && npc.state == NPC_RUNNING && n-- > 0)
   {
     cpu_exec_one_cycle();
@@ -171,11 +207,14 @@ void cpu_exec(uint64_t n)
     progress_cycle++;
     if ((progress_cycle & 0x3ffu) == 0)
       serial_tick();
-    if (progress_cycle % 40000000 == 0)
+    if (progress_cycle % progress_interval == 0)
     {
       Log("progress: %016llu cycles, %016llu insts, pc=" FMT_WORD_NO_PREFIX,
           (unsigned long long)progress_cycle, (unsigned long long)pmu.instr_cnt,
           (word_t)(*npc.pc));
+      // LightSSS: fork a COW snapshot at this rewind point. The previous
+      // snapshot (window was clean) is reaped here.
+      lightsss_fork_at_progress();
     }
     if (timeout_us && (progress_cycle % 800000 == 0))
     {
@@ -234,7 +273,8 @@ void cpu_exec(uint64_t n)
       // simulator can still run pk-based / coverage workloads against REFs
       // that don't model paging or delegation identically.
       extern bool difftest_is_enabled();
-      if (!difftest_is_enabled()) {
+      if (!difftest_is_enabled())
+      {
         // Still need to clear any pending memdiff bookkeeping below.
         goto skip_difftest_block;
       }
@@ -248,6 +288,24 @@ void cpu_exec(uint64_t n)
         {
           uint8_t live = *(uint8_t *)&VERILOG_CPU(io_interrupt);
           ref_difftest_set_meip(live & 1u);
+        }
+        // Mirror the DUT's Sstc-driven supervisor timer pending bit (sip.STIP,
+        // bit 5) into REF's mip when Sstc is enabled (menvcfg.STCE=1). In that
+        // mode STIP is hardware-controlled in the DUT from the stimecmp
+        // comparator (read-only to software), but the REF build defines
+        // CONFIG_TARGET_SHARE so its CLINT never self-drives STIP -- it would
+        // otherwise stay 0 and diverge from the DUT during the pending window
+        // before the interrupt is taken (e.g. while sstatus.SIE=0 in early
+        // boot). With STCE=0, STIP is software-managed and replayed normally,
+        // so we leave it to the regular CSR comparison.
+        {
+          extern void (*ref_difftest_set_stip)(uint8_t);
+          if (ref_difftest_set_stip && npc.menvcfg != NULL &&
+              (((uint64_t)*npc.menvcfg >> 63) & 1u))
+          {
+            uint8_t dut_stip = (*npc.sip____ >> 5) & 1u;
+            ref_difftest_set_stip(dut_stip);
+          }
         }
         // Mirror rising edges of the cluster-level external IRQ line into
         // NEMU's PLIC source 1 so both PLICs see identical source events.
@@ -323,6 +381,13 @@ void cpu_exec(uint64_t n)
       npc.state = NPC_QUIT;
       break;
     }
+    // LightSSS: a difftest divergence sets NPC_ABORT here without `break`ing
+    // (unlike timeout/stall aborts, which break earlier). Wake the snapshot
+    // child to dump a checkpoint a window behind the failure before unwinding.
+    if (npc.state == NPC_ABORT)
+    {
+      lightsss_trigger_save();
+    }
     // -c/-i thresholds only START waveform dumping; they no longer halt the
     // simulator.  Use -m / --maximum to bound execution length explicitly.
   }
@@ -352,4 +417,6 @@ void cpu_exec(uint64_t n)
     assert(0);
     break;
   }
+  // Reap any lingering LightSSS snapshot child once cpu_exec returns.
+  lightsss_finish();
 }

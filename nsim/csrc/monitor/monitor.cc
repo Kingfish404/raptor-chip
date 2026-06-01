@@ -1,10 +1,30 @@
 #include <common.h>
 #include <checkpoint.h>
 #include <difftest.h>
+#include <lightsss.h>
 #include <memory.h>
 #include <getopt.h>
 #include <stdio.h>
 #include <string.h>
+#include <libgen.h>
+
+/* Directory holding the simulator binary, derived from argv[0]. Per the nsim
+ * Makefile, BIN lives directly in $(BUILD_DIR) = ./build/$(RAPT_CONFIG), so
+ * this is the per-config build dir and the natural home for checkpoint /
+ * LightSSS snapshot output. Defaults to "." until parse_args() fills it. */
+static char g_build_dir[1024] = ".";
+
+static void compute_build_dir(const char *argv0)
+{
+  if (argv0 == NULL || argv0[0] == '\0')
+    return;
+  char buf[1024];
+  strncpy(buf, argv0, sizeof(buf) - 1);
+  buf[sizeof(buf) - 1] = '\0';
+  const char *d = dirname(buf); /* may return a pointer into buf or static storage */
+  strncpy(g_build_dir, d, sizeof(g_build_dir) - 1);
+  g_build_dir[sizeof(g_build_dir) - 1] = '\0';
+}
 
 static const uint32_t img[] = {
     0x00108093, // 80000000: addi ra, ra, 1
@@ -144,12 +164,18 @@ static void usage(const char *prog)
   printf("  -t, --timeout=SECONDS    set wall-clock timeout in seconds\n");
   printf("      --sig=SPEC           dump RISCOF signature (SPEC=<hex_begin>-<hex_end>:<path>)\n");
   printf("      --trap-on-ebreak     don't halt on ebreak; let RTL take the exception\n");
-  printf("      --ckpt-save=DIR      save checkpoint (arch state + memory) when a ckpt trigger fires\n");
+  printf("      --ckpt-save[=DIR]    save checkpoint (arch state + memory) when a ckpt trigger fires\n");
+  printf("                           (DIR defaults to <build>/checkpoint)\n");
   printf("      --ckpt-cycle=N       save after N cycles from reset/resume (default 0 if no trigger)\n");
   printf("      --ckpt-instr=N       save after N committed guest instructions from reset/resume\n");
   printf("      --ckpt-pc=HEX        save after first committed instruction at PC HEX\n");
   printf("      --ckpt-save-exit     exit simulator immediately after writing the checkpoint\n");
   printf("      --ckpt-load=DIR      restore architectural state from checkpoint DIR before run\n");
+  printf("      --lightsss[=DIR]     LightSSS: fork a snapshot each progress point; on difftest\n");
+  printf("                           divergence dump a checkpoint a window behind the failure\n");
+  printf("                           into DIR (default <build>/lightsss-snapshot). ON by default\n");
+  printf("                           whenever difftest (-d) is enabled.\n");
+  printf("      --no-lightsss        disable the LightSSS auto-snapshot (even with difftest on)\n");
   printf("      --disk=FILE          load FILE as virtio-mmio block disk image\n");
   printf("      --sdcard=FILE        load FILE as LiteX SPI SD-card image\n");
   printf("      --serial-lf-to-cr    translate host LF input to CR for CR-terminated monitors\n");
@@ -175,7 +201,7 @@ static int parse_args(int argc, char *argv[])
       {"timeout", required_argument, NULL, 't'},
       {"sig", required_argument, NULL, 256},
       {"trap-on-ebreak", no_argument, NULL, 257},
-      {"ckpt-save", required_argument, NULL, 258},
+      {"ckpt-save", optional_argument, NULL, 258},
       {"ckpt-cycle", required_argument, NULL, 259},
       {"ckpt-save-exit", no_argument, NULL, 260},
       {"ckpt-load", required_argument, NULL, 261},
@@ -183,13 +209,20 @@ static int parse_args(int argc, char *argv[])
       {"ckpt-pc", required_argument, NULL, 263},
       {"disk", required_argument, NULL, 264},
       {"sdcard", required_argument, NULL, 265},
-        {"serial-lf-to-cr", no_argument, NULL, 266},
+      {"serial-lf-to-cr", no_argument, NULL, 266},
+      {"lightsss", optional_argument, NULL, 267},
+      {"no-lightsss", no_argument, NULL, 268},
       {0, 0, NULL, 0},
   };
   int o;
   size_t cycle_threshold = -1, instr_threshold = -1;
   const char *ckpt_save_dir = NULL;
+  bool ckpt_save_requested = false;
   const char *ckpt_load_dir = NULL;
+  const char *lightsss_dir = NULL;
+  bool lightsss_on = false;
+  bool lightsss_off = false;
+  compute_build_dir(argv[0]);
   uint64_t ckpt_save_cycle = 0;
   uint64_t ckpt_save_instr = 0;
   word_t ckpt_save_pc = 0;
@@ -239,7 +272,14 @@ static int parse_args(int argc, char *argv[])
       }
       break;
     case 'd':
+#ifdef CONFIG_DIFFTEST
       diff_so_file = optarg;
+#else
+      /* Difftest is compiled out: ignore the reference shared object so we do
+       * not spuriously enable LightSSS (which keys off diff_so_file != NULL).
+       * The Makefile always passes -d for convenience regardless of config. */
+      (void)optarg;
+#endif
       break;
     case 'p':
       sscanf(optarg, "%d", &difftest_port);
@@ -270,7 +310,8 @@ static int parse_args(int argc, char *argv[])
       break;
     }
     case 258:
-      ckpt_save_dir = optarg;
+      ckpt_save_dir = optarg; /* NULL when given as bare --ckpt-save */
+      ckpt_save_requested = true;
       break;
     case 259:
       ckpt_save_cycle = parse_u64_auto(optarg);
@@ -299,6 +340,13 @@ static int parse_args(int argc, char *argv[])
     case 266:
       serial_set_lf_to_cr(true);
       break;
+    case 267:
+      lightsss_on = true;
+      lightsss_dir = optarg; /* NULL when given as bare --lightsss */
+      break;
+    case 268:
+      lightsss_off = true;
+      break;
     case 1:
       img_file = optarg;
       break;
@@ -312,12 +360,32 @@ static int parse_args(int argc, char *argv[])
   {
     cpu_exec_set_threshold(cycle_threshold, instr_threshold);
   }
-  if (ckpt_save_dir != NULL)
+  static char ckpt_default_dir[1100];
+  if (ckpt_save_requested)
   {
+    if (ckpt_save_dir == NULL)
+    {
+      snprintf(ckpt_default_dir, sizeof(ckpt_default_dir), "%s/checkpoint", g_build_dir);
+      ckpt_save_dir = ckpt_default_dir;
+    }
     checkpoint_configure_save(ckpt_save_has_cycle, ckpt_save_cycle,
                               ckpt_save_has_instr, ckpt_save_instr,
                               ckpt_save_has_pc, ckpt_save_pc,
                               ckpt_save_dir, ckpt_save_exit);
+  }
+  /* LightSSS is ON by default whenever difftest is active (that is exactly the
+   * configuration that hits deep divergences), unless --no-lightsss was given.
+   * It can also be enabled standalone via --lightsss. */
+  if (!lightsss_off && (lightsss_on || diff_so_file != NULL))
+  {
+    static char lightsss_default_dir[1100];
+    if (lightsss_dir == NULL)
+    {
+      snprintf(lightsss_default_dir, sizeof(lightsss_default_dir),
+               "%s/lightsss-snapshot", g_build_dir);
+      lightsss_dir = lightsss_default_dir;
+    }
+    lightsss_configure(lightsss_dir);
   }
   /* ckpt_load_dir handling is deferred -- see init_monitor() below. */
   if (ckpt_load_dir != NULL)

@@ -402,11 +402,13 @@ static void write_region(const char *dir, const ckpt_region_t *r)
     }
     offsets[nz_chunks++] = off;
     /* Always write CHUNK_SIZE bytes (zero-pad the tail chunk if any). */
-    fwrite(host + off, 1, this_chunk, fbin);
+    if (fwrite(host + off, 1, this_chunk, fbin) != this_chunk)
+      Error("checkpoint: short write to %s: %s", bin_path, strerror(errno));
     if (this_chunk < chunk)
     {
       static const uint8_t zeros[CKPT_CHUNK_SIZE] = {0};
-      fwrite(zeros, 1, chunk - this_chunk, fbin);
+      if (fwrite(zeros, 1, chunk - this_chunk, fbin) != chunk - this_chunk)
+        Error("checkpoint: short write to %s: %s", bin_path, strerror(errno));
     }
     bin_bytes += chunk;
   }
@@ -447,6 +449,19 @@ static void do_save(void)
       (unsigned long long)checkpoint_total_cycle(),
       (unsigned long long)checkpoint_total_instr(), *npc.pc, save_dir);
   save_done = 1;
+}
+
+/* Unconditional dump of the current live architectural + memory state into
+ * `dir`. Bypasses the trigger/quiesce state machine in checkpoint_save_tick();
+ * used by LightSSS, which already drains the pipeline before calling this from
+ * the throwaway snapshot child. */
+void checkpoint_emergency_save(const char *dir)
+{
+  strncpy(save_dir, dir, sizeof(save_dir) - 1);
+  save_dir[sizeof(save_dir) - 1] = '\0';
+  snprintf(save_trigger_desc, sizeof(save_trigger_desc), "lightsss snapshot");
+  save_done = 0;
+  do_save();
 }
 
 bool checkpoint_save_tick(void)

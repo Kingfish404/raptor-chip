@@ -246,6 +246,28 @@ __EXPORT void difftest_set_meip(uint8_t val)
 #endif
 }
 
+// Mirror the DUT's Sstc-driven supervisor timer interrupt pending bit
+// (STIP, mip bit 5) into ref state. When the Sstc extension is active
+// (menvcfg.STCE=1), STIP is hardware-controlled in the DUT from the
+// stimecmp comparator and is read-only to software (Priv "Sstc"); the
+// reference build defines CONFIG_TARGET_SHARE so its own CLINT never
+// self-drives STIP (clint_update_mip() is compiled out). nsim therefore
+// mirrors the DUT's level value here every difftest step so software reads
+// of sip/mip stay consistent across DUT/ref. Caller only invokes this while
+// Sstc is enabled; with STCE=0, STIP is software-managed and kept in sync by
+// the regular instruction replay instead.
+__EXPORT void difftest_set_stip(uint8_t val)
+{
+#ifdef CSR_MIP
+  if (val)
+    cpu.sr[CSR_MIP] |= (1u << 5);
+  else
+    cpu.sr[CSR_MIP] &= ~(1u << 5);
+#else
+  (void)val;
+#endif
+}
+
 // Forward an external IRQ source rising edge into NEMU's PLIC, keeping the
 // reference PLIC pending bits functionally aligned with the DUT's PLIC. SW
 // configuration writes (priority/enable/threshold) are already replayed via

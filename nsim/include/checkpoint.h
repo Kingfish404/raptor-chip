@@ -69,6 +69,11 @@ void checkpoint_load_post_trampoline_tick(word_t committed_pc);
 /* Returns 1 if a save is configured, 0 otherwise. */
 int checkpoint_save_configured(void);
 
+/* Unconditional dump of the current live architectural + memory state into
+ * `dir`, bypassing the trigger/quiesce state machine. Used by LightSSS from
+ * the throwaway snapshot child after it has drained the pipeline. */
+void checkpoint_emergency_save(const char *dir);
+
 /* Returns 1 if a load is configured, 0 otherwise (callers can use this to
  * skip loading the original image's MROM, since restore overrides it). */
 int checkpoint_load_configured(void);

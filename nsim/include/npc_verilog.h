@@ -99,9 +99,9 @@ static inline void verilog_connect(TOP_NAME *top, NPCState *npc)
   npc->mideleg = csr + MIDELEG;
   npc->mie____ = csr + MIE____;
   npc->mtvec__ = csr + MTVEC__;
+  npc->menvcfg = csr + MENVCFG;
 
   npc->mstatush = csr + MSTATUSH;
-
   npc->mscratch = csr + MSCRATCH;
   npc->mepc___ = csr + MEPC___;
   npc->mcause_ = csr + MCAUSE_;
