@@ -34,6 +34,14 @@ _start:
     # Set up stack pointer (end of SRAM at 0x0f002000)
     li_addr sp, 0x0f002000
 
+    # Print an early boot banner BEFORE touching main_ram. main_ram is a
+    # bus slave that only answers if the SoC actually instantiated it; probing
+    # it first (as the old code did) makes `make sim` (no payload) appear to
+    # produce zero output if that first load stalls. Printing here guarantees
+    # visible UART output the instant the CPU starts fetching from ROM.
+    la      a0, msg_boot
+    jal     ra, puts
+
     # Check if main_ram has a payload (first word != 0).
     li_addr t0, MAIN_RAM
     lw      t1, 0(t0)
@@ -84,6 +92,8 @@ puts:
     ret
 
 .section .rodata
+msg_boot:
+    .asciz "Raptor LiteX SoC — boot\n"
 msg_banner:
     .asciz "Raptor LiteX SoC — no payload in main_ram.\n"
 msg_jump:

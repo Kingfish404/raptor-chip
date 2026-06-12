@@ -22,6 +22,8 @@
 //   0x3000_0000 .. 0x3fff_ffff  FLASH
 //   0x8000_0000 .. 0x87ff_ffff  PMEM (main memory, program image)
 //   0xa000_0000 .. 0xa1ff_ffff  SDRAM
+// Runtime plusargs:
+//   +TEXT_TRACE      print writes/reads around egos app text windows
 //
 // Storage uses sparse associative byte arrays so the 128 MB PMEM / 256 MB FLASH
 // windows do not pre-allocate. Images are loaded with a $fread-style binary
@@ -85,8 +87,10 @@ module rapt_tb_mem #(
   localparam logic [31:0] FinisherSize = 32'h0000_1000;
   localparam logic [31:0] SramBase = 32'h0f00_0000;
   localparam logic [31:0] SramSize = 32'h0000_2000;
-  localparam logic [31:0] SerialBase = 32'h1000_0000;
+  localparam logic [31:0] SerialBase = 32'h1000_0000;   // NS16550 (QEMU / non-KU15P)
   localparam logic [31:0] SerialSize = 32'h0000_0100;
+  localparam logic [31:0] LiteXUartBase = 32'hF000_1800; // LiteX UART (KU15P / HARDWARE)
+  localparam logic [31:0] LiteXUartSize = 32'h0000_0020;
   localparam logic [31:0] MromBase = 32'h2000_0000;
   localparam logic [31:0] MromSize = 32'h0001_0000;
   localparam logic [31:0] FlashBase = 32'h3000_0000;
@@ -95,6 +99,8 @@ module rapt_tb_mem #(
   localparam logic [31:0] PmemSize = 32'h0800_0000;
   localparam logic [31:0] SdramBase = 32'ha000_0000;
   localparam logic [31:0] SdramSize = 32'h0200_0000;
+  localparam logic [31:0] SyscallArgBase = 32'h8030_1000;
+  localparam logic [31:0] SyscallArgSize = 32'h0000_0420;
 
   // sifive,test finisher commands.
   localparam logic [15:0] FinPass = 16'h5555;
@@ -114,6 +120,30 @@ module rapt_tb_mem #(
 
   // NS16550 minimal register state (TX console + polling).
   byte unsigned uart_lcr;
+  string uart_line;
+  logic uart_ansi;
+  bit syscall_trace;
+  bit text_trace;
+  int unsigned text_trace_events;
+
+  initial begin
+    syscall_trace = $test$plusargs("SYSCALL_TRACE");
+    text_trace = $test$plusargs("TEXT_TRACE");
+  end
+
+  task automatic uart_put_byte(input logic [7:0] ch);
+    if (uart_ansi) begin
+      if (ch == 8'h6d) uart_ansi = 1'b0;
+    end else if (ch == 8'h1b) begin
+      uart_ansi = 1'b1;
+    end else if (ch == 8'h0a) begin
+      $display("[uart] %s", uart_line);
+      uart_line = "";
+    end else if (ch != 8'h0d) begin
+      if (ch >= 8'h20 && ch <= 8'h7e) uart_line = {uart_line, $sformatf("%c", ch)};
+      else uart_line = {uart_line, "?"};
+    end
+  endtask
 
   // ---------------------------------------------------------------------------
   // Address helpers.
@@ -137,12 +167,25 @@ module rapt_tb_mem #(
     return in_region(a, SerialBase, SerialSize);
   endfunction
 
+  function automatic logic is_litex_uart(input logic [31:0] a);
+    return in_region(a, LiteXUartBase, LiteXUartSize);
+  endfunction
+
   function automatic logic is_finisher(input logic [31:0] a);
     return in_region(a, FinisherBase, FinisherSize);
   endfunction
 
+  function automatic logic is_syscall_arg(input logic [31:0] a);
+    return in_region(a, SyscallArgBase, SyscallArgSize);
+  endfunction
+
+  function automatic logic is_text_trace_addr(input logic [31:0] a);
+    return in_region(a, 32'h8020_0000, 32'h0000_0040) ||
+        in_region(a, 32'h8040_0000, 32'h0000_0040);
+  endfunction
+
   function automatic logic is_valid(input logic [31:0] a);
-    return is_mem(a) || is_serial(a) || is_finisher(a);
+    return is_mem(a) || is_serial(a) || is_litex_uart(a) || is_finisher(a);
   endfunction
 
   // Sparse byte read (unwritten => 0).
@@ -221,7 +264,7 @@ module rapt_tb_mem #(
         end
       end
     end else if (is_serial(a)) begin
-      // Find the active byte lane and its register offset.
+      // NS16550: find the active byte lane and its register offset.
       for (lane = 0; lane < XLEN / 8; lane++) begin
         if (strb[lane]) begin
           val    = wd[lane*8+:8];
@@ -229,13 +272,28 @@ module rapt_tb_mem #(
           case (regoff)
             8'h0: begin  // THR (DLAB=0) / DLL (DLAB=1)
               if (!uart_lcr[7]) begin
-                $write("%c", val);
-                $fflush();
+                uart_put_byte(val);
               end
             end
             8'h3: uart_lcr <= val;  // LCR (DLAB bit = bit7)
             default: ;  // IER/FCR/MCR/SCR ignored
           endcase
+          break;
+        end
+      end
+    end else if (is_litex_uart(a)) begin
+      // LiteX UART (KU15P): offsets relative to 0xF0001800.
+      //   +0x00  RXTX: write = TX data byte
+      //   +0x04  TXFULL: read only, ignored on write
+      //   +0x10  EVPEND: write 1 to ack TX/RX event — ignored in sim
+      for (lane = 0; lane < XLEN / 8; lane++) begin
+        if (strb[lane]) begin
+          val    = wd[lane*8+:8];
+          regoff = (a[4:0] + lane[4:0]) & 5'h1F;
+          if (regoff == 5'h00) begin  // RXTX write = TX data
+            uart_put_byte(val);
+          end
+          // EVPEND (offset 0x10) ack and all others silently ignored
           break;
         end
       end
@@ -257,6 +315,14 @@ module rapt_tb_mem #(
         default: b = 8'h00;
       endcase
       d[a[1:0]*8+:8] = b;
+    end else if (is_litex_uart(a)) begin
+      // LiteX UART (0xF0001800).  Raptor reports mvendorid=666, so egos runs
+      // the HARDWARE path: TXFULL at +0x04 must read 0 (TX ready), and RXEMPTY
+      // at +0x08 reads 1 because this testbench has no host input source.
+      case (a[4:2])
+        3'd2: d = XLEN'(32'h00000001);  // RXEMPTY
+        default: d = '0;  // RXTX/TXFULL/EVPEND and unmodelled regs
+      endcase
     end
     return d;
   endfunction
@@ -279,8 +345,23 @@ module rapt_tb_mem #(
   // assignments in some simulators.
   task automatic store_write_word(input logic [31:0] a, input logic [XLEN-1:0] wd,
                                   input logic [XLEN/8-1:0] strb);
+    logic [31:0] aa;
+    aa = a & ~32'(XLEN / 8 - 1);
     for (int i = 0; i < XLEN / 8; i++) begin
-      if (strb[i]) store[a+i[31:0]] = wd[i*8+:8];
+      if (strb[i]) store[aa+i[31:0]] = wd[i*8+:8];
+    end
+    if (text_trace && is_text_trace_addr(a) && text_trace_events < 256) begin
+      text_trace_events++;
+      $display("[text_trace] write t=%0t addr=0x%08h data=0x%08h strb=%b now=0x%08h",
+               $time, a, wd, strb, read_word(aa));
+    end
+    if (syscall_trace && is_syscall_arg(a) &&
+        ((a - SyscallArgBase) <= 32'h0000_0008)) begin
+      $display("[sysarg] off=0x%03h data=0x%08h strb=%b type=%0d sender=%0d receiver=%0d",
+               a - SyscallArgBase, wd, strb,
+               int'(read_word(SyscallArgBase)),
+               int'(read_word(SyscallArgBase + 32'd4)),
+               int'(read_word(SyscallArgBase + 32'd8)));
     end
   endtask
 
@@ -359,6 +440,8 @@ module rapt_tb_mem #(
       sim_finish    <= 1'b0;
       sim_exit_code <= '0;
       uart_lcr      <= 8'h00;
+      uart_line     = "";
+      uart_ansi     <= 1'b0;
     end else begin
       sim_finish <= 1'b0;  // single-cycle pulse default
 
@@ -378,11 +461,17 @@ module rapt_tb_mem #(
       end
       // (2) Accept new AR if slot free (may overwrite r_busy same cycle).
       if (accept_ar) begin
+        automatic logic [XLEN-1:0] rd = read_any(lo32(araddr));
         if (!is_valid(lo32(araddr)))
           $display("[rapt_tb_mem] ERROR: read from invalid addr 0x%08h", lo32(araddr));
+        if (text_trace && is_text_trace_addr(lo32(araddr)) && text_trace_events < 256) begin
+          text_trace_events++;
+          $display("[text_trace] read  t=%0t addr=0x%08h data=0x%08h arlen=%0d arsize=%0d",
+                   $time, lo32(araddr), rd, arlen, arsize);
+        end
         r_busy       <= 1'b1;
         r_id_q       <= arid;
-        r_data_q     <= read_any(lo32(araddr));
+        r_data_q     <= rd;
         r_resp_q     <= RespOkay;  // map decode errors to zero+OKAY (prefetch tolerance)
         r_size_q     <= arsize;
         r_burst_q    <= arburst;

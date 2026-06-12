@@ -6,13 +6,23 @@
 !*.c
 !*.ld
 !*.dts
+!*.dts.in
 !*.html
 !Makefile
+!scripts/*.tcl
 
 # LiteX build artifacts
 build/
 .venv/
+.Xil
 __pycache__
+glsim/gl_netlist.v
+glsim/xsim.dir/
+glsim/*.log
+glsim/*.jou
+glsim/*.pb
+glsim/*.wdb
+glsim/*.vcd
 
 # Cloned external sources
 benchmarks/coremark/coremark/

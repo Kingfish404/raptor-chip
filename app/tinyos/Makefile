@@ -10,8 +10,8 @@ include $(APP_HOME)/common.mk
 # Configuration
 # ============================================================================
 TINYOS_DIR    ?= $(abspath $(APP_HOME)/tinyos)## Source root for tiny teaching OS repositories (inside app/tinyos)
-EGOS_REPO_URL ?= https://github.com/yhzhang0128/egos-2000.git\#\# egos-2000 source repository URL
-XV6_REPO_URL  ?= https://github.com/mit-pdos/xv6-riscv.git\#\# xv6-riscv source repository URL
+EGOS_REPO_URL ?= https://github.com/yhzhang0128/egos-2000.git## egos-2000 source repository URL
+XV6_REPO_URL  ?= https://github.com/mit-pdos/xv6-riscv.git## xv6-riscv source repository URL
 OS            ?=## Target OS: egos (RV32/Sv32) or xv6 (RV64/Sv39)
 SYNC          ?= 1## Set to 0 to skip source repository update
 ARGS          ?= -b -n## Simulator arguments
@@ -19,6 +19,7 @@ MAX_INST      ?=## Maximum instruction limit
 TIMEOUT       ?=## Wall-clock timeout in seconds (nsim only)
 QEMU          ?=## Override QEMU executable (optional)
 XV6_CPUS      ?= 3## CPU count for xv6 QEMU
+XV6_EXTRA_CFLAGS ?= -Wno-error=unused-but-set-variable## Extra CFLAGS appended to the copied xv6 build tree
 
 # xv6 uses RV64 toolchain; probe in order of preference.
 XV6_OBJCOPY ?= $(firstword $(foreach t, \
@@ -43,15 +44,16 @@ EGOS_CFLAGS ?= -march=$(EGOS_ARCH) -mabi=$(EGOS_ABI) \
 EGOS_LDFLAGS ?= -nostdlib $(if $(filter 1,$(EGOS_NOSTDLIB)),-lgcc,-lc -lgcc)
 
 EGOS_RUNTIME_LIBC := $(APP_HOME)/lib/runtime/libc_min.c
+EGOS_RUNTIME_INCLUDE := $(APP_HOME)/lib/runtime/include
 NSIM_SRC_DIR  := $(APP_HOME)/build/tinyos-nsim-src
 EGOS_NSIM_DIR := $(NSIM_SRC_DIR)/egos-2000
 XV6_NSIM_DIR  := $(NSIM_SRC_DIR)/xv6-riscv
 EGOS_APPS_DEPS := apps/*.* library/egos.h library/*/* Makefile
 EGOS_EGOS_DEPS := earth/* grass/* library/egos.h library/*/* Makefile
 ifeq ($(EGOS_NOSTDLIB),1)
-EGOS_CFLAGS    += -DRAPT_LIBC_MIN_MALLOC=1
-EGOS_APPS_DEPS += $(EGOS_RUNTIME_LIBC)
-EGOS_EGOS_DEPS += $(EGOS_RUNTIME_LIBC)
+EGOS_CFLAGS    += -I$(EGOS_RUNTIME_INCLUDE) -DRAPT_LIBC_MIN_MALLOC=1
+EGOS_APPS_DEPS += $(EGOS_RUNTIME_LIBC) $(wildcard $(EGOS_RUNTIME_INCLUDE)/*.h)
+EGOS_EGOS_DEPS += $(EGOS_RUNTIME_LIBC) $(wildcard $(EGOS_RUNTIME_INCLUDE)/*.h)
 endif
 
 EGOS_SIM_IMAGE  := $(EGOS_NSIM_DIR)/tools/egos.bin
@@ -67,6 +69,11 @@ NEMU_LIMIT_ARGS := $(if $(MAX_INST),-m $(MAX_INST))
 define EGOS_TOOLCHAIN_CHECK
 	@[ -n "$(EGOS_RISCV_CC)" ] || { \
 		echo "[ERR] Cannot find RV32 GCC for egos (tried riscv32-unknown-elf-gcc, riscv64-unknown-elf-gcc, riscv-none-elf-gcc)"; \
+		echo "      Minimal Debian/Ubuntu install:"; \
+		echo "        sudo apt update"; \
+		 echo "        sudo apt install -y build-essential gcc-riscv64-unknown-elf"; \
+		echo "      Or run the repository setup: ./setup.sh"; \
+		echo "      Or override: EGOS_RISCV_CC=/path/to/riscv64-unknown-elf-gcc"; \
 		exit 1; }
 	@tmp_c=$$(mktemp /tmp/egos-rv32-check-XXXX.c); \
 	printf 'void _start(void){}\n' > $$tmp_c; \
@@ -74,7 +81,10 @@ define EGOS_TOOLCHAIN_CHECK
 		-o $${tmp_c%.c}.elf >/dev/null 2>&1 \
 	|| { rm -f $$tmp_c $${tmp_c%.c}.elf; \
 		echo "[ERR] $(EGOS_RISCV_CC) cannot link $(EGOS_ARCH)/$(EGOS_ABI) freestanding binaries."; \
-		echo "      Install an RV32-capable RISC-V GCC with $(EGOS_ARCH)/$(EGOS_ABI) libgcc support."; \
+		echo "      Install an RV32-capable RISC-V GCC with $(EGOS_ARCH)/$(EGOS_ABI) libgcc support:"; \
+		echo "        sudo apt update"; \
+		 echo "        sudo apt install -y build-essential gcc-riscv64-unknown-elf"; \
+		echo "      Or set EGOS_RISCV_CC to a working compiler."; \
 		exit 1; }; \
 	rm -f $$tmp_c $${tmp_c%.c}.elf
 endef
@@ -82,7 +92,13 @@ endef
 # Build xv6 kernel.bin + copy fs.img to a tmpfs, then run on a simulator.
 # $(1)=tag  $(2)=tmp-prefix  $(3)=run-target  $(4)=extra-make-vars  $(5)=limit-args
 define xv6-run-body
-	@[ -n "$(XV6_OBJCOPY)" ] || { echo "[ERR] Cannot find RV64 objcopy for xv6"; exit 1; }
+	@[ -n "$(XV6_OBJCOPY)" ] || { \
+		echo "[ERR] Cannot find RV64 objcopy for xv6"; \
+		echo "      Minimal Debian/Ubuntu install:"; \
+		echo "        sudo apt update"; \
+		 echo "        sudo apt install -y build-essential gcc-riscv64-unknown-elf"; \
+		echo "      Or override: XV6_OBJCOPY=/path/to/riscv64-unknown-elf-objcopy TOOLPREFIX=/path/to/riscv64-unknown-elf-"; \
+		exit 1; }
 	@$(MAKE) $(Q) -C "$(XV6_NSIM_DIR)" kernel/kernel fs.img
 	@$(XV6_OBJCOPY) -O binary "$(XV6_NSIM_DIR)/kernel/kernel" "$(XV6_NSIM_DIR)/kernel/kernel.bin"
 	@tmp_fs=$$(mktemp "$${TMPDIR:-/tmp}/$(2).XXXXXX"); \
@@ -161,6 +177,9 @@ egos-nsim-prepare: egos-clone
 xv6-nsim-prepare: xv6-clone
 	@rm -rf "$(XV6_NSIM_DIR)" && mkdir -p "$(XV6_NSIM_DIR)"
 	@tar -cf - --exclude=.git -C "$(TINYOS_DIR)/xv6-riscv" . | tar -x -C "$(XV6_NSIM_DIR)"
+	@if [ -n "$(strip $(XV6_EXTRA_CFLAGS))" ]; then \
+		printf '\nCFLAGS += %s\n' "$(XV6_EXTRA_CFLAGS)" >> "$(XV6_NSIM_DIR)/Makefile"; \
+	fi
 
 # ============================================================================
 # egos — RV32 / Sv32
@@ -176,6 +195,20 @@ egos-sim-image: egos-nsim-prepare ## Build egos binary for NPC/nsim/NEMU
 		APPS_DEPS="$(EGOS_APPS_DEPS)" EGOS_DEPS="$(EGOS_EGOS_DEPS)"
 	@test -f "$(EGOS_SIM_IMAGE)" && test -f "$(EGOS_SIM_SDCARD)"
 	@echo "Built egos image: $(EGOS_SIM_IMAGE)  sdcard: $(EGOS_SIM_SDCARD)"
+
+# KU15P RAM-disk image: single flat binary with embedded disk.img.
+# Uses PLATFORM_KU15P to fix UART=0xF0001800, CLINT=0x02000000, and embeds
+# disk.img at 0x81000000 (FLASH_ROM_BASE). The result is uploaded via
+# Linux/MIG BIOS serialboot to 0x80000000.
+EGOS_KU15P_IMAGE := $(EGOS_NSIM_DIR)/tools/egos-ku15p.bin
+egos-ku15p-image: egos-nsim-prepare ## Build egos KU15P RAM-disk image (embedded disk.img)
+	$(EGOS_TOOLCHAIN_CHECK)
+	@$(MAKE) $(Q) -C $(EGOS_NSIM_DIR) ku15p \
+		RISCV_CC=$(EGOS_RISCV_CC) OBJDUMP=$(EGOS_OBJDUMP) OBJCOPY=$(EGOS_OBJCOPY) \
+		CFLAGS="$(EGOS_CFLAGS)" LDFLAGS="$(EGOS_LDFLAGS)" \
+		APPS_DEPS="$(EGOS_APPS_DEPS)" EGOS_DEPS="$(EGOS_EGOS_DEPS)"
+	@test -f "$(EGOS_KU15P_IMAGE)" || { echo "[ERR] Missing $(EGOS_KU15P_IMAGE)"; exit 1; }
+	@echo "Built KU15P egos image: $(EGOS_KU15P_IMAGE) ($(shell stat -c%s $(EGOS_KU15P_IMAGE) 2>/dev/null) bytes)"
 
 egos-cli-nsim: egos-sim-image ## Boot egos on NPC/nsim [RV32/Sv32]
 	@echo "[egos-cli-nsim] RV32 / Sv32 (egos-2000)"
@@ -214,12 +247,31 @@ egos-cli-qemu: ## Boot egos on QEMU [RV32/Sv32]
 xv6-cli-nsim: xv6-nsim-prepare ## Boot xv6-riscv on NPC/nsim [RV64/Sv39]
 	$(call xv6-run-body,xv6-cli-nsim,xv6-nsim-fs,run-npc64,,$(SIM_LIMIT_ARGS))
 
+xv6-sim-image: xv6-nsim-prepare ## Build xv6 kernel.bin and fs.img without running a simulator
+	@[ -n "$(XV6_OBJCOPY)" ] || { \
+		echo "[ERR] Cannot find RV64 objcopy for xv6"; \
+		echo "      Minimal Debian/Ubuntu install:"; \
+		echo "        sudo apt update"; \
+		 echo "        sudo apt install -y build-essential gcc-riscv64-unknown-elf"; \
+		echo "      Or override: XV6_OBJCOPY=/path/to/riscv64-unknown-elf-objcopy TOOLPREFIX=/path/to/riscv64-unknown-elf-"; \
+		exit 1; }
+	@$(MAKE) $(Q) -C "$(XV6_NSIM_DIR)" kernel/kernel fs.img
+	@$(XV6_OBJCOPY) -O binary "$(XV6_NSIM_DIR)/kernel/kernel" "$(XV6_NSIM_DIR)/kernel/kernel.bin"
+	@test -f "$(XV6_NSIM_DIR)/kernel/kernel.bin" && test -f "$(XV6_NSIM_DIR)/fs.img"
+	@echo "Built xv6 kernel: $(XV6_NSIM_DIR)/kernel/kernel.bin  disk: $(XV6_NSIM_DIR)/fs.img"
+
 # Difftest variant: assumes caller (top-level Makefile) already configured
 # nsim with o2_difftest_defconfig (rebuilt with VFLAGS=-DRAPT_RV64) and
 # built the NEMU RV64 reference shared object. Bypasses run-npc64 (which
 # would clobber the difftest config) by invoking nsim's run target directly.
 xv6-cli-nsim-difftest: xv6-nsim-prepare ## Boot xv6-riscv on NPC/nsim with NEMU difftest [RV64/Sv39]
-	@[ -n "$(XV6_OBJCOPY)" ] || { echo "[ERR] Cannot find RV64 objcopy for xv6"; exit 1; }
+	@[ -n "$(XV6_OBJCOPY)" ] || { \
+		echo "[ERR] Cannot find RV64 objcopy for xv6"; \
+		echo "      Minimal Debian/Ubuntu install:"; \
+		echo "        sudo apt update"; \
+		 echo "        sudo apt install -y build-essential gcc-riscv64-unknown-elf"; \
+		echo "      Or override: XV6_OBJCOPY=/path/to/riscv64-unknown-elf-objcopy TOOLPREFIX=/path/to/riscv64-unknown-elf-"; \
+		exit 1; }
 	@$(MAKE) $(Q) -C "$(XV6_NSIM_DIR)" kernel/kernel fs.img
 	@$(XV6_OBJCOPY) -O binary "$(XV6_NSIM_DIR)/kernel/kernel" "$(XV6_NSIM_DIR)/kernel/kernel.bin"
 	@tmp_fs=$$(mktemp "$${TMPDIR:-/tmp}/xv6-nsim-fs.XXXXXX"); \
@@ -272,5 +324,5 @@ clean: ## Clean tinyos build artifacts
 	egos-clone xv6-clone \
 	egos-toolchain-check egos-nsim-prepare xv6-nsim-prepare egos-sim-image \
 	egos-cli-nsim egos-cli-nsim-difftest egos-cli-nemu egos-cli-qemu \
-	xv6-cli-nsim xv6-cli-nsim-difftest xv6-cli-nemu xv6-cli-qemu \
+	xv6-sim-image xv6-cli-nsim xv6-cli-nsim-difftest xv6-cli-nemu xv6-cli-qemu \
 	cli-nsim cli-nemu cli-qemu clean

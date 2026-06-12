@@ -19,6 +19,12 @@
 #   FLASH     flash .bin    -> FLASH @ 0x30000000 (optional)
 #   MAX_CYCLES watchdog cycles (default 100_000_000)
 #   WAVE=1    enable waveform dump
+#   PC_TRACE=1 print IFU heartbeat diagnostics
+#   COMMIT_TRACE=1 print commit diagnostics
+#   SYSCALL_TRACE=1 print ecall and SYSCALL_ARG diagnostics
+#   TRAP_TRACE=1 print trap/exception diagnostics
+#   TEXT_TRACE=1 print text-window memory diagnostics
+#   FATAL_PC=hex print commits that enter this FATAL routine address
 #   SDF       SDF file for gate-level timing (implies +define+RAPT_TB_SDF)
 #   SDF_MTM   MINIMUM | TYPICAL | MAXIMUM (default MAXIMUM)
 #   NETLIST   gate netlist .v for *-gls targets
@@ -90,6 +96,24 @@ PLUSARGS += +MAX_CYCLES=$(MAX_CYCLES)
 endif
 ifneq ($(WAVE),)
 PLUSARGS += +WAVE=1
+endif
+ifneq ($(PC_TRACE),)
+PLUSARGS += +PC_TRACE=$(PC_TRACE)
+endif
+ifneq ($(COMMIT_TRACE),)
+PLUSARGS += +COMMIT_TRACE=$(COMMIT_TRACE)
+endif
+ifneq ($(SYSCALL_TRACE),)
+PLUSARGS += +SYSCALL_TRACE
+endif
+ifneq ($(TRAP_TRACE),)
+PLUSARGS += +TRAP_TRACE
+endif
+ifneq ($(TEXT_TRACE),)
+PLUSARGS += +TEXT_TRACE
+endif
+ifneq ($(FATAL_PC),)
+PLUSARGS += +FATAL_PC=$(FATAL_PC)
 endif
 ifneq ($(SDF),)
 PLUSARGS += +SDF=$(abspath $(SDF)) +SDF_MTM=$(or $(SDF_MTM),MAXIMUM)
@@ -184,6 +208,58 @@ vsim: ## RTL sim under Questa
 	cd build && vlib work && $(VLOG) $(VLOG_FLAGS) $(VSRCS)
 	cd build && $(VSIM) -c -do "run -all; quit -f" $(TOP) $(addprefix -g,) \
 		$(addprefix +,$(patsubst +%,%,$(PLUSARGS)))
+
+# -----------------------------------------------------------------------------
+# Vivado XSIM (xvlog -> xelab -> xsim).
+# Works with Vivado 2022.1+. The three tools must be on PATH (source
+# Vivado's settings64.sh / settings64.bat first).
+# The rnp-interface single-word constraint and RAPT_CONFIG=small requirement
+# are the same as for all other targets in this Makefile (see top note).
+# -----------------------------------------------------------------------------
+XVLOG ?= xvlog
+XELAB ?= xelab
+XSIM  ?= xsim
+
+.PHONY: xsim
+xsim: ## RTL sim under Vivado XSIM (source settings64.sh first; RAPT_CONFIG=small)
+	mkdir -p build/xsim
+	cd build/xsim && $(XVLOG) -sv \
+		$(addprefix -d ,$(DEFINES)) \
+		$(addprefix -i ,$(abspath $(INCDIRS))) \
+		--log xvlog.log \
+		$(abspath $(VSRCS))
+	cd build/xsim && $(XELAB) work.$(TOP) \
+		-s $(TOP)_snap \
+		-timescale 1ns/1ps \
+		--log xelab.log
+	@printf 'run all\nquit\n' > build/xsim/run.tcl
+	cd build/xsim && $(XSIM) $(TOP)_snap \
+		-tclbatch run.tcl \
+		$(foreach pa,$(PLUSARGS),--testplusarg '$(patsubst +%,%,$(pa))') \
+		--log xsim_run.log
+
+.PHONY: xsim-gls
+xsim-gls: ## Gate-level sim under Vivado XSIM (set NETLIST=, LIBS=, SDF=)
+	mkdir -p build/xsim-gls
+	cd build/xsim-gls && $(XVLOG) -sv --timescale 1ns/1ps \
+		-d RAPT_TB_GLS -d RAPT_TB_SDF \
+		$(addprefix -d ,$(DEFINES)) \
+		$(addprefix -i ,$(abspath $(INCDIRS))) \
+		--log xvlog.log \
+		$(foreach l,$(LIBS),$(abspath $(l))) \
+		$(abspath $(NETLIST)) \
+		$(abspath $(RTL_SV)/perip/wrap_rnp.sv) \
+		$(abspath $(TB_SRC))
+	cd build/xsim-gls && $(XELAB) work.$(TOP) \
+		-s $(TOP)_gls_snap \
+		--timescale 1ns/1ps \
+		$(if $(SDF),--sdf_root u_dut=$(abspath $(SDF))) \
+		--log xelab.log
+	@printf 'run all\nquit\n' > build/xsim-gls/run.tcl
+	cd build/xsim-gls && $(XSIM) $(TOP)_gls_snap \
+		-tclbatch run.tcl \
+		$(foreach pa,$(PLUSARGS),--testplusarg '$(patsubst +%,%,$(pa))') \
+		--log xsim_run.log
 
 # -----------------------------------------------------------------------------
 .PHONY: filelist

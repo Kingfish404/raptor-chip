@@ -252,6 +252,30 @@ YOSYS_OPENSTA:
 	git clone https://github.com/Kingfish404/yosys-opensta $(YOSYS_OPENSTA)
 	make -C $(YOSYS_OPENSTA) setup-opensta setup-nangate45 setup-sky130hd
 
+# Ensure the STA toolchain and the selected platform's PDK are actually usable
+# before running synthesis/STA. A bare clone is NOT enough: a partial or aborted
+# setup leaves the repo cloned while the yosys-slang plugin, the OpenSTA binary,
+# or the per-platform liberty data are still missing. Checking only the
+# directory ( [ -d ... ] ) silently skips that work and the flow fails deep
+# inside yosys/OpenSTA. Each piece is rebuilt independently and idempotently, so
+# this also makes STA work for any PLATFORM (nangate45/asap7/sky130hd) on a
+# fresh machine.
+.PHONY: sta-deps
+sta-deps:
+	@if [ ! -d $(YOSYS_OPENSTA) ]; then \
+	  echo ">>> [sta] cloning yosys-opensta ..."; \
+	  git clone https://github.com/Kingfish404/yosys-opensta $(YOSYS_OPENSTA); \
+	fi
+	@if [ ! -x $(YOSYS_OPENSTA)/third_party/OpenSTA/build/sta ] || \
+	    ! yosys -m slang -p "help read_slang" >/dev/null 2>&1; then \
+	  echo ">>> [sta] building OpenSTA + yosys-slang plugin ..."; \
+	  $(MAKE) -C $(YOSYS_OPENSTA) setup-opensta; \
+	fi
+	@if [ ! -d $(YOSYS_OPENSTA)/third_party/lib/$(STA_PLATFORM) ]; then \
+	  echo ">>> [sta] fetching PDK data for $(STA_PLATFORM) ..."; \
+	  $(MAKE) -C $(YOSYS_OPENSTA) setup-$(STA_PLATFORM); \
+	fi
+
 pack: $(VSRCS) $(VHSRCS) ## Pack all SV files into one
 	mkdir -p $(BUILD_DIR)
 	verilator -E -P $(VFLAGS) $(addprefix -I, $(INC_PATH)) $(VSRCS) > $(BUILD_DIR)/rapt_pack.sv
@@ -260,23 +284,22 @@ pack: $(VSRCS) $(VHSRCS) ## Pack all SV files into one
 STA_PLATFORM ?= nangate45 ## STA platform: nangate45, asap7, sky130hd
 CLK_FREQ_MHZ ?= 50 ## Target clock frequency for STA (MHz)
 
-sta: pack ## Static timing analysis
+sta: pack sta-deps ## Static timing analysis
 	echo $(MAKECMDGOALS)
-	if [ ! -d $(YOSYS_OPENSTA) ]; then make YOSYS_OPENSTA; fi
 	make -C $(YOSYS_OPENSTA) sta show \
 		DESIGN=rapt \
 		PLATFORM=$(STA_PLATFORM) \
 		CLK_FREQ_MHZ=$(CLK_FREQ_MHZ) \
 		RTL_FILES="$(abspath $(BUILD_DIR)/rapt_pack.sv)"
 
-sta-detail: pack ## Detailed static timing analysis
+sta-detail: pack sta-deps ## Detailed static timing analysis
 	make -C $(YOSYS_OPENSTA) sta-detail show \
 		DESIGN=rapt \
 		PLATFORM=$(STA_PLATFORM) \
 		CLK_FREQ_MHZ=$(CLK_FREQ_MHZ) \
 		RTL_FILES="$(abspath $(BUILD_DIR)/rapt_pack.sv)"
 
-sta_show: pack ## Show timing analysis results
+sta_show: pack sta-deps ## Show timing analysis results
 	make -C $(YOSYS_OPENSTA) show \
 		DESIGN=rapt \
 		PLATFORM=$(STA_PLATFORM) \
@@ -313,8 +336,7 @@ pack-sram: $(VSRCS) $(VHSRCS)
 	mkdir -p $(BUILD_DIR)
 	verilator -E -P $(VFLAGS) -DRAPT_USE_SRAM_MACRO $(addprefix -I, $(INC_PATH)) $(VSRCS) > $(BUILD_DIR)/rapt_pack_sram.sv
 
-sta-sram: pack-sram ## STA with OpenRAM SRAM macros (vs flop-array default)
-	if [ ! -d $(YOSYS_OPENSTA) ]; then $(MAKE) YOSYS_OPENSTA; fi
+sta-sram: pack-sram sta-deps ## STA with OpenRAM SRAM macros (vs flop-array default)
 	@echo ">>> EXTRA_LIB_FILES        = $(RAPT_SRAM_LIBS)"
 	@echo ">>> EXTRA_BLACKBOX_V_FILES = $(RAPT_SRAM_BB_V)"
 	@for lib in $(RAPT_SRAM_LIBS); do \
@@ -337,8 +359,7 @@ sta-sram: pack-sram ## STA with OpenRAM SRAM macros (vs flop-array default)
 		CLK_FREQ_MHZ=$(CLK_FREQ_MHZ) \
 		RTL_FILES="$(abspath $(BUILD_DIR)/rapt_pack_sram.sv)"
 
-sta-sram-detail: pack-sram ## Detailed STA with OpenRAM SRAM macros
-	if [ ! -d $(YOSYS_OPENSTA) ]; then $(MAKE) YOSYS_OPENSTA; fi
+sta-sram-detail: pack-sram sta-deps ## Detailed STA with OpenRAM SRAM macros
 	EXTRA_LIB_FILES="$(RAPT_SRAM_LIBS)" \
 	EXTRA_BLACKBOX_V_FILES="$(RAPT_SRAM_BB_V)" \
 	$(MAKE) -C $(YOSYS_OPENSTA) sta-detail show \

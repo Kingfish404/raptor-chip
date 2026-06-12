@@ -8,6 +8,11 @@ NPROC := $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || s
 # ==============================================================================
 include $(PWD_DIR)/vars.mk
 
+.PHONY: help download-rv32 download-rv64 download all build_linux make_initramfs
+.PHONY: build_init install_initramfs check-opensbi-llvm-deps opensbi opensbi-gnu
+.PHONY: opensbi-with-kernel opensbi-clean print-rv32-payload print-rv64-payload
+.PHONY: print-opensbi-payload clean
+
 help: ## Show this help message
 	@echo "Usage: make <target> [VAR=value ...]"
 	@awk '\
@@ -127,7 +132,13 @@ OPENSBI_COMMON_FLAGS = \
 	PLATFORM_RISCV_ISA=rv32imac_zicntr_zicond_zicsr_zifencei_zcb_zba_zbb_zbs \
 	PLATFORM_RISCV_XLEN=32 PLATFORM=generic -j$(NPROC)
 
-opensbi: $(OPENSBI_DIR)/README.md ## Build OpenSBI (standalone, Clang/LLVM)
+check-opensbi-llvm-deps: ## Check LLVM tools required by OpenSBI
+	@command -v clang >/dev/null || { echo "error: clang not found. See linux/README.md for distro package commands."; exit 1; }
+	@command -v ld.lld >/dev/null || { echo "error: ld.lld not found. See linux/README.md for distro package commands."; exit 1; }
+	@command -v llvm-ar >/dev/null || { echo "error: llvm-ar not found. See linux/README.md for distro package commands."; exit 1; }
+	@command -v llvm-objcopy >/dev/null || { echo "error: llvm-objcopy not found. See linux/README.md for distro package commands."; exit 1; }
+
+opensbi: check-opensbi-llvm-deps $(OPENSBI_DIR)/README.md ## Build OpenSBI (standalone, Clang/LLVM)
 	make -C $(OPENSBI_DIR) LLVM=1 \
 		platform-cflags-y="-Wno-gnu-designator" \
 		$(OPENSBI_COMMON_FLAGS)

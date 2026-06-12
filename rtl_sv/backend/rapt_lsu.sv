@@ -27,6 +27,8 @@ module rapt_lsu #(
 );
   localparam int WordOffBits = $clog2(XLEN / 8);
   localparam int PageOffBits = 12;
+  localparam int SQLen = $clog2(SQ_SIZE);
+  localparam int ROBLen = $clog2(`RAPT_ROB_SIZE);
 
   typedef enum logic [1:0] {
     LS_S_V    = 2'b00,  // present lo beat, wait for wready
@@ -49,6 +51,7 @@ module rapt_lsu #(
   logic [SQ_SIZE-1:0] stq_valid;
 
   logic [4:0] stq_alu[SQ_SIZE];
+  logic [ROBLen-1:0] stq_dest[SQ_SIZE];
   logic [XLEN-1:0] stq_waddr[SQ_SIZE];
   logic [XLEN-1:0] stq_wdata[SQ_SIZE];
   // === Store Temporary Queue (STQ) ===
@@ -88,11 +91,65 @@ module rapt_lsu #(
   assign ralu = exu_lsu.ralu;
   assign sq_ready = sq_valid[sq_tail] == 0;
   assign rou_lsu.sq_ready = sq_ready;
+  assign rou_lsu.sq_empty = (sq_valid == '0) && (state_store == LS_S_V);
 
   assign wvalid = sq_valid[sq_head];
   assign wdata = sq_wdata[sq_head];
   assign waddr = sq_waddr[sq_head];
   assign walu = sq_alu[sq_head];
+
+  logic stq_enq_fire;
+  logic stq_commit_fire;
+  logic stq_commit_found;
+  logic [SQLen-1:0] stq_commit_idx;
+  logic stq_enq_ready;
+  logic [SQLen-1:0] stq_enq_idx;
+  logic [SQLen-1:0] stq_head_next;
+  logic [SQ_SIZE-1:0] stq_valid_after_commit;
+
+  assign stq_enq_fire = exu_ioq_bcast.valid && exu_ioq_bcast.wen;
+  assign stq_commit_fire = rou_lsu.valid && rou_lsu.store && sq_ready;
+  assign exu_lsu.stq_ready = stq_enq_ready;
+
+  always_comb begin
+    stq_commit_found = 1'b0;
+    stq_commit_idx = stq_head;
+    for (int i = 0; i < SQ_SIZE; i++) begin
+      if (!stq_commit_found && stq_valid[i] && stq_dest[i] == rou_lsu.dest) begin
+        stq_commit_found = 1'b1;
+        stq_commit_idx = i[SQLen-1:0];
+      end
+    end
+  end
+
+  always_comb begin
+    stq_valid_after_commit = stq_valid;
+    if (stq_commit_fire && stq_commit_found) begin
+      stq_valid_after_commit[stq_commit_idx] = 1'b0;
+    end
+
+    stq_enq_ready = 1'b0;
+    stq_enq_idx = stq_tail;
+    for (int j = 0; j < SQ_SIZE; j++) begin
+      automatic logic [SQLen-1:0] idx = stq_tail + j[SQLen-1:0];
+      if (!stq_enq_ready && !stq_valid_after_commit[idx]) begin
+        stq_enq_ready = 1'b1;
+        stq_enq_idx = idx;
+      end
+    end
+
+    stq_head_next = stq_head;
+    if (stq_valid_after_commit == '0) begin
+      stq_head_next = stq_tail;
+    end else if (!stq_valid_after_commit[stq_head]) begin
+      for (int j = 1; j <= SQ_SIZE; j++) begin
+        automatic logic [SQLen-1:0] idx = stq_head + j[SQLen-1:0];
+        if (!stq_valid_after_commit[stq_head_next] && stq_valid_after_commit[idx]) begin
+          stq_head_next = idx;
+        end
+      end
+    end
+  end
 
   always_ff @(posedge clock) begin
     if (reset) begin
@@ -104,6 +161,18 @@ module rapt_lsu #(
       stq_tail  <= 0;
       stq_valid <= 0;
       pmu_sq_full <= 1'b0;  // A2: Initialize full pulse
+      // Reset SQ/STQ payload arrays so unused entries cannot feed X values into
+      // store FSM or store-to-load forwarding logic in FPGA synthesis.
+      for (int i = 0; i < SQ_SIZE; i++) begin
+        sq_alu[i]    <= '0;
+        sq_waddr[i]  <= '0;
+        sq_vaddr[i]  <= '0;
+        sq_wdata[i]  <= '0;
+        stq_alu[i]   <= '0;
+        stq_dest[i]  <= '0;
+        stq_waddr[i] <= '0;
+        stq_wdata[i] <= '0;
+      end
     end else begin
       // A2: Latch current full status (rising-edge detection for pmu_sq_full)
       pmu_sq_full <= (&sq_valid) && !sq_full_r;
@@ -113,17 +182,21 @@ module rapt_lsu #(
         stq_tail  <= 0;
         stq_valid <= 0;
       end else begin
-        if (exu_ioq_bcast.valid && exu_ioq_bcast.wen) begin
-          stq_valid[stq_tail] <= 1;
-
-          stq_alu[stq_tail] <= exu_ioq_bcast.alu[4:0];
-          stq_waddr[stq_tail] <= exu_ioq_bcast.tval;  // virtual addr for forwarding
-          stq_wdata[stq_tail] <= exu_ioq_bcast.sq_wdata;
-          stq_tail <= stq_tail + 1;
+        if (stq_commit_fire && stq_commit_found) begin
+          stq_valid[stq_commit_idx] <= 0;
+          stq_head <= stq_head_next;
         end
-        if (rou_lsu.valid && rou_lsu.store && sq_ready) begin
-          stq_valid[stq_head] <= 0;
-          stq_head <= stq_head + 1;
+        if (stq_enq_fire) begin
+          stq_valid[stq_enq_idx] <= 1;
+
+          stq_alu[stq_enq_idx] <= exu_ioq_bcast.alu[4:0];
+          stq_dest[stq_enq_idx] <= exu_ioq_bcast.dest;
+          stq_waddr[stq_enq_idx] <= exu_ioq_bcast.tval;  // virtual addr for forwarding
+          stq_wdata[stq_enq_idx] <= exu_ioq_bcast.sq_wdata;
+          stq_tail <= stq_enq_idx + 1;
+          if (stq_valid_after_commit == '0) begin
+            stq_head <= stq_enq_idx;
+          end
         end
       end
       if (rou_lsu.valid && rou_lsu.store && sq_ready) begin
@@ -618,6 +691,10 @@ module rapt_lsu #(
     `RAPT_SVA_IMPLY(clock, reset, LSU_BLOCKED_LOAD_NOT_READY,
       (raddr_valid && (load_in_sq || stq_addr_conflict) && !fwd_hit),
       (!exu_lsu.rready))
+
+  `RAPT_SVA_IMPLY(clock, reset, LSU_STQ_ENQ_NEEDS_READY,
+      (stq_enq_fire),
+      (exu_lsu.stq_ready))
 
   // FLUSH_CLEAR: STQ head/tail/valid must be zero the cycle after flush.
   `RAPT_SVA_NEXT(clock, reset, LSU_STQ_FLUSH_CLEAR,

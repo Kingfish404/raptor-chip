@@ -181,9 +181,13 @@ module rapt_exu_ioq #(
       ? ioq_valid[oo_pending_idx]
       : (head_is_atomic_ready || ioq_issue_found);
 
+  logic active_load_done;
+  assign active_load_done = ioq_complete[active_idx];
+
   // === LSU output ===
   assign exu_lsu.rvalid = (issue_valid_now
       && ioq_ren[active_idx]
+      && !active_load_done
       && ioq_pr1[active_idx] == 0 && ioq_pr2[active_idx] == 0
       && (csr_bcast.dmmu_en
           || rapt_pkg::addr_cacheable(
@@ -273,18 +277,19 @@ module rapt_exu_ioq #(
       : (ioq_vj[ioq_head] + ioq_imm[ioq_head]));
 
   // === Head completion resolution ===
-  logic head_live_lsu;
   logic head_load_done;
   logic [XLEN-1:0] head_rdata;
   logic head_trap_lsu;
   logic [XLEN-1:0] head_cause_lsu;
   logic head_skip_lsu;
-  assign head_live_lsu  = (active_idx == ioq_head) && exu_lsu.rready;
-  assign head_load_done = ioq_complete[ioq_head] || head_live_lsu;
-  assign head_rdata     = head_live_lsu ? exu_lsu.rdata : ioq_rdata[ioq_head];
-  assign head_trap_lsu  = head_live_lsu ? exu_lsu.trap : ioq_load_trap[ioq_head];
-  assign head_cause_lsu = head_live_lsu ? exu_lsu.cause : ioq_load_cause[ioq_head];
-  assign head_skip_lsu  = head_live_lsu ? exu_lsu.difftest_skip : ioq_load_skip[ioq_head];
+  // Broadcast loads/AMOs only after the LSU response has been captured in
+  // IOQ state. This removes the same-cycle raddr->LSU->broadcast loop from
+  // the PRF/STQ writeback cone on FPGA builds.
+  assign head_load_done = ioq_complete[ioq_head];
+  assign head_rdata     = ioq_rdata[ioq_head];
+  assign head_trap_lsu  = ioq_load_trap[ioq_head];
+  assign head_cause_lsu = ioq_load_cause[ioq_head];
+  assign head_skip_lsu  = ioq_load_skip[ioq_head];
 
   // AMO write data: computed from head_rdata (correct live/captured mux)
   // instead of ioq_data which uses stale exu_lsu.rdata on non-live writeback.
@@ -366,11 +371,41 @@ module rapt_exu_ioq #(
       && (ioq_ren[ioq_head]
           ? head_load_done
           : ioq_mmu_en[ioq_head] == 0)
-      && (!ioq_wen[ioq_head] || ioq_mmu_en[ioq_head] == 0));
+      && (!ioq_wen[ioq_head] || (ioq_mmu_en[ioq_head] == 0 && exu_lsu.stq_ready)));
   assign exu_ioq_bcast.valid = ioq_valid_found;
 
   // === Sequential: enqueue / dequeue / forwarding / OoO LSU FSM ===
   logic ioq_full_r;  // Previous cycle full state (for pmu_ioq_full rising-edge detection)
+
+  // --------------------------------------------------------------------------
+  // Same-cycle enqueue/wakeup snoop.
+  //
+  // A just-enqueued entry is not visible to the forwarding loop until the next
+  // cycle, so wake it from same-cycle broadcasts before storing the tag/value.
+  // Priority mirrors the forwarding loop: exu_ioq_bcast > exu_rou > exu_rou_b.
+  function automatic logic [PLEN-1:0] wake_pr(input logic [PLEN-1:0] pr);
+    if (pr != '0 &&
+        ((exu_ioq_bcast.valid && exu_ioq_bcast.prd == pr) ||
+         (exu_rou.valid       && exu_rou.prd       == pr) ||
+         (exu_rou_b.valid     && exu_rou_b.prd     == pr))) begin
+      return '0;
+    end else begin
+      return pr;
+    end
+  endfunction
+
+  function automatic logic [XLEN-1:0] wake_val(input logic [PLEN-1:0] pr,
+                                               input logic [XLEN-1:0] dflt);
+    if (pr != '0 && exu_ioq_bcast.valid && exu_ioq_bcast.prd == pr) begin
+      return exu_ioq_bcast.result;
+    end else if (pr != '0 && exu_rou.valid && exu_rou.prd == pr) begin
+      return exu_rou.result;
+    end else if (pr != '0 && exu_rou_b.valid && exu_rou_b.prd == pr) begin
+      return exu_rou_b.result;
+    end else begin
+      return dflt;
+    end
+  endfunction
 
   always_ff @(posedge clock) begin
     if (reset || cmu_bcast.flush_pipe) begin
@@ -386,6 +421,17 @@ module rapt_exu_ioq #(
       oo_pending     <= 1'b0;
       oo_pending_idx <= '0;
       ioq_full_r     <= 1'b0;  // A2: Initialize full state tracker
+      // Reset payload arrays as well as valid bits so unused entries cannot
+      // feed X values into store-address and ordering logic in FPGA synthesis.
+      for (int i = 0; i < IOQ_SIZE; i++) begin
+        ioq_pr1[i]  <= '0;
+        ioq_pr2[i]  <= '0;
+        ioq_vj[i]   <= '0;
+        ioq_vk[i]   <= '0;
+        ioq_imm[i]  <= '0;
+        ioq_atom[i] <= '0;
+        ioq_alu[i]  <= '0;
+      end
     end else begin
       // A2: Latch current full status (rising-edge detection for pmu_ioq_full)
       ioq_full_r <= (&ioq_valid);  // Full when all entries valid
@@ -393,15 +439,15 @@ module rapt_exu_ioq #(
       if (disp.accept_a) begin
         ioq_valid[ioq_tail_a]     <= 1'b1;
         ioq_pc[ioq_tail_a]        <= rou_exu.uop.pc;
-        ioq_pr1[ioq_tail_a]       <= rou_exu.pr1;
-        ioq_pr2[ioq_tail_a]       <= rou_exu.pr2;
+        ioq_pr1[ioq_tail_a]       <= wake_pr(rou_exu.pr1);
+        ioq_pr2[ioq_tail_a]       <= wake_pr(rou_exu.pr2);
         ioq_prd[ioq_tail_a]       <= rou_exu.prd;
         ioq_rd[ioq_tail_a]        <= rou_exu.uop.rd;
         ioq_c[ioq_tail_a]         <= rou_exu.uop.c;
         ioq_word[ioq_tail_a]      <= rou_exu.uop.word;
         ioq_alu[ioq_tail_a]       <= rou_exu.uop.alu;
-        ioq_vj[ioq_tail_a]        <= rou_exu.op1;
-        ioq_vk[ioq_tail_a]        <= rou_exu.op2;
+        ioq_vj[ioq_tail_a]        <= wake_val(rou_exu.pr1, rou_exu.op1);
+        ioq_vk[ioq_tail_a]        <= wake_val(rou_exu.pr2, rou_exu.op2);
         ioq_dest[ioq_tail_a]      <= rou_exu.dest;
         ioq_imm[ioq_tail_a]       <= rou_exu.uop.imm;
         ioq_wen[ioq_tail_a]       <= rou_exu.uop.wen;
@@ -418,15 +464,15 @@ module rapt_exu_ioq #(
       if (disp.accept_b_paired) begin
         ioq_valid[ioq_tail_b]     <= 1'b1;
         ioq_pc[ioq_tail_b]        <= rou_exu.uop_b.pc;
-        ioq_pr1[ioq_tail_b]       <= rou_exu.pr1_b;
-        ioq_pr2[ioq_tail_b]       <= rou_exu.pr2_b;
+        ioq_pr1[ioq_tail_b]       <= wake_pr(rou_exu.pr1_b);
+        ioq_pr2[ioq_tail_b]       <= wake_pr(rou_exu.pr2_b);
         ioq_prd[ioq_tail_b]       <= rou_exu.prd_b;
         ioq_rd[ioq_tail_b]        <= rou_exu.uop_b.rd;
         ioq_c[ioq_tail_b]         <= rou_exu.uop_b.c;
         ioq_word[ioq_tail_b]      <= rou_exu.uop_b.word;
         ioq_alu[ioq_tail_b]       <= rou_exu.uop_b.alu;
-        ioq_vj[ioq_tail_b]        <= rou_exu.op1_b;
-        ioq_vk[ioq_tail_b]        <= rou_exu.op2_b;
+        ioq_vj[ioq_tail_b]        <= wake_val(rou_exu.pr1_b, rou_exu.op1_b);
+        ioq_vk[ioq_tail_b]        <= wake_val(rou_exu.pr2_b, rou_exu.op2_b);
         ioq_dest[ioq_tail_b]      <= rou_exu.dest_b;
         ioq_imm[ioq_tail_b]       <= rou_exu.uop_b.imm;
         ioq_wen[ioq_tail_b]       <= rou_exu.uop_b.wen;
@@ -442,15 +488,15 @@ module rapt_exu_ioq #(
       if (disp.accept_b_alone) begin
         ioq_valid[ioq_tail_a]     <= 1'b1;
         ioq_pc[ioq_tail_a]        <= rou_exu.uop_b.pc;
-        ioq_pr1[ioq_tail_a]       <= rou_exu.pr1_b;
-        ioq_pr2[ioq_tail_a]       <= rou_exu.pr2_b;
+        ioq_pr1[ioq_tail_a]       <= wake_pr(rou_exu.pr1_b);
+        ioq_pr2[ioq_tail_a]       <= wake_pr(rou_exu.pr2_b);
         ioq_prd[ioq_tail_a]       <= rou_exu.prd_b;
         ioq_rd[ioq_tail_a]        <= rou_exu.uop_b.rd;
         ioq_c[ioq_tail_a]         <= rou_exu.uop_b.c;
         ioq_word[ioq_tail_a]      <= rou_exu.uop_b.word;
         ioq_alu[ioq_tail_a]       <= rou_exu.uop_b.alu;
-        ioq_vj[ioq_tail_a]        <= rou_exu.op1_b;
-        ioq_vk[ioq_tail_a]        <= rou_exu.op2_b;
+        ioq_vj[ioq_tail_a]        <= wake_val(rou_exu.pr1_b, rou_exu.op1_b);
+        ioq_vk[ioq_tail_a]        <= wake_val(rou_exu.pr2_b, rou_exu.op2_b);
         ioq_dest[ioq_tail_a]      <= rou_exu.dest_b;
         ioq_imm[ioq_tail_a]       <= rou_exu.uop_b.imm;
         ioq_wen[ioq_tail_a]       <= rou_exu.uop_b.wen;

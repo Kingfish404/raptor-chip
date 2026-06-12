@@ -118,6 +118,7 @@ interface rou_lsu_if #(
 );
   logic store;
   logic [5:0] alu;
+  logic [$clog2(`RAPT_ROB_SIZE)-1:0] dest;
   logic [XLEN-1:0] sq_waddr;
   logic [XLEN-1:0] sq_vaddr;
   logic [XLEN-1:0] sq_wdata;
@@ -125,8 +126,11 @@ interface rou_lsu_if #(
   logic valid;
 
   logic sq_ready;
-  modport in(input store, alu, sq_waddr, sq_vaddr, sq_wdata, pc, valid, output sq_ready);
-  modport out(output store, alu, sq_waddr, sq_vaddr, sq_wdata, pc, valid, input sq_ready);
+  logic sq_empty;
+  modport in(input store, alu, dest, sq_waddr, sq_vaddr, sq_wdata, pc, valid,
+             output sq_ready, sq_empty);
+  modport out(output store, alu, dest, sq_waddr, sq_vaddr, sq_wdata, pc, valid,
+              input sq_ready, sq_empty);
 endinterface
 
 

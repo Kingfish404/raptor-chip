@@ -5,6 +5,23 @@ void *memcpy(void *dst, const void *src, size_t n)
 {
     unsigned char *d = (unsigned char *)dst;
     const unsigned char *s = (const unsigned char *)src;
+    if ((((uintptr_t)d ^ (uintptr_t)s) & (sizeof(uint32_t) - 1u)) == 0) {
+        while (((uintptr_t)d & (sizeof(uint32_t) - 1u)) && n) {
+            *d++ = *s++;
+            n--;
+        }
+
+        uint32_t *dw = (uint32_t *)d;
+        const uint32_t *sw = (const uint32_t *)s;
+        while (n >= sizeof(uint32_t)) {
+            *dw++ = *sw++;
+            n -= sizeof(uint32_t);
+        }
+
+        d = (unsigned char *)dw;
+        s = (const unsigned char *)sw;
+    }
+
     while (n--) *d++ = *s++;
     return dst;
 }
@@ -26,7 +43,24 @@ void *memmove(void *dst, const void *src, size_t n)
 void *memset(void *dst, int c, size_t n)
 {
     unsigned char *d = (unsigned char *)dst;
-    while (n--) *d++ = (unsigned char)c;
+    unsigned char byte = (unsigned char)c;
+    uint32_t word = byte;
+    word |= word << 8;
+    word |= word << 16;
+
+    while (((uintptr_t)d & (sizeof(uint32_t) - 1u)) && n) {
+        *d++ = byte;
+        n--;
+    }
+
+    uint32_t *dw = (uint32_t *)d;
+    while (n >= sizeof(uint32_t)) {
+        *dw++ = word;
+        n -= sizeof(uint32_t);
+    }
+
+    d = (unsigned char *)dw;
+    while (n--) *d++ = byte;
     return dst;
 }
 

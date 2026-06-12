@@ -620,6 +620,7 @@ module rapt_l1i #(
       replace_bit <= 0;
       fill_way_r <= 0;
       ifq_tail <= 0;
+      wait_invalid <= 1'b0;
     end else begin
 
       unique case (l1i_state)

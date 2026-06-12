@@ -42,12 +42,12 @@ module rapt_rnu #(
   logic [$clog2(RIQ_SIZE)-1:0] rnq_head_a, rnq_tail_a;
   logic           [RIQ_SIZE-1:0] rnq_valid;
 
-  rapt_pkg::uop_t                rnq_uops        [RIQ_SIZE];
-  logic           [    RLEN-1:0] rnq_rd          [RIQ_SIZE];
-  logic           [    XLEN-1:0] rnq_op1         [RIQ_SIZE];
-  logic           [    XLEN-1:0] rnq_op2         [RIQ_SIZE];
-  logic           [    RLEN-1:0] rnq_rs1         [RIQ_SIZE];
-  logic           [    RLEN-1:0] rnq_rs2         [RIQ_SIZE];
+  (* ram_style = "registers" *) rapt_pkg::uop_t rnq_uops[RIQ_SIZE];
+  (* ram_style = "registers" *) logic [RLEN-1:0] rnq_rd[RIQ_SIZE];
+  (* ram_style = "registers" *) logic [XLEN-1:0] rnq_op1[RIQ_SIZE];
+  (* ram_style = "registers" *) logic [XLEN-1:0] rnq_op2[RIQ_SIZE];
+  (* ram_style = "registers" *) logic [RLEN-1:0] rnq_rs1[RIQ_SIZE];
+  (* ram_style = "registers" *) logic [RLEN-1:0] rnq_rs2[RIQ_SIZE];
 
   // ================================================================
   // Rename Pipeline Registers (2-sub-stage rename)

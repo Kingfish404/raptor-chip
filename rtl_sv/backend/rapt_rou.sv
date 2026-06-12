@@ -338,6 +338,19 @@ module rapt_rou #(
       uoq_pv1_valid       <= '0;
       uoq_pv2_valid       <= '0;
       serialize_in_flight <= 1'b0;
+      // Reset UOQ payload arrays so unused entries cannot feed X values into
+      // dispatch muxes or serializing-uop decode in FPGA synthesis.
+      for (int i = 0; i < IIQ_SIZE; i++) begin
+        uoq_uops[i] <= '0;
+        uoq_pr1[i]  <= '0;
+        uoq_pr2[i]  <= '0;
+        uoq_prd[i]  <= '0;
+        uoq_prs[i]  <= '0;
+        uoq_op1[i]  <= '0;
+        uoq_op2[i]  <= '0;
+        uoq_pv1[i]  <= '0;
+        uoq_pv2[i]  <= '0;
+      end
 `ifdef RAPT_DUAL_ISSUE
       uoq_is_pair <= '0;
 `endif
@@ -541,6 +554,7 @@ module rapt_rou #(
       trap_cause       <= '0;
       pmu_rob_full     <= 1'b0;  // A2: Initialize full pulse
       for (int i = 0; i < ROB_SIZE; i++) begin
+        rob_entry[i]       <= '0;
         rob_entry[i].busy  <= 1'b0;
         rob_entry[i].state <= rapt_pkg::ROB_CM;
       end
@@ -669,10 +683,15 @@ module rapt_rou #(
 
   // ---- Slot 0 (head) ----
   assign head0_br_p_fail = rob_entry[h0].mispredict;
+  logic head0_store_ready;
+  logic head0_fence_ready;
+  assign head0_store_ready = rou_lsu.sq_ready || !rob_entry[h0].wen;
+  assign head0_fence_ready = !(uop_pl[h0].f_time || uop_pl[h0].f_i) || rou_lsu.sq_empty;
   assign head0_valid     = recieved_trap || (
       rob_entry[h0].busy
       && rob_entry[h0].state == rapt_pkg::ROB_WB
-      && (rou_lsu.sq_ready || !rob_entry[h0].wen));
+      && head0_store_ready
+      && head0_fence_ready);
 
   // Pure CSR: sys instruction without ecall/ebreak/mret/sret (no redirect needed)
   logic head0_sys_pure;
@@ -698,10 +717,15 @@ module rapt_rou #(
   // ---- Slot 1 (head+1): only considered when slot 0 doesn't flush ----
   logic head1_br_p_fail;
   logic head1_valid;
+  logic head1_store_ready;
+  logic head1_fence_ready;
+  assign head1_store_ready = rou_lsu.sq_ready || !rob_entry[h1].wen;
+  assign head1_fence_ready = !(uop_pl[h1].f_time || uop_pl[h1].f_i) || rou_lsu.sq_empty;
   assign head1_br_p_fail = rob_entry[h1].mispredict;
   assign head1_valid     = rob_entry[h1].busy
       && rob_entry[h1].state == rapt_pkg::ROB_WB
-      && (rou_lsu.sq_ready || !rob_entry[h1].wen);
+      && head1_store_ready
+      && head1_fence_ready;
 
   // Dual commit: slot 0 doesn't flush, isn't a store, and slot 1 ready.
   // Also guard against difftest_skip to simplify simulation infrastructure.
@@ -839,6 +863,7 @@ module rapt_rou #(
   // During dual commit, slot 0 is guaranteed non-store; route slot 1.
   assign rou_lsu.store = recieved_trap ? 1'b0 : dual_commit ? rob_entry[h1].wen : rob_entry[h0].wen;
   assign rou_lsu.alu = dual_commit ? rob_entry[h1].alu : rob_entry[h0].alu;
+  assign rou_lsu.dest = dual_commit ? h1 : h0;
   assign rou_lsu.sq_waddr = dual_commit ? rob_entry[h1].sq_waddr : rob_entry[h0].sq_waddr;
   assign rou_lsu.sq_vaddr = dual_commit ? rob_entry[h1].tval : rob_entry[h0].tval;
   assign rou_lsu.sq_wdata = dual_commit ? rob_entry[h1].sq_wdata : rob_entry[h0].sq_wdata;

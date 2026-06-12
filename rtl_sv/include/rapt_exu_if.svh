@@ -62,13 +62,14 @@ interface exu_lsu_if #(
   logic [XLEN-1:0] cause;
   logic difftest_skip;
   logic rready;
+  logic stq_ready;
 
   modport master(
     output rvalid, raddr, ralu, atomic_lock, pc,
-    input rdata, trap, cause, difftest_skip, rready);
+    input rdata, trap, cause, difftest_skip, rready, stq_ready);
   modport slave(
     input rvalid, raddr, ralu, atomic_lock, pc,
-    output rdata, trap, cause, difftest_skip, rready);
+    output rdata, trap, cause, difftest_skip, rready, stq_ready);
 endinterface
 
 

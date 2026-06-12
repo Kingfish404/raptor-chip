@@ -59,6 +59,8 @@ module rapt_plic #(
   logic [NDEV:0] pending_q;
   logic [NDEV:0] enable_q   [  NCTX];
   logic [   2:0] threshold_q[  NCTX];
+  logic [NHART-1:0] meip_q;
+  logic [NHART-1:0] seip_q;
   // Edge-detect on plic_bus.ext_irq so a level-held source doesn't perpetually
   // re-set pending_q after a complete (mirrors a typical PLIC RTL).
   logic [NDEV:0] ext_irq_q;
@@ -143,35 +145,47 @@ module rapt_plic #(
   // ---------------------------------------------------------------------
   logic [IdW-1:0] best_id  [NCTX];
   logic [    2:0] best_prio[NCTX];
-  logic           ctx_irq  [NCTX];
+  logic           ctx_irq_level[NCTX];
 
   always_comb begin
     for (int c = 0; c < NCTX; c++) begin
-      best_id[c]   = '0;
-      best_prio[c] = threshold_q[c];
-      ctx_irq[c]   = 1'b0;
+      best_id[c]        = '0;
+      best_prio[c]      = threshold_q[c];
+      ctx_irq_level[c]  = 1'b0;
       for (int s = 1; s <= NDEV; s++) begin
+        if (pending_q[s] && enable_q[c][s] && (priority_q[s] > threshold_q[c])) begin
+          ctx_irq_level[c] = 1'b1;
+        end
         if (pending_q[s] && enable_q[c][s] && (priority_q[s] > best_prio[c])) begin
           best_prio[c] = priority_q[s];
           best_id[c]   = IdW'(s);
-          ctx_irq[c]   = 1'b1;
         end
       end
     end
   end
 
-  // Map per-context IRQ level onto per-hart meip/seip.
+  // Map per-context IRQ level onto per-hart meip/seip. The hart-level outputs
+  // are registered below to keep the PLIC priority tree out of the core CSR and
+  // dispatch operand timing cones.
+  logic [NHART-1:0] meip_next;
+  logic [NHART-1:0] seip_next;
+
+  assign plic_bus.meip = meip_q;
+  assign plic_bus.seip = seip_q;
+
   always_comb begin
     int h;
+    meip_next = '0;
+    seip_next = '0;
     for (int hh = 0; hh < NHART; hh++) begin
-      plic_bus.meip[hh] = 1'b0;
-      plic_bus.seip[hh] = 1'b0;
+      meip_next[hh] = 1'b0;
+      seip_next[hh] = 1'b0;
     end
     for (int c = 0; c < NCTX; c++) begin
       h = c / 2;
       if (h < NHART) begin
-        if ((c & 1) == 0) plic_bus.meip[h] = ctx_irq[c];
-        else plic_bus.seip[h] = ctx_irq[c];
+        if ((c & 1) == 0) meip_next[h] = ctx_irq_level[c];
+        else seip_next[h] = ctx_irq_level[c];
       end
     end
   end
@@ -206,12 +220,17 @@ module rapt_plic #(
     if (reset) begin
       ext_irq_q <= '0;
       pending_q <= '0;
+      meip_q    <= '0;
+      seip_q    <= '0;
       for (int s = 0; s <= NDEV; s++) priority_q[s] <= '0;
       for (int c = 0; c < NCTX; c++) begin
         enable_q[c]    <= '0;
         threshold_q[c] <= '0;
       end
     end else begin
+      meip_q <= meip_next;
+      seip_q <= seip_next;
+
       // Edge-detect external sources.
       ext_irq_q <= plic_bus.ext_irq;
       for (int s = 1; s <= NDEV; s++) begin

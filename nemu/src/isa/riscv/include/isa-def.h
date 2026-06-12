@@ -79,6 +79,7 @@ enum CSR
   CSR_MIE = 0x304,
   CSR_MTVEC = 0x305,
 
+  CSR_MENVCFG = 0x30a,
   CSR_MSTATUSH = 0x310,
 
   // Machine Trap Handling

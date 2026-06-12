@@ -18,6 +18,8 @@
 //   +FLASH=<path>      raw .bin loaded into FLASH   @ 0x30000000 (optional)
 //   +MAX_CYCLES=<n>    watchdog timeout in clock cycles (default 100_000_000)
 //   +WAVE              enable waveform dump (VCD: rapt_tb.vcd)
+//   +PC_TRACE=<0|1>    print RTL retire/IFU heartbeat diagnostics
+//   +TRAP_TRACE         print RTL trap/exception diagnostics
 //   +SDF=<path>        SDF file to back-annotate (requires +define+RAPT_TB_SDF)
 //   +SDF_MTM=<m>       SDF corner: MINIMUM | TYPICAL | MAXIMUM (default MAXIMUM)
 // =============================================================================
@@ -351,10 +353,112 @@ module rapt_tb_top;
   // ---------------------------------------------------------------------------
   longint unsigned max_cycles;
   longint unsigned cyc;
+  int pc_trace_en;
+  int commit_trace_en;
+  int syscall_trace_en;
+  int trap_trace_en;
+  logic [31:0] fatal_pc;
+  int fatal_trace_en;
 
   initial begin
     if (!$value$plusargs("MAX_CYCLES=%d", max_cycles)) max_cycles = 64'd100_000_000;
+    if (!$value$plusargs("PC_TRACE=%d", pc_trace_en)) pc_trace_en = 0;
+    if (!$value$plusargs("COMMIT_TRACE=%d", commit_trace_en)) commit_trace_en = 0;
+    syscall_trace_en = $test$plusargs("SYSCALL_TRACE");
+    trap_trace_en = $test$plusargs("TRAP_TRACE");
+    fatal_trace_en = $value$plusargs("FATAL_PC=%h", fatal_pc);
   end
+
+`ifndef RAPT_TB_GLS
+  longint unsigned commit_count;
+  always_ff @(posedge clock) begin
+    if (reset) begin
+      commit_count <= 64'd0;
+    end else begin
+      if (u_dut.cpu.core.rou_cmu.valid_a) begin
+        commit_count <= commit_count + 64'd1 + (u_dut.cpu.core.rou_cmu.valid_b ? 64'd1 : 64'd0);
+      end
+      if (u_dut.cpu.core.rou_cmu.valid_a && (commit_trace_en != 0)) begin
+        $display("[pc_trace] cyc=%0d commit=%0d pc_a=0x%08h inst_a=0x%08h npc_a=0x%08h pc_b=0x%08h inst_b=0x%08h npc_b=0x%08h vb=%0d",
+                 cyc, commit_count, u_dut.cpu.core.rou_cmu.pc_a,
+                 u_dut.cpu.core.rou_cmu.inst_a, u_dut.cpu.core.rou_cmu.npc_a,
+                 u_dut.cpu.core.rou_cmu.pc_b, u_dut.cpu.core.rou_cmu.inst_b,
+                 u_dut.cpu.core.rou_cmu.npc_b, u_dut.cpu.core.rou_cmu.valid_b);
+      end
+
+      if (syscall_trace_en != 0) begin
+        if (u_dut.cpu.core.rou_cmu.valid_a && u_dut.cpu.core.rou_cmu.inst_a == 32'h0000_0073)
+          $display("[ecall] cyc=%0d pc=0x%08h", cyc, u_dut.cpu.core.rou_cmu.pc_a);
+`ifdef RAPT_DUAL_ISSUE
+        if (u_dut.cpu.core.rou_cmu.valid_b && u_dut.cpu.core.rou_cmu.inst_b == 32'h0000_0073)
+          $display("[ecall] cyc=%0d pc=0x%08h", cyc, u_dut.cpu.core.rou_cmu.pc_b);
+`endif
+      end
+
+      if ((trap_trace_en != 0) && u_dut.cpu.core.rou_csr.valid &&
+          (u_dut.cpu.core.rou_csr.trap || u_dut.cpu.core.rou_csr.ecall ||
+           u_dut.cpu.core.rou_csr.ebreak || u_dut.cpu.core.rou_csr.mret ||
+           u_dut.cpu.core.rou_csr.sret)) begin
+        $display("[trap_trace] cyc=%0d pc=0x%08h trap=%0d ecall=%0d ebreak=%0d mret=%0d sret=%0d cause=0x%08h tval=0x%08h priv=%0d tvec=0x%08h mtvec=0x%08h mmu_i=%0d mmu_d=%0d",
+                 cyc,
+                 u_dut.cpu.core.rou_csr.pc,
+                 u_dut.cpu.core.rou_csr.trap,
+                 u_dut.cpu.core.rou_csr.ecall,
+                 u_dut.cpu.core.rou_csr.ebreak,
+                 u_dut.cpu.core.rou_csr.mret,
+                 u_dut.cpu.core.rou_csr.sret,
+                 u_dut.cpu.core.rou_csr.cause,
+                 u_dut.cpu.core.rou_csr.tval,
+                 u_dut.cpu.core.csr_bcast.priv,
+                 u_dut.cpu.core.csr_bcast.tvec,
+                 u_dut.cpu.core.csr_bcast.mtvec,
+                 u_dut.cpu.core.csr_bcast.immu_en,
+                 u_dut.cpu.core.csr_bcast.dmmu_en);
+      end
+
+      if ((fatal_trace_en != 0) && u_dut.cpu.core.rou_cmu.valid_a &&
+          (u_dut.cpu.core.rou_cmu.npc_a == fatal_pc || u_dut.cpu.core.rou_cmu.pc_a == fatal_pc)) begin
+        $display("[fatal_trace] cyc=%0d call_pc=0x%08h inst=0x%08h npc=0x%08h",
+                 cyc, u_dut.cpu.core.rou_cmu.pc_a,
+                 u_dut.cpu.core.rou_cmu.inst_a,
+                 u_dut.cpu.core.rou_cmu.npc_a);
+      end
+
+      if ((pc_trace_en != 0) && (cyc != 0) && ((cyc % 64'd500000) == 0)) begin
+          $display("[pc_trace] heartbeat cyc=%0d commits=%0d va=%0d pc_a=0x%08h inst_a=0x%08h npc_a=0x%08h ifu_pc=0x%08h ifu_state=%0d ifu_idu_ready=%0d l1i_state=%0d inv=%0d wait_inv=%0d flush=%0d mmu=%0d pmp_fault=%0d hit=%0d hit_next=%0d sram_ready=%0d i_raddr_valid=%0d lsu_store_state=%0d lsu_ma_state=%0d lsu_rvalid=%0d lsu_rready=%0d lsu_wvalid=%0d lsu_wready=%0d l1d_state=%0d l1d_hit=%0d l1d_data_hit=%0d l1d_arvalid=%0d l1d_rvalid=%0d l1d_rready=%0d arvalid=%0d arready=%0d rvalid=%0d rready=%0d",
+                     cyc, commit_count, u_dut.cpu.core.rou_cmu.valid_a,
+            u_dut.cpu.core.rou_cmu.pc_a,
+            u_dut.cpu.core.rou_cmu.inst_a,
+            u_dut.cpu.core.rou_cmu.npc_a,
+                   u_dut.cpu.core.ifu.pc_ifu, u_dut.cpu.core.ifu.state_ifu,
+           u_dut.cpu.core.ifu_idu.ready,
+           u_dut.cpu.core.l1i_cache.l1i_state,
+           u_dut.cpu.core.l1i_cache.invalid_l1i,
+           u_dut.cpu.core.l1i_cache.wait_invalid,
+           u_dut.cpu.core.cmu_bcast.flush_pipe,
+           u_dut.cpu.core.l1i_cache.mmu_en,
+           u_dut.cpu.core.l1i_cache.pmp_fetch_fault,
+           u_dut.cpu.core.l1i_cache.hit,
+           u_dut.cpu.core.l1i_cache.hit_next,
+           u_dut.cpu.core.l1i_cache.sram_data_ready,
+           u_dut.cpu.core.l1i_cache.raddr_valid,
+           u_dut.cpu.core.lsu.state_store,
+           u_dut.cpu.core.lsu.ma_state,
+           u_dut.cpu.core.lsu_l1d.rvalid,
+           u_dut.cpu.core.lsu_l1d.rready,
+           u_dut.cpu.core.lsu_l1d.wvalid,
+           u_dut.cpu.core.lsu_l1d.wready,
+           u_dut.cpu.core.l1d_cache.l1d_state,
+           u_dut.cpu.core.l1d_cache.tag_hit,
+           u_dut.cpu.core.l1d_cache.data_hit,
+           u_dut.cpu.core.l1d_bus.arvalid,
+           u_dut.cpu.core.l1d_bus.rvalid,
+           u_dut.cpu.core.l1d_bus.rready,
+           rnp_arvalid, rnp_arready, rnp_rvalid, rnp_rready);
+      end
+    end
+  end
+`endif
 
   always_ff @(posedge clock) begin
     if (reset) begin

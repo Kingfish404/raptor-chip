@@ -513,7 +513,7 @@ microbench-npc64-difftest: $(AM_KERNELS) config-npc32-difftest config-nemu64-ref
 
 microbench-npc32-difftest: $(AM_KERNELS) config-npc32-difftest config-nemu32-ref ## Run MicroBench on NPC with difftest
 	@mkdir -p $(NPC_LOG_DIR)
-	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/microbench ARCH=$(NPC_ARCH) run ARGS="$(ARGS)" mainargs=test $(call tee_npc,microbench-npc32-difftest)
+	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/microbench ARCH=$(NPC_ARCH) run ARGS="$(ARGS)" mainargs=$(MAINARGS) $(call tee_npc,microbench-npc32-difftest-$(MAINARGS))
 
 microbench-ysyxsoc: $(AM_KERNELS) config-npc32-ysyxsoc config-nemu32-ref ## Run MicroBench on ysyxSoC
 	@mkdir -p $(NPC_LOG_DIR)

@@ -1,0 +1,67 @@
+/dts-v1/;
+
+/ {
+    #address-cells = <1>;
+    #size-cells = <1>;
+    compatible = "raptor,litex-soc";
+    model = "Raptor LiteX SoC on MLK-CU07-KU15P";
+
+    chosen {
+        stdout-path = "/soc/serial@f0001800";
+        bootargs = "console=hvc0 earlycon=sbi rdinit=/init";
+    };
+
+    cpus {
+        #address-cells = <1>;
+        #size-cells = <0>;
+        timebase-frequency = <@TIMEBASE@>;
+
+        cpu@0 {
+            device_type = "cpu";
+            compatible = "riscv";
+            riscv,isa = "rv32imac_zicsr_zifencei_zcb_zba_zbb_zbc_zbs";
+            mmu-type = "riscv,sv32";
+            reg = <0>;
+
+            cpu0_intc: interrupt-controller {
+                #interrupt-cells = <1>;
+                compatible = "riscv,cpu-intc";
+                interrupt-controller;
+            };
+        };
+    };
+
+    soc {
+        #address-cells = <1>;
+        #size-cells = <1>;
+        compatible = "simple-bus";
+        ranges;
+
+        clint@2000000 {
+            compatible = "riscv,clint0";
+            reg = <0x02000000 0x10000>;
+            interrupts-extended = <&cpu0_intc 3>,
+                                  <&cpu0_intc 7>;
+        };
+
+        plic: interrupt-controller@c000000 {
+            compatible = "riscv,plic0";
+            #interrupt-cells = <1>;
+            interrupt-controller;
+            reg = <0x0c000000 0x04000000>;
+            riscv,ndev = <31>;
+            interrupts-extended = <&cpu0_intc 11>,
+                                  <&cpu0_intc 9>;
+        };
+
+        serial@f0001800 {
+            compatible = "litex,liteuart";
+            reg = <0xf0001800 0x100>;
+        };
+    };
+
+    memory@80000000 {
+        device_type = "memory";
+        reg = <0x80000000 @MEM_SIZE@>;
+    };
+};

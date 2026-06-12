@@ -17,11 +17,10 @@
  *   * Direct-mapped (L2_N_WAYS=1 supported today; >1 reserved).
  *   * Line size  = 1 << L2_LINE_LEN words (default 4 words / 16 B @ RV32).
  *   * Sets       = 1 << L2_LEN (default 128 sets -> 8 KB @ RV32 / 16 KB @ RV64).
- *   * Tag + valid + data stored in flip-flop arrays (no SRAM macro
- *     dependency yet -- keeps the first version simple and lint-clean).
- *   * Cacheable region: rapt_pkg::addr_cacheable(addr) (same allowlist as
- *     L1I/L1D). MMIO traffic is forwarded straight through with no cache
- *     lookup.
+ *   * Tag + valid stored in flops; data stored in SRAM-style word banks so
+ *     FPGA builds infer local RAM instead of a 100k+ FF data array.
+ *   * Cacheable region: external main memory windows only. MMIO/ROM/SRAM
+ *     traffic is forwarded straight through with no cache lookup.
  *   * Read policy : on miss allocate a full-line refill from memory
  *     (INCR burst of LineSize beats). The first matching beat is
  *     forwarded to the requester as it streams in (early-restart);
@@ -137,28 +136,29 @@ module rapt_l2 #(
   localparam int TagBits = XLEN - IndexBits - OffsetBits;
 
   // ---------------------------------------------------------------------
-  // Storage (flip-flop arrays). L2_N_WAYS > 1 reserved for future use;
-  // current logic only walks way 0.
+  // Storage. L2_N_WAYS > 1 reserved for future use; current logic only walks
+  // way 0. Tag/valid stay in flops for reset simplicity; the data array is
+  // banked by word offset and implemented with the standard 1R1W SRAM wrapper
+  // to avoid expanding the default 16 KiB L2 into ~131k data FFs on FPGA.
   // ---------------------------------------------------------------------
   /* verilator lint_off UNUSEDPARAM */
   /* verilator lint_off UNUSEDSIGNAL */
   logic                line_valid[L2_N_WAYS][NSets];
   logic [TagBits-1:0] line_tag  [L2_N_WAYS][NSets];
-  logic [    XLEN-1:0] line_data [L2_N_WAYS][NSets] [LineSize];
+  logic [    XLEN-1:0] line_data_r[LineSize];
   /* verilator lint_on UNUSEDPARAM */
   /* verilator lint_on UNUSEDSIGNAL */
 
   // ---------------------------------------------------------------------
   // Helpers
   // ---------------------------------------------------------------------
-  // Cacheability must match the L1I/L1D predicate (addr_cacheable, an
-  // allowlist of real backing memory). The previous !addr_mmio() form was an
-  // incomplete denylist (used only for difftest-skip) and disagreed with L1
-  // for device regions absent from it (e.g. the QEMU-virt NS16550 UART at
-  // 0x10000000), causing L2 to cache MMIO and return stale device-register
-  // reads (OpenSBI uart8250_putc spun forever on LSR.THRE).
+  // L2 is intentionally narrower than the L1 addr_cacheable() allowlist: keep
+  // ROM/SRAM/flash single-beat through the LiteX fabric and reserve L2 line
+  // fills for external main memory where Linux/app payloads execute.
   function automatic logic cacheable(input logic [XLEN-1:0] a);
-    return rapt_pkg::addr_cacheable(a);
+    return (0)
+        || (a >= 'h80000000 && a < 'h90000000)  // FPGA main RAM / PMEM window.
+        || (a >= 'ha0000000 && a < 'ha2000000); // legacy SDRAM window.
   endfunction
 
   function automatic logic [IndexBits-1:0] addr_index(input logic [XLEN-1:0] a);
@@ -176,11 +176,13 @@ module rapt_l2 #(
   // =====================================================================
   // READ PATH
   // =====================================================================
-  typedef enum logic [2:0] {
+  typedef enum logic [3:0] {
     R_IDLE,
     R_HIT,
     R_MISS_AR,
     R_MISS_R,
+    R_INSTALL_WAIT,
+    R_BYPASS_WAIT,
     R_BYPASS_AR,
     R_BYPASS_R
   } state_r_t;
@@ -219,6 +221,15 @@ module rapt_l2 #(
   assign axi_s.rresp  = rs_rresp;
   assign axi_s.rid    = rs_rid;
 
+  wire r_hit_beat_fire = (rs == R_HIT) && r_hit_q && (!rs_rvalid || axi_s.rready);
+  wire [XLEN-1:0] r_addr_next = r_addr + WordBytes;
+  wire [IndexBits-1:0] data_sram_raddr =
+      (rs == R_IDLE && axi_s.arvalid && axi_s.arready && cacheable(axi_s.araddr))
+          ? addr_index(axi_s.araddr)
+      : (r_hit_beat_fire && (r_len != 8'd0) && (r_word == L2_LINE_LEN'(LineSize - 1)))
+          ? addr_index(r_addr_next)
+      : r_idx_q;
+
   // ---------------------------------------------------------------------
   // AR acceptance: only when read FSM idle.
   // ---------------------------------------------------------------------
@@ -241,8 +252,9 @@ module rapt_l2 #(
   assign axi_m.arsize  = m_arsize;
   assign axi_m.arburst = m_arburst;
 
-  // Master-side R always accepted (we buffer line / forward directly).
-  assign axi_m.rready  = (rs == R_MISS_R) || (rs == R_BYPASS_R);
+  // Miss fills can always be accepted into the line buffer. Bypass reads only
+  // accept a downstream beat when the single upstream holding register is free.
+  assign axi_m.rready  = (rs == R_MISS_R) || ((rs == R_BYPASS_R) && (!rs_rvalid || axi_s.rready));
 
   // ---------------------------------------------------------------------
   // Cache write port (drive on fill completion)
@@ -288,6 +300,8 @@ module rapt_l2 #(
     logic [XLEN-1:0]   wdata;
     logic [XLEN/8-1:0] wstrb;
     logic              wlast;
+    logic              posted;
+    logic [WbufPtrW-1:0] rsp_slot;
   } wbuf_ent_t;
 
   wbuf_ent_t wbuf[WbufDepth];
@@ -297,13 +311,17 @@ module rapt_l2 #(
 
   // Posted-B id FIFO (one id per W beat captured; consumed on upstream bready).
   logic [ID_W-1:0] b_id_q[WbufDepth];
+  logic [1:0] b_resp_q[WbufDepth];
+  logic b_ready_q[WbufDepth];
   logic [WbufPtrW-1:0] b_wptr;
   logic [WbufPtrW-1:0] b_rptr;
   logic [WbufCntW-1:0] b_count;
+  wire bq_full = (b_count == WbufCntW'(WbufDepth));
 
   // Any-busy: used to serialize reads vs all in-flight writes (AXI memory
   // models may reorder AR vs same- or other-line AW).
   wire any_write_in_flight = wbuf[0].busy || wbuf[1].busy;
+  wire read_bypass_in_progress = (rs == R_BYPASS_WAIT) || (rs == R_BYPASS_AR) || (rs == R_BYPASS_R);
 
   // Snoop hit-merge: fires when a W beat is captured into wbuf[w_wptr].
   // The slot's AW addr was registered one cycle earlier, so derive snoop
@@ -313,8 +331,26 @@ module rapt_l2 #(
   wire [TagBits-1:0] w_tag_q = addr_tag(w_snoop_addr);
   wire w_hit_q = line_valid[0][w_idx_q] && (line_tag[0][w_idx_q] == w_tag_q);
   wire [L2_LINE_LEN-1:0] w_word_now = addr_word(w_snoop_addr);
+  wire w_full_strobe = &axi_s.wstrb;
   logic w_hit_update;
-  logic [XLEN-1:0] w_data_mask_apply;
+
+  generate
+    for (genvar gi = 0; gi < LineSize; gi++) begin : gen_data_bank
+      wire bank_store_wen = w_hit_update && w_full_strobe && (w_word_now == L2_LINE_LEN'(gi));
+      rapt_sram_1r1w #(
+          .ADDR_WIDTH(L2_LEN),
+          .DATA_WIDTH(XLEN)
+      ) u_data_sram (
+          .clock(clock),
+          .ren  (1'b1),
+          .raddr(data_sram_raddr),
+          .rdata(line_data_r[gi]),
+          .wen  (cache_install || bank_store_wen),
+          .waddr(cache_install ? install_idx : w_idx_q),
+          .wdata(cache_install ? r_line_buf[gi] : axi_s.wdata)
+      );
+    end
+  endgenerate
 
   // Drain FSM placed before the read FSM because read miss-issue
   // serializes against write activity to avoid AR/AW ordering races.
@@ -392,13 +428,17 @@ module rapt_l2 #(
               rs <= R_HIT;
             end else begin
               // Forward AR straight through.
-              m_arvalid <= 1'b1;
-              m_araddr  <= axi_s.araddr;
-              m_arid    <= axi_s.arid;
-              m_arlen   <= axi_s.arlen;
-              m_arsize  <= axi_s.arsize;
-              m_arburst <= axi_s.arburst;
-              rs <= R_BYPASS_AR;
+              if (any_write_in_flight || axi_s.awvalid) begin
+                rs <= R_BYPASS_WAIT;
+              end else begin
+                m_arvalid <= 1'b1;
+                m_araddr  <= axi_s.araddr;
+                m_arid    <= axi_s.arid;
+                m_arlen   <= axi_s.arlen;
+                m_arsize  <= axi_s.arsize;
+                m_arburst <= axi_s.arburst;
+                rs <= R_BYPASS_AR;
+              end
             end
           end
         end
@@ -411,7 +451,7 @@ module rapt_l2 #(
             // a burst -- we hold this state until the burst completes.
             if (!rs_rvalid || axi_s.rready) begin
               rs_rvalid <= 1'b1;
-              rs_rdata  <= line_data[0][r_idx_q][r_word];
+              rs_rdata  <= line_data_r[r_word];
               rs_rresp  <= 2'b00;
               rs_rid    <= r_id;
               rs_rlast  <= (r_len == 8'd0);
@@ -508,9 +548,30 @@ module rapt_l2 #(
                       && (!rs_rvalid || axi_s.rready))) begin
                 rs <= R_IDLE;
               end else begin
-                rs <= R_HIT;  // serve remaining upstream beats from cache
+                rs <= R_INSTALL_WAIT;  // allow SRAM install/read to settle
               end
             end
+          end
+        end
+
+        // -----------------------------------------------------------------
+        R_INSTALL_WAIT: begin
+          // cache_install is a registered pulse asserted after the final fill
+          // beat. Wait one cycle so tag/valid commit and the SRAM write-first
+          // read for install_idx is visible before R_HIT consumes line_data_r.
+          rs <= R_HIT;
+        end
+
+        // -----------------------------------------------------------------
+        R_BYPASS_WAIT: begin
+          if (!any_write_in_flight) begin
+            m_arvalid <= 1'b1;
+            m_araddr  <= r_addr;
+            m_arid    <= r_id;
+            m_arlen   <= r_len;
+            m_arsize  <= r_size;
+            m_arburst <= r_burst;
+            rs <= R_BYPASS_AR;
           end
         end
 
@@ -541,16 +602,16 @@ module rapt_l2 #(
       if (cache_install) begin
         line_valid[0][install_idx] <= 1'b1;
         line_tag[0][install_idx]   <= install_tag;
-        for (int i = 0; i < LineSize; i++) begin
-          line_data[0][install_idx][i] <= r_line_buf[i];
-        end
       end
 
       // ---------------------------------------------------------------
-      // Write-through hit update (snoop)
+      // Write-through hit update (snoop). Full-word stores update the SRAM
+      // bank directly. Partial stores invalidate the L2 line instead of
+      // requiring a second read/modify/write port; the write still drains to
+      // memory, and later reads miss/refill after write-buffer serialization.
       // ---------------------------------------------------------------
-      if (w_hit_update) begin
-        line_data[0][w_idx_q][w_word_now] <= w_data_mask_apply;
+      if (w_hit_update && !w_full_strobe) begin
+        line_valid[0][w_idx_q] <= 1'b0;
       end
     end
   end
@@ -562,17 +623,11 @@ module rapt_l2 #(
   // and upstream B is returned as soon as the W beat lands. A separate
   // drain engine pushes the head of wbuf[] to memory in the background.
 
-  // ---- Snoop hit-merge (fires same cycle as W capture) ----
+  // ---- Snoop hit/update (fires same cycle as W capture) ----
   always_comb begin
-    w_hit_update      = 1'b0;
-    w_data_mask_apply = '0;
+    w_hit_update = 1'b0;
     if (axi_s.wvalid && axi_s.wready && cacheable(w_snoop_addr) && w_hit_q) begin
       w_hit_update = 1'b1;
-      for (int b = 0; b < XLEN / 8; b++) begin
-        w_data_mask_apply[8*b +: 8] = axi_s.wstrb[b]
-            ? axi_s.wdata[8*b +: 8]
-            : line_data[0][w_idx_q][w_word_now][8*b +: 8];
-      end
     end
   end
 
@@ -581,20 +636,19 @@ module rapt_l2 #(
   // race against an in-flight fill (AR/AW reordering hazard).
   wire l2_fill_in_progress = (rs == R_MISS_AR) || (rs == R_MISS_R);
   wire l2_aw_same_line = (axi_s.awaddr[XLEN-1:OffsetBits] == r_addr[XLEN-1:OffsetBits]);
-  assign axi_s.awready = !wbuf[aw_wptr].busy && !(l2_fill_in_progress && l2_aw_same_line);
+  assign axi_s.awready = !wbuf[aw_wptr].busy && !bq_full && !read_bypass_in_progress
+                       && !(l2_fill_in_progress && l2_aw_same_line);
 
   // W: accept when the W-target slot has an AW captured but no W yet.
   // (For single-beat stores w_wptr always points at the right slot.)
   wire wbuf_w_pending = wbuf[w_wptr].busy && !wbuf[w_wptr].has_w;
-  assign axi_s.wready = wbuf_w_pending;
+  assign axi_s.wready = wbuf_w_pending && !cache_install;
 
-  // B: posted -- emit as soon as the b_id FIFO has a pending entry.
-  // bresp is OKAY (downstream errors are logged via SVA; not propagated
-  // to upstream once posted). This matches the pre-existing assumption
-  // that store errors are not architecturally surfaced.
-  assign axi_s.bvalid = (b_count != 0);
+  // B: cacheable main-memory writes are posted; non-cacheable writes wait for
+  // the real downstream B so CSR/MMIO polling remains strictly ordered.
+  assign axi_s.bvalid = (b_count != 0) && b_ready_q[b_rptr];
   assign axi_s.bid    = b_id_q[b_rptr];
-  assign axi_s.bresp  = 2'b00;
+  assign axi_s.bresp  = b_resp_q[b_rptr];
 
   // ---- Downstream (master) drives ----
   // AW/W issued combinationally from the drain head. axi_m.awvalid is
@@ -636,7 +690,11 @@ module rapt_l2 #(
         wbuf[i].wdata <= '0;
         wbuf[i].wstrb <= '0;
         wbuf[i].wlast <= 1'b0;
+        wbuf[i].posted <= 1'b0;
+        wbuf[i].rsp_slot <= '0;
         b_id_q[i]     <= '0;
+        b_resp_q[i]   <= 2'b00;
+        b_ready_q[i]  <= 1'b0;
       end
     end else begin
       // ---- Drain side (free a slot when downstream B returns) ----
@@ -650,6 +708,10 @@ module rapt_l2 #(
         end
         W_B: begin
           if (axi_m.bvalid) begin
+            if (!wbuf[d_rptr].posted) begin
+              b_ready_q[wbuf[d_rptr].rsp_slot] <= 1'b1;
+              b_resp_q [wbuf[d_rptr].rsp_slot] <= axi_m.bresp;
+            end
             wbuf[d_rptr].busy  <= 1'b0;
             wbuf[d_rptr].has_w <= 1'b0;
             d_rptr             <= (d_rptr == WbufPtrW'(WbufDepth - 1)) ? '0 : (d_rptr + 1'b1);
@@ -672,6 +734,7 @@ module rapt_l2 #(
         wbuf[aw_wptr].size  <= axi_s.awsize;
         wbuf[aw_wptr].len   <= axi_s.awlen;
         wbuf[aw_wptr].burst <= axi_s.awburst;
+        wbuf[aw_wptr].posted <= cacheable(axi_s.awaddr);
         // TODO(coalesce): if wbuf[*] has a busy entry to the same line
         // with !has_drained_yet, we could merge wstrb into it and skip
         // the enqueue. Saves a downstream beat for adjacent stores.
@@ -685,15 +748,21 @@ module rapt_l2 #(
         wbuf[w_wptr].wlast <= axi_s.wlast;
         if (axi_s.wlast) begin
           wbuf[w_wptr].has_w <= 1'b1;
+          wbuf[w_wptr].rsp_slot <= b_wptr;
           w_wptr             <= (w_wptr == WbufPtrW'(WbufDepth - 1)) ? '0 : (w_wptr + 1'b1);
-          // Post B credit (registered) for upstream emission.
+          // Enqueue upstream B in write order. Cacheable writes are ready
+          // immediately; non-cacheable writes become ready on downstream B.
           b_id_q[b_wptr]     <= wbuf[w_wptr].id;
+          b_resp_q[b_wptr]   <= 2'b00;
+          b_ready_q[b_wptr]  <= wbuf[w_wptr].posted;
           b_wptr             <= (b_wptr == WbufPtrW'(WbufDepth - 1)) ? '0 : (b_wptr + 1'b1);
         end
       end
 
       // ---- Upstream B consume ----
       if (axi_s.bvalid && axi_s.bready) begin
+        b_ready_q[b_rptr] <= 1'b0;
+        b_resp_q [b_rptr] <= 2'b00;
         b_rptr <= (b_rptr == WbufPtrW'(WbufDepth - 1)) ? '0 : (b_rptr + 1'b1);
       end
 

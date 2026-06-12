@@ -196,10 +196,13 @@ module rapt_exu_rs #(
   // `age_col[i]` = set of entries strictly older than i. A ready entry is
   // the oldest of a subset S iff no older entry is also in S, i.e.
   // `(age_col[i] & S) == 0`.
+  //
+  // The diagonal is always false (an entry is not older than itself); hard-wire
+  // it instead of reading a flop so synthesis cannot create a floating read net.
   always_comb begin
     for (int j = 0; j < RS_SIZE; j++) begin
       for (int i = 0; i < RS_SIZE; i++) begin
-        age_col[j][i] = age_mat[i][j];
+        age_col[j][i] = (i == j) ? 1'b0 : age_mat[i][j];
       end
     end
   end
@@ -354,7 +357,31 @@ module rapt_exu_rs #(
       rs_mul_ready  <= '0;
       rs_mul_issued <= '0;
       rs_full_r     <= 1'b0;  // A2: Initialize full state tracker
-      for (int i = 0; i < RS_SIZE; i++) age_mat[i] <= '0;
+      // Reset payload arrays so unused entries cannot feed X values into issue,
+      // forwarding, or store-address logic in FPGA synthesis.
+      for (int i = 0; i < RS_SIZE; i++) begin
+        age_mat[i] <= '0;
+        rs_pc[i]   <= '0;
+        rs_c[i]    <= 1'b0;
+        rs_word[i] <= 1'b0;
+        rs_pr1[i]  <= '0;
+        rs_pr2[i]  <= '0;
+        rs_vj[i]   <= '0;
+        rs_vk[i]   <= '0;
+        rs_alu[i]  <= '0;
+        rs_dest[i] <= '0;
+        rs_prd[i]  <= '0;
+        rs_rd[i]   <= '0;
+        rs_mul_a[i] <= '0;
+        rs_jen[i] <= 1'b0;
+        rs_br_cond[i] <= 1'b0;
+        rs_imm[i] <= '0;
+        rs_pnpc[i] <= '0;
+        rs_b_block[i] <= 1'b0;
+        rs_trap[i] <= 1'b0;
+        rs_tval[i] <= '0;
+        rs_cause[i] <= '0;
+      end
     end else begin
       // A2: Latch current full status (rising-edge detection for pmu_rs_full)
       rs_full_r <= (&rs_valid);  // Full when all entries valid
@@ -372,6 +399,11 @@ module rapt_exu_rs #(
             rs_pr2[free_idx_a] <= rou_exu.pr2;
             rs_pr1_busy[free_idx_a] <= |rou_exu.pr1;
             rs_pr2_busy[free_idx_a] <= |rou_exu.pr2;
+            // Clear MUL bookkeeping inherited from a prior occupant before the
+            // operand-busy gated completion path can observe this slot.
+            rs_mul_issued[free_idx_a] <= 1'b0;
+            rs_mul_ready[free_idx_a] <= 1'b0;
+            rs_mul_a[free_idx_a] <= '0;
             rs_prd[free_idx_a] <= rou_exu.prd;
             rs_rd[free_idx_a] <= rou_exu.uop.rd;
             rs_c[free_idx_a] <= rou_exu.uop.c;
@@ -413,8 +445,29 @@ module rapt_exu_rs #(
               )-1:0])) begin
             rs_valid[i]      <= 1'b0;
             rs_alu[i]        <= '0;
+            rs_pc[i]         <= '0;
+            rs_c[i]          <= 1'b0;
+            rs_word[i]       <= 1'b0;
+            rs_vj[i]         <= '0;
+            rs_vk[i]         <= '0;
+            rs_dest[i]       <= '0;
+            rs_pr1[i]        <= '0;
+            rs_pr2[i]        <= '0;
+            rs_pr1_busy[i]   <= 1'b0;
+            rs_pr2_busy[i]   <= 1'b0;
+            rs_prd[i]        <= '0;
+            rs_rd[i]         <= '0;
+            rs_mul_a[i]      <= '0;
             rs_mul_ready[i]  <= 1'b0;
             rs_mul_issued[i] <= 1'b0;
+            rs_jen[i]        <= 1'b0;
+            rs_br_cond[i]    <= 1'b0;
+            rs_imm[i]        <= '0;
+            rs_pnpc[i]       <= '0;
+            rs_b_block[i]    <= 1'b0;
+            rs_trap[i]       <= 1'b0;
+            rs_tval[i]       <= '0;
+            rs_cause[i]      <= '0;
           end
         end else if (rs_valid[i]) begin
           // Operand forwarding.
@@ -458,6 +511,9 @@ module rapt_exu_rs #(
         rs_pr2[disp.b_rs_idx] <= rou_exu.pr2_b;
         rs_pr1_busy[disp.b_rs_idx] <= |rou_exu.pr1_b;
         rs_pr2_busy[disp.b_rs_idx] <= |rou_exu.pr2_b;
+        rs_mul_issued[disp.b_rs_idx] <= 1'b0;
+        rs_mul_ready[disp.b_rs_idx] <= 1'b0;
+        rs_mul_a[disp.b_rs_idx] <= '0;
         rs_prd[disp.b_rs_idx] <= rou_exu.prd_b;
         rs_rd[disp.b_rs_idx] <= rou_exu.uop_b.rd;
         rs_c[disp.b_rs_idx] <= rou_exu.uop_b.c;

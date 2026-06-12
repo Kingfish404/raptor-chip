@@ -55,6 +55,7 @@ typedef struct
   word_t *mie____;
   word_t *mtvec__;
 
+  word_t *menvcfg;
   word_t *mstatush;
 
   word_t *mscratch;
@@ -165,6 +166,8 @@ __EXPORT void difftest_regcpy(void *dut, bool direction)
     cpu.sr[CSR_MIDELEG] = *npc->mideleg;
     cpu.sr[CSR_MIE] = *npc->mie____;
     cpu.sr[CSR_MTVEC] = *npc->mtvec__;
+    cpu.sr[CSR_MENVCFG] = *npc->menvcfg;
+    cpu.sr[CSR_MSTATUSH] = *npc->mstatush;
 
     cpu.sr[CSR_MSCRATCH] = *npc->mscratch;
     cpu.sr[CSR_MEPC] = *npc->mepc___;
@@ -197,6 +200,8 @@ __EXPORT void difftest_regcpy(void *dut, bool direction)
     npc->mideleg = &cpu.sr[CSR_MIDELEG];
     npc->mie____ = &cpu.sr[CSR_MIE];
     npc->mtvec__ = &cpu.sr[CSR_MTVEC];
+    npc->menvcfg = &cpu.sr[CSR_MENVCFG];
+    npc->mstatush = &cpu.sr[CSR_MSTATUSH];
 
     npc->mscratch = &cpu.sr[CSR_MSCRATCH];
     npc->mepc___ = &cpu.sr[CSR_MEPC];

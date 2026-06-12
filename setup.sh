@@ -29,6 +29,42 @@ apt_install() {
   sudo apt install -y libevent-dev libjson-c-dev
 }
 
+pacman_install() {
+  # Brew provides the latest toolchain (verilator, sbt, yosys, riscv64-elf-*,
+  # openocd, dtc, libevent, json-c, ...) and is preferred for those.
+  # Here we install only the system-level libraries brew does not ship on Linux.
+  local aur_helper=""
+  if command -v yay >/dev/null 2>&1; then
+    aur_helper="yay"
+  elif command -v paru >/dev/null 2>&1; then
+    aur_helper="paru"
+  fi
+
+  # Official repo packages (sdl2-compat provides sdl2).
+  sudo pacman -S --needed --noconfirm \
+    base-devel git curl \
+    riscv64-linux-gnu-gcc \
+    sdl2-compat sdl2_image sdl2_ttf \
+    readline ncurses \
+    tcl eigen swig \
+    autoconf automake
+
+  # xxd is usually provided by vim/gvim; only pull tinyxxd if missing
+  # (tinyxxd conflicts with vim, which already ships an xxd).
+  command -v xxd >/dev/null 2>&1 || sudo pacman -S --needed --noconfirm tinyxxd
+
+  # AUR packages.
+  #   riscv64-elf-picolibc: RISC-V cross picolibc matching riscv64-elf-gcc
+  #     (equivalent to apt's picolibc-riscv64-unknown-elf; avoids building the
+  #      x86 host BIOS that the generic 'picolibc' package fails on).
+  #   tcllib: equivalent to apt's tcl-tclreadline support libraries.
+  if [ -n "$aur_helper" ]; then
+    "$aur_helper" -S --needed --noconfirm riscv64-elf-picolibc tcllib
+  else
+    echo "No AUR helper (yay/paru) found; please install 'riscv64-elf-picolibc' and 'tcllib' from the AUR manually."
+  fi
+}
+
 repo_clone() {
   mkdir -p third_party/NJU-ProjectN
   mkdir -p third_party/kingfish404
@@ -52,6 +88,10 @@ if [ "$(uname)" == "Linux" ]; then
     sudo apt update
     sudo apt install -y build-essential git curl
     apt_install
+  elif command -v pacman >/dev/null 2>&1; then
+    echo "Arch-based Linux detected"
+    sudo pacman -Sy --needed --noconfirm base-devel git curl
+    pacman_install
   else
     echo "Non-apt Linux detected, please install dependencies manually."
   fi

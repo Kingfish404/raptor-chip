@@ -99,8 +99,10 @@ module rapt_exu_mul #(
 
   logic signed [XLEN:0]     mul_ext_a;
   logic signed [XLEN:0]     mul_ext_b;
+  // Keep the combinational multiplier in fabric; the Vivado DSP48 mapping can
+  // move data independently of the valid/tag pipeline for this shared unit.
   /* verilator lint_off UNUSEDSIGNAL */
-  logic signed [2*XLEN+1:0] mul_full;
+  (* use_dsp = "no" *) logic signed [2*XLEN+1:0] mul_full;
   /* verilator lint_on UNUSEDSIGNAL */
   assign mul_ext_a = $signed({m1_sext_a & m1_s1[XLEN-1], m1_s1});
   assign mul_ext_b = $signed({m1_sext_b & m1_s2[XLEN-1], m1_s2});
@@ -157,6 +159,28 @@ module rapt_exu_mul #(
       m2_v          <= 1'b0;
       div_active    <= 1'b0;
       div_out_valid <= 1'b0;
+      // Reset shared datapath registers so inactive MUL/DIV state cannot feed
+      // X values into synthesized resource-sharing logic.
+      m1_s1                <= '0;
+      m1_s2                <= '0;
+      m1_op                <= '0;
+      m1_word              <= 1'b0;
+      m1_tag               <= '0;
+      m2_r                 <= '0;
+      m2_tag               <= '0;
+      div_op               <= '0;
+      div_s1               <= '0;
+      div_s2               <= '0;
+      div_word             <= 1'b0;
+      div_tag              <= '0;
+      div_quotient         <= '0;
+      div_remainder        <= '0;
+      div_divisor          <= '0;
+      div_dividend_shifted <= '0;
+      div_counter          <= '0;
+      div_sign             <= '0;
+      div_out_r            <= '0;
+      div_out_tag          <= '0;
     end else begin
       // ===== MUL stage-1 load =====
       if (accept_mul) begin

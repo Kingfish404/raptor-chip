@@ -785,6 +785,113 @@ jtag-debug-tests: ## JTAG: run upstream debug suite (BLOCKED, see verify/jtag/RE
 jtag-clean: ## JTAG: clean cloned riscv-tests + scratch artifacts
 	$(MAKE) -C $(JTAG_DIR) clean
 
+# ============================================================================
+# Vivado xsim Directed Checks
+# ============================================================================
+XSIM_DIR := $(VERIFY_HOME)/xsim
+XSIM_BUILD_DIR := $(BUILD_DIR)/xsim
+XSIM_RAPT_CONFIG ?= default
+VIVADO_SETTINGS ?= /opt/Xilinx/2025.2/Vivado/settings64.sh
+
+XSIM_COMMON_INCLUDES := \
+	-i "$(RAPTOR_HOME)/configs/$(XSIM_RAPT_CONFIG)" \
+	-i "$(RAPTOR_HOME)/rtl_sv/include" \
+	-i "$(RAPTOR_HOME)/rtl_sv/include/dpic_mock" \
+	-i "$(RAPTOR_HOME)/rtl_sv/include/npc" \
+	-i "$(XSIM_DIR)"
+
+XSIM_L2_SOURCES := \
+	"$(RAPTOR_HOME)/rtl_sv/rapt_pkg.sv" \
+	"$(RAPTOR_HOME)/rtl_sv/memory/rapt_sram_1r1w.sv" \
+	"$(RAPTOR_HOME)/rtl_sv/memory/rapt_l2.sv"
+
+XSIM_L1D_SOURCES := \
+	"$(RAPTOR_HOME)/rtl_sv/rapt_pkg.sv" \
+	"$(RAPTOR_HOME)/rtl_sv/memory/rapt_sram_1r1w.sv" \
+	"$(RAPTOR_HOME)/rtl_sv/memory/rapt_pmp.sv" \
+	"$(RAPTOR_HOME)/rtl_sv/memory/rapt_tlb.sv" \
+	"$(RAPTOR_HOME)/rtl_sv/memory/rapt_ptw.sv" \
+	"$(RAPTOR_HOME)/rtl_sv/memory/rapt_l1d.sv"
+
+XSIM_BUS_SOURCES := \
+	"$(RAPTOR_HOME)/rtl_sv/rapt_pkg.sv" \
+	"$(RAPTOR_HOME)/rtl_sv/memory/rapt_bus.sv"
+
+XSIM_IOQ_SOURCES := \
+	"$(RAPTOR_HOME)/rtl_sv/rapt_pkg.sv" \
+	"$(RAPTOR_HOME)/rtl_sv/memory/rapt_pmp.sv" \
+	"$(RAPTOR_HOME)/rtl_sv/backend/rapt_exu_ioq.sv"
+
+XSIM_ROU_SOURCES := \
+	"$(RAPTOR_HOME)/rtl_sv/rapt_pkg.sv" \
+	"$(RAPTOR_HOME)/rtl_sv/backend/rapt_rou.sv" \
+	"$(RAPTOR_HOME)/rtl_sv/backend/rapt_cmu.sv"
+
+XSIM_TARGETS := \
+	xsim-l2-ordered-mmio \
+	xsim-l2-write-stream \
+	xsim-l1d-byte-rom \
+	xsim-l1d-store-coherence \
+	xsim-bus-l1d-rlast \
+	xsim-bus-write-aw-before-w \
+	xsim-ioq-pending-lock \
+	xsim-rou-dual-commit
+
+define XSIM_RUN
+	@set -e; \
+	if ! command -v xvlog >/dev/null 2>&1; then \
+		if [ -f "$(VIVADO_SETTINGS)" ]; then source "$(VIVADO_SETTINGS)"; fi; \
+	fi; \
+	command -v xvlog >/dev/null 2>&1 || { \
+		echo "[xsim] ERROR: xvlog not found; source Vivado settings or set VIVADO_SETTINGS=/path/to/settings64.sh"; \
+		exit 1; \
+	}; \
+	rm -rf "$(XSIM_BUILD_DIR)/$(1)"; \
+	mkdir -p "$(XSIM_BUILD_DIR)/$(1)"; \
+	cd "$(XSIM_BUILD_DIR)/$(1)"; \
+	xvlog -sv $(4) \
+		$(XSIM_COMMON_INCLUDES) \
+		$(3) \
+		"$(XSIM_DIR)/$(2).sv"; \
+	xelab -debug typical $(2) -s $(2)_sim; \
+	xsim $(2)_sim -runall; \
+	if grep -Eq "FATAL_ERROR|FAIL:" xsim.log; then \
+		echo "[xsim] ERROR: $(2) reported FAIL/FATAL; see $(XSIM_BUILD_DIR)/$(1)/xsim.log"; \
+		exit 1; \
+	fi
+endef
+
+.PHONY: xsim $(XSIM_TARGETS) xsim-clean
+
+xsim: $(XSIM_TARGETS) ## xsim: run all directed checks
+
+xsim-l2-ordered-mmio: ## xsim: verify L2 ordered MMIO writes and posted DDR writes
+	$(call XSIM_RUN,l2_ordered_mmio,tb_l2_ordered_mmio,$(XSIM_L2_SOURCES),)
+
+xsim-l2-write-stream: ## xsim: verify L2 posted DDR write stream drains and unblocks later reads
+	$(call XSIM_RUN,l2_write_stream,tb_l2_write_stream,$(XSIM_L2_SOURCES),)
+
+xsim-l1d-byte-rom: ## xsim: verify L1D ROM byte reads across cache fills/hits
+	$(call XSIM_RUN,l1d_byte_rom,tb_l1d_byte_rom,$(XSIM_L1D_SOURCES),)
+
+xsim-l1d-store-coherence: ## xsim: verify L1D load-after-store coherence
+	$(call XSIM_RUN,l1d_store_coherence,tb_l1d_store_coherence,$(XSIM_L1D_SOURCES),)
+
+xsim-bus-l1d-rlast: ## xsim: verify bus forwards L1D AXI rlast in multi-outstanding mode
+	$(call XSIM_RUN,bus_l1d_rlast,tb_bus_l1d_rlast,$(XSIM_BUS_SOURCES),)
+
+xsim-bus-write-aw-before-w: ## xsim: verify bus write channel does not emit W before AW is accepted
+	$(call XSIM_RUN,bus_write_aw_before_w,tb_bus_write_aw_before_w,$(XSIM_BUS_SOURCES),)
+
+xsim-ioq-pending-lock: ## xsim: verify IOQ keeps a pending LSU load request stable
+	$(call XSIM_RUN,ioq_pending_lock,tb_ioq_pending_lock,$(XSIM_IOQ_SOURCES),)
+
+xsim-rou-dual-commit: ## xsim: verify ROU dual-commit retire, store, and slot1 flush semantics
+	$(call XSIM_RUN,rou_dual_commit,tb_rou_dual_commit,$(XSIM_ROU_SOURCES),-d RAPT_ASSERT_EN)
+
+xsim-clean: ## Clean xsim directed-check artifacts
+	rm -rf $(XSIM_BUILD_DIR)
+
 
 # ============================================================================
 # All-in-one
@@ -793,5 +900,5 @@ jtag-clean: ## JTAG: clean cloned riscv-tests + scratch artifacts
 
 all: fuzz sigtest ## Run all lightweight verification
 
-clean: fuzz-clean riscof-clean coverage-clean sigtest-clean formal-clean jtag-clean ## Clean all verify artifacts
+clean: fuzz-clean riscof-clean coverage-clean sigtest-clean formal-clean jtag-clean xsim-clean ## Clean all verify artifacts
 	rm -rf $(BUILD_DIR)
