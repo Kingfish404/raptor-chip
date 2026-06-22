@@ -269,7 +269,8 @@ module rapt_bpu_tage #(
   // values closest to the decision boundary (sign bit flip).
   assign provider_weak = (prov_ctr == 3'sd0) || (prov_ctr == -3'sd1);
 
-  wire any_tagged_hit = hit1 || hit2 || hit3;
+  logic any_tagged_hit;
+  assign any_tagged_hit = hit1 || hit2 || hit3;
   assign rd_taken = (any_tagged_hit && provider_weak && (use_alt_ctr >= 0))
                   ? alt_pred : provider_pred;
 

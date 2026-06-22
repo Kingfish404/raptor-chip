@@ -134,6 +134,12 @@ module rapt_l2 #(
   localparam int OffsetBits = L2_LINE_LEN + $clog2(WordBytes);
   localparam int IndexBits = L2_LEN;
   localparam int TagBits = XLEN - IndexBits - OffsetBits;
+  localparam int ByteOffsetBits = $clog2(WordBytes);
+  localparam int WordOffsetLsb = ByteOffsetBits;
+  localparam int WordOffsetMsb = ByteOffsetBits + L2_LINE_LEN - 1;
+  localparam int IndexLsb = OffsetBits;
+  localparam int IndexMsb = OffsetBits + IndexBits - 1;
+  localparam int TagLsb = OffsetBits + IndexBits;
 
   // ---------------------------------------------------------------------
   // Storage. L2_N_WAYS > 1 reserved for future use; current logic only walks
@@ -161,18 +167,6 @@ module rapt_l2 #(
         || (a >= 'ha0000000 && a < 'ha2000000); // legacy SDRAM window.
   endfunction
 
-  function automatic logic [IndexBits-1:0] addr_index(input logic [XLEN-1:0] a);
-    return a[OffsetBits+:IndexBits];
-  endfunction
-
-  function automatic logic [TagBits-1:0] addr_tag(input logic [XLEN-1:0] a);
-    return a[XLEN-1-:TagBits];
-  endfunction
-
-  function automatic logic [L2_LINE_LEN-1:0] addr_word(input logic [XLEN-1:0] a);
-    return a[$clog2(WordBytes)+:L2_LINE_LEN];
-  endfunction
-
   // =====================================================================
   // READ PATH
   // =====================================================================
@@ -196,15 +190,17 @@ module rapt_l2 #(
   logic [L2_LINE_LEN-1:0] r_word;  // current word offset within line
   logic [XLEN-1:0] r_line_buf[LineSize];
   logic [L2_LINE_LEN-1:0] r_fill_cnt;  // next word slot to write on fill
-  logic r_have[LineSize];  // word arrived in line buffer
   logic [1:0] r_resp;  // sticky worst rresp during fill
   logic r_up_done;  // upstream burst fully delivered (early-restart latch)
 
   // Hit detection on currently latched address (only meaningful while
   // rs == R_IDLE handshake or in R_HIT/R_MISS_*).
-  wire [IndexBits-1:0] r_idx_q = addr_index(r_addr);
-  wire [TagBits-1:0] r_tag_q = addr_tag(r_addr);
-  wire r_hit_q = line_valid[0][r_idx_q] && (line_tag[0][r_idx_q] == r_tag_q);
+  logic [IndexBits-1:0] r_idx_q;
+  logic [TagBits-1:0] r_tag_q;
+  logic r_hit_q;
+  assign r_idx_q = r_addr[IndexMsb:IndexLsb];
+  assign r_tag_q = r_addr[XLEN-1:TagLsb];
+  assign r_hit_q = line_valid[0][r_idx_q] && (line_tag[0][r_idx_q] == r_tag_q);
 
   // ---------------------------------------------------------------------
   // Slave side R driver
@@ -221,13 +217,14 @@ module rapt_l2 #(
   assign axi_s.rresp  = rs_rresp;
   assign axi_s.rid    = rs_rid;
 
-  wire r_hit_beat_fire = (rs == R_HIT) && r_hit_q && (!rs_rvalid || axi_s.rready);
-  wire [XLEN-1:0] r_addr_next = r_addr + WordBytes;
-  wire [IndexBits-1:0] data_sram_raddr =
+    logic r_hit_beat_fire;
+    logic [IndexBits-1:0] data_sram_raddr;
+    assign r_hit_beat_fire = (rs == R_HIT) && r_hit_q && (!rs_rvalid || axi_s.rready);
+    assign data_sram_raddr =
       (rs == R_IDLE && axi_s.arvalid && axi_s.arready && cacheable(axi_s.araddr))
-          ? addr_index(axi_s.araddr)
+        ? axi_s.araddr[IndexMsb:IndexLsb]
       : (r_hit_beat_fire && (r_len != 8'd0) && (r_word == L2_LINE_LEN'(LineSize - 1)))
-          ? addr_index(r_addr_next)
+          ? (r_idx_q + IndexBits'(1))
       : r_idx_q;
 
   // ---------------------------------------------------------------------
@@ -316,27 +313,39 @@ module rapt_l2 #(
   logic [WbufPtrW-1:0] b_wptr;
   logic [WbufPtrW-1:0] b_rptr;
   logic [WbufCntW-1:0] b_count;
-  wire bq_full = (b_count == WbufCntW'(WbufDepth));
+  logic bq_full;
+  assign bq_full = (b_count == WbufCntW'(WbufDepth));
 
   // Any-busy: used to serialize reads vs all in-flight writes (AXI memory
   // models may reorder AR vs same- or other-line AW).
-  wire any_write_in_flight = wbuf[0].busy || wbuf[1].busy;
-  wire read_bypass_in_progress = (rs == R_BYPASS_WAIT) || (rs == R_BYPASS_AR) || (rs == R_BYPASS_R);
+  logic any_write_in_flight;
+  logic read_bypass_in_progress;
+  assign any_write_in_flight = wbuf[0].busy || wbuf[1].busy;
+  assign read_bypass_in_progress = (rs == R_BYPASS_WAIT) || (rs == R_BYPASS_AR)
+                                 || (rs == R_BYPASS_R);
 
   // Snoop hit-merge: fires when a W beat is captured into wbuf[w_wptr].
   // The slot's AW addr was registered one cycle earlier, so derive snoop
   // index/tag/word from the slot directly.
-  wire [XLEN-1:0] w_snoop_addr = wbuf[w_wptr].addr;
-  wire [IndexBits-1:0] w_idx_q = addr_index(w_snoop_addr);
-  wire [TagBits-1:0] w_tag_q = addr_tag(w_snoop_addr);
-  wire w_hit_q = line_valid[0][w_idx_q] && (line_tag[0][w_idx_q] == w_tag_q);
-  wire [L2_LINE_LEN-1:0] w_word_now = addr_word(w_snoop_addr);
-  wire w_full_strobe = &axi_s.wstrb;
+  logic [XLEN-1:0] w_snoop_addr;
+  logic [IndexBits-1:0] w_idx_q;
+  logic [TagBits-1:0] w_tag_q;
+  logic w_hit_q;
+  logic [L2_LINE_LEN-1:0] w_word_now;
+  logic w_full_strobe;
+  assign w_snoop_addr = wbuf[w_wptr].addr;
+  assign w_idx_q = w_snoop_addr[IndexMsb:IndexLsb];
+  assign w_tag_q = w_snoop_addr[XLEN-1:TagLsb];
+  assign w_hit_q = line_valid[0][w_idx_q] && (line_tag[0][w_idx_q] == w_tag_q);
+  assign w_word_now = w_snoop_addr[WordOffsetMsb:WordOffsetLsb];
+  assign w_full_strobe = &axi_s.wstrb;
   logic w_hit_update;
 
   generate
     for (genvar gi = 0; gi < LineSize; gi++) begin : gen_data_bank
-      wire bank_store_wen = w_hit_update && w_full_strobe && (w_word_now == L2_LINE_LEN'(gi));
+      logic bank_store_wen;
+      assign bank_store_wen = w_hit_update && w_full_strobe
+                            && (w_word_now == L2_LINE_LEN'(gi));
       rapt_sram_1r1w #(
           .ADDR_WIDTH(L2_LEN),
           .DATA_WIDTH(XLEN)
@@ -386,7 +395,6 @@ module rapt_l2 #(
       r_up_done  <= 1'b0;
       for (int i = 0; i < LineSize; i++) begin
         r_line_buf[i] <= '0;
-        r_have[i]     <= 1'b0;
       end
       cache_install <= 1'b0;
       install_idx   <= '0;
@@ -419,7 +427,7 @@ module rapt_l2 #(
             r_len   <= axi_s.arlen;
             r_size  <= axi_s.arsize;
             r_burst <= axi_s.arburst;
-            r_word  <= addr_word(axi_s.araddr);
+            r_word  <= axi_s.araddr[WordOffsetMsb:WordOffsetLsb];
             r_resp  <= 2'b00;
             if (cacheable(axi_s.araddr)) begin
               // Lookup is combinational on r_addr_next; but since we
@@ -489,7 +497,6 @@ module rapt_l2 #(
             if (any_write_in_flight || axi_s.awvalid) begin
               // hold in R_HIT; re-evaluate next cycle
             end else begin
-              for (int i = 0; i < LineSize; i++) r_have[i] <= 1'b0;
               r_fill_cnt <= '0;
               r_resp     <= 2'b00;
               r_up_done  <= 1'b0;
@@ -519,7 +526,6 @@ module rapt_l2 #(
           // One-shot, gated to r_len==0 (L1D miss = single-beat).
           if (axi_m.rvalid) begin
             r_line_buf[r_fill_cnt] <= axi_m.rdata;
-            r_have[r_fill_cnt]     <= 1'b1;
             if (axi_m.rresp != 2'b00) r_resp <= axi_m.rresp;
             r_fill_cnt <= r_fill_cnt + 1'b1;
 
@@ -634,14 +640,17 @@ module rapt_l2 #(
   // ---- Upstream (slave) handshakes ----
   // AW: accept when the target wbuf slot is empty AND not a same-line
   // race against an in-flight fill (AR/AW reordering hazard).
-  wire l2_fill_in_progress = (rs == R_MISS_AR) || (rs == R_MISS_R);
-  wire l2_aw_same_line = (axi_s.awaddr[XLEN-1:OffsetBits] == r_addr[XLEN-1:OffsetBits]);
+  logic l2_fill_in_progress;
+  logic l2_aw_same_line;
+  assign l2_fill_in_progress = (rs == R_MISS_AR) || (rs == R_MISS_R);
+  assign l2_aw_same_line = (axi_s.awaddr[XLEN-1:OffsetBits] == r_addr[XLEN-1:OffsetBits]);
   assign axi_s.awready = !wbuf[aw_wptr].busy && !bq_full && !read_bypass_in_progress
                        && !(l2_fill_in_progress && l2_aw_same_line);
 
   // W: accept when the W-target slot has an AW captured but no W yet.
   // (For single-beat stores w_wptr always points at the right slot.)
-  wire wbuf_w_pending = wbuf[w_wptr].busy && !wbuf[w_wptr].has_w;
+  logic wbuf_w_pending;
+  assign wbuf_w_pending = wbuf[w_wptr].busy && !wbuf[w_wptr].has_w;
   assign axi_s.wready = wbuf_w_pending && !cache_install;
 
   // B: cacheable main-memory writes are posted; non-cacheable writes wait for

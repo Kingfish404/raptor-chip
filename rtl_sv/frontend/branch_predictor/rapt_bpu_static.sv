@@ -19,8 +19,9 @@ module rapt_bpu_static #(
   /* verilator lint_off UNUSEDSIGNAL */
   /* verilator lint_off UNUSEDPARAM */
   // Silence "unused" for the entire DIRP port group when this flavor is selected.
-  wire _u = |{ren, raddr, r_ghr, r_phr, update_en, update_pc, update_ghr,
-              update_phr, update_taken, update_mispred, init, clock, reset};
+  logic _u;
+  assign _u = |{ren, raddr, r_ghr, r_phr, update_en, update_pc, update_ghr,
+                update_phr, update_taken, update_mispred, init, clock, reset};
   /* verilator lint_on UNUSEDSIGNAL */
   /* verilator lint_on UNUSEDPARAM */
   assign rd_taken = 1'b0;

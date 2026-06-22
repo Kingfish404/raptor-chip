@@ -39,6 +39,7 @@ module rapt_exu_ioq #(
     exu_lsu_if.master    exu_lsu,
     exu_l1d_if.master    exu_l1d,
     exu_ioq_bcast_if.out exu_ioq_bcast,
+    exu_load_fast_if.source load_fast,
 
     // A2: PMU: one-cycle pulse when IOQ becomes full
     /* verilator lint_off UNUSEDSIGNAL */
@@ -374,8 +375,58 @@ module rapt_exu_ioq #(
       && (!ioq_wen[ioq_head] || (ioq_mmu_en[ioq_head] == 0 && exu_lsu.stq_ready)));
   assign exu_ioq_bcast.valid = ioq_valid_found;
 
+  // Fast load-use wakeup is a narrow tag-only path.  It wakes RS operands when
+  // a plain head load has actually returned, one cycle before the normal IOQ
+  // writeback presents the registered data.  The registered slow writeback is
+  // still the only data source; if it ever fails to confirm the tag on the next
+  // cycle, the framework emits a rebusy pulse so fast-woken consumers cannot
+  // issue with stale operands.  This mirrors BOOM/XiangShan's poison/cancel
+  // shape without reintroducing the old cache-data -> global-CDB combo path.
+  logic fast_load_pending;
+  logic [PLEN-1:0] fast_load_prd_q;
+  logic fast_load_fire;
+  logic fast_load_confirm;
+  logic fast_load_rebusy;
+
+  assign fast_load_fire = exu_lsu.rvalid
+      && exu_lsu.rready
+      && (active_idx == ioq_head)
+      && ioq_valid[active_idx]
+      && ioq_ren[active_idx]
+      && !ioq_atom[active_idx]
+      && !exu_lsu.trap
+      && !exu_lsu.difftest_skip
+      && (ioq_rd[active_idx] != '0)
+      && (ioq_prd[active_idx] != '0);
+  assign fast_load_confirm = fast_load_pending
+      && exu_ioq_bcast.valid
+      && (exu_ioq_bcast.prd == fast_load_prd_q);
+  assign fast_load_rebusy = fast_load_pending && !fast_load_confirm;
+
+  assign load_fast.valid = fast_load_fire || fast_load_rebusy;
+  assign load_fast.rebusy = fast_load_rebusy;
+  assign load_fast.prd = fast_load_rebusy ? fast_load_prd_q : ioq_prd[active_idx];
+
   // === Sequential: enqueue / dequeue / forwarding / OoO LSU FSM ===
   logic ioq_full_r;  // Previous cycle full state (for pmu_ioq_full rising-edge detection)
+  logic [IOQ_SIZE-1:0] ioq_pr1_ioq_match;
+  logic [IOQ_SIZE-1:0] ioq_pr2_ioq_match;
+  logic [IOQ_SIZE-1:0] ioq_pr1_rou_match;
+  logic [IOQ_SIZE-1:0] ioq_pr2_rou_match;
+  logic [IOQ_SIZE-1:0] ioq_pr1_rou_b_match;
+  logic [IOQ_SIZE-1:0] ioq_pr2_rou_b_match;
+
+  function automatic logic wb_ioq_match(input logic [PLEN-1:0] pr);
+    return (pr != '0) && exu_ioq_bcast.valid && (exu_ioq_bcast.prd == pr);
+  endfunction
+
+  function automatic logic wb_rou_match(input logic [PLEN-1:0] pr);
+    return (pr != '0) && exu_rou.valid && (exu_rou.prd == pr);
+  endfunction
+
+  function automatic logic wb_rou_b_match(input logic [PLEN-1:0] pr);
+    return (pr != '0) && exu_rou_b.valid && (exu_rou_b.prd == pr);
+  endfunction
 
   // --------------------------------------------------------------------------
   // Same-cycle enqueue/wakeup snoop.
@@ -384,10 +435,7 @@ module rapt_exu_ioq #(
   // cycle, so wake it from same-cycle broadcasts before storing the tag/value.
   // Priority mirrors the forwarding loop: exu_ioq_bcast > exu_rou > exu_rou_b.
   function automatic logic [PLEN-1:0] wake_pr(input logic [PLEN-1:0] pr);
-    if (pr != '0 &&
-        ((exu_ioq_bcast.valid && exu_ioq_bcast.prd == pr) ||
-         (exu_rou.valid       && exu_rou.prd       == pr) ||
-         (exu_rou_b.valid     && exu_rou_b.prd     == pr))) begin
+    if (wb_ioq_match(pr) || wb_rou_match(pr) || wb_rou_b_match(pr)) begin
       return '0;
     end else begin
       return pr;
@@ -396,31 +444,44 @@ module rapt_exu_ioq #(
 
   function automatic logic [XLEN-1:0] wake_val(input logic [PLEN-1:0] pr,
                                                input logic [XLEN-1:0] dflt);
-    if (pr != '0 && exu_ioq_bcast.valid && exu_ioq_bcast.prd == pr) begin
+    if (wb_ioq_match(pr)) begin
       return exu_ioq_bcast.result;
-    end else if (pr != '0 && exu_rou.valid && exu_rou.prd == pr) begin
+    end else if (wb_rou_match(pr)) begin
       return exu_rou.result;
-    end else if (pr != '0 && exu_rou_b.valid && exu_rou_b.prd == pr) begin
+    end else if (wb_rou_b_match(pr)) begin
       return exu_rou_b.result;
     end else begin
       return dflt;
     end
   endfunction
 
+  always_comb begin
+    for (int i = 0; i < IOQ_SIZE; i++) begin
+      ioq_pr1_ioq_match[i]   = wb_ioq_match(ioq_pr1[i]);
+      ioq_pr2_ioq_match[i]   = wb_ioq_match(ioq_pr2[i]);
+      ioq_pr1_rou_match[i]   = wb_rou_match(ioq_pr1[i]);
+      ioq_pr2_rou_match[i]   = wb_rou_match(ioq_pr2[i]);
+      ioq_pr1_rou_b_match[i] = wb_rou_b_match(ioq_pr1[i]);
+      ioq_pr2_rou_b_match[i] = wb_rou_b_match(ioq_pr2[i]);
+    end
+  end
+
   always_ff @(posedge clock) begin
     if (reset || cmu_bcast.flush_pipe) begin
-      ioq_ren        <= '0;
-      ioq_wen        <= '0;
-      ioq_mmu_en     <= '0;
-      ioq_valid      <= '0;
-      ioq_head       <= '0;
-      ioq_tail_a     <= '0;
-      ioq_complete   <= '0;
-      ioq_load_trap  <= '0;
-      ioq_load_skip  <= '0;
-      oo_pending     <= 1'b0;
-      oo_pending_idx <= '0;
-      ioq_full_r     <= 1'b0;  // A2: Initialize full state tracker
+      ioq_ren           <= '0;
+      ioq_wen           <= '0;
+      ioq_mmu_en        <= '0;
+      ioq_valid         <= '0;
+      ioq_head          <= '0;
+      ioq_tail_a        <= '0;
+      ioq_complete      <= '0;
+      ioq_load_trap     <= '0;
+      ioq_load_skip     <= '0;
+      oo_pending        <= 1'b0;
+      oo_pending_idx    <= '0;
+      ioq_full_r        <= 1'b0;  // A2: Initialize full state tracker
+      fast_load_pending <= 1'b0;
+      fast_load_prd_q   <= '0;
       // Reset payload arrays as well as valid bits so unused entries cannot
       // feed X values into store-address and ordering logic in FPGA synthesis.
       for (int i = 0; i < IOQ_SIZE; i++) begin
@@ -435,6 +496,13 @@ module rapt_exu_ioq #(
     end else begin
       // A2: Latch current full status (rising-edge detection for pmu_ioq_full)
       ioq_full_r <= (&ioq_valid);  // Full when all entries valid
+      if (fast_load_confirm || fast_load_rebusy) begin
+        fast_load_pending <= 1'b0;
+      end
+      if (fast_load_fire) begin
+        fast_load_pending <= 1'b1;
+        fast_load_prd_q   <= ioq_prd[active_idx];
+      end
       // ---- Enqueue slot A ----
       if (disp.accept_a) begin
         ioq_valid[ioq_tail_a]     <= 1'b1;
@@ -559,25 +627,25 @@ module rapt_exu_ioq #(
       for (bit [XLEN-1:0] i = 0; i < IOQ_SIZE; i++) begin
         if (ioq_valid[i]) begin
           if (|ioq_pr1[i]) begin
-            if (exu_ioq_bcast.valid && exu_ioq_bcast.prd == ioq_pr1[i]) begin
+            if (ioq_pr1_ioq_match[i]) begin
               ioq_vj[i]  <= exu_ioq_bcast.result;
               ioq_pr1[i] <= '0;
-            end else if (exu_rou.valid && exu_rou.prd == ioq_pr1[i]) begin
+            end else if (ioq_pr1_rou_match[i]) begin
               ioq_vj[i]  <= exu_rou.result;
               ioq_pr1[i] <= '0;
-            end else if (exu_rou_b.valid && exu_rou_b.prd == ioq_pr1[i]) begin
+            end else if (ioq_pr1_rou_b_match[i]) begin
               ioq_vj[i]  <= exu_rou_b.result;
               ioq_pr1[i] <= '0;
             end
           end
           if (|ioq_pr2[i]) begin
-            if (exu_ioq_bcast.valid && exu_ioq_bcast.prd == ioq_pr2[i]) begin
+            if (ioq_pr2_ioq_match[i]) begin
               ioq_vk[i]  <= exu_ioq_bcast.result;
               ioq_pr2[i] <= '0;
-            end else if (exu_rou.valid && exu_rou.prd == ioq_pr2[i]) begin
+            end else if (ioq_pr2_rou_match[i]) begin
               ioq_vk[i]  <= exu_rou.result;
               ioq_pr2[i] <= '0;
-            end else if (exu_rou_b.valid && exu_rou_b.prd == ioq_pr2[i]) begin
+            end else if (ioq_pr2_rou_b_match[i]) begin
               ioq_vk[i]  <= exu_rou_b.result;
               ioq_pr2[i] <= '0;
             end

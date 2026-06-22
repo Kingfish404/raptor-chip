@@ -90,34 +90,57 @@ module rapt_rvfi #(
   // ----------------------------------------------------------------
   // Decode register addresses from instruction word
   // ----------------------------------------------------------------
-  wire [4:0] rs1_a = rou_cmu.inst_a[19:15];
-  wire [4:0] rs2_a = rou_cmu.inst_a[24:20];
-  wire [4:0] rs1_b = rou_cmu.inst_b[19:15];
-  wire [4:0] rs2_b = rou_cmu.inst_b[24:20];
+  logic [4:0] rs1_a;
+  logic [4:0] rs2_a;
+  logic [4:0] rs1_b;
+  logic [4:0] rs2_b;
+  assign rs1_a = rou_cmu.inst_a[19:15];
+  assign rs2_a = rou_cmu.inst_a[24:20];
+  assign rs1_b = rou_cmu.inst_b[19:15];
+  assign rs2_b = rou_cmu.inst_b[24:20];
 
   // ----------------------------------------------------------------
   // Memory type detection from instruction opcode
   // ----------------------------------------------------------------
-  wire is_load_a  = (rou_cmu.inst_a[6:0] == `RAPT_OP_IL_TYPE);
-  wire is_store_a = (rou_cmu.inst_a[6:0] == `RAPT_OP_S_TYPE_);
-  wire is_amo_a   = (rou_cmu.inst_a[6:0] == `RAPT_OP_AMO___);
-  wire is_lr_a    = is_amo_a && (rou_cmu.inst_a[31:27] == `RAPT_F5_AMO_LR);
-  wire is_sc_a    = is_amo_a && (rou_cmu.inst_a[31:27] == `RAPT_F5_AMO_SC);
-  wire is_amo_rw_a = is_amo_a && !is_lr_a && !is_sc_a;
-  wire has_mem_read_a  = is_load_a || is_lr_a || is_amo_rw_a;
-  wire has_mem_write_a = is_store_a || (is_sc_a && rvfi_rd_wdata_a == '0) || is_amo_rw_a;
+  logic is_load_a;
+  logic is_store_a;
+  logic is_amo_a;
+  logic is_lr_a;
+  logic is_sc_a;
+  logic is_amo_rw_a;
+  logic has_mem_read_a;
+  logic has_mem_write_a;
+  logic is_load_b;
+  logic is_store_b;
+  logic is_amo_b;
+  logic is_lr_b;
+  logic is_sc_b;
+  logic is_amo_rw_b;
+  logic has_mem_read_b;
+  logic has_mem_write_b;
+  logic is_mem_a;
+  logic is_mem_b;
 
-  wire is_load_b  = (rou_cmu.inst_b[6:0] == `RAPT_OP_IL_TYPE);
-  wire is_store_b = (rou_cmu.inst_b[6:0] == `RAPT_OP_S_TYPE_);
-  wire is_amo_b   = (rou_cmu.inst_b[6:0] == `RAPT_OP_AMO___);
-  wire is_lr_b    = is_amo_b && (rou_cmu.inst_b[31:27] == `RAPT_F5_AMO_LR);
-  wire is_sc_b    = is_amo_b && (rou_cmu.inst_b[31:27] == `RAPT_F5_AMO_SC);
-  wire is_amo_rw_b = is_amo_b && !is_lr_b && !is_sc_b;
-  wire has_mem_read_b  = is_load_b || is_lr_b || is_amo_rw_b;
-  wire has_mem_write_b = is_store_b || (is_sc_b && rvfi_rd_wdata_b == '0) || is_amo_rw_b;
+  assign is_load_a       = (rou_cmu.inst_a[6:0] == `RAPT_OP_IL_TYPE);
+  assign is_store_a      = (rou_cmu.inst_a[6:0] == `RAPT_OP_S_TYPE_);
+  assign is_amo_a        = (rou_cmu.inst_a[6:0] == `RAPT_OP_AMO___);
+  assign is_lr_a         = is_amo_a && (rou_cmu.inst_a[31:27] == `RAPT_F5_AMO_LR);
+  assign is_sc_a         = is_amo_a && (rou_cmu.inst_a[31:27] == `RAPT_F5_AMO_SC);
+  assign is_amo_rw_a     = is_amo_a && !is_lr_a && !is_sc_a;
+  assign has_mem_read_a  = is_load_a || is_lr_a || is_amo_rw_a;
+  assign has_mem_write_a = is_store_a || (is_sc_a && rvfi_rd_wdata_a == '0) || is_amo_rw_a;
 
-  wire is_mem_a = is_load_a || is_store_a || is_amo_a;
-  wire is_mem_b = is_load_b || is_store_b || is_amo_b;
+  assign is_load_b       = (rou_cmu.inst_b[6:0] == `RAPT_OP_IL_TYPE);
+  assign is_store_b      = (rou_cmu.inst_b[6:0] == `RAPT_OP_S_TYPE_);
+  assign is_amo_b        = (rou_cmu.inst_b[6:0] == `RAPT_OP_AMO___);
+  assign is_lr_b         = is_amo_b && (rou_cmu.inst_b[31:27] == `RAPT_F5_AMO_LR);
+  assign is_sc_b         = is_amo_b && (rou_cmu.inst_b[31:27] == `RAPT_F5_AMO_SC);
+  assign is_amo_rw_b     = is_amo_b && !is_lr_b && !is_sc_b;
+  assign has_mem_read_b  = is_load_b || is_lr_b || is_amo_rw_b;
+  assign has_mem_write_b = is_store_b || (is_sc_b && rvfi_rd_wdata_b == '0) || is_amo_rw_b;
+
+  assign is_mem_a = is_load_a || is_store_a || is_amo_a;
+  assign is_mem_b = is_load_b || is_store_b || is_amo_b;
 
   // ----------------------------------------------------------------
   // Byte mask from instruction funct3 size encoding (inst[13:12])
@@ -134,38 +157,51 @@ module rapt_rvfi #(
     return m;
   endfunction
 
-  wire [XLEN/8-1:0] mask_a = mem_byte_mask(rou_cmu.inst_a[13:12]);
-  wire [XLEN/8-1:0] mask_b = mem_byte_mask(rou_cmu.inst_b[13:12]);
-  wire [XLEN/8-1:0] rmask_a = has_mem_read_a ? mask_a : '0;
-  wire [XLEN/8-1:0] wmask_a = has_mem_write_a ? mask_a : '0;
-  wire [XLEN/8-1:0] rmask_b = has_mem_read_b ? mask_b : '0;
-  wire [XLEN/8-1:0] wmask_b = has_mem_write_b ? mask_b : '0;
+  logic [XLEN/8-1:0] mask_a;
+  logic [XLEN/8-1:0] mask_b;
+  logic [XLEN/8-1:0] rmask_a;
+  logic [XLEN/8-1:0] wmask_a;
+  logic [XLEN/8-1:0] rmask_b;
+  logic [XLEN/8-1:0] wmask_b;
+  assign mask_a  = mem_byte_mask(rou_cmu.inst_a[13:12]);
+  assign mask_b  = mem_byte_mask(rou_cmu.inst_b[13:12]);
+  assign rmask_a = has_mem_read_a ? mask_a : '0;
+  assign wmask_a = has_mem_write_a ? mask_a : '0;
+  assign rmask_b = has_mem_read_b ? mask_b : '0;
+  assign wmask_b = has_mem_write_b ? mask_b : '0;
 
   // ----------------------------------------------------------------
   // Source register pre-state values from committed register file
   // ----------------------------------------------------------------
   // Slot A: direct read from committed state (rf)
-  wire [XLEN-1:0] rs1_rdata_a = (rs1_a != 0) ? rf[rs1_a] : '0;
-  wire [XLEN-1:0] rs2_rdata_a = (rs2_a != 0) ? rf[rs2_a] : '0;
+    logic [XLEN-1:0] rs1_rdata_a;
+    logic [XLEN-1:0] rs2_rdata_a;
+    assign rs1_rdata_a = (rs1_a != 0) ? rf[rs1_a] : '0;
+    assign rs2_rdata_a = (rs2_a != 0) ? rf[rs2_a] : '0;
 
   // Slot B: forward from slot A if slot A writes the same register
-  wire [XLEN-1:0] rs1_rdata_b = (rs1_b == 5'd0) ? '0
+    logic [XLEN-1:0] rs1_rdata_b;
+    logic [XLEN-1:0] rs2_rdata_b;
+    assign rs1_rdata_b = (rs1_b == 5'd0) ? '0
       : (rou_cmu.rd_a != 5'd0 && rou_cmu.rd_a == rs1_b) ? rvfi_rd_wdata_a
       : rf[rs1_b];
-  wire [XLEN-1:0] rs2_rdata_b = (rs2_b == 5'd0) ? '0
+    assign rs2_rdata_b = (rs2_b == 5'd0) ? '0
       : (rou_cmu.rd_a != 5'd0 && rou_cmu.rd_a == rs2_b) ? rvfi_rd_wdata_a
       : rf[rs2_b];
 
   // ----------------------------------------------------------------
   // Interrupt detection
   // ----------------------------------------------------------------
-  wire intr_a = prev_valid && (rou_cmu.pc_a != prev_npc);
-  wire intr_b = rou_cmu.valid_b && (rou_cmu.pc_b != rou_cmu.rvfi_npc_a);
+  logic intr_a;
+  logic intr_b;
+  assign intr_a = prev_valid && (rou_cmu.pc_a != prev_npc);
+  assign intr_b = rou_cmu.valid_b && (rou_cmu.pc_b != rou_cmu.rvfi_npc_a);
 
   // ----------------------------------------------------------------
   // Privilege mode & IXL encodings
   // ----------------------------------------------------------------
-  wire [1:0] mode = csr_bcast.priv;
+  logic [1:0] mode;
+  assign mode = csr_bcast.priv;
   localparam logic [1:0] IXL = (XLEN == 64) ? 2'd2 : 2'd1;
 
   // ================================================================

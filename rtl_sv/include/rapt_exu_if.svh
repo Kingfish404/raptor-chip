@@ -72,6 +72,17 @@ interface exu_lsu_if #(
     output rdata, trap, cause, difftest_skip, rready, stq_ready);
 endinterface
 
+interface exu_load_fast_if #(
+    parameter unsigned PLEN = `RAPT_PHY_LEN
+);
+  logic valid;
+  logic rebusy;
+  logic [PLEN-1:0] prd;
+
+  modport source(output valid, rebusy, prd);
+  modport sink(input valid, rebusy, prd);
+endinterface
+
 
 interface exu_csr_if #(
     parameter bit [7:0] R_W  = 12,

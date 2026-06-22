@@ -19,7 +19,8 @@ module rapt_exu_alu #(
 
   // `word_uw`: for SH1/2/3ADD, when word=1 it means .UW semantics (zext.w(rs1));
   // for ADD.UW and SLLI.UW we use dedicated opcodes below.
-  wire is_sh_uw = word && (XLEN > 32);
+  logic is_sh_uw;
+  assign is_sh_uw = word && (XLEN > 32);
 
   // CLZ helper: count leading zeros
   function automatic logic [ShamtW:0] fn_clz(input logic [XLEN-1:0] val, input logic w);
@@ -192,11 +193,12 @@ module rapt_exu_alu #(
   // 64-bit result and must NOT be truncated/sign-extended here.
   generate
     if (XLEN > 32) begin : gen_word_ext
-      wire is_uw_op = (op == `RAPT_ALU_ADD_UW)
-                   || (op == `RAPT_ALU_SLLI_UW)
-                   || (op == `RAPT_ALU_SH1ADD)
-                   || (op == `RAPT_ALU_SH2ADD)
-                   || (op == `RAPT_ALU_SH3ADD);
+      logic is_uw_op;
+      assign is_uw_op = (op == `RAPT_ALU_ADD_UW)
+             || (op == `RAPT_ALU_SLLI_UW)
+             || (op == `RAPT_ALU_SH1ADD)
+             || (op == `RAPT_ALU_SH2ADD)
+             || (op == `RAPT_ALU_SH3ADD);
       assign out_r = (word && !is_uw_op) ? {{XLEN - 32{alu_r[31]}}, alu_r[31:0]} : alu_r;
     end else begin : gen_no_word
       assign out_r = alu_r;

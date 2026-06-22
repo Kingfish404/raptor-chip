@@ -251,7 +251,8 @@ module rapt_l1i #(
   logic [31:0] l1i_fill_data;
   assign l1i_fill_data = fetch_addr[2] ? l1i_bus.rdata[63:32] : l1i_bus.rdata[31:0];
 `else
-  wire [31:0] l1i_fill_data = l1i_bus.rdata[31:0];
+  logic [31:0] l1i_fill_data;
+  assign l1i_fill_data = l1i_bus.rdata[31:0];
 `endif
 
   // --- ITLB ---

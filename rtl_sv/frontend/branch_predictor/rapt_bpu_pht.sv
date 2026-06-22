@@ -23,15 +23,18 @@ module rapt_bpu_pht #(
   /* verilator lint_off UNUSEDSIGNAL */
   /* verilator lint_off UNUSEDPARAM */
   // GHR/PHR and update_mispred are intentionally unused.
-  wire _u = |{r_ghr, r_phr, update_phr, update_mispred};
+  logic _u;
+  assign _u = |{r_ghr, r_phr, update_phr, update_mispred};
   /* verilator lint_on UNUSEDSIGNAL */
   /* verilator lint_on UNUSEDPARAM */
 
   logic [1:0]         mem      [DEPTH];
   logic [IDX_LEN-1:0] r_idx;
 
-  wire [IDX_LEN-1:0] rd_idx_w = raddr[IDX_LEN-1+1:1];
-  wire [IDX_LEN-1:0] up_idx_w = update_pc[IDX_LEN-1+1:1];
+  logic [IDX_LEN-1:0] rd_idx_w;
+  logic [IDX_LEN-1:0] up_idx_w;
+  assign rd_idx_w = raddr[IDX_LEN-1+1:1];
+  assign up_idx_w = update_pc[IDX_LEN-1+1:1];
 
   assign rd_taken = mem[r_idx][1];
 

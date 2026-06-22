@@ -18,7 +18,8 @@ module rapt_bpu_gshare #(
 );
   /* verilator lint_off UNUSEDSIGNAL */
   /* verilator lint_off UNUSEDPARAM */
-  wire _u = |{update_mispred, r_phr, update_phr};
+  logic _u;
+  assign _u = |{update_mispred, r_phr, update_phr};
   /* verilator lint_on UNUSEDSIGNAL */
   /* verilator lint_on UNUSEDPARAM */
 
@@ -35,8 +36,10 @@ module rapt_bpu_gshare #(
     return pc_part ^ gh_part;
   endfunction
 
-  wire [IDX_LEN-1:0] rd_idx_w = mix_idx(raddr, r_ghr);
-  wire [IDX_LEN-1:0] up_idx_w = mix_idx(update_pc, update_ghr);
+  logic [IDX_LEN-1:0] rd_idx_w;
+  logic [IDX_LEN-1:0] up_idx_w;
+  assign rd_idx_w = mix_idx(raddr, r_ghr);
+  assign up_idx_w = mix_idx(update_pc, update_ghr);
 
   assign rd_taken = mem[r_idx][1];
 

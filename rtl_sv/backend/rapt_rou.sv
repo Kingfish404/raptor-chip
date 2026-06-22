@@ -102,8 +102,10 @@ module rapt_rou #(
   // 4. Commit Logic: dual commit (up to 2 per cycle)
   // ================================================================
   // Aliases for ROB head entries
-  wire [$clog2(ROB_SIZE)-1:0] h0 = rob_head;
-  wire [$clog2(ROB_SIZE)-1:0] h1 = rob_head + 1;
+  logic [$clog2(ROB_SIZE)-1:0] h0;
+  logic [$clog2(ROB_SIZE)-1:0] h1;
+  assign h0 = rob_head;
+  assign h1 = rob_head + 1;
 
   // ================================================================
   // 1. Dispatch Queue (UOQ)

@@ -93,13 +93,13 @@ module axi2rnp #(
   // assign axi_bvalid = rnp_bvalid;
   assign rnp_bready = axi_bready;
 
-  reg   [1:0] rwstate_last;  // 00: idle, 01: read, 10: write, 11: undefined
+  logic [1:0] rwstate_last;  // 00: idle, 01: read, 10: write, 11: undefined
   logic [1:0] rwstate;
 
   assign rnp_rwstate = rwstate;
 
   logic state_rst;
-  reg [19:0] state_rst_cnt;
+  logic [19:0] state_rst_cnt;
   logic state_rst_cnt_rst;
 
   always_ff @(posedge clk) begin

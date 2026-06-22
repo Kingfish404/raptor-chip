@@ -473,14 +473,17 @@ linux-ticket-spinlock-repro-npc32: build-npc32 repro-tests-build ## Run Linux ti
 coremark-npc32: $(AM_KERNELS) config-npc32 ## Run CoreMark on NPC
 	@mkdir -p $(NPC_LOG_DIR)
 	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/coremark_eembc ARCH=$(NPC_ARCH) run ARGS="$(ARGS)" $(call tee_npc,coremark-npc32)
+	$(call coremark_mhz_report,$(NPC_LOG_DIR)/coremark-npc32.log)
 
 coremark-npc32-difftest: $(AM_KERNELS) config-npc32-difftest config-nemu32-ref ## Run CoreMark on NPC with difftest
 	@mkdir -p $(NPC_LOG_DIR)
 	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/coremark_eembc ARCH=$(NPC_ARCH) run ARGS="$(ARGS)" mainargs=test $(call tee_npc,coremark-npc32-difftest)
+	$(call coremark_mhz_report,$(NPC_LOG_DIR)/coremark-npc32-difftest.log)
 
 coremark-ysyxsoc: $(AM_KERNELS) config-npc32-ysyxsoc config-nemu32-ref ## Run CoreMark on ysyxSoC
 	@mkdir -p $(NPC_LOG_DIR)
 	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/coremark_eembc ARCH=$(YSYXSOC_ARCH) run ARGS="$(ARGS)" mainargs=test $(call tee_npc,coremark-ysyxsoc)
+	$(call coremark_mhz_report,$(NPC_LOG_DIR)/coremark-ysyxsoc.log)
 
 microbench-npc32: $(AM_KERNELS) config-npc32 ## Run MicroBench on NPC
 	@mkdir -p $(NPC_LOG_DIR)
@@ -495,11 +498,13 @@ coremark-npc64: VFLAGS := -DRAPT_RV64
 coremark-npc64: $(AM_KERNELS) config-npc32 ## Run CoreMark on NPC (riscv64)
 	@mkdir -p $(NPC_LOG_DIR)
 	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/coremark_eembc ARCH=riscv64-npc run ARGS="$(ARGS)" VFLAGS="$(VFLAGS)" $(call tee_npc,coremark-npc64)
+	$(call coremark_mhz_report,$(NPC_LOG_DIR)/coremark-npc64.log)
 
 coremark-npc64-difftest: VFLAGS := -DRAPT_RV64
 coremark-npc64-difftest: $(AM_KERNELS) config-npc32-difftest config-nemu64-ref ## Run CoreMark on NPC (riscv64) with difftest
 	@mkdir -p $(NPC_LOG_DIR)
 	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/coremark_eembc ARCH=riscv64-npc run ARGS="$(ARGS)" VFLAGS="$(VFLAGS)" $(call tee_npc,coremark-npc64-difftest)
+	$(call coremark_mhz_report,$(NPC_LOG_DIR)/coremark-npc64-difftest.log)
 
 microbench-npc64: VFLAGS := -DRAPT_RV64
 microbench-npc64: $(AM_KERNELS) config-npc32 ## Run MicroBench on NPC (riscv64)
@@ -518,6 +523,40 @@ microbench-npc32-difftest: $(AM_KERNELS) config-npc32-difftest config-nemu32-ref
 microbench-ysyxsoc: $(AM_KERNELS) config-npc32-ysyxsoc config-nemu32-ref ## Run MicroBench on ysyxSoC
 	@mkdir -p $(NPC_LOG_DIR)
 	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/microbench ARCH=$(YSYXSOC_ARCH) run ARGS="$(ARGS)" mainargs=test $(call tee_npc,microbench-ysyxsoc)
+
+# --- CoreMark "optimized" runs with CoreMark/MHz reporting ----------------
+# COREMARK_OPTIM_CFLAGS holds aggressive GCC flags that maximize CoreMark/MHz on
+# the Raptor core. They are injected into the CoreMark build (consumed by
+# abstract-machine/app/am-kernels/benchmarks/coremark_eembc/Makefile) so the
+# plain `coremark-*` targets keep the AM baseline flags. The CoreMark build is
+# cleaned first because the AM build system does not track CFLAGS changes.
+# CoreMark/MHz is frequency-independent: iterations * 1e6 / active_cycles
+# (mirrors third_party/cvw/benchmarks/coremark's XCFLAGS + score extraction).
+COREMARK_OPTIM_CFLAGS := \
+	-O3 -funroll-all-loops -finline-functions \
+	-falign-functions=16 -falign-jumps=4 -mbranch-cost=1 \
+	-DSKIP_DEFAULT_MEMSET -mtune=sifive-3-series \
+	--param=uninlined-function-insns=8 --param=loop-max-datarefs-for-datadeps=0 \
+	-fipa-pta -fno-tree-vrp -fwrapv
+
+# Parse a tee'd CoreMark + nsim run log and print the CoreMark/MHz score.
+# $(1) = path to the log file produced by tee_npc.
+define coremark_mhz_report
+@awk '/^[ \t]*Iterations[ \t]*:/{for(i=1;i<=NF;i++)if($$i~/^[0-9]+$$/)it=$$i} /#inst:/{if(match($$0,/cycle:[ \t]*[0-9]+/)){c=substr($$0,RSTART,RLENGTH);gsub(/[^0-9]/,"",c);cy=c}} END{if(it+0>0&&cy+0>0){printf "\n==================== CoreMark/MHz ====================\n";printf "Iterations    : %d\n",it;printf "Active cycles : %d\n",cy;printf "CoreMark/MHz  : %.4f  (= %d * 1e6 / %d)\n",it*1000000.0/cy,it,cy;printf "======================================================\n"}else{printf "[CoreMark/MHz] WARN: could not parse iterations(%s) / cycles(%s) from %s\n",it,cy,"$(1)"}}' "$(1)"
+endef
+
+coremark-npc32-optim: $(AM_KERNELS) config-npc32 ## Run  CoreMark on NPC with aggressive optim flags + CoreMark/MHz report
+	@mkdir -p $(NPC_LOG_DIR)
+	$(MAKE) -C $(AM_KERNELS)/benchmarks/coremark_eembc ARCH=$(NPC_ARCH) clean
+	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/coremark_eembc ARCH=$(NPC_ARCH) run ARGS="$(ARGS)" COREMARK_OPTIM_CFLAGS="$(COREMARK_OPTIM_CFLAGS)" $(call tee_npc,coremark-npc32-optim)
+	$(call coremark_mhz_report,$(NPC_LOG_DIR)/coremark-npc32-optim.log)
+
+coremark-npc64-optim: VFLAGS := -DRAPT_RV64
+coremark-npc64-optim: $(AM_KERNELS) config-npc32 ## Run CoreMark on NPC (riscv64) with aggressive optim flags + CoreMark/MHz report
+	@mkdir -p $(NPC_LOG_DIR)
+	$(MAKE) -C $(AM_KERNELS)/benchmarks/coremark_eembc ARCH=riscv64-npc clean
+	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/coremark_eembc ARCH=riscv64-npc run ARGS="$(ARGS)" VFLAGS="$(VFLAGS)" COREMARK_OPTIM_CFLAGS="$(COREMARK_OPTIM_CFLAGS)" $(call tee_npc,coremark-npc64-optim)
+	$(call coremark_mhz_report,$(NPC_LOG_DIR)/coremark-npc64-optim.log)
 
 # --- RISC-V Architecture Tests ---
 RISCV_ARCH_TEST ?= $(RAPTOR_HOME)/third_party/kingfish404/riscv-arch-test-am
@@ -785,6 +824,23 @@ app-hello-npc32: build-npc32 ## [app] Hello world test via pk (rv32)
 app-coremark-npc32: build-npc32 ## [app] CoreMark via pk (rv32)
 	@mkdir -p $(APP_LOG_DIR)
 	@set -o pipefail; $(MAKE) --no-print-directory -C $(APP_HOME) coremark-npc ARGS="$(ARGS)" $(call tee_app,coremark-npc32)
+	$(call coremark_mhz_report,$(APP_LOG_DIR)/coremark-npc32.log)
+
+# CoreMark via pk with aggressive optim flags + CoreMark/MHz report. The app
+# CoreMark build (app/benchmarks/coremark) does not track CFLAGS changes, so its
+# build dir is cleaned first to force a rebuild with COREMARK_OPTIM_CFLAGS.
+app-coremark-npc32-optim: build-npc32 ## [app] CoreMark via pk (rv32) with aggressive optim flags + CoreMark/MHz report
+	@mkdir -p $(APP_LOG_DIR)
+	@$(MAKE) --no-print-directory -C $(APP_HOME)/benchmarks/coremark clean
+	@set -o pipefail; $(MAKE) --no-print-directory -C $(APP_HOME) coremark-npc ARGS="$(ARGS)" COREMARK_OPTIM_CFLAGS="$(COREMARK_OPTIM_CFLAGS)" $(call tee_app,coremark-npc32-optim)
+	$(call coremark_mhz_report,$(APP_LOG_DIR)/coremark-npc32-optim.log)
+
+app-coremark-npc64-optim: VFLAGS := -DRAPT_RV64
+app-coremark-npc64-optim: build-npc64 ## [app] CoreMark via pk (rv64) with aggressive optim flags + CoreMark/MHz report
+	@mkdir -p $(APP_LOG_DIR)
+	@$(MAKE) --no-print-directory -C $(APP_HOME)/benchmarks/coremark ISA64=1 clean
+	@set -o pipefail; $(MAKE) --no-print-directory -C $(APP_HOME) ISA64=1 coremark-npc ARGS="$(ARGS)" VFLAGS="$(VFLAGS)" COREMARK_OPTIM_CFLAGS="$(COREMARK_OPTIM_CFLAGS)" $(call tee_app,coremark-npc64-optim)
+	$(call coremark_mhz_report,$(APP_LOG_DIR)/coremark-npc64-optim.log)
 
 app-coremark-nemu32: config-nemu32 ## [app] CoreMark via pk on NEMU (rv32)
 	@mkdir -p $(APP_LOG_DIR)
@@ -870,7 +926,7 @@ app-clean: ## [app] Clean app build artifacts
 	config-nemu64 config-nemu64-ref config-nemu64-linux-device build-nemu64 run-nemu64 run-nemu64-linux-device \
 	config-npc32 config-npc32-difftest config-npc32-linux config-npc32-ysyxsoc menuconfig-npc32 build-npc32 run-npc32 sim-npc32 \
 	build-npc64 run-npc64 lint-npc64 \
-	coremark-npc32 coremark-npc64 coremark-npc32-difftest coremark-ysyxsoc microbench-npc32 microbench-npc64 microbench-npc32-difftest microbench-ysyxsoc \
+	coremark-npc32 coremark-npc64 coremark-npc32-optim coremark-npc64-optim coremark-npc32-difftest coremark-ysyxsoc microbench-npc32 microbench-npc64 microbench-npc32-difftest microbench-ysyxsoc \
 	coremark-nemu32 microbench-nemu32 coremark-nemu64 microbench-nemu64 \
 	archtest-npc32 archtest-npc32e \
 	nanos-nemu32 nanos-npc32 \
@@ -879,7 +935,7 @@ app-clean: ## [app] Clean app build artifacts
 	fpga-syn fpga-pnr pack lint ide-setup compile-commands sta clean-npc clean \
 	verify-fuzz verify-fuzz-inf verify-fuzz-replay verify-sigtest verify-riscof verify-coverage verify-all verify-clean \
 	tinyos-sync os-cli-qemu egos-cli-qemu xv6-cli-qemu os-cli-nsim os-cli-nemu egos-cli-nsim egos-cli-nemu xv6-cli-nsim xv6-cli-nemu \
-	app-hello-npc32 app-coremark-npc32 app-coremark-nemu32 app-embench-npc32 app-embench-nemu32 app-llm-npc32 app-llm-nemu32 \
+	app-hello-npc32 app-coremark-npc32 app-coremark-npc32-optim app-coremark-npc64-optim app-coremark-nemu32 app-embench-npc32 app-embench-nemu32 app-llm-npc32 app-llm-nemu32 \
 	app-tests-npc32 app-tests-npc32-difftest app-demos-npc32 \
 	app-tests-nemu32 app-demos-nemu32 \
 	app-run app-run-nemu app-pk-build app-clean \

@@ -48,6 +48,7 @@ module rapt_exu #(
   // === Sub-module dispatch handshakes ===
   exu_disp_rs_if #(.RS_SIZE(RS_SIZE)) disp_rs ();
   exu_disp_ioq_if #(.IOQ_SIZE(IOQ_SIZE)) disp_ioq ();
+  exu_load_fast_if #(.PLEN(PLEN)) load_fast ();
 
   // === Arbitration ===
   // A uop goes to IOQ if it touches memory (load/store/atomic), otherwise
@@ -138,6 +139,7 @@ module rapt_exu #(
       .rou_exu      (rou_exu),
       .disp         (disp_rs),
       .exu_ioq_bcast(exu_ioq_bcast),
+      .load_fast    (load_fast),
       .exu_csr      (exu_csr),
       .exu_rou      (exu_rou),
       .exu_rou_b    (exu_rou_b),
@@ -164,6 +166,7 @@ module rapt_exu #(
       .exu_lsu      (exu_lsu),
       .exu_l1d      (exu_l1d),
       .exu_ioq_bcast(exu_ioq_bcast),
+      .load_fast    (load_fast),
       .pmu_ioq_full (pmu_ioq_full_unused)
   );
 

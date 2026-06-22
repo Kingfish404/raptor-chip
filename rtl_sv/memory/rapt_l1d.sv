@@ -246,11 +246,13 @@ module rapt_l1d #(
   );
 
   // Shared PTW: serves both load and store TLB misses
-  wire store_tlb_miss = exu_l1d.mmu_en && exu_l1d.valid && !stlb_hit && !mis_align_store;
+  logic store_tlb_miss;
+  assign store_tlb_miss = exu_l1d.mmu_en && exu_l1d.valid && !stlb_hit && !mis_align_store;
   assign ptw_vaddr = store_tlb_miss ? exu_l1d.vaddr : lsu_l1d.raddr;
 
-  wire load_tlb_miss = lsu_l1d.rvalid && !tlb_hit && !mis_align_load
-      && !(exu_l1d.mmu_en && exu_l1d.valid);
+  logic load_tlb_miss;
+  assign load_tlb_miss = lsu_l1d.rvalid && !tlb_hit && !mis_align_load
+                       && !(exu_l1d.mmu_en && exu_l1d.valid);
   assign ptw_req = (l1d_state == IDLE) && mmu_en && !cmu_bcast.flush_pipe
       && !ptw_busy
       && (store_tlb_miss || load_tlb_miss);

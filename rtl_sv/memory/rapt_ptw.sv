@@ -61,23 +61,37 @@ module rapt_ptw #(
   logic [XLEN-1:0] ad_pte_data;
   logic req_store_q;
 
-  wire [63:0] pte_data = bus_rdata[63:0];
-  wire pte_v = pte_data[0];
-  wire pte_r = pte_data[1];
-  wire pte_w = pte_data[2];
-  wire pte_x = pte_data[3];
-  wire pte_a = pte_data[6];
-  wire pte_d = pte_data[7];
-  wire pte_leaf = pte_r || pte_x;
-  wire pte_reserved = (pte_w && !pte_r) || (pte_data[63:54] != 10'h0);
-  wire pte_needs_ad_update = !pte_a || (req_store_q && !pte_d);
-  wire [63:0] pte_data_ad = pte_data | 64'h0000_0000_0000_0040
-                           | (req_store_q ? 64'h0000_0000_0000_0080 : 64'h0);
+  logic [63:0] pte_data;
+  logic pte_v;
+  logic pte_r;
+  logic pte_w;
+  logic pte_x;
+  logic pte_a;
+  logic pte_d;
+  logic pte_leaf;
+  logic pte_reserved;
+  logic pte_needs_ad_update;
+  logic [63:0] pte_data_ad;
+  assign pte_data = bus_rdata[63:0];
+  assign pte_v = pte_data[0];
+  assign pte_r = pte_data[1];
+  assign pte_w = pte_data[2];
+  assign pte_x = pte_data[3];
+  assign pte_a = pte_data[6];
+  assign pte_d = pte_data[7];
+  assign pte_leaf = pte_r || pte_x;
+  assign pte_reserved = (pte_w && !pte_r) || (pte_data[63:54] != 10'h0);
+  assign pte_needs_ad_update = !pte_a || (req_store_q && !pte_d);
+  assign pte_data_ad = pte_data | 64'h0000_0000_0000_0040
+                     | (req_store_q ? 64'h0000_0000_0000_0080 : 64'h0);
 
   localparam int Rv64PtagPadW = XLEN - 54;
-  wire [XLEN-1:10] ptag_lvl2 = {{Rv64PtagPadW{1'b0}}, pte_data[53:28], vpn1, vpn0};
-  wire [XLEN-1:10] ptag_lvl1 = {{Rv64PtagPadW{1'b0}}, pte_data[53:19], vpn0};
-  wire [XLEN-1:10] ptag_lvl0 = {{Rv64PtagPadW{1'b0}}, pte_data[53:10]};
+  logic [XLEN-1:10] ptag_lvl2;
+  logic [XLEN-1:10] ptag_lvl1;
+  logic [XLEN-1:10] ptag_lvl0;
+  assign ptag_lvl2 = {{Rv64PtagPadW{1'b0}}, pte_data[53:28], vpn1, vpn0};
+  assign ptag_lvl1 = {{Rv64PtagPadW{1'b0}}, pte_data[53:19], vpn0};
+  assign ptag_lvl0 = {{Rv64PtagPadW{1'b0}}, pte_data[53:10]};
 
   assign busy = (state != IDLE);
   assign bus_arvalid = (state == LVL2 || state == LVL1 || state == LVL0);
@@ -92,7 +106,8 @@ module rapt_ptw #(
   // SBE is WARL-zero in rapt today. Keep the port so the requester interface
   // stays uniform across RV32/RV64.
   /* verilator lint_off UNUSEDSIGNAL */
-  wire _unused_sbe = sbe;
+  logic _unused_sbe;
+  assign _unused_sbe = sbe;
   /* verilator lint_on UNUSEDSIGNAL */
 
   always_ff @(posedge clock) begin
@@ -234,16 +249,19 @@ module rapt_ptw #(
   logic [XLEN+1:0] ppn_a;
   /* verilator lint_on UNUSEDSIGNAL */
 
-  wire [31:0] pte_raw = bus_rdata[31:0];
+  logic [31:0] pte_raw;
+  assign pte_raw = bus_rdata[31:0];
   logic [XLEN-1:0] ad_pte_addr;
   logic [31:0] ad_pte_data;
   logic req_store_q;
 
   // SBE: WARL-zero. Keep the port for interface stability.
   /* verilator lint_off UNUSEDSIGNAL */
-  wire _unused_sbe = sbe;
+  logic _unused_sbe;
+  assign _unused_sbe = sbe;
   /* verilator lint_on UNUSEDSIGNAL */
-  wire [31:0] pte_data = pte_raw;
+  logic [31:0] pte_data;
+  assign pte_data = pte_raw;
 
   assign busy = (state != IDLE);
   assign bus_arvalid = (state == LVL1 || state == LVL0);
@@ -254,20 +272,32 @@ module rapt_ptw #(
   assign bus_wdata = XLEN'(ad_pte_data);
   assign bus_wstrb = 8'h0f;
 
-  wire pte_v = pte_data[0];
-  wire pte_r = pte_data[1];
-  wire pte_w = pte_data[2];
-  wire pte_x = pte_data[3];
-  wire pte_a = pte_data[6];
-  wire pte_d = pte_data[7];
-  wire pte_leaf = pte_r || pte_x;
-  wire pte_reserved = pte_w && !pte_r;
-  wire pte_needs_ad_update = !pte_a || (req_store_q && !pte_d);
-  wire [31:0] pte_data_ad = pte_data | 32'h0000_0040
-                           | (req_store_q ? 32'h0000_0080 : 32'h0);
+  logic pte_v;
+  logic pte_r;
+  logic pte_w;
+  logic pte_x;
+  logic pte_a;
+  logic pte_d;
+  logic pte_leaf;
+  logic pte_reserved;
+  logic pte_needs_ad_update;
+  logic [31:0] pte_data_ad;
+  logic [XLEN-1:10] ptag_lvl1;
+  logic [XLEN-1:10] ptag_lvl0;
+  assign pte_v = pte_data[0];
+  assign pte_r = pte_data[1];
+  assign pte_w = pte_data[2];
+  assign pte_x = pte_data[3];
+  assign pte_a = pte_data[6];
+  assign pte_d = pte_data[7];
+  assign pte_leaf = pte_r || pte_x;
+  assign pte_reserved = pte_w && !pte_r;
+  assign pte_needs_ad_update = !pte_a || (req_store_q && !pte_d);
+  assign pte_data_ad = pte_data | 32'h0000_0040
+                     | (req_store_q ? 32'h0000_0080 : 32'h0);
 
-  wire [XLEN-1:10] ptag_lvl1 = {pte_data[31:20], vpn0};
-  wire [XLEN-1:10] ptag_lvl0 = pte_data[31:10];
+  assign ptag_lvl1 = {pte_data[31:20], vpn0};
+  assign ptag_lvl0 = pte_data[31:10];
 
   assign result_vtag = {vpn1, vpn0};
 

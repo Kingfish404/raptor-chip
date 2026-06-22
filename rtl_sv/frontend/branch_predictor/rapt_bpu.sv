@@ -91,7 +91,8 @@ module rapt_bpu #(
   // the uniform port set in `rapt_bpu_dirp_if.svh`. BTB / RSB / training
   // logic is shared and lives in this wrapper.
   logic dirp_taken;
-  wire  dirp_update_mispred = cmu_bcast.ben && cmu_bcast.flush_pipe;
+  logic dirp_update_mispred;
+  assign dirp_update_mispred = cmu_bcast.ben && cmu_bcast.flush_pipe;
   // All DIRP flavors share an identical parameter list (XLEN, GHR_LEN,
   // PHR_LEN, DEPTH) and port set (`RAPT_BPU_DIRP_PORTS`), so the only
   // thing the `ifdef` switches is the module name. Keeps the parameter
@@ -247,7 +248,8 @@ module rapt_bpu #(
   logic [XLEN-1:0] rsb_push_addr;
   assign rsb_push_addr = rpc + (cmu_bcast.rvc ? XLEN'(2) : XLEN'(4));
   /* verilator lint_off UNUSEDSIGNAL */
-  wire _unused_rsb_cmt_push_addr = |rsb_push_addr;
+  logic _unused_rsb_cmt_push_addr;
+  assign _unused_rsb_cmt_push_addr = |rsb_push_addr;
   /* verilator lint_on UNUSEDSIGNAL */
 
   // Next committed RSB index (accounts for this cycle's commit)

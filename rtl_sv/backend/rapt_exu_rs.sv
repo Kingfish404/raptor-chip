@@ -35,6 +35,7 @@ module rapt_exu_rs #(
 
     // Forwarding source
     exu_ioq_bcast_if.in exu_ioq_bcast,
+    exu_load_fast_if.sink load_fast,
 
     // CSR access
     exu_csr_if.master exu_csr,
@@ -74,6 +75,8 @@ module rapt_exu_rs #(
   // gate levels from the wakeup -> select cone.
   logic                   [RS_SIZE-1:0] rs_pr1_busy;
   logic                   [RS_SIZE-1:0] rs_pr2_busy;
+  logic                   [RS_SIZE-1:0] rs_pr1_fast;
+  logic                   [RS_SIZE-1:0] rs_pr2_fast;
   logic                   [   PLEN-1:0] rs_prd        [RS_SIZE];
   logic                   [   RLEN-1:0] rs_rd         [RS_SIZE];
 
@@ -134,9 +137,73 @@ module rapt_exu_rs #(
 
   // === Eligibility vectors ===
   logic [RS_SIZE-1:0] rs_pr_ready;
+  logic [RS_SIZE-1:0] rs_pr1_fast_confirm;
+  logic [RS_SIZE-1:0] rs_pr2_fast_confirm;
+  logic [RS_SIZE-1:0] rs_pr1_fast_rebusy;
+  logic [RS_SIZE-1:0] rs_pr2_fast_rebusy;
+  logic [RS_SIZE-1:0] rs_pr1_fast_wake;
+  logic [RS_SIZE-1:0] rs_pr2_fast_wake;
+  logic [RS_SIZE-1:0] rs_pr1_ioq_match;
+  logic [RS_SIZE-1:0] rs_pr2_ioq_match;
+  logic [RS_SIZE-1:0] rs_pr1_rou_match;
+  logic [RS_SIZE-1:0] rs_pr2_rou_match;
+  logic [RS_SIZE-1:0] rs_pr1_rou_b_match;
+  logic [RS_SIZE-1:0] rs_pr2_rou_b_match;
+  logic disp_a_pr1_fast_wake;
+  logic disp_a_pr2_fast_wake;
+`ifdef RAPT_DUAL_ISSUE
+  logic disp_b_pr1_fast_wake;
+  logic disp_b_pr2_fast_wake;
+`endif
+
+  function automatic logic fast_wake_match(input logic [PLEN-1:0] pr);
+    return (pr != '0) && load_fast.valid && !load_fast.rebusy && (load_fast.prd == pr);
+  endfunction
+
+  function automatic logic fast_confirm_match(input logic is_fast, input logic [PLEN-1:0] pr);
+    return is_fast && exu_ioq_bcast.valid && (exu_ioq_bcast.prd == pr);
+  endfunction
+
+  function automatic logic fast_rebusy_match(input logic is_fast, input logic [PLEN-1:0] pr);
+    return is_fast && load_fast.valid && load_fast.rebusy && (load_fast.prd == pr);
+  endfunction
+
+  assign disp_a_pr1_fast_wake = fast_wake_match(rou_exu.pr1);
+  assign disp_a_pr2_fast_wake = fast_wake_match(rou_exu.pr2);
+`ifdef RAPT_DUAL_ISSUE
+  assign disp_b_pr1_fast_wake = fast_wake_match(rou_exu.pr1_b);
+  assign disp_b_pr2_fast_wake = fast_wake_match(rou_exu.pr2_b);
+`endif
+
   always_comb begin
     for (int i = 0; i < RS_SIZE; i++) begin
-      rs_pr_ready[i] = ~(rs_pr1_busy[i] | rs_pr2_busy[i]);
+      rs_pr1_fast_confirm[i] = fast_confirm_match(rs_pr1_fast[i], rs_pr1[i]);
+      rs_pr2_fast_confirm[i] = fast_confirm_match(rs_pr2_fast[i], rs_pr2[i]);
+      rs_pr1_fast_rebusy[i]  = fast_rebusy_match(rs_pr1_fast[i], rs_pr1[i]);
+      rs_pr2_fast_rebusy[i]  = fast_rebusy_match(rs_pr2_fast[i], rs_pr2[i]);
+      rs_pr1_fast_wake[i]    = rs_pr1_busy[i] && fast_wake_match(rs_pr1[i]);
+      rs_pr2_fast_wake[i]    = rs_pr2_busy[i] && fast_wake_match(rs_pr2[i]);
+      rs_pr1_ioq_match[i]    = rs_pr1_busy[i]
+                            && exu_ioq_bcast.valid
+                            && (exu_ioq_bcast.prd == rs_pr1[i]);
+      rs_pr2_ioq_match[i]    = rs_pr2_busy[i]
+                            && exu_ioq_bcast.valid
+                            && (exu_ioq_bcast.prd == rs_pr2[i]);
+      rs_pr1_rou_match[i]    = rs_pr1_busy[i]
+                            && exu_rou.valid
+                            && (exu_rou.prd == rs_pr1[i]);
+      rs_pr2_rou_match[i]    = rs_pr2_busy[i]
+                            && exu_rou.valid
+                            && (exu_rou.prd == rs_pr2[i]);
+      rs_pr1_rou_b_match[i]  = rs_pr1_busy[i]
+                            && exu_rou_b.valid
+                            && (exu_rou_b.prd == rs_pr1[i]);
+      rs_pr2_rou_b_match[i]  = rs_pr2_busy[i]
+                            && exu_rou_b.valid
+                            && (exu_rou_b.prd == rs_pr2[i]);
+      rs_pr_ready[i] = ~(rs_pr1_busy[i] | rs_pr2_busy[i])
+                       && (!rs_pr1_fast[i] || rs_pr1_fast_confirm[i])
+                       && (!rs_pr2_fast[i] || rs_pr2_fast_confirm[i]);
       rs_free_vec[i] = !rs_valid[i];
       // Slot A: everything except conditional branches (port C handles ben).
       rs_ready_vec[i] = rs_valid[i] && rs_pr_ready[i]
@@ -284,16 +351,30 @@ module rapt_exu_rs #(
   logic                       mul_ready;
   logic [$clog2(RS_SIZE)-1:0] mul_out_tag;
 
+  logic [XLEN-1:0] op1_a, op2_a;
+  logic [XLEN-1:0] op1_b, op2_b;
+  logic [XLEN-1:0] op1_c, op2_c;
+  logic [XLEN-1:0] op1_mul, op2_mul;
+
+    assign op1_a = rs_pr1_fast_confirm[valid_idx_a] ? exu_ioq_bcast.result : rs_vj[valid_idx_a];
+    assign op2_a = rs_pr2_fast_confirm[valid_idx_a] ? exu_ioq_bcast.result : rs_vk[valid_idx_a];
+    assign op1_b = rs_pr1_fast_confirm[valid_idx_b] ? exu_ioq_bcast.result : rs_vj[valid_idx_b];
+    assign op2_b = rs_pr2_fast_confirm[valid_idx_b] ? exu_ioq_bcast.result : rs_vk[valid_idx_b];
+    assign op1_c = rs_pr1_fast_confirm[valid_idx_c] ? exu_ioq_bcast.result : rs_vj[valid_idx_c];
+    assign op2_c = rs_pr2_fast_confirm[valid_idx_c] ? exu_ioq_bcast.result : rs_vk[valid_idx_c];
+    assign op1_mul = rs_pr1_fast_confirm[mul_rs_idx] ? exu_ioq_bcast.result : rs_vj[mul_rs_idx];
+    assign op2_mul = rs_pr2_fast_confirm[mul_rs_idx] ? exu_ioq_bcast.result : rs_vk[mul_rs_idx];
+
   rapt_exu_alu gen_alu_a (
-      .s1(rs_vj[valid_idx_a]),
-      .s2(rs_vk[valid_idx_a]),
+      .s1(op1_a),
+      .s2(op2_a),
       .op(rs_alu[valid_idx_a]),
       .word(rs_word[valid_idx_a]),
       .out_r(alu_result_a)
   );
   rapt_exu_alu gen_alu_b (
-      .s1(rs_vj[valid_idx_b]),
-      .s2(rs_vk[valid_idx_b]),
+      .s1(op1_b),
+      .s2(op2_b),
       .op(rs_alu[valid_idx_b]),
       .word(rs_word[valid_idx_b]),
       .out_r(alu_result_b)
@@ -306,8 +387,8 @@ module rapt_exu_rs #(
   // op-driven cones (no shifter / Zbb / Zbs / CLMUL behind port C).
   logic [XLEN-1:0] bru_s1, bru_s2;
   logic [     5:0] bru_op;
-  assign bru_s1 = rs_vj[valid_idx_c];
-  assign bru_s2 = rs_vk[valid_idx_c];
+  assign bru_s1 = op1_c;
+  assign bru_s2 = op2_c;
   assign bru_op = rs_alu[valid_idx_c];
   always_comb begin
     unique case (bru_op)
@@ -328,8 +409,8 @@ module rapt_exu_rs #(
       .clock(clock),
       .reset(reset),
       .flush(cmu_bcast.flush_pipe),
-      .in_a(rs_vj[mul_rs_idx]),
-      .in_b(rs_vk[mul_rs_idx]),
+      .in_a(op1_mul),
+      .in_b(op2_mul),
       .in_op(rs_alu[mul_rs_idx][4:0]),
       .in_word(rs_word[mul_rs_idx]),
       .in_tag(mul_rs_idx),
@@ -354,6 +435,8 @@ module rapt_exu_rs #(
       rs_valid      <= '0;
       rs_pr1_busy   <= '0;
       rs_pr2_busy   <= '0;
+      rs_pr1_fast   <= '0;
+      rs_pr2_fast   <= '0;
       rs_mul_ready  <= '0;
       rs_mul_issued <= '0;
       rs_full_r     <= 1'b0;  // A2: Initialize full state tracker
@@ -397,8 +480,10 @@ module rapt_exu_rs #(
             rs_dest[free_idx_a] <= rou_exu.dest;
             rs_pr1[free_idx_a] <= rou_exu.pr1;
             rs_pr2[free_idx_a] <= rou_exu.pr2;
-            rs_pr1_busy[free_idx_a] <= |rou_exu.pr1;
-            rs_pr2_busy[free_idx_a] <= |rou_exu.pr2;
+            rs_pr1_busy[free_idx_a] <= (|rou_exu.pr1) && !disp_a_pr1_fast_wake;
+            rs_pr2_busy[free_idx_a] <= (|rou_exu.pr2) && !disp_a_pr2_fast_wake;
+            rs_pr1_fast[free_idx_a] <= disp_a_pr1_fast_wake;
+            rs_pr2_fast[free_idx_a] <= disp_a_pr2_fast_wake;
             // Clear MUL bookkeeping inherited from a prior occupant before the
             // operand-busy gated completion path can observe this slot.
             rs_mul_issued[free_idx_a] <= 1'b0;
@@ -421,7 +506,17 @@ module rapt_exu_rs #(
             rs_tval[free_idx_a] <= rou_exu.uop.tval;
             rs_cause[free_idx_a] <= rou_exu.uop.cause;
           end
-        end else if (rs_valid[i] && !rs_pr1_busy[i] && !rs_pr2_busy[i]) begin
+        end else if (rs_valid[i] && rs_pr_ready[i]) begin
+          if (rs_pr1_fast_confirm[i]) begin
+            rs_vj[i]       <= exu_ioq_bcast.result;
+            rs_pr1[i]      <= '0;
+            rs_pr1_fast[i] <= 1'b0;
+          end
+          if (rs_pr2_fast_confirm[i]) begin
+            rs_vk[i]       <= exu_ioq_bcast.result;
+            rs_pr2[i]      <= '0;
+            rs_pr2_fast[i] <= 1'b0;
+          end
           // MUL FU bookkeeping (tag-based completion).
           if (rs_alu[i][5:4] == 2'b01) begin
             if (mul_found && mul_ready && i[$clog2(
@@ -455,6 +550,8 @@ module rapt_exu_rs #(
             rs_pr2[i]        <= '0;
             rs_pr1_busy[i]   <= 1'b0;
             rs_pr2_busy[i]   <= 1'b0;
+            rs_pr1_fast[i]   <= 1'b0;
+            rs_pr2_fast[i]   <= 1'b0;
             rs_prd[i]        <= '0;
             rs_rd[i]         <= '0;
             rs_mul_a[i]      <= '0;
@@ -471,31 +568,59 @@ module rapt_exu_rs #(
           end
         end else if (rs_valid[i]) begin
           // Operand forwarding.
-          if (rs_pr1_busy[i] && exu_ioq_bcast.valid && exu_ioq_bcast.prd == rs_pr1[i]) begin
+          if (rs_pr1_fast_confirm[i]) begin
             rs_vj[i]       <= exu_ioq_bcast.result;
             rs_pr1[i]      <= '0;
             rs_pr1_busy[i] <= 1'b0;
-          end else if (rs_pr1_busy[i] && exu_rou.valid && exu_rou.prd == rs_pr1[i]) begin
+            rs_pr1_fast[i] <= 1'b0;
+          end else if (rs_pr1_fast_rebusy[i]) begin
+            rs_pr1_busy[i] <= 1'b1;
+            rs_pr1_fast[i] <= 1'b0;
+          end else if (rs_pr1_ioq_match[i]) begin
+            rs_vj[i]       <= exu_ioq_bcast.result;
+            rs_pr1[i]      <= '0;
+            rs_pr1_busy[i] <= 1'b0;
+            rs_pr1_fast[i] <= 1'b0;
+          end else if (rs_pr1_fast_wake[i]) begin
+            rs_pr1_busy[i] <= 1'b0;
+            rs_pr1_fast[i] <= 1'b1;
+          end else if (rs_pr1_rou_match[i]) begin
             rs_vj[i]       <= exu_rou.result;
             rs_pr1[i]      <= '0;
             rs_pr1_busy[i] <= 1'b0;
-          end else if (rs_pr1_busy[i] && exu_rou_b.valid && exu_rou_b.prd == rs_pr1[i]) begin
+            rs_pr1_fast[i] <= 1'b0;
+          end else if (rs_pr1_rou_b_match[i]) begin
             rs_vj[i]       <= exu_rou_b.result;
             rs_pr1[i]      <= '0;
             rs_pr1_busy[i] <= 1'b0;
+            rs_pr1_fast[i] <= 1'b0;
           end
-          if (rs_pr2_busy[i] && exu_ioq_bcast.valid && exu_ioq_bcast.prd == rs_pr2[i]) begin
+          if (rs_pr2_fast_confirm[i]) begin
             rs_vk[i]       <= exu_ioq_bcast.result;
             rs_pr2[i]      <= '0;
             rs_pr2_busy[i] <= 1'b0;
-          end else if (rs_pr2_busy[i] && exu_rou.valid && exu_rou.prd == rs_pr2[i]) begin
+            rs_pr2_fast[i] <= 1'b0;
+          end else if (rs_pr2_fast_rebusy[i]) begin
+            rs_pr2_busy[i] <= 1'b1;
+            rs_pr2_fast[i] <= 1'b0;
+          end else if (rs_pr2_ioq_match[i]) begin
+            rs_vk[i]       <= exu_ioq_bcast.result;
+            rs_pr2[i]      <= '0;
+            rs_pr2_busy[i] <= 1'b0;
+            rs_pr2_fast[i] <= 1'b0;
+          end else if (rs_pr2_fast_wake[i]) begin
+            rs_pr2_busy[i] <= 1'b0;
+            rs_pr2_fast[i] <= 1'b1;
+          end else if (rs_pr2_rou_match[i]) begin
             rs_vk[i]       <= exu_rou.result;
             rs_pr2[i]      <= '0;
             rs_pr2_busy[i] <= 1'b0;
-          end else if (rs_pr2_busy[i] && exu_rou_b.valid && exu_rou_b.prd == rs_pr2[i]) begin
+            rs_pr2_fast[i] <= 1'b0;
+          end else if (rs_pr2_rou_b_match[i]) begin
             rs_vk[i]       <= exu_rou_b.result;
             rs_pr2[i]      <= '0;
             rs_pr2_busy[i] <= 1'b0;
+            rs_pr2_fast[i] <= 1'b0;
           end
         end
       end
@@ -509,8 +634,10 @@ module rapt_exu_rs #(
         rs_dest[disp.b_rs_idx] <= rou_exu.dest_b;
         rs_pr1[disp.b_rs_idx] <= rou_exu.pr1_b;
         rs_pr2[disp.b_rs_idx] <= rou_exu.pr2_b;
-        rs_pr1_busy[disp.b_rs_idx] <= |rou_exu.pr1_b;
-        rs_pr2_busy[disp.b_rs_idx] <= |rou_exu.pr2_b;
+        rs_pr1_busy[disp.b_rs_idx] <= (|rou_exu.pr1_b) && !disp_b_pr1_fast_wake;
+        rs_pr2_busy[disp.b_rs_idx] <= (|rou_exu.pr2_b) && !disp_b_pr2_fast_wake;
+        rs_pr1_fast[disp.b_rs_idx] <= disp_b_pr1_fast_wake;
+        rs_pr2_fast[disp.b_rs_idx] <= disp_b_pr2_fast_wake;
         rs_mul_issued[disp.b_rs_idx] <= 1'b0;
         rs_mul_ready[disp.b_rs_idx] <= 1'b0;
         rs_mul_a[disp.b_rs_idx] <= '0;
@@ -567,14 +694,14 @@ module rapt_exu_rs #(
   // `rs_jen` doubles as the "jump base = vj" select; ecall/ebreak/mret/sret/
   // trap are short-circuited above this expression, so jen is sufficient.
   assign addr_exu_a = ((rs_jen[valid_idx_a]
-      ? rs_vj[valid_idx_a]
+      ? op1_a
       : rs_pc[valid_idx_a]) + rs_imm[valid_idx_a]) & ~'b1;
 
   assign exu_csr.raddr = rs_imm[valid_idx_a][11:0];
   assign csr_wdata_a = (
-      ({XLEN{rs_pl_a.csr_csw[0]}} & rs_vj[valid_idx_a]) |
-      ({XLEN{rs_pl_a.csr_csw[1]}} & (exu_csr.rdata | rs_vj[valid_idx_a])) |
-      ({XLEN{rs_pl_a.csr_csw[2]}} & (exu_csr.rdata & ~rs_vj[valid_idx_a])) |
+      ({XLEN{rs_pl_a.csr_csw[0]}} & op1_a) |
+      ({XLEN{rs_pl_a.csr_csw[1]}} & (exu_csr.rdata | op1_a)) |
+      ({XLEN{rs_pl_a.csr_csw[2]}} & (exu_csr.rdata & ~op1_a)) |
       (0)
   );
 
@@ -637,7 +764,7 @@ module rapt_exu_rs #(
   // taken-redirect source is JAL/JALR (rs_jen).
   logic [XLEN-1:0] addr_exu_b;
   assign addr_exu_b = ((rs_jen[valid_idx_b]
-      ? rs_vj[valid_idx_b]
+      ? op1_b
       : rs_pc[valid_idx_b]) + rs_imm[valid_idx_b]) & ~'b1;
 
   assign exu_rou_b.valid = valid_found_b;

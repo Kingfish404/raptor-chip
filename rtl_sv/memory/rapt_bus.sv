@@ -96,7 +96,8 @@ module rapt_bus #(
   logic l1i_push, l1d_push;
   logic l1i_captured;
   logic [XLEN-1:0] l1i_last_push_addr;
-  wire l1i_new_request = !l1i_captured || (l1i_bus.araddr != l1i_last_push_addr);
+  logic l1i_new_request;
+  assign l1i_new_request = !l1i_captured || (l1i_bus.araddr != l1i_last_push_addr);
   assign l1i_push       = l1i_bus.arvalid && !l1i_q_full && l1i_new_request;
   assign l1d_push       = l1d_bus.arvalid && !l1d_slot_busy;
   assign l1i_bus.rready = l1i_push;
