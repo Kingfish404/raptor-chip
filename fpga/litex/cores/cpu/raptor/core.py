@@ -77,6 +77,10 @@ class Raptor(CPU):
             self.gcc_triple = CPU_GCC_TRIPLE_RISCV32
             self.linker_output_format = "elf32-littleriscv"
         self.reset = Signal()
+        # Debug-only extra CPU reset (e.g. wired to the J23 button) so an ILA
+        # can be armed while the core is held in reset and then released to
+        # capture the boot.  Defaults to 0 (no effect) when left unconnected.
+        self.dbg_reset = Signal()
         self.interrupt = Signal(32)
 
         # AXI4 master peripheral bus (connected to main SoC bus).
@@ -90,7 +94,7 @@ class Raptor(CPU):
         self.cpu_params = dict(
             # Clock / Reset.
             i_clock=ClockSignal("sys"),
-            i_reset=ResetSignal("sys") | self.reset,
+            i_reset=ResetSignal("sys") | self.reset | self.dbg_reset,
             # Interrupt.
             i_io_interrupt=self.interrupt[0],
             i_ext_irq_i=0,
@@ -179,6 +183,11 @@ class Raptor(CPU):
             cmd.append(f"VFLAGS={env_vflags}")
         if env_config:
             cmd.append(f"RAPT_CONFIG={env_config}")
+        # Force the NPC (non-ysyxSoC) source set regardless of nsim's Kconfig
+        # state: a leftover CONFIG_MODE="soc" (from ysyxsoc sim targets) would
+        # otherwise pull ysyxSoC peripherals (PSRAM/SPI, `default_nettype none)
+        # into the pack and break Vivado synthesis.
+        cmd.append("CONFIG_MODE=")
         try:
             subprocess.run(cmd, check=True)
         except subprocess.CalledProcessError as exc:

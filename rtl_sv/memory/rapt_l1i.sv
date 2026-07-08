@@ -70,10 +70,16 @@ module rapt_l1i #(
   logic [L1iWayW-1:0] hit_way_sel, hit_next_way_sel;
   /* verilator lint_on UNUSEDSIGNAL */
 
-  // Replacement: 1-bit per set (toggle on fill); fill picks invalid way first
+  // Replacement: PLRU for >2 ways, toggle for 2-way
   logic [L1iSize-1:0] replace_bit;
   logic [L1iWayW-1:0] fill_way_r;
   logic [L1iWayW-1:0] fill_way_calc, fill_way_next_calc;
+  // PLRU signals (only used for >2-way; suppressed for 2-way)
+  /* verilator lint_off UNUSEDSIGNAL */
+  logic [L1I_N_WAYS-1:0] victim_way;
+  logic [L1I_N_WAYS-1:0] hit_way_onehot;
+  logic                  lru_write_en;
+  /* verilator lint_on UNUSEDSIGNAL */
 
   logic [L1iTagW-1:0] addr_tag;
   logic [L1I_LEN-1:0] addr_idx;
@@ -91,6 +97,7 @@ module rapt_l1i #(
 
   logic hit, hit_next;
   logic ifu_sdram_arburst;
+  logic fetch_addr_valid;
   logic wait_invalid;
 
   logic mmu_en;
@@ -173,7 +180,16 @@ module rapt_l1i #(
   assign offset_fetch = fetch_addr[L1I_LINE_LEN+2-1:2];
   assign idx_fetch = fetch_addr[L1I_LEN+L1I_LINE_LEN+2-1:L1I_LINE_LEN+2];
 
+  assign fetch_addr_valid = csr_bcast.immu_en || rapt_pkg::addr_cacheable(pc_ifu);
   assign raddr_valid = csr_bcast.immu_en || rapt_pkg::addr_cacheable(l1i_addr);
+
+  // Pipeline tracking: valid address was presented in previous cycle
+  logic addr_valid_r;
+  always_ff @(posedge clock) begin
+    if (reset) addr_valid_r <= 1'b0;
+    else addr_valid_r <= fetch_addr_valid && !invalid_l1i && !wait_invalid
+                        && (l1i_state == IDLE || l1i_state == RD_A);
+  end
 
   // --- L1I Tag Comparison (N-way set-associative, line-level tags) ---
   generate
@@ -193,9 +209,10 @@ module rapt_l1i #(
     for (int w = int'(L1I_N_WAYS) - 1; w >= 0; w--)
     if (way_hit_next[w]) hit_next_way_sel = L1iWayW'(w);
   end
-  // Fill way: prefer invalid way, then random toggle
+  // Fill way: prefer duplicate-tag way, then invalid way, then PLRU/toggle victim.
+  // For 2-way: simple toggle. For >2-way: tree-based PLRU.
   generate
-    if (L1I_N_WAYS > 1) begin : gen_fill_multi
+    if (L1I_N_WAYS == 2) begin : gen_fill_2way
       assign fill_way_calc = way_tag_match[0] ? 1'b0
         : way_tag_match[1] ? 1'b1
         : !tag_valid_curr[0] ? 1'b0
@@ -206,6 +223,51 @@ module rapt_l1i #(
         : !(pc_ifu[1] ? tag_valid_next4[0] : tag_valid_curr[0]) ? 1'b0
         : !(pc_ifu[1] ? tag_valid_next4[1] : tag_valid_curr[1]) ? 1'b1
         : replace_bit[addr_idx_next];
+    end else if (L1I_N_WAYS > 2) begin : gen_fill_plru
+      // Generic: duplicate-tag > invalid > PLRU victim
+      always_comb begin
+        fill_way_calc = '0;
+        // Check duplicate tag first
+        for (int w = 0; w < int'(L1I_N_WAYS); w++) begin
+          if (way_tag_match[w]) fill_way_calc = L1iWayW'(w);
+        end
+        // Then invalid
+        if (fill_way_calc == '0 && !(|way_tag_match)) begin
+          for (int w = 0; w < int'(L1I_N_WAYS); w++) begin
+            if (!tag_valid_curr[w]) begin
+              fill_way_calc = L1iWayW'(w);
+              break;
+            end
+          end
+        end
+        // Fallback: PLRU victim (one-hot to binary)
+        if (fill_way_calc == '0 && !(|way_tag_match) && &tag_valid_curr) begin
+          for (int w = 0; w < int'(L1I_N_WAYS); w++) begin
+            if (victim_way[w]) fill_way_calc = L1iWayW'(w);
+          end
+        end
+      end
+      // next calc: same logic but using next tag signals
+      always_comb begin
+        fill_way_next_calc = '0;
+        for (int w = 0; w < int'(L1I_N_WAYS); w++) begin
+          if (way_tag_match_next[w]) fill_way_next_calc = L1iWayW'(w);
+        end
+        if (fill_way_next_calc == '0 && !(|way_tag_match_next)) begin
+          for (int w = 0; w < int'(L1I_N_WAYS); w++) begin
+            if (!(pc_ifu[1] ? tag_valid_next4[w] : tag_valid_curr[w])) begin
+              fill_way_next_calc = L1iWayW'(w);
+              break;
+            end
+          end
+        end
+        if (fill_way_next_calc == '0 && !(|way_tag_match_next)
+            && &{(pc_ifu[1] ? tag_valid_next4 : tag_valid_curr)}) begin
+          for (int w = 0; w < int'(L1I_N_WAYS); w++) begin
+            if (victim_way[w]) fill_way_next_calc = L1iWayW'(w);
+          end
+        end
+      end
     end else begin : gen_fill_dm
       assign fill_way_calc = '0;
       assign fill_way_next_calc = '0;
@@ -404,6 +466,42 @@ module rapt_l1i #(
     end
   endgenerate
 
+  // PLRU instantiation for >2-way caches
+  generate
+    if (L1I_N_WAYS > 2) begin : gen_plru
+      // One-hot hit way encoding for PLRU update
+      always_comb begin
+        hit_way_onehot = '0;
+        for (int w = 0; w < int'(L1I_N_WAYS); w++)
+          if (way_hit[w]) hit_way_onehot[w] = 1'b1;
+      end
+      assign lru_write_en = hit && (l1i_state == IDLE || l1i_state == RD_A)
+                            && (rec_addr == ifu_l1i.pc);
+
+      rapt_plru #(
+          .NUMWAYS(L1I_N_WAYS),
+          .SETLEN(L1I_LEN),
+          .NSETS(L1iSize)
+      ) u_plru (
+          .clock(clock),
+          .reset(reset),
+          .cache_en(1'b1),
+          .hit_way(hit_way_onehot),
+          .valid_way(tag_valid_curr),
+          .victim_way(victim_way),
+          .cache_set(addr_idx),
+          .lru_write_en(lru_write_en),
+          .paddr_set(addr_idx),
+          .invalidate_cache(invalid_l1i),
+          .invalidate_flush(1'b0)
+      );
+    end else begin : gen_no_plru
+      assign victim_way = '1;
+      assign hit_way_onehot = '0;
+      assign lru_write_en = 1'b0;
+    end
+  endgenerate
+
   // Per-way data SRAM banks
   generate
     for (genvar w = 0; w < L1I_N_WAYS; w++) begin : gen_way
@@ -418,7 +516,8 @@ module rapt_l1i #(
             .rdata(data_bank_rdata[w][gi]),
             .wen(l1i_fill_en && (offset_fetch == L1I_LINE_LEN'(gi)) && (fill_way_r == L1iWayW'(w))),
             .waddr(idx_fetch),
-            .wdata(l1i_fill_data)
+            .wdata(l1i_fill_data),
+            .bwe('b0)
         );
       end
     end
@@ -440,7 +539,7 @@ module rapt_l1i #(
   // Each bank gi drives raddr = addr_idx when addr_offset==gi, else addr_idx_next.
   // Non-current banks pre-read the next set every cycle, so for sequential fetch
   // the target bank has already loaded the right data in the previous cycle
-  // (sram_data_ready = 1 with zero bubble).  Branches/redirects still incur the
+  // (sram_data_ready = 1 with zero bubble). Branches/redirects still incur the
   // one-cycle SRAM latency, as the banks were reading a different index.
   //
   // inst_lo comes from bank[addr_offset]  -> check data_bank_raddr_d1[addr_offset] == addr_idx
@@ -455,7 +554,8 @@ module rapt_l1i #(
       for (int i = 0; i < int'(L1I_LINE_SIZE); i++) data_bank_raddr_d1[i] <= data_bank_raddr[i];
     end
   end
-  assign sram_data_ready = (data_bank_raddr_d1[addr_offset] == addr_idx)
+  assign sram_data_ready = addr_valid_r
+    && (data_bank_raddr_d1[addr_offset] == addr_idx)
     && (is_c || data_bank_raddr_d1[addr_offset_next] == addr_idx_next);
 
   assign ifu_l1i.inst_n0 = (l1i_state == TRAP) ? 'h00000013 : {{inst_hi}, {inst_lo}};
@@ -474,7 +574,9 @@ module rapt_l1i #(
   // When pc[1]=1: bank[addr_offset_next] already has pc+2..pc+5; reuse l1i_word_next.
   logic [L1I_LINE_LEN-1:0] addr_offset_n1;
   logic [L1I_N_WAYS-1:0] way_hit_n1;
+  /* verilator lint_off UNUSEDSIGNAL */
   logic [L1iWayW-1:0] hit_n1_way_sel;
+  /* verilator lint_on UNUSEDSIGNAL */
   logic hit_n1;
   logic [31:0] l1i_word_n1;
   logic sram_n1_ready;
@@ -496,7 +598,7 @@ module rapt_l1i #(
 
   assign hit_n1 = |way_hit_n1;
   assign l1i_word_n1 = data_bank_rdata[hit_n1_way_sel][addr_offset_n1];
-  assign sram_n1_ready = (data_bank_raddr_d1[addr_offset_n1] == addr_idx_next4);
+  assign sram_n1_ready = addr_valid_r && (data_bank_raddr_d1[addr_offset_n1] == addr_idx_next4);
 
   assign ifu_l1i.inst_n1 = pc_ifu[1] ? l1i_word_next : l1i_word_n1;
 
@@ -818,7 +920,7 @@ module rapt_l1i #(
       l1i_valid[fill_way_r][idx_fetch] <= fill_tag_match[fill_way_r]
         ? (l1i_valid[fill_way_r][idx_fetch] | fill_word_mask)
         : fill_word_mask;
-      if (ifq_valid[0] == 0) begin
+      if (ifq_valid[0] == 0 && L1I_N_WAYS == 2) begin
         replace_bit[idx_fetch] <= ~replace_bit[idx_fetch];
       end
       ifq_valid[ifq_tail] <= 0;

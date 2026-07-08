@@ -25,6 +25,14 @@ INCLUDES = $(addprefix -I, $(INC_PATH))
 CFLAGS  := -O2 -MMD -Wall -Werror $(INCLUDES) $(CFLAGS)
 LDFLAGS := -O2 $(LDFLAGS)
 
+# The interpreter links the system libreadline, which has a DT_NEEDED on a
+# versioned libncursesw.so.6 / libtinfo (e.g. `tgoto@NCURSES6_TINFO_5.0...`).
+READLINE_SO  := $(realpath $(shell $(CC) -print-file-name=libreadline.so 2>/dev/null))
+READLINE_DIR := $(patsubst %/,%,$(dir $(filter /%,$(READLINE_SO))))
+ifneq ($(READLINE_DIR),)
+LDFLAGS += -Wl,-rpath-link,$(READLINE_DIR)
+endif
+
 OBJS = $(SRCS:%.c=$(OBJ_DIR)/%.o) $(CXXSRC:%.cc=$(OBJ_DIR)/%.o)
 
 # Compilation patterns

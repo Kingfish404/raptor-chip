@@ -76,7 +76,7 @@ _io = [
     ),
 
     # Active-low reset push-button (BUT1 / J23, LVCMOS18).
-    ("cpu_resetn", 0, Pins("J23"), IOStandard("LVCMOS18")),
+    ("cpu_resetn", 0, Pins("J23"), IOStandard("LVCMOS18"), Misc("PULLTYPE PULLUP")),
 
     # On-board USB-UART (LVCMOS33). tx = FPGA->Host, rx = Host->FPGA.
     (
@@ -205,9 +205,13 @@ class _CRG(LiteXModule):
         # the pin up it can idle low and hold the SoC (or the MMCM) in reset
         # forever, preventing the BIOS from ever running. A free-running
         # power-on reset (POR) clocked by the raw 100 MHz input brings the
-        # design up reliably regardless of the button. Request it so the pin is
-        # still constrained, but do not connect it.
-        platform.request("cpu_resetn")
+        # A free-running power-on reset (POR) clocked by the raw 100 MHz input
+        # brings the design up reliably regardless of the button. Request it so
+        # the pin stays constrained. For --with-ila debug builds the SoC reads
+        # self.cpu_resetn to build a CPU-only reset; a PULLTYPE PULLUP on the
+        # pin (see pin def) keeps it idle-high so an un-pressed button never
+        # holds the core in reset.
+        self.cpu_resetn = platform.request("cpu_resetn")
 
         # Power-on reset: hold the MMCM in reset for a fixed number of input
         # clocks after configuration, then release (mirrors the Tang Mega CRG).
@@ -428,6 +432,7 @@ class RaptorMLKCU07SoC(SoCCore):
         mig_size=0x40000000,
         with_led_chaser=False,
         rapt_memspeed_trace=False,
+        with_ila=False,
         **kwargs,
     ):
         platform = Platform(toolchain="vivado")
@@ -438,7 +443,6 @@ class RaptorMLKCU07SoC(SoCCore):
         kwargs.setdefault("ident_version", True)
         kwargs.setdefault("uart_name", "serial")
         kwargs.setdefault("uart_baudrate", 115200)
-        kwargs.setdefault("uart_fifo_depth", 64)
         kwargs.setdefault("integrated_rom_size", 0x8000)
         kwargs.setdefault("integrated_sram_size", 0x2000)
         kwargs.setdefault("integrated_main_ram_size", 0)
@@ -460,11 +464,41 @@ class RaptorMLKCU07SoC(SoCCore):
 
         self.crg = _CRG(platform, sys_clk_freq, with_litedram=with_litedram)
 
+        if with_ila:
+            # Automated arm-before-boot for the dual-commit transition capture.
+            # Hold ONLY the CPU in reset for a fixed wall-clock time (~45 s)
+            # after configuration (sys_clk / ILA keep running) so a JTAG ILA can
+            # be armed before the core boots, then auto-release so the boot ->
+            # derailment happens with the ILA already watching.  The hold cycle
+            # count is derived from sys_clk_freq so the window stays ~45 s at
+            # any profile clock (10 MHz standard / 50 MHz linux).  The
+            # (physically inaccessible) J23 button is OR'd in as a harmless
+            # manual backup.
+            cpu_rst_btn = Signal()
+            self.specials += MultiReg(~self.crg.cpu_resetn, cpu_rst_btn, "sys")
+            boot_hold_cycles = int(45 * sys_clk_freq)
+            boot_hold = Signal(max=boot_hold_cycles + 1)
+            cpu_held = Signal(reset=1)
+            self.sync += [
+                If(cpu_held,
+                    If(boot_hold == boot_hold_cycles,
+                        cpu_held.eq(0),
+                    ).Else(
+                        boot_hold.eq(boot_hold + 1),
+                    )
+                )
+            ]
+            self.comb += self.cpu.dbg_reset.eq(cpu_held | cpu_rst_btn)
+
         if with_mig:
             self.ddr4_mig = KU15PDDR4MIG(platform)
             mig_ready_sys = Signal()
             self.specials += MultiReg(self.ddr4_mig.init_done, mig_ready_sys, "sys")
-            self.cpu.cpu_params["i_reset"] = ResetSignal("sys") | self.cpu.reset | ~mig_ready_sys
+            # NOTE: keep dbg_reset in the override — this replaces the i_reset
+            # expression built in core.py, and dropping dbg_reset here would
+            # silently defeat the --with-ila arm-before-boot hold counter.
+            self.cpu.cpu_params["i_reset"] = (ResetSignal("sys") | self.cpu.reset
+                                              | self.cpu.dbg_reset | ~mig_ready_sys)
 
             mig_sys_axi = axi.AXIInterface(
                 data_width=512,
@@ -565,11 +599,22 @@ def main():
         action="store_true",
         help="Enable Raptor LiteX BIOS memspeed phase trace markers.",
     )
+    parser.add_target_argument(
+        "--uart-polling",
+        action="store_true",
+        help="Build BIOS with UART_POLLING (no IRQ-driven UART ring buffer).",
+    )
+    parser.add_target_argument(
+        "--with-ila",
+        action="store_true",
+        help="Insert a netlist ILA on RAPT_DBG_ILA mark_debug nets (JTAG hang capture).",
+    )
     parser.set_defaults(cpu_type="raptor", cpu_variant="standard")
 
     args = parser.parse_args()
 
     soc_kwargs = dict(parser.soc_argdict)
+    soc_kwargs["uart_fifo_depth"] = max(int(soc_kwargs.get("uart_fifo_depth", 16)), 1024)
     builder_kwargs = dict(parser.builder_argdict)
     has_integrated_rom_init = soc_kwargs.get("integrated_rom_init") not in (
         None,
@@ -603,8 +648,12 @@ def main():
         mig_size=args.mig_size,
         with_led_chaser=args.with_led_chaser,
         rapt_memspeed_trace=args.rapt_memspeed_trace,
+        with_ila=args.with_ila,
         **soc_kwargs,
     )
+
+    if args.uart_polling:
+        soc.add_constant("UART_POLLING")
 
     # Hold-timing hardening. The system clock (main_clkout) fans the whole core
     # out of a single global buffer with large (~2.4 ns) net skew, leaving some
@@ -629,6 +678,15 @@ def main():
         f"set_clock_uncertainty -hold {hold_uncertainty:.3f} [all_clocks]"
     )
 
+    # Optional netlist ILA insertion for the dual-commit hang capture. Sourced
+    # after synth_design (pre_optimize) so the MARK_DEBUG nets exist. The tcl
+    # file itself may use curly braces (only the inlined pre-optimize strings
+    # cannot, since the toolchain str.format()s them).
+    if args.with_ila:
+        _ila_tcl = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                "scripts", "insert_ila.tcl")
+        soc.platform.toolchain.pre_optimize_commands.add(f"source {_ila_tcl}")
+
     if args.with_litedram:
         # Keep the 4x DDR PHY clock and divided sys clock on matched global
         # routing. OSERDESE3/ISERDESE3 CLK-to-CLKDIV skew is otherwise tight on
@@ -642,19 +700,31 @@ def main():
     # makes the same RTL boot there). Limiting synth fanout forces Vivado to
     # replicate high-fanout control/enable nets, cutting skew and widening
     # hold margin on short reg->reg paths.
-    soc.platform.toolchain.vivado_synth_fanout_limit = 24
-
+    #
     # Vivado synthesis occasionally miscompiles a control-flow corner (observed
     # as a jump to PC=4 when a divide is in flight) that Verilator and Gowin
     # get correct. Disabling resource sharing and LUT combining prevents this
     # misoptimization. The root-cause RTL fix is tracked separately; until then
     # these options are required for functional correctness on KU15P Vivado.
-    soc.platform.toolchain.vivado_synth_extra_options = "-resource_sharing off -no_lc"
+    #
+    # NOTE: the LiteX Vivado toolchain has no `vivado_synth_extra_options` /
+    # `vivado_synth_fanout_limit` attributes -- setting them is silently
+    # ignored. The only string that reaches the generated `synth_design`
+    # command is `vivado_synth_directive` (spliced verbatim right after
+    # `-directive`), so smuggle the extra options through it. It must be set
+    # via the toolchain argdict: toolchain.build() re-assigns the attribute
+    # from its kwargs (CLI default "default") and would overwrite a value set
+    # directly on the toolchain object before builder.build().
+    toolchain_argdict = dict(parser.toolchain_argdict)
+    toolchain_argdict["vivado_synth_directive"] = (
+        str(toolchain_argdict.get("vivado_synth_directive") or "default")
+        + " -resource_sharing off -no_lc -fanout_limit 24"
+    )
 
     builder = Builder(soc, **builder_kwargs)
 
     if args.build:
-        builder.build(build_name="mlk_cu07_ku15p", **parser.toolchain_argdict)
+        builder.build(build_name="mlk_cu07_ku15p", **toolchain_argdict)
 
 
 if __name__ == "__main__":

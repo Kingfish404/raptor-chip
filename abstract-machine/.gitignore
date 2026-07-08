@@ -17,3 +17,5 @@ _*
 build/
 !.gitignore
 .vscode
+# am-kernels is cloned locally by the build (NJU-ProjectN), not tracked here
+/app/am-kernels/

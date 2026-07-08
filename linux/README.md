@@ -37,11 +37,11 @@ main RAM path:
 
 ```sh
 cd ../fpga/litex
-make linux-fpga-opensbi-img
-make linux-fpga-opensbi-upload UART_PORT=/dev/ttyUSB0 UART_BAUD=230400
+make fpga-opensbi-img
+make fpga-opensbi-upload
 ```
 
-`linux-fpga-opensbi-img` runs `make -C linux opensbi` as needed and writes
+`fpga-opensbi-img` runs `make -C linux opensbi` as needed and writes
 `fpga/litex/build/firmware/linux-fpga/linux-fpga-opensbi.img` with stage0 at
 `0x80000000`, OpenSBI's `fw_payload.bin` staged at `0x80100000`, and the LiteX
 DTB staged at `0x80800000` by default. Stage0 copies OpenSBI back to
@@ -52,4 +52,4 @@ custom OpenSBI payload that needs more than the default 8 MiB staging window.
 This path uses OpenSBI's standalone `fw_payload.bin`. `fw_dynamic.bin` would need
 an `fw_dynamic_info` handoff block from stage0, and `fw_jump.bin` needs a defined
 next-stage address/payload convention, so they are not direct replacements for
-`linux-fpga-opensbi-upload`.
+`fpga-opensbi-upload`.

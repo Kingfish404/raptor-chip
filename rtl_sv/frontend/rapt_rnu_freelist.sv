@@ -38,6 +38,23 @@ module rapt_rnu_freelist #(
   assign do_alloc_b = fl.alloc_req_b && !fl.alloc_empty_b;
 `endif
 
+  // Dealloc write decode: per-entry one-hot (FPGA-robust, like the PRF).
+  //   - slot A writes fifo[tail]
+  //   - slot B writes fifo[tail+1] when A also deallocs this cycle, else fifo[tail]
+  // The two indices are always distinct, so there is no true collision; the
+  // per-entry mux below still gives B priority for safety.  This replaces the
+  // two addressed writes (fifo[tail]<=..; fifo[tail+1]<=..), which Vivado can
+  // mis-synthesise as a fragile 2-write-port array on the dual-commit path.
+  logic [PLEN-1:0] dealloc_waddr_b;
+  logic [PNUM-1:0] fifo_wr_a_oh, fifo_wr_b_oh;
+  always_comb begin
+    dealloc_waddr_b = fl.dealloc_req_a ? (tail[PLEN-1:0] + 1'b1) : tail[PLEN-1:0];
+    fifo_wr_a_oh = '0;
+    fifo_wr_b_oh = '0;
+    if (fl.dealloc_req_a) fifo_wr_a_oh[tail[PLEN-1:0]] = 1'b1;
+    if (fl.dealloc_req_b) fifo_wr_b_oh[dealloc_waddr_b] = 1'b1;
+  end
+
   always_ff @(posedge clock) begin
     if (reset) begin
       for (integer i = 0; i < PNUM; i = i + 1) begin
@@ -79,17 +96,21 @@ module rapt_rnu_freelist #(
 `endif
       end
 
-      // --- Tail pointer (dealloc always proceeds, even during flush) ---
+      // --- Tail pointer + per-entry FIFO write (dealloc always proceeds) ---
       if (fl.dealloc_req_a && fl.dealloc_req_b) begin
-        fifo[tail[PLEN-1:0]]   <= fl.dealloc_pr_a;
-        fifo[tail[PLEN-1:0]+1] <= fl.dealloc_pr_b;
-        tail                   <= tail + 2;
-      end else if (fl.dealloc_req_a) begin
-        fifo[tail[PLEN-1:0]] <= fl.dealloc_pr_a;
-        tail                 <= tail + 1;
-      end else if (fl.dealloc_req_b) begin
-        fifo[tail[PLEN-1:0]] <= fl.dealloc_pr_b;
-        tail                 <= tail + 1;
+        tail <= tail + 2;
+      end else if (fl.dealloc_req_a || fl.dealloc_req_b) begin
+        tail <= tail + 1;
+      end
+      // Per-entry one-hot write (slot B priority; indices are distinct so this
+      // is exactly the original last-wins semantics but without a 2-write-port
+      // addressed-array inference).
+      for (integer i = 0; i < PNUM; i = i + 1) begin
+        if (fifo_wr_b_oh[i]) begin
+          fifo[i] <= fl.dealloc_pr_b;
+        end else if (fifo_wr_a_oh[i]) begin
+          fifo[i] <= fl.dealloc_pr_a;
+        end
       end
     end
   end

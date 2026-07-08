@@ -349,7 +349,15 @@
 `define RAPT_CAUSE_MEI 'hb
 
 // CSR Write Masks
-`define RAPT_CSR_MEDELEG_WMASK 'hf4bffe
+// medeleg (WARL): delegable synchronous exceptions only, matching the Spike
+// reference for this extension set (RV32IMAC+S, Zicntr, no Zicfiss/Zicfilp/H):
+//   bits 1-9   fetch-access/illegal/breakpoint/misaligned-LS/LS-access/ecall-U/S
+//   bits 12/13/15  page faults
+//   bit  19    hardware-error fault (Zicntr)
+// Hardwired 0: bit 0 (misaligned fetch; C ext), bit 11 (ecall-M, per spec),
+// bit 18 (software check; needs Zicfiss/Zicfilp), reserved/hypervisor bits.
+// Bit 18 leak caused a Spike-difftest ABORT on the OpenSBI medeleg write.
+`define RAPT_CSR_MEDELEG_WMASK 'h8b3fe
 `define RAPT_CSR_MSTATUS_WMASK 32'h007FF9EA
 `define RAPT_CSR_MSTATUS_SD 32'h80000000
 `define RAPT_CSR_SSTATUS_WMASK 32'h000DE162

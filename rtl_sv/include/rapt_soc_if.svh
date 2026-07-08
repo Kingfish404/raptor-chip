@@ -119,9 +119,12 @@ interface plic_bus_if #(
   logic [NHART-1:0] meip;
   logic [NHART-1:0] seip;
 
+  // NOTE: ext_irq is intentionally NOT part of the master modport.  The
+  // router never drives it; the SoC top drives the interface signal
+  // directly.  Listing it as a master output makes synthesis tools tie the
+  // undriven router-side port to GND, which then wins over the real driver
+  // (multi-driven net) and kills all external interrupts on FPGA.
   modport master(
-      output ext_irq,
-
       output araddr, ar_commit,
       input rdata,
 

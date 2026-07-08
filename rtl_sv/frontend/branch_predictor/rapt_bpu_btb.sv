@@ -113,14 +113,15 @@ module rapt_bpu_btb #(
         end
         r_raddr_lru <= raddr;
       end
-      // Update LRU on read hit: mark other way as next victim
-      if (rd_tag_match) lru[r_raddr_lru] <= ~hit_way;
-      // Write entry: allocate/update target + tag + valid, update LRU
+      // Update LRU on read hit: mark other way as next victim.
+      // Write-entry LRU takes priority when both fire (same-set R/W).
       if (wen_entry) begin
         valid[w_sel][waddr]  <= 1'b1;
         tag[w_sel][waddr]    <= wd_tag;
         target[w_sel][waddr] <= wd_target;
         lru[waddr] <= ~w_sel;
+      end else if (rd_tag_match) begin
+        lru[r_raddr_lru] <= ~hit_way;
       end
       // Write type: only if entry exists (matching tag) or new entry being created.
       // Prevents type corruption of unrelated entries via non-flushing wen_type writes.

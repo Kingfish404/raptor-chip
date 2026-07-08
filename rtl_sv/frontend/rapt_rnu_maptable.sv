@@ -22,26 +22,9 @@ module rapt_rnu_maptable #(
   // ---- Committed Map (RAT) ----
   logic [PLEN-1:0] rat[RNUM];
 
-  always_ff @(posedge clock) begin
-    if (reset) begin
-      for (integer i = 0; i < RNUM; i = i + 1) begin
-        rat[i] <= PLEN'(i);
-      end
-    end else begin
-      if (mt.rat_wen_a) begin
-        rat[mt.rat_waddr_a] <= mt.rat_wdata_a;
-      end
-      // Second commit (dual): slot 1 is younger, wins on conflict
-      if (mt.rat_wen_b) begin
-        rat[mt.rat_waddr_b] <= mt.rat_wdata_b;
-      end
-    end
-  end
-
-  // ---- Speculative Map (MAP) ----
-  logic [PLEN-1:0] map[RNUM];
-
-  // Pre-decode commit addresses to one-hot (reduce per-entry fanin during flush)
+  // Pre-decode commit write addresses to one-hot.  Shared by the committed-RAT
+  // per-entry write below and the MAP flush-restore further down.  Slot B is
+  // the younger committed instruction and wins WAW conflicts.
   logic [RNUM-1:0] rat_wen_oh, rat_wen_b_oh;
   always_comb begin
     rat_wen_oh   = '0;
@@ -49,6 +32,37 @@ module rapt_rnu_maptable #(
     if (mt.rat_wen_a) rat_wen_oh[mt.rat_waddr_a] = 1'b1;
     if (mt.rat_wen_b) rat_wen_b_oh[mt.rat_waddr_b] = 1'b1;
   end
+
+  always_ff @(posedge clock) begin
+    if (reset) begin
+      for (integer i = 0; i < RNUM; i = i + 1) begin
+        rat[i] <= PLEN'(i);
+      end
+    end else begin
+      // Per-entry priority write (FPGA-robust; matches the PRF and the MAP
+      // flush-restore).  Each RAT entry has ONE next-state mux with explicit
+      // priority: the younger committed slot (B) wins WAW conflicts.  This
+      // replaces two addressed writes (`rat[waddr_a]<=..; rat[waddr_b]<=..`)
+      // to the same register array in one process, which Vivado (KU15P) can
+      // mis-synthesise -- observed as a WAW dual-commit latching the OLDER
+      // mapping, so a later `ret` read a physical register holding 0 and the
+      // core jumped to PC=0 and looped forever.  Functionally identical to the
+      // original last-wins semantics (difftest-verified).
+      for (integer i = 0; i < RNUM; i = i + 1) begin
+        if (rat_wen_b_oh[i]) begin
+          rat[i] <= mt.rat_wdata_b;  // younger slot wins
+        end else if (rat_wen_oh[i]) begin
+          rat[i] <= mt.rat_wdata_a;
+        end
+      end
+    end
+  end
+
+  // ---- Speculative Map (MAP) ----
+  logic [PLEN-1:0] map[RNUM];
+
+  // (rat_wen_oh / rat_wen_b_oh are decoded once above, next to the RAT write,
+  //  and reused here for the flush-restore.)
 
   always_ff @(posedge clock) begin
     if (reset) begin

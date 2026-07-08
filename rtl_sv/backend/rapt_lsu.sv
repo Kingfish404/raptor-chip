@@ -182,9 +182,17 @@ module rapt_lsu #(
         stq_tail  <= 0;
         stq_valid <= 0;
       end else begin
+        // -- STQ commit: clear the retiring store's valid bit.
+        //    When the same slot is reused by enqueue this cycle, the
+        //    enqueue write (below) takes priority — the slot stays
+        //    valid with the new store's payload.  This explicit
+        //    mutual-exclusion guard avoids a Vivado-addressed-WAW
+        //    hazard (R1 pattern: two addressed writes to the same
+        //    stq_valid[idx] from separate if-branches).
         if (stq_commit_fire && stq_commit_found) begin
-          stq_valid[stq_commit_idx] <= 0;
           stq_head <= stq_head_next;
+          if (!(stq_enq_fire && stq_commit_idx == stq_enq_idx))
+            stq_valid[stq_commit_idx] <= 0;
         end
         if (stq_enq_fire) begin
           stq_valid[stq_enq_idx] <= 1;
@@ -367,7 +375,23 @@ module rapt_lsu #(
   // the forwarding hit so the request stalls (`ma_load_req` already requires
   // `!load_in_sq && !stq_addr_conflict`) until the matching store drains to
   // L1D, after which the misaligned-split path will fetch both halves.
-  assign fwd_hit = !ma_span
+  //
+  // Device (MMIO) ordering: an uncacheable load must not forward from, nor
+  // bypass, ANY older committed store still draining in the SQ -- not just
+  // same-address ones.  A device read may depend on a side effect of a prior
+  // write to a DIFFERENT device register.  Observed on KU15P (SQ_SIZE=8):
+  // memspeed's timer0 update CSR write sat behind 2 MiB of DDR4 stores in
+  // the SQ while the timer0 value CSR read (different address, no conflict)
+  // issued immediately -> read the stale latch -> start-end==0 ->
+  // __udivdi3 divide-by-zero ebreak -> jump to PC=0.  Zero-latency sim never
+  // exposes this window.  Mirrors the IOQ's `dmmu_en ||` bypass: with the
+  // MMU on, raddr is virtual and the physical cacheability is unknown here.
+  logic mmio_ordered;
+  assign mmio_ordered = !csr_bcast.dmmu_en && !rapt_pkg::addr_cacheable(raddr);
+  logic mmio_load_blocked;
+  assign mmio_load_blocked = mmio_ordered
+                          && !((sq_valid == '0) && (state_store == LS_S_V));
+  assign fwd_hit = !ma_span && !mmio_ordered
                 && ((stq_addr_conflict && stq_fwd_ok)
                  || (!stq_addr_conflict && load_in_sq && sq_fwd_ok));
   logic pmp_load_fault_lsu;
@@ -572,8 +596,7 @@ module rapt_lsu #(
   assign lsu_l1d.raddr = ma_req_addr;
   assign lsu_l1d.ralu = ma_req_alu;
   assign lsu_l1d.rvalid = (ma_state == MA_HI)
-                       || (raddr_valid && !load_in_sq && !stq_addr_conflict
-                                       && (ma_state == MA_IDLE));
+                       || (raddr_valid && !load_in_sq && !stq_addr_conflict                                        && !mmio_load_blocked                                       && (ma_state == MA_IDLE));
   assign lsu_l1d.atomic_lock = exu_lsu.atomic_lock;
 
   // Misalign-split FSM.

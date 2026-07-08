@@ -21,9 +21,10 @@ module rapt_bus #(
     input reset
 );
   typedef enum logic [1:0] {
-    LS_S_A = 0,
-    LS_S_W = 1,
-    LS_S_B = 2
+    LS_S_A  = 0,
+    LS_S_W  = 1,
+    LS_S_B  = 2,
+    LS_S_AW = 3
   } state_store_t;
   typedef enum logic [3:0] {
     L1I  = 1,
@@ -41,10 +42,15 @@ module rapt_bus #(
 
   assign axi.awburst = 0;
   assign axi.awlen = 0;
-  assign axi.awid = (state_store == LS_S_A) ? store_bridge : awid;
+  assign axi.awid = ((state_store == LS_S_A) || (state_store == LS_S_AW)) ? store_bridge : awid;
 
   assign store_bridge = l1i_bus.awvalid ? L1I : L1D;
-  assign store_current = (state_store == LS_S_A) ? store_bridge : store_source;
+  // In LS_S_A and LS_S_AW the AW handshake has not completed yet, so
+  // store_source is stale; select the live store_bridge instead.  (LS_S_AW:
+  // W was accepted first, AW still outstanding -- see the AW/W concurrent
+  // presentation note in the store FSM below.)
+  assign store_current = ((state_store == LS_S_A) || (state_store == LS_S_AW))
+                       ? store_bridge : store_source;
 
 `ifndef RAPT_SOC
   // =========================================================================
@@ -333,13 +339,13 @@ module rapt_bus #(
       |({3{store_wstrb_aw == 8'hff}} & 3'b011))
     : 3'b000;
   assign axi.awaddr = store_awvalid ? store_awaddr : 'h0;
-  assign axi.awvalid = (state_store == LS_S_A) && store_awvalid;
+  assign axi.awvalid = ((state_store == LS_S_A) || (state_store == LS_S_AW)) && store_awvalid;
 
   localparam logic [31:0] ADDR2BITS = $clog2(XLEN / 8);  // 2 for RV32, 3 for RV64
   logic [ADDR2BITS-1:0] awaddr_lo;
   assign awaddr_lo = axi.awaddr[ADDR2BITS-1:0];
   assign axi.wdata = store_wdata << (awaddr_lo * 8);
-  assign axi.wvalid = (state_store == LS_S_W) && store_wvalid;
+  assign axi.wvalid = ((state_store == LS_S_A) || (state_store == LS_S_W)) && store_wvalid;
   assign axi.wlast = axi.wvalid;
   assign axi.wstrb = store_wstrb << awaddr_lo;
 
@@ -358,14 +364,33 @@ module rapt_bus #(
     end else begin
       unique case (state_store)
         LS_S_A: begin
-          if (store_awvalid && axi.awready) begin
+          // Present AW and W concurrently: the master must never wait for
+          // AWREADY before asserting WVALID. Slaves whose AWREADY depends on
+          // WVALID being present (e.g. the ysyxSoC ultra-embedded sdram_axi
+          // controller) would otherwise deadlock (AW-before-W). L1I/L1D hold
+          // both awvalid and wvalid stable until the B response, so it is safe
+          // to offer them together and complete each channel independently.
+          if (axi.awvalid && axi.awready) begin
             store_source <= store_bridge;
             awid <= store_bridge;
-            state_store <= LS_S_W;
+          end
+          if ((axi.awvalid && axi.awready) && (axi.wvalid && axi.wready)) begin
+            state_store <= LS_S_B;   // AW + W accepted together
+          end else if (axi.awvalid && axi.awready) begin
+            state_store <= LS_S_W;   // AW accepted, W still outstanding
+          end else if (axi.wvalid && axi.wready) begin
+            state_store <= LS_S_AW;  // W accepted, AW still outstanding
           end
         end
         LS_S_W: begin
           if (store_wvalid && axi.wready) begin
+            state_store <= LS_S_B;
+          end
+        end
+        LS_S_AW: begin
+          if (store_awvalid && axi.awready) begin
+            store_source <= store_bridge;
+            awid <= store_bridge;
             state_store <= LS_S_B;
           end
         end

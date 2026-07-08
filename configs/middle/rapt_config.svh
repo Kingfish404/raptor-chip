@@ -34,13 +34,15 @@
 `define RAPT_RIQ_SIZE 8
 `define RAPT_IIQ_SIZE 8
 `define RAPT_ROB_SIZE 16
+
 `define RAPT_RS_SIZE 8
 `define RAPT_IOQ_SIZE 8
+
 `define RAPT_SQ_SIZE 4
 
-// Middle deliberately stays single issue and single commit for FPGA stability.
-// `define RAPT_DUAL_COMMIT
-// `define RAPT_DUAL_ISSUE
+// Middle enables dual commit
+`define RAPT_DUAL_COMMIT
+`define RAPT_DUAL_ISSUE
 
 `ifdef RAPT_DUAL_ISSUE
 `define RAPT_ISSUE_WIDTH 2

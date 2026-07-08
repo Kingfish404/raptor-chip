@@ -78,8 +78,17 @@ VERILATOR_EXTRA ?= ## Extra Verilator CLI flags (e.g. --coverage-line --coverage
 CXXFLAGS = -Wall -Werror \
 	-Wno-bool-operation -Wno-implicit-fallthrough -Wno-macro-redefined \
 	-Wno-parentheses-equality -Wno-unused-variable \
+	-Wno-unused-but-set-variable \
 	$(call remove_quote,$(CONFIG_CC_OPT))
 LDFLAGS = -lreadline -ldl
+# -ltinfo does not exist on macOS (readline links against system ncurses there);
+# Homebrew's lib dir is needed there for -llz4/-lz pulled in by Verilator FST.
+ifeq ($(shell uname -s),Darwin)
+HOMEBREW_PREFIX ?= $(shell brew --prefix 2>/dev/null || echo /opt/homebrew)
+LDFLAGS += -L$(HOMEBREW_PREFIX)/lib
+else
+LDFLAGS += -ltinfo
+endif
 
 # RV64 support: pass VFLAGS="-DRAPT_RV64" to enable 64-bit mode.
 # Simulation assertions are enabled by default for Verilator builds only;
@@ -250,7 +259,7 @@ YOSYS_OPENSTA = $(RAPTOR_HOME)/third_party/yosys-opensta
 
 YOSYS_OPENSTA:
 	git clone https://github.com/Kingfish404/yosys-opensta $(YOSYS_OPENSTA)
-	make -C $(YOSYS_OPENSTA) setup-opensta setup-nangate45 setup-sky130hd
+	make -C $(YOSYS_OPENSTA) setup-opensta setup-sv-elab setup-nangate45 setup-sky130hd
 
 # Ensure the STA toolchain and the selected platform's PDK are actually usable
 # before running synthesis/STA. A bare clone is NOT enough: a partial or aborted
@@ -266,10 +275,13 @@ sta-deps:
 	  echo ">>> [sta] cloning yosys-opensta ..."; \
 	  git clone https://github.com/Kingfish404/yosys-opensta $(YOSYS_OPENSTA); \
 	fi
-	@if [ ! -x $(YOSYS_OPENSTA)/third_party/OpenSTA/build/sta ] || \
-	    ! yosys -m slang -p "help read_slang" >/dev/null 2>&1; then \
-	  echo ">>> [sta] building OpenSTA + yosys-slang plugin ..."; \
+	@if [ ! -x $(YOSYS_OPENSTA)/third_party/OpenSTA/build/sta ]; then \
+	  echo ">>> [sta] building OpenSTA (CUDD) ..."; \
 	  $(MAKE) -C $(YOSYS_OPENSTA) setup-opensta; \
+	fi
+	@if ! yosys -m slang -p "help read_slang" >/dev/null 2>&1; then \
+	  echo ">>> [sta] building yosys-slang plugin ..."; \
+	  $(MAKE) -C $(YOSYS_OPENSTA) setup-sv-elab; \
 	fi
 	@if [ ! -d $(YOSYS_OPENSTA)/third_party/lib/$(STA_PLATFORM) ]; then \
 	  echo ">>> [sta] fetching PDK data for $(STA_PLATFORM) ..."; \

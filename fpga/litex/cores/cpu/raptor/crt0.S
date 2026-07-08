@@ -2,6 +2,19 @@
 .global isr
 .global _start
 
+#ifndef RAPT_LITEX_CRT0_UART_PROBE_COUNT
+#define RAPT_LITEX_CRT0_UART_PROBE_COUNT 256
+#endif
+#ifndef RAPT_LITEX_CRT0_UART_PROBE_DELAY
+#define RAPT_LITEX_CRT0_UART_PROBE_DELAY 0
+#endif
+#ifndef RAPT_LITEX_CRT0_UART_PROBE_GAP
+#define RAPT_LITEX_CRT0_UART_PROBE_GAP 0
+#endif
+#ifndef RAPT_LITEX_CRT0_UART_PROBE_FENCE
+#define RAPT_LITEX_CRT0_UART_PROBE_FENCE 0
+#endif
+
 _start:
   j crt_init
   nop
@@ -123,6 +136,36 @@ bss_done:
   li a0, 0x800     // Enable external interrupt sources (mie.MEIE)
   csrw mie, a0
   csrw mscratch, zero  // Clear irq.h's software irq-mask shadow
+
+#ifdef RAPT_LITEX_CRT0_UART_PROBE
+#if RAPT_LITEX_CRT0_UART_PROBE_DELAY > 0
+  li a3, RAPT_LITEX_CRT0_UART_PROBE_DELAY
+3:
+  addi a3, a3, -1
+  bnez a3, 3b
+#endif
+  li a0, RAPT_LITEX_CRT0_UART_PROBE_COUNT
+1:
+  li a1, 85
+  lui a2, 0xf0002
+#if RAPT_LITEX_CRT0_UART_PROBE_FENCE > 0
+  fence
+#endif
+  sw a1, -2048(a2)
+#if RAPT_LITEX_CRT0_UART_PROBE_FENCE > 0
+  fence
+#endif
+#if RAPT_LITEX_CRT0_UART_PROBE_GAP > 0
+  li a3, RAPT_LITEX_CRT0_UART_PROBE_GAP
+4:
+  addi a3, a3, -1
+  bnez a3, 4b
+#endif
+  addi a0, a0, -1
+  bnez a0, 1b
+2:
+  j 2b
+#endif
 
   call main
 infinit_loop:

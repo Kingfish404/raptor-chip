@@ -661,24 +661,40 @@ module rapt_exu_rs #(
 `endif
 
       // ---- Age matrix updates on allocation ----
-      // Newly allocated entry is youngest: zero its row, set its column to
-      // currently-valid entries (older). NBA semantics let same-cycle B
-      // override A's column entry to mark A as older than B.
+      // Per-cell one-hot priority (FPGA-robust; matches the PRF, RAT and
+      // freelist one-hot pattern).  Each age_mat[i][j] cell is driven by
+      // exactly ONE if-branch per cycle, removing the addressed-WAW hazard
+      // that Vivado (KU15P) can mis-synthesise.  Priority (highest first):
+      //   1. B->A cross-cell   (A older than B, explicit override)
+      //   2. B  row zero        (new entry B is youngest)
+      //   3. B  column set      (existing entries older than B)
+      //   4. A  row zero        (new entry A is youngest)
+      //   5. A  column set      (existing entries older than A)
+      //   –  keep             (cell unchanged this cycle)
+`ifdef RAPT_DUAL_ISSUE
+      for (int i = 0; i < RS_SIZE; i++) begin
+        for (int j = 0; j < RS_SIZE; j++) begin
+          if (disp.accept_a && disp.accept_b
+              && i == int'(free_idx_a) && j == int'(disp.b_rs_idx)) begin
+            age_mat[i][j] <= 1'b1;
+          end else if (disp.accept_b && i == int'(disp.b_rs_idx)) begin
+            age_mat[i][j] <= 1'b0;
+          end else if (disp.accept_b && j == int'(disp.b_rs_idx)
+                     && i != int'(disp.b_rs_idx)) begin
+            age_mat[i][j] <= rs_valid[i];
+          end else if (disp.accept_a && i == int'(free_idx_a)) begin
+            age_mat[i][j] <= 1'b0;
+          end else if (disp.accept_a && j == int'(free_idx_a)
+                     && i != int'(free_idx_a)) begin
+            age_mat[i][j] <= rs_valid[i];
+          end
+        end
+      end
+`else
       if (disp.accept_a) begin
         for (int j = 0; j < RS_SIZE; j++) begin
           age_mat[free_idx_a][j] <= 1'b0;
           if (j != int'(free_idx_a)) age_mat[j][free_idx_a] <= rs_valid[j];
-        end
-      end
-`ifdef RAPT_DUAL_ISSUE
-      if (disp.accept_b) begin
-        for (int j = 0; j < RS_SIZE; j++) begin
-          age_mat[disp.b_rs_idx][j] <= 1'b0;
-          if (j != int'(disp.b_rs_idx)) age_mat[j][disp.b_rs_idx] <= rs_valid[j];
-        end
-        // If A also allocated this cycle, A is older than B.
-        if (disp.accept_a) begin
-          age_mat[free_idx_a][disp.b_rs_idx] <= 1'b1;
         end
       end
 `endif

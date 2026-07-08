@@ -604,13 +604,18 @@ module rapt_exu_ioq #(
         ioq_head             <= ioq_head + 1'b1;
       end
 
-      // ---- OoO LSU FSM ----
+      // ---- OoO LSU FSM (per-entry one-hot: avoid multi-write with head retire) ----
       if (exu_lsu.rvalid && exu_lsu.rready) begin
         ioq_rdata[active_idx]      <= exu_lsu.rdata;
-        ioq_complete[active_idx]   <= 1'b1;
-        ioq_load_trap[active_idx]  <= exu_lsu.trap;
-        ioq_load_cause[active_idx] <= exu_lsu.cause;
-        ioq_load_skip[active_idx]  <= exu_lsu.difftest_skip;
+        // Suppress completion/trap/skip write when the same entry is also
+        // being retired this cycle (head-retire clear below takes priority).
+        // This avoids a Vivado-addressed-WAW hazard (R1 pattern).
+        if (active_idx != ioq_head || !ioq_valid_found) begin
+          ioq_complete[active_idx]   <= 1'b1;
+          ioq_load_trap[active_idx]  <= exu_lsu.trap;
+          ioq_load_cause[active_idx] <= exu_lsu.cause;
+          ioq_load_skip[active_idx]  <= exu_lsu.difftest_skip;
+        end
         oo_pending                 <= 1'b0;
       end else if (!oo_pending && exu_lsu.rvalid && !exu_lsu.rready) begin
         oo_pending     <= 1'b1;

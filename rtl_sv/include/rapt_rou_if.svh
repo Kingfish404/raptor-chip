@@ -171,8 +171,14 @@ interface rou_cmu_if #(
   logic fence_time;
   logic fence_i;
   logic flush_pipe;
+  logic flush_redirect;
   logic sys_resume;
   logic time_trap;
+
+  // Registered commit-redirect target (Phase 1). Holds the resolved redirect
+  // PC one cycle, so the frontend fetch redirect is driven from a flop instead
+  // of the long ROB->...->pc_ifu->L1I combinational path.
+  logic [XLEN-1:0] redirect_pc;
 
   logic [$clog2(`RAPT_ROB_SIZE)-1:0] rob_head;
 
@@ -198,7 +204,8 @@ interface rou_cmu_if #(
       output rd_b, inst_b, pc_b, prd_b, prs_b, npc_b,
       output ebreak_b, difftest_skip_b, valid_b,
       output btaken, ben, jen, jren, atomic_sc,
-      output fence_time, fence_i, flush_pipe, sys_resume, time_trap,
+      output fence_time, fence_i, flush_pipe, flush_redirect, sys_resume, time_trap,
+      output redirect_pc,
       output rob_head
 `ifdef RAPT_RVFI
       , output rvfi_trap_a, rvfi_trap_b,
@@ -214,7 +221,8 @@ interface rou_cmu_if #(
       input rd_b, inst_b, pc_b, prd_b, prs_b, npc_b,
       input ebreak_b, difftest_skip_b, valid_b,
       input btaken, ben, jen, jren, atomic_sc,
-      input fence_time, fence_i, flush_pipe, sys_resume, time_trap,
+      input fence_time, fence_i, flush_pipe, flush_redirect, sys_resume, time_trap,
+      input redirect_pc,
       input rob_head
 `ifdef RAPT_RVFI
       , input rvfi_trap_a, rvfi_trap_b,

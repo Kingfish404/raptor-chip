@@ -661,7 +661,12 @@ static int decode_exec(Decode *s)
 #endif
   CSR(CSR_MSTATUS) = CSR(CSR_MSTATUS) & MSTATUS_WMASK;
   CSR(CSR_MISA) = CSR_MISA_VALUE;
-  CSR(CSR_MEDELEG) &= 0xf4bffe; // bit 0 (insn addr misaligned) hardwired 0 with C ext
+  // medeleg is WARL: only delegable synchronous exceptions are writable,
+  // matching the Spike reference for this extension set (RV32IMAC+S, Zicntr,
+  // no Zicfiss/Zicfilp/H): bits 1-9, 12/13/15 (page faults), 19 (hw error).
+  // Hardwired 0: bit 0 (misaligned fetch; C ext), bit 11 (ecall-M, per spec),
+  // bit 18 (software check; needs Zicfiss/Zicfilp), reserved bits.
+  CSR(CSR_MEDELEG) &= 0x8b3fe;
   CSR(CSR_MIDELEG) &= 0x222;
   // sstatus/sie are architecturally views of mstatus/mie (not separate regs).
   // Propagate direct writes back to mstatus/mie at any privilege level.

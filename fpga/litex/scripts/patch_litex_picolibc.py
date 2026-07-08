@@ -26,6 +26,7 @@ STDIO_FILES = {
     "printf.c",
     "puts.c",
     "strtoul.c",
+    "strtoull.c",
     "vfprintf.c",
     "vfiprintf.c",
     "vffprintf.c",
@@ -119,6 +120,10 @@ def patch_libc_mk(path: pathlib.Path) -> bool:
             + "[ -f \"$(PICOLIBC_SRC_DIR)/libc/stdlib/strtoul.c\" ]; then" + MAKE_CONT
             + "\t\tcp \"$(PICOLIBC_SRC_DIR)/libc/stdlib/strtoul.c\" \"$(PICOLIBC_SRC_DIR)/libc/tinystdio/strtoul.c\" ;" + TAB_CONT
             + "\tfi\n"
+            + "\tif [ ! -f \"$(PICOLIBC_SRC_DIR)/libc/tinystdio/strtoull.c\" ] && "
+            + "[ -f \"$(PICOLIBC_SRC_DIR)/libc/stdlib/strtoull.c\" ]; then" + MAKE_CONT
+            + "\t\tcp \"$(PICOLIBC_SRC_DIR)/libc/stdlib/strtoull.c\" \"$(PICOLIBC_SRC_DIR)/libc/tinystdio/strtoull.c\" ;" + TAB_CONT
+            + "\tfi\n"
         )
         text = text.replace(cpu_copy, cpu_copy + compat_copy)
     text = text.replace(
@@ -128,6 +133,14 @@ def patch_libc_mk(path: pathlib.Path) -> bool:
     text = text.replace(
         "$(PICOLIBC_SRC_DIR)/newlib/libc/stdlib/strtoul.c",
         "$(PICOLIBC_SRC_DIR)/libc/stdlib/strtoul.c",
+    )
+    text = text.replace(
+        "$(PICOLIBC_SRC_DIR)/newlib/libc/tinystdio/strtoull.c",
+        "$(PICOLIBC_SRC_DIR)/libc/tinystdio/strtoull.c",
+    )
+    text = text.replace(
+        "$(PICOLIBC_SRC_DIR)/newlib/libc/stdlib/strtoull.c",
+        "$(PICOLIBC_SRC_DIR)/libc/stdlib/strtoull.c",
     )
 
     if text == original:

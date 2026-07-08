@@ -43,8 +43,21 @@ PORTME_DIR   := $(_THIS_DIR)portme
 ITERATIONS ?= 64
 SYS_CLK_HZ ?= 10000000
 ITER_STAMP := $(BUILD_DIR)/.iterations
+
+# Optimization flags, tuned for the FPGA target. Unlike the NPC simulator
+# (ideal memory model), the FPGA core fetches instructions from DDR, so it is
+# code-size sensitive: -funroll-all-loops + function/jump alignment padding bloat
+# the binary and slow fetch (measured 120 vs 131 CoreMark on this SoC). We keep
+# -O3 with cheap, density-friendly wins. The freestanding portme/minilib.c
+# provides memset/memcpy/memcmp, so -DSKIP_DEFAULT_MEMSET is safe. Override to
+# customize.
+COREMARK_OPTIM_CFLAGS ?= \
+          -O3 -finline-functions -mbranch-cost=1 \
+          -DSKIP_DEFAULT_MEMSET -mtune=sifive-3-series \
+          -fipa-pta -fno-tree-vrp -fwrapv
+
 CFLAGS := -march=$(ARCH) -mabi=$(ABI) -mcmodel=medany \
-          -O2 -Wall -g \
+          $(COREMARK_OPTIM_CFLAGS) -Wall \
           -ffreestanding -nostdlib -nostdinc \
           -isystem $(shell $(CC) -print-file-name=include) \
           -I$(PORTME_DIR) -I$(COREMARK_DIR) \

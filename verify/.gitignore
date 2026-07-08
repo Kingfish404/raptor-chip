@@ -19,3 +19,4 @@ riscof/riscv-arch-test/
 *.elf
 *.bin
 *.o
+*.out

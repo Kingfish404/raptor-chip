@@ -413,13 +413,15 @@ module rapt_bpu_tage #(
 
         // -- u-bit update: provider was "useful" when its direction
         //    differed from bimodal alt-pred and matched the actual outcome.
+        //    Suppressed during u_clear_pulse to avoid multi-write on the
+        //    same array element (global clear below already resets all u-bits).
         if (up_hit1 && (up_provider == 2'd1) && (t1_taken_at(
                 up_t1_idx
             ) != bim_taken_at(
                 up_bim_idx
             )) && (t1_taken_at(
                 up_t1_idx
-            ) == update_taken))
+            ) == update_taken) && !u_clear_pulse)
           t1_u[up_t1_idx] <= 1'b1;
         if (up_hit2 && (up_provider == 2'd2) && (t2_taken_at(
                 up_t2_idx
@@ -427,7 +429,7 @@ module rapt_bpu_tage #(
                 up_bim_idx
             )) && (t2_taken_at(
                 up_t2_idx
-            ) == update_taken))
+            ) == update_taken) && !u_clear_pulse)
           t2_u[up_t2_idx] <= 1'b1;
         if (up_hit3 && (up_provider == 2'd3) && (t3_taken_at(
                 up_t3_idx
@@ -435,7 +437,7 @@ module rapt_bpu_tage #(
                 up_bim_idx
             )) && (t3_taken_at(
                 up_t3_idx
-            ) == update_taken))
+            ) == update_taken) && !u_clear_pulse)
           t3_u[up_t3_idx] <= 1'b1;
 
         // -- Allocation on mispredict --

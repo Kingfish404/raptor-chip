@@ -17,4 +17,4 @@ prep -top formal_exu_mul
 
 [files]
 formal_exu_mul.sv
-rapt_pack.sv ./../../nsim/build/rapt_pack.sv
+rapt_pack.sv ./../../nsim/build/default/rapt_pack.sv

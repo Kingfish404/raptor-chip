@@ -96,12 +96,12 @@
 `define RAPT_PHY_SIZE 64 // physical register number (must be power of 2)
 `define RAPT_PHY_LEN $clog2(`RAPT_PHY_SIZE)
 
-// L1I (Phase A baseline: 64 B line × 64 sets × 2-way = 8 KiB)
+// L1I (64 B line * 32 sets * 2-way = 8 KiB)
 `define RAPT_L1I_LINE_LEN 4
 `define RAPT_L1I_LEN 5
 `define RAPT_L1I_N_WAYS 2
 
-// L1D (Phase A baseline: 64 B line × 32 sets × 2-way = 4 KiB, VIPT-safe)
+// L1D (64 B line * 16 sets * 2-way = 4 KiB, VIPT-safe)
 `ifdef RAPT_RV64
 `define RAPT_L1D_LINE_LEN 3
 `else
@@ -111,10 +111,8 @@
 `define RAPT_L1D_N_WAYS 2
 
 // L2 unified cache (between rapt_bus and io_master).
-// Disabled by default -- pass-through. Define `RAPT_L2_EN` to opt in.
-`define RAPT_L2_EN
-// Target is 2x(L1I+L1D). With direct-mapped + power-of-two sets,
-// default rounds up to 16 KiB (256 sets x 64B).
+// `define RAPT_L2_EN  // disabled to isolate STA bottleneck
+// 16 KiB direct-mapped (256 sets x 64B).  Multi-way support reserved.
 `define RAPT_L2_LEN 8            // 256 sets
 // 64-byte line (16 × 4B @ RV32, 8 × 8B @ RV64).
 `ifdef RAPT_RV64
@@ -122,6 +120,10 @@
 `else
 `define RAPT_L2_LINE_LEN 4
 `endif
-`define RAPT_L2_N_WAYS 1         // direct-mapped (only mode supported today)
+`define RAPT_L2_N_WAYS 1         // direct-mapped (multi-way support reserved)
+
+// Cache SRAM subarray width in bits (matches CVW CACHE_SRAMLEN=128).
+// Reduces SRAM instance count and address fanout vs per-word (32-bit) banks.
+`define RAPT_CACHE_SRAMLEN 128
 
 `endif

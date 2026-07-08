@@ -56,6 +56,18 @@ module rapt_ifu #(
   logic redirect_event;
   logic valid;
 
+  // --- Unified redirect arbiter (Phase 0) ---------------------------------
+  // Single prioritized frontend redirect channel. Priority (highest first):
+  //   1. commit flush  (cmu_bcast.flush_pipe -> cpc)   [pipeline squash]
+  //   2. sys resume    (cmu_bcast.sys_resume -> cpc)    [pipeline squash]
+  //   3. IDU resteer   (ifu_idu.resteer -> resteer_pc)  [decode redirect]
+  //   4. BPU taken     (ifu_bpu.taken -> npc)           [predicted steer]
+  // `redirect_squash` covers sources 1-3 (they squash in-flight uops). The BPU
+  // predicted-taken steer is a normal fetch redirection and is intentionally
+  // excluded from the squash/`redirect_event` set (matches legacy behavior).
+  logic            redirect_squash;
+  logic [XLEN-1:0] redirect_squash_pc;
+
 
   // PMU: registered signals for accurate cycle-level sampling
   /* verilator lint_off UNUSEDSIGNAL */
@@ -166,12 +178,26 @@ module rapt_ifu #(
 
   assign ifu_idu.inst_b  = inst_b_raw;
   assign ifu_idu.pc_b    = pc_b;
-  assign ifu_idu.valid_b = inst_b_valid && valid;
+  assign ifu_idu.valid_b = inst_b_valid && valid && !redirect_event;
 `endif
 
   assign ifu_bpu.pc = pc_ifu;
   assign ifu_bpu.nextpc = nextpc;
-  assign redirect_event = cmu_bcast.flush_pipe || cmu_bcast.sys_resume || ifu_idu.resteer;
+
+  // Phase 1: two-level redirect.
+  //   redirect_squash (state invalidation): fires immediately when flush_pipe=1
+  //     (cycle N), killing the wrong-path instruction before it enters the IDU.
+  //   redirect_pc_update (PC update): fires one cycle later (N+1) via the
+  //     registered flush_redirect+redirect_pc pair, breaking the long
+  //     ROB->...->pc_ifu->L1I combinational path.
+  logic redirect_pc_update;
+  assign redirect_pc_update = cmu_bcast.flush_redirect || cmu_bcast.sys_resume || ifu_idu.resteer;
+  assign redirect_squash = cmu_bcast.flush_pipe || redirect_pc_update;
+  assign redirect_squash_pc = cmu_bcast.flush_redirect ? cmu_bcast.redirect_pc
+                            : cmu_bcast.flush_pipe     ? cmu_bcast.cpc
+                            : cmu_bcast.sys_resume      ? cmu_bcast.cpc
+                            :                             ifu_idu.resteer_pc;
+  assign redirect_event = redirect_squash;
   assign ifu_bpu.pc_update = recv_ready || redirect_event;
 
   assign ifu_l1i.pc = pc_ifu;
@@ -179,7 +205,7 @@ module rapt_ifu #(
 
   assign ifu_idu.inst_a = inst_a;
   assign ifu_idu.pc_a = pc_a;
-  assign ifu_idu.valid_a = valid;
+  assign ifu_idu.valid_a = valid && !redirect_event;
 
   assign ifu_idu.pnpc = pc_ifu;
 
@@ -196,10 +222,9 @@ module rapt_ifu #(
 `else
   assign seqpc = pre_is_c_a ? seq2 : seq4;
 `endif
-  assign nextpc = (cmu_bcast.flush_pipe ? cmu_bcast.cpc
-                 : cmu_bcast.sys_resume ? cmu_bcast.cpc
-                 : ifu_idu.resteer ? ifu_idu.resteer_pc
-                 : ifu_bpu.taken ? ifu_bpu.npc : seqpc);
+  assign nextpc = redirect_squash ? redirect_squash_pc
+                : ifu_bpu.taken   ? ifu_bpu.npc
+                :                   seqpc;
   assign recv_ready = ifu_l1i.valid && (ifu_idu.ready || (state_ifu == IDLE)) && !ifu_hazard
                     && !redirect_event;
 
@@ -260,7 +285,7 @@ module rapt_ifu #(
           state_ifu <= IDLE;
         end
       endcase
-      if (recv_ready || redirect_event) begin
+      if (recv_ready || redirect_pc_update) begin
         pc_ifu <= nextpc;
       end
       if (recv_ready) begin

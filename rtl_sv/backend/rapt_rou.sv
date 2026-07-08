@@ -81,7 +81,18 @@ module rapt_rou #(
   /* verilator lint_off UNUSEDSIGNAL */
   logic valid_a, ready_a;
   /* verilator lint_on UNUSEDSIGNAL */
+  // Phase 1: decoupled (registered) commit redirect.
+  //   flush_pipe    : combinational flush at ROB head (legacy) - clears the
+  //                   pipeline (UOQ, ROB, RS, IOQ, LSU, etc.) immediately.
+  //   flush_apply   : 1-cycle pulse one cycle AFTER flush_pipe; used ONLY
+  //                   for the frontend redirect so the redirect target comes
+  //                   from a register, breaking the ROB->pc_ifu->L1I path.
+  //   flush_target_c: combinational redirect target (= CMU cpc).
+  //   flush_target_r: registered redirect target for the frontend.
   logic            flush_pipe;
+  logic            flush_apply;
+  logic [XLEN-1:0] flush_target_c;
+  logic [XLEN-1:0] flush_target_r;
   logic            fence_time;
 
   // Async trap state
@@ -239,12 +250,20 @@ module rapt_rou #(
   // Latch one renamed uop into a UOQ entry, applying same-cycle CDB
   // bypass (EXU-A / EXU-B / IOQ broadcast) when the producer prd matches
   // a non-zero pr1/pr2; otherwise capture the PRF pre-read result.
+  //
+  // The packed status vectors (uoq_valid / uoq_pv1_valid / uoq_pv2_valid) are
+  // intentionally NOT written here. Verilator flags MULTIDRIVEN when a packed
+  // vector is written whole (reset `<= '0`) in the always_ff AND bit-wise from
+  // inside an NBA task, because it models the task body as a separate process.
+  // Instead the task returns the two operand-ready decisions via output args
+  // and the caller (the single always_ff) performs the packed-vector writes.
+  // The unpacked payload arrays are safe to write here (same as dispatch_to_rob).
   task automatic uoq_enqueue_slot(
       input logic [$clog2(IIQ_SIZE)-1:0] idx, input rapt_pkg::uop_t u, input logic [PLEN-1:0] pr1,
       input logic [PLEN-1:0] pr2, input logic [PLEN-1:0] pr_d, input logic [PLEN-1:0] pr_s,
       input logic [XLEN-1:0] im1, input logic [XLEN-1:0] im2, input logic [XLEN-1:0] prf_pv1,
-      input logic [XLEN-1:0] prf_pv2, input logic prf_pv1_v, input logic prf_pv2_v);
-    uoq_valid[idx] <= 1'b1;
+      input logic [XLEN-1:0] prf_pv2, input logic prf_pv1_v, input logic prf_pv2_v,
+      output logic pv1_v_o, output logic pv2_v_o);
     uoq_uops[idx]  <= u;
     uoq_pr1[idx]   <= pr1;
     uoq_pr2[idx]   <= pr2;
@@ -255,32 +274,32 @@ module rapt_rou #(
 
     // Operand 1 bypass at enqueue
     if (|pr1 && exu_rou.valid && exu_rou.prd == pr1) begin
-      uoq_pv1[idx]       <= exu_rou.result;
-      uoq_pv1_valid[idx] <= 1'b1;
+      uoq_pv1[idx] <= exu_rou.result;
+      pv1_v_o = 1'b1;
     end else if (|pr1 && exu_rou_b.valid && exu_rou_b.prd == pr1) begin
-      uoq_pv1[idx]       <= exu_rou_b.result;
-      uoq_pv1_valid[idx] <= 1'b1;
+      uoq_pv1[idx] <= exu_rou_b.result;
+      pv1_v_o = 1'b1;
     end else if (|pr1 && exu_ioq_bcast.valid && exu_ioq_bcast.prd == pr1) begin
-      uoq_pv1[idx]       <= exu_ioq_bcast.result;
-      uoq_pv1_valid[idx] <= 1'b1;
+      uoq_pv1[idx] <= exu_ioq_bcast.result;
+      pv1_v_o = 1'b1;
     end else begin
-      uoq_pv1[idx]       <= prf_pv1;
-      uoq_pv1_valid[idx] <= prf_pv1_v;
+      uoq_pv1[idx] <= prf_pv1;
+      pv1_v_o = prf_pv1_v;
     end
 
     // Operand 2 bypass at enqueue
     if (|pr2 && exu_rou.valid && exu_rou.prd == pr2) begin
-      uoq_pv2[idx]       <= exu_rou.result;
-      uoq_pv2_valid[idx] <= 1'b1;
+      uoq_pv2[idx] <= exu_rou.result;
+      pv2_v_o = 1'b1;
     end else if (|pr2 && exu_rou_b.valid && exu_rou_b.prd == pr2) begin
-      uoq_pv2[idx]       <= exu_rou_b.result;
-      uoq_pv2_valid[idx] <= 1'b1;
+      uoq_pv2[idx] <= exu_rou_b.result;
+      pv2_v_o = 1'b1;
     end else if (|pr2 && exu_ioq_bcast.valid && exu_ioq_bcast.prd == pr2) begin
-      uoq_pv2[idx]       <= exu_ioq_bcast.result;
-      uoq_pv2_valid[idx] <= 1'b1;
+      uoq_pv2[idx] <= exu_ioq_bcast.result;
+      pv2_v_o = 1'b1;
     end else begin
-      uoq_pv2[idx]       <= prf_pv2;
-      uoq_pv2_valid[idx] <= prf_pv2_v;
+      uoq_pv2[idx] <= prf_pv2;
+      pv2_v_o = prf_pv2_v;
     end
   endtask
 
@@ -360,17 +379,32 @@ module rapt_rou #(
       // Pipeline already drained; just clear the serialize lock
       serialize_in_flight <= 1'b0;
     end else begin
+      // Operand-ready decisions returned by uoq_enqueue_slot; the packed
+      // status vectors are written here (single process) to avoid MULTIDRIVEN.
+      automatic logic enq_pv1_v_a = 1'b0;
+      automatic logic enq_pv2_v_a = 1'b0;
+`ifdef RAPT_DUAL_ISSUE
+      automatic logic enq_pv1_v_b = 1'b0;
+      automatic logic enq_pv2_v_b = 1'b0;
+`endif
       if (uoq_enq_fire_a) begin
         uoq_enqueue_slot(uoq_head_a, rnu_rou.uop_a, rnu_rou.pr1_a, rnu_rou.pr2_a, rnu_rou.prd_a,
                          rnu_rou.prs_a, rnu_rou.op1_a, rnu_rou.op2_a, exu_prf.pv1_a, exu_prf.pv2_a,
-                         exu_prf.pv1_a_valid, exu_prf.pv2_a_valid);
+                         exu_prf.pv1_a_valid, exu_prf.pv2_a_valid, enq_pv1_v_a, enq_pv2_v_a);
+        uoq_valid[uoq_head_a]     <= 1'b1;
+        uoq_pv1_valid[uoq_head_a] <= enq_pv1_v_a;
+        uoq_pv2_valid[uoq_head_a] <= enq_pv2_v_a;
 `ifdef RAPT_DUAL_ISSUE
         if (uoq_enq_fire_b) begin
           uoq_is_pair[uoq_head_a] <= 1'b0;
           uoq_is_pair[uoq_head_b] <= 1'b1;
           uoq_enqueue_slot(uoq_head_b, rnu_rou.uop_b, rnu_rou.pr1_b, rnu_rou.pr2_b, rnu_rou.prd_b,
                            rnu_rou.prs_b, rnu_rou.op1_b, rnu_rou.op2_b, exu_prf.pv1_b,
-                           exu_prf.pv2_b, exu_prf.pv1_b_valid, exu_prf.pv2_b_valid);
+                           exu_prf.pv2_b, exu_prf.pv1_b_valid, exu_prf.pv2_b_valid,
+                           enq_pv1_v_b, enq_pv2_v_b);
+          uoq_valid[uoq_head_b]     <= 1'b1;
+          uoq_pv1_valid[uoq_head_b] <= enq_pv1_v_b;
+          uoq_pv2_valid[uoq_head_b] <= enq_pv2_v_b;
           uoq_head_a <= uoq_head_a + 2;
         end else begin
           uoq_is_pair[uoq_head_a] <= 1'b0;
@@ -683,15 +717,44 @@ module rapt_rou #(
     end
   end
 
+  // ---- Narrow per-entry eligibility vectors (Phase 0: break rob_head cone) --
+  // Each wide ROB / uop_pl struct field the commit-pointer decision needs is
+  // reduced to a 1-bit-per-entry vector.  These reductions do NOT depend on
+  // rob_head, so the only rob_head-dependent logic left in the commit-pointer
+  // feedback path is a set of cheap 1-bit N:1 muxes (indexed by h0/h1) instead
+  // of wide struct muxes.  This mirrors BOOM/XiangShan registered per-bank
+  // commit-eligibility flags and lets dual commit close timing on FPGA.
+  // Functionally identical to reading the structs directly (difftest-verified).
+  logic [ROB_SIZE-1:0] rob_wb_vec;    // state == ROB_WB
+  logic [ROB_SIZE-1:0] rob_wen_vec;   // wen
+  logic [ROB_SIZE-1:0] rob_dsk_vec;   // difftest_skip
+  logic [ROB_SIZE-1:0] rob_mis_vec;   // mispredict
+  logic [ROB_SIZE-1:0] rob_trap_vec;  // trap
+  logic [ROB_SIZE-1:0] upl_sys_vec;   // uop_pl.sys
+  logic [ROB_SIZE-1:0] upl_fi_vec;    // uop_pl.f_i
+  logic [ROB_SIZE-1:0] upl_ft_vec;    // uop_pl.f_time
+  logic [ROB_SIZE-1:0] upl_atom_vec;  // uop_pl.atom
+  for (genvar ge = 0; ge < int'(ROB_SIZE); ge++) begin : gen_rob_elig_vec
+    assign rob_wb_vec[ge]   = (rob_entry[ge].state == rapt_pkg::ROB_WB);
+    assign rob_wen_vec[ge]  = rob_entry[ge].wen;
+    assign rob_dsk_vec[ge]  = rob_entry[ge].difftest_skip;
+    assign rob_mis_vec[ge]  = rob_entry[ge].mispredict;
+    assign rob_trap_vec[ge] = rob_entry[ge].trap;
+    assign upl_sys_vec[ge]  = uop_pl[ge].sys;
+    assign upl_fi_vec[ge]   = uop_pl[ge].f_i;
+    assign upl_ft_vec[ge]   = uop_pl[ge].f_time;
+    assign upl_atom_vec[ge] = uop_pl[ge].atom;
+  end
+
   // ---- Slot 0 (head) ----
-  assign head0_br_p_fail = rob_entry[h0].mispredict;
+  assign head0_br_p_fail = rob_mis_vec[h0];
   logic head0_store_ready;
   logic head0_fence_ready;
-  assign head0_store_ready = rou_lsu.sq_ready || !rob_entry[h0].wen;
-  assign head0_fence_ready = !(uop_pl[h0].f_time || uop_pl[h0].f_i) || rou_lsu.sq_empty;
+  assign head0_store_ready = rou_lsu.sq_ready || !rob_wen_vec[h0];
+  assign head0_fence_ready = !(upl_ft_vec[h0] || upl_fi_vec[h0]) || rou_lsu.sq_empty;
   assign head0_valid     = recieved_trap || (
-      rob_entry[h0].busy
-      && rob_entry[h0].state == rapt_pkg::ROB_WB
+      rob_entry_busy[h0]
+      && rob_wb_vec[h0]
       && head0_store_ready
       && head0_fence_ready);
 
@@ -703,12 +766,12 @@ module rapt_rou #(
 
   logic head0_flush;
   assign head0_flush = recieved_trap || (head0_valid && (
-      uop_pl[h0].f_i
+      upl_fi_vec[h0]
       || head0_br_p_fail
-      || rob_entry[h0].trap
-      || uop_pl[h0].sys
-      || uop_pl[h0].f_time
-      || uop_pl[h0].atom
+      || rob_trap_vec[h0]
+      || upl_sys_vec[h0]
+      || upl_ft_vec[h0]
+      || upl_atom_vec[h0]
   ));
 
   // Kept as a distinct broadcast path for interface compatibility. Pure
@@ -721,20 +784,33 @@ module rapt_rou #(
   logic head1_valid;
   logic head1_store_ready;
   logic head1_fence_ready;
-  assign head1_store_ready = rou_lsu.sq_ready || !rob_entry[h1].wen;
-  assign head1_fence_ready = !(uop_pl[h1].f_time || uop_pl[h1].f_i) || rou_lsu.sq_empty;
-  assign head1_br_p_fail = rob_entry[h1].mispredict;
-  assign head1_valid     = rob_entry[h1].busy
-      && rob_entry[h1].state == rapt_pkg::ROB_WB
+  assign head1_store_ready = rou_lsu.sq_ready || !rob_wen_vec[h1];
+  assign head1_fence_ready = !(upl_ft_vec[h1] || upl_fi_vec[h1]) || rou_lsu.sq_empty;
+  assign head1_br_p_fail = rob_mis_vec[h1];
+  assign head1_valid     = rob_entry_busy[h1]
+      && rob_wb_vec[h1]
       && head1_store_ready
       && head1_fence_ready;
 
   // Dual commit: slot 0 doesn't flush, isn't a store, and slot 1 ready.
   // Also guard against difftest_skip to simplify simulation infrastructure.
 `ifdef RAPT_DUAL_COMMIT
+  // Dual commit: retire both ROB slots in one cycle when
+  //   - slot 0 is ready and does NOT need a flush,
+  //   - slot 0 does NOT write a register (wen==0, i.e. store/branch),
+  //   - slot 1 is ready,
+  //   - NEITHER slot carries a difftest_skip flag,
+  //   - AND slot 1 does NOT itself require a flush (mispredict, trap, sys,
+  //     fence, or atomic).
   assign dual_commit = head0_valid && !head0_flush
-      && !rob_entry[h0].wen && head1_valid
-      && !rob_entry[h0].difftest_skip && !rob_entry[h1].difftest_skip;
+      && !rob_wen_vec[h0] && head1_valid
+      && !rob_dsk_vec[h0] && !rob_dsk_vec[h1]
+      && !upl_fi_vec[h1]
+      && !rob_mis_vec[h1]
+      && !rob_trap_vec[h1]
+      && !upl_sys_vec[h1]
+      && !upl_ft_vec[h1]
+      && !upl_atom_vec[h1];
 `else
   assign dual_commit = 1'b0;
 `endif
@@ -742,17 +818,32 @@ module rapt_rou #(
   // Slot 1 flush
   logic head1_flush;
   assign head1_flush = dual_commit && (
-      uop_pl[h1].f_i
+      upl_fi_vec[h1]
       || head1_br_p_fail
-      || rob_entry[h1].trap
-      || uop_pl[h1].sys
-      || uop_pl[h1].f_time
-      || uop_pl[h1].atom
+      || rob_trap_vec[h1]
+      || upl_sys_vec[h1]
+      || upl_ft_vec[h1]
+      || upl_atom_vec[h1]
   );
 
   // ---- Global flush / fence ----
   assign fence_time = (head0_valid && uop_pl[h0].f_time) || (dual_commit && uop_pl[h1].f_time);
+
+  // ---- Phase 1: registered commit redirect ----
+  // Legacy combinational flush for the pipeline (UOQ / ROB / RS / IOQ / LSU).
   assign flush_pipe = head0_flush || head1_flush;
+  // Registered redirect target for the frontend: detect in cycle N, apply in N+1.
+  assign flush_target_c = dual_commit ? rou_cmu.npc_b : rou_cmu.npc_a;
+  always_ff @(posedge clock) begin
+    if (reset) begin
+      flush_apply    <= 1'b0;
+      flush_target_r <= '0;
+    end else begin
+      // Single-cycle pulse: detect in cycle N (apply=0) -> apply in cycle N+1.
+      flush_apply <= flush_pipe && !flush_apply;
+      if (flush_pipe && !flush_apply) flush_target_r <= flush_target_c;
+    end
+  end
 
   // PMU: SQ-specific commit stall (ROB head is a ready store blocked by full SQ)
   /* verilator lint_off UNUSEDSIGNAL */
@@ -788,6 +879,8 @@ module rapt_rou #(
   assign rou_cmu.fence_time = fence_time;
   assign rou_cmu.fence_i = (head0_valid && uop_pl[h0].f_i) || (dual_commit && uop_pl[h1].f_i);
   assign rou_cmu.flush_pipe = flush_pipe;
+  assign rou_cmu.flush_redirect = flush_apply;
+  assign rou_cmu.redirect_pc = flush_target_r;
   assign rou_cmu.sys_resume = sys_resume;
   assign rou_cmu.time_trap = recieved_trap;
   assign rou_cmu.rob_head = rob_head;
@@ -875,6 +968,60 @@ module rapt_rou #(
   // ---- Retire count for instret CSR ----
   assign rou_csr.retire_a = head0_valid;
   assign rou_csr.retire_b = dual_commit;
+
+  // ==========================================================================
+  //  DEBUG (ILA): dual-commit hang capture for FPGA bring-up.
+  //  Enabled only when RAPT_DBG_ILA is defined (pass via RAPT_PACK_VFLAGS on
+  //  the debug FPGA build); normal sim / production builds are unaffected.
+  //  `dbg_hang` asserts when the ROB is non-empty yet no commit has fired for
+  //  many cycles (pipeline deadlock) -- used as the ILA trigger.  All probed
+  //  nets carry (* mark_debug *) so the post-synth ILA-insertion tcl can find
+  //  and connect them over JTAG.
+  // ==========================================================================
+`ifdef RAPT_DBG_ILA
+  (* mark_debug = "true" *) logic dbg_hang;
+  (* mark_debug = "true" *) logic dbg_commit_fire;
+  (* mark_debug = "true" *) logic dbg_rob_empty;
+  (* mark_debug = "true" *) logic dbg_dual_commit;
+  (* mark_debug = "true" *) logic dbg_head0_valid;
+  (* mark_debug = "true" *) logic dbg_flush_pipe;
+  (* mark_debug = "true" *) logic dbg_flush_apply;
+  (* mark_debug = "true" *) logic dbg_recv_trap;
+  (* mark_debug = "true" *) logic [$clog2(ROB_SIZE)-1:0] dbg_rob_head;
+  (* mark_debug = "true" *) logic [$clog2(ROB_SIZE)-1:0] dbg_rob_tail;
+  (* mark_debug = "true" *) logic [XLEN-1:0] dbg_commit_pc;
+  (* mark_debug = "true" *) logic [XLEN-1:0] dbg_commit_pc_b;
+  (* mark_debug = "true" *) logic [31:0] dbg_commit_inst;
+  (* mark_debug = "true" *) logic [31:0] dbg_commit_inst_b;
+
+  assign dbg_commit_fire = commit_fire_o;
+  assign dbg_rob_empty   = rob_empty;
+  assign dbg_dual_commit = dual_commit;
+  assign dbg_head0_valid = head0_valid;
+  assign dbg_flush_pipe  = flush_pipe;
+  assign dbg_flush_apply = flush_apply;
+  assign dbg_recv_trap   = recieved_trap;
+  assign dbg_rob_head    = rob_head;
+  assign dbg_rob_tail    = rob_tail_a;
+  assign dbg_commit_pc   = uop_pl[h0].pc;
+  assign dbg_commit_pc_b = uop_pl[h1].pc;
+  assign dbg_commit_inst   = uop_pl[h0].inst;
+  assign dbg_commit_inst_b = uop_pl[h1].inst;
+
+  logic [15:0] dbg_nocommit_cnt;
+  always_ff @(posedge clock) begin
+    if (reset) begin
+      dbg_nocommit_cnt <= '0;
+      dbg_hang         <= 1'b0;
+    end else if (commit_fire_o || rob_empty) begin
+      dbg_nocommit_cnt <= '0;
+      dbg_hang         <= 1'b0;
+    end else begin
+      if (dbg_nocommit_cnt != 16'hffff) dbg_nocommit_cnt <= dbg_nocommit_cnt + 16'd1;
+      if (dbg_nocommit_cnt > 16'd3000) dbg_hang <= 1'b1;
+    end
+  end
+`endif
 
   // ==========================================================================
   //  Assertions (enable with +define+RAPT_ASSERT_EN)

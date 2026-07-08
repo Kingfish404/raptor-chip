@@ -47,6 +47,20 @@ module rapt_l1d #(
   localparam unsigned L1dWayW = L1D_N_WAYS > 1 ? $clog2(L1D_N_WAYS) : 1;
   logic [L1D_LINE_SIZE-1:0] l1d_valid[L1D_N_WAYS][L1D_SIZE];
   logic [L1dTagW-1:0] l1d_tag[L1D_N_WAYS][L1D_SIZE];
+
+  // Wide subarray configuration for L1D data SRAMs (128-bit target, matching L1I).
+  // Clamp the subarray to the line when a cache line is narrower than 128 bits
+  // (e.g. small config: L1D_LINE_LEN=1 -> 2 words < 4 words on RV32) so that
+  // D_SUBARRAY_COUNT stays >= 1. SLANG (yosys-slang, used by the STA flow) is
+  // stricter than Verilator and rejects zero-sized unpacked arrays.
+  localparam int D_SUBARRAY_WORDS_MAX = 16 / (XLEN / 8);  // 4 (RV32) / 2 (RV64)
+  localparam int D_SUBARRAY_WORDS =
+      (L1D_LINE_SIZE < D_SUBARRAY_WORDS_MAX) ? L1D_LINE_SIZE : D_SUBARRAY_WORDS_MAX;
+  localparam int D_SUBARRAY_BYTES = D_SUBARRAY_WORDS * (XLEN / 8);  // <= 16 (128 bits)
+  localparam int D_SUBARRAY_COUNT = L1D_LINE_SIZE / D_SUBARRAY_WORDS;
+  // Raw subarray read data + registered raddr per subarray
+  logic [D_SUBARRAY_BYTES*8-1:0] d_sa_rdata[L1D_N_WAYS][D_SUBARRAY_COUNT];
+  logic [L1D_LEN-1:0] d_sa_raddr[D_SUBARRAY_COUNT];
   logic [7:0] rstrb;
 
   logic [L1dTagW-1:0] addr_tag;
@@ -115,7 +129,13 @@ module rapt_l1d #(
   logic [L1D_LINE_LEN-1:0] l1d_off;
   logic [L1dWayW-1:0] l1d_way;           // which way for pending l1d_update
   logic [L1dWayW-1:0] ld_fill_way_r;     // registered fill way for load miss
-  logic [L1D_SIZE-1:0] d_replace_bit;      // random replacement toggle per set
+  logic [L1D_SIZE-1:0] d_replace_bit;      // random replacement toggle per set (used for 2-way only)
+  // PLRU signals (only used for >2-way; suppressed for 2-way)
+  /* verilator lint_off UNUSEDSIGNAL */
+  logic [L1D_N_WAYS-1:0] d_victim_way;
+  logic [L1D_N_WAYS-1:0] d_hit_way_onehot;
+  logic                  d_lru_write_en;
+  /* verilator lint_on UNUSEDSIGNAL */
 
   // Read-Modify-Write (RMW) for partial store cache updates.
   // When a partial store (SB/SH, or SW in RV64) hits in cache, instead of
@@ -165,23 +185,61 @@ module rapt_l1d #(
       ? lsu_l1d.raddr[L1D_LEN+L1D_LINE_LEN+L1dOffsetBits-1:L1D_LINE_LEN+L1dOffsetBits]
       : addr_idx;
 
-  // Data SRAM banks: per-way, one bank per word position in cache line
+  // Data SRAM: wide subarrays (128-bit), shared raddr across all ways.
+  // 4 subarrays per way replaces per-word banks, reducing SRAM instance count
+  // from 32 to 8 (for 2-way), proportionally cutting address fanout.
   logic [XLEN-1:0] data_bank_rdata[L1D_N_WAYS][L1D_LINE_SIZE];
+  // Pre-register raddr per subarray before fanout to SRAM instances
+  generate
+    for (genvar sa = 0; sa < D_SUBARRAY_COUNT; sa++) begin : gen_sa_raddr
+      always_ff @(posedge clock) begin
+        if (reset) d_sa_raddr[sa] <= '0;
+        else       d_sa_raddr[sa] <= sram_raddr;
+      end
+    end
+  endgenerate
   generate
     for (genvar w = 0; w < L1D_N_WAYS; w++) begin : gen_way
-      for (genvar gi = 0; gi < L1D_LINE_SIZE; gi++) begin : gen_data_bank
+      for (genvar sa = 0; sa < D_SUBARRAY_COUNT; sa++) begin : gen_sa
+        localparam int SA_BASE = sa * D_SUBARRAY_WORDS;
+        // BWE: write only the target word within the subarray
+        logic [D_SUBARRAY_BYTES-1:0] d_sa_bwe;
+        always_comb begin
+          d_sa_bwe = '0;
+          if (l1d_update && (l1d_way == L1dWayW'(w))) begin
+            for (int wi = 0; wi < D_SUBARRAY_WORDS; wi++) begin
+              if (l1d_off == L1D_LINE_LEN'(SA_BASE + wi))
+                d_sa_bwe[wi*(XLEN/8) +: (XLEN/8)] = {(XLEN/8){1'b1}};
+            end
+          end
+        end
+        // Write data: replicate l1d_data_u to subarray width
+        logic [D_SUBARRAY_BYTES*8-1:0] d_sa_wdata;
+        always_comb begin
+          d_sa_wdata = '0;
+          for (int wi = 0; wi < D_SUBARRAY_WORDS; wi++) begin
+            d_sa_wdata[wi*XLEN +: XLEN] = l1d_data_u;
+          end
+        end
         rapt_sram_1r1w #(
             .ADDR_WIDTH(L1D_LEN),
-            .DATA_WIDTH(XLEN)
+            .DATA_WIDTH(D_SUBARRAY_BYTES * 8),
+            .SKIP_ADDR_REG(1),
+            .USE_BWE(1)
         ) u_data_sram (
             .clock(clock),
             .ren  (1'b1),
-            .raddr(sram_raddr),
-            .rdata(data_bank_rdata[w][gi]),
-            .wen  (l1d_update && (l1d_off == L1D_LINE_LEN'(gi)) && (l1d_way == L1dWayW'(w))),
+            .raddr(d_sa_raddr[sa]),
+            .rdata(d_sa_rdata[w][sa]),
+            .wen  (|d_sa_bwe),
             .waddr(l1d_idx),
-            .wdata(l1d_data_u)
+            .wdata(d_sa_wdata),
+            .bwe  (d_sa_bwe)
         );
+        // Reconstruct per-word data from subarray
+        for (genvar wi = 0; wi < D_SUBARRAY_WORDS; wi++) begin : gen_word
+          assign data_bank_rdata[w][SA_BASE + wi] = d_sa_rdata[w][sa][(wi+1)*XLEN-1:wi*XLEN];
+        end
       end
     end
   endgenerate
@@ -337,12 +395,58 @@ module rapt_l1d #(
       assign tag_hit_vec[gi] = |way_tag_hit[gi];
     end
   endgenerate
+  // load_hit_way kept for debug visibility; AND-OR mux replaces it for data selection
+  /* verilator lint_off UNUSEDSIGNAL */
   logic [L1dWayW-1:0] load_hit_way;
+  /* verilator lint_on UNUSEDSIGNAL */
   always_comb begin
     load_hit_way = '0;
     for (int w = int'(L1D_N_WAYS)-1; w >= 0; w--)
       if (way_tag_hit[addr_offset][w]) load_hit_way = L1dWayW'(w);
   end
+
+  // PLRU instantiation for >2-way caches
+  generate
+    if (L1D_N_WAYS > 2) begin : gen_dplru
+      // Per-way line-valid: a way is "valid" for PLRU if any word in the line is valid
+      logic [L1D_N_WAYS-1:0] d_way_line_valid;
+      for (genvar w = 0; w < L1D_N_WAYS; w++) begin : gen_lv
+        assign d_way_line_valid[w] = |l1d_valid[w][addr_idx];
+      end
+
+      // One-hot hit way for PLRU update
+      always_comb begin
+        d_hit_way_onehot = '0;
+        for (int w = 0; w < int'(L1D_N_WAYS); w++)
+          if (way_tag_hit[addr_offset][w]) d_hit_way_onehot[w] = 1'b1;
+      end
+      // LRU write enable: on load hit or when a fill completes (l1d_update with valid_u)
+      assign d_lru_write_en = ((l1d_state == LD_A) && tag_hit)
+                           || (l1d_update && l1d_valid_u);
+
+      rapt_plru #(
+          .NUMWAYS(L1D_N_WAYS),
+          .SETLEN(L1D_LEN),
+          .NSETS(L1D_SIZE)
+      ) u_dplru (
+          .clock(clock),
+          .reset(reset),
+          .cache_en(1'b1),
+          .hit_way(d_hit_way_onehot),
+          .valid_way(d_way_line_valid),
+          .victim_way(d_victim_way),
+          .cache_set(addr_idx),
+          .lru_write_en(d_lru_write_en),
+          .paddr_set(addr_idx),
+          .invalidate_cache(cmu_bcast.fence_time),
+          .invalidate_flush(1'b0)
+      );
+    end else begin : gen_no_dplru
+      assign d_victim_way = '1;
+      assign d_hit_way_onehot = '0;
+      assign d_lru_write_en = 1'b0;
+    end
+  endgenerate
 
   logic sram_bypass_r;
   always_ff @(posedge clock) begin
@@ -382,7 +486,20 @@ module rapt_l1d #(
   // data_hit: SRAM data ready in LD_A: the speculative read in the preceding
   // IDLE (or PTW-wait) cycle guarantees data_bank_rdata is valid on LD_A entry.
   assign data_hit = (l1d_state == LD_A) && tag_hit;
-  assign l1d_data = data_bank_rdata[load_hit_way][addr_offset];
+  // AND-OR mux: each way gates its data with its hit, then all ways OR.
+  // Replaces the priority-encoder → indexed-mux chain.
+  logic [XLEN-1:0] way_data_masked[L1D_N_WAYS];
+  generate
+    for (genvar w = 0; w < L1D_N_WAYS; w++) begin : gen_ao_load
+      assign way_data_masked[w] = way_tag_hit[addr_offset][w]
+        ? data_bank_rdata[w][addr_offset] : '0;
+    end
+  endgenerate
+  always_comb begin
+    l1d_data = '0;
+    for (int w = 0; w < int'(L1D_N_WAYS); w++)
+      l1d_data |= way_data_masked[w];
+  end
 
   assign waddr_tag = lsu_l1d.waddr[XLEN-1:L1D_LEN+L1D_LINE_LEN+L1dOffsetBits];
   assign waddr_idx = lsu_l1d.waddr[L1D_LEN+L1D_LINE_LEN+L1dOffsetBits-1:L1D_LINE_LEN+L1dOffsetBits];
@@ -414,22 +531,11 @@ module rapt_l1d #(
   // Fill way selection for load miss
   logic [L1dWayW-1:0] ld_fill_way;
   generate
-    if (L1D_N_WAYS > 1) begin : gen_fill_multi
-      // Duplicate-tag prevention: if the tag already exists in a way (from a
-      // previous fill that was forced-miss by sram_bypass_r), reuse that way
-      // instead of allocating a new one.  Without this check, a conservative
-      // sram_bypass_r miss creates duplicate tags across ways; a subsequent
-      // store updates only one copy, leaving the other stale: and when the
-      // updated copy is later evicted, a load hits the stale duplicate.
-      // With per-line tags, "tag exists" means any word in the line is valid
-      // AND the line's tag matches.
+    if (L1D_N_WAYS == 2) begin : gen_fill_2way
+      // Duplicate-tag prevention: if the tag already exists in a way, reuse it.
       logic ld_tag_dup0, ld_tag_dup1;
       assign ld_tag_dup0 = (|l1d_valid[0][addr_idx]) && way_tag_match[0];
       assign ld_tag_dup1 = (|l1d_valid[1][addr_idx]) && way_tag_match[1];
-      // Same dup-tag check on the store side: without it, a full-word store
-      // miss could allocate a new way for a line that already exists in the
-      // other way, creating duplicate tags.  Subsequent partial stores then
-      // invalidate only one copy, leaving stale data in the other.
       logic st_tag_dup0, st_tag_dup1;
       assign st_tag_dup0 = (|l1d_valid[0][waddr_idx]) && way_wtag_match[0];
       assign st_tag_dup1 = (|l1d_valid[1][waddr_idx]) && way_wtag_match[1];
@@ -443,6 +549,50 @@ module rapt_l1d #(
                          : !l1d_valid[0][addr_idx][addr_offset] ? 1'b0
                          : !l1d_valid[1][addr_idx][addr_offset] ? 1'b1
                          : d_replace_bit[addr_idx];
+    end else if (L1D_N_WAYS > 2) begin : gen_fill_plru
+      // Generic N-way: duplicate-tag > invalid at target offset > PLRU victim
+      always_comb begin
+        store_fill_way = '0;
+        ld_fill_way     = '0;
+        // Store side
+        for (int w = 0; w < int'(L1D_N_WAYS); w++) begin
+          if ((|l1d_valid[w][waddr_idx]) && way_wtag_match[w])
+            store_fill_way = L1dWayW'(w);
+        end
+        if (store_fill_way == '0 && !(|way_wtag_match)) begin
+          for (int w = 0; w < int'(L1D_N_WAYS); w++) begin
+            if (!l1d_valid[w][waddr_idx][waddr_offset]) begin
+              store_fill_way = L1dWayW'(w);
+              break;
+            end
+          end
+        end
+        // All ways have the target word valid (no invalid to pick): use PLRU victim
+        if (store_fill_way == '0 && !(|way_wtag_match)) begin
+          for (int w = 0; w < int'(L1D_N_WAYS); w++) begin
+            if (d_victim_way[w]) store_fill_way = L1dWayW'(w);
+          end
+        end
+        // Load side
+        for (int w = 0; w < int'(L1D_N_WAYS); w++) begin
+          if ((|l1d_valid[w][addr_idx]) && way_tag_match[w])
+            ld_fill_way = L1dWayW'(w);
+        end
+        if (ld_fill_way == '0 && !(|way_tag_match)) begin
+          for (int w = 0; w < int'(L1D_N_WAYS); w++) begin
+            if (!l1d_valid[w][addr_idx][addr_offset]) begin
+              ld_fill_way = L1dWayW'(w);
+              break;
+            end
+          end
+        end
+        // All ways have the target word valid (no invalid to pick): use PLRU victim
+        if (ld_fill_way == '0 && !(|way_tag_match)) begin
+          for (int w = 0; w < int'(L1D_N_WAYS); w++) begin
+            if (d_victim_way[w]) ld_fill_way = L1dWayW'(w);
+          end
+        end
+      end
     end else begin : gen_fill_dm
       assign store_fill_way = '0;
       assign ld_fill_way = '0;
@@ -979,7 +1129,7 @@ module rapt_l1d #(
           l1d_idx <= waddr_idx;
           l1d_off <= waddr_offset;
           l1d_way <= hit_w ? store_hit_way : store_fill_way;
-          if (!hit_w) d_replace_bit[waddr_idx] <= ~d_replace_bit[waddr_idx];
+          if (!hit_w && L1D_N_WAYS == 2) d_replace_bit[waddr_idx] <= ~d_replace_bit[waddr_idx];
         end else begin
           if (hit_w) begin
             if (partial_store_rmw) begin
@@ -1016,7 +1166,7 @@ module rapt_l1d #(
             l1d_idx <= addr_idx;
             l1d_off <= addr_offset;
             l1d_way <= ld_fill_way_r;
-            d_replace_bit[addr_idx] <= ~d_replace_bit[addr_idx];
+            if (L1D_N_WAYS == 2) d_replace_bit[addr_idx] <= ~d_replace_bit[addr_idx];
           end
         end
       end

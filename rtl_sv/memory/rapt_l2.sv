@@ -348,8 +348,11 @@ module rapt_l2 #(
                             && (w_word_now == L2_LINE_LEN'(gi));
       rapt_sram_1r1w #(
           .ADDR_WIDTH(L2_LEN),
-          .DATA_WIDTH(XLEN)
+          .DATA_WIDTH(XLEN),
+          .INST_ID(200 + gi),
+          .USE_BWE(0)
       ) u_data_sram (
+          .bwe({(XLEN/8){1'b1}}),
           .clock(clock),
           .ren  (1'b1),
           .raddr(data_sram_raddr),

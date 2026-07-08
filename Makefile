@@ -558,7 +558,63 @@ coremark-npc64-optim: $(AM_KERNELS) config-npc32 ## Run CoreMark on NPC (riscv64
 	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/coremark_eembc ARCH=riscv64-npc run ARGS="$(ARGS)" VFLAGS="$(VFLAGS)" COREMARK_OPTIM_CFLAGS="$(COREMARK_OPTIM_CFLAGS)" $(call tee_npc,coremark-npc64-optim)
 	$(call coremark_mhz_report,$(NPC_LOG_DIR)/coremark-npc64-optim.log)
 
-# --- RISC-V Architecture Tests ---
+# --- Dhrystone (DMIPS / DMIPS/MHz) ----------------------------------------
+# Mirrors the CoreMark integration. DMIPS/MHz is frequency-independent and
+# derived from the nsim PMU active-cycle count, matching how CoreMark/MHz is
+# computed (so the frequency assumption is identical to CoreMark's). Absolute
+# DMIPS is then DMIPS/MHz * DHRY_FREQ_MHZ.
+#   DMIPS/MHz = Number_Of_Runs * 1e6 / (active_cycles * 1757)
+#   DMIPS     = DMIPS/MHz * DHRY_FREQ_MHZ
+# 1757 is the VAX-11/780 reference (1 DMIPS == 1757 Dhrystones/s).
+DHRY_FREQ_MHZ ?= 180 ## Assumed clock (MHz) for absolute DMIPS (DMIPS/MHz is frequency-independent)
+
+# Parse a tee'd Dhrystone + nsim run log and print the DMIPS / DMIPS/MHz score.
+# $(1) = path to the log file produced by tee_npc.
+define dhrystone_dmips_report
+@awk -v freq=$(DHRY_FREQ_MHZ) '/^[ \t]*Number_Of_Runs[ \t]*:/{for(i=1;i<=NF;i++)if($$i~/^[0-9]+$$/)runs=$$i} /#inst:/{if(match($$0,/cycle:[ \t]*[0-9]+/)){c=substr($$0,RSTART,RLENGTH);gsub(/[^0-9]/,"",c);cy=c}} END{if(runs+0>0&&cy+0>0){dpm=runs*1000000.0/(cy*1757.0);printf "\n==================== Dhrystone DMIPS ====================\n";printf "Runs          : %d\n",runs;printf "Active cycles : %d\n",cy;printf "Assumed freq  : %d MHz\n",freq;printf "DMIPS/MHz     : %.4f  (= %d * 1e6 / (%d * 1757))\n",dpm,runs,cy;printf "DMIPS         : %.2f  (= DMIPS/MHz * %d MHz)\n",dpm*freq,freq;printf "========================================================\n"}else{printf "[DMIPS] WARN: could not parse runs(%s) / cycles(%s) from %s\n",runs,cy,"$(1)"}}' "$(1)"
+endef
+
+dhrystone-npc32: $(AM_KERNELS) config-npc32 ## Run Dhrystone on NPC (DMIPS + DMIPS/MHz)
+	@mkdir -p $(NPC_LOG_DIR)
+	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/dhrystone ARCH=$(NPC_ARCH) run ARGS="$(ARGS)" $(call tee_npc,dhrystone-npc32)
+	$(call dhrystone_dmips_report,$(NPC_LOG_DIR)/dhrystone-npc32.log)
+
+dhrystone-npc32-difftest: $(AM_KERNELS) config-npc32-difftest config-nemu32-ref ## Run Dhrystone on NPC with difftest
+	@mkdir -p $(NPC_LOG_DIR)
+	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/dhrystone ARCH=$(NPC_ARCH) run ARGS="$(ARGS)" $(call tee_npc,dhrystone-npc32-difftest)
+	$(call dhrystone_dmips_report,$(NPC_LOG_DIR)/dhrystone-npc32-difftest.log)
+
+dhrystone-npc64: VFLAGS := -DRAPT_RV64
+dhrystone-npc64: $(AM_KERNELS) config-npc32 ## Run Dhrystone on NPC (riscv64)
+	@mkdir -p $(NPC_LOG_DIR)
+	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/dhrystone ARCH=riscv64-npc run ARGS="$(ARGS)" VFLAGS="$(VFLAGS)" $(call tee_npc,dhrystone-npc64)
+	$(call dhrystone_dmips_report,$(NPC_LOG_DIR)/dhrystone-npc64.log)
+
+dhrystone-nemu32: $(AM_KERNELS) config-nemu32 ## Run Dhrystone on NEMU (riscv32, functional check)
+	@mkdir -p $(NEMU_LOG_DIR)
+	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/dhrystone ARCH=riscv32-nemu run ARGS="$(ARGS)" $(call tee_nemu,dhrystone-nemu32)
+
+# Optimized Dhrystone codegen.
+DHRYSTONE_OPTIM_CFLAGS := \
+	-O3 -funroll-loops -finline-functions -falign-functions=16 \
+	-fbuiltin -fno-builtin-printf -fno-builtin-puts -fno-builtin-putchar
+
+dhrystone-npc32-optim: $(AM_KERNELS) config-npc32 ## Run Dhrystone on NPC with optimized codegen (builtins) + DMIPS report
+	@mkdir -p $(NPC_LOG_DIR)
+	$(MAKE) -C $(AM_KERNELS)/benchmarks/dhrystone ARCH=$(NPC_ARCH) clean
+	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/dhrystone ARCH=$(NPC_ARCH) run ARGS="$(ARGS)" DHRYSTONE_OPTIM_CFLAGS="$(DHRYSTONE_OPTIM_CFLAGS)" $(call tee_npc,dhrystone-npc32-optim)
+	$(call dhrystone_dmips_report,$(NPC_LOG_DIR)/dhrystone-npc32-optim.log)
+
+dhrystone-npc64-optim: VFLAGS := -DRAPT_RV64
+dhrystone-npc64-optim: $(AM_KERNELS) config-npc32 ## Run Dhrystone on NPC (riscv64) with optimized codegen (builtins) + DMIPS report
+	@mkdir -p $(NPC_LOG_DIR)
+	$(MAKE) -C $(AM_KERNELS)/benchmarks/dhrystone ARCH=riscv64-npc clean
+	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/dhrystone ARCH=riscv64-npc run ARGS="$(ARGS)" VFLAGS="$(VFLAGS)" DHRYSTONE_OPTIM_CFLAGS="$(DHRYSTONE_OPTIM_CFLAGS)" $(call tee_npc,dhrystone-npc64-optim)
+	$(call dhrystone_dmips_report,$(NPC_LOG_DIR)/dhrystone-npc64-optim.log)
+
+# ============================================================================
+# RISC-V Architecture Tests
+# ============================================================================
 RISCV_ARCH_TEST ?= $(RAPTOR_HOME)/third_party/kingfish404/riscv-arch-test-am
 
 $(RISCV_ARCH_TEST):
@@ -927,6 +983,7 @@ app-clean: ## [app] Clean app build artifacts
 	config-npc32 config-npc32-difftest config-npc32-linux config-npc32-ysyxsoc menuconfig-npc32 build-npc32 run-npc32 sim-npc32 \
 	build-npc64 run-npc64 lint-npc64 \
 	coremark-npc32 coremark-npc64 coremark-npc32-optim coremark-npc64-optim coremark-npc32-difftest coremark-ysyxsoc microbench-npc32 microbench-npc64 microbench-npc32-difftest microbench-ysyxsoc \
+	dhrystone-npc32 dhrystone-npc32-difftest dhrystone-npc64 dhrystone-nemu32 dhrystone-npc32-optim dhrystone-npc64-optim \
 	coremark-nemu32 microbench-nemu32 coremark-nemu64 microbench-nemu64 \
 	archtest-npc32 archtest-npc32e \
 	nanos-nemu32 nanos-npc32 \
