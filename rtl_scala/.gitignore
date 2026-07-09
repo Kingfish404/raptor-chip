@@ -3,6 +3,7 @@
 !build.sbt
 !build.sc
 !.scalafmt.conf
+!project/build.properties
 
 # ---- SBT build artifacts ----
 target/
