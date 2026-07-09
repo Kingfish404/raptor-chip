@@ -20,13 +20,13 @@ module rapt_prf #(
     exu_prf_if.slave prf_rd,
 
     // Write source A: EXU ALU result
-    exu_rou_if.in exu_rou,
+    exu_wb_if.in exu_rou,
 
     // Write source C: EXU ALU slot-B (pure arithmetic)
-    exu_rou_b_if.in exu_rou_b,
+    exu_wb_if.in exu_rou_b,
 
     // Write source B: IOQ broadcast (LSU/CSR)
-    exu_ioq_bcast_if.in exu_ioq_bcast,
+    exu_wb_if.in exu_ioq_bcast,
 
     // Commit / dealloc / flush
     rou_cmu_if.in   rou_cmu,
@@ -77,27 +77,27 @@ module rapt_prf #(
   assign prf_rd.pv2_b_valid = prf_valid[prf_rd.pr2_b];
 `endif
 
-  // ---- Write port extraction ----
-  logic            wr_a_en;
-  logic [PLEN-1:0] wr_a_addr;
-  logic [XLEN-1:0] wr_a_data;
-  assign wr_a_en   = exu_rou.valid && exu_rou.rd != 0;
-  assign wr_a_addr = exu_rou.prd;
-  assign wr_a_data = exu_rou.result;
+  // ---- Write port extraction (unified CDB) ----
+  // One slot per value-producing writeback pipe: [0]=ALU-A [1]=ALU-B [2]=MEM.
+  // The BRU port never writes rd (prd/rd tied 0) so it has no slot here.
+  // Rename guarantees a unique producer per physical register, so at most
+  // one port targets a given prd in any cycle and slot order is irrelevant.
+  localparam int unsigned NWB = 3;
+  logic            wr_en  [NWB];
+  logic [PLEN-1:0] wr_addr[NWB];
+  logic [XLEN-1:0] wr_data[NWB];
 
-  logic            wr_b_en;
-  logic [PLEN-1:0] wr_b_addr;
-  logic [XLEN-1:0] wr_b_data;
-  assign wr_b_en   = exu_ioq_bcast.valid && exu_ioq_bcast.rd != 0;
-  assign wr_b_addr = exu_ioq_bcast.prd;
-  assign wr_b_data = exu_ioq_bcast.result;
+  assign wr_en[0]   = exu_rou.valid && exu_rou.rd != 0;
+  assign wr_addr[0] = exu_rou.prd;
+  assign wr_data[0] = exu_rou.result;
 
-  logic            wr_c_en;
-  logic [PLEN-1:0] wr_c_addr;
-  logic [XLEN-1:0] wr_c_data;
-  assign wr_c_en   = exu_rou_b.valid && exu_rou_b.rd != 0;
-  assign wr_c_addr = exu_rou_b.prd;
-  assign wr_c_data = exu_rou_b.result;
+  assign wr_en[1]   = exu_rou_b.valid && exu_rou_b.rd != 0;
+  assign wr_addr[1] = exu_rou_b.prd;
+  assign wr_data[1] = exu_rou_b.result;
+
+  assign wr_en[2]   = exu_ioq_bcast.valid && exu_ioq_bcast.rd != 0;
+  assign wr_addr[2] = exu_ioq_bcast.prd;
+  assign wr_data[2] = exu_ioq_bcast.result;
 
   // ---- Commit / dealloc ----
   logic commit_dealloc;
@@ -109,23 +109,37 @@ module rapt_prf #(
   // Pre-decode addresses to one-hot vectors (shared decoders, reduce per-entry fanin)
   logic [PNUM-1:0] dealloc_prs_oh, dealloc_prs_b_oh;
   logic [PNUM-1:0] settle_prd_oh, settle_prd_b_oh;
-  logic [PNUM-1:0] wr_a_oh, wr_b_oh, wr_c_oh;
+  logic [PNUM-1:0] wr_oh[NWB];
 
   always_comb begin
     dealloc_prs_oh   = '0;
     dealloc_prs_b_oh = '0;
     settle_prd_oh    = '0;
     settle_prd_b_oh  = '0;
-    wr_a_oh          = '0;
-    wr_b_oh          = '0;
-    wr_c_oh          = '0;
+    for (int p = 0; p < NWB; p++) wr_oh[p] = '0;
     if (commit_dealloc_b) dealloc_prs_b_oh[rou_cmu.prs_b] = 1'b1;
     if (commit_dealloc) dealloc_prs_oh[rou_cmu.prs_a] = 1'b1;
     if (commit_dealloc_b) settle_prd_b_oh[rou_cmu.prd_b] = 1'b1;
     if (commit_dealloc) settle_prd_oh[rou_cmu.prd_a] = 1'b1;
-    if (wr_a_en) wr_a_oh[wr_a_addr] = 1'b1;
-    if (wr_b_en) wr_b_oh[wr_b_addr] = 1'b1;
-    if (wr_c_en) wr_c_oh[wr_c_addr] = 1'b1;
+    for (int p = 0; p < NWB; p++) begin
+      if (wr_en[p]) wr_oh[p][wr_addr[p]] = 1'b1;
+    end
+  end
+
+  // Any-port write select per entry (unique by rename invariant).
+  logic [PNUM-1:0] wr_any_oh;
+  logic [XLEN-1:0] wr_mux_data[PNUM];
+  always_comb begin
+    for (int i = 0; i < PNUM; i++) begin
+      wr_any_oh[i]   = 1'b0;
+      wr_mux_data[i] = wr_data[0];
+      for (int p = NWB - 1; p >= 0; p--) begin
+        if (wr_oh[p][i]) begin
+          wr_any_oh[i]   = 1'b1;
+          wr_mux_data[i] = wr_data[p];
+        end
+      end
+    end
   end
 
   // ---- Write / state update ----
@@ -157,16 +171,8 @@ module rapt_prf #(
           // PNUM*XLEN data-flop D mux fanin.
           prf_valid[i]     <= 1'b0;
           prf_transient[i] <= 1'b0;
-        end else if (!cmu_bcast.flush_pipe && wr_a_oh[i]) begin
-          prf_arr[i]           <= wr_a_data;
-          prf_valid[i]     <= 1'b1;
-          prf_transient[i] <= 1'b1;
-        end else if (!cmu_bcast.flush_pipe && wr_b_oh[i]) begin
-          prf_arr[i]           <= wr_b_data;
-          prf_valid[i]     <= 1'b1;
-          prf_transient[i] <= 1'b1;
-        end else if (!cmu_bcast.flush_pipe && wr_c_oh[i]) begin
-          prf_arr[i]           <= wr_c_data;
+        end else if (!cmu_bcast.flush_pipe && wr_any_oh[i]) begin
+          prf_arr[i]       <= wr_mux_data[i];
           prf_valid[i]     <= 1'b1;
           prf_transient[i] <= 1'b1;
         end else if (dbg_we_i && dbg_addr_i != 5'd0

@@ -32,13 +32,13 @@ module rapt_exu_ioq #(
     exu_disp_ioq_if.ioq disp,
 
     // Forwarding sources (other writeback buses)
-    exu_rou_if.in   exu_rou,
-    exu_rou_b_if.in exu_rou_b,
+    exu_wb_if.in exu_rou,
+    exu_wb_if.in exu_rou_b,
 
     // Outputs to memory subsystem & ROB writeback
     exu_lsu_if.master    exu_lsu,
     exu_l1d_if.master    exu_l1d,
-    exu_ioq_bcast_if.out exu_ioq_bcast,
+    exu_wb_if.out        exu_ioq_bcast,
     exu_load_fast_if.source load_fast,
 
     // A2: PMU: one-cycle pulse when IOQ becomes full
@@ -202,6 +202,38 @@ module rapt_exu_ioq #(
       : ioq_alu[active_idx][4:0];
   assign exu_lsu.atomic_lock = ioq_atom[active_idx] && ioq_alu[active_idx] == `RAPT_ATO_LR__;
   assign exu_lsu.pc = ioq_pc[active_idx];
+
+  // === Hit-under-miss B issue (Phase A2, RAPT_LSU_HUM) ===
+  // While the A channel is parked on a miss (oo_pending), offer the next
+  // eligible load (in age order, skipping the pending entry) on the B
+  // channel.  B is best-effort: it completes only on a clean L1D hit or SQ
+  // forward; anything else just leaves the entry to retry via A later, so
+  // no extra state is held here.  ioq_load_issue_vec already enforces
+  // operand readiness, non-atomic, and older-store disambiguation.
+`ifdef RAPT_LSU_HUM
+  logic [$clog2(IOQ_SIZE)-1:0] b_issue_idx;
+  logic b_issue_found;
+  always_comb begin
+    b_issue_idx   = ioq_head;
+    b_issue_found = 1'b0;
+    for (int k = 0; k < IOQ_SIZE; k++) begin
+      automatic logic [$clog2(IOQ_SIZE)-1:0] idx;
+      idx = ioq_head + k[$clog2(IOQ_SIZE)-1:0];
+      if (!b_issue_found && ioq_load_issue_vec[idx]
+          && idx != oo_pending_idx && !ioq_atom[idx]) begin
+        b_issue_idx   = idx;
+        b_issue_found = 1'b1;
+      end
+    end
+  end
+  assign exu_lsu.rvalid_b = oo_pending && b_issue_found;
+  assign exu_lsu.raddr_b  = ioq_vj[b_issue_idx] + ioq_imm[b_issue_idx];
+  assign exu_lsu.ralu_b   = ioq_alu[b_issue_idx][4:0];
+`else
+  assign exu_lsu.rvalid_b = 1'b0;
+  assign exu_lsu.raddr_b  = '0;
+  assign exu_lsu.ralu_b   = '0;
+`endif
 
   // LSU/SQ store width expects SB/SH/SW/SD masks, while atomics carry
   // RAPT_ATO_* opcodes in ioq_alu. Convert AMO/SC width from uop.word.
@@ -374,6 +406,12 @@ module rapt_exu_ioq #(
           : ioq_mmu_en[ioq_head] == 0)
       && (!ioq_wen[ioq_head] || (ioq_mmu_en[ioq_head] == 0 && exu_lsu.stq_ready)));
   assign exu_ioq_bcast.valid = ioq_valid_found;
+  // MEM pipe never resolves branches nor writes CSRs (unified exu_wb_if
+  // tie-offs; ROB keeps mispredict at its dispatch-init value of 0).
+  assign exu_ioq_bcast.btaken = 1'b0;
+  assign exu_ioq_bcast.mispredict = 1'b0;
+  assign exu_ioq_bcast.csr_wen = 1'b0;
+  assign exu_ioq_bcast.csr_wdata = '0;
 
   // Fast load-use wakeup is a narrow tag-only path.  It wakes RS operands when
   // a plain head load has actually returned, one cycle before the normal IOQ
@@ -409,23 +447,45 @@ module rapt_exu_ioq #(
 
   // === Sequential: enqueue / dequeue / forwarding / OoO LSU FSM ===
   logic ioq_full_r;  // Previous cycle full state (for pmu_ioq_full rising-edge detection)
-  logic [IOQ_SIZE-1:0] ioq_pr1_ioq_match;
-  logic [IOQ_SIZE-1:0] ioq_pr2_ioq_match;
-  logic [IOQ_SIZE-1:0] ioq_pr1_rou_match;
-  logic [IOQ_SIZE-1:0] ioq_pr2_rou_match;
-  logic [IOQ_SIZE-1:0] ioq_pr1_rou_b_match;
-  logic [IOQ_SIZE-1:0] ioq_pr2_rou_b_match;
 
-  function automatic logic wb_ioq_match(input logic [PLEN-1:0] pr);
-    return (pr != '0) && exu_ioq_bcast.valid && (exu_ioq_bcast.prd == pr);
+  // --------------------------------------------------------------------------
+  // Unified CDB view for operand forwarding.
+  //
+  // Value-producing writeback ports in forwarding-priority order:
+  //   [0] MEM (self broadcast)   [1] ALU-A   [2] ALU-B
+  // Rename guarantees a unique producer per physical register, so at most one
+  // port matches a given tag per cycle; the priority order only pins the
+  // legacy mux shape. Adding a pipe = appending one slot here.
+  // --------------------------------------------------------------------------
+  localparam int unsigned NWB = 3;
+  logic            wb_valid [NWB];
+  logic [PLEN-1:0] wb_prd   [NWB];
+  logic [XLEN-1:0] wb_result[NWB];
+  assign wb_valid[0]  = exu_ioq_bcast.valid;
+  assign wb_prd[0]    = exu_ioq_bcast.prd;
+  assign wb_result[0] = exu_ioq_bcast.result;
+  assign wb_valid[1]  = exu_rou.valid;
+  assign wb_prd[1]    = exu_rou.prd;
+  assign wb_result[1] = exu_rou.result;
+  assign wb_valid[2]  = exu_rou_b.valid;
+  assign wb_prd[2]    = exu_rou_b.prd;
+  assign wb_result[2] = exu_rou_b.result;
+
+  // Any-port tag match (zero tag never matches).
+  function automatic logic wb_hit(input logic [PLEN-1:0] pr);
+    wb_hit = 1'b0;
+    for (int p = 0; p < NWB; p++) begin
+      wb_hit |= (pr != '0) && wb_valid[p] && (wb_prd[p] == pr);
+    end
   endfunction
 
-  function automatic logic wb_rou_match(input logic [PLEN-1:0] pr);
-    return (pr != '0) && exu_rou.valid && (exu_rou.prd == pr);
-  endfunction
-
-  function automatic logic wb_rou_b_match(input logic [PLEN-1:0] pr);
-    return (pr != '0) && exu_rou_b.valid && (exu_rou_b.prd == pr);
+  // First-match value in priority order (reverse loop: slot 0 wins).
+  function automatic logic [XLEN-1:0] wb_val(input logic [PLEN-1:0] pr,
+                                             input logic [XLEN-1:0] dflt);
+    wb_val = dflt;
+    for (int p = NWB - 1; p >= 0; p--) begin
+      if ((pr != '0) && wb_valid[p] && (wb_prd[p] == pr)) wb_val = wb_result[p];
+    end
   endfunction
 
   // --------------------------------------------------------------------------
@@ -433,36 +493,28 @@ module rapt_exu_ioq #(
   //
   // A just-enqueued entry is not visible to the forwarding loop until the next
   // cycle, so wake it from same-cycle broadcasts before storing the tag/value.
-  // Priority mirrors the forwarding loop: exu_ioq_bcast > exu_rou > exu_rou_b.
+  // --------------------------------------------------------------------------
   function automatic logic [PLEN-1:0] wake_pr(input logic [PLEN-1:0] pr);
-    if (wb_ioq_match(pr) || wb_rou_match(pr) || wb_rou_b_match(pr)) begin
-      return '0;
-    end else begin
-      return pr;
-    end
+    return wb_hit(pr) ? '0 : pr;
   endfunction
 
   function automatic logic [XLEN-1:0] wake_val(input logic [PLEN-1:0] pr,
                                                input logic [XLEN-1:0] dflt);
-    if (wb_ioq_match(pr)) begin
-      return exu_ioq_bcast.result;
-    end else if (wb_rou_match(pr)) begin
-      return exu_rou.result;
-    end else if (wb_rou_b_match(pr)) begin
-      return exu_rou_b.result;
-    end else begin
-      return dflt;
-    end
+    return wb_val(pr, dflt);
   endfunction
+
+  // Per-entry resident forwarding: hit flag + selected value.
+  logic [IOQ_SIZE-1:0] ioq_fwd1_hit;
+  logic [IOQ_SIZE-1:0] ioq_fwd2_hit;
+  logic [XLEN-1:0] ioq_fwd1_val[IOQ_SIZE];
+  logic [XLEN-1:0] ioq_fwd2_val[IOQ_SIZE];
 
   always_comb begin
     for (int i = 0; i < IOQ_SIZE; i++) begin
-      ioq_pr1_ioq_match[i]   = wb_ioq_match(ioq_pr1[i]);
-      ioq_pr2_ioq_match[i]   = wb_ioq_match(ioq_pr2[i]);
-      ioq_pr1_rou_match[i]   = wb_rou_match(ioq_pr1[i]);
-      ioq_pr2_rou_match[i]   = wb_rou_match(ioq_pr2[i]);
-      ioq_pr1_rou_b_match[i] = wb_rou_b_match(ioq_pr1[i]);
-      ioq_pr2_rou_b_match[i] = wb_rou_b_match(ioq_pr2[i]);
+      ioq_fwd1_hit[i] = wb_hit(ioq_pr1[i]);
+      ioq_fwd2_hit[i] = wb_hit(ioq_pr2[i]);
+      ioq_fwd1_val[i] = wb_val(ioq_pr1[i], ioq_vj[i]);
+      ioq_fwd2_val[i] = wb_val(ioq_pr2[i], ioq_vk[i]);
     end
   end
 
@@ -621,6 +673,23 @@ module rapt_exu_ioq #(
         oo_pending     <= 1'b1;
         oo_pending_idx <= active_idx;
       end
+`ifdef RAPT_LSU_HUM
+      // ---- B-channel completion (hit-under-miss) ----
+      // Distinct from the A entry by construction (selection skips
+      // oo_pending_idx) and from the retiring head (B only targets
+      // !complete entries; retire requires complete).  The guard makes the
+      // exclusion explicit for synthesis (R1 discipline).
+      if (exu_lsu.rvalid_b && exu_lsu.rready_b) begin
+        if (b_issue_idx != active_idx
+            && !(ioq_valid_found && b_issue_idx == ioq_head)) begin
+          ioq_rdata[b_issue_idx]      <= exu_lsu.rdata_b;
+          ioq_complete[b_issue_idx]   <= 1'b1;
+          ioq_load_trap[b_issue_idx]  <= 1'b0;
+          ioq_load_cause[b_issue_idx] <= '0;
+          ioq_load_skip[b_issue_idx]  <= 1'b0;
+        end
+      end
+`endif
       // Clear per-entry completion when head retires (NBA after live latch)
       if (ioq_valid_found) begin
         ioq_complete[ioq_head]  <= 1'b0;
@@ -628,30 +697,18 @@ module rapt_exu_ioq #(
         ioq_load_skip[ioq_head] <= 1'b0;
       end
 
-      // ---- Operand forwarding: IOQ self / RS slot A / RS slot B ----
+      // ---- Operand forwarding: any CDB port (unique-producer invariant) ----
       for (bit [XLEN-1:0] i = 0; i < IOQ_SIZE; i++) begin
         if (ioq_valid[i]) begin
           if (|ioq_pr1[i]) begin
-            if (ioq_pr1_ioq_match[i]) begin
-              ioq_vj[i]  <= exu_ioq_bcast.result;
-              ioq_pr1[i] <= '0;
-            end else if (ioq_pr1_rou_match[i]) begin
-              ioq_vj[i]  <= exu_rou.result;
-              ioq_pr1[i] <= '0;
-            end else if (ioq_pr1_rou_b_match[i]) begin
-              ioq_vj[i]  <= exu_rou_b.result;
+            if (ioq_fwd1_hit[i]) begin
+              ioq_vj[i]  <= ioq_fwd1_val[i];
               ioq_pr1[i] <= '0;
             end
           end
           if (|ioq_pr2[i]) begin
-            if (ioq_pr2_ioq_match[i]) begin
-              ioq_vk[i]  <= exu_ioq_bcast.result;
-              ioq_pr2[i] <= '0;
-            end else if (ioq_pr2_rou_match[i]) begin
-              ioq_vk[i]  <= exu_rou.result;
-              ioq_pr2[i] <= '0;
-            end else if (ioq_pr2_rou_b_match[i]) begin
-              ioq_vk[i]  <= exu_rou_b.result;
+            if (ioq_fwd2_hit[i]) begin
+              ioq_vk[i]  <= ioq_fwd2_val[i];
               ioq_pr2[i] <= '0;
             end
           end

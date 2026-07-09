@@ -1,8 +1,7 @@
 # Raptor — RISC-V Processor Core
 
-[![RISC-V Compatibility](https://github.com/Kingfish404/raptor-chip/actions/workflows/verify.yaml/badge.svg)](https://github.com/Kingfish404/raptor-chip/actions/workflows/verify.yaml)
 [![Benchmark](https://github.com/Kingfish404/raptor-chip/actions/workflows/benchmark.yaml/badge.svg)](https://github.com/Kingfish404/raptor-chip/actions/workflows/benchmark.yaml)
-[![Linux Boot](https://github.com/Kingfish404/raptor-chip/actions/workflows/linux-boot.yaml/badge.svg)](https://github.com/Kingfish404/raptor-chip/actions/workflows/linux-boot.yaml)
+[![App](https://github.com/Kingfish404/raptor-chip/actions/workflows/app.yaml/badge.svg)](https://github.com/Kingfish404/raptor-chip/actions/workflows/app.yaml)
 [![STA](https://github.com/Kingfish404/raptor-chip/actions/workflows/sta.yaml/badge.svg)](https://github.com/Kingfish404/raptor-chip/actions/workflows/sta.yaml)
 
 Raptor is a dual-issue, out-of-order RISC-V core with register renaming, a
@@ -18,17 +17,21 @@ Repository: <https://github.com/Kingfish404/raptor-chip>
 
 ## Core Summary
 
-| Item                 | Value                                                                 |
-| -------------------- | --------------------------------------------------------------------- |
-| ISA                  | `rv32/64imac_zicntr_zicond_zicsr_zifencei_zimop_zcb_zba_zbb_zbc_zbs`  |
-| Privilege modes      | M, S, U                                                               |
-| MMU                  | Sv32 (RV32) / Sv39 PTW path (RV64 xv6 bring-up) / Bare                |
-| Interrupts           | CLINT (`mtime`, `mtimecmp`, `msip`) + PLIC (31 sources, M/S contexts) |
-| Issue / commit width | 2 / 2                                                                 |
-| ROB / RS / IOQ / SQ  | 16 / 8 / 8 / 8                                                        |
-| L1I / L1D            | 4-word lines; L1D 2-way, banked SRAM                                  |
-| Bus                  | AXI4, XLEN-bit data/addr, 4-bit ID                                    |
-| Verification         | Difftest against NEMU; RVFI/riscv-formal; SVA;                        |
+| Item                 | Value                                                                                                   |
+| -------------------- | ------------------------------------------------------------------------------------------------------- |
+| ISA                  | `rv32/64imac_zicbop_zicntr_zicond_zicsr_zifencei_zihintntl_zihintpause_zimop_zcb_zcmop_zba_zbb_zbc_zbs` |
+| Privilege modes      | M, S, U                                                                                                 |
+| MMU                  | Sv32 (RV32) / Sv39 PTW path (RV64 xv6 bring-up) / Bare                                                  |
+| Interrupts           | CLINT (`mtime`, `mtimecmp`, `msip`) + PLIC (31 sources, M/S contexts)                                   |
+| Issue / commit width | 2 / 2                                                                                                   |
+| ROB / RS / IOQ / SQ  | 64 / 8 / 8 / 16                                                                                         |
+| PRF                  | 128 physical integer registers                                                                          |
+| BPU                  | TAGE direction predictor + 2-way BTB + 4-entry RSB                                                      |
+| L1I / L1D            | 8 KiB 2-way L1I / 4 KiB 2-way L1D, banked SRAM                                                          |
+| L2                   | Optional 16 KiB direct-mapped unified cache; default config disables it as passthrough                  |
+| Bus                  | AXI4, XLEN-bit data/addr, 4-bit ID                                                                      |
+| Debug                | RISC-V Debug Module / JTAG DTM bring-up ports at cluster top                                            |
+| Verification         | Difftest against NEMU; RVFI/riscv-formal; SVA                                                           |
 
 See [Microarchitecture](./uarch.md) for the complete pipeline description.
 
@@ -69,12 +72,13 @@ raptor-chip/
 ├── env.sh                environment variables (auto-sourced by Makefile)
 ├── rtl_scala/            Chisel (decoder generation only)
 ├── rtl_sv/               hand-written SystemVerilog RTL
-│   ├── rapt.sv           cluster-level top (core + CLINT + PLIC + router)
+│   ├── rapt.sv           cluster-level top (core + CLINT + PLIC + router + debug)
 │   ├── rapt_core.sv      single-hart CPU body
 │   ├── rapt_pkg.sv       shared types (uop_t, rob_entry_t, ...)
 │   ├── frontend/         IFU, IDU, BPU, CSR
 │   ├── backend/          RNU, PRF, ROU, EXU, CMU
-│   ├── memory/           LSU, L1I/L1D, TLB, PTW, AXI4 bus, CLINT, PLIC
+│   ├── memory/           L1I/L1D, optional L2, TLB, PTW, AXI4 bus
+│   ├── perip/            CLINT, PLIC, debug module, JTAG DTM, DPI wrappers
 │   ├── include/          config, interfaces, DPI-C
 │   └── generated/        Chisel-generated decoders
 ├── nemu/                 NEMU reference ISS

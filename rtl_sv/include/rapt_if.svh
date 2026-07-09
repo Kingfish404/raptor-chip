@@ -28,6 +28,17 @@ interface lsu_l1d_if #(
   logic difftest_skip;
   logic rready;
 
+  // Hit-under-miss B channel (Phase A2, RAPT_LSU_HUM): a second best-effort
+  // load request served ONLY from the cache while the A channel waits on a
+  // miss refill (LD_D).  Held-request protocol like A; completes on a clean
+  // cacheable hit, otherwise simply never fires rready_b (the load retries
+  // via A later, where traps/PMP are raised).  No trap/cause on B.
+  logic [XLEN-1:0] raddr_b;
+  logic [4:0] ralu_b;
+  logic rvalid_b;
+  logic [XLEN-1:0] rdata_b;
+  logic rready_b;
+
   logic [XLEN-1:0] waddr;
   logic [4:0] walu;
   logic wvalid;
@@ -37,12 +48,16 @@ interface lsu_l1d_if #(
   modport master(
       output raddr, ralu, rvalid, atomic_lock,
       input rdata, trap, cause, difftest_skip, rready,
+      output raddr_b, ralu_b, rvalid_b,
+      input rdata_b, rready_b,
       output waddr, walu, wvalid, wdata,
       input wready
   );
   modport slave(
       input raddr, ralu, rvalid, atomic_lock,
       output rdata, trap, cause, difftest_skip, rready,
+      input raddr_b, ralu_b, rvalid_b,
+      output rdata_b, rready_b,
       input waddr, walu, wvalid, wdata,
       output wready
   );

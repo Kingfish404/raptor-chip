@@ -1,5 +1,7 @@
 # Performance Profile
 
+> Legacy performance archive. These tables preserve early NPC/SoC measurements and do not describe the current default RTL configuration. For current dual-issue OoO benchmark history, cache/window sizes, and STA baselines, use [Performance Iterations](./perf-iterations.md).
+
 使用`am-kernels`中的`microbench`测试程序进行性能测试.
 
 ```shell

@@ -117,13 +117,15 @@ module rapt_core #(
   // Dispatch-only uop payload snapshot (ROU -> EXU/RS)
   rapt_pkg::uop_payload_t uop_pl[`RAPT_ROB_SIZE];
 
-  // EXU stage
-  exu_rou_if exu_rou ();  // Execute & Writeback => Commit
-  exu_rou_b_if exu_rou_b ();  // Second ALU writeback (pure arithmetic)
-  exu_rou_c_if exu_rou_c ();  // Dedicated BRU writeback (conditional branches)
+  // EXU stage: unified writeback (CDB) ports, one per execution pipeline.
+  // Index map (see exu_wb_if): ALU-A (full), ALU-B (simple+jump), BRU
+  // (conditional branches), MEM (IOQ loads/stores/atomics).
+  exu_wb_if exu_rou ();  // ALU-A writeback => ROB/PRF/bypass
+  exu_wb_if exu_rou_b ();  // ALU-B writeback (pure arithmetic + JAL/JALR)
+  exu_wb_if exu_rou_c ();  // BRU writeback (conditional branches)
+  exu_wb_if exu_ioq_bcast ();  // MEM writeback (IOQ broadcast)
 
   exu_prf_if exu_prf ();
-  exu_ioq_bcast_if exu_ioq_bcast ();
   exu_csr_if exu_csr ();
   exu_lsu_if exu_lsu ();
   exu_l1d_if exu_l1d ();

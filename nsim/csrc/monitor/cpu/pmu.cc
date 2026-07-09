@@ -124,7 +124,6 @@ void perf_sample_per_cycle()
   bool lsu_l1d_hit = *(uint8_t *)&VERILOG_CPU(l1d_cache__DOT__tag_hit);
   bool lsu_fwd_hit = *(uint8_t *)&VERILOG_CPU(lsu__DOT__fwd_hit);
   bool lsu_load_in_sq = *(uint8_t *)&VERILOG_CPU(lsu__DOT__load_in_sq);
-  bool lsu_stq_conflict = *(uint8_t *)&VERILOG_CPU(lsu__DOT__stq_addr_conflict);
   bool lsu_raddr_valid = *(uint8_t *)&VERILOG_CPU(lsu__DOT__raddr_valid);
   bool wbu_valid = *(uint8_t *)&VERILOG_CPU(cmu__DOT__valid);
   bool wbu_valid_b = *(uint8_t *)&VERILOG_CPU(cmu__DOT__valid_b);
@@ -158,7 +157,6 @@ void perf_sample_per_cycle()
   pmu.early_resteer_cnt += early_resteer ? 1 : 0;
   pmu.lsu_fwd_cnt += (lsu_raddr_valid && lsu_fwd_hit) ? 1 : 0;
   pmu.lsu_sq_conflict_cnt += (lsu_raddr_valid && lsu_load_in_sq) ? 1 : 0;
-  pmu.lsu_stq_conflict_cnt += (lsu_raddr_valid && lsu_stq_conflict) ? 1 : 0;
   pmu.dual_commit_cnt += (wbu_valid && wbu_valid_b) ? 1 : 0;
   if (!wbu_valid)
   {
@@ -190,11 +188,11 @@ void perf_sample_per_cycle()
   // 2. Structural full cycles + rising-edge events.
   //    RS/IOQ are 8 entries each (RS_SIZE=IIQ_SIZE=8) -> full when uint8 == 0xFF.
   //    ROB-full proxy: rnu has a renamed uop but UOQ/ROB cannot accept it.
-  //    SQ-full: scan npc.sq_valid bitvector (SQ_SIZE=8) -> 0xFF means all-occupied.
+  //    SQ-full: width-stable 1-bit probe from the LSU (&sq_valid).
   bool rs_full = (exu_ooo_valid == 0xFFu);
   bool ioq_full = (exu_ioq_valid == 0xFFu);
   bool rob_full = rnu_valid && !rou_ready;
-  bool sq_full = npc.sq_valid && (*npc.sq_valid == 0xFFu);
+  bool sq_full = npc.sq_full && (*npc.sq_full != 0);
   static bool prev_rs_full = false, prev_ioq_full = false;
   static bool prev_rob_full = false, prev_sq_full = false;
   if (rs_full)
@@ -438,8 +436,7 @@ void perf()
   Log("hazard cycle of ifu_sys: %6lld,%2.0f%%, rou_cycle: %6lld,%2.0f%% (structural)",
       pmu.ifu_sys_hazard_cycle, percentage(pmu.ifu_sys_hazard_cycle, pmu.active_cycle),
       pmu.rou_hazard_cycle, percentage(pmu.rou_hazard_cycle, pmu.active_cycle));
-  Log("LSU fwd: %lld, sq_conflict: %lld, stq_conflict: %lld",
-      pmu.lsu_fwd_cnt, pmu.lsu_sq_conflict_cnt, pmu.lsu_stq_conflict_cnt);
+  Log("LSU fwd: %lld, sq_conflict: %lld", pmu.lsu_fwd_cnt, pmu.lsu_sq_conflict_cnt);
   // Dual-commit: report two perspectives consistent with gem5:
   //   * fraction of commit cycles (i.e. cycles where >=1 inst committed)
   //   * fraction of total instructions committed in dual mode (2*dual / instr)

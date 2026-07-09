@@ -503,23 +503,21 @@ bool checkpoint_save_tick(void)
   /* Defer save until pipeline is quiesced so committed stores have drained
    * from SQ -> bus -> host backing buffer. Otherwise mem_pmem.bin loses the
    * tail of in-flight writes.
-   *   - rob_empty            : ROB drained (head==tail && !head.busy)
-   *   - sq_valid==0          : no post-commit store in flight
-   *   - stq_valid==0         : no speculative store buffered
-   * Note: SQ_SIZE=8 so sq_valid is one byte (uint8_t); STQ same.
+   *   - rob_empty : ROB drained (head==tail && !head.busy)
+   *   - sq_empty  : unified SQ fully drained (speculative + committed) and
+   *                 the store FSM is idle -- 1-bit, SQ_SIZE-independent
    * If quiesce never happens (defensive cap of 100k cycles), force-save
    * with a warning so we don't hang the run forever. */
   bool rob_q = (npc.rob_empty != NULL) ? (*npc.rob_empty != 0) : true;
-  bool sq_q = (npc.sq_valid != NULL) ? (*npc.sq_valid == 0) : true;
-  bool stq_q = (npc.stq_valid != NULL) ? (*npc.stq_valid == 0) : true;
-  if (!(rob_q && sq_q && stq_q))
+  bool sq_q = (npc.sq_empty != NULL) ? (*npc.sq_empty != 0) : true;
+  if (!(rob_q && sq_q))
   {
     quiesce_wait_cycles++;
     if (quiesce_wait_cycles < 100000)
       return false;
     Log("checkpoint: quiesce wait exceeded 100k cycles "
-        "(rob_q=%d sq_q=%d stq_q=%d) -- forcing save (memory may be inconsistent)",
-        rob_q, sq_q, stq_q);
+        "(rob_q=%d sq_q=%d) -- forcing save (memory may be inconsistent)",
+        rob_q, sq_q);
   }
   else if (quiesce_wait_cycles > 0)
   {

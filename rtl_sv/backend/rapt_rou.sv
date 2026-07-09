@@ -28,10 +28,10 @@ module rapt_rou #(
     exu_prf_if.master exu_prf,
     rou_exu_if.master rou_exu,
 
-    exu_rou_if.in exu_rou,
-    exu_rou_b_if.in exu_rou_b,
-    exu_rou_c_if.in exu_rou_c,
-    exu_ioq_bcast_if.in exu_ioq_bcast,
+    exu_wb_if.in exu_rou,
+    exu_wb_if.in exu_rou_b,
+    exu_wb_if.in exu_rou_c,
+    exu_wb_if.in exu_ioq_bcast,
 
     // interrupt
     csr_bcast_if.in csr_bcast,
@@ -243,12 +243,52 @@ module rapt_rou #(
 `endif
 
   // ================================================================
+  //  Unified CDB view for dispatch-side bypass / UOQ forwarding.
+  //
+  //  Value-producing writeback ports: [0]=ALU-A [1]=ALU-B [2]=MEM.
+  //  The BRU port never carries a result (prd tied 0) so it is not
+  //  snooped. Rename guarantees a unique producer per physical register,
+  //  so at most one port matches a given tag per cycle.
+  //  Adding a pipe = appending one slot here.
+  // ================================================================
+  localparam int unsigned NWB = 3;
+  logic            wb_valid_v[NWB];
+  logic [PLEN-1:0] wb_prd_v  [NWB];
+  logic [XLEN-1:0] wb_res_v  [NWB];
+  assign wb_valid_v[0] = exu_rou.valid;
+  assign wb_prd_v[0]   = exu_rou.prd;
+  assign wb_res_v[0]   = exu_rou.result;
+  assign wb_valid_v[1] = exu_rou_b.valid;
+  assign wb_prd_v[1]   = exu_rou_b.prd;
+  assign wb_res_v[1]   = exu_rou_b.result;
+  assign wb_valid_v[2] = exu_ioq_bcast.valid;
+  assign wb_prd_v[2]   = exu_ioq_bcast.prd;
+  assign wb_res_v[2]   = exu_ioq_bcast.result;
+
+  // Any-port tag match (zero tag never matches).
+  function automatic logic wb_hit(input logic [PLEN-1:0] pr);
+    wb_hit = 1'b0;
+    for (int p = 0; p < NWB; p++) begin
+      wb_hit |= (pr != '0) && wb_valid_v[p] && (wb_prd_v[p] == pr);
+    end
+  endfunction
+
+  // First-match value in port order (reverse loop: slot 0 wins).
+  function automatic logic [XLEN-1:0] wb_val(input logic [PLEN-1:0] pr,
+                                             input logic [XLEN-1:0] dflt);
+    wb_val = dflt;
+    for (int p = NWB - 1; p >= 0; p--) begin
+      if ((pr != '0) && wb_valid_v[p] && (wb_prd_v[p] == pr)) wb_val = wb_res_v[p];
+    end
+  endfunction
+
+  // ================================================================
   //  Helper tasks: factor out per-slot dispatch/enqueue duplication.
   //  Same code path for slot A (always) and slot B (RAPT_DUAL_ISSUE).
   // ================================================================
 
   // Latch one renamed uop into a UOQ entry, applying same-cycle CDB
-  // bypass (EXU-A / EXU-B / IOQ broadcast) when the producer prd matches
+  // bypass (any value-producing port) when the producer prd matches
   // a non-zero pr1/pr2; otherwise capture the PRF pre-read result.
   //
   // The packed status vectors (uoq_valid / uoq_pv1_valid / uoq_pv2_valid) are
@@ -264,23 +304,17 @@ module rapt_rou #(
       input logic [XLEN-1:0] im1, input logic [XLEN-1:0] im2, input logic [XLEN-1:0] prf_pv1,
       input logic [XLEN-1:0] prf_pv2, input logic prf_pv1_v, input logic prf_pv2_v,
       output logic pv1_v_o, output logic pv2_v_o);
-    uoq_uops[idx]  <= u;
-    uoq_pr1[idx]   <= pr1;
-    uoq_pr2[idx]   <= pr2;
-    uoq_prd[idx]   <= pr_d;
-    uoq_prs[idx]   <= pr_s;
-    uoq_op1[idx]   <= im1;
-    uoq_op2[idx]   <= im2;
+    uoq_uops[idx] <= u;
+    uoq_pr1[idx]  <= pr1;
+    uoq_pr2[idx]  <= pr2;
+    uoq_prd[idx]  <= pr_d;
+    uoq_prs[idx]  <= pr_s;
+    uoq_op1[idx]  <= im1;
+    uoq_op2[idx]  <= im2;
 
-    // Operand 1 bypass at enqueue
-    if (|pr1 && exu_rou.valid && exu_rou.prd == pr1) begin
-      uoq_pv1[idx] <= exu_rou.result;
-      pv1_v_o = 1'b1;
-    end else if (|pr1 && exu_rou_b.valid && exu_rou_b.prd == pr1) begin
-      uoq_pv1[idx] <= exu_rou_b.result;
-      pv1_v_o = 1'b1;
-    end else if (|pr1 && exu_ioq_bcast.valid && exu_ioq_bcast.prd == pr1) begin
-      uoq_pv1[idx] <= exu_ioq_bcast.result;
+    // Operand 1 bypass at enqueue (any CDB port; unique-producer invariant)
+    if (wb_hit(pr1)) begin
+      uoq_pv1[idx] <= wb_val(pr1, prf_pv1);
       pv1_v_o = 1'b1;
     end else begin
       uoq_pv1[idx] <= prf_pv1;
@@ -288,14 +322,8 @@ module rapt_rou #(
     end
 
     // Operand 2 bypass at enqueue
-    if (|pr2 && exu_rou.valid && exu_rou.prd == pr2) begin
-      uoq_pv2[idx] <= exu_rou.result;
-      pv2_v_o = 1'b1;
-    end else if (|pr2 && exu_rou_b.valid && exu_rou_b.prd == pr2) begin
-      uoq_pv2[idx] <= exu_rou_b.result;
-      pv2_v_o = 1'b1;
-    end else if (|pr2 && exu_ioq_bcast.valid && exu_ioq_bcast.prd == pr2) begin
-      uoq_pv2[idx] <= exu_ioq_bcast.result;
+    if (wb_hit(pr2)) begin
+      uoq_pv2[idx] <= wb_val(pr2, prf_pv2);
       pv2_v_o = 1'b1;
     end else begin
       uoq_pv2[idx] <= prf_pv2;
@@ -400,12 +428,12 @@ module rapt_rou #(
           uoq_is_pair[uoq_head_b] <= 1'b1;
           uoq_enqueue_slot(uoq_head_b, rnu_rou.uop_b, rnu_rou.pr1_b, rnu_rou.pr2_b, rnu_rou.prd_b,
                            rnu_rou.prs_b, rnu_rou.op1_b, rnu_rou.op2_b, exu_prf.pv1_b,
-                           exu_prf.pv2_b, exu_prf.pv1_b_valid, exu_prf.pv2_b_valid,
-                           enq_pv1_v_b, enq_pv2_v_b);
+                           exu_prf.pv2_b, exu_prf.pv1_b_valid, exu_prf.pv2_b_valid, enq_pv1_v_b,
+                           enq_pv2_v_b);
           uoq_valid[uoq_head_b]     <= 1'b1;
           uoq_pv1_valid[uoq_head_b] <= enq_pv1_v_b;
           uoq_pv2_valid[uoq_head_b] <= enq_pv2_v_b;
-          uoq_head_a <= uoq_head_a + 2;
+          uoq_head_a                <= uoq_head_a + 2;
         end else begin
           uoq_is_pair[uoq_head_a] <= 1'b0;
           uoq_head_a <= uoq_head_a + 1;
@@ -437,31 +465,16 @@ module rapt_rou #(
       end
 
       // Broadcast forwarding: update pre-read values during UOQ residence
+      // (any CDB port; unique-producer invariant)
       for (int i = 0; i < IIQ_SIZE; i++) begin
         if (uoq_valid[i]) begin
-          if (|uoq_pr1[i] && !uoq_pv1_valid[i]) begin
-            if (exu_rou.valid && exu_rou.prd == uoq_pr1[i]) begin
-              uoq_pv1[i]       <= exu_rou.result;
-              uoq_pv1_valid[i] <= 1'b1;
-            end else if (exu_rou_b.valid && exu_rou_b.prd == uoq_pr1[i]) begin
-              uoq_pv1[i]       <= exu_rou_b.result;
-              uoq_pv1_valid[i] <= 1'b1;
-            end else if (exu_ioq_bcast.valid && exu_ioq_bcast.prd == uoq_pr1[i]) begin
-              uoq_pv1[i]       <= exu_ioq_bcast.result;
-              uoq_pv1_valid[i] <= 1'b1;
-            end
+          if (|uoq_pr1[i] && !uoq_pv1_valid[i] && wb_hit(uoq_pr1[i])) begin
+            uoq_pv1[i]       <= wb_val(uoq_pr1[i], uoq_pv1[i]);
+            uoq_pv1_valid[i] <= 1'b1;
           end
-          if (|uoq_pr2[i] && !uoq_pv2_valid[i]) begin
-            if (exu_rou.valid && exu_rou.prd == uoq_pr2[i]) begin
-              uoq_pv2[i]       <= exu_rou.result;
-              uoq_pv2_valid[i] <= 1'b1;
-            end else if (exu_rou_b.valid && exu_rou_b.prd == uoq_pr2[i]) begin
-              uoq_pv2[i]       <= exu_rou_b.result;
-              uoq_pv2_valid[i] <= 1'b1;
-            end else if (exu_ioq_bcast.valid && exu_ioq_bcast.prd == uoq_pr2[i]) begin
-              uoq_pv2[i]       <= exu_ioq_bcast.result;
-              uoq_pv2_valid[i] <= 1'b1;
-            end
+          if (|uoq_pr2[i] && !uoq_pv2_valid[i] && wb_hit(uoq_pr2[i])) begin
+            uoq_pv2[i]       <= wb_val(uoq_pr2[i], uoq_pv2[i]);
+            uoq_pv2_valid[i] <= 1'b1;
           end
         end
       end
@@ -480,41 +493,24 @@ module rapt_rou #(
 `endif
 
   // Bypass: use UOQ pre-read values + same-cycle broadcast forwarding
-  logic pr1_a_from_uoq, pr1_a_from_ioq, pr1_a_from_exu, pr1_a_from_exu_b;
-  logic pr2_a_from_uoq, pr2_a_from_ioq, pr2_a_from_exu, pr2_a_from_exu_b;
-
-  assign pr1_a_from_uoq   = uoq_pv1_valid[uoq_tail_a];
-  assign pr1_a_from_ioq   = exu_ioq_bcast.valid && (exu_ioq_bcast.prd == uoq_pr1[uoq_tail_a]);
-  assign pr1_a_from_exu   = exu_rou.valid && (exu_rou.prd == uoq_pr1[uoq_tail_a]);
-  assign pr1_a_from_exu_b = exu_rou_b.valid && (exu_rou_b.prd == uoq_pr1[uoq_tail_a]);
-
-  assign pr2_a_from_uoq   = uoq_pv2_valid[uoq_tail_a];
-  assign pr2_a_from_ioq   = exu_ioq_bcast.valid && (exu_ioq_bcast.prd == uoq_pr2[uoq_tail_a]);
-  assign pr2_a_from_exu   = exu_rou.valid && (exu_rou.prd == uoq_pr2[uoq_tail_a]);
-  assign pr2_a_from_exu_b = exu_rou_b.valid && (exu_rou_b.prd == uoq_pr2[uoq_tail_a]);
-
   logic pr1_a_ready, pr2_a_ready;
-  assign pr1_a_ready = pr1_a_from_uoq || pr1_a_from_ioq || pr1_a_from_exu || pr1_a_from_exu_b;
-  assign pr2_a_ready = pr2_a_from_uoq || pr2_a_from_ioq || pr2_a_from_exu || pr2_a_from_exu_b;
+  assign pr1_a_ready = uoq_pv1_valid[uoq_tail_a] || wb_hit(uoq_pr1[uoq_tail_a]);
+  assign pr2_a_ready = uoq_pv2_valid[uoq_tail_a] || wb_hit(uoq_pr2[uoq_tail_a]);
 
   always_comb begin
     rou_exu.uop = uoq_uops[uoq_tail_a];
 
-    // Operand 1 selection (priority: UOQ pre-read > IOQ > EXU-A > EXU-B > immediate)
+    // Operand 1 selection (priority: UOQ pre-read > same-cycle CDB > immediate)
     rou_exu.op1 = (uoq_pr1[uoq_tail_a] != 0)
-        ? (pr1_a_from_uoq ? uoq_pv1[uoq_tail_a]
-         : pr1_a_from_ioq ? exu_ioq_bcast.result
-         : pr1_a_from_exu ? exu_rou.result
-         :                exu_rou_b.result)
-        : uoq_op1[uoq_tail_a];
+        ? (uoq_pv1_valid[uoq_tail_a]
+            ? uoq_pv1[uoq_tail_a]
+            : wb_val(uoq_pr1[uoq_tail_a], exu_rou_b.result)) : uoq_op1[uoq_tail_a];
 
     // Operand 2 selection
     rou_exu.op2 = (uoq_pr2[uoq_tail_a] != 0)
-        ? (pr2_a_from_uoq ? uoq_pv2[uoq_tail_a]
-         : pr2_a_from_ioq ? exu_ioq_bcast.result
-         : pr2_a_from_exu ? exu_rou.result
-         :                exu_rou_b.result)
-        : uoq_op2[uoq_tail_a];
+        ? (uoq_pv2_valid[uoq_tail_a]
+            ? uoq_pv2[uoq_tail_a]
+            : wb_val(uoq_pr2[uoq_tail_a], exu_rou_b.result)) : uoq_op2[uoq_tail_a];
 
     // Physical register IDs (zero if operand is ready = no scoreboard stall)
     rou_exu.pr1 = pr1_a_ready ? '0 : uoq_pr1[uoq_tail_a];
@@ -528,39 +524,22 @@ module rapt_rou #(
 
 `ifdef RAPT_DUAL_ISSUE
   // ---- Slot B dispatch bypass & operand mux ----
-  logic pr1_b_from_uoq, pr1_b_from_ioq, pr1_b_from_exu, pr1_b_from_exu_b;
-  logic pr2_b_from_uoq, pr2_b_from_ioq, pr2_b_from_exu, pr2_b_from_exu_b;
-
-  assign pr1_b_from_uoq   = uoq_pv1_valid[uoq_tail_b];
-  assign pr1_b_from_ioq   = exu_ioq_bcast.valid && (exu_ioq_bcast.prd == uoq_pr1[uoq_tail_b]);
-  assign pr1_b_from_exu   = exu_rou.valid && (exu_rou.prd == uoq_pr1[uoq_tail_b]);
-  assign pr1_b_from_exu_b = exu_rou_b.valid && (exu_rou_b.prd == uoq_pr1[uoq_tail_b]);
-
-  assign pr2_b_from_uoq   = uoq_pv2_valid[uoq_tail_b];
-  assign pr2_b_from_ioq   = exu_ioq_bcast.valid && (exu_ioq_bcast.prd == uoq_pr2[uoq_tail_b]);
-  assign pr2_b_from_exu   = exu_rou.valid && (exu_rou.prd == uoq_pr2[uoq_tail_b]);
-  assign pr2_b_from_exu_b = exu_rou_b.valid && (exu_rou_b.prd == uoq_pr2[uoq_tail_b]);
-
   logic pr1_b_ready, pr2_b_ready;
-  assign pr1_b_ready = pr1_b_from_uoq || pr1_b_from_ioq || pr1_b_from_exu || pr1_b_from_exu_b;
-  assign pr2_b_ready = pr2_b_from_uoq || pr2_b_from_ioq || pr2_b_from_exu || pr2_b_from_exu_b;
+  assign pr1_b_ready = uoq_pv1_valid[uoq_tail_b] || wb_hit(uoq_pr1[uoq_tail_b]);
+  assign pr2_b_ready = uoq_pv2_valid[uoq_tail_b] || wb_hit(uoq_pr2[uoq_tail_b]);
 
   always_comb begin
     rou_exu.uop_b = uoq_uops[uoq_tail_b];
 
     rou_exu.op1_b = (uoq_pr1[uoq_tail_b] != 0)
-        ? (pr1_b_from_uoq ? uoq_pv1[uoq_tail_b]
-         : pr1_b_from_ioq ? exu_ioq_bcast.result
-         : pr1_b_from_exu ? exu_rou.result
-         :                  exu_rou_b.result)
-        : uoq_op1[uoq_tail_b];
+        ? (uoq_pv1_valid[uoq_tail_b]
+            ? uoq_pv1[uoq_tail_b]
+            : wb_val(uoq_pr1[uoq_tail_b], exu_rou_b.result)) : uoq_op1[uoq_tail_b];
 
     rou_exu.op2_b = (uoq_pr2[uoq_tail_b] != 0)
-        ? (pr2_b_from_uoq ? uoq_pv2[uoq_tail_b]
-         : pr2_b_from_ioq ? exu_ioq_bcast.result
-         : pr2_b_from_exu ? exu_rou.result
-         :                  exu_rou_b.result)
-        : uoq_op2[uoq_tail_b];
+        ? (uoq_pv2_valid[uoq_tail_b]
+            ? uoq_pv2[uoq_tail_b]
+            : wb_val(uoq_pr2[uoq_tail_b], exu_rou_b.result)) : uoq_op2[uoq_tail_b];
 
     rou_exu.pr1_b = pr1_b_ready ? '0 : uoq_pr1[uoq_tail_b];
     rou_exu.pr2_b = pr2_b_ready ? '0 : uoq_pr2[uoq_tail_b];
@@ -725,14 +704,14 @@ module rapt_rou #(
   // of wide struct muxes.  This mirrors BOOM/XiangShan registered per-bank
   // commit-eligibility flags and lets dual commit close timing on FPGA.
   // Functionally identical to reading the structs directly (difftest-verified).
-  logic [ROB_SIZE-1:0] rob_wb_vec;    // state == ROB_WB
-  logic [ROB_SIZE-1:0] rob_wen_vec;   // wen
-  logic [ROB_SIZE-1:0] rob_dsk_vec;   // difftest_skip
-  logic [ROB_SIZE-1:0] rob_mis_vec;   // mispredict
+  logic [ROB_SIZE-1:0] rob_wb_vec;  // state == ROB_WB
+  logic [ROB_SIZE-1:0] rob_wen_vec;  // wen
+  logic [ROB_SIZE-1:0] rob_dsk_vec;  // difftest_skip
+  logic [ROB_SIZE-1:0] rob_mis_vec;  // mispredict
   logic [ROB_SIZE-1:0] rob_trap_vec;  // trap
-  logic [ROB_SIZE-1:0] upl_sys_vec;   // uop_pl.sys
-  logic [ROB_SIZE-1:0] upl_fi_vec;    // uop_pl.f_i
-  logic [ROB_SIZE-1:0] upl_ft_vec;    // uop_pl.f_time
+  logic [ROB_SIZE-1:0] upl_sys_vec;  // uop_pl.sys
+  logic [ROB_SIZE-1:0] upl_fi_vec;  // uop_pl.f_i
+  logic [ROB_SIZE-1:0] upl_ft_vec;  // uop_pl.f_time
   logic [ROB_SIZE-1:0] upl_atom_vec;  // uop_pl.atom
   for (genvar ge = 0; ge < int'(ROB_SIZE); ge++) begin : gen_rob_elig_vec
     assign rob_wb_vec[ge]   = (rob_entry[ge].state == rapt_pkg::ROB_WB);

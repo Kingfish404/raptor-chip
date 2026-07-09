@@ -51,19 +51,27 @@
 //   RAPT_BPU_DIRP_STATIC   — always-not-taken (control reference)
 `define RAPT_BPU_DIRP_TAGE
 
-// OoO window sizing. Rationale: dual-issue rename/commit were throttled by
-// an 8-entry ROB and 4-entry RS; with 2-ALU + pipelined MUL + OoO LSU the
-// in-flight window becomes the new bottleneck, so ROB/PRF are grown to
-// reduce dispatch stall.
+// OoO window sizing (Phase B: grow toward a classic large-window OoO).
+// ROB is the primary in-flight window; PHY must cover 32 arch regs plus the
+// worst case of ROB_SIZE in-flight register writers (power of 2 required).
 `define RAPT_RIQ_SIZE 8
 `define RAPT_IIQ_SIZE 8
-`define RAPT_ROB_SIZE 16
+`define RAPT_ROB_SIZE 64
 
 // Scheduler: RS / IOQ to feed both ALU pipes plus pipelined MUL.
 `define RAPT_RS_SIZE 8
 `define RAPT_IOQ_SIZE 8
 
-`define RAPT_SQ_SIZE 8
+// Unified SQ (Phase A): one queue holds a store from execute to drain
+// (committed coloring), replacing the former split STQ(8)+SQ(8).  16 entries
+// preserve the former aggregate capacity and move toward the Phase A target.
+`define RAPT_SQ_SIZE 16
+
+// Hit-under-miss (Phase A2): while a load miss waits on the bus refill, the
+// idle L1D SRAM read port serves a second best-effort load (B channel).
+// Bare-mode only; B completes only on a clean cacheable hit or SQ forward,
+// everything else retries via the trap-owning A channel.
+`define RAPT_LSU_HUM
 
 // RVFI: RISC-V Formal Interface for formal verification.
 // Adds RVFI output ports to the core; enable only for riscv-formal checks.
@@ -93,7 +101,7 @@
 
 `define RAPT_REG_LEN $clog2(`RAPT_REG_SIZE) // Register Length
 
-`define RAPT_PHY_SIZE 64 // physical register number (must be power of 2)
+`define RAPT_PHY_SIZE 128 // physical register number (must be power of 2)
 `define RAPT_PHY_LEN $clog2(`RAPT_PHY_SIZE)
 
 // L1I (64 B line * 32 sets * 2-way = 8 KiB)

@@ -59,7 +59,7 @@ Closest RISC-V profile peer: RVM23U32 / RVA20S64.
 ```text
  FRONTEND (speculative, dual-fetch)
    IFU[L1I,ITLB,IFQ] --dual-fetch--▸ IDU[slot A, slot B]
-     ^-- BPU[PHT,BTB,GHR,RSB]
+     ^-- BPU[TAGE/GSHARE/PHT/static DIRP,BTB,GHR/PHR,RSB]
 
  BACKEND (rename -> dispatch -> execute -> commit)
    IDU --dual-issue--▸ RNU[RNQ,Freelist,MapTable]
@@ -69,16 +69,16 @@ Closest RISC-V profile peer: RVM23U32 / RVA20S64.
    ROB --commit--▸ CMU (broadcast) + LSU[SQ] + CSR
 
  MEMORY SUBSYSTEM
-   LSU[STQ(spec), SQ(committed)] --▸ L1D[DTLB,DSTLB,DPTW] --▸ BUS --▸ AXI4
+  LSU[unified SQ(spec+committed)] --▸ L1D[DTLB,DSTLB,DPTW] --▸ BUS --▸ optional L2 --▸ AXI4
    L1I[ITLB,IPTW] --▸ BUS --▸ AXI4
   BUS --AXI4--▸ cluster router --▸ CLINT / PLIC / off-chip AXI4
 ```
 
 ### Store & Load Ordering
 
-- **Stores**: IOQ computes address+data -> STQ (speculative); ROB commit -> SQ (committed); SQ drains to L1D/BUS (write-through)
-- **Store-to-load forwarding**: loads check STQ then SQ via virtual address CAM, youngest-match-wins
-- **Loads blocked** while SQ/STQ non-empty (conservative ordering)
+- **Stores**: IOQ computes address+data and allocates one unified SQ entry; ROB commit marks the existing entry committed; committed head entries drain to L1D/BUS in program order.
+- **Store-to-load forwarding**: loads CAM the unified SQ by virtual word address; youngest matching full-width store forwards data.
+- **Load issue**: IOQ supports out-of-order load issue when older stores are resolved and non-conflicting. Atomics and uncacheable/MMIO requests remain ordered at the ROB/IOQ head.
 
 ### Branch Misprediction Recovery
 
@@ -96,18 +96,19 @@ Closest RISC-V profile peer: RVM23U32 / RVA20S64.
 
 #### BPU (`rapt_bpu.sv`)
 
-| Component                   | Implementation                                | Key details                                          |
-| --------------------------- | --------------------------------------------- | ---------------------------------------------------- |
-| **PHT** (`rapt_bpu_pht.sv`) | 2-bit saturating, `PHT_SIZE` entries (256)    | `(* keep_hierarchy *)`, sync read, bimodal           |
-| **BTB** (`rapt_bpu_btb.sv`) | 2-way SA, `BTB_SIZE` entries (128), 7-bit tag | `(* keep_hierarchy *)`, sync read, XOR-hash, LRU     |
-| **GHR**                     | 11-bit global history                         | Updated on committed branches / spec predictions     |
-| **RSB**                     | `RSB_SIZE` entries (8)                        | Committed + speculative pointers, link-reg detection |
+| Component                   | Implementation                                                 | Key details                                           |
+| --------------------------- | -------------------------------------------------------------- | ----------------------------------------------------- |
+| **DIRP**                    | Default TAGE; alternatives: gshare, bimodal/PHT, static        | Selected by `RAPT_BPU_DIRP_*` macros                  |
+| **PHT** (`rapt_bpu_pht.sv`) | 2-bit saturating, `PHT_SIZE` entries (256)                     | Used by bimodal/PHT mode and as local predictor base  |
+| **BTB** (`rapt_bpu_btb.sv`) | 2-way SA, `BTB_SIZE` entries (128), 7-bit tag                  | `(* keep_hierarchy *)`, sync read, XOR-hash, LRU      |
+| **History**                 | 64-bit GHR plus 8-bit path history for TAGE/gshare-style DIRPs | Speculative prediction state with commit/flush repair |
+| **RSB**                     | `RSB_SIZE` entries (4)                                         | Committed + speculative pointers, link-reg detection  |
 
-BTB entry types: `COND`, `DIRE`, `INDR`, `RETU`. PHT updated on committed branches; BTB on flushes (including JALR). Both invalidated on `fence_time`.
+BTB entry types: `COND`, `DIRE`, `INDR`, `RETU`. Direction predictor state is trained from committed branch outcomes; BTB updates occur on flushes (including JALR). Predictor structures are invalidated or repaired on `fence_time` / flush paths as appropriate.
 
 #### L1I (`rapt_l1i.sv`)
 
-N-way set-associative I-cache (`L1I_N_WAYS`, default 1). `2^L1I_LEN` sets (64), `2^L1I_LINE_LEN` words/line (4). 7-state FSM (`IDLE`, `PTWAIT`, `TRAP`, `RD_A`, `RD_0`, `RD_1`, `FINA`).
+N-way set-associative I-cache (`L1I_N_WAYS`, default 2). `2^L1I_LEN` sets (32), `2^L1I_LINE_LEN` words/line (16 RV32 words = 64 B). Default capacity is 8 KiB. 7-state FSM (`IDLE`, `PTWAIT`, `TRAP`, `RD_A`, `RD_0`, `RD_1`, `FINA`).
 
 | Storage | Implementation                                                                       |
 | ------- | ------------------------------------------------------------------------------------ |
@@ -130,19 +131,19 @@ N-way set-associative I-cache (`L1I_N_WAYS`, default 1). `2^L1I_LEN` sets (64), 
 Pure rename: maps arch -> physical registers. Dual-rename with RAW dependency handling (slot B sees slot A's result when they share an arch register).
 
 - **RNQ**: Circular queue, `RIQ_SIZE` entries (8). Dual-issue enqueues atomically; paired via `rnq_is_pair`.
-- **Freelist** (`rapt_rnu_freelist.sv`): Circular FIFO, `PHY_SIZE` entries (64). Dual alloc ports (B reads `head+1`). Dual dealloc for dual commit. Flush: rewinds head by in-flight count.
+- **Freelist** (`rapt_rnu_freelist.sv`): Circular FIFO, `PHY_SIZE` entries (128). Dual alloc ports (B reads `head+1`). Dual dealloc for dual commit. Flush: rewinds head by in-flight count.
 - **MapTable** (`rapt_rnu_maptable.sv`): MAP (6R + 2W, B wins conflict) + RAT (2W, B wins). Flush: MAP←RAT with concurrent commit forwarding.
 
 #### PRF (`rapt_prf.sv`)
 
-`PHY_SIZE` entries (64). 4 read ports (2 per dispatch slot) + 2 write ports (ALU writeback + IOQ broadcast). `prf_valid[]` + `prf_transient[]` tracking. Flush: transient entries invalidated. Commit: transient cleared. Dealloc: valid cleared.
+`PHY_SIZE` entries (128). 4 read ports (2 per dispatch slot) + 2 write ports (ALU writeback + IOQ broadcast). `prf_valid[]` + `prf_transient[]` tracking. Flush: transient entries invalidated. Commit: transient cleared. Dealloc: valid cleared.
 
 #### ROU (`rapt_rou.sv`)
 
 Dispatch queue + reorder buffer + commit logic.
 
 - **UOQ**: Circular, `IIQ_SIZE` entries (8). Dual enqueue/dequeue with `uoq_is_pair` tracking.
-- **ROB**: `rob_entry_t[]`, `ROB_SIZE` entries (16). States: `ROB_EX`->`ROB_WB`->`ROB_CM`. Dual dispatch inserts 2 entries at tail/tail+1.
+- **ROB**: `rob_entry_t[]`, `ROB_SIZE` entries (64). States: `ROB_EX`->`ROB_WB`->`ROB_CM`. Dual dispatch inserts 2 entries at tail/tail+1.
 - **Operand bypass**: UOQ pre-read > IOQ broadcast > EXU broadcast. Broadcast forwarding continues during UOQ residence.
 - **Dual commit**: slot 0 commits; slot 1 joins if slot 0 doesn't flush/store, neither has `difftest_skip`, and slot 1 is ready. BPU trains on slot 1's branch info during dual commit.
 - **Flush triggers**: fence\_i, branch mispredict, trap, system op, atomic (from either slot).
@@ -171,14 +172,13 @@ Broadcast unit. Outputs: `rpc`, `cpc`, branch resolution, `flush_pipe`, `fence_i
 
 #### LSU (`rapt_lsu.sv`)
 
-- **STQ**: `SQ_SIZE` entries, speculative stores (virtual address for forwarding)
-- **SQ**: `SQ_SIZE` entries, committed stores (physical + virtual address)
-- Store FSM: 2-state (`LS_S_V`/`LS_S_R`)
-- Store-to-load forwarding: SQ + STQ CAM by virtual address, youngest-match-wins
+- **Unified SQ**: `SQ_SIZE` entries (default 16). One ring stores each store from execute/writeback through commit and drain. `[head,cmt)` entries are committed and survive flush; `[cmt,tail)` entries are speculative and are discarded on flush.
+- Store FSM: 4-state (`LS_S_V`/`LS_S_R`/`LS_S_HI_V`/`LS_S_HI_R`) to handle aligned and split misaligned drains.
+- Store-to-load forwarding: single SQ CAM by virtual word address, youngest-match-wins for full-width stores; partial or conflicting stores conservatively block/retry.
 
 #### L1D (`rapt_l1d.sv`)
 
-2-way set-associative. `2^L1D_LEN` sets (32), `2^L1D_LINE_LEN` words/line (2). 5-state FSM (`IDLE`, `PTWAIT`, `TRAP`, `LD_A`, `LD_D`).
+2-way set-associative. `2^L1D_LEN` sets (16), `2^L1D_LINE_LEN` words/line (16 RV32 words or 8 RV64 words = 64 B). Default capacity is 4 KiB. 5-state FSM (`IDLE`, `PTWAIT`, `TRAP`, `LD_A`, `LD_D`).
 
 | Storage   | Implementation                                                                      |
 | --------- | ----------------------------------------------------------------------------------- |
@@ -198,6 +198,10 @@ Reusable page-table walker. RV32 uses a Sv32 two-level FSM (`IDLE`->`LVL1`->`LVL
 #### BUS (`rapt_bus.sv`)
 
 AXI4 master bridge arbitrating L1I/L1D (L1D priority). Read FSM: 3-state (`LD_A`/`LD_AS`/`LD_D`). Write FSM: 3-state (`LS_S_A`/`LS_S_W`/`LS_S_B`). Load source tracking: `L1I`/`L1D`/`TLBI`/`TLBD`. It is SoC-memory-map agnostic; the cluster-level `rapt_router.sv` decodes CLINT/PLIC MMIO and forwards all other transactions off chip.
+
+#### L2 (`rapt_l2.sv`)
+
+Optional unified AXI4 cache between the core bus/router path and off-chip memory. When `RAPT_L2_EN` is undefined, the module collapses to a transparent passthrough; the default configuration currently leaves it disabled. When enabled, the configured implementation is a 16 KiB direct-mapped cache (`2^RAPT_L2_LEN` sets, 64 B lines) with multi-way support reserved.
 
 #### CLINT (`rapt_clint.sv`)
 
@@ -243,30 +247,34 @@ Cluster-level Platform-Level Interrupt Controller. Default `NDEV=31` sources and
 
 ## Configuration (`rapt_config.svh`)
 
-| Parameter           | Default | Description                                |
-| ------------------- | ------- | ------------------------------------------ |
-| `RAPT_XLEN`         | 32      | Register width (64 with `RAPT_RV64`)       |
-| `RAPT_M_FAST`       | 1       | Single-cycle mul/div (sim mode)            |
-| `RAPT_L1I_LINE_LEN` | 2       | L1I line: 2² = 4 words                     |
-| `RAPT_L1I_LEN`      | 6       | L1I sets: 2⁶ = 64                          |
-| `RAPT_L1I_N_WAYS`   | 1       | L1I ways (1 = direct-mapped)               |
-| `RAPT_PHT_SIZE`     | 256     | PHT entries                                |
-| `RAPT_BTB_SIZE`     | 128     | BTB entries (64 sets × 2 ways)             |
-| `RAPT_BTB_WAYS`     | 2       | BTB associativity                          |
-| `RAPT_RSB_SIZE`     | 8       | Return stack entries                       |
-| `RAPT_RIQ_SIZE`     | 8       | Rename queue (RNQ) entries                 |
-| `RAPT_IIQ_SIZE`     | 8       | Dispatch queue (UOQ) entries               |
-| `RAPT_ROB_SIZE`     | 16      | Reorder buffer entries                     |
-| `RAPT_RS_SIZE`      | 8       | Reservation station entries                |
-| `RAPT_IOQ_SIZE`     | 8       | In-order queue entries                     |
-| `RAPT_SQ_SIZE`      | 8       | Store queue entries                        |
-| `RAPT_L1D_LINE_LEN` | 1       | L1D line: 2¹ = 2 words/line                |
-| `RAPT_L1D_LEN`      | 5       | L1D sets: 2⁵ = 32                          |
-| `RAPT_L1D_N_WAYS`   | 2       | L1D ways (2-way SA)                        |
-| `RAPT_DUAL_COMMIT`  | defined | Retire up to 2 ROB entries/cycle           |
-| `RAPT_DUAL_ISSUE`   | defined | Dual-issue: 2 insts/cycle through pipeline |
-| `RAPT_ISSUE_WIDTH`  | 2       | Dispatch width (2 when dual-issue, else 1) |
-| `RAPT_PHY_SIZE`     | 64      | Physical registers                         |
+| Parameter            | Default   | Description                                |
+| -------------------- | --------- | ------------------------------------------ |
+| `RAPT_XLEN`          | 32        | Register width (64 with `RAPT_RV64`)       |
+| `RAPT_M_FAST`        | 1         | Single-cycle mul/div (sim mode)            |
+| `RAPT_L1I_LINE_LEN`  | 4         | L1I line: 2⁴ = 16 words (64 B in RV32)     |
+| `RAPT_L1I_LEN`       | 5         | L1I sets: 2⁵ = 32                          |
+| `RAPT_L1I_N_WAYS`    | 2         | L1I ways (2-way SA)                        |
+| `RAPT_PHT_SIZE`      | 256       | PHT entries                                |
+| `RAPT_BTB_SIZE`      | 128       | BTB entries (64 sets × 2 ways)             |
+| `RAPT_BTB_WAYS`      | 2         | BTB associativity                          |
+| `RAPT_RSB_SIZE`      | 4         | Return stack entries                       |
+| `RAPT_BPU_DIRP_TAGE` | defined   | Default direction predictor                |
+| `RAPT_RIQ_SIZE`      | 8         | Rename queue (RNQ) entries                 |
+| `RAPT_IIQ_SIZE`      | 8         | Dispatch queue (UOQ) entries               |
+| `RAPT_ROB_SIZE`      | 64        | Reorder buffer entries                     |
+| `RAPT_RS_SIZE`       | 8         | Reservation station entries                |
+| `RAPT_IOQ_SIZE`      | 8         | In-order queue entries                     |
+| `RAPT_SQ_SIZE`       | 16        | Unified store queue entries                |
+| `RAPT_L1D_LINE_LEN`  | 4 / 3     | RV32: 16 words/line; RV64: 8 words/line    |
+| `RAPT_L1D_LEN`       | 4         | L1D sets: 2⁴ = 16                          |
+| `RAPT_L1D_N_WAYS`    | 2         | L1D ways (2-way SA)                        |
+| `RAPT_L2_EN`         | undefined | Optional L2 defaults to passthrough        |
+| `RAPT_L2_LEN`        | 8         | L2 sets: 2⁸ = 256 when enabled             |
+| `RAPT_L2_N_WAYS`     | 1         | L2 ways when enabled                       |
+| `RAPT_DUAL_COMMIT`   | defined   | Retire up to 2 ROB entries/cycle           |
+| `RAPT_DUAL_ISSUE`    | defined   | Dual-issue: 2 insts/cycle through pipeline |
+| `RAPT_ISSUE_WIDTH`   | 2         | Dispatch width (2 when dual-issue, else 1) |
+| `RAPT_PHY_SIZE`      | 128       | Physical registers                         |
 
 ## Key Types (`rapt_pkg.sv`)
 
@@ -278,7 +286,7 @@ Cluster-level Platform-Level Interrupt Controller. Default `NDEV=31` sources and
 | `rob_entry_t`      | Full ROB entry: phys regs, arch rd, state, branch, memory, atomics, CSR, trap, fence, inst/PC |
 | `addr_cacheable()` | Returns true for cacheable regions (mrom, flash, psram, sdram)                                |
 | `addr_mapped()`    | Returns true for any mapped memory or MMIO region                                             |
-| `addr_mmio()`      | Returns true for MMIO regions that difftest should skip                                      |
+| `addr_mmio()`      | Returns true for MMIO regions that difftest should skip                                       |
 
 ## Diagram
 
@@ -288,7 +296,7 @@ flowchart LR
         IFU["IFU (3-state FSM)"]
         L1I["L1I (N-way, SRAM tags)"]
         IDU["IDU (dual decode)"]
-        BPU["BPU (PHT/BTB/GHR/RSB)"]
+        BPU["BPU (TAGE/BTB/GHR/RSB)"]
   end
  subgraph BE["Backend (dual-issue)"]
         subgraph RNU_TOP["RNU (dual rename)"]
@@ -307,11 +315,12 @@ flowchart LR
         CSR["CSR"]
   end
  subgraph MEM["Memory"]
-        LSU["LSU (STQ+SQ)"]
+        LSU["LSU (unified SQ)"]
         L1D["L1D (2-way)"]
         TLB["TLB"]
         PTW["PTW (Sv32/Sv39)"]
         BUS["BUS (core AXI4 bridge)"]
+        L2["optional L2 / passthrough"]
         ROUTER["rapt_router"]
         CLINT["CLINT"]
         PLIC["PLIC"]
@@ -342,7 +351,8 @@ flowchart LR
     L1D --- TLB & PTW
     L1I -->|"l1i_bus_if"| BUS
     L1D -->|"l1d_bus_if"| BUS
-    BUS -->|"AXI4"| ROUTER
+    BUS -->|"AXI4"| L2
+    L2 -->|"AXI4"| ROUTER
     ROUTER <-->|"off-chip"| AXI["AXI4 Master"]
     ROUTER --- CLINT
     ROUTER --- PLIC

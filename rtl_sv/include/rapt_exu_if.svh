@@ -64,12 +64,26 @@ interface exu_lsu_if #(
   logic rready;
   logic stq_ready;
 
+  // Hit-under-miss B channel (Phase A2, RAPT_LSU_HUM): best-effort second
+  // load issued while the A channel waits on a miss.  Completes only on a
+  // clean cacheable L1D hit or an SQ forward; no trap/skip side effects
+  // (a load that cannot complete on B retries via A, which owns traps).
+  logic rvalid_b;
+  logic [XLEN-1:0] raddr_b;
+  logic [4:0] ralu_b;
+  logic [XLEN-1:0] rdata_b;
+  logic rready_b;
+
   modport master(
     output rvalid, raddr, ralu, atomic_lock, pc,
-    input rdata, trap, cause, difftest_skip, rready, stq_ready);
+    input rdata, trap, cause, difftest_skip, rready, stq_ready,
+    output rvalid_b, raddr_b, ralu_b,
+    input rdata_b, rready_b);
   modport slave(
     input rvalid, raddr, ralu, atomic_lock, pc,
-    output rdata, trap, cause, difftest_skip, rready, stq_ready);
+    output rdata, trap, cause, difftest_skip, rready, stq_ready,
+    input rvalid_b, raddr_b, ralu_b,
+    output rdata_b, rready_b);
 endinterface
 
 interface exu_load_fast_if #(
@@ -99,11 +113,30 @@ interface exu_csr_if #(
   modport slave(input raddr, output rdata, mtvec, mepc, sepc);
 endinterface
 
-interface exu_rou_if #(
+// ---------------------------------------------------------------------------
+// Unified writeback / CDB port (Phase 0 of the execution-engine decoupling).
+//
+// One instance per execution pipeline; rapt_core instantiates one per
+// writeback port with the following fixed assignment:
+//   [0] ALU-A : full path (ALU + CSR + system + trap + MUL writeback)
+//   [1] ALU-B : simple ALU + JAL/JALR link write (never CSR/system/trap/MUL)
+//   [2] BRU   : conditional branches only (no result/prd/rd -> tied 0;
+//               no PRF write port, no bypass network entry)
+//   [3] MEM   : IOQ broadcast (loads / stores / atomics / MMIO)
+//
+// Fields a pipeline does not produce are tied to '0 by the driver and are
+// constant-folded away downstream, so the superset costs no hardware.
+// Adding a pipeline = adding one more `exu_wb_if` port, not a new type.
+// ---------------------------------------------------------------------------
+interface exu_wb_if #(
     parameter unsigned PLEN = `RAPT_PHY_LEN,
     parameter unsigned RLEN = `RAPT_REG_LEN,
     parameter int XLEN = `RAPT_XLEN
 );
+  // Not every consumer samples every field (e.g. PRF ignores pc/npc); the
+  // file-wide UNUSEDSIGNAL pragma does not reach interface-bundle instance
+  // scope, so re-disable here.
+  /* verilator lint_off UNUSEDSIGNAL */
   logic [XLEN-1:0] pc;
   logic [XLEN-1:0] npc;
   logic btaken;
@@ -118,9 +151,16 @@ interface exu_rou_if #(
   logic [PLEN-1:0] prd;
   logic [RLEN-1:0] rd;
 
-  // csr (WB-written; csr_addr lives in uop_pl, not here)
+  // csr (ALU-A only; csr_addr lives in uop_pl, not here)
   logic csr_wen;
   logic [XLEN-1:0] csr_wdata;
+
+  // Memory sideband (MEM only). `alu` bit[5] selects mul/div family and is
+  // unused by non-EXU consumers.
+  logic wen;
+  logic [5:0] alu;
+  logic [XLEN-1:0] sq_waddr;
+  logic [XLEN-1:0] sq_wdata;
 
   logic trap;
   logic [XLEN-1:0] tval;
@@ -129,12 +169,14 @@ interface exu_rou_if #(
   logic difftest_skip;
 
   logic valid;
+  /* verilator lint_on UNUSEDSIGNAL */
 
   modport in(
       input pc, npc, btaken, mispredict,
       input dest, result,
       input prd, rd,
       input csr_wen, csr_wdata,
+      input wen, alu, sq_waddr, sq_wdata,
       input trap, tval, cause,
       input difftest_skip,
       input valid
@@ -144,76 +186,8 @@ interface exu_rou_if #(
       output dest, result,
       output prd, rd,
       output csr_wen, csr_wdata,
+      output wen, alu, sq_waddr, sq_wdata,
       output trap, tval, cause,
-      output difftest_skip,
-      output valid
-  );
-endinterface
-
-// Second writeback bus: pure ALU + BRU (branch/JAL/JALR).
-// Slot B handles arithmetic and branch-target/condition resolution but never
-// CSR / system / trap / MUL -- those still go through exu_rou (slot A).
-interface exu_rou_b_if #(
-    parameter unsigned PLEN = `RAPT_PHY_LEN,
-    parameter unsigned RLEN = `RAPT_REG_LEN,
-    parameter int XLEN = `RAPT_XLEN
-);
-  logic [XLEN-1:0] pc;
-  logic [XLEN-1:0] npc;
-  logic btaken;
-  logic mispredict;
-
-  logic [$clog2(`RAPT_ROB_SIZE)-1:0] dest;
-  logic [XLEN-1:0] result;
-
-  logic [PLEN-1:0] prd;
-  logic [RLEN-1:0] rd;
-
-  logic difftest_skip;
-  logic valid;
-
-  modport in(
-      input pc, npc, btaken, mispredict,
-      input dest, result,
-      input prd, rd,
-      input difftest_skip,
-      input valid
-  );
-  modport out(
-      output pc, npc, btaken, mispredict,
-      output dest, result,
-      output prd, rd,
-      output difftest_skip,
-      output valid
-  );
-endinterface
-
-// Third writeback bus: dedicated BRU for conditional branches (ben).
-// Conditional branches never write rd and never produce values consumed
-// downstream, so this bus carries only ROB-state + branch-resolution
-// fields (no result/prd/rd, no PRF write port, no bypass network entry).
-interface exu_rou_c_if #(
-    parameter int XLEN = `RAPT_XLEN
-);
-  logic [XLEN-1:0] pc;
-  logic [XLEN-1:0] npc;
-  logic btaken;
-  logic mispredict;
-
-  logic [$clog2(`RAPT_ROB_SIZE)-1:0] dest;
-
-  logic difftest_skip;
-  logic valid;
-
-  modport in(
-      input pc, npc, btaken, mispredict,
-      input dest,
-      input difftest_skip,
-      input valid
-  );
-  modport out(
-      output pc, npc, btaken, mispredict,
-      output dest,
       output difftest_skip,
       output valid
   );
@@ -289,60 +263,6 @@ interface exu_l1d_if #(
 
   modport master(output mmu_en, vaddr, walu, valid, input paddr, trap, cause, reservation, ready);
   modport slave(input mmu_en, vaddr, walu, valid, output paddr, trap, cause, reservation, ready);
-endinterface
-
-interface exu_ioq_bcast_if #(
-    parameter unsigned PLEN = `RAPT_PHY_LEN,
-    parameter unsigned RLEN = `RAPT_REG_LEN,
-    parameter int XLEN = `RAPT_XLEN
-);
-  // `pc` is broadcast for trap reporting / debug paths only; some consumers
-  // (PMP store-bare) do not sample it. `alu` bit[5] selects mul/div family
-  // and is unused by non-EXU consumers. The file-wide UNUSEDSIGNAL pragma at
-  // the top doesn't reach interface-bundle instance scope, so we re-disable
-  // here.
-  /* verilator lint_off UNUSEDSIGNAL */
-  logic [XLEN-1:0] pc;
-  logic [XLEN-1:0] npc;
-
-  logic [XLEN-1:0] result;
-  // ROB destination index (0-indexed, directly maps to rob_entry[]).
-  logic [$clog2(`RAPT_ROB_SIZE)-1:0] dest;
-
-  logic [PLEN-1:0] prd;
-  logic [RLEN-1:0] rd;
-
-  logic wen;
-  logic [5:0] alu;
-  logic [XLEN-1:0] sq_waddr;
-  logic [XLEN-1:0] sq_wdata;
-
-  logic trap;
-  logic [XLEN-1:0] tval;
-  logic [XLEN-1:0] cause;
-
-  logic difftest_skip;
-
-  logic valid;
-
-  modport in(
-      input pc, npc,
-      input result, dest,
-      input prd, rd,
-      input wen, alu, sq_waddr, sq_wdata,
-      input trap, tval, cause,
-      input difftest_skip,
-      input valid
-  );
-  modport out(
-      output pc, npc,
-      output result, dest,
-      output prd, rd,
-      output wen, alu, sq_waddr, sq_wdata,
-      output trap, tval, cause,
-      output difftest_skip,
-      output valid
-  );
 endinterface
 
 /* verilator lint_on UNUSEDSIGNAL */

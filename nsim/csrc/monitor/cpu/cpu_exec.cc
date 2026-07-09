@@ -48,8 +48,8 @@ void cpu_exec_set_threshold(uint64_t cycle, uint64_t inst)
 {
   // size_t(-1) sentinel from the CLI parser comes through as UINT64_MAX;
   // preserve it so the unset axis never triggers the start-of-dump condition.
-  tfp_cycle = (cycle == 0) ? UINT64_MAX : cycle;
-  tfp_inst = (inst == 0) ? UINT64_MAX : inst;
+  tfp_cycle = cycle;
+  tfp_inst = inst;
 }
 
 static void cpu_exec_one_cycle()
@@ -95,9 +95,8 @@ void cpu_exec_lightsss_snapshot(const char *dir)
   for (int i = 0; i < 200000; i++)
   {
     bool rob_q = (npc.rob_empty != NULL) ? (*npc.rob_empty != 0) : true;
-    bool sq_q = (npc.sq_valid != NULL) ? (*npc.sq_valid == 0) : true;
-    bool stq_q = (npc.stq_valid != NULL) ? (*npc.stq_valid == 0) : true;
-    if (rob_q && sq_q && stq_q)
+    bool sq_q = (npc.sq_empty != NULL) ? (*npc.sq_empty != 0) : true;
+    if (rob_q && sq_q)
       break;
     cpu_exec_one_cycle();
   }

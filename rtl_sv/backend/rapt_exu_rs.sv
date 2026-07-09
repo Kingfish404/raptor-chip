@@ -34,16 +34,16 @@ module rapt_exu_rs #(
     exu_disp_rs_if.rs  disp,
 
     // Forwarding source
-    exu_ioq_bcast_if.in exu_ioq_bcast,
+    exu_wb_if.in exu_ioq_bcast,
     exu_load_fast_if.sink load_fast,
 
     // CSR access
     exu_csr_if.master exu_csr,
 
     // Writebacks (ROB)
-    exu_rou_if.out   exu_rou,
-    exu_rou_b_if.out exu_rou_b,
-    exu_rou_c_if.out exu_rou_c,
+    exu_wb_if.out exu_rou,
+    exu_wb_if.out exu_rou_b,
+    exu_wb_if.out exu_rou_c,
 
     // Dispatch-only uop payload snapshot (indexed by ROB destination).
     // Read at issue time by slot A to source `ecall/ebreak/mret/sret/csr_*/inst`.
@@ -773,6 +773,11 @@ module rapt_exu_rs #(
       `RAPT_CSR_MCYCLE_
       || rs_imm[valid_idx_a][11:0] == `RAPT_CSR_MCYCLEH);
   assign exu_rou.valid = valid_found_a;
+  // ALU-A never produces the MEM sideband (unified exu_wb_if tie-offs).
+  assign exu_rou.wen = 1'b0;
+  assign exu_rou.alu = '0;
+  assign exu_rou.sq_waddr = '0;
+  assign exu_rou.sq_wdata = '0;
 
   // === Slot-B writeback (pure ALU + jen) ===
   // Slot B never schedules ecall/mret/trap (rs_b_block) and never schedules
@@ -799,6 +804,16 @@ module rapt_exu_rs #(
   assign exu_rou_b.btaken = 1'b0;
   assign exu_rou_b.mispredict = (exu_rou_b.npc != rs_pnpc[valid_idx_b]);
   assign exu_rou_b.difftest_skip = 1'b0;
+  // ALU-B never produces CSR / trap / MEM sideband (unified exu_wb_if tie-offs).
+  assign exu_rou_b.csr_wen = 1'b0;
+  assign exu_rou_b.csr_wdata = '0;
+  assign exu_rou_b.trap = 1'b0;
+  assign exu_rou_b.tval = '0;
+  assign exu_rou_b.cause = '0;
+  assign exu_rou_b.wen = 1'b0;
+  assign exu_rou_b.alu = '0;
+  assign exu_rou_b.sq_waddr = '0;
+  assign exu_rou_b.sq_wdata = '0;
 
   // === Port-C writeback (BRU only) ===
   logic [XLEN-1:0] addr_exu_c;
@@ -813,5 +828,20 @@ module rapt_exu_rs #(
   assign exu_rou_c.btaken = btaken_c;
   assign exu_rou_c.mispredict = (exu_rou_c.npc != rs_pnpc[valid_idx_c]);
   assign exu_rou_c.difftest_skip = 1'b0;
+  // BRU never writes rd nor produces CSR / trap / MEM sideband (unified
+  // exu_wb_if tie-offs; keeps the no-PRF-write-port / no-bypass-entry
+  // property: consumers never see a valid prd from this port).
+  assign exu_rou_c.result = '0;
+  assign exu_rou_c.prd = '0;
+  assign exu_rou_c.rd = '0;
+  assign exu_rou_c.csr_wen = 1'b0;
+  assign exu_rou_c.csr_wdata = '0;
+  assign exu_rou_c.trap = 1'b0;
+  assign exu_rou_c.tval = '0;
+  assign exu_rou_c.cause = '0;
+  assign exu_rou_c.wen = 1'b0;
+  assign exu_rou_c.alu = '0;
+  assign exu_rou_c.sq_waddr = '0;
+  assign exu_rou_c.sq_wdata = '0;
 
 endmodule

@@ -12,11 +12,11 @@ module tb_ioq_pending_lock;
   csr_bcast_if csr_bcast();
   rou_exu_if rou_exu();
   exu_disp_ioq_if disp();
-  exu_rou_if exu_rou();
-  exu_rou_b_if exu_rou_b();
+  exu_wb_if exu_rou();
+  exu_wb_if exu_rou_b();
   exu_lsu_if exu_lsu();
   exu_l1d_if exu_l1d();
-  exu_ioq_bcast_if exu_ioq_bcast();
+  exu_wb_if exu_ioq_bcast();
 
   rapt_exu_ioq dut (
       .clock(clock),

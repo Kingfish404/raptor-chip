@@ -98,11 +98,7 @@ _FPGA_ALIAS_GOALS := $(BOARD_ALIASES) $(addsuffix -build,$(BOARD_ALIASES))
 _IS_FPGA_GOAL := $(strip \
 	$(foreach g,$(MAKECMDGOALS),$(if $(findstring fpga,$(g)),y)) \
 	$(filter $(_FPGA_ALIAS_GOALS),$(MAKECMDGOALS)))
-ifneq (,$(_IS_FPGA_GOAL))
 RAPT_CONFIG ?= default ## Raptor uarch config preset (default|middle|small|...)
-else
-RAPT_CONFIG ?= default ## Raptor uarch config preset (default|small|...)
-endif
 RAPT_CONFIG := $(strip $(RAPT_CONFIG))
 export RAPT_CONFIG
 FPGA_BOARD ?= $(if $(LINUX_FPGA_PROFILE),mlk_cu07_ku15p,tang_mega_138k_pro) ## Target FPGA board (linux FPGA profile: mlk_cu07_ku15p)
@@ -883,7 +879,7 @@ linux: ## Alias: make sim PAYLOAD=linux VARIANT=linux
 # profile). The generic fpga-* targets pick up the KU15P Linux/MIG bitstream
 # behaviour automatically when VARIANT=linux is set on an FPGA goal
 # (board=mlk_cu07_ku15p, BOOT_MODE=bios, WITH_MIG=1, INTEGRATED_MAIN_RAM_SIZE=0,
-# SYS_CLK=50 MHz, UART_BAUD=115200, RAPT_CONFIG=middle). The retired wrappers map
+# SYS_CLK=50 MHz, UART_BAUD=115200, RAPT_CONFIG=default). The retired wrappers map
 # to:
 #   linux-fpga-build           -> make fpga-build VARIANT=linux
 #   linux-fpga-timing-ok       -> make fpga-timing-ok VARIANT=linux
@@ -925,8 +921,8 @@ fpga-egos-prepare: ## Build egos-ku15p.bin (RAM-disk, embedded disk.img, ready f
 	@$(MAKE) --no-print-directory -C $(RAPTOR_HOME)/app/tinyos egos-ku15p-image
 	@test -f "$(LINUX_FPGA_EGOS_KU15P_IMAGE)" || { echo "[ERR] Missing egos KU15P image: $(LINUX_FPGA_EGOS_KU15P_IMAGE)"; exit 1; }
 	@echo "[INFO] egos KU15P image: $(LINUX_FPGA_EGOS_KU15P_IMAGE)"
-	@echo "[INFO]   size: $(shell stat -c%s $(LINUX_FPGA_EGOS_KU15P_IMAGE) 2>/dev/null) bytes"
-	@echo "[INFO]   upload: make fpga-egos-upload UART_PORT=$(UART_PORT) UART_BAUD=$(UART_BAUD)"
+	@sz=$$(stat -c%s "$(LINUX_FPGA_EGOS_KU15P_IMAGE)" 2>/dev/null); echo "[INFO]   size: $$sz bytes"
+	@echo "[INFO]   upload: make fpga-egos-upload   (forces VARIANT=linux; UART $(UART_PORT) @ linux-profile baud)"
 
 fpga-xv6-prepare: ## Build xv6 kernel.bin and fs.img used by TinyOS xv6 checks
 	@echo "[INFO] Building xv6-riscv kernel.bin and fs.img via app/tinyos"

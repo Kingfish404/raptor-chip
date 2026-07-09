@@ -38,7 +38,9 @@
 `define RAPT_RS_SIZE 8
 `define RAPT_IOQ_SIZE 8
 
-`define RAPT_SQ_SIZE 4
+// Unified SQ (Phase A): one queue from execute to drain (committed coloring),
+// replacing the former split STQ(4)+SQ(4); 8 preserves aggregate capacity.
+`define RAPT_SQ_SIZE 8
 
 // Middle enables dual commit
 `define RAPT_DUAL_COMMIT

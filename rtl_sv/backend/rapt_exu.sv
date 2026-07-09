@@ -28,12 +28,13 @@ module rapt_exu #(
     // No modport: EXU drives ready/ready_b (slave) but RS/IOQ only read (monitor).
     rou_exu_if rou_exu,
 
-    // No modport here: RS drives (.out) while IOQ reads (.in) for forwarding.
-    exu_rou_if       exu_rou,
-    exu_rou_b_if     exu_rou_b,
-    exu_rou_c_if.out exu_rou_c,
-    // No modport: IOQ drives (.out) while RS reads (.in) for forwarding.
-    exu_ioq_bcast_if exu_ioq_bcast,
+    // Unified writeback (CDB) ports -- see exu_wb_if for the index map.
+    // No modport on ALU-A/ALU-B/MEM: RS drives A/B while IOQ reads them for
+    // forwarding, and IOQ drives MEM while RS reads it.
+    exu_wb_if     exu_rou,
+    exu_wb_if     exu_rou_b,
+    exu_wb_if.out exu_rou_c,
+    exu_wb_if     exu_ioq_bcast,
 
     exu_lsu_if.master exu_lsu,
     exu_csr_if.master exu_csr,

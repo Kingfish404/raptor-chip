@@ -215,7 +215,7 @@ static int parse_args(int argc, char *argv[])
       {0, 0, NULL, 0},
   };
   int o;
-  size_t cycle_threshold = -1, instr_threshold = -1;
+  size_t cycle_threshold = 0, instr_threshold = 0;
   const char *ckpt_save_dir = NULL;
   bool ckpt_save_requested = false;
   const char *ckpt_load_dir = NULL;
@@ -252,24 +252,10 @@ static int parse_args(int argc, char *argv[])
       log_file = optarg;
       break;
     case 'c':
-      if (optarg[0] == '0' && (optarg[1] == 'x' || optarg[1] == 'X'))
-      {
-        sscanf(optarg, "%zx", &cycle_threshold);
-      }
-      else
-      {
-        sscanf(optarg, "%zu", &cycle_threshold);
-      }
+      cycle_threshold = strtoull(optarg, NULL, 0);
       break;
     case 'i':
-      if (optarg[0] == '0' && (optarg[1] == 'x' || optarg[1] == 'X'))
-      {
-        sscanf(optarg, "%zx", &instr_threshold);
-      }
-      else
-      {
-        sscanf(optarg, "%zu", &instr_threshold);
-      }
+      instr_threshold = strtoull(optarg, NULL, 0);
       break;
     case 'd':
 #ifdef CONFIG_DIFFTEST
@@ -356,10 +342,7 @@ static int parse_args(int argc, char *argv[])
     }
   }
   void cpu_exec_set_threshold(uint64_t cycle, uint64_t inst);
-  if (cycle_threshold != (size_t)-1 || instr_threshold != (size_t)-1)
-  {
-    cpu_exec_set_threshold(cycle_threshold, instr_threshold);
-  }
+  cpu_exec_set_threshold(cycle_threshold, instr_threshold);
   static char ckpt_default_dir[1100];
   if (ckpt_save_requested)
   {

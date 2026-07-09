@@ -1,8 +1,7 @@
 # Raptor Project
 
-[![RISC-V Compatibility](https://github.com/Kingfish404/raptor-chip/actions/workflows/verify.yaml/badge.svg)](https://github.com/Kingfish404/raptor-chip/actions/workflows/verify.yaml)
 [![Benchmark](https://github.com/Kingfish404/raptor-chip/actions/workflows/benchmark.yaml/badge.svg)](https://github.com/Kingfish404/raptor-chip/actions/workflows/benchmark.yaml)
-[![Linux Boot](https://github.com/Kingfish404/raptor-chip/actions/workflows/linux-boot.yaml/badge.svg)](https://github.com/Kingfish404/raptor-chip/actions/workflows/linux-boot.yaml)
+[![App](https://github.com/Kingfish404/raptor-chip/actions/workflows/app.yaml/badge.svg)](https://github.com/Kingfish404/raptor-chip/actions/workflows/app.yaml)
 [![STA](https://github.com/Kingfish404/raptor-chip/actions/workflows/sta.yaml/badge.svg)](https://github.com/Kingfish404/raptor-chip/actions/workflows/sta.yaml)
 [![Ubuntu](https://img.shields.io/badge/Ubuntu-E95420?style=flat&logo=ubuntu&logoColor=white)](https://en.wikipedia.org/wiki/Ubuntu)
 [![macOS](https://img.shields.io/badge/macOS-000000?style=flat&logo=apple&logoColor=white)](https://en.wikipedia.org/wiki/MacOS)
@@ -19,7 +18,7 @@
 
 Welcome to the Raptor Project! Here is an all-in-one repository for exploring, developing, optimizing, and verifying a RISC-V core. Aiming at high quality, full Linux support, FPGA implementation, and ASIC readiness.
 
-Core description: **Super-scalar, Out-of-order RISC-V core** with register renaming, ROB, and reservation stations. The RTL is described by `SystemVerilog` with `Chisel` (`Scala`) used only for decoder generation. Features Sv32 (RV32) / Sv39 (RV64) virtual memory (MMU/TLB/PTW), 16-entry PMP (TOR/NA4/NAPOT), LR/SC + AMO atomics, compressed instructions (RVC), CLINT/PLIC interrupts, and boots Linux v6.18.x via OpenSBI. Supports configurable **RV32** and **RV64** modes via compile-time switch.
+Core description: **Super-scalar, out-of-order RISC-V core** with register renaming, a 64-entry ROB, reservation stations, TAGE branch prediction, and a unified speculative/committed store queue. The RTL is described by `SystemVerilog` with `Chisel` (`Scala`) used only for decoder generation. Features Sv32 (RV32) / Sv39 (RV64) virtual memory (MMU/TLB/PTW), 16-entry PMP (TOR/NA4/NAPOT), LR/SC + AMO atomics, compressed instructions (RVC), CLINT/PLIC interrupts, a RISC-V Debug Module / JTAG DTM bring-up path, and boots Linux v6.18.x via OpenSBI. Supports configurable **RV32** and **RV64** modes via compile-time switch.
 
 ```
 Core name:  raptor-falcon (M/S/U + Sv32/Sv39 + PMP, Linux-capable)
@@ -31,6 +30,7 @@ Interrupts: CLINT (mtime, mtimecmp, msip) + PLIC (31 sources, M/S contexts)
 Profile:    n/a (closest peer: RVM23U32 / RVA20S64)
 
 Bus Interface:  AXI4, XLEN-bit data/addr, 4-bit ID, burst
+Default uarch: dual issue / dual commit, ROB=64, RS=8, IOQ=8, SQ=16, PRF=128, L1I=8 KiB, L1D=4 KiB, optional L2 passthrough/cache stage
 
 Verifying:  RISCOF (riscv-arch-test), RVFI, SVA
 ```
