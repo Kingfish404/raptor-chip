@@ -1,8 +1,7 @@
 # Raptor — RISC-V Processor Core
 
-[![RISC-V Compatibility](https://github.com/Kingfish404/raptor-chip/actions/workflows/verify.yaml/badge.svg)](https://github.com/Kingfish404/raptor-chip/actions/workflows/verify.yaml)
 [![Benchmark](https://github.com/Kingfish404/raptor-chip/actions/workflows/benchmark.yaml/badge.svg)](https://github.com/Kingfish404/raptor-chip/actions/workflows/benchmark.yaml)
-[![Linux Boot](https://github.com/Kingfish404/raptor-chip/actions/workflows/linux-boot.yaml/badge.svg)](https://github.com/Kingfish404/raptor-chip/actions/workflows/linux-boot.yaml)
+[![App](https://github.com/Kingfish404/raptor-chip/actions/workflows/app.yaml/badge.svg)](https://github.com/Kingfish404/raptor-chip/actions/workflows/app.yaml)
 [![STA](https://github.com/Kingfish404/raptor-chip/actions/workflows/sta.yaml/badge.svg)](https://github.com/Kingfish404/raptor-chip/actions/workflows/sta.yaml)
 
 Raptor is a dual-issue, out-of-order RISC-V core with register renaming, a

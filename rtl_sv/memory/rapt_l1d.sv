@@ -159,6 +159,15 @@ module rapt_l1d #(
   logic partial_store_rmw;
   logic load_speculate;
   assign load_speculate = (l1d_state == IDLE && lsu_l1d.rvalid && !cmu_bcast.flush_pipe);
+
+`ifdef RAPT_LSU_HUM
+  // Hit-under-miss B channel arm (full logic further below): in LD_D the
+  // SRAM read port is idle, steer it to the B request's set this cycle and
+  // tag-compare next cycle.  Declared here so the sram_raddr mux can see it.
+  logic b_arm_ok;
+  logic [L1D_LEN-1:0] b_idx_in;
+`endif
+
   assign partial_store_rmw = !l1d_rmw && !l1d_update
       && (l1d_state == IDLE)  // Only in IDLE; PTWAIT/LD_D would steal read port
       && !load_speculate      // load speculation uses SRAM read port
@@ -183,6 +192,9 @@ module rapt_l1d #(
   assign sram_raddr = partial_store_rmw ? waddr_idx
       : load_speculate
       ? lsu_l1d.raddr[L1D_LEN+L1D_LINE_LEN+L1dOffsetBits-1:L1D_LINE_LEN+L1dOffsetBits]
+`ifdef RAPT_LSU_HUM
+      : b_arm_ok ? b_idx_in
+`endif
       : addr_idx;
 
   // Data SRAM: wide subarrays (128-bit), shared raddr across all ways.
@@ -500,6 +512,85 @@ module rapt_l1d #(
     for (int w = 0; w < int'(L1D_N_WAYS); w++)
       l1d_data |= way_data_masked[w];
   end
+
+  // ==========================================================================
+  //  Hit-under-miss B channel (Phase A2, RAPT_LSU_HUM)
+  //
+  //  While the A channel waits on a miss refill (LD_D), the SRAM read port
+  //  is idle (A's data comes straight from the bus).  Serve a best-effort
+  //  second load on it: cycle N steers the read port to B's set (b_armed),
+  //  cycle N+1 does the tag compare and completes on a clean hit.  A B load
+  //  that misses / collides simply never completes here and retries via A
+  //  later, which owns all trap/PMP/PTW handling.  Bare mode only
+  //  (!mmu_en): under MMU the B vaddr is untranslated, so it is not served.
+  //
+  //  Data hazards: any cycle with l1d_update / l1d_rmw active (fill or
+  //  merge write in flight) kills the B attempt -- the tag registers and
+  //  the SRAM write-first bypass could otherwise disagree (same class as
+  //  the sram_bypass_r hazard on A).
+  // ==========================================================================
+`ifdef RAPT_LSU_HUM
+  logic b_armed;
+  logic [XLEN-1:0] b_addr_r;
+  assign b_idx_in = lsu_l1d.raddr_b[L1D_LEN+L1D_LINE_LEN+L1dOffsetBits-1:L1D_LINE_LEN+L1dOffsetBits];
+  assign b_arm_ok = (l1d_state == LD_D) && lsu_l1d.rvalid_b && !mmu_en
+                  && !l1d_rmw && !l1d_update
+                  && rapt_pkg::addr_cacheable(lsu_l1d.raddr_b)
+                  && !cmu_bcast.flush_pipe;
+
+  always_ff @(posedge clock) begin
+    if (reset || cmu_bcast.flush_pipe) begin
+      b_armed  <= 1'b0;
+      b_addr_r <= '0;
+    end else begin
+      b_armed  <= b_arm_ok;
+      if (b_arm_ok) b_addr_r <= lsu_l1d.raddr_b;
+    end
+  end
+
+  // B-side decode + tag compare (parallel to A's, on the registered B addr)
+  logic [L1dTagW-1:0] b_tag;
+  logic [L1D_LEN-1:0] b_idx;
+  logic [L1D_LINE_LEN-1:0] b_off;
+  assign b_tag = b_addr_r[XLEN-1:L1D_LEN+L1D_LINE_LEN+L1dOffsetBits];
+  assign b_idx = b_addr_r[L1D_LEN+L1D_LINE_LEN+L1dOffsetBits-1:L1D_LINE_LEN+L1dOffsetBits];
+  assign b_off = b_addr_r[L1D_LINE_LEN+L1dOffsetBits-1:L1dOffsetBits];
+
+  logic [L1D_N_WAYS-1:0] b_way_hit;
+  generate
+    for (genvar w = 0; w < L1D_N_WAYS; w++) begin : gen_b_tag_cmp
+      assign b_way_hit[w] = (l1d_tag[w][b_idx] == b_tag) & l1d_valid[w][b_idx][b_off];
+    end
+  endgenerate
+
+  logic [XLEN-1:0] b_way_data_masked[L1D_N_WAYS];
+  logic [XLEN-1:0] b_data;
+  generate
+    for (genvar w = 0; w < L1D_N_WAYS; w++) begin : gen_b_ao
+      assign b_way_data_masked[w] = b_way_hit[w] ? data_bank_rdata[w][b_off] : '0;
+    end
+  endgenerate
+  always_comb begin
+    b_data = '0;
+    for (int w = 0; w < int'(L1D_N_WAYS); w++) b_data |= b_way_data_masked[w];
+  end
+
+  // Complete only while the held request is unchanged and no write raced us.
+  assign lsu_l1d.rready_b = b_armed
+                         && lsu_l1d.rvalid_b
+                         && (lsu_l1d.raddr_b == b_addr_r)
+                         && |b_way_hit
+                         && !l1d_rmw && !l1d_update
+                         && !cmu_bcast.flush_pipe;
+  assign lsu_l1d.rdata_b = b_data;
+`else
+  assign lsu_l1d.rready_b = 1'b0;
+  assign lsu_l1d.rdata_b  = '0;
+  /* verilator lint_off UNUSEDSIGNAL */
+  logic _unused_hum_b;
+  assign _unused_hum_b = lsu_l1d.rvalid_b ^ (^lsu_l1d.raddr_b) ^ (^lsu_l1d.ralu_b);
+  /* verilator lint_on UNUSEDSIGNAL */
+`endif
 
   assign waddr_tag = lsu_l1d.waddr[XLEN-1:L1D_LEN+L1D_LINE_LEN+L1dOffsetBits];
   assign waddr_idx = lsu_l1d.waddr[L1D_LEN+L1D_LINE_LEN+L1dOffsetBits-1:L1D_LINE_LEN+L1dOffsetBits];

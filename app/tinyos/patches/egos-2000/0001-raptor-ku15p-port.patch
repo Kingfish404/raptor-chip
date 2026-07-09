@@ -1,0 +1,96 @@
+diff --git a/Makefile b/Makefile
+index 2391738..b18999f 100644
+--- a/Makefile
++++ b/Makefile
+@@ -58,6 +58,32 @@ install: egos
+ 	$(CC) tools/mkfs.c library/file/file$(FILESYS).c -DMKFS -DFILESYS=$(FILESYS) -DCPU_BIN_FILE="\"fpga/$(BOARD).bin\"" $(INCLUDE) -o tools/mkfs
+ 	cd tools; rm -f disk.img fpgaROM.bin qemuROM.bin; ./mkfs
+ 
++# KU15P RAM-disk image: a single flat binary uploaded to main_ram (RAM_START)
++# via LiteX BIOS serialboot. The egos kernel is (re)built with -DPLATFORM_KU15P
++# so it drives the LiteX UART (0xF0001800) and the Raptor internal CLINT
++# (0x02000000), and serves its read-only file system from a RAM-disk embedded
++# at KU15P_FLASH_BASE. Layout: egos.bin at offset 0, disk.img at
++# (KU15P_FLASH_BASE - KU15P_RAM_BASE). Override KU15P_FLASH_BASE to trade the
++# zero-padding upload size against headroom above the 6 MB egos runtime region.
++KU15P_RAM_BASE   ?= 0x80000000
++KU15P_FLASH_BASE ?= 0x80800000
++KU15P_IMAGE       = tools/egos-ku15p.bin
++
++ku15p:
++	@printf "$(YELLOW)-------- Build egos KU15P RAM-disk image --------$(END)\n"
++	@rm -f $(RELEASE)/egos.elf
++	$(MAKE) egos CFLAGS="$(CFLAGS) -DPLATFORM_KU15P -DEGOS_KU15P_FLASH_BASE=$(KU15P_FLASH_BASE)UL"
++	$(OBJCOPY) -O binary $(RELEASE)/egos.elf tools/egos.bin
++	$(CC) tools/mkfs.c library/file/file$(FILESYS).c -DMKFS -DFILESYS=$(FILESYS) -DCPU_BIN_FILE="\"fpga/$(BOARD).bin\"" $(INCLUDE) -o tools/mkfs
++	cd tools; rm -f disk.img fpgaROM.bin qemuROM.bin; ./mkfs
++	@off=$$(( $(KU15P_FLASH_BASE) - $(KU15P_RAM_BASE) )); \
++	 cp tools/egos.bin $(KU15P_IMAGE); \
++	 truncate -s $$off $(KU15P_IMAGE); \
++	 cat tools/disk.img >> $(KU15P_IMAGE); \
++	 printf "$(YELLOW)Built %s: %d bytes (kernel=%d, disk=%d @ 0x%x)$(END)\n" \
++	   $(KU15P_IMAGE) $$(stat -c%s $(KU15P_IMAGE)) $$(stat -c%s tools/egos.bin) \
++	   $$(stat -c%s tools/disk.img) $(KU15P_FLASH_BASE)
++
+ QEMU_MACHINE = -M virt -smp 4 -m 8M -bios tools/egos.bin
+ QEMU_GRAPHIC = -nographic# -device VGA,addr=0x2 -serial mon:stdio
+ QEMU_FLASH_1 = -drive if=pflash,format=raw,unit=1,file=tools/qemuROM.bin
+diff --git a/earth/dev_disk.c b/earth/dev_disk.c
+index 154958e..f0dec39 100644
+--- a/earth/dev_disk.c
++++ b/earth/dev_disk.c
+@@ -199,6 +199,14 @@ void disk_init() {
+     earth->disk_read  = disk_read;
+     earth->disk_write = disk_write;
+ 
++#if defined(PLATFORM_KU15P)
++    /* The KU15P LiteX SoC has no SD/SPI controller. Use the read-only RAM-disk
++     * embedded at FLASH_ROM_BASE (uploaded together with the kernel image via
++     * BIOS serialboot); probing SDSPI_BASE would hang on a missing device. */
++    type = FLASH_ROM;
++    CRITICAL("KU15P: using read-only FLASH_ROM RAM-disk at 0x%x",
++             (uint)FLASH_ROM_BASE);
++#else
+     if (earth->platform == QEMU) {
+         /* QEMU uses the PCI bus and the SDHCI standard. */
+         sdhci_init();
+@@ -207,4 +215,5 @@ void disk_init() {
+         type = (sdspi_init() == 0) ? SD_CARD : FLASH_ROM;
+         if (type == FLASH_ROM) CRITICAL("Using FLASH_ROM instead of SD_CARD");
+     }
++#endif
+ }
+diff --git a/library/egos.h b/library/egos.h
+index 0240399..cb0ded3 100644
+--- a/library/egos.h
++++ b/library/egos.h
+@@ -64,10 +64,29 @@ extern struct grass* grass;
+ #define ETH_PCI_ECAM     0x30018000UL /* QEMU     */
+ #define ETH_BUF_BASE     0x90000000UL /* Hardware */
+ #define ETH_CTL_BASE     (earth->platform == QEMU ? 0x41000000UL : 0xF0002000UL)
++#if defined(PLATFORM_KU15P)
++/* Raptor KU15P LiteX SoC overrides (fpga/litex .../csr.csv). The core still
++ * reports mvendorid==666 so boot.c selects the HARDWARE (LiteX) driver paths,
++ * but the peripheral bases differ from the tangnano20k board:
++ *   UART  : LiteX UART CSR at 0xF0001800
++ *   CLINT : Raptor internal CLINT at 0x02000000 (intercepted by rapt_router,
++ *           register-compatible: mtimecmp +0x4000, mtime +0xBFF8)
++ *   FLASH : RAM-disk embedded above RAM_END, uploaded with the kernel image
++ *           via BIOS serialboot (see app/tinyos egos-ku15p-image).
++ */
++#ifndef EGOS_KU15P_FLASH_BASE
++#define EGOS_KU15P_FLASH_BASE 0x81000000UL
++#endif
++#define UART_BASE        0xF0001800UL
++#define CLINT_BASE       0x02000000UL
++#define FLASH_ROM_BASE   EGOS_KU15P_FLASH_BASE
++#define VIDEO_FRAME_BASE 0x80600000UL
++#else
+ #define UART_BASE        (earth->platform == QEMU ? 0x10000000UL : 0xF0001000UL)
+ #define CLINT_BASE       (earth->platform == QEMU ? 0x02000000UL : 0xF0010000UL)
+ #define FLASH_ROM_BASE   (earth->platform == QEMU ? 0x22000000UL : 0x20400000UL)
+ #define VIDEO_FRAME_BASE (earth->platform == QEMU ? 0x41000000UL : 0x80600000UL)
++#endif
+ 
+ /* Below are some common macros/declarations for I/O, multicore and printing. */
+ #define ACCESS(x)          (*(__typeof__(*x) volatile*)(x))

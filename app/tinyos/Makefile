@@ -32,7 +32,7 @@ EGOS_NOSTDLIB ?= 1## Use app-provided tiny libc for egos (avoids compiler libc d
 EGOS_ARCH     ?= rv32imac_zicsr## ISA string for egos
 EGOS_ABI      ?= ilp32## ABI for egos
 EGOS_RISCV_CC ?= $(firstword $(foreach t, \
-    riscv32-unknown-elf-gcc riscv64-unknown-elf-gcc riscv-none-elf-gcc, \
+    riscv32-unknown-elf-gcc riscv64-unknown-elf-gcc riscv-none-elf-gcc riscv64-elf-gcc, \
     $(if $(shell command -v $t 2>/dev/null),$t)))## Override egos compiler (auto-detected)
 EGOS_RISCV_PREFIX := $(patsubst %gcc,%,$(EGOS_RISCV_CC))
 EGOS_OBJDUMP  ?= $(EGOS_RISCV_PREFIX)objdump## Override egos objdump (auto-detected)
@@ -48,6 +48,12 @@ EGOS_RUNTIME_INCLUDE := $(APP_HOME)/lib/runtime/include
 NSIM_SRC_DIR  := $(APP_HOME)/build/tinyos-nsim-src
 EGOS_NSIM_DIR := $(NSIM_SRC_DIR)/egos-2000
 XV6_NSIM_DIR  := $(NSIM_SRC_DIR)/xv6-riscv
+
+# Raptor-local modifications to the (gitignored) upstream egos-2000 clone live
+# as patches under patches/egos-2000/ (git-tracked via app/.gitignore's
+# !tinyos/patches/** allow-rule). The clone stays pristine and re-cloneable;
+# the patches are applied onto the build-tree copy at prepare time.
+EGOS_PATCH_DIR := $(_THIS_DIR)patches/egos-2000
 EGOS_APPS_DEPS := apps/*.* library/egos.h library/*/* Makefile
 EGOS_EGOS_DEPS := earth/* grass/* library/egos.h library/*/* Makefile
 ifeq ($(EGOS_NOSTDLIB),1)
@@ -173,6 +179,13 @@ xv6-clone: ## Clone xv6-riscv if missing (no fetch/pull)
 egos-nsim-prepare: egos-clone
 	@rm -rf "$(EGOS_NSIM_DIR)" && mkdir -p "$(EGOS_NSIM_DIR)"
 	@tar -cf - --exclude=.git --exclude=build -C "$(TINYOS_DIR)/egos-2000" . | tar -x -C "$(EGOS_NSIM_DIR)"
+	@if ls $(EGOS_PATCH_DIR)/*.patch >/dev/null 2>&1; then \
+		for p in $(EGOS_PATCH_DIR)/*.patch; do \
+			echo "[tinyos] apply egos patch: $$(basename $$p)"; \
+			patch -p1 -d "$(EGOS_NSIM_DIR)" < "$$p" \
+				|| { echo "[ERR] Failed to apply $$p (upstream egos-2000 drift? regenerate the patch)"; exit 1; }; \
+		done; \
+	fi
 
 xv6-nsim-prepare: xv6-clone
 	@rm -rf "$(XV6_NSIM_DIR)" && mkdir -p "$(XV6_NSIM_DIR)"
@@ -198,8 +211,9 @@ egos-sim-image: egos-nsim-prepare ## Build egos binary for NPC/nsim/NEMU
 
 # KU15P RAM-disk image: single flat binary with embedded disk.img.
 # Uses PLATFORM_KU15P to fix UART=0xF0001800, CLINT=0x02000000, and embeds
-# disk.img at 0x81000000 (FLASH_ROM_BASE). The result is uploaded via
-# Linux/MIG BIOS serialboot to 0x80000000.
+# disk.img above the egos runtime region (KU15P_FLASH_BASE, default 0x80800000
+# = FLASH_ROM_BASE; overridable). The result is uploaded via Linux/MIG BIOS
+# serialboot to 0x80000000.
 EGOS_KU15P_IMAGE := $(EGOS_NSIM_DIR)/tools/egos-ku15p.bin
 egos-ku15p-image: egos-nsim-prepare ## Build egos KU15P RAM-disk image (embedded disk.img)
 	$(EGOS_TOOLCHAIN_CHECK)
@@ -208,7 +222,7 @@ egos-ku15p-image: egos-nsim-prepare ## Build egos KU15P RAM-disk image (embedded
 		CFLAGS="$(EGOS_CFLAGS)" LDFLAGS="$(EGOS_LDFLAGS)" \
 		APPS_DEPS="$(EGOS_APPS_DEPS)" EGOS_DEPS="$(EGOS_EGOS_DEPS)"
 	@test -f "$(EGOS_KU15P_IMAGE)" || { echo "[ERR] Missing $(EGOS_KU15P_IMAGE)"; exit 1; }
-	@echo "Built KU15P egos image: $(EGOS_KU15P_IMAGE) ($(shell stat -c%s $(EGOS_KU15P_IMAGE) 2>/dev/null) bytes)"
+	@sz=$$(stat -c%s "$(EGOS_KU15P_IMAGE)" 2>/dev/null); echo "Built KU15P egos image: $(EGOS_KU15P_IMAGE) ($$sz bytes)"
 
 egos-cli-nsim: egos-sim-image ## Boot egos on NPC/nsim [RV32/Sv32]
 	@echo "[egos-cli-nsim] RV32 / Sv32 (egos-2000)"

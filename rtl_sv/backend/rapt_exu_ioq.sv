@@ -203,6 +203,38 @@ module rapt_exu_ioq #(
   assign exu_lsu.atomic_lock = ioq_atom[active_idx] && ioq_alu[active_idx] == `RAPT_ATO_LR__;
   assign exu_lsu.pc = ioq_pc[active_idx];
 
+  // === Hit-under-miss B issue (Phase A2, RAPT_LSU_HUM) ===
+  // While the A channel is parked on a miss (oo_pending), offer the next
+  // eligible load (in age order, skipping the pending entry) on the B
+  // channel.  B is best-effort: it completes only on a clean L1D hit or SQ
+  // forward; anything else just leaves the entry to retry via A later, so
+  // no extra state is held here.  ioq_load_issue_vec already enforces
+  // operand readiness, non-atomic, and older-store disambiguation.
+`ifdef RAPT_LSU_HUM
+  logic [$clog2(IOQ_SIZE)-1:0] b_issue_idx;
+  logic b_issue_found;
+  always_comb begin
+    b_issue_idx   = ioq_head;
+    b_issue_found = 1'b0;
+    for (int k = 0; k < IOQ_SIZE; k++) begin
+      automatic logic [$clog2(IOQ_SIZE)-1:0] idx;
+      idx = ioq_head + k[$clog2(IOQ_SIZE)-1:0];
+      if (!b_issue_found && ioq_load_issue_vec[idx]
+          && idx != oo_pending_idx && !ioq_atom[idx]) begin
+        b_issue_idx   = idx;
+        b_issue_found = 1'b1;
+      end
+    end
+  end
+  assign exu_lsu.rvalid_b = oo_pending && b_issue_found;
+  assign exu_lsu.raddr_b  = ioq_vj[b_issue_idx] + ioq_imm[b_issue_idx];
+  assign exu_lsu.ralu_b   = ioq_alu[b_issue_idx][4:0];
+`else
+  assign exu_lsu.rvalid_b = 1'b0;
+  assign exu_lsu.raddr_b  = '0;
+  assign exu_lsu.ralu_b   = '0;
+`endif
+
   // LSU/SQ store width expects SB/SH/SW/SD masks, while atomics carry
   // RAPT_ATO_* opcodes in ioq_alu. Convert AMO/SC width from uop.word.
   logic [4:0] head_store_walu;
@@ -621,6 +653,23 @@ module rapt_exu_ioq #(
         oo_pending     <= 1'b1;
         oo_pending_idx <= active_idx;
       end
+`ifdef RAPT_LSU_HUM
+      // ---- B-channel completion (hit-under-miss) ----
+      // Distinct from the A entry by construction (selection skips
+      // oo_pending_idx) and from the retiring head (B only targets
+      // !complete entries; retire requires complete).  The guard makes the
+      // exclusion explicit for synthesis (R1 discipline).
+      if (exu_lsu.rvalid_b && exu_lsu.rready_b) begin
+        if (b_issue_idx != active_idx
+            && !(ioq_valid_found && b_issue_idx == ioq_head)) begin
+          ioq_rdata[b_issue_idx]      <= exu_lsu.rdata_b;
+          ioq_complete[b_issue_idx]   <= 1'b1;
+          ioq_load_trap[b_issue_idx]  <= 1'b0;
+          ioq_load_cause[b_issue_idx] <= '0;
+          ioq_load_skip[b_issue_idx]  <= 1'b0;
+        end
+      end
+`endif
       // Clear per-entry completion when head retires (NBA after live latch)
       if (ioq_valid_found) begin
         ioq_complete[ioq_head]  <= 1'b0;

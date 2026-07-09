@@ -128,12 +128,13 @@ static inline void verilog_connect(TOP_NAME *top, NPCState *npc)
   npc->pmpcfg = (uint8_t *)&VERILOG_CPU(csrs__DOT__pmpcfg_r);
   npc->pmpaddr = (word_t *)&VERILOG_CPU(csrs__DOT__pmpaddr_r);
 
-  /* Pipeline quiesce probes (for checkpoint save: defer until SQ/STQ/ROB are
+  /* Pipeline quiesce probes (for checkpoint save: defer until SQ/ROB are
    * empty so in-flight stores don't get truncated by host-side memory dump).
-   * Use valid-bitvectors / dedicated empty signal -- head==tail is ambiguous. */
+   * Phase A unified SQ: 1-bit sq_all_empty/sq_all_full probes are width-
+   * stable -- host code never depends on SQ_SIZE's bit width. */
   npc->rob_empty = (uint8_t *)&VERILOG_ROU(rob_empty);
-  npc->sq_valid = (uint8_t *)&VERILOG_CPU(lsu__DOT__sq_valid);
-  npc->stq_valid = (uint8_t *)&VERILOG_CPU(lsu__DOT__stq_valid);
+  npc->sq_empty = (uint8_t *)&VERILOG_CPU(lsu__DOT__sq_all_empty);
+  npc->sq_full = (uint8_t *)&VERILOG_CPU(lsu__DOT__sq_all_full);
 }
 
 #endif // __NPC_VERILOG_H__

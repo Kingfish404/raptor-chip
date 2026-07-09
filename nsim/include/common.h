@@ -204,12 +204,11 @@ typedef struct
   word_t *pmpaddr;
 
   // for checkpoint quiesce check (pipeline drain detection before save).
-  // For ring buffers, head==tail is ambiguous (full vs empty), so we use
-  // the valid bitvector directly (sq_valid/stq_valid==0 means empty).
+  // Phase A unified SQ: width-stable 1-bit probes (independent of SQ_SIZE).
   // ROB exposes a dedicated rob_empty signal.
   uint8_t *rob_empty;
-  uint8_t *sq_valid; // raw byte view of [SQ_SIZE-1:0]; SQ empty when all-0
-  uint8_t *stq_valid;
+  uint8_t *sq_empty;  // 1-bit: SQ fully drained (no store buffered, FSM idle)
+  uint8_t *sq_full;   // 1-bit: all SQ entries occupied
 } NPCState;
 
 typedef struct

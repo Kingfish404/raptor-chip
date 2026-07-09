@@ -64,12 +64,26 @@ interface exu_lsu_if #(
   logic rready;
   logic stq_ready;
 
+  // Hit-under-miss B channel (Phase A2, RAPT_LSU_HUM): best-effort second
+  // load issued while the A channel waits on a miss.  Completes only on a
+  // clean cacheable L1D hit or an SQ forward; no trap/skip side effects
+  // (a load that cannot complete on B retries via A, which owns traps).
+  logic rvalid_b;
+  logic [XLEN-1:0] raddr_b;
+  logic [4:0] ralu_b;
+  logic [XLEN-1:0] rdata_b;
+  logic rready_b;
+
   modport master(
     output rvalid, raddr, ralu, atomic_lock, pc,
-    input rdata, trap, cause, difftest_skip, rready, stq_ready);
+    input rdata, trap, cause, difftest_skip, rready, stq_ready,
+    output rvalid_b, raddr_b, ralu_b,
+    input rdata_b, rready_b);
   modport slave(
     input rvalid, raddr, ralu, atomic_lock, pc,
-    output rdata, trap, cause, difftest_skip, rready, stq_ready);
+    output rdata, trap, cause, difftest_skip, rready, stq_ready,
+    input rvalid_b, raddr_b, ralu_b,
+    output rdata_b, rready_b);
 endinterface
 
 interface exu_load_fast_if #(

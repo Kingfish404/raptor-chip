@@ -95,9 +95,8 @@ void cpu_exec_lightsss_snapshot(const char *dir)
   for (int i = 0; i < 200000; i++)
   {
     bool rob_q = (npc.rob_empty != NULL) ? (*npc.rob_empty != 0) : true;
-    bool sq_q = (npc.sq_valid != NULL) ? (*npc.sq_valid == 0) : true;
-    bool stq_q = (npc.stq_valid != NULL) ? (*npc.stq_valid == 0) : true;
-    if (rob_q && sq_q && stq_q)
+    bool sq_q = (npc.sq_empty != NULL) ? (*npc.sq_empty != 0) : true;
+    if (rob_q && sq_q)
       break;
     cpu_exec_one_cycle();
   }

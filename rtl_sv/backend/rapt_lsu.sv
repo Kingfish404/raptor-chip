@@ -45,217 +45,164 @@ module rapt_lsu #(
   logic [XLEN-1:0] rdata_unalign;
   logic [XLEN-1:0] rdata;
 
-  // === Store Temporary Queue (STQ) ===
-  logic [$clog2(SQ_SIZE)-1:0] stq_head;
-  logic [$clog2(SQ_SIZE)-1:0] stq_tail;
-  logic [SQ_SIZE-1:0] stq_valid;
-
-  logic [4:0] stq_alu[SQ_SIZE];
-  logic [ROBLen-1:0] stq_dest[SQ_SIZE];
-  logic [XLEN-1:0] stq_waddr[SQ_SIZE];
-  logic [XLEN-1:0] stq_wdata[SQ_SIZE];
-  // === Store Temporary Queue (STQ) ===
-
-  // === Store Queue (SQ) ===
-  logic sq_ready;
-  logic [$clog2(SQ_SIZE)-1:0] sq_head;
-  logic [$clog2(SQ_SIZE)-1:0] sq_tail;
+  // ==========================================================================
+  //  Unified Store Queue (Phase A LSU refactor)
+  //
+  //  ONE ring buffer holds a store from execute to drain
+  //
+  //  Ring order == program order (the IOQ executes stores in order):
+  //      [head, cmt)  committed  - drains to L1D, survives flush
+  //      [cmt, tail)  speculative- flush rolls tail back to cmt
+  //
+  //  Entry lifecycle (payload is written exactly ONCE, at allocation):
+  //    alloc  : exu_ioq_bcast store writeback -- vaddr(tval), paddr(sq_waddr),
+  //             wdata, alu, dest are all available here; tail++
+  //    commit : ROB retires the store IN ORDER -> committed[cmt] <= 1, cmt++
+  //             (no CAM, no payload copy, never blocks: rou_lsu.sq_ready == 1)
+  //    drain  : head entry, when committed, through the state_store FSM; head++
+  //    flush  : clear valid on [cmt, tail), tail <= cmt; committed entries
+  //             keep draining
+  //
+  //  Per-array single-writer discipline (R1):
+  //    payload[] : alloc only        valid[] : alloc set / drain clr / flush clr
+  //    committed[]: commit set / drain clr
+  //  (alloc@tail, commit@cmt, drain@head are distinct entries by construction;
+  //   see assertions at the bottom.)
+  // ==========================================================================
+  logic [SQLen-1:0] sq_head;  // oldest committed (drain point)
+  logic [SQLen-1:0] sq_cmt;   // commit boundary: [head,cmt) committed
+  logic [SQLen-1:0] sq_tail;  // allocation point
   logic [SQ_SIZE-1:0] sq_valid;
+  logic [SQ_SIZE-1:0] sq_committed;
   logic [4:0] sq_alu[SQ_SIZE];
-  logic [XLEN-1:0] sq_waddr[SQ_SIZE];  // physical: for bus write-through
-  logic [XLEN-1:0] sq_vaddr[SQ_SIZE];  // virtual : for forwarding comparison
+  /* verilator lint_off UNUSEDSIGNAL */
+  logic [ROBLen-1:0] sq_dest[SQ_SIZE];  // ROB id: assertions/debug only
+  /* verilator lint_on UNUSEDSIGNAL */
+  logic [XLEN-1:0] sq_vaddr[SQ_SIZE];  // virtual : forwarding comparison
+  logic [XLEN-1:0] sq_paddr[SQ_SIZE];  // physical: bus write-through
   logic [XLEN-1:0] sq_wdata[SQ_SIZE];
   // A2: SQ full state tracker (for pmu_sq_full rising-edge detection)
   logic sq_full_r;
-  // === Store Queue (SQ) ===
 
-  // SQ index helpers (debug/waveform only; outputs feed sq_fwd_data lookup
-  // directly via sq_head + j arithmetic).
+  logic sq_alloc_fire;
+  logic sq_alloc_ready;
+  logic sq_commit_fire;
+  logic sq_drain_fire;
+
+  assign sq_alloc_fire  = exu_ioq_bcast.valid && exu_ioq_bcast.wen;
+  assign sq_alloc_ready = !sq_valid[sq_tail];
+  assign sq_commit_fire = rou_lsu.valid && rou_lsu.store;
+  assign exu_lsu.stq_ready = sq_alloc_ready;
+
+  // Commit never blocks: the entry already exists (allocated at writeback,
+  // which precedes ROB_WB state and therefore commit) and marking it
+  // committed consumes no new slot.  This removes the former SQ-full commit
+  // stall in ROU (head0_store_ready).
+  assign rou_lsu.sq_ready = 1'b1;
+  // Width-stable 1-bit occupancy probes: consumed by the nsim testbench
+  // (quiesce/PMU) so host code never depends on SQ_SIZE's bit width.
+  // sq_all_full has no RTL reader -- it exists for the PMU sq-full counter.
+  logic sq_all_empty;
   /* verilator lint_off UNUSEDSIGNAL */
-  logic load_in_sq;
-  logic [$clog2(SQ_SIZE)-1:0] load_in_sq_idx;
-  logic store_in_sq;
-  logic [$clog2(SQ_SIZE)-1:0] store_in_sq_idx;
+  logic sq_all_full;
   /* verilator lint_on UNUSEDSIGNAL */
+  assign sq_all_empty = (sq_valid == '0) && (state_store == LS_S_V);
+  assign sq_all_full  = &sq_valid;
+  assign rou_lsu.sq_empty = sq_all_empty;
 
-  // Store-to-load forwarding from SQ
-  logic sq_fwd_ok;
-  logic [XLEN-1:0] sq_fwd_data;
-
+  // Drain source: oldest committed entry.
   logic wvalid;
   logic [XLEN-1:0] wdata;
   logic [XLEN-1:0] waddr;
   logic [4:0] walu;
+  assign wvalid = sq_valid[sq_head] && sq_committed[sq_head];
+  assign wdata  = sq_wdata[sq_head];
+  assign waddr  = sq_paddr[sq_head];
+  assign walu   = sq_alu[sq_head];
 
   assign raddr = exu_lsu.raddr;
   assign ralu = exu_lsu.ralu;
-  assign sq_ready = sq_valid[sq_tail] == 0;
-  assign rou_lsu.sq_ready = sq_ready;
-  assign rou_lsu.sq_empty = (sq_valid == '0) && (state_store == LS_S_V);
 
-  assign wvalid = sq_valid[sq_head];
-  assign wdata = sq_wdata[sq_head];
-  assign waddr = sq_waddr[sq_head];
-  assign walu = sq_alu[sq_head];
-
-  logic stq_enq_fire;
-  logic stq_commit_fire;
-  logic stq_commit_found;
-  logic [SQLen-1:0] stq_commit_idx;
-  logic stq_enq_ready;
-  logic [SQLen-1:0] stq_enq_idx;
-  logic [SQLen-1:0] stq_head_next;
-  logic [SQ_SIZE-1:0] stq_valid_after_commit;
-
-  assign stq_enq_fire = exu_ioq_bcast.valid && exu_ioq_bcast.wen;
-  assign stq_commit_fire = rou_lsu.valid && rou_lsu.store && sq_ready;
-  assign exu_lsu.stq_ready = stq_enq_ready;
-
-  always_comb begin
-    stq_commit_found = 1'b0;
-    stq_commit_idx = stq_head;
-    for (int i = 0; i < SQ_SIZE; i++) begin
-      if (!stq_commit_found && stq_valid[i] && stq_dest[i] == rou_lsu.dest) begin
-        stq_commit_found = 1'b1;
-        stq_commit_idx = i[SQLen-1:0];
-      end
-    end
-  end
-
-  always_comb begin
-    stq_valid_after_commit = stq_valid;
-    if (stq_commit_fire && stq_commit_found) begin
-      stq_valid_after_commit[stq_commit_idx] = 1'b0;
-    end
-
-    stq_enq_ready = 1'b0;
-    stq_enq_idx = stq_tail;
-    for (int j = 0; j < SQ_SIZE; j++) begin
-      automatic logic [SQLen-1:0] idx = stq_tail + j[SQLen-1:0];
-      if (!stq_enq_ready && !stq_valid_after_commit[idx]) begin
-        stq_enq_ready = 1'b1;
-        stq_enq_idx = idx;
-      end
-    end
-
-    stq_head_next = stq_head;
-    if (stq_valid_after_commit == '0) begin
-      stq_head_next = stq_tail;
-    end else if (!stq_valid_after_commit[stq_head]) begin
-      for (int j = 1; j <= SQ_SIZE; j++) begin
-        automatic logic [SQLen-1:0] idx = stq_head + j[SQLen-1:0];
-        if (!stq_valid_after_commit[stq_head_next] && stq_valid_after_commit[idx]) begin
-          stq_head_next = idx;
-        end
-      end
-    end
-  end
+  // Drain completion: FSM signals release of the head entry.
+  assign sq_drain_fire = (state_store == LS_S_R || state_store == LS_S_HI_R)
+                       && sq_valid[sq_head];
 
   always_ff @(posedge clock) begin
     if (reset) begin
-      sq_head   <= 0;
-      sq_tail   <= 0;
-      sq_valid  <= 0;
-
-      stq_head  <= 0;
-      stq_tail  <= 0;
-      stq_valid <= 0;
-      pmu_sq_full <= 1'b0;  // A2: Initialize full pulse
-      // Reset SQ/STQ payload arrays so unused entries cannot feed X values into
+      sq_head      <= '0;
+      sq_cmt       <= '0;
+      sq_tail      <= '0;
+      sq_valid     <= '0;
+      sq_committed <= '0;
+      pmu_sq_full  <= 1'b0;
+      // Reset payload arrays so unused entries cannot feed X values into the
       // store FSM or store-to-load forwarding logic in FPGA synthesis.
       for (int i = 0; i < SQ_SIZE; i++) begin
-        sq_alu[i]    <= '0;
-        sq_waddr[i]  <= '0;
-        sq_vaddr[i]  <= '0;
-        sq_wdata[i]  <= '0;
-        stq_alu[i]   <= '0;
-        stq_dest[i]  <= '0;
-        stq_waddr[i] <= '0;
-        stq_wdata[i] <= '0;
+        sq_alu[i]   <= '0;
+        sq_dest[i]  <= '0;
+        sq_vaddr[i] <= '0;
+        sq_paddr[i] <= '0;
+        sq_wdata[i] <= '0;
       end
     end else begin
       // A2: Latch current full status (rising-edge detection for pmu_sq_full)
       pmu_sq_full <= (&sq_valid) && !sq_full_r;
-      sq_full_r <= (&sq_valid);  // Full when all SQ entries valid
+      sq_full_r   <= (&sq_valid);
+
+      // ---- Allocate / commit / flush (speculative side) ----
       if (cmu_bcast.flush_pipe || cmu_bcast.fence_time) begin
-        stq_head  <= 0;
-        stq_tail  <= 0;
-        stq_valid <= 0;
+        // Roll back the speculative region.  Committed entries [head,cmt)
+        // are architectural state and keep draining.  A store cannot commit
+        // in the same cycle as a flush (stores never flush; traps suppress
+        // rou_lsu.store), so no commit-mark is lost here.
+        sq_tail <= sq_cmt;
+        for (int i = 0; i < SQ_SIZE; i++) begin
+          if (sq_valid[i] && !sq_committed[i]) sq_valid[i] <= 1'b0;
+        end
       end else begin
-        // -- STQ commit: clear the retiring store's valid bit.
-        //    When the same slot is reused by enqueue this cycle, the
-        //    enqueue write (below) takes priority — the slot stays
-        //    valid with the new store's payload.  This explicit
-        //    mutual-exclusion guard avoids a Vivado-addressed-WAW
-        //    hazard (R1 pattern: two addressed writes to the same
-        //    stq_valid[idx] from separate if-branches).
-        if (stq_commit_fire && stq_commit_found) begin
-          stq_head <= stq_head_next;
-          if (!(stq_enq_fire && stq_commit_idx == stq_enq_idx))
-            stq_valid[stq_commit_idx] <= 0;
+        if (sq_alloc_fire) begin
+          sq_valid[sq_tail] <= 1'b1;
+          sq_alu[sq_tail]   <= exu_ioq_bcast.alu[4:0];
+          sq_dest[sq_tail]  <= exu_ioq_bcast.dest;
+          sq_vaddr[sq_tail] <= exu_ioq_bcast.tval;      // virtual (forwarding)
+          sq_paddr[sq_tail] <= exu_ioq_bcast.sq_waddr;  // physical (drain)
+          sq_wdata[sq_tail] <= exu_ioq_bcast.sq_wdata;
+          sq_tail <= sq_tail + 1'b1;
         end
-        if (stq_enq_fire) begin
-          stq_valid[stq_enq_idx] <= 1;
-
-          stq_alu[stq_enq_idx] <= exu_ioq_bcast.alu[4:0];
-          stq_dest[stq_enq_idx] <= exu_ioq_bcast.dest;
-          stq_waddr[stq_enq_idx] <= exu_ioq_bcast.tval;  // virtual addr for forwarding
-          stq_wdata[stq_enq_idx] <= exu_ioq_bcast.sq_wdata;
-          stq_tail <= stq_enq_idx + 1;
-          if (stq_valid_after_commit == '0) begin
-            stq_head <= stq_enq_idx;
-          end
+        if (sq_commit_fire) begin
+          sq_committed[sq_cmt] <= 1'b1;
+          sq_cmt <= sq_cmt + 1'b1;
+          `RAPT_DPI_C_NPC_DIFFTEST_MEM_DIFF(rou_lsu.sq_waddr, rou_lsu.sq_wdata,
+                                            {{2'b0}, rou_lsu.alu})
         end
       end
-      if (rou_lsu.valid && rou_lsu.store && sq_ready) begin
-        // Store Commit
-        sq_valid[sq_tail] <= 1;
 
-        sq_alu[sq_tail] <= rou_lsu.alu[4:0];
-        sq_waddr[sq_tail] <= rou_lsu.sq_waddr;
-        // Virtual address comes from ROB (tval), not STQ. ROB survives flushes
-        // and retains the correct per-store virtual address for forwarding,
-        // whereas STQ entries can be clobbered by post-flush re-enqueues.
-        sq_vaddr[sq_tail] <= rou_lsu.sq_vaddr;
-        sq_wdata[sq_tail] <= rou_lsu.sq_wdata;
-
-        sq_tail <= sq_tail + 1;
-        `RAPT_DPI_C_NPC_DIFFTEST_MEM_DIFF(rou_lsu.sq_waddr, rou_lsu.sq_wdata, {{2'b0}, rou_lsu.alu})
-      end
-      if (state_store == LS_S_R && sq_valid[sq_head]) begin
-        // Store Finished (aligned case -- released after single beat).
-        sq_valid[sq_head] <= 0;
-
-        sq_alu[sq_head] <= 0;
-        sq_waddr[sq_head] <= 0;
-        sq_wdata[sq_head] <= 0;
-
-        sq_head <= sq_head + 1;
-      end
-      if (state_store == LS_S_HI_R && sq_valid[sq_head]) begin
-        // Store Finished (misaligned case -- released after hi beat).
-        sq_valid[sq_head] <= 0;
-
-        sq_alu[sq_head] <= 0;
-        sq_waddr[sq_head] <= 0;
-        sq_wdata[sq_head] <= 0;
-
-        sq_head <= sq_head + 1;
+      // ---- Drain release (committed side; independent of flush) ----
+      if (sq_drain_fire) begin
+        sq_valid[sq_head]     <= 1'b0;
+        sq_committed[sq_head] <= 1'b0;
+        sq_head <= sq_head + 1'b1;
       end
     end
   end
 
-  // SQ address conflict + store-to-load forwarding.
-  // Phase 1: parallel match vector (all comparisons fire simultaneously)
-  // Phase 2: age-ordered priority select (youngest match wins)
+  // ==========================================================================
+  //  Load conflict detection + store-to-load forwarding (single CAM).
+  //  Ring order from head == program order, so "last match scanning from
+  //  head" == youngest matching store -- this replaces the former separate
+  //  STQ/SQ CAMs and their STQ-over-SQ priority mux.
+  // ==========================================================================
+  logic load_in_sq;
+  logic sq_fwd_ok;
+  logic [XLEN-1:0] sq_fwd_data;
   logic [SQ_SIZE-1:0] sq_match_vec;
-  logic [SQ_SIZE-1:0] sq_full_vec;  // full-width store (can forward)
+  logic [SQ_SIZE-1:0] sq_fwd_full_vec;  // full-width store (can forward)
   always_comb begin
     for (int j = 0; j < SQ_SIZE; j++) begin
-      automatic logic [$clog2(SQ_SIZE)-1:0] idx = sq_head + j[$clog2(SQ_SIZE)-1:0];
+      automatic logic [SQLen-1:0] idx = sq_head + j[SQLen-1:0];
       sq_match_vec[j] = sq_valid[idx]
-          && (sq_vaddr[idx][XLEN-1:$clog2(XLEN/8)] == raddr[XLEN-1:$clog2(XLEN/8)]);
-      sq_full_vec[j] = sq_match_vec[j] && (sq_alu[idx] ==
+          && (sq_vaddr[idx][XLEN-1:WordOffBits] == raddr[XLEN-1:WordOffBits]);
+      sq_fwd_full_vec[j] = sq_match_vec[j] && (sq_alu[idx] ==
 `ifdef RAPT_RV64
           `RAPT_SD_WSTRB
 `else
@@ -268,76 +215,25 @@ module rapt_lsu #(
   // Youngest match wins: highest j in age order (last set bit)
   always_comb begin
     load_in_sq = |sq_match_vec;
-    load_in_sq_idx = sq_head;
     sq_fwd_ok = 0;
     sq_fwd_data = 0;
     for (int j = 0; j < SQ_SIZE; j++) begin
       if (sq_match_vec[j]) begin
-        load_in_sq_idx = sq_head + j[$clog2(SQ_SIZE)-1:0];
-        sq_fwd_ok = sq_full_vec[j];
-        sq_fwd_data = sq_wdata[sq_head + j[$clog2(SQ_SIZE)-1:0]];
+        sq_fwd_ok = sq_fwd_full_vec[j];
+        sq_fwd_data = sq_wdata[sq_head+j[SQLen-1:0]];
       end
     end
   end
 
-  // Store address conflict detection (first match)
-  logic [SQ_SIZE-1:0] store_match_vec;
-  always_comb begin
-    for (int i = 0; i < SQ_SIZE; i++) begin
-      store_match_vec[i] = sq_valid[i] && (sq_waddr[i] == rou_lsu.sq_waddr);
-    end
-  end
-  always_comb begin
-    store_in_sq = |store_match_vec;
-    store_in_sq_idx = 0;
-    for (int i = SQ_SIZE - 1; i >= 0; i--) begin
-      if (store_match_vec[i]) begin
-        store_in_sq_idx = i[$clog2(SQ_SIZE)-1:0];
-      end
-    end
-  end
-
-  // STQ address conflict + store-to-load forwarding (parallel match)
-  logic stq_addr_conflict;
-  logic stq_fwd_ok;
-  logic [XLEN-1:0] stq_fwd_data;
-  logic [SQ_SIZE-1:0] stq_match_vec;
-  logic [SQ_SIZE-1:0] stq_full_vec;
-  always_comb begin
-    for (int j = 0; j < SQ_SIZE; j++) begin
-      automatic logic [$clog2(SQ_SIZE)-1:0] idx = stq_head + j[$clog2(SQ_SIZE)-1:0];
-      stq_match_vec[j] = stq_valid[idx]
-          && (stq_waddr[idx][XLEN-1:$clog2(XLEN/8)] == raddr[XLEN-1:$clog2(XLEN/8)]);
-      stq_full_vec[j] = stq_match_vec[j] && (stq_alu[idx] ==
-`ifdef RAPT_RV64
-          `RAPT_SD_WSTRB
-`else
-          `RAPT_SW_WSTRB
-`endif
-      );
-    end
-  end
-  always_comb begin
-    stq_addr_conflict = |stq_match_vec;
-    stq_fwd_ok = 0;
-    stq_fwd_data = 0;
-    for (int j = 0; j < SQ_SIZE; j++) begin
-      if (stq_match_vec[j]) begin
-        stq_fwd_ok = stq_full_vec[j];
-        stq_fwd_data = stq_wdata[stq_head + j[$clog2(SQ_SIZE)-1:0]];
-      end
-    end
-  end
-
-  // Store-to-load forwarding priority: STQ (youngest) > SQ (committed)
+  // Store-to-load forwarding hit.
   // NOTE: `fwd_hit` assignment is deferred until after `ma_span` is computed
   // below, because misaligned loads that cross a word boundary cannot be
-  // satisfied by the word-granular SQ/STQ match (the high half lives in the
+  // satisfied by the word-granular SQ match (the high half lives in the
   // next word, which the matched store does not cover).  See assign block
   // immediately following the `ma_span` definition.
   logic fwd_hit;
   logic [XLEN-1:0] fwd_data;
-  assign fwd_data = (stq_addr_conflict && stq_fwd_ok) ? stq_fwd_data : sq_fwd_data;
+  assign fwd_data = sq_fwd_data;
 
   assign raddr_valid = exu_lsu.rvalid;
 
@@ -370,38 +266,138 @@ module rapt_lsu #(
 `endif
   ;
   // Misaligned loads that cross a word/dword boundary cannot use single-shot
-  // SQ/STQ forwarding: the word-granular `sq_match_vec` only covers the lo
+  // SQ forwarding: the word-granular `sq_match_vec` only covers the lo
   // word, but the load also needs the byte(s) in the next word.  Suppress
   // the forwarding hit so the request stalls (`ma_load_req` already requires
-  // `!load_in_sq && !stq_addr_conflict`) until the matching store drains to
-  // L1D, after which the misaligned-split path will fetch both halves.
+  // `!load_in_sq`) until the matching store drains to L1D, after which the
+  // misaligned-split path will fetch both halves.
   //
   // Device (MMIO) ordering: an uncacheable load must not forward from, nor
-  // bypass, ANY older committed store still draining in the SQ -- not just
-  // same-address ones.  A device read may depend on a side effect of a prior
-  // write to a DIFFERENT device register.  Observed on KU15P (SQ_SIZE=8):
-  // memspeed's timer0 update CSR write sat behind 2 MiB of DDR4 stores in
-  // the SQ while the timer0 value CSR read (different address, no conflict)
-  // issued immediately -> read the stale latch -> start-end==0 ->
-  // __udivdi3 divide-by-zero ebreak -> jump to PC=0.  Zero-latency sim never
-  // exposes this window.  Mirrors the IOQ's `dmmu_en ||` bypass: with the
-  // MMU on, raddr is virtual and the physical cacheability is unknown here.
+  // bypass, ANY older store still in the SQ -- not just same-address ones.
+  // A device read may depend on a side effect of a prior write to a
+  // DIFFERENT device register.  Observed on KU15P (SQ_SIZE=8): memspeed's
+  // timer0 update CSR write sat behind 2 MiB of DDR4 stores in the SQ while
+  // the timer0 value CSR read (different address, no conflict) issued
+  // immediately -> read the stale latch -> start-end==0 -> __udivdi3
+  // divide-by-zero ebreak -> jump to PC=0.  Zero-latency sim never exposes
+  // this window.  Mirrors the IOQ's `dmmu_en ||` bypass: with the MMU on,
+  // raddr is virtual and the physical cacheability is unknown here.
   logic mmio_ordered;
   assign mmio_ordered = !csr_bcast.dmmu_en && !rapt_pkg::addr_cacheable(raddr);
   logic mmio_load_blocked;
   assign mmio_load_blocked = mmio_ordered
                           && !((sq_valid == '0) && (state_store == LS_S_V));
-  assign fwd_hit = !ma_span && !mmio_ordered
-                && ((stq_addr_conflict && stq_fwd_ok)
-                 || (!stq_addr_conflict && load_in_sq && sq_fwd_ok));
+  assign fwd_hit = !ma_span && !mmio_ordered && load_in_sq && sq_fwd_ok;
   logic pmp_load_fault_lsu;
   // Only engage the split for requests that actually reach the cache
-  // (no SQ forward, no STQ conflict).  Forwarded loads keep the single-shot
-  // path; the store queue does not straddle word boundaries today.
+  // (no SQ forward/conflict).  Forwarded loads keep the single-shot path;
+  // the store queue does not straddle word boundaries today.
   logic ma_load_req;
   assign ma_load_req = raddr_valid && ma_span && !fwd_hit
-                    && !load_in_sq && !stq_addr_conflict
+                    && !load_in_sq
                     && !pmp_load_fault_lsu;
+
+  // ==========================================================================
+  //  Hit-under-miss B channel (Phase A2, RAPT_LSU_HUM)
+  //  Best-effort second load while the A channel waits on a miss.  Same
+  //  correctness rules as A, but with NO trap/PMP/MA-split path: any load
+  //  that cannot complete cleanly on B simply never gets rready_b and later
+  //  retries via A.  Aligned loads only; MMIO excluded (device ordering);
+  //  SQ conflicts stall B exactly like A (partial-store match blocks,
+  //  full-width youngest match forwards).
+  // ==========================================================================
+`ifdef RAPT_LSU_HUM
+  logic [XLEN-1:0] raddr_b;
+  logic [4:0] ralu_b;
+  assign raddr_b = exu_lsu.raddr_b;
+  assign ralu_b  = exu_lsu.ralu_b;
+
+  // B-side SQ CAM (parallel to A's; youngest match wins)
+  logic load_in_sq_b;
+  logic sq_fwd_ok_b;
+  logic [XLEN-1:0] sq_fwd_data_b;
+  logic [SQ_SIZE-1:0] sq_match_vec_b;
+  logic [SQ_SIZE-1:0] sq_fwd_full_vec_b;
+  always_comb begin
+    for (int j = 0; j < SQ_SIZE; j++) begin
+      automatic logic [SQLen-1:0] idx = sq_head + j[SQLen-1:0];
+      sq_match_vec_b[j] = sq_valid[idx]
+          && (sq_vaddr[idx][XLEN-1:WordOffBits] == raddr_b[XLEN-1:WordOffBits]);
+      sq_fwd_full_vec_b[j] = sq_match_vec_b[j] && (sq_alu[idx] ==
+`ifdef RAPT_RV64
+          `RAPT_SD_WSTRB
+`else
+          `RAPT_SW_WSTRB
+`endif
+      );
+    end
+  end
+  always_comb begin
+    load_in_sq_b = |sq_match_vec_b;
+    sq_fwd_ok_b = 0;
+    sq_fwd_data_b = 0;
+    for (int j = 0; j < SQ_SIZE; j++) begin
+      if (sq_match_vec_b[j]) begin
+        sq_fwd_ok_b = sq_fwd_full_vec_b[j];
+        sq_fwd_data_b = sq_wdata[sq_head+j[SQLen-1:0]];
+      end
+    end
+  end
+
+  logic ma_span_b;
+  assign ma_span_b =
+       ((ralu_b == `RAPT_ALU_LH__ || ralu_b == `RAPT_ALU_LHU_) && raddr_b[1:0] == 2'b11)
+    || ((ralu_b == `RAPT_ALU_LW__) && (raddr_b[1:0] != 2'b00))
+`ifdef RAPT_RV64
+    || ((ralu_b == `RAPT_ALU_LWU_) && (raddr_b[1:0] != 2'b00))
+    || ((ralu_b == `RAPT_ALU_LD__) && (raddr_b[OFFW-1:0] != '0))
+`endif
+  ;
+  logic mmio_ordered_b;
+  assign mmio_ordered_b = !csr_bcast.dmmu_en && !rapt_pkg::addr_cacheable(raddr_b);
+
+  logic fwd_hit_b;
+  assign fwd_hit_b = exu_lsu.rvalid_b && !ma_span_b && !mmio_ordered_b
+                  && load_in_sq_b && sq_fwd_ok_b;
+
+  // Pass to L1D only when nothing local blocks it.
+  assign lsu_l1d.rvalid_b = exu_lsu.rvalid_b && !fwd_hit_b && !load_in_sq_b
+                         && !ma_span_b && !mmio_ordered_b;
+  assign lsu_l1d.raddr_b  = raddr_b;
+  assign lsu_l1d.ralu_b   = ralu_b;
+
+  // B load data path: align + extend (parallel to A's)
+  logic [XLEN-1:0] rdata_b_unalign;
+  logic [XLEN-1:0] rdata_b_al;
+  assign rdata_b_unalign = fwd_hit_b ? sq_fwd_data_b : lsu_l1d.rdata_b;
+  assign rdata_b_al = rdata_b_unalign >> (raddr_b[OFFW-1:0] * 8);
+  assign exu_lsu.rdata_b = (
+      ({XLEN{ralu_b == `RAPT_ALU_LB__}} & {{XLEN-8{rdata_b_al[7]}}, rdata_b_al[7:0]})
+    | ({XLEN{ralu_b == `RAPT_ALU_LBU_}} & {{XLEN-8{1'b0}}, rdata_b_al[7:0]})
+    | ({XLEN{ralu_b == `RAPT_ALU_LH__}} & {{XLEN-16{rdata_b_al[15]}}, rdata_b_al[15:0]})
+    | ({XLEN{ralu_b == `RAPT_ALU_LHU_}} & {{XLEN-16{1'b0}}, rdata_b_al[15:0]})
+`ifdef RAPT_RV64
+    | ({XLEN{ralu_b == `RAPT_ALU_LW__}} & {{XLEN-32{rdata_b_al[31]}}, rdata_b_al[31:0]})
+    | ({XLEN{ralu_b == `RAPT_ALU_LWU_}} & {{XLEN-32{1'b0}}, rdata_b_al[31:0]})
+    | ({XLEN{ralu_b == `RAPT_ALU_LD__}} & rdata_b_al)
+`else
+    | ({XLEN{ralu_b == `RAPT_ALU_LW__}} & rdata_b_al)
+`endif
+    );
+  assign exu_lsu.rready_b = fwd_hit_b || lsu_l1d.rready_b;
+`else
+  assign lsu_l1d.rvalid_b = 1'b0;
+  assign lsu_l1d.raddr_b  = '0;
+  assign lsu_l1d.ralu_b   = '0;
+  assign exu_lsu.rdata_b  = '0;
+  assign exu_lsu.rready_b = 1'b0;
+  /* verilator lint_off UNUSEDSIGNAL */
+  logic _unused_hum_lsu;
+  assign _unused_hum_lsu = exu_lsu.rvalid_b ^ (^exu_lsu.raddr_b)
+                         ^ (^exu_lsu.ralu_b) ^ lsu_l1d.rready_b
+                         ^ (^lsu_l1d.rdata_b);
+  /* verilator lint_on UNUSEDSIGNAL */
+`endif
 
   // --- Pre-split PMP check on the ORIGINAL misaligned address ---
   // The MA-split path below turns a misaligned load into two aligned
@@ -539,7 +535,7 @@ module rapt_lsu #(
   // IOQ retires the load as a trap without touching the cache.
   logic lsu_pmp_trap;
   assign lsu_pmp_trap = raddr_valid && ma_span && pmp_load_fault_lsu
-                     && !fwd_hit && !load_in_sq && !stq_addr_conflict
+                     && !fwd_hit && !load_in_sq
                      && (ma_state == MA_IDLE);
   assign exu_lsu.trap = lsu_pmp_trap ? 1'b1
                       : (raddr_valid && fwd_hit) ? 1'b0
@@ -596,7 +592,9 @@ module rapt_lsu #(
   assign lsu_l1d.raddr = ma_req_addr;
   assign lsu_l1d.ralu = ma_req_alu;
   assign lsu_l1d.rvalid = (ma_state == MA_HI)
-                       || (raddr_valid && !load_in_sq && !stq_addr_conflict                                        && !mmio_load_blocked                                       && (ma_state == MA_IDLE));
+                       || (raddr_valid && !load_in_sq
+                                       && !mmio_load_blocked
+                                       && (ma_state == MA_IDLE));
   assign lsu_l1d.atomic_lock = exu_lsu.atomic_lock;
 
   // Misalign-split FSM.
@@ -682,52 +680,66 @@ module rapt_lsu #(
   // ==========================================================================
   //  Assertions (enable with +define+RAPT_ASSERT_EN)
   //  Category legend:
-  //    COMMIT_DURABLE : commit-time inputs must come from durable sources
+  //    COMMIT_ORDER   : in-order commit marks the oldest speculative entry
   //    HANDSHAKE      : queue capacity / ready-valid contract
-  //    FLUSH_CLEAR    : STQ is fully cleared on pipeline flush
-  //    FLUSH_SURVIVE  : SQ keeps older-than-flush entries (no flush of SQ)
+  //    FLUSH_ROLLBACK : flush drops exactly the speculative region
   // ==========================================================================
 
-    // COMMIT_DURABLE: vaddr and waddr at SQ commit must describe the same word.
-    // With DMMU enabled only the page offset is invariant across translation.
-    `RAPT_SVA_IMPLY(clock, reset, LSU_SQ_COMMIT_ADDR_PAGE_OFFSET,
-      (rou_lsu.valid && rou_lsu.store && sq_ready
-       && !$isunknown(rou_lsu.sq_vaddr) && !$isunknown(rou_lsu.sq_waddr)),
+  // COMMIT_ORDER: a store never commits in the same cycle as a flush (stores
+  // carry no flush attribute and traps suppress rou_lsu.store).  The flush
+  // rollback branch relies on this to not lose a commit mark.
+  `RAPT_SVA_IMPLY(clock, reset, LSU_SQ_NO_COMMIT_ON_FLUSH,
+      (sq_commit_fire),
+      (!cmu_bcast.flush_pipe && !cmu_bcast.fence_time))
+
+  // COMMIT_ORDER: the entry being commit-marked must exist, be speculative,
+  // and belong to the store the ROB is retiring (stores commit in order, so
+  // no CAM is needed -- this assertion proves that assumption holds).
+  `RAPT_SVA_IMPLY(clock, reset, LSU_SQ_COMMIT_ENTRY_MATCH,
+      (sq_commit_fire),
+      (sq_valid[sq_cmt] && !sq_committed[sq_cmt]
+       && sq_dest[sq_cmt] == rou_lsu.dest))
+
+  // COMMIT_ORDER: the alloc-time vaddr of the entry being committed must
+  // describe the same word as the ROB's durable copy.  With DMMU enabled
+  // only the page offset is invariant across translation.
+  `RAPT_SVA_IMPLY(clock, reset, LSU_SQ_COMMIT_ADDR_PAGE_OFFSET,
+      (sq_commit_fire
+       && !$isunknown(rou_lsu.sq_vaddr) && !$isunknown(sq_vaddr[sq_cmt])),
       (csr_bcast.dmmu_en
-       ? (rou_lsu.sq_vaddr[PageOffBits-1:WordOffBits]
-         == rou_lsu.sq_waddr[PageOffBits-1:WordOffBits])
-       : (rou_lsu.sq_vaddr[XLEN-1:WordOffBits]
-         == rou_lsu.sq_waddr[XLEN-1:WordOffBits])))
+       ? (sq_vaddr[sq_cmt][PageOffBits-1:WordOffBits]
+         == rou_lsu.sq_vaddr[PageOffBits-1:WordOffBits])
+       : (sq_vaddr[sq_cmt][XLEN-1:WordOffBits]
+         == rou_lsu.sq_vaddr[XLEN-1:WordOffBits])))
 
-  // HANDSHAKE: SQ commit requires a free slot at sq_tail (sq_ready).
-  `RAPT_SVA_IMPLY(clock, reset, LSU_SQ_COMMIT_NEEDS_READY,
-      (rou_lsu.valid && rou_lsu.store),
-      (sq_ready))
-
-  // HANDSHAKE: the SQ drain target slot must be valid when state_store==LS_S_R.
+  // HANDSHAKE: the SQ drain target slot must be a valid committed entry.
   `RAPT_SVA_IMPLY(clock, reset, LSU_SQ_DRAIN_VALID,
       (state_store == LS_S_R),
-      (sq_valid[sq_head]))
+      (sq_valid[sq_head] && sq_committed[sq_head]))
 
-    // HANDSHAKE: a load/AMO blocked by an older partial store must not complete
-    // via a stale L1D rready from a request that was never issued.
-    `RAPT_SVA_IMPLY(clock, reset, LSU_BLOCKED_LOAD_NOT_READY,
-      (raddr_valid && (load_in_sq || stq_addr_conflict) && !fwd_hit),
+  // HANDSHAKE: a load/AMO blocked by an older partial store must not complete
+  // via a stale L1D rready from a request that was never issued.
+  `RAPT_SVA_IMPLY(clock, reset, LSU_BLOCKED_LOAD_NOT_READY,
+      (raddr_valid && load_in_sq && !fwd_hit),
       (!exu_lsu.rready))
 
-  `RAPT_SVA_IMPLY(clock, reset, LSU_STQ_ENQ_NEEDS_READY,
-      (stq_enq_fire),
-      (exu_lsu.stq_ready))
+  // HANDSHAKE: allocation requires a free slot at sq_tail.
+  `RAPT_SVA_IMPLY(clock, reset, LSU_SQ_ALLOC_NEEDS_READY,
+      (sq_alloc_fire),
+      (sq_alloc_ready))
 
-  // FLUSH_CLEAR: STQ head/tail/valid must be zero the cycle after flush.
-  `RAPT_SVA_NEXT(clock, reset, LSU_STQ_FLUSH_CLEAR,
+  // HANDSHAKE: alloc/commit/drain must target distinct entries whenever two
+  // of them fire in the same cycle (single-writer-per-array discipline).
+  `RAPT_SVA_IMPLY(clock, reset, LSU_SQ_ALLOC_COMMIT_DISTINCT,
+      (sq_alloc_fire && sq_commit_fire),
+      (sq_tail != sq_cmt))
+  `RAPT_SVA_IMPLY(clock, reset, LSU_SQ_COMMIT_DRAIN_DISTINCT,
+      (sq_commit_fire && sq_drain_fire),
+      (sq_cmt != sq_head))
+
+  // FLUSH_ROLLBACK: the cycle after a flush there are no speculative entries;
+  // committed entries (still draining) are untouched.
+  `RAPT_SVA_NEXT(clock, reset, LSU_SQ_FLUSH_ROLLBACK,
       (cmu_bcast.flush_pipe || cmu_bcast.fence_time),
-      (stq_head == '0 && stq_tail == '0 && stq_valid == '0))
-
-  // COMMIT_DURABLE: after an SQ commit, the freshly written sq_vaddr must
-  // equal what was presented on rou_lsu.sq_vaddr that cycle. Detects any
-  // regression that reroutes sq_vaddr through a speculative structure.
-  `RAPT_SVA_NEXT(clock, reset, LSU_SQ_VADDR_FROM_ROB,
-      (rou_lsu.valid && rou_lsu.store && sq_ready),
-      (sq_vaddr[$past(sq_tail)] == $past(rou_lsu.sq_vaddr)))
+      (sq_cmt == sq_tail && ((sq_valid & ~sq_committed) == '0)))
 endmodule
