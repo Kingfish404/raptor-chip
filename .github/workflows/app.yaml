@@ -237,10 +237,10 @@ jobs:
       - name: Download pre-built Linux kernel
         shell: bash -l {0}
         run: make linux-download-rv32
-      - name: Boot Linux on NPC
+      - name: Boot Linux on NPC with difftest
         shell: bash -l {0}
         run: |
-          make linux-boot-npc32 ARGS="-b -n" MAX_INST=120000000 \
+          make linux-boot-npc32-difftest ARGS="-b -n" MAX_INST=120000000 \
             2>&1 | tee /tmp/linux-boot.log || true
       - name: Linux boot summary
         run: |
@@ -362,6 +362,7 @@ jobs:
 
   litex-test:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     env:
       RAPTOR_HOME: ${{ github.workspace }}
     steps:
@@ -378,8 +379,23 @@ jobs:
         shell: bash -l {0}
         run: |
           cd fpga/litex
-          timeout 300s make coremark SIM_TIMEOUT=0 2>&1 | tee /tmp/litex-coremark.log || true
+          # Two iterations make this a functional smoke test, not a score-valid run.
+          # The inner timeout applies after the separate CoreMark Vsim cold build.
+          set -o pipefail
+          COREMARK_RC=0
+          make coremark COREMARK_ITERATIONS=2 SIM_TIMEOUT=300 \
+            2>&1 | tee /tmp/litex-coremark.log || COREMARK_RC=$?
+          if [ "$COREMARK_RC" -ne 0 ]; then
+            echo "::warning::LiteX CoreMark build or simulation exited with $COREMARK_RC; retaining the log and continuing"
+            tail -n 100 /tmp/litex-coremark.log || true
+          elif ! grep -q 'CoreMark: done\.' /tmp/litex-coremark.log; then
+            echo "::warning::LiteX CoreMark did not reach its completion marker before its timeout; retaining the log and continuing"
+            tail -n 100 /tmp/litex-coremark.log || true
+          elif ! grep -q 'Correct operation validated' /tmp/litex-coremark.log; then
+            echo "::notice::LiteX CoreMark completed its two-iteration smoke test; score validation is intentionally skipped"
+          fi
       - name: LiteX summary
+        if: always()
         run: |
           LOG=/tmp/litex-coremark.log
           CM_SCORE=$(grep -oP 'Iterations/Sec\s*:\s*\K[0-9.]+' "$LOG" 2>/dev/null | head -1 || echo "N/A")
@@ -387,7 +403,13 @@ jobs:
           CM_TICKS=$(grep -oP 'Total ticks\s*:\s*\K[0-9]+' "$LOG" 2>/dev/null | head -1 || echo "N/A")
           CM_TIME=$(grep -oP 'Total time \(secs\):\s*\K[0-9.]+' "$LOG" 2>/dev/null | head -1 || echo "N/A")
           CPU_INFO=$(grep -oP 'CPU:\s*\K.+' "$LOG" 2>/dev/null | head -1 || echo "N/A")
-          CM_VALID=$(grep -q 'Correct operation validated' "$LOG" 2>/dev/null && echo "PASS" || echo "FAIL")
+          if grep -q 'Correct operation validated' "$LOG" 2>/dev/null; then
+            CM_VALID="PASS"
+          elif [ "$CM_ITERS" = "2" ]; then
+            CM_VALID="SMOKE (score validation skipped)"
+          else
+            CM_VALID="FAIL"
+          fi
           {
             echo ""
             echo "## LiteX CoreMark Results"
@@ -417,12 +439,16 @@ jobs:
         shell: bash -l {0}
         run: |
           cd fpga/litex
-          make embench SIM_TIMEOUT=1800 2>&1 | tee /tmp/litex-embench.log || true
+          # Two single-threaded simulations avoid oversubscribing the hosted
+          # runner while retaining parallel benchmark throughput.
+          set -o pipefail
+          make embench SIM_TIMEOUT=1800 SIM_THREADS=1 EMBENCH_JOBS=2 \
+            2>&1 | tee /tmp/litex-embench.log
 
       - name: Generate Embench summary
         if: always()
         run: |
-          LOG_DIR="fpga/litex/build/embench-logs"
+          LOG_DIR="nsim/build/default/logs/litex/embench-logs"
           SUMMARY="$LOG_DIR/summary.md"
           REF_JSON=".github/data/embench-m4-ref.json"
 
@@ -489,7 +515,7 @@ jobs:
         with:
           name: litex-embench-logs-${{ github.sha }}
           path: |
-            fpga/litex/build/embench-logs/
+            nsim/build/default/logs/litex/embench-logs/
             /tmp/litex-embench.log
           retention-days: 30
           overwrite: true

@@ -249,9 +249,11 @@ jobs:
             git clone --depth 1 https://github.com/riscv-software-src/riscv-pk \
               third_party/riscv-software-src/riscv-pk
 
-      - name: Build NPC simulator
+      - name: Build NEMU reference and NPC simulator
         shell: bash -l {0}
-        run: make build-npc32
+        run: |
+          make config-nemu32-ref
+          make build-npc32
 
       - name: Build pk
         shell: bash -l {0}
@@ -373,9 +375,11 @@ jobs:
             git clone --depth 1 https://github.com/riscv-software-src/riscv-pk \
               third_party/riscv-software-src/riscv-pk
 
-      - name: Build NPC simulator
+      - name: Build NEMU reference and NPC simulator
         shell: bash -l {0}
-        run: make build-npc32
+        run: |
+          make config-nemu32-ref
+          make build-npc32
 
       - name: Build pk
         shell: bash -l {0}

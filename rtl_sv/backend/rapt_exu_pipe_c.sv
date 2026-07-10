@@ -25,12 +25,12 @@ module rapt_exu_pipe_c #(
   logic btaken_c;
   always_comb begin
     unique case (iss.alu)
-      `RAPT_ALU_EQ__: btaken_c = (iss.op1 == iss.op2);                       // BEQ
-      `RAPT_ALU_XOR_: btaken_c = (iss.op1 != iss.op2);                       // BNE: |s1^s2
-      `RAPT_ALU_SLT_: btaken_c = ($signed(iss.op1) < $signed(iss.op2));      // BLT
-      `RAPT_ALU_SGE_: btaken_c = ($signed(iss.op1) >= $signed(iss.op2));     // BGE
-      `RAPT_ALU_SLTU: btaken_c = (iss.op1 < iss.op2);                        // BLTU
-      `RAPT_ALU_SGEU: btaken_c = (iss.op1 >= iss.op2);                       // BGEU
+      `RAPT_ALU_EQ__: btaken_c = (iss.op1 == iss.op2);  // BEQ
+      `RAPT_ALU_XOR_: btaken_c = (iss.op1 != iss.op2);  // BNE: |s1^s2
+      `RAPT_ALU_SLT_: btaken_c = ($signed(iss.op1) < $signed(iss.op2));  // BLT
+      `RAPT_ALU_SGE_: btaken_c = ($signed(iss.op1) >= $signed(iss.op2));  // BGE
+      `RAPT_ALU_SLTU: btaken_c = (iss.op1 < iss.op2);  // BLTU
+      `RAPT_ALU_SGEU: btaken_c = (iss.op1 >= iss.op2);  // BGEU
       default:        btaken_c = 1'b0;
     endcase
   end

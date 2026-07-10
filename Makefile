@@ -256,7 +256,7 @@ export RAPT_SIM_ASSERT
 
 config-npc32: ## Configure NPC simulator (o2 default)
 	$(MAKE) -C $(NSIM_HOME) o2_difftest_defconfig
-	@$(MAKE) --no-print-directory -C $(NSIM_HOME) $(NPC_DEFCONFIG)
+	@$(MAKE) --no-print-directory -C $(NSIM_HOME)
 
 config-npc32-linux:
 	$(MAKE) -C $(NSIM_HOME) o2linux_difftest_defconfig
@@ -604,10 +604,11 @@ linux-download: ## Download pre-built Linux (RV32 + RV64)
 # Canned recipes: download payload, (re)build sim with VFLAGS, run + tee log.
 # $(1) = rv32|rv64 (linux/Makefile download suffix), $(2) = payload image,
 # $(3) = log stem.
+# $(4) = optional nsim variable override.
 define linux_boot_npc
 	$(MAKE) -C $(LINUX_HOME) download-$(1)
 	$(MAKE) -C $(NSIM_HOME) -j$(NPROC) VFLAGS="$(VFLAGS)"
-	@set -o pipefail; $(MAKE) -C $(NSIM_HOME) run IMG=$(2) ARGS="$(ARGS) $(if $(MAX_INST),-m $(MAX_INST))" VFLAGS="$(VFLAGS)" $(call tee_npc,$(3))
+	@set -o pipefail; $(MAKE) -C $(NSIM_HOME) run IMG=$(2) ARGS="$(ARGS) $(if $(MAX_INST),-m $(MAX_INST))" VFLAGS="$(VFLAGS)" $(4) $(call tee_npc,$(3))
 endef
 
 define linux_boot_nemu
@@ -622,17 +623,17 @@ linux-boot-nemu64: config-nemu64-linux ## Boot Linux on NEMU (riscv64)
 	$(call linux_boot_nemu,rv64,$(LINUX_RV64_PAYLOAD),linux-boot-nemu64)
 
 linux-boot-npc32: config-npc32-linux ## Boot Linux on NPC (riscv32)
-	$(call linux_boot_npc,rv32,$(LINUX_RV32_PAYLOAD),linux-boot-npc32)
+	$(call linux_boot_npc,rv32,$(LINUX_RV32_PAYLOAD),linux-boot-npc32,DIFF_REF_SO=)
 
-linux-boot-npc32-difftest: config-npc32-linux config-nemu32-ref ## Boot Linux on NPC with difftest
+linux-boot-npc32-difftest: config-nemu32-ref config-npc32-linux ## Boot Linux on NPC with difftest
 	$(call linux_boot_npc,rv32,$(LINUX_RV32_PAYLOAD),linux-boot-npc32-difftest)
 
 linux-boot-npc64: VFLAGS := -DRAPT_RV64
 linux-boot-npc64: config-npc32-linux ## Boot Linux on NPC (riscv64)
-	$(call linux_boot_npc,rv64,$(LINUX_RV64_PAYLOAD),linux-boot-npc64)
+	$(call linux_boot_npc,rv64,$(LINUX_RV64_PAYLOAD),linux-boot-npc64,DIFF_REF_SO=)
 
 linux-boot-npc64-difftest: VFLAGS := -DRAPT_RV64
-linux-boot-npc64-difftest: config-npc32-linux config-nemu64-ref ## Boot Linux on NPC RV64 with difftest
+linux-boot-npc64-difftest: config-nemu64-ref config-npc32-linux ## Boot Linux on NPC RV64 with difftest
 	$(call linux_boot_npc,rv64,$(LINUX_RV64_PAYLOAD),linux-boot-npc64-difftest)
 
 linux-boot-nemu32-device: config-nemu32-linux-device ## Boot Linux on NEMU RV32 (auto-download)

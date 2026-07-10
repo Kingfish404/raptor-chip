@@ -1,77 +1,10 @@
 # Microarchitecture
 
-Raptor is an out-of-order, super-scalar RISC-V processor core with register renaming, a reorder buffer (ROB), per-pipeline issue queues, and virtual memory support.
-
-### ISA breakdown
-
-- Base: `RV32I` / `RV64I`, selected at compile time via `-DRAPT_RV64`.
-- Standard: `M` (mul/div), `A` (LR/SC, AMO), `C` (compressed), `Zicsr`,
-  `Zifencei`, `Zicntr`.
-- Bit-manipulation: `Zba` (address generation, incl. RV64 `.UW` variants),
-  `Zbb` (basic bit-manipulation), `Zbc` (carry-less multiply), `Zbs`
-  (single-bit), `Zcb` (additional compressed ops).
-- Conditional: `Zicond` (`czero.{eqz,nez}`).
-- Hints / may-be-ops (decoded as NOPs): `Zihintpause`, `Zihintntl`, `Zicbop`,
-  `Zimop`, `Zcmop`.
-- Privileged: M, S (Sv32 on RV32, Sv39 on RV64), U; 16-entry PMP (TOR/NA4/NAPOT, L-bit WARL) checked on fetch, load/store, and PTW PTE loads.
-
-Closest RISC-V profile peer: RVM23U32 / RVA20S64.
-
-
-## Microarchitecture Diagram
-
-```mermaid
-flowchart TD
-  subgraph BPU["Frontend (dual-fetch)"]
-    direction TD
-    BTB["BTB (2-way SA, 128 entries)"]
-    PHT["PHT (2-bit, 256 entries)"]
-    RSB["RSB (4 entries)"]
-    TAGE["TAGE (default DIRP)"]
-  end
-  subgraph FE["Frontend (dual-fetch)"]
-    BPU["BPU (TAGE/BTB/RSB)"]
-    IFU
-    IDU["IDU (dual decode)"]
-    RNU["RNU (rename, PHY 128)"]
-  end
-  subgraph BE["Backend (dual-issue / dual-commit)"]
-    ROU["ROU (UOQ + ROB 64)"]
-    RT{{"EXU dispatch router"}}
-    PA["IQ-A 8: ALU-A + Sys"]
-    PB["IQ-B 8: ALU-B"]
-    PBR["BRQ 4: BRU"]
-    PM["MDQ 4: MUL/DIV"]
-    PQ["IOQ 8: mem"]
-    CDB(("CDB ×5"))
-    PRF["PRF (4R/4W)"]
-    CMU["CMU (commit)"]
-    LSU["LSU (unified SQ 16)"]
-    CSR
-  end
-  subgraph MEM["Memory"]
-    L1I["L1I 8 KiB 2-way + ITLB/PTW"]
-    L1D["L1D 4 KiB 2-way + DTLB/PTW"]
-    BUS["BUS -> L2 opt -> router (CLINT/PLIC) -> AXI4"]
-  end
-  BPU --- IFU
-  IFU --- L1I
-  IFU --> IDU
-  IDU -."Early Restear".-> IFU
-  IDU --> RNU --> ROU --> RT
-  RT --> PA & PB & PBR & PM & PQ
-  PA & PB & PBR & PM & PQ --> CDB
-  CDB -->|"writeback + wakeup"| ROU & PRF
-  ROU --> CMU
-  CMU -."flush / BPU train".-> FE
-  CSR --- PA
-  PQ --> LSU --> L1D --> BUS
-  L1I --> BUS
-```
+Raptor is an out-of-order, super-scalar RISC-V processor core with register renaming, a reorder buffer (ROB), per-class issue queues (a dual-ported ALQ shared by the two ALU pipes, plus BRQ / MDQ / IOQ), and virtual memory support.
 
 ## Pipeline
 
-8 logical stages, dual-issue width through IF->DI. Valid/ready handshaking at all boundaries; queues (RNQ, UOQ, per-pipe IQs, IOQ, ROB) decouple stages.
+8 logical stages, dual-issue width through IF->DI. Valid/ready handshaking at all boundaries; queues (RNQ, UOQ, ALQ/BRQ/MDQ, IOQ, ROB) decouple stages.
 
 ```text
  IF0     IF1      ID      RN       DI       IS/EX    WB      CM
@@ -177,10 +110,10 @@ Dispatch queue + reorder buffer + commit logic.
 
 #### EXU (`rapt_exu.sv`)
 
-Thin dispatch router + 5 execution pipelines. Each pipeline = private issue queue + function unit + one dedicated writeback port on the unified CDB (`exu_wb_if`).
+Thin dispatch router + 5 execution pipelines, each with one dedicated writeback port on the unified CDB (`exu_wb_if`).
 
-- **Dispatch router**: classifies each uop (priority: memory > MUL/DIV > branch > CSR/system/trap > simple ALU) and steers it to the owning pipe. CSR/system/trap uops must go to ALU-A (the only pipe with CSR/trap semantics); simple ALU work is **load-balanced** between IQ-A and IQ-B by occupancy (ties prefer IQ-B). Dual dispatch into the same queue uses its first + second free slots.
-- **Generic IQ** (`rapt_exu_iq.sv`): parameterized issue queue instantiated per ALU-class pipe -- IQ-A (8), IQ-B (8), BRQ (4). Data-capture scheduler: operands are woken from all 4 value-producing CDB ports plus the **fast load-use** tag path (early tag wakeup, confirmed or re-busied by the MEM broadcast one cycle later, with issue-time data bypass). Age-matrix oldest-first one-hot select; the winning entry issues and frees in the same cycle. Issue payload is exposed via `exu_iq_iss_if`.
+- **Dispatch router**: classifies each uop (priority: memory > MUL/DIV > branch > ALU-class) and steers it to the owning queue. CSR/system/trap entries are flagged **port-B-blocked** at dispatch, so they only ever issue to ALU-A (the only pipe with CSR/trap semantics). Dual dispatch into the same queue uses its first + second free slots.
+- **Generic IQ** (`rapt_exu_iq.sv`): parameterized issue queue -- ALQ (8, dual issue ports via `HAS_ISS_B`) shared by both ALU pipes, and BRQ (4, single port). Data-capture scheduler: operands are woken from all 4 value-producing CDB ports plus the **fast load-use** tag path (early tag wakeup, confirmed or re-busied by the MEM broadcast one cycle later, with issue-time data bypass). Age-matrix oldest-first one-hot select; port B picks the oldest ready non-blocked entry distinct from port A's pick. Winning entries issue and free in the same cycle. Issue payloads are exposed via `exu_iq_iss_if`.
 - **ALU-A pipe** (`rapt_exu_pipe_a.sv`): full ALU + CSR read/write staging + system/trap redirect (`mtvec`/`mepc`/`sepc`), instret correction. Combinational; drives CDB port [0].
 - **ALU-B pipe** (`rapt_exu_pipe_b.sv`): simple ALU + JAL/JALR link write. Drives CDB port [1].
 - **BRU pipe** (`rapt_exu_pipe_c.sv`): compare-only branch resolution (single taken bit instead of a full ALU); never writes rd, so its CDB port carries no result/prd (no PRF write port, no bypass entry). Drives CDB port [2].
@@ -261,7 +194,7 @@ Cluster-level Platform-Level Interrupt Controller. Default `NDEV=31` sources and
 | `rou_csr_if`     | ROU->CSR                | CSR write + trap/system on commit                         |
 | `rou_cmu_if`     | ROU->CMU                | Commit info slot A/B (PC, branch, fence, flush)           |
 | `exu_wb_if` (x5) | pipes->ROU/PRF/LSU/IQs  | Unified CDB writeback: ALU-A / ALU-B / BRU / MEM / MULDIV |
-| `exu_iq_iss_if`  | IQ->pipe (EXU internal) | Oldest-ready entry payload (operands, alu, pc, dest, ...) |
+| `exu_iq_iss_if`  | IQ->pipe (EXU internal) | Oldest-ready entry payload; the ALQ exposes two (ports A/B) |
 | `exu_prf_if`     | ROU->PRF                | Operand read (4 ports: 2 per slot)                        |
 | `exu_lsu_if`     | EXU->LSU                | Load request (addr/alu/atomic)                            |
 | `exu_csr_if`     | EXU->CSR                | CSR read port                                             |
@@ -296,7 +229,7 @@ Cluster-level Platform-Level Interrupt Controller. Default `NDEV=31` sources and
 | `RAPT_RIQ_SIZE`      | 8         | Rename queue (RNQ) entries                 |
 | `RAPT_IIQ_SIZE`      | 8         | Dispatch queue (UOQ) entries               |
 | `RAPT_ROB_SIZE`      | 64        | Reorder buffer entries                     |
-| `RAPT_RS_SIZE`       | 8         | Per-ALU issue queue entries (IQ-A / IQ-B)  |
+| `RAPT_RS_SIZE`       | 8         | ALU issue queue (ALQ) entries, shared by ALU-A/ALU-B |
 | `RAPT_IOQ_SIZE`      | 8         | In-order memory queue entries              |
 | `BRQ_SIZE` (param)   | 4         | BRU issue queue entries                    |
 | `MDQ_SIZE` (param)   | 4         | MUL/DIV issue queue entries                |

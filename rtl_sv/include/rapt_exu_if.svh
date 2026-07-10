@@ -247,14 +247,19 @@ interface exu_disp_rs_if #(
   logic accept_a;         // slot A is allocated this cycle (uses free_idx_a)
   logic accept_b;         // slot B is allocated this cycle (uses b_rs_idx)
   logic [$clog2(RS_SIZE)-1:0] b_rs_idx;
+  // Per-slot dispatch sideband, captured into the entry: ineligible for
+  // issue port B (CSR / system / trap class -- only pipe A handles those
+  // semantics). Constant 0 for single-issue-port queues.
+  logic iss_b_block_a;
+  logic iss_b_block_b;
 
   modport top(
       input free_found_a, free_found_b, free_idx_a, free_idx_b,
-      output accept_a, accept_b, b_rs_idx
+      output accept_a, accept_b, b_rs_idx, iss_b_block_a, iss_b_block_b
   );
   modport rs(
       output free_found_a, free_found_b, free_idx_a, free_idx_b,
-      input accept_a, accept_b, b_rs_idx
+      input accept_a, accept_b, b_rs_idx, iss_b_block_a, iss_b_block_b
   );
 endinterface
 

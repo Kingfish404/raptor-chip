@@ -3,12 +3,20 @@
 
 // Generic Issue Queue (IQ) -- per-pipeline out-of-order scheduler.
 //
-// Phase 1 of the execution-engine decoupling: one parameterized IQ instance
-// sits in front of every ALU-class execution pipe (ALU-A / ALU-B / BRU).
-// Dispatch routing (rapt_exu) decides which IQ a uop enters, so the IQ
-// itself needs no per-port eligibility predicates: the oldest entry with
-// ready operands issues, one per cycle, and the entry is freed the same
-// cycle (the pipe's writeback port is dedicated and never back-pressures).
+// One parameterized IQ instance sits in front of every ALU-class execution
+// pipe. Dispatch routing (rapt_exu) decides which IQ a uop enters, so the
+// IQ itself needs no per-port class predicates beyond the optional port-B
+// block bit: the oldest entry with ready operands issues, and the entry is
+// freed the same cycle (the pipe's writeback port is dedicated and never
+// back-pressures).
+//
+// Issue ports:
+//   * `iss`   -- always present: oldest ready entry (any class).
+//   * `iss_b` -- when HAS_ISS_B=1: the oldest ready entry that is not
+//     port-B-blocked (CSR/system/trap class, flagged at dispatch via
+//     `disp.iss_b_block_*`) and distinct from `iss`'s pick. This lets one
+//     shared entry pool feed two ALU pipes: the two oldest ready uops
+//     issue together regardless of how dispatch interleaved them.
 //
 // Responsibilities:
 //   * Hold dispatched uops with captured operands (data-capture scheduler)
@@ -16,11 +24,12 @@
 //   * Fast load-use: tag-only early wakeup from `load_fast`, confirmed (or
 //     re-busied) by the MEM broadcast one cycle later; issue-time data
 //     bypass from `exu_ioq_bcast.result`
-//   * Age-matrix oldest-first select; expose the winning entry's payload
-//     combinationally on the `iss_*` issue port
+//   * Age-matrix oldest-first select; expose the winning entries' payload
+//     combinationally on the issue ports
 //   * 2-wide allocation (slot A at free_idx_a, slot B at disp.b_rs_idx)
 module rapt_exu_iq #(
     parameter unsigned IQ_SIZE  = 8,
+    parameter bit      HAS_ISS_B = 1'b0,
     parameter unsigned ROB_SIZE = `RAPT_ROB_SIZE,
     parameter unsigned PLEN     = `RAPT_PHY_LEN,
     parameter unsigned RLEN     = `RAPT_REG_LEN,
@@ -44,11 +53,12 @@ module rapt_exu_iq #(
     // Fast load-use tag wakeup
     exu_load_fast_if.sink load_fast,
 
-    // Issue port: combinational view of the oldest ready entry.
+    // Issue ports: combinational view of the oldest ready entries.
     // op1/op2 have the fast-confirm MEM-result bypass already applied.
     exu_iq_iss_if.iq iss,
+    exu_iq_iss_if.iq iss_b,
 
-    // Occupancy (for the EXU router's load balancing) + PMU full pulse
+    // Occupancy (PMU aggregation) + PMU full pulse
     output logic [$clog2(IQ_SIZE):0] occ_o,
     /* verilator lint_off UNUSEDSIGNAL */
     output logic pmu_iq_full
@@ -75,6 +85,10 @@ module rapt_exu_iq #(
   logic [   PLEN-1:0] iq_prd     [IQ_SIZE];
   logic [   RLEN-1:0] iq_rd      [IQ_SIZE];
   logic [IQ_SIZE-1:0] iq_jen;
+  // Ineligible for port B (dispatch sideband); only read when HAS_ISS_B=1.
+  /* verilator lint_off UNUSEDSIGNAL */
+  logic [IQ_SIZE-1:0] iq_b_block;
+  /* verilator lint_on UNUSEDSIGNAL */
   logic [   XLEN-1:0] iq_imm     [IQ_SIZE];
   logic [   XLEN-1:0] iq_pnpc    [IQ_SIZE];
   logic [IQ_SIZE-1:0] iq_trap;
@@ -230,14 +244,32 @@ module rapt_exu_iq #(
     return bin;
   endfunction
 
-  // === Issue selection: oldest ready entry ===
+  // === Issue selection ===
+  // Port A: oldest ready entry (any class).
   logic [IQ_SIZE-1:0] sel_onehot;
   logic [IQLen-1:0] sel_idx;
   assign sel_onehot = age_oldest_oh(iq_ready_vec);
   assign iss.valid  = |sel_onehot;
   assign sel_idx    = oh2bin(sel_onehot);
 
-  // === Issue payload (fast-confirm bypass on operands) ===
+  // Port B (HAS_ISS_B only): oldest ready entry that is not port-B-blocked
+  // and distinct from port A's pick. The age-matrix strict partial order
+  // guarantees both picks are one-hot and disjoint.
+  logic [IQ_SIZE-1:0] sel_b_onehot;
+  logic [IQLen-1:0] sel_b_idx;
+  generate
+    if (HAS_ISS_B) begin : gen_iss_b_sel
+      logic [IQ_SIZE-1:0] sel_b_msk;
+      assign sel_b_msk   = iq_ready_vec & ~iq_b_block & ~sel_onehot;
+      assign sel_b_onehot = age_oldest_oh(sel_b_msk);
+    end else begin : gen_no_iss_b_sel
+      assign sel_b_onehot = '0;
+    end
+  endgenerate
+  assign sel_b_idx   = oh2bin(sel_b_onehot);
+  assign iss_b.valid = |sel_b_onehot;
+
+  // === Issue payloads (fast-confirm bypass on operands) ===
   assign iss.op1   = pr1_fast_confirm[sel_idx] ? exu_ioq_bcast.result : iq_vj[sel_idx];
   assign iss.op2   = pr2_fast_confirm[sel_idx] ? exu_ioq_bcast.result : iq_vk[sel_idx];
   assign iss.alu   = iq_alu[sel_idx];
@@ -253,6 +285,22 @@ module rapt_exu_iq #(
   assign iss.dest  = iq_dest[sel_idx];
   assign iss.prd   = iq_prd[sel_idx];
   assign iss.rd    = iq_rd[sel_idx];
+
+  assign iss_b.op1   = pr1_fast_confirm[sel_b_idx] ? exu_ioq_bcast.result : iq_vj[sel_b_idx];
+  assign iss_b.op2   = pr2_fast_confirm[sel_b_idx] ? exu_ioq_bcast.result : iq_vk[sel_b_idx];
+  assign iss_b.alu   = iq_alu[sel_b_idx];
+  assign iss_b.pc    = iq_pc[sel_b_idx];
+  assign iss_b.c     = iq_c[sel_b_idx];
+  assign iss_b.word  = iq_word[sel_b_idx];
+  assign iss_b.imm   = iq_imm[sel_b_idx];
+  assign iss_b.pnpc  = iq_pnpc[sel_b_idx];
+  assign iss_b.jen   = iq_jen[sel_b_idx];
+  assign iss_b.trap  = iq_trap[sel_b_idx];
+  assign iss_b.tval  = iq_tval[sel_b_idx];
+  assign iss_b.cause = iq_cause[sel_b_idx];
+  assign iss_b.dest  = iq_dest[sel_b_idx];
+  assign iss_b.prd   = iq_prd[sel_b_idx];
+  assign iss_b.rd    = iq_rd[sel_b_idx];
 
   // === Occupancy for router load balancing ===
   always_comb begin
@@ -273,6 +321,7 @@ module rapt_exu_iq #(
       iq_c        <= '0;
       iq_word     <= '0;
       iq_jen      <= '0;
+      iq_b_block  <= '0;
       iq_trap     <= '0;
       iq_full_r   <= 1'b0;
       // Reset payload arrays so unused entries cannot feed X values into
@@ -318,6 +367,7 @@ module rapt_exu_iq #(
             iq_c[free_idx_a] <= rou_exu.uop.c;
             iq_word[free_idx_a] <= rou_exu.uop.word;
             iq_jen[free_idx_a] <= rou_exu.uop.jen;
+            iq_b_block[free_idx_a] <= disp.iss_b_block_a;
             iq_imm[free_idx_a] <= rou_exu.uop.imm;
             iq_pnpc[free_idx_a] <= rou_exu.uop.pnpc;
             iq_trap[free_idx_a] <= rou_exu.uop.trap;
@@ -335,9 +385,9 @@ module rapt_exu_iq #(
             iq_pr2[i]      <= '0;
             iq_pr2_fast[i] <= 1'b0;
           end
-          // Issue clear: the selected entry frees this cycle (dedicated WB
-          // port, never back-pressured).
-          if (sel_onehot[i]) begin
+          // Issue clear: entries selected on either port free this cycle
+          // (dedicated WB ports, never back-pressured).
+          if (sel_onehot[i] || sel_b_onehot[i]) begin
             iq_valid[i]    <= 1'b0;
             iq_alu[i]      <= '0;
             iq_pc[i]       <= '0;
@@ -355,6 +405,7 @@ module rapt_exu_iq #(
             iq_prd[i]      <= '0;
             iq_rd[i]       <= '0;
             iq_jen[i]      <= 1'b0;
+            iq_b_block[i]  <= 1'b0;
             iq_imm[i]      <= '0;
             iq_pnpc[i]     <= '0;
             iq_trap[i]     <= 1'b0;
@@ -422,6 +473,7 @@ module rapt_exu_iq #(
         iq_c[disp.b_rs_idx] <= rou_exu.uop_b.c;
         iq_word[disp.b_rs_idx] <= rou_exu.uop_b.word;
         iq_jen[disp.b_rs_idx] <= rou_exu.uop_b.jen;
+        iq_b_block[disp.b_rs_idx] <= disp.iss_b_block_b;
         iq_imm[disp.b_rs_idx] <= rou_exu.uop_b.imm;
         iq_pnpc[disp.b_rs_idx] <= rou_exu.uop_b.pnpc;
         iq_trap[disp.b_rs_idx] <= rou_exu.uop_b.trap;
@@ -471,8 +523,12 @@ module rapt_exu_iq #(
   //  Assertions (enable with +define+RAPT_ASSERT_EN)
   // ==========================================================================
 
-  // ONE_HOT: issue select must be one-hot (age matrix strict partial order).
+  // ONE_HOT: issue selects must be one-hot and disjoint (age matrix strict
+  // partial order; port B masks out port A's pick).
   `RAPT_SVA_IMPLY(clock, reset, IQ_SEL_ONEHOT, iss.valid, $onehot(sel_onehot))
+  `RAPT_SVA_IMPLY(clock, reset, IQ_SEL_B_ONEHOT, iss_b.valid, $onehot(sel_b_onehot))
+  `RAPT_SVA_IMPLY(clock, reset, IQ_SEL_AB_DISJOINT, iss_b.valid,
+                  ((sel_onehot & sel_b_onehot) == '0))
 
   // HANDSHAKE: the router must never allocate into an occupied slot.
   `RAPT_SVA_IMPLY(clock, reset, IQ_ALLOC_A_FREE, disp.accept_a, !iq_valid[free_idx_a])

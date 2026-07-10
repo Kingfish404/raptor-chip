@@ -3,14 +3,10 @@
 [![Benchmark](https://github.com/Kingfish404/raptor-chip/actions/workflows/benchmark.yaml/badge.svg)](https://github.com/Kingfish404/raptor-chip/actions/workflows/benchmark.yaml)
 [![App](https://github.com/Kingfish404/raptor-chip/actions/workflows/app.yaml/badge.svg)](https://github.com/Kingfish404/raptor-chip/actions/workflows/app.yaml)
 [![STA](https://github.com/Kingfish404/raptor-chip/actions/workflows/sta.yaml/badge.svg)](https://github.com/Kingfish404/raptor-chip/actions/workflows/sta.yaml)
-[![Ubuntu](https://img.shields.io/badge/Ubuntu-E95420?style=flat&logo=ubuntu&logoColor=white)](https://en.wikipedia.org/wiki/Ubuntu)
-[![macOS](https://img.shields.io/badge/macOS-000000?style=flat&logo=apple&logoColor=white)](https://en.wikipedia.org/wiki/MacOS)
-[![Github](https://img.shields.io/badge/GitHub-181717?style=flat&logo=github&logoColor=white)](https://github.dev/Kingfish404/raptor-chip)
 
 [![ISA](https://img.shields.io/badge/ISA-RV32%2F64IMAC__Zb*-192f60?longCache=true&style=flat&logo=riscv&logoColor=white&colorA=192f60&colorB=660874)](./docs/uarch.md)
 [![marchID](https://img.shields.io/badge/marchID-0x32-660874?longCache=true&style=flat&colorA=192f60&colorB=660874)](https://github.com/riscv/riscv-isa-manual)
 [![Privilege](https://img.shields.io/badge/Priv-M%2FS%2FU%20%2B%20Sv32%2FSv39%20%2B%20PMP-660874?longCache=true&style=flat&colorA=192f60&colorB=660874)](./docs/uarch.md)
-[![Microarchitecture](https://img.shields.io/badge/uArch-Superscalar%20OoO-192f60?longCache=true&style=flat&colorA=192f60&colorB=660874)](./docs/uarch.md)
 [![FPGA](https://img.shields.io/badge/FPGA-LiteX-192f60?longCache=true&style=flat&colorA=192f60&colorB=660874)](./fpga/)
 [![License](https://img.shields.io/github/license/Kingfish404/raptor-chip?label=License&longCache=true&style=flat&logo=apache&logoColor=white&colorA=192f60&colorB=660874)](./LICENSE)
 
@@ -18,7 +14,7 @@
 
 Welcome to the Raptor Project! Here is an all-in-one repository for exploring, developing, optimizing, and verifying a RISC-V core. Aiming at high quality, full Linux support, FPGA implementation, and ASIC readiness.
 
-Core description: **Super-scalar, out-of-order RISC-V core** with register renaming, a 64-entry ROB, reservation stations, TAGE branch prediction, and a unified speculative/committed store queue. The RTL is described by `SystemVerilog` with `Chisel` (`Scala`) used only for decoder generation. Features Sv32 (RV32) / Sv39 (RV64) virtual memory (MMU/TLB/PTW), 16-entry PMP (TOR/NA4/NAPOT), LR/SC + AMO atomics, compressed instructions (RVC), CLINT/PLIC interrupts, a RISC-V Debug Module / JTAG DTM bring-up path, and boots Linux v6.18.x via OpenSBI. Supports configurable **RV32** and **RV64** modes via compile-time switch.
+Core description: **Super-scalar, out-of-order RISC-V core** with register renaming, a 64-entry ROB, 5 execution pipelines fed by per-class issue queues over a unified writeback CDB, TAGE branch prediction, and a unified speculative/committed store queue. The RTL is described by `SystemVerilog` with `Chisel` (`Scala`) used only for decoder generation. Features Sv32 (RV32) / Sv39 (RV64) virtual memory (MMU/TLB/PTW), 16-entry PMP (TOR/NA4/NAPOT), LR/SC + AMO atomics, compressed instructions (RVC), CLINT/PLIC interrupts, a RISC-V Debug Module / JTAG DTM bring-up path, and boots Linux v6.18.x via OpenSBI. Supports configurable **RV32** and **RV64** modes via compile-time switch.
 
 ```
 Core name:  raptor-falcon (M/S/U + Sv32/Sv39 + PMP, Linux-capable)
@@ -30,16 +26,83 @@ Interrupts: CLINT (mtime, mtimecmp, msip) + PLIC (31 sources, M/S contexts)
 Profile:    n/a (closest peer: RVM23U32 / RVA20S64)
 
 Bus Interface:  AXI4, XLEN-bit data/addr, 4-bit ID, burst
-Default uarch: dual issue / dual commit, ROB=64, RS=8, IOQ=8, SQ=16, PRF=128, L1I=8 KiB, L1D=4 KiB, optional L2 passthrough/cache stage
+Default uarch: dual issue / dual commit, ROB=64, ALQ=8 (2 issue ports), BRQ=4, MDQ=4, IOQ=8, SQ=16, PRF=128, L1I=8 KiB, L1D=4 KiB, optional L2 passthrough/cache stage
 
 Verifying:  RISCOF (riscv-arch-test), RVFI, SVA
 ```
 
-### [Documentation](./docs/README.md)
+See [documentation](./docs/README.md) for more details.
 
 ## Microarchitecture
 
-![](./docs/assets/raptor-rv.svg)
+```mermaid
+flowchart TD
+  subgraph BPU["BPU structure"]
+    direction TD
+    BTB["BTB (2-way SA, 128 entries)"]
+    PHT["PHT (2-bit, 256 entries)"]
+    RSB["RSB (4 entries)"]
+    TAGE["TAGE (default DIRP)"]
+  end
+  subgraph FE["Frontend (dual-fetch) · IF0-IF1-ID-RN"]
+    BPU["BPU (TAGE/BTB/RSB)"]
+    IFU["IFU (dual fetch, 2x16B)"]
+    IDU["IDU (dual decode)"]
+    RNU["RNU (rename, PHY 128)"]
+    FL["Freelist (PHY 128)"]
+    MAP["Maptable (ARCH 32/64)"]
+  end
+  subgraph BE["Backend (dual-issue / dual-commit) · DI-IS/EX-WB-CM"]
+    ROU["ROU (UOQ + ROB 64)"]
+    RT{{"EXU dispatch router"}}
+    PAB["ALQ 8: ALU-A + Sys | ALU-B (2 issue ports)"]
+    PBR["BRQ 4: BRU"]
+    PM["MDQ 4: MUL/DIV"]
+    PQ["IOQ 8: mem"]
+    CDB(("CDB ×5"))
+    PRF["PRF (4R/4W)"]
+    CMU["CMU (commit)"]
+    CSR
+  end
+  subgraph MEM["Memory Subsystem"]
+    direction TD
+    subgraph IMEM["I-side · IF0 (0-bubble seq fetch)"]
+      L1I["L1I 8 KiB 2-way (banked SRAM)"]
+      ITLB["ITLB (4e, FA)"]
+      IPTW["IPTW (Sv32 2-lvl / Sv39 3-lvl)"]
+    end
+    subgraph DMEM["D-side · IS/EX-WB (2-cyc hit, 3-cyc load-use)"]
+      LSU["LSU (unified SQ 16, STL fwd)"]
+      L1D["L1D 4 KiB 2-way (banked SRAM, VIPT, write-through)"]
+      DTLB["DTLB/DSTLB"]
+      DPTW["DPTW (Sv32/Sv39, hw A/D)"]
+    end
+    PMPC["PMP ×16 (TOR/NA4/NAPOT): fetch + ld/st + PTW checks"]
+    BUS["BUS (AXI4 bridge, L1D > L1I)"]
+    L2["L2 (optional, 16 KiB DM / passthrough)"]
+    RTR["cluster router"]
+  end
+  BPU --- IFU
+  IFU --> IDU --> RNU --> FL & MAP
+  IDU -."Early Resteer".-> IFU
+  IDU --> RNU --> FL & MAP --> ROU --> RT
+  RT --> PAB & PBR & PM & PQ
+  PAB & PBR & PM & PQ --> CDB
+  CDB -->|"writeback + wakeup"| ROU & PRF
+  ROU --> CMU
+  ROU -."store commit".-> LSU
+  CMU -."flush / BPU train".-> FE
+  CSR --- PAB
+  IFU --- L1I
+  L1I --- ITLB
+  ITLB -."miss".-> IPTW
+  PQ --> LSU --> L1D
+  L1D --- DTLB
+  DTLB -."miss".-> DPTW
+  PMPC -.-> L1I & L1D & IPTW & DPTW
+  L1I & L1D & IPTW & DPTW --> BUS
+  BUS --> L2 --> RTR
+```
 
 ## Setup & Quick Start
 
