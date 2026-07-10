@@ -28,6 +28,9 @@ module rapt_prf #(
     // Write source B: IOQ broadcast (LSU/CSR)
     exu_wb_if.in exu_ioq_bcast,
 
+    // Write source D: MUL/DIV pipe
+    exu_wb_if.in exu_wb_mul,
+
     // Commit / dealloc / flush
     rou_cmu_if.in   rou_cmu,
     cmu_bcast_if.in cmu_bcast,
@@ -78,11 +81,12 @@ module rapt_prf #(
 `endif
 
   // ---- Write port extraction (unified CDB) ----
-  // One slot per value-producing writeback pipe: [0]=ALU-A [1]=ALU-B [2]=MEM.
+  // One slot per value-producing writeback pipe:
+  //   [0]=ALU-A [1]=ALU-B [2]=MEM [3]=MULDIV.
   // The BRU port never writes rd (prd/rd tied 0) so it has no slot here.
   // Rename guarantees a unique producer per physical register, so at most
   // one port targets a given prd in any cycle and slot order is irrelevant.
-  localparam int unsigned NWB = 3;
+  localparam int unsigned NWB = 4;
   logic            wr_en  [NWB];
   logic [PLEN-1:0] wr_addr[NWB];
   logic [XLEN-1:0] wr_data[NWB];
@@ -98,6 +102,10 @@ module rapt_prf #(
   assign wr_en[2]   = exu_ioq_bcast.valid && exu_ioq_bcast.rd != 0;
   assign wr_addr[2] = exu_ioq_bcast.prd;
   assign wr_data[2] = exu_ioq_bcast.result;
+
+  assign wr_en[3]   = exu_wb_mul.valid && exu_wb_mul.rd != 0;
+  assign wr_addr[3] = exu_wb_mul.prd;
+  assign wr_data[3] = exu_wb_mul.result;
 
   // ---- Commit / dealloc ----
   logic commit_dealloc;

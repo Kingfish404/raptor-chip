@@ -34,6 +34,7 @@ module rapt_exu_ioq #(
     // Forwarding sources (other writeback buses)
     exu_wb_if.in exu_rou,
     exu_wb_if.in exu_rou_b,
+    exu_wb_if.in exu_wb_mul,
 
     // Outputs to memory subsystem & ROB writeback
     exu_lsu_if.master    exu_lsu,
@@ -452,12 +453,12 @@ module rapt_exu_ioq #(
   // Unified CDB view for operand forwarding.
   //
   // Value-producing writeback ports in forwarding-priority order:
-  //   [0] MEM (self broadcast)   [1] ALU-A   [2] ALU-B
+  //   [0] MEM (self broadcast)   [1] ALU-A   [2] ALU-B   [3] MULDIV
   // Rename guarantees a unique producer per physical register, so at most one
   // port matches a given tag per cycle; the priority order only pins the
   // legacy mux shape. Adding a pipe = appending one slot here.
   // --------------------------------------------------------------------------
-  localparam int unsigned NWB = 3;
+  localparam int unsigned NWB = 4;
   logic            wb_valid [NWB];
   logic [PLEN-1:0] wb_prd   [NWB];
   logic [XLEN-1:0] wb_result[NWB];
@@ -470,6 +471,9 @@ module rapt_exu_ioq #(
   assign wb_valid[2]  = exu_rou_b.valid;
   assign wb_prd[2]    = exu_rou_b.prd;
   assign wb_result[2] = exu_rou_b.result;
+  assign wb_valid[3]  = exu_wb_mul.valid;
+  assign wb_prd[3]    = exu_wb_mul.prd;
+  assign wb_result[3] = exu_wb_mul.result;
 
   // Any-port tag match (zero tag never matches).
   function automatic logic wb_hit(input logic [PLEN-1:0] pr);

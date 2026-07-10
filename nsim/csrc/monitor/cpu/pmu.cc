@@ -116,8 +116,11 @@ void perf_sample_per_cycle()
   bool ifu_stall = *(uint8_t *)&VERILOG_CPU(ifu__DOT__pmu_ifu_stall);
 
   bool rou_ready = *(uint8_t *)&VERILOG_ROU(ready_a);
-  uint32_t exu_ooo_valid = *(uint8_t *)&VERILOG_CPU(exu__DOT__u_rs__DOT__rs_valid);
-  bool exu_ooo_valid_found = *(uint8_t *)&VERILOG_CPU(exu__DOT__u_rs__DOT__valid_found_a);
+  // OoO scheduler stall: any ALU-class IQ (IQ-A / IQ-B / BRQ) holds pending
+  // work but no ALU-class pipe issued this cycle. Aggregated in rapt_exu
+  // (the former unified RS was split into per-pipe issue queues).
+  bool exu_ooo_valid = *(uint8_t *)&VERILOG_CPU(exu__DOT__pmu_ooo_valid);
+  bool exu_ooo_valid_found = *(uint8_t *)&VERILOG_CPU(exu__DOT__pmu_ooo_valid_found);
   uint32_t exu_ioq_valid = *(uint8_t *)&VERILOG_CPU(exu__DOT__u_ioq__DOT__ioq_valid);
   bool exu_ioq_valid_found = *(uint8_t *)&VERILOG_CPU(exu__DOT__u_ioq__DOT__ioq_valid_found);
   uint8_t l1d_state = *(uint8_t *)&VERILOG_CPU(l1d_cache__DOT__l1d_state);
@@ -186,10 +189,11 @@ void perf_sample_per_cycle()
   }
 
   // 2. Structural full cycles + rising-edge events.
-  //    RS/IOQ are 8 entries each (RS_SIZE=IIQ_SIZE=8) -> full when uint8 == 0xFF.
+  //    RS-full proxy: both distributed ALU IQs full (aggregated in rapt_exu);
+  //    IOQ is 8 entries (IIQ_SIZE=8) -> full when uint8 == 0xFF.
   //    ROB-full proxy: rnu has a renamed uop but UOQ/ROB cannot accept it.
   //    SQ-full: width-stable 1-bit probe from the LSU (&sq_valid).
-  bool rs_full = (exu_ooo_valid == 0xFFu);
+  bool rs_full = *(uint8_t *)&VERILOG_CPU(exu__DOT__pmu_ooo_full);
   bool ioq_full = (exu_ioq_valid == 0xFFu);
   bool rob_full = rnu_valid && !rou_ready;
   bool sq_full = npc.sq_full && (*npc.sq_full != 0);
@@ -467,7 +471,7 @@ void perf()
   Log("|%10s|%14s|%10s|%14s|%10s|%14s|%10s|%14s|",
       "RS EVT", "RS CYC, %", "IOQ EVT", "IOQ CYC, %",
       "ROB EVT", "ROB CYC, %", "SQ EVT", "SQ CYC, %");
-  Log("|%10lld|%8.0e,%4.1f|%10lld|%8.0e,%4.1f|%10lld|%8.0e,%4.1f|%10lld|%8.0e,%4.1f|",
+  Log("|%10lld|%9.0e,%4.1f|%10lld|%8.0e,%4.1f|%10lld|%8.0e,%4.1f|%10lld|%8.0e,%4.1f|",
       pmu.rs_full_events, (double)pmu.rs_full_cycle, percentage(pmu.rs_full_cycle, pmu.active_cycle),
       pmu.ioq_full_events, (double)pmu.ioq_full_cycle, percentage(pmu.ioq_full_cycle, pmu.active_cycle),
       pmu.rob_full_events, (double)pmu.rob_full_cycle, percentage(pmu.rob_full_cycle, pmu.active_cycle),

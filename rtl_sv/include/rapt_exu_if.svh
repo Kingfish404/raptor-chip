@@ -114,15 +114,16 @@ interface exu_csr_if #(
 endinterface
 
 // ---------------------------------------------------------------------------
-// Unified writeback / CDB port (Phase 0 of the execution-engine decoupling).
+// Unified writeback / CDB port (execution-engine decoupling).
 //
 // One instance per execution pipeline; rapt_core instantiates one per
 // writeback port with the following fixed assignment:
-//   [0] ALU-A : full path (ALU + CSR + system + trap + MUL writeback)
-//   [1] ALU-B : simple ALU + JAL/JALR link write (never CSR/system/trap/MUL)
-//   [2] BRU   : conditional branches only (no result/prd/rd -> tied 0;
-//               no PRF write port, no bypass network entry)
-//   [3] MEM   : IOQ broadcast (loads / stores / atomics / MMIO)
+//   [0] ALU-A  : full path (ALU + CSR + system + trap)
+//   [1] ALU-B  : simple ALU + JAL/JALR link write (never CSR/system/trap)
+//   [2] BRU    : conditional branches only (no result/prd/rd -> tied 0;
+//                no PRF write port, no bypass network entry)
+//   [3] MEM    : IOQ broadcast (loads / stores / atomics / MMIO)
+//   [4] MULDIV : MUL/DIV pipe (pure arithmetic, no CSR/trap/MEM sideband)
 //
 // Fields a pipeline does not produce are tied to '0 by the driver and are
 // constant-folded away downstream, so the superset costs no hardware.
@@ -193,28 +194,66 @@ interface exu_wb_if #(
   );
 endinterface
 
-// EXU internal: top-level dispatch arbiter <-> Reservation Station.
-// Top reads RS free-vector status, drives accept signals back to RS.
+// EXU internal: generic issue queue -> execution pipe (FU + writeback).
+// Combinational view of the oldest ready IQ entry; `op1`/`op2` carry the
+// fast-confirm MEM-result bypass already applied. One instance per pipe.
+interface exu_iq_iss_if #(
+    parameter unsigned PLEN = `RAPT_PHY_LEN,
+    parameter unsigned RLEN = `RAPT_REG_LEN,
+    parameter int XLEN = `RAPT_XLEN
+);
+  // Not every pipe samples every field (e.g. the BRU ignores rd/trap);
+  // re-disable UNUSEDSIGNAL inside the bundle scope.
+  /* verilator lint_off UNUSEDSIGNAL */
+  logic valid;
+  logic [XLEN-1:0] op1;
+  logic [XLEN-1:0] op2;
+  logic [5:0] alu;
+  logic [XLEN-1:0] pc;
+  logic c;
+  logic word;
+  logic [XLEN-1:0] imm;
+  logic [XLEN-1:0] pnpc;
+  logic jen;
+  logic trap;
+  logic [XLEN-1:0] tval;
+  logic [XLEN-1:0] cause;
+  logic [$clog2(`RAPT_ROB_SIZE)-1:0] dest;
+  logic [PLEN-1:0] prd;
+  logic [RLEN-1:0] rd;
+  /* verilator lint_on UNUSEDSIGNAL */
+
+  modport iq(
+      output valid, op1, op2, alu, pc, c, word, imm, pnpc, jen,
+      output trap, tval, cause, dest, prd, rd
+  );
+  modport fu(
+      input valid, op1, op2, alu, pc, c, word, imm, pnpc, jen,
+      input trap, tval, cause, dest, prd, rd
+  );
+endinterface
+
+// EXU internal: top-level dispatch arbiter <-> issue queue (IQ/MDQ).
+// Top reads the queue's free-vector status, drives accept signals back.
 interface exu_disp_rs_if #(
     parameter unsigned RS_SIZE = `RAPT_RS_SIZE
 );
-  // RS -> top status
+  // IQ -> top status
   logic free_found_a;
   logic free_found_b;
   logic [$clog2(RS_SIZE)-1:0] free_idx_a;
   logic [$clog2(RS_SIZE)-1:0] free_idx_b;
-  logic mul_found;        // a MUL is currently selectable in the FU
-  // top -> RS dispatch decisions (gated by rou_exu.valid / valid_b)
-  logic accept_a;         // slot A is allocated to RS this cycle (uses free_idx_a)
-  logic accept_b;         // slot B is allocated to RS this cycle (uses b_rs_idx)
+  // top -> IQ dispatch decisions (gated by rou_exu.valid / valid_b)
+  logic accept_a;         // slot A is allocated this cycle (uses free_idx_a)
+  logic accept_b;         // slot B is allocated this cycle (uses b_rs_idx)
   logic [$clog2(RS_SIZE)-1:0] b_rs_idx;
 
   modport top(
-      input free_found_a, free_found_b, free_idx_a, free_idx_b, mul_found,
+      input free_found_a, free_found_b, free_idx_a, free_idx_b,
       output accept_a, accept_b, b_rs_idx
   );
   modport rs(
-      output free_found_a, free_found_b, free_idx_a, free_idx_b, mul_found,
+      output free_found_a, free_found_b, free_idx_a, free_idx_b,
       input accept_a, accept_b, b_rs_idx
   );
 endinterface

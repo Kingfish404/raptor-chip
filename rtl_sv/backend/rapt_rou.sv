@@ -32,6 +32,7 @@ module rapt_rou #(
     exu_wb_if.in exu_rou_b,
     exu_wb_if.in exu_rou_c,
     exu_wb_if.in exu_ioq_bcast,
+    exu_wb_if.in exu_wb_mul,
 
     // interrupt
     csr_bcast_if.in csr_bcast,
@@ -245,13 +246,13 @@ module rapt_rou #(
   // ================================================================
   //  Unified CDB view for dispatch-side bypass / UOQ forwarding.
   //
-  //  Value-producing writeback ports: [0]=ALU-A [1]=ALU-B [2]=MEM.
+  //  Value-producing writeback ports: [0]=ALU-A [1]=ALU-B [2]=MEM [3]=MULDIV.
   //  The BRU port never carries a result (prd tied 0) so it is not
   //  snooped. Rename guarantees a unique producer per physical register,
   //  so at most one port matches a given tag per cycle.
   //  Adding a pipe = appending one slot here.
   // ================================================================
-  localparam int unsigned NWB = 3;
+  localparam int unsigned NWB = 4;
   logic            wb_valid_v[NWB];
   logic [PLEN-1:0] wb_prd_v  [NWB];
   logic [XLEN-1:0] wb_res_v  [NWB];
@@ -264,6 +265,9 @@ module rapt_rou #(
   assign wb_valid_v[2] = exu_ioq_bcast.valid;
   assign wb_prd_v[2]   = exu_ioq_bcast.prd;
   assign wb_res_v[2]   = exu_ioq_bcast.result;
+  assign wb_valid_v[3] = exu_wb_mul.valid;
+  assign wb_prd_v[3]   = exu_wb_mul.prd;
+  assign wb_res_v[3]   = exu_wb_mul.result;
 
   // Any-port tag match (zero tag never matches).
   function automatic logic wb_hit(input logic [PLEN-1:0] pr);
@@ -657,6 +661,17 @@ module rapt_rou #(
         rob_entry[exu_rou_c.dest].btaken        <= exu_rou_c.btaken;
         rob_entry[exu_rou_c.dest].mispredict    <= exu_rou_c.mispredict;
         rob_entry[exu_rou_c.dest].difftest_skip <= exu_rou_c.difftest_skip;
+      end
+
+      // ---- Write-back from the MUL/DIV pipe ----
+      // Pure arithmetic: no CSR / trap / store sideband. `mispredict` still
+      // matters (a BTB alias may have predicted a bogus target off a MUL).
+      if (exu_wb_mul.valid) begin
+        rob_entry[exu_wb_mul.dest].state         <= rapt_pkg::ROB_WB;
+        rob_entry[exu_wb_mul.dest].npc           <= exu_wb_mul.npc;
+        rob_entry[exu_wb_mul.dest].btaken        <= exu_wb_mul.btaken;
+        rob_entry[exu_wb_mul.dest].mispredict    <= exu_wb_mul.mispredict;
+        rob_entry[exu_wb_mul.dest].difftest_skip <= exu_wb_mul.difftest_skip;
       end
 
       // ---- Commit: retire ROB entries (up to 2 per cycle) ----

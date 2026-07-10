@@ -31,6 +31,7 @@ module tb_rou_dual_commit;
   exu_wb_if exu_rou_b();
   exu_wb_if exu_rou_c();
   exu_wb_if exu_ioq_bcast();
+  exu_wb_if exu_wb_mul();
   csr_bcast_if csr_bcast();
   rou_cmu_if rou_cmu();
   rou_csr_if rou_csr();
@@ -48,6 +49,7 @@ module tb_rou_dual_commit;
       .exu_rou_b(exu_rou_b),
       .exu_rou_c(exu_rou_c),
       .exu_ioq_bcast(exu_ioq_bcast),
+      .exu_wb_mul(exu_wb_mul),
       .csr_bcast(csr_bcast),
       .clint_timer_trap(clint_timer_trap),
       .clint_sw_trap(clint_sw_trap),
@@ -84,6 +86,7 @@ module tb_rou_dual_commit;
       exu_rou_b.valid = 1'b0;
       exu_rou_c.valid = 1'b0;
       exu_ioq_bcast.valid = 1'b0;
+      exu_wb_mul.valid = 1'b0;
     end
   endtask
 

@@ -124,6 +124,7 @@ module rapt_core #(
   exu_wb_if exu_rou_b ();  // ALU-B writeback (pure arithmetic + JAL/JALR)
   exu_wb_if exu_rou_c ();  // BRU writeback (conditional branches)
   exu_wb_if exu_ioq_bcast ();  // MEM writeback (IOQ broadcast)
+  exu_wb_if exu_wb_mul ();  // MUL/DIV pipe writeback
 
   exu_prf_if exu_prf ();
   exu_csr_if exu_csr ();
@@ -240,6 +241,7 @@ module rapt_core #(
       .exu_rou_b(exu_rou_b),
       .exu_rou_c(exu_rou_c),
       .exu_ioq_bcast(exu_ioq_bcast),
+      .exu_wb_mul(exu_wb_mul),
 
       .csr_bcast(csr_bcast),
       .clint_timer_trap(clint_timer_trap),
@@ -288,6 +290,7 @@ module rapt_core #(
       .exu_rou      (exu_rou),
       .exu_rou_b    (exu_rou_b),
       .exu_ioq_bcast(exu_ioq_bcast),
+      .exu_wb_mul   (exu_wb_mul),
       .rou_cmu      (rou_cmu),
       .cmu_bcast    (cmu_bcast),
 
@@ -319,6 +322,7 @@ module rapt_core #(
       .exu_rou_b(exu_rou_b),
       .exu_rou_c(exu_rou_c),
       .exu_ioq_bcast(exu_ioq_bcast),
+      .exu_wb_mul(exu_wb_mul),
 
       .exu_lsu(exu_lsu),
       .exu_csr(exu_csr),

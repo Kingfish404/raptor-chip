@@ -14,6 +14,7 @@ module tb_ioq_pending_lock;
   exu_disp_ioq_if disp();
   exu_wb_if exu_rou();
   exu_wb_if exu_rou_b();
+  exu_wb_if exu_wb_mul();
   exu_lsu_if exu_lsu();
   exu_l1d_if exu_l1d();
   exu_wb_if exu_ioq_bcast();
@@ -27,6 +28,7 @@ module tb_ioq_pending_lock;
       .disp(disp),
       .exu_rou(exu_rou),
       .exu_rou_b(exu_rou_b),
+      .exu_wb_mul(exu_wb_mul),
       .exu_lsu(exu_lsu),
       .exu_l1d(exu_l1d),
       .exu_ioq_bcast(exu_ioq_bcast),
@@ -94,6 +96,10 @@ module tb_ioq_pending_lock;
       exu_rou_b.rd = '0;
       exu_rou_b.difftest_skip = 1'b0;
       exu_rou_b.valid = 1'b0;
+
+      exu_wb_mul.result = '0;
+      exu_wb_mul.prd = '0;
+      exu_wb_mul.valid = 1'b0;
 
       exu_lsu.rdata = '0;
       exu_lsu.trap = 1'b0;
