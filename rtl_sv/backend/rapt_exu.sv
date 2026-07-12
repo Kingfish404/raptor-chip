@@ -8,12 +8,12 @@
 //     scheduler queues feeding five execution pipes:
 //       IOQ    - loads / stores / atomics (in-order memory queue)
 //       MULDIV - pure MUL/DIV arithmetic (private IQ + tag-based FU)
-//       BRQ    - conditional branches (compare-only BRU pipe)
+//       BRQ    - conditional branches (compare-only Branch pipe)
 //       ALQ    - everything else: ONE shared ALU issue queue with TWO
-//                issue ports feeding ALU-A (full: CSR/system/trap) and
-//                ALU-B (simple ALU + jumps). CSR/system/trap entries are
-//                flagged port-B-blocked at dispatch so they only ever
-//                issue to pipe A. Sharing one entry pool lets the two
+//                issue ports feeding the ALU-CSR pipe (full: CSR/system/trap)
+//                and ALU pipe (simple arithmetic + jumps). CSR/system/trap
+//                entries are flagged ALU-port-blocked at dispatch so they
+//                only ever issue to ALU-CSR. Sharing one entry pool lets the two
 //                oldest ready uops issue together every cycle, with no
 //                dispatch-time load-balancing heuristic.
 //   * The single-driver `rou_exu.ready` / `rou_exu.ready_b` back-pressure
@@ -21,7 +21,8 @@
 //
 // All micro-architectural state lives in the sub-modules: the generic
 // issue queues (`rapt_exu_iq`), the combinational pipes
-// (`rapt_exu_pipe_a/b/c`), the MUL/DIV pipe, and the IOQ.
+// (`rapt_exu_pipe_alu_csr`, `rapt_exu_pipe_alu`, and
+// `rapt_exu_pipe_branch`), the MUL/DIV pipe, and the IOQ.
 module rapt_exu #(
     parameter unsigned ALQ_SIZE = `RAPT_RS_SIZE,
     parameter unsigned BRQ_SIZE = 4,
@@ -42,9 +43,9 @@ module rapt_exu #(
 
     // Unified writeback (CDB) ports -- see exu_wb_if for the index map.
     // No modport: each is driven by one pipe and read by the others.
-    exu_wb_if exu_rou,
-    exu_wb_if exu_rou_b,
-    exu_wb_if exu_rou_c,
+    exu_wb_if wb_alu_csr,
+    exu_wb_if wb_alu,
+    exu_wb_if wb_branch,
     exu_wb_if exu_ioq_bcast,
     exu_wb_if exu_wb_mul,
 
@@ -54,7 +55,7 @@ module rapt_exu #(
     csr_bcast_if.in   csr_bcast,
     exu_l1d_if.master exu_l1d,
 
-    // Dispatch-only uop payload snapshot from ROU (read by pipe A at issue)
+    // Dispatch-only uop payload snapshot from ROU (read by ALU-CSR at issue)
     input rapt_pkg::uop_payload_t uop_pl[ROB_SIZE]
 );
 
@@ -70,28 +71,28 @@ module rapt_exu #(
       .PLEN(PLEN),
       .RLEN(RLEN),
       .XLEN(XLEN)
-  ) iss_a ();
+  ) iss_alu_csr ();
   exu_iq_iss_if #(
       .PLEN(PLEN),
       .RLEN(RLEN),
       .XLEN(XLEN)
-  ) iss_b ();
+  ) iss_alu ();
   exu_iq_iss_if #(
       .PLEN(PLEN),
       .RLEN(RLEN),
       .XLEN(XLEN)
-  ) iss_c ();
+  ) iss_branch ();
   // Unused second issue port of the single-port BRQ (tied off inside).
   exu_iq_iss_if #(
       .PLEN(PLEN),
       .RLEN(RLEN),
       .XLEN(XLEN)
-  ) iss_c_nc ();
+  ) iss_branch_unused ();
 
   // === Classification ===
   // The MDQ predicate must be airtight: a trap-marked or system uop may
   // carry a garbage `alu` in the MUL range (e.g. fetch page fault), and
-  // only the ALU-A pipe handles CSR / trap / redirect semantics.
+  // only the ALU-CSR pipe handles CSR / trap / redirect semantics.
   // (Only the classification bits of the uop are inspected here.)
   /* verilator lint_off UNUSEDSIGNAL */
   function automatic logic uop_is_mdq(input rapt_pkg::uop_t u);
@@ -103,11 +104,11 @@ module rapt_exu #(
         && (u.csr_csw == '0);
   endfunction
 
-  // ALU-A-only: CSR / system / trap semantics live exclusively in pipe A.
+  // ALU-CSR-only: CSR / system / trap semantics live exclusively in that pipe.
   // (Conditional branches are checked separately and win: a trap-marked
-  // branch resolves on the BRU as before, with trap info already in the
+  // branch resolves on the Branch pipe as before, with trap info already in the
   // ROB from dispatch.)
-  function automatic logic uop_is_a_only(input rapt_pkg::uop_t u);
+  function automatic logic uop_requires_alu_csr(input rapt_pkg::uop_t u);
     return u.system || u.trap || u.ecall || u.ebreak || u.mret || u.sret || (u.csr_csw != '0);
   endfunction
   /* verilator lint_on UNUSEDSIGNAL */
@@ -126,13 +127,13 @@ module rapt_exu #(
   assign b_to_alq = !b_to_ioq && !b_to_mdq && !b_to_brq;
 `endif
 
-  // Port-B block flag: CSR/system/trap entries may only issue to pipe A.
+  // ALU-port block flag: CSR/system/trap entries may only issue to ALU-CSR.
   // Captured into the ALQ entry at dispatch (BRQ/MDQ never use it).
-  assign disp_alq.iss_b_block_a = uop_is_a_only(rou_exu.uop);
+  assign disp_alq.iss_b_block_a = uop_requires_alu_csr(rou_exu.uop);
   assign disp_brq.iss_b_block_a = 1'b0;
   assign disp_mdq.iss_b_block_a = 1'b0;
 `ifdef RAPT_DUAL_ISSUE
-  assign disp_alq.iss_b_block_b = uop_is_a_only(rou_exu.uop_b);
+  assign disp_alq.iss_b_block_b = uop_requires_alu_csr(rou_exu.uop_b);
 `else
   assign disp_alq.iss_b_block_b = 1'b0;
 `endif
@@ -213,7 +214,7 @@ module rapt_exu #(
   logic pmu_ooo_full;
   /* verilator lint_on UNUSEDSIGNAL */
   assign pmu_ooo_valid = (occ_alq != '0) || (occ_brq != '0);
-  assign pmu_ooo_valid_found = iss_a.valid || iss_b.valid || iss_c.valid;
+  assign pmu_ooo_valid_found = iss_alu_csr.valid || iss_alu.valid || iss_branch.valid;
   // ALQ full: ALU-class dispatch is structurally blocked.
   assign pmu_ooo_full = (occ_alq == ($clog2(ALQ_SIZE) + 1)'(ALQ_SIZE));
 
@@ -236,13 +237,13 @@ module rapt_exu #(
       .cmu_bcast    (cmu_bcast),
       .rou_exu      (rou_exu),
       .disp         (disp_alq),
-      .exu_rou      (exu_rou),
-      .exu_rou_b    (exu_rou_b),
+      .exu_rou      (wb_alu_csr),
+      .exu_rou_b    (wb_alu),
       .exu_ioq_bcast(exu_ioq_bcast),
       .exu_wb_mul   (exu_wb_mul),
       .load_fast    (load_fast),
-      .iss          (iss_a),
-      .iss_b        (iss_b),
+      .iss          (iss_alu_csr),
+      .iss_b        (iss_alu),
       .occ_o        (occ_alq),
       .pmu_iq_full  (pmu_alq_full_unused)
   );
@@ -259,42 +260,42 @@ module rapt_exu #(
       .cmu_bcast    (cmu_bcast),
       .rou_exu      (rou_exu),
       .disp         (disp_brq),
-      .exu_rou      (exu_rou),
-      .exu_rou_b    (exu_rou_b),
+      .exu_rou      (wb_alu_csr),
+      .exu_rou_b    (wb_alu),
       .exu_ioq_bcast(exu_ioq_bcast),
       .exu_wb_mul   (exu_wb_mul),
       .load_fast    (load_fast),
-      .iss          (iss_c),
-      .iss_b        (iss_c_nc),
+      .iss          (iss_branch),
+      .iss_b        (iss_branch_unused),
       .occ_o        (occ_brq),
       .pmu_iq_full  (pmu_brq_full_unused)
   );
 
   // === Execution pipes (combinational FU + writeback) ===
-  rapt_exu_pipe_a #(
+  rapt_exu_pipe_alu_csr #(
       .ROB_SIZE(ROB_SIZE),
       .XLEN    (XLEN)
-  ) u_pipe_a (
-      .iss      (iss_a),
-      .cmu_bcast(cmu_bcast),
-      .csr_bcast(csr_bcast),
-      .exu_csr  (exu_csr),
-      .exu_rou  (exu_rou),
-      .uop_pl   (uop_pl)
+  ) u_pipe_alu_csr (
+      .iss       (iss_alu_csr),
+      .cmu_bcast (cmu_bcast),
+      .csr_bcast (csr_bcast),
+      .exu_csr   (exu_csr),
+      .wb_alu_csr(wb_alu_csr),
+      .uop_pl    (uop_pl)
   );
 
-  rapt_exu_pipe_b #(
+  rapt_exu_pipe_alu #(
       .XLEN(XLEN)
-  ) u_pipe_b (
-      .iss      (iss_b),
-      .exu_rou_b(exu_rou_b)
+  ) u_pipe_alu (
+      .iss   (iss_alu),
+      .wb_alu(wb_alu)
   );
 
-  rapt_exu_pipe_c #(
+  rapt_exu_pipe_branch #(
       .XLEN(XLEN)
-  ) u_pipe_c (
-      .iss      (iss_c),
-      .exu_rou_c(exu_rou_c)
+  ) u_pipe_branch (
+      .iss      (iss_branch),
+      .wb_branch(wb_branch)
   );
 
   // === Memory + MUL/DIV pipes ===
@@ -311,8 +312,8 @@ module rapt_exu #(
       .csr_bcast    (csr_bcast),
       .rou_exu      (rou_exu),
       .disp         (disp_ioq),
-      .exu_rou      (exu_rou),
-      .exu_rou_b    (exu_rou_b),
+      .exu_rou      (wb_alu_csr),
+      .exu_rou_b    (wb_alu),
       .exu_wb_mul   (exu_wb_mul),
       .exu_lsu      (exu_lsu),
       .exu_l1d      (exu_l1d),
@@ -333,8 +334,8 @@ module rapt_exu #(
       .cmu_bcast    (cmu_bcast),
       .rou_exu      (rou_exu),
       .disp         (disp_mdq),
-      .exu_rou      (exu_rou),
-      .exu_rou_b    (exu_rou_b),
+      .exu_rou      (wb_alu_csr),
+      .exu_rou_b    (wb_alu),
       .exu_ioq_bcast(exu_ioq_bcast),
       .exu_wb_mul   (exu_wb_mul)
   );

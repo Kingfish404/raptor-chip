@@ -325,6 +325,9 @@ EMBENCH_BENCHES := aha-mont64 crc32 depthconv edn huffbench matmult-int \
                    qrduino sglib-combined slre statemate tarfind ud \
                    wikisort xgboost
 EMBENCH_LOG_DIR := $(LITEX_LOG_DIR)/embench-logs
+EMBENCH_JOBS ?= ## Parallel Vsim processes for `make embench` (empty=auto)
+EMBENCH_NETTLE_SHA256_LOCAL_SCALE ?= 562 ## Nettle SHA-256 loop count (CI smoke may lower this)
+EMBENCH_RUN_BENCHES ?= $(EMBENCH_BENCHES) ## Space-separated Embench workload selection
 
 APP_LLM_BENCH     := $(RAPTOR_HOME)/app/benchmarks/llm
 APP_LLM_BUILD_DIR := $(RAPTOR_HOME)/app/build/rv32/benchmarks/llm-litex
@@ -747,10 +750,12 @@ EMBENCH_TARGETS := $(addprefix embench-run-,$(EMBENCH_BENCHES))
 EMBENCH_BUILDS  := $(addprefix embench-build-,$(EMBENCH_BENCHES))
 
 embench-build: ## Build all Embench-IoT benchmarks (one BIN per bench)
-	$(MAKE) -C $(EMBENCH_BENCH) build SYS_CLK_HZ=$(SYS_CLK)
+	$(MAKE) -C $(EMBENCH_BENCH) build SYS_CLK_HZ=$(SYS_CLK) \
+		NETTLE_SHA256_LOCAL_SCALE=$(EMBENCH_NETTLE_SHA256_LOCAL_SCALE)
 
 $(EMBENCH_BUILDS): embench-build-%:
-	$(MAKE) -C $(EMBENCH_BENCH) build BENCH=$* SYS_CLK_HZ=$(SYS_CLK)
+	$(MAKE) -C $(EMBENCH_BENCH) build BENCH=$* SYS_CLK_HZ=$(SYS_CLK) \
+		NETTLE_SHA256_LOCAL_SCALE=$(EMBENCH_NETTLE_SHA256_LOCAL_SCALE)
 
 embench-build-one: ## Build one Embench bench (BENCH=<name>) {BENCH}
 	@if [ -z "$(BENCH)" ]; then echo "[ERR] Set BENCH=<name>"; exit 1; fi
@@ -771,10 +776,16 @@ embench-run: ## Run one Embench bench (BENCH=<name>) {BENCH}
 embench: $(PACK_SV) $(FW_SIM_BIN) ## Build + run all Embench benches (parallel) + Embench Score report
 	@$(MAKE) --no-print-directory sim-build ROM=sim
 	@mkdir -p $(EMBENCH_LOG_DIR)
-	@LOG_DIR=$(EMBENCH_LOG_DIR) ROM=sim bash $(EMBENCH_BENCH)/run-embench.sh 2>&1 | tee $(LITEX_LOG_DIR)/embench.log
+	@set -o pipefail; env BENCHES="$(EMBENCH_RUN_BENCHES)" LOG_DIR=$(EMBENCH_LOG_DIR) ROM=sim \
+		SYS_CLK_HZ=$(SYS_CLK) \
+		SIM_TIMEOUT=$(if $(filter command line environment,$(origin SIM_TIMEOUT)),$(SIM_TIMEOUT),1200) \
+		EMBENCH_NETTLE_SHA256_LOCAL_SCALE=$(EMBENCH_NETTLE_SHA256_LOCAL_SCALE) \
+		$(if $(strip $(EMBENCH_JOBS)),JOBS=$(EMBENCH_JOBS),) \
+		bash $(EMBENCH_BENCH)/run-embench.sh 2>&1 | tee $(LITEX_LOG_DIR)/embench.log
 
 embench-report: ## Re-run Embench Score report from existing logs
-	@bash $(EMBENCH_BENCH)/report-embench.sh $(EMBENCH_LOG_DIR)
+	@env $(if $(filter command line environment,$(origin EMBENCH_NETTLE_SHA256_LOCAL_SCALE)),EMBENCH_NETTLE_SHA256_LOCAL_SCALE=$(EMBENCH_NETTLE_SHA256_LOCAL_SCALE)) \
+		bash $(EMBENCH_BENCH)/report-embench.sh $(EMBENCH_LOG_DIR)
 
 embench-clean: ## Remove Embench build artifacts and run logs
 	$(MAKE) -C $(EMBENCH_BENCH) clean

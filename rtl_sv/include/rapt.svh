@@ -3,6 +3,14 @@
 `include "rapt_config.svh"
 `include "rapt_sva.svh"
 
+// Cache lines are specified in bytes, not XLEN words. A configuration may
+// select a smaller line for formal/FPGA capacity, but RV32 and RV64 use the
+// same byte line size within that configuration. L1D/L2 derive their
+// XLEN-word counts from this value; L1I always uses 32-bit instruction words.
+`ifndef RAPT_CACHE_LINE_BYTES
+`define RAPT_CACHE_LINE_BYTES 64
+`endif
+
 // Instruction Set Opcodes
 `define RAPT_INST_FENCE_I 32'h0000100f
 

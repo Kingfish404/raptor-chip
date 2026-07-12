@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import ast
 import copy
 import json
+import math
 import re
 import sys
 from pathlib import Path
@@ -48,6 +50,60 @@ def _parse_int(tok: str) -> int:
     if tok.lower().startswith("0x"):
         return int(tok, 16)
     return int(tok)
+
+
+def _parse_constant_expr(expr: str, cfg: dict) -> int:
+    """Evaluate a restricted integer SystemVerilog constant expression.
+
+    Config presets use `$clog2(`RAPT_CACHE_LINE_BYTES / 4)` for cache
+    geometry. Only already-resolved RAPT macros, integer arithmetic, and
+    `$clog2` are accepted here; arbitrary Python names, calls, and attributes
+    remain invalid.
+    """
+    def replace_macro(match: re.Match) -> str:
+        key = match.group(1)
+        value = cfg.get(key)
+        if not isinstance(value, int):
+            raise ValueError(f"unresolved macro `{key}")
+        return str(value)
+
+    expanded = re.sub(r"`(RAPT_\w+)", replace_macro, expr)
+    expanded = expanded.replace("$clog2", "clog2")
+    tree = ast.parse(expanded, mode="eval")
+
+    def evaluate(node: ast.AST) -> int:
+        if isinstance(node, ast.Constant) and isinstance(node.value, int):
+            return node.value
+        if isinstance(node, ast.BinOp) and isinstance(
+            node.op, (ast.Add, ast.Sub, ast.Mult, ast.Div, ast.FloorDiv, ast.Mod)
+        ):
+            left = evaluate(node.left)
+            right = evaluate(node.right)
+            if right == 0 and isinstance(node.op, (ast.Div, ast.FloorDiv, ast.Mod)):
+                raise ValueError("division by zero")
+            if isinstance(node.op, ast.Add):
+                return left + right
+            if isinstance(node.op, ast.Sub):
+                return left - right
+            if isinstance(node.op, ast.Mult):
+                return left * right
+            if isinstance(node.op, ast.Mod):
+                return left % right
+            return left // right
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "clog2"
+            and len(node.args) == 1
+            and not node.keywords
+        ):
+            value = evaluate(node.args[0])
+            if value <= 0:
+                raise ValueError("$clog2 argument must be positive")
+            return math.ceil(math.log2(value))
+        raise ValueError(f"unsupported constant expression: {expr!r}")
+
+    return evaluate(tree.body)
 
 
 def parse_rapt_config(svh_path: Path, rv64: bool) -> dict:
@@ -95,10 +151,14 @@ def parse_rapt_config(svh_path: Path, rv64: bool) -> dict:
             if val is None or val == "":
                 cfg[key] = True
                 continue
+            value = val.strip()
             try:
-                cfg[key] = _parse_int(val.split()[0])
+                cfg[key] = _parse_int(value)
             except ValueError:
-                cfg[key] = val.strip()
+                try:
+                    cfg[key] = _parse_constant_expr(value, cfg)
+                except (SyntaxError, ValueError):
+                    cfg[key] = value
     return cfg
 
 

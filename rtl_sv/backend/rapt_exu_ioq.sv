@@ -37,9 +37,9 @@ module rapt_exu_ioq #(
     exu_wb_if.in exu_wb_mul,
 
     // Outputs to memory subsystem & ROB writeback
-    exu_lsu_if.master    exu_lsu,
-    exu_l1d_if.master    exu_l1d,
-    exu_wb_if.out        exu_ioq_bcast,
+    exu_lsu_if.master       exu_lsu,
+    exu_l1d_if.master       exu_l1d,
+    exu_wb_if.out           exu_ioq_bcast,
     exu_load_fast_if.source load_fast,
 
     // A2: PMU: one-cycle pulse when IOQ becomes full
@@ -453,7 +453,7 @@ module rapt_exu_ioq #(
   // Unified CDB view for operand forwarding.
   //
   // Value-producing writeback ports in forwarding-priority order:
-  //   [0] MEM (self broadcast)   [1] ALU-A   [2] ALU-B   [3] MULDIV
+  //   [0] MEM (self broadcast)   [1] ALU-CSR   [2] ALU   [3] MULDIV
   // Rename guarantees a unique producer per physical register, so at most one
   // port matches a given tag per cycle; the priority order only pins the
   // legacy mux shape. Adding a pipe = appending one slot here.
@@ -662,7 +662,7 @@ module rapt_exu_ioq #(
 
       // ---- OoO LSU FSM (per-entry one-hot: avoid multi-write with head retire) ----
       if (exu_lsu.rvalid && exu_lsu.rready) begin
-        ioq_rdata[active_idx]      <= exu_lsu.rdata;
+        ioq_rdata[active_idx] <= exu_lsu.rdata;
         // Suppress completion/trap/skip write when the same entry is also
         // being retired this cycle (head-retire clear below takes priority).
         // This avoids a Vivado-addressed-WAW hazard (R1 pattern).
@@ -672,7 +672,7 @@ module rapt_exu_ioq #(
           ioq_load_cause[active_idx] <= exu_lsu.cause;
           ioq_load_skip[active_idx]  <= exu_lsu.difftest_skip;
         end
-        oo_pending                 <= 1'b0;
+        oo_pending <= 1'b0;
       end else if (!oo_pending && exu_lsu.rvalid && !exu_lsu.rready) begin
         oo_pending     <= 1'b1;
         oo_pending_idx <= active_idx;
@@ -684,8 +684,7 @@ module rapt_exu_ioq #(
       // !complete entries; retire requires complete).  The guard makes the
       // exclusion explicit for synthesis (R1 discipline).
       if (exu_lsu.rvalid_b && exu_lsu.rready_b) begin
-        if (b_issue_idx != active_idx
-            && !(ioq_valid_found && b_issue_idx == ioq_head)) begin
+        if (b_issue_idx != active_idx && !(ioq_valid_found && b_issue_idx == ioq_head)) begin
           ioq_rdata[b_issue_idx]      <= exu_lsu.rdata_b;
           ioq_complete[b_issue_idx]   <= 1'b1;
           ioq_load_trap[b_issue_idx]  <= 1'b0;

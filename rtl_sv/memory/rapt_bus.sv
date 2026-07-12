@@ -1,6 +1,10 @@
 `include "rapt.svh"
 `include "rapt_if.svh"
 `include "rapt_soc.svh"
+
+`ifndef RAPT_L1I_REFILL_WORDS
+`define RAPT_L1I_REFILL_WORDS 8
+`endif
 `include "rapt_soc_if.svh"
 `include "rapt_dpi_c.svh"
 
@@ -73,17 +77,19 @@ module rapt_bus #(
   //   - Arbiter: L1D priority over L1I (matches the original FSM order).
   //     Downstream AR is registered/stable until `axi.arready`.
   // =========================================================================
-  localparam int L1iARDepth = 2;
+  localparam int L1iARDepth = `RAPT_L1I_REFILL_WORDS;
+  localparam int L1iARPtrW = (L1iARDepth <= 1) ? 1 : $clog2(L1iARDepth);
+  localparam int L1iARCntW = $clog2(L1iARDepth + 1);
 
   // L1I AR FIFO (depth 2)
   logic [XLEN-1:0] l1i_q_addr                                     [L1iARDepth];
   logic            l1i_q_burst                                    [L1iARDepth];
-  logic            l1i_q_rdptr;  // 1-bit index into depth-2 array
-  logic            l1i_q_wrptr;
-  logic [     1:0] l1i_q_cnt;
+  logic [L1iARPtrW-1:0] l1i_q_rdptr;
+  logic [L1iARPtrW-1:0] l1i_q_wrptr;
+  logic [L1iARCntW-1:0] l1i_q_cnt;
   logic l1i_q_full, l1i_q_empty;
-  assign l1i_q_full  = (l1i_q_cnt == 2'(L1iARDepth));
-  assign l1i_q_empty = (l1i_q_cnt == 2'd0);
+  assign l1i_q_full  = (l1i_q_cnt == L1iARCntW'(L1iARDepth));
+  assign l1i_q_empty = (l1i_q_cnt == '0);
 
   // L1D AR slot. Lifetime: capture .. R-rlast (so difftest_skip stays valid).
   logic            l1d_slot_busy;  // pending: AR accepted or in flight or awaiting R
@@ -160,8 +166,8 @@ module rapt_bus #(
 
   always_ff @(posedge clock) begin
     if (reset) begin
-      l1i_q_rdptr <= 1'b0;
-      l1i_q_wrptr <= 1'b0;
+      l1i_q_rdptr <= '0;
+      l1i_q_wrptr <= '0;
       l1i_q_cnt   <= '0;
       for (int i = 0; i < L1iARDepth; i++) begin
         l1i_q_addr[i]  <= '0;
@@ -179,7 +185,7 @@ module rapt_bus #(
       if (l1i_push) begin
         l1i_q_addr[l1i_q_wrptr]  <= l1i_bus.araddr;
         l1i_q_burst[l1i_q_wrptr] <= l1i_bus.arburst;
-        l1i_q_wrptr              <= ~l1i_q_wrptr;
+        l1i_q_wrptr              <= l1i_q_wrptr + 1'b1;
         l1i_captured             <= 1'b1;
         l1i_last_push_addr       <= l1i_bus.araddr;
       end else if (!l1i_bus.arvalid) begin
@@ -187,14 +193,14 @@ module rapt_bus #(
         l1i_captured <= 1'b0;
       end
       if (l1i_pop) begin
-        l1i_q_rdptr <= ~l1i_q_rdptr;
+        l1i_q_rdptr <= l1i_q_rdptr + 1'b1;
       end
       // Combined count update: handles same-cycle push+pop.
       unique case ({
         l1i_push, l1i_pop
       })
-        2'b10:   l1i_q_cnt <= l1i_q_cnt + 2'd1;
-        2'b01:   l1i_q_cnt <= l1i_q_cnt - 2'd1;
+        2'b10:   l1i_q_cnt <= l1i_q_cnt + 1'b1;
+        2'b01:   l1i_q_cnt <= l1i_q_cnt - 1'b1;
         default: l1i_q_cnt <= l1i_q_cnt;
       endcase
 

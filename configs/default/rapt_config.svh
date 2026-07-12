@@ -104,17 +104,22 @@
 `define RAPT_PHY_SIZE 128 // physical register number (must be power of 2)
 `define RAPT_PHY_LEN $clog2(`RAPT_PHY_SIZE)
 
-// L1I (64 B line * 32 sets * 2-way = 8 KiB)
-`define RAPT_L1I_LINE_LEN 4
+// Cache line size is a byte-level configuration. Keep it invariant across
+// RV32/RV64; individual caches derive XLEN-word counts.
+`define RAPT_CACHE_LINE_BYTES 64
+
+// L1I (64 B line * 32 sets * 2-way = 4 KiB)
+`define RAPT_L1I_LINE_LEN $clog2(`RAPT_CACHE_LINE_BYTES / 4)
 `define RAPT_L1I_LEN 5
 `define RAPT_L1I_N_WAYS 2
+// Refill 32 B per L1I miss (8 x RV32 words). This covers most sequential
+// fetch sectors while avoiding the request pressure of a full-line refill.
+`ifndef RAPT_L1I_REFILL_WORDS
+`define RAPT_L1I_REFILL_WORDS 8
+`endif
 
 // L1D (64 B line * 16 sets * 2-way = 4 KiB, VIPT-safe)
-`ifdef RAPT_RV64
-`define RAPT_L1D_LINE_LEN 3
-`else
-`define RAPT_L1D_LINE_LEN 4
-`endif
+`define RAPT_L1D_LINE_LEN $clog2(`RAPT_CACHE_LINE_BYTES / (`RAPT_XLEN / 8))
 `define RAPT_L1D_LEN 4
 `define RAPT_L1D_N_WAYS 2
 
@@ -122,12 +127,8 @@
 // `define RAPT_L2_EN  // disabled to isolate STA bottleneck
 // 16 KiB direct-mapped (256 sets x 64B).  Multi-way support reserved.
 `define RAPT_L2_LEN 8            // 256 sets
-// 64-byte line (16 × 4B @ RV32, 8 × 8B @ RV64).
-`ifdef RAPT_RV64
-`define RAPT_L2_LINE_LEN 3
-`else
-`define RAPT_L2_LINE_LEN 4
-`endif
+// 64-byte line (16 x 4B @ RV32, 8 x 8B @ RV64).
+`define RAPT_L2_LINE_LEN $clog2(`RAPT_CACHE_LINE_BYTES / (`RAPT_XLEN / 8))
 `define RAPT_L2_N_WAYS 1         // direct-mapped (multi-way support reserved)
 
 // Cache SRAM subarray width in bits (matches CVW CACHE_SRAMLEN=128).

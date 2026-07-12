@@ -223,6 +223,9 @@ coremark-npc: coremark-build ## Build and run CoreMark on NPC/nsim via pk
 coremark-nemu: coremark-build ## Build and run CoreMark on NEMU via pk
 	@$(call _pk_run_with,nemu-run,$(APP_HOME)/build/rv$(XLEN)/coremark/coremark.elf)
 
+microbench-build: ## Build MicroBench as a gem5 SE-compatible user ELF
+	@$(MAKE) $(Q) -C $(APP_HOME)/benchmarks/microbench build
+
 # ============================================================================
 # Embench-IoT
 # ============================================================================

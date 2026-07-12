@@ -9,24 +9,22 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$ROOT_DIR/setup-rtl.sh"
 
 brew_dep_install() {
-  brew install yosys bazelisk ninja
-  brew install riscv64-elf-binutils riscv64-elf-gcc open-ocd
-  brew install ncurses readline flex bison
+  brew install \
+    yosys bazelisk ninja ncurses readline flex bison \
+    riscv64-elf-binutils riscv64-elf-gcc open-ocd \
+    dtc cmake automake libevent json-c
   if [ "$(uname)" == "Darwin" ]; then
     brew install sdl2 sdl2_image sdl2_ttf
   fi
-  brew install dtc cmake automake
-  brew install libevent json-c
 }
 
 apt_install() {
-  sudo apt install -y gcc-riscv64-linux-gnu
-  sudo apt install -y gcc-riscv64-unknown-elf picolibc-riscv64-unknown-elf
-  sudo apt install -y libsdl2-dev libsdl2-image-dev libsdl2-ttf-dev
-  sudo apt install -y libreadline-dev libncurses5-dev
-  sudo apt install -y tcl-dev tcl-tclreadline libeigen3-dev \
-    swig autotools-dev libncursesw5-dev device-tree-compiler xxd
-  sudo apt install -y libevent-dev libjson-c-dev
+  sudo apt install -y \
+    gcc-riscv64-linux-gnu gcc-riscv64-unknown-elf picolibc-riscv64-unknown-elf \
+    libsdl2-dev libsdl2-image-dev libsdl2-ttf-dev libreadline-dev libncurses5-dev \
+    tcl-dev tcl-tclreadline libeigen3-dev \
+    swig autotools-dev libncursesw5-dev device-tree-compiler xxd \
+    libevent-dev libjson-c-dev
 }
 
 pacman_install() {

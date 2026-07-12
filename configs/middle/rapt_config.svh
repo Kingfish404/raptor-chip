@@ -63,27 +63,24 @@
 `define RAPT_PHY_SIZE 64
 `define RAPT_PHY_LEN $clog2(`RAPT_PHY_SIZE)
 
-// L1I: 64B line * 64 sets * 2-way = 8 KiB.
-`define RAPT_L1I_LINE_LEN 4
+`define RAPT_CACHE_LINE_BYTES 64
+
+// L1I: 64B line * 32 sets * 2-way = 4 KiB.
+`define RAPT_L1I_LINE_LEN $clog2(`RAPT_CACHE_LINE_BYTES / 4)
 `define RAPT_L1I_LEN 5
 `define RAPT_L1I_N_WAYS 2
+`ifndef RAPT_L1I_REFILL_WORDS
+`define RAPT_L1I_REFILL_WORDS 8
+`endif
 
 // L1D: default-size 2-way cache, with RV64 line sizing preserved.
-`ifdef RAPT_RV64
-`define RAPT_L1D_LINE_LEN 3
-`else
-`define RAPT_L1D_LINE_LEN 4
-`endif
+`define RAPT_L1D_LINE_LEN $clog2(`RAPT_CACHE_LINE_BYTES / (`RAPT_XLEN / 8))
 `define RAPT_L1D_LEN 4
 `define RAPT_L1D_N_WAYS 2
 
 // No L2 in the current KU15P passing profile.
 // `define RAPT_L2_EN
-`ifdef RAPT_RV64
-`define RAPT_L2_LINE_LEN 3
-`else
-`define RAPT_L2_LINE_LEN 4
-`endif
+`define RAPT_L2_LINE_LEN $clog2(`RAPT_CACHE_LINE_BYTES / (`RAPT_XLEN / 8))
 `define RAPT_L2_LEN 8
 `define RAPT_L2_N_WAYS 1
 

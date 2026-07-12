@@ -82,8 +82,8 @@ module rapt_prf #(
 
   // ---- Write port extraction (unified CDB) ----
   // One slot per value-producing writeback pipe:
-  //   [0]=ALU-A [1]=ALU-B [2]=MEM [3]=MULDIV.
-  // The BRU port never writes rd (prd/rd tied 0) so it has no slot here.
+  //   [0]=ALU-CSR [1]=ALU [2]=MEM [3]=MULDIV.
+  // The Branch pipe never writes rd (prd/rd tied 0) so it has no slot here.
   // Rename guarantees a unique producer per physical register, so at most
   // one port targets a given prd in any cycle and slot order is irrelevant.
   localparam int unsigned NWB = 4;

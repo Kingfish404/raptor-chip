@@ -74,13 +74,20 @@
 `define RAPT_PHY_SIZE 64
 `define RAPT_PHY_LEN $clog2(`RAPT_PHY_SIZE)
 
-// L1I: 2 words/line x 2 sets x 1 way (minimum legal geometry).
-`define RAPT_L1I_LINE_LEN 1
+// Keep a 16B byte line in the formal preset so RV32/RV64 geometries match
+// while arrays remain small enough for whole-cluster proofs.
+`define RAPT_CACHE_LINE_BYTES 16
+
+// L1I: 4 instruction words/line x 2 sets x 1 way.
+`define RAPT_L1I_LINE_LEN $clog2(`RAPT_CACHE_LINE_BYTES / 4)
 `define RAPT_L1I_LEN 1
 `define RAPT_L1I_N_WAYS 1
+`ifndef RAPT_L1I_REFILL_WORDS
+`define RAPT_L1I_REFILL_WORDS 4
+`endif
 
-// L1D: 2 words/line x 2 sets x 1 way.
-`define RAPT_L1D_LINE_LEN 1
+// L1D: 16B line x 2 sets x 1 way.
+`define RAPT_L1D_LINE_LEN $clog2(`RAPT_CACHE_LINE_BYTES / (`RAPT_XLEN / 8))
 `define RAPT_L1D_LEN 1
 `define RAPT_L1D_N_WAYS 1
 

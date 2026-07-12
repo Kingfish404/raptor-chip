@@ -113,7 +113,36 @@ void perf_sample_per_cycle()
   }
   bool ifu_hazard = *(uint8_t *)&VERILOG_CPU(ifu__DOT__ifu_hazard);
   bool ifu_fetch_fire = *(uint8_t *)&VERILOG_CPU(ifu__DOT__pmu_fetch_fire);
+  uint8_t ifu_fetch_slots = *(uint8_t *)&VERILOG_CPU(ifu__DOT__pmu_fetch_slots);
+  bool ifu_fetch_response_consume = *(uint8_t *)&VERILOG_CPU(ifu__DOT__pmu_fetch_response_consume);
+  bool ifu_fetch_dual = *(uint8_t *)&VERILOG_CPU(ifu__DOT__pmu_fetch_dual_fire);
+  bool ifu_fetch_bpu_taken = *(uint8_t *)&VERILOG_CPU(ifu__DOT__pmu_fetch_bpu_taken);
+  bool ifu_fetch_slot_a_control = *(uint8_t *)&VERILOG_CPU(ifu__DOT__pmu_fetch_slot_a_control);
+  bool ifu_fetch_slot_b_control = *(uint8_t *)&VERILOG_CPU(ifu__DOT__pmu_fetch_slot_b_control);
+  bool ifu_fetch_slot_b_jal_pack = *(uint8_t *)&VERILOG_CPU(ifu__DOT__pmu_fetch_slot_b_jal_pack);
+  bool ifu_fetch_slot_b_cond_pack = *(uint8_t *)&VERILOG_CPU(ifu__DOT__pmu_fetch_slot_b_cond_pack);
+  bool ifu_fetch_n1_unavailable = *(uint8_t *)&VERILOG_CPU(ifu__DOT__pmu_fetch_n1_unavailable);
+  bool ifu_fetch_n1_unavailable_unaligned = *(uint8_t *)&VERILOG_CPU(ifu__DOT__pmu_fetch_n1_unavailable_unaligned);
+  bool ifu_fetch_n1_unavailable_l1i = *(uint8_t *)&VERILOG_CPU(ifu__DOT__pmu_fetch_n1_unavailable_l1i);
+  bool ifu_fetch_downstream_blocked = *(uint8_t *)&VERILOG_CPU(ifu__DOT__pmu_fetch_downstream_blocked);
+  bool ifu_fetch_target_steer = *(uint8_t *)&VERILOG_CPU(ifu__DOT__pmu_fetch_target_steer);
   bool ifu_stall = *(uint8_t *)&VERILOG_CPU(ifu__DOT__pmu_ifu_stall);
+  bool ifu_icache_stall = *(uint8_t *)&VERILOG_CPU(ifu__DOT__pmu_ifu_icache_stall);
+  bool ifu_flush_stall = *(uint8_t *)&VERILOG_CPU(ifu__DOT__pmu_ifu_flush_stall);
+  bool ifu_empty_stall = *(uint8_t *)&VERILOG_CPU(ifu__DOT__pmu_ifu_empty_stall);
+  bool ifu_response_after_redirect = *(uint8_t *)&VERILOG_CPU(ifu__DOT__pmu_ifu_response_after_redirect);
+  bool ifu_response_after_l1i_gap = *(uint8_t *)&VERILOG_CPU(ifu__DOT__pmu_ifu_response_after_l1i_gap);
+  bool ifu_response_bypass_candidate = *(uint8_t *)&VERILOG_CPU(ifu__DOT__pmu_ifu_response_bypass_candidate);
+  bool l1i_refill_active = *(uint8_t *)&VERILOG_CPU(l1i_cache__DOT__pmu_l1i_refill_active);
+  bool l1i_sram_warmup = *(uint8_t *)&VERILOG_CPU(l1i_cache__DOT__pmu_l1i_sram_warmup);
+  bool l1i_tag_miss = *(uint8_t *)&VERILOG_CPU(l1i_cache__DOT__pmu_l1i_tag_miss);
+  bool l1i_nextword_miss = *(uint8_t *)&VERILOG_CPU(l1i_cache__DOT__pmu_l1i_nextword_miss);
+  bool l1i_refill_start_line_miss = *(uint8_t *)&VERILOG_CPU(l1i_cache__DOT__pmu_l1i_refill_start_line_miss);
+  bool l1i_refill_start_current_hole = *(uint8_t *)&VERILOG_CPU(l1i_cache__DOT__pmu_l1i_refill_start_current_hole);
+  bool l1i_refill_start_next_line_miss = *(uint8_t *)&VERILOG_CPU(l1i_cache__DOT__pmu_l1i_refill_start_next_line_miss);
+  bool l1i_refill_start_next_hole = *(uint8_t *)&VERILOG_CPU(l1i_cache__DOT__pmu_l1i_refill_start_next_hole);
+  bool fqu_full = *(uint8_t *)&VERILOG_CPU(fqu__DOT__pmu_full);
+  uint8_t fqu_count = *(uint8_t *)&VERILOG_CPU(fqu__DOT__pmu_count);
 
   bool rou_ready = *(uint8_t *)&VERILOG_ROU(ready_a);
   // OoO scheduler stall: any ALU-class IQ (IQ-A / IQ-B / BRQ) holds pending
@@ -135,10 +164,24 @@ void perf_sample_per_cycle()
   {
     pmu.ifu_fetch_cnt++;
   }
+  pmu.ifu_fetch_inst_cnt += ifu_fetch_slots;
+  pmu.ifu_fetch_response_cnt += ifu_fetch_response_consume ? 1 : 0;
+  pmu.ifu_dual_fetch_cnt += ifu_fetch_dual ? 1 : 0;
+  pmu.ifu_fetch_bpu_taken_cnt += ifu_fetch_bpu_taken ? 1 : 0;
+  pmu.ifu_fetch_slot_a_control_cnt += ifu_fetch_slot_a_control ? 1 : 0;
+  pmu.ifu_fetch_slot_b_control_cnt += ifu_fetch_slot_b_control ? 1 : 0;
+  pmu.ifu_fetch_slot_b_jal_pack_cnt += ifu_fetch_slot_b_jal_pack ? 1 : 0;
+  pmu.ifu_fetch_slot_b_cond_pack_cnt += ifu_fetch_slot_b_cond_pack ? 1 : 0;
+  pmu.ifu_fetch_n1_unavailable_cnt += ifu_fetch_n1_unavailable ? 1 : 0;
+  pmu.ifu_fetch_n1_unavailable_unaligned_cnt += ifu_fetch_n1_unavailable_unaligned ? 1 : 0;
+  pmu.ifu_fetch_n1_unavailable_l1i_cnt += ifu_fetch_n1_unavailable_l1i ? 1 : 0;
+  pmu.ifu_fetch_downstream_blocked_cycle += ifu_fetch_downstream_blocked ? 1 : 0;
+  pmu.ifu_fetch_target_steer_cnt += ifu_fetch_target_steer ? 1 : 0;
   // IFU stall: IDU was ready but IFU had no instruction (registered for correct timing)
   pmu.ifu_stall_cycle += ifu_stall ? 1 : 0;
   pmu.ifu_sys_hazard_cycle += ifu_hazard ? 1 : 0;
-  // ROU structural hazard: RNU has a renamed uop but dispatch queue (UOQ) is full
+  // ROU structural hazard: RNU has renamed work but the dispatch path cannot
+  // accept it. `ready_a` is UOQ-space based, so this is not a ROB-full probe.
   uint8_t rnq_valid = *(uint8_t *)&VERILOG_CPU(rnu__DOT__rnq_valid);
   uint8_t rnq_tail = *(uint8_t *)&VERILOG_CPU(rnu__DOT__rnq_tail_a);
   bool rnu_valid = (rnq_valid >> rnq_tail) & 1;
@@ -155,9 +198,32 @@ void perf_sample_per_cycle()
   // SQ stall: only count when a ready store at ROB head is blocked by full SQ
   bool rou_sq_stall = *(uint8_t *)&VERILOG_ROU(pmu_sq_stall);
   pmu.lsu_sq_stall_cycle += rou_sq_stall ? 1 : 0;
-  // IDU early resteer: BPU predicted taken on non-branch instruction
+  // IDU early resteer: statically resolvable IFU correction.
   bool early_resteer = *(uint8_t *)&VERILOG_CPU(idu__DOT__pmu_early_resteer);
   pmu.early_resteer_cnt += early_resteer ? 1 : 0;
+
+  // Measure the end-to-end frontend recovery after an exact branch-caused
+  // commit flush. This intentionally includes any downstream backpressure
+  // encountered before the corrected path can supply its first packet.
+  bool branch_flush = *(uint8_t *)&VERILOG_ROU(pmu_branch_flush);
+  bool nonbranch_flush = *(uint8_t *)&VERILOG_ROU(pmu_nonbranch_flush);
+  static bool branch_recovery_active = false;
+  if (branch_flush)
+  {
+    pmu.branch_flush_events++;
+    pmu.branch_recovery_overlap_events += branch_recovery_active ? 1 : 0;
+    branch_recovery_active = true;
+  }
+  else if (branch_recovery_active)
+  {
+    pmu.branch_recovery_wait_cycles++;
+    if (ifu_fetch_fire)
+    {
+      pmu.branch_recovery_completed++;
+      branch_recovery_active = false;
+    }
+  }
+  pmu.nonbranch_flush_events += nonbranch_flush ? 1 : 0;
   pmu.lsu_fwd_cnt += (lsu_raddr_valid && lsu_fwd_hit) ? 1 : 0;
   pmu.lsu_sq_conflict_cnt += (lsu_raddr_valid && lsu_load_in_sq) ? 1 : 0;
   pmu.dual_commit_cnt += (wbu_valid && wbu_valid_b) ? 1 : 0;
@@ -169,7 +235,8 @@ void perf_sample_per_cycle()
   // -------------------------------------------------------------------
   // Extended (gem5-aligned) PMU samples
   // -------------------------------------------------------------------
-  // 1. IFU stall decomposition.  Uses L1I FSM busy + a small flush-drain timer.
+  // 1. IFU stall decomposition. The IFU publishes registered, mutually
+  // exclusive root causes; do not approximate flush cost with a fixed timer.
   static int flush_drain_window = 0;
   bool flush_pipe_r = *(uint8_t *)&VERILOG_CPU(cmu__DOT__flush_pipe_r);
   if (flush_pipe_r)
@@ -177,28 +244,40 @@ void perf_sample_per_cycle()
   else if (flush_drain_window > 0)
     flush_drain_window--;
 
-  if (ifu_stall)
+  pmu.ifu_icache_miss_cycle += ifu_icache_stall ? 1 : 0;
+  pmu.ifu_flush_cycle += ifu_flush_stall ? 1 : 0;
+  pmu.ifu_empty_cycle += ifu_empty_stall ? 1 : 0;
+  pmu.ifu_response_after_redirect_cycle += ifu_response_after_redirect ? 1 : 0;
+  pmu.ifu_response_after_l1i_gap_cycle += ifu_response_after_l1i_gap ? 1 : 0;
+  pmu.ifu_response_bypass_candidate_cycle += ifu_response_bypass_candidate ? 1 : 0;
+  if (ifu_icache_stall)
   {
-    bool l1i_busy_now = (l1i_state == 0b001) || (l1i_state == 0b010) || (l1i_state == 0b110) || (l1i_state == 0b111) || (l1i_state == 0b100);
-    if (l1i_busy_now)
-      pmu.ifu_icache_miss_cycle++;
-    else if (flush_drain_window)
-      pmu.ifu_flush_cycle++;
-    else
-      pmu.ifu_empty_cycle++;
+    pmu.ifu_no_response_refill_cycle += l1i_refill_active ? 1 : 0;
+    pmu.ifu_no_response_sram_warmup_cycle += l1i_sram_warmup ? 1 : 0;
+    pmu.ifu_no_response_tag_miss_cycle += l1i_tag_miss ? 1 : 0;
+    pmu.ifu_no_response_nextword_miss_cycle += l1i_nextword_miss ? 1 : 0;
   }
+  pmu.l1i_refill_start_line_miss += l1i_refill_start_line_miss ? 1 : 0;
+  pmu.l1i_refill_start_current_hole += l1i_refill_start_current_hole ? 1 : 0;
+  pmu.l1i_refill_start_next_line_miss += l1i_refill_start_next_line_miss ? 1 : 0;
+  pmu.l1i_refill_start_next_hole += l1i_refill_start_next_hole ? 1 : 0;
+  pmu.fqu_full_cycle += fqu_full ? 1 : 0;
+  pmu.fqu_buffered_cycle += fqu_count != 0 ? 1 : 0;
+  pmu.fqu_occupancy_sum += fqu_count;
 
   // 2. Structural full cycles + rising-edge events.
   //    RS-full proxy: both distributed ALU IQs full (aggregated in rapt_exu);
   //    IOQ is 8 entries (IIQ_SIZE=8) -> full when uint8 == 0xFF.
-  //    ROB-full proxy: rnu has a renamed uop but UOQ/ROB cannot accept it.
+  //    UOQ-blocked: rnu has a renamed uop but the dispatch path cannot accept it.
+  //    True ROB-full is the rapt_rou all-entry-busy event pulse.
   //    SQ-full: width-stable 1-bit probe from the LSU (&sq_valid).
   bool rs_full = *(uint8_t *)&VERILOG_CPU(exu__DOT__pmu_ooo_full);
   bool ioq_full = (exu_ioq_valid == 0xFFu);
-  bool rob_full = rnu_valid && !rou_ready;
+  bool uoq_blocked = rnu_valid && !rou_ready;
+  bool rob_full_event = *(uint8_t *)&VERILOG_ROU(pmu_rob_full);
   bool sq_full = npc.sq_full && (*npc.sq_full != 0);
   static bool prev_rs_full = false, prev_ioq_full = false;
-  static bool prev_rob_full = false, prev_sq_full = false;
+  static bool prev_uoq_blocked = false, prev_sq_full = false;
   if (rs_full)
   {
     pmu.rs_full_cycle++;
@@ -211,12 +290,13 @@ void perf_sample_per_cycle()
     if (!prev_ioq_full)
       pmu.ioq_full_events++;
   }
-  if (rob_full)
+  if (uoq_blocked)
   {
-    pmu.rob_full_cycle++;
-    if (!prev_rob_full)
-      pmu.rob_full_events++;
+    pmu.uoq_blocked_cycle++;
+    if (!prev_uoq_blocked)
+      pmu.uoq_blocked_events++;
   }
+  pmu.rob_full_events += rob_full_event ? 1 : 0;
   if (sq_full)
   {
     pmu.sq_full_cycle++;
@@ -225,7 +305,7 @@ void perf_sample_per_cycle()
   }
   prev_rs_full = rs_full;
   prev_ioq_full = ioq_full;
-  prev_rob_full = rob_full;
+  prev_uoq_blocked = uoq_blocked;
   prev_sq_full = sq_full;
 
   // 3. Commit-width distribution (per cycle).
@@ -449,39 +529,98 @@ void perf()
       pmu.commit_2_cycle,
       percentage(pmu.commit_2_cycle, commit_cycles),
       percentage(2 * pmu.commit_2_cycle, pmu.instr_cnt));
-  Log("Early resteer: %lld events (BPU taken on non-branch, IDU-detected)",
+  Log("Early resteer: %lld events (statically resolvable IFU corrections)",
       pmu.early_resteer_cnt);
+  Log("Commit flush: branch %lld, non-branch %lld; branch recovery: %lld completed, "
+      "%lld wait cycles (%4.2f cycles/completed), %lld overlaps",
+      pmu.branch_flush_events, pmu.nonbranch_flush_events,
+      pmu.branch_recovery_completed, pmu.branch_recovery_wait_cycles,
+      pmu.branch_recovery_completed
+          ? (double)pmu.branch_recovery_wait_cycles / pmu.branch_recovery_completed
+          : 0.0,
+      pmu.branch_recovery_overlap_events);
 
   // -------------------------------------------------------------------
   // IFU stall decomposition  (gem5: fetch.icacheStallCycles / squashCycles)
   // -------------------------------------------------------------------
   Log("======== IFU Stall Decomposition ========");
   Log("|%10s, %%|%10s, %%|%10s, %%|%10s, %%|",
-      "IFU TOTAL", "L1I/PTW", "FLUSH", "EMPTY");
+      "IFU TOTAL", "L1I/PTW", "RESP STAGE", "SERIAL");
   Log("|%10.0e,%3.0f|%10.0e,%3.0f|%10.0e,%3.0f|%10.0e,%3.0f|",
       (double)pmu.ifu_stall_cycle, percentage(pmu.ifu_stall_cycle, pmu.active_cycle),
       (double)pmu.ifu_icache_miss_cycle, percentage(pmu.ifu_icache_miss_cycle, pmu.ifu_stall_cycle),
       (double)pmu.ifu_flush_cycle, percentage(pmu.ifu_flush_cycle, pmu.ifu_stall_cycle),
       (double)pmu.ifu_empty_cycle, percentage(pmu.ifu_empty_cycle, pmu.ifu_stall_cycle));
+  Log("IFU roots exact: total %lld, no-response %lld, response-stage %lld, serializing %lld",
+      pmu.ifu_stall_cycle, pmu.ifu_icache_miss_cycle,
+      pmu.ifu_flush_cycle, pmu.ifu_empty_cycle);
+  Log("response-stage origin: redirect %lld, prior-L1I-gap %lld, other %lld",
+      pmu.ifu_response_after_redirect_cycle, pmu.ifu_response_after_l1i_gap_cycle,
+      pmu.ifu_flush_cycle - pmu.ifu_response_after_redirect_cycle - pmu.ifu_response_after_l1i_gap_cycle);
+  Log("response-stage direct-bypass candidates: %lld", pmu.ifu_response_bypass_candidate_cycle);
+  Log("no-response roots: refill/PTW %lld, SRAM warmup %lld, tag miss %lld, next-word miss %lld, other %lld",
+      pmu.ifu_no_response_refill_cycle, pmu.ifu_no_response_sram_warmup_cycle,
+      pmu.ifu_no_response_tag_miss_cycle, pmu.ifu_no_response_nextword_miss_cycle,
+      pmu.ifu_icache_miss_cycle - pmu.ifu_no_response_refill_cycle - pmu.ifu_no_response_sram_warmup_cycle - pmu.ifu_no_response_tag_miss_cycle - pmu.ifu_no_response_nextword_miss_cycle);
+  Log("L1I refill starts: line miss %lld, current-word hole %lld, next-line miss %lld, next-word hole %lld",
+      pmu.l1i_refill_start_line_miss, pmu.l1i_refill_start_current_hole,
+      pmu.l1i_refill_start_next_line_miss, pmu.l1i_refill_start_next_hole);
+    Log("FQU: full %lld cycles, buffered %lld cycles, avg occupancy %4.2f / 2",
+      pmu.fqu_full_cycle, pmu.fqu_buffered_cycle,
+      pmu.active_cycle ? (double)pmu.fqu_occupancy_sum / pmu.active_cycle : 0.0);
+
+  Log("======== Fetch Delivery ========");
+  Log("packets: %lld, instructions: %lld, avg/packet: %4.2f, dual packets: %lld (%2.1f%%)",
+      pmu.ifu_fetch_cnt, pmu.ifu_fetch_inst_cnt,
+      pmu.ifu_fetch_cnt ? (double)pmu.ifu_fetch_inst_cnt / pmu.ifu_fetch_cnt : 0.0,
+      pmu.ifu_dual_fetch_cnt, percentage(pmu.ifu_dual_fetch_cnt, pmu.ifu_fetch_cnt));
+  Log("L1I response consumes: %lld; gem5-aligned B-CFI deferrals: %lld (%2.1f%% consumes, %4.1f / 1K active cycles)",
+      pmu.ifu_fetch_response_cnt, pmu.ifu_fetch_slot_b_control_cnt,
+      percentage(pmu.ifu_fetch_slot_b_control_cnt, pmu.ifu_fetch_response_cnt),
+      pmu.active_cycle
+          ? 1000.0 * (double)pmu.ifu_fetch_slot_b_control_cnt / pmu.active_cycle
+          : 0.0);
+  Log("slot-B direct-JAL packs: %lld (%2.1f%% response consumes)",
+      pmu.ifu_fetch_slot_b_jal_pack_cnt,
+      percentage(pmu.ifu_fetch_slot_b_jal_pack_cnt, pmu.ifu_fetch_response_cnt));
+  Log("slot-B conditional packs: %lld (%2.1f%% response consumes)",
+      pmu.ifu_fetch_slot_b_cond_pack_cnt,
+      percentage(pmu.ifu_fetch_slot_b_cond_pack_cnt, pmu.ifu_fetch_response_cnt));
+  Log("predicted target-steered packets: %lld (%2.1f%% response consumes)",
+      pmu.ifu_fetch_target_steer_cnt,
+      percentage(pmu.ifu_fetch_target_steer_cnt, pmu.ifu_fetch_response_cnt));
+  Log("next-word unavailable roots: unaligned R32+R32 %lld (%2.1f%%), L1I/PMP %lld (%2.1f%%)",
+      pmu.ifu_fetch_n1_unavailable_unaligned_cnt,
+      percentage(pmu.ifu_fetch_n1_unavailable_unaligned_cnt, pmu.ifu_fetch_response_cnt),
+      pmu.ifu_fetch_n1_unavailable_l1i_cnt,
+      percentage(pmu.ifu_fetch_n1_unavailable_l1i_cnt, pmu.ifu_fetch_response_cnt));
+  Log("slot-B loss (%% packets): BPU-taken %lld (%2.1f%%), A-control %lld (%2.1f%%), "
+      "B-control %lld (%2.1f%%), next-word unavailable %lld (%2.1f%%), IDU blocked %lld (%2.1f%%)",
+      pmu.ifu_fetch_bpu_taken_cnt, percentage(pmu.ifu_fetch_bpu_taken_cnt, pmu.ifu_fetch_cnt),
+      pmu.ifu_fetch_slot_a_control_cnt, percentage(pmu.ifu_fetch_slot_a_control_cnt, pmu.ifu_fetch_cnt),
+      pmu.ifu_fetch_slot_b_control_cnt, percentage(pmu.ifu_fetch_slot_b_control_cnt, pmu.ifu_fetch_cnt),
+      pmu.ifu_fetch_n1_unavailable_cnt, percentage(pmu.ifu_fetch_n1_unavailable_cnt, pmu.ifu_fetch_cnt),
+      pmu.ifu_fetch_downstream_blocked_cycle,
+      percentage(pmu.ifu_fetch_downstream_blocked_cycle, pmu.active_cycle));
 
   // -------------------------------------------------------------------
   // Structural-full events  (gem5: iqFullEvents / robFullEvents / sqFullEvents)
   // -------------------------------------------------------------------
   Log("======== Structural Full (events / cycles, %% of total) ========");
-  Log("|%10s|%14s|%10s|%14s|%10s|%14s|%10s|%14s|",
+  Log("|%10s|%14s|%10s|%13s|%10s|%13s|%10s|%10s|",
       "RS EVT", "RS CYC, %", "IOQ EVT", "IOQ CYC, %",
-      "ROB EVT", "ROB CYC, %", "SQ EVT", "SQ CYC, %");
-  Log("|%10lld|%9.0e,%4.1f|%10lld|%8.0e,%4.1f|%10lld|%8.0e,%4.1f|%10lld|%8.0e,%4.1f|",
+      "UOQ EVT", "UOQ CYC, %", "ROB EVT", "SQ EVT/CYC");
+  Log("|%10lld|%9.0e,%4.1f|%10lld|%8.0e,%4.1f|%10lld|%8.0e,%4.1f|%10lld|%5lld/%4.1f|",
       pmu.rs_full_events, (double)pmu.rs_full_cycle, percentage(pmu.rs_full_cycle, pmu.active_cycle),
       pmu.ioq_full_events, (double)pmu.ioq_full_cycle, percentage(pmu.ioq_full_cycle, pmu.active_cycle),
-      pmu.rob_full_events, (double)pmu.rob_full_cycle, percentage(pmu.rob_full_cycle, pmu.active_cycle),
-      pmu.sq_full_events, (double)pmu.sq_full_cycle, percentage(pmu.sq_full_cycle, pmu.active_cycle));
+      pmu.uoq_blocked_events, (double)pmu.uoq_blocked_cycle, percentage(pmu.uoq_blocked_cycle, pmu.active_cycle),
+      pmu.rob_full_events, pmu.sq_full_events, percentage(pmu.sq_full_cycle, pmu.active_cycle));
 
   // -------------------------------------------------------------------
   // Commit-width distribution  (gem5: commit.committed_per_cycle)
   // -------------------------------------------------------------------
   Log("======== Commit Width Distribution ========");
-  Log("|%12s, %%|%12s, %%|%12s, %%|  avg/cycle: %5.3f",
+  Log("|%13s, %%|%13s, %%|%13s, %%|  avg/cycle: %5.3f",
       "0 (stall)", "1 (single)", "2 (dual)",
       pmu.active_cycle ? (double)pmu.instr_cnt / pmu.active_cycle : 0.0);
   Log("|%12.0e,%3.0f|%12.0e,%3.0f|%12.0e,%3.0f|",
@@ -493,7 +632,7 @@ void perf()
   // Rename / Dispatch status mix  (gem5: rename.status)
   // -------------------------------------------------------------------
   Log("======== Rename/Dispatch Status ========");
-  Log("|%12s, %%|%12s, %%|%12s, %%|%12s, %%|",
+  Log("|%13s, %%|%13s, %%|%13s, %%|%13s, %%|",
       "Running", "Blocked", "Idle", "Squashing");
   Log("|%12.0e,%3.0f|%12.0e,%3.0f|%12.0e,%3.0f|%12.0e,%3.0f|",
       (double)pmu.dispatch_running_cycle, percentage(pmu.dispatch_running_cycle, pmu.active_cycle),

@@ -245,25 +245,39 @@ RLLMBench uses `rdtime` by default and reports `score_per_sec` from physical sec
 
 ## Environment Variables
 
-| Variable                   | Description                                      | Default                                                       |
-| -------------------------- | ------------------------------------------------ | ------------------------------------------------------------- |
-| `RAPTOR_HOME`              | Root of raptor-chip repo                         | Auto-detected                                                 |
-| `VARIANT`                  | CPU variant (`standard`, `linux`, `linux64`)     | `standard`                                                    |
-| `SYS_CLK`                  | System clock frequency (Hz)                      | `10000000` (`50000000` in linux FPGA profile)                 |
-| `FPGA_BOARD`               | FPGA board target                                | `tang_mega_138k_pro` (`mlk_cu07_ku15p` in linux FPGA profile) |
-| `BOOT_MODE`                | FPGA boot ROM source                             | `custom` (`bios` in linux FPGA profile)                       |
-| `RAPT_CONFIG`              | RTL config preset                                | `middle` for FPGA goals, otherwise `default`                  |
-| `INTEGRATED_MAIN_RAM_SIZE` | FPGA main RAM size at `0x80000000`               | `0x80000` (`0` in linux FPGA profile)                         |
-| `WITH_LITEDRAM`            | Use external LiteDRAM/DDR4 for FPGA main RAM     | `0`                                                           |
-| `LITEDRAM_SIZE`            | Mapped external LiteDRAM main RAM size           | `0x40000000`                                                  |
-| `WITH_MIG`                 | Use external Xilinx DDR4 MIG for FPGA main RAM   | `0` (`1` in linux FPGA profile)                               |
-| `MIG_SIZE`                 | Mapped external MIG main RAM size                | `0x40000000`                                                  |
-| `LINUX_FPGA_RAM_SIZE`      | Linux FPGA DDR window advertised in DTB          | `MIG_SIZE`                                                    |
-| `LINUX_FPGA_DTB_ADDR`      | Runtime DTB address passed to OpenSBI            | `0x83f00000`                                                  |
-| `UART_PORT`                | FPGA UART device                                 | Auto-detected; KU15P prefers `/dev/ttyUSB0`                   |
-| `UART_BAUD`                | FPGA UART baud rate                              | `115200` (`230400` in linux FPGA profile)                     |
-| `SERIALBOOT_SAFE`          | Use `litex_term --safe` for uploads              | `1`                                                           |
-| `GOWIN_APP`                | Gowin IDE app bundle path                        | Auto-detected on macOS                                        |
-| `RLLMBENCH_TIMEBASE_HZ`    | RLLMBench `time` CSR frequency in Hz             | `1000000`                                                     |
-| `RLLMBENCH_CORE_CLOCK_MHZ` | Core clock for score/MHz reports                 | `SYS_CLK/1e6`                                                 |
-| `EXTRA_FLAGS`              | Extra flags for the selected LiteX target script | (empty)                                                       |
+| Variable                   | Description                                       | Default                                                       |
+| -------------------------- | ------------------------------------------------- | ------------------------------------------------------------- |
+| `RAPTOR_HOME`              | Root of raptor-chip repo                          | Auto-detected                                                 |
+| `VARIANT`                  | CPU variant (`standard`, `linux`, `linux64`)      | `standard`                                                    |
+| `SYS_CLK`                  | System clock frequency (Hz)                       | `10000000` (`50000000` in linux FPGA profile)                 |
+| `SIM_THREADS`              | Verilator evaluation threads per LiteX simulation | `4`                                                           |
+| `SIM_TIMEOUT`              | Per-benchmark Embench timeout when overridden     | `1200` for `make embench`                                     |
+| `EMBENCH_JOBS`             | Parallel Vsim processes for `make embench`        | Auto-detected                                                 |
+| `FPGA_BOARD`               | FPGA board target                                 | `tang_mega_138k_pro` (`mlk_cu07_ku15p` in linux FPGA profile) |
+| `BOOT_MODE`                | FPGA boot ROM source                              | `custom` (`bios` in linux FPGA profile)                       |
+| `RAPT_CONFIG`              | RTL config preset                                 | `middle` for FPGA goals, otherwise `default`                  |
+| `INTEGRATED_MAIN_RAM_SIZE` | FPGA main RAM size at `0x80000000`                | `0x80000` (`0` in linux FPGA profile)                         |
+| `WITH_LITEDRAM`            | Use external LiteDRAM/DDR4 for FPGA main RAM      | `0`                                                           |
+| `LITEDRAM_SIZE`            | Mapped external LiteDRAM main RAM size            | `0x40000000`                                                  |
+| `WITH_MIG`                 | Use external Xilinx DDR4 MIG for FPGA main RAM    | `0` (`1` in linux FPGA profile)                               |
+| `MIG_SIZE`                 | Mapped external MIG main RAM size                 | `0x40000000`                                                  |
+| `LINUX_FPGA_RAM_SIZE`      | Linux FPGA DDR window advertised in DTB           | `MIG_SIZE`                                                    |
+| `LINUX_FPGA_DTB_ADDR`      | Runtime DTB address passed to OpenSBI             | `0x83f00000`                                                  |
+| `UART_PORT`                | FPGA UART device                                  | Auto-detected; KU15P prefers `/dev/ttyUSB0`                   |
+| `UART_BAUD`                | FPGA UART baud rate                               | `115200` (`230400` in linux FPGA profile)                     |
+| `SERIALBOOT_SAFE`          | Use `litex_term --safe` for uploads               | `1`                                                           |
+| `GOWIN_APP`                | Gowin IDE app bundle path                         | Auto-detected on macOS                                        |
+| `RLLMBENCH_TIMEBASE_HZ`    | RLLMBench `time` CSR frequency in Hz              | `1000000`                                                     |
+| `RLLMBENCH_CORE_CLOCK_MHZ` | Core clock for score/MHz reports                  | `SYS_CLK/1e6`                                                 |
+| `EXTRA_FLAGS`              | Extra flags for the selected LiteX target script  | (empty)                                                       |
+
+### Embench Simulation
+
+```bash
+make embench
+# CI-style Linux smoke: one Vsim process, using the host CPUs internally.
+make embench SIM_TIMEOUT=300 SIM_THREADS="$(nproc)" EMBENCH_JOBS=1 \
+    EMBENCH_NETTLE_SHA256_LOCAL_SCALE=1
+```
+
+Per-benchmark logs and `summary.md` are written to `nsim/build/<RAPT_CONFIG>/logs/litex/embench-logs/`. A benchmark is successful only after its UART output contains `--- done ---`; a missing binary, Vsim early exit, or timeout is recorded as `ERROR` or `TIMEOUT` and makes `make embench` return nonzero. A non-default `EMBENCH_NETTLE_SHA256_LOCAL_SCALE` keeps SHA-256 as a correctness smoke check and excludes it from the partial aggregate; retain the default scale `562` when reporting an official Embench score. That scale is necessary but not sufficient: the run must also select all 19 canonical workloads and every workload must pass with reference data. Each actual run atomically records its source revision, patch identity, clock, scale, and benchmark selection in `run-config.env`; reports use that manifest and reject an explicitly conflicting scale override.

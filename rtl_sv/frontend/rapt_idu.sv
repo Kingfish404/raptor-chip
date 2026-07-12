@@ -34,7 +34,7 @@ module rapt_idu #(
   logic valid, ready;
 
   // ================================================================
-  // Early Resteer: detect BPU misprediction on non-branch instructions
+  // Early Resteer: resolve prediction errors whose target is statically known
   // ================================================================
   // If BPU predicted taken (pnpc != pc + inst_len) but the decoded
   // instruction is not a branch/jump, resteer IFU to the correct
@@ -47,6 +47,8 @@ module rapt_idu #(
   logic early_resteer_cond;
   logic idu_redirect_event;
   logic resteer_sent;
+  logic slot_b_direct_jal;
+  logic slot_b_cond_branch;
 
   assign valid = (state_idu == VALID);
   assign ready = (state_idu == IDLE) || idu_rnu.ready;
@@ -346,6 +348,13 @@ module rapt_idu #(
   assign jal_target_a = pc_idu_a + {{(XLEN - 21) {jal_imm21_a[20]}}, jal_imm21_a};
 
   assign is_branch_or_jump = idu_rnu.uop_a.ben || idu_rnu.uop_a.jen || idu_rnu.uop_a.jren;
+`ifdef RAPT_DUAL_ISSUE
+  assign slot_b_direct_jal = ifu_valid_b && idu_rnu.uop_b.jen && !idu_rnu.uop_b.jren;
+  assign slot_b_cond_branch = ifu_valid_b && idu_rnu.uop_b.ben;
+`else
+  assign slot_b_direct_jal = 1'b0;
+  assign slot_b_cond_branch = 1'b0;
+`endif
   assign bpu_predicted_taken = (pnpc_idu != group_seq);
 
   // Resolve what the BPU *should* have predicted, when statically derivable.
@@ -360,14 +369,7 @@ module rapt_idu #(
   //     resteer to group_seq. BTB has no invalidate port today, so we do
   //     NOT train; the alias re-fires on every encounter (rare; ~1 event
   //     per CoreMark run empirically).
-  //  3. A=B-type with BPU-taken + wrong target: intentionally NOT handled.
-  //     Patching uop.pnpc to btype_target_a presumes runtime-taken; if the
-  //     branch turns out not-taken, we *introduce* a mispredict that wasn't
-  //     there before. The conservative behavior is to let commit-flush
-  //     update BTB on actual mispredict. (TODO: handle by not patching
-  //     uop.pnpc for B-type -- but then BTB training races with commit's
-  //     authoritative training on the next encounter; needs careful study.)
-  //  4. A=JALR: target depends on rs1; unresolvable at IDU.
+  //  3. A=JALR: target depends on rs1; unresolvable at IDU.
   logic train_jal_a;
   // Note: the decoder asserts `jen` for BOTH JAL and JALR. Gate strictly on
   // `jen && !jren` so we only train/patch for true JAL (PC-relative,
@@ -379,7 +381,8 @@ module rapt_idu #(
     if (train_jal_a) begin
       target_resolvable = 1'b1;
       correct_npc       = jal_target_a;
-    end else if (!is_branch_or_jump && bpu_predicted_taken) begin
+    end else if (!is_branch_or_jump && !slot_b_direct_jal && !slot_b_cond_branch
+           && bpu_predicted_taken) begin
       target_resolvable = 1'b1;
       correct_npc       = group_seq;
     end else begin
@@ -391,9 +394,8 @@ module rapt_idu #(
   assign early_resteer_cond = valid && !ifu_trap && target_resolvable && (pnpc_idu != correct_npc);
   assign idu_redirect_event = cmu_bcast.flush_pipe || cmu_bcast.sys_resume;
 
-  // BPU training side-channel -- fires only with the one-shot resteer pulse
-  // and only on the JAL case where BTB can be authoritatively updated from
-  // a statically-derived target with no direction ambiguity.
+  // BPU training side-channel fires with the one-shot resteer pulse for the
+  // statically-resolvable direct-JAL target.
   logic resteer_pulse;
   assign resteer_pulse        = early_resteer_cond && !resteer_sent;
   assign idu_bpu.train_en     = resteer_pulse && train_jal_a;
@@ -401,17 +403,30 @@ module rapt_idu #(
   assign idu_bpu.train_target = correct_npc;
   assign idu_bpu.train_type   = 2'b01;  // DIRE (JAL)
 
-  // Speculative RSB push: pulse on a CALL in slot A (jal/jalr with link rd).
-  // Slot B can never be a control op (see IDU_SLOT_B_NO_CONTROL), so handling
-  // slot A only is sufficient. Suppressed during early-resteer / trap so we
-  // don't push a wrong-path call. The pop side lives in `rapt_bpu`; flush
-  // recovery rewinds `rsb_spec_idx` to the architectural pointer.
+  // Speculative RSB push: direct calls may be in either issue slot. B-slot
+  // support is deliberately limited to the statically predicted direct JAL
+  // form; flush recovery rewinds `rsb_spec_idx` to the architectural pointer.
   logic is_link_rd_a;
   assign is_link_rd_a    = (rd_a == 5'd1) || (rd_a == 5'd5);
+`ifdef RAPT_DUAL_ISSUE
+  logic is_link_rd_b;
+  logic slot_b_direct_call;
+  assign is_link_rd_b = (rd_b == 5'd1) || (rd_b == 5'd5);
+  assign slot_b_direct_call = slot_b_direct_jal && is_link_rd_b;
+`endif
+`ifdef RAPT_DUAL_ISSUE
+  assign idu_bpu.push_en = valid && !ifu_trap && !early_resteer_cond
+                            && (((idu_rnu.uop_a.jen || idu_rnu.uop_a.jren) && is_link_rd_a)
+                             || slot_b_direct_call);
+  assign idu_bpu.push_addr = slot_b_direct_call
+    ? pc_idu_b + (is_c_b ? XLEN'('d2) : XLEN'('d4))
+    : pc_idu_a + (is_c_a ? XLEN'('d2) : XLEN'('d4));
+`else
   assign idu_bpu.push_en = valid && !ifu_trap && !early_resteer_cond
                             && (idu_rnu.uop_a.jen || idu_rnu.uop_a.jren)
                             && is_link_rd_a;
   assign idu_bpu.push_addr = pc_idu_a + (is_c_a ? XLEN'('d2) : XLEN'('d4));
+`endif
 
   // One-shot pulse: only fire resteer on the first cycle of detection
   always_ff @(posedge clock) begin
@@ -575,7 +590,9 @@ module rapt_idu #(
   assign idu_rnu.uop_b.tval = is_illegal_b ? inst_idu_b : '0;
   assign idu_rnu.uop_b.cause = is_illegal_b ? `RAPT_CAUSE_ILLEGAL_INST : '0;
 
-  assign idu_rnu.uop_b.pnpc = pc_idu_b + (is_c_b ? XLEN'('d2) : XLEN'('d4));
+  assign idu_rnu.uop_b.pnpc = (slot_b_direct_jal || slot_b_cond_branch)
+    ? pnpc_idu
+    : pc_idu_b + (is_c_b ? XLEN'('d2) : XLEN'('d4));
   assign idu_rnu.uop_b.inst = inst_idu_b;
 `ifdef RAPT_RVFI
   assign idu_rnu.uop_b.rvfi_inst = is_c_b ? {16'b0, inst_b[15:0]} : inst_b;
@@ -613,11 +630,18 @@ module rapt_idu #(
   `RAPT_COVER(clock, reset, IDU_EARLY_RESTEER_EVENT, ifu_idu.resteer)
 
 `ifdef RAPT_DUAL_ISSUE
-  // DUAL_COMMIT_SEMANTICS: slot B is intentionally limited to non-control,
-  // non-serializing uops because only slot A carries frontend prediction state.
+    // DUAL_COMMIT_SEMANTICS: slot B may carry a direct JAL or a conditionally
+    // predicted branch. JALR and serializing uops remain forbidden.
   `RAPT_SVA_IMPLY(
-      clock, reset, IDU_SLOT_B_NO_CONTROL, idu_rnu.valid_b,
-      !(idu_rnu.uop_b.ben || idu_rnu.uop_b.jen || idu_rnu.uop_b.jren || idu_rnu.uop_b.system || idu_rnu.uop_b.f_i || idu_rnu.uop_b.f_time || idu_rnu.uop_b.atom))
+        clock, reset, IDU_SLOT_B_ONLY_PREDICTED_CONTROL, idu_rnu.valid_b,
+        !(idu_rnu.uop_b.jren || idu_rnu.uop_b.system || idu_rnu.uop_b.f_i
+      || idu_rnu.uop_b.f_time || idu_rnu.uop_b.atom))
+    `RAPT_SVA_IMPLY(clock, reset, IDU_SLOT_B_DIRECT_JAL_PNPC,
+            idu_rnu.valid_b && slot_b_direct_jal,
+            idu_rnu.uop_b.pnpc == pnpc_idu)
+    `RAPT_SVA_IMPLY(clock, reset, IDU_SLOT_B_COND_BRANCH_PNPC,
+                    idu_rnu.valid_b && slot_b_cond_branch,
+                    idu_rnu.uop_b.pnpc == pnpc_idu)
 `endif
 
 endmodule

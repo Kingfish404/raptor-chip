@@ -53,11 +53,14 @@ module rapt_l1d #(
   // (e.g. small config: L1D_LINE_LEN=1 -> 2 words < 4 words on RV32) so that
   // D_SUBARRAY_COUNT stays >= 1. SLANG (yosys-slang, used by the STA flow) is
   // stricter than Verilator and rejects zero-sized unpacked arrays.
+  // L1D_LINE_SIZE is a narrow packed parameter because it also sizes arrays;
+  // use an explicit integer mirror for arithmetic with int localparams.
+  localparam int unsigned L1dLineWords = int'(L1D_LINE_SIZE);
   localparam int D_SUBARRAY_WORDS_MAX = 16 / (XLEN / 8);  // 4 (RV32) / 2 (RV64)
   localparam int D_SUBARRAY_WORDS =
-      (L1D_LINE_SIZE < D_SUBARRAY_WORDS_MAX) ? L1D_LINE_SIZE : D_SUBARRAY_WORDS_MAX;
+      (L1dLineWords < D_SUBARRAY_WORDS_MAX) ? L1dLineWords : D_SUBARRAY_WORDS_MAX;
   localparam int D_SUBARRAY_BYTES = D_SUBARRAY_WORDS * (XLEN / 8);  // <= 16 (128 bits)
-  localparam int D_SUBARRAY_COUNT = L1D_LINE_SIZE / D_SUBARRAY_WORDS;
+  localparam int D_SUBARRAY_COUNT = L1dLineWords / D_SUBARRAY_WORDS;
   // Raw subarray read data + registered raddr per subarray
   logic [D_SUBARRAY_BYTES*8-1:0] d_sa_rdata[L1D_N_WAYS][D_SUBARRAY_COUNT];
   logic [L1D_LEN-1:0] d_sa_raddr[D_SUBARRAY_COUNT];

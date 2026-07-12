@@ -32,6 +32,9 @@
 !*.sv
 !*.svh
 
+# ---- LiteX upstream source patches ----
+!/fpga/litex/benchmarks/embench/patches/*.patch
+
 # ---- Non-self-contained directories (need root whitelist) ----
 !/configs/*
 !/docs/*

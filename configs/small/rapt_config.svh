@@ -60,14 +60,20 @@
 `define RAPT_PHY_SIZE 64 // physical register number (must be power of 2)
 `define RAPT_PHY_LEN $clog2(`RAPT_PHY_SIZE)
 
+// Keep a smaller, but XLEN-independent, line for low-area builds.
+`define RAPT_CACHE_LINE_BYTES 16
+
 // L1I
-`define RAPT_L1I_LINE_LEN 2
+`define RAPT_L1I_LINE_LEN $clog2(`RAPT_CACHE_LINE_BYTES / 4)
 `define RAPT_L1I_LEN 5
 `define RAPT_L1I_N_WAYS 1
+`ifndef RAPT_L1I_REFILL_WORDS
+`define RAPT_L1I_REFILL_WORDS 4
+`endif
 
 // L1D
 `define RAPT_SQ_SIZE 4
-`define RAPT_L1D_LINE_LEN 1
+`define RAPT_L1D_LINE_LEN $clog2(`RAPT_CACHE_LINE_BYTES / (`RAPT_XLEN / 8))
 `define RAPT_L1D_LEN 3
 `define RAPT_L1D_N_WAYS 2
 

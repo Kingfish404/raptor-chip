@@ -67,10 +67,15 @@
 `define RAPT_PHY_SIZE 128
 `define RAPT_PHY_LEN $clog2(`RAPT_PHY_SIZE)
 
+`define RAPT_CACHE_LINE_BYTES 64
+
 // L1I: 64B line * 512 sets * 1 way = 32 KiB
-`define RAPT_L1I_LINE_LEN 4
+`define RAPT_L1I_LINE_LEN $clog2(`RAPT_CACHE_LINE_BYTES / 4)
 `define RAPT_L1I_LEN 9
 `define RAPT_L1I_N_WAYS 1
+`ifndef RAPT_L1I_REFILL_WORDS
+`define RAPT_L1I_REFILL_WORDS 8
+`endif
 
 // L1D: 64B line (16*4B RV32, 8*8B RV64) * 64 sets * 2 ways = 8 KiB
 // VIPT constraint: L1D_LEN + L1D_LINE_LEN + log2(XLEN/8) must fit in the
@@ -78,21 +83,13 @@
 // is 6 bits, and the current 2-way fill logic in rapt_l1d.sv caps the
 // associativity, so L1D_LEN must be <=6. Larger L1D requires PIPT or a
 // generalised N-way fill path.
-`ifdef RAPT_RV64
-`define RAPT_L1D_LINE_LEN 3
-`else
-`define RAPT_L1D_LINE_LEN 4
-`endif
+`define RAPT_L1D_LINE_LEN $clog2(`RAPT_CACHE_LINE_BYTES / (`RAPT_XLEN / 8))
 `define RAPT_L1D_LEN 6
 `define RAPT_L1D_N_WAYS 2
 
 // L2 unified cache: 64B line * 2048 sets * 1 way = 128 KiB
 `define RAPT_L2_EN
-`ifdef RAPT_RV64
-`define RAPT_L2_LINE_LEN 3
-`else
-`define RAPT_L2_LINE_LEN 4
-`endif
+`define RAPT_L2_LINE_LEN $clog2(`RAPT_CACHE_LINE_BYTES / (`RAPT_XLEN / 8))
 `define RAPT_L2_LEN 11
 `define RAPT_L2_N_WAYS 1
 

@@ -217,6 +217,19 @@ typedef struct
   long long int active_cycle;
   long long int instr_cnt;
   long long int ifu_fetch_cnt;
+  long long int ifu_fetch_inst_cnt;
+  long long int ifu_fetch_response_cnt;
+  long long int ifu_dual_fetch_cnt;
+  long long int ifu_fetch_bpu_taken_cnt;
+  long long int ifu_fetch_slot_a_control_cnt;
+  long long int ifu_fetch_slot_b_control_cnt;
+  long long int ifu_fetch_slot_b_jal_pack_cnt;
+  long long int ifu_fetch_slot_b_cond_pack_cnt;
+  long long int ifu_fetch_n1_unavailable_cnt;
+  long long int ifu_fetch_n1_unavailable_unaligned_cnt;
+  long long int ifu_fetch_n1_unavailable_l1i_cnt;
+  long long int ifu_fetch_downstream_blocked_cycle;
+  long long int ifu_fetch_target_steer_cnt;
   long long int lsu_load_cnt;
 
   long long int ifu_stall_cycle;
@@ -271,15 +284,35 @@ typedef struct
   // early resteer (IDU detects BPU alias on non-branch)
   long long int early_resteer_cnt;
 
+  // Commit-flush classification and the measured wait from a branch-caused
+  // flush to the first resumed IFU fetch packet.
+  long long int branch_flush_events;
+  long long int nonbranch_flush_events;
+  long long int branch_recovery_completed;
+  long long int branch_recovery_wait_cycles;
+  long long int branch_recovery_overlap_events;
+
   // -------------------------------------------------------------------
   // Extended PMU counters (gem5-aligned). Sampled in perf_sample_per_cycle.
   // -------------------------------------------------------------------
-  // Decomposition of ifu_stall_cycle:
-  //   ifu_stall_cycle = ifu_icache_miss_cycle + ifu_flush_cycle + ifu_empty_cycle
-  //                     (approximate; sampling races may cause +-1 cycle drift)
-  long long int ifu_icache_miss_cycle; // !valid && L1I FSM busy (cache miss / PTW)
-  long long int ifu_flush_cycle;       // !valid during pipeline flush drain window
-  long long int ifu_empty_cycle;       // !valid otherwise (early resteer bubble, branch shadow)
+  // Exact IFU stall decomposition from mutually-exclusive RTL probes.
+  long long int ifu_icache_miss_cycle; // no L1I/PTW response
+  long long int ifu_flush_cycle;       // response staging after an invalid interval
+  long long int ifu_empty_cycle;       // serialization/trap hold
+  long long int ifu_response_after_redirect_cycle;
+  long long int ifu_response_after_l1i_gap_cycle;
+  long long int ifu_response_bypass_candidate_cycle;
+  long long int ifu_no_response_refill_cycle;
+  long long int ifu_no_response_sram_warmup_cycle;
+  long long int ifu_no_response_tag_miss_cycle;
+  long long int ifu_no_response_nextword_miss_cycle;
+  long long int l1i_refill_start_line_miss;
+  long long int l1i_refill_start_current_hole;
+  long long int l1i_refill_start_next_line_miss;
+  long long int l1i_refill_start_next_hole;
+  long long int fqu_full_cycle;
+  long long int fqu_buffered_cycle;
+  long long int fqu_occupancy_sum;
 
   // Structural-full events  (gem5: iqFullEvents / robFullEvents / sqFullEvents)
   // *_cycle  = cycles spent fully occupied;  *_events = rising-edge count.
@@ -287,7 +320,11 @@ typedef struct
   long long int rs_full_events;
   long long int ioq_full_cycle;
   long long int ioq_full_events;
-  long long int rob_full_cycle; // proxy: rnu_valid && !rou_ready
+  // RNU has renamed work but ROU cannot enqueue it. This is UOQ/downstream
+  // dispatch backpressure, not an all-busy ROB.
+  long long int uoq_blocked_cycle;
+  long long int uoq_blocked_events;
+  // Exact all-ROB-entries-busy rising-edge probe exported by rapt_rou.
   long long int rob_full_events;
   long long int sq_full_cycle;
   long long int sq_full_events;

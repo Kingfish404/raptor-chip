@@ -94,8 +94,9 @@ module rapt_core #(
   logic pmu_sq_full_unused;
   l1i_bus_if l1i_bus ();
 
-  // IFU stage
-  ifu_idu_if ifu_idu ();  // Fetch => Decode
+  // FQU stage: registered fetch packets decouple IFU timing from IDU decode.
+  ifu_idu_if ifu_fqu ();  // IFU => Fetch Queue Unit
+  ifu_idu_if fqu_idu ();  // Fetch Queue Unit => Decode
 
   ifu_bpu_if ifu_bpu ();
   ifu_l1i_if ifu_l1i ();
@@ -118,11 +119,11 @@ module rapt_core #(
   rapt_pkg::uop_payload_t uop_pl[`RAPT_ROB_SIZE];
 
   // EXU stage: unified writeback (CDB) ports, one per execution pipeline.
-  // Index map (see exu_wb_if): ALU-A (full), ALU-B (simple+jump), BRU
+  // Index map (see exu_wb_if): ALU-CSR (full), ALU (simple+jump), Branch
   // (conditional branches), MEM (IOQ loads/stores/atomics).
-  exu_wb_if exu_rou ();  // ALU-A writeback => ROB/PRF/bypass
-  exu_wb_if exu_rou_b ();  // ALU-B writeback (pure arithmetic + JAL/JALR)
-  exu_wb_if exu_rou_c ();  // BRU writeback (conditional branches)
+  exu_wb_if wb_alu_csr ();  // ALU-CSR writeback => ROB/PRF/bypass
+  exu_wb_if wb_alu ();  // ALU writeback (pure arithmetic + JAL/JALR)
+  exu_wb_if wb_branch ();  // Branch writeback (conditional branches)
   exu_wb_if exu_ioq_bcast ();  // MEM writeback (IOQ broadcast)
   exu_wb_if exu_wb_mul ();  // MUL/DIV pipe writeback
 
@@ -142,6 +143,132 @@ module rapt_core #(
 
   // CSR
   csr_bcast_if csr_bcast ();
+
+`ifdef VERILATOR
+  // Waveform-only stage view. The OoO core does not have a single linear
+  // instruction lane, so these signals expose interface occupancy/activity
+  // rather than claiming an instruction remains in one serial pipeline.
+  typedef enum logic [1:0] {
+    P_EMPTY  = 2'd0,
+    P_VALID  = 2'd1,
+    P_STALL  = 2'd2,
+    P_SQUASH = 2'd3
+  } pipe_state_e;
+
+  pipe_state_e       pipe_ifu_a_state  /*verilator public_flat_rd*/;
+  pipe_state_e       pipe_fqu_a_state  /*verilator public_flat_rd*/;
+  pipe_state_e       pipe_idu_a_state  /*verilator public_flat_rd*/;
+  pipe_state_e       pipe_rnu_a_state  /*verilator public_flat_rd*/;
+  pipe_state_e       pipe_dispatch_a_state  /*verilator public_flat_rd*/;
+  pipe_state_e       pipe_writeback_state  /*verilator public_flat_rd*/;
+  // WB is not a persistent A/B lane after dispatch: independent execution
+  // ports may complete out of program order. Keep the aggregate state above
+  // and expose the actual CDB fan-in below for waveform inspection.
+  // CDB bit map [4:0] = MULDIV, MEM, Branch, ALU, ALU-CSR.
+  logic        [4:0] pipe_cdb_valid_mask  /*verilator public_flat_rd*/;
+  logic        [2:0] pipe_cdb_valid_count  /*verilator public_flat_rd*/;
+  logic              pipe_cdb_multi_valid  /*verilator public_flat_rd*/;
+  // Result-WB excludes the Branch completion port, which intentionally has
+  // no PRF destination or bypass value.
+  logic        [3:0] pipe_result_wb_valid_mask  /*verilator public_flat_rd*/;
+  logic              pipe_result_wb_multi_valid  /*verilator public_flat_rd*/;
+  pipe_state_e       pipe_commit_a_state  /*verilator public_flat_rd*/;
+`ifdef RAPT_DUAL_ISSUE
+  pipe_state_e pipe_ifu_b_state  /*verilator public_flat_rd*/;
+  pipe_state_e pipe_fqu_b_state  /*verilator public_flat_rd*/;
+  pipe_state_e pipe_idu_b_state  /*verilator public_flat_rd*/;
+  pipe_state_e pipe_rnu_b_state  /*verilator public_flat_rd*/;
+  pipe_state_e pipe_dispatch_b_state  /*verilator public_flat_rd*/;
+  pipe_state_e pipe_commit_b_state  /*verilator public_flat_rd*/;
+`endif
+
+  always_comb begin
+    pipe_cdb_valid_mask = {
+      exu_wb_mul.valid, exu_ioq_bcast.valid, wb_branch.valid, wb_alu.valid, wb_alu_csr.valid
+    };
+    pipe_cdb_valid_count = $countones(pipe_cdb_valid_mask);
+    pipe_cdb_multi_valid = (pipe_cdb_valid_count >= 2);
+    pipe_result_wb_valid_mask = {
+      exu_wb_mul.valid, exu_ioq_bcast.valid, wb_alu.valid, wb_alu_csr.valid
+    };
+    pipe_result_wb_multi_valid = ($countones(pipe_result_wb_valid_mask) >= 2);
+    pipe_ifu_a_state = cmu_bcast.flush_pipe || ifu_fqu.resteer
+        ? P_SQUASH
+        : !ifu_fqu.valid_a
+            ? P_EMPTY
+            : ifu_fqu.ready
+                ? P_VALID
+                : P_STALL;
+    pipe_fqu_a_state = cmu_bcast.flush_pipe || fqu_idu.resteer
+        ? P_SQUASH
+        : !fqu_idu.valid_a
+            ? P_EMPTY
+            : fqu_idu.ready
+                ? P_VALID
+                : P_STALL;
+    pipe_idu_a_state = cmu_bcast.flush_pipe
+        ? P_SQUASH
+        : !idu_rnu.valid_a
+            ? P_EMPTY
+            : idu_rnu.ready
+                ? P_VALID
+                : P_STALL;
+    pipe_rnu_a_state = cmu_bcast.flush_pipe
+        ? P_SQUASH
+        : !rnu_rou.valid_a
+            ? P_EMPTY
+            : rnu_rou.ready
+                ? P_VALID
+                : P_STALL;
+    pipe_dispatch_a_state = cmu_bcast.flush_pipe
+        ? P_SQUASH
+        : !rou_exu.valid
+            ? P_EMPTY
+            : rou_exu.ready
+                ? P_VALID
+                : P_STALL;
+    pipe_writeback_state = (pipe_cdb_valid_count != 0) ? P_VALID : P_EMPTY;
+    pipe_commit_a_state = rou_cmu.valid_a ? P_VALID : P_EMPTY;
+`ifdef RAPT_DUAL_ISSUE
+    pipe_ifu_b_state = cmu_bcast.flush_pipe || ifu_fqu.resteer
+        ? P_SQUASH
+        : !ifu_fqu.valid_b
+            ? P_EMPTY
+            : ifu_fqu.ready
+                ? P_VALID
+                : P_STALL;
+    pipe_fqu_b_state = cmu_bcast.flush_pipe || fqu_idu.resteer
+        ? P_SQUASH
+        : !fqu_idu.valid_b
+            ? P_EMPTY
+            : fqu_idu.ready
+                ? P_VALID
+                : P_STALL;
+    pipe_idu_b_state = cmu_bcast.flush_pipe
+        ? P_SQUASH
+        : !idu_rnu.valid_b
+            ? P_EMPTY
+            : idu_rnu.ready
+                ? P_VALID
+                : P_STALL;
+    pipe_rnu_b_state = cmu_bcast.flush_pipe
+        ? P_SQUASH
+        : !rnu_rou.valid_b
+            ? P_EMPTY
+            : rnu_rou.ready
+                ? P_VALID
+                : P_STALL;
+    pipe_dispatch_b_state = cmu_bcast.flush_pipe
+        ? P_SQUASH
+        : !rou_exu.valid_b
+            ? P_EMPTY
+            : rou_exu.ready_b
+                ? P_VALID
+                : P_STALL;
+    pipe_commit_b_state = rou_cmu.valid_b ? P_VALID : P_EMPTY;
+`endif
+  end
+`endif
 
   logic clint_timer_trap;
   logic clint_sw_trap;
@@ -176,7 +303,18 @@ module rapt_core #(
 
       .ifu_bpu(ifu_bpu),
       .ifu_l1i(ifu_l1i),
-      .ifu_idu(ifu_idu),
+      .ifu_idu(ifu_fqu),
+
+      .reset(reset)
+  );
+
+  rapt_fqu fqu (
+      .clock(clock),
+
+      .cmu_bcast(cmu_bcast),
+
+      .ifu_in (ifu_fqu),
+      .idu_out(fqu_idu),
 
       .reset(reset)
   );
@@ -201,7 +339,7 @@ module rapt_core #(
       .cmu_bcast(cmu_bcast),
       .csr_bcast(csr_bcast),
 
-      .ifu_idu(ifu_idu),
+      .ifu_idu(fqu_idu),
       .idu_bpu(idu_bpu),
       .idu_rnu(idu_rnu),
 
@@ -237,9 +375,9 @@ module rapt_core #(
       .exu_prf(exu_prf),
       .rou_exu(rou_exu),
 
-      .exu_rou(exu_rou),
-      .exu_rou_b(exu_rou_b),
-      .exu_rou_c(exu_rou_c),
+      .exu_rou(wb_alu_csr),
+      .exu_rou_b(wb_alu),
+      .exu_rou_c(wb_branch),
       .exu_ioq_bcast(exu_ioq_bcast),
       .exu_wb_mul(exu_wb_mul),
 
@@ -287,8 +425,8 @@ module rapt_core #(
 
       .prf_rd(exu_prf),
 
-      .exu_rou      (exu_rou),
-      .exu_rou_b    (exu_rou_b),
+      .exu_rou      (wb_alu_csr),
+      .exu_rou_b    (wb_alu),
       .exu_ioq_bcast(exu_ioq_bcast),
       .exu_wb_mul   (exu_wb_mul),
       .rou_cmu      (rou_cmu),
@@ -318,9 +456,9 @@ module rapt_core #(
 
       .rou_exu(rou_exu),
 
-      .exu_rou(exu_rou),
-      .exu_rou_b(exu_rou_b),
-      .exu_rou_c(exu_rou_c),
+      .wb_alu_csr(wb_alu_csr),
+      .wb_alu(wb_alu),
+      .wb_branch(wb_branch),
       .exu_ioq_bcast(exu_ioq_bcast),
       .exu_wb_mul(exu_wb_mul),
 

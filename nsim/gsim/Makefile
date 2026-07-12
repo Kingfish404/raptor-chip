@@ -109,14 +109,20 @@ SWEEP_OUTDIR  := $(GSIM_BUILD)/sweep-$(BENCH)
 SWEEP_CSV     := $(RESULTS_DIR)/sweep-$(BENCH)-rv$(XLEN).csv
 DSE_OUTDIR    := $(GSIM_BUILD)/dse-$(BENCH)
 DSE_CSV       := $(RESULTS_DIR)/dse-$(BENCH)-rv$(XLEN).csv
+RESULTS_DIR   := $(strip $(RESULTS_DIR))
+SWEEP_CSV     := $(RESULTS_DIR)/sweep-$(BENCH)-rv$(XLEN).csv
+DSE_CSV       := $(RESULTS_DIR)/dse-$(BENCH)-rv$(XLEN).csv
 
 ELF_BASE := $(RAPTOR_HOME)/app/build/rv$(XLEN)
 COREMARK_ELF := $(ELF_BASE)/coremark/coremark.elf
 EMBENCH_DIR  := $(ELF_BASE)/embench
+MICROBENCH_ELF := $(ELF_BASE)/microbench/microbench.elf
 
 # CoreMark canonical args (validation seed): 0 0 0x66 10
 COREMARK_OPTS ?= 0;0;0x66;10 ## Canonical CoreMark validation args
 COREMARK_OPTS := $(strip $(COREMARK_OPTS))
+BP_STUDY_BENCHES ?= coremark microbench ## SE-compatible workloads for bp-study
+BP_STUDY_BENCHES := $(strip $(BP_STUDY_BENCHES))
 
 # ============================================================================
 # Examples
@@ -137,9 +143,9 @@ COREMARK_OPTS := $(strip $(COREMARK_OPTS))
 #   make dse-sweep BENCH=coremark DSE_DIR=sweep-rob
 #   make print-config PRESET=default SET=ooo_cpu.0.rob_size=96
 
-.PHONY: help check-gem5 build-coremark build-embench \
-        coremark embench-% timing run summary sweep aggregate \
-        dse-sweep dse-aggregate print-config clean
+.PHONY: help check-gem5 build-coremark build-microbench build-embench \
+	coremark microbench embench-% timing run summary sweep aggregate \
+		bp-study dse-sweep dse-aggregate print-config clean
 
 
 # ============================================================================
@@ -205,12 +211,19 @@ check-gem5: ## Verify gem5 source tree + built binary are available
 	  echo "gem5 binary not found: $(GEM5)"; \
 	  echo "Build it first: cd $(GEM5_ROOT) && scons build/RISCV/gem5.opt -j\$$(sysctl -n hw.ncpu)"; \
 	  exit 1; }
+	@$(GEM5) --help >/dev/null 2>&1 || { \
+	  echo "gem5 cannot start: $(GEM5)"; \
+	  echo "Rebuild it against the current host dependencies before running DSE."; \
+	  exit 1; }
 
 # ============================================================================
 # Workload build helpers
 # ============================================================================
 build-coremark: ## Build raptor coremark.elf for current XLEN
 	$(MAKE) -C $(RAPTOR_HOME)/app coremark-build $(if $(filter 64,$(XLEN)),ISA64=1,)
+
+build-microbench: ## Build MicroBench SE ELF for current XLEN
+	$(MAKE) -C $(RAPTOR_HOME)/app microbench-build $(if $(filter 64,$(XLEN)),ISA64=1,)
 
 build-embench: ## Build raptor embench ELFs for current XLEN
 	$(MAKE) -C $(RAPTOR_HOME)/app embench-build $(if $(filter 64,$(XLEN)),ISA64=1,)
@@ -241,11 +254,41 @@ summary: ## Re-summarise an existing $(OUTDIR) (writes summary.txt/.csv)
 coremark: build-coremark ## Run CoreMark with seed 0 0 0x66 10 (SE-mode bare-metal newlib)
 	$(MAKE) run BENCH=coremark OPTIONS="$(COREMARK_OPTS)"
 
+microbench: build-microbench ## Run MicroBench as a gem5 SE user process
+	$(MAKE) run BENCH=$(MICROBENCH_ELF)
+
 embench-%: build-embench ## Run an Embench-IoT workload (e.g. embench-crc32)
 	$(MAKE) run BENCH=embench-$*
 
 timing: ## Run on the in-order TimingSimpleCPU baseline
 	$(MAKE) run CPU=timing
+
+bp-study: check-gem5 build-coremark build-microbench ## Compare BPU designs on SE-compatible workloads
+	@set -e; \
+	  for bench in $(BP_STUDY_BENCHES); do \
+	    if [ "$$bench" = coremark ]; then \
+	      workload=coremark; options='$(COREMARK_OPTS)'; \
+	    elif [ "$$bench" = microbench ]; then \
+	      workload='$(MICROBENCH_ELF)'; options='test'; \
+	    else \
+	      echo "Unknown bp-study workload: $$bench (expected coremark or microbench)"; exit 2; \
+	    fi; \
+	    csv='$(RESULTS_DIR)/bp-study-'"$$bench"'-rv$(XLEN).csv'; \
+	    rm -f "$$csv"; \
+	    for label in rtl-tage same-budget-gshare practical-tage-sc upper-tage-sc; do \
+	      case "$$label" in \
+	        rtl-tage) set_args='';; \
+	        same-budget-gshare) set_args='ooo_cpu.0.branch_predictor=gshare';; \
+	        practical-tage-sc) set_args='ooo_cpu.0.branch_predictor=tage_sc_l_8kb,sim.equalize_budget=false';; \
+	        upper-tage-sc) set_args='ooo_cpu.0.branch_predictor=tage_sc_l_64kb,sim.equalize_budget=false';; \
+	      esac; \
+	      $(MAKE) --no-print-directory run BENCH="$$workload" OPTIONS="$$options" SET="$$set_args" \
+	        OUTDIR='$(GSIM_BUILD)/bp-study/'"$$bench"'/rv$(XLEN)/'"$$label" \
+	        AGGREGATE_CSV="$$csv"; \
+	    done; \
+	    echo "[bp-study] aggregated -> $$csv"; \
+	    column -t -s, "$$csv" 2>/dev/null || cat "$$csv"; \
+	  done
 
 # ============================================================================
 # Aggregation and sweeps

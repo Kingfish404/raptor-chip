@@ -4,23 +4,24 @@ Raptor is an out-of-order, super-scalar RISC-V processor core with register rena
 
 ## Pipeline
 
-8 logical stages, dual-issue width through IF->DI. Valid/ready handshaking at all boundaries; queues (RNQ, UOQ, ALQ/BRQ/MDQ, IOQ, ROB) decouple stages.
+9 logical stages, dual-issue width through IF->DI. Valid/ready handshaking at all boundaries; FQU, RNQ, UOQ, ALQ/BRQ/MDQ, IOQ, and ROB decouple stages.
 
 ```text
- IF0     IF1      ID      RN       DI       IS/EX    WB      CM
-+-----++------++------++-------++--------++-------++-----++------+
-|L1I  ||IFU   ||IDU   ||RNU    ||ROU     ||EXU    ||ROB  ||CMU   |
-|SRAM ||FSM   ||decode||RNQ->   ||UOQ->    ||IQ->FU  ||->WB  ||bcast |
-|read ||latch ||x2    ||rename ||dispatch||issue  ||state||retire|
-|(spec)|      | latch | pipe x2| +ROB x2 |        |      | x2   |
-+--+--++--+---++--+---++--+----++---+----++--+----++--+--++--+---+
- 1 cyc  1 cyc   1 cyc   1 cyc    1 cyc    1 cyc   0 cyc  1 cyc
+ IF0     IF1      FQ       ID      RN       DI       IS/EX    WB      CM
++-----++------++-------++------++-------++--------++-------++-----++------+
+|L1I  ||IFU   ||FQU    ||IDU   ||RNU    ||ROU     ||EXU    ||ROB  ||CMU   |
+|SRAM ||FSM   ||packet ||decode||RNQ->  ||UOQ->    ||IQ->FU ||->WB  ||bcast |
+|read ||latch ||queue  ||x2    ||rename ||dispatch||issue  ||state||retire|
+|(spec)|      |x2     | latch | pipe x2| +ROB x2 |        |      | x2   |
++--+--++--+---++---+---++--+---++--+----++---+----++--+----++--+--++--+---+
+ 1 cyc  1 cyc   1 cyc   1 cyc   1 cyc    1 cyc    1 cyc   0 cyc  1 cyc
 ```
 
 | Stage     | Module | Register boundary                          |
 | --------- | ------ | ------------------------------------------ |
 | **IF0**   | L1I    | SRAM address latched                       |
 | **IF1**   | IFU    | `inst`, `pc`, `pc_ifu` registered          |
+| **FQ**    | FQU    | Fetch packet registered before decode       |
 | **ID**    | IDU    | `uop_t`, operands registered               |
 | **RN**    | RNU    | `rn_pipe_{pr1,pr2,prd,prs,uop}` registered |
 | **DI**    | ROU    | UOQ consumed, ROB entry allocated          |
@@ -28,7 +29,7 @@ Raptor is an out-of-order, super-scalar RISC-V processor core with register rena
 | **WB**    | ROB    | ROB state -> `ROB_WB`                      |
 | **CM**    | CMU    | Architectural state committed              |
 
-- **First-instruction latency**: ~9 cycles (empty pipeline, L1I hit, ALU)
+- **First-instruction latency**: ~10 cycles (empty pipeline, L1I hit, ALU)
 - **Peak throughput**: 2 IPC (dual-issue, all queues flowing)
 - **Load-use latency**: 3 cycles (IOQ issue -> L1D hit -> result broadcast)
 - **Branch misprediction penalty**: ~8 cycles (full pipeline drain, flush at commit)
@@ -51,7 +52,15 @@ Raptor is an out-of-order, super-scalar RISC-V processor core with register rena
 
 3-state FSM (`IDLE`->`VALID`->`STALL`). Sends PC to L1I and BPU in parallel. Next-PC priority: flush > early resteer > BPU taken > sequential (PC+2/+4/+6/+8). Pre-registered `seq2`/`seq4`/`seq6`/`seq8` avoid adder on critical `pc_ifu` loop.
 
-**Dual-fetch**: delivers two instructions from L1I via `ifu_idu_if.{inst_b, pc_b, valid_b}`. Supports all combinations: C+C, C+R32, R32+C, R32+R32. Uses `inst_n0` (current assembled word) and `inst_n1` (next 4-byte-aligned word from L1I) for assembling slot B. Suppressed when either slot is branch/jump, BPU predicts taken, L1I trap, or `inst_n1` data unavailable. R32+R32 at unaligned PC (`pc[1]=1`) excluded (would span 3 words). Stalls on system/atomic/trap until flush.
+**Dual-fetch**: delivers two instructions from L1I via `ifu_idu_if.{inst_b, pc_b, valid_b}`. Supports C+C, C+R32, R32+C, and R32+R32 at either halfword alignment; the unaligned R32+R32 form uses `inst_n2` for its third-word upper half. Slot-A controls terminate a packet. Slot-B direct JAL/C.J and conditional branches may be packed with their own target/direction metadata; JALR, serializing instructions, traps, and unavailable lookahead data remain single-packet boundaries. System/atomic/trap instructions enter `STALL` until their commit-side flush.
+
+**Read-ahead**: every accepted packet supplies its exact next PC (sequential stride, predicted target, or redirect target) to L1I as a side-effect-free data-SRAM hint. This hides the synchronous SRAM read latency without creating a cache request or modifying cache state.
+
+#### FQU (`rapt_fqu.sv`)
+
+Two-entry registered elastic fetch queue between IFU and IDU. A packet accepted from IFU is always stored before IDU can observe it; there is no empty-queue flow-through path. This makes FQU an explicit timing boundary while still allowing one packet to dequeue and one to enqueue in the same cycle.
+
+FQU carries the complete dual-issue fetch packet (`inst`, PC, `pnpc`, and fetch-trap metadata). `flush_pipe`, `sys_resume`, and an IDU early resteer clear resident packets and block same-cycle IFU acceptance. The early-resteer channel itself remains combinational through FQU so IFU can squash stale fetch data in that cycle.
 
 #### BPU (`rapt_bpu.sv`)
 
@@ -67,7 +76,7 @@ BTB entry types: `COND`, `DIRE`, `INDR`, `RETU`. Direction predictor state is tr
 
 #### L1I (`rapt_l1i.sv`)
 
-N-way set-associative I-cache (`L1I_N_WAYS`, default 2). `2^L1I_LEN` sets (32), `2^L1I_LINE_LEN` words/line (16 RV32 words = 64 B). Default capacity is 8 KiB. 7-state FSM (`IDLE`, `PTWAIT`, `TRAP`, `RD_A`, `RD_0`, `RD_1`, `FINA`).
+N-way set-associative I-cache (`L1I_N_WAYS`, default 2). `2^L1I_LEN` sets (32), `2^L1I_LINE_LEN` words/line (16 RV32 words = 64 B). Default capacity is 4 KiB. 7-state FSM (`IDLE`, `PTWAIT`, `TRAP`, `RD_A`, `RD_0`, `RD_1`, `FINA`).
 
 | Storage | Implementation                                                                       |
 | ------- | ------------------------------------------------------------------------------------ |
@@ -75,7 +84,7 @@ N-way set-associative I-cache (`L1I_N_WAYS`, default 2). `2^L1I_LEN` sets (32), 
 | Tags    | Banked `rapt_sram_1r1w` per way per word (combinational compare from SRAM output)    |
 | Valid   | Register arrays per way (`l1i_valid[way][set]`) for fast `fence.i` bulk invalidation |
 
-3-tier pre-read: current bank reads `addr_idx`, next bank reads `addr_idx_next` (+2), remaining banks read `addr_idx_next4` (+4). This eliminates SRAM bubbles on sequential fetch and provides `inst_n1` (next 4-byte-aligned word) for generalized dual-fetch. Way replacement: first invalid, then toggle `replace_bit` per set. IFQ (2-entry) for outstanding requests. ITLB + IPTW for Sv32/Sv39 translation.
+3-tier pre-read uses the IFU's exact next-PC hint: current bank reads the hinted word, next bank reads `+2`, and remaining banks read `+4`. This provides `inst_n1` and `inst_n2` for generalized dual-fetch while hiding hit-path target/stride transitions. Cache lines retain per-word valid bits; on the default non-SDRAM AR path, `RAPT_L1I_REFILL_WORDS=8` refills one 32 B sector per miss through an 8-entry AR FIFO. The value is capped by the configured line length and may be overridden for experiments; SDRAM burst targets retain their dedicated two-beat burst refill path. Way replacement: first invalid, then toggle `replace_bit` per set. ITLB + IPTW support Sv32/Sv39 translation.
 
 #### IDU (`rapt_idu.sv`)
 
@@ -95,7 +104,7 @@ Pure rename: maps arch -> physical registers. Dual-rename with RAW dependency ha
 
 #### PRF (`rapt_prf.sv`)
 
-`PHY_SIZE` entries (128). 4 read ports (2 per dispatch slot) + 4 write ports, one per value-producing CDB pipe (ALU-A, ALU-B, MEM, MULDIV; the BRU never writes a register). `prf_valid[]` + `prf_transient[]` tracking. Flush: transient entries invalidated. Commit: transient cleared. Dealloc: valid cleared.
+`PHY_SIZE` entries (128). 4 read ports (2 per dispatch slot) + 4 write ports, one per value-producing CDB pipe (ALU-CSR, ALU, MEM, MULDIV; the Branch pipe never writes a register). `prf_valid[]` + `prf_transient[]` tracking. Flush: transient entries invalidated. Commit: transient cleared. Dealloc: valid cleared.
 
 #### ROU (`rapt_rou.sv`)
 
@@ -112,11 +121,11 @@ Dispatch queue + reorder buffer + commit logic.
 
 Thin dispatch router + 5 execution pipelines, each with one dedicated writeback port on the unified CDB (`exu_wb_if`).
 
-- **Dispatch router**: classifies each uop (priority: memory > MUL/DIV > branch > ALU-class) and steers it to the owning queue. CSR/system/trap entries are flagged **port-B-blocked** at dispatch, so they only ever issue to ALU-A (the only pipe with CSR/trap semantics). Dual dispatch into the same queue uses its first + second free slots.
-- **Generic IQ** (`rapt_exu_iq.sv`): parameterized issue queue -- ALQ (8, dual issue ports via `HAS_ISS_B`) shared by both ALU pipes, and BRQ (4, single port). Data-capture scheduler: operands are woken from all 4 value-producing CDB ports plus the **fast load-use** tag path (early tag wakeup, confirmed or re-busied by the MEM broadcast one cycle later, with issue-time data bypass). Age-matrix oldest-first one-hot select; port B picks the oldest ready non-blocked entry distinct from port A's pick. Winning entries issue and free in the same cycle. Issue payloads are exposed via `exu_iq_iss_if`.
-- **ALU-A pipe** (`rapt_exu_pipe_a.sv`): full ALU + CSR read/write staging + system/trap redirect (`mtvec`/`mepc`/`sepc`), instret correction. Combinational; drives CDB port [0].
-- **ALU-B pipe** (`rapt_exu_pipe_b.sv`): simple ALU + JAL/JALR link write. Drives CDB port [1].
-- **BRU pipe** (`rapt_exu_pipe_c.sv`): compare-only branch resolution (single taken bit instead of a full ALU); never writes rd, so its CDB port carries no result/prd (no PRF write port, no bypass entry). Drives CDB port [2].
+- **Dispatch router**: classifies each uop (priority: memory > MUL/DIV > branch > ALU-class) and steers it to the owning queue. CSR/system/trap entries are flagged **ALU-port-blocked** at dispatch, so they only ever issue to the ALU-CSR pipe (the only pipe with CSR/trap semantics). Dual dispatch into the same queue uses its first + second free slots.
+- **Generic IQ** (`rapt_exu_iq.sv`): parameterized issue queue -- ALQ (8, dual issue ports via `HAS_ISS_B`) shared by the ALU-CSR and ALU pipes, and BRQ (4, single port). Data-capture scheduler: operands are woken from all 4 value-producing CDB ports plus the **fast load-use** tag path (early tag wakeup, confirmed or re-busied by the MEM broadcast one cycle later, with issue-time data bypass). Age-matrix oldest-first one-hot select; the ALU port picks the oldest ready non-blocked entry distinct from the ALU-CSR port pick. Winning entries issue and free in the same cycle. Issue payloads are exposed via `exu_iq_iss_if`.
+- **ALU-CSR pipe** (`rapt_exu_pipe_alu_csr.sv`): full ALU + CSR read/write staging + system/trap redirect (`mtvec`/`mepc`/`sepc`), instret correction. Combinational; drives CDB port [0].
+- **ALU pipe** (`rapt_exu_pipe_alu.sv`): simple ALU + JAL/JALR link write. Drives CDB port [1].
+- **Branch pipe** (`rapt_exu_pipe_branch.sv`): compare-only conditional-branch resolution (single taken bit instead of a full ALU); never writes rd, so its CDB port carries no result/prd (no PRF write port, no bypass entry). Drives CDB port [2].
 - **MULDIV pipe** (`rapt_exu_muldiv.sv`): 4-entry private IQ + `rapt_exu_mul` FU (pipelined fast-multiply with tag-based completion + iterative restoring divider). Wakes operands from the slow CDB only (no fast load-use path). Drives CDB port [4].
 - **IOQ** (`rapt_exu_ioq.sv`): `IOQ_SIZE` entries (8), circular FIFO for ld/st/amo -- with **out-of-order load issue to L1D**. A younger ready load can drive L1D ahead of an older pending store/load when safe: (a) per-entry completion state (`ioq_complete`/`ioq_rdata`/`ioq_load_trap`/`ioq_load_cause`/`ioq_load_skip`); (b) oldest-ready priority encoder over `ioq_load_issue_vec`; (c) older-store blocker mask holds a load if any older IOQ store has unresolved base reg (`pr1!=0`), pending MMU translation, or word-address conflict; (d) `oo_pending` FSM locks `active_idx` across multi-cycle L1D misses so the response latches into the originating entry; (e) commit mux at `ioq_head` consumes either the live L1D response (when `active_idx==head`) or pre-latched `ioq_rdata[head]`; (f) atomics (LR/SC/AMO) and uncacheable MMIO stay gated to ROB head for memory ordering. Single outstanding L1D request. Drives CDB port [3] (the MEM broadcast).
 - **Atomics**: LR/SC with reservation register, full AMO set.
@@ -145,7 +154,7 @@ Broadcast unit. Outputs: `rpc`, `cpc`, branch resolution, `flush_pipe`, `fence_i
 
 #### L1D (`rapt_l1d.sv`)
 
-2-way set-associative. `2^L1D_LEN` sets (16), `2^L1D_LINE_LEN` words/line (16 RV32 words or 8 RV64 words = 64 B). Default capacity is 4 KiB. 5-state FSM (`IDLE`, `PTWAIT`, `TRAP`, `LD_A`, `LD_D`).
+2-way set-associative. `2^L1D_LEN` sets (16), `2^L1D_LINE_LEN` words/line (16 RV32 words or 8 RV64 words = 64 B). Default capacity is 2 KiB. 5-state FSM (`IDLE`, `PTWAIT`, `TRAP`, `LD_A`, `LD_D`).
 
 | Storage   | Implementation                                                                      |
 | --------- | ----------------------------------------------------------------------------------- |
@@ -186,15 +195,15 @@ Cluster-level Platform-Level Interrupt Controller. Default `NDEV=31` sources and
 | ---------------- | ----------------------- | --------------------------------------------------------- |
 | `ifu_bpu_if`     | IFU<->BPU               | PC for prediction; NPC + taken back                       |
 | `ifu_l1i_if`     | IFU<->L1I               | PC fetch request; `inst_n0` + `inst_n1` + trap response   |
-| `ifu_idu_if`     | IFU<->IDU               | inst_a/b + PC_a/b + pnpc; early resteer back              |
+| `ifu_idu_if`     | IFU<->FQU / FQU<->IDU   | inst_a/b + PC_a/b + pnpc; early resteer returns via FQU   |
 | `idu_rnu_if`     | IDU->RNU                | uop_a/b + operands + arch reg IDs                         |
 | `rnu_rou_if`     | RNU->ROU                | uop_a/b + physical reg mappings                           |
 | `rou_exu_if`     | ROU->EXU                | uop/uop_b + operands + ROB dest (dual dispatch)           |
 | `rou_lsu_if`     | ROU->LSU                | Store commit (addr/data/alu)                              |
 | `rou_csr_if`     | ROU->CSR                | CSR write + trap/system on commit                         |
 | `rou_cmu_if`     | ROU->CMU                | Commit info slot A/B (PC, branch, fence, flush)           |
-| `exu_wb_if` (x5) | pipes->ROU/PRF/LSU/IQs  | Unified CDB writeback: ALU-A / ALU-B / BRU / MEM / MULDIV |
-| `exu_iq_iss_if`  | IQ->pipe (EXU internal) | Oldest-ready entry payload; the ALQ exposes two (ports A/B) |
+| `exu_wb_if` (x5) | pipes->ROU/PRF/LSU/IQs  | Unified CDB writeback: ALU-CSR / ALU / Branch / MEM / MULDIV |
+| `exu_iq_iss_if`  | IQ->pipe (EXU internal) | Oldest-ready entry payload; the ALQ exposes ALU-CSR and ALU issue ports |
 | `exu_prf_if`     | ROU->PRF                | Operand read (4 ports: 2 per slot)                        |
 | `exu_lsu_if`     | EXU->LSU                | Load request (addr/alu/atomic)                            |
 | `exu_csr_if`     | EXU->CSR                | CSR read port                                             |
@@ -221,6 +230,7 @@ Cluster-level Platform-Level Interrupt Controller. Default `NDEV=31` sources and
 | `RAPT_L1I_LINE_LEN`  | 4         | L1I line: 2⁴ = 16 words (64 B in RV32)     |
 | `RAPT_L1I_LEN`       | 5         | L1I sets: 2⁵ = 32                          |
 | `RAPT_L1I_N_WAYS`    | 2         | L1I ways (2-way SA)                        |
+| `RAPT_L1I_REFILL_WORDS` | 8      | Words per L1I sector refill (capped at line size) |
 | `RAPT_PHT_SIZE`      | 256       | PHT entries                                |
 | `RAPT_BTB_SIZE`      | 128       | BTB entries (64 sets × 2 ways)             |
 | `RAPT_BTB_WAYS`      | 2         | BTB associativity                          |
@@ -229,9 +239,9 @@ Cluster-level Platform-Level Interrupt Controller. Default `NDEV=31` sources and
 | `RAPT_RIQ_SIZE`      | 8         | Rename queue (RNQ) entries                 |
 | `RAPT_IIQ_SIZE`      | 8         | Dispatch queue (UOQ) entries               |
 | `RAPT_ROB_SIZE`      | 64        | Reorder buffer entries                     |
-| `RAPT_RS_SIZE`       | 8         | ALU issue queue (ALQ) entries, shared by ALU-A/ALU-B |
+| `RAPT_RS_SIZE`       | 8         | ALU issue queue (ALQ) entries, shared by ALU-CSR/ALU |
 | `RAPT_IOQ_SIZE`      | 8         | In-order memory queue entries              |
-| `BRQ_SIZE` (param)   | 4         | BRU issue queue entries                    |
+| `BRQ_SIZE` (param)   | 4         | Branch issue queue entries                 |
 | `MDQ_SIZE` (param)   | 4         | MUL/DIV issue queue entries                |
 | `RAPT_SQ_SIZE`       | 16        | Unified store queue entries                |
 | `RAPT_L1D_LINE_LEN`  | 4 / 3     | RV32: 16 words/line; RV64: 8 words/line    |

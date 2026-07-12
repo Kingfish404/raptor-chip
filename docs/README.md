@@ -27,7 +27,7 @@ Repository: <https://github.com/Kingfish404/raptor-chip>
 | ROB / RS / IOQ / SQ  | 64 / 8 / 8 / 16                                                                                         |
 | PRF                  | 128 physical integer registers                                                                          |
 | BPU                  | TAGE direction predictor + 2-way BTB + 4-entry RSB                                                      |
-| L1I / L1D            | 8 KiB 2-way L1I / 4 KiB 2-way L1D, banked SRAM                                                          |
+| L1I / L1D            | 4 KiB 2-way L1I / 2 KiB 2-way L1D, banked SRAM                                                          |
 | L2                   | Optional 16 KiB direct-mapped unified cache; default config disables it as passthrough                  |
 | Bus                  | AXI4, XLEN-bit data/addr, 4-bit ID                                                                      |
 | Debug                | RISC-V Debug Module / JTAG DTM bring-up ports at cluster top                                            |

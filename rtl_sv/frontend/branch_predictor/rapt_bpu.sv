@@ -66,6 +66,19 @@ module rapt_bpu #(
   logic taken;
   logic rbtaken;
 
+`ifdef RAPT_DUAL_ISSUE
+  // Side predictor for a packet's slot-B conditional branch. Unlike the
+  // synchronous primary TAGE/BTB path, this table is read combinationally
+  // because slot B is only known after the L1I response arrives. The target
+  // remains a static branch immediate in IFU, so no second BTB port is needed.
+  logic [1:0] slot_b_pht[PHT_SIZE];
+  logic [PHT_LEN-1:0] slot_b_pht_idx;
+  logic [PHT_LEN-1:0] slot_b_pht_update_idx;
+  assign slot_b_pht_idx = ifu_bpu.slot_b_pc[PHT_LEN:1];
+  assign slot_b_pht_update_idx = cmu_bcast.rpc[PHT_LEN:1];
+  assign ifu_bpu.slot_b_taken = ifu_bpu.slot_b_query && slot_b_pht[slot_b_pht_idx][1];
+`endif
+
   logic [XLEN-1:0] rpc;
   logic [XLEN-1:0] cpc;
 
@@ -92,6 +105,19 @@ module rapt_bpu #(
   // logic is shared and lives in this wrapper.
   logic dirp_taken;
   logic dirp_update_mispred;
+  logic [GHR_LEN-1:0] dirp_read_ghr;
+  logic [PHR_LEN-1:0] dirp_read_phr;
+`ifdef RAPT_DUAL_ISSUE
+  assign dirp_read_ghr = ifu_bpu.slot_b_pred_valid
+    ? {gshare[GHR_LEN-2:0], ifu_bpu.slot_b_taken}
+    : gshare;
+  assign dirp_read_phr = ifu_bpu.slot_b_pred_valid
+    ? {phr[PHR_LEN-2:0], ifu_bpu.slot_b_pc[1]}
+    : phr;
+`else
+  assign dirp_read_ghr = gshare;
+  assign dirp_read_phr = phr;
+`endif
   assign dirp_update_mispred = cmu_bcast.ben && cmu_bcast.flush_pipe;
   // All DIRP flavors share an identical parameter list (XLEN, GHR_LEN,
   // PHR_LEN, DEPTH) and port set (`RAPT_BPU_DIRP_PORTS`), so the only
@@ -116,8 +142,8 @@ module rapt_bpu #(
       .reset         (reset),
       .ren           (ifu_bpu.pc_update),
       .raddr         (ifu_bpu.nextpc),
-      .r_ghr         (gshare),
-      .r_phr         (phr),
+      .r_ghr         (dirp_read_ghr),
+      .r_phr         (dirp_read_phr),
       .rd_taken      (dirp_taken),
       .update_en     (cmu_bcast.ben),
       .update_pc     (rpc),
@@ -237,6 +263,22 @@ module rapt_bpu #(
   assign ifu_bpu.taken = taken;
   assign ifu_bpu.npc = npc;
 
+`ifdef RAPT_DUAL_ISSUE
+  always_ff @(posedge clock) begin
+    if (reset || cmu_bcast.fence_time) begin
+      for (int i = 0; i < PHT_SIZE; i++) slot_b_pht[i] <= WN;
+    end else if (cmu_bcast.ben) begin
+      if (rbtaken) begin
+        if (slot_b_pht[slot_b_pht_update_idx] != ST)
+          slot_b_pht[slot_b_pht_update_idx] <= slot_b_pht[slot_b_pht_update_idx] + 1'b1;
+      end else begin
+        if (slot_b_pht[slot_b_pht_update_idx] != SN)
+          slot_b_pht[slot_b_pht_update_idx] <= slot_b_pht[slot_b_pht_update_idx] - 1'b1;
+      end
+    end
+  end
+`endif
+
   assign rpc = cmu_bcast.rpc;
   assign rbtaken = cmu_bcast.btaken;
   assign cpc = cmu_bcast.cpc;
@@ -307,6 +349,11 @@ module rapt_bpu #(
         gshare <= {rgshare[GHR_LEN-2:0], rbtaken};
         // PHR rewinds to architectural value plus this committed branch's PC bit.
         phr <= {rphr[PHR_LEN-2:0], rpc[1]};
+    `ifdef RAPT_DUAL_ISSUE
+      end else if (ifu_bpu.slot_b_pred_valid) begin
+        gshare <= {gshare[GHR_LEN-2:0], ifu_bpu.slot_b_taken};
+        phr <= {phr[PHR_LEN-2:0], ifu_bpu.slot_b_pc[1]};
+    `endif
       end else if (pred_valid && is_b && btb_tag_match) begin
         gshare <= {gshare[GHR_LEN-2:0], btaken};
         // Shift in PC bit on each speculative COND prediction.

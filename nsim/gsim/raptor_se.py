@@ -90,35 +90,47 @@ from m5.objects import (
     BranchPredictor,
     Cache,
     Clint,
+    FUPool,
     GshareBP,
     HiFiveBase,
+    IntALU,
+    IntMultDiv,
     L2XBar,
     LTAGE,
     LocalBP,
+    FP_ALU,
+    FP_MultDiv,
+    Matrix_Unit,
     MultiperspectivePerceptron8KB,
     MultiperspectivePerceptron64KB,
     MultiperspectivePerceptronTAGE8KB,
     MultiperspectivePerceptronTAGE64KB,
     Plic,
+    PredALU,
     Process,
+    RdWrPort,
+    ReadPort,
     ReturnAddrStack,
     RiscvO3CPU,
     RiscvISA,
     RiscvSystem,
     RiscvRTC,
     RiscvTimingSimpleCPU,
+    SIMD_Unit,
     Root,
     SEWorkload,
     SimpleBTB,
     SimpleIndirectPredictor,
     SimpleMemory,
     SrcClockDomain,
+    System_Unit,
     SystemXBar,
     TAGE,
     TAGE_SC_L_8KB,
     TAGE_SC_L_64KB,
     TournamentBP,
     VoltageDomain,
+    WritePort,
 )
 from m5.objects.IQUnit import IQUnit
 from m5.params import NULL
@@ -527,6 +539,8 @@ def build_o3_cpu(
     cpu_id: int = 0,
     sim: dict | None = None,
     storeset: bool = False,
+    rtl_execution_resources: bool = False,
+    fetch_queue_size: int | None = None,
 ) -> RiscvO3CPU:
     """Build a RiscvO3CPU configured to match raptor-chip microarchitecture.
 
@@ -557,6 +571,8 @@ def build_o3_cpu(
     #   we model both as a single 16-entry queue. Performance-neutral for
     #   most workloads; validated against coremark baseline.
     cpu.fetchBufferSize = u.get("fetch_buffer_size", u["line_bytes"])
+    if fetch_queue_size is not None:
+        cpu.fetchQueueSize = fetch_queue_size
     cpu.fetchWidth = u["fetch_w"]
     cpu.decodeWidth = u["decode_w"]
     cpu.renameWidth = u["rename_w"]
@@ -571,6 +587,31 @@ def build_o3_cpu(
     cpu.LQEntries = u["lq"]
     cpu.SQEntries = u["sq"]
     cpu.instQueues = [IQUnit(numEntries=u["iq"])]
+    if rtl_execution_resources:
+        # Preserve the default pool's non-integer capabilities, while matching
+        # Raptor's two ALU pipes, one MULDIV pipe, and one L1D request path.
+        cpu.instQueues = [
+            IQUnit(
+                numEntries=u["iq"],
+                fuPool=FUPool(
+                    FUList=[
+                        IntALU(count=2),
+                        IntMultDiv(count=1),
+                        FP_ALU(),
+                        FP_MultDiv(),
+                        ReadPort(),
+                        SIMD_Unit(),
+                        Matrix_Unit(),
+                        System_Unit(),
+                        PredALU(),
+                        WritePort(),
+                        RdWrPort(count=1),
+                    ]
+                ),
+            )
+        ]
+        cpu.cacheLoadPorts = 1
+        cpu.cacheStorePorts = 1
     cpu.branchPred = build_branch_pred(u, sim or DEFAULT_SIM_CFG)
     if not storeset:
         # C6: Memory model alignment.
@@ -733,6 +774,23 @@ def main(argv: list[str] | None = None) -> int:
         help="enable gem5's StoreSet load speculation (default: disabled to match RTL)",
     )
     ap.add_argument(
+        "--rtl-execution-resources",
+        action="store_true",
+        help=(
+            "use 2 integer ALUs, 1 MULDIV, and one load/store request port "
+            "instead of gem5's broader default FUPool"
+        ),
+    )
+    ap.add_argument(
+        "--fetch-queue-size",
+        type=int,
+        default=None,
+        help=(
+            "override gem5's per-thread fetch queue depth (default: 32); "
+            "use a small value to measure frontend-buffer decoupling"
+        ),
+    )
+    ap.add_argument(
         "--mshrs",
         type=int,
         default=1,
@@ -849,6 +907,8 @@ def main(argv: list[str] | None = None) -> int:
     args.clk_freq    = sim["clk_freq"]
     args.mem_size    = sim["mem_size"]
     args.mem_latency = sim["mem_latency"]
+    sim["rtl_execution_resources"] = args.rtl_execution_resources
+    sim["fetch_queue_size"] = args.fetch_queue_size
 
     print(f"[raptor_se] preset={args.preset} svh={svh}")
     if args.json_config:
@@ -900,7 +960,12 @@ def main(argv: list[str] | None = None) -> int:
     # CPU
     if args.cpu == "o3":
         system.cpu = build_o3_cpu(
-            u, rv64=args.rv64, sim=sim, storeset=args.storeset
+            u,
+            rv64=args.rv64,
+            sim=sim,
+            storeset=args.storeset,
+            rtl_execution_resources=args.rtl_execution_resources,
+            fetch_queue_size=args.fetch_queue_size,
         )
     else:
         system.cpu = RiscvTimingSimpleCPU(

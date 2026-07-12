@@ -2,9 +2,13 @@
 `include "rapt_if.svh"
 `include "rapt_soc.svh"
 
+`ifndef RAPT_L1I_REFILL_WORDS
+`define RAPT_L1I_REFILL_WORDS 8
+`endif
+
 module rapt_l1i #(
     parameter int XLEN = `RAPT_XLEN,
-    parameter unsigned IFQ_SIZE = 2,
+  parameter unsigned IFQ_SIZE = `RAPT_L1I_REFILL_WORDS,
     parameter int L1I_LINE_LEN = `RAPT_L1I_LINE_LEN,
     parameter bit [`RAPT_L1I_LEN:0] L1I_LINE_SIZE = 2 ** L1I_LINE_LEN,
     parameter int L1I_LEN = `RAPT_L1I_LEN,
@@ -32,6 +36,28 @@ module rapt_l1i #(
   } l1i_state_t;
 
   l1i_state_t l1i_state;
+
+  localparam int unsigned LineWords = int'(L1I_LINE_SIZE);
+  // Never permit a refill to cross the configured cache-line boundary. This
+  // keeps VFLAGS experiments safe for the 16B small/formal presets too.
+  localparam int unsigned RefillWords = (`RAPT_L1I_REFILL_WORDS < LineWords)
+                                     ? `RAPT_L1I_REFILL_WORDS : LineWords;
+  localparam int unsigned RefillIdxW = (RefillWords <= 1) ? 1 : $clog2(RefillWords);
+  localparam int unsigned RefillBytes = RefillWords * 4;
+  logic [RefillIdxW-1:0] l1i_fill_issue_idx;
+
+  // Simulation PMU probes. Registered alongside the IFU's probes so C++ can
+  // attribute no-response cycles without relying on a post-update FSM state.
+  /* verilator lint_off UNUSEDSIGNAL */
+  logic pmu_l1i_refill_active;
+  logic pmu_l1i_sram_warmup;
+  logic pmu_l1i_tag_miss;
+  logic pmu_l1i_nextword_miss;
+  logic pmu_l1i_refill_start_line_miss;
+  logic pmu_l1i_refill_start_current_hole;
+  logic pmu_l1i_refill_start_next_line_miss;
+  logic pmu_l1i_refill_start_next_hole;
+  /* verilator lint_on UNUSEDSIGNAL */
 
   /* verilator lint_off UNUSEDSIGNAL */
   logic raddr_valid;
@@ -100,6 +126,18 @@ module rapt_l1i #(
   logic fetch_addr_valid;
   logic wait_invalid;
 
+  // A predicted target can hide the synchronous data-SRAM latency by using
+  // the next read slot. This is bare-mode only: under translation L1I owns
+  // physical-address formation, so an IFU virtual target is not a valid SRAM
+  // hint. The read is side-effect-free and never allocates or requests data.
+  logic target_read_ahead;
+  logic [L1I_LEN-1:0] sram_read_idx;
+  logic [L1I_LEN-1:0] sram_read_idx_next;
+  logic [L1I_LEN-1:0] sram_read_idx_next4;
+  logic [L1I_LINE_LEN-1:0] sram_read_offset;
+  logic [L1I_LINE_LEN-1:0] sram_read_offset_next;
+  logic sram_read_half;
+
   logic mmu_en;
   logic tlb_hit;
   logic [XLEN-1:10] itlb_ptag;
@@ -149,6 +187,7 @@ module rapt_l1i #(
   // bits feed nothing because the SRAM banks are word-aligned by construction.
   /* verilator lint_off UNUSEDSIGNAL */
   logic [XLEN-1:0] pc_ifu_next4;
+  logic [XLEN-1:0] pc_ifu_next6;
   /* verilator lint_on UNUSEDSIGNAL */
   logic [L1I_LEN-1:0] addr_idx_next4;
 
@@ -162,6 +201,7 @@ module rapt_l1i #(
   logic pmp_fetch_fault;
 
   assign pc_ifu_next4 = pc_ifu + 4;
+  assign pc_ifu_next6 = pc_ifu + 6;
   assign addr_idx_next4 = pc_ifu_next4[L1I_LEN+L1I_LINE_LEN+2-1:L1I_LINE_LEN+2];
 
   assign tlb_offset = ifu_l1i.pc[11:0];
@@ -182,13 +222,29 @@ module rapt_l1i #(
 
   assign fetch_addr_valid = csr_bcast.immu_en || rapt_pkg::addr_cacheable(pc_ifu);
   assign raddr_valid = csr_bcast.immu_en || rapt_pkg::addr_cacheable(l1i_addr);
+  assign target_read_ahead = ifu_l1i.prefetch_valid && !mmu_en
+                          && !invalid_l1i && !wait_invalid
+                          && rapt_pkg::addr_cacheable(ifu_l1i.prefetch_pc);
+  assign sram_read_idx = target_read_ahead
+                       ? ifu_l1i.prefetch_pc[L1I_LEN+L1I_LINE_LEN+2-1:L1I_LINE_LEN+2]
+                       : pc_ifu[L1I_LEN+L1I_LINE_LEN+2-1:L1I_LINE_LEN+2];
+  assign sram_read_offset = target_read_ahead
+                          ? ifu_l1i.prefetch_pc[L1I_LINE_LEN+1:2]
+                          : pc_ifu[L1I_LINE_LEN+1:2];
+  assign sram_read_half = target_read_ahead ? ifu_l1i.prefetch_pc[1] : pc_ifu[1];
+  // +2 crosses into the next word only from an upper-halfword PC; +4
+  // always advances one word. Carry into the set index occurs at line end.
+  assign sram_read_offset_next = sram_read_offset + L1I_LINE_LEN'(sram_read_half);
+  assign sram_read_idx_next = sram_read_idx
+                             + L1I_LEN'(sram_read_half && (&sram_read_offset));
+  assign sram_read_idx_next4 = sram_read_idx + L1I_LEN'(&sram_read_offset);
 
   // Pipeline tracking: valid address was presented in previous cycle
   logic addr_valid_r;
   always_ff @(posedge clock) begin
     if (reset) addr_valid_r <= 1'b0;
     else addr_valid_r <= fetch_addr_valid && !invalid_l1i && !wait_invalid
-                        && (l1i_state == IDLE || l1i_state == RD_A);
+                        && (l1i_state == IDLE || l1i_state == RD_A || l1i_state == FINA);
   end
 
   // --- L1I Tag Comparison (N-way set-associative, line-level tags) ---
@@ -283,14 +339,17 @@ module rapt_l1i #(
   // Bus mux: PTW takes priority over cache fill
   assign l1i_bus.araddr = ptw_arvalid
     ? ptw_araddr
-    : (l1i_state == RD_0)
-      ? (l1i_addr & ~'h4)
-      : (l1i_addr | 'h4);
+    : ifu_sdram_arburst
+      ? ((l1i_state == RD_0) ? (l1i_addr & ~'h4) : (l1i_addr | 'h4))
+      : (RefillWords == 2)
+        ? ((l1i_state == RD_0) ? (l1i_addr & ~'h4) : (l1i_addr | 'h4))
+        : ((l1i_addr & ~XLEN'(RefillBytes - 1))
+           + (XLEN'(l1i_fill_issue_idx) << 2));
   assign l1i_bus.arvalid = ptw_arvalid
     ? !pmp_iptw_fault
-    : raddr_valid && (ifu_sdram_arburst
-      ? (l1i_state == RD_0)
-      : (l1i_state == RD_0 || l1i_state == RD_1));
+    : raddr_valid && ((ifu_sdram_arburst || (RefillWords == 2))
+      ? (l1i_state == RD_0 || (!ifu_sdram_arburst && l1i_state == RD_1))
+      : (l1i_state == RD_0));
 
   assign ifu_sdram_arburst = (`RAPT_I_SDRAM_ARBURST)
     && (l1i_addr >= 'ha0000000)
@@ -417,11 +476,12 @@ module rapt_l1i #(
   // SRAM address routing (shared across all ways)
   //
   // Three-tier pre-read strategy for zero-bubble sequential fetch at both
-  // +2 and +4 byte strides:
-  //   - Bank matching addr_offset      -> reads addr_idx      (current fetch)
-  //   - Bank matching addr_offset_next -> reads addr_idx_next (+2 lookahead,
+  // +2 and +4 byte strides. On an accepted bare-mode predicted target,
+  // `sram_read_pc` selects that target instead of the current sequential PC:
+  //   - Bank matching read offset      -> reads read index      (current/target)
+  //   - Bank matching read offset +2   -> reads next index (+2 lookahead,
   //                                       needed for 32-bit insn spanning)
-  //   - All remaining banks            -> read addr_idx_next4 (+4 lookahead,
+  //   - All remaining banks            -> read next4 index (+4 lookahead,
   //                                       covers 32-bit insn stride and
   //                                       dual C-pair stride)
   //
@@ -430,11 +490,11 @@ module rapt_l1i #(
   generate
     for (genvar gi = 0; gi < L1I_LINE_SIZE; gi++) begin : gen_addr
       assign data_bank_raddr[gi] =
-          (addr_offset == L1I_LINE_LEN'(gi))
-          ? addr_idx
-          : (addr_offset_next == L1I_LINE_LEN'(gi))
-            ? addr_idx_next
-            : addr_idx_next4;
+          (sram_read_offset == L1I_LINE_LEN'(gi))
+          ? sram_read_idx
+          : (sram_read_offset_next == L1I_LINE_LEN'(gi))
+            ? sram_read_idx_next
+            : sram_read_idx_next4;
     end
   endgenerate
 
@@ -573,32 +633,53 @@ module rapt_l1i #(
   // When pc[1]=0: bank[addr_offset+1] holds the word at pc+4.
   // When pc[1]=1: bank[addr_offset_next] already has pc+2..pc+5; reuse l1i_word_next.
   logic [L1I_LINE_LEN-1:0] addr_offset_n1;
+  logic [L1I_LINE_LEN-1:0] addr_offset_n2;
   logic [L1I_N_WAYS-1:0] way_hit_n1;
+  logic [L1I_N_WAYS-1:0] way_hit_n2;
   /* verilator lint_off UNUSEDSIGNAL */
   logic [L1iWayW-1:0] hit_n1_way_sel;
+  logic [L1iWayW-1:0] hit_n2_way_sel;
   /* verilator lint_on UNUSEDSIGNAL */
   logic hit_n1;
+  logic hit_n2;
   logic [31:0] l1i_word_n1;
+  logic [31:0] l1i_word_n2;
   logic sram_n1_ready;
+  logic sram_n2_ready;
+  logic n2_same_line_as_next4;
 
   assign addr_offset_n1 = addr_offset + L1I_LINE_LEN'(1);
+  assign addr_offset_n2 = addr_offset + L1I_LINE_LEN'(2);
 
   generate
     for (genvar w = 0; w < L1I_N_WAYS; w++) begin : gen_way_hit_n1
       assign way_hit_n1[w] = tag_valid_next4[w]
         && (tag_rdata_next4[w] == addr_tag_next4)
         && l1i_valid[w][addr_idx_next4][addr_offset_n1];
+      assign way_hit_n2[w] = tag_valid_next4[w]
+        && (tag_rdata_next4[w] == addr_tag_next4)
+        && l1i_valid[w][addr_idx_next4][addr_offset_n2];
     end
   endgenerate
 
   always_comb begin
     hit_n1_way_sel = '0;
     for (int w = int'(L1I_N_WAYS) - 1; w >= 0; w--) if (way_hit_n1[w]) hit_n1_way_sel = L1iWayW'(w);
+    hit_n2_way_sel = '0;
+    for (int w = int'(L1I_N_WAYS) - 1; w >= 0; w--) if (way_hit_n2[w]) hit_n2_way_sel = L1iWayW'(w);
   end
 
   assign hit_n1 = |way_hit_n1;
+  assign hit_n2 = |way_hit_n2;
   assign l1i_word_n1 = data_bank_rdata[hit_n1_way_sel][addr_offset_n1];
+  assign l1i_word_n2 = data_bank_rdata[hit_n2_way_sel][addr_offset_n2];
   assign sram_n1_ready = addr_valid_r && (data_bank_raddr_d1[addr_offset_n1] == addr_idx_next4);
+  assign sram_n2_ready = addr_valid_r && (data_bank_raddr_d1[addr_offset_n2] == addr_idx_next4);
+  // The existing extra tag/data mirror is addressed by pc+4. At the one
+  // boundary where pc+6 enters a new line, defer the pair until a future
+  // third-tag-mirror implementation can prove that line's hit and data.
+  assign n2_same_line_as_next4 = pc_ifu_next4[XLEN-1:L1I_LINE_LEN+2]
+                              == pc_ifu_next6[XLEN-1:L1I_LINE_LEN+2];
 
   assign ifu_l1i.inst_n1 = pc_ifu[1] ? l1i_word_next : l1i_word_n1;
 
@@ -636,10 +717,40 @@ module rapt_l1i #(
       .fault         (pmp_n1_fetch_fault)
   );
 
+  // For an unaligned R32+R32 pair, slot B also consumes the halfword at
+  // pc+6. Gate the third-word lookahead with an execute-permission check.
+  logic pmp_n2_fetch_fault;
+  rapt_pmp #(
+      .XLEN(XLEN)
+  ) u_pmp_fetch_n2 (
+      .addr          (pc_ifu + XLEN'(6)),
+      .size_m1       (4'd1),
+      .priv          (csr_bcast.priv),
+      .op_r          (1'b0),
+      .op_w          (1'b0),
+      .op_x          (1'b1),
+      .pmp_napot_mask(csr_bcast.pmp_napot_mask),
+      .pmp_napot_base(csr_bcast.pmp_napot_base),
+      .pmp_tor_lo    (csr_bcast.pmp_tor_lo),
+      .pmp_tor_hi    (csr_bcast.pmp_tor_hi),
+      .pmp_cfg_r     (csr_bcast.pmp_cfg_r),
+      .pmp_cfg_w     (csr_bcast.pmp_cfg_w),
+      .pmp_cfg_x     (csr_bcast.pmp_cfg_x),
+      .pmp_cfg_l     (csr_bcast.pmp_cfg_l),
+      .pmp_mode_off  (csr_bcast.pmp_mode_off),
+      .pmp_mode_tor  (csr_bcast.pmp_mode_tor),
+      .pmp_mode_na4  (csr_bcast.pmp_mode_na4),
+      .pmp_mode_napot(csr_bcast.pmp_mode_napot),
+      .fault         (pmp_n2_fetch_fault)
+  );
+
   assign ifu_l1i.inst_n1_valid = !pmp_n1_fetch_fault
     && (pc_ifu[1]
       ? (hit_next && (data_bank_raddr_d1[addr_offset_next] == addr_idx_next))
       : (hit_n1 && sram_n1_ready));
+  assign ifu_l1i.inst_n2 = l1i_word_n2;
+  assign ifu_l1i.inst_n2_valid = !pmp_n2_fetch_fault && n2_same_line_as_next4
+                               && hit_n2 && sram_n2_ready;
 `endif
 
   // PTW request: TLB miss in IDLE when MMU enabled and address is nonzero
@@ -722,6 +833,7 @@ module rapt_l1i #(
       end
       replace_bit <= 0;
       fill_way_r <= 0;
+      l1i_fill_issue_idx <= '0;
       ifq_tail <= 0;
       wait_invalid <= 1'b0;
     end else begin
@@ -750,6 +862,7 @@ module rapt_l1i #(
                       l1i_state <= RD_A;
                     end else if (!hit_next) begin
                       l1i_addr   <= pc_ifu_next;
+                      l1i_fill_issue_idx <= '0;
                       l1i_state  <= RD_0;
                       fill_way_r <= fill_way_next_calc;
                     end
@@ -780,10 +893,12 @@ module rapt_l1i #(
                 if (sram_data_ready) begin
                   if (!hit) begin
                     l1i_addr   <= pc_ifu;
+                      l1i_fill_issue_idx <= '0;
                     l1i_state  <= RD_0;
                     fill_way_r <= fill_way_calc;
                   end else if (!hit_next) begin
                     l1i_addr   <= pc_ifu_next;
+                      l1i_fill_issue_idx <= '0;
                     l1i_state  <= RD_0;
                     fill_way_r <= fill_way_next_calc;
                   end
@@ -835,10 +950,12 @@ module rapt_l1i #(
           end else if (sram_data_ready) begin
             if (!hit) begin
               l1i_addr   <= pc_ifu;
+              l1i_fill_issue_idx <= '0;
               l1i_state  <= RD_0;
               fill_way_r <= fill_way_calc;
             end else if (!hit_next) begin
               l1i_addr   <= pc_ifu_next;
+              l1i_fill_issue_idx <= '0;
               l1i_state  <= RD_0;
               fill_way_r <= fill_way_next_calc;
             end else begin
@@ -860,11 +977,16 @@ module rapt_l1i #(
               ifq_valid <= '0;
               l1i_state <= TRAP;
             end else begin
-              l1i_state <= RD_1;
-
               ifq_raddr[ifq_head] <= l1i_bus.araddr;
               ifq_valid[ifq_head] <= 1'b1;
               ifq_head <= ifq_head + 1;
+              if (ifu_sdram_arburst || (RefillWords == 2)) begin
+                l1i_state <= RD_1;
+              end else if (l1i_fill_issue_idx == RefillIdxW'(RefillWords - 1)) begin
+                l1i_state <= FINA;
+              end else begin
+                l1i_fill_issue_idx <= l1i_fill_issue_idx + 1'b1;
+              end
             end
           end
         end
@@ -925,6 +1047,64 @@ module rapt_l1i #(
       end
       ifq_valid[ifq_tail] <= 0;
       ifq_tail <= ifq_tail + 1;
+    end
+  end
+
+  // Attribute the same pre-edge L1I conditions observed by IFU. The four
+  // causes below are mutually exclusive when the cache is in IDLE; refill is
+  // kept separate because it spans the multi-cycle miss/PTW FSM.
+  always_ff @(posedge clock) begin
+    if (reset) begin
+      pmu_l1i_refill_active <= 1'b0;
+      pmu_l1i_sram_warmup <= 1'b0;
+      pmu_l1i_tag_miss <= 1'b0;
+      pmu_l1i_nextword_miss <= 1'b0;
+      pmu_l1i_refill_start_line_miss <= 1'b0;
+      pmu_l1i_refill_start_current_hole <= 1'b0;
+      pmu_l1i_refill_start_next_line_miss <= 1'b0;
+      pmu_l1i_refill_start_next_hole <= 1'b0;
+    end else begin
+      pmu_l1i_refill_active <= (l1i_state == RD_A) || (l1i_state == RD_0)
+                            || (l1i_state == RD_1) || (l1i_state == FINA)
+                            || (l1i_state == PTWAIT);
+      pmu_l1i_sram_warmup <= (l1i_state == IDLE) && fetch_addr_valid
+                           && !invalid_l1i && !wait_invalid
+                           && (!mmu_en || tlb_hit) && !pmp_fetch_fault
+                           && hit && (hit_next || is_c) && !sram_data_ready;
+      pmu_l1i_tag_miss <= (l1i_state == IDLE) && fetch_addr_valid
+                        && !invalid_l1i && !wait_invalid
+                        && (!mmu_en || tlb_hit) && !pmp_fetch_fault
+                        && sram_data_ready && !hit;
+      pmu_l1i_nextword_miss <= (l1i_state == IDLE) && fetch_addr_valid
+                             && !invalid_l1i && !wait_invalid
+                             && (!mmu_en || tlb_hit) && !pmp_fetch_fault
+                             && sram_data_ready && hit && !is_c && !hit_next;
+      // These are the exact two conditions that send the IDLE FSM to RD_0.
+      // Split them by whether a matching line tag already exists: a matching
+      // tag with an invalid word is a partial-fill sector hole; no matching
+      // tag is a cold/conflict line miss.
+      pmu_l1i_refill_start_line_miss <= (l1i_state == IDLE) && fetch_addr_valid
+                  && !invalid_l1i && !wait_invalid
+                  && !cmu_bcast.flush_pipe
+                  && (!mmu_en || tlb_hit) && !pmp_fetch_fault
+                  && sram_data_ready && !hit && !(|way_tag_match);
+      pmu_l1i_refill_start_current_hole <= (l1i_state == IDLE) && fetch_addr_valid
+                     && !invalid_l1i && !wait_invalid
+                     && !cmu_bcast.flush_pipe
+                     && (!mmu_en || tlb_hit) && !pmp_fetch_fault
+                     && sram_data_ready && !hit && (|way_tag_match);
+      pmu_l1i_refill_start_next_line_miss <= (l1i_state == IDLE) && fetch_addr_valid
+                   && !invalid_l1i && !wait_invalid
+                   && !cmu_bcast.flush_pipe
+                   && (!mmu_en || tlb_hit) && !pmp_fetch_fault
+                   && sram_data_ready && hit && !is_c && !hit_next
+                   && !(|way_tag_match_next);
+      pmu_l1i_refill_start_next_hole <= (l1i_state == IDLE) && fetch_addr_valid
+                  && !invalid_l1i && !wait_invalid
+                  && !cmu_bcast.flush_pipe
+                  && (!mmu_en || tlb_hit) && !pmp_fetch_fault
+                  && sram_data_ready && hit && !is_c && !hit_next
+                  && (|way_tag_match_next);
     end
   end
 

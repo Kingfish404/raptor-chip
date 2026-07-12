@@ -1,0 +1,18 @@
+diff --git a/src/nettle-sha256/nettle-sha256.c b/src/nettle-sha256/nettle-sha256.c
+index c583894..98b49d0 100644
+--- a/src/nettle-sha256/nettle-sha256.c
++++ b/src/nettle-sha256/nettle-sha256.c
+@@ -20,8 +20,12 @@
+ 
+ /* This scale factor will be changed to equalise the runtime of the
+    benchmarks. */
+-#define LOCAL_SCALE_FACTOR 562
++#ifndef NETTLE_SHA256_LOCAL_SCALE
++#define NETTLE_SHA256_LOCAL_SCALE 562
++#endif
++
++#define LOCAL_SCALE_FACTOR NETTLE_SHA256_LOCAL_SCALE
+ 
+ // From nettle/nettle-types.h
+ 
+ /* Hash algorithms */

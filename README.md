@@ -55,8 +55,8 @@ flowchart TD
   subgraph BE["Backend (dual-issue / dual-commit) · DI-IS/EX-WB-CM"]
     ROU["ROU (UOQ + ROB 64)"]
     RT{{"EXU dispatch router"}}
-    PAB["ALQ 8: ALU-A + Sys | ALU-B (2 issue ports)"]
-    PBR["BRQ 4: BRU"]
+    PAB["ALQ 8: ALU-CSR | ALU (2 issue ports)"]
+    PBR["BRQ 4: Branch"]
     PM["MDQ 4: MUL/DIV"]
     PQ["IOQ 8: mem"]
     CDB(("CDB ×5"))

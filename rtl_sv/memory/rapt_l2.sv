@@ -15,7 +15,8 @@
  * --- Design summary (RAPT_L2_EN) ---
  *
  *   * Direct-mapped (L2_N_WAYS=1 supported today; >1 reserved).
- *   * Line size  = 1 << L2_LINE_LEN words (default 4 words / 16 B @ RV32).
+ *   * Line size  = `RAPT_CACHE_LINE_BYTES bytes, expressed internally as
+ *     1 << L2_LINE_LEN XLEN-wide words.
  *   * Sets       = 1 << L2_LEN (default 128 sets -> 8 KB @ RV32 / 16 KB @ RV64).
  *   * Tag + valid stored in flops; data stored in SRAM-style word banks so
  *     FPGA builds infer local RAM instead of a 100k+ FF data array.
@@ -48,7 +49,7 @@
 `define RAPT_L2_LEN 7
 `endif
 `ifndef RAPT_L2_LINE_LEN
-`define RAPT_L2_LINE_LEN 2
+`define RAPT_L2_LINE_LEN $clog2(`RAPT_CACHE_LINE_BYTES / (`RAPT_XLEN / 8))
 `endif
 `ifndef RAPT_L2_N_WAYS
 `define RAPT_L2_N_WAYS 1

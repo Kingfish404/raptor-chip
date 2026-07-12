@@ -20,7 +20,7 @@
 //
 // Responsibilities:
 //   * Hold dispatched uops with captured operands (data-capture scheduler)
-//   * Wake operands from the slow CDB ports (ALU-A / ALU-B / MEM / MULDIV)
+//   * Wake operands from the slow CDB ports (ALU-CSR / ALU / MEM / MULDIV)
 //   * Fast load-use: tag-only early wakeup from `load_fast`, confirmed (or
 //     re-busied) by the MEM broadcast one cycle later; issue-time data
 //     bypass from `exu_ioq_bcast.result`
@@ -96,7 +96,7 @@ module rapt_exu_iq #(
   logic [   XLEN-1:0] iq_cause   [IQ_SIZE];
 
   // === Unified CDB view for operand wakeup ===
-  // [0]=MEM [1]=ALU-A [2]=ALU-B [3]=MULDIV. Rename guarantees a unique
+  // [0]=MEM [1]=ALU-CSR [2]=ALU [3]=MULDIV. Rename guarantees a unique
   // producer per physical register, so port order is don't-care; the fast
   // load-use tag path is layered on top (mutually exclusive per tag).
   localparam int unsigned NWB = 4;

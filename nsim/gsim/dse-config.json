@@ -10,18 +10,18 @@
     "Run from nsim/gsim: make coremark JSON_CONFIG=dse-config.json"
   ],
   "executable_name": "raptor-gem5-se",
-  "block_size": 16,
+  "block_size": 64,
   "page_size": 4096,
   "heartbeat_frequency": 10000000,
   "num_cores": 1,
   "ooo_cpu": [
     {
       "frequency": 1000,
-      "ifetch_buffer_size": 16,
-      "register_file_size": 64,
-      "rob_size": 16,
-      "lq_size": 8,
-      "sq_size": 8,
+      "ifetch_buffer_size": 64,
+      "register_file_size": 128,
+      "rob_size": 64,
+      "lq_size": 16,
+      "sq_size": 16,
       "fetch_width": 2,
       "decode_width": 2,
       "rename_width": 2,
@@ -37,8 +37,8 @@
     }
   ],
   "L1I": {
-    "sets": 64,
-    "ways": 1,
+    "sets": 32,
+    "ways": 2,
     "rq_size": 1,
     "wq_size": 1,
     "pq_size": 0,
@@ -51,7 +51,7 @@
     "prefetcher": "no"
   },
   "L1D": {
-    "sets": 32,
+    "sets": 16,
     "ways": 2,
     "rq_size": 1,
     "wq_size": 1,
@@ -75,7 +75,7 @@
     "counter_bits": 2
   },
   "RAS": {
-    "entries": 8,
+    "entries": 4,
     "enabled": true
   },
   "indirect_branch_predictor": {
@@ -101,8 +101,8 @@
       "counter_bits": 2
     },
     "ras": {
-      "entries": 8,
-      "enabled": false
+      "entries": 4,
+      "enabled": true
     },
     "capacity": {
       "budget_bits": 5504

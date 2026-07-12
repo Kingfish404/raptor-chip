@@ -18,9 +18,27 @@ interface ifu_bpu_if #(
 
   logic [XLEN-1:0] npc;
   logic taken;
+`ifdef RAPT_DUAL_ISSUE
+  // Slot-B conditional prediction uses a small independent combinational
+  // direction table. Its target is derived statically by IFU.
+  logic            slot_b_query;
+  logic [XLEN-1:0] slot_b_pc;
+  logic            slot_b_pred_valid;
+  logic            slot_b_taken;
+`endif
 
-  modport out(output pc, nextpc, pc_update, input npc, taken);
-  modport in(input pc, nextpc, pc_update, output npc, taken);
+  modport out(output pc, nextpc, pc_update,
+`ifdef RAPT_DUAL_ISSUE
+              output slot_b_query, slot_b_pc, slot_b_pred_valid,
+              input slot_b_taken,
+`endif
+              input npc, taken);
+  modport in(input pc, nextpc, pc_update,
+`ifdef RAPT_DUAL_ISSUE
+             input slot_b_query, slot_b_pc, slot_b_pred_valid,
+             output slot_b_taken,
+`endif
+             output npc, taken);
 endinterface
 
 // IDU -> BPU BTB training side-channel.
@@ -66,25 +84,34 @@ interface ifu_l1i_if #(
 );
   logic [XLEN-1:0] pc;
   logic invalid;
+  // An accepted predicted non-sequential next PC. L1I uses this only as a
+  // data-SRAM read-ahead hint; it neither changes cache state nor issues a
+  // request, so incorrect predictions remain architecturally harmless.
+  logic [XLEN-1:0] prefetch_pc;
+  logic            prefetch_valid;
 
   logic [31:0] inst_n0;
 `ifdef RAPT_DUAL_ISSUE
   logic [31:0] inst_n1;       // Next 4-byte-aligned word for dual-issue
   logic        inst_n1_valid; // inst_n1 is tag-matched and SRAM-ready
+  // Third word needed only for an unaligned R32+R32 pair. It contains the
+  // upper halfword of slot B at pc+6.
+  logic [31:0] inst_n2;
+  logic        inst_n2_valid;
 `endif
   logic trap;
   logic [XLEN-1:0] cause;
   logic [XLEN-1:0] tval;
   logic valid;
 
-  modport master(output pc, invalid, input inst_n0,
+  modport master(output pc, invalid, prefetch_pc, prefetch_valid, input inst_n0,
 `ifdef RAPT_DUAL_ISSUE
-    input inst_n1, inst_n1_valid,
+  input inst_n1, inst_n1_valid, inst_n2, inst_n2_valid,
 `endif
     input trap, cause, tval, valid);
-  modport slave(input pc, invalid, output inst_n0,
+  modport slave(input pc, invalid, prefetch_pc, prefetch_valid, output inst_n0,
 `ifdef RAPT_DUAL_ISSUE
-    output inst_n1, inst_n1_valid,
+  output inst_n1, inst_n1_valid, inst_n2, inst_n2_valid,
 `endif
     output trap, cause, tval, valid);
 endinterface

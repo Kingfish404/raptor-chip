@@ -20,6 +20,7 @@
 SHELL := /bin/bash
 
 _THIS_DIR   := $(dir $(lastword $(MAKEFILE_LIST)))
+_THIS_MAKEFILE := $(abspath $(lastword $(MAKEFILE_LIST)))
 LITEX_DIR   := $(abspath $(_THIS_DIR)/../..)
 RAPTOR_HOME := $(abspath $(LITEX_DIR)/../..)
 
@@ -46,11 +47,18 @@ ABI  := ilp32
 # Override via `make build SYS_CLK_HZ=...` if you re-generate the SoC with
 # a different --sys-clk-freq.
 SYS_CLK_HZ ?= 50000000
+NETTLE_SHA256_LOCAL_SCALE ?= 562
 
 # ---- Directories ----
-EMBENCH_DIR  := $(_THIS_DIR)embench
-BUILD_DIR    := $(_THIS_DIR)build
-SUPPORT_DIR  := $(_THIS_DIR)support
+EMBENCH_DIR      := $(_THIS_DIR)embench
+EMBENCH_REPO     := https://github.com/embench/embench-iot.git
+EMBENCH_REV      := 09c2ed8c3b7008c95d08b038de4a3f6dc103ed70
+EMBENCH_PATCH    := $(_THIS_DIR)patches/0001-nettle-sha256-configurable-local-scale.patch
+EMBENCH_PATCH_ID := $(shell git hash-object "$(abspath $(EMBENCH_PATCH))")
+EMBENCH_PREPARED := $(EMBENCH_DIR)/.raptor-prepared-$(EMBENCH_REV)-$(EMBENCH_PATCH_ID)
+BUILD_DIR        := $(_THIS_DIR)build
+SUPPORT_DIR      := $(_THIS_DIR)support
+BUILD_CONFIG     := $(BUILD_DIR)/.build-config
 
 # ---- Benchmark list (matches app/benchmarks/embench/Makefile) ----
 BENCHMARKS := aha-mont64 crc32 depthconv edn huffbench matmult-int \
@@ -75,6 +83,7 @@ CFLAGS_COMMON := -march=$(ARCH) -mabi=$(ABI) -mcmodel=medany \
                 -DHAVE_BOARDSUPPORT_H \
                 -DGLOBAL_SCALE_FACTOR=1 -DWARMUP_HEAT=1 \
                 -DSYS_CLK_HZ=$(SYS_CLK_HZ) \
+				-DNETTLE_SHA256_LOCAL_SCALE=$(NETTLE_SHA256_LOCAL_SCALE) \
                 -Wno-unused-variable -Wno-implicit-function-declaration \
                 -Wno-incompatible-pointer-types -Wno-builtin-declaration-mismatch \
                 -I$(SUPPORT_DIR) -I$(EMBENCH_DIR)/support
@@ -84,11 +93,37 @@ LDFLAGS := -march=$(ARCH) -mabi=$(ABI) -mcmodel=medany \
            -T$(SUPPORT_DIR)/link.ld
 
 LIBGCC := $(shell $(CC) -march=$(ARCH) -mabi=$(ABI) -print-libgcc-file-name)
+CC_VERSION := $(shell $(CC) --version 2>/dev/null | head -n 1)
+LOCAL_BUILD_INPUTS_ID := $(shell { \
+	git hash-object "$(_THIS_MAKEFILE)"; \
+	find "$(abspath $(SUPPORT_DIR))" -type f -print | LC_ALL=C sort | xargs git hash-object; \
+} | git hash-object --stdin)
 
 # ---- Source fetching ----
-$(EMBENCH_DIR)/support/main.c:
+.PHONY: FORCE
+FORCE:
+
+$(EMBENCH_PREPARED): FORCE $(EMBENCH_PATCH)
 	@mkdir -p $(dir $(EMBENCH_DIR))
-	git clone --depth 1 https://github.com/embench/embench-iot.git $(EMBENCH_DIR)
+	@if [ ! -d "$(EMBENCH_DIR)/.git" ]; then \
+		git init -q "$(EMBENCH_DIR)"; \
+	fi
+	@if git -C "$(EMBENCH_DIR)" remote get-url origin >/dev/null 2>&1; then \
+		git -C "$(EMBENCH_DIR)" remote set-url origin "$(EMBENCH_REPO)"; \
+	else \
+		git -C "$(EMBENCH_DIR)" remote add origin "$(EMBENCH_REPO)"; \
+	fi
+	@if ! git -C "$(EMBENCH_DIR)" cat-file -e "$(EMBENCH_REV)^{commit}" 2>/dev/null; then \
+		git -C "$(EMBENCH_DIR)" fetch -q --depth 1 origin "$(EMBENCH_REV)"; \
+	fi
+	@git -C "$(EMBENCH_DIR)" reset --hard -q "$(EMBENCH_REV)"
+	@git -C "$(EMBENCH_DIR)" clean -fdx -q
+	@git -C "$(EMBENCH_DIR)" apply --check "$(abspath $(EMBENCH_PATCH))"
+	@git -C "$(EMBENCH_DIR)" apply "$(abspath $(EMBENCH_PATCH))"
+	@rm -f "$(EMBENCH_DIR)"/.raptor-prepared-*
+	@touch $@
+
+$(EMBENCH_DIR)/support/main.c: $(EMBENCH_PREPARED)
 
 # ==============================================================================
 # Build rules (only active after clone)
@@ -103,26 +138,56 @@ SUPPORT_OBJS := \
 	$(BUILD_DIR)/_support/main.o \
 	$(BUILD_DIR)/_support/beebsc.o
 
-$(BUILD_DIR)/_support/crt0.o: $(SUPPORT_DIR)/crt0.S
+.PHONY: print-build-config
+
+print-build-config:
+	@printf '%s\n' \
+		'BUILD_CONFIG_VERSION=2' \
+		'EMBENCH_UPSTREAM_REV=$(EMBENCH_REV)' \
+		'EMBENCH_PATCH_ID=$(EMBENCH_PATCH_ID)' \
+		'SYS_CLK_HZ=$(SYS_CLK_HZ)' \
+		'NETTLE_SHA256_LOCAL_SCALE=$(NETTLE_SHA256_LOCAL_SCALE)' \
+		'ARCH=$(ARCH)' \
+		'ABI=$(ABI)' \
+		'CC=$(CC)' \
+		'CC_VERSION=$(CC_VERSION)' \
+		'OBJCOPY=$(OBJCOPY)' \
+		'CFLAGS_COMMON=$(CFLAGS_COMMON)' \
+		'LDFLAGS=$(LDFLAGS)' \
+		'LIBGCC=$(LIBGCC)' \
+		'LOCAL_BUILD_INPUTS_ID=$(LOCAL_BUILD_INPUTS_ID)'
+
+$(BUILD_CONFIG): FORCE
+	@mkdir -p $(BUILD_DIR)
+	@tmp="$@.tmp"; \
+	$(MAKE) --no-print-directory print-build-config > "$$tmp"; \
+	if ! cmp -s "$$tmp" "$@"; then \
+		echo "[INFO] embench build configuration changed; forcing rebuild."; \
+		mv "$$tmp" "$@"; \
+	else \
+		rm -f "$$tmp"; \
+	fi
+
+$(BUILD_DIR)/_support/crt0.o: $(SUPPORT_DIR)/crt0.S $(BUILD_CONFIG)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS_COMMON) -c $< -o $@
 
-$(BUILD_DIR)/_support/minilib.o: $(SUPPORT_DIR)/minilib.c
+$(BUILD_DIR)/_support/minilib.o: $(SUPPORT_DIR)/minilib.c $(BUILD_CONFIG)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS_COMMON) -c $< -o $@
 
 # boardsupport.o is rebuilt per-bench (depends on BENCH_NAME macro), so the
 # rule below overrides this default via -include. We still have a catch-all
 # shared build to provide a symbol if a benchmark doesn't inject one.
-$(BUILD_DIR)/_support/boardsupport.o: $(SUPPORT_DIR)/boardsupport.c
+$(BUILD_DIR)/_support/boardsupport.o: $(SUPPORT_DIR)/boardsupport.c $(BUILD_CONFIG)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS_COMMON) -DBENCH_NAME=\"default\" -c $< -o $@
 
-$(BUILD_DIR)/_support/main.o: $(SUPPORT_DIR)/main.c
+$(BUILD_DIR)/_support/main.o: $(SUPPORT_DIR)/main.c $(BUILD_CONFIG)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS_COMMON) -c $< -o $@
 
-$(BUILD_DIR)/_support/beebsc.o: $(EMBENCH_DIR)/support/beebsc.c
+$(BUILD_DIR)/_support/beebsc.o: $(EMBENCH_DIR)/support/beebsc.c $(BUILD_CONFIG)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS_COMMON) -c $< -o $@
 
@@ -137,11 +202,11 @@ $(1)_ELF     := $$(BUILD_DIR)/$(1)/$(1).elf
 $(1)_BIN     := $$(BUILD_DIR)/$(1)/$(1).bin
 
 # Per-bench boardsupport.o with injected BENCH_NAME
-$$($(1)_BSO): $$(SUPPORT_DIR)/boardsupport.c
+$$($(1)_BSO): $$(SUPPORT_DIR)/boardsupport.c $(BUILD_CONFIG)
 	@mkdir -p $$(dir $$@)
 	$$(CC) $$(CFLAGS_COMMON) -DBENCH_NAME=\"$(1)\" -c $$< -o $$@
 
-$$(BUILD_DIR)/$(1)/%.o: $$($(1)_SRC_DIR)/%.c
+$$(BUILD_DIR)/$(1)/%.o: $$($(1)_SRC_DIR)/%.c $(BUILD_CONFIG)
 	@mkdir -p $$(dir $$@)
 	$$(CC) $$(CFLAGS_COMMON) -I$$($(1)_SRC_DIR) -c $$< -o $$@
 
@@ -185,8 +250,7 @@ clone: $(EMBENCH_DIR)/support/main.c ## Clone embench-iot repository
 # BENCH=<name> builds just that one benchmark; otherwise all.
 BENCH ?=
 
-build: ## Build all Embench-IoT benchmarks (BENCH=<name> for just one)
-	@$(MAKE) --no-print-directory $(EMBENCH_DIR)/support/main.c
+build: clone ## Build all Embench-IoT benchmarks (BENCH=<name> for just one)
 ifeq ($(BENCH),)
 	@$(MAKE) --no-print-directory _build
 else

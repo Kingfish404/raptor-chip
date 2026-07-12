@@ -140,22 +140,21 @@ module rapt_rou #(
   logic           [IIQ_SIZE-1:0] uoq_pv2_valid;
 
   logic uoq_enq_fire_a, uoq_deq_fire_a;
+  logic uoq_head_a_available;
+  logic uoq_tail_a_reused;
   logic sys_resume;
 `ifdef RAPT_DUAL_ISSUE
   // Dual-issue UOQ pointers
   logic [$clog2(IIQ_SIZE)-1:0] uoq_head_b, uoq_tail_b;
+  logic uoq_head_b_available;
+  logic uoq_tail_b_reused;
+  logic uoq_enq_fire_b, uoq_deq_fire_b;
 
   // Lightweight resume for pure CSR: no flush, just unblock IFU and clear drain
 
   assign uoq_head_b = uoq_head_a + 1;
   assign uoq_tail_b = uoq_tail_a + 1;
 
-  // When valid_b is set, both UOQ slots must be free to enqueue.
-  // This prevents slot A from enqueuing without slot B, avoiding duplication.
-  assign uoq_enq_fire_a  = rnu_rou.valid_a && !uoq_valid[uoq_head_a]
-      && (!rnu_rou.valid_b || !uoq_valid[uoq_head_b]);
-`else
-  assign uoq_enq_fire_a = rnu_rou.valid_a && !uoq_valid[uoq_head_a];
 `endif
 
   // Pipeline drain: serializing instructions (CSR/fence/ecall/mret/sret)
@@ -208,9 +207,6 @@ module rapt_rou #(
       && (!uoq_tail_a_is_serializing || rob_empty);
 
 `ifdef RAPT_DUAL_ISSUE
-  logic uoq_enq_fire_b, uoq_deq_fire_b;
-  assign uoq_enq_fire_b = uoq_enq_fire_a && rnu_rou.valid_b && !uoq_valid[uoq_head_b];
-
   // Track which UOQ entries are B-slots of a dual-issue pair.
   // Prevents consecutive single-issue entries from being treated as a pair.
   logic [IIQ_SIZE-1:0] uoq_is_pair;
@@ -224,6 +220,32 @@ module rapt_rou #(
       && rou_exu.ready_b;
 `endif
 
+  // A dispatch can free UOQ slots at the same clock edge as rename enqueues
+  // new uops. Treat those slots as available so a full UOQ does not inject an
+  // avoidable one-cycle backpressure bubble. Dual pairs remain atomic: B is
+  // accepted only when its specific slot is free or reclaimed this cycle.
+  assign uoq_head_a_available = !uoq_valid[uoq_head_a]
+      || (uoq_deq_fire_a && (uoq_head_a == uoq_tail_a))
+`ifdef RAPT_DUAL_ISSUE
+      || (uoq_deq_fire_b && (uoq_head_a == uoq_tail_b))
+`endif
+      ;
+`ifdef RAPT_DUAL_ISSUE
+  assign uoq_head_b_available = !uoq_valid[uoq_head_b]
+      || (uoq_deq_fire_a && (uoq_head_b == uoq_tail_a))
+      || (uoq_deq_fire_b && (uoq_head_b == uoq_tail_b));
+  assign uoq_enq_fire_a = rnu_rou.valid_a && uoq_head_a_available
+      && (!rnu_rou.valid_b || uoq_head_b_available);
+  assign uoq_enq_fire_b = uoq_enq_fire_a && rnu_rou.valid_b && uoq_head_b_available;
+  assign uoq_tail_a_reused = (uoq_enq_fire_a && (uoq_head_a == uoq_tail_a))
+      || (uoq_enq_fire_b && (uoq_head_b == uoq_tail_a));
+  assign uoq_tail_b_reused = (uoq_enq_fire_a && (uoq_head_a == uoq_tail_b))
+      || (uoq_enq_fire_b && (uoq_head_b == uoq_tail_b));
+`else
+  assign uoq_enq_fire_a = rnu_rou.valid_a && uoq_head_a_available;
+  assign uoq_tail_a_reused = uoq_enq_fire_a && (uoq_head_a == uoq_tail_a);
+`endif
+
   assign valid_a         = uoq_valid[uoq_tail_a] && !rob_entry[rob_tail_a].busy
       && !serialize_in_flight
       && !dm_haltreq_i
@@ -231,10 +253,12 @@ module rapt_rou #(
   assign ready_a = !uoq_valid[uoq_head_a];
   assign rou_exu.valid = valid_a;
 `ifdef RAPT_DUAL_ISSUE
-  // When RNU sends a dual pair (valid_b), both UOQ slots must be free.
-  assign rnu_rou.ready = !uoq_valid[uoq_head_a] && (!rnu_rou.valid_b || !uoq_valid[uoq_head_b]);
+  // When RNU sends a dual pair (valid_b), both slots must be available;
+  // same-cycle dispatch reclaim is included in the availability predicate.
+  assign rnu_rou.ready = uoq_head_a_available
+      && (!rnu_rou.valid_b || uoq_head_b_available);
 `else
-  assign rnu_rou.ready = ready_a;
+  assign rnu_rou.ready = uoq_head_a_available;
 `endif
 
 `ifdef RAPT_DUAL_ISSUE
@@ -246,8 +270,8 @@ module rapt_rou #(
   // ================================================================
   //  Unified CDB view for dispatch-side bypass / UOQ forwarding.
   //
-  //  Value-producing writeback ports: [0]=ALU-A [1]=ALU-B [2]=MEM [3]=MULDIV.
-  //  The BRU port never carries a result (prd tied 0) so it is not
+  //  Value-producing writeback ports: [0]=ALU-CSR [1]=ALU [2]=MEM [3]=MULDIV.
+  //  The Branch pipe never carries a result (prd tied 0) so it is not
   //  snooped. Rename guarantees a unique producer per physical register,
   //  so at most one port matches a given tag per cycle.
   //  Adding a pipe = appending one slot here.
@@ -454,24 +478,36 @@ module rapt_rou #(
 `ifdef RAPT_DUAL_ISSUE
         if (uoq_deq_fire_b) begin
           uoq_tail_a <= uoq_tail_a + 2;
-          uoq_valid[uoq_tail_a] <= 1'b0;
-          uoq_valid[uoq_tail_b] <= 1'b0;
-          uoq_is_pair[uoq_tail_b] <= 1'b0;
+          if (!uoq_tail_a_reused) uoq_valid[uoq_tail_a] <= 1'b0;
+          if (!uoq_tail_b_reused) begin
+            uoq_valid[uoq_tail_b] <= 1'b0;
+            uoq_is_pair[uoq_tail_b] <= 1'b0;
+          end
         end else begin
           uoq_tail_a              <= uoq_tail_a + 1;
-          uoq_valid[uoq_tail_a]   <= 1'b0;
-          uoq_is_pair[uoq_tail_a] <= 1'b0;
+          if (!uoq_tail_a_reused) begin
+            uoq_valid[uoq_tail_a]   <= 1'b0;
+            uoq_is_pair[uoq_tail_a] <= 1'b0;
+          end
         end
 `else
         uoq_tail_a            <= uoq_tail_a + 1;
-        uoq_valid[uoq_tail_a] <= 1'b0;
+        if (!uoq_tail_a_reused) uoq_valid[uoq_tail_a] <= 1'b0;
 `endif
       end
 
       // Broadcast forwarding: update pre-read values during UOQ residence
       // (any CDB port; unique-producer invariant)
       for (int i = 0; i < IIQ_SIZE; i++) begin
-        if (uoq_valid[i]) begin
+        // A same-cycle enqueue already applies CDB bypass in
+        // uoq_enqueue_slot. Do not let this resident-entry loop overwrite a
+        // reclaimed slot with the previous uop's tag/value state.
+        if (uoq_valid[i]
+            && !(uoq_enq_fire_a && (i[$clog2(IIQ_SIZE)-1:0] == uoq_head_a))
+`ifdef RAPT_DUAL_ISSUE
+            && !(uoq_enq_fire_b && (i[$clog2(IIQ_SIZE)-1:0] == uoq_head_b))
+`endif
+            ) begin
           if (|uoq_pr1[i] && !uoq_pv1_valid[i] && wb_hit(uoq_pr1[i])) begin
             uoq_pv1[i]       <= wb_val(uoq_pr1[i], uoq_pv1[i]);
             uoq_pv1_valid[i] <= 1'b1;
@@ -638,7 +674,7 @@ module rapt_rou #(
         rob_entry[wb_dest_exu].difftest_skip <= exu_rou.difftest_skip;
       end
 
-      // ---- Write-back from EXU slot B (pure ALU + BRU completion) ----
+      // ---- Write-back from the ALU CDB (pure ALU completion) ----
       // Slot B handles arithmetic and branches (jen / ben). It never carries
       // CSR/trap/system/mul, so dispatch-time fields (csr_wen, ecall, mret,
       // trap, ...) stay at their defaults (0). We update state/npc/btaken/
@@ -651,7 +687,7 @@ module rapt_rou #(
         rob_entry[wb_dest_exu_b].difftest_skip <= exu_rou_b.difftest_skip;
       end
 
-      // ---- Write-back from EXU port C (dedicated BRU, ben only) ----
+      // ---- Write-back from the Branch CDB (dedicated branch resolution) ----
       // Conditional branches don't write rd, so no result/prd update is
       // needed; only state + npc + btaken + mispredict + difftest_skip are
       // written so commit/BPU can resolve the branch.
@@ -768,6 +804,14 @@ module rapt_rou #(
       || upl_atom_vec[h0]
   ));
 
+  // Simulation PMU classification: distinguish a branch-caused commit flush
+  // from traps, fences, system instructions, and atomics.
+  /* verilator lint_off UNUSEDSIGNAL */
+  logic pmu_branch_flush;
+  logic pmu_nonbranch_flush;
+  /* verilator lint_on UNUSEDSIGNAL */
+  assign pmu_branch_flush = head0_valid && head0_br_p_fail;
+
   // Kept as a distinct broadcast path for interface compatibility. Pure
   // CSR/f_time currently take the full flush path above so any younger
   // speculative uops are discarded before dispatch resumes.
@@ -826,6 +870,7 @@ module rapt_rou #(
   // ---- Phase 1: registered commit redirect ----
   // Legacy combinational flush for the pipeline (UOQ / ROB / RS / IOQ / LSU).
   assign flush_pipe = head0_flush || head1_flush;
+  assign pmu_nonbranch_flush = flush_pipe && !pmu_branch_flush;
   // Registered redirect target for the frontend: detect in cycle N, apply in N+1.
   assign flush_target_c = dual_commit ? rou_cmu.npc_b : rou_cmu.npc_a;
   always_ff @(posedge clock) begin

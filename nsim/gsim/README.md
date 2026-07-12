@@ -77,6 +77,14 @@ make coremark PRESET=large RV64=1
 make embench-crc32
 make embench-matmult-int
 
+# MicroBench uses an SE-compatible compatibility layer around the upstream
+# AM-Kernels algorithms. Its optional workload argument is test/train/ref/huge.
+make microbench
+
+# Branch-predictor study: RTL-size TAGE, equal-budget gshare,
+# a practical 8 KiB TAGE-SC point, and a 64 KiB upper bound
+make bp-study
+
 # In-order TimingSimpleCPU baseline (pure ISA throughput, no uarch)
 make timing BENCH=coremark
 
@@ -101,6 +109,16 @@ preset×CPU combo. To regenerate the summaries from existing `stats.txt`
 without re-running gem5: `make summary OUTDIR=<dir>` or
 `make aggregate BENCH=<bench>`.
 
+`make bp-study` writes one CSV per selected workload under
+`nsim/build/gsim/results/bp-study-<bench>-rv32.csv`; by default this includes
+CoreMark and the SE-compatible MicroBench port. `rtl-tage` is the current
+Raptor-equivalent direction predictor: a 256-entry bimodal base and three
+128-entry tagged tables. `same-budget-gshare` uses the same normalized
+direction-predictor budget, separating algorithm benefit from capacity.
+`practical-tage-sc` uses gem5's fixed 8 KiB TAGE-SC-L implementation; the
+fixed 64 KiB `upper-tage-sc` model is a deliberately impractical ceiling for
+this RTL, useful for bounding the benefit of direction-prediction accuracy.
+
 ## Direct gem5 invocation
 
 ```sh
@@ -119,6 +137,13 @@ Useful flags:
 * `--config-svh <path>` — point at a custom `rapt_config.svh` (skips `--preset`).
 * `--no-l2` — drop the model L2; L1s connect directly to membus
   (closer to raptor-chip's RTL today, which has no L2).
+* `--rtl-execution-resources` — use two integer ALUs, one MULDIV unit, and
+  one load/store request port. This is opt-in because gem5's default FUPool is
+  deliberately more provisioned; it isolates execution-resource effects from
+  branch-predictor DSE results.
+* `--fetch-queue-size N` — override gem5's default 32-uop per-thread fetch
+  queue. A small value helps quantify frontend-buffer decoupling separately
+  from `fetchWidth`.
 * `--max-insts N` — early stop for long workloads.
 * `--mem-latency 30ns` — flat backing-memory latency.
 

@@ -6,11 +6,11 @@
 //
 // Phase 1 of the execution-engine decoupling: carve the multiplier out of
 // the unified RS so MUL/DIV uops no longer occupy RS entries for their
-// whole latency nor consume an ALU-A issue slot at completion.
+// whole latency nor consume an ALU-CSR issue slot at completion.
 //
 // Responsibilities:
 //   * Buffer dispatched MUL/DIV uops with operands (small age-ordered IQ)
-//   * Wake operands from the slow CDB ports (ALU-A / ALU-B / MEM / self).
+//   * Wake operands from the slow CDB ports (ALU-CSR / ALU / MEM / self).
 //     No fast load-use path here: a load-fed MUL wakes one cycle later on
 //     the confirming MEM broadcast, trading a cycle of mul latency for a
 //     narrow wakeup network.
@@ -66,7 +66,7 @@ module rapt_exu_muldiv #(
   logic [    XLEN-1:0] mdq_pnpc    [MDQ_SIZE];
 
   // === Unified CDB view for operand wakeup ===
-  // [0]=MEM [1]=ALU-A [2]=ALU-B [3]=self. Rename guarantees a unique
+  // [0]=MEM [1]=ALU-CSR [2]=ALU [3]=self. Rename guarantees a unique
   // producer per physical register, so port order is don't-care.
   localparam int unsigned NWB = 4;
   logic            wb_valid [NWB];

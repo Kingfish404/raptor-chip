@@ -118,9 +118,9 @@ endinterface
 //
 // One instance per execution pipeline; rapt_core instantiates one per
 // writeback port with the following fixed assignment:
-//   [0] ALU-A  : full path (ALU + CSR + system + trap)
-//   [1] ALU-B  : simple ALU + JAL/JALR link write (never CSR/system/trap)
-//   [2] BRU    : conditional branches only (no result/prd/rd -> tied 0;
+//   [0] ALU-CSR : full path (ALU + CSR + system + trap)
+//   [1] ALU     : simple ALU + JAL/JALR link write (never CSR/system/trap)
+//   [2] BRANCH  : conditional branches only (no result/prd/rd -> tied 0;
 //                no PRF write port, no bypass network entry)
 //   [3] MEM    : IOQ broadcast (loads / stores / atomics / MMIO)
 //   [4] MULDIV : MUL/DIV pipe (pure arithmetic, no CSR/trap/MEM sideband)
@@ -152,7 +152,7 @@ interface exu_wb_if #(
   logic [PLEN-1:0] prd;
   logic [RLEN-1:0] rd;
 
-  // csr (ALU-A only; csr_addr lives in uop_pl, not here)
+  // csr (ALU-CSR pipe only; csr_addr lives in uop_pl, not here)
   logic csr_wen;
   logic [XLEN-1:0] csr_wdata;
 
@@ -202,7 +202,7 @@ interface exu_iq_iss_if #(
     parameter unsigned RLEN = `RAPT_REG_LEN,
     parameter int XLEN = `RAPT_XLEN
 );
-  // Not every pipe samples every field (e.g. the BRU ignores rd/trap);
+  // Not every pipe samples every field (e.g. Branch ignores rd/trap);
   // re-disable UNUSEDSIGNAL inside the bundle scope.
   /* verilator lint_off UNUSEDSIGNAL */
   logic valid;
@@ -248,7 +248,7 @@ interface exu_disp_rs_if #(
   logic accept_b;         // slot B is allocated this cycle (uses b_rs_idx)
   logic [$clog2(RS_SIZE)-1:0] b_rs_idx;
   // Per-slot dispatch sideband, captured into the entry: ineligible for
-  // issue port B (CSR / system / trap class -- only pipe A handles those
+  // issue port B (CSR / system / trap class -- only the ALU-CSR pipe handles those
   // semantics). Constant 0 for single-issue-port queues.
   logic iss_b_block_a;
   logic iss_b_block_b;

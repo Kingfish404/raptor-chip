@@ -389,12 +389,11 @@ module rapt_bpu_tage #(
           u_age_cnt <= '0;
         end
 
-        // -- Direction counter update on the provider --
-        // Always update bimodal: it absorbs cold cases and serves as alt-pred.
-        // For tagged hits, additionally update the matched-tag entry's counter.
-        if (up_provider == 2'd0) begin
-          bim[up_bim_idx] <= bim_update(bim[up_bim_idx], update_taken);
-        end
+        // -- Direction counter update --
+        // The bimodal base is trained on every branch: it is both the cold
+        // fallback and alternate predictor for weak tagged-table providers.
+        // Tagged hits additionally update their matching entry.
+        bim[up_bim_idx] <= bim_update(bim[up_bim_idx], update_taken);
         if (up_hit1) t1_ctr[up_t1_idx] <= ctr_update(t1_ctr[up_t1_idx], update_taken);
         if (up_hit2) t2_ctr[up_t2_idx] <= ctr_update(t2_ctr[up_t2_idx], update_taken);
         if (up_hit3) t3_ctr[up_t3_idx] <= ctr_update(t3_ctr[up_t3_idx], update_taken);
