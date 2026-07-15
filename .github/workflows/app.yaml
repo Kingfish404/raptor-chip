@@ -20,9 +20,8 @@ on:
   push:
     branches: ["master", "main"]
     paths:
-      - "rtl_sv/**"
-      - "rtl_scala/**"
-      - "nsim/**"
+      - "hdl/**"
+      - "sim/**"
       - "nemu/**"
       - "linux/**"
       - "verify/**"
@@ -32,9 +31,8 @@ on:
   pull_request:
     branches: ["master", "main"]
     paths:
-      - "rtl_sv/**"
-      - "rtl_scala/**"
-      - "nsim/**"
+      - "hdl/**"
+      - "sim/**"
       - "nemu/**"
       - "linux/**"
       - "verify/**"
@@ -96,8 +94,8 @@ jobs:
         shell: bash -l {0}
         run: |
           make config-npc32
-          make -C nsim -j$(nproc)
-          make -C nsim/csrc/mem/mrom-data
+          make -C sim -j$(nproc)
+          make -C sim/csrc/mem/mrom-data
 
       - name: Cache riscv-arch-test suite
         uses: actions/cache@v5
@@ -273,10 +271,10 @@ jobs:
         run: make pack
       - name: Collect release artifacts
         run: |
-          mkdir -p dist/rtl_sv
-          cp nsim/build/default/rapt_pack.sv dist/
-          cp nsim/build/default/rapt_pack.svh dist/
-          cp -r rtl_sv/. dist/rtl_sv/
+          mkdir -p dist/hdl
+          cp sim/build/default/rapt_pack.sv dist/
+          cp sim/build/default/rapt_pack.svh dist/
+          cp -r hdl/. dist/hdl/
           printf "commit: %s\nref: %s\ndate: %s\n" \
             "${{ github.sha }}" "${{ github.ref_name }}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > dist/VERSION
           cd dist && zip -r ../raptor-chip-rtl.zip .
@@ -299,8 +297,8 @@ jobs:
             --title "RTL Nightly (${{ github.ref_name }}, $(date -u +%Y-%m-%d))" \
             --notes "Auto-generated RTL release from commit \`${{ github.sha }}\`." \
             --prerelease \
-            "nsim/build/default/rapt_pack.sv#rapt_pack.sv (single-file packed RTL)" \
-            "nsim/build/default/rapt_pack.svh#rapt_pack.svh (macro definitions)" \
+            "sim/build/default/rapt_pack.sv#rapt_pack.sv (single-file packed RTL)" \
+            "sim/build/default/rapt_pack.svh#rapt_pack.svh (macro definitions)" \
             "raptor-chip-rtl.zip#raptor-chip-rtl.zip (full RTL source)"
         env:
           GH_TOKEN: ${{ github.token }}
@@ -462,7 +460,7 @@ jobs:
   #     - name: Generate Embench summary
   #       if: always()
   #       run: |
-  #         LOG_DIR="nsim/build/default/logs/litex/embench-logs"
+  #         LOG_DIR="sim/build/default/logs/litex/embench-logs"
   #         SUMMARY="$LOG_DIR/summary.md"
   #         if [[ -f "$SUMMARY" ]]; then
   #           cat "$SUMMARY" >> "$GITHUB_STEP_SUMMARY"
@@ -477,7 +475,7 @@ jobs:
   #       with:
   #         name: litex-embench-logs-${{ github.sha }}
   #         path: |
-  #           nsim/build/default/logs/litex/embench-logs/
+  #           sim/build/default/logs/litex/embench-logs/
   #           /tmp/litex-embench.log
   #         retention-days: 30
   #         overwrite: true

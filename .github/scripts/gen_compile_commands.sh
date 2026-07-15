@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 NEMU_HOME="${ROOT_DIR}/nemu"
-NSIM_HOME="${ROOT_DIR}/nsim"
+NSIM_HOME="${ROOT_DIR}/sim"
 HOST_OS="$(uname -s)"
 RAPT_CFG_RAW="${RAPT_CONFIG:-default}"
 RAPT_CFG_RAW="${RAPT_CFG_RAW%%#*}"
@@ -85,11 +85,11 @@ echo "[compile-commands] Generating NEMU database..."
   --cdb "${NEMU_DB}" \
   make -C "${NEMU_HOME}" -B -j"${NPROC}" CONFIG_CC=
 
-echo "[compile-commands] Generating NSIM database..."
+echo "[compile-commands] Generating sim database..."
 TMP_PARENT="${TMPDIR:-/tmp}"
 TMP_PARENT="${TMP_PARENT%/}"
-NSIM_LOG="$(mktemp "${TMP_PARENT}/nsim-cdb.XXXXXX")"
-make -C "${NSIM_HOME}" -B -j"${NPROC}" >"${NSIM_LOG}" 2>&1
+SIM_LOG="$(mktemp "${TMP_PARENT}/sim-cdb.XXXXXX")"
+make -C "${NSIM_HOME}" -B -j"${NPROC}" >"${SIM_LOG}" 2>&1
 
 # Verilator's nested build emits the real C++ compile lines in obj_dir.
 awk -v objdir="${NSIM_BUILD_DIR}/obj_dir" '
@@ -106,10 +106,10 @@ awk -v objdir="${NSIM_BUILD_DIR}/obj_dir" '
     gsub(/\"/, "\\\"", cmd)
     printf("{\"directory\":\"%s\",\"file\":\"%s\",\"command\":\"%s\"}\n", objdir, f, cmd)
   }
-' "${NSIM_LOG}" \
+' "${SIM_LOG}" \
   | jq -s 'unique_by(.directory + "|" + .file + "|" + .command)' \
   > "${NSIM_DB}"
-rm -f "${NSIM_LOG}"
+rm -f "${SIM_LOG}"
 
 echo "[compile-commands] Merging databases..."
 jq -s '

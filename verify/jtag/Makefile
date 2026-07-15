@@ -9,20 +9,20 @@
 #                        DTM/DM compliance points (IDCODE, BYPASS identity,
 #                        DTMCS fields, dmcontrol RW, dmstatus version=3,
 #                        abstractcs cmderr W1C, dmactive=0 quiesce, …).
-#                        See nsim/csrc/jtag/jtag_selftest.cc for the catalog.
+#                        See sim/csrc/jtag/jtag_selftest.cc for the catalog.
 #
-#   2. openocd-smoke   - runs today. Builds nsim, launches it as an OpenOCD
+#   2. openocd-smoke   - runs today. Builds sim, launches it as an OpenOCD
 #                        `remote_bitbang` TCP server, runs upstream OpenOCD
 #                        0.12+ against verify/jtag/openocd.cfg, and PASSes if
 #                        OpenOCD enumerates IDCODE = 0x10001913. Validates
-#                        the full path real-OpenOCD -> TCP -> nsim -> RTL TAP.
-#                        Use `make openocd-server` to leave nsim running for
+#                        the full path real-OpenOCD -> TCP -> sim -> RTL TAP.
+#                        Use `make openocd-server` to leave sim running for
 #                        interactive OpenOCD/GDB sessions.
 #
 #   3. debug-tests     - clones https://github.com/riscv-software-src/riscv-tests
 #                        and stages the upstream `debug/` GDB-driven debug-spec
 #                        suite. *Currently P1-blocked*: requires (a) an OpenOCD
-#                        remote_bitbang DPI bridge in nsim, (b) working
+#                        remote_bitbang DPI bridge in sim, (b) working
 #                        halt/resume + abstract access_register/access_memory
 #                        in rapt_dm, and (c) dcsr/dpc/dscratch CSRs in
 #                        rapt_csr.sv. The setup target clones the repo and
@@ -37,7 +37,7 @@ SHELL := /bin/bash
 .DEFAULT_GOAL := help
 
 RAPTOR_HOME ?= $(abspath ../..)
-NSIM_HOME   ?= $(RAPTOR_HOME)/nsim
+NSIM_HOME   ?= $(RAPTOR_HOME)/sim
 JTAG_DIR    := $(abspath .)
 BUILD_DIR   := $(JTAG_DIR)/build
 RISCV_TESTS_REPO := $(JTAG_DIR)/riscv-tests
@@ -76,16 +76,16 @@ selftest: ## Build & run DTM+DM compliance probe (23 checks, no NEMU needed)
 # ---------------------------------------------------------------------------
 # Foreground server: OpenOCD connects via remote_bitbang over TCP. Run in one
 # terminal, then point OpenOCD at openocd.cfg from another.
-openocd-server: ## Run nsim as foreground OpenOCD remote_bitbang server (Ctrl-C to exit)
+openocd-server: ## Run sim as foreground OpenOCD remote_bitbang server (Ctrl-C to exit)
 	$(MAKE) -C $(NSIM_HOME) all
-	@echo "[jtag] nsim listening on 127.0.0.1:$(JTAG_PORT) for OpenOCD"
+	@echo "[jtag] sim listening on 127.0.0.1:$(JTAG_PORT) for OpenOCD"
 	$(NSIM_BIN) --jtag-server --jtag-port=$(JTAG_PORT)
 
 # Background end-to-end smoke: confirms OpenOCD enumerates the IDCODE.
-# This validates the full TAP path: OpenOCD -> TCP -> nsim -> rapt_dtm -> TDO.
+# This validates the full TAP path: OpenOCD -> TCP -> sim -> rapt_dtm -> TDO.
 openocd-smoke: ## End-to-end OpenOCD bring-up smoke (expects IDCODE=0x10001913)
 	$(MAKE) -C $(NSIM_HOME) all
-	@echo "[jtag] starting nsim server..."
+	@echo "[jtag] starting sim server..."
 	@pkill -f 'riscv32-npc-sim --jtag-server' 2>/dev/null; sleep 1; \
 	$(NSIM_BIN) --jtag-server --jtag-port=$(JTAG_PORT) >/tmp/jtag_srv.log 2>&1 & \
 	SRV=$$!; sleep 2; \
@@ -107,7 +107,7 @@ openocd-smoke: ## End-to-end OpenOCD bring-up smoke (expects IDCODE=0x10001913)
 # operates entirely on the halted hart.
 openocd-halt-reg: ## OpenOCD halt + GPR/CSR round-trip (full debug stack)
 	$(MAKE) -C $(NSIM_HOME) all
-	@echo "[jtag] starting nsim server..."
+	@echo "[jtag] starting sim server..."
 	@pkill -f 'riscv32-npc-sim --jtag-server' 2>/dev/null; sleep 1; \
 	$(NSIM_BIN) --jtag-server --jtag-port=$(JTAG_PORT) >/tmp/jtag_srv.log 2>&1 & \
 	SRV=$$!; sleep 2; \
@@ -193,10 +193,10 @@ debug-tests: debug-tests-setup ## Run upstream riscv-tests/debug (BLOCKED on P1)
 	@echo "[jtag] riscv-tests/debug is BLOCKED on the following preconditions:"
 	@echo "================================================================"
 	@echo ""
-	@echo "  (a) OpenOCD bridge: nsim must expose JTAG over OpenOCD's"
+	@echo "  (a) OpenOCD bridge: sim must expose JTAG over OpenOCD's"
 	@echo "      remote_bitbang protocol (TCP socket per dev.jtag.md §8.1)."
 	@echo "      Status: DONE — see 'make openocd-smoke' / 'make openocd-server'."
-	@echo "              Implementation: nsim/csrc/jtag/jtag_rbb_server.cc"
+	@echo "              Implementation: sim/csrc/jtag/jtag_rbb_server.cc"
 	@echo ""
 	@echo "  (b) Halt / resume: the DM must drive the core's CMU into a"
 	@echo "      halt boundary on haltreq, and IFU must redirect to"

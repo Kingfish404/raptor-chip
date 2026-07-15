@@ -128,16 +128,16 @@ RVFI_SRC_DIR  := rvfi
 RVFI_CORE_DIR := $(RISCV_FORMAL_DIR)/cores/raptor
 RVFI_CHECKS   := $(RVFI_CORE_DIR)/checks
 RVFI_PACK     := build/rapt_pack_rvfi.sv
-VSRC_PATH     := $(RAPTOR_HOME)/rtl_sv
-# uarch config preset providing rapt_config.svh (configs/<name>/rapt_config.svh).
-# Must precede rtl_sv/include on the verilator include path so its config wins.
+VSRC_PATH     := $(RAPTOR_HOME)/hdl
+# uarch config preset providing rapt_config.svh (hdl/configs/<name>/rapt_config.svh).
+# Must precede hdl/include on the verilator include path so its config wins.
 # The `formal` preset is a minimal-but-valid RV32IMC config (tiny caches, no L2,
 # bimodal BP, small ROB/RS) that keeps yosys prep/check and BMC tractable on the
 # full-cluster wrapper. Override with RAPT_CONFIG=default for a full-size proof.
 RAPT_CONFIG   ?= formal
-RVFI_CFG_DIR  := $(RAPTOR_HOME)/configs/$(RAPT_CONFIG)
+RVFI_CFG_DIR  := $(VSRC_PATH)/configs/$(RAPT_CONFIG)
 # Core-only sources: exclude SoC wrappers, DPI-C, and include-dir files.
-# Note: rapt_npc_soc / wrap_rnp_soc were moved to $(RAPTOR_HOME)/nsim/rtl/
+# Note: rapt_npc_soc / wrap_rnp_soc live in $(RAPTOR_HOME)/sim/rtl/
 # (TB-only); they are no longer found via $(VSRC_PATH), so excluding them is
 # only kept for documentation purposes.
 VSRCS_RVFI_PKG  := $(filter %/rapt_pkg.sv, $(shell find $(VSRC_PATH) -name "*.sv"))

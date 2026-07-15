@@ -1,6 +1,6 @@
-/* app/tests/irq/link.ld: bare-metal layout for nsim IRQ tests.
+/* app/tests/irq/link.ld: bare-metal layout for sim IRQ tests.
  *
- * Image is loaded by nsim into MBASE = 0x80000000 via the positional
+ * Image is loaded by sim into MBASE = 0x80000000 via the positional
  * IMG argument. _start lives at the very beginning so the MROM jumper
  * (rom.c) lands directly on it.
  */

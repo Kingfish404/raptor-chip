@@ -70,8 +70,8 @@ for detailed numbers and the change history.
 raptor-chip/
 ├── Makefile              top-level driver
 ├── env.sh                environment variables (auto-sourced by Makefile)
-├── rtl_scala/            Chisel (decoder generation only)
-├── rtl_sv/               hand-written SystemVerilog RTL
+├── hdl/                   hand-written SystemVerilog RTL
+│   ├── chisel/            Chisel decoder generator
 │   ├── rapt.sv           cluster-level top (core + CLINT + PLIC + router + debug)
 │   ├── rapt_core.sv      single-hart CPU body
 │   ├── rapt_pkg.sv       shared types (uop_t, rob_entry_t, ...)
@@ -82,7 +82,7 @@ raptor-chip/
 │   ├── include/          config, interfaces, DPI-C
 │   └── generated/        Chisel-generated decoders
 ├── nemu/                 NEMU reference ISS
-├── nsim/                 NPC Verilator simulator
+├── sim/                  NPC Verilator simulator
 ├── abstract-machine/     AM runtime (nanos-lite, navy-apps)
 ├── linux/                Linux kernel build scripts
 ├── fpga/                 FPGA integration (Gowin Tang Nano 20K, LiteX)

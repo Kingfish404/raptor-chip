@@ -142,9 +142,9 @@ static void nemu_periodic_save(void)
     if (!home)
       return;
     char path[512];
-    snprintf(path, sizeof(path), "%s/../data/nemu-status.log", home);
+    snprintf(path, sizeof(path), "%s/build/nemu-status.log", home);
     nemu_save_status_to_file(path);
-    snprintf(path, sizeof(path), "%s/../data/nemu-uarch_state.json", home);
+    snprintf(path, sizeof(path), "%s/build/nemu-uarch_state.json", home);
     nemu_save_uarch_state(path);
   }
 }

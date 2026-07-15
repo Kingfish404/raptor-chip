@@ -8,7 +8,7 @@ Standalone RISC-V programs that compile to standard ELFs and run on any RISC-V L
 # Build everything
 make all
 
-# Build and run specific test suites via pk on NPC/nsim
+# Build and run specific test suites via pk on NPC/sim
 make isa-tests-npc        # ISA correctness verification
 make memory-tests-npc     # Memory subsystem tests
 make algo-tests-npc       # Algorithm correctness tests
@@ -240,7 +240,7 @@ use the `RAGENTBENCH_*` prefix; profile string is
 
 ```bash
 make agent-bench-build      # cross-compile pk ELFs
-make agent-bench-report-npc # build + run + summarize on NPC/nsim
+make agent-bench-report-npc # build + run + summarize on NPC/sim
 make agent-bench-report-nemu
 make agent-litex-build      # LiteX flat binaries
 make agent-native-test      # host-native smoke test

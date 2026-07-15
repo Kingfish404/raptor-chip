@@ -1,7 +1,7 @@
-# app/tests/irq/Makefile: bare-metal PLIC IRQ tests for nsim.
+# app/tests/irq/Makefile: bare-metal PLIC IRQ tests for sim.
 #
 # Each .c file becomes one test: `_start` (crt0.S) -> main() -> finisher.
-# Output: build/rv32/tests/irq/<name>.bin (raw, loaded at 0x80000000 by nsim).
+# Output: build/rv32/tests/irq/<name>.bin (raw, loaded at 0x80000000 by sim).
 #
 # Bare-metal (NOT pk) — runs in M-mode with full PLIC/CSR access.
 

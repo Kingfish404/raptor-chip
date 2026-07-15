@@ -1,4 +1,4 @@
-# app/tests/repro/Makefile: bare-metal minimal repro tests for nsim.
+# app/tests/repro/Makefile: bare-metal minimal repro tests for sim.
 
 _THIS_DIR := $(dir $(lastword $(MAKEFILE_LIST)))
 APP_HOME  := $(abspath $(_THIS_DIR)/../..)

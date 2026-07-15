@@ -2,7 +2,7 @@
 # Unified Verification Makefile
 # ============================================================================
 # Orchestrates: random fuzz, ACT4 compliance, coverage, assertion checks.
-# Reuses the existing nsim Verilator simulator and NEMU difftest reference.
+# Reuses the existing sim Verilator simulator and NEMU difftest reference.
 #
 # Usage:
 #   make help                        Show all targets
@@ -13,12 +13,12 @@ SHELL := /bin/bash
 
 # --- Environment (inherited from root Makefile or set manually) ---
 RAPTOR_HOME   ?= $(abspath ..)
-NSIM_HOME   := $(RAPTOR_HOME)/nsim
+NSIM_HOME   := $(RAPTOR_HOME)/sim
 NEMU_HOME   := $(RAPTOR_HOME)/nemu
 AM_HOME     := $(RAPTOR_HOME)/abstract-machine
 VERIFY_HOME := $(abspath .)
 
-# Export vars that sub-Makefiles (nsim/, nemu/) expect.
+# Export vars that sub-Makefiles (sim/, nemu/) expect.
 export RAPTOR_HOME
 export NSIM_HOME
 export NEMU_HOME
@@ -48,8 +48,8 @@ else
 endif
 
 # --- Paths to existing build artifacts ---
-# nsim now scopes outputs per RAPT_CONFIG (configs/<name>/). Keep this in
-# sync with nsim/Makefile; default preset is 'default'.
+# sim scopes outputs per RAPT_CONFIG (hdl/configs/<name>/). Keep this in
+# sync with sim/Makefile; default preset is 'default'.
 RAPT_CONFIG ?= default
 NPC_BIN_32  := $(NSIM_HOME)/build/$(RAPT_CONFIG)/riscv32-npc-sim
 NPC_BIN_64  := $(NSIM_HOME)/build/$(RAPT_CONFIG)/riscv64-npc-sim
@@ -346,7 +346,7 @@ riscof-clean: ## Clean ACT4 artifacts
 # Classic RISCOF (upstream riscv-arch-test main branch, sail reference model)
 # ============================================================================
 # Independent of ACT4: runs the stock RISCOF framework with a Raptor DUT plugin
-# that drives `nsim` via the new --sig signature dump option. Serves as a
+# that drives `sim` via the new --sig signature dump option. Serves as a
 # cross-check against the ACT4 flow and is closer to how most RISC-V projects
 # (e.g. neorv32, hazard3) exercise RISCOF.
 # ============================================================================
@@ -366,7 +366,7 @@ RISCOF_CLASSIC_BRANCH   ?= old-framework-3.x
 riscof-classic: riscof-classic-setup riscof-classic-run ## Run classic RISCOF compliance flow
 
 riscof-classic-build-npc: ## (Re)build NPC simulator without difftest for RISCOF
-	@# RISCOF's DUT plugin invokes nsim without `--diff`, so the simulator
+	@# RISCOF's DUT plugin invokes sim without `--diff`, so the simulator
 	@# must be built with the plain (non-difftest) config; otherwise
 	@# init_difftest aborts with `ref_so_file != NULL`.
 	@if [ ! -f $(NPC_BIN) ] || grep -q '^CONFIG_DIFFTEST=y' $(NSIM_HOME)/.config 2>/dev/null; then \
@@ -438,7 +438,7 @@ riscof-classic-clean: ## Clean classic RISCOF artifacts
 # Classic RISCOF (NEMU as DUT)
 # ============================================================================
 # Runs the same riscv-arch-test compliance suite through NEMU (standalone
-# executable) rather than the Raptor nsim simulator.  This verifies that
+# executable) rather than the Raptor sim simulator. This verifies that
 # NEMU itself passes the RISCOF suite and produces signatures byte-identical
 # to sail_cSim, giving us confidence in the difftest reference model.
 # Test suite is shared with the classic flow via symlink; workdir is
@@ -605,7 +605,7 @@ coverage-run: ## Run test suite to collect coverage
 APP_ISA64 := $(if $(filter rv64,$(ISA)),1,)
 
 # All coverage-run-* targets must propagate the same SIM_VFLAGS that
-# `coverage-build` used; otherwise nsim/Makefile's .vflags_stamp invalidates
+# `coverage-build` used; otherwise sim/Makefile's .vflags_stamp invalidates
 # and rebuilds the simulator WITHOUT `VERILATOR_EXTRA="--coverage-line ..."`,
 # losing both coverage instrumentation and (since SVA gets re-enabled by
 # default) potentially turning random-instruction workloads into SVA `$fatal`
@@ -614,8 +614,8 @@ APP_ISA64 := $(if $(filter rv64,$(ISA)),1,)
 COV_PASS_ENV := RAPT_SIM_ASSERT=0
 
 # Sanity check that the expected NPC sim binary exists. The workload sub-make
-# (am-kernels / app) ultimately invokes `make -C nsim run`, which picks
-# whichever simulator variant is built per the current `nsim/.config`. If the
+# (am-kernels / app) ultimately invokes `make -C sim run`, which picks
+# whichever simulator variant is built per the current `sim/.config`. If the
 # user has `CONFIG_ysyxSoC=y` left over from a previous session, only
 # `riscv32-npc-soc` exists and loading an `riscv32-npc` binary into it fails
 # (wrong memory map). Guard the per-workload runners so they fail fast.
@@ -624,7 +624,7 @@ check-coverage-bin:
 	@if [ ! -x "$(NPC_BIN)" ]; then \
 		echo "[coverage] ERROR: simulator $(NPC_BIN) not found."; \
 		echo "[coverage]        Run 'make -C verify coverage-build' first"; \
-		echo "[coverage]        (the current nsim/.config may be a non-NPC variant, e.g. ysyxSoC)."; \
+		echo "[coverage]        (the current sim/.config may be a non-NPC variant, e.g. ysyxSoC)."; \
 		exit 1; \
 	fi
 
@@ -794,38 +794,38 @@ XSIM_RAPT_CONFIG ?= default
 VIVADO_SETTINGS ?= /opt/Xilinx/2025.2/Vivado/settings64.sh
 
 XSIM_COMMON_INCLUDES := \
-	-i "$(RAPTOR_HOME)/configs/$(XSIM_RAPT_CONFIG)" \
-	-i "$(RAPTOR_HOME)/rtl_sv/include" \
-	-i "$(RAPTOR_HOME)/rtl_sv/include/dpic_mock" \
-	-i "$(RAPTOR_HOME)/rtl_sv/include/npc" \
+	-i "$(RAPTOR_HOME)/hdl/configs/$(XSIM_RAPT_CONFIG)" \
+	-i "$(RAPTOR_HOME)/hdl/include" \
+	-i "$(RAPTOR_HOME)/hdl/include/dpic_mock" \
+	-i "$(RAPTOR_HOME)/hdl/include/npc" \
 	-i "$(XSIM_DIR)"
 
 XSIM_L2_SOURCES := \
-	"$(RAPTOR_HOME)/rtl_sv/rapt_pkg.sv" \
-	"$(RAPTOR_HOME)/rtl_sv/memory/rapt_sram_1r1w.sv" \
-	"$(RAPTOR_HOME)/rtl_sv/memory/rapt_l2.sv"
+	"$(RAPTOR_HOME)/hdl/rapt_pkg.sv" \
+	"$(RAPTOR_HOME)/hdl/memory/rapt_sram_1r1w.sv" \
+	"$(RAPTOR_HOME)/hdl/memory/rapt_l2.sv"
 
 XSIM_L1D_SOURCES := \
-	"$(RAPTOR_HOME)/rtl_sv/rapt_pkg.sv" \
-	"$(RAPTOR_HOME)/rtl_sv/memory/rapt_sram_1r1w.sv" \
-	"$(RAPTOR_HOME)/rtl_sv/memory/rapt_pmp.sv" \
-	"$(RAPTOR_HOME)/rtl_sv/memory/rapt_tlb.sv" \
-	"$(RAPTOR_HOME)/rtl_sv/memory/rapt_ptw.sv" \
-	"$(RAPTOR_HOME)/rtl_sv/memory/rapt_l1d.sv"
+	"$(RAPTOR_HOME)/hdl/rapt_pkg.sv" \
+	"$(RAPTOR_HOME)/hdl/memory/rapt_sram_1r1w.sv" \
+	"$(RAPTOR_HOME)/hdl/memory/rapt_pmp.sv" \
+	"$(RAPTOR_HOME)/hdl/memory/rapt_tlb.sv" \
+	"$(RAPTOR_HOME)/hdl/memory/rapt_ptw.sv" \
+	"$(RAPTOR_HOME)/hdl/memory/rapt_l1d.sv"
 
 XSIM_BUS_SOURCES := \
-	"$(RAPTOR_HOME)/rtl_sv/rapt_pkg.sv" \
-	"$(RAPTOR_HOME)/rtl_sv/memory/rapt_bus.sv"
+	"$(RAPTOR_HOME)/hdl/rapt_pkg.sv" \
+	"$(RAPTOR_HOME)/hdl/memory/rapt_bus.sv"
 
 XSIM_IOQ_SOURCES := \
-	"$(RAPTOR_HOME)/rtl_sv/rapt_pkg.sv" \
-	"$(RAPTOR_HOME)/rtl_sv/memory/rapt_pmp.sv" \
-	"$(RAPTOR_HOME)/rtl_sv/backend/rapt_exu_ioq.sv"
+	"$(RAPTOR_HOME)/hdl/rapt_pkg.sv" \
+	"$(RAPTOR_HOME)/hdl/memory/rapt_pmp.sv" \
+	"$(RAPTOR_HOME)/hdl/backend/rapt_exu_ioq.sv"
 
 XSIM_ROU_SOURCES := \
-	"$(RAPTOR_HOME)/rtl_sv/rapt_pkg.sv" \
-	"$(RAPTOR_HOME)/rtl_sv/backend/rapt_rou.sv" \
-	"$(RAPTOR_HOME)/rtl_sv/backend/rapt_cmu.sv"
+	"$(RAPTOR_HOME)/hdl/rapt_pkg.sv" \
+	"$(RAPTOR_HOME)/hdl/backend/rapt_rou.sv" \
+	"$(RAPTOR_HOME)/hdl/backend/rapt_cmu.sv"
 
 XSIM_TARGETS := \
 	xsim-l2-ordered-mmio \

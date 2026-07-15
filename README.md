@@ -272,7 +272,7 @@ cd $NEMU_HOME && make riscv32_defconfig && make && make run
 cd $NEMU_HOME && make riscv32_linux_defconfig && make && make run
 
 # 2. build and run NPC
-cd $RAPTOR_HOME/rtl_scala && make verilog
+cd $RAPTOR_HOME/hdl/chisel && make verilog
 cd $NSIM_HOME && make o2_defconfig && make && make run
 cd $NSIM_HOME && make o2linux_defconfig && make && make run
 cd $NSIM_HOME && make menuconfig && make ARCH=riscv32-npc run
@@ -299,7 +299,7 @@ cd $RAPTOR_HOME/abstract-machine/app/am-kernels/benchmarks/microbench && \
 # ARGS="-b -n" is optional, -b is for batch mode [default], -n is for no wave trace
 
 ## package all sv files into one
-cd nsim && make pack
+cd sim && make pack
 ```
 
 ## Run OpenSBI & Linux Kernel

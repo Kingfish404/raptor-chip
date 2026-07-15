@@ -12,7 +12,7 @@ include $(APP_HOME)/common.mk
 # (e.g. Ubuntu / GitHub Actions runners). Required by NPC tee wrappers below.
 SHELL := /bin/bash
 
-ARGS ?= -b -n## Simulator args for nsim/NEMU run targets (-b: batch, -n: no wave)
+ARGS ?= -b -n## Simulator args for sim/NEMU run targets (-b: batch, -n: no wave)
 MAX_INST ?=## Optional maximum instruction limit for tinyos cli-nsim/cli-nemu
 TIMEOUT ?=## Optional wall-clock timeout in seconds for tinyos cli-nsim
 USER_ELF ?=## ELF binary for pk-run
@@ -81,11 +81,11 @@ RLLMBENCH_BACKEND := npc
 export ISA64 ARGS CROSS_COMPILE
 
 # ============================================================================
-# Test/benchmark output logging (tee to nsim/build/<config>/logs/app/)
+# Test/benchmark output logging (tee to sim/build/<config>/logs/app/)
 # Inherits NPC_LOG_DIR / NEMU_LOG_DIR / APP_LOG_DIR from the root Makefile when
 # invoked as `make -C app …` from root. Falls back to local defaults otherwise.
 # ============================================================================
-NSIM_HOME    ?= $(abspath $(APP_HOME)/../nsim)
+NSIM_HOME    ?= $(abspath $(APP_HOME)/../sim)
 NEMU_HOME    ?= $(abspath $(APP_HOME)/../nemu)
 RAPT_CONFIG  ?= default
 APP_LOG_DIR  ?= $(NSIM_HOME)/build/$(RAPT_CONFIG)/logs/app
@@ -189,7 +189,7 @@ bbl-linux: ## Boot Linux via BBL
 #
 # NPC payload runs (pk-target=pk-run / backend=npc) tee stdout+stderr to
 # $(APP_LOG_DIR)/<elf-stem>.log so results are persisted alongside other
-# nsim/build/<config>/logs/ artifacts. NEMU runs stay unredirected because
+# sim/build/<config>/logs/ artifacts. NEMU runs stay unredirected because
 # they already log via NEMU's own --log facility.
 # ============================================================================
 # Strip directory + extension for log file naming.
@@ -217,7 +217,7 @@ endef
 coremark-build: ## Build CoreMark ELF
 	@$(MAKE) $(Q) -C $(APP_HOME)/benchmarks/coremark build
 
-coremark-npc: coremark-build ## Build and run CoreMark on NPC/nsim via pk
+coremark-npc: coremark-build ## Build and run CoreMark on NPC/sim via pk
 	@$(call _pk_run_with,pk-run,$(APP_HOME)/build/rv$(XLEN)/coremark/coremark.elf)
 
 coremark-nemu: coremark-build ## Build and run CoreMark on NEMU via pk
@@ -234,7 +234,7 @@ EMBENCH_BENCHMARKS := aha-mont64 crc32 depthconv edn huffbench matmult-int \
 					  qrduino sglib-combined slre statemate tarfind ud \
 					  wikisort xgboost
 
-EMBENCH_JOBS ?= $(NPROC)## Parallel NPC/nsim instances for embench-npc
+EMBENCH_JOBS ?= $(NPROC)## Parallel NPC/sim instances for embench-npc
 PK_BUILD     = $(APP_HOME)/build/pk-build-rv$(XLEN)
 
 embench-build: ## Build all Embench ELFs
@@ -254,7 +254,7 @@ embench-pk-bins: embench-build
 		$(OBJCOPY) -S -O binary $(PK_BUILD)/pk "$$bin"; \
 	done
 
-embench-npc: embench-pk-bins ## Build and run all Embench benchmarks on NPC/nsim via pk (parallel)
+embench-npc: embench-pk-bins ## Build and run all Embench benchmarks on NPC/sim via pk (parallel)
 	@echo "=== Running Embench-IoT (npc, JOBS=$(EMBENCH_JOBS)) ==="
 	@NPC_CMD=$$($(MAKE) --no-print-directory -C $(NSIM_HOME) ISA=riscv$(XLEN) \
 		VFLAGS="$(VFLAGS)" print-npc-exec 2>/dev/null) || \
@@ -368,31 +368,31 @@ define _llm_bench_report_with
 	exit $$fail
 endef
 
-llm-ops-npc: llm-bench-build ## Build and run LLM operator benchmark on NPC/nsim via pk
+llm-ops-npc: llm-bench-build ## Build and run LLM operator benchmark on NPC/sim via pk
 	@$(call _pk_run_with,pk-run,$(APP_HOME)/build/rv$(XLEN)/benchmarks/llm/llm-ops.elf)
 
 llm-ops-nemu: llm-bench-build ## Build and run LLM operator benchmark on NEMU via pk
 	@$(call _pk_run_with,nemu-run,$(APP_HOME)/build/rv$(XLEN)/benchmarks/llm/llm-ops.elf)
 
-llm-infer-npc: llm-bench-build ## Build and run LLM E2E inference benchmark on NPC/nsim via pk
+llm-infer-npc: llm-bench-build ## Build and run LLM E2E inference benchmark on NPC/sim via pk
 	@$(call _pk_run_with,pk-run,$(APP_HOME)/build/rv$(XLEN)/benchmarks/llm/llm-infer.elf)
 
 llm-infer-nemu: llm-bench-build ## Build and run LLM E2E inference benchmark on NEMU via pk
 	@$(call _pk_run_with,nemu-run,$(APP_HOME)/build/rv$(XLEN)/benchmarks/llm/llm-infer.elf)
 
-llm-train-npc: llm-bench-build ## Build and run LLM E2E training benchmark on NPC/nsim via pk
+llm-train-npc: llm-bench-build ## Build and run LLM E2E training benchmark on NPC/sim via pk
 	@$(call _pk_run_with,pk-run,$(APP_HOME)/build/rv$(XLEN)/benchmarks/llm/llm-train.elf)
 
 llm-train-nemu: llm-bench-build ## Build and run LLM E2E training benchmark on NEMU via pk
 	@$(call _pk_run_with,nemu-run,$(APP_HOME)/build/rv$(XLEN)/benchmarks/llm/llm-train.elf)
 
-llm-bench-run-npc: llm-bench-build ## Build and run all LLM benchmarks on NPC/nsim via pk without report files
+llm-bench-run-npc: llm-bench-build ## Build and run all LLM benchmarks on NPC/sim via pk without report files
 	$(call _pk_run_suite_with,RLLMBench,npc,pk-run,$(LLM_BUILD_DIR),$(LLM_BENCHMARKS))
 
 llm-bench-run-nemu: llm-bench-build ## Build and run all LLM benchmarks on NEMU via pk without report files
 	$(call _pk_run_suite_with,RLLMBench,nemu,nemu-run,$(LLM_BUILD_DIR),$(LLM_BENCHMARKS))
 
-llm-bench-report-npc: llm-bench-build ## Build, run, log, and summarize RLLMBench on NPC/nsim
+llm-bench-report-npc: llm-bench-build ## Build, run, log, and summarize RLLMBench on NPC/sim
 	$(call _llm_bench_report_with,pk-run)
 
 llm-bench-report-nemu: llm-bench-build ## Build, run, log, and summarize RLLMBench on NEMU
@@ -481,31 +481,31 @@ define _agent_bench_report_with
 	exit $$fail
 endef
 
-agent-tools-npc: agent-bench-build ## Build and run RAgentBench tool dispatch benchmark on NPC/nsim via pk
+agent-tools-npc: agent-bench-build ## Build and run RAgentBench tool dispatch benchmark on NPC/sim via pk
 	@$(call _pk_run_with,pk-run,$(APP_HOME)/build/rv$(XLEN)/benchmarks/agent/agent-tools.elf)
 
 agent-tools-nemu: agent-bench-build ## Build and run RAgentBench tool dispatch benchmark on NEMU via pk
 	@$(call _pk_run_with,nemu-run,$(APP_HOME)/build/rv$(XLEN)/benchmarks/agent/agent-tools.elf)
 
-agent-rag-npc: agent-bench-build ## Build and run RAgentBench RAG benchmark on NPC/nsim via pk
+agent-rag-npc: agent-bench-build ## Build and run RAgentBench RAG benchmark on NPC/sim via pk
 	@$(call _pk_run_with,pk-run,$(APP_HOME)/build/rv$(XLEN)/benchmarks/agent/agent-rag.elf)
 
 agent-rag-nemu: agent-bench-build ## Build and run RAgentBench RAG benchmark on NEMU via pk
 	@$(call _pk_run_with,nemu-run,$(APP_HOME)/build/rv$(XLEN)/benchmarks/agent/agent-rag.elf)
 
-agent-workflow-npc: agent-bench-build ## Build and run RAgentBench workflow benchmark on NPC/nsim via pk
+agent-workflow-npc: agent-bench-build ## Build and run RAgentBench workflow benchmark on NPC/sim via pk
 	@$(call _pk_run_with,pk-run,$(APP_HOME)/build/rv$(XLEN)/benchmarks/agent/agent-workflow.elf)
 
 agent-workflow-nemu: agent-bench-build ## Build and run RAgentBench workflow benchmark on NEMU via pk
 	@$(call _pk_run_with,nemu-run,$(APP_HOME)/build/rv$(XLEN)/benchmarks/agent/agent-workflow.elf)
 
-agent-bench-run-npc: agent-bench-build ## Build and run all RAgentBench benchmarks on NPC/nsim via pk without report files
+agent-bench-run-npc: agent-bench-build ## Build and run all RAgentBench benchmarks on NPC/sim via pk without report files
 	$(call _pk_run_suite_with,RAgentBench,npc,pk-run,$(AGENT_BUILD_DIR),$(AGENT_BENCHMARKS))
 
 agent-bench-run-nemu: agent-bench-build ## Build and run all RAgentBench benchmarks on NEMU via pk without report files
 	$(call _pk_run_suite_with,RAgentBench,nemu,nemu-run,$(AGENT_BUILD_DIR),$(AGENT_BENCHMARKS))
 
-agent-bench-report-npc: agent-bench-build ## Build, run, log, and summarize RAgentBench on NPC/nsim
+agent-bench-report-npc: agent-bench-build ## Build, run, log, and summarize RAgentBench on NPC/sim
 	$(call _agent_bench_report_with,pk-run)
 
 agent-bench-report-nemu: agent-bench-build ## Build, run, log, and summarize RAgentBench on NEMU
@@ -532,7 +532,7 @@ egos-cli-qemu: ## Enter egos CLI on QEMU
 xv6-cli-qemu: ## Enter xv6 CLI on QEMU
 	@$(MAKE) $(Q) -C $(APP_HOME)/tinyos xv6-cli-qemu $(if $(QEMU),QEMU=$(QEMU),)
 
-os-cli-nsim: ## Boot upstream OS image on NPC/nsim where supported (OS=egos|xv6 or TINYOS_OS=egos|xv6) {OS,TINYOS_OS,ARGS,MAX_INST,TIMEOUT}
+os-cli-nsim: ## Boot upstream OS image on NPC/sim where supported (OS=egos|xv6 or TINYOS_OS=egos|xv6) {OS,TINYOS_OS,ARGS,MAX_INST,TIMEOUT}
 	@if [ -z "$(TINYOS_OS_SELECTED)" ]; then echo "[ERR] Set OS=egos|xv6 or TINYOS_OS=egos|xv6"; exit 1; fi
 	@$(MAKE) $(Q) -C $(APP_HOME)/tinyos cli-nsim OS=$(TINYOS_OS_SELECTED) ARGS="$(ARGS)" MAX_INST="$(MAX_INST)" TIMEOUT="$(TIMEOUT)"
 
@@ -540,20 +540,20 @@ os-cli-nemu: ## Boot upstream OS image on NEMU where supported (OS=egos|xv6 or T
 	@if [ -z "$(TINYOS_OS_SELECTED)" ]; then echo "[ERR] Set OS=egos|xv6 or TINYOS_OS=egos|xv6"; exit 1; fi
 	@$(MAKE) $(Q) -C $(APP_HOME)/tinyos cli-nemu OS=$(TINYOS_OS_SELECTED) ARGS="$(ARGS)" MAX_INST="$(MAX_INST)"
 
-egos-cli-nsim: ## Boot upstream egos image on NPC/nsim
+egos-cli-nsim: ## Boot upstream egos image on NPC/sim
 	@$(MAKE) $(Q) -C $(APP_HOME)/tinyos egos-cli-nsim ARGS="$(ARGS)" MAX_INST="$(MAX_INST)" TIMEOUT="$(TIMEOUT)"
 
-egos-cli-nsim-difftest: ## Boot upstream egos image on NPC/nsim with NEMU difftest (auto-configure nsim+ref)
+egos-cli-nsim-difftest: ## Boot upstream egos image on NPC/sim with NEMU difftest (auto-configure sim+ref)
 	@$(MAKE) $(Q) -C $(APP_HOME)/.. config-npc32-difftest config-nemu32-ref
 	@$(MAKE) $(Q) -C $(APP_HOME)/tinyos egos-cli-nsim-difftest ARGS="$(ARGS)" MAX_INST="$(MAX_INST)" TIMEOUT="$(TIMEOUT)"
 
 egos-cli-nemu: ## Boot upstream egos image on NEMU
 	@$(MAKE) $(Q) -C $(APP_HOME)/tinyos egos-cli-nemu ARGS="$(ARGS)" MAX_INST="$(MAX_INST)"
 
-xv6-cli-nsim: ## Boot upstream xv6-riscv on NPC/nsim
+xv6-cli-nsim: ## Boot upstream xv6-riscv on NPC/sim
 	@$(MAKE) $(Q) -C $(APP_HOME)/tinyos xv6-cli-nsim ARGS="$(ARGS)" MAX_INST="$(MAX_INST)" TIMEOUT="$(TIMEOUT)"
 
-xv6-cli-nsim-difftest: ## Boot upstream xv6-riscv on NPC/nsim with NEMU difftest (auto-configure nsim+ref)
+xv6-cli-nsim-difftest: ## Boot upstream xv6-riscv on NPC/sim with NEMU difftest (auto-configure sim+ref)
 	@$(MAKE) $(Q) -C $(APP_HOME)/.. config-npc32-difftest config-nemu64-ref
 	@$(MAKE) $(Q) -C $(APP_HOME)/tinyos xv6-cli-nsim-difftest ARGS="$(ARGS)" MAX_INST="$(MAX_INST)" TIMEOUT="$(TIMEOUT)"
 
@@ -566,7 +566,7 @@ xv6-cli-nemu: ## Boot upstream xv6-riscv on NEMU
 hello-build: ## Build hello ELF
 	@$(MAKE) $(Q) -C $(APP_HOME)/tests/hello build
 
-hello-npc: hello-build ## Build and run hello on NPC/nsim via pk
+hello-npc: hello-build ## Build and run hello on NPC/sim via pk
 	@$(call _pk_run_with,pk-run,$(APP_HOME)/build/rv$(XLEN)/tests/hello/hello.elf)
 
 hello-nemu: hello-build ## Build and run hello on NEMU via pk
@@ -581,7 +581,7 @@ isa-tests-build: ## Build ISA verification tests
 ISA_TESTS := rv_add rv_shift rv_logic rv_mul_div rv_branch rv_slt rv_bitmanip rv_compressed \
              rv_zicond rv_zicsr rv_zifencei rv_zcb rv_zimop
 
-isa-tests-npc: isa-tests-build ## Build and run all ISA tests on NPC/nsim via pk
+isa-tests-npc: isa-tests-build ## Build and run all ISA tests on NPC/sim via pk
 	$(call _pk_run_suite_with,ISA tests,npc,pk-run,$(APP_HOME)/build/rv$(XLEN)/tests/isa,$(ISA_TESTS))
 
 isa-tests-nemu: isa-tests-build ## Build and run all ISA tests on NEMU via pk
@@ -595,7 +595,7 @@ memory-tests-build: ## Build memory tests
 
 MEMORY_TESTS := load_store memory_pattern stack_test memtest
 
-memory-tests-npc: memory-tests-build ## Build and run all memory tests on NPC/nsim via pk
+memory-tests-npc: memory-tests-build ## Build and run all memory tests on NPC/sim via pk
 	$(call _pk_run_suite_with,Memory tests,npc,pk-run,$(APP_HOME)/build/rv$(XLEN)/tests/memory,$(MEMORY_TESTS))
 
 memory-tests-nemu: memory-tests-build ## Build and run all memory tests on NEMU via pk
@@ -609,7 +609,7 @@ algo-tests-build: ## Build algorithm tests
 
 ALGO_TESTS := sorting crc32 math_test string_ops
 
-algo-tests-npc: algo-tests-build ## Build and run all algorithm tests on NPC/nsim via pk
+algo-tests-npc: algo-tests-build ## Build and run all algorithm tests on NPC/sim via pk
 	$(call _pk_run_suite_with,Algorithm tests,npc,pk-run,$(APP_HOME)/build/rv$(XLEN)/tests/algo,$(ALGO_TESTS))
 
 algo-tests-nemu: algo-tests-build ## Build and run all algorithm tests on NEMU via pk
@@ -624,7 +624,7 @@ security-tests-build: ## Build security / side-channel tests
 SECURITY_TESTS := cache-timing fence-timing bpu-collision \
                   spectre-v1 spectre-v2 spec-store-bypass
 
-security-tests-npc: security-tests-build ## Build and run all security tests on NPC/nsim via pk
+security-tests-npc: security-tests-build ## Build and run all security tests on NPC/sim via pk
 	$(call _pk_run_suite_with,Security tests,npc,pk-run,$(APP_HOME)/build/rv$(XLEN)/tests/security,$(SECURITY_TESTS))
 
 security-tests-nemu: security-tests-build ## Build and run all security tests on NEMU via pk
@@ -635,7 +635,7 @@ security-tests-nemu: security-tests-build ## Build and run all security tests on
 # ============================================================================
 tests-build: hello-build isa-tests-build memory-tests-build algo-tests-build security-tests-build ## Build all tests
 
-tests-npc: hello-npc isa-tests-npc memory-tests-npc algo-tests-npc security-tests-npc ## Run all tests on NPC/nsim via pk
+tests-npc: hello-npc isa-tests-npc memory-tests-npc algo-tests-npc security-tests-npc ## Run all tests on NPC/sim via pk
 
 tests-nemu: hello-nemu isa-tests-nemu memory-tests-nemu algo-tests-nemu security-tests-nemu ## Run all tests on NEMU via pk
 
@@ -647,7 +647,7 @@ demos-build: ## Build demo programs
 
 DEMOS := donut cmatrix langton life hanoi mandelbrot sysinfo
 
-demos-npc: demos-build ## Build and run all demos on NPC/nsim via pk
+demos-npc: demos-build ## Build and run all demos on NPC/sim via pk
 	$(call _pk_run_suite_with,Demo programs,npc,pk-run,$(APP_HOME)/build/rv$(XLEN)/demos,$(DEMOS))
 
 demos-nemu: demos-build ## Build and run all demos on NEMU via pk

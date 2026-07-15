@@ -8,17 +8,15 @@ on:
   push:
     branches: ["master", "main"]
     paths:
-      - "rtl_sv/**"
-      - "rtl_scala/**"
-      - "nsim/**"
+      - "hdl/**"
+      - "sim/**"
       - ".github/scripts/**"
       - ".github/workflows/sta.yaml"
   pull_request:
     branches: ["master", "main"]
     paths:
-      - "rtl_sv/**"
-      - "rtl_scala/**"
-      - "nsim/**"
+      - "hdl/**"
+      - "sim/**"
       - ".github/scripts/**"
       - ".github/workflows/sta.yaml"
   schedule:

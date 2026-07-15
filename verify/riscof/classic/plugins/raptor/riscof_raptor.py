@@ -1,8 +1,8 @@
 """RISCOF DUT plugin for Raptor Chip (classic RISCOF flow).
 
 Compiles each test through `riscv64-elf-gcc`, extracts the signature region
-symbols from the ELF, then runs the binary on the Raptor nsim simulator with
-`--sig=<begin>-<end>:<signature_path>` so that nsim writes the RISCOF signature
+symbols from the ELF, then runs the binary on the Raptor sim simulator with
+`--sig=<begin>-<end>:<signature_path>` so that sim writes the RISCOF signature
 directly.  No difftest is needed: RISCOF compares the DUT signature against
 the sail reference signature.
 """
@@ -46,7 +46,7 @@ class raptor(pluginTemplate):
         self.npc_bin = os.environ.get("NPC_BIN")
         self.mrom_img = os.environ.get("MROM_IMG")
         self.timeout = os.environ.get("RAPT_TIMEOUT", "30")
-        # The nsim binary expects its working directory to be $NSIM_HOME
+        # The sim binary expects its working directory to be $NSIM_HOME
         # because it dlopen()s capstone via a relative path. All test
         # inputs/outputs we pass on the command line are absolute.
         self.nsim_home = os.environ.get("NSIM_HOME")

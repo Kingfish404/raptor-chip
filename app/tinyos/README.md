@@ -4,8 +4,8 @@ This directory hosts the Raptor app-layer integration for tiny teaching OSes.
 
 Current scope:
 - Source sync helper for upstream trees under `app/tinyos/`
-- Clean temporary build-copy flow for NPC/nsim and NEMU
-- NPC/nsim egos/xv6 boot helpers
+- Clean temporary build-copy flow for NPC/sim and NEMU
+- NPC/sim egos/xv6 boot helpers
 - NEMU egos/xv6 boot helpers
 - Direct upstream CLI entry helpers for egos/xv6 on QEMU
 
@@ -17,7 +17,7 @@ The integration expects source trees at:
 
 These directories are treated as upstream source checkouts. The sim targets
 export a clean copy of each checkout's `HEAD` into
-`app/build/tinyos-nsim-src/`. NPC/nsim and NEMU use upstream-compatible QEMU
+`app/build/tinyos-sim-src/`. NPC/sim and NEMU use upstream-compatible QEMU
 device paths, so no tinyos OS patches are required.
 
 Use:
@@ -32,11 +32,11 @@ make -C app tinyos-sync
 
 `egos-cli-nsim` boots the upstream egos QEMU image path without an egos patch:
 `tools/egos.bin` is loaded as the boot image and `tools/disk.img` is attached
-through nsim's QEMU-compatible SDHCI model at `0x40000000` with PCI ECAM at
+through sim's QEMU-compatible SDHCI model at `0x40000000` with PCI ECAM at
 `0x30008000`. `egos-cli-nemu` uses the same image pair through NEMU's optional
 `--sdcard` path.
 
-On NPC/nsim, egos keeps its upstream translation prompt. Enter `0` to boot with
+On NPC/sim, egos keeps its upstream translation prompt. Enter `0` to boot with
 Sv32 page-table translation and exercise the RTL hardware PTW, or enter `1` to
 boot with egos' software TLB path. UART RX is wired through the simulator, so
 bounded smoke tests can pipe the selection and simple shell input, for example:
@@ -53,15 +53,15 @@ the hardware PTW path was active before the artificial limit stopped the run.
 
 `xv6-cli-nsim` builds an unpatched temporary copy of upstream xv6-riscv as an
 RV64/Sv39 kernel, objcopies `kernel/kernel` to `kernel/kernel.bin`, copies
-`fs.img` to a temporary disk, and passes that image to nsim through `DISK=...` /
-`--disk`. The nsim virtio-blk model keeps writes in memory, so repeated bounded
+`fs.img` to a temporary disk, and passes that image to sim through `DISK=...` /
+`--disk`. The sim virtio-blk model keeps writes in memory, so repeated bounded
 debug runs do not mutate the source `fs.img`.
 
 The current xv6 path has passed the former paging and device blockers without
-requiring xv6 source patches on nsim/NEMU:
-hardware PTW A/D writeback lets xv6 run with Sv39 leaf PTEs, the nsim
+requiring xv6 source patches on sim/NEMU:
+hardware PTW A/D writeback lets xv6 run with Sv39 leaf PTEs, the sim
 virtio-blk model serves `fs.img`, RV64 CLINT/PLIC internal MMIO obeys AXI byte
-lane semantics, and the nsim 16550 model raises TX-empty interrupts so xv6's
+lane semantics, and the sim 16550 model raises TX-empty interrupts so xv6's
 `uartwrite()` can wake after each byte. A cold bounded run reaches the shell
 prompt with a 12M cycle/instruction-limit window:
 
@@ -98,7 +98,7 @@ make -C app egos-cli-qemu
 make -C app os-cli-qemu OS=xv6
 make -C app os-cli-qemu OS=egos
 
-# Boot OS images on NPC/nsim where supported
+# Boot OS images on NPC/sim where supported
 make -C app xv6-cli-nsim ARGS="-b -n"
 make -C app egos-cli-nsim ARGS="-b -n"
 make -C app egos-cli-nemu ARGS="-b -n"
@@ -121,7 +121,7 @@ make egos-cli-qemu
 make cli-qemu OS=xv6
 make cli-qemu OS=egos
 
-# Boot OS images on NPC/nsim where supported
+# Boot OS images on NPC/sim where supported
 make xv6-cli-nsim ARGS="-b -n"
 make egos-cli-nsim ARGS="-b -n"
 make egos-cli-nemu ARGS="-b -n"

@@ -1,7 +1,7 @@
 # ==============================================================================
 # Strategy: deny-all + whitelist.
 # All files ignored by default; directories allowed for traversal.
-# Self-contained subdirs (nemu, nsim, abstract-machine, fpga/)
+# Self-contained subdirs (nemu, sim, abstract-machine, fpga/)
 # have their own deny-all .gitignore.
 # Non-self-contained subdirs are whitelisted below.
 # ==============================================================================
@@ -26,7 +26,7 @@
 !/.github/**
 /.github/*.md
 
-# ---- HDL sources (global whitelist for rtl_sv/) ----
+# ---- HDL sources (global whitelist for hdl/) ----
 !*.v
 !*.vh
 !*.sv
@@ -36,16 +36,14 @@
 !/fpga/litex/benchmarks/embench/patches/*.patch
 
 # ---- Non-self-contained directories (need root whitelist) ----
-!/configs/*
 !/docs/*
 !/linux/*
-!/rtl_scala/*
-!/rtl_sv/*
+!/hdl/**
 !/verify/*
 
 # ---- Re-ignore: generated, third-party, synthesis, local config ----
-/rtl_sv/generated/
-/rtl_scala/target/
+/hdl/generated/
+/hdl/chisel/target/
 /third_party/
 /docs-*/
 /syn/

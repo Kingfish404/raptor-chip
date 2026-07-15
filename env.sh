@@ -15,7 +15,7 @@ echo "BASE_DIR => $BASE_DIR"
 export RAPTOR_HOME=$BASE_DIR
 
 export NEMU_HOME=$RAPTOR_HOME/nemu
-export NSIM_HOME=$RAPTOR_HOME/nsim
+export NSIM_HOME=$RAPTOR_HOME/sim
 
 export AM_HOME=$RAPTOR_HOME/abstract-machine
 export NAVY_HOME=$RAPTOR_HOME/abstract-machine/app/navy-apps

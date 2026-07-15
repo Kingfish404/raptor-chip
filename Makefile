@@ -3,7 +3,7 @@
 # ============================================================================
 export RAPTOR_HOME := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 export NEMU_HOME := $(RAPTOR_HOME)/nemu
-export NSIM_HOME := $(RAPTOR_HOME)/nsim
+export NSIM_HOME := $(RAPTOR_HOME)/sim
 export AM_HOME   := $(RAPTOR_HOME)/abstract-machine
 export NAVY_HOME := $(RAPTOR_HOME)/abstract-machine/app/navy-apps
 export NVBOARD_HOME := $(RAPTOR_HOME)/third_party/NJU-ProjectN/nvboard
@@ -12,15 +12,15 @@ export CROSS_COMPILE ?= riscv64-elf-
 # Default to batch mode (no interactive prompt). Override with ARGS="" to disable.
 ARGS ?= -b -n ## Pass args to runner (-b: batch, -n: no wave)
 IMG ?= ## Custom image to load
-DISK ?= ## Virtio block disk image to pass to nsim
-SDCARD ?= ## QEMU SDHCI SD-card image to pass to nsim/NEMU
+DISK ?= ## Virtio block disk image to pass to sim
+SDCARD ?= ## QEMU SDHCI SD-card image to pass to sim/NEMU
 MAX_INST ?= ## Max instructions to execute (-m N)
 TIMEOUT ?=## Wall-clock timeout in seconds for selected simulator runs
 TINYOS_OS ?=## TinyOS payload selector: egos or xv6
 QEMU ?=## Override QEMU executable for OS CLI helpers
 
-# Raptor uarch config preset (selects configs/<name>/rapt_config.svh).
-# Exported so it propagates through chained sub-makes (nsim, am-kernels, app, ...).
+# Raptor uarch config preset (selects hdl/configs/<name>/rapt_config.svh).
+# Exported so it propagates through chained sub-makes (sim, am-kernels, app, ...).
 RAPT_CONFIG ?= default ## Raptor uarch config preset (default|small|...)
 # `?=` keeps the trailing space before `##` in the value; strip it so paths
 # like `$(NSIM_HOME)/build/$(RAPT_CONFIG)/...` don't end up with a stray
@@ -30,7 +30,7 @@ export RAPT_CONFIG
 
 # ============================================================================
 # Guard: only define project-level targets when invoked from root directory.
-# Subprojects (nsim, nemu) include this file for env vars only.
+# Subprojects (sim, nemu) include this file for env vars only.
 # ============================================================================
 ifeq ($(abspath $(dir $(firstword $(MAKEFILE_LIST)))),$(RAPTOR_HOME))
 
@@ -53,15 +53,15 @@ NPROC := $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 JOBS ?= $(NPROC)## Parallel simulator instances for multi-binary test suites
 
 # ============================================================================
-# Test/benchmark output logging (tee to nsim/build/<config>/logs/)
+# Test/benchmark output logging (tee to sim/build/<config>/logs/)
 #
 # All benchmark/test recipes pipe their output through `tee` to a per-target
-# log file under nsim/build/<RAPT_CONFIG>/logs/ (NPC) or nemu/build/logs/
+# log file under sim/build/<RAPT_CONFIG>/logs/ (NPC) or nemu/build/logs/
 # (NEMU). This persists results so they can be inspected later without
 # re-running the simulator.
 #
 # Wrappers:
-#   $(call tee_npc,name)  -> ` 2>&1 | tee nsim/build/<config>/logs/<name>.log`
+#   $(call tee_npc,name)  -> ` 2>&1 | tee sim/build/<config>/logs/<name>.log`
 #   $(call tee_nemu,name) -> ` 2>&1 | tee nemu/build/logs/<name>.log`
 #
 # Generic escape hatch for any target not pre-wrapped:
@@ -80,14 +80,14 @@ tee_nemu   = 2>&1 | { mkdir -p $(NEMU_LOG_DIR); tee $(NEMU_LOG_DIR)/$(1).log; }
 tee_app    = 2>&1 | { mkdir -p $(APP_LOG_DIR); tee $(APP_LOG_DIR)/$(1).log; }
 tee_verify = 2>&1 | { mkdir -p $(VERIFY_LOG_DIR); tee $(VERIFY_LOG_DIR)/$(1).log; }
 
-log: ## Run TARGET=<target> with stdout/stderr tee'd to nsim/build/<config>/logs/$(LOG_NAME).log
+log: ## Run TARGET=<target> with stdout/stderr tee'd to sim/build/<config>/logs/$(LOG_NAME).log
 	@test -n "$(TARGET)" || { echo "Usage: make log TARGET=<target> [LOG_NAME=<stem>]"; exit 1; }
 	@mkdir -p $(NPC_LOG_DIR)
 	@stem="$(if $(LOG_NAME),$(LOG_NAME),$(TARGET))"; \
 	  echo "[log] $(NPC_LOG_DIR)/$$stem.log"; \
 	  set -o pipefail; $(MAKE) --no-print-directory $(TARGET) 2>&1 | tee "$(NPC_LOG_DIR)/$$stem.log"
 
-logs-show: ## List all persisted test/benchmark logs under nsim/build/ and nemu/build/logs/
+logs-show: ## List all persisted test/benchmark logs under sim/build/ and nemu/build/logs/
 	@find $(NSIM_HOME)/build $(NEMU_LOG_DIR) -type f -name '*.log' 2>/dev/null | sort
 
 logs-clean: ## Remove all persisted test/benchmark logs
@@ -143,7 +143,7 @@ setup-rtl: ## Install dependencies and initialize RTL workspace
 # RTL Generation (Chisel -> SystemVerilog)
 # ============================================================================
 verilog: ## Generate SystemVerilog from Chisel (Scala)
-	$(MAKE) -C $(RAPTOR_HOME)/rtl_scala verilog
+	$(MAKE) -C $(RAPTOR_HOME)/hdl/chisel verilog
 
 # ============================================================================
 # NEMU Targets
@@ -247,7 +247,7 @@ NPC_ARCH ?= riscv32-npc ## Override ARCH for AM targets
 YSYXSOC_ARCH ?= riscv32-ysyxsoc ## Override ARCH for ysyxSoC targets
 
 # RV64 mode: set via `make run-npc64` or explicitly `make run-npc32 VFLAGS="-DRAPT_RV64"`.
-# NSIM Verilator simulation enables RTL assertions by default via RAPT_SIM_ASSERT;
+# sim Verilator simulation enables RTL assertions by default via RAPT_SIM_ASSERT;
 # pack/STA/FPGA synthesis paths do not receive the default assertion define.
 VFLAGS ?= ## Extra RTL defines for NPC (-DRAPT_RV64, etc.)
 RAPT_SIM_ASSERT ?= 1## Enable RTL SVA assertions by default in NPC Verilator simulation (1=on, 0=off)
@@ -268,7 +268,7 @@ config-npc32-ysyxsoc:
 
 
 # Auto-generate RTL from Chisel if generated/ doesn't exist
-GENERATED_DIR := $(RAPTOR_HOME)/rtl_sv/generated
+GENERATED_DIR := $(RAPTOR_HOME)/hdl/generated
 
 $(GENERATED_DIR):
 	$(MAKE) verilog
@@ -381,7 +381,7 @@ cpu-tests-npc32: build-npc32 ## Run AM cpu-tests on NPC (parallel)
 
 # --- Bare-metal IRQ tests (PLIC, etc) -------------------------------------
 # Each test is a standalone M-mode .bin loaded directly at 0x80000000 via
-# the nsim positional IMG argument. No pk/AM dependency.
+# the sim positional IMG argument. No pk/AM dependency.
 IRQ_TESTS_DIR  := $(RAPTOR_HOME)/app/build/rv32/tests/irq
 IRQ_TESTS_SRC_DIR := $(RAPTOR_HOME)/app/tests/irq
 IRQ_TESTS      := $(notdir $(basename $(wildcard $(IRQ_TESTS_SRC_DIR)/*.c)))
@@ -490,7 +490,7 @@ COREMARK_OPTIM_CFLAGS := \
 	--param=uninlined-function-insns=8 --param=loop-max-datarefs-for-datadeps=0 \
 	-fipa-pta -fno-tree-vrp -fwrapv
 
-# Parse a tee'd CoreMark + nsim run log and print the CoreMark/MHz score.
+# Parse a tee'd CoreMark + sim run log and print the CoreMark/MHz score.
 # $(1) = path to the log file produced by tee_npc.
 define coremark_mhz_report
 @awk '/^[ \t]*Iterations[ \t]*:/{for(i=1;i<=NF;i++)if($$i~/^[0-9]+$$/)it=$$i} /#inst:/{if(match($$0,/cycle:[ \t]*[0-9]+/)){c=substr($$0,RSTART,RLENGTH);gsub(/[^0-9]/,"",c);cy=c}} END{if(it+0>0&&cy+0>0){printf "\n==================== CoreMark/MHz ====================\n";printf "Iterations    : %d\n",it;printf "Active cycles : %d\n",cy;printf "CoreMark/MHz  : %.4f  (= %d * 1e6 / %d)\n",it*1000000.0/cy,it,cy;printf "======================================================\n"}else{printf "[CoreMark/MHz] WARN: could not parse iterations(%s) / cycles(%s) from %s\n",it,cy,"$(1)"}}' "$(1)"
@@ -509,7 +509,7 @@ coremark-npc64-optim: $(AM_KERNELS) config-npc32 ## Run CoreMark on NPC (riscv64
 
 # --- Dhrystone (DMIPS / DMIPS/MHz) ----------------------------------------
 # Mirrors the CoreMark integration. DMIPS/MHz is frequency-independent and
-# derived from the nsim PMU active-cycle count, matching how CoreMark/MHz is
+# derived from the sim PMU active-cycle count, matching how CoreMark/MHz is
 # computed (so the frequency assumption is identical to CoreMark's). Absolute
 # DMIPS is then DMIPS/MHz * DHRY_FREQ_MHZ.
 #   DMIPS/MHz = Number_Of_Runs * 1e6 / (active_cycles * 1757)
@@ -517,7 +517,7 @@ coremark-npc64-optim: $(AM_KERNELS) config-npc32 ## Run CoreMark on NPC (riscv64
 # 1757 is the VAX-11/780 reference (1 DMIPS == 1757 Dhrystones/s).
 DHRY_FREQ_MHZ ?= 180 ## Assumed clock (MHz) for absolute DMIPS (DMIPS/MHz is frequency-independent)
 
-# Parse a tee'd Dhrystone + nsim run log and print the DMIPS / DMIPS/MHz score.
+# Parse a tee'd Dhrystone + sim run log and print the DMIPS / DMIPS/MHz score.
 # $(1) = path to the log file produced by tee_npc.
 define dhrystone_dmips_report
 @awk -v freq=$(DHRY_FREQ_MHZ) '/^[ \t]*Number_Of_Runs[ \t]*:/{for(i=1;i<=NF;i++)if($$i~/^[0-9]+$$/)runs=$$i} /#inst:/{if(match($$0,/cycle:[ \t]*[0-9]+/)){c=substr($$0,RSTART,RLENGTH);gsub(/[^0-9]/,"",c);cy=c}} END{if(runs+0>0&&cy+0>0){dpm=runs*1000000.0/(cy*1757.0);printf "\n==================== Dhrystone DMIPS ====================\n";printf "Runs          : %d\n",runs;printf "Active cycles : %d\n",cy;printf "Assumed freq  : %d MHz\n",freq;printf "DMIPS/MHz     : %.4f  (= %d * 1e6 / (%d * 1757))\n",dpm,runs,cy;printf "DMIPS         : %.2f  (= DMIPS/MHz * %d MHz)\n",dpm*freq,freq;printf "========================================================\n"}else{printf "[DMIPS] WARN: could not parse runs(%s) / cycles(%s) from %s\n",runs,cy,"$(1)"}}' "$(1)"
@@ -604,7 +604,7 @@ linux-download: ## Download pre-built Linux (RV32 + RV64)
 # Canned recipes: download payload, (re)build sim with VFLAGS, run + tee log.
 # $(1) = rv32|rv64 (linux/Makefile download suffix), $(2) = payload image,
 # $(3) = log stem.
-# $(4) = optional nsim variable override.
+# $(4) = optional sim variable override.
 define linux_boot_npc
 	$(MAKE) -C $(LINUX_HOME) download-$(1)
 	$(MAKE) -C $(NSIM_HOME) -j$(NPROC) VFLAGS="$(VFLAGS)"
@@ -645,12 +645,12 @@ linux-boot-nemu64-device: config-nemu64-linux-device ## Boot Linux on NEMU RV64 
 	$(MAKE) -C $(NEMU_HOME) run IMG=$(LINUX_RV64_PAYLOAD) ARGS="$(DEVICE_ARGS)"
 
 # ----------------------------------------------------------------------------
-# Linux boot checkpoint save/restore (architectural snapshot of nsim).
+# Linux boot checkpoint save/restore (architectural snapshot of sim).
 # Saves arch state + memory at a chosen cycle, restores via an MROM trampoline
 # that re-runs through real lw/csrw/mret instructions. Pure architectural
 # checkpoint — survives RTL/microarch changes.
 # ----------------------------------------------------------------------------
-CKPT_DIR   ?= $(RAPTOR_HOME)/nsim/data/ckpt-linux-rv32 ## Checkpoint directory (save target / load source)
+CKPT_DIR   ?= $(RAPTOR_HOME)/sim/data/ckpt-linux-rv32 ## Checkpoint directory (save target / load source)
 CKPT_CYCLE ?= 1000000 ## Cycle at which to take the checkpoint
 
 linux-boot-npc32-ckpt-save: config-npc32-linux ## Boot Linux on NPC, save checkpoint at CKPT_CYCLE -> CKPT_DIR
@@ -691,7 +691,7 @@ ide-setup: compile-commands ## Generate compile_commands.json for IDE/LSP setup
 	@echo "[ide-setup] clangd-based editors will pick it up via .clangd"
 	@echo "[ide-setup] VS Code can open raptor-chip.code-workspace"
 
-compile-commands: ## Generate root compile_commands.json from real NEMU+NSIM build commands
+compile-commands: ## Generate root compile_commands.json from real NEMU+sim build commands
 	bash $(RAPTOR_HOME)/.github/scripts/gen_compile_commands.sh
 
 STA_PLATFORM ?= nangate45 ## STA platform: nangate45, asap7, sky130hd
@@ -714,7 +714,7 @@ sta-detail-rv64: sta-detail ## Detailed static timing analysis in RV64 mode
 
 SRAM_PLATFORM ?= sky130 ## OpenRAM technology for SRAM macros (sky130, freepdk45)
 
-sram-macros: ## Compile OpenRAM SRAM macros for cache data arrays (see nsim/sram/README.md)
+sram-macros: ## Compile OpenRAM SRAM macros for cache data arrays (see sim/sram/README.md)
 	$(MAKE) -C $(NSIM_HOME) sram-macros SRAM_PLATFORM=$(SRAM_PLATFORM)
 
 sram-stubs: ## Generate behavioural SRAM .lib/.v stubs (placeholder timing, no PDK needed)
@@ -745,7 +745,7 @@ clean-npc: ## Clean NPC build only
 clean: ## Clean all build artifacts
 	-$(MAKE) -C $(NEMU_HOME) clean 2>/dev/null || true
 	-$(MAKE) -C $(NSIM_HOME) clean 2>/dev/null || true
-	-$(MAKE) -C $(RAPTOR_HOME)/rtl_scala clean 2>/dev/null || true
+	-$(MAKE) -C $(RAPTOR_HOME)/hdl/chisel clean 2>/dev/null || true
 	-$(MAKE) -C $(RAPTOR_HOME)/verify clean 2>/dev/null || true
 	-$(MAKE) -C $(RAPTOR_HOME)/app clean 2>/dev/null || true
 
@@ -864,19 +864,19 @@ egos-cli-qemu: ## [app] Enter egos CLI on QEMU
 xv6-cli-qemu: ## [app] Enter xv6 CLI on QEMU
 	@$(MAKE) --no-print-directory -C $(APP_HOME) xv6-cli-qemu $(if $(QEMU),QEMU="$(QEMU)",)
 
-os-cli-nsim: ## [app] Boot upstream OS image on NPC/nsim (OS=egos|xv6 or TINYOS_OS=egos|xv6)
+os-cli-nsim: ## [app] Boot upstream OS image on NPC/sim (OS=egos|xv6 or TINYOS_OS=egos|xv6)
 	@$(MAKE) --no-print-directory -C $(APP_HOME) os-cli-nsim OS="$(OS)" TINYOS_OS="$(TINYOS_OS)" ARGS="$(ARGS)" MAX_INST="$(MAX_INST)" TIMEOUT="$(TIMEOUT)"
 
 os-cli-nemu: ## [app] Boot upstream OS image on NEMU (OS=egos|xv6 or TINYOS_OS=egos|xv6)
 	@$(MAKE) --no-print-directory -C $(APP_HOME) os-cli-nemu OS="$(OS)" TINYOS_OS="$(TINYOS_OS)" ARGS="$(ARGS)" MAX_INST="$(MAX_INST)"
 
-egos-cli-nsim: ## [app] Boot upstream egos image on NPC/nsim
+egos-cli-nsim: ## [app] Boot upstream egos image on NPC/sim
 	@$(MAKE) --no-print-directory -C $(APP_HOME) egos-cli-nsim ARGS="$(ARGS)" MAX_INST="$(MAX_INST)" TIMEOUT="$(TIMEOUT)"
 
 egos-cli-nemu: ## [app] Boot upstream egos image on NEMU
 	@$(MAKE) --no-print-directory -C $(APP_HOME) egos-cli-nemu ARGS="$(ARGS)" MAX_INST="$(MAX_INST)"
 
-xv6-cli-nsim: ## [app] Boot upstream xv6-riscv on NPC/nsim
+xv6-cli-nsim: ## [app] Boot upstream xv6-riscv on NPC/sim
 	@$(MAKE) --no-print-directory -C $(APP_HOME) xv6-cli-nsim ARGS="$(ARGS)" MAX_INST="$(MAX_INST)" TIMEOUT="$(TIMEOUT)"
 
 xv6-cli-nemu: ## [app] Boot upstream xv6-riscv on NEMU

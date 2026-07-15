@@ -11,9 +11,8 @@ on:
   push:
     branches: [ "master", "main" ]
     paths:
-      - "rtl_sv/**"
-      - "rtl_scala/**"
-      - "nsim/**"
+      - "hdl/**"
+      - "sim/**"
       - "abstract-machine/**"
       - "app/**"
       - ".github/scripts/**"
@@ -21,9 +20,8 @@ on:
   pull_request:
     branches: [ "master", "main" ]
     paths:
-      - "rtl_sv/**"
-      - "rtl_scala/**"
-      - "nsim/**"
+      - "hdl/**"
+      - "sim/**"
       - "abstract-machine/**"
       - "app/**"
       - ".github/scripts/**"

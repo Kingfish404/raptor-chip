@@ -17,4 +17,4 @@ prep -top formal_bus
 
 [files]
 formal_bus.sv
-rapt_pack.sv ./../../nsim/build/default/rapt_pack.sv
+rapt_pack.sv ./../../sim/build/default/rapt_pack.sv

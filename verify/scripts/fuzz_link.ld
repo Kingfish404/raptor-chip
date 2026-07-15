@@ -1,7 +1,7 @@
 /* ==========================================================================
  * Linker script for fuzz/sigtest programs targeting Raptor Chip NPC sim.
  *
- * Memory map must match nsim expectations:
+ * Memory map must match sim expectations:
  *   - MROM at 0x20000000 (bootloader, jumps to MBASE)
  *   - User code/data loaded at MBASE = 0x80000000
  * ========================================================================== */

@@ -7,7 +7,7 @@ Simulators, FPGA boards, ASIC flow, software stack, and memory maps.
 | Target      | Purpose                           | Entry                                                         |
 | ----------- | --------------------------------- | ------------------------------------------------------------- |
 | NEMU        | Software ISS (difftest reference) | `nemu/README.md`                                              |
-| NPC         | Verilator simulator               | `nsim/README.md`                                              |
+| NPC         | Verilator simulator               | `sim/`                                                        |
 | ysyxSoC     | Chisel SoC for testing            | [memory map](#ysyxsoc-memory-map)                             |
 | FPGA        | Gowin Tang Nano 20K, LiteX        | `fpga/gowin-tang-nano-20k/README.md`, `fpga/litex/README.md`  |
 | ASIC (open) | Yosys + OpenSTA flow              | [yosys-opensta](https://github.com/Kingfish404/yosys-opensta) |
@@ -17,7 +17,7 @@ Simulators, FPGA boards, ASIC flow, software stack, and memory maps.
 | Simulator   | Role                                 | Entry                        |
 | ----------- | ------------------------------------ | ---------------------------- |
 | **NEMU**    | Software ISS, reference model        | `make run-nemu32`, `nemu/`   |
-| **NPC**     | Verilator, cycle-accurate, waveform  | `make sim-npc32`, `nsim/`    |
+| **NPC**     | Verilator, cycle-accurate, waveform  | `make sim-npc32`, `sim/`     |
 | **raptSoC** | Chisel SoC wrapping Raptor + devices | `make coremark-ysyxsoc` etc. |
 
 NPC is the primary development simulator. NEMU acts as the difftest reference for every commit.

@@ -151,17 +151,17 @@ class Raptor(CPU):
             os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", ".."),
         )
         raptor_home = os.path.abspath(raptor_home)
-        rtl_dir = os.path.join(raptor_home, "rtl_sv")
+        rtl_dir = os.path.join(raptor_home, "hdl")
 
         # Pack all SV into a single preprocessed file for synthesis tools.
-        # nsim/Makefile scopes its build outputs per RAPT_CONFIG, so mirror
+        # sim/Makefile scopes its build outputs per RAPT_CONFIG, so mirror
         # that layout here when locating the packed RTL.
         env_config_for_path = os.environ.get("RAPT_CONFIG", "") or "default"
-        pack_dir = os.path.join(raptor_home, "nsim", "build", env_config_for_path)
+        pack_dir = os.path.join(raptor_home, "sim", "build", env_config_for_path)
         pack_sv = os.path.join(pack_dir, "rapt_pack.sv")
 
         # Allow the integrator (e.g. FPGA target) to override RTL preprocessor
-        # defines via env. nsim/Makefile auto-invalidates the pack when VFLAGS
+        # defines via env. sim/Makefile auto-invalidates the pack when VFLAGS
         # changes, so switching presets just works.
         env_vflags = os.environ.get("RAPT_PACK_VFLAGS", "")
         if variant in ("linux", "linux64") and "-DRAPT_LINUX" not in env_vflags:
@@ -169,7 +169,7 @@ class Raptor(CPU):
         if variant == "linux64" and "-DRAPT_RV64" not in env_vflags:
             env_vflags = (env_vflags + " -DRAPT_RV64").strip()
 
-        # Allow the integrator to pick a config preset (configs/<name>/).
+        # Allow the integrator to pick an RTL config preset (hdl/configs/<name>/).
         env_config = os.environ.get("RAPT_CONFIG", "")
 
         # Always re-invoke the pack rule; the underlying Makefile uses file
@@ -178,12 +178,12 @@ class Raptor(CPU):
         # Use subprocess instead of os.system: avoids shell injection on the
         # VFLAGS / RAPT_CONFIG pass-through and silences the Pylance
         # `os.system is deprecated` notice.
-        cmd = ["make", "-C", os.path.join(raptor_home, "nsim"), "pack"]
+        cmd = ["make", "-C", os.path.join(raptor_home, "sim"), "pack"]
         if env_vflags:
             cmd.append(f"VFLAGS={env_vflags}")
         if env_config:
             cmd.append(f"RAPT_CONFIG={env_config}")
-        # Force the NPC (non-ysyxSoC) source set regardless of nsim's Kconfig
+        # Force the NPC (non-ysyxSoC) source set regardless of sim's Kconfig
         # state: a leftover CONFIG_MODE="soc" (from ysyxsoc sim targets) would
         # otherwise pull ysyxSoC peripherals (PSRAM/SPI, `default_nettype none)
         # into the pack and break Vivado synthesis.
@@ -207,7 +207,7 @@ class Raptor(CPU):
         # gives MTIME_DIV=100 and any firmware that assumes
         # `EE_TICKS_PER_SEC == sys_clk_freq` (e.g. CoreMark) reports
         # wall-clock times that are 100x too small.
-        # Injected via RAPT_PACK_VFLAGS so it flows into the nsim pack rule
+        # Injected via RAPT_PACK_VFLAGS so it flows into the sim pack rule
         # (see add_sources below). Only set when the user hasn't already
         # pinned the rate themselves.
         sys_clk_mhz = max(1, int(round(soc.sys_clk_freq / 1_000_000)))

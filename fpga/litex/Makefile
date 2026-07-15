@@ -9,8 +9,8 @@ SHELL         := /bin/bash
 
 LITEX_DIR   := $(abspath .)
 RAPTOR_HOME := $(abspath ../..)
-NSIM_DIR    := $(RAPTOR_HOME)/nsim
-RTL_DIR     := $(RAPTOR_HOME)/rtl_sv
+NSIM_DIR    := $(RAPTOR_HOME)/sim
+RTL_DIR     := $(RAPTOR_HOME)/hdl
 BUILD_DIR   := $(LITEX_DIR)/build
 VENV_DIR    := $(LITEX_DIR)/.venv
 PYTHON      := $(VENV_DIR)/bin/python3
@@ -162,7 +162,7 @@ ifeq ($(LINUX_FPGA_PROFILE),1)
 MEMSPEED_TRACE ?= 0 ## (linux FPGA profile) add LiteX BIOS memspeed phase trace markers
 EXTRA_FLAGS := $(strip $(EXTRA_FLAGS) $(if $(filter 1 yes true on,$(MEMSPEED_TRACE)),--rapt-memspeed-trace,))
 endif
-RAPT_PACK_VFLAGS ?= ## Extra defines passed to the nsim RTL pack rule
+RAPT_PACK_VFLAGS ?= ## Extra defines passed to the sim RTL pack rule
 RAPT_PACK_VFLAGS := $(strip $(RAPT_PACK_VFLAGS))
 RAPT_PACK_SYS_CLK_MHZ := $(shell awk 'BEGIN { printf "%d", ($(SYS_CLK) + 500000) / 1000000 }')
 ifeq (,$(findstring -DRAPT_CORE_CLOCK_MHZ=,$(RAPT_PACK_VFLAGS)))
@@ -201,7 +201,7 @@ $(VENV_DIR)/bin/activate:
 
 PACK_SV := $(NSIM_DIR)/build/$(or $(RAPT_CONFIG),default)/rapt_pack.sv
 
-NSIM_RTL_DIR := $(RAPTOR_HOME)/nsim/rtl
+NSIM_RTL_DIR := $(RAPTOR_HOME)/sim/rtl
 RTL_SOURCES := $(shell find $(RTL_DIR) $(NSIM_RTL_DIR) -type f \( -name '*.sv' -o -name '*.svh' -o -name '*.v' -o -name '*.vh' \) 2>/dev/null)
 
 RAPT_CONFIG_STAMP := $(BUILD_DIR)/.rapt_config_stamp
@@ -368,11 +368,11 @@ LINUX_FPGA_STAGE0_SRAM ?= 0x0f000000 ## SRAM address for stage0 relocation loop
 OS ?= ## Generic OS selector for fpga-tinyos-* helpers: egos or xv6
 TINYOS_OS ?= ## TinyOS OS selector for fpga-tinyos-* helpers: egos or xv6
 LINUX_FPGA_TINYOS_FORCE_RAW ?= 0 ## Set to 1 to raw-upload prepared egos.bin after the compatibility warning
-LINUX_FPGA_EGOS_IMAGE ?= $(RAPTOR_HOME)/app/build/tinyos-nsim-src/egos-2000/tools/egos.bin ## Prepared egos flat image path
-LINUX_FPGA_EGOS_DISK ?= $(RAPTOR_HOME)/app/build/tinyos-nsim-src/egos-2000/tools/disk.img ## Prepared egos disk image path
-LINUX_FPGA_EGOS_KU15P_IMAGE ?= $(RAPTOR_HOME)/app/build/tinyos-nsim-src/egos-2000/tools/egos-ku15p.bin ## KU15P RAM-disk egos image (embedded disk.img)
-LINUX_FPGA_XV6_KERNEL ?= $(RAPTOR_HOME)/app/build/tinyos-nsim-src/xv6-riscv/kernel/kernel.bin ## Prepared xv6 kernel.bin path
-LINUX_FPGA_XV6_DISK ?= $(RAPTOR_HOME)/app/build/tinyos-nsim-src/xv6-riscv/fs.img ## Prepared xv6 fs.img path
+LINUX_FPGA_EGOS_IMAGE ?= $(RAPTOR_HOME)/app/build/tinyos-sim-src/egos-2000/tools/egos.bin ## Prepared egos flat image path
+LINUX_FPGA_EGOS_DISK ?= $(RAPTOR_HOME)/app/build/tinyos-sim-src/egos-2000/tools/disk.img ## Prepared egos disk image path
+LINUX_FPGA_EGOS_KU15P_IMAGE ?= $(RAPTOR_HOME)/app/build/tinyos-sim-src/egos-2000/tools/egos-ku15p.bin ## KU15P RAM-disk egos image (embedded disk.img)
+LINUX_FPGA_XV6_KERNEL ?= $(RAPTOR_HOME)/app/build/tinyos-sim-src/xv6-riscv/kernel/kernel.bin ## Prepared xv6 kernel.bin path
+LINUX_FPGA_XV6_DISK ?= $(RAPTOR_HOME)/app/build/tinyos-sim-src/xv6-riscv/fs.img ## Prepared xv6 fs.img path
 _VSTRIP2 := LINUX_FPGA_RAM_SIZE LINUX_FPGA_TIMEBASE LINUX_FPGA_PAYLOAD LINUX_FPGA_OPENSBI_PAYLOAD LINUX_FPGA_PAYLOAD_OFFSET LINUX_FPGA_DTB_OFFSET LINUX_FPGA_OPENSBI_DTB_OFFSET LINUX_FPGA_DTB_ADDR LINUX_FPGA_STAGE0_SRAM LINUX_FPGA_TINYOS_FORCE_RAW LINUX_FPGA_EGOS_IMAGE LINUX_FPGA_EGOS_DISK LINUX_FPGA_EGOS_KU15P_IMAGE LINUX_FPGA_XV6_KERNEL LINUX_FPGA_XV6_DISK
 $(foreach v,$(_VSTRIP2),$(eval $v := $(strip $($v))))
 LINUX_FPGA_TINYOS_OS := $(strip $(if $(OS),$(OS),$(TINYOS_OS)))
@@ -1280,7 +1280,7 @@ clean-all: clean firmware-clean ## Remove build artifacts + firmware + venv
 	rm -rf $(VENV_DIR)
 	@echo "Virtual environment removed."
 
-lint: ## Lint RTL (via nsim)
+lint: ## Lint RTL (via sim)
 	$(MAKE) -C $(RAPTOR_HOME) lint
 
 _INFO_VARS := RAPTOR_HOME LITEX_DIR VARIANT SYS_CLK RAPT_CONFIG GOWIN_APP GOWIN_BIN_DIR OFL OFL_CABLE WITH_LITEDRAM LITEDRAM_SIZE WITH_MIG MIG_SIZE UART_PORT SIM_TIMEOUT PACK_SV BUILD_DIR PYTHON

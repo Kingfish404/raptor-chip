@@ -177,7 +177,7 @@ static void load_sdcard_image(const char *path)
 
 // ---------------------------------------------------------------------------
 // LiteX SPI SD-card controller (egos HARDWARE platform), at 0xF0008000.
-// Mirrors nsim/csrc/mem/mmio-litex-spi.cc.  Reuses sdcard_image loaded
+// Mirrors sim/csrc/mem/mmio-litex-spi.cc. Reuses sdcard_image loaded
 // above so a single --sdcard image serves both QEMU SDHCI and LiteX SPI.
 // Register layout:
 //   0x00 CONTROL (bit 0 starts a transfer)
@@ -320,7 +320,7 @@ static void litex_spi_io_handler(uint32_t offset, int len, bool is_write) {
   if (is_write) {
     // Snapshot the byte-aligned word that was just written by the dispatcher
     // and update our shadow state.  Only act on CONTROL when the bit-0 byte
-    // (offset 0) is part of the access — matches the nsim model and avoids
+    // (offset 0) is part of the access — matches the sim model and avoids
     // re-triggering on each byte of a 32-bit store.
     bool ctrl_start_byte = false;
     for (int i = 0; i < len; i++) {

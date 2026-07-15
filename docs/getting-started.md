@@ -167,7 +167,7 @@ source ./env.sh
 cd $NEMU_HOME && make riscv32_defconfig && make && make run
 
 # 2. NPC
-cd $RAPTOR_HOME/rtl_scala && make verilog
+cd $RAPTOR_HOME/hdl/chisel && make verilog
 cd $NSIM_HOME && make o2_defconfig && make && make run
 
 # 3. nanos-lite on NEMU (with VME)

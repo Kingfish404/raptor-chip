@@ -2,7 +2,7 @@
 
 Unified verification infrastructure for the Raptor Chip RISC-V processor.
 **Zero RTL modifications required**: all tools reuse the existing Verilator
-simulator (`nsim/`) and NEMU difftest reference model.
+simulator (`sim/`) and NEMU difftest reference model.
 
 ## Quick Start
 
@@ -44,7 +44,7 @@ verify/
 
 Raptor ships inline SVA guarded by `RAPT_ASSERT_EN` for zero default overhead.
 The assertion macros (`RAPT_SVA`, `RAPT_SVA_IMPLY`, `RAPT_SVA_NEXT`, `RAPT_COVER`, ...)
-are defined in [rtl_sv/include/rapt_sva.svh](../rtl_sv/include/rapt_sva.svh) and
+are defined in [hdl/include/rapt_sva.svh](../hdl/include/rapt_sva.svh) and
 auto-included via `rapt.svh`.
 
 ```shell
@@ -144,7 +144,7 @@ make -C formal formal_exu_mul   # Multiplier correctness properties
 
 [riscv-formal](https://github.com/YosysHQ/riscv-formal) performs per-instruction
 formal verification via the RVFI (RISC-V Formal Interface). The Raptor core
-exposes RVFI signals through `rtl_sv/backend/rapt_rvfi.sv` (enabled by
+exposes RVFI signals through `hdl/backend/rapt_rvfi.sv` (enabled by
 `-DRAPT_RVFI`), with NRET=2 for dual-commit.
 
 The riscv-formal repository is **auto-cloned** on first use. Project-owned
@@ -203,7 +203,7 @@ make jtag-debug-tests         # Currently exits 1 with checklist
 ```
 
 Stages the upstream GDB-driven debug-spec suite. The actual run is gated on
-(a) an OpenOCD `remote_bitbang` DPI bridge in `nsim/`, (b) halt/resume +
+(a) an OpenOCD `remote_bitbang` DPI bridge in `sim/`, (b) halt/resume +
 dcsr/dpc CSRs in the core, (c) abstract `access_register`/`access_memory`
 in `rapt_dm`. None of these exists yet — the target prints the gap list and
 exits non-zero rather than silently passing. OpenOCD config scaffold lives

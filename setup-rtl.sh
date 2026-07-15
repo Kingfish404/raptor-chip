@@ -69,12 +69,12 @@ run_setup_rtl() {
   step=$((step + 1))
   echo "Step $step: Running RTL build pipeline..."
   source "$ROOT_DIR/env.sh"
-  if [ -d "$ROOT_DIR/rtl_sv/generated" ] && [ "$(ls -A "$ROOT_DIR/rtl_sv/generated" 2>/dev/null)" ]; then
-    echo "rtl_sv/generated/ exists, skipping Chisel verilog generation"
+  if [ -d "$ROOT_DIR/hdl/generated" ] && [ "$(ls -A "$ROOT_DIR/hdl/generated" 2>/dev/null)" ]; then
+    echo "hdl/generated/ exists, skipping Chisel verilog generation"
   else
-    make -C "$ROOT_DIR/rtl_scala" verilog -j"$(host_nproc)"
+    make -C "$ROOT_DIR/hdl/chisel" verilog -j"$(host_nproc)"
   fi
-  make -C "$ROOT_DIR/nsim" pack
+  make -C "$ROOT_DIR/sim" pack
 
   echo "RTL build environment setup complete."
 }

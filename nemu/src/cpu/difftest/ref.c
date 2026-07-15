@@ -23,7 +23,7 @@
 extern CPU_state cpu;
 
 /* IMPORTANT: This struct layout must stay in sync with the canonical
- * NPCState defined in nsim/include/common.h. */
+ * NPCState defined in sim/include/common.h. */
 typedef struct
 {
   int state;
@@ -235,7 +235,7 @@ __EXPORT void difftest_raise_intr(word_t NO)
 }
 
 // Mirror an external M-mode interrupt line (MEIP, mip bit 11) into ref state.
-// Called every difftest step from nsim with the live `io_interrupt` value
+// Called every difftest step from sim with the live `io_interrupt` value
 // from the DUT, so that software reads of mip[11] match between DUT and ref.
 // MEIP is hardware-controlled (read-only to software per Priv §3.1.9), so
 // writing storage directly here mirrors the DUT's hardwired behaviour.
@@ -256,7 +256,7 @@ __EXPORT void difftest_set_meip(uint8_t val)
 // (menvcfg.STCE=1), STIP is hardware-controlled in the DUT from the
 // stimecmp comparator and is read-only to software (Priv "Sstc"); the
 // reference build defines CONFIG_TARGET_SHARE so its own CLINT never
-// self-drives STIP (clint_update_mip() is compiled out). nsim therefore
+// self-drives STIP (clint_update_mip() is compiled out). sim therefore
 // mirrors the DUT's level value here every difftest step so software reads
 // of sip/mip stay consistent across DUT/ref. Caller only invokes this while
 // Sstc is enabled; with STCE=0, STIP is software-managed and kept in sync by
@@ -284,7 +284,7 @@ __EXPORT void difftest_set_stip(uint8_t val)
 //
 // When the ref is built with CONFIG_DEVICE disabled (the usual SHARE/ref
 // build), the PLIC peripheral is absent and this function is a no-op; the
-// nsim mirror still calls it but no state changes.
+// sim mirror still calls it but no state changes.
 __EXPORT void difftest_plic_raise(uint32_t src)
 {
 #ifdef CONFIG_DEVICE

@@ -32,8 +32,8 @@ int is_exit_status_bad()
  * Configured via --sig=<hex_begin>-<hex_end>:<path> option.  Dumps
  * memory[sig_begin, sig_end) as 4-byte little-endian words, one word
  * per line as 8 lowercase hex chars, matching the RISCOF signature
- * format produced by the sail reference model.  Mirrors the nsim
- * implementation in nsim/csrc/utils/state.cc so the two DUT flows
+ * format produced by the sail reference model.  Mirrors the sim
+ * implementation in sim/csrc/utils/state.cc so the two DUT flows
  * produce byte-identical signatures. */
 
 static paddr_t sig_begin = 0;
