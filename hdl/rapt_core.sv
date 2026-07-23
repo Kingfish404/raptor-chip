@@ -542,12 +542,13 @@ module rapt_core #(
   // L2 cache sits between the L1 bus arbiter and the external AXI4 master
   // port. When RAPT_L2_EN is not defined the L2 collapses to a pure
   // passthrough, so this wiring is a no-op for legacy / SoC flows.
+  mem_link_if memory_link ();
   axi4_if l2_axi ();
 
   rapt_bus bus (
       .clock(clock),
 
-      .axi(l2_axi),
+      .mem(memory_link),
 
       .l1i_bus(l1i_bus),
       .l1d_bus(l1d_bus),
@@ -556,6 +557,23 @@ module rapt_core #(
       .cmu_bcast(cmu_bcast),
 
       .reset(reset)
+  );
+
+`ifdef RAPT_SOC
+    localparam int MemoryReadCredits = 1;
+`else
+    localparam int MemoryReadCredits = 8;
+`endif
+
+  rapt_axi_master #(
+          .XLEN(XLEN),
+          .MAX_READ_OUTSTANDING(MemoryReadCredits)
+  ) axi_master (
+          .clock(clock),
+          .reset(reset),
+
+          .mem(memory_link),
+          .axi(l2_axi)
   );
 
   rapt_l2 l2 (

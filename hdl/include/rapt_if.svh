@@ -21,6 +21,7 @@ interface lsu_l1d_if #(
   logic [4:0] ralu;
   logic rvalid;
   logic atomic_lock;
+  logic ordered;
 
   logic [XLEN-1:0] rdata;
   logic trap;
@@ -46,7 +47,7 @@ interface lsu_l1d_if #(
   logic wready;
 
   modport master(
-      output raddr, ralu, rvalid, atomic_lock,
+      output raddr, ralu, rvalid, atomic_lock, ordered,
       input rdata, trap, cause, difftest_skip, rready,
       output raddr_b, ralu_b, rvalid_b,
       input rdata_b, rready_b,
@@ -54,7 +55,7 @@ interface lsu_l1d_if #(
       input wready
   );
   modport slave(
-      input raddr, ralu, rvalid, atomic_lock,
+      input raddr, ralu, rvalid, atomic_lock, ordered,
       output rdata, trap, cause, difftest_skip, rready,
       input raddr_b, ralu_b, rvalid_b,
       output rdata_b, rready_b,
@@ -71,10 +72,12 @@ interface l1i_bus_if #(
   logic arvalid;
   logic [XLEN-1:0] araddr;
   logic arburst;  // request 2-beat INCR burst (SDRAM)
+    logic ar_ptw;
   logic rready;
 
   logic [XLEN-1:0] rdata;
   logic rvalid;
+    logic ptw_rvalid;
   logic rlast;
   // Bus-error indicator: AXI rresp != OKAY for the routed response beat.
   // Asserted in the same cycle as `rvalid`; treat as fetch access-fault.
@@ -88,18 +91,21 @@ interface l1i_bus_if #(
   logic [7:0] wstrb;
   logic wready;
   logic werr;
+  logic aw_ptw;
+  logic ptw_wready;
+  logic ptw_werr;
 
   modport master(
-      output arvalid, araddr, arburst,
-      input rready, rdata, rvalid, rlast, rerr,
-      output awvalid, awaddr, wvalid, wdata, wstrb,
-      input wready, werr
+      output arvalid, araddr, arburst, ar_ptw,
+      input rready, rdata, rvalid, ptw_rvalid, rlast, rerr,
+      output awvalid, awaddr, wvalid, wdata, wstrb, aw_ptw,
+      input wready, werr, ptw_wready, ptw_werr
   );
   modport slave(
-      input arvalid, araddr, arburst,
-      output rready, rdata, rvalid, rlast, rerr,
-      input awvalid, awaddr, wvalid, wdata, wstrb,
-      output wready, werr
+      input arvalid, araddr, arburst, ar_ptw,
+      output rready, rdata, rvalid, ptw_rvalid, rlast, rerr,
+      input awvalid, awaddr, wvalid, wdata, wstrb, aw_ptw,
+      output wready, werr, ptw_wready, ptw_werr
   );
 endinterface
 
@@ -111,10 +117,12 @@ interface l1d_bus_if #(
   logic arvalid;
   logic [XLEN-1:0] araddr;
   logic [7:0] rstrb;
+    logic ar_ptw;
   logic rready;
 
   logic [XLEN-1:0] rdata;
   logic rvalid;
+    logic ptw_rvalid;
   logic rlast;
   logic difftest_skip;
   // Bus-error indicator on the read channel (AXI rresp != OKAY).
@@ -134,22 +142,25 @@ interface l1d_bus_if #(
   // bare-mode PMA / PMP / MMU PMP before reaching the bus, so a runtime
   // werr indicates a configuration mismatch worth flagging in waves.
   logic werr;
+  logic aw_ptw;
+  logic ptw_wready;
+  logic ptw_werr;
 
   modport master(
-      output arvalid, araddr, rstrb,
+      output arvalid, araddr, rstrb, ar_ptw,
       input rready,
-      input rdata, rvalid, rlast, difftest_skip, rerr,
+      input rdata, rvalid, ptw_rvalid, rlast, difftest_skip, rerr,
 
-      output awvalid, awaddr, wvalid, wdata, wstrb,
-      input wready, werr
+      output awvalid, awaddr, wvalid, wdata, wstrb, aw_ptw,
+      input wready, werr, ptw_wready, ptw_werr
   );
   modport slave(
-      input arvalid, araddr, rstrb,
+      input arvalid, araddr, rstrb, ar_ptw,
       output rready,
-      output rdata, rvalid, rlast, difftest_skip, rerr,
+      output rdata, rvalid, ptw_rvalid, rlast, difftest_skip, rerr,
 
-      input awvalid, awaddr, wvalid, wdata, wstrb,
-      output wready, werr
+      input awvalid, awaddr, wvalid, wdata, wstrb, aw_ptw,
+      output wready, werr, ptw_wready, ptw_werr
   );
 endinterface
 

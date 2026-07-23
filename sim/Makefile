@@ -68,12 +68,18 @@ endif
 BUILD_ROOT = ./build
 BUILD_DIR = $(BUILD_ROOT)/$(RAPT_CONFIG)
 DATA_DIR = ./data
-OBJ_DIR = $(BUILD_DIR)/obj_dir
 ISA_NAME = $(if $(findstring DRAPT_RV64,$(VFLAGS)),riscv64,riscv32)
 NPC_MODE = $(if $(findstring soc,$(call remove_quote,$(CONFIG_MODE))),soc,sim)
-BIN = $(BUILD_DIR)/$(ISA_NAME)-npc-$(NPC_MODE)
-VERILATOR_FLAG =--prof-c --prof-cfuncs \
-	--public \
+RAPT_SIM_PROFILE ?= 0## Enable Verilator C profiling instrumentation (1=on, 0=off)
+RAPT_SIM_PROFILE := $(strip $(RAPT_SIM_PROFILE))
+PROFILE_SUFFIX = $(if $(filter 1,$(RAPT_SIM_PROFILE)),-profile,)
+OBJ_DIR = $(BUILD_DIR)/obj_dir$(PROFILE_SUFFIX)
+BIN = $(BUILD_DIR)/$(ISA_NAME)-npc-$(NPC_MODE)$(PROFILE_SUFFIX)
+VERILATOR_PROFILE_FLAGS :=
+ifeq ($(RAPT_SIM_PROFILE),1)
+VERILATOR_PROFILE_FLAGS := --prof-c --prof-cfuncs
+endif
+VERILATOR_FLAG = $(VERILATOR_PROFILE_FLAGS) --public \
 	--autoflush --timescale "1ns/1ns" --no-timing \
 	-Wno-WIDTHEXPAND -Wno-WIDTHTRUNC # -Wall -Wno-DECLFILENAME -Wno-UNUSED
 VERILATOR_EXTRA ?= ## Extra Verilator CLI flags (e.g. --coverage-line --coverage-toggle)

@@ -69,6 +69,33 @@ FUZZ_DIR  := $(BUILD_DIR)/fuzz
 COV_DIR   := $(BUILD_DIR)/coverage
 AM_KERNELS := $(RAPTOR_HOME)/abstract-machine/app/am-kernels
 
+# riscv-dv uses its pure-Python pyflow generator. Python 3.11 is selected
+# because pyvsc/pyboolector do not currently build with Python 3.14.
+RISCV_DV_REV        ?= b7a0b4b0b51346a3c64f159f81ea262d867c14a9## Pinned upstream revision
+RISCV_DV_DIR        := $(VERIFY_HOME)/riscv-dv
+RISCV_DV_TARGET     := $(VERIFY_HOME)/riscv-dv-target
+RISCV_DV_VENV       := $(BUILD_DIR)/riscv-dv-venv
+RISCV_DV_PYTHON     ?= python3.11## Python 3.10-3.12 interpreter for pyvsc
+RISCV_DV_OUT        ?= $(BUILD_DIR)/riscv-dv## Generated programs and logs
+RISCV_DV_TEST       ?= raptor_privileged_smoke## Test name from riscv-dv-target/testlist.yaml
+RISCV_DV_ITERATIONS ?= 1## Override generated program count
+RISCV_DV_SEED       ?= 1## Reproducible first random seed
+RISCV_DV_TIMEOUT    ?= 120## NPC timeout per delay/seed case
+RISCV_DV_MEM_DELAYS ?= 0 7 31 63 233## AXI random-delay maxima (0..N cycles per beat)
+RISCV_DV_MEM_SEEDS  ?= 1## Reproducible AXI delay seeds
+
+RISCV_DV_ENV = PATH="$(RISCV_DV_VENV)/bin:$$PATH" \
+	PYTHONPATH="$(RISCV_DV_TARGET):$$PYTHONPATH" \
+	RISCV_GCC="$(CC)" RISCV_OBJCOPY="$(OBJCOPY)"
+RISCV_DV_RUN = cd $(RISCV_DV_DIR) && $(RISCV_DV_ENV) \
+	$(RISCV_DV_VENV)/bin/python ./run.py --simulator pyflow \
+	--target raptor_rv32imac --custom_target $(RISCV_DV_TARGET) \
+	--isa rv32imac_zicsr_zifencei --mabi ilp32
+
+define RISCV_DV_TIMEOUT_CMD
+$(if $(TIMEOUT_BIN),$(TIMEOUT_RUN) --kill-after=2 $(1),$(TIMEOUT_RUN) $(1))
+endef
+
 ifeq ($(ISA),rv64)
   NPC_BIN  := $(NPC_BIN_64)
   NEMU_SO  := $(NEMU_SO_64)
@@ -146,6 +173,90 @@ check-prereqs: $(MROM_IMG) ## Verify all prerequisites are built
 	@test -f $(NPC_BIN)  || (echo "ERROR: NPC binary not found: $(NPC_BIN)"  && echo "  Run: make -C $(RAPTOR_HOME) build-npc32" && exit 1)
 	@test -f $(NEMU_SO)  || (echo "ERROR: NEMU SO not found: $(NEMU_SO)"    && echo "  Run: make -C $(RAPTOR_HOME) config-nemu32-ref" && exit 1)
 	@echo "[verify] All prerequisites OK."
+
+# ============================================================================
+# riscv-dv privileged random verification
+# ============================================================================
+.PHONY: riscv-dv riscv-dv-setup riscv-dv-gen riscv-dv-run riscv-dv-smoke \
+	riscv-dv-stress riscv-dv-mmu riscv-dv-clean
+
+riscv-dv: riscv-dv-smoke ## Generate and run the M-mode privileged smoke test
+
+riscv-dv-setup: $(RISCV_DV_VENV)/.ready ## Clone riscv-dv and install pyflow dependencies
+
+$(RISCV_DV_DIR)/.git:
+	git clone https://github.com/chipsalliance/riscv-dv.git $(RISCV_DV_DIR)
+	git -C $(RISCV_DV_DIR) checkout $(RISCV_DV_REV)
+
+$(RISCV_DV_VENV)/.ready: $(RISCV_DV_DIR)/.git $(RISCV_DV_DIR)/requirements.txt
+	@command -v $(RISCV_DV_PYTHON) >/dev/null || { \
+		echo "[riscv-dv] ERROR: $(RISCV_DV_PYTHON) is required (Python 3.10-3.12)."; \
+		exit 1; \
+	}
+	$(RISCV_DV_PYTHON) -m venv $(RISCV_DV_VENV)
+	$(RISCV_DV_VENV)/bin/python -m pip install -r $(RISCV_DV_DIR)/requirements.txt
+	@touch $@
+
+riscv-dv-gen: riscv-dv-setup ## Generate and compile RISCV_DV_TEST programs
+	@rm -rf "$(RISCV_DV_OUT)/$(RISCV_DV_TEST)"
+	$(RISCV_DV_RUN) --steps gen \
+		--test $(RISCV_DV_TEST) --iterations $(RISCV_DV_ITERATIONS) \
+		--start_seed $(RISCV_DV_SEED) \
+		--output "$(RISCV_DV_OUT)/$(RISCV_DV_TEST)"
+	$(PYTHON) $(VERIFY_HOME)/scripts/patch_riscv_dv_npc.py \
+		$(if $(filter raptor_exception_stress,$(RISCV_DV_TEST)),--illegal-burst-count 256) \
+		"$(RISCV_DV_OUT)/$(RISCV_DV_TEST)/asm_test"
+	$(RISCV_DV_RUN) --steps gcc_compile --noclean \
+		--test $(RISCV_DV_TEST) --iterations $(RISCV_DV_ITERATIONS) \
+		--start_seed $(RISCV_DV_SEED) \
+		--output "$(RISCV_DV_OUT)/$(RISCV_DV_TEST)"
+
+riscv-dv-run: check-prereqs ## Run generated RISCV_DV_TEST binaries with NEMU difftest
+	@set -e; found=0; total=0; pass=0; fail=0; fail_list=""; \
+	for bin in "$(RISCV_DV_OUT)/$(RISCV_DV_TEST)"/asm_test/*.bin; do \
+		[ -f "$$bin" ] || continue; found=$$((found + 1)); \
+		name=$$(basename "$$bin" .bin); \
+		for delay in $(RISCV_DV_MEM_DELAYS); do \
+			for mem_seed in $(RISCV_DV_MEM_SEEDS); do \
+				total=$$((total + 1)); case_id="$${name}.delay$${delay}-seed$${mem_seed}"; \
+				log="$${bin%.bin}.delay$${delay}-seed$${mem_seed}.run.log"; \
+				printf "  [RUN ] %s\n" "$$case_id"; \
+				set +e; cd "$(NSIM_HOME)" && $(call RISCV_DV_TIMEOUT_CMD,$(RISCV_DV_TIMEOUT)) \
+					"$(NPC_BIN)" -b -n --trap-on-ebreak \
+					--mem-random-delay="$$delay" --mem-random-seed="$$mem_seed" \
+					-d "$(NEMU_SO)" -r "$(MROM_IMG)" "$$bin" \
+					</dev/null >"$$log" 2>&1; rc=$$?; set -e; \
+				cd "$(VERIFY_HOME)"; \
+				if [ $$rc -ne 0 ] || grep -qiE "BAD TRAP|ABORT|mismatch" "$$log" || \
+					! grep -q "HIT GOOD TRAP" "$$log"; then \
+					echo "  [FAIL] $$case_id (exit $$rc)"; tail -20 "$$log"; \
+					fail=$$((fail + 1)); fail_list="$$fail_list $$case_id"; \
+				else \
+					echo "  [PASS] $$case_id"; pass=$$((pass + 1)); \
+				fi; \
+			done; \
+		done; \
+	done; \
+	[ $$found -gt 0 ] || { echo "[riscv-dv] No binaries found; run riscv-dv-gen first."; exit 1; }; \
+	echo "[riscv-dv] $$pass/$$total matrix cases passed with NPC + NEMU difftest"; \
+	[ $$fail -eq 0 ] || { echo "[riscv-dv] Failed:$$fail_list"; exit 1; }
+
+riscv-dv-smoke: ## Generate and run one short M-mode privileged test
+	$(MAKE) --no-print-directory riscv-dv-gen riscv-dv-run \
+		RISCV_DV_TEST=raptor_privileged_smoke RISCV_DV_ITERATIONS=1
+
+riscv-dv-stress: ## Run privileged exception stress with riscv-dv pyflow
+	$(MAKE) --no-print-directory riscv-dv-gen riscv-dv-run \
+		RISCV_DV_TEST=raptor_exception_stress RISCV_DV_MEM_SEEDS="1 42 31337"
+
+riscv-dv-mmu: ## Report the upstream simulator needed for riscv-dv Sv32/MMU tests
+	@echo "[riscv-dv] Sv32/MMU generation is unavailable in the pyflow backend:"
+	@echo "[riscv-dv] create_page_table(), page-table sections, and fault handlers are TODO upstream."
+	@echo "[riscv-dv] Use the SV/UVM generator with VCS, Questa, Xcelium, or Riviera-PRO."
+	@exit 2
+
+riscv-dv-clean: ## Clean riscv-dv generated programs (keep clone and venv)
+	rm -rf $(RISCV_DV_OUT)
 
 # ============================================================================
 # Random Instruction Fuzz
@@ -285,6 +396,9 @@ endif
 # Using EXTENSIONS instead of EXCLUDE_EXTENSIONS avoids generating tests for
 # F/D/Zfh/etc which bloats tests/ by ~600MB and wastes Sail simulation time.
 ACT4_EXTENSIONS ?= I,M,Zca,Zicsr,Zicntr,Zifencei,Zaamo,Zalrsc,Zba,Zbb,Zbc,Zbs
+ACT4_SAIL_DIR   ?= $(HOME)/.local/opt/sail-riscv-0.12/bin
+ACT4_RUBY_DIR   ?= $(shell command -v brew >/dev/null 2>&1 && printf '%s/bin' "$$(brew --prefix ruby@3.2 2>/dev/null)")
+ACT4_PATH       := $(if $(ACT4_RUBY_DIR),$(ACT4_RUBY_DIR):)$(ACT4_SAIL_DIR):$(PATH)
 
 .PHONY: riscof riscof-setup riscof-gen riscof-run riscof-clean
 
@@ -300,10 +414,17 @@ riscof-setup: ## Clone ACT4 repo and check prerequisites
 	@command -v uv >/dev/null 2>&1 \
 		&& echo "[act4] uv: $$(uv --version)" \
 		|| { echo "[act4] ERROR: 'uv' not found. Install: curl -LsSf https://astral.sh/uv/install.sh | sh"; exit 1; }
-	@command -v sail_riscv_sim >/dev/null 2>&1 \
-		&& echo "[act4] sail: $$(sail_riscv_sim --version 2>&1 | head -1)" \
-		|| { echo "[act4] WARN: 'sail_riscv_sim' not found (needed for riscof-gen)."; \
-		echo "  Install: see https://github.com/riscv/sail-riscv/releases"; }
+	@ACT4_RUBY_VERSION=$$(PATH="$(ACT4_PATH)" ruby -e 'print RUBY_VERSION[/^[0-9]+\.[0-9]+/]') \
+		&& [ "$$ACT4_RUBY_VERSION" = "3.2" ] \
+		&& echo "[act4] ruby: $$(PATH="$(ACT4_PATH)" ruby --version)" \
+		&& echo "[act4] bundle: $$(PATH="$(ACT4_PATH)" command -v bundle)" \
+		|| { echo "[act4] ERROR: Ruby 3.2 is required by the ACT4 UDB Gemfile."; \
+		echo "  Install ruby@3.2 or set ACT4_RUBY_DIR."; exit 1; }
+	@ACT4_SAIL_VERSION=$$(PATH="$(ACT4_PATH)" sail_riscv_sim --version 2>/dev/null) \
+		&& [ "$$ACT4_SAIL_VERSION" = "0.12" ] \
+		&& echo "[act4] sail: $$ACT4_SAIL_VERSION ($$(PATH="$(ACT4_PATH)" command -v sail_riscv_sim))" \
+		|| { echo "[act4] ERROR: Sail 0.12 is required for ACT4."; \
+		echo "  Install under $(ACT4_SAIL_DIR) or set ACT4_SAIL_DIR."; exit 1; }
 	@echo "[act4] Setup complete.  Config: $(ACT4_CONFIG)"
 
 riscof-gen: ## Generate self-checking ELFs via ACT4 framework
@@ -314,7 +435,7 @@ riscof-gen: ## Generate self-checking ELFs via ACT4 framework
 	@echo "  Workdir: $(ACT4_WORKDIR)"
 	@mkdir -p "$(ACT4_WORKDIR)"
 	cd "$(ACT4_REPO)" && \
-		$(MAKE) elfs \
+		PATH="$(ACT4_PATH)" $(MAKE) elfs \
 		CONFIG_FILES="$(ACT4_CONFIG)" \
 		WORKDIR="$(ACT4_WORKDIR)" \
 		EXTENSIONS="$(ACT4_EXTENSIONS)" \
@@ -786,6 +907,73 @@ jtag-clean: ## JTAG: clean cloned riscv-tests + scratch artifacts
 	$(MAKE) -C $(JTAG_DIR) clean
 
 # ============================================================================
+# UVM Module Verification
+# ============================================================================
+UVM_DIR := $(VERIFY_HOME)/uvm
+UVM_BUILD_DIR := $(BUILD_DIR)/uvm
+UVM_RAPT_CONFIG ?= default
+UVM_CYCLES ?= 500## Random issue-queue cycles (for a class-capable simulator)
+
+UVM_COMMON_INCLUDES := \
+	-i "$(RAPTOR_HOME)/hdl/configs/$(UVM_RAPT_CONFIG)" \
+	-i "$(RAPTOR_HOME)/hdl/include" \
+	-i "$(RAPTOR_HOME)/hdl/include/dpic_mock" \
+	-i "$(RAPTOR_HOME)/hdl/include/npc"
+
+UVM_IQ_SOURCES := \
+	"$(RAPTOR_HOME)/hdl/rapt_pkg.sv" \
+	"$(UVM_DIR)/iq/rapt_iq_uvm_if.sv" \
+	"$(UVM_DIR)/iq/rapt_iq_uvm_pkg.sv" \
+	"$(RAPTOR_HOME)/hdl/backend/rapt_exu_iq.sv" \
+	"$(UVM_DIR)/iq/tb_rapt_exu_iq_uvm.sv"
+
+UVM_CSR_SOURCES := \
+	"$(RAPTOR_HOME)/hdl/rapt_pkg.sv" \
+	"$(UVM_DIR)/csr/rapt_csr_uvm_if.sv" \
+	"$(UVM_DIR)/csr/rapt_csr_uvm_pkg.sv" \
+	"$(RAPTOR_HOME)/hdl/frontend/rapt_csr.sv" \
+	"$(UVM_DIR)/csr/tb_rapt_csr_uvm.sv"
+
+.PHONY: uvm uvm-smoke uvm-iq-compile uvm-csr-sret uvm-clean
+
+uvm: uvm-smoke uvm-iq-compile uvm-csr-sret ## UVM: run module-level UVM verification
+
+uvm-smoke: ## UVM: run a minimal UVM 1.2 test on XSim
+	@set -e; \
+	if ! command -v xvlog >/dev/null 2>&1 && [ -f "$(VIVADO_SETTINGS)" ]; then source "$(VIVADO_SETTINGS)"; fi; \
+	command -v xvlog >/dev/null 2>&1 || { echo "[uvm] ERROR: xvlog not found"; exit 1; }; \
+	rm -rf "$(UVM_BUILD_DIR)/smoke"; mkdir -p "$(UVM_BUILD_DIR)/smoke"; \
+	cd "$(UVM_BUILD_DIR)/smoke"; \
+	xvlog -sv --uvm_version 1.2 -L uvm "$(UVM_DIR)/xsim_uvm_smoke.sv"; \
+	xelab -mt off -L uvm xsim_uvm_smoke -s xsim_uvm_smoke_sim; \
+	xsim xsim_uvm_smoke_sim -testplusarg UVM_NO_RELNOTES -runall
+
+uvm-iq-compile: ## UVM: compile the IQ agent, sequences, scoreboard, coverage, and DUT
+	@set -e; \
+	if ! command -v xvlog >/dev/null 2>&1 && [ -f "$(VIVADO_SETTINGS)" ]; then source "$(VIVADO_SETTINGS)"; fi; \
+	command -v xvlog >/dev/null 2>&1 || { echo "[uvm] ERROR: xvlog not found"; exit 1; }; \
+	rm -rf "$(UVM_BUILD_DIR)/iq"; mkdir -p "$(UVM_BUILD_DIR)/iq"; \
+	cd "$(UVM_BUILD_DIR)/iq"; \
+	xvlog -sv --uvm_version 1.2 -L uvm -d RAPT_ASSERT_EN \
+		$(UVM_COMMON_INCLUDES) $(UVM_IQ_SOURCES); \
+	echo "[uvm] IQ environment compiled. See uvm/README.md for simulator support."
+
+uvm-csr-sret: ## UVM: stress Linux-shaped U-ecall/SRET and mtvec contamination
+	@set -e; \
+	if ! command -v xvlog >/dev/null 2>&1 && [ -f "$(VIVADO_SETTINGS)" ]; then source "$(VIVADO_SETTINGS)"; fi; \
+	command -v xvlog >/dev/null 2>&1 || { echo "[uvm] ERROR: xvlog not found"; exit 1; }; \
+	rm -rf "$(UVM_BUILD_DIR)/csr"; mkdir -p "$(UVM_BUILD_DIR)/csr"; \
+	cd "$(UVM_BUILD_DIR)/csr"; \
+	xvlog -sv --uvm_version 1.2 -L uvm -d RAPT_ASSERT_EN \
+		$(UVM_COMMON_INCLUDES) $(UVM_CSR_SOURCES); \
+	xelab -mt off -L uvm tb_rapt_csr_uvm -s tb_rapt_csr_uvm_sim; \
+	xsim tb_rapt_csr_uvm_sim -testplusarg UVM_NO_RELNOTES -testplusarg ntb_random_seed=1 -runall; \
+	! grep -Eq "UVM_(ERROR|FATAL) *: *[1-9]|FAIL:" xsim.log
+
+uvm-clean: ## UVM: clean module-level UVM artifacts
+	rm -rf $(UVM_BUILD_DIR)
+
+# ============================================================================
 # Vivado xsim Directed Checks
 # ============================================================================
 XSIM_DIR := $(VERIFY_HOME)/xsim
@@ -813,28 +1001,70 @@ XSIM_L1D_SOURCES := \
 	"$(RAPTOR_HOME)/hdl/memory/rapt_ptw.sv" \
 	"$(RAPTOR_HOME)/hdl/memory/rapt_l1d.sv"
 
+XSIM_L1I_SOURCES := \
+	"$(RAPTOR_HOME)/hdl/rapt_pkg.sv" \
+	"$(RAPTOR_HOME)/hdl/memory/rapt_sram_1r1w.sv" \
+	"$(RAPTOR_HOME)/hdl/memory/rapt_l1i_tagmem.sv" \
+	"$(RAPTOR_HOME)/hdl/memory/rapt_plru.sv" \
+	"$(RAPTOR_HOME)/hdl/memory/rapt_pmp.sv" \
+	"$(RAPTOR_HOME)/hdl/memory/rapt_tlb.sv" \
+	"$(RAPTOR_HOME)/hdl/memory/rapt_ptw.sv" \
+	"$(RAPTOR_HOME)/hdl/memory/rapt_l1i.sv"
+
+XSIM_PTW_SOURCES := \
+	"$(RAPTOR_HOME)/hdl/rapt_pkg.sv" \
+	"$(RAPTOR_HOME)/hdl/memory/rapt_ptw.sv"
+
+XSIM_TLB_SOURCES := \
+	"$(RAPTOR_HOME)/hdl/rapt_pkg.sv" \
+	"$(RAPTOR_HOME)/hdl/memory/rapt_tlb.sv"
+
 XSIM_BUS_SOURCES := \
 	"$(RAPTOR_HOME)/hdl/rapt_pkg.sv" \
-	"$(RAPTOR_HOME)/hdl/memory/rapt_bus.sv"
+	"$(RAPTOR_HOME)/hdl/memory/rapt_bus.sv" \
+	"$(RAPTOR_HOME)/hdl/memory/rapt_axi_master.sv"
+
+XSIM_CSR_SOURCES := \
+	"$(RAPTOR_HOME)/hdl/rapt_pkg.sv" \
+	"$(RAPTOR_HOME)/hdl/frontend/rapt_csr.sv"
 
 XSIM_IOQ_SOURCES := \
 	"$(RAPTOR_HOME)/hdl/rapt_pkg.sv" \
 	"$(RAPTOR_HOME)/hdl/memory/rapt_pmp.sv" \
 	"$(RAPTOR_HOME)/hdl/backend/rapt_exu_ioq.sv"
 
+XSIM_LSU_SOURCES := \
+	"$(RAPTOR_HOME)/hdl/rapt_pkg.sv" \
+	"$(RAPTOR_HOME)/hdl/memory/rapt_pmp.sv" \
+	"$(RAPTOR_HOME)/hdl/backend/rapt_lsu.sv"
+
 XSIM_ROU_SOURCES := \
 	"$(RAPTOR_HOME)/hdl/rapt_pkg.sv" \
 	"$(RAPTOR_HOME)/hdl/backend/rapt_rou.sv" \
 	"$(RAPTOR_HOME)/hdl/backend/rapt_cmu.sv"
 
+XSIM_MULDIV_SOURCES := \
+	"$(RAPTOR_HOME)/hdl/rapt_pkg.sv" \
+	"$(RAPTOR_HOME)/hdl/backend/rapt_exu_mul.sv" \
+	"$(RAPTOR_HOME)/hdl/backend/rapt_exu_muldiv.sv"
+
 XSIM_TARGETS := \
-	xsim-l2-ordered-mmio \
-	xsim-l2-write-stream \
+	xsim-l2 \
 	xsim-l1d-byte-rom \
 	xsim-l1d-store-coherence \
-	xsim-bus-l1d-rlast \
-	xsim-bus-write-aw-before-w \
-	xsim-ioq-pending-lock \
+	xsim-l1d-flush-ordered \
+	xsim-l1i-sret-priv-epoch \
+	xsim-ptw-kill-drain \
+	xsim-tlb-flush-asid \
+	xsim-bus-axi \
+	xsim-bus-read-ownership \
+	xsim-csr-sret-roundtrip \
+	xsim-sram-l1d-lutram \
+	xsim-sram-l1d-lutram-post-synth \
+	xsim-lsu-lr-sq-forward \
+	xsim-lsu-sq-random \
+	xsim-ioq \
+	xsim-muldiv-flush-reuse \
 	xsim-rou-dual-commit
 
 define XSIM_RUN
@@ -853,23 +1083,25 @@ define XSIM_RUN
 		$(XSIM_COMMON_INCLUDES) \
 		$(3) \
 		"$(XSIM_DIR)/$(2).sv"; \
-	xelab -debug typical $(2) -s $(2)_sim; \
-	xsim $(2)_sim -runall; \
-	if grep -Eq "FATAL_ERROR|FAIL:" xsim.log; then \
+	xelab -debug typical --timescale 1ns/1ps --override_timeunit \
+		--override_timeprecision $(2) -s $(2)_sim; \
+	xsim $(2)_sim $(5) -runall; \
+	if grep -Eq "^Error:|FATAL_ERROR|FAIL:" xsim.log; then \
 		echo "[xsim] ERROR: $(2) reported FAIL/FATAL; see $(XSIM_BUILD_DIR)/$(1)/xsim.log"; \
 		exit 1; \
 	fi
 endef
 
-.PHONY: xsim $(XSIM_TARGETS) xsim-clean
+.PHONY: xsim $(XSIM_TARGETS) xsim-l2-ordered-mmio xsim-l2-write-stream \
+	xsim-bus-l1d-rlast xsim-bus-write-aw-before-w \
+	xsim-ioq-lrsc-reservation xsim-ioq-pending-lock xsim-clean
 
 xsim: $(XSIM_TARGETS) ## xsim: run all directed checks
 
-xsim-l2-ordered-mmio: ## xsim: verify L2 ordered MMIO writes and posted DDR writes
-	$(call XSIM_RUN,l2_ordered_mmio,tb_l2_ordered_mmio,$(XSIM_L2_SOURCES),)
+xsim-l2: ## xsim: verify L2 ordering, cache fills, and posted write streams
+	$(call XSIM_RUN,l2,tb_l2_ordered_mmio,$(XSIM_L2_SOURCES),-d RAPT_L2_EN)
 
-xsim-l2-write-stream: ## xsim: verify L2 posted DDR write stream drains and unblocks later reads
-	$(call XSIM_RUN,l2_write_stream,tb_l2_write_stream,$(XSIM_L2_SOURCES),)
+xsim-l2-ordered-mmio xsim-l2-write-stream: xsim-l2
 
 xsim-l1d-byte-rom: ## xsim: verify L1D ROM byte reads across cache fills/hits
 	$(call XSIM_RUN,l1d_byte_rom,tb_l1d_byte_rom,$(XSIM_L1D_SOURCES),)
@@ -877,16 +1109,66 @@ xsim-l1d-byte-rom: ## xsim: verify L1D ROM byte reads across cache fills/hits
 xsim-l1d-store-coherence: ## xsim: verify L1D load-after-store coherence
 	$(call XSIM_RUN,l1d_store_coherence,tb_l1d_store_coherence,$(XSIM_L1D_SOURCES),)
 
-xsim-bus-l1d-rlast: ## xsim: verify bus forwards L1D AXI rlast in multi-outstanding mode
-	$(call XSIM_RUN,bus_l1d_rlast,tb_bus_l1d_rlast,$(XSIM_BUS_SOURCES),)
+xsim-l1d-flush-ordered: ## xsim: verify L1D flush drain and non-cacheable ordering
+	$(call XSIM_RUN,l1d_flush_ordered,tb_l1d_flush_ordered,$(XSIM_L1D_SOURCES),-d RAPT_ASSERT_EN)
 
-xsim-bus-write-aw-before-w: ## xsim: verify bus write channel does not emit W before AW is accepted
-	$(call XSIM_RUN,bus_write_aw_before_w,tb_bus_write_aw_before_w,$(XSIM_BUS_SOURCES),)
+xsim-l1i-sret-priv-epoch: ## xsim: verify SRET target privilege and stale PTW response kill
+	$(call XSIM_RUN,l1i_sret_priv_epoch,tb_l1i_sret_priv_epoch,$(XSIM_L1I_SOURCES),-d RAPT_ASSERT_EN)
 
-xsim-ioq-pending-lock: ## xsim: verify IOQ keeps a pending LSU load request stable
-	$(call XSIM_RUN,ioq_pending_lock,tb_ioq_pending_lock,$(XSIM_IOQ_SOURCES),)
+xsim-ptw-kill-drain: ## xsim: verify PTW cancel-before-accept and drain-after-accept
+	$(call XSIM_RUN,ptw_kill_drain,tb_ptw_kill_drain,$(XSIM_PTW_SOURCES),-d RAPT_ASSERT_EN)
 
-xsim-rou-dual-commit: ## xsim: verify ROU dual-commit retire, store, and slot1 flush semantics
+xsim-tlb-flush-asid: ## xsim: verify TLB ASID matching and flush priority
+	$(call XSIM_RUN,tlb_flush_asid,tb_tlb_flush_asid,$(XSIM_TLB_SOURCES),-d RAPT_ASSERT_EN)
+
+xsim-bus-axi: ## xsim: verify bus AXI reads and independent AW/W handshakes
+	$(call XSIM_RUN,bus_axi,tb_bus_l1d_rlast,$(XSIM_BUS_SOURCES),)
+
+xsim-bus-l1d-rlast xsim-bus-write-aw-before-w: xsim-bus-axi
+
+xsim-bus-read-ownership: ## xsim: verify read response ID ownership and interleaving
+	$(call XSIM_RUN,bus_read_ownership,tb_bus_read_ownership,$(XSIM_BUS_SOURCES),)
+
+xsim-csr-sret-roundtrip: ## xsim: verify CSR reset and U-ecall/SRET round trip
+	$(call XSIM_RUN,csr_sret_roundtrip,tb_csr_sret_roundtrip,$(XSIM_CSR_SOURCES),)
+
+xsim-sram-l1d-lutram: ## xsim: verify L1D 16x128 LUTRAM byte writes and collisions
+	$(call XSIM_RUN,sram_l1d_lutram,tb_sram_l1d_lutram,"$(RAPTOR_HOME)/hdl/memory/rapt_sram_1r1w.sv" "$(XSIM_DIR)/sram_l1d_lutram_top.sv",)
+
+xsim-sram-l1d-lutram-post-synth: ## xsim: verify synthesized KU15P L1D LUTRAM netlist
+	@set -e; \
+	if ! command -v vivado >/dev/null 2>&1; then \
+		if [ -f "$(VIVADO_SETTINGS)" ]; then source "$(VIVADO_SETTINGS)"; fi; \
+	fi; \
+	command -v vivado >/dev/null 2>&1 || { echo "[xsim] ERROR: vivado not found"; exit 1; }; \
+	build_dir="$(XSIM_BUILD_DIR)/sram_l1d_lutram_post_synth"; \
+	rm -rf "$$build_dir"; mkdir -p "$$build_dir"; cd "$$build_dir"; \
+	vivado -mode batch -nojournal -nolog -source "$(XSIM_DIR)/synth_sram_l1d_lutram.tcl" \
+		-tclargs "$(RAPTOR_HOME)/hdl/memory/rapt_sram_1r1w.sv" \
+		"$(XSIM_DIR)/sram_l1d_lutram_top.sv" \
+		"$$build_dir/sram_l1d_lutram_funcsim.v" "$$build_dir/utilization.rpt"; \
+	xvlog --sv "$$build_dir/sram_l1d_lutram_funcsim.v" "$(XSIM_DIR)/tb_sram_l1d_lutram.sv"; \
+	xelab -L unisims_ver -debug typical tb_sram_l1d_lutram glbl \
+		-s tb_sram_l1d_lutram_post_synth_sim; \
+	xsim tb_sram_l1d_lutram_post_synth_sim -runall; \
+	grep -q '^PASS: L1D LUTRAM' xsim.log
+
+xsim-lsu-lr-sq-forward: ## xsim: verify LR waits for SQ drain instead of forwarding
+	$(call XSIM_RUN,lsu_lr_sq_forward,tb_lsu_lr_sq_forward,$(XSIM_LSU_SOURCES),-d RAPT_ASSERT_EN)
+
+LSU_SQ_RANDOM_SEED ?= 1370169382
+xsim-lsu-sq-random: ## xsim: constrained-random SQ ordering, alias, wrap, flush, and backpressure
+	$(call XSIM_RUN,lsu_sq_random,tb_lsu_sq_random,$(XSIM_LSU_SOURCES),-d RAPT_ASSERT_EN,-testplusarg SEED=$(LSU_SQ_RANDOM_SEED))
+
+xsim-ioq: ## xsim: verify IOQ LR/SC reservations, pending loads, and flush kills
+	$(call XSIM_RUN,ioq,tb_ioq_pending_lock,$(XSIM_IOQ_SOURCES),)
+
+xsim-ioq-lrsc-reservation xsim-ioq-pending-lock: xsim-ioq
+
+xsim-muldiv-flush-reuse: ## xsim: verify flush kills DIV completion before MDQ slot reuse
+	$(call XSIM_RUN,muldiv_flush_reuse,tb_muldiv_flush_reuse,$(XSIM_MULDIV_SOURCES),-d RAPT_ASSERT_EN)
+
+xsim-rou-dual-commit: ## xsim: verify ROU dual commit and slot1 flush serialization
 	$(call XSIM_RUN,rou_dual_commit,tb_rou_dual_commit,$(XSIM_ROU_SOURCES),-d RAPT_ASSERT_EN)
 
 xsim-clean: ## Clean xsim directed-check artifacts
@@ -900,5 +1182,5 @@ xsim-clean: ## Clean xsim directed-check artifacts
 
 all: fuzz sigtest ## Run all lightweight verification
 
-clean: fuzz-clean riscof-clean coverage-clean sigtest-clean formal-clean jtag-clean xsim-clean ## Clean all verify artifacts
+clean: fuzz-clean riscof-clean coverage-clean sigtest-clean formal-clean jtag-clean uvm-clean xsim-clean ## Clean all verify artifacts
 	rm -rf $(BUILD_DIR)

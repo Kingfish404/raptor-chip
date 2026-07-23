@@ -45,7 +45,7 @@ static void restart()
   cpu.gpr[0] = 0;
 
   /* Setting the machine information */
-  cpu.sr[CSR_MVENDORID] = 666; // MVENDORID=666 to match Raptor DUT (egos HARDWARE selector)
+  cpu.sr[CSR_MVENDORID] = 0; // MVENDORID=0 for open-source implementations
   cpu.sr[CSR_MARCHID] = 50; // MARCHID=50 (0x32) for Raptor
   cpu.sr[CSR_MISA] = CSR_MISA_VALUE;
   cpu.priv = PRV_M;

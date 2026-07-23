@@ -5,6 +5,7 @@
 # AXI4 master bus, single external interrupt input.
 
 import os
+import re
 import subprocess
 
 from migen import *
@@ -24,9 +25,9 @@ CPU_VARIANTS = {
 # GCC Flags ----------------------------------------------------------------------------------------
 
 GCC_FLAGS = {
-    "standard": "-march=rv32imac_zicntr_zicond_zicsr_zifencei_zcb_zba_zbb_zbc_zbs -mabi=ilp32",
-    "linux": "-march=rv32imac_zicntr_zicond_zicsr_zifencei_zcb_zba_zbb_zbc_zbs -mabi=ilp32",
-    "linux64": "-march=rv64imac_zicntr_zicond_zicsr_zifencei_zcb_zba_zbb_zbc_zbs -mabi=lp64",
+    "standard": "-march=rv32imac_zicbom_zicntr_zicond_zicsr_zifencei_zcb_zba_zbb_zbc_zbs -mabi=ilp32",
+    "linux": "-march=rv32imac_zicbom_zicntr_zicond_zicsr_zifencei_zcb_zba_zbb_zbc_zbs -mabi=ilp32",
+    "linux64": "-march=rv64imac_zicbom_zicntr_zicond_zicsr_zifencei_zcb_zba_zbb_zbc_zbs -mabi=lp64",
 }
 
 # Raptor -------------------------------------------------------------------------------------------
@@ -201,6 +202,27 @@ class Raptor(CPU):
         soc.add_config("CPU_HAS_DCACHE")
         soc.add_config("CPU_HAS_ICACHE")
 
+        raptor_home = os.path.abspath(os.environ.get(
+            "RAPTOR_HOME",
+            os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", ".."),
+        ))
+        rapt_config = os.environ.get("RAPT_CONFIG", "") or "default"
+        config_path = os.path.join(raptor_home, "hdl", "configs", rapt_config, "rapt_config.svh")
+        with open(config_path, encoding="utf-8") as config_file:
+            config_text = config_file.read()
+
+        def config_int(name):
+            match = re.search(rf"^`define {name}\s+(\d+)(?:\s+.*)?$", config_text, re.MULTILINE)
+            if match is None:
+                raise RuntimeError(f"{name} missing from {config_path}")
+            return int(match.group(1))
+
+        cache_block_size = config_int("RAPT_CACHE_LINE_BYTES")
+        icache_ways = config_int("RAPT_L1I_N_WAYS")
+        dcache_ways = config_int("RAPT_L1D_N_WAYS")
+        icache_size = cache_block_size * (1 << config_int("RAPT_L1I_LEN")) * icache_ways
+        dcache_size = cache_block_size * (1 << config_int("RAPT_L1D_LEN")) * dcache_ways
+
         # Pin the Raptor CLINT mtime tick rate to the LiteX sys_clk so that
         # `rdtime` advances once per cycle (MTIME_DIV=1). Without this the
         # RTL default (RAPT_CORE_CLOCK_MHZ=1000, RAPT_MTIME_FREQ_MHZ=10)
@@ -220,21 +242,13 @@ class Raptor(CPU):
         if extra:
             os.environ["RAPT_PACK_VFLAGS"] = (existing + " " + " ".join(extra)).strip()
 
-        # Cache parameters for Device Tree.
-        if self.variant in ("linux", "linux64"):
-            soc.add_config("CPU_DCACHE_SIZE", 4096)
-            soc.add_config("CPU_DCACHE_WAYS", 4)
-            soc.add_config("CPU_DCACHE_BLOCK_SIZE", 8)
-            soc.add_config("CPU_ICACHE_SIZE", 8192)
-            soc.add_config("CPU_ICACHE_WAYS", 2)
-            soc.add_config("CPU_ICACHE_BLOCK_SIZE", 16)
-        else:  # standard
-            soc.add_config("CPU_DCACHE_SIZE", 512)
-            soc.add_config("CPU_DCACHE_WAYS", 2)
-            soc.add_config("CPU_DCACHE_BLOCK_SIZE", 8)
-            soc.add_config("CPU_ICACHE_SIZE", 1024)
-            soc.add_config("CPU_ICACHE_WAYS", 1)
-            soc.add_config("CPU_ICACHE_BLOCK_SIZE", 16)
+        # Cache parameters for Device Tree, derived from the selected RTL preset.
+        soc.add_config("CPU_DCACHE_SIZE", dcache_size)
+        soc.add_config("CPU_DCACHE_WAYS", dcache_ways)
+        soc.add_config("CPU_DCACHE_BLOCK_SIZE", cache_block_size)
+        soc.add_config("CPU_ICACHE_SIZE", icache_size)
+        soc.add_config("CPU_ICACHE_WAYS", icache_ways)
+        soc.add_config("CPU_ICACHE_BLOCK_SIZE", cache_block_size)
 
     def do_finalize(self):
         assert hasattr(self, "reset_address")

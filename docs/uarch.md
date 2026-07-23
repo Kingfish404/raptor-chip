@@ -163,6 +163,8 @@ Broadcast unit. Outputs: `rpc`, `cpc`, branch resolution, `flush_pipe`, `fence_i
 
 Write-through policy. Partial stores (SB/SH): read-modify-write (RMW) 2-cycle merge in IDLE. Speculative SRAM read: VIPT-safe virtual index in IDLE. Separate DTLB + DSTLB instances; shared DPTW for both. Reservation register for LR/SC. Cacheability via `addr_cacheable()`.
 
+Zicbom `cbo.inval`, `cbo.clean`, and `cbo.flush` are serializing operations. Retirement waits for the unified SQ to become empty, then the existing `fence_time` maintenance path invalidates every L1D valid entry and flushes the data-side TLBs. This is a conservative whole-L1D implementation: the encoded `rs1` address is accepted but does not yet select one cache block. Because L1D is write-through, treating `cbo.clean` as the same stronger whole-cache operation is functionally correct. LiteX uses this behavior as its full-cache fallback after non-coherent DMA.
+
 #### TLB (`rapt_tlb.sv`)
 
 Reusable fully-associative Sv32/Sv39 TLB. `ENTRIES` param (default 4), ASID-aware. Combinational lookup, sequential fill (no duplicates), round-robin replacement, bulk flush. Instantiated as: `u_itlb` (L1I), `u_dtlb` (L1D load), `u_dstlb` (L1D store).
@@ -173,7 +175,7 @@ Reusable page-table walker. RV32 uses a Sv32 two-level FSM (`IDLE`->`LVL1`->`LVL
 
 #### BUS (`rapt_bus.sv`)
 
-AXI4 master bridge arbitrating L1I/L1D (L1D priority). Read FSM: 3-state (`LD_A`/`LD_AS`/`LD_D`). Write FSM: 3-state (`LS_S_A`/`LS_S_W`/`LS_S_B`). Load source tracking: `L1I`/`L1D`/`TLBI`/`TLBD`. It is SoC-memory-map agnostic; the cluster-level `rapt_router.sv` decodes CLINT/PLIC MMIO and forwards all other transactions off chip.
+`rapt_bus.sv` arbitrates core memory traffic onto `mem_link_if`. Reads use request IDs (`L1I`, `L1D`, `TLBI`, `TLBD`): L1I has a configurable refill-request FIFO, L1D has a held request slot, and L1D has issue priority. Responses are demultiplexed by ID. `rapt_axi_master.sv` converts that internal link to AXI4, supports up to eight outstanding reads with per-ID ownership tracking, and handles AW and W handshakes independently for one outstanding write. The bus is SoC-memory-map agnostic; the cluster-level `rapt_router.sv` decodes CLINT/PLIC MMIO and forwards all other transactions off chip.
 
 #### L2 (`rapt_l2.sv`)
 

@@ -410,6 +410,33 @@ static inline void host_write(void *addr, word_t data, int len)
   }
 }
 
+static void log_watched_write(word_t addr, word_t data, char wmask,
+                              uint8_t *host_addr, size_t len)
+{
+  static bool initialized = false;
+  static bool enabled = false;
+  static word_t watched_addr = 0;
+  if (!initialized)
+  {
+    const char *value = getenv("NSIM_MEM_WATCH_ADDR");
+    if (value != NULL && *value != '\0')
+    {
+      watched_addr = (word_t)strtoull(value, NULL, 0);
+      enabled = true;
+      Log("memory write watch: address=" FMT_WORD, watched_addr);
+    }
+    initialized = true;
+  }
+  if (!enabled || watched_addr < addr || watched_addr >= addr + len)
+    return;
+
+  word_t old_data = host_read(host_addr, (int)len);
+  Log("memory write watch: time=%llu rpc=" FMT_WORD " npc=" FMT_WORD
+      " addr=" FMT_WORD " old=" FMT_WORD " data=" FMT_WORD " mask=0x%02x",
+      (unsigned long long)contextp->time(), *npc.rpc, *npc.pc, addr,
+      old_data, data, wmask & 0xff);
+}
+
 extern "C" void sdram_read(word_t addr, uint8_t *data)
 {
   size_t offset;
@@ -521,15 +548,19 @@ extern "C" void pmem_write(word_t waddr, word_t wdata, char wmask)
   switch (wmask)
   {
   case 0x1:
+    log_watched_write(addr, data, wmask, host_addr, 1);
     host_write(host_addr, data, 1);
     break;
   case 0x3:
+    log_watched_write(addr, data, wmask, host_addr, 2);
     host_write(host_addr, data, 2);
     break;
   case 0xf:
+    log_watched_write(addr, data, wmask, host_addr, 4);
     host_write(host_addr, data, 4);
     break;
   case (char)0xff:
+    log_watched_write(addr, data, wmask, host_addr, 8);
     host_write(host_addr, data, 8);
     break;
   default:

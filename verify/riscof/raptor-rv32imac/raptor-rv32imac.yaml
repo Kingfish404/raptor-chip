@@ -1,4 +1,4 @@
-# yaml-language-server: $schema=../../../../external/riscv-unified-db/spec/schemas/config_schema.json
+# yaml-language-server: $schema=https://raw.githubusercontent.com/riscv/riscv-unified-db/main/spec/schemas/config_schema.json
 
 # UDB Architecture Configuration for Raptor Chip — RV32IMAC
 ---
@@ -23,8 +23,6 @@ implemented_extensions:
   - { name: Zbc, version: "= 1.0.0" }
   - { name: Zbs, version: "= 1.0.0" }
   - { name: Sm, version: "= 1.12.0" }
-  # Smhpm is a fake extension for UDB purposes, due to be deleted soon.
-  - { name: Smhpm, version: "= 1.12" }
 
 params:
   # XLEN
@@ -76,7 +74,8 @@ params:
   # Zicntr
   TIME_CSR_IMPLEMENTED: true
 
-  # Smhpm: Raptor has no HPM counters; provide minimal config
+  # Raptor has no HPM counters; retain the Sm counter parameterization
+  # without claiming the optional Zihpm extension.
   HPM_COUNTER_EN:
     [
       false,
@@ -112,11 +111,10 @@ params:
       false,
       false,
     ]
-  HPM_EVENTS: [0]
-  COUNTINHIBIT_EN:
+  MCOUNTENABLE_EN:
     [
       true,
-      false,
+      true,
       true,
       false,
       false,
@@ -148,6 +146,7 @@ params:
       false,
       false,
     ]
+  MCOUNTINHIBIT_IMPLEMENTED: false
 
   # MTVEC
   MTVEC_ACCESS: rw
@@ -167,3 +166,5 @@ params:
   # Misc
   CONFIG_PTR_ADDRESS: 0
   PMA_GRANULARITY: 3
+  NUM_PMP_ENTRIES: 16
+  PMP_GRANULARITY: 2

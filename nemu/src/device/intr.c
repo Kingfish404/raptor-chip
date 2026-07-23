@@ -123,6 +123,31 @@ void plic_raise_irq(int irq)
     plic_update_mip();
 }
 
+void plic_restore_checkpoint(const uint8_t *priority, uint32_t pending,
+                             const uint32_t *enable, const uint8_t *threshold,
+                             uint32_t ndev, uint32_t nctx)
+{
+    memset(plic_priority, 0, sizeof(plic_priority));
+    memset(plic_pending, 0, sizeof(plic_pending));
+    memset(plic_enable, 0, sizeof(plic_enable));
+    memset(plic_threshold, 0, sizeof(plic_threshold));
+    memset(plic_claimed, 0, sizeof(plic_claimed));
+
+    if (ndev > PLIC_NDEV)
+        ndev = PLIC_NDEV;
+    if (nctx > PLIC_NCTX)
+        nctx = PLIC_NCTX;
+    for (uint32_t src = 0; src <= ndev; src++)
+        plic_priority[src] = priority[src];
+    plic_pending[0] = pending & ~1u;
+    for (uint32_t ctx = 0; ctx < nctx; ctx++)
+    {
+        plic_enable[ctx][0] = enable[ctx];
+        plic_threshold[ctx] = threshold[ctx];
+    }
+    plic_update_mip();
+}
+
 // Keep the old timer-interrupt API for backward compatibility.
 // With the new CLINT implementation, timer interrupts are delivered via MIP.MTIP
 // rather than this flag. This function is now only used as a fallback for the

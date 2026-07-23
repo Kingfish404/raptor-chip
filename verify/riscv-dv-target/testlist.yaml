@@ -1,0 +1,21 @@
+- test: raptor_privileged_smoke
+  description: Short M-mode privileged CSR and trap setup smoke test
+  iterations: 1
+  gen_test: riscv_instr_base_test
+  gen_opts: >
+    +instr_cnt=50
+    +num_of_sub_program=0
+    +boot_mode=m
+  rtl_test: core_base_test
+
+- test: raptor_exception_stress
+  description: Long random stream with a project-injected M-mode illegal-instruction burst
+  iterations: 4
+  gen_test: riscv_instr_base_test
+  gen_opts: >
+    +instr_cnt=3000
+    +num_of_sub_program=0
+    +boot_mode=m
+    +illegal_instr_ratio=0
+    +no_ebreak=1
+  rtl_test: core_base_test

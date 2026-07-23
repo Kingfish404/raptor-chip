@@ -1,0 +1,8 @@
+!*.S
+!*.c
+!*.h
+!*.ld
+!*.py
+!fs/rootfs/*
+
+build

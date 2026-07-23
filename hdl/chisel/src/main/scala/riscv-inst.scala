@@ -59,7 +59,11 @@ trait Instr {
   // Zifencei               imm[11:0]   rs1 func3  rd  opcode
   def FENCE_I__ = BitPat("b??????? ????? ????? 001 ????? 0001111")
   // Zifencetime
-  def FENCE_TIM = BitPat("b0000000 00000 00000 010 00000 0001111")
+  // Zicbom cache-block management operations. Raptor's write-through L1D
+  // implements these conservatively as a whole-cache maintenance barrier.
+  def CBO_INVAL = BitPat("b0000000 00000 ????? 010 00000 0001111")
+  def CBO_CLEAN = BitPat("b0000000 00001 ????? 010 00000 0001111")
+  def CBO_FLUSH = BitPat("b0000000 00010 ????? 010 00000 0001111")
 
   def SFENCE_VM = BitPat("b0001001 ????? ????? 000 00000 1110011")
 

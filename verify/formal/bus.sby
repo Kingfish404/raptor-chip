@@ -12,9 +12,9 @@ smtbmc
 
 [script]
 plugin -i slang
-read_slang --single-unit -DFORMAL -DRAPT_XLEN=32 -DRAPT_REG_SIZE=32 -DRAPT_REG_LEN=5 formal_bus.sv rapt_pack.sv
+read_slang --single-unit -DFORMAL -DRAPT_XLEN=32 -DRAPT_REG_SIZE=32 -DRAPT_REG_LEN=5 formal_bus.sv formal_bus_pack.sv
 prep -top formal_bus
 
 [files]
 formal_bus.sv
-rapt_pack.sv ./../../sim/build/default/rapt_pack.sv
+formal_bus_pack.sv build/formal_bus_pack.sv

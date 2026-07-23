@@ -114,7 +114,9 @@ class rapt_idu_decoder extends RawModule with Instr with MicroOP {
     // format: off
    FENCE____ -> BitPat("b" + "00" + ALU_ADD_), // N (also covers FENCE.TSO)
    FENCE_I__ -> BitPat("b" + "00" + ALU_ADD_), // N
-   FENCE_TIM -> BitPat("b" + "00" + ALU_ADD_), // N
+  CBO_INVAL -> BitPat("b" + "00" + ALU_ADD_), // Zicbom
+  CBO_CLEAN -> BitPat("b" + "00" + ALU_ADD_), // Zicbom
+  CBO_FLUSH -> BitPat("b" + "00" + ALU_ADD_), // Zicbom
 
    SFENCE_VM -> BitPat("b" + "00" + ALU_ADD_), // N
     // format: on
@@ -360,7 +362,9 @@ class rapt_idu_decoder extends RawModule with Instr with MicroOP {
     // format: off
    FENCE____ -> BitPat("b" + "000 0  0  0  0  1"), // N (also covers FENCE.TSO)
    FENCE_I__ -> BitPat("b" + "000 0  0  0  0  1"), // N
-   FENCE_TIM -> BitPat("b" + "000 0  0  0  0  1"), // N
+  CBO_INVAL -> BitPat("b" + "000 0  0  0  0  1"), // Zicbom
+  CBO_CLEAN -> BitPat("b" + "000 0  0  0  0  1"), // Zicbom
+  CBO_FLUSH -> BitPat("b" + "000 0  0  0  0  1"), // Zicbom
 
    SFENCE_VM -> BitPat("b" + "000 0  0  0  0  1"), // N
     // format: on
@@ -394,7 +398,9 @@ class rapt_idu_decoder extends RawModule with Instr with MicroOP {
     Map( //                      ftime iflush
       FENCE____ -> BitPat("b" + "0" + "0"), // N (also covers FENCE.TSO)
       FENCE_I__ -> BitPat("b" + "0" + "1"), // N
-      FENCE_TIM -> BitPat("b" + "1" + "1"), // N
+      CBO_INVAL -> BitPat("b" + "1" + "0"), // Zicbom: conservative whole-L1 maintenance
+      CBO_CLEAN -> BitPat("b" + "1" + "0"), // Zicbom: write-through clean is ordering-only
+      CBO_FLUSH -> BitPat("b" + "1" + "0"), // Zicbom: conservative whole-L1 maintenance
       SFENCE_VM -> BitPat("b" + "1" + "1")  // N: flush TLBs + I-cache
     ),
     BitPat("b" + "0" + "0")
@@ -457,7 +463,9 @@ class rapt_idu_decoder extends RawModule with Instr with MicroOP {
 
     FENCE____ -> List(0.U, 0.U,   0.U,   0.U, 0.U, 0.U), // N (also covers FENCE.TSO)
     FENCE_I__ -> List(0.U, 0.U,   0.U,   0.U, 0.U, 0.U), // N
-    FENCE_TIM -> List(0.U, 0.U,   0.U,   0.U, 0.U, 0.U), // N
+    CBO_INVAL -> List(0.U, 0.U,   0.U,   0.U, rs1, 0.U), // Zicbom
+    CBO_CLEAN -> List(0.U, 0.U,   0.U,   0.U, rs1, 0.U), // Zicbom
+    CBO_FLUSH -> List(0.U, 0.U,   0.U,   0.U, rs1, 0.U), // Zicbom
 
     SFENCE_VM -> List(0.U,    0.U,   0.U,   0.U, 0.U, 0.U), // N   
 

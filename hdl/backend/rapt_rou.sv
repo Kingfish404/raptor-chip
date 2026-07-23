@@ -101,6 +101,18 @@ module rapt_rou #(
   logic            recieved_sw_trap  /* verilator public */;
   logic [XLEN-1:0] trap_pc;
   logic [XLEN-1:0] trap_cause  /* verilator public */;
+  logic            async_trap_pending;
+  logic [XLEN-1:0] async_trap_cause;
+
+  assign async_trap_pending = clint_sw_trap || clint_timer_trap
+              || clint_ext_trap || s_int_pending;
+  assign async_trap_cause = clint_ext_trap
+    ? XLEN'(`RAPT_CAUSE_MEI) | (XLEN'(1) << (XLEN - 1))
+    : clint_sw_trap
+      ? XLEN'(`RAPT_CAUSE_MSI) | (XLEN'(1) << (XLEN - 1))
+      : clint_timer_trap
+        ? XLEN'(`RAPT_CAUSE_MTI) | (XLEN'(1) << (XLEN - 1))
+        : s_int_cause;
 
   // Forward declarations (used across sections)
   logic [$clog2(ROB_SIZE)-1:0] rob_head, rob_tail_a;
@@ -141,13 +153,11 @@ module rapt_rou #(
 
   logic uoq_enq_fire_a, uoq_deq_fire_a;
   logic uoq_head_a_available;
-  logic uoq_tail_a_reused;
   logic sys_resume;
 `ifdef RAPT_DUAL_ISSUE
   // Dual-issue UOQ pointers
   logic [$clog2(IIQ_SIZE)-1:0] uoq_head_b, uoq_tail_b;
   logic uoq_head_b_available;
-  logic uoq_tail_b_reused;
   logic uoq_enq_fire_b, uoq_deq_fire_b;
 
   // Lightweight resume for pure CSR: no flush, just unblock IFU and clear drain
@@ -188,7 +198,7 @@ module rapt_rou #(
     if (reset) begin
       commit_npc_q <= XLEN'(`RAPT_PC_INIT);
     end else if (head0_valid && !recieved_trap) begin
-      commit_npc_q <= dual_commit ? rob_entry[h1].npc : rob_entry[h0].npc;
+      commit_npc_q <= rou_cmu.npc_a;
     end
   end
   assign halt_pc_o = commit_npc_q;
@@ -237,13 +247,8 @@ module rapt_rou #(
   assign uoq_enq_fire_a = rnu_rou.valid_a && uoq_head_a_available
       && (!rnu_rou.valid_b || uoq_head_b_available);
   assign uoq_enq_fire_b = uoq_enq_fire_a && rnu_rou.valid_b && uoq_head_b_available;
-  assign uoq_tail_a_reused = (uoq_enq_fire_a && (uoq_head_a == uoq_tail_a))
-      || (uoq_enq_fire_b && (uoq_head_b == uoq_tail_a));
-  assign uoq_tail_b_reused = (uoq_enq_fire_a && (uoq_head_a == uoq_tail_b))
-      || (uoq_enq_fire_b && (uoq_head_b == uoq_tail_b));
 `else
   assign uoq_enq_fire_a = rnu_rou.valid_a && uoq_head_a_available;
-  assign uoq_tail_a_reused = uoq_enq_fire_a && (uoq_head_a == uoq_tail_a);
 `endif
 
   assign valid_a         = uoq_valid[uoq_tail_a] && !rob_entry[rob_tail_a].busy
@@ -431,8 +436,11 @@ module rapt_rou #(
 `ifdef RAPT_DUAL_ISSUE
       uoq_is_pair <= '0;
 `endif
-    end else if (sys_resume) begin
-      // Pipeline already drained; just clear the serialize lock
+    end else if (sys_resume || (serialize_in_flight && rob_empty)) begin
+      // Pipeline already drained; clear the serialization lock. The rob_empty
+      // fallback recovers a lock whose owner retired without producing the
+      // expected flush/resume pulse; a live serializing uop always owns a busy
+      // ROB entry by the cycle after the lock is set.
       serialize_in_flight <= 1'b0;
     end else begin
       // Operand-ready decisions returned by uoq_enqueue_slot; the packed
@@ -444,26 +452,10 @@ module rapt_rou #(
       automatic logic enq_pv2_v_b = 1'b0;
 `endif
       if (uoq_enq_fire_a) begin
-        uoq_enqueue_slot(uoq_head_a, rnu_rou.uop_a, rnu_rou.pr1_a, rnu_rou.pr2_a, rnu_rou.prd_a,
-                         rnu_rou.prs_a, rnu_rou.op1_a, rnu_rou.op2_a, exu_prf.pv1_a, exu_prf.pv2_a,
-                         exu_prf.pv1_a_valid, exu_prf.pv2_a_valid, enq_pv1_v_a, enq_pv2_v_a);
-        uoq_valid[uoq_head_a]     <= 1'b1;
-        uoq_pv1_valid[uoq_head_a] <= enq_pv1_v_a;
-        uoq_pv2_valid[uoq_head_a] <= enq_pv2_v_a;
 `ifdef RAPT_DUAL_ISSUE
         if (uoq_enq_fire_b) begin
-          uoq_is_pair[uoq_head_a] <= 1'b0;
-          uoq_is_pair[uoq_head_b] <= 1'b1;
-          uoq_enqueue_slot(uoq_head_b, rnu_rou.uop_b, rnu_rou.pr1_b, rnu_rou.pr2_b, rnu_rou.prd_b,
-                           rnu_rou.prs_b, rnu_rou.op1_b, rnu_rou.op2_b, exu_prf.pv1_b,
-                           exu_prf.pv2_b, exu_prf.pv1_b_valid, exu_prf.pv2_b_valid, enq_pv1_v_b,
-                           enq_pv2_v_b);
-          uoq_valid[uoq_head_b]     <= 1'b1;
-          uoq_pv1_valid[uoq_head_b] <= enq_pv1_v_b;
-          uoq_pv2_valid[uoq_head_b] <= enq_pv2_v_b;
           uoq_head_a                <= uoq_head_a + 2;
         end else begin
-          uoq_is_pair[uoq_head_a] <= 1'b0;
           uoq_head_a <= uoq_head_a + 1;
         end
 `else
@@ -478,36 +470,49 @@ module rapt_rou #(
 `ifdef RAPT_DUAL_ISSUE
         if (uoq_deq_fire_b) begin
           uoq_tail_a <= uoq_tail_a + 2;
-          if (!uoq_tail_a_reused) uoq_valid[uoq_tail_a] <= 1'b0;
-          if (!uoq_tail_b_reused) begin
-            uoq_valid[uoq_tail_b] <= 1'b0;
-            uoq_is_pair[uoq_tail_b] <= 1'b0;
-          end
         end else begin
-          uoq_tail_a              <= uoq_tail_a + 1;
-          if (!uoq_tail_a_reused) begin
-            uoq_valid[uoq_tail_a]   <= 1'b0;
-            uoq_is_pair[uoq_tail_a] <= 1'b0;
-          end
+          uoq_tail_a <= uoq_tail_a + 1;
         end
 `else
-        uoq_tail_a            <= uoq_tail_a + 1;
-        if (!uoq_tail_a_reused) uoq_valid[uoq_tail_a] <= 1'b0;
+        uoq_tail_a <= uoq_tail_a + 1;
 `endif
       end
 
-      // Broadcast forwarding: update pre-read values during UOQ residence
-      // (any CDB port; unique-producer invariant)
+      // One static write cone per UOQ entry. Enqueue wins over a same-cycle
+      // dequeue when a full queue reclaims that entry.
       for (int i = 0; i < IIQ_SIZE; i++) begin
-        // A same-cycle enqueue already applies CDB bypass in
-        // uoq_enqueue_slot. Do not let this resident-entry loop overwrite a
-        // reclaimed slot with the previous uop's tag/value state.
-        if (uoq_valid[i]
-            && !(uoq_enq_fire_a && (i[$clog2(IIQ_SIZE)-1:0] == uoq_head_a))
 `ifdef RAPT_DUAL_ISSUE
-            && !(uoq_enq_fire_b && (i[$clog2(IIQ_SIZE)-1:0] == uoq_head_b))
+        if (uoq_enq_fire_b && i == int'(uoq_head_b)) begin
+          uoq_enqueue_slot(i, rnu_rou.uop_b, rnu_rou.pr1_b, rnu_rou.pr2_b, rnu_rou.prd_b,
+                           rnu_rou.prs_b, rnu_rou.op1_b, rnu_rou.op2_b, exu_prf.pv1_b,
+                           exu_prf.pv2_b, exu_prf.pv1_b_valid, exu_prf.pv2_b_valid,
+                           enq_pv1_v_b, enq_pv2_v_b);
+          uoq_valid[i]     <= 1'b1;
+          uoq_pv1_valid[i] <= enq_pv1_v_b;
+          uoq_pv2_valid[i] <= enq_pv2_v_b;
+          uoq_is_pair[i]   <= 1'b1;
+        end else
 `endif
-            ) begin
+        if (uoq_enq_fire_a && i == int'(uoq_head_a)) begin
+          uoq_enqueue_slot(i, rnu_rou.uop_a, rnu_rou.pr1_a, rnu_rou.pr2_a, rnu_rou.prd_a,
+                           rnu_rou.prs_a, rnu_rou.op1_a, rnu_rou.op2_a, exu_prf.pv1_a,
+                           exu_prf.pv2_a, exu_prf.pv1_a_valid, exu_prf.pv2_a_valid,
+                           enq_pv1_v_a, enq_pv2_v_a);
+          uoq_valid[i]     <= 1'b1;
+          uoq_pv1_valid[i] <= enq_pv1_v_a;
+          uoq_pv2_valid[i] <= enq_pv2_v_a;
+`ifdef RAPT_DUAL_ISSUE
+          uoq_is_pair[i] <= 1'b0;
+        end else if (uoq_deq_fire_b && i == int'(uoq_tail_b)) begin
+          uoq_valid[i]   <= 1'b0;
+          uoq_is_pair[i] <= 1'b0;
+`endif
+        end else if (uoq_deq_fire_a && i == int'(uoq_tail_a)) begin
+          uoq_valid[i] <= 1'b0;
+`ifdef RAPT_DUAL_ISSUE
+          uoq_is_pair[i] <= 1'b0;
+`endif
+        end else if (uoq_valid[i]) begin
           if (|uoq_pr1[i] && !uoq_pv1_valid[i] && wb_hit(uoq_pr1[i])) begin
             uoq_pv1[i]       <= wb_val(uoq_pr1[i], uoq_pv1[i]);
             uoq_pv1_valid[i] <= 1'b1;
@@ -600,6 +605,39 @@ module rapt_rou #(
   assign wb_dest_exu_b = exu_rou_b.dest;
   assign wb_dest_ioq   = exu_ioq_bcast.dest;
 
+  // Decode every ROB write source once, then update each entry through one
+  // explicit priority mux. Dynamic addressed writes rely on simulator NBA
+  // ordering for same-entry collisions, but FPGA synthesis may implement a
+  // different WAW priority across inferred write ports.
+  logic [ROB_SIZE-1:0] rob_dispatch_a_oh, rob_dispatch_b_oh;
+  logic [ROB_SIZE-1:0] rob_wb_ioq_oh, rob_wb_exu_oh, rob_wb_exu_b_oh;
+  logic [ROB_SIZE-1:0] rob_wb_exu_c_oh, rob_wb_mul_oh;
+  logic [ROB_SIZE-1:0] rob_commit_a_oh, rob_commit_b_oh;
+
+  always_comb begin
+    rob_dispatch_a_oh = '0;
+    rob_dispatch_b_oh = '0;
+    rob_wb_ioq_oh     = '0;
+    rob_wb_exu_oh     = '0;
+    rob_wb_exu_b_oh   = '0;
+    rob_wb_exu_c_oh   = '0;
+    rob_wb_mul_oh     = '0;
+    rob_commit_a_oh   = '0;
+    rob_commit_b_oh   = '0;
+
+    if (uoq_deq_fire_a) rob_dispatch_a_oh[rob_tail_a] = 1'b1;
+`ifdef RAPT_DUAL_ISSUE
+    if (uoq_deq_fire_b) rob_dispatch_b_oh[rob_tail_b] = 1'b1;
+`endif
+    if (exu_ioq_bcast.valid) rob_wb_ioq_oh[wb_dest_ioq] = 1'b1;
+    if (exu_rou.valid)       rob_wb_exu_oh[wb_dest_exu] = 1'b1;
+    if (exu_rou_b.valid)     rob_wb_exu_b_oh[wb_dest_exu_b] = 1'b1;
+    if (exu_rou_c.valid)     rob_wb_exu_c_oh[exu_rou_c.dest] = 1'b1;
+    if (exu_wb_mul.valid)    rob_wb_mul_oh[exu_wb_mul.dest] = 1'b1;
+    if (head0_valid)         rob_commit_a_oh[rob_head] = 1'b1;
+    if (dual_commit)         rob_commit_b_oh[h1] = 1'b1;
+  end
+
   always_ff @(posedge clock) begin
     if (reset || flush_pipe) begin
       rob_head         <= '0;
@@ -612,6 +650,19 @@ module rapt_rou #(
         rob_entry[i]       <= '0;
         rob_entry[i].busy  <= 1'b0;
         rob_entry[i].state <= rapt_pkg::ROB_CM;
+        uop_pl[i].sys      <= 1'b0;
+        uop_pl[i].ecall    <= 1'b0;
+        uop_pl[i].ebreak   <= 1'b0;
+        uop_pl[i].mret     <= 1'b0;
+        uop_pl[i].sret     <= 1'b0;
+        uop_pl[i].f_i      <= 1'b0;
+        uop_pl[i].f_time   <= 1'b0;
+        uop_pl[i].csr_csw  <= '0;
+        uop_pl[i].ben      <= 1'b0;
+        uop_pl[i].jen      <= 1'b0;
+        uop_pl[i].jren     <= 1'b0;
+        uop_pl[i].atom     <= 1'b0;
+        uop_pl[i].atom_sc  <= 1'b0;
       end
     end else begin
       // A2: PMU: one-cycle pulse on ROB full rising edge
@@ -625,89 +676,75 @@ module rapt_rou #(
 `else
         rob_tail_a <= rob_tail_a + 1;
 `endif
+      end
 
-        dispatch_to_rob(rob_tail_a, uoq_uops[uoq_tail_a], uoq_prd[uoq_tail_a], uoq_prs[uoq_tail_a]);
-
+      for (int entry = 0; entry < ROB_SIZE; entry++) begin
+        // Source order matches the former NBA order. Later blocks have higher
+        // priority for fields written by more than one source.
+        if (rob_dispatch_a_oh[entry]) begin
+          dispatch_to_rob(entry, uoq_uops[uoq_tail_a], uoq_prd[uoq_tail_a], uoq_prs[uoq_tail_a]);
+        end
 `ifdef RAPT_DUAL_ISSUE
-        // ---- Dispatch slot B: insert into ROB tail+1 ----
-        if (uoq_deq_fire_b) begin
-          dispatch_to_rob(rob_tail_b, uoq_uops[uoq_tail_b], uoq_prd[uoq_tail_b],
-                          uoq_prs[uoq_tail_b]);
+        else if (rob_dispatch_b_oh[entry]) begin
+          dispatch_to_rob(entry, uoq_uops[uoq_tail_b], uoq_prd[uoq_tail_b], uoq_prs[uoq_tail_b]);
         end
 `endif
-      end
 
-      // ---- Write-back from IOQ (load/store completion) ----
-      // Loads/stores never branch, so `mispredict` is left at its
-      // dispatch-init value of 0 (no IOQ field needed).
-      if (exu_ioq_bcast.valid) begin
-        rob_entry[wb_dest_ioq].state    <= rapt_pkg::ROB_WB;
-        rob_entry[wb_dest_ioq].npc      <= exu_ioq_bcast.npc;
-        rob_entry[wb_dest_ioq].wen      <= exu_ioq_bcast.wen;
-        rob_entry[wb_dest_ioq].sq_waddr <= exu_ioq_bcast.sq_waddr;
-        rob_entry[wb_dest_ioq].sq_wdata <= exu_ioq_bcast.sq_wdata;
-
-        if (exu_ioq_bcast.trap) begin
-          rob_entry[wb_dest_ioq].rd  <= '0;
-          rob_entry[wb_dest_ioq].wen <= 1'b0;
+        // Loads/stores never branch, so mispredict keeps its dispatch value.
+        if (rob_wb_ioq_oh[entry]) begin
+          rob_entry[entry].state    <= rapt_pkg::ROB_WB;
+          rob_entry[entry].npc      <= exu_ioq_bcast.npc;
+          rob_entry[entry].wen      <= exu_ioq_bcast.wen;
+          rob_entry[entry].sq_waddr <= exu_ioq_bcast.sq_waddr;
+          rob_entry[entry].sq_wdata <= exu_ioq_bcast.sq_wdata;
+          rob_entry[entry].rd       <= exu_ioq_bcast.trap ? '0 : rob_entry[entry].rd;
+          rob_entry[entry].trap     <= exu_ioq_bcast.trap;
+          rob_entry[entry].tval     <= exu_ioq_bcast.tval;
+          rob_entry[entry].cause    <= exu_ioq_bcast.cause;
+          rob_entry[entry].difftest_skip <= exu_ioq_bcast.difftest_skip;
+          if (exu_ioq_bcast.trap) rob_entry[entry].wen <= 1'b0;
+        end
+        if (rob_wb_exu_oh[entry]) begin
+          rob_entry[entry].state         <= rapt_pkg::ROB_WB;
+          rob_entry[entry].btaken        <= exu_rou.btaken;
+          rob_entry[entry].npc           <= exu_rou.npc;
+          rob_entry[entry].mispredict    <= exu_rou.mispredict;
+          rob_entry[entry].csr_wen       <= exu_rou.csr_wen;
+          rob_entry[entry].csr_wdata     <= exu_rou.csr_wdata;
+          rob_entry[entry].trap          <= exu_rou.trap;
+          rob_entry[entry].tval          <= exu_rou.tval;
+          rob_entry[entry].cause         <= exu_rou.cause;
+          rob_entry[entry].difftest_skip <= exu_rou.difftest_skip;
+        end
+        if (rob_wb_exu_b_oh[entry]) begin
+          rob_entry[entry].state         <= rapt_pkg::ROB_WB;
+          rob_entry[entry].npc           <= exu_rou_b.npc;
+          rob_entry[entry].btaken        <= exu_rou_b.btaken;
+          rob_entry[entry].mispredict    <= exu_rou_b.mispredict;
+          rob_entry[entry].difftest_skip <= exu_rou_b.difftest_skip;
+        end
+        if (rob_wb_exu_c_oh[entry]) begin
+          rob_entry[entry].state         <= rapt_pkg::ROB_WB;
+          rob_entry[entry].npc           <= exu_rou_c.npc;
+          rob_entry[entry].btaken        <= exu_rou_c.btaken;
+          rob_entry[entry].mispredict    <= exu_rou_c.mispredict;
+          rob_entry[entry].difftest_skip <= exu_rou_c.difftest_skip;
+        end
+        if (rob_wb_mul_oh[entry]) begin
+          rob_entry[entry].state         <= rapt_pkg::ROB_WB;
+          rob_entry[entry].npc           <= exu_wb_mul.npc;
+          rob_entry[entry].btaken        <= exu_wb_mul.btaken;
+          rob_entry[entry].mispredict    <= exu_wb_mul.mispredict;
+          rob_entry[entry].difftest_skip <= exu_wb_mul.difftest_skip;
         end
 
-        rob_entry[wb_dest_ioq].trap <= exu_ioq_bcast.trap;
-        rob_entry[wb_dest_ioq].tval <= exu_ioq_bcast.tval;
-        rob_entry[wb_dest_ioq].cause <= exu_ioq_bcast.cause;
-        rob_entry[wb_dest_ioq].difftest_skip <= exu_ioq_bcast.difftest_skip;
-      end
-
-      // ---- Write-back from EXU (ALU/branch completion) ----
-      if (exu_rou.valid) begin
-        rob_entry[wb_dest_exu].state         <= rapt_pkg::ROB_WB;
-        rob_entry[wb_dest_exu].btaken        <= exu_rou.btaken;
-        rob_entry[wb_dest_exu].npc           <= exu_rou.npc;
-        rob_entry[wb_dest_exu].mispredict    <= exu_rou.mispredict;
-
-        rob_entry[wb_dest_exu].csr_wen       <= exu_rou.csr_wen;
-        rob_entry[wb_dest_exu].csr_wdata     <= exu_rou.csr_wdata;
-
-        rob_entry[wb_dest_exu].trap          <= exu_rou.trap;
-        rob_entry[wb_dest_exu].tval          <= exu_rou.tval;
-        rob_entry[wb_dest_exu].cause         <= exu_rou.cause;
-        rob_entry[wb_dest_exu].difftest_skip <= exu_rou.difftest_skip;
-      end
-
-      // ---- Write-back from the ALU CDB (pure ALU completion) ----
-      // Slot B handles arithmetic and branches (jen / ben). It never carries
-      // CSR/trap/system/mul, so dispatch-time fields (csr_wen, ecall, mret,
-      // trap, ...) stay at their defaults (0). We update state/npc/btaken/
-      // mispredict/difftest_skip.
-      if (exu_rou_b.valid) begin
-        rob_entry[wb_dest_exu_b].state         <= rapt_pkg::ROB_WB;
-        rob_entry[wb_dest_exu_b].npc           <= exu_rou_b.npc;
-        rob_entry[wb_dest_exu_b].btaken        <= exu_rou_b.btaken;
-        rob_entry[wb_dest_exu_b].mispredict    <= exu_rou_b.mispredict;
-        rob_entry[wb_dest_exu_b].difftest_skip <= exu_rou_b.difftest_skip;
-      end
-
-      // ---- Write-back from the Branch CDB (dedicated branch resolution) ----
-      // Conditional branches don't write rd, so no result/prd update is
-      // needed; only state + npc + btaken + mispredict + difftest_skip are
-      // written so commit/BPU can resolve the branch.
-      if (exu_rou_c.valid) begin
-        rob_entry[exu_rou_c.dest].state         <= rapt_pkg::ROB_WB;
-        rob_entry[exu_rou_c.dest].npc           <= exu_rou_c.npc;
-        rob_entry[exu_rou_c.dest].btaken        <= exu_rou_c.btaken;
-        rob_entry[exu_rou_c.dest].mispredict    <= exu_rou_c.mispredict;
-        rob_entry[exu_rou_c.dest].difftest_skip <= exu_rou_c.difftest_skip;
-      end
-
-      // ---- Write-back from the MUL/DIV pipe ----
-      // Pure arithmetic: no CSR / trap / store sideband. `mispredict` still
-      // matters (a BTB alias may have predicted a bogus target off a MUL).
-      if (exu_wb_mul.valid) begin
-        rob_entry[exu_wb_mul.dest].state         <= rapt_pkg::ROB_WB;
-        rob_entry[exu_wb_mul.dest].npc           <= exu_wb_mul.npc;
-        rob_entry[exu_wb_mul.dest].btaken        <= exu_wb_mul.btaken;
-        rob_entry[exu_wb_mul.dest].mispredict    <= exu_wb_mul.mispredict;
-        rob_entry[exu_wb_mul.dest].difftest_skip <= exu_wb_mul.difftest_skip;
+        if (rob_commit_a_oh[entry] || rob_commit_b_oh[entry]) begin
+          rob_entry[entry].busy    <= 1'b0;
+          rob_entry[entry].state   <= rapt_pkg::ROB_CM;
+          rob_entry[entry].csr_wen <= 1'b0;
+          rob_entry[entry].trap    <= 1'b0;
+          rob_entry[entry].wen     <= 1'b0;
+        end
       end
 
       // ---- Commit: retire ROB entries (up to 2 per cycle) ----
@@ -720,29 +757,18 @@ module rapt_rou #(
       if (head0_valid) begin
         rob_head                    <= dual_commit ? rob_head + 2 : rob_head + 1;
 
-        rob_entry[rob_head].busy    <= 1'b0;
-        rob_entry[rob_head].state   <= rapt_pkg::ROB_CM;
-        rob_entry[rob_head].csr_wen <= 1'b0;
-        rob_entry[rob_head].trap    <= 1'b0;
-        rob_entry[rob_head].wen     <= 1'b0;
-
-        if (dual_commit) begin
-          rob_entry[h1].busy    <= 1'b0;
-          rob_entry[h1].state   <= rapt_pkg::ROB_CM;
-          rob_entry[h1].csr_wen <= 1'b0;
-          rob_entry[h1].trap    <= 1'b0;
-          rob_entry[h1].wen     <= 1'b0;
-        end
-
-        recieved_trap    <= clint_sw_trap || clint_timer_trap || clint_ext_trap || s_int_pending;
+        recieved_trap    <= async_trap_pending;
         recieved_sw_trap <= clint_sw_trap;
-        // Cause priority: MEI > MSI > MTI > S-mode delegated
-        // (RISC-V Priv Sec.3.1.9 ordering for M-mode sources, then S-level).
-        if (clint_ext_trap) trap_cause <= XLEN'(`RAPT_CAUSE_MEI) | (XLEN'(1) << (XLEN - 1));
-        else if (clint_sw_trap) trap_cause <= XLEN'(`RAPT_CAUSE_MSI) | (XLEN'(1) << (XLEN - 1));
-        else if (clint_timer_trap) trap_cause <= XLEN'(`RAPT_CAUSE_MTI) | (XLEN'(1) << (XLEN - 1));
-        else if (s_int_pending) trap_cause <= s_int_cause;
-        trap_pc <= dual_commit ? rob_entry[h1].npc : rob_entry[rob_head].npc;
+        if (async_trap_pending) trap_cause <= async_trap_cause;
+        trap_pc <= rou_cmu.npc_a;
+      end else if (rob_empty && async_trap_pending) begin
+        // Interrupts can become pending after WFI has drained the ROB. There
+        // is then no future commit edge on which to sample them, so inject the
+        // trap from the last committed next PC and wake the empty pipeline.
+        recieved_trap    <= 1'b1;
+        recieved_sw_trap <= clint_sw_trap;
+        trap_cause       <= async_trap_cause;
+        trap_pc          <= commit_npc_q;
       end
     end
   end
@@ -878,9 +904,11 @@ module rapt_rou #(
       flush_apply    <= 1'b0;
       flush_target_r <= '0;
     end else begin
-      // Single-cycle pulse: detect in cycle N (apply=0) -> apply in cycle N+1.
-      flush_apply <= flush_pipe && !flush_apply;
-      if (flush_pipe && !flush_apply) flush_target_r <= flush_target_c;
+      // One-cycle pipeline: every flush in cycle N redirects in cycle N+1.
+      // Do not suppress a flush just because the previous redirect is being
+      // applied; adjacent flushes are distinct events and both need targets.
+      flush_apply <= flush_pipe;
+      if (flush_pipe) flush_target_r <= flush_target_c;
     end
   end
 
@@ -1080,11 +1108,62 @@ module rapt_rou #(
   `RAPT_SVA_IMPLY(clock, reset, ROB_COMMIT_NEEDS_BUSY, (head0_valid && !recieved_trap),
                   (rob_entry[h0].busy))
 
+  `RAPT_SVA_IMPLY(clock, reset, ROB_IOQ_WB_NEEDS_BUSY,
+                  exu_ioq_bcast.valid, rob_entry_busy[wb_dest_ioq])
+
+  `RAPT_SVA_IMPLY(clock, reset, ROB_EXU_A_WB_NEEDS_BUSY,
+                  exu_rou.valid, rob_entry_busy[wb_dest_exu])
+
+  `RAPT_SVA_IMPLY(clock, reset, ROB_EXU_B_WB_NEEDS_BUSY,
+                  exu_rou_b.valid, rob_entry_busy[wb_dest_exu_b])
+
+  `RAPT_SVA_IMPLY(clock, reset, ROB_EXU_C_WB_NEEDS_BUSY,
+                  exu_rou_c.valid, rob_entry_busy[exu_rou_c.dest])
+
+  `RAPT_SVA_IMPLY(clock, reset, ROB_MULDIV_WB_NEEDS_BUSY,
+                  exu_wb_mul.valid, rob_entry_busy[exu_wb_mul.dest])
+
+  `RAPT_SVA_IMPLY(clock, reset, ROB_DISPATCH_A_SYSOP_ONEHOT,
+                  uoq_deq_fire_a,
+                  $onehot0({uoq_uops[uoq_tail_a].ecall, uoq_uops[uoq_tail_a].ebreak,
+                            uoq_uops[uoq_tail_a].mret, uoq_uops[uoq_tail_a].sret}))
+
+`ifdef RAPT_DUAL_ISSUE
+  `RAPT_SVA_IMPLY(clock, reset, ROB_DISPATCH_B_SYSOP_ONEHOT,
+                  uoq_deq_fire_b,
+                  $onehot0({uoq_uops[uoq_tail_b].ecall, uoq_uops[uoq_tail_b].ebreak,
+                            uoq_uops[uoq_tail_b].mret, uoq_uops[uoq_tail_b].sret}))
+`endif
+
+  `RAPT_SVA_IMPLY(clock, reset, ROB_SRET_WB_NOT_CONTAMINATED,
+                  (exu_rou.valid && uop_pl[wb_dest_exu].sret),
+                  !(uop_pl[wb_dest_exu].ecall || uop_pl[wb_dest_exu].ebreak
+                    || uop_pl[wb_dest_exu].mret))
+
+  `RAPT_SVA(clock, reset, ROB_DISPATCH_WB_NO_ALIAS,
+          !(|((rob_dispatch_a_oh | rob_dispatch_b_oh)
+              & (rob_wb_ioq_oh | rob_wb_exu_oh | rob_wb_exu_b_oh
+                | rob_wb_exu_c_oh | rob_wb_mul_oh))))
+
   `RAPT_SVA_IMPLY(clock, reset, ROB_SYS_SERIALIZING_FLUSH,
                   (head0_valid && (uop_pl[h0].sys || uop_pl[h0].f_time)), flush_pipe)
 
   `RAPT_SVA_IMPLY(clock, reset, ROB_DUAL_SERIALIZING_FLUSH,
                   (dual_commit && (uop_pl[h1].sys || uop_pl[h1].f_time)), flush_pipe)
+
+  `RAPT_SVA_NEXT(clock, reset, ROB_COMMIT_NPC_IS_ARCHITECTURAL,
+                 (head0_valid && !recieved_trap),
+                 (commit_npc_q == $past(rou_cmu.npc_a)))
+
+  `RAPT_SVA_NEXT(clock, reset, ROB_IDLE_INTERRUPT_CAPTURE,
+                 (rob_empty && async_trap_pending && !head0_valid),
+                 (recieved_trap && trap_pc == $past(commit_npc_q)))
+
+  `RAPT_SVA_NEXT(clock, reset, ROB_ORPHAN_SERIALIZE_LOCK_CLEARS,
+                 (serialize_in_flight && rob_empty), !serialize_in_flight)
+
+  `RAPT_SVA_NEXT(clock, reset, ROB_EVERY_FLUSH_REDIRECTS,
+                 flush_pipe, (flush_apply && flush_target_r == $past(flush_target_c)))
 
   // Coverage: flush events happen (sanity that the DUT actually exercises
   // flush paths during tests -- guards against accidentally disabling flush).

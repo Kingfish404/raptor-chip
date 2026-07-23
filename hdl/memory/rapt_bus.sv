@@ -13,8 +13,8 @@ module rapt_bus #(
 ) (
     input clock,
 
-    // AXI4 Master bus
-    axi4_if.master axi,
+    // Internal memory transaction port
+    mem_link_if.master mem,
 
     l1i_bus_if.slave l1i_bus,
     l1d_bus_if.slave l1d_bus,
@@ -24,12 +24,6 @@ module rapt_bus #(
 
     input reset
 );
-  typedef enum logic [1:0] {
-    LS_S_A  = 0,
-    LS_S_W  = 1,
-    LS_S_B  = 2,
-    LS_S_AW = 3
-  } state_store_t;
   typedef enum logic [3:0] {
     L1I  = 1,
     L1D  = 2,
@@ -37,32 +31,12 @@ module rapt_bus #(
     TLBD = 4
   } state_lds_t;  // load source
 
-  logic [3:0] awid;
-
-  state_store_t state_store;
-  state_lds_t store_bridge;
-  state_lds_t store_source;
-  state_lds_t store_current;
-
-  assign axi.awburst = 0;
-  assign axi.awlen = 0;
-  assign axi.awid = ((state_store == LS_S_A) || (state_store == LS_S_AW)) ? store_bridge : awid;
-
-  assign store_bridge = l1i_bus.awvalid ? L1I : L1D;
-  // In LS_S_A and LS_S_AW the AW handshake has not completed yet, so
-  // store_source is stale; select the live store_bridge instead.  (LS_S_AW:
-  // W was accepted first, AW still outstanding -- see the AW/W concurrent
-  // presentation note in the store FSM below.)
-  assign store_current = ((state_store == LS_S_A) || (state_store == LS_S_AW))
-                       ? store_bridge : store_source;
-
-`ifndef RAPT_SOC
   // =========================================================================
   // Multi-outstanding read AR pipeline.
   //
   // The bus exposes two independent AR slots so L1I and L1D can have ARs in
   // flight simultaneously. The downstream router/SoC handle multi-outstanding
-  // responses via `axi.rid`; per-master rvalid de-mux is already by rid below.
+  // responses via request IDs; per-master response de-mux is by ID below.
   //
   //   - L1I slot: 2-deep FIFO. The L1I miss FSM (rapt_l1i.sv RD_0->RD_1)
   //     issues two sequential ARs gated only on `l1i_bus.rready` pulses, so
@@ -75,7 +49,7 @@ module rapt_bus #(
   //     master-side "AR accepted, advance" semantic that the L1I FSM relies on.
   //
   //   - Arbiter: L1D priority over L1I (matches the original FSM order).
-  //     Downstream AR is registered/stable until `axi.arready`.
+  //     Downstream requests are registered/stable until `rd_req_ready`.
   // =========================================================================
   localparam int L1iARDepth = `RAPT_L1I_REFILL_WORDS;
   localparam int L1iARPtrW = (L1iARDepth <= 1) ? 1 : $clog2(L1iARDepth);
@@ -84,6 +58,7 @@ module rapt_bus #(
   // L1I AR FIFO (depth 2)
   logic [XLEN-1:0] l1i_q_addr                                     [L1iARDepth];
   logic            l1i_q_burst                                    [L1iARDepth];
+  logic            l1i_q_ptw                                      [L1iARDepth];
   logic [L1iARPtrW-1:0] l1i_q_rdptr;
   logic [L1iARPtrW-1:0] l1i_q_wrptr;
   logic [L1iARCntW-1:0] l1i_q_cnt;
@@ -97,6 +72,7 @@ module rapt_bus #(
   logic [XLEN-1:0] l1d_slot_addr;
   logic [     2:0] l1d_slot_size;
   logic            l1d_slot_mmio;
+  logic            l1d_slot_ptw;
 
   // Master-side capture handshakes (each pulses *_bus.rready for one cycle).
   //
@@ -108,20 +84,21 @@ module rapt_bus #(
   logic l1i_push, l1d_push;
   logic l1i_captured;
   logic [XLEN-1:0] l1i_last_push_addr;
+  logic l1i_last_push_ptw;
   logic l1i_new_request;
-  assign l1i_new_request = !l1i_captured || (l1i_bus.araddr != l1i_last_push_addr);
+  assign l1i_new_request = !l1i_captured
+                         || (l1i_bus.araddr != l1i_last_push_addr)
+                         || (l1i_bus.ar_ptw != l1i_last_push_ptw);
   assign l1i_push       = l1i_bus.arvalid && !l1i_q_full && l1i_new_request;
   assign l1d_push       = l1d_bus.arvalid && !l1d_slot_busy;
   assign l1i_bus.rready = l1i_push;
   assign l1d_bus.rready = l1d_push;
 
   // Downstream issue arbiter (L1D priority).
-  // (The RAPT_SOC variant uses the legacy single-outstanding FSM further down
-  // and does not reach this point -- see the `\`else` branch.)
   logic issue_l1d, issue_l1i, l1i_pop;
   assign issue_l1d = l1d_slot_busy && !l1d_slot_issued;
   assign issue_l1i = !issue_l1d && !l1i_q_empty;
-  assign l1i_pop = issue_l1i && axi.arready;
+  assign l1i_pop = issue_l1i && mem.rd_req_ready;
 
   logic [XLEN-1:0] l1i_q_head_addr;
   logic            l1i_q_head_burst;
@@ -129,32 +106,37 @@ module rapt_bus #(
   assign l1i_q_head_burst = l1i_q_burst[l1i_q_rdptr];
 
   // ifu read demux
-  assign l1i_bus.rdata = axi.rdata;
-  assign l1i_bus.rvalid = (axi.rid == L1I) && axi.rvalid;
-  assign l1i_bus.rlast = (axi.rid == L1I) && axi.rlast;
-  assign l1i_bus.rerr = (axi.rid == L1I) && axi.rvalid && (axi.rresp != 2'b00);
-  assign l1i_bus.wready = (state_store == LS_S_B) && (store_source == L1I) && axi.bvalid;
-  assign l1i_bus.werr = (store_source == L1I) && axi.bvalid && (axi.bresp != 2'b00);
+  assign l1i_bus.rdata = mem.rd_rsp_data;
+  assign l1i_bus.rvalid = (mem.rd_rsp_id == L1I) && mem.rd_rsp_valid;
+  assign l1i_bus.ptw_rvalid = (mem.rd_rsp_id == TLBI) && mem.rd_rsp_valid;
+  assign l1i_bus.rlast = (mem.rd_rsp_id == L1I) && mem.rd_rsp_last;
+  assign l1i_bus.rerr = (mem.rd_rsp_id == L1I) && mem.rd_rsp_valid && mem.rd_rsp_error;
 
   // lsu read demux
-  // Gate L1D response by slot_issued: do NOT forward axi.rvalid to L1D until
+  // Gate L1D response by slot_issued: do not forward a response to L1D until
   // our AR has been handed to the slave. This prevents accepting stale
   // responses (e.g. ysyxSoC `sdram_axi` response-FIFO mis-sync) that arrive
   // before our request has been issued.
-  assign l1d_bus.rdata = axi.rdata;
-  assign l1d_bus.rvalid = l1d_slot_issued && (axi.rid == L1D) && axi.rvalid;
-  assign l1d_bus.rlast = l1d_slot_issued && (axi.rid == L1D) && axi.rlast;
+  assign l1d_bus.rdata = mem.rd_rsp_data;
+  assign l1d_bus.rvalid = l1d_slot_issued && !l1d_slot_ptw
+                       && (mem.rd_rsp_id == L1D) && mem.rd_rsp_valid;
+  assign l1d_bus.ptw_rvalid = l1d_slot_issued && l1d_slot_ptw
+                           && (mem.rd_rsp_id == TLBD) && mem.rd_rsp_valid;
+  assign l1d_bus.rlast = l1d_slot_issued && !l1d_slot_ptw
+                      && (mem.rd_rsp_id == L1D) && mem.rd_rsp_last;
   assign l1d_bus.difftest_skip = l1d_slot_busy && l1d_slot_mmio;
-  assign l1d_bus.rerr = l1d_slot_issued && (axi.rid == L1D) && axi.rvalid && (axi.rresp != 2'b00);
+  assign l1d_bus.rerr = l1d_slot_issued && !l1d_slot_ptw && (mem.rd_rsp_id == L1D)
+                     && mem.rd_rsp_valid && mem.rd_rsp_error;
 
   // Downstream AR drive (combinational; backed by registered slot/queue).
-  assign axi.arvalid = issue_l1d || issue_l1i;
-  assign axi.arid = issue_l1d ? 4'(L1D) : 4'(L1I);
-  assign axi.araddr = issue_l1d ? l1d_slot_addr : l1i_q_head_addr;
-  assign axi.arsize = issue_l1d ? l1d_slot_size : 3'b010;  // L1I: 4-byte
-  assign axi.arburst = (issue_l1i && l1i_q_head_burst) ? 2'b01 : 2'b00;
-  assign axi.arlen = (issue_l1i && l1i_q_head_burst) ? 8'h1 : 8'h0;
-  assign axi.rready = 1'b1;
+  assign mem.rd_req_valid = issue_l1d || issue_l1i;
+  assign mem.rd_req_id = issue_l1d ? (l1d_slot_ptw ? 4'(TLBD) : 4'(L1D))
+                                   : (l1i_q_ptw[l1i_q_rdptr] ? 4'(TLBI) : 4'(L1I));
+  assign mem.rd_req_addr = issue_l1d ? l1d_slot_addr : l1i_q_head_addr;
+  assign mem.rd_req_size = issue_l1d ? l1d_slot_size : 3'b010;
+  assign mem.rd_req_burst = (issue_l1i && l1i_q_head_burst) ? 2'b01 : 2'b00;
+  assign mem.rd_req_len = (issue_l1i && l1i_q_head_burst) ? 8'h1 : 8'h0;
+  assign mem.rd_rsp_ready = 1'b1;
 
   // L1D arsize from rstrb (matches original encoding).
   logic [2:0] l1d_arsize_enc;
@@ -172,22 +154,27 @@ module rapt_bus #(
       for (int i = 0; i < L1iARDepth; i++) begin
         l1i_q_addr[i]  <= '0;
         l1i_q_burst[i] <= 1'b0;
+        l1i_q_ptw[i]   <= 1'b0;
       end
       l1i_captured       <= 1'b0;
       l1i_last_push_addr <= '0;
+      l1i_last_push_ptw  <= 1'b0;
       l1d_slot_busy      <= 1'b0;
       l1d_slot_issued    <= 1'b0;
       l1d_slot_addr      <= '0;
       l1d_slot_size      <= 3'b000;
       l1d_slot_mmio      <= 1'b0;
+      l1d_slot_ptw       <= 1'b0;
     end else begin
       // L1I FIFO: push on capture, pop on downstream AR handshake.
       if (l1i_push) begin
         l1i_q_addr[l1i_q_wrptr]  <= l1i_bus.araddr;
         l1i_q_burst[l1i_q_wrptr] <= l1i_bus.arburst;
+        l1i_q_ptw[l1i_q_wrptr]   <= l1i_bus.ar_ptw;
         l1i_q_wrptr              <= l1i_q_wrptr + 1'b1;
         l1i_captured             <= 1'b1;
         l1i_last_push_addr       <= l1i_bus.araddr;
+        l1i_last_push_ptw        <= l1i_bus.ar_ptw;
       end else if (!l1i_bus.arvalid) begin
         // arvalid dropped -> window closed; reopen capture window.
         l1i_captured <= 1'b0;
@@ -211,209 +198,90 @@ module rapt_bus #(
         l1d_slot_addr   <= l1d_bus.araddr;
         l1d_slot_size   <= l1d_arsize_enc;
         l1d_slot_mmio   <= rapt_pkg::addr_mmio(l1d_bus.araddr);
+        l1d_slot_ptw    <= l1d_bus.ar_ptw;
       end
-      if (issue_l1d && axi.arready) begin
+      if (issue_l1d && mem.rd_req_ready) begin
         l1d_slot_issued <= 1'b1;
       end
-      if (l1d_slot_busy && l1d_slot_issued && axi.rvalid && axi.rlast && (axi.rid == 4'(L1D))) begin
+      if (l1d_slot_busy && l1d_slot_issued && mem.rd_rsp_valid && mem.rd_rsp_last
+          && (mem.rd_rsp_id == (l1d_slot_ptw ? 4'(TLBD) : 4'(L1D)))) begin
         l1d_slot_busy   <= 1'b0;
         l1d_slot_issued <= 1'b0;
         l1d_slot_mmio   <= 1'b0;
+        l1d_slot_ptw    <= 1'b0;
       end
     end
   end
 
-`else  // RAPT_SOC: legacy single-outstanding FSM.
-  typedef enum logic [2:0] {
-    LD_A,
-    LD_AS,
-    LD_D
-  } state_load_t;
+  typedef enum logic {
+    WR_IDLE,
+    WR_WAIT
+  } write_state_t;
 
-  logic [3:0] arid;
-  logic [XLEN-1:0] bus_araddr;
-  logic arburst;
-  logic [2:0] arsize;
-  logic l1d_load_is_mmio;
-
-  state_load_t state_load;
-  state_lds_t state_load_source;
-  state_lds_t load_bridge;
-
-  assign axi.arid = arid;
-  assign load_bridge = l1d_bus.arvalid ? L1D : L1I;
-
-  assign l1i_bus.rready = (state_load == LD_A && load_bridge == L1I);
-  assign l1i_bus.rdata = axi.rdata;
-  assign l1i_bus.rvalid = (axi.rid == L1I) && axi.rvalid;
-  assign l1i_bus.rlast = (axi.rid == L1I) && axi.rlast;
-  assign l1i_bus.rerr = (axi.rid == L1I) && axi.rvalid && (axi.rresp != 2'b00);
-  assign l1i_bus.wready = (state_store == LS_S_B) && (store_source == L1I) && axi.bvalid;
-  assign l1i_bus.werr = (store_source == L1I) && axi.bvalid && (axi.bresp != 2'b00);
-
-  assign l1d_bus.rready = (state_load == LD_A && load_bridge == L1D);
-  assign l1d_bus.rdata = axi.rdata;
-  assign l1d_bus.rvalid = (axi.rid == L1D) && axi.rvalid;
-  assign l1d_bus.rlast = (axi.rid == L1D) && axi.rlast;
-  assign l1d_bus.difftest_skip = l1d_load_is_mmio;
-  assign l1d_bus.rerr = (axi.rid == L1D) && axi.rvalid && (axi.rresp != 2'b00);
-
-  assign axi.arburst = arburst ? 2'b01 : 2'b00;
-  assign axi.arsize = arsize;
-  assign axi.arlen = arburst ? 8'h1 : 8'h0;
-  assign axi.araddr = bus_araddr;
-  assign axi.arvalid = (state_load == LD_AS);
-  assign axi.rready = 1'b1;
-
-  always_ff @(posedge clock) begin
-    if (reset) begin
-      state_load <= LD_A;
-      l1d_load_is_mmio <= 1'b0;
-      arsize <= 3'b000;
-      arburst <= 1'b0;
-      bus_araddr <= '0;
-      arid <= '0;
-      state_load_source <= L1I;
-    end else begin
-      unique case (state_load)
-        LD_A: begin
-          if (l1d_bus.arvalid) begin
-            state_load <= LD_AS;
-            bus_araddr <= l1d_bus.araddr;
-            arid <= L1D;
-            state_load_source <= L1D;
-            l1d_load_is_mmio <= rapt_pkg::addr_mmio(l1d_bus.araddr);
-            arsize <= (
-              ({3{l1d_bus.rstrb == 8'h1}} & 3'b000) |
-              ({3{l1d_bus.rstrb == 8'h3}} & 3'b001) |
-              ({3{l1d_bus.rstrb == 8'hf}} & 3'b010) |
-              ({3{l1d_bus.rstrb == 8'hff}} & 3'b011) |
-              (3'b000)
-            );
-          end else if (l1i_bus.arvalid) begin
-            bus_araddr <= l1i_bus.araddr;
-            state_load <= LD_AS;
-            arburst <= l1i_bus.arburst;
-            arid <= L1I;
-            arsize <= 3'b010;
-            state_load_source <= L1I;
-          end
-        end
-        LD_AS: begin
-          if (axi.arready) begin
-            state_load <= LD_D;
-            arburst <= 1'b0;
-            bus_araddr <= '0;
-          end
-        end
-        LD_D: begin
-          if (axi.rvalid && axi.rlast) begin
-            state_load <= LD_A;
-            arburst <= 1'b0;
-            bus_araddr <= '0;
-            l1d_load_is_mmio <= 1'b0;
-          end
-        end
-        default: state_load <= LD_A;
-      endcase
-    end
-  end
-`endif  // RAPT_SOC
-
+  write_state_t write_state;
+  state_lds_t store_bridge;
+  state_lds_t store_source;
   logic [XLEN-1:0] store_awaddr;
   logic [XLEN-1:0] store_wdata;
-  logic [7:0] store_wstrb_aw;
-  logic [XLEN/8-1:0] store_wstrb;
+  logic [7:0] store_wstrb;
   logic store_awvalid;
   logic store_wvalid;
 
-  assign store_awaddr = (store_bridge == L1I) ? l1i_bus.awaddr : l1d_bus.awaddr;
-  assign store_wdata = (store_current == L1I) ? l1i_bus.wdata : l1d_bus.wdata;
-  assign store_wstrb_aw = (store_bridge == L1I) ? l1i_bus.wstrb : l1d_bus.wstrb;
-  assign store_wstrb = (store_current == L1I) ? l1i_bus.wstrb[XLEN/8-1:0]
-                                               : l1d_bus.wstrb[XLEN/8-1:0];
-  assign store_awvalid = (store_bridge == L1I) ? l1i_bus.awvalid : l1d_bus.awvalid;
-  assign store_wvalid = (store_current == L1I) ? l1i_bus.wvalid : l1d_bus.wvalid;
+  assign store_bridge = l1i_bus.awvalid ? (l1i_bus.aw_ptw ? TLBI : L1I)
+                                        : (l1d_bus.aw_ptw ? TLBD : L1D);
+  assign store_awaddr = (store_bridge inside {L1I, TLBI}) ? l1i_bus.awaddr : l1d_bus.awaddr;
+  assign store_wdata = (store_bridge inside {L1I, TLBI}) ? l1i_bus.wdata : l1d_bus.wdata;
+  assign store_wstrb = (store_bridge inside {L1I, TLBI}) ? l1i_bus.wstrb : l1d_bus.wstrb;
+  assign store_awvalid = (store_bridge inside {L1I, TLBI}) ? l1i_bus.awvalid : l1d_bus.awvalid;
+  assign store_wvalid = (store_bridge inside {L1I, TLBI}) ? l1i_bus.wvalid : l1d_bus.wvalid;
 
-  // lsu/IPTW write
-  assign l1d_bus.wready = (state_store == LS_S_B) && (store_source == L1D) && axi.bvalid;
+  assign mem.wr_req_valid = (write_state == WR_IDLE) && store_awvalid && store_wvalid;
+  assign mem.wr_req_id = 4'(store_bridge);
+  assign mem.wr_req_addr = store_awaddr;
+  assign mem.wr_req_size =
+      ({3{store_wstrb == 8'h01}} & 3'b000)
+    | ({3{store_wstrb == 8'h03}} & 3'b001)
+    | ({3{store_wstrb == 8'h0f}} & 3'b010)
+    | ({3{store_wstrb == 8'hff}} & 3'b011);
+  assign mem.wr_req_data = store_wdata;
+  assign mem.wr_req_strb = store_wstrb[XLEN/8-1:0];
+  assign mem.wr_rsp_ready = write_state == WR_WAIT;
 
-  assign axi.awsize = store_awvalid
-    ? (({3{store_wstrb_aw == 8'h1}} & 3'b000)
-      |({3{store_wstrb_aw == 8'h3}} & 3'b001)
-      |({3{store_wstrb_aw == 8'hf}} & 3'b010)
-      |({3{store_wstrb_aw == 8'hff}} & 3'b011))
-    : 3'b000;
-  assign axi.awaddr = store_awvalid ? store_awaddr : 'h0;
-  assign axi.awvalid = ((state_store == LS_S_A) || (state_store == LS_S_AW)) && store_awvalid;
-
-  localparam logic [31:0] ADDR2BITS = $clog2(XLEN / 8);  // 2 for RV32, 3 for RV64
-  logic [ADDR2BITS-1:0] awaddr_lo;
-  assign awaddr_lo = axi.awaddr[ADDR2BITS-1:0];
-  assign axi.wdata = store_wdata << (awaddr_lo * 8);
-  assign axi.wvalid = ((state_store == LS_S_A) || (state_store == LS_S_W)) && store_wvalid;
-  assign axi.wlast = axi.wvalid;
-  assign axi.wstrb = store_wstrb << awaddr_lo;
-
-  assign axi.bready = (state_store == LS_S_B);
-  // Bus error on write response. Stores reaching the bus have already
-  // passed bare-mode PMA / MMU PMP checks, so a runtime werr is a configuration
-  // hazard -- surface it for waves but do not break the existing handshake
-  // contract back to LSU (no per-store trap path on the write side today).
-  assign l1d_bus.werr = (store_source == L1D) && axi.bvalid && (axi.bresp != 2'b00);
+  assign l1i_bus.wready = (write_state == WR_WAIT) && (store_source == L1I)
+                       && mem.wr_rsp_valid;
+  assign l1i_bus.werr = (store_source == L1I) && mem.wr_rsp_valid && mem.wr_rsp_error;
+  assign l1i_bus.ptw_wready = (write_state == WR_WAIT) && (store_source == TLBI)
+                           && mem.wr_rsp_valid;
+  assign l1i_bus.ptw_werr = (store_source == TLBI) && mem.wr_rsp_valid && mem.wr_rsp_error;
+  assign l1d_bus.wready = (write_state == WR_WAIT) && (store_source == L1D)
+                       && mem.wr_rsp_valid;
+  assign l1d_bus.werr = (store_source == L1D) && mem.wr_rsp_valid && mem.wr_rsp_error;
+  assign l1d_bus.ptw_wready = (write_state == WR_WAIT) && (store_source == TLBD)
+                           && mem.wr_rsp_valid;
+  assign l1d_bus.ptw_werr = (store_source == TLBD) && mem.wr_rsp_valid && mem.wr_rsp_error;
 
   always_ff @(posedge clock) begin
     if (reset) begin
-      state_store <= LS_S_A;
-      awid <= 'h1;
+      write_state <= WR_IDLE;
       store_source <= L1D;
     end else begin
-      unique case (state_store)
-        LS_S_A: begin
-          // Present AW and W concurrently: the master must never wait for
-          // AWREADY before asserting WVALID. Slaves whose AWREADY depends on
-          // WVALID being present (e.g. the ysyxSoC ultra-embedded sdram_axi
-          // controller) would otherwise deadlock (AW-before-W). L1I/L1D hold
-          // both awvalid and wvalid stable until the B response, so it is safe
-          // to offer them together and complete each channel independently.
-          if (axi.awvalid && axi.awready) begin
+      unique case (write_state)
+        WR_IDLE: begin
+          if (mem.wr_req_valid && mem.wr_req_ready) begin
             store_source <= store_bridge;
-            awid <= store_bridge;
-          end
-          if ((axi.awvalid && axi.awready) && (axi.wvalid && axi.wready)) begin
-            state_store <= LS_S_B;   // AW + W accepted together
-          end else if (axi.awvalid && axi.awready) begin
-            state_store <= LS_S_W;   // AW accepted, W still outstanding
-          end else if (axi.wvalid && axi.wready) begin
-            state_store <= LS_S_AW;  // W accepted, AW still outstanding
+            write_state <= WR_WAIT;
           end
         end
-        LS_S_W: begin
-          if (store_wvalid && axi.wready) begin
-            state_store <= LS_S_B;
+        WR_WAIT: begin
+          if (mem.wr_rsp_valid && mem.wr_rsp_ready) begin
+            write_state <= WR_IDLE;
           end
         end
-        LS_S_AW: begin
-          if (store_awvalid && axi.awready) begin
-            store_source <= store_bridge;
-            awid <= store_bridge;
-            state_store <= LS_S_B;
-          end
-        end
-        LS_S_B: begin
-          if (axi.bvalid) begin
-            state_store <= LS_S_A;
-          end
-        end
-        default: state_store <= LS_S_A;
+        default: write_state <= WR_IDLE;
       endcase
     end
   end
 
-  // SVA: stores leaving the core must already have been screened by PMA / PMP
-  // checks. A non-OKAY bresp on a committed store flags either a SoC decoder
-  // misconfiguration or a PMA / SoC memory-map drift. Use the central SVA macro
-  // so this check is completely absent from FPGA/ASIC synthesis.
-  `RAPT_SVA_IMPLY(clock, reset, BUS_STORE_BRESP_OK, axi.bvalid, axi.bresp == 2'b00)
+  `RAPT_SVA_IMPLY(clock, reset, BUS_STORE_RESPONSE_OK, mem.wr_rsp_valid, !mem.wr_rsp_error)
 
 endmodule

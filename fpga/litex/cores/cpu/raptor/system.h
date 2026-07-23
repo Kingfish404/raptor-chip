@@ -19,7 +19,8 @@ extern "C"
   __attribute__((unused)) static void flush_cpu_dcache(void)
   {
 #if defined(CONFIG_CPU_HAS_DCACHE)
-    asm volatile("fence" ::: "memory");
+    /* cbo.flush 0(x0); Raptor conservatively maintains the whole L1D. */
+    asm volatile("cbo.flush 0(x0)" ::: "memory");
 #endif
   }
 

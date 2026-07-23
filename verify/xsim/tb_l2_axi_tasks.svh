@@ -35,7 +35,9 @@ task automatic init_l2_axi(input bit upstream_bready_init);
   end
 endtask
 
+
 task automatic send_l2_aw(input logic [XLEN-1:0] addr, input logic [IdW-1:0] id);
+  bit accepted;
   begin
     axi_s.awaddr = addr;
     axi_s.awid = id;
@@ -43,19 +45,30 @@ task automatic send_l2_aw(input logic [XLEN-1:0] addr, input logic [IdW-1:0] id)
     axi_s.awsize = 3'd2;
     axi_s.awburst = 2'b01;
     axi_s.awvalid = 1'b1;
-    do @(posedge clock); while (!axi_s.awready);
+    accepted = 1'b0;
+    for (int wait_cycle = 0; wait_cycle < 64 && !accepted; wait_cycle++) begin
+      @(posedge clock);
+      accepted = axi_s.awready;
+    end
+    if (!accepted) fail("timed out waiting for upstream AW ready");
     #1;
     axi_s.awvalid = 1'b0;
   end
 endtask
 
 task automatic send_l2_w(input logic [XLEN-1:0] data, input logic [XLEN/8-1:0] strb);
+  bit accepted;
   begin
     axi_s.wdata = data;
     axi_s.wstrb = strb;
     axi_s.wlast = 1'b1;
     axi_s.wvalid = 1'b1;
-    do @(posedge clock); while (!axi_s.wready);
+    accepted = 1'b0;
+    for (int wait_cycle = 0; wait_cycle < 64 && !accepted; wait_cycle++) begin
+      @(posedge clock);
+      accepted = axi_s.wready;
+    end
+    if (!accepted) fail("timed out waiting for upstream W ready");
     #1;
     axi_s.wvalid = 1'b0;
     axi_s.wstrb = '0;
@@ -74,6 +87,7 @@ task automatic send_l2_ar_len(
     input logic [7:0] len,
     input logic [1:0] burst
 );
+  bit accepted;
   begin
     axi_s.araddr = addr;
     axi_s.arid = id;
@@ -81,7 +95,12 @@ task automatic send_l2_ar_len(
     axi_s.arsize = 3'd2;
     axi_s.arburst = burst;
     axi_s.arvalid = 1'b1;
-    do @(posedge clock); while (!axi_s.arready);
+    accepted = 1'b0;
+    for (int wait_cycle = 0; wait_cycle < 64 && !accepted; wait_cycle++) begin
+      @(posedge clock);
+      accepted = axi_s.arready;
+    end
+    if (!accepted) fail("timed out waiting for upstream AR ready");
     #1;
     axi_s.arvalid = 1'b0;
   end
@@ -100,16 +119,27 @@ task automatic accept_l2_downstream_write(
     output logic [XLEN/8-1:0] strb_seen,
     output logic last_seen
 );
+  bit accepted;
   begin
     axi_m.awready = 1'b1;
-    do @(posedge clock); while (!axi_m.awvalid);
+    accepted = 1'b0;
+    for (int wait_cycle = 0; wait_cycle < 64 && !accepted; wait_cycle++) begin
+      @(posedge clock);
+      accepted = axi_m.awvalid;
+    end
+    if (!accepted) fail("timed out waiting for downstream AW valid");
     id_seen = axi_m.awid;
     addr_seen = axi_m.awaddr;
     #1;
     axi_m.awready = 1'b0;
 
     axi_m.wready = 1'b1;
-    do @(posedge clock); while (!axi_m.wvalid);
+    accepted = 1'b0;
+    for (int wait_cycle = 0; wait_cycle < 64 && !accepted; wait_cycle++) begin
+      @(posedge clock);
+      accepted = axi_m.wvalid;
+    end
+    if (!accepted) fail("timed out waiting for downstream W valid");
     data_seen = axi_m.wdata;
     strb_seen = axi_m.wstrb;
     last_seen = axi_m.wlast;
@@ -119,11 +149,17 @@ task automatic accept_l2_downstream_write(
 endtask
 
 task automatic return_l2_downstream_b(input logic [IdW-1:0] id, input logic [1:0] resp);
+  bit accepted;
   begin
     axi_m.bid = id;
     axi_m.bresp = resp;
     axi_m.bvalid = 1'b1;
-    do @(posedge clock); while (!axi_m.bready);
+    accepted = 1'b0;
+    for (int wait_cycle = 0; wait_cycle < 64 && !accepted; wait_cycle++) begin
+      @(posedge clock);
+      accepted = axi_m.bready;
+    end
+    if (!accepted) fail("timed out waiting for downstream B ready");
     #1;
     axi_m.bvalid = 1'b0;
     axi_m.bresp = 2'b00;
@@ -135,9 +171,15 @@ task automatic accept_l2_downstream_ar(
     output logic [XLEN-1:0] addr_seen,
     output logic [7:0] len_seen
 );
+  bit accepted;
   begin
     axi_m.arready = 1'b1;
-    do @(posedge clock); while (!axi_m.arvalid);
+    accepted = 1'b0;
+    for (int wait_cycle = 0; wait_cycle < 64 && !accepted; wait_cycle++) begin
+      @(posedge clock);
+      accepted = axi_m.arvalid;
+    end
+    if (!accepted) fail("timed out waiting for downstream AR valid");
     id_seen = axi_m.arid;
     addr_seen = axi_m.araddr;
     len_seen = axi_m.arlen;
@@ -151,13 +193,19 @@ task automatic return_l2_downstream_r(
     input logic [XLEN-1:0] data,
     input logic last
 );
+  bit accepted;
   begin
     axi_m.rid = id;
     axi_m.rdata = data;
     axi_m.rresp = 2'b00;
     axi_m.rlast = last;
     axi_m.rvalid = 1'b1;
-    do @(posedge clock); while (!axi_m.rready);
+    accepted = 1'b0;
+    for (int wait_cycle = 0; wait_cycle < 64 && !accepted; wait_cycle++) begin
+      @(posedge clock);
+      accepted = axi_m.rready;
+    end
+    if (!accepted) fail("timed out waiting for downstream R ready");
     #1;
     axi_m.rvalid = 1'b0;
     axi_m.rlast = 1'b1;

@@ -97,6 +97,21 @@ void clint_update_mip(void)
 #endif
 }
 
+void clint_restore_checkpoint(uint64_t mtime, uint64_t mtimecmp, uint8_t msip)
+{
+  (void)mtime;
+  cpu.mtimecmp = mtimecmp;
+  clint_msip = msip & 1u;
+  if (clint_base != NULL)
+  {
+    uint8_t *p = (uint8_t *)clint_base;
+    *(uint32_t *)(p + MSIP_BASE) = clint_msip;
+    *(uint32_t *)(p + MTIMECMP_BASE) = (uint32_t)mtimecmp;
+    *(uint32_t *)(p + MTIMECMP_BASE + 4) = (uint32_t)(mtimecmp >> 32);
+  }
+  clint_update_mip();
+}
+
 // WFI acceleration: advance time to mtimecmp so the next instruction sees MTIP.
 // Returns true if time was advanced.
 bool clint_wfi_advance(void)

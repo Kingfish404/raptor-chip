@@ -103,10 +103,18 @@ module rapt_lsu #(
   // (quiesce/PMU) so host code never depends on SQ_SIZE's bit width.
   // sq_all_full has no RTL reader -- it exists for the PMU sq-full counter.
   logic sq_all_empty;
+  logic [31:0] sq_snapshot_valid;
+  logic [31:0] sq_snapshot_committed;
+  logic [7:0] sq_snapshot_capacity;
+  logic [7:0] sq_snapshot_head;
   /* verilator lint_off UNUSEDSIGNAL */
   logic sq_all_full;
   /* verilator lint_on UNUSEDSIGNAL */
   assign sq_all_empty = (sq_valid == '0) && (state_store == LS_S_V);
+  assign sq_snapshot_valid = 32'(sq_valid);
+  assign sq_snapshot_committed = 32'(sq_committed);
+  assign sq_snapshot_capacity = 8'(SQ_SIZE);
+  assign sq_snapshot_head = 8'(sq_head);
   assign sq_all_full  = &sq_valid;
   assign rou_lsu.sq_empty = sq_all_empty;
 
@@ -127,6 +135,27 @@ module rapt_lsu #(
   assign sq_drain_fire = (state_store == LS_S_R || state_store == LS_S_HI_R)
                        && sq_valid[sq_head];
 
+  logic [SQ_SIZE-1:0] sq_alloc_oh;
+  logic [SQ_SIZE-1:0] sq_commit_oh;
+  logic [SQ_SIZE-1:0] sq_drain_oh;
+  logic [SQ_SIZE-1:0] sq_flush_clear_oh;
+  always_comb begin
+    sq_alloc_oh = '0;
+    sq_commit_oh = '0;
+    sq_drain_oh = '0;
+    sq_flush_clear_oh = '0;
+    if (sq_alloc_fire && !(cmu_bcast.flush_pipe || cmu_bcast.fence_time))
+      sq_alloc_oh[sq_tail] = 1'b1;
+    if (sq_commit_fire) sq_commit_oh[sq_cmt] = 1'b1;
+    if (sq_drain_fire) sq_drain_oh[sq_head] = 1'b1;
+    if (cmu_bcast.flush_pipe || cmu_bcast.fence_time) begin
+      for (int i = 0; i < SQ_SIZE; i++) begin
+        if (sq_valid[i] && !sq_committed[i] && !sq_commit_oh[i])
+          sq_flush_clear_oh[i] = 1'b1;
+      end
+    end
+  end
+
   always_ff @(posedge clock) begin
     if (reset) begin
       sq_head      <= '0;
@@ -135,6 +164,7 @@ module rapt_lsu #(
       sq_valid     <= '0;
       sq_committed <= '0;
       pmu_sq_full  <= 1'b0;
+      sq_full_r    <= 1'b0;
       // Reset payload arrays so unused entries cannot feed X values into the
       // store FSM or store-to-load forwarding logic in FPGA synthesis.
       for (int i = 0; i < SQ_SIZE; i++) begin
@@ -157,19 +187,12 @@ module rapt_lsu #(
         // the flush; preserve that commit mark while discarding younger work.
         sq_tail <= sq_cmt + SQLen'(sq_commit_fire);
         if (sq_commit_fire) begin
-          sq_committed[sq_cmt] <= 1'b1;
           sq_cmt <= sq_cmt + 1'b1;
           `RAPT_DPI_C_NPC_DIFFTEST_MEM_DIFF(rou_lsu.sq_waddr, rou_lsu.sq_wdata,
                                             {{2'b0}, rou_lsu.alu})
         end
-        for (int i = 0; i < SQ_SIZE; i++) begin
-          if (sq_valid[i] && !sq_committed[i] && !(sq_commit_fire && SQLen'(i) == sq_cmt)) begin
-            sq_valid[i] <= 1'b0;
-          end
-        end
       end else begin
         if (sq_alloc_fire) begin
-          sq_valid[sq_tail] <= 1'b1;
           sq_alu[sq_tail]   <= exu_ioq_bcast.alu[4:0];
           sq_dest[sq_tail]  <= exu_ioq_bcast.dest;
           sq_vaddr[sq_tail] <= exu_ioq_bcast.tval;      // virtual (forwarding)
@@ -178,7 +201,6 @@ module rapt_lsu #(
           sq_tail <= sq_tail + 1'b1;
         end
         if (sq_commit_fire) begin
-          sq_committed[sq_cmt] <= 1'b1;
           sq_cmt <= sq_cmt + 1'b1;
           `RAPT_DPI_C_NPC_DIFFTEST_MEM_DIFF(rou_lsu.sq_waddr, rou_lsu.sq_wdata,
                                             {{2'b0}, rou_lsu.alu})
@@ -187,9 +209,23 @@ module rapt_lsu #(
 
       // ---- Drain release (committed side; independent of flush) ----
       if (sq_drain_fire) begin
-        sq_valid[sq_head]     <= 1'b0;
-        sq_committed[sq_head] <= 1'b0;
         sq_head <= sq_head + 1'b1;
+      end
+
+      // Static per-entry state muxes. Drain is textually last in the former
+      // implementation, so it retains highest priority on any pointer alias.
+      for (int i = 0; i < SQ_SIZE; i++) begin
+        if (sq_drain_oh[i])
+          sq_valid[i] <= 1'b0;
+        else if (sq_flush_clear_oh[i])
+          sq_valid[i] <= 1'b0;
+        else if (sq_alloc_oh[i])
+          sq_valid[i] <= 1'b1;
+
+        if (sq_drain_oh[i])
+          sq_committed[i] <= 1'b0;
+        else if (sq_commit_oh[i])
+          sq_committed[i] <= 1'b1;
       end
     end
   end
@@ -222,7 +258,10 @@ module rapt_lsu #(
 
   // Youngest match wins: highest j in age order (last set bit)
   always_comb begin
-    load_in_sq = |sq_match_vec;
+    // Before translation, a load VA cannot disprove aliasing with an SQ
+    // store's PA. Keep exact-VA forwarding, but conservatively block every
+    // other MMU-mode load until older stores have drained.
+    load_in_sq = csr_bcast.dmmu_en ? (|sq_valid || sq_alloc_fire) : |sq_match_vec;
     sq_fwd_ok = 0;
     sq_fwd_data = 0;
     for (int j = 0; j < SQ_SIZE; j++) begin
@@ -295,7 +334,11 @@ module rapt_lsu #(
   logic mmio_load_blocked;
   assign mmio_load_blocked = mmio_ordered
                           && !((sq_valid == '0) && (state_store == LS_S_V));
-  assign fwd_hit = !ma_span && !mmio_ordered && load_in_sq && sq_fwd_ok;
+  // LR must reach L1D to establish a physical-address reservation. If an
+  // older same-address store is still in the SQ, wait for it to drain rather
+  // than completing LR through the ordinary load-forwarding path.
+  assign fwd_hit = !exu_lsu.atomic_lock
+                && !ma_span && !mmio_ordered && load_in_sq && sq_fwd_ok;
   logic pmp_load_fault_lsu;
   // Only engage the split for requests that actually reach the cache
   // (no SQ forward/conflict).  Forwarded loads keep the single-shot path;
@@ -341,7 +384,7 @@ module rapt_lsu #(
     end
   end
   always_comb begin
-    load_in_sq_b = |sq_match_vec_b;
+    load_in_sq_b = csr_bcast.dmmu_en ? (|sq_valid || sq_alloc_fire) : |sq_match_vec_b;
     sq_fwd_ok_b = 0;
     sq_fwd_data_b = 0;
     for (int j = 0; j < SQ_SIZE; j++) begin
@@ -604,6 +647,7 @@ module rapt_lsu #(
                                        && !mmio_load_blocked
                                        && (ma_state == MA_IDLE));
   assign lsu_l1d.atomic_lock = exu_lsu.atomic_lock;
+  assign lsu_l1d.ordered = exu_lsu.ordered && sq_all_empty;
 
   // Misalign-split FSM.
   always_ff @(posedge clock) begin
@@ -628,8 +672,10 @@ module rapt_lsu #(
           end
         end
         MA_DONE: begin
-          // EXU consumes the merged word when rvalid drops.
-          if (!exu_lsu.rvalid) begin
+          // The IOQ may switch directly to another load after this response;
+          // release ownership on the handshake instead of requiring an
+          // otherwise-unrelated rvalid bubble.
+          if (!exu_lsu.rvalid || exu_lsu.rready) begin
             ma_state <= MA_IDLE;
           end
         end
@@ -731,6 +777,12 @@ module rapt_lsu #(
   `RAPT_SVA_IMPLY(clock, reset, LSU_BLOCKED_LOAD_NOT_READY,
       (raddr_valid && load_in_sq && !fwd_hit),
       (!exu_lsu.rready))
+
+    // LR establishes its reservation in L1D and therefore cannot complete via
+    // store-queue forwarding even when an older store fully covers its bytes.
+    `RAPT_SVA_IMPLY(clock, reset, LSU_LR_NO_SQ_FORWARD,
+      (raddr_valid && exu_lsu.atomic_lock),
+      (!fwd_hit))
 
   // HANDSHAKE: allocation requires a free slot at sq_tail.
   `RAPT_SVA_IMPLY(clock, reset, LSU_SQ_ALLOC_NEEDS_READY,

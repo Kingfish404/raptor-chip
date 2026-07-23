@@ -499,12 +499,14 @@ static int decode_exec(Decode *s)
   INSTPAT_CASE_END(grp_op32)
 #endif // CONFIG_RV64
 
-  INSTPAT_CASE(0b00011, grp_miscmem)                                   // MISC-MEM (fence, fence.i, fence.time, fence.tso, pause)
+  INSTPAT_CASE(0b00011, grp_miscmem)                                   // MISC-MEM (fence, fence.i, Zicbom, fence.tso, pause)
   INSTPAT("0000000 10000 00000 000 00000 00011 11", pause, N, {});     // hint instruction (include in fence)
   INSTPAT("1000001 10011 00000 000 00000 00011 11", fence_tso, N, {}); // fence.tso: inst[6:2]=0b00011, same MISC-MEM group
   INSTPAT("??????? ????? ????? 000 ????? 00011 11", fence, N, {});
   INSTPAT("??????? ????? ????? 001 ????? 00011 11", fence_i, I, icache_flush());
-  INSTPAT("0000000 00000 00000 010 00000 00011 11", fence.time, N, {});
+  INSTPAT("0000000 00000 ????? 010 00000 00011 11", cbo.inval, N, {});
+  INSTPAT("0000000 00001 ????? 010 00000 00011 11", cbo.clean, N, {});
+  INSTPAT("0000000 00010 ????? 010 00000 00011 11", cbo.flush, N, {});
   INSTPAT_CASE_END(grp_miscmem)
 
   INSTPAT_CASE(0b11100, grp_system) // SYSTEM (ecall, ebreak, sfence.vma, mret, sret, wfi, CSRs)

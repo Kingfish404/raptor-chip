@@ -11,7 +11,8 @@ Chisel is used only to generate instruction decoders.
 
 The repository also bundles the NEMU software ISS (used as a difftest
 reference), a Verilator-based simulator (NPC), an AbstractMachine runtime,
-Linux kernel build scripts, and FPGA integration (Gowin Tang Nano 20K, LiteX).
+Linux kernel build scripts, and FPGA integration (Gowin Tang boards and Xilinx
+KU15P through LiteX).
 
 Repository: <https://github.com/Kingfish404/raptor-chip>
 
@@ -19,7 +20,7 @@ Repository: <https://github.com/Kingfish404/raptor-chip>
 
 | Item                 | Value                                                                                                   |
 | -------------------- | ------------------------------------------------------------------------------------------------------- |
-| ISA                  | `rv32/64imac_zicbop_zicntr_zicond_zicsr_zifencei_zihintntl_zihintpause_zimop_zcb_zcmop_zba_zbb_zbc_zbs` |
+| ISA                  | `rv32/64imac_zicbom_zicbop_zicntr_zicond_zicsr_zifencei_zihintntl_zihintpause_zimop_zcb_zcmop_zba_zbb_zbc_zbs` |
 | Privilege modes      | M, S, U                                                                                                 |
 | MMU                  | Sv32 (RV32) / Sv39 PTW path (RV64 xv6 bring-up) / Bare                                                  |
 | Interrupts           | CLINT (`mtime`, `mtimecmp`, `msip`) + PLIC (31 sources, M/S contexts)                                   |
@@ -27,7 +28,7 @@ Repository: <https://github.com/Kingfish404/raptor-chip>
 | ROB / RS / IOQ / SQ  | 64 / 8 / 8 / 16                                                                                         |
 | PRF                  | 128 physical integer registers                                                                          |
 | BPU                  | TAGE direction predictor + 2-way BTB + 4-entry RSB                                                      |
-| L1I / L1D            | 4 KiB 2-way L1I / 2 KiB 2-way L1D, banked SRAM                                                          |
+| L1I / L1D            | 4 KiB 2-way L1I / 2 KiB 2-way write-through L1D, banked SRAM, 64 B lines                                |
 | L2                   | Optional 16 KiB direct-mapped unified cache; default config disables it as passthrough                  |
 | Bus                  | AXI4, XLEN-bit data/addr, 4-bit ID                                                                      |
 | Debug                | RISC-V Debug Module / JTAG DTM bring-up ports at cluster top                                            |

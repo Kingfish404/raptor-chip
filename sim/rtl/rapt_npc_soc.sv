@@ -277,6 +277,7 @@ module rapt_npc_soc #(
   logic [XLEN-1:0] r_next_addr;  // address for the NEXT beat
   logic [     2:0] r_size_q;
   logic [     1:0] r_burst_q;
+  logic [    31:0] r_delay_q;
 
   // -------------------------------------------------------------------------
   // Write pipeline. AW captured into a single-entry holding register; W beats
@@ -294,14 +295,16 @@ module rapt_npc_soc #(
   logic            b_busy;  // B response pending
   logic [     3:0] b_id_q;
   logic [     1:0] b_resp_q;
+  logic [    31:0] w_delay_q;
+  logic [    31:0] b_delay_q;
 
   // Combinational AR-handshake helpers (skid: free when current beat exits)
   logic r_slot_free, aw_slot_free;
-  assign r_slot_free  = !r_busy || (rready && r_last_q);
+  assign r_slot_free  = !r_busy || (out_rvalid && rready && r_last_q);
   assign aw_slot_free = !aw_busy;
 
   assign out_arready  = r_slot_free;
-  assign out_rvalid   = r_busy;
+  assign out_rvalid   = r_busy && (r_delay_q == 0);
   assign out_rdata    = r_data_q;
   assign out_rid      = r_id_q;
   assign out_rresp    = r_resp_q;
@@ -314,8 +317,8 @@ module rapt_npc_soc #(
   // this is conservative (stalls mid-burst too when B is busy) but avoids
   // a combinational dependence on the master-driven `wlast`, which would
   // otherwise close a loop through the AXI interface.
-  assign out_wready   = aw_busy && !b_busy;
-  assign out_bvalid   = b_busy;
+  assign out_wready   = aw_busy && !b_busy && (w_delay_q == 0);
+  assign out_bvalid   = b_busy && (b_delay_q == 0);
   assign out_bid      = b_id_q;
   assign out_bresp    = b_resp_q;
 
@@ -331,6 +334,12 @@ module rapt_npc_soc #(
   logic accept_ar;
   assign accept_ar = arvalid && r_slot_free;
 
+  function automatic logic [31:0] random_delay();
+    logic [31:0] delay;
+    `RAPT_DPI_C_MEM_RANDOM_DELAY(delay);
+    return delay;
+  endfunction
+
   // ==========================================================================
   // Sequential update — single always_ff drives both channels.
   // ==========================================================================
@@ -345,6 +354,7 @@ module rapt_npc_soc #(
       r_next_addr   <= '0;
       r_size_q      <= '0;
       r_burst_q     <= '0;
+      r_delay_q     <= '0;
 
       aw_busy       <= 1'b0;
       aw_id_q       <= '0;
@@ -357,13 +367,18 @@ module rapt_npc_soc #(
       b_busy        <= 1'b0;
       b_id_q        <= '0;
       b_resp_q      <= AXIRespOKAY;
+      w_delay_q     <= '0;
+      b_delay_q     <= '0;
 
       r_timeout_cnt <= '0;
       w_timeout_cnt <= '0;
     end else begin
       // -------------------- READ CHANNEL --------------------
       // (1) Consume current beat if handshake fires.
-      if (r_busy && rready) begin
+      if (r_delay_q != 0) begin
+        r_delay_q <= r_delay_q - 1;
+      end
+      if (out_rvalid && rready) begin
         if (r_last_q) begin
           // Burst complete; slot becomes free this cycle.
           r_busy <= 1'b0;
@@ -383,6 +398,7 @@ module rapt_npc_soc #(
           r_next_addr  <= burst_next_addr(na, r_size_q, r_burst_q);
           r_beats_left <= r_beats_left - 8'd1;
           r_last_q     <= (r_beats_left == 8'd1);
+          r_delay_q    <= random_delay();
         end
       end
 
@@ -407,9 +423,16 @@ module rapt_npc_soc #(
         r_beats_left <= arlen;  // beats remaining after first
         r_last_q     <= (arlen == 8'd0);
         r_next_addr  <= burst_next_addr(araddr, arsize, arburst);
+        r_delay_q    <= random_delay();
       end
 
       // -------------------- WRITE CHANNEL --------------------
+      if (w_delay_q != 0) begin
+        w_delay_q <= w_delay_q - 1;
+      end
+      if (b_delay_q != 0) begin
+        b_delay_q <= b_delay_q - 1;
+      end
       // (1) Accept new AW if slot is free.
       if (awvalid && aw_slot_free) begin
         aw_busy       <= 1'b1;
@@ -419,6 +442,7 @@ module rapt_npc_soc #(
         aw_burst_q    <= awburst;
         aw_beats_left <= awlen;  // beats after first
         aw_resp_acc   <= addr_valid(awaddr) ? AXIRespOKAY : AXIRespDecerr;
+        w_delay_q     <= random_delay();
         if (!addr_valid(awaddr)) begin
           $display("NPC_SOC: [ERROR] AXI write to invalid addr=%0h, awid=%0d", awaddr, awid);
         end
@@ -441,14 +465,16 @@ module rapt_npc_soc #(
           b_id_q   <= aw_id_q;
           b_resp_q <= aw_resp_acc;
           aw_busy  <= 1'b0;  // free AW slot for next transaction
+          b_delay_q <= random_delay();
         end else begin
           aw_addr_q <= burst_next_addr(aw_addr_q, aw_size_q, aw_burst_q);
           aw_beats_left <= aw_beats_left - 8'd1;
+          w_delay_q <= random_delay();
         end
       end
 
       // (3) Drain B on handshake.
-      if (b_busy && bready) begin
+      if (out_bvalid && bready) begin
         b_busy <= 1'b0;
       end
 

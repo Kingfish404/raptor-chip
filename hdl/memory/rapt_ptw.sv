@@ -12,6 +12,7 @@ module rapt_ptw #(
     input reset,
 
     input logic req_valid,
+    input logic kill,
     /* verilator lint_off UNUSEDSIGNAL */
     input logic [XLEN-1:0] vaddr,
     /* verilator lint_on UNUSEDSIGNAL */
@@ -22,6 +23,7 @@ module rapt_ptw #(
 
     output logic bus_arvalid,
     output logic [XLEN-1:0] bus_araddr,
+    input  logic bus_arready,
     input  logic bus_rvalid,
     input  logic [XLEN-1:0] bus_rdata,
 
@@ -45,11 +47,14 @@ module rapt_ptw #(
 
 `ifdef RAPT_RV64
   typedef enum logic [2:0] {
-    IDLE   = 3'b000,
-    LVL2   = 3'b001,
-    LVL1   = 3'b010,
-    LVL0   = 3'b011,
-    AD_UPD = 3'b100
+    IDLE      = 3'b000,
+    LVL2_REQ  = 3'b001,
+    LVL2_WAIT = 3'b010,
+    LVL1_REQ  = 3'b011,
+    LVL1_WAIT = 3'b100,
+    LVL0_REQ  = 3'b101,
+    LVL0_WAIT = 3'b110,
+    AD_UPD    = 3'b111
   } ptw_state_t;
 
   ptw_state_t state;
@@ -60,6 +65,7 @@ module rapt_ptw #(
   logic [XLEN-1:0] ad_pte_addr;
   logic [XLEN-1:0] ad_pte_data;
   logic req_store_q;
+  logic killed;
 
   logic [63:0] pte_data;
   logic pte_v;
@@ -94,7 +100,8 @@ module rapt_ptw #(
   assign ptag_lvl0 = {{Rv64PtagPadW{1'b0}}, pte_data[53:10]};
 
   assign busy = (state != IDLE);
-  assign bus_arvalid = (state == LVL2 || state == LVL1 || state == LVL0);
+  assign bus_arvalid = !kill
+                     && (state == LVL2_REQ || state == LVL1_REQ || state == LVL0_REQ);
   assign bus_araddr = pte_addr;
   assign bus_awvalid = (state == AD_UPD);
   assign bus_awaddr = ad_pte_addr;
@@ -115,26 +122,32 @@ module rapt_ptw #(
       state <= IDLE;
       done  <= 1'b0;
       fault <= 1'b0;
+      killed <= 1'b0;
     end else begin
       done  <= 1'b0;
       fault <= 1'b0;
 
       unique case (state)
         IDLE: begin
-          if (req_valid && mmu_en) begin
+          killed <= 1'b0;
+          if (req_valid && mmu_en && !kill) begin
             vpn1 <= vaddr[29:21];
             vpn0 <= vaddr[20:12];
             vtag_q <= vaddr[XLEN-1:12];
             req_store_q <= req_store;
             pte_addr <= XLEN'({satp_ppn, 12'b0}) + (XLEN'(vaddr[38:30]) << 3);
-            state <= LVL2;
+            state <= LVL2_REQ;
           end
         end
-        LVL2: begin
-          if (!mmu_en) begin
-            state <= IDLE;
-          end else if (bus_rvalid) begin
-            if (!pte_v || pte_reserved) begin
+        LVL2_REQ: begin
+          if (kill) state <= IDLE;
+          else if (bus_arready) state <= LVL2_WAIT;
+        end
+        LVL2_WAIT: begin
+          if (bus_rvalid) begin
+            if (killed || kill) begin
+              state <= IDLE;
+            end else if (!pte_v || pte_reserved) begin
               fault <= 1'b1;
               state <= IDLE;
             end else if (pte_leaf) begin
@@ -159,16 +172,20 @@ module rapt_ptw #(
                 state <= IDLE;
               end else begin
                 pte_addr <= XLEN'({pte_data[53:10], 12'b0}) + (XLEN'(vpn1) << 3);
-                state <= LVL1;
+                state <= LVL1_REQ;
               end
             end
-          end
+          end else if (kill) killed <= 1'b1;
         end
-        LVL1: begin
-          if (!mmu_en) begin
-            state <= IDLE;
-          end else if (bus_rvalid) begin
-            if (!pte_v || pte_reserved) begin
+        LVL1_REQ: begin
+          if (kill) state <= IDLE;
+          else if (bus_arready) state <= LVL1_WAIT;
+        end
+        LVL1_WAIT: begin
+          if (bus_rvalid) begin
+            if (killed || kill) begin
+              state <= IDLE;
+            end else if (!pte_v || pte_reserved) begin
               fault <= 1'b1;
               state <= IDLE;
             end else if (pte_leaf) begin
@@ -193,16 +210,20 @@ module rapt_ptw #(
                 state <= IDLE;
               end else begin
                 pte_addr <= XLEN'({pte_data[53:10], 12'b0}) + (XLEN'(vpn0) << 3);
-                state <= LVL0;
+                state <= LVL0_REQ;
               end
             end
-          end
+          end else if (kill) killed <= 1'b1;
         end
-        LVL0: begin
-          if (!mmu_en) begin
-            state <= IDLE;
-          end else if (bus_rvalid) begin
-            if (!pte_v || pte_reserved || !pte_leaf) begin
+        LVL0_REQ: begin
+          if (kill) state <= IDLE;
+          else if (bus_arready) state <= LVL0_WAIT;
+        end
+        LVL0_WAIT: begin
+          if (bus_rvalid) begin
+            if (killed || kill) begin
+              state <= IDLE;
+            end else if (!pte_v || pte_reserved || !pte_leaf) begin
               fault <= 1'b1;
               state <= IDLE;
             end else begin
@@ -217,27 +238,42 @@ module rapt_ptw #(
                 state <= IDLE;
               end
             end
-          end
+          end else if (kill) killed <= 1'b1;
         end
         AD_UPD: begin
-          if (!mmu_en) begin
+          if (bus_wready) begin
+            fault <= !(killed || kill) && bus_werr;
+            done  <= !(killed || kill) && !bus_werr;
             state <= IDLE;
-          end else if (bus_wready) begin
-            fault <= bus_werr;
-            done  <= !bus_werr;
-            state <= IDLE;
-          end
+          end else if (kill) killed <= 1'b1;
         end
         default: state <= IDLE;
       endcase
     end
   end
+
+  always_ff @(posedge clock) begin
+    if (!reset) begin
+      assert (!bus_rvalid || state inside {LVL2_WAIT, LVL1_WAIT, LVL0_WAIT})
+        else $error("PTW read response arrived outside a response-wait state");
+      assert (!(bus_arvalid && bus_rvalid))
+        else $error("PTW issued a read request while consuming a response");
+    end
+  end
+
+  `RAPT_SVA_NEXT(clock, reset, PTW_KILLED_DRAIN_NO_COMPLETE,
+      (killed || kill)
+        && (((state inside {LVL2_WAIT, LVL1_WAIT, LVL0_WAIT}) && bus_rvalid)
+          || ((state == AD_UPD) && bus_wready)),
+      !done && !fault)
 `else
-  typedef enum logic [1:0] {
-    IDLE   = 2'b00,
-    LVL1   = 2'b01,
-    LVL0   = 2'b10,
-    AD_UPD = 2'b11
+  typedef enum logic [2:0] {
+    IDLE      = 3'b000,
+    LVL1_REQ  = 3'b001,
+    LVL1_WAIT = 3'b010,
+    LVL0_REQ  = 3'b011,
+    LVL0_WAIT = 3'b100,
+    AD_UPD    = 3'b101
   } ptw_state_t;
 
   ptw_state_t state;
@@ -254,6 +290,7 @@ module rapt_ptw #(
   logic [XLEN-1:0] ad_pte_addr;
   logic [31:0] ad_pte_data;
   logic req_store_q;
+  logic killed;
 
   // SBE: WARL-zero. Keep the port for interface stability.
   /* verilator lint_off UNUSEDSIGNAL */
@@ -264,7 +301,7 @@ module rapt_ptw #(
   assign pte_data = pte_raw;
 
   assign busy = (state != IDLE);
-  assign bus_arvalid = (state == LVL1 || state == LVL0);
+  assign bus_arvalid = !kill && (state == LVL1_REQ || state == LVL0_REQ);
   assign bus_araddr = ppn_a[XLEN-1:0];
   assign bus_awvalid = (state == AD_UPD);
   assign bus_awaddr = ad_pte_addr;
@@ -306,25 +343,31 @@ module rapt_ptw #(
       state <= IDLE;
       done  <= 1'b0;
       fault <= 1'b0;
+      killed <= 1'b0;
     end else begin
       done  <= 1'b0;
       fault <= 1'b0;
 
       unique case (state)
         IDLE: begin
-          if (req_valid && mmu_en) begin
+          killed <= 1'b0;
+          if (req_valid && mmu_en && !kill) begin
             vpn1  <= vaddr[31:22];
             vpn0  <= vaddr[21:12];
             req_store_q <= req_store;
             ppn_a <= {satp_ppn, 12'b0} + (vaddr[31:22] * 4);
-            state <= LVL1;
+            state <= LVL1_REQ;
           end
         end
-        LVL1: begin
-          if (!mmu_en) begin
-            state <= IDLE;
-          end else if (bus_rvalid) begin
-            if (!pte_v || pte_reserved) begin
+        LVL1_REQ: begin
+          if (kill) state <= IDLE;
+          else if (bus_arready) state <= LVL1_WAIT;
+        end
+        LVL1_WAIT: begin
+          if (bus_rvalid) begin
+            if (killed || kill) begin
+              state <= IDLE;
+            end else if (!pte_v || pte_reserved) begin
               fault <= 1'b1;
               state <= IDLE;
             end else if (pte_leaf) begin
@@ -349,16 +392,20 @@ module rapt_ptw #(
                 state <= IDLE;
               end else begin
                 ppn_a <= {pte_data[31:10], 12'b0} + (vpn0 * 4);
-                state <= LVL0;
+                state <= LVL0_REQ;
               end
             end
-          end
+          end else if (kill) killed <= 1'b1;
         end
-        LVL0: begin
-          if (!mmu_en) begin
-            state <= IDLE;
-          end else if (bus_rvalid) begin
-            if (!pte_v || pte_reserved || !pte_leaf) begin
+        LVL0_REQ: begin
+          if (kill) state <= IDLE;
+          else if (bus_arready) state <= LVL0_WAIT;
+        end
+        LVL0_WAIT: begin
+          if (bus_rvalid) begin
+            if (killed || kill) begin
+              state <= IDLE;
+            end else if (!pte_v || pte_reserved || !pte_leaf) begin
               fault <= 1'b1;
               state <= IDLE;
             end else begin
@@ -373,21 +420,35 @@ module rapt_ptw #(
                 state <= IDLE;
               end
             end
-          end
+          end else if (kill) killed <= 1'b1;
         end
         AD_UPD: begin
-          if (!mmu_en) begin
+          if (bus_wready) begin
+            fault <= !(killed || kill) && bus_werr;
+            done  <= !(killed || kill) && !bus_werr;
             state <= IDLE;
-          end else if (bus_wready) begin
-            fault <= bus_werr;
-            done  <= !bus_werr;
-            state <= IDLE;
-          end
+          end else if (kill) killed <= 1'b1;
         end
         default: state <= IDLE;
       endcase
     end
   end
+
+  always_ff @(posedge clock) begin
+    if (!reset) begin
+      assert (!bus_rvalid || state inside {LVL1_WAIT, LVL0_WAIT})
+        else $error("PTW read response arrived outside a response-wait state");
+      assert (!(bus_arvalid && bus_rvalid))
+        else $error("PTW issued a read request while consuming a response");
+    end
+  end
+
+
+  `RAPT_SVA_NEXT(clock, reset, PTW_KILLED_DRAIN_NO_COMPLETE,
+      (killed || kill)
+        && (((state inside {LVL1_WAIT, LVL0_WAIT}) && bus_rvalid)
+          || ((state == AD_UPD) && bus_wready)),
+      !done && !fault)
 `endif
 
 endmodule

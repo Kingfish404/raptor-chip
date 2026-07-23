@@ -6,6 +6,7 @@ task automatic init_l1d_inputs;
     lsu_l1d.ralu = '0;
     lsu_l1d.rvalid = 1'b0;
     lsu_l1d.atomic_lock = 1'b0;
+    lsu_l1d.ordered = 1'b1;
     lsu_l1d.waddr = '0;
     lsu_l1d.walu = '0;
     lsu_l1d.wvalid = 1'b0;
@@ -13,11 +14,14 @@ task automatic init_l1d_inputs;
 
     l1d_bus.rdata = '0;
     l1d_bus.rvalid = 1'b0;
+    l1d_bus.ptw_rvalid = 1'b0;
     l1d_bus.rlast = 1'b1;
     l1d_bus.difftest_skip = 1'b0;
     l1d_bus.rerr = 1'b0;
     l1d_bus.wready = 1'b1;
     l1d_bus.werr = 1'b0;
+    l1d_bus.ptw_wready = 1'b0;
+    l1d_bus.ptw_werr = 1'b0;
 
     init_csr_bcast_defaults(`RAPT_PRIV_M, '0, 1'b1);
 
@@ -25,6 +29,7 @@ task automatic init_l1d_inputs;
     exu_l1d.vaddr = '0;
     exu_l1d.walu = '0;
     exu_l1d.valid = 1'b0;
+    exu_l1d.reservation_clear = 1'b0;
 
     init_cmu_bcast_defaults();
 

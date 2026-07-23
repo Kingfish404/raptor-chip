@@ -142,33 +142,58 @@ module rapt_rnu #(
       rn_pipe_valid_b <= 1'b0;
       rnq_is_pair <= '0;
 `endif
+      for (int i = 0; i < RIQ_SIZE; i++) begin
+        rnq_uops[i] <= '0;
+        rnq_rd[i]   <= '0;
+        rnq_op1[i]  <= '0;
+        rnq_op2[i]  <= '0;
+        rnq_rs1[i]  <= '0;
+        rnq_rs2[i]  <= '0;
+      end
     end else begin
-      // ---- RNQ Enqueue ----
+      // One static write cone per RNQ entry. Preserve the former NBA
+      // priority: dequeue wins over enqueue on any selector alias.
+      for (int i = 0; i < RIQ_SIZE; i++) begin
+`ifdef RAPT_DUAL_ISSUE
+        if (rnq_deq_fire_b && i == int'(rnq_tail_b)) begin
+          rnq_valid[i]   <= 1'b0;
+          rnq_is_pair[i] <= 1'b0;
+        end else
+`endif
+        if (rnq_deq_fire_a && i == int'(rnq_tail_a)) begin
+          rnq_valid[i] <= 1'b0;
+`ifdef RAPT_DUAL_ISSUE
+          rnq_is_pair[i] <= 1'b0;
+        end else if (rnq_enq_fire_b && i == int'(rnq_head_b)) begin
+          rnq_valid[i]   <= 1'b1;
+          rnq_uops[i]    <= idu_rnu.uop_b;
+          rnq_rd[i]      <= idu_rnu.uop_b.rd;
+          rnq_op1[i]     <= idu_rnu.op1_b;
+          rnq_op2[i]     <= idu_rnu.op2_b;
+          rnq_rs1[i]     <= idu_rnu.rs1_b;
+          rnq_rs2[i]     <= idu_rnu.rs2_b;
+          rnq_is_pair[i] <= 1'b1;
+`endif
+        end else if (rnq_enq_fire_a && i == int'(rnq_head_a)) begin
+          rnq_valid[i] <= 1'b1;
+          rnq_uops[i]  <= idu_rnu.uop_a;
+          rnq_rd[i]    <= idu_rnu.uop_a.rd;
+          rnq_op1[i]   <= idu_rnu.op1_a;
+          rnq_op2[i]   <= idu_rnu.op2_a;
+          rnq_rs1[i]   <= idu_rnu.rs1_a;
+          rnq_rs2[i]   <= idu_rnu.rs2_a;
+`ifdef RAPT_DUAL_ISSUE
+          rnq_is_pair[i] <= 1'b0;
+`endif
+        end
+      end
+
+      // ---- RNQ Enqueue pointer ----
       if (rnq_enq_fire_a) begin
-        rnq_valid[rnq_head_a] <= 1'b1;
-        rnq_uops[rnq_head_a]  <= idu_rnu.uop_a;
-        rnq_rd[rnq_head_a]    <= idu_rnu.uop_a.rd;
-        rnq_op1[rnq_head_a]   <= idu_rnu.op1_a;
-        rnq_op2[rnq_head_a]   <= idu_rnu.op2_a;
-        rnq_rs1[rnq_head_a]   <= idu_rnu.rs1_a;
-        rnq_rs2[rnq_head_a]   <= idu_rnu.rs2_a;
 `ifdef RAPT_DUAL_ISSUE
         if (rnq_enq_fire_b) begin
-          rnq_is_pair[rnq_head_a]   <= 1'b0;
-          rnq_is_pair[rnq_head_b] <= 1'b1;
-          rnq_valid[rnq_head_b] <= 1'b1;
-          rnq_uops[rnq_head_b]  <= idu_rnu.uop_b;
-          rnq_rd[rnq_head_b]    <= idu_rnu.uop_b.rd;
-          rnq_op1[rnq_head_b]   <= idu_rnu.op1_b;
-          rnq_op2[rnq_head_b]   <= idu_rnu.op2_b;
-          rnq_rs1[rnq_head_b]   <= idu_rnu.rs1_b;
-          rnq_rs2[rnq_head_b]   <= idu_rnu.rs2_b;
           rnq_head_a <= rnq_head_a + 2;
         end else begin
-          // Clear stale is_pair flag from a previous epoch that used this
-          // index as a B-slot.  Without this, a later dequeue could falsely
-          // treat an adjacent single entry as the B-slot of a pair.
-          rnq_is_pair[rnq_head_a] <= 1'b0;
           rnq_head_a <= rnq_head_a + 1;
         end
 `else
@@ -178,8 +203,6 @@ module rapt_rnu #(
 
       // ---- RNQ Dequeue + Rename Stage 1 -> Stage 2 ----
       if (rnq_deq_fire_a) begin
-        rnq_valid[rnq_tail_a] <= 1'b0;
-
         // Slot A: register rename results
         rn_pipe_valid_a <= 1'b1;
         rn_pipe_uop_a <= rnq_uops[rnq_tail_a];
@@ -192,8 +215,6 @@ module rapt_rnu #(
 
 `ifdef RAPT_DUAL_ISSUE
         if (rnq_deq_fire_b) begin
-          rnq_valid[rnq_tail_b] <= 1'b0;
-          rnq_is_pair[rnq_tail_b] <= 1'b0;
           rnq_tail_a <= rnq_tail_a + 2;
 
           // Slot B: rename with RAW dependency bypass from slot A
@@ -211,7 +232,6 @@ module rapt_rnu #(
           rn_pipe_prs_b <= dep_b_rdold_from_a ? fl_bus.alloc_pr_a : mt_bus.map_rdata_f;
         end else begin
           rnq_tail_a <= rnq_tail_a + 1;
-          rnq_is_pair[rnq_tail_a] <= 1'b0;
           rn_pipe_valid_b <= 1'b0;
         end
 `else

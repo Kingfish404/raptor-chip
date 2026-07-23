@@ -11,7 +11,7 @@
 # ==============================================================================
 
 LINUX_HOME          ?= $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
-LINUX_BUILD_VERSION ?= v6.18.29
+LINUX_BUILD_VERSION ?= v6.18.39
 LINUX_BUILD_VERSION := $(strip $(LINUX_BUILD_VERSION))
 
 # Pre-built kernel releases: https://github.com/Kingfish404/linux-build/releases

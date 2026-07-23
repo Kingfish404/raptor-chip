@@ -37,6 +37,7 @@ OSS_CAD_URL     := $(OSS_CAD_REPO)/$(OSS_CAD_VERSION)/$(OSS_CAD_TARBALL)
 # Prepend oss-cad-suite/bin to PATH for all recipes
 export PATH := $(OSS_CAD_BIN):$(PATH)
 NPROC ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
+FORMAL_BUS_PACK := build/formal_bus_pack.sv
 
 # ============================================================================
 # Help
@@ -105,7 +106,19 @@ check-tools: ## Verify sby and yosys are available
 # ============================================================================
 all: formal_exu_mul formal_bus ## Run all formal verification (excludes RVFI)
 
-formal_bus: check-tools ## Verify AXI bus
+$(FORMAL_BUS_PACK): \
+		$(RAPTOR_HOME)/hdl/rapt_pkg.sv \
+		$(RAPTOR_HOME)/hdl/memory/rapt_bus.sv \
+		$(RAPTOR_HOME)/hdl/memory/rapt_axi_master.sv
+	@mkdir -p $(@D)
+	verilator -E -P \
+		-I$(RAPTOR_HOME)/hdl/configs/formal \
+		-I$(RAPTOR_HOME)/hdl/include \
+		-I$(RAPTOR_HOME)/hdl/include/npc \
+		-I$(RAPTOR_HOME)/hdl/include/dpic_mock \
+		$^ > $@
+
+formal_bus: check-tools $(FORMAL_BUS_PACK) ## Verify AXI bus
 	sby -f bus.sby
 
 formal_exu_mul: check-tools ## Verify EXU multiplier

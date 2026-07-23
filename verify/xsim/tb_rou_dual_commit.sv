@@ -238,6 +238,32 @@ module tb_rou_dual_commit;
     end
   endfunction
 
+  function automatic rapt_pkg::uop_t make_sret_uop(input logic [XLEN-1:0] pc);
+    rapt_pkg::uop_t u;
+    begin
+      u = '0;
+      u.pc = pc;
+      u.pnpc = pc + XLEN'(4);
+      u.inst = 32'h1020_0073;
+      u.system = 1'b1;
+      u.sret = 1'b1;
+      return u;
+    end
+  endfunction
+
+  function automatic rapt_pkg::uop_t make_ecall_uop(input logic [XLEN-1:0] pc);
+    rapt_pkg::uop_t u;
+    begin
+      u = '0;
+      u.pc = pc;
+      u.pnpc = pc + XLEN'(4);
+      u.inst = 32'h0000_0073;
+      u.system = 1'b1;
+      u.ecall = 1'b1;
+      return u;
+    end
+  endfunction
+
   task automatic reset_dut;
     begin
       reset = 1'b1;
@@ -248,6 +274,11 @@ module tb_rou_dual_commit;
       check(rnu_rou.ready, "ROU not ready after reset");
       check(!rou_cmu.valid_a, "ROU reports commit after reset");
       check(!cmu_bcast.flush_pipe, "CMU reports flush after reset");
+      for (int entry = 0; entry < `RAPT_ROB_SIZE; entry++) begin
+        check({uop_pl[entry].ecall, uop_pl[entry].ebreak,
+               uop_pl[entry].mret, uop_pl[entry].sret} === 4'b0000,
+          "system return/trap payload was not reset deterministically");
+      end
     end
   endtask
 
@@ -332,6 +363,24 @@ module tb_rou_dual_commit;
     end
   endtask
 
+  task automatic writeback_alu_one(
+      input logic [RobW-1:0] dest,
+      input logic [XLEN-1:0] npc
+  );
+    begin
+      exu_rou.dest = dest;
+      exu_rou.npc = npc;
+      exu_rou.btaken = 1'b0;
+      exu_rou.mispredict = 1'b0;
+      exu_rou.trap = 1'b0;
+      exu_rou.difftest_skip = 1'b0;
+      exu_rou.valid = 1'b1;
+      tick(1);
+      clear_writebacks();
+      #1;
+    end
+  endtask
+
   task automatic expect_basic_dual_commit;
     begin
       reset_dut();
@@ -383,29 +432,99 @@ module tb_rou_dual_commit;
     end
   endtask
 
-  task automatic expect_slot1_branch_flush;
+  task automatic expect_slot1_branch_serializes_flush;
     begin
       reset_dut();
       dispatch_one(make_alu_uop(32'h8000_2000, 32'h0040_0213, 5'd4), 6'd36, 6'd4, RobW'(0));
       dispatch_one(make_branch_uop(32'h8000_2004, 32'h0002_0863), '0, '0, RobW'(1));
       writeback_alu_pair(32'h8000_2004, 32'h8000_2080, 1'b1);
 
-      check(commit_fire, "slot1 branch pair did not assert commit_fire");
-      check(rou_cmu.valid_a, "slot1 branch pair missing slot0 commit");
-      check(rou_cmu.valid_b, "slot1 branch pair missing slot1 commit");
-      check(rou_cmu.flush_pipe, "slot1 branch mispredict did not flush");
-      check(rou_cmu.ben, "slot1 branch did not drive branch metadata");
-      check(rou_cmu.btaken, "slot1 branch did not drive taken metadata");
-      check(rou_cmu.pc_b == 32'h8000_2004, "slot1 branch pc mismatch");
-      check(rou_cmu.npc_b == 32'h8000_2080, "slot1 branch target mismatch");
-      check(cmu_bcast.flush_pipe, "CMU broadcast missing slot1 branch flush");
-      check(cmu_bcast.rpc == 32'h8000_2004, "CMU broadcast did not select branch slot rpc");
-      check(cmu_bcast.cpc == 32'h8000_2080, "CMU broadcast did not select branch target");
+      check(commit_fire, "slot0 did not commit before serializing slot1 branch");
+      check(rou_cmu.valid_a, "serialized branch pair missing slot0 commit");
+      check(!rou_cmu.valid_b, "mispredicting slot1 branch incorrectly dual committed");
+      check(!rou_cmu.flush_pipe, "slot1 branch flushed before reaching ROB head");
+
+      tick(1);
+      check(rou_cmu.rob_head == RobW'(1), "ROB head did not advance to serialized branch");
+      check(commit_fire && rou_cmu.valid_a, "serialized branch did not commit at ROB head");
+      check(!rou_cmu.valid_b, "serialized branch unexpectedly used slot1 commit");
+      check(rou_cmu.flush_pipe, "serialized branch mispredict did not flush");
+      check(rou_cmu.ben, "serialized branch did not drive branch metadata");
+      check(rou_cmu.btaken, "serialized branch did not drive taken metadata");
+      check(rou_cmu.pc_a == 32'h8000_2004, "serialized branch pc mismatch");
+      check(rou_cmu.npc_a == 32'h8000_2080, "serialized branch target mismatch");
+      check(cmu_bcast.flush_pipe, "CMU broadcast missing serialized branch flush");
+      check(cmu_bcast.rpc == 32'h8000_2004, "CMU broadcast selected wrong branch rpc");
+      check(cmu_bcast.cpc == 32'h8000_2080, "CMU broadcast selected wrong branch target");
 
       tick(1);
       check(rou_cmu.rob_head == RobW'(0), "flush did not reset ROB head");
-      check(!rou_cmu.valid_a, "ROU still reports commit after slot1 branch flush");
+      check(!rou_cmu.valid_a, "ROU still reports commit after serialized branch flush");
       check(!cmu_bcast.flush_pipe, "CMU flush did not clear after one cycle");
+    end
+  endtask
+
+  task automatic expect_rob_wrap_reuse_and_sret;
+    localparam int WrapIterations = 4 * `RAPT_ROB_SIZE;
+    logic [XLEN-1:0] pc;
+    logic [RobW-1:0] dest;
+    begin
+      reset_dut();
+
+      pc = 32'h8000_0400;
+      dispatch_one(make_ecall_uop(pc), '0, '0, RobW'(0));
+      check(uop_pl[0].ecall && !uop_pl[0].ebreak
+          && !uop_pl[0].mret && !uop_pl[0].sret,
+        "ECALL payload classification was not exclusive");
+      writeback_alu_one(RobW'(0), csr_bcast.mtvec);
+      check(commit_fire && rou_cmu.valid_a, "seed ECALL did not commit");
+      check(rou_cmu.flush_pipe, "seed ECALL did not flush");
+      check(rou_cmu.npc_a == csr_bcast.mtvec,
+        "seed ECALL did not select mtvec");
+      tick(1);
+      check(uop_pl[0].ecall === 1'b0,
+        "ECALL payload survived flush before ROB reuse");
+
+      for (int iteration = 0; iteration < WrapIterations; iteration++) begin
+        pc = 32'h8001_0000 + XLEN'(iteration * 4);
+        dest = RobW'(iteration);
+        dispatch_one(make_alu_uop(pc, 32'h0010_0093, 5'd1),
+             PLEN'(33), PLEN'(1), dest);
+        writeback_alu_one(dest, pc + XLEN'(4));
+
+        check(commit_fire && rou_cmu.valid_a,
+          "ROB wrap entry did not become committable");
+        check(!rou_cmu.valid_b, "ROB wrap entry unexpectedly dual committed");
+        check(rou_cmu.pc_a == pc, "ROB wrap reused stale PC payload");
+        check(rou_cmu.npc_a == pc + XLEN'(4),
+          "ROB wrap reused stale NPC payload");
+        tick(1);
+        check(rou_cmu.rob_head == RobW'(iteration + 1),
+          "ROB head mismatch across wrap/reuse");
+      end
+
+      pc = 32'h8002_0000;
+      dest = RobW'(WrapIterations);
+      dispatch_one(make_sret_uop(pc), '0, '0, dest);
+      check(uop_pl[dest].sret && !uop_pl[dest].ecall
+          && !uop_pl[dest].ebreak && !uop_pl[dest].mret,
+        "SRET reused stale ECALL/EBREAK/MRET payload");
+      writeback_alu_one(dest, 32'h0001_2340);
+
+      check(commit_fire && rou_cmu.valid_a, "post-wrap SRET did not commit");
+      check(rou_csr.valid && rou_csr.sret,
+        "post-wrap SRET metadata was corrupted");
+      check(rou_cmu.flush_pipe, "post-wrap SRET did not flush");
+      check(rou_cmu.npc_a == 32'h0001_2340,
+        "post-wrap SRET used a stale redirect target");
+      check(rou_cmu.npc_a != csr_bcast.mtvec,
+        "post-wrap SRET was contaminated by the old ECALL mtvec target");
+      tick(1);
+      check(rou_cmu.flush_redirect, "post-wrap SRET redirect was not registered");
+      check(rou_cmu.redirect_pc == 32'h0001_2340,
+        "post-wrap SRET registered the wrong redirect target");
+      tick(1);
+      check(!rou_cmu.flush_redirect, "post-wrap SRET redirect did not clear");
     end
   endtask
 
@@ -417,9 +536,10 @@ module tb_rou_dual_commit;
     init_inputs();
     expect_basic_dual_commit();
     expect_slot0_store_blocks_dual();
-    expect_slot1_branch_flush();
+    expect_slot1_branch_serializes_flush();
+    expect_rob_wrap_reuse_and_sret();
 
-    $display("PASS: ROU dual-commit xsim checks passed");
+    $display("PASS: ROU dual-commit, wrap/reuse, and SRET xsim checks passed");
     $finish;
   end
 endmodule

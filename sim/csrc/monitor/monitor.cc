@@ -88,6 +88,20 @@ static char *mrom_img_file = NULL;
 static char *disk_img_file = NULL;
 static char *sdcard_img_file = NULL;
 static int difftest_port = 1234;
+static uint32_t mem_random_delay_max = 0;
+static uint32_t mem_random_state = 1;
+
+extern "C" uint32_t npc_mem_random_delay(void)
+{
+  if (mem_random_delay_max == 0)
+    return 0;
+
+  /* xorshift32: deterministic so a failing seed can be replayed exactly. */
+  mem_random_state ^= mem_random_state << 13;
+  mem_random_state ^= mem_random_state >> 17;
+  mem_random_state ^= mem_random_state << 5;
+  return mem_random_state % (mem_random_delay_max + 1);
+}
 
 long load_file(const char *filename, void *buf)
 {
@@ -180,6 +194,8 @@ static void usage(const char *prog)
   printf("      --disk=FILE          load FILE as virtio-mmio block disk image\n");
   printf("      --sdcard=FILE        load FILE as LiteX SPI SD-card image\n");
   printf("      --serial-lf-to-cr    translate host LF input to CR for CR-terminated monitors\n");
+  printf("      --mem-random-delay=N add 0..N random wait cycles to each AXI memory beat\n");
+  printf("      --mem-random-seed=N  set reproducible random-delay seed (default 1)\n");
   printf("  -h, --help               display this help and exit\n");
   printf("\n");
   print_nsim_memory_map(stdout);
@@ -213,6 +229,8 @@ static int parse_args(int argc, char *argv[])
       {"serial-lf-to-cr", no_argument, NULL, 266},
       {"lightsss", optional_argument, NULL, 267},
       {"no-lightsss", no_argument, NULL, 268},
+      {"mem-random-delay", required_argument, NULL, 269},
+      {"mem-random-seed", required_argument, NULL, 270},
       {0, 0, NULL, 0},
   };
   int o;
@@ -334,6 +352,22 @@ static int parse_args(int argc, char *argv[])
     case 268:
       lightsss_off = true;
       break;
+    case 269:
+    {
+      uint64_t delay = parse_u64_auto(optarg);
+      if (delay >= 0xfffff)
+      {
+        printf("ERROR: --mem-random-delay must be less than 1048575 cycles\n");
+        exit(1);
+      }
+      mem_random_delay_max = (uint32_t)delay;
+      break;
+    }
+    case 270:
+      mem_random_state = (uint32_t)parse_u64_auto(optarg);
+      if (mem_random_state == 0)
+        mem_random_state = 1;
+      break;
     case 1:
       img_file = optarg;
       break;
@@ -344,6 +378,9 @@ static int parse_args(int argc, char *argv[])
   }
   void cpu_exec_set_threshold(uint64_t cycle, uint64_t inst);
   cpu_exec_set_threshold(cycle_threshold, instr_threshold);
+  if (mem_random_delay_max != 0)
+    Log("AXI memory random delay enabled: 0..%u cycles, seed=%u",
+        mem_random_delay_max, mem_random_state);
   static char ckpt_default_dir[1100];
   if (ckpt_save_requested)
   {

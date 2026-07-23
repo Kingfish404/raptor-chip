@@ -95,11 +95,14 @@ module rapt_l1d #(
 
   // atomic support
   logic [XLEN-1:0] reservation;
+  logic reservation_valid;
+  logic l1d_atomic_lock;
 
   // PTW instance signals
   logic ptw_req;
   /* verilator lint_off UNUSEDSIGNAL */
   logic ptw_busy;
+  logic load_killed;
   /* verilator lint_on UNUSEDSIGNAL */
   logic ptw_done, ptw_fault;
   logic ptw_arvalid;
@@ -334,6 +337,7 @@ module rapt_l1d #(
       .clock(clock),
       .reset(reset),
       .req_valid(ptw_req),
+      .kill(cmu_bcast.fence_time || cmu_bcast.flush_pipe),
       .vaddr(ptw_vaddr),
       .satp_ppn(csr_bcast.satp_ppn),
       .mmu_en(mmu_en),
@@ -341,7 +345,8 @@ module rapt_l1d #(
       .req_store(store_tlb_miss),
       .bus_arvalid(ptw_arvalid),
       .bus_araddr(ptw_araddr),
-      .bus_rvalid(l1d_bus.rvalid),
+      .bus_arready(l1d_bus.rready),
+      .bus_rvalid(l1d_bus.ptw_rvalid),
       .bus_rdata(l1d_bus.rdata),
       .bus_awvalid(ptw_awvalid),
       .bus_awaddr(ptw_awaddr),
@@ -349,7 +354,7 @@ module rapt_l1d #(
       .bus_wdata(ptw_wdata),
       .bus_wstrb(ptw_wstrb),
       .bus_wready(ptw_wready),
-      .bus_werr(l1d_bus.werr),
+      .bus_werr(l1d_bus.ptw_werr),
       .done(ptw_done),
       .fault(ptw_fault),
       .result_ptag(ptw_result_ptag),
@@ -881,9 +886,11 @@ module rapt_l1d #(
     : (l1d_state == LD_A)
       && !tag_hit
       && !(pmp_load_fault || load_unmapped_fault)
+      && (cacheable_r || lsu_l1d.ordered)
       && !cmu_bcast.flush_pipe;
   assign l1d_bus.araddr = ptw_arvalid ? ptw_araddr : l1d_addr;
   assign l1d_bus.rstrb = (cacheable_r || ptw_arvalid) ? 8'($unsigned({XLEN/8{1'b1}})) : rstrb;
+  assign l1d_bus.ar_ptw = ptw_arvalid;
 
   assign lsu_l1d.rdata = data_hit ? l1d_data : l1d_bus.rdata;
   // Difftest skip propagation for MMIO loads: cache-hit loads (data_hit=1) are
@@ -909,6 +916,7 @@ module rapt_l1d #(
   // write channel
   assign l1d_bus.awvalid = ptw_awvalid ? 1'b1 : lsu_l1d.wvalid;
   assign l1d_bus.awaddr = ptw_awvalid ? ptw_awaddr : lsu_l1d.waddr;
+  assign l1d_bus.aw_ptw = ptw_awvalid;
 `ifdef RAPT_RV64
   // Decode walu (5-bit store mask) to full 8-bit wstrb for RV64
   // SB: 5'b00001->8'h01, SH: 5'b00011->8'h03, SW: 5'b01111->8'h0f, SD: 5'b11111->8'hff
@@ -920,7 +928,7 @@ module rapt_l1d #(
   assign l1d_bus.wvalid = ptw_wvalid ? 1'b1 : lsu_l1d.wvalid;
   assign l1d_bus.wdata = ptw_wvalid ? ptw_wdata : lsu_l1d.wdata;
 
-  assign ptw_wready = ptw_wvalid && l1d_bus.wready;
+  assign ptw_wready = ptw_wvalid && l1d_bus.ptw_wready;
   // Gate lsu wready while an RMW is in its merge-write phase: the SET block
   // below runs the `if (l1d_rmw)` branch this cycle, which means an incoming
   // store would not be consumed by the `else if (lsu_l1d.wvalid ...)` branch
@@ -937,6 +945,7 @@ module rapt_l1d #(
   assign exu_l1d.trap = (l1d_state == TRAP) && (rec_addr == exu_l1d.vaddr);
   assign exu_l1d.cause = cause;
   assign exu_l1d.reservation = reservation;
+  assign exu_l1d.reservation_valid = reservation_valid;
   assign exu_l1d.ready = exu_l1d.valid && ((l1d_state == TRAP)
     || (stlb_hit
       && !mis_align_store
@@ -961,9 +970,12 @@ module rapt_l1d #(
       l1d_way <= '0;
 
       reservation <= 'h0;
+      reservation_valid <= 1'b0;
+      l1d_atomic_lock <= 1'b0;
+      load_killed <= 1'b0;
     end else begin
-      if (rou_cmu.valid_a && rou_cmu.atomic_sc) begin
-        reservation <= 'h0;
+      if (exu_l1d.reservation_clear) begin
+        reservation_valid <= 1'b0;
       end
       // if (l1d_bus.awvalid && csr_bcast.dmmu_en) begin
       //   $display("  [L1D WRITE] addr: %h, data: %h, wstrb: %h",
@@ -974,10 +986,16 @@ module rapt_l1d #(
       // end
       unique case (l1d_state)
         IDLE: begin
+          load_killed <= 1'b0;
+          l1d_atomic_lock <= 1'b0;
           if (!cmu_bcast.flush_pipe) begin
             if (mmu_en) begin
               // Store TLB lookup (priority)
               if (exu_l1d.mmu_en && exu_l1d.valid) begin
+                // if (exu_l1d.vaddr == XLEN'('h800c1eac)) begin
+                //   $display("[L1D_TARGET] state=IDLE hit=%0d pte=%h pf=%0d busy=%0d",
+                //            stlb_hit, dstlb_pte, pf_store_tlb, ptw_busy);
+                // end
                 if (mis_align_store) begin
                   cause <= 'h6; // store address mis-aligned
                   rec_addr <= exu_l1d.vaddr;
@@ -1014,12 +1032,14 @@ module rapt_l1d #(
                   l1d_addr <= XLEN'({dtlb_ptag, lsu_l1d.raddr[11:0]});
                   rec_addr <= lsu_l1d.raddr;
                   l1d_ralu  <= lsu_l1d.ralu;
+                  l1d_atomic_lock <= lsu_l1d.atomic_lock;
                   l1d_state <= LD_A;
                 end else if (!ptw_busy) begin
                   // PTW request issued via ptw_req
                   l1d_addr <= lsu_l1d.raddr;
                   rec_addr <= lsu_l1d.raddr;
                   l1d_ralu  <= lsu_l1d.ralu;
+                  l1d_atomic_lock <= lsu_l1d.atomic_lock;
                   stlb_mmu <= 'b0;
                   l1d_state <= PTWAIT;
                 end
@@ -1029,12 +1049,17 @@ module rapt_l1d #(
                 l1d_addr <= lsu_l1d.raddr;
                 rec_addr <= lsu_l1d.raddr;
                 l1d_ralu  <= lsu_l1d.ralu;
+                l1d_atomic_lock <= lsu_l1d.atomic_lock;
                 l1d_state <= LD_A;
               end
             end
           end
         end
         PTWAIT: begin
+          // if (rec_addr == XLEN'('h800c1eac) && (ptw_done || ptw_fault)) begin
+          //   $display("[L1D_TARGET] state=PTWAIT done=%0d fault=%0d ptag=%h pte=%h pf=%0d",
+          //            ptw_done, ptw_fault, ptw_result_ptag, ptw_result_pte, pf_store_ptw);
+          // end
           if (cmu_bcast.flush_pipe) begin
             stlb_mmu <= 'b0;
             l1d_state <= IDLE;
@@ -1085,14 +1110,20 @@ module rapt_l1d #(
           l1d_state <= IDLE;
         end
         LD_A: begin
-          if (pmp_load_fault || load_unmapped_fault) begin
+          if (cmu_bcast.flush_pipe) begin
+            l1d_addr <= '0;
+            l1d_state <= IDLE;
+          end else if (!cacheable_r && !lsu_l1d.ordered) begin
+            l1d_state <= LD_A;
+          end else if (pmp_load_fault || load_unmapped_fault) begin
             // PMP denies load at this physical address for eff_priv,
             // or the address is unmapped (bus error -> access fault).
             cause <= `RAPT_CAUSE_LOAD_ACC_FAULT;
             l1d_state <= TRAP;
-          end else if (lsu_l1d.atomic_lock) begin
-            reservation <= l1d_addr;
+          end else if (l1d_atomic_lock) begin
             if (tag_hit) begin
+              reservation <= l1d_addr;
+              reservation_valid <= 1'b1;
               l1d_addr  <= '0;
               l1d_state <= IDLE;
             end else begin
@@ -1122,6 +1153,9 @@ module rapt_l1d #(
           end
         end
         LD_D: begin
+          if (cmu_bcast.flush_pipe) begin
+            load_killed <= 1'b1;
+          end
           if (l1d_bus.rvalid) begin
             // Bus error on the response beat -> load access-fault. Gated
             // on `rvalid` (the same condition that consumes the beat), so
@@ -1131,8 +1165,9 @@ module rapt_l1d #(
               l1d_state <= TRAP;
             end else begin
               l1d_state <= IDLE;
-              if (lsu_l1d.atomic_lock) begin
+              if (l1d_atomic_lock && !load_killed && !cmu_bcast.flush_pipe) begin
                 reservation <= l1d_addr;
+                reservation_valid <= 1'b1;
               end
             end
           end
@@ -1266,4 +1301,23 @@ module rapt_l1d #(
       end
     end
   end
+
+  `RAPT_SVA_IMPLY(clock, reset, L1D_MMIO_READ_REQUIRES_ORDER,
+      l1d_bus.arvalid && !l1d_bus.ar_ptw && !cacheable_r,
+      lsu_l1d.ordered)
+  `RAPT_SVA_IMPLY(clock, reset, L1D_FLUSH_BLOCKS_NEW_READ,
+      cmu_bcast.flush_pipe, !l1d_bus.arvalid)
+  `RAPT_SVA_NEXT(clock, reset, L1D_LR_HIT_ESTABLISHES_RESERVATION,
+      (l1d_state == LD_A) && tag_hit && l1d_atomic_lock
+        && !cmu_bcast.flush_pipe && !exu_l1d.reservation_clear,
+      reservation_valid && reservation == $past(l1d_addr))
+  `RAPT_SVA_NEXT(clock, reset, L1D_LR_RESPONSE_ESTABLISHES_RESERVATION,
+      (l1d_state == LD_D) && l1d_bus.rvalid && !l1d_bus.rerr
+        && l1d_atomic_lock && !load_killed && !cmu_bcast.flush_pipe
+        && !exu_l1d.reservation_clear,
+      reservation_valid && reservation == $past(l1d_addr))
+  `RAPT_SVA_NEXT(clock, reset, L1D_KILLED_LR_RESPONSE_NO_NEW_RESERVATION,
+      (l1d_state == LD_D) && l1d_bus.rvalid && l1d_atomic_lock
+        && !reservation_valid && (load_killed || cmu_bcast.flush_pipe),
+      !reservation_valid)
 endmodule

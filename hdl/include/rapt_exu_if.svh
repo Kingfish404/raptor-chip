@@ -10,7 +10,6 @@ interface exu_prf_if #(
     parameter unsigned PLEN = `RAPT_PHY_LEN,
     parameter unsigned XLEN = `RAPT_XLEN
 );
-  rapt_pkg::prd_t prd;
   logic [PLEN-1:0] pr1_a;
   logic [PLEN-1:0] pr2_a;
 
@@ -55,6 +54,7 @@ interface exu_lsu_if #(
   logic [XLEN-1:0] raddr;
   logic [4:0] ralu;
   logic atomic_lock;
+  logic ordered;
   logic [XLEN-1:0] pc;
 
   logic [XLEN-1:0] rdata;
@@ -75,12 +75,12 @@ interface exu_lsu_if #(
   logic rready_b;
 
   modport master(
-    output rvalid, raddr, ralu, atomic_lock, pc,
+    output rvalid, raddr, ralu, atomic_lock, ordered, pc,
     input rdata, trap, cause, difftest_skip, rready, stq_ready,
     output rvalid_b, raddr_b, ralu_b,
     input rdata_b, rready_b);
   modport slave(
-    input rvalid, raddr, ralu, atomic_lock, pc,
+    input rvalid, raddr, ralu, atomic_lock, ordered, pc,
     output rdata, trap, cause, difftest_skip, rready, stq_ready,
     input rvalid_b, raddr_b, ralu_b,
     output rdata_b, rready_b);
@@ -215,6 +215,7 @@ interface exu_iq_iss_if #(
   logic [XLEN-1:0] imm;
   logic [XLEN-1:0] pnpc;
   logic jen;
+  logic jren;
   logic trap;
   logic [XLEN-1:0] tval;
   logic [XLEN-1:0] cause;
@@ -224,11 +225,11 @@ interface exu_iq_iss_if #(
   /* verilator lint_on UNUSEDSIGNAL */
 
   modport iq(
-      output valid, op1, op2, alu, pc, c, word, imm, pnpc, jen,
+      output valid, op1, op2, alu, pc, c, word, imm, pnpc, jen, jren,
       output trap, tval, cause, dest, prd, rd
   );
   modport fu(
-      input valid, op1, op2, alu, pc, c, word, imm, pnpc, jen,
+      input valid, op1, op2, alu, pc, c, word, imm, pnpc, jen, jren,
       input trap, tval, cause, dest, prd, rd
   );
 endinterface
@@ -303,10 +304,14 @@ interface exu_l1d_if #(
   logic trap;
   logic [XLEN-1:0] cause;
   logic [XLEN-1:0] reservation;
+  logic reservation_valid;
+  logic reservation_clear;
   logic ready;
 
-  modport master(output mmu_en, vaddr, walu, valid, input paddr, trap, cause, reservation, ready);
-  modport slave(input mmu_en, vaddr, walu, valid, output paddr, trap, cause, reservation, ready);
+  modport master(output mmu_en, vaddr, walu, valid, reservation_clear,
+      input paddr, trap, cause, reservation, reservation_valid, ready);
+  modport slave(input mmu_en, vaddr, walu, valid, reservation_clear,
+      output paddr, trap, cause, reservation, reservation_valid, ready);
 endinterface
 
 /* verilator lint_on UNUSEDSIGNAL */

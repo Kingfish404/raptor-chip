@@ -23,6 +23,9 @@ make linux-boot-npc32 ARGS="-b -n"
 # RV32 NPC with NEMU difftest reference
 make linux-boot-npc32-difftest ARGS="-b -n"
 
+# RV32 Linux on the KU15P FPGA through LiteX BIOS + MIG DDR4
+make -C fpga/litex linux-fpga-e2e UART_PORT=/dev/ttyUSB0
+
 # RV64 prebuilt payload path is available; the top-level device helper is NEMU-only today
 make linux-download-rv64
 make linux-boot-nemu64-device
@@ -37,11 +40,12 @@ make linux-boot-npc32 LINUX_RV32_PAYLOAD=/path/to/fw_payload.bin ARGS="-b -n"
 
 ## Supported Modes
 
-| Mode | RTL path | Status |
-| ---- | -------- | ------ |
-| RV32 Linux | Sv32 PTW/TLB + PMP + CLINT/PLIC | Primary NPC/NEMU flow |
-| RV64 Linux payloads | Payload download + NEMU device helper | Available in tooling |
-| RV64 xv6 smoke path | Sv39 PTW/TLB + A/D writeback | Available via `app/tinyos` helpers |
+| Mode                | RTL path                              | Status                                                |
+| ------------------- | ------------------------------------- | ----------------------------------------------------- |
+| RV32 Linux          | Sv32 PTW/TLB + PMP + CLINT/PLIC       | Primary NPC/NEMU flow                                 |
+| RV32 KU15P FPGA     | LiteX BIOS + MIG DDR4 + OpenSBI/Linux | Hardware flow; serialboot or FAT32 SD-card `boot.bin` |
+| RV64 Linux payloads | Payload download + NEMU device helper | Available in tooling                                  |
+| RV64 xv6 smoke path | Sv39 PTW/TLB + A/D writeback          | Available via `app/tinyos` helpers                    |
 
 See [linux/README.md](../linux/README.md) and [app/tinyos/README.md](../app/tinyos/README.md) for the lower-level payload and xv6/egos helpers.
 
@@ -73,6 +77,11 @@ payload and simulator ROM flow. The RTL-visible platform devices are:
 
 `RAPT_MTIME_FREQ_MHZ` / `RAPT_MTIME_DIV` must match the device-tree
 `timebase-frequency`, because CSR `time` and CLINT `mtime` are paced together.
+
+The KU15P Linux DT advertises `zicbom` and `riscv,cbom-block-size` using the
+selected RTL preset's `RAPT_CACHE_LINE_BYTES`. LiteSDCard DMA is non-coherent;
+the BIOS calls the CPU cache-maintenance hook after DMA, and Raptor currently
+implements that hook as a conservative whole-L1D `cbo.flush` operation.
 
 ## Build From Source
 

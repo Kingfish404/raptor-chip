@@ -1,6 +1,6 @@
 PWD_DIR=$(abspath .)
 RAPTOR_HOME ?= $(abspath ..)
-KERNEL_VERSION:=6.18.22
+KERNEL_VERSION:=6.18.39
 NPROC := $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 
 # ==============================================================================

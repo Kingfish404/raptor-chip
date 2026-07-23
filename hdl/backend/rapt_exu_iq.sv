@@ -85,6 +85,7 @@ module rapt_exu_iq #(
   logic [   PLEN-1:0] iq_prd     [IQ_SIZE];
   logic [   RLEN-1:0] iq_rd      [IQ_SIZE];
   logic [IQ_SIZE-1:0] iq_jen;
+  logic [IQ_SIZE-1:0] iq_jren;
   // Ineligible for port B (dispatch sideband); only read when HAS_ISS_B=1.
   /* verilator lint_off UNUSEDSIGNAL */
   logic [IQ_SIZE-1:0] iq_b_block;
@@ -279,6 +280,7 @@ module rapt_exu_iq #(
   assign iss.imm   = iq_imm[sel_idx];
   assign iss.pnpc  = iq_pnpc[sel_idx];
   assign iss.jen   = iq_jen[sel_idx];
+  assign iss.jren  = iq_jren[sel_idx];
   assign iss.trap  = iq_trap[sel_idx];
   assign iss.tval  = iq_tval[sel_idx];
   assign iss.cause = iq_cause[sel_idx];
@@ -295,6 +297,7 @@ module rapt_exu_iq #(
   assign iss_b.imm   = iq_imm[sel_b_idx];
   assign iss_b.pnpc  = iq_pnpc[sel_b_idx];
   assign iss_b.jen   = iq_jen[sel_b_idx];
+  assign iss_b.jren  = iq_jren[sel_b_idx];
   assign iss_b.trap  = iq_trap[sel_b_idx];
   assign iss_b.tval  = iq_tval[sel_b_idx];
   assign iss_b.cause = iq_cause[sel_b_idx];
@@ -321,6 +324,7 @@ module rapt_exu_iq #(
       iq_c        <= '0;
       iq_word     <= '0;
       iq_jen      <= '0;
+      iq_jren     <= '0;
       iq_b_block  <= '0;
       iq_trap     <= '0;
       iq_full_r   <= 1'b0;
@@ -346,34 +350,62 @@ module rapt_exu_iq #(
       iq_full_r <= (&iq_valid);
 
       // ---- Per-entry state machine ----
-      for (bit [XLEN-1:0] i = 0; i < IQ_SIZE; i++) begin
-        if (free_found_a && i[IQLen-1:0] == free_idx_a) begin
+      for (int i = 0; i < IQ_SIZE; i++) begin
+`ifdef RAPT_DUAL_ISSUE
+        if (disp.accept_b && i == int'(disp.b_rs_idx)) begin
+          // Slot B has priority if both dispatch selectors ever alias.
+          iq_valid[i]    <= 1'b1;
+          iq_alu[i]      <= rou_exu.uop_b.alu;
+          iq_vj[i]       <= rou_exu.op1_b;
+          iq_vk[i]       <= rou_exu.op2_b;
+          iq_dest[i]     <= rou_exu.dest_b;
+          iq_pr1[i]      <= rou_exu.pr1_b;
+          iq_pr2[i]      <= rou_exu.pr2_b;
+          iq_pr1_busy[i] <= (|rou_exu.pr1_b) && !disp_b_pr1_fast_wake;
+          iq_pr2_busy[i] <= (|rou_exu.pr2_b) && !disp_b_pr2_fast_wake;
+          iq_pr1_fast[i] <= disp_b_pr1_fast_wake;
+          iq_pr2_fast[i] <= disp_b_pr2_fast_wake;
+          iq_prd[i]      <= rou_exu.prd_b;
+          iq_rd[i]       <= rou_exu.uop_b.rd;
+          iq_pc[i]       <= rou_exu.uop_b.pc;
+          iq_c[i]        <= rou_exu.uop_b.c;
+          iq_word[i]     <= rou_exu.uop_b.word;
+          iq_jen[i]      <= rou_exu.uop_b.jen;
+          iq_jren[i]     <= rou_exu.uop_b.jren;
+          iq_b_block[i]  <= disp.iss_b_block_b;
+          iq_imm[i]      <= rou_exu.uop_b.imm;
+          iq_pnpc[i]     <= rou_exu.uop_b.pnpc;
+          iq_trap[i]     <= rou_exu.uop_b.trap;
+          iq_tval[i]     <= rou_exu.uop_b.tval;
+          iq_cause[i]    <= rou_exu.uop_b.cause;
+        end else
+`endif
+        if (disp.accept_a && free_found_a && i == int'(free_idx_a)) begin
           // Slot-A allocation lands here when accepted by the router.
-          if (disp.accept_a) begin
-            iq_valid[free_idx_a] <= 1'b1;
-            iq_alu[free_idx_a] <= rou_exu.uop.alu;
-            iq_vj[free_idx_a] <= rou_exu.op1;
-            iq_vk[free_idx_a] <= rou_exu.op2;
-            iq_dest[free_idx_a] <= rou_exu.dest;
-            iq_pr1[free_idx_a] <= rou_exu.pr1;
-            iq_pr2[free_idx_a] <= rou_exu.pr2;
-            iq_pr1_busy[free_idx_a] <= (|rou_exu.pr1) && !disp_a_pr1_fast_wake;
-            iq_pr2_busy[free_idx_a] <= (|rou_exu.pr2) && !disp_a_pr2_fast_wake;
-            iq_pr1_fast[free_idx_a] <= disp_a_pr1_fast_wake;
-            iq_pr2_fast[free_idx_a] <= disp_a_pr2_fast_wake;
-            iq_prd[free_idx_a] <= rou_exu.prd;
-            iq_rd[free_idx_a] <= rou_exu.uop.rd;
-            iq_pc[free_idx_a] <= rou_exu.uop.pc;
-            iq_c[free_idx_a] <= rou_exu.uop.c;
-            iq_word[free_idx_a] <= rou_exu.uop.word;
-            iq_jen[free_idx_a] <= rou_exu.uop.jen;
-            iq_b_block[free_idx_a] <= disp.iss_b_block_a;
-            iq_imm[free_idx_a] <= rou_exu.uop.imm;
-            iq_pnpc[free_idx_a] <= rou_exu.uop.pnpc;
-            iq_trap[free_idx_a] <= rou_exu.uop.trap;
-            iq_tval[free_idx_a] <= rou_exu.uop.tval;
-            iq_cause[free_idx_a] <= rou_exu.uop.cause;
-          end
+          iq_valid[i]    <= 1'b1;
+          iq_alu[i]      <= rou_exu.uop.alu;
+          iq_vj[i]       <= rou_exu.op1;
+          iq_vk[i]       <= rou_exu.op2;
+          iq_dest[i]     <= rou_exu.dest;
+          iq_pr1[i]      <= rou_exu.pr1;
+          iq_pr2[i]      <= rou_exu.pr2;
+          iq_pr1_busy[i] <= (|rou_exu.pr1) && !disp_a_pr1_fast_wake;
+          iq_pr2_busy[i] <= (|rou_exu.pr2) && !disp_a_pr2_fast_wake;
+          iq_pr1_fast[i] <= disp_a_pr1_fast_wake;
+          iq_pr2_fast[i] <= disp_a_pr2_fast_wake;
+          iq_prd[i]      <= rou_exu.prd;
+          iq_rd[i]       <= rou_exu.uop.rd;
+          iq_pc[i]       <= rou_exu.uop.pc;
+          iq_c[i]        <= rou_exu.uop.c;
+          iq_word[i]     <= rou_exu.uop.word;
+          iq_jen[i]      <= rou_exu.uop.jen;
+          iq_jren[i]     <= rou_exu.uop.jren;
+          iq_b_block[i]  <= disp.iss_b_block_a;
+          iq_imm[i]      <= rou_exu.uop.imm;
+          iq_pnpc[i]     <= rou_exu.uop.pnpc;
+          iq_trap[i]     <= rou_exu.uop.trap;
+          iq_tval[i]     <= rou_exu.uop.tval;
+          iq_cause[i]    <= rou_exu.uop.cause;
         end else if (iq_valid[i] && pr_ready[i]) begin
           if (pr1_fast_confirm[i]) begin
             iq_vj[i]       <= exu_ioq_bcast.result;
@@ -405,6 +437,7 @@ module rapt_exu_iq #(
             iq_prd[i]      <= '0;
             iq_rd[i]       <= '0;
             iq_jen[i]      <= 1'b0;
+            iq_jren[i]     <= 1'b0;
             iq_b_block[i]  <= 1'b0;
             iq_imm[i]      <= '0;
             iq_pnpc[i]     <= '0;
@@ -452,35 +485,6 @@ module rapt_exu_iq #(
           end
         end
       end
-
-`ifdef RAPT_DUAL_ISSUE
-      // ---- Slot-B allocation (independent of A; disp.b_rs_idx chosen by router) ----
-      if (disp.accept_b) begin
-        iq_valid[disp.b_rs_idx] <= 1'b1;
-        iq_alu[disp.b_rs_idx] <= rou_exu.uop_b.alu;
-        iq_vj[disp.b_rs_idx] <= rou_exu.op1_b;
-        iq_vk[disp.b_rs_idx] <= rou_exu.op2_b;
-        iq_dest[disp.b_rs_idx] <= rou_exu.dest_b;
-        iq_pr1[disp.b_rs_idx] <= rou_exu.pr1_b;
-        iq_pr2[disp.b_rs_idx] <= rou_exu.pr2_b;
-        iq_pr1_busy[disp.b_rs_idx] <= (|rou_exu.pr1_b) && !disp_b_pr1_fast_wake;
-        iq_pr2_busy[disp.b_rs_idx] <= (|rou_exu.pr2_b) && !disp_b_pr2_fast_wake;
-        iq_pr1_fast[disp.b_rs_idx] <= disp_b_pr1_fast_wake;
-        iq_pr2_fast[disp.b_rs_idx] <= disp_b_pr2_fast_wake;
-        iq_prd[disp.b_rs_idx] <= rou_exu.prd_b;
-        iq_rd[disp.b_rs_idx] <= rou_exu.uop_b.rd;
-        iq_pc[disp.b_rs_idx] <= rou_exu.uop_b.pc;
-        iq_c[disp.b_rs_idx] <= rou_exu.uop_b.c;
-        iq_word[disp.b_rs_idx] <= rou_exu.uop_b.word;
-        iq_jen[disp.b_rs_idx] <= rou_exu.uop_b.jen;
-        iq_b_block[disp.b_rs_idx] <= disp.iss_b_block_b;
-        iq_imm[disp.b_rs_idx] <= rou_exu.uop_b.imm;
-        iq_pnpc[disp.b_rs_idx] <= rou_exu.uop_b.pnpc;
-        iq_trap[disp.b_rs_idx] <= rou_exu.uop_b.trap;
-        iq_tval[disp.b_rs_idx] <= rou_exu.uop_b.tval;
-        iq_cause[disp.b_rs_idx] <= rou_exu.uop_b.cause;
-      end
-`endif
 
       // ---- Age matrix updates on allocation ----
       // Per-cell one-hot priority (FPGA-robust; same as former RS/MULDIV):

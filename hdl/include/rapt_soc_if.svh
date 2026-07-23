@@ -82,6 +82,65 @@ interface axi4_if #(
   );
 endinterface
 
+// Internal memory transaction interface. Unlike AXI, a write request carries
+// address and data together; protocol adapters own channel splitting.
+interface mem_link_if #(
+    parameter int XLEN = `RAPT_XLEN,
+    parameter int ID_W = 4
+);
+  logic              rd_req_valid;
+  logic              rd_req_ready;
+  logic [  ID_W-1:0] rd_req_id;
+  logic [  XLEN-1:0] rd_req_addr;
+  logic [       2:0] rd_req_size;
+  logic [       7:0] rd_req_len;
+  logic [       1:0] rd_req_burst;
+
+  logic              rd_rsp_valid;
+  logic              rd_rsp_ready;
+  logic [  ID_W-1:0] rd_rsp_id;
+  logic [  XLEN-1:0] rd_rsp_data;
+  logic              rd_rsp_last;
+  logic              rd_rsp_error;
+
+  logic                wr_req_valid;
+  logic                wr_req_ready;
+  logic [    ID_W-1:0] wr_req_id;
+  logic [    XLEN-1:0] wr_req_addr;
+  logic [         2:0] wr_req_size;
+  logic [    XLEN-1:0] wr_req_data;
+  logic [XLEN/8-1:0] wr_req_strb;
+
+  logic              wr_rsp_valid;
+  logic              wr_rsp_ready;
+  logic [  ID_W-1:0] wr_rsp_id;
+  logic              wr_rsp_error;
+
+  modport master(
+      output rd_req_valid, rd_req_id, rd_req_addr, rd_req_size, rd_req_len, rd_req_burst,
+      input rd_req_ready,
+      input rd_rsp_valid, rd_rsp_id, rd_rsp_data, rd_rsp_last, rd_rsp_error,
+      output rd_rsp_ready,
+
+      output wr_req_valid, wr_req_id, wr_req_addr, wr_req_size, wr_req_data, wr_req_strb,
+      input wr_req_ready,
+      input wr_rsp_valid, wr_rsp_id, wr_rsp_error,
+      output wr_rsp_ready
+  );
+
+  modport slave(
+      input rd_req_valid, rd_req_id, rd_req_addr, rd_req_size, rd_req_len, rd_req_burst,
+      output rd_req_ready,
+      output rd_rsp_valid, rd_rsp_id, rd_rsp_data, rd_rsp_last, rd_rsp_error,
+      input rd_rsp_ready,
+
+      input wr_req_valid, wr_req_id, wr_req_addr, wr_req_size, wr_req_data, wr_req_strb,
+      output wr_req_ready,
+      output wr_rsp_valid, wr_rsp_id, wr_rsp_error,
+      input wr_rsp_ready
+  );
+endinterface
+
 interface clint_bus_if #(
     parameter int XLEN = `RAPT_XLEN
 );

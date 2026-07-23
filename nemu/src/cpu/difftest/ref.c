@@ -114,8 +114,15 @@ typedef struct
 
   // for checkpoint quiesce check
   uint8_t *rob_empty;
-  uint8_t *sq_valid;
-  uint8_t *stq_valid;
+  uint8_t *sq_empty;
+  uint8_t *sq_full;
+  uint8_t *sq_snapshot_capacity;
+  uint8_t *sq_snapshot_head;
+  uint32_t *sq_snapshot_valid;
+  uint32_t *sq_snapshot_committed;
+  uint8_t *sq_snapshot_alu;
+  word_t *sq_snapshot_paddr;
+  word_t *sq_snapshot_wdata;
 } NPCState;
 
 __EXPORT void difftest_memcpy(paddr_t addr, void *buf, size_t n, bool direction)
@@ -222,6 +229,50 @@ __EXPORT void difftest_regcpy(void *dut, bool direction)
   }
   // isa_reg_display();
   // vaddr_show(cpu.pc, 0x2c);
+}
+
+__EXPORT void difftest_checkpoint_sync(void *dut, uint32_t plic_ndev,
+                                       uint32_t plic_nctx)
+{
+  NPCState *npc = (NPCState *)dut;
+  difftest_regcpy(dut, DIFFTEST_TO_REF);
+  cpu.priv = *npc->priv;
+
+  if (npc->pmpcfg != NULL && npc->pmpaddr != NULL)
+  {
+    extern void pmp_restore_checkpoint(const uint8_t *cfg, const word_t *addr);
+    pmp_restore_checkpoint(npc->pmpcfg, npc->pmpaddr);
+  }
+
+  if (npc->clint_mtime != NULL && npc->clint_mtimecmp != NULL &&
+      npc->clint_msip != NULL)
+  {
+    cpu.mtimecmp = *npc->clint_mtimecmp;
+#ifdef CONFIG_DEVICE
+    extern void clint_restore_checkpoint(uint64_t mtime, uint64_t mtimecmp,
+                                         uint8_t msip);
+    clint_restore_checkpoint(*npc->clint_mtime, *npc->clint_mtimecmp,
+                             *npc->clint_msip);
+#endif
+  }
+
+#ifdef CONFIG_DEVICE
+  if (npc->plic_priority != NULL && npc->plic_pending != NULL &&
+      npc->plic_enable != NULL && npc->plic_threshold != NULL)
+  {
+    extern void plic_restore_checkpoint(const uint8_t *priority,
+                                        uint32_t pending,
+                                        const uint32_t *enable,
+                                        const uint8_t *threshold,
+                                        uint32_t ndev, uint32_t nctx);
+    plic_restore_checkpoint(npc->plic_priority, *npc->plic_pending,
+                            npc->plic_enable, npc->plic_threshold,
+                            plic_ndev, plic_nctx);
+  }
+#else
+  (void)plic_ndev;
+  (void)plic_nctx;
+#endif
 }
 
 __EXPORT void difftest_exec(uint64_t n)

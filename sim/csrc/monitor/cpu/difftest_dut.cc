@@ -15,6 +15,8 @@ void (*ref_difftest_raise_intr)(uint64_t NO) = NULL;
 void (*ref_difftest_set_meip)(uint8_t val) = NULL;
 void (*ref_difftest_set_stip)(uint8_t val) = NULL;
 void (*ref_difftest_plic_raise)(uint32_t src) = NULL;
+static void (*ref_difftest_checkpoint_sync)(void *dut, uint32_t plic_ndev,
+                                            uint32_t plic_nctx) = NULL;
 
 static bool is_skip_ref = false;
 static bool should_diff_mem = false;
@@ -26,6 +28,25 @@ static int skip_dut_nr_inst = 0;
 static bool difftest_enabled = false;
 
 bool difftest_is_enabled() { return difftest_enabled; }
+
+void difftest_checkpoint_resync()
+{
+  if (!difftest_enabled)
+    return;
+
+  ref_difftest_memcpy(MBASE, guest_to_host(MBASE), MSIZE, DIFFTEST_TO_REF);
+  ref_difftest_memcpy(MROM_BASE, guest_to_host(MROM_BASE), MROM_SIZE, DIFFTEST_TO_REF);
+  ref_difftest_memcpy(FLASH_BASE, guest_to_host(FLASH_BASE), FLASH_SIZE, DIFFTEST_TO_REF);
+  if (ref_difftest_checkpoint_sync != NULL)
+    ref_difftest_checkpoint_sync(&npc, NPC_PLIC_NDEV, NPC_PLIC_NCTX);
+  else
+    ref_difftest_regcpy(&npc, DIFFTEST_TO_REF);
+
+  is_skip_ref = false;
+  should_diff_mem = false;
+  skip_dut_nr_inst = 0;
+  Log("checkpoint: resynchronized difftest REF from restored DUT state");
+}
 
 void difftest_should_diff_mem()
 {
@@ -116,6 +137,8 @@ void init_difftest(char *ref_so_file, long img_size, int port)
   ref_difftest_set_meip = (void (*)(uint8_t))dlsym(handle, "difftest_set_meip");
   ref_difftest_set_stip = (void (*)(uint8_t))dlsym(handle, "difftest_set_stip");
   ref_difftest_plic_raise = (void (*)(uint32_t))dlsym(handle, "difftest_plic_raise");
+  ref_difftest_checkpoint_sync =
+      (void (*)(void *, uint32_t, uint32_t))dlsym(handle, "difftest_checkpoint_sync");
 
   void (*ref_difftest_init)(int) = (void (*)(int))dlsym(handle, "difftest_init");
   assert(ref_difftest_init);

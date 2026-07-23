@@ -35,6 +35,10 @@
 #define RAPT_DTB_SIZE 0
 #endif
 
+#ifndef RAPT_UART_BASE
+#define RAPT_UART_BASE 0xf0001800
+#endif
+
 .equ MAIN_RAM,     RAPT_MAIN_RAM
 .equ STAGE0_SRAM,  RAPT_STAGE0_SRAM
 .equ PAYLOAD_SRC,  RAPT_PAYLOAD_SRC
@@ -42,8 +46,8 @@
 .equ DTB_SRC,      RAPT_DTB_SRC
 .equ DTB_DEST,     RAPT_DTB_DEST
 .equ DTB_SIZE,     RAPT_DTB_SIZE
-.equ UART_RXTX,    0xf0001800
-.equ UART_TXFULL,  0xf0001804
+.equ UART_RXTX,    RAPT_UART_BASE
+.equ UART_TXFULL,  RAPT_UART_BASE + 4
 
 .macro li_addr reg, val
     li      \reg, (((\val) >> 24) & 0xff)

@@ -209,6 +209,13 @@ typedef struct
   uint8_t *rob_empty;
   uint8_t *sq_empty;  // 1-bit: SQ fully drained (no store buffered, FSM idle)
   uint8_t *sq_full;   // 1-bit: all SQ entries occupied
+  uint8_t *sq_snapshot_capacity;
+  uint8_t *sq_snapshot_head;
+  uint32_t *sq_snapshot_valid;
+  uint32_t *sq_snapshot_committed;
+  uint8_t *sq_snapshot_alu;
+  word_t *sq_snapshot_paddr;
+  word_t *sq_snapshot_wdata;
 } NPCState;
 
 typedef struct

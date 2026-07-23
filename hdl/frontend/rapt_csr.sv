@@ -16,7 +16,7 @@ module rapt_csr #(
     // cluster only instantiates one core; the multi-core wiring is in place.
     input [XLEN-1:0] hart_id_i,
 
-    rou_csr_if.out   rou_csr,
+    rou_csr_if.in    rou_csr,
     exu_csr_if.slave exu_csr,
 
     csr_bcast_if.out csr_bcast,
@@ -272,7 +272,7 @@ module rapt_csr #(
       TIMEH__:   exu_csr.rdata = csr[TIMEH__];
       MINSTRET:  exu_csr.rdata = csr[MINSTRET];
       MINSTRETH: exu_csr.rdata = csr[MINSTRETH];
-      MVENDORID: exu_csr.rdata = XLEN'(32'd666);
+      MVENDORID: exu_csr.rdata = XLEN'('d0);
       MARCHID:   exu_csr.rdata = 'd50;
       IMPID__:   exu_csr.rdata = '0;
       MHARTID:   exu_csr.rdata = hart_id_i;
@@ -328,10 +328,27 @@ module rapt_csr #(
   // ecall causes: U=8, S=9, M=11; ebreak cause: 3
   logic [XLEN-1:0] ecall_cause_idx;
   logic ecall_deleg, ebreak_deleg;
+  logic [XLEN-1:0] mret_mstatus_next, sret_mstatus_next;
   assign ecall_cause_idx = (priv_mode == `RAPT_PRIV_U) ? (XLEN'(1) << 8) :
                            (priv_mode == `RAPT_PRIV_S) ? (XLEN'(1) << 9) : '0;
   assign ecall_deleg = (priv_mode != `RAPT_PRIV_M) && |(csr[MEDELEG] & ecall_cause_idx);
   assign ebreak_deleg = (priv_mode != `RAPT_PRIV_M) && csr[MEDELEG][3];
+
+  always_comb begin
+    mret_mstatus_next = csr[MSTATUS];
+    mret_mstatus_next[`RAPT_CSR_MSTATUS_MPP_] = `RAPT_PRIV_U;
+    mret_mstatus_next[`RAPT_CSR_MSTATUS_MPIE] = 1'b1;
+    mret_mstatus_next[`RAPT_CSR_MSTATUS_MIE_] = csr[MSTATUS][`RAPT_CSR_MSTATUS_MPIE];
+    if (csr[MSTATUS][`RAPT_CSR_MSTATUS_MPP_] != `RAPT_PRIV_M) begin
+      mret_mstatus_next[`RAPT_CSR_MSTATUS_MPRV] = 1'b0;
+    end
+
+    sret_mstatus_next = csr[MSTATUS];
+    sret_mstatus_next[`RAPT_CSR_MSTATUS_SPP_] = 1'b0;
+    sret_mstatus_next[`RAPT_CSR_MSTATUS_SPIE] = 1'b1;
+    sret_mstatus_next[`RAPT_CSR_MSTATUS_SIE_] = csr[MSTATUS][`RAPT_CSR_MSTATUS_SPIE];
+    sret_mstatus_next[`RAPT_CSR_MSTATUS_MPRV] = 1'b0;
+  end
 
   assign csr_bcast.priv = priv_mode;
   assign csr_bcast.satp_ppn = csr[SATP___][`RAPT_CSR_SATP_PPN_W-1:0];
@@ -508,6 +525,19 @@ module rapt_csr #(
       csr[MTVEC__] <= RESET_VAL;
       csr[MSTATUS] <= RESET_VAL | `RAPT_CSR_MSTATUS_HW;
       csr[SSTATUS] <= `RAPT_CSR_SSTATUS_HW;
+      csr[SIE____] <= '0;
+      csr[STVEC__] <= '0;
+      csr[SSCRATC] <= '0;
+      csr[SEPC___] <= '0;
+      csr[SCAUSE_] <= '0;
+      csr[STVAL__] <= '0;
+      csr[SIP____] <= '0;
+      csr[SATP___] <= '0;
+      csr[MEDELEG] <= '0;
+      csr[MIE____] <= '0;
+      csr[MSCRATCH] <= '0;
+      csr[MTVAL__] <= '0;
+      csr[MIP____] <= '0;
       csr[MCYCLE_] <= RESET_VAL;
       csr[MCYCLEH] <= RESET_VAL;
       csr[TIME___] <= RESET_VAL;
@@ -706,29 +736,10 @@ module rapt_csr #(
           end
         end else if (rou_csr.mret) begin
           priv_mode <= csr[MSTATUS][`RAPT_CSR_MSTATUS_MPP_];
-          csr[MSTATUS] <= {
-            csr[MSTATUS][XLEN-1:13],
-            `RAPT_PRIV_U,
-            csr[MSTATUS][10:8],
-            1'b1,
-            csr[MSTATUS][6:4],
-            csr[MSTATUS][`RAPT_CSR_MSTATUS_MPIE],
-            csr[MSTATUS][2:0]
-          };
-          if (csr[MSTATUS][`RAPT_CSR_MSTATUS_MPP_] != `RAPT_PRIV_M) begin
-            csr[MSTATUS][`RAPT_CSR_MSTATUS_MPRV] <= 1'b0;
-          end
+          csr[MSTATUS] <= mret_mstatus_next;
         end else if (rou_csr.sret) begin
           priv_mode <= csr[MSTATUS][`RAPT_CSR_MSTATUS_SPP_] == 1'b1 ? `RAPT_PRIV_S : `RAPT_PRIV_U;
-          csr[MSTATUS] <= {
-            csr[MSTATUS][XLEN-1:9],
-            1'b0,  // SPP = 0
-            csr[MSTATUS][7:6],  // preserve MPIE, bit 6
-            1'b1,  // SPIE = 1
-            csr[MSTATUS][4:2],  // preserve MIE, bits 4,2
-            csr[MSTATUS][`RAPT_CSR_MSTATUS_SPIE],  // SIE <- SPIE
-            csr[MSTATUS][0]
-          };
+          csr[MSTATUS] <= sret_mstatus_next;
           csr[SSTATUS] <= {
             csr[SSTATUS][XLEN-1:9],
             1'b0,  // SPP = 0
@@ -738,7 +749,6 @@ module rapt_csr #(
             csr[SSTATUS][`RAPT_CSR_MSTATUS_SPIE],  // SIE <- SPIE
             csr[SSTATUS][0]
           };
-          csr[MSTATUS][`RAPT_CSR_MSTATUS_MPRV] <= 1'b0;
         end else if (rou_csr.ebreak) begin
           if (ebreak_deleg) begin
             // Delegate to S-mode

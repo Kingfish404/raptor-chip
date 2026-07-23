@@ -24,7 +24,7 @@
 # The .ltx (debug probes file) is emitted by write_bitstream next to the .bit.
 # ============================================================================
 if {$argc < 3} {
-    puts "ERROR: usage: capture_ila.tcl <bitstream.bit> <probes.ltx> <out.csv> \[derail|now\]"
+    puts "ERROR: usage: capture_ila.tcl <bitstream.bit> <probes.ltx> <out.csv> \[derail|hang|now\]"
     exit 1
 }
 set bitstream [file normalize [lindex $argv 0]]
@@ -148,7 +148,7 @@ if {$mode eq "now"} {
     flush stdout
 }
 
-# Robust wait: poll CORE_STATUS until the ILA is Full (triggered + captured)
+# Robust wait: poll STATUS.CORE_STATUS until the ILA is Full (triggered + captured)
 # rather than relying on wait_on_hw_ila's default timeout (the CPU boots only
 # ~54 s after config, which can exceed that default).
 if {$mode eq "now"} {
@@ -161,7 +161,7 @@ if {$mode eq "now"} {
         after 2000
         if {[catch {refresh_hw_device -quiet $dev} e]} {}
         set st ""
-        catch {set st [get_property CORE_STATUS $ila]}
+        catch {set st [get_property STATUS.CORE_STATUS $ila]}
         if {[expr {$t % 5 == 0}]} { puts "INFO: \[capture_ila\] t=[expr {$t*2}]s CORE_STATUS=$st" ; flush stdout }
         if {[string match -nocase "*FULL*" $st] || [string match -nocase "*IDLE*" $st]} {
             set done 1

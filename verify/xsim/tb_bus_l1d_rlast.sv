@@ -13,6 +13,7 @@ module tb_bus_l1d_rlast;
       .XLEN(XLEN),
       .ID_W(IdW)
   ) axi ();
+  mem_link_if #(.XLEN(XLEN), .ID_W(IdW)) mem ();
 
   l1i_bus_if #(.XLEN(XLEN)) l1i_bus ();
   l1d_bus_if #(.XLEN(XLEN)) l1d_bus ();
@@ -21,7 +22,7 @@ module tb_bus_l1d_rlast;
 
   rapt_bus #(.XLEN(XLEN)) dut (
       .clock(clock),
-      .axi(axi),
+      .mem(mem),
       .l1i_bus(l1i_bus),
       .l1d_bus(l1d_bus),
       .csr_bcast(csr_bcast),
@@ -29,10 +30,18 @@ module tb_bus_l1d_rlast;
       .reset(reset)
   );
 
+      rapt_axi_master #(.XLEN(XLEN), .ID_W(IdW)) adapter (
+        .clock(clock),
+        .reset(reset),
+        .mem(mem),
+        .axi(axi)
+      );
+
   always #5 clock = ~clock;
 
   `include "tb_common.svh"
   `include "tb_bus_defaults.svh"
+  `include "tb_bus_write_scenario.svh"
 
   task automatic wait_for_ar;
     bit found;
@@ -81,8 +90,17 @@ module tb_bus_l1d_rlast;
     check(l1d_bus.rdata == 32'hcafe_babe, "L1D response data mismatch");
     check(!l1d_bus.rerr, "L1D response unexpectedly flagged error");
     tick(1);
-
     $display("PASS: rapt_bus L1D rlast xsim checks passed");
+
+    reset = 1'b1;
+    init_bus_inputs();
+    tick(2);
+    reset = 1'b0;
+    tick(1);
+
+    run_bus_write_scenario();
+
+    $display("PASS: rapt_bus independent AW/W and back-to-back write checks passed");
     $finish;
   end
 endmodule

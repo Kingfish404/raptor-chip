@@ -22,6 +22,7 @@
 
 #include <isa.h>
 #include <isa-def.h>
+#include <memory/tlb.h>
 #include "../local-include/reg.h"
 
 #define PMP_N 16
@@ -97,6 +98,17 @@ static void pmp_rebuild_active(void)
       return;
     }
   }
+}
+
+void pmp_restore_checkpoint(const uint8_t *cfg, const word_t *addr)
+{
+  for (int i = 0; i < PMP_N; i++)
+  {
+    pmp_cfg_set(i, cfg[i]);
+    pmp_addr_set(i, addr[i]);
+  }
+  pmp_rebuild_active();
+  soft_tlb_flush();
 }
 
 int pmp_csr_write(uint16_t csr, word_t val)

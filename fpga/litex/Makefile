@@ -17,6 +17,7 @@ PYTHON      := $(VENV_DIR)/bin/python3
 PIP         := $(VENV_DIR)/bin/pip
 HOST_PYTHON := $(shell if [ -x "$(PYTHON)" ]; then echo "$(PYTHON)"; elif command -v python3 >/dev/null 2>&1; then command -v python3; elif command -v python >/dev/null 2>&1; then command -v python; fi)
 TIMEOUT_BIN := $(shell command -v timeout 2>/dev/null || command -v gtimeout 2>/dev/null)
+NPROC       := $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 
 export RAPTOR_HOME
 
@@ -31,7 +32,6 @@ else
 	TIMEOUT_FOREGROUND := --foreground
 endif
 
-VARIANT     ?= standard ## CPU variant (standard|linux|linux64)
 BOARDS := tang_mega_138k_pro mlk_cu07_ku15p
 BOARD_ALIASES := $(subst _,-,$(BOARDS))
 
@@ -57,27 +57,29 @@ GOWIN_APP   ?= $(firstword $(wildcard /Applications/GowinIDE.app /Applications/G
 # 64.8 s vs ~13 s wall clock when a 50 MHz linux bitstream was loaded but coremark
 # was built for the 10 MHz standard profile: a 5x over-report).
 _LINUX_PROFILE_BENCH_GOALS := coremark-fpga main-fpga main-fpga-build irqtest-fpga app-fpga-upload app-llm-fpga app-llm-ops-fpga app-llm-infer-fpga app-llm-train-fpga
-_LINUX_PROFILE_DEFAULT_GOALS := fpga-gen fpga-build fpga-build-force fpga-load fpga-flash fpga fpga-timing-ok fpga-clean fpga-upload fpga-reports-index $(_LINUX_PROFILE_BENCH_GOALS) $(addsuffix -build,$(BOARD_ALIASES)) $(BOARD_ALIASES)
-_FPGA_ALIAS_GOALS_EARLY := $(BOARD_ALIASES) $(addsuffix -build,$(BOARD_ALIASES))
-_IS_FPGA_GOAL_EARLY := $(strip \
+_FPGA_ALIAS_GOALS := $(BOARD_ALIASES) $(addsuffix -build,$(BOARD_ALIASES))
+_IS_FPGA_GOAL := $(strip \
 	$(foreach g,$(MAKECMDGOALS),$(if $(findstring fpga,$(g)),y)) \
-	$(filter $(_FPGA_ALIAS_GOALS_EARLY),$(MAKECMDGOALS)))
-_IS_LINUX_PROFILE_DEFAULT_GOAL := $(strip $(filter $(_LINUX_PROFILE_DEFAULT_GOALS),$(MAKECMDGOALS)))
+	$(filter $(_FPGA_ALIAS_GOALS),$(MAKECMDGOALS)))
+_IS_LINUX_PROFILE_DEFAULT_GOAL := $(strip $(_IS_FPGA_GOAL) $(filter $(_LINUX_PROFILE_BENCH_GOALS),$(MAKECMDGOALS)))
 
-ifneq (,$(_IS_LINUX_PROFILE_DEFAULT_GOAL))
+VARIANT ?= $(if $(_IS_LINUX_PROFILE_DEFAULT_GOAL),$(if $(strip $(GOWIN_APP)),standard,linux),standard) ## CPU variant (standard|linux|linux64)
 ifeq ($(origin VARIANT),file)
+ifeq ($(VARIANT),linux)
+ifneq (,$(_IS_LINUX_PROFILE_DEFAULT_GOAL))
 ifeq ($(strip $(GOWIN_APP)),)
-VARIANT := linux
 $(if $(filter 0,$(MAKELEVEL)),$(info [litex] GOWIN_APP empty on FPGA goal -> defaulting to VARIANT=linux (KU15P Linux/MIG profile)))
 endif
 endif
 endif
+endif
 
-ifneq (,$(_IS_FPGA_GOAL_EARLY))
+ifneq (,$(_IS_FPGA_GOAL))
 ifneq (,$(filter linux linux64,$(VARIANT)))
 LINUX_FPGA_PROFILE := 1
 endif
 endif
+_LINUX_FPGA_ARGS := VARIANT=linux
 
 SYS_CLK     ?= $(if $(LINUX_FPGA_PROFILE),50000000,10000000) ## System clock in Hz (linux FPGA profile: 50 MHz)
 SIM_TIMEOUT ?= 30 ## Simulation timeout in seconds (0=unlimited)
@@ -94,10 +96,6 @@ BOARD_mlk_cu07_ku15p_BITNAME   := mlk_cu07_ku15p.bit
 BOARD_mlk_cu07_ku15p_TIMINGRPT := mlk_cu07_ku15p_timing.rpt
 BOARD_mlk_cu07_ku15p_UART      := /dev/ttyUSB0
 
-_FPGA_ALIAS_GOALS := $(BOARD_ALIASES) $(addsuffix -build,$(BOARD_ALIASES))
-_IS_FPGA_GOAL := $(strip \
-	$(foreach g,$(MAKECMDGOALS),$(if $(findstring fpga,$(g)),y)) \
-	$(filter $(_FPGA_ALIAS_GOALS),$(MAKECMDGOALS)))
 RAPT_CONFIG ?= default ## Raptor uarch config preset (default|middle|small|...)
 RAPT_CONFIG := $(strip $(RAPT_CONFIG))
 export RAPT_CONFIG
@@ -115,13 +113,25 @@ WITH_LITEDRAM ?= 0 ## Set to 1 to use external LiteDRAM/DDR4 as FPGA main_ram
 LITEDRAM_SIZE ?= 0x40000000 ## Mapped external LiteDRAM main_ram size in bytes
 WITH_MIG ?= $(if $(LINUX_FPGA_PROFILE),1,0) ## Set to 1 to use external Xilinx DDR4 MIG as FPGA main_ram (linux FPGA profile: 1)
 MIG_SIZE ?= 0x40000000 ## Mapped external MIG main_ram size in bytes
+WITH_SDCARD ?= $(if $(filter mlk_cu07_ku15p,$(FPGA_BOARD)),1,0) ## Add SDCard controller/DMA by default on MLK-CU07 KU15P; set 0 to omit
+SDCARD_BOOT ?= 0 ## Set to 1 to make LiteX BIOS automatically try SDCard boot
+ifneq (,$(filter 1 yes true on,$(WITH_SDCARD)))
+ifneq ($(FPGA_BOARD),mlk_cu07_ku15p)
+$(error WITH_SDCARD is only supported on FPGA_BOARD=mlk_cu07_ku15p)
+endif
+endif
+ifneq (,$(filter 1 yes true on,$(SDCARD_BOOT)))
+ifeq (,$(filter 1 yes true on,$(WITH_SDCARD)))
+$(error SDCARD_BOOT requires WITH_SDCARD=1)
+endif
+endif
 # Auto-detect the serial device. Prefer /dev/ttyUSB0 (the common UART channel,
 # e.g. the MLK-CU07 KU15P), then fall back to the highest-sorted device for
 # macOS / other setups. A board-specific BOARD_<b>_UART override (see above)
 # still takes precedence, and an explicit UART_PORT=... always wins.
 UART_PORT_AUTO := $(firstword $(wildcard /dev/ttyUSB0) $(shell ls -1 /dev/tty.usbserial* /dev/tty.wchusbserial* /dev/tty.usbmodem* /dev/ttyUSB* /dev/ttyACM* 2>/dev/null | sort | tail -n 1))
 UART_PORT   ?= $(firstword $(wildcard $(BOARD_$(FPGA_BOARD)_UART)) $(UART_PORT_AUTO)) ## Serial device for fpga-console
-UART_BAUD   ?= 115200
+override UART_BAUD := 115200 ## Fixed FPGA UART/SFL baud; command-line and environment overrides are intentionally ignored
 SERIALBOOT_SAFE ?= 1 ## Set to 0 to re-enable litex_term upload speed optimizations
 
 SIM_THREADS ?= 4 ## Verilator simulation threads (1=off)
@@ -131,7 +141,7 @@ TRACE ?= none ## Wave dump mode (none|fst|vcd)
 TRACE_START ?= 0 ## Start dump at cycle N (0=from t=0)
 TRACE_END   ?= -1 ## Stop dump at cycle N (-1=no end)
 
-_VSTRIP1 := VARIANT SYS_CLK SIM_TIMEOUT GOWIN_APP WITH_LED_CHASER WITH_LITEDRAM LITEDRAM_SIZE WITH_MIG MIG_SIZE UART_PORT UART_BAUD SERIALBOOT_SAFE SIM_THREADS TRACE TRACE_START TRACE_END
+_VSTRIP1 := VARIANT SYS_CLK SIM_TIMEOUT GOWIN_APP WITH_LED_CHASER WITH_LITEDRAM LITEDRAM_SIZE WITH_MIG MIG_SIZE WITH_SDCARD SDCARD_BOOT UART_PORT UART_BAUD SERIALBOOT_SAFE SIM_THREADS TRACE TRACE_START TRACE_END
 $(foreach v,$(_VSTRIP1),$(eval $v := $(strip $($v))))
 SERIALBOOT_SAFE_FLAG := $(if $(filter 1 yes true on,$(SERIALBOOT_SAFE)),--safe,)
 
@@ -349,6 +359,8 @@ MICROBENCH_BIN  := $(MICROBENCH_DIR)/build/microbench-riscv32-npc.bin
 TESTS_DIR       := $(LITEX_DIR)/tests
 TESTS_BUILD_DIR := $(BUILD_DIR)/tests
 TEST_NAMES      := hello text fib prime memcpy mul
+ECALL_STRESS_FPGA_DIR := $(BUILD_DIR)/tests/irq-fpga
+ECALL_STRESS_FPGA_BIN := $(ECALL_STRESS_FPGA_DIR)/u_sv32_s_ecall_stress.bin
 
 LINUX_DIR       := $(RAPTOR_HOME)/linux
 include $(LINUX_DIR)/vars.mk
@@ -356,32 +368,35 @@ OPENSBI_FW_DIR  := $(LINUX_DIR)/opensbi/build/platform/generic/firmware
 OPENSBI_BIN     := $(OPENSBI_FW_DIR)/fw_payload.bin
 LINUX_IMG        = $(LINUX_RV32_PAYLOAD)
 
-LINUX_FPGA_RAM_SIZE ?= $(MIG_SIZE) ## Linux FPGA memory size advertised in DTB
-LINUX_FPGA_TIMEBASE ?= $(if $(LINUX_FPGA_PROFILE),$(SYS_CLK),50000000) ## Linux FPGA DTB timebase-frequency (tracks SYS_CLK in the linux FPGA profile)
-LINUX_FPGA_PAYLOAD ?= $(LINUX_IMG) ## OpenSBI fw_payload.bin for fpga-upload VARIANT=linux
+LINUX_FPGA_RAM_SIZE ?= 0x10000000 ## DTB RAM size: matches Raptor's 0x80000000..0x8fffffff PMEM window
+LINUX_FPGA_PAYLOAD ?= $(LINUX_IMG) ## Legacy stage0-bundled payload for fpga-img
 LINUX_FPGA_OPENSBI_PAYLOAD ?= $(OPENSBI_BIN) ## Standalone linux/opensbi fw_payload.bin for fpga-opensbi-upload
 LINUX_FPGA_PAYLOAD_OFFSET ?= 0x00100000 ## Offset of fw_payload source inside uploaded image
 LINUX_FPGA_DTB_OFFSET ?= 0x02000000 ## Offset of DTB source inside uploaded image
 LINUX_FPGA_OPENSBI_DTB_OFFSET ?= 0x00800000 ## Offset of DTB source inside OpenSBI-only upload image
 LINUX_FPGA_DTB_ADDR ?= 0x83f00000 ## DTB runtime address passed to OpenSBI in a1
 LINUX_FPGA_STAGE0_SRAM ?= 0x0f000000 ## SRAM address for stage0 relocation loop
+override LINUX_FPGA_UART_BASE := 0xf0001800 # Stable LiteUART CSR base (board csr_map slot 3).
 OS ?= ## Generic OS selector for fpga-tinyos-* helpers: egos or xv6
 TINYOS_OS ?= ## TinyOS OS selector for fpga-tinyos-* helpers: egos or xv6
-LINUX_FPGA_TINYOS_FORCE_RAW ?= 0 ## Set to 1 to raw-upload prepared egos.bin after the compatibility warning
 LINUX_FPGA_EGOS_IMAGE ?= $(RAPTOR_HOME)/app/build/tinyos-sim-src/egos-2000/tools/egos.bin ## Prepared egos flat image path
 LINUX_FPGA_EGOS_DISK ?= $(RAPTOR_HOME)/app/build/tinyos-sim-src/egos-2000/tools/disk.img ## Prepared egos disk image path
 LINUX_FPGA_EGOS_KU15P_IMAGE ?= $(RAPTOR_HOME)/app/build/tinyos-sim-src/egos-2000/tools/egos-ku15p.bin ## KU15P RAM-disk egos image (embedded disk.img)
+LINUX_FPGA_EGOS_STAGE_ADDR := 0x82000000
 LINUX_FPGA_XV6_KERNEL ?= $(RAPTOR_HOME)/app/build/tinyos-sim-src/xv6-riscv/kernel/kernel.bin ## Prepared xv6 kernel.bin path
 LINUX_FPGA_XV6_DISK ?= $(RAPTOR_HOME)/app/build/tinyos-sim-src/xv6-riscv/fs.img ## Prepared xv6 fs.img path
-_VSTRIP2 := LINUX_FPGA_RAM_SIZE LINUX_FPGA_TIMEBASE LINUX_FPGA_PAYLOAD LINUX_FPGA_OPENSBI_PAYLOAD LINUX_FPGA_PAYLOAD_OFFSET LINUX_FPGA_DTB_OFFSET LINUX_FPGA_OPENSBI_DTB_OFFSET LINUX_FPGA_DTB_ADDR LINUX_FPGA_STAGE0_SRAM LINUX_FPGA_TINYOS_FORCE_RAW LINUX_FPGA_EGOS_IMAGE LINUX_FPGA_EGOS_DISK LINUX_FPGA_EGOS_KU15P_IMAGE LINUX_FPGA_XV6_KERNEL LINUX_FPGA_XV6_DISK
+_VSTRIP2 := LINUX_FPGA_RAM_SIZE LINUX_FPGA_PAYLOAD LINUX_FPGA_OPENSBI_PAYLOAD LINUX_FPGA_PAYLOAD_OFFSET LINUX_FPGA_OPENSBI_DTB_OFFSET LINUX_FPGA_DTB_OFFSET LINUX_FPGA_DTB_ADDR LINUX_FPGA_STAGE0_SRAM LINUX_FPGA_UART_BASE LINUX_FPGA_EGOS_IMAGE LINUX_FPGA_EGOS_DISK LINUX_FPGA_EGOS_KU15P_IMAGE LINUX_FPGA_XV6_KERNEL LINUX_FPGA_XV6_DISK
 $(foreach v,$(_VSTRIP2),$(eval $v := $(strip $($v))))
 LINUX_FPGA_TINYOS_OS := $(strip $(if $(OS),$(OS),$(TINYOS_OS)))
+LINUX_FPGA_UART_UNIT_ADDR := $(patsubst 0x%,%,$(LINUX_FPGA_UART_BASE))
 LINUX_FPGA_PAYLOAD_SRC_ADDR = $(shell printf "0x%08x" $$(( $(MAIN_RAM_BASE) + $(LINUX_FPGA_PAYLOAD_OFFSET) )))
 LINUX_FPGA_DTB_SRC_ADDR = $(shell printf "0x%08x" $$(( $(MAIN_RAM_BASE) + $(LINUX_FPGA_DTB_OFFSET) )))
 LINUX_FPGA_OPENSBI_DTB_SRC_ADDR = $(shell printf "0x%08x" $$(( $(MAIN_RAM_BASE) + $(LINUX_FPGA_OPENSBI_DTB_OFFSET) )))
 LINUX_FPGA_PAYLOAD_SIZE = $(shell stat -c%s "$(LINUX_FPGA_PAYLOAD)" 2>/dev/null || echo 0)
 LINUX_FPGA_OPENSBI_PAYLOAD_SIZE = $(shell stat -c%s "$(LINUX_FPGA_OPENSBI_PAYLOAD)" 2>/dev/null || echo 0)
 LINUX_FPGA_DTB_SIZE = $(shell stat -c%s "$(FW_LINUX_FPGA_DTB)" 2>/dev/null || echo 0)
+RAPT_CACHE_LINE_BYTES := $(word 3,$(shell grep '^`define RAPT_CACHE_LINE_BYTES ' \
+	$(RAPTOR_HOME)/hdl/configs/$(RAPT_CONFIG)/rapt_config.svh))
 
 
 FW_LINUX_FPGA_SRC    := $(FW_BASE)/linux-fpga
@@ -398,29 +413,48 @@ FW_LINUX_FPGA_SMOKE_IMAGE := $(FW_LINUX_FPGA_DIR)/linux-fpga-smoke.img
 FW_LINUX_FPGA_OPENSBI_ELF   := $(FW_LINUX_FPGA_DIR)/stage0-opensbi.elf
 FW_LINUX_FPGA_OPENSBI_BIN   := $(FW_LINUX_FPGA_DIR)/stage0-opensbi.bin
 FW_LINUX_FPGA_OPENSBI_IMAGE := $(FW_LINUX_FPGA_DIR)/linux-fpga-opensbi.img
+FW_EGOS_STAGE0_SRC    := $(FW_BASE)/egos-stage0
+FW_EGOS_STAGE0_DIR    := $(BUILD_DIR)/firmware/egos-stage0
+FW_EGOS_STAGE0_ELF    := $(FW_EGOS_STAGE0_DIR)/stage0.elf
+FW_EGOS_STAGE0_BIN    := $(FW_EGOS_STAGE0_DIR)/stage0.bin
+FW_EGOS_STAGE0_BUNDLE := $(FW_EGOS_STAGE0_DIR)/egos-ku15p-compact.bin
 # $(call _fpga_linux_upload,<bin>): serialboot a flat bin to main_ram through the
 # KU15P Linux/MIG BIOS bitstream. Forces VARIANT=linux so the FPGA profile (board,
 # MIG, clocks, baud, and the timing-report path) is derived consistently.
-_fpga_linux_upload = $(MAKE) --no-print-directory fpga-upload VARIANT=linux BIN=$(1) MAIN_RAM_BASE=$(MAIN_RAM_BASE)
+_fpga_linux_upload = $(MAKE) --no-print-directory fpga-upload $(_LINUX_FPGA_ARGS) BIN=$(1) MAIN_RAM_BASE=$(MAIN_RAM_BASE)
 
 $(FW_LINUX_FPGA_DIR):
 	@mkdir -p $@
+
+$(FW_EGOS_STAGE0_DIR):
+	@mkdir -p $@
+
+$(FW_EGOS_STAGE0_ELF): $(FW_EGOS_STAGE0_SRC)/boot.S $(FW_EGOS_STAGE0_SRC)/link.ld | $(FW_EGOS_STAGE0_DIR)
+	$(CROSS)gcc -march=rv32imac_zicsr_zifencei -mabi=ilp32 -nostdlib -nostartfiles \
+		-fno-pic -no-pie -Wl,--build-id=none -T $(FW_EGOS_STAGE0_SRC)/link.ld -o $@ $<
+
+$(FW_EGOS_STAGE0_BIN): $(FW_EGOS_STAGE0_ELF)
+	$(CROSS)objcopy -O binary $< $@
 
 $(LINUX_FPGA_PAYLOAD): linux-build
 
 $(LINUX_FPGA_OPENSBI_PAYLOAD): opensbi-build
 
 $(FW_LINUX_FPGA_DTS): $(FW_LINUX_FPGA_DTS_IN) FORCE | $(FW_LINUX_FPGA_DIR)
-	sed -e 's/@TIMEBASE@/$(LINUX_FPGA_TIMEBASE)/g' \
+	sed -e 's/@TIMEBASE@/$(SYS_CLK)/g' \
 	    -e 's/@MEM_SIZE@/$(LINUX_FPGA_RAM_SIZE)/g' \
+	    -e 's/@UART_BASE@/$(LINUX_FPGA_UART_BASE)/g' \
+	    -e 's/@UART_UNIT_ADDR@/$(LINUX_FPGA_UART_UNIT_ADDR)/g' \
+	    -e 's/@CBOM_BLOCK_SIZE@/$(RAPT_CACHE_LINE_BYTES)/g' \
 	    $< > $@
 
 $(FW_LINUX_FPGA_DTB): $(FW_LINUX_FPGA_DTS) | $(FW_LINUX_FPGA_DIR)
 	dtc -I dts -O dtb -o $@ $<
 
 FW_LINUX_FPGA_BASE_CFLAGS = -march=rv32imac_zicsr_zifencei -mabi=ilp32 -nostdlib -nostartfiles \
-	-fno-pic -no-pie -DRAPT_MAIN_RAM=$(MAIN_RAM_BASE) \
+	-fno-pic -no-pie -Wl,--build-id=none -DRAPT_MAIN_RAM=$(MAIN_RAM_BASE) \
 	-DRAPT_STAGE0_SRAM=$(LINUX_FPGA_STAGE0_SRAM) \
+	-DRAPT_UART_BASE=$(LINUX_FPGA_UART_BASE) \
 	-DRAPT_PAYLOAD_SRC=$(LINUX_FPGA_PAYLOAD_SRC_ADDR) \
 	-DRAPT_DTB_DEST=$(LINUX_FPGA_DTB_ADDR)
 
@@ -606,7 +640,7 @@ SIM_PAYLOAD_FLAG :=
 endif
 
 SIM_DIR    := $(BUILD_DIR)/sim/$(VARIANT)-$(ROM)-$(SOC)
-SIM_GW_DIR := $(SIM_DIR)/gateware
+SIM_BUILD_DIR := $(SIM_DIR)/gateware
 
 define _soc_gen
 	source $(VENV_DIR)/bin/activate && \
@@ -686,13 +720,13 @@ sim-gen: $(PACK_SV) $(SIM_ROM_DEP) $(SIM_PAYLOAD_BUILD) ## Generate SoC Verilog 
 	$(call _soc_gen,$(SIM_FLAGS))
 
 sim-build: sim-gen ## Generate SoC + compile Verilator binary {ROM,SOC,PAYLOAD,VARIANT,IMG}
-	$(call _compile_if_needed,$(SIM_GW_DIR))
+	$(call _compile_if_needed,$(SIM_BUILD_DIR))
 
 sim: sim-build ## Build + run sim {ROM,SOC,PAYLOAD,VARIANT,IMG,TRACE,SIM_TIMEOUT,SIM_THREADS}
-	$(call _run_vsim,$(SIM_GW_DIR))
+	$(call _run_vsim,$(SIM_BUILD_DIR))
 
 sim-run: ## Run already-built sim (no rebuild) {ROM,SOC,PAYLOAD,VARIANT,SIM_TIMEOUT}
-	$(call _run_vsim,$(SIM_GW_DIR))
+	$(call _run_vsim,$(SIM_BUILD_DIR))
 
 sim-trace: ## Alias: make sim TRACE=fst
 	@$(MAKE) --no-print-directory sim TRACE=fst
@@ -725,21 +759,28 @@ coremark: ## Alias: make sim PAYLOAD=coremark — tees output to $(LITEX_LOG_DIR
 # prior `make coremark-build COREMARK_ITERATIONS=N`.  Override inline instead:
 # `make coremark-fpga COREMARK_ITERATIONS=N`.
 coremark-fpga: COREMARK_ITERATIONS := 2000
-coremark-fpga: coremark-build ## Upload CoreMark to FPGA main_ram via BIOS serialboot {COREMARK_ITERATIONS,MAIN_RAM_BASE,UART_PORT,UART_BAUD}
+coremark-fpga: coremark-build ## Upload CoreMark to FPGA main_ram via BIOS serialboot {COREMARK_ITERATIONS,MAIN_RAM_BASE,UART_PORT}
 	@echo "[INFO] CoreMark built for SYS_CLK=$(SYS_CLK) Hz (VARIANT=$(VARIANT)) — the LOADED bitstream must run at this clock, else 'Total time'/'Iterations/Sec' are off by the clock ratio (rdtime timebase == sys_clk)."
 	@$(MAKE) --no-print-directory fpga-upload BIN=$(COREMARK_BIN)
 
 coremark-clean: ## Remove CoreMark build artifacts (keep cloned source)
 	$(MAKE) -C $(COREMARK_BENCH) clean
 
-main-fpga-build: ## Build FPGA main firmware (uploadable via serialboot to main_ram) {UART_PORT,UART_BAUD}
+main-fpga-build: ## Build FPGA main firmware (uploadable via serialboot to main_ram) {UART_PORT}
 	$(MAKE) -C $(LITEX_DIR) firmware-fpga FW_FPGA_TARGET=main FW_FPGA_LOAD=main_ram
 	@echo "[INFO] FPGA main firmware ready: $(BUILD_DIR)/firmware/fpga/main-main_ram/boot.bin"
 
-main-fpga: main-fpga-build ## Build + upload FPGA main firmware to main_ram {UART_PORT,UART_BAUD}
+main-fpga: main-fpga-build ## Build + upload FPGA main firmware to main_ram {UART_PORT}
 	@$(MAKE) --no-print-directory fpga-upload BIN=$(BUILD_DIR)/firmware/fpga/main-main_ram/boot.bin
 
-irqtest-fpga: ## Build + upload minimal IRQ test firmware {UART_PORT,UART_BAUD}
+u-sv32-s-ecall-stress-fpga-build: ## Build short Sv32 U->S syscall stress for LiteX FPGA
+	$(MAKE) -C $(RAPTOR_HOME)/app/tests/irq $(ECALL_STRESS_FPGA_BIN) \
+		BUILD_DIR=$(ECALL_STRESS_FPGA_DIR) EXTRA_CFLAGS=-DRAPT_LITEX_FPGA
+
+u-sv32-s-ecall-stress-fpga-upload: u-sv32-s-ecall-stress-fpga-build ## Upload short Sv32 U->S syscall stress via BIOS serialboot
+	@$(MAKE) --no-print-directory fpga-upload BIN=$(ECALL_STRESS_FPGA_BIN)
+
+irqtest-fpga: ## Build + upload minimal IRQ test firmware {UART_PORT}
 	$(MAKE) -C $(LITEX_DIR) firmware-fpga FW_FPGA_TARGET=irqtest FW_FPGA_LOAD=main_ram
 	@$(MAKE) --no-print-directory fpga-upload BIN=$(BUILD_DIR)/firmware/fpga/irqtest-main_ram/boot.bin
 
@@ -816,12 +857,12 @@ app-llm-run: ## Run one app/ LLM benchmark in LiteX sim (BENCH=ops|infer|train) 
 $(APP_LLM_FPGAS): app-llm-%-fpga: app-llm-build-% ## Upload app/ LLM benchmark to FPGA via BIOS serialboot
 	@$(MAKE) --no-print-directory fpga-upload BIN=$(APP_LLM_BUILD_DIR)/llm-$*.bin
 
-app-llm-fpga: ## Upload one app/ LLM benchmark to FPGA (BENCH=ops|infer|train) {BENCH,UART_PORT,UART_BAUD}
+app-llm-fpga: ## Upload one app/ LLM benchmark to FPGA (BENCH=ops|infer|train) {BENCH,UART_PORT}
 	@if [ -z "$(BENCH)" ]; then echo "[ERR] Set BENCH=ops|infer|train"; exit 1; fi
 	@$(MAKE) --no-print-directory app-llm-$(BENCH)-fpga $(APP_LLM_VARS)
 
 APP_FPGA_BIN ?= ## Custom app-built LiteX-native binary for app-fpga-upload
-app-fpga-upload: ## Upload a prebuilt app LiteX-native bin via BIOS serialboot {APP_FPGA_BIN,UART_PORT,UART_BAUD}
+app-fpga-upload: ## Upload a prebuilt app LiteX-native bin via BIOS serialboot {APP_FPGA_BIN,UART_PORT}
 	@if [ -z "$(APP_FPGA_BIN)" ]; then echo "[ERR] Set APP_FPGA_BIN=/path/to.bin"; exit 1; fi
 	@$(MAKE) --no-print-directory fpga-upload BIN=$(APP_FPGA_BIN)
 
@@ -886,36 +927,48 @@ linux: ## Alias: make sim PAYLOAD=linux VARIANT=linux
 	@$(MAKE) --no-print-directory sim PAYLOAD=linux VARIANT=linux
 
 # ------------------------------------------------------------------------------
-# KU15P Linux/MIG FPGA helpers (set VARIANT=linux to activate the FPGA Linux
-# profile). The generic fpga-* targets pick up the KU15P Linux/MIG bitstream
-# behaviour automatically when VARIANT=linux is set on an FPGA goal
-# (board=mlk_cu07_ku15p, BOOT_MODE=bios, WITH_MIG=1, INTEGRATED_MAIN_RAM_SIZE=0,
-# SYS_CLK=50 MHz, UART_BAUD=115200, RAPT_CONFIG=default). The retired wrappers map
-# to:
-#   linux-fpga-build           -> make fpga-build VARIANT=linux
-#   linux-fpga-timing-ok       -> make fpga-timing-ok VARIANT=linux
-#   linux-fpga-load            -> make fpga VARIANT=linux            (build + load)
-#   linux-fpga-load-only       -> make fpga-load VARIANT=linux       (load, timing-gated)
-#   linux-fpga-flash           -> make fpga-build VARIANT=linux && make fpga-flash VARIANT=linux
-#   linux-fpga-console         -> make fpga-console VARIANT=linux
-#   linux-fpga-upload          -> make fpga-upload VARIANT=linux     (assemble + serialboot)
-#   linux-fpga-upload-bin      -> make fpga-upload VARIANT=linux BIN=/path/to.bin
-#   linux-fpga-app-upload      -> make app-fpga-upload VARIANT=linux APP_FPGA_BIN=...
-#   linux-fpga-coremark-upload -> make coremark-fpga VARIANT=linux
-#   linux-fpga-main-upload     -> make main-fpga VARIANT=linux
-#   linux-fpga                 -> make fpga VARIANT=linux && make fpga-upload VARIANT=linux
-# The targets below are the Linux-only image/upload helpers with no standard FPGA
-# analogue; each forces VARIANT=linux internally for its serialboot step.
+# KU15P Linux/MIG FPGA helpers. These wrappers force VARIANT=linux so callers do
+# not need to repeat the profile on every build/load/upload command. `*-run`
+# reloads an existing timing-clean bitstream before uploading software; `*-e2e`
+# builds the bitstream when stale, loads it, then uploads software.
 # ------------------------------------------------------------------------------
 
-fpga-opensbi-upload: fpga-opensbi-img ## Build/upload standalone linux/opensbi image through BIOS serialboot {UART_PORT,UART_BAUD,LINUX_FPGA_OPENSBI_PAYLOAD}
+linux-fpga-build: ## Build the timing-gated KU15P Linux/MIG bitstream
+	@$(MAKE) --no-print-directory fpga-build $(_LINUX_FPGA_ARGS)
+
+linux-fpga-load: ## Load the existing KU15P Linux/MIG bitstream
+	@$(MAKE) --no-print-directory fpga-load $(_LINUX_FPGA_ARGS)
+
+linux-fpga-upload: ## Upload the contiguous Linux image with litex_term (SD-boot fallback) {UART_PORT}
+	@$(MAKE) --no-print-directory fpga-upload $(_LINUX_FPGA_ARGS)
+
+linux-fpga-run: ## Load the existing bitstream, then upload OpenSBI + Linux {UART_PORT}
+	@$(MAKE) --no-print-directory fpga-load $(_LINUX_FPGA_ARGS)
+	@$(MAKE) --no-print-directory linux-fpga-upload
+
+linux-fpga-e2e: ## Build/load the bitstream, then upload OpenSBI + Linux {UART_PORT}
+	@$(MAKE) --no-print-directory fpga-build $(_LINUX_FPGA_ARGS)
+	@$(MAKE) --no-print-directory linux-fpga-run
+
+opensbi-fpga-upload: ## Upload standalone OpenSBI without rebuilding or reloading {UART_PORT}
+	@$(MAKE) --no-print-directory fpga-opensbi-upload $(_LINUX_FPGA_ARGS)
+
+opensbi-fpga-run: ## Load the existing bitstream, then upload standalone OpenSBI {UART_PORT}
+	@$(MAKE) --no-print-directory fpga-load $(_LINUX_FPGA_ARGS)
+	@$(MAKE) --no-print-directory opensbi-fpga-upload
+
+opensbi-fpga-e2e: ## Build/load the bitstream, then upload standalone OpenSBI {UART_PORT}
+	@$(MAKE) --no-print-directory fpga-build $(_LINUX_FPGA_ARGS)
+	@$(MAKE) --no-print-directory opensbi-fpga-run
+
+fpga-opensbi-upload: fpga-opensbi-img ## Build/upload standalone linux/opensbi image through BIOS serialboot {UART_PORT,LINUX_FPGA_OPENSBI_PAYLOAD}
 	@$(call _fpga_linux_upload,$(FW_LINUX_FPGA_OPENSBI_IMAGE))
 
-fpga-smoke-upload: fpga-smoke-img ## Upload tiny stage0-only image through BIOS serialboot {UART_PORT,UART_BAUD}
+fpga-smoke-upload: fpga-smoke-img ## Upload tiny stage0-only image through BIOS serialboot {UART_PORT}
 	@$(call _fpga_linux_upload,$(FW_LINUX_FPGA_SMOKE_IMAGE))
 
 fpga-smoke: ## Build/load Linux FPGA bitstream, then upload tiny stage0-only smoke image {UART_PORT,VIVADO}
-	@$(MAKE) --no-print-directory fpga VARIANT=linux
+	@$(MAKE) --no-print-directory fpga $(_LINUX_FPGA_ARGS)
 	@$(MAKE) --no-print-directory fpga-smoke-upload
 
 fpga-tinyos-prepare: ## Build TinyOS simulator artifacts for OS=egos|xv6 {OS,TINYOS_OS}
@@ -927,13 +980,31 @@ fpga-tinyos-prepare: ## Build TinyOS simulator artifacts for OS=egos|xv6 {OS,TIN
 	  *) echo "[ERR] Unsupported TinyOS OS '$$os' (use OS=egos or OS=xv6)"; exit 1 ;; \
 	esac
 
-fpga-egos-prepare: ## Build egos-ku15p.bin (RAM-disk, embedded disk.img, ready for serialboot upload)
+fpga-egos-prepare: ## Build egos kernel, disk.img, and legacy flat simulation image
 	@echo "[INFO] Building egos-2000 KU15P RAM-disk image via app/tinyos"
 	@$(MAKE) --no-print-directory -C $(RAPTOR_HOME)/app/tinyos egos-ku15p-image
 	@test -f "$(LINUX_FPGA_EGOS_KU15P_IMAGE)" || { echo "[ERR] Missing egos KU15P image: $(LINUX_FPGA_EGOS_KU15P_IMAGE)"; exit 1; }
-	@echo "[INFO] egos KU15P image: $(LINUX_FPGA_EGOS_KU15P_IMAGE)"
-	@sz=$$(stat -c%s "$(LINUX_FPGA_EGOS_KU15P_IMAGE)" 2>/dev/null); echo "[INFO]   size: $$sz bytes"
+	@test -f "$(LINUX_FPGA_EGOS_IMAGE)" || { echo "[ERR] Missing egos kernel: $(LINUX_FPGA_EGOS_IMAGE)"; exit 1; }
+	@test -f "$(LINUX_FPGA_EGOS_DISK)" || { echo "[ERR] Missing egos disk: $(LINUX_FPGA_EGOS_DISK)"; exit 1; }
+	@echo "[INFO] egos kernel: $(LINUX_FPGA_EGOS_IMAGE)"
+	@echo "[INFO] egos disk:   $(LINUX_FPGA_EGOS_DISK)"
 	@echo "[INFO]   upload: make fpga-egos-upload   (forces VARIANT=linux; UART $(UART_PORT) @ linux-profile baud)"
+
+fpga-egos-bundle: fpga-egos-prepare $(FW_EGOS_STAGE0_BIN) ## Build compact stage0+kernel+disk serialboot bundle
+	@stage_size=$$(stat -c%s "$(FW_EGOS_STAGE0_BIN)"); \
+	 kernel_size=$$(stat -c%s "$(LINUX_FPGA_EGOS_IMAGE)"); \
+	 disk_size=$$(stat -c%s "$(LINUX_FPGA_EGOS_DISK)"); \
+	 if [ $$stage_size -gt $$((0x1000)) ]; then echo "[ERR] egos stage0 exceeds 4 KiB: $$stage_size"; exit 1; fi; \
+	 if [ $$kernel_size -gt $$((0x10000)) ]; then echo "[ERR] egos kernel exceeds 64 KiB slot: $$kernel_size"; exit 1; fi; \
+	 if [ $$disk_size -ne $$((0x400000)) ]; then echo "[ERR] egos disk must be exactly 4 MiB: $$disk_size"; exit 1; fi; \
+	 cp "$(FW_EGOS_STAGE0_BIN)" "$(FW_EGOS_STAGE0_BUNDLE)"; \
+	 truncate -s $$((0x1000)) "$(FW_EGOS_STAGE0_BUNDLE)"; \
+	 cat "$(LINUX_FPGA_EGOS_IMAGE)" >> "$(FW_EGOS_STAGE0_BUNDLE)"; \
+	 truncate -s $$((0x11000)) "$(FW_EGOS_STAGE0_BUNDLE)"; \
+	 cat "$(LINUX_FPGA_EGOS_DISK)" >> "$(FW_EGOS_STAGE0_BUNDLE)"; \
+	 bundle_size=$$(stat -c%s "$(FW_EGOS_STAGE0_BUNDLE)"); \
+	 echo "[INFO] Compact egos bundle: $(FW_EGOS_STAGE0_BUNDLE) ($$bundle_size bytes)"; \
+	 echo "[INFO]   stage0 @ $(LINUX_FPGA_EGOS_STAGE_ADDR), kernel -> 0x80000000, disk -> 0x80800000"
 
 fpga-xv6-prepare: ## Build xv6 kernel.bin and fs.img used by TinyOS xv6 checks
 	@echo "[INFO] Building xv6-riscv kernel.bin and fs.img via app/tinyos"
@@ -943,16 +1014,16 @@ fpga-xv6-prepare: ## Build xv6 kernel.bin and fs.img used by TinyOS xv6 checks
 	@echo "[INFO] xv6 kernel: $(LINUX_FPGA_XV6_KERNEL)"
 	@echo "[INFO] xv6 disk:   $(LINUX_FPGA_XV6_DISK)"
 
-fpga-tinyos-check: ## Explain TinyOS FPGA serialboot compatibility for OS=egos|xv6 {OS,TINYOS_OS,LINUX_FPGA_TINYOS_FORCE_RAW}
+fpga-tinyos-check: ## Explain TinyOS FPGA serialboot compatibility for OS=egos|xv6 {OS,TINYOS_OS}
 	@os="$(LINUX_FPGA_TINYOS_OS)"; \
 	if [ -z "$$os" ]; then echo "[ERR] Set OS=egos|xv6 or TINYOS_OS=egos|xv6"; exit 1; fi; \
 	case "$$os" in \
 	  egos) \
-		echo "[INFO] egos-2000 KU15P RAM-disk image is ready for serialboot upload."; \
-		echo "      Image: $(LINUX_FPGA_EGOS_KU15P_IMAGE)"; \
+		echo "[INFO] egos-2000 KU15P compact bundle is ready for serialboot upload."; \
+		echo "      Bundle: $(FW_EGOS_STAGE0_BUNDLE)"; \
 		echo "      Build: make fpga-egos-prepare"; \
 		echo "      Upload: make fpga-egos-upload UART_PORT=$(UART_PORT) UART_BAUD=$(UART_BAUD)"; \
-		echo "      The image embeds disk.img at 0x81000000 and fixes UART/CLINT for KU15P LiteX."; \
+		echo "      Stage0 restores egos at 0x80000000 and disk.img at 0x80800000."; \
 		;; \
 	  xv6) \
 		echo "[ERR] xv6-riscv artifacts are prepared, but they cannot run on the current KU15P Linux/MIG bitstream."; \
@@ -971,17 +1042,30 @@ fpga-tinyos-check: ## Explain TinyOS FPGA serialboot compatibility for OS=egos|x
 	  *) echo "[ERR] Unsupported TinyOS OS '$$os' (use OS=egos or OS=xv6)"; exit 1 ;; \
 	esac
 
-fpga-tinyos-upload: ## Guarded TinyOS upload entry; dispatches OS=egos|xv6 {OS,TINYOS_OS,LINUX_FPGA_TINYOS_FORCE_RAW}
+fpga-tinyos-upload: ## Guarded TinyOS upload entry; dispatches OS=egos|xv6 {OS,TINYOS_OS}
 	@os="$(LINUX_FPGA_TINYOS_OS)"; \
 	if [ -z "$$os" ]; then echo "[ERR] Set OS=egos|xv6 or TINYOS_OS=egos|xv6"; exit 1; fi; \
 	case "$$os" in \
-	  egos) $(MAKE) --no-print-directory fpga-egos-upload LINUX_FPGA_TINYOS_FORCE_RAW=$(LINUX_FPGA_TINYOS_FORCE_RAW) ;; \
+	  egos) $(MAKE) --no-print-directory fpga-egos-upload ;; \
 	  xv6)  $(MAKE) --no-print-directory fpga-xv6-upload ;; \
 	  *) echo "[ERR] Unsupported TinyOS OS '$$os' (use OS=egos or OS=xv6)"; exit 1 ;; \
 	esac
 
-fpga-egos-upload: fpga-egos-prepare ## Build and upload KU15P egos RAM-disk image through BIOS serialboot {UART_PORT,UART_BAUD}
-	@$(call _fpga_linux_upload,$(LINUX_FPGA_EGOS_KU15P_IMAGE))
+fpga-egos-upload: fpga-egos-bundle ## Upload compact KU15P egos bundle through LiteX BIOS serialboot {UART_PORT}
+	@$(MAKE) --no-print-directory fpga-upload $(_LINUX_FPGA_ARGS) \
+		BIN=$(FW_EGOS_STAGE0_BUNDLE) MAIN_RAM_BASE=$(LINUX_FPGA_EGOS_STAGE_ADDR)
+
+RAPTOS_KU15P_BIN := $(RAPTOR_HOME)/app/tinyos/raptos/build/ku15p/raptos.bin
+
+fpga-raptos-build: ## Build the single RaptOS image with all built-in U-mode payload commands
+	@$(MAKE) --no-print-directory -C $(RAPTOR_HOME)/app/tinyos/raptos all PLATFORM=ku15p
+
+fpga-raptos-upload: fpga-raptos-build ## Build and upload RaptOS with payload commands through the loaded KU15P BIOS {UART_PORT}
+	@$(MAKE) --no-print-directory fpga-upload $(_LINUX_FPGA_ARGS) \
+		BIN=$(RAPTOS_KU15P_BIN) MAIN_RAM_BASE=$(MAIN_RAM_BASE)
+
+fpga-raptos-run: ## Build, upload, and attach to the interactive RaptOS shell {UART_PORT}
+	@$(MAKE) --no-print-directory fpga-raptos-upload $(_LINUX_FPGA_ARGS)
 
 fpga-xv6-upload: fpga-xv6-prepare ## Prepare xv6, then explain why current Linux/MIG bitstream refuses it
 	@$(MAKE) --no-print-directory fpga-tinyos-check OS=xv6
@@ -1011,6 +1095,12 @@ endif
 ifneq (,$(filter 1 yes true on,$(WITH_MIG)))
 FPGA_FLAVOR    := $(FPGA_FLAVOR)-mig
 endif
+ifneq (,$(filter 1 yes true on,$(WITH_SDCARD)))
+FPGA_FLAVOR    := $(FPGA_FLAVOR)-sdcard
+endif
+ifneq (,$(filter 1 yes true on,$(SDCARD_BOOT)))
+FPGA_FLAVOR    := $(FPGA_FLAVOR)-boot
+endif
 ifneq ($(VARIANT),standard)
 FPGA_FLAVOR    := $(FPGA_FLAVOR)-$(RAPT_CONFIG)
 endif
@@ -1020,7 +1110,7 @@ ifneq ($(FPGA_FLAVOR_SUFFIX),)
 FPGA_FLAVOR    := $(FPGA_FLAVOR)-$(FPGA_FLAVOR_SUFFIX)
 endif
 FPGA_DIR       := $(BUILD_DIR)/$(FPGA_BOARD)/$(FPGA_FLAVOR)
-FPGA_GW_DIR    := $(FPGA_DIR)/gateware
+FPGA_BUILD_DIR    := $(FPGA_DIR)/gateware
 
 # fpga-build shells out to `$(MAKE) fpga-reports-index`; that sub-make would
 # otherwise re-derive the FPGA profile from scratch and (since fpga-reports-index
@@ -1028,9 +1118,9 @@ FPGA_GW_DIR    := $(FPGA_DIR)/gateware
 # look in the wrong build dir -- e.g. bios/gateware instead of
 # bios-linux-mig-default/gateware -- and warn "not found". Pin the resolved dir,
 # board (=> vendor) and boot mode so the sub-make targets exactly what was built.
-_FPGA_REPORTS_INDEX_ARGS = FPGA_GW_DIR="$(FPGA_GW_DIR)" FPGA_BOARD="$(FPGA_BOARD)" BOOT_MODE="$(BOOT_MODE)"
+_FPGA_REPORTS_INDEX_ARGS = FPGA_BUILD_DIR="$(FPGA_BUILD_DIR)" FPGA_BOARD="$(FPGA_BOARD)" BOOT_MODE="$(BOOT_MODE)"
 
-FPGA_BITSTREAM := $(FPGA_GW_DIR)/$(BOARD_$(FPGA_BOARD)_BITNAME)
+FPGA_BITSTREAM := $(FPGA_BUILD_DIR)/$(BOARD_$(FPGA_BOARD)_BITNAME)
 
 ifneq ($(strip $(GOWIN_APP)),)
 	GOWIN_BIN_DIR := $(GOWIN_APP)/Contents/Resources/Gowin_EDA/IDE/bin
@@ -1038,7 +1128,11 @@ ifneq ($(strip $(GOWIN_APP)),)
 endif
 
 VIVADO       ?= vivado ## Vivado executable (Xilinx KU15P flow)
+VIVADO_JOBS  ?= $(NPROC) ## Maximum Vivado worker threads
+VIVADO_INCREMENTAL ?= 0 ## Set to 1 to reuse a compatible routed checkpoint
 VIVADO := $(strip $(VIVADO))
+VIVADO_JOBS := $(strip $(VIVADO_JOBS))
+VIVADO_INCREMENTAL := $(strip $(VIVADO_INCREMENTAL))
 
 OFL          ?= openFPGALoader ## openFPGALoader binary
 OFL_CABLE    ?= ft2232 ## openFPGALoader cable (ft2232 for Tang Mega Pro on-board debugger)
@@ -1048,7 +1142,7 @@ OFL_CABLE := $(strip $(OFL_CABLE))
 ifeq ($(FPGA_VENDOR),vivado)
 FPGA_LOAD_TOOL_CHECK = command -v $(VIVADO) >/dev/null 2>&1 || { echo "[ERR] $(VIVADO) not found on PATH — source settings64.sh"; exit 1; }
 FPGA_LOAD_CMD  = $(VIVADO) -mode batch -nojournal -nolog -source $(LITEX_DIR)/scripts/vivado_load.tcl -tclargs $(FPGA_BITSTREAM)
-FPGA_FLASH_CMD = $(VIVADO) -mode batch -nojournal -nolog -source $(LITEX_DIR)/scripts/vivado_flash.tcl -tclargs $(FPGA_BITSTREAM) $(FPGA_GW_DIR)
+FPGA_FLASH_CMD = $(VIVADO) -mode batch -nojournal -nolog -source $(LITEX_DIR)/scripts/vivado_flash.tcl -tclargs $(FPGA_BITSTREAM) $(FPGA_BUILD_DIR)
 else
 FPGA_LOAD_TOOL_CHECK = command -v $(OFL) >/dev/null 2>&1 || { echo "[ERR] openFPGALoader not found"; exit 1; }
 FPGA_LOAD_CMD  = $(OFL) --cable $(OFL_CABLE) --bitstream $(FPGA_BITSTREAM)
@@ -1062,6 +1156,9 @@ LITEDRAM_SIZE_FLAG := $(if $(WITH_LITEDRAM_FLAG),--litedram-size=$(LITEDRAM_SIZE
 
 WITH_MIG_FLAG := $(if $(filter 1 yes true on,$(WITH_MIG)),--with-mig,)
 MIG_SIZE_FLAG := $(if $(WITH_MIG_FLAG),--mig-size=$(MIG_SIZE),)
+WITH_SDCARD_FLAG := $(if $(filter 1 yes true on,$(WITH_SDCARD)),--with-sdcard,)
+SDCARD_BOOT_FLAG := $(if $(filter 1 yes true on,$(SDCARD_BOOT)),--sdcard-boot,)
+VIVADO_INCREMENTAL_FLAG := $(if $(filter 1 yes true on,$(VIVADO_INCREMENTAL)),--vivado-incremental,)
 
 ifneq ($(WITH_LITEDRAM_FLAG),)
 ifneq ($(WITH_MIG_FLAG),)
@@ -1079,11 +1176,12 @@ endif
 
 _FPGA_FLAGS = --output-dir=$(FPGA_DIR) \
 	--cpu-variant=$(VARIANT) --sys-clk-freq=$(SYS_CLK) \
+	--vivado-max-threads=$(VIVADO_JOBS) $(VIVADO_INCREMENTAL_FLAG) \
 	--uart-baudrate=$(UART_BAUD) \
 	$(_FPGA_BOOT_FLAGS) \
 	$(_MAIN_RAM_FLAG) \
 	$(WITH_LED_CHASER_FLAG) $(WITH_LITEDRAM_FLAG) $(LITEDRAM_SIZE_FLAG) \
-	$(WITH_MIG_FLAG) $(MIG_SIZE_FLAG) $(EXTRA_FLAGS)
+	$(WITH_MIG_FLAG) $(MIG_SIZE_FLAG) $(WITH_SDCARD_FLAG) $(SDCARD_BOOT_FLAG) $(EXTRA_FLAGS)
 
 FPGA_STAMP    := $(FPGA_DIR)/.bitstream_stamp
 _FPGA_HASH_COMMON_INPUTS = $(PACK_SV) $(FPGA_PY) $(if $(WITH_MIG_FLAG),$(LITEX_DIR)/scripts/ku15p_ddr4_mig.tcl,)
@@ -1103,7 +1201,7 @@ fpga-gen: $(PACK_SV) $(_FPGA_FW_DEP) ## Generate FPGA SoC sources only (no PnR) 
 	trap '[ "$(BOOT_MODE)" = "bios" ] && { $(call _litex_bios_patches_restore); } || true' EXIT; \
 	source $(VENV_DIR)/bin/activate && \
 	$(PYTHON) $(FPGA_PY) $(_FPGA_FLAGS) --build --no-compile-gateware
-	@echo "[INFO] Sources generated under $(FPGA_GW_DIR) (BOOT_MODE=$(BOOT_MODE))"
+	@echo "[INFO] Sources generated under $(FPGA_BUILD_DIR) (BOOT_MODE=$(BOOT_MODE))"
 
 fpga-build: $(PACK_SV) $(_FPGA_FW_DEP) ## Build FPGA bitstream (synth + P&R) {BOOT_MODE,FPGA_BOARD,RAPT_CONFIG,INTEGRATED_MAIN_RAM_SIZE,WITH_LED_CHASER}
 ifeq ($(FPGA_VENDOR),gowin)
@@ -1148,35 +1246,35 @@ ifeq ($(LINUX_FPGA_PROFILE),1)
 endif
 
 GOWIN_REPORTS_INDEX_SRC  := $(LITEX_DIR)/scripts/reports_index.html
-GOWIN_REPORTS_INDEX_DST  := $(FPGA_GW_DIR)/impl/index.html
+GOWIN_REPORTS_INDEX_DST  := $(FPGA_BUILD_DIR)/impl/index.html
 VIVADO_REPORTS_INDEX_GEN := $(LITEX_DIR)/scripts/vivado_reports_index.py
-VIVADO_REPORTS_INDEX_DST := $(FPGA_GW_DIR)/index.html
+VIVADO_REPORTS_INDEX_DST := $(FPGA_BUILD_DIR)/index.html
 
 fpga-reports-index: ## Generate/install aggregated FPGA report HTML dashboard
 ifeq ($(FPGA_VENDOR),gowin)
-	@if [ -d "$(FPGA_GW_DIR)/impl" ]; then \
+	@if [ -d "$(FPGA_BUILD_DIR)/impl" ]; then \
 		cp $(GOWIN_REPORTS_INDEX_SRC) $(GOWIN_REPORTS_INDEX_DST); \
 		echo "[INFO] Reports index: $(GOWIN_REPORTS_INDEX_DST)"; \
 	else \
-		echo "[WARN] $(FPGA_GW_DIR)/impl not found — run 'make fpga-build' first."; \
+		echo "[WARN] $(FPGA_BUILD_DIR)/impl not found — run 'make fpga-build' first."; \
 	fi
 else
-	@if [ -d "$(FPGA_GW_DIR)" ]; then \
-		if ls "$(FPGA_GW_DIR)"/*.rpt >/dev/null 2>&1; then \
-			$(HOST_PYTHON) $(VIVADO_REPORTS_INDEX_GEN) $(FPGA_GW_DIR) \
+	@if [ -d "$(FPGA_BUILD_DIR)" ]; then \
+		if ls "$(FPGA_BUILD_DIR)"/*.rpt >/dev/null 2>&1; then \
+			$(HOST_PYTHON) $(VIVADO_REPORTS_INDEX_GEN) $(FPGA_BUILD_DIR) \
 				--output $(VIVADO_REPORTS_INDEX_DST) \
 				--title "Vivado Reports - $(FPGA_BOARD) $(BOOT_MODE) $(RAPT_CONFIG)"; \
 		else \
-			echo "[WARN] no Vivado .rpt files under $(FPGA_GW_DIR) — run 'make fpga-build' first."; \
+			echo "[WARN] no Vivado .rpt files under $(FPGA_BUILD_DIR) — run 'make fpga-build' first."; \
 		fi; \
 	else \
-		echo "[WARN] $(FPGA_GW_DIR) not found — run 'make fpga-build' first."; \
+		echo "[WARN] $(FPGA_BUILD_DIR) not found — run 'make fpga-build' first."; \
 	fi
 endif
 
 fpga-timing-ok: ## Check FPGA timing report before hardware load/flash {FPGA_BOARD,BOOT_MODE,RAPT_CONFIG}
 ifeq ($(FPGA_VENDOR),vivado)
-	@rpt="$(FPGA_GW_DIR)/$(FPGA_TIMINGRPT)"; \
+	@rpt="$(FPGA_BUILD_DIR)/$(FPGA_TIMINGRPT)"; \
 	if [ ! -f "$$rpt" ]; then \
 		echo "[ERR] Vivado timing report not found: $$rpt"; \
 		echo "[ERR] Run 'make fpga-build' first."; \
@@ -1227,7 +1325,7 @@ mlk-cu07-ku15p: ## Build + load on MLK-CU07-KU15P (Vivado) {BOOT_MODE,RAPT_CONFI
 mlk-cu07-ku15p-build: ## Build bitstream only on MLK-CU07-KU15P (Vivado) {BOOT_MODE,RAPT_CONFIG}
 	@$(MAKE) --no-print-directory fpga-build FPGA_BOARD=mlk_cu07_ku15p
 
-fpga-console: ## Open serial terminal on the FPGA UART (Ctrl-A K to quit) {UART_PORT,UART_BAUD}
+fpga-console: ## Open serial terminal on the FPGA UART at fixed 115200 baud (Ctrl-A K to quit) {UART_PORT}
 	@if [ -z "$(UART_PORT)" ]; then \
 		echo "[ERR] UART_PORT empty — plug in the board or set UART_PORT=/dev/tty.usbserial-XXXX"; exit 1; fi
 	@command -v lm.flterm >/dev/null 2>&1 || command -v litex_term >/dev/null 2>&1 || true
@@ -1235,9 +1333,9 @@ fpga-console: ## Open serial terminal on the FPGA UART (Ctrl-A K to quit) {UART_
 	source $(VENV_DIR)/bin/activate && \
 	litex_term --speed=$(UART_BAUD) $(UART_PORT)
 
-# fpga-upload payload defaults + Linux-profile serialboot prerequisites: in the
-# Linux profile with no BIN, assemble + timing-gate the stage0+OpenSBI+DTB image;
-# with BIN set, just timing-gate the raw upload.
+# fpga-upload payload defaults + Linux-profile serialboot prerequisites. Linux
+# uses the existing contiguous stage0+OpenSBI+DTB image so every upload can use
+# LiteX's maintained litex_term implementation. BIN=... selects a raw image.
 ifeq ($(LINUX_FPGA_PROFILE),1)
 _FPGA_UPLOAD_DEFAULT_BIN := $(FW_LINUX_FPGA_IMAGE)
 ifeq ($(strip $(BIN)),)
@@ -1249,7 +1347,8 @@ else
 _FPGA_UPLOAD_DEFAULT_BIN := $(FW_FPGA_BIN)
 endif
 
-fpga-upload: ## Upload a firmware bin to main_ram via BIOS serialboot (no PnR; linux profile assembles the stage0+OpenSBI+DTB image when BIN is unset) {MAIN_RAM_BASE,UART_PORT,UART_BAUD,SERIALBOOT_SAFE,BIN}
+fpga-upload: ## Upload one firmware image via LiteX serialboot at fixed 115200 baud {MAIN_RAM_BASE,UART_PORT,SERIALBOOT_SAFE,BIN}
+fpga-upload:
 	@if [ -z "$(UART_PORT)" ]; then \
 		echo "[ERR] UART_PORT empty — set UART_PORT=/dev/tty.usbserial-XXXX"; exit 1; fi
 	@bin="$(BIN)"; [ -z "$$bin" ] && bin="$(_FPGA_UPLOAD_DEFAULT_BIN)"; \
@@ -1283,7 +1382,7 @@ clean-all: clean firmware-clean ## Remove build artifacts + firmware + venv
 lint: ## Lint RTL (via sim)
 	$(MAKE) -C $(RAPTOR_HOME) lint
 
-_INFO_VARS := RAPTOR_HOME LITEX_DIR VARIANT SYS_CLK RAPT_CONFIG GOWIN_APP GOWIN_BIN_DIR OFL OFL_CABLE WITH_LITEDRAM LITEDRAM_SIZE WITH_MIG MIG_SIZE UART_PORT SIM_TIMEOUT PACK_SV BUILD_DIR PYTHON
+_INFO_VARS := RAPTOR_HOME LITEX_DIR VARIANT SYS_CLK RAPT_CONFIG GOWIN_APP GOWIN_BIN_DIR OFL OFL_CABLE WITH_LITEDRAM LITEDRAM_SIZE WITH_MIG MIG_SIZE WITH_SDCARD SDCARD_BOOT UART_PORT UART_BAUD SIM_TIMEOUT PACK_SV BUILD_DIR PYTHON
 
 info: ## Show configuration info
 	@$(foreach v,$(_INFO_VARS),echo "$v = $($v)";)
@@ -1292,8 +1391,8 @@ info: ## Show configuration info
 	@echo "SOC          = $(SOC)"
 	@echo "PAYLOAD      = $(PAYLOAD)"
 	@echo "SIM_DIR      = $(SIM_DIR)"
-	@echo "SIM_GW_DIR   = $(SIM_GW_DIR)"
-	@echo "VSIM         = $(SIM_GW_DIR)/obj_dir/Vsim (exists: $(shell test -f $(SIM_GW_DIR)/obj_dir/Vsim && echo yes || echo no))"
+	@echo "SIM_BUILD_DIR   = $(SIM_BUILD_DIR)"
+	@echo "VSIM         = $(SIM_BUILD_DIR)/obj_dir/Vsim (exists: $(shell test -f $(SIM_BUILD_DIR)/obj_dir/Vsim && echo yes || echo no))"
 	@echo "---- fpga ----"
 	@echo "FPGA_BOARD   = $(FPGA_BOARD)"
 	@echo "FPGA_DIR     = $(FPGA_DIR)"
@@ -1303,22 +1402,25 @@ info: ## Show configuration info
 	@echo "---- linux fpga profile ----"
 	@echo "LINUX_FPGA_PROFILE = $(LINUX_FPGA_PROFILE)"
 	@echo "LINUX_FPGA_RAM_SIZE= $(LINUX_FPGA_RAM_SIZE)"
-	@echo "LINUX_FPGA_TIMEBASE= $(LINUX_FPGA_TIMEBASE)"
 	@echo "LINUX_FPGA_PAYLOAD = $(LINUX_FPGA_PAYLOAD)"
 	@echo "LINUX_FPGA_IMAGE   = $(FW_LINUX_FPGA_IMAGE) (exists: $(shell test -f $(FW_LINUX_FPGA_IMAGE) && echo yes || echo no))"
 
 help: ## Show this help message
 	@echo "Usage: make <target> [VAR=value ...]"
-	@awk -v file="$(MAKEFILE_LIST)" 'BEGIN { \
-			while ((getline line < file) > 0) { \
-				if (match(line, /^[A-Z_][A-Z_0-9]*[ \t]*\?=/)) { \
-					name = substr(line, 1, RLENGTH); sub(/[ \t]*\?=$$/, "", name); \
-					rest = substr(line, RLENGTH+1); \
-					sub(/^[ \t]+/, "", rest); sub(/[ \t]*##.*/, "", rest); sub(/[ \t]+$$/, "", rest); \
-					if (!(name in defaults)) defaults[name] = rest; \
+	@awk -v files="$(MAKEFILE_LIST)" 'BEGIN { \
+			nfiles=split(files, filelist, /[ \t]+/); \
+			for (file_idx=1; file_idx<=nfiles; file_idx++) { \
+				file=filelist[file_idx]; \
+				while ((getline line < file) > 0) { \
+					if (match(line, /^[A-Z_][A-Z_0-9]*[ \t]*\?=/)) { \
+						name = substr(line, 1, RLENGTH); sub(/[ \t]*\?=$$/, "", name); \
+						rest = substr(line, RLENGTH+1); \
+						sub(/^[ \t]+/, "", rest); sub(/[ \t]*##.*/, "", rest); sub(/[ \t]+$$/, "", rest); \
+						if (!(name in defaults)) defaults[name] = rest; \
+					} \
 				} \
+				close(file); \
 			} \
-			close(file); \
 			state=0; pending=""; first_target=1 \
 		} \
 		/^# =+$$/ { \
@@ -1361,6 +1463,7 @@ help: ## Show this help message
 				gsub(/^[ \t]+|[ \t]+$$/, "", a[1]); gsub(/^[ \t]+|[ \t]+$$/, "", a[2]); \
 				if (a[2] != "") printf "  %-20s (default: %s)\n", a[1], a[2] } }'
 	@echo ""
+	@echo "Workflow guide: $(LITEX_DIR)/README.md"
 
 # ==============================================================================
 # PHONY declarations
@@ -1377,14 +1480,17 @@ help: ## Show this help message
 	$(APP_LLM_TARGETS) $(APP_LLM_BUILDS) $(APP_LLM_FPGAS) \
 	microbench microbench-build \
 	tests tests-clean tests-run $(TEST_TARGETS) \
-	opensbi opensbi-build opensbi-clean \
+	opensbi opensbi-build opensbi-clean fpga-opensbi-jump-build \
 	payload \
 	linux linux-build \
 	bios \
+	linux-fpga-build linux-fpga-load linux-fpga-upload linux-fpga-run linux-fpga-e2e \
+	opensbi-fpga-upload opensbi-fpga-run opensbi-fpga-e2e \
 	fpga-gen fpga-build fpga-build-force fpga-load fpga-flash fpga fpga-console fpga-upload fpga-clean fpga-detect fpga-reports-index fpga-timing-ok \
 	fpga-img fpga-smoke-img fpga-opensbi-img \
 	fpga-smoke fpga-smoke-upload fpga-opensbi-upload \
-	fpga-egos-prepare fpga-egos-upload fpga-xv6-prepare fpga-xv6-upload \
+	fpga-egos-prepare fpga-egos-bundle fpga-egos-upload fpga-xv6-prepare fpga-xv6-upload \
+	fpga-raptos-build fpga-raptos-upload fpga-raptos-run \
 	fpga-tinyos-prepare fpga-tinyos-check fpga-tinyos-upload \
 	tang-mega-138k-pro \
 	mlk-cu07-ku15p mlk-cu07-ku15p-build \

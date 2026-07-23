@@ -76,7 +76,7 @@ jobs:
           # with bin/, include/, share/. Strip it so binary lands directly in
           # $GITHUB_WORKSPACE/sail-riscv/bin/sail_riscv_sim.
           mkdir -p "$GITHUB_WORKSPACE/sail-riscv"
-          curl -L https://github.com/riscv/sail-riscv/releases/download/0.11/sail-riscv-Linux-x86_64.tar.gz \
+          curl -L https://github.com/riscv/sail-riscv/releases/download/0.12/sail-riscv-Linux-x86_64.tar.gz \
             | tar -xz -C "$GITHUB_WORKSPACE/sail-riscv" --strip-components=1
           ls -al "$GITHUB_WORKSPACE/sail-riscv/bin"
           echo "$GITHUB_WORKSPACE/sail-riscv/bin" >> "$GITHUB_PATH"
@@ -238,7 +238,7 @@ jobs:
       - name: Boot Linux on NPC with difftest
         shell: bash -l {0}
         run: |
-          make linux-boot-npc32-difftest ARGS="-b -n" MAX_INST=120000000 \
+          make linux-boot-npc32-difftest ARGS="-b -n" MAX_INST=160000000 \
             2>&1 | tee /tmp/linux-boot.log || true
       - name: Linux boot summary
         run: |
@@ -266,6 +266,7 @@ jobs:
           bash .github/scripts/parse-pmu.sh \
             "Linux Boot NPC" /tmp/linux-boot.log \
             >> "$GITHUB_STEP_SUMMARY"
+          python3 verify/scripts/check_linux_boot.py /tmp/linux-boot.log
       - name: Pack RTL into single file
         shell: bash -l {0}
         run: make pack

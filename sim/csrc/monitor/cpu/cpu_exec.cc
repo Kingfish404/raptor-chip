@@ -22,6 +22,8 @@ extern VerilatedContext *contextp;
 extern TOP_NAME *top;
 extern VerilatedFstC *tfp;
 void serial_tick();
+unsigned serial_rx_pending();
+const char *serial_input_source();
 
 extern void (*ref_difftest_exec)(uint64_t n);
 extern long long int max_timeout;
@@ -205,12 +207,15 @@ void cpu_exec(uint64_t n)
     cur_inst_cycle++;
     progress_cycle++;
     if ((progress_cycle & 0x3ffu) == 0)
-      serial_tick();
+    {
+        serial_tick();
+    }
     if (progress_cycle % progress_interval == 0)
     {
-      Log("progress: %016llu cycles, %016llu insts, pc=" FMT_WORD_NO_PREFIX,
+        Log("progress: %016llu cycles, %016llu insts, pc=" FMT_WORD_NO_PREFIX
+          ", uart_rx=%u, input=%s",
           (unsigned long long)progress_cycle, (unsigned long long)pmu.instr_cnt,
-          (word_t)(*npc.pc));
+          (word_t)(*npc.pc), serial_rx_pending(), serial_input_source());
       // LightSSS: fork a COW snapshot at this rewind point. The previous
       // snapshot (window was clean) is reaped here.
       lightsss_fork_at_progress();
@@ -234,7 +239,8 @@ void cpu_exec(uint64_t n)
       npc.state = NPC_ABORT;
       break;
     }
-    if (*(uint8_t *)&VERILOG_CPU(cmu__DOT__valid))
+    uint8_t cmu_valid = *(uint8_t *)&VERILOG_CPU(cmu__DOT__valid);
+    if (cmu_valid)
     {
       perf_sample_per_inst();
       cur_inst_cycle = 0;
@@ -246,14 +252,14 @@ void cpu_exec(uint64_t n)
       word_t flow_next_a = cmu_valid_b ? cmu_rpc_b : cmu_npc_a;
       /* Checkpoint load/PC trigger hooks use registered per-slot commit PCs
        * so dual-commit slot 0 is visible to the simulator. */
-      checkpoint_load_post_trampoline_tick(cmu_rpc_a);
+      bool checkpoint_resumed = checkpoint_load_post_trampoline_tick(cmu_rpc_a);
       checkpoint_note_commit(cmu_rpc_a);
       flow_check_commit(cmu_rpc_a, flow_next_a, 'A');
       if (npc.state != NPC_RUNNING)
         break;
       if (cmu_valid_b)
       {
-        checkpoint_load_post_trampoline_tick(cmu_rpc_b);
+        checkpoint_resumed |= checkpoint_load_post_trampoline_tick(cmu_rpc_b);
         checkpoint_note_commit(cmu_rpc_b);
         flow_check_commit(cmu_rpc_b, cmu_npc_b, 'B');
         if (npc.state != NPC_RUNNING)
@@ -271,10 +277,18 @@ void cpu_exec(uint64_t n)
       // function pointers NULL. Skip all REF interactions in that case so the
       // simulator can still run pk-based / coverage workloads against REFs
       // that don't model paging or delegation identically.
-      extern bool difftest_is_enabled();
       if (!difftest_is_enabled())
       {
         // Still need to clear any pending memdiff bookkeeping below.
+        goto skip_difftest_block;
+      }
+      if (checkpoint_resumed)
+      {
+        difftest_checkpoint_resync();
+        goto skip_difftest_block;
+      }
+      if (checkpoint_load_pending())
+      {
         goto skip_difftest_block;
       }
       // Mirror live external IRQ line into REF's mip[MEIP] before stepping,
@@ -374,6 +388,17 @@ void cpu_exec(uint64_t n)
       }
       npc.last_inst = *(npc.inst);
     }
+#ifdef CONFIG_DIFFTEST
+    // An interrupt captured while the ROB is empty has no commit pulse on
+    // which to synchronize REF. Inject it directly before the first handler
+    // instruction commits; commit-associated interrupts are handled above.
+    if (!cmu_valid && difftest_is_enabled() &&
+        *(uint8_t *)&VERILOG_ROU(recieved_trap))
+    {
+      word_t cause = *(word_t *)&VERILOG_ROU(trap_cause);
+      difftest_raise_intr(cause);
+    }
+#endif
     if (checkpoint_save_tick())
     {
       Log("checkpoint: --ckpt-save-exit set, ending simulation.");

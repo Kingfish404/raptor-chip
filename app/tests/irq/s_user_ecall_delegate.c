@@ -54,7 +54,7 @@ void s_trap_handler(void) {
     TEST_ASSERT((status & MSTATUS_SPP) == 0, "delegated U trap did not clear SPP");
 
     s_ecall_count++;
-    if (s_ecall_count == 2) test_pass();
+    if (s_ecall_count == 257) test_pass();
 
     csr_write(sepc, csr_read(sepc) + 4);
 }
@@ -112,8 +112,15 @@ __asm__(
 "  ecall\n"
 "  j user_s_stage\n"
 "user_s_stage:\n"
+"  li    t0, 257\n"
+"2:\n"
+"  li    a0, 1\n"
+"  li    a1, 0x111dc\n"
+"  li    a2, 1\n"
+"  li    a7, 64\n"
 "  ecall\n"
-"  ecall\n"
+"  addi  t0, t0, -1\n"
+"  bnez  t0, 2b\n"
 "1:\n"
 "  j 1b\n"
 );

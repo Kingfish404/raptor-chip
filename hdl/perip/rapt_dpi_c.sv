@@ -11,6 +11,7 @@ import "DPI-C" function void npc_difftest_skip_ref();
 // equivalent of the legacy `*npc.plic_pending |= ...` backdoor; only used by
 // sim/rtl/ TB wrappers to drive `ext_irq_i[]` on rapt.sv.
 import "DPI-C" function void npc_consume_ext_irq_vector(output int rdata);
+import "DPI-C" function int unsigned npc_mem_random_delay();
 
 `ifdef RAPT_RV64
 import "DPI-C" function void npc_difftest_mem_diff(

@@ -27,9 +27,10 @@ $(shell rm -rf ./build)
 $(shell mkdir -p ./build && printf '%s' '$(ISA64)' > $(ISA_STAMP))
 endif
 
-CFLAGS = -g -O2 -MMD -Wall \
+CFLAGS = -g -O2 -MMD -Wall -fno-pie \
 	-fno-asynchronous-unwind-tables -fno-builtin -fno-stack-protector \
 	-nostartfiles -ffreestanding $(COMMON_CFLAGS) -nostdlib
+LDFLAGS = -no-pie -Wl,-Ttext=0 -Wl,-e,_start
 
 all: $(IMAGE).elf $(IMAGE).bin ## Build MROM data (elf + bin)
 

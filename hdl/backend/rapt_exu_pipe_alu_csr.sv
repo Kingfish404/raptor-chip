@@ -43,9 +43,9 @@ module rapt_exu_pipe_alu_csr #(
       .out_r(alu_result)
   );
 
-  // Jump target: base = op1 for JALR (jen + register base), else PC.
+    // Jump target: base = op1 for JALR (jren + register base), else PC.
   logic [XLEN-1:0] jump_target;
-  assign jump_target = ((iss.jen ? iss.op1 : iss.pc) + iss.imm) & ~'b1;
+    assign jump_target = ((iss.jren ? iss.op1 : iss.pc) + iss.imm) & ~'b1;
 
   // CSR read + write-strobe data
   logic [XLEN-1:0] csr_wdata;

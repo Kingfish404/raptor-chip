@@ -87,6 +87,21 @@ _io = [
         IOStandard("LVCMOS33"),
     ),
 
+    # On-board microSD socket in 4-bit SD mode (Bank 66, 1.8 V).
+    (
+        "sdcard",
+        0,
+        Subsignal("clk", Pins("B9")),
+        Subsignal("cmd", Pins("A10"), Misc("PULLTYPE PULLUP")),
+        Subsignal(
+            "data",
+            Pins("B11 A9 C8 B10"),
+            Misc("PULLTYPE PULLUP"),
+        ),
+        Subsignal("cd", Pins("C11"), Misc("PULLTYPE PULLUP")),
+        IOStandard("LVCMOS18"),
+    ),
+
     # 4GB DDR4 SDRAM: 4 x Hynix H5AN8G6NCJR-VKI, modeled as MT40A512M16.
     (
         "ddram",
@@ -423,6 +438,19 @@ class KU15PDDR4MIG(LiteXModule):
 
 
 class RaptorMLKCU07SoC(SoCCore):
+    csr_map = {
+        "ctrl": 0,
+        "identifier_mem": 1,
+        "timer0": 2,
+        "uart": 3,
+        "sdcard": 4,
+    }
+    interrupt_map = {
+        "uart": 0,
+        "timer0": 1,
+        "sdcard": 2,
+    }
+
     def __init__(
         self,
         sys_clk_freq=DEFAULT_FPGA_SYS_CLK,
@@ -430,6 +458,8 @@ class RaptorMLKCU07SoC(SoCCore):
         litedram_size=0x40000000,
         with_mig=False,
         mig_size=0x40000000,
+        with_sdcard=False,
+        sdcard_boot=False,
         with_led_chaser=False,
         rapt_memspeed_trace=False,
         with_ila=False,
@@ -540,6 +570,11 @@ class RaptorMLKCU07SoC(SoCCore):
                 l2_cache_size=kwargs.get("l2_size", 8192),
             )
 
+        if with_sdcard:
+            self.add_sdcard(name="sdcard", mode="read+write")
+            if not sdcard_boot:
+                self.add_constant("SDCARD_BOOT_DISABLE")
+
         if with_led_chaser:
             try:
                 self.leds = LedChaser(
@@ -595,6 +630,16 @@ def main():
         help="Mapped DDR4 MIG main_ram size in bytes.",
     )
     parser.add_target_argument(
+        "--with-sdcard",
+        action="store_true",
+        help="Enable the on-board 4-bit SDCard controller and DMA engine.",
+    )
+    parser.add_target_argument(
+        "--sdcard-boot",
+        action="store_true",
+        help="Automatically try SDCard during BIOS boot (disabled by default).",
+    )
+    parser.add_target_argument(
         "--rapt-memspeed-trace",
         action="store_true",
         help="Enable Raptor LiteX BIOS memspeed phase trace markers.",
@@ -609,9 +654,17 @@ def main():
         action="store_true",
         help="Insert a netlist ILA on RAPT_DBG_ILA mark_debug nets (JTAG hang capture).",
     )
+    parser.add_target_argument(
+        "--vivado-incremental",
+        action="store_true",
+        help="Reuse the previous routed checkpoint for incremental implementation.",
+    )
     parser.set_defaults(cpu_type="raptor", cpu_variant="standard")
 
     args = parser.parse_args()
+
+    if args.sdcard_boot and not args.with_sdcard:
+        parser.error("--sdcard-boot requires --with-sdcard")
 
     soc_kwargs = dict(parser.soc_argdict)
     soc_kwargs["uart_fifo_depth"] = max(int(soc_kwargs.get("uart_fifo_depth", 16)), 1024)
@@ -646,6 +699,8 @@ def main():
         litedram_size=args.litedram_size,
         with_mig=args.with_mig,
         mig_size=args.mig_size,
+        with_sdcard=args.with_sdcard,
+        sdcard_boot=args.sdcard_boot,
         with_led_chaser=args.with_led_chaser,
         rapt_memspeed_trace=args.rapt_memspeed_trace,
         with_ila=args.with_ila,
@@ -686,6 +741,9 @@ def main():
         _ila_tcl = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                 "scripts", "insert_ila.tcl")
         soc.platform.toolchain.pre_optimize_commands.add(f"source {_ila_tcl}")
+        soc.platform.toolchain.additional_commands.append(
+            "write_debug_probes -force {build_name}.ltx"
+        )
 
     if args.with_litedram:
         # Keep the 4x DDR PHY clock and divided sys clock on matched global
@@ -720,6 +778,17 @@ def main():
         str(toolchain_argdict.get("vivado_synth_directive") or "default")
         + " -resource_sharing off -no_lc -fanout_limit 24"
     )
+
+    route_checkpoint = os.path.join(
+        builder_kwargs["output_dir"],
+        "gateware",
+        "mlk_cu07_ku15p_route.dcp",
+    )
+    if args.vivado_incremental and os.path.isfile(route_checkpoint):
+        soc.platform.toolchain.incremental_implementation = True
+        print(f"[litex] Vivado incremental reference: {route_checkpoint}")
+    elif args.vivado_incremental:
+        print("[litex] No routed checkpoint found; using full implementation")
 
     builder = Builder(soc, **builder_kwargs)
 

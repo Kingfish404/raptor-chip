@@ -9,10 +9,11 @@ _THIS_DIR := $(dir $(lastword $(MAKEFILE_LIST)))
 APP_HOME  := $(abspath $(_THIS_DIR)/../..)
 include $(APP_HOME)/common.mk
 
-BUILD_DIR := $(APP_HOME)/build/rv$(XLEN)/tests/irq
+BUILD_DIR ?= $(APP_HOME)/build/rv$(XLEN)/tests/irq
+EXTRA_CFLAGS ?=
 
 # Bare-metal: bypass picolibc, freestanding, no stdlib, custom linker.
-BM_CFLAGS := -march=$(ARCH) -mabi=$(ABI) -mcmodel=medany -O2 -g -Wall \
+BM_CFLAGS := -march=$(ARCH) -mabi=$(ABI) -mcmodel=medany -O2 -g -Wall $(EXTRA_CFLAGS) \
              -ffreestanding -fno-builtin -fno-stack-protector \
              -nostdlib -nostartfiles \
              -fno-asynchronous-unwind-tables -static
@@ -23,6 +24,8 @@ SRCS := $(wildcard $(_THIS_DIR)*.c)
 NAMES := $(patsubst $(_THIS_DIR)%.c,%,$(SRCS))
 ELFS := $(patsubst %,$(BUILD_DIR)/%.elf,$(NAMES))
 BINS := $(patsubst %,$(BUILD_DIR)/%.bin,$(NAMES))
+
+.PRECIOUS: $(ELFS)
 
 OBJCOPY ?= $(CROSS_COMPILE)objcopy
 

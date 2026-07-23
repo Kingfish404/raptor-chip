@@ -202,6 +202,7 @@ module rapt_exu_ioq #(
       ? (ioq_word[active_idx] ? `RAPT_ALU_LW__ : `RAPT_ALU_LD__)
       : ioq_alu[active_idx][4:0];
   assign exu_lsu.atomic_lock = ioq_atom[active_idx] && ioq_alu[active_idx] == `RAPT_ATO_LR__;
+  assign exu_lsu.ordered = (active_idx == ioq_head) && ioq_at_rob_head;
   assign exu_lsu.pc = ioq_pc[active_idx];
 
   // === Hit-under-miss B issue (Phase A2, RAPT_LSU_HUM) ===
@@ -306,9 +307,10 @@ module rapt_exu_ioq #(
       ioq_vj[ioq_head] + ioq_imm[ioq_head]
   ));
 
-  assign reservation_match = exu_l1d.reservation == (csr_bcast.dmmu_en
-      ? ioq_paddr[ioq_head]
-      : (ioq_vj[ioq_head] + ioq_imm[ioq_head]));
+  assign reservation_match = exu_l1d.reservation_valid
+      && exu_l1d.reservation == (csr_bcast.dmmu_en
+        ? ioq_paddr[ioq_head]
+        : (ioq_vj[ioq_head] + ioq_imm[ioq_head]));
 
   // === Head completion resolution ===
   logic head_load_done;
@@ -407,6 +409,8 @@ module rapt_exu_ioq #(
           : ioq_mmu_en[ioq_head] == 0)
       && (!ioq_wen[ioq_head] || (ioq_mmu_en[ioq_head] == 0 && exu_lsu.stq_ready)));
   assign exu_ioq_bcast.valid = ioq_valid_found;
+  assign exu_l1d.reservation_clear = ioq_valid_found
+      && ioq_atom[ioq_head] && ioq_alu[ioq_head] == `RAPT_ATO_SC__;
   // MEM pipe never resolves branches nor writes CSRs (unified exu_wb_if
   // tie-offs; ROB keeps mispredict at its dispatch-init value of 0).
   assign exu_ioq_bcast.btaken = 1'b0;
@@ -559,79 +563,114 @@ module rapt_exu_ioq #(
         fast_load_pending <= 1'b1;
         fast_load_prd_q   <= ioq_prd[active_idx];
       end
-      // ---- Enqueue slot A ----
-      if (disp.accept_a) begin
-        ioq_valid[ioq_tail_a]     <= 1'b1;
-        ioq_pc[ioq_tail_a]        <= rou_exu.uop.pc;
-        ioq_pr1[ioq_tail_a]       <= wake_pr(rou_exu.pr1);
-        ioq_pr2[ioq_tail_a]       <= wake_pr(rou_exu.pr2);
-        ioq_prd[ioq_tail_a]       <= rou_exu.prd;
-        ioq_rd[ioq_tail_a]        <= rou_exu.uop.rd;
-        ioq_c[ioq_tail_a]         <= rou_exu.uop.c;
-        ioq_word[ioq_tail_a]      <= rou_exu.uop.word;
-        ioq_alu[ioq_tail_a]       <= rou_exu.uop.alu;
-        ioq_vj[ioq_tail_a]        <= wake_val(rou_exu.pr1, rou_exu.op1);
-        ioq_vk[ioq_tail_a]        <= wake_val(rou_exu.pr2, rou_exu.op2);
-        ioq_dest[ioq_tail_a]      <= rou_exu.dest;
-        ioq_imm[ioq_tail_a]       <= rou_exu.uop.imm;
-        ioq_wen[ioq_tail_a]       <= rou_exu.uop.wen;
-        ioq_mmu_en[ioq_tail_a]    <= csr_bcast.dmmu_en;
-        ioq_ren[ioq_tail_a]       <= rou_exu.uop.ren;
-        ioq_atom[ioq_tail_a]      <= rou_exu.uop.atom;
-        ioq_trap[ioq_tail_a]      <= rou_exu.uop.trap;
-        ioq_complete[ioq_tail_a]  <= 1'b0;
-        ioq_load_trap[ioq_tail_a] <= 1'b0;
-        ioq_load_skip[ioq_tail_a] <= 1'b0;
+      // ---- Static per-entry enqueue mux (B > A on any selector alias) ----
+      for (int i = 0; i < IOQ_SIZE; i++) begin
+`ifdef RAPT_DUAL_ISSUE
+        if ((disp.accept_b_paired && i == int'(ioq_tail_b))
+            || (disp.accept_b_alone && i == int'(ioq_tail_a))) begin
+          ioq_valid[i]     <= 1'b1;
+          ioq_pc[i]        <= rou_exu.uop_b.pc;
+          ioq_pr1[i]       <= wake_pr(rou_exu.pr1_b);
+          ioq_pr2[i]       <= wake_pr(rou_exu.pr2_b);
+          ioq_prd[i]       <= rou_exu.prd_b;
+          ioq_rd[i]        <= rou_exu.uop_b.rd;
+          ioq_c[i]         <= rou_exu.uop_b.c;
+          ioq_word[i]      <= rou_exu.uop_b.word;
+          ioq_alu[i]       <= rou_exu.uop_b.alu;
+          ioq_vj[i]        <= wake_val(rou_exu.pr1_b, rou_exu.op1_b);
+          ioq_vk[i]        <= wake_val(rou_exu.pr2_b, rou_exu.op2_b);
+          ioq_dest[i]      <= rou_exu.dest_b;
+          ioq_imm[i]       <= rou_exu.uop_b.imm;
+          ioq_wen[i]       <= rou_exu.uop_b.wen;
+          ioq_mmu_en[i]    <= csr_bcast.dmmu_en;
+          ioq_ren[i]       <= rou_exu.uop_b.ren;
+          ioq_atom[i]      <= rou_exu.uop_b.atom;
+          ioq_trap[i]      <= rou_exu.uop_b.trap;
+          ioq_complete[i]  <= 1'b0;
+          ioq_load_trap[i] <= 1'b0;
+          ioq_load_skip[i] <= 1'b0;
+        end else
+`endif
+        if (disp.accept_a && i == int'(ioq_tail_a)) begin
+          ioq_valid[i]     <= 1'b1;
+          ioq_pc[i]        <= rou_exu.uop.pc;
+          ioq_pr1[i]       <= wake_pr(rou_exu.pr1);
+          ioq_pr2[i]       <= wake_pr(rou_exu.pr2);
+          ioq_prd[i]       <= rou_exu.prd;
+          ioq_rd[i]        <= rou_exu.uop.rd;
+          ioq_c[i]         <= rou_exu.uop.c;
+          ioq_word[i]      <= rou_exu.uop.word;
+          ioq_alu[i]       <= rou_exu.uop.alu;
+          ioq_vj[i]        <= wake_val(rou_exu.pr1, rou_exu.op1);
+          ioq_vk[i]        <= wake_val(rou_exu.pr2, rou_exu.op2);
+          ioq_dest[i]      <= rou_exu.dest;
+          ioq_imm[i]       <= rou_exu.uop.imm;
+          ioq_wen[i]       <= rou_exu.uop.wen;
+          ioq_mmu_en[i]    <= csr_bcast.dmmu_en;
+          ioq_ren[i]       <= rou_exu.uop.ren;
+          ioq_atom[i]      <= rou_exu.uop.atom;
+          ioq_trap[i]      <= rou_exu.uop.trap;
+          ioq_complete[i]  <= 1'b0;
+          ioq_load_trap[i] <= 1'b0;
+          ioq_load_skip[i] <= 1'b0;
+        end
+
+        // Preserve the original NBA priority while keeping every IOQ array
+        // update on this single static entry selector.
+        if (exu_l1d.ready && ioq_mmu_en[ioq_head] && i == int'(ioq_head)) begin
+          ioq_paddr[i]  <= exu_l1d.paddr;
+          ioq_mmu_en[i] <= 1'b0;
+          ioq_trap[i]   <= exu_l1d.trap;
+          ioq_cause[i]  <= exu_l1d.cause;
+        end
+
+        if (ioq_valid_found && i == int'(ioq_head)) begin
+          ioq_wen[i]    <= 1'b0;
+          ioq_mmu_en[i] <= 1'b0;
+          ioq_trap[i]   <= 1'b0;
+          ioq_ren[i]    <= 1'b0;
+          ioq_valid[i]  <= 1'b0;
+        end
+
+        if (exu_lsu.rvalid && exu_lsu.rready && i == int'(active_idx)) begin
+          ioq_rdata[i] <= exu_lsu.rdata;
+          if (active_idx != ioq_head || !ioq_valid_found) begin
+            ioq_complete[i]   <= 1'b1;
+            ioq_load_trap[i]  <= exu_lsu.trap;
+            ioq_load_cause[i] <= exu_lsu.cause;
+            ioq_load_skip[i]  <= exu_lsu.difftest_skip;
+          end
+        end
+`ifdef RAPT_LSU_HUM
+        if (exu_lsu.rvalid_b && exu_lsu.rready_b
+            && b_issue_idx != active_idx
+            && !(ioq_valid_found && b_issue_idx == ioq_head)
+            && i == int'(b_issue_idx)) begin
+          ioq_rdata[i]      <= exu_lsu.rdata_b;
+          ioq_complete[i]   <= 1'b1;
+          ioq_load_trap[i]  <= 1'b0;
+          ioq_load_cause[i] <= '0;
+          ioq_load_skip[i]  <= 1'b0;
+        end
+`endif
+        if (ioq_valid_found && i == int'(ioq_head)) begin
+          ioq_complete[i]  <= 1'b0;
+          ioq_load_trap[i] <= 1'b0;
+          ioq_load_skip[i] <= 1'b0;
+        end
+
+        if (ioq_valid[i]) begin
+          if ((|ioq_pr1[i]) && ioq_fwd1_hit[i]) begin
+            ioq_vj[i]  <= ioq_fwd1_val[i];
+            ioq_pr1[i] <= '0;
+          end
+          if ((|ioq_pr2[i]) && ioq_fwd2_hit[i]) begin
+            ioq_vk[i]  <= ioq_fwd2_val[i];
+            ioq_pr2[i] <= '0;
+          end
+        end
       end
 `ifdef RAPT_DUAL_ISSUE
-      // ---- Enqueue slot B paired with A (uses ioq_tail_a+1) ----
-      if (disp.accept_b_paired) begin
-        ioq_valid[ioq_tail_b]     <= 1'b1;
-        ioq_pc[ioq_tail_b]        <= rou_exu.uop_b.pc;
-        ioq_pr1[ioq_tail_b]       <= wake_pr(rou_exu.pr1_b);
-        ioq_pr2[ioq_tail_b]       <= wake_pr(rou_exu.pr2_b);
-        ioq_prd[ioq_tail_b]       <= rou_exu.prd_b;
-        ioq_rd[ioq_tail_b]        <= rou_exu.uop_b.rd;
-        ioq_c[ioq_tail_b]         <= rou_exu.uop_b.c;
-        ioq_word[ioq_tail_b]      <= rou_exu.uop_b.word;
-        ioq_alu[ioq_tail_b]       <= rou_exu.uop_b.alu;
-        ioq_vj[ioq_tail_b]        <= wake_val(rou_exu.pr1_b, rou_exu.op1_b);
-        ioq_vk[ioq_tail_b]        <= wake_val(rou_exu.pr2_b, rou_exu.op2_b);
-        ioq_dest[ioq_tail_b]      <= rou_exu.dest_b;
-        ioq_imm[ioq_tail_b]       <= rou_exu.uop_b.imm;
-        ioq_wen[ioq_tail_b]       <= rou_exu.uop_b.wen;
-        ioq_mmu_en[ioq_tail_b]    <= csr_bcast.dmmu_en;
-        ioq_ren[ioq_tail_b]       <= rou_exu.uop_b.ren;
-        ioq_atom[ioq_tail_b]      <= rou_exu.uop_b.atom;
-        ioq_trap[ioq_tail_b]      <= rou_exu.uop_b.trap;
-        ioq_complete[ioq_tail_b]  <= 1'b0;
-        ioq_load_trap[ioq_tail_b] <= 1'b0;
-        ioq_load_skip[ioq_tail_b] <= 1'b0;
-      end
-      // ---- Enqueue slot B alone (A went to RS, uses ioq_tail_a) ----
-      if (disp.accept_b_alone) begin
-        ioq_valid[ioq_tail_a]     <= 1'b1;
-        ioq_pc[ioq_tail_a]        <= rou_exu.uop_b.pc;
-        ioq_pr1[ioq_tail_a]       <= wake_pr(rou_exu.pr1_b);
-        ioq_pr2[ioq_tail_a]       <= wake_pr(rou_exu.pr2_b);
-        ioq_prd[ioq_tail_a]       <= rou_exu.prd_b;
-        ioq_rd[ioq_tail_a]        <= rou_exu.uop_b.rd;
-        ioq_c[ioq_tail_a]         <= rou_exu.uop_b.c;
-        ioq_word[ioq_tail_a]      <= rou_exu.uop_b.word;
-        ioq_alu[ioq_tail_a]       <= rou_exu.uop_b.alu;
-        ioq_vj[ioq_tail_a]        <= wake_val(rou_exu.pr1_b, rou_exu.op1_b);
-        ioq_vk[ioq_tail_a]        <= wake_val(rou_exu.pr2_b, rou_exu.op2_b);
-        ioq_dest[ioq_tail_a]      <= rou_exu.dest_b;
-        ioq_imm[ioq_tail_a]       <= rou_exu.uop_b.imm;
-        ioq_wen[ioq_tail_a]       <= rou_exu.uop_b.wen;
-        ioq_mmu_en[ioq_tail_a]    <= csr_bcast.dmmu_en;
-        ioq_ren[ioq_tail_a]       <= rou_exu.uop_b.ren;
-        ioq_atom[ioq_tail_a]      <= rou_exu.uop_b.atom;
-        ioq_trap[ioq_tail_a]      <= rou_exu.uop_b.trap;
-        ioq_complete[ioq_tail_a]  <= 1'b0;
-        ioq_load_trap[ioq_tail_a] <= 1'b0;
-        ioq_load_skip[ioq_tail_a] <= 1'b0;
-      end
       // Tail pointer advance: 0 / 1 / 2 entries enqueued this cycle.
       if (disp.accept_a && disp.accept_b_paired) begin
         ioq_tail_a <= ioq_tail_a + 2'd2;
@@ -642,80 +681,17 @@ module rapt_exu_ioq #(
       if (disp.accept_a) ioq_tail_a <= ioq_tail_a + 1'b1;
 `endif
 
-      // ---- Store MMU response latch ----
-      if (exu_l1d.ready && ioq_mmu_en[ioq_head]) begin
-        ioq_paddr[ioq_head]  <= exu_l1d.paddr;
-        ioq_mmu_en[ioq_head] <= 1'b0;
-        ioq_trap[ioq_head]   <= exu_l1d.trap;
-        ioq_cause[ioq_head]  <= exu_l1d.cause;
-      end
-
       // ---- Head retire ----
       if (ioq_valid_found) begin
-        ioq_wen[ioq_head]    <= 1'b0;
-        ioq_mmu_en[ioq_head] <= 1'b0;
-        ioq_trap[ioq_head]   <= 1'b0;
-        ioq_ren[ioq_head]    <= 1'b0;
-        ioq_valid[ioq_head]  <= 1'b0;
-        ioq_head             <= ioq_head + 1'b1;
+        ioq_head <= ioq_head + 1'b1;
       end
 
-      // ---- OoO LSU FSM (per-entry one-hot: avoid multi-write with head retire) ----
+      // ---- OoO LSU scalar state ----
       if (exu_lsu.rvalid && exu_lsu.rready) begin
-        ioq_rdata[active_idx] <= exu_lsu.rdata;
-        // Suppress completion/trap/skip write when the same entry is also
-        // being retired this cycle (head-retire clear below takes priority).
-        // This avoids a Vivado-addressed-WAW hazard (R1 pattern).
-        if (active_idx != ioq_head || !ioq_valid_found) begin
-          ioq_complete[active_idx]   <= 1'b1;
-          ioq_load_trap[active_idx]  <= exu_lsu.trap;
-          ioq_load_cause[active_idx] <= exu_lsu.cause;
-          ioq_load_skip[active_idx]  <= exu_lsu.difftest_skip;
-        end
         oo_pending <= 1'b0;
       end else if (!oo_pending && exu_lsu.rvalid && !exu_lsu.rready) begin
         oo_pending     <= 1'b1;
         oo_pending_idx <= active_idx;
-      end
-`ifdef RAPT_LSU_HUM
-      // ---- B-channel completion (hit-under-miss) ----
-      // Distinct from the A entry by construction (selection skips
-      // oo_pending_idx) and from the retiring head (B only targets
-      // !complete entries; retire requires complete).  The guard makes the
-      // exclusion explicit for synthesis (R1 discipline).
-      if (exu_lsu.rvalid_b && exu_lsu.rready_b) begin
-        if (b_issue_idx != active_idx && !(ioq_valid_found && b_issue_idx == ioq_head)) begin
-          ioq_rdata[b_issue_idx]      <= exu_lsu.rdata_b;
-          ioq_complete[b_issue_idx]   <= 1'b1;
-          ioq_load_trap[b_issue_idx]  <= 1'b0;
-          ioq_load_cause[b_issue_idx] <= '0;
-          ioq_load_skip[b_issue_idx]  <= 1'b0;
-        end
-      end
-`endif
-      // Clear per-entry completion when head retires (NBA after live latch)
-      if (ioq_valid_found) begin
-        ioq_complete[ioq_head]  <= 1'b0;
-        ioq_load_trap[ioq_head] <= 1'b0;
-        ioq_load_skip[ioq_head] <= 1'b0;
-      end
-
-      // ---- Operand forwarding: any CDB port (unique-producer invariant) ----
-      for (bit [XLEN-1:0] i = 0; i < IOQ_SIZE; i++) begin
-        if (ioq_valid[i]) begin
-          if (|ioq_pr1[i]) begin
-            if (ioq_fwd1_hit[i]) begin
-              ioq_vj[i]  <= ioq_fwd1_val[i];
-              ioq_pr1[i] <= '0;
-            end
-          end
-          if (|ioq_pr2[i]) begin
-            if (ioq_fwd2_hit[i]) begin
-              ioq_vk[i]  <= ioq_fwd2_val[i];
-              ioq_pr2[i] <= '0;
-            end
-          end
-        end
       end
     end
   end

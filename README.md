@@ -18,7 +18,7 @@ Core description: **Super-scalar, out-of-order RISC-V core** with register renam
 
 ```
 Core name:  raptor-falcon (M/S/U + Sv32/Sv39 + PMP, Linux-capable)
-ISA:        rv32/rv64 imac_zicbop_zicntr_zicond_zicsr_zifencei_zihintntl_zihintpause_zimop_zcb_zcmop_zba_zbb_zbc_zbs
+ISA:        rv32/rv64 imac_zicbom_zicbop_zicntr_zicond_zicsr_zifencei_zihintntl_zihintpause_zimop_zcb_zcmop_zba_zbb_zbc_zbs
 Modes:      Machine, Supervisor, User
 MMU:        riscv,sv32 (RV32) / riscv,sv39 (RV64) / riscv,none (Bare)
 PMP:        16 entries, TOR / NA4 / NAPOT, L-bit lockable
@@ -26,7 +26,7 @@ Interrupts: CLINT (mtime, mtimecmp, msip) + PLIC (31 sources, M/S contexts)
 Profile:    n/a (closest peer: RVM23U32 / RVA20S64)
 
 Bus Interface:  AXI4, XLEN-bit data/addr, 4-bit ID, burst
-Default uarch: dual issue / dual commit, ROB=64, ALQ=8 (2 issue ports), BRQ=4, MDQ=4, IOQ=8, SQ=16, PRF=128, L1I=8 KiB, L1D=4 KiB, optional L2 passthrough/cache stage
+Default uarch: dual issue / dual commit, ROB=64, ALQ=8 (2 issue ports), BRQ=4, MDQ=4, IOQ=8, SQ=16, PRF=128, L1I=4 KiB, L1D=2 KiB, 64 B cache lines, optional L2 passthrough/cache stage
 
 Verifying:  RISCOF (riscv-arch-test), RVFI, SVA
 ```
@@ -67,20 +67,24 @@ flowchart TD
   subgraph MEM["Memory Subsystem"]
     direction TD
     subgraph IMEM["I-side · IF0 (0-bubble seq fetch)"]
-      L1I["L1I 8 KiB 2-way (banked SRAM)"]
+      L1I["L1I 4 KiB 2-way (banked SRAM)"]
       ITLB["ITLB (4e, FA)"]
       IPTW["IPTW (Sv32 2-lvl / Sv39 3-lvl)"]
     end
     subgraph DMEM["D-side · IS/EX-WB (2-cyc hit, 3-cyc load-use)"]
       LSU["LSU (unified SQ 16, STL fwd)"]
-      L1D["L1D 4 KiB 2-way (banked SRAM, VIPT, write-through)"]
+      L1D["L1D 2 KiB 2-way (banked SRAM, VIPT, write-through)"]
       DTLB["DTLB/DSTLB"]
       DPTW["DPTW (Sv32/Sv39, hw A/D)"]
     end
     PMPC["PMP ×16 (TOR/NA4/NAPOT): fetch + ld/st + PTW checks"]
-    BUS["BUS (AXI4 bridge, L1D > L1I)"]
+    BUS["BUS (mem_link arbiter, request IDs, L1D > L1I)"]
+    AXIM["AXI4 master (up to 8 reads, independent AW/W)"]
     L2["L2 (optional, 16 KiB DM / passthrough)"]
-    RTR["cluster router"]
+    RTR["cluster AXI router (1 master / 3 targets)"]
+    CLINT["CLINT (mtime / mtimecmp / msip)"]
+    PLIC["PLIC (31 sources, M/S contexts)"]
+    EXT["off-chip AXI (memory / LiteX SoC)"]
   end
   BPU --- IFU
   IFU --> IDU --> RNU --> FL & MAP
@@ -101,7 +105,8 @@ flowchart TD
   DTLB -."miss".-> DPTW
   PMPC -.-> L1I & L1D & IPTW & DPTW
   L1I & L1D & IPTW & DPTW --> BUS
-  BUS --> L2 --> RTR
+  BUS -->|mem_link| AXIM --> L2 --> RTR
+  RTR --> CLINT & PLIC & EXT
 ```
 
 ## Setup & Quick Start
@@ -156,6 +161,8 @@ make run-npc32            # run simulation
 # Run with args
 make run-npc32 ARGS="-b -n"    # -b: batch mode [default], -n: no wave trace
 make run-npc32 IMG=path/to.bin  # load custom image
+# Add reproducible 0..8-cycle delays to each AXI memory beat/response
+make run-npc32 ARGS="-b -n --mem-random-delay=8 --mem-random-seed=1"
 # Interactive menuconfig
 make menuconfig-npc32
 ```
@@ -254,6 +261,11 @@ make fpga-build                     # synth + P&R bitstream
 make fpga-load                      # load to SRAM (volatile)
 make fpga-flash                     # write to external SPI flash
 make fpga-console                   # open UART console
+
+# MLK-CU07-KU15P OpenSBI/Linux over MIG DDR and BIOS serialboot
+make opensbi-fpga-e2e UART_PORT=/dev/ttyUSB0  # build/load, then standalone OpenSBI
+make linux-fpga-e2e UART_PORT=/dev/ttyUSB0    # build/load, then OpenSBI + Linux
+make linux-fpga-run UART_PORT=/dev/ttyUSB0    # reuse an existing bitstream
 # See fpga/litex/README.md for full target/variant matrix
 ```
 

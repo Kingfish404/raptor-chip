@@ -60,9 +60,22 @@ module rapt_rnu_maptable #(
 
   // ---- Speculative Map (MAP) ----
   logic [PLEN-1:0] map[RNUM];
+  logic [RNUM-1:0] map_wen_oh;
+`ifdef RAPT_DUAL_ISSUE
+  logic [RNUM-1:0] map_wen_b_oh;
+`endif
 
   // (rat_wen_oh / rat_wen_b_oh are decoded once above, next to the RAT write,
   //  and reused here for the flush-restore.)
+
+  always_comb begin
+    map_wen_oh = '0;
+    if (mt.map_wen_a) map_wen_oh[mt.map_waddr_a] = 1'b1;
+`ifdef RAPT_DUAL_ISSUE
+    map_wen_b_oh = '0;
+    if (mt.map_wen_b) map_wen_b_oh[mt.map_waddr_b] = 1'b1;
+`endif
+  end
 
   always_ff @(posedge clock) begin
     if (reset) begin
@@ -81,26 +94,17 @@ module rapt_rnu_maptable #(
         end
       end
     end else begin
+      // One next-state mux per entry. Slot B is younger and wins WAW.
+      for (integer i = 0; i < RNUM; i = i + 1) begin
 `ifdef RAPT_DUAL_ISSUE
-      // Dual speculative write: slot A first, then slot B (younger wins on conflict)
-      if (mt.map_wen_a && mt.map_wen_b) begin
-        if (mt.map_waddr_a == mt.map_waddr_b) begin
-          // Same register: only slot B's mapping survives
-          map[mt.map_waddr_b] <= mt.map_wdata_b;
-        end else begin
-          map[mt.map_waddr_a] <= mt.map_wdata_a;
-          map[mt.map_waddr_b] <= mt.map_wdata_b;
-        end
-      end else if (mt.map_wen_b) begin
-        map[mt.map_waddr_b] <= mt.map_wdata_b;
-      end else if (mt.map_wen_a) begin
-        map[mt.map_waddr_a] <= mt.map_wdata_a;
-      end
-`else
-      if (mt.map_wen_a) begin
-        map[mt.map_waddr_a] <= mt.map_wdata_a;
-      end
+        if (map_wen_b_oh[i]) begin
+          map[i] <= mt.map_wdata_b;
+        end else
 `endif
+        if (map_wen_oh[i]) begin
+          map[i] <= mt.map_wdata_a;
+        end
+      end
     end
   end
 

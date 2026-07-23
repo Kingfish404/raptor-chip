@@ -64,7 +64,11 @@ void checkpoint_inject_after_reset(void);
  * instruction reaches ckpt_pc (i.e. the trampoline + mret has retired).
  * Used to overwrite host-visible state that the trampoline itself perturbs
  * (counters, mepc) so the resumed image is exactly the saved snapshot. */
-void checkpoint_load_post_trampoline_tick(word_t committed_pc);
+bool checkpoint_load_post_trampoline_tick(word_t committed_pc);
+
+/* Returns 1 while the restore trampoline is running and REF has not yet been
+ * resynchronized to the restored architectural state. */
+int checkpoint_load_pending(void);
 
 /* Returns 1 if a save is configured, 0 otherwise. */
 int checkpoint_save_configured(void);

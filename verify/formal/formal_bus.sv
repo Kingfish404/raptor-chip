@@ -57,6 +57,8 @@ module formal_bus #(
   // Interface instances
   l1i_bus_if #(.XLEN(XLEN)) l1i_bus ();
   l1d_bus_if #(.XLEN(XLEN)) l1d_bus ();
+  mem_link_if #(.XLEN(XLEN)) mem ();
+  axi4_if #(.XLEN(XLEN)) axi ();
   csr_bcast_if #(.XLEN(XLEN)) csr_bcast ();
   cmu_bcast_if #(.XLEN(XLEN)) cmu_bcast ();
 
@@ -64,13 +66,22 @@ module formal_bus #(
   assign l1i_bus.arvalid = l1i_arvalid;
   assign l1i_bus.araddr = l1i_araddr;
   assign l1i_bus.arburst = l1i_arburst;
+  assign l1i_bus.ar_ptw = 1'b0;
+  assign l1i_bus.awvalid = 1'b0;
+  assign l1i_bus.awaddr = '0;
+  assign l1i_bus.aw_ptw = 1'b0;
+  assign l1i_bus.wvalid = 1'b0;
+  assign l1i_bus.wdata = '0;
+  assign l1i_bus.wstrb = '0;
 
   // Drive L1D master-side signals from module inputs
   assign l1d_bus.arvalid = l1d_arvalid;
   assign l1d_bus.araddr = l1d_araddr;
   assign l1d_bus.rstrb = l1d_rstrb;
+  assign l1d_bus.ar_ptw = 1'b0;
   assign l1d_bus.awvalid = l1d_awvalid;
   assign l1d_bus.awaddr = l1d_awaddr;
+  assign l1d_bus.aw_ptw = 1'b0;
   assign l1d_bus.wvalid = l1d_wvalid;
   assign l1d_bus.wdata = l1d_wdata;
   assign l1d_bus.wstrb = l1d_wstrb;
@@ -83,7 +94,6 @@ module formal_bus #(
   assign csr_bcast.dmmu_en = 1'b0;
   assign csr_bcast.mtvec = '0;
   assign csr_bcast.tvec = '0;
-  assign csr_bcast.interrupt_en = 1'b0;
 
   // Tie off cmu_bcast inputs
   assign cmu_bcast.rpc = '0;
@@ -103,54 +113,55 @@ module formal_bus #(
   assign cmu_bcast.flush_pipe = 1'b0;
   assign cmu_bcast.time_trap = 1'b0;
 
-  wire io_trap_o;
+  assign io_master_arburst = axi.arburst;
+  assign io_master_arsize = axi.arsize;
+  assign io_master_arlen = axi.arlen;
+  assign io_master_arid = axi.arid;
+  assign io_master_araddr = axi.araddr;
+  assign io_master_arvalid = axi.arvalid;
+  assign axi.arready = io_master_arready;
+  assign axi.rid = io_master_rid;
+  assign axi.rlast = io_master_rlast;
+  assign axi.rdata = io_master_rdata;
+  assign axi.rresp = io_master_rresp;
+  assign axi.rvalid = io_master_rvalid;
+  assign io_master_rready = axi.rready;
+
+  assign io_master_awburst = axi.awburst;
+  assign io_master_awsize = axi.awsize;
+  assign io_master_awlen = axi.awlen;
+  assign io_master_awid = axi.awid;
+  assign io_master_awaddr = axi.awaddr;
+  assign io_master_awvalid = axi.awvalid;
+  assign axi.awready = io_master_awready;
+  assign io_master_wlast = axi.wlast;
+  assign io_master_wdata = axi.wdata;
+  assign io_master_wstrb = axi.wstrb;
+  assign io_master_wvalid = axi.wvalid;
+  assign axi.wready = io_master_wready;
+  assign axi.bid = io_master_bid;
+  assign axi.bresp = io_master_bresp;
+  assign axi.bvalid = io_master_bvalid;
+  assign io_master_bready = axi.bready;
 
   rapt_bus bus (
       .clock(clock),
-
-      .axi_arburst(io_master_arburst),
-      .axi_arsize(io_master_arsize),
-      .axi_arlen(io_master_arlen),
-      .axi_arid(io_master_arid),
-      .axi_araddr(io_master_araddr),
-      .axi_arvalid(io_master_arvalid),
-      .axi_arready(io_master_arready),
-
-      .axi_rid(io_master_rid),
-      .axi_rlast(io_master_rlast),
-      .axi_rdata(io_master_rdata),
-      .axi_rresp(io_master_rresp),
-      .axi_rvalid(io_master_rvalid),
-      .axi_rready(io_master_rready),
-
-      .axi_awburst(io_master_awburst),
-      .axi_awsize(io_master_awsize),
-      .axi_awlen(io_master_awlen),
-      .axi_awid(io_master_awid),
-      .axi_awaddr(io_master_awaddr),
-      .axi_awvalid(io_master_awvalid),
-      .axi_awready(io_master_awready),
-
-      .axi_wlast (io_master_wlast),
-      .axi_wdata (io_master_wdata),
-      .axi_wstrb (io_master_wstrb),
-      .axi_wvalid(io_master_wvalid),
-      .axi_wready(io_master_wready),
-
-      .axi_bid(io_master_bid),
-      .axi_bresp(io_master_bresp),
-      .axi_bvalid(io_master_bvalid),
-      .axi_bready(io_master_bready),
-
+      .mem(mem),
       .l1i_bus(l1i_bus),
       .l1d_bus(l1d_bus),
 
       .csr_bcast(csr_bcast),
       .cmu_bcast(cmu_bcast),
-      .io_trap_o(io_trap_o),
 
       .reset(reset)
   );
+
+      rapt_axi_master #(.XLEN(XLEN)) axi_master (
+        .clock(clock),
+        .reset(reset),
+        .mem(mem),
+        .axi(axi)
+      );
 
 `ifdef FORMAL
   // Standard formal past-valid register: skip initial state checks
@@ -158,8 +169,10 @@ module formal_bus #(
   always @(posedge clock) f_past_valid <= 1;
 
   // Assume reset held at start, released after first cycle
-  always @(*) if (!f_past_valid) assume(reset);
-  always @(*) if (f_past_valid) assume(!reset);
+  always_comb begin
+    if (!f_past_valid) assume(reset);
+    if (f_past_valid) assume(!reset);
+  end
 
   // Assume legal cache-side input values: in RV32, no 8-byte transfers
   always_comb begin

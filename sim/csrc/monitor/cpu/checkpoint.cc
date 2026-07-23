@@ -35,6 +35,20 @@ static uint64_t resume_pmu_cycle_base = 0;
 static uint64_t resume_pmu_instr_base = 0;
 static int resume_ready = 1;
 static uint64_t quiesce_wait_cycles = 0;
+static uint64_t quiesce_last_cycle = UINT64_MAX;
+
+static uint64_t quiesce_wait_max_cycles(void)
+{
+  static uint64_t value = 0;
+  if (value == 0)
+  {
+    const char *env = getenv("NSIM_CKPT_QUIESCE_MAX");
+    value = (env != NULL) ? strtoull(env, NULL, 0) : 10000000ull;
+    if (value == 0)
+      value = 10000000ull;
+  }
+  return value;
+}
 
 /* Snapshot of arch state captured from disk; injected after reset. */
 typedef struct
@@ -451,6 +465,72 @@ static void do_save(void)
   save_done = 1;
 }
 
+struct SqOverlayByte
+{
+  uint8_t *host;
+  uint8_t original;
+};
+
+static bool overlay_committed_sq(SqOverlayByte *bytes, size_t *byte_count)
+{
+  *byte_count = 0;
+  if (npc.sq_snapshot_valid == NULL)
+    return true;
+
+  uint32_t valid = *npc.sq_snapshot_valid;
+  uint32_t committed = *npc.sq_snapshot_committed;
+  uint8_t capacity = *npc.sq_snapshot_capacity;
+  uint8_t head = *npc.sq_snapshot_head;
+  if ((valid & ~committed) != 0 || capacity == 0 || capacity > 32 || head >= capacity)
+    return false;
+
+  for (uint8_t ordinal = 0; ordinal < capacity; ordinal++)
+  {
+    uint8_t entry = (head + ordinal) % capacity;
+    if ((valid & (1u << entry)) == 0)
+      continue;
+
+    uint8_t alu = npc.sq_snapshot_alu[entry];
+    size_t size = (alu == 0x01) ? 1 : (alu == 0x03) ? 2 :
+                  (alu == 0x0f) ? 4 : (alu == 0x1f) ? 8 : 0;
+    if (size == 0)
+      return false;
+    for (size_t offset = 0; offset < size; offset++)
+    {
+      uint8_t *host = guest_to_host(npc.sq_snapshot_paddr[entry] + offset);
+      if (host == NULL)
+        return false;
+    }
+  }
+
+  for (uint8_t ordinal = 0; ordinal < capacity; ordinal++)
+  {
+    uint8_t entry = (head + ordinal) % capacity;
+    if ((valid & (1u << entry)) == 0)
+      continue;
+    uint8_t alu = npc.sq_snapshot_alu[entry];
+    size_t size = (alu == 0x01) ? 1 : (alu == 0x03) ? 2 :
+                  (alu == 0x0f) ? 4 : 8;
+    for (size_t offset = 0; offset < size; offset++)
+    {
+      uint8_t *host = guest_to_host(npc.sq_snapshot_paddr[entry] + offset);
+      bytes[*byte_count] = {host, *host};
+      *host = (uint8_t)(npc.sq_snapshot_wdata[entry] >> (offset * 8));
+      (*byte_count)++;
+    }
+  }
+  return true;
+}
+
+static void restore_sq_overlay(const SqOverlayByte *bytes, size_t byte_count)
+{
+  while (byte_count > 0)
+  {
+    byte_count--;
+    *bytes[byte_count].host = bytes[byte_count].original;
+  }
+}
+
 /* Unconditional dump of the current live architectural + memory state into
  * `dir`. Bypasses the trigger/quiesce state machine in checkpoint_save_tick();
  * used by LightSSS, which already drains the pipeline before calling this from
@@ -496,35 +576,47 @@ bool checkpoint_save_tick(void)
       return false;
 
     quiesce_wait_cycles = 0;
+    quiesce_last_cycle = UINT64_MAX;
     Log("checkpoint: trigger hit (%s), waiting for pipeline quiesce",
         save_trigger_desc[0] ? save_trigger_desc : "manual");
   }
 
-  /* Defer save until pipeline is quiesced so committed stores have drained
-   * from SQ -> bus -> host backing buffer. Otherwise mem_pmem.bin loses the
-   * tail of in-flight writes.
-   *   - rob_empty : ROB drained (head==tail && !head.busy)
-   *   - sq_empty  : unified SQ fully drained (speculative + committed) and
-   *                 the store FSM is idle -- 1-bit, SQ_SIZE-independent
-   * If quiesce never happens (defensive cap of 100k cycles), force-save
-   * with a warning so we don't hang the run forever. */
+  /* Save at an architectural ROB boundary. Committed stores still buffered in
+   * an idle SQ are overlaid into the memory image below; accepted stores and
+   * MMIO stores must drain normally before the snapshot can proceed. */
   bool rob_q = (npc.rob_empty != NULL) ? (*npc.rob_empty != 0) : true;
-  bool sq_q = (npc.sq_empty != NULL) ? (*npc.sq_empty != 0) : true;
+  bool sq_q = true;
   if (!(rob_q && sq_q))
   {
-    quiesce_wait_cycles++;
-    if (quiesce_wait_cycles < 100000)
+    uint64_t cycle = current_pmu_cycle();
+    if (cycle == quiesce_last_cycle)
       return false;
-    Log("checkpoint: quiesce wait exceeded 100k cycles "
-        "(rob_q=%d sq_q=%d) -- forcing save (memory may be inconsistent)",
-        rob_q, sq_q);
+    quiesce_last_cycle = cycle;
+    quiesce_wait_cycles++;
+    uint64_t wait_max = quiesce_wait_max_cycles();
+    if (quiesce_wait_cycles < wait_max)
+      return false;
+    Error("checkpoint: quiesce wait exceeded %llu cycles "
+      "(rob_q=%d sq_q=%d) -- refusing inconsistent save",
+        (unsigned long long)wait_max, rob_q, sq_q);
+    npc.state = NPC_ABORT;
+    save_enabled = 0;
+    return false;
   }
   else if (quiesce_wait_cycles > 0)
   {
     Log("checkpoint: pipeline quiesced after %llu wait cycles",
         (unsigned long long)quiesce_wait_cycles);
   }
+
+  SqOverlayByte overlay[32 * sizeof(word_t)];
+  size_t overlay_count = 0;
+  if (!overlay_committed_sq(overlay, &overlay_count))
+    return false;
+  if (overlay_count > 0)
+    Log("checkpoint: overlaid %zu committed SQ bytes into memory image", overlay_count);
   do_save();
+  restore_sq_overlay(overlay, overlay_count);
   return save_exit_after ? true : false;
 }
 
@@ -532,6 +624,7 @@ bool checkpoint_save_tick(void)
  * Load
  * ------------------------------------------------------------------------ */
 int checkpoint_load_configured(void) { return load_enabled; }
+int checkpoint_load_pending(void) { return load_enabled && !resume_ready; }
 
 static int parse_word(const char *s, word_t *out)
 {
@@ -1095,9 +1188,7 @@ void checkpoint_configure_load(const char *dir)
   if (read_state_txt(path, &loaded_snap) != 0)
   {
     Error("checkpoint: failed to read state from %s", path);
-    load_enabled = 0;
-    resume_ready = 1;
-    return;
+    exit(1);
   }
   Log("checkpoint: loaded arch state from %s (saved at cycle %llu, pc=" FMT_WORD_NO_PREFIX ")", path,
       (unsigned long long)loaded_snap.cycle, loaded_snap.pc);
@@ -1112,9 +1203,7 @@ void checkpoint_configure_load(const char *dir)
   if (mrom == NULL)
   {
     Error("checkpoint: MROM has no host backing -- cannot install trampoline");
-    load_enabled = 0;
-    resume_ready = 1;
-    return;
+    exit(1);
   }
   memset(mrom, 0, 256); /* clear leading region; trampoline is < 256 bytes */
   build_trampoline(mrom, &loaded_snap);
@@ -1254,12 +1343,12 @@ void checkpoint_inject_after_reset(void)
   post_trampoline_pending = 1;
 }
 
-void checkpoint_load_post_trampoline_tick(word_t committed_pc)
+bool checkpoint_load_post_trampoline_tick(word_t committed_pc)
 {
   if (!post_trampoline_pending)
-    return;
+    return false;
   if (committed_pc != loaded_snap.pc)
-    return;
+    return false;
 
   post_trampoline_pending = 0;
 
@@ -1294,4 +1383,5 @@ void checkpoint_load_post_trampoline_tick(word_t committed_pc)
   Log("checkpoint: post-trampoline fixup applied at pc=" FMT_WORD_NO_PREFIX
       " (mepc/counters restored from snapshot, relative triggers armed)",
       committed_pc);
+  return true;
 }

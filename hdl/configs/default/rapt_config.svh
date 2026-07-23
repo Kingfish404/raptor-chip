@@ -120,7 +120,7 @@
 `define RAPT_L1I_REFILL_WORDS 8
 `endif
 
-// L1D (64 B line * 16 sets * 2-way = 4 KiB, VIPT-safe)
+// L1D (64 B line * 16 sets * 2-way = 2 KiB, VIPT-safe)
 `define RAPT_L1D_LINE_LEN $clog2(`RAPT_CACHE_LINE_BYTES / (`RAPT_XLEN / 8))
 `define RAPT_L1D_LEN 4
 `define RAPT_L1D_N_WAYS 2

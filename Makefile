@@ -365,8 +365,12 @@ define run_cpu_tests_parallel
 	        printf "[%18s] \033[1;32mPASS\033[0m\n" "$$name"; \
 	      else \
 	        printf "[%18s] \033[1;31mFAIL\033[0m (rc=%d)\n" "$$name" $$rc; \
+	        echo "$$out" | tail -20 | sed "s/^/  [$$name] /"; \
+	        exit 1; \
 	      fi' _; \
+	  xargs_rc=$$?; \
 	  echo "=== cpu-tests-$(1): done ==="; \
+	  exit $$xargs_rc; \
 	} 2>&1 | { mkdir -p $$(dirname $(4)); tee $(4); }
 endef
 
@@ -375,7 +379,7 @@ cpu-tests-nemu32: build-nemu32 ## Run AM cpu-tests on NEMU (sequential; NEMU is 
 
 cpu-tests-npc32: build-npc32 ## Run AM cpu-tests on NPC (parallel)
 	@set -o pipefail; \
-	  NPC_CMD=$$($(MAKE) --no-print-directory -C $(NSIM_HOME) VFLAGS="$(VFLAGS)" print-npc-exec) \
+	  NPC_CMD=$$($(MAKE) --no-print-directory -C $(NSIM_HOME) VFLAGS="$(VFLAGS)" print-npc-exec | tail -1) \
 	    || { echo "[cpu-tests-npc32] ERROR: print-npc-exec failed"; exit 1; }; \
 	  $(call run_cpu_tests_parallel,npc32,"$$NPC_CMD",$(NPC_ARCH),$(NPC_LOG_DIR)/cpu-tests-npc32.log)
 
@@ -628,6 +632,31 @@ linux-boot-npc32: config-npc32-linux ## Boot Linux on NPC (riscv32)
 linux-boot-npc32-difftest: config-nemu32-ref config-npc32-linux ## Boot Linux on NPC with difftest
 	$(call linux_boot_npc,rv32,$(LINUX_RV32_PAYLOAD),linux-boot-npc32-difftest)
 
+LINUX_BOOT_MAX_INST ?= 120000000
+LINUX_MEM_RANDOM_DELAY ?= 7
+LINUX_MEM_STRESS_SEEDS ?= 1 2 7
+LINUX_MEM_STRESS_MAX_INST ?= 400000000
+LINUX_CKPT_STRESS_MAX_INST ?= 300000000
+LINUX_BOOT_CHECK := $(RAPTOR_HOME)/verify/scripts/check_linux_boot.py
+
+verify-linux-boot-npc32: ## Boot RV32 Linux with difftest and require the /init milestone
+	$(MAKE) --no-print-directory linux-boot-npc32-difftest \
+		ARGS="$(ARGS)" MAX_INST=$(LINUX_BOOT_MAX_INST)
+	python3 $(LINUX_BOOT_CHECK) $(NPC_LOG_DIR)/linux-boot-npc32-difftest.log
+
+verify-linux-memory-stress-npc32: config-nemu32-ref config-npc32-linux ## Boot RV32 Linux under randomized memory latency
+	$(MAKE) -C $(LINUX_HOME) download-rv32
+	@set -eu -o pipefail; \
+	mkdir -p $(NPC_LOG_DIR); \
+	for seed in $(LINUX_MEM_STRESS_SEEDS); do \
+		echo "[Linux memory-stress] delay=$(LINUX_MEM_RANDOM_DELAY) seed=$$seed"; \
+		log="$(NPC_LOG_DIR)/linux-memory-stress-delay$(LINUX_MEM_RANDOM_DELAY)-seed$$seed.log"; \
+		$(MAKE) --no-print-directory -C $(NSIM_HOME) run IMG=$(LINUX_RV32_PAYLOAD) \
+			ARGS="-b -n -m $(LINUX_MEM_STRESS_MAX_INST) --mem-random-delay=$(LINUX_MEM_RANDOM_DELAY) --mem-random-seed=$$seed" \
+			2>&1 | tee "$$log"; \
+		python3 $(LINUX_BOOT_CHECK) "$$log"; \
+	done
+
 linux-boot-npc64: VFLAGS := -DRAPT_RV64
 linux-boot-npc64: config-npc32-linux ## Boot Linux on NPC (riscv64)
 	$(call linux_boot_npc,rv64,$(LINUX_RV64_PAYLOAD),linux-boot-npc64,DIFF_REF_SO=)
@@ -650,17 +679,19 @@ linux-boot-nemu64-device: config-nemu64-linux-device ## Boot Linux on NEMU RV64 
 # that re-runs through real lw/csrw/mret instructions. Pure architectural
 # checkpoint — survives RTL/microarch changes.
 # ----------------------------------------------------------------------------
-CKPT_DIR   ?= $(RAPTOR_HOME)/sim/data/ckpt-linux-rv32 ## Checkpoint directory (save target / load source)
-CKPT_CYCLE ?= 1000000 ## Cycle at which to take the checkpoint
+# CKPT_DIR is the checkpoint save target and load source.
+CKPT_DIR   ?= $(RAPTOR_HOME)/sim/data/ckpt-linux-rv32
+# CKPT_CYCLE selects the cycle at which a checkpoint is saved.
+CKPT_CYCLE ?= 100000000
 
-linux-boot-npc32-ckpt-save: config-npc32-linux ## Boot Linux on NPC, save checkpoint at CKPT_CYCLE -> CKPT_DIR
+linux-boot-npc32-ckpt-save: config-nemu32-ref config-npc32-linux ## Boot Linux on NPC, save checkpoint at CKPT_CYCLE -> CKPT_DIR
 	$(MAKE) -C $(LINUX_HOME) download-rv32
 	$(MAKE) -C $(NSIM_HOME) -j$(NPROC)
 	rm -rf $(CKPT_DIR)
 	$(MAKE) -C $(NSIM_HOME) run IMG=$(LINUX_RV32_PAYLOAD) \
 		ARGS="$(ARGS) --ckpt-cycle=$(CKPT_CYCLE) --ckpt-save=$(CKPT_DIR) --ckpt-save-exit"
 
-linux-boot-npc32-ckpt-load: config-npc32-linux ## Resume Linux boot on NPC from CKPT_DIR
+linux-boot-npc32-ckpt-load: config-nemu32-ref config-npc32-linux ## Resume Linux boot on NPC from CKPT_DIR
 	$(MAKE) -C $(NSIM_HOME) -j$(NPROC)
 	$(MAKE) -C $(NSIM_HOME) run IMG=$(LINUX_RV32_PAYLOAD) \
 		ARGS="$(ARGS) --ckpt-load=$(CKPT_DIR) $(if $(MAX_INST),-m $(MAX_INST))"
@@ -775,11 +806,26 @@ verify-riscof-classic-nemu: ## RISCOF classic compliance tests on NEMU reference
 verify-riscof: ## RISCOF official compliance tests
 	@set -o pipefail; $(MAKE) -C $(VERIFY_HOME) riscof $(call tee_verify,riscof)
 
+verify-riscv-dv: ## riscv-dv privileged smoke across the memory-delay matrix
+	@set -o pipefail; $(MAKE) -C $(VERIFY_HOME) riscv-dv $(call tee_verify,riscv-dv)
+
+verify-riscv-dv-stress: ## riscv-dv exception stress across delay/seed matrix
+	@set -o pipefail; $(MAKE) -C $(VERIFY_HOME) riscv-dv-stress $(call tee_verify,riscv-dv-stress)
+
+verify-riscv-dv-mmu: ## Check riscv-dv Sv32/MMU generator availability
+	@$(MAKE) -C $(VERIFY_HOME) riscv-dv-mmu
+
 verify-coverage: ## Verilator line/toggle coverage
 	@set -o pipefail; $(MAKE) -C $(VERIFY_HOME) coverage $(call tee_verify,coverage)
 
 verify-all: ## Run all verification targets
 	@set -o pipefail; $(MAKE) -C $(VERIFY_HOME) all $(call tee_verify,all)
+
+verify-memory-stress-npc32: ## RaptOS: randomized Sv32 memory/atomic integration matrix
+	$(MAKE) -C $(RAPTOR_HOME)/app/tinyos/raptos memory-stress \
+		MEM_RANDOM_DELAY=$(or $(MEM_RANDOM_DELAY),32) \
+		$(if $(MEM_STRESS_SEEDS),MEM_STRESS_SEEDS="$(MEM_STRESS_SEEDS)",) \
+		$(if $(MEM_STRESS_PAYLOADS),MEM_STRESS_PAYLOADS="$(MEM_STRESS_PAYLOADS)",)
 
 verify-clean: ## Clean verification artifacts
 	$(MAKE) -C $(VERIFY_HOME) clean
@@ -895,7 +941,7 @@ app-clean: ## [app] Clean app build artifacts
 	build-npc64 run-npc64 lint-npc64 \
 	am-kernels-hello-npc32 am-tests-cache-tests-npc32 am-tests-nemu32 am-tests-npc32 \
 	cpu-tests-nemu32 cpu-tests-npc32 irq-tests-build irq-tests-npc32 irq-tests-npc32-difftest \
-	repro-tests-build linux-ticket-spinlock-repro-npc32 \
+	repro-tests-build linux-ticket-spinlock-repro-npc32 sv32-sq-alias-repro-npc32 \
 	coremark-npc32 coremark-npc64 coremark-npc32-optim coremark-npc64-optim coremark-npc32-difftest coremark-npc64-difftest coremark-ysyxsoc \
 	microbench-npc32 microbench-npc64 microbench-npc32-difftest micorbench-npc32-difftest microbench-npc64-difftest microbench-ysyxsoc \
 	dhrystone-npc32 dhrystone-npc32-difftest dhrystone-npc64 dhrystone-nemu32 dhrystone-npc32-optim dhrystone-npc64-optim \
@@ -904,9 +950,10 @@ app-clean: ## [app] Clean app build artifacts
 	nanos-nemu32 nanos-npc32 \
 	linux-download linux-download-rv32 linux-download-rv64 \
 	linux-boot-nemu32 linux-boot-nemu64 linux-boot-npc32 linux-boot-npc32-difftest linux-boot-npc64 linux-boot-npc64-difftest linux-boot-nemu32-device linux-boot-nemu64-device \
+	verify-linux-boot-npc32 verify-linux-memory-stress-npc32 verify-linux-memory-stress-from-ckpt-npc32 \
 	linux-boot-npc32-ckpt-save linux-boot-npc32-ckpt-load \
 	fpga-syn fpga-pnr pack lint lint-verible ide-setup compile-commands sta sta-detail sta-rv64 sta-detail-rv64 clean-npc clean \
-	verify-fuzz verify-fuzz-inf verify-fuzz-replay verify-sigtest verify-riscof-classic verify-riscof-classic-nemu verify-riscof verify-coverage verify-all verify-clean \
+	verify-fuzz verify-fuzz-inf verify-fuzz-replay verify-sigtest verify-riscof-classic verify-riscof-classic-nemu verify-riscof verify-riscv-dv verify-riscv-dv-stress verify-riscv-dv-mmu verify-coverage verify-all verify-clean \
 	tinyos-sync os-cli-qemu egos-cli-qemu xv6-cli-qemu os-cli-nsim os-cli-nemu egos-cli-nsim egos-cli-nemu xv6-cli-nsim xv6-cli-nemu \
 	app-hello-npc32 app-coremark-npc32 app-coremark-npc32-optim app-coremark-npc64-optim app-coremark-nemu32 app-embench-npc32 app-embench-nemu32 app-llm-npc32 app-llm-nemu32 \
 	app-tests-npc32 app-tests-npc32-difftest app-demos-npc32 \

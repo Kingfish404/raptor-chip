@@ -172,7 +172,10 @@ module rapt_l1i #(
 
   logic l1i_fill_en;
   logic l1i_tag_valid_set;
+  logic cache_ar_accept;
   logic l1i_tag_inv;
+  logic ifq_push_en;
+  logic ifq_clear_en;
 
   assign mmu_en = csr_bcast.immu_en;
   assign pc_ifu = mmu_en ? XLEN'({itlb_ptag, tlb_offset}) : ifu_l1i.pc;
@@ -350,6 +353,7 @@ module rapt_l1i #(
     : raddr_valid && ((ifu_sdram_arburst || (RefillWords == 2))
       ? (l1i_state == RD_0 || (!ifu_sdram_arburst && l1i_state == RD_1))
       : (l1i_state == RD_0));
+  assign l1i_bus.ar_ptw = ptw_arvalid;
 
   assign ifu_sdram_arburst = (`RAPT_I_SDRAM_ARBURST)
     && (l1i_addr >= 'ha0000000)
@@ -360,13 +364,21 @@ module rapt_l1i #(
   assign l1i_bus.wvalid  = ptw_wvalid;
   assign l1i_bus.wdata   = ptw_wdata;
   assign l1i_bus.wstrb   = ptw_wstrb;
+  assign l1i_bus.aw_ptw  = 1'b1;
 
-  // Fill write condition: suppress during PTW states where the bus is used for
-  // page table reads (IFQ is always empty during PTW, but be explicit)
-  assign l1i_fill_en = l1i_bus.rvalid && ifq_valid[ifq_tail] && (l1i_state != PTWAIT);
+  // Cache refills and IPTW reads have distinct AXI IDs. A cache response may
+  // therefore complete while the walker is busy and must still be consumed.
+  assign l1i_fill_en = l1i_bus.rvalid && ifq_valid[ifq_tail];
   assign l1i_tag_valid_set = l1i_fill_en && (ifq_valid[0] == 0);
   assign l1i_tag_inv = (invalid_l1i || wait_invalid) && (l1i_state == IDLE);
   assign fill_word_mask = {{L1I_LINE_SIZE - 1{1'b0}}, 1'b1} << offset_fetch;
+  assign cache_ar_accept = l1i_bus.rready && !ptw_arvalid;
+  assign ifq_push_en = ((l1i_state == RD_0) && cache_ar_accept && !l1i_bus.rerr)
+    || ((l1i_state == RD_1) && (ifu_sdram_arburst || cache_ar_accept)
+        && !(cache_ar_accept && l1i_bus.rerr));
+  assign ifq_clear_en = ((l1i_state == RD_0) && cache_ar_accept && l1i_bus.rerr)
+    || ((l1i_state == RD_1) && cache_ar_accept && l1i_bus.rerr)
+    || ((l1i_state == FINA) && !raddr_valid);
 
 `ifdef RAPT_RV64
   logic [31:0] l1i_fill_data;
@@ -402,6 +414,7 @@ module rapt_l1i #(
       .clock(clock),
       .reset(reset),
       .req_valid(ptw_req),
+      .kill(cmu_bcast.fence_time || cmu_bcast.flush_pipe),
       .vaddr(ifu_l1i.pc),
       .satp_ppn(csr_bcast.satp_ppn),
       .mmu_en(mmu_en),
@@ -409,15 +422,16 @@ module rapt_l1i #(
       .req_store(1'b0),
       .bus_arvalid(ptw_arvalid),
       .bus_araddr(ptw_araddr),
-      .bus_rvalid(l1i_bus.rvalid),
+      .bus_arready(l1i_bus.rready),
+      .bus_rvalid(l1i_bus.ptw_rvalid),
       .bus_rdata(l1i_bus.rdata),
       .bus_awvalid(ptw_awvalid),
       .bus_awaddr(ptw_awaddr),
       .bus_wvalid(ptw_wvalid),
       .bus_wdata(ptw_wdata),
       .bus_wstrb(ptw_wstrb),
-      .bus_wready(l1i_bus.wready),
-      .bus_werr(l1i_bus.werr),
+      .bus_wready(l1i_bus.ptw_wready),
+      .bus_werr(l1i_bus.ptw_werr),
       .done(ptw_done),
       .fault(ptw_fault),
       .result_ptag(ptw_result_ptag),
@@ -755,7 +769,8 @@ module rapt_l1i #(
 
   // PTW request: TLB miss in IDLE when MMU enabled and address is nonzero
   assign ptw_req = (l1i_state == IDLE) && mmu_en && !tlb_hit
-      && !invalid_l1i && !wait_invalid && !cmu_bcast.flush_pipe
+      && !invalid_l1i && !wait_invalid
+      && !cmu_bcast.flush_pipe && !cmu_bcast.flush_redirect
       && !ptw_busy
       && (ifu_l1i.pc != 0);
 
@@ -840,7 +855,8 @@ module rapt_l1i #(
 
       unique case (l1i_state)
         IDLE: begin
-          if (!invalid_l1i && !wait_invalid && !cmu_bcast.flush_pipe) begin
+          if (!invalid_l1i && !wait_invalid
+              && !cmu_bcast.flush_pipe && !cmu_bcast.flush_redirect) begin
             if (mmu_en) begin
               if (tlb_hit) begin
                 if (pf_fetch_tlb) begin
@@ -966,19 +982,15 @@ module rapt_l1i #(
         RD_0: begin
           if (!raddr_valid) begin
             l1i_state <= IDLE;
-          end else if (l1i_bus.rready) begin
+          end else if (cache_ar_accept) begin
             // Bus error on the first beat -> fetch access-fault. Gated on the
             // same handshake condition that consumes the beat, so a glitchy /
             // stale `rerr` in any other cycle is ignored.
             if (l1i_bus.rerr) begin
-              rec_addr  <= ifu_l1i.pc;
-              rec_tval  <= ifu_l1i.pc;
+              rec_tval  <= rec_addr;
               cause     <= `RAPT_CAUSE_INSTR_ACC_FAULT;
-              ifq_valid <= '0;
               l1i_state <= TRAP;
             end else begin
-              ifq_raddr[ifq_head] <= l1i_bus.araddr;
-              ifq_valid[ifq_head] <= 1'b1;
               ifq_head <= ifq_head + 1;
               if (ifu_sdram_arburst || (RefillWords == 2)) begin
                 l1i_state <= RD_1;
@@ -993,21 +1005,17 @@ module rapt_l1i #(
         RD_1: begin
           if (!raddr_valid) begin
             l1i_state <= IDLE;
-          end else if (ifu_sdram_arburst || l1i_bus.rready) begin
+          end else if (ifu_sdram_arburst || cache_ar_accept) begin
             // Same handshake-gated bus-error check as RD_0. For the burst
             // path (`ifu_sdram_arburst`), the second beat is implicit and
             // any bus error would have been latched on beat 1 in RD_0.
-            if (l1i_bus.rready && l1i_bus.rerr) begin
-              rec_addr  <= ifu_l1i.pc;
-              rec_tval  <= ifu_l1i.pc;
+            if (cache_ar_accept && l1i_bus.rerr) begin
+              rec_tval  <= rec_addr;
               cause     <= `RAPT_CAUSE_INSTR_ACC_FAULT;
-              ifq_valid <= '0;
               l1i_state <= TRAP;
             end else begin
               l1i_state <= FINA;
 
-              ifq_raddr[ifq_head] <= l1i_bus.araddr;
-              ifq_valid[ifq_head] <= 1'b1;
               ifq_head <= ifq_head + 1;
             end
           end
@@ -1015,7 +1023,6 @@ module rapt_l1i #(
         FINA: begin
           if (!raddr_valid) begin
             l1i_state <= IDLE;
-            ifq_valid <= 0;
           end else if (ifq_valid == 0) begin
             l1i_state <= IDLE;
           end
@@ -1036,8 +1043,7 @@ module rapt_l1i #(
         wait_invalid <= 1;
       end
     end
-    // Valid + IFQ update on cache line arrival (tag fill handled by SRAM wen)
-    // Valid + IFQ update on cache line arrival (tag fill handled by SRAM wen)
+    // Cache line arrival (tag fill handled by SRAM wen).
     if (l1i_fill_en) begin
       l1i_valid[fill_way_r][idx_fetch] <= fill_tag_match[fill_way_r]
         ? (l1i_valid[fill_way_r][idx_fetch] | fill_word_mask)
@@ -1045,8 +1051,23 @@ module rapt_l1i #(
       if (ifq_valid[0] == 0 && L1I_N_WAYS == 2) begin
         replace_bit[idx_fetch] <= ~replace_bit[idx_fetch];
       end
-      ifq_valid[ifq_tail] <= 0;
       ifq_tail <= ifq_tail + 1;
+    end
+
+    // One static write cone per IFQ entry. A returning response consumes an
+    // aliased entry before a same-cycle request can reuse it.
+    for (int i = 0; i < int'(IFQ_SIZE); i++) begin
+      if (l1i_fill_en && i == int'(ifq_tail)) begin
+        ifq_valid[i] <= 1'b0;
+      end else if (ifq_clear_en) begin
+        ifq_valid[i] <= 1'b0;
+      end else if (ifq_push_en && i == int'(ifq_head)) begin
+        ifq_valid[i] <= 1'b1;
+      end
+
+      if (ifq_push_en && i == int'(ifq_head)) begin
+        ifq_raddr[i] <= l1i_bus.araddr;
+      end
     end
   end
 
@@ -1107,5 +1128,8 @@ module rapt_l1i #(
                   && (|way_tag_match_next);
     end
   end
+
+  `RAPT_SVA_IMPLY(clock, reset, L1I_REDIRECT_BLOCKS_PTW_REQUEST,
+      cmu_bcast.flush_redirect, !ptw_req)
 
 endmodule

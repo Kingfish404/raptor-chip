@@ -19,6 +19,8 @@ make all                            # fuzz + sigtest
 make fuzz                           # Random instruction fuzzing
 make sigtest                        # Signature-based ISA corner-case tests
 make riscof                         # ACT4 official compliance tests (Sail reference)
+make riscv-dv                       # riscv-dv M-mode privileged smoke
+make riscv-dv-stress                # riscv-dv exception stress
 make coverage                       # Verilator line/toggle coverage
 ```
 
@@ -26,6 +28,8 @@ make coverage                       # Verilator line/toggle coverage
 
 ```
 verify/
+├── uvm/                # Module-level UVM agents, scoreboards, and test plan
+│   └── iq/               # Issue-queue UVM environment
 ├── scripts/            # Test generation and orchestration scripts
 ├── riscof/             # ACT4 compliance testing
 │   ├── raptor-rv32imac/  # RV32 test config, UDB config, model macros
@@ -107,7 +111,68 @@ make riscof-run           # Execute tests on NPC
 
 Requires `sail_riscv_sim` and `uv` (Python package manager).
 
-### 4. Verilator Coverage (`make coverage`)
+### 4. RISCV-DV Privileged Stress (`make riscv-dv`)
+
+Uses the upstream [chipsalliance/riscv-dv](https://github.com/chipsalliance/riscv-dv)
+pure-Python generator with a Raptor RV32IMC M-mode target. Generated binaries
+run on NPC with NEMU instruction-by-instruction difftest; no commercial UVM
+simulator is needed for M-mode CSR and trap-handler stress.
+
+```bash
+make riscv-dv                         # one short privileged smoke test
+make riscv-dv-stress                  # illegal-instruction exception stress
+make riscv-dv-gen RISCV_DV_TEST=raptor_exception_stress RISCV_DV_SEED=42
+make riscv-dv-run RISCV_DV_TEST=raptor_exception_stress
+```
+
+Memory timing is a separate, reproducible verification dimension. NPC samples
+a uniform `0..N` cycle delay independently for every AXI memory beat. The smoke
+suite defaults to maxima `0 7 31 63 233` with memory seed `1`; the stress target
+uses memory seeds `1 42 31337`, producing a full delay-by-seed matrix. Generator
+seed and memory-delay seed are intentionally independent.
+
+The default delay maxima represent distinct operating conditions:
+
+- `0`: deterministic zero-wait baseline and regression comparison.
+- `7`: short SRAM/cache/interconnect jitter.
+- `31`: moderate cache-miss and shared-fabric latency.
+- `63`: sustained contention and long external-memory responses.
+- `233`: extreme backpressure, matching the existing real-system stress setup.
+
+```bash
+# Reproduce one timing coordinate exactly.
+make riscv-dv-run RISCV_DV_TEST=raptor_exception_stress \
+  RISCV_DV_MEM_DELAYS=233 RISCV_DV_MEM_SEEDS=1
+
+# Customize the matrix.
+make riscv-dv-run RISCV_DV_MEM_DELAYS="0 3 15 63 233" \
+  RISCV_DV_MEM_SEEDS="1 42 31337"
+```
+
+Each coordinate writes `*.delayN-seedS.run.log` next to its generated binary,
+so failures retain the exact timing rule needed for replay.
+
+The pyflow backend cannot currently generate random exceptions reliably: its
+EBREAK templates are unregistered, subprogram callstack state is uninitialized,
+and illegal-instruction constraints fail to solve. The exception stress target
+therefore uses pyflow's generated M-mode trap harness and long random stream,
+then injects 256 register-free `0xffffffff` illegal instructions at `main`.
+This exercises `mcause`/`mepc`, trap-frame save/restore, and `mret` without
+depending on those broken upstream paths.
+
+The first run clones pinned revision `b7a0b4b0b51346a3c64f159f81ea262d867c14a9`
+and creates an isolated Python 3.11 environment under `verify/build/`.
+Python 3.10-3.12 is required because the upstream `pyvsc` dependency does not
+currently build on Python 3.14.
+
+The upstream Python backend does not implement page-table creation, page-table
+sections, or page-fault handlers (these functions are `TODO` in
+`pygen/pygen_src/riscv_asm_program_gen.py`). Run `make riscv-dv-mmu` for a
+fail-fast capability check. Full Sv32/MMU generation requires riscv-dv's
+SV/UVM backend and one of its supported simulators (VCS, Questa, Xcelium, or
+Riviera-PRO); none is installed in the current open-source tool environment.
+
+### 5. Verilator Coverage (`make coverage`)
 
 Collects line and toggle coverage during simulation.
 
@@ -208,6 +273,23 @@ dcsr/dpc CSRs in the core, (c) abstract `access_register`/`access_memory`
 in `rapt_dm`. None of these exists yet — the target prints the gap list and
 exits non-zero rather than silently passing. OpenOCD config scaffold lives
 at [verify/jtag/openocd.cfg](./jtag/openocd.cfg).
+
+### 7. Module-level UVM (`make uvm`)
+
+The module-level layer targets local ordering and protocol bugs that are hard
+to diagnose through full-core software alone. The first environment covers the
+out-of-order issue queue with an independent age/operand reference model,
+directed fast-load tests, randomized CDB/dispatch/flush stimulus, a scoreboard,
+coverage counters, and inline SVA.
+
+```bash
+make uvm-smoke       # Run the simulator's minimal UVM 1.2 runtime check
+make uvm-iq-compile  # Compile the complete issue-queue UVM environment
+```
+
+See [uvm/README.md](./uvm/README.md) for the installed XSim limitation and
+[uvm/VERIFICATION_PLAN.md](./uvm/VERIFICATION_PLAN.md) for the P0-P2 module
+matrix and closure criteria.
 
 ## Integration with Root Makefile
 

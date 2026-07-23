@@ -9,7 +9,7 @@ Simulators, FPGA boards, ASIC flow, software stack, and memory maps.
 | NEMU        | Software ISS (difftest reference) | `nemu/README.md`                                              |
 | NPC         | Verilator simulator               | `sim/`                                                        |
 | ysyxSoC     | Chisel SoC for testing            | [memory map](#ysyxsoc-memory-map)                             |
-| FPGA        | Gowin Tang Nano 20K, LiteX        | `fpga/gowin-tang-nano-20k/README.md`, `fpga/litex/README.md`  |
+| FPGA        | Gowin boards and LiteX KU15P      | `fpga/gowin-tang-nano-20k/README.md`, `fpga/litex/README.md`  |
 | ASIC (open) | Yosys + OpenSTA flow              | [yosys-opensta](https://github.com/Kingfish404/yosys-opensta) |
 
 ## Simulators
@@ -24,10 +24,11 @@ NPC is the primary development simulator. NEMU acts as the difftest reference fo
 
 ## FPGA Targets
 
-| Board / Flow                   | Status                          | Entry                                        |
-| ------------------------------ | ------------------------------- | -------------------------------------------- |
-| **Gowin Tang Nano 20K**        | Supported (synth + P&R)         | `fpga/gowin-tang-nano-20k/`, `make fpga-syn` |
-| **LiteX SoC** (Digilent, etc.) | Supported via LiteX integration | `fpga/litex/`                                |
+| Board / Flow                   | Status                                          | Entry                                        |
+| ------------------------------ | ----------------------------------------------- | -------------------------------------------- |
+| **Gowin Tang Nano 20K**        | Supported (synth + P&R)                         | `fpga/gowin-tang-nano-20k/`, `make fpga-syn` |
+| **Tang Mega 138K Pro / LiteX** | Supported Gowin LiteX FPGA flow                 | `fpga/litex/`                                |
+| **MLK-CU07-KU15P / LiteX**     | Vivado, BIOS, MIG DDR4, SDCard, RV32 Linux boot | `fpga/litex/`                                |
 
 See [`fpga/litex/README.md`](../fpga/litex/README.md) for the LiteX BIOS + Linux flow.
 

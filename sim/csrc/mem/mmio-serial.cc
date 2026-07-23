@@ -85,6 +85,10 @@ static int stdin_saved_flags;
 static bool stdin_termios_saved;
 static struct termios stdin_saved_termios;
 static bool stdin_cleanup_registered;
+static int tty_input_fd = -1;
+static bool tty_fallback_attempted;
+static bool tty_termios_saved;
+static struct termios tty_saved_termios;
 static bool serial_lf_to_cr;
 
 void nsim_plic_raise(uint32_t irq);
@@ -92,6 +96,13 @@ bool sdb_is_batch_mode();
 
 static void serial_restore_stdin()
 {
+    if (tty_input_fd >= 0)
+    {
+        if (tty_termios_saved)
+            tcsetattr(tty_input_fd, TCSANOW, &tty_saved_termios);
+        close(tty_input_fd);
+        tty_input_fd = -1;
+    }
     if (stdin_termios_saved)
         tcsetattr(STDIN_FILENO, TCSANOW, &stdin_saved_termios);
     if (stdin_flags_saved)
@@ -152,7 +163,8 @@ static bool serial_read_host_byte(uint8_t *ch)
 {
     for (;;)
     {
-        ssize_t nread = read(STDIN_FILENO, ch, 1);
+        int input_fd = tty_input_fd >= 0 ? tty_input_fd : STDIN_FILENO;
+        ssize_t nread = read(input_fd, ch, 1);
         if (nread == 1)
         {
             if (serial_lf_to_cr && *ch == '\n')
@@ -160,7 +172,41 @@ static bool serial_read_host_byte(uint8_t *ch)
             return true;
         }
         if (nread == 0)
+        {
+            if (input_fd == STDIN_FILENO && sdb_is_batch_mode()
+                && !tty_fallback_attempted)
+            {
+                tty_fallback_attempted = true;
+                tty_input_fd = open("/dev/tty", O_RDONLY | O_NONBLOCK | O_NOCTTY);
+                if (tty_input_fd >= 0)
+                {
+                    pid_t foreground_pgrp = tcgetpgrp(tty_input_fd);
+                    if (foreground_pgrp >= 0 && foreground_pgrp != getpgrp())
+                    {
+                        close(tty_input_fd);
+                        tty_input_fd = -1;
+                        Log("serial input: stdin reached EOF; /dev/tty belongs to foreground process group %d",
+                            (int)foreground_pgrp);
+                        return false;
+                    }
+                    struct termios term;
+                    if (tcgetattr(tty_input_fd, &tty_saved_termios) == 0)
+                    {
+                        tty_termios_saved = true;
+                        term = tty_saved_termios;
+                        term.c_lflag &= ~(ECHO | ICANON);
+                        term.c_cc[VMIN] = 0;
+                        term.c_cc[VTIME] = 0;
+                        tcsetattr(tty_input_fd, TCSANOW, &term);
+                    }
+                    Log("serial input: stdin reached EOF; continuing from /dev/tty");
+                    continue;
+                }
+                Log("serial input: stdin reached EOF; /dev/tty unavailable (%s)",
+                    strerror(errno));
+            }
             return false;
+        }
         if (errno == EINTR)
             continue;
         return false;
@@ -235,6 +281,8 @@ void init_serial()
     rx_tail = 0;
     rx_count = 0;
     tx_irq_pending = false;
+    tty_fallback_attempted = false;
+    tty_termios_saved = false;
 
     serial_configure_stdin();
 }
@@ -373,6 +421,20 @@ void serial_tick()
 {
     serial_poll_stdin();
     serial_update_irq();
+}
+
+unsigned serial_rx_pending()
+{
+    return rx_count;
+}
+
+const char *serial_input_source()
+{
+    if (tty_input_fd >= 0)
+        return "tty";
+    if (tty_fallback_attempted)
+        return "none";
+    return isatty(STDIN_FILENO) ? "stdin-tty" : "stdin-pipe";
 }
 
 // ----------------------------------------------------------------------------

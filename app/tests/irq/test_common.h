@@ -5,7 +5,12 @@
 #include <stdint.h>
 
 /* ---- Platform addresses (raptor NPC SoC, see rapt_soc.svh). ---- */
+#ifdef RAPT_LITEX_FPGA
+#define UART_BASE 0xf0001800UL
+#define UART_TXFULL (UART_BASE + 0x4UL)
+#else
 #define UART_BASE 0x10000000UL
+#endif
 #define UART_TX 0x0UL
 
 #define FINISHER 0x00100000UL
@@ -27,7 +32,14 @@
 #define MMIO8(a) (*(volatile uint8_t *)(uintptr_t)(a))
 
 /* ---- Tiny printer (UART byte poke). ---- */
-static inline void putc_(char c) { MMIO8(UART_BASE + UART_TX) = (uint8_t)c; }
+static inline void putc_(char c) {
+#ifdef RAPT_LITEX_FPGA
+    while (MMIO32(UART_TXFULL)) { }
+    MMIO32(UART_BASE + UART_TX) = (uint32_t)(uint8_t)c;
+#else
+    MMIO8(UART_BASE + UART_TX) = (uint8_t)c;
+#endif
+}
 
 static inline void puts_(const char *s)
 {
@@ -50,9 +62,11 @@ static inline void put_hex32(uint32_t v)
 static inline void test_pass(void)
 {
     puts_("PASS\n");
+#ifndef RAPT_LITEX_FPGA
     MMIO32(FINISHER) = FINISH_PASS;
+#endif
     while (1)
-        ;
+    __asm__ volatile ("wfi");
 }
 
 static inline void test_fail(const char *msg)
@@ -60,9 +74,11 @@ static inline void test_fail(const char *msg)
     puts_("FAIL: ");
     puts_(msg);
     putc_('\n');
+#ifndef RAPT_LITEX_FPGA
     MMIO32(FINISHER) = FINISH_FAIL;
+#endif
     while (1)
-        ;
+        __asm__ volatile ("wfi");
 }
 
 #define TEST_ASSERT(cond, msg) \
