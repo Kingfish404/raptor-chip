@@ -143,6 +143,23 @@ module rapt_core #(
 
   // CSR
   csr_bcast_if csr_bcast ();
+  pmp_update_if pmp_update ();
+  pmp_state_if pmp_fetch_state ();
+  pmp_state_if pmp_data_state ();
+
+  rapt_pmp_state pmp_fetch_state_regs (
+      .clock,
+      .reset,
+      .update(pmp_update),
+      .state(pmp_fetch_state)
+  );
+
+  rapt_pmp_state pmp_data_state_regs (
+      .clock,
+      .reset,
+      .update(pmp_update),
+      .state(pmp_data_state)
+  );
 
 `ifdef VERILATOR
   // Waveform-only stage view. The OoO core does not have a single linear
@@ -328,6 +345,7 @@ module rapt_core #(
       .l1i_bus(l1i_bus),
 
       .csr_bcast(csr_bcast),
+            .pmp_state(pmp_fetch_state),
 
       .reset(reset)
   );
@@ -412,7 +430,7 @@ module rapt_core #(
   /* verilator lint_on UNUSEDSIGNAL */
 
   // Expose committed GPR view to the cluster-level Debug Module.
-  assign dbg_gpr_rdata_o = rf;
+    assign dbg_gpr_rdata_o = rf;
 
 `ifdef RAPT_RVFI
   logic [XLEN-1:0] rvfi_rd_wdata_a_w;
@@ -466,6 +484,7 @@ module rapt_core #(
       .exu_csr(exu_csr),
 
       .csr_bcast(csr_bcast),
+            .pmp_state(pmp_data_state),
       .exu_l1d  (exu_l1d),
 
       .uop_pl(uop_pl),
@@ -492,6 +511,7 @@ module rapt_core #(
       .exu_csr(exu_csr),
 
       .csr_bcast(csr_bcast),
+            .pmp_update(pmp_update),
 
       .s_int_pending(s_int_pending),
       .s_int_cause  (s_int_cause),
@@ -517,6 +537,7 @@ module rapt_core #(
       .rou_lsu(rou_lsu),
 
       .csr_bcast(csr_bcast),
+            .pmp_state(pmp_data_state),
 
       .pmu_sq_full(pmu_sq_full_unused),
 
@@ -532,6 +553,7 @@ module rapt_core #(
       .l1d_bus(l1d_bus),
 
       .csr_bcast(csr_bcast),
+            .pmp_state(pmp_data_state),
 
       .exu_l1d(exu_l1d),
       .rou_cmu(rou_cmu),

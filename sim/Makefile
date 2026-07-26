@@ -89,12 +89,15 @@ CXXFLAGS = -Wall -Werror \
 	-Wno-unused-but-set-variable \
 	$(call remove_quote,$(CONFIG_CC_OPT))
 LDFLAGS = -lreadline -ldl
-# -ltinfo does not exist on macOS (readline links against system ncurses there);
-# Homebrew's lib dir is needed there for -llz4/-lz pulled in by Verilator FST.
-ifeq ($(shell uname -s),Darwin)
-HOMEBREW_PREFIX ?= $(shell brew --prefix 2>/dev/null || echo /opt/homebrew)
-LDFLAGS += -L$(HOMEBREW_PREFIX)/lib
-else
+# Verilator FST includes lz4.h and links -llz4. Homebrew may keep lz4 in its
+# own keg, so its headers and libraries are not necessarily on compiler paths.
+LZ4_PREFIX ?= $(shell brew --prefix lz4 2>/dev/null)
+ifneq ($(wildcard $(LZ4_PREFIX)/include/lz4.h),)
+CXXFLAGS += -I$(LZ4_PREFIX)/include
+LDFLAGS += -L$(LZ4_PREFIX)/lib
+endif
+# -ltinfo does not exist on macOS (readline links against system ncurses there).
+ifneq ($(shell uname -s),Darwin)
 LDFLAGS += -ltinfo
 endif
 
@@ -278,6 +281,7 @@ perf: ## Run microbenchmark for performance testing
 	make -s -C $(AM_KERNEL)/benchmarks/microbench/ ARCH=riscv32-ysyxsoc ARGS='-b -n' mainargs=test run
 
 YOSYS_OPENSTA = $(RAPTOR_HOME)/third_party/yosys-opensta
+YOSYS_SLANG = $(YOSYS_OPENSTA)/yosys-slang
 
 YOSYS_OPENSTA:
 	git clone https://github.com/Kingfish404/yosys-opensta $(YOSYS_OPENSTA)
@@ -301,9 +305,33 @@ sta-deps:
 	  echo ">>> [sta] building OpenSTA (CUDD) ..."; \
 	  $(MAKE) -C $(YOSYS_OPENSTA) setup-opensta; \
 	fi
-	@if ! yosys -m slang -p "help read_slang" >/dev/null 2>&1; then \
+	@set -e; \
+	if [ ! -d $(YOSYS_SLANG)/.git ]; then \
+	  echo ">>> [sta] cloning yosys-slang ..."; \
+	  git clone --recursive https://github.com/povik/yosys-slang $(YOSYS_SLANG); \
+	fi
+	@set -e; \
+	if [ -n "$$(git -C $(YOSYS_SLANG) status --porcelain --untracked-files=no)" ]; then \
+	  echo ">>> [sta] ERROR: $(YOSYS_SLANG) has local changes; update it manually."; \
+	  exit 1; \
+	fi; \
+	if ! git -C $(YOSYS_SLANG) fetch origin master; then \
+	  echo ">>> [sta] WARNING: could not refresh yosys-slang; using cached origin/master."; \
+	fi; \
+	if [ "$$(git -C $(YOSYS_SLANG) rev-parse HEAD)" != \
+	     "$$(git -C $(YOSYS_SLANG) rev-parse origin/master)" ]; then \
+	  echo ">>> [sta] updating yosys-slang to latest origin/master ..."; \
+	  git -C $(YOSYS_SLANG) merge --ff-only origin/master; \
+	  git -C $(YOSYS_SLANG) submodule update --init --recursive; \
+	fi; \
+	current_rev=$$(git -C $(YOSYS_SLANG) rev-parse HEAD); \
+	installed_rev=$$(yosys -m slang -p "slang_version" 2>/dev/null | \
+	  awk '/^(yosys-slang|sv-elab) revision/{print $$3}'); \
+	if [ "$$installed_rev" != "$$current_rev" ]; then \
 	  echo ">>> [sta] building yosys-slang plugin ..."; \
-	  $(MAKE) -C $(YOSYS_OPENSTA) setup-sv-elab; \
+	  cmake -S $(YOSYS_SLANG) -B $(YOSYS_SLANG)/build; \
+	  cmake --build $(YOSYS_SLANG)/build --parallel $(NPROC); \
+	  cmake --install $(YOSYS_SLANG)/build; \
 	fi
 	@if [ ! -d $(YOSYS_OPENSTA)/third_party/lib/$(STA_PLATFORM) ]; then \
 	  echo ">>> [sta] fetching PDK data for $(STA_PLATFORM) ..."; \
@@ -312,8 +340,8 @@ sta-deps:
 
 pack: $(VSRCS) $(VHSRCS) ## Pack all SV files into one
 	mkdir -p $(BUILD_DIR)
-	verilator -E -P $(VFLAGS) $(addprefix -I, $(INC_PATH)) $(VSRCS) > $(BUILD_DIR)/rapt_pack.sv
-	verilator -E -P --dump-defines $(VFLAGS) $(addprefix -I, $(INC_PATH)) $(VSRCS) > $(BUILD_DIR)/rapt_pack.svh
+	verilator -E -P -DSYNTHESIS $(VFLAGS) $(addprefix -I, $(INC_PATH)) $(VSRCS) > $(BUILD_DIR)/rapt_pack.sv
+	verilator -E -P --dump-defines -DSYNTHESIS $(VFLAGS) $(addprefix -I, $(INC_PATH)) $(VSRCS) > $(BUILD_DIR)/rapt_pack.svh
 
 STA_PLATFORM ?= nangate45 ## STA platform: nangate45, asap7, sky130hd
 CLK_FREQ_MHZ ?= 50 ## Target clock frequency for STA (MHz)
@@ -368,7 +396,7 @@ sram-test-sta: ## Opt-in SRAM STA smoke (needs yosys+slang+OpenSTA)
 # OpenRAM 1R1W blackbox declared in sim/sram/wrappers/rapt_sram_blackbox.v.
 pack-sram: $(VSRCS) $(VHSRCS)
 	mkdir -p $(BUILD_DIR)
-	verilator -E -P $(VFLAGS) -DRAPT_USE_SRAM_MACRO $(addprefix -I, $(INC_PATH)) $(VSRCS) > $(BUILD_DIR)/rapt_pack_sram.sv
+	verilator -E -P -DSYNTHESIS $(VFLAGS) -DRAPT_USE_SRAM_MACRO $(addprefix -I, $(INC_PATH)) $(VSRCS) > $(BUILD_DIR)/rapt_pack_sram.sv
 
 sta-sram: pack-sram sta-deps ## STA with OpenRAM SRAM macros (vs flop-array default)
 	@echo ">>> EXTRA_LIB_FILES        = $(RAPT_SRAM_LIBS)"

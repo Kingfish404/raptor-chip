@@ -1,4 +1,5 @@
 `include "tb_core_bcast_defaults.svh"
+`include "tb_pmp_state_defaults.svh"
 
 task automatic init_l1d_inputs;
   begin
@@ -24,6 +25,7 @@ task automatic init_l1d_inputs;
     l1d_bus.ptw_werr = 1'b0;
 
     init_csr_bcast_defaults(`RAPT_PRIV_M, '0, 1'b1);
+    init_pmp_state_defaults(1'b1);
 
     exu_l1d.mmu_en = 1'b0;
     exu_l1d.vaddr = '0;

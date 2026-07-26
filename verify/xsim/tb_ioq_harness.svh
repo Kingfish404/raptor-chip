@@ -4,6 +4,7 @@ logic pmu_ioq_full;
 
 cmu_bcast_if cmu_bcast();
 csr_bcast_if csr_bcast();
+pmp_state_if pmp_state();
 rou_exu_if rou_exu();
 exu_disp_ioq_if disp();
 exu_wb_if exu_rou();
@@ -19,6 +20,7 @@ rapt_exu_ioq dut (
     .reset(reset),
     .cmu_bcast(cmu_bcast),
     .csr_bcast(csr_bcast),
+    .pmp_state(pmp_state),
     .rou_exu(rou_exu),
     .disp(disp),
     .exu_rou(exu_rou),
@@ -35,11 +37,13 @@ always #5 clock = ~clock;
 
 `include "tb_common.svh"
 `include "tb_core_bcast_defaults.svh"
+`include "tb_pmp_state_defaults.svh"
 
 task automatic init_ioq_inputs(input logic dmmu_en);
   begin
     init_cmu_bcast_defaults();
     init_csr_bcast_defaults(`RAPT_PRIV_M, 32'h2000_0000, dmmu_en);
+    init_pmp_state_defaults(1'b0);
     rou_exu.uop = '0;
     rou_exu.op1 = '0;
     rou_exu.op2 = '0;

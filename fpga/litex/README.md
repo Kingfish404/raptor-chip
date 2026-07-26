@@ -28,6 +28,108 @@ make fpga-load
 make fpga-console
 ```
 
+## FPGA Auto-Detection
+
+For FPGA targets, the Makefile asks Vivado Hardware Manager for attached Xilinx
+device parts and maps a recognized part to `FPGA_BOARD`. An attached `xcau15p`
+selects `alinx_axau15`; an attached `xcku15p` selects `mlk_cu07_ku15p`; an
+attached `xcvu9p` selects `xilinx_vcu118`.
+An explicit `FPGA_BOARD=...` always wins. If no supported Xilinx device is found,
+the existing profile default is used. Set `FPGA_AUTO_DETECT=0` to skip probing,
+and run `make fpga-detect` to refresh and inspect the current result. Detection
+is cached in `build/.fpga_detect_parts`, so later commands such as
+`make fpga-console` do not restart Vivado. Use `FPGA_DETECT_REFRESH=1` on any
+FPGA command when the connected board has changed.
+
+Vivado load and flash scripts require exactly one JTAG device matching the board's
+registered part. They never fall back to the first device in the chain, so a
+KU15P bitstream cannot accidentally be assigned to an AU15P.
+
+## ALINX AXAU15 Hardware Flow (Xilinx Vivado)
+
+The AXAU15 (`xcau15p-ffvb676-2-i`) supports both `VARIANT=standard` and
+`VARIANT=linux`. With the board attached, the common commands need no board
+override:
+
+```bash
+make fpga-build
+make fpga-load
+make fpga-console
+```
+
+The default AXAU15 Linux profile uses the `small` Raptor configuration, the
+on-board 1 GiB x16 DDR4 through Xilinx MIG, and the 4-bit SDCard controller/DMA.
+The MIG parameters and pinout are based on the same-board
+`xilinx-xcau15p-pcie-gen4` Vivado project and the AXAU15 manual. The physical
+200 MHz differential input is buffered once and shared by the SoC CRG and MIG.
+
+```bash
+make fpga-build FPGA_BOARD=alinx_axau15 VARIANT=linux
+```
+
+This design maps the full 1 GiB device at `0x80000000`. It passes Vivado DRC,
+timing, pulse-width, and MIG bus-skew checks. The installed memory is
+`MT40A512M16LY-062EIT`; the reference project uses Vivado's compatible
+`MT40A512M16HA-083E` timing model at 2400 MT/s, CL16/CWL12, with a 128-bit AXI
+reference interface. The LiteX integration uses a native 32-bit AXI interface
+to match the SoC bus without narrow transfers. On the current AXAU15, all MIG
+calibration stages pass with no error, the LiteX BIOS 2 MiB write/read memtest
+passes, and sequential throughput is approximately 20.0 MiB/s write and
+14.6 MiB/s read. Full Linux boot from SD remains to be validated.
+
+Configuration flash is not implemented for AXAU15, so
+`make fpga-flash FPGA_BOARD=alinx_axau15` is deliberately refused.
+
+## Xilinx VCU118 Hardware Flow (Preliminary)
+
+The VCU118 (`xcvu9p-flga2104-2-e`) target reuses the maintained
+LiteX-Boards platform definition, including the 125 MHz differential clock,
+on-board USB-UART, eight user LEDs, and DDR4 channel C1. Basic builds use an
+integrated 512 KiB main RAM at 75 MHz. The default Linux profile also uses
+512 KiB of integrated main RAM, with the `small` Raptor configuration and a
+62.5 MHz system clock. DDR4 is disabled by default until the LiteDRAM PHY
+timing constraints have been resolved.
+
+```bash
+# UART/integrated-memory bring-up bitstream.
+make fpga-build FPGA_BOARD=xilinx_vcu118 BOOT_MODE=bios
+make fpga-load FPGA_BOARD=xilinx_vcu118 BOOT_MODE=bios
+make fpga-console FPGA_BOARD=xilinx_vcu118 UART_PORT=/dev/ttyUSB0
+
+# Default Linux-oriented build without external DDR4.
+make fpga-build FPGA_BOARD=xilinx_vcu118 VARIANT=linux
+
+# Experimental external DDR4 build.
+make fpga-build FPGA_BOARD=xilinx_vcu118 VARIANT=linux \
+    WITH_LITEDRAM=1 INTEGRATED_MAIN_RAM_SIZE=0
+```
+
+VCU118 support is currently implementation-validated: LiteX completes SoC
+finalization and Vivado emits a bitstream. The experimental LiteDRAM build maps
+a 1 GiB main RAM window at `0x80000000`; its PHY derives a 250 MHz 4x clock and
+500 MHz IDELAY reference from the 125 MHz input. Raptor `sys_clk` setup passes
+at 62.5 MHz, but the upstream LiteDRAM PHY still reports marginal OSERDES
+`CLK`/`CLKDIV` Max Skew checks. External DDR4 training, UART operation, and
+Linux boot therefore still require validation on a physical board. The LiteX
+platform does not define an SDCard resource, so `WITH_SDCARD=1` is rejected.
+This target intentionally retains LiteDRAM only as an explicit experiment
+rather than introducing an unverified board-specific MIG. Persistent
+configuration flash is also disabled until the board flow is validated.
+
+The VCU118 requires the optional Virtex UltraScale+ device files. A Vivado
+installation that only contains Artix/Kintex device data reports `No parts
+matched 'xcvu9p-flga2104-2-e'`. Re-run the matching AMD installer in maintenance
+mode, choose **Add Design Tools or Devices**, and install **Virtex UltraScale+**.
+For the default per-user installation, the maintenance launcher is typically:
+
+```bash
+$HOME/Vivado/.xinstall/2025.2/xsetup
+```
+
+`fpga-build` checks the exact part before starting LiteX synthesis and prints
+this guidance when the device package is absent. After installation, rerun the
+same build command; no source or part-name override is required.
+
 ## MLK-CU07-KU15P Hardware Flow (Xilinx Vivado)
 
 Milianke MLK-CU07-KU15P (Kintex UltraScale+ `xcku15p-ffva1156-2-e`). UART-only bring-up SoC (integrated ROM/SRAM, no DDR4) over the on-board USB-UART.
@@ -62,7 +164,7 @@ Notes:
 
 ## KU15P Linux FPGA Flow (Vivado MIG)
 
-Linux-oriented KU15P bitstream: `VARIANT=linux`, LiteX BIOS, on-board 4 GB DDR4 via Xilinx MIG mapped as `main_ram` at `0x80000000` (1 GiB AXI window). Setting `VARIANT=linux` (or `linux64`) on any FPGA goal auto-activates the **Linux FPGA profile**, which flips the defaults to `FPGA_BOARD=mlk_cu07_ku15p BOOT_MODE=bios WITH_MIG=1 WITH_SDCARD=1 INTEGRATED_MAIN_RAM_SIZE=0`, `SYS_CLK=50000000` (50 MHz), `UART_BAUD=115200`, and the `default` Raptor preset. Linux currently sees 256 MiB because the core's PMEM classifier accepts `0x80000000..0x8fffffff`; `LINUX_FPGA_RAM_SIZE` must not exceed that window until the classifier is widened. The legacy LiteDRAM path is still available via `WITH_LITEDRAM=1`. `make fpga-build VARIANT=linux` only succeeds if the Vivado timing report meets constraints; the default bitstream lands under `build/mlk_cu07_ku15p/bios-linux-mig-sdcard-default/gateware/`.
+Linux-oriented KU15P bitstream: `VARIANT=linux`, LiteX BIOS, on-board 4 GB DDR4 via Xilinx MIG mapped as `main_ram` at `0x80000000` (1 GiB AXI window). On the KU15P, the board-aware Linux profile selects `BOOT_MODE=bios WITH_MIG=1 WITH_SDCARD=1 INTEGRATED_MAIN_RAM_SIZE=0`, `SYS_CLK=50000000` (50 MHz), `UART_BAUD=115200`, and the `default` Raptor preset. Linux currently sees 256 MiB because the core's PMEM classifier accepts `0x80000000..0x8fffffff`; `LINUX_FPGA_RAM_SIZE` must not exceed that window until the classifier is widened. The legacy LiteDRAM path is still available via `WITH_LITEDRAM=1`. `make fpga-build VARIANT=linux FPGA_BOARD=mlk_cu07_ku15p` only succeeds if the Vivado timing report meets constraints; the default bitstream lands under `build/mlk_cu07_ku15p/bios-linux-mig-sdcard-default/gateware/`.
 
 ```bash
 source /opt/Xilinx/2025.2/Vivado/settings64.sh
@@ -137,11 +239,14 @@ sudo umount /dev/sdX1 2>/dev/null || true
 sudo mkfs.fat -F 32 -n RAPTOR_BOOT /dev/sdX1
 ```
 
-Insert the card into the KU15P board, load the Linux bitstream, and open the console (`make fpga-load`, `make fpga-console`). At the `litex>` prompt, run `sdcardboot`.
+Insert the card into the KU15P board, load its Linux bitstream, and open the
+console (`make fpga-load`, `make fpga-console`). At the `litex>` prompt, run
+`sdcardboot`. AXAU15 MIG and BIOS memory validation pass; end-to-end SD Linux
+boot remains pending.
 
 Key conventions:
-- The bitstream knobs `BOOT_MODE=bios INTEGRATED_MAIN_RAM_SIZE=0 WITH_MIG=1` are all auto-set by the Linux FPGA profile (`VARIANT=linux`). DDR4 MIG IP `raptor_ddr4_0` maps a 1 GiB AXI window at `0x80000000`; the default DTB advertises the currently supported low 256 MiB.
-- Linux normally boots from the SD card with the BIOS `sdcardboot` command. The SD controller is present by default on KU15P builds, while automatic SD boot remains disabled so serialboot and RaptOS iteration stay convenient.
+- The bitstream knobs `BOOT_MODE=bios INTEGRATED_MAIN_RAM_SIZE=0 WITH_MIG=1` are all auto-set by the Linux FPGA profile (`VARIANT=linux`). The board-specific MIG IP maps external DDR4 at `0x80000000`.
+- Linux can boot from the SD card with the BIOS `sdcardboot` command. The SD controller is present by default in both KU15P and AXAU15 Linux builds. Automatic SD boot is disabled by default: after serialboot times out, BIOS enters the `litex>` console. Use `sdcardboot` for an inserted card or `boot <address>` for an image already in memory. Set `SDCARD_BOOT=1` at build time to restore automatic SD boot. A small compatibility shim supplies this `SDCARD_BOOT_DISABLE` behavior for LiteX revisions that do not yet implement it and becomes a no-op once upstream support is present.
 - Default `fpga-upload VARIANT=linux` is a serial fallback: it uploads the contiguous `linux-fpga.img` at `0x80000000` with `litex_term`, using the same path as RaptOS and other firmware images.
 - KU15P UART and SFL are fixed at 115200 baud because the board's host-to-FPGA path is not reliable at higher rates.
 - Payload-only iteration: once the bitstream is loaded, just re-run the matching upload target (`make fpga-upload VARIANT=linux`, `make coremark-fpga VARIANT=linux`, …) — no re-synthesis needed.
@@ -155,10 +260,12 @@ Status: the `default` RV32IMAC preset routes, passes the BIOS DDR test, boots Op
 ```
 fpga/litex/
 +-- Makefile            # Build system (run 'make help')
++-- mk/                 # Derived config (config.mk) and reusable recipes (recipes.mk)
 +-- setup_env.sh        # Environment setup (venv + LiteX install)
 +-- raptor_soc.py       # Verilator simulation SoC entry point
 +-- raptor_tang_mega_138k_pro.py  # Tang Mega 138K Pro FPGA SoC entry point
 +-- raptor_mlk_cu07_ku15p.py      # MLK-CU07-KU15P Vivado/MIG FPGA SoC entry point
++-- raptor_alinx_axau15.py         # ALINX AXAU15 MIG/SDCard target
 +-- README.md           # This file
 +-- firmware/           # Sim, integrated-ROM FPGA, and Linux-FPGA stage0 firmware
 +-- benchmarks/         # LiteX-native CoreMark/Embench payloads

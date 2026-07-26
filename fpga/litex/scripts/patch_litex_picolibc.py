@@ -72,9 +72,23 @@ def patch_libc_mk(path: pathlib.Path) -> bool:
     text = path.read_text()
     original = text
 
+    if "PICOLIBC_SRC_STAMP =" not in text:
+        text = text.replace(
+            "PICOLIBC_SRC_DIR = $(BUILDINC_DIRECTORY)/../picolibc_src\n",
+            "PICOLIBC_SRC_DIR = $(BUILDINC_DIRECTORY)/../picolibc_src\n"
+            "PICOLIBC_SRC_STAMP = $(PICOLIBC_SRC_DIR)/.litex-stage-v1\n",
+        )
     text = text.replace(
         "cp -a $(PICOLIBC_DIRECTORY) $(BUILDINC_DIRECTORY)/../picolibc_src",
         "cp -a $(PICOLIBC_ROOT_DIR) $(BUILDINC_DIRECTORY)/../picolibc_src",
+    )
+    text = text.replace(
+        "$(PICOLIBC_SRC_DIR): $(MESON_CROSS_FILE)",
+        "$(PICOLIBC_SRC_STAMP): $(MESON_CROSS_FILE) $(PICOLIBC_ROOT_DIR)/meson.build",
+    )
+    text = text.replace(
+        "configure-picolibc: $(PICOLIBC_SRC_DIR)",
+        "configure-picolibc: $(PICOLIBC_SRC_STAMP)",
     )
     text = text.replace("$(PICOLIBC_SRC_DIR)/newlib/libc/", "$(PICOLIBC_SRC_DIR)/libc/")
     text = text.replace("$(PICOLIBC_SRC_DIR)/newlib/libm/", "$(PICOLIBC_SRC_DIR)/libm/")
@@ -126,6 +140,12 @@ def patch_libc_mk(path: pathlib.Path) -> bool:
             + "\tfi\n"
         )
         text = text.replace(cpu_copy, cpu_copy + compat_copy)
+    if "touch $(PICOLIBC_SRC_STAMP)" not in text:
+        text = text.replace(
+            "\n$(CURDIR)/picolibc.h: $(LIBC_DIRECTORY)/picolibc-minimal.h",
+            "\ttouch $(PICOLIBC_SRC_STAMP)\n\n"
+            "$(CURDIR)/picolibc.h: $(LIBC_DIRECTORY)/picolibc-minimal.h",
+        )
     text = text.replace(
         "$(PICOLIBC_SRC_DIR)/newlib/libc/tinystdio/strtoul.c",
         "$(PICOLIBC_SRC_DIR)/libc/tinystdio/strtoul.c",
@@ -141,6 +161,10 @@ def patch_libc_mk(path: pathlib.Path) -> bool:
     text = text.replace(
         "$(PICOLIBC_SRC_DIR)/newlib/libc/stdlib/strtoull.c",
         "$(PICOLIBC_SRC_DIR)/libc/stdlib/strtoull.c",
+    )
+    text = text.replace(
+        "$(MINIMAL_PICOLIBC_SRCS): | $(PICOLIBC_SRC_DIR)",
+        "$(MINIMAL_PICOLIBC_SRCS): | $(PICOLIBC_SRC_STAMP)",
     )
 
     if text == original:

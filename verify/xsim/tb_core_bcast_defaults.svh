@@ -26,7 +26,7 @@ endtask
 task automatic init_csr_bcast_defaults(
     input logic [1:0] priv_value,
     input logic [XLEN-1:0] vector_base,
-    input bit pmp_mode_off_value
+  input bit unused_pmp_mode_off_value
 );
   begin
     csr_bcast.priv = priv_value;
@@ -49,22 +49,6 @@ task automatic init_csr_bcast_defaults(
     csr_bcast.tw = 1'b0;
     csr_bcast.mcounteren = '0;
     csr_bcast.scounteren = '0;
-    csr_bcast.pmp_cfg_r = '0;
-    csr_bcast.pmp_cfg_w = '0;
-    csr_bcast.pmp_cfg_x = '0;
-    csr_bcast.pmp_cfg_l = '0;
-    csr_bcast.pmp_mode_off = pmp_mode_off_value ? '1 : '0;
-    csr_bcast.pmp_mode_tor = '0;
-    csr_bcast.pmp_mode_na4 = '0;
-    csr_bcast.pmp_mode_napot = '0;
-    for (int i = 0; i < `RAPT_PMP_NUM; i++) begin
-      csr_bcast.pmpcfg[i] = '0;
-      csr_bcast.pmpaddr[i] = '0;
-      csr_bcast.pmp_napot_mask[i] = '0;
-      csr_bcast.pmp_napot_base[i] = '0;
-      csr_bcast.pmp_tor_lo[i] = '0;
-      csr_bcast.pmp_tor_hi[i] = '0;
-    end
   end
 endtask
 

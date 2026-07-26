@@ -254,10 +254,10 @@ module rapt_ptw #(
 
   always_ff @(posedge clock) begin
     if (!reset) begin
-      assert (!bus_rvalid || state inside {LVL2_WAIT, LVL1_WAIT, LVL0_WAIT})
-        else $error("PTW read response arrived outside a response-wait state");
-      assert (!(bus_arvalid && bus_rvalid))
-        else $error("PTW issued a read request while consuming a response");
+      `RAPT_SVA_IMM(PTW_READ_RESPONSE_STATE,
+          !bus_rvalid || state inside {LVL2_WAIT, LVL1_WAIT, LVL0_WAIT})
+      `RAPT_SVA_IMM(PTW_NO_REQUEST_DURING_RESPONSE,
+          !(bus_arvalid && bus_rvalid))
     end
   end
 
@@ -436,10 +436,10 @@ module rapt_ptw #(
 
   always_ff @(posedge clock) begin
     if (!reset) begin
-      assert (!bus_rvalid || state inside {LVL1_WAIT, LVL0_WAIT})
-        else $error("PTW read response arrived outside a response-wait state");
-      assert (!(bus_arvalid && bus_rvalid))
-        else $error("PTW issued a read request while consuming a response");
+      `RAPT_SVA_IMM(PTW_READ_RESPONSE_STATE,
+          !bus_rvalid || state inside {LVL1_WAIT, LVL0_WAIT})
+      `RAPT_SVA_IMM(PTW_NO_REQUEST_DURING_RESPONSE,
+          !(bus_arvalid && bus_rvalid))
     end
   end
 

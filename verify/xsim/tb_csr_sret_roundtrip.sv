@@ -13,6 +13,15 @@ module tb_csr_sret_roundtrip;
   rou_csr_if #(.XLEN(XLEN)) rou_csr ();
   exu_csr_if #(.XLEN(XLEN)) exu_csr ();
   csr_bcast_if #(.XLEN(XLEN)) csr_bcast ();
+      pmp_update_if #(.XLEN(XLEN)) pmp_update ();
+      pmp_state_if #(.XLEN(XLEN)) pmp_state ();
+
+      rapt_pmp_state pmp_state_regs (
+                  .clock,
+                  .reset,
+                  .update(pmp_update),
+                  .state(pmp_state)
+      );
 
   rapt_csr #(.XLEN(XLEN)) dut (
       .clock,
@@ -20,6 +29,7 @@ module tb_csr_sret_roundtrip;
       .rou_csr,
       .exu_csr,
       .csr_bcast,
+      .pmp_update,
       .s_int_pending,
       .s_int_cause,
       .timer_irq_i(1'b0),
@@ -109,6 +119,35 @@ module tb_csr_sret_roundtrip;
     check_csr_zero(`RAPT_CSR_MIE____, "mie");
     check_csr_zero(`RAPT_CSR_MIP____, "mip");
 
+    // PMP shadows update with accepted writes, including the next TOR lower bound.
+    write_csr(`RAPT_CSR_PMPADDR0, 32'h0000_0123);
+      check(dut.pmpaddr_r[0] == 32'h0000_0123, "pmpaddr0 write was not stored");
+      check(pmp_state.pmp_napot_mask[0] == 32'h0000_0007,
+          "pmpaddr0 produced the wrong NAPOT mask");
+      check(pmp_state.pmp_napot_base[0] == 32'h0000_0120,
+          "pmpaddr0 produced the wrong NAPOT base");
+      check(pmp_state.pmp_tor_hi[0] == 32'h0000_0123,
+          "pmpaddr0 did not update its TOR upper bound");
+      check(pmp_state.pmp_tor_lo[1] == 32'h0000_0123,
+          "pmpaddr0 did not update the next TOR lower bound");
+
+    // Entry 0 is unlocked NAPOT/RWX; entry 1 is locked TOR/R. The locked TOR
+    // entry also locks pmpaddr0 because it supplies entry 1's lower bound.
+    write_csr(`RAPT_CSR_PMPCFG0, 32'h0000_891f);
+      check(pmp_state.pmp_cfg_r[0] && pmp_state.pmp_cfg_w[0] && pmp_state.pmp_cfg_x[0],
+          "pmpcfg0 did not update entry 0 permissions");
+      check(pmp_state.pmp_mode_napot[0] && !pmp_state.pmp_mode_off[0],
+          "pmpcfg0 did not update entry 0 NAPOT mode");
+      check(pmp_state.pmp_cfg_l[1] && pmp_state.pmp_mode_tor[1],
+          "pmpcfg0 did not update entry 1 locked TOR mode");
+    write_csr(`RAPT_CSR_PMPADDR0, 32'h0000_0456);
+      check(dut.pmpaddr_r[0] == 32'h0000_0123,
+          "locked TOR lower bound accepted a pmpaddr0 write");
+      check(pmp_state.pmp_napot_mask[0] == 32'h0000_0007,
+          "rejected pmpaddr0 write changed its NAPOT shadow");
+      check(pmp_state.pmp_tor_lo[1] == 32'h0000_0123,
+          "rejected pmpaddr0 write changed the next TOR lower bound");
+
     // Enter U-mode through MRET with MPP=U, then delegate U-ecall to S-mode.
     write_csr(`RAPT_CSR_MSTATUS, 32'h0);
     write_csr(`RAPT_CSR_MEDELEG, 32'h0000_0100);
@@ -133,7 +172,7 @@ module tb_csr_sret_roundtrip;
     check(exu_csr.rdata[`RAPT_CSR_MSTATUS_SPIE] == 1'b1,
           "SRET did not set SPIE");
 
-    $display("PASS: CSR reset and U-ecall/SRET round-trip checks passed");
+    $display("PASS: CSR PMP shadow and U-ecall/SRET round-trip checks passed");
     $finish;
   end
 endmodule

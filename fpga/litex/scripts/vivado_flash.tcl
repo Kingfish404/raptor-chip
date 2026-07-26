@@ -3,14 +3,15 @@
 #
 # Usage (driven by `make fpga-flash FPGA_BOARD=mlk_cu07_ku15p`):
 #   vivado -mode batch -source scripts/vivado_flash.tcl \
-#       -tclargs <bitstream.bit> <gateware_dir>
+#       -tclargs <bitstream.bit> <gateware_dir> <expected-part>
 
-if {$argc < 2} {
-    puts "ERROR: usage: vivado -source vivado_flash.tcl -tclargs <bitstream.bit> <gateware_dir>"
+if {$argc < 3} {
+    puts "ERROR: usage: vivado -source vivado_flash.tcl -tclargs <bitstream.bit> <gateware_dir> <expected-part>"
     exit 1
 }
 set bitstream [lindex $argv 0]
 set out_dir   [lindex $argv 1]
+set expected_part [string tolower [lindex $argv 2]]
 if {![file exists $bitstream]} {
     puts "ERROR: bitstream not found: $bitstream"
     exit 1
@@ -29,17 +30,27 @@ open_hw_manager
 connect_hw_server -allow_non_jtag
 open_hw_target
 
-set dev ""
-foreach d [get_hw_devices] {
-    if {[string match -nocase "*ku15p*" $d] || [string match -nocase "xcku15p*" $d]} {
-        set dev $d
-        break
+set matches [list]
+set discovered [list]
+foreach candidate [get_hw_devices] {
+    refresh_hw_device -update_hw_probes false $candidate
+    set candidate_part [string tolower [get_property PART $candidate]]
+    lappend discovered "$candidate:$candidate_part"
+    if {$candidate_part eq $expected_part} {
+        lappend matches $candidate
     }
 }
-if {$dev eq ""} {
-    set dev [lindex [get_hw_devices] 0]
+if {[llength $matches] != 1} {
+    puts "ERROR: expected exactly one JTAG device with part '$expected_part', found [llength $matches]."
+    puts "ERROR: discovered devices: [join $discovered {, }]"
+    puts "ERROR: refusing to flash configuration memory."
+    close_hw_target
+    disconnect_hw_server
+    close_hw_manager
+    exit 1
 }
-puts "INFO: flashing config memory on hw device: $dev"
+set dev [lindex $matches 0]
+puts "INFO: flashing config memory on hw device: $dev (part=$expected_part)"
 
 current_hw_device $dev
 refresh_hw_device -update_hw_probes false $dev
@@ -63,5 +74,6 @@ program_hw_cfgmem -hw_cfgmem $cfgmem
 endgroup
 
 close_hw_target
+disconnect_hw_server
 close_hw_manager
 puts "INFO: config flash written; power-cycle the board to boot from flash."

@@ -14,6 +14,7 @@
 //   * Single L1D outstanding load (`oo_pending` FSM)
 //   * Atomics and uncached MMIO loads serialize at head only
 //   * Stores always wait at head (no speculative writes)
+/* verilator lint_off PINCONNECTEMPTY */
 module rapt_exu_ioq #(
     parameter unsigned IOQ_SIZE = `RAPT_IOQ_SIZE,
     parameter unsigned ROB_SIZE = `RAPT_ROB_SIZE,
@@ -26,6 +27,7 @@ module rapt_exu_ioq #(
 
     cmu_bcast_if.in cmu_bcast,
     csr_bcast_if.in csr_bcast,
+    pmp_state_if.in pmp_state,
 
     // Dispatch source (read-only view of rou_exu, drive accepts via disp.io)
     rou_exu_if.monitor  rou_exu,
@@ -284,19 +286,20 @@ module rapt_exu_ioq #(
       .op_r          (1'b0),
       .op_w          (1'b1),
       .op_x          (1'b0),
-      .pmp_napot_mask(csr_bcast.pmp_napot_mask),
-      .pmp_napot_base(csr_bcast.pmp_napot_base),
-      .pmp_tor_lo    (csr_bcast.pmp_tor_lo),
-      .pmp_tor_hi    (csr_bcast.pmp_tor_hi),
-      .pmp_cfg_r     (csr_bcast.pmp_cfg_r),
-      .pmp_cfg_w     (csr_bcast.pmp_cfg_w),
-      .pmp_cfg_x     (csr_bcast.pmp_cfg_x),
-      .pmp_cfg_l     (csr_bcast.pmp_cfg_l),
-      .pmp_mode_off  (csr_bcast.pmp_mode_off),
-      .pmp_mode_tor  (csr_bcast.pmp_mode_tor),
-      .pmp_mode_na4  (csr_bcast.pmp_mode_na4),
-      .pmp_mode_napot(csr_bcast.pmp_mode_napot),
-      .fault         (pmp_store_bare_fault)
+      .pmp_napot_mask(pmp_state.pmp_napot_mask),
+      .pmp_napot_base(pmp_state.pmp_napot_base),
+      .pmp_tor_lo    (pmp_state.pmp_tor_lo),
+      .pmp_tor_hi    (pmp_state.pmp_tor_hi),
+      .pmp_cfg_r     (pmp_state.pmp_cfg_r),
+      .pmp_cfg_w     (pmp_state.pmp_cfg_w),
+      .pmp_cfg_x     (pmp_state.pmp_cfg_x),
+      .pmp_cfg_l     (pmp_state.pmp_cfg_l),
+      .pmp_mode_off  (pmp_state.pmp_mode_off),
+      .pmp_mode_tor  (pmp_state.pmp_mode_tor),
+      .pmp_mode_na4  (pmp_state.pmp_mode_na4),
+      .pmp_mode_napot(pmp_state.pmp_mode_napot),
+      .fault         (pmp_store_bare_fault),
+      .fault_lo_o    ()
   );
   logic store_bare_pmp_trap;
   assign store_bare_pmp_trap = ioq_wen[ioq_head]
@@ -700,3 +703,4 @@ module rapt_exu_ioq #(
   assign pmu_ioq_full = (&ioq_valid) && !ioq_full_r;
 
 endmodule
+/* verilator lint_on PINCONNECTEMPTY */

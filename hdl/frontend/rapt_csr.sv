@@ -20,6 +20,7 @@ module rapt_csr #(
     exu_csr_if.slave exu_csr,
 
     csr_bcast_if.out csr_bcast,
+    pmp_update_if.out pmp_update,
 
     // S-mode delegated interrupt pending signal to rou (level).
     // Asserts when (mip & mie & mideleg) has any bit set AND the interrupt is
@@ -127,25 +128,6 @@ module rapt_csr #(
   // pmpaddr is stored in its raw CSR form (byte_addr >> 2).
   logic [7:0]      pmpcfg_r [`RAPT_PMP_NUM];
   logic [XLEN-1:0] pmpaddr_r[`RAPT_PMP_NUM];
-
-  // PMP shadow registers (precomputed every clock from pmpcfg_r/pmpaddr_r).
-  // Allows the combinational rapt_pmp module to skip the per-entry NAPOT
-  // decode (XOR + AND), TOR neighbour fetch, and bit-slice extraction.
-  // 1-cycle latency vs raw CSR -- the pipeline already flushes on PMP CSR
-  // writes (via fence/csrrw side-effects), so by the time the next L/S
-  // executes the shadow has caught up.
-  logic [XLEN-1:0]          pmp_napot_mask_r[`RAPT_PMP_NUM];
-  logic [XLEN-1:0]          pmp_napot_base_r[`RAPT_PMP_NUM];
-  logic [XLEN-1:0]          pmp_tor_lo_r    [`RAPT_PMP_NUM];
-  logic [XLEN-1:0]          pmp_tor_hi_r    [`RAPT_PMP_NUM];
-  logic [`RAPT_PMP_NUM-1:0] pmp_cfg_r_r;
-  logic [`RAPT_PMP_NUM-1:0] pmp_cfg_w_r;
-  logic [`RAPT_PMP_NUM-1:0] pmp_cfg_x_r;
-  logic [`RAPT_PMP_NUM-1:0] pmp_cfg_l_r;
-  logic [`RAPT_PMP_NUM-1:0] pmp_mode_off_r;
-  logic [`RAPT_PMP_NUM-1:0] pmp_mode_tor_r;
-  logic [`RAPT_PMP_NUM-1:0] pmp_mode_na4_r;
-  logic [`RAPT_PMP_NUM-1:0] pmp_mode_napot_r;
 
   // trap handle
   logic [XLEN-1:0] cause_idx;
@@ -455,65 +437,94 @@ module rapt_csr #(
   assign csr_bcast.mxr        = csr[MSTATUS][`RAPT_CSR_MSTATUS_MXR_];
   assign csr_bcast.sbe        = csr[MSTATUSH][`RAPT_CSR_MSTATUSH_SBE];
 
-  // PMP broadcast
+  // Incremental PMP update command. Consumers keep local decoded state; only
+  // accepted writes toggle this core-wide bus.
   always_comb begin
-    for (int gi = 0; gi < `RAPT_PMP_NUM; gi++) begin
-      csr_bcast.pmpcfg[gi]  = pmpcfg_r[gi];
-      csr_bcast.pmpaddr[gi] = pmpaddr_r[gi];
-      csr_bcast.pmp_napot_mask[gi] = pmp_napot_mask_r[gi];
-      csr_bcast.pmp_napot_base[gi] = pmp_napot_base_r[gi];
-      csr_bcast.pmp_tor_lo[gi]     = pmp_tor_lo_r[gi];
-      csr_bcast.pmp_tor_hi[gi]     = pmp_tor_hi_r[gi];
-    end
-    csr_bcast.pmp_cfg_r      = pmp_cfg_r_r;
-    csr_bcast.pmp_cfg_w      = pmp_cfg_w_r;
-    csr_bcast.pmp_cfg_x      = pmp_cfg_x_r;
-    csr_bcast.pmp_cfg_l      = pmp_cfg_l_r;
-    csr_bcast.pmp_mode_off   = pmp_mode_off_r;
-    csr_bcast.pmp_mode_tor   = pmp_mode_tor_r;
-    csr_bcast.pmp_mode_na4   = pmp_mode_na4_r;
-    csr_bcast.pmp_mode_napot = pmp_mode_napot_r;
-  end
+    automatic int cfg_base;
+    automatic int cfg_count;
+    automatic logic cfg_write;
+    automatic logic [3:0] pidx;
+    automatic logic self_locked;
+    automatic logic tor_locked;
 
-  // PMP shadow registers -- derived from pmpcfg_r/pmpaddr_r every clock.
-  // Updates 1 cycle after the underlying CSR write, which is invisible to
-  // software because the PMP CSR write itself triggers a pipeline flush
-  // and any subsequent load/store is at least 2 cycles downstream.
-  always_ff @(posedge clock) begin
-    if (reset) begin
-      for (int i = 0; i < `RAPT_PMP_NUM; i++) begin
-        pmp_napot_mask_r[i] <= '0;
-        pmp_napot_base_r[i] <= '0;
-        pmp_tor_lo_r[i]     <= '0;
-        pmp_tor_hi_r[i]     <= '0;
+    pmp_update.addr_we    = 1'b0;
+    pmp_update.addr_idx   = '0;
+    pmp_update.napot_mask = '0;
+    pmp_update.napot_base = '0;
+    pmp_update.tor_hi     = '0;
+    pmp_update.cfg_we     = '0;
+    pmp_update.cfg_r      = '0;
+    pmp_update.cfg_w      = '0;
+    pmp_update.cfg_x      = '0;
+    pmp_update.cfg_l      = '0;
+    pmp_update.mode_off   = '0;
+    pmp_update.mode_tor   = '0;
+    pmp_update.mode_na4   = '0;
+    pmp_update.mode_napot = '0;
+
+    cfg_base  = 0;
+    cfg_count = 0;
+    cfg_write = 1'b0;
+    unique case (rou_csr.csr_addr)
+      `RAPT_CSR_PMPCFG0: begin
+        cfg_write = 1'b1;
+        cfg_count = (XLEN == 64) ? 8 : 4;
       end
-      pmp_cfg_r_r      <= '0;
-      pmp_cfg_w_r      <= '0;
-      pmp_cfg_x_r      <= '0;
-      pmp_cfg_l_r      <= '0;
-      pmp_mode_off_r   <= '1;  // OFF by default
-      pmp_mode_tor_r   <= '0;
-      pmp_mode_na4_r   <= '0;
-      pmp_mode_napot_r <= '0;
-    end else begin
-      for (int i = 0; i < `RAPT_PMP_NUM; i++) begin
-        // NAPOT closed-form: mask = pmpaddr ^ (pmpaddr + 1), base = pmpaddr & ~mask.
-        // Computed on the fast pmpaddr_r -> FF path, kept off the LSU/L1D critical path.
-        pmp_napot_mask_r[i] <= pmpaddr_r[i] ^ (pmpaddr_r[i] + {{(XLEN-1){1'b0}}, 1'b1});
-        pmp_napot_base_r[i] <= pmpaddr_r[i]
-          & ~(pmpaddr_r[i]
-          ^ (pmpaddr_r[i] + {{(XLEN-1){1'b0}}, 1'b1}));
-        pmp_tor_lo_r[i]     <= (i == 0) ? '0 : pmpaddr_r[i-1];
-        pmp_tor_hi_r[i]     <= pmpaddr_r[i];
-        pmp_cfg_r_r[i]      <= pmpcfg_r[i][`RAPT_PMPCFG_R_];
-        pmp_cfg_w_r[i]      <= pmpcfg_r[i][`RAPT_PMPCFG_W_];
-        pmp_cfg_x_r[i]      <= pmpcfg_r[i][`RAPT_PMPCFG_X_];
-        pmp_cfg_l_r[i]      <= pmpcfg_r[i][`RAPT_PMPCFG_L_];
-        pmp_mode_off_r[i]   <= (pmpcfg_r[i][`RAPT_PMPCFG_A_] == `RAPT_PMP_A_OFF);
-        pmp_mode_tor_r[i]   <= (pmpcfg_r[i][`RAPT_PMPCFG_A_] == `RAPT_PMP_A_TOR);
-        pmp_mode_na4_r[i]   <= (pmpcfg_r[i][`RAPT_PMPCFG_A_] == `RAPT_PMP_A_NA4);
-        pmp_mode_napot_r[i] <= (pmpcfg_r[i][`RAPT_PMPCFG_A_] == `RAPT_PMP_A_NAPOT);
+      `RAPT_CSR_PMPCFG1: begin
+        cfg_write = (XLEN == 32);
+        cfg_base  = 4;
+        cfg_count = 4;
       end
+      `RAPT_CSR_PMPCFG2: begin
+        cfg_write = 1'b1;
+        cfg_base  = 8;
+        cfg_count = (XLEN == 64) ? 8 : 4;
+      end
+      `RAPT_CSR_PMPCFG3: begin
+        cfg_write = (XLEN == 32);
+        cfg_base  = 12;
+        cfg_count = 4;
+      end
+      default: begin
+      end
+    endcase
+
+    if (rou_csr.valid && rou_csr.csr_wen && cfg_write) begin
+      for (int i = 0; i < `RAPT_PMP_NUM; i++) begin
+        if (i >= cfg_base && i < cfg_base + cfg_count
+            && !pmpcfg_r[i][`RAPT_PMPCFG_L_]) begin
+          pmp_update.cfg_we[i]      = 1'b1;
+          pmp_update.cfg_r[i]       = rou_csr.csr_wdata[(i-cfg_base)*8 + `RAPT_PMPCFG_R_];
+          pmp_update.cfg_w[i]       = rou_csr.csr_wdata[(i-cfg_base)*8 + `RAPT_PMPCFG_W_];
+          pmp_update.cfg_x[i]       = rou_csr.csr_wdata[(i-cfg_base)*8 + `RAPT_PMPCFG_X_];
+          pmp_update.cfg_l[i]       = rou_csr.csr_wdata[(i-cfg_base)*8 + `RAPT_PMPCFG_L_];
+          pmp_update.mode_off[i]    = (rou_csr.csr_wdata[(i-cfg_base)*8 + 3 +: 2]
+                                       == `RAPT_PMP_A_OFF);
+          pmp_update.mode_tor[i]    = (rou_csr.csr_wdata[(i-cfg_base)*8 + 3 +: 2]
+                                       == `RAPT_PMP_A_TOR);
+          pmp_update.mode_na4[i]    = (rou_csr.csr_wdata[(i-cfg_base)*8 + 3 +: 2]
+                                       == `RAPT_PMP_A_NA4);
+          pmp_update.mode_napot[i]  = (rou_csr.csr_wdata[(i-cfg_base)*8 + 3 +: 2]
+                                       == `RAPT_PMP_A_NAPOT);
+        end
+      end
+    end
+
+    pidx = rou_csr.csr_addr[3:0];
+    self_locked = pmpcfg_r[pidx][`RAPT_PMPCFG_L_];
+    tor_locked = (pidx < 4'(`RAPT_PMP_NUM - 1))
+        ? (pmpcfg_r[pidx + 4'd1][`RAPT_PMPCFG_L_]
+           && (pmpcfg_r[pidx + 4'd1][`RAPT_PMPCFG_A_] == `RAPT_PMP_A_TOR))
+        : 1'b0;
+    if (rou_csr.valid && rou_csr.csr_wen
+        && rou_csr.csr_addr >= `RAPT_CSR_PMPADDR0
+        && rou_csr.csr_addr <= `RAPT_CSR_PMPADDR15
+        && !self_locked && !tor_locked) begin
+      pmp_update.addr_we    = 1'b1;
+      pmp_update.addr_idx   = pidx;
+      pmp_update.napot_mask = rou_csr.csr_wdata ^ (rou_csr.csr_wdata + XLEN'(1));
+      pmp_update.napot_base = rou_csr.csr_wdata & ~pmp_update.napot_mask;
+      pmp_update.tor_hi     = rou_csr.csr_wdata;
     end
   end
 

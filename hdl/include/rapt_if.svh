@@ -165,6 +165,59 @@ interface l1d_bus_if #(
 endinterface
 
 // csr boardcast
+interface pmp_update_if #(
+    parameter int XLEN = `RAPT_XLEN,
+    parameter int N = `RAPT_PMP_NUM,
+    parameter int IDX_W = $clog2(N)
+);
+  logic                  addr_we;
+  logic [IDX_W-1:0]      addr_idx;
+  logic [XLEN-1:0]       napot_mask;
+  logic [XLEN-1:0]       napot_base;
+  logic [XLEN-1:0]       tor_hi;
+  logic [N-1:0]          cfg_we;
+  logic [N-1:0]          cfg_r;
+  logic [N-1:0]          cfg_w;
+  logic [N-1:0]          cfg_x;
+  logic [N-1:0]          cfg_l;
+  logic [N-1:0]          mode_off;
+  logic [N-1:0]          mode_tor;
+  logic [N-1:0]          mode_na4;
+  logic [N-1:0]          mode_napot;
+
+  modport in(input addr_we, addr_idx, napot_mask, napot_base, tor_hi,
+             cfg_we, cfg_r, cfg_w, cfg_x, cfg_l,
+             mode_off, mode_tor, mode_na4, mode_napot);
+  modport out(output addr_we, addr_idx, napot_mask, napot_base, tor_hi,
+              cfg_we, cfg_r, cfg_w, cfg_x, cfg_l,
+              mode_off, mode_tor, mode_na4, mode_napot);
+endinterface
+
+interface pmp_state_if #(
+    parameter int XLEN = `RAPT_XLEN,
+    parameter int N = `RAPT_PMP_NUM
+);
+  logic [XLEN-1:0] pmp_napot_mask[N];
+  logic [XLEN-1:0] pmp_napot_base[N];
+  logic [XLEN-1:0] pmp_tor_lo[N];
+  logic [XLEN-1:0] pmp_tor_hi[N];
+  logic [N-1:0] pmp_cfg_r;
+  logic [N-1:0] pmp_cfg_w;
+  logic [N-1:0] pmp_cfg_x;
+  logic [N-1:0] pmp_cfg_l;
+  logic [N-1:0] pmp_mode_off;
+  logic [N-1:0] pmp_mode_tor;
+  logic [N-1:0] pmp_mode_na4;
+  logic [N-1:0] pmp_mode_napot;
+
+  modport in(input pmp_napot_mask, pmp_napot_base, pmp_tor_lo, pmp_tor_hi,
+             pmp_cfg_r, pmp_cfg_w, pmp_cfg_x, pmp_cfg_l,
+             pmp_mode_off, pmp_mode_tor, pmp_mode_na4, pmp_mode_napot);
+  modport out(output pmp_napot_mask, pmp_napot_base, pmp_tor_lo, pmp_tor_hi,
+              pmp_cfg_r, pmp_cfg_w, pmp_cfg_x, pmp_cfg_l,
+              pmp_mode_off, pmp_mode_tor, pmp_mode_na4, pmp_mode_napot);
+endinterface
+
 interface csr_bcast_if #(
     parameter int XLEN = `RAPT_XLEN
 );
@@ -200,51 +253,17 @@ interface csr_bcast_if #(
   logic [2:0] mcounteren;
   logic [2:0] scounteren;
 
-  // PMP raw state. pmpaddr is the raw CSR value (byte address >> 2);
-  // pmpcfg is the 8-bit layout L[7] 0[6:5] A[4:3] X[2] W[1] R[0].
-  // Used for software CSR reads (rapt_csr.sv).
-  logic [7:0] pmpcfg[`RAPT_PMP_NUM];
-  logic [XLEN-1:0] pmpaddr[`RAPT_PMP_NUM];
-
-  // PMP shadow registers, precomputed in rapt_csr on every CSR write.
-  // These break the long combinational chain inside rapt_pmp:
-  //   * napot_mask/base : closed-form NAPOT decode (XOR + AND)
-  //   * tor_lo/tor_hi   : pmpaddr[i-1] / pmpaddr[i] for TOR comparison
-  //   * cfg_r/w/x/l     : per-entry permission bit-vectors (one-hot AND-OR friendly)
-  //   * mode_off/tor/na4/napot : per-entry mode one-hot vectors
-  // 1-cycle latency vs raw pmpcfg/pmpaddr -- RISC-V spec requires sfence.vma
-  // (or a pipeline flush, which CSR writes already trigger) before PMP
-  // changes take effect, so software always sees the new values in time.
-  logic [XLEN-1:0] pmp_napot_mask[`RAPT_PMP_NUM];
-  logic [XLEN-1:0] pmp_napot_base[`RAPT_PMP_NUM];
-  logic [XLEN-1:0] pmp_tor_lo[`RAPT_PMP_NUM];
-  logic [XLEN-1:0] pmp_tor_hi[`RAPT_PMP_NUM];
-  logic [`RAPT_PMP_NUM-1:0] pmp_cfg_r;
-  logic [`RAPT_PMP_NUM-1:0] pmp_cfg_w;
-  logic [`RAPT_PMP_NUM-1:0] pmp_cfg_x;
-  logic [`RAPT_PMP_NUM-1:0] pmp_cfg_l;
-  logic [`RAPT_PMP_NUM-1:0] pmp_mode_off;
-  logic [`RAPT_PMP_NUM-1:0] pmp_mode_tor;
-  logic [`RAPT_PMP_NUM-1:0] pmp_mode_na4;
-  logic [`RAPT_PMP_NUM-1:0] pmp_mode_napot;
-
   modport in(
       input priv, satp_ppn, satp_asid,
       input immu_en, dmmu_en, mtvec, tvec, timer_int_en, sw_int_en, ext_int_en,
-      input mprv, mpp, pmpcfg, pmpaddr,
-      input pmp_napot_mask, pmp_napot_base, pmp_tor_lo, pmp_tor_hi,
-      input pmp_cfg_r, pmp_cfg_w, pmp_cfg_x, pmp_cfg_l,
-      input pmp_mode_off, pmp_mode_tor, pmp_mode_na4, pmp_mode_napot,
+      input mprv, mpp,
       input tsr, tvm, tw, mcounteren, scounteren,
       input sum, mxr, sbe
   );
   modport out(
       output priv, satp_ppn, satp_asid,
       output immu_en, dmmu_en, mtvec, tvec, timer_int_en, sw_int_en, ext_int_en,
-      output mprv, mpp, pmpcfg, pmpaddr,
-      output pmp_napot_mask, pmp_napot_base, pmp_tor_lo, pmp_tor_hi,
-      output pmp_cfg_r, pmp_cfg_w, pmp_cfg_x, pmp_cfg_l,
-      output pmp_mode_off, pmp_mode_tor, pmp_mode_na4, pmp_mode_napot,
+      output mprv, mpp,
       output tsr, tvm, tw, mcounteren, scounteren,
       output sum, mxr, sbe
   );

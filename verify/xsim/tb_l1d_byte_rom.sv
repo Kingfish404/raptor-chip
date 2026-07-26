@@ -13,6 +13,7 @@ module tb_l1d_byte_rom;
   lsu_l1d_if lsu_l1d();
   l1d_bus_if l1d_bus();
   csr_bcast_if csr_bcast();
+  pmp_state_if pmp_state();
   exu_l1d_if exu_l1d();
   rou_cmu_if rou_cmu();
 
@@ -22,6 +23,7 @@ module tb_l1d_byte_rom;
       .lsu_l1d(lsu_l1d),
       .l1d_bus(l1d_bus),
       .csr_bcast(csr_bcast),
+      .pmp_state(pmp_state),
       .exu_l1d(exu_l1d),
       .rou_cmu(rou_cmu),
       .reset(reset)

@@ -2,6 +2,7 @@
 `include "rapt_if.svh"
 `include "rapt_soc.svh"
 
+/* verilator lint_off PINCONNECTEMPTY */
 module rapt_l1d #(
     parameter int L1D_LINE_LEN = `RAPT_L1D_LINE_LEN,
     parameter bit [`RAPT_L1D_LEN:0] L1D_LINE_SIZE = 2 ** L1D_LINE_LEN,
@@ -18,6 +19,7 @@ module rapt_l1d #(
     l1d_bus_if.master l1d_bus,
 
     csr_bcast_if.in csr_bcast,
+    pmp_state_if.in pmp_state,
     exu_l1d_if.slave exu_l1d,
     rou_cmu_if.in rou_cmu,
 
@@ -734,19 +736,20 @@ module rapt_l1d #(
       .op_r   (1'b1),
       .op_w   (1'b0),
       .op_x   (1'b0),
-      .pmp_napot_mask (csr_bcast.pmp_napot_mask),
-      .pmp_napot_base (csr_bcast.pmp_napot_base),
-      .pmp_tor_lo     (csr_bcast.pmp_tor_lo),
-      .pmp_tor_hi     (csr_bcast.pmp_tor_hi),
-      .pmp_cfg_r      (csr_bcast.pmp_cfg_r),
-      .pmp_cfg_w      (csr_bcast.pmp_cfg_w),
-      .pmp_cfg_x      (csr_bcast.pmp_cfg_x),
-      .pmp_cfg_l      (csr_bcast.pmp_cfg_l),
-      .pmp_mode_off   (csr_bcast.pmp_mode_off),
-      .pmp_mode_tor   (csr_bcast.pmp_mode_tor),
-      .pmp_mode_na4   (csr_bcast.pmp_mode_na4),
-      .pmp_mode_napot (csr_bcast.pmp_mode_napot),
-      .fault  (pmp_load_fault)
+      .pmp_napot_mask (pmp_state.pmp_napot_mask),
+      .pmp_napot_base (pmp_state.pmp_napot_base),
+      .pmp_tor_lo     (pmp_state.pmp_tor_lo),
+      .pmp_tor_hi     (pmp_state.pmp_tor_hi),
+      .pmp_cfg_r      (pmp_state.pmp_cfg_r),
+      .pmp_cfg_w      (pmp_state.pmp_cfg_w),
+      .pmp_cfg_x      (pmp_state.pmp_cfg_x),
+      .pmp_cfg_l      (pmp_state.pmp_cfg_l),
+      .pmp_mode_off   (pmp_state.pmp_mode_off),
+      .pmp_mode_tor   (pmp_state.pmp_mode_tor),
+      .pmp_mode_na4   (pmp_state.pmp_mode_na4),
+      .pmp_mode_napot (pmp_state.pmp_mode_napot),
+      .fault  (pmp_load_fault),
+      .fault_lo_o()
   );
   // Treat loads from unmapped physical addresses as access faults (bus error).
   logic load_unmapped_fault;
@@ -775,19 +778,20 @@ module rapt_l1d #(
       .op_r   (1'b0),
       .op_w   (1'b1),
       .op_x   (1'b0),
-      .pmp_napot_mask (csr_bcast.pmp_napot_mask),
-      .pmp_napot_base (csr_bcast.pmp_napot_base),
-      .pmp_tor_lo     (csr_bcast.pmp_tor_lo),
-      .pmp_tor_hi     (csr_bcast.pmp_tor_hi),
-      .pmp_cfg_r      (csr_bcast.pmp_cfg_r),
-      .pmp_cfg_w      (csr_bcast.pmp_cfg_w),
-      .pmp_cfg_x      (csr_bcast.pmp_cfg_x),
-      .pmp_cfg_l      (csr_bcast.pmp_cfg_l),
-      .pmp_mode_off   (csr_bcast.pmp_mode_off),
-      .pmp_mode_tor   (csr_bcast.pmp_mode_tor),
-      .pmp_mode_na4   (csr_bcast.pmp_mode_na4),
-      .pmp_mode_napot (csr_bcast.pmp_mode_napot),
-      .fault  (pmp_store_fault_mmu)
+      .pmp_napot_mask (pmp_state.pmp_napot_mask),
+      .pmp_napot_base (pmp_state.pmp_napot_base),
+      .pmp_tor_lo     (pmp_state.pmp_tor_lo),
+      .pmp_tor_hi     (pmp_state.pmp_tor_hi),
+      .pmp_cfg_r      (pmp_state.pmp_cfg_r),
+      .pmp_cfg_w      (pmp_state.pmp_cfg_w),
+      .pmp_cfg_x      (pmp_state.pmp_cfg_x),
+      .pmp_cfg_l      (pmp_state.pmp_cfg_l),
+      .pmp_mode_off   (pmp_state.pmp_mode_off),
+      .pmp_mode_tor   (pmp_state.pmp_mode_tor),
+      .pmp_mode_na4   (pmp_state.pmp_mode_na4),
+      .pmp_mode_napot (pmp_state.pmp_mode_napot),
+      .fault  (pmp_store_fault_mmu),
+      .fault_lo_o()
   );
   // P3: PMA pre-check on the translated store PA. Mirrors load_unmapped_fault
   // -- stops a store to a region with no bus slave from issuing on AXI and
@@ -853,19 +857,20 @@ module rapt_l1d #(
       .op_r   (1'b1),
       .op_w   (1'b0),
       .op_x   (1'b0),
-      .pmp_napot_mask (csr_bcast.pmp_napot_mask),
-      .pmp_napot_base (csr_bcast.pmp_napot_base),
-      .pmp_tor_lo     (csr_bcast.pmp_tor_lo),
-      .pmp_tor_hi     (csr_bcast.pmp_tor_hi),
-      .pmp_cfg_r      (csr_bcast.pmp_cfg_r),
-      .pmp_cfg_w      (csr_bcast.pmp_cfg_w),
-      .pmp_cfg_x      (csr_bcast.pmp_cfg_x),
-      .pmp_cfg_l      (csr_bcast.pmp_cfg_l),
-      .pmp_mode_off   (csr_bcast.pmp_mode_off),
-      .pmp_mode_tor   (csr_bcast.pmp_mode_tor),
-      .pmp_mode_na4   (csr_bcast.pmp_mode_na4),
-      .pmp_mode_napot (csr_bcast.pmp_mode_napot),
-      .fault  (pmp_ptw_fault)
+      .pmp_napot_mask (pmp_state.pmp_napot_mask),
+      .pmp_napot_base (pmp_state.pmp_napot_base),
+      .pmp_tor_lo     (pmp_state.pmp_tor_lo),
+      .pmp_tor_hi     (pmp_state.pmp_tor_hi),
+      .pmp_cfg_r      (pmp_state.pmp_cfg_r),
+      .pmp_cfg_w      (pmp_state.pmp_cfg_w),
+      .pmp_cfg_x      (pmp_state.pmp_cfg_x),
+      .pmp_cfg_l      (pmp_state.pmp_cfg_l),
+      .pmp_mode_off   (pmp_state.pmp_mode_off),
+      .pmp_mode_tor   (pmp_state.pmp_mode_tor),
+      .pmp_mode_na4   (pmp_state.pmp_mode_na4),
+      .pmp_mode_napot (pmp_state.pmp_mode_napot),
+      .fault  (pmp_ptw_fault),
+      .fault_lo_o()
   );
 
   // Misaligned accesses are split by the LSU's MA-split FSM into two aligned
@@ -1321,3 +1326,4 @@ module rapt_l1d #(
         && !reservation_valid && (load_killed || cmu_bcast.flush_pipe),
       !reservation_valid)
 endmodule
+/* verilator lint_on PINCONNECTEMPTY */

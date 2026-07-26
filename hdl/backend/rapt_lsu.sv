@@ -2,6 +2,7 @@
 `include "rapt_if.svh"
 `include "rapt_dpi_c.svh"
 
+/* verilator lint_off PINCONNECTEMPTY */
 module rapt_lsu #(
     parameter unsigned SQ_SIZE = `RAPT_SQ_SIZE,
     parameter int XLEN = `RAPT_XLEN
@@ -17,6 +18,7 @@ module rapt_lsu #(
     rou_lsu_if.in rou_lsu,
 
     csr_bcast_if.in csr_bcast,
+    pmp_state_if.in pmp_state,
 
     // A2: PMU: one-cycle pulse when SQ becomes full
     /* verilator lint_off UNUSEDSIGNAL */
@@ -498,19 +500,20 @@ module rapt_lsu #(
       .op_r   (1'b1),
       .op_w   (1'b0),
       .op_x   (1'b0),
-      .pmp_napot_mask (csr_bcast.pmp_napot_mask),
-      .pmp_napot_base (csr_bcast.pmp_napot_base),
-      .pmp_tor_lo     (csr_bcast.pmp_tor_lo),
-      .pmp_tor_hi     (csr_bcast.pmp_tor_hi),
-      .pmp_cfg_r      (csr_bcast.pmp_cfg_r),
-      .pmp_cfg_w      (csr_bcast.pmp_cfg_w),
-      .pmp_cfg_x      (csr_bcast.pmp_cfg_x),
-      .pmp_cfg_l      (csr_bcast.pmp_cfg_l),
-      .pmp_mode_off   (csr_bcast.pmp_mode_off),
-      .pmp_mode_tor   (csr_bcast.pmp_mode_tor),
-      .pmp_mode_na4   (csr_bcast.pmp_mode_na4),
-      .pmp_mode_napot (csr_bcast.pmp_mode_napot),
-      .fault  (pmp_load_fault_lsu)
+      .pmp_napot_mask (pmp_state.pmp_napot_mask),
+      .pmp_napot_base (pmp_state.pmp_napot_base),
+      .pmp_tor_lo     (pmp_state.pmp_tor_lo),
+      .pmp_tor_hi     (pmp_state.pmp_tor_hi),
+      .pmp_cfg_r      (pmp_state.pmp_cfg_r),
+      .pmp_cfg_w      (pmp_state.pmp_cfg_w),
+      .pmp_cfg_x      (pmp_state.pmp_cfg_x),
+      .pmp_cfg_l      (pmp_state.pmp_cfg_l),
+      .pmp_mode_off   (pmp_state.pmp_mode_off),
+      .pmp_mode_tor   (pmp_state.pmp_mode_tor),
+      .pmp_mode_na4   (pmp_state.pmp_mode_na4),
+      .pmp_mode_napot (pmp_state.pmp_mode_napot),
+      .fault  (pmp_load_fault_lsu),
+      .fault_lo_o()
   );
 
   // Aligned low and high request addresses for the two beats.
@@ -804,3 +807,4 @@ module rapt_lsu #(
       (cmu_bcast.flush_pipe || cmu_bcast.fence_time),
       (sq_cmt == sq_tail && ((sq_valid & ~sq_committed) == '0)))
 endmodule
+/* verilator lint_on PINCONNECTEMPTY */

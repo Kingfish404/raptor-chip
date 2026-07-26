@@ -1,8 +1,59 @@
 `include "rapt.svh"
 
+/* verilator lint_off DECLFILENAME */
+module rapt_pmp_state #(
+    parameter int N = `RAPT_PMP_NUM
+) (
+    input logic clock,
+    input logic reset,
+    pmp_update_if.in update,
+    pmp_state_if.out state
+);
+  always_ff @(posedge clock) begin
+    if (reset) begin
+      for (int i = 0; i < N; i++) begin
+        state.pmp_napot_mask[i] <= '0;
+        state.pmp_napot_base[i] <= '0;
+        state.pmp_tor_lo[i]     <= '0;
+        state.pmp_tor_hi[i]     <= '0;
+      end
+      state.pmp_cfg_r      <= '0;
+      state.pmp_cfg_w      <= '0;
+      state.pmp_cfg_x      <= '0;
+      state.pmp_cfg_l      <= '0;
+      state.pmp_mode_off   <= '1;
+      state.pmp_mode_tor   <= '0;
+      state.pmp_mode_na4   <= '0;
+      state.pmp_mode_napot <= '0;
+    end else begin
+      if (update.addr_we) begin
+        state.pmp_napot_mask[update.addr_idx] <= update.napot_mask;
+        state.pmp_napot_base[update.addr_idx] <= update.napot_base;
+        state.pmp_tor_hi[update.addr_idx]     <= update.tor_hi;
+        if (update.addr_idx < $clog2(N)'(N - 1)) begin
+          state.pmp_tor_lo[update.addr_idx + $clog2(N)'(1)] <= update.tor_hi;
+        end
+      end
+      for (int i = 0; i < N; i++) begin
+        if (update.cfg_we[i]) begin
+          state.pmp_cfg_r[i]      <= update.cfg_r[i];
+          state.pmp_cfg_w[i]      <= update.cfg_w[i];
+          state.pmp_cfg_x[i]      <= update.cfg_x[i];
+          state.pmp_cfg_l[i]      <= update.cfg_l[i];
+          state.pmp_mode_off[i]   <= update.mode_off[i];
+          state.pmp_mode_tor[i]   <= update.mode_tor[i];
+          state.pmp_mode_na4[i]   <= update.mode_na4[i];
+          state.pmp_mode_napot[i] <= update.mode_napot[i];
+        end
+      end
+    end
+  end
+endmodule
+/* verilator lint_on DECLFILENAME */
+
 // Combinational RISC-V PMP permission checker.
 //
-// Uses precomputed shadow registers from rapt_csr (`csr_bcast.pmp_*`) to
+// Uses precomputed state from the local pmp_state_if replica to
 // keep the hot LSU/L1D critical path short.  All NAPOT decoding (XOR+AND),
 // TOR neighbour selection and per-entry cfg-bit slicing happen one cycle
 // earlier in CSR-update FFs; this module only does:
@@ -39,7 +90,7 @@ module rapt_pmp #(
     input logic            op_w,
     input logic            op_x,
 
-    // Shadow inputs from csr_bcast.pmp_*
+    // Decoded inputs from pmp_state_if
     input logic [         XLEN-1:0] pmp_napot_mask[`RAPT_PMP_NUM],
     input logic [         XLEN-1:0] pmp_napot_base[`RAPT_PMP_NUM],
     input logic [         XLEN-1:0] pmp_tor_lo    [`RAPT_PMP_NUM],
@@ -55,7 +106,8 @@ module rapt_pmp #(
     input logic [`RAPT_PMP_NUM-1:0] pmp_mode_na4,
     input logic [`RAPT_PMP_NUM-1:0] pmp_mode_napot,
 
-    output logic fault
+    output logic fault,
+    output logic fault_lo_o
 );
   localparam int N = `RAPT_PMP_NUM;
 
@@ -139,6 +191,7 @@ module rapt_pmp #(
   logic fault_lo, fault_hi;
   assign fault_lo = byte_fault(any_match_lo, perm_r_lo, perm_w_lo, perm_x_lo, perm_l_lo);
   assign fault_hi = byte_fault(any_match_hi, perm_r_hi, perm_w_hi, perm_x_hi, perm_l_hi);
+  assign fault_lo_o = fault_lo;
   assign fault = fault_lo | fault_hi;
 
 endmodule

@@ -9,6 +9,8 @@
 !*.dts.in
 !*.html
 !Makefile
+!mk/
+!mk/*.mk
 !scripts/*.tcl
 
 # LiteX build artifacts

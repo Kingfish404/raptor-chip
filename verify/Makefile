@@ -1026,6 +1026,7 @@ XSIM_BUS_SOURCES := \
 
 XSIM_CSR_SOURCES := \
 	"$(RAPTOR_HOME)/hdl/rapt_pkg.sv" \
+	"$(RAPTOR_HOME)/hdl/memory/rapt_pmp.sv" \
 	"$(RAPTOR_HOME)/hdl/frontend/rapt_csr.sv"
 
 XSIM_IOQ_SOURCES := \
@@ -1059,6 +1060,7 @@ XSIM_TARGETS := \
 	xsim-bus-axi \
 	xsim-bus-read-ownership \
 	xsim-csr-sret-roundtrip \
+	xsim-pmp-endpoint \
 	xsim-sram-l1d-lutram \
 	xsim-sram-l1d-lutram-post-synth \
 	xsim-lsu-lr-sq-forward \
@@ -1131,6 +1133,9 @@ xsim-bus-read-ownership: ## xsim: verify read response ID ownership and interlea
 
 xsim-csr-sret-roundtrip: ## xsim: verify CSR reset and U-ecall/SRET round trip
 	$(call XSIM_RUN,csr_sret_roundtrip,tb_csr_sret_roundtrip,$(XSIM_CSR_SOURCES),)
+
+xsim-pmp-endpoint: ## xsim: verify variable-size PMP endpoint boundary checks
+	$(call XSIM_RUN,pmp_endpoint,tb_pmp_endpoint,"$(RAPTOR_HOME)/hdl/rapt_pkg.sv" "$(RAPTOR_HOME)/hdl/memory/rapt_pmp.sv",)
 
 xsim-sram-l1d-lutram: ## xsim: verify L1D 16x128 LUTRAM byte writes and collisions
 	$(call XSIM_RUN,sram_l1d_lutram,tb_sram_l1d_lutram,"$(RAPTOR_HOME)/hdl/memory/rapt_sram_1r1w.sv" "$(XSIM_DIR)/sram_l1d_lutram_top.sv",)

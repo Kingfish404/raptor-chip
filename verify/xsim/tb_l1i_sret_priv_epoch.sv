@@ -15,6 +15,7 @@ module tb_l1i_sret_priv_epoch;
   ifu_l1i_if ifu_l1i();
   l1i_bus_if l1i_bus();
   csr_bcast_if csr_bcast();
+  pmp_state_if pmp_state();
 
   rapt_l1i dut (
       .clock(clock),
@@ -22,6 +23,7 @@ module tb_l1i_sret_priv_epoch;
       .ifu_l1i(ifu_l1i),
       .l1i_bus(l1i_bus),
       .csr_bcast(csr_bcast),
+      .pmp_state(pmp_state),
       .reset(reset)
   );
 
@@ -29,11 +31,13 @@ module tb_l1i_sret_priv_epoch;
 
   `include "tb_common.svh"
   `include "tb_core_bcast_defaults.svh"
+  `include "tb_pmp_state_defaults.svh"
 
   task automatic init_inputs;
     begin
       init_cmu_bcast_defaults();
       init_csr_bcast_defaults(`RAPT_PRIV_S, '0, 1'b0);
+      init_pmp_state_defaults(1'b0);
 
       ifu_l1i.pc = OldSupervisorPc;
       ifu_l1i.invalid = 1'b0;
@@ -53,13 +57,13 @@ module tb_l1i_sret_priv_epoch;
 
       csr_bcast.immu_en = 1'b1;
       csr_bcast.satp_ppn = `RAPT_CSR_SATP_PPN_W'(32'h8000_0);
-      csr_bcast.pmp_cfg_r[0] = 1'b1;
-      csr_bcast.pmp_cfg_w[0] = 1'b1;
-      csr_bcast.pmp_cfg_x[0] = 1'b1;
-      csr_bcast.pmp_mode_off[0] = 1'b0;
-      csr_bcast.pmp_mode_napot[0] = 1'b1;
-      csr_bcast.pmp_napot_base[0] = '0;
-      csr_bcast.pmp_napot_mask[0] = '1;
+      pmp_state.pmp_cfg_r[0] = 1'b1;
+      pmp_state.pmp_cfg_w[0] = 1'b1;
+      pmp_state.pmp_cfg_x[0] = 1'b1;
+      pmp_state.pmp_mode_off[0] = 1'b0;
+      pmp_state.pmp_mode_napot[0] = 1'b1;
+      pmp_state.pmp_napot_base[0] = '0;
+      pmp_state.pmp_napot_mask[0] = '1;
     end
   endtask
 

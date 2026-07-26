@@ -53,6 +53,7 @@ module rapt_exu #(
     exu_csr_if.master exu_csr,
 
     csr_bcast_if.in   csr_bcast,
+    pmp_state_if.in   pmp_state,
     exu_l1d_if.master exu_l1d,
 
     // Dispatch-only uop payload snapshot from ROU (read by ALU-CSR at issue)
@@ -310,6 +311,7 @@ module rapt_exu #(
       .reset        (reset),
       .cmu_bcast    (cmu_bcast),
       .csr_bcast    (csr_bcast),
+      .pmp_state    (pmp_state),
       .rou_exu      (rou_exu),
       .disp         (disp_ioq),
       .exu_rou      (wb_alu_csr),

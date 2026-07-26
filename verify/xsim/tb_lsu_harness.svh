@@ -8,6 +8,7 @@ exu_lsu_if exu_lsu();
 exu_wb_if exu_ioq_bcast();
 rou_lsu_if rou_lsu();
 csr_bcast_if csr_bcast();
+pmp_state_if pmp_state();
 
 rapt_lsu #(.SQ_SIZE(LsuTbSqSize)) dut (
     .clock,
@@ -17,6 +18,7 @@ rapt_lsu #(.SQ_SIZE(LsuTbSqSize)) dut (
     .exu_ioq_bcast,
     .rou_lsu,
     .csr_bcast,
+    .pmp_state,
     .pmu_sq_full,
     .reset
 );
@@ -25,6 +27,7 @@ always #5 clock = ~clock;
 
 `include "tb_common.svh"
 `include "tb_core_bcast_defaults.svh"
+`include "tb_pmp_state_defaults.svh"
 
 task automatic init_lsu_inputs(
     input logic ordered,
@@ -33,6 +36,7 @@ task automatic init_lsu_inputs(
   begin
     init_cmu_bcast_defaults();
     init_csr_bcast_defaults(`RAPT_PRIV_M, '0, 1'b0);
+    init_pmp_state_defaults(1'b0);
     exu_lsu.rvalid = 1'b0;
     exu_lsu.raddr = '0;
     exu_lsu.ralu = `RAPT_ALU_LW__;
