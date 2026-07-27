@@ -73,13 +73,13 @@ Profile string format: `tools<N>-rag<N>-flow<N>` (e.g. `tools16-rag16-flow16`).
 make -C app/benchmarks/agent native-test
 
 # pk-on-NPC and NEMU full reports (markdown/csv/json)
-make -C app agent-bench-report-npc
+make -C app agent-bench-report-rv32
 make -C app agent-bench-report-nemu
 
 # single mode
-make -C app agent-tools-npc
-make -C app agent-rag-npc
-make -C app agent-workflow-npc
+make -C app agent-tools-rv32
+make -C app agent-rag-rv32
+make -C app agent-workflow-rv32
 
 # LiteX flat binaries for FPGA bring-up
 make -C app/benchmarks/agent litex-build

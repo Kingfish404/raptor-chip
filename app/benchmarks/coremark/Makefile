@@ -14,7 +14,7 @@ PORTME_DIR   := $(_THIS_DIR)portme
 # ---- CoreMark config ----
 ITERATIONS ?= 16
 # COREMARK_OPTIM_CFLAGS: optional aggressive optimization flags injected by the
-# top-level `app-coremark-npc{32,64}-optim` targets. Empty by default so the
+# top-level `app-coremark-rv{32,64}-optim` targets. Empty by default so the
 # plain `app-coremark-*` targets keep the -O2 baseline from CFLAGS_COMMON.
 CFLAGS := $(CFLAGS_COMMON) -std=gnu99 \
           -I$(COREMARK_DIR) -I$(PORTME_DIR) \

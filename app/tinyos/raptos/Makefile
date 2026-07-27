@@ -96,7 +96,7 @@ disasm: $(BUILD)/raptos.elf
 
 sim:
 	@$(MAKE) --no-print-directory all PLATFORM=sim
-	@$(MAKE) --no-print-directory -C $(ROOT) run-npc32 \
+	@$(MAKE) --no-print-directory -C $(ROOT) run-rv32 \
 		IMG=$(abspath build/sim/raptos.bin) \
 		ARGS="$(ARGS) $(if $(MAX_INST),-m $(MAX_INST),)"
 
@@ -107,7 +107,7 @@ nemu:
 		ARGS="$(ARGS) $(if $(MAX_INST),-m $(MAX_INST),)"
 
 payload-test: all
-	@printf '$(if $(SMODE),smode\n,)$(if $(TICK),tick $(TICK)\n,)payload $(PAYLOAD)\n$(if $(TICK),tick 0\n,)halt\n' | $(MAKE) --no-print-directory -C $(ROOT) run-npc32 \
+	@printf '$(if $(SMODE),smode\n,)$(if $(TICK),tick $(TICK)\n,)payload $(PAYLOAD)\n$(if $(TICK),tick 0\n,)halt\n' | $(MAKE) --no-print-directory -C $(ROOT) run-rv32 \
 		IMG=$(abspath build/sim/raptos.bin) \
 		ARGS="-b -n --mem-random-delay=$(MEM_RANDOM_DELAY) --mem-random-seed=$(MEM_RANDOM_SEED) $(if $(MAX_INST),-m $(MAX_INST),)"
 
@@ -116,7 +116,7 @@ payload-test-all: all
 	for payload in $(PAYLOAD_NAMES); do \
 		echo "[RaptOS] payload=$$payload delay=$(MEM_RANDOM_DELAY) seed=$(MEM_RANDOM_SEED)"; \
 		printf '$(if $(SMODE),smode\n,)$(if $(TICK),tick $(TICK)\n,)payload %s\n$(if $(TICK),tick 0\n,)halt\n' "$$payload" | \
-			$(MAKE) --no-print-directory -C $(ROOT) run-npc32 \
+			$(MAKE) --no-print-directory -C $(ROOT) run-rv32 \
 				IMG=$(abspath build/sim/raptos.bin) \
 				ARGS="-b -n --mem-random-delay=$(MEM_RANDOM_DELAY) --mem-random-seed=$(MEM_RANDOM_SEED) $(if $(MAX_INST),-m $(MAX_INST),)"; \
 	done

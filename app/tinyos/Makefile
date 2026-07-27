@@ -226,13 +226,13 @@ egos-ku15p-image: egos-nsim-prepare ## Build egos KU15P RAM-disk image (embedded
 
 egos-cli-nsim: egos-sim-image ## Boot egos on NPC/sim [RV32/Sv32]
 	@echo "[egos-cli-nsim] RV32 / Sv32 (egos-2000)"
-	@$(MAKE) $(Q) -C $(APP_HOME)/.. run-npc32 \
+	@$(MAKE) $(Q) -C $(APP_HOME)/.. run-rv32 \
 		IMG=$(EGOS_SIM_IMAGE) SDCARD=$(EGOS_SIM_SDCARD) \
 		ARGS="$(ARGS) --serial-lf-to-cr $(SIM_LIMIT_ARGS)"
 
 # Difftest variant: assumes caller (top-level Makefile) already configured
 # sim with o2_difftest_defconfig and built the NEMU reference shared object.
-# Bypasses run-npc32 (which would clobber the difftest config) by invoking
+# Bypasses run-rv32 (which would clobber the difftest config) by invoking
 # sim's run target directly.
 egos-cli-nsim-difftest: egos-sim-image ## Boot egos on NPC/sim with NEMU difftest [RV32/Sv32]
 	@echo "[egos-cli-nsim-difftest] RV32 / Sv32 (egos-2000) + NEMU difftest"
@@ -259,7 +259,7 @@ egos-cli-qemu: ## Boot egos on QEMU [RV32/Sv32]
 # xv6 — RV64 / Sv39
 # ============================================================================
 xv6-cli-nsim: xv6-nsim-prepare ## Boot xv6-riscv on NPC/sim [RV64/Sv39]
-	$(call xv6-run-body,xv6-cli-nsim,xv6-sim-fs,run-npc64,,$(SIM_LIMIT_ARGS))
+	$(call xv6-run-body,xv6-cli-nsim,xv6-sim-fs,run-rv64,,$(SIM_LIMIT_ARGS))
 
 xv6-sim-image: xv6-nsim-prepare ## Build xv6 kernel.bin and fs.img without running a simulator
 	@[ -n "$(XV6_OBJCOPY)" ] || { \
@@ -276,7 +276,7 @@ xv6-sim-image: xv6-nsim-prepare ## Build xv6 kernel.bin and fs.img without runni
 
 # Difftest variant: assumes caller (top-level Makefile) already configured
 # sim with o2_difftest_defconfig (rebuilt with VFLAGS=-DRAPT_RV64) and
-# built the NEMU RV64 reference shared object. Bypasses run-npc64 (which
+# built the NEMU RV64 reference shared object. Bypasses run-rv64 (which
 # would clobber the difftest config) by invoking sim's run target directly.
 xv6-cli-nsim-difftest: xv6-nsim-prepare ## Boot xv6-riscv on NPC/sim with NEMU difftest [RV64/Sv39]
 	@[ -n "$(XV6_OBJCOPY)" ] || { \

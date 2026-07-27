@@ -29,6 +29,10 @@
 #define RAPT_RUNTIME_PROVIDE_EXIT 1
 #endif
 
+#ifndef RAPT_RUNTIME_FINISHER_BASE
+#define RAPT_RUNTIME_FINISHER_BASE 0
+#endif
+
 #ifndef UART_TXFULL_OFFSET
 #define UART_TXFULL_OFFSET 0x04
 #endif
@@ -225,6 +229,10 @@ void _litex_halt(int status)
     }
 #else
     (void)status;
+#endif
+#if RAPT_RUNTIME_FINISHER_BASE
+    *(volatile uint32_t *)(uintptr_t)RAPT_RUNTIME_FINISHER_BASE =
+        status == 0 ? 0x5555u : (0x3333u | ((uint32_t)status << 16));
 #endif
     while (1) {
 #if RAPT_RUNTIME_HALT_WFI

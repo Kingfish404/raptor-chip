@@ -8,8 +8,8 @@ simulator (`sim/`) and NEMU difftest reference model.
 
 ```bash
 # Prerequisites: ensure simulator + NEMU are built
-make -C .. build-npc32              # Build NPC simulator
-make -C .. config-npc32-difftest    # Enable difftest config
+make -C .. build-rv32              # Build NPC simulator
+make -C .. config-rv32-difftest    # Enable difftest config
 make -C .. config-nemu32-ref        # Build NEMU reference SO
 
 # Run all lightweight tests
@@ -53,9 +53,9 @@ auto-included via `rapt.svh`.
 
 ```shell
 # Enable assertions for any simulation target
-make sim-npc32                VFLAGS="-DRAPT_ASSERT_EN"
+make sim-rv32                VFLAGS="-DRAPT_ASSERT_EN"
 make microbench-ysyxsoc       VFLAGS="-DRAPT_ASSERT_EN"
-make cpu-tests-npc32 ARGS="-b -n" VFLAGS="-DRAPT_ASSERT_EN"
+make cpu-tests-rv32 ARGS="-b -n" VFLAGS="-DRAPT_ASSERT_EN"
 ```
 
 Failure format: `[<time>] SVA FAIL: <hier>.<LABEL> (<ante>) |-> (<cons>)`

@@ -21,10 +21,10 @@ From the project root:
 
 ```bash
 # Build + run all security tests on NPC (RV32) via pk
-make -C app security-tests-npc
+make -C app security-tests-sim
 
 # RV64 mode
-make -C app security-tests-npc ISA64=1
+make -C app security-tests-sim ISA64=1
 
 # Run on NEMU
 make -C app security-tests-nemu

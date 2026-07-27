@@ -18,10 +18,10 @@ make linux-download
 
 # RV32 Linux through NEMU / NPC
 make linux-boot-nemu32 ARGS="-b -n"
-make linux-boot-npc32 ARGS="-b -n"
+make linux-boot-rv32 ARGS="-b -n"
 
 # RV32 NPC with NEMU difftest reference
-make linux-boot-npc32-difftest ARGS="-b -n"
+make linux-boot-rv32-difftest ARGS="-b -n"
 
 # RV32 Linux on the KU15P FPGA through LiteX BIOS + MIG DDR4
 make -C fpga/litex linux-fpga-e2e UART_PORT=/dev/ttyUSB0
@@ -34,8 +34,8 @@ make linux-boot-nemu64-device
 Useful overrides:
 
 ```shell
-make linux-boot-npc32 LINUX_BUILD_VERSION=v6.18.22 MAX_INST=100000000 ARGS="-b -n"
-make linux-boot-npc32 LINUX_RV32_PAYLOAD=/path/to/fw_payload.bin ARGS="-b -n"
+make linux-boot-rv32 LINUX_BUILD_VERSION=v6.18.22 MAX_INST=100000000 ARGS="-b -n"
+make linux-boot-rv32 LINUX_RV32_PAYLOAD=/path/to/fw_payload.bin ARGS="-b -n"
 ```
 
 ## Supported Modes

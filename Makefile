@@ -246,7 +246,7 @@ NPC_DEFCONFIG ?= o2_defconfig ## NPC simulator defconfig profile
 NPC_ARCH ?= riscv32-npc ## Override ARCH for AM targets
 YSYXSOC_ARCH ?= riscv32-ysyxsoc ## Override ARCH for ysyxSoC targets
 
-# RV64 mode: set via `make run-npc64` or explicitly `make run-npc32 VFLAGS="-DRAPT_RV64"`.
+# RV64 mode: set via `make run-rv64` or explicitly `make run-rv32 VFLAGS="-DRAPT_RV64"`.
 # sim Verilator simulation enables RTL assertions by default via RAPT_SIM_ASSERT;
 # pack/STA/FPGA synthesis paths do not receive the default assertion define.
 VFLAGS ?= ## Extra RTL defines for NPC (-DRAPT_RV64, etc.)
@@ -254,15 +254,17 @@ RAPT_SIM_ASSERT ?= 1## Enable RTL SVA assertions by default in NPC Verilator sim
 RAPT_SIM_ASSERT := $(strip $(RAPT_SIM_ASSERT))
 export RAPT_SIM_ASSERT
 
-config-npc32: ## Configure NPC simulator (o2 default)
+config-rv32: ## Configure NPC simulator (o2 default)
 	$(MAKE) -C $(NSIM_HOME) o2_difftest_defconfig
 	@$(MAKE) --no-print-directory -C $(NSIM_HOME)
 
-config-npc32-linux:
+config-rv32-difftest: config-rv32 ## Configure NPC simulator with difftest
+
+config-rv32-linux:
 	$(MAKE) -C $(NSIM_HOME) o2linux_difftest_defconfig
 	$(MAKE) -C $(NSIM_HOME) -j$(NPROC)
 
-config-npc32-ysyxsoc:
+config-rv32-ysyxsoc:
 	$(MAKE) -C $(NSIM_HOME) o2soc_defconfig
 	$(MAKE) -C $(NSIM_HOME) -j$(NPROC)
 
@@ -273,25 +275,25 @@ GENERATED_DIR := $(RAPTOR_HOME)/hdl/generated
 $(GENERATED_DIR):
 	$(MAKE) verilog
 
-build-npc32: config-npc32 | $(GENERATED_DIR) ## Build NPC simulator
+build-rv32: config-rv32 | $(GENERATED_DIR) ## Build NPC simulator
 	@$(MAKE) --no-print-directory -q -C $(NSIM_HOME) VFLAGS="$(VFLAGS)" 2>/dev/null \
 		|| $(MAKE) --no-print-directory -C $(NSIM_HOME) -j$(NPROC) VFLAGS="$(VFLAGS)"
 
-run-npc32: build-npc32 ## Build and run NPC simulator
+run-rv32: build-rv32 ## Build and run NPC simulator
 	$(MAKE) -C $(NSIM_HOME) run ARGS="$(ARGS)" VFLAGS="$(VFLAGS)" $(if $(IMG),IMG=$(IMG)) $(if $(DISK),DISK=$(DISK)) $(if $(SDCARD),SDCARD=$(SDCARD))
 
-sim-npc32: verilog config-npc32 build-npc32 ## Full pipeline: verilog + config + build + run
+sim-rv32: verilog config-rv32 build-rv32 ## Full pipeline: verilog + config + build + run
 	$(MAKE) -C $(NSIM_HOME) run ARGS="$(ARGS)" VFLAGS="$(VFLAGS)" $(if $(IMG),IMG=$(IMG)) $(if $(DISK),DISK=$(DISK)) $(if $(SDCARD),SDCARD=$(SDCARD))
 
 # --- RV64 convenience targets (equivalent to VFLAGS="-DRAPT_RV64") ---
-build-npc64: VFLAGS := -DRAPT_RV64
-build-npc64: build-npc32 ## Build NPC in RV64 mode
+build-rv64: VFLAGS := -DRAPT_RV64
+build-rv64: build-rv32 ## Build NPC in RV64 mode
 
-run-npc64: VFLAGS := -DRAPT_RV64
-run-npc64: run-npc32 ## Build and run NPC in RV64 mode
+run-rv64: VFLAGS := -DRAPT_RV64
+run-rv64: run-rv32 ## Build and run NPC in RV64 mode
 
-lint-npc64: VFLAGS := -DRAPT_RV64
-lint-npc64: lint ## Lint RTL in RV64 mode
+lint-rv64: VFLAGS := -DRAPT_RV64
+lint-rv64: lint ## Lint RTL in RV64 mode
 
 # ============================================================================
 # AM Kernels / Benchmarks
@@ -316,17 +318,17 @@ coremark-nemu64: $(AM_KERNELS) config-nemu64 ## Run CoreMark on NEMU (riscv64)
 microbench-nemu64: $(AM_KERNELS) config-nemu64 ## Run MicroBench on NEMU (riscv64)
 	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/microbench ARCH=riscv64-nemu run ARGS="$(ARGS)" mainargs=$(MAINARGS) $(call tee_nemu,microbench-nemu64-$(MAINARGS))
 
-am-kernels-hello-npc32: build-npc32 ## Run AM hello-world on NPC (riscv32)
-	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/kernels/hello ARCH=$(NPC_ARCH) run ARGS="$(ARGS)" mainargs="i" VME=1 $(call tee_npc,am-kernels-hello-npc32)
+am-kernels-hello-rv32: build-rv32 ## Run AM hello-world on NPC (riscv32)
+	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/kernels/hello ARCH=$(NPC_ARCH) run ARGS="$(ARGS)" mainargs="i" VME=1 $(call tee_npc,am-kernels-hello-rv32)
 
-am-tests-cache-tests-npc32: build-npc32 ## Run AM cache-tests on NPC (riscv32)
-	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/tests/cache-tests ARCH=$(NPC_ARCH) ALL=icache run ARGS="$(ARGS)" mainargs="i" VME=1 $(call tee_npc,am-tests-cache-tests-npc32)
+am-tests-cache-tests-rv32: build-rv32 ## Run AM cache-tests on NPC (riscv32)
+	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/tests/cache-tests ARCH=$(NPC_ARCH) ALL=icache run ARGS="$(ARGS)" mainargs="i" VME=1 $(call tee_npc,am-tests-cache-tests-rv32)
 
 am-tests-nemu32: build-nemu32
 	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/tests/am-tests ARCH=riscv32-nemu run ARGS="$(ARGS)" mainargs="i" VME=1 $(call tee_nemu,am-tests-nemu32)
 
-am-tests-npc32: build-npc32
-	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/tests/am-tests ARCH=$(NPC_ARCH) run ARGS="$(ARGS)" mainargs="i" VME=1 $(call tee_npc,am-tests-npc32)
+am-tests-rv32: build-rv32
+	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/tests/am-tests ARCH=$(NPC_ARCH) run ARGS="$(ARGS)" mainargs="i" VME=1 $(call tee_npc,am-tests-rv32)
 
 CPU_TESTS_DIR := $(AM_KERNELS)/tests/cpu-tests
 CPU_TESTS     := $(basename $(notdir $(wildcard $(CPU_TESTS_DIR)/tests/*.c)))
@@ -335,7 +337,7 @@ CPU_TESTS     := $(basename $(notdir $(wildcard $(CPU_TESTS_DIR)/tests/*.c)))
 # 1. Build all per-test .bin files sequentially (shares AM lib state).
 # 2. Run resulting .bin files concurrently via xargs -P $(JOBS).
 # Args (positional, all shell-quoted internally):
-#   $(1) suite label (e.g. npc32 / nemu32) - used in log header
+#   $(1) suite label (e.g. rv32 / nemu32) - used in log header
 #   $(2) shell expression producing the simulator command (binary + base args)
 #   $(3) AM ARCH for the test build (riscv32-npc / riscv32-nemu / ...)
 #   $(4) absolute log file path for tee'ing aggregate output
@@ -377,11 +379,11 @@ endef
 cpu-tests-nemu32: build-nemu32 ## Run AM cpu-tests on NEMU (sequential; NEMU is not concurrency-safe here)
 	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/tests/cpu-tests ARCH=riscv32-nemu run ARGS="$(ARGS)" mainargs="i" VME=1 $(call tee_nemu,cpu-tests-nemu32)
 
-cpu-tests-npc32: build-npc32 ## Run AM cpu-tests on NPC (parallel)
+cpu-tests-rv32: build-rv32 ## Run AM cpu-tests on NPC (parallel)
 	@set -o pipefail; \
 	  NPC_CMD=$$($(MAKE) --no-print-directory -C $(NSIM_HOME) VFLAGS="$(VFLAGS)" print-npc-exec | tail -1) \
-	    || { echo "[cpu-tests-npc32] ERROR: print-npc-exec failed"; exit 1; }; \
-	  $(call run_cpu_tests_parallel,npc32,"$$NPC_CMD",$(NPC_ARCH),$(NPC_LOG_DIR)/cpu-tests-npc32.log)
+	    || { echo "[cpu-tests-rv32] ERROR: print-npc-exec failed"; exit 1; }; \
+	  $(call run_cpu_tests_parallel,rv32,"$$NPC_CMD",$(NPC_ARCH),$(NPC_LOG_DIR)/cpu-tests-rv32.log)
 
 # --- Bare-metal IRQ tests (PLIC, etc) -------------------------------------
 # Each test is a standalone M-mode .bin loaded directly at 0x80000000 via
@@ -420,11 +422,11 @@ define run_irq_tests_parallel
 	  } $(call tee_npc,$(2))
 endef
 
-irq-tests-npc32: build-npc32 irq-tests-build ## Build & run bare-metal PLIC IRQ tests on NPC (parallel)
-	$(call run_irq_tests_parallel,bare-metal,irq-tests-npc32)
+irq-tests-rv32: build-rv32 irq-tests-build ## Build & run bare-metal PLIC IRQ tests on NPC (parallel)
+	$(call run_irq_tests_parallel,bare-metal,irq-tests-rv32)
 
-irq-tests-npc32-difftest: build-npc32 config-nemu32-ref irq-tests-build ## Build & run bare-metal PLIC IRQ tests on NPC with difftest (parallel)
-	$(call run_irq_tests_parallel,difftest,irq-tests-npc32-difftest)
+irq-tests-rv32-difftest: build-rv32 config-nemu32-ref irq-tests-build ## Build & run bare-metal PLIC IRQ tests on NPC with difftest (parallel)
+	$(call run_irq_tests_parallel,difftest,irq-tests-rv32-difftest)
 
 # --- Minimal Linux-pattern repros -----------------------------------------
 REPRO_TESTS_DIR := $(RAPTOR_HOME)/app/build/rv32/tests/repro
@@ -432,51 +434,51 @@ REPRO_TESTS_DIR := $(RAPTOR_HOME)/app/build/rv32/tests/repro
 repro-tests-build: ## Build bare-metal minimal repro tests
 	$(MAKE) -C $(RAPTOR_HOME)/app/tests/repro build
 
-linux-ticket-spinlock-repro-npc32: build-npc32 repro-tests-build ## Run Linux ticket-spinlock AMO/SH/LW repro on NPC
+linux-ticket-spinlock-repro-rv32: build-rv32 repro-tests-build ## Run Linux ticket-spinlock AMO/SH/LW repro on NPC
 	$(MAKE) --no-print-directory -C $(NSIM_HOME) run \
 		ARGS="$(ARGS)" VFLAGS="$(VFLAGS)" \
 		IMG=$(REPRO_TESTS_DIR)/linux_ticket_spinlock.bin
 
-coremark-npc32: $(AM_KERNELS) config-npc32 ## Run CoreMark on NPC
-	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/coremark_eembc ARCH=$(NPC_ARCH) run ARGS="$(ARGS)" $(call tee_npc,coremark-npc32)
-	$(call coremark_mhz_report,$(NPC_LOG_DIR)/coremark-npc32.log)
+coremark-rv32: $(AM_KERNELS) config-rv32 ## Run CoreMark on NPC
+	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/coremark_eembc ARCH=$(NPC_ARCH) run ARGS="$(ARGS)" $(call tee_npc,coremark-rv32)
+	$(call coremark_mhz_report,$(NPC_LOG_DIR)/coremark-rv32.log)
 
-coremark-npc32-difftest: $(AM_KERNELS) config-npc32 config-nemu32-ref ## Run CoreMark on NPC with difftest
-	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/coremark_eembc ARCH=$(NPC_ARCH) run ARGS="$(ARGS)" mainargs=test $(call tee_npc,coremark-npc32-difftest)
-	$(call coremark_mhz_report,$(NPC_LOG_DIR)/coremark-npc32-difftest.log)
+coremark-rv32-difftest: $(AM_KERNELS) config-rv32 config-nemu32-ref ## Run CoreMark on NPC with difftest
+	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/coremark_eembc ARCH=$(NPC_ARCH) run ARGS="$(ARGS)" mainargs=test $(call tee_npc,coremark-rv32-difftest)
+	$(call coremark_mhz_report,$(NPC_LOG_DIR)/coremark-rv32-difftest.log)
 
-coremark-ysyxsoc: $(AM_KERNELS) config-npc32-ysyxsoc config-nemu32-ref ## Run CoreMark on ysyxSoC
+coremark-ysyxsoc: $(AM_KERNELS) config-rv32-ysyxsoc config-nemu32-ref ## Run CoreMark on ysyxSoC
 	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/coremark_eembc ARCH=$(YSYXSOC_ARCH) run ARGS="$(ARGS)" mainargs=test $(call tee_npc,coremark-ysyxsoc)
 	$(call coremark_mhz_report,$(NPC_LOG_DIR)/coremark-ysyxsoc.log)
 
-microbench-npc32: $(AM_KERNELS) config-npc32 ## Run MicroBench on NPC
-	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/microbench ARCH=$(NPC_ARCH) run ARGS="$(ARGS)" mainargs=$(MAINARGS) $(call tee_npc,microbench-npc32-$(MAINARGS))
+microbench-rv32: $(AM_KERNELS) config-rv32 ## Run MicroBench on NPC
+	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/microbench ARCH=$(NPC_ARCH) run ARGS="$(ARGS)" mainargs=$(MAINARGS) $(call tee_npc,microbench-rv32-$(MAINARGS))
 
-micorbench-npc32-difftest: microbench-npc32-difftest ## Typo-compat alias of microbench-npc32-difftest
+micorbench-rv32-difftest: microbench-rv32-difftest ## Typo-compat alias of microbench-rv32-difftest
 
 # --- RV64 benchmark targets ---
-coremark-npc64: VFLAGS := -DRAPT_RV64
-coremark-npc64: $(AM_KERNELS) config-npc32 ## Run CoreMark on NPC (riscv64)
-	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/coremark_eembc ARCH=riscv64-npc run ARGS="$(ARGS)" VFLAGS="$(VFLAGS)" $(call tee_npc,coremark-npc64)
-	$(call coremark_mhz_report,$(NPC_LOG_DIR)/coremark-npc64.log)
+coremark-rv64: VFLAGS := -DRAPT_RV64
+coremark-rv64: $(AM_KERNELS) config-rv32 ## Run CoreMark on NPC (riscv64)
+	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/coremark_eembc ARCH=riscv64-npc run ARGS="$(ARGS)" VFLAGS="$(VFLAGS)" $(call tee_npc,coremark-rv64)
+	$(call coremark_mhz_report,$(NPC_LOG_DIR)/coremark-rv64.log)
 
-coremark-npc64-difftest: VFLAGS := -DRAPT_RV64
-coremark-npc64-difftest: $(AM_KERNELS) config-npc32 config-nemu64-ref ## Run CoreMark on NPC (riscv64) with difftest
-	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/coremark_eembc ARCH=riscv64-npc run ARGS="$(ARGS)" VFLAGS="$(VFLAGS)" $(call tee_npc,coremark-npc64-difftest)
-	$(call coremark_mhz_report,$(NPC_LOG_DIR)/coremark-npc64-difftest.log)
+coremark-rv64-difftest: VFLAGS := -DRAPT_RV64
+coremark-rv64-difftest: $(AM_KERNELS) config-rv32 config-nemu64-ref ## Run CoreMark on NPC (riscv64) with difftest
+	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/coremark_eembc ARCH=riscv64-npc run ARGS="$(ARGS)" VFLAGS="$(VFLAGS)" $(call tee_npc,coremark-rv64-difftest)
+	$(call coremark_mhz_report,$(NPC_LOG_DIR)/coremark-rv64-difftest.log)
 
-microbench-npc64: VFLAGS := -DRAPT_RV64
-microbench-npc64: $(AM_KERNELS) config-npc32 ## Run MicroBench on NPC (riscv64)
-	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/microbench ARCH=riscv64-npc run ARGS="$(ARGS)" VFLAGS="$(VFLAGS)" mainargs=$(MAINARGS) $(call tee_npc,microbench-npc64-$(MAINARGS))
+microbench-rv64: VFLAGS := -DRAPT_RV64
+microbench-rv64: $(AM_KERNELS) config-rv32 ## Run MicroBench on NPC (riscv64)
+	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/microbench ARCH=riscv64-npc run ARGS="$(ARGS)" VFLAGS="$(VFLAGS)" mainargs=$(MAINARGS) $(call tee_npc,microbench-rv64-$(MAINARGS))
 
-microbench-npc64-difftest: VFLAGS := -DRAPT_RV64
-microbench-npc64-difftest: $(AM_KERNELS) config-npc32 config-nemu64-ref ## Run MicroBench on NPC (riscv64) with difftest
-	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/microbench ARCH=riscv64-npc run ARGS="$(ARGS)" VFLAGS="$(VFLAGS)" mainargs=$(MAINARGS) $(call tee_npc,microbench-npc64-difftest-$(MAINARGS))
+microbench-rv64-difftest: VFLAGS := -DRAPT_RV64
+microbench-rv64-difftest: $(AM_KERNELS) config-rv32 config-nemu64-ref ## Run MicroBench on NPC (riscv64) with difftest
+	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/microbench ARCH=riscv64-npc run ARGS="$(ARGS)" VFLAGS="$(VFLAGS)" mainargs=$(MAINARGS) $(call tee_npc,microbench-rv64-difftest-$(MAINARGS))
 
-microbench-npc32-difftest: $(AM_KERNELS) config-npc32 config-nemu32-ref ## Run MicroBench on NPC with difftest
-	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/microbench ARCH=$(NPC_ARCH) run ARGS="$(ARGS)" mainargs=$(MAINARGS) $(call tee_npc,microbench-npc32-difftest-$(MAINARGS))
+microbench-rv32-difftest: $(AM_KERNELS) config-rv32 config-nemu32-ref ## Run MicroBench on NPC with difftest
+	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/microbench ARCH=$(NPC_ARCH) run ARGS="$(ARGS)" mainargs=$(MAINARGS) $(call tee_npc,microbench-rv32-difftest-$(MAINARGS))
 
-microbench-ysyxsoc: $(AM_KERNELS) config-npc32-ysyxsoc config-nemu32-ref ## Run MicroBench on ysyxSoC
+microbench-ysyxsoc: $(AM_KERNELS) config-rv32-ysyxsoc config-nemu32-ref ## Run MicroBench on ysyxSoC
 	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/microbench ARCH=$(YSYXSOC_ARCH) run ARGS="$(ARGS)" mainargs=test $(call tee_npc,microbench-ysyxsoc)
 
 # --- CoreMark "optimized" runs with CoreMark/MHz reporting ----------------
@@ -500,16 +502,16 @@ define coremark_mhz_report
 @awk '/^[ \t]*Iterations[ \t]*:/{for(i=1;i<=NF;i++)if($$i~/^[0-9]+$$/)it=$$i} /#inst:/{if(match($$0,/cycle:[ \t]*[0-9]+/)){c=substr($$0,RSTART,RLENGTH);gsub(/[^0-9]/,"",c);cy=c}} END{if(it+0>0&&cy+0>0){printf "\n==================== CoreMark/MHz ====================\n";printf "Iterations    : %d\n",it;printf "Active cycles : %d\n",cy;printf "CoreMark/MHz  : %.4f  (= %d * 1e6 / %d)\n",it*1000000.0/cy,it,cy;printf "======================================================\n"}else{printf "[CoreMark/MHz] WARN: could not parse iterations(%s) / cycles(%s) from %s\n",it,cy,"$(1)"}}' "$(1)"
 endef
 
-coremark-npc32-optim: $(AM_KERNELS) config-npc32 ## Run  CoreMark on NPC with aggressive optim flags + CoreMark/MHz report
+coremark-rv32-optim: $(AM_KERNELS) config-rv32 ## Run  CoreMark on NPC with aggressive optim flags + CoreMark/MHz report
 	$(MAKE) -C $(AM_KERNELS)/benchmarks/coremark_eembc ARCH=$(NPC_ARCH) clean
-	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/coremark_eembc ARCH=$(NPC_ARCH) run ARGS="$(ARGS)" COREMARK_OPTIM_CFLAGS="$(COREMARK_OPTIM_CFLAGS)" $(call tee_npc,coremark-npc32-optim)
-	$(call coremark_mhz_report,$(NPC_LOG_DIR)/coremark-npc32-optim.log)
+	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/coremark_eembc ARCH=$(NPC_ARCH) run ARGS="$(ARGS)" COREMARK_OPTIM_CFLAGS="$(COREMARK_OPTIM_CFLAGS)" $(call tee_npc,coremark-rv32-optim)
+	$(call coremark_mhz_report,$(NPC_LOG_DIR)/coremark-rv32-optim.log)
 
-coremark-npc64-optim: VFLAGS := -DRAPT_RV64
-coremark-npc64-optim: $(AM_KERNELS) config-npc32 ## Run CoreMark on NPC (riscv64) with aggressive optim flags + CoreMark/MHz report
+coremark-rv64-optim: VFLAGS := -DRAPT_RV64
+coremark-rv64-optim: $(AM_KERNELS) config-rv32 ## Run CoreMark on NPC (riscv64) with aggressive optim flags + CoreMark/MHz report
 	$(MAKE) -C $(AM_KERNELS)/benchmarks/coremark_eembc ARCH=riscv64-npc clean
-	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/coremark_eembc ARCH=riscv64-npc run ARGS="$(ARGS)" VFLAGS="$(VFLAGS)" COREMARK_OPTIM_CFLAGS="$(COREMARK_OPTIM_CFLAGS)" $(call tee_npc,coremark-npc64-optim)
-	$(call coremark_mhz_report,$(NPC_LOG_DIR)/coremark-npc64-optim.log)
+	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/coremark_eembc ARCH=riscv64-npc run ARGS="$(ARGS)" VFLAGS="$(VFLAGS)" COREMARK_OPTIM_CFLAGS="$(COREMARK_OPTIM_CFLAGS)" $(call tee_npc,coremark-rv64-optim)
+	$(call coremark_mhz_report,$(NPC_LOG_DIR)/coremark-rv64-optim.log)
 
 # --- Dhrystone (DMIPS / DMIPS/MHz) ----------------------------------------
 # Mirrors the CoreMark integration. DMIPS/MHz is frequency-independent and
@@ -527,18 +529,18 @@ define dhrystone_dmips_report
 @awk -v freq=$(DHRY_FREQ_MHZ) '/^[ \t]*Number_Of_Runs[ \t]*:/{for(i=1;i<=NF;i++)if($$i~/^[0-9]+$$/)runs=$$i} /#inst:/{if(match($$0,/cycle:[ \t]*[0-9]+/)){c=substr($$0,RSTART,RLENGTH);gsub(/[^0-9]/,"",c);cy=c}} END{if(runs+0>0&&cy+0>0){dpm=runs*1000000.0/(cy*1757.0);printf "\n==================== Dhrystone DMIPS ====================\n";printf "Runs          : %d\n",runs;printf "Active cycles : %d\n",cy;printf "Assumed freq  : %d MHz\n",freq;printf "DMIPS/MHz     : %.4f  (= %d * 1e6 / (%d * 1757))\n",dpm,runs,cy;printf "DMIPS         : %.2f  (= DMIPS/MHz * %d MHz)\n",dpm*freq,freq;printf "========================================================\n"}else{printf "[DMIPS] WARN: could not parse runs(%s) / cycles(%s) from %s\n",runs,cy,"$(1)"}}' "$(1)"
 endef
 
-dhrystone-npc32: $(AM_KERNELS) config-npc32 ## Run Dhrystone on NPC (DMIPS + DMIPS/MHz)
-	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/dhrystone ARCH=$(NPC_ARCH) run ARGS="$(ARGS)" $(call tee_npc,dhrystone-npc32)
-	$(call dhrystone_dmips_report,$(NPC_LOG_DIR)/dhrystone-npc32.log)
+dhrystone-rv32: $(AM_KERNELS) config-rv32 ## Run Dhrystone on NPC (DMIPS + DMIPS/MHz)
+	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/dhrystone ARCH=$(NPC_ARCH) run ARGS="$(ARGS)" $(call tee_npc,dhrystone-rv32)
+	$(call dhrystone_dmips_report,$(NPC_LOG_DIR)/dhrystone-rv32.log)
 
-dhrystone-npc32-difftest: $(AM_KERNELS) config-npc32 config-nemu32-ref ## Run Dhrystone on NPC with difftest
-	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/dhrystone ARCH=$(NPC_ARCH) run ARGS="$(ARGS)" $(call tee_npc,dhrystone-npc32-difftest)
-	$(call dhrystone_dmips_report,$(NPC_LOG_DIR)/dhrystone-npc32-difftest.log)
+dhrystone-rv32-difftest: $(AM_KERNELS) config-rv32 config-nemu32-ref ## Run Dhrystone on NPC with difftest
+	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/dhrystone ARCH=$(NPC_ARCH) run ARGS="$(ARGS)" $(call tee_npc,dhrystone-rv32-difftest)
+	$(call dhrystone_dmips_report,$(NPC_LOG_DIR)/dhrystone-rv32-difftest.log)
 
-dhrystone-npc64: VFLAGS := -DRAPT_RV64
-dhrystone-npc64: $(AM_KERNELS) config-npc32 ## Run Dhrystone on NPC (riscv64)
-	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/dhrystone ARCH=riscv64-npc run ARGS="$(ARGS)" VFLAGS="$(VFLAGS)" $(call tee_npc,dhrystone-npc64)
-	$(call dhrystone_dmips_report,$(NPC_LOG_DIR)/dhrystone-npc64.log)
+dhrystone-rv64: VFLAGS := -DRAPT_RV64
+dhrystone-rv64: $(AM_KERNELS) config-rv32 ## Run Dhrystone on NPC (riscv64)
+	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/dhrystone ARCH=riscv64-npc run ARGS="$(ARGS)" VFLAGS="$(VFLAGS)" $(call tee_npc,dhrystone-rv64)
+	$(call dhrystone_dmips_report,$(NPC_LOG_DIR)/dhrystone-rv64.log)
 
 dhrystone-nemu32: $(AM_KERNELS) config-nemu32 ## Run Dhrystone on NEMU (riscv32, functional check)
 	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/dhrystone ARCH=riscv32-nemu run ARGS="$(ARGS)" $(call tee_nemu,dhrystone-nemu32)
@@ -548,16 +550,16 @@ DHRYSTONE_OPTIM_CFLAGS := \
 	-O3 -funroll-loops -finline-functions -falign-functions=16 \
 	-fbuiltin -fno-builtin-printf -fno-builtin-puts -fno-builtin-putchar
 
-dhrystone-npc32-optim: $(AM_KERNELS) config-npc32 ## Run Dhrystone on NPC with optimized codegen (builtins) + DMIPS report
+dhrystone-rv32-optim: $(AM_KERNELS) config-rv32 ## Run Dhrystone on NPC with optimized codegen (builtins) + DMIPS report
 	$(MAKE) -C $(AM_KERNELS)/benchmarks/dhrystone ARCH=$(NPC_ARCH) clean
-	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/dhrystone ARCH=$(NPC_ARCH) run ARGS="$(ARGS)" DHRYSTONE_OPTIM_CFLAGS="$(DHRYSTONE_OPTIM_CFLAGS)" $(call tee_npc,dhrystone-npc32-optim)
-	$(call dhrystone_dmips_report,$(NPC_LOG_DIR)/dhrystone-npc32-optim.log)
+	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/dhrystone ARCH=$(NPC_ARCH) run ARGS="$(ARGS)" DHRYSTONE_OPTIM_CFLAGS="$(DHRYSTONE_OPTIM_CFLAGS)" $(call tee_npc,dhrystone-rv32-optim)
+	$(call dhrystone_dmips_report,$(NPC_LOG_DIR)/dhrystone-rv32-optim.log)
 
-dhrystone-npc64-optim: VFLAGS := -DRAPT_RV64
-dhrystone-npc64-optim: $(AM_KERNELS) config-npc32 ## Run Dhrystone on NPC (riscv64) with optimized codegen (builtins) + DMIPS report
+dhrystone-rv64-optim: VFLAGS := -DRAPT_RV64
+dhrystone-rv64-optim: $(AM_KERNELS) config-rv32 ## Run Dhrystone on NPC (riscv64) with optimized codegen (builtins) + DMIPS report
 	$(MAKE) -C $(AM_KERNELS)/benchmarks/dhrystone ARCH=riscv64-npc clean
-	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/dhrystone ARCH=riscv64-npc run ARGS="$(ARGS)" VFLAGS="$(VFLAGS)" DHRYSTONE_OPTIM_CFLAGS="$(DHRYSTONE_OPTIM_CFLAGS)" $(call tee_npc,dhrystone-npc64-optim)
-	$(call dhrystone_dmips_report,$(NPC_LOG_DIR)/dhrystone-npc64-optim.log)
+	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/dhrystone ARCH=riscv64-npc run ARGS="$(ARGS)" VFLAGS="$(VFLAGS)" DHRYSTONE_OPTIM_CFLAGS="$(DHRYSTONE_OPTIM_CFLAGS)" $(call tee_npc,dhrystone-rv64-optim)
+	$(call dhrystone_dmips_report,$(NPC_LOG_DIR)/dhrystone-rv64-optim.log)
 
 # ============================================================================
 # RISC-V Architecture Tests
@@ -567,11 +569,11 @@ RISCV_ARCH_TEST ?= $(RAPTOR_HOME)/third_party/kingfish404/riscv-arch-test-am
 $(RISCV_ARCH_TEST):
 	git clone --depth 1 https://github.com/Kingfish404/riscv-arch-test-am $@
 
-archtest-npc32: build-npc32 $(RISCV_ARCH_TEST) ## Run RISC-V Architecture Test on NPC (riscv32)
-	@set -o pipefail; $(MAKE) -C $(RISCV_ARCH_TEST) ARCH=$(NPC_ARCH) run ARGS="$(ARGS)" $(call tee_npc,archtest-npc32)
+archtest-rv32: build-rv32 $(RISCV_ARCH_TEST) ## Run RISC-V Architecture Test on NPC (riscv32)
+	@set -o pipefail; $(MAKE) -C $(RISCV_ARCH_TEST) ARCH=$(NPC_ARCH) run ARGS="$(ARGS)" $(call tee_npc,archtest-rv32)
 
-archtest-npc32e: build-npc32 $(RISCV_ARCH_TEST) ## Run RISC-V Architecture Test on NPC (riscv32e)
-	@set -o pipefail; $(MAKE) -C $(RISCV_ARCH_TEST) ARCH=riscv32e-npc run ARGS="$(ARGS)" $(call tee_npc,archtest-npc32e)
+archtest-rv32e: build-rv32 $(RISCV_ARCH_TEST) ## Run RISC-V Architecture Test on NPC (riscv32e)
+	@set -o pipefail; $(MAKE) -C $(RISCV_ARCH_TEST) ARCH=riscv32e-npc run ARGS="$(ARGS)" $(call tee_npc,archtest-rv32e)
 
 # ============================================================================
 # Nanos-lite OS
@@ -583,7 +585,7 @@ nanos-nemu32: ## Build and run nanos-lite on NEMU
 	$(MAKE) -C $(NAVY_HOME)/apps/menu ISA=$(ISA) install
 	$(MAKE) -C $(RAPTOR_HOME)/abstract-machine/app/nanos-lite ARCH=$(ISA)-nemu update run
 
-nanos-npc32: ## Build and run nanos-lite on NPC
+nanos-rv32: ## Build and run nanos-lite on NPC
 	$(MAKE) -C $(NAVY_HOME) ISA=$(ISA) fsimg
 	$(MAKE) -C $(NAVY_HOME)/apps/menu ISA=$(ISA) install
 	$(MAKE) -C $(RAPTOR_HOME)/abstract-machine/app/nanos-lite ARCH=$(ISA)-npc update run
@@ -626,11 +628,11 @@ linux-boot-nemu32: config-nemu32-linux ## Boot Linux on NEMU (riscv32)
 linux-boot-nemu64: config-nemu64-linux ## Boot Linux on NEMU (riscv64)
 	$(call linux_boot_nemu,rv64,$(LINUX_RV64_PAYLOAD),linux-boot-nemu64)
 
-linux-boot-npc32: config-npc32-linux ## Boot Linux on NPC (riscv32)
-	$(call linux_boot_npc,rv32,$(LINUX_RV32_PAYLOAD),linux-boot-npc32,DIFF_REF_SO=)
+linux-boot-rv32: config-rv32-linux ## Boot Linux on NPC (riscv32)
+	$(call linux_boot_npc,rv32,$(LINUX_RV32_PAYLOAD),linux-boot-rv32,DIFF_REF_SO=)
 
-linux-boot-npc32-difftest: config-nemu32-ref config-npc32-linux ## Boot Linux on NPC with difftest
-	$(call linux_boot_npc,rv32,$(LINUX_RV32_PAYLOAD),linux-boot-npc32-difftest)
+linux-boot-rv32-difftest: config-nemu32-ref config-rv32-linux ## Boot Linux on NPC with difftest
+	$(call linux_boot_npc,rv32,$(LINUX_RV32_PAYLOAD),linux-boot-rv32-difftest)
 
 LINUX_BOOT_MAX_INST ?= 120000000
 LINUX_MEM_RANDOM_DELAY ?= 7
@@ -639,12 +641,12 @@ LINUX_MEM_STRESS_MAX_INST ?= 400000000
 LINUX_CKPT_STRESS_MAX_INST ?= 300000000
 LINUX_BOOT_CHECK := $(RAPTOR_HOME)/verify/scripts/check_linux_boot.py
 
-verify-linux-boot-npc32: ## Boot RV32 Linux with difftest and require the /init milestone
-	$(MAKE) --no-print-directory linux-boot-npc32-difftest \
+verify-linux-boot-rv32: ## Boot RV32 Linux with difftest and require the /init milestone
+	$(MAKE) --no-print-directory linux-boot-rv32-difftest \
 		ARGS="$(ARGS)" MAX_INST=$(LINUX_BOOT_MAX_INST)
-	python3 $(LINUX_BOOT_CHECK) $(NPC_LOG_DIR)/linux-boot-npc32-difftest.log
+	python3 $(LINUX_BOOT_CHECK) $(NPC_LOG_DIR)/linux-boot-rv32-difftest.log
 
-verify-linux-memory-stress-npc32: config-nemu32-ref config-npc32-linux ## Boot RV32 Linux under randomized memory latency
+verify-linux-memory-stress-rv32: config-nemu32-ref config-rv32-linux ## Boot RV32 Linux under randomized memory latency
 	$(MAKE) -C $(LINUX_HOME) download-rv32
 	@set -eu -o pipefail; \
 	mkdir -p $(NPC_LOG_DIR); \
@@ -657,13 +659,13 @@ verify-linux-memory-stress-npc32: config-nemu32-ref config-npc32-linux ## Boot R
 		python3 $(LINUX_BOOT_CHECK) "$$log"; \
 	done
 
-linux-boot-npc64: VFLAGS := -DRAPT_RV64
-linux-boot-npc64: config-npc32-linux ## Boot Linux on NPC (riscv64)
-	$(call linux_boot_npc,rv64,$(LINUX_RV64_PAYLOAD),linux-boot-npc64,DIFF_REF_SO=)
+linux-boot-rv64: VFLAGS := -DRAPT_RV64
+linux-boot-rv64: config-rv32-linux ## Boot Linux on NPC (riscv64)
+	$(call linux_boot_npc,rv64,$(LINUX_RV64_PAYLOAD),linux-boot-rv64,DIFF_REF_SO=)
 
-linux-boot-npc64-difftest: VFLAGS := -DRAPT_RV64
-linux-boot-npc64-difftest: config-nemu64-ref config-npc32-linux ## Boot Linux on NPC RV64 with difftest
-	$(call linux_boot_npc,rv64,$(LINUX_RV64_PAYLOAD),linux-boot-npc64-difftest)
+linux-boot-rv64-difftest: VFLAGS := -DRAPT_RV64
+linux-boot-rv64-difftest: config-nemu64-ref config-rv32-linux ## Boot Linux on NPC RV64 with difftest
+	$(call linux_boot_npc,rv64,$(LINUX_RV64_PAYLOAD),linux-boot-rv64-difftest)
 
 linux-boot-nemu32-device: config-nemu32-linux-device ## Boot Linux on NEMU RV32 (auto-download)
 	$(MAKE) -C $(LINUX_HOME) download-rv32
@@ -684,14 +686,14 @@ CKPT_DIR   ?= $(RAPTOR_HOME)/sim/data/ckpt-linux-rv32
 # CKPT_CYCLE selects the cycle at which a checkpoint is saved.
 CKPT_CYCLE ?= 100000000
 
-linux-boot-npc32-ckpt-save: config-nemu32-ref config-npc32-linux ## Boot Linux on NPC, save checkpoint at CKPT_CYCLE -> CKPT_DIR
+linux-boot-rv32-ckpt-save: config-nemu32-ref config-rv32-linux ## Boot Linux on NPC, save checkpoint at CKPT_CYCLE -> CKPT_DIR
 	$(MAKE) -C $(LINUX_HOME) download-rv32
 	$(MAKE) -C $(NSIM_HOME) -j$(NPROC)
 	rm -rf $(CKPT_DIR)
 	$(MAKE) -C $(NSIM_HOME) run IMG=$(LINUX_RV32_PAYLOAD) \
 		ARGS="$(ARGS) --ckpt-cycle=$(CKPT_CYCLE) --ckpt-save=$(CKPT_DIR) --ckpt-save-exit"
 
-linux-boot-npc32-ckpt-load: config-nemu32-ref config-npc32-linux ## Resume Linux boot on NPC from CKPT_DIR
+linux-boot-rv32-ckpt-load: config-nemu32-ref config-rv32-linux ## Resume Linux boot on NPC from CKPT_DIR
 	$(MAKE) -C $(NSIM_HOME) -j$(NPROC)
 	$(MAKE) -C $(NSIM_HOME) run IMG=$(LINUX_RV32_PAYLOAD) \
 		ARGS="$(ARGS) --ckpt-load=$(CKPT_DIR) $(if $(MAX_INST),-m $(MAX_INST))"
@@ -821,7 +823,7 @@ verify-coverage: ## Verilator line/toggle coverage
 verify-all: ## Run all verification targets
 	@set -o pipefail; $(MAKE) -C $(VERIFY_HOME) all $(call tee_verify,all)
 
-verify-memory-stress-npc32: ## RaptOS: randomized Sv32 memory/atomic integration matrix
+verify-memory-stress-rv32: ## RaptOS: randomized Sv32 memory/atomic integration matrix
 	$(MAKE) -C $(RAPTOR_HOME)/app/tinyos/raptos memory-stress \
 		MEM_RANDOM_DELAY=$(or $(MEM_RANDOM_DELAY),32) \
 		$(if $(MEM_STRESS_SEEDS),MEM_STRESS_SEEDS="$(MEM_STRESS_SEEDS)",) \
@@ -835,60 +837,79 @@ verify-clean: ## Clean verification artifacts
 # ============================================================================
 APP_HOME := $(RAPTOR_HOME)/app
 
-app-run: build-npc32 ## [app] Run USER_ELF via pk on NPC
+app-run: build-rv32 ## [app] Run USER_ELF via pk on NPC
 	@$(MAKE) --no-print-directory -C $(APP_HOME) pk-run USER_ELF=$(USER_ELF) ARGS="$(ARGS)"
 
 app-run-nemu: build-nemu32 ## [app] Run USER_ELF via pk on NEMU
 	@$(MAKE) --no-print-directory -C $(APP_HOME) nemu-run USER_ELF=$(USER_ELF) ARGS="$(ARGS)"
 
-app-bbl-linux: build-npc32 ## [app] Boot Linux via BBL on NPC
+app-bbl-linux: build-rv32 ## [app] Boot Linux via BBL on NPC
 	@$(MAKE) --no-print-directory -C $(APP_HOME) bbl-linux ARGS="$(ARGS)"
 
-app-hello-npc32: build-npc32 ## [app] Hello world test via pk (rv32)
-	@set -o pipefail; $(MAKE) --no-print-directory -C $(APP_HOME) hello-npc ARGS="$(ARGS)" $(call tee_app,hello-npc32)
+app-hello-rv32: build-rv32 ## [app] Hello world test via pk (rv32)
+	@set -o pipefail; $(MAKE) --no-print-directory -C $(APP_HOME) hello-sim ARGS="$(ARGS)" $(call tee_app,hello-rv32)
 
-app-coremark-npc32: build-npc32 ## [app] CoreMark via pk (rv32)
-	@set -o pipefail; $(MAKE) --no-print-directory -C $(APP_HOME) coremark-npc ARGS="$(ARGS)" $(call tee_app,coremark-npc32)
-	$(call coremark_mhz_report,$(APP_LOG_DIR)/coremark-npc32.log)
+app-coremark-rv32: build-rv32 ## [app] CoreMark via pk (rv32)
+	@set -o pipefail; $(MAKE) --no-print-directory -C $(APP_HOME) coremark-sim ARGS="$(ARGS)" $(call tee_app,coremark-rv32)
+	$(call coremark_mhz_report,$(APP_LOG_DIR)/coremark-rv32.log)
 
 # CoreMark via pk with aggressive optim flags + CoreMark/MHz report. The app
 # CoreMark build (app/benchmarks/coremark) does not track CFLAGS changes, so its
 # build dir is cleaned first to force a rebuild with COREMARK_OPTIM_CFLAGS.
-app-coremark-npc32-optim: build-npc32 ## [app] CoreMark via pk (rv32) with aggressive optim flags + CoreMark/MHz report
+app-coremark-rv32-optim: build-rv32 ## [app] CoreMark via pk (rv32) with aggressive optim flags + CoreMark/MHz report
 	@$(MAKE) --no-print-directory -C $(APP_HOME)/benchmarks/coremark clean
-	@set -o pipefail; $(MAKE) --no-print-directory -C $(APP_HOME) coremark-npc ARGS="$(ARGS)" COREMARK_OPTIM_CFLAGS="$(COREMARK_OPTIM_CFLAGS)" $(call tee_app,coremark-npc32-optim)
-	$(call coremark_mhz_report,$(APP_LOG_DIR)/coremark-npc32-optim.log)
+	@set -o pipefail; $(MAKE) --no-print-directory -C $(APP_HOME) coremark-sim ARGS="$(ARGS)" COREMARK_OPTIM_CFLAGS="$(COREMARK_OPTIM_CFLAGS)" $(call tee_app,coremark-rv32-optim)
+	$(call coremark_mhz_report,$(APP_LOG_DIR)/coremark-rv32-optim.log)
 
-app-coremark-npc64-optim: VFLAGS := -DRAPT_RV64
-app-coremark-npc64-optim: build-npc64 ## [app] CoreMark via pk (rv64) with aggressive optim flags + CoreMark/MHz report
+app-coremark-rv64-optim: VFLAGS := -DRAPT_RV64
+app-coremark-rv64-optim: build-rv64 ## [app] CoreMark via pk (rv64) with aggressive optim flags + CoreMark/MHz report
 	@$(MAKE) --no-print-directory -C $(APP_HOME)/benchmarks/coremark ISA64=1 clean
-	@set -o pipefail; $(MAKE) --no-print-directory -C $(APP_HOME) ISA64=1 coremark-npc ARGS="$(ARGS)" VFLAGS="$(VFLAGS)" COREMARK_OPTIM_CFLAGS="$(COREMARK_OPTIM_CFLAGS)" $(call tee_app,coremark-npc64-optim)
-	$(call coremark_mhz_report,$(APP_LOG_DIR)/coremark-npc64-optim.log)
+	@set -o pipefail; $(MAKE) --no-print-directory -C $(APP_HOME) ISA64=1 coremark-sim ARGS="$(ARGS)" VFLAGS="$(VFLAGS)" COREMARK_OPTIM_CFLAGS="$(COREMARK_OPTIM_CFLAGS)" $(call tee_app,coremark-rv64-optim)
+	$(call coremark_mhz_report,$(APP_LOG_DIR)/coremark-rv64-optim.log)
 
 app-coremark-nemu32: config-nemu32 ## [app] CoreMark via pk on NEMU (rv32)
 	@set -o pipefail; $(MAKE) --no-print-directory -C $(APP_HOME) coremark-nemu ARGS="$(ARGS)" $(call tee_app,coremark-nemu32)
 
-app-embench-npc32: build-npc32 ## [app] Embench-IoT via pk (rv32)
-	@set -o pipefail; $(MAKE) --no-print-directory -C $(APP_HOME) embench-npc ARGS="$(ARGS)" $(call tee_app,embench-npc32)
+app-embench-rv32: build-rv32 ## [app] Build, run, and report Embench-IoT via pk (rv32)
+	@$(MAKE) --no-print-directory -C $(APP_HOME) embench-sim \
+		ISA64=0 ARGS="$(ARGS)" EMBENCH_JOBS=$(JOBS)
+
+app-embench-pk-run-rv32: build-rv32 ## [app] Run pk/MMU Embench-IoT and save logs (rv32)
+	@$(MAKE) --no-print-directory -C $(APP_HOME) embench-pk-run-sim \
+		ISA64=0 ARGS="$(ARGS)" EMBENCH_JOBS=$(JOBS)
+
+app-embench-pk-report-rv32: ## [app] Generate Markdown from existing pk/MMU Embench logs (rv32)
+	@$(MAKE) --no-print-directory -C $(APP_HOME) embench-pk-report-sim ISA64=0
+
+app-embench-baremetal-rv32: build-rv32 ## [app] Bare-metal Embench-IoT with per-benchmark logs and score (rv32)
+	@$(MAKE) --no-print-directory -C $(APP_HOME) embench-baremetal-sim \
+		ISA64=0 ARGS="$(ARGS)" EMBENCH_JOBS=$(JOBS)
+
+app-embench-baremetal-run-rv32: build-rv32 ## [app] Run bare-metal Embench-IoT and save logs (rv32)
+	@$(MAKE) --no-print-directory -C $(APP_HOME) embench-baremetal-run-sim \
+		ISA64=0 ARGS="$(ARGS)" EMBENCH_JOBS=$(JOBS)
+
+app-embench-baremetal-report-rv32: ## [app] Generate Markdown from existing bare-metal Embench logs (rv32)
+	@$(MAKE) --no-print-directory -C $(APP_HOME) embench-baremetal-report-sim ISA64=0
 
 app-embench-nemu32: config-nemu32 ## [app] Embench-IoT via pk on NEMU (rv32)
 	@set -o pipefail; $(MAKE) --no-print-directory -C $(APP_HOME) embench-nemu ARGS="$(ARGS)" $(call tee_app,embench-nemu32)
 
-app-llm-npc32: build-npc32 ## [app] LLM operator/infer/train benchmarks via pk (rv32)
-	@set -o pipefail; $(MAKE) --no-print-directory -C $(APP_HOME) llm-bench-report-npc ARGS="$(ARGS)" $(call tee_app,llm-npc32)
+app-llm-rv32: build-rv32 ## [app] LLM operator/infer/train benchmarks via pk (rv32)
+	@set -o pipefail; $(MAKE) --no-print-directory -C $(APP_HOME) llm-bench-report-sim ARGS="$(ARGS)" $(call tee_app,llm-rv32)
 
 app-llm-nemu32: config-nemu32 ## [app] LLM operator/infer/train benchmarks via pk on NEMU (rv32)
 	@set -o pipefail; $(MAKE) --no-print-directory -C $(APP_HOME) llm-bench-report-nemu ARGS="$(ARGS)" $(call tee_app,llm-nemu32)
 
 # --- app tests/demos on NPC ---
-app-tests-npc32: build-npc32 ## [app] All tests via pk on NPC (rv32)
-	@set -o pipefail; $(MAKE) --no-print-directory -C $(APP_HOME) tests-npc ARGS="$(ARGS)" $(call tee_app,tests-npc32)
+app-tests-rv32: build-rv32 ## [app] All tests via pk on NPC (rv32)
+	@set -o pipefail; $(MAKE) --no-print-directory -C $(APP_HOME) tests-sim ARGS="$(ARGS)" $(call tee_app,tests-rv32)
 
-app-tests-npc32-difftest: config-npc32 config-nemu32-ref ## [app] All tests via pk on NPC with difftest
-	@set -o pipefail; $(MAKE) --no-print-directory -C $(APP_HOME) tests-npc ARGS="$(ARGS)" $(call tee_app,tests-npc32-difftest)
+app-tests-rv32-difftest: config-rv32 config-nemu32-ref ## [app] All tests via pk on NPC with difftest
+	@set -o pipefail; $(MAKE) --no-print-directory -C $(APP_HOME) tests-sim ARGS="$(ARGS)" $(call tee_app,tests-rv32-difftest)
 
-app-demos-npc32: build-npc32 ## [app] All demos via pk on NPC (rv32)
-	@set -o pipefail; $(MAKE) --no-print-directory -C $(APP_HOME) demos-npc ARGS="$(ARGS)" $(call tee_app,demos-npc32)
+app-demos-rv32: build-rv32 ## [app] All demos via pk on NPC (rv32)
+	@set -o pipefail; $(MAKE) --no-print-directory -C $(APP_HOME) demos-sim ARGS="$(ARGS)" $(call tee_app,demos-rv32)
 
 # --- app tests/demos on NEMU (default: with difftest) ---
 app-tests-nemu32: config-nemu32 ## [app] All tests via pk on NEMU (rv32)
@@ -937,26 +958,29 @@ app-clean: ## [app] Clean app build artifacts
 .PHONY: help setup setup-rtl verilog log logs-show logs-clean \
 	config-nemu32 config-nemu32-linux config-nemu32-ref config-nemu32-linux-device menuconfig-nemu32 build-nemu32 run-nemu32 run-nemu32-linux run-nemu32-linux-device \
 	config-nemu64 config-nemu64-ref config-nemu64-linux config-nemu64-linux-device build-nemu64 run-nemu64 run-nemu64-linux-device \
-	config-npc32 config-npc32-linux config-npc32-ysyxsoc build-npc32 run-npc32 sim-npc32 \
-	build-npc64 run-npc64 lint-npc64 \
-	am-kernels-hello-npc32 am-tests-cache-tests-npc32 am-tests-nemu32 am-tests-npc32 \
-	cpu-tests-nemu32 cpu-tests-npc32 irq-tests-build irq-tests-npc32 irq-tests-npc32-difftest \
-	repro-tests-build linux-ticket-spinlock-repro-npc32 sv32-sq-alias-repro-npc32 \
-	coremark-npc32 coremark-npc64 coremark-npc32-optim coremark-npc64-optim coremark-npc32-difftest coremark-npc64-difftest coremark-ysyxsoc \
-	microbench-npc32 microbench-npc64 microbench-npc32-difftest micorbench-npc32-difftest microbench-npc64-difftest microbench-ysyxsoc \
-	dhrystone-npc32 dhrystone-npc32-difftest dhrystone-npc64 dhrystone-nemu32 dhrystone-npc32-optim dhrystone-npc64-optim \
+	config-rv32 config-rv32-difftest config-rv32-linux config-rv32-ysyxsoc build-rv32 run-rv32 sim-rv32 \
+	build-rv64 run-rv64 lint-rv64 \
+	am-kernels-hello-rv32 am-tests-cache-tests-rv32 am-tests-nemu32 am-tests-rv32 \
+	cpu-tests-nemu32 cpu-tests-rv32 irq-tests-build irq-tests-rv32 irq-tests-rv32-difftest \
+	repro-tests-build linux-ticket-spinlock-repro-rv32 sv32-sq-alias-repro-rv32 \
+	coremark-rv32 coremark-rv64 coremark-rv32-optim coremark-rv64-optim coremark-rv32-difftest coremark-rv64-difftest coremark-ysyxsoc \
+	microbench-rv32 microbench-rv64 microbench-rv32-difftest micorbench-rv32-difftest microbench-rv64-difftest microbench-ysyxsoc \
+	dhrystone-rv32 dhrystone-rv32-difftest dhrystone-rv64 dhrystone-nemu32 dhrystone-rv32-optim dhrystone-rv64-optim \
 	coremark-nemu32 microbench-nemu32 coremark-nemu64 microbench-nemu64 \
-	archtest-npc32 archtest-npc32e \
-	nanos-nemu32 nanos-npc32 \
+	archtest-rv32 archtest-rv32e \
+	nanos-nemu32 nanos-rv32 \
 	linux-download linux-download-rv32 linux-download-rv64 \
-	linux-boot-nemu32 linux-boot-nemu64 linux-boot-npc32 linux-boot-npc32-difftest linux-boot-npc64 linux-boot-npc64-difftest linux-boot-nemu32-device linux-boot-nemu64-device \
-	verify-linux-boot-npc32 verify-linux-memory-stress-npc32 verify-linux-memory-stress-from-ckpt-npc32 \
-	linux-boot-npc32-ckpt-save linux-boot-npc32-ckpt-load \
+	linux-boot-nemu32 linux-boot-nemu64 linux-boot-rv32 linux-boot-rv32-difftest linux-boot-rv64 linux-boot-rv64-difftest linux-boot-nemu32-device linux-boot-nemu64-device \
+	verify-linux-boot-rv32 verify-linux-memory-stress-rv32 verify-linux-memory-stress-from-ckpt-rv32 \
+	linux-boot-rv32-ckpt-save linux-boot-rv32-ckpt-load \
 	fpga-syn fpga-pnr pack lint lint-verible ide-setup compile-commands sta sta-detail sta-rv64 sta-detail-rv64 clean-npc clean \
 	verify-fuzz verify-fuzz-inf verify-fuzz-replay verify-sigtest verify-riscof-classic verify-riscof-classic-nemu verify-riscof verify-riscv-dv verify-riscv-dv-stress verify-riscv-dv-mmu verify-coverage verify-all verify-clean \
 	tinyos-sync os-cli-qemu egos-cli-qemu xv6-cli-qemu os-cli-nsim os-cli-nemu egos-cli-nsim egos-cli-nemu xv6-cli-nsim xv6-cli-nemu \
-	app-hello-npc32 app-coremark-npc32 app-coremark-npc32-optim app-coremark-npc64-optim app-coremark-nemu32 app-embench-npc32 app-embench-nemu32 app-llm-npc32 app-llm-nemu32 \
-	app-tests-npc32 app-tests-npc32-difftest app-demos-npc32 \
+	app-hello-rv32 app-coremark-rv32 app-coremark-rv32-optim app-coremark-rv64-optim app-coremark-nemu32 \
+	app-embench-rv32 app-embench-pk-run-rv32 app-embench-pk-report-rv32 \
+	app-embench-baremetal-rv32 app-embench-baremetal-run-rv32 \
+	app-embench-baremetal-report-rv32 app-embench-nemu32 app-llm-rv32 app-llm-nemu32 \
+	app-tests-rv32 app-tests-rv32-difftest app-demos-rv32 \
 	app-tests-nemu32 app-demos-nemu32 \
 	app-run app-run-nemu app-bbl-linux app-pk-build app-clean
 

@@ -24,32 +24,32 @@ read_val() {
 }
 
 # Gather results
-CM_NPC_SCORE=$(read_val "$RESULTS_DIR/coremark-npc.txt" "score")
-CM_NPC_IPC=$(read_val "$RESULTS_DIR/coremark-npc.txt" "ipc")
-CM_NPC_CYCLES=$(read_val "$RESULTS_DIR/coremark-npc.txt" "cycles")
-CM_NPC_INSTS=$(read_val "$RESULTS_DIR/coremark-npc.txt" "insts")
-CM_NPC_TRAP=$(read_val "$RESULTS_DIR/coremark-npc.txt" "trap")
+CM_RV32_SCORE=$(read_val "$RESULTS_DIR/coremark-rv32.txt" "score")
+CM_RV32_IPC=$(read_val "$RESULTS_DIR/coremark-rv32.txt" "ipc")
+CM_RV32_CYCLES=$(read_val "$RESULTS_DIR/coremark-rv32.txt" "cycles")
+CM_RV32_INSTS=$(read_val "$RESULTS_DIR/coremark-rv32.txt" "insts")
+CM_RV32_TRAP=$(read_val "$RESULTS_DIR/coremark-rv32.txt" "trap")
 
-CM_NPCE_SCORE=$(read_val "$RESULTS_DIR/coremark-npce.txt" "score")
-CM_NPCE_IPC=$(read_val "$RESULTS_DIR/coremark-npce.txt" "ipc")
-CM_NPCE_TRAP=$(read_val "$RESULTS_DIR/coremark-npce.txt" "trap")
+CM_RV32E_SCORE=$(read_val "$RESULTS_DIR/coremark-rv32e.txt" "score")
+CM_RV32E_IPC=$(read_val "$RESULTS_DIR/coremark-rv32e.txt" "ipc")
+CM_RV32E_TRAP=$(read_val "$RESULTS_DIR/coremark-rv32e.txt" "trap")
 
-MB_NPC_RESULT=$(read_val "$RESULTS_DIR/microbench-npc.txt" "result")
-MB_NPC_SCORE=$(read_val "$RESULTS_DIR/microbench-npc.txt" "score")
-MB_NPC_IPC=$(read_val "$RESULTS_DIR/microbench-npc.txt" "ipc")
-MB_NPC_CYCLES=$(read_val "$RESULTS_DIR/microbench-npc.txt" "cycles")
-MB_NPC_INSTS=$(read_val "$RESULTS_DIR/microbench-npc.txt" "insts")
-MB_NPC_TRAP=$(read_val "$RESULTS_DIR/microbench-npc.txt" "trap")
+MB_RV32_RESULT=$(read_val "$RESULTS_DIR/microbench-rv32.txt" "result")
+MB_RV32_SCORE=$(read_val "$RESULTS_DIR/microbench-rv32.txt" "score")
+MB_RV32_IPC=$(read_val "$RESULTS_DIR/microbench-rv32.txt" "ipc")
+MB_RV32_CYCLES=$(read_val "$RESULTS_DIR/microbench-rv32.txt" "cycles")
+MB_RV32_INSTS=$(read_val "$RESULTS_DIR/microbench-rv32.txt" "insts")
+MB_RV32_TRAP=$(read_val "$RESULTS_DIR/microbench-rv32.txt" "trap")
 
-MB_NPCE_RESULT=$(read_val "$RESULTS_DIR/microbench-npce.txt" "result")
-MB_NPCE_SCORE=$(read_val "$RESULTS_DIR/microbench-npce.txt" "score")
-MB_NPCE_IPC=$(read_val "$RESULTS_DIR/microbench-npce.txt" "ipc")
-MB_NPCE_TRAP=$(read_val "$RESULTS_DIR/microbench-npce.txt" "trap")
+MB_RV32E_RESULT=$(read_val "$RESULTS_DIR/microbench-rv32e.txt" "result")
+MB_RV32E_SCORE=$(read_val "$RESULTS_DIR/microbench-rv32e.txt" "score")
+MB_RV32E_IPC=$(read_val "$RESULTS_DIR/microbench-rv32e.txt" "ipc")
+MB_RV32E_TRAP=$(read_val "$RESULTS_DIR/microbench-rv32e.txt" "trap")
 
-ARCHTEST_NPC_PASS=$(read_val "$RESULTS_DIR/archtest-npc.txt" "pass" "0")
-ARCHTEST_NPC_FAIL=$(read_val "$RESULTS_DIR/archtest-npc.txt" "fail" "0")
-ARCHTEST_NPCE_PASS=$(read_val "$RESULTS_DIR/archtest-npce.txt" "pass" "0")
-ARCHTEST_NPCE_FAIL=$(read_val "$RESULTS_DIR/archtest-npce.txt" "fail" "0")
+ARCHTEST_RV32_PASS=$(read_val "$RESULTS_DIR/archtest-rv32.txt" "pass" "0")
+ARCHTEST_RV32_FAIL=$(read_val "$RESULTS_DIR/archtest-rv32.txt" "fail" "0")
+ARCHTEST_RV32E_PASS=$(read_val "$RESULTS_DIR/archtest-rv32e.txt" "pass" "0")
+ARCHTEST_RV32E_FAIL=$(read_val "$RESULTS_DIR/archtest-rv32e.txt" "fail" "0")
 
 STA_FREQ=$(read_val "$RESULTS_DIR/sta.txt" "freq_mhz")
 STA_AREA=$(read_val "$RESULTS_DIR/sta.txt" "area")
@@ -92,26 +92,26 @@ cat > "$OUTPUT_JSON" << ENDJSON
     "coremark_ipc": {
       "schemaVersion": 1,
       "label": "CoreMark IPC",
-      "message": "$CM_NPC_IPC",
+      "message": "$CM_RV32_IPC",
       "color": "blue"
     },
     "coremark_score": {
       "schemaVersion": 1,
       "label": "CoreMark",
-      "message": "${CM_NPC_SCORE} Marks",
-      "color": "$(trap_color "$CM_NPC_TRAP")"
+      "message": "${CM_RV32_SCORE} Marks",
+      "color": "$(trap_color "$CM_RV32_TRAP")"
     },
     "microbench_ipc": {
       "schemaVersion": 1,
       "label": "MicroBench IPC",
-      "message": "$MB_NPC_IPC",
+      "message": "$MB_RV32_IPC",
       "color": "blue"
     },
     "microbench_score": {
       "schemaVersion": 1,
       "label": "MicroBench",
-      "message": "${MB_NPC_SCORE} Marks",
-      "color": "$(result_color "$MB_NPC_RESULT")"
+      "message": "${MB_RV32_SCORE} Marks",
+      "color": "$(result_color "$MB_RV32_RESULT")"
     },
     "sta_freq": {
       "schemaVersion": 1,
@@ -128,49 +128,49 @@ cat > "$OUTPUT_JSON" << ENDJSON
     "archtest": {
       "schemaVersion": 1,
       "label": "RISC-V Arch Test",
-      "message": "${ARCHTEST_NPC_PASS} passed",
-      "color": "$([ "$ARCHTEST_NPC_FAIL" = "0" ] && echo "brightgreen" || echo "red")"
+      "message": "${ARCHTEST_RV32_PASS} passed",
+      "color": "$([ "$ARCHTEST_RV32_FAIL" = "0" ] && echo "brightgreen" || echo "red")"
     }
   },
   "results": {
     "coremark": {
-      "riscv32-npc": {
-        "score": "$CM_NPC_SCORE",
-        "ipc": "$CM_NPC_IPC",
-        "cycles": "$CM_NPC_CYCLES",
-        "insts": "$CM_NPC_INSTS",
-        "status": "$CM_NPC_TRAP"
+      "rv32": {
+        "score": "$CM_RV32_SCORE",
+        "ipc": "$CM_RV32_IPC",
+        "cycles": "$CM_RV32_CYCLES",
+        "insts": "$CM_RV32_INSTS",
+        "status": "$CM_RV32_TRAP"
       },
-      "riscv32e-npc": {
-        "score": "$CM_NPCE_SCORE",
-        "ipc": "$CM_NPCE_IPC",
-        "status": "$CM_NPCE_TRAP"
+      "rv32e": {
+        "score": "$CM_RV32E_SCORE",
+        "ipc": "$CM_RV32E_IPC",
+        "status": "$CM_RV32E_TRAP"
       }
     },
     "microbench": {
-      "riscv32-npc": {
-        "result": "$MB_NPC_RESULT",
-        "score": "$MB_NPC_SCORE",
-        "ipc": "$MB_NPC_IPC",
-        "cycles": "$MB_NPC_CYCLES",
-        "insts": "$MB_NPC_INSTS",
-        "status": "$MB_NPC_TRAP"
+      "rv32": {
+        "result": "$MB_RV32_RESULT",
+        "score": "$MB_RV32_SCORE",
+        "ipc": "$MB_RV32_IPC",
+        "cycles": "$MB_RV32_CYCLES",
+        "insts": "$MB_RV32_INSTS",
+        "status": "$MB_RV32_TRAP"
       },
-      "riscv32e-npc": {
-        "result": "$MB_NPCE_RESULT",
-        "score": "$MB_NPCE_SCORE",
-        "ipc": "$MB_NPCE_IPC",
-        "status": "$MB_NPCE_TRAP"
+      "rv32e": {
+        "result": "$MB_RV32E_RESULT",
+        "score": "$MB_RV32E_SCORE",
+        "ipc": "$MB_RV32E_IPC",
+        "status": "$MB_RV32E_TRAP"
       }
     },
     "archtest": {
-      "riscv32-npc": {
-        "pass": "$ARCHTEST_NPC_PASS",
-        "fail": "$ARCHTEST_NPC_FAIL"
+      "rv32": {
+        "pass": "$ARCHTEST_RV32_PASS",
+        "fail": "$ARCHTEST_RV32_FAIL"
       },
-      "riscv32e-npc": {
-        "pass": "$ARCHTEST_NPCE_PASS",
-        "fail": "$ARCHTEST_NPCE_FAIL"
+      "rv32e": {
+        "pass": "$ARCHTEST_RV32E_PASS",
+        "fail": "$ARCHTEST_RV32E_FAIL"
       }
     },
     "sta": {
@@ -191,26 +191,26 @@ cat >> "$STEP_SUMMARY" << ENDMD
 
 > Commit: \`$COMMIT_SHORT\` | Updated: $TIMESTAMP
 
-### Performance (riscv32-npc, standalone)
+### Performance (rv32, standalone sim)
 
 | Benchmark | Score | IPC | Cycles | Instructions | Status |
 |-----------|-------|-----|--------|--------------|--------|
-| CoreMark  | $CM_NPC_SCORE | $CM_NPC_IPC | $CM_NPC_CYCLES | $CM_NPC_INSTS | $CM_NPC_TRAP |
-| MicroBench | $MB_NPC_SCORE | $MB_NPC_IPC | $MB_NPC_CYCLES | $MB_NPC_INSTS | $MB_NPC_TRAP |
+| CoreMark  | $CM_RV32_SCORE | $CM_RV32_IPC | $CM_RV32_CYCLES | $CM_RV32_INSTS | $CM_RV32_TRAP |
+| MicroBench | $MB_RV32_SCORE | $MB_RV32_IPC | $MB_RV32_CYCLES | $MB_RV32_INSTS | $MB_RV32_TRAP |
 
-### Performance (riscv32e-npc, standalone)
+### Performance (rv32e, standalone sim)
 
 | Benchmark | Score | IPC | Status |
 |-----------|-------|-----|--------|
-| CoreMark  | $CM_NPCE_SCORE | $CM_NPCE_IPC | $CM_NPCE_TRAP |
-| MicroBench | $MB_NPCE_SCORE | $MB_NPCE_IPC | $MB_NPCE_TRAP |
+| CoreMark  | $CM_RV32E_SCORE | $CM_RV32E_IPC | $CM_RV32E_TRAP |
+| MicroBench | $MB_RV32E_SCORE | $MB_RV32E_IPC | $MB_RV32E_TRAP |
 
 ### RISC-V Architecture Tests
 
 | Target | Passed | Failed |
 |--------|--------|--------|
-| riscv32-npc  | $ARCHTEST_NPC_PASS  | $ARCHTEST_NPC_FAIL  |
-| riscv32e-npc | $ARCHTEST_NPCE_PASS | $ARCHTEST_NPCE_FAIL |
+| rv32  | $ARCHTEST_RV32_PASS  | $ARCHTEST_RV32_FAIL  |
+| rv32e | $ARCHTEST_RV32E_PASS | $ARCHTEST_RV32E_FAIL |
 
 ENDMD
 

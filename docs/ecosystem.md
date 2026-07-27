@@ -17,7 +17,7 @@ Simulators, FPGA boards, ASIC flow, software stack, and memory maps.
 | Simulator   | Role                                 | Entry                        |
 | ----------- | ------------------------------------ | ---------------------------- |
 | **NEMU**    | Software ISS, reference model        | `make run-nemu32`, `nemu/`   |
-| **NPC**     | Verilator, cycle-accurate, waveform  | `make sim-npc32`, `sim/`     |
+| **NPC**     | Verilator, cycle-accurate, waveform  | `make sim-rv32`, `sim/`      |
 | **raptSoC** | Chisel SoC wrapping Raptor + devices | `make coremark-ysyxsoc` etc. |
 
 NPC is the primary development simulator. NEMU acts as the difftest reference for every commit.

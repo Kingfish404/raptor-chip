@@ -29,7 +29,7 @@ published comparisons).
 
 | Backend                 | OP_ITERS | GEN_TOKENS | INFER_REPEATS | TRAIN_STEPS | Target wall  |
 | ----------------------- | -------: | ---------: | ------------: | ----------: | ------------ |
-| NPC RTL sim (`*-npc`)   |        8 |         12 |             1 |           4 | a few s      |
+| NPC RTL sim (`*-sim`)   |        8 |         12 |             1 |           4 | a few s      |
 | NEMU ISS (`*-nemu`)     |       64 |         16 |             2 |          16 | ~1–3 s       |
 | Native host             |  524 288 |         16 |       131 072 |     262 144 | ~3–5 s/mode  |
 | LiteX FPGA (`litex-build`) |     8 |         12 |             1 |           4 | (uses fallback; override per-board) |
@@ -118,9 +118,9 @@ The top-level convenience targets below run from `app/`:
 make llm-bench-build
 
 # Individual pk/NPC runs
-make llm-ops-npc
-make llm-infer-npc
-make llm-train-npc
+make llm-ops-rv32
+make llm-infer-rv32
+make llm-train-rv32
 
 # Individual NEMU runs
 make llm-ops-nemu
@@ -128,7 +128,7 @@ make llm-infer-nemu
 make llm-train-nemu
 
 # Full suite: run, keep logs, emit Markdown/CSV/JSON reports
-make llm-bench-report-npc
+make llm-bench-report-rv32
 make llm-bench-report-nemu
 
 # Host-native build/run/report for portability smoke testing
@@ -140,9 +140,9 @@ default:
 
 | File                 | Purpose                        |
 | -------------------- | ------------------------------ |
-| `rllmbench-npc.md`   | human-readable summary table   |
-| `rllmbench-npc.csv`  | spreadsheet / dashboard import |
-| `rllmbench-npc.json` | machine-readable archive       |
+| `rllmbench-rv32.md`   | human-readable summary table   |
+| `rllmbench-rv32.csv`  | spreadsheet / dashboard import |
+| `rllmbench-rv32.json` | machine-readable archive       |
 
 Recommended RISC-V comparison headline:
 

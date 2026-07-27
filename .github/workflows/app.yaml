@@ -1,14 +1,14 @@
 name: App (Verified, Linux boot, LiteX)
 
-# Unified workflow RISCOF compatibility + coverage, Linux boot NPC/NEMU, and LiteX BIOS / CoreMark / Embench
+# Unified workflow RISCOF compatibility + coverage, Linux boot RV32/NEMU, and LiteX BIOS / CoreMark / Embench
 #
 # Jobs:
 #   - riscof-classic: cross-validates the Raptor core against the upstream
 #     riscv-non-isa/riscv-arch-test suite via the classic RISCOF flow
 #     (sail-riscv reference).
-#   - fuzztest-sigtest-and-coverage: builds NPC with coverage instrumentation
+#   - fuzztest-sigtest-and-coverage: builds with coverage instrumentation
 #     and runs the verify suite to produce a unified Verilator coverage report.
-#   - linux-npc-test: boots Linux on the Verilator NPC and publishes the RTL
+#   - linux-rv32-test: boots Linux on the Verilator and publishes the RTL
 #     nightly release.
 #   - nemu-linux-test: boots OpenSBI + Linux 32/64-bit on NEMU.
 #   - litex-test: LiteX BIOS + CoreMark in the Verilator LiteX SoC.
@@ -90,10 +90,10 @@ jobs:
           python3 -m pip install --upgrade pip
           pip3 install git+https://github.com/riscv/riscof.git@d38859f85fe407bcacddd2efcd355ada4683aee4
 
-      - name: Build NPC (no difftest) and MROM image
+      - name: Build (no difftest) and MROM image
         shell: bash -l {0}
         run: |
-          make config-npc32
+          make config-rv32
           make -C sim -j$(nproc)
           make -C sim/csrc/mem/mrom-data
 
@@ -180,10 +180,10 @@ jobs:
       - uses: actions/checkout@v6
       - name: Setup environment
         run: ./setup.sh
-      - name: Build NPC with difftest and NEMU-Ref
+      - name: Build with difftest and NEMU-Ref
         shell: bash -l {0}
         run: |
-          make config-npc32-difftest
+          make config-rv32-difftest
           make config-nemu32-ref
       # - name: Random instruction fuzz tests
       #   shell: bash -l {0}
@@ -191,7 +191,7 @@ jobs:
       # - name: Signature-based ISA tests
       #   shell: bash -l {0}
       #   run: make -C verify sigtest TIMEOUT=10
-      - name: Build NPC with coverage instrumentation
+      - name: Build with coverage instrumentation
         shell: bash -l {0}
         run: make -C verify coverage-build
 
@@ -219,7 +219,7 @@ jobs:
           path: verify/build/coverage/
           retention-days: 30
 
-  linux-npc-test:
+  linux-rv32-test:
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -235,10 +235,10 @@ jobs:
       - name: Download pre-built Linux kernel
         shell: bash -l {0}
         run: make linux-download-rv32
-      - name: Boot Linux on NPC with difftest
+      - name: Boot Linux on RV32 with difftest
         shell: bash -l {0}
         run: |
-          make linux-boot-npc32-difftest ARGS="-b -n" MAX_INST=160000000 \
+          make linux-boot-rv32-difftest ARGS="-b -n" MAX_INST=160000000 \
             2>&1 | tee /tmp/linux-boot.log || true
       - name: Linux boot summary
         run: |
@@ -251,7 +251,7 @@ jobs:
           CYCLES=$(grep -oP 'cycle:\s*\K\d+' /tmp/linux-boot.log | head -1 || echo "N/A")
           {
             echo ""
-            echo "## Linux Boot Test (NPC)"
+            echo "## Linux Boot Test (RV32)"
             echo "| Check | Status |"
             echo "|-------|--------|"
             echo "| Kernel boot | $([ "$BOOT_OK" = "yes" ] && echo 'PASS' || echo 'FAIL') |"
@@ -264,7 +264,7 @@ jobs:
             echo "| Cycles | $CYCLES |"
           } >> "$GITHUB_STEP_SUMMARY"
           bash .github/scripts/parse-pmu.sh \
-            "Linux Boot NPC" /tmp/linux-boot.log \
+            "Linux Boot RV32" /tmp/linux-boot.log \
             >> "$GITHUB_STEP_SUMMARY"
           python3 verify/scripts/check_linux_boot.py /tmp/linux-boot.log
       - name: Pack RTL into single file

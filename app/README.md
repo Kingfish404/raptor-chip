@@ -9,16 +9,16 @@ Standalone RISC-V programs that compile to standard ELFs and run on any RISC-V L
 make all
 
 # Build and run specific test suites via pk on NPC/sim
-make isa-tests-npc        # ISA correctness verification
-make memory-tests-npc     # Memory subsystem tests
-make algo-tests-npc       # Algorithm correctness tests
-make demos-npc            # Demo programs
-make coremark-npc         # CoreMark benchmark
-make embench-npc          # Embench-IoT benchmarks
-make llm-bench-report-npc # RLLMBench: LLM operator/infer/train benchmark + report
-make llm-native-test  # RLLMBench host-native build/run/report smoke test
-make agent-bench-report-npc # RAgentBench: agentic-workload CPU benchmark + report
-make agent-native-test    # RAgentBench host-native build/run/report smoke test
+make isa-tests-rv32        # ISA correctness verification
+make memory-tests-rv32     # Memory subsystem tests
+make algo-tests-rv32       # Algorithm correctness tests
+make demos-rv32            # Demo programs
+make coremark-rv32         # CoreMark benchmark
+make embench-rv32          # Embench-IoT benchmarks
+make llm-bench-report-rv32 # RLLMBench: LLM operator/infer/train benchmark + report
+make llm-native-test       # RLLMBench host-native build/run/report smoke test
+make agent-bench-report-rv32 # RAgentBench: agentic-workload CPU benchmark + report
+make agent-native-test     # RAgentBench host-native build/run/report smoke test
 
 # Run on NEMU
 make isa-tests-nemu
@@ -135,10 +135,10 @@ Programs run on the Raptor NPC simulator via riscv-pk proxy kernel:
 make pk-run USER_ELF=app/build/rv32/tests/isa/rv_add.elf
 
 # Run all tests on NPC
-make tests-npc ARGS="-b -n"
+make tests-sim ARGS="-b -n"
 
 # Run all tests on NPC with difftest (from project root)
-make app-tests-npc32-difftest ARGS="-b -n"
+make app-tests-rv32-difftest ARGS="-b -n"
 ```
 
 ## Running on NEMU (via pk)
@@ -170,10 +170,10 @@ and FPGA payload runs stay practical.
 
 ```bash
 make llm-bench-build
-make llm-ops-npc
-make llm-infer-npc
-make llm-train-npc
-make llm-bench-report-npc
+make llm-ops-rv32
+make llm-infer-rv32
+make llm-train-rv32
+make llm-bench-report-rv32
 make llm-native-test
 
 # Reports from the full suite
@@ -181,12 +181,12 @@ ls build/rv32/benchmarks/llm/reports/
 ls build/native/benchmarks/llm/reports/
 
 # Tune workload size
-make llm-bench-report-npc LLM_OP_ITERS=16 LLM_GEN_TOKENS=16 LLM_TRAIN_STEPS=8
+make llm-bench-report-rv32 LLM_OP_ITERS=16 LLM_GEN_TOKENS=16 LLM_TRAIN_STEPS=8
 ```
 
 The profile name encodes the workload knobs as
 `ops<LLM_OP_ITERS>-gen<LLM_GEN_TOKENS>-train<LLM_TRAIN_STEPS>`; the default
-comparable profile is `ops8-gen12-train4`. `make llm-bench-report-npc` and
+comparable profile is `ops8-gen12-train4`. `make llm-bench-report-rv32` and
 `make llm-bench-report-nemu` keep per-run logs
 and emits Markdown/CSV/JSON reports. The headline metric is `score_per_sec`:
 benchmark work items per physical second, higher is better. Reports use only
@@ -208,7 +208,7 @@ The port layer is the single header `benchmarks/llm/rllmbench_port.h`. New
 bare-metal RISC-V ports normally only set `RLLMBENCH_TIMEBASE_HZ` to the real
 `time` CSR rate; unusual platforms can override `RLLMBENCH_READ_TIME_US()` to
 return monotonic physical microseconds.
-For NPC comparisons, `make llm-bench-report-npc` defaults to `RLLMBENCH_TIMEBASE_HZ=10000000`
+For NPC comparisons, `make llm-bench-report-rv32` defaults to `RLLMBENCH_TIMEBASE_HZ=10000000`
 and `RLLMBENCH_CORE_CLOCK_MHZ=1000`, matching the current RTL timer/core-clock
 model. Override `RLLMBENCH_CORE_CLOCK_MHZ` for FPGA or ASIC reports when the
 core frequency differs.
@@ -240,7 +240,7 @@ use the `RAGENTBENCH_*` prefix; profile string is
 
 ```bash
 make agent-bench-build      # cross-compile pk ELFs
-make agent-bench-report-npc # build + run + summarize on NPC/sim
+make agent-bench-report-rv32 # build + run + summarize on NPC/sim
 make agent-bench-report-nemu
 make agent-litex-build      # LiteX flat binaries
 make agent-native-test      # host-native smoke test

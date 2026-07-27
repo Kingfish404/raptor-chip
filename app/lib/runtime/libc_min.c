@@ -125,6 +125,15 @@ int strncmp(const char *lhs, const char *rhs, size_t n)
     return *(const unsigned char *)lhs - *(const unsigned char *)rhs;
 }
 
+char *strchr(const char *s, int c)
+{
+    char needle = (char)c;
+    do {
+        if (*s == needle) return (char *)s;
+    } while (*s++ != '\0');
+    return NULL;
+}
+
 int atoi(const char *s)
 {
     int sign = 1;
@@ -169,6 +178,17 @@ char *itoa(int value, char *str, int base)
     for (int i = 0; i < pos; i++) str[i] = tmp[pos - 1 - i];
     str[pos] = '\0';
     return str;
+}
+
+double sqrt(double value)
+{
+    if (value <= 0.0) return 0.0;
+
+    double estimate = value >= 1.0 ? value : 1.0;
+    for (int i = 0; i < 32; i++) {
+        estimate = 0.5 * (estimate + value / estimate);
+    }
+    return estimate;
 }
 
 #ifdef RAPT_LIBC_MIN_MALLOC

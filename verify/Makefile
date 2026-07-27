@@ -153,7 +153,7 @@ help: ## Show this help message
 # ============================================================================
 $(NPC_BIN):
 	@echo "[verify] Building NPC simulator (difftest enabled)..."
-	$(MAKE) -C $(RAPTOR_HOME) config-npc32-difftest
+	$(MAKE) -C $(RAPTOR_HOME) config-rv32-difftest
 	$(MAKE) -C $(NSIM_HOME) -j$(NPROC) VFLAGS="$(VFLAGS)"
 
 $(NEMU_SO):
@@ -170,7 +170,7 @@ $(MROM_IMG):
 .PHONY: check-prereqs
 check-prereqs: $(MROM_IMG) ## Verify all prerequisites are built
 	@echo "[verify] Checking prerequisites..."
-	@test -f $(NPC_BIN)  || (echo "ERROR: NPC binary not found: $(NPC_BIN)"  && echo "  Run: make -C $(RAPTOR_HOME) build-npc32" && exit 1)
+	@test -f $(NPC_BIN)  || (echo "ERROR: NPC binary not found: $(NPC_BIN)"  && echo "  Run: make -C $(RAPTOR_HOME) build-rv32" && exit 1)
 	@test -f $(NEMU_SO)  || (echo "ERROR: NEMU SO not found: $(NEMU_SO)"    && echo "  Run: make -C $(RAPTOR_HOME) config-nemu32-ref" && exit 1)
 	@echo "[verify] All prerequisites OK."
 
@@ -753,13 +753,13 @@ coverage-run-coremark: check-coverage-bin ## Run only coremark coverage workload
 	$(call RUN_AND_SAVE_COVERAGE,coremark,$(MAKE) -C $(AM_KERNELS)/benchmarks/coremark_eembc ARCH=$(NPC_ARCH_COV) run ARGS="-b -n" VFLAGS="$(VFLAGS)" $(COV_PASS_ENV))
 
 coverage-run-coremark-pk: check-coverage-bin ## Run coremark under pk (app/) for coverage
-	$(call RUN_AND_SAVE_COVERAGE,coremark-pk,$(MAKE) -C $(RAPTOR_HOME)/app coremark-npc ISA64=$(APP_ISA64) ARGS="-b -n" VFLAGS="$(VFLAGS)" $(COV_PASS_ENV) DIFF_REF_SO=)
+	$(call RUN_AND_SAVE_COVERAGE,coremark-pk,$(MAKE) -C $(RAPTOR_HOME)/app coremark-sim ISA64=$(APP_ISA64) ARGS="-b -n" VFLAGS="$(VFLAGS)" $(COV_PASS_ENV) DIFF_REF_SO=)
 
 coverage-run-hello-pk: check-coverage-bin ## Run hello under pk (app/) for coverage
-	$(call RUN_AND_SAVE_COVERAGE,hello-pk,$(MAKE) -C $(RAPTOR_HOME)/app hello-npc ISA64=$(APP_ISA64) ARGS="-b -n" VFLAGS="$(VFLAGS)" $(COV_PASS_ENV) DIFF_REF_SO=)
+	$(call RUN_AND_SAVE_COVERAGE,hello-pk,$(MAKE) -C $(RAPTOR_HOME)/app hello-sim ISA64=$(APP_ISA64) ARGS="-b -n" VFLAGS="$(VFLAGS)" $(COV_PASS_ENV) DIFF_REF_SO=)
 
 coverage-run-isa-tests-pk: check-coverage-bin ## Run ISA tests under pk (app/) for coverage
-	$(call RUN_AND_SAVE_COVERAGE,isa-tests-pk,$(MAKE) -C $(RAPTOR_HOME)/app isa-tests-npc ISA64=$(APP_ISA64) ARGS="-b -n" VFLAGS="$(VFLAGS)" $(COV_PASS_ENV) DIFF_REF_SO=)
+	$(call RUN_AND_SAVE_COVERAGE,isa-tests-pk,$(MAKE) -C $(RAPTOR_HOME)/app isa-tests-sim ISA64=$(APP_ISA64) ARGS="-b -n" VFLAGS="$(VFLAGS)" $(COV_PASS_ENV) DIFF_REF_SO=)
 
 
 coverage-run-microbench: check-coverage-bin ## Run only microbench coverage workload

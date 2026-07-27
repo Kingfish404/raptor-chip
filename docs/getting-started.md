@@ -46,18 +46,18 @@ make menuconfig-nemu32          # interactive Kconfig
 
 ```shell
 # Full pipeline: Chisel -> SystemVerilog -> configure -> build -> run
-make sim-npc32
+make sim-rv32
 
 # Or step by step
 make verilog                    # Chisel -> SystemVerilog
-make config-npc32               # o2_defconfig
-make build-npc32
-make run-npc32
+make config-rv32               # o2_defconfig
+make build-rv32
+make run-rv32
 
 # Common runtime flags
-make run-npc32 ARGS="-b -n"     # -b batch mode (default) · -n no wave trace
-make run-npc32 IMG=path/to.bin  # load a custom image
-make menuconfig-npc32           # interactive Kconfig
+make run-rv32 ARGS="-b -n"     # -b batch mode (default) · -n no wave trace
+make run-rv32 IMG=path/to.bin  # load a custom image
+make menuconfig-rv32           # interactive Kconfig
 ```
 
 ### RV64 Mode
@@ -66,23 +66,23 @@ The core supports RV64 via the compile-time switch `-DRAPT_RV64`. Switching betw
 RV32 and RV64 automatically invalidates the build cache — no manual `make clean` needed.
 
 ```shell
-make build-npc64
-make run-npc64   ARGS="-b -n"
-make lint-npc64
+make build-rv64
+make run-rv64   ARGS="-b -n"
+make lint-rv64
 # or pass VFLAGS explicitly
-make run-npc32 VFLAGS="-DRAPT_RV64" ARGS="-b -n"
+make run-rv32 VFLAGS="-DRAPT_RV64" ARGS="-b -n"
 ```
 
 ## 4. Benchmarks
 
 ```shell
 # NPC standalone
-make coremark-npc32        ARGS="-b -n"
-make microbench-npc32      ARGS="-b -n"
+make coremark-rv32        ARGS="-b -n"
+make microbench-rv32      ARGS="-b -n"
 
 # NPC with difftest (vs NEMU reference model)
-make coremark-npc32-difftest     ARGS="-b -n"
-make microbench-npc32-difftest   ARGS="-b -n"
+make coremark-rv32-difftest     ARGS="-b -n"
+make microbench-rv32-difftest   ARGS="-b -n"
 
 # raptSoC
 make coremark-ysyxsoc      ARGS="-b -n"
@@ -98,9 +98,9 @@ Detailed results: **[PROFILE](./PROFILE.md)**.
 ## 5. Apps on riscv-pk
 
 ```shell
-make app-hello-npc32                        # hello world
-make app-coremark-npc32    ARGS="-b -n"     # CoreMark on pk
-make app-embench-npc32     ARGS="-b -n"     # Embench-IoT
+make app-hello-rv32                        # hello world
+make app-coremark-rv32    ARGS="-b -n"     # CoreMark on pk
+make app-embench-rv32     ARGS="-b -n"     # Embench-IoT
 make app-pk-build                           # build OpenSBI + pk
 make app-clean
 ```
@@ -109,8 +109,8 @@ make app-clean
 
 ```shell
 make linux-boot-nemu32              # NEMU
-make linux-boot-npc32               # NPC (Verilator)
-make linux-boot-npc32-difftest      # NPC + difftest vs NEMU
+make linux-boot-rv32               # NPC (Verilator)
+make linux-boot-rv32-difftest      # NPC + difftest vs NEMU
 ```
 
 Details: **[Linux Kernel Boot](./linux_kernel.md)**.
@@ -140,15 +140,15 @@ make clean    # clean all build artifacts
 | Setup environment               | `make setup`                           |
 | Generate RTL                    | `make verilog`                         |
 | Build & run NEMU                | `make run-nemu32`                      |
-| Full NPC simulation             | `make sim-npc32`                       |
-| NPC simulation (batch, no wave) | `make run-npc32 ARGS="-b -n"`          |
-| NPC RV64 mode                   | `make run-npc64 ARGS="-b -n"`          |
-| CPU tests on NPC                | `make cpu-tests-npc32 ARGS="-b -n"`    |
-| Run CoreMark on NPC             | `make coremark-npc32 ARGS="-b -n"`     |
-| Run MicroBench on NPC           | `make microbench-npc32 ARGS="-b -n"`   |
+| Full NPC simulation             | `make sim-rv32`                        |
+| NPC simulation (batch, no wave) | `make run-rv32 ARGS="-b -n"`           |
+| NPC RV64 mode                   | `make run-rv64 ARGS="-b -n"`           |
+| CPU tests on NPC                | `make cpu-tests-rv32 ARGS="-b -n"`     |
+| Run CoreMark on NPC             | `make coremark-rv32 ARGS="-b -n"`      |
+| Run MicroBench on NPC           | `make microbench-rv32 ARGS="-b -n"`    |
 | Run nanos-lite on NEMU          | `make nanos-nemu32`                    |
 | Boot Linux on NEMU              | `make linux-boot-nemu32`               |
-| Boot Linux on NPC w/ difftest   | `make linux-boot-npc32-difftest`       |
+| Boot Linux on NPC w/ difftest   | `make linux-boot-rv32-difftest`        |
 | FPGA synthesis                  | `make fpga-syn`                        |
 | Pack SV / Lint / STA            | `make pack` / `make lint` / `make sta` |
 | Clean all                       | `make clean`                           |

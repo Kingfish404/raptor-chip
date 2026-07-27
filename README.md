@@ -146,25 +146,25 @@ make run-nemu32             # run
 make menuconfig-nemu32
 ```
 
-### 2. NPC Simulation (Verilator)
+### 2. Simulation (Verilator)
 
 ```shell
 # Full pipeline: generate RTL -> configure -> build -> run
-make sim-npc32
+make sim-rv32
 
 # Or step by step
 make verilog              # Chisel -> SystemVerilog
-make config-npc32         # configure (o2_defconfig)
-make build-npc32          # build Verilator simulator
-make run-npc32            # run simulation
+make config-rv32         # configure (o2_defconfig)
+make build-rv32          # build Verilator simulator
+make run-rv32            # run simulation
 
 # Run with args
-make run-npc32 ARGS="-b -n"    # -b: batch mode [default], -n: no wave trace
-make run-npc32 IMG=path/to.bin  # load custom image
+make run-rv32 ARGS="-b -n"    # -b: batch mode [default], -n: no wave trace
+make run-rv32 IMG=path/to.bin  # load custom image
 # Add reproducible 0..8-cycle delays to each AXI memory beat/response
-make run-npc32 ARGS="-b -n --mem-random-delay=8 --mem-random-seed=1"
+make run-rv32 ARGS="-b -n --mem-random-delay=8 --mem-random-seed=1"
 # Interactive menuconfig
-make menuconfig-npc32
+make menuconfig-rv32
 ```
 
 #### RV64 Mode
@@ -173,21 +173,21 @@ The processor supports RV64 via a compile-time switch (`-DRAPT_RV64`). Switching
 
 ```shell
 # Build and run in RV64 mode (convenience targets)
-make build-npc64
-make run-npc64 ARGS="-b -n"
+make build-rv64
+make run-rv64 ARGS="-b -n"
 # Or explicitly pass VFLAGS
-make run-npc32 VFLAGS="-DRAPT_RV64" ARGS="-b -n"
+make run-rv32 VFLAGS="-DRAPT_RV64" ARGS="-b -n"
 ```
 
 ### 3. Benchmarks
 
 ```shell
-# Run on NPC (riscv32-npc)
-make coremark-npc32 ARGS="-b -n"
-make microbench-npc32 ARGS="-b -n"
-# Run on NPC with difftest (vs NEMU reference)
-make coremark-npc32-difftest ARGS="-b -n"
-make microbench-npc32-difftest ARGS="-b -n"
+# Run riscv32
+make coremark-rv32 ARGS="-b -n"
+make microbench-rv32 ARGS="-b -n"
+# Run with difftest (vs NEMU reference)
+make coremark-rv32-difftest ARGS="-b -n"
+make microbench-rv32-difftest ARGS="-b -n"
 # Run on ysyxSoC
 make coremark-ysyxsoc ARGS="-b -n"
 make microbench-ysyxsoc ARGS="-b -n"
@@ -200,11 +200,11 @@ make microbench-nemu32 ARGS="-b -n"
 
 ```shell
 # Build and run hello world on NPC
-make app-hello-npc32
+make app-hello-rv32
 # Build and run CoreMark on NPC
-make app-coremark-npc32 ARGS="-b -n"
+make app-coremark-rv32 ARGS="-b -n"
 # Build and run Embench-IoT on NPC
-make app-embench-npc32 ARGS="-b -n"
+make app-embench-rv32 ARGS="-b -n"
 # Build riscv-pk (opensbi + pk)
 make app-pk-build
 # Clean app build artifacts
@@ -217,9 +217,9 @@ make app-clean
 # Boot Linux on NEMU (requires OpenSBI payload built first)
 make linux-boot-nemu32
 # Boot Linux on NPC
-make linux-boot-npc32
+make linux-boot-rv32
 # Boot Linux on NPC with difftest (vs NEMU reference)
-make linux-boot-npc32-difftest
+make linux-boot-rv32-difftest
 # See detailed instructions
 # docs/linux_kernel.md, linux/README.md
 ```

@@ -1,9 +1,10 @@
-name: Benchmark (AM + pk + ysyxSoC)
+name: Benchmark (AM + bare metal + pk + ysyxSoC)
 
 # Combined performance / functional benchmark workflow:
-#   - npc-benchmark / npc-cpu-tests   : abstract-machine on the Raptor NPC
+#   - rv-benchmark / rv32-cpu-tests   : abstract-machine on the Raptor
 #   - app-pk-coremark                 : pk-hosted hello + CoreMark
-#   - app-pk-embench                  : pk-hosted Embench-IoT suite
+#   - app-pk-embench                  : pk/MMU-hosted Embench-IoT suite
+#   - app-baremetal-embench           : bare-metal Embench-IoT suite
 #   - ysyxsoc-benchmark / ysyxsoc-cpu-tests : ysyxSoC integration
 # STA / PPA evaluation lives in the dedicated `sta.yaml` workflow.
 
@@ -34,7 +35,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  npc-benchmark:
+  rv-benchmark:
     runs-on: ubuntu-latest
     env:
       RAPTOR_HOME: ${{ github.workspace }}
@@ -45,54 +46,54 @@ jobs:
       - uses: actions/checkout@v6
       - name: Setup environment
         run: ./setup.sh
-      - name: Build NEMU (ref) and NPC
+      - name: Build NEMU (ref) and rv32
         shell: bash -l {0}
         run: |
           make config-nemu32-ref
-          make build-npc32
+          make build-rv32
 
-      - name: Run microbench riscv32-npc
+      - name: Run microbench rv32
         shell: bash -l {0}
         run: |
           mkdir -p .github/results
-          make microbench-npc32 ARGS="-b -n" MAINARGS=test \
-            2>&1 | tee /tmp/microbench-npc.log
-          bash .github/scripts/parse-benchmark.sh microbench /tmp/microbench-npc.log > .github/results/microbench-npc.txt
+          make microbench-rv32 ARGS="-b -n" MAINARGS=test \
+            2>&1 | tee /tmp/microbench-rv32.log
+          bash .github/scripts/parse-benchmark.sh microbench /tmp/microbench-rv32.log > .github/results/microbench-rv32.txt
 
-      - name: Run microbench riscv32e-npc
+      - name: Run microbench rv32e
         shell: bash -l {0}
         run: |
-          make microbench-npc32 NPC_ARCH=riscv32e-npc ARGS="-b -n" MAINARGS=test \
-            2>&1 | tee /tmp/microbench-npce.log
-          bash .github/scripts/parse-benchmark.sh microbench /tmp/microbench-npce.log > .github/results/microbench-npce.txt
+          make microbench-rv32 NPC_ARCH=riscv32e-npc ARGS="-b -n" MAINARGS=test \
+            2>&1 | tee /tmp/microbench-rv32e.log
+          bash .github/scripts/parse-benchmark.sh microbench /tmp/microbench-rv32e.log > .github/results/microbench-rv32e.txt
 
-      - name: Run coremark riscv32-npc
+      - name: Run coremark rv32
         shell: bash -l {0}
         run: |
-          make coremark-npc32 ARGS="-b -n" \
-            2>&1 | tee /tmp/coremark-npc.log
-          bash .github/scripts/parse-benchmark.sh coremark /tmp/coremark-npc.log > .github/results/coremark-npc.txt
+          make coremark-rv32 ARGS="-b -n" \
+            2>&1 | tee /tmp/coremark-rv32.log
+          bash .github/scripts/parse-benchmark.sh coremark /tmp/coremark-rv32.log > .github/results/coremark-rv32.txt
 
-      - name: Run coremark riscv32e-npc
+      - name: Run coremark rv32e
         shell: bash -l {0}
         run: |
-          make coremark-npc32 NPC_ARCH=riscv32e-npc ARGS="-b -n" \
-            2>&1 | tee /tmp/coremark-npce.log
-          bash .github/scripts/parse-benchmark.sh coremark /tmp/coremark-npce.log > .github/results/coremark-npce.txt
+          make coremark-rv32 NPC_ARCH=riscv32e-npc ARGS="-b -n" \
+            2>&1 | tee /tmp/coremark-rv32e.log
+          bash .github/scripts/parse-benchmark.sh coremark /tmp/coremark-rv32e.log > .github/results/coremark-rv32e.txt
 
-      - name: Run RISC-V Architecture Test riscv32-npc
+      - name: Run RISC-V Architecture Test rv32
         shell: bash -l {0}
         run: |
-          make archtest-npc32 ARGS="-b -n" \
-            2>&1 | tee /tmp/archtest-npc.log
-          bash .github/scripts/parse-benchmark.sh archtest /tmp/archtest-npc.log > .github/results/archtest-npc.txt
+          make archtest-rv32 ARGS="-b -n" \
+            2>&1 | tee /tmp/archtest-rv32.log
+          bash .github/scripts/parse-benchmark.sh archtest /tmp/archtest-rv32.log > .github/results/archtest-rv32.txt
 
-      - name: Run RISC-V Architecture Test riscv32e-npc
+      - name: Run RISC-V Architecture Test rv32e
         shell: bash -l {0}
         run: |
-          make archtest-npc32e ARGS="-b -n" \
-            2>&1 | tee /tmp/archtest-npce.log
-          bash .github/scripts/parse-benchmark.sh archtest /tmp/archtest-npce.log > .github/results/archtest-npce.txt
+          make archtest-rv32e ARGS="-b -n" \
+            2>&1 | tee /tmp/archtest-rv32e.log
+          bash .github/scripts/parse-benchmark.sh archtest /tmp/archtest-rv32e.log > .github/results/archtest-rv32e.txt
 
       - name: Generate benchmark summary
         run: bash .github/scripts/generate-summary.sh .github/results
@@ -102,10 +103,10 @@ jobs:
         if: always()
         run: |
           bash .github/scripts/parse-pmu.sh \
-            "CoreMark riscv32-npc" /tmp/coremark-npc.log \
-            "CoreMark riscv32e-npc" /tmp/coremark-npce.log \
-            "MicroBench riscv32-npc" /tmp/microbench-npc.log \
-            "MicroBench riscv32e-npc" /tmp/microbench-npce.log \
+            "CoreMark rv32" /tmp/coremark-rv32.log \
+            "CoreMark rv32e" /tmp/coremark-rv32e.log \
+            "MicroBench rv32" /tmp/microbench-rv32.log \
+            "MicroBench rv32e" /tmp/microbench-rv32e.log \
             >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload benchmark results
@@ -118,7 +119,7 @@ jobs:
           retention-days: 90
           overwrite: true
 
-  npc-cpu-tests:
+  rv32-cpu-tests:
     runs-on: ubuntu-latest
     env:
       RAPTOR_HOME: ${{ github.workspace }}
@@ -129,17 +130,17 @@ jobs:
       - uses: actions/checkout@v6
       - name: Setup environment
         run: ./setup.sh
-      - name: Build NPC with difftest and NEMU-Ref
+      - name: Build RV32 with difftest and NEMU-Ref
         shell: bash -l {0}
         run: |
-          make config-npc32-difftest
+          make config-rv32-difftest
           make config-nemu32-ref
-      - name: cpu-tests riscv32e-npc
+      - name: cpu-tests rv32e
         shell: bash -l {0}
-        run: make cpu-tests-npc32 NPC_ARCH=riscv32e-npc ARGS="-b -n"
-      - name: cpu-tests riscv32-npc
+        run: make cpu-tests-rv32 NPC_ARCH=riscv32e-npc ARGS="-b -n"
+      - name: cpu-tests rv32
         shell: bash -l {0}
-        run: make cpu-tests-npc32 NPC_ARCH=riscv32-npc ARGS="-b -n"
+        run: make cpu-tests-rv32 NPC_ARCH=riscv32-npc ARGS="-b -n"
 
   ysyxsoc-benchmark:
     runs-on: ubuntu-latest
@@ -155,10 +156,10 @@ jobs:
       - name: Generate ysyxSoC
         shell: bash -l {0}
         run: make -C ./third_party/kingfish404/ysyxSoC/ dev-init verilog
-      - name: Build NPC (ysyxSoC config) and NEMU-Ref
+      - name: Build simulator (ysyxSoC config) and NEMU-Ref
         shell: bash -l {0}
         run: |
-          make config-npc32-ysyxsoc
+          make config-rv32-ysyxsoc
           make config-nemu32-ref
       - name: Run microbench riscv32-ysyxsoc
         shell: bash -l {0}
@@ -211,10 +212,10 @@ jobs:
       - name: Generate ysyxSoC
         shell: bash -l {0}
         run: make -C ./third_party/kingfish404/ysyxSoC/ dev-init verilog
-      - name: Build NPC (ysyxSoC config) and NEMU-Ref
+      - name: Build simulator (ysyxSoC config) and NEMU-Ref
         shell: bash -l {0}
         run: |
-          make config-npc32-ysyxsoc
+          make config-rv32-ysyxsoc
           make config-nemu32-ref
       - name: cpu-tests riscv32-ysyxsoc
         shell: bash -l {0}
@@ -247,11 +248,11 @@ jobs:
             git clone --depth 1 https://github.com/riscv-software-src/riscv-pk \
               third_party/riscv-software-src/riscv-pk
 
-      - name: Build NEMU reference and NPC simulator
+      - name: Build NEMU reference and simulator
         shell: bash -l {0}
         run: |
           make config-nemu32-ref
-          make build-npc32
+          make build-rv32
 
       - name: Build pk
         shell: bash -l {0}
@@ -262,13 +263,13 @@ jobs:
         shell: bash -l {0}
         run: |
           mkdir -p .github/results
-          make app-hello-npc32 ARGS="-b -n" 2>&1 | tee /tmp/app-hello.log
+          make app-hello-rv32 ARGS="-b -n" 2>&1 | tee /tmp/app-hello.log
 
       # ---- CoreMark ----
       - name: Run CoreMark
         shell: bash -l {0}
         run: |
-          make app-coremark-npc32 ARGS="-b -n" 2>&1 | tee /tmp/app-coremark.log
+          make app-coremark-rv32 ARGS="-b -n" 2>&1 | tee /tmp/app-coremark.log
 
       # ---- Summary ----
       - name: Generate summary
@@ -307,7 +308,7 @@ jobs:
 
           # ---- Write summary ----
           {
-            echo "## App Tests — CoreMark (pk on NPC)"
+            echo "## App Tests — CoreMark (pk on sim)"
             echo ""
             echo "### Overview"
             echo ""
@@ -351,6 +352,56 @@ jobs:
           retention-days: 30
           overwrite: true
 
+  app-baremetal-embench:
+    runs-on: ubuntu-latest
+    env:
+      RAPTOR_HOME: ${{ github.workspace }}
+      NEMU_HOME: ${{ github.workspace }}/nemu
+      AM_HOME: ${{ github.workspace }}/abstract-machine
+      CROSS_COMPILE: riscv64-unknown-elf-
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup base environment
+        run: |
+          ./setup.sh
+          ${CROSS_COMPILE}gcc --version | head -1
+
+      - name: Build NEMU reference and simulator
+        shell: bash -l {0}
+        run: |
+          make config-nemu32-ref
+          make build-rv32
+
+      # ---- Embench-IoT ----
+      - name: Run Embench-IoT
+        shell: bash -l {0}
+        run: |
+          mkdir -p .github/results
+          make app-embench-baremetal-run-rv32 ARGS="-b -n"
+
+      # ---- Summary ----
+      - name: Generate summary
+        if: always()
+        run: |
+          report_rc=0
+          make app-embench-baremetal-report-rv32 || report_rc=$?
+          cat sim/build/default/logs/app/embench-baremetal-rv32.md \
+            >> "$GITHUB_STEP_SUMMARY"
+          exit "$report_rc"
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: app-embench-logs-${{ github.sha }}
+          path: |
+            sim/build/default/logs/app/embench-baremetal-rv32.log
+            sim/build/default/logs/app/embench-baremetal-rv32.md
+            sim/build/default/logs/app/embench-baremetal-rv32/
+          retention-days: 30
+          overwrite: true
+
   app-pk-embench:
     runs-on: ubuntu-latest
     env:
@@ -373,203 +424,34 @@ jobs:
             git clone --depth 1 https://github.com/riscv-software-src/riscv-pk \
               third_party/riscv-software-src/riscv-pk
 
-      - name: Build NEMU reference and NPC simulator
+      - name: Build NEMU reference, simulator, and pk
         shell: bash -l {0}
         run: |
           make config-nemu32-ref
-          make build-npc32
+          make build-rv32
+          make --no-print-directory -C app pk-build
 
-      - name: Build pk
+      - name: Run pk/MMU Embench-IoT
         shell: bash -l {0}
-        run: make --no-print-directory -C app pk-build
+        run: make app-embench-pk-run-rv32 ARGS="-b -n"
 
-      # ---- Embench-IoT ----
-      - name: Run Embench-IoT
-        shell: bash -l {0}
-        run: |
-          mkdir -p .github/results
-          make app-embench-npc32 ARGS="-b -n" 2>&1 | tee /tmp/app-embench.log
-
-      # ---- Summary ----
-      - name: Generate summary
+      - name: Generate pk/MMU summary
         if: always()
         run: |
-          # ---- Parse Embench (per-benchmark) ----
-          # Splits the log at each "--- <name> ---" marker emitted by the
-          # Makefile's `embench` target and extracts PMU metrics + Ticks.
-          # Also computes the official Embench Score relative to the
-          # Cortex-M4 @ 16 MHz reference (baseline-data/speed.json upstream):
-          #   speed_i = ref_ms[i] * 1000 / measured_cycles_i       (our gsf=1, ref gsf=16 cancels with ref_ms being ms on M4@16MHz)
-          #   Embench Score = geomean_i(speed_i)
-          REF_JSON=".github/data/embench-m4-ref.json"
-          mkdir -p /tmp/embench-summary
-          awk '
-            /^--- [a-zA-Z0-9_.+-]+ ---$/ {
-              name=$2; file="/tmp/embench-summary/" name ".log";
-              print > file; next
-            }
-            file { print >> file }
-          ' /tmp/app-embench.log || true
+          report_rc=0
+          make app-embench-pk-report-rv32 || report_rc=$?
+          cat sim/build/default/logs/app/embench-pk-rv32.md \
+            >> "$GITHUB_STEP_SUMMARY"
+          exit "$report_rc"
 
-          EMBENCH_ROWS=""
-          EMBENCH_PASS=0
-          EMBENCH_FAIL=0
-          # Aggregates (awk-friendly, space-separated floats/ints)
-          AGG_CYCLES=""     # for geomean + total
-          AGG_INSTS=""      # for total
-          AGG_TICKS=""      # for geomean
-          AGG_IPC=""        # for arithmetic mean
-          AGG_DUAL=""       # for arithmetic mean
-          AGG_BPU=""        # for arithmetic mean
-          AGG_SPEED=""      # for Embench Score geomean
-          AGG_TOPSTALL=""   # newline-separated stall category names
-          mkdir -p /tmp/embench-summary
-          awk '
-            /^--- [a-zA-Z0-9_.+-]+ ---$/ {
-              name=$2; file="/tmp/embench-summary/" name ".log";
-              print > file; next
-            }
-            file { print >> file }
-          ' /tmp/app-embench.log || true
-
-          EMBENCH_ROWS=""
-          EMBENCH_PASS=0
-          EMBENCH_FAIL=0
-          # Aggregates (awk-friendly, space-separated floats/ints)
-          AGG_CYCLES=""     # for geomean + total
-          AGG_INSTS=""      # for total
-          AGG_TICKS=""      # for geomean
-          AGG_IPC=""        # for arithmetic mean
-          AGG_DUAL=""       # for arithmetic mean
-          AGG_BPU=""        # for arithmetic mean
-          AGG_SPEED=""      # for Embench Score geomean
-          AGG_TOPSTALL=""   # newline-separated stall category names
-
-          for f in /tmp/embench-summary/*.log; do
-            [ -f "$f" ] || continue
-            name=$(basename "$f" .log)
-            trap=$(grep -oE 'HIT (GOOD|BAD) TRAP' "$f" | head -1 || echo "")
-            ticks=$(grep -oP '^Ticks:\s*\K\d+' "$f" | head -1 || echo "")
-            ipc=$(grep -oP 'IPC:\s*\K[0-9.]+' "$f" | head -1 || echo "")
-            cycles=$(grep -oP 'cycle:\s*\K\d+' "$f" | head -1 || echo "")
-            insts=$(grep -oP '#inst:\s*\K\d+' "$f" | head -1 || echo "")
-            bpu=$(grep -oP 'BPU Success.*Rate:\s*\K[0-9.]+' "$f" | head -1 || echo "")
-            dual=$(grep -oP 'Dual commit.*\(\K[0-9.]+' "$f" | head -1 || echo "")
-
-            # ---- Embench Score vs Cortex-M4 reference ----
-            # Extract ref_ms from JSON via grep (avoids multi-line heredoc).
-            ref_ms=$(grep -oE "\"${name}\"[[:space:]]*:[[:space:]]*[0-9]+" "$REF_JSON" 2>/dev/null \
-              | grep -oE '[0-9]+$' | head -1 || echo "")
-            speed="N/A"
-            if [ -n "$ref_ms" ] && [ -n "$cycles" ] && [ "$cycles" -gt 0 ]; then
-              speed=$(awk -v r="$ref_ms" -v c="$cycles" 'BEGIN{printf "%.3f", r*1000.0/c}')
-              AGG_SPEED="$AGG_SPEED $speed"
-            fi
-
-            # ---- Top stall category (highest %) ----
-            # PMU line format (the values row directly follows the header row):
-            #  |   IFU, %| EX|RS, %|EX|IoQ, %|   L1D, %|    SQ, %|Bubble, %|
-            #  | 7e+06,28| 8e+06,31| 1e+07,55| 8e+05, 3| 9e+03, 0| 1e+07,38|
-            topstall=$(awk '
-              /\|  *IFU, %\|/ { has=1; next }
-              has==1 {
-                n=split($0, cells, "|")
-                labels[1]="IFU"; labels[2]="RS"; labels[3]="IoQ"; labels[4]="L1D"; labels[5]="SQ"; labels[6]="Bubble"
-                best=-1; bestlbl="N/A"
-                # Leading | produces empty cells[1]; data cells are 2..7
-                for (i=2; i<=7; i++) {
-                  split(cells[i], parts, ",")
-                  p=parts[2]+0
-                  if (p>best) { best=p; bestlbl=labels[i-1] }
-                }
-                printf "%s(%d%%)", bestlbl, best
-                exit
-              }
-            ' "$f")
-            [ -z "$topstall" ] && topstall="N/A"
-
-            if [ "$trap" = "HIT GOOD TRAP" ]; then
-              status="PASS"; EMBENCH_PASS=$((EMBENCH_PASS+1))
-            else
-              status="FAIL"; EMBENCH_FAIL=$((EMBENCH_FAIL+1))
-            fi
-
-            [ -n "$ticks" ]  && AGG_TICKS="$AGG_TICKS $ticks"
-            [ -n "$cycles" ] && AGG_CYCLES="$AGG_CYCLES $cycles"
-            [ -n "$insts" ]  && AGG_INSTS="$AGG_INSTS $insts"
-            [ -n "$ipc" ]    && AGG_IPC="$AGG_IPC $ipc"
-            [ -n "$dual" ]   && AGG_DUAL="$AGG_DUAL $dual"
-            [ -n "$bpu" ]    && AGG_BPU="$AGG_BPU $bpu"
-            AGG_TOPSTALL="$AGG_TOPSTALL"$'\n'"$topstall"
-
-            EMBENCH_ROWS+="| ${name} | ${status} | ${speed} | ${ticks:-N/A} | ${ipc:-N/A} | ${cycles:-N/A} | ${insts:-N/A} | ${dual:-N/A}% | ${bpu:-N/A}% | ${topstall} |"$'\n'
-          done
-          EMBENCH_TOTAL=$((EMBENCH_PASS + EMBENCH_FAIL))
-
-          # ---- Aggregate stats ----
-          _geomean() { awk -v xs="$1" 'BEGIN{n=0;s=0; k=split(xs,a," "); for(i=1;i<=k;i++){ if(a[i]+0>0){ s+=log(a[i]); n++ } } if(n==0){print "N/A"} else printf "%.3f", exp(s/n)}'; }
-          _amean()   { awk -v xs="$1" 'BEGIN{n=0;s=0; k=split(xs,a," "); for(i=1;i<=k;i++){ s+=a[i]; n++ } if(n==0){print "N/A"} else printf "%.3f", s/n}'; }
-          _sum()     { awk -v xs="$1" 'BEGIN{s=0; k=split(xs,a," "); for(i=1;i<=k;i++) s+=a[i]; printf "%d", s}'; }
-
-          EMBENCH_SCORE=$(_geomean "$AGG_SPEED")
-          GEO_TICKS=$(_geomean "$AGG_TICKS")
-          GEO_CYCLES=$(_geomean "$AGG_CYCLES")
-          AVG_IPC=$(_amean "$AGG_IPC")
-          AVG_DUAL=$(_amean "$AGG_DUAL")
-          AVG_BPU=$(_amean "$AGG_BPU")
-          SUM_CYCLES=$(_sum "$AGG_CYCLES")
-          SUM_INSTS=$(_sum "$AGG_INSTS")
-          AGG_IPC_TOTAL=$(awk -v i="$SUM_INSTS" -v c="$SUM_CYCLES" 'BEGIN{ if(c+0>0) printf "%.3f", i/c; else print "N/A" }')
-
-          # Most common top-stall category
-          WORST_STALL=$(printf '%s\n' "$AGG_TOPSTALL" \
-            | sed -E 's/\(.*$//' | grep -v '^$' | grep -v '^N/A$' \
-            | sort | uniq -c | sort -rn | awk 'NR==1{print $2" (x"$1")"}')
-          [ -z "$WORST_STALL" ] && WORST_STALL="N/A"
-
-
-          # ---- Write summary ----
-          {
-            echo "## App Tests — Embench-IoT (pk on NPC)"
-            echo ""
-            echo "### Overview"
-            echo ""
-            echo "| Test | Status | IPC | Details |"
-            echo "|------|--------|-----|---------|"
-            echo "| Embench-IoT | ${EMBENCH_PASS}/${EMBENCH_TOTAL} pass | ${AGG_IPC_TOTAL} | Score=**${EMBENCH_SCORE}** (vs Cortex-M4@16MHz), dual=${AVG_DUAL}%, BPU=${AVG_BPU}% |"
-            echo ""
-
-            # ---- Embench detail ----
-            echo "### Embench-IoT (per benchmark)"
-            echo ""
-            echo "Embench Score is the geometric mean of per-benchmark speed relative to"
-            echo "Cortex-M4 @ 16 MHz (Embench v2.0 reference baseline, \`gsf=1\` here)."
-            echo "Higher is better; **1.0 = parity with the M4 reference**."
-            echo ""
-            echo "| Benchmark | Status | Speed (vs M4) | Ticks | IPC | Cycles | Instructions | Dual% | BPU% | Top stall |"
-            echo "|-----------|--------|--------------:|------:|----:|-------:|-------------:|------:|-----:|:----------|"
-            printf '%s' "$EMBENCH_ROWS"
-            echo ""
-            echo "**Aggregates (${EMBENCH_PASS}/${EMBENCH_TOTAL} pass)**"
-            echo ""
-            echo "| Metric | Value |"
-            echo "|--------|-------|"
-            echo "| **Embench Score (geomean speed vs M4@16MHz)** | **${EMBENCH_SCORE}** |"
-            echo "| Geomean Ticks | ${GEO_TICKS} |"
-            echo "| Geomean Cycles | ${GEO_CYCLES} |"
-            echo "| Aggregate IPC (total inst / total cycles) | ${AGG_IPC_TOTAL} |"
-            echo "| Avg per-bench IPC | ${AVG_IPC} |"
-            echo "| Avg Dual-issue commit % | ${AVG_DUAL}% |"
-            echo "| Avg BPU hit rate % | ${AVG_BPU}% |"
-            echo "| Most frequent top stall | ${WORST_STALL} |"
-            echo ""
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Upload logs
+      - name: Upload pk/MMU logs
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: app-embench-logs-${{ github.sha }}
-          path: /tmp/app-embench.log
+          name: app-pk-embench-logs-${{ github.sha }}
+          path: |
+            sim/build/default/logs/app/embench-pk-rv32.log
+            sim/build/default/logs/app/embench-pk-rv32.md
+            sim/build/default/logs/app/embench-pk-rv32/
           retention-days: 30
           overwrite: true
