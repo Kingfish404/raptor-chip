@@ -78,6 +78,7 @@ typedef struct
   uint8_t clint_msip;
   uint8_t plic_priority[NPC_PLIC_NDEV + 1];
   uint32_t plic_pending;
+  uint32_t plic_gateway_busy;
   uint32_t plic_enable[NPC_PLIC_NCTX];
   uint8_t plic_threshold[NPC_PLIC_NCTX];
   uint32_t plic_ext_irq;
@@ -325,14 +326,17 @@ static void write_state_txt(const char *path)
     fprintf(fp, "clint_msip=0x%02x\n", (unsigned int)(msip & 0x1u));
   }
 
-  /* PLIC device state. Claim/complete has no extra architectural storage; the
-   * priority/pending/enable/threshold registers plus ext_irq edge latch fully
-   * describe this RTL instance. */
+  /* PLIC device state. gateway_busy records requests that have passed through
+   * a source gateway and are pending or waiting for completion. ext_irq is an
+   * observation-only copy of the external input. */
   if (npc.plic_priority != NULL && npc.plic_pending != NULL &&
+      npc.plic_gateway_busy != NULL &&
       npc.plic_enable != NULL && npc.plic_threshold != NULL &&
       npc.plic_ext_irq != NULL)
   {
     fprintf(fp, "plic_pending=0x%08x\n", (unsigned int)(*npc.plic_pending));
+    fprintf(fp, "plic_gateway_busy=0x%08x\n",
+            (unsigned int)(*npc.plic_gateway_busy));
     fprintf(fp, "plic_ext_irq=0x%08x\n", (unsigned int)(*npc.plic_ext_irq));
     for (int i = 0; i <= NPC_PLIC_NDEV; i++)
       fprintf(fp, "plic_priority%d=0x%02x\n", i,
@@ -800,6 +804,12 @@ static int read_state_txt(const char *path, arch_snapshot_t *s)
       if (sscanf(val, "%x", &v) == 1)
         s->plic_pending = (uint32_t)v;
     }
+    else if (strcmp(key, "plic_gateway_busy") == 0)
+    {
+      unsigned int v = 0;
+      if (sscanf(val, "%x", &v) == 1)
+        s->plic_gateway_busy = (uint32_t)v;
+    }
     else if (strcmp(key, "plic_ext_irq") == 0)
     {
       unsigned int v = 0;
@@ -1263,7 +1273,8 @@ void checkpoint_inject_after_reset(void)
   if (npc.clint_msip != NULL)
     *npc.clint_msip = (uint8_t)(loaded_snap.clint_msip & 0x1u);
 
-  if (npc.plic_priority != NULL && npc.plic_enable != NULL &&
+  if (npc.plic_priority != NULL && npc.plic_pending != NULL &&
+      npc.plic_gateway_busy != NULL && npc.plic_enable != NULL &&
       npc.plic_threshold != NULL)
   {
     for (int i = 0; i <= NPC_PLIC_NDEV; i++)
@@ -1274,16 +1285,8 @@ void checkpoint_inject_after_reset(void)
       npc.plic_enable[c] = loaded_snap.plic_enable[c] & ~1u;
       npc.plic_threshold[c] = (uint8_t)(loaded_snap.plic_threshold[c] & 0x7u);
     }
-
-    // Do not restore pending/ext_irq by directly poking RTL internal latches.
-    // Those are edge-detect/runtime states and must be regenerated via the
-    // synthesizable ext_irq_i[] delivery path.
-    if ((loaded_snap.plic_pending & ~1u) != 0u)
-    {
-      Log("checkpoint: NOTE plic_pending snapshot=0x%08x is not force-restored; "
-          "pending IRQ latches restart empty and will be re-driven by devices",
-          (unsigned int)(loaded_snap.plic_pending & ~1u));
-    }
+    *npc.plic_pending = loaded_snap.plic_pending & ~1u;
+    *npc.plic_gateway_busy = loaded_snap.plic_gateway_busy & ~1u;
   }
 
   if (npc.pmpcfg != NULL && npc.pmpaddr != NULL)

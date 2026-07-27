@@ -1066,6 +1066,8 @@ XSIM_TARGETS := \
 	xsim-lsu-lr-sq-forward \
 	xsim-lsu-sq-random \
 	xsim-ioq \
+	xsim-clint \
+	xsim-plic-gateway \
 	xsim-muldiv-flush-reuse \
 	xsim-rou-dual-commit
 
@@ -1169,6 +1171,12 @@ xsim-ioq: ## xsim: verify IOQ LR/SC reservations, pending loads, and flush kills
 	$(call XSIM_RUN,ioq,tb_ioq_pending_lock,$(XSIM_IOQ_SOURCES),)
 
 xsim-ioq-lrsc-reservation xsim-ioq-pending-lock: xsim-ioq
+
+xsim-clint: ## xsim: verify CLINT divider, compare, and software interrupt semantics
+	$(call XSIM_RUN,clint,tb_clint,"$(RAPTOR_HOME)/hdl/perip/rapt_clint.sv",)
+
+xsim-plic-gateway: ## xsim: verify PLIC gateway and claim/complete semantics
+	$(call XSIM_RUN,plic_gateway,tb_plic_gateway,"$(RAPTOR_HOME)/hdl/perip/rapt_plic.sv",)
 
 xsim-muldiv-flush-reuse: ## xsim: verify flush kills DIV completion before MDQ slot reuse
 	$(call XSIM_RUN,muldiv_flush_reuse,tb_muldiv_flush_reuse,$(XSIM_MULDIV_SOURCES),-d RAPT_ASSERT_EN)

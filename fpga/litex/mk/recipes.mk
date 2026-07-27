@@ -660,13 +660,24 @@ fpga-build-force:
 	@rm -f $(FPGA_STAMP)
 	@$(call _make,fpga-build)
 
-fpga-load:
+fpga-bitstream-current:
+	@OLD_HASH=$$(cat $(FPGA_STAMP) 2>/dev/null || echo ""); \
+	NEW_HASH="$(_FPGA_HASH_KEY)"; \
+	if [ -z "$$OLD_HASH" ] || [ "$$OLD_HASH" != "$$NEW_HASH" ]; then \
+		echo "[ERR] Refusing to program a stale or untracked bitstream."; \
+		echo "[ERR] Bitstream stamp: $${OLD_HASH:-missing}"; \
+		echo "[ERR] Current input hash: $$NEW_HASH"; \
+		echo "[ERR] Run 'make fpga-build' with the same FPGA_BOARD, VARIANT, BOOT_MODE, and RAPT_CONFIG."; \
+		exit 1; \
+	fi
+
+fpga-load: fpga-bitstream-current
 	@echo "[INFO] FPGA board: $(FPGA_BOARD) (source=$(FPGA_BOARD_SOURCE), vendor=$(FPGA_VENDOR), device=$(if $(FPGA_DEVICE),$(FPGA_DEVICE),n/a))"
 	$(call _require_file,$(FPGA_BITSTREAM),$(FPGA_BITSTREAM) not found — run 'make fpga-build' first.)
 	@$(FPGA_LOAD_TOOL_CHECK)
 	$(FPGA_LOAD_CMD)
 
-fpga-flash:
+fpga-flash: fpga-bitstream-current
 	$(call _require_file,$(FPGA_BITSTREAM),$(FPGA_BITSTREAM) not found — run 'make fpga-build' first.)
 	@if [ "$(FPGA_VENDOR)" = "vivado" ] && [ "$(BOARD_$(FPGA_BOARD)_VIVADO_FLASH)" != "1" ]; then \
 		echo "[ERR] Persistent flash is not configured for FPGA_BOARD=$(FPGA_BOARD); refusing to use a board-specific cfgmem script."; \

@@ -399,7 +399,7 @@ irq-tests-build: ## Build bare-metal PLIC IRQ tests
 # $(1) = suite label (shown in headers), $(2) = log stem for tee_npc.
 define run_irq_tests_parallel
 	@set -o pipefail; \
-	  NPC_CMD=$$($(MAKE) --no-print-directory -C $(NSIM_HOME) VFLAGS="$(VFLAGS)" print-npc-exec) \
+	  NPC_CMD=$$($(MAKE) --no-print-directory -C $(NSIM_HOME) VFLAGS="$(VFLAGS)" print-npc-exec | tail -1) \
 	    || { echo "[$(2)] ERROR: print-npc-exec failed"; exit 1; }; \
 	  { \
 	    echo "=== IRQ tests ($(1), parallel JOBS=$(JOBS)) ==="; \

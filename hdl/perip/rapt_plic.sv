@@ -61,9 +61,15 @@ module rapt_plic #(
   logic [   2:0] threshold_q[  NCTX];
   logic [NHART-1:0] meip_q;
   logic [NHART-1:0] seip_q;
-  // Edge-detect on plic_bus.ext_irq so a level-held source doesn't perpetually
-  // re-set pending_q after a complete (mirrors a typical PLIC RTL).
+  // A gateway admits at most one request per source until software claims and
+  // completes it. For a level source that remains asserted, completion opens
+  // the gateway and causes a fresh request on the following cycle.
+  logic [NDEV:0] gateway_busy_q;
+  // Retained as an observation-only snapshot for NPC checkpoint diagnostics.
+  // Gateway behavior must not depend on edge detection from this register.
+  /* verilator lint_off UNUSEDSIGNAL */
   logic [NDEV:0] ext_irq_q;
+  /* verilator lint_on UNUSEDSIGNAL */
 
   // ---------------------------------------------------------------------
   // Pure-functional address decode helpers. Verilator only sees the low
@@ -216,12 +222,57 @@ module rapt_plic #(
   logic [31:0] w_eoff;
   assign w_eoff = (w_off - EnBase) - EnStride * w_ectx;
 
+  logic claim_fire;
+  logic [IdW-1:0] claim_id;
+  logic complete_fire;
+  logic [IdW-1:0] complete_id;
+  logic complete_id_claimed;
+  logic sw_pending_set;
+  logic [NDEV:0] pending_next;
+  logic [NDEV:0] gateway_busy_next;
+
+  assign claim_fire = plic_bus.ar_commit && r_cctx >= 0 && r_creg == 12'h4
+                      && best_id[r_cctx] != '0;
+  assign claim_id = claim_fire ? best_id[r_cctx] : '0;
+  assign complete_id = plic_bus.wdata[IdW-1:0];
+  assign complete_fire = plic_bus.wvalid && w_cctx >= 0 && w_creg == 12'h4
+                         && complete_id_claimed;
+  assign sw_pending_set = plic_bus.wvalid && is_pending(w_off);
+
+  always_comb begin
+    complete_id_claimed = 1'b0;
+    for (int s = 1; s <= NDEV; s++) begin
+      if (complete_id == IdW'(s) && gateway_busy_q[s] && !pending_q[s]) begin
+        complete_id_claimed = 1'b1;
+      end
+    end
+  end
+
+  // One priority mux per source. Claim wins over request admission for IP;
+  // completion only releases a gateway whose request has already been claimed.
+  always_comb begin
+    pending_next = pending_q;
+    gateway_busy_next = gateway_busy_q;
+    pending_next[0] = 1'b0;
+    gateway_busy_next[0] = 1'b0;
+    for (int s = 1; s <= NDEV; s++) begin
+      if (!gateway_busy_q[s]
+          && (plic_bus.ext_irq[s] || (sw_pending_set && plic_bus.wdata[s]))) begin
+        pending_next[s] = 1'b1;
+        gateway_busy_next[s] = 1'b1;
+      end
+      if (claim_fire && claim_id == IdW'(s)) pending_next[s] = 1'b0;
+      if (complete_fire && complete_id == IdW'(s)) gateway_busy_next[s] = 1'b0;
+    end
+  end
+
   always_ff @(posedge clock) begin
     if (reset) begin
-      ext_irq_q <= '0;
-      pending_q <= '0;
-      meip_q    <= '0;
-      seip_q    <= '0;
+      pending_q      <= '0;
+      gateway_busy_q <= '0;
+      ext_irq_q      <= '0;
+      meip_q         <= '0;
+      seip_q         <= '0;
       for (int s = 0; s <= NDEV; s++) priority_q[s] <= '0;
       for (int c = 0; c < NCTX; c++) begin
         enable_q[c]    <= '0;
@@ -230,38 +281,23 @@ module rapt_plic #(
     end else begin
       meip_q <= meip_next;
       seip_q <= seip_next;
-
-      // Edge-detect external sources.
       ext_irq_q <= plic_bus.ext_irq;
-      for (int s = 1; s <= NDEV; s++) begin
-        if (plic_bus.ext_irq[s] && !ext_irq_q[s]) pending_q[s] <= 1'b1;
-      end
-      pending_q[0] <= 1'b0;
-
-      // Claim atomic: at AR handshake on a claim register, clear the
-      // pending bit of the source we just returned.
-      if (plic_bus.ar_commit && r_cctx >= 0 && r_creg == 12'h4 && best_id[r_cctx] != '0) begin
-        pending_q[best_id[r_cctx]] <= 1'b0;
-      end
+      pending_q <= pending_next;
+      gateway_busy_q <= gateway_busy_next;
 
       // Write side.
       if (plic_bus.wvalid) begin
         if (w_pidx > 0 && w_pidx <= NDEV) begin
           priority_q[w_pidx] <= plic_bus.wdata[2:0];
         end else if (is_pending(w_off)) begin
-          // SW pending-set extension (non-spec, SiFive-style debug aid).
-          // Per-bit set so we coexist with the edge-detect path that may
-          // also be raising bits this cycle. Bit 0 is hardwired to 0.
-          for (int s = 1; s <= NDEV; s++) begin
-            if (plic_bus.wdata[s]) pending_q[s] <= 1'b1;
-          end
+          // SW pending-set extension is handled by the per-source gateway
+          // mux above so it obeys the same one-outstanding-request rule.
         end else if (w_ectx >= 0 && w_eoff < 32'h4) begin
           // Source 0 hardwired to 0 in the enable bitmap.
           enable_q[w_ectx] <= {plic_bus.wdata[NDEV:1], 1'b0};
         end else if (w_cctx >= 0 && w_creg == 12'h0) begin
           threshold_q[w_cctx] <= plic_bus.wdata[2:0];
-          // w_creg == 12'h4 (complete): no extra state -- pending was cleared
-          // on claim; level sources re-arm via the rising-edge detector.
+          // w_creg == 12'h4 (complete) is handled by the gateway mux above.
         end
       end
     end

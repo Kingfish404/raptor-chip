@@ -6,8 +6,8 @@ import "DPI-C" function void npc_difftest_skip_ref();
 
 // Pull-and-clear pending external-interrupt bitmap from the C++ side.
 // Returns a 32-bit pulse vector indexed by IRQ number; the call atomically
-// clears the value so each pulse is delivered exactly once (PLIC edge-detect
-// FSM latches the rising edge as pending). This is the synthesizable
+// clears the value so each pulse is delivered exactly once (the PLIC gateway
+// latches the request as pending). This is the synthesizable
 // equivalent of the legacy `*npc.plic_pending |= ...` backdoor; only used by
 // sim/rtl/ TB wrappers to drive `ext_irq_i[]` on rapt.sv.
 import "DPI-C" function void npc_consume_ext_irq_vector(output int rdata);

@@ -48,12 +48,7 @@ int main(void) {
     for (int i = 0; i < 128; i++) __asm__ volatile ("nop");
     TEST_ASSERT((csr_read(mip) & MIP_MTIP) == 0, "MTIP set with max mtimecmp");
 
-    clint_mtimecmp_write(clint_mtime_read() + 2u);
-    for (int i = 0; i < 100000 && (csr_read(mip) & MIP_MTIP) == 0; i++) {
-        __asm__ volatile ("nop");
-    }
-    TEST_ASSERT((csr_read(mip) & MIP_MTIP) != 0, "MTIP never asserted");
-
+    clint_mtimecmp_write(clint_mtime_read() + 32u);
     csr_set(mie, MIE_MTIE);
     csr_set(mstatus, MSTATUS_MIE);
 

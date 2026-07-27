@@ -195,6 +195,7 @@ typedef struct
   // for PLIC checkpoint persistence
   uint8_t *plic_priority; // [NPC_PLIC_NDEV + 1]
   uint32_t *plic_pending;
+  uint32_t *plic_gateway_busy;
   uint32_t *plic_enable;   // [NPC_PLIC_NCTX]
   uint8_t *plic_threshold; // [NPC_PLIC_NCTX]
   uint32_t *plic_ext_irq;

@@ -29,6 +29,7 @@
             reg = <0>;
 
             cpu0_intc: interrupt-controller {
+                #address-cells = <0>;
                 #interrupt-cells = <1>;
                 compatible = "riscv,cpu-intc";
                 interrupt-controller;
@@ -51,6 +52,7 @@
 
         plic: interrupt-controller@c000000 {
             compatible = "riscv,plic0";
+            #address-cells = <0>;
             #interrupt-cells = <1>;
             interrupt-controller;
             reg = <0x0c000000 0x04000000>;
@@ -62,6 +64,8 @@
         liteuart0: serial@@UART_UNIT_ADDR@ {
             compatible = "litex,liteuart";
             reg = <@UART_BASE@ 0x100>;
+            interrupt-parent = <&plic>;
+            interrupts = <1>;
             status = "okay";
         };
     };

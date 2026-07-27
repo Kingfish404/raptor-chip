@@ -36,10 +36,7 @@ from migen.genlib.cdc import MultiReg
 from migen.genlib.resetsync import AsyncResetSynchronizer
 
 from litex.gen import *
-from litex.build.generic_platform import Subsignal, Pins, IOStandard, Misc
 from litex.build.io import DifferentialInput
-from litex.build.xilinx import XilinxUSPPlatform
-from litex.build.openfpgaloader import OpenFPGALoader
 from litex.build.parser import LiteXArgumentParser
 
 from litex.soc.cores.clock import USPMMCM, USPIDELAYCTRL
@@ -50,155 +47,16 @@ from litex.soc.integration.soc import SoCRegion
 from litex.soc.integration.soc_core import SoCCore
 from litex.soc.interconnect import axi, stream
 
+from litex_boards.platforms import mlk_cu07_ku15p
+
 from litedram.modules import MT40A512M16
 from litedram.phy import usddrphy
 
 
 CPUS["raptor"] = Raptor
 
-DEVICE_PART = "xcku15p-ffva1156-2-e"
 DEFAULT_FPGA_SYS_CLK = int(75e6)
 DEFAULT_FPGA_BOOT_MODE = "bios"
-
-# IOs --------------------------------------------------------------------------
-
-_io = [
-    # 100 MHz single-ended system clock (Y2 / AH18, LVCMOS18).
-    ("clk100", 0, Pins("AH18"), IOStandard("LVCMOS18")),
-
-    # 100 MHz DDR4 reference clock (Y1 / AK17-AK16, DIFF_SSTL12).
-    (
-        "clk100_ddr",
-        0,
-        Subsignal("p", Pins("AK17")),
-        Subsignal("n", Pins("AK16")),
-        IOStandard("DIFF_SSTL12"),
-    ),
-
-    # Active-low reset push-button (BUT1 / J23, LVCMOS18).
-    ("cpu_resetn", 0, Pins("J23"), IOStandard("LVCMOS18"), Misc("PULLTYPE PULLUP")),
-
-    # On-board USB-UART (LVCMOS33). tx = FPGA->Host, rx = Host->FPGA.
-    (
-        "serial",
-        0,
-        Subsignal("tx", Pins("AN13")),
-        Subsignal("rx", Pins("AP13")),
-        IOStandard("LVCMOS33"),
-    ),
-
-    # On-board microSD socket in 4-bit SD mode (Bank 66, 1.8 V).
-    (
-        "sdcard",
-        0,
-        Subsignal("clk", Pins("B9")),
-        Subsignal("cmd", Pins("A10"), Misc("PULLTYPE PULLUP")),
-        Subsignal(
-            "data",
-            Pins("B11 A9 C8 B10"),
-            Misc("PULLTYPE PULLUP"),
-        ),
-        Subsignal("cd", Pins("C11"), Misc("PULLTYPE PULLUP")),
-        IOStandard("LVCMOS18"),
-    ),
-
-    # 4GB DDR4 SDRAM: 4 x Hynix H5AN8G6NCJR-VKI, modeled as MT40A512M16.
-    (
-        "ddram",
-        0,
-        Subsignal(
-            "a",
-            Pins(
-                "AM34 AN26 AP34 AK26 AL32 AK28 AK32 AL30",
-                "AL34 AP26 AK31 AL33 AH32 AM32",
-            ),
-            IOStandard("SSTL12_DCI"),
-        ),
-        Subsignal("ba", Pins("AJ31 AK27"), IOStandard("SSTL12_DCI")),
-        Subsignal("bg", Pins("AJ30"), IOStandard("SSTL12_DCI")),
-        Subsignal("ras_n", Pins("AJ33"), IOStandard("SSTL12_DCI")),
-        Subsignal("cas_n", Pins("AJ34"), IOStandard("SSTL12_DCI")),
-        Subsignal("we_n", Pins("AJ28"), IOStandard("SSTL12_DCI")),
-        Subsignal("cs_n", Pins("AH33"), IOStandard("SSTL12_DCI")),
-        Subsignal("act_n", Pins("AH31"), IOStandard("SSTL12_DCI")),
-        Subsignal(
-            "dm",
-            Pins("Y26 V27 AA22 W23 AE25 AD21 AM21 AJ21"),
-            IOStandard("POD12_DCI"),
-        ),
-        Subsignal(
-            "dq",
-            Pins(
-                "AD25 AA27 AC24 AB25 AB24 AB27 AD26 AB26",
-                "U25 W28 W26 W29 U24 V29 V26 Y28",
-                "AB20 Y23 AC22 AA24 AA20 AA25 AC23 AA23",
-                "U22 T22 T23 W21 U21 Y25 V21 W25",
-                "AJ23 AF23 AJ24 AG25 AH23 AF24 AH22 AG24",
-                "AG20 AE22 AF20 AF22 AD20 AE23 AG22 AE20",
-                "AM22 AM24 AN22 AN24 AN23 AP24 AP23 AP25",
-                "AL24 AL25 AK22 AL22 AK23 AM20 AL20 AL23",
-            ),
-            IOStandard("POD12_DCI"),
-        ),
-        Subsignal(
-            "dqs_p",
-            Pins("AC26 U26 AB21 V22 AH24 AG21 AP20 AJ20"),
-            IOStandard("DIFF_POD12_DCI"),
-        ),
-        Subsignal(
-            "dqs_n",
-            Pins("AC27 U27 AC21 V23 AJ25 AH21 AP21 AK20"),
-            IOStandard("DIFF_POD12_DCI"),
-        ),
-        Subsignal("clk_p", Pins("AJ29"), IOStandard("DIFF_SSTL12_DCI")),
-        Subsignal("clk_n", Pins("AK30"), IOStandard("DIFF_SSTL12_DCI")),
-        Subsignal("cke", Pins("AH27"), IOStandard("SSTL12_DCI")),
-        Subsignal("odt", Pins("AH28"), IOStandard("SSTL12_DCI")),
-        Subsignal("reset_n", Pins("AJ26"), IOStandard("LVCMOS12")),
-        Misc("SLEW=FAST"),
-    ),
-]
-
-_connectors = []
-
-
-# Platform ---------------------------------------------------------------------
-
-
-class Platform(XilinxUSPPlatform):
-    default_clk_name = "clk100"
-    default_clk_period = 1e9 / 100e6
-
-    def __init__(self, toolchain="vivado"):
-        XilinxUSPPlatform.__init__(
-            self, DEVICE_PART, _io, _connectors, toolchain=toolchain
-        )
-        # Match the on-board config flash so `make fpga-flash` can write it.
-        self.add_platform_command(
-            "set_property BITSTREAM.CONFIG.SPI_BUSWIDTH 4 [current_design]"
-        )
-        self.add_platform_command(
-            "set_property BITSTREAM.GENERAL.COMPRESS true [current_design]"
-        )
-        self.add_platform_command(
-            "set_property CONFIG_VOLTAGE 1.8 [current_design]"
-        )
-        self.add_platform_command("set_property CFGBVS GND [current_design]")
-        self.add_platform_command(
-            "set_property CONFIG_MODE SPIx4 [current_design]"
-        )
-        self.add_platform_command(
-            "set_property BITSTREAM.CONFIG.UNUSEDPIN pulldown [current_design]"
-        )
-
-    def create_programmer(self):
-        return OpenFPGALoader(fpga_part="xcku15p-ffva1156", cable="ft2232")
-
-    def do_finalize(self, fragment):
-        XilinxUSPPlatform.do_finalize(self, fragment)
-        self.add_period_constraint(
-            self.lookup_request("clk100", loose=True), 1e9 / 100e6
-        )
 
 
 # CRG --------------------------------------------------------------------------
@@ -465,7 +323,7 @@ class RaptorMLKCU07SoC(SoCCore):
         with_ila=False,
         **kwargs,
     ):
-        platform = Platform(toolchain="vivado")
+        platform = mlk_cu07_ku15p.Platform(toolchain="vivado")
 
         kwargs["cpu_type"] = "raptor"
         kwargs.setdefault("cpu_variant", "standard")
@@ -587,7 +445,7 @@ class RaptorMLKCU07SoC(SoCCore):
 
 def main():
     parser = LiteXArgumentParser(
-        platform=Platform,
+        platform=mlk_cu07_ku15p.Platform,
         description="Raptor LiteX SoC on Milianke MLK-CU07-KU15P (Vivado).",
     )
     parser.add_target_argument(

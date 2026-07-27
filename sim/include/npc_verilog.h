@@ -121,6 +121,7 @@ static inline void verilog_connect(TOP_NAME *top, NPCState *npc)
 
   npc->plic_priority = (uint8_t *)&VERILOG_PLIC(priority_q)[0];
   npc->plic_pending = (uint32_t *)&VERILOG_PLIC(pending_q);
+  npc->plic_gateway_busy = (uint32_t *)&VERILOG_PLIC(gateway_busy_q);
   npc->plic_enable = (uint32_t *)&VERILOG_PLIC(enable_q)[0];
   npc->plic_threshold = (uint8_t *)&VERILOG_PLIC(threshold_q)[0];
   npc->plic_ext_irq = (uint32_t *)&VERILOG_PLIC(ext_irq_q);
