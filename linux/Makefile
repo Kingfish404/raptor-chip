@@ -9,7 +9,7 @@ NPROC := $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || s
 include $(PWD_DIR)/vars.mk
 
 .PHONY: help download-rv32 download-rv64 download all build_linux make_initramfs
-.PHONY: build_init install_initramfs check-opensbi-llvm-deps opensbi opensbi-gnu
+.PHONY: build_init install_initramfs check-opensbi-llvm-deps opensbi opensbi-rv32 opensbi-rv64 opensbi-gnu opensbi-gnu-rv32 opensbi-gnu-rv64
 .PHONY: opensbi-with-kernel opensbi-clean print-rv32-payload print-rv64-payload
 .PHONY: print-opensbi-payload clean
 
@@ -120,17 +120,38 @@ install_initramfs: ## Configure kernel to use initramfs
 	cd linux && ./scripts/config --set-str CONFIG_INITRAMFS_SOURCE $(PWD_DIR)/initramfs
 	make -C linux ARCH=riscv -j$(NPROC) olddefconfig
 
-OPENSBI_DIR     := $(PWD_DIR)/opensbi
-OPENSBI_FW_DIR  := $(OPENSBI_DIR)/build/platform/generic/firmware
-OPENSBI_PAYLOAD := $(OPENSBI_FW_DIR)/fw_payload.bin
+OPENSBI_SRC_DIR := $(RAPTOR_HOME)/third_party/riscv-software-src/opensbi
+OPENSBI_OUT_DIR := $(PWD_DIR)/opensbi
+OPENSBI_RV32_BUILD_DIR := $(OPENSBI_OUT_DIR)/build-rv32
+OPENSBI_RV64_BUILD_DIR := $(OPENSBI_OUT_DIR)/build-rv64
+OPENSBI_RV32_PAYLOAD := $(OPENSBI_RV32_BUILD_DIR)/platform/generic/firmware/fw_payload.bin
+OPENSBI_RV64_PAYLOAD := $(OPENSBI_RV64_BUILD_DIR)/platform/generic/firmware/fw_payload.bin
+OPENSBI_PAYLOAD := $(OPENSBI_RV32_PAYLOAD)
 export OPENSBI_PAYLOAD
 
-$(OPENSBI_DIR)/README.md:
-	git clone https://github.com/riscv-software-src/opensbi $(OPENSBI_DIR)
+# OpenSBI does not track PLATFORM_RISCV_ISA or compiler-mode changes in its
+# generated dependencies. Invalidate only the affected output directory when
+# either changes, otherwise an old RV32/RV64 capability set can survive.
+define prepare_opensbi_build
+	@config='$(1)'; stamp='$(2)/.raptor-build-config'; \
+	old=$$(cat "$$stamp" 2>/dev/null || true); \
+	if [ "$$old" != "$$config" ]; then \
+		echo "[opensbi] build config changed; resetting $(2)"; \
+		rm -rf "$(2)"; mkdir -p "$(2)"; \
+		printf '%s\n' "$$config" > "$$stamp"; \
+	fi
+endef
 
-OPENSBI_COMMON_FLAGS = \
-	PLATFORM_RISCV_ISA=rv32imac_zicntr_zicond_zicsr_zifencei_zcb_zba_zbb_zbs \
-	PLATFORM_RISCV_XLEN=32 PLATFORM=generic -j$(NPROC)
+$(OPENSBI_SRC_DIR)/Makefile:
+	@echo "error: OpenSBI source not found at $(OPENSBI_SRC_DIR); run make setup"; exit 1
+
+OPENSBI_RV32_FLAGS = \
+	PLATFORM_RISCV_ISA=$(RAPTOR_RV32_ISA) \
+	PLATFORM_RISCV_XLEN=32 PLATFORM=generic O=$(OPENSBI_RV32_BUILD_DIR) -j$(NPROC)
+
+OPENSBI_RV64_FLAGS = \
+	PLATFORM_RISCV_ISA=$(RAPTOR_RV64_ISA) \
+	PLATFORM_RISCV_XLEN=64 PLATFORM=generic O=$(OPENSBI_RV64_BUILD_DIR) -j$(NPROC)
 
 check-opensbi-llvm-deps: ## Check LLVM tools required by OpenSBI
 	@command -v clang >/dev/null || { echo "error: clang not found. See linux/README.md for distro package commands."; exit 1; }
@@ -138,22 +159,40 @@ check-opensbi-llvm-deps: ## Check LLVM tools required by OpenSBI
 	@command -v llvm-ar >/dev/null || { echo "error: llvm-ar not found. See linux/README.md for distro package commands."; exit 1; }
 	@command -v llvm-objcopy >/dev/null || { echo "error: llvm-objcopy not found. See linux/README.md for distro package commands."; exit 1; }
 
-opensbi: check-opensbi-llvm-deps $(OPENSBI_DIR)/README.md ## Build OpenSBI (standalone, Clang/LLVM)
-	make -C $(OPENSBI_DIR) LLVM=1 \
-		platform-cflags-y="-Wno-gnu-designator" \
-		$(OPENSBI_COMMON_FLAGS)
+opensbi: opensbi-rv32 ## Compatibility alias: build RV32 OpenSBI
 
-opensbi-gnu: $(OPENSBI_DIR)/README.md ## Build OpenSBI (GNU toolchain)
-	make -C $(OPENSBI_DIR) CROSS_COMPILE=riscv64-linux-gnu- \
-		$(OPENSBI_COMMON_FLAGS)
+opensbi-rv32: check-opensbi-llvm-deps $(OPENSBI_SRC_DIR)/Makefile ## Build RV32 OpenSBI (standalone, Clang/LLVM)
+	$(call prepare_opensbi_build,compiler=llvm mode=standalone xlen=32 isa=$(RAPTOR_RV32_ISA),$(OPENSBI_RV32_BUILD_DIR))
+	make -C $(OPENSBI_SRC_DIR) LLVM=1 \
+		platform-cflags-y="-Wno-gnu-designator -Wno-sometimes-uninitialized" \
+		$(OPENSBI_RV32_FLAGS)
 
-opensbi-with-kernel: $(OPENSBI_DIR)/README.md ## Build OpenSBI with Linux kernel as payload
-	make -C $(OPENSBI_DIR) CROSS_COMPILE=riscv64-linux-gnu- \
+opensbi-rv64: check-opensbi-llvm-deps $(OPENSBI_SRC_DIR)/Makefile ## Build RV64 OpenSBI (standalone, Clang/LLVM)
+	$(call prepare_opensbi_build,compiler=llvm mode=standalone xlen=64 isa=$(RAPTOR_RV64_ISA),$(OPENSBI_RV64_BUILD_DIR))
+	make -C $(OPENSBI_SRC_DIR) LLVM=1 \
+		platform-cflags-y="-Wno-gnu-designator -Wno-sometimes-uninitialized" \
+		$(OPENSBI_RV64_FLAGS)
+
+opensbi-gnu: opensbi-gnu-rv32 ## Compatibility alias: build RV32 OpenSBI with GNU
+
+opensbi-gnu-rv32: $(OPENSBI_SRC_DIR)/Makefile ## Build RV32 OpenSBI (GNU toolchain)
+	$(call prepare_opensbi_build,compiler=gnu mode=standalone xlen=32 isa=$(RAPTOR_RV32_ISA),$(OPENSBI_RV32_BUILD_DIR))
+	make -C $(OPENSBI_SRC_DIR) CROSS_COMPILE=riscv64-linux-gnu- \
+		$(OPENSBI_RV32_FLAGS)
+
+opensbi-gnu-rv64: $(OPENSBI_SRC_DIR)/Makefile ## Build RV64 OpenSBI (GNU toolchain)
+	$(call prepare_opensbi_build,compiler=gnu mode=standalone xlen=64 isa=$(RAPTOR_RV64_ISA),$(OPENSBI_RV64_BUILD_DIR))
+	make -C $(OPENSBI_SRC_DIR) CROSS_COMPILE=riscv64-linux-gnu- \
+		$(OPENSBI_RV64_FLAGS)
+
+opensbi-with-kernel: $(OPENSBI_SRC_DIR)/Makefile ## Build OpenSBI with Linux kernel as payload
+	$(call prepare_opensbi_build,compiler=gnu mode=payload xlen=32 isa=$(RAPTOR_RV32_ISA),$(OPENSBI_RV32_BUILD_DIR))
+	make -C $(OPENSBI_SRC_DIR) CROSS_COMPILE=riscv64-linux-gnu- \
 		FW_PAYLOAD_PATH=$(PWD_DIR)/linux/arch/riscv/boot/Image \
-		$(OPENSBI_COMMON_FLAGS)
+		$(OPENSBI_RV32_FLAGS)
 
 opensbi-clean: ## Clean OpenSBI build artifacts
-	make -C $(OPENSBI_DIR) clean
+	rm -rf $(OPENSBI_RV32_BUILD_DIR) $(OPENSBI_RV64_BUILD_DIR)
 
 print-opensbi-payload: ## Print OpenSBI fw_payload.bin path
 	@echo $(OPENSBI_PAYLOAD)

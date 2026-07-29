@@ -62,7 +62,7 @@ module tb_l1i_sret_priv_epoch;
       pmp_state.pmp_cfg_x[0] = 1'b1;
       pmp_state.pmp_mode_off[0] = 1'b0;
       pmp_state.pmp_mode_napot[0] = 1'b1;
-      pmp_state.pmp_napot_base[0] = '0;
+      pmp_state.pmp_raw_addr[0] = '1;
       pmp_state.pmp_napot_mask[0] = '1;
     end
   endtask

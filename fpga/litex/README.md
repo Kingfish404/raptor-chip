@@ -170,11 +170,15 @@ Linux-oriented KU15P bitstream: `VARIANT=linux`, LiteX BIOS, on-board 4 GB DDR4 
 source /opt/Xilinx/2025.2/Vivado/settings64.sh
 export XILINXD_LICENSE_FILE=$HOME/.Xilinx/License.lic
 
-# Build the bitstream when stale, load it, then upload OpenSBI + Linux:
-make linux-fpga-e2e UART_PORT=/dev/ttyUSB0
+# Build the RV32 bitstream when stale, load it, then upload OpenSBI + Linux:
+make linux-fpga-rv32-e2e UART_PORT=/dev/ttyUSB0
 
-# OpenSBI-only end-to-end bring-up (small upload, useful before Linux):
-make opensbi-fpga-e2e UART_PORT=/dev/ttyUSB0
+# RV32 OpenSBI-only end-to-end bring-up (small upload, useful before Linux):
+make opensbi-fpga-rv32-e2e UART_PORT=/dev/ttyUSB0
+
+# RV64 equivalents use the linux64 CPU variant and a separate image directory:
+make linux-fpga-rv64-e2e UART_PORT=/dev/ttyUSB0
+make opensbi-fpga-rv64-e2e UART_PORT=/dev/ttyUSB0
 
 # Open the console after either flow finishes:
 make fpga-console VARIANT=linux UART_PORT=/dev/ttyUSB0
@@ -187,14 +191,18 @@ The convenience targets are split by iteration cost:
 
 | Target                | Operations                                                         | Use when                                                 |
 | --------------------- | ------------------------------------------------------------------ | -------------------------------------------------------- |
-| `linux-fpga-upload`   | Build the contiguous Linux image, then upload it with `litex_term` | Debugging without using the SD card                      |
-| `linux-fpga-run`      | Load the existing timing-clean bitstream, then Linux upload        | The FPGA may contain another bitstream                   |
-| `linux-fpga-e2e`      | Build bitstream if stale, load, then Linux upload                  | Reproducing the complete boot flow                       |
-| `opensbi-fpga-upload` | Upload standalone OpenSBI only                                     | Iterating OpenSBI or DTB without touching the FPGA image |
-| `opensbi-fpga-run`    | Load existing bitstream, then standalone OpenSBI upload            | Re-establishing a known OpenSBI test state               |
-| `opensbi-fpga-e2e`    | Build if stale, load, then standalone OpenSBI upload               | Full OpenSBI-only bring-up                               |
+| `linux-fpga-rv32-upload` / `linux-fpga-rv64-upload`   | Build the selected contiguous Linux image, then upload it | Debugging without using the SD card                      |
+| `linux-fpga-rv32-run` / `linux-fpga-rv64-run`         | Load the matching timing-clean bitstream, then upload Linux | The FPGA may contain another bitstream                   |
+| `linux-fpga-rv32-e2e` / `linux-fpga-rv64-e2e`         | Build, load, then upload the matching Linux image          | Reproducing the complete boot flow                       |
+| `opensbi-fpga-rv32-upload` / `opensbi-fpga-rv64-upload` | Upload standalone OpenSBI only                           | Iterating OpenSBI or DTB without touching the FPGA image |
+| `opensbi-fpga-rv32-run` / `opensbi-fpga-rv64-run`     | Load the matching bitstream, then upload OpenSBI            | Re-establishing a known OpenSBI test state               |
+| `opensbi-fpga-rv32-e2e` / `opensbi-fpga-rv64-e2e`     | Build, load, then upload standalone OpenSBI                 | Full OpenSBI-only bring-up                               |
 
-All wrappers force `VARIANT=linux`; board, MIG, BIOS, clock, DTB timebase, and payload builds therefore remain on the same profile. Override `UART_PORT` when auto-detection does not select the board. Keep SFL at the default 115200 baud: the host-to-FPGA path is not reliable at higher rates.
+The RV32 wrappers force `VARIANT=linux`, while the RV64 wrappers force
+`VARIANT=linux64`; board, MIG, BIOS, clock, DTB timebase, and payload builds
+therefore remain on the matching profile. Override `UART_PORT` when
+auto-detection does not select the board. Keep SFL at the default 115200 baud:
+the host-to-FPGA path is not reliable at higher rates.
 
 ### DMA Cache Maintenance
 
@@ -205,17 +213,34 @@ LiteSDCard DMA is not coherent with Raptor's write-through L1D. The CPU implemen
 Build the Linux image from this directory:
 
 ```bash
-make fpga-img VARIANT=linux RAPT_CONFIG=default
-sha256sum build/firmware/linux-fpga/linux-fpga.img
+make fpga-img-rv32 RAPT_CONFIG=default
+sha256sum build/firmware/linux-fpga/rv32/linux-fpga.img
+
+# RV64 image (linux64 RTL, LP64 stage0, RV64 Linux payload, Sv39 DTB):
+make fpga-img-rv64 RAPT_CONFIG=default
+sha256sum build/firmware/linux-fpga/rv64/linux-fpga.img
 ```
 
-LiteX BIOS reads this image from `boot.bin` in the root of a FAT32 SD-card partition. This is an SD-card file copy, not a QSPI flash operation. Before inserting the card, run:
+LiteX BIOS reads this image from `boot.bin` in the root of a FAT32 SD-card
+partition. The bundled FatFs configuration has exFAT support disabled
+(`FF_FS_EXFAT=0`), so exFAT and NTFS partitions are not accepted even when the
+host can mount them normally. Use FAT32; do not rely on the exFAT format commonly
+shipped on 64 GB and larger cards. This is an SD-card file copy, not a QSPI flash
+operation. Before inserting the card, run:
 
 ```bash
 lsblk -p -o NAME,SIZE,FSTYPE,LABEL,MOUNTPOINTS,RM,MODEL,TRAN
 ```
 
 Insert the card and run the same command again. The newly appearing removable disk is the SD card. A USB reader commonly appears as `/dev/sdX` with partition `/dev/sdX1`; an internal reader may appear as `/dev/mmcblk0` with partition `/dev/mmcblk0p1`. Confirm its size, model, and `RM=1`. **Do not use the host system disk**, such as `/dev/nvme0n1`.
+
+Before copying, verify that the partition is detected as `vfat`/`FAT32`, not
+`exfat`, `ntfs`, or an unknown filesystem:
+
+```bash
+lsblk -p -o NAME,SIZE,FSTYPE,FSVER,LABEL,MOUNTPOINTS,RM,MODEL,TRAN /dev/sdX
+sudo blkid -p /dev/sdX1
+```
 
 Replace `/dev/sdX` and `/dev/sdX1` below with the names shown by `lsblk`, then copy and verify the image:
 
@@ -224,19 +249,51 @@ lsblk -p -o NAME,SIZE,FSTYPE,LABEL,MOUNTPOINTS,RM,MODEL,TRAN /dev/sdX
 sudo umount /dev/sdX1 2>/dev/null || true
 sudo mkdir -p /mnt/raptor-sd
 sudo mount /dev/sdX1 /mnt/raptor-sd
-sudo cp -f build/firmware/linux-fpga/linux-fpga.img /mnt/raptor-sd/boot.bin
+sudo cp -f build/firmware/linux-fpga/rv32/linux-fpga.img /mnt/raptor-sd/boot.bin
 sync
-sha256sum build/firmware/linux-fpga/linux-fpga.img
+sha256sum build/firmware/linux-fpga/rv32/linux-fpga.img
 sudo sha256sum /mnt/raptor-sd/boot.bin
 sudo umount /mnt/raptor-sd
 sudo eject /dev/sdX
 ```
 
-The two SHA-256 values must match. If BIOS reports `filesystem mount failed (FatFs error 13)`, recreate the partition filesystem, which **erases all files on that partition**, then repeat the mount/copy/verify commands above:
+For RV64, keep the same mount, sync, destination checksum, unmount, and eject steps, but replace the image copy and source checksum commands with:
+
+```bash
+sudo cp -f build/firmware/linux-fpga/rv64/linux-fpga.img /mnt/raptor-sd/boot.bin
+sha256sum build/firmware/linux-fpga/rv64/linux-fpga.img
+```
+
+The two SHA-256 values must match. `filesystem mount failed (FatFs error 13)`
+means `FR_NO_FILESYSTEM`: FatFs did not find a supported FAT volume. Check the
+partition first; a valid exFAT filesystem still produces this BIOS error because
+exFAT is disabled:
+
+```bash
+sudo blkid -p /dev/sdX1
+sudo file -s /dev/sdX1
+```
+
+If the result is exFAT, NTFS, unknown, or a damaged FAT filesystem, recreate it
+as FAT32. The following commands **erase all files on that partition**. For an
+MBR-partitioned `/dev/sdX`, also set partition 1 to type `0x0c` (W95 FAT32 LBA);
+omit the `sfdisk` command for a GPT card, or use its existing Microsoft basic-data
+partition type.
 
 ```bash
 sudo umount /dev/sdX1 2>/dev/null || true
+sudo sfdisk --part-type /dev/sdX 1 c
 sudo mkfs.fat -F 32 -n RAPTOR_BOOT /dev/sdX1
+sudo fsck.fat -n /dev/sdX1
+```
+
+Then repeat the mount/copy/checksum/unmount steps above. A successful final
+check should report `TYPE="vfat"`, `VERSION="FAT32"`, and matching source and
+destination SHA-256 values:
+
+```bash
+sudo blkid -p /dev/sdX1
+sudo fsck.fat -n /dev/sdX1
 ```
 
 Insert the card into the KU15P board, load its Linux bitstream, and open the
@@ -292,7 +349,7 @@ Raptor's microarchitecture preset is selected separately with `RAPT_CONFIG=<name
 | `linux`    | RV32 Linux/OpenSBI boot                |
 | `linux64`  | RV64 experiments                       |
 
-Select variant directly with `make sim VARIANT=linux`, or use convenience targets such as `make linux` (sim) and `make fpga-build VARIANT=linux` (KU15P Linux/MIG FPGA).
+Use `make linux-rv32` or `make linux-rv64` for simulation. For FPGA, prefer the explicit commands such as `make linux-fpga-rv32-build` and `make linux-fpga-rv64-build`; unqualified legacy Linux/OpenSBI targets remain RV32 compatibility aliases.
 
 ## Command Reference
 

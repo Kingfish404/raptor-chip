@@ -57,6 +57,18 @@ static inline word_t csrw_warl(uint16_t c, word_t v)
   {
     return v & ~(word_t)0x1;
   }
+  if (c == CSR_SENVCFG)
+  {
+    return v & (word_t)0x70;
+  }
+  if (c == CSR_MENVCFG)
+  {
+#ifdef CONFIG_RV64
+    return v & ((word_t)0x8000000000000000ull | (word_t)0x70);
+#else
+    return v & (word_t)0x70;
+#endif
+  }
   return v;
 }
 #define CSRW(i, v)                                                         \

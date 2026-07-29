@@ -289,6 +289,7 @@ module rapt_idu #(
     case (addr)
       // Supervisor-level CSRs
       `RAPT_CSR_SSTATUS,  `RAPT_CSR_SIE____,  `RAPT_CSR_STVEC__,  `RAPT_CSR_SCOUNTE,
+      `RAPT_CSR_SENVCFG,
       `RAPT_CSR_SSCRATC,  `RAPT_CSR_SEPC___,  `RAPT_CSR_SCAUSE_,  `RAPT_CSR_STVAL__,
       `RAPT_CSR_SIP____,  `RAPT_CSR_STIMECMP, `RAPT_CSR_STIMECMPH, `RAPT_CSR_SATP___,
       // Machine Trap Setup

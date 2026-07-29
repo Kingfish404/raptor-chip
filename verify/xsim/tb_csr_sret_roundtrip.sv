@@ -3,7 +3,13 @@
 `include "rapt_rou_if.svh"
 
 module tb_csr_sret_roundtrip;
+`ifdef RAPT_RV64
+  localparam int XLEN = 64;
+`else
   localparam int XLEN = 32;
+`endif
+  localparam logic [XLEN-1:0] PmpaddrMask =
+      {XLEN{1'b1}} >> (XLEN - `RAPT_PMPADDR_BITS);
 
   logic clock = 1'b0;
   logic reset = 1'b1;
@@ -62,7 +68,7 @@ module tb_csr_sret_roundtrip;
     end
   endtask
 
-  task automatic write_csr(input logic [11:0] address, input logic [31:0] data);
+  task automatic write_csr(input logic [11:0] address, input logic [XLEN-1:0] data);
     begin
       @(negedge clock);
       rou_csr.csr_addr = address;
@@ -79,7 +85,7 @@ module tb_csr_sret_roundtrip;
       input logic do_ecall,
       input logic do_mret,
       input logic do_sret,
-      input logic [31:0] pc);
+      input logic [XLEN-1:0] pc);
     begin
       @(negedge clock);
       rou_csr.pc = pc;
@@ -97,8 +103,8 @@ module tb_csr_sret_roundtrip;
     begin
       exu_csr.raddr = address;
       #1;
-      check(exu_csr.rdata === 32'h0,
-            $sformatf("%s reset value is not deterministic zero: %08x",
+      check(exu_csr.rdata === '0,
+        $sformatf("%s reset value is not deterministic zero: %x",
                       name, exu_csr.rdata));
     end
   endtask
@@ -119,17 +125,33 @@ module tb_csr_sret_roundtrip;
     check_csr_zero(`RAPT_CSR_MIE____, "mie");
     check_csr_zero(`RAPT_CSR_MIP____, "mip");
 
-    // PMP shadows update with accepted writes, including the next TOR lower bound.
+    // Linux restores senvcfg on every context switch when Zicbom is present.
+    write_csr(`RAPT_CSR_SENVCFG, '1);
+      exu_csr.raddr = `RAPT_CSR_SENVCFG;
+      #1;
+      check(exu_csr.rdata == XLEN'('h70),
+        "senvcfg did not apply the Zicbom WARL mask");
+    write_csr(`RAPT_CSR_SENVCFG, XLEN'('h40));
+      check(exu_csr.rdata == XLEN'('h40),
+        "senvcfg rejected Linux's CBCFE context-switch value");
+
+    // pmpaddr WARL readback is architectural and wider than the local
+    // physical checker encoding on RV64.
+    write_csr(`RAPT_CSR_PMPADDR0, '1);
+      exu_csr.raddr = `RAPT_CSR_PMPADDR0;
+      #1;
+      check(exu_csr.rdata == PmpaddrMask,
+        "pmpaddr0 all-ones write returned the wrong architectural mask");
+      check(pmp_state.pmp_raw_addr[0] == '1,
+        "pmpaddr0 all-ones write did not fill the physical checker state");
+
+    // PMP shadows update with accepted raw-address writes.
     write_csr(`RAPT_CSR_PMPADDR0, 32'h0000_0123);
       check(dut.pmpaddr_r[0] == 32'h0000_0123, "pmpaddr0 write was not stored");
+      check(pmp_state.pmp_raw_addr[0] == 32'h0000_0123,
+        "pmpaddr0 produced the wrong raw-address shadow");
       check(pmp_state.pmp_napot_mask[0] == 32'h0000_0007,
           "pmpaddr0 produced the wrong NAPOT mask");
-      check(pmp_state.pmp_napot_base[0] == 32'h0000_0120,
-          "pmpaddr0 produced the wrong NAPOT base");
-      check(pmp_state.pmp_tor_hi[0] == 32'h0000_0123,
-          "pmpaddr0 did not update its TOR upper bound");
-      check(pmp_state.pmp_tor_lo[1] == 32'h0000_0123,
-          "pmpaddr0 did not update the next TOR lower bound");
 
     // Entry 0 is unlocked NAPOT/RWX; entry 1 is locked TOR/R. The locked TOR
     // entry also locks pmpaddr0 because it supplies entry 1's lower bound.
@@ -145,8 +167,8 @@ module tb_csr_sret_roundtrip;
           "locked TOR lower bound accepted a pmpaddr0 write");
       check(pmp_state.pmp_napot_mask[0] == 32'h0000_0007,
           "rejected pmpaddr0 write changed its NAPOT shadow");
-      check(pmp_state.pmp_tor_lo[1] == 32'h0000_0123,
-          "rejected pmpaddr0 write changed the next TOR lower bound");
+        check(pmp_state.pmp_raw_addr[0] == 32'h0000_0123,
+          "rejected pmpaddr0 write changed its raw-address shadow");
 
     // Enter U-mode through MRET with MPP=U, then delegate U-ecall to S-mode.
     write_csr(`RAPT_CSR_MSTATUS, 32'h0);

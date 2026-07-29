@@ -178,18 +178,22 @@ jobs:
       - name: ysyxSoC benchmark summary
         shell: bash -l {0}
         run: |
+          mkdir -p .github/results
+          bash .github/scripts/parse-benchmark.sh coremark /tmp/cm-soc.log > .github/results/coremark-ysyxsoc.txt
+          bash .github/scripts/parse-benchmark.sh coremark /tmp/cm-soce.log > .github/results/coremark-ysyxsoce.txt
           extract_ipc() { grep -oP 'IPC:\s*\K[0-9.]+' "$1" 2>/dev/null | head -1 || echo "N/A"; }
           extract_score() { grep -oP '\d+(?=(/1000)? Marks)' "$1" 2>/dev/null | head -1 || echo "N/A"; }
           extract_trap() { grep -oE 'HIT (GOOD|BAD) TRAP' "$1" 2>/dev/null | head -1 || echo "N/A"; }
+          read_result() { grep -oP "^$2=\K.*" "$1" 2>/dev/null || echo "N/A"; }
           {
             echo ""
             echo "## ysyxSoC Benchmark Results"
-            echo "| Benchmark | Target | Score | IPC | Status |"
-            echo "|-----------|--------|-------|-----|--------|"
-            echo "| CoreMark  | riscv32-ysyxsoc  | $(extract_score /tmp/cm-soc.log) | $(extract_ipc /tmp/cm-soc.log) | $(extract_trap /tmp/cm-soc.log) |"
-            echo "| CoreMark  | riscv32e-ysyxsoc | $(extract_score /tmp/cm-soce.log) | $(extract_ipc /tmp/cm-soce.log) | $(extract_trap /tmp/cm-soce.log) |"
-            echo "| MicroBench | riscv32-ysyxsoc  | $(extract_score /tmp/mb-soc.log) | $(extract_ipc /tmp/mb-soc.log) | $(extract_trap /tmp/mb-soc.log) |"
-            echo "| MicroBench | riscv32e-ysyxsoc | $(extract_score /tmp/mb-soce.log) | $(extract_ipc /tmp/mb-soce.log) | $(extract_trap /tmp/mb-soce.log) |"
+            echo "| Benchmark | Target | Score | CoreMark/MHz | IPC | Status |"
+            echo "|-----------|--------|-------|--------------|-----|--------|"
+            echo "| CoreMark  | riscv32-ysyxsoc  | $(extract_score /tmp/cm-soc.log) | $(read_result .github/results/coremark-ysyxsoc.txt coremark_per_mhz) ($(read_result .github/results/coremark-ysyxsoc.txt iterations) iterations) | $(extract_ipc /tmp/cm-soc.log) | $(extract_trap /tmp/cm-soc.log) |"
+            echo "| CoreMark  | riscv32e-ysyxsoc | $(extract_score /tmp/cm-soce.log) | $(read_result .github/results/coremark-ysyxsoce.txt coremark_per_mhz) ($(read_result .github/results/coremark-ysyxsoce.txt iterations) iterations) | $(extract_ipc /tmp/cm-soce.log) | $(extract_trap /tmp/cm-soce.log) |"
+            echo "| MicroBench | riscv32-ysyxsoc  | $(extract_score /tmp/mb-soc.log) | N/A | $(extract_ipc /tmp/mb-soc.log) | $(extract_trap /tmp/mb-soc.log) |"
+            echo "| MicroBench | riscv32e-ysyxsoc | $(extract_score /tmp/mb-soce.log) | N/A | $(extract_ipc /tmp/mb-soce.log) | $(extract_trap /tmp/mb-soce.log) |"
           } >> "$GITHUB_STEP_SUMMARY"
           bash .github/scripts/parse-pmu.sh \
             "CoreMark riscv32-ysyxsoc" /tmp/cm-soc.log \
@@ -300,11 +304,12 @@ jobs:
           CM_TRAP=$(grep -oE 'HIT (GOOD|BAD) TRAP' /tmp/app-coremark.log | head -1 || echo "UNKNOWN")
           CM_OK=$( [ "$CM_TRAP" = "HIT GOOD TRAP" ] && [ "$CM_VALID" -ge 1 ] && echo "PASS" || echo "FAIL" )
 
-          CM_CMARK_PER_MHZ="N/A"
-          if [ -n "$CM_ITERS" ] && [ -n "$CM_CYCLES" ] && [ "$CM_CYCLES" -gt 0 ]; then
+          CM_CMARK_PER_MHZ=$(grep -oP '^CoreMark/MHz\s*:\s*\K[0-9]+(?:\.[0-9]+)?' /tmp/app-coremark.log | tail -1 || true)
+          if [ -z "$CM_CMARK_PER_MHZ" ] && [ -n "$CM_ITERS" ] && [ -n "$CM_CYCLES" ] && [ "$CM_CYCLES" -gt 0 ]; then
             CM_CMARK_PER_MHZ=$(awk -v i="$CM_ITERS" -v c="$CM_CYCLES" \
-              'BEGIN{ printf "%.3f", i*1e6/c }')
+              'BEGIN{ printf "%.4f", i*1e6/c }')
           fi
+          CM_CMARK_PER_MHZ=${CM_CMARK_PER_MHZ:-N/A}
 
           # ---- Write summary ----
           {

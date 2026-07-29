@@ -3,6 +3,26 @@
 `include "rapt_config.svh"
 `include "rapt_sva.svh"
 
+// Implemented physical-address width. RV64 does not imply a 64-bit physical
+// address space; Sv39-capable systems conventionally implement up to 48 bits.
+`ifndef RAPT_PADDR_BITS
+`ifdef RAPT_RV64
+`define RAPT_PADDR_BITS 48
+`else
+`define RAPT_PADDR_BITS 32
+`endif
+`endif
+
+// Architectural pmpaddr CSR width. RV64 reserves bits 63:54, independently
+// of the narrower physical address width implemented by the checker.
+`ifndef RAPT_PMPADDR_BITS
+`ifdef RAPT_RV64
+`define RAPT_PMPADDR_BITS 54
+`else
+`define RAPT_PMPADDR_BITS 32
+`endif
+`endif
+
 // Cache lines are specified in bytes, not XLEN words. A configuration may
 // select a smaller line for formal/FPGA capacity, but RV32 and RV64 use the
 // same byte line size within that configuration. L1D/L2 derive their
@@ -197,6 +217,7 @@
 `define RAPT_CSR_STVEC__ 'h105
 
 `define RAPT_CSR_SCOUNTE 'h106
+`define RAPT_CSR_SENVCFG 'h10a
 
 `define RAPT_CSR_SSCRATC 'h140
 `define RAPT_CSR_SEPC___ 'h141
@@ -293,11 +314,14 @@
 `define RAPT_CSR_SIP_WMASK 32'h00000002
 `define RAPT_CSR_MIP_WMASK 32'h00000222
 
+// Zicbom environment controls: CBIE[5:4] and CBCFE[6]. CBZE[7] remains
+// WARL-zero because Raptor does not advertise Zicboz.
+`define RAPT_CSR_SENVCFG_WMASK 32'h00000070
 `ifdef RAPT_RV64
 `define RAPT_CSR_MENVCFG_STCE 63
-`define RAPT_CSR_MENVCFG_WMASK 64'h8000_0000_0000_0000
+`define RAPT_CSR_MENVCFG_WMASK 64'h8000_0000_0000_0070
 `else
-`define RAPT_CSR_MENVCFG_WMASK 32'h0000_0000
+`define RAPT_CSR_MENVCFG_WMASK 32'h0000_0070
 `endif
 
 // tvec MODE field encodings

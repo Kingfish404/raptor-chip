@@ -23,9 +23,11 @@
         cpu@0 {
             device_type = "cpu";
             compatible = "riscv";
-            riscv,isa = "rv32imac_zicbom_zicsr_zifencei_zcb_zba_zbb_zbc_zbs";
+            riscv,isa = "@RISCV_ISA@";
+            riscv,isa-base = "@RISCV_ISA_BASE@";
+            riscv,isa-extensions = @RISCV_ISA_EXTENSIONS@;
             riscv,cbom-block-size = <@CBOM_BLOCK_SIZE@>;
-            mmu-type = "riscv,sv32";
+            mmu-type = "riscv,@RISCV_MMU@";
             reg = <0>;
 
             cpu0_intc: interrupt-controller {

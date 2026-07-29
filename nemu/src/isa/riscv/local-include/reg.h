@@ -68,6 +68,7 @@ static inline CSR_status check_csr_exist(uint16_t csr)
           csr == CSR_STVEC ||
 
           csr == CSR_SCOUNTEREN ||
+          csr == CSR_SENVCFG ||
 
           csr == CSR_SSCRATCH ||
           csr == CSR_SEPC ||

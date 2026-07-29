@@ -83,7 +83,8 @@ module rapt_csr #(
     MVENDORID,
     MARCHID,
     IMPID__,
-    MHARTID
+    MHARTID,
+    SENVCFG
   } csr_t;
 
   logic [1:0] priv_mode;
@@ -126,8 +127,10 @@ module rapt_csr #(
   // PMP state: 8 active entries (pmpcfg0/pmpcfg1; pmpcfg2/3 hardwired 0).
   // Reserved bits [6:5] of each cfg byte are WARL-zero (mask 8'h9F).
   // pmpaddr is stored in its raw CSR form (byte_addr >> 2).
-  logic [7:0]      pmpcfg_r [`RAPT_PMP_NUM];
-  logic [XLEN-1:0] pmpaddr_r[`RAPT_PMP_NUM];
+  localparam int PMPAddrW = `RAPT_PMPADDR_BITS;
+  localparam int PMPCheckAddrW = `RAPT_PADDR_BITS - 2;
+  logic [7:0]          pmpcfg_r [`RAPT_PMP_NUM];
+  logic [PMPAddrW-1:0] pmpaddr_r[`RAPT_PMP_NUM];
 
   // trap handle
   logic [XLEN-1:0] cause_idx;
@@ -148,6 +151,7 @@ module rapt_csr #(
       `RAPT_CSR_SIE____:   waddr_reg = SIE____;
       `RAPT_CSR_STVEC__:   waddr_reg = STVEC__;
       `RAPT_CSR_SCOUNTE:   waddr_reg = SCOUNTE;
+      `RAPT_CSR_SENVCFG:   waddr_reg = SENVCFG;
       `RAPT_CSR_SSCRATC:   waddr_reg = SSCRATC;
       `RAPT_CSR_SEPC___:   waddr_reg = SEPC___;
       `RAPT_CSR_SCAUSE_:   waddr_reg = SCAUSE_;
@@ -180,6 +184,7 @@ module rapt_csr #(
       `RAPT_CSR_SIE____:   raddr_reg = SIE____;
       `RAPT_CSR_STVEC__:   raddr_reg = STVEC__;
       `RAPT_CSR_SCOUNTE:   raddr_reg = SCOUNTE;
+      `RAPT_CSR_SENVCFG:   raddr_reg = SENVCFG;
       `RAPT_CSR_SSCRATC:   raddr_reg = SSCRATC;
       `RAPT_CSR_SEPC___:   raddr_reg = SEPC___;
       `RAPT_CSR_SCAUSE_:   raddr_reg = SCAUSE_;
@@ -226,6 +231,7 @@ module rapt_csr #(
       SIE____:   exu_csr.rdata = csr[MIE____] & `RAPT_CSR_SIE_RMASK;
       STVEC__:   exu_csr.rdata = csr[STVEC__];
       SCOUNTE:   exu_csr.rdata = csr[SCOUNTE];
+      SENVCFG:   exu_csr.rdata = csr[SENVCFG];
       MCOUNTE:   exu_csr.rdata = csr[MCOUNTE];
       SSCRATC:   exu_csr.rdata = csr[SSCRATC];
       SEPC___:   exu_csr.rdata = csr[SEPC___];
@@ -449,9 +455,8 @@ module rapt_csr #(
 
     pmp_update.addr_we    = 1'b0;
     pmp_update.addr_idx   = '0;
+    pmp_update.raw_addr   = '0;
     pmp_update.napot_mask = '0;
-    pmp_update.napot_base = '0;
-    pmp_update.tor_hi     = '0;
     pmp_update.cfg_we     = '0;
     pmp_update.cfg_r      = '0;
     pmp_update.cfg_w      = '0;
@@ -522,9 +527,9 @@ module rapt_csr #(
         && !self_locked && !tor_locked) begin
       pmp_update.addr_we    = 1'b1;
       pmp_update.addr_idx   = pidx;
-      pmp_update.napot_mask = rou_csr.csr_wdata ^ (rou_csr.csr_wdata + XLEN'(1));
-      pmp_update.napot_base = rou_csr.csr_wdata & ~pmp_update.napot_mask;
-      pmp_update.tor_hi     = rou_csr.csr_wdata;
+      pmp_update.raw_addr   = rou_csr.csr_wdata[PMPCheckAddrW-1:0];
+      pmp_update.napot_mask = pmp_update.raw_addr
+            ^ (pmp_update.raw_addr + PMPCheckAddrW'(1));
     end
   end
 
@@ -559,6 +564,7 @@ module rapt_csr #(
       csr[MENVCFG] <= '0;
       csr[MCOUNTE] <= '0;
       csr[SCOUNTE] <= '0;
+      csr[SENVCFG] <= '0;
       csr[MIDELEG] <= '0;
       stimecmp <= 64'hFFFF_FFFF_FFFF_FFFF;
       for (int i = 0; i < `RAPT_PMP_NUM; i++) begin
@@ -627,7 +633,7 @@ module rapt_csr #(
                    && (pmpcfg_r[pidx + 4'd1][`RAPT_PMPCFG_A_] == `RAPT_PMP_A_TOR))
                 : 1'b0;
             if (!self_locked && !tor_locked) begin
-              pmpaddr_r[pidx] <= rou_csr.csr_wdata;
+              pmpaddr_r[pidx] <= rou_csr.csr_wdata[PMPAddrW-1:0];
             end
           end else if (waddr_reg == MEDELEG) begin
             csr[waddr_reg] <= (rou_csr.csr_wdata & `RAPT_CSR_MEDELEG_WMASK);
@@ -637,6 +643,8 @@ module rapt_csr #(
           end else if (waddr_reg == MCOUNTE || waddr_reg == SCOUNTE) begin
             // Only CY/TM/IR (bits [2:0]) modeled; HPM bits WARL-zero.
             csr[waddr_reg] <= (rou_csr.csr_wdata & `RAPT_CSR_COUNTEREN_WMASK);
+          end else if (waddr_reg == SENVCFG) begin
+            csr[SENVCFG] <= (rou_csr.csr_wdata & `RAPT_CSR_SENVCFG_WMASK);
           end else if (waddr_reg == MENVCFG) begin
             csr[MENVCFG] <= (rou_csr.csr_wdata & `RAPT_CSR_MENVCFG_WMASK);
           end else if (waddr_reg == STIMECMP) begin

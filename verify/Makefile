@@ -1134,7 +1134,7 @@ xsim-bus-read-ownership: ## xsim: verify read response ID ownership and interlea
 	$(call XSIM_RUN,bus_read_ownership,tb_bus_read_ownership,$(XSIM_BUS_SOURCES),)
 
 xsim-csr-sret-roundtrip: ## xsim: verify CSR reset and U-ecall/SRET round trip
-	$(call XSIM_RUN,csr_sret_roundtrip,tb_csr_sret_roundtrip,$(XSIM_CSR_SOURCES),)
+	$(call XSIM_RUN,csr_sret_roundtrip_$(ISA),tb_csr_sret_roundtrip,$(XSIM_CSR_SOURCES),$(if $(filter rv64,$(ISA)),-d RAPT_RV64,))
 
 xsim-pmp-endpoint: ## xsim: verify variable-size PMP endpoint boundary checks
 	$(call XSIM_RUN,pmp_endpoint,tb_pmp_endpoint,"$(RAPTOR_HOME)/hdl/rapt_pkg.sv" "$(RAPTOR_HOME)/hdl/memory/rapt_pmp.sv",)

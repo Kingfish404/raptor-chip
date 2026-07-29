@@ -15,7 +15,8 @@ endef
 
 # $(call _emit_fpga_image,out,stage_bin,payload,dtb_offset,dtb_src,label)
 define _emit_fpga_image
-@if [ -z "$(3)" ] || [ ! -f "$(3)" ]; then \
+@$(HOST_PYTHON) $(LITEX_DIR)/scripts/check_linux_dts.py $(FW_LINUX_FPGA_DTS) || exit 1; \
+if [ -z "$(3)" ] || [ ! -f "$(3)" ]; then \
 	echo "[ERR] $(6) payload not found: $(3)"; exit 1; fi; \
 stage_size=$$(stat -c%s "$(2)"); \
 payload_size=$$(stat -c%s "$(3)"); \
@@ -181,6 +182,12 @@ firmware-clean:
 $(FW_LINUX_FPGA_DIR):
 	@mkdir -p $@
 
+$(LINUX_IMG): linux-build
+	@test -f $@
+
+$(OPENSBI_BIN): opensbi-build
+	@test -f $@
+
 $(FW_EGOS_STAGE0_DIR):
 	@mkdir -p $@
 
@@ -197,10 +204,17 @@ $(FW_LINUX_FPGA_DTS): $(FW_LINUX_FPGA_DTS_IN) FORCE | $(FW_LINUX_FPGA_DIR)
 	    -e 's/@UART_BASE@/$(LINUX_FPGA_UART_BASE)/g' \
 	    -e 's/@UART_UNIT_ADDR@/$(LINUX_FPGA_UART_UNIT_ADDR)/g' \
 	    -e 's/@CBOM_BLOCK_SIZE@/$(RAPT_CACHE_LINE_BYTES)/g' \
+	    -e 's/@RISCV_ISA@/$(LINUX_ISA)/g' \
+	    -e 's/@RISCV_ISA_BASE@/$(LINUX_ISA_BASE)/g' \
+	    -e 's/@RISCV_ISA_EXTENSIONS@/$(RAPTOR_DT_ISA_EXTENSIONS)/g' \
+	    -e 's/@RISCV_MMU@/$(LINUX_MMU)/g' \
 	    $< > $@
 
 $(FW_LINUX_FPGA_DTB): $(FW_LINUX_FPGA_DTS) | $(FW_LINUX_FPGA_DIR)
 	dtc -I dts -O dtb -o $@ $<
+
+fpga-linux-dtb-check: $(FW_LINUX_FPGA_DTB)
+	$(HOST_PYTHON) $(LITEX_DIR)/scripts/check_linux_dts.py $(FW_LINUX_FPGA_DTS)
 
 $(FW_LINUX_FPGA_ELF): $(FW_LINUX_FPGA_SRC)/boot.S $(FW_LINUX_FPGA_SRC)/link.ld $(FW_LINUX_FPGA_DTB) $(LINUX_FPGA_PAYLOAD) | $(FW_LINUX_FPGA_DIR)
 	@if [ -z "$(LINUX_FPGA_PAYLOAD)" ] || [ ! -f "$(LINUX_FPGA_PAYLOAD)" ]; then \
@@ -385,10 +399,22 @@ tests-run: tests
 	echo "[tests-run] All tests completed."; } 2>&1 | tee $(LITEX_LOG_DIR)/tests-run.log
 
 opensbi-build:
-	$(MAKE) -C $(LINUX_DIR) opensbi
+	$(MAKE) -C $(LINUX_DIR) $(OPENSBI_BUILD_TARGET)
+
+opensbi-rv32-build:
+	@$(call _make,opensbi-build VARIANT=linux)
+
+opensbi-rv64-build:
+	@$(call _make,opensbi-build VARIANT=linux64)
 
 opensbi:
-	@$(call _make,sim PAYLOAD=opensbi)
+	@$(call _make,opensbi-rv32)
+
+opensbi-rv32:
+	@$(call _make,sim PAYLOAD=opensbi VARIANT=linux)
+
+opensbi-rv64:
+	@$(call _make,sim PAYLOAD=opensbi VARIANT=linux64)
 
 opensbi-clean:
 	$(MAKE) -C $(LINUX_DIR) opensbi-clean
@@ -407,38 +433,126 @@ egos-ku15p-sim-trace: fpga-egos-prepare
 	@$(call _make,egos-ku15p-sim TRACE=fst)
 
 linux-build:
-	$(MAKE) -s -C $(LINUX_DIR) download-rv32
+	$(MAKE) -s -C $(LINUX_DIR) $(LINUX_DOWNLOAD_TARGET)
+
+linux-rv32-build:
+	@$(call _make,linux-build VARIANT=linux)
+
+linux-rv64-build:
+	@$(call _make,linux-build VARIANT=linux64)
 
 linux:
+	@$(call _make,linux-rv32)
+
+linux-rv32:
 	@$(call _make,sim PAYLOAD=linux VARIANT=linux)
 
+linux-rv64:
+	@$(call _make,sim PAYLOAD=linux VARIANT=linux64)
+
+fpga-img-rv32:
+	@$(call _make,fpga-img VARIANT=linux)
+
+fpga-img-rv64:
+	@$(call _make,fpga-img VARIANT=linux64)
+
+fpga-linux-dtb-check-rv32:
+	@$(call _make,fpga-linux-dtb-check VARIANT=linux)
+
+fpga-linux-dtb-check-rv64:
+	@$(call _make,fpga-linux-dtb-check VARIANT=linux64)
+
+fpga-smoke-img-rv32:
+	@$(call _make,fpga-smoke-img VARIANT=linux)
+
+fpga-smoke-img-rv64:
+	@$(call _make,fpga-smoke-img VARIANT=linux64)
+
+fpga-opensbi-img-rv32:
+	@$(call _make,fpga-opensbi-img VARIANT=linux)
+
+fpga-opensbi-img-rv64:
+	@$(call _make,fpga-opensbi-img VARIANT=linux64)
+
 linux-fpga-build:
-	@$(call _make,fpga-build $(_LINUX_FPGA_ARGS))
+	@$(call _make,linux-fpga-rv32-build)
+
+linux-fpga-rv32-build:
+	@$(call _make,fpga-build $(_LINUX_FPGA_RV32_ARGS))
+
+linux-fpga-rv64-build:
+	@$(call _make,fpga-build $(_LINUX_FPGA_RV64_ARGS))
 
 linux-fpga-load:
-	@$(call _make,fpga-load $(_LINUX_FPGA_ARGS))
+	@$(call _make,linux-fpga-rv32-load)
+
+linux-fpga-rv32-load:
+	@$(call _make,fpga-load $(_LINUX_FPGA_RV32_ARGS))
+
+linux-fpga-rv64-load:
+	@$(call _make,fpga-load $(_LINUX_FPGA_RV64_ARGS))
 
 linux-fpga-upload:
-	@$(call _make,fpga-upload $(_LINUX_FPGA_ARGS))
+	@$(call _make,linux-fpga-rv32-upload)
+
+linux-fpga-rv32-upload:
+	@$(call _make,fpga-upload $(_LINUX_FPGA_RV32_ARGS))
+
+linux-fpga-rv64-upload:
+	@$(call _make,fpga-upload $(_LINUX_FPGA_RV64_ARGS))
 
 linux-fpga-run:
-	@$(call _make,fpga-load $(_LINUX_FPGA_ARGS))
-	@$(call _make,linux-fpga-upload)
+	@$(call _make,linux-fpga-rv32-run)
+
+linux-fpga-rv32-run:
+	@$(call _make,linux-fpga-rv32-load)
+	@$(call _make,linux-fpga-rv32-upload)
+
+linux-fpga-rv64-run:
+	@$(call _make,linux-fpga-rv64-load)
+	@$(call _make,linux-fpga-rv64-upload)
 
 linux-fpga-e2e:
-	@$(call _make,fpga-build $(_LINUX_FPGA_ARGS))
-	@$(call _make,linux-fpga-run)
+	@$(call _make,linux-fpga-rv32-e2e)
+
+linux-fpga-rv32-e2e:
+	@$(call _make,linux-fpga-rv32-build)
+	@$(call _make,linux-fpga-rv32-run)
+
+linux-fpga-rv64-e2e:
+	@$(call _make,linux-fpga-rv64-build)
+	@$(call _make,linux-fpga-rv64-run)
 
 opensbi-fpga-upload:
-	@$(call _make,fpga-opensbi-upload $(_LINUX_FPGA_ARGS))
+	@$(call _make,opensbi-fpga-rv32-upload)
+
+opensbi-fpga-rv32-upload:
+	@$(call _make,fpga-opensbi-upload $(_LINUX_FPGA_RV32_ARGS))
+
+opensbi-fpga-rv64-upload:
+	@$(call _make,fpga-opensbi-upload $(_LINUX_FPGA_RV64_ARGS))
 
 opensbi-fpga-run:
-	@$(call _make,fpga-load $(_LINUX_FPGA_ARGS))
-	@$(call _make,opensbi-fpga-upload)
+	@$(call _make,opensbi-fpga-rv32-run)
+
+opensbi-fpga-rv32-run:
+	@$(call _make,linux-fpga-rv32-load)
+	@$(call _make,opensbi-fpga-rv32-upload)
+
+opensbi-fpga-rv64-run:
+	@$(call _make,linux-fpga-rv64-load)
+	@$(call _make,opensbi-fpga-rv64-upload)
 
 opensbi-fpga-e2e:
-	@$(call _make,fpga-build $(_LINUX_FPGA_ARGS))
-	@$(call _make,opensbi-fpga-run)
+	@$(call _make,opensbi-fpga-rv32-e2e)
+
+opensbi-fpga-rv32-e2e:
+	@$(call _make,linux-fpga-rv32-build)
+	@$(call _make,opensbi-fpga-rv32-run)
+
+opensbi-fpga-rv64-e2e:
+	@$(call _make,linux-fpga-rv64-build)
+	@$(call _make,opensbi-fpga-rv64-run)
 
 fpga-opensbi-upload: fpga-opensbi-img
 	@$(call _fpga_linux_upload,$(FW_LINUX_FPGA_OPENSBI_IMAGE))
@@ -671,7 +785,7 @@ fpga-bitstream-current:
 		exit 1; \
 	fi
 
-fpga-load: fpga-bitstream-current
+fpga-load:
 	@echo "[INFO] FPGA board: $(FPGA_BOARD) (source=$(FPGA_BOARD_SOURCE), vendor=$(FPGA_VENDOR), device=$(if $(FPGA_DEVICE),$(FPGA_DEVICE),n/a))"
 	$(call _require_file,$(FPGA_BITSTREAM),$(FPGA_BITSTREAM) not found — run 'make fpga-build' first.)
 	@$(FPGA_LOAD_TOOL_CHECK)
@@ -755,5 +869,6 @@ info:
 	@echo "LINUX_FPGA_IMAGE   = $(FW_LINUX_FPGA_IMAGE) (exists: $(shell test -f $(FW_LINUX_FPGA_IMAGE) && echo yes || echo no))"
 
 help:
-	@awk -v guide="$(LITEX_DIR)/README.md" -f $(LITEX_DIR)/scripts/make_help.awk $(MAKEFILE_LIST)
+	@echo "Usage: make <target> [VAR=value ...]"
+	@awk '/^[a-zA-Z0-9_-]+:.*## / { target=$$0; sub(/:.*/, "", target); desc=$$0; sub(/.*## /, "", desc); printf "  %-30s %s\n", target, desc }' $(MAKEFILE_LIST)
 

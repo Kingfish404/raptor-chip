@@ -14,6 +14,12 @@ LINUX_HOME          ?= $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 LINUX_BUILD_VERSION ?= v6.18.39
 LINUX_BUILD_VERSION := $(strip $(LINUX_BUILD_VERSION))
 
+# Keep firmware compilation and both device-tree ISA properties in lockstep.
+# Zicbom also makes [ms]envcfg architectural state visible to OpenSBI/Linux.
+RAPTOR_RV32_ISA := rv32imac_zicbom_zicntr_zicond_zicsr_zifencei_zcb_zba_zbb_zbc_zbs
+RAPTOR_RV64_ISA := rv64imac_zicbom_zicntr_zicond_zicsr_zifencei_zcb_zba_zbb_zbc_zbs
+RAPTOR_DT_ISA_EXTENSIONS := "i", "m", "a", "c", "zicbom", "zicntr", "zicond", "zicsr", "zifencei", "zcb", "zba", "zbb", "zbc", "zbs"
+
 # Pre-built kernel releases: https://github.com/Kingfish404/linux-build/releases
 LINUX_BUILD_DIR     := $(LINUX_HOME)/build
 LINUX_BUILD_URL     := https://github.com/Kingfish404/linux-build/releases/download/rv-$(LINUX_BUILD_VERSION)

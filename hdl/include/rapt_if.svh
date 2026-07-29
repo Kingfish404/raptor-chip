@@ -167,14 +167,15 @@ endinterface
 // csr boardcast
 interface pmp_update_if #(
     parameter int XLEN = `RAPT_XLEN,
+    parameter int PADDR_BITS = `RAPT_PADDR_BITS,
     parameter int N = `RAPT_PMP_NUM,
     parameter int IDX_W = $clog2(N)
 );
+  localparam int PMPAddrBits = PADDR_BITS - 2;
   logic                  addr_we;
   logic [IDX_W-1:0]      addr_idx;
-  logic [XLEN-1:0]       napot_mask;
-  logic [XLEN-1:0]       napot_base;
-  logic [XLEN-1:0]       tor_hi;
+  logic [PMPAddrBits-1:0] raw_addr;
+  logic [PMPAddrBits-1:0] napot_mask;
   logic [N-1:0]          cfg_we;
   logic [N-1:0]          cfg_r;
   logic [N-1:0]          cfg_w;
@@ -185,22 +186,22 @@ interface pmp_update_if #(
   logic [N-1:0]          mode_na4;
   logic [N-1:0]          mode_napot;
 
-  modport in(input addr_we, addr_idx, napot_mask, napot_base, tor_hi,
+  modport in(input addr_we, addr_idx, raw_addr, napot_mask,
              cfg_we, cfg_r, cfg_w, cfg_x, cfg_l,
              mode_off, mode_tor, mode_na4, mode_napot);
-  modport out(output addr_we, addr_idx, napot_mask, napot_base, tor_hi,
+  modport out(output addr_we, addr_idx, raw_addr, napot_mask,
               cfg_we, cfg_r, cfg_w, cfg_x, cfg_l,
               mode_off, mode_tor, mode_na4, mode_napot);
 endinterface
 
 interface pmp_state_if #(
     parameter int XLEN = `RAPT_XLEN,
+    parameter int PADDR_BITS = `RAPT_PADDR_BITS,
     parameter int N = `RAPT_PMP_NUM
 );
-  logic [XLEN-1:0] pmp_napot_mask[N];
-  logic [XLEN-1:0] pmp_napot_base[N];
-  logic [XLEN-1:0] pmp_tor_lo[N];
-  logic [XLEN-1:0] pmp_tor_hi[N];
+  localparam int PMPAddrBits = PADDR_BITS - 2;
+  logic [PMPAddrBits-1:0] pmp_raw_addr[N];
+  logic [PMPAddrBits-1:0] pmp_napot_mask[N];
   logic [N-1:0] pmp_cfg_r;
   logic [N-1:0] pmp_cfg_w;
   logic [N-1:0] pmp_cfg_x;
@@ -210,10 +211,10 @@ interface pmp_state_if #(
   logic [N-1:0] pmp_mode_na4;
   logic [N-1:0] pmp_mode_napot;
 
-  modport in(input pmp_napot_mask, pmp_napot_base, pmp_tor_lo, pmp_tor_hi,
+  modport in(input pmp_raw_addr, pmp_napot_mask,
              pmp_cfg_r, pmp_cfg_w, pmp_cfg_x, pmp_cfg_l,
              pmp_mode_off, pmp_mode_tor, pmp_mode_na4, pmp_mode_napot);
-  modport out(output pmp_napot_mask, pmp_napot_base, pmp_tor_lo, pmp_tor_hi,
+  modport out(output pmp_raw_addr, pmp_napot_mask,
               pmp_cfg_r, pmp_cfg_w, pmp_cfg_x, pmp_cfg_l,
               pmp_mode_off, pmp_mode_tor, pmp_mode_na4, pmp_mode_napot);
 endinterface

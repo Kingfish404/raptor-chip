@@ -12,10 +12,8 @@ module rapt_pmp_state #(
   always_ff @(posedge clock) begin
     if (reset) begin
       for (int i = 0; i < N; i++) begin
+        state.pmp_raw_addr[i]   <= '0;
         state.pmp_napot_mask[i] <= '0;
-        state.pmp_napot_base[i] <= '0;
-        state.pmp_tor_lo[i]     <= '0;
-        state.pmp_tor_hi[i]     <= '0;
       end
       state.pmp_cfg_r      <= '0;
       state.pmp_cfg_w      <= '0;
@@ -27,12 +25,8 @@ module rapt_pmp_state #(
       state.pmp_mode_napot <= '0;
     end else begin
       if (update.addr_we) begin
+        state.pmp_raw_addr[update.addr_idx]   <= update.raw_addr;
         state.pmp_napot_mask[update.addr_idx] <= update.napot_mask;
-        state.pmp_napot_base[update.addr_idx] <= update.napot_base;
-        state.pmp_tor_hi[update.addr_idx]     <= update.tor_hi;
-        if (update.addr_idx < $clog2(N)'(N - 1)) begin
-          state.pmp_tor_lo[update.addr_idx + $clog2(N)'(1)] <= update.tor_hi;
-        end
       end
       for (int i = 0; i < N; i++) begin
         if (update.cfg_we[i]) begin
@@ -53,10 +47,9 @@ endmodule
 
 // Combinational RISC-V PMP permission checker.
 //
-// Uses precomputed state from the local pmp_state_if replica to
-// keep the hot LSU/L1D critical path short.  All NAPOT decoding (XOR+AND),
-// TOR neighbour selection and per-entry cfg-bit slicing happen one cycle
-// earlier in CSR-update FFs; this module only does:
+// Uses compact state from the local pmp_state_if replica. NAPOT masks are
+// precomputed on CSR writes; NAPOT bases and TOR neighbours are derived from
+// each entry's raw pmpaddr value in the checker.
 //
 //   * `addr_hi = addr + size_m1` (single 4-bit + carry-extend adder)
 //   * per-entry XOR / compare for match (parallel, generate-for)
@@ -73,13 +66,13 @@ endmodule
 //   op_r/_w/_x - which permission to check
 //
 // Inputs (shadow, 1-cycle delayed copies of pmpcfg/pmpaddr):
-//   napot_mask[i], napot_base[i] : closed-form NAPOT decode
-//   tor_lo[i], tor_hi[i]         : pmpaddr[i-1] / pmpaddr[i]
+//   raw_addr[i], napot_mask[i]   : raw pmpaddr and NAPOT mask
 //   cfg_r/w/x/l[i]               : per-entry permission bit-vectors
 //   mode_off/tor/na4/napot[i]    : per-entry mode one-hot vectors
 
 module rapt_pmp #(
-    parameter int XLEN = `RAPT_XLEN
+  parameter int XLEN = `RAPT_XLEN,
+  parameter int PADDR_BITS = `RAPT_PADDR_BITS
 ) (
     /* verilator lint_off UNUSEDSIGNAL */
     input logic [XLEN-1:0] addr,
@@ -91,10 +84,8 @@ module rapt_pmp #(
     input logic            op_x,
 
     // Decoded inputs from pmp_state_if
-    input logic [         XLEN-1:0] pmp_napot_mask[`RAPT_PMP_NUM],
-    input logic [         XLEN-1:0] pmp_napot_base[`RAPT_PMP_NUM],
-    input logic [         XLEN-1:0] pmp_tor_lo    [`RAPT_PMP_NUM],
-    input logic [         XLEN-1:0] pmp_tor_hi    [`RAPT_PMP_NUM],
+    input logic [PADDR_BITS-3:0] pmp_raw_addr  [`RAPT_PMP_NUM],
+    input logic [PADDR_BITS-3:0] pmp_napot_mask[`RAPT_PMP_NUM],
     input logic [`RAPT_PMP_NUM-1:0] pmp_cfg_r,
     input logic [`RAPT_PMP_NUM-1:0] pmp_cfg_w,
     input logic [`RAPT_PMP_NUM-1:0] pmp_cfg_x,
@@ -110,6 +101,7 @@ module rapt_pmp #(
     output logic fault_lo_o
 );
   localparam int N = `RAPT_PMP_NUM;
+  localparam int PMPAddrBits = PADDR_BITS - 2;
 
   // Per-byte-end match vectors.
   logic [N-1:0] entry_match_lo;
@@ -118,21 +110,33 @@ module rapt_pmp #(
   // pmpaddr granularity = words (G=0 -> byte_addr >> 2). We compute
   // addr_hi_w directly via (addr + size_m1) >> 2 to avoid carrying the
   // unused byte-offset bits of the sum.
-  logic [XLEN-1:0] addr_lo_w;
-  logic [XLEN-1:0] addr_hi_w;
-  assign addr_lo_w = {2'b00, addr[XLEN-1:2]};
-  assign addr_hi_w = (addr + {{(XLEN - 4) {1'b0}}, size_m1}) >> 2;
+  logic [PADDR_BITS-1:0] addr_phys;
+  logic [PADDR_BITS-1:0] addr_hi_phys;
+  logic [PMPAddrBits-1:0] addr_lo_w;
+  logic [PMPAddrBits-1:0] addr_hi_w;
+  assign addr_phys = addr[PADDR_BITS-1:0];
+  assign addr_hi_phys = addr_phys + {{(PADDR_BITS - 4) {1'b0}}, size_m1};
+  assign addr_lo_w = addr_phys[PADDR_BITS-1:2];
+  assign addr_hi_w = addr_hi_phys[PADDR_BITS-1:2];
   for (genvar i = 0; i < N; i++) begin : gen_entry
+    logic [PMPAddrBits-1:0] tor_lo;
+    logic [PMPAddrBits-1:0] napot_base;
     logic match_tor_lo, match_na4_lo, match_napot_lo;
     logic match_tor_hi, match_na4_hi, match_napot_hi;
+    if (i == 0) begin : gen_first_tor
+      assign tor_lo = '0;
+    end else begin : gen_next_tor
+      assign tor_lo = pmp_raw_addr[i-1];
+    end
+    assign napot_base = pmp_raw_addr[i] & ~pmp_napot_mask[i];
     /* verilator lint_off UNSIGNED */
-    assign match_tor_lo = (addr_lo_w >= pmp_tor_lo[i]) && (addr_lo_w < pmp_tor_hi[i]);
-    assign match_tor_hi = (addr_hi_w >= pmp_tor_lo[i]) && (addr_hi_w < pmp_tor_hi[i]);
+    assign match_tor_lo = (addr_lo_w >= tor_lo) && (addr_lo_w < pmp_raw_addr[i]);
+    assign match_tor_hi = (addr_hi_w >= tor_lo) && (addr_hi_w < pmp_raw_addr[i]);
     /* verilator lint_on UNSIGNED */
-    assign match_na4_lo = (addr_lo_w == pmp_tor_hi[i]);  // tor_hi == pmpaddr[i]
-    assign match_na4_hi = (addr_hi_w == pmp_tor_hi[i]);
-    assign match_napot_lo = ((addr_lo_w & ~pmp_napot_mask[i]) == pmp_napot_base[i]);
-    assign match_napot_hi = ((addr_hi_w & ~pmp_napot_mask[i]) == pmp_napot_base[i]);
+    assign match_na4_lo = (addr_lo_w == pmp_raw_addr[i]);
+    assign match_na4_hi = (addr_hi_w == pmp_raw_addr[i]);
+    assign match_napot_lo = ((addr_lo_w & ~pmp_napot_mask[i]) == napot_base);
+    assign match_napot_hi = ((addr_hi_w & ~pmp_napot_mask[i]) == napot_base);
 
     // OR-of-AND with mode one-hot vectors.  Equivalent to the previous
     // unique-case but synthesises as 4xAND + OR-reduce instead of a

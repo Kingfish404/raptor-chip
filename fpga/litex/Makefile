@@ -96,7 +96,9 @@ FPGA_PY        := $(BOARD_$(FPGA_BOARD)_PY)
 FPGA_TIMINGRPT := $(BOARD_$(FPGA_BOARD)_TIMINGRPT)
 FPGA_DEVICE    := $(BOARD_$(FPGA_BOARD)_DEVICE)
 FPGA_PART      := $(BOARD_$(FPGA_BOARD)_PART)
-_LINUX_FPGA_ARGS = VARIANT=linux FPGA_BOARD=$(FPGA_BOARD)
+_LINUX_FPGA_ARGS = VARIANT=$(LINUX_VARIANT) FPGA_BOARD=$(FPGA_BOARD)
+_LINUX_FPGA_RV32_ARGS = VARIANT=linux FPGA_BOARD=$(FPGA_BOARD)
+_LINUX_FPGA_RV64_ARGS = VARIANT=linux64 FPGA_BOARD=$(FPGA_BOARD)
 
 SYS_CLK     ?= $(if $(LINUX_FPGA_PROFILE),$(BOARD_$(FPGA_BOARD)_LINUX_SYS_CLK),$(BOARD_$(FPGA_BOARD)_DEFAULT_SYS_CLK)) ## System clock in Hz (board/profile default)
 SIM_TIMEOUT ?= 30 ## Simulation timeout in seconds (0=unlimited)
@@ -339,9 +341,18 @@ ECALL_STRESS_FPGA_BIN := $(ECALL_STRESS_FPGA_DIR)/u_sv32_s_ecall_stress.bin
 
 LINUX_DIR       := $(RAPTOR_HOME)/linux
 include $(LINUX_DIR)/vars.mk
-OPENSBI_FW_DIR  := $(LINUX_DIR)/opensbi/build/platform/generic/firmware
+LINUX_XLEN      := $(if $(filter linux64,$(VARIANT)),64,32)
+LINUX_ARCH      := rv$(LINUX_XLEN)
+LINUX_VARIANT   := $(if $(filter 64,$(LINUX_XLEN)),linux64,linux)
+LINUX_MABI      := $(if $(filter 64,$(LINUX_XLEN)),lp64,ilp32)
+LINUX_MMU       := $(if $(filter 64,$(LINUX_XLEN)),sv39,sv32)
+LINUX_ISA_BASE  := rv$(LINUX_XLEN)i
+LINUX_ISA       := $(if $(filter 64,$(LINUX_XLEN)),$(RAPTOR_RV64_ISA),$(RAPTOR_RV32_ISA))
+LINUX_DOWNLOAD_TARGET := download-rv$(LINUX_XLEN)
+OPENSBI_BUILD_TARGET  := opensbi-rv$(LINUX_XLEN)
+OPENSBI_FW_DIR  := $(LINUX_DIR)/opensbi/build-rv$(LINUX_XLEN)/platform/generic/firmware
 OPENSBI_BIN     := $(OPENSBI_FW_DIR)/fw_payload.bin
-LINUX_IMG        = $(LINUX_RV32_PAYLOAD)
+LINUX_IMG        = $(if $(filter 64,$(LINUX_XLEN)),$(LINUX_RV64_PAYLOAD),$(LINUX_RV32_PAYLOAD))
 
 LINUX_FPGA_RAM_SIZE ?= 0x10000000 ## DTB RAM size: matches Raptor's 0x80000000..0x8fffffff PMEM window
 LINUX_FPGA_PAYLOAD ?= $(LINUX_IMG) ## Legacy stage0-bundled payload for fpga-img
@@ -375,7 +386,7 @@ RAPT_CACHE_LINE_BYTES := $(word 3,$(shell grep '^`define RAPT_CACHE_LINE_BYTES '
 
 
 FW_LINUX_FPGA_SRC    := $(FW_BASE)/linux-fpga
-FW_LINUX_FPGA_DIR    := $(BUILD_DIR)/firmware/linux-fpga
+FW_LINUX_FPGA_DIR    := $(BUILD_DIR)/firmware/linux-fpga/rv$(LINUX_XLEN)
 FW_LINUX_FPGA_BIN    := $(FW_LINUX_FPGA_DIR)/stage0.bin
 FW_LINUX_FPGA_ELF    := $(FW_LINUX_FPGA_DIR)/stage0.elf
 FW_LINUX_FPGA_DTB    := $(FW_LINUX_FPGA_DIR)/litex-soc.dtb
@@ -398,7 +409,7 @@ FW_EGOS_STAGE0_BUNDLE := $(FW_EGOS_STAGE0_DIR)/egos-ku15p-compact.bin
 # MIG, clocks, baud, and the timing-report path) is derived consistently.
 _fpga_linux_upload = $(call _make,fpga-upload $(_LINUX_FPGA_ARGS) BIN=$(1) MAIN_RAM_BASE=$(MAIN_RAM_BASE))
 
-FW_LINUX_FPGA_BASE_CFLAGS = -march=rv32imac_zicsr_zifencei -mabi=ilp32 -nostdlib -nostartfiles \
+FW_LINUX_FPGA_BASE_CFLAGS = -march=rv$(LINUX_XLEN)imac_zicsr_zifencei -mabi=$(LINUX_MABI) -nostdlib -nostartfiles \
 	-fno-pic -no-pie -Wl,--build-id=none -DRAPT_MAIN_RAM=$(MAIN_RAM_BASE) \
 	-DRAPT_STAGE0_SRAM=$(LINUX_FPGA_STAGE0_SRAM) \
 	-DRAPT_UART_BASE=$(LINUX_FPGA_UART_BASE) \
@@ -420,11 +431,20 @@ FW_LINUX_FPGA_OPENSBI_CFLAGS = $(FW_LINUX_FPGA_BASE_CFLAGS) \
 	-DRAPT_DTB_SRC=$(LINUX_FPGA_OPENSBI_DTB_SRC_ADDR) \
 	-DRAPT_DTB_SIZE=$(LINUX_FPGA_DTB_SIZE)
 
-fpga-img: $(FW_LINUX_FPGA_IMAGE) ## Build Linux FPGA stage0+OpenSBI+DTB upload image (VARIANT=linux)
+fpga-img: $(FW_LINUX_FPGA_IMAGE) ## Compatibility target; use fpga-img-rv32 or fpga-img-rv64
+fpga-img-rv32: ## Build RV32 Linux FPGA upload image
+fpga-img-rv64: ## Build RV64 Linux FPGA upload image
+fpga-linux-dtb-check: $(FW_LINUX_FPGA_DTB) ## Validate Linux FPGA DT ISA/MMU/timer/cache consistency
+fpga-linux-dtb-check-rv32: ## Validate the generated RV32 Linux FPGA device tree
+fpga-linux-dtb-check-rv64: ## Validate the generated RV64 Linux FPGA device tree
 
-fpga-smoke-img: $(FW_LINUX_FPGA_SMOKE_IMAGE) ## Build tiny Linux FPGA stage0-only smoke upload image (VARIANT=linux)
+fpga-smoke-img: $(FW_LINUX_FPGA_SMOKE_IMAGE) ## Compatibility target; use fpga-smoke-img-rv32 or fpga-smoke-img-rv64
+fpga-smoke-img-rv32: ## Build RV32 Linux FPGA stage0-only smoke image
+fpga-smoke-img-rv64: ## Build RV64 Linux FPGA stage0-only smoke image
 
-fpga-opensbi-img: $(FW_LINUX_FPGA_OPENSBI_IMAGE) ## Build Linux FPGA stage0+standalone OpenSBI+DTB upload image (VARIANT=linux)
+fpga-opensbi-img: $(FW_LINUX_FPGA_OPENSBI_IMAGE) ## Compatibility target; use fpga-opensbi-img-rv32 or fpga-opensbi-img-rv64
+fpga-opensbi-img-rv32: ## Build RV32 standalone OpenSBI FPGA image
+fpga-opensbi-img-rv64: ## Build RV64 standalone OpenSBI FPGA image
 
 IMG ?= ## Custom payload binary (for 'make payload' / 'make sim PAYLOAD=img')
 
@@ -569,9 +589,13 @@ $(TEST_TARGETS): test-%: ## Alias: make sim PAYLOAD=test-<NAME>
 
 tests-run: tests ## Run every standalone test sequentially — tees aggregate output to $(LITEX_LOG_DIR)/tests-run.log
 
-opensbi-build: ## Build OpenSBI (standalone, from linux/opensbi)
+opensbi-build: ## Compatibility alias: build RV32 OpenSBI
+opensbi-rv32-build: ## Build RV32 OpenSBI (standalone, from linux/opensbi)
+opensbi-rv64-build: ## Build RV64 OpenSBI (standalone, from linux/opensbi)
 
-opensbi: ## Alias: make sim PAYLOAD=opensbi
+opensbi: ## Compatibility alias: simulate RV32 OpenSBI
+opensbi-rv32: ## Simulate RV32 OpenSBI
+opensbi-rv64: ## Simulate RV64 OpenSBI
 
 opensbi-clean: ## Clean OpenSBI build artifacts
 
@@ -583,9 +607,13 @@ egos-ku15p-sim: fpga-egos-prepare ## Simulate egos-ku15p in LiteX Verilator SoC 
 
 egos-ku15p-sim-trace: fpga-egos-prepare ## Simulate egos-ku15p with FST waveform dump {TRACE_START,TRACE_END}
 
-linux-build: ## Download pre-built Linux payload (if needed)
+linux-build: ## Compatibility alias: download RV32 Linux payload
+linux-rv32-build: ## Download pre-built RV32 Linux payload
+linux-rv64-build: ## Download pre-built RV64 Linux payload
 
-linux: ## Alias: make sim PAYLOAD=linux VARIANT=linux
+linux: ## Compatibility alias: simulate RV32 Linux
+linux-rv32: ## Simulate RV32 Linux
+linux-rv64: ## Simulate RV64 Linux
 
 # ------------------------------------------------------------------------------
 # KU15P Linux/MIG FPGA helpers. These wrappers force VARIANT=linux so callers do
@@ -594,21 +622,37 @@ linux: ## Alias: make sim PAYLOAD=linux VARIANT=linux
 # builds the bitstream when stale, loads it, then uploads software.
 # ------------------------------------------------------------------------------
 
-linux-fpga-build: ## Build the timing-gated KU15P Linux/MIG bitstream
+linux-fpga-build: ## Compatibility alias for linux-fpga-rv32-build
+linux-fpga-rv32-build: ## Build the RV32 Linux/MIG bitstream
+linux-fpga-rv64-build: ## Build the RV64 Linux/MIG bitstream
 
-linux-fpga-load: ## Load the existing KU15P Linux/MIG bitstream
+linux-fpga-load: ## Compatibility alias for linux-fpga-rv32-load
+linux-fpga-rv32-load: ## Load the RV32 Linux/MIG bitstream
+linux-fpga-rv64-load: ## Load the RV64 Linux/MIG bitstream
 
-linux-fpga-upload: ## Upload the contiguous Linux image with litex_term (SD-boot fallback) {UART_PORT}
+linux-fpga-upload: ## Compatibility alias for linux-fpga-rv32-upload
+linux-fpga-rv32-upload: ## Upload the RV32 Linux image
+linux-fpga-rv64-upload: ## Upload the RV64 Linux image
 
-linux-fpga-run: ## Load the existing bitstream, then upload OpenSBI + Linux {UART_PORT}
+linux-fpga-run: ## Compatibility alias for linux-fpga-rv32-run
+linux-fpga-rv32-run: ## Load bitstream, then upload RV32 Linux
+linux-fpga-rv64-run: ## Load bitstream, then upload RV64 Linux
 
-linux-fpga-e2e: ## Build/load the bitstream, then upload OpenSBI + Linux {UART_PORT}
+linux-fpga-e2e: ## Compatibility alias for linux-fpga-rv32-e2e
+linux-fpga-rv32-e2e: ## Build/load/upload RV32 Linux end to end
+linux-fpga-rv64-e2e: ## Build/load/upload RV64 Linux end to end
 
-opensbi-fpga-upload: ## Upload standalone OpenSBI without rebuilding or reloading {UART_PORT}
+opensbi-fpga-upload: ## Compatibility alias for opensbi-fpga-rv32-upload
+opensbi-fpga-rv32-upload: ## Upload standalone RV32 OpenSBI
+opensbi-fpga-rv64-upload: ## Upload standalone RV64 OpenSBI
 
-opensbi-fpga-run: ## Load the existing bitstream, then upload standalone OpenSBI {UART_PORT}
+opensbi-fpga-run: ## Compatibility alias for opensbi-fpga-rv32-run
+opensbi-fpga-rv32-run: ## Load bitstream, then upload RV32 OpenSBI
+opensbi-fpga-rv64-run: ## Load bitstream, then upload RV64 OpenSBI
 
-opensbi-fpga-e2e: ## Build/load the bitstream, then upload standalone OpenSBI {UART_PORT}
+opensbi-fpga-e2e: ## Compatibility alias for opensbi-fpga-rv32-e2e
+opensbi-fpga-rv32-e2e: ## Build/load/upload RV32 OpenSBI end to end
+opensbi-fpga-rv64-e2e: ## Build/load/upload RV64 OpenSBI end to end
 
 fpga-opensbi-upload: fpga-opensbi-img ## Build/upload standalone linux/opensbi image through BIOS serialboot {UART_PORT,LINUX_FPGA_OPENSBI_PAYLOAD}
 
@@ -715,7 +759,7 @@ clean-all: clean firmware-clean ## Remove build artifacts + firmware + venv
 
 lint: ## Lint RTL (via sim)
 
-_INFO_VARS := RAPTOR_HOME LITEX_DIR VARIANT SYS_CLK RAPT_CONFIG GOWIN_APP GOWIN_BIN_DIR OFL OFL_CABLE FPGA_AUTO_DETECT FPGA_DETECT_REFRESH FPGA_DETECT_CACHE FPGA_DETECTED_PARTS FPGA_BOARD_SOURCE FPGA_DEVICE FPGA_PART WITH_LITEDRAM LITEDRAM_SIZE WITH_MIG MIG_SIZE WITH_SDCARD SDCARD_BOOT UART_PORT UART_BAUD SIM_TIMEOUT PACK_SV BUILD_DIR PYTHON
+_INFO_VARS := RAPTOR_HOME LITEX_DIR VARIANT LINUX_XLEN LINUX_IMG SYS_CLK RAPT_CONFIG GOWIN_APP GOWIN_BIN_DIR OFL OFL_CABLE FPGA_AUTO_DETECT FPGA_DETECT_REFRESH FPGA_DETECT_CACHE FPGA_DETECTED_PARTS FPGA_BOARD_SOURCE FPGA_DEVICE FPGA_PART WITH_LITEDRAM LITEDRAM_SIZE WITH_MIG MIG_SIZE WITH_SDCARD SDCARD_BOOT UART_PORT UART_BAUD SIM_TIMEOUT PACK_SV BUILD_DIR PYTHON
 
 info: ## Show configuration info
 
@@ -731,6 +775,8 @@ include $(LITEX_DIR)/mk/recipes.mk
 	pack \
 	firmware firmware-sim firmware-fpga firmware-clean \
 	sim-gen sim-build sim sim-run sim-trace sim-trace-vcd sim-clean \
+	fpga-img-rv32 fpga-img-rv64 fpga-smoke-img-rv32 fpga-smoke-img-rv64 fpga-opensbi-img-rv32 fpga-opensbi-img-rv64 \
+	fpga-linux-dtb-check fpga-linux-dtb-check-rv32 fpga-linux-dtb-check-rv64 \
 	coremark coremark-build coremark-clean coremark-fpga \
 	main-fpga-build main-fpga irqtest-fpga main-fpga-clean \
 	embench embench-build embench-build-one embench-run embench-report embench-clean \
@@ -739,12 +785,16 @@ include $(LITEX_DIR)/mk/recipes.mk
 	$(APP_LLM_TARGETS) $(APP_LLM_BUILDS) $(APP_LLM_FPGAS) \
 	microbench microbench-build \
 	tests tests-clean tests-run $(TEST_TARGETS) \
-	opensbi opensbi-build opensbi-clean fpga-opensbi-jump-build \
+	opensbi opensbi-build opensbi-rv32 opensbi-rv64 opensbi-rv32-build opensbi-rv64-build opensbi-clean fpga-opensbi-jump-build \
 	payload \
-	linux linux-build \
+	linux linux-build linux-rv32 linux-rv64 linux-rv32-build linux-rv64-build \
 	bios \
 	linux-fpga-build linux-fpga-load linux-fpga-upload linux-fpga-run linux-fpga-e2e \
+	linux-fpga-rv32-build linux-fpga-rv32-load linux-fpga-rv32-upload linux-fpga-rv32-run linux-fpga-rv32-e2e \
+	linux-fpga-rv64-build linux-fpga-rv64-load linux-fpga-rv64-upload linux-fpga-rv64-run linux-fpga-rv64-e2e \
 	opensbi-fpga-upload opensbi-fpga-run opensbi-fpga-e2e \
+	opensbi-fpga-rv32-upload opensbi-fpga-rv32-run opensbi-fpga-rv32-e2e \
+	opensbi-fpga-rv64-upload opensbi-fpga-rv64-run opensbi-fpga-rv64-e2e \
 	fpga-gen fpga-build fpga-build-force fpga-load fpga-flash fpga fpga-console fpga-upload fpga-clean fpga-detect fpga-reports-index fpga-timing-ok \
 	fpga-img fpga-smoke-img fpga-opensbi-img \
 	fpga-smoke fpga-smoke-upload fpga-opensbi-upload \

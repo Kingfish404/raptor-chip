@@ -4,8 +4,10 @@ Please see `/linux/Makefile` in this directory for details.
 
 ## Linux Dependencies
 
-`make opensbi` uses Clang/LLVM and requires `ld.lld` for RISC-V PIE firmware.
-`make opensbi-gnu` uses the RISC-V GNU cross compiler.
+`make opensbi-rv32` and `make opensbi-rv64` use Clang/LLVM and require `ld.lld`
+for RISC-V PIE firmware. The corresponding GNU targets are
+`make opensbi-gnu-rv32` and `make opensbi-gnu-rv64`. The unqualified
+`make opensbi` and `make opensbi-gnu` names remain RV32 compatibility aliases.
 
 ```sh
 # Arch Linux
@@ -37,12 +39,17 @@ main RAM path:
 
 ```sh
 cd ../fpga/litex
-make fpga-opensbi-img
-make fpga-opensbi-upload
+make fpga-opensbi-img-rv32
+make opensbi-fpga-rv32-upload
+
+# RV64 equivalents:
+make fpga-opensbi-img-rv64
+make opensbi-fpga-rv64-upload
 ```
 
-`fpga-opensbi-img` runs `make -C linux opensbi` as needed and writes
-`fpga/litex/build/firmware/linux-fpga/linux-fpga-opensbi.img` with stage0 at
+The image targets run the matching OpenSBI build as needed and write
+`fpga/litex/build/firmware/linux-fpga/rv32/linux-fpga-opensbi.img` or
+`fpga/litex/build/firmware/linux-fpga/rv64/linux-fpga-opensbi.img` with stage0 at
 `0x80000000`, OpenSBI's `fw_payload.bin` staged at `0x80100000`, and the LiteX
 DTB staged at `0x80800000` by default. Stage0 copies OpenSBI back to
 `0x80000000`, copies the DTB to `0x83f00000`, then jumps with `a0=0` and

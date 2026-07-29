@@ -10,13 +10,15 @@ READELF   = $(CROSS_COMPILE)readelf
 # ISA64=1 to build for RV64, default RV32
 ifeq ($(ISA64),1)
 COMMON_CFLAGS = -march=rv64im_zicsr_zifencei -mabi=lp64
+DT_SOURCE = spike-rv64ima.dts
 else
 COMMON_CFLAGS = -march=rv32im_zicsr_zifencei -mabi=ilp32
+DT_SOURCE = spike-rv32ima.dts
 endif
 LDFLAGS       =
 
 IMAGE = ./build/mrom-data
-SOURCE = rom.c dtb.c
+SOURCE = rom.c ./build/dtb.c
 
 # Auto-invalidate build when ISA64 flag changes (e.g., switching RV32<->RV64)
 ISA64 ?= 0
@@ -34,10 +36,11 @@ LDFLAGS = -no-pie -Wl,-Ttext=0 -Wl,-e,_start
 
 all: $(IMAGE).elf $(IMAGE).bin ## Build MROM data (elf + bin)
 
-dtb.c: raptor.dts spike-rv32ima.dts ## Generate DTB C source
+./build/dtb.c: $(DT_SOURCE) ## Generate DTB C source
 	# brew install dtc
-	dtc spike-rv32ima.dts -o raptor.dtb
-	xxd -i raptor.dtb > dtb.c
+	mkdir -p ./build
+	dtc $(DT_SOURCE) -o ./build/raptor.dtb
+	cd ./build && xxd -i raptor.dtb > dtb.c
 
 $(IMAGE).elf: $(SOURCE)
 	mkdir -p $(dir $(IMAGE))

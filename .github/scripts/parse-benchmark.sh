@@ -20,11 +20,19 @@ case "$TYPE" in
   coremark)
     # Extract: CoreMark PASS  <score>/1000 Marks  or  CoreMark PASS  <score> Marks
     SCORE=$(grep -oP 'CoreMark PASS\s+\K\d+' "$LOG" | head -1 || echo "N/A")
+    ITERATIONS=$(grep -oP '^\s*Iterations\s*:\s*\K\d+' "$LOG" | head -1 || true)
     IPC=$(grep -oP 'IPC:\s*\K[0-9.]+' "$LOG" | head -1 || echo "N/A")
     CYCLES=$(grep -oP 'cycle:\s*\K\d+' "$LOG" | head -1 || echo "N/A")
     INSTS=$(grep -oP '#inst:\s*\K\d+' "$LOG" | head -1 || echo "N/A")
     TRAP=$(grep -oE 'HIT (GOOD|BAD) TRAP|NPC QUIT' "$LOG" | head -1 || echo "UNKNOWN")
+    COREMARK_PER_MHZ=$(grep -oP '^CoreMark/MHz\s*:\s*\K[0-9]+(?:\.[0-9]+)?' "$LOG" | tail -1 || true)
+    if [[ -z "$COREMARK_PER_MHZ" && "$ITERATIONS" =~ ^[0-9]+$ && "$CYCLES" =~ ^[0-9]+$ && "$CYCLES" -gt 0 ]]; then
+      COREMARK_PER_MHZ=$(awk -v iterations="$ITERATIONS" -v cycles="$CYCLES" \
+        'BEGIN { printf "%.4f", iterations * 1000000.0 / cycles }')
+    fi
     echo "score=$SCORE"
+    echo "iterations=${ITERATIONS:-N/A}"
+    echo "coremark_per_mhz=${COREMARK_PER_MHZ:-N/A}"
     echo "ipc=$IPC"
     echo "cycles=$CYCLES"
     echo "insts=$INSTS"

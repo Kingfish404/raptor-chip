@@ -25,12 +25,16 @@ read_val() {
 
 # Gather results
 CM_RV32_SCORE=$(read_val "$RESULTS_DIR/coremark-rv32.txt" "score")
+CM_RV32_ITERATIONS=$(read_val "$RESULTS_DIR/coremark-rv32.txt" "iterations")
+CM_RV32_PER_MHZ=$(read_val "$RESULTS_DIR/coremark-rv32.txt" "coremark_per_mhz")
 CM_RV32_IPC=$(read_val "$RESULTS_DIR/coremark-rv32.txt" "ipc")
 CM_RV32_CYCLES=$(read_val "$RESULTS_DIR/coremark-rv32.txt" "cycles")
 CM_RV32_INSTS=$(read_val "$RESULTS_DIR/coremark-rv32.txt" "insts")
 CM_RV32_TRAP=$(read_val "$RESULTS_DIR/coremark-rv32.txt" "trap")
 
 CM_RV32E_SCORE=$(read_val "$RESULTS_DIR/coremark-rv32e.txt" "score")
+CM_RV32E_ITERATIONS=$(read_val "$RESULTS_DIR/coremark-rv32e.txt" "iterations")
+CM_RV32E_PER_MHZ=$(read_val "$RESULTS_DIR/coremark-rv32e.txt" "coremark_per_mhz")
 CM_RV32E_IPC=$(read_val "$RESULTS_DIR/coremark-rv32e.txt" "ipc")
 CM_RV32E_TRAP=$(read_val "$RESULTS_DIR/coremark-rv32e.txt" "trap")
 
@@ -101,6 +105,12 @@ cat > "$OUTPUT_JSON" << ENDJSON
       "message": "${CM_RV32_SCORE} Marks",
       "color": "$(trap_color "$CM_RV32_TRAP")"
     },
+    "coremark_per_mhz": {
+      "schemaVersion": 1,
+      "label": "CoreMark/MHz",
+      "message": "$CM_RV32_PER_MHZ",
+      "color": "blue"
+    },
     "microbench_ipc": {
       "schemaVersion": 1,
       "label": "MicroBench IPC",
@@ -136,6 +146,8 @@ cat > "$OUTPUT_JSON" << ENDJSON
     "coremark": {
       "rv32": {
         "score": "$CM_RV32_SCORE",
+        "iterations": "$CM_RV32_ITERATIONS",
+        "coremark_per_mhz": "$CM_RV32_PER_MHZ",
         "ipc": "$CM_RV32_IPC",
         "cycles": "$CM_RV32_CYCLES",
         "insts": "$CM_RV32_INSTS",
@@ -143,6 +155,8 @@ cat > "$OUTPUT_JSON" << ENDJSON
       },
       "rv32e": {
         "score": "$CM_RV32E_SCORE",
+        "iterations": "$CM_RV32E_ITERATIONS",
+        "coremark_per_mhz": "$CM_RV32E_PER_MHZ",
         "ipc": "$CM_RV32E_IPC",
         "status": "$CM_RV32E_TRAP"
       }
@@ -193,17 +207,17 @@ cat >> "$STEP_SUMMARY" << ENDMD
 
 ### Performance (rv32, standalone sim)
 
-| Benchmark | Score | IPC | Cycles | Instructions | Status |
-|-----------|-------|-----|--------|--------------|--------|
-| CoreMark  | $CM_RV32_SCORE | $CM_RV32_IPC | $CM_RV32_CYCLES | $CM_RV32_INSTS | $CM_RV32_TRAP |
-| MicroBench | $MB_RV32_SCORE | $MB_RV32_IPC | $MB_RV32_CYCLES | $MB_RV32_INSTS | $MB_RV32_TRAP |
+| Benchmark | Score | CoreMark/MHz | IPC | Cycles | Instructions | Status |
+|-----------|-------|--------------|-----|--------|--------------|--------|
+| CoreMark  | $CM_RV32_SCORE | $CM_RV32_PER_MHZ ($CM_RV32_ITERATIONS iterations) | $CM_RV32_IPC | $CM_RV32_CYCLES | $CM_RV32_INSTS | $CM_RV32_TRAP |
+| MicroBench | $MB_RV32_SCORE | N/A | $MB_RV32_IPC | $MB_RV32_CYCLES | $MB_RV32_INSTS | $MB_RV32_TRAP |
 
 ### Performance (rv32e, standalone sim)
 
-| Benchmark | Score | IPC | Status |
-|-----------|-------|-----|--------|
-| CoreMark  | $CM_RV32E_SCORE | $CM_RV32E_IPC | $CM_RV32E_TRAP |
-| MicroBench | $MB_RV32E_SCORE | $MB_RV32E_IPC | $MB_RV32E_TRAP |
+| Benchmark | Score | CoreMark/MHz | IPC | Status |
+|-----------|-------|--------------|-----|--------|
+| CoreMark  | $CM_RV32E_SCORE | $CM_RV32E_PER_MHZ ($CM_RV32E_ITERATIONS iterations) | $CM_RV32E_IPC | $CM_RV32E_TRAP |
+| MicroBench | $MB_RV32E_SCORE | N/A | $MB_RV32E_IPC | $MB_RV32E_TRAP |
 
 ### RISC-V Architecture Tests
 
