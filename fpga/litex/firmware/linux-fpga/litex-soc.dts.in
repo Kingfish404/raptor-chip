@@ -12,7 +12,7 @@
 
     chosen {
         stdout-path = "/soc/serial@@UART_UNIT_ADDR@";
-        bootargs = "console=liteuart0,115200 earlycon=sbi rdinit=/init";
+        bootargs = "@BOOTARGS@";
     };
 
     cpus {

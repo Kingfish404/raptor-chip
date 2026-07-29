@@ -19,12 +19,21 @@ module rapt_l1d #(
     l1d_bus_if.master l1d_bus,
 
     csr_bcast_if.in csr_bcast,
-    pmp_state_if.in pmp_state,
+    pmp_update_if.in pmp_update,
     exu_l1d_if.slave exu_l1d,
     rou_cmu_if.in rou_cmu,
 
     input reset
 );
+  pmp_state_if pmp_state ();
+
+  rapt_pmp_state pmp_state_regs (
+      .clock,
+      .reset,
+      .update(pmp_update),
+      .state(pmp_state)
+  );
+
   typedef enum logic [2:0] {
     IDLE   = 3'b000,
     PTWAIT = 3'b100,  // waiting for PTW to complete

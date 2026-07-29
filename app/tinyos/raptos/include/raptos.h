@@ -9,7 +9,11 @@
 #define IPC_MESSAGE_SIZE 64
 #define RAPTOS_PATH_SIZE 32
 #define PAGE_SIZE 4096u
+#if __riscv_xlen == 64
+#define USER_STACK_TOP 0x80f00000u
+#else
 #define USER_STACK_TOP 0x40001000u
+#endif
 
 enum syscall_number {
     SYS_WRITE = 1,

@@ -65,15 +65,15 @@ LITEX_CONFIG_PHASE := profile
 include $(LITEX_DIR)/mk/config.mk
 
 # ---------------------------------------------------------------------------
-# Linux FPGA profile: auto-enabled on FPGA goals when VARIANT is linux/linux64.
+# Linux FPGA profile: auto-enabled on FPGA goals when VARIANT is linux32/linux64.
 # It flips the FPGA board/MIG/clock/baud/boot defaults to the KU15P Linux
-# bring-up flow, so `make fpga-* VARIANT=linux` behaves like the retired
-# `linux-fpga-*` commands. Sim goals (`make sim VARIANT=linux`, `make linux`)
+# bring-up flow, so `make fpga-* VARIANT=linux32` behaves like the retired
+# `linux-fpga-*` commands. Sim goals (`make sim VARIANT=linux32`, `make linux32`)
 # do not contain "fpga" and therefore keep the standard defaults.
 #
 # When an FPGA goal is requested without an explicit VARIANT and no Gowin IDE is
 # installed (GOWIN_APP empty, e.g. on Linux), the on-board Gowin Tang flow cannot
-# run, so default to VARIANT=linux (the KU15P Linux/MIG Vivado profile).
+# run, so default to VARIANT=linux32 (the KU15P Linux/MIG Vivado profile).
 # ---------------------------------------------------------------------------
 # Benchmark / firmware upload helpers run ON the already-loaded bitstream, so they
 # must default to the SAME profile (and therefore SYS_CLK) as fpga-load. Otherwise
@@ -81,7 +81,7 @@ include $(LITEX_DIR)/mk/config.mk
 # the running SoC's mtime rate, giving a wrong reported time (e.g. coremark showed
 # 64.8 s vs ~13 s wall clock when a 50 MHz linux bitstream was loaded but coremark
 # was built for the 10 MHz standard profile: a 5x over-report).
-VARIANT ?= $(call _default_variant) ## CPU variant (standard|linux|linux64)
+VARIANT ?= $(call _default_variant) ## CPU variant (standard|linux32|linux64)
 VARIANT := $(strip $(VARIANT))
 $(call _linux_profile_notice)
 LINUX_FPGA_PROFILE := $(call _linux_fpga_profile,$(VARIANT))
@@ -97,7 +97,7 @@ FPGA_TIMINGRPT := $(BOARD_$(FPGA_BOARD)_TIMINGRPT)
 FPGA_DEVICE    := $(BOARD_$(FPGA_BOARD)_DEVICE)
 FPGA_PART      := $(BOARD_$(FPGA_BOARD)_PART)
 _LINUX_FPGA_ARGS = VARIANT=$(LINUX_VARIANT) FPGA_BOARD=$(FPGA_BOARD)
-_LINUX_FPGA_RV32_ARGS = VARIANT=linux FPGA_BOARD=$(FPGA_BOARD)
+_LINUX_FPGA_RV32_ARGS = VARIANT=linux32 FPGA_BOARD=$(FPGA_BOARD)
 _LINUX_FPGA_RV64_ARGS = VARIANT=linux64 FPGA_BOARD=$(FPGA_BOARD)
 
 SYS_CLK     ?= $(if $(LINUX_FPGA_PROFILE),$(BOARD_$(FPGA_BOARD)_LINUX_SYS_CLK),$(BOARD_$(FPGA_BOARD)_DEFAULT_SYS_CLK)) ## System clock in Hz (board/profile default)
@@ -343,11 +343,12 @@ LINUX_DIR       := $(RAPTOR_HOME)/linux
 include $(LINUX_DIR)/vars.mk
 LINUX_XLEN      := $(if $(filter linux64,$(VARIANT)),64,32)
 LINUX_ARCH      := rv$(LINUX_XLEN)
-LINUX_VARIANT   := $(if $(filter 64,$(LINUX_XLEN)),linux64,linux)
+LINUX_VARIANT   := $(if $(filter 64,$(LINUX_XLEN)),linux64,linux32)
 LINUX_MABI      := $(if $(filter 64,$(LINUX_XLEN)),lp64,ilp32)
 LINUX_MMU       := $(if $(filter 64,$(LINUX_XLEN)),sv39,sv32)
 LINUX_ISA_BASE  := rv$(LINUX_XLEN)i
 LINUX_ISA       := $(if $(filter 64,$(LINUX_XLEN)),$(RAPTOR_RV64_ISA),$(RAPTOR_RV32_ISA))
+LINUX_DT_ISA_EXTENSIONS := $(shell printf '%s\n' '$(LINUX_ISA)' | awk '{ sub(/^rv(32|64)/, ""); count = split($$0, parts, "_"); for (i = 1; i <= length(parts[1]); i++) extensions[++n] = substr(parts[1], i, 1); for (i = 2; i <= count; i++) extensions[++n] = parts[i]; for (i = 1; i <= n; i++) printf "%s\"%s\"", (i == 1 ? "" : ", "), extensions[i] }')
 LINUX_DOWNLOAD_TARGET := download-rv$(LINUX_XLEN)
 OPENSBI_BUILD_TARGET  := opensbi-rv$(LINUX_XLEN)
 OPENSBI_FW_DIR  := $(LINUX_DIR)/opensbi/build-rv$(LINUX_XLEN)/platform/generic/firmware
@@ -355,6 +356,7 @@ OPENSBI_BIN     := $(OPENSBI_FW_DIR)/fw_payload.bin
 LINUX_IMG        = $(if $(filter 64,$(LINUX_XLEN)),$(LINUX_RV64_PAYLOAD),$(LINUX_RV32_PAYLOAD))
 
 LINUX_FPGA_RAM_SIZE ?= 0x10000000 ## DTB RAM size: matches Raptor's 0x80000000..0x8fffffff PMEM window
+LINUX_FPGA_BOOTARGS ?= console=liteuart0,115200 earlycon=sbi rdinit=/init ## Linux FPGA kernel command line
 LINUX_FPGA_PAYLOAD ?= $(LINUX_IMG) ## Legacy stage0-bundled payload for fpga-img
 LINUX_FPGA_OPENSBI_PAYLOAD ?= $(OPENSBI_BIN) ## Standalone linux/opensbi fw_payload.bin for fpga-opensbi-upload
 LINUX_FPGA_PAYLOAD_OFFSET ?= 0x00100000 ## Offset of fw_payload source inside uploaded image
@@ -371,7 +373,7 @@ LINUX_FPGA_EGOS_KU15P_IMAGE ?= $(RAPTOR_HOME)/app/build/tinyos-sim-src/egos-2000
 LINUX_FPGA_EGOS_STAGE_ADDR := 0x82000000
 LINUX_FPGA_XV6_KERNEL ?= $(RAPTOR_HOME)/app/build/tinyos-sim-src/xv6-riscv/kernel/kernel.bin ## Prepared xv6 kernel.bin path
 LINUX_FPGA_XV6_DISK ?= $(RAPTOR_HOME)/app/build/tinyos-sim-src/xv6-riscv/fs.img ## Prepared xv6 fs.img path
-_VSTRIP2 := LINUX_FPGA_RAM_SIZE LINUX_FPGA_PAYLOAD LINUX_FPGA_OPENSBI_PAYLOAD LINUX_FPGA_PAYLOAD_OFFSET LINUX_FPGA_OPENSBI_DTB_OFFSET LINUX_FPGA_DTB_OFFSET LINUX_FPGA_DTB_ADDR LINUX_FPGA_STAGE0_SRAM LINUX_FPGA_UART_BASE LINUX_FPGA_EGOS_IMAGE LINUX_FPGA_EGOS_DISK LINUX_FPGA_EGOS_KU15P_IMAGE LINUX_FPGA_XV6_KERNEL LINUX_FPGA_XV6_DISK
+_VSTRIP2 := LINUX_FPGA_RAM_SIZE LINUX_FPGA_BOOTARGS LINUX_FPGA_PAYLOAD LINUX_FPGA_OPENSBI_PAYLOAD LINUX_FPGA_PAYLOAD_OFFSET LINUX_FPGA_OPENSBI_DTB_OFFSET LINUX_FPGA_DTB_OFFSET LINUX_FPGA_DTB_ADDR LINUX_FPGA_STAGE0_SRAM LINUX_FPGA_UART_BASE LINUX_FPGA_EGOS_IMAGE LINUX_FPGA_EGOS_DISK LINUX_FPGA_EGOS_KU15P_IMAGE LINUX_FPGA_XV6_KERNEL LINUX_FPGA_XV6_DISK
 $(foreach v,$(_VSTRIP2),$(eval $v := $(strip $($v))))
 LINUX_FPGA_TINYOS_OS := $(strip $(if $(OS),$(OS),$(TINYOS_OS)))
 LINUX_FPGA_UART_UNIT_ADDR := $(patsubst 0x%,%,$(LINUX_FPGA_UART_BASE))
@@ -405,7 +407,7 @@ FW_EGOS_STAGE0_ELF    := $(FW_EGOS_STAGE0_DIR)/stage0.elf
 FW_EGOS_STAGE0_BIN    := $(FW_EGOS_STAGE0_DIR)/stage0.bin
 FW_EGOS_STAGE0_BUNDLE := $(FW_EGOS_STAGE0_DIR)/egos-ku15p-compact.bin
 # $(call _fpga_linux_upload,<bin>): serialboot a flat bin to main_ram through the
-# KU15P Linux/MIG BIOS bitstream. Forces VARIANT=linux so the FPGA profile (board,
+# KU15P Linux/MIG BIOS bitstream. Forces VARIANT=linux32 so the FPGA profile (board,
 # MIG, clocks, baud, and the timing-report path) is derived consistently.
 _fpga_linux_upload = $(call _make,fpga-upload $(_LINUX_FPGA_ARGS) BIN=$(1) MAIN_RAM_BASE=$(MAIN_RAM_BASE))
 
@@ -607,16 +609,24 @@ egos-ku15p-sim: fpga-egos-prepare ## Simulate egos-ku15p in LiteX Verilator SoC 
 
 egos-ku15p-sim-trace: fpga-egos-prepare ## Simulate egos-ku15p with FST waveform dump {TRACE_START,TRACE_END}
 
-linux-build: ## Compatibility alias: download RV32 Linux payload
-linux-rv32-build: ## Download pre-built RV32 Linux payload
-linux-rv64-build: ## Download pre-built RV64 Linux payload
+raptos-bios-sim: ## Compatibility alias for raptos-bios-sim-rv32
+raptos-bios-sim-rv32: ## Simulate RV32 RaptOS booting through LiteX BIOS (boot 0x80000000)
+raptos-bios-sim-rv64: ## Simulate RV64 RaptOS booting through LiteX BIOS (boot 0x80000000)
 
-linux: ## Compatibility alias: simulate RV32 Linux
-linux-rv32: ## Simulate RV32 Linux
-linux-rv64: ## Simulate RV64 Linux
+linux-build: ## Compatibility alias: use linux32-build
+linux32-build: ## Download pre-built RV32 Linux payload
+linux64-build: ## Download pre-built RV64 Linux payload
+linux-rv32-build: ## Compatibility alias: use linux32-build
+linux-rv64-build: ## Compatibility alias: use linux64-build
+
+linux: ## Compatibility alias: use linux32
+linux32: ## Simulate RV32 Linux
+linux64: ## Simulate RV64 Linux
+linux-rv32: ## Compatibility alias: use linux32
+linux-rv64: ## Compatibility alias: use linux64
 
 # ------------------------------------------------------------------------------
-# KU15P Linux/MIG FPGA helpers. These wrappers force VARIANT=linux so callers do
+# KU15P Linux/MIG FPGA helpers. These wrappers force VARIANT=linux32 so callers do
 # not need to repeat the profile on every build/load/upload command. `*-run`
 # reloads an existing timing-clean bitstream before uploading software; `*-e2e`
 # builds the bitstream when stale, loads it, then uploads software.
@@ -674,13 +684,21 @@ fpga-tinyos-upload: ## Guarded TinyOS upload entry; dispatches OS=egos|xv6 {OS,T
 
 fpga-egos-upload: fpga-egos-bundle ## Upload compact KU15P egos bundle through LiteX BIOS serialboot {UART_PORT}
 
-RAPTOS_KU15P_BIN := $(RAPTOR_HOME)/app/tinyos/raptos/build/ku15p/raptos.bin
+RAPTOS_KU15P_RV32_BIN := $(RAPTOR_HOME)/app/tinyos/raptos/build/ku15p-rv32/raptos.bin
+RAPTOS_KU15P_RV64_BIN := $(RAPTOR_HOME)/app/tinyos/raptos/build/ku15p-rv64/raptos.bin
+RAPTOS_KU15P_BIN := $(RAPTOS_KU15P_RV32_BIN)
 
-fpga-raptos-build: ## Build the single RaptOS image with all built-in U-mode payload commands
+fpga-raptos-build: ## Compatibility alias for fpga-raptos-rv32-build
+fpga-raptos-rv32-build: ## Build RV32 RaptOS image with all built-in U-mode payload commands
+fpga-raptos-rv64-build: ## Build RV64 RaptOS image with all built-in U-mode payload commands
 
-fpga-raptos-upload: fpga-raptos-build ## Build and upload RaptOS with payload commands through the loaded KU15P BIOS {UART_PORT}
+fpga-raptos-upload: fpga-raptos-build ## Compatibility alias for fpga-raptos-rv32-upload
+fpga-raptos-rv32-upload: fpga-raptos-rv32-build ## Build and upload RV32 RaptOS through the loaded KU15P BIOS {UART_PORT}
+fpga-raptos-rv64-upload: fpga-raptos-rv64-build ## Build and upload RV64 RaptOS through the loaded KU15P BIOS {UART_PORT}
 
-fpga-raptos-run: ## Build, upload, and attach to the interactive RaptOS shell {UART_PORT}
+fpga-raptos-run: ## Compatibility alias for fpga-raptos-rv32-run
+fpga-raptos-rv32-run: ## Build, upload, and attach to the interactive RV32 RaptOS shell {UART_PORT}
+fpga-raptos-rv64-run: ## Build, upload, and attach to the interactive RV64 RaptOS shell {UART_PORT}
 
 fpga-xv6-upload: fpga-xv6-prepare ## Prepare xv6, then explain why current Linux/MIG bitstream refuses it
 
@@ -695,6 +713,7 @@ FPGA_FLAVOR_SUFFIX ?= ## Optional suffix for diagnostic FPGA builds, e.g. bimoda
 
 VIVADO_JOBS  ?= $(shell n='$(NPROC)'; if [ "$$n" -gt 32 ]; then echo 32; else echo "$$n"; fi) ## Maximum Vivado worker threads (default capped at Vivado's limit of 32)
 VIVADO_INCREMENTAL ?= 0 ## Set to 1 to reuse a compatible routed checkpoint
+VIVADO_ROUTE_DIRECTIVE ?= default ## Vivado route_design directive (for example AlternateCLBRouting)
 
 LITEX_CONFIG_PHASE := fpga
 include $(LITEX_DIR)/mk/config.mk
@@ -759,7 +778,7 @@ clean-all: clean firmware-clean ## Remove build artifacts + firmware + venv
 
 lint: ## Lint RTL (via sim)
 
-_INFO_VARS := RAPTOR_HOME LITEX_DIR VARIANT LINUX_XLEN LINUX_IMG SYS_CLK RAPT_CONFIG GOWIN_APP GOWIN_BIN_DIR OFL OFL_CABLE FPGA_AUTO_DETECT FPGA_DETECT_REFRESH FPGA_DETECT_CACHE FPGA_DETECTED_PARTS FPGA_BOARD_SOURCE FPGA_DEVICE FPGA_PART WITH_LITEDRAM LITEDRAM_SIZE WITH_MIG MIG_SIZE WITH_SDCARD SDCARD_BOOT UART_PORT UART_BAUD SIM_TIMEOUT PACK_SV BUILD_DIR PYTHON
+_INFO_VARS := RAPTOR_HOME LITEX_DIR VARIANT LINUX_XLEN LINUX_IMG LINUX_FPGA_BOOTARGS SYS_CLK RAPT_CONFIG GOWIN_APP GOWIN_BIN_DIR OFL OFL_CABLE FPGA_AUTO_DETECT FPGA_DETECT_REFRESH FPGA_DETECT_CACHE FPGA_DETECTED_PARTS FPGA_BOARD_SOURCE FPGA_DEVICE FPGA_PART WITH_LITEDRAM LITEDRAM_SIZE WITH_MIG MIG_SIZE WITH_SDCARD SDCARD_BOOT VIVADO_ROUTE_DIRECTIVE UART_PORT UART_BAUD SIM_TIMEOUT PACK_SV BUILD_DIR PYTHON
 
 info: ## Show configuration info
 
@@ -787,7 +806,8 @@ include $(LITEX_DIR)/mk/recipes.mk
 	tests tests-clean tests-run $(TEST_TARGETS) \
 	opensbi opensbi-build opensbi-rv32 opensbi-rv64 opensbi-rv32-build opensbi-rv64-build opensbi-clean fpga-opensbi-jump-build \
 	payload \
-	linux linux-build linux-rv32 linux-rv64 linux-rv32-build linux-rv64-build \
+	linux linux32 linux64 linux-build linux32-build linux64-build linux-rv32 linux-rv64 linux-rv32-build linux-rv64-build \
+	raptos-bios-sim raptos-bios-sim-rv32 raptos-bios-sim-rv64 \
 	bios \
 	linux-fpga-build linux-fpga-load linux-fpga-upload linux-fpga-run linux-fpga-e2e \
 	linux-fpga-rv32-build linux-fpga-rv32-load linux-fpga-rv32-upload linux-fpga-rv32-run linux-fpga-rv32-e2e \
@@ -800,6 +820,8 @@ include $(LITEX_DIR)/mk/recipes.mk
 	fpga-smoke fpga-smoke-upload fpga-opensbi-upload \
 	fpga-egos-prepare fpga-egos-bundle fpga-egos-upload fpga-xv6-prepare fpga-xv6-upload \
 	fpga-raptos-build fpga-raptos-upload fpga-raptos-run \
+	fpga-raptos-rv32-build fpga-raptos-rv32-upload fpga-raptos-rv32-run \
+	fpga-raptos-rv64-build fpga-raptos-rv64-upload fpga-raptos-rv64-run \
 	fpga-tinyos-prepare fpga-tinyos-check fpga-tinyos-upload \
 	tang-mega-138k-pro \
 	mlk-cu07-ku15p mlk-cu07-ku15p-build \

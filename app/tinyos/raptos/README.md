@@ -1,6 +1,6 @@
 # RaptOS
 
-RaptOS is a compact RV32 microkernel-style teaching OS for the Raptor core. It exercises M/U privilege transitions, Sv32 virtual memory, system calls, scheduling, IPC, and FPGA console I/O while keeping the image below 256 KiB.
+RaptOS is a compact microkernel-style teaching OS for the Raptor core. The RV32 profile exercises M/U privilege transitions with Sv32 virtual memory; the RV64 FPGA profile uses the same U-mode services with flat low-memory addressing. Both profiles provide system calls, scheduling, IPC, and FPGA console I/O while keeping the image below 256 KiB.
 
 ## Layout
 

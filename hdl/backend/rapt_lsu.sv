@@ -18,7 +18,7 @@ module rapt_lsu #(
     rou_lsu_if.in rou_lsu,
 
     csr_bcast_if.in csr_bcast,
-    pmp_state_if.in pmp_state,
+    pmp_update_if.in pmp_update,
 
     // A2: PMU: one-cycle pulse when SQ becomes full
     /* verilator lint_off UNUSEDSIGNAL */
@@ -27,6 +27,15 @@ module rapt_lsu #(
 
     input reset
 );
+  pmp_state_if pmp_state ();
+
+  rapt_pmp_state pmp_state_regs (
+      .clock,
+      .reset,
+      .update(pmp_update),
+      .state(pmp_state)
+  );
+
   localparam int WordOffBits = $clog2(XLEN / 8);
   localparam int PageOffBits = 12;
   localparam int SQLen = $clog2(SQ_SIZE);

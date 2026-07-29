@@ -145,7 +145,7 @@ module rapt_core #(
   csr_bcast_if csr_bcast ();
   pmp_update_if pmp_update ();
   pmp_state_if pmp_fetch_state ();
-  pmp_state_if pmp_data_state ();
+  pmp_state_if pmp_exu_state ();
 
   rapt_pmp_state pmp_fetch_state_regs (
       .clock,
@@ -154,11 +154,11 @@ module rapt_core #(
       .state(pmp_fetch_state)
   );
 
-  rapt_pmp_state pmp_data_state_regs (
+  rapt_pmp_state pmp_exu_state_regs (
       .clock,
       .reset,
       .update(pmp_update),
-      .state(pmp_data_state)
+      .state(pmp_exu_state)
   );
 
 `ifdef VERILATOR
@@ -484,7 +484,7 @@ module rapt_core #(
       .exu_csr(exu_csr),
 
       .csr_bcast(csr_bcast),
-            .pmp_state(pmp_data_state),
+      .pmp_state(pmp_exu_state),
       .exu_l1d  (exu_l1d),
 
       .uop_pl(uop_pl),
@@ -511,7 +511,7 @@ module rapt_core #(
       .exu_csr(exu_csr),
 
       .csr_bcast(csr_bcast),
-            .pmp_update(pmp_update),
+      .pmp_update(pmp_update),
 
       .s_int_pending(s_int_pending),
       .s_int_cause  (s_int_cause),
@@ -537,7 +537,7 @@ module rapt_core #(
       .rou_lsu(rou_lsu),
 
       .csr_bcast(csr_bcast),
-            .pmp_state(pmp_data_state),
+      .pmp_update(pmp_update),
 
       .pmu_sq_full(pmu_sq_full_unused),
 
@@ -553,7 +553,7 @@ module rapt_core #(
       .l1d_bus(l1d_bus),
 
       .csr_bcast(csr_bcast),
-            .pmp_state(pmp_data_state),
+      .pmp_update(pmp_update),
 
       .exu_l1d(exu_l1d),
       .rou_cmu(rou_cmu),

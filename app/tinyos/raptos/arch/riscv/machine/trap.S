@@ -1,6 +1,16 @@
 .equ TF_MEPC, 128
 .equ TF_MSTATUS, 132
 
+#if __riscv_xlen == 64
+.macro load_word rd, offset
+    lwu \rd, \offset(sp)
+.endm
+#else
+.macro load_word rd, offset
+    lw \rd, \offset(sp)
+.endm
+#endif
+
 .section .text, "ax"
 .align 2
 .globl trap_entry
@@ -51,41 +61,41 @@ trap_entry:
 trap_return:
     mv sp, a0
 .Lrestore:
-    lw t0, TF_MEPC(sp)
+    load_word t0, TF_MEPC
     csrw mepc, t0
-    lw t0, TF_MSTATUS(sp)
+    load_word t0, TF_MSTATUS
     csrw mstatus, t0
-    lw t0, 8(sp)
+    load_word t0, 8
     csrw mscratch, t0
-    lw ra, 4(sp)
-    lw gp, 12(sp)
-    lw tp, 16(sp)
-    lw t1, 24(sp)
-    lw t2, 28(sp)
-    lw s0, 32(sp)
-    lw s1, 36(sp)
-    lw a0, 40(sp)
-    lw a1, 44(sp)
-    lw a2, 48(sp)
-    lw a3, 52(sp)
-    lw a4, 56(sp)
-    lw a5, 60(sp)
-    lw a6, 64(sp)
-    lw a7, 68(sp)
-    lw s2, 72(sp)
-    lw s3, 76(sp)
-    lw s4, 80(sp)
-    lw s5, 84(sp)
-    lw s6, 88(sp)
-    lw s7, 92(sp)
-    lw s8, 96(sp)
-    lw s9, 100(sp)
-    lw s10, 104(sp)
-    lw s11, 108(sp)
-    lw t3, 112(sp)
-    lw t4, 116(sp)
-    lw t5, 120(sp)
-    lw t6, 124(sp)
-    lw t0, 20(sp)
+    load_word ra, 4
+    load_word gp, 12
+    load_word tp, 16
+    load_word t1, 24
+    load_word t2, 28
+    load_word s0, 32
+    load_word s1, 36
+    load_word a0, 40
+    load_word a1, 44
+    load_word a2, 48
+    load_word a3, 52
+    load_word a4, 56
+    load_word a5, 60
+    load_word a6, 64
+    load_word a7, 68
+    load_word s2, 72
+    load_word s3, 76
+    load_word s4, 80
+    load_word s5, 84
+    load_word s6, 88
+    load_word s7, 92
+    load_word s8, 96
+    load_word s9, 100
+    load_word s10, 104
+    load_word s11, 108
+    load_word t3, 112
+    load_word t4, 116
+    load_word t5, 120
+    load_word t6, 124
+    load_word t0, 20
     csrrw sp, mscratch, sp
     mret

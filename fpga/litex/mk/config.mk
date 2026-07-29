@@ -122,12 +122,12 @@ $(error Multiple supported FPGA boards detected ($(FPGA_DETECTED_BOARDS)); set F
 endif
 FPGA_DETECTED_BOARD := $(firstword $(FPGA_DETECTED_BOARDS))
 
-_default_variant = $(if $(_IS_LINUX_PROFILE_DEFAULT_GOAL),$(if $(strip $(GOWIN_APP)),standard,linux),standard)
-_linux_fpga_profile = $(if $(and $(_IS_FPGA_GOAL),$(filter linux linux64,$(1))),1,)
+_default_variant = $(if $(_IS_LINUX_PROFILE_DEFAULT_GOAL),$(if $(strip $(GOWIN_APP)),standard,linux32),standard)
+_linux_fpga_profile = $(if $(and $(_IS_FPGA_GOAL),$(filter linux32 linux64,$(1))),1,)
 _default_fpga_board = $(if $(FPGA_DETECTED_BOARD),$(FPGA_DETECTED_BOARD),$(if $(LINUX_FPGA_PROFILE),mlk_cu07_ku15p,tang_mega_138k_pro))
 
 define _linux_profile_notice
-$(if $(and $(filter file,$(origin VARIANT)),$(filter linux,$(VARIANT)),$(_IS_LINUX_PROFILE_DEFAULT_GOAL),$(if $(strip $(GOWIN_APP)),,y),$(filter 0,$(MAKELEVEL))),$(info [litex] GOWIN_APP empty on FPGA goal -> defaulting to VARIANT=linux))
+$(if $(and $(filter file,$(origin VARIANT)),$(filter linux32,$(VARIANT)),$(_IS_LINUX_PROFILE_DEFAULT_GOAL),$(if $(strip $(GOWIN_APP)),,y),$(filter 0,$(MAKELEVEL))),$(info [litex] GOWIN_APP empty on FPGA goal -> defaulting to VARIANT=linux32))
 endef
 
 else ifeq ($(LITEX_CONFIG_PHASE),sim)
@@ -173,7 +173,7 @@ SIM_PAYLOAD_BIN   := $(OPENSBI_BIN)
 SIM_PAYLOAD_BUILD := opensbi-build
 else ifeq ($(PAYLOAD),linux)
 SIM_PAYLOAD_BIN    = $(LINUX_IMG)
-SIM_PAYLOAD_BUILD := linux-build
+SIM_PAYLOAD_BUILD := $(LINUX_VARIANT)-build
 else ifeq ($(PAYLOAD),img)
 ifndef IMG
 $(error PAYLOAD=img requires IMG=/path/to/binary.bin)
@@ -247,6 +247,7 @@ endif
 VIVADO := $(strip $(VIVADO))
 VIVADO_JOBS := $(strip $(VIVADO_JOBS))
 VIVADO_INCREMENTAL := $(strip $(VIVADO_INCREMENTAL))
+VIVADO_ROUTE_DIRECTIVE := $(strip $(VIVADO_ROUTE_DIRECTIVE))
 OFL := $(strip $(OFL))
 OFL_CABLE := $(strip $(OFL_CABLE))
 
@@ -285,7 +286,7 @@ endif
 
 _FPGA_FLAGS = --output-dir=$(FPGA_DIR) \
 	--cpu-variant=$(VARIANT) --sys-clk-freq=$(SYS_CLK) \
-	--vivado-max-threads=$(VIVADO_JOBS) $(VIVADO_INCREMENTAL_FLAG) \
+	--vivado-max-threads=$(VIVADO_JOBS) --vivado-route-directive=$(VIVADO_ROUTE_DIRECTIVE) $(VIVADO_INCREMENTAL_FLAG) \
 	--uart-baudrate=$(UART_BAUD) \
 	$(_FPGA_BOOT_FLAGS) \
 	$(_MAIN_RAM_FLAG) \
@@ -293,7 +294,10 @@ _FPGA_FLAGS = --output-dir=$(FPGA_DIR) \
 	$(WITH_MIG_FLAG) $(MIG_SIZE_FLAG) $(WITH_SDCARD_FLAG) $(SDCARD_BOOT_FLAG) $(EXTRA_FLAGS)
 
 FPGA_STAMP := $(FPGA_DIR)/.bitstream_stamp
-_FPGA_HASH_COMMON_INPUTS = $(PACK_SV) $(FPGA_PY) $(LITEX_DIR)/scripts/patch_litex_sdcard_boot.py $(if $(WITH_MIG_FLAG),$(LITEX_DIR)/$(BOARD_$(FPGA_BOARD)_MIG_TCL),)
+_FPGA_HASH_COMMON_INPUTS = $(PACK_SV) $(FPGA_PY) $(LITEX_DIR)/Makefile \
+	$(LITEX_DIR)/mk/config.mk $(LITEX_DIR)/mk/recipes.mk \
+	$(LITEX_DIR)/scripts/patch_litex_sdcard_boot.py \
+	$(if $(WITH_MIG_FLAG),$(LITEX_DIR)/$(BOARD_$(FPGA_BOARD)_MIG_TCL),)
 ifeq ($(BOOT_MODE),custom)
 _FPGA_HASH_INPUTS = $(_FPGA_HASH_COMMON_INPUTS) $(FW_FPGA_BIN)
 else

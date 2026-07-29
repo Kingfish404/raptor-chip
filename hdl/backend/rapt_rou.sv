@@ -1040,52 +1040,23 @@ module rapt_rou #(
   //  DEBUG (ILA): dual-commit hang capture for FPGA bring-up.
   //  Enabled only when RAPT_DBG_ILA is defined (pass via RAPT_PACK_VFLAGS on
   //  the debug FPGA build); normal sim / production builds are unaffected.
-  //  `dbg_hang` asserts when the ROB is non-empty yet no commit has fired for
-  //  many cycles (pipeline deadlock) -- used as the ILA trigger.  All probed
-  //  nets carry (* mark_debug *) so the post-synth ILA-insertion tcl can find
-  //  and connect them over JTAG.
+  //  `dbg_hang` is a sticky context flag for the chr_dev_init device_create
+  //  call under investigation.  All probed nets carry (* mark_debug *) so the
+  //  post-synth ILA-insertion tcl can find and connect them over JTAG.
   // ==========================================================================
 `ifdef RAPT_DBG_ILA
   (* mark_debug = "true" *) logic dbg_hang;
   (* mark_debug = "true" *) logic dbg_commit_fire;
-  (* mark_debug = "true" *) logic dbg_rob_empty;
-  (* mark_debug = "true" *) logic dbg_dual_commit;
-  (* mark_debug = "true" *) logic dbg_head0_valid;
-  (* mark_debug = "true" *) logic dbg_flush_pipe;
-  (* mark_debug = "true" *) logic dbg_flush_apply;
-  (* mark_debug = "true" *) logic dbg_recv_trap;
-  (* mark_debug = "true" *) logic [$clog2(ROB_SIZE)-1:0] dbg_rob_head;
-  (* mark_debug = "true" *) logic [$clog2(ROB_SIZE)-1:0] dbg_rob_tail;
   (* mark_debug = "true" *) logic [XLEN-1:0] dbg_commit_pc;
-  (* mark_debug = "true" *) logic [XLEN-1:0] dbg_commit_pc_b;
-  (* mark_debug = "true" *) logic [31:0] dbg_commit_inst;
-  (* mark_debug = "true" *) logic [31:0] dbg_commit_inst_b;
 
   assign dbg_commit_fire = commit_fire_o;
-  assign dbg_rob_empty   = rob_empty;
-  assign dbg_dual_commit = dual_commit;
-  assign dbg_head0_valid = head0_valid;
-  assign dbg_flush_pipe  = flush_pipe;
-  assign dbg_flush_apply = flush_apply;
-  assign dbg_recv_trap   = recieved_trap;
-  assign dbg_rob_head    = rob_head;
-  assign dbg_rob_tail    = rob_tail_a;
   assign dbg_commit_pc   = uop_pl[h0].pc;
-  assign dbg_commit_pc_b = uop_pl[h1].pc;
-  assign dbg_commit_inst   = uop_pl[h0].inst;
-  assign dbg_commit_inst_b = uop_pl[h1].inst;
 
-  logic [15:0] dbg_nocommit_cnt;
   always_ff @(posedge clock) begin
     if (reset) begin
-      dbg_nocommit_cnt <= '0;
-      dbg_hang         <= 1'b0;
-    end else if (commit_fire_o || rob_empty) begin
-      dbg_nocommit_cnt <= '0;
-      dbg_hang         <= 1'b0;
-    end else begin
-      if (dbg_nocommit_cnt != 16'hffff) dbg_nocommit_cnt <= dbg_nocommit_cnt + 16'd1;
-      if (dbg_nocommit_cnt > 16'd3000) dbg_hang <= 1'b1;
+      dbg_hang <= 1'b0;
+    end else if (commit_fire_o && uop_pl[h0].pc == 64'hffffffff80c321c8) begin
+      dbg_hang <= 1'b1;
     end
   end
 `endif

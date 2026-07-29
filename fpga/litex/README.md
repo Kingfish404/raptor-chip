@@ -48,7 +48,7 @@ KU15P bitstream cannot accidentally be assigned to an AU15P.
 ## ALINX AXAU15 Hardware Flow (Xilinx Vivado)
 
 The AXAU15 (`xcau15p-ffvb676-2-i`) supports both `VARIANT=standard` and
-`VARIANT=linux`. With the board attached, the common commands need no board
+`VARIANT=linux32`. With the board attached, the common commands need no board
 override:
 
 ```bash
@@ -64,7 +64,7 @@ The MIG parameters and pinout are based on the same-board
 200 MHz differential input is buffered once and shared by the SoC CRG and MIG.
 
 ```bash
-make fpga-build FPGA_BOARD=alinx_axau15 VARIANT=linux
+make fpga-build FPGA_BOARD=alinx_axau15 VARIANT=linux32
 ```
 
 This design maps the full 1 GiB device at `0x80000000`. It passes Vivado DRC,
@@ -97,10 +97,10 @@ make fpga-load FPGA_BOARD=xilinx_vcu118 BOOT_MODE=bios
 make fpga-console FPGA_BOARD=xilinx_vcu118 UART_PORT=/dev/ttyUSB0
 
 # Default Linux-oriented build without external DDR4.
-make fpga-build FPGA_BOARD=xilinx_vcu118 VARIANT=linux
+make fpga-build FPGA_BOARD=xilinx_vcu118 VARIANT=linux32
 
 # Experimental external DDR4 build.
-make fpga-build FPGA_BOARD=xilinx_vcu118 VARIANT=linux \
+make fpga-build FPGA_BOARD=xilinx_vcu118 VARIANT=linux32 \
     WITH_LITEDRAM=1 INTEGRATED_MAIN_RAM_SIZE=0
 ```
 
@@ -164,7 +164,7 @@ Notes:
 
 ## KU15P Linux FPGA Flow (Vivado MIG)
 
-Linux-oriented KU15P bitstream: `VARIANT=linux`, LiteX BIOS, on-board 4 GB DDR4 via Xilinx MIG mapped as `main_ram` at `0x80000000` (1 GiB AXI window). On the KU15P, the board-aware Linux profile selects `BOOT_MODE=bios WITH_MIG=1 WITH_SDCARD=1 INTEGRATED_MAIN_RAM_SIZE=0`, `SYS_CLK=50000000` (50 MHz), `UART_BAUD=115200`, and the `default` Raptor preset. Linux currently sees 256 MiB because the core's PMEM classifier accepts `0x80000000..0x8fffffff`; `LINUX_FPGA_RAM_SIZE` must not exceed that window until the classifier is widened. The legacy LiteDRAM path is still available via `WITH_LITEDRAM=1`. `make fpga-build VARIANT=linux FPGA_BOARD=mlk_cu07_ku15p` only succeeds if the Vivado timing report meets constraints; the default bitstream lands under `build/mlk_cu07_ku15p/bios-linux-mig-sdcard-default/gateware/`.
+Linux-oriented KU15P bitstream: `VARIANT=linux32`, LiteX BIOS, on-board 4 GB DDR4 via Xilinx MIG mapped as `main_ram` at `0x80000000` (1 GiB AXI window). On the KU15P, the board-aware Linux profile selects `BOOT_MODE=bios WITH_MIG=1 WITH_SDCARD=1 INTEGRATED_MAIN_RAM_SIZE=0`, `SYS_CLK=50000000` (50 MHz), `UART_BAUD=115200`, and the `default` Raptor preset. Linux currently sees 256 MiB because the core's PMEM classifier accepts `0x80000000..0x8fffffff`; `LINUX_FPGA_RAM_SIZE` must not exceed that window until the classifier is widened. The legacy LiteDRAM path is still available via `WITH_LITEDRAM=1`. `make fpga-build VARIANT=linux32 FPGA_BOARD=mlk_cu07_ku15p` only succeeds if the Vivado timing report meets constraints; the default bitstream lands under `build/mlk_cu07_ku15p/bios-linux32-mig-sdcard-default/gateware/`.
 
 ```bash
 source /opt/Xilinx/2025.2/Vivado/settings64.sh
@@ -181,24 +181,24 @@ make linux-fpga-rv64-e2e UART_PORT=/dev/ttyUSB0
 make opensbi-fpga-rv64-e2e UART_PORT=/dev/ttyUSB0
 
 # Open the console after either flow finishes:
-make fpga-console VARIANT=linux UART_PORT=/dev/ttyUSB0
+make fpga-console VARIANT=linux32 UART_PORT=/dev/ttyUSB0
 
 # QSPI flash remains an explicit operation:
-make fpga-build VARIANT=linux && make fpga-flash VARIANT=linux
+make fpga-build VARIANT=linux32 && make fpga-flash VARIANT=linux32
 ```
 
 The convenience targets are split by iteration cost:
 
-| Target                | Operations                                                         | Use when                                                 |
-| --------------------- | ------------------------------------------------------------------ | -------------------------------------------------------- |
-| `linux-fpga-rv32-upload` / `linux-fpga-rv64-upload`   | Build the selected contiguous Linux image, then upload it | Debugging without using the SD card                      |
-| `linux-fpga-rv32-run` / `linux-fpga-rv64-run`         | Load the matching timing-clean bitstream, then upload Linux | The FPGA may contain another bitstream                   |
-| `linux-fpga-rv32-e2e` / `linux-fpga-rv64-e2e`         | Build, load, then upload the matching Linux image          | Reproducing the complete boot flow                       |
-| `opensbi-fpga-rv32-upload` / `opensbi-fpga-rv64-upload` | Upload standalone OpenSBI only                           | Iterating OpenSBI or DTB without touching the FPGA image |
-| `opensbi-fpga-rv32-run` / `opensbi-fpga-rv64-run`     | Load the matching bitstream, then upload OpenSBI            | Re-establishing a known OpenSBI test state               |
-| `opensbi-fpga-rv32-e2e` / `opensbi-fpga-rv64-e2e`     | Build, load, then upload standalone OpenSBI                 | Full OpenSBI-only bring-up                               |
+| Target                                                  | Operations                                                  | Use when                                                 |
+| ------------------------------------------------------- | ----------------------------------------------------------- | -------------------------------------------------------- |
+| `linux-fpga-rv32-upload` / `linux-fpga-rv64-upload`     | Build the selected contiguous Linux image, then upload it   | Debugging without using the SD card                      |
+| `linux-fpga-rv32-run` / `linux-fpga-rv64-run`           | Load the matching timing-clean bitstream, then upload Linux | The FPGA may contain another bitstream                   |
+| `linux-fpga-rv32-e2e` / `linux-fpga-rv64-e2e`           | Build, load, then upload the matching Linux image           | Reproducing the complete boot flow                       |
+| `opensbi-fpga-rv32-upload` / `opensbi-fpga-rv64-upload` | Upload standalone OpenSBI only                              | Iterating OpenSBI or DTB without touching the FPGA image |
+| `opensbi-fpga-rv32-run` / `opensbi-fpga-rv64-run`       | Load the matching bitstream, then upload OpenSBI            | Re-establishing a known OpenSBI test state               |
+| `opensbi-fpga-rv32-e2e` / `opensbi-fpga-rv64-e2e`       | Build, load, then upload standalone OpenSBI                 | Full OpenSBI-only bring-up                               |
 
-The RV32 wrappers force `VARIANT=linux`, while the RV64 wrappers force
+The RV32 wrappers force `VARIANT=linux32`, while the RV64 wrappers force
 `VARIANT=linux64`; board, MIG, BIOS, clock, DTB timebase, and payload builds
 therefore remain on the matching profile. Override `UART_PORT` when
 auto-detection does not select the board. Keep SFL at the default 115200 baud:
@@ -302,15 +302,15 @@ console (`make fpga-load`, `make fpga-console`). At the `litex>` prompt, run
 boot remains pending.
 
 Key conventions:
-- The bitstream knobs `BOOT_MODE=bios INTEGRATED_MAIN_RAM_SIZE=0 WITH_MIG=1` are all auto-set by the Linux FPGA profile (`VARIANT=linux`). The board-specific MIG IP maps external DDR4 at `0x80000000`.
+- The bitstream knobs `BOOT_MODE=bios INTEGRATED_MAIN_RAM_SIZE=0 WITH_MIG=1` are all auto-set by the Linux FPGA profile (`VARIANT=linux32`). The board-specific MIG IP maps external DDR4 at `0x80000000`.
 - Linux can boot from the SD card with the BIOS `sdcardboot` command. The SD controller is present by default in both KU15P and AXAU15 Linux builds. Automatic SD boot is disabled by default: after serialboot times out, BIOS enters the `litex>` console. Use `sdcardboot` for an inserted card or `boot <address>` for an image already in memory. Set `SDCARD_BOOT=1` at build time to restore automatic SD boot. A small compatibility shim supplies this `SDCARD_BOOT_DISABLE` behavior for LiteX revisions that do not yet implement it and becomes a no-op once upstream support is present.
-- Default `fpga-upload VARIANT=linux` is a serial fallback: it uploads the contiguous `linux-fpga.img` at `0x80000000` with `litex_term`, using the same path as RaptOS and other firmware images.
+- Default `fpga-upload VARIANT=linux32` is a serial fallback: it uploads the contiguous `linux-fpga.img` at `0x80000000` with `litex_term`, using the same path as RaptOS and other firmware images.
 - KU15P UART and SFL are fixed at 115200 baud because the board's host-to-FPGA path is not reliable at higher rates.
-- Payload-only iteration: once the bitstream is loaded, just re-run the matching upload target (`make fpga-upload VARIANT=linux`, `make coremark-fpga VARIANT=linux`, …) — no re-synthesis needed.
-- Raw `BIN` uploads (`make fpga-upload VARIANT=linux BIN=…`) carry no OpenSBI args/DTB/relocation; the image must bring its own LiteX MMIO runtime.
-- Hardware-changing knobs require a new bitstream; `make fpga VARIANT=linux` (build + load) rebuilds first, while `make fpga-load VARIANT=linux` loads the existing bitstream without rebuilding.
+- Payload-only iteration: once the bitstream is loaded, just re-run the matching upload target (`make fpga-upload VARIANT=linux32`, `make coremark-fpga VARIANT=linux32`, …) — no re-synthesis needed.
+- Raw `BIN` uploads (`make fpga-upload VARIANT=linux32 BIN=…`) carry no OpenSBI args/DTB/relocation; the image must bring its own LiteX MMIO runtime.
+- Hardware-changing knobs require a new bitstream; `make fpga VARIANT=linux32` (build + load) rebuilds first, while `make fpga-load VARIANT=linux32` loads the existing bitstream without rebuilding.
 
-Status: the `default` RV32IMAC preset routes, passes the BIOS DDR test, boots OpenSBI and Linux from SD, and reaches the interactive `tinysh#` initramfs shell. `make coremark-fpga VARIANT=linux` and the directed privileged/MMU probes also pass from MIG DDR. Do not treat SFL upload completion alone as a successful Linux boot; the end-to-end success marker is an interactive `tinysh#` prompt.
+Status: the `default` RV32IMAC preset routes, passes the BIOS DDR test, boots OpenSBI and Linux from SD, and reaches the interactive `tinysh#` initramfs shell. `make coremark-fpga VARIANT=linux32` and the directed privileged/MMU probes also pass from MIG DDR. Do not treat SFL upload completion alone as a successful Linux boot; the end-to-end success marker is an interactive `tinysh#` prompt.
 
 ## Directory Structure
 
@@ -346,10 +346,10 @@ Raptor's microarchitecture preset is selected separately with `RAPT_CONFIG=<name
 | Variant    | Use Case                               |
 | ---------- | -------------------------------------- |
 | `standard` | Sim & FPGA (BIOS-only, no Linux image) |
-| `linux`    | RV32 Linux/OpenSBI boot                |
+| `linux32`  | RV32 Linux/OpenSBI boot                |
 | `linux64`  | RV64 experiments                       |
 
-Use `make linux-rv32` or `make linux-rv64` for simulation. For FPGA, prefer the explicit commands such as `make linux-fpga-rv32-build` and `make linux-fpga-rv64-build`; unqualified legacy Linux/OpenSBI targets remain RV32 compatibility aliases.
+Use `make linux32` or `make linux64` for simulation. For FPGA, prefer the explicit commands such as `make linux-fpga-rv32-build` and `make linux-fpga-rv64-build`; `linux`, `linux-rv32`, and `linux-rv64` remain compatibility aliases.
 
 ## Command Reference
 
@@ -373,7 +373,7 @@ make coremark-fpga FPGA_BOARD=mlk_cu07_ku15p UART_PORT=/dev/ttyUSB0 COREMARK_ITE
 make app-llm-infer-fpga FPGA_BOARD=mlk_cu07_ku15p UART_PORT=/dev/ttyUSB0
 ```
 
-If `litex_term` reports a serialboot timeout, press the board reset button with the same command still running. OpenSBI/Linux runs in sim (`make linux`) and on the KU15P MIG bring-up path (`make fpga-* VARIANT=linux`); the verified day-to-day FPGA smoke path is the 512 KiB integrated-RAM BIOS/CoreMark flow above.
+If `litex_term` reports a serialboot timeout, press the board reset button with the same command still running. OpenSBI/Linux runs in sim (`make linux32`) and on the KU15P MIG bring-up path (`make fpga-* VARIANT=linux32`); the verified day-to-day FPGA smoke path is the 512 KiB integrated-RAM BIOS/CoreMark flow above.
 
 ## app/ Payloads
 
@@ -397,8 +397,8 @@ make app-llm-fpga BENCH=infer FPGA_BOARD=mlk_cu07_ku15p UART_PORT=/dev/ttyUSB0
 make app-fpga-upload APP_FPGA_BIN=/path/to/app.bin FPGA_BOARD=mlk_cu07_ku15p UART_PORT=/dev/ttyUSB0
 
 # Same app payload, but using the KU15P Linux/MIG DDR bitstream
-# (VARIANT=linux selects the MIG board + 115200 baud automatically)
-make app-fpga-upload VARIANT=linux APP_FPGA_BIN=/path/to/app.bin UART_PORT=/dev/ttyUSB0
+# (VARIANT=linux32 selects the MIG board + 115200 baud automatically)
+make app-fpga-upload VARIANT=linux32 APP_FPGA_BIN=/path/to/app.bin UART_PORT=/dev/ttyUSB0
 ```
 
 RLLMBench uses `rdtime` by default and reports `score_per_sec` from physical seconds only. Set `RLLMBENCH_TIMEBASE_HZ` to the real `time` CSR frequency so LiteX simulation, FPGA boards, pk/NPC, and native ports remain directly comparable. When producing reports from copied serial logs, pass the board or simulation core clock as `--core-clock-mhz <MHz>` to `report.py` to derive `score_per_mhz`, the CoreMark/MHz-style work-per-million-core-cycles metric.

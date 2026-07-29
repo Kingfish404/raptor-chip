@@ -25,3 +25,31 @@ set_property -dict [list \
 
 generate_target all $raptor_ddr4_ip
 synth_ip $raptor_ddr4_ip -force
+
+set raptor_ddr4_ip_name [get_property NAME $raptor_ddr4_ip]
+set raptor_ddr4_project_name [get_property NAME [current_project]]
+set raptor_ddr4_dcp [file join [pwd] "${raptor_ddr4_project_name}.gen" \
+    sources_1 ip $raptor_ddr4_ip_name "${raptor_ddr4_ip_name}.dcp"]
+
+# Wait for the out-of-context synth run to flush the DCP to disk.  Under
+# parallel variant builds the file may lag the synth_ip completion message,
+# so poll with a timeout instead of a single racy `file exists` check.
+proc wait_for_dcp {path timeout_ms} {
+    set waited 0
+    while {![file exists $path] && $waited < $timeout_ms} {
+        after 500
+        incr waited 500
+    }
+    return [file exists $path]
+}
+
+if {![wait_for_dcp $raptor_ddr4_dcp 30000]} {
+    puts "WARNING: DDR4 IP synthesis did not produce $raptor_ddr4_dcp; retrying once"
+    reset_target all $raptor_ddr4_ip
+    generate_target all $raptor_ddr4_ip
+    synth_ip $raptor_ddr4_ip -force
+    wait_for_dcp $raptor_ddr4_dcp 60000
+}
+if {![file exists $raptor_ddr4_dcp]} {
+    error "DDR4 IP synthesis failed to produce $raptor_ddr4_dcp"
+}

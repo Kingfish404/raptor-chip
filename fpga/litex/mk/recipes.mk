@@ -201,12 +201,13 @@ $(FW_EGOS_STAGE0_BIN): $(FW_EGOS_STAGE0_ELF)
 $(FW_LINUX_FPGA_DTS): $(FW_LINUX_FPGA_DTS_IN) FORCE | $(FW_LINUX_FPGA_DIR)
 	sed -e 's/@TIMEBASE@/$(SYS_CLK)/g' \
 	    -e 's/@MEM_SIZE@/$(LINUX_FPGA_RAM_SIZE)/g' \
+	    -e 's|@BOOTARGS@|$(LINUX_FPGA_BOOTARGS)|g' \
 	    -e 's/@UART_BASE@/$(LINUX_FPGA_UART_BASE)/g' \
 	    -e 's/@UART_UNIT_ADDR@/$(LINUX_FPGA_UART_UNIT_ADDR)/g' \
 	    -e 's/@CBOM_BLOCK_SIZE@/$(RAPT_CACHE_LINE_BYTES)/g' \
 	    -e 's/@RISCV_ISA@/$(LINUX_ISA)/g' \
 	    -e 's/@RISCV_ISA_BASE@/$(LINUX_ISA_BASE)/g' \
-	    -e 's/@RISCV_ISA_EXTENSIONS@/$(RAPTOR_DT_ISA_EXTENSIONS)/g' \
+	    -e 's/@RISCV_ISA_EXTENSIONS@/$(LINUX_DT_ISA_EXTENSIONS)/g' \
 	    -e 's/@RISCV_MMU@/$(LINUX_MMU)/g' \
 	    $< > $@
 
@@ -402,7 +403,7 @@ opensbi-build:
 	$(MAKE) -C $(LINUX_DIR) $(OPENSBI_BUILD_TARGET)
 
 opensbi-rv32-build:
-	@$(call _make,opensbi-build VARIANT=linux)
+	@$(call _make,opensbi-build VARIANT=linux32)
 
 opensbi-rv64-build:
 	@$(call _make,opensbi-build VARIANT=linux64)
@@ -411,7 +412,7 @@ opensbi:
 	@$(call _make,opensbi-rv32)
 
 opensbi-rv32:
-	@$(call _make,sim PAYLOAD=opensbi VARIANT=linux)
+	@$(call _make,sim PAYLOAD=opensbi VARIANT=linux32)
 
 opensbi-rv64:
 	@$(call _make,sim PAYLOAD=opensbi VARIANT=linux64)
@@ -432,20 +433,78 @@ egos-ku15p-sim: fpga-egos-prepare
 egos-ku15p-sim-trace: fpga-egos-prepare
 	@$(call _make,egos-ku15p-sim TRACE=fst)
 
+raptos-bios-sim:
+	@$(call _make,raptos-bios-sim-rv32)
+
+raptos-bios-sim-rv32: fpga-raptos-rv32-build
+	@echo "[INFO] BIOS-mode sim boot: preload RV32 RaptOS at $(MAIN_RAM_BASE), then issue 'boot $(MAIN_RAM_BASE)'."
+	@$(call _make,sim ROM=bios PAYLOAD=img IMG=$(RAPTOS_KU15P_RV32_BIN) VARIANT=linux32 \
+		SIM_STDIN_IMMEDIATE=Q\\n \
+		SIM_STOP_MARKER=litex SIM_STDIN_AFTER_MARKER=boot\ $(MAIN_RAM_BASE)\\n \
+		SIM_KEEP_RUNNING_AFTER_INJECT=1 \
+		SIM_TIMEOUT=$(if $(filter command line environment,$(origin SIM_TIMEOUT)),$(SIM_TIMEOUT),300))
+
+raptos-bios-sim-rv64: fpga-raptos-rv64-build
+	@echo "[INFO] BIOS-mode sim boot: preload RV64 RaptOS at $(MAIN_RAM_BASE), then issue 'boot $(MAIN_RAM_BASE)'."
+	@$(call _make,sim ROM=bios PAYLOAD=img IMG=$(RAPTOS_KU15P_RV64_BIN) VARIANT=linux64 \
+		SIM_STDIN_IMMEDIATE=Q\\n \
+		SIM_STOP_MARKER=litex SIM_STDIN_AFTER_MARKER=boot\ $(MAIN_RAM_BASE)\\n \
+		SIM_KEEP_RUNNING_AFTER_INJECT=1 \
+		SIM_TIMEOUT=$(if $(filter command line environment,$(origin SIM_TIMEOUT)),$(SIM_TIMEOUT),300))
+
 linux-build:
+	@$(call _make,linux32-build)
+
+linux32-build:
 	$(MAKE) -s -C $(LINUX_DIR) $(LINUX_DOWNLOAD_TARGET)
 
+linux64-build:
+	@$(call _make,linux32-build VARIANT=linux64)
+
 linux-rv32-build:
-	@$(call _make,linux-build VARIANT=linux)
+	@$(call _make,linux32-build)
 
 linux-rv64-build:
-	@$(call _make,linux-build VARIANT=linux64)
+	@$(call _make,linux64-build)
 
 linux:
-	@$(call _make,linux-rv32)
+	@$(call _make,linux32)
+
+linux32:
+	@$(call _make,sim PAYLOAD=linux VARIANT=linux32)
+
+linux64:
+	@$(call _make,sim PAYLOAD=linux VARIANT=linux64)
 
 linux-rv32:
-	@$(call _make,sim PAYLOAD=linux VARIANT=linux)
+	@$(call _make,linux32)
+
+linux-rv64:
+	@$(call _make,linux64)
+
+fpga-img-rv32:
+	@$(call _make,fpga-img VARIANT=linux32)
+
+fpga-img-rv64:
+	@$(call _make,fpga-img VARIANT=linux64)
+
+fpga-linux-dtb-check-rv32:
+	@$(call _make,fpga-linux-dtb-check VARIANT=linux32)
+
+fpga-linux-dtb-check-rv64:
+	@$(call _make,fpga-linux-dtb-check VARIANT=linux64)
+
+fpga-smoke-img-rv32:
+	@$(call _make,fpga-smoke-img VARIANT=linux32)
+
+fpga-smoke-img-rv64:
+	@$(call _make,fpga-smoke-img VARIANT=linux64)
+
+fpga-opensbi-img-rv32:
+	@$(call _make,fpga-opensbi-img VARIANT=linux32)
+
+fpga-opensbi-img-rv64:
+	@$(call _make,fpga-opensbi-img VARIANT=linux64)
 
 linux-rv64:
 	@$(call _make,sim PAYLOAD=linux VARIANT=linux64)
@@ -581,7 +640,7 @@ fpga-egos-prepare:
 	@test -f "$(LINUX_FPGA_EGOS_DISK)" || { echo "[ERR] Missing egos disk: $(LINUX_FPGA_EGOS_DISK)"; exit 1; }
 	@echo "[INFO] egos kernel: $(LINUX_FPGA_EGOS_IMAGE)"
 	@echo "[INFO] egos disk:   $(LINUX_FPGA_EGOS_DISK)"
-	@echo "[INFO]   upload: make fpga-egos-upload   (forces VARIANT=linux; UART $(UART_PORT) @ linux-profile baud)"
+	@echo "[INFO]   upload: make fpga-egos-upload   (forces VARIANT=linux32; UART $(UART_PORT) @ linux-profile baud)"
 
 fpga-egos-bundle: fpga-egos-prepare $(FW_EGOS_STAGE0_BIN)
 	@stage_size=$$(stat -c%s "$(FW_EGOS_STAGE0_BIN)"); \
@@ -625,7 +684,7 @@ fpga-tinyos-check:
 		echo "      Prepare/build command:"; \
 		echo "        make fpga-xv6-prepare"; \
 		echo "      Required before FPGA serialboot can be correct:"; \
-		echo "        - RV64/Sv39 FPGA CPU/bitstream, not the current RV32 VARIANT=linux bitstream"; \
+		echo "        - RV64/Sv39 FPGA CPU/bitstream, not the current RV32 VARIANT=linux32 bitstream"; \
 		echo "        - UART/CLINT/PLIC/virtio-blk map compatible with xv6, or an xv6 LiteX port"; \
 		echo "        - $(LINUX_FPGA_XV6_DISK) exposed as the xv6 block device"; \
 		echo "      Simulator validation command:"; \
@@ -648,15 +707,31 @@ fpga-egos-upload: fpga-egos-bundle
 	@$(MAKE) --no-print-directory fpga-upload $(_LINUX_FPGA_ARGS) \
 		BIN=$(FW_EGOS_STAGE0_BUNDLE) MAIN_RAM_BASE=$(LINUX_FPGA_EGOS_STAGE_ADDR)
 
-fpga-raptos-build:
-	@$(MAKE) --no-print-directory -C $(RAPTOR_HOME)/app/tinyos/raptos all PLATFORM=ku15p
+fpga-raptos-build: fpga-raptos-rv32-build
 
-fpga-raptos-upload: fpga-raptos-build
-	@$(MAKE) --no-print-directory fpga-upload $(_LINUX_FPGA_ARGS) \
-		BIN=$(RAPTOS_KU15P_BIN) MAIN_RAM_BASE=$(MAIN_RAM_BASE)
+fpga-raptos-rv32-build:
+	@$(MAKE) --no-print-directory -C $(RAPTOR_HOME)/app/tinyos/raptos all PLATFORM=ku15p-rv32 XLEN=32
 
-fpga-raptos-run:
-	@$(MAKE) --no-print-directory fpga-raptos-upload $(_LINUX_FPGA_ARGS)
+fpga-raptos-rv64-build:
+	@$(MAKE) --no-print-directory -C $(RAPTOR_HOME)/app/tinyos/raptos all PLATFORM=ku15p-rv64 XLEN=64
+
+fpga-raptos-upload: fpga-raptos-rv32-upload
+
+fpga-raptos-rv32-upload: fpga-raptos-rv32-build
+	@$(MAKE) --no-print-directory fpga-upload $(_LINUX_FPGA_RV32_ARGS) \
+		BIN=$(RAPTOS_KU15P_RV32_BIN) MAIN_RAM_BASE=$(MAIN_RAM_BASE)
+
+fpga-raptos-rv64-upload: fpga-raptos-rv64-build
+	@$(MAKE) --no-print-directory fpga-upload $(_LINUX_FPGA_RV64_ARGS) \
+		BIN=$(RAPTOS_KU15P_RV64_BIN) MAIN_RAM_BASE=$(MAIN_RAM_BASE)
+
+fpga-raptos-run: fpga-raptos-rv32-run
+
+fpga-raptos-rv32-run:
+	@$(MAKE) --no-print-directory fpga-raptos-rv32-upload $(_LINUX_FPGA_RV32_ARGS)
+
+fpga-raptos-rv64-run:
+	@$(MAKE) --no-print-directory fpga-raptos-rv64-upload $(_LINUX_FPGA_RV64_ARGS)
 
 fpga-xv6-upload: fpga-xv6-prepare
 	@$(MAKE) --no-print-directory fpga-tinyos-check OS=xv6

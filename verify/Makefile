@@ -168,7 +168,7 @@ $(MROM_IMG):
 	$(MAKE) -C $(NSIM_HOME)/csrc/mem/mrom-data
 
 .PHONY: check-prereqs
-check-prereqs: $(MROM_IMG) ## Verify all prerequisites are built
+check-prereqs: $(NPC_BIN) $(NEMU_SO) $(MROM_IMG) ## Verify all prerequisites are built
 	@echo "[verify] Checking prerequisites..."
 	@test -f $(NPC_BIN)  || (echo "ERROR: NPC binary not found: $(NPC_BIN)"  && echo "  Run: make -C $(RAPTOR_HOME) build-rv32" && exit 1)
 	@test -f $(NEMU_SO)  || (echo "ERROR: NEMU SO not found: $(NEMU_SO)"    && echo "  Run: make -C $(RAPTOR_HOME) config-nemu32-ref" && exit 1)
@@ -361,6 +361,9 @@ fuzz-run-one: check-prereqs ## Run a single .S test file (SRC=path/to/test.S)
 	$(OBJCOPY) -O binary "$$elf" "$$bin"; \
 	$(NPC_BIN) -b -n -d $(NEMU_SO) -r $(MROM_IMG) "$$bin" 2>&1 | tee "$$log"; \
 	echo "[fuzz-run-one] Log: $$log"
+
+zbb-strlen: ## Run the Linux RV64 strlen_zbb sequence through NPC/NEMU difftest
+	@$(MAKE) --no-print-directory fuzz-run-one ISA=rv64 SRC=$(VERIFY_HOME)/tests/zbb_strlen.S
 
 fuzz-inf: check-prereqs ## Continuous fuzz until Ctrl-C or saturation
 	@python3 $(VERIFY_HOME)/scripts/run_fuzz_inf.py \
@@ -1049,6 +1052,9 @@ XSIM_MULDIV_SOURCES := \
 	"$(RAPTOR_HOME)/hdl/backend/rapt_exu_mul.sv" \
 	"$(RAPTOR_HOME)/hdl/backend/rapt_exu_muldiv.sv"
 
+XSIM_ALU_SOURCES := \
+	"$(RAPTOR_HOME)/hdl/backend/rapt_exu_alu.sv"
+
 XSIM_TARGETS := \
 	xsim-l2 \
 	xsim-l1d-byte-rom \
@@ -1068,6 +1074,7 @@ XSIM_TARGETS := \
 	xsim-ioq \
 	xsim-clint \
 	xsim-plic-gateway \
+	xsim-alu-zbb-strlen \
 	xsim-muldiv-flush-reuse \
 	xsim-rou-dual-commit
 
@@ -1101,6 +1108,9 @@ endef
 	xsim-ioq-lrsc-reservation xsim-ioq-pending-lock xsim-clean
 
 xsim: $(XSIM_TARGETS) ## xsim: run all directed checks
+
+xsim-alu-zbb-strlen: ## xsim: verify the RV64 ORC.B/CTZ strlen sequence
+	$(call XSIM_RUN,alu_zbb_strlen,tb_alu_zbb_strlen,$(XSIM_ALU_SOURCES),-d RAPT_RV64)
 
 xsim-l2: ## xsim: verify L2 ordering, cache fills, and posted write streams
 	$(call XSIM_RUN,l2,tb_l2_ordered_mmio,$(XSIM_L2_SOURCES),-d RAPT_L2_EN)

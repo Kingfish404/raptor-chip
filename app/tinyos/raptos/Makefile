@@ -1,6 +1,7 @@
 ROOT := $(abspath ../../..)
 PLATFORM ?= sim
 BUILD := build/$(PLATFORM)
+XLEN ?= $(if $(filter %-rv64,$(PLATFORM)),64,32)
 PYTHON ?= python3
 ARGS ?= -b -n
 MAX_INST ?=
@@ -16,11 +17,12 @@ OBJCOPY := $(CROSS)objcopy
 OBJDUMP := $(CROSS)objdump
 SIZE := $(CROSS)size
 
-ARCH := rv32imac_zicsr_zifencei
-CFLAGS := -march=$(ARCH) -mabi=ilp32 -mcmodel=medany -Os -g -Wall -Wextra \
+ARCH ?= $(if $(filter 64,$(XLEN)),rv64imac_zicsr_zifencei,rv32imac_zicsr_zifencei)
+MABI ?= $(if $(filter 64,$(XLEN)),lp64,ilp32)
+CFLAGS := -march=$(ARCH) -mabi=$(MABI) -mcmodel=medany -Os -g -Wall -Wextra \
 	-ffreestanding -fno-builtin -fno-pic -fno-stack-protector \
 	-ffunction-sections -fdata-sections -nostdlib -nostartfiles -Iinclude -Iuser -Ipayloads \
-	$(if $(filter ku15p,$(PLATFORM)),-DRAPTOS_KU15P,)
+	$(if $(findstring ku15p,$(PLATFORM)),-DRAPTOS_KU15P,)
 LINKER_SCRIPT := arch/riscv/raptos.ld
 LDFLAGS := -T $(LINKER_SCRIPT) -Wl,--gc-sections -Wl,--build-id=none -Wl,-Map,$(BUILD)/raptos.map
 USER_OBJS := $(BUILD)/user.o $(BUILD)/user_runtime.o $(BUILD)/user_service.o \
@@ -37,7 +39,7 @@ ROOTFS_FILES := $(shell find $(ROOTFS) -mindepth 1 -print)
 
 help:
 	@echo "RaptOS targets:"
-	@echo "  build/all    Build PLATFORM=sim|ku15p (default: sim)"
+	@echo "  build/all    Build PLATFORM=sim|ku15p-rv32|ku15p-rv64 (default: sim)"
 	@echo "  nemu         Fast functional shell on NEMU (run first)"
 	@echo "  sim          RTL shell on NPC (run after NEMU)"
 	@echo "  payload-test Run one payload on NPC with randomized memory delay"
@@ -46,7 +48,7 @@ help:
 	@echo "  payloads     List auto-discovered payloads"
 	@echo "  clean        Remove the selected PLATFORM output"
 	@echo "  clean-all    Remove all generated outputs"
-	@echo "Variables: PLATFORM ARGS MAX_INST PAYLOAD MEM_RANDOM_DELAY MEM_RANDOM_SEED"
+	@echo "Variables: PLATFORM XLEN ARCH MABI ARGS MAX_INST PAYLOAD MEM_RANDOM_DELAY MEM_RANDOM_SEED"
 	@echo "           MEM_STRESS_PAYLOADS MEM_STRESS_SEEDS CROSS"
 
 payloads:

@@ -18,7 +18,7 @@ from litex.soc.integration.soc import SoCRegion
 
 CPU_VARIANTS = {
     "standard": "raptor",
-    "linux": "raptor",
+    "linux32": "raptor",
     "linux64": "raptor",
 }
 
@@ -26,7 +26,7 @@ CPU_VARIANTS = {
 
 GCC_FLAGS = {
     "standard": "-march=rv32imac_zicbom_zicntr_zicond_zicsr_zifencei_zcb_zba_zbb_zbc_zbs -mabi=ilp32",
-    "linux": "-march=rv32imac_zicbom_zicntr_zicond_zicsr_zifencei_zcb_zba_zbb_zbc_zbs -mabi=ilp32",
+    "linux32": "-march=rv32imac_zicbom_zicntr_zicond_zicsr_zifencei_zcb_zba_zbb_zbc_zbs -mabi=ilp32",
     "linux64": "-march=rv64imac_zicbom_zicntr_zicond_zicsr_zifencei_zcb_zba_zbb_zbc_zbs -mabi=lp64",
 }
 
@@ -165,7 +165,7 @@ class Raptor(CPU):
         # defines via env. sim/Makefile auto-invalidates the pack when VFLAGS
         # changes, so switching presets just works.
         env_vflags = os.environ.get("RAPT_PACK_VFLAGS", "")
-        if variant in ("linux", "linux64") and "-DRAPT_LINUX" not in env_vflags:
+        if variant in ("linux32", "linux64") and "-DRAPT_LINUX" not in env_vflags:
             env_vflags = (env_vflags + " -DRAPT_LINUX").strip()
         if variant == "linux64" and "-DRAPT_RV64" not in env_vflags:
             env_vflags = (env_vflags + " -DRAPT_RV64").strip()

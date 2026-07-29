@@ -358,13 +358,32 @@ static void close_all_fds(struct process *proc) {
 }
 
 static void map_page(struct process *proc, uint32_t va, uint32_t pa, uint32_t flags) {
+#if __riscv_xlen == 64
+    (void)proc;
+    (void)va;
+    (void)pa;
+    (void)flags;
+#else
     uint32_t vpn1 = va >> 22;
     uint32_t *leaf = (vpn1 == (USER_STACK_TOP - PAGE_SIZE) >> 22) ? proc->leaf_stack : proc->leaf_code;
     proc->root[vpn1] = ((uint32_t)leaf >> 2) | PTE_V;
     leaf[(va >> 12) & 0x3ffu] = (pa >> 2) | flags | PTE_V | PTE_A | PTE_D;
+#endif
 }
 
 static uint32_t user_pa(struct process *proc, uint32_t va, int write) {
+#if __riscv_xlen == 64
+    uint32_t user_start = (uint32_t)(uintptr_t)__user_start;
+    uint32_t user_end = (uint32_t)(uintptr_t)__user_end;
+    uint32_t bss_start = (uint32_t)(uintptr_t)__user_bss_start;
+    uint32_t bss_end = (uint32_t)(uintptr_t)__user_bss_end;
+    uint32_t stack_start = (uint32_t)(uintptr_t)proc->stack_page;
+    uint32_t stack_end = stack_start + PAGE_SIZE;
+    if (va >= user_start && va < user_end) return write ? 0 : va;
+    if (va >= bss_start && va < bss_end) return va;
+    if (va >= stack_start && va < stack_end) return va;
+    return 0;
+#else
     uint32_t pte1 = proc->root[va >> 22];
     if (!(pte1 & PTE_V)) return 0;
     uint32_t *leaf = (uint32_t *)((pte1 << 2) & 0xfffff000u);
@@ -372,15 +391,20 @@ static uint32_t user_pa(struct process *proc, uint32_t va, int write) {
     if (!(pte0 & PTE_V) || (!(pte0 & PTE_U) && !proc->smode) ||
         (write && !(pte0 & PTE_W))) return 0;
     return ((pte0 << 2) & 0xfffff000u) | (va & 0xfffu);
+#endif
 }
 
 static uint32_t debug_va_pa(struct process *proc, uint32_t va) {
+#if __riscv_xlen == 64
+    return user_pa(proc, va, 0);
+#else
     uint32_t pte1 = proc->root[va >> 22];
     if (!(pte1 & PTE_V)) return 0;
     uint32_t *leaf = (uint32_t *)((pte1 << 2) & 0xfffff000u);
     uint32_t pte0 = leaf[(va >> 12) & 0x3ffu];
     if (!(pte0 & PTE_V) || !(pte0 & (PTE_R | PTE_W | PTE_X))) return 0;
     return ((pte0 << 2) & 0xfffff000u) | (va & 0xfffu);
+#endif
 }
 
 static int copy_from_user(struct process *proc, void *dst, uint32_t src, uint32_t size) {
@@ -456,8 +480,12 @@ static int copy_user_path(struct process *proc, char *path, uint32_t ptr) {
 static void switch_to(int next) {
     current = next;
     procs[next].state = PROCESS_RUNNING;
+#if __riscv_xlen == 64
+    __asm__ volatile("csrw satp, zero; sfence.vma zero, zero" ::: "memory");
+#else
     uint32_t satp = 0x80000000u | ((uint32_t)procs[next].root >> 12);
     __asm__ volatile("csrw satp, %0; sfence.vma zero, zero" :: "r"(satp) : "memory");
+#endif
 }
 
 static struct trap_frame *schedule(void) {
@@ -889,8 +917,13 @@ static int sys_debug_info(struct process *proc, uint32_t ptr) {
     layout.data_end = (uint32_t)__data_end;
     layout.bss_start = (uint32_t)__bss_start;
     layout.bss_end = (uint32_t)__bss_end;
+#if __riscv_xlen == 64
+    layout.user_stack_start = (uint32_t)(uintptr_t)proc->stack_page;
+    layout.user_stack_end = layout.user_stack_start + PAGE_SIZE;
+#else
     layout.user_stack_start = USER_STACK_TOP - PAGE_SIZE;
     layout.user_stack_end = USER_STACK_TOP;
+#endif
     return copy_to_user(proc, ptr, &layout, sizeof(layout));
 }
 
@@ -1108,20 +1141,32 @@ static void create_process(int slot, void (*entry)(void)) {
     map_page(proc, USER_STACK_TOP - PAGE_SIZE, (uint32_t)proc->stack_page,
              PTE_R | PTE_W | PTE_U);
 
+#if __riscv_xlen == 64
+    proc->frame.x[2] = (uint32_t)(uintptr_t)proc->stack_page + PAGE_SIZE;
+#else
     proc->frame.x[2] = USER_STACK_TOP;
+#endif
     proc->frame.mepc = (uint32_t)entry;
     proc->frame.mstatus = 0x80u & ~MSTATUS_MPP_MASK;
 }
 
 void kmain(void) {
+#if __riscv_xlen == 64
+    uart_puts("\n[RaptOS] RV64 kernel booting\n");
+#else
     uart_puts("\n[RaptOS] compact RV32 kernel booting\n");
+#endif
     uart_puts("[RaptOS] mounting disk filesystem... ");
     if (disk_init()) {
         uart_puts("FAILED\n");
         for (;;) __asm__ volatile("wfi");
     }
     uart_puts("OK\n");
+#if __riscv_xlen == 64
+    uart_puts("[RaptOS] RV64 U-mode services + IPC + writable RAM disk\n");
+#else
     uart_puts("[RaptOS] Sv32 + U-mode services + IPC + writable RAM disk\n");
+#endif
 
     __asm__ volatile("csrw pmpaddr0, %0" :: "r"(0xffffffffu));
     __asm__ volatile("csrw pmpcfg0, %0" :: "r"(0x0fu));
