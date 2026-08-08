@@ -106,7 +106,7 @@ class RaptorTangMega138KSoC(SoCCore):
         )
 
         kwargs["cpu_type"] = "raptor"
-        kwargs.setdefault("cpu_variant", "standard")
+        kwargs.setdefault("cpu_variant", "linux32")
         kwargs.setdefault("ident", "Raptor LiteX SoC on Tang Mega 138K Pro")
         kwargs.setdefault("ident_version", True)
         kwargs.setdefault("uart_name", "serial")
@@ -178,7 +178,7 @@ def main():
         action="store_true",
         help="Enable LedChaser (off by default on the Pro to relieve PnR density).",
     )
-    parser.set_defaults(cpu_type="raptor", cpu_variant="standard")
+    parser.set_defaults(cpu_type="raptor", cpu_variant="linux32")
 
     args = parser.parse_args()
 

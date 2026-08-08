@@ -32,14 +32,19 @@ make fpga-console
 
 For FPGA targets, the Makefile asks Vivado Hardware Manager for attached Xilinx
 device parts and maps a recognized part to `FPGA_BOARD`. An attached `xcau15p`
-selects `alinx_axau15`; an attached `xcku15p` selects `mlk_cu07_ku15p`; an
-attached `xcvu9p` selects `xilinx_vcu118`.
+selects `alinx_axau15`; an attached `xcvu9p` selects `xilinx_vcu118`.
+The `xcku15p` part is shared by `mlk_cu08_ku15p` and `mlk_cu07_ku15p`, so builds
+require an explicit board selection to avoid programming the wrong pinout.
 An explicit `FPGA_BOARD=...` always wins. If no supported Xilinx device is found,
 the existing profile default is used. Set `FPGA_AUTO_DETECT=0` to skip probing,
-and run `make fpga-detect` to refresh and inspect the current result. Detection
-is cached in `build/.fpga_detect_parts`, so later commands such as
-`make fpga-console` do not restart Vivado. Use `FPGA_DETECT_REFRESH=1` on any
-FPGA command when the connected board has changed.
+and run `make fpga-info` to refresh and inspect the connected FPGA count and
+target details. Detection is cached in `build/.fpga_detect_parts` and related
+`.fpga_detect_*` files, so later commands do not restart Vivado. Use
+`FPGA_DETECT_REFRESH=1` on any FPGA command when the connected board has changed.
+Commands that only use the already-loaded image, such as `make fpga-console` and
+`make fpga-upload`, do not require `FPGA_BOARD`; set `UART_PORT` when automatic
+UART selection is ambiguous. Build, load, flash, and timing-gate commands still
+require an explicit board when multiple boards share the same FPGA part.
 
 Vivado load and flash scripts require exactly one JTAG device matching the board's
 registered part. They never fall back to the first device in the chain, so a
@@ -47,9 +52,9 @@ KU15P bitstream cannot accidentally be assigned to an AU15P.
 
 ## ALINX AXAU15 Hardware Flow (Xilinx Vivado)
 
-The AXAU15 (`xcau15p-ffvb676-2-i`) supports both `VARIANT=standard` and
-`VARIANT=linux32`. With the board attached, the common commands need no board
-override:
+The AXAU15 (`xcau15p-ffvb676-2-i`) supports both `VARIANT=linux32` and
+`VARIANT=linux64`. With the board attached, the common commands need no board
+override; `linux32` is the default:
 
 ```bash
 make fpga-build
@@ -130,9 +135,38 @@ $HOME/Vivado/.xinstall/2025.2/xsetup
 this guidance when the device package is absent. After installation, rerun the
 same build command; no source or part-name override is required.
 
+## MLK-CU08-KU15P Hardware Flow (Xilinx Vivado)
+
+MiLianKe MLK-CU08-KU15P (Kintex UltraScale+ `xcku15p-ffva1156-2-e`).
+The board has a 100 MHz single-ended clock on `P26`, UART on `AN11/AM11`,
+4 GB DDR4, a 4-bit TF-card interface, and 256 Mbit QSPI configuration flash.
+
+```bash
+# List all FPGA targets visible through Vivado Hardware Manager:
+make fpga-info FPGA_DETECT_REFRESH=1
+
+# Build and load the unified 4 GB DDR4/MIG BIOS bitstream:
+make fpga-build FPGA_BOARD=mlk_cu08_ku15p
+make fpga-load FPGA_BOARD=mlk_cu08_ku15p
+
+# Open the H13 UART (the default on the current host is /dev/ttyUSB1):
+make fpga-console FPGA_BOARD=mlk_cu08_ku15p UART_PORT=/dev/ttyUSB1
+
+# Linux/MIG flow:
+make linux-fpga-rv32-e2e FPGA_BOARD=mlk_cu08_ku15p UART_PORT=/dev/ttyUSB1
+```
+
+The H13 platform uses the board-specific clock, UART, SD, and DDR pinout while
+reusing the verified KU15P MIG and Vivado load/flash flow. H13 FPGA builds
+always use the external 4 GB DDR4 profile (`VARIANT=linux32`, `WITH_MIG=1`,
+`INTEGRATED_MAIN_RAM_SIZE=0`); there is no separate standard 512 KiB image.
+Because H13 and CU07 share the same `xcku15p` JTAG part, always pass
+`FPGA_BOARD` for build, load, flash, and upload operations.
+
 ## MLK-CU07-KU15P Hardware Flow (Xilinx Vivado)
 
-Milianke MLK-CU07-KU15P (Kintex UltraScale+ `xcku15p-ffva1156-2-e`). UART-only bring-up SoC (integrated ROM/SRAM, no DDR4) over the on-board USB-UART.
+Milianke MLK-CU07-KU15P (Kintex UltraScale+ `xcku15p-ffva1156-2-e`). The
+bring-up flow supports the on-board DDR4 through the shared KU15P MIG profile.
 
 ```bash
 # Source the Vivado settings so `vivado` is on PATH, e.g.:
@@ -320,9 +354,11 @@ fpga/litex/
 +-- mk/                 # Derived config (config.mk) and reusable recipes (recipes.mk)
 +-- setup_env.sh        # Environment setup (venv + LiteX install)
 +-- raptor_soc.py       # Verilator simulation SoC entry point
-+-- raptor_tang_mega_138k_pro.py  # Tang Mega 138K Pro FPGA SoC entry point
-+-- raptor_mlk_cu07_ku15p.py      # MLK-CU07-KU15P Vivado/MIG FPGA SoC entry point
-+-- raptor_alinx_axau15.py         # ALINX AXAU15 MIG/SDCard target
++-- tang_mega_138k_pro.py         # Tang Mega 138K Pro FPGA SoC entry point
++-- mlk_cu07_ku15p.py             # MLK-CU07-KU15P Vivado/MIG FPGA SoC entry point
++-- mlk_cu08_ku15p.py              # MLK-CU08-KU15P Vivado/MIG entry point
++-- mlk_cu08_ku15p_platform.py     # MLK-CU08-KU15P local pin/platform definition
++-- alinx_axau15.py                # ALINX AXAU15 MIG/SDCard target
 +-- README.md           # This file
 +-- firmware/           # Sim, integrated-ROM FPGA, and Linux-FPGA stage0 firmware
 +-- benchmarks/         # LiteX-native CoreMark/Embench payloads
@@ -343,13 +379,12 @@ fpga/litex/
 
 Raptor's microarchitecture preset is selected separately with `RAPT_CONFIG=<name>`, which maps to `hdl/configs/<name>/rapt_config.svh` during RTL packing. The LiteX CPU `VARIANT` still selects SoC/software defaults, but Linux variants also add RTL preprocessor defines through `RAPT_PACK_VFLAGS` (`-DRAPT_LINUX`, and `-DRAPT_RV64` for `linux64`).
 
-| Variant    | Use Case                               |
-| ---------- | -------------------------------------- |
-| `standard` | Sim & FPGA (BIOS-only, no Linux image) |
-| `linux32`  | RV32 Linux/OpenSBI boot                |
-| `linux64`  | RV64 experiments                       |
+| Variant   | Use Case                |
+| --------- | ----------------------- |
+| `linux32` | RV32 Linux/OpenSBI boot |
+| `linux64` | RV64 experiments        |
 
-Use `make linux32` or `make linux64` for simulation. For FPGA, prefer the explicit commands such as `make linux-fpga-rv32-build` and `make linux-fpga-rv64-build`; `linux`, `linux-rv32`, and `linux-rv64` remain compatibility aliases.
+Use `make linux32` or `make linux64` for simulation. For FPGA, use the explicit commands such as `make linux-fpga-rv32-build` and `make linux-fpga-rv64-build`.
 
 ## Command Reference
 

@@ -17,7 +17,6 @@ from litex.soc.integration.soc import SoCRegion
 # Variants -----------------------------------------------------------------------------------------
 
 CPU_VARIANTS = {
-    "standard": "raptor",
     "linux32": "raptor",
     "linux64": "raptor",
 }
@@ -25,7 +24,6 @@ CPU_VARIANTS = {
 # GCC Flags ----------------------------------------------------------------------------------------
 
 GCC_FLAGS = {
-    "standard": "-march=rv32imac_zicbom_zicntr_zicond_zicsr_zifencei_zcb_zba_zbb_zbc_zbs -mabi=ilp32",
     "linux32": "-march=rv32imac_zicbom_zicntr_zicond_zicsr_zifencei_zcb_zba_zbb_zbc_zbs -mabi=ilp32",
     "linux64": "-march=rv64imac_zicbom_zicntr_zicond_zicsr_zifencei_zcb_zba_zbb_zbc_zbs -mabi=lp64",
 }
@@ -65,7 +63,7 @@ class Raptor(CPU):
         flags += " -D__raptor__"
         return flags
 
-    def __init__(self, platform, variant="standard"):
+    def __init__(self, platform, variant="linux32"):
         self.platform = platform
         self.variant = variant
         self.human_name = f"Raptor ({variant})"
@@ -146,7 +144,7 @@ class Raptor(CPU):
         self.reset_address = reset_address
 
     @staticmethod
-    def add_sources(platform, variant="standard"):
+    def add_sources(platform, variant="linux32"):
         raptor_home = os.environ.get(
             "RAPTOR_HOME",
             os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", ".."),

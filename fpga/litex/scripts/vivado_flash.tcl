@@ -19,7 +19,7 @@ if {![file exists $bitstream]} {
 
 # MT25QU256: 256 Mbit (32 MB) QSPI flash, SPIx4 config interface.
 set cfg_part "mt25qu256-spi-x1_x2_x4"
-set mcs "$out_dir/mlk_cu07_ku15p.mcs"
+set mcs "$out_dir/[file rootname [file tail $bitstream]].mcs"
 
 # Generate the configuration memory image from the bitstream.
 write_cfgmem -force -format mcs -interface spix4 -size 32 \

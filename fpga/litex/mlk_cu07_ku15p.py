@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 #
-# raptor_mlk_cu07_ku15p.py — Raptor LiteX SoC on the Milianke MLK-CU07-KU15P
+# mlk_cu07_ku15p.py — Raptor LiteX SoC on the Milianke MLK-CU07-KU15P
 # (Xilinx Kintex UltraScale+ XCKU15P-FFVA1156-2-E) using the Vivado toolchain.
 #
-# This is the Vivado counterpart to raptor_tang_mega_138k_pro.py (Gowin). It
+# This is the Vivado counterpart to tang_mega_138k_pro.py (Gowin). It
 # builds the UART bring-up SoC by default: integrated ROM (BIOS or custom
 # firmware) + integrated SRAM + optional BSRAM main_ram, a single LiteUART on
 # the on-board USB-UART, and the Raptor OoO core. Pass --with-mig to switch
@@ -19,8 +19,8 @@
 #   * Cfg flash   : MT25QU256 QSPI, SPIx4
 #
 # Usage (driven by the Makefile fpga-* targets with FPGA_BOARD=mlk_cu07_ku15p):
-#   python3 raptor_mlk_cu07_ku15p.py --boot-mode=bios --build
-#   python3 raptor_mlk_cu07_ku15p.py --boot-mode=custom \
+#   python3 mlk_cu07_ku15p.py --boot-mode=bios --build
+#   python3 mlk_cu07_ku15p.py --boot-mode=custom \
 #       --integrated-rom-init=build/.../boot.bin --build
 
 import os
@@ -57,6 +57,8 @@ CPUS["raptor"] = Raptor
 
 DEFAULT_FPGA_SYS_CLK = int(75e6)
 DEFAULT_FPGA_BOOT_MODE = "bios"
+BOARD_NAME = "mlk_cu07_ku15p"
+BOARD_IDENT = "Raptor LiteX SoC on MLK-CU07-KU15P"
 
 
 # CRG --------------------------------------------------------------------------
@@ -326,8 +328,8 @@ class RaptorMLKCU07SoC(SoCCore):
         platform = mlk_cu07_ku15p.Platform(toolchain="vivado")
 
         kwargs["cpu_type"] = "raptor"
-        kwargs.setdefault("cpu_variant", "standard")
-        kwargs.setdefault("ident", "Raptor LiteX SoC on MLK-CU07-KU15P")
+        kwargs.setdefault("cpu_variant", "linux32")
+        kwargs.setdefault("ident", BOARD_IDENT)
         kwargs.setdefault("ident_version", True)
         kwargs.setdefault("uart_name", "serial")
         kwargs.setdefault("uart_baudrate", 115200)
@@ -359,7 +361,7 @@ class RaptorMLKCU07SoC(SoCCore):
             # be armed before the core boots, then auto-release so the boot ->
             # derailment happens with the ILA already watching.  The hold cycle
             # count is derived from sys_clk_freq so the window stays ~45 s at
-            # any profile clock (10 MHz standard / 50 MHz linux).  The
+            # any supported profile clock (for example 10 MHz / 50 MHz).  The
             # (physically inaccessible) J23 button is OR'd in as a harmless
             # manual backup.
             cpu_rst_btn = Signal()
@@ -446,7 +448,7 @@ class RaptorMLKCU07SoC(SoCCore):
 def main():
     parser = LiteXArgumentParser(
         platform=mlk_cu07_ku15p.Platform,
-        description="Raptor LiteX SoC on Milianke MLK-CU07-KU15P (Vivado).",
+        description=f"{BOARD_IDENT} (Vivado).",
     )
     parser.add_target_argument(
         "--sys-clk-freq",
@@ -517,7 +519,7 @@ def main():
         action="store_true",
         help="Reuse the previous routed checkpoint for incremental implementation.",
     )
-    parser.set_defaults(cpu_type="raptor", cpu_variant="standard")
+    parser.set_defaults(cpu_type="raptor", cpu_variant="linux32")
 
     args = parser.parse_args()
 
@@ -586,7 +588,9 @@ def main():
     # intra-site RAMD32/FDRE paths that Vivado cannot detour, so keep a smaller
     # extra hold margin for the Linux/DDR build. NOTE: no curly braces in the
     # pre-optimize command -- the toolchain str.format()s these command strings.
-    hold_uncertainty = 0.050 if (args.with_litedram or args.with_mig) else 0.250
+    hold_uncertainty = 0.050 if (
+        args.with_litedram or args.with_mig or BOARD_NAME == "mlk_cu08_ku15p"
+    ) else 0.250
     soc.platform.toolchain.pre_optimize_commands.add(
         f"set_clock_uncertainty -hold {hold_uncertainty:.3f} [all_clocks]"
     )
@@ -640,7 +644,7 @@ def main():
     route_checkpoint = os.path.join(
         builder_kwargs["output_dir"],
         "gateware",
-        "mlk_cu07_ku15p_route.dcp",
+        f"{BOARD_NAME}_route.dcp",
     )
     if args.vivado_incremental and os.path.isfile(route_checkpoint):
         soc.platform.toolchain.incremental_implementation = True
@@ -651,7 +655,7 @@ def main():
     builder = Builder(soc, **builder_kwargs)
 
     if args.build:
-        builder.build(build_name="mlk_cu07_ku15p", **toolchain_argdict)
+        builder.build(build_name=BOARD_NAME, **toolchain_argdict)
 
 
 if __name__ == "__main__":

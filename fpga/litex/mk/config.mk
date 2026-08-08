@@ -7,7 +7,7 @@ ifeq ($(LITEX_CONFIG_PHASE),profile)
 # Private board capability table. User-facing board selection remains in the
 # main Makefile; these values only drive derived configuration.
 BOARD_tang_mega_138k_pro_VENDOR              := gowin
-BOARD_tang_mega_138k_pro_PY                  := raptor_tang_mega_138k_pro.py
+BOARD_tang_mega_138k_pro_PY                  := tang_mega_138k_pro.py
 BOARD_tang_mega_138k_pro_BITNAME             := sipeed_tang_mega_138k_pro.fs
 BOARD_tang_mega_138k_pro_TIMINGRPT           :=
 BOARD_tang_mega_138k_pro_UART                :=
@@ -26,8 +26,30 @@ BOARD_tang_mega_138k_pro_LINUX_WITH_SDCARD   := 0
 BOARD_tang_mega_138k_pro_LINUX_MAIN_RAM_SIZE := 0x80000
 BOARD_tang_mega_138k_pro_VIVADO_FLASH        := 0
 
+BOARD_mlk_cu08_ku15p_VENDOR              := vivado
+BOARD_mlk_cu08_ku15p_PY                  := mlk_cu08_ku15p.py
+BOARD_mlk_cu08_ku15p_BITNAME             := mlk_cu08_ku15p.bit
+BOARD_mlk_cu08_ku15p_TIMINGRPT           := mlk_cu08_ku15p_timing.rpt
+BOARD_mlk_cu08_ku15p_UART                := /dev/ttyUSB1
+BOARD_mlk_cu08_ku15p_DEVICE              := xcku15p
+BOARD_mlk_cu08_ku15p_PART                := xcku15p-ffva1156-2-e
+BOARD_mlk_cu08_ku15p_DEFAULT_SYS_CLK     := 10000000
+BOARD_mlk_cu08_ku15p_LINUX_SYS_CLK       := 50000000
+BOARD_mlk_cu08_ku15p_DEFAULT_RAPT_CONFIG := default
+BOARD_mlk_cu08_ku15p_HAS_LITEDRAM        := 1
+BOARD_mlk_cu08_ku15p_LINUX_WITH_LITEDRAM := 0
+BOARD_mlk_cu08_ku15p_LITEDRAM_SIZE       := 0x40000000
+BOARD_mlk_cu08_ku15p_HAS_MIG             := 1
+BOARD_mlk_cu08_ku15p_LINUX_WITH_MIG      := 1
+BOARD_mlk_cu08_ku15p_MIG_TCL             := scripts/ku15p_ddr4_mig.tcl
+BOARD_mlk_cu08_ku15p_HAS_SDCARD          := 1
+BOARD_mlk_cu08_ku15p_DEFAULT_WITH_SDCARD := 1
+BOARD_mlk_cu08_ku15p_LINUX_WITH_SDCARD   := 1
+BOARD_mlk_cu08_ku15p_LINUX_MAIN_RAM_SIZE := 0
+BOARD_mlk_cu08_ku15p_VIVADO_FLASH        := 1
+
 BOARD_mlk_cu07_ku15p_VENDOR              := vivado
-BOARD_mlk_cu07_ku15p_PY                  := raptor_mlk_cu07_ku15p.py
+BOARD_mlk_cu07_ku15p_PY                  := mlk_cu07_ku15p.py
 BOARD_mlk_cu07_ku15p_BITNAME             := mlk_cu07_ku15p.bit
 BOARD_mlk_cu07_ku15p_TIMINGRPT           := mlk_cu07_ku15p_timing.rpt
 BOARD_mlk_cu07_ku15p_UART                := /dev/ttyUSB0
@@ -49,7 +71,7 @@ BOARD_mlk_cu07_ku15p_LINUX_MAIN_RAM_SIZE := 0
 BOARD_mlk_cu07_ku15p_VIVADO_FLASH        := 1
 
 BOARD_alinx_axau15_VENDOR              := vivado
-BOARD_alinx_axau15_PY                  := raptor_alinx_axau15.py
+BOARD_alinx_axau15_PY                  := alinx_axau15.py
 BOARD_alinx_axau15_BITNAME             := alinx_axau15.bit
 BOARD_alinx_axau15_TIMINGRPT           := alinx_axau15_timing.rpt
 BOARD_alinx_axau15_UART                :=
@@ -69,7 +91,7 @@ BOARD_alinx_axau15_LINUX_MAIN_RAM_SIZE := 0
 BOARD_alinx_axau15_VIVADO_FLASH        := 0
 
 BOARD_xilinx_vcu118_VENDOR              := vivado
-BOARD_xilinx_vcu118_PY                  := raptor_xilinx_vcu118.py
+BOARD_xilinx_vcu118_PY                  := xilinx_vcu118.py
 BOARD_xilinx_vcu118_BITNAME             := xilinx_vcu118.bit
 BOARD_xilinx_vcu118_TIMINGRPT           := xilinx_vcu118_timing.rpt
 BOARD_xilinx_vcu118_UART                :=
@@ -97,32 +119,57 @@ _IS_FPGA_GOAL := $(strip \
 	$(filter $(_FPGA_ALIAS_GOALS),$(MAKECMDGOALS)))
 _IS_LINUX_PROFILE_DEFAULT_GOAL := $(strip $(_IS_FPGA_GOAL) $(filter $(_LINUX_PROFILE_BENCH_GOALS),$(MAKECMDGOALS)))
 _FPGA_BOARD_EXPLICIT := $(filter command line environment override,$(origin FPGA_BOARD))
-_FPGA_AUTO_DETECT_ENABLED := $(and $(_IS_FPGA_GOAL),$(if $(_FPGA_BOARD_EXPLICIT),,$(filter 1 yes true on,$(FPGA_AUTO_DETECT))))
-_FPGA_DETECT_REFRESH := $(or $(filter fpga-detect,$(MAKECMDGOALS)),$(filter 1 yes true on,$(FPGA_DETECT_REFRESH)))
+_FPGA_DETECT_GOAL := $(filter fpga-detect fpga-info,$(MAKECMDGOALS))
+_FPGA_BOARD_REQUIRED_GOALS := fpga-gen fpga-build fpga-build-force fpga-load fpga-flash fpga fpga-timing-ok \
+	linux-fpga-build linux-fpga-rv32-build linux-fpga-rv64-build \
+	linux-fpga-load linux-fpga-rv32-load linux-fpga-rv64-load \
+	linux-fpga-run linux-fpga-rv32-run linux-fpga-rv64-run \
+	linux-fpga-e2e linux-fpga-rv32-e2e linux-fpga-rv64-e2e \
+	opensbi-fpga-run opensbi-fpga-rv32-run opensbi-fpga-rv64-run \
+	opensbi-fpga-e2e opensbi-fpga-rv32-e2e opensbi-fpga-rv64-e2e \
+	fpga-smoke $(BOARD_ALIASES) $(addsuffix -build,$(BOARD_ALIASES))
+_FPGA_BOARD_REQUIRED := $(filter $(_FPGA_BOARD_REQUIRED_GOALS),$(MAKECMDGOALS))
+_FPGA_AUTO_DETECT_ENABLED := $(and $(_IS_FPGA_GOAL),$(or $(_FPGA_DETECT_GOAL),$(if $(_FPGA_BOARD_EXPLICIT),,$(filter 1 yes true on,$(FPGA_AUTO_DETECT)))))
+_FPGA_DETECT_REFRESH := $(or $(_FPGA_DETECT_GOAL),$(filter 1 yes true on,$(FPGA_DETECT_REFRESH)))
 
 FPGA_DETECTED_PARTS := $(strip $(if $(_FPGA_AUTO_DETECT_ENABLED),$(shell \
 	set -o pipefail; \
 	cache="$(strip $(FPGA_DETECT_CACHE))"; \
 	if [ -n "$(_FPGA_DETECT_REFRESH)" ] || [ ! -f "$$cache" ]; then \
 		mkdir -p "$$(dirname "$$cache")"; \
+		raw="$$cache.raw.$$PPID"; \
 		tmp="$$cache.tmp.$$PPID"; \
+		info_tmp="$(strip $(FPGA_DETECT_INFO_CACHE)).tmp.$$PPID"; \
+		count_tmp="$(strip $(FPGA_DETECT_COUNT_CACHE)).tmp.$$PPID"; \
 		if command -v "$(VIVADO)" >/dev/null 2>&1; then \
 			"$(VIVADO)" -mode batch -nojournal -nolog \
-				-source "$(LITEX_DIR)/scripts/vivado_detect.tcl" 2>/dev/null | \
-				sed -n 's/^RAPTOR_FPGA_PART=//p' | sort -u > "$$tmp" || true; \
-			mv -f "$$tmp" "$$cache"; \
+				-source "$(LITEX_DIR)/scripts/vivado_detect.tcl" > "$$raw" 2>/dev/null || true; \
+			sed -n 's/^RAPTOR_FPGA_PART=//p' "$$raw" | sort -u > "$$tmp"; \
+			sed -n 's/^RAPTOR_FPGA_INFO=//p' "$$raw" | sort -u > "$$info_tmp"; \
+			sed -n 's/^RAPTOR_FPGA_COUNT=//p' "$$raw" | tail -n 1 > "$$count_tmp"; \
+			[ -s "$$count_tmp" ] || printf '0\n' > "$$count_tmp"; \
 		else \
-			rm -f "$$tmp"; \
+			: > "$$tmp"; : > "$$info_tmp"; printf '0\n' > "$$count_tmp"; \
 		fi; \
+		mv -f "$$tmp" "$$cache"; \
+		mv -f "$$info_tmp" "$(strip $(FPGA_DETECT_INFO_CACHE))"; \
+		mv -f "$$count_tmp" "$(strip $(FPGA_DETECT_COUNT_CACHE))"; \
+		rm -f "$$raw"; \
 	fi; \
 	cat "$$cache" 2>/dev/null)))
 FPGA_DETECTED_BOARDS := $(strip $(foreach board,$(BOARDS),$(if $(filter $(BOARD_$(board)_DEVICE),$(FPGA_DETECTED_PARTS)),$(board))))
+FPGA_DETECTED_BOARD := $(if $(word 2,$(FPGA_DETECTED_BOARDS)),,$(firstword $(FPGA_DETECTED_BOARDS)))
+FPGA_DETECTED_INFO := $(strip $(shell cat $(FPGA_DETECT_INFO_CACHE) 2>/dev/null))
+FPGA_DETECTED_COUNT := $(strip $(shell cat $(FPGA_DETECT_COUNT_CACHE) 2>/dev/null || echo 0))
 ifneq ($(word 2,$(FPGA_DETECTED_BOARDS)),)
-$(error Multiple supported FPGA boards detected ($(FPGA_DETECTED_BOARDS)); set FPGA_BOARD explicitly)
+ifneq ($(strip $(_FPGA_DETECT_GOAL)),)
+else ifneq ($(strip $(_FPGA_BOARD_REQUIRED)),)
+$(error Multiple supported FPGA boards detected ($(FPGA_DETECTED_BOARDS)); set FPGA_BOARD explicitly for build/load/flash operations)
+else
 endif
-FPGA_DETECTED_BOARD := $(firstword $(FPGA_DETECTED_BOARDS))
+endif
 
-_default_variant = $(if $(_IS_LINUX_PROFILE_DEFAULT_GOAL),$(if $(strip $(GOWIN_APP)),standard,linux32),standard)
+_default_variant = linux32
 _linux_fpga_profile = $(if $(and $(_IS_FPGA_GOAL),$(filter linux32 linux64,$(1))),1,)
 _default_fpga_board = $(if $(FPGA_DETECTED_BOARD),$(FPGA_DETECTED_BOARD),$(if $(LINUX_FPGA_PROFILE),mlk_cu07_ku15p,tang_mega_138k_pro))
 
@@ -211,9 +258,7 @@ endif
 endif
 
 FPGA_FLAVOR := $(BOOT_MODE)
-ifneq ($(VARIANT),standard)
 FPGA_FLAVOR := $(FPGA_FLAVOR)-$(VARIANT)
-endif
 ifneq (,$(filter 1 yes true on,$(WITH_LITEDRAM)))
 FPGA_FLAVOR := $(FPGA_FLAVOR)-litedram
 endif
@@ -226,9 +271,7 @@ endif
 ifneq (,$(filter 1 yes true on,$(SDCARD_BOOT)))
 FPGA_FLAVOR := $(FPGA_FLAVOR)-boot
 endif
-ifneq ($(VARIANT),standard)
 FPGA_FLAVOR := $(FPGA_FLAVOR)-$(RAPT_CONFIG)
-endif
 FPGA_FLAVOR_SUFFIX := $(strip $(FPGA_FLAVOR_SUFFIX))
 ifneq ($(FPGA_FLAVOR_SUFFIX),)
 FPGA_FLAVOR := $(FPGA_FLAVOR)-$(FPGA_FLAVOR_SUFFIX)

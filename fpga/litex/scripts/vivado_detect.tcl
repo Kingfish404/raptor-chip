@@ -5,9 +5,16 @@ open_hw_manager
 connect_hw_server -allow_non_jtag
 open_hw_target
 
-foreach dev [get_hw_devices] {
+set devices [get_hw_devices]
+puts "RAPTOR_FPGA_COUNT=[llength $devices]"
+
+set index 0
+foreach dev $devices {
     refresh_hw_device -update_hw_probes false $dev
-    puts "RAPTOR_FPGA_PART=[string tolower [get_property PART $dev]]"
+    set part [string tolower [get_property PART $dev]]
+    puts "RAPTOR_FPGA_PART=$part"
+    puts "RAPTOR_FPGA_INFO=$index|$part|$dev"
+    incr index
 }
 
 close_hw_target

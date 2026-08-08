@@ -182,7 +182,7 @@ firmware-clean:
 $(FW_LINUX_FPGA_DIR):
 	@mkdir -p $@
 
-$(LINUX_IMG): linux-build
+$(LINUX_IMG): $(LINUX_VARIANT)-build
 	@test -f $@
 
 $(OPENSBI_BIN): opensbi-build
@@ -219,7 +219,7 @@ fpga-linux-dtb-check: $(FW_LINUX_FPGA_DTB)
 
 $(FW_LINUX_FPGA_ELF): $(FW_LINUX_FPGA_SRC)/boot.S $(FW_LINUX_FPGA_SRC)/link.ld $(FW_LINUX_FPGA_DTB) $(LINUX_FPGA_PAYLOAD) | $(FW_LINUX_FPGA_DIR)
 	@if [ -z "$(LINUX_FPGA_PAYLOAD)" ] || [ ! -f "$(LINUX_FPGA_PAYLOAD)" ]; then \
-		echo "[ERR] Linux FPGA payload not found after linux-build: $(LINUX_FPGA_PAYLOAD)"; exit 1; fi
+		echo "[ERR] Linux FPGA payload not found after $(LINUX_VARIANT)-build: $(LINUX_FPGA_PAYLOAD)"; exit 1; fi
 	$(CROSS)gcc $(FW_LINUX_FPGA_CFLAGS) -T $(FW_LINUX_FPGA_SRC)/link.ld -o $@ $(FW_LINUX_FPGA_SRC)/boot.S
 
 $(FW_LINUX_FPGA_BIN): $(FW_LINUX_FPGA_ELF)
@@ -408,9 +408,6 @@ opensbi-rv32-build:
 opensbi-rv64-build:
 	@$(call _make,opensbi-build VARIANT=linux64)
 
-opensbi:
-	@$(call _make,opensbi-rv32)
-
 opensbi-rv32:
 	@$(call _make,sim PAYLOAD=opensbi VARIANT=linux32)
 
@@ -433,9 +430,6 @@ egos-ku15p-sim: fpga-egos-prepare
 egos-ku15p-sim-trace: fpga-egos-prepare
 	@$(call _make,egos-ku15p-sim TRACE=fst)
 
-raptos-bios-sim:
-	@$(call _make,raptos-bios-sim-rv32)
-
 raptos-bios-sim-rv32: fpga-raptos-rv32-build
 	@echo "[INFO] BIOS-mode sim boot: preload RV32 RaptOS at $(MAIN_RAM_BASE), then issue 'boot $(MAIN_RAM_BASE)'."
 	@$(call _make,sim ROM=bios PAYLOAD=img IMG=$(RAPTOS_KU15P_RV32_BIN) VARIANT=linux32 \
@@ -452,23 +446,11 @@ raptos-bios-sim-rv64: fpga-raptos-rv64-build
 		SIM_KEEP_RUNNING_AFTER_INJECT=1 \
 		SIM_TIMEOUT=$(if $(filter command line environment,$(origin SIM_TIMEOUT)),$(SIM_TIMEOUT),300))
 
-linux-build:
-	@$(call _make,linux32-build)
-
 linux32-build:
 	$(MAKE) -s -C $(LINUX_DIR) $(LINUX_DOWNLOAD_TARGET)
 
 linux64-build:
 	@$(call _make,linux32-build VARIANT=linux64)
-
-linux-rv32-build:
-	@$(call _make,linux32-build)
-
-linux-rv64-build:
-	@$(call _make,linux64-build)
-
-linux:
-	@$(call _make,linux32)
 
 linux32:
 	@$(call _make,sim PAYLOAD=linux VARIANT=linux32)
@@ -476,17 +458,11 @@ linux32:
 linux64:
 	@$(call _make,sim PAYLOAD=linux VARIANT=linux64)
 
-linux-rv32:
-	@$(call _make,linux32)
-
-linux-rv64:
-	@$(call _make,linux64)
-
 fpga-img-rv32:
-	@$(call _make,fpga-img VARIANT=linux32)
+	@$(call _make,$(FW_LINUX_FPGA_IMAGE) VARIANT=linux32)
 
 fpga-img-rv64:
-	@$(call _make,fpga-img VARIANT=linux64)
+	@$(call _make,$(FW_LINUX_FPGA_IMAGE) VARIANT=linux64)
 
 fpga-linux-dtb-check-rv32:
 	@$(call _make,fpga-linux-dtb-check VARIANT=linux32)
@@ -495,46 +471,16 @@ fpga-linux-dtb-check-rv64:
 	@$(call _make,fpga-linux-dtb-check VARIANT=linux64)
 
 fpga-smoke-img-rv32:
-	@$(call _make,fpga-smoke-img VARIANT=linux32)
+	@$(call _make,$(FW_LINUX_FPGA_SMOKE_IMAGE) VARIANT=linux32)
 
 fpga-smoke-img-rv64:
-	@$(call _make,fpga-smoke-img VARIANT=linux64)
+	@$(call _make,$(FW_LINUX_FPGA_SMOKE_IMAGE) VARIANT=linux64)
 
 fpga-opensbi-img-rv32:
-	@$(call _make,fpga-opensbi-img VARIANT=linux32)
+	@$(call _make,$(FW_LINUX_FPGA_OPENSBI_IMAGE) VARIANT=linux32)
 
 fpga-opensbi-img-rv64:
-	@$(call _make,fpga-opensbi-img VARIANT=linux64)
-
-linux-rv64:
-	@$(call _make,sim PAYLOAD=linux VARIANT=linux64)
-
-fpga-img-rv32:
-	@$(call _make,fpga-img VARIANT=linux)
-
-fpga-img-rv64:
-	@$(call _make,fpga-img VARIANT=linux64)
-
-fpga-linux-dtb-check-rv32:
-	@$(call _make,fpga-linux-dtb-check VARIANT=linux)
-
-fpga-linux-dtb-check-rv64:
-	@$(call _make,fpga-linux-dtb-check VARIANT=linux64)
-
-fpga-smoke-img-rv32:
-	@$(call _make,fpga-smoke-img VARIANT=linux)
-
-fpga-smoke-img-rv64:
-	@$(call _make,fpga-smoke-img VARIANT=linux64)
-
-fpga-opensbi-img-rv32:
-	@$(call _make,fpga-opensbi-img VARIANT=linux)
-
-fpga-opensbi-img-rv64:
-	@$(call _make,fpga-opensbi-img VARIANT=linux64)
-
-linux-fpga-build:
-	@$(call _make,linux-fpga-rv32-build)
+	@$(call _make,$(FW_LINUX_FPGA_OPENSBI_IMAGE) VARIANT=linux64)
 
 linux-fpga-rv32-build:
 	@$(call _make,fpga-build $(_LINUX_FPGA_RV32_ARGS))
@@ -542,26 +488,17 @@ linux-fpga-rv32-build:
 linux-fpga-rv64-build:
 	@$(call _make,fpga-build $(_LINUX_FPGA_RV64_ARGS))
 
-linux-fpga-load:
-	@$(call _make,linux-fpga-rv32-load)
-
 linux-fpga-rv32-load:
 	@$(call _make,fpga-load $(_LINUX_FPGA_RV32_ARGS))
 
 linux-fpga-rv64-load:
 	@$(call _make,fpga-load $(_LINUX_FPGA_RV64_ARGS))
 
-linux-fpga-upload:
-	@$(call _make,linux-fpga-rv32-upload)
-
 linux-fpga-rv32-upload:
 	@$(call _make,fpga-upload $(_LINUX_FPGA_RV32_ARGS))
 
 linux-fpga-rv64-upload:
 	@$(call _make,fpga-upload $(_LINUX_FPGA_RV64_ARGS))
-
-linux-fpga-run:
-	@$(call _make,linux-fpga-rv32-run)
 
 linux-fpga-rv32-run:
 	@$(call _make,linux-fpga-rv32-load)
@@ -571,9 +508,6 @@ linux-fpga-rv64-run:
 	@$(call _make,linux-fpga-rv64-load)
 	@$(call _make,linux-fpga-rv64-upload)
 
-linux-fpga-e2e:
-	@$(call _make,linux-fpga-rv32-e2e)
-
 linux-fpga-rv32-e2e:
 	@$(call _make,linux-fpga-rv32-build)
 	@$(call _make,linux-fpga-rv32-run)
@@ -582,17 +516,11 @@ linux-fpga-rv64-e2e:
 	@$(call _make,linux-fpga-rv64-build)
 	@$(call _make,linux-fpga-rv64-run)
 
-opensbi-fpga-upload:
-	@$(call _make,opensbi-fpga-rv32-upload)
-
 opensbi-fpga-rv32-upload:
 	@$(call _make,fpga-opensbi-upload $(_LINUX_FPGA_RV32_ARGS))
 
 opensbi-fpga-rv64-upload:
 	@$(call _make,fpga-opensbi-upload $(_LINUX_FPGA_RV64_ARGS))
-
-opensbi-fpga-run:
-	@$(call _make,opensbi-fpga-rv32-run)
 
 opensbi-fpga-rv32-run:
 	@$(call _make,linux-fpga-rv32-load)
@@ -602,9 +530,6 @@ opensbi-fpga-rv64-run:
 	@$(call _make,linux-fpga-rv64-load)
 	@$(call _make,opensbi-fpga-rv64-upload)
 
-opensbi-fpga-e2e:
-	@$(call _make,opensbi-fpga-rv32-e2e)
-
 opensbi-fpga-rv32-e2e:
 	@$(call _make,linux-fpga-rv32-build)
 	@$(call _make,opensbi-fpga-rv32-run)
@@ -613,10 +538,10 @@ opensbi-fpga-rv64-e2e:
 	@$(call _make,linux-fpga-rv64-build)
 	@$(call _make,opensbi-fpga-rv64-run)
 
-fpga-opensbi-upload: fpga-opensbi-img
+fpga-opensbi-upload: $(FW_LINUX_FPGA_OPENSBI_IMAGE)
 	@$(call _fpga_linux_upload,$(FW_LINUX_FPGA_OPENSBI_IMAGE))
 
-fpga-smoke-upload: fpga-smoke-img
+fpga-smoke-upload: $(FW_LINUX_FPGA_SMOKE_IMAGE)
 	@$(call _fpga_linux_upload,$(FW_LINUX_FPGA_SMOKE_IMAGE))
 
 fpga-smoke:
@@ -707,15 +632,11 @@ fpga-egos-upload: fpga-egos-bundle
 	@$(MAKE) --no-print-directory fpga-upload $(_LINUX_FPGA_ARGS) \
 		BIN=$(FW_EGOS_STAGE0_BUNDLE) MAIN_RAM_BASE=$(LINUX_FPGA_EGOS_STAGE_ADDR)
 
-fpga-raptos-build: fpga-raptos-rv32-build
-
 fpga-raptos-rv32-build:
 	@$(MAKE) --no-print-directory -C $(RAPTOR_HOME)/app/tinyos/raptos all PLATFORM=ku15p-rv32 XLEN=32
 
 fpga-raptos-rv64-build:
 	@$(MAKE) --no-print-directory -C $(RAPTOR_HOME)/app/tinyos/raptos all PLATFORM=ku15p-rv64 XLEN=64
-
-fpga-raptos-upload: fpga-raptos-rv32-upload
 
 fpga-raptos-rv32-upload: fpga-raptos-rv32-build
 	@$(MAKE) --no-print-directory fpga-upload $(_LINUX_FPGA_RV32_ARGS) \
@@ -724,8 +645,6 @@ fpga-raptos-rv32-upload: fpga-raptos-rv32-build
 fpga-raptos-rv64-upload: fpga-raptos-rv64-build
 	@$(MAKE) --no-print-directory fpga-upload $(_LINUX_FPGA_RV64_ARGS) \
 		BIN=$(RAPTOS_KU15P_RV64_BIN) MAIN_RAM_BASE=$(MAIN_RAM_BASE)
-
-fpga-raptos-run: fpga-raptos-rv32-run
 
 fpga-raptos-rv32-run:
 	@$(MAKE) --no-print-directory fpga-raptos-rv32-upload $(_LINUX_FPGA_RV32_ARGS)
@@ -740,8 +659,17 @@ bios:
 	@$(MAKE) --no-print-directory sim ROM=bios SOC=$(SOC) PAYLOAD=$(PAYLOAD)
 
 fpga-detect:
-	@if [ -n "$(FPGA_DETECTED_BOARD)" ]; then \
+	@echo "[INFO] Connected FPGA count: $(FPGA_DETECTED_COUNT)"; \
+	if [ -s "$(FPGA_DETECT_INFO_CACHE)" ]; then \
+		awk -F'|' '{ printf "[INFO] FPGA[%s]: part=%s target=%s\n", $$1, $$2, $$3 }' "$(FPGA_DETECT_INFO_CACHE)"; \
+	else \
+		echo "[INFO] No FPGA target details cached."; \
+	fi; \
+	if [ -n "$(FPGA_DETECTED_BOARD)" ]; then \
 		echo "[INFO] Detected FPGA_BOARD=$(FPGA_DETECTED_BOARD) (parts: $(FPGA_DETECTED_PARTS))"; \
+	elif [ -n "$(FPGA_DETECTED_PARTS)" ]; then \
+		echo "[WARN] Part matches multiple board profiles: $(FPGA_DETECTED_BOARDS)"; \
+		echo "[WARN] Set FPGA_BOARD explicitly before build/load/flash."; \
 	else \
 		echo "[WARN] No supported Xilinx FPGA detected; default would be FPGA_BOARD=$(FPGA_BOARD)."; \
 		echo "[WARN] Set FPGA_BOARD explicitly for Gowin or an unrecognized JTAG device."; \
@@ -880,6 +808,12 @@ mlk-cu07-ku15p:
 
 mlk-cu07-ku15p-build:
 	@$(call _make,fpga-build FPGA_BOARD=mlk_cu07_ku15p)
+
+mlk-cu08-ku15p:
+	@$(call _make,fpga FPGA_BOARD=mlk_cu08_ku15p)
+
+mlk-cu08-ku15p-build:
+	@$(call _make,fpga-build FPGA_BOARD=mlk_cu08_ku15p)
 
 xilinx-vcu118:
 	@$(call _make,fpga FPGA_BOARD=xilinx_vcu118)

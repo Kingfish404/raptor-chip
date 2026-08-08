@@ -99,7 +99,7 @@ class RaptorVCU118SoC(SoCCore):
         platform = xilinx_vcu118.Platform(toolchain="vivado")
 
         kwargs["cpu_type"] = "raptor"
-        kwargs.setdefault("cpu_variant", "standard")
+        kwargs.setdefault("cpu_variant", "linux32")
         kwargs.setdefault("ident", "Raptor LiteX SoC on Xilinx VCU118")
         kwargs.setdefault("ident_version", True)
         kwargs.setdefault("uart_name", "serial")
@@ -178,7 +178,7 @@ def main():
         action="store_true",
         help="Reserved for compatibility with the common FPGA Makefile.",
     )
-    parser.set_defaults(cpu_type="raptor", cpu_variant="standard")
+    parser.set_defaults(cpu_type="raptor", cpu_variant="linux32")
 
     args = parser.parse_args()
     soc_kwargs = dict(parser.soc_argdict)

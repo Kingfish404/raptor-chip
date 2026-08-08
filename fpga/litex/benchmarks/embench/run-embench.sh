@@ -27,20 +27,14 @@ BUILD_CONFIG="$SCRIPT_DIR/build/.build-config"
 _ncpu=$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)
 JOBS="${JOBS:-$(( _ncpu / 2 > 0 ? _ncpu / 2 : 1 ))}"
 
-VARIANT="${VARIANT:-standard}"
+VARIANT="${VARIANT:-linux32}"
 ROM="${ROM:-sim}"
 SOC="${SOC:-default}"
 
 # Keep path logic in sync with fpga/litex/Makefile:
 #   SIM_DIR := build/sim/<variant>-<rom>-<soc>
 SIM_GW_DIR_DEFAULT="$LITEX_DIR/build/sim/${VARIANT}-${ROM}-${SOC}/gateware"
-# Backward-compatible fallback for older layouts.
-SIM_GW_DIR_LEGACY="$LITEX_DIR/build/$VARIANT/gateware"
-
 GW_DIR="${SIM_GW_DIR:-$SIM_GW_DIR_DEFAULT}"
-if [[ ! -x "$GW_DIR/obj_dir/Vsim" && -x "$SIM_GW_DIR_LEGACY/obj_dir/Vsim" ]]; then
-    GW_DIR="$SIM_GW_DIR_LEGACY"
-fi
 VSIM="$GW_DIR/obj_dir/Vsim"
 WORKDIR="$LITEX_DIR/build/embench-work"
 

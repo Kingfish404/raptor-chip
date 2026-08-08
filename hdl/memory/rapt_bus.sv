@@ -133,7 +133,18 @@ module rapt_bus #(
   assign mem.rd_req_id = issue_l1d ? (l1d_slot_ptw ? 4'(TLBD) : 4'(L1D))
                                    : (l1i_q_ptw[l1i_q_rdptr] ? 4'(TLBI) : 4'(L1I));
   assign mem.rd_req_addr = issue_l1d ? l1d_slot_addr : l1i_q_head_addr;
-  assign mem.rd_req_size = issue_l1d ? l1d_slot_size : 3'b010;
+  // RV64 page-table entries are 64 bits.  L1I/PTW requests share the L1I
+  // queue, but only ordinary instruction refills are 32-bit reads. Sending
+  // a 4-byte PTW read through LiteX's AXI64->AXI32 converter returns only one
+  // half of the PTE and loses the physical page number on FPGA.
+  assign mem.rd_req_size = issue_l1d ? l1d_slot_size
+                       : (l1i_q_ptw[l1i_q_rdptr]
+`ifdef RAPT_RV64
+                           ? 3'b011
+`else
+                           ? 3'b010
+`endif
+                           : 3'b010);
   assign mem.rd_req_burst = (issue_l1i && l1i_q_head_burst) ? 2'b01 : 2'b00;
   assign mem.rd_req_len = (issue_l1i && l1i_q_head_burst) ? 8'h1 : 8'h0;
   assign mem.rd_rsp_ready = 1'b1;
