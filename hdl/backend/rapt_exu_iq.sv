@@ -30,6 +30,7 @@
 module rapt_exu_iq #(
     parameter unsigned IQ_SIZE  = 8,
     parameter bit      HAS_ISS_B = 1'b0,
+    parameter bit      IN_ORDER_ISSUE = 1'b0,
     parameter unsigned ROB_SIZE = `RAPT_ROB_SIZE,
     parameter unsigned PLEN     = `RAPT_PHY_LEN,
     parameter unsigned RLEN     = `RAPT_REG_LEN,
@@ -52,6 +53,9 @@ module rapt_exu_iq #(
 
     // Fast load-use tag wakeup
     exu_load_fast_if.sink load_fast,
+
+    // Port-A execution availability from the attached function unit.
+    input logic issue_enable,
 
     // Issue ports: combinational view of the oldest ready entries.
     // op1/op2 have the fast-confirm MEM-result bypass already applied.
@@ -84,6 +88,17 @@ module rapt_exu_iq #(
   logic [IQ_SIZE-1:0] iq_pr2_fast;
   logic [   PLEN-1:0] iq_prd     [IQ_SIZE];
   logic [   RLEN-1:0] iq_rd      [IQ_SIZE];
+  logic [IQ_SIZE-1:0] iq_fp_valid;
+  logic [        5:0] iq_fp_op   [IQ_SIZE];
+  logic [        2:0] iq_fp_rm   [IQ_SIZE];
+  logic [        4:0] iq_fp_rs1  [IQ_SIZE];
+  logic [        4:0] iq_fp_rs2  [IQ_SIZE];
+  logic [        4:0] iq_fp_rs3  [IQ_SIZE];
+  logic [        4:0] iq_fp_rd   [IQ_SIZE];
+  logic [IQ_SIZE-1:0] iq_fp_dep1_busy, iq_fp_dep2_busy, iq_fp_dep3_busy;
+  logic [ ROBLen-1:0] iq_fp_dep1 [IQ_SIZE];
+  logic [ ROBLen-1:0] iq_fp_dep2 [IQ_SIZE];
+  logic [ ROBLen-1:0] iq_fp_dep3 [IQ_SIZE];
   logic [IQ_SIZE-1:0] iq_jen;
   logic [IQ_SIZE-1:0] iq_jren;
   // Ineligible for port B (dispatch sideband); only read when HAS_ISS_B=1.
@@ -104,23 +119,35 @@ module rapt_exu_iq #(
   logic            wb_valid [NWB];
   logic [PLEN-1:0] wb_prd   [NWB];
   logic [XLEN-1:0] wb_result[NWB];
+  logic [ROBLen-1:0] wb_dest[NWB];
   assign wb_valid[0]  = exu_ioq_bcast.valid;
   assign wb_prd[0]    = exu_ioq_bcast.prd;
   assign wb_result[0] = exu_ioq_bcast.result;
+  assign wb_dest[0]   = exu_ioq_bcast.dest;
   assign wb_valid[1]  = exu_rou.valid;
   assign wb_prd[1]    = exu_rou.prd;
   assign wb_result[1] = exu_rou.result;
+  assign wb_dest[1]   = exu_rou.dest;
   assign wb_valid[2]  = exu_rou_b.valid;
   assign wb_prd[2]    = exu_rou_b.prd;
   assign wb_result[2] = exu_rou_b.result;
+  assign wb_dest[2]   = exu_rou_b.dest;
   assign wb_valid[3]  = exu_wb_mul.valid;
   assign wb_prd[3]    = exu_wb_mul.prd;
   assign wb_result[3] = exu_wb_mul.result;
+  assign wb_dest[3]   = exu_wb_mul.dest;
 
   function automatic logic wb_hit(input logic [PLEN-1:0] pr);
     wb_hit = 1'b0;
     for (int p = 0; p < NWB; p++) begin
       wb_hit |= (pr != '0) && wb_valid[p] && (wb_prd[p] == pr);
+    end
+  endfunction
+
+  function automatic logic fp_wb_hit(input logic [ROBLen-1:0] dep);
+    fp_wb_hit = 1'b0;
+    for (int p = 0; p < NWB; p++) begin
+      fp_wb_hit |= wb_valid[p] && (wb_dest[p] == dep);
     end
   endfunction
 
@@ -177,6 +204,7 @@ module rapt_exu_iq #(
       pr1_slow_val[i]     = wb_val(iq_pr1[i], iq_vj[i]);
       pr2_slow_val[i]     = wb_val(iq_pr2[i], iq_vk[i]);
       pr_ready[i] = ~(iq_pr1_busy[i] | iq_pr2_busy[i])
+                    && ~(iq_fp_dep1_busy[i] | iq_fp_dep2_busy[i] | iq_fp_dep3_busy[i])
                     && (!iq_pr1_fast[i] || pr1_fast_confirm[i])
                     && (!iq_pr2_fast[i] || pr2_fast_confirm[i]);
       iq_free_vec[i]  = !iq_valid[i];
@@ -248,8 +276,12 @@ module rapt_exu_iq #(
   // === Issue selection ===
   // Port A: oldest ready entry (any class).
   logic [IQ_SIZE-1:0] sel_onehot;
+  logic [IQ_SIZE-1:0] oldest_valid_onehot;
   logic [IQLen-1:0] sel_idx;
-  assign sel_onehot = age_oldest_oh(iq_ready_vec);
+  assign oldest_valid_onehot = age_oldest_oh(iq_valid);
+  assign sel_onehot = issue_enable
+    ? (IN_ORDER_ISSUE ? (oldest_valid_onehot & iq_ready_vec) : age_oldest_oh(iq_ready_vec))
+    : '0;
   assign iss.valid  = |sel_onehot;
   assign sel_idx    = oh2bin(sel_onehot);
 
@@ -287,6 +319,19 @@ module rapt_exu_iq #(
   assign iss.dest  = iq_dest[sel_idx];
   assign iss.prd   = iq_prd[sel_idx];
   assign iss.rd    = iq_rd[sel_idx];
+  assign iss.fp_valid = iq_fp_valid[sel_idx];
+  assign iss.fp_op    = iq_fp_op[sel_idx];
+  assign iss.fp_rm    = iq_fp_rm[sel_idx];
+  assign iss.fp_rs1   = iq_fp_rs1[sel_idx];
+  assign iss.fp_rs2   = iq_fp_rs2[sel_idx];
+  assign iss.fp_rs3   = iq_fp_rs3[sel_idx];
+  assign iss.fp_rd    = iq_fp_rd[sel_idx];
+  assign iss.fp_dep1_valid = iq_fp_dep1_busy[sel_idx];
+  assign iss.fp_dep2_valid = iq_fp_dep2_busy[sel_idx];
+  assign iss.fp_dep3_valid = iq_fp_dep3_busy[sel_idx];
+  assign iss.fp_dep1 = iq_fp_dep1[sel_idx];
+  assign iss.fp_dep2 = iq_fp_dep2[sel_idx];
+  assign iss.fp_dep3 = iq_fp_dep3[sel_idx];
 
   assign iss_b.op1   = pr1_fast_confirm[sel_b_idx] ? exu_ioq_bcast.result : iq_vj[sel_b_idx];
   assign iss_b.op2   = pr2_fast_confirm[sel_b_idx] ? exu_ioq_bcast.result : iq_vk[sel_b_idx];
@@ -304,6 +349,19 @@ module rapt_exu_iq #(
   assign iss_b.dest  = iq_dest[sel_b_idx];
   assign iss_b.prd   = iq_prd[sel_b_idx];
   assign iss_b.rd    = iq_rd[sel_b_idx];
+  assign iss_b.fp_valid = iq_fp_valid[sel_b_idx];
+  assign iss_b.fp_op    = iq_fp_op[sel_b_idx];
+  assign iss_b.fp_rm    = iq_fp_rm[sel_b_idx];
+  assign iss_b.fp_rs1   = iq_fp_rs1[sel_b_idx];
+  assign iss_b.fp_rs2   = iq_fp_rs2[sel_b_idx];
+  assign iss_b.fp_rs3   = iq_fp_rs3[sel_b_idx];
+  assign iss_b.fp_rd    = iq_fp_rd[sel_b_idx];
+  assign iss_b.fp_dep1_valid = iq_fp_dep1_busy[sel_b_idx];
+  assign iss_b.fp_dep2_valid = iq_fp_dep2_busy[sel_b_idx];
+  assign iss_b.fp_dep3_valid = iq_fp_dep3_busy[sel_b_idx];
+  assign iss_b.fp_dep1 = iq_fp_dep1[sel_b_idx];
+  assign iss_b.fp_dep2 = iq_fp_dep2[sel_b_idx];
+  assign iss_b.fp_dep3 = iq_fp_dep3[sel_b_idx];
 
   // === Occupancy for router load balancing ===
   always_comb begin
@@ -316,36 +374,10 @@ module rapt_exu_iq #(
 
   always_ff @(posedge clock) begin
     if (reset || cmu_bcast.flush_pipe) begin
-      iq_valid    <= '0;
-      iq_pr1_busy <= '0;
-      iq_pr2_busy <= '0;
-      iq_pr1_fast <= '0;
-      iq_pr2_fast <= '0;
-      iq_c        <= '0;
-      iq_word     <= '0;
-      iq_jen      <= '0;
-      iq_jren     <= '0;
-      iq_b_block  <= '0;
-      iq_trap     <= '0;
-      iq_full_r   <= 1'b0;
-      // Reset payload arrays so unused entries cannot feed X values into
-      // issue or forwarding logic in FPGA synthesis.
-      for (int i = 0; i < IQ_SIZE; i++) begin
-        age_mat[i]  <= '0;
-        iq_pc[i]    <= '0;
-        iq_alu[i]   <= '0;
-        iq_vj[i]    <= '0;
-        iq_vk[i]    <= '0;
-        iq_dest[i]  <= '0;
-        iq_pr1[i]   <= '0;
-        iq_pr2[i]   <= '0;
-        iq_prd[i]   <= '0;
-        iq_rd[i]    <= '0;
-        iq_imm[i]   <= '0;
-        iq_pnpc[i]  <= '0;
-        iq_tval[i]  <= '0;
-        iq_cause[i] <= '0;
-      end
+      iq_valid  <= '0;
+      iq_full_r <= 1'b0;
+      // Per-entry payload, dependency, and age state is initialized on
+      // allocation and cannot be selected while iq_valid is clear.
     end else begin
       iq_full_r <= (&iq_valid);
 
@@ -367,6 +399,19 @@ module rapt_exu_iq #(
           iq_pr2_fast[i] <= disp_b_pr2_fast_wake;
           iq_prd[i]      <= rou_exu.prd_b;
           iq_rd[i]       <= rou_exu.uop_b.rd;
+          iq_fp_valid[i] <= rou_exu.uop_b.fp_valid;
+          iq_fp_op[i]    <= rou_exu.uop_b.fp_op;
+          iq_fp_rm[i]    <= rou_exu.uop_b.fp_rm;
+          iq_fp_rs1[i]   <= rou_exu.uop_b.fp_rs1;
+          iq_fp_rs2[i]   <= rou_exu.uop_b.fp_rs2;
+          iq_fp_rs3[i]   <= rou_exu.uop_b.fp_rs3;
+          iq_fp_rd[i]    <= rou_exu.uop_b.fp_rd;
+          iq_fp_dep1_busy[i] <= rou_exu.fp_dep1_valid && !fp_wb_hit(rou_exu.fp_dep1);
+          iq_fp_dep2_busy[i] <= rou_exu.fp_dep2_valid && !fp_wb_hit(rou_exu.fp_dep2);
+          iq_fp_dep3_busy[i] <= rou_exu.fp_dep3_valid && !fp_wb_hit(rou_exu.fp_dep3);
+          iq_fp_dep1[i] <= rou_exu.fp_dep1;
+          iq_fp_dep2[i] <= rou_exu.fp_dep2;
+          iq_fp_dep3[i] <= rou_exu.fp_dep3;
           iq_pc[i]       <= rou_exu.uop_b.pc;
           iq_c[i]        <= rou_exu.uop_b.c;
           iq_word[i]     <= rou_exu.uop_b.word;
@@ -395,6 +440,19 @@ module rapt_exu_iq #(
           iq_pr2_fast[i] <= disp_a_pr2_fast_wake;
           iq_prd[i]      <= rou_exu.prd;
           iq_rd[i]       <= rou_exu.uop.rd;
+          iq_fp_valid[i] <= rou_exu.uop.fp_valid;
+          iq_fp_op[i]    <= rou_exu.uop.fp_op;
+          iq_fp_rm[i]    <= rou_exu.uop.fp_rm;
+          iq_fp_rs1[i]   <= rou_exu.uop.fp_rs1;
+          iq_fp_rs2[i]   <= rou_exu.uop.fp_rs2;
+          iq_fp_rs3[i]   <= rou_exu.uop.fp_rs3;
+          iq_fp_rd[i]    <= rou_exu.uop.fp_rd;
+          iq_fp_dep1_busy[i] <= rou_exu.fp_dep1_valid && !fp_wb_hit(rou_exu.fp_dep1);
+          iq_fp_dep2_busy[i] <= rou_exu.fp_dep2_valid && !fp_wb_hit(rou_exu.fp_dep2);
+          iq_fp_dep3_busy[i] <= rou_exu.fp_dep3_valid && !fp_wb_hit(rou_exu.fp_dep3);
+          iq_fp_dep1[i] <= rou_exu.fp_dep1;
+          iq_fp_dep2[i] <= rou_exu.fp_dep2;
+          iq_fp_dep3[i] <= rou_exu.fp_dep3;
           iq_pc[i]       <= rou_exu.uop.pc;
           iq_c[i]        <= rou_exu.uop.c;
           iq_word[i]     <= rou_exu.uop.word;
@@ -407,43 +465,32 @@ module rapt_exu_iq #(
           iq_tval[i]     <= rou_exu.uop.tval;
           iq_cause[i]    <= rou_exu.uop.cause;
         end else if (iq_valid[i] && pr_ready[i]) begin
+          // Fast-confirm data capture for an entry that became fully ready
+          // this cycle (woken between ready computation and the clock edge).
           if (pr1_fast_confirm[i]) begin
             iq_vj[i]       <= exu_ioq_bcast.result;
-            iq_pr1[i]      <= '0;
             iq_pr1_fast[i] <= 1'b0;
           end
           if (pr2_fast_confirm[i]) begin
             iq_vk[i]       <= exu_ioq_bcast.result;
-            iq_pr2[i]      <= '0;
             iq_pr2_fast[i] <= 1'b0;
           end
           // Issue clear: entries selected on either port free this cycle
-          // (dedicated WB ports, never back-pressured).
+          // (dedicated WB ports, never back-pressured).  Only the valid bit
+          // and the operand-tracking bits are cleared; payload arrays keep
+          // their old values (don't-care once invalid).
           if (sel_onehot[i] || sel_b_onehot[i]) begin
             iq_valid[i]    <= 1'b0;
-            iq_alu[i]      <= '0;
-            iq_pc[i]       <= '0;
-            iq_c[i]        <= 1'b0;
-            iq_word[i]     <= 1'b0;
-            iq_vj[i]       <= '0;
-            iq_vk[i]       <= '0;
-            iq_dest[i]     <= '0;
-            iq_pr1[i]      <= '0;
-            iq_pr2[i]      <= '0;
             iq_pr1_busy[i] <= 1'b0;
             iq_pr2_busy[i] <= 1'b0;
             iq_pr1_fast[i] <= 1'b0;
             iq_pr2_fast[i] <= 1'b0;
-            iq_prd[i]      <= '0;
-            iq_rd[i]       <= '0;
-            iq_jen[i]      <= 1'b0;
-            iq_jren[i]     <= 1'b0;
+            iq_fp_valid[i] <= 1'b0;
+            iq_fp_dep1_busy[i] <= 1'b0;
+            iq_fp_dep2_busy[i] <= 1'b0;
+            iq_fp_dep3_busy[i] <= 1'b0;
             iq_b_block[i]  <= 1'b0;
-            iq_imm[i]      <= '0;
-            iq_pnpc[i]     <= '0;
             iq_trap[i]     <= 1'b0;
-            iq_tval[i]     <= '0;
-            iq_cause[i]    <= '0;
           end
         end else if (iq_valid[i]) begin
           // Operand wakeup. Per tag, fast-wake and slow-hit are mutually
@@ -451,7 +498,6 @@ module rapt_exu_iq #(
           // confirm/rebusy pair is don't-care.
           if (pr1_fast_confirm[i]) begin
             iq_vj[i]       <= exu_ioq_bcast.result;
-            iq_pr1[i]      <= '0;
             iq_pr1_busy[i] <= 1'b0;
             iq_pr1_fast[i] <= 1'b0;
           end else if (pr1_fast_rebusy[i]) begin
@@ -459,16 +505,17 @@ module rapt_exu_iq #(
             iq_pr1_fast[i] <= 1'b0;
           end else if (pr1_slow_hit[i]) begin
             iq_vj[i]       <= pr1_slow_val[i];
-            iq_pr1[i]      <= '0;
             iq_pr1_busy[i] <= 1'b0;
             iq_pr1_fast[i] <= 1'b0;
           end else if (pr1_fast_wake[i]) begin
             iq_pr1_busy[i] <= 1'b0;
             iq_pr1_fast[i] <= 1'b1;
           end
+          if (iq_fp_dep1_busy[i] && fp_wb_hit(iq_fp_dep1[i])) iq_fp_dep1_busy[i] <= 1'b0;
+          if (iq_fp_dep2_busy[i] && fp_wb_hit(iq_fp_dep2[i])) iq_fp_dep2_busy[i] <= 1'b0;
+          if (iq_fp_dep3_busy[i] && fp_wb_hit(iq_fp_dep3[i])) iq_fp_dep3_busy[i] <= 1'b0;
           if (pr2_fast_confirm[i]) begin
             iq_vk[i]       <= exu_ioq_bcast.result;
-            iq_pr2[i]      <= '0;
             iq_pr2_busy[i] <= 1'b0;
             iq_pr2_fast[i] <= 1'b0;
           end else if (pr2_fast_rebusy[i]) begin
@@ -476,7 +523,6 @@ module rapt_exu_iq #(
             iq_pr2_fast[i] <= 1'b0;
           end else if (pr2_slow_hit[i]) begin
             iq_vk[i]       <= pr2_slow_val[i];
-            iq_pr2[i]      <= '0;
             iq_pr2_busy[i] <= 1'b0;
             iq_pr2_fast[i] <= 1'b0;
           end else if (pr2_fast_wake[i]) begin

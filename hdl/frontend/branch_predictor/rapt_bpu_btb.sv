@@ -89,19 +89,14 @@ module rapt_bpu_btb #(
 
   always_ff @(posedge clock) begin
     if (reset || init) begin
-      for (int i = 0; i < DEPTH; i++) begin
-        for (int w = 0; w < WAYS; w++) itype[w][i] <= 2'b00;
-      end
       for (int w = 0; w < WAYS; w++) valid[w] <= '0;
       lru <= '0;
-      for (int w = 0; w < WAYS; w++) begin
-        r_raddr_tag[w]    <= '0;
-        r_raddr_target[w] <= '0;
-        r_raddr_itype[w]  <= '0;
-        r_raddr_valid[w]  <= '0;
-        r_rtag_cmp[w]     <= '0;
-      end
-      r_raddr_lru <= '0;
+      // itype/tag/target payload and the replicated r_raddr_* address
+      // registers are intentionally NOT reset: way_hit ANDs every payload
+      // read with valid[w][r_raddr_valid[w]], and the valid array is
+      // cleared here, so no stale entry can raise rd_tag_match (the only
+      // gate through which rd_target/rd_type are consumed in rapt_bpu).
+      // target was already unreset; itype now follows the same rule.
     end else begin
       if (ren) begin
         for (int w = 0; w < WAYS; w++) begin

@@ -161,10 +161,9 @@ module rapt_router #(
       int_resp_tail    <= '0;
       int_resp_count   <= '0;
       offchip_in_burst <= 1'b0;
-      for (int i = 0; i < INT_RESP_DEPTH; i++) begin
-        int_resp_q[i].id   <= '0;
-        int_resp_q[i].data <= '0;
-      end
+      // int_resp_q payload stays unreset: drain_int (count != 0) gates
+      // every read of int_resp_q[int_resp_head], and a push always
+      // rewrites the tail entry together with the count increment.
     end else begin
       // Push: capture the internal slave's combinational read result
       // in the same cycle as the AR handshake.

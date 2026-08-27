@@ -12,6 +12,7 @@ void (*ref_difftest_memcpy)(paddr_t addr, void *buf, size_t n, bool direction) =
 void (*ref_difftest_regcpy)(void *dut, bool direction) = NULL;
 void (*ref_difftest_exec)(uint64_t n) = NULL;
 void (*ref_difftest_raise_intr)(uint64_t NO) = NULL;
+uint32_t (*ref_difftest_state_version)(void) = NULL;
 void (*ref_difftest_set_meip)(uint8_t val) = NULL;
 void (*ref_difftest_set_stip)(uint8_t val) = NULL;
 void (*ref_difftest_plic_raise)(uint32_t src) = NULL;
@@ -133,6 +134,13 @@ void init_difftest(char *ref_so_file, long img_size, int port)
   ref_difftest_raise_intr = (void (*)(uint64_t))dlsym(handle, "difftest_raise_intr");
   assert(ref_difftest_raise_intr);
 
+  ref_difftest_state_version =
+      (uint32_t (*)(void))dlsym(handle, "difftest_state_version");
+  if (ref_difftest_state_version != NULL)
+  {
+    assert(ref_difftest_state_version() == DIFFTEST_STATE_VERSION);
+  }
+
   // Optional: present in newer NEMU builds; absent in older refs (skip if missing).
   ref_difftest_set_meip = (void (*)(uint8_t))dlsym(handle, "difftest_set_meip");
   ref_difftest_set_stip = (void (*)(uint8_t))dlsym(handle, "difftest_set_stip");
@@ -207,6 +215,24 @@ static void checkregs(NPCState *ref, vaddr_t pc)
              regs[i], ref->gpr[i], npc.gpr[i]);
       is_same = false;
     }
+  }
+  if (ref->fpr != nullptr && npc.fpr != nullptr)
+  {
+    for (int i = 0; i < FPR_SIZE; i++)
+    {
+      if (ref->fpr[i] != npc.fpr[i])
+      {
+        printf(FMT_RED("[ERROR] fpr[%d] is different! ref = %016" PRIx64 ", dut = %016" PRIx64 "\n"),
+               i, ref->fpr[i], npc.fpr[i]);
+        is_same = false;
+      }
+    }
+  }
+  if (ref->fcsr != nullptr && npc.fcsr != nullptr && *ref->fcsr != *npc.fcsr)
+  {
+    printf(FMT_RED("[ERROR] fcsr is different! ref = %08" PRIx32 ", dut = %08" PRIx32 "\n"),
+           *ref->fcsr, *npc.fcsr);
+    is_same = false;
   }
   CHECK_NPC_CSR_S(status);
   CHECK_NPC_CSR_S(ie____);

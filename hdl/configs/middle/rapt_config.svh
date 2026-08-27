@@ -10,10 +10,10 @@
 // ---------- Architecture (arch) ----------
 `ifdef RAPT_RV64
 `define RAPT_XLEN 64
-`define RAPT_MISA 'h8000000000141107
+`define RAPT_MISA 'h800000000014112f
 `else
 `define RAPT_XLEN 32
-`define RAPT_MISA 'h40141107
+`define RAPT_MISA 'h4014112f
 `endif
 
 

@@ -47,6 +47,36 @@ interface exu_prf_if #(
   );
 endinterface
 
+// Architectural FPR bank interface. The serializing FP pipe needs three read
+// channels for fused multiply-add and two independent write sources.
+interface fpr_if;
+  logic [4:0] alu_raddr_a, alu_raddr_b, alu_raddr_c;
+  logic [63:0] alu_rdata_a, alu_rdata_b, alu_rdata_c;
+  logic [4:0] ioq_raddr;
+  logic [63:0] ioq_rdata;
+
+  logic alu_wvalid;
+  logic [4:0] alu_waddr;
+  logic [63:0] alu_wdata;
+  logic ioq_wvalid;
+  logic [4:0] ioq_waddr;
+  logic [63:0] ioq_wdata;
+
+  modport storage(
+    input alu_raddr_a, alu_raddr_b, alu_raddr_c, ioq_raddr,
+    output alu_rdata_a, alu_rdata_b, alu_rdata_c, ioq_rdata,
+    input alu_wvalid, alu_waddr, alu_wdata,
+    input ioq_wvalid, ioq_waddr, ioq_wdata);
+  modport alu(
+    output alu_raddr_a, alu_raddr_b, alu_raddr_c,
+    input alu_rdata_a, alu_rdata_b, alu_rdata_c,
+    output alu_wvalid, alu_waddr, alu_wdata);
+  modport ioq(
+    output ioq_raddr,
+    input ioq_rdata,
+    output ioq_wvalid, ioq_waddr, ioq_wdata);
+endinterface
+
 interface exu_lsu_if #(
     parameter int XLEN = `RAPT_XLEN
 );
@@ -58,6 +88,9 @@ interface exu_lsu_if #(
   logic [XLEN-1:0] pc;
 
   logic [XLEN-1:0] rdata;
+  logic [63:0] fp_rdata64;
+  logic fp_rdata64_req;
+  logic fp_rdata64_valid;
   logic trap;
   logic [XLEN-1:0] cause;
   logic difftest_skip;
@@ -76,12 +109,14 @@ interface exu_lsu_if #(
 
   modport master(
     output rvalid, raddr, ralu, atomic_lock, ordered, pc,
-    input rdata, trap, cause, difftest_skip, rready, stq_ready,
+    output fp_rdata64_req,
+    input rdata, fp_rdata64, fp_rdata64_valid, trap, cause, difftest_skip, rready, stq_ready,
     output rvalid_b, raddr_b, ralu_b,
     input rdata_b, rready_b);
   modport slave(
     input rvalid, raddr, ralu, atomic_lock, ordered, pc,
-    output rdata, trap, cause, difftest_skip, rready, stq_ready,
+    output rdata, fp_rdata64, fp_rdata64_valid, trap, cause, difftest_skip, rready, stq_ready,
+    input fp_rdata64_req,
     input rvalid_b, raddr_b, ralu_b,
     output rdata_b, rready_b);
 endinterface
@@ -155,6 +190,8 @@ interface exu_wb_if #(
   // csr (ALU-CSR pipe only; csr_addr lives in uop_pl, not here)
   logic csr_wen;
   logic [XLEN-1:0] csr_wdata;
+  logic fp_flags_valid;
+  logic [4:0] fp_flags;
 
   // Memory sideband (MEM only). `alu` bit[5] selects mul/div family and is
   // unused by non-EXU consumers.
@@ -162,6 +199,8 @@ interface exu_wb_if #(
   logic [5:0] alu;
   logic [XLEN-1:0] sq_waddr;
   logic [XLEN-1:0] sq_wdata;
+  logic [63:0] sq_wdata64;
+  logic sq_fp64;
 
   logic trap;
   logic [XLEN-1:0] tval;
@@ -176,8 +215,8 @@ interface exu_wb_if #(
       input pc, npc, btaken, mispredict,
       input dest, result,
       input prd, rd,
-      input csr_wen, csr_wdata,
-      input wen, alu, sq_waddr, sq_wdata,
+      input csr_wen, csr_wdata, fp_flags_valid, fp_flags,
+      input wen, alu, sq_waddr, sq_wdata, sq_wdata64, sq_fp64,
       input trap, tval, cause,
       input difftest_skip,
       input valid
@@ -186,8 +225,8 @@ interface exu_wb_if #(
       output pc, npc, btaken, mispredict,
       output dest, result,
       output prd, rd,
-      output csr_wen, csr_wdata,
-      output wen, alu, sq_waddr, sq_wdata,
+      output csr_wen, csr_wdata, fp_flags_valid, fp_flags,
+      output wen, alu, sq_waddr, sq_wdata, sq_wdata64, sq_fp64,
       output trap, tval, cause,
       output difftest_skip,
       output valid
@@ -222,15 +261,32 @@ interface exu_iq_iss_if #(
   logic [$clog2(`RAPT_ROB_SIZE)-1:0] dest;
   logic [PLEN-1:0] prd;
   logic [RLEN-1:0] rd;
+    logic fp_valid;
+    logic [5:0] fp_op;
+    logic [2:0] fp_rm;
+    logic [4:0] fp_rs1;
+    logic [4:0] fp_rs2;
+    logic [4:0] fp_rs3;
+    logic [4:0] fp_rd;
+    logic fp_dep1_valid;
+    logic fp_dep2_valid;
+    logic fp_dep3_valid;
+    logic [$clog2(`RAPT_ROB_SIZE)-1:0] fp_dep1;
+    logic [$clog2(`RAPT_ROB_SIZE)-1:0] fp_dep2;
+    logic [$clog2(`RAPT_ROB_SIZE)-1:0] fp_dep3;
   /* verilator lint_on UNUSEDSIGNAL */
 
   modport iq(
       output valid, op1, op2, alu, pc, c, word, imm, pnpc, jen, jren,
-      output trap, tval, cause, dest, prd, rd
+      output trap, tval, cause, dest, prd, rd,
+      output fp_valid, fp_op, fp_rm, fp_rs1, fp_rs2, fp_rs3, fp_rd,
+      output fp_dep1_valid, fp_dep2_valid, fp_dep3_valid, fp_dep1, fp_dep2, fp_dep3
   );
   modport fu(
       input valid, op1, op2, alu, pc, c, word, imm, pnpc, jen, jren,
-      input trap, tval, cause, dest, prd, rd
+      input trap, tval, cause, dest, prd, rd,
+      input fp_valid, fp_op, fp_rm, fp_rs1, fp_rs2, fp_rs3, fp_rd,
+      input fp_dep1_valid, fp_dep2_valid, fp_dep3_valid, fp_dep1, fp_dep2, fp_dep3
   );
 endinterface
 

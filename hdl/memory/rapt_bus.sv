@@ -162,20 +162,16 @@ module rapt_bus #(
       l1i_q_rdptr <= '0;
       l1i_q_wrptr <= '0;
       l1i_q_cnt   <= '0;
-      for (int i = 0; i < L1iARDepth; i++) begin
-        l1i_q_addr[i]  <= '0;
-        l1i_q_burst[i] <= 1'b0;
-        l1i_q_ptw[i]   <= 1'b0;
-      end
+      // l1i_q_* payload and l1d_slot_addr/size stay unreset: every read is
+      // gated by l1i_q_cnt != 0 (issue_l1i) or l1d_slot_busy/issued, both
+      // of which reset here; push/pop always rewrite the payload together
+      // with the pointer/count update.  l1d_slot_mmio/ptw are cleared on
+      // slot free.
       l1i_captured       <= 1'b0;
       l1i_last_push_addr <= '0;
       l1i_last_push_ptw  <= 1'b0;
       l1d_slot_busy      <= 1'b0;
       l1d_slot_issued    <= 1'b0;
-      l1d_slot_addr      <= '0;
-      l1d_slot_size      <= 3'b000;
-      l1d_slot_mmio      <= 1'b0;
-      l1d_slot_ptw       <= 1'b0;
     end else begin
       // L1I FIFO: push on capture, pop on downstream AR handshake.
       if (l1i_push) begin
@@ -252,7 +248,9 @@ module rapt_bus #(
   assign mem.wr_req_size =
       ({3{store_wstrb == 8'h01}} & 3'b000)
     | ({3{store_wstrb == 8'h03}} & 3'b001)
+    | ({3{store_wstrb == 8'h07}} & 3'b010)
     | ({3{store_wstrb == 8'h0f}} & 3'b010)
+    | ({3{store_wstrb == 8'h7f}} & 3'b011)
     | ({3{store_wstrb == 8'hff}} & 3'b011);
   assign mem.wr_req_data = store_wdata;
   assign mem.wr_req_strb = store_wstrb[XLEN/8-1:0];

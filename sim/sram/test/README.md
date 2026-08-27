@@ -6,10 +6,10 @@ the macro pins:
 
 | Layer                 | File                                           |
 | --------------------- | ---------------------------------------------- |
-| Macro shape configs   | `sim/sram/configs/rapt_sram_*_1r1w_sky130.py` |
+| Macro shape configs   | `sim/sram/configs/rapt_sram_*_1rw_sky130.py`  |
 | Yosys blackbox decls  | `sim/sram/wrappers/rapt_sram_blackbox.v`      |
 | Stub `.lib` generator | `sim/sram/scripts/gen_stub_lib.py`            |
-| RTL instantiation     | `hdl/memory/rapt_sram_1r1w.sv`                |
+| RTL instantiation     | `hdl/memory/rapt_sram_1rw.sv`                 |
 
 If any of these drift (e.g. port width change in the blackbox without a
 matching Liberty update) STA will either fail to elaborate or silently
@@ -25,16 +25,15 @@ make -C sim/sram/test clean
 
 ## What `make check` verifies (no external tools)
 
-1. **Configs** — Each macro shape in `SHAPES` has a `rapt_sram_*_1r1w_sky130.py`
+1. **Configs** — Each macro shape in `SHAPES` has a `rapt_sram_*_1rw_sky130.py`
    declaring the right `word_size` / `num_words` / `write_size`.
 2. **Blackbox V** — Each shape has one `(* blackbox *) module` whose port
    widths match the shape (addr = ⌈log₂(depth)⌉, wmask = width/write_size).
 3. **RTL macro path** — The `RAPT_USE_SRAM_MACRO` branch in
-   `rapt_sram_1r1w.sv` instantiates each shape with all ten ports
-   (`clk0/csb0/web0/wmask0/addr0/din0/clk1/csb1/addr1/dout1`) connected,
-   under the correct `DEPTH=={D} && DATA_WIDTH=={W}` guard, and falls
-   back to `$fatal` on unsupported shapes. The write-first bypass mux
-   (`bypass_en_r`, `wdata_r`) is present (since OpenRAM is read-first).
+   `rapt_sram_1rw.sv` instantiates each single-port shape with all seven
+   ports (`clk0/csb0/web0/wmask0/addr0/din0/dout0`) connected, under the
+   correct `DEPTH=={D} && DATA_WIDTH=={W}` guard, and falls back to
+   `$fatal` on unsupported shapes.
 4. **Stub Liberty** — `gen_stub_lib.py` produces parseable `.lib` files
    with: `is_macro_cell:true`, `dont_touch:true`, all required pins/buses
    at the right widths, ≥6 setup arcs and ≥6 hold arcs on the inputs,
@@ -51,10 +50,10 @@ Generates stubs if needed, preprocesses `fixtures/rapt_sram_test_top.sv`
 `EXTRA_BLACKBOX_V_FILES` set to the stub artefacts. Then it asserts:
 
 - Yosys produced a synthesised netlist.
-- The macro instance (`rapt_openram_1r1w_32x32`) survives synthesis
+- The macro instance (`rapt_openram_1rw_32x32`) survives synthesis
   (i.e. the blackbox was preserved, not flattened).
 - The OpenSTA timing report is non-empty and references the macro's
-  `clk0`/`clk1` pins (proving the `.lib` arcs were actually used).
+  `clk0` pin (proving the `.lib` arcs were actually used).
 
 If `yosys-slang` is missing on the host (e.g. on macOS without the
 plugin) the smoke target exits with a clear `FAIL: yosys-slang plugin

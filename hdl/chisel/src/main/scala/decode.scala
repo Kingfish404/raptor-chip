@@ -42,8 +42,24 @@ class rapt_idu_decoder extends RawModule with Instr with MicroOP {
     val time = Output(UInt(1.W))
   })
 
+  val out_fp = IO(new Bundle {
+    val valid     = Output(UInt(1.W))
+    val op        = Output(UInt(6.W))
+    val rm        = Output(UInt(3.W))
+    val rs1       = Output(UInt(5.W))
+    val rs2       = Output(UInt(5.W))
+    val rs3       = Output(UInt(5.W))
+    val rd        = Output(UInt(5.W))
+    val load      = Output(UInt(1.W))
+    val store     = Output(UInt(1.W))
+    val width_d   = Output(UInt(1.W))
+    val to_int    = Output(UInt(1.W))
+    val writes_fpr = Output(UInt(1.W))
+  })
+
   val rs1    = in.inst(19, 15)
   val rs2    = in.inst(24, 20)
+  val rs3    = in.inst(31, 27)
   val rd     = in.inst(11, 7)
   val opcode = in.inst(6, 0)
   val funct3 = in.inst(14, 12)
@@ -409,6 +425,164 @@ class rapt_idu_decoder extends RawModule with Instr with MicroOP {
   out_fence.i    := fence_decoded(0)
   out_fence.time := fence_decoded(1)
 
+  val fp_op_table = TruthTable(
+    Map(
+      FMV_W_X  -> BitPat("b" + FP_FMV_W_X),
+      FMV_X_W  -> BitPat("b" + FP_FMV_X_W),
+      FSGNJ_S  -> BitPat("b" + FP_FSGNJ_S),
+      FSGNJN_S -> BitPat("b" + FP_FSGNJN_S),
+      FSGNJX_S -> BitPat("b" + FP_FSGNJX_S),
+      FMV_D_X  -> BitPat("b" + FP_FMV_D_X),
+      FMV_X_D  -> BitPat("b" + FP_FMV_X_D),
+      FSGNJ_D  -> BitPat("b" + FP_FSGNJ_D),
+      FSGNJN_D -> BitPat("b" + FP_FSGNJN_D),
+      FSGNJX_D -> BitPat("b" + FP_FSGNJX_D),
+      FLW___   -> BitPat("b" + FP_FLW),
+      FSW___   -> BitPat("b" + FP_FSW),
+      FLD___   -> BitPat("b" + FP_FLD),
+      FSD___   -> BitPat("b" + FP_FSD),
+      FMADD_S  -> BitPat("b" + FP_FMADD_S),
+      FMADD_D  -> BitPat("b" + FP_FMADD_D),
+      FMSUB_S  -> BitPat("b" + FP_FMSUB_S),
+      FMSUB_D  -> BitPat("b" + FP_FMSUB_D),
+      FNMSUB_S -> BitPat("b" + FP_FNMSUB_S),
+      FNMSUB_D -> BitPat("b" + FP_FNMSUB_D),
+      FNMADD_S -> BitPat("b" + FP_FNMADD_S),
+      FNMADD_D -> BitPat("b" + FP_FNMADD_D),
+      FADD_S   -> BitPat("b" + FP_FADD_S),
+      FSUB_S   -> BitPat("b" + FP_FSUB_S),
+      FMUL_S   -> BitPat("b" + FP_FMUL_S),
+      FDIV_S   -> BitPat("b" + FP_FDIV_S),
+      FSQRT_S  -> BitPat("b" + FP_FSQRT_S),
+      FADD_D   -> BitPat("b" + FP_FADD_D),
+      FSUB_D   -> BitPat("b" + FP_FSUB_D),
+      FMUL_D   -> BitPat("b" + FP_FMUL_D),
+      FDIV_D   -> BitPat("b" + FP_FDIV_D),
+      FSQRT_D  -> BitPat("b" + FP_FSQRT_D),
+      FMIN_S   -> BitPat("b" + FP_FMIN_S),
+      FMAX_S   -> BitPat("b" + FP_FMAX_S),
+      FMIN_D   -> BitPat("b" + FP_FMIN_D),
+      FMAX_D   -> BitPat("b" + FP_FMAX_D),
+      FLE_S    -> BitPat("b" + FP_FLE_S),
+      FLT_S    -> BitPat("b" + FP_FLT_S),
+      FEQ_S    -> BitPat("b" + FP_FEQ_S),
+      FCLASS_S -> BitPat("b" + FP_FCLASS_S),
+      FLE_D    -> BitPat("b" + FP_FLE_D),
+      FLT_D    -> BitPat("b" + FP_FLT_D),
+      FEQ_D    -> BitPat("b" + FP_FEQ_D),
+      FCLASS_D -> BitPat("b" + FP_FCLASS_D),
+      FCVT_W_S -> BitPat("b" + FP_FCVT_W_S),
+      FCVT_WU_S -> BitPat("b" + FP_FCVT_WU_S),
+      FCVT_L_S -> BitPat("b" + FP_FCVT_L_S),
+      FCVT_LU_S -> BitPat("b" + FP_FCVT_LU_S),
+      FCVT_S_W -> BitPat("b" + FP_FCVT_S_W),
+      FCVT_S_WU -> BitPat("b" + FP_FCVT_S_WU),
+      FCVT_S_L -> BitPat("b" + FP_FCVT_S_L),
+      FCVT_S_LU -> BitPat("b" + FP_FCVT_S_LU),
+      FCVT_W_D -> BitPat("b" + FP_FCVT_W_D),
+      FCVT_WU_D -> BitPat("b" + FP_FCVT_WU_D),
+      FCVT_L_D -> BitPat("b" + FP_FCVT_L_D),
+      FCVT_LU_D -> BitPat("b" + FP_FCVT_LU_D),
+      FCVT_D_W -> BitPat("b" + FP_FCVT_D_W),
+      FCVT_D_WU -> BitPat("b" + FP_FCVT_D_WU),
+      FCVT_D_L -> BitPat("b" + FP_FCVT_D_L),
+      FCVT_D_LU -> BitPat("b" + FP_FCVT_D_LU),
+      FCVT_S_D -> BitPat("b" + FP_FCVT_S_D),
+      FCVT_D_S -> BitPat("b" + FP_FCVT_D_S)
+    ),
+    BitPat("b" + FP_NONE)
+  )
+  val fp_op_decoded = decoder(in.inst, fp_op_table)
+  val fp_fmv_x_w = ("b" + FP_FMV_X_W).U(6.W)
+  val fp_fmv_x_d = ("b" + FP_FMV_X_D).U(6.W)
+  val fp_flw = ("b" + FP_FLW).U(6.W)
+  val fp_fsw = ("b" + FP_FSW).U(6.W)
+  val fp_fld = ("b" + FP_FLD).U(6.W)
+  val fp_fsd = ("b" + FP_FSD).U(6.W)
+  val fp_fmv_d_x = ("b" + FP_FMV_D_X).U(6.W)
+  val fp_fsgnj_d = ("b" + FP_FSGNJ_D).U(6.W)
+  val fp_fsgnjn_d = ("b" + FP_FSGNJN_D).U(6.W)
+  val fp_fsgnjx_d = ("b" + FP_FSGNJX_D).U(6.W)
+  val fp_fadd_d = ("b" + FP_FADD_D).U(6.W)
+  val fp_fsub_d = ("b" + FP_FSUB_D).U(6.W)
+  val fp_fmul_d = ("b" + FP_FMUL_D).U(6.W)
+  val fp_fdiv_d = ("b" + FP_FDIV_D).U(6.W)
+  val fp_fsqrt_d = ("b" + FP_FSQRT_D).U(6.W)
+  val fp_fmadd_d = ("b" + FP_FMADD_D).U(6.W)
+  val fp_fmsub_d = ("b" + FP_FMSUB_D).U(6.W)
+  val fp_fnmsub_d = ("b" + FP_FNMSUB_D).U(6.W)
+  val fp_fnmadd_d = ("b" + FP_FNMADD_D).U(6.W)
+  val fp_fmin_d = ("b" + FP_FMIN_D).U(6.W)
+  val fp_fmax_d = ("b" + FP_FMAX_D).U(6.W)
+  val fp_fle_s = ("b" + FP_FLE_S).U(6.W)
+  val fp_flt_s = ("b" + FP_FLT_S).U(6.W)
+  val fp_feq_s = ("b" + FP_FEQ_S).U(6.W)
+  val fp_fclass_s = ("b" + FP_FCLASS_S).U(6.W)
+  val fp_fle_d = ("b" + FP_FLE_D).U(6.W)
+  val fp_flt_d = ("b" + FP_FLT_D).U(6.W)
+  val fp_feq_d = ("b" + FP_FEQ_D).U(6.W)
+  val fp_fclass_d = ("b" + FP_FCLASS_D).U(6.W)
+  val fp_fcvt_w_s = ("b" + FP_FCVT_W_S).U(6.W)
+  val fp_fcvt_wu_s = ("b" + FP_FCVT_WU_S).U(6.W)
+  val fp_fcvt_l_s = ("b" + FP_FCVT_L_S).U(6.W)
+  val fp_fcvt_lu_s = ("b" + FP_FCVT_LU_S).U(6.W)
+  val fp_fcvt_s_w = ("b" + FP_FCVT_S_W).U(6.W)
+  val fp_fcvt_s_wu = ("b" + FP_FCVT_S_WU).U(6.W)
+  val fp_fcvt_s_l = ("b" + FP_FCVT_S_L).U(6.W)
+  val fp_fcvt_s_lu = ("b" + FP_FCVT_S_LU).U(6.W)
+  val fp_fcvt_w_d = ("b" + FP_FCVT_W_D).U(6.W)
+  val fp_fcvt_wu_d = ("b" + FP_FCVT_WU_D).U(6.W)
+  val fp_fcvt_l_d = ("b" + FP_FCVT_L_D).U(6.W)
+  val fp_fcvt_lu_d = ("b" + FP_FCVT_LU_D).U(6.W)
+  val fp_fcvt_d_w = ("b" + FP_FCVT_D_W).U(6.W)
+  val fp_fcvt_d_wu = ("b" + FP_FCVT_D_WU).U(6.W)
+  val fp_fcvt_d_l = ("b" + FP_FCVT_D_L).U(6.W)
+  val fp_fcvt_d_lu = ("b" + FP_FCVT_D_LU).U(6.W)
+  val fp_fcvt_s_d = ("b" + FP_FCVT_S_D).U(6.W)
+  val fp_fcvt_d_s = ("b" + FP_FCVT_D_S).U(6.W)
+  val fp_valid_decoded = fp_op_decoded =/= 0.U
+  val fp_to_int_decoded = (
+    (fp_op_decoded === fp_fmv_x_w) || (fp_op_decoded === fp_fmv_x_d) ||
+    (fp_op_decoded === fp_fle_s) || (fp_op_decoded === fp_flt_s) ||
+    (fp_op_decoded === fp_feq_s) || (fp_op_decoded === fp_fclass_s) ||
+    (fp_op_decoded === fp_fle_d) || (fp_op_decoded === fp_flt_d) ||
+    (fp_op_decoded === fp_feq_d) || (fp_op_decoded === fp_fclass_d) ||
+    (fp_op_decoded === fp_fcvt_w_s) || (fp_op_decoded === fp_fcvt_wu_s) ||
+    (fp_op_decoded === fp_fcvt_l_s) || (fp_op_decoded === fp_fcvt_lu_s) ||
+    (fp_op_decoded === fp_fcvt_w_d) || (fp_op_decoded === fp_fcvt_wu_d) ||
+    (fp_op_decoded === fp_fcvt_l_d) || (fp_op_decoded === fp_fcvt_lu_d)
+  )
+  val fp_store_decoded = (fp_op_decoded === fp_fsw) || (fp_op_decoded === fp_fsd)
+  out_fp.valid := fp_valid_decoded.asUInt
+  out_fp.op := fp_op_decoded
+  out_fp.rm := funct3
+  out_fp.rs1 := rs1
+  out_fp.rs2 := rs2
+  out_fp.rs3 := rs3
+  out_fp.rd := rd
+  out_fp.load := ((fp_op_decoded === fp_flw) || (fp_op_decoded === fp_fld)).asUInt
+  out_fp.store := fp_store_decoded.asUInt
+  out_fp.width_d := (
+    (fp_op_decoded === fp_fmv_d_x) || (fp_op_decoded === fp_fmv_x_d) ||
+    (fp_op_decoded === fp_fsgnj_d) || (fp_op_decoded === fp_fsgnjn_d) ||
+    (fp_op_decoded === fp_fsgnjx_d) || (fp_op_decoded === fp_fld) ||
+    (fp_op_decoded === fp_fsd) || (fp_op_decoded === fp_fadd_d) ||
+    (fp_op_decoded === fp_fsub_d) || (fp_op_decoded === fp_fmul_d) ||
+    (fp_op_decoded === fp_fdiv_d) || (fp_op_decoded === fp_fsqrt_d) ||
+    (fp_op_decoded === fp_fmadd_d) || (fp_op_decoded === fp_fmsub_d) ||
+    (fp_op_decoded === fp_fnmsub_d) || (fp_op_decoded === fp_fnmadd_d) ||
+    (fp_op_decoded === fp_fmin_d) || (fp_op_decoded === fp_fmax_d) ||
+    (fp_op_decoded === fp_fle_d) || (fp_op_decoded === fp_flt_d) ||
+    (fp_op_decoded === fp_feq_d) || (fp_op_decoded === fp_fclass_d) ||
+    (fp_op_decoded === fp_fcvt_w_d) || (fp_op_decoded === fp_fcvt_wu_d) ||
+    (fp_op_decoded === fp_fcvt_l_d) || (fp_op_decoded === fp_fcvt_lu_d) ||
+    (fp_op_decoded === fp_fcvt_d_w) || (fp_op_decoded === fp_fcvt_d_wu) ||
+    (fp_op_decoded === fp_fcvt_d_l) || (fp_op_decoded === fp_fcvt_d_lu) ||
+    (fp_op_decoded === fp_fcvt_s_d) || (fp_op_decoded === fp_fcvt_d_s)
+  ).asUInt
+  out_fp.to_int := fp_to_int_decoded.asUInt
+  out_fp.writes_fpr := (fp_valid_decoded && !fp_to_int_decoded && !fp_store_decoded).asUInt
+
   val op_table    = Array(
     // format: off
     // inst      |  rd|    imm|   op1|   op2| rs1| rs2|
@@ -431,10 +605,14 @@ class rapt_idu_decoder extends RawModule with Instr with MicroOP {
     LW____ -> List( rd,  imm_i,   0.U,   0.U, rs1, 0.U), // I
     LBU___ -> List( rd,  imm_i,   0.U,   0.U, rs1, 0.U), // I
     LHU___ -> List( rd,  imm_i,   0.U,   0.U, rs1, 0.U), // I
+    FLW___ -> List( rd,  imm_i,   0.U,   0.U, rs1, 0.U), // FP I
+    FLD___ -> List( rd,  imm_i,   0.U,   0.U, rs1, 0.U), // FP I
     
     SB____ -> List(0.U,  imm_s,   0.U,   0.U, rs1, rs2), // S
     SH____ -> List(0.U,  imm_s,   0.U,   0.U, rs1, rs2), // S
     SW____ -> List(0.U,  imm_s,   0.U,   0.U, rs1, rs2), // S
+    FSW___ -> List(0.U,  imm_s,   0.U,   0.U, rs1, rs2), // FP S
+    FSD___ -> List(0.U,  imm_s,   0.U,   0.U, rs1, rs2), // FP S
 
     ADDI__ -> List( rd,  imm_i,   0.U, imm_i, rs1, 0.U), // I
     SLTI__ -> List( rd,  imm_i,   0.U, imm_i, rs1, 0.U), // I

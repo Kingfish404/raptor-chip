@@ -20,17 +20,17 @@ Repository: <https://github.com/Kingfish404/raptor-chip>
 
 | Item                 | Value                                                                                                   |
 | -------------------- | ------------------------------------------------------------------------------------------------------- |
-| ISA                  | `rv32/64imac_zicbom_zicbop_zicntr_zicond_zicsr_zifencei_zihintntl_zihintpause_zimop_zcb_zcmop_zba_zbb_zbc_zbs` |
+| ISA                  | `rv32/64imafdc_zicbom_zicbop_zicntr_zicond_zicsr_zifencei_zihintntl_zihintpause_zimop_zca_zcb_zcmop_zba_zbb_zbc_zbs` |
 | Privilege modes      | M, S, U                                                                                                 |
 | MMU                  | Sv32 (RV32) / Sv39 PTW path (RV64 xv6 bring-up) / Bare                                                  |
 | Interrupts           | CLINT (`mtime`, `mtimecmp`, `msip`) + PLIC (31 sources, M/S contexts)                                   |
 | Issue / commit width | 2 / 2                                                                                                   |
 | ROB / RS / IOQ / SQ  | 64 / 8 / 8 / 16                                                                                         |
-| PRF                  | 128 physical integer registers                                                                          |
+| Register state       | 128-entry renamed integer PRF + separate 32 x 64-bit architectural FPR bank                            |
 | BPU                  | TAGE direction predictor + 2-way BTB + 4-entry RSB                                                      |
 | L1I / L1D            | 4 KiB 2-way L1I / 2 KiB 2-way write-through L1D, banked SRAM, 64 B lines                                |
 | L2                   | Optional 16 KiB direct-mapped unified cache; default config disables it as passthrough                  |
-| Bus                  | AXI4, XLEN-bit data/addr, 4-bit ID                                                                      |
+| Bus                  | AXI4, XLEN-bit data/addr, 4-bit ID; up to 8 reads, one single-beat write                                |
 | Debug                | RISC-V Debug Module / JTAG DTM bring-up ports at cluster top                                            |
 | Verification         | Difftest against NEMU; RVFI/riscv-formal; SVA                                                           |
 
@@ -43,14 +43,16 @@ for detailed numbers and the change history.
 
 ## Verification
 
-- Difftest — every retired instruction compared against NEMU.
+- Difftest — retired instructions can be compared against NEMU, including the
+  full-core directed/differential RV32/RV64 F/D test suite under `app/tests/fp`.
 - Architectural tests — 35 / 35 `cpu-tests` pass on RV32 and RV64.
 - [RISCOF](https://github.com/riscv-software-src/riscof) running
   [riscv-arch-test](https://github.com/riscv-non-isa/riscv-arch-test):
   pass against `sail_c_simulator` on both the RTL DUT
   (`make verify-riscof-classic`) and NEMU (`make verify-riscof-classic-nemu`).
-  Coverage: rv32i_m/{I, M, A, B (Zba/Zbb/Zbc/Zbs), C, Zcb hints, Zicond,
-  Zifencei, privilege, pmp, vm_sv32, vm_pmp}.
+  The classic profile declares RV32 I/M/A/F/D/C/S/U plus the listed Z
+  extensions. The retained UDB profile is narrower than the current RTL, and
+  the riscv-dv target is an RV32 I/M/C, M-mode, Bare smoke configuration.
 - Benchmarks: CoreMark, MicroBench, Embench-IoT, and RLLMBench/LLM-style fixed-point workloads under NPC/NEMU and selected native/LiteX paths.
 - System software: nanos-lite, riscv-pk, OpenSBI + Linux boot
   (see [Linux Kernel Boot](./linux_kernel.md)); upstream xv6-riscv and egos-2000 CLI smoke paths are available through `app/tinyos`.

@@ -39,7 +39,7 @@
  *   * Multi-outstanding miss tracking (MSHR).
  *   * Set-associative + LRU.
  *   * Write-back (dirty bit) -- currently write-through.
- *   * Optional SRAM macro mapping via `rapt_sram_1r1w`.
+ *   * Optional SRAM macro mapping via `rapt_sram_1rw`.
  */
 `include "rapt.svh"
 `include "rapt_soc.svh"
@@ -145,7 +145,7 @@ module rapt_l2 #(
   // ---------------------------------------------------------------------
   // Storage. L2_N_WAYS > 1 reserved for future use; current logic only walks
   // way 0. Tag/valid stay in flops for reset simplicity; the data array is
-  // banked by word offset and implemented with the standard 1R1W SRAM wrapper
+  // banked by word offset and implemented with the single-port SRAM wrapper
   // to avoid expanding the default 16 KiB L2 into ~131k data FFs on FPGA.
   // ---------------------------------------------------------------------
   /* verilator lint_off UNUSEDPARAM */
@@ -342,25 +342,39 @@ module rapt_l2 #(
   assign w_full_strobe = &axi_s.wstrb;
   logic w_hit_update;
 
+  // Single-port arbitration: the data banks are read continuously for the
+  // hit path; a write (line install on fill completion, or a full-word
+  // store-hit snoop update) takes the port for that cycle.
+  //   * cache_install fires while the read FSM sits in R_INSTALL_WAIT --
+  //     the read port is idle, no conflict.
+  //   * w_hit_update can fire mid-R_HIT (store drain concurrent with an
+  //     unrelated read burst). The write then wins the port and the read
+  //     address register is clobbered; R_HIT stalls for exactly one cycle
+  //     (see l2_sram_wblock below) while the read address is re-latched.
+  logic l2_sram_wblock;
+  assign l2_sram_wblock = cache_install || (w_hit_update && w_full_strobe);
+
   generate
     for (genvar gi = 0; gi < LineSize; gi++) begin : gen_data_bank
       logic bank_store_wen;
+      logic bank_wen;
       assign bank_store_wen = w_hit_update && w_full_strobe
                             && (w_word_now == L2_LINE_LEN'(gi));
-      rapt_sram_1r1w #(
+      assign bank_wen = cache_install || bank_store_wen;
+      rapt_sram_1rw #(
           .ADDR_WIDTH(L2_LEN),
           .DATA_WIDTH(XLEN),
           .INST_ID(200 + gi),
           .USE_BWE(0)
       ) u_data_sram (
-          .bwe({(XLEN/8){1'b1}}),
           .clock(clock),
-          .ren  (1'b1),
-          .raddr(data_sram_raddr),
+          .en   (1'b1),
+          .wen  (bank_wen),
+          .addr (bank_wen ? (cache_install ? install_idx : w_idx_q)
+                          : data_sram_raddr),
           .rdata(line_data_r[gi]),
-          .wen  (cache_install || bank_store_wen),
-          .waddr(cache_install ? install_idx : w_idx_q),
-          .wdata(cache_install ? r_line_buf[gi] : axi_s.wdata)
+          .wdata(cache_install ? r_line_buf[gi] : axi_s.wdata),
+          .bwe  ({(XLEN/8){1'b1}})
       );
     end
   endgenerate
@@ -397,16 +411,16 @@ module rapt_l2 #(
       r_fill_cnt <= '0;
       r_resp     <= 2'b00;
       r_up_done  <= 1'b0;
-      for (int i = 0; i < LineSize; i++) begin
-        r_line_buf[i] <= '0;
-      end
       cache_install <= 1'b0;
       install_idx   <= '0;
       install_tag   <= '0;
       for (int w = 0; w < L2_N_WAYS; w++) begin
         for (int s = 0; s < NSets; s++) begin
           line_valid[w][s] <= 1'b0;
-          line_tag[w][s]   <= '0;
+          // line_tag is valid-gated (r_hit_q / w_hit_q AND the compare
+          // with line_valid) and rewritten on every install; r_line_buf is
+          // only consumed while cache_install pulses after a completed
+          // fill.  Both stay off the reset network.
         end
       end
     end else begin
@@ -458,7 +472,13 @@ module rapt_l2 #(
         // -----------------------------------------------------------------
         // Resolve hit / miss against the (now-latched) request.
         R_HIT: begin
-          if (r_hit_q) begin
+          if (l2_sram_wblock) begin
+            // A store-hit snoop write took the single SRAM port this cycle
+            // and clobbered the read address register. Hold the burst for
+            // one cycle so data_sram_raddr is re-latched and line_data_r
+            // is fresh again before the next beat is delivered.
+            rs <= R_HIT;
+          end else if (r_hit_q) begin
             // Drive next beat from cache. May take multiple cycles for
             // a burst -- we hold this state until the burst completes.
             if (!rs_rvalid || axi_s.rready) begin
@@ -567,8 +587,8 @@ module rapt_l2 #(
         // -----------------------------------------------------------------
         R_INSTALL_WAIT: begin
           // cache_install is a registered pulse asserted after the final fill
-          // beat. Wait one cycle so tag/valid commit and the SRAM write-first
-          // read for install_idx is visible before R_HIT consumes line_data_r.
+          // beat. Wait one cycle so tag/valid commit and the single-port SRAM
+          // write at install_idx settle before R_HIT re-reads line_data_r.
           rs <= R_HIT;
         end
 
@@ -693,21 +713,12 @@ module rapt_l2 #(
       b_rptr  <= '0;
       b_count <= '0;
       for (int i = 0; i < WbufDepth; i++) begin
+        // wbuf payload is gated by busy/has_w (axi_m.awvalid) and the
+        // b_* response registers by b_count (axi_s.bvalid); allocation
+        // rewrites every payload field, so only the control bits reset.
         wbuf[i].busy  <= 1'b0;
         wbuf[i].has_w <= 1'b0;
-        wbuf[i].addr  <= '0;
-        wbuf[i].id    <= '0;
-        wbuf[i].size  <= '0;
-        wbuf[i].len   <= '0;
-        wbuf[i].burst <= '0;
-        wbuf[i].wdata <= '0;
-        wbuf[i].wstrb <= '0;
-        wbuf[i].wlast <= 1'b0;
         wbuf[i].posted <= 1'b0;
-        wbuf[i].rsp_slot <= '0;
-        b_id_q[i]     <= '0;
-        b_resp_q[i]   <= 2'b00;
-        b_ready_q[i]  <= 1'b0;
       end
     end else begin
       // ---- Drain side (free a slot when downstream B returns) ----

@@ -11,7 +11,7 @@ module rapt_l1i #(
     parameter int XLEN = `RAPT_XLEN,
   parameter unsigned IFQ_SIZE = `RAPT_L1I_REFILL_WORDS,
     parameter int L1I_LINE_LEN = `RAPT_L1I_LINE_LEN,
-    parameter bit [`RAPT_L1I_LEN:0] L1I_LINE_SIZE = 2 ** L1I_LINE_LEN,
+  parameter int unsigned L1I_LINE_SIZE = 2 ** L1I_LINE_LEN,
     parameter int L1I_LEN = `RAPT_L1I_LEN,
     parameter unsigned L1I_N_WAYS = `RAPT_L1I_N_WAYS
 ) (
@@ -577,22 +577,29 @@ module rapt_l1i #(
     end
   endgenerate
 
-  // Per-way data SRAM banks
+  // Per-way data SRAM banks (single shared read/write port).
+  //
+  // Refill writes reuse the fetch read port: l1i_fill_en only fires while
+  // the FSM is in RD_0/RD_1 (miss refill), when no fetch data is consumed,
+  // so the port is free. The write address replaces the read address for
+  // that one cycle; fetch reads resume as soon as the fill completes.
   generate
     for (genvar w = 0; w < L1I_N_WAYS; w++) begin : gen_way
       for (genvar gi = 0; gi < L1I_LINE_SIZE; gi++) begin : gen_bank
-        rapt_sram_1r1w #(
+        logic bank_wen;
+        assign bank_wen = l1i_fill_en && (offset_fetch == L1I_LINE_LEN'(gi))
+                       && (fill_way_r == L1iWayW'(w));
+        rapt_sram_1rw #(
             .ADDR_WIDTH(L1I_LEN),
             .DATA_WIDTH(32)
         ) u_data_sram (
             .clock(clock),
-            .ren(1'b1),
-            .raddr(data_bank_raddr[gi]),
+            .en   (1'b1),
+            .wen  (bank_wen),
+            .addr (bank_wen ? idx_fetch : data_bank_raddr[gi]),
             .rdata(data_bank_rdata[w][gi]),
-            .wen(l1i_fill_en && (offset_fetch == L1I_LINE_LEN'(gi)) && (fill_way_r == L1iWayW'(w))),
-            .waddr(idx_fetch),
             .wdata(l1i_fill_data),
-            .bwe('b0)
+            .bwe  ('b0)
         );
       end
     end
@@ -622,12 +629,15 @@ module rapt_l1i #(
   //   (skipped when is_c=1, since only inst_lo is needed for 16-bit instructions)
   logic [L1I_LEN-1:0] data_bank_raddr_d1[L1I_LINE_SIZE];
   logic sram_data_ready;
+  // The tracker payload needs no reset: sram_data_ready and every sram_*_ready
+  // gate on addr_valid_r (reset in the FSM), and the tracker is refreshed
+  // unconditionally every cycle, so stale entries cannot assert readiness
+  // before addr_valid_r is set.
   always_ff @(posedge clock) begin
-    if (reset) begin
-      for (int i = 0; i < int'(L1I_LINE_SIZE); i++) data_bank_raddr_d1[i] <= '0;
-    end else begin
-      for (int i = 0; i < int'(L1I_LINE_SIZE); i++) data_bank_raddr_d1[i] <= data_bank_raddr[i];
-    end
+    for (int i = 0; i < int'(L1I_LINE_SIZE); i++)
+      data_bank_raddr_d1[i] <= l1i_fill_en && (offset_fetch == L1I_LINE_LEN'(i))
+        ? idx_fetch
+        : data_bank_raddr[i];
   end
   assign sram_data_ready = addr_valid_r
     && (data_bank_raddr_d1[addr_offset] == addr_idx)

@@ -41,11 +41,13 @@ module rapt_lsu #(
   localparam int SQLen = $clog2(SQ_SIZE);
   localparam int ROBLen = $clog2(`RAPT_ROB_SIZE);
 
-  typedef enum logic [1:0] {
-    LS_S_V    = 2'b00,  // present lo beat, wait for wready
-    LS_S_R    = 2'b01,  // lo beat retired; aligned case completes here
-    LS_S_HI_V = 2'b10,  // misaligned: present hi beat, wait for wready
-    LS_S_HI_R = 2'b11   // hi beat retired; SQ entry released next cycle
+  typedef enum logic [2:0] {
+    LS_S_V    = 3'b000,  // present lo beat, wait for wready
+    LS_S_R    = 3'b001,  // lo beat retired; aligned case completes here
+    LS_S_HI_V = 3'b010,  // misaligned: present hi beat, wait for wready
+    LS_S_HI_R = 3'b011, // hi beat retired; SQ entry released next cycle
+    LS_S_X_V  = 3'b100, // RV32D FSD: present the third beat
+    LS_S_X_R  = 3'b101  // third beat retired; SQ entry released next cycle
   } state_store_t;
 
   state_store_t state_store;
@@ -92,6 +94,8 @@ module rapt_lsu #(
   logic [XLEN-1:0] sq_vaddr[SQ_SIZE];  // virtual : forwarding comparison
   logic [XLEN-1:0] sq_paddr[SQ_SIZE];  // physical: bus write-through
   logic [XLEN-1:0] sq_wdata[SQ_SIZE];
+  logic [63:0] sq_wdata64[SQ_SIZE];
+  logic sq_fp64[SQ_SIZE];
   // A2: SQ full state tracker (for pmu_sq_full rising-edge detection)
   logic sq_full_r;
 
@@ -132,18 +136,41 @@ module rapt_lsu #(
   // Drain source: oldest committed entry.
   logic wvalid;
   logic [XLEN-1:0] wdata;
+  logic [63:0] wdata64;
+  logic wfp64;
   logic [XLEN-1:0] waddr;
   logic [4:0] walu;
   assign wvalid = sq_valid[sq_head] && sq_committed[sq_head];
   assign wdata  = sq_wdata[sq_head];
+  assign wdata64 = sq_wdata64[sq_head];
+  assign wfp64 = sq_fp64[sq_head];
   assign waddr  = sq_paddr[sq_head];
   assign walu   = sq_alu[sq_head];
+
+  logic [XLEN-1:0] difftest_store_addr;
+  logic [XLEN-1:0] difftest_store_data;
+  logic [7:0]      difftest_store_wstrb;
+`ifdef RAPT_RV64
+  assign difftest_store_addr  = rou_lsu.sq_waddr;
+  assign difftest_store_data  = rou_lsu.sq_wdata;
+  assign difftest_store_wstrb = {2'b0, rou_lsu.alu};
+`else
+  // NEMU records the second 32-bit write of RV32 FSD, which is its final
+  // vaddr_write() call for the instruction.
+  assign difftest_store_addr  = rou_lsu.sq_fp64 ? rou_lsu.sq_waddr + XLEN'(4)
+                                                 : rou_lsu.sq_waddr;
+  assign difftest_store_data  = rou_lsu.sq_fp64 ? rou_lsu.sq_wdata64[63:32]
+                                                 : rou_lsu.sq_wdata;
+  assign difftest_store_wstrb = rou_lsu.sq_fp64 ? 8'h0f
+                                                 : {2'b0, rou_lsu.alu};
+`endif
 
   assign raddr = exu_lsu.raddr;
   assign ralu = exu_lsu.ralu;
 
   // Drain completion: FSM signals release of the head entry.
-  assign sq_drain_fire = (state_store == LS_S_R || state_store == LS_S_HI_R)
+  assign sq_drain_fire = (state_store == LS_S_R || state_store == LS_S_HI_R
+                       || state_store == LS_S_X_R)
                        && sq_valid[sq_head];
 
   logic [SQ_SIZE-1:0] sq_alloc_oh;
@@ -176,15 +203,12 @@ module rapt_lsu #(
       sq_committed <= '0;
       pmu_sq_full  <= 1'b0;
       sq_full_r    <= 1'b0;
-      // Reset payload arrays so unused entries cannot feed X values into the
-      // store FSM or store-to-load forwarding logic in FPGA synthesis.
-      for (int i = 0; i < SQ_SIZE; i++) begin
-        sq_alu[i]   <= '0;
-        sq_dest[i]  <= '0;
-        sq_vaddr[i] <= '0;
-        sq_paddr[i] <= '0;
-        sq_wdata[i] <= '0;
-      end
+      // SQ payload arrays (alu/dest/vaddr/paddr/wdata) are intentionally NOT
+      // reset: the store FSM only reads sq_*[sq_head] for valid entries, and
+      // the forwarding CAM ANDs every address comparison with sq_valid[idx],
+      // so invalid entries never match or drain.  The data flops are
+      // don't-care (same principle as rapt_prf); skipping them removes
+      // ~SQ_SIZE*(2*XLEN+...) endpoints from the reset network.
     end else begin
       // A2: Latch current full status (rising-edge detection for pmu_sq_full)
       pmu_sq_full <= (&sq_valid) && !sq_full_r;
@@ -199,8 +223,8 @@ module rapt_lsu #(
         sq_tail <= sq_cmt + SQLen'(sq_commit_fire);
         if (sq_commit_fire) begin
           sq_cmt <= sq_cmt + 1'b1;
-          `RAPT_DPI_C_NPC_DIFFTEST_MEM_DIFF(rou_lsu.sq_waddr, rou_lsu.sq_wdata,
-                                            {{2'b0}, rou_lsu.alu})
+          `RAPT_DPI_C_NPC_DIFFTEST_MEM_DIFF(difftest_store_addr, difftest_store_data,
+                                            difftest_store_wstrb)
         end
       end else begin
         if (sq_alloc_fire) begin
@@ -209,12 +233,14 @@ module rapt_lsu #(
           sq_vaddr[sq_tail] <= exu_ioq_bcast.tval;      // virtual (forwarding)
           sq_paddr[sq_tail] <= exu_ioq_bcast.sq_waddr;  // physical (drain)
           sq_wdata[sq_tail] <= exu_ioq_bcast.sq_wdata;
+          sq_wdata64[sq_tail] <= exu_ioq_bcast.sq_wdata64;
+          sq_fp64[sq_tail] <= exu_ioq_bcast.sq_fp64;
           sq_tail <= sq_tail + 1'b1;
         end
         if (sq_commit_fire) begin
           sq_cmt <= sq_cmt + 1'b1;
-          `RAPT_DPI_C_NPC_DIFFTEST_MEM_DIFF(rou_lsu.sq_waddr, rou_lsu.sq_wdata,
-                                            {{2'b0}, rou_lsu.alu})
+          `RAPT_DPI_C_NPC_DIFFTEST_MEM_DIFF(difftest_store_addr, difftest_store_data,
+                                            difftest_store_wstrb)
         end
       end
 
@@ -257,7 +283,8 @@ module rapt_lsu #(
       automatic logic [SQLen-1:0] idx = sq_head + j[SQLen-1:0];
       sq_match_vec[j] = sq_valid[idx]
           && (sq_vaddr[idx][XLEN-1:WordOffBits] == raddr[XLEN-1:WordOffBits]);
-      sq_fwd_full_vec[j] = sq_match_vec[j] && (sq_alu[idx] ==
+      sq_fwd_full_vec[j] = sq_match_vec[j] && (sq_vaddr[idx][WordOffBits-1:0] == '0)
+        && (sq_alu[idx] ==
 `ifdef RAPT_RV64
           `RAPT_SD_WSTRB
 `else
@@ -321,6 +348,9 @@ module rapt_lsu #(
 `ifdef RAPT_RV64
     || ((ralu == `RAPT_ALU_LWU_) && (raddr[1:0] != 2'b00))
     || ((ralu == `RAPT_ALU_LD__) && (raddr[OFFW-1:0] != '0))
+`endif
+`ifndef RAPT_RV64
+  || exu_lsu.fp_rdata64_req
 `endif
   ;
   // Misaligned loads that cross a word/dword boundary cannot use single-shot
@@ -481,11 +511,16 @@ module rapt_lsu #(
   //    that spilled past the word boundary, shifted down to live at byte 0.
   // ==========================================================================
   logic ma_store_span;
+  logic ma_store_third;
   logic [XLEN-1:0] ma_waddr_hi;
+  logic [XLEN-1:0] ma_waddr_third;
   logic [4:0]      ma_walu_hi;
+  logic [4:0]      ma_walu_lo;
+  logic [4:0]      ma_walu_third;
   logic [XLEN-1:0] ma_wdata_hi;
+  logic [XLEN-1:0] ma_wdata_third;
   logic [OFFW:0]   ma_w_off;       // byte offset into the aligned word (extra bit)
-  logic [OFFW:0]   ma_w_size;      // store size in bytes, 1/2/4/(8)
+  logic [OFFW+1:0] ma_w_size;      // store size in bytes, 1/2/4/(8)
   logic [XLEN/8-1:0] ma_wstrb_lo;
   /* verilator lint_off UNUSEDSIGNAL */
   logic [2*XLEN/8-1:0]   ma_wstrb_wide;  // low half unused (bus path handles lo)
@@ -575,6 +610,12 @@ module rapt_lsu #(
                ? rdata_unalign
                : (rdata_unalign >> (raddr[OFFW-1:0] * 8));
 
+              assign exu_lsu.fp_rdata64_valid = exu_lsu.fp_rdata64_req
+                && ((ma_state == MA_DONE) || (lsu_l1d.rvalid && lsu_l1d.rready));
+          assign exu_lsu.fp_rdata64 = (XLEN == 32)
+            ? ma_cat[ma_shift +: 64]
+            : {{(64-XLEN){1'b0}}, rdata};
+
   assign exu_lsu.rdata = (
       ({XLEN{ralu == `RAPT_ALU_LB__}} & {{XLEN-8{rdata[7]}}, rdata[7:0]})
     | ({XLEN{ralu == `RAPT_ALU_LBU_}} & {{XLEN-8{1'b0}}, rdata[7:0]})
@@ -637,10 +678,18 @@ module rapt_lsu #(
         end
         LS_S_HI_V: begin
           if (lsu_l1d.wready) begin
-            state_store <= LS_S_HI_R;
+            state_store <= ma_store_third ? LS_S_X_V : LS_S_HI_R;
           end
         end
         LS_S_HI_R: begin
+          state_store <= LS_S_V;
+        end
+        LS_S_X_V: begin
+          if (lsu_l1d.wready) begin
+            state_store <= LS_S_X_R;
+          end
+        end
+        LS_S_X_R: begin
           state_store <= LS_S_V;
         end
         default: begin
@@ -660,11 +709,12 @@ module rapt_lsu #(
   assign lsu_l1d.ordered = exu_lsu.ordered && sq_all_empty;
 
   // Misalign-split FSM.
+  // ma_lo_data/ma_hi_data are read only in MA_DONE (merged result), so their
+  // data flops are don't-care in MA_IDLE (same principle as rapt_prf); only
+  // the FSM state needs reset.
   always_ff @(posedge clock) begin
     if (reset) begin
       ma_state <= MA_IDLE;
-      ma_lo_data <= '0;
-      ma_hi_data <= '0;
     end else if (cmu_bcast.flush_pipe) begin
       ma_state <= MA_IDLE;
     end else begin
@@ -699,29 +749,36 @@ module rapt_lsu #(
   // Compute store size from walu byte mask.
   always_comb begin
     unique case (walu)
-      `RAPT_SB_WSTRB: ma_w_size = (OFFW+1)'(1);
-      `RAPT_SH_WSTRB: ma_w_size = (OFFW+1)'(2);
-      `RAPT_SW_WSTRB: ma_w_size = (OFFW+1)'(4);
+      `RAPT_SB_WSTRB: ma_w_size = (OFFW+2)'(1);
+      `RAPT_SH_WSTRB: ma_w_size = (OFFW+2)'(2);
+      `RAPT_SW_WSTRB: ma_w_size = (OFFW+2)'(4);
 `ifdef RAPT_RV64
-      `RAPT_SD_WSTRB: ma_w_size = (OFFW+1)'(8);
+      `RAPT_SD_WSTRB: ma_w_size = (OFFW+2)'(8);
+    `else
+      default:        ma_w_size = wfp64 ? (OFFW+2)'(8) : (OFFW+2)'(0);
 `endif
-      default:        ma_w_size = (OFFW+1)'(0);
+    `ifdef RAPT_RV64
+      default:        ma_w_size = (OFFW+2)'(0);
+    `endif
     endcase
   end
   // Misaligned cross-word if off + size > word size.
   assign ma_store_span = (ma_w_size != '0)
                       && ((ma_w_off + ma_w_size) > (OFFW+1)'(XLEN/8));
+  assign ma_store_third = (XLEN == 32) && wfp64
+                       && (waddr[OFFW-1:0] != '0);
 
 `ifdef RAPT_RV64
   assign ma_wstrb_lo = (walu == `RAPT_SD_WSTRB) ? 8'hff : {3'b0, walu};
 `else
-  assign ma_wstrb_lo = walu[XLEN/8-1:0];
+  assign ma_wstrb_lo = wfp64 ? 4'hf : walu[XLEN/8-1:0];
 `endif
 
   /* verilator lint_off WIDTHTRUNC */
   assign ma_wstrb_wide = {{(XLEN/8){1'b0}}, ma_wstrb_lo} << ma_w_off;
   assign ma_w_shift    = {{($clog2(2*XLEN)-OFFW-3){1'b0}}, waddr[OFFW-1:0], 3'b000};
-  assign ma_wdata_wide = {{XLEN{1'b0}}, wdata} << ma_w_shift;
+  assign ma_wdata_wide = (wfp64 ? {{XLEN{1'b0}}, wdata64}
+                          : {{XLEN{1'b0}}, wdata}) << ma_w_shift;
   assign ma_wdata_hi   = ma_wdata_wide[2*XLEN-1:XLEN];
   /* verilator lint_on WIDTHTRUNC */
   assign ma_waddr_hi = {waddr[XLEN-1:OFFW], {OFFW{1'b0}}} + XLEN'(XLEN/8);
@@ -731,15 +788,46 @@ module rapt_lsu #(
   // overflow fits in 3 bits).  Zero-extend safely.
   assign ma_walu_hi = {1'b0, ma_wstrb_wide[XLEN/8+3:XLEN/8]};
 `else
-  assign ma_walu_hi = {{(5-XLEN/8){1'b0}}, ma_wstrb_wide[2*XLEN/8-1:XLEN/8]};
+  assign ma_walu_hi = wfp64 ? 5'b01111
+                    : {{(5-XLEN/8){1'b0}}, ma_wstrb_wide[2*XLEN/8-1:XLEN/8]};
 `endif
+  always_comb begin
+    ma_walu_lo = walu;
+    ma_walu_third = '0;
+    ma_wdata_third = '0;
+    if ((XLEN == 32) && wfp64) begin
+      unique case (waddr[1:0])
+        2'b00: ma_walu_lo = 5'b01111;
+        2'b01: begin
+          ma_walu_lo = 5'b00111;
+          ma_walu_third = 5'b00001;
+          ma_wdata_third = wdata64 >> 56;
+        end
+        2'b10: begin
+          ma_walu_lo = 5'b00011;
+          ma_walu_third = 5'b00011;
+          ma_wdata_third = wdata64 >> 48;
+        end
+        default: begin
+          ma_walu_lo = 5'b00001;
+          ma_walu_third = 5'b00111;
+          ma_wdata_third = wdata64 >> 40;
+        end
+      endcase
+    end
+  end
+  assign ma_waddr_third = ma_waddr_hi + XLEN'(XLEN/8);
 
   // L1D drive muxing.
-  assign lsu_l1d.waddr  = (state_store == LS_S_HI_V) ? ma_waddr_hi : waddr;
-  assign lsu_l1d.walu   = (state_store == LS_S_HI_V) ? ma_walu_hi  : walu;
+  assign lsu_l1d.waddr  = (state_store == LS_S_HI_V) ? ma_waddr_hi
+                       : (state_store == LS_S_X_V)  ? ma_waddr_third : waddr;
+  assign lsu_l1d.walu   = (state_store == LS_S_HI_V) ? ma_walu_hi
+                       : (state_store == LS_S_X_V)  ? ma_walu_third : ma_walu_lo;
   assign lsu_l1d.wvalid = (state_store == LS_S_V && wvalid)
-                       || (state_store == LS_S_HI_V);
-  assign lsu_l1d.wdata  = (state_store == LS_S_HI_V) ? ma_wdata_hi : wdata;
+                       || (state_store == LS_S_HI_V)
+                       || (state_store == LS_S_X_V);
+  assign lsu_l1d.wdata  = (state_store == LS_S_HI_V) ? ma_wdata_hi
+                       : (state_store == LS_S_X_V)  ? ma_wdata_third : wdata;
 
   // ==========================================================================
   //  Assertions (enable with +define+RAPT_ASSERT_EN)

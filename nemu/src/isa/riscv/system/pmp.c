@@ -134,6 +134,7 @@ int pmp_csr_write(uint16_t csr, word_t val)
       pmp_cfg_set(base + pi, nb);
     }
     pmp_rebuild_active();
+    soft_tlb_flush();
     return 1;
   }
   if (csr >= CSR_PMPADDR0 && csr <= CSR_PMPADDR0 + PMP_N - 1)
@@ -152,6 +153,7 @@ int pmp_csr_write(uint16_t csr, word_t val)
       }
     }
     pmp_addr_set(i, val);
+    soft_tlb_flush();
     return 1;
   }
   return 0;
@@ -214,6 +216,34 @@ static void pmp_byte_lookup(word_t addr_bytes, struct pmp_match *m)
   }
 }
 
+static bool pmp_entry_matches(int entry, word_t addr_bytes)
+{
+  uint8_t cfg = pmp_cfg(entry);
+  int a = (cfg >> PMPCFG_A_LSB) & 0x3;
+  word_t addr_w = addr_bytes >> 2;
+  word_t pa = pmp_addr(entry);
+  if (a == PMP_A_TOR)
+  {
+    word_t lo = (entry == 0) ? 0 : pmp_addr(entry - 1);
+    return addr_w >= lo && addr_w < pa;
+  }
+  if (a == PMP_A_NA4)
+    return addr_w == pa;
+  if (a == PMP_A_NAPOT)
+  {
+    word_t mask = 1;
+    for (int j = 1; j < (int)sizeof(word_t) * 8; j++)
+    {
+      if (pa & ((word_t)1 << (j - 1)))
+        mask |= (word_t)1 << j;
+      else
+        break;
+    }
+    return (addr_w & ~mask) == (pa & ~mask);
+  }
+  return false;
+}
+
 /* Last PMP fault address — reports which byte of a possibly-straddling access
  * triggered the fault. For hi-byte failures, reports the naturally-aligned
  * second segment (matching sail's mtval convention for straddle faults). */
@@ -244,10 +274,19 @@ bool pmp_check(paddr_t addr, int size, uint32_t priv,
   pmp_byte_lookup((word_t)addr_hi, &hi);
   bool is_m = (priv == PRV_M);
 
+  /* Data accesses use first-byte priority and require that entry to cover
+   * the complete access. Instruction fetch retains endpoint permissions. */
+  if (!op_x && lo.any_match &&
+      !pmp_entry_matches(lo.entry, (word_t)addr_hi))
+  {
+    pmp_last_fault_addr = addr;
+    return true;
+  }
+
   for (int pass = 0; pass < 2; pass++)
   {
     struct pmp_match *m = (pass == 0) ? &lo : &hi;
-    paddr_t fail_addr = (pass == 0) ? addr : (((addr_hi) & ~(paddr_t)(size - 1)));
+    paddr_t fail_addr = (pass == 0) ? addr : (addr_hi & ~(paddr_t)(size - 1));
     if (!m->any_match)
     {
       if (!is_m)

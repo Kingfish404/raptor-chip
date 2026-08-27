@@ -15,3 +15,18 @@
 
 INC_PATH += $(NEMU_HOME)/src/isa/$(GUEST_ISA)/include
 DIRS-y += src/isa/$(GUEST_ISA)
+
+ifeq ($(CONFIG_ISA_riscv),y)
+SOFTFLOAT_ROOT := $(NEMU_HOME)/tools/spike-diff/repo
+SOFTFLOAT_HEADER := $(SOFTFLOAT_ROOT)/softfloat/softfloat.h
+SOFTFLOAT_ARCHIVE := $(SOFTFLOAT_ROOT)/build/libsoftfloat.a
+INC_PATH += $(SOFTFLOAT_ROOT)/softfloat
+GENERATED_HEADERS += $(SOFTFLOAT_HEADER)
+ARCHIVES += $(SOFTFLOAT_ARCHIVE)
+
+$(SOFTFLOAT_HEADER):
+	$(MAKE) -C $(NEMU_HOME)/tools/spike-diff repo/softfloat/softfloat.h
+
+$(SOFTFLOAT_ARCHIVE): $(SOFTFLOAT_HEADER)
+	$(MAKE) -C $(NEMU_HOME)/tools/spike-diff repo/build/libsoftfloat.a
+endif

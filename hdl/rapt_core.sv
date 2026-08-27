@@ -128,6 +128,7 @@ module rapt_core #(
   exu_wb_if exu_wb_mul ();  // MUL/DIV pipe writeback
 
   exu_prf_if exu_prf ();
+    fpr_if fpr ();
   exu_csr_if exu_csr ();
   exu_lsu_if exu_lsu ();
   exu_l1d_if exu_l1d ();
@@ -203,12 +204,20 @@ module rapt_core #(
     pipe_cdb_valid_mask = {
       exu_wb_mul.valid, exu_ioq_bcast.valid, wb_branch.valid, wb_alu.valid, wb_alu_csr.valid
     };
-    pipe_cdb_valid_count = $countones(pipe_cdb_valid_mask);
+        pipe_cdb_valid_count = {2'b0, pipe_cdb_valid_mask[0]}
+                                                 + {2'b0, pipe_cdb_valid_mask[1]}
+                                                 + {2'b0, pipe_cdb_valid_mask[2]}
+                                                 + {2'b0, pipe_cdb_valid_mask[3]}
+                                                 + {2'b0, pipe_cdb_valid_mask[4]};
     pipe_cdb_multi_valid = (pipe_cdb_valid_count >= 2);
     pipe_result_wb_valid_mask = {
       exu_wb_mul.valid, exu_ioq_bcast.valid, wb_alu.valid, wb_alu_csr.valid
     };
-    pipe_result_wb_multi_valid = ($countones(pipe_result_wb_valid_mask) >= 2);
+    pipe_result_wb_multi_valid =
+        ({2'b0, pipe_result_wb_valid_mask[0]}
+       + {2'b0, pipe_result_wb_valid_mask[1]}
+       + {2'b0, pipe_result_wb_valid_mask[2]}
+       + {2'b0, pipe_result_wb_valid_mask[3]}) >= 3'd2;
     pipe_ifu_a_state = cmu_bcast.flush_pipe || ifu_fqu.resteer
         ? P_SQUASH
         : !ifu_fqu.valid_a
@@ -466,6 +475,12 @@ module rapt_core #(
 `endif
   );
 
+    rapt_fpr fpr_bank (
+            .clock(clock),
+            .reset(reset),
+            .fpr(fpr)
+    );
+
   // EXU (EXecution Unit)
   rapt_exu exu (
       .clock(clock),
@@ -482,6 +497,7 @@ module rapt_core #(
 
       .exu_lsu(exu_lsu),
       .exu_csr(exu_csr),
+    .fpr(fpr),
 
       .csr_bcast(csr_bcast),
       .pmp_state(pmp_exu_state),

@@ -8,6 +8,15 @@ config RVE
   bool "Use E extension"
   default n
 
+config RV_F
+  bool "F: single-precision floating-point extension"
+  default n
+
+config RV_D
+  bool "D: double-precision floating-point extension"
+  depends on RV_F
+  default n
+
 config RV_SVADE
   bool "Svade: A/D bits faulted by hardware (instead of Svadu auto-update)"
   default n

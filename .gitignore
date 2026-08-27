@@ -15,6 +15,9 @@
 !.clangd
 !Makefile
 !README.md
+!/app/netbsd/.gitignore
+!/app/netbsd/patches/
+!/app/netbsd/patches/**
 !raptor-chip.code-workspace
 !env.sh
 !setup.sh
@@ -32,6 +35,13 @@
 !*.sv
 !*.svh
 
+# ---- Test / verification sources (assembly tests, C/C++ testbenches) ----
+!*.S
+!*.c
+!*.cc
+!*.cpp
+!*.h
+
 # ---- LiteX upstream source patches ----
 !/fpga/litex/benchmarks/embench/patches/*.patch
 
@@ -48,6 +58,11 @@
 /docs-*/
 /syn/
 Makefile.local
+
+# ---- Re-ignore: build / simulation outputs (these may contain *.cpp/*.h
+# ---- that match the source whitelist above, e.g. Verilator obj_dir) ----
+obj_dir/
+**/obj_dir/
 
 # ---- OS artifacts ----
 .DS_Store

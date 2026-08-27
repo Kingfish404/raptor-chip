@@ -15,6 +15,8 @@
 
 #include <setjmp.h>
 #include "local-include/reg.h"
+#include "local-include/fp.h"
+#include "local-include/fp-exec.h"
 #include <isa-def.h>
 #include <cpu/cpu.h>
 #include <cpu/ifetch.h>
@@ -25,6 +27,10 @@
 
 #define R(i) gpr(i)
 #define CSR(i) sr(i)
+#define CSR_READ(i)                                                                                                   \
+  ((((i) & 0xfff) == CSR_FFLAGS) ? (CSR(CSR_FCSR) & 0x1f) : (((i) & 0xfff) == CSR_FRM) ? ((CSR(CSR_FCSR) >> 5) & 0x7) \
+                                                        : (((i) & 0xfff) == CSR_FCSR)  ? (CSR(CSR_FCSR) & 0xff)       \
+                                                                                       : CSR(i))
 /* CSR write with PMP hook: routes writes to pmpcfg/pmpaddr through
  * pmp_csr_write() which enforces WARL masking and L-bit lockdown.  All
  * other CSRs fall through to the raw cpu.sr[] store. */
@@ -71,29 +77,40 @@ static inline word_t csrw_warl(uint16_t c, word_t v)
   }
   return v;
 }
-#define CSRW(i, v)                                                         \
-  do                                                                       \
-  {                                                                        \
-    uint16_t _c = (uint16_t)((i) & 0xfff);                                 \
-    word_t _v = csrw_warl(_c, (word_t)(v));                                \
-    /* satp WARL: drop entire write if MODE is unsupported (Priv §10.6.1). */ \
-    if (_c == CSR_SATP && !csrw_satp_accept(_v))                           \
-    {                                                                      \
-      cpu.last_csr_wr = _c;                                                \
-      break;                                                               \
-    }                                                                      \
-    if (!pmp_csr_write(_c, _v))                                            \
-    {                                                                      \
-      if (_c == CSR_MIP)                                                   \
-        sr(_c) = (sr(_c) & ~(word_t)0x222) | (_v & (word_t)0x222);         \
-      else                                                                 \
-        sr(_c) = _v;                                                       \
-    }                                                                      \
-    cpu.last_csr_wr = _c;                                                  \
-    /* Flush soft TLB on writes to CSRs that affect address translation */ \
-    if (_c == CSR_SATP || _c == CSR_MSTATUS || _c == CSR_SSTATUS ||        \
-        _c == CSR_MSTATUSH)                                                \
-      soft_tlb_flush();                                                    \
+
+#define CSRW(i, v)                                                                      \
+  do                                                                                    \
+  {                                                                                     \
+    uint16_t _c = (uint16_t)((i) & 0xfff);                                              \
+    word_t _v = csrw_warl(_c, (word_t)(v));                                             \
+    /* satp WARL: drop entire write if MODE is unsupported (Priv §10.6.1). */           \
+    if (_c == CSR_SATP && !csrw_satp_accept(_v))                                        \
+    {                                                                                   \
+      cpu.last_csr_wr = _c;                                                             \
+      break;                                                                            \
+    }                                                                                   \
+    if (is_fp_csr(_c))                                                                  \
+    {                                                                                   \
+      if (_c == CSR_FFLAGS)                                                             \
+        CSR(CSR_FCSR) = (CSR(CSR_FCSR) & ~(word_t)0x1f) | (_v & 0x1f);                  \
+      else if (_c == CSR_FRM)                                                           \
+        CSR(CSR_FCSR) = (CSR(CSR_FCSR) & ~(word_t)0xe0) | ((_v & 0x7) << 5);            \
+      else                                                                              \
+        CSR(CSR_FCSR) = _v & 0xff;                                                      \
+      CSR(CSR_MSTATUS) = (CSR(CSR_MSTATUS) & ~CSR_MSTATUS_FS_MASK) | ((word_t)3 << 13); \
+    }                                                                                   \
+    else if (!pmp_csr_write(_c, _v))                                                    \
+    {                                                                                   \
+      if (_c == CSR_MIP)                                                                \
+        sr(_c) = (sr(_c) & ~(word_t)0x222) | (_v & (word_t)0x222);                      \
+      else                                                                              \
+        sr(_c) = _v;                                                                    \
+    }                                                                                   \
+    cpu.last_csr_wr = _c;                                                               \
+    /* Flush soft TLB on writes to CSRs that affect address translation */              \
+    if (_c == CSR_SATP || _c == CSR_MSTATUS || _c == CSR_SSTATUS ||                     \
+        _c == CSR_MSTATUSH)                                                             \
+      soft_tlb_flush();                                                                 \
   } while (0)
 #define Mr vaddr_read
 #define Mw vaddr_write
@@ -140,6 +157,16 @@ bool csr_valid(Decode *s, uint16_t csr, bool is_write)
   {
     csr_t ms = {.val = cpu.sr[CSR_MSTATUS]};
     if (ms.mstatus.tvm)
+    {
+      s->dnpc = isa_raise_intr(MCA_ILLEGAL_INS, s->pc);
+      difftest_skip_ref();
+      return false;
+    }
+  }
+  if (is_fp_csr(csr))
+  {
+    word_t fs = (CSR(CSR_MSTATUS) & CSR_MSTATUS_FS_MASK) >> 13;
+    if (!(CSR(CSR_MISA) & CSR_MISA_EXT_F) || fs == 0)
     {
       s->dnpc = isa_raise_intr(MCA_ILLEGAL_INS, s->pc);
       difftest_skip_ref();
@@ -296,6 +323,11 @@ static int decode_exec(Decode *s)
 #endif
   INSTPAT_CASE_END(grp_load)
 
+  INSTPAT_CASE(0b00001, grp_fp_load)
+  INSTPAT("??????? ????? ????? 010 ????? 00001 11", flw, I, fp_load_s(s, rd, src1 + imm));
+  INSTPAT("??????? ????? ????? 011 ????? 00001 11", fld, I, fp_load_d(s, rd, src1 + imm));
+  INSTPAT_CASE_END(grp_fp_load)
+
   INSTPAT_CASE(0b01000, grp_store) // Store
   INSTPAT("??????? ????? ????? 000 ????? 01000 11", sb, S, Mw(src1 + imm, 1, src2));
   INSTPAT("??????? ????? ????? 001 ????? 01000 11", sh, S, Mw(src1 + imm, 2, src2));
@@ -305,6 +337,92 @@ static int decode_exec(Decode *s)
   INSTPAT("??????? ????? ????? 011 ????? 01000 11", sd, S, Mw(src1 + imm, 8, src2));
 #endif
   INSTPAT_CASE_END(grp_store)
+
+  INSTPAT_CASE(0b01001, grp_fp_store)
+  INSTPAT("??????? ????? ????? 010 ????? 01001 11", fsw, S, fp_store_s(s, src1 + imm, fp_rs2(s)));
+  INSTPAT("??????? ????? ????? 011 ????? 01001 11", fsd, S, fp_store_d(s, src1 + imm, fp_rs2(s)));
+  INSTPAT_CASE_END(grp_fp_store)
+
+  INSTPAT_CASE(0b10000, grp_fmadd)
+  INSTPAT("????? 00 ????? ????? ??? ????? 10000 11", fmadd.s, R, fp_exec_fma_s(s, rd, fp_rs1(s), fp_rs2(s), fp_rs3(s), false, false));
+  INSTPAT("????? 01 ????? ????? ??? ????? 10000 11", fmadd.d, R, fp_exec_fma_d(s, rd, fp_rs1(s), fp_rs2(s), fp_rs3(s), false, false));
+  INSTPAT_CASE_END(grp_fmadd)
+
+  INSTPAT_CASE(0b10001, grp_fmsub)
+  INSTPAT("????? 00 ????? ????? ??? ????? 10001 11", fmsub.s, R, fp_exec_fma_s(s, rd, fp_rs1(s), fp_rs2(s), fp_rs3(s), false, true));
+  INSTPAT("????? 01 ????? ????? ??? ????? 10001 11", fmsub.d, R, fp_exec_fma_d(s, rd, fp_rs1(s), fp_rs2(s), fp_rs3(s), false, true));
+  INSTPAT_CASE_END(grp_fmsub)
+
+  INSTPAT_CASE(0b10010, grp_fnmsub)
+  INSTPAT("????? 00 ????? ????? ??? ????? 10010 11", fnmsub.s, R, fp_exec_fma_s(s, rd, fp_rs1(s), fp_rs2(s), fp_rs3(s), true, false));
+  INSTPAT("????? 01 ????? ????? ??? ????? 10010 11", fnmsub.d, R, fp_exec_fma_d(s, rd, fp_rs1(s), fp_rs2(s), fp_rs3(s), true, false));
+  INSTPAT_CASE_END(grp_fnmsub)
+
+  INSTPAT_CASE(0b10011, grp_fnmadd)
+  INSTPAT("????? 00 ????? ????? ??? ????? 10011 11", fnmadd.s, R, fp_exec_fma_s(s, rd, fp_rs1(s), fp_rs2(s), fp_rs3(s), true, true));
+  INSTPAT("????? 01 ????? ????? ??? ????? 10011 11", fnmadd.d, R, fp_exec_fma_d(s, rd, fp_rs1(s), fp_rs2(s), fp_rs3(s), true, true));
+  INSTPAT_CASE_END(grp_fnmadd)
+
+  INSTPAT_CASE(0b10100, grp_fp_op)
+  INSTPAT("1111000 00000 ????? 000 ????? 10100 11", fmv.w.x, R, fp_move_to_s(s, rd, src1));
+  INSTPAT("1110000 00000 ????? 000 ????? 10100 11", fmv.x.w, R, fp_move_from_s(s, rd, fp_rs1(s)));
+  INSTPAT("0010000 ????? ????? 000 ????? 10100 11", fsgnj.s, R, fp_sign_inject_s(s, rd, fp_rs1(s), fp_rs2(s), 0));
+  INSTPAT("0010000 ????? ????? 001 ????? 10100 11", fsgnjn.s, R, fp_sign_inject_s(s, rd, fp_rs1(s), fp_rs2(s), 1));
+  INSTPAT("0010000 ????? ????? 010 ????? 10100 11", fsgnjx.s, R, fp_sign_inject_s(s, rd, fp_rs1(s), fp_rs2(s), 2));
+  INSTPAT("0000000 ????? ????? ??? ????? 10100 11", fadd.s, R, fp_exec_binary_s(s, rd, fp_rs1(s), fp_rs2(s), riscv_fp_add_s));
+  INSTPAT("0000100 ????? ????? ??? ????? 10100 11", fsub.s, R, fp_exec_binary_s(s, rd, fp_rs1(s), fp_rs2(s), riscv_fp_sub_s));
+  INSTPAT("0001000 ????? ????? ??? ????? 10100 11", fmul.s, R, fp_exec_binary_s(s, rd, fp_rs1(s), fp_rs2(s), riscv_fp_mul_s));
+  INSTPAT("0001100 ????? ????? ??? ????? 10100 11", fdiv.s, R, fp_exec_binary_s(s, rd, fp_rs1(s), fp_rs2(s), riscv_fp_div_s));
+  INSTPAT("0101100 00000 ????? ??? ????? 10100 11", fsqrt.s, R, fp_exec_unary_s(s, rd, fp_rs1(s), riscv_fp_sqrt_s));
+  INSTPAT("0010100 ????? ????? 000 ????? 10100 11", fmin.s, R, fp_exec_minmax_s(s, rd, fp_rs1(s), fp_rs2(s), riscv_fp_min_s));
+  INSTPAT("0010100 ????? ????? 001 ????? 10100 11", fmax.s, R, fp_exec_minmax_s(s, rd, fp_rs1(s), fp_rs2(s), riscv_fp_max_s));
+  INSTPAT("1010000 ????? ????? 000 ????? 10100 11", fle.s, R, fp_exec_compare_s(s, rd, fp_rs1(s), fp_rs2(s), riscv_fp_le_s));
+  INSTPAT("1010000 ????? ????? 001 ????? 10100 11", flt.s, R, fp_exec_compare_s(s, rd, fp_rs1(s), fp_rs2(s), riscv_fp_lt_s));
+  INSTPAT("1010000 ????? ????? 010 ????? 10100 11", feq.s, R, fp_exec_compare_s(s, rd, fp_rs1(s), fp_rs2(s), riscv_fp_eq_s));
+  INSTPAT("1110000 00000 ????? 001 ????? 10100 11", fclass.s, R, fp_exec_class_s(s, rd, fp_rs1(s)));
+  INSTPAT("1100000 00000 ????? ??? ????? 10100 11", fcvt.w.s, R, fp_exec_to_int_s(s, rd, fp_rs1(s), false, false));
+  INSTPAT("1100000 00001 ????? ??? ????? 10100 11", fcvt.wu.s, R, fp_exec_to_int_s(s, rd, fp_rs1(s), true, false));
+#ifdef CONFIG_RV64
+  INSTPAT("1100000 00010 ????? ??? ????? 10100 11", fcvt.l.s, R, fp_exec_to_int_s(s, rd, fp_rs1(s), false, true));
+  INSTPAT("1100000 00011 ????? ??? ????? 10100 11", fcvt.lu.s, R, fp_exec_to_int_s(s, rd, fp_rs1(s), true, true));
+#endif
+  INSTPAT("1101000 00000 ????? ??? ????? 10100 11", fcvt.s.w, R, fp_exec_from_int_s(s, rd, src1, false, false));
+  INSTPAT("1101000 00001 ????? ??? ????? 10100 11", fcvt.s.wu, R, fp_exec_from_int_s(s, rd, src1, true, false));
+#ifdef CONFIG_RV64
+  INSTPAT("1101000 00010 ????? ??? ????? 10100 11", fcvt.s.l, R, fp_exec_from_int_s(s, rd, src1, false, true));
+  INSTPAT("1101000 00011 ????? ??? ????? 10100 11", fcvt.s.lu, R, fp_exec_from_int_s(s, rd, src1, true, true));
+#endif
+  INSTPAT("1111001 00000 ????? 000 ????? 10100 11", fmv.d.x, R, fp_move_to_d(s, rd, src1));
+  INSTPAT("1110001 00000 ????? 000 ????? 10100 11", fmv.x.d, R, fp_move_from_d(s, rd, fp_rs1(s)));
+  INSTPAT("0010001 ????? ????? 000 ????? 10100 11", fsgnj.d, R, fp_sign_inject_d(s, rd, fp_rs1(s), fp_rs2(s), 0));
+  INSTPAT("0010001 ????? ????? 001 ????? 10100 11", fsgnjn.d, R, fp_sign_inject_d(s, rd, fp_rs1(s), fp_rs2(s), 1));
+  INSTPAT("0010001 ????? ????? 010 ????? 10100 11", fsgnjx.d, R, fp_sign_inject_d(s, rd, fp_rs1(s), fp_rs2(s), 2));
+  INSTPAT("0000001 ????? ????? ??? ????? 10100 11", fadd.d, R, fp_exec_binary_d(s, rd, fp_rs1(s), fp_rs2(s), riscv_fp_add_d));
+  INSTPAT("0000101 ????? ????? ??? ????? 10100 11", fsub.d, R, fp_exec_binary_d(s, rd, fp_rs1(s), fp_rs2(s), riscv_fp_sub_d));
+  INSTPAT("0001001 ????? ????? ??? ????? 10100 11", fmul.d, R, fp_exec_binary_d(s, rd, fp_rs1(s), fp_rs2(s), riscv_fp_mul_d));
+  INSTPAT("0001101 ????? ????? ??? ????? 10100 11", fdiv.d, R, fp_exec_binary_d(s, rd, fp_rs1(s), fp_rs2(s), riscv_fp_div_d));
+  INSTPAT("0101101 00000 ????? ??? ????? 10100 11", fsqrt.d, R, fp_exec_unary_d(s, rd, fp_rs1(s), riscv_fp_sqrt_d));
+  INSTPAT("0010101 ????? ????? 000 ????? 10100 11", fmin.d, R, fp_exec_minmax_d(s, rd, fp_rs1(s), fp_rs2(s), riscv_fp_min_d));
+  INSTPAT("0010101 ????? ????? 001 ????? 10100 11", fmax.d, R, fp_exec_minmax_d(s, rd, fp_rs1(s), fp_rs2(s), riscv_fp_max_d));
+  INSTPAT("1010001 ????? ????? 000 ????? 10100 11", fle.d, R, fp_exec_compare_d(s, rd, fp_rs1(s), fp_rs2(s), riscv_fp_le_d));
+  INSTPAT("1010001 ????? ????? 001 ????? 10100 11", flt.d, R, fp_exec_compare_d(s, rd, fp_rs1(s), fp_rs2(s), riscv_fp_lt_d));
+  INSTPAT("1010001 ????? ????? 010 ????? 10100 11", feq.d, R, fp_exec_compare_d(s, rd, fp_rs1(s), fp_rs2(s), riscv_fp_eq_d));
+  INSTPAT("1110001 00000 ????? 001 ????? 10100 11", fclass.d, R, fp_exec_class_d(s, rd, fp_rs1(s)));
+  INSTPAT("1100001 00000 ????? ??? ????? 10100 11", fcvt.w.d, R, fp_exec_to_int_d(s, rd, fp_rs1(s), false, false));
+  INSTPAT("1100001 00001 ????? ??? ????? 10100 11", fcvt.wu.d, R, fp_exec_to_int_d(s, rd, fp_rs1(s), true, false));
+#ifdef CONFIG_RV64
+  INSTPAT("1100001 00010 ????? ??? ????? 10100 11", fcvt.l.d, R, fp_exec_to_int_d(s, rd, fp_rs1(s), false, true));
+  INSTPAT("1100001 00011 ????? ??? ????? 10100 11", fcvt.lu.d, R, fp_exec_to_int_d(s, rd, fp_rs1(s), true, true));
+#endif
+  INSTPAT("1101001 00000 ????? ??? ????? 10100 11", fcvt.d.w, R, fp_exec_from_int_d(s, rd, src1, false, false));
+  INSTPAT("1101001 00001 ????? ??? ????? 10100 11", fcvt.d.wu, R, fp_exec_from_int_d(s, rd, src1, true, false));
+#ifdef CONFIG_RV64
+  INSTPAT("1101001 00010 ????? ??? ????? 10100 11", fcvt.d.l, R, fp_exec_from_int_d(s, rd, src1, false, true));
+  INSTPAT("1101001 00011 ????? ??? ????? 10100 11", fcvt.d.lu, R, fp_exec_from_int_d(s, rd, src1, true, true));
+#endif
+  INSTPAT("0100000 00001 ????? ??? ????? 10100 11", fcvt.s.d, R, fp_exec_convert_d_to_s(s, rd, fp_rs1(s)));
+  INSTPAT("0100001 00000 ????? ??? ????? 10100 11", fcvt.d.s, R, fp_exec_convert_s_to_d(s, rd, fp_rs1(s)));
+  INSTPAT_CASE_END(grp_fp_op)
 
   INSTPAT_CASE(0b00100, grp_opimm) // OP-IMM
   INSTPAT("??????? ????? ????? 000 ????? 00100 11", addi, I, R(rd) = (sword_t)src1 + imm);
@@ -554,12 +672,12 @@ static int decode_exec(Decode *s)
     }
   });
   // RV32/RV64 Zicsr Extension
-  INSTPAT("??????? ????? ????? 001 ????? 11100 11", csrrw, I, { if (csr_valid(s, imm, true)) {R(rd) = CSR(imm); CSRW(imm, src1); } });
-  INSTPAT("??????? ????? ????? 010 ????? 11100 11", csrrs, I, { if (csr_valid(s, imm, rs1 != 0)) {R(rd) = CSR(imm); if (rs1 != 0) { CSRW(imm, CSR(imm) | src1);}; } });
-  INSTPAT("??????? ????? ????? 011 ????? 11100 11", csrrc, I, { if (csr_valid(s, imm, rs1 != 0)) {R(rd) = CSR(imm); if (rs1 != 0) { CSRW(imm, CSR(imm) & ~src1);}; } });
-  INSTPAT("??????? ????? ????? 101 ????? 11100 11", csrrwi, I_I, { if (csr_valid(s, imm, true)) { R(rd) = CSR(imm); CSRW(imm, src1);} });
-  INSTPAT("??????? ????? ????? 110 ????? 11100 11", csrrsi, I_I, { if (csr_valid(s, imm, rs1 != 0)) { R(rd) = CSR(imm); if (rs1 != 0) { CSRW(imm, CSR(imm) | src1); };} });
-  INSTPAT("??????? ????? ????? 111 ????? 11100 11", csrrci, I_I, { if (csr_valid(s, imm, rs1 != 0)) { R(rd) = CSR(imm); if (rs1 != 0) { CSRW(imm, CSR(imm) & ~src1); };} });
+  INSTPAT("??????? ????? ????? 001 ????? 11100 11", csrrw, I, { if (csr_valid(s, imm, true)) {R(rd) = CSR_READ(imm); CSRW(imm, src1); } });
+  INSTPAT("??????? ????? ????? 010 ????? 11100 11", csrrs, I, { if (csr_valid(s, imm, rs1 != 0)) {R(rd) = CSR_READ(imm); if (rs1 != 0) { CSRW(imm, CSR_READ(imm) | src1);}; } });
+  INSTPAT("??????? ????? ????? 011 ????? 11100 11", csrrc, I, { if (csr_valid(s, imm, rs1 != 0)) {R(rd) = CSR_READ(imm); if (rs1 != 0) { CSRW(imm, CSR_READ(imm) & ~src1);}; } });
+  INSTPAT("??????? ????? ????? 101 ????? 11100 11", csrrwi, I_I, { if (csr_valid(s, imm, true)) { R(rd) = CSR_READ(imm); CSRW(imm, src1);} });
+  INSTPAT("??????? ????? ????? 110 ????? 11100 11", csrrsi, I_I, { if (csr_valid(s, imm, rs1 != 0)) {R(rd) = CSR_READ(imm); if (rs1 != 0) { CSRW(imm, CSR_READ(imm) | src1); };} });
+  INSTPAT("??????? ????? ????? 111 ????? 11100 11", csrrci, I_I, { if (csr_valid(s, imm, rs1 != 0)) {R(rd) = CSR_READ(imm); if (rs1 != 0) { CSRW(imm, CSR_READ(imm) & ~src1); };} });
   // Trap-Return Instructions
   INSTPAT("0011000 00010 00000 000 00000 11100 11", mret, N, s->dnpc = CSR(CSR_MEPC);
           csr_t reg = {.val = CSR(CSR_MSTATUS)};

@@ -1,0 +1,12 @@
+# NetBSD source volumes and unpacked source tree.
+src/
+build/
+
+# Keep compressed source archives ignored even if the build layout changes.
+*.tgz
+*.tar.gz
+
+# Local boot-test logs and decompressed release images.
+*.log
+*.img
+*.elf

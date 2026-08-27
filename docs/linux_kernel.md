@@ -26,9 +26,15 @@ make linux-boot-rv32-difftest ARGS="-b -n"
 # RV32 Linux on the KU15P FPGA through LiteX BIOS + MIG DDR4
 make -C fpga/litex linux-fpga-e2e UART_PORT=/dev/ttyUSB0
 
-# RV64 prebuilt payload path is available; the top-level device helper is NEMU-only today
+# RV64 prebuilt payload and NPC paths
 make linux-download-rv64
+make linux-boot-rv64 ARGS="-b -n"
+make linux-boot-rv64-difftest ARGS="-b -n"
 make linux-boot-nemu64-device
+
+# Hard-float F/D Buildroot payloads (payloads are built separately)
+make linux-boot-rv32gc LINUX_RV32GC_PAYLOAD=/path/to/fw_payload.bin
+make linux-boot-rv64gc LINUX_RV64GC_PAYLOAD=/path/to/fw_payload.bin
 ```
 
 Useful overrides:
@@ -44,8 +50,13 @@ make linux-boot-rv32 LINUX_RV32_PAYLOAD=/path/to/fw_payload.bin ARGS="-b -n"
 | ------------------- | ------------------------------------- | ----------------------------------------------------- |
 | RV32 Linux          | Sv32 PTW/TLB + PMP + CLINT/PLIC       | Primary NPC/NEMU flow                                 |
 | RV32 KU15P FPGA     | LiteX BIOS + MIG DDR4 + OpenSBI/Linux | Hardware flow; serialboot or FAT32 SD-card `boot.bin` |
-| RV64 Linux payloads | Payload download + NEMU device helper | Available in tooling                                  |
+| RV64 Linux          | Sv39 PTW/TLB + NPC/NEMU helpers       | Build and boot targets are wired; current boot result should be checked per commit |
+| RV32/RV64 hard-float | `*gc` DTB + Buildroot F/D payload    | NPC targets are wired; payloads are built separately  |
 | RV64 xv6 smoke path | Sv39 PTW/TLB + A/D writeback          | Available via `app/tinyos` helpers                    |
+
+The presence of an RV64 or hard-float target documents integration and build
+wiring, not a reproduced full boot result for every checkout. Use a dated boot
+log or the corresponding verification target when recording validated status.
 
 See [linux/README.md](../linux/README.md) and [app/tinyos/README.md](../app/tinyos/README.md) for the lower-level payload and xv6/egos helpers.
 

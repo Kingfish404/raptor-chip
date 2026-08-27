@@ -4,7 +4,7 @@
 [![App](https://github.com/Kingfish404/raptor-chip/actions/workflows/app.yaml/badge.svg)](https://github.com/Kingfish404/raptor-chip/actions/workflows/app.yaml)
 [![STA](https://github.com/Kingfish404/raptor-chip/actions/workflows/sta.yaml/badge.svg)](https://github.com/Kingfish404/raptor-chip/actions/workflows/sta.yaml)
 
-[![ISA](https://img.shields.io/badge/ISA-RV32%2F64IMAC__Zb*-192f60?longCache=true&style=flat&logo=riscv&logoColor=white&colorA=192f60&colorB=660874)](./docs/uarch.md)
+[![ISA](https://img.shields.io/badge/ISA-RV32%2F64IMAFDC__Zb*-192f60?longCache=true&style=flat&logo=riscv&logoColor=white&colorA=192f60&colorB=660874)](./docs/uarch.md)
 [![marchID](https://img.shields.io/badge/marchID-0x32-660874?longCache=true&style=flat&colorA=192f60&colorB=660874)](https://github.com/riscv/riscv-isa-manual)
 [![Privilege](https://img.shields.io/badge/Priv-M%2FS%2FU%20%2B%20Sv32%2FSv39%20%2B%20PMP-660874?longCache=true&style=flat&colorA=192f60&colorB=660874)](./docs/uarch.md)
 [![FPGA](https://img.shields.io/badge/FPGA-LiteX-192f60?longCache=true&style=flat&colorA=192f60&colorB=660874)](./fpga/)
@@ -14,22 +14,27 @@
 
 Welcome to the Raptor Project! Here is an all-in-one repository for exploring, developing, optimizing, and verifying a RISC-V core. Aiming at high quality, full Linux support, FPGA implementation, and ASIC readiness.
 
-Core description: **Super-scalar, out-of-order RISC-V core** with register renaming, a 64-entry ROB, 5 execution pipelines fed by per-class issue queues over a unified writeback CDB, TAGE branch prediction, and a unified speculative/committed store queue. The RTL is described by `SystemVerilog` with `Chisel` (`Scala`) used only for decoder generation. Features Sv32 (RV32) / Sv39 (RV64) virtual memory (MMU/TLB/PTW), 16-entry PMP (TOR/NA4/NAPOT), LR/SC + AMO atomics, compressed instructions (RVC), CLINT/PLIC interrupts, a RISC-V Debug Module / JTAG DTM bring-up path, and boots Linux v6.18.x via OpenSBI. Supports configurable **RV32** and **RV64** modes via compile-time switch.
+Core description: **Super-scalar, out-of-order RISC-V core** with register renaming, a 64-entry ROB, six execution paths fed by five scheduler classes over five unified writeback CDB ports, TAGE branch prediction, and a unified speculative/committed store queue. The scalar F/D unit has a dedicated FPQ and architectural 32 x 64-bit FPR bank, and shares CDB0 with the ALU-CSR pipe. The RTL is described by `SystemVerilog` with `Chisel` (`Scala`) used only for decoder generation. Features Sv32 (RV32) / Sv39 (RV64) virtual memory (MMU/TLB/PTW), 16-entry PMP (TOR/NA4/NAPOT), LR/SC + AMO atomics, compressed instructions (RVC), CLINT/PLIC interrupts, a RISC-V Debug Module / JTAG DTM bring-up path, and Linux v6.18.x flows via OpenSBI. Supports configurable **RV32** and **RV64** modes via compile-time switch.
 
 ```
 Core name:  raptor-falcon (M/S/U + Sv32/Sv39 + PMP, Linux-capable)
-ISA:        rv32/rv64 imac_zicbom_zicbop_zicntr_zicond_zicsr_zifencei_zihintntl_zihintpause_zimop_zcb_zcmop_zba_zbb_zbc_zbs
+ISA:        rv32/rv64 imafdc_zicbom_zicbop_zicntr_zicond_zicsr_zifencei_zihintntl_zihintpause_zimop_zca_zcb_zcmop_zba_zbb_zbc_zbs
 Modes:      Machine, Supervisor, User
 MMU:        riscv,sv32 (RV32) / riscv,sv39 (RV64) / riscv,none (Bare)
 PMP:        16 entries, TOR / NA4 / NAPOT, L-bit lockable
 Interrupts: CLINT (mtime, mtimecmp, msip) + PLIC (31 sources, M/S contexts)
 Profile:    n/a (closest peer: RVM23U32 / RVA20S64)
 
-Bus Interface:  AXI4, XLEN-bit data/addr, 4-bit ID, burst
-Default uarch: dual issue / dual commit, ROB=64, ALQ=8 (2 issue ports), BRQ=4, MDQ=4, IOQ=8, SQ=16, PRF=128, L1I=4 KiB, L1D=2 KiB, 64 B cache lines, optional L2 passthrough/cache stage
+Bus Interface:  AXI4, XLEN-bit data/addr, 4-bit ID; burst-capable reads (up to 8 outstanding), one outstanding single-beat write with independent AW/W handshakes
+Default uarch: dual issue / dual commit, ROB=64, ALQ=8 (2 issue ports), BRQ=4, MDQ=4, FPQ=4, IOQ=8, SQ=16, integer PRF=128, FPR=32 x 64-bit, L1I=4 KiB, L1D=2 KiB, 64 B cache lines, optional L2 passthrough/cache stage
 
-Verifying:  RISCOF (riscv-arch-test), RVFI, SVA
+Verifying:  RISCOF (riscv-arch-test), full-core F/D directed/differential tests, RVFI, SVA
 ```
+
+The F/D implementation covers scalar floating-point load/store, arithmetic,
+FMA, divide/square-root, conversion, comparison/classification, rounding modes,
+and accrued exception flags. Compressed floating-point instructions are not
+part of the currently supported compressed subset.
 
 See [documentation](./docs/README.md) for more details.
 
@@ -58,9 +63,11 @@ flowchart TD
     PAB["ALQ 8: ALU-CSR | ALU (2 issue ports)"]
     PBR["BRQ 4: Branch"]
     PM["MDQ 4: MUL/DIV"]
+    PF["FPQ 4: scalar F/D"]
     PQ["IOQ 8: mem"]
     CDB(("CDB ×5"))
     PRF["PRF (4R/4W)"]
+    FPR["FPR (32 × 64-bit)"]
     CMU["CMU (commit)"]
     CSR
   end
@@ -90,9 +97,10 @@ flowchart TD
   IFU --> IDU --> RNU --> FL & MAP
   IDU -."Early Resteer".-> IFU
   IDU --> RNU --> FL & MAP --> ROU --> RT
-  RT --> PAB & PBR & PM & PQ
-  PAB & PBR & PM & PQ --> CDB
+  RT --> PAB & PBR & PM & PF & PQ
+  PAB & PBR & PM & PF & PQ --> CDB
   CDB -->|"writeback + wakeup"| ROU & PRF
+  PF --- FPR
   ROU --> CMU
   ROU -."store commit".-> LSU
   CMU -."flush / BPU train".-> FE

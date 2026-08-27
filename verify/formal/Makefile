@@ -37,6 +37,9 @@ OSS_CAD_URL     := $(OSS_CAD_REPO)/$(OSS_CAD_VERSION)/$(OSS_CAD_TARBALL)
 # Prepend oss-cad-suite/bin to PATH for all recipes
 export PATH := $(OSS_CAD_BIN):$(PATH)
 NPROC ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
+FORMAL_JOBS ?= 4
+FORMAL_SBY := $(OSS_CAD_BIN)/sby
+FORMAL_YOSYS := $(RAPTOR_HOME)/verify/formal/yosys-rvfi-compat.sh
 FORMAL_BUS_PACK := build/formal_bus_pack.sv
 
 # ============================================================================
@@ -104,7 +107,7 @@ check-tools: ## Verify sby and yosys are available
 # ============================================================================
 # Formal Verification Targets
 # ============================================================================
-all: formal_exu_mul formal_bus ## Run all formal verification (excludes RVFI)
+all: formal_exu_mul formal_bus formal_divsqrt ## Run all formal verification (excludes RVFI)
 
 $(FORMAL_BUS_PACK): \
 		$(RAPTOR_HOME)/hdl/rapt_pkg.sv \
@@ -123,6 +126,20 @@ formal_bus: check-tools $(FORMAL_BUS_PACK) ## Verify AXI bus
 
 formal_exu_mul: check-tools ## Verify EXU multiplier
 	sby -f exu_mul.sby
+
+DIVSQRT_PACK := build/divsqrt_pack.sv
+$(DIVSQRT_PACK): \
+		$(RAPTOR_HOME)/hdl/backend/fpu/rapt_fpu_divsqrt.sv
+	@mkdir -p $(@D)
+	verilator -E -P \
+		-I$(RAPTOR_HOME)/hdl/configs/small -I$(RAPTOR_HOME)/hdl/include \
+		$^ > $@
+
+formal_divsqrt: check-tools $(DIVSQRT_PACK) ## Verify FPU divider/sqrt safety+liveness (BMC)
+	sby -f divsqrt.sby bmc
+
+formal_divsqrt_prove: check-tools $(DIVSQRT_PACK) ## Prove FPU divider/sqrt safety properties (k-induction)
+	sby -f divsqrt.sby prove
 
 formal_gui: check-tools ## Open sby GUI
 	sby-gui
@@ -187,11 +204,11 @@ $(RVFI_CHECKS)/Makefile: $(RVFI_CORE_DIR)/checks.cfg $(RVFI_PACK)
 formal_rvfi_gen: $(RVFI_CHECKS)/Makefile ## Generate riscv-formal check .sby files
 
 formal_rvfi: check-tools $(RVFI_CHECKS)/Makefile ## Run all riscv-formal checks
-	$(MAKE) -C $(RVFI_CHECKS) -j$(NPROC)
+	PATH=$(RAPTOR_HOME)/verify/formal:$(PATH) $(MAKE) -C $(RVFI_CHECKS) -j$(FORMAL_JOBS) SBY=$(FORMAL_SBY)
 
 formal_rvfi_check: check-tools $(RVFI_CHECKS)/Makefile ## Run a single check (CHECK=insn_add_ch0)
 	@test -n "$(CHECK)" || { echo "Usage: make formal_rvfi_check CHECK=insn_add_ch0"; exit 1; }
-	cd $(RVFI_CHECKS) && sby -f $(CHECK).sby
+	cd $(RVFI_CHECKS) && PATH=$(RAPTOR_HOME)/verify/formal:$(PATH) sby -f $(CHECK).sby --yosys $(FORMAL_YOSYS)
 
 formal_rvfi_clean: ## Clean generated riscv-formal checks
 	rm -rf $(RVFI_CHECKS) $(RVFI_PACK)

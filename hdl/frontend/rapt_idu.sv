@@ -132,10 +132,22 @@ module rapt_idu #(
   // Solt A: main instruction (could be compressed or regular)
   // ================================================================
   logic [ 5:0] alu_a;
+  logic        ren_dec_a, wen_dec_a;
   logic        word_flag_a;
   logic [11:0] csr_a;
   logic [ 2:0] csr_csw_a;
   logic [4:0] rd_a, rs1_a, rs2_a;
+
+  logic fp_valid_a;
+  logic [5:0] fp_op_a;
+  logic fp_to_int_a;
+  logic fp_writes_fpr_a;
+  logic fp_i2f_a, fp_rv64_only_a;
+  logic fp_load_a, fp_store_a;
+  logic fp_load_d_a, fp_store_d_a;
+  logic fp_width_d_a;
+  logic [2:0] fp_rm_a;
+  logic [4:0] fp_rs1_a, fp_rs2_a, fp_rs3_a, fp_rd_a;
 
   // Compressed instruction expansion
   logic        is_c_a;
@@ -151,6 +163,14 @@ module rapt_idu #(
   logic [11:0] csr_b;
   logic [ 2:0] csr_csw_b;
   logic [4:0] rd_b, rs1_b, rs2_b;
+  logic ren_dec_b, wen_dec_b;
+  logic fp_valid_b, fp_load_b, fp_store_b, fp_load_d_b, fp_store_d_b;
+  logic [5:0] fp_op_b;
+  logic fp_to_int_b, fp_writes_fpr_b;
+  logic fp_i2f_b, fp_rv64_only_b;
+  logic fp_width_d_b;
+  logic [2:0] fp_rm_b;
+  logic [4:0] fp_rs1_b, fp_rs2_b, fp_rs3_b, fp_rd_b;
 
   // Compressed instruction expansion
   logic        is_c_b;
@@ -181,8 +201,8 @@ module rapt_idu #(
       .out_ben (idu_rnu.uop_a.ben),
       .out_jen (idu_rnu.uop_a.jen),
       .out_jren(idu_rnu.uop_a.jren),
-      .out_wen (idu_rnu.uop_a.wen),
-      .out_ren (idu_rnu.uop_a.ren),
+      .out_wen (wen_dec_a),
+      .out_ren (ren_dec_a),
       .out_atom(idu_rnu.uop_a.atom),
 
       .out_sys_system (idu_rnu.uop_a.system),
@@ -195,6 +215,19 @@ module rapt_idu #(
       .out_fence_i   (idu_rnu.uop_a.f_i),
       .out_fence_time(idu_rnu.uop_a.f_time),
 
+      .out_fp_valid(fp_valid_a),
+      .out_fp_op(fp_op_a),
+      .out_fp_rm(fp_rm_a),
+      .out_fp_rs1(fp_rs1_a),
+      .out_fp_rs2(fp_rs2_a),
+      .out_fp_rs3(fp_rs3_a),
+      .out_fp_rd(fp_rd_a),
+      .out_fp_load(fp_load_a),
+      .out_fp_store(fp_store_a),
+      .out_fp_width_d(fp_width_d_a),
+      .out_fp_to_int(fp_to_int_a),
+      .out_fp_writes_fpr(fp_writes_fpr_a),
+
       .out_imm(dec_imm_a),
       .out_rd (rd_a),
       .out_csr(csr_a),
@@ -205,6 +238,25 @@ module rapt_idu #(
       .out_rs2(rs2_a)
   );
 
+  assign fp_load_d_a = fp_load_a && fp_width_d_a;
+  assign fp_store_d_a = fp_store_a && fp_width_d_a;
+  assign fp_i2f_a = (fp_op_a == `RAPT_FP_OP_FCVT_S_W)
+    || (fp_op_a == `RAPT_FP_OP_FCVT_S_WU)
+    || (fp_op_a == `RAPT_FP_OP_FCVT_S_L)
+    || (fp_op_a == `RAPT_FP_OP_FCVT_S_LU)
+    || (fp_op_a == `RAPT_FP_OP_FCVT_D_W)
+    || (fp_op_a == `RAPT_FP_OP_FCVT_D_WU)
+    || (fp_op_a == `RAPT_FP_OP_FCVT_D_L)
+    || (fp_op_a == `RAPT_FP_OP_FCVT_D_LU);
+  assign fp_rv64_only_a = (fp_op_a == `RAPT_FP_OP_FCVT_L_S)
+    || (fp_op_a == `RAPT_FP_OP_FCVT_LU_S)
+    || (fp_op_a == `RAPT_FP_OP_FCVT_S_L)
+    || (fp_op_a == `RAPT_FP_OP_FCVT_S_LU)
+    || (fp_op_a == `RAPT_FP_OP_FCVT_L_D)
+    || (fp_op_a == `RAPT_FP_OP_FCVT_LU_D)
+    || (fp_op_a == `RAPT_FP_OP_FCVT_D_L)
+    || (fp_op_a == `RAPT_FP_OP_FCVT_D_LU);
+
   // Truncate 64-bit decoder outputs to XLEN
   assign idu_rnu.uop_a.imm = dec_imm_a[XLEN-1:0];
   assign idu_rnu.op1_a     = dec_op1_a[XLEN-1:0];
@@ -214,12 +266,13 @@ module rapt_idu #(
   // Illegality detection for slot A
   // check if the decoded ALU operation is illegal or if a CSR
   // ================================================================
-  logic illegal_inst_a, illegal_csr_a, is_illegal_a;
+  logic illegal_inst_a, illegal_csr_a, fp_disabled_a, is_illegal_a;
 
   // Illegality detection for slot B
   logic illegal_inst_b, illegal_csr_b, is_illegal_b;
 
   assign illegal_inst_a = (alu_a == `RAPT_ALU_ILL_);
+  assign fp_disabled_a = fp_valid_a && (csr_bcast.fs == 2'b00);
   // CSR write attempt: CSRRW/CSRRWI always write; CSRRS/C/SI/CI write if rs1/uimm != 0
   logic csr_write_a;
   assign csr_write_a = (csr_csw_a[1:0] == 2'b01) || (rs1_a != 5'b0);
@@ -275,9 +328,10 @@ module rapt_idu #(
       `RAPT_PRIV_S
       && ((counter_sel_a & csr_bcast.mcounteren) == `RAPT_CTR_SEL_NONE)));
 
-  assign is_illegal_a = illegal_inst_a || illegal_csr_a
+  assign is_illegal_a = (illegal_inst_a && !fp_valid_a) || illegal_csr_a
       || wfi_illegal_a || sret_illegal_a || sfence_vma_illegal_a
-      || satp_illegal_a || counter_illegal_a;
+      || satp_illegal_a || counter_illegal_a || fp_disabled_a
+      || (fp_rv64_only_a && XLEN != 64);
 
   // CSR address validity check - returns 1 if the CSR address is legal.
   // Extend this function when adding new CSR registers.
@@ -287,6 +341,7 @@ module rapt_idu #(
     if (addr >= `RAPT_CSR_PMPCFG0 && addr <= `RAPT_CSR_PMPCFG3) return 1'b1;  // pmpcfg0-3
     if (addr >= `RAPT_CSR_PMPADDR0 && addr <= `RAPT_CSR_PMPADDR15) return 1'b1;  // pmpaddr0-15
     case (addr)
+      `RAPT_CSR_FFLAGS, `RAPT_CSR_FRM, `RAPT_CSR_FCSR,
       // Supervisor-level CSRs
       `RAPT_CSR_SSTATUS,  `RAPT_CSR_SIE____,  `RAPT_CSR_STVEC__,  `RAPT_CSR_SCOUNTE,
       `RAPT_CSR_SENVCFG,
@@ -318,8 +373,22 @@ module rapt_idu #(
   // For atomics, use funct3=010 to mark 32-bit variant on RV64.
   assign idu_rnu.uop_a.word = word_flag_a
       || (idu_rnu.uop_a.atom && inst_idu_a[14:12] == `RAPT_F3_AMO_W_);
-  assign idu_rnu.uop_a.alu = alu_a;
-  assign idu_rnu.uop_a.rd[RLEN-1:0] = is_illegal_a ? '0 : rd_a[RLEN-1:0];
+    assign idu_rnu.uop_a.alu = fp_load_d_a ? `RAPT_ALU_LD__
+      : (fp_store_d_a ? `RAPT_SD_WSTRB
+      : (fp_load_a ? `RAPT_ALU_LW__
+      : (fp_store_a ? `RAPT_SW_WSTRB : alu_a)));
+  assign idu_rnu.uop_a.fp_valid = fp_valid_a;
+  assign idu_rnu.uop_a.fp_op = fp_op_a;
+  assign idu_rnu.uop_a.fp_rm = fp_rm_a;
+  assign idu_rnu.uop_a.fp_rs1 = fp_rs1_a;
+  assign idu_rnu.uop_a.fp_rs2 = fp_rs2_a;
+  assign idu_rnu.uop_a.fp_rs3 = fp_rs3_a;
+  assign idu_rnu.uop_a.fp_rd = fp_rd_a;
+  assign idu_rnu.uop_a.ren = ren_dec_a || fp_load_a || fp_load_d_a;
+  assign idu_rnu.uop_a.wen = wen_dec_a || fp_store_a || fp_store_d_a;
+    assign idu_rnu.uop_a.rd[RLEN-1:0] = (is_illegal_a || fp_writes_fpr_a
+      || fp_store_a || fp_store_d_a) ? '0
+      : (fp_valid_a ? fp_rd_a[RLEN-1:0] : rd_a[RLEN-1:0]);
   assign idu_rnu.uop_a.csr_csw = csr_csw_a;
 
   // Trap aggregation: IFU traps (e.g., page fault) or decode-time illegality
@@ -483,8 +552,11 @@ module rapt_idu #(
 `endif
   assign idu_rnu.uop_a.pc        = pc_idu_a;
 
-  assign idu_rnu.rs1_a[RLEN-1:0] = rs1_a[RLEN-1:0];
-  assign idu_rnu.rs2_a[RLEN-1:0] = rs2_a[RLEN-1:0];
+      assign idu_rnu.rs1_a[RLEN-1:0] = (fp_valid_a &&
+        (fp_op_a == `RAPT_FP_OP_FMV_W_X || fp_op_a == `RAPT_FP_OP_FMV_D_X
+         || fp_i2f_a || fp_load_a || fp_store_a || fp_load_d_a || fp_store_d_a))
+        ? fp_rs1_a[RLEN-1:0] : rs1_a[RLEN-1:0];
+      assign idu_rnu.rs2_a[RLEN-1:0] = fp_valid_a ? fp_rs2_a[RLEN-1:0] : rs2_a[RLEN-1:0];
 
 `ifdef RAPT_DUAL_ISSUE
   assign is_c_b     = (inst_b[1:0] != 2'b11);
@@ -505,8 +577,8 @@ module rapt_idu #(
       .out_ben (idu_rnu.uop_b.ben),
       .out_jen (idu_rnu.uop_b.jen),
       .out_jren(idu_rnu.uop_b.jren),
-      .out_wen (idu_rnu.uop_b.wen),
-      .out_ren (idu_rnu.uop_b.ren),
+      .out_wen (wen_dec_b),
+      .out_ren (ren_dec_b),
       .out_atom(idu_rnu.uop_b.atom),
 
       .out_sys_system (idu_rnu.uop_b.system),
@@ -519,6 +591,19 @@ module rapt_idu #(
       .out_fence_i   (idu_rnu.uop_b.f_i),
       .out_fence_time(idu_rnu.uop_b.f_time),
 
+      .out_fp_valid(fp_valid_b),
+      .out_fp_op(fp_op_b),
+      .out_fp_rm(fp_rm_b),
+      .out_fp_rs1(fp_rs1_b),
+      .out_fp_rs2(fp_rs2_b),
+      .out_fp_rs3(fp_rs3_b),
+      .out_fp_rd(fp_rd_b),
+      .out_fp_load(fp_load_b),
+      .out_fp_store(fp_store_b),
+      .out_fp_width_d(fp_width_d_b),
+      .out_fp_to_int(fp_to_int_b),
+      .out_fp_writes_fpr(fp_writes_fpr_b),
+
       .out_imm(dec_imm_b),
       .out_rd (rd_b),
       .out_csr(csr_b),
@@ -528,6 +613,25 @@ module rapt_idu #(
       .out_rs1(rs1_b),
       .out_rs2(rs2_b)
   );
+
+  assign fp_load_d_b = fp_load_b && fp_width_d_b;
+  assign fp_store_d_b = fp_store_b && fp_width_d_b;
+  assign fp_i2f_b = (fp_op_b == `RAPT_FP_OP_FCVT_S_W)
+    || (fp_op_b == `RAPT_FP_OP_FCVT_S_WU)
+    || (fp_op_b == `RAPT_FP_OP_FCVT_S_L)
+    || (fp_op_b == `RAPT_FP_OP_FCVT_S_LU)
+    || (fp_op_b == `RAPT_FP_OP_FCVT_D_W)
+    || (fp_op_b == `RAPT_FP_OP_FCVT_D_WU)
+    || (fp_op_b == `RAPT_FP_OP_FCVT_D_L)
+    || (fp_op_b == `RAPT_FP_OP_FCVT_D_LU);
+  assign fp_rv64_only_b = (fp_op_b == `RAPT_FP_OP_FCVT_L_S)
+    || (fp_op_b == `RAPT_FP_OP_FCVT_LU_S)
+    || (fp_op_b == `RAPT_FP_OP_FCVT_S_L)
+    || (fp_op_b == `RAPT_FP_OP_FCVT_S_LU)
+    || (fp_op_b == `RAPT_FP_OP_FCVT_L_D)
+    || (fp_op_b == `RAPT_FP_OP_FCVT_LU_D)
+    || (fp_op_b == `RAPT_FP_OP_FCVT_D_L)
+    || (fp_op_b == `RAPT_FP_OP_FCVT_D_LU);
 
   assign illegal_inst_b = (alu_b == `RAPT_ALU_ILL_);
   logic csr_write_b;
@@ -539,8 +643,9 @@ module rapt_idu #(
   // Slot B privileged-mode gating (mirrors slot A).
   logic is_wfi_b, is_sfence_vma_b;
   logic wfi_illegal_b, sret_illegal_b, sfence_vma_illegal_b, satp_illegal_b;
-  logic counter_illegal_b;
+  logic counter_illegal_b, fp_disabled_b;
   logic [2:0] counter_sel_b;
+  assign fp_disabled_b = fp_valid_b && (csr_bcast.fs == 2'b00);
   assign is_wfi_b = (inst_idu_b == `RAPT_INST_WFI);
   assign is_sfence_vma_b = (inst_idu_b[31:25] == `RAPT_F7_SFENCE_VMA)
                         && (inst_idu_b[14:12] == `RAPT_F3_SYS___)
@@ -575,16 +680,30 @@ module rapt_idu #(
       `RAPT_PRIV_S
       && ((counter_sel_b & csr_bcast.mcounteren) == `RAPT_CTR_SEL_NONE)));
 
-  assign is_illegal_b = illegal_inst_b || illegal_csr_b
+  assign is_illegal_b = (illegal_inst_b && !fp_valid_b) || illegal_csr_b
       || wfi_illegal_b || sret_illegal_b || sfence_vma_illegal_b
-      || satp_illegal_b || counter_illegal_b;
+      || satp_illegal_b || counter_illegal_b || fp_disabled_b
+      || (fp_rv64_only_b && XLEN != 64);
 
   // Slot B UOP assembly
   assign idu_rnu.uop_b.c = is_c_b;
+  assign idu_rnu.uop_b.fp_valid = fp_valid_b;
+  assign idu_rnu.uop_b.fp_op = fp_op_b;
+  assign idu_rnu.uop_b.fp_rm = fp_rm_b;
+  assign idu_rnu.uop_b.fp_rs1 = fp_rs1_b;
+  assign idu_rnu.uop_b.fp_rs2 = fp_rs2_b;
+  assign idu_rnu.uop_b.fp_rs3 = fp_rs3_b;
+  assign idu_rnu.uop_b.fp_rd = fp_rd_b;
   assign idu_rnu.uop_b.word = word_flag_b
       || (idu_rnu.uop_b.atom && inst_idu_b[14:12] == `RAPT_F3_AMO_W_);
-  assign idu_rnu.uop_b.alu = alu_b;
-  assign idu_rnu.uop_b.rd[RLEN-1:0] = is_illegal_b ? '0 : rd_b[RLEN-1:0];
+    assign idu_rnu.uop_b.alu = fp_load_d_b ? `RAPT_ALU_LD__
+      : (fp_store_d_b ? `RAPT_SD_WSTRB
+      : (fp_load_b ? `RAPT_ALU_LW__
+      : (fp_store_b ? `RAPT_SW_WSTRB : alu_b)));
+    assign idu_rnu.uop_b.rd[RLEN-1:0] = (is_illegal_b || fp_writes_fpr_b) ? '0
+      : (fp_valid_b ? fp_rd_b[RLEN-1:0] : rd_b[RLEN-1:0]);
+  assign idu_rnu.uop_b.ren = ren_dec_b || fp_load_b || fp_load_d_b;
+  assign idu_rnu.uop_b.wen = wen_dec_b || fp_store_b || fp_store_d_b;
   assign idu_rnu.uop_b.csr_csw = csr_csw_b;
 
   assign idu_rnu.uop_b.trap = is_illegal_b;
@@ -604,8 +723,11 @@ module rapt_idu #(
   assign idu_rnu.op1_b = dec_op1_b[XLEN-1:0];
   assign idu_rnu.op2_b = dec_op2_b[XLEN-1:0];
 
-  assign idu_rnu.rs1_b[RLEN-1:0] = rs1_b[RLEN-1:0];
-  assign idu_rnu.rs2_b[RLEN-1:0] = rs2_b[RLEN-1:0];
+      assign idu_rnu.rs1_b[RLEN-1:0] = (fp_valid_b &&
+        (fp_op_b == `RAPT_FP_OP_FMV_W_X || fp_op_b == `RAPT_FP_OP_FMV_D_X
+         || fp_i2f_b || fp_load_b || fp_store_b || fp_load_d_b || fp_store_d_b))
+        ? fp_rs1_b[RLEN-1:0] : rs1_b[RLEN-1:0];
+      assign idu_rnu.rs2_b[RLEN-1:0] = fp_valid_b ? fp_rs2_b[RLEN-1:0] : rs2_b[RLEN-1:0];
 
   // Slot B valid: IFU provided a second instruction AND slot A is not a trap
   // or branch/jump (branches in slot A could skip slot B on the taken path).

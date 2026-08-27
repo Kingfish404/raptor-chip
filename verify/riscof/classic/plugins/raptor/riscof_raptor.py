@@ -82,6 +82,7 @@ class raptor(pluginTemplate):
         self.compile_cmd = (
             self.cc
             + " -march={0}"
+            + " -mabi={1}"
             + " -static -mcmodel=medany -fvisibility=hidden -nostdlib -nostartfiles"
             + " -T " + os.path.join(self.pluginpath, "env", "link.ld")
             + " -I " + os.path.join(self.pluginpath, "env")
@@ -92,9 +93,21 @@ class raptor(pluginTemplate):
     def build(self, isa_yaml, platform_yaml):
         ispec = utils.load_yaml(isa_yaml)["hart0"]
         self.xlen = "64" if 64 in ispec["supported_xlen"] else "32"
-        self.compile_cmd += (
-            " -mabi=" + ("lp64 " if self.xlen == "64" else "ilp32 ")
-        )
+
+    @staticmethod
+    def _mabi_for_isa(march):
+        base_isa = march.lower().split("_", 1)[0]
+        xlen_prefix = "rv64" if base_isa.startswith("rv64") else "rv32"
+        extension_block = base_isa[len(xlen_prefix):]
+        # Only inspect the single-letter base extension block.  A naive
+        # substring search mistakes the trailing 'd' in Zicond for RV32D.
+        extension_block = re.split(r"[zsx]", extension_block, maxsplit=1)[0]
+        xlen_abi = "lp64" if base_isa.startswith("rv64") else "ilp32"
+        if "d" in extension_block:
+            return xlen_abi + "d"
+        if "f" in extension_block:
+            return xlen_abi + "f"
+        return xlen_abi
 
     # ------------------------------------------------------------------
     def _extract_sig_range(self, elf):
@@ -132,7 +145,8 @@ class raptor(pluginTemplate):
             sig = os.path.join(test_dir, self.name[:-1] + ".signature")
 
             macros = " -D" + " -D".join(entry["macros"])
-            cmd = self.compile_cmd.format(marchstr, self.xlen, asm, elf, macros)
+            mabi = self._mabi_for_isa(marchstr)
+            cmd = self.compile_cmd.format(marchstr, mabi, asm, elf, macros)
             logger.debug("[%d/%d] compile: %s", idx, total, cmd)
             utils.shellCommand(cmd).run(cwd=test_dir)
 

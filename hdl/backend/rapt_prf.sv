@@ -160,7 +160,7 @@ module rapt_prf #(
       // path).
       prf_valid     <= {{(PNUM - RNUM) {1'b0}}, {RNUM{1'b1}}};
       prf_transient <= '0;
-    end else begin
+        end else begin
       for (integer i = 0; i < PNUM; i = i + 1) begin
         // Free old physical register (prs): slot 1 then slot 0 priority
         if (dealloc_prs_b_oh[i]) begin

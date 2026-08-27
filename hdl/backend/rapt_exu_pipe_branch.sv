@@ -56,6 +56,8 @@ module rapt_exu_pipe_branch #(
   assign wb_branch.rd = '0;
   assign wb_branch.csr_wen = 1'b0;
   assign wb_branch.csr_wdata = '0;
+  assign wb_branch.fp_flags_valid = 1'b0;
+  assign wb_branch.fp_flags = '0;
   assign wb_branch.trap = 1'b0;
   assign wb_branch.tval = '0;
   assign wb_branch.cause = '0;
@@ -63,5 +65,7 @@ module rapt_exu_pipe_branch #(
   assign wb_branch.alu = '0;
   assign wb_branch.sq_waddr = '0;
   assign wb_branch.sq_wdata = '0;
+  assign wb_branch.sq_wdata64 = '0;
+  assign wb_branch.sq_fp64 = 1'b0;
 
 endmodule

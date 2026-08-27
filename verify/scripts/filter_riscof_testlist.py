@@ -43,6 +43,15 @@ CLASSIC_INCOMPAT_TESTS = {
     "vm_reserved_rwx_pte_U_mode.S",
 }
 
+# Raptor implements 16 PMP entries (pmpaddr0..15).  These classic tests are
+# explicitly generated for the 64-entry PMP profile and access pmpaddr62/63.
+UNSUPPORTED_PROFILE_TESTS = {
+    "pmpm_all_entries_check-01.S",
+    "pmpm_all_entries_check-02.S",
+    "pmpm_all_entries_check-03.S",
+    "pmpm_all_entries_check-04.S",
+}
+
 
 def is_sv32_vm_test(path: str) -> bool:
     return "/vm_sv32/" in Path(path).as_posix()
@@ -215,6 +224,7 @@ def main() -> None:
     kept = {}
     dropped_ad = []
     dropped_incompat = []
+    dropped_profile = []
     rewritten_ad = []
     marked_hardware_ad = []
     for test_name, entry in tests.items():
@@ -223,6 +233,10 @@ def main() -> None:
 
         if is_classic_incompat_test(test_path):
             dropped_incompat.append(test_name)
+            continue
+
+        if Path(test_path).name in UNSUPPORTED_PROFILE_TESTS:
+            dropped_profile.append(test_name)
             continue
 
         if has_software_ad_macro(macros):
@@ -250,7 +264,8 @@ def main() -> None:
         f"rewrote {len(rewritten_ad)} A/D tests, "
         f"marked {len(marked_hardware_ad)} Sv32 VM tests for hardware A/D, "
         f"dropped {len(dropped_ad)} A/D tests, "
-        f"quarantined {len(dropped_incompat)} classic-incompat tests"
+        f"quarantined {len(dropped_incompat)} classic-incompat tests, "
+        f"quarantined {len(dropped_profile)} unsupported-profile tests"
     )
 
 

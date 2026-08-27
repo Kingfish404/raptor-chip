@@ -21,6 +21,17 @@ package rapt_pkg;
     logic       ren;
     logic       atom;
 
+    // Serializing scalar-FP bring-up metadata. FP architectural registers
+    // live in the separate FPR bank; rd remains an integer destination only
+    // for FP-to-integer moves.
+    logic       fp_valid;
+    logic [5:0] fp_op;
+    logic [2:0] fp_rm;
+    logic [4:0] fp_rs1;
+    logic [4:0] fp_rs2;
+    logic [4:0] fp_rs3;
+    logic [4:0] fp_rd;
+
     logic system;
     logic ecall;
     logic ebreak;
@@ -78,6 +89,13 @@ package rapt_pkg;
     logic sret;
     logic f_i;
     logic f_time;
+    logic fp_valid;
+    logic [5:0] fp_op;
+    logic [2:0] fp_rm;
+    logic [4:0] fp_rs1;
+    logic [4:0] fp_rs2;
+    logic [4:0] fp_rs3;
+    logic [4:0] fp_rd;
 
     // CSR access
     logic [11:0] csr_addr;  // equals uop.imm[11:0]
@@ -135,10 +153,14 @@ package rapt_pkg;
     logic [5:0]         alu;
     logic [XLENPkg-1:0] sq_waddr;
     logic [XLENPkg-1:0] sq_wdata;
+    logic [63:0] sq_wdata64;
+    logic sq_fp64;
 
     // CSR (WB-written)
     logic               csr_wen;
     logic [XLENPkg-1:0] csr_wdata;
+    logic               fp_flags_valid;
+    logic [4:0]         fp_flags;
 
     // Trap (WB-mutable by EXU port-A and IOQ)
     logic               trap;
@@ -150,13 +172,20 @@ package rapt_pkg;
   } rob_entry_t;
 
   // Shared address classification functions for L1I/L1D
+  function automatic logic [XLENPkg-1:0] canonical_addr(
+      input logic [XLENPkg-1:0] addr);
+    return (XLENPkg == 64) ? XLENPkg'({32'b0, addr[31:0]}) : addr;
+  endfunction
+
   function automatic logic addr_cacheable(input logic [XLENPkg-1:0] addr);
+    logic [XLENPkg-1:0] a;
+    a = canonical_addr(addr);
     return (0)  // --- IGNORE ---
-    || (addr >= 'h0f000000 && addr < 'h0f010000)  // sram (litex + raptSoC)
-    || (addr >= 'h20000000 && addr < 'h20010000)  // mrom (64KB)
-    || (addr >= 'h30000000 && addr < 'h40000000)  // flash
-    || (addr >= 'h80000000 && addr < 'h90000000)  // psram (cacheable)
-    || (addr >= 'ha0000000 && addr < 'ha2000000)  // sdram
+    || (a >= 'h0f000000 && a < 'h0f010000)  // sram (litex + raptSoC)
+    || (a >= 'h20000000 && a < 'h20010000)  // mrom (64KB)
+    || (a >= 'h30000000 && a < 'h40000000)  // flash
+    || (a >= 'h80000000 && a < 'h90000000)  // psram (cacheable)
+    || (a >= 'ha0000000 && a < 'ha2000000)  // sdram
     ;
   endfunction
 
@@ -165,37 +194,41 @@ package rapt_pkg;
   // are unmapped and must raise an access-fault trap to mimic sail /
   // real-hardware bus-error behaviour.
   function automatic logic addr_mapped(input logic [XLENPkg-1:0] addr);
+    logic [XLENPkg-1:0] a;
+    a = canonical_addr(addr);
     return (0)  // --- IGNORE ---
-    || (addr >= 'h00100000 && addr < 'h00101000)  // sifive,test finisher
-    || (addr >= 'h02000000 && addr < 'h020c0000)  // CLINT
-    || (addr >= 'h0c000000 && addr < 'h0d000000)  // PLIC
-    || (addr >= 'h0f000000 && addr < 'h0f010000)  // SRAM
-    || (addr >= 'h10000000 && addr < 'h10012000)  // UART / GPIO / peripherals
-    || (addr >= 'h20000000 && addr < 'h20010000)  // MROM
-    || (addr >= 'h21000000 && addr < 'h21200000)  // VGA
-    || (addr >= 'h30000000 && addr < 'h40000000)  // FLASH
-    || (addr >= 'h80000000 && addr < 'h90000000)  // PMEM / PSRAM
-    || (addr >= 'ha0000000 && addr < 'ha2000000)  // SDRAM
-    || (addr >= 'hf0008000 && addr < 'hf0008100)  // LiteX SPI SD-card controller
-    || (addr >= 'hf0001000 && addr < 'hf0001100)  // LiteX UART (egos HARDWARE)
-    || (addr >= 'hf0010000 && addr < 'hf0020000)  // CLINT alias (egos HARDWARE)
-    || (addr >= 'hc0000000);  // raptSoC MMIO window
+    || (a >= 'h00100000 && a < 'h00101000)  // sifive,test finisher
+    || (a >= 'h02000000 && a < 'h020c0000)  // CLINT
+    || (a >= 'h0c000000 && a < 'h0d000000)  // PLIC
+    || (a >= 'h0f000000 && a < 'h0f010000)  // SRAM
+    || (a >= 'h10000000 && a < 'h10012000)  // UART / GPIO / peripherals
+    || (a >= 'h20000000 && a < 'h20010000)  // MROM
+    || (a >= 'h21000000 && a < 'h21200000)  // VGA
+    || (a >= 'h30000000 && a < 'h40000000)  // FLASH
+    || (a >= 'h80000000 && a < 'h90000000)  // PMEM / PSRAM
+    || (a >= 'ha0000000 && a < 'ha2000000)  // SDRAM
+    || (a >= 'hf0008000 && a < 'hf0008100)  // LiteX SPI SD-card controller
+    || (a >= 'hf0001000 && a < 'hf0001100)  // LiteX UART (egos HARDWARE)
+    || (a >= 'hf0010000 && a < 'hf0020000)  // CLINT alias (egos HARDWARE)
+    || (a >= 'hc0000000);  // raptSoC MMIO window
   endfunction
 
   // MMIO regions for difftest skip (not modelled in reference ISS)
   function automatic logic addr_mmio(input logic [XLENPkg-1:0] addr);
+    logic [XLENPkg-1:0] a;
+    a = canonical_addr(addr);
     return (0)  // --- IGNORE ---
-    || (addr >= 'h00100000 && addr <= 'h00100fff)  // finisher (sifive,test)
-    || (addr >= 'h02000000 && addr <= 'h020bffff)  // CLINT (mtime / mtimecmp / msip)
-    || (addr >= 'h0c000000 && addr <= 'h0cffffff)  // PLIC (claim/complete RMW)
-    || (addr >= 'hf0008000 && addr <= 'hf00080ff)  // LiteX SPI SD-card controller
-    || (addr >= 'hf0001000 && addr <= 'hf00010ff)  // LiteX UART (egos HARDWARE)
-    || (addr >= 'hf0010000 && addr <= 'hf001ffff)  // CLINT alias (egos HARDWARE)
-    || (addr >= 'h10001000 && addr <= 'h10001fff)  // uart
-    || (addr >= 'h10002000 && addr <= 'h1000200f)  // gpio
-    || (addr >= 'h10011000 && addr <= 'h10012000)  // legacy ysyxSoC clint (kept for back-compat)
-    || (addr >= 'h21000000 && addr <= 'h211fffff)  // vga
-    || (addr >= 'hc0000000);  // raptSoC memory-mapped I/O
+    || (a >= 'h00100000 && a <= 'h00100fff)  // finisher (sifive,test)
+    || (a >= 'h02000000 && a <= 'h020bffff)  // CLINT (mtime / mtimecmp / msip)
+    || (a >= 'h0c000000 && a <= 'h0cffffff)  // PLIC (claim/complete RMW)
+    || (a >= 'hf0008000 && a <= 'hf00080ff)  // LiteX SPI SD-card controller
+    || (a >= 'hf0001000 && a <= 'hf00010ff)  // LiteX UART (egos HARDWARE)
+    || (a >= 'hf0010000 && a <= 'hf001ffff)  // CLINT alias (egos HARDWARE)
+    || (a >= 'h10001000 && a <= 'h10001fff)  // uart
+    || (a >= 'h10002000 && a <= 'h1000200f)  // gpio
+    || (a >= 'h10011000 && a <= 'h10012000)  // legacy ysyxSoC clint (kept for back-compat)
+    || (a >= 'h21000000 && a <= 'h211fffff)  // vga
+    || (a >= 'hc0000000);  // raptSoC memory-mapped I/O
   endfunction
 
 endpackage

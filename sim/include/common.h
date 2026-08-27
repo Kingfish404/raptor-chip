@@ -23,6 +23,8 @@ typedef word_t paddr_t;
 typedef word_t vaddr_t;
 
 #define GPR_SIZE 32
+#define FPR_SIZE 32
+#define DIFFTEST_STATE_VERSION 2
 #define NPC_PMP_NUM 16
 #define NPC_PLIC_NDEV 31
 #define NPC_PLIC_NCTX 2
@@ -217,6 +219,14 @@ typedef struct
   uint8_t *sq_snapshot_alu;
   word_t *sq_snapshot_paddr;
   word_t *sq_snapshot_wdata;
+
+  // Optional F/D architectural state. These fields are appended so older
+  // integer-only reference libraries remain layout-compatible for existing
+  // state members.
+  uint64_t *fpr;
+  uint32_t *fcsr;
+  uint32_t difftest_state_version;
+  uint32_t xlen;
 } NPCState;
 
 typedef struct

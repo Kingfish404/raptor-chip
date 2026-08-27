@@ -555,9 +555,17 @@ extern "C" void pmem_write(word_t waddr, word_t wdata, char wmask)
     log_watched_write(addr, data, wmask, host_addr, 2);
     host_write(host_addr, data, 2);
     break;
+  case 0x7:
+    log_watched_write(addr, data, wmask, host_addr, 3);
+    host_write(host_addr, data, 3);
+    break;
   case 0xf:
     log_watched_write(addr, data, wmask, host_addr, 4);
     host_write(host_addr, data, 4);
+    break;
+  case 0x7f:
+    log_watched_write(addr, data, wmask, host_addr, 7);
+    host_write(host_addr, data, 7);
     break;
   case (char)0xff:
     log_watched_write(addr, data, wmask, host_addr, 8);

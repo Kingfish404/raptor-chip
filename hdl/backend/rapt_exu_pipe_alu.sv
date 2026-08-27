@@ -49,6 +49,8 @@ module rapt_exu_pipe_alu #(
   // ALU never produces CSR / trap / MEM sideband (unified exu_wb_if tie-offs).
   assign wb_alu.csr_wen = 1'b0;
   assign wb_alu.csr_wdata = '0;
+    assign wb_alu.fp_flags_valid = 1'b0;
+    assign wb_alu.fp_flags = '0;
   assign wb_alu.trap = 1'b0;
   assign wb_alu.tval = '0;
   assign wb_alu.cause = '0;
@@ -56,5 +58,7 @@ module rapt_exu_pipe_alu #(
   assign wb_alu.alu = '0;
   assign wb_alu.sq_waddr = '0;
   assign wb_alu.sq_wdata = '0;
+    assign wb_alu.sq_wdata64 = '0;
+    assign wb_alu.sq_fp64 = 1'b0;
 
 endmodule

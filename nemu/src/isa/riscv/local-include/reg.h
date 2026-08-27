@@ -34,6 +34,14 @@ static inline int check_sr_idx(int idx)
 
 #define gpr(idx) (cpu.gpr[check_reg_idx(idx)])
 
+static inline int check_fpr_idx(int idx)
+{
+  IFDEF(CONFIG_RT_CHECK, assert(idx >= 0 && idx < 32));
+  return idx;
+}
+
+#define fpr(idx) (cpu.fpr[check_fpr_idx(idx)])
+
 #define sr(idx) (cpu.sr[check_sr_idx(idx)])
 
 // PMP (pmpcfg0..3 @ 0x3a0-0x3a3, pmpaddr0..15 @ 0x3b0-0x3bf) is now
@@ -44,6 +52,12 @@ static inline bool is_pmp_csr(uint16_t csr)
 {
   csr = csr & 0xfff;
   return (csr >= 0x3a0 && csr <= 0x3a3) || (csr >= 0x3b0 && csr <= 0x3bf);
+}
+
+static inline bool is_fp_csr(uint16_t csr)
+{
+  csr &= 0xfff;
+  return csr == CSR_FFLAGS || csr == CSR_FRM || csr == CSR_FCSR;
 }
 
 static inline const char *reg_name(int idx)
@@ -64,6 +78,9 @@ static inline CSR_status check_csr_exist(uint16_t csr)
   csr = csr & 0xfff;
   if (likely(
           csr == CSR_SSTATUS ||
+          csr == CSR_FFLAGS ||
+          csr == CSR_FRM ||
+          csr == CSR_FCSR ||
           csr == CSR_SIE ||
           csr == CSR_STVEC ||
 

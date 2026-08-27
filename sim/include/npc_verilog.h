@@ -115,6 +115,9 @@ static inline void verilog_connect(TOP_NAME *top, NPCState *npc)
   npc->time___ = csr + TIME___;
   npc->timeh__ = csr + TIMEH__;
 
+  npc->fpr = (uint64_t *)&VERILOG_CPU(fpr_bank__DOT__regs);
+  npc->fcsr = (uint32_t *)(csr + FCSR);
+
   npc->clint_mtime = (uint64_t *)&VERILOG_CLINT(mtime);
   npc->clint_mtimecmp = (uint64_t *)&VERILOG_CLINT(mtimecmp);
   npc->clint_msip = (uint8_t *)&VERILOG_CLINT(msip_reg);

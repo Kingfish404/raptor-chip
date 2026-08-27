@@ -49,14 +49,33 @@ typedef enum
   TYPE_N,
 } Inst_type;
 
-#if defined(CONFIG_RV64)
-#define CSR_MISA_VALUE 0x8000000000141107ULL
+#if defined(CONFIG_RV_F)
+#define CSR_MISA_F_VALUE 0x20
 #else
-#define CSR_MISA_VALUE 0x40141107
+#define CSR_MISA_F_VALUE 0
 #endif
+#if defined(CONFIG_RV_D)
+#define CSR_MISA_D_VALUE 0x08
+#else
+#define CSR_MISA_D_VALUE 0
+#endif
+#if defined(CONFIG_RV64)
+#define CSR_MISA_VALUE (0x8000000000141107ULL | CSR_MISA_F_VALUE | CSR_MISA_D_VALUE)
+#else
+#define CSR_MISA_VALUE (0x40141107 | CSR_MISA_F_VALUE | CSR_MISA_D_VALUE)
+#endif
+
+#define CSR_MISA_EXT_D ((word_t)1 << 3)
+#define CSR_MISA_EXT_F ((word_t)1 << 5)
+#define CSR_MSTATUS_FS_MASK ((word_t)3 << 13)
 
 enum CSR
 {
+  // Floating-point CSRs (F extension)
+  CSR_FFLAGS = 0x001,
+  CSR_FRM = 0x002,
+  CSR_FCSR = 0x003,
+
   // Supervisor-level CSR
   CSR_SSTATUS = 0x100,
   CSR_SIE = 0x104,
@@ -351,6 +370,8 @@ typedef struct
 {
   word_t sr[4096];
   word_t gpr[MUXDEF(CONFIG_RVE, 16, 32)];
+  // FLEN is fixed at 64 for every future F/D-capable RV32/RV64 build.
+  uint64_t fpr[32];
   vaddr_t pc;
   vaddr_t cpc; // for difftest.ref
   uint32_t inst;

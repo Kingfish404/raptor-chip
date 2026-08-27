@@ -30,6 +30,12 @@ LINUX_RV64_DIR      := $(LINUX_BUILD_DIR)/$(LINUX_RV64_NAME)
 LINUX_RV32_PAYLOAD  ?= $(LINUX_RV32_DIR)/fw_payload.bin
 LINUX_RV64_PAYLOAD  ?= $(LINUX_RV64_DIR)/fw_payload.bin
 
+# rv32gc (rv32imafd + C) Buildroot image built by third_party/linux-build.
+# Hard-float userspace; requires a DTB advertising F/D (see linux-boot-rv32gc).
+LINUX_BUILD_GC_DIR  := $(LINUX_HOME)/../third_party/linux-build/dist
+LINUX_RV32GC_PAYLOAD ?= $(abspath $(LINUX_BUILD_GC_DIR)/linux-riscv-rv32-qemu-rv32-buildroot-v$(LINUX_BUILD_VERSION)/fw_payload.bin)
+LINUX_RV64GC_PAYLOAD ?= $(abspath $(LINUX_BUILD_GC_DIR)/linux-riscv-rv64-qemu-rv64-buildroot-v$(LINUX_BUILD_VERSION)/fw_payload.bin)
+
 # Exported so sub-makes (fpga/litex, etc.) inherit the resolved paths.
 export LINUX_BUILD_VERSION
 export LINUX_RV32_PAYLOAD

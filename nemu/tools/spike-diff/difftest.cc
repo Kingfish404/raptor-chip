@@ -40,6 +40,7 @@ struct diff_context_t
 {
   word_t sr[4096];
   word_t gpr[MUXDEF(CONFIG_RVE, 16, 32)];
+  uint64_t fpr[32];
   word_t pc;
   word_t cpc;
   uint32_t inst;
@@ -104,6 +105,11 @@ public:
     {
       ctx->gpr[i] = state->XPR[i];
     }
+    for (int i = 0; i < NFPR; i++)
+    {
+      ctx->fpr[i] = state->FPR[i].v[0];
+    }
+    ctx->sr[CSR_FCSR] = state->csrmap[CSR_FCSR]->read();
     ctx->sr[CSR_SSTATUS] = state->sstatus->read();
     ctx->sr[CSR_SIE] = state->csrmap[CSR_SIE]->read();
     ctx->sr[CSR_STVEC] = state->stvec->read();
@@ -139,6 +145,10 @@ public:
     {
       state->XPR.write(i, (sword_t)ctx->gpr[i]);
     }
+    for (int i = 0; i < NFPR; i++)
+    {
+      state->FPR.write(i, freg_t{ctx->fpr[i], UINT64_MAX});
+    }
     state->sstatus->write(ctx->sr[CSR_SSTATUS]);
     state->csrmap[CSR_SIE]->write(ctx->sr[CSR_SIE]);
     state->stvec->write(ctx->sr[CSR_STVEC]);
@@ -152,6 +162,8 @@ public:
 
     if (state->mstatush) state->mstatush->write(ctx->sr[CSR_MSTATUSH]);
     state->mstatus->write(ctx->sr[CSR_MSTATUS]);
+    if (((ctx->sr[CSR_MSTATUS] >> 13) & 0x3) != 0 || ctx->sr[CSR_FCSR] != 0)
+      state->csrmap[CSR_FCSR]->write(ctx->sr[CSR_FCSR]);
     state->medeleg->write(ctx->sr[CSR_MEDELEG]);
     state->mideleg->write(ctx->sr[CSR_MIDELEG]);
     state->mie->write(ctx->sr[CSR_MIE]);
@@ -179,6 +191,11 @@ static diffsim_t *s = NULL;
 
 extern "C"
 {
+
+  __EXPORT uint32_t difftest_state_version()
+  {
+    return DIFFTEST_STATE_VERSION;
+  }
 
   __EXPORT void difftest_memcpy(paddr_t addr, void *buf, size_t n, bool direction)
   {
@@ -212,7 +229,12 @@ extern "C"
   __EXPORT void difftest_init(int port)
   {
     difftest_htif_args.push_back("");
-    const char *isa = "RV" MUXDEF(CONFIG_RV64, "64", "32") MUXDEF(CONFIG_RVE, "E", "I") "MAC_zicbop_zicclsm_zicntr_zicond_zicsr_zifencei_zihintntl_zihintpause_zimop_zcb_zcmop_zba_zbb_zbc_zbs";
+    const char *isa = "RV" MUXDEF(CONFIG_RV64, "64", "32")
+              MUXDEF(CONFIG_RVE, "E", "IM")
+              "A"
+              MUXDEF(CONFIG_RV_F, "F", "")
+              MUXDEF(CONFIG_RV_D, "D", "")
+              "C_zicbop_zicclsm_zicntr_zicond_zicsr_zifencei_zihintntl_zihintpause_zimop_zcb_zcmop_zba_zbb_zbc_zbs";
     cfg.initrd_bounds = std::make_pair((reg_t)0, (reg_t)0);
     cfg.bootargs = nullptr;
     cfg.isa = isa;

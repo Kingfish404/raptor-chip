@@ -82,6 +82,7 @@ endif
 VERILATOR_FLAG = $(VERILATOR_PROFILE_FLAGS) --public \
 	--autoflush --timescale "1ns/1ns" --no-timing \
 	-Wno-WIDTHEXPAND -Wno-WIDTHTRUNC # -Wall -Wno-DECLFILENAME -Wno-UNUSED
+VERILATOR_FLAG += -Wno-ASCRANGE -Wno-UNSIGNED
 VERILATOR_EXTRA ?= ## Extra Verilator CLI flags (e.g. --coverage-line --coverage-toggle)
 CXXFLAGS = -Wall -Werror \
 	-Wno-bool-operation -Wno-implicit-fallthrough -Wno-macro-redefined \
@@ -173,7 +174,20 @@ $(shell printf '%s' '$(CONFIG_SIG)' > $(CONFIG_STAMP))
 # can wire them without touching hdl. They are still treated as RTL for
 # packing and verilation.
 NSIM_RTL_PATH := $(abspath ./rtl)
-VSRCS_RAW = $(shell find $(VSRC_PATH) $(NSIM_RTL_PATH) -name "*.sv")
+GENERATED_RTL_PATH := $(abspath $(VSRC_PATH)/generated)
+GENERATED_DECODERS := $(GENERATED_RTL_PATH)/rapt_idu_decoder.sv \
+	$(GENERATED_RTL_PATH)/rapt_idu_decoder_c.sv
+CHISEL_DECODER_SRCS := $(shell find $(RAPTOR_HOME)/hdl/chisel/src -type f) \
+	$(RAPTOR_HOME)/hdl/chisel/Makefile
+
+# The instruction decoders are generated and ignored by Git. Make them explicit
+# prerequisites so a clean checkout can build the simulator without a separate
+# manual `make -C hdl/chisel verilog` step.
+$(GENERATED_DECODERS) &: $(CHISEL_DECODER_SRCS)
+	$(MAKE) -C $(RAPTOR_HOME)/hdl/chisel verilog
+
+VSRCS_RAW = $(shell find $(VSRC_PATH) $(NSIM_RTL_PATH) -path $(GENERATED_RTL_PATH) -prune -o -name "*.sv" -print) \
+	$(GENERATED_DECODERS)
 # Ensure rapt_pkg.sv comes first (DC requires package before import)
 VSRCS_PKG = $(filter %/rapt_pkg.sv, $(VSRCS_RAW))
 VSRCS = $(VSRCS_PKG) $(filter-out %/rapt_pkg.sv, $(VSRCS_RAW)) \
@@ -187,10 +201,11 @@ ifeq ($(MROM_IMG),)
 MROM_IMG ?= $(NSIM_HOME)/csrc/mem/mrom-data/build/mrom-data.bin
 endif
 
-# Always descend so mrom-data's Makefile can rebuild when ISA64 changes
+# Always descend so mrom-data's Makefile can rebuild when ISA64 or DT_SOURCE
+# changes. DT_SOURCE selects the embedded DTB (e.g. spike-rv32gc.dts for F/D).
 .PHONY: $(NSIM_HOME)/csrc/mem/mrom-data/build/mrom-data.bin
 $(NSIM_HOME)/csrc/mem/mrom-data/build/mrom-data.bin:
-	$(MAKE) -C $(NSIM_HOME)/csrc/mem/mrom-data ISA64=$(ISA64)
+	$(MAKE) -C $(NSIM_HOME)/csrc/mem/mrom-data ISA64=$(ISA64) $(if $(DT_SOURCE),DT_SOURCE=$(DT_SOURCE))
 
 all: $(BIN) ## Build NPC simulator
 
@@ -369,7 +384,7 @@ sta_show: pack sta-deps ## Show timing analysis results
 		RTL_FILES="$(abspath $(BUILD_DIR)/rapt_pack.sv)"
 
 # =====================================================================
-#  STA with OpenRAM SRAM macros (rapt_sram_1r1w -> OpenRAM 1R1W blackbox)
+#  STA with OpenRAM SRAM macros (rapt_sram_1rw -> OpenRAM 1RW blackbox)
 #  Workflow: see sim/sram/README.md
 # =====================================================================
 RAPT_SRAM_DIR    := $(abspath $(NSIM_HOME)/sram)
@@ -392,8 +407,8 @@ sram-test: ## Validate SRAM macro integration consistency (no external deps)
 sram-test-sta: ## Opt-in SRAM STA smoke (needs yosys+slang+OpenSTA)
 	$(MAKE) -C $(RAPT_SRAM_DIR) test-sta
 
-# Pack RTL with RAPT_USE_SRAM_MACRO so rapt_sram_1r1w instantiates the
-# OpenRAM 1R1W blackbox declared in sim/sram/wrappers/rapt_sram_blackbox.v.
+# Pack RTL with RAPT_USE_SRAM_MACRO so rapt_sram_1rw instantiates the
+# OpenRAM 1RW blackbox declared in sim/sram/wrappers/rapt_sram_blackbox.v.
 pack-sram: $(VSRCS) $(VHSRCS)
 	mkdir -p $(BUILD_DIR)
 	verilator -E -P -DSYNTHESIS $(VFLAGS) -DRAPT_USE_SRAM_MACRO $(addprefix -I, $(INC_PATH)) $(VSRCS) > $(BUILD_DIR)/rapt_pack_sram.sv

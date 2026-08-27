@@ -14,6 +14,9 @@ interface rou_csr_if #(
   logic csr_wen;
   logic [XLEN-1:0] csr_wdata;
   logic [11:0] csr_addr;
+  logic fp_flags_valid;
+  logic [4:0] fp_flags;
+  logic fp_dirty;
 
   logic ecall;
   logic ebreak;
@@ -31,14 +34,16 @@ interface rou_csr_if #(
 
   modport in(
       input pc,
-      input csr_wen, csr_wdata, csr_addr, ecall, ebreak, mret, sret,
+      input csr_wen, csr_wdata, csr_addr, fp_flags_valid, fp_flags, fp_dirty,
+      input ecall, ebreak, mret, sret,
       input trap, tval, cause,
       input valid,
       input retire_a, retire_b
   );
   modport out(
       output pc,
-      output csr_wen, csr_wdata, csr_addr, ecall, ebreak, mret, sret,
+      output csr_wen, csr_wdata, csr_addr, fp_flags_valid, fp_flags, fp_dirty,
+      output ecall, ebreak, mret, sret,
       output trap, tval, cause,
       output valid,
       output retire_a, retire_b
@@ -62,6 +67,13 @@ interface rou_exu_if #(
   logic [PLEN-1:0] prd;
   logic [PLEN-1:0] prs;
 
+  logic fp_dep1_valid;
+  logic fp_dep2_valid;
+  logic fp_dep3_valid;
+  logic [$clog2(`RAPT_ROB_SIZE)-1:0] fp_dep1;
+  logic [$clog2(`RAPT_ROB_SIZE)-1:0] fp_dep2;
+  logic [$clog2(`RAPT_ROB_SIZE)-1:0] fp_dep3;
+
   // ROB destination index (0-indexed, directly maps to rob_entry[]).
   logic [$clog2(`RAPT_ROB_SIZE)-1:0] dest;
 
@@ -80,6 +92,13 @@ interface rou_exu_if #(
   logic [PLEN-1:0] prd_b;
   logic [PLEN-1:0] prs_b;
 
+  logic fp_dep1_valid_b;
+  logic fp_dep2_valid_b;
+  logic fp_dep3_valid_b;
+  logic [$clog2(`RAPT_ROB_SIZE)-1:0] fp_dep1_b;
+  logic [$clog2(`RAPT_ROB_SIZE)-1:0] fp_dep2_b;
+  logic [$clog2(`RAPT_ROB_SIZE)-1:0] fp_dep3_b;
+
   logic [$clog2(`RAPT_ROB_SIZE)-1:0] dest_b;
 
   logic valid_b;
@@ -88,16 +107,22 @@ interface rou_exu_if #(
 
   modport master(
       output uop, op1, op2, pr1, pr2, prd, prs, dest, valid,
+      output fp_dep1_valid, fp_dep2_valid, fp_dep3_valid, fp_dep1, fp_dep2, fp_dep3,
 `ifdef RAPT_DUAL_ISSUE
       output uop_b, op1_b, op2_b, pr1_b, pr2_b, prd_b, prs_b, dest_b, valid_b,
+      output fp_dep1_valid_b, fp_dep2_valid_b, fp_dep3_valid_b,
+      output fp_dep1_b, fp_dep2_b, fp_dep3_b,
       input ready_b,
 `endif
       input ready
   );
   modport slave(
       input uop, op1, op2, pr1, pr2, prd, prs, dest, valid,
+      input fp_dep1_valid, fp_dep2_valid, fp_dep3_valid, fp_dep1, fp_dep2, fp_dep3,
 `ifdef RAPT_DUAL_ISSUE
       input uop_b, op1_b, op2_b, pr1_b, pr2_b, prd_b, prs_b, dest_b, valid_b,
+      input fp_dep1_valid_b, fp_dep2_valid_b, fp_dep3_valid_b,
+      input fp_dep1_b, fp_dep2_b, fp_dep3_b,
       output ready_b,
 `endif
       output ready
@@ -106,9 +131,12 @@ interface rou_exu_if #(
   // driver of `ready` / `ready_b`; RS and IOQ submodules use this modport
   // to consume dispatch fields without violating single-driver rules.
   modport monitor(
-      input uop, op1, op2, pr1, pr2, prd, prs, dest, valid
+      input uop, op1, op2, pr1, pr2, prd, prs, dest, valid,
+      input fp_dep1_valid, fp_dep2_valid, fp_dep3_valid, fp_dep1, fp_dep2, fp_dep3
 `ifdef RAPT_DUAL_ISSUE
       , input uop_b, op1_b, op2_b, pr1_b, pr2_b, prd_b, prs_b, dest_b, valid_b
+      , input fp_dep1_valid_b, fp_dep2_valid_b, fp_dep3_valid_b,
+      input fp_dep1_b, fp_dep2_b, fp_dep3_b
 `endif
   );
 endinterface
@@ -122,14 +150,16 @@ interface rou_lsu_if #(
   logic [XLEN-1:0] sq_waddr;
   logic [XLEN-1:0] sq_vaddr;
   logic [XLEN-1:0] sq_wdata;
+  logic [63:0] sq_wdata64;
+  logic sq_fp64;
   logic [XLEN-1:0] pc;
   logic valid;
 
   logic sq_ready;
   logic sq_empty;
-  modport in(input store, alu, dest, sq_waddr, sq_vaddr, sq_wdata, pc, valid,
+  modport in(input store, alu, dest, sq_waddr, sq_vaddr, sq_wdata, sq_wdata64, sq_fp64, pc, valid,
              output sq_ready, sq_empty);
-  modport out(output store, alu, dest, sq_waddr, sq_vaddr, sq_wdata, pc, valid,
+  modport out(output store, alu, dest, sq_waddr, sq_vaddr, sq_wdata, sq_wdata64, sq_fp64, pc, valid,
               input sq_ready, sq_empty);
 endinterface
 

@@ -1,0 +1,29 @@
+# ============================================================================
+# SymbiYosys script: formal verification of rapt_fpu_divsqrt
+# ----------------------------------------------------------------------------
+# bmc  : bounded model check of end-to-end equivalence + liveness. depth must
+#        exceed the longest operation latency (double-precision sqrt = 56
+#        iterations plus launch/drain overhead), so 70 gives margin.
+# prove: k-induction for the safety (flush / liveness) properties.
+# ============================================================================
+[tasks]
+bmc
+prove
+
+[options]
+bmc: mode bmc
+bmc: depth 70
+prove: mode prove
+
+[engines]
+bmc: smtbmc --nopresat z3
+prove: smtbmc --nopresat z3
+
+[script]
+plugin -i slang
+read_slang --single-unit -DFORMAL formal_divsqrt.sv divsqrt_pack.sv
+prep -top formal_divsqrt
+
+[files]
+formal_divsqrt.sv
+divsqrt_pack.sv build/divsqrt_pack.sv

@@ -146,7 +146,41 @@ params:
       false,
       false,
     ]
-  MCOUNTINHIBIT_IMPLEMENTED: false
+  COUNTINHIBIT_EN:
+    [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+    ]
 
   # MTVEC
   MTVEC_ACCESS: rw

@@ -14,18 +14,22 @@
 #**************************************************************************************/
 
 REPO_PATH = repo
-ifeq ($(wildcard repo/spike_main),)
-  $(shell git clone --depth=1 https://github.com/riscv-software-src/riscv-isa-sim $(REPO_PATH))
-  $(shell bash ./patch.sh)
-endif
+REPO_MARKER = $(REPO_PATH)/softfloat/softfloat.h
+
+$(REPO_MARKER):
+	git clone --depth=1 https://github.com/riscv-software-src/riscv-isa-sim $(REPO_PATH)
+	bash ./patch.sh
 
 REPO_BUILD_PATH = $(REPO_PATH)/build
 REPO_MAKEFILE = $(REPO_BUILD_PATH)/Makefile
 NPROC := $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
-$(REPO_MAKEFILE):
+$(REPO_MAKEFILE): $(REPO_MARKER)
 	@mkdir -p $(@D)
 	cd $(@D) && $(abspath $(REPO_PATH))/configure
 	sed -i.bak -e 's/-g -O2/-O2/' $@ && rm -f $@.bak
+
+$(REPO_BUILD_PATH)/libsoftfloat.a: $(REPO_MAKEFILE)
+	$(MAKE) -C $(REPO_BUILD_PATH) -j$(NPROC) libsoftfloat.a
 
 SPIKE = $(REPO_BUILD_PATH)/spike
 $(SPIKE): $(REPO_MAKEFILE)
@@ -46,7 +50,7 @@ INC_LIBS  = $(addprefix $(REPO_PATH)/build/, $(lib_dependencies))
 # difftest references coexist and switching CONFIG_RV64 picks the right one.
 NAME = $(if $(filter riscv,$(GUEST_ISA)),$(GUEST_ISA)$(if $(CONFIG_RV64),64,32),$(GUEST_ISA))-spike-so
 BINARY = $(BUILD_DIR)/$(NAME)
-SRCS = difftest.cc repo/riscv/sim.cc
+SRCS = difftest.cc
 
 $(BINARY): $(SPIKE) $(SRCS)
 	g++ -std=c++17 -O2 -shared -fPIC -fvisibility=hidden $(INC_PATH) $(SRCS) $(INC_LIBS) -o $@

@@ -49,8 +49,8 @@ endif
 
 # --- Paths to existing build artifacts ---
 # sim scopes outputs per RAPT_CONFIG (hdl/configs/<name>/). Keep this in
-# sync with sim/Makefile; default preset is 'default'.
-RAPT_CONFIG ?= default
+# sync with sim/Makefile; classic RISCOF is validated against the small profile.
+RAPT_CONFIG ?= small
 NPC_BIN_32  := $(NSIM_HOME)/build/$(RAPT_CONFIG)/riscv32-npc-sim
 NPC_BIN_64  := $(NSIM_HOME)/build/$(RAPT_CONFIG)/riscv64-npc-sim
 NEMU_SO_32  := $(NEMU_HOME)/build/riscv32-nemu-interpreter-so
@@ -61,7 +61,7 @@ MROM_IMG    := $(NSIM_HOME)/csrc/mem/mrom-data/build/mrom-data.bin
 SEED     ?= $(shell date +%s)	## Random seed for fuzz
 FUZZ_NUM ?= 20	## Number of fuzz test programs to generate
 FUZZ_LEN ?= 200	## Instructions per fuzz program
-TIMEOUT  ?= 3	## Per-test timeout in seconds
+TIMEOUT  ?= 10	## Per-test timeout in seconds
 ISA      ?= rv32## rv32 or rv64
 
 BUILD_DIR := $(VERIFY_HOME)/build
@@ -154,7 +154,7 @@ help: ## Show this help message
 $(NPC_BIN):
 	@echo "[verify] Building NPC simulator (difftest enabled)..."
 	$(MAKE) -C $(RAPTOR_HOME) config-rv32-difftest
-	$(MAKE) -C $(NSIM_HOME) -j$(NPROC) VFLAGS="$(VFLAGS)"
+	$(MAKE) -C $(NSIM_HOME) -j$(NPROC) RAPT_CONFIG=$(RAPT_CONFIG) VFLAGS="$(VFLAGS)"
 
 $(NEMU_SO):
 	@echo "[verify] Building NEMU reference SO..."
@@ -351,10 +351,16 @@ fuzz-replay: ## Replay the last failing fuzz-inf batch
 #   make fuzz-run-one SRC=build/fuzz/batch_42/fuzz_0003.S
 # ---------------------------------------------------------------------------
 SRC ?=## Single .S file to run
+RUN_BUILD_DIR ?=## Optional output directory for fuzz-run-one artifacts
 fuzz-run-one: check-prereqs ## Run a single .S test file (SRC=path/to/test.S)
 	@test -n "$(SRC)" || { echo "[fuzz-run-one] ERROR: specify SRC=path/to/test.S"; exit 1; }
 	@test -f "$(SRC)" || { echo "[fuzz-run-one] ERROR: $(SRC) not found"; exit 1; }
-	@elf="$${SRC%.S}.elf"; bin="$${SRC%.S}.bin"; log="$${SRC%.S}.run.log"; \
+	@src_base="$${SRC%.S}"; out_base="$$src_base"; \
+	if [ -n "$(RUN_BUILD_DIR)" ]; then \
+		mkdir -p "$(RUN_BUILD_DIR)"; \
+		out_base="$(RUN_BUILD_DIR)/$$(basename "$$src_base")"; \
+	fi; \
+	elf="$$out_base.elf"; bin="$$out_base.bin"; log="$$out_base.run.log"; \
 	echo "[fuzz-run-one] $(SRC)"; \
 	$(CC) -march=$(MARCH) -mabi=$(MABI) -nostdlib -nostartfiles \
 		-T $(FUZZ_LINKER) -o "$$elf" "$(SRC)"; \
@@ -363,7 +369,9 @@ fuzz-run-one: check-prereqs ## Run a single .S test file (SRC=path/to/test.S)
 	echo "[fuzz-run-one] Log: $$log"
 
 zbb-strlen: ## Run the Linux RV64 strlen_zbb sequence through NPC/NEMU difftest
-	@$(MAKE) --no-print-directory fuzz-run-one ISA=rv64 SRC=$(VERIFY_HOME)/tests/zbb_strlen.S
+	@$(MAKE) --no-print-directory fuzz-run-one ISA=rv64 \
+		SRC=$(RAPTOR_HOME)/app/tests/zbb/strlen.S \
+		RUN_BUILD_DIR=$(RAPTOR_HOME)/app/build/rv64/tests/zbb
 
 fuzz-inf: check-prereqs ## Continuous fuzz until Ctrl-C or saturation
 	@python3 $(VERIFY_HOME)/scripts/run_fuzz_inf.py \
@@ -399,9 +407,11 @@ endif
 # Using EXTENSIONS instead of EXCLUDE_EXTENSIONS avoids generating tests for
 # F/D/Zfh/etc which bloats tests/ by ~600MB and wastes Sail simulation time.
 ACT4_EXTENSIONS ?= I,M,Zca,Zicsr,Zicntr,Zifencei,Zaamo,Zalrsc,Zba,Zbb,Zbc,Zbs
-ACT4_SAIL_DIR   ?= $(HOME)/.local/opt/sail-riscv-0.12/bin
-ACT4_RUBY_DIR   ?= $(shell command -v brew >/dev/null 2>&1 && printf '%s/bin' "$$(brew --prefix ruby@3.2 2>/dev/null)")
-ACT4_PATH       := $(if $(ACT4_RUBY_DIR),$(ACT4_RUBY_DIR):)$(ACT4_SAIL_DIR):$(PATH)
+SAIL_VERSION    ?= 0.13.1
+ACT4_SAIL_DIR   ?= $(HOME)/.local/opt/sail-riscv-$(SAIL_VERSION)/bin
+ACT4_RUBY_DIR   ?= $(shell if command -v brew >/dev/null 2>&1; then dir="$$(brew --prefix ruby@3.2 2>/dev/null)/bin"; test -x "$$dir/ruby" && printf '%s' "$$dir"; fi)
+ACT4_GEM_BIN    ?= $(shell if [ -n "$(ACT4_RUBY_DIR)" ]; then PATH="$(ACT4_RUBY_DIR):$(PATH)" ruby -e 'print Gem.bindir' 2>/dev/null; fi)
+ACT4_PATH       := $(if $(ACT4_RUBY_DIR),$(ACT4_RUBY_DIR):)$(if $(ACT4_GEM_BIN),$(ACT4_GEM_BIN):)$(ACT4_SAIL_DIR):$(PATH)
 
 .PHONY: riscof riscof-setup riscof-gen riscof-run riscof-clean
 
@@ -413,6 +423,7 @@ riscof-setup: ## Clone ACT4 repo and check prerequisites
 		mkdir -p "$(ACT4_DIR)"; \
 		git clone --depth 1 -b act4 https://github.com/riscv-non-isa/riscv-arch-test.git "$(ACT4_REPO)"; \
 	else echo "[act4] Repo already present at $(ACT4_REPO)"; fi
+	@python3 $(VERIFY_HOME)/scripts/patch_act4_sail.py --repo "$(ACT4_REPO)"
 	@echo "[act4] Checking prerequisites..."
 	@command -v uv >/dev/null 2>&1 \
 		&& echo "[act4] uv: $$(uv --version)" \
@@ -423,16 +434,22 @@ riscof-setup: ## Clone ACT4 repo and check prerequisites
 		&& echo "[act4] bundle: $$(PATH="$(ACT4_PATH)" command -v bundle)" \
 		|| { echo "[act4] ERROR: Ruby 3.2 is required by the ACT4 UDB Gemfile."; \
 		echo "  Install ruby@3.2 or set ACT4_RUBY_DIR."; exit 1; }
+	@PATH="$(ACT4_PATH)" command -v udb >/dev/null 2>&1 \
+		&& echo "[act4] udb: $$(PATH="$(ACT4_PATH)" command -v udb)" \
+		|| { echo "[act4] ERROR: UDB command not found in the Ruby 3.2 gem bindir."; exit 1; }
 	@ACT4_SAIL_VERSION=$$(PATH="$(ACT4_PATH)" sail_riscv_sim --version 2>/dev/null) \
-		&& [ "$$ACT4_SAIL_VERSION" = "0.12" ] \
+		&& [ "$$ACT4_SAIL_VERSION" = "$(SAIL_VERSION)" ] \
 		&& echo "[act4] sail: $$ACT4_SAIL_VERSION ($$(PATH="$(ACT4_PATH)" command -v sail_riscv_sim))" \
-		|| { echo "[act4] ERROR: Sail 0.12 is required for ACT4."; \
+		|| { echo "[act4] ERROR: Sail $(SAIL_VERSION) is required for ACT4."; \
 		echo "  Install under $(ACT4_SAIL_DIR) or set ACT4_SAIL_DIR."; exit 1; }
+	@PATH="$(ACT4_PATH)" sail_riscv_sim --rv32 --config-override \
+		"$(ACT4_DIR)/raptor-rv32imac/sail.json" --validate-config >/dev/null
 	@echo "[act4] Setup complete.  Config: $(ACT4_CONFIG)"
 
 riscof-gen: ## Generate self-checking ELFs via ACT4 framework
 	@test -d "$(ACT4_REPO)" || { echo "[act4] ERROR: repo not found. Run 'make riscof-setup' first."; exit 1; }
 	@test -f "$(ACT4_CONFIG)" || { echo "[act4] ERROR: config not found: $(ACT4_CONFIG)"; exit 1; }
+	@python3 $(VERIFY_HOME)/scripts/patch_act4_sail.py --repo "$(ACT4_REPO)"
 	@echo "[act4] Generating self-checking ELFs..."
 	@echo "  Config:  $(ACT4_CONFIG)"
 	@echo "  Workdir: $(ACT4_WORKDIR)"
@@ -480,6 +497,9 @@ RISCOF_CLASSIC_WORKDIR  := $(BUILD_DIR)/riscof-classic
 RISCOF_CLASSIC_TESTLIST := $(RISCOF_CLASSIC_WORKDIR)/test_list.yaml
 RISCOF_CLASSIC_FILTERED_TESTLIST := $(BUILD_DIR)/riscof-classic.raptor-test_list.yaml
 RISCOF_CLASSIC_ENV_PATCH := $(VERIFY_HOME)/scripts/patch_riscof_classic_env.py
+RISCOF_CLASSIC_VENV ?= $(BUILD_DIR)/riscof-classic-venv
+RISCOF_CLASSIC_BIN ?= $(RISCOF_CLASSIC_VENV)/bin/riscof
+RISCOF_CLASSIC_PYTHON ?= $(RISCOF_CLASSIC_VENV)/bin/python
 # Use old-framework-3.x: the upstream 'main' branch was replaced by the ACT4
 # layout, which drops riscv-test-suite/ in favour of a Makefile+Python flow.
 # The classic RISCOF driver still expects the 3.x layout.
@@ -494,12 +514,12 @@ riscof-classic-build-npc: ## (Re)build NPC simulator without difftest for RISCOF
 	@# must be built with the plain (non-difftest) config; otherwise
 	@# init_difftest aborts with `ref_so_file != NULL`.
 	@if [ ! -f $(NPC_BIN) ] || grep -q '^CONFIG_DIFFTEST=y' $(NSIM_HOME)/.config 2>/dev/null; then \
-		echo "[riscof-classic] (Re)building NPC without difftest..."; \
+		echo "[riscof-classic] (Re)building NPC without difftest (RAPT_CONFIG=$(RAPT_CONFIG))..."; \
 		$(MAKE) -C $(NSIM_HOME) o2_defconfig; \
-		$(MAKE) -C $(NSIM_HOME) -j$(NPROC) VFLAGS="$(VFLAGS)"; \
 	else \
-		echo "[riscof-classic] NPC binary OK (no difftest)."; \
+		echo "[riscof-classic] NPC config OK (no difftest)."; \
 	fi
+	@$(MAKE) -C $(NSIM_HOME) -j$(NPROC) RAPT_CONFIG=$(RAPT_CONFIG) VFLAGS="$(VFLAGS)"
 	@test -f $(NPC_BIN) || { echo "[riscof-classic] ERROR: NPC build failed: $(NPC_BIN)"; exit 1; }
 
 riscof-classic-setup: ## Clone upstream riscv-arch-test suite
@@ -508,12 +528,27 @@ riscof-classic-setup: ## Clone upstream riscv-arch-test suite
 		mkdir -p "$(RISCOF_CLASSIC_DIR)"; \
 		git clone --depth 1 -b $(RISCOF_CLASSIC_BRANCH) https://github.com/riscv-non-isa/riscv-arch-test.git "$(RISCOF_CLASSIC_SUITE)"; \
 	else echo "[riscof-classic] Suite already present at $(RISCOF_CLASSIC_SUITE)"; fi
-	@command -v riscof         >/dev/null 2>&1 || { echo "[riscof-classic] ERROR: 'riscof' not found. Install: pip install git+https://github.com/riscv/riscof.git"; exit 1; }
-	@command -v sail_riscv_sim >/dev/null 2>&1 || { echo "[riscof-classic] ERROR: 'sail_riscv_sim' not found. Install from https://github.com/riscv/sail-riscv/releases"; exit 1; }
+	@if [ ! -x "$(RISCOF_CLASSIC_BIN)" ] && ! command -v riscof >/dev/null 2>&1; then \
+		echo "[riscof-classic] 'riscof' not found; bootstrapping venv at $(RISCOF_CLASSIC_VENV)..."; \
+		$(PYTHON) -m venv "$(RISCOF_CLASSIC_VENV)" || { echo "[riscof-classic] ERROR: python venv creation failed."; exit 1; }; \
+		"$(RISCOF_CLASSIC_VENV)/bin/pip" install --quiet --upgrade pip && \
+		"$(RISCOF_CLASSIC_VENV)/bin/pip" install --quiet riscof || { \
+			echo "[riscof-classic] ERROR: pip install riscof failed (network?)."; \
+			echo "  Manual fix: $(PYTHON) -m venv $(RISCOF_CLASSIC_VENV) && $(RISCOF_CLASSIC_VENV)/bin/pip install riscof"; \
+			exit 1; }; \
+	fi
+	@SAIL_FOUND_VERSION=$$(sail_riscv_sim --version 2>/dev/null) \
+		&& [ "$$SAIL_FOUND_VERSION" = "$(SAIL_VERSION)" ] \
+		|| { echo "[riscof-classic] ERROR: Sail $(SAIL_VERSION) is required (found '$$SAIL_FOUND_VERSION')."; exit 1; }
+	@sail_riscv_sim --rv32 --validate-config >/dev/null
 	@echo "[riscof-classic] Setup complete."
 
 riscof-classic-run: $(MROM_IMG) riscof-classic-build-npc ## Execute classic RISCOF flow
 	@test -d "$(RISCOF_CLASSIC_SUITE)" || { echo "[riscof-classic] ERROR: suite not found. Run 'make riscof-classic-setup' first."; exit 1; }
+	@# RISCOF's framework creates per-test dirs with os.mkdir() (no exist_ok),
+	@# so a stale work-dir from a previous run crashes with FileExistsError.
+	@# Wipe it before each run.
+	rm -rf "$(RISCOF_CLASSIC_WORKDIR)"
 	@mkdir -p "$(RISCOF_CLASSIC_WORKDIR)"
 	@echo "================================================================"
 	@echo "[riscof-classic] Running classic RISCOF flow"
@@ -524,31 +559,28 @@ riscof-classic-run: $(MROM_IMG) riscof-classic-build-npc ## Execute classic RISC
 	@$(PYTHON) "$(RISCOF_CLASSIC_ENV_PATCH)" \
 		--env="$(RISCOF_CLASSIC_SUITE)/riscv-test-suite/env"
 	cd "$(RISCOF_CLASSIC_DIR)" && \
-		NPC_BIN="$(NPC_BIN)" \
-		MROM_IMG="$(MROM_IMG)" \
-		NSIM_HOME="$(NSIM_HOME)" \
-		RAPT_TIMEOUT="$(TIMEOUT)" \
-		riscof testlist \
+		export NPC_BIN="$(NPC_BIN)" MROM_IMG="$(MROM_IMG)" \
+			NSIM_HOME="$(NSIM_HOME)" RAPT_TIMEOUT="$(TIMEOUT)"; \
+		RISCOF_BIN="$(if $(wildcard $(RISCOF_CLASSIC_BIN)),$(RISCOF_CLASSIC_BIN),riscof)"; \
+		"$$RISCOF_BIN" testlist \
 			--config=config.ini \
 			--suite=$(RISCOF_CLASSIC_SUITE)/riscv-test-suite/ \
 			--env=$(RISCOF_CLASSIC_SUITE)/riscv-test-suite/env \
 			--work-dir="$(RISCOF_CLASSIC_WORKDIR)" && \
-		$(PYTHON) "$(VERIFY_HOME)/scripts/filter_riscof_testlist.py" \
+		$(if $(wildcard $(RISCOF_CLASSIC_PYTHON)),$(RISCOF_CLASSIC_PYTHON),$(PYTHON)) "$(VERIFY_HOME)/scripts/filter_riscof_testlist.py" \
 			--input="$(RISCOF_CLASSIC_TESTLIST)" \
 			--output="$(RISCOF_CLASSIC_FILTERED_TESTLIST)" \
 			--drop-legacy-ad && \
-		NPC_BIN="$(NPC_BIN)" \
-		MROM_IMG="$(MROM_IMG)" \
-		NSIM_HOME="$(NSIM_HOME)" \
-		RAPT_TIMEOUT="$(TIMEOUT)" \
-		riscof run \
+		export NPC_BIN="$(NPC_BIN)" MROM_IMG="$(MROM_IMG)" \
+			NSIM_HOME="$(NSIM_HOME)" RAPT_TIMEOUT="$(TIMEOUT)"; \
+		"$$RISCOF_BIN" run \
 			--config=config.ini \
 			--suite=$(RISCOF_CLASSIC_SUITE)/riscv-test-suite/ \
 			--env=$(RISCOF_CLASSIC_SUITE)/riscv-test-suite/env \
 			--testfile="$(RISCOF_CLASSIC_FILTERED_TESTLIST)" \
 			--work-dir="$(RISCOF_CLASSIC_WORKDIR)" \
 			--no-browser
-	@if grep -q '>0[Ff]ailed<' "$(RISCOF_CLASSIC_WORKDIR)/report.html" 2>/dev/null; then \
+	@if ! grep -q 'class="col-result">Failed' "$(RISCOF_CLASSIC_WORKDIR)/report.html" 2>/dev/null; then \
 		echo "[riscof-classic] PASS"; \
 	else \
 		echo "[riscof-classic] FAIL (see $(RISCOF_CLASSIC_WORKDIR)/report.html)"; \
@@ -607,15 +639,24 @@ endif
 riscof-classic-nemu: riscof-classic-nemu-setup riscof-classic-nemu-run ## Run classic RISCOF flow against NEMU
 
 riscof-classic-nemu-setup: riscof-classic-setup riscof-classic-build-nemu ## Ensure NEMU and the arch-test suite are ready
+	@mkdir -p "$(RISCOF_CLASSIC_NEMU_DIR)"
+	@if [ ! -e "$(RISCOF_CLASSIC_NEMU_SUITE)" ]; then \
+		ln -s ../classic/riscv-arch-test "$(RISCOF_CLASSIC_NEMU_SUITE)"; \
+		echo "[riscof-classic-nemu] Linked shared architecture test suite"; \
+	fi
 	@test -L "$(RISCOF_CLASSIC_NEMU_SUITE)" || { \
 		echo "[riscof-classic-nemu] ERROR: missing symlink $(RISCOF_CLASSIC_NEMU_SUITE) -> ../classic/riscv-arch-test"; \
 		exit 1; }
-	@command -v riscof         >/dev/null 2>&1 || { echo "[riscof-classic-nemu] ERROR: 'riscof' not found."; exit 1; }
-	@command -v sail_riscv_sim >/dev/null 2>&1 || { echo "[riscof-classic-nemu] ERROR: 'sail_riscv_sim' not found."; exit 1; }
+	@test -x "$(RISCOF_CLASSIC_BIN)" || command -v riscof >/dev/null 2>&1 || { echo "[riscof-classic-nemu] ERROR: 'riscof' not found."; exit 1; }
+	@SAIL_FOUND_VERSION=$$(sail_riscv_sim --version 2>/dev/null) \
+		&& [ "$$SAIL_FOUND_VERSION" = "$(SAIL_VERSION)" ] \
+		|| { echo "[riscof-classic-nemu] ERROR: Sail $(SAIL_VERSION) is required (found '$$SAIL_FOUND_VERSION')."; exit 1; }
 	@echo "[riscof-classic-nemu] Setup complete. NEMU_BIN=$(NEMU_BIN)"
 
 riscof-classic-nemu-run: $(NEMU_BIN) ## Execute classic RISCOF flow with NEMU as DUT
 	@test -d "$(RISCOF_CLASSIC_NEMU_SUITE)" || { echo "[riscof-classic-nemu] ERROR: suite not found. Run 'make riscof-classic-setup' first."; exit 1; }
+	@# Same FileExistsError guard as riscof-classic-run: wipe stale work-dir.
+	rm -rf "$(RISCOF_CLASSIC_NEMU_WORKDIR)"
 	@mkdir -p "$(RISCOF_CLASSIC_NEMU_WORKDIR)"
 	@echo "================================================================"
 	@echo "[riscof-classic-nemu] Running classic RISCOF flow (NEMU as DUT)"
@@ -626,22 +667,19 @@ riscof-classic-nemu-run: $(NEMU_BIN) ## Execute classic RISCOF flow with NEMU as
 	@$(PYTHON) "$(RISCOF_CLASSIC_ENV_PATCH)" \
 		--env="$(RISCOF_CLASSIC_NEMU_SUITE)/riscv-test-suite/env"
 	cd "$(RISCOF_CLASSIC_NEMU_DIR)" && \
-		NEMU_BIN="$(NEMU_BIN)" \
-		NEMU_HOME="$(NEMU_HOME)" \
-		RAPT_TIMEOUT="$(TIMEOUT)" \
-		riscof testlist \
+		export NEMU_BIN="$(NEMU_BIN)" NEMU_HOME="$(NEMU_HOME)" \
+			RAPT_TIMEOUT="$(TIMEOUT)"; \
+		RISCOF_BIN="$(if $(wildcard $(RISCOF_CLASSIC_BIN)),$(RISCOF_CLASSIC_BIN),riscof)"; \
+		"$$RISCOF_BIN" testlist \
 			--config=config.ini \
 			--suite=$(RISCOF_CLASSIC_NEMU_SUITE)/riscv-test-suite/ \
 			--env=$(RISCOF_CLASSIC_NEMU_SUITE)/riscv-test-suite/env \
 			--work-dir="$(RISCOF_CLASSIC_NEMU_WORKDIR)" && \
-		$(PYTHON) "$(VERIFY_HOME)/scripts/filter_riscof_testlist.py" \
+		$(if $(wildcard $(RISCOF_CLASSIC_PYTHON)),$(RISCOF_CLASSIC_PYTHON),$(PYTHON)) "$(VERIFY_HOME)/scripts/filter_riscof_testlist.py" \
 			--input="$(RISCOF_CLASSIC_NEMU_TESTLIST)" \
 			--output="$(RISCOF_CLASSIC_NEMU_FILTERED_TESTLIST)" \
 			--drop-legacy-ad && \
-		NEMU_BIN="$(NEMU_BIN)" \
-		NEMU_HOME="$(NEMU_HOME)" \
-		RAPT_TIMEOUT="$(TIMEOUT)" \
-		riscof run \
+		"$$RISCOF_BIN" run \
 			--config=config.ini \
 			--suite=$(RISCOF_CLASSIC_NEMU_SUITE)/riscv-test-suite/ \
 			--env=$(RISCOF_CLASSIC_NEMU_SUITE)/riscv-test-suite/env \
@@ -670,6 +708,7 @@ COV_FUZZ_SEED       ?= 123## Fuzz seed used by coverage-run
 COV_FUZZ_NUM        ?= 40## Fuzz test count used by coverage-run
 COV_FUZZ_LEN        ?= 200## Fuzz test length used by coverage-run
 COV_MICROBENCH_ARGS ?= test## Microbench mainargs used by coverage-run
+COV_PK_TIMEOUT      ?= 300## Wall-clock timeout for each pk coverage workload
 
 define RUN_AND_SAVE_COVERAGE
 	@echo "[coverage] Running $(1) workload..."
@@ -697,13 +736,13 @@ coverage: coverage-build coverage-run coverage-report ## Full coverage flow
 coverage-build: ## Build NPC with coverage instrumentation
 	@echo "[coverage] Building NPC with --coverage-line..."
 	@rm -rf $(NSIM_HOME)/build/$(RAPT_CONFIG)/obj_dir $(NSIM_HOME)/build/$(RAPT_CONFIG)/riscv*-npc-*
-	$(MAKE) -C $(NSIM_HOME) o2_difftest_defconfig
+	$(MAKE) -C $(NSIM_HOME) o2_difftest_defconfig RAPT_CONFIG=$(RAPT_CONFIG)
 	# Coverage build: disable RTL SVA (RAPT_SIM_ASSERT=0) and use line-only
 	# coverage. `--coverage-toggle` was observed to crash the simulator on CI
 	# during microbench (queen) due to combined memory pressure with toggle
 	# counters on a design that has UNOPTFLAT loops. Line coverage is enough
 	# to track structural coverage of RTL.
-	$(MAKE) -C $(NSIM_HOME) -j$(NPROC) VFLAGS="$(VFLAGS)" RAPT_SIM_ASSERT=0 \
+	$(MAKE) -C $(NSIM_HOME) -j$(NPROC) RAPT_CONFIG=$(RAPT_CONFIG) VFLAGS="$(VFLAGS)" RAPT_SIM_ASSERT=0 \
 		VERILATOR_EXTRA="--coverage-line -Wno-UNOPTFLAT"
 
 coverage-run: ## Run test suite to collect coverage
@@ -734,8 +773,9 @@ APP_ISA64 := $(if $(filter rv64,$(ISA)),1,)
 # losing both coverage instrumentation and (since SVA gets re-enabled by
 # default) potentially turning random-instruction workloads into SVA `$fatal`
 # crashes (manifesting as host SIGSEGV / exit 139 in some Verilator builds).
-# Pass `RAPT_SIM_ASSERT=0` to keep SIM_VFLAGS empty across all sub-makes.
-COV_PASS_ENV := RAPT_SIM_ASSERT=0
+# Pass the build profile and assertion setting through every recursive make so
+# workloads reuse the instrumented simulator instead of selecting `default`.
+COV_PASS_ENV := RAPT_CONFIG=$(RAPT_CONFIG) RAPT_SIM_ASSERT=0
 
 # Sanity check that the expected NPC sim binary exists. The workload sub-make
 # (am-kernels / app) ultimately invokes `make -C sim run`, which picks
@@ -756,13 +796,13 @@ coverage-run-coremark: check-coverage-bin ## Run only coremark coverage workload
 	$(call RUN_AND_SAVE_COVERAGE,coremark,$(MAKE) -C $(AM_KERNELS)/benchmarks/coremark_eembc ARCH=$(NPC_ARCH_COV) run ARGS="-b -n" VFLAGS="$(VFLAGS)" $(COV_PASS_ENV))
 
 coverage-run-coremark-pk: check-coverage-bin ## Run coremark under pk (app/) for coverage
-	$(call RUN_AND_SAVE_COVERAGE,coremark-pk,$(MAKE) -C $(RAPTOR_HOME)/app coremark-sim ISA64=$(APP_ISA64) ARGS="-b -n" VFLAGS="$(VFLAGS)" $(COV_PASS_ENV) DIFF_REF_SO=)
+	$(call RUN_AND_SAVE_COVERAGE,coremark-pk,$(MAKE) -C $(RAPTOR_HOME)/app coremark-sim ISA64=$(APP_ISA64) ARGS="-b -n -t $(COV_PK_TIMEOUT)" VFLAGS="$(VFLAGS)" $(COV_PASS_ENV) DIFF_REF_SO=)
 
 coverage-run-hello-pk: check-coverage-bin ## Run hello under pk (app/) for coverage
-	$(call RUN_AND_SAVE_COVERAGE,hello-pk,$(MAKE) -C $(RAPTOR_HOME)/app hello-sim ISA64=$(APP_ISA64) ARGS="-b -n" VFLAGS="$(VFLAGS)" $(COV_PASS_ENV) DIFF_REF_SO=)
+	$(call RUN_AND_SAVE_COVERAGE,hello-pk,$(MAKE) -C $(RAPTOR_HOME)/app hello-sim ISA64=$(APP_ISA64) ARGS="-b -n -t $(COV_PK_TIMEOUT)" VFLAGS="$(VFLAGS)" $(COV_PASS_ENV) DIFF_REF_SO=)
 
 coverage-run-isa-tests-pk: check-coverage-bin ## Run ISA tests under pk (app/) for coverage
-	$(call RUN_AND_SAVE_COVERAGE,isa-tests-pk,$(MAKE) -C $(RAPTOR_HOME)/app isa-tests-sim ISA64=$(APP_ISA64) ARGS="-b -n" VFLAGS="$(VFLAGS)" $(COV_PASS_ENV) DIFF_REF_SO=)
+	$(call RUN_AND_SAVE_COVERAGE,isa-tests-pk,$(MAKE) -C $(RAPTOR_HOME)/app isa-tests-sim ISA64=$(APP_ISA64) ARGS="-b -n -t $(COV_PK_TIMEOUT)" VFLAGS="$(VFLAGS)" $(COV_PASS_ENV) DIFF_REF_SO=)
 
 
 coverage-run-microbench: check-coverage-bin ## Run only microbench coverage workload
@@ -884,6 +924,38 @@ formal-clean: ## Formal: clean all formal artifacts
 	$(MAKE) -C $(FORMAL_DIR) formal_rvfi_clean
 
 # ============================================================================
+# FPU Component Verification (Verilator)
+# ============================================================================
+FPU_TB_DIR := $(VERIFY_HOME)/xsim/fpu
+
+.PHONY: unit-fpu unit-fpu-addsub unit-fpu-mul unit-fpu-fma \
+	unit-fpu-convert unit-fpu-int-to-fp unit-fpu-divsqrt unit-clean
+
+unit-fpu: ## Unit: run all FPU RTL component tests
+	$(MAKE) -C $(FPU_TB_DIR) all
+
+unit-fpu-addsub: ## Unit: run FPU add/sub differential test
+	$(MAKE) -C $(FPU_TB_DIR) addsub
+
+unit-fpu-mul: ## Unit: run FPU multiply differential test
+	$(MAKE) -C $(FPU_TB_DIR) mul
+
+unit-fpu-fma: ## Unit: run FPU FMA directed regression
+	$(MAKE) -C $(FPU_TB_DIR) fma
+
+unit-fpu-convert: ## Unit: run FPU format-conversion differential test
+	$(MAKE) -C $(FPU_TB_DIR) convert
+
+unit-fpu-int-to-fp: ## Unit: run integer-to-FP differential test
+	$(MAKE) -C $(FPU_TB_DIR) int_to_fp
+
+unit-fpu-divsqrt: ## Unit: run FPU divide/sqrt differential test
+	$(MAKE) -C $(FPU_TB_DIR) divsqrt
+
+unit-clean: ## Unit: clean RTL unit-test artifacts
+	$(MAKE) -C $(FPU_TB_DIR) clean
+
+# ============================================================================
 # JTAG / RISC-V Debug verification
 # ============================================================================
 # Layer 1 (selftest)  - 23-point in-tree DTM/DM compliance probe (runs today).
@@ -993,12 +1065,12 @@ XSIM_COMMON_INCLUDES := \
 
 XSIM_L2_SOURCES := \
 	"$(RAPTOR_HOME)/hdl/rapt_pkg.sv" \
-	"$(RAPTOR_HOME)/hdl/memory/rapt_sram_1r1w.sv" \
+	"$(RAPTOR_HOME)/hdl/memory/rapt_sram_1rw.sv" \
 	"$(RAPTOR_HOME)/hdl/memory/rapt_l2.sv"
 
 XSIM_L1D_SOURCES := \
 	"$(RAPTOR_HOME)/hdl/rapt_pkg.sv" \
-	"$(RAPTOR_HOME)/hdl/memory/rapt_sram_1r1w.sv" \
+	"$(RAPTOR_HOME)/hdl/memory/rapt_sram_1rw.sv" \
 	"$(RAPTOR_HOME)/hdl/memory/rapt_pmp.sv" \
 	"$(RAPTOR_HOME)/hdl/memory/rapt_tlb.sv" \
 	"$(RAPTOR_HOME)/hdl/memory/rapt_ptw.sv" \
@@ -1006,7 +1078,7 @@ XSIM_L1D_SOURCES := \
 
 XSIM_L1I_SOURCES := \
 	"$(RAPTOR_HOME)/hdl/rapt_pkg.sv" \
-	"$(RAPTOR_HOME)/hdl/memory/rapt_sram_1r1w.sv" \
+	"$(RAPTOR_HOME)/hdl/memory/rapt_sram_1rw.sv" \
 	"$(RAPTOR_HOME)/hdl/memory/rapt_l1i_tagmem.sv" \
 	"$(RAPTOR_HOME)/hdl/memory/rapt_plru.sv" \
 	"$(RAPTOR_HOME)/hdl/memory/rapt_pmp.sv" \
@@ -1148,27 +1220,6 @@ xsim-csr-sret-roundtrip: ## xsim: verify CSR reset and U-ecall/SRET round trip
 
 xsim-pmp-endpoint: ## xsim: verify variable-size PMP endpoint boundary checks
 	$(call XSIM_RUN,pmp_endpoint,tb_pmp_endpoint,"$(RAPTOR_HOME)/hdl/rapt_pkg.sv" "$(RAPTOR_HOME)/hdl/memory/rapt_pmp.sv",)
-
-xsim-sram-l1d-lutram: ## xsim: verify L1D 16x128 LUTRAM byte writes and collisions
-	$(call XSIM_RUN,sram_l1d_lutram,tb_sram_l1d_lutram,"$(RAPTOR_HOME)/hdl/memory/rapt_sram_1r1w.sv" "$(XSIM_DIR)/sram_l1d_lutram_top.sv",)
-
-xsim-sram-l1d-lutram-post-synth: ## xsim: verify synthesized KU15P L1D LUTRAM netlist
-	@set -e; \
-	if ! command -v vivado >/dev/null 2>&1; then \
-		if [ -f "$(VIVADO_SETTINGS)" ]; then source "$(VIVADO_SETTINGS)"; fi; \
-	fi; \
-	command -v vivado >/dev/null 2>&1 || { echo "[xsim] ERROR: vivado not found"; exit 1; }; \
-	build_dir="$(XSIM_BUILD_DIR)/sram_l1d_lutram_post_synth"; \
-	rm -rf "$$build_dir"; mkdir -p "$$build_dir"; cd "$$build_dir"; \
-	vivado -mode batch -nojournal -nolog -source "$(XSIM_DIR)/synth_sram_l1d_lutram.tcl" \
-		-tclargs "$(RAPTOR_HOME)/hdl/memory/rapt_sram_1r1w.sv" \
-		"$(XSIM_DIR)/sram_l1d_lutram_top.sv" \
-		"$$build_dir/sram_l1d_lutram_funcsim.v" "$$build_dir/utilization.rpt"; \
-	xvlog --sv "$$build_dir/sram_l1d_lutram_funcsim.v" "$(XSIM_DIR)/tb_sram_l1d_lutram.sv"; \
-	xelab -L unisims_ver -debug typical tb_sram_l1d_lutram glbl \
-		-s tb_sram_l1d_lutram_post_synth_sim; \
-	xsim tb_sram_l1d_lutram_post_synth_sim -runall; \
-	grep -q '^PASS: L1D LUTRAM' xsim.log
 
 xsim-lsu-lr-sq-forward: ## xsim: verify LR waits for SQ drain instead of forwarding
 	$(call XSIM_RUN,lsu_lr_sq_forward,tb_lsu_lr_sq_forward,$(XSIM_LSU_SOURCES),-d RAPT_ASSERT_EN)

@@ -45,11 +45,13 @@ endif
 ISA64 ?= 0 ## RV64 mode (0=RV32, 1=RV64)
 ifeq ($(ISA64),1)
   ARCH   := rv64imac_zicntr_zicond_zicsr_zifencei_zcb_zba_zbb_zbc_zbs
+  PK_ARCH := rv64imafdc_zicntr_zicond_zicsr_zifencei_zcb_zba_zbb_zbc_zbs
   ABI    := lp64
   XLEN   := 64
   VFLAGS := -DRAPT_RV64
 else
   ARCH   := rv32imac_zicntr_zicond_zicsr_zifencei_zcb_zba_zbb_zbc_zbs
+  PK_ARCH := rv32imafdc_zicntr_zicond_zicsr_zifencei_zcb_zba_zbb_zbc_zbs
   ABI    := ilp32
   XLEN   := 32
   VFLAGS :=

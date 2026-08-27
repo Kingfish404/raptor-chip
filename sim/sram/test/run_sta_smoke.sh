@@ -30,7 +30,7 @@ fi
 [ -d "$YOSTA" ] || { echo "FAIL: $YOSTA missing (make YOSYS_OPENSTA)"; exit 1; }
 
 # --- Ensure stub libs exist ------------------------------------------------
-LIB="$SRAM_DIR/build/sky130/macro/rapt_openram_1r1w_32x32/rapt_openram_1r1w_32x32.lib"
+LIB="$SRAM_DIR/build/sky130/macro/rapt_openram_1rw_32x32/rapt_openram_1rw_32x32.lib"
 if [ ! -f "$LIB" ]; then
     echo ">>> stub .lib missing, generating..."
     make -C "$SRAM_DIR" stubs PLATFORM=sky130
@@ -45,7 +45,7 @@ verilator -E -P -DRAPT_USE_SRAM_MACRO \
     -I"$RAPTOR/hdl/configs/default" \
     -I"$RAPTOR/hdl/include" \
     "$RAPTOR/hdl/rapt_pkg.sv" \
-    "$RAPTOR/hdl/memory/rapt_sram_1r1w.sv" \
+    "$RAPTOR/hdl/memory/rapt_sram_1rw.sv" \
     "$HERE/fixtures/rapt_sram_test_top.sv" \
     > "$SV_OUT"
 
@@ -80,7 +80,7 @@ echo
 echo "=== Smoke assertions ==="
 check "[ -f '$NETLIST' ]"                              "yosys produced synthesised netlist"
 check "[ -f '$REPORT' ]"                               "OpenSTA produced timing report"
-check "grep -q 'rapt_openram_1r1w_32x32' '$NETLIST'"   "macro instance preserved in netlist (not flattened)"
+check "grep -q 'rapt_openram_1rw_32x32' '$NETLIST'"    "macro instance preserved in netlist (not flattened)"
 check "grep -qE 'clk0|clk1' '$REPORT'"                 "STA report references macro clock pins"
 check "[ -s '$REPORT' ]"                               "STA report is non-empty"
 

@@ -142,14 +142,11 @@ module rapt_rnu #(
       rn_pipe_valid_b <= 1'b0;
       rnq_is_pair <= '0;
 `endif
-      for (int i = 0; i < RIQ_SIZE; i++) begin
-        rnq_uops[i] <= '0;
-        rnq_rd[i]   <= '0;
-        rnq_op1[i]  <= '0;
-        rnq_op2[i]  <= '0;
-        rnq_rs1[i]  <= '0;
-        rnq_rs2[i]  <= '0;
-      end
+      // RNQ payload arrays (uops/rd/op*/rs*) are intentionally NOT reset:
+      // every read is gated by rnq_valid[] (dequeue-side reads index
+      // rnq_tail_* whose valid was checked), so the data flops are
+      // don't-care (same principle as rapt_prf).  This removes
+      // ~RIQ_SIZE*uop_width endpoints from the reset/flush network.
     end else begin
       // One static write cone per RNQ entry. Preserve the former NBA
       // priority: dequeue wins over enqueue on any selector alias.

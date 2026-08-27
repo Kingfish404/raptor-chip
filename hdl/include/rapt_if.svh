@@ -253,20 +253,22 @@ interface csr_bcast_if #(
   // mcounteren / scounteren low 3 bits (CY/TM/IR) for U/S counter reads.
   logic [2:0] mcounteren;
   logic [2:0] scounteren;
+  logic [2:0] frm;
+  logic [1:0] fs;
 
   modport in(
       input priv, satp_ppn, satp_asid,
       input immu_en, dmmu_en, mtvec, tvec, timer_int_en, sw_int_en, ext_int_en,
       input mprv, mpp,
       input tsr, tvm, tw, mcounteren, scounteren,
-      input sum, mxr, sbe
+      input sum, mxr, sbe, frm, fs
   );
   modport out(
       output priv, satp_ppn, satp_asid,
       output immu_en, dmmu_en, mtvec, tvec, timer_int_en, sw_int_en, ext_int_en,
       output mprv, mpp,
       output tsr, tvm, tw, mcounteren, scounteren,
-      output sum, mxr, sbe
+      output sum, mxr, sbe, frm, fs
   );
 endinterface
 

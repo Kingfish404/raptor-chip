@@ -4,10 +4,11 @@
 // Execution Unit (EXU) -- top-level wiring & dispatch arbitration.
 //
 // This module is intentionally thin. It owns:
-//   * The routing policy that steers each renamed uop to one of the four
-//     scheduler queues feeding five execution pipes:
+//   * The routing policy that steers each renamed uop to one of five
+//     scheduler queues feeding six execution paths:
 //       IOQ    - loads / stores / atomics (in-order memory queue)
 //       MULDIV - pure MUL/DIV arithmetic (private IQ + tag-based FU)
+//       FPQ    - scalar F/D operations (dedicated IQ + FPU, shares CDB0)
 //       BRQ    - conditional branches (compare-only Branch pipe)
 //       ALQ    - everything else: ONE shared ALU issue queue with TWO
 //                issue ports feeding the ALU-CSR pipe (full: CSR/system/trap)
@@ -20,7 +21,7 @@
 //     to the rename / dispatch pipeline.
 //
 // All micro-architectural state lives in the sub-modules: the generic
-// issue queues (`rapt_exu_iq`), the combinational pipes
+// issue queues (`rapt_exu_iq`), the combinational pipes and FPU
 // (`rapt_exu_pipe_alu_csr`, `rapt_exu_pipe_alu`, and
 // `rapt_exu_pipe_branch`), the MUL/DIV pipe, and the IOQ.
 module rapt_exu #(
@@ -28,6 +29,7 @@ module rapt_exu #(
     parameter unsigned BRQ_SIZE = 4,
     parameter unsigned IOQ_SIZE = `RAPT_IOQ_SIZE,
     parameter unsigned MDQ_SIZE = 4,
+    parameter unsigned FPQ_SIZE = 4,
     parameter unsigned ROB_SIZE = `RAPT_ROB_SIZE,
     parameter unsigned PLEN     = `RAPT_PHY_LEN,
     parameter unsigned RLEN     = `RAPT_REG_LEN,
@@ -51,6 +53,7 @@ module rapt_exu #(
 
     exu_lsu_if.master exu_lsu,
     exu_csr_if.master exu_csr,
+    fpr_if           fpr,
 
     csr_bcast_if.in   csr_bcast,
     pmp_state_if.in   pmp_state,
@@ -64,6 +67,7 @@ module rapt_exu #(
   exu_disp_rs_if #(.RS_SIZE(ALQ_SIZE)) disp_alq ();
   exu_disp_rs_if #(.RS_SIZE(BRQ_SIZE)) disp_brq ();
   exu_disp_rs_if #(.RS_SIZE(MDQ_SIZE)) disp_mdq ();
+  exu_disp_rs_if #(.RS_SIZE(FPQ_SIZE)) disp_fpq ();
   exu_disp_ioq_if #(.IOQ_SIZE(IOQ_SIZE)) disp_ioq ();
   exu_load_fast_if #(.PLEN(PLEN)) load_fast ();
 
@@ -82,6 +86,11 @@ module rapt_exu #(
       .PLEN(PLEN),
       .RLEN(RLEN),
       .XLEN(XLEN)
+  ) iss_fpu ();
+  exu_iq_iss_if #(
+      .PLEN(PLEN),
+      .RLEN(RLEN),
+      .XLEN(XLEN)
   ) iss_branch ();
   // Unused second issue port of the single-port BRQ (tied off inside).
   exu_iq_iss_if #(
@@ -89,6 +98,16 @@ module rapt_exu #(
       .RLEN(RLEN),
       .XLEN(XLEN)
   ) iss_branch_unused ();
+  exu_iq_iss_if #(
+      .PLEN(PLEN),
+      .RLEN(RLEN),
+      .XLEN(XLEN)
+  ) iss_fpu_unused ();
+  logic alu_csr_pipe_enable;
+  logic alu_csr_issue_enable;
+  logic fpu_issue_enable;
+  exu_wb_if wb_alu_csr_raw ();
+  exu_wb_if wb_fpu ();
 
   // === Classification ===
   // The MDQ predicate must be airtight: a trap-marked or system uop may
@@ -105,27 +124,37 @@ module rapt_exu #(
         && (u.csr_csw == '0);
   endfunction
 
+  // FP loads/stores advertise ren/wen and remain in the IOQ. All other
+  // scalar-FP operations execute through the independent FP issue queue.
+  function automatic logic uop_is_fp_exec(input rapt_pkg::uop_t u);
+    return u.fp_valid && !u.wen && !u.ren;
+  endfunction
+
   // ALU-CSR-only: CSR / system / trap semantics live exclusively in that pipe.
   // (Conditional branches are checked separately and win: a trap-marked
   // branch resolves on the Branch pipe as before, with trap info already in the
   // ROB from dispatch.)
   function automatic logic uop_requires_alu_csr(input rapt_pkg::uop_t u);
-    return u.system || u.trap || u.ecall || u.ebreak || u.mret || u.sret || (u.csr_csw != '0);
+    return u.system || u.trap || u.ecall || u.ebreak
+      || u.mret || u.sret || (u.csr_csw != '0);
   endfunction
   /* verilator lint_on UNUSEDSIGNAL */
 
   // Per-slot routing class (mutually exclusive; priority IOQ > MDQ > BRQ > ALQ)
-  logic a_to_ioq, a_to_mdq, a_to_brq, a_to_alq;
-  assign a_to_ioq = (rou_exu.uop.wen || rou_exu.uop.ren);
+  logic a_to_ioq, a_to_mdq, a_to_fpq, a_to_brq, a_to_alq;
+  // A decoded trap must reach ALU-CSR before an IOQ request can issue.
+  assign a_to_ioq = (rou_exu.uop.wen || rou_exu.uop.ren) && !rou_exu.uop.trap;
   assign a_to_mdq = !a_to_ioq && uop_is_mdq(rou_exu.uop);
-  assign a_to_brq = !a_to_ioq && !a_to_mdq && rou_exu.uop.ben;
-  assign a_to_alq = !a_to_ioq && !a_to_mdq && !a_to_brq;
+  assign a_to_fpq = !a_to_ioq && !a_to_mdq && uop_is_fp_exec(rou_exu.uop);
+  assign a_to_brq = !a_to_ioq && !a_to_mdq && !a_to_fpq && rou_exu.uop.ben;
+  assign a_to_alq = !a_to_ioq && !a_to_mdq && !a_to_fpq && !a_to_brq;
 `ifdef RAPT_DUAL_ISSUE
-  logic b_to_ioq, b_to_mdq, b_to_brq, b_to_alq;
-  assign b_to_ioq = (rou_exu.uop_b.wen || rou_exu.uop_b.ren);
+  logic b_to_ioq, b_to_mdq, b_to_fpq, b_to_brq, b_to_alq;
+  assign b_to_ioq = (rou_exu.uop_b.wen || rou_exu.uop_b.ren) && !rou_exu.uop_b.trap;
   assign b_to_mdq = !b_to_ioq && uop_is_mdq(rou_exu.uop_b);
-  assign b_to_brq = !b_to_ioq && !b_to_mdq && rou_exu.uop_b.ben;
-  assign b_to_alq = !b_to_ioq && !b_to_mdq && !b_to_brq;
+  assign b_to_fpq = !b_to_ioq && !b_to_mdq && uop_is_fp_exec(rou_exu.uop_b);
+  assign b_to_brq = !b_to_ioq && !b_to_mdq && !b_to_fpq && rou_exu.uop_b.ben;
+  assign b_to_alq = !b_to_ioq && !b_to_mdq && !b_to_fpq && !b_to_brq;
 `endif
 
   // ALU-port block flag: CSR/system/trap entries may only issue to ALU-CSR.
@@ -133,6 +162,7 @@ module rapt_exu #(
   assign disp_alq.iss_b_block_a = uop_requires_alu_csr(rou_exu.uop);
   assign disp_brq.iss_b_block_a = 1'b0;
   assign disp_mdq.iss_b_block_a = 1'b0;
+  assign disp_fpq.iss_b_block_a = 1'b0;
 `ifdef RAPT_DUAL_ISSUE
   assign disp_alq.iss_b_block_b = uop_requires_alu_csr(rou_exu.uop_b);
 `else
@@ -140,11 +170,13 @@ module rapt_exu #(
 `endif
   assign disp_brq.iss_b_block_b = 1'b0;
   assign disp_mdq.iss_b_block_b = 1'b0;
+  assign disp_fpq.iss_b_block_b = 1'b0;
 
   // === Slot-A readiness: the chosen queue must have room ===
   logic rs_ready_a;
   assign rs_ready_a = a_to_ioq ? disp_ioq.ready
                     : a_to_mdq ? disp_mdq.free_found_a
+                    : a_to_fpq ? disp_fpq.free_found_a
                     : a_to_brq ? disp_brq.free_found_a
                     : disp_alq.free_found_a;
   assign rou_exu.ready = rs_ready_a;
@@ -161,6 +193,8 @@ module rapt_exu #(
       rs_ready_b = a_to_ioq ? disp_ioq.ready_b : disp_ioq.ready;
     end else if (b_to_mdq) begin
       rs_ready_b = a_to_mdq ? disp_mdq.free_found_b : disp_mdq.free_found_a;
+    end else if (b_to_fpq) begin
+      rs_ready_b = a_to_fpq ? disp_fpq.free_found_b : disp_fpq.free_found_a;
     end else if (b_to_brq) begin
       rs_ready_b = a_to_brq ? disp_brq.free_found_b : disp_brq.free_found_a;
     end else begin
@@ -174,24 +208,29 @@ module rapt_exu #(
   assign disp_alq.b_rs_idx = a_to_alq ? disp_alq.free_idx_b : disp_alq.free_idx_a;
   assign disp_brq.b_rs_idx = a_to_brq ? disp_brq.free_idx_b : disp_brq.free_idx_a;
   assign disp_mdq.b_rs_idx = a_to_mdq ? disp_mdq.free_idx_b : disp_mdq.free_idx_a;
+  assign disp_fpq.b_rs_idx = a_to_fpq ? disp_fpq.free_idx_b : disp_fpq.free_idx_a;
 `else
   assign disp_alq.b_rs_idx = '0;
   assign disp_brq.b_rs_idx = '0;
   assign disp_mdq.b_rs_idx = '0;
+  assign disp_fpq.b_rs_idx = '0;
 `endif
 
   // === Accept signals ===
   assign disp_alq.accept_a = rou_exu.valid && rs_ready_a && a_to_alq;
   assign disp_brq.accept_a = rou_exu.valid && rs_ready_a && a_to_brq;
   assign disp_mdq.accept_a = rou_exu.valid && rs_ready_a && a_to_mdq;
+  assign disp_fpq.accept_a = rou_exu.valid && rs_ready_a && a_to_fpq;
 `ifdef RAPT_DUAL_ISSUE
   assign disp_alq.accept_b = rou_exu.valid_b && rs_ready_b && b_to_alq;
   assign disp_brq.accept_b = rou_exu.valid_b && rs_ready_b && b_to_brq;
   assign disp_mdq.accept_b = rou_exu.valid_b && rs_ready_b && b_to_mdq;
+  assign disp_fpq.accept_b = rou_exu.valid_b && rs_ready_b && b_to_fpq;
 `else
   assign disp_alq.accept_b = 1'b0;
   assign disp_brq.accept_b = 1'b0;
   assign disp_mdq.accept_b = 1'b0;
+  assign disp_fpq.accept_b = 1'b0;
 `endif
 
   // IOQ accepts: A is paired with B if both target IOQ; else B may go alone.
@@ -243,6 +282,7 @@ module rapt_exu #(
       .exu_ioq_bcast(exu_ioq_bcast),
       .exu_wb_mul   (exu_wb_mul),
       .load_fast    (load_fast),
+      .issue_enable (alu_csr_issue_enable),
       .iss          (iss_alu_csr),
       .iss_b        (iss_alu),
       .occ_o        (occ_alq),
@@ -266,24 +306,82 @@ module rapt_exu #(
       .exu_ioq_bcast(exu_ioq_bcast),
       .exu_wb_mul   (exu_wb_mul),
       .load_fast    (load_fast),
+      .issue_enable (1'b1),
       .iss          (iss_branch),
       .iss_b        (iss_branch_unused),
       .occ_o        (occ_brq),
       .pmu_iq_full  (pmu_brq_full_unused)
   );
 
+    rapt_exu_iq #(
+      .IQ_SIZE (FPQ_SIZE),
+      .IN_ORDER_ISSUE(1'b1),
+      .ROB_SIZE(ROB_SIZE),
+      .PLEN    (PLEN),
+      .RLEN    (RLEN),
+      .XLEN    (XLEN)
+    ) u_fpq (
+      .clock        (clock), .reset(reset), .cmu_bcast(cmu_bcast), .rou_exu(rou_exu),
+      .disp         (disp_fpq), .exu_rou(wb_alu_csr), .exu_rou_b(wb_alu),
+      .exu_ioq_bcast(exu_ioq_bcast), .exu_wb_mul(exu_wb_mul), .load_fast(load_fast),
+      .issue_enable (fpu_issue_enable), .iss(iss_fpu), .iss_b(iss_fpu_unused),
+      .occ_o        (), .pmu_iq_full()
+    );
+
   // === Execution pipes (combinational FU + writeback) ===
   rapt_exu_pipe_alu_csr #(
       .ROB_SIZE(ROB_SIZE),
       .XLEN    (XLEN)
   ) u_pipe_alu_csr (
-      .iss       (iss_alu_csr),
       .cmu_bcast (cmu_bcast),
+      .iss       (iss_alu_csr),
       .csr_bcast (csr_bcast),
       .exu_csr   (exu_csr),
-      .wb_alu_csr(wb_alu_csr),
+      .wb_alu_csr(wb_alu_csr_raw),
       .uop_pl    (uop_pl)
   );
+
+    rapt_exu_pipe_fpu #(
+      .ROB_SIZE(ROB_SIZE), .XLEN(XLEN)
+    ) u_pipe_fpu (
+      .clock(clock), .reset(reset), .iss(iss_fpu), .cmu_bcast(cmu_bcast),
+      .csr_bcast(csr_bcast), .fpr(fpr), .wb_fpu(wb_fpu),
+      .issue_enable(fpu_issue_enable), .uop_pl(uop_pl)
+    );
+
+    // FP and ALU-CSR share CDB port 0. FP has priority because div/sqrt may
+    // complete while the FPQ itself is blocked; gate ALU-CSR issue on that CDB.
+    assign alu_csr_pipe_enable = 1'b1;
+    // A multi-cycle FMA/divsqrt owns the FP writeback/flags slot until it
+    // completes. Keep CSR/ALU issue behind the same gate so instructions such
+    // as CSRR FFLAGS cannot observe the pre-FMA architectural flags.
+    assign alu_csr_issue_enable = alu_csr_pipe_enable && !wb_fpu.valid
+      && fpu_issue_enable;
+    assign wb_alu_csr.pc = wb_fpu.valid ? wb_fpu.pc : wb_alu_csr_raw.pc;
+    assign wb_alu_csr.npc = wb_fpu.valid ? wb_fpu.npc : wb_alu_csr_raw.npc;
+    assign wb_alu_csr.btaken = wb_fpu.valid ? wb_fpu.btaken : wb_alu_csr_raw.btaken;
+    assign wb_alu_csr.mispredict = wb_fpu.valid ? wb_fpu.mispredict : wb_alu_csr_raw.mispredict;
+    assign wb_alu_csr.dest = wb_fpu.valid ? wb_fpu.dest : wb_alu_csr_raw.dest;
+    assign wb_alu_csr.result = wb_fpu.valid ? wb_fpu.result : wb_alu_csr_raw.result;
+    assign wb_alu_csr.prd = wb_fpu.valid ? wb_fpu.prd : wb_alu_csr_raw.prd;
+    assign wb_alu_csr.rd = wb_fpu.valid ? wb_fpu.rd : wb_alu_csr_raw.rd;
+    assign wb_alu_csr.csr_wen = wb_fpu.valid ? wb_fpu.csr_wen : wb_alu_csr_raw.csr_wen;
+    assign wb_alu_csr.csr_wdata = wb_fpu.valid ? wb_fpu.csr_wdata : wb_alu_csr_raw.csr_wdata;
+    assign wb_alu_csr.fp_flags_valid = wb_fpu.valid ? wb_fpu.fp_flags_valid
+      : wb_alu_csr_raw.fp_flags_valid;
+    assign wb_alu_csr.fp_flags = wb_fpu.valid ? wb_fpu.fp_flags : wb_alu_csr_raw.fp_flags;
+    assign wb_alu_csr.wen = wb_fpu.valid ? wb_fpu.wen : wb_alu_csr_raw.wen;
+    assign wb_alu_csr.alu = wb_fpu.valid ? wb_fpu.alu : wb_alu_csr_raw.alu;
+    assign wb_alu_csr.sq_waddr = wb_fpu.valid ? wb_fpu.sq_waddr : wb_alu_csr_raw.sq_waddr;
+    assign wb_alu_csr.sq_wdata = wb_fpu.valid ? wb_fpu.sq_wdata : wb_alu_csr_raw.sq_wdata;
+    assign wb_alu_csr.sq_wdata64 = wb_fpu.valid ? wb_fpu.sq_wdata64 : wb_alu_csr_raw.sq_wdata64;
+    assign wb_alu_csr.sq_fp64 = wb_fpu.valid ? wb_fpu.sq_fp64 : wb_alu_csr_raw.sq_fp64;
+    assign wb_alu_csr.trap = wb_fpu.valid ? wb_fpu.trap : wb_alu_csr_raw.trap;
+    assign wb_alu_csr.tval = wb_fpu.valid ? wb_fpu.tval : wb_alu_csr_raw.tval;
+    assign wb_alu_csr.cause = wb_fpu.valid ? wb_fpu.cause : wb_alu_csr_raw.cause;
+    assign wb_alu_csr.difftest_skip = wb_fpu.valid ? wb_fpu.difftest_skip
+      : wb_alu_csr_raw.difftest_skip;
+    assign wb_alu_csr.valid = wb_fpu.valid ? 1'b1 : wb_alu_csr_raw.valid;
 
   rapt_exu_pipe_alu #(
       .XLEN(XLEN)
@@ -319,6 +417,7 @@ module rapt_exu #(
       .exu_wb_mul   (exu_wb_mul),
       .exu_lsu      (exu_lsu),
       .exu_l1d      (exu_l1d),
+      .fpr          (fpr),
       .exu_ioq_bcast(exu_ioq_bcast),
       .load_fast    (load_fast),
       .pmu_ioq_full (pmu_ioq_full_unused)
@@ -347,11 +446,11 @@ module rapt_exu #(
   // ==========================================================================
 
   // ONE_HOT: each dispatch slot targets exactly one queue when dispatching.
-  `RAPT_SVA_IMPLY(clock, reset, EXU_ROUTE_A_ONEHOT, rou_exu.valid, ($onehot({a_to_ioq, a_to_mdq,
-                                                                             a_to_brq, a_to_alq})))
+  `RAPT_SVA_IMPLY(clock, reset, EXU_ROUTE_A_ONEHOT, rou_exu.valid,
+                  ($onehot({a_to_ioq, a_to_mdq, a_to_fpq, a_to_brq, a_to_alq})))
 `ifdef RAPT_DUAL_ISSUE
   `RAPT_SVA_IMPLY(clock, reset, EXU_ROUTE_B_ONEHOT, rou_exu.valid_b, ($onehot
-                  ({b_to_ioq, b_to_mdq, b_to_brq, b_to_alq})))
+                  ({b_to_ioq, b_to_mdq, b_to_fpq, b_to_brq, b_to_alq})))
 `endif
 
 endmodule

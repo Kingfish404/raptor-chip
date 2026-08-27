@@ -41,6 +41,9 @@ module rapt_csr #(
 );
   typedef enum logic [REG_W-1:0] {
     MNONE__ = 0,
+    FFLAGS,
+    FRM,
+    FCSR,
     SSTATUS,
     SIE____,
     STVEC__,
@@ -147,6 +150,9 @@ module rapt_csr #(
   assign raddr = exu_csr.raddr;
   always_comb begin
     case (rou_csr.csr_addr)
+      `RAPT_CSR_FFLAGS:    waddr_reg = FFLAGS;
+      `RAPT_CSR_FRM:       waddr_reg = FRM;
+      `RAPT_CSR_FCSR:      waddr_reg = FCSR;
       `RAPT_CSR_SSTATUS:   waddr_reg = SSTATUS;
       `RAPT_CSR_SIE____:   waddr_reg = SIE____;
       `RAPT_CSR_STVEC__:   waddr_reg = STVEC__;
@@ -180,6 +186,9 @@ module rapt_csr #(
   end
   always_comb begin
     case (raddr)
+      `RAPT_CSR_FFLAGS:    raddr_reg = FFLAGS;
+      `RAPT_CSR_FRM:       raddr_reg = FRM;
+      `RAPT_CSR_FCSR:      raddr_reg = FCSR;
       `RAPT_CSR_SSTATUS:   raddr_reg = SSTATUS;
       `RAPT_CSR_SIE____:   raddr_reg = SIE____;
       `RAPT_CSR_STVEC__:   raddr_reg = STVEC__;
@@ -227,6 +236,9 @@ module rapt_csr #(
 
   always_comb begin
     case (raddr_reg)
+      FFLAGS:    exu_csr.rdata = csr[FCSR][4:0];
+      FRM:       exu_csr.rdata = csr[FCSR][7:5];
+      FCSR:      exu_csr.rdata = csr[FCSR][7:0];
       SSTATUS:   exu_csr.rdata = csr[SSTATUS];
       SIE____:   exu_csr.rdata = csr[MIE____] & `RAPT_CSR_SIE_RMASK;
       STVEC__:   exu_csr.rdata = csr[STVEC__];
@@ -442,6 +454,8 @@ module rapt_csr #(
   assign csr_bcast.sum        = csr[MSTATUS][`RAPT_CSR_MSTATUS_SUM_];
   assign csr_bcast.mxr        = csr[MSTATUS][`RAPT_CSR_MSTATUS_MXR_];
   assign csr_bcast.sbe        = csr[MSTATUSH][`RAPT_CSR_MSTATUSH_SBE];
+  assign csr_bcast.frm        = csr[FCSR][7:5];
+  assign csr_bcast.fs         = csr[MSTATUS][14:13];
 
   // Incremental PMP update command. Consumers keep local decoded state; only
   // accepted writes toggle this core-wide bus.
@@ -541,6 +555,7 @@ module rapt_csr #(
       csr[MTVEC__] <= RESET_VAL;
       csr[MSTATUS] <= RESET_VAL | `RAPT_CSR_MSTATUS_HW;
       csr[SSTATUS] <= `RAPT_CSR_SSTATUS_HW;
+      csr[FCSR] <= '0;
       csr[SIE____] <= '0;
       csr[STVEC__] <= '0;
       csr[SSCRATC] <= '0;
@@ -591,8 +606,25 @@ module rapt_csr #(
         csr[MINSTRETH] <= csr[MINSTRETH] + 1;
       end
       if (rou_csr.valid) begin
+        if (rou_csr.fp_dirty) begin
+          csr[MSTATUS] <= csr[MSTATUS] | `RAPT_CSR_MSTATUS_SD | (XLEN'(3) << 13);
+          csr[SSTATUS] <= csr[SSTATUS] | `RAPT_CSR_MSTATUS_SD | (XLEN'(3) << 13);
+        end
+        if (rou_csr.fp_flags_valid) begin
+          csr[FCSR][4:0] <= csr[FCSR][4:0] | rou_csr.fp_flags;
+        end
         if (rou_csr.csr_wen) begin
-          if (rou_csr.csr_addr == `RAPT_CSR_PMPCFG0) begin
+          if (waddr_reg == FFLAGS || waddr_reg == FRM || waddr_reg == FCSR) begin
+            csr[MSTATUS] <= csr[MSTATUS] | `RAPT_CSR_MSTATUS_SD | (XLEN'(3) << 13);
+            csr[SSTATUS] <= csr[SSTATUS] | `RAPT_CSR_MSTATUS_SD | (XLEN'(3) << 13);
+          end
+          if (waddr_reg == FFLAGS) begin
+            csr[FCSR][4:0] <= rou_csr.csr_wdata[4:0];
+          end else if (waddr_reg == FRM) begin
+            csr[FCSR][7:5] <= rou_csr.csr_wdata[2:0];
+          end else if (waddr_reg == FCSR) begin
+            csr[FCSR][7:0] <= rou_csr.csr_wdata[7:0];
+          end else if (rou_csr.csr_addr == `RAPT_CSR_PMPCFG0) begin
             // pmpcfg0: RV32 packs entries 0..3 (4 bytes); RV64 packs entries 0..7 (8 bytes).
             // L-bit locked cfgs ignore further writes (until reset).
             // Reserved bits [6:5] are WARL-zero (mask 8'h9F).
@@ -661,7 +693,7 @@ module rapt_csr #(
             // SBE/MBE are WARL-zero (little-endian only).
             csr[MSTATUSH] <= '0;
           end else if (waddr_reg == MSTATUS) begin
-            // Write mask: exclude SD(31, read-only) and VS(10:9, hardwired 0 -- no V ext)
+            // Write mask: exclude SD(XLEN-1, read-only) and VS(10:9, hardwired 0 -- no V ext)
             // SD recomputed from FS dirty (14:13==2'b11) or XS dirty (16:15==2'b11)
             // SXL/UXL (RV64 only, bits 35:32) are hardwired to 2 (RV64) -- OR back in.
             csr[MSTATUS] <= (rou_csr.csr_wdata & `RAPT_CSR_MSTATUS_WMASK)

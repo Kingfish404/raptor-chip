@@ -151,6 +151,12 @@ module rapt_rou #(
   logic           [IIQ_SIZE-1:0] uoq_pv1_valid;
   logic           [IIQ_SIZE-1:0] uoq_pv2_valid;
 
+  // FPR rename map: each architectural FPR points at its youngest unfinished
+  // producer's ROB entry.  Values remain in rapt_fpr; these tags only gate
+  // consumers until the producer has written that architectural bank.
+  logic [31:0] fp_map_valid;
+  logic [$clog2(ROB_SIZE)-1:0] fp_map[32];
+
   logic uoq_enq_fire_a, uoq_deq_fire_a;
   logic uoq_head_a_available;
   logic sys_resume;
@@ -160,10 +166,17 @@ module rapt_rou #(
   logic uoq_head_b_available;
   logic uoq_enq_fire_b, uoq_deq_fire_b;
 
+  logic uoq_tail_b_is_serializing;
+
   // Lightweight resume for pure CSR: no flush, just unblock IFU and clear drain
 
   assign uoq_head_b = uoq_head_a + 1;
   assign uoq_tail_b = uoq_tail_a + 1;
+  assign uoq_tail_b_is_serializing = uoq_valid[uoq_tail_b] && (
+      uoq_uops[uoq_tail_b].system
+      || uoq_uops[uoq_tail_b].fp_valid
+      || uoq_uops[uoq_tail_b].f_i
+      || uoq_uops[uoq_tail_b].f_time);
 
 `endif
 
@@ -173,6 +186,7 @@ module rapt_rou #(
   logic uoq_tail_a_is_serializing;
   assign uoq_tail_a_is_serializing = uoq_valid[uoq_tail_a] && (
       uoq_uops[uoq_tail_a].system
+      || uoq_uops[uoq_tail_a].fp_valid
       || uoq_uops[uoq_tail_a].f_i
       || uoq_uops[uoq_tail_a].f_time);
 
@@ -226,6 +240,8 @@ module rapt_rou #(
   assign rob_tail_b = rob_tail_a + 1;
   assign uoq_deq_fire_b = uoq_deq_fire_a && uoq_is_pair[uoq_tail_b]
       && uoq_valid[uoq_tail_b]
+      && !uoq_tail_a_is_serializing
+      && !uoq_tail_b_is_serializing
       && !rob_entry[rob_tail_b].busy
       && rou_exu.ready_b;
 `endif
@@ -267,9 +283,7 @@ module rapt_rou #(
 `endif
 
 `ifdef RAPT_DUAL_ISSUE
-  assign rou_exu.valid_b = uoq_deq_fire_a && uoq_is_pair[uoq_tail_b]
-      && uoq_valid[uoq_tail_b]
-      && !rob_entry[rob_tail_b].busy;
+  assign rou_exu.valid_b = uoq_deq_fire_b;
 `endif
 
   // ================================================================
@@ -297,6 +311,67 @@ module rapt_rou #(
   assign wb_valid_v[3] = exu_wb_mul.valid;
   assign wb_prd_v[3]   = exu_wb_mul.prd;
   assign wb_res_v[3]   = exu_wb_mul.result;
+
+  function automatic logic fp_writes_fpr(input rapt_pkg::uop_t u);
+    if (!u.fp_valid || u.trap) return 1'b0;
+    case (u.fp_op)
+      `RAPT_FP_OP_FMV_X_W, `RAPT_FP_OP_FMV_X_D,
+      `RAPT_FP_OP_FLE_S, `RAPT_FP_OP_FLT_S, `RAPT_FP_OP_FEQ_S,
+      `RAPT_FP_OP_FLE_D, `RAPT_FP_OP_FLT_D, `RAPT_FP_OP_FEQ_D,
+      `RAPT_FP_OP_FCLASS_S, `RAPT_FP_OP_FCLASS_D,
+      `RAPT_FP_OP_FCVT_W_S, `RAPT_FP_OP_FCVT_WU_S,
+      `RAPT_FP_OP_FCVT_L_S, `RAPT_FP_OP_FCVT_LU_S,
+      `RAPT_FP_OP_FCVT_W_D, `RAPT_FP_OP_FCVT_WU_D,
+      `RAPT_FP_OP_FCVT_L_D, `RAPT_FP_OP_FCVT_LU_D,
+      `RAPT_FP_OP_FSW, `RAPT_FP_OP_FSD: return 1'b0;
+      default: return 1'b1;
+    endcase
+  endfunction
+
+  function automatic logic fp_uses_rs1(input rapt_pkg::uop_t u);
+    if (!u.fp_valid) return 1'b0;
+    case (u.fp_op)
+      `RAPT_FP_OP_FLW, `RAPT_FP_OP_FLD, `RAPT_FP_OP_FSW, `RAPT_FP_OP_FSD,
+      `RAPT_FP_OP_FMV_W_X, `RAPT_FP_OP_FMV_D_X,
+      `RAPT_FP_OP_FCVT_S_W, `RAPT_FP_OP_FCVT_S_WU,
+      `RAPT_FP_OP_FCVT_S_L, `RAPT_FP_OP_FCVT_S_LU,
+      `RAPT_FP_OP_FCVT_D_W, `RAPT_FP_OP_FCVT_D_WU,
+      `RAPT_FP_OP_FCVT_D_L, `RAPT_FP_OP_FCVT_D_LU: return 1'b0;
+      default: return 1'b1;
+    endcase
+  endfunction
+
+  function automatic logic fp_uses_rs2(input rapt_pkg::uop_t u);
+    if (!u.fp_valid) return 1'b0;
+    case (u.fp_op)
+      `RAPT_FP_OP_FSW, `RAPT_FP_OP_FSD,
+      `RAPT_FP_OP_FSGNJ_S, `RAPT_FP_OP_FSGNJN_S, `RAPT_FP_OP_FSGNJX_S,
+      `RAPT_FP_OP_FSGNJ_D, `RAPT_FP_OP_FSGNJN_D, `RAPT_FP_OP_FSGNJX_D,
+      `RAPT_FP_OP_FADD_S, `RAPT_FP_OP_FSUB_S, `RAPT_FP_OP_FMUL_S, `RAPT_FP_OP_FDIV_S,
+      `RAPT_FP_OP_FADD_D, `RAPT_FP_OP_FSUB_D, `RAPT_FP_OP_FMUL_D, `RAPT_FP_OP_FDIV_D,
+      `RAPT_FP_OP_FMIN_S, `RAPT_FP_OP_FMAX_S, `RAPT_FP_OP_FMIN_D, `RAPT_FP_OP_FMAX_D,
+      `RAPT_FP_OP_FLE_S, `RAPT_FP_OP_FLT_S, `RAPT_FP_OP_FEQ_S,
+      `RAPT_FP_OP_FLE_D, `RAPT_FP_OP_FLT_D, `RAPT_FP_OP_FEQ_D,
+      `RAPT_FP_OP_FMADD_S, `RAPT_FP_OP_FMSUB_S, `RAPT_FP_OP_FNMSUB_S, `RAPT_FP_OP_FNMADD_S,
+      `RAPT_FP_OP_FMADD_D, `RAPT_FP_OP_FMSUB_D, `RAPT_FP_OP_FNMSUB_D, `RAPT_FP_OP_FNMADD_D:
+        return 1'b1;
+      default: return 1'b0;
+    endcase
+  endfunction
+
+  function automatic logic fp_uses_rs3(input rapt_pkg::uop_t u);
+    return u.fp_valid && (u.fp_op == `RAPT_FP_OP_FMADD_S || u.fp_op == `RAPT_FP_OP_FMSUB_S
+      || u.fp_op == `RAPT_FP_OP_FNMSUB_S || u.fp_op == `RAPT_FP_OP_FNMADD_S
+      || u.fp_op == `RAPT_FP_OP_FMADD_D || u.fp_op == `RAPT_FP_OP_FMSUB_D
+      || u.fp_op == `RAPT_FP_OP_FNMSUB_D || u.fp_op == `RAPT_FP_OP_FNMADD_D);
+  endfunction
+
+  function automatic logic fp_wb_done(input logic [$clog2(ROB_SIZE)-1:0] dest);
+    return (exu_rou.valid && exu_rou.dest == dest)
+      || (exu_rou_b.valid && exu_rou_b.dest == dest)
+      || (exu_ioq_bcast.valid && exu_ioq_bcast.dest == dest)
+      || (exu_wb_mul.valid && exu_wb_mul.dest == dest);
+  endfunction
 
   // Any-port tag match (zero tag never matches).
   function automatic logic wb_hit(input logic [PLEN-1:0] pr);
@@ -381,6 +456,8 @@ module rapt_rou #(
     rob_entry[tail].mispredict <= 1'b0;
     rob_entry[tail].wen        <= u.wen;
     rob_entry[tail].word       <= u.word;
+    rob_entry[tail].fp_flags_valid <= 1'b0;
+    rob_entry[tail].fp_flags   <= '0;
 `ifdef RAPT_RV64
     rob_entry[tail].alu <= u.atom ? (u.word ? 6'b001111 : 6'b011111) : u.alu;
 `else
@@ -392,6 +469,13 @@ module rapt_rou #(
 
     // ---- Cold dispatch-only payload (RS issue + commit display) ----
     uop_pl[tail].sys      <= u.system;
+    uop_pl[tail].fp_valid <= u.fp_valid;
+    uop_pl[tail].fp_op    <= u.fp_op;
+    uop_pl[tail].fp_rm    <= u.fp_rm;
+    uop_pl[tail].fp_rs1   <= u.fp_rs1;
+    uop_pl[tail].fp_rs2   <= u.fp_rs2;
+    uop_pl[tail].fp_rs3   <= u.fp_rs3;
+    uop_pl[tail].fp_rd    <= u.fp_rd;
     uop_pl[tail].ecall    <= u.ecall;
     uop_pl[tail].ebreak   <= u.ebreak;
     uop_pl[tail].mret     <= u.mret;
@@ -420,28 +504,21 @@ module rapt_rou #(
       uoq_pv1_valid       <= '0;
       uoq_pv2_valid       <= '0;
       serialize_in_flight <= 1'b0;
-      // Reset UOQ payload arrays so unused entries cannot feed X values into
-      // dispatch muxes or serializing-uop decode in FPGA synthesis.
-      for (int i = 0; i < IIQ_SIZE; i++) begin
-        uoq_uops[i] <= '0;
-        uoq_pr1[i]  <= '0;
-        uoq_pr2[i]  <= '0;
-        uoq_prd[i]  <= '0;
-        uoq_prs[i]  <= '0;
-        uoq_op1[i]  <= '0;
-        uoq_op2[i]  <= '0;
-        uoq_pv1[i]  <= '0;
-        uoq_pv2[i]  <= '0;
-      end
+      fp_map_valid        <= '0;
+      // fp_map payload is valid-gated: fp_dep*/fp_dep*_valid pairs are
+      // consumed together and the snoop only looks up fp_map[i] under
+      // fp_map_valid[i], so the mapping data itself needs no reset.
+      // UOQ payload arrays (uops/pr*/op*/pv*) are intentionally NOT reset:
+      // every read is gated by uoq_valid[] / uoq_pv*_valid[] -- dispatch
+      // muxes index tail slots whose valid was checked, and the resident
+      // forwarding snoop (`|uoq_pr1[i] && ...`) lives inside the
+      // `else if (uoq_valid[i])` branch, so invalid entries never forward.
+      // Data flops are therefore don't-care (same principle as rapt_prf);
+      // leaving them unreset removes ~IIQ_SIZE*uop_width endpoints from
+      // the reset/flush network.
 `ifdef RAPT_DUAL_ISSUE
       uoq_is_pair <= '0;
 `endif
-    end else if (sys_resume || (serialize_in_flight && rob_empty)) begin
-      // Pipeline already drained; clear the serialization lock. The rob_empty
-      // fallback recovers a lock whose owner retired without producing the
-      // expected flush/resume pulse; a live serializing uop always owns a busy
-      // ROB entry by the cycle after the lock is set.
-      serialize_in_flight <= 1'b0;
     end else begin
       // Operand-ready decisions returned by uoq_enqueue_slot; the packed
       // status vectors are written here (single process) to avoid MULTIDRIVEN.
@@ -451,6 +528,24 @@ module rapt_rou #(
       automatic logic enq_pv1_v_b = 1'b0;
       automatic logic enq_pv2_v_b = 1'b0;
 `endif
+  for (int i = 0; i < 32; i++) begin
+    if (fp_map_valid[i] && fp_wb_done(fp_map[i])) fp_map_valid[i] <= 1'b0;
+  end
+  if (uoq_deq_fire_a && fp_writes_fpr(uoq_uops[uoq_tail_a])) begin
+    fp_map_valid[uoq_uops[uoq_tail_a].fp_rd] <= 1'b1;
+    fp_map[uoq_uops[uoq_tail_a].fp_rd] <= rob_tail_a;
+  end
+`ifdef RAPT_DUAL_ISSUE
+  if (uoq_deq_fire_b && fp_writes_fpr(uoq_uops[uoq_tail_b])) begin
+    fp_map_valid[uoq_uops[uoq_tail_b].fp_rd] <= 1'b1;
+    fp_map[uoq_uops[uoq_tail_b].fp_rd] <= rob_tail_b;
+  end
+`endif
+      if (sys_resume || (serialize_in_flight && rob_empty)) begin
+        // Releasing the drain lock must not suppress a simultaneous enqueue:
+        // RNU may have accepted a younger uop while dispatch was blocked.
+        serialize_in_flight <= 1'b0;
+      end
       if (uoq_enq_fire_a) begin
 `ifdef RAPT_DUAL_ISSUE
         if (uoq_enq_fire_b) begin
@@ -563,6 +658,16 @@ module rapt_rou #(
     rou_exu.prd = uoq_prd[uoq_tail_a];
     rou_exu.prs = uoq_prs[uoq_tail_a];
 
+    rou_exu.fp_dep1_valid = fp_uses_rs1(uoq_uops[uoq_tail_a])
+      && fp_map_valid[uoq_uops[uoq_tail_a].fp_rs1];
+    rou_exu.fp_dep2_valid = fp_uses_rs2(uoq_uops[uoq_tail_a])
+      && fp_map_valid[uoq_uops[uoq_tail_a].fp_rs2];
+    rou_exu.fp_dep3_valid = fp_uses_rs3(uoq_uops[uoq_tail_a])
+      && fp_map_valid[uoq_uops[uoq_tail_a].fp_rs3];
+    rou_exu.fp_dep1 = fp_map[uoq_uops[uoq_tail_a].fp_rs1];
+    rou_exu.fp_dep2 = fp_map[uoq_uops[uoq_tail_a].fp_rs2];
+    rou_exu.fp_dep3 = fp_map[uoq_uops[uoq_tail_a].fp_rs3];
+
     // ROB destination tag: directly the slot this uop will occupy.
     rou_exu.dest = rob_tail_a;
   end
@@ -590,6 +695,28 @@ module rapt_rou #(
     rou_exu.pr2_b = pr2_b_ready ? '0 : uoq_pr2[uoq_tail_b];
     rou_exu.prd_b = uoq_prd[uoq_tail_b];
     rou_exu.prs_b = uoq_prs[uoq_tail_b];
+
+    rou_exu.fp_dep1_valid_b = fp_uses_rs1(uoq_uops[uoq_tail_b])
+      && ((fp_writes_fpr(uoq_uops[uoq_tail_a])
+        && uoq_uops[uoq_tail_a].fp_rd == uoq_uops[uoq_tail_b].fp_rs1)
+        || fp_map_valid[uoq_uops[uoq_tail_b].fp_rs1]);
+    rou_exu.fp_dep2_valid_b = fp_uses_rs2(uoq_uops[uoq_tail_b])
+      && ((fp_writes_fpr(uoq_uops[uoq_tail_a])
+        && uoq_uops[uoq_tail_a].fp_rd == uoq_uops[uoq_tail_b].fp_rs2)
+        || fp_map_valid[uoq_uops[uoq_tail_b].fp_rs2]);
+    rou_exu.fp_dep3_valid_b = fp_uses_rs3(uoq_uops[uoq_tail_b])
+      && ((fp_writes_fpr(uoq_uops[uoq_tail_a])
+        && uoq_uops[uoq_tail_a].fp_rd == uoq_uops[uoq_tail_b].fp_rs3)
+        || fp_map_valid[uoq_uops[uoq_tail_b].fp_rs3]);
+    rou_exu.fp_dep1_b = (fp_writes_fpr(uoq_uops[uoq_tail_a])
+      && uoq_uops[uoq_tail_a].fp_rd == uoq_uops[uoq_tail_b].fp_rs1)
+      ? rob_tail_a : fp_map[uoq_uops[uoq_tail_b].fp_rs1];
+    rou_exu.fp_dep2_b = (fp_writes_fpr(uoq_uops[uoq_tail_a])
+      && uoq_uops[uoq_tail_a].fp_rd == uoq_uops[uoq_tail_b].fp_rs2)
+      ? rob_tail_a : fp_map[uoq_uops[uoq_tail_b].fp_rs2];
+    rou_exu.fp_dep3_b = (fp_writes_fpr(uoq_uops[uoq_tail_a])
+      && uoq_uops[uoq_tail_a].fp_rd == uoq_uops[uoq_tail_b].fp_rs3)
+      ? rob_tail_a : fp_map[uoq_uops[uoq_tail_b].fp_rs3];
 
     rou_exu.dest_b = rob_tail_b;
   end
@@ -646,23 +773,15 @@ module rapt_rou #(
       recieved_sw_trap <= 1'b0;
       trap_cause       <= '0;
       pmu_rob_full     <= 1'b0;  // A2: Initialize full pulse
+      // The dispatch tasks write every field of rob_entry[tail] and
+      // uop_pl[tail] before the entry becomes observable, and every read of
+      // those arrays is gated by busy/state, so invalid entries are
+      // don't-care (same principle as rapt_prf).  Leaving them unreset
+      // removes ~ROB_SIZE*(entry+payload) endpoints from the reset/flush
+      // network; only the control bits (busy/state) are reset.
       for (int i = 0; i < ROB_SIZE; i++) begin
-        rob_entry[i]       <= '0;
         rob_entry[i].busy  <= 1'b0;
         rob_entry[i].state <= rapt_pkg::ROB_CM;
-        uop_pl[i].sys      <= 1'b0;
-        uop_pl[i].ecall    <= 1'b0;
-        uop_pl[i].ebreak   <= 1'b0;
-        uop_pl[i].mret     <= 1'b0;
-        uop_pl[i].sret     <= 1'b0;
-        uop_pl[i].f_i      <= 1'b0;
-        uop_pl[i].f_time   <= 1'b0;
-        uop_pl[i].csr_csw  <= '0;
-        uop_pl[i].ben      <= 1'b0;
-        uop_pl[i].jen      <= 1'b0;
-        uop_pl[i].jren     <= 1'b0;
-        uop_pl[i].atom     <= 1'b0;
-        uop_pl[i].atom_sc  <= 1'b0;
       end
     end else begin
       // A2: PMU: one-cycle pulse on ROB full rising edge
@@ -697,6 +816,8 @@ module rapt_rou #(
           rob_entry[entry].wen      <= exu_ioq_bcast.wen;
           rob_entry[entry].sq_waddr <= exu_ioq_bcast.sq_waddr;
           rob_entry[entry].sq_wdata <= exu_ioq_bcast.sq_wdata;
+          rob_entry[entry].sq_wdata64 <= exu_ioq_bcast.sq_wdata64;
+          rob_entry[entry].sq_fp64 <= exu_ioq_bcast.sq_fp64;
           rob_entry[entry].rd       <= exu_ioq_bcast.trap ? '0 : rob_entry[entry].rd;
           rob_entry[entry].trap     <= exu_ioq_bcast.trap;
           rob_entry[entry].tval     <= exu_ioq_bcast.tval;
@@ -711,6 +832,8 @@ module rapt_rou #(
           rob_entry[entry].mispredict    <= exu_rou.mispredict;
           rob_entry[entry].csr_wen       <= exu_rou.csr_wen;
           rob_entry[entry].csr_wdata     <= exu_rou.csr_wdata;
+          rob_entry[entry].fp_flags_valid <= exu_rou.fp_flags_valid;
+          rob_entry[entry].fp_flags      <= exu_rou.fp_flags;
           rob_entry[entry].trap          <= exu_rou.trap;
           rob_entry[entry].tval          <= exu_rou.tval;
           rob_entry[entry].cause         <= exu_rou.cause;
@@ -742,6 +865,7 @@ module rapt_rou #(
           rob_entry[entry].busy    <= 1'b0;
           rob_entry[entry].state   <= rapt_pkg::ROB_CM;
           rob_entry[entry].csr_wen <= 1'b0;
+          rob_entry[entry].fp_flags_valid <= 1'b0;
           rob_entry[entry].trap    <= 1'b0;
           rob_entry[entry].wen     <= 1'b0;
         end
@@ -841,7 +965,9 @@ module rapt_rou #(
   // Kept as a distinct broadcast path for interface compatibility. Pure
   // CSR/f_time currently take the full flush path above so any younger
   // speculative uops are discarded before dispatch resumes.
-  assign sys_resume = head0_valid && (head0_sys_pure || uop_pl[h0].f_time) && !head0_flush;
+    assign sys_resume = head0_valid
+      && (head0_sys_pure || uop_pl[h0].f_time)
+      && !head0_flush;
 
   // ---- Slot 1 (head+1): only considered when slot 0 doesn't flush ----
   logic head1_br_p_fail;
@@ -989,6 +1115,56 @@ module rapt_rou #(
   // When dual committing, route slot 1's CSR/sys info if present.
   logic csr_from_h1;
   assign csr_from_h1 = dual_commit && (uop_pl[h1].sys || rob_entry[h1].trap);
+  logic fp_flags_from_h1;
+  assign fp_flags_from_h1 = dual_commit && rob_entry[h1].fp_flags_valid;
+    logic fp_f2i_from_h0, fp_f2i_from_h1;
+    logic fp_dirty_from_h0, fp_dirty_from_h1;
+    assign fp_f2i_from_h0 = (uop_pl[h0].fp_op == `RAPT_FP_OP_FCVT_W_S)
+      || (uop_pl[h0].fp_op == `RAPT_FP_OP_FCVT_WU_S)
+      || (uop_pl[h0].fp_op == `RAPT_FP_OP_FCVT_L_S)
+      || (uop_pl[h0].fp_op == `RAPT_FP_OP_FCVT_LU_S)
+      || (uop_pl[h0].fp_op == `RAPT_FP_OP_FCVT_W_D)
+      || (uop_pl[h0].fp_op == `RAPT_FP_OP_FCVT_WU_D)
+      || (uop_pl[h0].fp_op == `RAPT_FP_OP_FCVT_L_D)
+      || (uop_pl[h0].fp_op == `RAPT_FP_OP_FCVT_LU_D);
+    assign fp_f2i_from_h1 = (uop_pl[h1].fp_op == `RAPT_FP_OP_FCVT_W_S)
+      || (uop_pl[h1].fp_op == `RAPT_FP_OP_FCVT_WU_S)
+      || (uop_pl[h1].fp_op == `RAPT_FP_OP_FCVT_L_S)
+      || (uop_pl[h1].fp_op == `RAPT_FP_OP_FCVT_LU_S)
+      || (uop_pl[h1].fp_op == `RAPT_FP_OP_FCVT_W_D)
+      || (uop_pl[h1].fp_op == `RAPT_FP_OP_FCVT_WU_D)
+      || (uop_pl[h1].fp_op == `RAPT_FP_OP_FCVT_L_D)
+      || (uop_pl[h1].fp_op == `RAPT_FP_OP_FCVT_LU_D);
+    assign fp_dirty_from_h0 = head0_valid && uop_pl[h0].fp_valid && !rob_entry[h0].trap
+      && ((uop_pl[h0].fp_op != `RAPT_FP_OP_FSW)
+        && (uop_pl[h0].fp_op != `RAPT_FP_OP_FSD)
+        && (uop_pl[h0].fp_op != `RAPT_FP_OP_FMV_X_W)
+        && (uop_pl[h0].fp_op != `RAPT_FP_OP_FMV_X_D)
+        && (uop_pl[h0].fp_op != `RAPT_FP_OP_FLE_S)
+        && (uop_pl[h0].fp_op != `RAPT_FP_OP_FLT_S)
+        && (uop_pl[h0].fp_op != `RAPT_FP_OP_FEQ_S)
+        && (uop_pl[h0].fp_op != `RAPT_FP_OP_FCLASS_S)
+        && (uop_pl[h0].fp_op != `RAPT_FP_OP_FLE_D)
+        && (uop_pl[h0].fp_op != `RAPT_FP_OP_FLT_D)
+        && (uop_pl[h0].fp_op != `RAPT_FP_OP_FEQ_D)
+        && (uop_pl[h0].fp_op != `RAPT_FP_OP_FCLASS_D)
+        && !fp_f2i_from_h0
+        || (rob_entry[h0].fp_flags_valid && |rob_entry[h0].fp_flags));
+    assign fp_dirty_from_h1 = dual_commit && uop_pl[h1].fp_valid && !rob_entry[h1].trap
+      && ((uop_pl[h1].fp_op != `RAPT_FP_OP_FSW)
+        && (uop_pl[h1].fp_op != `RAPT_FP_OP_FSD)
+        && (uop_pl[h1].fp_op != `RAPT_FP_OP_FMV_X_W)
+        && (uop_pl[h1].fp_op != `RAPT_FP_OP_FMV_X_D)
+        && (uop_pl[h1].fp_op != `RAPT_FP_OP_FLE_S)
+        && (uop_pl[h1].fp_op != `RAPT_FP_OP_FLT_S)
+        && (uop_pl[h1].fp_op != `RAPT_FP_OP_FEQ_S)
+        && (uop_pl[h1].fp_op != `RAPT_FP_OP_FCLASS_S)
+        && (uop_pl[h1].fp_op != `RAPT_FP_OP_FLE_D)
+        && (uop_pl[h1].fp_op != `RAPT_FP_OP_FLT_D)
+        && (uop_pl[h1].fp_op != `RAPT_FP_OP_FEQ_D)
+        && (uop_pl[h1].fp_op != `RAPT_FP_OP_FCLASS_D)
+        && !fp_f2i_from_h1
+        || (rob_entry[h1].fp_flags_valid && |rob_entry[h1].fp_flags));
 
   // An illegal-inst or IFU page-fault may set trap=1 on a uop that still
   // carries decoded sret/mret/ecall/ebreak/csr_wen bits. Gate these so the
@@ -1002,6 +1178,11 @@ module rapt_rou #(
                            :                 rob_entry[h0].csr_wen;
   assign rou_csr.csr_wdata = csr_from_h1 ? rob_entry[h1].csr_wdata : rob_entry[h0].csr_wdata;
   assign rou_csr.csr_addr = csr_from_h1 ? uop_pl[h1].csr_addr : uop_pl[h0].csr_addr;
+  assign rou_csr.fp_flags_valid = (recieved_trap || commit_trap) ? 1'b0
+      : fp_flags_from_h1 ? rob_entry[h1].fp_flags_valid : rob_entry[h0].fp_flags_valid;
+  assign rou_csr.fp_flags = fp_flags_from_h1 ? rob_entry[h1].fp_flags : rob_entry[h0].fp_flags;
+    assign rou_csr.fp_dirty = (recieved_trap || commit_trap) ? 1'b0
+      : fp_dirty_from_h1 ? 1'b1 : fp_dirty_from_h0;
   assign rou_csr.ecall     = (recieved_trap || commit_trap) ? 1'b0
                            : csr_from_h1 ? uop_pl[h1].ecall : uop_pl[h0].ecall;
   assign rou_csr.ebreak    = (recieved_trap || commit_trap) ? 1'b0
@@ -1019,16 +1200,24 @@ module rapt_rou #(
       :               rob_entry[h0].cause;
   assign rou_csr.valid     = recieved_trap
       || (head0_valid && (uop_pl[h0].sys || rob_entry[h0].trap))
-      || csr_from_h1;
+      || csr_from_h1
+      || (head0_valid && rob_entry[h0].fp_flags_valid)
+      || fp_flags_from_h1
+      || fp_dirty_from_h0
+      || fp_dirty_from_h1;
 
   // ---- LSU interface (store commit: MUX slot 0 / slot 1) ----
   // During dual commit, slot 0 is guaranteed non-store; route slot 1.
-  assign rou_lsu.store = recieved_trap ? 1'b0 : dual_commit ? rob_entry[h1].wen : rob_entry[h0].wen;
+  assign rou_lsu.store = recieved_trap ? 1'b0 : dual_commit
+      ? (rob_entry[h1].wen && !rob_entry[h1].trap)
+      : (rob_entry[h0].wen && !rob_entry[h0].trap);
   assign rou_lsu.alu = dual_commit ? rob_entry[h1].alu : rob_entry[h0].alu;
   assign rou_lsu.dest = dual_commit ? h1 : h0;
   assign rou_lsu.sq_waddr = dual_commit ? rob_entry[h1].sq_waddr : rob_entry[h0].sq_waddr;
   assign rou_lsu.sq_vaddr = dual_commit ? rob_entry[h1].tval : rob_entry[h0].tval;
   assign rou_lsu.sq_wdata = dual_commit ? rob_entry[h1].sq_wdata : rob_entry[h0].sq_wdata;
+  assign rou_lsu.sq_wdata64 = dual_commit ? rob_entry[h1].sq_wdata64 : rob_entry[h0].sq_wdata64;
+  assign rou_lsu.sq_fp64 = dual_commit ? rob_entry[h1].sq_fp64 : rob_entry[h0].sq_fp64;
   assign rou_lsu.pc = dual_commit ? uop_pl[h1].pc : uop_pl[h0].pc;
   assign rou_lsu.valid = head0_valid;
 

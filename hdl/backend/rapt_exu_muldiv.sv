@@ -255,6 +255,8 @@ module rapt_exu_muldiv #(
   // Pure arithmetic pipe: no CSR / trap / MEM sideband (tie-offs).
   assign exu_wb_mul.csr_wen = 1'b0;
   assign exu_wb_mul.csr_wdata = '0;
+  assign exu_wb_mul.fp_flags_valid = 1'b0;
+  assign exu_wb_mul.fp_flags = '0;
   assign exu_wb_mul.trap = 1'b0;
   assign exu_wb_mul.tval = '0;
   assign exu_wb_mul.cause = '0;
@@ -262,6 +264,8 @@ module rapt_exu_muldiv #(
   assign exu_wb_mul.alu = '0;
   assign exu_wb_mul.sq_waddr = '0;
   assign exu_wb_mul.sq_wdata = '0;
+  assign exu_wb_mul.sq_wdata64 = '0;
+  assign exu_wb_mul.sq_fp64 = 1'b0;
   assign exu_wb_mul.difftest_skip = 1'b0;
 
   // === Sequential: alloc / wakeup / issue / completion ===
@@ -271,21 +275,13 @@ module rapt_exu_muldiv #(
       mdq_issued   <= '0;
       mdq_pr1_busy <= '0;
       mdq_pr2_busy <= '0;
-      mdq_c        <= '0;
-      mdq_word     <= '0;
-      for (int i = 0; i < MDQ_SIZE; i++) begin
-        age_mat[i]  <= '0;
-        mdq_vj[i]   <= '0;
-        mdq_vk[i]   <= '0;
-        mdq_pr1[i]  <= '0;
-        mdq_pr2[i]  <= '0;
-        mdq_prd[i]  <= '0;
-        mdq_rd[i]   <= '0;
-        mdq_dest[i] <= '0;
-        mdq_pc[i]   <= '0;
-        mdq_alu[i]  <= '0;
-        mdq_pnpc[i] <= '0;
-      end
+      // Payload arrays (vj/vk/pc/alu/pnpc/...), pr1/pr2, and the age
+      // matrix are intentionally NOT reset: every read is gated by
+      // mdq_valid[]/busy bits (FU input is qualified by sel_found, the
+      // wakeup snoop lives inside `if (mdq_valid[i])`), and allocation
+      // initializes each new entry's age row/column before its valid bit
+      // is set (same argument as rapt_exu_iq).  Only valid/issued/busy
+      // control bits stay on the reset network.
     end else begin
       // ---- Allocation (slot A / slot B write distinct free slots) ----
       if (disp.accept_a) begin

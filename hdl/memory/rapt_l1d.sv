@@ -5,7 +5,7 @@
 /* verilator lint_off PINCONNECTEMPTY */
 module rapt_l1d #(
     parameter int L1D_LINE_LEN = `RAPT_L1D_LINE_LEN,
-    parameter bit [`RAPT_L1D_LEN:0] L1D_LINE_SIZE = 2 ** L1D_LINE_LEN,
+  parameter int unsigned L1D_LINE_SIZE = 2 ** L1D_LINE_LEN,
     parameter int L1D_LEN = `RAPT_L1D_LEN,
     parameter bit [`RAPT_L1D_LEN:0] L1D_SIZE = 2 ** `RAPT_L1D_LEN,
     parameter int XLEN = `RAPT_XLEN,
@@ -72,9 +72,10 @@ module rapt_l1d #(
       (L1dLineWords < D_SUBARRAY_WORDS_MAX) ? L1dLineWords : D_SUBARRAY_WORDS_MAX;
   localparam int D_SUBARRAY_BYTES = D_SUBARRAY_WORDS * (XLEN / 8);  // <= 16 (128 bits)
   localparam int D_SUBARRAY_COUNT = L1dLineWords / D_SUBARRAY_WORDS;
-  // Raw subarray read data + registered raddr per subarray
+  // Raw subarray read data. With the single-port SRAM the read address is
+  // registered INSIDE the macro; the parent drives the address
+  // combinationally and consumes rdata the following cycle.
   logic [D_SUBARRAY_BYTES*8-1:0] d_sa_rdata[L1D_N_WAYS][D_SUBARRAY_COUNT];
-  logic [L1D_LEN-1:0] d_sa_raddr[D_SUBARRAY_COUNT];
   logic [7:0] rstrb;
 
   logic [L1dTagW-1:0] addr_tag;
@@ -214,19 +215,35 @@ module rapt_l1d #(
 `endif
       : addr_idx;
 
-  // Data SRAM: wide subarrays (128-bit), shared raddr across all ways.
+  // Data SRAM: wide subarrays (128-bit), single shared read/write port.
   // 4 subarrays per way replaces per-word banks, reducing SRAM instance count
   // from 32 to 8 (for 2-way), proportionally cutting address fanout.
+  //
+  // Single-port arbitration (rapt_sram_1rw):
+  //   * Writes (l1d_update: fill / full-store / RMW write-back) take the port:
+  //     wen=1, addr=l1d_idx. The shared read-address tracker is invalidated
+  //     because only the written way/subarray accepts that address.
+  //   * Reads (load speculate / RMW old-word fetch) use the port when no
+  //     write is active: wen=0, addr=sram_raddr. The address is registered
+  //     inside the SRAM at posedge K and data is consumed at cycle K+1.
   logic [XLEN-1:0] data_bank_rdata[L1D_N_WAYS][L1D_LINE_SIZE];
-  // Pre-register raddr per subarray before fanout to SRAM instances
-  generate
-    for (genvar sa = 0; sa < D_SUBARRAY_COUNT; sa++) begin : gen_sa_raddr
-      always_ff @(posedge clock) begin
-        if (reset) d_sa_raddr[sa] <= '0;
-        else       d_sa_raddr[sa] <= sram_raddr;
-      end
+  logic sram_read_valid_r;
+  logic [L1D_LEN-1:0] sram_read_idx_r;
+
+  // A write only enables its target way/subarray, leaving the other SRAM
+  // instances on their previous addresses. Mark that cycle invalid globally;
+  // only a normal read makes every data SRAM agree on one index again.
+  always_ff @(posedge clock) begin
+    if (reset) begin
+      sram_read_valid_r <= 1'b0;
+    end else if (l1d_update) begin
+      sram_read_valid_r <= 1'b0;
+    end else begin
+      sram_read_valid_r <= 1'b1;
+      sram_read_idx_r <= sram_raddr;
     end
-  endgenerate
+  end
+
   generate
     for (genvar w = 0; w < L1D_N_WAYS; w++) begin : gen_way
       for (genvar sa = 0; sa < D_SUBARRAY_COUNT; sa++) begin : gen_sa
@@ -250,24 +267,25 @@ module rapt_l1d #(
             d_sa_wdata[wi*XLEN +: XLEN] = l1d_data_u;
           end
         end
-        rapt_sram_1r1w #(
+        logic d_sa_wen;
+        assign d_sa_wen = |d_sa_bwe;
+        rapt_sram_1rw #(
             .ADDR_WIDTH(L1D_LEN),
             .DATA_WIDTH(D_SUBARRAY_BYTES * 8),
-            .SKIP_ADDR_REG(1),
             .USE_BWE(1)
         ) u_data_sram (
             .clock(clock),
-            .ren  (1'b1),
-            .raddr(d_sa_raddr[sa]),
+            .en   (d_sa_wen || !l1d_update),
+            .wen  (d_sa_wen),
+            .addr (d_sa_wen ? l1d_idx : sram_raddr),
             .rdata(d_sa_rdata[w][sa]),
-            .wen  (|d_sa_bwe),
-            .waddr(l1d_idx),
             .wdata(d_sa_wdata),
             .bwe  (d_sa_bwe)
         );
-        // Reconstruct per-word data from subarray
+        // Reconstruct per-word data from the last accepted SRAM read.
         for (genvar wi = 0; wi < D_SUBARRAY_WORDS; wi++) begin : gen_word
-          assign data_bank_rdata[w][SA_BASE + wi] = d_sa_rdata[w][sa][(wi+1)*XLEN-1:wi*XLEN];
+          assign data_bank_rdata[w][SA_BASE + wi] =
+              d_sa_rdata[w][sa][(wi+1)*XLEN-1:wi*XLEN];
         end
       end
     end
@@ -392,24 +410,6 @@ module rapt_l1d #(
 
   // tag_hit: combinational tag match in LD_A (per-word tags in registers, no SRAM latency)
   //
-  // Guard against SRAM write-first bypass corruption:
-  // When l1d_update is processed at posedge K, the SRAM bank write and the
-  // concurrent SRAM read (for a load entering LD_A) can hit the same
-  // bank+index.  The write-first bypass in rapt_sram_1r1w then returns the
-  // store's merge/fill data instead of the load's cached data.  Because the
-  // bypass fires at posedge K but l1d_update is cleared at the same posedge
-  // (NBA), a combinational check at cycle K+1 (LD_A) would see l1d_update=0
-  // and miss the conflict.  We therefore register the conflict condition and
-  // check the delayed flag in the LD_A tag_hit calculation.
-  //
-  // When load_speculate is active, addr_offset still reflects the stale
-  // l1d_addr from the previous operation.  Use the incoming load's word
-  // offset (from the virtual address: safe due to VIPT: the offset bits
-  // lie within the page offset, so virt == phys).
-  logic [L1D_LINE_LEN-1:0] sram_rd_offset;
-  assign sram_rd_offset = load_speculate
-      ? lsu_l1d.raddr[L1D_LINE_LEN+L1dOffsetBits-1:L1dOffsetBits]
-      : addr_offset;
   // Parallel tag comparison: with per-line tag, compare once per way; then
   // AND with per-word valid bits to yield per-offset hit vectors.
   logic [L1D_N_WAYS-1:0] way_tag_match;
@@ -479,39 +479,14 @@ module rapt_l1d #(
     end
   endgenerate
 
-  logic sram_bypass_r;
-  always_ff @(posedge clock) begin
-    if (reset) sram_bypass_r <= 1'b0;
-    else sram_bypass_r <= l1d_update && (l1d_idx == sram_raddr)
-                       && (l1d_off == sram_rd_offset);
-  end
-  // Same-cycle write-vs-load hazard: when l1d_update fires the SAME cycle
-  // a load is in LD_A on the matching line/word, the load's data_bank_rdata
-  // reflects the SRAM read latched at LD_A entry (i.e. BEFORE the merged
-  // partial-store / full-store / fill write completes), giving stale data.
-  // The SRAM module's internal write-first bypass cannot help: the read
-  // address was latched the prior cycle when there was no concurrent write.
-  // Suppress tag_hit so the load stalls in LD_A; the next cycle l1d_update
-  // has cleared, mem[idx] holds the merged value, the SRAM re-read sampled
-  // at the LD_A boundary brings in the fresh data, and the load completes.
-  //
-  // Additionally, l1d_rmw=1 means the SRAM read port is currently serving
-  // the partial-store merge (sram_raddr=waddr_idx), so data_bank_rdata in
-  // this cycle reflects the STORE's set, not the load's. Stall the load
-  // until the RMW chain completes and a normal SRAM read re-fetches at
-  // the load's idx.
-  //
-  // Same-cycle partial_store_rmw concurrent with IDLE->LD_A entry has the
-  // same effect: in the next cycle (LD_A), l1d_rmw will be high, so the
-  // l1d_rmw stall covers it.
-  logic l1d_update_collide;
-  assign l1d_update_collide = l1d_update
-                           && (l1d_idx == addr_idx)
-                           && (l1d_off == addr_offset);
+  // A load may consume SRAM data only when every way/subarray completed a
+  // read for its index. Writes invalidate that shared correspondence; LD_A
+  // then holds the request while the following free cycle re-reads it.
   logic l1d_sram_busy;
-  assign l1d_sram_busy = l1d_rmw || l1d_update_collide;
+  assign l1d_sram_busy = l1d_update
+                       || !sram_read_valid_r
+                       || (sram_read_idx_r != addr_idx);
   assign tag_hit = (l1d_state == LD_A)
-    && !sram_bypass_r
     && !l1d_sram_busy
     && tag_hit_vec[addr_offset];
   // data_hit: SRAM data ready in LD_A: the speculative read in the preceding
@@ -544,9 +519,8 @@ module rapt_l1d #(
   //  (!mmu_en): under MMU the B vaddr is untranslated, so it is not served.
   //
   //  Data hazards: any cycle with l1d_update / l1d_rmw active (fill or
-  //  merge write in flight) kills the B attempt -- the tag registers and
-  //  the SRAM write-first bypass could otherwise disagree (same class as
-  //  the sram_bypass_r hazard on A).
+  //  merge write in flight) kills the B attempt because the data SRAM read
+  //  address is not available to that request.
   // ==========================================================================
 `ifdef RAPT_LSU_HUM
   logic b_armed;
@@ -893,6 +867,7 @@ module rapt_l1d #(
     ? !pmp_ptw_fault
     : (l1d_state == LD_A)
       && !tag_hit
+      && !l1d_sram_busy
       && !(pmp_load_fault || load_unmapped_fault)
       && (cacheable_r || lsu_l1d.ordered)
       && !cmu_bcast.flush_pipe;

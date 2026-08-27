@@ -5,6 +5,13 @@ typedef enum
 {
   MNONE__ = 0,
 
+  // Keep this order identical to `csr_t` in rapt_csr.sv. F/D CSRs occupy
+  // the first three storage slots, so omitting them shifts every later CSR
+  // observed by difftest.
+  FFLAGS,
+  FRM,
+  FCSR,
+
   SSTATUS,
   SIE____,
   STVEC__,

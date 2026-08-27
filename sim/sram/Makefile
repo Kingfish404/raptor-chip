@@ -20,15 +20,18 @@ BUILD_DIR   := $(SRAM_DIR)/build/$(PLATFORM)
 MACRO_DIR   := $(BUILD_DIR)/macro
 
 # SRAM configurations to compile for this platform. The naming convention is
-# `<basename>_<PLATFORM>.py`; each must produce a macro under
+# `<basename>_1rw_<PLATFORM>.py`; each must produce a macro under
 # $(MACRO_DIR)/$(MACRO_NAME)/$(MACRO_NAME).{v,lib,lef,gds,sp}.
+# All macros are single-port (1RW) — the port shape the RTL instantiates.
+PORTS := 1rw
 CONFIGS := \
-  rapt_sram_32x32_1r1w \
-  rapt_sram_16x32_1r1w \
-  rapt_sram_16x64_1r1w
+  rapt_sram_32x32_1rw \
+  rapt_sram_16x32_1rw \
+  rapt_sram_16x64_1rw
 
 CONFIG_FILES := $(foreach c,$(CONFIGS),$(CONFIG_DIR)/$(c)_$(PLATFORM).py)
-MACRO_NAMES  := $(foreach c,$(CONFIGS),$(subst rapt_sram_,rapt_openram_1r1w_,$(subst _1r1w,,$(c))))
+# rapt_sram_32x32_1rw -> rapt_openram_1rw_32x32
+MACRO_NAMES  := $(foreach c,$(CONFIGS),rapt_openram_1rw_$(subst rapt_sram_,,$(subst _1rw,,$(c))))
 STAMPS       := $(foreach m,$(MACRO_NAMES),$(BUILD_DIR)/$(m).ok)
 
 # ---------------------------------------------------------------------------
@@ -93,11 +96,11 @@ all: $(STAMPS) ## Compile all SRAM macros for $(PLATFORM) via OpenRAM
 # ---------------------------------------------------------------------------
 STUB_SCRIPT := $(SRAM_DIR)/scripts/gen_stub_lib.py
 
-# (name, depth, width, write_size)
+# (name, depth, width, write_size) -- all single-port (1RW).
 STUB_SHAPES := \
-  rapt_openram_1r1w_32x32,32,32,8 \
-  rapt_openram_1r1w_16x32,16,32,8 \
-  rapt_openram_1r1w_16x64,16,64,8
+  rapt_openram_1rw_32x32,32,32,8 \
+  rapt_openram_1rw_16x32,16,32,8 \
+  rapt_openram_1rw_16x64,16,64,8
 
 stubs: ## Generate behavioural Liberty/Verilog stubs (no OpenRAM/PDK needed)
 	@mkdir -p $(MACRO_DIR)
@@ -108,7 +111,7 @@ stubs: ## Generate behavioural Liberty/Verilog stubs (no OpenRAM/PDK needed)
 	  m=$$(echo $$s | cut -d, -f4);                               	\
 	  echo ">>> stub: $$name ($$d x $$w, write_size=$$m)";        	\
 	  out=$(MACRO_DIR)/$$name;                                    	\
-	  $(PYTHON) $(STUB_SCRIPT) $$name $$d $$w $$m $$out || exit 1;	\
+	  $(PYTHON) $(STUB_SCRIPT) $$name $$d $$w $$m $$out || exit 1;\
 	  touch $(BUILD_DIR)/$$name.ok;                               	\
 	done
 	@echo ">>> stubs ready under $(MACRO_DIR) (placeholder timing!)"
@@ -148,15 +151,15 @@ setup: ## Show OpenRAM dependency setup hints
 	  echo ">>>   git clone https://github.com/VLSIDA/OpenRAM $(OPENRAM_DIR)"; \
 	fi
 
-# Per-config rule. `$*` is the macro name; the matching config file is
-# $(CONFIG_DIR)/$(basename)_$(PLATFORM).py.
+# Per-config rule. `$*` is the macro name (rapt_openram_1rw_<WxD>);
+# the matching config file is rapt_sram_<WxD>_1rw_<PLATFORM>.py.
 $(BUILD_DIR)/%.ok:
 	@if [ ! -f $(SRAM_COMPILER) ]; then \
 	  echo "ERROR: OpenRAM compiler missing at $(SRAM_COMPILER)"; \
 	  echo "       Run: make -C $(SRAM_DIR) setup"; exit 1; \
 	fi
 	mkdir -p $(MACRO_DIR)
-	$(eval CFG := $(CONFIG_DIR)/$(subst rapt_openram_1r1w_,rapt_sram_,$*)_1r1w_$(PLATFORM).py)
+	$(eval CFG := $(CONFIG_DIR)/rapt_sram_$(subst rapt_openram_1rw_,,$*)_1rw_$(PLATFORM).py)
 	@echo ">>> OpenRAM: compiling $* from $(CFG)"
 	$(eval $< := $(CFG))
 	$(RUN_OPENRAM)

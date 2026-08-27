@@ -116,7 +116,7 @@ $(PK_BUILD)/Makefile: $(PK_STAGING)/.stamp
 		CC="$(PK_CC)" \
 		$(PK_STAGING)/configure \
 			--host=$(CONFIG_HOST) \
-			--with-arch=$(ARCH) \
+			--with-arch=$(PK_ARCH) \
 			--with-abi=$(ABI) \
 			--with-mem-start=$(MEM_START) \
 			--disable-fp-emulation \
@@ -185,7 +185,7 @@ bbl-linux: $(PK_STAGING)/.stamp ## Build BBL with Linux payload, run on NPC
 	@mkdir -p $(BBL_BUILD)
 	cd $(BBL_BUILD) && CC="$(PK_CC)" $(PK_STAGING)/configure \
 		--host=$(CONFIG_HOST) \
-		--with-arch=$(ARCH) \
+		--with-arch=$(PK_ARCH) \
 		--with-abi=$(ABI) \
 		--with-mem-start=$(MEM_START) \
 		--with-payload=$(LINUX_IMAGE) \

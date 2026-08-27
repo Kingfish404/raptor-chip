@@ -1,10 +1,10 @@
 # Microarchitecture
 
-Raptor is an out-of-order, super-scalar RISC-V processor core with register renaming, a reorder buffer (ROB), per-class issue queues (a dual-ported ALQ shared by the two ALU pipes, plus BRQ / MDQ / IOQ), and virtual memory support.
+Raptor is an out-of-order, super-scalar RISC-V processor core with register renaming, a reorder buffer (ROB), per-class issue queues (a dual-ported ALQ shared by the two ALU pipes, plus BRQ / MDQ / FPQ / IOQ), scalar F/D floating-point execution, and virtual memory support.
 
 ## Pipeline
 
-9 logical stages, dual-issue width through IF->DI. Valid/ready handshaking at all boundaries; FQU, RNQ, UOQ, ALQ/BRQ/MDQ, IOQ, and ROB decouple stages.
+9 logical stages, dual-issue width through IF->DI. Valid/ready handshaking at all boundaries; FQU, RNQ, UOQ, ALQ/BRQ/MDQ/FPQ, IOQ, and ROB decouple stages.
 
 ```text
  IF0     IF1      FQ       ID      RN       DI       IS/EX    WB      CM
@@ -80,8 +80,8 @@ N-way set-associative I-cache (`L1I_N_WAYS`, default 2). `2^L1I_LEN` sets (32), 
 
 | Storage | Implementation                                                                       |
 | ------- | ------------------------------------------------------------------------------------ |
-| Data    | Banked `rapt_sram_1r1w` per way per word (sync read)                                 |
-| Tags    | Banked `rapt_sram_1r1w` per way per word (combinational compare from SRAM output)    |
+| Data    | Banked `rapt_sram_1rw` per way per word (single-port, sync read)                     |
+| Tags    | Banked `rapt_sram_1rw` per way per word (combinational compare from SRAM output)     |
 | Valid   | Register arrays per way (`l1i_valid[way][set]`) for fast `fence.i` bulk invalidation |
 
 3-tier pre-read uses the IFU's exact next-PC hint: current bank reads the hinted word, next bank reads `+2`, and remaining banks read `+4`. This provides `inst_n1` and `inst_n2` for generalized dual-fetch while hiding hit-path target/stride transitions. Cache lines retain per-word valid bits; on the default non-SDRAM AR path, `RAPT_L1I_REFILL_WORDS=8` refills one 32 B sector per miss through an 8-entry AR FIFO. The value is capped by the configured line length and may be overridden for experiments; SDRAM burst targets retain their dedicated two-beat burst refill path. Way replacement: first invalid, then toggle `replace_bit` per set. ITLB + IPTW support Sv32/Sv39 translation.
@@ -106,6 +106,15 @@ Pure rename: maps arch -> physical registers. Dual-rename with RAW dependency ha
 
 `PHY_SIZE` entries (128). 4 read ports (2 per dispatch slot) + 4 write ports, one per value-producing CDB pipe (ALU-CSR, ALU, MEM, MULDIV; the Branch pipe never writes a register). `prf_valid[]` + `prf_transient[]` tracking. Flush: transient entries invalidated. Commit: transient cleared. Dealloc: valid cleared.
 
+#### FPR (`rapt_fpr.sv`)
+
+Separate 32 x 64-bit architectural floating-point register bank. The fixed
+64-bit width supports RV32 and RV64, with single-precision values NaN-boxed in
+the same storage used by double precision. FP arithmetic writes through the FPU
+path and FP loads write through the IOQ path, with local bypassing for recent
+writes. FP dependency tags are tracked through the ROB; this bank is not a
+second renamed physical register file.
+
 #### ROU (`rapt_rou.sv`)
 
 Dispatch queue + reorder buffer + commit logic.
@@ -119,14 +128,17 @@ Dispatch queue + reorder buffer + commit logic.
 
 #### EXU (`rapt_exu.sv`)
 
-Thin dispatch router + 5 execution pipelines, each with one dedicated writeback port on the unified CDB (`exu_wb_if`).
+Thin dispatch router with five scheduler classes and six execution paths. Five
+top-level unified CDB interfaces (`exu_wb_if`) remain because the scalar FPU
+shares CDB0 with ALU-CSR; an FPU completion has priority on that port.
 
-- **Dispatch router**: classifies each uop (priority: memory > MUL/DIV > branch > ALU-class) and steers it to the owning queue. CSR/system/trap entries are flagged **ALU-port-blocked** at dispatch, so they only ever issue to the ALU-CSR pipe (the only pipe with CSR/trap semantics). Dual dispatch into the same queue uses its first + second free slots.
+- **Dispatch router**: classifies each uop (priority: memory > MUL/DIV > FP > branch > ALU-class) and steers it to the owning queue. FP loads/stores stay in the IOQ; other scalar-FP operations enter the FPQ. CSR/system/trap entries are flagged **ALU-port-blocked** at dispatch, so they only ever issue to the ALU-CSR pipe (the only pipe with CSR/trap semantics). Dual dispatch into the same queue uses its first + second free slots.
 - **Generic IQ** (`rapt_exu_iq.sv`): parameterized issue queue -- ALQ (8, dual issue ports via `HAS_ISS_B`) shared by the ALU-CSR and ALU pipes, and BRQ (4, single port). Data-capture scheduler: operands are woken from all 4 value-producing CDB ports plus the **fast load-use** tag path (early tag wakeup, confirmed or re-busied by the MEM broadcast one cycle later, with issue-time data bypass). Age-matrix oldest-first one-hot select; the ALU port picks the oldest ready non-blocked entry distinct from the ALU-CSR port pick. Winning entries issue and free in the same cycle. Issue payloads are exposed via `exu_iq_iss_if`.
 - **ALU-CSR pipe** (`rapt_exu_pipe_alu_csr.sv`): full ALU + CSR read/write staging + system/trap redirect (`mtvec`/`mepc`/`sepc`), instret correction. Combinational; drives CDB port [0].
 - **ALU pipe** (`rapt_exu_pipe_alu.sv`): simple ALU + JAL/JALR link write. Drives CDB port [1].
 - **Branch pipe** (`rapt_exu_pipe_branch.sv`): compare-only conditional-branch resolution (single taken bit instead of a full ALU); never writes rd, so its CDB port carries no result/prd (no PRF write port, no bypass entry). Drives CDB port [2].
 - **MULDIV pipe** (`rapt_exu_muldiv.sv`): 4-entry private IQ + `rapt_exu_mul` FU (pipelined fast-multiply with tag-based completion + iterative restoring divider). Wakes operands from the slow CDB only (no fast load-use path). Drives CDB port [4].
+- **FPQ / FPU pipe** (`rapt_exu_pipe_fpu.sv`): 4-entry scalar-FP issue queue feeding F/D arithmetic, FMA, divide/square-root, conversion, comparison/classification, and move operations. It reads/writes the separate architectural FPR bank, updates accrued FP exception flags, and shares CDB port [0] with ALU-CSR. FP loads/stores use the IOQ and FPR interface instead of the FPQ.
 - **IOQ** (`rapt_exu_ioq.sv`): `IOQ_SIZE` entries (8), circular FIFO for ld/st/amo -- with **out-of-order load issue to L1D**. A younger ready load can drive L1D ahead of an older pending store/load when safe: (a) per-entry completion state (`ioq_complete`/`ioq_rdata`/`ioq_load_trap`/`ioq_load_cause`/`ioq_load_skip`); (b) oldest-ready priority encoder over `ioq_load_issue_vec`; (c) older-store blocker mask holds a load if any older IOQ store has unresolved base reg (`pr1!=0`), pending MMU translation, or word-address conflict; (d) `oo_pending` FSM locks `active_idx` across multi-cycle L1D misses so the response latches into the originating entry; (e) commit mux at `ioq_head` consumes either the live L1D response (when `active_idx==head`) or pre-latched `ioq_rdata[head]`; (f) atomics (LR/SC/AMO) and uncacheable MMIO stay gated to ROB head for memory ordering. Single outstanding L1D request. Drives CDB port [3] (the MEM broadcast).
 - **Atomics**: LR/SC with reservation register, full AMO set.
 - **Store MMU**: address translation via `exu_l1d_if`.
@@ -158,7 +170,7 @@ Broadcast unit. Outputs: `rpc`, `cpc`, branch resolution, `flush_pipe`, `fence_i
 
 | Storage   | Implementation                                                                      |
 | --------- | ----------------------------------------------------------------------------------- |
-| Data      | Banked `rapt_sram_1r1w` per word (sync read)                                        |
+| Data      | Banked `rapt_sram_1rw` wide subarrays (single-port, sync read, write bypass)        |
 | Tag/Valid | Per-word register arrays for simultaneous ld/st hit check + fast fence invalidation |
 
 Write-through policy. Partial stores (SB/SH): read-modify-write (RMW) 2-cycle merge in IDLE. Speculative SRAM read: VIPT-safe virtual index in IDLE. Separate DTLB + DSTLB instances; shared DPTW for both. Reservation register for LR/SC. Cacheability via `addr_cacheable()`.
@@ -204,9 +216,10 @@ Cluster-level Platform-Level Interrupt Controller. Default `NDEV=31` sources and
 | `rou_lsu_if`     | ROU->LSU                | Store commit (addr/data/alu)                              |
 | `rou_csr_if`     | ROU->CSR                | CSR write + trap/system on commit                         |
 | `rou_cmu_if`     | ROU->CMU                | Commit info slot A/B (PC, branch, fence, flush)           |
-| `exu_wb_if` (x5) | pipes->ROU/PRF/LSU/IQs  | Unified CDB writeback: ALU-CSR / ALU / Branch / MEM / MULDIV |
+| `exu_wb_if` (x5) | pipes->ROU/PRF/LSU/IQs  | Unified CDB writeback: ALU-CSR or FPU / ALU / Branch / MEM / MULDIV |
 | `exu_iq_iss_if`  | IQ->pipe (EXU internal) | Oldest-ready entry payload; the ALQ exposes ALU-CSR and ALU issue ports |
 | `exu_prf_if`     | ROU->PRF                | Operand read (4 ports: 2 per slot)                        |
+| `fpr_if`         | FPU/IOQ<->FPR           | FP register reads and arithmetic/load writeback          |
 | `exu_lsu_if`     | EXU->LSU                | Load request (addr/alu/atomic)                            |
 | `exu_csr_if`     | EXU->CSR                | CSR read port                                             |
 | `exu_l1d_if`     | EXU->L1D                | Store MMU + SC reservation check                          |

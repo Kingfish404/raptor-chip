@@ -101,6 +101,70 @@
 
 `define RAPT_ALU_ILL_ 'b01001
 
+// Serializing scalar-FP bring-up operation identifiers.
+`define RAPT_FP_OP_FMV_W_X 6'd1
+`define RAPT_FP_OP_FMV_X_W 6'd2
+`define RAPT_FP_OP_FSGNJ_S 6'd3
+`define RAPT_FP_OP_FSGNJN_S 6'd4
+`define RAPT_FP_OP_FSGNJX_S 6'd5
+`define RAPT_FP_OP_FLW 6'd6
+`define RAPT_FP_OP_FSW 6'd7
+`define RAPT_FP_OP_FMV_D_X 6'd8
+`define RAPT_FP_OP_FMV_X_D 6'd9
+`define RAPT_FP_OP_FSGNJ_D 6'd10
+`define RAPT_FP_OP_FSGNJN_D 6'd11
+`define RAPT_FP_OP_FSGNJX_D 6'd12
+`define RAPT_FP_OP_FLD 6'd13
+`define RAPT_FP_OP_FSD 6'd14
+`define RAPT_FP_OP_FADD_S 6'd15
+`define RAPT_FP_OP_FSUB_S 6'd16
+`define RAPT_FP_OP_FADD_D 6'd17
+`define RAPT_FP_OP_FSUB_D 6'd18
+`define RAPT_FP_OP_FMUL_S 6'd19
+`define RAPT_FP_OP_FMUL_D 6'd20
+`define RAPT_FP_OP_FMIN_S 6'd21
+`define RAPT_FP_OP_FMAX_S 6'd22
+`define RAPT_FP_OP_FMIN_D 6'd23
+`define RAPT_FP_OP_FMAX_D 6'd24
+`define RAPT_FP_OP_FLE_S 6'd25
+`define RAPT_FP_OP_FLT_S 6'd26
+`define RAPT_FP_OP_FEQ_S 6'd27
+`define RAPT_FP_OP_FCLASS_S 6'd28
+`define RAPT_FP_OP_FLE_D 6'd29
+`define RAPT_FP_OP_FLT_D 6'd30
+`define RAPT_FP_OP_FEQ_D 6'd31
+`define RAPT_FP_OP_FCLASS_D 6'd32
+`define RAPT_FP_OP_FCVT_W_S 6'd33
+`define RAPT_FP_OP_FCVT_WU_S 6'd34
+`define RAPT_FP_OP_FCVT_L_S 6'd35
+`define RAPT_FP_OP_FCVT_LU_S 6'd36
+`define RAPT_FP_OP_FCVT_S_W 6'd37
+`define RAPT_FP_OP_FCVT_S_WU 6'd38
+`define RAPT_FP_OP_FCVT_S_L 6'd39
+`define RAPT_FP_OP_FCVT_S_LU 6'd40
+`define RAPT_FP_OP_FCVT_W_D 6'd41
+`define RAPT_FP_OP_FCVT_WU_D 6'd42
+`define RAPT_FP_OP_FCVT_L_D 6'd43
+`define RAPT_FP_OP_FCVT_LU_D 6'd44
+`define RAPT_FP_OP_FCVT_D_W 6'd45
+`define RAPT_FP_OP_FCVT_D_WU 6'd46
+`define RAPT_FP_OP_FCVT_D_L 6'd47
+`define RAPT_FP_OP_FCVT_D_LU 6'd48
+`define RAPT_FP_OP_FCVT_S_D 6'd49
+`define RAPT_FP_OP_FCVT_D_S 6'd50
+`define RAPT_FP_OP_FMADD_S 6'd51
+`define RAPT_FP_OP_FMADD_D 6'd52
+`define RAPT_FP_OP_FMSUB_S 6'd53
+`define RAPT_FP_OP_FMSUB_D 6'd54
+`define RAPT_FP_OP_FNMSUB_S 6'd55
+`define RAPT_FP_OP_FNMSUB_D 6'd56
+`define RAPT_FP_OP_FNMADD_S 6'd57
+`define RAPT_FP_OP_FNMADD_D 6'd58
+`define RAPT_FP_OP_FDIV_S 6'd59
+`define RAPT_FP_OP_FDIV_D 6'd60
+`define RAPT_FP_OP_FSQRT_S 6'd61
+`define RAPT_FP_OP_FSQRT_D 6'd62
+
 `define RAPT_ALU_ADD_ 'b00000
 `define RAPT_ALU_SUB_ 'b01000
 `define RAPT_ALU_EQ__ 'b01100
@@ -212,6 +276,9 @@
 `define RAPT_PRIV_M 2'h3
 
 // Supervisor-level CSR
+`define RAPT_CSR_FFLAGS 'h001
+`define RAPT_CSR_FRM    'h002
+`define RAPT_CSR_FCSR   'h003
 `define RAPT_CSR_SSTATUS 'h100
 `define RAPT_CSR_SIE____ 'h104
 `define RAPT_CSR_STVEC__ 'h105
@@ -391,9 +458,7 @@
 // Bit 18 leak caused a Spike-difftest ABORT on the OpenSBI medeleg write.
 `define RAPT_CSR_MEDELEG_WMASK 'h8b3fe
 `define RAPT_CSR_MSTATUS_WMASK 32'h007FF9EA
-`define RAPT_CSR_MSTATUS_SD 32'h80000000
 `define RAPT_CSR_SSTATUS_WMASK 32'h000DE162
-`define RAPT_CSR_SSTATUS_CMASK 32'h800DE162
 
 // Hardwired mstatus/sstatus bits per RISC-V Priv Sec.3.1.6: in RV64 the SXL/UXL
 // fields are WARL but our implementation only supports XLEN=64 in S/U modes,
@@ -401,9 +466,13 @@
 // (=> 64'h0000_000A_0000_0000); sstatus only exposes UXL (=> 64'h0000_0002_0000_0000).
 // In RV32 these fields don't exist so the constants are zero.
 `ifdef RAPT_RV64
+`define RAPT_CSR_MSTATUS_SD 64'h8000_0000_0000_0000
+`define RAPT_CSR_SSTATUS_CMASK 64'h8000_0000_000D_E162
 `define RAPT_CSR_MSTATUS_HW 64'h0000_000A_0000_0000
 `define RAPT_CSR_SSTATUS_HW 64'h0000_0002_0000_0000
 `else
+`define RAPT_CSR_MSTATUS_SD 32'h80000000
+`define RAPT_CSR_SSTATUS_CMASK 32'h800DE162
 `define RAPT_CSR_MSTATUS_HW 32'h0
 `define RAPT_CSR_SSTATUS_HW 32'h0
 `endif

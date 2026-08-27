@@ -41,6 +41,7 @@ module rapt_exu_ioq #(
     // Outputs to memory subsystem & ROB writeback
     exu_lsu_if.master       exu_lsu,
     exu_l1d_if.master       exu_l1d,
+    fpr_if.ioq              fpr,
     exu_wb_if.out           exu_ioq_bcast,
     exu_load_fast_if.source load_fast,
 
@@ -81,12 +82,26 @@ module rapt_exu_ioq #(
   logic [    XLEN-1:0] ioq_paddr           [IOQ_SIZE];
   logic [IOQ_SIZE-1:0] ioq_ren;
   logic [IOQ_SIZE-1:0] ioq_atom;
+  logic [IOQ_SIZE-1:0] ioq_fp_valid;
+  logic [5:0]          ioq_fp_op [IOQ_SIZE];
+  logic [4:0]          ioq_fp_rd [IOQ_SIZE];
+  logic [4:0]          ioq_fp_rs2[IOQ_SIZE];
+  logic [IOQ_SIZE-1:0] ioq_fp_dep2_busy;
+  logic [ROBLen-1:0]   ioq_fp_dep2[IOQ_SIZE];
+
+  function automatic logic fp_wb_hit(input logic [ROBLen-1:0] dep);
+    return (exu_rou.valid && exu_rou.dest == dep)
+      || (exu_rou_b.valid && exu_rou_b.dest == dep)
+      || (exu_wb_mul.valid && exu_wb_mul.dest == dep)
+      || (exu_ioq_bcast.valid && exu_ioq_bcast.dest == dep);
+  endfunction
 
   // OoO load completion tracking
   logic [IOQ_SIZE-1:0] ioq_complete;
   logic [IOQ_SIZE-1:0] ioq_load_trap;
   logic [IOQ_SIZE-1:0] ioq_load_skip;
   logic [    XLEN-1:0] ioq_rdata           [IOQ_SIZE];
+  logic [63:0]         ioq_fp_rdata64      [IOQ_SIZE];
   logic [    XLEN-1:0] ioq_load_cause      [IOQ_SIZE];
 
   logic                oo_pending;
@@ -106,6 +121,8 @@ module rapt_exu_ioq #(
   assign disp.ready_b = (ioq_valid[ioq_tail_b] == 1'b0);
 
   // === IOQ effective address & older-store blocker ===
+  // ioq_eff_addr is meaningful only for valid entries (all readers gate with
+  // ioq_valid/complete; see older-store blocker and issue vectors below).
   logic [XLEN-1:0] ioq_eff_addr[IOQ_SIZE];
   always_comb begin
     for (int i = 0; i < IOQ_SIZE; i++) begin
@@ -124,11 +141,11 @@ module rapt_exu_ioq #(
         age_j = ({1'b0, j[$clog2(IOQ_SIZE)-1:0]} - {1'b0, ioq_head}) &
             ((1 << $clog2(IOQ_SIZE)) - 1);
         if (ioq_valid[j] && ioq_wen[j] && age_j < age_i) begin
-          if (|ioq_pr1[j] || ioq_mmu_en[j] || (ioq_eff_addr[j][XLEN-1:$clog2(
+          if (|ioq_pr1[j] || ioq_mmu_en[j] || (ioq_valid[i] && (ioq_eff_addr[j][XLEN-1:$clog2(
                   XLEN/8
               )] == ioq_eff_addr[i][XLEN-1:$clog2(
                   XLEN/8
-              )])) begin
+              )]))) begin
             ioq_older_store_blk[i] = 1'b1;
           end
         end
@@ -154,7 +171,7 @@ module rapt_exu_ioq #(
           && !ioq_atom[i]
           && !ioq_older_store_blk[i]
           && (csr_bcast.dmmu_en
-              || rapt_pkg::addr_cacheable(ioq_eff_addr[i]) ||
+              || (ioq_valid[i] && rapt_pkg::addr_cacheable(ioq_eff_addr[i])) ||
           (i[$clog2(IOQ_SIZE)-1:0] == ioq_head && ioq_at_rob_head));
     end
   end
@@ -189,23 +206,32 @@ module rapt_exu_ioq #(
   assign active_load_done = ioq_complete[active_idx];
 
   // === LSU output ===
+  // issue_valid_now guarantees ioq_valid[active_idx] (or an in-flight pending
+  // entry), so the payload reads below are always of a live entry.
   assign exu_lsu.rvalid = (issue_valid_now
       && ioq_ren[active_idx]
       && !active_load_done
       && ioq_pr1[active_idx] == 0 && ioq_pr2[active_idx] == 0
       && (csr_bcast.dmmu_en
-          || rapt_pkg::addr_cacheable(
+          || (issue_valid_now && rapt_pkg::addr_cacheable(
       exu_lsu.raddr
-  ) || (active_idx == ioq_head && ioq_at_rob_head)));
+  )) || (active_idx == ioq_head && ioq_at_rob_head)));
   assign exu_lsu.raddr = ioq_atom[active_idx]
       ? ioq_vj[active_idx]
       : ioq_vj[active_idx] + ioq_imm[active_idx];
   assign exu_lsu.ralu = ioq_atom[active_idx]
       ? (ioq_word[active_idx] ? `RAPT_ALU_LW__ : `RAPT_ALU_LD__)
-      : ioq_alu[active_idx][4:0];
+      : ((ioq_fp_valid[active_idx] && ioq_fp_op[active_idx] == `RAPT_FP_OP_FLD)
+        ? `RAPT_ALU_LD__
+        : ((ioq_fp_valid[active_idx] && ioq_fp_op[active_idx] == `RAPT_FP_OP_FLW)
+          ? `RAPT_ALU_LW__ : ioq_alu[active_idx][4:0]));
+    assign exu_lsu.fp_rdata64_req = ioq_fp_valid[active_idx]
+      && ioq_fp_op[active_idx] == `RAPT_FP_OP_FLD;
   assign exu_lsu.atomic_lock = ioq_atom[active_idx] && ioq_alu[active_idx] == `RAPT_ATO_LR__;
   assign exu_lsu.ordered = (active_idx == ioq_head) && ioq_at_rob_head;
   assign exu_lsu.pc = ioq_pc[active_idx];
+
+  assign fpr.ioq_raddr = ioq_fp_rs2[ioq_head];
 
   // === Hit-under-miss B issue (Phase A2, RAPT_LSU_HUM) ===
   // While the A channel is parked on a miss (oo_pending), offer the next
@@ -376,7 +402,20 @@ module rapt_exu_ioq #(
   assign exu_ioq_bcast.sq_waddr = csr_bcast.dmmu_en
       ? ioq_paddr[ioq_head]
       : ioq_vj[ioq_head] + ioq_imm[ioq_head];
-  assign exu_ioq_bcast.sq_wdata = ioq_atom[ioq_head] ? head_amo_wdata : ioq_vk[ioq_head];
+  assign exu_ioq_bcast.sq_wdata = ioq_atom[ioq_head] ? head_amo_wdata
+      : ((ioq_fp_valid[ioq_head] && ioq_fp_op[ioq_head] == `RAPT_FP_OP_FSW)
+        ? fpr.ioq_rdata[XLEN-1:0]
+        : ((ioq_fp_valid[ioq_head] && ioq_fp_op[ioq_head] == `RAPT_FP_OP_FSD)
+          ? fpr.ioq_rdata[XLEN-1:0] : ioq_vk[ioq_head]));
+  assign exu_ioq_bcast.sq_wdata64 = fpr.ioq_rdata;
+  assign exu_ioq_bcast.sq_fp64 = ioq_fp_valid[ioq_head]
+      && ioq_fp_op[ioq_head] == `RAPT_FP_OP_FSD;
+  assign fpr.ioq_wvalid = exu_ioq_bcast.valid && ioq_fp_valid[ioq_head]
+      && (ioq_fp_op[ioq_head] == `RAPT_FP_OP_FLW
+        || ioq_fp_op[ioq_head] == `RAPT_FP_OP_FLD) && !head_trap_lsu;
+  assign fpr.ioq_waddr = ioq_fp_rd[ioq_head];
+    assign fpr.ioq_wdata = (ioq_fp_op[ioq_head] == `RAPT_FP_OP_FLD)
+      ? ioq_fp_rdata64[ioq_head] : {32'hffff_ffff, head_rdata[31:0]};
   // For AMO RW (atomic with both R and W), PMP/page fault on either side
   // is reported as a store access fault per RISC-V spec.  LR is treated as a
   // pure load; SC as a pure store (PMP store path).
@@ -405,6 +444,7 @@ module rapt_exu_ioq #(
 
   assign ioq_valid_found = (ioq_valid[ioq_head]
       && ioq_pr1[ioq_head] == 0 && ioq_pr2[ioq_head] == 0
+      && !ioq_fp_dep2_busy[ioq_head]
       && (ioq_ren[ioq_head]
           ? head_load_done
           : ioq_mmu_en[ioq_head] == 0)
@@ -418,6 +458,8 @@ module rapt_exu_ioq #(
   assign exu_ioq_bcast.mispredict = 1'b0;
   assign exu_ioq_bcast.csr_wen = 1'b0;
   assign exu_ioq_bcast.csr_wdata = '0;
+  assign exu_ioq_bcast.fp_flags_valid = 1'b0;
+  assign exu_ioq_bcast.fp_flags = '0;
 
   // Fast load-use wakeup is a narrow tag-only path.  It wakes RS operands when
   // a plain head load has actually returned, one cycle before the normal IOQ
@@ -538,22 +580,20 @@ module rapt_exu_ioq #(
       ioq_complete      <= '0;
       ioq_load_trap     <= '0;
       ioq_load_skip     <= '0;
+      ioq_fp_dep2_busy  <= '0;
       oo_pending        <= 1'b0;
       oo_pending_idx    <= '0;
       ioq_full_r        <= 1'b0;  // A2: Initialize full state tracker
       fast_load_pending <= 1'b0;
       fast_load_prd_q   <= '0;
-      // Reset payload arrays as well as valid bits so unused entries cannot
-      // feed X values into store-address and ordering logic in FPGA synthesis.
-      for (int i = 0; i < IOQ_SIZE; i++) begin
-        ioq_pr1[i]  <= '0;
-        ioq_pr2[i]  <= '0;
-        ioq_vj[i]   <= '0;
-        ioq_vk[i]   <= '0;
-        ioq_imm[i]  <= '0;
-        ioq_atom[i] <= '0;
-        ioq_alu[i]  <= '0;
-      end
+      // Payload arrays (pc/vj/vk/imm/cause/rdata/...) are intentionally NOT
+      // reset: every read is gated by ioq_valid[] / ioq_complete[] / the busy
+      // bits, so the data flops are don't-care (same principle as rapt_prf).
+      // pr1/pr2 likewise stay unreset: the older-store blocker reads them
+      // inside ioq_valid[j] && ioq_wen[j], issue/head/valid_found checks are
+      // valid-gated, and the resident forwarding flags are only consumed in
+      // the `if (ioq_valid[i])` wakeup branch.  Every allocation rewrites
+      // the pair before ioq_valid[i] is set.
     end else begin
       // A2: Latch current full status (rising-edge detection for pmu_ioq_full)
       ioq_full_r <= (&ioq_valid);  // Full when all entries valid
@@ -586,6 +626,12 @@ module rapt_exu_ioq #(
           ioq_mmu_en[i]    <= csr_bcast.dmmu_en;
           ioq_ren[i]       <= rou_exu.uop_b.ren;
           ioq_atom[i]      <= rou_exu.uop_b.atom;
+          ioq_fp_valid[i]  <= rou_exu.uop_b.fp_valid;
+          ioq_fp_op[i]     <= rou_exu.uop_b.fp_op;
+          ioq_fp_rd[i]     <= rou_exu.uop_b.inst[11:7];
+          ioq_fp_rs2[i]    <= rou_exu.uop_b.inst[24:20];
+          ioq_fp_dep2_busy[i] <= rou_exu.fp_dep2_valid_b && !fp_wb_hit(rou_exu.fp_dep2_b);
+          ioq_fp_dep2[i] <= rou_exu.fp_dep2_b;
           ioq_trap[i]      <= rou_exu.uop_b.trap;
           ioq_complete[i]  <= 1'b0;
           ioq_load_trap[i] <= 1'b0;
@@ -610,6 +656,12 @@ module rapt_exu_ioq #(
           ioq_mmu_en[i]    <= csr_bcast.dmmu_en;
           ioq_ren[i]       <= rou_exu.uop.ren;
           ioq_atom[i]      <= rou_exu.uop.atom;
+          ioq_fp_valid[i]  <= rou_exu.uop.fp_valid;
+          ioq_fp_op[i]     <= rou_exu.uop.fp_op;
+          ioq_fp_rd[i]     <= rou_exu.uop.inst[11:7];
+          ioq_fp_rs2[i]    <= rou_exu.uop.inst[24:20];
+          ioq_fp_dep2_busy[i] <= rou_exu.fp_dep2_valid && !fp_wb_hit(rou_exu.fp_dep2);
+          ioq_fp_dep2[i] <= rou_exu.fp_dep2;
           ioq_trap[i]      <= rou_exu.uop.trap;
           ioq_complete[i]  <= 1'b0;
           ioq_load_trap[i] <= 1'b0;
@@ -633,8 +685,18 @@ module rapt_exu_ioq #(
           ioq_valid[i]  <= 1'b0;
         end
 
+        if (ioq_valid[i] && ioq_fp_dep2_busy[i]
+            && ((exu_rou.valid && exu_rou.dest == ioq_fp_dep2[i])
+              || (exu_rou_b.valid && exu_rou_b.dest == ioq_fp_dep2[i])
+              || (exu_wb_mul.valid && exu_wb_mul.dest == ioq_fp_dep2[i])
+              || (exu_ioq_bcast.valid && exu_ioq_bcast.dest == ioq_fp_dep2[i]))) begin
+          ioq_fp_dep2_busy[i] <= 1'b0;
+        end
+
         if (exu_lsu.rvalid && exu_lsu.rready && i == int'(active_idx)) begin
           ioq_rdata[i] <= exu_lsu.rdata;
+          if (ioq_fp_valid[i] && ioq_fp_op[i] == `RAPT_FP_OP_FLD)
+            ioq_fp_rdata64[i] <= exu_lsu.fp_rdata64;
           if (active_idx != ioq_head || !ioq_valid_found) begin
             ioq_complete[i]   <= 1'b1;
             ioq_load_trap[i]  <= exu_lsu.trap;

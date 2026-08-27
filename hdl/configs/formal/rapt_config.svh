@@ -22,10 +22,10 @@
 // Architecture: RV32 (RV64 still selectable via -DRAPT_RV64 for rv64 checks)
 `ifdef RAPT_RV64
 `define RAPT_XLEN 64
-`define RAPT_MISA 'h8000000000141107
+`define RAPT_MISA 'h800000000014112f
 `else
 `define RAPT_XLEN 32
-`define RAPT_MISA 'h40141107
+`define RAPT_MISA 'h4014112f
 `endif
 `define RAPT_I_EXTENSION 'h1
 `define RAPT_M_EXTENSION 'h1

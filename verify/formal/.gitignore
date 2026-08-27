@@ -4,5 +4,10 @@
 !.gitignore
 !rvfi/
 !rvfi/**
+!formal_*.sv
+!*.sby
+!sby
+!yosys-rvfi-compat.sh
+!abc-read-blif-compat.sh
 
 build/**

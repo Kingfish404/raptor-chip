@@ -21,6 +21,8 @@
 #define MSIP_BASE 0x0
 #define MTIMECMP_BASE 0x4000
 #define MTIME_BASE 0xbff8
+#define GOLDFISH_RTC_BASE 0x00101000u
+#define GOLDFISH_RTC_SIZE 0x1000u
 
 // MIP bit positions for CLINT-controlled interrupts
 #define MIP_MSIP_BIT (1u << 3)  // Machine Software Interrupt Pending
@@ -35,6 +37,7 @@
 // must NOT override it from stimecmp.
 
 static uint32_t *rtc_port_base = NULL;
+static uint8_t *goldfish_rtc_base = NULL;
 static uint32_t *clint_base = NULL;
 static uint32_t clint_msip = 0; // MSIP register (only bit 0 used)
 
@@ -146,6 +149,16 @@ static void rtc_io_handler(uint32_t offset, int len, bool is_write)
   }
 }
 
+static void goldfish_rtc_io_handler(uint32_t offset, int len, bool is_write)
+{
+  if (!is_write && (offset == 0 || offset == 4))
+  {
+    uint64_t us = get_time();
+    *(uint32_t *)(goldfish_rtc_base + 0) = (uint32_t)us;
+    *(uint32_t *)(goldfish_rtc_base + 4) = (uint32_t)(us >> 32);
+  }
+}
+
 static void clint_io_handler(uint32_t offset, int len, bool is_write)
 {
   if (is_write)
@@ -209,6 +222,7 @@ uint64_t get_mtimecmp()
 void init_timer()
 {
   rtc_port_base = (uint32_t *)new_space(8);
+  goldfish_rtc_base = new_space(GOLDFISH_RTC_SIZE);
   clint_base = (uint32_t *)new_space(0x000c0000);
   clint_msip = 0;
   /* Initialize mtimecmp to max so timer doesn't fire until software programs it */
@@ -219,6 +233,8 @@ void init_timer()
   add_pio_map("rtc", CONFIG_RTC_PORT, rtc_port_base, 8, rtc_io_handler);
 #else
   add_mmio_map("rtc", CONFIG_RTC_MMIO, rtc_port_base, 8, rtc_io_handler);
+  add_mmio_map("goldfish-rtc", GOLDFISH_RTC_BASE, goldfish_rtc_base,
+               GOLDFISH_RTC_SIZE, goldfish_rtc_io_handler);
   // https://github.com/riscv-software-src/riscv-isa-sim/blob/master/riscv/platform.h
   // https://github.com/riscv-software-src/riscv-isa-sim/blob/master/riscv/clint.cc
   add_mmio_map("clint", CONFIG_RTC_MMIO_CLINT, clint_base, 0x000c0000, clint_io_handler);

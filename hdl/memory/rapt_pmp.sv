@@ -193,9 +193,12 @@ module rapt_pmp #(
   endfunction
 
   logic fault_lo, fault_hi;
+  logic data_partial_match_fault;
   assign fault_lo = byte_fault(any_match_lo, perm_r_lo, perm_w_lo, perm_x_lo, perm_l_lo);
   assign fault_hi = byte_fault(any_match_hi, perm_r_hi, perm_w_hi, perm_x_hi, perm_l_hi);
+  assign data_partial_match_fault = (op_r || op_w) && any_match_lo
+                                  && !(|(fm_lo & entry_match_hi));
   assign fault_lo_o = fault_lo;
-  assign fault = fault_lo | fault_hi;
+  assign fault = fault_lo | fault_hi | data_partial_match_fault;
 
 endmodule

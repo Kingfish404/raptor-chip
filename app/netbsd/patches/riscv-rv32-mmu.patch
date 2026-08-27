@@ -1,0 +1,77 @@
+--- a/sys/arch/riscv/riscv/riscv_machdep.c
++++ b/sys/arch/riscv/riscv/riscv_machdep.c
+@@ -777,0 +778,12 @@
++#ifndef _LP64
++	/* RV32 early page tables identity-map only the kernel window. */
++	const uint64_t rv32_memory_limit =
++	    (uint64_t)VM_KERNEL_BASE + VM_KERNEL_SIZE;
++	if (memory_end > rv32_memory_limit) {
++		fdt_memory_remove_range(rv32_memory_limit,
++		    memory_end - rv32_memory_limit);
++		memory_end = rv32_memory_limit;
++		physical_end = memory_end;
++	}
++#endif
++
+@@ -845,3 +856,0 @@
+-	paddr_t msgbufaddr = 0;
+-
+-#ifdef _LP64
+@@ -849 +858,8 @@
+-	msgbufaddr = memory_end - MSGBUFSIZE;
++#ifdef _LP64
++	paddr_t msgbufaddr = memory_end - MSGBUFSIZE;
++#else
++	/* The initial RV32 page tables only map the kernel window. */
++	paddr_t msgbufaddr = MIN(memory_end,
++	    (paddr_t)(VM_KERNEL_BASE + VM_KERNEL_SIZE)) - MSGBUFSIZE;
++#endif
++	vaddr_t msgbufva;
+@@ -852,4 +867,0 @@
+-	msgbufaddr = RISCV_PA_TO_KVA(msgbufaddr);
+-	VPRINTF("msgbufaddr = %#lx\n", msgbufaddr);
+-	initmsgbuf((void *)msgbufaddr, MSGBUFSIZE);
+-#endif
+@@ -857 +868,0 @@
+-	KASSERT(msgbufaddr != 0);	/* no space for msgbuf */
+@@ -859 +870,3 @@
+-	initmsgbuf((void *)RISCV_PA_TO_KVA(msgbufaddr), MSGBUFSIZE);
++	msgbufva = RISCV_PA_TO_KVA(msgbufaddr);
++#else
++	msgbufva = KERN_PHYSTOV(msgbufaddr);
+@@ -860,0 +874,2 @@
++	VPRINTF("msgbufaddr = %#lx\n", (unsigned long)msgbufva);
++	initmsgbuf((void *)msgbufva, MSGBUFSIZE);
+--- a/sys/arch/riscv/riscv/pmap_machdep.c
++++ b/sys/arch/riscv/riscv/pmap_machdep.c
+@@ -77 +77 @@
+-	KASSERT(false);
++	memset((void *)KERN_PHYSTOV(pa), 0, PAGE_SIZE);
+@@ -92 +92,2 @@
+-	KASSERT(false);
++	memcpy((void *)KERN_PHYSTOV(dst), (const void *)KERN_PHYSTOV(src),
++	    PAGE_SIZE);
+@@ -122 +123 @@
+-	panic("not supported");
++	return KERN_PHYSTOV(pa);
+@@ -139 +140,2 @@
+-	return false;
++	return va >= VM_KERNEL_BASE &&
++	    va < VM_KERNEL_BASE + VM_KERNEL_SIZE;
+@@ -160,2 +162 @@
+-	KASSERT(false);
+-	return 0;
++	return KERN_VTOPHYS(va);
+@@ -171 +172 @@
+-	panic("not supported");
++	return KERN_PHYSTOV(pa);
+@@ -405,1 +405,7 @@
+-	/*
++#ifndef _LP64
++	/* Keep the RV32 KVA allocator large enough for device mappings. */
++	if (kvmsize < VM_KERNEL_VM_SIZE)
++		kvmsize = VM_KERNEL_VM_SIZE;
++#endif
++
++	/*
+

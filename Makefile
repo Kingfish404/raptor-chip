@@ -611,10 +611,12 @@ linux-download: ## Download pre-built Linux (RV32 + RV64)
 # $(1) = rv32|rv64 (linux/Makefile download suffix), $(2) = payload image,
 # $(3) = log stem.
 # $(4) = optional sim variable override.
+# $(5) = optional extra variables propagated to BOTH the `make -C sim` build
+#        and the `make -C sim run` invocation (e.g. DT_SOURCE=...).
 define linux_boot_npc
 	$(MAKE) -C $(LINUX_HOME) download-$(1)
-	$(MAKE) -C $(NSIM_HOME) -j$(NPROC) VFLAGS="$(VFLAGS)"
-	@set -o pipefail; $(MAKE) -C $(NSIM_HOME) run IMG=$(2) ARGS="$(ARGS) $(if $(MAX_INST),-m $(MAX_INST))" VFLAGS="$(VFLAGS)" $(4) $(call tee_npc,$(3))
+	$(MAKE) -C $(NSIM_HOME) -j$(NPROC) VFLAGS="$(VFLAGS)" $(5)
+	@set -o pipefail; $(MAKE) -C $(NSIM_HOME) run IMG=$(2) ARGS="$(ARGS) $(if $(MAX_INST),-m $(MAX_INST))" VFLAGS="$(VFLAGS)" $(4) $(5) $(call tee_npc,$(3))
 endef
 
 define linux_boot_nemu
@@ -633,6 +635,25 @@ linux-boot-rv32: config-rv32-linux ## Boot Linux on NPC (riscv32)
 
 linux-boot-rv32-difftest: config-nemu32-ref config-rv32-linux ## Boot Linux on NPC with difftest
 	$(call linux_boot_npc,rv32,$(LINUX_RV32_PAYLOAD),linux-boot-rv32-difftest)
+
+# rv32gc Buildroot (hard-float F/D userspace) boot. Uses the spike-rv32gc.dts
+# DTB (riscv,isa=rv32imafdc...) so the kernel sees the F/D extensions; payload
+# defaults to third_party/linux-build's rv32 Buildroot fw_payload.bin and is NOT
+# auto-downloaded (override LINUX_RV32GC_PAYLOAD to use a different image).
+linux-boot-rv32gc: config-rv32-linux ## Boot rv32gc Buildroot Linux on NPC (hard-float F/D)
+	@test -f "$(LINUX_RV32GC_PAYLOAD)" || { echo "[ERR] rv32gc payload not found: $(LINUX_RV32GC_PAYLOAD)"; \
+		echo "      Build it via third_party/linux-build (qemu-rv32 buildroot preset),"; \
+		echo "      or override LINUX_RV32GC_PAYLOAD=/path/to/fw_payload.bin"; exit 1; }
+	$(call linux_boot_npc,rv32,$(LINUX_RV32GC_PAYLOAD),linux-boot-rv32gc,DIFF_REF_SO=,DT_SOURCE=spike-rv32gc.dts)
+
+# rv64gc Buildroot (hard-float F/D userspace) boot; mirrors linux-boot-rv32gc.
+# RV64 datapath via VFLAGS=-DRAPT_RV64; DTB via spike-rv64gc.dts (sv39).
+linux-boot-rv64gc: VFLAGS := -DRAPT_RV64
+linux-boot-rv64gc: config-rv32-linux ## Boot rv64gc Buildroot Linux on NPC (hard-float F/D)
+	@test -f "$(LINUX_RV64GC_PAYLOAD)" || { echo "[ERR] rv64gc payload not found: $(LINUX_RV64GC_PAYLOAD)"; \
+		echo "      Build it via third_party/linux-build (qemu-rv64 buildroot preset),"; \
+		echo "      or override LINUX_RV64GC_PAYLOAD=/path/to/fw_payload.bin"; exit 1; }
+	$(call linux_boot_npc,rv64,$(LINUX_RV64GC_PAYLOAD),linux-boot-rv64gc,DIFF_REF_SO=,DT_SOURCE=spike-rv64gc.dts)
 
 LINUX_BOOT_MAX_INST ?= 120000000
 LINUX_MEM_RANDOM_DELAY ?= 7
@@ -789,6 +810,39 @@ VERIFY_HOME := $(RAPTOR_HOME)/verify
 
 verify-fuzz: ## Random instruction fuzz with difftest
 	@set -o pipefail; $(MAKE) -C $(VERIFY_HOME) fuzz $(call tee_verify,fuzz)
+
+verify-unit-fpu: ## Run all Verilator FPU component tests
+	$(MAKE) -C $(VERIFY_HOME) unit-fpu
+
+verify-fp-smoke-rv32: ## Run the NEMU RV32F directed smoke test
+	$(MAKE) -C $(RAPTOR_HOME)/app/tests/fp run ISA=rv32
+
+verify-fp-smoke-rv64: ## Run the NEMU RV64F directed smoke test
+	$(MAKE) -C $(RAPTOR_HOME)/app/tests/fp run ISA=rv64
+
+verify-fp-spike-rv32: ## Run the RV32F smoke test with NEMU versus Spike
+	$(MAKE) -C $(RAPTOR_HOME)/app/tests/fp run ISA=rv32 DIFFTEST=1
+
+verify-fp-spike-rv64: ## Run the RV64F smoke test with NEMU versus Spike
+	$(MAKE) -C $(RAPTOR_HOME)/app/tests/fp run ISA=rv64 DIFFTEST=1
+
+verify-fp-arith-rv32: ## Run RV32F SoftFloat arithmetic regression
+	$(MAKE) -C $(RAPTOR_HOME)/app/tests/fp arith ISA=rv32
+
+verify-fp-arith-rv64: ## Run RV64F SoftFloat arithmetic regression
+	$(MAKE) -C $(RAPTOR_HOME)/app/tests/fp arith ISA=rv64
+
+verify-fp-arith-spike-rv32: ## Run RV32F arithmetic against Spike
+	$(MAKE) -C $(RAPTOR_HOME)/app/tests/fp arith-spike ISA=rv32 DIFFTEST=1
+
+verify-fp-arith-spike-rv64: ## Run RV64F arithmetic against Spike
+	$(MAKE) -C $(RAPTOR_HOME)/app/tests/fp arith-spike ISA=rv64 DIFFTEST=1
+
+verify-fp-double-rv32: ## Run RV32D NEMU directed regression
+	$(MAKE) -C $(RAPTOR_HOME)/app/tests/fp double ISA=rv32
+
+verify-fp-double-rv64: ## Run RV64D NEMU directed regression
+	$(MAKE) -C $(RAPTOR_HOME)/app/tests/fp double ISA=rv64
 
 verify-fuzz-inf: ## Continuous fuzz until Ctrl-C or failure
 	@set -o pipefail; $(MAKE) -C $(VERIFY_HOME) fuzz-inf $(call tee_verify,fuzz-inf)
@@ -970,11 +1024,11 @@ app-clean: ## [app] Clean app build artifacts
 	archtest-rv32 archtest-rv32e \
 	nanos-nemu32 nanos-rv32 \
 	linux-download linux-download-rv32 linux-download-rv64 \
-	linux-boot-nemu32 linux-boot-nemu64 linux-boot-rv32 linux-boot-rv32-difftest linux-boot-rv64 linux-boot-rv64-difftest linux-boot-nemu32-device linux-boot-nemu64-device \
+	linux-boot-nemu32 linux-boot-nemu64 linux-boot-rv32 linux-boot-rv32-difftest linux-boot-rv32gc linux-boot-rv64 linux-boot-rv64-difftest linux-boot-rv64gc linux-boot-nemu32-device linux-boot-nemu64-device \
 	verify-linux-boot-rv32 verify-linux-memory-stress-rv32 verify-linux-memory-stress-from-ckpt-rv32 \
 	linux-boot-rv32-ckpt-save linux-boot-rv32-ckpt-load \
 	fpga-syn fpga-pnr pack lint lint-verible ide-setup compile-commands sta sta-detail sta-rv64 sta-detail-rv64 clean-npc clean \
-	verify-fuzz verify-fuzz-inf verify-fuzz-replay verify-sigtest verify-riscof-classic verify-riscof-classic-nemu verify-riscof verify-riscv-dv verify-riscv-dv-stress verify-riscv-dv-mmu verify-coverage verify-all verify-clean \
+	verify-fuzz verify-fp-smoke-rv32 verify-fp-smoke-rv64 verify-fp-spike-rv32 verify-fp-spike-rv64 verify-fp-arith-rv32 verify-fp-arith-rv64 verify-fp-arith-spike-rv32 verify-fp-arith-spike-rv64 verify-fp-double-rv32 verify-fp-double-rv64 verify-fuzz-inf verify-fuzz-replay verify-sigtest verify-riscof-classic verify-riscof-classic-nemu verify-riscof verify-riscv-dv verify-riscv-dv-stress verify-riscv-dv-mmu verify-coverage verify-all verify-clean \
 	tinyos-sync os-cli-qemu egos-cli-qemu xv6-cli-qemu os-cli-nsim os-cli-nemu egos-cli-nsim egos-cli-nemu xv6-cli-nsim xv6-cli-nemu \
 	app-hello-rv32 app-coremark-rv32 app-coremark-rv32-optim app-coremark-rv64-optim app-coremark-nemu32 \
 	app-embench-rv32 app-embench-pk-run-rv32 app-embench-pk-report-rv32 \

@@ -13,6 +13,11 @@ NPCState npc = {
     .inst = NULL,
 
     .soc_sram = NULL,
+
+    .fpr = NULL,
+    .fcsr = NULL,
+    .difftest_state_version = DIFFTEST_STATE_VERSION,
+    .xlen = sizeof(word_t) * 8,
 };
 
 const char *regs[] = {

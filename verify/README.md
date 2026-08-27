@@ -41,7 +41,22 @@ verify/
 │   ├── riscv-formal/     # riscv-formal repo (auto-cloned, gitignored)
 │   ├── bus.sby           # AXI bus formal property
 │   └── exu_mul.sby       # Multiplier formal property
+├── xsim/               # Module-level SystemVerilog testbenches
+│   └── fpu/              # Verilator FPU arithmetic/conversion tests
 └── build/              # Generated artifacts (gitignored)
+```
+
+## RTL Unit Tests
+
+Component-level FPU tests are grouped with the existing module-level
+testbenches below `xsim/fpu/`. These FPU tests use Verilator because their
+differential harnesses include C++ host reference models.
+
+```bash
+make unit-fpu                    # Run all FPU component tests
+make unit-fpu-fma                # Run one directed component regression
+make unit-fpu-mul MUL_N=1000000  # Override a random test count
+make unit-fpu-convert CONVERT_N=1000000
 ```
 
 ## In-RTL Assertions (SVA)
@@ -109,7 +124,20 @@ make riscof-gen           # Generate self-checking ELFs
 make riscof-run           # Execute tests on NPC
 ```
 
-Requires `sail_riscv_sim` and `uv` (Python package manager).
+Requires Sail RISC-V 0.13.1 and `uv` (Python package manager). Install the
+official Linux x86_64 release in the default project location with:
+
+```bash
+mkdir -p "$HOME/.local/opt/sail-riscv-0.13.1"
+curl --fail --location \
+  https://github.com/riscv/sail-riscv/releases/download/0.13.1/sail-riscv-Linux-x86_64.tar.gz \
+  | tar -xz -C "$HOME/.local/opt/sail-riscv-0.13.1" --strip-components=1
+ln -sfn "$HOME/.local/opt/sail-riscv-0.13.1/bin/sail_riscv_sim" \
+  "$HOME/.local/bin/sail_riscv_sim"
+sail_riscv_sim --version
+```
+
+Both ACT4 and classic RISCOF validate the exact Sail version before running.
 
 ### 4. RISCV-DV Privileged Stress (`make riscv-dv`)
 
@@ -117,6 +145,9 @@ Uses the upstream [chipsalliance/riscv-dv](https://github.com/chipsalliance/risc
 pure-Python generator with a Raptor RV32IMC M-mode target. Generated binaries
 run on NPC with NEMU instruction-by-instruction difftest; no commercial UVM
 simulator is needed for M-mode CSR and trap-handler stress.
+This riscv-dv target is an IMAC smoke configuration and does not represent the
+full implemented ISA; use the RISCOF classic profile and `app/tests/fp` for the
+broader architectural and F/D coverage.
 
 ```bash
 make riscv-dv                         # one short privileged smoke test

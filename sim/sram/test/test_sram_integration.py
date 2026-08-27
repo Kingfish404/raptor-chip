@@ -7,11 +7,13 @@ the *contract* between the four pieces of the integration:
     1. sim/sram/configs/*.py            - macro shape definitions
     2. sim/sram/wrappers/rapt_sram_blackbox.v - Yosys blackbox declarations
     3. sim/sram/scripts/gen_stub_lib.py - placeholder Liberty/Verilog
-    4. hdl/memory/rapt_sram_1r1w.sv     - RTL macro instantiations
+    4. hdl/memory/rapt_sram_1rw.sv      - RTL macro instantiations
 
 If any of these drift out of sync (port width changes, missing pin,
 shape removed from one file but not another), STA would either fail to
 elaborate or silently mis-map. These tests catch that.
+
+All macros are single-port (1RW) — the shape the RTL instantiates.
 
 Run as:
   python3 test_sram_integration.py
@@ -35,14 +37,14 @@ RAPTOR = SRAM.parent.parent
 
 # (macro_name, depth, data_width, write_size)
 SHAPES = [
-    ("rapt_openram_1r1w_32x32", 32, 32, 8),
-    ("rapt_openram_1r1w_16x32", 16, 32, 8),
-    ("rapt_openram_1r1w_16x64", 16, 64, 8),
+    ("rapt_openram_1rw_32x32", 32, 32, 8),
+    ("rapt_openram_1rw_16x32", 16, 32, 8),
+    ("rapt_openram_1rw_16x64", 16, 64, 8),
 ]
 
 BLACKBOX_V = SRAM / "wrappers" / "rapt_sram_blackbox.v"
 STUB_GEN   = SRAM / "scripts" / "gen_stub_lib.py"
-RTL_SRAM   = RAPTOR / "hdl" / "memory" / "rapt_sram_1r1w.sv"
+RTL_SRAM   = RAPTOR / "hdl" / "memory" / "rapt_sram_1rw.sv"
 CONFIG_DIR = SRAM / "configs"
 
 
@@ -84,9 +86,9 @@ def read(path: Path) -> str:
 def test_configs():
     section("Configs (sim/sram/configs/*_sky130.py)")
     for name, depth, width, ws in SHAPES:
-        # rapt_openram_1r1w_32x32 -> rapt_sram_32x32_1r1w_sky130.py
-        shape = name.replace("rapt_openram_1r1w_", "")
-        cfg = CONFIG_DIR / f"rapt_sram_{shape}_1r1w_sky130.py"
+        # rapt_openram_1rw_32x32 -> rapt_sram_32x32_1rw_sky130.py
+        shape = name.replace("rapt_openram_1rw_", "")
+        cfg = CONFIG_DIR / f"rapt_sram_{shape}_1rw_sky130.py"
         check(cfg.is_file(), f"config exists: {cfg.name}")
         if not cfg.is_file():
             continue
@@ -97,6 +99,8 @@ def test_configs():
               f"{cfg.name} declares num_words={depth}")
         check(f"write_size = {ws}" in text or f"write_size = {ws}" in text,
               f"{cfg.name} declares write_size={ws}")
+        check('ports_human  = "1rw"' in text,
+              f"{cfg.name} declares ports_human=\"1rw\"")
 
 
 # ---------------------------------------------------------------------------
@@ -121,7 +125,7 @@ def test_blackbox():
         if not m:
             continue
         body = m.group(1)
-        # Required port widths
+        # Required port widths for the single shared read/write port.
         port_specs = [
             ("clk0", None),
             ("csb0", None),
@@ -129,10 +133,7 @@ def test_blackbox():
             ("wmask0", bytes_),
             ("addr0", aw),
             ("din0", width),
-            ("clk1", None),
-            ("csb1", None),
-            ("addr1", aw),
-            ("dout1", width),
+            ("dout0", width),
         ]
         for port, expect_w in port_specs:
             if expect_w is None:
@@ -152,15 +153,13 @@ def test_blackbox():
 # 3. RTL macro path instantiates each shape correctly
 # ---------------------------------------------------------------------------
 def test_rtl_macro_path():
-    section("RTL macro path (rapt_sram_1r1w.sv)")
+    section("RTL macro path (rapt_sram_1rw.sv)")
     check(RTL_SRAM.is_file(), f"RTL file exists: {RTL_SRAM.name}")
     if not RTL_SRAM.is_file():
         return
     text = read(RTL_SRAM)
     check("`ifdef RAPT_USE_SRAM_MACRO" in text,
           "macro path guarded by RAPT_USE_SRAM_MACRO")
-    check("bypass_en_r" in text and "wdata_r" in text,
-          "write-first bypass mux present (read-first macro -> write-first wrapper)")
     for name, depth, width, _ in SHAPES:
         # Find instantiation of this macro
         inst_re = re.compile(rf"{re.escape(name)}\s+\w+\s*\((.*?)\);", re.DOTALL)
@@ -169,8 +168,7 @@ def test_rtl_macro_path():
         if not m:
             continue
         body = m.group(1)
-        for pin in ("clk0", "csb0", "web0", "wmask0", "addr0", "din0",
-                    "clk1", "csb1", "addr1", "dout1"):
+        for pin in ("clk0", "csb0", "web0", "wmask0", "addr0", "din0", "dout0"):
             check(f".{pin}(" in body, f"{name}: port `.{pin}(...)` connected")
         # Verify the generate-if guard matches the shape
         guard_re = re.compile(
@@ -212,32 +210,30 @@ def test_stub_lib():
         if not lib.is_file():
             continue
         text = read(lib)
-        # Mandatory liberty constructs
-        for marker, label in [
+        # Mandatory liberty constructs (single shared port).
+        markers = [
             (f"library ({name})", "library() header"),
             (f"cell ({name})", "cell() block"),
             ("is_macro_cell : true", "is_macro_cell"),
             ("dont_touch : true", "dont_touch"),
             ("delay_model              : table_lookup", "delay_model"),
             ("pin (clk0)", "pin(clk0)"),
-            ("pin (clk1)", "pin(clk1)"),
             ("pin (csb0)", "pin(csb0)"),
             ("pin (web0)", "pin(web0)"),
             ("bus (wmask0)", "bus(wmask0)"),
             ("bus (addr0)", "bus(addr0)"),
             ("bus (din0)", "bus(din0)"),
-            ("pin (csb1)", "pin(csb1)"),
-            ("bus (addr1)", "bus(addr1)"),
-            ("bus (dout1)", "bus(dout1)"),
-        ]:
+            ("bus (dout0)", "bus(dout0)"),
+        ]
+        for marker, label in markers:
             check(marker in text, f"{name}: {label} present")
-        # Timing arcs: clk->Q on dout1 and setup/hold on at least one input
-        check(text.count("timing_type : setup_rising") >= 6,
-              f"{name}: >=6 setup arcs (csb0/web0/wmask0/addr0/din0/csb1/addr1)")
-        check(text.count("timing_type : hold_rising") >= 6,
-              f"{name}: >=6 hold arcs")
+        # Timing arcs: clk->Q on dout0 plus setup/hold on the five inputs
+        check(text.count("timing_type : setup_rising") >= 5,
+              f"{name}: >=5 setup arcs (csb0/web0/wmask0/addr0/din0)")
+        check(text.count("timing_type : hold_rising") >= 5,
+              f"{name}: >=5 hold arcs")
         check("timing_type : rising_edge" in text and "cell_rise" in text,
-              f"{name}: clk1 -> dout1 propagation arc present")
+              f"{name}: clk0 -> dout0 propagation arc present")
         # Bus widths match
         aw = addr_width(depth)
         bytes_ = width // ws
@@ -246,8 +242,7 @@ def test_stub_lib():
             "wmask0": ("wmask0_bus_t", bytes_),
             "addr0":  ("addr0_bus_t",  aw),
             "din0":   ("data0_bus_t",  width),
-            "addr1":  ("addr1_bus_t",  aw),
-            "dout1":  ("data1_bus_t",  width),
+            "dout0":  ("data0_bus_t",  width),
         }
         for bus, (typ, expect) in bus_widths.items():
             m = re.search(
@@ -261,10 +256,10 @@ def test_stub_lib():
         check(m is not None and float(m.group(1)) > 0,
               f"{name}: area annotation present and > 0")
         if m:
-            expected = depth * width * 2.0 * 1.3
+            expected = depth * width * 2.0
             actual = float(m.group(1))
-            check(0.5 * expected <= actual <= 2.0 * expected,
-                  f"{name}: area ~ depth*width*2.0*1.3 "
+            check(0.4 * expected <= actual <= 2.0 * expected,
+                  f"{name}: area ~ depth*width*2.0*scale "
                   f"({expected:.0f}, got {actual:.0f})")
 
 
@@ -285,12 +280,13 @@ def test_cross_consistency():
     for name, _, _, _ in SHAPES:
         in_bb = name in bb
         in_rtl = name in rtl
-        in_cfg = (CONFIG_DIR / f"rapt_sram_{name.replace('rapt_openram_1r1w_','')}_1r1w_sky130.py").is_file()
+        shape = name.replace("rapt_openram_1rw_", "")
+        in_cfg = (CONFIG_DIR / f"rapt_sram_{shape}_1rw_sky130.py").is_file()
         check(in_bb and in_rtl and in_cfg,
               f"{name}: appears in blackbox V, RTL, and configs")
 
     # No orphan macro names in blackbox V (declared but never instantiated)
-    declared = set(re.findall(r"module\s+(rapt_openram_1r1w_\w+)\s*\(", bb))
+    declared = set(re.findall(r"module\s+(rapt_openram_\w+)\s*\(", bb))
     expected = {n for n, *_ in SHAPES}
     check(declared == expected,
           f"blackbox V module set == expected set "

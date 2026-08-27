@@ -25,6 +25,7 @@ void (*ref_difftest_memcpy)(paddr_t addr, void *buf, size_t n, bool direction) =
 void (*ref_difftest_regcpy)(void *dut, bool direction) = NULL;
 void (*ref_difftest_exec)(uint64_t n) = NULL;
 void (*ref_difftest_raise_intr)(uint64_t NO) = NULL;
+uint32_t (*ref_difftest_state_version)(void) = NULL;
 
 #ifdef CONFIG_DIFFTEST
 
@@ -84,6 +85,12 @@ void init_difftest(char *ref_so_file, long img_size, int port) {
 
   ref_difftest_raise_intr = dlsym(handle, "difftest_raise_intr");
   assert(ref_difftest_raise_intr);
+
+  ref_difftest_state_version = dlsym(handle, "difftest_state_version");
+  if (ref_difftest_state_version != NULL)
+  {
+    assert(ref_difftest_state_version() == DIFFTEST_STATE_VERSION);
+  }
 
   void (*ref_difftest_init)(int) = dlsym(handle, "difftest_init");
   assert(ref_difftest_init);

@@ -7,11 +7,10 @@ neorv32-specific overrides.
 
 from __future__ import annotations
 
-import json
 import logging
 import os
+import re
 import shutil
-import subprocess
 
 import riscof.utils as utils
 from riscof.pluginTemplate import pluginTemplate
@@ -47,7 +46,7 @@ class sail_cSim(pluginTemplate):
         self.suite = suite
         self.work_dir = work_dir
         self.objdump_cmd = (
-            f"{RISCV_PREFIX}objdump -D " + "{0} > {2};"
+            f"{RISCV_PREFIX}objdump -D " + "{0} > {2} &&"
         )
         self.compile_cmd = (
             f"{RISCV_PREFIX}gcc -march={{0}}"
@@ -61,11 +60,15 @@ class sail_cSim(pluginTemplate):
     def build(self, isa_yaml, platform_yaml):
         ispec = utils.load_yaml(isa_yaml)["hart0"]
         self.xlen = "64" if 64 in ispec["supported_xlen"] else "32"
-        self.flen = "64" if "D" in ispec["ISA"] else "32"
+        isa = ispec["ISA"].upper()
+        self.flen = "64" if "D" in isa else "32"
+        sail_exe = shutil.which(self.sail_exe)
+        if sail_exe is None:
+            logger.error("sail_cSim: tool not found: %s", self.sail_exe)
+            raise SystemExit(1)
+        self.sail_exe = os.path.realpath(sail_exe)
         self.isa_yaml_path = isa_yaml
         self.isa = "rv" + self.xlen
-        mabi = "lp64" if 64 in ispec["supported_xlen"] else "ilp32"
-        self.compile_cmd += f" -mabi={mabi}"
 
         for letter in "IMAFDCB":
             if letter in ispec["ISA"]:
@@ -74,7 +77,6 @@ class sail_cSim(pluginTemplate):
         for tool in (
             f"{RISCV_PREFIX}gcc",
             f"{RISCV_PREFIX}objdump",
-            self.sail_exe,
             self.make,
         ):
             if shutil.which(tool) is None:
@@ -90,12 +92,7 @@ class sail_cSim(pluginTemplate):
             os.remove(makefile_path)
         make = utils.makeUtil(makefilePath=makefile_path)
         make.makeCommand = self.make + " -j" + self.num_jobs
-
-        # sail_riscv_sim 0.10+ supports --rv32 / --rv64 flags that pick the
-        # correct default configuration, so we avoid the JSONC-based config
-        # file round-trip used by older plugins (which would need a comment-
-        # stripping parser).
-        sail_arch_flag = "--rv32" if self.xlen == "32" else ""
+        sail_arch_flag = " --rv32" if self.xlen == "32" else ""
 
         for testname in testList:
             entry = testList[testname]
@@ -104,13 +101,16 @@ class sail_cSim(pluginTemplate):
             test_name = test.rsplit("/", 1)[1][:-2]
 
             elf = "ref.elf"
-            execute = f"@cd {test_dir};"
+            execute = f"@cd {test_dir} &&"
+            march = entry["isa"].lower()
+            mabi = self._mabi_for_isa(march)
             compile_cmd = (
-                self.compile_cmd.format(entry["isa"].lower())
+                self.compile_cmd.format(march)
+                + " -mabi=" + mabi
                 + " " + test + " -o " + elf
                 + " -D" + " -D".join(entry["macros"])
             )
-            execute += compile_cmd + ";"
+            execute += compile_cmd + " &&"
             execute += self.objdump_cmd.format(elf, self.xlen, "ref.disass")
 
             sig_file = os.path.join(
@@ -118,11 +118,25 @@ class sail_cSim(pluginTemplate):
             )
 
             execute += (
-                f"{self.sail_exe} {sail_arch_flag}"
+                f"{self.sail_exe}"
+                f"{sail_arch_flag}"
                 f" --signature-granularity=4"
                 f" --test-signature={sig_file}"
-                f" {elf} > {test_name}.log 2>&1;"
+                f" {elf} > {test_name}.log 2>&1"
             )
             make.add_target(execute)
 
         make.execute_all(self.work_dir)
+
+    @staticmethod
+    def _mabi_for_isa(march):
+        base_isa = march.lower().split("_", 1)[0]
+        xlen_prefix = "rv64" if base_isa.startswith("rv64") else "rv32"
+        extension_block = base_isa[len(xlen_prefix):]
+        extension_block = re.split(r"[zsx]", extension_block, maxsplit=1)[0]
+        xlen_abi = "lp64" if base_isa.startswith("rv64") else "ilp32"
+        if "d" in extension_block:
+            return xlen_abi + "d"
+        if "f" in extension_block:
+            return xlen_abi + "f"
+        return xlen_abi

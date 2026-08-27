@@ -153,34 +153,21 @@ module rapt_exu_mul #(
   end
 
   // ---- Sequential logic ----
+  // Only control/valid state is reset.  Datapath registers (m1_s1/s2, m2_r,
+  // div_* operands) are gated by their valid companions (m1_v/m2_v,
+  // div_active, div_out_valid) and need no reset: an inactive lane's stale
+  // data never reaches out_valid (same principle as rapt_prf).  This keeps
+  // ~2*XLEN*6 reset endpoints off the reset/flush network.  div_counter is
+  // reset because accept_div keys off div_active alone; the counter is only
+  // read while div_active, but keeping it defined avoids a sim-only X check
+  // on the first post-reset division.
   always_ff @(posedge clock) begin
     if (reset || flush) begin
       m1_v          <= 1'b0;
       m2_v          <= 1'b0;
       div_active    <= 1'b0;
       div_out_valid <= 1'b0;
-      // Reset shared datapath registers so inactive MUL/DIV state cannot feed
-      // X values into synthesized resource-sharing logic.
-      m1_s1                <= '0;
-      m1_s2                <= '0;
-      m1_op                <= '0;
-      m1_word              <= 1'b0;
-      m1_tag               <= '0;
-      m2_r                 <= '0;
-      m2_tag               <= '0;
-      div_op               <= '0;
-      div_s1               <= '0;
-      div_s2               <= '0;
-      div_word             <= 1'b0;
-      div_tag              <= '0;
-      div_quotient         <= '0;
-      div_remainder        <= '0;
-      div_divisor          <= '0;
-      div_dividend_shifted <= '0;
-      div_counter          <= '0;
-      div_sign             <= '0;
-      div_out_r            <= '0;
-      div_out_tag          <= '0;
+      div_counter   <= '0;
     end else begin
       // ===== MUL stage-1 load =====
       if (accept_mul) begin

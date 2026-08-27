@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+real_sby="${RAPTOR_SBY_REAL:-$(cd "$(dirname "$0")/../../third_party/oss-cad-suite/bin" && pwd)/sby}"
+for arg in "$@"; do
+  if [[ $arg == "--yosys" ]]; then
+    exec "$real_sby" "$@"
+  fi
+done
+
+compat_yosys=$(cd "$(dirname "$0")" && pwd)/yosys-rvfi-compat.sh
+exec "$real_sby" --yosys "$compat_yosys" "$@"

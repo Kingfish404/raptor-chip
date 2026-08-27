@@ -104,6 +104,7 @@ typedef struct
   // for PLIC checkpoint persistence
   uint8_t *plic_priority;
   uint32_t *plic_pending;
+  uint32_t *plic_gateway_busy;
   uint32_t *plic_enable;
   uint8_t *plic_threshold;
   uint32_t *plic_ext_irq;
@@ -123,6 +124,11 @@ typedef struct
   uint8_t *sq_snapshot_alu;
   word_t *sq_snapshot_paddr;
   word_t *sq_snapshot_wdata;
+
+  uint64_t *fpr;
+  uint32_t *fcsr;
+  uint32_t difftest_state_version;
+  uint32_t xlen;
 } NPCState;
 
 __EXPORT void difftest_memcpy(paddr_t addr, void *buf, size_t n, bool direction)
@@ -157,6 +163,14 @@ __EXPORT void difftest_regcpy(void *dut, bool direction)
     {
       cpu.gpr[i] = npc->gpr[i];
     }
+    if (npc->fpr != NULL)
+    {
+      memcpy(cpu.fpr, npc->fpr, sizeof(cpu.fpr));
+    }
+    if (npc->fcsr != NULL)
+    {
+      cpu.sr[CSR_FCSR] = *npc->fcsr;
+    }
     cpu.sr[CSR_SSTATUS] = *npc->sstatus;
     cpu.sr[CSR_SIE] = *npc->sie____;
     cpu.sr[CSR_STVEC] = *npc->stvec__;
@@ -188,6 +202,10 @@ __EXPORT void difftest_regcpy(void *dut, bool direction)
     npc->rpc = &cpu.cpc;
     npc->inst = &cpu.inst;
     npc->gpr = cpu.gpr;
+    npc->fpr = cpu.fpr;
+    npc->fcsr = (uint32_t *)&cpu.sr[CSR_FCSR];
+    npc->difftest_state_version = DIFFTEST_STATE_VERSION;
+    npc->xlen = XLEN;
     npc->pc = &cpu.pc;
     npc->priv = (char *)&cpu.priv;
 
@@ -229,6 +247,11 @@ __EXPORT void difftest_regcpy(void *dut, bool direction)
   }
   // isa_reg_display();
   // vaddr_show(cpu.pc, 0x2c);
+}
+
+__EXPORT uint32_t difftest_state_version(void)
+{
+  return DIFFTEST_STATE_VERSION;
 }
 
 __EXPORT void difftest_checkpoint_sync(void *dut, uint32_t plic_ndev,

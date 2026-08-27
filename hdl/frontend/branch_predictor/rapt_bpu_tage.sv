@@ -360,16 +360,15 @@ module rapt_bpu_tage #(
     if (reset || init) begin
       for (int i = 0; i < BimSize; i++) bim[i] <= 2'b01;
       for (int i = 0; i < TabSize; i++) begin
-        t1_tag[i]   <= '0;
-        t1_ctr[i]   <= '0;
+        // t*_tag / t*_ctr payload is valid-gated: every read (hit1..hit3,
+        // update/alt-pred paths) is qualified by t*_valid[i] or up_hit*,
+        // and allocation rewrites the pair together with the valid bit.
+        // u stays on the reset network because the allocation probes
+        // (alloc_t*_ok) read it without a valid gate.
         t1_u[i]     <= 1'b0;
         t1_valid[i] <= 1'b0;
-        t2_tag[i]   <= '0;
-        t2_ctr[i]   <= '0;
         t2_u[i]     <= 1'b0;
         t2_valid[i] <= 1'b0;
-        t3_tag[i]   <= '0;
-        t3_ctr[i]   <= '0;
         t3_u[i]     <= 1'b0;
         t3_valid[i] <= 1'b0;
       end

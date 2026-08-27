@@ -21,6 +21,7 @@
 #include <generated/autoconf.h>
 
 #define __EXPORT __attribute__((visibility("default")))
+#define DIFFTEST_STATE_VERSION 2
 enum { DIFFTEST_TO_DUT, DIFFTEST_TO_REF };
 
 #if defined(CONFIG_ISA_x86)

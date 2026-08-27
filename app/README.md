@@ -48,6 +48,8 @@ app/
 │   ├── isa/          #   ISA instruction-level tests
 │   ├── memory/       #   Memory access pattern tests
 │   ├── algo/         #   Algorithm correctness tests
+│   ├── fp/           #   Bare-metal floating-point payloads
+│   ├── zbb/          #   Bare-metal bit-manipulation payloads
 │   └── hello/        #   Minimal hello world
 ├── demos/            # Interactive demo programs
 ├── benchmarks/       # Performance benchmarks
@@ -93,6 +95,12 @@ Instruction-level tests using inline assembly. Each test verifies correct behavi
 | `crc32`      | CRC-32 table lookup, verified against known IEEE 802.3 test vectors    |
 | `math_test`  | Fibonacci, prime sieve, GCD, 4×4 matrix multiply                       |
 | `string_ops` | strlen, strcmp, strcpy, memset, memcpy, reverse, itoa, case conversion |
+
+### Bare-Metal Payloads (`tests/fp/`, `tests/zbb/`)
+
+Directed assembly payloads live with the other application tests even when
+their execution is orchestrated by NEMU, NPC, or the verification Makefiles.
+Generated ELF, binary, and log files are written below `app/build/`.
 
 ## Demo Programs (`demos/`)
 
