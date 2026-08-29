@@ -9,12 +9,11 @@
  *
  * Timing contract (matches real macros AND BRAM inference):
  *   - Write: mem[addr] updated on posedge clock when wen=1.
- *   - Read : addr latched on posedge clock when en && !wen; rdata is
- *     combinational from the registered address (tCQ), i.e. valid the
- *     cycle AFTER the address was presented.
- *   - Simultaneous read+write to the same address: write wins on the
- *     storage; the read sees the OLD data (read-first). Parents that need
- *     the new data must implement a bypass register (see rapt_l1d.sv).
+ *   - Read : rdata registered on posedge clock when en && !wen, i.e. valid
+ *     the cycle AFTER the address was presented. When en is low or a write
+ *     is performed, rdata holds its previous value.
+ *   - The shared port performs either a read or a write in one cycle. Parents
+ *     that need write-to-read forwarding must implement an explicit bypass.
  *
  * To use real SRAM macros, define RAPT_USE_SRAM_MACRO and select the
  * pre-characterised OpenRAM single-port macro by (DEPTH, DATA_WIDTH).
@@ -31,7 +30,7 @@
 module rapt_sram_1rw #(
     parameter int ADDR_WIDTH = 7,
     parameter int DATA_WIDTH = 32,
-    parameter int INST_ID    = 0,  // Unique per-instance ID (for CSE prevention)
+  parameter int INST_ID    = 0,  // Compatibility parameter; instance API is stable
     parameter bit USE_BWE = 0  // Enable byte write enables
 ) (
     input  logic                  clock,
@@ -81,14 +80,29 @@ module rapt_sram_1rw #(
         .addr0(addr), .din0(wdata), .dout0(rdata)
       );
     end else begin : g_unsupported
-      // No OpenRAM macro generated for this (DEPTH, DATA_WIDTH).
-      // Add a config under sim/sram/configs/ and a stub in
-      // sim/sram/wrappers/rapt_sram_blackbox.v, then extend this
-      // generate cascade. Until then, fail loudly instead of silently
-      // mis-mapping.
-      initial $fatal(1, "rapt_sram_1rw: no OpenRAM macro for DEPTH=%0d WIDTH=%0d",
-                     DEPTH, DATA_WIDTH);
-      assign rdata = '0;
+      // No characterised OpenRAM macro exists for this shape yet. Keep the
+      // design synthesizable by falling back to the same synchronous RAM
+      // inference template used by FPGA builds. ASIC flows with inferred-
+      // memory mapping can still replace it; otherwise add an OpenRAM config
+      // and a generate branch above for characterised timing and physical data.
+      logic [DATA_WIDTH-1:0] mem[DEPTH];
+
+      if (USE_BWE) begin : g_write_bwe
+        always_ff @(posedge clock) begin
+          if (en && wen) begin
+            for (int b = 0; b < DATA_WIDTH/8; b++) begin
+              if (bwe[b]) mem[addr][b*8 +: 8] <= wdata[b*8 +: 8];
+            end
+          end else if (en) begin
+            rdata <= mem[addr];
+          end
+        end
+      end else begin : g_write_full
+        always_ff @(posedge clock) begin
+          if (en && wen) mem[addr] <= wdata;
+          else if (en) rdata <= mem[addr];
+        end
+      end
     end
   endgenerate
 
@@ -96,6 +110,9 @@ module rapt_sram_1rw #(
   // ============================================================
   // Behavioral model for simulation / Verilator / FPGA BRAM
   // ============================================================
+  /* verilator lint_off UNUSEDPARAM */
+  localparam int InstanceIdUnused = INST_ID;
+  /* verilator lint_on UNUSEDPARAM */
   logic [DATA_WIDTH-1:0] mem[DEPTH];
 
   // Synchronous write with optional byte enables
@@ -115,28 +132,12 @@ module rapt_sram_1rw #(
     end
   endgenerate
 
-  // Synchronous read: address registered (gated off during writes), data
-  // combinational from the registered address. Read-first on collision:
-  // when a write and a read target the same address in one cycle the
-  // registered address is the WRITE address, so rdata reflects pre-write
-  // storage for that address (real SRAM behavior). INST_ID XOR-keying
-  // keeps per-instance address registers CSE-immune under flat synthesis.
-  localparam logic [ADDR_WIDTH-1:0] KEY = ADDR_WIDTH'(INST_ID);
-
-  (* keep = "true" *)logic [ADDR_WIDTH-1:0] addr_r;
-  // Dummy token: holds INST_ID upper bits for per-instance uniqueness
-  /* verilator lint_off UNUSEDSIGNAL */
-  (* keep = "true" *)logic [3:0]            token_r;
-  /* verilator lint_on UNUSEDSIGNAL */
-
+  // Standard synchronous-read template recognized by FPGA BRAM and ASIC
+  // memory inference flows. Keeping the data register inside the memory
+  // process avoids an asynchronous array read after a registered address.
   always_ff @(posedge clock) begin
-    if (en) begin
-      addr_r  <= addr ^ KEY;
-      token_r <= 4'(INST_ID >> ADDR_WIDTH);
-    end
+    if (en && !wen) rdata <= mem[addr];
   end
-
-  assign rdata = mem[addr_r ^ KEY];
 `endif
 
 endmodule

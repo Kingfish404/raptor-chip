@@ -177,9 +177,9 @@ def test_rtl_macro_path():
         )
         check(guard_re.search(text) is not None,
               f"{name}: guarded by DEPTH=={depth} && DATA_WIDTH=={width}")
-    # Unsupported shape escape hatch
-    check("$fatal" in text and "no OpenRAM macro" in text,
-          "unsupported (DEPTH,WIDTH) triggers $fatal at elaboration")
+        # Unsupported shapes must remain synthesizable for L2 and custom configs.
+        check("g_unsupported" in text and "logic [DATA_WIDTH-1:0] mem[DEPTH]" in text,
+            "unsupported (DEPTH,WIDTH) uses synchronous inference fallback")
 
 
 # ---------------------------------------------------------------------------

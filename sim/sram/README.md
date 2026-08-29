@@ -7,10 +7,10 @@ Verilog blackboxes + Liberty timing into the Yosys / OpenSTA flow used by
 
 ## Why
 
-The default [hdl/memory/rapt_sram_1rw.sv](../../hdl/memory/rapt_sram_1rw.sv) is a
-behavioural flop-array model. Yosys synthesises it to D flip-flop + mux trees, which makes
-the cache data arrays dominate area and inflate `WNS/TNS` to numbers that bear no resemblance
-to a real chip. Replacing them with characterised SRAM macros gives:
+The default [hdl/memory/rapt_sram_1rw.sv](../../hdl/memory/rapt_sram_1rw.sv) uses the
+canonical clocked-read single-port RAM template. FPGA synthesis can infer block RAM from
+that model. Generic ASIC synthesis may still lower it to flops unless the technology flow
+maps inferred memories, so the OpenRAM path replaces it with characterised SRAM macros:
 
 - **Realistic area** (6T SRAM bitcell ≈ 50–100× denser than a flop)
 - **Realistic timing** (single-cycle synchronous read with `t_CQ` from `.lib`)
@@ -33,6 +33,10 @@ All macros are **single-port (1RW)** since the RTL was migrated to
 [rapt_sram_1rw.sv](../../hdl/memory/rapt_sram_1rw.sv): the cache controllers
 time-multiplex reads and writes onto the shared port. Legacy 1R1W configs
 are kept for reference and can be built with `make PORTS=1r1w`.
+
+The RTL and OpenRAM models share the same port contract: writes occur on the
+rising edge, reads register `rdata` on the rising edge, and `rdata` holds during
+disabled and write cycles.
 
 Each shape becomes one OpenRAM-compiled macro under
 `build/<PLATFORM>/macro/<openram_name>/` with the standard OpenRAM artefacts:
@@ -61,6 +65,11 @@ The `sta-sram` target defines `RAPT_USE_SRAM_MACRO`, so
 declared in [wrappers/rapt_sram_blackbox.v](wrappers/rapt_sram_blackbox.v) instead of the
 flop array. Yosys then leaves the macros as blackboxes; OpenSTA picks up the OpenRAM-produced
 `.lib` files and reports real cache timing.
+
+Shapes without a generated OpenRAM macro, such as an enabled large L2 configuration,
+fall back to the synchronous inference template instead of failing elaboration. Their
+timing and area are only technology-accurate after the ASIC flow maps the inferred memory
+or a matching OpenRAM shape is added.
 
 ## Adding a new shape
 

@@ -26,6 +26,7 @@
 # Build artifacts
 build/
 tmp/
+_tmp_*
 /obj_dir
 /include/config
 /include/generated

@@ -627,21 +627,31 @@ module rapt_l1i #(
   // inst_lo comes from bank[addr_offset]  -> check data_bank_raddr_d1[addr_offset] == addr_idx
   // inst_hi comes from bank[addr_offset_next] -> check data_bank_raddr_d1[addr_offset_next] == addr_idx_next
   //   (skipped when is_c=1, since only inst_lo is needed for 16-bit instructions)
-  logic [L1I_LEN-1:0] data_bank_raddr_d1[L1I_LINE_SIZE];
+  logic [L1I_LEN-1:0] data_bank_raddr_d1[L1I_N_WAYS][L1I_LINE_SIZE];
+  logic data_bank_rvalid_d1[L1I_N_WAYS][L1I_LINE_SIZE];
   logic sram_data_ready;
-  // The tracker payload needs no reset: sram_data_ready and every sram_*_ready
-  // gate on addr_valid_r (reset in the FSM), and the tracker is refreshed
-  // unconditionally every cycle, so stale entries cannot assert readiness
-  // before addr_valid_r is set.
   always_ff @(posedge clock) begin
-    for (int i = 0; i < int'(L1I_LINE_SIZE); i++)
-      data_bank_raddr_d1[i] <= l1i_fill_en && (offset_fetch == L1I_LINE_LEN'(i))
-        ? idx_fetch
-        : data_bank_raddr[i];
+    for (int w = 0; w < int'(L1I_N_WAYS); w++) begin
+      for (int i = 0; i < int'(L1I_LINE_SIZE); i++) begin
+        if (reset) begin
+          data_bank_rvalid_d1[w][i] <= 1'b0;
+        end else if (l1i_fill_en && (fill_way_r == L1iWayW'(w))
+                    && (offset_fetch == L1I_LINE_LEN'(i))) begin
+          // A 1RW write leaves rdata unchanged; do not label the held value as
+          // the newly filled set. The following read cycle revalidates it.
+          data_bank_rvalid_d1[w][i] <= 1'b0;
+        end else begin
+          data_bank_raddr_d1[w][i] <= data_bank_raddr[i];
+          data_bank_rvalid_d1[w][i] <= 1'b1;
+        end
+      end
+    end
   end
   assign sram_data_ready = addr_valid_r
-    && (data_bank_raddr_d1[addr_offset] == addr_idx)
-    && (is_c || data_bank_raddr_d1[addr_offset_next] == addr_idx_next);
+    && data_bank_rvalid_d1[hit_way_sel][addr_offset]
+    && (data_bank_raddr_d1[hit_way_sel][addr_offset] == addr_idx)
+    && (is_c || (data_bank_rvalid_d1[hit_next_way_sel][addr_offset_next]
+                 && data_bank_raddr_d1[hit_next_way_sel][addr_offset_next] == addr_idx_next));
 
   assign ifu_l1i.inst_n0 = (l1i_state == TRAP) ? 'h00000013 : {{inst_hi}, {inst_lo}};
   assign ifu_l1i.trap = (l1i_state == TRAP && rec_addr == ifu_l1i.pc);
@@ -698,8 +708,10 @@ module rapt_l1i #(
   assign hit_n2 = |way_hit_n2;
   assign l1i_word_n1 = data_bank_rdata[hit_n1_way_sel][addr_offset_n1];
   assign l1i_word_n2 = data_bank_rdata[hit_n2_way_sel][addr_offset_n2];
-  assign sram_n1_ready = addr_valid_r && (data_bank_raddr_d1[addr_offset_n1] == addr_idx_next4);
-  assign sram_n2_ready = addr_valid_r && (data_bank_raddr_d1[addr_offset_n2] == addr_idx_next4);
+  assign sram_n1_ready = addr_valid_r && data_bank_rvalid_d1[hit_n1_way_sel][addr_offset_n1]
+                       && (data_bank_raddr_d1[hit_n1_way_sel][addr_offset_n1] == addr_idx_next4);
+  assign sram_n2_ready = addr_valid_r && data_bank_rvalid_d1[hit_n2_way_sel][addr_offset_n2]
+                       && (data_bank_raddr_d1[hit_n2_way_sel][addr_offset_n2] == addr_idx_next4);
   // The existing extra tag/data mirror is addressed by pc+4. At the one
   // boundary where pc+6 enters a new line, defer the pair until a future
   // third-tag-mirror implementation can prove that line's hit and data.
@@ -769,7 +781,8 @@ module rapt_l1i #(
 
   assign ifu_l1i.inst_n1_valid = !pmp_n1_fetch_fault
     && (pc_ifu[1]
-      ? (hit_next && (data_bank_raddr_d1[addr_offset_next] == addr_idx_next))
+      ? (hit_next && data_bank_rvalid_d1[hit_next_way_sel][addr_offset_next]
+         && (data_bank_raddr_d1[hit_next_way_sel][addr_offset_next] == addr_idx_next))
       : (hit_n1 && sram_n1_ready));
   assign ifu_l1i.inst_n2 = l1i_word_n2;
   assign ifu_l1i.inst_n2_valid = !pmp_n2_fetch_fault && n2_same_line_as_next4
