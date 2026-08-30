@@ -50,6 +50,7 @@
 !/linux/*
 !/hdl/**
 !/verify/*
+!/lspd/**
 
 # ---- Re-ignore: generated, third-party, synthesis, local config ----
 /hdl/generated/
@@ -57,12 +58,15 @@
 /third_party/
 /docs-*/
 /syn/
+/lspd/syn/build/
 Makefile.local
 
 # ---- Re-ignore: build / simulation outputs (these may contain *.cpp/*.h
 # ---- that match the source whitelist above, e.g. Verilator obj_dir) ----
 obj_dir/
 **/obj_dir/
+build
+__pycache__
 
 # ---- OS artifacts ----
 .DS_Store

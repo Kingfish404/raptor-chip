@@ -61,7 +61,19 @@ module rapt_sram_1rw #(
   // write to the same address returns the OLD data.
   // ============================================================
   generate
-    if (DEPTH == 32 && DATA_WIDTH == 32) begin : g_32x32
+    if (DEPTH == 2 && DATA_WIDTH == 32) begin : g_2x32
+      rapt_openram_1rw_2x32 u_sram (
+        .clk0(clock), .csb0(~en), .web0(~wen),
+        .wmask0(USE_BWE ? bwe : {(DATA_WIDTH/8){1'b1}}),
+        .addr0(addr), .din0(wdata), .dout0(rdata)
+      );
+    end else if (DEPTH == 8 && DATA_WIDTH == 32) begin : g_8x32
+      rapt_openram_1rw_8x32 u_sram (
+        .clk0(clock), .csb0(~en), .web0(~wen),
+        .wmask0(USE_BWE ? bwe : {(DATA_WIDTH/8){1'b1}}),
+        .addr0(addr), .din0(wdata), .dout0(rdata)
+      );
+    end else if (DEPTH == 32 && DATA_WIDTH == 32) begin : g_32x32
       rapt_openram_1rw_32x32 u_sram (
         .clk0(clock), .csb0(~en), .web0(~wen),
         .wmask0(USE_BWE ? bwe : {(DATA_WIDTH/8){1'b1}}),
@@ -79,30 +91,53 @@ module rapt_sram_1rw #(
         .wmask0(USE_BWE ? bwe : {(DATA_WIDTH/8){1'b1}}),
         .addr0(addr), .din0(wdata), .dout0(rdata)
       );
+    end else if (DEPTH == 512 && DATA_WIDTH == 32) begin : g_512x32
+      rapt_openram_1rw_512x32 u_sram (
+        .clk0(clock), .csb0(~en), .web0(~wen),
+        .wmask0(USE_BWE ? bwe : {(DATA_WIDTH/8){1'b1}}),
+        .addr0(addr), .din0(wdata), .dout0(rdata)
+      );
+    end else if (DEPTH == 2 && DATA_WIDTH == 128) begin : g_2x128
+      rapt_openram_1rw_2x128 u_sram (
+        .clk0(clock), .csb0(~en), .web0(~wen),
+        .wmask0(USE_BWE ? bwe : {(DATA_WIDTH/8){1'b1}}),
+        .addr0(addr), .din0(wdata), .dout0(rdata)
+      );
+    end else if (DEPTH == 8 && DATA_WIDTH == 128) begin : g_8x128
+      rapt_openram_1rw_8x128 u_sram (
+        .clk0(clock), .csb0(~en), .web0(~wen),
+        .wmask0(USE_BWE ? bwe : {(DATA_WIDTH/8){1'b1}}),
+        .addr0(addr), .din0(wdata), .dout0(rdata)
+      );
+    end else if (DEPTH == 16 && DATA_WIDTH == 128) begin : g_16x128
+      rapt_openram_1rw_16x128 u_sram (
+        .clk0(clock), .csb0(~en), .web0(~wen),
+        .wmask0(USE_BWE ? bwe : {(DATA_WIDTH/8){1'b1}}),
+        .addr0(addr), .din0(wdata), .dout0(rdata)
+      );
+    end else if (DEPTH == 64 && DATA_WIDTH == 128) begin : g_64x128
+      rapt_openram_1rw_64x128 u_sram (
+        .clk0(clock), .csb0(~en), .web0(~wen),
+        .wmask0(USE_BWE ? bwe : {(DATA_WIDTH/8){1'b1}}),
+        .addr0(addr), .din0(wdata), .dout0(rdata)
+      );
+    end else if (DEPTH == 2048 && DATA_WIDTH == 32) begin : g_2048x32
+      rapt_openram_1rw_2048x32 u_sram (
+        .clk0(clock), .csb0(~en), .web0(~wen),
+        .wmask0(USE_BWE ? bwe : {(DATA_WIDTH/8){1'b1}}),
+        .addr0(addr), .din0(wdata), .dout0(rdata)
+      );
+    end else if (DEPTH == 2048 && DATA_WIDTH == 64) begin : g_2048x64
+      rapt_openram_1rw_2048x64 u_sram (
+        .clk0(clock), .csb0(~en), .web0(~wen),
+        .wmask0(USE_BWE ? bwe : {(DATA_WIDTH/8){1'b1}}),
+        .addr0(addr), .din0(wdata), .dout0(rdata)
+      );
     end else begin : g_unsupported
-      // No characterised OpenRAM macro exists for this shape yet. Keep the
-      // design synthesizable by falling back to the same synchronous RAM
-      // inference template used by FPGA builds. ASIC flows with inferred-
-      // memory mapping can still replace it; otherwise add an OpenRAM config
-      // and a generate branch above for characterised timing and physical data.
-      logic [DATA_WIDTH-1:0] mem[DEPTH];
-
-      if (USE_BWE) begin : g_write_bwe
-        always_ff @(posedge clock) begin
-          if (en && wen) begin
-            for (int b = 0; b < DATA_WIDTH/8; b++) begin
-              if (bwe[b]) mem[addr][b*8 +: 8] <= wdata[b*8 +: 8];
-            end
-          end else if (en) begin
-            rdata <= mem[addr];
-          end
-        end
-      end else begin : g_write_full
-        always_ff @(posedge clock) begin
-          if (en && wen) mem[addr] <= wdata;
-          else if (en) rdata <= mem[addr];
-        end
-      end
+      rapt_unsupported_sram_shape #(
+          .DEPTH(DEPTH), .DATA_WIDTH(DATA_WIDTH), .USE_BWE(USE_BWE)
+      ) u_unsupported_sram_shape ();
+      assign rdata = 'x;
     end
   endgenerate
 

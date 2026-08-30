@@ -37,9 +37,18 @@ RAPTOR = SRAM.parent.parent
 
 # (macro_name, depth, data_width, write_size)
 SHAPES = [
+    ("rapt_openram_1rw_2x32", 2, 32, 8),
+    ("rapt_openram_1rw_8x32", 8, 32, 8),
     ("rapt_openram_1rw_32x32", 32, 32, 8),
     ("rapt_openram_1rw_16x32", 16, 32, 8),
     ("rapt_openram_1rw_16x64", 16, 64, 8),
+    ("rapt_openram_1rw_512x32", 512, 32, 8),
+    ("rapt_openram_1rw_2x128", 2, 128, 8),
+    ("rapt_openram_1rw_8x128", 8, 128, 8),
+    ("rapt_openram_1rw_16x128", 16, 128, 8),
+    ("rapt_openram_1rw_64x128", 64, 128, 8),
+    ("rapt_openram_1rw_2048x32", 2048, 32, 8),
+    ("rapt_openram_1rw_2048x64", 2048, 64, 8),
 ]
 
 BLACKBOX_V = SRAM / "wrappers" / "rapt_sram_blackbox.v"
@@ -177,9 +186,8 @@ def test_rtl_macro_path():
         )
         check(guard_re.search(text) is not None,
               f"{name}: guarded by DEPTH=={depth} && DATA_WIDTH=={width}")
-        # Unsupported shapes must remain synthesizable for L2 and custom configs.
-        check("g_unsupported" in text and "logic [DATA_WIDTH-1:0] mem[DEPTH]" in text,
-            "unsupported (DEPTH,WIDTH) uses synchronous inference fallback")
+        check("g_unsupported" in text and "rapt_unsupported_sram_shape" in text,
+                    "unsupported (DEPTH,WIDTH) fails hierarchy checking in macro mode")
 
 
 # ---------------------------------------------------------------------------

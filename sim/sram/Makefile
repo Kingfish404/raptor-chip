@@ -25,9 +25,18 @@ MACRO_DIR   := $(BUILD_DIR)/macro
 # All macros are single-port (1RW) — the port shape the RTL instantiates.
 PORTS := 1rw
 CONFIGS := \
+	rapt_sram_2x32_1rw \
+	rapt_sram_8x32_1rw \
   rapt_sram_32x32_1rw \
   rapt_sram_16x32_1rw \
-  rapt_sram_16x64_1rw
+	rapt_sram_16x64_1rw \
+	rapt_sram_512x32_1rw \
+	rapt_sram_2x128_1rw \
+	rapt_sram_8x128_1rw \
+	rapt_sram_16x128_1rw \
+	rapt_sram_64x128_1rw \
+	rapt_sram_2048x32_1rw \
+	rapt_sram_2048x64_1rw
 
 CONFIG_FILES := $(foreach c,$(CONFIGS),$(CONFIG_DIR)/$(c)_$(PLATFORM).py)
 # rapt_sram_32x32_1rw -> rapt_openram_1rw_32x32
@@ -98,9 +107,18 @@ STUB_SCRIPT := $(SRAM_DIR)/scripts/gen_stub_lib.py
 
 # (name, depth, width, write_size) -- all single-port (1RW).
 STUB_SHAPES := \
+	rapt_openram_1rw_2x32,2,32,8 \
+	rapt_openram_1rw_8x32,8,32,8 \
   rapt_openram_1rw_32x32,32,32,8 \
   rapt_openram_1rw_16x32,16,32,8 \
-  rapt_openram_1rw_16x64,16,64,8
+	rapt_openram_1rw_16x64,16,64,8 \
+	rapt_openram_1rw_512x32,512,32,8 \
+	rapt_openram_1rw_2x128,2,128,8 \
+	rapt_openram_1rw_8x128,8,128,8 \
+	rapt_openram_1rw_16x128,16,128,8 \
+	rapt_openram_1rw_64x128,64,128,8 \
+	rapt_openram_1rw_2048x32,2048,32,8 \
+	rapt_openram_1rw_2048x64,2048,64,8
 
 stubs: ## Generate behavioural Liberty/Verilog stubs (no OpenRAM/PDK needed)
 	@mkdir -p $(MACRO_DIR)

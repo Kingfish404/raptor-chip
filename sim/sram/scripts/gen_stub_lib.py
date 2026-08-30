@@ -120,6 +120,31 @@ def emit_lib(name: str, depth: int, width: int, write_size: int) -> str:
         index_2    ("0.005, 0.05");
       }}
 
+      type (wmask0_bus_t) {{
+        base_type : array;
+        data_type : bit;
+        bit_width : {bytes_};
+        bit_from  : {bytes_ - 1};
+        bit_to    : 0;
+        downto    : true;
+      }}
+      type (addr0_bus_t) {{
+        base_type : array;
+        data_type : bit;
+        bit_width : {aw};
+        bit_from  : {aw - 1};
+        bit_to    : 0;
+        downto    : true;
+      }}
+      type (data0_bus_t) {{
+        base_type : array;
+        data_type : bit;
+        bit_width : {width};
+        bit_from  : {width - 1};
+        bit_to    : 0;
+        downto    : true;
+      }}
+
       cell ({name}) {{
         area : {area};
         dont_use : false;
@@ -226,30 +251,6 @@ def emit_lib(name: str, depth: int, width: int, write_size: int) -> str:
         {dout0_arc}
       }}
 
-      type (wmask0_bus_t) {{
-        base_type : array;
-        data_type : bit;
-        bit_width : {bytes_};
-        bit_from  : {bytes_ - 1};
-        bit_to    : 0;
-        downto    : true;
-      }}
-      type (addr0_bus_t) {{
-        base_type : array;
-        data_type : bit;
-        bit_width : {aw};
-        bit_from  : {aw - 1};
-        bit_to    : 0;
-        downto    : true;
-      }}
-      type (data0_bus_t) {{
-        base_type : array;
-        data_type : bit;
-        bit_width : {width};
-        bit_from  : {width - 1};
-        bit_to    : 0;
-        downto    : true;
-      }}
     }}
     """)
     return header
