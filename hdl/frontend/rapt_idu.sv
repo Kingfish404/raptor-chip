@@ -131,8 +131,8 @@ module rapt_idu #(
   // Instruction Decoding (combinational)
   // Solt A: main instruction (could be compressed or regular)
   // ================================================================
-  logic [ 5:0] alu_a;
-  logic        ren_dec_a, wen_dec_a;
+  logic [5:0] alu_a;
+  logic ren_dec_a, wen_dec_a;
   logic        word_flag_a;
   logic [11:0] csr_a;
   logic [ 2:0] csr_csw_a;
@@ -373,7 +373,7 @@ module rapt_idu #(
   // For atomics, use funct3=010 to mark 32-bit variant on RV64.
   assign idu_rnu.uop_a.word = word_flag_a
       || (idu_rnu.uop_a.atom && inst_idu_a[14:12] == `RAPT_F3_AMO_W_);
-    assign idu_rnu.uop_a.alu = fp_load_d_a ? `RAPT_ALU_LD__
+  assign idu_rnu.uop_a.alu = fp_load_d_a ? `RAPT_ALU_LD__
       : (fp_store_d_a ? `RAPT_SD_WSTRB
       : (fp_load_a ? `RAPT_ALU_LW__
       : (fp_store_a ? `RAPT_SW_WSTRB : alu_a)));
@@ -386,7 +386,7 @@ module rapt_idu #(
   assign idu_rnu.uop_a.fp_rd = fp_rd_a;
   assign idu_rnu.uop_a.ren = ren_dec_a || fp_load_a || fp_load_d_a;
   assign idu_rnu.uop_a.wen = wen_dec_a || fp_store_a || fp_store_d_a;
-    assign idu_rnu.uop_a.rd[RLEN-1:0] = (is_illegal_a || fp_writes_fpr_a
+  assign idu_rnu.uop_a.rd[RLEN-1:0] = (is_illegal_a || fp_writes_fpr_a
       || fp_store_a || fp_store_d_a) ? '0
       : (fp_valid_a ? fp_rd_a[RLEN-1:0] : rd_a[RLEN-1:0]);
   assign idu_rnu.uop_a.csr_csw = csr_csw_a;
@@ -477,7 +477,7 @@ module rapt_idu #(
   // support is deliberately limited to the statically predicted direct JAL
   // form; flush recovery rewinds `rsb_spec_idx` to the architectural pointer.
   logic is_link_rd_a;
-  assign is_link_rd_a    = (rd_a == 5'd1) || (rd_a == 5'd5);
+  assign is_link_rd_a = (rd_a == 5'd1) || (rd_a == 5'd5);
 `ifdef RAPT_DUAL_ISSUE
   logic is_link_rd_b;
   logic slot_b_direct_call;
@@ -543,7 +543,7 @@ module rapt_idu #(
     : early_resteer_cond   ? correct_npc
     :                        pnpc_idu;
 `endif
-  assign idu_rnu.uop_a.inst      = inst_idu_a;
+  assign idu_rnu.uop_a.inst = inst_idu_a;
 `ifdef RAPT_RVFI
   // RVFI must report the original instruction word: compressed instructions
   // are reported as the raw 16-bit encoding zero-extended (so `insn[1:0]!=2'b11`),
@@ -552,11 +552,11 @@ module rapt_idu #(
 `endif
   assign idu_rnu.uop_a.pc        = pc_idu_a;
 
-      assign idu_rnu.rs1_a[RLEN-1:0] = (fp_valid_a &&
+  assign idu_rnu.rs1_a[RLEN-1:0] = (fp_valid_a &&
         (fp_op_a == `RAPT_FP_OP_FMV_W_X || fp_op_a == `RAPT_FP_OP_FMV_D_X
          || fp_i2f_a || fp_load_a || fp_store_a || fp_load_d_a || fp_store_d_a))
         ? fp_rs1_a[RLEN-1:0] : rs1_a[RLEN-1:0];
-      assign idu_rnu.rs2_a[RLEN-1:0] = fp_valid_a ? fp_rs2_a[RLEN-1:0] : rs2_a[RLEN-1:0];
+  assign idu_rnu.rs2_a[RLEN-1:0] = fp_valid_a ? fp_rs2_a[RLEN-1:0] : rs2_a[RLEN-1:0];
 
 `ifdef RAPT_DUAL_ISSUE
   assign is_c_b     = (inst_b[1:0] != 2'b11);
@@ -696,11 +696,11 @@ module rapt_idu #(
   assign idu_rnu.uop_b.fp_rd = fp_rd_b;
   assign idu_rnu.uop_b.word = word_flag_b
       || (idu_rnu.uop_b.atom && inst_idu_b[14:12] == `RAPT_F3_AMO_W_);
-    assign idu_rnu.uop_b.alu = fp_load_d_b ? `RAPT_ALU_LD__
+  assign idu_rnu.uop_b.alu = fp_load_d_b ? `RAPT_ALU_LD__
       : (fp_store_d_b ? `RAPT_SD_WSTRB
       : (fp_load_b ? `RAPT_ALU_LW__
       : (fp_store_b ? `RAPT_SW_WSTRB : alu_b)));
-    assign idu_rnu.uop_b.rd[RLEN-1:0] = (is_illegal_b || fp_writes_fpr_b) ? '0
+  assign idu_rnu.uop_b.rd[RLEN-1:0] = (is_illegal_b || fp_writes_fpr_b) ? '0
       : (fp_valid_b ? fp_rd_b[RLEN-1:0] : rd_b[RLEN-1:0]);
   assign idu_rnu.uop_b.ren = ren_dec_b || fp_load_b || fp_load_d_b;
   assign idu_rnu.uop_b.wen = wen_dec_b || fp_store_b || fp_store_d_b;
@@ -723,11 +723,11 @@ module rapt_idu #(
   assign idu_rnu.op1_b = dec_op1_b[XLEN-1:0];
   assign idu_rnu.op2_b = dec_op2_b[XLEN-1:0];
 
-      assign idu_rnu.rs1_b[RLEN-1:0] = (fp_valid_b &&
+  assign idu_rnu.rs1_b[RLEN-1:0] = (fp_valid_b &&
         (fp_op_b == `RAPT_FP_OP_FMV_W_X || fp_op_b == `RAPT_FP_OP_FMV_D_X
          || fp_i2f_b || fp_load_b || fp_store_b || fp_load_d_b || fp_store_d_b))
         ? fp_rs1_b[RLEN-1:0] : rs1_b[RLEN-1:0];
-      assign idu_rnu.rs2_b[RLEN-1:0] = fp_valid_b ? fp_rs2_b[RLEN-1:0] : rs2_b[RLEN-1:0];
+  assign idu_rnu.rs2_b[RLEN-1:0] = fp_valid_b ? fp_rs2_b[RLEN-1:0] : rs2_b[RLEN-1:0];
 
   // Slot B valid: IFU provided a second instruction AND slot A is not a trap
   // or branch/jump (branches in slot A could skip slot B on the taken path).
@@ -753,18 +753,15 @@ module rapt_idu #(
   `RAPT_COVER(clock, reset, IDU_EARLY_RESTEER_EVENT, ifu_idu.resteer)
 
 `ifdef RAPT_DUAL_ISSUE
-    // DUAL_COMMIT_SEMANTICS: slot B may carry a direct JAL or a conditionally
-    // predicted branch. JALR and serializing uops remain forbidden.
+  // DUAL_COMMIT_SEMANTICS: slot B may carry a direct JAL or a conditionally
+  // predicted branch. JALR and serializing uops remain forbidden.
   `RAPT_SVA_IMPLY(
-        clock, reset, IDU_SLOT_B_ONLY_PREDICTED_CONTROL, idu_rnu.valid_b,
-        !(idu_rnu.uop_b.jren || idu_rnu.uop_b.system || idu_rnu.uop_b.f_i
-      || idu_rnu.uop_b.f_time || idu_rnu.uop_b.atom))
-    `RAPT_SVA_IMPLY(clock, reset, IDU_SLOT_B_DIRECT_JAL_PNPC,
-            idu_rnu.valid_b && slot_b_direct_jal,
-            idu_rnu.uop_b.pnpc == pnpc_idu)
-    `RAPT_SVA_IMPLY(clock, reset, IDU_SLOT_B_COND_BRANCH_PNPC,
-                    idu_rnu.valid_b && slot_b_cond_branch,
-                    idu_rnu.uop_b.pnpc == pnpc_idu)
+      clock, reset, IDU_SLOT_B_ONLY_PREDICTED_CONTROL, idu_rnu.valid_b,
+      !(idu_rnu.uop_b.jren || idu_rnu.uop_b.system || idu_rnu.uop_b.f_i || idu_rnu.uop_b.f_time || idu_rnu.uop_b.atom))
+  `RAPT_SVA_IMPLY(clock, reset, IDU_SLOT_B_DIRECT_JAL_PNPC, idu_rnu.valid_b && slot_b_direct_jal,
+                  idu_rnu.uop_b.pnpc == pnpc_idu)
+  `RAPT_SVA_IMPLY(clock, reset, IDU_SLOT_B_COND_BRANCH_PNPC, idu_rnu.valid_b && slot_b_cond_branch,
+                  idu_rnu.uop_b.pnpc == pnpc_idu)
 `endif
 
 endmodule

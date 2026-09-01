@@ -53,7 +53,7 @@ module rapt_exu #(
 
     exu_lsu_if.master exu_lsu,
     exu_csr_if.master exu_csr,
-    fpr_if           fpr,
+    fpr_if            fpr,
 
     csr_bcast_if.in   csr_bcast,
     pmp_state_if.in   pmp_state,
@@ -135,8 +135,7 @@ module rapt_exu #(
   // branch resolves on the Branch pipe as before, with trap info already in the
   // ROB from dispatch.)
   function automatic logic uop_requires_alu_csr(input rapt_pkg::uop_t u);
-    return u.system || u.trap || u.ecall || u.ebreak
-      || u.mret || u.sret || (u.csr_csw != '0);
+    return u.system || u.trap || u.ecall || u.ebreak || u.mret || u.sret || (u.csr_csw != '0);
   endfunction
   /* verilator lint_on UNUSEDSIGNAL */
 
@@ -313,20 +312,30 @@ module rapt_exu #(
       .pmu_iq_full  (pmu_brq_full_unused)
   );
 
-    rapt_exu_iq #(
-      .IQ_SIZE (FPQ_SIZE),
+  rapt_exu_iq #(
+      .IQ_SIZE       (FPQ_SIZE),
       .IN_ORDER_ISSUE(1'b1),
-      .ROB_SIZE(ROB_SIZE),
-      .PLEN    (PLEN),
-      .RLEN    (RLEN),
-      .XLEN    (XLEN)
-    ) u_fpq (
-      .clock        (clock), .reset(reset), .cmu_bcast(cmu_bcast), .rou_exu(rou_exu),
-      .disp         (disp_fpq), .exu_rou(wb_alu_csr), .exu_rou_b(wb_alu),
-      .exu_ioq_bcast(exu_ioq_bcast), .exu_wb_mul(exu_wb_mul), .load_fast(load_fast),
-      .issue_enable (fpu_issue_enable), .iss(iss_fpu), .iss_b(iss_fpu_unused),
-      .occ_o        (), .pmu_iq_full()
-    );
+      .ROB_SIZE      (ROB_SIZE),
+      .PLEN          (PLEN),
+      .RLEN          (RLEN),
+      .XLEN          (XLEN)
+  ) u_fpq (
+      .clock        (clock),
+      .reset        (reset),
+      .cmu_bcast    (cmu_bcast),
+      .rou_exu      (rou_exu),
+      .disp         (disp_fpq),
+      .exu_rou      (wb_alu_csr),
+      .exu_rou_b    (wb_alu),
+      .exu_ioq_bcast(exu_ioq_bcast),
+      .exu_wb_mul   (exu_wb_mul),
+      .load_fast    (load_fast),
+      .issue_enable (fpu_issue_enable),
+      .iss          (iss_fpu),
+      .iss_b        (iss_fpu_unused),
+      .occ_o        (),
+      .pmu_iq_full  ()
+  );
 
   // === Execution pipes (combinational FU + writeback) ===
   rapt_exu_pipe_alu_csr #(
@@ -341,47 +350,53 @@ module rapt_exu #(
       .uop_pl    (uop_pl)
   );
 
-    rapt_exu_pipe_fpu #(
-      .ROB_SIZE(ROB_SIZE), .XLEN(XLEN)
-    ) u_pipe_fpu (
-      .clock(clock), .reset(reset), .iss(iss_fpu), .cmu_bcast(cmu_bcast),
-      .csr_bcast(csr_bcast), .fpr(fpr), .wb_fpu(wb_fpu),
-      .issue_enable(fpu_issue_enable), .uop_pl(uop_pl)
-    );
+  rapt_exu_pipe_fpu #(
+      .ROB_SIZE(ROB_SIZE),
+      .XLEN(XLEN)
+  ) u_pipe_fpu (
+      .clock(clock),
+      .reset(reset),
+      .iss(iss_fpu),
+      .cmu_bcast(cmu_bcast),
+      .csr_bcast(csr_bcast),
+      .fpr(fpr),
+      .wb_fpu(wb_fpu),
+      .issue_enable(fpu_issue_enable),
+      .uop_pl(uop_pl)
+  );
 
-    // FP and ALU-CSR share CDB port 0. FP has priority because div/sqrt may
-    // complete while the FPQ itself is blocked; gate ALU-CSR issue on that CDB.
-    assign alu_csr_pipe_enable = 1'b1;
-    // A multi-cycle FMA/divsqrt owns the FP writeback/flags slot until it
-    // completes. Keep CSR/ALU issue behind the same gate so instructions such
-    // as CSRR FFLAGS cannot observe the pre-FMA architectural flags.
-    assign alu_csr_issue_enable = alu_csr_pipe_enable && !wb_fpu.valid
-      && fpu_issue_enable;
-    assign wb_alu_csr.pc = wb_fpu.valid ? wb_fpu.pc : wb_alu_csr_raw.pc;
-    assign wb_alu_csr.npc = wb_fpu.valid ? wb_fpu.npc : wb_alu_csr_raw.npc;
-    assign wb_alu_csr.btaken = wb_fpu.valid ? wb_fpu.btaken : wb_alu_csr_raw.btaken;
-    assign wb_alu_csr.mispredict = wb_fpu.valid ? wb_fpu.mispredict : wb_alu_csr_raw.mispredict;
-    assign wb_alu_csr.dest = wb_fpu.valid ? wb_fpu.dest : wb_alu_csr_raw.dest;
-    assign wb_alu_csr.result = wb_fpu.valid ? wb_fpu.result : wb_alu_csr_raw.result;
-    assign wb_alu_csr.prd = wb_fpu.valid ? wb_fpu.prd : wb_alu_csr_raw.prd;
-    assign wb_alu_csr.rd = wb_fpu.valid ? wb_fpu.rd : wb_alu_csr_raw.rd;
-    assign wb_alu_csr.csr_wen = wb_fpu.valid ? wb_fpu.csr_wen : wb_alu_csr_raw.csr_wen;
-    assign wb_alu_csr.csr_wdata = wb_fpu.valid ? wb_fpu.csr_wdata : wb_alu_csr_raw.csr_wdata;
-    assign wb_alu_csr.fp_flags_valid = wb_fpu.valid ? wb_fpu.fp_flags_valid
+  // FP and ALU-CSR share CDB port 0. FP has priority because div/sqrt may
+  // complete while the FPQ itself is blocked; gate ALU-CSR issue on that CDB.
+  assign alu_csr_pipe_enable = 1'b1;
+  // A multi-cycle FMA/divsqrt owns the FP writeback/flags slot until it
+  // completes. Keep CSR/ALU issue behind the same gate so instructions such
+  // as CSRR FFLAGS cannot observe the pre-FMA architectural flags.
+  assign alu_csr_issue_enable = alu_csr_pipe_enable && !wb_fpu.valid && fpu_issue_enable;
+  assign wb_alu_csr.pc = wb_fpu.valid ? wb_fpu.pc : wb_alu_csr_raw.pc;
+  assign wb_alu_csr.npc = wb_fpu.valid ? wb_fpu.npc : wb_alu_csr_raw.npc;
+  assign wb_alu_csr.btaken = wb_fpu.valid ? wb_fpu.btaken : wb_alu_csr_raw.btaken;
+  assign wb_alu_csr.mispredict = wb_fpu.valid ? wb_fpu.mispredict : wb_alu_csr_raw.mispredict;
+  assign wb_alu_csr.dest = wb_fpu.valid ? wb_fpu.dest : wb_alu_csr_raw.dest;
+  assign wb_alu_csr.result = wb_fpu.valid ? wb_fpu.result : wb_alu_csr_raw.result;
+  assign wb_alu_csr.prd = wb_fpu.valid ? wb_fpu.prd : wb_alu_csr_raw.prd;
+  assign wb_alu_csr.rd = wb_fpu.valid ? wb_fpu.rd : wb_alu_csr_raw.rd;
+  assign wb_alu_csr.csr_wen = wb_fpu.valid ? wb_fpu.csr_wen : wb_alu_csr_raw.csr_wen;
+  assign wb_alu_csr.csr_wdata = wb_fpu.valid ? wb_fpu.csr_wdata : wb_alu_csr_raw.csr_wdata;
+  assign wb_alu_csr.fp_flags_valid = wb_fpu.valid ? wb_fpu.fp_flags_valid
       : wb_alu_csr_raw.fp_flags_valid;
-    assign wb_alu_csr.fp_flags = wb_fpu.valid ? wb_fpu.fp_flags : wb_alu_csr_raw.fp_flags;
-    assign wb_alu_csr.wen = wb_fpu.valid ? wb_fpu.wen : wb_alu_csr_raw.wen;
-    assign wb_alu_csr.alu = wb_fpu.valid ? wb_fpu.alu : wb_alu_csr_raw.alu;
-    assign wb_alu_csr.sq_waddr = wb_fpu.valid ? wb_fpu.sq_waddr : wb_alu_csr_raw.sq_waddr;
-    assign wb_alu_csr.sq_wdata = wb_fpu.valid ? wb_fpu.sq_wdata : wb_alu_csr_raw.sq_wdata;
-    assign wb_alu_csr.sq_wdata64 = wb_fpu.valid ? wb_fpu.sq_wdata64 : wb_alu_csr_raw.sq_wdata64;
-    assign wb_alu_csr.sq_fp64 = wb_fpu.valid ? wb_fpu.sq_fp64 : wb_alu_csr_raw.sq_fp64;
-    assign wb_alu_csr.trap = wb_fpu.valid ? wb_fpu.trap : wb_alu_csr_raw.trap;
-    assign wb_alu_csr.tval = wb_fpu.valid ? wb_fpu.tval : wb_alu_csr_raw.tval;
-    assign wb_alu_csr.cause = wb_fpu.valid ? wb_fpu.cause : wb_alu_csr_raw.cause;
-    assign wb_alu_csr.difftest_skip = wb_fpu.valid ? wb_fpu.difftest_skip
+  assign wb_alu_csr.fp_flags = wb_fpu.valid ? wb_fpu.fp_flags : wb_alu_csr_raw.fp_flags;
+  assign wb_alu_csr.wen = wb_fpu.valid ? wb_fpu.wen : wb_alu_csr_raw.wen;
+  assign wb_alu_csr.alu = wb_fpu.valid ? wb_fpu.alu : wb_alu_csr_raw.alu;
+  assign wb_alu_csr.sq_waddr = wb_fpu.valid ? wb_fpu.sq_waddr : wb_alu_csr_raw.sq_waddr;
+  assign wb_alu_csr.sq_wdata = wb_fpu.valid ? wb_fpu.sq_wdata : wb_alu_csr_raw.sq_wdata;
+  assign wb_alu_csr.sq_wdata64 = wb_fpu.valid ? wb_fpu.sq_wdata64 : wb_alu_csr_raw.sq_wdata64;
+  assign wb_alu_csr.sq_fp64 = wb_fpu.valid ? wb_fpu.sq_fp64 : wb_alu_csr_raw.sq_fp64;
+  assign wb_alu_csr.trap = wb_fpu.valid ? wb_fpu.trap : wb_alu_csr_raw.trap;
+  assign wb_alu_csr.tval = wb_fpu.valid ? wb_fpu.tval : wb_alu_csr_raw.tval;
+  assign wb_alu_csr.cause = wb_fpu.valid ? wb_fpu.cause : wb_alu_csr_raw.cause;
+  assign wb_alu_csr.difftest_skip = wb_fpu.valid ? wb_fpu.difftest_skip
       : wb_alu_csr_raw.difftest_skip;
-    assign wb_alu_csr.valid = wb_fpu.valid ? 1'b1 : wb_alu_csr_raw.valid;
+  assign wb_alu_csr.valid = wb_fpu.valid ? 1'b1 : wb_alu_csr_raw.valid;
 
   rapt_exu_pipe_alu #(
       .XLEN(XLEN)
@@ -446,8 +461,8 @@ module rapt_exu #(
   // ==========================================================================
 
   // ONE_HOT: each dispatch slot targets exactly one queue when dispatching.
-  `RAPT_SVA_IMPLY(clock, reset, EXU_ROUTE_A_ONEHOT, rou_exu.valid,
-                  ($onehot({a_to_ioq, a_to_mdq, a_to_fpq, a_to_brq, a_to_alq})))
+  `RAPT_SVA_IMPLY(clock, reset, EXU_ROUTE_A_ONEHOT, rou_exu.valid, ($onehot
+                  ({a_to_ioq, a_to_mdq, a_to_fpq, a_to_brq, a_to_alq})))
 `ifdef RAPT_DUAL_ISSUE
   `RAPT_SVA_IMPLY(clock, reset, EXU_ROUTE_B_ONEHOT, rou_exu.valid_b, ($onehot
                   ({b_to_ioq, b_to_mdq, b_to_fpq, b_to_brq, b_to_alq})))

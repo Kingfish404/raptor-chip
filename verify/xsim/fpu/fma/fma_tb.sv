@@ -1,7 +1,7 @@
 // Directed regression for rapt_fpu_fma (single & double), covering the
 // subnormal / zero / rounding corner cases that previously failed RISCOF.
 // Handshake: assert `valid` for one cycle, result appears on `result`/`flags`
-// `result_valid` three clocks later.
+// `result_valid` four clocks later.
 module tb;
   logic clock = 0, reset = 1, flush = 0, valid = 0;
   logic [5:0]  op;

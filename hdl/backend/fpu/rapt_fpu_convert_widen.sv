@@ -38,8 +38,11 @@ module rapt_fpu_convert_widen (
     fraction_c = source_c[22:0];
     leading_one_c = '0;
     leading_found_c = 1'b0;
-    for (leading_scan_index_c = 22; leading_scan_index_c >= 0;
-         leading_scan_index_c = leading_scan_index_c - 1) begin
+    for (
+        leading_scan_index_c = 22;
+        leading_scan_index_c >= 0;
+        leading_scan_index_c = leading_scan_index_c - 1
+    ) begin
       if (!leading_found_c && fraction_c[leading_scan_index_c]) begin
         leading_one_c = 6'(leading_scan_index_c + 1);
         leading_found_c = 1'b1;

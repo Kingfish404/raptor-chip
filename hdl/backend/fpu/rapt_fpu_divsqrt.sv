@@ -40,7 +40,10 @@ module rapt_fpu_divsqrt #(
 
   localparam int CNT_W = 7;
 
-  typedef enum logic [0:0] {ST_IDLE = 1'b0, ST_RUN = 1'b1} state_e;
+  typedef enum logic [0:0] {
+    ST_IDLE = 1'b0,
+    ST_RUN = 1'b1
+  } state_e;
 
   state_e           state_q;
   logic [CNT_W-1:0] cnt_q;          // iterations remaining
@@ -71,20 +74,20 @@ module rapt_fpu_divsqrt #(
   logic [10:0] exp_a, exp_b;
   logic [51:0] frac_a, frac_b;
   logic sign_a, sign_b;
-    logic a_boxed, b_boxed;
+  logic a_boxed, b_boxed;
   logic a_nan, b_nan, a_snan, b_snan, a_inf, b_inf, a_zero, b_zero;
 
-    assign a_boxed = src_is_double || operand_a[63:32] == '1;
-    assign b_boxed = src_is_double || operand_b[63:32] == '1;
+  assign a_boxed = src_is_double || operand_a[63:32] == '1;
+  assign b_boxed = src_is_double || operand_b[63:32] == '1;
   assign sign_a = src_is_double ? operand_a[63]    : operand_a[31];
   assign sign_b = src_is_double ? operand_b[63]    : operand_b[31];
-    assign exp_a  = src_is_double ? operand_a[62:52]
+  assign exp_a  = src_is_double ? operand_a[62:52]
       : a_boxed ? {3'b0, operand_a[30:23]} : 11'h0ff;
-    assign exp_b  = src_is_double ? operand_b[62:52]
+  assign exp_b  = src_is_double ? operand_b[62:52]
       : b_boxed ? {3'b0, operand_b[30:23]} : 11'h0ff;
-    assign frac_a = src_is_double ? operand_a[51:0]
+  assign frac_a = src_is_double ? operand_a[51:0]
       : a_boxed ? {29'b0, operand_a[22:0]} : {29'b0, 23'h40_0000};
-    assign frac_b = src_is_double ? operand_b[51:0]
+  assign frac_b = src_is_double ? operand_b[51:0]
       : b_boxed ? {29'b0, operand_b[22:0]} : {29'b0, 23'h40_0000};
 
   localparam logic [10:0] EXP_ALL1_DP = 11'h7ff;
@@ -104,9 +107,9 @@ module rapt_fpu_divsqrt #(
   logic [4:0]  special_flags;
 
   always_comb begin
-    logic        sign_r;
+    logic sign_r;
     logic [63:0] inf_a, qnan_a;
-    logic        inv, dz;
+    logic inv, dz;
 
     sign_r = divide ? (sign_a ^ sign_b) : sign_a;
     qnan_a = src_is_double ? 64'h7ff8_0000_0000_0000 : 64'hffff_ffff_7fc0_0000;
@@ -117,24 +120,22 @@ module rapt_fpu_divsqrt #(
     special_result = qnan_a;
 
     if (a_nan || (divide && b_nan)) begin
-      inv = a_snan || (divide && b_snan);       // quiet NaN: flag only if sNaN
+      inv = a_snan || (divide && b_snan);  // quiet NaN: flag only if sNaN
     end else if (!divide && sign_a && !a_zero) begin
-      inv = 1'b1;                               // sqrt(negative)
+      inv = 1'b1;  // sqrt(negative)
     end else if (divide && ((a_zero && b_zero) || (a_inf && b_inf))) begin
-      inv = 1'b1;                               // 0/0, inf/inf
+      inv = 1'b1;  // 0/0, inf/inf
     end else if (divide && b_zero && a_inf) begin
-      special_result = inf_a;                   // inf/0 = inf, NO DZ flag
+      special_result = inf_a;  // inf/0 = inf, NO DZ flag
     end else if (divide && b_zero) begin
       dz = 1'b1;                                // finite-nonzero / 0 = inf, DZ
       special_result = inf_a;
     end else if (divide && b_inf) begin
-      special_result = src_is_double ? {sign_r, 63'b0}
-                                     : {32'hffff_ffff, sign_r, 31'b0};
+      special_result = src_is_double ? {sign_r, 63'b0} : {32'hffff_ffff, sign_r, 31'b0};
     end else if (a_inf) begin
-      special_result = inf_a;                   // inf/x = inf ; sqrt(inf)=inf
-    end else begin                              // a_zero (b finite nonzero)
-      special_result = src_is_double ? {sign_r, 63'b0}
-                                     : {32'hffff_ffff, sign_r, 31'b0};
+      special_result = inf_a;  // inf/x = inf ; sqrt(inf)=inf
+    end else begin  // a_zero (b finite nonzero)
+      special_result = src_is_double ? {sign_r, 63'b0} : {32'hffff_ffff, sign_r, 31'b0};
     end
 
     special = a_nan || (divide && b_nan) || (!divide && sign_a && !a_zero)
@@ -147,22 +148,20 @@ module rapt_fpu_divsqrt #(
   // Launch-time operand preparation
   // ------------------------------------------------------------------------
   // Normalise a mantissa to have its leading 1 at bit 52 (1.f at bit 52).
-  function automatic logic [52:0] norm_mant(input logic [51:0] frac,
-                                            input logic [10:0] exp,
-                                            input logic        dbl,
-                                            output int adj);
+  function automatic logic [52:0] norm_mant(input logic [51:0] frac, input logic [10:0] exp,
+                                            input logic dbl, output int adj);
     logic [52:0] m;
     int          i;
     begin
       // Unified 1.f format with the leading 1 at bit 52 for both precisions.
       // Single precision left-aligns its 23-bit fraction just below bit 52.
       if (dbl) m = {1'b1, frac};
-      else     m = {1'b1, frac[22:0], 29'b0};
+      else m = {1'b1, frac[22:0], 29'b0};
       adj = 0;
       if (exp == '0) begin
         // subnormal: strip the implicit hidden bit, then normalise upward
         if (dbl) m = {1'b0, frac};
-        else     m = {1'b0, frac[22:0], 29'b0};
+        else m = {1'b0, frac[22:0], 29'b0};
         for (i = 0; i < 52; i = i + 1) begin
           if (!m[52]) begin
             m   = m << 1;
@@ -175,7 +174,7 @@ module rapt_fpu_divsqrt #(
   endfunction
 
   logic [52:0] ma_n, mb_n;
-  int          adj_a, adj_b;
+  int adj_a, adj_b;
   logic signed [13:0] exp_launch;
   logic [191:0] d_launch;
   logic [191:0] rem_launch;
@@ -186,7 +185,7 @@ module rapt_fpu_divsqrt #(
     int e_val;
     begin
       if (e == '0) e_val = dbl ? -1022 : -126;
-      else         e_val = int'(e) - (dbl ? 1023 : 127);
+      else e_val = int'(e) - (dbl ? 1023 : 127);
       return e_val + adj;
     end
   endfunction
@@ -258,7 +257,7 @@ module rapt_fpu_divsqrt #(
 
   always_comb begin
     logic [63:0] rem2;
-    rem2 = {rem_q[62:0], 1'b0};                 // 2 * R
+    rem2 = {rem_q[62:0], 1'b0};  // 2 * R
     if (rem2 >= d_q[63:0]) begin
       div_rem_n = 192'({64'b0, rem2 - d_q[63:0]});
       div_quo_n = {quo_q[54:0], 1'b1};
@@ -288,7 +287,7 @@ module rapt_fpu_divsqrt #(
       sqrt_rem_n  = {132'b0, rem2};
       sqrt_root_n = {sroot_q[54:0], 1'b0};
     end
-    sqrt_rad_n = {d_q[189:0], 2'b00};        // consume two radicand bits
+    sqrt_rad_n = {d_q[189:0], 2'b00};  // consume two radicand bits
   end
 
   // ------------------------------------------------------------------------
@@ -303,14 +302,14 @@ module rapt_fpu_divsqrt #(
     logic [55:0]        q;
     logic               rem_nz;
     logic [57:0]        sig_ext;
-    logic               g, r, s, inexact, round_up;
+    logic g, r, s, inexact, round_up;
     logic [57:0]        sig_round;
     logic signed [13:0] e_round;
-    logic               sub_norm, overflow, uf;
+    logic sub_norm, overflow, uf;
     int                 sh;
     logic [57:0]        sticky_mask;
     logic               sign_r;
-    logic [63:0]        inf_a, max_a, qnan_a;
+    logic [63:0] inf_a, max_a, qnan_a;
     logic [10:0]        pe;
     int                 int_bit;
 
@@ -357,29 +356,31 @@ module rapt_fpu_divsqrt #(
     int_bit = do_divide_q ? (is_double_q ? 54 : 25)
                           : (is_double_q ? 54 : 25);
     if (int_bit >= 55) sig_ext = {2'b0, q} >> (int_bit - 55);
-    else               sig_ext = {2'b0, q} << (55 - int_bit);
+    else sig_ext = {2'b0, q} << (55 - int_bit);
     sig_ext[0] = sig_ext[0] | rem_nz;
 
     // subnormal: shift right until exponent reaches emin
     sub_norm = 1'b0;
     final_emin = is_double_q ? -14'sd1022 : -14'sd126;
     if (e < final_emin) begin
-        sh = final_emin - e;
-        if (sh > 57) sh = 58;
-        sticky_mask = (58'd1 << sh) - 58'd1;
-        if ((sig_ext & sticky_mask) != '0) begin
-          sig_ext = (sig_ext >> sh);
-          sig_ext[0] = 1'b1;
-        end else begin
-          sig_ext = sig_ext >> sh;
-        end
-        e        = final_emin;
-        sub_norm = 1'b1;
+      sh = final_emin - e;
+      if (sh > 57) sh = 58;
+      sticky_mask = (58'd1 << sh) - 58'd1;
+      if ((sig_ext & sticky_mask) != '0) begin
+        sig_ext = (sig_ext >> sh);
+        sig_ext[0] = 1'b1;
+      end else begin
+        sig_ext = sig_ext >> sh;
+      end
+      e        = final_emin;
+      sub_norm = 1'b1;
     end
 
     // rounding at target precision
     if (is_double_q) begin
-      g = sig_ext[2]; r = sig_ext[1]; s = sig_ext[0];
+      g = sig_ext[2];
+      r = sig_ext[1];
+      s = sig_ext[0];
       inexact = g | r | s;
       unique case (rm_q)
         3'b000:  round_up = g && (r || s || sig_ext[3]);
@@ -391,7 +392,9 @@ module rapt_fpu_divsqrt #(
       endcase
       sig_round = {5'b0, sig_ext[55:3]} + 58'(round_up);
     end else begin
-      g = sig_ext[31]; r = sig_ext[30]; s = |sig_ext[29:0];
+      g = sig_ext[31];
+      r = sig_ext[30];
+      s = |sig_ext[29:0];
       inexact = g | r | s;
       unique case (rm_q)
         3'b000:  round_up = g && (r || s || sig_ext[32]);
@@ -421,13 +424,12 @@ module rapt_fpu_divsqrt #(
     // pack
     overflow = e_round > 14'(is_double_q ? 1023 : 127);
     if (overflow) begin
-      if (rm_q == 3'b001 || (rm_q == 3'b010 && !sign_r)
-          || (rm_q == 3'b011 && sign_r)) begin
+      if (rm_q == 3'b001 || (rm_q == 3'b010 && !sign_r) || (rm_q == 3'b011 && sign_r)) begin
         final_result = max_a;
       end else begin
         final_result = inf_a;
       end
-      final_flags = {2'b00, 1'b1, 1'b0, 1'b1};           // OF | NX
+      final_flags = {2'b00, 1'b1, 1'b0, 1'b1};  // OF | NX
     end else begin
       pe = 11'(e_round + (is_double_q ? 1023 : 127));
       uf = 1'b0;

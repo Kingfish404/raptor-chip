@@ -50,19 +50,15 @@ module rapt_fpu_int_to_fp #(
   logic [10:0] exponent_c;
 
   always_comb begin
-    if (INT64_INPUT)
-      source_c = operand;
-    else if (unsigned_input)
-      source_c = {32'b0, operand[31:0]};
-    else
-      source_c = {{32{operand[31]}}, operand[31:0]};
+    if (INT64_INPUT) source_c = operand;
+    else if (unsigned_input) source_c = {32'b0, operand[31:0]};
+    else source_c = {{32{operand[31]}}, operand[31:0]};
 
     sign_c = !unsigned_input && source_c[63];
     magnitude_c = sign_c ? (~source_c + 64'd1) : source_c;
     leading_one_c = '0;
     leading_found_c = 1'b0;
-    for (leading_index_c = 63; leading_index_c >= 0;
-         leading_index_c = leading_index_c - 1) begin
+    for (leading_index_c = 63; leading_index_c >= 0; leading_index_c = leading_index_c - 1) begin
       if (!leading_found_c && magnitude_c[leading_index_c]) begin
         leading_one_c = 7'(leading_index_c + 1);
         leading_found_c = 1'b1;
@@ -81,11 +77,10 @@ module rapt_fpu_int_to_fp #(
           ? s1_magnitude_q << (Precision - integer'(s1_leading_one_q))
           : s1_magnitude_q >> shift_count_c;
       if (shift_count_c > 0) begin
-        guard_c = s1_magnitude_q[shift_count_c - 1];
-        for (sticky_index_c = 0; sticky_index_c < 64;
-             sticky_index_c = sticky_index_c + 1)
-          if (sticky_index_c < shift_count_c - 1)
-            sticky_c = sticky_c | s1_magnitude_q[sticky_index_c];
+        guard_c = s1_magnitude_q[shift_count_c-1];
+        for (sticky_index_c = 0; sticky_index_c < 64; sticky_index_c = sticky_index_c + 1)
+        if (sticky_index_c < shift_count_c - 1)
+          sticky_c = sticky_c | s1_magnitude_q[sticky_index_c];
       end
     end
   end
@@ -108,14 +103,11 @@ module rapt_fpu_int_to_fp #(
         3'b100: round_up_c = s2_guard_q;
         default: round_up_c = 1'b0;
       endcase
-        rounded_c = {1'b0, s2_retained_q[52:0]} + round_up_c;
-        exponent_c = 11'(Bias - 1) + {4'b0, s2_leading_one_q}
+      rounded_c = {1'b0, s2_retained_q[52:0]} + round_up_c;
+      exponent_c = 11'(Bias - 1) + {4'b0, s2_leading_one_q}
           + {{10{1'b0}}, TARGET_DOUBLE ? rounded_c[53] : rounded_c[24]};
-      if (TARGET_DOUBLE)
-        stage3_result_c = {s2_sign_q, exponent_c[10:0], rounded_c[51:0]};
-      else
-        stage3_result_c[31:0] = {
-            s2_sign_q, exponent_c[7:0], rounded_c[22:0]};
+      if (TARGET_DOUBLE) stage3_result_c = {s2_sign_q, exponent_c[10:0], rounded_c[51:0]};
+      else stage3_result_c[31:0] = {s2_sign_q, exponent_c[7:0], rounded_c[22:0]};
       stage3_flags_c[0] = inexact_c;
     end
   end

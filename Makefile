@@ -8,6 +8,7 @@ export AM_HOME   := $(RAPTOR_HOME)/abstract-machine
 export NAVY_HOME := $(RAPTOR_HOME)/abstract-machine/app/navy-apps
 export NVBOARD_HOME := $(RAPTOR_HOME)/third_party/NJU-ProjectN/nvboard
 export CROSS_COMPILE ?= riscv64-elf-
+VERIBLE_FORMAT ?= verible-verilog-format
 
 # Default to batch mode (no interactive prompt). Override with ARGS="" to disable.
 ARGS ?= -b -n ## Pass args to runner (-b: batch, -n: no wave)
@@ -731,6 +732,24 @@ fpga-pnr: ## Place and route for FPGA
 # ============================================================================
 # Utilities
 # ============================================================================
+VERIBLE_FLAGS := $(RAPTOR_HOME)/.verible-format.flags
+HDL_FORMAT_SOURCES := $(addprefix $(RAPTOR_HOME)/,$(shell git -C $(RAPTOR_HOME) ls-files \
+	'hdl/*.v' 'hdl/*.vh' 'hdl/*.sv' 'hdl/*.svh' \
+	'hdl/**/*.v' 'hdl/**/*.vh' 'hdl/**/*.sv' 'hdl/**/*.svh'))
+
+.PHONY: hdl-format hdl-format-check
+hdl-format: HDL_FORMAT_MODE := --inplace
+hdl-format: ## Format tracked hand-written HDL sources with Verible
+
+hdl-format-check: HDL_FORMAT_MODE := --verify --inplace
+hdl-format-check: ## Fail if tracked hand-written HDL is not Verible-formatted
+
+hdl-format hdl-format-check:
+	@command -v $(VERIBLE_FORMAT) >/dev/null || { \
+		echo "ERROR: $(VERIBLE_FORMAT) not found (brew install verible)" >&2; exit 1; }
+	@$(VERIBLE_FORMAT) --flagfile="$(VERIBLE_FLAGS)" --failsafe_success=false \
+		$(HDL_FORMAT_MODE) $(HDL_FORMAT_SOURCES)
+
 pack: ## Pack all SV files into one
 	$(MAKE) -C $(NSIM_HOME) pack VFLAGS="$(VFLAGS)"
 

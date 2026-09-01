@@ -71,8 +71,8 @@ endmodule
 //   mode_off/tor/na4/napot[i]    : per-entry mode one-hot vectors
 
 module rapt_pmp #(
-  parameter int XLEN = `RAPT_XLEN,
-  parameter int PADDR_BITS = `RAPT_PADDR_BITS
+    parameter int XLEN = `RAPT_XLEN,
+    parameter int PADDR_BITS = `RAPT_PADDR_BITS
 ) (
     /* verilator lint_off UNUSEDSIGNAL */
     input logic [XLEN-1:0] addr,
@@ -84,7 +84,7 @@ module rapt_pmp #(
     input logic            op_x,
 
     // Decoded inputs from pmp_state_if
-    input logic [PADDR_BITS-3:0] pmp_raw_addr  [`RAPT_PMP_NUM],
+    input logic [PADDR_BITS-3:0] pmp_raw_addr[`RAPT_PMP_NUM],
     input logic [PADDR_BITS-3:0] pmp_napot_mask[`RAPT_PMP_NUM],
     input logic [`RAPT_PMP_NUM-1:0] pmp_cfg_r,
     input logic [`RAPT_PMP_NUM-1:0] pmp_cfg_w,
@@ -196,8 +196,7 @@ module rapt_pmp #(
   logic data_partial_match_fault;
   assign fault_lo = byte_fault(any_match_lo, perm_r_lo, perm_w_lo, perm_x_lo, perm_l_lo);
   assign fault_hi = byte_fault(any_match_hi, perm_r_hi, perm_w_hi, perm_x_hi, perm_l_hi);
-  assign data_partial_match_fault = (op_r || op_w) && any_match_lo
-                                  && !(|(fm_lo & entry_match_hi));
+  assign data_partial_match_fault = (op_r || op_w) && any_match_lo && !(|(fm_lo & entry_match_hi));
   assign fault_lo_o = fault_lo;
   assign fault = fault_lo | fault_hi | data_partial_match_fault;
 

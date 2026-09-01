@@ -41,20 +41,21 @@ interface rnu_rou_if #(
 
   logic ready;
 
+`ifdef RAPT_DUAL_ISSUE
   modport master(
       output uop_a, op1_a, op2_a, pr1_a, pr2_a, prd_a, prs_a, valid_a,
-`ifdef RAPT_DUAL_ISSUE
       output uop_b, op1_b, op2_b, pr1_b, pr2_b, prd_b, prs_b, valid_b,
-`endif
       input ready
   );
   modport slave(
       input uop_a, op1_a, op2_a, pr1_a, pr2_a, prd_a, prs_a, valid_a,
-`ifdef RAPT_DUAL_ISSUE
       input uop_b, op1_b, op2_b, pr1_b, pr2_b, prd_b, prs_b, valid_b,
-`endif
       output ready
   );
+`else
+  modport master(output uop_a, op1_a, op2_a, pr1_a, pr2_a, prd_a, prs_a, valid_a, input ready);
+  modport slave(input uop_a, op1_a, op2_a, pr1_a, pr2_a, prd_a, prs_a, valid_a, output ready);
+`endif
 endinterface
 
 /* verilator lint_on UNUSEDSIGNAL */

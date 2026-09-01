@@ -1,6 +1,16 @@
 `include "rapt.svh"
 `include "rapt_if.svh"
 
+`ifdef RAPT_BPU_DIRP_TAGE
+`define RAPT_BPU_DIRP_MODULE rapt_bpu_tage
+`elsif RAPT_BPU_DIRP_GSHARE
+`define RAPT_BPU_DIRP_MODULE rapt_bpu_gshare
+`elsif RAPT_BPU_DIRP_BIMODAL
+`define RAPT_BPU_DIRP_MODULE rapt_bpu_pht
+`else
+`define RAPT_BPU_DIRP_MODULE rapt_bpu_static
+`endif
+
 /* verilator lint_off UNUSEDPARAM */
 module rapt_bpu #(
     parameter int PHT_SIZE = `RAPT_PHT_SIZE,
@@ -123,16 +133,7 @@ module rapt_bpu #(
   // PHR_LEN, DEPTH) and port set (`RAPT_BPU_DIRP_PORTS`), so the only
   // thing the `ifdef` switches is the module name. Keeps the parameter
   // map and port map authoritative in a single place.
-`ifdef RAPT_BPU_DIRP_TAGE
-  rapt_bpu_tage
-`elsif RAPT_BPU_DIRP_GSHARE
-  rapt_bpu_gshare
-`elsif RAPT_BPU_DIRP_BIMODAL
-  rapt_bpu_pht
-`else  // RAPT_BPU_DIRP_STATIC (always-not-taken) predictor if no flavor defined.
-  rapt_bpu_static
-`endif
-      #(
+  `RAPT_BPU_DIRP_MODULE #(
       .XLEN   (XLEN),
       .GHR_LEN(GHR_LEN),
       .PHR_LEN(PHR_LEN),
@@ -337,7 +338,9 @@ module rapt_bpu #(
       if (cmu_bcast.flush_pipe) begin
         rsb_spec_idx <= next_rsb_cmt_idx;
       end else begin
-        unique case ({spec_push, spec_pop})
+        unique case ({
+          spec_push, spec_pop
+        })
           2'b10:   rsb_spec_idx <= rsb_spec_idx + 1'b1;
           2'b01:   rsb_spec_idx <= rsb_spec_idx - 1'b1;
           default: rsb_spec_idx <= rsb_spec_idx;  // 00 or 11
@@ -345,20 +348,30 @@ module rapt_bpu #(
       end
 
       // --- GHR update (preserved for future gshare with larger PHT) ---
+`ifdef RAPT_DUAL_ISSUE
       if (cmu_bcast.flush_pipe) begin
         gshare <= {rgshare[GHR_LEN-2:0], rbtaken};
         // PHR rewinds to architectural value plus this committed branch's PC bit.
         phr <= {rphr[PHR_LEN-2:0], rpc[1]};
-    `ifdef RAPT_DUAL_ISSUE
       end else if (ifu_bpu.slot_b_pred_valid) begin
         gshare <= {gshare[GHR_LEN-2:0], ifu_bpu.slot_b_taken};
         phr <= {phr[PHR_LEN-2:0], ifu_bpu.slot_b_pc[1]};
-    `endif
       end else if (pred_valid && is_b && btb_tag_match) begin
         gshare <= {gshare[GHR_LEN-2:0], btaken};
         // Shift in PC bit on each speculative COND prediction.
         phr <= {phr[PHR_LEN-2:0], ifu_bpu.pc[1]};
       end
+`else
+      if (cmu_bcast.flush_pipe) begin
+        gshare <= {rgshare[GHR_LEN-2:0], rbtaken};
+        // PHR rewinds to architectural value plus this committed branch's PC bit.
+        phr <= {rphr[PHR_LEN-2:0], rpc[1]};
+      end else if (pred_valid && is_b && btb_tag_match) begin
+        gshare <= {gshare[GHR_LEN-2:0], btaken};
+        // Shift in PC bit on each speculative COND prediction.
+        phr <= {phr[PHR_LEN-2:0], ifu_bpu.pc[1]};
+      end
+`endif
       if (cmu_bcast.ben) begin
         rgshare <= {rgshare[GHR_LEN-2:0], rbtaken};
         rphr    <= {rphr[PHR_LEN-2:0], rpc[1]};
@@ -367,3 +380,5 @@ module rapt_bpu #(
   end
 
 endmodule
+
+`undef RAPT_BPU_DIRP_MODULE

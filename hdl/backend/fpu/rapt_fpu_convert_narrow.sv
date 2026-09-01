@@ -70,16 +70,17 @@ module rapt_fpu_convert_narrow (
 
     if (exponent_c == 11'h7ff) begin
       special_c = 1'b1;
-      if (fraction_c == '0)
-        special_result_c = {32'hffff_ffff, sign_c, 8'hff, 23'b0};
-      else
-        special_flags_c[4] = !fraction_c[51];
+      if (fraction_c == '0) special_result_c = {32'hffff_ffff, sign_c, 8'hff, 23'b0};
+      else special_flags_c[4] = !fraction_c[51];
     end else if (exponent_c == '0 && fraction_c == '0) begin
       special_c = 1'b1;
       special_result_c = {32'hffff_ffff, sign_c, 31'b0};
     end else if (exponent_c == '0) begin
-      for (leading_scan_index_c = 51; leading_scan_index_c >= 0;
-           leading_scan_index_c = leading_scan_index_c - 1) begin
+      for (
+          leading_scan_index_c = 51;
+          leading_scan_index_c >= 0;
+          leading_scan_index_c = leading_scan_index_c - 1
+      ) begin
         if (!leading_found_c && fraction_c[leading_scan_index_c]) begin
           leading_index_c = leading_scan_index_c;
           leading_found_c = 1'b1;
@@ -99,17 +100,13 @@ module rapt_fpu_convert_narrow (
     retained_c = '0;
     guard_c = 1'b0;
     sticky_c = 1'b0;
-    if (shift_count_c < 64)
-      retained_c = 24'(s1_significand_q >> shift_count_c);
-    if (shift_count_c > 0 && shift_count_c <= 53)
-      guard_c = s1_significand_q[shift_count_c - 1];
-    if (shift_count_c > 53)
-      sticky_c = |s1_significand_q;
+    if (shift_count_c < 64) retained_c = 24'(s1_significand_q >> shift_count_c);
+    if (shift_count_c > 0 && shift_count_c <= 53) guard_c = s1_significand_q[shift_count_c-1];
+    if (shift_count_c > 53) sticky_c = |s1_significand_q;
     else if (shift_count_c > 1)
-      for (sticky_index_c = 0; sticky_index_c < 53;
-           sticky_index_c = sticky_index_c + 1)
-        if (sticky_index_c < shift_count_c - 1)
-          sticky_c = sticky_c | s1_significand_q[sticky_index_c];
+      for (sticky_index_c = 0; sticky_index_c < 53; sticky_index_c = sticky_index_c + 1)
+      if (sticky_index_c < shift_count_c - 1)
+        sticky_c = sticky_c | s1_significand_q[sticky_index_c];
   end
 
   always_comb begin
@@ -142,8 +139,7 @@ module rapt_fpu_convert_narrow (
               || (s2_rounding_mode_q == 3'b011 && s2_sign_q)
               || (s2_rounding_mode_q == 3'b010 && !s2_sign_q))
             stage3_result_c[31:0] = {s2_sign_q, 8'hfe, 23'h7f_ffff};
-          else
-            stage3_result_c[31:0] = {s2_sign_q, 8'hff, 23'b0};
+          else stage3_result_c[31:0] = {s2_sign_q, 8'hff, 23'b0};
         end else begin
           stage3_result_c[31:0] = {
               s2_sign_q, 8'(rounded_exponent_c + 127), rounded_c[22:0]};

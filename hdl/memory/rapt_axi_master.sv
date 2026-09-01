@@ -47,15 +47,19 @@ module rapt_axi_master #(
         read_id_outstanding[id] <= '0;
       end
     end else begin
-      unique case ({read_request_fire, read_response_fire})
+      unique case ({
+        read_request_fire, read_response_fire
+      })
         2'b10: read_outstanding <= read_outstanding + 1'b1;
         2'b01: read_outstanding <= read_outstanding - 1'b1;
         default: read_outstanding <= read_outstanding;
       endcase
 
       for (int id = 0; id < IdCount; id++) begin
-        unique case ({read_request_fire && (mem.rd_req_id == ID_W'(id)),
-                      read_response_fire && (mem.rd_rsp_id == ID_W'(id))})
+        unique case ({
+          read_request_fire && (mem.rd_req_id == ID_W'(id)),
+          read_response_fire && (mem.rd_rsp_id == ID_W'(id))
+        })
           2'b10: read_id_outstanding[id] <= read_id_outstanding[id] + 1'b1;
           2'b01: read_id_outstanding[id] <= read_id_outstanding[id] - 1'b1;
           default: read_id_outstanding[id] <= read_id_outstanding[id];
@@ -132,9 +136,9 @@ module rapt_axi_master #(
     end
   end
 
-  `RAPT_SVA_IMPLY(clock, reset, AXI_READ_RESPONSE_OWNED, axi.rvalid,
-                  (read_id_outstanding[axi.rid] != '0)
-                  || (read_request_fire && (mem.rd_req_id == axi.rid)))
+  `RAPT_SVA_IMPLY(
+      clock, reset, AXI_READ_RESPONSE_OWNED, axi.rvalid,
+      (read_id_outstanding[axi.rid] != '0) || (read_request_fire && (mem.rd_req_id == axi.rid)))
   `RAPT_SVA_IMPLY(clock, reset, AXI_WRITE_RESPONSE_OWNED, axi.bvalid,
                   write_busy && !write_aw_pending && !write_w_pending)
   `RAPT_SVA_IMPLY(clock, reset, AXI_WRITE_RESPONSE_ID, axi.bvalid, axi.bid == write_id)

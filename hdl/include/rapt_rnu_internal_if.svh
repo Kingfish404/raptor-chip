@@ -44,28 +44,41 @@ interface rnu_fl_if #(
   logic             dealloc_req_b;
   logic [PLEN-1:0]  dealloc_pr_b;
 
+`ifdef RAPT_DUAL_ISSUE
   modport master(
       output flush_pipe, flush_rd_a, flush_rd_b,
       output alloc_req_a,
-      input  alloc_pr_a, alloc_empty_a,
-`ifdef RAPT_DUAL_ISSUE
+      input alloc_pr_a, alloc_empty_a,
       output alloc_req_b,
-      input  alloc_pr_b, alloc_empty_b,
-`endif
+      input alloc_pr_b, alloc_empty_b,
       output dealloc_req_a, dealloc_pr_a,
       output dealloc_req_b, dealloc_pr_b
   );
   modport slave(
-      input  flush_pipe, flush_rd_a, flush_rd_b,
-      input  alloc_req_a,
+      input flush_pipe, flush_rd_a, flush_rd_b,
+      input alloc_req_a,
       output alloc_pr_a, alloc_empty_a,
-`ifdef RAPT_DUAL_ISSUE
-      input  alloc_req_b,
+      input alloc_req_b,
       output alloc_pr_b, alloc_empty_b,
-`endif
-      input  dealloc_req_a, dealloc_pr_a,
-      input  dealloc_req_b, dealloc_pr_b
+      input dealloc_req_a, dealloc_pr_a,
+      input dealloc_req_b, dealloc_pr_b
   );
+`else
+  modport master(
+      output flush_pipe, flush_rd_a, flush_rd_b,
+      output alloc_req_a,
+      input alloc_pr_a, alloc_empty_a,
+      output dealloc_req_a, dealloc_pr_a,
+      output dealloc_req_b, dealloc_pr_b
+  );
+  modport slave(
+      input flush_pipe, flush_rd_a, flush_rd_b,
+      input alloc_req_a,
+      output alloc_pr_a, alloc_empty_a,
+      input dealloc_req_a, dealloc_pr_a,
+      input dealloc_req_b, dealloc_pr_b
+  );
+`endif
 endinterface
 
 // ----------------------------------------------------------------------------
@@ -127,36 +140,71 @@ interface rnu_mt_if #(
   logic [RLEN-1:0]  rat_waddr_b;
   logic [PLEN-1:0]  rat_wdata_b;
 
+`ifdef RAPT_DUAL_ISSUE
   modport master(
       output flush_pipe,
       output map_wen_a, map_waddr_a, map_wdata_a,
-      output map_raddr_a, input map_rdata_a,
-      output map_raddr_b, input map_rdata_b,
-      output map_raddr_c, input map_rdata_c,
-`ifdef RAPT_DUAL_ISSUE
+      output map_raddr_a,
+      input map_rdata_a,
+      output map_raddr_b,
+      input map_rdata_b,
+      output map_raddr_c,
+      input map_rdata_c,
       output map_wen_b, map_waddr_b, map_wdata_b,
-      output map_raddr_d, input map_rdata_d,
-      output map_raddr_e, input map_rdata_e,
-      output map_raddr_f, input map_rdata_f,
-`endif
+      output map_raddr_d,
+      input map_rdata_d,
+      output map_raddr_e,
+      input map_rdata_e,
+      output map_raddr_f,
+      input map_rdata_f,
       output rat_wen_a, rat_waddr_a, rat_wdata_a,
       output rat_wen_b, rat_waddr_b, rat_wdata_b
   );
   modport slave(
-      input  flush_pipe,
-      input  map_wen_a, map_waddr_a, map_wdata_a,
-      input  map_raddr_a, output map_rdata_a,
-      input  map_raddr_b, output map_rdata_b,
-      input  map_raddr_c, output map_rdata_c,
-`ifdef RAPT_DUAL_ISSUE
-      input  map_wen_b, map_waddr_b, map_wdata_b,
-      input  map_raddr_d, output map_rdata_d,
-      input  map_raddr_e, output map_rdata_e,
-      input  map_raddr_f, output map_rdata_f,
-`endif
-      input  rat_wen_a, rat_waddr_a, rat_wdata_a,
-      input  rat_wen_b, rat_waddr_b, rat_wdata_b
+      input flush_pipe,
+      input map_wen_a, map_waddr_a, map_wdata_a,
+      input map_raddr_a,
+      output map_rdata_a,
+      input map_raddr_b,
+      output map_rdata_b,
+      input map_raddr_c,
+      output map_rdata_c,
+      input map_wen_b, map_waddr_b, map_wdata_b,
+      input map_raddr_d,
+      output map_rdata_d,
+      input map_raddr_e,
+      output map_rdata_e,
+      input map_raddr_f,
+      output map_rdata_f,
+      input rat_wen_a, rat_waddr_a, rat_wdata_a,
+      input rat_wen_b, rat_waddr_b, rat_wdata_b
   );
+`else
+  modport master(
+      output flush_pipe,
+      output map_wen_a, map_waddr_a, map_wdata_a,
+      output map_raddr_a,
+      input map_rdata_a,
+      output map_raddr_b,
+      input map_rdata_b,
+      output map_raddr_c,
+      input map_rdata_c,
+      output rat_wen_a, rat_waddr_a, rat_wdata_a,
+      output rat_wen_b, rat_waddr_b, rat_wdata_b
+  );
+  modport slave(
+      input flush_pipe,
+      input map_wen_a, map_waddr_a, map_wdata_a,
+      input map_raddr_a,
+      output map_rdata_a,
+      input map_raddr_b,
+      output map_rdata_b,
+      input map_raddr_c,
+      output map_rdata_c,
+      input rat_wen_a, rat_waddr_a, rat_wdata_a,
+      input rat_wen_b, rat_waddr_b, rat_wdata_b
+  );
+`endif
 endinterface
 
-`endif // RAPT_RNU_INTERNAL_IF_SVH
+`endif  // RAPT_RNU_INTERNAL_IF_SVH

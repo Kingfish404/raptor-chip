@@ -120,6 +120,15 @@ module rapt_exu_ioq #(
   assign disp.ready   = (ioq_valid[ioq_tail_a] == 1'b0);
   assign disp.ready_b = (ioq_valid[ioq_tail_b] == 1'b0);
 
+  function automatic logic disp_b_selects_entry(input int entry);
+`ifdef RAPT_DUAL_ISSUE
+    return (disp.accept_b_paired && entry == int'(ioq_tail_b))
+        || (disp.accept_b_alone && entry == int'(ioq_tail_a));
+`else
+    return 1'b0;
+`endif
+  endfunction
+
   // === IOQ effective address & older-store blocker ===
   // ioq_eff_addr is meaningful only for valid entries (all readers gate with
   // ioq_valid/complete; see older-store blocker and issue vectors below).
@@ -225,7 +234,7 @@ module rapt_exu_ioq #(
         ? `RAPT_ALU_LD__
         : ((ioq_fp_valid[active_idx] && ioq_fp_op[active_idx] == `RAPT_FP_OP_FLW)
           ? `RAPT_ALU_LW__ : ioq_alu[active_idx][4:0]));
-    assign exu_lsu.fp_rdata64_req = ioq_fp_valid[active_idx]
+  assign exu_lsu.fp_rdata64_req = ioq_fp_valid[active_idx]
       && ioq_fp_op[active_idx] == `RAPT_FP_OP_FLD;
   assign exu_lsu.atomic_lock = ioq_atom[active_idx] && ioq_alu[active_idx] == `RAPT_ATO_LR__;
   assign exu_lsu.ordered = (active_idx == ioq_head) && ioq_at_rob_head;
@@ -414,7 +423,7 @@ module rapt_exu_ioq #(
       && (ioq_fp_op[ioq_head] == `RAPT_FP_OP_FLW
         || ioq_fp_op[ioq_head] == `RAPT_FP_OP_FLD) && !head_trap_lsu;
   assign fpr.ioq_waddr = ioq_fp_rd[ioq_head];
-    assign fpr.ioq_wdata = (ioq_fp_op[ioq_head] == `RAPT_FP_OP_FLD)
+  assign fpr.ioq_wdata = (ioq_fp_op[ioq_head] == `RAPT_FP_OP_FLD)
       ? ioq_fp_rdata64[ioq_head] : {32'hffff_ffff, head_rdata[31:0]};
   // For AMO RW (atomic with both R and W), PMP/page fault on either side
   // is reported as a store access fault per RISC-V spec.  LR is treated as a
@@ -606,9 +615,8 @@ module rapt_exu_ioq #(
       end
       // ---- Static per-entry enqueue mux (B > A on any selector alias) ----
       for (int i = 0; i < IOQ_SIZE; i++) begin
+        if (disp_b_selects_entry(i)) begin
 `ifdef RAPT_DUAL_ISSUE
-        if ((disp.accept_b_paired && i == int'(ioq_tail_b))
-            || (disp.accept_b_alone && i == int'(ioq_tail_a))) begin
           ioq_valid[i]     <= 1'b1;
           ioq_pc[i]        <= rou_exu.uop_b.pc;
           ioq_pr1[i]       <= wake_pr(rou_exu.pr1_b);
@@ -636,9 +644,8 @@ module rapt_exu_ioq #(
           ioq_complete[i]  <= 1'b0;
           ioq_load_trap[i] <= 1'b0;
           ioq_load_skip[i] <= 1'b0;
-        end else
 `endif
-        if (disp.accept_a && i == int'(ioq_tail_a)) begin
+        end else if (disp.accept_a && i == int'(ioq_tail_a)) begin
           ioq_valid[i]     <= 1'b1;
           ioq_pc[i]        <= rou_exu.uop.pc;
           ioq_pr1[i]       <= wake_pr(rou_exu.pr1);

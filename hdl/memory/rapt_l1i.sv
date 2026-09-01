@@ -9,9 +9,9 @@
 /* verilator lint_off PINCONNECTEMPTY */
 module rapt_l1i #(
     parameter int XLEN = `RAPT_XLEN,
-  parameter unsigned IFQ_SIZE = `RAPT_L1I_REFILL_WORDS,
+    parameter unsigned IFQ_SIZE = `RAPT_L1I_REFILL_WORDS,
     parameter int L1I_LINE_LEN = `RAPT_L1I_LINE_LEN,
-  parameter int unsigned L1I_LINE_SIZE = 2 ** L1I_LINE_LEN,
+    parameter int unsigned L1I_LINE_SIZE = 2 ** L1I_LINE_LEN,
     parameter int L1I_LEN = `RAPT_L1I_LEN,
     parameter unsigned L1I_N_WAYS = `RAPT_L1I_N_WAYS
 ) (
@@ -248,7 +248,8 @@ module rapt_l1i #(
   logic addr_valid_r;
   always_ff @(posedge clock) begin
     if (reset) addr_valid_r <= 1'b0;
-    else addr_valid_r <= fetch_addr_valid && !invalid_l1i && !wait_invalid
+    else
+      addr_valid_r <= fetch_addr_valid && !invalid_l1i && !wait_invalid
                         && (l1i_state == IDLE || l1i_state == RD_A || l1i_state == FINA);
   end
 
@@ -446,7 +447,7 @@ module rapt_l1i #(
   // itlb_pte = {D,A,G,U,X,W,R}; only X/U/A bits influence fetch fault.
   /* verilator lint_off UNUSEDSIGNAL */
   function automatic logic pte_fault_fetch(input logic [6:0] pte, input logic [1:0] priv_i);
-  /* verilator lint_on UNUSEDSIGNAL */
+    /* verilator lint_on UNUSEDSIGNAL */
     logic x, u, a;
     logic fault;
     x = pte[2];
@@ -547,8 +548,7 @@ module rapt_l1i #(
       // One-hot hit way encoding for PLRU update
       always_comb begin
         hit_way_onehot = '0;
-        for (int w = 0; w < int'(L1I_N_WAYS); w++)
-          if (way_hit[w]) hit_way_onehot[w] = 1'b1;
+        for (int w = 0; w < int'(L1I_N_WAYS); w++) if (way_hit[w]) hit_way_onehot[w] = 1'b1;
       end
       assign lru_write_en = hit && (l1i_state == IDLE || l1i_state == RD_A)
                             && (rec_addr == ifu_l1i.pc);
@@ -796,9 +796,9 @@ module rapt_l1i #(
       && !ptw_busy
       && (ifu_l1i.pc != 0);
 
-    // Check the complete instruction with one PMP instance. Before SRAM data is
-    // ready, conservatively check four bytes; once decoded, compressed
-    // instructions narrow the checked range to two bytes.
+  // Check the complete instruction with one PMP instance. Before SRAM data is
+  // ready, conservatively check four bytes; once decoded, compressed
+  // instructions narrow the checked range to two bytes.
   rapt_pmp #(
       .XLEN(XLEN)
   ) u_pmp_fetch (
@@ -899,12 +899,12 @@ module rapt_l1i #(
                 if (sram_data_ready) begin
                   if (!hit) begin
                     l1i_addr   <= pc_ifu;
-                      l1i_fill_issue_idx <= '0;
+                    l1i_fill_issue_idx <= '0;
                     l1i_state  <= RD_0;
                     fill_way_r <= fill_way_calc;
                   end else if (!hit_next) begin
                     l1i_addr   <= pc_ifu_next;
-                      l1i_fill_issue_idx <= '0;
+                    l1i_fill_issue_idx <= '0;
                     l1i_state  <= RD_0;
                     fill_way_r <= fill_way_next_calc;
                   end
@@ -1119,8 +1119,7 @@ module rapt_l1i #(
     end
   end
 
-  `RAPT_SVA_IMPLY(clock, reset, L1I_REDIRECT_BLOCKS_PTW_REQUEST,
-      cmu_bcast.flush_redirect, !ptw_req)
+  `RAPT_SVA_IMPLY(clock, reset, L1I_REDIRECT_BLOCKS_PTW_REQUEST, cmu_bcast.flush_redirect, !ptw_req)
 
 endmodule
 /* verilator lint_on PINCONNECTEMPTY */

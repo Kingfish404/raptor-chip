@@ -255,16 +255,14 @@ module rapt_ptw #(
   always_ff @(posedge clock) begin
     if (!reset) begin
       `RAPT_SVA_IMM(PTW_READ_RESPONSE_STATE,
-          !bus_rvalid || state inside {LVL2_WAIT, LVL1_WAIT, LVL0_WAIT})
-      `RAPT_SVA_IMM(PTW_NO_REQUEST_DURING_RESPONSE,
-          !(bus_arvalid && bus_rvalid))
+                    !bus_rvalid || state inside {LVL2_WAIT, LVL1_WAIT, LVL0_WAIT})
+      `RAPT_SVA_IMM(PTW_NO_REQUEST_DURING_RESPONSE, !(bus_arvalid && bus_rvalid))
     end
   end
 
-  `RAPT_SVA_NEXT(clock, reset, PTW_KILLED_DRAIN_NO_COMPLETE,
-      (killed || kill)
-        && (((state inside {LVL2_WAIT, LVL1_WAIT, LVL0_WAIT}) && bus_rvalid)
-          || ((state == AD_UPD) && bus_wready)),
+  `RAPT_SVA_NEXT(
+      clock, reset, PTW_KILLED_DRAIN_NO_COMPLETE,
+      (killed || kill) && (((state inside {LVL2_WAIT, LVL1_WAIT, LVL0_WAIT}) && bus_rvalid) || ((state == AD_UPD) && bus_wready)),
       !done && !fault)
 `else
   typedef enum logic [2:0] {
@@ -436,18 +434,15 @@ module rapt_ptw #(
 
   always_ff @(posedge clock) begin
     if (!reset) begin
-      `RAPT_SVA_IMM(PTW_READ_RESPONSE_STATE,
-          !bus_rvalid || state inside {LVL1_WAIT, LVL0_WAIT})
-      `RAPT_SVA_IMM(PTW_NO_REQUEST_DURING_RESPONSE,
-          !(bus_arvalid && bus_rvalid))
+      `RAPT_SVA_IMM(PTW_READ_RESPONSE_STATE, !bus_rvalid || state inside {LVL1_WAIT, LVL0_WAIT})
+      `RAPT_SVA_IMM(PTW_NO_REQUEST_DURING_RESPONSE, !(bus_arvalid && bus_rvalid))
     end
   end
 
 
-  `RAPT_SVA_NEXT(clock, reset, PTW_KILLED_DRAIN_NO_COMPLETE,
-      (killed || kill)
-        && (((state inside {LVL1_WAIT, LVL0_WAIT}) && bus_rvalid)
-          || ((state == AD_UPD) && bus_wready)),
+  `RAPT_SVA_NEXT(
+      clock, reset, PTW_KILLED_DRAIN_NO_COMPLETE,
+      (killed || kill) && (((state inside {LVL1_WAIT, LVL0_WAIT}) && bus_rvalid) || ((state == AD_UPD) && bus_wready)),
       !done && !fault)
 `endif
 

@@ -311,15 +311,26 @@ module rapt_ifu #(
 `else
   assign seqpc = pre_is_c_a ? seq2 : seq4;
 `endif
+  logic [XLEN-1:0] nextpc_fallback;
+`ifdef RAPT_DUAL_ISSUE
+  assign nextpc_fallback = slot_b_direct_jal ? direct_jal_target_b
+                         : slot_b_cond_branch && ifu_bpu.slot_b_taken ? cond_branch_target_b
+                         : seqpc;
+`else
+  assign nextpc_fallback = seqpc;
+`endif
   assign nextpc = redirect_squash ? redirect_squash_pc
                 : ifu_bpu.taken   ? ifu_bpu.npc
-`ifdef RAPT_DUAL_ISSUE
-                : slot_b_direct_jal ? direct_jal_target_b
-                : slot_b_cond_branch && ifu_bpu.slot_b_taken ? cond_branch_target_b
-`endif
-                :                   seqpc;
+                :                   nextpc_fallback;
   assign recv_ready = ifu_l1i.valid && (ifu_idu.ready || (state_ifu == IDLE)) && !ifu_hazard
                     && !redirect_event;
+
+  logic [1:0] pmu_fetch_slots_next;
+`ifdef RAPT_DUAL_ISSUE
+  assign pmu_fetch_slots_next = ifu_idu.valid_b ? 2'd2 : 2'd1;
+`else
+  assign pmu_fetch_slots_next = 2'd1;
+`endif
 
   // Combinational sequential-PC candidates (see declaration for rationale).
   assign seq2 = pc_ifu + 'h2;
@@ -337,37 +348,32 @@ module rapt_ifu #(
       trap <= 0;
       tval <= 0;
       pmu_fetch_fire <= 0;
-        pmu_fetch_slots <= '0;
+      pmu_fetch_slots <= '0;
       pmu_ifu_stall <= 0;
-        pmu_ifu_icache_stall <= 0;
-        pmu_ifu_flush_stall <= 0;
-        pmu_ifu_empty_stall <= 0;
-        pmu_ifu_response_after_redirect <= 0;
-        pmu_ifu_response_after_l1i_gap <= 0;
-        pmu_ifu_response_bypass_candidate <= 0;
-        pmu_fetch_response_consume <= 0;
-        pmu_fetch_dual_fire <= 0;
-        pmu_fetch_bpu_taken <= 0;
-        pmu_fetch_slot_a_control <= 0;
-        pmu_fetch_slot_b_control <= 0;
-        pmu_fetch_slot_b_jal_pack <= 0;
-        pmu_fetch_slot_b_cond_pack <= 0;
-        pmu_fetch_n1_unavailable <= 0;
-        pmu_fetch_n1_unavailable_unaligned <= 0;
-        pmu_fetch_n1_unavailable_l1i <= 0;
-        pmu_fetch_downstream_blocked <= 0;
-        pmu_fetch_target_steer <= 0;
-    `ifdef RAPT_DUAL_ISSUE
+      pmu_ifu_icache_stall <= 0;
+      pmu_ifu_flush_stall <= 0;
+      pmu_ifu_empty_stall <= 0;
+      pmu_ifu_response_after_redirect <= 0;
+      pmu_ifu_response_after_l1i_gap <= 0;
+      pmu_ifu_response_bypass_candidate <= 0;
+      pmu_fetch_response_consume <= 0;
+      pmu_fetch_dual_fire <= 0;
+      pmu_fetch_bpu_taken <= 0;
+      pmu_fetch_slot_a_control <= 0;
+      pmu_fetch_slot_b_control <= 0;
+      pmu_fetch_slot_b_jal_pack <= 0;
+      pmu_fetch_slot_b_cond_pack <= 0;
+      pmu_fetch_n1_unavailable <= 0;
+      pmu_fetch_n1_unavailable_unaligned <= 0;
+      pmu_fetch_n1_unavailable_l1i <= 0;
+      pmu_fetch_downstream_blocked <= 0;
+      pmu_fetch_target_steer <= 0;
+`ifdef RAPT_DUAL_ISSUE
       inst_b_valid <= 0;
 `endif
     end else begin
       pmu_fetch_fire <= valid && ifu_idu.ready;
-        pmu_fetch_slots <= !(valid && ifu_idu.ready) ? 2'd0
-`ifdef RAPT_DUAL_ISSUE
-          : ifu_idu.valid_b ? 2'd2 : 2'd1;
-`else
-          : 2'd1;
-`endif
+      pmu_fetch_slots <= !(valid && ifu_idu.ready) ? 2'd0 : pmu_fetch_slots_next;
       pmu_ifu_stall <= !valid && ifu_idu.ready;  // Total (sum of below)
       // A1: Decomposed stall causes. Give serializing STALL priority, then
       // split IDLE by whether L1I has supplied the next response. The three
@@ -385,50 +391,50 @@ module rapt_ifu #(
       // downstream fetch-bundle queue is ready. Control and trap packets keep
       // the registered path until their redirect/serialization contract is
       // explicitly handled by a later change.
-    `ifdef RAPT_DUAL_ISSUE
+`ifdef RAPT_DUAL_ISSUE
       pmu_ifu_response_bypass_candidate <= !valid && ifu_idu.ready && (state_ifu == IDLE)
                     && ifu_l1i.valid && !redirect_event
                     && !pre_is_branch_a && !ifu_l1i.trap;
-    `else
+`else
       pmu_ifu_response_bypass_candidate <= 1'b0;
-    `endif
-    `ifdef RAPT_DUAL_ISSUE
-        pmu_fetch_response_consume <= recv_ready;
-        pmu_fetch_dual_fire <= valid && ifu_idu.ready && ifu_idu.valid_b;
-        pmu_fetch_downstream_blocked <= valid && !ifu_idu.ready;
-        pmu_fetch_bpu_taken <= recv_ready && ifu_bpu.taken;
-        pmu_fetch_slot_a_control <= recv_ready && !ifu_bpu.taken && !ifu_l1i.trap
+`endif
+`ifdef RAPT_DUAL_ISSUE
+      pmu_fetch_response_consume <= recv_ready;
+      pmu_fetch_dual_fire <= valid && ifu_idu.ready && ifu_idu.valid_b;
+      pmu_fetch_downstream_blocked <= valid && !ifu_idu.ready;
+      pmu_fetch_bpu_taken <= recv_ready && ifu_bpu.taken;
+      pmu_fetch_slot_a_control <= recv_ready && !ifu_bpu.taken && !ifu_l1i.trap
           && pre_is_branch_a;
-        pmu_fetch_slot_b_control <= recv_ready && !ifu_bpu.taken && !ifu_l1i.trap
+      pmu_fetch_slot_b_control <= recv_ready && !ifu_bpu.taken && !ifu_l1i.trap
           && !pre_is_branch_a && inst_b_data_avail && pre_is_branch_b
           && !pre_is_direct_jal_b && !pre_is_cond_branch_b;
-        pmu_fetch_slot_b_jal_pack <= recv_ready && slot_b_direct_jal;
-        pmu_fetch_slot_b_cond_pack <= recv_ready && slot_b_cond_branch;
-        pmu_fetch_n1_unavailable <= recv_ready && !ifu_bpu.taken && !ifu_l1i.trap
+      pmu_fetch_slot_b_jal_pack <= recv_ready && slot_b_direct_jal;
+      pmu_fetch_slot_b_cond_pack <= recv_ready && slot_b_cond_branch;
+      pmu_fetch_n1_unavailable <= recv_ready && !ifu_bpu.taken && !ifu_l1i.trap
           && !pre_is_branch_a && !inst_b_data_avail;
-        pmu_fetch_n1_unavailable_unaligned <= recv_ready && !ifu_bpu.taken && !ifu_l1i.trap
+      pmu_fetch_n1_unavailable_unaligned <= recv_ready && !ifu_bpu.taken && !ifu_l1i.trap
           && !pre_is_branch_a && slot_b_r32_r32_unaligned
           && !inst_b_data_avail;
-        pmu_fetch_n1_unavailable_l1i <= recv_ready && !ifu_bpu.taken && !ifu_l1i.trap
+      pmu_fetch_n1_unavailable_l1i <= recv_ready && !ifu_bpu.taken && !ifu_l1i.trap
           && !pre_is_branch_a && !slot_b_r32_r32_unaligned
           && !inst_b_data_avail;
-        // Accepted packets whose next PC is a predicted non-sequential target
-        // can use target-directed L1I data SRAM read-ahead on the next cycle.
-        pmu_fetch_target_steer <= recv_ready && !redirect_event && (nextpc != seqpc);
-      `else
-            pmu_fetch_response_consume <= 1'b0;
-          pmu_fetch_dual_fire <= 1'b0;
-          pmu_fetch_bpu_taken <= 1'b0;
-          pmu_fetch_slot_a_control <= 1'b0;
-          pmu_fetch_slot_b_control <= 1'b0;
-          pmu_fetch_slot_b_jal_pack <= 1'b0;
-          pmu_fetch_slot_b_cond_pack <= 1'b0;
-          pmu_fetch_n1_unavailable <= 1'b0;
-          pmu_fetch_n1_unavailable_unaligned <= 1'b0;
-          pmu_fetch_n1_unavailable_l1i <= 1'b0;
-          pmu_fetch_downstream_blocked <= 1'b0;
-          pmu_fetch_target_steer <= 1'b0;
-    `endif
+      // Accepted packets whose next PC is a predicted non-sequential target
+      // can use target-directed L1I data SRAM read-ahead on the next cycle.
+      pmu_fetch_target_steer <= recv_ready && !redirect_event && (nextpc != seqpc);
+`else
+      pmu_fetch_response_consume <= 1'b0;
+      pmu_fetch_dual_fire <= 1'b0;
+      pmu_fetch_bpu_taken <= 1'b0;
+      pmu_fetch_slot_a_control <= 1'b0;
+      pmu_fetch_slot_b_control <= 1'b0;
+      pmu_fetch_slot_b_jal_pack <= 1'b0;
+      pmu_fetch_slot_b_cond_pack <= 1'b0;
+      pmu_fetch_n1_unavailable <= 1'b0;
+      pmu_fetch_n1_unavailable_unaligned <= 1'b0;
+      pmu_fetch_n1_unavailable_l1i <= 1'b0;
+      pmu_fetch_downstream_blocked <= 1'b0;
+      pmu_fetch_target_steer <= 1'b0;
+`endif
       unique case (state_ifu)
         IDLE: begin
           if (redirect_event) begin
@@ -498,8 +504,8 @@ module rapt_ifu #(
 
 `ifdef RAPT_DUAL_ISSUE
   `RAPT_SVA_IMPLY(clock, reset, IFU_SLOT_B_IMPLIES_SLOT_A, ifu_idu.valid_b, ifu_idu.valid_a)
-  `RAPT_SVA_IMPLY(clock, reset, IFU_SLOT_B_DIRECT_JAL_STEERS,
-                  recv_ready && slot_b_direct_jal, nextpc == direct_jal_target_b)
+  `RAPT_SVA_IMPLY(clock, reset, IFU_SLOT_B_DIRECT_JAL_STEERS, recv_ready && slot_b_direct_jal,
+                  nextpc == direct_jal_target_b)
   `RAPT_SVA_IMPLY(clock, reset, IFU_SLOT_B_COND_STEERS,
                   recv_ready && slot_b_cond_branch && ifu_bpu.slot_b_taken,
                   nextpc == cond_branch_target_b)

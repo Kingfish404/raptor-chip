@@ -52,8 +52,8 @@ module rapt_bus #(
   //     Downstream requests are registered/stable until `rd_req_ready`.
   // =========================================================================
   localparam int L1iARDepth = `RAPT_L1I_REFILL_WORDS;
-  localparam int L1iARPtrW = (L1iARDepth <= 1) ? 1 : $clog2(L1iARDepth);
-  localparam int L1iARCntW = $clog2(L1iARDepth + 1);
+  localparam int L1iARPtrW  = (L1iARDepth <= 1) ? 1 : $clog2(L1iARDepth);
+  localparam int L1iARCntW  = $clog2(L1iARDepth + 1);
 
   // L1I AR FIFO (depth 2)
   logic [XLEN-1:0] l1i_q_addr                                     [L1iARDepth];
@@ -137,14 +137,13 @@ module rapt_bus #(
   // queue, but only ordinary instruction refills are 32-bit reads. Sending
   // a 4-byte PTW read through LiteX's AXI64->AXI32 converter returns only one
   // half of the PTE and loses the physical page number on FPGA.
-  assign mem.rd_req_size = issue_l1d ? l1d_slot_size
-                       : (l1i_q_ptw[l1i_q_rdptr]
 `ifdef RAPT_RV64
-                           ? 3'b011
+  localparam logic [2:0] PtwReadSize = 3'b011;
 `else
-                           ? 3'b010
+  localparam logic [2:0] PtwReadSize = 3'b010;
 `endif
-                           : 3'b010);
+  assign mem.rd_req_size = issue_l1d ? l1d_slot_size
+                       : (l1i_q_ptw[l1i_q_rdptr] ? PtwReadSize : 3'b010);
   assign mem.rd_req_burst = (issue_l1i && l1i_q_head_burst) ? 2'b01 : 2'b00;
   assign mem.rd_req_len = (issue_l1i && l1i_q_head_burst) ? 8'h1 : 8'h0;
   assign mem.rd_rsp_ready = 1'b1;

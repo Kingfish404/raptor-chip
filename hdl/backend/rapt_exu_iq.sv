@@ -68,7 +68,7 @@ module rapt_exu_iq #(
     output logic pmu_iq_full
     /* verilator lint_on UNUSEDSIGNAL */
 );
-  localparam unsigned IQLen = (IQ_SIZE > 1) ? $clog2(IQ_SIZE) : 1;
+  localparam unsigned IQLen  = (IQ_SIZE > 1) ? $clog2(IQ_SIZE) : 1;
   localparam unsigned ROBLen = $clog2(ROB_SIZE);
 
   // === IQ state ===
@@ -172,6 +172,14 @@ module rapt_exu_iq #(
     return is_fast && load_fast.valid && load_fast.rebusy && (load_fast.prd == pr);
   endfunction
 
+  function automatic logic disp_b_selects_entry(input int entry);
+`ifdef RAPT_DUAL_ISSUE
+    return disp.accept_b && entry == int'(disp.b_rs_idx);
+`else
+    return 1'b0;
+`endif
+  endfunction
+
   logic disp_a_pr1_fast_wake, disp_a_pr2_fast_wake;
   assign disp_a_pr1_fast_wake = fast_wake_match(rou_exu.pr1);
   assign disp_a_pr2_fast_wake = fast_wake_match(rou_exu.pr2);
@@ -230,8 +238,7 @@ module rapt_exu_iq #(
     free_idx_b   = '0;
     free_found_b = 1'b0;
     for (int i = 0; i < IQ_SIZE; i++) begin
-      if (!free_found_b && iq_free_vec[i]
-          && !(free_found_a && i[IQLen-1:0] == free_idx_a)) begin
+      if (!free_found_b && iq_free_vec[i] && !(free_found_a && i[IQLen-1:0] == free_idx_a)) begin
         free_idx_b   = i[IQLen-1:0];
         free_found_b = 1'b1;
       end
@@ -383,8 +390,8 @@ module rapt_exu_iq #(
 
       // ---- Per-entry state machine ----
       for (int i = 0; i < IQ_SIZE; i++) begin
+        if (disp_b_selects_entry(i)) begin
 `ifdef RAPT_DUAL_ISSUE
-        if (disp.accept_b && i == int'(disp.b_rs_idx)) begin
           // Slot B has priority if both dispatch selectors ever alias.
           iq_valid[i]    <= 1'b1;
           iq_alu[i]      <= rou_exu.uop_b.alu;
@@ -423,9 +430,8 @@ module rapt_exu_iq #(
           iq_trap[i]     <= rou_exu.uop_b.trap;
           iq_tval[i]     <= rou_exu.uop_b.tval;
           iq_cause[i]    <= rou_exu.uop_b.cause;
-        end else
 `endif
-        if (disp.accept_a && free_found_a && i == int'(free_idx_a)) begin
+        end else if (disp.accept_a && free_found_a && i == int'(free_idx_a)) begin
           // Slot-A allocation lands here when accepted by the router.
           iq_valid[i]    <= 1'b1;
           iq_alu[i]      <= rou_exu.uop.alu;
@@ -544,13 +550,11 @@ module rapt_exu_iq #(
             age_mat[i][j] <= 1'b1;
           end else if (disp.accept_b && i == int'(disp.b_rs_idx)) begin
             age_mat[i][j] <= 1'b0;
-          end else if (disp.accept_b && j == int'(disp.b_rs_idx)
-                     && i != int'(disp.b_rs_idx)) begin
+          end else if (disp.accept_b && j == int'(disp.b_rs_idx) && i != int'(disp.b_rs_idx)) begin
             age_mat[i][j] <= iq_valid[i];
           end else if (disp.accept_a && i == int'(free_idx_a)) begin
             age_mat[i][j] <= 1'b0;
-          end else if (disp.accept_a && j == int'(free_idx_a)
-                     && i != int'(free_idx_a)) begin
+          end else if (disp.accept_a && j == int'(free_idx_a) && i != int'(free_idx_a)) begin
             age_mat[i][j] <= iq_valid[i];
           end
         end

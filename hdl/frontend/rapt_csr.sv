@@ -68,7 +68,7 @@ module rapt_csr #(
     MTVEC__,
 
     MSTATUSH,
-  MENVCFG,
+    MENVCFG,
 
     MSCRATCH,
     MEPC___,
@@ -108,9 +108,7 @@ module rapt_csr #(
   logic [63:0]             stimecmp;
   logic                    sstc_en;
   logic                    stime_irq;
-  assign time_tick = (RAPTTimeDIV <= 1)
-                   ? 1'b1
-                   : (time_div_cnt == RAPTTimeDIVW'(RAPTTimeDIV - 1));
+  assign time_tick = (RAPTTimeDIV <= 1) ? 1'b1 : (time_div_cnt == RAPTTimeDIVW'(RAPTTimeDIV - 1));
 
   generate
     if (XLEN == 64) begin : gen_time64_rv64
@@ -132,6 +130,8 @@ module rapt_csr #(
   // pmpaddr is stored in its raw CSR form (byte_addr >> 2).
   localparam int PMPAddrW = `RAPT_PMPADDR_BITS;
   localparam int PMPCheckAddrW = `RAPT_PADDR_BITS - 2;
+  localparam logic [11:0] PMPAddrBase = `RAPT_CSR_PMPADDR0;
+  localparam logic [11:0] PMPAddrLast = `RAPT_CSR_PMPADDR15;
   logic [7:0]          pmpcfg_r [`RAPT_PMP_NUM];
   logic [PMPAddrW-1:0] pmpaddr_r[`RAPT_PMP_NUM];
 
@@ -286,8 +286,7 @@ module rapt_csr #(
                                  pmpcfg_r[3], pmpcfg_r[2], pmpcfg_r[1], pmpcfg_r[0]})
                         : XLEN'({pmpcfg_r[3], pmpcfg_r[2], pmpcfg_r[1], pmpcfg_r[0]});
         end else if (raddr == `RAPT_CSR_PMPCFG1) begin
-          exu_csr.rdata = (XLEN == 64) ? '0
-                        : {pmpcfg_r[7], pmpcfg_r[6], pmpcfg_r[5], pmpcfg_r[4]};
+          exu_csr.rdata = (XLEN == 64) ? '0 : {pmpcfg_r[7], pmpcfg_r[6], pmpcfg_r[5], pmpcfg_r[4]};
         end else if (raddr == `RAPT_CSR_PMPCFG2) begin
           exu_csr.rdata = (XLEN == 64)
                         ? XLEN'({pmpcfg_r[15], pmpcfg_r[14], pmpcfg_r[13], pmpcfg_r[12],
@@ -296,11 +295,9 @@ module rapt_csr #(
         end else if (raddr == `RAPT_CSR_PMPCFG3) begin
           exu_csr.rdata = (XLEN == 64) ? '0
                         : {pmpcfg_r[15], pmpcfg_r[14], pmpcfg_r[13], pmpcfg_r[12]};
-        end else if (raddr >= `RAPT_CSR_PMPADDR0
-              && raddr <= `RAPT_CSR_PMPADDR15)
+        end else if (raddr >= PMPAddrBase && raddr <= PMPAddrLast)
           exu_csr.rdata = pmpaddr_r[raddr[3:0]];
-        else
-          exu_csr.rdata = '0;
+        else exu_csr.rdata = '0;
       end
     endcase
   end
@@ -377,7 +374,7 @@ module rapt_csr #(
   //   - Reserved MODE values coerced to Direct by the tvec write mask.
   // BASE is tvec with [1:0] stripped (4-byte aligned).
   logic [XLEN-1:0] mtvec_base, stvec_base;
-  logic [1:0]      mtvec_mode, stvec_mode;
+  logic [1:0] mtvec_mode, stvec_mode;
   logic [XLEN-1:0] vec_offset;
   logic            is_interrupt;
   logic            use_smode_tvec;
@@ -510,8 +507,7 @@ module rapt_csr #(
 
     if (rou_csr.valid && rou_csr.csr_wen && cfg_write) begin
       for (int i = 0; i < `RAPT_PMP_NUM; i++) begin
-        if (i >= cfg_base && i < cfg_base + cfg_count
-            && !pmpcfg_r[i][`RAPT_PMPCFG_L_]) begin
+        if (i >= cfg_base && i < cfg_base + cfg_count && !pmpcfg_r[i][`RAPT_PMPCFG_L_]) begin
           pmp_update.cfg_we[i]      = 1'b1;
           pmp_update.cfg_r[i]       = rou_csr.csr_wdata[(i-cfg_base)*8 + `RAPT_PMPCFG_R_];
           pmp_update.cfg_w[i]       = rou_csr.csr_wdata[(i-cfg_base)*8 + `RAPT_PMPCFG_W_];
@@ -536,8 +532,8 @@ module rapt_csr #(
            && (pmpcfg_r[pidx + 4'd1][`RAPT_PMPCFG_A_] == `RAPT_PMP_A_TOR))
         : 1'b0;
     if (rou_csr.valid && rou_csr.csr_wen
-        && rou_csr.csr_addr >= `RAPT_CSR_PMPADDR0
-        && rou_csr.csr_addr <= `RAPT_CSR_PMPADDR15
+      && rou_csr.csr_addr >= PMPAddrBase
+      && rou_csr.csr_addr <= PMPAddrLast
         && !self_locked && !tor_locked) begin
       pmp_update.addr_we    = 1'b1;
       pmp_update.addr_idx   = pidx;
@@ -630,32 +626,31 @@ module rapt_csr #(
             // Reserved bits [6:5] are WARL-zero (mask 8'h9F).
             for (int pi = 0; pi < (XLEN == 64 ? 8 : 4); pi++) begin
               if (!pmpcfg_r[pi][`RAPT_PMPCFG_L_]) begin
-                pmpcfg_r[pi] <= rou_csr.csr_wdata[pi*8 +: 8] & 8'h9F;
+                pmpcfg_r[pi] <= rou_csr.csr_wdata[pi*8+:8] & 8'h9F;
               end
             end
           end else if (rou_csr.csr_addr == `RAPT_CSR_PMPCFG1 && XLEN == 32) begin
             // pmpcfg1 only exists on RV32. On RV64 it is reserved; ignore writes.
             for (int pi = 0; pi < 4; pi++) begin
-              if (!pmpcfg_r[pi + 4][`RAPT_PMPCFG_L_]) begin
-                pmpcfg_r[pi + 4] <= rou_csr.csr_wdata[pi*8 +: 8] & 8'h9F;
+              if (!pmpcfg_r[pi+4][`RAPT_PMPCFG_L_]) begin
+                pmpcfg_r[pi+4] <= rou_csr.csr_wdata[pi*8+:8] & 8'h9F;
               end
             end
           end else if (rou_csr.csr_addr == `RAPT_CSR_PMPCFG2) begin
             // pmpcfg2: RV32 packs entries 8..11 (4 bytes); RV64 packs entries 8..15 (8 bytes).
             for (int pi = 0; pi < (XLEN == 64 ? 8 : 4); pi++) begin
-              if (!pmpcfg_r[pi + 8][`RAPT_PMPCFG_L_]) begin
-                pmpcfg_r[pi + 8] <= rou_csr.csr_wdata[pi*8 +: 8] & 8'h9F;
+              if (!pmpcfg_r[pi+8][`RAPT_PMPCFG_L_]) begin
+                pmpcfg_r[pi+8] <= rou_csr.csr_wdata[pi*8+:8] & 8'h9F;
               end
             end
           end else if (rou_csr.csr_addr == `RAPT_CSR_PMPCFG3 && XLEN == 32) begin
             // pmpcfg3 only exists on RV32.
             for (int pi = 0; pi < 4; pi++) begin
-              if (!pmpcfg_r[pi + 12][`RAPT_PMPCFG_L_]) begin
-                pmpcfg_r[pi + 12] <= rou_csr.csr_wdata[pi*8 +: 8] & 8'h9F;
+              if (!pmpcfg_r[pi+12][`RAPT_PMPCFG_L_]) begin
+                pmpcfg_r[pi+12] <= rou_csr.csr_wdata[pi*8+:8] & 8'h9F;
               end
             end
-          end else if (rou_csr.csr_addr >= `RAPT_CSR_PMPADDR0
-                    && rou_csr.csr_addr <= `RAPT_CSR_PMPADDR15) begin
+          end else if (rou_csr.csr_addr >= PMPAddrBase && rou_csr.csr_addr <= PMPAddrLast) begin
             // pmpaddr[i] writable unless entry i is locked OR the next entry
             // is locked AND its A-mode is TOR (entry i then forms TOR's lower bound).
             automatic logic [3:0] pidx = rou_csr.csr_addr[3:0];
@@ -730,8 +725,9 @@ module rapt_csr #(
             // WARL on MODE field [1:0]: only Direct(00) and Vectored(01) are
             // defined; reserved values (10/11) coerce to Direct(00).
             // BASE field [XLEN-1:2] is fully writable (must be 4-byte aligned).
-            csr[waddr_reg] <= {rou_csr.csr_wdata[XLEN-1:2],
-                               rou_csr.csr_wdata[1] ? 2'b00 : rou_csr.csr_wdata[1:0]};
+            csr[waddr_reg] <= {
+              rou_csr.csr_wdata[XLEN-1:2], rou_csr.csr_wdata[1] ? 2'b00 : rou_csr.csr_wdata[1:0]
+            };
           end else if (waddr_reg == MEPC___ || waddr_reg == SEPC___) begin
             // WARL: mepc/sepc bit [0] is always 0 per RISC-V priv spec.
             // With C-ext, bit [1] is writable (2-byte alignment). Without C,
@@ -850,9 +846,8 @@ module rapt_csr #(
             csr[MTVAL__] <= rou_csr.tval;
             priv_mode <= `RAPT_PRIV_M;
 `ifdef RAPT_DEBUG_PMP
-            $display(
-              "[%0t] CSR_TRAP_M cause=%h mepc=%h mtval=%h",
-              $time, rou_csr.cause, rou_csr.pc, rou_csr.tval);
+            $display("[%0t] CSR_TRAP_M cause=%h mepc=%h mtval=%h", $time, rou_csr.cause,
+                     rou_csr.pc, rou_csr.tval);
 `endif
           end
         end

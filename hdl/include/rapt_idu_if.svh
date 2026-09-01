@@ -29,20 +29,21 @@ interface idu_rnu_if #(
 
   logic ready;
 
+`ifdef RAPT_DUAL_ISSUE
   modport master(
       output uop_a, op1_a, op2_a, rs1_a, rs2_a, valid_a,
-`ifdef RAPT_DUAL_ISSUE
       output uop_b, op1_b, op2_b, rs1_b, rs2_b, valid_b,
-`endif
       input ready
   );
   modport slave(
       input uop_a, op1_a, op2_a, rs1_a, rs2_a, valid_a,
-`ifdef RAPT_DUAL_ISSUE
       input uop_b, op1_b, op2_b, rs1_b, rs2_b, valid_b,
-`endif
       output ready
   );
+`else
+  modport master(output uop_a, op1_a, op2_a, rs1_a, rs2_a, valid_a, input ready);
+  modport slave(input uop_a, op1_a, op2_a, rs1_a, rs2_a, valid_a, output ready);
+`endif
 endinterface
 
 `endif

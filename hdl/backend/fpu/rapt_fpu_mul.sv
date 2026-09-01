@@ -82,9 +82,8 @@ module rapt_fpu_mul #(
   logic [52:0] significand_4;
   logic signed [13:0] exponent_4;
 
-  function automatic logic [MantBits-1:0] normalize_subnormal(
-      input logic [FracBits-1:0] fraction,
-      output integer exponent_value);
+  function automatic logic [MantBits-1:0] normalize_subnormal(input logic [FracBits-1:0] fraction,
+                                                              output integer exponent_value);
     logic [MantBits-1:0] normalized;
     logic found;
     integer index;
@@ -103,22 +102,18 @@ module rapt_fpu_mul #(
     end
   endfunction
 
-  function automatic logic [ExtBits-1:0] shift_sticky(
-      input logic [ExtBits-1:0] value,
-      input integer amount);
+  function automatic logic [ExtBits-1:0] shift_sticky(input logic [ExtBits-1:0] value,
+                                                      input integer amount);
     logic [ExtBits-1:0] shifted;
     integer index;
     begin
       shifted = '0;
-      if (amount == 0)
-        shifted = value;
-      else if (amount >= ExtBits)
-        shifted[0] = |value;
+      if (amount == 0) shifted = value;
+      else if (amount >= ExtBits) shifted[0] = |value;
       else begin
         shifted = value >> amount;
         for (index = 0; index < ExtBits; index = index + 1)
-          if (index < amount)
-            shifted[0] = shifted[0] | value[index];
+        if (index < amount) shifted[0] = shifted[0] | value[index];
       end
       shift_sticky = shifted;
     end
@@ -239,7 +234,7 @@ module rapt_fpu_mul #(
         3'b100: round_up_4 = guard_4;
         default: round_up_4 = 1'b0;
       endcase
-      rounded_4 = {1'b0, s3_mant_q[ExtBits-1 -: MantBits]} + round_up_4;
+      rounded_4 = {1'b0, s3_mant_q[ExtBits-1-:MantBits]} + round_up_4;
       if (rounded_4[MantBits]) begin
         significand_4[MantBits-1:0] = rounded_4[MantBits:1];
         exponent_4 = s3_exponent_q + 1;

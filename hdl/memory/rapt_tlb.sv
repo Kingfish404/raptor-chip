@@ -64,7 +64,6 @@ module rapt_tlb #(
     end
   end
 
-  `RAPT_SVA_NEXT(clock, reset, TLB_FLUSH_CLEARS_ENTRIES,
-      flush, valid == '0)
+  `RAPT_SVA_NEXT(clock, reset, TLB_FLUSH_CLEARS_ENTRIES, flush, valid == '0)
 
 endmodule

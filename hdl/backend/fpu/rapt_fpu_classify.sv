@@ -39,15 +39,10 @@ module rapt_fpu_classify (
     end
 
     result = '0;
-    if (exponent_ones && !fraction_zero)
-      result[quiet_nan ? 9 : 8] = 1'b1;
-    else if (exponent_ones)
-      result[sign ? 0 : 7] = 1'b1;
-    else if (exponent_zero && fraction_zero)
-      result[sign ? 3 : 4] = 1'b1;
-    else if (exponent_zero)
-      result[sign ? 2 : 5] = 1'b1;
-    else
-      result[sign ? 1 : 6] = 1'b1;
+    if (exponent_ones && !fraction_zero) result[quiet_nan?9 : 8] = 1'b1;
+    else if (exponent_ones) result[sign?0 : 7] = 1'b1;
+    else if (exponent_zero && fraction_zero) result[sign?3 : 4] = 1'b1;
+    else if (exponent_zero) result[sign?2 : 5] = 1'b1;
+    else result[sign?1 : 6] = 1'b1;
   end
 endmodule

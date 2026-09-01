@@ -1,10 +1,12 @@
 `include "rapt.svh"
 
-// Three-stage, one-operation-at-a-time IEEE-754 fused multiply-add unit.
+// Five-stage, one-operation-at-a-time IEEE-754 fused multiply-add unit.
 //
 // Stage 1: decode/normalize operands and calculate the mantissa product.
 // Stage 2: align the product/addend and calculate the signed sum.
-// Stage 3: normalize, round, and pack the architectural result.
+// Stage 3: calculate magnitude.
+// Stage 4: calculate the leading-one position.
+// Stage 5: normalize, round, and pack the architectural result.
 //
 // The unit deliberately exposes a ready/valid boundary. The FPU execution
 // pipe holds the ROB metadata while this unit is occupied and writes the FPR
@@ -37,8 +39,37 @@ module rapt_fpu_fma #(
   localparam int MinExp = TARGET_DOUBLE ? -1022 : -126;
   localparam int MaxExp = TARGET_DOUBLE ? 1023 : 127;
   localparam int InfExponent = TARGET_DOUBLE ? 11'h7ff : 11'h0ff;
+  localparam int LeadingBits = $clog2(WorkBits + 1);
+  localparam int LeadingGroupBits = 16;
+  localparam int LeadingGroups = WorkBits / LeadingGroupBits;
 
-  logic s1_valid_q, s2_valid_q, s3_valid_q;
+  function automatic logic [LeadingBits-1:0] find_leading_one(input logic [WorkBits-1:0] value);
+    logic [LeadingGroups-1:0] group_nonzero;
+    logic group_found;
+    logic bit_found;
+    begin
+      for (int group_index = 0; group_index < LeadingGroups; group_index++)
+      group_nonzero[group_index] = |value[group_index*LeadingGroupBits+:LeadingGroupBits];
+
+      find_leading_one = '0;
+      group_found = 1'b0;
+      for (int group_index = LeadingGroups - 1; group_index >= 0; group_index--) begin
+        if (!group_found && group_nonzero[group_index]) begin
+          bit_found = 1'b0;
+          for (int bit_index = LeadingGroupBits - 1; bit_index >= 0; bit_index--) begin
+            if (!bit_found && value[group_index*LeadingGroupBits+bit_index]) begin
+              find_leading_one = LeadingBits'(
+                group_index * LeadingGroupBits + bit_index + 1);
+              bit_found = 1'b1;
+            end
+          end
+          group_found = 1'b1;
+        end
+      end
+    end
+  endfunction
+
+  logic s1_valid_q, s2_valid_q, s3_valid_q, s4_valid_q, s5_valid_q;
 
   logic [MantBits-1:0] s1_mant_a_q, s1_mant_b_q, s1_mant_c_q;
   logic [ProductBits-1:0] s1_product_q;
@@ -58,6 +89,27 @@ module rapt_fpu_fma #(
   logic [63:0] s2_special_result_q;
   logic [4:0] s2_special_flags_q;
   logic [2:0] s2_rounding_mode_q;
+
+  logic [WorkBits-1:0] s3_magnitude_q;
+  logic signed [13:0] s3_common_base_q;
+  logic s3_result_sign_q;
+  logic s3_zero_sign_q;
+  logic s3_sticky_q;
+  logic s3_special_q;
+  logic [63:0] s3_special_result_q;
+  logic [4:0] s3_special_flags_q;
+  logic [2:0] s3_rounding_mode_q;
+
+  logic [WorkBits-1:0] s4_magnitude_q;
+  logic [LeadingBits-1:0] s4_leading_one_q;
+  logic signed [13:0] s4_common_base_q;
+  logic s4_result_sign_q;
+  logic s4_zero_sign_q;
+  logic s4_sticky_q;
+  logic s4_special_q;
+  logic [63:0] s4_special_result_q;
+  logic [4:0] s4_special_flags_q;
+  logic [2:0] s4_rounding_mode_q;
 
   logic [63:0] result_q;
   logic [4:0] flags_q;
@@ -84,8 +136,10 @@ module rapt_fpu_fma #(
   logic [63:0] s2_special_result_c;
   logic [4:0] s2_special_flags_c;
 
-  logic [63:0] stage3_result_c;
-  logic [4:0] stage3_flags_c;
+  logic [WorkBits-1:0] s3_magnitude_c;
+  logic [LeadingBits-1:0] s4_leading_one_c;
+  logic [63:0] stage4_result_c;
+  logic [4:0] stage4_flags_c;
 
   /* Normalize a subnormal fraction to an internal (mantissa, exponent) pair
    * with the leading one at bit MantBits-1.  Internal convention:
@@ -97,8 +151,7 @@ module rapt_fpu_fma #(
    * base and corrupting every subnormal operand (e.g. double min-subnormal
    * 2^-1074 was interpreted as ~2^-51). */
   function automatic logic [MantBits-1:0] normalize_subnormal(
-      input logic [FracBits-1:0] fraction,
-      output logic signed [13:0] exponent_adjust);
+      input logic [FracBits-1:0] fraction, output logic signed [13:0] exponent_adjust);
     logic [MantBits-1:0] normalized;
     integer index;
     begin
@@ -194,10 +247,9 @@ module rapt_fpu_fma #(
     logic signed [13:0] product_base;
     logic signed [13:0] addend_base;
     logic signed [13:0] common_base;
-    integer product_shift;
-    integer addend_shift;
-    integer low_base;
-    integer high_base;
+    logic signed [14:0] base_delta;
+    logic signed [14:0] product_shift;
+    logic signed [14:0] addend_shift;
     logic product_discarded;
     logic addend_discarded;
     logic discarded_sign;
@@ -232,19 +284,10 @@ module rapt_fpu_fma #(
      * otherwise the other term's shift saturates WorkBits and the value is
      * lost (e.g. fmadd.d(x, 0, min_subnormal) dropped the addend). */
     product_base = s1_product_zero_q
-      ? s1_exp_c_q - FracBits  // align with addend so max() picks the addend
+      ? s1_exp_c_q - FracBits
       : s1_exp_a_q + s1_exp_b_q - (2 * FracBits);
     addend_base = s1_exp_c_q - FracBits;
-    // Use the larger exponent as the fixed-point base.  The smaller term is
-    // shifted right and contributes its discarded bits to sticky; using the
-    // minimum base would require a potentially 2000-bit left shift for valid
-    // IEEE exponent differences and would drop the dominant term in a small
-    // WorkBits datapath.
-    // Keep the full product precision below the dominant term.  This is
-    // required for cancellation cases; a few guard bits alone are not enough
-    // when two nearly equal FMA terms cancel and expose low product bits.
-    low_base = product_base < addend_base ? product_base : addend_base;
-    high_base = product_base > addend_base ? product_base : addend_base;
+    base_delta = 15'(product_base) - 15'(addend_base);
     /* Prefer the lower exponent when the complete product and addend fit in
      * the fixed-point window.  Keeping only a sticky bit for a discarded
      * opposite-sign addend loses the borrow/carry at the rounding boundary
@@ -252,10 +295,27 @@ module rapt_fpu_fma #(
     /* s2_total_c is signed; leave one top bit as sign headroom.  Allowing
      * the aligned product to occupy bit WorkBits-1 turns a large positive
      * product into a negative value and can produce -inf instead of +inf. */
-    common_base = (high_base - low_base + ProductBits <= WorkBits - 1)
-      ? low_base : high_base - ProductBits;
-    product_shift = common_base - product_base;
-    addend_shift = common_base - addend_base;
+    if (base_delta >= 0) begin
+      if (base_delta <= WorkBits - 1 - ProductBits) begin
+        common_base = addend_base;
+        product_shift = -base_delta;
+        addend_shift = '0;
+      end else begin
+        common_base = product_base - ProductBits;
+        product_shift = -ProductBits;
+        addend_shift = base_delta - ProductBits;
+      end
+    end else begin
+      if (-base_delta <= WorkBits - 1 - ProductBits) begin
+        common_base = product_base;
+        product_shift = '0;
+        addend_shift = base_delta;
+      end else begin
+        common_base = addend_base - ProductBits;
+        product_shift = -base_delta - ProductBits;
+        addend_shift = -ProductBits;
+      end
+    end
 
     if (!s1_special_q) begin
       if (product_shift < 0) begin
@@ -265,8 +325,7 @@ module rapt_fpu_fma #(
       end else begin
         product_term = WorkBits'(s1_product_q) >> product_shift;
         for (integer index = 0; index < ProductBits; index = index + 1)
-          if (index < product_shift)
-            product_discarded = product_discarded || s1_product_q[index];
+        if (index < product_shift) product_discarded = product_discarded || s1_product_q[index];
       end
       if (addend_shift < 0) begin
         addend_term = WorkBits'(s1_mant_c_q) <<< (-addend_shift);
@@ -275,8 +334,7 @@ module rapt_fpu_fma #(
       end else begin
         addend_term = WorkBits'(s1_mant_c_q) >> addend_shift;
         for (integer index = 0; index < MantBits; index = index + 1)
-          if (index < addend_shift)
-            addend_discarded = addend_discarded || s1_mant_c_q[index];
+        if (index < addend_shift) addend_discarded = addend_discarded || s1_mant_c_q[index];
       end
       if (s1_product_sign_q) product_term = -product_term;
       if (s1_addend_sign_q) addend_term = -addend_term;
@@ -284,10 +342,8 @@ module rapt_fpu_fma #(
       discarded_sign = product_discarded
         ? s1_product_sign_q : s1_addend_sign_q;
       if (product_discarded || addend_discarded) begin
-        if (!s2_total_c[WorkBits-1] && discarded_sign)
-          s2_total_c = s2_total_c - 1'b1;
-        else if (s2_total_c[WorkBits-1] && !discarded_sign)
-          s2_total_c = s2_total_c + 1'b1;
+        if (!s2_total_c[WorkBits-1] && discarded_sign) s2_total_c = s2_total_c - 1'b1;
+        else if (s2_total_c[WorkBits-1] && !discarded_sign) s2_total_c = s2_total_c + 1'b1;
       end
       s2_common_base_c = common_base;
       s2_sticky_c = product_discarded || addend_discarded;
@@ -295,7 +351,6 @@ module rapt_fpu_fma #(
   end
 
   always_comb begin
-    logic [WorkBits-1:0] magnitude;
     logic [WorkBits-1:0] magnitude_aligned;
     logic [FracBits:0] retained;
     logic [FracBits+1:0] rounded;
@@ -303,65 +358,58 @@ module rapt_fpu_fma #(
     logic guard_bit, sticky_bit, inexact, round_up, invalid;
     logic signed [13:0] exponent_value;
     logic [10:0] result_exponent;
-    integer leading_one;
     integer shift_amount;
     integer index;
 
-    stage3_result_c = s2_special_result_q;
-    stage3_flags_c = s2_special_flags_q;
-    magnitude = s2_total_q[WorkBits-1] ? -s2_total_q : s2_total_q;
-    result_sign = s2_total_q[WorkBits-1];
+    stage4_result_c = s4_special_result_q;
+    stage4_flags_c = s4_special_flags_q;
+    result_sign = s4_result_sign_q;
     retained = '0;
     rounded = '0;
     guard_bit = 1'b0;
-    sticky_bit = s2_sticky_q;
+    sticky_bit = s4_sticky_q;
     inexact = 1'b0;
     round_up = 1'b0;
     invalid = 1'b0;
     exponent_value = '0;
     result_exponent = '0;
-    leading_one = 0;
     shift_amount = 0;
     magnitude_aligned = '0;
 
-    for (index = WorkBits - 1; index >= 0; index = index - 1)
-      if (magnitude[index] && leading_one == 0)
-        leading_one = index + 1;
-
-    if (!s2_special_q && leading_one == 0) begin
+    if (!s4_special_q && s4_leading_one_q == 0) begin
       /* Exact zero OR total underflow to zero.  If sticky captured discarded
        * bits (tiny product shifted below the WorkBits window), the true value
        * is nonzero but rounds to zero: raise NX and UF per IEEE 754. */
-      round_up = s2_sticky_q
-        && ((s2_rounding_mode_q == 3'b010 && s2_result_sign_q)
-          || (s2_rounding_mode_q == 3'b011 && !s2_result_sign_q));
-      stage3_result_c = TARGET_DOUBLE
-        ? {s2_result_sign_q, 62'b0, round_up}
-        : {32'hffff_ffff, s2_result_sign_q, 30'b0, round_up};
-      stage3_flags_c[0] = s2_sticky_q;
-      stage3_flags_c[1] = s2_sticky_q;
-    end else if (!s2_special_q) begin
-      exponent_value = leading_one + s2_common_base_q - 1;
-      shift_amount = leading_one > MantBits ? leading_one - MantBits : 0;
-      if (exponent_value < MinExp)
-        shift_amount = shift_amount + (MinExp - exponent_value);
+      round_up = s4_sticky_q
+        && ((s4_rounding_mode_q == 3'b010 && s4_zero_sign_q)
+          || (s4_rounding_mode_q == 3'b011 && !s4_zero_sign_q));
+      stage4_result_c = TARGET_DOUBLE
+        ? {s4_zero_sign_q, 62'b0, round_up}
+        : {32'hffff_ffff, s4_zero_sign_q, 30'b0, round_up};
+      stage4_flags_c[0] = s4_sticky_q;
+      stage4_flags_c[1] = s4_sticky_q;
+    end else if (!s4_special_q) begin
+      exponent_value = 14'(s4_leading_one_q) + s4_common_base_q - 1;
+      shift_amount = integer'(s4_leading_one_q) > MantBits
+        ? integer'(s4_leading_one_q) - MantBits : 0;
+      if (exponent_value < MinExp) shift_amount = shift_amount + (MinExp - exponent_value);
       if (shift_amount >= WorkBits) begin
         retained = '0;
         guard_bit = 1'b0;
-        sticky_bit = sticky_bit || (|magnitude);
+        sticky_bit = sticky_bit || (|s4_magnitude_q);
       end else begin
         magnitude_aligned = shift_amount == 0
-          ? magnitude << (MantBits - leading_one)
-          : magnitude >> shift_amount;
+          ? s4_magnitude_q << (MantBits - integer'(s4_leading_one_q))
+          : s4_magnitude_q >> shift_amount;
         retained = magnitude_aligned[MantBits-1:0];
-        guard_bit = shift_amount > 0 ? magnitude[shift_amount - 1] : 1'b0;
+        guard_bit = shift_amount > 0
+          ? s4_magnitude_q[shift_amount - 1] : 1'b0;
         if (shift_amount > 1)
           for (index = 0; index < WorkBits; index = index + 1)
-            if (index < shift_amount - 1)
-              sticky_bit = sticky_bit || magnitude[index];
+          if (index < shift_amount - 1) sticky_bit = sticky_bit || s4_magnitude_q[index];
       end
       inexact = guard_bit || sticky_bit;
-      case (s2_rounding_mode_q)
+      case (s4_rounding_mode_q)
         3'b000: round_up = guard_bit && (sticky_bit || retained[0]);
         3'b001: round_up = 1'b0;
         3'b010: round_up = inexact && result_sign;
@@ -378,48 +426,58 @@ module rapt_fpu_fma #(
       end
       invalid = 1'b0;
       if (exponent_value > MaxExp) begin
-        stage3_flags_c[2] = 1'b1;
-        stage3_flags_c[0] = 1'b1;
-        if (s2_rounding_mode_q == 3'b001
-            || (s2_rounding_mode_q == 3'b010 && !result_sign)
-            || (s2_rounding_mode_q == 3'b011 && result_sign))
-          stage3_result_c = TARGET_DOUBLE
+        stage4_flags_c[2] = 1'b1;
+        stage4_flags_c[0] = 1'b1;
+        if (s4_rounding_mode_q == 3'b001
+          || (s4_rounding_mode_q == 3'b010 && !result_sign)
+          || (s4_rounding_mode_q == 3'b011 && result_sign))
+          stage4_result_c = TARGET_DOUBLE
             ? {result_sign, 11'h7fe, 52'hf_ffff_ffff_ffff}
             : {32'hffff_ffff, result_sign, 8'hfe, 23'h7f_ffff};
         else
-          stage3_result_c = TARGET_DOUBLE
+          stage4_result_c = TARGET_DOUBLE
             ? {result_sign, 11'h7ff, 52'b0}
             : {32'hffff_ffff, result_sign, 8'hff, 23'b0};
       end else if (exponent_value < MinExp
           || (exponent_value == MinExp && !retained[FracBits])) begin
-        stage3_result_c = TARGET_DOUBLE
+        stage4_result_c = TARGET_DOUBLE
           ? {result_sign, 11'b0, retained[51:0]}
           : {32'hffff_ffff, result_sign, 8'b0, retained[22:0]};
-        stage3_flags_c[1] = inexact;
-        stage3_flags_c[0] = inexact;
+        stage4_flags_c[1] = inexact;
+        stage4_flags_c[0] = inexact;
       end else begin
         result_exponent = exponent_value + ExpBias;
-        stage3_result_c = TARGET_DOUBLE
+        stage4_result_c = TARGET_DOUBLE
           ? {result_sign, result_exponent, retained[51:0]}
           : {32'hffff_ffff, result_sign, result_exponent[7:0], retained[22:0]};
-        stage3_flags_c[0] = inexact;
+        stage4_flags_c[0] = inexact;
       end
     end
   end
 
-  assign ready = !(s1_valid_q || s2_valid_q || s3_valid_q);
+  always_comb begin
+    s3_magnitude_c = s2_total_q[WorkBits-1] ? -s2_total_q : s2_total_q;
+    s4_leading_one_c = find_leading_one(s3_magnitude_q);
+  end
+
+  assign ready = !(s1_valid_q || s2_valid_q || s3_valid_q || s4_valid_q
+    || s5_valid_q);
   assign result = result_q;
   assign flags = flags_q;
-  assign result_valid = s3_valid_q;
+  assign result_valid = s5_valid_q;
 
   always_ff @(posedge clock) begin
     if (reset || flush) begin
       s1_valid_q <= 1'b0;
       s2_valid_q <= 1'b0;
       s3_valid_q <= 1'b0;
+      s4_valid_q <= 1'b0;
+      s5_valid_q <= 1'b0;
       result_q <= '0;
       flags_q <= '0;
     end else begin
+      s5_valid_q <= s4_valid_q;
+      s4_valid_q <= s3_valid_q;
       s3_valid_q <= s2_valid_q;
       s2_valid_q <= s1_valid_q;
       s1_valid_q <= valid && ready;
@@ -451,8 +509,31 @@ module rapt_fpu_fma #(
         s2_rounding_mode_q <= s1_rounding_mode_q;
       end
       if (s2_valid_q) begin
-        result_q <= stage3_result_c;
-        flags_q <= stage3_flags_c;
+        s3_magnitude_q <= s3_magnitude_c;
+        s3_common_base_q <= s2_common_base_q;
+        s3_result_sign_q <= s2_total_q[WorkBits-1];
+        s3_zero_sign_q <= s2_result_sign_q;
+        s3_sticky_q <= s2_sticky_q;
+        s3_special_q <= s2_special_q;
+        s3_special_result_q <= s2_special_result_q;
+        s3_special_flags_q <= s2_special_flags_q;
+        s3_rounding_mode_q <= s2_rounding_mode_q;
+      end
+      if (s3_valid_q) begin
+        s4_magnitude_q <= s3_magnitude_q;
+        s4_leading_one_q <= s4_leading_one_c;
+        s4_common_base_q <= s3_common_base_q;
+        s4_result_sign_q <= s3_result_sign_q;
+        s4_zero_sign_q <= s3_zero_sign_q;
+        s4_sticky_q <= s3_sticky_q;
+        s4_special_q <= s3_special_q;
+        s4_special_result_q <= s3_special_result_q;
+        s4_special_flags_q <= s3_special_flags_q;
+        s4_rounding_mode_q <= s3_rounding_mode_q;
+      end
+      if (s4_valid_q) begin
+        result_q <= stage4_result_c;
+        flags_q <= stage4_flags_c;
       end
     end
   end

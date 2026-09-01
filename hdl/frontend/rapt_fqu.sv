@@ -86,7 +86,9 @@ module rapt_fqu #(
       tail <= '0;
       count <= '0;
     end else begin
-      unique case ({push, pop})
+      unique case ({
+        push, pop
+      })
         2'b10: begin
           inst_a_mem[tail] <= ifu_in.inst_a;
           pc_a_mem[tail] <= ifu_in.pc_a;
@@ -128,17 +130,12 @@ module rapt_fqu #(
   end
 
   // HANDSHAKE: an empty FQU cannot expose an unregistered IFU packet.
-  `RAPT_SVA_IMPLY(clock, reset, FQU_EMPTY_BLOCKS_OUTPUT,
-                  empty, !idu_out.valid_a)
+  `RAPT_SVA_IMPLY(clock, reset, FQU_EMPTY_BLOCKS_OUTPUT, empty, !idu_out.valid_a)
 `ifdef RAPT_DUAL_ISSUE
-  `RAPT_SVA_IMPLY(clock, reset, FQU_SLOT_B_IMPLIES_SLOT_A,
-                  idu_out.valid_b, idu_out.valid_a)
+  `RAPT_SVA_IMPLY(clock, reset, FQU_SLOT_B_IMPLIES_SLOT_A, idu_out.valid_b, idu_out.valid_a)
 `endif
-  `RAPT_SVA_IMPLY(clock, reset, FQU_FLUSH_BLOCKS_OUTPUT,
-                  flush, !idu_out.valid_a && !ifu_in.ready)
-  `RAPT_SVA_NEXT(clock, reset, FQU_FLUSH_CLEARS_STORAGE,
-                 flush, empty)
-  `RAPT_COVER(clock, reset, FQU_STEADY_PACKET_FLOW,
-              !empty && idu_out.ready && ifu_in.valid_a)
+  `RAPT_SVA_IMPLY(clock, reset, FQU_FLUSH_BLOCKS_OUTPUT, flush, !idu_out.valid_a && !ifu_in.ready)
+  `RAPT_SVA_NEXT(clock, reset, FQU_FLUSH_CLEARS_STORAGE, flush, empty)
+  `RAPT_COVER(clock, reset, FQU_STEADY_PACKET_FLOW, !empty && idu_out.ready && ifu_in.valid_a)
 
 endmodule

@@ -277,8 +277,8 @@
 
 // Supervisor-level CSR
 `define RAPT_CSR_FFLAGS 'h001
-`define RAPT_CSR_FRM    'h002
-`define RAPT_CSR_FCSR   'h003
+`define RAPT_CSR_FRM 'h002
+`define RAPT_CSR_FCSR 'h003
 `define RAPT_CSR_SSTATUS 'h100
 `define RAPT_CSR_SIE____ 'h104
 `define RAPT_CSR_STVEC__ 'h105

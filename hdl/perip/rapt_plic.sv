@@ -91,8 +91,7 @@ module rapt_plic #(
   endfunction
 
   function automatic int en_ctx(input logic [31:0] off);
-    if (off >= EnBase && off < EnBase + EnStride * NCTX)
-      en_ctx = int'((off - EnBase) / EnStride);
+    if (off >= EnBase && off < EnBase + EnStride * NCTX) en_ctx = int'((off - EnBase) / EnStride);
     else en_ctx = -1;
   endfunction
 

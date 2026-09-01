@@ -29,7 +29,7 @@ module rapt_exu_pipe_alu #(
   );
 
   logic [XLEN-1:0] jump_target;
-    assign jump_target = ((iss.jren ? iss.op1 : iss.pc) + iss.imm) & ~'b1;
+  assign jump_target = ((iss.jren ? iss.op1 : iss.pc) + iss.imm) & ~'b1;
 
   // === Writeback ===
   assign wb_alu.valid = iss.valid;
@@ -49,8 +49,8 @@ module rapt_exu_pipe_alu #(
   // ALU never produces CSR / trap / MEM sideband (unified exu_wb_if tie-offs).
   assign wb_alu.csr_wen = 1'b0;
   assign wb_alu.csr_wdata = '0;
-    assign wb_alu.fp_flags_valid = 1'b0;
-    assign wb_alu.fp_flags = '0;
+  assign wb_alu.fp_flags_valid = 1'b0;
+  assign wb_alu.fp_flags = '0;
   assign wb_alu.trap = 1'b0;
   assign wb_alu.tval = '0;
   assign wb_alu.cause = '0;
@@ -58,7 +58,7 @@ module rapt_exu_pipe_alu #(
   assign wb_alu.alu = '0;
   assign wb_alu.sq_waddr = '0;
   assign wb_alu.sq_wdata = '0;
-    assign wb_alu.sq_wdata64 = '0;
-    assign wb_alu.sq_fp64 = 1'b0;
+  assign wb_alu.sq_wdata64 = '0;
+  assign wb_alu.sq_fp64 = 1'b0;
 
 endmodule

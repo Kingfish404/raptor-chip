@@ -29,22 +29,21 @@ interface exu_prf_if #(
   logic pv2_b_valid;
 `endif
 
-  modport master(
-      output pr1_a, pr2_a,
-      input pv1_a, pv1_a_valid, pv2_a, pv2_a_valid
 `ifdef RAPT_DUAL_ISSUE
-      , output pr1_b, pr2_b
-      , input pv1_b, pv1_b_valid, pv2_b, pv2_b_valid
-`endif
+  modport master(
+      output pr1_a, pr2_a, pr1_b, pr2_b,
+      input pv1_a, pv1_a_valid, pv2_a, pv2_a_valid,
+      input pv1_b, pv1_b_valid, pv2_b, pv2_b_valid
   );
   modport slave(
-      input pr1_a, pr2_a,
-      output pv1_a, pv1_a_valid, pv2_a, pv2_a_valid
-`ifdef RAPT_DUAL_ISSUE
-      , input pr1_b, pr2_b
-      , output pv1_b, pv1_b_valid, pv2_b, pv2_b_valid
-`endif
+      input pr1_a, pr2_a, pr1_b, pr2_b,
+      output pv1_a, pv1_a_valid, pv2_a, pv2_a_valid,
+      output pv1_b, pv1_b_valid, pv2_b, pv2_b_valid
   );
+`else
+  modport master(output pr1_a, pr2_a, input pv1_a, pv1_a_valid, pv2_a, pv2_a_valid);
+  modport slave(input pr1_a, pr2_a, output pv1_a, pv1_a_valid, pv2_a, pv2_a_valid);
+`endif
 endinterface
 
 // Architectural FPR bank interface. The serializing FP pipe needs three read
@@ -63,18 +62,17 @@ interface fpr_if;
   logic [63:0] ioq_wdata;
 
   modport storage(
-    input alu_raddr_a, alu_raddr_b, alu_raddr_c, ioq_raddr,
-    output alu_rdata_a, alu_rdata_b, alu_rdata_c, ioq_rdata,
-    input alu_wvalid, alu_waddr, alu_wdata,
-    input ioq_wvalid, ioq_waddr, ioq_wdata);
+      input alu_raddr_a, alu_raddr_b, alu_raddr_c, ioq_raddr,
+      output alu_rdata_a, alu_rdata_b, alu_rdata_c, ioq_rdata,
+      input alu_wvalid, alu_waddr, alu_wdata,
+      input ioq_wvalid, ioq_waddr, ioq_wdata
+  );
   modport alu(
-    output alu_raddr_a, alu_raddr_b, alu_raddr_c,
-    input alu_rdata_a, alu_rdata_b, alu_rdata_c,
-    output alu_wvalid, alu_waddr, alu_wdata);
-  modport ioq(
-    output ioq_raddr,
-    input ioq_rdata,
-    output ioq_wvalid, ioq_waddr, ioq_wdata);
+      output alu_raddr_a, alu_raddr_b, alu_raddr_c,
+      input alu_rdata_a, alu_rdata_b, alu_rdata_c,
+      output alu_wvalid, alu_waddr, alu_wdata
+  );
+  modport ioq(output ioq_raddr, input ioq_rdata, output ioq_wvalid, ioq_waddr, ioq_wdata);
 endinterface
 
 interface exu_lsu_if #(
@@ -108,17 +106,19 @@ interface exu_lsu_if #(
   logic rready_b;
 
   modport master(
-    output rvalid, raddr, ralu, atomic_lock, ordered, pc,
-    output fp_rdata64_req,
-    input rdata, fp_rdata64, fp_rdata64_valid, trap, cause, difftest_skip, rready, stq_ready,
-    output rvalid_b, raddr_b, ralu_b,
-    input rdata_b, rready_b);
+      output rvalid, raddr, ralu, atomic_lock, ordered, pc,
+      output fp_rdata64_req,
+      input rdata, fp_rdata64, fp_rdata64_valid, trap, cause, difftest_skip, rready, stq_ready,
+      output rvalid_b, raddr_b, ralu_b,
+      input rdata_b, rready_b
+  );
   modport slave(
-    input rvalid, raddr, ralu, atomic_lock, ordered, pc,
-    output rdata, fp_rdata64, fp_rdata64_valid, trap, cause, difftest_skip, rready, stq_ready,
-    input fp_rdata64_req,
-    input rvalid_b, raddr_b, ralu_b,
-    output rdata_b, rready_b);
+      input rvalid, raddr, ralu, atomic_lock, ordered, pc,
+      output rdata, fp_rdata64, fp_rdata64_valid, trap, cause, difftest_skip, rready, stq_ready,
+      input fp_rdata64_req,
+      input rvalid_b, raddr_b, ralu_b,
+      output rdata_b, rready_b
+  );
 endinterface
 
 interface exu_load_fast_if #(
@@ -261,19 +261,19 @@ interface exu_iq_iss_if #(
   logic [$clog2(`RAPT_ROB_SIZE)-1:0] dest;
   logic [PLEN-1:0] prd;
   logic [RLEN-1:0] rd;
-    logic fp_valid;
-    logic [5:0] fp_op;
-    logic [2:0] fp_rm;
-    logic [4:0] fp_rs1;
-    logic [4:0] fp_rs2;
-    logic [4:0] fp_rs3;
-    logic [4:0] fp_rd;
-    logic fp_dep1_valid;
-    logic fp_dep2_valid;
-    logic fp_dep3_valid;
-    logic [$clog2(`RAPT_ROB_SIZE)-1:0] fp_dep1;
-    logic [$clog2(`RAPT_ROB_SIZE)-1:0] fp_dep2;
-    logic [$clog2(`RAPT_ROB_SIZE)-1:0] fp_dep3;
+  logic fp_valid;
+  logic [5:0] fp_op;
+  logic [2:0] fp_rm;
+  logic [4:0] fp_rs1;
+  logic [4:0] fp_rs2;
+  logic [4:0] fp_rs3;
+  logic [4:0] fp_rd;
+  logic fp_dep1_valid;
+  logic fp_dep2_valid;
+  logic fp_dep3_valid;
+  logic [$clog2(`RAPT_ROB_SIZE)-1:0] fp_dep1;
+  logic [$clog2(`RAPT_ROB_SIZE)-1:0] fp_dep2;
+  logic [$clog2(`RAPT_ROB_SIZE)-1:0] fp_dep3;
   /* verilator lint_on UNUSEDSIGNAL */
 
   modport iq(
@@ -333,14 +333,8 @@ interface exu_disp_ioq_if #(
   logic accept_b_paired;  // slot B enqueued together with A (uses ioq_tail+1)
   logic accept_b_alone;   // slot B enqueued without A (uses ioq_tail)
 
-  modport top(
-      input ready, ready_b,
-      output accept_a, accept_b_paired, accept_b_alone
-  );
-  modport ioq(
-      output ready, ready_b,
-      input accept_a, accept_b_paired, accept_b_alone
-  );
+  modport top(input ready, ready_b, output accept_a, accept_b_paired, accept_b_alone);
+  modport ioq(output ready, ready_b, input accept_a, accept_b_paired, accept_b_alone);
 
   // Tie unused signal to silence lint when RAPT_DUAL_ISSUE is off.
   /* verilator lint_off UNUSEDSIGNAL */
@@ -364,10 +358,14 @@ interface exu_l1d_if #(
   logic reservation_clear;
   logic ready;
 
-  modport master(output mmu_en, vaddr, walu, valid, reservation_clear,
-      input paddr, trap, cause, reservation, reservation_valid, ready);
-  modport slave(input mmu_en, vaddr, walu, valid, reservation_clear,
-      output paddr, trap, cause, reservation, reservation_valid, ready);
+  modport master(
+      output mmu_en, vaddr, walu, valid, reservation_clear,
+      input paddr, trap, cause, reservation, reservation_valid, ready
+  );
+  modport slave(
+      input mmu_en, vaddr, walu, valid, reservation_clear,
+      output paddr, trap, cause, reservation, reservation_valid, ready
+  );
 endinterface
 
 /* verilator lint_on UNUSEDSIGNAL */

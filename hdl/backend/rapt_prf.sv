@@ -1,6 +1,14 @@
 `include "rapt.svh"
 `include "rapt_if.svh"
 
+`ifdef RAPT_RVFI
+`define RAPT_PRF_RVFI_PORTS \
+  , output [XLEN-1:0] rvfi_rd_wdata_a \
+  , output [XLEN-1:0] rvfi_rd_wdata_b
+`else
+`define RAPT_PRF_RVFI_PORTS
+`endif
+
 // Physical Register File - multi-ported register storage with valid/transient tracking.
 // Instantiated at the top level (rapt.sv) as a shared resource:
 //   - Read by ROU (operand fetch via exu_prf_if)
@@ -51,12 +59,7 @@ module rapt_prf #(
     input  logic            dbg_we_i,
     input  logic [4:0]      dbg_addr_i,
     input  logic [XLEN-1:0] dbg_wdata_i
-
-`ifdef RAPT_RVFI
-    // RVFI: read destination register values at commit time
-    , output [XLEN-1:0] rvfi_rd_wdata_a
-    , output [XLEN-1:0] rvfi_rd_wdata_b
-`endif
+    `RAPT_PRF_RVFI_PORTS
 );
   logic [XLEN-1:0] prf_arr           [PNUM];
   logic [PNUM-1:0] prf_valid;
@@ -160,7 +163,7 @@ module rapt_prf #(
       // path).
       prf_valid     <= {{(PNUM - RNUM) {1'b0}}, {RNUM{1'b1}}};
       prf_transient <= '0;
-        end else begin
+    end else begin
       for (integer i = 0; i < PNUM; i = i + 1) begin
         // Free old physical register (prs): slot 1 then slot 0 priority
         if (dealloc_prs_b_oh[i]) begin
@@ -183,8 +186,7 @@ module rapt_prf #(
           prf_arr[i]       <= wr_mux_data[i];
           prf_valid[i]     <= 1'b1;
           prf_transient[i] <= 1'b1;
-        end else if (dbg_we_i && dbg_addr_i != 5'd0
-                     && rat_snapshot[dbg_addr_i] == PLEN'(i)) begin
+        end else if (dbg_we_i && dbg_addr_i != 5'd0 && rat_snapshot[dbg_addr_i] == PLEN'(i)) begin
           // Halt-time abstract write: target the committed phys reg of
           // architectural reg `dbg_addr_i`. Caller must hold halted=1.
           prf_arr[i] <= dbg_wdata_i;
@@ -202,3 +204,5 @@ module rapt_prf #(
     end
   endgenerate
 endmodule
+
+`undef RAPT_PRF_RVFI_PORTS

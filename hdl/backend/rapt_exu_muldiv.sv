@@ -145,8 +145,7 @@ module rapt_exu_muldiv #(
     free_idx_b   = '0;
     free_found_b = 1'b0;
     for (int i = 0; i < MDQ_SIZE; i++) begin
-      if (!free_found_b && mdq_free_vec[i]
-          && !(free_found_a && i[MDQLen-1:0] == free_idx_a)) begin
+      if (!free_found_b && mdq_free_vec[i] && !(free_found_a && i[MDQLen-1:0] == free_idx_a)) begin
         free_idx_b   = i[MDQLen-1:0];
         free_found_b = 1'b1;
       end
@@ -192,8 +191,7 @@ module rapt_exu_muldiv #(
   logic [MDQ_SIZE-1:0] mdq_elig_vec;
   always_comb begin
     for (int i = 0; i < MDQ_SIZE; i++) begin
-      mdq_elig_vec[i] = mdq_valid[i] && !mdq_issued[i]
-                        && !mdq_pr1_busy[i] && !mdq_pr2_busy[i];
+      mdq_elig_vec[i] = mdq_valid[i] && !mdq_issued[i] && !mdq_pr1_busy[i] && !mdq_pr2_busy[i];
     end
   end
 
@@ -359,13 +357,11 @@ module rapt_exu_muldiv #(
             age_mat[i][j] <= 1'b1;
           end else if (disp.accept_b && i == int'(disp.b_rs_idx)) begin
             age_mat[i][j] <= 1'b0;
-          end else if (disp.accept_b && j == int'(disp.b_rs_idx)
-                     && i != int'(disp.b_rs_idx)) begin
+          end else if (disp.accept_b && j == int'(disp.b_rs_idx) && i != int'(disp.b_rs_idx)) begin
             age_mat[i][j] <= mdq_valid[i];
           end else if (disp.accept_a && i == int'(free_idx_a)) begin
             age_mat[i][j] <= 1'b0;
-          end else if (disp.accept_a && j == int'(free_idx_a)
-                     && i != int'(free_idx_a)) begin
+          end else if (disp.accept_a && j == int'(free_idx_a) && i != int'(free_idx_a)) begin
             age_mat[i][j] <= mdq_valid[i];
           end
         end

@@ -128,7 +128,7 @@ module rapt_core #(
   exu_wb_if exu_wb_mul ();  // MUL/DIV pipe writeback
 
   exu_prf_if exu_prf ();
-    fpr_if fpr ();
+  fpr_if fpr ();
   exu_csr_if exu_csr ();
   exu_lsu_if exu_lsu ();
   exu_l1d_if exu_l1d ();
@@ -204,7 +204,7 @@ module rapt_core #(
     pipe_cdb_valid_mask = {
       exu_wb_mul.valid, exu_ioq_bcast.valid, wb_branch.valid, wb_alu.valid, wb_alu_csr.valid
     };
-        pipe_cdb_valid_count = {2'b0, pipe_cdb_valid_mask[0]}
+    pipe_cdb_valid_count = {2'b0, pipe_cdb_valid_mask[0]}
                                                  + {2'b0, pipe_cdb_valid_mask[1]}
                                                  + {2'b0, pipe_cdb_valid_mask[2]}
                                                  + {2'b0, pipe_cdb_valid_mask[3]}
@@ -354,7 +354,7 @@ module rapt_core #(
       .l1i_bus(l1i_bus),
 
       .csr_bcast(csr_bcast),
-            .pmp_state(pmp_fetch_state),
+      .pmp_state(pmp_fetch_state),
 
       .reset(reset)
   );
@@ -439,7 +439,7 @@ module rapt_core #(
   /* verilator lint_on UNUSEDSIGNAL */
 
   // Expose committed GPR view to the cluster-level Debug Module.
-    assign dbg_gpr_rdata_o = rf;
+  assign dbg_gpr_rdata_o = rf;
 
 `ifdef RAPT_RVFI
   logic [XLEN-1:0] rvfi_rd_wdata_a_w;
@@ -470,16 +470,16 @@ module rapt_core #(
       .dbg_wdata_i(dbg_gpr_wdata_i)
 
 `ifdef RAPT_RVFI,
-        .rvfi_rd_wdata_a(rvfi_rd_wdata_a_w)
+      .rvfi_rd_wdata_a(rvfi_rd_wdata_a_w)
       , .rvfi_rd_wdata_b(rvfi_rd_wdata_b_w)
 `endif
   );
 
-    rapt_fpr fpr_bank (
-            .clock(clock),
-            .reset(reset),
-            .fpr(fpr)
-    );
+  rapt_fpr fpr_bank (
+      .clock(clock),
+      .reset(reset),
+      .fpr(fpr)
+  );
 
   // EXU (EXecution Unit)
   rapt_exu exu (
@@ -497,7 +497,7 @@ module rapt_core #(
 
       .exu_lsu(exu_lsu),
       .exu_csr(exu_csr),
-    .fpr(fpr),
+      .fpr(fpr),
 
       .csr_bcast(csr_bcast),
       .pmp_state(pmp_exu_state),
@@ -598,20 +598,20 @@ module rapt_core #(
   );
 
 `ifdef RAPT_SOC
-    localparam int MemoryReadCredits = 1;
+  localparam int MemoryReadCredits = 1;
 `else
-    localparam int MemoryReadCredits = 8;
+  localparam int MemoryReadCredits = 8;
 `endif
 
   rapt_axi_master #(
-          .XLEN(XLEN),
-          .MAX_READ_OUTSTANDING(MemoryReadCredits)
+      .XLEN(XLEN),
+      .MAX_READ_OUTSTANDING(MemoryReadCredits)
   ) axi_master (
-          .clock(clock),
-          .reset(reset),
+      .clock(clock),
+      .reset(reset),
 
-          .mem(memory_link),
-          .axi(l2_axi)
+      .mem(memory_link),
+      .axi(l2_axi)
   );
 
   rapt_l2 l2 (

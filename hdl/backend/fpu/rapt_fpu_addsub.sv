@@ -83,22 +83,18 @@ module rapt_fpu_addsub #(
   logic [63:0] stage3_result_c;
   logic [4:0] stage3_flags_c;
 
-  function automatic [MantExtBits-1:0] shift_sticky(
-      input logic [MantExtBits-1:0] value,
-      input integer amount);
+  function automatic [MantExtBits-1:0] shift_sticky(input logic [MantExtBits-1:0] value,
+                                                    input integer amount);
     logic [MantExtBits-1:0] shifted;
     integer index;
     begin
       shifted = '0;
-      if (amount == 0)
-        shifted = value;
-      else if (amount >= MantExtBits)
-        shifted[0] = |value;
+      if (amount == 0) shifted = value;
+      else if (amount >= MantExtBits) shifted[0] = |value;
       else begin
         shifted = value >> amount;
         for (index = 0; index < MantExtBits; index = index + 1)
-          if (index < amount)
-            shifted[0] = shifted[0] | value[index];
+        if (index < amount) shifted[0] = shifted[0] | value[index];
       end
       shift_sticky = shifted;
     end
@@ -176,12 +172,9 @@ module rapt_fpu_addsub #(
     sum_c = {1'b0, s1_aligned_a_q} + {1'b0, s1_aligned_b_q};
     diff_c = '0;
     s2_result_sign_c = s1_sign_a_q;
-    if (s1_aligned_a_q >= s1_aligned_b_q)
-      diff_c = s1_aligned_a_q - s1_aligned_b_q;
-    else
-      diff_c = s1_aligned_b_q - s1_aligned_a_q;
-    if (s1_aligned_b_q > s1_aligned_a_q)
-      s2_result_sign_c = s1_sign_b_q;
+    if (s1_aligned_a_q >= s1_aligned_b_q) diff_c = s1_aligned_a_q - s1_aligned_b_q;
+    else diff_c = s1_aligned_b_q - s1_aligned_a_q;
+    if (s1_aligned_b_q > s1_aligned_a_q) s2_result_sign_c = s1_sign_b_q;
 
     // Leading-zero count of the subtraction result (priority encoder).
     lzc_c = '0;
@@ -277,8 +270,7 @@ module rapt_fpu_addsub #(
               ? {s2_result_sign_q, 11'h7ff, 52'b0}
               : {32'hffff_ffff, s2_result_sign_q, 8'hff, 23'b0};
           end
-        end else if (exponent_3 == 1
-            && !rounded_significand_3[FracBits]) begin
+        end else if (exponent_3 == 1 && !rounded_significand_3[FracBits]) begin
           // Subnormal result.
           stage3_result_c = TARGET_DOUBLE
             ? {s2_result_sign_q, 11'b0, rounded_significand_3[51:0]}
@@ -293,8 +285,7 @@ module rapt_fpu_addsub #(
         end
       end
       stage3_flags_c[0] = inexact_3;
-      if (stage3_flags_c[4])
-        stage3_flags_c[0] = 1'b0;
+      if (stage3_flags_c[4]) stage3_flags_c[0] = 1'b0;
     end
   end
 

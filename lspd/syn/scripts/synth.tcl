@@ -46,7 +46,16 @@ if {[info exists LATCH_MAP_FILE] && $LATCH_MAP_FILE ne ""} {
 
 dfflibmap {*}$liberty_args {*}$dont_use_args
 opt -undriven
-abc -D [expr {$period_ns * 1000.0}] {*}$liberty_args {*}$dont_use_args
+set abc_args {}
+if {[info exists ABC_DRIVER_CELL] && [info exists ABC_LOAD_IN_FF]} {
+    set abc_constr "$out/abc.constr"
+    set constr_file [open $abc_constr w]
+    puts $constr_file "set_driving_cell $ABC_DRIVER_CELL"
+    puts $constr_file "set_load $ABC_LOAD_IN_FF"
+    close $constr_file
+    lappend abc_args -constr $abc_constr
+}
+abc -D [expr {$period_ns * 1000.0}] {*}$abc_args {*}$liberty_args {*}$dont_use_args
 setundef -zero
 splitnets
 hilomap -singleton -hicell {*}$TIEHI_CELL_AND_PORT -locell {*}$TIELO_CELL_AND_PORT

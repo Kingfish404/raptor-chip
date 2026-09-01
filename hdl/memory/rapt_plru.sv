@@ -19,7 +19,7 @@ module rapt_plru #(
     parameter int SETLEN   = 5,
     parameter int NSETS    = 32
 ) (
-/* verilator lint_on WIDTHEXPAND */
+    /* verilator lint_on WIDTHEXPAND */
     input  logic                 clock,
     input  logic                 reset,
     input  logic                 cache_en,
@@ -87,8 +87,7 @@ module rapt_plru #(
       assign way23_any_valid = valid_way[2] | valid_way[3];
 
       logic pick_left;
-      assign pick_left = ~way23_any_valid
-                       | (way01_any_valid & lru_left);
+      assign pick_left = ~way23_any_valid | (way01_any_valid & lru_left);
 
       logic [1:0] pick_way01, pick_way23;
       assign pick_way01[0] = ~valid_way[1] | (valid_way[0] & lru_way01);
@@ -192,8 +191,7 @@ module rapt_plru #(
   generate
     if (NUMWAYS == 2) begin : g_update_2
       always_ff @(posedge clock) begin
-        if (reset)
-          for (int i = 0; i < NSETS; i++) lru_state[i] <= '0;
+        if (reset) for (int i = 0; i < NSETS; i++) lru_state[i] <= '0;
         else if (cache_en) begin
           if (invalidate_cache && !invalidate_flush) begin
             for (int i = 0; i < NSETS; i++) lru_state[i] <= '0;
@@ -205,8 +203,7 @@ module rapt_plru #(
       end
     end else if (NUMWAYS == 4) begin : g_update_4
       always_ff @(posedge clock) begin
-        if (reset)
-          for (int i = 0; i < NSETS; i++) lru_state[i] <= '0;
+        if (reset) for (int i = 0; i < NSETS; i++) lru_state[i] <= '0;
         else if (cache_en) begin
           if (invalidate_cache && !invalidate_flush) begin
             for (int i = 0; i < NSETS; i++) lru_state[i] <= '0;
@@ -222,8 +219,7 @@ module rapt_plru #(
       end
     end else if (NUMWAYS == 8) begin : g_update_8
       always_ff @(posedge clock) begin
-        if (reset)
-          for (int i = 0; i < NSETS; i++) lru_state[i] <= '0;
+        if (reset) for (int i = 0; i < NSETS; i++) lru_state[i] <= '0;
         else if (cache_en) begin
           if (invalidate_cache && !invalidate_flush) begin
             for (int i = 0; i < NSETS; i++) lru_state[i] <= '0;

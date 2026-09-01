@@ -94,10 +94,10 @@ module rapt_router #(
     logic [XLEN-1:0] data;
   } int_resp_t;
 
-  int_resp_t                       int_resp_q [INT_RESP_DEPTH];
-  logic [INT_RESP_IDX_W-1:0]       int_resp_head, int_resp_tail;
-  logic [INT_RESP_CNT_W-1:0]       int_resp_count;
-  logic                            int_resp_empty, int_resp_full;
+  int_resp_t int_resp_q[INT_RESP_DEPTH];
+  logic [INT_RESP_IDX_W-1:0] int_resp_head, int_resp_tail;
+  logic [INT_RESP_CNT_W-1:0] int_resp_count;
+  logic int_resp_empty, int_resp_full;
   assign int_resp_empty = (int_resp_count == '0);
   assign int_resp_full  = (int_resp_count == INT_RESP_CNT_W'(INT_RESP_DEPTH));
 
@@ -185,7 +185,9 @@ module rapt_router #(
         int_resp_head <= (int_resp_head == INT_RESP_IDX_W'(INT_RESP_DEPTH - 1))
                        ? '0 : int_resp_head + 1'b1;
       end
-      unique case ({push_int_resp, pop_int_resp})
+      unique case ({
+        push_int_resp, pop_int_resp
+      })
         2'b10:   int_resp_count <= int_resp_count + 1'b1;
         2'b01:   int_resp_count <= int_resp_count - 1'b1;
         default: int_resp_count <= int_resp_count;
@@ -205,8 +207,7 @@ module rapt_router #(
   // within a burst. If we are forwarding offchip and have not yet seen
   // rlast for the burst, the next R beat must also come from offchip
   // (i.e. drain_int must be 0).
-  `RAPT_SVA_IMPLY(clock, reset, ROUTER_R_NO_INTERLEAVE,
-                  offchip_in_burst, !drain_int)
+  `RAPT_SVA_IMPLY(clock, reset, ROUTER_R_NO_INTERLEAVE, offchip_in_burst, !drain_int)
 
 
   // ----- Write channel router -----

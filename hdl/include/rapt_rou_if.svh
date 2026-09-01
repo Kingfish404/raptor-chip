@@ -105,26 +105,23 @@ interface rou_exu_if #(
   logic ready_b;
 `endif
 
+`ifdef RAPT_DUAL_ISSUE
   modport master(
       output uop, op1, op2, pr1, pr2, prd, prs, dest, valid,
       output fp_dep1_valid, fp_dep2_valid, fp_dep3_valid, fp_dep1, fp_dep2, fp_dep3,
-`ifdef RAPT_DUAL_ISSUE
       output uop_b, op1_b, op2_b, pr1_b, pr2_b, prd_b, prs_b, dest_b, valid_b,
       output fp_dep1_valid_b, fp_dep2_valid_b, fp_dep3_valid_b,
       output fp_dep1_b, fp_dep2_b, fp_dep3_b,
       input ready_b,
-`endif
       input ready
   );
   modport slave(
       input uop, op1, op2, pr1, pr2, prd, prs, dest, valid,
       input fp_dep1_valid, fp_dep2_valid, fp_dep3_valid, fp_dep1, fp_dep2, fp_dep3,
-`ifdef RAPT_DUAL_ISSUE
       input uop_b, op1_b, op2_b, pr1_b, pr2_b, prd_b, prs_b, dest_b, valid_b,
       input fp_dep1_valid_b, fp_dep2_valid_b, fp_dep3_valid_b,
       input fp_dep1_b, fp_dep2_b, fp_dep3_b,
       output ready_b,
-`endif
       output ready
   );
   // Read-only view for sub-modules of the EXU. Top-level remains the sole
@@ -132,13 +129,27 @@ interface rou_exu_if #(
   // to consume dispatch fields without violating single-driver rules.
   modport monitor(
       input uop, op1, op2, pr1, pr2, prd, prs, dest, valid,
-      input fp_dep1_valid, fp_dep2_valid, fp_dep3_valid, fp_dep1, fp_dep2, fp_dep3
-`ifdef RAPT_DUAL_ISSUE
-      , input uop_b, op1_b, op2_b, pr1_b, pr2_b, prd_b, prs_b, dest_b, valid_b
-      , input fp_dep1_valid_b, fp_dep2_valid_b, fp_dep3_valid_b,
+      input fp_dep1_valid, fp_dep2_valid, fp_dep3_valid, fp_dep1, fp_dep2, fp_dep3,
+      input uop_b, op1_b, op2_b, pr1_b, pr2_b, prd_b, prs_b, dest_b, valid_b,
+      input fp_dep1_valid_b, fp_dep2_valid_b, fp_dep3_valid_b,
       input fp_dep1_b, fp_dep2_b, fp_dep3_b
-`endif
   );
+`else
+  modport master(
+      output uop, op1, op2, pr1, pr2, prd, prs, dest, valid,
+      output fp_dep1_valid, fp_dep2_valid, fp_dep3_valid, fp_dep1, fp_dep2, fp_dep3,
+      input ready
+  );
+  modport slave(
+      input uop, op1, op2, pr1, pr2, prd, prs, dest, valid,
+      input fp_dep1_valid, fp_dep2_valid, fp_dep3_valid, fp_dep1, fp_dep2, fp_dep3,
+      output ready
+  );
+  modport monitor(
+      input uop, op1, op2, pr1, pr2, prd, prs, dest, valid,
+      input fp_dep1_valid, fp_dep2_valid, fp_dep3_valid, fp_dep1, fp_dep2, fp_dep3
+  );
+`endif
 endinterface
 
 interface rou_lsu_if #(
@@ -157,10 +168,14 @@ interface rou_lsu_if #(
 
   logic sq_ready;
   logic sq_empty;
-  modport in(input store, alu, dest, sq_waddr, sq_vaddr, sq_wdata, sq_wdata64, sq_fp64, pc, valid,
-             output sq_ready, sq_empty);
-  modport out(output store, alu, dest, sq_waddr, sq_vaddr, sq_wdata, sq_wdata64, sq_fp64, pc, valid,
-              input sq_ready, sq_empty);
+  modport in(
+      input store, alu, dest, sq_waddr, sq_vaddr, sq_wdata, sq_wdata64, sq_fp64, pc, valid,
+      output sq_ready, sq_empty
+  );
+  modport out(
+      output store, alu, dest, sq_waddr, sq_vaddr, sq_wdata, sq_wdata64, sq_fp64, pc, valid,
+      input sq_ready, sq_empty
+  );
 endinterface
 
 
@@ -228,6 +243,7 @@ interface rou_cmu_if #(
   logic [31:0] rvfi_inst_b;
 `endif
 
+`ifdef RAPT_RVFI
   modport out(
       output rd_a, inst_a, pc_a, prd_a, prs_a, npc_a,
       output ebreak_a, difftest_skip_a, valid_a,
@@ -235,15 +251,12 @@ interface rou_cmu_if #(
       output ebreak_b, difftest_skip_b, valid_b,
       output btaken, ben, jen, jren, atomic_sc,
       output fence_time, fence_i, flush_pipe, flush_redirect, sys_resume, time_trap,
-      output redirect_pc,
-      output rob_head
-`ifdef RAPT_RVFI
-      , output rvfi_trap_a, rvfi_trap_b,
+      output redirect_pc, rob_head,
+      output rvfi_trap_a, rvfi_trap_b,
       output rvfi_npc_a,
       output rvfi_sq_waddr_a, rvfi_sq_waddr_b,
       output rvfi_sq_wdata_a, rvfi_sq_wdata_b,
       output rvfi_inst_a, rvfi_inst_b
-`endif
   );
   modport in(
       input rd_a, inst_a, pc_a, prd_a, prs_a, npc_a,
@@ -252,16 +265,33 @@ interface rou_cmu_if #(
       input ebreak_b, difftest_skip_b, valid_b,
       input btaken, ben, jen, jren, atomic_sc,
       input fence_time, fence_i, flush_pipe, flush_redirect, sys_resume, time_trap,
-      input redirect_pc,
-      input rob_head
-`ifdef RAPT_RVFI
-      , input rvfi_trap_a, rvfi_trap_b,
+      input redirect_pc, rob_head,
+      input rvfi_trap_a, rvfi_trap_b,
       input rvfi_npc_a,
       input rvfi_sq_waddr_a, rvfi_sq_waddr_b,
       input rvfi_sq_wdata_a, rvfi_sq_wdata_b,
       input rvfi_inst_a, rvfi_inst_b
-`endif
   );
+`else
+  modport out(
+      output rd_a, inst_a, pc_a, prd_a, prs_a, npc_a,
+      output ebreak_a, difftest_skip_a, valid_a,
+      output rd_b, inst_b, pc_b, prd_b, prs_b, npc_b,
+      output ebreak_b, difftest_skip_b, valid_b,
+      output btaken, ben, jen, jren, atomic_sc,
+      output fence_time, fence_i, flush_pipe, flush_redirect, sys_resume, time_trap,
+      output redirect_pc, rob_head
+  );
+  modport in(
+      input rd_a, inst_a, pc_a, prd_a, prs_a, npc_a,
+      input ebreak_a, difftest_skip_a, valid_a,
+      input rd_b, inst_b, pc_b, prd_b, prs_b, npc_b,
+      input ebreak_b, difftest_skip_b, valid_b,
+      input btaken, ben, jen, jren, atomic_sc,
+      input fence_time, fence_i, flush_pipe, flush_redirect, sys_resume, time_trap,
+      input redirect_pc, rob_head
+  );
+`endif
 endinterface
 
 /* verilator lint_on UNUSEDSIGNAL */

@@ -72,12 +72,12 @@ interface l1i_bus_if #(
   logic arvalid;
   logic [XLEN-1:0] araddr;
   logic arburst;  // request 2-beat INCR burst (SDRAM)
-    logic ar_ptw;
+  logic ar_ptw;
   logic rready;
 
   logic [XLEN-1:0] rdata;
   logic rvalid;
-    logic ptw_rvalid;
+  logic ptw_rvalid;
   logic rlast;
   // Bus-error indicator: AXI rresp != OKAY for the routed response beat.
   // Asserted in the same cycle as `rvalid`; treat as fetch access-fault.
@@ -117,12 +117,12 @@ interface l1d_bus_if #(
   logic arvalid;
   logic [XLEN-1:0] araddr;
   logic [7:0] rstrb;
-    logic ar_ptw;
+  logic ar_ptw;
   logic rready;
 
   logic [XLEN-1:0] rdata;
   logic rvalid;
-    logic ptw_rvalid;
+  logic ptw_rvalid;
   logic rlast;
   logic difftest_skip;
   // Bus-error indicator on the read channel (AXI rresp != OKAY).
@@ -186,12 +186,16 @@ interface pmp_update_if #(
   logic [N-1:0]          mode_na4;
   logic [N-1:0]          mode_napot;
 
-  modport in(input addr_we, addr_idx, raw_addr, napot_mask,
+  modport in(
+      input addr_we, addr_idx, raw_addr, napot_mask,
              cfg_we, cfg_r, cfg_w, cfg_x, cfg_l,
-             mode_off, mode_tor, mode_na4, mode_napot);
-  modport out(output addr_we, addr_idx, raw_addr, napot_mask,
+             mode_off, mode_tor, mode_na4, mode_napot
+  );
+  modport out(
+      output addr_we, addr_idx, raw_addr, napot_mask,
               cfg_we, cfg_r, cfg_w, cfg_x, cfg_l,
-              mode_off, mode_tor, mode_na4, mode_napot);
+              mode_off, mode_tor, mode_na4, mode_napot
+  );
 endinterface
 
 interface pmp_state_if #(
@@ -211,12 +215,16 @@ interface pmp_state_if #(
   logic [N-1:0] pmp_mode_na4;
   logic [N-1:0] pmp_mode_napot;
 
-  modport in(input pmp_raw_addr, pmp_napot_mask,
+  modport in(
+      input pmp_raw_addr, pmp_napot_mask,
              pmp_cfg_r, pmp_cfg_w, pmp_cfg_x, pmp_cfg_l,
-             pmp_mode_off, pmp_mode_tor, pmp_mode_na4, pmp_mode_napot);
-  modport out(output pmp_raw_addr, pmp_napot_mask,
+             pmp_mode_off, pmp_mode_tor, pmp_mode_na4, pmp_mode_napot
+  );
+  modport out(
+      output pmp_raw_addr, pmp_napot_mask,
               pmp_cfg_r, pmp_cfg_w, pmp_cfg_x, pmp_cfg_l,
-              pmp_mode_off, pmp_mode_tor, pmp_mode_na4, pmp_mode_napot);
+              pmp_mode_off, pmp_mode_tor, pmp_mode_na4, pmp_mode_napot
+  );
 endinterface
 
 interface csr_bcast_if #(

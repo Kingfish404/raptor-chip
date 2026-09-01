@@ -361,7 +361,7 @@ pack: $(VSRCS) $(VHSRCS) ## Pack all SV files into one
 STA_PLATFORM ?= nangate45 ## STA platform: nangate45, asap7, sky130hd
 CLK_FREQ_MHZ ?= 50 ## Target clock frequency for STA (MHz)
 
-sta: pack sta-deps ## Static timing analysis
+sta-flops: pack sta-deps ## STA with behavioral memories expanded to flops
 	echo $(MAKECMDGOALS)
 	make -C $(YOSYS_OPENSTA) sta show \
 		DESIGN=rapt \
@@ -388,7 +388,7 @@ sta_show: pack sta-deps ## Show timing analysis results
 #  Workflow: see sim/sram/README.md
 # =====================================================================
 RAPT_SRAM_DIR    := $(abspath $(NSIM_HOME)/sram)
-SRAM_PLATFORM    ?= sky130 ## OpenRAM tech (sky130, freepdk45)
+SRAM_PLATFORM    ?= $(STA_PLATFORM) ## SRAM timing model platform; defaults to the standard-cell platform
 RAPT_SRAM_LIBS    = $(shell $(MAKE) -s -C $(RAPT_SRAM_DIR) print-libs PLATFORM=$(SRAM_PLATFORM))
 RAPT_SRAM_BB_V    = $(shell $(MAKE) -s -C $(RAPT_SRAM_DIR) print-blackbox)
 
@@ -397,6 +397,16 @@ sram-macros: ## Compile OpenRAM SRAM macros (see sim/sram/README.md)
 
 sram-stubs: ## Generate behavioural .lib/.v stubs (no OpenRAM/PDK needed)
 	$(MAKE) -C $(RAPT_SRAM_DIR) stubs PLATFORM=$(SRAM_PLATFORM)
+
+sram-ensure-libs: ## Generate conservative SRAM timing stubs when selected libraries are absent
+	@missing=0; \
+	for lib in $(RAPT_SRAM_LIBS); do \
+	  if [ ! -f "$$lib" ]; then missing=1; break; fi; \
+	done; \
+	if [ $$missing -eq 1 ]; then \
+	  echo ">>> SRAM libraries missing for $(SRAM_PLATFORM); generating conservative placeholder timing"; \
+	  $(MAKE) -C $(RAPT_SRAM_DIR) stubs PLATFORM=$(SRAM_PLATFORM); \
+	fi
 
 sram-doctor: ## Diagnose OpenRAM / PDK / docker prerequisites
 	$(MAKE) -C $(RAPT_SRAM_DIR) doctor PLATFORM=$(SRAM_PLATFORM)
@@ -413,9 +423,9 @@ pack-sram: $(VSRCS) $(VHSRCS)
 	mkdir -p $(BUILD_DIR)
 	verilator -E -P -DSYNTHESIS $(VFLAGS) -DRAPT_USE_SRAM_MACRO $(addprefix -I, $(INC_PATH)) $(VSRCS) > $(BUILD_DIR)/rapt_pack_sram.sv
 
-sta-sram: pack-sram sta-deps ## STA with OpenRAM SRAM macros (vs flop-array default)
+sta-sram: pack-sram sta-deps sram-ensure-libs ## STA with SRAM macros and platform-matched timing models
 	@echo ">>> EXTRA_LIB_FILES        = $(RAPT_SRAM_LIBS)"
-	@echo ">>> EXTRA_BLACKBOX_V_FILES = $(RAPT_SRAM_BB_V)"
+	@echo ">>> SRAM_PLATFORM         = $(SRAM_PLATFORM)"
 	@for lib in $(RAPT_SRAM_LIBS); do \
 	  if [ ! -f "$$lib" ]; then \
 	    echo "ERROR: $$lib missing."; \
@@ -429,20 +439,22 @@ sta-sram: pack-sram sta-deps ## STA with OpenRAM SRAM macros (vs flop-array defa
 	  fi; \
 	done
 	EXTRA_LIB_FILES="$(RAPT_SRAM_LIBS)" \
-	EXTRA_BLACKBOX_V_FILES="$(RAPT_SRAM_BB_V)" \
 	$(MAKE) -C $(YOSYS_OPENSTA) sta show \
 		DESIGN=rapt \
 		PLATFORM=$(STA_PLATFORM) \
 		CLK_FREQ_MHZ=$(CLK_FREQ_MHZ) \
+		SYNTH_HIERARCHICAL=1 \
 		RTL_FILES="$(abspath $(BUILD_DIR)/rapt_pack_sram.sv)"
 
-sta-sram-detail: pack-sram sta-deps ## Detailed STA with OpenRAM SRAM macros
+sta: sta-sram ## Static timing analysis with SRAM macro timing models
+
+sta-sram-detail: pack-sram sta-deps sram-ensure-libs ## Detailed STA with SRAM macros
 	EXTRA_LIB_FILES="$(RAPT_SRAM_LIBS)" \
-	EXTRA_BLACKBOX_V_FILES="$(RAPT_SRAM_BB_V)" \
 	$(MAKE) -C $(YOSYS_OPENSTA) sta-detail show \
 		DESIGN=rapt \
 		PLATFORM=$(STA_PLATFORM) \
 		CLK_FREQ_MHZ=$(CLK_FREQ_MHZ) \
+		SYNTH_HIERARCHICAL=1 \
 		RTL_FILES="$(abspath $(BUILD_DIR)/rapt_pack_sram.sv)"
 
 lint: ## Lint RTL with Verilator

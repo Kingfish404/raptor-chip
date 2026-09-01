@@ -39,7 +39,8 @@ module rapt_rnu #(
   // ================================================================
   // Rename Queue (RNQ)
   // ================================================================
-  logic [$clog2(RIQ_SIZE)-1:0] rnq_head_a, rnq_tail_a;
+  logic [$clog2(RIQ_SIZE)-1:0] rnq_head_a;
+  (* keep = "true" *) logic [RIQ_SIZE-1:0] rnq_tail_oh_a;
   logic           [RIQ_SIZE-1:0] rnq_valid;
 
   (* ram_style = "registers" *) rapt_pkg::uop_t rnq_uops[RIQ_SIZE];
@@ -74,7 +75,76 @@ module rapt_rnu #(
   logic rn_pipe_ready_a;
   assign rn_pipe_ready_a = !rn_pipe_valid_a || rnu_rou.ready;
 
+  rapt_pkg::uop_t rnq_tail_uop_a;
+  logic [RLEN-1:0] rnq_tail_rd_a, rnq_tail_rs1_a, rnq_tail_rs2_a;
+  logic [XLEN-1:0] rnq_tail_op1_a, rnq_tail_op2_a;
+  logic rnq_tail_valid_a;
   logic rnq_enq_fire_a, rnq_deq_fire_a;
+
+`ifdef RAPT_DUAL_ISSUE
+  logic [RIQ_SIZE-1:0] rnq_tail_oh_b;
+  rapt_pkg::uop_t rnq_tail_uop_b;
+  logic [RLEN-1:0] rnq_tail_rd_b, rnq_tail_rs1_b, rnq_tail_rs2_b;
+  logic [XLEN-1:0] rnq_tail_op1_b, rnq_tail_op2_b;
+  logic rnq_tail_valid_b, rnq_tail_is_pair_b;
+  assign rnq_tail_oh_b = {rnq_tail_oh_a[RIQ_SIZE-2:0], rnq_tail_oh_a[RIQ_SIZE-1]};
+
+  // Second RNQ dequeue: can dequeue slot B if slot A fires, next entry valid,
+  // is actually a dual-pair B-slot, and freelist has enough registers.
+  logic [RIQ_SIZE-1:0] rnq_is_pair;
+  logic rnq_deq_fire_b;
+  assign rnq_deq_fire_b = rnq_deq_fire_a && rnq_tail_is_pair_b
+      && rnq_tail_valid_b
+      && (rnq_tail_rd_b == 0 || !fl_bus.alloc_empty_b);
+
+  assign rnq_head_b = rnq_head_a + 1;
+  logic rnq_enq_fire_b;
+  assign rnq_enq_fire_b = idu_rnu.valid_b && rnq_enq_fire_a && !rnq_valid[rnq_head_b];
+`endif
+
+  always_comb begin
+    rnq_tail_uop_a = '0;
+    rnq_tail_rd_a = '0;
+    rnq_tail_rs1_a = '0;
+    rnq_tail_rs2_a = '0;
+    rnq_tail_op1_a = '0;
+    rnq_tail_op2_a = '0;
+    rnq_tail_valid_a = 1'b0;
+`ifdef RAPT_DUAL_ISSUE
+    rnq_tail_uop_b = '0;
+    rnq_tail_rd_b = '0;
+    rnq_tail_rs1_b = '0;
+    rnq_tail_rs2_b = '0;
+    rnq_tail_op1_b = '0;
+    rnq_tail_op2_b = '0;
+    rnq_tail_valid_b = 1'b0;
+    rnq_tail_is_pair_b = 1'b0;
+`endif
+    for (int i = 0; i < RIQ_SIZE; i++) begin
+      if (rnq_tail_oh_a[i]) begin
+        rnq_tail_uop_a = rnq_uops[i];
+        rnq_tail_rd_a = rnq_rd[i];
+        rnq_tail_rs1_a = rnq_rs1[i];
+        rnq_tail_rs2_a = rnq_rs2[i];
+        rnq_tail_op1_a = rnq_op1[i];
+        rnq_tail_op2_a = rnq_op2[i];
+        rnq_tail_valid_a = rnq_valid[i];
+      end
+`ifdef RAPT_DUAL_ISSUE
+      if (rnq_tail_oh_b[i]) begin
+        rnq_tail_uop_b = rnq_uops[i];
+        rnq_tail_rd_b = rnq_rd[i];
+        rnq_tail_rs1_b = rnq_rs1[i];
+        rnq_tail_rs2_b = rnq_rs2[i];
+        rnq_tail_op1_b = rnq_op1[i];
+        rnq_tail_op2_b = rnq_op2[i];
+        rnq_tail_valid_b = rnq_valid[i];
+        rnq_tail_is_pair_b = rnq_is_pair[i];
+      end
+`endif
+    end
+  end
+
 `ifdef RAPT_DUAL_ISSUE
   // When valid_b is set, both RNQ slots must be free to enqueue.
   // This prevents slot A from enqueuing without slot B, avoiding duplication.
@@ -83,23 +153,7 @@ module rapt_rnu #(
 `else
   assign rnq_enq_fire_a = idu_rnu.valid_a && !rnq_valid[rnq_head_a];
 `endif
-  assign rnq_deq_fire_a = rn_pipe_ready_a && rnq_valid[rnq_tail_a];
-
-`ifdef RAPT_DUAL_ISSUE
-  // Second RNQ dequeue: can dequeue slot B if slot A fires, next entry valid,
-  // is actually a dual-pair B-slot, and freelist has enough registers.
-  logic [$clog2(RIQ_SIZE)-1:0] rnq_tail_b;
-  assign rnq_tail_b = rnq_tail_a + 1;
-  logic [RIQ_SIZE-1:0] rnq_is_pair;
-  logic rnq_deq_fire_b;
-  assign rnq_deq_fire_b = rnq_deq_fire_a && rnq_is_pair[rnq_tail_b]
-      && rnq_valid[rnq_tail_b]
-      && (rnq_rd[rnq_tail_b] == 0 || !fl_bus.alloc_empty_b);
-
-  assign rnq_head_b = rnq_head_a + 1;
-  logic rnq_enq_fire_b;
-  assign rnq_enq_fire_b = idu_rnu.valid_b && rnq_enq_fire_a && !rnq_valid[rnq_head_b];
-`endif
+  assign rnq_deq_fire_a = rn_pipe_ready_a && rnq_tail_valid_a;
 
   // Output uses pipeline register (stage 2)
   assign rnu_rou.valid_a = rn_pipe_valid_a;
@@ -121,21 +175,21 @@ module rapt_rnu #(
   // ================================================================
 `ifdef RAPT_DUAL_ISSUE
   logic slot_a_writes_rd;
-  assign slot_a_writes_rd = rnq_deq_fire_a && (rnq_rd[rnq_tail_a] != 0);
+  assign slot_a_writes_rd = rnq_deq_fire_a && (rnq_tail_rd_a != 0);
 
   // RAW bypass: slot B's source registers match slot A's destination
   logic dep_b_rs1_from_a;
   logic dep_b_rs2_from_a;
   logic dep_b_rdold_from_a;
-  assign dep_b_rs1_from_a   = slot_a_writes_rd && (rnq_rs1[rnq_tail_b] == rnq_rd[rnq_tail_a]);
-  assign dep_b_rs2_from_a   = slot_a_writes_rd && (rnq_rs2[rnq_tail_b] == rnq_rd[rnq_tail_a]);
-  assign dep_b_rdold_from_a = slot_a_writes_rd && (rnq_rd[rnq_tail_b] == rnq_rd[rnq_tail_a]);
+  assign dep_b_rs1_from_a   = slot_a_writes_rd && (rnq_tail_rs1_b == rnq_tail_rd_a);
+  assign dep_b_rs2_from_a   = slot_a_writes_rd && (rnq_tail_rs2_b == rnq_tail_rd_a);
+  assign dep_b_rdold_from_a = slot_a_writes_rd && (rnq_tail_rd_b == rnq_tail_rd_a);
 `endif
 
   always_ff @(posedge clock) begin
     if (reset || cmu_bcast.flush_pipe) begin
       rnq_head_a <= '0;
-      rnq_tail_a <= '0;
+      rnq_tail_oh_a <= {{RIQ_SIZE-1{1'b0}}, 1'b1};
       rnq_valid <= '0;
       rn_pipe_valid_a <= 1'b0;
 `ifdef RAPT_DUAL_ISSUE
@@ -152,14 +206,11 @@ module rapt_rnu #(
       // priority: dequeue wins over enqueue on any selector alias.
       for (int i = 0; i < RIQ_SIZE; i++) begin
 `ifdef RAPT_DUAL_ISSUE
-        if (rnq_deq_fire_b && i == int'(rnq_tail_b)) begin
+        if (rnq_deq_fire_b && rnq_tail_oh_b[i]) begin
           rnq_valid[i]   <= 1'b0;
           rnq_is_pair[i] <= 1'b0;
-        end else
-`endif
-        if (rnq_deq_fire_a && i == int'(rnq_tail_a)) begin
-          rnq_valid[i] <= 1'b0;
-`ifdef RAPT_DUAL_ISSUE
+        end else if (rnq_deq_fire_a && rnq_tail_oh_a[i]) begin
+          rnq_valid[i]   <= 1'b0;
           rnq_is_pair[i] <= 1'b0;
         end else if (rnq_enq_fire_b && i == int'(rnq_head_b)) begin
           rnq_valid[i]   <= 1'b1;
@@ -170,7 +221,19 @@ module rapt_rnu #(
           rnq_rs1[i]     <= idu_rnu.rs1_b;
           rnq_rs2[i]     <= idu_rnu.rs2_b;
           rnq_is_pair[i] <= 1'b1;
-`endif
+        end else if (rnq_enq_fire_a && i == int'(rnq_head_a)) begin
+          rnq_valid[i]   <= 1'b1;
+          rnq_uops[i]    <= idu_rnu.uop_a;
+          rnq_rd[i]      <= idu_rnu.uop_a.rd;
+          rnq_op1[i]     <= idu_rnu.op1_a;
+          rnq_op2[i]     <= idu_rnu.op2_a;
+          rnq_rs1[i]     <= idu_rnu.rs1_a;
+          rnq_rs2[i]     <= idu_rnu.rs2_a;
+          rnq_is_pair[i] <= 1'b0;
+        end
+`else
+        if (rnq_deq_fire_a && rnq_tail_oh_a[i]) begin
+          rnq_valid[i] <= 1'b0;
         end else if (rnq_enq_fire_a && i == int'(rnq_head_a)) begin
           rnq_valid[i] <= 1'b1;
           rnq_uops[i]  <= idu_rnu.uop_a;
@@ -179,10 +242,8 @@ module rapt_rnu #(
           rnq_op2[i]   <= idu_rnu.op2_a;
           rnq_rs1[i]   <= idu_rnu.rs1_a;
           rnq_rs2[i]   <= idu_rnu.rs2_a;
-`ifdef RAPT_DUAL_ISSUE
-          rnq_is_pair[i] <= 1'b0;
-`endif
         end
+`endif
       end
 
       // ---- RNQ Enqueue pointer ----
@@ -202,37 +263,37 @@ module rapt_rnu #(
       if (rnq_deq_fire_a) begin
         // Slot A: register rename results
         rn_pipe_valid_a <= 1'b1;
-        rn_pipe_uop_a <= rnq_uops[rnq_tail_a];
-        rn_pipe_op1_a <= rnq_op1[rnq_tail_a];
-        rn_pipe_op2_a <= rnq_op2[rnq_tail_a];
+        rn_pipe_uop_a <= rnq_tail_uop_a;
+        rn_pipe_op1_a <= rnq_tail_op1_a;
+        rn_pipe_op2_a <= rnq_tail_op2_a;
         rn_pipe_pr1_a <= mt_bus.map_rdata_a;
         rn_pipe_pr2_a <= mt_bus.map_rdata_b;
-        rn_pipe_prd_a <= (rnq_rd[rnq_tail_a] != 0) ? fl_bus.alloc_pr_a : '0;
+        rn_pipe_prd_a <= (rnq_tail_rd_a != 0) ? fl_bus.alloc_pr_a : '0;
         rn_pipe_prs_a <= mt_bus.map_rdata_c;
 
 `ifdef RAPT_DUAL_ISSUE
         if (rnq_deq_fire_b) begin
-          rnq_tail_a <= rnq_tail_a + 2;
+          rnq_tail_oh_a <= {rnq_tail_oh_a[RIQ_SIZE-3:0], rnq_tail_oh_a[RIQ_SIZE-1:RIQ_SIZE-2]};
 
           // Slot B: rename with RAW dependency bypass from slot A
           rn_pipe_valid_b <= 1'b1;
-          rn_pipe_uop_b <= rnq_uops[rnq_tail_b];
-          rn_pipe_op1_b <= rnq_op1[rnq_tail_b];
-          rn_pipe_op2_b <= rnq_op2[rnq_tail_b];
+          rn_pipe_uop_b <= rnq_tail_uop_b;
+          rn_pipe_op1_b <= rnq_tail_op1_b;
+          rn_pipe_op2_b <= rnq_tail_op2_b;
           // rs1_b: bypass from slot A if dependency
           rn_pipe_pr1_b <= dep_b_rs1_from_a ? fl_bus.alloc_pr_a : mt_bus.map_rdata_d;
           // rs2_b: bypass from slot A if dependency
           rn_pipe_pr2_b <= dep_b_rs2_from_a ? fl_bus.alloc_pr_a : mt_bus.map_rdata_e;
           // prd_b: new physical register from freelist slot B
-          rn_pipe_prd_b <= (rnq_rd[rnq_tail_b] != 0) ? fl_bus.alloc_pr_b : '0;
+          rn_pipe_prd_b <= (rnq_tail_rd_b != 0) ? fl_bus.alloc_pr_b : '0;
           // prs_b: old mapping: bypass from slot A if same rd
           rn_pipe_prs_b <= dep_b_rdold_from_a ? fl_bus.alloc_pr_a : mt_bus.map_rdata_f;
         end else begin
-          rnq_tail_a <= rnq_tail_a + 1;
+          rnq_tail_oh_a <= rnq_tail_oh_b;
           rn_pipe_valid_b <= 1'b0;
         end
 `else
-        rnq_tail_a <= rnq_tail_a + 1;
+        rnq_tail_oh_a <= {rnq_tail_oh_a[RIQ_SIZE-2:0], rnq_tail_oh_a[RIQ_SIZE-1]};
 `endif
       end else if (rnu_rou.ready) begin
         rn_pipe_valid_a <= 1'b0;
@@ -269,9 +330,9 @@ module rapt_rnu #(
   assign fl_bus.flush_pipe  = cmu_bcast.flush_pipe;
   assign fl_bus.flush_rd_a  = cmu_bcast.rd_a;
   assign fl_bus.flush_rd_b  = cmu_bcast.valid_b ? cmu_bcast.rd_b : '0;
-  assign fl_bus.alloc_req_a = rnq_deq_fire_a && !fl_bus.alloc_empty_a && rnq_rd[rnq_tail_a] != 0;
+  assign fl_bus.alloc_req_a = rnq_deq_fire_a && !fl_bus.alloc_empty_a && rnq_tail_rd_a != 0;
 `ifdef RAPT_DUAL_ISSUE
-  assign fl_bus.alloc_req_b = rnq_deq_fire_b && !fl_bus.alloc_empty_b && rnq_rd[rnq_tail_b] != 0;
+  assign fl_bus.alloc_req_b = rnq_deq_fire_b && !fl_bus.alloc_empty_b && rnq_tail_rd_b != 0;
 `endif
   assign fl_bus.dealloc_req_a = commit_dealloc;
   assign fl_bus.dealloc_pr_a  = rou_cmu.prs_a;
@@ -295,23 +356,23 @@ module rapt_rnu #(
   assign mt_bus.flush_pipe  = cmu_bcast.flush_pipe;
   // Speculative write A (on allocation)
   assign mt_bus.map_wen_a   = fl_bus.alloc_req_a;
-  assign mt_bus.map_waddr_a = rnq_rd[rnq_tail_a];
+  assign mt_bus.map_waddr_a = rnq_tail_rd_a;
   assign mt_bus.map_wdata_a = fl_bus.alloc_pr_a;
   // Speculative read: rs1, rs2
-  assign mt_bus.map_raddr_a = rnq_rs1[rnq_tail_a];
-  assign mt_bus.map_raddr_b = rnq_rs2[rnq_tail_a];
+  assign mt_bus.map_raddr_a = rnq_tail_rs1_a;
+  assign mt_bus.map_raddr_b = rnq_tail_rs2_a;
   // Speculative read: rd old mapping (prs for ROB dealloc)
-  assign mt_bus.map_raddr_c = rnq_rd[rnq_tail_a];
+  assign mt_bus.map_raddr_c = rnq_tail_rd_a;
 
 `ifdef RAPT_DUAL_ISSUE
   // Speculative write B (slot B allocation: younger, wins on conflict)
   assign mt_bus.map_wen_b   = fl_bus.alloc_req_b;
-  assign mt_bus.map_waddr_b = rnq_rd[rnq_tail_b];
+  assign mt_bus.map_waddr_b = rnq_tail_rd_b;
   assign mt_bus.map_wdata_b = fl_bus.alloc_pr_b;
   // Speculative read slot B: rs1_b, rs2_b, rd_old_b
-  assign mt_bus.map_raddr_d = rnq_rs1[rnq_tail_b];
-  assign mt_bus.map_raddr_e = rnq_rs2[rnq_tail_b];
-  assign mt_bus.map_raddr_f = rnq_rd[rnq_tail_b];
+  assign mt_bus.map_raddr_d = rnq_tail_rs1_b;
+  assign mt_bus.map_raddr_e = rnq_tail_rs2_b;
+  assign mt_bus.map_raddr_f = rnq_tail_rd_b;
 `endif
 
   // Committed write A

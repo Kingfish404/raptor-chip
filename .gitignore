@@ -13,6 +13,7 @@
 # ---- Root-level files ----
 !.gitignore
 !.clangd
+!.verible-format.flags
 !Makefile
 !README.md
 !/app/netbsd/.gitignore

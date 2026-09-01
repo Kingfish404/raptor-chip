@@ -99,11 +99,14 @@ module rapt_rnu_maptable #(
 `ifdef RAPT_DUAL_ISSUE
         if (map_wen_b_oh[i]) begin
           map[i] <= mt.map_wdata_b;
-        end else
-`endif
+        end else if (map_wen_oh[i]) begin
+          map[i] <= mt.map_wdata_a;
+        end
+`else
         if (map_wen_oh[i]) begin
           map[i] <= mt.map_wdata_a;
         end
+`endif
       end
     end
   end

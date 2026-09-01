@@ -83,18 +83,12 @@ module rapt_fpu_compare (
     flags = '0;
     if (is_minmax) begin
       flags[4] = a_snan || b_snan;
-      if (a_nan && b_nan)
-        result = canonical_nan;
-      else if (a_nan)
-        result = b_value;
-      else if (b_nan)
-        result = a_value;
+      if (a_nan && b_nan) result = canonical_nan;
+      else if (a_nan) result = b_value;
+      else if (b_nan) result = a_value;
       else if (is_equal && a_zero && b_zero)
-        result = is_maximum
-          ? (a_sign ? b_value : a_value)
-          : (a_sign ? a_value : b_value);
-      else
-        result = (is_less == is_maximum) ? b_value : a_value;
+        result = is_maximum ? (a_sign ? b_value : a_value) : (a_sign ? a_value : b_value);
+      else result = (is_less == is_maximum) ? b_value : a_value;
     end else begin
       flags[4] = a_snan || b_snan
         || ((op != `RAPT_FP_OP_FEQ_S) && (op != `RAPT_FP_OP_FEQ_D)

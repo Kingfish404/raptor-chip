@@ -174,18 +174,18 @@ module rapt_rvfi #(
   // Source register pre-state values from committed register file
   // ----------------------------------------------------------------
   // Slot A: direct read from committed state (rf)
-    logic [XLEN-1:0] rs1_rdata_a;
-    logic [XLEN-1:0] rs2_rdata_a;
-    assign rs1_rdata_a = (rs1_a != 0) ? rf[rs1_a] : '0;
-    assign rs2_rdata_a = (rs2_a != 0) ? rf[rs2_a] : '0;
+  logic [XLEN-1:0] rs1_rdata_a;
+  logic [XLEN-1:0] rs2_rdata_a;
+  assign rs1_rdata_a = (rs1_a != 0) ? rf[rs1_a] : '0;
+  assign rs2_rdata_a = (rs2_a != 0) ? rf[rs2_a] : '0;
 
   // Slot B: forward from slot A if slot A writes the same register
-    logic [XLEN-1:0] rs1_rdata_b;
-    logic [XLEN-1:0] rs2_rdata_b;
-    assign rs1_rdata_b = (rs1_b == 5'd0) ? '0
+  logic [XLEN-1:0] rs1_rdata_b;
+  logic [XLEN-1:0] rs2_rdata_b;
+  assign rs1_rdata_b = (rs1_b == 5'd0) ? '0
       : (rou_cmu.rd_a != 5'd0 && rou_cmu.rd_a == rs1_b) ? rvfi_rd_wdata_a
       : rf[rs1_b];
-    assign rs2_rdata_b = (rs2_b == 5'd0) ? '0
+  assign rs2_rdata_b = (rs2_b == 5'd0) ? '0
       : (rou_cmu.rd_a != 5'd0 && rou_cmu.rd_a == rs2_b) ? rvfi_rd_wdata_a
       : rf[rs2_b];
 

@@ -182,9 +182,7 @@ void perf_sample_per_cycle()
   pmu.ifu_sys_hazard_cycle += ifu_hazard ? 1 : 0;
   // ROU structural hazard: RNU has renamed work but the dispatch path cannot
   // accept it. `ready_a` is UOQ-space based, so this is not a ROB-full probe.
-  uint8_t rnq_valid = *(uint8_t *)&VERILOG_CPU(rnu__DOT__rnq_valid);
-  uint8_t rnq_tail = *(uint8_t *)&VERILOG_CPU(rnu__DOT__rnq_tail_a);
-  bool rnu_valid = (rnq_valid >> rnq_tail) & 1;
+  bool rnu_valid = *(uint8_t *)&VERILOG_CPU(rnu__DOT__rnq_tail_valid_a);
   pmu.rou_hazard_cycle += (rnu_valid && !rou_ready) ? 1 : 0;
   if (exu_ooo_valid && !exu_ooo_valid_found)
   {

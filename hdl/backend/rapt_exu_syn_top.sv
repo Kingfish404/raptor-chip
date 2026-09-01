@@ -7,8 +7,8 @@ module rapt_exu_syn_top #(
 ) (
     input  logic clock,
     input  logic reset,
-  input  logic [2047:0] stimulus,
-  output logic response
+    input  logic [2047:0] stimulus,
+    output logic response
 );
   cmu_bcast_if cmu_bcast ();
   rou_exu_if rou_exu ();
@@ -147,11 +147,15 @@ module rapt_exu_syn_top #(
     assign uop_pl[index] = rapt_pkg::uop_payload_t'(stimulus >> (index % 16));
   end
 
+  logic response_ready_b;
+`ifdef RAPT_DUAL_ISSUE
+  assign response_ready_b = rou_exu.ready_b;
+`else
+  assign response_ready_b = 1'b0;
+`endif
   assign response = ^{
       rou_exu.ready,
-`ifdef RAPT_DUAL_ISSUE
-      rou_exu.ready_b,
-`endif
+      response_ready_b,
       wb_alu_csr.pc, wb_alu_csr.npc, wb_alu_csr.result, wb_alu_csr.valid,
       wb_alu.pc, wb_alu.npc, wb_alu.result, wb_alu.valid,
       wb_branch.pc, wb_branch.npc, wb_branch.btaken, wb_branch.valid,

@@ -188,8 +188,7 @@ module rapt_lsu #(
     if (sq_drain_fire) sq_drain_oh[sq_head] = 1'b1;
     if (cmu_bcast.flush_pipe || cmu_bcast.fence_time) begin
       for (int i = 0; i < SQ_SIZE; i++) begin
-        if (sq_valid[i] && !sq_committed[i] && !sq_commit_oh[i])
-          sq_flush_clear_oh[i] = 1'b1;
+        if (sq_valid[i] && !sq_committed[i] && !sq_commit_oh[i]) sq_flush_clear_oh[i] = 1'b1;
       end
     end
   end
@@ -252,17 +251,12 @@ module rapt_lsu #(
       // Static per-entry state muxes. Drain is textually last in the former
       // implementation, so it retains highest priority on any pointer alias.
       for (int i = 0; i < SQ_SIZE; i++) begin
-        if (sq_drain_oh[i])
-          sq_valid[i] <= 1'b0;
-        else if (sq_flush_clear_oh[i])
-          sq_valid[i] <= 1'b0;
-        else if (sq_alloc_oh[i])
-          sq_valid[i] <= 1'b1;
+        if (sq_drain_oh[i]) sq_valid[i] <= 1'b0;
+        else if (sq_flush_clear_oh[i]) sq_valid[i] <= 1'b0;
+        else if (sq_alloc_oh[i]) sq_valid[i] <= 1'b1;
 
-        if (sq_drain_oh[i])
-          sq_committed[i] <= 1'b0;
-        else if (sq_commit_oh[i])
-          sq_committed[i] <= 1'b1;
+        if (sq_drain_oh[i]) sq_committed[i] <= 1'b0;
+        else if (sq_commit_oh[i]) sq_committed[i] <= 1'b1;
       end
     end
   end
@@ -278,19 +272,18 @@ module rapt_lsu #(
   logic [XLEN-1:0] sq_fwd_data;
   logic [SQ_SIZE-1:0] sq_match_vec;
   logic [SQ_SIZE-1:0] sq_fwd_full_vec;  // full-width store (can forward)
+`ifdef RAPT_RV64
+  localparam logic [7:0] FullStoreWstrb = `RAPT_SD_WSTRB;
+`else
+  localparam logic [7:0] FullStoreWstrb = `RAPT_SW_WSTRB;
+`endif
   always_comb begin
     for (int j = 0; j < SQ_SIZE; j++) begin
       automatic logic [SQLen-1:0] idx = sq_head + j[SQLen-1:0];
       sq_match_vec[j] = sq_valid[idx]
           && (sq_vaddr[idx][XLEN-1:WordOffBits] == raddr[XLEN-1:WordOffBits]);
       sq_fwd_full_vec[j] = sq_match_vec[j] && (sq_vaddr[idx][WordOffBits-1:0] == '0)
-        && (sq_alu[idx] ==
-`ifdef RAPT_RV64
-          `RAPT_SD_WSTRB
-`else
-          `RAPT_SW_WSTRB
-`endif
-      );
+        && (sq_alu[idx] == FullStoreWstrb);
     end
   end
 
@@ -330,7 +323,7 @@ module rapt_lsu #(
   //    Covers LH[U] crossing (raddr[1:0]==3), LW[U] at any non-zero low-bit
   //    alignment, and (RV64) LD with raddr[2:0]!=0.
   // ==========================================================================
-  localparam int OFFW = $clog2(XLEN/8);  // 2 for RV32, 3 for RV64
+  localparam int OFFW = $clog2(XLEN / 8);  // 2 for RV32, 3 for RV64
   typedef enum logic [1:0] {
     MA_IDLE = 2'b00,  // normal aligned flow
     MA_HI   = 2'b01,  // lo half latched, requesting hi half
@@ -342,17 +335,20 @@ module rapt_lsu #(
 
   // Detect a misaligned access that must be split into two beats.
   logic ma_span;
+  logic ma_span_rv64;
+  logic ma_span_fp64;
+`ifdef RAPT_RV64
+  assign ma_span_rv64 = ((ralu == `RAPT_ALU_LWU_) && (raddr[1:0] != 2'b00))
+      || ((ralu == `RAPT_ALU_LD__) && (raddr[OFFW-1:0] != '0));
+  assign ma_span_fp64 = 1'b0;
+`else
+  assign ma_span_rv64 = 1'b0;
+  assign ma_span_fp64 = exu_lsu.fp_rdata64_req;
+`endif
   assign ma_span =
        ((ralu == `RAPT_ALU_LH__ || ralu == `RAPT_ALU_LHU_) && raddr[1:0] == 2'b11)
     || ((ralu == `RAPT_ALU_LW__) && (raddr[1:0] != 2'b00))
-`ifdef RAPT_RV64
-    || ((ralu == `RAPT_ALU_LWU_) && (raddr[1:0] != 2'b00))
-    || ((ralu == `RAPT_ALU_LD__) && (raddr[OFFW-1:0] != '0))
-`endif
-`ifndef RAPT_RV64
-  || exu_lsu.fp_rdata64_req
-`endif
-  ;
+    || ma_span_rv64 || ma_span_fp64;
   // Misaligned loads that cross a word/dword boundary cannot use single-shot
   // SQ forwarding: the word-granular `sq_match_vec` only covers the lo
   // word, but the load also needs the byte(s) in the next word.  Suppress
@@ -385,9 +381,7 @@ module rapt_lsu #(
   // (no SQ forward/conflict).  Forwarded loads keep the single-shot path;
   // the store queue does not straddle word boundaries today.
   logic ma_load_req;
-  assign ma_load_req = raddr_valid && ma_span && !fwd_hit
-                    && !load_in_sq
-                    && !pmp_load_fault_lsu;
+  assign ma_load_req = raddr_valid && ma_span && !fwd_hit && !load_in_sq && !pmp_load_fault_lsu;
 
   // ==========================================================================
   //  Hit-under-miss B channel (Phase A2, RAPT_LSU_HUM)
@@ -415,13 +409,7 @@ module rapt_lsu #(
       automatic logic [SQLen-1:0] idx = sq_head + j[SQLen-1:0];
       sq_match_vec_b[j] = sq_valid[idx]
           && (sq_vaddr[idx][XLEN-1:WordOffBits] == raddr_b[XLEN-1:WordOffBits]);
-      sq_fwd_full_vec_b[j] = sq_match_vec_b[j] && (sq_alu[idx] ==
-`ifdef RAPT_RV64
-          `RAPT_SD_WSTRB
-`else
-          `RAPT_SW_WSTRB
-`endif
-      );
+      sq_fwd_full_vec_b[j] = sq_match_vec_b[j] && (sq_alu[idx] == FullStoreWstrb);
     end
   end
   always_comb begin
@@ -437,14 +425,17 @@ module rapt_lsu #(
   end
 
   logic ma_span_b;
+  logic ma_span_rv64_b;
+`ifdef RAPT_RV64
+  assign ma_span_rv64_b = ((ralu_b == `RAPT_ALU_LWU_) && (raddr_b[1:0] != 2'b00))
+      || ((ralu_b == `RAPT_ALU_LD__) && (raddr_b[OFFW-1:0] != '0));
+`else
+  assign ma_span_rv64_b = 1'b0;
+`endif
   assign ma_span_b =
        ((ralu_b == `RAPT_ALU_LH__ || ralu_b == `RAPT_ALU_LHU_) && raddr_b[1:0] == 2'b11)
     || ((ralu_b == `RAPT_ALU_LW__) && (raddr_b[1:0] != 2'b00))
-`ifdef RAPT_RV64
-    || ((ralu_b == `RAPT_ALU_LWU_) && (raddr_b[1:0] != 2'b00))
-    || ((ralu_b == `RAPT_ALU_LD__) && (raddr_b[OFFW-1:0] != '0))
-`endif
-  ;
+    || ma_span_rv64_b;
   logic mmio_ordered_b;
   assign mmio_ordered_b = !csr_bcast.dmmu_en && !rapt_pkg::addr_cacheable(raddr_b);
 
@@ -461,20 +452,24 @@ module rapt_lsu #(
   // B load data path: align + extend (parallel to A's)
   logic [XLEN-1:0] rdata_b_unalign;
   logic [XLEN-1:0] rdata_b_al;
+  logic [XLEN-1:0] rdata_b_word;
   assign rdata_b_unalign = fwd_hit_b ? sq_fwd_data_b : lsu_l1d.rdata_b;
   assign rdata_b_al = rdata_b_unalign >> (raddr_b[OFFW-1:0] * 8);
+`ifdef RAPT_RV64
+  assign rdata_b_word = ({XLEN{ralu_b == `RAPT_ALU_LW__}}
+                          & {{XLEN-32{rdata_b_al[31]}}, rdata_b_al[31:0]})
+                      | ({XLEN{ralu_b == `RAPT_ALU_LWU_}}
+                          & {{XLEN-32{1'b0}}, rdata_b_al[31:0]})
+                      | ({XLEN{ralu_b == `RAPT_ALU_LD__}} & rdata_b_al);
+`else
+  assign rdata_b_word = {XLEN{ralu_b == `RAPT_ALU_LW__}} & rdata_b_al;
+`endif
   assign exu_lsu.rdata_b = (
       ({XLEN{ralu_b == `RAPT_ALU_LB__}} & {{XLEN-8{rdata_b_al[7]}}, rdata_b_al[7:0]})
     | ({XLEN{ralu_b == `RAPT_ALU_LBU_}} & {{XLEN-8{1'b0}}, rdata_b_al[7:0]})
     | ({XLEN{ralu_b == `RAPT_ALU_LH__}} & {{XLEN-16{rdata_b_al[15]}}, rdata_b_al[15:0]})
     | ({XLEN{ralu_b == `RAPT_ALU_LHU_}} & {{XLEN-16{1'b0}}, rdata_b_al[15:0]})
-`ifdef RAPT_RV64
-    | ({XLEN{ralu_b == `RAPT_ALU_LW__}} & {{XLEN-32{rdata_b_al[31]}}, rdata_b_al[31:0]})
-    | ({XLEN{ralu_b == `RAPT_ALU_LWU_}} & {{XLEN-32{1'b0}}, rdata_b_al[31:0]})
-    | ({XLEN{ralu_b == `RAPT_ALU_LD__}} & rdata_b_al)
-`else
-    | ({XLEN{ralu_b == `RAPT_ALU_LW__}} & rdata_b_al)
-`endif
+    | rdata_b_word
     );
   assign exu_lsu.rready_b = fwd_hit_b || lsu_l1d.rready_b;
 `else
@@ -537,7 +532,9 @@ module rapt_lsu #(
       default: lsu_load_size_m1 = 4'd3;
     endcase
   end
-  rapt_pmp #(.XLEN(XLEN)) u_pmp_load_lsu (
+  rapt_pmp #(
+      .XLEN(XLEN)
+  ) u_pmp_load_lsu (
       .addr   (raddr),
       .size_m1(lsu_load_size_m1),
       .priv   (lsu_eff_priv),
@@ -578,18 +575,17 @@ module rapt_lsu #(
   // Address/rvalid muxing toward the L1D interface.
   logic [XLEN-1:0] ma_req_addr;
   logic [4:0]      ma_req_alu;
+`ifdef RAPT_RV64
+  localparam logic [4:0] MaLoadAlu = `RAPT_ALU_LD__;
+`else
+  localparam logic [4:0] MaLoadAlu = `RAPT_ALU_LW__;
+`endif
   assign ma_req_addr = (ma_state == MA_HI) ? ma_raddr_hi
                      : (ma_load_req)        ? ma_raddr_lo
                      :                        raddr;
   // Force an aligned word/dword load opcode during the split so the L1D
   // never sees a "misaligned" request.
-  assign ma_req_alu = (ma_state == MA_HI || ma_load_req)
-`ifdef RAPT_RV64
-                    ? `RAPT_ALU_LD__
-`else
-                    ? `RAPT_ALU_LW__
-`endif
-                    : ralu;
+  assign ma_req_alu = (ma_state == MA_HI || ma_load_req) ? MaLoadAlu : ralu;
 
   // ==========================================================================
   //  Load data path -- uses the split-merge result when ma_state == MA_DONE.
@@ -610,24 +606,26 @@ module rapt_lsu #(
                ? rdata_unalign
                : (rdata_unalign >> (raddr[OFFW-1:0] * 8));
 
-              assign exu_lsu.fp_rdata64_valid = exu_lsu.fp_rdata64_req
+  assign exu_lsu.fp_rdata64_valid = exu_lsu.fp_rdata64_req
                 && ((ma_state == MA_DONE) || (lsu_l1d.rvalid && lsu_l1d.rready));
-          assign exu_lsu.fp_rdata64 = (XLEN == 32)
+  assign exu_lsu.fp_rdata64 = (XLEN == 32)
             ? ma_cat[ma_shift +: 64]
             : {{(64-XLEN){1'b0}}, rdata};
 
+  logic [XLEN-1:0] rdata_word;
+`ifdef RAPT_RV64
+  assign rdata_word = ({XLEN{ralu == `RAPT_ALU_LW__}} & {{XLEN-32{rdata[31]}}, rdata[31:0]})
+                    | ({XLEN{ralu == `RAPT_ALU_LWU_}} & {{XLEN-32{1'b0}}, rdata[31:0]})
+                    | ({XLEN{ralu == `RAPT_ALU_LD__}} & rdata);
+`else
+  assign rdata_word = {XLEN{ralu == `RAPT_ALU_LW__}} & rdata;
+`endif
   assign exu_lsu.rdata = (
       ({XLEN{ralu == `RAPT_ALU_LB__}} & {{XLEN-8{rdata[7]}}, rdata[7:0]})
     | ({XLEN{ralu == `RAPT_ALU_LBU_}} & {{XLEN-8{1'b0}}, rdata[7:0]})
     | ({XLEN{ralu == `RAPT_ALU_LH__}} & {{XLEN-16{rdata[15]}}, rdata[15:0]})
     | ({XLEN{ralu == `RAPT_ALU_LHU_}} & {{XLEN-16{1'b0}}, rdata[15:0]})
-`ifdef RAPT_RV64
-    | ({XLEN{ralu == `RAPT_ALU_LW__}} & {{XLEN-32{rdata[31]}}, rdata[31:0]})
-    | ({XLEN{ralu == `RAPT_ALU_LWU_}} & {{XLEN-32{1'b0}}, rdata[31:0]})
-    | ({XLEN{ralu == `RAPT_ALU_LD__}} & rdata)
-`else
-    | ({XLEN{ralu == `RAPT_ALU_LW__}} & rdata)
-`endif
+    | rdata_word
     );
   // Swallow per-beat traps on the MA split path (we never issue a misaligned
   // address to the cache, so any L1D-raised trap on the beats is spurious).
@@ -745,7 +743,7 @@ module rapt_lsu #(
   end
 
 
-  assign ma_w_off  = {1'b0, waddr[OFFW-1:0]};
+  assign ma_w_off = {1'b0, waddr[OFFW-1:0]};
   // Compute store size from walu byte mask.
   always_comb begin
     unique case (walu)
@@ -754,12 +752,12 @@ module rapt_lsu #(
       `RAPT_SW_WSTRB: ma_w_size = (OFFW+2)'(4);
 `ifdef RAPT_RV64
       `RAPT_SD_WSTRB: ma_w_size = (OFFW+2)'(8);
-    `else
+`else
       default:        ma_w_size = wfp64 ? (OFFW+2)'(8) : (OFFW+2)'(0);
 `endif
-    `ifdef RAPT_RV64
+`ifdef RAPT_RV64
       default:        ma_w_size = (OFFW+2)'(0);
-    `endif
+`endif
     endcase
   end
   // Misaligned cross-word if off + size > word size.
@@ -841,65 +839,51 @@ module rapt_lsu #(
   // store being retired is the current commit-boundary entry and survives the
   // speculative rollback.
   `RAPT_SVA_IMPLY(clock, reset, LSU_SQ_COMMIT_ON_FLUSH_MATCH,
-      (sq_commit_fire && (cmu_bcast.flush_pipe || cmu_bcast.fence_time)),
-      (sq_valid[sq_cmt] && !sq_committed[sq_cmt]
-       && sq_dest[sq_cmt] == rou_lsu.dest))
+                  (sq_commit_fire && (cmu_bcast.flush_pipe || cmu_bcast.fence_time)),
+                  (sq_valid[sq_cmt] && !sq_committed[sq_cmt] && sq_dest[sq_cmt] == rou_lsu.dest))
 
   // COMMIT_ORDER: the entry being commit-marked must exist, be speculative,
   // and belong to the store the ROB is retiring (stores commit in order, so
   // no CAM is needed -- this assertion proves that assumption holds).
-  `RAPT_SVA_IMPLY(clock, reset, LSU_SQ_COMMIT_ENTRY_MATCH,
-      (sq_commit_fire),
-      (sq_valid[sq_cmt] && !sq_committed[sq_cmt]
-       && sq_dest[sq_cmt] == rou_lsu.dest))
+  `RAPT_SVA_IMPLY(clock, reset, LSU_SQ_COMMIT_ENTRY_MATCH, (sq_commit_fire),
+                  (sq_valid[sq_cmt] && !sq_committed[sq_cmt] && sq_dest[sq_cmt] == rou_lsu.dest))
 
   // COMMIT_ORDER: the alloc-time vaddr of the entry being committed must
   // describe the same word as the ROB's durable copy.  With DMMU enabled
   // only the page offset is invariant across translation.
-  `RAPT_SVA_IMPLY(clock, reset, LSU_SQ_COMMIT_ADDR_PAGE_OFFSET,
-      (sq_commit_fire
-       && !$isunknown(rou_lsu.sq_vaddr) && !$isunknown(sq_vaddr[sq_cmt])),
-      (csr_bcast.dmmu_en
-       ? (sq_vaddr[sq_cmt][PageOffBits-1:WordOffBits]
-         == rou_lsu.sq_vaddr[PageOffBits-1:WordOffBits])
-       : (sq_vaddr[sq_cmt][XLEN-1:WordOffBits]
-         == rou_lsu.sq_vaddr[XLEN-1:WordOffBits])))
+  `RAPT_SVA_IMPLY(
+      clock, reset, LSU_SQ_COMMIT_ADDR_PAGE_OFFSET, (sq_commit_fire && !$isunknown
+      (rou_lsu.sq_vaddr) && !$isunknown(sq_vaddr[sq_cmt])),
+      (csr_bcast.dmmu_en ? (sq_vaddr[sq_cmt][PageOffBits-1:WordOffBits] == rou_lsu.sq_vaddr[PageOffBits-1:WordOffBits]) : (sq_vaddr[sq_cmt][XLEN-1:WordOffBits] == rou_lsu.sq_vaddr[XLEN-1:WordOffBits])))
 
   // HANDSHAKE: the SQ drain target slot must be a valid committed entry.
-  `RAPT_SVA_IMPLY(clock, reset, LSU_SQ_DRAIN_VALID,
-      (state_store == LS_S_R),
-      (sq_valid[sq_head] && sq_committed[sq_head]))
+  `RAPT_SVA_IMPLY(clock, reset, LSU_SQ_DRAIN_VALID, (state_store == LS_S_R),
+                  (sq_valid[sq_head] && sq_committed[sq_head]))
 
   // HANDSHAKE: a load/AMO blocked by an older partial store must not complete
   // via a stale L1D rready from a request that was never issued.
   `RAPT_SVA_IMPLY(clock, reset, LSU_BLOCKED_LOAD_NOT_READY,
-      (raddr_valid && load_in_sq && !fwd_hit),
-      (!exu_lsu.rready))
+                  (raddr_valid && load_in_sq && !fwd_hit), (!exu_lsu.rready))
 
-    // LR establishes its reservation in L1D and therefore cannot complete via
-    // store-queue forwarding even when an older store fully covers its bytes.
-    `RAPT_SVA_IMPLY(clock, reset, LSU_LR_NO_SQ_FORWARD,
-      (raddr_valid && exu_lsu.atomic_lock),
-      (!fwd_hit))
+  // LR establishes its reservation in L1D and therefore cannot complete via
+  // store-queue forwarding even when an older store fully covers its bytes.
+  `RAPT_SVA_IMPLY(clock, reset, LSU_LR_NO_SQ_FORWARD, (raddr_valid && exu_lsu.atomic_lock),
+                  (!fwd_hit))
 
   // HANDSHAKE: allocation requires a free slot at sq_tail.
-  `RAPT_SVA_IMPLY(clock, reset, LSU_SQ_ALLOC_NEEDS_READY,
-      (sq_alloc_fire),
-      (sq_alloc_ready))
+  `RAPT_SVA_IMPLY(clock, reset, LSU_SQ_ALLOC_NEEDS_READY, (sq_alloc_fire), (sq_alloc_ready))
 
   // HANDSHAKE: alloc/commit/drain must target distinct entries whenever two
   // of them fire in the same cycle (single-writer-per-array discipline).
-  `RAPT_SVA_IMPLY(clock, reset, LSU_SQ_ALLOC_COMMIT_DISTINCT,
-      (sq_alloc_fire && sq_commit_fire),
-      (sq_tail != sq_cmt))
-  `RAPT_SVA_IMPLY(clock, reset, LSU_SQ_COMMIT_DRAIN_DISTINCT,
-      (sq_commit_fire && sq_drain_fire),
-      (sq_cmt != sq_head))
+  `RAPT_SVA_IMPLY(clock, reset, LSU_SQ_ALLOC_COMMIT_DISTINCT, (sq_alloc_fire && sq_commit_fire),
+                  (sq_tail != sq_cmt))
+  `RAPT_SVA_IMPLY(clock, reset, LSU_SQ_COMMIT_DRAIN_DISTINCT, (sq_commit_fire && sq_drain_fire),
+                  (sq_cmt != sq_head))
 
   // FLUSH_ROLLBACK: the cycle after a flush there are no speculative entries;
   // committed entries (still draining) are untouched.
   `RAPT_SVA_NEXT(clock, reset, LSU_SQ_FLUSH_ROLLBACK,
-      (cmu_bcast.flush_pipe || cmu_bcast.fence_time),
-      (sq_cmt == sq_tail && ((sq_valid & ~sq_committed) == '0)))
+                 (cmu_bcast.flush_pipe || cmu_bcast.fence_time),
+                 (sq_cmt == sq_tail && ((sq_valid & ~sq_committed) == '0)))
 endmodule
 /* verilator lint_on PINCONNECTEMPTY */

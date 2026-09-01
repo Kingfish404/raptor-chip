@@ -172,8 +172,7 @@ package rapt_pkg;
   } rob_entry_t;
 
   // Shared address classification functions for L1I/L1D
-  function automatic logic [XLENPkg-1:0] canonical_addr(
-      input logic [XLENPkg-1:0] addr);
+  function automatic logic [XLENPkg-1:0] canonical_addr(input logic [XLENPkg-1:0] addr);
     return (XLENPkg == 64) ? XLENPkg'({32'b0, addr[31:0]}) : addr;
   endfunction
 

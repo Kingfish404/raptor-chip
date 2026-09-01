@@ -250,12 +250,15 @@ module rapt_rou #(
   // new uops. Treat those slots as available so a full UOQ does not inject an
   // avoidable one-cycle backpressure bubble. Dual pairs remain atomic: B is
   // accepted only when its specific slot is free or reclaimed this cycle.
+  logic uoq_head_a_reclaim_b;
+`ifdef RAPT_DUAL_ISSUE
+  assign uoq_head_a_reclaim_b = uoq_deq_fire_b && (uoq_head_a == uoq_tail_b);
+`else
+  assign uoq_head_a_reclaim_b = 1'b0;
+`endif
   assign uoq_head_a_available = !uoq_valid[uoq_head_a]
       || (uoq_deq_fire_a && (uoq_head_a == uoq_tail_a))
-`ifdef RAPT_DUAL_ISSUE
-      || (uoq_deq_fire_b && (uoq_head_a == uoq_tail_b))
-`endif
-      ;
+      || uoq_head_a_reclaim_b;
 `ifdef RAPT_DUAL_ISSUE
   assign uoq_head_b_available = !uoq_valid[uoq_head_b]
       || (uoq_deq_fire_a && (uoq_head_b == uoq_tail_a))
@@ -276,8 +279,7 @@ module rapt_rou #(
 `ifdef RAPT_DUAL_ISSUE
   // When RNU sends a dual pair (valid_b), both slots must be available;
   // same-cycle dispatch reclaim is included in the availability predicate.
-  assign rnu_rou.ready = uoq_head_a_available
-      && (!rnu_rou.valid_b || uoq_head_b_available);
+  assign rnu_rou.ready = uoq_head_a_available && (!rnu_rou.valid_b || uoq_head_b_available);
 `else
   assign rnu_rou.ready = uoq_head_a_available;
 `endif
@@ -360,10 +362,13 @@ module rapt_rou #(
   endfunction
 
   function automatic logic fp_uses_rs3(input rapt_pkg::uop_t u);
-    return u.fp_valid && (u.fp_op == `RAPT_FP_OP_FMADD_S || u.fp_op == `RAPT_FP_OP_FMSUB_S
-      || u.fp_op == `RAPT_FP_OP_FNMSUB_S || u.fp_op == `RAPT_FP_OP_FNMADD_S
-      || u.fp_op == `RAPT_FP_OP_FMADD_D || u.fp_op == `RAPT_FP_OP_FMSUB_D
-      || u.fp_op == `RAPT_FP_OP_FNMSUB_D || u.fp_op == `RAPT_FP_OP_FNMADD_D);
+    return u.fp_valid && (u.fp_op == `RAPT_FP_OP_FMADD_S || u.fp_op ==
+    `RAPT_FP_OP_FMSUB_S
+    || u.fp_op == `RAPT_FP_OP_FNMSUB_S || u.fp_op ==
+    `RAPT_FP_OP_FNMADD_S
+    || u.fp_op == `RAPT_FP_OP_FMADD_D || u.fp_op ==
+    `RAPT_FP_OP_FMSUB_D
+    || u.fp_op == `RAPT_FP_OP_FNMSUB_D || u.fp_op == `RAPT_FP_OP_FNMADD_D);
   endfunction
 
   function automatic logic fp_wb_done(input logic [$clog2(ROB_SIZE)-1:0] dest);
@@ -438,6 +443,30 @@ module rapt_rou #(
       pv2_v_o = prf_pv2_v;
     end
   endtask
+
+  function automatic logic uoq_enq_b_selects_entry(input int entry);
+`ifdef RAPT_DUAL_ISSUE
+    return uoq_enq_fire_b && entry == int'(uoq_head_b);
+`else
+    return 1'b0;
+`endif
+  endfunction
+
+  function automatic logic uoq_deq_b_selects_entry(input int entry);
+`ifdef RAPT_DUAL_ISSUE
+    return uoq_deq_fire_b && entry == int'(uoq_tail_b);
+`else
+    return 1'b0;
+`endif
+  endfunction
+
+  function automatic logic rob_dispatch_b_selects_entry(input int entry);
+`ifdef RAPT_DUAL_ISSUE
+    return rob_dispatch_b_oh[entry];
+`else
+    return 1'b0;
+`endif
+  endfunction
 
   // Allocate a fresh ROB entry + cold uop_pl payload at `tail`.
   // Hot WB-mutable fields (state/btaken/npc/sq_*/csr_w*) are intentionally
@@ -528,18 +557,18 @@ module rapt_rou #(
       automatic logic enq_pv1_v_b = 1'b0;
       automatic logic enq_pv2_v_b = 1'b0;
 `endif
-  for (int i = 0; i < 32; i++) begin
-    if (fp_map_valid[i] && fp_wb_done(fp_map[i])) fp_map_valid[i] <= 1'b0;
-  end
-  if (uoq_deq_fire_a && fp_writes_fpr(uoq_uops[uoq_tail_a])) begin
-    fp_map_valid[uoq_uops[uoq_tail_a].fp_rd] <= 1'b1;
-    fp_map[uoq_uops[uoq_tail_a].fp_rd] <= rob_tail_a;
-  end
+      for (int i = 0; i < 32; i++) begin
+        if (fp_map_valid[i] && fp_wb_done(fp_map[i])) fp_map_valid[i] <= 1'b0;
+      end
+      if (uoq_deq_fire_a && fp_writes_fpr(uoq_uops[uoq_tail_a])) begin
+        fp_map_valid[uoq_uops[uoq_tail_a].fp_rd] <= 1'b1;
+        fp_map[uoq_uops[uoq_tail_a].fp_rd] <= rob_tail_a;
+      end
 `ifdef RAPT_DUAL_ISSUE
-  if (uoq_deq_fire_b && fp_writes_fpr(uoq_uops[uoq_tail_b])) begin
-    fp_map_valid[uoq_uops[uoq_tail_b].fp_rd] <= 1'b1;
-    fp_map[uoq_uops[uoq_tail_b].fp_rd] <= rob_tail_b;
-  end
+      if (uoq_deq_fire_b && fp_writes_fpr(uoq_uops[uoq_tail_b])) begin
+        fp_map_valid[uoq_uops[uoq_tail_b].fp_rd] <= 1'b1;
+        fp_map[uoq_uops[uoq_tail_b].fp_rd] <= rob_tail_b;
+      end
 `endif
       if (sys_resume || (serialize_in_flight && rob_empty)) begin
         // Releasing the drain lock must not suppress a simultaneous enqueue:
@@ -549,7 +578,7 @@ module rapt_rou #(
       if (uoq_enq_fire_a) begin
 `ifdef RAPT_DUAL_ISSUE
         if (uoq_enq_fire_b) begin
-          uoq_head_a                <= uoq_head_a + 2;
+          uoq_head_a <= uoq_head_a + 2;
         end else begin
           uoq_head_a <= uoq_head_a + 1;
         end
@@ -576,29 +605,30 @@ module rapt_rou #(
       // One static write cone per UOQ entry. Enqueue wins over a same-cycle
       // dequeue when a full queue reclaims that entry.
       for (int i = 0; i < IIQ_SIZE; i++) begin
+        if (uoq_enq_b_selects_entry(i)) begin
 `ifdef RAPT_DUAL_ISSUE
-        if (uoq_enq_fire_b && i == int'(uoq_head_b)) begin
           uoq_enqueue_slot(i, rnu_rou.uop_b, rnu_rou.pr1_b, rnu_rou.pr2_b, rnu_rou.prd_b,
                            rnu_rou.prs_b, rnu_rou.op1_b, rnu_rou.op2_b, exu_prf.pv1_b,
-                           exu_prf.pv2_b, exu_prf.pv1_b_valid, exu_prf.pv2_b_valid,
-                           enq_pv1_v_b, enq_pv2_v_b);
+                           exu_prf.pv2_b, exu_prf.pv1_b_valid, exu_prf.pv2_b_valid, enq_pv1_v_b,
+                           enq_pv2_v_b);
           uoq_valid[i]     <= 1'b1;
           uoq_pv1_valid[i] <= enq_pv1_v_b;
           uoq_pv2_valid[i] <= enq_pv2_v_b;
           uoq_is_pair[i]   <= 1'b1;
-        end else
 `endif
-        if (uoq_enq_fire_a && i == int'(uoq_head_a)) begin
+        end else if (uoq_enq_fire_a && i == int'(uoq_head_a)) begin
           uoq_enqueue_slot(i, rnu_rou.uop_a, rnu_rou.pr1_a, rnu_rou.pr2_a, rnu_rou.prd_a,
                            rnu_rou.prs_a, rnu_rou.op1_a, rnu_rou.op2_a, exu_prf.pv1_a,
-                           exu_prf.pv2_a, exu_prf.pv1_a_valid, exu_prf.pv2_a_valid,
-                           enq_pv1_v_a, enq_pv2_v_a);
+                           exu_prf.pv2_a, exu_prf.pv1_a_valid, exu_prf.pv2_a_valid, enq_pv1_v_a,
+                           enq_pv2_v_a);
           uoq_valid[i]     <= 1'b1;
           uoq_pv1_valid[i] <= enq_pv1_v_a;
           uoq_pv2_valid[i] <= enq_pv2_v_a;
 `ifdef RAPT_DUAL_ISSUE
           uoq_is_pair[i] <= 1'b0;
-        end else if (uoq_deq_fire_b && i == int'(uoq_tail_b)) begin
+`endif
+        end else if (uoq_deq_b_selects_entry(i)) begin
+`ifdef RAPT_DUAL_ISSUE
           uoq_valid[i]   <= 1'b0;
           uoq_is_pair[i] <= 1'b0;
 `endif
@@ -757,12 +787,12 @@ module rapt_rou #(
     if (uoq_deq_fire_b) rob_dispatch_b_oh[rob_tail_b] = 1'b1;
 `endif
     if (exu_ioq_bcast.valid) rob_wb_ioq_oh[wb_dest_ioq] = 1'b1;
-    if (exu_rou.valid)       rob_wb_exu_oh[wb_dest_exu] = 1'b1;
-    if (exu_rou_b.valid)     rob_wb_exu_b_oh[wb_dest_exu_b] = 1'b1;
-    if (exu_rou_c.valid)     rob_wb_exu_c_oh[exu_rou_c.dest] = 1'b1;
-    if (exu_wb_mul.valid)    rob_wb_mul_oh[exu_wb_mul.dest] = 1'b1;
-    if (head0_valid)         rob_commit_a_oh[rob_head] = 1'b1;
-    if (dual_commit)         rob_commit_b_oh[h1] = 1'b1;
+    if (exu_rou.valid) rob_wb_exu_oh[wb_dest_exu] = 1'b1;
+    if (exu_rou_b.valid) rob_wb_exu_b_oh[wb_dest_exu_b] = 1'b1;
+    if (exu_rou_c.valid) rob_wb_exu_c_oh[exu_rou_c.dest] = 1'b1;
+    if (exu_wb_mul.valid) rob_wb_mul_oh[exu_wb_mul.dest] = 1'b1;
+    if (head0_valid) rob_commit_a_oh[rob_head] = 1'b1;
+    if (dual_commit) rob_commit_b_oh[h1] = 1'b1;
   end
 
   always_ff @(posedge clock) begin
@@ -802,12 +832,11 @@ module rapt_rou #(
         // priority for fields written by more than one source.
         if (rob_dispatch_a_oh[entry]) begin
           dispatch_to_rob(entry, uoq_uops[uoq_tail_a], uoq_prd[uoq_tail_a], uoq_prs[uoq_tail_a]);
-        end
+        end else if (rob_dispatch_b_selects_entry(entry)) begin
 `ifdef RAPT_DUAL_ISSUE
-        else if (rob_dispatch_b_oh[entry]) begin
           dispatch_to_rob(entry, uoq_uops[uoq_tail_b], uoq_prd[uoq_tail_b], uoq_prs[uoq_tail_b]);
-        end
 `endif
+        end
 
         // Loads/stores never branch, so mispredict keeps its dispatch value.
         if (rob_wb_ioq_oh[entry]) begin
@@ -965,7 +994,7 @@ module rapt_rou #(
   // Kept as a distinct broadcast path for interface compatibility. Pure
   // CSR/f_time currently take the full flush path above so any younger
   // speculative uops are discarded before dispatch resumes.
-    assign sys_resume = head0_valid
+  assign sys_resume = head0_valid
       && (head0_sys_pure || uop_pl[h0].f_time)
       && !head0_flush;
 
@@ -1117,9 +1146,9 @@ module rapt_rou #(
   assign csr_from_h1 = dual_commit && (uop_pl[h1].sys || rob_entry[h1].trap);
   logic fp_flags_from_h1;
   assign fp_flags_from_h1 = dual_commit && rob_entry[h1].fp_flags_valid;
-    logic fp_f2i_from_h0, fp_f2i_from_h1;
-    logic fp_dirty_from_h0, fp_dirty_from_h1;
-    assign fp_f2i_from_h0 = (uop_pl[h0].fp_op == `RAPT_FP_OP_FCVT_W_S)
+  logic fp_f2i_from_h0, fp_f2i_from_h1;
+  logic fp_dirty_from_h0, fp_dirty_from_h1;
+  assign fp_f2i_from_h0 = (uop_pl[h0].fp_op == `RAPT_FP_OP_FCVT_W_S)
       || (uop_pl[h0].fp_op == `RAPT_FP_OP_FCVT_WU_S)
       || (uop_pl[h0].fp_op == `RAPT_FP_OP_FCVT_L_S)
       || (uop_pl[h0].fp_op == `RAPT_FP_OP_FCVT_LU_S)
@@ -1127,7 +1156,7 @@ module rapt_rou #(
       || (uop_pl[h0].fp_op == `RAPT_FP_OP_FCVT_WU_D)
       || (uop_pl[h0].fp_op == `RAPT_FP_OP_FCVT_L_D)
       || (uop_pl[h0].fp_op == `RAPT_FP_OP_FCVT_LU_D);
-    assign fp_f2i_from_h1 = (uop_pl[h1].fp_op == `RAPT_FP_OP_FCVT_W_S)
+  assign fp_f2i_from_h1 = (uop_pl[h1].fp_op == `RAPT_FP_OP_FCVT_W_S)
       || (uop_pl[h1].fp_op == `RAPT_FP_OP_FCVT_WU_S)
       || (uop_pl[h1].fp_op == `RAPT_FP_OP_FCVT_L_S)
       || (uop_pl[h1].fp_op == `RAPT_FP_OP_FCVT_LU_S)
@@ -1135,7 +1164,7 @@ module rapt_rou #(
       || (uop_pl[h1].fp_op == `RAPT_FP_OP_FCVT_WU_D)
       || (uop_pl[h1].fp_op == `RAPT_FP_OP_FCVT_L_D)
       || (uop_pl[h1].fp_op == `RAPT_FP_OP_FCVT_LU_D);
-    assign fp_dirty_from_h0 = head0_valid && uop_pl[h0].fp_valid && !rob_entry[h0].trap
+  assign fp_dirty_from_h0 = head0_valid && uop_pl[h0].fp_valid && !rob_entry[h0].trap
       && ((uop_pl[h0].fp_op != `RAPT_FP_OP_FSW)
         && (uop_pl[h0].fp_op != `RAPT_FP_OP_FSD)
         && (uop_pl[h0].fp_op != `RAPT_FP_OP_FMV_X_W)
@@ -1150,7 +1179,7 @@ module rapt_rou #(
         && (uop_pl[h0].fp_op != `RAPT_FP_OP_FCLASS_D)
         && !fp_f2i_from_h0
         || (rob_entry[h0].fp_flags_valid && |rob_entry[h0].fp_flags));
-    assign fp_dirty_from_h1 = dual_commit && uop_pl[h1].fp_valid && !rob_entry[h1].trap
+  assign fp_dirty_from_h1 = dual_commit && uop_pl[h1].fp_valid && !rob_entry[h1].trap
       && ((uop_pl[h1].fp_op != `RAPT_FP_OP_FSW)
         && (uop_pl[h1].fp_op != `RAPT_FP_OP_FSD)
         && (uop_pl[h1].fp_op != `RAPT_FP_OP_FMV_X_W)
@@ -1181,7 +1210,7 @@ module rapt_rou #(
   assign rou_csr.fp_flags_valid = (recieved_trap || commit_trap) ? 1'b0
       : fp_flags_from_h1 ? rob_entry[h1].fp_flags_valid : rob_entry[h0].fp_flags_valid;
   assign rou_csr.fp_flags = fp_flags_from_h1 ? rob_entry[h1].fp_flags : rob_entry[h0].fp_flags;
-    assign rou_csr.fp_dirty = (recieved_trap || commit_trap) ? 1'b0
+  assign rou_csr.fp_dirty = (recieved_trap || commit_trap) ? 1'b0
       : fp_dirty_from_h1 ? 1'b1 : fp_dirty_from_h0;
   assign rou_csr.ecall     = (recieved_trap || commit_trap) ? 1'b0
                            : csr_from_h1 ? uop_pl[h1].ecall : uop_pl[h0].ecall;
@@ -1268,42 +1297,37 @@ module rapt_rou #(
   `RAPT_SVA_IMPLY(clock, reset, ROB_COMMIT_NEEDS_BUSY, (head0_valid && !recieved_trap),
                   (rob_entry[h0].busy))
 
-  `RAPT_SVA_IMPLY(clock, reset, ROB_IOQ_WB_NEEDS_BUSY,
-                  exu_ioq_bcast.valid, rob_entry_busy[wb_dest_ioq])
+  `RAPT_SVA_IMPLY(clock, reset, ROB_IOQ_WB_NEEDS_BUSY, exu_ioq_bcast.valid,
+                  rob_entry_busy[wb_dest_ioq])
 
-  `RAPT_SVA_IMPLY(clock, reset, ROB_EXU_A_WB_NEEDS_BUSY,
-                  exu_rou.valid, rob_entry_busy[wb_dest_exu])
+  `RAPT_SVA_IMPLY(clock, reset, ROB_EXU_A_WB_NEEDS_BUSY, exu_rou.valid, rob_entry_busy[wb_dest_exu])
 
-  `RAPT_SVA_IMPLY(clock, reset, ROB_EXU_B_WB_NEEDS_BUSY,
-                  exu_rou_b.valid, rob_entry_busy[wb_dest_exu_b])
+  `RAPT_SVA_IMPLY(clock, reset, ROB_EXU_B_WB_NEEDS_BUSY, exu_rou_b.valid,
+                  rob_entry_busy[wb_dest_exu_b])
 
-  `RAPT_SVA_IMPLY(clock, reset, ROB_EXU_C_WB_NEEDS_BUSY,
-                  exu_rou_c.valid, rob_entry_busy[exu_rou_c.dest])
+  `RAPT_SVA_IMPLY(clock, reset, ROB_EXU_C_WB_NEEDS_BUSY, exu_rou_c.valid,
+                  rob_entry_busy[exu_rou_c.dest])
 
-  `RAPT_SVA_IMPLY(clock, reset, ROB_MULDIV_WB_NEEDS_BUSY,
-                  exu_wb_mul.valid, rob_entry_busy[exu_wb_mul.dest])
+  `RAPT_SVA_IMPLY(clock, reset, ROB_MULDIV_WB_NEEDS_BUSY, exu_wb_mul.valid,
+                  rob_entry_busy[exu_wb_mul.dest])
 
-  `RAPT_SVA_IMPLY(clock, reset, ROB_DISPATCH_A_SYSOP_ONEHOT,
-                  uoq_deq_fire_a,
+  `RAPT_SVA_IMPLY(clock, reset, ROB_DISPATCH_A_SYSOP_ONEHOT, uoq_deq_fire_a,
                   $onehot0({uoq_uops[uoq_tail_a].ecall, uoq_uops[uoq_tail_a].ebreak,
                             uoq_uops[uoq_tail_a].mret, uoq_uops[uoq_tail_a].sret}))
 
 `ifdef RAPT_DUAL_ISSUE
-  `RAPT_SVA_IMPLY(clock, reset, ROB_DISPATCH_B_SYSOP_ONEHOT,
-                  uoq_deq_fire_b,
+  `RAPT_SVA_IMPLY(clock, reset, ROB_DISPATCH_B_SYSOP_ONEHOT, uoq_deq_fire_b,
                   $onehot0({uoq_uops[uoq_tail_b].ecall, uoq_uops[uoq_tail_b].ebreak,
                             uoq_uops[uoq_tail_b].mret, uoq_uops[uoq_tail_b].sret}))
 `endif
 
-  `RAPT_SVA_IMPLY(clock, reset, ROB_SRET_WB_NOT_CONTAMINATED,
-                  (exu_rou.valid && uop_pl[wb_dest_exu].sret),
-                  !(uop_pl[wb_dest_exu].ecall || uop_pl[wb_dest_exu].ebreak
-                    || uop_pl[wb_dest_exu].mret))
+  `RAPT_SVA_IMPLY(
+      clock, reset, ROB_SRET_WB_NOT_CONTAMINATED, (exu_rou.valid && uop_pl[wb_dest_exu].sret),
+      !(uop_pl[wb_dest_exu].ecall || uop_pl[wb_dest_exu].ebreak || uop_pl[wb_dest_exu].mret))
 
-  `RAPT_SVA(clock, reset, ROB_DISPATCH_WB_NO_ALIAS,
-          !(|((rob_dispatch_a_oh | rob_dispatch_b_oh)
-              & (rob_wb_ioq_oh | rob_wb_exu_oh | rob_wb_exu_b_oh
-                | rob_wb_exu_c_oh | rob_wb_mul_oh))))
+  `RAPT_SVA(
+      clock, reset, ROB_DISPATCH_WB_NO_ALIAS,
+      !(|((rob_dispatch_a_oh | rob_dispatch_b_oh) & (rob_wb_ioq_oh | rob_wb_exu_oh | rob_wb_exu_b_oh | rob_wb_exu_c_oh | rob_wb_mul_oh))))
 
   `RAPT_SVA_IMPLY(clock, reset, ROB_SYS_SERIALIZING_FLUSH,
                   (head0_valid && (uop_pl[h0].sys || uop_pl[h0].f_time)), flush_pipe)
@@ -1311,8 +1335,7 @@ module rapt_rou #(
   `RAPT_SVA_IMPLY(clock, reset, ROB_DUAL_SERIALIZING_FLUSH,
                   (dual_commit && (uop_pl[h1].sys || uop_pl[h1].f_time)), flush_pipe)
 
-  `RAPT_SVA_NEXT(clock, reset, ROB_COMMIT_NPC_IS_ARCHITECTURAL,
-                 (head0_valid && !recieved_trap),
+  `RAPT_SVA_NEXT(clock, reset, ROB_COMMIT_NPC_IS_ARCHITECTURAL, (head0_valid && !recieved_trap),
                  (commit_npc_q == $past(rou_cmu.npc_a)))
 
   `RAPT_SVA_NEXT(clock, reset, ROB_IDLE_INTERRUPT_CAPTURE,
@@ -1322,8 +1345,8 @@ module rapt_rou #(
   `RAPT_SVA_NEXT(clock, reset, ROB_ORPHAN_SERIALIZE_LOCK_CLEARS,
                  (serialize_in_flight && rob_empty), !serialize_in_flight)
 
-  `RAPT_SVA_NEXT(clock, reset, ROB_EVERY_FLUSH_REDIRECTS,
-                 flush_pipe, (flush_apply && flush_target_r == $past(flush_target_c)))
+  `RAPT_SVA_NEXT(clock, reset, ROB_EVERY_FLUSH_REDIRECTS, flush_pipe,
+                 (flush_apply && flush_target_r == $past(flush_target_c)))
 
   // Coverage: flush events happen (sanity that the DUT actually exercises
   // flush paths during tests -- guards against accidentally disabling flush).

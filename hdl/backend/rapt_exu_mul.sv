@@ -89,11 +89,23 @@ module rapt_exu_mul #(
   logic              m1_sext_b;
   always_comb begin
     unique case (m1_op)
-      `RAPT_ALU_MULH__: begin m1_sext_a = 1'b1; m1_sext_b = 1'b1; end
-      `RAPT_ALU_MULHSU: begin m1_sext_a = 1'b1; m1_sext_b = 1'b0; end
-      `RAPT_ALU_MULHU_: begin m1_sext_a = 1'b0; m1_sext_b = 1'b0; end
+      `RAPT_ALU_MULH__: begin
+        m1_sext_a = 1'b1;
+        m1_sext_b = 1'b1;
+      end
+      `RAPT_ALU_MULHSU: begin
+        m1_sext_a = 1'b1;
+        m1_sext_b = 1'b0;
+      end
+      `RAPT_ALU_MULHU_: begin
+        m1_sext_a = 1'b0;
+        m1_sext_b = 1'b0;
+      end
       // MUL (and any default) -- low product is sign-agnostic.
-      default:          begin m1_sext_a = 1'b0; m1_sext_b = 1'b0; end
+      default: begin
+        m1_sext_a = 1'b0;
+        m1_sext_b = 1'b0;
+      end
     endcase
   end
 

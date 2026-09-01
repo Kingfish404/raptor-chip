@@ -5,7 +5,7 @@
 /* verilator lint_off PINCONNECTEMPTY */
 module rapt_l1d #(
     parameter int L1D_LINE_LEN = `RAPT_L1D_LINE_LEN,
-  parameter int unsigned L1D_LINE_SIZE = 2 ** L1D_LINE_LEN,
+    parameter int unsigned L1D_LINE_SIZE = 2 ** L1D_LINE_LEN,
     parameter int L1D_LEN = `RAPT_L1D_LEN,
     parameter bit [`RAPT_L1D_LEN:0] L1D_SIZE = 2 ** `RAPT_L1D_LEN,
     parameter int XLEN = `RAPT_XLEN,
@@ -53,11 +53,15 @@ module rapt_l1d #(
   // cache line has independent valid tracking so partial fills / invalidates
   // don't require whole-line eviction.  When a new tag is installed in a
   // line (tag mismatch), all valid bits except the new target are cleared.
-  localparam unsigned L1dOffsetBits = $clog2(XLEN/8);  // 2 for RV32, 3 for RV64
+  localparam unsigned L1dOffsetBits = $clog2(XLEN / 8);  // 2 for RV32, 3 for RV64
   localparam unsigned L1dTagW = XLEN - L1D_LEN - L1D_LINE_LEN - L1dOffsetBits;
   localparam unsigned L1dWayW = L1D_N_WAYS > 1 ? $clog2(L1D_N_WAYS) : 1;
   logic [L1D_LINE_SIZE-1:0] l1d_valid[L1D_N_WAYS][L1D_SIZE];
   logic [L1dTagW-1:0] l1d_tag[L1D_N_WAYS][L1D_SIZE];
+  logic [L1D_SIZE-1:0] fence_clear_set;
+  logic fence_clear_busy;
+
+  assign fence_clear_busy = cmu_bcast.fence_time || |fence_clear_set;
 
   // Wide subarray configuration for L1D data SRAMs (128-bit target, matching L1I).
   // Clamp the subarray to the line when a cache line is narrower than 128 bits
@@ -176,7 +180,8 @@ module rapt_l1d #(
   // data instead of the load's: causing silent data corruption.
   logic partial_store_rmw;
   logic load_speculate;
-  assign load_speculate = (l1d_state == IDLE && lsu_l1d.rvalid && !cmu_bcast.flush_pipe);
+  assign load_speculate = (l1d_state == IDLE && lsu_l1d.rvalid
+      && !cmu_bcast.flush_pipe && !fence_clear_busy);
 
 `ifdef RAPT_LSU_HUM
   // Hit-under-miss B channel arm (full logic further below): in LD_D the
@@ -186,34 +191,37 @@ module rapt_l1d #(
   logic [L1D_LEN-1:0] b_idx_in;
 `endif
 
+`ifdef RAPT_RV64
+  localparam logic [7:0] FullStoreWstrb = `RAPT_SD_WSTRB;
+`else
+  localparam logic [7:0] FullStoreWstrb = `RAPT_SW_WSTRB;
+`endif
   assign partial_store_rmw = !l1d_rmw && !l1d_update
       && (l1d_state == IDLE)  // Only in IDLE; PTWAIT/LD_D would steal read port
-      && !load_speculate      // load speculation uses SRAM read port
+      && !load_speculate  // load speculation uses SRAM read port
       && lsu_l1d.wvalid && l1d_bus.wready && cacheable_w && hit_w
-`ifdef RAPT_RV64
-      && (lsu_l1d.walu != `RAPT_SD_WSTRB)
-`else
-      && (lsu_l1d.walu != `RAPT_SW_WSTRB)
-`endif
-      ;  // partial-store RMW: SRAM read port is free in IDLE, capture the
-         // hit-line for byte-lane merge on next cycle. wready is gated by
-         // `!l1d_rmw` so an incoming store on the merge-write cycle is
-         // held one cycle (preventing silent drop).
+      && (lsu_l1d.walu != FullStoreWstrb);  // partial-store RMW: SRAM read port is free in IDLE, capture the
+  // hit-line for byte-lane merge on next cycle. wready is gated by
+  // `!l1d_rmw` so an incoming store on the merge-write cycle is
+  // held one cycle (preventing silent drop).
 
   // Speculative SRAM read: when IDLE with a pending load, drive the *incoming*
   // virtual index directly instead of waiting for l1d_addr to be registered.
-    // Safe because L1D_LEN+L1D_LINE_LEN+L1dOffsetBits < 12 (page offset), so
+  // Safe because L1D_LEN+L1D_LINE_LEN+L1dOffsetBits < 12 (page offset), so
   // virt_idx == phys_idx (VIPT constraint satisfied). PTW paths are also safe:
   // l1d_addr holds the virtual address during PTW, whose index equals the
   // final physical index.
   logic [L1D_LEN-1:0] sram_raddr;
+  logic [L1D_LEN-1:0] sram_raddr_fallback;
+`ifdef RAPT_LSU_HUM
+  assign sram_raddr_fallback = b_arm_ok ? b_idx_in : addr_idx;
+`else
+  assign sram_raddr_fallback = addr_idx;
+`endif
   assign sram_raddr = partial_store_rmw ? waddr_idx
       : load_speculate
       ? lsu_l1d.raddr[L1D_LEN+L1D_LINE_LEN+L1dOffsetBits-1:L1D_LINE_LEN+L1dOffsetBits]
-`ifdef RAPT_LSU_HUM
-      : b_arm_ok ? b_idx_in
-`endif
-      : addr_idx;
+      : sram_raddr_fallback;
 
   // Data SRAM: wide subarrays (128-bit), single shared read/write port.
   // 4 subarrays per way replaces per-word banks, reducing SRAM instance count
@@ -255,7 +263,7 @@ module rapt_l1d #(
           if (l1d_update && (l1d_way == L1dWayW'(w))) begin
             for (int wi = 0; wi < D_SUBARRAY_WORDS; wi++) begin
               if (l1d_off == L1D_LINE_LEN'(SA_BASE + wi))
-                d_sa_bwe[wi*(XLEN/8) +: (XLEN/8)] = {(XLEN/8){1'b1}};
+                d_sa_bwe[wi*(XLEN/8)+:(XLEN/8)] = {(XLEN / 8) {1'b1}};
             end
           end
         end
@@ -264,7 +272,7 @@ module rapt_l1d #(
         always_comb begin
           d_sa_wdata = '0;
           for (int wi = 0; wi < D_SUBARRAY_WORDS; wi++) begin
-            d_sa_wdata[wi*XLEN +: XLEN] = l1d_data_u;
+            d_sa_wdata[wi*XLEN+:XLEN] = l1d_data_u;
           end
         end
         logic d_sa_wen;
@@ -284,8 +292,7 @@ module rapt_l1d #(
         );
         // Reconstruct per-word data from the last accepted SRAM read.
         for (genvar wi = 0; wi < D_SUBARRAY_WORDS; wi++) begin : gen_word
-          assign data_bank_rdata[w][SA_BASE + wi] =
-              d_sa_rdata[w][sa][(wi+1)*XLEN-1:wi*XLEN];
+          assign data_bank_rdata[w][SA_BASE+wi] = d_sa_rdata[w][sa][(wi+1)*XLEN-1:wi*XLEN];
         end
       end
     end
@@ -303,8 +310,8 @@ module rapt_l1d #(
   assign rmw_byte_mask = l1d_rmw_walu[3:0] << l1d_rmw_waddr_lo;
 `endif
   always_comb begin
-    for (int i = 0; i < XLEN/8; i++) begin
-      rmw_bit_mask[i*8 +: 8] = {8{rmw_byte_mask[i]}};
+    for (int i = 0; i < XLEN / 8; i++) begin
+      rmw_bit_mask[i*8+:8] = {8{rmw_byte_mask[i]}};
     end
   end
   assign rmw_data_shifted = l1d_rmw_wdata << (l1d_rmw_waddr_lo * 8);
@@ -318,7 +325,9 @@ module rapt_l1d #(
   assign dtlb_fill  = (l1d_state == PTWAIT) && ptw_done && !stlb_mmu;
   assign dstlb_fill = (l1d_state == PTWAIT) && ptw_done &&  stlb_mmu;
 
-  rapt_tlb #(.XLEN(XLEN)) u_dtlb (
+  rapt_tlb #(
+      .XLEN(XLEN)
+  ) u_dtlb (
       .clock(clock),
       .reset(reset),
       .flush(cmu_bcast.fence_time),
@@ -334,7 +343,9 @@ module rapt_l1d #(
       .fill_pte(ptw_result_pte)
   );
 
-  rapt_tlb #(.XLEN(XLEN)) u_dstlb (
+  rapt_tlb #(
+      .XLEN(XLEN)
+  ) u_dstlb (
       .clock(clock),
       .reset(reset),
       .flush(cmu_bcast.fence_time),
@@ -362,7 +373,9 @@ module rapt_l1d #(
       && !ptw_busy
       && (store_tlb_miss || load_tlb_miss);
 
-  rapt_ptw #(.XLEN(XLEN)) u_dptw (
+  rapt_ptw #(
+      .XLEN(XLEN)
+  ) u_dptw (
       .clock(clock),
       .reset(reset),
       .req_valid(ptw_req),
@@ -392,16 +405,20 @@ module rapt_l1d #(
       .busy(ptw_busy)
   );
 
+  logic [7:0] rstrb_rv64;
+`ifdef RAPT_RV64
+  assign rstrb_rv64 = ({8{l1d_ralu == `RAPT_ALU_LWU_}} & 8'hf)
+                     | ({8{l1d_ralu == `RAPT_ALU_LD__}} & 8'hff);
+`else
+  assign rstrb_rv64 = '0;
+`endif
   assign rstrb = (
       ({8{l1d_ralu == `RAPT_ALU_LB__}} & 8'h1)
     | ({8{l1d_ralu == `RAPT_ALU_LBU_}} & 8'h1)
     | ({8{l1d_ralu == `RAPT_ALU_LH__}} & 8'h3)
     | ({8{l1d_ralu == `RAPT_ALU_LHU_}} & 8'h3)
     | ({8{l1d_ralu == `RAPT_ALU_LW__}} & 8'hf)
-`ifdef RAPT_RV64
-    | ({8{l1d_ralu == `RAPT_ALU_LWU_}} & 8'hf)
-    | ({8{l1d_ralu == `RAPT_ALU_LD__}} & 8'hff)
-`endif
+    | rstrb_rv64
     );
 
   assign addr_tag = l1d_addr[XLEN-1:L1D_LEN+L1D_LINE_LEN+L1dOffsetBits];
@@ -432,8 +449,8 @@ module rapt_l1d #(
   /* verilator lint_on UNUSEDSIGNAL */
   always_comb begin
     load_hit_way = '0;
-    for (int w = int'(L1D_N_WAYS)-1; w >= 0; w--)
-      if (way_tag_hit[addr_offset][w]) load_hit_way = L1dWayW'(w);
+    for (int w = int'(L1D_N_WAYS) - 1; w >= 0; w--)
+    if (way_tag_hit[addr_offset][w]) load_hit_way = L1dWayW'(w);
   end
 
   // PLRU instantiation for >2-way caches
@@ -449,11 +466,10 @@ module rapt_l1d #(
       always_comb begin
         d_hit_way_onehot = '0;
         for (int w = 0; w < int'(L1D_N_WAYS); w++)
-          if (way_tag_hit[addr_offset][w]) d_hit_way_onehot[w] = 1'b1;
+        if (way_tag_hit[addr_offset][w]) d_hit_way_onehot[w] = 1'b1;
       end
       // LRU write enable: on load hit or when a fill completes (l1d_update with valid_u)
-      assign d_lru_write_en = ((l1d_state == LD_A) && tag_hit)
-                           || (l1d_update && l1d_valid_u);
+      assign d_lru_write_en = ((l1d_state == LD_A) && tag_hit) || (l1d_update && l1d_valid_u);
 
       rapt_plru #(
           .NUMWAYS(L1D_N_WAYS),
@@ -503,8 +519,7 @@ module rapt_l1d #(
   endgenerate
   always_comb begin
     l1d_data = '0;
-    for (int w = 0; w < int'(L1D_N_WAYS); w++)
-      l1d_data |= way_data_masked[w];
+    for (int w = 0; w < int'(L1D_N_WAYS); w++) l1d_data |= way_data_masked[w];
   end
 
   // ==========================================================================
@@ -536,7 +551,7 @@ module rapt_l1d #(
       b_armed  <= 1'b0;
       b_addr_r <= '0;
     end else begin
-      b_armed  <= b_arm_ok;
+      b_armed <= b_arm_ok;
       if (b_arm_ok) b_addr_r <= lsu_l1d.raddr_b;
     end
   end
@@ -607,8 +622,8 @@ module rapt_l1d #(
   logic [L1dWayW-1:0] store_hit_way;
   always_comb begin
     store_hit_way = '0;
-    for (int w = int'(L1D_N_WAYS)-1; w >= 0; w--)
-      if (way_whit[waddr_offset][w]) store_hit_way = L1dWayW'(w);
+    for (int w = int'(L1D_N_WAYS) - 1; w >= 0; w--)
+    if (way_whit[waddr_offset][w]) store_hit_way = L1dWayW'(w);
   end
   // Fill way selection for store miss (full-word write-allocate)
   logic [L1dWayW-1:0] store_fill_way;
@@ -640,8 +655,7 @@ module rapt_l1d #(
         ld_fill_way     = '0;
         // Store side
         for (int w = 0; w < int'(L1D_N_WAYS); w++) begin
-          if ((|l1d_valid[w][waddr_idx]) && way_wtag_match[w])
-            store_fill_way = L1dWayW'(w);
+          if ((|l1d_valid[w][waddr_idx]) && way_wtag_match[w]) store_fill_way = L1dWayW'(w);
         end
         if (store_fill_way == '0 && !(|way_wtag_match)) begin
           for (int w = 0; w < int'(L1D_N_WAYS); w++) begin
@@ -659,8 +673,7 @@ module rapt_l1d #(
         end
         // Load side
         for (int w = 0; w < int'(L1D_N_WAYS); w++) begin
-          if ((|l1d_valid[w][addr_idx]) && way_tag_match[w])
-            ld_fill_way = L1dWayW'(w);
+          if ((|l1d_valid[w][addr_idx]) && way_tag_match[w]) ld_fill_way = L1dWayW'(w);
         end
         if (ld_fill_way == '0 && !(|way_tag_match)) begin
           for (int w = 0; w < int'(L1D_N_WAYS); w++) begin
@@ -712,7 +725,9 @@ module rapt_l1d #(
     endcase
   end
   logic pmp_load_fault;
-  rapt_pmp #(.XLEN(XLEN)) u_pmp_load (
+  rapt_pmp #(
+      .XLEN(XLEN)
+  ) u_pmp_load (
       .addr   (l1d_addr),
       .size_m1(load_size_m1),
       .priv   (eff_priv),
@@ -752,7 +767,9 @@ module rapt_l1d #(
     endcase
   end
   logic pmp_store_fault_mmu;
-  rapt_pmp #(.XLEN(XLEN)) u_pmp_store_mmu (
+  rapt_pmp #(
+      .XLEN(XLEN)
+  ) u_pmp_store_mmu (
       .addr   (exu_l1d.paddr),
       .size_m1(store_size_m1),
       .priv   (eff_priv),
@@ -782,34 +799,34 @@ module rapt_l1d #(
   // pte bits (rapt_tlb layout): [0]=R [1]=W [2]=X [3]=U [4]=G [5]=A [6]=D.
   // Bit [4]=G (global) does not affect data fault and is not consumed below.
   /* verilator lint_off UNUSEDSIGNAL */
-  function automatic logic pte_fault_data(
-      input logic [6:0] pte,
-      input logic       is_store,
-      input logic [1:0] priv_eff,
-      input logic       sum_i,
-      input logic       mxr_i
-  );
-      logic r, w, x, u, a, d;
-      logic can_read;
-      logic fault;
-      r = pte[0]; w = pte[1]; x = pte[2]; u = pte[3];
-      a = pte[5]; d = pte[6];
-      can_read = r || (mxr_i && x);
-      fault = 1'b0;
-      // U-bit rules: U-mode requires U=1; S-mode denies U=1 unless SUM.
-      if (priv_eff == `RAPT_PRIV_U) begin
-        if (!u) fault = 1'b1;
-      end else if (priv_eff == `RAPT_PRIV_S) begin
-        if (u && !sum_i) fault = 1'b1;
-      end
-      if (is_store) begin
-        if (!w) fault = 1'b1;
-        if (!a || !d) fault = 1'b1;
-      end else begin
-        if (!can_read) fault = 1'b1;
-        if (!a) fault = 1'b1;
-      end
-      return fault;
+  function automatic logic pte_fault_data(input logic [6:0] pte, input logic is_store,
+                                          input logic [1:0] priv_eff, input logic sum_i,
+                                          input logic mxr_i);
+    logic r, w, x, u, a, d;
+    logic can_read;
+    logic fault;
+    r = pte[0];
+    w = pte[1];
+    x = pte[2];
+    u = pte[3];
+    a = pte[5];
+    d = pte[6];
+    can_read = r || (mxr_i && x);
+    fault = 1'b0;
+    // U-bit rules: U-mode requires U=1; S-mode denies U=1 unless SUM.
+    if (priv_eff == `RAPT_PRIV_U) begin
+      if (!u) fault = 1'b1;
+    end else if (priv_eff == `RAPT_PRIV_S) begin
+      if (u && !sum_i) fault = 1'b1;
+    end
+    if (is_store) begin
+      if (!w) fault = 1'b1;
+      if (!a || !d) fault = 1'b1;
+    end else begin
+      if (!can_read) fault = 1'b1;
+      if (!a) fault = 1'b1;
+    end
+    return fault;
   endfunction
   /* verilator lint_on UNUSEDSIGNAL */
 
@@ -829,7 +846,9 @@ module rapt_l1d #(
   // privilege of the original access.  Fault is reported as access-fault of
   // same type (load/store) as the triggering access.
   logic pmp_ptw_fault;
-  rapt_pmp #(.XLEN(XLEN)) u_pmp_ptw (
+  rapt_pmp #(
+      .XLEN(XLEN)
+  ) u_pmp_ptw (
       .addr   (ptw_araddr),
       .size_m1(4'd3),
       .priv   (eff_priv),
@@ -918,7 +937,7 @@ module rapt_l1d #(
   // and would be silently dropped if wready had fired. Stalling the store
   // for one cycle lets the merge-write complete and the next-cycle SET will
   // re-evaluate the new store.
-  assign lsu_l1d.wready = !ptw_wvalid && l1d_bus.wready && !l1d_rmw;
+  assign lsu_l1d.wready = !ptw_wvalid && l1d_bus.wready && !l1d_rmw && !fence_clear_busy;
 
   // store address translation: stlb_hit uses TLB, otherwise wait for PTW
   assign store_paddr = XLEN'({ptw_result_ptag, exu_l1d.vaddr[11:0]});
@@ -942,9 +961,10 @@ module rapt_l1d #(
 
   always_ff @(posedge clock) begin
     if (reset) begin
-      l1d_state  <= IDLE;
+      l1d_state <= IDLE;
       for (int w = 0; w < int'(L1D_N_WAYS); w++)
-        for (int i = 0; i < int'(L1D_SIZE); i++) l1d_valid[w][i] <= '0;
+      for (int i = 0; i < int'(L1D_SIZE); i++) l1d_valid[w][i] <= '0;
+      fence_clear_set <= '0;
       l1d_update <= 0;
       l1d_inv_all_ways <= 0;
       l1d_rmw    <= 0;
@@ -957,6 +977,7 @@ module rapt_l1d #(
       l1d_atomic_lock <= 1'b0;
       load_killed <= 1'b0;
     end else begin
+      fence_clear_set <= {L1D_SIZE{cmu_bcast.fence_time}};
       if (exu_l1d.reservation_clear) begin
         reservation_valid <= 1'b0;
       end
@@ -971,7 +992,7 @@ module rapt_l1d #(
         IDLE: begin
           load_killed <= 1'b0;
           l1d_atomic_lock <= 1'b0;
-          if (!cmu_bcast.flush_pipe) begin
+          if (!cmu_bcast.flush_pipe && !fence_clear_busy) begin
             if (mmu_en) begin
               // Store TLB lookup (priority)
               if (exu_l1d.mmu_en && exu_l1d.valid) begin
@@ -1084,7 +1105,7 @@ module rapt_l1d #(
               cause <= 'hf; // store page fault
               stlb_mmu <= 'b0;
             end else begin
-              cause <= 'hd; // load page fault
+              cause <= 'hd;  // load page fault
             end
             l1d_state <= TRAP;
           end
@@ -1166,9 +1187,7 @@ module rapt_l1d #(
       // same cycle (e.g. load-fill completes, then store write-through arrives
       // next cycle while l1d_update is still high), the SET's NBA wins and the
       // new update is not lost.
-      if (cmu_bcast.fence_time) begin
-        for (int w = 0; w < int'(L1D_N_WAYS); w++)
-          for (int i = 0; i < int'(L1D_SIZE); i++) l1d_valid[w][i] <= '0;
+      if (|fence_clear_set) begin
         l1d_rmw <= 0;
       end else if (l1d_update) begin
         // Per-line tag + per-word valid semantics:
@@ -1197,8 +1216,7 @@ module rapt_l1d #(
           // retain stale words at OTHER offsets of the same line, and a
           // later load to those offsets would hit the stale duplicate.
           for (int w = 0; w < int'(L1D_N_WAYS); w++) begin
-            if (w != int'(l1d_way)
-                && l1d_tag[w][l1d_idx] == l1d_tag_u) begin
+            if (w != int'(l1d_way) && l1d_tag[w][l1d_idx] == l1d_tag_u) begin
               l1d_valid[w][l1d_idx] <= '0;
             end
           end
@@ -1213,6 +1231,12 @@ module rapt_l1d #(
         l1d_inv_all_ways <= 0;
       end
 
+      for (int w = 0; w < int'(L1D_N_WAYS); w++) begin
+        for (int i = 0; i < int'(L1D_SIZE); i++) begin
+          if (fence_clear_set[i]) l1d_valid[w][i] <= '0;
+        end
+      end
+
       // l1d_update SET: request a new SRAM + tag/valid write next cycle.
       // Textually last so its NBA to l1d_update wins over the CLEAR above.
       if (l1d_rmw) begin
@@ -1224,16 +1248,10 @@ module rapt_l1d #(
         l1d_valid_u <= 1'b1;
         // l1d_idx, l1d_off, l1d_tag_u already set at RMW trigger
       end else if (lsu_l1d.wvalid && l1d_bus.wready && cacheable_w) begin
-`ifdef RAPT_RV64
         // Treat misaligned full-width store as partial: cache must not be
         // updated as if the natural-aligned word/dword was fully written,
         // because the BUS shifts wstrb/wdata by waddr_lo.
-        if (lsu_l1d.walu == `RAPT_SD_WSTRB
-            && lsu_l1d.waddr[L1dOffsetBits-1:0] == '0) begin
-`else
-        if (lsu_l1d.walu == `RAPT_SW_WSTRB
-            && lsu_l1d.waddr[L1dOffsetBits-1:0] == '0) begin
-`endif
+        if (lsu_l1d.walu == FullStoreWstrb && lsu_l1d.waddr[L1dOffsetBits-1:0] == '0) begin
           l1d_update <= 1'b1;
           l1d_data_u <= lsu_l1d.wdata;
           l1d_valid_u <= 1'b1;
@@ -1286,22 +1304,19 @@ module rapt_l1d #(
   end
 
   `RAPT_SVA_IMPLY(clock, reset, L1D_MMIO_READ_REQUIRES_ORDER,
-      l1d_bus.arvalid && !l1d_bus.ar_ptw && !cacheable_r,
-      lsu_l1d.ordered)
-  `RAPT_SVA_IMPLY(clock, reset, L1D_FLUSH_BLOCKS_NEW_READ,
-      cmu_bcast.flush_pipe, !l1d_bus.arvalid)
-  `RAPT_SVA_NEXT(clock, reset, L1D_LR_HIT_ESTABLISHES_RESERVATION,
-      (l1d_state == LD_A) && tag_hit && l1d_atomic_lock
-        && !cmu_bcast.flush_pipe && !exu_l1d.reservation_clear,
+                  l1d_bus.arvalid && !l1d_bus.ar_ptw && !cacheable_r, lsu_l1d.ordered)
+  `RAPT_SVA_IMPLY(clock, reset, L1D_FLUSH_BLOCKS_NEW_READ, cmu_bcast.flush_pipe, !l1d_bus.arvalid)
+  `RAPT_SVA_NEXT(
+      clock, reset, L1D_LR_HIT_ESTABLISHES_RESERVATION,
+      (l1d_state == LD_A) && tag_hit && l1d_atomic_lock && !cmu_bcast.flush_pipe && !exu_l1d.reservation_clear,
       reservation_valid && reservation == $past(l1d_addr))
-  `RAPT_SVA_NEXT(clock, reset, L1D_LR_RESPONSE_ESTABLISHES_RESERVATION,
-      (l1d_state == LD_D) && l1d_bus.rvalid && !l1d_bus.rerr
-        && l1d_atomic_lock && !load_killed && !cmu_bcast.flush_pipe
-        && !exu_l1d.reservation_clear,
+  `RAPT_SVA_NEXT(
+      clock, reset, L1D_LR_RESPONSE_ESTABLISHES_RESERVATION,
+      (l1d_state == LD_D) && l1d_bus.rvalid && !l1d_bus.rerr && l1d_atomic_lock && !load_killed && !cmu_bcast.flush_pipe && !exu_l1d.reservation_clear,
       reservation_valid && reservation == $past(l1d_addr))
-  `RAPT_SVA_NEXT(clock, reset, L1D_KILLED_LR_RESPONSE_NO_NEW_RESERVATION,
-      (l1d_state == LD_D) && l1d_bus.rvalid && l1d_atomic_lock
-        && !reservation_valid && (load_killed || cmu_bcast.flush_pipe),
+  `RAPT_SVA_NEXT(
+      clock, reset, L1D_KILLED_LR_RESPONSE_NO_NEW_RESERVATION,
+      (l1d_state == LD_D) && l1d_bus.rvalid && l1d_atomic_lock && !reservation_valid && (load_killed || cmu_bcast.flush_pipe),
       !reservation_valid)
 endmodule
 /* verilator lint_on PINCONNECTEMPTY */

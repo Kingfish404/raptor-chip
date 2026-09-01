@@ -7,7 +7,7 @@ module rapt_exu_pipe_alu_csr #(
     parameter unsigned ROB_SIZE = `RAPT_ROB_SIZE,
     parameter unsigned XLEN     = `RAPT_XLEN
 ) (
-  cmu_bcast_if.in cmu_bcast,
+    cmu_bcast_if.in cmu_bcast,
     exu_iq_iss_if.fu iss,
     csr_bcast_if.in csr_bcast,
     exu_csr_if.master exu_csr,
@@ -19,7 +19,11 @@ module rapt_exu_pipe_alu_csr #(
 
   logic [XLEN-1:0] alu_result;
   rapt_exu_alu gen_alu (
-      .s1(iss.op1), .s2(iss.op2), .op(iss.alu), .word(iss.word), .out_r(alu_result)
+      .s1(iss.op1),
+      .s2(iss.op2),
+      .op(iss.alu),
+      .word(iss.word),
+      .out_r(alu_result)
   );
 
   logic [XLEN-1:0] jump_target;

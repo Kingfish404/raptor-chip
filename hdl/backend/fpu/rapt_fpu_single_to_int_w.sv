@@ -80,21 +80,19 @@ module rapt_fpu_single_to_int_w #(
     if (!s1_zero_q && !s1_nan_q && !s1_inf_q) begin
       if (s1_exponent_q >= FracBitsSigned) begin
         shift_count_c = int'(s1_exponent_q) - FracBits;
-        if (s1_exponent_q <= 63)
-          magnitude_c = {11'b0, s1_significand_q} << shift_count_c;
+        if (s1_exponent_q <= 63) magnitude_c = {11'b0, s1_significand_q} << shift_count_c;
       end else begin
         shift_count_c = FracBits - int'(s1_exponent_q);
-        if (shift_count_c < 64)
-          magnitude_c = {11'b0, s1_significand_q} >> shift_count_c;
+        if (shift_count_c < 64) magnitude_c = {11'b0, s1_significand_q} >> shift_count_c;
         if (shift_count_c > 0 && shift_count_c <= FracBits + 1)
-          guard_c = s1_significand_q[shift_count_c - 1];
-        if (shift_count_c > FracBits + 1)
-          sticky_c = |s1_significand_q;
+          guard_c = s1_significand_q[shift_count_c-1];
+        if (shift_count_c > FracBits + 1) sticky_c = |s1_significand_q;
         else if (shift_count_c > 1)
-          for (sticky_index_c = 0; sticky_index_c < FracBits + 1;
-               sticky_index_c = sticky_index_c + 1)
-            if (sticky_index_c < shift_count_c - 1)
-              sticky_c = sticky_c | s1_significand_q[sticky_index_c];
+          for (
+              sticky_index_c = 0; sticky_index_c < FracBits + 1; sticky_index_c = sticky_index_c + 1
+          )
+          if (sticky_index_c < shift_count_c - 1)
+            sticky_c = sticky_c | s1_significand_q[sticky_index_c];
       end
     end
   end
@@ -131,15 +129,13 @@ module rapt_fpu_single_to_int_w #(
         ? (~rounded_magnitude_c + 64'd1) : rounded_magnitude_c;
     if (range_invalid_c) begin
       if (s2_int64_q) begin
-        if (s2_unsigned_q)
-          int_result_c = s2_sign_q && !s2_nan_q ? 64'b0 : {64{1'b1}};
+        if (s2_unsigned_q) int_result_c = s2_sign_q && !s2_nan_q ? 64'b0 : {64{1'b1}};
         else
           int_result_c = s2_nan_q ? 64'h7fff_ffff_ffff_ffff
               : (s2_sign_q ? 64'h8000_0000_0000_0000
                             : 64'h7fff_ffff_ffff_ffff);
       end else if (s2_unsigned_q) begin
-        int_result_c = s2_sign_q && !s2_nan_q
-            ? 64'b0 : 64'h0000_0000_ffff_ffff;
+        int_result_c = s2_sign_q && !s2_nan_q ? 64'b0 : 64'h0000_0000_ffff_ffff;
       end else begin
         int_result_c = s2_nan_q ? 64'h0000_0000_7fff_ffff
             : (s2_sign_q ? 64'h0000_0000_8000_0000

@@ -73,17 +73,17 @@ module rapt_l2 #(
     axi4_if.master axi_m
 );
 
-// The active L2 cache is only instantiated when explicitly enabled
-// (`RAPT_L2_EN`) AND the build does not target the third-party ysyxSoC
-// (`RAPT_SOC`). The ysyxSoC `sdram_axi` / xbar slaves cannot service the
-// L2's multi-beat burst line fills (the same incompatibility that forces
-// the legacy single-outstanding bus FSM under `RAPT_SOC`); an allocate on a
-// store/load miss never completes, hanging the SQ/ROB on the first SDRAM
-// store (e.g. `sb` to 0xa000_000a during the MROM->SDRAM copy loop). For
-// SoC builds the L2 therefore collapses to a pure passthrough.
+  // The active L2 cache is only instantiated when explicitly enabled
+  // (`RAPT_L2_EN`) AND the build does not target the third-party ysyxSoC
+  // (`RAPT_SOC`). The ysyxSoC `sdram_axi` / xbar slaves cannot service the
+  // L2's multi-beat burst line fills (the same incompatibility that forces
+  // the legacy single-outstanding bus FSM under `RAPT_SOC`); an allocate on a
+  // store/load miss never completes, hanging the SQ/ROB on the first SDRAM
+  // store (e.g. `sb` to 0xa000_000a during the MROM->SDRAM copy loop). For
+  // SoC builds the L2 therefore collapses to a pure passthrough.
 `ifdef RAPT_L2_EN
 `ifndef RAPT_SOC
-`define RAPT_L2_ACTIVE
+  `define RAPT_L2_ACTIVE
 `endif
 `endif
 
@@ -163,9 +163,8 @@ module rapt_l2 #(
   // ROM/SRAM/flash single-beat through the LiteX fabric and reserve L2 line
   // fills for external main memory where Linux/app payloads execute.
   function automatic logic cacheable(input logic [XLEN-1:0] a);
-    return (0)
-        || (a >= 'h80000000 && a < 'h90000000)  // FPGA main RAM / PMEM window.
-        || (a >= 'ha0000000 && a < 'ha2000000); // legacy SDRAM window.
+    return (0) || (a >= 'h80000000 && a < 'h90000000)  // FPGA main RAM / PMEM window.
+    || (a >= 'ha0000000 && a < 'ha2000000);  // legacy SDRAM window.
   endfunction
 
   // =====================================================================
@@ -218,10 +217,10 @@ module rapt_l2 #(
   assign axi_s.rresp  = rs_rresp;
   assign axi_s.rid    = rs_rid;
 
-    logic r_hit_beat_fire;
-    logic [IndexBits-1:0] data_sram_raddr;
-    assign r_hit_beat_fire = (rs == R_HIT) && r_hit_q && (!rs_rvalid || axi_s.rready);
-    assign data_sram_raddr =
+  logic r_hit_beat_fire;
+  logic [IndexBits-1:0] data_sram_raddr;
+  assign r_hit_beat_fire = (rs == R_HIT) && r_hit_q && (!rs_rvalid || axi_s.rready);
+  assign data_sram_raddr =
       (rs == R_IDLE && axi_s.arvalid && axi_s.arready && cacheable(axi_s.araddr))
         ? axi_s.araddr[IndexMsb:IndexLsb]
       : (r_hit_beat_fire && (r_len != 8'd0) && (r_word == L2_LINE_LEN'(LineSize - 1)))
@@ -284,8 +283,8 @@ module rapt_l2 #(
   //     outstanding fills), today `r_*` is a single-entry placeholder.
   //   - L1D write-back path: dirty evicts enqueue here directly.
   localparam int WbufDepth = 2;
-  localparam int WbufPtrW = $clog2(WbufDepth);
-  localparam int WbufCntW = $clog2(WbufDepth + 1);
+  localparam int WbufPtrW  = $clog2(WbufDepth);
+  localparam int WbufCntW  = $clog2(WbufDepth + 1);
 
   typedef struct packed {
     logic              busy;   // slot in use (AW captured, not yet freed)
@@ -800,10 +799,10 @@ module rapt_l2 #(
 
 `endif  // RAPT_L2_ACTIVE
 
-// Scope the helper define to this module so it does not leak into other
-// translation-unit files in single-unit Verilator/Yosys compilation.
+  // Scope the helper define to this module so it does not leak into other
+  // translation-unit files in single-unit Verilator/Yosys compilation.
 `ifdef RAPT_L2_ACTIVE
-`undef RAPT_L2_ACTIVE
+  `undef RAPT_L2_ACTIVE
 `endif
 
 endmodule

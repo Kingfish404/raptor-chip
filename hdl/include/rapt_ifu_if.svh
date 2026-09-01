@@ -27,18 +27,23 @@ interface ifu_bpu_if #(
   logic            slot_b_taken;
 `endif
 
-  modport out(output pc, nextpc, pc_update,
 `ifdef RAPT_DUAL_ISSUE
-              output slot_b_query, slot_b_pc, slot_b_pred_valid,
-              input slot_b_taken,
+  modport out(
+      output pc, nextpc, pc_update,
+      output slot_b_query, slot_b_pc, slot_b_pred_valid,
+      input slot_b_taken,
+      input npc, taken
+  );
+  modport in(
+      input pc, nextpc, pc_update,
+      input slot_b_query, slot_b_pc, slot_b_pred_valid,
+      output slot_b_taken,
+      output npc, taken
+  );
+`else
+  modport out(output pc, nextpc, pc_update, input npc, taken);
+  modport in(input pc, nextpc, pc_update, output npc, taken);
 `endif
-              input npc, taken);
-  modport in(input pc, nextpc, pc_update,
-`ifdef RAPT_DUAL_ISSUE
-             input slot_b_query, slot_b_pc, slot_b_pred_valid,
-             output slot_b_taken,
-`endif
-             output npc, taken);
 endinterface
 
 // IDU -> BPU BTB training side-channel.
@@ -71,10 +76,8 @@ interface idu_bpu_if #(
   logic            push_en;
   logic [XLEN-1:0] push_addr;
 
-  modport out(output train_en, train_pc, train_target, train_type,
-              push_en, push_addr);
-  modport in (input  train_en, train_pc, train_target, train_type,
-              push_en, push_addr);
+  modport out(output train_en, train_pc, train_target, train_type, push_en, push_addr);
+  modport in(input train_en, train_pc, train_target, train_type, push_en, push_addr);
 endinterface
 
 interface ifu_l1i_if #(
@@ -104,16 +107,27 @@ interface ifu_l1i_if #(
   logic [XLEN-1:0] tval;
   logic valid;
 
-  modport master(output pc, invalid, prefetch_pc, prefetch_valid, input inst_n0,
 `ifdef RAPT_DUAL_ISSUE
-  input inst_n1, inst_n1_valid, inst_n2, inst_n2_valid,
+  modport master(
+      output pc, invalid, prefetch_pc, prefetch_valid,
+      input inst_n0, inst_n1, inst_n1_valid, inst_n2, inst_n2_valid,
+      input trap, cause, tval, valid
+  );
+  modport slave(
+      input pc, invalid, prefetch_pc, prefetch_valid,
+      output inst_n0, inst_n1, inst_n1_valid, inst_n2, inst_n2_valid,
+      output trap, cause, tval, valid
+  );
+`else
+  modport master(
+      output pc, invalid, prefetch_pc, prefetch_valid,
+      input inst_n0, trap, cause, tval, valid
+  );
+  modport slave(
+      input pc, invalid, prefetch_pc, prefetch_valid,
+      output inst_n0, trap, cause, tval, valid
+  );
 `endif
-    input trap, cause, tval, valid);
-  modport slave(input pc, invalid, prefetch_pc, prefetch_valid, output inst_n0,
-`ifdef RAPT_DUAL_ISSUE
-  output inst_n1, inst_n1_valid, inst_n2, inst_n2_valid,
-`endif
-    output trap, cause, tval, valid);
 endinterface
 
 interface ifu_idu_if #(
@@ -140,22 +154,31 @@ interface ifu_idu_if #(
   logic resteer;
   logic [XLEN-1:0] resteer_pc;
 
+`ifdef RAPT_DUAL_ISSUE
   modport master(
       output inst_a, pc_a, valid_a,
-`ifdef RAPT_DUAL_ISSUE
       output inst_b, pc_b, valid_b,
-`endif
       output pnpc, trap, cause, tval,
       input ready, resteer, resteer_pc
   );
   modport slave(
       input inst_a, pc_a, valid_a,
-`ifdef RAPT_DUAL_ISSUE
       input inst_b, pc_b, valid_b,
-`endif
       input pnpc, trap, cause, tval,
       output ready, resteer, resteer_pc
   );
+`else
+  modport master(
+      output inst_a, pc_a, valid_a,
+      output pnpc, trap, cause, tval,
+      input ready, resteer, resteer_pc
+  );
+  modport slave(
+      input inst_a, pc_a, valid_a,
+      input pnpc, trap, cause, tval,
+      output ready, resteer, resteer_pc
+  );
+`endif
 endinterface
 
 /* verilator lint_on UNUSEDSIGNAL */
