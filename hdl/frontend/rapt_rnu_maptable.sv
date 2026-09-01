@@ -18,6 +18,11 @@ module rapt_rnu_maptable #(
     output [PLEN-1:0] map_snapshot[RNUM],
     // Debug: full RAT snapshot (committed, unpacked array)
     output [PLEN-1:0] rat_snapshot[RNUM]
+`ifdef FORMAL
+    , input  logic [$clog2(RNUM)-1:0] formal_watch_addr,
+    output logic [PLEN-1:0] formal_map_watch,
+    output logic [PLEN-1:0] formal_rat_watch
+`endif
 );
   // ---- Committed Map (RAT) ----
   logic [PLEN-1:0] rat[RNUM];
@@ -133,4 +138,8 @@ module rapt_rnu_maptable #(
       assign rat_snapshot[gi] = rat[gi];
     end
   endgenerate
+`ifdef FORMAL
+  assign formal_map_watch = map[formal_watch_addr];
+  assign formal_rat_watch = rat[formal_watch_addr];
+`endif
 endmodule

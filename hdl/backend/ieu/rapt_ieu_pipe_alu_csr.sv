@@ -2,23 +2,23 @@
 `include "rapt_if.svh"
 
 // Integer ALU, CSR, system and trap execution pipe. Scalar floating-point
-// arithmetic is owned by rapt_exu_pipe_fpu.
-module rapt_exu_pipe_alu_csr #(
+// arithmetic is owned by rapt_feu.
+module rapt_ieu_pipe_alu_csr #(
     parameter unsigned ROB_SIZE = `RAPT_ROB_SIZE,
     parameter unsigned XLEN     = `RAPT_XLEN
 ) (
     cmu_bcast_if.in cmu_bcast,
-    exu_iq_iss_if.fu iss,
+    iq_iss_if.fu iss,
     csr_bcast_if.in csr_bcast,
     exu_csr_if.master exu_csr,
-    exu_wb_if.out wb_alu_csr,
+    cdb_if.out wb_alu_csr,
     input rapt_pkg::uop_payload_t uop_pl[ROB_SIZE]
 );
   rapt_pkg::uop_payload_t uop_payload;
   assign uop_payload = uop_pl[iss.dest];
 
   logic [XLEN-1:0] alu_result;
-  rapt_exu_alu gen_alu (
+  rapt_ieu_alu gen_alu (
       .s1(iss.op1),
       .s2(iss.op2),
       .op(iss.alu),
@@ -41,8 +41,9 @@ module rapt_exu_pipe_alu_csr #(
   logic is_instret_read;
   logic [XLEN-1:0] csr_rdata_corrected;
   assign instret_correction = iss.dest - cmu_bcast.rob_head + 1'b1;
-  assign is_instret_read = iss.imm[11:0] == `RAPT_CSR_INSTRET_
-    || iss.imm[11:0] == `RAPT_CSR_MINSTRET;
+  assign is_instret_read = iss.imm[11:0] ==
+      `RAPT_CSR_INSTRET_
+      || iss.imm[11:0] == `RAPT_CSR_MINSTRET;
   assign csr_rdata_corrected = is_instret_read
     ? exu_csr.rdata + XLEN'(instret_correction) : exu_csr.rdata;
 
@@ -65,9 +66,11 @@ module rapt_exu_pipe_alu_csr #(
   assign wb_alu_csr.trap = iss.trap;
   assign wb_alu_csr.tval = iss.tval;
   assign wb_alu_csr.cause = iss.cause;
-  assign wb_alu_csr.difftest_skip = |uop_payload.csr_csw && (iss.imm[11:0] == `RAPT_CSR_TIME___
-    || iss.imm[11:0] == `RAPT_CSR_TIMEH__ || iss.imm[11:0] == `RAPT_CSR_CYCLE__
-    || iss.imm[11:0] == `RAPT_CSR_MCYCLE_ || iss.imm[11:0] == `RAPT_CSR_MCYCLEH);
+  assign wb_alu_csr.difftest_skip = |uop_payload.csr_csw && (iss.imm[11:0] ==
+      `RAPT_CSR_TIME___
+      || iss.imm[11:0] == `RAPT_CSR_TIMEH__ || iss.imm[11:0] ==
+      `RAPT_CSR_CYCLE__
+      || iss.imm[11:0] == `RAPT_CSR_MCYCLE_ || iss.imm[11:0] == `RAPT_CSR_MCYCLEH);
   assign wb_alu_csr.valid = iss.valid;
   assign wb_alu_csr.btaken = 1'b0;
   assign wb_alu_csr.wen = 1'b0;

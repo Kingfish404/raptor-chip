@@ -6,7 +6,10 @@
 `include "rapt_idu_if.svh"
 `include "rapt_rnu_if.svh"
 `include "rapt_rou_if.svh"
-`include "rapt_exu_if.svh"
+`include "rapt_dpu_if.svh"
+`include "rapt_cdb_if.svh"
+`include "rapt_eu_if.svh"
+`include "rapt_lsu_if.svh"
 
 /* verilator lint_off UNUSEDSIGNAL */
 /* verilator lint_off UNUSEDPARAM */

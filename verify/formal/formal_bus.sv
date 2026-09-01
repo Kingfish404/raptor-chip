@@ -174,19 +174,82 @@ module formal_bus #(
     if (f_past_valid) assume(!reset);
   end
 
-  // Assume legal cache-side input values: in RV32, no 8-byte transfers
+  // Model the cache-side request contract.  Transfer masks are the canonical
+  // unshifted masks produced by L1D; AW and W are issued as one local request.
   always_comb begin
-    if (XLEN == 32) begin
-      assume (l1d_rstrb != 8'hff);
-      assume (l1d_wstrb != 8'hff);
+    if (l1d_arvalid) begin
+      if (XLEN == 32) assume(l1d_rstrb inside {8'h01, 8'h03, 8'h0f});
+      else            assume(l1d_rstrb inside {8'h01, 8'h03, 8'h0f, 8'hff});
+    end
+    if (l1d_awvalid || l1d_wvalid) begin
+      assume(l1d_awvalid && l1d_wvalid);
+      if (XLEN == 32) assume(l1d_wstrb inside {8'h01, 8'h03, 8'h07, 8'h0f});
+      else assume(l1d_wstrb inside {8'h01, 8'h03, 8'h07, 8'h0f, 8'h7f, 8'hff});
     end
   end
 
-  // Assert only after reset has been applied (after first clock edge)
+  logic ar_stalled_q, aw_stalled_q, w_stalled_q;
+  logic [XLEN-1:0] araddr_q, awaddr_q, wdata_q;
+  logic [2:0] arsize_q, awsize_q;
+  logic [3:0] arid_q, awid_q;
+  logic [XLEN/8-1:0] wstrb_q;
+  logic [3:0] f_read_outstanding;
+  wire f_ar_fire = io_master_arvalid && io_master_arready;
+  wire f_r_fire = io_master_rvalid && io_master_rready && io_master_rlast;
+  always_ff @(posedge clock) begin
+    if (reset) begin
+      f_read_outstanding <= '0;
+      ar_stalled_q <= 1'b0;
+      aw_stalled_q <= 1'b0;
+      w_stalled_q <= 1'b0;
+      araddr_q <= '0; arsize_q <= '0; arid_q <= '0;
+      awaddr_q <= '0; awsize_q <= '0; awid_q <= '0;
+      wdata_q <= '0; wstrb_q <= '0;
+    end else begin
+      unique case ({f_ar_fire, f_r_fire})
+        2'b10: f_read_outstanding <= f_read_outstanding + 1'b1;
+        2'b01: f_read_outstanding <= f_read_outstanding - 1'b1;
+        default: f_read_outstanding <= f_read_outstanding;
+      endcase
+      ar_stalled_q <= io_master_arvalid && !io_master_arready;
+      aw_stalled_q <= io_master_awvalid && !io_master_awready;
+      w_stalled_q  <= io_master_wvalid && !io_master_wready;
+      araddr_q <= io_master_araddr; arsize_q <= io_master_arsize; arid_q <= io_master_arid;
+      awaddr_q <= io_master_awaddr; awsize_q <= io_master_awsize; awid_q <= io_master_awid;
+      wdata_q <= io_master_wdata; wstrb_q <= io_master_wstrb;
+    end
+  end
+
+  // AXI slaves cannot complete a read that the master has not issued.  This
+  // prevents an unconstrained spurious R beat from underflowing the DUT's
+  // outstanding counter and creating a false AR-stability counterexample.
+  always_comb begin
+    assume(!io_master_rlast || io_master_rvalid);
+    if (f_r_fire) assume((f_read_outstanding != '0) || f_ar_fire);
+  end
+
+  // Legal RV32 transfer sizes and AXI payload stability under backpressure.
   always @(posedge clock) begin
-    if (f_past_valid && XLEN == 32) begin
-      arsize_assert : assert (io_master_arsize != 3'b011);
-      awsize_assert : assert (io_master_awsize != 3'b011);
+    if (f_past_valid && !reset) begin
+      if (XLEN == 32 && io_master_arvalid)
+        arsize_assert : assert (io_master_arsize <= 3'b010);
+      if (XLEN == 32 && io_master_awvalid)
+        awsize_assert : assert (io_master_awsize <= 3'b010);
+      if (ar_stalled_q) begin
+        arhold_valid: assert(io_master_arvalid);
+        arhold_data: assert({io_master_araddr, io_master_arsize, io_master_arid}
+                            == {araddr_q, arsize_q, arid_q});
+      end
+      if (aw_stalled_q) begin
+        awhold_valid: assert(io_master_awvalid);
+        awhold_data: assert({io_master_awaddr, io_master_awsize, io_master_awid}
+                            == {awaddr_q, awsize_q, awid_q});
+      end
+      if (w_stalled_q) begin
+        whold_valid: assert(io_master_wvalid);
+        whold_data: assert({io_master_wdata, io_master_wstrb} == {wdata_q, wstrb_q});
+      end
+      if (io_master_wvalid) wlast_assert: assert(io_master_wlast);
     end
   end
 `endif  // FORMAL

@@ -9,7 +9,7 @@ Raptor is an out-of-order, super-scalar RISC-V processor core with register rena
 ```text
  IF0     IF1      FQ       ID      RN       DI       IS/EX    WB      CM
 +-----++------++-------++------++-------++--------++-------++-----++------+
-|L1I  ||IFU   ||FQU    ||IDU   ||RNU    ||ROU     ||EXU    ||ROB  ||CMU   |
+|L1I  ||IFU   ||FQU    ||IDU   ||RNU    ||ROU     ||DPU/EUs||ROB  ||CMU   |
 |SRAM ||FSM   ||packet ||decode||RNQ->  ||UOQ->    ||IQ->FU ||->WB  ||bcast |
 |read ||latch ||queue  ||x2    ||rename ||dispatch||issue  ||state||retire|
 |(spec)|      |x2     | latch | pipe x2| +ROB x2 |        |      | x2   |
@@ -25,7 +25,7 @@ Raptor is an out-of-order, super-scalar RISC-V processor core with register rena
 | **ID**    | IDU    | `uop_t`, operands registered               |
 | **RN**    | RNU    | `rn_pipe_{pr1,pr2,prd,prs,uop}` registered |
 | **DI**    | ROU    | UOQ consumed, ROB entry allocated          |
-| **IS/EX** | EXU    | IQ/IOQ entries updated                     |
+| **IS/EX** | IEU/FEU/LSU | IQ/IOQ entries updated                |
 | **WB**    | ROB    | ROB state -> `ROB_WB`                      |
 | **CM**    | CMU    | Architectural state committed              |
 
@@ -110,8 +110,8 @@ Pure rename: maps arch -> physical registers. Dual-rename with RAW dependency ha
 
 Separate 32 x 64-bit architectural floating-point register bank. The fixed
 64-bit width supports RV32 and RV64, with single-precision values NaN-boxed in
-the same storage used by double precision. FP arithmetic writes through the FPU
-path and FP loads write through the IOQ path, with local bypassing for recent
+the same storage used by double precision. FP arithmetic writes through the FEU
+path and FP loads write through the LSU path, with local bypassing for recent
 writes. FP dependency tags are tracked through the ROB; this bank is not a
 second renamed physical register file.
 
@@ -121,28 +121,37 @@ Dispatch queue + reorder buffer + commit logic.
 
 - **UOQ**: Circular, `IIQ_SIZE` entries (8). Dual enqueue/dequeue with `uoq_is_pair` tracking.
 - **ROB**: `rob_entry_t[]`, `ROB_SIZE` entries (64). States: `ROB_EX`->`ROB_WB`->`ROB_CM`. Dual dispatch inserts 2 entries at tail/tail+1.
-- **Operand bypass**: UOQ pre-read > IOQ broadcast > EXU broadcast. Broadcast forwarding continues during UOQ residence.
+- **Operand bypass**: UOQ pre-read > LSU/IOQ broadcast > CDB broadcast. Broadcast forwarding continues during UOQ residence.
 - **Dual commit**: slot 0 commits; slot 1 joins if slot 0 doesn't flush/store, neither has `difftest_skip`, and slot 1 is ready. BPU trains on slot 1's branch info during dual commit.
 - **Flush triggers**: fence\_i, branch mispredict, trap, system op, atomic (from either slot).
 - **Async traps**: CLINT software/timer interrupts plus PLIC M/S external interrupts, gated by CSR enables and delegation state.
 
-#### EXU (`rapt_exu.sv`)
+#### DPU (`rapt_dpu.sv`)
 
-Thin dispatch router with five scheduler classes and six execution paths. Five
-top-level unified CDB interfaces (`exu_wb_if`) remain because the scalar FPU
-shares CDB0 with ALU-CSR; an FPU completion has priority on that port.
+Stateless dispatch router. It classifies each uop with priority memory >
+MUL/DIV > FP > branch > ALU-class and steers it to the owning queue through
+`dpu_iq_if` or `dpu_ioq_if`. FP loads/stores stay in the LSU IOQ; other scalar
+FP operations enter the FEU FPQ. CSR/system/trap entries are marked
+**ALU-port-blocked**, so only the IEU ALU-CSR pipe can issue them. Queue free
+slots return through the same interfaces and form `rou_exu.ready/ready_b`.
 
-- **Dispatch router**: classifies each uop (priority: memory > MUL/DIV > FP > branch > ALU-class) and steers it to the owning queue. FP loads/stores stay in the IOQ; other scalar-FP operations enter the FPQ. CSR/system/trap entries are flagged **ALU-port-blocked** at dispatch, so they only ever issue to the ALU-CSR pipe (the only pipe with CSR/trap semantics). Dual dispatch into the same queue uses its first + second free slots.
-- **Generic IQ** (`rapt_exu_iq.sv`): parameterized issue queue -- ALQ (8, dual issue ports via `HAS_ISS_B`) shared by the ALU-CSR and ALU pipes, and BRQ (4, single port). Data-capture scheduler: operands are woken from all 4 value-producing CDB ports plus the **fast load-use** tag path (early tag wakeup, confirmed or re-busied by the MEM broadcast one cycle later, with issue-time data bypass). Age-matrix oldest-first one-hot select; the ALU port picks the oldest ready non-blocked entry distinct from the ALU-CSR port pick. Winning entries issue and free in the same cycle. Issue payloads are exposed via `exu_iq_iss_if`.
-- **ALU-CSR pipe** (`rapt_exu_pipe_alu_csr.sv`): full ALU + CSR read/write staging + system/trap redirect (`mtvec`/`mepc`/`sepc`), instret correction. Combinational; drives CDB port [0].
-- **ALU pipe** (`rapt_exu_pipe_alu.sv`): simple ALU + JAL/JALR link write. Drives CDB port [1].
-- **Branch pipe** (`rapt_exu_pipe_branch.sv`): compare-only conditional-branch resolution (single taken bit instead of a full ALU); never writes rd, so its CDB port carries no result/prd (no PRF write port, no bypass entry). Drives CDB port [2].
-- **MULDIV pipe** (`rapt_exu_muldiv.sv`): 4-entry private IQ + `rapt_exu_mul` FU (pipelined fast-multiply with tag-based completion + iterative restoring divider). Wakes operands from the slow CDB only (no fast load-use path). Drives CDB port [4].
-- **FPQ / FPU pipe** (`rapt_exu_pipe_fpu.sv`): 4-entry scalar-FP issue queue feeding F/D arithmetic, FMA, divide/square-root, conversion, comparison/classification, and move operations. It reads/writes the separate architectural FPR bank, updates accrued FP exception flags, and shares CDB port [0] with ALU-CSR. FP loads/stores use the IOQ and FPR interface instead of the FPQ.
-- **IOQ** (`rapt_exu_ioq.sv`): `IOQ_SIZE` entries (8), circular FIFO for ld/st/amo -- with **out-of-order load issue to L1D**. A younger ready load can drive L1D ahead of an older pending store/load when safe: (a) per-entry completion state (`ioq_complete`/`ioq_rdata`/`ioq_load_trap`/`ioq_load_cause`/`ioq_load_skip`); (b) oldest-ready priority encoder over `ioq_load_issue_vec`; (c) older-store blocker mask holds a load if any older IOQ store has unresolved base reg (`pr1!=0`), pending MMU translation, or word-address conflict; (d) `oo_pending` FSM locks `active_idx` across multi-cycle L1D misses so the response latches into the originating entry; (e) commit mux at `ioq_head` consumes either the live L1D response (when `active_idx==head`) or pre-latched `ioq_rdata[head]`; (f) atomics (LR/SC/AMO) and uncacheable MMIO stay gated to ROB head for memory ordering. Single outstanding L1D request. Drives CDB port [3] (the MEM broadcast).
-- **Atomics**: LR/SC with reservation register, full AMO set.
-- **Store MMU**: address translation via `exu_l1d_if`.
-- **ALU** (`rapt_exu_alu.sv`): combinational; 6-bit opcode, 64 operations including dedicated ALU ops for RV64 Zba `.UW` variants -- `ADD_UW`/`SLLI_UW`/`SH[1-3]ADD` zero-extend rs1[31:0] and produce a full 64-bit result, bypassing the W-variant output sign-extension.
+#### IEU (`ieu/rapt_ieu.sv`)
+
+- **Generic IQ** (`rapt_iq.sv`): shared parameterized data-capture scheduler. IEU instantiates the ALQ (8 entries, two issue ports) and BRQ (4 entries); FEU instantiates FPQ separately. Operands wake from all four value-producing CDB ports plus the **fast load-use** tag path. The age matrix selects oldest-first, with a second ALQ winner constrained by port eligibility.
+- **ALU-CSR pipe** (`ieu/rapt_ieu_pipe_alu_csr.sv`): full ALU + CSR/system/trap redirect semantics; produces the raw CDB0 candidate.
+- **ALU pipe** (`ieu/rapt_ieu_pipe_alu.sv`): simple ALU + JAL/JALR link write; drives CDB1.
+- **Branch pipe** (`ieu/rapt_ieu_pipe_branch.sv`): conditional-branch resolution; drives CDB2 and never writes PRF data.
+- **MULDIV pipe** (`ieu/rapt_ieu_muldiv.sv`): private four-entry MDQ plus `rapt_ieu_mul`; pipelined multiply and iterative divide complete through CDB4.
+- **ALU** (`ieu/rapt_ieu_alu.sv`): combinational 6-bit opcode datapath, including the RV64 Zba `.UW` operations.
+
+#### FEU (`feu/rapt_feu.sv`)
+
+Owns the four-entry in-order FPQ and scalar F/D arithmetic, FMA,
+divide/square-root, conversions, comparison/classification, sign injection and
+move operations under `feu/fpu/`. It reads/writes the architectural FPR bank
+and produces the FPU candidate for CDB0. `rapt_cdb_arb.sv` preserves the
+original arbitration: an FPU completion wins over the IEU ALU-CSR candidate,
+and the losing issue source is backpressured. FP loads/stores remain in LSU.
 
 #### CMU (`rapt_cmu.sv`)
 
@@ -158,11 +167,38 @@ Broadcast unit. Outputs: `rpc`, `cpc`, branch resolution, `flush_pipe`, `fence_i
 
 ### Memory Subsystem
 
-#### LSU (`rapt_lsu.sv`)
+#### LSU (`lsu/rapt_lsu.sv`)
 
+- **IOQ / AGU** (`lsu/rapt_lsu_ioq.sv`): `IOQ_SIZE` entries (default 8) for loads, stores and atomics. A younger ready load may issue ahead of older work only after older stores have resolved and are known non-conflicting. `oo_pending` retains the selected entry across a multicycle L1D request; atomics and uncacheable/MMIO accesses remain ordered. The IOQ drives CDB3 and the early `load_fast_if` wakeup path to IEU/FEU.
 - **Unified SQ**: `SQ_SIZE` entries (default 16). One ring stores each store from execute/writeback through commit and drain. `[head,cmt)` entries are committed and survive flush; `[cmt,tail)` entries are speculative and are discarded on flush.
-- Store FSM: 4-state (`LS_S_V`/`LS_S_R`/`LS_S_HI_V`/`LS_S_HI_R`) to handle aligned and split misaligned drains.
+- Store FSM: six states (`LS_S_V`/`LS_S_R`, `LS_S_HI_V`/`LS_S_HI_R`,
+  `LS_S_X_V`/`LS_S_X_R`) handle aligned drains, split misaligned drains, and
+  the third RV32D FSD beat.
 - Store-to-load forwarding: single SQ CAM by virtual word address, youngest-match-wins for full-width stores; partial or conflicting stores conservatively block/retry.
+
+#### Backend optimization handoff
+
+The EXU split is intentionally structural. The following optimization items
+remain separate microarchitecture projects, now rooted at their owning module:
+
+- **P0-1 — earlier speculative load wakeup**: move the `load_fast_if` pulse in
+  [`lsu/rapt_lsu_ioq.sv`](../hdl/backend/lsu/rapt_lsu_ioq.sv) toward the L1D
+  tag-compare stage while retaining `rebusy` cancellation in
+  [`rapt_iq.sv`](../hdl/backend/rapt_iq.sv). The current refactor preserves the
+  existing data-return-cycle wakeup behavior.
+- **P0-2 — precise memory disambiguation / store sets**: replace the
+  conservative unknown-address portion of `ioq_older_store_blk` in
+  [`lsu/rapt_lsu_ioq.sv`](../hdl/backend/lsu/rapt_lsu_ioq.sv) with violation
+  detection, replay, and eventually a load-PC-to-store-set predictor. IOQ and
+  SQ now share the LSU hierarchy, but this refactor does not relax ordering.
+- **P1-2 — multiple outstanding L1D misses**: extract the single-miss state in
+  [`memory/rapt_l1d.sv`](../hdl/memory/rapt_l1d.sv) into a small MSHR file and
+  return completions to the per-entry IOQ completion storage. The current L1D
+  remains single-outstanding apart from its hit-under-miss B channel.
+- **P1-3 — scalable issue selection**: replace the data-capture age matrix in
+  [`rapt_iq.sv`](../hdl/backend/rapt_iq.sv) with position-based oldest-first
+  selection and PRF read-after-select. ALQ, BRQ, and FPQ deliberately retain
+  their existing age and bypass semantics in this structural change.
 
 #### L1D (`rapt_l1d.sv`)
 
@@ -212,17 +248,20 @@ Cluster-level Platform-Level Interrupt Controller. Default `NDEV=31` sources and
 | `ifu_idu_if`     | IFU<->FQU / FQU<->IDU   | inst_a/b + PC_a/b + pnpc; early resteer returns via FQU   |
 | `idu_rnu_if`     | IDU->RNU                | uop_a/b + operands + arch reg IDs                         |
 | `rnu_rou_if`     | RNU->ROU                | uop_a/b + physical reg mappings                           |
-| `rou_exu_if`     | ROU->EXU                | uop/uop_b + operands + ROB dest (dual dispatch)           |
+| `rou_exu_if`     | ROU->DPU/EUs            | uop/uop_b + operands + ROB dest (dual dispatch)           |
 | `rou_lsu_if`     | ROU->LSU                | Store commit (addr/data/alu)                              |
 | `rou_csr_if`     | ROU->CSR                | CSR write + trap/system on commit                         |
 | `rou_cmu_if`     | ROU->CMU                | Commit info slot A/B (PC, branch, fence, flush)           |
-| `exu_wb_if` (x5) | pipes->ROU/PRF/LSU/IQs  | Unified CDB writeback: ALU-CSR or FPU / ALU / Branch / MEM / MULDIV |
-| `exu_iq_iss_if`  | IQ->pipe (EXU internal) | Oldest-ready entry payload; the ALQ exposes ALU-CSR and ALU issue ports |
+| `dpu_iq_if`      | DPU<->IEU/FEU           | Queue allocation and free-slot backpressure               |
+| `dpu_ioq_if`     | DPU<->LSU               | IOQ allocation and paired-slot backpressure               |
+| `cdb_if` (x5)    | EUs->ROU/PRF/LSU/IQs    | Unified writeback: ALU-CSR or FPU / ALU / Branch / MEM / MULDIV |
+| `load_fast_if`   | LSU->IEU/FEU            | Early load tag wakeup and rebusy confirmation             |
+| `iq_iss_if`      | IQ->pipe                | Oldest-ready issue payload                                 |
 | `exu_prf_if`     | ROU->PRF                | Operand read (4 ports: 2 per slot)                        |
-| `fpr_if`         | FPU/IOQ<->FPR           | FP register reads and arithmetic/load writeback          |
-| `exu_lsu_if`     | EXU->LSU                | Load request (addr/alu/atomic)                            |
-| `exu_csr_if`     | EXU->CSR                | CSR read port                                             |
-| `exu_l1d_if`     | EXU->L1D                | Store MMU + SC reservation check                          |
+| `fpr_if`         | FEU/LSU<->FPR           | FP register reads and arithmetic/load writeback          |
+| `lsu_pipe_if`    | LSU internal            | IOQ/AGU to SQ load request and response                   |
+| `exu_csr_if`     | IEU->CSR                | CSR read port                                             |
+| `lsu_l1d_mmu_if` | LSU->L1D                | Store MMU + SC reservation check                          |
 | `cmu_bcast_if`   | CMU->all                | Retire broadcast (flush, fence, branch, call/ret)         |
 | `csr_bcast_if`   | CSR->all                | Priv, SATP, MMU enable, tvec                              |
 | `lsu_l1d_if`     | LSU->L1D                | Load/store data path                                      |

@@ -894,7 +894,8 @@ sigtest-clean: ## Clean sigtest artifacts
 # ============================================================================
 FORMAL_DIR := $(VERIFY_HOME)/formal
 
-.PHONY: formal formal-setup formal-bus formal-exu-mul \
+.PHONY: formal formal-setup formal-bus formal-ieu-alu formal-ieu-mul \
+	formal-pmp formal-plru formal-rnu-maptable formal-clint formal-plic formal-dtm formal-divsqrt \
 	formal-rvfi formal-rvfi-gen formal-rvfi-check formal-rvfi-clean formal-clean
 
 formal-setup: ## Install oss-cad-suite (yosys, sby, solvers)
@@ -903,10 +904,35 @@ formal-setup: ## Install oss-cad-suite (yosys, sby, solvers)
 formal-bus: ## Formal: verify AXI bus properties
 	$(MAKE) -C $(FORMAL_DIR) formal_bus
 
-formal-exu-mul: ## Formal: verify EXU multiplier
-	$(MAKE) -C $(FORMAL_DIR) formal_exu_mul
+formal-ieu-mul: ## Formal: verify IEU multiplier
+	$(MAKE) -C $(FORMAL_DIR) formal_ieu_mul
 
-formal: formal-bus formal-exu-mul ## Run all standalone formal checks
+formal-ieu-alu: ## Formal: verify RV32 IEU ALU and bit-manipulation operations
+	$(MAKE) -C $(FORMAL_DIR) formal_ieu_alu
+
+formal-pmp: ## Formal: verify RV32/RV64 PMP matching and permissions
+	$(MAKE) -C $(FORMAL_DIR) formal_pmp
+
+formal-plru: ## Formal: verify 2/4/8-way PLRU replacement
+	$(MAKE) -C $(FORMAL_DIR) formal_plru
+
+formal-rnu-maptable: ## Formal: verify rename MAP/RAT recovery and WAW priority
+	$(MAKE) -C $(FORMAL_DIR) formal_rnu_maptable
+
+formal-clint: ## Formal: verify CLINT timer and software-interrupt semantics
+	$(MAKE) -C $(FORMAL_DIR) formal_clint
+
+formal-plic: ## Formal: verify PLIC arbitration and gateway lifecycle
+	$(MAKE) -C $(FORMAL_DIR) formal_plic
+
+formal-dtm: ## Formal: verify the single-clock JTAG TAP and DMI transport
+	$(MAKE) -C $(FORMAL_DIR) formal_dtm
+
+formal-divsqrt: ## Formal: verify FPU divide/square-root control contract
+	$(MAKE) -C $(FORMAL_DIR) formal_divsqrt
+
+formal: formal-ieu-alu formal-ieu-mul formal-pmp formal-plru \
+	formal-rnu-maptable formal-clint formal-plic formal-dtm formal-bus formal-divsqrt ## Run all standalone formal checks
 
 formal-rvfi-gen: ## Formal: generate riscv-formal checks (auto-clones repo)
 	$(MAKE) -C $(FORMAL_DIR) formal_rvfi_gen
@@ -999,8 +1025,8 @@ UVM_IQ_SOURCES := \
 	"$(RAPTOR_HOME)/hdl/rapt_pkg.sv" \
 	"$(UVM_DIR)/iq/rapt_iq_uvm_if.sv" \
 	"$(UVM_DIR)/iq/rapt_iq_uvm_pkg.sv" \
-	"$(RAPTOR_HOME)/hdl/backend/rapt_exu_iq.sv" \
-	"$(UVM_DIR)/iq/tb_rapt_exu_iq_uvm.sv"
+	"$(RAPTOR_HOME)/hdl/backend/rapt_iq.sv" \
+	"$(UVM_DIR)/iq/tb_rapt_iq_uvm.sv"
 
 UVM_CSR_SOURCES := \
 	"$(RAPTOR_HOME)/hdl/rapt_pkg.sv" \
@@ -1107,12 +1133,12 @@ XSIM_CSR_SOURCES := \
 XSIM_IOQ_SOURCES := \
 	"$(RAPTOR_HOME)/hdl/rapt_pkg.sv" \
 	"$(RAPTOR_HOME)/hdl/memory/rapt_pmp.sv" \
-	"$(RAPTOR_HOME)/hdl/backend/rapt_exu_ioq.sv"
+	"$(RAPTOR_HOME)/hdl/backend/lsu/rapt_lsu_ioq.sv"
 
 XSIM_LSU_SOURCES := \
 	"$(RAPTOR_HOME)/hdl/rapt_pkg.sv" \
 	"$(RAPTOR_HOME)/hdl/memory/rapt_pmp.sv" \
-	"$(RAPTOR_HOME)/hdl/backend/rapt_lsu.sv"
+	"$(RAPTOR_HOME)/hdl/backend/lsu/rapt_lsu_sq.sv"
 
 XSIM_ROU_SOURCES := \
 	"$(RAPTOR_HOME)/hdl/rapt_pkg.sv" \
@@ -1121,11 +1147,11 @@ XSIM_ROU_SOURCES := \
 
 XSIM_MULDIV_SOURCES := \
 	"$(RAPTOR_HOME)/hdl/rapt_pkg.sv" \
-	"$(RAPTOR_HOME)/hdl/backend/rapt_exu_mul.sv" \
-	"$(RAPTOR_HOME)/hdl/backend/rapt_exu_muldiv.sv"
+	"$(RAPTOR_HOME)/hdl/backend/ieu/rapt_ieu_mul.sv" \
+	"$(RAPTOR_HOME)/hdl/backend/ieu/rapt_ieu_muldiv.sv"
 
 XSIM_ALU_SOURCES := \
-	"$(RAPTOR_HOME)/hdl/backend/rapt_exu_alu.sv"
+	"$(RAPTOR_HOME)/hdl/backend/ieu/rapt_ieu_alu.sv"
 
 XSIM_TARGETS := \
 	xsim-l2 \

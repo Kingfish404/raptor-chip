@@ -5,7 +5,7 @@ basic: default
 [options]
 bmc:
 mode bmc
-depth 8
+depth 12
 
 [engines]
 smtbmc

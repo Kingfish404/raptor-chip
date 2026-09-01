@@ -10,7 +10,7 @@
 ROOT     := ../../../..
 HDL_INC  := $(ROOT)/hdl/include
 CONFIG   := $(ROOT)/hdl/configs/small
-DUT      := $(ROOT)/hdl/backend/fpu/rapt_fpu_fma.sv
+DUT      := $(ROOT)/hdl/backend/feu/fpu/rapt_fpu_fma.sv
 
 VERILATOR ?= verilator
 N ?= 200000

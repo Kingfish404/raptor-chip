@@ -1,6 +1,6 @@
 `include "rapt.svh"
 
-module rapt_exu_alu #(
+module rapt_ieu_alu #(
     parameter int XLEN = `RAPT_XLEN
 ) (
     input        [XLEN-1:0] s1,

@@ -9,7 +9,7 @@ module tb_alu_zbb_strlen;
   logic word;
   logic [XLEN-1:0] result;
 
-  rapt_exu_alu #(
+  rapt_ieu_alu #(
       .XLEN(XLEN)
   ) dut (
       .s1(source),

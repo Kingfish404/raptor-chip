@@ -24,12 +24,26 @@ module rapt_clint #(
     clint_bus_if.slave clint_bus,
 
     input reset
+`ifdef FORMAL
+    , output logic [63:0] formal_mtime,
+    output logic [63:0] formal_mtimecmp,
+    output logic formal_msip,
+    output logic [((MTIME_DIV <= 1) ? 1 : $clog2(MTIME_DIV))-1:0]
+        formal_mtime_div_cnt
+`endif
 );
   logic [63:0] mtime;
   logic [63:0] mtimecmp;
   logic        msip_reg;
   localparam int MTIMEdivW = (MTIME_DIV <= 1) ? 1 : $clog2(MTIME_DIV);
   logic [MTIMEdivW-1:0] mtime_div_cnt;
+
+`ifdef FORMAL
+  assign formal_mtime = mtime;
+  assign formal_mtimecmp = mtimecmp;
+  assign formal_msip = msip_reg;
+  assign formal_mtime_div_cnt = mtime_div_cnt;
+`endif
 
   // --- Interrupt generation (level-triggered) ---
   assign clint_bus.timer_int = (mtime >= mtimecmp);

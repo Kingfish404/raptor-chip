@@ -40,6 +40,15 @@ module rapt_dtm #(
     output logic [31:0] dmi_wdata,
     input  logic [31:0] dmi_rdata,
     input  logic [ 1:0] dmi_resp
+`ifdef FORMAL
+    , output logic [3:0] formal_state,
+    output logic [4:0] formal_ir_shift,
+    output logic [4:0] formal_ir,
+    output logic [40:0] formal_dr,
+    output logic [6:0] formal_dmi_addr_q,
+    output logic [31:0] formal_dmi_data_q,
+    output logic [1:0] formal_dmi_op_q
+`endif
 );
 
   // ---------------------------------------------------------------------
@@ -109,6 +118,16 @@ module rapt_dtm #(
   logic [         6:0] dmi_addr_q;
   logic [        31:0] dmi_data_q;
   logic [         1:0] dmi_op_q;
+
+`ifdef FORMAL
+  assign formal_state = state_q;
+  assign formal_ir_shift = ir_shift_q;
+  assign formal_ir = ir_q;
+  assign formal_dr = dr_q;
+  assign formal_dmi_addr_q = dmi_addr_q;
+  assign formal_dmi_data_q = dmi_data_q;
+  assign formal_dmi_op_q = dmi_op_q;
+`endif
 
   // Capture value selection
   logic [DrWidth-1:0] capture_val;

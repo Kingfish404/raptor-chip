@@ -20,7 +20,7 @@ module rapt_l1d #(
 
     csr_bcast_if.in csr_bcast,
     pmp_update_if.in pmp_update,
-    exu_l1d_if.slave exu_l1d,
+    lsu_l1d_mmu_if.slave exu_l1d,
     rou_cmu_if.in rou_cmu,
 
     input reset
@@ -754,7 +754,7 @@ module rapt_l1d #(
   // Store PMP (MMU path): exu_l1d.paddr is the translated physical address
   // (meaningful once stlb_hit or immediately after ptw_done).
   // NOTE: bare-mode stores bypass this interface; their PMP enforcement is
-  // handled at the IOQ (see rapt_exu_ioq.sv).
+  // handled at the IOQ (see backend/lsu/rapt_lsu_ioq.sv).
   // walu is the byte-strobe pattern; popcount-1 = size_m1.
   logic [3:0] store_size_m1;
   always_comb begin

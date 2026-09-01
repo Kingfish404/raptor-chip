@@ -28,16 +28,16 @@ module rapt_prf #(
     exu_prf_if.slave prf_rd,
 
     // Write source A: EXU ALU result
-    exu_wb_if.in exu_rou,
+    cdb_if.in exu_rou,
 
     // Write source C: EXU ALU slot-B (pure arithmetic)
-    exu_wb_if.in exu_rou_b,
+    cdb_if.in exu_rou_b,
 
     // Write source B: IOQ broadcast (LSU/CSR)
-    exu_wb_if.in exu_ioq_bcast,
+    cdb_if.in exu_ioq_bcast,
 
     // Write source D: MUL/DIV pipe
-    exu_wb_if.in exu_wb_mul,
+    cdb_if.in exu_wb_mul,
 
     // Commit / dealloc / flush
     rou_cmu_if.in   rou_cmu,

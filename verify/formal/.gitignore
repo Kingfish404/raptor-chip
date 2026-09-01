@@ -5,6 +5,8 @@
 !rvfi/
 !rvfi/**
 !formal_*.sv
+!*_formal_if.sv
+!rapt_soc_if.svh
 !*.sby
 !sby
 !yosys-rvfi-compat.sh

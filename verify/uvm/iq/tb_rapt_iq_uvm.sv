@@ -2,7 +2,7 @@
 `include "rapt.svh"
 `include "rapt_if.svh"
 
-module tb_rapt_exu_iq_uvm;
+module tb_rapt_iq_uvm;
   import uvm_pkg::*;
   import rapt_pkg::*;
   import rapt_iq_uvm_pkg::*;
@@ -14,16 +14,16 @@ module tb_rapt_exu_iq_uvm;
 
   cmu_bcast_if cmu_bcast();
   rou_exu_if rou_exu();
-  exu_disp_rs_if #(.RS_SIZE(8)) disp();
-  exu_wb_if exu_rou();
-  exu_wb_if exu_rou_b();
-  exu_wb_if exu_ioq_bcast();
-  exu_wb_if exu_wb_mul();
-  exu_load_fast_if load_fast();
-  exu_iq_iss_if iss();
-  exu_iq_iss_if iss_b();
+  dpu_iq_if #(.RS_SIZE(8)) disp();
+  cdb_if exu_rou();
+  cdb_if exu_rou_b();
+  cdb_if exu_ioq_bcast();
+  cdb_if exu_wb_mul();
+  load_fast_if load_fast();
+  iq_iss_if iss();
+  iq_iss_if iss_b();
 
-  rapt_exu_iq #(
+  rapt_iq #(
       .IQ_SIZE(8),
       .HAS_ISS_B(1'b1)
   ) dut (

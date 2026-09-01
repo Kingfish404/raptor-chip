@@ -1,0 +1,23 @@
+[tasks]
+basic bmc
+basic: default
+
+[options]
+bmc:
+mode bmc
+depth 3
+
+[engines]
+smtbmc
+
+[script]
+plugin -i slang
+read_slang --single-unit -DFORMAL formal_ieu_mul.sv rapt_ieu_mul.sv
+prep -top formal_ieu_mul
+
+[files]
+formal_ieu_mul.sv
+rapt_ieu_mul.sv ../../hdl/backend/ieu/rapt_ieu_mul.sv
+rapt.svh ../../hdl/include/rapt.svh
+rapt_config.svh ../../hdl/configs/default/rapt_config.svh
+rapt_sva.svh ../../hdl/include/rapt_sva.svh

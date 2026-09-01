@@ -4,8 +4,8 @@
 ROOT     := ../../../..
 HDL_INC  := $(ROOT)/hdl/include
 CONFIG   := $(ROOT)/hdl/configs/small
-DUTS     := $(ROOT)/hdl/backend/fpu/rapt_fpu_convert_widen.sv \
-            $(ROOT)/hdl/backend/fpu/rapt_fpu_convert_narrow.sv
+DUTS     := $(ROOT)/hdl/backend/feu/fpu/rapt_fpu_convert_widen.sv \
+            $(ROOT)/hdl/backend/feu/fpu/rapt_fpu_convert_narrow.sv
 N        ?= 200000
 
 VERILATOR ?= verilator

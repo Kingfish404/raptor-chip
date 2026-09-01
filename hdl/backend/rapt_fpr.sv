@@ -1,5 +1,5 @@
 `include "rapt.svh"
-`include "rapt_exu_if.svh"
+`include "rapt_eu_if.svh"
 
 // Architectural FPR storage for scalar F/D execution.
 // FPR width is fixed at 64 for both RV32 and RV64 so S values can be

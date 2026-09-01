@@ -1,22 +1,70 @@
 `include "rapt.svh"
 `include "rapt_if.svh"
 
-// Floating-point execution pipe. Floating-point loads/stores remain in the
-// IOQ; this pipe owns scalar arithmetic, conversions, flags and FPR writes.
-module rapt_exu_pipe_fpu #(
+// Floating-point execution unit. Floating-point loads/stores remain in the
+// LSU; this unit owns the FP issue queue, scalar arithmetic, conversions,
+// flags and FPR writes.
+module rapt_feu #(
+    parameter unsigned FPQ_SIZE = 4,
     parameter unsigned ROB_SIZE = `RAPT_ROB_SIZE,
+    parameter unsigned PLEN     = `RAPT_PHY_LEN,
+    parameter unsigned RLEN     = `RAPT_REG_LEN,
     parameter unsigned XLEN     = `RAPT_XLEN
 ) (
     input clock,
     input reset,
-    exu_iq_iss_if.fu iss,
     cmu_bcast_if.in cmu_bcast,
     csr_bcast_if.in csr_bcast,
+    rou_exu_if.monitor rou_exu,
+    dpu_iq_if.rs disp_fpq,
+    cdb_if.in wb_alu_csr,
+    cdb_if.in wb_alu,
+    cdb_if.in exu_ioq_bcast,
+    cdb_if.in exu_wb_mul,
+    load_fast_if.sink load_fast,
     fpr_if.alu fpr,
-    exu_wb_if.out wb_fpu,
+    cdb_if.out wb_fpu,
     output logic issue_enable,
     input rapt_pkg::uop_payload_t uop_pl[ROB_SIZE]
 );
+  iq_iss_if #(
+      .PLEN(PLEN),
+      .RLEN(RLEN),
+      .XLEN(XLEN)
+  ) iss ();
+  iq_iss_if #(
+      .PLEN(PLEN),
+      .RLEN(RLEN),
+      .XLEN(XLEN)
+  ) iss_unused ();
+  logic [$clog2(FPQ_SIZE):0] fpq_occ_unused;
+  logic pmu_fpq_full_unused;
+
+  rapt_iq #(
+      .IQ_SIZE       (FPQ_SIZE),
+      .IN_ORDER_ISSUE(1'b1),
+      .ROB_SIZE      (ROB_SIZE),
+      .PLEN          (PLEN),
+      .RLEN          (RLEN),
+      .XLEN          (XLEN)
+  ) u_fpq (
+      .clock        (clock),
+      .reset        (reset),
+      .cmu_bcast    (cmu_bcast),
+      .rou_exu      (rou_exu),
+      .disp         (disp_fpq),
+      .exu_rou      (wb_alu_csr),
+      .exu_rou_b    (wb_alu),
+      .exu_ioq_bcast(exu_ioq_bcast),
+      .exu_wb_mul   (exu_wb_mul),
+      .load_fast    (load_fast),
+      .issue_enable (issue_enable),
+      .iss          (iss),
+      .iss_b        (iss_unused),
+      .occ_o        (fpq_occ_unused),
+      .pmu_iq_full  (pmu_fpq_full_unused)
+  );
+
   rapt_pkg::uop_payload_t uop_payload;
   assign uop_payload = uop_pl[iss.dest];
 
@@ -212,8 +260,7 @@ module rapt_exu_pipe_fpu #(
     else if (fp_double_to_int_l) fp_launch_kind = FP_PENDING_DOUBLE_TO_INT_L;
   end
 
-  assign fp_launch = iss.valid && fp_long_op && !fp_trap
-            && !fp_pending_q && fp_selected_ready;
+  assign fp_launch = iss.valid && fp_long_op && !fp_trap && !fp_pending_q && fp_selected_ready;
   assign fp_divsqrt_launch = fp_launch && fp_divsqrt;
   assign fp_fma_launch = fp_launch && (fp_fma_s || fp_fma_d);
   assign fp_addsub_launch = fp_launch && (fp_addsub_s || fp_addsub_d);
@@ -319,8 +366,7 @@ module rapt_exu_pipe_fpu #(
     endcase
   end
 
-  assign fp_complete = fp_pending_q && fp_pending_result_valid
-            && !cmu_bcast.flush_pipe;
+  assign fp_complete  = fp_pending_q && fp_pending_result_valid && !cmu_bcast.flush_pipe;
   assign issue_enable = !fp_pending_q && (fp_release_q == 0);
 
   rapt_fpu_divsqrt #(
@@ -392,8 +438,8 @@ module rapt_exu_pipe_fpu #(
       .valid(fp_convert_widen_launch),
       .ready(fp_convert_widen_ready),
       .operand(fpr.alu_rdata_a),
-      .result (fp_convert_widen_result),
-      .flags  (fp_convert_widen_flags),
+      .result(fp_convert_widen_result),
+      .flags(fp_convert_widen_flags),
       .result_valid(fp_convert_widen_valid)
   );
   rapt_fpu_convert_narrow u_fpu_convert_narrow (
@@ -650,8 +696,7 @@ module rapt_exu_pipe_fpu #(
   assign wb_fpu.npc = fp_pending_q
         ? fp_pending_pc_q + (fp_pending_c_q ? 2 : 4)
         : iss.pc + (iss.c ? 2 : 4);
-  assign wb_fpu.mispredict = wb_fpu.npc
-        != (fp_pending_q ? fp_pending_pnpc_q : iss.pnpc);
+  assign wb_fpu.mispredict = wb_fpu.npc != (fp_pending_q ? fp_pending_pnpc_q : iss.pnpc);
   assign wb_fpu.prd = fp_pending_q ? fp_pending_prd_q : iss.prd;
   assign wb_fpu.rd = fp_pending_q ? fp_pending_rd_q : iss.rd;
   assign wb_fpu.pc = fp_pending_q ? fp_pending_pc_q : iss.pc;
@@ -669,8 +714,7 @@ module rapt_exu_pipe_fpu #(
         : (iss.trap ? iss.tval : fp_rm_invalid ? uop_payload.inst : '0);
   assign wb_fpu.cause = fp_pending_q ? '0
         : (iss.trap ? iss.cause : fp_rm_invalid ? `RAPT_CAUSE_ILLEGAL_INST : '0);
-  assign wb_fpu.valid = fp_pending_q ? fp_complete
-      : fp_launch ? 1'b0 : iss.valid;
+  assign wb_fpu.valid = fp_pending_q ? fp_complete : fp_launch ? 1'b0 : iss.valid;
   assign wb_fpu.btaken = 1'b0;
   assign wb_fpu.csr_wen = 1'b0;
   assign wb_fpu.csr_wdata = '0;

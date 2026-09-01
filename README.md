@@ -59,12 +59,10 @@ flowchart TD
   end
   subgraph BE["Backend (dual-issue / dual-commit) · DI-IS/EX-WB-CM"]
     ROU["ROU (UOQ + ROB 64)"]
-    RT{{"EXU dispatch router"}}
-    PAB["ALQ 8: ALU-CSR | ALU (2 issue ports)"]
-    PBR["BRQ 4: Branch"]
-    PM["MDQ 4: MUL/DIV"]
-    PF["FPQ 4: scalar F/D"]
-    PQ["IOQ 8: mem"]
+    DPU{{"DPU dispatch router"}}
+    IEU["IEU: ALQ 8 + BRQ 4 + MDQ 4"]
+    FEU["FEU: FPQ 4 + scalar F/D"]
+    LSU["LSU: IOQ 8 + SQ 16"]
     CDB(("CDB ×5"))
     PRF["PRF (4R/4W)"]
     FPR["FPR (32 × 64-bit)"]
@@ -79,7 +77,6 @@ flowchart TD
       IPTW["IPTW (Sv32 2-lvl / Sv39 3-lvl)"]
     end
     subgraph DMEM["D-side · IS/EX-WB (2-cyc hit, 3-cyc load-use)"]
-      LSU["LSU (unified SQ 16, STL fwd)"]
       L1D["L1D 2 KiB 2-way (banked SRAM, VIPT, write-through)"]
       DTLB["DTLB/DSTLB"]
       DPTW["DPTW (Sv32/Sv39, hw A/D)"]
@@ -96,19 +93,20 @@ flowchart TD
   BPU --- IFU
   IFU --> IDU --> RNU --> FL & MAP
   IDU -."Early Resteer".-> IFU
-  IDU --> RNU --> FL & MAP --> ROU --> RT
-  RT --> PAB & PBR & PM & PF & PQ
-  PAB & PBR & PM & PF & PQ --> CDB
+  IDU --> RNU --> FL & MAP --> ROU --> DPU
+  DPU --> IEU & FEU & LSU
+  IEU & FEU & LSU --> CDB
   CDB -->|"writeback + wakeup"| ROU & PRF
-  PF --- FPR
+  FEU --- FPR
+  LSU --- FPR
   ROU --> CMU
   ROU -."store commit".-> LSU
   CMU -."flush / BPU train".-> FE
-  CSR --- PAB
+  CSR --- IEU
   IFU --- L1I
   L1I --- ITLB
   ITLB -."miss".-> IPTW
-  PQ --> LSU --> L1D
+  LSU --> L1D
   L1D --- DTLB
   DTLB -."miss".-> DPTW
   PMPC -.-> L1I & L1D & IPTW & DPTW

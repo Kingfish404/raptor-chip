@@ -1,0 +1,25 @@
+[tasks]
+rv32
+rv64
+
+[options]
+mode prove
+depth 1
+
+[engines]
+smtbmc
+
+[script]
+rv32: plugin -i slang
+rv32: read_slang --single-unit pmp_formal_if.sv formal_pmp.sv rapt_pmp.sv
+rv64: plugin -i slang
+rv64: read_slang --single-unit -DRAPT_RV64 pmp_formal_if.sv formal_pmp.sv rapt_pmp.sv
+prep -top formal_pmp
+
+[files]
+formal_pmp.sv
+rapt_pmp.sv ../../hdl/memory/rapt_pmp.sv
+rapt.svh ../../hdl/include/rapt.svh
+rapt_config.svh ../../hdl/configs/formal/rapt_config.svh
+rapt_sva.svh ../../hdl/include/rapt_sva.svh
+pmp_formal_if.sv

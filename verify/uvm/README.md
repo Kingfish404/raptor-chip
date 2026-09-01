@@ -7,7 +7,7 @@ debug sessions.
 
 ## Current status
 
-The first environment targets `rapt_exu_iq` and contains:
+The first environment targets `rapt_iq` and contains:
 
 - a cycle transaction and virtual interface;
 - sequencer and driver with directed and randomized stimulus;
@@ -53,7 +53,7 @@ uvm/
 └── iq/
     ├── rapt_iq_uvm_if.sv
     ├── rapt_iq_uvm_pkg.sv
-    └── tb_rapt_exu_iq_uvm.sv
+    └── tb_rapt_iq_uvm.sv
 ```
 
 New module environments should use the same agent/monitor/reference-model/

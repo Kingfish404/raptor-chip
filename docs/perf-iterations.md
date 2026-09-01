@@ -24,7 +24,7 @@ Tracks microarchitecture changes and their impact on IPC, cycle count, and stall
 | e913241 | Zbc + ROB fix [8]       | 3681752  | 2860946  | 0.777 | 8e5,21 | 7e5,19    | 2e6, 42    | 1e5, 3 | 0e0, 0 | 2e6, 44   |
 | dfca64e | 2ALU pMUL OoO LSU [9]   | 2869704  | 2530446  | 0.882 | 7e5,25 | 1e6,36    | 1e6, 51    | 9e4, 3 | 0e0, 0 | 1e6, 36   |
 | 76143bb | RAS-4 + TAGE [10]       | 16958705 | 15914408 | 0.938 | 4e6,26 | 7e6,40    | 9e6, 53    | 3e5, 2 | 0e0, 0 | 5e6, 32   |
-| current | Default worktree [12]   | 14321377 | 15914407 | 1.111 | 5e5, 4 | 0e0, 0    | 1e7, 72    | 1e5, 1 | 0e0, 0 | 5e6, 32   |
+| current | Backend hierarchy [13]  | 15726556 | 16085734 | 1.023 | 6e5, 4 | 5e6,31    | 1e7, 72    | 5e4, 0 | 0e0, 0 | 6e6, 36   |
 
 ### MicroBench
 
@@ -41,7 +41,7 @@ Tracks microarchitecture changes and their impact on IPC, cycle count, and stall
 | e913241 | Zbc + ROB fix [8]       | 500857 | 340204 | 0.679 | 1e5,28 | 7e4,13    | 2e5, 44    | 1e4, 3 | 2e4, 3 | 2e5, 49   |
 | dfca64e | 2ALU pMUL OoO LSU [9]   | 460943 | 339907 | 0.737 | 1e5,27 | 1e5,26    | 2e5, 46    | 2e4, 4 | 0e0, 0 | 2e5, 46   |
 | 76143bb | RAS-4 + TAGE [10]       | 459530 | 339907 | 0.740 | 1e5,25 | 1e5,25    | 2e5, 44    | 2e4, 3 | 0e0, 0 | 2e5, 46   |
-| current | Default worktree [12]   | 402118 | 339863 | 0.845 | 3e4, 7 | 0e0, 0    | 3e5, 72    | 1e4, 3 | 0e0, 0 | 2e5, 46   |
+| current | Backend hierarchy [13]  | 437471 | 339931 | 0.777 | 3e4, 7 | 7e4,15    | 3e5, 72    | 1e4, 3 | 0e0, 0 | 2e5, 51   |
 
 [1]: L1D hit latency reduced from 3 cycles to 2 cycles due to SRAM-based design, and L1I sequential fetch optimized to eliminate bubbles on hits.
 [2]: SQ address-based bypass (loads only block on same-word address conflict instead of blanket `|sq_valid`). Fixed L1D `l1d_update` NBA priority bug. Store-to-load forwarding for full-word (SW) stores, age-ordered youngest-match-wins with STQ>SQ priority. Partial (SB/SH) stores still block conservatively.
@@ -55,6 +55,8 @@ Tracks microarchitecture changes and their impact on IPC, cycle count, and stall
 [10]: RAS (4-entry RSB) + TAGE direction predictor enabled in BPU. Return prediction uses BTB `RETU` + speculative RSB top; calls are pushed speculatively at IDU (slot-A jal/jalr with link rd), rets pop speculatively on prediction, and flush rewinds `spec_idx` to `cmt_idx`. TAGE is used for conditional-branch direction prediction in this iteration. Perf impact: CoreMark IPC **0.882->0.938 (+6.4%)**, BPU 89.8%->93.0%, JALR mispredict 117K->5.7K; MicroBench IPC 0.737->0.740 (+0.4%). STA (nangate45, target 50MHz): period_min 17.35ns (Fmax 57.65MHz), total area 1,095,067.47 um^2, total power 1.01e-01 W. Power split: internal/switching/leakage = 57.1% / 16.9% / 25.9%. Area split: sequential 23.3%, combinational 76.7%.
 [11]: L2-ready integration (`rapt_l2.sv`) + L1I/SRAM refactor, plus EXU/MUL and typo/lint cleanups. In the current default config, `RAPT_L2_EN` is disabled and `rapt_l2` behaves as a passthrough; benchmark gains are therefore attributed primarily to the larger/tuned L1I path and SRAM pre-read tuning unless a run explicitly enables L2. CoreMark IFU stall drops from 26% to 14%, pulling CoreMark IPC **0.938->1.025 (+9.3%)**, -1430585 cycles, dual commit 44.5%, BPU 92.6%. MicroBench IPC 0.740->0.759 (+2.6%, -11427 cycles, dual commit 39.8%, BPU 78.9%). #Inst essentially unchanged (CoreMark identical, MicroBench +24). STA below is run with the `small` (single-issue) uarch preset.
 [12]: A shared dual-issue ALQ built from `rapt_exu_iq`; TAGE bimodal-base training on every committed conditional branch; slot-B direct-JAL and conditional-branch packing; line-safe unaligned R32+R32 assembly through `inst_n2`; exact-next-PC/redirect L1I SRAM read-ahead; and 8-word (32 B) L1I sector refills with the read-valid pipeline held through `FINA`. CoreMark was clean-rebuilt with `ITERATIONS=64` and run with `ARGS="-b -n"`, matching the long-run instruction count of the prior row; it reached `HIT GOOD TRAP` at 14,321,377 cycles / 15,914,407 instructions / IPC 1.111. MicroBench ran with `ARGS="-b -n"`; all 10 subtests passed and it reached `HIT GOOD TRAP` at 402,118 cycles / 339,863 instructions / IPC 0.845.
+
+[13]: Structural split of the backend into peer DPU, IEU, FEU, and LSU blocks. To avoid comparing against the stale historical `[12]` row, the old EXU hierarchy was rebuilt from the current `HEAD` archive and both old and new RTL ran the exact same binaries. MicroBench is cycle-identical at 437,471 cycles / 339,931 instructions / IPC 0.777. The 64-iteration CoreMark run is also cycle-identical at 15,726,556 cycles / 16,085,734 instructions / IPC 1.023 and reaches `HIT GOOD TRAP`; however, the benchmark reports that this simulated timed interval is shorter than its required 10 seconds, so no valid CoreMark/MHz score is claimed. The nonzero EX|RS values in the new rows reflect repaired PMU hierarchy probes; the archived EXU simulator cannot observe those moved signals and reports zero there.
 
 ### Column Description
 
@@ -95,4 +97,3 @@ The historical `[11]` STA row is run with the `small` (single-issue, low-area) u
 | 875aa2f | L2$ + L1I/SRAM [11]   |     53.78 |   859,590.97 | 9.00e-02 |      57.67 |  80,248.39 |  6.80e-03 |       22.71 | 4,680,833.04 |   5.09e-02 |
 
 Footnote `[9]` matches the corresponding entry in the CoreMark/MicroBench tables above. `[10]` and `[11]` STA were run via CI across all three PDKs and both ISAs. `[10]` used the `default` (dual-issue OoO) preset; `[11]` was measured at `875aa2f` with the `small` (single-issue) preset, so its lower area/higher Fmax (e.g. RV32 NG45 area 1.04M -> 0.53M um^2, Fmax 62.08 -> 77.15 MHz) reflect the smaller preset, not a like-for-like uarch comparison. No STA result is recorded for the current default worktree [12].
-

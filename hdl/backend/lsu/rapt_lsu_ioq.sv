@@ -15,7 +15,7 @@
 //   * Atomics and uncached MMIO loads serialize at head only
 //   * Stores always wait at head (no speculative writes)
 /* verilator lint_off PINCONNECTEMPTY */
-module rapt_exu_ioq #(
+module rapt_lsu_ioq #(
     parameter unsigned IOQ_SIZE = `RAPT_IOQ_SIZE,
     parameter unsigned ROB_SIZE = `RAPT_ROB_SIZE,
     parameter unsigned PLEN     = `RAPT_PHY_LEN,
@@ -30,20 +30,20 @@ module rapt_exu_ioq #(
     pmp_state_if.in pmp_state,
 
     // Dispatch source (read-only view of rou_exu, drive accepts via disp.io)
-    rou_exu_if.monitor  rou_exu,
-    exu_disp_ioq_if.ioq disp,
+    rou_exu_if.monitor rou_exu,
+    dpu_ioq_if.ioq disp,
 
     // Forwarding sources (other writeback buses)
-    exu_wb_if.in exu_rou,
-    exu_wb_if.in exu_rou_b,
-    exu_wb_if.in exu_wb_mul,
+    cdb_if.in exu_rou,
+    cdb_if.in exu_rou_b,
+    cdb_if.in exu_wb_mul,
 
     // Outputs to memory subsystem & ROB writeback
-    exu_lsu_if.master       exu_lsu,
-    exu_l1d_if.master       exu_l1d,
-    fpr_if.ioq              fpr,
-    exu_wb_if.out           exu_ioq_bcast,
-    exu_load_fast_if.source load_fast,
+    lsu_pipe_if.master    exu_lsu,
+    lsu_l1d_mmu_if.master exu_l1d,
+    fpr_if.ioq            fpr,
+    cdb_if.out            exu_ioq_bcast,
+    load_fast_if.source   load_fast,
 
     // A2: PMU: one-cycle pulse when IOQ becomes full
     /* verilator lint_off UNUSEDSIGNAL */
@@ -58,36 +58,36 @@ module rapt_exu_ioq #(
   logic [  IOQLen-1:0] ioq_tail_a;
   logic [  IOQLen-1:0] ioq_head;
 
-  logic [    XLEN-1:0] ioq_pc              [IOQ_SIZE];
+  logic [    XLEN-1:0] ioq_pc           [IOQ_SIZE];
 
-  logic [    PLEN-1:0] ioq_pr1             [IOQ_SIZE];
-  logic [    PLEN-1:0] ioq_pr2             [IOQ_SIZE];
-  logic [    PLEN-1:0] ioq_prd             [IOQ_SIZE];
-  logic [    RLEN-1:0] ioq_rd              [IOQ_SIZE];
+  logic [    PLEN-1:0] ioq_pr1          [IOQ_SIZE];
+  logic [    PLEN-1:0] ioq_pr2          [IOQ_SIZE];
+  logic [    PLEN-1:0] ioq_prd          [IOQ_SIZE];
+  logic [    RLEN-1:0] ioq_rd           [IOQ_SIZE];
 
-  logic                ioq_c               [IOQ_SIZE];
+  logic                ioq_c            [IOQ_SIZE];
   /* verilator lint_off UNUSEDSIGNAL */
-  logic                ioq_word            [IOQ_SIZE];  // reserved for RV64 sub-word
+  logic                ioq_word         [IOQ_SIZE];  // reserved for RV64 sub-word
   /* verilator lint_on UNUSEDSIGNAL */
-  logic [         5:0] ioq_alu             [IOQ_SIZE];
-  logic [    XLEN-1:0] ioq_vj              [IOQ_SIZE];
-  logic [    XLEN-1:0] ioq_vk              [IOQ_SIZE];
-  logic [  ROBLen-1:0] ioq_dest            [IOQ_SIZE];
-  logic [    XLEN-1:0] ioq_imm             [IOQ_SIZE];
+  logic [         5:0] ioq_alu          [IOQ_SIZE];
+  logic [    XLEN-1:0] ioq_vj           [IOQ_SIZE];
+  logic [    XLEN-1:0] ioq_vk           [IOQ_SIZE];
+  logic [  ROBLen-1:0] ioq_dest         [IOQ_SIZE];
+  logic [    XLEN-1:0] ioq_imm          [IOQ_SIZE];
 
   logic [IOQ_SIZE-1:0] ioq_wen;
   logic [IOQ_SIZE-1:0] ioq_mmu_en;
   logic [IOQ_SIZE-1:0] ioq_trap;
-  logic [    XLEN-1:0] ioq_cause           [IOQ_SIZE];
-  logic [    XLEN-1:0] ioq_paddr           [IOQ_SIZE];
+  logic [    XLEN-1:0] ioq_cause        [IOQ_SIZE];
+  logic [    XLEN-1:0] ioq_paddr        [IOQ_SIZE];
   logic [IOQ_SIZE-1:0] ioq_ren;
   logic [IOQ_SIZE-1:0] ioq_atom;
   logic [IOQ_SIZE-1:0] ioq_fp_valid;
-  logic [5:0]          ioq_fp_op [IOQ_SIZE];
-  logic [4:0]          ioq_fp_rd [IOQ_SIZE];
-  logic [4:0]          ioq_fp_rs2[IOQ_SIZE];
+  logic [         5:0] ioq_fp_op        [IOQ_SIZE];
+  logic [         4:0] ioq_fp_rd        [IOQ_SIZE];
+  logic [         4:0] ioq_fp_rs2       [IOQ_SIZE];
   logic [IOQ_SIZE-1:0] ioq_fp_dep2_busy;
-  logic [ROBLen-1:0]   ioq_fp_dep2[IOQ_SIZE];
+  logic [  ROBLen-1:0] ioq_fp_dep2      [IOQ_SIZE];
 
   function automatic logic fp_wb_hit(input logic [ROBLen-1:0] dep);
     return (exu_rou.valid && exu_rou.dest == dep)
@@ -101,7 +101,7 @@ module rapt_exu_ioq #(
   logic [IOQ_SIZE-1:0] ioq_load_trap;
   logic [IOQ_SIZE-1:0] ioq_load_skip;
   logic [    XLEN-1:0] ioq_rdata           [IOQ_SIZE];
-  logic [63:0]         ioq_fp_rdata64      [IOQ_SIZE];
+  logic [        63:0] ioq_fp_rdata64      [IOQ_SIZE];
   logic [    XLEN-1:0] ioq_load_cause      [IOQ_SIZE];
 
   logic                oo_pending;
@@ -231,9 +231,10 @@ module rapt_exu_ioq #(
   assign exu_lsu.ralu = ioq_atom[active_idx]
       ? (ioq_word[active_idx] ? `RAPT_ALU_LW__ : `RAPT_ALU_LD__)
       : ((ioq_fp_valid[active_idx] && ioq_fp_op[active_idx] == `RAPT_FP_OP_FLD)
-        ? `RAPT_ALU_LD__
-        : ((ioq_fp_valid[active_idx] && ioq_fp_op[active_idx] == `RAPT_FP_OP_FLW)
-          ? `RAPT_ALU_LW__ : ioq_alu[active_idx][4:0]));
+        ?
+      `RAPT_ALU_LD__
+      : ((ioq_fp_valid[active_idx] && ioq_fp_op[active_idx] == `RAPT_FP_OP_FLW) ? `RAPT_ALU_LW__ :
+         ioq_alu[active_idx][4:0]));
   assign exu_lsu.fp_rdata64_req = ioq_fp_valid[active_idx]
       && ioq_fp_op[active_idx] == `RAPT_FP_OP_FLD;
   assign exu_lsu.atomic_lock = ioq_atom[active_idx] && ioq_alu[active_idx] == `RAPT_ATO_LR__;
@@ -417,11 +418,10 @@ module rapt_exu_ioq #(
         : ((ioq_fp_valid[ioq_head] && ioq_fp_op[ioq_head] == `RAPT_FP_OP_FSD)
           ? fpr.ioq_rdata[XLEN-1:0] : ioq_vk[ioq_head]));
   assign exu_ioq_bcast.sq_wdata64 = fpr.ioq_rdata;
-  assign exu_ioq_bcast.sq_fp64 = ioq_fp_valid[ioq_head]
-      && ioq_fp_op[ioq_head] == `RAPT_FP_OP_FSD;
-  assign fpr.ioq_wvalid = exu_ioq_bcast.valid && ioq_fp_valid[ioq_head]
-      && (ioq_fp_op[ioq_head] == `RAPT_FP_OP_FLW
-        || ioq_fp_op[ioq_head] == `RAPT_FP_OP_FLD) && !head_trap_lsu;
+  assign exu_ioq_bcast.sq_fp64 = ioq_fp_valid[ioq_head] && ioq_fp_op[ioq_head] == `RAPT_FP_OP_FSD;
+  assign fpr.ioq_wvalid = exu_ioq_bcast.valid && ioq_fp_valid[ioq_head] && (ioq_fp_op[ioq_head] ==
+      `RAPT_FP_OP_FLW
+      || ioq_fp_op[ioq_head] == `RAPT_FP_OP_FLD) && !head_trap_lsu;
   assign fpr.ioq_waddr = ioq_fp_rd[ioq_head];
   assign fpr.ioq_wdata = (ioq_fp_op[ioq_head] == `RAPT_FP_OP_FLD)
       ? ioq_fp_rdata64[ioq_head] : {32'hffff_ffff, head_rdata[31:0]};
@@ -461,7 +461,7 @@ module rapt_exu_ioq #(
   assign exu_ioq_bcast.valid = ioq_valid_found;
   assign exu_l1d.reservation_clear = ioq_valid_found
       && ioq_atom[ioq_head] && ioq_alu[ioq_head] == `RAPT_ATO_SC__;
-  // MEM pipe never resolves branches nor writes CSRs (unified exu_wb_if
+  // MEM pipe never resolves branches nor writes CSRs (unified cdb_if
   // tie-offs; ROB keeps mispredict at its dispatch-init value of 0).
   assign exu_ioq_bcast.btaken = 1'b0;
   assign exu_ioq_bcast.mispredict = 1'b0;
@@ -617,62 +617,62 @@ module rapt_exu_ioq #(
       for (int i = 0; i < IOQ_SIZE; i++) begin
         if (disp_b_selects_entry(i)) begin
 `ifdef RAPT_DUAL_ISSUE
-          ioq_valid[i]     <= 1'b1;
-          ioq_pc[i]        <= rou_exu.uop_b.pc;
-          ioq_pr1[i]       <= wake_pr(rou_exu.pr1_b);
-          ioq_pr2[i]       <= wake_pr(rou_exu.pr2_b);
-          ioq_prd[i]       <= rou_exu.prd_b;
-          ioq_rd[i]        <= rou_exu.uop_b.rd;
-          ioq_c[i]         <= rou_exu.uop_b.c;
-          ioq_word[i]      <= rou_exu.uop_b.word;
-          ioq_alu[i]       <= rou_exu.uop_b.alu;
-          ioq_vj[i]        <= wake_val(rou_exu.pr1_b, rou_exu.op1_b);
-          ioq_vk[i]        <= wake_val(rou_exu.pr2_b, rou_exu.op2_b);
-          ioq_dest[i]      <= rou_exu.dest_b;
-          ioq_imm[i]       <= rou_exu.uop_b.imm;
-          ioq_wen[i]       <= rou_exu.uop_b.wen;
-          ioq_mmu_en[i]    <= csr_bcast.dmmu_en;
-          ioq_ren[i]       <= rou_exu.uop_b.ren;
-          ioq_atom[i]      <= rou_exu.uop_b.atom;
-          ioq_fp_valid[i]  <= rou_exu.uop_b.fp_valid;
-          ioq_fp_op[i]     <= rou_exu.uop_b.fp_op;
-          ioq_fp_rd[i]     <= rou_exu.uop_b.inst[11:7];
-          ioq_fp_rs2[i]    <= rou_exu.uop_b.inst[24:20];
+          ioq_valid[i]        <= 1'b1;
+          ioq_pc[i]           <= rou_exu.uop_b.pc;
+          ioq_pr1[i]          <= wake_pr(rou_exu.pr1_b);
+          ioq_pr2[i]          <= wake_pr(rou_exu.pr2_b);
+          ioq_prd[i]          <= rou_exu.prd_b;
+          ioq_rd[i]           <= rou_exu.uop_b.rd;
+          ioq_c[i]            <= rou_exu.uop_b.c;
+          ioq_word[i]         <= rou_exu.uop_b.word;
+          ioq_alu[i]          <= rou_exu.uop_b.alu;
+          ioq_vj[i]           <= wake_val(rou_exu.pr1_b, rou_exu.op1_b);
+          ioq_vk[i]           <= wake_val(rou_exu.pr2_b, rou_exu.op2_b);
+          ioq_dest[i]         <= rou_exu.dest_b;
+          ioq_imm[i]          <= rou_exu.uop_b.imm;
+          ioq_wen[i]          <= rou_exu.uop_b.wen;
+          ioq_mmu_en[i]       <= csr_bcast.dmmu_en;
+          ioq_ren[i]          <= rou_exu.uop_b.ren;
+          ioq_atom[i]         <= rou_exu.uop_b.atom;
+          ioq_fp_valid[i]     <= rou_exu.uop_b.fp_valid;
+          ioq_fp_op[i]        <= rou_exu.uop_b.fp_op;
+          ioq_fp_rd[i]        <= rou_exu.uop_b.inst[11:7];
+          ioq_fp_rs2[i]       <= rou_exu.uop_b.inst[24:20];
           ioq_fp_dep2_busy[i] <= rou_exu.fp_dep2_valid_b && !fp_wb_hit(rou_exu.fp_dep2_b);
-          ioq_fp_dep2[i] <= rou_exu.fp_dep2_b;
-          ioq_trap[i]      <= rou_exu.uop_b.trap;
-          ioq_complete[i]  <= 1'b0;
-          ioq_load_trap[i] <= 1'b0;
-          ioq_load_skip[i] <= 1'b0;
+          ioq_fp_dep2[i]      <= rou_exu.fp_dep2_b;
+          ioq_trap[i]         <= rou_exu.uop_b.trap;
+          ioq_complete[i]     <= 1'b0;
+          ioq_load_trap[i]    <= 1'b0;
+          ioq_load_skip[i]    <= 1'b0;
 `endif
         end else if (disp.accept_a && i == int'(ioq_tail_a)) begin
-          ioq_valid[i]     <= 1'b1;
-          ioq_pc[i]        <= rou_exu.uop.pc;
-          ioq_pr1[i]       <= wake_pr(rou_exu.pr1);
-          ioq_pr2[i]       <= wake_pr(rou_exu.pr2);
-          ioq_prd[i]       <= rou_exu.prd;
-          ioq_rd[i]        <= rou_exu.uop.rd;
-          ioq_c[i]         <= rou_exu.uop.c;
-          ioq_word[i]      <= rou_exu.uop.word;
-          ioq_alu[i]       <= rou_exu.uop.alu;
-          ioq_vj[i]        <= wake_val(rou_exu.pr1, rou_exu.op1);
-          ioq_vk[i]        <= wake_val(rou_exu.pr2, rou_exu.op2);
-          ioq_dest[i]      <= rou_exu.dest;
-          ioq_imm[i]       <= rou_exu.uop.imm;
-          ioq_wen[i]       <= rou_exu.uop.wen;
-          ioq_mmu_en[i]    <= csr_bcast.dmmu_en;
-          ioq_ren[i]       <= rou_exu.uop.ren;
-          ioq_atom[i]      <= rou_exu.uop.atom;
-          ioq_fp_valid[i]  <= rou_exu.uop.fp_valid;
-          ioq_fp_op[i]     <= rou_exu.uop.fp_op;
-          ioq_fp_rd[i]     <= rou_exu.uop.inst[11:7];
-          ioq_fp_rs2[i]    <= rou_exu.uop.inst[24:20];
+          ioq_valid[i]        <= 1'b1;
+          ioq_pc[i]           <= rou_exu.uop.pc;
+          ioq_pr1[i]          <= wake_pr(rou_exu.pr1);
+          ioq_pr2[i]          <= wake_pr(rou_exu.pr2);
+          ioq_prd[i]          <= rou_exu.prd;
+          ioq_rd[i]           <= rou_exu.uop.rd;
+          ioq_c[i]            <= rou_exu.uop.c;
+          ioq_word[i]         <= rou_exu.uop.word;
+          ioq_alu[i]          <= rou_exu.uop.alu;
+          ioq_vj[i]           <= wake_val(rou_exu.pr1, rou_exu.op1);
+          ioq_vk[i]           <= wake_val(rou_exu.pr2, rou_exu.op2);
+          ioq_dest[i]         <= rou_exu.dest;
+          ioq_imm[i]          <= rou_exu.uop.imm;
+          ioq_wen[i]          <= rou_exu.uop.wen;
+          ioq_mmu_en[i]       <= csr_bcast.dmmu_en;
+          ioq_ren[i]          <= rou_exu.uop.ren;
+          ioq_atom[i]         <= rou_exu.uop.atom;
+          ioq_fp_valid[i]     <= rou_exu.uop.fp_valid;
+          ioq_fp_op[i]        <= rou_exu.uop.fp_op;
+          ioq_fp_rd[i]        <= rou_exu.uop.inst[11:7];
+          ioq_fp_rs2[i]       <= rou_exu.uop.inst[24:20];
           ioq_fp_dep2_busy[i] <= rou_exu.fp_dep2_valid && !fp_wb_hit(rou_exu.fp_dep2);
-          ioq_fp_dep2[i] <= rou_exu.fp_dep2;
-          ioq_trap[i]      <= rou_exu.uop.trap;
-          ioq_complete[i]  <= 1'b0;
-          ioq_load_trap[i] <= 1'b0;
-          ioq_load_skip[i] <= 1'b0;
+          ioq_fp_dep2[i]      <= rou_exu.fp_dep2;
+          ioq_trap[i]         <= rou_exu.uop.trap;
+          ioq_complete[i]     <= 1'b0;
+          ioq_load_trap[i]    <= 1'b0;
+          ioq_load_skip[i]    <= 1'b0;
         end
 
         // Preserve the original NBA priority while keeping every IOQ array

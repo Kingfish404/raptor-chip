@@ -198,6 +198,20 @@ endif
 ifeq (,$(findstring -DRAPT_MTIME_FREQ_MHZ=,$(RAPT_PACK_VFLAGS)))
 RAPT_PACK_VFLAGS := $(strip $(RAPT_PACK_VFLAGS) -DRAPT_MTIME_FREQ_MHZ=$(RAPT_PACK_SYS_CLK_MHZ))
 endif
+# Keep the prerequisite pack and the LiteX CPU's finalize-time pack on the same
+# variant defines.  Otherwise an FPGA build first packs without the Linux
+# defines, core.py repacks with them after the bitstream hash has been computed,
+# and the next identical invocation incorrectly treats the bitstream as stale.
+ifneq (,$(filter linux32 linux64,$(VARIANT)))
+ifeq (,$(findstring -DRAPT_LINUX,$(RAPT_PACK_VFLAGS)))
+RAPT_PACK_VFLAGS := $(strip $(RAPT_PACK_VFLAGS) -DRAPT_LINUX)
+endif
+endif
+ifeq ($(VARIANT),linux64)
+ifeq (,$(findstring -DRAPT_RV64,$(RAPT_PACK_VFLAGS)))
+RAPT_PACK_VFLAGS := $(strip $(RAPT_PACK_VFLAGS) -DRAPT_RV64)
+endif
+endif
 export RAPT_PACK_VFLAGS
 
 _WITH_EXTERNAL_MAIN_RAM := $(strip $(filter 1 yes true on,$(WITH_LITEDRAM) $(WITH_MIG)))

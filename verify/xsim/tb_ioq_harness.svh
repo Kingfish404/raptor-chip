@@ -6,16 +6,17 @@ cmu_bcast_if cmu_bcast();
 csr_bcast_if csr_bcast();
 pmp_state_if pmp_state();
 rou_exu_if rou_exu();
-exu_disp_ioq_if disp();
-exu_wb_if exu_rou();
-exu_wb_if exu_rou_b();
-exu_wb_if exu_wb_mul();
-exu_lsu_if exu_lsu();
-exu_l1d_if exu_l1d();
-exu_wb_if exu_ioq_bcast();
-exu_load_fast_if load_fast();
+dpu_ioq_if disp();
+cdb_if exu_rou();
+cdb_if exu_rou_b();
+cdb_if exu_wb_mul();
+lsu_pipe_if exu_lsu();
+lsu_l1d_mmu_if exu_l1d();
+fpr_if fpr();
+cdb_if exu_ioq_bcast();
+load_fast_if load_fast();
 
-rapt_exu_ioq dut (
+rapt_lsu_ioq dut (
     .clock(clock),
     .reset(reset),
     .cmu_bcast(cmu_bcast),
@@ -28,6 +29,7 @@ rapt_exu_ioq dut (
     .exu_wb_mul(exu_wb_mul),
     .exu_lsu(exu_lsu),
     .exu_l1d(exu_l1d),
+    .fpr(fpr),
     .exu_ioq_bcast(exu_ioq_bcast),
     .load_fast(load_fast),
     .pmu_ioq_full(pmu_ioq_full)
@@ -108,6 +110,7 @@ task automatic init_ioq_inputs(input logic dmmu_en);
     exu_l1d.cause = '0;
     exu_l1d.reservation = '0;
     exu_l1d.reservation_valid = 1'b0;
+    fpr.ioq_rdata = '0;
     exu_l1d.ready = 1'b0;
   end
 endtask

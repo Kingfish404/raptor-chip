@@ -1,0 +1,36 @@
+[tasks]
+rv32
+rv64
+rv32_full
+cover
+
+[options]
+rv32: mode prove
+rv32: depth 4
+rv64: mode prove
+rv64: depth 4
+rv32_full: mode bmc
+rv32_full: depth 4
+cover: mode cover
+cover: depth 16
+
+[engines]
+smtbmc --nopresat z3
+
+[script]
+plugin -i slang
+rv32: read_slang --single-unit -DFORMAL --top formal_plic -G XLEN=32 perip_formal_if.sv formal_plic.sv rapt_plic.sv
+rv64: read_slang --single-unit -DFORMAL --top formal_plic -G XLEN=64 perip_formal_if.sv formal_plic.sv rapt_plic.sv
+rv32_full: read_slang --single-unit -DFORMAL --top formal_plic -G XLEN=32 -G NDEV=31 perip_formal_if.sv formal_plic.sv rapt_plic.sv
+cover: read_slang --single-unit -DFORMAL --top formal_plic -G XLEN=32 perip_formal_if.sv formal_plic.sv rapt_plic.sv
+prep -top formal_plic
+
+[files]
+perip_formal_if.sv
+rapt_soc_if.svh
+formal_plic.sv
+rapt_plic.sv ../../hdl/perip/rapt_plic.sv
+rapt.svh ../../hdl/include/rapt.svh
+rapt_config.svh ../../hdl/configs/formal/rapt_config.svh
+rapt_sva.svh ../../hdl/include/rapt_sva.svh
+rapt_soc.svh ../../hdl/include/npc/rapt_soc.svh

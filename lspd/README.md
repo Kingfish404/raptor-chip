@@ -53,8 +53,15 @@ small frontend blocks. Reduce `PARALLEL_JOBS` or increase `JOB_MEMORY_MB` when
 running `core`, `l1i`, `l1d`, and enabled `l2` together.
 
 Supported module names are `core`, `bpu`, `ifu`, `fqu`, `l1i`, `idu`, `rnu`,
-`rou`, `prf`, `fpr`, `exu`, `cmu`, `csr`, `lsu`, `l1d`, `bus`, `axi`, and `l2`.
+`rou`, `prf`, `fpr`, `dpu`, `ieu`, `feu`, `cmu`, `csr`, `lsu`, `l1d`, `bus`,
+`axi`, and `l2`.
 Use `make -C lspd list` to show the corresponding RTL top modules.
+
+Module-only synthesis adapters live in `lspd/hdl_wrapper/`. They are appended
+only to the LSPD source set and do not enter the product `hdl/` tree, simulator
+pack, or tapeout RTL file list. DPU, IEU, FEU, and LSU use these adapters to
+present tool-friendly `stimulus` / `response` boundaries while preserving the
+product modules' native interface topology.
 
 Results are isolated by configuration, PDK, module, and target frequency:
 

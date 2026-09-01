@@ -346,7 +346,9 @@ _FPGA_HASH_INPUTS = $(_FPGA_HASH_COMMON_INPUTS) $(FW_FPGA_BIN)
 else
 _FPGA_HASH_INPUTS = $(_FPGA_HASH_COMMON_INPUTS)
 endif
-_FPGA_HASH_KEY = $(shell { cat $(_FPGA_HASH_INPUTS) 2>/dev/null; printf '%s' '$(_FPGA_FLAGS)'; printf '%s' '$(RAPT_PACK_VFLAGS)'; } | shasum 2>/dev/null | cut -d' ' -f1)
+# Keep this as a shell command instead of a parse-time value: LiteX finalization
+# can refresh PACK_SV, so fpga-build must recompute the stamp after generation.
+_FPGA_HASH_COMMAND = { cat $(_FPGA_HASH_INPUTS) 2>/dev/null; printf '%s' '$(_FPGA_FLAGS)'; printf '%s' '$(RAPT_PACK_VFLAGS)'; } | shasum 2>/dev/null | cut -d' ' -f1
 
 GOWIN_REPORTS_INDEX_SRC  := $(LITEX_DIR)/scripts/reports_index.html
 GOWIN_REPORTS_INDEX_DST  := $(FPGA_BUILD_DIR)/impl/index.html

@@ -1,6 +1,6 @@
 `include "rapt.svh"
 
-module rapt_exu_mul #(
+module rapt_ieu_mul #(
     parameter int XLEN = `RAPT_XLEN,
     parameter unsigned TAG_W = 1
 ) (

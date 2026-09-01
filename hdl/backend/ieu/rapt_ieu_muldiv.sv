@@ -14,14 +14,14 @@
 //     No fast load-use path here: a load-fed MUL wakes one cycle later on
 //     the confirming MEM broadcast, trading a cycle of mul latency for a
 //     narrow wakeup network.
-//   * Feed the tag-based rapt_exu_mul FU (pipelined MUL, iterative DIV)
+//   * Feed the tag-based rapt_ieu_mul FU (pipelined MUL, iterative DIV)
 //   * Drive the `exu_wb_mul` CDB port straight from the FU's registered
 //     outputs (dest/prd/rd looked up by tag)
 //
 // A uop is routed here only if it is pure MUL/DIV arithmetic
-// (see `a_is_mdq` in rapt_exu): never memory / system / trap / branch,
+// (see `a_to_mdq` in rapt_dpu): never memory / system / trap / branch,
 // so this pipe carries no CSR, trap, or store sideband (tied 0).
-module rapt_exu_muldiv #(
+module rapt_ieu_muldiv #(
     parameter unsigned MDQ_SIZE = 4,
     parameter unsigned ROB_SIZE = `RAPT_ROB_SIZE,
     parameter unsigned PLEN     = `RAPT_PHY_LEN,
@@ -35,15 +35,15 @@ module rapt_exu_muldiv #(
 
     // Dispatch source + arbitration (same handshake shape as the RS)
     rou_exu_if.monitor rou_exu,
-    exu_disp_rs_if.rs  disp,
+    dpu_iq_if.rs  disp,
 
     // CDB forwarding sources (other value-producing pipes)
-    exu_wb_if.in exu_rou,
-    exu_wb_if.in exu_rou_b,
-    exu_wb_if.in exu_ioq_bcast,
+    cdb_if.in exu_rou,
+    cdb_if.in exu_rou_b,
+    cdb_if.in exu_ioq_bcast,
 
     // Own writeback
-    exu_wb_if.out exu_wb_mul
+    cdb_if.out exu_wb_mul
 );
   localparam unsigned MDQLen = (MDQ_SIZE > 1) ? $clog2(MDQ_SIZE) : 1;
 
@@ -209,7 +209,7 @@ module rapt_exu_muldiv #(
   logic fu_in_ready;
 
 `ifdef RAPT_M_EXTENSION
-  rapt_exu_mul #(
+  rapt_ieu_mul #(
       .TAG_W(MDQLen)
   ) mul (
       .clock(clock),
@@ -278,7 +278,7 @@ module rapt_exu_muldiv #(
       // mdq_valid[]/busy bits (FU input is qualified by sel_found, the
       // wakeup snoop lives inside `if (mdq_valid[i])`), and allocation
       // initializes each new entry's age row/column before its valid bit
-      // is set (same argument as rapt_exu_iq).  Only valid/issued/busy
+      // is set (same argument as rapt_iq).  Only valid/issued/busy
       // control bits stay on the reset network.
     end else begin
       // ---- Allocation (slot A / slot B write distinct free slots) ----

@@ -96,9 +96,31 @@ module rapt_bus #(
 
   // Downstream issue arbiter (L1D priority).
   logic issue_l1d, issue_l1i, l1i_pop;
-  assign issue_l1d = l1d_slot_busy && !l1d_slot_issued;
-  assign issue_l1i = !issue_l1d && !l1i_q_empty;
+  logic rd_issue_lock, rd_issue_l1d;
+  logic want_l1d, want_l1i;
+  assign want_l1d = l1d_slot_busy && !l1d_slot_issued;
+  assign want_l1i = !want_l1d && !l1i_q_empty;
+  // Once ARVALID is presented, AXI requires every AR payload signal to remain
+  // stable until ARREADY.  Lock the selected source while stalled so a newly
+  // captured high-priority L1D request cannot replace an already-presented
+  // L1I request.
+  assign issue_l1d = rd_issue_lock ? rd_issue_l1d : want_l1d;
+  assign issue_l1i = rd_issue_lock ? !rd_issue_l1d : want_l1i;
   assign l1i_pop = issue_l1i && mem.rd_req_ready;
+
+  always_ff @(posedge clock) begin
+    if (reset) begin
+      rd_issue_lock <= 1'b0;
+      rd_issue_l1d  <= 1'b0;
+    end else if (mem.rd_req_valid && !mem.rd_req_ready) begin
+      if (!rd_issue_lock) begin
+        rd_issue_lock <= 1'b1;
+        rd_issue_l1d  <= issue_l1d;
+      end
+    end else begin
+      rd_issue_lock <= 1'b0;
+    end
+  end
 
   logic [XLEN-1:0] l1i_q_head_addr;
   logic            l1i_q_head_burst;

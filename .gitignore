@@ -57,7 +57,7 @@
 /hdl/generated/
 /hdl/chisel/target/
 /third_party/
-/docs-*/
+/docs.*/
 /syn/
 /lspd/syn/build/
 Makefile.local

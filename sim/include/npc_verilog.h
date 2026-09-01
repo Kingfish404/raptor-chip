@@ -137,15 +137,15 @@ static inline void verilog_connect(TOP_NAME *top, NPCState *npc)
    * Phase A unified SQ: 1-bit sq_all_empty/sq_all_full probes are width-
    * stable -- host code never depends on SQ_SIZE's bit width. */
   npc->rob_empty = (uint8_t *)&VERILOG_ROU(rob_empty);
-  npc->sq_empty = (uint8_t *)&VERILOG_CPU(lsu__DOT__sq_all_empty);
-  npc->sq_full = (uint8_t *)&VERILOG_CPU(lsu__DOT__sq_all_full);
-  npc->sq_snapshot_capacity = (uint8_t *)&VERILOG_CPU(lsu__DOT__sq_snapshot_capacity);
-  npc->sq_snapshot_head = (uint8_t *)&VERILOG_CPU(lsu__DOT__sq_snapshot_head);
-  npc->sq_snapshot_valid = (uint32_t *)&VERILOG_CPU(lsu__DOT__sq_snapshot_valid);
-  npc->sq_snapshot_committed = (uint32_t *)&VERILOG_CPU(lsu__DOT__sq_snapshot_committed);
-  npc->sq_snapshot_alu = (uint8_t *)&VERILOG_CPU(lsu__DOT__sq_alu)[0];
-  npc->sq_snapshot_paddr = (word_t *)&VERILOG_CPU(lsu__DOT__sq_paddr)[0];
-  npc->sq_snapshot_wdata = (word_t *)&VERILOG_CPU(lsu__DOT__sq_wdata)[0];
+  npc->sq_empty = (uint8_t *)&VERILOG_CPU(lsu__DOT__u_sq__DOT__sq_all_empty);
+  npc->sq_full = (uint8_t *)&VERILOG_CPU(lsu__DOT__u_sq__DOT__sq_all_full);
+  npc->sq_snapshot_capacity = (uint8_t *)&VERILOG_CPU(lsu__DOT__u_sq__DOT__sq_snapshot_capacity);
+  npc->sq_snapshot_head = (uint8_t *)&VERILOG_CPU(lsu__DOT__u_sq__DOT__sq_snapshot_head);
+  npc->sq_snapshot_valid = (uint32_t *)&VERILOG_CPU(lsu__DOT__u_sq__DOT__sq_snapshot_valid);
+  npc->sq_snapshot_committed = (uint32_t *)&VERILOG_CPU(lsu__DOT__u_sq__DOT__sq_snapshot_committed);
+  npc->sq_snapshot_alu = (uint8_t *)&VERILOG_CPU(lsu__DOT__u_sq__DOT__sq_alu)[0];
+  npc->sq_snapshot_paddr = (word_t *)&VERILOG_CPU(lsu__DOT__u_sq__DOT__sq_paddr)[0];
+  npc->sq_snapshot_wdata = (word_t *)&VERILOG_CPU(lsu__DOT__u_sq__DOT__sq_wdata)[0];
 }
 
 #endif // __NPC_VERILOG_H__

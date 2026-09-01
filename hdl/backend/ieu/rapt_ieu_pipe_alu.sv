@@ -8,19 +8,19 @@
 // trap / conditional-branch / MUL-DIV uops, so the only taken-redirect
 // source is an unconditional jump (jen).
 /* verilator lint_off UNUSEDSIGNAL */
-module rapt_exu_pipe_alu #(
+module rapt_ieu_pipe_alu #(
     parameter unsigned XLEN = `RAPT_XLEN
 ) (
     // Issue slot from the ALU issue port
-    exu_iq_iss_if.fu iss,
+    iq_iss_if.fu iss,
 
     // Writeback (CDB port [1])
-    exu_wb_if.out wb_alu
+    cdb_if.out wb_alu
 );
   /* verilator lint_on UNUSEDSIGNAL */
 
   logic [XLEN-1:0] alu_result;
-  rapt_exu_alu gen_alu (
+  rapt_ieu_alu gen_alu (
       .s1(iss.op1),
       .s2(iss.op2),
       .op(iss.alu),
@@ -46,7 +46,7 @@ module rapt_exu_pipe_alu #(
   assign wb_alu.btaken = 1'b0;
   assign wb_alu.mispredict = (wb_alu.npc != iss.pnpc);
   assign wb_alu.difftest_skip = 1'b0;
-  // ALU never produces CSR / trap / MEM sideband (unified exu_wb_if tie-offs).
+  // ALU never produces CSR / trap / MEM sideband (unified cdb_if tie-offs).
   assign wb_alu.csr_wen = 1'b0;
   assign wb_alu.csr_wdata = '0;
   assign wb_alu.fp_flags_valid = 1'b0;

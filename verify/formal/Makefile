@@ -107,7 +107,7 @@ check-tools: ## Verify sby and yosys are available
 # ============================================================================
 # Formal Verification Targets
 # ============================================================================
-all: formal_exu_mul formal_bus formal_divsqrt ## Run all formal verification (excludes RVFI)
+all: formal_ieu_alu formal_ieu_mul formal_pmp formal_plru formal_rnu_maptable formal_clint formal_plic formal_dtm formal_bus formal_divsqrt ## Run all formal verification (excludes RVFI)
 
 $(FORMAL_BUS_PACK): \
 		$(RAPTOR_HOME)/hdl/rapt_pkg.sv \
@@ -124,12 +124,33 @@ $(FORMAL_BUS_PACK): \
 formal_bus: check-tools $(FORMAL_BUS_PACK) ## Verify AXI bus
 	sby -f bus.sby
 
-formal_exu_mul: check-tools ## Verify EXU multiplier
-	sby -f exu_mul.sby
+formal_ieu_mul: check-tools ## Verify IEU multiplier
+	sby -f ieu_mul.sby
+
+formal_ieu_alu: check-tools ## Verify RV32 IEU ALU and bitmanip equivalence
+	sby -f ieu_alu.sby
+
+formal_pmp: check-tools ## Prove RV32/RV64 PMP matching, priority and permissions
+	sby -f pmp.sby
+
+formal_plru: check-tools ## Prove 2/4/8-way PLRU selection and state updates
+	sby -f plru.sby
+
+formal_rnu_maptable: check-tools ## Prove rename MAP/RAT WAW priority and flush recovery
+	sby -f rnu_maptable.sby
+
+formal_clint: check-tools ## Prove CLINT timer, compare, register and interrupt behavior
+	sby -f clint.sby
+
+formal_plic: check-tools ## Prove RV32/RV64 PLIC arbitration, contexts and gateway lifecycle
+	sby -f plic.sby
+
+formal_dtm: check-tools ## Prove single-clock JTAG TAP and DMI transport behavior
+	sby -f dtm.sby
 
 DIVSQRT_PACK := build/divsqrt_pack.sv
 $(DIVSQRT_PACK): \
-		$(RAPTOR_HOME)/hdl/backend/fpu/rapt_fpu_divsqrt.sv
+		$(RAPTOR_HOME)/hdl/backend/feu/fpu/rapt_fpu_divsqrt.sv
 	@mkdir -p $(@D)
 	verilator -E -P \
 		-I$(RAPTOR_HOME)/hdl/configs/small -I$(RAPTOR_HOME)/hdl/include \
@@ -187,7 +208,14 @@ $(RVFI_CORE_DIR)/checks.cfg: $(RVFI_SRC_DIR)/checks.cfg $(RVFI_SRC_DIR)/wrapper.
 	ln -sf $(abspath $(RVFI_SRC_DIR))/wrapper.sv $(RVFI_CORE_DIR)/wrapper.sv
 
 # --- Generate RVFI pack file ---
-$(RVFI_PACK): $(VSRCS_RVFI)
+.PHONY: FORCE_RVFI_PACK
+FORCE_RVFI_PACK:
+
+# Always rebuild the preprocessed pack when an RVFI target is requested. A
+# normal source prerequisite list cannot notice a deleted or moved RTL file;
+# without this force edge, a hierarchy refactor can leave removed modules in a
+# timestamp-newer generated pack.
+$(RVFI_PACK): FORCE_RVFI_PACK $(VSRCS_RVFI)
 	@mkdir -p build
 	@echo "[formal] Generating RVFI-enabled pack: $@"
 	verilator -E -P -DRAPT_RVFI \

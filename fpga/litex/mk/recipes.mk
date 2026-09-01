@@ -692,7 +692,7 @@ else
 endif
 	@mkdir -p $(FPGA_DIR)
 	@OLD_HASH=$$(cat $(FPGA_STAMP) 2>/dev/null || echo ""); \
-	NEW_HASH="$(_FPGA_HASH_KEY)"; \
+	NEW_HASH=$$($(_FPGA_HASH_COMMAND)); \
 	if [ -f "$(FPGA_BITSTREAM)" ] && [ "$$OLD_HASH" = "$$NEW_HASH" ]; then \
 		echo "[INFO] Bitstream up to date (BOOT_MODE=$(BOOT_MODE), hash=$${NEW_HASH:0:12})"; \
 		echo "[INFO]   $(FPGA_BITSTREAM)"; \
@@ -706,7 +706,8 @@ endif
 			-source $(LITEX_DIR)/scripts/vivado_check_part.tcl -tclargs $(FPGA_PART) || exit 1; \
 	fi; \
 	$(call _run_litex_target,$(_FPGA_FLAGS) --build) && \
-	printf '%s' "$$NEW_HASH" > $(FPGA_STAMP)
+	FINAL_HASH=$$($(_FPGA_HASH_COMMAND)) && \
+	printf '%s' "$$FINAL_HASH" > $(FPGA_STAMP)
 	@$(MAKE) --no-print-directory fpga-reports-index $(_FPGA_REPORTS_INDEX_ARGS)
 	@echo ""
 	@echo "========================================="
@@ -779,7 +780,7 @@ fpga-build-force:
 
 fpga-bitstream-current:
 	@OLD_HASH=$$(cat $(FPGA_STAMP) 2>/dev/null || echo ""); \
-	NEW_HASH="$(_FPGA_HASH_KEY)"; \
+	NEW_HASH=$$($(_FPGA_HASH_COMMAND)); \
 	if [ -z "$$OLD_HASH" ] || [ "$$OLD_HASH" != "$$NEW_HASH" ]; then \
 		echo "[ERR] Refusing to program a stale or untracked bitstream."; \
 		echo "[ERR] Bitstream stamp: $${OLD_HASH:-missing}"; \
@@ -880,4 +881,3 @@ info:
 help:
 	@echo "Usage: make <target> [VAR=value ...]"
 	@awk '/^[a-zA-Z0-9_-]+:.*## / { target=$$0; sub(/:.*/, "", target); desc=$$0; sub(/.*## /, "", desc); printf "  %-30s %s\n", target, desc }' $(MAKEFILE_LIST)
-

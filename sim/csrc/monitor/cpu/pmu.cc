@@ -145,18 +145,17 @@ void perf_sample_per_cycle()
   uint8_t fqu_count = *(uint8_t *)&VERILOG_CPU(fqu__DOT__pmu_count);
 
   bool rou_ready = *(uint8_t *)&VERILOG_ROU(ready_a);
-  // OoO scheduler stall: any ALU-class IQ (IQ-A / IQ-B / BRQ) holds pending
-  // work but no ALU-class pipe issued this cycle. Aggregated in rapt_exu
-  // (the former unified RS was split into per-pipe issue queues).
-  bool exu_ooo_valid = *(uint8_t *)&VERILOG_CPU(exu__DOT__pmu_ooo_valid);
-  bool exu_ooo_valid_found = *(uint8_t *)&VERILOG_CPU(exu__DOT__pmu_ooo_valid_found);
-  uint32_t exu_ioq_valid = *(uint8_t *)&VERILOG_CPU(exu__DOT__u_ioq__DOT__ioq_valid);
-  bool exu_ioq_valid_found = *(uint8_t *)&VERILOG_CPU(exu__DOT__u_ioq__DOT__ioq_valid_found);
+  // OoO scheduler stall: any ALU-class IQ holds pending work but no IEU pipe
+  // issued this cycle. The IOQ is owned by the LSU.
+  bool exu_ooo_valid = *(uint8_t *)&VERILOG_CPU(ieu__DOT__pmu_ooo_valid);
+  bool exu_ooo_valid_found = *(uint8_t *)&VERILOG_CPU(ieu__DOT__pmu_ooo_valid_found);
+  uint32_t exu_ioq_valid = *(uint8_t *)&VERILOG_CPU(lsu__DOT__u_ioq__DOT__ioq_valid);
+  bool exu_ioq_valid_found = *(uint8_t *)&VERILOG_CPU(lsu__DOT__u_ioq__DOT__ioq_valid_found);
   uint8_t l1d_state = *(uint8_t *)&VERILOG_CPU(l1d_cache__DOT__l1d_state);
   bool lsu_l1d_hit = *(uint8_t *)&VERILOG_CPU(l1d_cache__DOT__tag_hit);
-  bool lsu_fwd_hit = *(uint8_t *)&VERILOG_CPU(lsu__DOT__fwd_hit);
-  bool lsu_load_in_sq = *(uint8_t *)&VERILOG_CPU(lsu__DOT__load_in_sq);
-  bool lsu_raddr_valid = *(uint8_t *)&VERILOG_CPU(lsu__DOT__raddr_valid);
+  bool lsu_fwd_hit = *(uint8_t *)&VERILOG_CPU(lsu__DOT__u_sq__DOT__fwd_hit);
+  bool lsu_load_in_sq = *(uint8_t *)&VERILOG_CPU(lsu__DOT__u_sq__DOT__load_in_sq);
+  bool lsu_raddr_valid = *(uint8_t *)&VERILOG_CPU(lsu__DOT__u_sq__DOT__raddr_valid);
   bool wbu_valid = *(uint8_t *)&VERILOG_CPU(cmu__DOT__valid);
   bool wbu_valid_b = *(uint8_t *)&VERILOG_CPU(cmu__DOT__valid_b);
   uint8_t l1i_state = *(uint8_t *)&VERILOG_CPU(l1i_cache__DOT__l1i_state);
@@ -264,12 +263,12 @@ void perf_sample_per_cycle()
   pmu.fqu_occupancy_sum += fqu_count;
 
   // 2. Structural full cycles + rising-edge events.
-  //    RS-full proxy: both distributed ALU IQs full (aggregated in rapt_exu);
+  //    RS-full proxy: both distributed ALU IQs full (aggregated in rapt_ieu);
   //    IOQ is 8 entries (IIQ_SIZE=8) -> full when uint8 == 0xFF.
   //    UOQ-blocked: rnu has a renamed uop but the dispatch path cannot accept it.
   //    True ROB-full is the rapt_rou all-entry-busy event pulse.
   //    SQ-full: width-stable 1-bit probe from the LSU (&sq_valid).
-  bool rs_full = *(uint8_t *)&VERILOG_CPU(exu__DOT__pmu_ooo_full);
+  bool rs_full = *(uint8_t *)&VERILOG_CPU(ieu__DOT__pmu_ooo_full);
   bool ioq_full = (exu_ioq_valid == 0xFFu);
   bool uoq_blocked = rnu_valid && !rou_ready;
   bool rob_full_event = *(uint8_t *)&VERILOG_ROU(pmu_rob_full);

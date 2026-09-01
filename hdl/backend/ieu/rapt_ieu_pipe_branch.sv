@@ -11,14 +11,14 @@
 // carries only ROB-state + branch-resolution fields (result/prd/rd tied 0
 // -> no PRF write port, no bypass network entry).
 /* verilator lint_off UNUSEDSIGNAL */
-module rapt_exu_pipe_branch #(
+module rapt_ieu_pipe_branch #(
     parameter unsigned XLEN = `RAPT_XLEN
 ) (
     // Issue slot from the branch issue queue
-    exu_iq_iss_if.fu iss,
+    iq_iss_if.fu iss,
 
     // Writeback (CDB port [2])
-    exu_wb_if.out wb_branch
+    cdb_if.out wb_branch
 );
   /* verilator lint_on UNUSEDSIGNAL */
 
@@ -49,7 +49,7 @@ module rapt_exu_pipe_branch #(
   assign wb_branch.mispredict = (wb_branch.npc != iss.pnpc);
   assign wb_branch.difftest_skip = 1'b0;
   // Branch pipe never writes rd nor produces CSR / trap / MEM sideband (unified
-  // exu_wb_if tie-offs; keeps the no-PRF-write-port / no-bypass-entry
+  // cdb_if tie-offs; keeps the no-PRF-write-port / no-bypass-entry
   // property: consumers never see a valid prd from this port).
   assign wb_branch.result = '0;
   assign wb_branch.prd = '0;

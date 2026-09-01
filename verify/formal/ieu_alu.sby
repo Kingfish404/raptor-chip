@@ -1,0 +1,33 @@
+[tasks]
+rv32
+rv32_clmul
+rv32_clmulh_basis
+rv32_clmulr
+
+[options]
+mode bmc
+depth 1
+
+[engines]
+rv32: smtbmc
+rv32_clmul: smtbmc z3
+rv32_clmulh_basis: smtbmc z3
+rv32_clmulr: smtbmc z3
+
+[script]
+rv32: plugin -i slang
+rv32: read_slang --single-unit formal_ieu_alu.sv rapt_ieu_alu.sv
+rv32_clmul: plugin -i slang
+rv32_clmul: read_slang --single-unit -DFORMAL_ALU_CLMUL formal_ieu_alu.sv rapt_ieu_alu.sv
+rv32_clmulh_basis: plugin -i slang
+rv32_clmulh_basis: read_slang --single-unit -DFORMAL_ALU_CLMUL -DFORMAL_ALU_CLMULH formal_ieu_alu.sv rapt_ieu_alu.sv
+rv32_clmulr: plugin -i slang
+rv32_clmulr: read_slang --single-unit -DFORMAL_ALU_CLMUL -DFORMAL_ALU_CLMULR formal_ieu_alu.sv rapt_ieu_alu.sv
+prep -top formal_ieu_alu
+
+[files]
+formal_ieu_alu.sv
+rapt_ieu_alu.sv ../../hdl/backend/ieu/rapt_ieu_alu.sv
+rapt.svh ../../hdl/include/rapt.svh
+rapt_config.svh ../../hdl/configs/formal/rapt_config.svh
+rapt_sva.svh ../../hdl/include/rapt_sva.svh

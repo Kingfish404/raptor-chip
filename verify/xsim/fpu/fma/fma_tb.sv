@@ -1,7 +1,7 @@
 // Directed regression for rapt_fpu_fma (single & double), covering the
 // subnormal / zero / rounding corner cases that previously failed RISCOF.
 // Handshake: assert `valid` for one cycle, result appears on `result`/`flags`
-// `result_valid` four clocks later.
+// `result_valid` marks the completion cycle.
 module tb;
   logic clock = 0, reset = 1, flush = 0, valid = 0;
   logic [5:0]  op;
@@ -25,7 +25,7 @@ module tb;
     begin
       @(negedge clock); a = x; b = y; c = z; rm = 0; op = 52; valid = 1;
       @(negedge clock); valid = 0;
-      repeat (6) @(negedge clock);
+      while (!rv) @(negedge clock);
       if (res !== er || flags !== ef) begin
         errors++;
         $display("FAIL fmadd.d(%h,%h,%h)=%h flags=%b  expect %h/%b", x, y, z, res, flags, er, ef);

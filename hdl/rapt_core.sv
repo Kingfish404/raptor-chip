@@ -92,6 +92,9 @@ module rapt_core #(
   // Optional PMU outputs from submodules are not consumed at core level.
   logic pmu_rob_full_unused;
   logic pmu_sq_full_unused;
+  logic pmu_ooo_valid_unused;
+  logic pmu_ooo_valid_found_unused;
+  logic pmu_ooo_full_unused;
   l1i_bus_if l1i_bus ();
 
   // FQU stage: registered fetch packets decouple IFU timing from IDU decode.
@@ -115,23 +118,31 @@ module rapt_core #(
 
   rou_csr_if rou_csr ();
 
-  // Dispatch-only uop payload snapshot (ROU -> EXU/RS)
+  // Dispatch-only uop payload snapshot (ROU -> execution queues)
   rapt_pkg::uop_payload_t uop_pl[`RAPT_ROB_SIZE];
 
-  // EXU stage: unified writeback (CDB) ports, one per execution pipeline.
-  // Index map (see exu_wb_if): ALU-CSR (full), ALU (simple+jump), Branch
-  // (conditional branches), MEM (IOQ loads/stores/atomics).
-  exu_wb_if wb_alu_csr ();  // ALU-CSR writeback => ROB/PRF/bypass
-  exu_wb_if wb_alu ();  // ALU writeback (pure arithmetic + JAL/JALR)
-  exu_wb_if wb_branch ();  // Branch writeback (conditional branches)
-  exu_wb_if exu_ioq_bcast ();  // MEM writeback (IOQ broadcast)
-  exu_wb_if exu_wb_mul ();  // MUL/DIV pipe writeback
+  dpu_iq_if disp_alq ();
+  dpu_iq_if #(.RS_SIZE(4)) disp_brq ();
+  dpu_iq_if #(.RS_SIZE(4)) disp_mdq ();
+  dpu_iq_if #(.RS_SIZE(4)) disp_fpq ();
+  dpu_ioq_if disp_ioq ();
+
+  // Unified CDB ports: ALU-CSR/FPU, ALU, branch, memory, and MUL/DIV.
+  cdb_if wb_alu_csr ();
+  cdb_if wb_alu_csr_raw ();
+  cdb_if wb_fpu ();
+  cdb_if wb_alu ();
+  cdb_if wb_branch ();
+  cdb_if exu_ioq_bcast ();
+  cdb_if exu_wb_mul ();
+  load_fast_if load_fast ();
+  logic alu_csr_issue_enable;
+  logic fpu_issue_enable;
 
   exu_prf_if exu_prf ();
   fpr_if fpr ();
   exu_csr_if exu_csr ();
-  exu_lsu_if exu_lsu ();
-  exu_l1d_if exu_l1d ();
+  lsu_l1d_mmu_if exu_l1d ();
 
   // CMU
   cmu_bcast_if cmu_bcast ();  // Difftest & Debug
@@ -146,20 +157,12 @@ module rapt_core #(
   csr_bcast_if csr_bcast ();
   pmp_update_if pmp_update ();
   pmp_state_if pmp_fetch_state ();
-  pmp_state_if pmp_exu_state ();
 
   rapt_pmp_state pmp_fetch_state_regs (
       .clock,
       .reset,
       .update(pmp_update),
       .state(pmp_fetch_state)
-  );
-
-  rapt_pmp_state pmp_exu_state_regs (
-      .clock,
-      .reset,
-      .update(pmp_update),
-      .state(pmp_exu_state)
   );
 
 `ifdef VERILATOR
@@ -481,31 +484,68 @@ module rapt_core #(
       .fpr(fpr)
   );
 
-  // EXU (EXecution Unit)
-  rapt_exu exu (
-      .clock(clock),
+  rapt_dpu dpu (
+      .clock,
+      .reset,
+      .rou_exu,
+      .disp_alq,
+      .disp_brq,
+      .disp_mdq,
+      .disp_fpq,
+      .disp_ioq
+  );
 
-      .cmu_bcast(cmu_bcast),
+  rapt_ieu ieu (
+      .clock,
+      .reset,
+      .cmu_bcast,
+      .csr_bcast,
+      .rou_exu,
+      .disp_alq,
+      .disp_brq,
+      .disp_mdq,
+      .exu_ioq_bcast,
+      .load_fast,
+      .alu_csr_issue_enable,
+      .exu_csr,
+      .wb_alu_csr_raw,
+      .wb_alu_csr,
+      .wb_alu,
+      .wb_branch,
+      .exu_wb_mul,
+      .pmu_ooo_valid(pmu_ooo_valid_unused),
+      .pmu_ooo_valid_found(pmu_ooo_valid_found_unused),
+      .pmu_ooo_full(pmu_ooo_full_unused),
+      .uop_pl
+  );
 
-      .rou_exu(rou_exu),
+  rapt_feu feu (
+      .clock,
+      .reset,
+      .cmu_bcast,
+      .csr_bcast,
+      .rou_exu,
+      .disp_fpq,
+      .wb_alu_csr,
+      .wb_alu,
+      .exu_ioq_bcast,
+      .exu_wb_mul,
+      .load_fast,
+      .fpr,
+      .wb_fpu,
+      .issue_enable(fpu_issue_enable),
+      .uop_pl
+  );
 
-      .wb_alu_csr(wb_alu_csr),
-      .wb_alu(wb_alu),
-      .wb_branch(wb_branch),
-      .exu_ioq_bcast(exu_ioq_bcast),
-      .exu_wb_mul(exu_wb_mul),
-
-      .exu_lsu(exu_lsu),
-      .exu_csr(exu_csr),
-      .fpr(fpr),
-
-      .csr_bcast(csr_bcast),
-      .pmp_state(pmp_exu_state),
-      .exu_l1d  (exu_l1d),
-
-      .uop_pl(uop_pl),
-
-      .reset(reset)
+  rapt_cdb_arb cdb_arb (
+      .clock,
+      .reset,
+      .alu_csr_pipe_enable(1'b1),
+      .fpu_issue_enable,
+      .wb_alu_csr_raw,
+      .wb_fpu,
+      .wb_alu_csr,
+      .alu_csr_issue_enable
   );
 
   // CMU (ComMit Unit)
@@ -542,22 +582,23 @@ module rapt_core #(
 
   // LSU (Load/Store Unit)
   rapt_lsu lsu (
-      .clock(clock),
-
-      .cmu_bcast(cmu_bcast),
-
-      .lsu_l1d(lsu_l1d),
-
-      .exu_lsu(exu_lsu),
-      .exu_ioq_bcast(exu_ioq_bcast),
-      .rou_lsu(rou_lsu),
-
-      .csr_bcast(csr_bcast),
-      .pmp_update(pmp_update),
-
-      .pmu_sq_full(pmu_sq_full_unused),
-
-      .reset(reset)
+      .clock,
+      .reset,
+      .cmu_bcast,
+      .lsu_l1d,
+      .exu_l1d,
+      .rou_exu,
+      .disp_ioq,
+      .wb_alu_csr,
+      .wb_alu,
+      .exu_wb_mul,
+      .exu_ioq_bcast,
+      .rou_lsu,
+      .csr_bcast,
+      .pmp_update,
+      .fpr,
+      .load_fast,
+      .pmu_sq_full(pmu_sq_full_unused)
   );
 
   rapt_l1d l1d_cache (

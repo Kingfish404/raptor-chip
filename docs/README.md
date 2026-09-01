@@ -79,13 +79,14 @@ raptor-chip/
 │   ├── rapt_core.sv      single-hart CPU body
 │   ├── rapt_pkg.sv       shared types (uop_t, rob_entry_t, ...)
 │   ├── frontend/         IFU, IDU, BPU, CSR
-│   ├── backend/          RNU, PRF, ROU, EXU, CMU
+│   ├── backend/          RNU, PRF, ROU, DPU, IEU, FEU, LSU, CMU
 │   ├── memory/           L1I/L1D, optional L2, TLB, PTW, AXI4 bus
 │   ├── perip/            CLINT, PLIC, debug module, JTAG DTM, DPI wrappers
 │   ├── include/          config, interfaces, DPI-C
 │   └── generated/        Chisel-generated decoders
 ├── nemu/                 NEMU reference ISS
 ├── sim/                  NPC Verilator simulator
+├── lspd/                 synthesis/PPA flow and non-product HDL wrappers
 ├── abstract-machine/     AM runtime (nanos-lite, navy-apps)
 ├── linux/                Linux kernel build scripts
 ├── fpga/                 FPGA integration (Gowin Tang Nano 20K, LiteX)

@@ -273,7 +273,7 @@ module rapt_rnu #(
 
 `ifdef RAPT_DUAL_ISSUE
         if (rnq_deq_fire_b) begin
-          rnq_tail_oh_a <= {rnq_tail_oh_a[RIQ_SIZE-3:0], rnq_tail_oh_a[RIQ_SIZE-1:RIQ_SIZE-2]};
+          rnq_tail_oh_a <= (rnq_tail_oh_a << 2) | (rnq_tail_oh_a >> (RIQ_SIZE - 2));
 
           // Slot B: rename with RAW dependency bypass from slot A
           rn_pipe_valid_b <= 1'b1;

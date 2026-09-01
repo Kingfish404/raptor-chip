@@ -3,7 +3,7 @@
 `include "rapt_dpi_c.svh"
 
 /* verilator lint_off PINCONNECTEMPTY */
-module rapt_lsu #(
+module rapt_lsu_sq #(
     parameter unsigned SQ_SIZE = `RAPT_SQ_SIZE,
     parameter int XLEN = `RAPT_XLEN
 ) (
@@ -13,12 +13,12 @@ module rapt_lsu #(
 
     lsu_l1d_if.master lsu_l1d,
 
-    exu_lsu_if.slave exu_lsu,
-    exu_wb_if.in exu_ioq_bcast,
+    lsu_pipe_if.slave exu_lsu,
+    cdb_if.in exu_ioq_bcast,
     rou_lsu_if.in rou_lsu,
 
     csr_bcast_if.in csr_bcast,
-    pmp_update_if.in pmp_update,
+    pmp_state_if.in pmp_state,
 
     // A2: PMU: one-cycle pulse when SQ becomes full
     /* verilator lint_off UNUSEDSIGNAL */
@@ -27,15 +27,6 @@ module rapt_lsu #(
 
     input reset
 );
-  pmp_state_if pmp_state ();
-
-  rapt_pmp_state pmp_state_regs (
-      .clock,
-      .reset,
-      .update(pmp_update),
-      .state(pmp_state)
-  );
-
   localparam int WordOffBits = $clog2(XLEN / 8);
   localparam int PageOffBits = 12;
   localparam int SQLen = $clog2(SQ_SIZE);

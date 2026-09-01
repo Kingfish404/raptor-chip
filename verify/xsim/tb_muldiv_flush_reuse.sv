@@ -11,13 +11,13 @@ module tb_muldiv_flush_reuse;
   cmu_bcast_if cmu_bcast();
       csr_bcast_if csr_bcast();
   rou_exu_if rou_exu();
-      exu_disp_rs_if #(.RS_SIZE(MdqSize)) disp();
-  exu_wb_if exu_rou();
-  exu_wb_if exu_rou_b();
-  exu_wb_if exu_ioq_bcast();
-  exu_wb_if exu_wb_mul();
+  dpu_iq_if #(.RS_SIZE(MdqSize)) disp();
+  cdb_if exu_rou();
+  cdb_if exu_rou_b();
+  cdb_if exu_ioq_bcast();
+  cdb_if exu_wb_mul();
 
-  rapt_exu_muldiv #(
+  rapt_ieu_muldiv #(
         .MDQ_SIZE(MdqSize)
   ) dut (
       .clock(clock),

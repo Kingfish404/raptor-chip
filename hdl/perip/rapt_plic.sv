@@ -36,6 +36,15 @@ module rapt_plic #(
     input reset,
 
     plic_bus_if.slave plic_bus
+`ifdef FORMAL
+    , output logic [2:0] formal_priority[NDEV+1],
+    output logic [NDEV:0] formal_pending,
+    output logic [NDEV:0] formal_enable[NCTX],
+    output logic [2:0] formal_threshold[NCTX],
+    output logic [NDEV:0] formal_gateway_busy,
+    output logic [NHART-1:0] formal_meip,
+    output logic [NHART-1:0] formal_seip
+`endif
 );
   // Width helpers (avoid 0-width when NDEV=1).
   // CamelCase to satisfy verible parameter-name-style.
@@ -70,6 +79,20 @@ module rapt_plic #(
   /* verilator lint_off UNUSEDSIGNAL */
   logic [NDEV:0] ext_irq_q;
   /* verilator lint_on UNUSEDSIGNAL */
+
+`ifdef FORMAL
+  for (genvar fs = 0; fs <= NDEV; fs++) begin : g_formal_priority
+    assign formal_priority[fs] = priority_q[fs];
+  end
+  for (genvar fc = 0; fc < NCTX; fc++) begin : g_formal_context
+    assign formal_enable[fc] = enable_q[fc];
+    assign formal_threshold[fc] = threshold_q[fc];
+  end
+  assign formal_pending = pending_q;
+  assign formal_gateway_busy = gateway_busy_q;
+  assign formal_meip = meip_q;
+  assign formal_seip = seip_q;
+`endif
 
   // ---------------------------------------------------------------------
   // Pure-functional address decode helpers. Verilator only sees the low

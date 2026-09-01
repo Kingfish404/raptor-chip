@@ -1,6 +1,6 @@
 # Differential unit test for rapt_fpu_divsqrt vs. host IEEE-754 FPU.
 #
-# The DUT (hdl/backend/fpu/rapt_fpu_divsqrt.sv) is exercised with random
+# The DUT (hdl/backend/feu/fpu/rapt_fpu_divsqrt.sv) is exercised with random
 # operands across both precisions, both operations, and all four rounding
 # modes supported by the host fenv (RNE/RTZ/RDN/RUP), plus subnormals,
 # infinities, zeros and NaNs. Numeric results must match the host bit-exactly;
@@ -12,7 +12,7 @@
 ROOT     := ../../../..
 HDL_INC  := $(ROOT)/hdl/include
 CONFIG   := $(ROOT)/hdl/configs/small
-DUT      := $(ROOT)/hdl/backend/fpu/rapt_fpu_divsqrt.sv
+DUT      := $(ROOT)/hdl/backend/feu/fpu/rapt_fpu_divsqrt.sv
 N        ?= 300000
 
 VERILATOR ?= verilator

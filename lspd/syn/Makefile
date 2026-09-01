@@ -4,6 +4,7 @@ SHELL := /bin/bash
 RAPT_HOME := $(abspath ../..)
 LSPD_DIR := $(RAPT_HOME)/lspd
 HDL_ROOT := $(RAPT_HOME)/hdl
+HDL_WRAPPER_DIR := $(LSPD_DIR)/hdl_wrapper
 FLOW_ROOT ?= $(RAPT_HOME)/third_party/yosys-opensta
 PLATFORM_ROOT := $(FLOW_ROOT)/third_party/lib
 
@@ -55,7 +56,8 @@ SRAM_LIB_FILES := $(shell $(MAKE) -s -C $(SRAM_DIR) print-libs PLATFORM=$(SRAM_P
 HDL_SV := $(HDL_ROOT)/rapt_pkg.sv \
           $(filter-out $(HDL_ROOT)/rapt_pkg.sv,$(shell find $(HDL_ROOT) -path '$(HDL_ROOT)/chisel' -prune -o -path '$(HDL_ROOT)/generated' -prune -o -name '*.sv' -print | sort)) \
           $(HDL_ROOT)/generated/rapt_idu_decoder.sv \
-          $(HDL_ROOT)/generated/rapt_idu_decoder_c.sv
+          $(HDL_ROOT)/generated/rapt_idu_decoder_c.sv \
+          $(shell find $(HDL_WRAPPER_DIR) -name '*.sv' -print | sort)
 INCLUDE_DIRS := $(HDL_ROOT)/configs/$(RAPT_CONFIG) \
                 $(HDL_ROOT) \
                 $(HDL_ROOT)/include \

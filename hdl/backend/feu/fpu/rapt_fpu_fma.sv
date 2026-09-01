@@ -1,17 +1,64 @@
 `include "rapt.svh"
 
-// Five-stage, one-operation-at-a-time IEEE-754 fused multiply-add unit.
+// Six-stage, one-operation-at-a-time IEEE-754 fused multiply-add unit.
 //
 // Stage 1: decode/normalize operands and calculate the mantissa product.
-// Stage 2: align the product/addend and calculate the signed sum.
-// Stage 3: calculate magnitude.
-// Stage 4: calculate the leading-one position.
-// Stage 5: normalize, round, and pack the architectural result.
+// Stage 2: align the product/addend in the fixed-point work window.
+// Stage 3: calculate the signed sum with a parallel-prefix adder.
+// Stage 4: apply the discarded-bit correction and form the magnitude.
+// Stage 5: calculate the leading-one position.
+// Stage 6: normalize, round, and pack the architectural result.
 //
 // The unit deliberately exposes a ready/valid boundary. The FPU execution
 // pipe holds the ROB metadata while this unit is occupied and writes the FPR
 // only with result_valid. This creates real RTL timing boundaries; no FPGA
 // multicycle exception is required for the FMA datapath.
+
+// A technology-independent parallel-prefix adder prevents wide FMA sums from
+// degrading into a linear ripple-carry chain in standard-cell synthesis.  The
+// prefix network has O(log2(WIDTH)) logic depth and intentionally drops carry
+// out, matching SystemVerilog's fixed-width addition semantics.
+module rapt_fpu_prefix_adder #(
+    parameter int WIDTH = 256
+) (
+    input  logic [WIDTH-1:0] lhs,
+    input  logic [WIDTH-1:0] rhs,
+    output logic [WIDTH-1:0] sum
+);
+  localparam int LEVELS = $clog2(WIDTH);
+  wire [WIDTH-1:0] bit_propagate;
+  wire [WIDTH-1:0] prefix_generate[0:LEVELS];
+  wire [WIDTH-1:0] prefix_propagate[0:LEVELS];
+
+  assign bit_propagate = lhs ^ rhs;
+  assign prefix_generate[0] = lhs & rhs;
+  assign prefix_propagate[0] = bit_propagate;
+
+  for (genvar level = 0; level < LEVELS; level++) begin : gen_prefix_level
+    localparam int DISTANCE = 1 << level;
+    for (genvar bit_index = 0; bit_index < WIDTH; bit_index++) begin : gen_prefix_bit
+      if (bit_index >= DISTANCE) begin : gen_combine
+        assign prefix_generate[level+1][bit_index] =
+            prefix_generate[level][bit_index]
+            | (prefix_propagate[level][bit_index]
+               & prefix_generate[level][bit_index-DISTANCE]);
+        assign prefix_propagate[level+1][bit_index] =
+            prefix_propagate[level][bit_index]
+            & prefix_propagate[level][bit_index-DISTANCE];
+      end else begin : gen_pass
+        assign prefix_generate[level+1][bit_index] = prefix_generate[level][bit_index];
+        assign prefix_propagate[level+1][bit_index] = prefix_propagate[level][bit_index];
+      end
+    end
+  end
+
+  assign sum[0] = bit_propagate[0];
+  for (genvar bit_index = 1; bit_index < WIDTH; bit_index++) begin : gen_sum_bit
+    assign sum[bit_index] = bit_propagate[bit_index]
+        ^ prefix_generate[LEVELS][bit_index-1];
+  end
+endmodule
+
 module rapt_fpu_fma #(
     parameter bit TARGET_DOUBLE = 1'b0
 ) (
@@ -69,7 +116,7 @@ module rapt_fpu_fma #(
     end
   endfunction
 
-  logic s1_valid_q, s2_valid_q, s3_valid_q, s4_valid_q, s5_valid_q;
+  logic s1_valid_q, align_valid_q, s2_valid_q, s3_valid_q, s4_valid_q, s5_valid_q;
 
   logic [MantBits-1:0] s1_mant_a_q, s1_mant_b_q, s1_mant_c_q;
   logic [ProductBits-1:0] s1_product_q;
@@ -81,9 +128,18 @@ module rapt_fpu_fma #(
   logic [4:0] s1_special_flags_q;
   logic [2:0] s1_rounding_mode_q;
 
+  logic [WorkBits-1:0] align_product_term_q, align_addend_term_q;
+  logic align_product_sign_q, align_addend_sign_q, align_discarded_sign_q;
+  logic signed [13:0] align_common_base_q;
+  logic align_zero_sign_q, align_sticky_q;
+  logic align_special_q;
+  logic [63:0] align_special_result_q;
+  logic [4:0] align_special_flags_q;
+  logic [2:0] align_rounding_mode_q;
+
   logic signed [WorkBits-1:0] s2_total_q;
   logic signed [13:0] s2_common_base_q;
-  logic s2_result_sign_q;
+  logic s2_result_sign_q, s2_discarded_sign_q;
   logic s2_sticky_q;
   logic s2_special_q;
   logic [63:0] s2_special_result_q;
@@ -129,14 +185,18 @@ module rapt_fpu_fma #(
   logic [4:0] special_flags_c;
   logic [ProductBits-1:0] product_c;
 
-  logic signed [WorkBits-1:0] s2_total_c;
-  logic signed [13:0] s2_common_base_c;
-  logic s2_result_sign_c, s2_sticky_c;
-  logic s2_special_c;
-  logic [63:0] s2_special_result_c;
-  logic [4:0] s2_special_flags_c;
+  logic [WorkBits-1:0] align_product_term_c, align_addend_term_c;
+  logic signed [13:0] align_common_base_c;
+  logic align_zero_sign_c, align_sticky_c, align_discarded_sign_c;
+  logic align_special_c;
+  logic [63:0] align_special_result_c;
+  logic [4:0] align_special_flags_c;
 
-  logic [WorkBits-1:0] s3_magnitude_c;
+  logic [WorkBits-1:0] signed_product_c, signed_addend_c, sign_bias_c;
+  logic [WorkBits-1:0] carry_save_sum_c, carry_save_carry_c;
+  logic [WorkBits-1:0] s2_total_c;
+  logic [WorkBits-1:0] magnitude_base_c, magnitude_adjust_c, s3_magnitude_c;
+  logic s3_result_sign_c;
   logic [LeadingBits-1:0] s4_leading_one_c;
   logic [63:0] stage4_result_c;
   logic [4:0] stage4_flags_c;
@@ -212,8 +272,6 @@ module rapt_fpu_fma #(
     if (a_zero_c) mant_a_c = '0;
     if (b_zero_c) mant_b_c = '0;
     if (c_zero_c) mant_c_c = '0;
-    product_c = mant_a_c * mant_b_c;
-
     special_result_c = TARGET_DOUBLE ? 64'h7ff8_0000_0000_0000
       : {32'hffff_ffff, 32'h7fc0_0000};
     special_flags_c = {a_snan_c || b_snan_c || c_snan_c, 4'b0};
@@ -239,11 +297,12 @@ module rapt_fpu_fma #(
       special_result_c = TARGET_DOUBLE ? {addend_sign_c, 11'h7ff, 52'b0}
         : {32'hffff_ffff, addend_sign_c, 8'hff, 23'b0};
     end
+    product_c = mant_a_c * mant_b_c;
   end
 
   always_comb begin
-    logic signed [WorkBits-1:0] product_term;
-    logic signed [WorkBits-1:0] addend_term;
+    logic [WorkBits-1:0] product_term;
+    logic [WorkBits-1:0] addend_term;
     logic signed [13:0] product_base;
     logic signed [13:0] addend_base;
     logic signed [13:0] common_base;
@@ -254,12 +313,13 @@ module rapt_fpu_fma #(
     logic addend_discarded;
     logic discarded_sign;
 
-    s2_total_c = '0;
-    s2_common_base_c = '0;
+    align_product_term_c = '0;
+    align_addend_term_c = '0;
+    align_common_base_c = '0;
     /* Preserve the sign of the nonzero term when the other FMA term is
      * exactly zero.  The opposite-sign/RDN rule applies only when two
      * nonzero magnitudes cancel exactly. */
-    s2_result_sign_c = (s1_product_zero_q && s1_addend_zero_q)
+    align_zero_sign_c = (s1_product_zero_q && s1_addend_zero_q)
       ? ((s1_product_sign_q == s1_addend_sign_q)
         ? s1_product_sign_q
         : (s1_rounding_mode_q == 3'b010))
@@ -270,10 +330,11 @@ module rapt_fpu_fma #(
           : (s1_product_sign_q == s1_addend_sign_q)
             ? s1_product_sign_q
             : (s1_rounding_mode_q == 3'b010);
-    s2_sticky_c = 1'b0;
-    s2_special_c = s1_special_q;
-    s2_special_result_c = s1_special_result_q;
-    s2_special_flags_c = s1_special_flags_q;
+    align_sticky_c = 1'b0;
+    align_discarded_sign_c = 1'b0;
+    align_special_c = s1_special_q;
+    align_special_result_c = s1_special_result_q;
+    align_special_flags_c = s1_special_flags_q;
     product_term = '0;
     addend_term = '0;
     product_discarded = 1'b0;
@@ -336,19 +397,70 @@ module rapt_fpu_fma #(
         for (integer index = 0; index < MantBits; index = index + 1)
         if (index < addend_shift) addend_discarded = addend_discarded || s1_mant_c_q[index];
       end
-      if (s1_product_sign_q) product_term = -product_term;
-      if (s1_addend_sign_q) addend_term = -addend_term;
-      s2_total_c = product_term + addend_term;
       discarded_sign = product_discarded
         ? s1_product_sign_q : s1_addend_sign_q;
-      if (product_discarded || addend_discarded) begin
-        if (!s2_total_c[WorkBits-1] && discarded_sign) s2_total_c = s2_total_c - 1'b1;
-        else if (s2_total_c[WorkBits-1] && !discarded_sign) s2_total_c = s2_total_c + 1'b1;
-      end
-      s2_common_base_c = common_base;
-      s2_sticky_c = product_discarded || addend_discarded;
+      align_product_term_c = product_term;
+      align_addend_term_c = addend_term;
+      align_common_base_c = common_base;
+      align_sticky_c = product_discarded || addend_discarded;
+      align_discarded_sign_c = discarded_sign;
     end
   end
+
+  // Convert both aligned magnitudes to two's-complement operands without a
+  // carry-propagating negation.  A carry-save compressor folds in the two
+  // sign-bias bits; only the following prefix network propagates carry.
+  always_comb begin
+    signed_product_c = align_product_term_q ^ {WorkBits{align_product_sign_q}};
+    signed_addend_c = align_addend_term_q ^ {WorkBits{align_addend_sign_q}};
+    sign_bias_c = '0;
+    sign_bias_c[1:0] = {
+      align_product_sign_q & align_addend_sign_q,
+      align_product_sign_q ^ align_addend_sign_q
+    };
+    carry_save_sum_c = signed_product_c ^ signed_addend_c ^ sign_bias_c;
+    carry_save_carry_c = ((signed_product_c & signed_addend_c)
+        | (signed_product_c & sign_bias_c)
+        | (signed_addend_c & sign_bias_c)) << 1;
+  end
+
+  rapt_fpu_prefix_adder #(.WIDTH(WorkBits)) u_total_adder (
+      .lhs(carry_save_sum_c),
+      .rhs(carry_save_carry_c),
+      .sum(s2_total_c)
+  );
+
+  // Fold the one-ULP discarded-bit correction into the absolute-value
+  // operation.  This needs one more prefix addition, but no linear negation.
+  always_comb begin
+    magnitude_base_c = '0;
+    magnitude_adjust_c = '0;
+    s3_result_sign_c = s2_total_q[WorkBits-1];
+    if (!s2_total_q[WorkBits-1]) begin
+      magnitude_base_c = s2_total_q;
+      if (s2_sticky_q && s2_discarded_sign_q) begin
+        if (s2_total_q == '0) begin
+          magnitude_adjust_c[0] = 1'b1;
+          s3_result_sign_c = 1'b1;
+        end else begin
+          magnitude_adjust_c = '1;
+        end
+      end
+    end else begin
+      magnitude_base_c = ~s2_total_q;
+      if (s2_sticky_q && !s2_discarded_sign_q) begin
+        if (s2_total_q == '1) s3_result_sign_c = 1'b0;
+      end else begin
+        magnitude_adjust_c[0] = 1'b1;
+      end
+    end
+  end
+
+  rapt_fpu_prefix_adder #(.WIDTH(WorkBits)) u_magnitude_adder (
+      .lhs(magnitude_base_c),
+      .rhs(magnitude_adjust_c),
+      .sum(s3_magnitude_c)
+  );
 
   always_comb begin
     logic [WorkBits-1:0] magnitude_aligned;
@@ -455,13 +567,10 @@ module rapt_fpu_fma #(
     end
   end
 
-  always_comb begin
-    s3_magnitude_c = s2_total_q[WorkBits-1] ? -s2_total_q : s2_total_q;
-    s4_leading_one_c = find_leading_one(s3_magnitude_q);
-  end
+  always_comb s4_leading_one_c = find_leading_one(s3_magnitude_q);
 
-  assign ready = !(s1_valid_q || s2_valid_q || s3_valid_q || s4_valid_q
-    || s5_valid_q);
+  assign ready = !(s1_valid_q || align_valid_q || s2_valid_q
+    || s3_valid_q || s4_valid_q || s5_valid_q);
   assign result = result_q;
   assign flags = flags_q;
   assign result_valid = s5_valid_q;
@@ -469,6 +578,7 @@ module rapt_fpu_fma #(
   always_ff @(posedge clock) begin
     if (reset || flush) begin
       s1_valid_q <= 1'b0;
+      align_valid_q <= 1'b0;
       s2_valid_q <= 1'b0;
       s3_valid_q <= 1'b0;
       s4_valid_q <= 1'b0;
@@ -479,7 +589,8 @@ module rapt_fpu_fma #(
       s5_valid_q <= s4_valid_q;
       s4_valid_q <= s3_valid_q;
       s3_valid_q <= s2_valid_q;
-      s2_valid_q <= s1_valid_q;
+      s2_valid_q <= align_valid_q;
+      align_valid_q <= s1_valid_q;
       s1_valid_q <= valid && ready;
       if (valid && ready) begin
         s1_mant_a_q <= mant_a_c;
@@ -499,19 +610,34 @@ module rapt_fpu_fma #(
         s1_rounding_mode_q <= rounding_mode;
       end
       if (s1_valid_q) begin
+        align_product_term_q <= align_product_term_c;
+        align_addend_term_q <= align_addend_term_c;
+        align_product_sign_q <= s1_product_sign_q;
+        align_addend_sign_q <= s1_addend_sign_q;
+        align_discarded_sign_q <= align_discarded_sign_c;
+        align_common_base_q <= align_common_base_c;
+        align_zero_sign_q <= align_zero_sign_c;
+        align_sticky_q <= align_sticky_c;
+        align_special_q <= align_special_c;
+        align_special_result_q <= align_special_result_c;
+        align_special_flags_q <= align_special_flags_c;
+        align_rounding_mode_q <= s1_rounding_mode_q;
+      end
+      if (align_valid_q) begin
         s2_total_q <= s2_total_c;
-        s2_common_base_q <= s2_common_base_c;
-        s2_result_sign_q <= s2_result_sign_c;
-        s2_sticky_q <= s2_sticky_c;
-        s2_special_q <= s2_special_c;
-        s2_special_result_q <= s2_special_result_c;
-        s2_special_flags_q <= s2_special_flags_c;
-        s2_rounding_mode_q <= s1_rounding_mode_q;
+        s2_common_base_q <= align_common_base_q;
+        s2_result_sign_q <= align_zero_sign_q;
+        s2_discarded_sign_q <= align_discarded_sign_q;
+        s2_sticky_q <= align_sticky_q;
+        s2_special_q <= align_special_q;
+        s2_special_result_q <= align_special_result_q;
+        s2_special_flags_q <= align_special_flags_q;
+        s2_rounding_mode_q <= align_rounding_mode_q;
       end
       if (s2_valid_q) begin
         s3_magnitude_q <= s3_magnitude_c;
         s3_common_base_q <= s2_common_base_q;
-        s3_result_sign_q <= s2_total_q[WorkBits-1];
+        s3_result_sign_q <= s3_result_sign_c;
         s3_zero_sign_q <= s2_result_sign_q;
         s3_sticky_q <= s2_sticky_q;
         s3_special_q <= s2_special_q;

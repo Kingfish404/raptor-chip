@@ -28,11 +28,11 @@ module rapt_rou #(
     exu_prf_if.master exu_prf,
     rou_exu_if.master rou_exu,
 
-    exu_wb_if.in exu_rou,
-    exu_wb_if.in exu_rou_b,
-    exu_wb_if.in exu_rou_c,
-    exu_wb_if.in exu_ioq_bcast,
-    exu_wb_if.in exu_wb_mul,
+    cdb_if.in exu_rou,
+    cdb_if.in exu_rou_b,
+    cdb_if.in exu_rou_c,
+    cdb_if.in exu_ioq_bcast,
+    cdb_if.in exu_wb_mul,
 
     // interrupt
     csr_bcast_if.in csr_bcast,

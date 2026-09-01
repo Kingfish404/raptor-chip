@@ -4,13 +4,13 @@ logic pmu_sq_full;
 
 cmu_bcast_if cmu_bcast();
 lsu_l1d_if lsu_l1d();
-exu_lsu_if exu_lsu();
-exu_wb_if exu_ioq_bcast();
+lsu_pipe_if exu_lsu();
+cdb_if exu_ioq_bcast();
 rou_lsu_if rou_lsu();
 csr_bcast_if csr_bcast();
 pmp_state_if pmp_state();
 
-rapt_lsu #(.SQ_SIZE(LsuTbSqSize)) dut (
+rapt_lsu_sq #(.SQ_SIZE(LsuTbSqSize)) dut (
     .clock,
     .cmu_bcast,
     .lsu_l1d,

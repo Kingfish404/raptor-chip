@@ -40,7 +40,7 @@ verify/
 │   │   └── wrapper.sv     # RVFI wrapper with unconstrained AXI4
 │   ├── riscv-formal/     # riscv-formal repo (auto-cloned, gitignored)
 │   ├── bus.sby           # AXI bus formal property
-│   └── exu_mul.sby       # Multiplier formal property
+│   └── ieu_mul.sby       # IEU multiplier formal property
 ├── xsim/               # Module-level SystemVerilog testbenches
 │   └── fpu/              # Verilator FPU arithmetic/conversion tests
 └── build/              # Generated artifacts (gitignored)
@@ -222,8 +222,9 @@ simulator exit and then merged/reported via `verilator_coverage`.
 
 ### 5. Formal Verification (`make -C formal`)
 
-Uses [SymbiYosys](https://github.com/YosysHQ/sby) for bounded model checking.
-Runs from the `formal/` subdirectory.
+Uses [SymbiYosys](https://github.com/YosysHQ/sby) for symbolic equivalence,
+k-induction, cover reachability, and bounded model checking. Runs from the
+`formal/` subdirectory.
 
 **Setup:**
 ```bash
@@ -233,8 +234,35 @@ make -C formal setup      # Download oss-cad-suite (yosys, sby, solvers)
 **Standalone property checks:**
 ```bash
 make -C formal formal_bus       # AXI bus protocol properties
-make -C formal formal_exu_mul   # Multiplier correctness properties
+make -C formal formal_ieu_alu   # RV32 ALU + Zb*/Zicond equivalence
+make -C formal formal_ieu_mul   # Multiplier correctness properties
+make -C formal formal_pmp       # RV32/RV64 PMP priority and permissions
+make -C formal formal_plru      # 2/4/8-way replacement + invalid priority
+make -C formal formal_rnu_maptable # MAP/RAT WAW priority + flush recovery
+make -C formal formal_clint     # CLINT timer/register/interrupt semantics
+make -C formal formal_plic      # PLIC priority/context/gateway lifecycle
+make -C formal formal_dtm       # Single-clock JTAG TAP + DMI transport
+make -C formal formal_divsqrt   # FPU div/sqrt control, flush, and liveness
+make -C formal all              # All standalone checks above
 ```
+
+The ALU proof is exhaustive over symbolic RV32 operands for all non-CLMUL
+operations. CLMUL and CLMULR are also exhaustive; CLMULH exhaustively proves
+all polynomial basis terms (the implementation is their linear XOR
+accumulation). PLRU, maptable, CLINT, and PLIC use k-induction and include
+reachable cover witnesses. CLINT checks RV32/RV64 plus divider-bypass and
+divided timer paths. PLIC uses k-induction for reduced RV32/RV64 geometries and
+a four-cycle BMC on the production RV32 geometry (31 sources, two contexts).
+Its lifecycle covers use three symbolic sources and two contexts to preserve
+arbitration ties, M/S interrupt routing, and claim/complete behavior while
+keeping witnesses short. The bus check explores 12 cycles of arbitrary
+backpressure, while div/sqrt explores 70 cycles to exceed the longest iterative
+operation.
+
+The DTM proof covers the implemented single-clock simulation transport: all 16
+TAP states, IR/DR shifting, IDCODE/DTMCS capture, and DMI request/response
+sequencing. CDC, busy/sticky status, and reset side effects remain explicitly
+outside `rapt_dtm`'s current implementation contract.
 
 #### riscv-formal (RVFI)
 
