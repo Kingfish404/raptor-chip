@@ -8,7 +8,8 @@ reset/MROM -> OpenSBI (M-mode) -> Linux (S-mode) -> init/userspace
 
 The top-level Makefile is the preferred entry point. It downloads prebuilt
 OpenSBI + Linux payloads from `Kingfish404/linux-build` and keeps NEMU/NPC
-configuration in sync. The default `LINUX_BUILD_VERSION` is `v6.18.22`.
+configuration in sync. By default it fetches `v6.18.49` assets from the
+[`rv-v6.18.49` release](https://github.com/Kingfish404/linux-build/releases/tag/rv-v6.18.49).
 
 ## Quick Commands
 
@@ -20,29 +21,32 @@ make linux-download
 make linux-boot-nemu32 ARGS="-b -n"
 make linux-boot-rv32 ARGS="-b -n"
 
-# RV32 NPC with NEMU difftest reference
-make linux-boot-rv32-difftest ARGS="-b -n"
-
 # RV32 Linux on the KU15P FPGA through LiteX BIOS + MIG DDR4
 make -C fpga/litex linux-fpga-e2e UART_PORT=/dev/ttyUSB0
 
 # RV64 prebuilt payload and NPC paths
 make linux-download-rv64
 make linux-boot-rv64 ARGS="-b -n"
-make linux-boot-rv64-difftest ARGS="-b -n"
 make linux-boot-nemu64-device
 
-# Hard-float F/D Buildroot payloads (payloads are built separately)
-make linux-boot-rv32gc LINUX_RV32GC_PAYLOAD=/path/to/fw_payload.bin
-make linux-boot-rv64gc LINUX_RV64GC_PAYLOAD=/path/to/fw_payload.bin
+# Hard-float F/D Buildroot payloads (downloaded automatically)
+make linux-boot-rv32gc
+make linux-boot-rv64gc
+
+# Complete RV32GC Buildroot payload used by the FPGA flow
+make linux-download-rv32gc-fpga
 ```
 
 Useful overrides:
 
 ```shell
-make linux-boot-rv32 LINUX_BUILD_VERSION=v6.18.22 MAX_INST=100000000 ARGS="-b -n"
+make linux-boot-rv32 LINUX_BUILD_RELEASE=rv-v6.18.49 LINUX_BUILD_VERSION=v6.18.49 MAX_INST=100000000 ARGS="-b -n"
 make linux-boot-rv32 LINUX_RV32_PAYLOAD=/path/to/fw_payload.bin ARGS="-b -n"
 ```
+
+All NPC Linux boot targets use the matching RV32/RV64 NEMU difftest reference
+by default, including the hard-float `rv32gc` and `rv64gc` targets. For focused
+simulator diagnosis, pass `DIFF_REF_SO=` explicitly to disable comparison.
 
 ## Supported Modes
 
@@ -52,7 +56,7 @@ make linux-boot-rv32 LINUX_RV32_PAYLOAD=/path/to/fw_payload.bin ARGS="-b -n"
 | RV32 KU15P FPGA     | LiteX BIOS + MIG DDR4 + OpenSBI/Linux | Hardware flow; serialboot or FAT32 SD-card `boot.bin` |
 | RV64 Linux          | Sv39 PTW/TLB + NPC/NEMU helpers       | Build and boot targets are wired; current boot result should be checked per commit |
 | RV32/RV64 hard-float | `*gc` DTB + Buildroot F/D payload    | NPC targets are wired; payloads are built separately  |
-| RV64 xv6 smoke path | Sv39 PTW/TLB + A/D writeback          | Available via `app/tinyos` helpers                    |
+| RV64 xv6 smoke path | Sv39 PTW/TLB + Svade (software-managed A/D) | Available via `app/tinyos` helpers               |
 
 The presence of an RV64 or hard-float target documents integration and build
 wiring, not a reproduced full boot result for every checkout. Use a dated boot
@@ -65,8 +69,10 @@ See [linux/README.md](../linux/README.md) and [app/tinyos/README.md](../app/tiny
 The downloaded payloads live under `linux/build/`:
 
 ```text
-linux/build/linux-riscv-qemu-rv32-m-<version>/fw_payload.bin
+linux/build/linux-riscv-qemu-rv32-fast-<version>/fw_payload.bin
 linux/build/linux-riscv-qemu-rv64-m-<version>/fw_payload.bin
+linux/build/linux-riscv-rv32-qemu-rv32-fast-buildroot-<version>/Image
+linux/build/linux-riscv-rv32-qemu-rv32-buildroot-<version>/fw_payload.bin
 ```
 
 Use the `linux/Makefile` helpers when another flow needs the exact path:
@@ -93,6 +99,14 @@ The KU15P Linux DT advertises `zicbom` and `riscv,cbom-block-size` using the
 selected RTL preset's `RAPT_CACHE_LINE_BYTES`. LiteSDCard DMA is non-coherent;
 the BIOS calls the CPU cache-maintenance hook after DMA, and Raptor currently
 implements that hook as a conservative whole-L1D `cbo.flush` operation.
+
+The NEMU RV32GC/RV64GC configurations inject a fresh 256-bit host-random seed
+into the external DTB `/chosen/rng-seed` property before each boot. This matches
+QEMU's early-boot entropy handoff and works even when a pre-built guest kernel
+does not contain a hardware RNG driver. They also expose a virtio-mmio entropy
+device at `0x10003000` on PLIC source 3 for ongoing entropy. Guest kernels must
+enable `CONFIG_HW_RANDOM=y` and `CONFIG_HW_RANDOM_VIRTIO=y` to use that device;
+Buildroot then sees `virtio_rng.0` as `/dev/hwrng`.
 
 ## Build From Source
 

@@ -2,6 +2,32 @@
 
 Please see `/linux/Makefile` in this directory for details.
 
+## Pre-built release images
+
+Raptor downloads its pre-built Linux images from the
+[`linux-build` rv-v6.18.49 release](https://github.com/Kingfish404/linux-build/releases/tag/rv-v6.18.49)
+into the ignored `linux/build/` directory. Downloads are checked against the
+SHA-256 digests published by GitHub before extraction.
+
+```sh
+# Standard RV32/RV64 simulator payloads.
+make download
+
+# Fast RV32GC/RV64GC Buildroot Images used by RTL simulation.
+make download-gc
+
+# Complete RV32GC Buildroot payload used by the FPGA SD-card image.
+make download-rv32gc-fpga
+
+# Fetch every release asset used by the repository.
+make download-all
+```
+
+The release tag and asset version are separate variables. The current
+`rv-v6.18.49` release publishes files suffixed with `v6.18.49`. Override `LINUX_BUILD_RELEASE`,
+`LINUX_BUILD_VERSION`, and the corresponding `*_SHA256` value together when
+selecting another release.
+
 ## Linux Dependencies
 
 `make opensbi-rv32` and `make opensbi-rv64` use Clang/LLVM and require `ld.lld`

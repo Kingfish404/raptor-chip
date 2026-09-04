@@ -27,10 +27,33 @@
 
 #define R(i) gpr(i)
 #define CSR(i) sr(i)
-#define CSR_READ(i)                                                                                                   \
-  ((((i) & 0xfff) == CSR_FFLAGS) ? (CSR(CSR_FCSR) & 0x1f) : (((i) & 0xfff) == CSR_FRM) ? ((CSR(CSR_FCSR) >> 5) & 0x7) \
-                                                        : (((i) & 0xfff) == CSR_FCSR)  ? (CSR(CSR_FCSR) & 0xff)       \
-                                                                                       : CSR(i))
+static inline word_t csr_read_value(uint16_t csr)
+{
+  csr &= 0xfff;
+  if (is_hpm_zero_csr(csr))
+    return 0;
+  if (csr == CSR_FFLAGS)
+    return CSR(CSR_FCSR) & 0x1f;
+  if (csr == CSR_FRM)
+    return (CSR(CSR_FCSR) >> 5) & 0x7;
+  if (csr == CSR_FCSR)
+    return CSR(CSR_FCSR) & 0xff;
+
+  /* Raptor implements the user-visible counters as read-only aliases of the
+   * corresponding machine counters, rather than as independent storage. */
+  if (csr == CSR_CYCLE_)
+    return CSR(CSR_MCYCLE);
+  if (csr == CSR_INSTRET)
+    return CSR(CSR_MINSTRET);
+#ifndef CONFIG_RV64
+  if (csr == CSR_CYCLEH)
+    return CSR(CSR_MCYCLEH);
+  if (csr == CSR_INSTRETH)
+    return CSR(CSR_MINSTRETH);
+#endif
+  return CSR(csr);
+}
+#define CSR_READ(i) csr_read_value(i)
 /* CSR write with PMP hook: routes writes to pmpcfg/pmpaddr through
  * pmp_csr_write() which enforces WARL masking and L-bit lockdown.  All
  * other CSRs fall through to the raw cpu.sr[] store. */
@@ -63,17 +86,40 @@ static inline word_t csrw_warl(uint16_t c, word_t v)
   {
     return v & ~(word_t)0x1;
   }
+  if (c == CSR_SATP)
+  {
+#ifdef CONFIG_RV64
+    /* Raptor implements ASID[8:0].  Keep MODE and the low nine ASID bits,
+     * while making ASID[15:9] WARL-zero exactly as rapt_csr.sv does. */
+    return v & ~((word_t)0x7f << 53);
+#else
+    return v;
+#endif
+  }
+  if (c == CSR_MCOUNTEREN || c == CSR_SCOUNTEREN)
+  {
+    return v & (word_t)0x7;
+  }
+  if (c == CSR_MSTATUSH)
+  {
+    /* Raptor is little-endian only, so MBE/SBE are WARL-zero. */
+    return 0;
+  }
   if (c == CSR_SENVCFG)
   {
-    return v & (word_t)0x70;
+    word_t result = v & (word_t)0xf0;
+    return (result & (word_t)0x30) == (word_t)0x20
+        ? result | (word_t)0x10 : result;
   }
   if (c == CSR_MENVCFG)
   {
 #ifdef CONFIG_RV64
-    return v & ((word_t)0x8000000000000000ull | (word_t)0x70);
+    word_t result = v & ((word_t)0x8000000000000000ull | (word_t)0xf0);
 #else
-    return v & (word_t)0x70;
+    word_t result = v & (word_t)0xf0;
 #endif
+    return (result & (word_t)0x30) == (word_t)0x20
+        ? result | (word_t)0x10 : result;
   }
   return v;
 }
@@ -98,6 +144,10 @@ static inline word_t csrw_warl(uint16_t c, word_t v)
       else                                                                              \
         CSR(CSR_FCSR) = _v & 0xff;                                                      \
       CSR(CSR_MSTATUS) = (CSR(CSR_MSTATUS) & ~CSR_MSTATUS_FS_MASK) | ((word_t)3 << 13); \
+    }                                                                                   \
+    else if (is_hpm_zero_csr(_c))                                                       \
+    {                                                                                   \
+      /* Optional HPM counters/event selectors are implemented as WARL-zero. */         \
     }                                                                                   \
     else if (!pmp_csr_write(_c, _v))                                                    \
     {                                                                                   \
@@ -133,6 +183,49 @@ bool clint_wfi_advance(void);
 extern uint64_t g_nr_guest_inst;
 
 void ftrace_add(word_t pc, word_t npc, word_t inst);
+
+enum cbo_kind
+{
+  CBO_INVAL,
+  CBO_CLEAN_FLUSH,
+  CBO_ZERO,
+};
+
+static bool cbo_access_enabled(enum cbo_kind kind)
+{
+  if (cpu.priv == PRV_M)
+    return true;
+
+  word_t menvcfg = CSR(CSR_MENVCFG);
+  word_t senvcfg = CSR(CSR_SENVCFG);
+  bool machine_enabled;
+  bool supervisor_enabled;
+  if (kind == CBO_INVAL)
+  {
+    machine_enabled = (menvcfg & (word_t)0x30) != 0;
+    supervisor_enabled = (senvcfg & (word_t)0x30) != 0;
+  }
+  else if (kind == CBO_CLEAN_FLUSH)
+  {
+    machine_enabled = (menvcfg & (word_t)0x40) != 0;
+    supervisor_enabled = (senvcfg & (word_t)0x40) != 0;
+  }
+  else
+  {
+    machine_enabled = (menvcfg & (word_t)0x80) != 0;
+    supervisor_enabled = (senvcfg & (word_t)0x80) != 0;
+  }
+  return machine_enabled && (cpu.priv != PRV_U || supervisor_enabled);
+}
+
+static bool cbo_prepare(Decode *s, enum cbo_kind kind)
+{
+  if (cbo_access_enabled(kind))
+    return true;
+  s->dnpc = isa_raise_intr(MCA_ILLEGAL_INS, s->pc);
+  difftest_skip_ref();
+  return false;
+}
 
 bool csr_valid(Decode *s, uint16_t csr, bool is_write)
 {
@@ -173,6 +266,35 @@ bool csr_valid(Decode *s, uint16_t csr, bool is_write)
       return false;
     }
   }
+  unsigned counter_bit = counteren_bit(csr);
+  if (counter_bit != 0 && cpu.priv != PRV_M)
+  {
+    bool denied = (CSR(CSR_MCOUNTEREN) & counter_bit) == 0;
+    if (cpu.priv == PRV_U)
+      denied = denied || (CSR(CSR_SCOUNTEREN) & counter_bit) == 0;
+    if (denied)
+    {
+      s->dnpc = isa_raise_intr(MCA_ILLEGAL_INS, s->pc);
+      difftest_skip_ref();
+      return false;
+    }
+  }
+  /* The implemented HPM banks are read-only zero and their counter-enable
+   * bits are WARL-zero, so the user aliases are accessible only from M-mode. */
+  if (csr >= 0xc03 && csr <= 0xc1f && cpu.priv != PRV_M)
+  {
+    s->dnpc = isa_raise_intr(MCA_ILLEGAL_INS, s->pc);
+    difftest_skip_ref();
+    return false;
+  }
+#ifndef CONFIG_RV64
+  if (csr >= 0xc83 && csr <= 0xc9f && cpu.priv != PRV_M)
+  {
+    s->dnpc = isa_raise_intr(MCA_ILLEGAL_INS, s->pc);
+    difftest_skip_ref();
+    return false;
+  }
+#endif
   // PMP CSRs are fully implemented in system/pmp.c; no special-case needed
   // here.  Writes are routed through pmp_csr_write() below.
 
@@ -324,6 +446,7 @@ static int decode_exec(Decode *s)
   INSTPAT_CASE_END(grp_load)
 
   INSTPAT_CASE(0b00001, grp_fp_load)
+  INSTPAT("??????? ????? ????? 001 ????? 00001 11", flh, I, fp_load_h(s, rd, src1 + imm));
   INSTPAT("??????? ????? ????? 010 ????? 00001 11", flw, I, fp_load_s(s, rd, src1 + imm));
   INSTPAT("??????? ????? ????? 011 ????? 00001 11", fld, I, fp_load_d(s, rd, src1 + imm));
   INSTPAT_CASE_END(grp_fp_load)
@@ -339,6 +462,7 @@ static int decode_exec(Decode *s)
   INSTPAT_CASE_END(grp_store)
 
   INSTPAT_CASE(0b01001, grp_fp_store)
+  INSTPAT("??????? ????? ????? 001 ????? 01001 11", fsh, S, fp_store_h(s, src1 + imm, fp_rs2(s)));
   INSTPAT("??????? ????? ????? 010 ????? 01001 11", fsw, S, fp_store_s(s, src1 + imm, fp_rs2(s)));
   INSTPAT("??????? ????? ????? 011 ????? 01001 11", fsd, S, fp_store_d(s, src1 + imm, fp_rs2(s)));
   INSTPAT_CASE_END(grp_fp_store)
@@ -364,6 +488,8 @@ static int decode_exec(Decode *s)
   INSTPAT_CASE_END(grp_fnmadd)
 
   INSTPAT_CASE(0b10100, grp_fp_op)
+  INSTPAT("1111010 00000 ????? 000 ????? 10100 11", fmv.h.x, R, fp_move_to_h(s, rd, src1));
+  INSTPAT("1110010 00000 ????? 000 ????? 10100 11", fmv.x.h, R, fp_move_from_h(s, rd, fp_rs1(s)));
   INSTPAT("1111000 00000 ????? 000 ????? 10100 11", fmv.w.x, R, fp_move_to_s(s, rd, src1));
   INSTPAT("1110000 00000 ????? 000 ????? 10100 11", fmv.x.w, R, fp_move_from_s(s, rd, fp_rs1(s)));
   INSTPAT("0010000 ????? ????? 000 ????? 10100 11", fsgnj.s, R, fp_sign_inject_s(s, rd, fp_rs1(s), fp_rs2(s), 0));
@@ -422,9 +548,19 @@ static int decode_exec(Decode *s)
 #endif
   INSTPAT("0100000 00001 ????? ??? ????? 10100 11", fcvt.s.d, R, fp_exec_convert_d_to_s(s, rd, fp_rs1(s)));
   INSTPAT("0100001 00000 ????? ??? ????? 10100 11", fcvt.d.s, R, fp_exec_convert_s_to_d(s, rd, fp_rs1(s)));
+  INSTPAT("0100000 00010 ????? ??? ????? 10100 11", fcvt.s.h, R, fp_exec_convert_h_to_s(s, rd, fp_rs1(s)));
+  INSTPAT("0100001 00010 ????? ??? ????? 10100 11", fcvt.d.h, R, fp_exec_convert_h_to_d(s, rd, fp_rs1(s)));
+  INSTPAT("0100010 00000 ????? ??? ????? 10100 11", fcvt.h.s, R, fp_exec_convert_s_to_h(s, rd, fp_rs1(s)));
+  INSTPAT("0100010 00001 ????? ??? ????? 10100 11", fcvt.h.d, R, fp_exec_convert_d_to_h(s, rd, fp_rs1(s)));
   INSTPAT_CASE_END(grp_fp_op)
 
   INSTPAT_CASE(0b00100, grp_opimm) // OP-IMM
+  // Zicbop HINTs are explicit so the advertised profile is visible in the
+  // decoder.  The generic ORI encoding would also have no architectural
+  // effect with rd=x0, but naming these avoids accidental future rejection.
+  INSTPAT("0000000 00000 ????? 110 00000 00100 11", prefetch.i, N, {});
+  INSTPAT("0000000 00001 ????? 110 00000 00100 11", prefetch.r, N, {});
+  INSTPAT("0000000 00011 ????? 110 00000 00100 11", prefetch.w, N, {});
   INSTPAT("??????? ????? ????? 000 ????? 00100 11", addi, I, R(rd) = (sword_t)src1 + imm);
   INSTPAT("??????? ????? ????? 010 ????? 00100 11", slti, I, R(rd) = ((sword_t)src1 < (sword_t)imm) ? 1 : 0);
   INSTPAT("??????? ????? ????? 011 ????? 00100 11", sltiu, I, R(rd) = ((word_t)src1 < (word_t)imm) ? 1 : 0);
@@ -511,13 +647,15 @@ static int decode_exec(Decode *s)
   // RISC-V spec: div-by-zero and signed overflow (INT_MIN/-1) have defined results
   INSTPAT("0000001 ????? ????? 100 ????? 01100 11", div, R,
           R(rd) = ((sword_t)src2 == 0)                                  ? (word_t)~0
-                  : ((sword_t)src1 == INT32_MIN && (sword_t)src2 == -1) ? (word_t)INT32_MIN
+                  : (src1 == ((word_t)1 << (sizeof(word_t) * 8 - 1))
+                     && (sword_t)src2 == -1)                            ? src1
                                                                         : (word_t)((sword_t)src1 / (sword_t)src2));
   INSTPAT("0000001 ????? ????? 101 ????? 01100 11", divu, R,
           R(rd) = ((word_t)src2 == 0) ? (word_t)~0 : (word_t)src1 / (word_t)src2);
   INSTPAT("0000001 ????? ????? 110 ????? 01100 11", rem, R,
           R(rd) = ((sword_t)src2 == 0)                                  ? src1
-                  : ((sword_t)src1 == INT32_MIN && (sword_t)src2 == -1) ? 0
+                  : (src1 == ((word_t)1 << (sizeof(word_t) * 8 - 1))
+                     && (sword_t)src2 == -1)                            ? 0
                                                                         : (word_t)((sword_t)src1 % (sword_t)src2));
   INSTPAT("0000001 ????? ????? 111 ????? 01100 11", remu, R, R(rd) = ((word_t)src2 == 0) ? src1 : (word_t)src1 % (word_t)src2);
 
@@ -602,17 +740,28 @@ static int decode_exec(Decode *s)
   INSTPAT_CASE_END(grp_opimm32)
 
   INSTPAT_CASE(0b01110, grp_op32) // OP-32 + RV64M (RV64 only)
-  INSTPAT("0000000 ????? ????? 000 ????? 01110 11", addw, R, R(rd) = SEXT((int32_t)src1 + (int32_t)src2, 32));
-  INSTPAT("0100000 ????? ????? 000 ????? 01110 11", subw, R, R(rd) = SEXT((int32_t)src1 - (int32_t)src2, 32));
-  INSTPAT("0000000 ????? ????? 001 ????? 01110 11", sllw, R, R(rd) = SEXT((uint32_t)src1 << ((uint32_t)src2), 32));
-  INSTPAT("0000000 ????? ????? 101 ????? 01110 11", srlw, R, R(rd) = SEXT((uint32_t)src1 >> ((uint32_t)src2), 32));
-  INSTPAT("0100000 ????? ????? 101 ????? 01110 11", sraw, R, R(rd) = SEXT((int32_t)src1 >> ((int32_t)src2), 32));
+  INSTPAT("0000000 ????? ????? 000 ????? 01110 11", addw, R, R(rd) = SEXT((uint32_t)src1 + (uint32_t)src2, 32));
+  INSTPAT("0100000 ????? ????? 000 ????? 01110 11", subw, R, R(rd) = SEXT((uint32_t)src1 - (uint32_t)src2, 32));
+  INSTPAT("0000000 ????? ????? 001 ????? 01110 11", sllw, R, R(rd) = SEXT((uint32_t)src1 << ((uint32_t)src2 & 31), 32));
+  INSTPAT("0000000 ????? ????? 101 ????? 01110 11", srlw, R, R(rd) = SEXT((uint32_t)src1 >> ((uint32_t)src2 & 31), 32));
+  INSTPAT("0100000 ????? ????? 101 ????? 01110 11", sraw, R, R(rd) = SEXT((int32_t)src1 >> ((uint32_t)src2 & 31), 32));
   // RV64M Extension
-  INSTPAT("0000001 ????? ????? 000 ????? 01110 11", mulw, R, R(rd) = SEXT((int32_t)src1 * (int32_t)src2, 32));
-  INSTPAT("0000001 ????? ????? 100 ????? 01110 11", divw, R, R(rd) = SEXT((int32_t)src1 / (int32_t)src2, 32));
-  INSTPAT("0000001 ????? ????? 101 ????? 01110 11", divuw, R, R(rd) = SEXT((uint32_t)src1 / (uint32_t)src2, 32));
-  INSTPAT("0000001 ????? ????? 110 ????? 01110 11", remw, R, R(rd) = SEXT((int32_t)src1 % (int32_t)src2, 32));
-  INSTPAT("0000001 ????? ????? 111 ????? 01110 11", remuw, R, R(rd) = SEXT((uint32_t)src1 % (uint32_t)src2, 32));
+  INSTPAT("0000001 ????? ????? 000 ????? 01110 11", mulw, R, R(rd) = SEXT((uint32_t)src1 * (uint32_t)src2, 32));
+  INSTPAT("0000001 ????? ????? 100 ????? 01110 11", divw, R,
+          R(rd) = ((int32_t)src2 == 0) ? SEXT(UINT32_MAX, 32)
+                  : ((int32_t)src1 == INT32_MIN && (int32_t)src2 == -1)
+                    ? SEXT((uint32_t)INT32_MIN, 32)
+                    : SEXT((int32_t)src1 / (int32_t)src2, 32));
+  INSTPAT("0000001 ????? ????? 101 ????? 01110 11", divuw, R,
+          R(rd) = ((uint32_t)src2 == 0) ? SEXT(UINT32_MAX, 32)
+                                         : SEXT((uint32_t)src1 / (uint32_t)src2, 32));
+  INSTPAT("0000001 ????? ????? 110 ????? 01110 11", remw, R,
+          R(rd) = ((int32_t)src2 == 0) ? SEXT((uint32_t)src1, 32)
+                  : ((int32_t)src1 == INT32_MIN && (int32_t)src2 == -1)
+                    ? 0 : SEXT((int32_t)src1 % (int32_t)src2, 32));
+  INSTPAT("0000001 ????? ????? 111 ????? 01110 11", remuw, R,
+          R(rd) = ((uint32_t)src2 == 0) ? SEXT((uint32_t)src1, 32)
+                                         : SEXT((uint32_t)src1 % (uint32_t)src2, 32));
   // Zba Extension (RV64 only)
   INSTPAT("0010000 ????? ????? 010 ????? 01110 11", sh1add.uw, R, R(rd) = ((word_t)(uint32_t)src1 << 1) + src2);
   INSTPAT("0010000 ????? ????? 100 ????? 01110 11", sh2add.uw, R, R(rd) = ((word_t)(uint32_t)src1 << 2) + src2);
@@ -634,9 +783,22 @@ static int decode_exec(Decode *s)
   INSTPAT("1000001 10011 00000 000 00000 00011 11", fence_tso, N, {}); // fence.tso: inst[6:2]=0b00011, same MISC-MEM group
   INSTPAT("??????? ????? ????? 000 ????? 00011 11", fence, N, {});
   INSTPAT("??????? ????? ????? 001 ????? 00011 11", fence_i, I, icache_flush());
-  INSTPAT("0000000 00000 ????? 010 00000 00011 11", cbo.inval, N, {});
-  INSTPAT("0000000 00001 ????? 010 00000 00011 11", cbo.clean, N, {});
-  INSTPAT("0000000 00010 ????? 010 00000 00011 11", cbo.flush, N, {});
+  INSTPAT("0000000 00000 ????? 010 00000 00011 11", cbo.inval, I, {
+    if (cbo_prepare(s, CBO_INVAL)) vaddr_check_cmo(src1);
+  });
+  INSTPAT("0000000 00001 ????? 010 00000 00011 11", cbo.clean, I, {
+    if (cbo_prepare(s, CBO_CLEAN_FLUSH)) vaddr_check_cmo(src1);
+  });
+  INSTPAT("0000000 00010 ????? 010 00000 00011 11", cbo.flush, I, {
+    if (cbo_prepare(s, CBO_CLEAN_FLUSH)) vaddr_check_cmo(src1);
+  });
+  INSTPAT("0000000 00100 ????? 010 00000 00011 11", cbo.zero, I, {
+    if (cbo_prepare(s, CBO_ZERO)) {
+      word_t block = src1 & ~(word_t)0x3f;
+      for (int off = 0; off < 64; off += sizeof(word_t))
+        vaddr_write(block + off, sizeof(word_t), 0);
+    }
+  });
   INSTPAT_CASE_END(grp_miscmem)
 
   INSTPAT_CASE(0b11100, grp_system) // SYSTEM (ecall, ebreak, sfence.vma, mret, sret, wfi, CSRs)
@@ -689,27 +851,40 @@ static int decode_exec(Decode *s)
           reg.mstatus.mpp = PRV_U;
           CSR(CSR_MSTATUS) = reg.val;
           soft_tlb_flush(););
-  INSTPAT("0001000 00010 00000 000 00000 11100 11", sret, N, s->dnpc = CSR(CSR_SEPC);
-          csr_t reg = {.val = CSR(CSR_MSTATUS)};
-          cpu.last_inst_priv = cpu.priv;
-          cpu.priv = reg.mstatus.spp;
-          reg.mstatus.sie = reg.mstatus.spie;
-          reg.mstatus.spie = 1;
-          reg.mstatus.spp = 0;
-          /* sret returning to priv != M clears MPRV (spec). */
-          if (cpu.priv != PRV_M) reg.mstatus.mprv = 0;
-          CSR(CSR_MSTATUS) = reg.val;
-          /* SSTATUS view will be re-derived by post-instruction code. */
-          soft_tlb_flush(););
+  INSTPAT("0001000 00010 00000 000 00000 11100 11", sret, N, {
+    csr_t reg = {.val = CSR(CSR_MSTATUS)};
+    if (cpu.priv == PRV_U || (cpu.priv == PRV_S && reg.mstatus.tsr)) {
+      s->dnpc = isa_raise_intr(MCA_ILLEGAL_INS, s->pc);
+      difftest_skip_ref();
+    } else {
+      s->dnpc = CSR(CSR_SEPC);
+      cpu.last_inst_priv = cpu.priv;
+      cpu.priv = reg.mstatus.spp;
+      reg.mstatus.sie = reg.mstatus.spie;
+      reg.mstatus.spie = 1;
+      reg.mstatus.spp = 0;
+      /* sret returning to priv != M clears MPRV (spec). */
+      if (cpu.priv != PRV_M) reg.mstatus.mprv = 0;
+      CSR(CSR_MSTATUS) = reg.val;
+      /* SSTATUS view will be re-derived by post-instruction code. */
+      soft_tlb_flush();
+    }
+  });
   // Interrupt-Management Instructions
   INSTPAT("0001000 00101 00000 000 00000 11100 11", wfi, N, {
+    csr_t reg = {.val = CSR(CSR_MSTATUS)};
+    if (cpu.priv == PRV_U || (cpu.priv == PRV_S && reg.mstatus.tw)) {
+      s->dnpc = isa_raise_intr(MCA_ILLEGAL_INS, s->pc);
+      difftest_skip_ref();
+    } else {
 #if !defined(CONFIG_TARGET_SHARE)
-    // WFI acceleration: if no interrupt pending, advance time to mtimecmp
-    word_t pending = cpu.sr[CSR_MIP] & cpu.sr[CSR_MIE];
-    if (pending == 0)
-      clint_wfi_advance();
+      // WFI acceleration: if no interrupt pending, advance time to mtimecmp
+      word_t pending = cpu.sr[CSR_MIP] & cpu.sr[CSR_MIE];
+      if (pending == 0)
+        clint_wfi_advance();
 #endif
-    difftest_skip_ref();
+      difftest_skip_ref();
+    }
   });
   // Zimop: May-Be-Operations. Architecturally write 0 to rd; semantics
   // reserved for future repurposing. Currently decode as NOP + rd<-0.
@@ -859,11 +1034,17 @@ static int decode_exec(Decode *s)
   CSR(CSR_SIE) = CSR(CSR_MIE) & SIE_RMASK;
 #endif
 
-  uint64_t inst_advance = 1;
-  CSR(CSR_CYCLE_) = CSR(CSR_CYCLE_) + inst_advance;
-  CSR(CSR_MCYCLE) = CSR(CSR_MCYCLE) + inst_advance;
-  CSR(CSR_INSTRET) = CSR(CSR_INSTRET) + inst_advance;
-  CSR(CSR_MINSTRET) = CSR(CSR_INSTRET);
+  word_t inst_advance = 1;
+#ifndef CONFIG_RV64
+  word_t old_mcycle = CSR(CSR_MCYCLE);
+  word_t old_minstret = CSR(CSR_MINSTRET);
+#endif
+  CSR(CSR_MCYCLE) += inst_advance;
+  CSR(CSR_MINSTRET) += inst_advance;
+#ifndef CONFIG_RV64
+  if (CSR(CSR_MCYCLE) < old_mcycle) CSR(CSR_MCYCLEH)++;
+  if (CSR(CSR_MINSTRET) < old_minstret) CSR(CSR_MINSTRETH)++;
+#endif
   /* See RV32 sibling for the deadlock-safety rationale of this gate. */
 #define TIMER_TICK_INTERVAL 1024u
   if ((g_nr_guest_inst & (TIMER_TICK_INTERVAL - 1)) == 0)

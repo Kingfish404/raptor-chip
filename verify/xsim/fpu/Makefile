@@ -6,9 +6,12 @@ INT_TO_FP_N ?= 200000
 FP_TO_INT_N ?= 200000
 DIVSQRT_N ?= 300000
 
-.PHONY: all addsub mul fma convert int_to_fp fp_to_int misc divsqrt clean
+.PHONY: all addsub mul fma convert int_to_fp fp_to_int half misc divsqrt clean
 
-all: addsub mul fma convert int_to_fp fp_to_int misc divsqrt
+all: addsub mul fma convert int_to_fp fp_to_int half misc divsqrt
+
+half:
+	$(MAKE) -C half run
 
 addsub:
 	$(MAKE) -C addsub run N=$(ADDSUB_N)
@@ -43,3 +46,4 @@ clean:
 	$(MAKE) -C fp_to_int clean
 	$(MAKE) -C misc clean
 	$(MAKE) -C divsqrt clean
+	$(MAKE) -C half clean

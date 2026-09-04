@@ -228,15 +228,24 @@ module rapt_fpu_fma #(
   endfunction
 
   always_comb begin
-    sign_a_c = TARGET_DOUBLE ? operand_a[63] : operand_a[31];
-    sign_b_c = TARGET_DOUBLE ? operand_b[63] : operand_b[31];
-    sign_c_c = TARGET_DOUBLE ? operand_c[63] : operand_c[31];
-    exp_a_c = TARGET_DOUBLE ? operand_a[62:52] : {3'b0, operand_a[30:23]};
-    exp_b_c = TARGET_DOUBLE ? operand_b[62:52] : {3'b0, operand_b[30:23]};
-    exp_c_c = TARGET_DOUBLE ? operand_c[62:52] : {3'b0, operand_c[30:23]};
-    frac_a_c = TARGET_DOUBLE ? operand_a[51:0] : operand_a[22:0];
-    frac_b_c = TARGET_DOUBLE ? operand_b[51:0] : operand_b[22:0];
-    frac_c_c = TARGET_DOUBLE ? operand_c[51:0] : operand_c[22:0];
+    sign_a_c = TARGET_DOUBLE ? operand_a[63]
+      : (operand_a[63:32] == '1 ? operand_a[31] : 1'b0);
+    sign_b_c = TARGET_DOUBLE ? operand_b[63]
+      : (operand_b[63:32] == '1 ? operand_b[31] : 1'b0);
+    sign_c_c = TARGET_DOUBLE ? operand_c[63]
+      : (operand_c[63:32] == '1 ? operand_c[31] : 1'b0);
+    exp_a_c = TARGET_DOUBLE ? operand_a[62:52]
+      : (operand_a[63:32] == '1 ? {3'b0, operand_a[30:23]} : 11'h0ff);
+    exp_b_c = TARGET_DOUBLE ? operand_b[62:52]
+      : (operand_b[63:32] == '1 ? {3'b0, operand_b[30:23]} : 11'h0ff);
+    exp_c_c = TARGET_DOUBLE ? operand_c[62:52]
+      : (operand_c[63:32] == '1 ? {3'b0, operand_c[30:23]} : 11'h0ff);
+    frac_a_c = TARGET_DOUBLE ? operand_a[51:0]
+      : (operand_a[63:32] == '1 ? operand_a[22:0] : {1'b1, {FracBits-1{1'b0}}});
+    frac_b_c = TARGET_DOUBLE ? operand_b[51:0]
+      : (operand_b[63:32] == '1 ? operand_b[22:0] : {1'b1, {FracBits-1{1'b0}}});
+    frac_c_c = TARGET_DOUBLE ? operand_c[51:0]
+      : (operand_c[63:32] == '1 ? operand_c[22:0] : {1'b1, {FracBits-1{1'b0}}});
 
     product_sign_c = sign_a_c ^ sign_b_c
       ^ (TARGET_DOUBLE
@@ -468,6 +477,7 @@ module rapt_fpu_fma #(
     logic [FracBits+1:0] rounded;
     logic result_sign;
     logic guard_bit, sticky_bit, inexact, round_up, invalid;
+    logic tiny_before_rounding;
     logic signed [13:0] exponent_value;
     logic [10:0] result_exponent;
     integer shift_amount;
@@ -483,6 +493,7 @@ module rapt_fpu_fma #(
     inexact = 1'b0;
     round_up = 1'b0;
     invalid = 1'b0;
+    tiny_before_rounding = 1'b0;
     exponent_value = '0;
     result_exponent = '0;
     shift_amount = 0;
@@ -504,7 +515,14 @@ module rapt_fpu_fma #(
       exponent_value = 14'(s4_leading_one_q) + s4_common_base_q - 1;
       shift_amount = integer'(s4_leading_one_q) > MantBits
         ? integer'(s4_leading_one_q) - MantBits : 0;
-      if (exponent_value < MinExp) shift_amount = shift_amount + (MinExp - exponent_value);
+      tiny_before_rounding = exponent_value < MinExp;
+      if (exponent_value < MinExp) begin
+        shift_amount = shift_amount + (MinExp - exponent_value);
+        // The extra shift expresses the result at Emin.  Packing must use
+        // that clamped exponent so rounding a maximal subnormal up produces
+        // the minimum normal value instead of truncating its new hidden bit.
+        exponent_value = MinExp;
+      end
       if (shift_amount >= WorkBits) begin
         retained = '0;
         guard_bit = 1'b0;
@@ -562,6 +580,12 @@ module rapt_fpu_fma #(
         stage4_result_c = TARGET_DOUBLE
           ? {result_sign, result_exponent, retained[51:0]}
           : {32'hffff_ffff, result_sign, result_exponent[7:0], retained[22:0]};
+        // With directed rounding, a sticky-only tiny magnitude can round to
+        // the minimum normal encoding while still satisfying SoftFloat's
+        // after-rounding tininess test.  A guard-bit carry (the nearest-mode
+        // boundary case) is not tiny after rounding and must suppress UF.
+        stage4_flags_c[1] = inexact && tiny_before_rounding
+          && round_up && !guard_bit;
         stage4_flags_c[0] = inexact;
       end
     end

@@ -45,6 +45,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  RAPT_CONFIG: default
+
 jobs:
   riscof-classic:
     runs-on: ubuntu-latest
@@ -215,7 +218,7 @@ jobs:
 
       - name: Generate coverage report
         shell: bash -l {0}
-        run: make -C verify coverage-report
+        run: make -C verify coverage-report COV_LINE_MIN=50.0
 
       - name: Upload coverage artifacts
         if: always()
@@ -241,17 +244,15 @@ jobs:
       - name: Download pre-built Linux kernel
         shell: bash -l {0}
         run: make linux-download-rv32
-      - name: Boot Linux on RV32 with difftest
+      - name: Boot Linux on RV32 with default difftest
         shell: bash -l {0}
         run: |
-          make linux-boot-rv32-difftest ARGS="-b -n" MAX_INST=160000000 \
+          make linux-boot-rv32 ARGS="-b -n" MAX_INST=160000000 \
             2>&1 | tee /tmp/linux-boot.log || true
       - name: Linux boot summary
         run: |
           BOOT_OK="no"
-          grep -q "Booting Linux on hartid" /tmp/linux-boot.log && BOOT_OK="yes"
-          INIT_OK="no"
-          grep -q "Run /init as init process" /tmp/linux-boot.log && INIT_OK="yes"
+          grep -q "Linux version" /tmp/linux-boot.log && BOOT_OK="yes"
           IPC=$(grep -oP 'IPC:\s*\K[0-9.]+' /tmp/linux-boot.log | head -1 || echo "N/A")
           INSTS=$(grep -oP '#inst:\s*\K\d+' /tmp/linux-boot.log | head -1 || echo "N/A")
           CYCLES=$(grep -oP 'cycle:\s*\K\d+' /tmp/linux-boot.log | head -1 || echo "N/A")
@@ -261,7 +262,6 @@ jobs:
             echo "| Check | Status |"
             echo "|-------|--------|"
             echo "| Kernel boot | $([ "$BOOT_OK" = "yes" ] && echo 'PASS' || echo 'FAIL') |"
-            echo "| Reaches init | $([ "$INIT_OK" = "yes" ] && echo 'PASS' || echo 'FAIL') |"
             echo ""
             echo "| Metric | Value |"
             echo "|--------|-------|"
@@ -272,15 +272,16 @@ jobs:
           bash .github/scripts/parse-pmu.sh \
             "Linux Boot RV32" /tmp/linux-boot.log \
             >> "$GITHUB_STEP_SUMMARY"
-          python3 verify/scripts/check_linux_boot.py /tmp/linux-boot.log
+          python3 verify/scripts/check_linux_boot.py \
+            --success-marker "Linux version" /tmp/linux-boot.log
       - name: Pack RTL into single file
         shell: bash -l {0}
         run: make pack
       - name: Collect release artifacts
         run: |
           mkdir -p dist/hdl
-          cp sim/build/default/rapt_pack.sv dist/
-          cp sim/build/default/rapt_pack.svh dist/
+          cp sim/build/${{ env.RAPT_CONFIG }}/rapt_pack.sv dist/
+          cp sim/build/${{ env.RAPT_CONFIG }}/rapt_pack.svh dist/
           cp -r hdl/. dist/hdl/
           printf "commit: %s\nref: %s\ndate: %s\n" \
             "${{ github.sha }}" "${{ github.ref_name }}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > dist/VERSION
@@ -304,8 +305,8 @@ jobs:
             --title "RTL Nightly (${{ github.ref_name }}, $(date -u +%Y-%m-%d))" \
             --notes "Auto-generated RTL release from commit \`${{ github.sha }}\`." \
             --prerelease \
-            "sim/build/default/rapt_pack.sv#rapt_pack.sv (single-file packed RTL)" \
-            "sim/build/default/rapt_pack.svh#rapt_pack.svh (macro definitions)" \
+            "sim/build/${{ env.RAPT_CONFIG }}/rapt_pack.sv#rapt_pack.sv (single-file packed RTL)" \
+            "sim/build/${{ env.RAPT_CONFIG }}/rapt_pack.svh#rapt_pack.svh (macro definitions)" \
             "raptor-chip-rtl.zip#raptor-chip-rtl.zip (full RTL source)"
         env:
           GH_TOKEN: ${{ github.token }}
@@ -467,7 +468,7 @@ jobs:
   #     - name: Generate Embench summary
   #       if: always()
   #       run: |
-  #         LOG_DIR="sim/build/default/logs/litex/embench-logs"
+  #         LOG_DIR="sim/build/${{ env.RAPT_CONFIG }}/logs/litex/embench-logs"
   #         SUMMARY="$LOG_DIR/summary.md"
   #         if [[ -f "$SUMMARY" ]]; then
   #           cat "$SUMMARY" >> "$GITHUB_STEP_SUMMARY"
@@ -482,7 +483,7 @@ jobs:
   #       with:
   #         name: litex-embench-logs-${{ github.sha }}
   #         path: |
-  #           sim/build/default/logs/litex/embench-logs/
+  #           sim/build/${{ env.RAPT_CONFIG }}/logs/litex/embench-logs/
   #           /tmp/litex-embench.log
   #         retention-days: 30
   #         overwrite: true

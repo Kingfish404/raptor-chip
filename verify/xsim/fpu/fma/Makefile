@@ -14,14 +14,14 @@ DUT      := $(ROOT)/hdl/backend/feu/fpu/rapt_fpu_fma.sv
 
 VERILATOR ?= verilator
 N ?= 200000
-VFLAGS := --binary -j 8 -Wno-fatal -Wno-lint -Wno-WIDTH \
+VFLAGS := --binary -Wno-fatal -Wno-lint -Wno-WIDTH \
           -I$(HDL_INC) -I$(CONFIG) --top-module tb
 
 obj_dir/tb: $(DUT) fma_tb.sv
-	$(VERILATOR) $(VFLAGS) $(DUT) fma_tb.sv -o tb
+	+$(VERILATOR) $(VFLAGS) $(DUT) fma_tb.sv -o tb
 
 obj_diff/tb: $(DUT) rapt_fpu_fma_tb.sv tb_host_diff.cpp
-	$(VERILATOR) --cc --exe --build -j 8 -Wno-fatal -Wno-lint -Wno-WIDTH \
+	+$(VERILATOR) --cc --exe --build -Wno-fatal -Wno-lint -Wno-WIDTH \
 		-CFLAGS -frounding-math -I$(HDL_INC) -I$(CONFIG) \
 		--top-module rapt_fpu_fma_tb $(DUT) rapt_fpu_fma_tb.sv \
 		tb_host_diff.cpp --Mdir obj_diff -o tb

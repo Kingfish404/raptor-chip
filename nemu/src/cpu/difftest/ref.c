@@ -174,6 +174,8 @@ __EXPORT void difftest_regcpy(void *dut, bool direction)
     cpu.sr[CSR_SSTATUS] = *npc->sstatus;
     cpu.sr[CSR_SIE] = *npc->sie____;
     cpu.sr[CSR_STVEC] = *npc->stvec__;
+    cpu.sr[CSR_SCOUNTEREN] = *npc->scounte;
+    cpu.sr[CSR_MCOUNTEREN] = *npc->mcounte;
 
     cpu.sr[CSR_SSCRATCH] = *npc->sscratch;
     cpu.sr[CSR_SEPC] = *npc->sepc___;
@@ -212,6 +214,8 @@ __EXPORT void difftest_regcpy(void *dut, bool direction)
     npc->sstatus = &cpu.sr[CSR_SSTATUS];
     npc->sie____ = &cpu.sr[CSR_SIE];
     npc->stvec__ = &cpu.sr[CSR_STVEC];
+    npc->scounte = &cpu.sr[CSR_SCOUNTEREN];
+    npc->mcounte = &cpu.sr[CSR_MCOUNTEREN];
 
     npc->sscratch = &cpu.sr[CSR_SSCRATCH];
     npc->sepc___ = &cpu.sr[CSR_SEPC];
@@ -298,6 +302,14 @@ __EXPORT void difftest_checkpoint_sync(void *dut, uint32_t plic_ndev,
 #endif
 }
 
+/* An SC is architecturally permitted to fail even when the reservation still
+ * matches.  The DUT difftest driver uses this hook before stepping a failed
+ * DUT SC so that the reference also fails without writing memory. */
+__EXPORT void difftest_clear_reservation(void)
+{
+  cpu.reservation = 0;
+}
+
 __EXPORT void difftest_exec(uint64_t n)
 {
   cpu_exec(n);
@@ -308,21 +320,34 @@ __EXPORT void difftest_raise_intr(word_t NO)
   cpu.pc = isa_raise_intr(NO, cpu.pc);
 }
 
-// Mirror an external M-mode interrupt line (MEIP, mip bit 11) into ref state.
-// Called every difftest step from sim with the live `io_interrupt` value
-// from the DUT, so that software reads of mip[11] match between DUT and ref.
+// Mirror the effective external M-mode interrupt level (MEIP, mip bit 11)
+// into ref state so that software reads of mip[11] match between DUT and ref.
 // MEIP is hardware-controlled (read-only to software per Priv §3.1.9), so
 // writing storage directly here mirrors the DUT's hardwired behaviour.
 __EXPORT void difftest_set_meip(uint8_t val)
 {
-#ifdef CSR_MIP
   if (val)
     cpu.sr[CSR_MIP] |= (1u << 11);
   else
     cpu.sr[CSR_MIP] &= ~(1u << 11);
-#else
-  (void)val;
-#endif
+}
+
+// Mirror the cluster CLINT levels into the reference configuration, whose
+// CONFIG_TARGET_SHARE build intentionally does not update MSIP/MTIP itself.
+__EXPORT void difftest_set_msip(uint8_t val)
+{
+  if (val)
+    cpu.sr[CSR_MIP] |= (1u << 3);
+  else
+    cpu.sr[CSR_MIP] &= ~(1u << 3);
+}
+
+__EXPORT void difftest_set_mtip(uint8_t val)
+{
+  if (val)
+    cpu.sr[CSR_MIP] |= (1u << 7);
+  else
+    cpu.sr[CSR_MIP] &= ~(1u << 7);
 }
 
 // Mirror the DUT's Sstc-driven supervisor timer interrupt pending bit

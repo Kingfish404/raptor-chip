@@ -245,7 +245,7 @@ module rapt_npc_soc #(
     || (a >= 32'h10000000 && a < 32'h10012000)  // serial / peripherals
     || (a >= 32'h20000000 && a < 32'h20010000)  // MROM
     || (a >= 32'h30000000 && a < 32'h40000000)  // FLASH
-    || (a >= 32'h80000000 && a < 32'h88000000)  // PMEM (main memory)
+    || (a >= 32'h80000000 && a < 32'h90000000)  // PMEM (main memory, 256 MiB)
     || (a >= 32'ha0000000 && a < 32'ha2000000)  // SDRAM
     || (a >= 32'hf0001000 && a < 32'hf0001100)  // LiteX UART (egos HARDWARE)
     || (a >= 32'hf0008000 && a < 32'hf0008100)  // LiteX SPI SD-card controller

@@ -1,4 +1,4 @@
-!/riscof/raptor-rv32imac/
+!/riscof/raptor-rv32gc/
 !/riscof/raptor-rv64imac/
 !/scripts/*
 !*.yaml

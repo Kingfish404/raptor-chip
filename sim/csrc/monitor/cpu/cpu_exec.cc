@@ -39,12 +39,96 @@ void perf();
 
 void perf_sample_per_cycle();
 
-void perf_sample_per_inst();
+void perf_sample_per_inst(uint32_t inst);
+
+void perf_reset_sampler_state();
 
 void statistic();
 
 static uint64_t tfp_cycle = UINT64_MAX;
 static uint64_t tfp_inst = UINT64_MAX;
+
+static void dump_pipeline_stall_state()
+{
+  Log("stall state: ROB head=%u tail=%u busy=%016llx head_valid=%u "
+      "store_ready=%u fence_ready=%u UOQ valid=%02x head=%u tail=%u",
+      (unsigned)VERILOG_ROU(rob_head), (unsigned)VERILOG_ROU(rob_tail_a),
+      (unsigned long long)VERILOG_ROU(rob_entry_busy),
+      (unsigned)VERILOG_ROU(head0_valid),
+      (unsigned)VERILOG_ROU(head0_store_ready),
+      (unsigned)VERILOG_ROU(head0_fence_ready),
+      (unsigned)VERILOG_ROU(uoq_valid),
+      (unsigned)VERILOG_ROU(uoq_head_a), (unsigned)VERILOG_ROU(uoq_tail_a));
+  Log("stall state: IFU=%u L1I=%u IPTW=%u; L1D=%u DPTW=%u; "
+      "AXI rd_out=%u req=%u resp=%u; bus l1d_busy=%u issued=%u "
+      "mmio=%u skid=%u source=%u",
+      (unsigned)VERILOG_CPU(ifu__DOT__state_ifu),
+      (unsigned)VERILOG_CPU(l1i_cache__DOT__l1i_state),
+      (unsigned)VERILOG_CPU(l1i_cache__DOT__u_iptw__DOT__state),
+      (unsigned)VERILOG_CPU(l1d_cache__DOT__l1d_state),
+      (unsigned)VERILOG_CPU(l1d_cache__DOT__u_dptw__DOT__state),
+      (unsigned)VERILOG_CPU(axi_master__DOT__read_outstanding),
+      (unsigned)VERILOG_CPU(axi_master__DOT__read_request_fire),
+      (unsigned)VERILOG_CPU(axi_master__DOT__read_response_fire),
+      (unsigned)VERILOG_CPU(bus__DOT__l1d_slot_busy),
+      (unsigned)VERILOG_CPU(bus__DOT__l1d_slot_issued),
+      (unsigned)VERILOG_CPU(bus__DOT__l1d_slot_mmio),
+      (unsigned)VERILOG_CPU(bus__DOT__rd_skid_valid),
+      (unsigned)VERILOG_CPU(bus__DOT__source_valid));
+  Log("stall state: IOQ valid=%02x complete=%02x mmu=%02x head=%u tail=%u "
+      "issue=%u req_valid=%u req_idx=%u at_rob_head=%u; "
+      "ALQ valid=%02x ready=%02x p1busy=%02x p2busy=%02x; BRQ valid=%x",
+      (unsigned)VERILOG_CPU(lsu__DOT__u_ioq__DOT__ioq_valid),
+      (unsigned)VERILOG_CPU(lsu__DOT__u_ioq__DOT__ioq_complete),
+      (unsigned)VERILOG_CPU(lsu__DOT__u_ioq__DOT__ioq_mmu_en),
+      (unsigned)VERILOG_CPU(lsu__DOT__u_ioq__DOT__ioq_head),
+      (unsigned)VERILOG_CPU(lsu__DOT__u_ioq__DOT__ioq_tail_a),
+      (unsigned)VERILOG_CPU(lsu__DOT__u_ioq__DOT__ioq_issue_found),
+      (unsigned)VERILOG_CPU(lsu__DOT__u_ioq__DOT__load_req_valid_q),
+      (unsigned)VERILOG_CPU(lsu__DOT__u_ioq__DOT__load_req_idx_q),
+      (unsigned)VERILOG_CPU(lsu__DOT__u_ioq__DOT__ioq_at_rob_head),
+      (unsigned)VERILOG_CPU(ieu__DOT__u_alq__DOT__iq_valid),
+      (unsigned)VERILOG_CPU(ieu__DOT__u_alq__DOT__iq_ready_vec),
+      (unsigned)VERILOG_CPU(ieu__DOT__u_alq__DOT__iq_pr1_busy),
+      (unsigned)VERILOG_CPU(ieu__DOT__u_alq__DOT__iq_pr2_busy),
+      (unsigned)VERILOG_CPU(ieu__DOT__u_brq__DOT__iq_valid));
+  const size_t ioq_entries = sizeof(VERILOG_CPU(lsu__DOT__u_ioq__DOT__ioq_pc)) /
+                             sizeof(VERILOG_CPU(lsu__DOT__u_ioq__DOT__ioq_pc)[0]);
+  for (size_t i = 0; i < ioq_entries; i++)
+  {
+    if (VERILOG_CPU(lsu__DOT__u_ioq__DOT__ioq_valid) & (1u << i))
+      Log("stall IOQ[%zu]: pc=" FMT_WORD_NO_PREFIX " dest=%u pr1=%u pr2=%u",
+          i, (word_t)VERILOG_CPU(lsu__DOT__u_ioq__DOT__ioq_pc)[i],
+          (unsigned)VERILOG_CPU(lsu__DOT__u_ioq__DOT__ioq_dest)[i],
+          (unsigned)VERILOG_CPU(lsu__DOT__u_ioq__DOT__ioq_pr1)[i],
+          (unsigned)VERILOG_CPU(lsu__DOT__u_ioq__DOT__ioq_pr2)[i]);
+  }
+  const size_t alq_entries = sizeof(VERILOG_CPU(ieu__DOT__u_alq__DOT__iq_pc)) /
+                             sizeof(VERILOG_CPU(ieu__DOT__u_alq__DOT__iq_pc)[0]);
+  for (size_t i = 0; i < alq_entries; i++)
+  {
+    if (VERILOG_CPU(ieu__DOT__u_alq__DOT__iq_valid) & (1u << i))
+      Log("stall ALQ[%zu]: pc=" FMT_WORD_NO_PREFIX " dest=%u pr1=%u pr2=%u",
+          i, (word_t)VERILOG_CPU(ieu__DOT__u_alq__DOT__iq_pc)[i],
+          (unsigned)VERILOG_CPU(ieu__DOT__u_alq__DOT__iq_dest)[i],
+          (unsigned)VERILOG_CPU(ieu__DOT__u_alq__DOT__iq_pr1)[i],
+          (unsigned)VERILOG_CPU(ieu__DOT__u_alq__DOT__iq_pr2)[i]);
+  }
+#if !defined(RAPT_SOC) && !defined(CONFIG_wrapBus)
+  Log("stall AXI model: AR v/r=%u/%u addr=%08x; R busy=%u v/r=%u/%u "
+      "id=%u delay=%u beats=%u timeout=%u",
+      (unsigned)top->rootp->raptSoC->perip__DOT__arvalid,
+      (unsigned)top->rootp->raptSoC->perip__DOT__out_arready,
+      (unsigned)top->rootp->raptSoC->perip__DOT__araddr,
+      (unsigned)top->rootp->raptSoC->perip__DOT__r_busy,
+      (unsigned)top->rootp->raptSoC->perip__DOT__out_rvalid,
+      (unsigned)top->rootp->raptSoC->perip__DOT__rready,
+      (unsigned)top->rootp->raptSoC->perip__DOT__r_id_q,
+      (unsigned)top->rootp->raptSoC->perip__DOT__r_delay_q,
+      (unsigned)top->rootp->raptSoC->perip__DOT__r_beats_left,
+      (unsigned)top->rootp->raptSoC->perip__DOT__r_timeout_cnt);
+#endif
+}
 
 void cpu_exec_set_threshold(uint64_t cycle, uint64_t inst)
 {
@@ -148,6 +232,7 @@ void cpu_exec_init()
   }
 #endif
   memset(&pmu, 0, sizeof(pmu));
+  perf_reset_sampler_state();
   flow_check_init();
 }
 
@@ -187,14 +272,29 @@ void cpu_exec(uint64_t n)
   while (!contextp->gotFinish() && npc.state == NPC_RUNNING && n-- > 0)
   {
     cpu_exec_one_cycle();
-    if (npc.state == NPC_END) // for ebreak
-    {
-      pmu.instr_cnt++;
-      pmu.csr_inst_cnt++;
-      break;
-    }
-    // Simulate the performance monitor unit
+    // Sample the cycle and every committed slot before handling an ebreak or
+    // another simulator-side stop.  The old special case counted only one CSR
+    // instruction and dropped both the final cycle and slot A when ebreak was
+    // in slot B of a dual commit.
     perf_sample_per_cycle();
+    uint8_t cmu_valid = *(uint8_t *)&VERILOG_CPU(cmu__DOT__valid);
+    uint8_t cmu_valid_b = *(uint8_t *)&VERILOG_CPU(cmu__DOT__valid_b);
+    if (cmu_valid)
+    {
+      const uint32_t pmu_inst_a = *(uint32_t *)&VERILOG_CPU(cmu__DOT__pmu_inst_a);
+      const uint32_t pmu_inst_b = *(uint32_t *)&VERILOG_CPU(cmu__DOT__pmu_inst_b);
+      perf_sample_per_inst(pmu_inst_a);
+      if (cmu_valid_b)
+        perf_sample_per_inst(pmu_inst_b);
+      cur_inst_cycle = 0;
+    }
+    else
+    {
+      cur_inst_cycle++;
+    }
+    if (npc.state == NPC_END) // ebreak has now been sampled like any other commit
+      break;
+
     flow_check_redirect_gap();
     // Checkpoint save: trigger on configured cycle/instr/PC, then wait for
     // quiesce before dumping. If --ckpt-save-exit was passed, terminate cleanly.
@@ -204,7 +304,6 @@ void cpu_exec(uint64_t n)
       npc.state = NPC_QUIT;
       break;
     }
-    cur_inst_cycle++;
     progress_cycle++;
     if ((progress_cycle & 0x3ffu) == 0)
     {
@@ -229,6 +328,7 @@ void cpu_exec(uint64_t n)
             max_timeout, (word_t)(*npc.pc),
             (unsigned long long)progress_cycle, (unsigned long long)pmu.instr_cnt);
         npc.state = NPC_ABORT;
+        lightsss_trigger_save();
         break;
       }
     }
@@ -236,15 +336,16 @@ void cpu_exec(uint64_t n)
     {
       Log(FMT_RED("Too many cycles (0x%llx) stalled at pc: " FMT_WORD_NO_PREFIX ", rpc: " FMT_WORD_NO_PREFIX ", inst: %08x."),
           (long long int)cur_inst_cycle, (word_t)(*npc.pc), (word_t)(*npc.rpc), (uint32_t)(*(npc.inst)));
+      dump_pipeline_stall_state();
       npc.state = NPC_ABORT;
+      // A no-commit hang is just as valuable to rewind as a register
+      // divergence.  Preserve the most recent LightSSS progress snapshot so
+      // the failing window can be replayed with waveform tracing.
+      lightsss_trigger_save();
       break;
     }
-    uint8_t cmu_valid = *(uint8_t *)&VERILOG_CPU(cmu__DOT__valid);
     if (cmu_valid)
     {
-      perf_sample_per_inst();
-      cur_inst_cycle = 0;
-      uint8_t cmu_valid_b = *(uint8_t *)&VERILOG_CPU(cmu__DOT__valid_b);
       word_t cmu_rpc_a = *(word_t *)&VERILOG_CPU(cmu__DOT__rpc_a);
       word_t cmu_rpc_b = *(word_t *)&VERILOG_CPU(cmu__DOT__rpc_b);
       word_t cmu_npc_a = *(word_t *)&VERILOG_CPU(cmu__DOT__npc_a);
@@ -291,16 +392,26 @@ void cpu_exec(uint64_t n)
       {
         goto skip_difftest_block;
       }
-      // Mirror live external IRQ line into REF's mip[MEIP] before stepping,
-      // so software reads of mip stay consistent across DUT/REF. The line is
-      // hardwired 0 in the npc soc wrapper today, but this future-proofs the
-      // path when an interrupt source gets wired in.
+      // Mirror the DUT's effective hardware-owned mip bits into REF before
+      // stepping, so CSR reads stay consistent across DUT/REF.
       {
         extern void (*ref_difftest_set_meip)(uint8_t);
-        if (ref_difftest_set_meip)
+        extern void (*ref_difftest_set_msip)(uint8_t);
+        extern void (*ref_difftest_set_mtip)(uint8_t);
+        // NEMU's shared-library configuration has no self-driven CLINT.
+        // Keep its hardware-owned pending bits aligned with mip_eff.  This is
+        // also needed on the commit immediately after a CLINT write: the RTL
+        // device register changes at the clock edge, after the MMIO operation
+        // itself was marked as a skipped reference access.
+        if (npc.mip____ != NULL)
         {
-          uint8_t live = *(uint8_t *)&VERILOG_CPU(io_interrupt);
-          ref_difftest_set_meip(live & 1u);
+          word_t dut_mip = *npc.mip____;
+          if (ref_difftest_set_msip)
+            ref_difftest_set_msip((dut_mip >> 3) & 1u);
+          if (ref_difftest_set_mtip)
+            ref_difftest_set_mtip((dut_mip >> 7) & 1u);
+          if (ref_difftest_set_meip)
+            ref_difftest_set_meip((dut_mip >> 11) & 1u);
         }
         // Mirror the DUT's Sstc-driven supervisor timer pending bit (sip.STIP,
         // bit 5) into REF's mip when Sstc is enabled (menvcfg.STCE=1). In that
@@ -382,10 +493,6 @@ void cpu_exec(uint64_t n)
       }
     skip_difftest_block:;
 #endif
-      if (cmu_valid_b)
-      {
-        perf_sample_per_inst();
-      }
       npc.last_inst = *(npc.inst);
     }
 #ifdef CONFIG_DIFFTEST

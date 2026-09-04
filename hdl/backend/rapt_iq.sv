@@ -380,6 +380,35 @@ module rapt_iq #(
   // === Sequential: alloc / wakeup / issue-clear ===
   logic iq_full_r;
 
+  // Keep the wide operand data arrays on a data-only write cone.  In
+  // particular, fast rebusy/wake and issue-clear do not change operand data;
+  // folding those state-only events into this block makes FPGA synthesis put
+  // the LSU arbitration path on every iq_vj/iq_vk clock-enable pin.
+  always_ff @(posedge clock) begin
+    if (!(reset || cmu_bcast.flush_pipe)) begin
+      for (int i = 0; i < IQ_SIZE; i++) begin
+        if (disp_b_selects_entry(i)) begin
+`ifdef RAPT_DUAL_ISSUE
+          // Slot B has priority if both dispatch selectors ever alias.
+          iq_vj[i] <= rou_exu.op1_b;
+          iq_vk[i] <= rou_exu.op2_b;
+`endif
+        end else if (disp.accept_a && free_found_a && i == int'(free_idx_a)) begin
+          iq_vj[i] <= rou_exu.op1;
+          iq_vk[i] <= rou_exu.op2;
+        end else if (iq_valid[i]) begin
+          // A confirmed speculative wake has priority over an ordinary CDB
+          // hit, matching the operand-state machine below.  Rename guarantees
+          // that both cannot name different producers for the same operand.
+          if (pr1_fast_confirm[i]) iq_vj[i] <= exu_ioq_bcast.result;
+          else if (pr1_slow_hit[i]) iq_vj[i] <= pr1_slow_val[i];
+          if (pr2_fast_confirm[i]) iq_vk[i] <= exu_ioq_bcast.result;
+          else if (pr2_slow_hit[i]) iq_vk[i] <= pr2_slow_val[i];
+        end
+      end
+    end
+  end
+
   always_ff @(posedge clock) begin
     if (reset || cmu_bcast.flush_pipe) begin
       iq_valid  <= '0;
@@ -396,8 +425,6 @@ module rapt_iq #(
           // Slot B has priority if both dispatch selectors ever alias.
           iq_valid[i]        <= 1'b1;
           iq_alu[i]          <= rou_exu.uop_b.alu;
-          iq_vj[i]           <= rou_exu.op1_b;
-          iq_vk[i]           <= rou_exu.op2_b;
           iq_dest[i]         <= rou_exu.dest_b;
           iq_pr1[i]          <= rou_exu.pr1_b;
           iq_pr2[i]          <= rou_exu.pr2_b;
@@ -436,8 +463,6 @@ module rapt_iq #(
           // Slot-A allocation lands here when accepted by the router.
           iq_valid[i]        <= 1'b1;
           iq_alu[i]          <= rou_exu.uop.alu;
-          iq_vj[i]           <= rou_exu.op1;
-          iq_vk[i]           <= rou_exu.op2;
           iq_dest[i]         <= rou_exu.dest;
           iq_pr1[i]          <= rou_exu.pr1;
           iq_pr2[i]          <= rou_exu.pr2;
@@ -475,11 +500,9 @@ module rapt_iq #(
           // Fast-confirm data capture for an entry that became fully ready
           // this cycle (woken between ready computation and the clock edge).
           if (pr1_fast_confirm[i]) begin
-            iq_vj[i]       <= exu_ioq_bcast.result;
             iq_pr1_fast[i] <= 1'b0;
           end
           if (pr2_fast_confirm[i]) begin
-            iq_vk[i]       <= exu_ioq_bcast.result;
             iq_pr2_fast[i] <= 1'b0;
           end
           // Issue clear: entries selected on either port free this cycle
@@ -504,14 +527,12 @@ module rapt_iq #(
           // exclusive (unique producer), so arm order beyond the fast
           // confirm/rebusy pair is don't-care.
           if (pr1_fast_confirm[i]) begin
-            iq_vj[i]       <= exu_ioq_bcast.result;
             iq_pr1_busy[i] <= 1'b0;
             iq_pr1_fast[i] <= 1'b0;
           end else if (pr1_fast_rebusy[i]) begin
             iq_pr1_busy[i] <= 1'b1;
             iq_pr1_fast[i] <= 1'b0;
           end else if (pr1_slow_hit[i]) begin
-            iq_vj[i]       <= pr1_slow_val[i];
             iq_pr1_busy[i] <= 1'b0;
             iq_pr1_fast[i] <= 1'b0;
           end else if (pr1_fast_wake[i]) begin
@@ -522,14 +543,12 @@ module rapt_iq #(
           if (iq_fp_dep2_busy[i] && fp_wb_hit(iq_fp_dep2[i])) iq_fp_dep2_busy[i] <= 1'b0;
           if (iq_fp_dep3_busy[i] && fp_wb_hit(iq_fp_dep3[i])) iq_fp_dep3_busy[i] <= 1'b0;
           if (pr2_fast_confirm[i]) begin
-            iq_vk[i]       <= exu_ioq_bcast.result;
             iq_pr2_busy[i] <= 1'b0;
             iq_pr2_fast[i] <= 1'b0;
           end else if (pr2_fast_rebusy[i]) begin
             iq_pr2_busy[i] <= 1'b1;
             iq_pr2_fast[i] <= 1'b0;
           end else if (pr2_slow_hit[i]) begin
-            iq_vk[i]       <= pr2_slow_val[i];
             iq_pr2_busy[i] <= 1'b0;
             iq_pr2_fast[i] <= 1'b0;
           end else if (pr2_fast_wake[i]) begin

@@ -60,6 +60,45 @@ static inline bool is_fp_csr(uint16_t csr)
   return csr == CSR_FFLAGS || csr == CSR_FRM || csr == CSR_FCSR;
 }
 
+/* Raptor implements the optional Zihpm CSR banks as WARL-zero.  Keep the
+ * reference model's CSR existence and read/write behaviour aligned with the
+ * RTL: reads return zero and writes to the machine banks are ignored. */
+static inline bool is_hpm_zero_csr(uint16_t csr)
+{
+  csr &= 0xfff;
+  if ((csr >= 0xb03 && csr <= 0xb1f) ||  /* mhpmcounter3..31 */
+      (csr >= 0x323 && csr <= 0x33f) ||  /* mhpmevent3..31 */
+      (csr >= 0xc03 && csr <= 0xc1f))    /* hpmcounter3..31 */
+    return true;
+#ifndef CONFIG_RV64
+  if ((csr >= 0xb83 && csr <= 0xb9f) ||  /* mhpmcounter3h..31h */
+      (csr >= 0xc83 && csr <= 0xc9f))    /* hpmcounter3h..31h */
+    return true;
+#endif
+  return false;
+}
+
+static inline unsigned counteren_bit(uint16_t csr)
+{
+  csr &= 0xfff;
+  if (csr == CSR_CYCLE_ || csr == CSR_CYCLEH) return 1u << 0;
+  if (csr == CSR_TIME || csr == CSR_TIMEH) return 1u << 1;
+  if (csr == CSR_INSTRET || csr == CSR_INSTRETH) return 1u << 2;
+  return 0;
+}
+
+static inline bool is_rv32_counter_high_csr(uint16_t csr)
+{
+#ifdef CONFIG_RV64
+  (void)csr;
+  return false;
+#else
+  csr &= 0xfff;
+  return csr == CSR_MCYCLEH || csr == CSR_MINSTRETH ||
+         csr == CSR_CYCLEH || csr == CSR_TIMEH || csr == CSR_INSTRETH;
+#endif
+}
+
 static inline const char *reg_name(int idx)
 {
   extern const char *regs[];
@@ -111,13 +150,10 @@ static inline CSR_status check_csr_exist(uint16_t csr)
 
           csr == CSR_MCYCLE ||
           csr == CSR_MINSTRET ||
-          csr == CSR_MCYCLEH ||
-          csr == CSR_MINSTRETH ||
           csr == CSR_CYCLE_ ||
           csr == CSR_TIME ||
           csr == CSR_INSTRET ||
-          csr == CSR_TIMEH ||
-          csr == CSR_INSTRETH ||
+          is_rv32_counter_high_csr(csr) ||
 
           csr == CSR_MVENDORID ||
           csr == CSR_MARCHID ||
@@ -126,8 +162,9 @@ static inline CSR_status check_csr_exist(uint16_t csr)
 
           csr == 0x14d ||  // stimecmp
           csr == 0x15d ||  // stimecmph (RV32 view; harmless in RV64 table)
-          csr == 0x306 ||  // mcounteren
+          csr == CSR_MCOUNTEREN ||
           csr == 0x30a ||  // menvcfg
+          is_hpm_zero_csr(csr) ||
           (csr >= 0x3a0 && csr <= 0x3a3) ||  // pmpcfg0-3
           (csr >= 0x3b0 && csr <= 0x3bf)))    // pmpaddr0-15
   {
@@ -136,13 +173,10 @@ static inline CSR_status check_csr_exist(uint16_t csr)
 
         || (csr == CSR_MCYCLE)    //
         || (csr == CSR_MINSTRET)  //
-        || (csr == CSR_MCYCLEH)   //
-        || (csr == CSR_MINSTRETH) //
         || (csr == CSR_CYCLE_)    //
         || (csr == CSR_TIME)      //
         || (csr == CSR_INSTRET)   //
-        || (csr == CSR_TIMEH)     //
-        || (csr == CSR_INSTRETH)  //
+        || is_rv32_counter_high_csr(csr)
 
         || (csr == CSR_MVENDORID) //
         || (csr == CSR_MARCHID)   //
@@ -151,7 +185,7 @@ static inline CSR_status check_csr_exist(uint16_t csr)
 
         || csr == 0x14d   // stimecmp
         || csr == 0x15d   // stimecmph
-        || csr == 0x306   // mcounteren
+        || csr == CSR_MCOUNTEREN
         || csr == 0x30a   // menvcfg
     )
     {

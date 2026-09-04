@@ -1,0 +1,9 @@
+/include/ "spike-rv64ima.dts"
+
+/ {
+	memory@80000000 {
+		// PK eagerly clears every advertised page during boot.  Keep app
+		// regressions small; Linux and memory-stress use the full-size DTS.
+		reg = <0x00 0x80000000 0x00 0x00800000>;
+	};
+};

@@ -112,12 +112,17 @@ module rapt_fpu_addsub #(
     end else begin
       sign_a_c = operand_a[31];
       sign_b_c = operand_b[31] ^ (op == `RAPT_FP_OP_FSUB_S);
-      exp_a_c = operand_a[63:32] == '1 ? {3'b0, operand_a[30:23]} : 11'h7ff;
-      exp_b_c = operand_b[63:32] == '1 ? {3'b0, operand_b[30:23]} : 11'h7ff;
+      // In an FLEN=64 implementation, every single-precision source must be
+      // NaN-boxed.  An unboxed source is consumed as canonical qNaN.  Keep
+      // the synthetic exponent in the single-precision domain: using 0x7ff
+      // here fails the comparison against InfExponent (0x0ff), so the bad
+      // box would incorrectly flow through the finite datapath.
+      exp_a_c = operand_a[63:32] == '1 ? {3'b0, operand_a[30:23]} : 11'h0ff;
+      exp_b_c = operand_b[63:32] == '1 ? {3'b0, operand_b[30:23]} : 11'h0ff;
       frac_a_c = operand_a[63:32] == '1
-        ? {29'b0, operand_a[22:0]} : 52'h8_0000_0000_0000;
+        ? {29'b0, operand_a[22:0]} : {29'b0, 1'b1, 22'b0};
       frac_b_c = operand_b[63:32] == '1
-        ? {29'b0, operand_b[22:0]} : 52'h8_0000_0000_0000;
+        ? {29'b0, operand_b[22:0]} : {29'b0, 1'b1, 22'b0};
     end
 
     a_nan_c = exp_a_c == InfExponent && frac_a_c[FracBits-1:0] != '0;

@@ -192,6 +192,8 @@ module formal_bus #(
   logic [XLEN-1:0] araddr_q, awaddr_q, wdata_q;
   logic [2:0] arsize_q, awsize_q;
   logic [3:0] arid_q, awid_q;
+  logic [7:0] arlen_q;
+  logic [1:0] arburst_q;
   logic [XLEN/8-1:0] wstrb_q;
   logic [3:0] f_read_outstanding;
   wire f_ar_fire = io_master_arvalid && io_master_arready;
@@ -203,6 +205,7 @@ module formal_bus #(
       aw_stalled_q <= 1'b0;
       w_stalled_q <= 1'b0;
       araddr_q <= '0; arsize_q <= '0; arid_q <= '0;
+      arlen_q <= '0; arburst_q <= '0;
       awaddr_q <= '0; awsize_q <= '0; awid_q <= '0;
       wdata_q <= '0; wstrb_q <= '0;
     end else begin
@@ -215,6 +218,7 @@ module formal_bus #(
       aw_stalled_q <= io_master_awvalid && !io_master_awready;
       w_stalled_q  <= io_master_wvalid && !io_master_wready;
       araddr_q <= io_master_araddr; arsize_q <= io_master_arsize; arid_q <= io_master_arid;
+      arlen_q <= io_master_arlen; arburst_q <= io_master_arburst;
       awaddr_q <= io_master_awaddr; awsize_q <= io_master_awsize; awid_q <= io_master_awid;
       wdata_q <= io_master_wdata; wstrb_q <= io_master_wstrb;
     end
@@ -237,8 +241,9 @@ module formal_bus #(
         awsize_assert : assert (io_master_awsize <= 3'b010);
       if (ar_stalled_q) begin
         arhold_valid: assert(io_master_arvalid);
-        arhold_data: assert({io_master_araddr, io_master_arsize, io_master_arid}
-                            == {araddr_q, arsize_q, arid_q});
+        arhold_data: assert({io_master_araddr, io_master_arsize, io_master_arid,
+                            io_master_arlen, io_master_arburst}
+                            == {araddr_q, arsize_q, arid_q, arlen_q, arburst_q});
       end
       if (aw_stalled_q) begin
         awhold_valid: assert(io_master_awvalid);

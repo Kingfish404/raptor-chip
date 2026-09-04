@@ -718,6 +718,13 @@ extern "C" int jtag_selftest_main(int argc, char *argv[])
   printf("[jtag-selftest] === Phase 7: dcsr.step single-step ===\n");
   test_single_step();
 
+#if VM_COVERAGE
+  // Standalone JTAG mode owns a separate context and does not pass through
+  // engine_free(), so persist its DTM/DM coverage before destroying it.
+  if (g_ctx && g_ctx->coveragep())
+    g_ctx->coveragep()->write();
+#endif
+
   delete g_top;
   delete g_ctx;
   g_top = nullptr;

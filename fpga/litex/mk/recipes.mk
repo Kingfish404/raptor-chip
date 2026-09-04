@@ -20,7 +20,7 @@ if [ -z "$(3)" ] || [ ! -f "$(3)" ]; then \
 	echo "[ERR] $(6) payload not found: $(3)"; exit 1; fi; \
 stage_size=$$(stat -c%s "$(2)"); \
 payload_size=$$(stat -c%s "$(3)"); \
-dtb_size=$$(stat -c%s "$(FW_LINUX_FPGA_DTB)"); \
+dtb_size=$$(stat -c%s "$(FW_LINUX_FPGA_SEEDED_DTB)"); \
 payload_offset=$$(( $(LINUX_FPGA_PAYLOAD_OFFSET) )); \
 dtb_offset=$$(( $(4) )); \
 if [ $$stage_size -gt $$payload_offset ]; then \
@@ -31,26 +31,33 @@ cp "$(2)" "$(1)"; \
 truncate -s $$payload_offset "$(1)"; \
 cat "$(3)" >> "$(1)"; \
 truncate -s $$dtb_offset "$(1)"; \
-cat "$(FW_LINUX_FPGA_DTB)" >> "$(1)"; \
+cat "$(FW_LINUX_FPGA_SEEDED_DTB)" >> "$(1)"; \
 image_size=$$(stat -c%s "$(1)"); \
 echo "[INFO] $(6) image: $(1) ($$image_size bytes)"; \
 echo "[INFO]   stage0  @ $(MAIN_RAM_BASE) size=$$stage_size"; \
 echo "[INFO]   payload @ $(LINUX_FPGA_PAYLOAD_SRC_ADDR) -> $(MAIN_RAM_BASE) size=$$payload_size"; \
-echo "[INFO]   dtb     @ $(5) -> $(LINUX_FPGA_DTB_ADDR) size=$$dtb_size"
+echo "[INFO]   dtb     @ $(5) -> $(LINUX_FPGA_DTB_ADDR) size=$$dtb_size"; \
+echo "[INFO]   rng-seed: $(FW_LINUX_FPGA_RNG_SEED) (persistent development seed)"
 endef
 
 define _litex_bios_patches_apply
-	$(PYTHON) $(LITEX_DIR)/scripts/patch_litex_picolibc.py $(LITEX_PATH) && $(PYTHON) $(LITEX_DIR)/scripts/patch_litex_uart_polling.py $(LITEX_PATH) && $(PYTHON) $(LITEX_DIR)/scripts/patch_litex_sdcard_boot.py $(LITEX_PATH)
+	$(PYTHON) $(LITEX_DIR)/scripts/patch_litex_picolibc.py $(LITEX_PATH) && \
+	$(PYTHON) $(LITEX_DIR)/scripts/patch_litex_uart_polling.py $(LITEX_PATH) && \
+	{ [ "$(LINUX_FPGA_PROFILE)" != "1" ] || \
+	  $(PYTHON) $(LITEX_DIR)/scripts/patch_litex_sdcard_linux_override.py \
+		$(LITEX_PATH) $(FW_LINUX_FPGA_BIN) $(FW_LINUX_FPGA_SEEDED_DTB) \
+		$(LINUX_FPGA_PAYLOAD) $(LINUX_FPGA_PAYLOAD_OFFSET) \
+		$(LINUX_FPGA_DTB_OFFSET) $(LINUX_FPGA_DTB_ADDR) $(MAIN_RAM_BASE); }
 endef
 
 define _litex_bios_patches_restore
-	cd $(LITEX_PATH) && git checkout -- litex/soc/software/common.mak litex/soc/software/libc/Makefile litex/soc/software/libbase/uart.c litex/soc/software/bios/main.c 2>/dev/null || true
+	cd $(LITEX_PATH) && git checkout -- litex/soc/software/common.mak litex/soc/software/libc/Makefile litex/soc/software/libbase/uart.c litex/soc/software/bios/boot.c 2>/dev/null || true
 endef
 
 # $(call _run_litex_target,arguments)
 define _run_litex_target
-if [ "$(BOOT_MODE)" = "bios" ]; then $(call _litex_bios_patches_apply); fi; \
 trap '[ "$(BOOT_MODE)" = "bios" ] && { $(call _litex_bios_patches_restore); } || true' EXIT; \
+if [ "$(BOOT_MODE)" = "bios" ]; then $(call _litex_bios_patches_apply); fi; \
 source $(VENV_DIR)/bin/activate && \
 $(PYTHON) $(FPGA_PY) $(1)
 endef
@@ -199,7 +206,8 @@ $(FW_EGOS_STAGE0_BIN): $(FW_EGOS_STAGE0_ELF)
 	$(CROSS)objcopy -O binary $< $@
 
 $(FW_LINUX_FPGA_DTS): $(FW_LINUX_FPGA_DTS_IN) FORCE | $(FW_LINUX_FPGA_DIR)
-	sed -e 's/@TIMEBASE@/$(SYS_CLK)/g' \
+	sed -e 's|@MODEL@|$(LINUX_FPGA_MODEL)|g' \
+	    -e 's/@TIMEBASE@/$(SYS_CLK)/g' \
 	    -e 's/@MEM_SIZE@/$(LINUX_FPGA_RAM_SIZE)/g' \
 	    -e 's|@BOOTARGS@|$(LINUX_FPGA_BOOTARGS)|g' \
 	    -e 's/@UART_BASE@/$(LINUX_FPGA_UART_BASE)/g' \
@@ -214,6 +222,16 @@ $(FW_LINUX_FPGA_DTS): $(FW_LINUX_FPGA_DTS_IN) FORCE | $(FW_LINUX_FPGA_DIR)
 $(FW_LINUX_FPGA_DTB): $(FW_LINUX_FPGA_DTS) | $(FW_LINUX_FPGA_DIR)
 	dtc -I dts -O dtb -o $@ $<
 
+# Create one random development seed per build directory, then reuse it across
+# SD boots. Delete rng-seed.bin explicitly when a new seed is wanted.
+$(FW_LINUX_FPGA_RNG_SEED): | $(FW_LINUX_FPGA_DIR)
+	@umask 077; $(HOST_PYTHON) -c 'import os, sys; open(sys.argv[1], "xb").write(os.urandom(32))' $@
+	@echo "[rng-seed] created persistent development seed: $@"
+
+# The source DTB remains a zero-filled template and must never be booted alone.
+$(FW_LINUX_FPGA_SEEDED_DTB): $(FW_LINUX_FPGA_DTB) $(FW_LINUX_FPGA_RNG_SEED) $(LITEX_DIR)/scripts/inject_dtb_rng_seed.py | $(FW_LINUX_FPGA_DIR)
+	$(HOST_PYTHON) $(LITEX_DIR)/scripts/inject_dtb_rng_seed.py --seed-file $(FW_LINUX_FPGA_RNG_SEED) $(FW_LINUX_FPGA_DTB) $@
+
 fpga-linux-dtb-check: $(FW_LINUX_FPGA_DTB)
 	$(HOST_PYTHON) $(LITEX_DIR)/scripts/check_linux_dts.py $(FW_LINUX_FPGA_DTS)
 
@@ -225,8 +243,17 @@ $(FW_LINUX_FPGA_ELF): $(FW_LINUX_FPGA_SRC)/boot.S $(FW_LINUX_FPGA_SRC)/link.ld $
 $(FW_LINUX_FPGA_BIN): $(FW_LINUX_FPGA_ELF)
 	$(CROSS)objcopy -O binary $< $@
 
-$(FW_LINUX_FPGA_IMAGE): $(FW_LINUX_FPGA_BIN) $(FW_LINUX_FPGA_DTB) $(LINUX_FPGA_PAYLOAD)
+$(FW_LINUX_FPGA_IMAGE): $(FW_LINUX_FPGA_BIN) $(FW_LINUX_FPGA_SEEDED_DTB) $(LINUX_FPGA_PAYLOAD)
 	$(call _emit_fpga_image,$@,$(FW_LINUX_FPGA_BIN),$(LINUX_FPGA_PAYLOAD),$(LINUX_FPGA_DTB_OFFSET),$(LINUX_FPGA_DTB_SRC_ADDR),Linux FPGA)
+
+# Upload only populated regions. Keep stage0 last: LiteXTerm boots the address
+# of the final JSON entry after all regions have been transferred.
+$(FW_LINUX_FPGA_UPLOAD_IMAGES): $(FW_LINUX_FPGA_BIN) $(FW_LINUX_FPGA_SEEDED_DTB) $(LINUX_FPGA_PAYLOAD) | $(FW_LINUX_FPGA_DIR)
+	$(HOST_PYTHON) -c 'import json, sys; json.dump(dict(zip(sys.argv[2::2], sys.argv[3::2])), open(sys.argv[1], "w"), indent=2)' \
+		$@ $(LINUX_FPGA_PAYLOAD) $(LINUX_FPGA_PAYLOAD_SRC_ADDR) \
+		$(FW_LINUX_FPGA_SEEDED_DTB) $(LINUX_FPGA_DTB_SRC_ADDR) \
+		$(FW_LINUX_FPGA_BIN) $(MAIN_RAM_BASE)
+	@echo "[INFO] Sparse serial upload: payload + seeded DTB + stage0 (no zero-filled image holes)."
 
 $(FW_LINUX_FPGA_SMOKE_ELF): $(FW_LINUX_FPGA_SRC)/boot.S $(FW_LINUX_FPGA_SRC)/link.ld | $(FW_LINUX_FPGA_DIR)
 	$(CROSS)gcc $(FW_LINUX_FPGA_SMOKE_CFLAGS) -T $(FW_LINUX_FPGA_SRC)/link.ld -o $@ $(FW_LINUX_FPGA_SRC)/boot.S
@@ -249,7 +276,7 @@ $(FW_LINUX_FPGA_OPENSBI_ELF): opensbi-build $(FW_LINUX_FPGA_SRC)/boot.S $(FW_LIN
 $(FW_LINUX_FPGA_OPENSBI_BIN): $(FW_LINUX_FPGA_OPENSBI_ELF)
 	$(CROSS)objcopy -O binary $< $@
 
-$(FW_LINUX_FPGA_OPENSBI_IMAGE): $(FW_LINUX_FPGA_OPENSBI_BIN) $(FW_LINUX_FPGA_DTB) $(LINUX_FPGA_OPENSBI_PAYLOAD)
+$(FW_LINUX_FPGA_OPENSBI_IMAGE): $(FW_LINUX_FPGA_OPENSBI_BIN) $(FW_LINUX_FPGA_SEEDED_DTB) $(LINUX_FPGA_OPENSBI_PAYLOAD)
 	$(call _emit_fpga_image,$@,$(FW_LINUX_FPGA_OPENSBI_BIN),$(LINUX_FPGA_OPENSBI_PAYLOAD),$(LINUX_FPGA_OPENSBI_DTB_OFFSET),$(LINUX_FPGA_OPENSBI_DTB_SRC_ADDR),Linux FPGA OpenSBI)
 
 sim-gen: $(PACK_SV) $(SIM_ROM_DEP) $(SIM_PAYLOAD_BUILD)
@@ -447,10 +474,12 @@ raptos-bios-sim-rv64: fpga-raptos-rv64-build
 		SIM_TIMEOUT=$(if $(filter command line environment,$(origin SIM_TIMEOUT)),$(SIM_TIMEOUT),300))
 
 linux32-build:
-	$(MAKE) -s -C $(LINUX_DIR) $(LINUX_DOWNLOAD_TARGET)
+	$(MAKE) -s -C $(LINUX_DIR) download-rv32gc-fpga
+	@echo "[INFO] RV32GC Buildroot payload: $(LINUX_RV32GC_FPGA_PAYLOAD)"
 
 linux64-build:
-	@$(call _make,linux32-build VARIANT=linux64)
+	$(MAKE) -s -C $(LINUX_DIR) download-rv64
+	@echo "[INFO] RV64 Linux payload: $(LINUX_RV64_PAYLOAD)"
 
 linux32:
 	@$(call _make,sim PAYLOAD=linux VARIANT=linux32)
@@ -830,14 +859,25 @@ fpga-console:
 
 fpga-upload: $(_FPGA_UPLOAD_DEPS)
 	$(call _require_var,UART_PORT,$(UART_PORT),UART_PORT empty — set UART_PORT=/dev/tty.usbserial-XXXX)
-	@bin="$(BIN)"; [ -z "$$bin" ] && bin="$(_FPGA_UPLOAD_DEFAULT_BIN)"; \
-	if [ ! -f "$$bin" ]; then \
+	@bin="$(BIN)"; images="$(if $(strip $(BIN)),,$(_FPGA_UPLOAD_DEFAULT_IMAGES))"; \
+	[ -z "$$bin" ] && bin="$(_FPGA_UPLOAD_DEFAULT_BIN)"; \
+	if [ -n "$$images" ] && [ ! -f "$$images" ]; then \
+		echo "[ERR] LiteXTerm image manifest not found: $$images"; exit 1; \
+	elif [ -z "$$images" ] && [ ! -f "$$bin" ]; then \
 		echo "[ERR] $$bin not found — build it first (e.g. 'make firmware-fpga FW_FPGA_TARGET=$(FW_FPGA_TARGET) FW_FPGA_LOAD=main_ram')"; exit 1; fi; \
-	echo "[INFO] Uploading $$bin to MAIN_RAM ($(MAIN_RAM_BASE)) via BIOS serialboot on $(UART_PORT)"; \
+	if [ -n "$$images" ]; then \
+		echo "[INFO] Uploading sparse Linux regions from $$images via BIOS serialboot on $(UART_PORT)"; \
+	else \
+		echo "[INFO] Uploading $$bin to MAIN_RAM ($(MAIN_RAM_BASE)) via BIOS serialboot on $(UART_PORT)"; \
+	fi; \
 	if [ -n "$(SERIALBOOT_SAFE_FLAG)" ]; then echo "[INFO] Using litex_term --safe (SERIALBOOT_SAFE=$(SERIALBOOT_SAFE))"; fi; \
 	echo "[INFO] Power-cycle / press the reboot button on the board if the BIOS prompt has timed out."; \
 	source $(VENV_DIR)/bin/activate && \
-	litex_term --speed=$(UART_BAUD) $(SERIALBOOT_SAFE_FLAG) --kernel="$$bin" --kernel-adr=$(MAIN_RAM_BASE) $(UART_PORT)
+	if [ -n "$$images" ]; then \
+		litex_term --speed=$(UART_BAUD) $(SERIALBOOT_SAFE_FLAG) --images="$$images" $(UART_PORT); \
+	else \
+		litex_term --speed=$(UART_BAUD) $(SERIALBOOT_SAFE_FLAG) --kernel="$$bin" --kernel-adr=$(MAIN_RAM_BASE) $(UART_PORT); \
+	fi
 
 fpga-clean:
 	rm -rf $(FPGA_DIR)

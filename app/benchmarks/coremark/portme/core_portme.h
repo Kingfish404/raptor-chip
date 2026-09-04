@@ -61,6 +61,42 @@ static inline unsigned long long _rdtime(void)
 #endif
 }
 
+static inline unsigned long long _rdcycle64(void)
+{
+#if __riscv_xlen == 64
+  unsigned long long value;
+  __asm__ volatile("rdcycle %0" : "=r"(value) : : "memory");
+  return value;
+#else
+  unsigned int lo, hi, hi2;
+  do
+  {
+    __asm__ volatile("rdcycleh %0" : "=r"(hi) : : "memory");
+    __asm__ volatile("rdcycle  %0" : "=r"(lo) : : "memory");
+    __asm__ volatile("rdcycleh %0" : "=r"(hi2) : : "memory");
+  } while (hi != hi2);
+  return ((unsigned long long)hi << 32) | lo;
+#endif
+}
+
+static inline unsigned long long _rdinstret64(void)
+{
+#if __riscv_xlen == 64
+  unsigned long long value;
+  __asm__ volatile("rdinstret %0" : "=r"(value) : : "memory");
+  return value;
+#else
+  unsigned int lo, hi, hi2;
+  do
+  {
+    __asm__ volatile("rdinstreth %0" : "=r"(hi) : : "memory");
+    __asm__ volatile("rdinstret  %0" : "=r"(lo) : : "memory");
+    __asm__ volatile("rdinstreth %0" : "=r"(hi2) : : "memory");
+  } while (hi != hi2);
+  return ((unsigned long long)hi << 32) | lo;
+#endif
+}
+
 /* CLINT timebase: 1 MHz (from DTS timebase-frequency) */
 #define CORETIMETYPE unsigned long long
 #define GETMYTIME(_t) (*(_t) = _rdtime())

@@ -30,6 +30,25 @@ int large_frame(void) {
     return sum;
 }
 
+/* Touch a 64 KiB frame sparsely so PK must fault in multiple stack pages.
+ * Distinct markers catch aliasing or corruption while later pages fault in.
+ */
+__attribute__((noinline))
+int paged_frame(void) {
+    enum { PAGE_WORDS = 4096 / sizeof(uint32_t), PAGES = 16 };
+    volatile uint32_t arr[PAGES * PAGE_WORDS];
+    for (int page = 0; page < PAGES; page++) {
+        arr[page * PAGE_WORDS] = 0x12340000u + page;
+        arr[(page + 1) * PAGE_WORDS - 1] = 0xabcd0000u + page;
+    }
+    for (int page = PAGES - 1; page >= 0; page--) {
+        if (arr[page * PAGE_WORDS] != 0x12340000u + page ||
+            arr[(page + 1) * PAGE_WORDS - 1] != 0xabcd0000u + page)
+            return 0;
+    }
+    return 1;
+}
+
 /* Function with many saved registers */
 __attribute__((noinline))
 long many_regs(long a, long b, long c, long d,
@@ -64,6 +83,8 @@ int main(void) {
         int result = large_frame();
         CHECK(result == 5559680, "large stack frame: sum of squares");
     }
+
+    CHECK(paged_frame(), "demand-paged stack: distinct markers across 64 KiB");
 
     /* many registers */
     {

@@ -1,6 +1,7 @@
 logic clock = 1'b0;
 logic reset = 1'b1;
 logic pmu_sq_full;
+logic [XLEN-1:0] sq_waddr_hi;
 
 cmu_bcast_if cmu_bcast();
 lsu_l1d_if lsu_l1d();
@@ -16,6 +17,7 @@ rapt_lsu_sq #(.SQ_SIZE(LsuTbSqSize)) dut (
     .lsu_l1d,
     .exu_lsu,
     .exu_ioq_bcast,
+    .sq_waddr_hi,
     .rou_lsu,
     .csr_bcast,
     .pmp_state,
@@ -60,6 +62,8 @@ task automatic init_lsu_inputs(
     exu_ioq_bcast.alu = '0;
     exu_ioq_bcast.sq_waddr = '0;
     exu_ioq_bcast.sq_wdata = '0;
+    exu_ioq_bcast.sq_wdata64 = '0;
+    exu_ioq_bcast.sq_fp64 = 1'b0;
     exu_ioq_bcast.trap = 1'b0;
     exu_ioq_bcast.tval = '0;
     exu_ioq_bcast.cause = '0;
@@ -71,8 +75,11 @@ task automatic init_lsu_inputs(
     rou_lsu.sq_waddr = '0;
     rou_lsu.sq_vaddr = '0;
     rou_lsu.sq_wdata = '0;
+    rou_lsu.sq_wdata64 = '0;
+    rou_lsu.sq_fp64 = 1'b0;
     rou_lsu.pc = '0;
     rou_lsu.valid = 1'b0;
+    sq_waddr_hi = '0;
     lsu_l1d.rdata = default_rdata;
     lsu_l1d.trap = 1'b0;
     lsu_l1d.cause = '0;

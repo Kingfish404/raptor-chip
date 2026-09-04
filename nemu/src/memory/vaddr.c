@@ -243,6 +243,29 @@ void vaddr_write(vaddr_t addr, int len, word_t data)
   }
 }
 
+/* Zicbom management operations check the addressed byte as a data access with
+ * load-or-store permission.  They use the store/AMO exception class, require
+ * PTE.A under Svade, do not require PTE.D, and have no memory side effect. */
+void vaddr_check_cmo(vaddr_t addr)
+{
+  g_vaddr = addr;
+  paddr_t paddr = addr;
+  if (isa_mmu_check(addr, 1, MEM_TYPE_CMO) != MMU_DIRECT)
+  {
+    paddr = isa_mmu_translate(addr, 1, MEM_TYPE_CMO);
+  }
+
+  uint32_t priv = pmp_effective_priv_ls();
+  bool read_fault = pmp_check(paddr, 1, priv, true, false, false);
+  bool write_fault = pmp_check(paddr, 1, priv, false, true, false);
+  if (read_fault && write_fault)
+  {
+    g_vaddr = pmp_last_fault_addr;
+    cause = MCA_STO_ACC_FAU;
+    nemu_longjmp(exec_jmp_buf, 24);
+  }
+}
+
 void vaddr_show(vaddr_t addr, int n)
 {
   word_t data;

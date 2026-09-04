@@ -20,7 +20,7 @@ Repository: <https://github.com/Kingfish404/raptor-chip>
 
 | Item                 | Value                                                                                                   |
 | -------------------- | ------------------------------------------------------------------------------------------------------- |
-| ISA                  | `rv32/64imafdc_zicbom_zicbop_zicntr_zicond_zicsr_zifencei_zihintntl_zihintpause_zimop_zca_zcb_zcmop_zba_zbb_zbc_zbs` |
+| ISA                  | `rv32/64imafdc_zba_zbb_zbs_zfhmin_zicbom_zicbop_zicboz_zicntr_zicond_zicsr_zifencei_zihintntl_zihintpause_zihpm_zimop_zca_zcb_zcmop` |
 | Privilege modes      | M, S, U                                                                                                 |
 | MMU                  | Sv32 (RV32) / Sv39 PTW path (RV64 xv6 bring-up) / Bare                                                  |
 | Interrupts           | CLINT (`mtime`, `mtimecmp`, `msip`) + PLIC (31 sources, M/S contexts)                                   |
@@ -61,6 +61,7 @@ for detailed numbers and the change history.
 
 - [Quick Start](./getting-started.md) — build and simulate.
 - [Microarchitecture](./uarch.md) — pipeline, modules, interfaces, ISA breakdown.
+- [RISC-V Profiles](./riscv-profiles.md) — RVI20U32/RVA20S64/RVA22U64 conformance matrix, RVA22S64 gap matrix, and PMA scope.
 - [Profile](./PROFILE.md) — benchmarks, cycle-stall breakdown, PPA.
 - [Performance Iterations](./perf-iterations.md) — IPC history per commit.
 - [Ecosystem](./ecosystem.md) — simulators, SoC memory maps, FPGA, tools.

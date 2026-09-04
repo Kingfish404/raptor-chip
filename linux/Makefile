@@ -1,6 +1,6 @@
 PWD_DIR=$(abspath .)
 RAPTOR_HOME ?= $(abspath ..)
-KERNEL_VERSION:=6.18.39
+KERNEL_VERSION:=6.18.49
 NPROC := $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 
 # ==============================================================================
@@ -8,10 +8,17 @@ NPROC := $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || s
 # ==============================================================================
 include $(PWD_DIR)/vars.mk
 
-.PHONY: help download-rv32 download-rv64 download all build_linux make_initramfs
+.PHONY: help download-rv32 download-rv64 download-rv32gc download-rv64gc
+.PHONY: download-rv32gc-fpga download-gc download download-all all build_linux make_initramfs
 .PHONY: build_init install_initramfs check-opensbi-llvm-deps opensbi opensbi-rv32 opensbi-rv64 opensbi-gnu opensbi-gnu-rv32 opensbi-gnu-rv64
-.PHONY: opensbi-with-kernel opensbi-clean print-rv32-payload print-rv64-payload
-.PHONY: print-opensbi-payload clean
+.PHONY: opensbi-with-kernel opensbi-clean opensbi-rv32gc-payload opensbi-rv64gc-payload print-rv32-payload print-rv64-payload
+.PHONY: print-opensbi-payload clean force-opensbi-config-check
+
+# Command-line ISA/image/FDT changes are tracked by .raptor-build-config, but
+# make cannot see those values in ordinary prerequisite timestamps.  Always
+# enter the GC payload recipes so prepare_opensbi_build can validate the stamp;
+# the nested OpenSBI build remains incremental when the stamp is unchanged.
+force-opensbi-config-check:
 
 help: ## Show this help message
 	@echo "Usage: make <target> [VAR=value ...]"
@@ -35,27 +42,61 @@ help: ## Show this help message
 # Pre-built download targets
 # ==============================================================================
 
-$(LINUX_RV32_DIR)/fw_payload.bin:
+define download_release_asset
 	@mkdir -p $(LINUX_BUILD_DIR)
-	curl -L -o $(LINUX_BUILD_DIR)/$(LINUX_RV32_NAME).tar.gz \
-		$(LINUX_BUILD_URL)/$(LINUX_RV32_NAME).tar.gz
-	tar xzf $(LINUX_BUILD_DIR)/$(LINUX_RV32_NAME).tar.gz -C $(LINUX_BUILD_DIR)
+	@set -eu; \
+	archive="$(LINUX_BUILD_DIR)/$(1).tar.gz"; \
+	if ! printf '%s  %s\n' "$(2)" "$$archive" | sha256sum --check --status 2>/dev/null; then \
+		echo "Downloading $(1).tar.gz from $(LINUX_BUILD_RELEASE)"; \
+		curl --fail --location --retry 3 \
+			--output "$$archive.part" "$(LINUX_BUILD_URL)/$(1).tar.gz"; \
+		printf '%s  %s\n' "$(2)" "$$archive.part" | sha256sum --check -; \
+		mv -f "$$archive.part" "$$archive"; \
+	else \
+		echo "Using verified release archive $$archive"; \
+	fi; \
+	tar -xzf "$$archive" -C "$(LINUX_BUILD_DIR)"
+endef
+
+$(LINUX_RV32_DIR)/fw_payload.bin:
+	$(call download_release_asset,$(LINUX_RV32_NAME),$(LINUX_RV32_SHA256))
+	@test -f $@
 	@echo "RV32 Linux build extracted to $(LINUX_RV32_DIR)"
 
 $(LINUX_RV64_DIR)/fw_payload.bin:
-	@mkdir -p $(LINUX_BUILD_DIR)
-	curl -L -o $(LINUX_BUILD_DIR)/$(LINUX_RV64_NAME).tar.gz \
-		$(LINUX_BUILD_URL)/$(LINUX_RV64_NAME).tar.gz
-	tar xzf $(LINUX_BUILD_DIR)/$(LINUX_RV64_NAME).tar.gz -C $(LINUX_BUILD_DIR)
+	$(call download_release_asset,$(LINUX_RV64_NAME),$(LINUX_RV64_SHA256))
+	@test -f $@
 	@echo "RV64 Linux build extracted to $(LINUX_RV64_DIR)"
+
+$(LINUX_RV32GC_IMAGE):
+	$(call download_release_asset,$(LINUX_RV32GC_NAME),$(LINUX_RV32GC_SHA256))
+	@test -f $@
+	@echo "RV32GC Buildroot image extracted to $(LINUX_RV32GC_DIST_DIR)"
+
+$(LINUX_RV64GC_IMAGE):
+	$(call download_release_asset,$(LINUX_RV64GC_NAME),$(LINUX_RV64GC_SHA256))
+	@test -f $@
+	@echo "RV64GC Buildroot image extracted to $(LINUX_RV64GC_DIST_DIR)"
+
+$(LINUX_RV32GC_FPGA_PAYLOAD):
+	$(call download_release_asset,$(LINUX_RV32GC_FPGA_NAME),$(LINUX_RV32GC_FPGA_SHA256))
+	@test -f $@
+	@echo "Complete RV32GC FPGA payload extracted to $(LINUX_RV32GC_FPGA_DIST_DIR)"
 
 download-rv32: $(LINUX_RV32_DIR)/fw_payload.bin ## Download pre-built Linux (RV32)
 download-rv64: $(LINUX_RV64_DIR)/fw_payload.bin ## Download pre-built Linux (RV64)
+download-rv32gc: $(LINUX_RV32GC_IMAGE) ## Download fast RV32GC Buildroot image for simulation
+download-rv64gc: $(LINUX_RV64GC_IMAGE) ## Download fast RV64GC Buildroot image for simulation
+download-rv32gc-fpga: $(LINUX_RV32GC_FPGA_PAYLOAD) ## Download complete RV32GC Buildroot payload for FPGA
+download-gc: download-rv32gc download-rv64gc ## Download RV32GC + RV64GC simulation images
 download: download-rv32 download-rv64 ## Download pre-built Linux (RV32 + RV64)
-	@echo "Downloaded Linux $(LINUX_BUILD_VERSION) for RV32 and RV64"
+	@echo "Downloaded Linux $(LINUX_BUILD_VERSION) from $(LINUX_BUILD_RELEASE) for RV32 and RV64"
 	@echo "  RV32: $(LINUX_RV32_DIR)/"
 	@echo "  RV64: $(LINUX_RV64_DIR)/"
 	@cat $(LINUX_RV32_DIR)/README.md
+
+download-all: download download-gc download-rv32gc-fpga ## Download every Linux release asset used by Raptor
+	@echo "All Linux assets are available under $(LINUX_BUILD_DIR)"
 
 # Helper targets for querying paths from other Makefiles (e.g. fpga/litex/Makefile).
 print-rv32-payload: ## Print RV32 fw_payload.bin path
@@ -124,8 +165,11 @@ OPENSBI_SRC_DIR := $(RAPTOR_HOME)/third_party/riscv-software-src/opensbi
 OPENSBI_OUT_DIR := $(PWD_DIR)/opensbi
 OPENSBI_RV32_BUILD_DIR := $(OPENSBI_OUT_DIR)/build-rv32
 OPENSBI_RV64_BUILD_DIR := $(OPENSBI_OUT_DIR)/build-rv64
+OPENSBI_RV32GC_BUILD_DIR := $(OPENSBI_OUT_DIR)/build-rv32gc
+OPENSBI_RV64GC_BUILD_DIR := $(OPENSBI_OUT_DIR)/build-rv64gc
 OPENSBI_RV32_PAYLOAD := $(OPENSBI_RV32_BUILD_DIR)/platform/generic/firmware/fw_payload.bin
 OPENSBI_RV64_PAYLOAD := $(OPENSBI_RV64_BUILD_DIR)/platform/generic/firmware/fw_payload.bin
+OPENSBI_GC_FDT_ADDR ?= 0x8fff0000
 OPENSBI_PAYLOAD := $(OPENSBI_RV32_PAYLOAD)
 export OPENSBI_PAYLOAD
 
@@ -191,8 +235,31 @@ opensbi-with-kernel: $(OPENSBI_SRC_DIR)/Makefile ## Build OpenSBI with Linux ker
 		FW_PAYLOAD_PATH=$(PWD_DIR)/linux/arch/riscv/boot/Image \
 		$(OPENSBI_RV32_FLAGS)
 
+# The pre-built GC releases use OpenSBI's QEMU-oriented 0x82200000 FDT
+# relocation address.  Their embedded Images extend beyond that address, so
+# the relocation overwrites live kernel data.  Re-wrap the unchanged Image and
+# place the small FDT at the top of the simulated 256 MiB DRAM instead.
+$(LINUX_RV32GC_SIM_PAYLOAD): force-opensbi-config-check $(LINUX_RV32GC_IMAGE) $(OPENSBI_SRC_DIR)/Makefile $(PWD_DIR)/Makefile $(PWD_DIR)/vars.mk
+	$(call prepare_opensbi_build,compiler=gnu mode=gc-payload xlen=32 isa=rv32imafdc_zicntr_zicsr_zifencei fdt=$(OPENSBI_GC_FDT_ADDR) image=$(LINUX_RV32GC_IMAGE),$(OPENSBI_RV32GC_BUILD_DIR))
+	make -C $(OPENSBI_SRC_DIR) CROSS_COMPILE=riscv64-linux-gnu- \
+		PLATFORM_RISCV_ISA=rv32imafdc_zicntr_zicsr_zifencei \
+		PLATFORM_RISCV_XLEN=32 PLATFORM=generic O=$(OPENSBI_RV32GC_BUILD_DIR) \
+		FW_PAYLOAD_PATH=$(LINUX_RV32GC_IMAGE) FW_PAYLOAD_FDT_ADDR=$(OPENSBI_GC_FDT_ADDR) -j$(NPROC)
+
+$(LINUX_RV64GC_SIM_PAYLOAD): force-opensbi-config-check $(LINUX_RV64GC_IMAGE) $(OPENSBI_SRC_DIR)/Makefile $(PWD_DIR)/Makefile $(PWD_DIR)/vars.mk
+	$(call prepare_opensbi_build,compiler=gnu mode=gc-payload xlen=64 isa=rv64imafdc_zicntr_zicsr_zifencei fdt=$(OPENSBI_GC_FDT_ADDR) image=$(LINUX_RV64GC_IMAGE),$(OPENSBI_RV64GC_BUILD_DIR))
+	make -C $(OPENSBI_SRC_DIR) CROSS_COMPILE=riscv64-linux-gnu- \
+		PLATFORM_RISCV_ISA=rv64imafdc_zicntr_zicsr_zifencei \
+		PLATFORM_RISCV_XLEN=64 PLATFORM=generic O=$(OPENSBI_RV64GC_BUILD_DIR) \
+		FW_PAYLOAD_PATH=$(LINUX_RV64GC_IMAGE) FW_PAYLOAD_FDT_ADDR=$(OPENSBI_GC_FDT_ADDR) -j$(NPROC)
+
+opensbi-rv32gc-payload: $(LINUX_RV32GC_SIM_PAYLOAD) ## Re-wrap RV32GC Linux with a non-overlapping FDT address
+
+opensbi-rv64gc-payload: $(LINUX_RV64GC_SIM_PAYLOAD) ## Re-wrap RV64GC Linux with a non-overlapping FDT address
+
 opensbi-clean: ## Clean OpenSBI build artifacts
-	rm -rf $(OPENSBI_RV32_BUILD_DIR) $(OPENSBI_RV64_BUILD_DIR)
+	rm -rf $(OPENSBI_RV32_BUILD_DIR) $(OPENSBI_RV64_BUILD_DIR) \
+		$(OPENSBI_RV32GC_BUILD_DIR) $(OPENSBI_RV64GC_BUILD_DIR)
 
 print-opensbi-payload: ## Print OpenSBI fw_payload.bin path
 	@echo $(OPENSBI_PAYLOAD)

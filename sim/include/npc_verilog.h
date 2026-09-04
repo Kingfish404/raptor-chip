@@ -89,8 +89,8 @@ static inline void verilog_connect(TOP_NAME *top, NPCState *npc)
   npc->satp___ = csr + SATP___;
 
   npc->mstatus = csr + MSTATUS;
-  // sie/sip live as restricted views of mie/mip in RTL; difftest reads them
-  // from dedicated combinational shadows kept in sync within the same eval
+  // sie/sip and mip have architectural combinational views in RTL; difftest
+  // reads them from dedicated shadows kept in sync within the same eval
   // (csr[SIE____]/csr[SIP____] storage slots are not maintained per-cycle).
   npc->sie____ = (word_t *)&VERILOG_CPU(csrs__DOT__csr_sie_shadow);
   npc->sip____ = (word_t *)&VERILOG_CPU(csrs__DOT__csr_sip_shadow);
@@ -106,7 +106,7 @@ static inline void verilog_connect(TOP_NAME *top, NPCState *npc)
   npc->mepc___ = csr + MEPC___;
   npc->mcause_ = csr + MCAUSE_;
   npc->mtval__ = csr + MTVAL__;
-  npc->mip____ = csr + MIP____;
+  npc->mip____ = (word_t *)&VERILOG_CPU(csrs__DOT__csr_mip_shadow);
 
   npc->mcycle_ = csr + MCYCLE_;
   npc->mcycleh = csr + MCYCLEH;

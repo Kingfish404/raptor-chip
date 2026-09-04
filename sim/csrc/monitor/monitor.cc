@@ -80,6 +80,7 @@ void sdb_set_vcd(bool status);
 void sdb_sim_init(int argc, char **argv);
 
 void serial_set_lf_to_cr(bool enable);
+void serial_set_exit_pattern(const char *pattern);
 
 static char *log_file = NULL;
 static char *diff_so_file = NULL;
@@ -194,6 +195,7 @@ static void usage(const char *prog)
   printf("      --disk=FILE          load FILE as virtio-mmio block disk image\n");
   printf("      --sdcard=FILE        load FILE as LiteX SPI SD-card image\n");
   printf("      --serial-lf-to-cr    translate host LF input to CR for CR-terminated monitors\n");
+  printf("      --serial-exit-on=TEXT exit successfully after TEXT appears on serial TX\n");
   printf("      --mem-random-delay=N add 0..N random wait cycles to each AXI memory beat\n");
   printf("      --mem-random-seed=N  set reproducible random-delay seed (default 1)\n");
   printf("  -h, --help               display this help and exit\n");
@@ -231,6 +233,7 @@ static int parse_args(int argc, char *argv[])
       {"no-lightsss", no_argument, NULL, 268},
       {"mem-random-delay", required_argument, NULL, 269},
       {"mem-random-seed", required_argument, NULL, 270},
+      {"serial-exit-on", required_argument, NULL, 271},
       {0, 0, NULL, 0},
   };
   int o;
@@ -367,6 +370,9 @@ static int parse_args(int argc, char *argv[])
       mem_random_state = (uint32_t)parse_u64_auto(optarg);
       if (mem_random_state == 0)
         mem_random_state = 1;
+      break;
+    case 271:
+      serial_set_exit_pattern(optarg);
       break;
     case 1:
       img_file = optarg;

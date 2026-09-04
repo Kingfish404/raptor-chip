@@ -31,14 +31,22 @@ ee_u32 default_num_contexts = 1;
 
 /* ---- Timing implementation ---- */
 static CORETIMETYPE start_time_val, stop_time_val;
+static unsigned long long start_cycle_val, stop_cycle_val;
+static unsigned long long start_instret_val, stop_instret_val;
 
 void start_time(void)
 {
   GETMYTIME(&start_time_val);
+  // Keep the cycle read closest to returning into CoreMark's measured loop.
+  start_instret_val = _rdinstret64();
+  start_cycle_val = _rdcycle64();
 }
 
 void stop_time(void)
 {
+  // Capture the cycle boundary before doing any reporting or time conversion.
+  stop_cycle_val = _rdcycle64();
+  stop_instret_val = _rdinstret64();
   GETMYTIME(&stop_time_val);
 }
 
@@ -61,13 +69,21 @@ void portable_init(core_portable *p, int *argc, char *argv[])
   (void)argc;
   (void)argv;
 
-  printf("CoreMark: NPC bare-metal port (rv%d, newlib)\n",
+  printf("CoreMark: NPC pk userspace port (rv%d, newlib)\n",
          (int)(sizeof(void *) * 8));
   printf("Iterations: %d\n", ITERATIONS);
 }
 
 void portable_fini(core_portable *p)
 {
+  unsigned long long cycles = stop_cycle_val - start_cycle_val;
+  unsigned long long instructions = stop_instret_val - start_instret_val;
+  unsigned long long ipc_milli = cycles ? (instructions * 1000ULL) / cycles : 0;
+
   (void)p;
+  printf("CoreMark ROI cycles       : %llu\n", cycles);
+  printf("CoreMark ROI instructions : %llu\n", instructions);
+  printf("CoreMark ROI IPC          : %llu.%03llu\n",
+         ipc_milli / 1000ULL, ipc_milli % 1000ULL);
   printf("CoreMark: done.\n");
 }

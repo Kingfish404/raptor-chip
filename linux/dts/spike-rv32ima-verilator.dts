@@ -1,0 +1,8 @@
+/include/ "spike-rv32ima.dts"
+
+/ {
+	chosen {
+		/* Keep the portable Verilator gate focused on boot integration. */
+		bootargs = "console=ttyS0 earlycon init=/init unaligned_scalar_speed=fast initcall_blacklist=sha3_generic_mod_init";
+	};
+};

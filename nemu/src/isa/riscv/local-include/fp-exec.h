@@ -20,12 +20,16 @@ int fp_rs2(const Decode *s);
 int fp_rs3(const Decode *s);
 void fp_load_s(Decode *s, int rd, vaddr_t addr);
 void fp_load_d(Decode *s, int rd, vaddr_t addr);
+void fp_load_h(Decode *s, int rd, vaddr_t addr);
 void fp_store_s(Decode *s, vaddr_t addr, int rs2);
 void fp_store_d(Decode *s, vaddr_t addr, int rs2);
+void fp_store_h(Decode *s, vaddr_t addr, int rs2);
 void fp_move_to_s(Decode *s, int rd, word_t value);
 void fp_move_from_s(Decode *s, int rd, int rs1);
 void fp_move_to_d(Decode *s, int rd, word_t value);
 void fp_move_from_d(Decode *s, int rd, int rs1);
+void fp_move_to_h(Decode *s, int rd, word_t value);
+void fp_move_from_h(Decode *s, int rd, int rs1);
 void fp_sign_inject_s(Decode *s, int rd, int rs1, int rs2, unsigned mode);
 void fp_sign_inject_d(Decode *s, int rd, int rs1, int rs2, unsigned mode);
 void fp_exec_binary_s(Decode *s, int rd, int rs1, int rs2, fp_binary_s_fn operation);
@@ -48,5 +52,9 @@ void fp_exec_from_int_s(Decode *s, int rd, word_t value, bool unsigned_input, bo
 void fp_exec_from_int_d(Decode *s, int rd, word_t value, bool unsigned_input, bool int64);
 void fp_exec_convert_d_to_s(Decode *s, int rd, int rs1);
 void fp_exec_convert_s_to_d(Decode *s, int rd, int rs1);
+void fp_exec_convert_h_to_s(Decode *s, int rd, int rs1);
+void fp_exec_convert_h_to_d(Decode *s, int rd, int rs1);
+void fp_exec_convert_s_to_h(Decode *s, int rd, int rs1);
+void fp_exec_convert_d_to_h(Decode *s, int rd, int rs1);
 
 #endif

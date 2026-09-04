@@ -425,14 +425,90 @@ uint64_t riscv_fp_box_s(uint32_t bits)
   return UINT64_C(0xffffffff00000000) | bits;
 }
 
+uint64_t riscv_fp_box_h(uint16_t bits)
+{
+  return UINT64_C(0xffffffffffff0000) | bits;
+}
+
 uint32_t riscv_fp_s_bits(uint64_t bits)
 {
   return (uint32_t)bits;
 }
 
+uint16_t riscv_fp_h_bits(uint64_t bits)
+{
+  return (uint16_t)bits;
+}
+
 uint32_t riscv_fp_read_s(uint64_t bits)
 {
   return (bits >> 32) == UINT32_MAX ? (uint32_t)bits : UINT32_C(0x7fc00000);
+}
+
+uint16_t riscv_fp_read_h(uint64_t bits)
+{
+  return (bits >> 16) == UINT64_C(0x0000ffffffffffff)
+      ? (uint16_t)bits : UINT16_C(0x7e00);
+}
+
+static bool riscv_fp_is_nan_h(uint16_t bits)
+{
+  return (bits & UINT16_C(0x7c00)) == UINT16_C(0x7c00)
+      && (bits & UINT16_C(0x03ff)) != 0;
+}
+
+uint32_t riscv_fp_convert_h_to_s(uint16_t bits, uint32_t *flags)
+{
+  softfloat_exceptionFlags = 0;
+  if (riscv_fp_is_nan_h(bits)) {
+    *flags = (bits & UINT16_C(0x0200)) ? 0 : (1u << 4);
+    return UINT32_C(0x7fc00000);
+  }
+  float32_t result = f16_to_f32((float16_t){bits});
+  *flags = riscv_fp_flags();
+  return result.v;
+}
+
+uint64_t riscv_fp_convert_h_to_d(uint16_t bits, uint32_t *flags)
+{
+  softfloat_exceptionFlags = 0;
+  if (riscv_fp_is_nan_h(bits)) {
+    *flags = (bits & UINT16_C(0x0200)) ? 0 : (1u << 4);
+    return UINT64_C(0x7ff8000000000000);
+  }
+  float64_t result = f16_to_f64((float16_t){bits});
+  *flags = riscv_fp_flags();
+  return result.v;
+}
+
+uint16_t riscv_fp_convert_s_to_h(uint32_t bits, unsigned rm, uint32_t *flags)
+{
+  bool nan = (bits & UINT32_C(0x7f800000)) == UINT32_C(0x7f800000)
+      && (bits & UINT32_C(0x007fffff)) != 0;
+  if (nan) {
+    *flags = (bits & UINT32_C(0x00400000)) ? 0 : (1u << 4);
+    return UINT16_C(0x7e00);
+  }
+  softfloat_roundingMode = riscv_fp_rounding_mode(rm);
+  softfloat_exceptionFlags = 0;
+  float16_t result = f32_to_f16((float32_t){bits});
+  *flags = riscv_fp_flags();
+  return result.v;
+}
+
+uint16_t riscv_fp_convert_d_to_h(uint64_t bits, unsigned rm, uint32_t *flags)
+{
+  bool nan = (bits & UINT64_C(0x7ff0000000000000)) == UINT64_C(0x7ff0000000000000)
+      && (bits & UINT64_C(0x000fffffffffffff)) != 0;
+  if (nan) {
+    *flags = (bits & UINT64_C(0x0008000000000000)) ? 0 : (1u << 4);
+    return UINT16_C(0x7e00);
+  }
+  softfloat_roundingMode = riscv_fp_rounding_mode(rm);
+  softfloat_exceptionFlags = 0;
+  float16_t result = f64_to_f16((float64_t){bits});
+  *flags = riscv_fp_flags();
+  return result.v;
 }
 
 uint64_t riscv_fp_sgnj(uint64_t lhs, uint64_t rhs, unsigned mode)

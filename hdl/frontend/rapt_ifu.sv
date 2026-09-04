@@ -116,6 +116,19 @@ module rapt_ifu #(
   logic is_sys_a;
   logic is_atomic_a;
 
+  // Zimop occupies encodings in the SYSTEM opcode space, but MOP.R.n and
+  // MOP.RR.n are ordinary, non-serializing instructions.  Treating every
+  // SYSTEM opcode as serializing leaves the IFU in STALL forever because a
+  // MOP correctly decodes with uop.system=0 and therefore never produces a
+  // system-resume redirect at retirement.
+  function automatic logic is_zimop(input logic [31:0] inst);
+    return inst[6:0] == `RAPT_OP_SYSTEM
+        && inst[14:12] == 3'b100
+        && inst[31]
+        && inst[29:28] == 2'b00
+        && (inst[25] || inst[24:22] == 3'b111);
+  endfunction
+
   logic trap;
   logic [XLEN-1:0] cause;
   logic [XLEN-1:0] tval;
@@ -124,7 +137,8 @@ module rapt_ifu #(
   assign pre_is_c_a = !(ifu_l1i.inst_n0[1:0] == 2'b11);
   assign is_c_a = !(inst_a[1:0] == 2'b11);
   assign opcode_a = is_c_a ? {2'b0, {inst_a[15:13]}, {inst_a[1:0]}} : inst_a[6:0];
-  assign is_sys_a = (opcode_a == `RAPT_OP_SYSTEM) || (opcode_a == `RAPT_OP_FENCE_);
+  assign is_sys_a = ((opcode_a == `RAPT_OP_SYSTEM) && !is_zimop(inst_a))
+                  || (opcode_a == `RAPT_OP_FENCE_);
   assign is_atomic_a = (opcode_a == `RAPT_OP_AMO___);
 
   assign valid = state_ifu == VALID;
@@ -189,7 +203,8 @@ module rapt_ifu #(
       : ((ifu_l1i.inst_n0[6:0] == `RAPT_OP_B_TYPE_)
       || (ifu_l1i.inst_n0[6:0] == `RAPT_OP_JAL___)
       || (ifu_l1i.inst_n0[6:0] == `RAPT_OP_JALR__)
-      || (ifu_l1i.inst_n0[6:0] == `RAPT_OP_SYSTEM)
+      || ((ifu_l1i.inst_n0[6:0] == `RAPT_OP_SYSTEM)
+          && !is_zimop(ifu_l1i.inst_n0))
       || (ifu_l1i.inst_n0[6:0] == `RAPT_OP_FENCE_)
       || (ifu_l1i.inst_n0[6:0] == `RAPT_OP_AMO___));
 
@@ -204,7 +219,8 @@ module rapt_ifu #(
       : ((inst_b_lo_pre[6:0] == `RAPT_OP_B_TYPE_)
       || (inst_b_lo_pre[6:0] == `RAPT_OP_JAL___)
       || (inst_b_lo_pre[6:0] == `RAPT_OP_JALR__)
-      || (inst_b_lo_pre[6:0] == `RAPT_OP_SYSTEM)
+      || ((inst_b_lo_pre[6:0] == `RAPT_OP_SYSTEM)
+          && !is_zimop(inst_b_pre))
       || (inst_b_lo_pre[6:0] == `RAPT_OP_FENCE_)
       || (inst_b_lo_pre[6:0] == `RAPT_OP_AMO___));
 
@@ -398,11 +414,13 @@ module rapt_ifu #(
 `else
       pmu_ifu_response_bypass_candidate <= 1'b0;
 `endif
-`ifdef RAPT_DUAL_ISSUE
+      // These packet-level probes are meaningful in both single- and
+      // dual-issue configurations.
       pmu_fetch_response_consume <= recv_ready;
-      pmu_fetch_dual_fire <= valid && ifu_idu.ready && ifu_idu.valid_b;
-      pmu_fetch_downstream_blocked <= valid && !ifu_idu.ready;
       pmu_fetch_bpu_taken <= recv_ready && ifu_bpu.taken;
+      pmu_fetch_target_steer <= recv_ready && !redirect_event && (nextpc != seqpc);
+`ifdef RAPT_DUAL_ISSUE
+      pmu_fetch_dual_fire <= valid && ifu_idu.ready && ifu_idu.valid_b;
       pmu_fetch_slot_a_control <= recv_ready && !ifu_bpu.taken && !ifu_l1i.trap
           && pre_is_branch_a;
       pmu_fetch_slot_b_control <= recv_ready && !ifu_bpu.taken && !ifu_l1i.trap
@@ -418,13 +436,8 @@ module rapt_ifu #(
       pmu_fetch_n1_unavailable_l1i <= recv_ready && !ifu_bpu.taken && !ifu_l1i.trap
           && !pre_is_branch_a && !slot_b_r32_r32_unaligned
           && !inst_b_data_avail;
-      // Accepted packets whose next PC is a predicted non-sequential target
-      // can use target-directed L1I data SRAM read-ahead on the next cycle.
-      pmu_fetch_target_steer <= recv_ready && !redirect_event && (nextpc != seqpc);
 `else
-      pmu_fetch_response_consume <= 1'b0;
       pmu_fetch_dual_fire <= 1'b0;
-      pmu_fetch_bpu_taken <= 1'b0;
       pmu_fetch_slot_a_control <= 1'b0;
       pmu_fetch_slot_b_control <= 1'b0;
       pmu_fetch_slot_b_jal_pack <= 1'b0;
@@ -432,9 +445,9 @@ module rapt_ifu #(
       pmu_fetch_n1_unavailable <= 1'b0;
       pmu_fetch_n1_unavailable_unaligned <= 1'b0;
       pmu_fetch_n1_unavailable_l1i <= 1'b0;
-      pmu_fetch_downstream_blocked <= 1'b0;
-      pmu_fetch_target_steer <= 1'b0;
 `endif
+      // Backpressure exists in both single- and dual-issue configurations.
+      pmu_fetch_downstream_blocked <= valid && !ifu_idu.ready;
       unique case (state_ifu)
         IDLE: begin
           if (redirect_event) begin

@@ -38,10 +38,9 @@ module rapt_bus #(
   // flight simultaneously. The downstream router/SoC handle multi-outstanding
   // responses via request IDs; per-master response de-mux is by ID below.
   //
-  //   - L1I slot: 2-deep FIFO. The L1I miss FSM (rapt_l1i.sv RD_0->RD_1)
-  //     issues two sequential ARs gated only on `l1i_bus.rready` pulses, so
-  //     the bus must accept both back-to-back without waiting for the first
-  //     response.
+  //   - L1I slot: refill-depth FIFO. The L1I miss FSM can issue sequential
+  //     ARs gated only on `l1i_bus.rready` pulses, so the bus must accept a
+  //     complete refill without waiting for its first response.
   //   - L1D slot: 1-deep, held until the response's `rlast` so the captured
   //     `l1d_load_is_mmio` flag stays valid across the round trip.
   //
@@ -55,7 +54,7 @@ module rapt_bus #(
   localparam int L1iARPtrW  = (L1iARDepth <= 1) ? 1 : $clog2(L1iARDepth);
   localparam int L1iARCntW  = $clog2(L1iARDepth + 1);
 
-  // L1I AR FIFO (depth 2)
+  // L1I AR FIFO (one entry per refill word)
   logic [XLEN-1:0] l1i_q_addr                                     [L1iARDepth];
   logic            l1i_q_burst                                    [L1iARDepth];
   logic            l1i_q_ptw                                      [L1iARDepth];
@@ -67,8 +66,9 @@ module rapt_bus #(
   assign l1i_q_empty = (l1i_q_cnt == '0);
 
   // L1D AR slot. Lifetime: capture .. R-rlast (so difftest_skip stays valid).
-  logic            l1d_slot_busy;  // pending: AR accepted or in flight or awaiting R
-  logic            l1d_slot_issued;  // AR has been handed to downstream
+  logic            l1d_slot_busy;  // pending: buffered, in flight, or awaiting R
+  logic            l1d_slot_held;  // ownership transferred to downstream/skid
+  logic            l1d_slot_issued;  // AR handshake completed with downstream
   logic [XLEN-1:0] l1d_slot_addr;
   logic [     2:0] l1d_slot_size;
   logic            l1d_slot_mmio;
@@ -94,33 +94,35 @@ module rapt_bus #(
   assign l1i_bus.rready = l1i_push;
   assign l1d_bus.rready = l1d_push;
 
-  // Downstream issue arbiter (L1D priority).
-  logic issue_l1d, issue_l1i, l1i_pop;
-  logic rd_issue_lock, rd_issue_l1d;
-  logic want_l1d, want_l1i;
-  assign want_l1d = l1d_slot_busy && !l1d_slot_issued;
-  assign want_l1i = !want_l1d && !l1i_q_empty;
-  // Once ARVALID is presented, AXI requires every AR payload signal to remain
-  // stable until ARREADY.  Lock the selected source while stalled so a newly
-  // captured high-priority L1D request cannot replace an already-presented
-  // L1I request.
-  assign issue_l1d = rd_issue_lock ? rd_issue_l1d : want_l1d;
-  assign issue_l1i = rd_issue_lock ? !rd_issue_l1d : want_l1i;
-  assign l1i_pop = issue_l1i && mem.rd_req_ready;
+  // Downstream AR fall-through skid buffer (L1D priority).
+  //
+  // The normal ready path remains combinational, matching the latency and
+  // throughput of the known-good implementation.  On backpressure, the skid
+  // entry takes ownership of the complete AR payload and holds it stable until
+  // handshake.  When a buffered request handshakes, the entry can be replaced
+  // in the same cycle, so recovery from a stall also has no valid bubble.
+  logic rd_skid_valid;
+  logic [3:0] rd_skid_id;
+  logic [XLEN-1:0] rd_skid_addr;
+  logic [2:0] rd_skid_size;
+  logic [7:0] rd_skid_len;
+  logic [1:0] rd_skid_burst;
+  logic source_l1d, source_l1i, source_valid;
+  logic [3:0] source_id;
+  logic [XLEN-1:0] source_addr;
+  logic [2:0] source_size;
+  logic [7:0] source_len;
+  logic [1:0] source_burst;
+  logic rd_skid_available, rd_capture_source, rd_output_fire;
+  logic take_l1d, take_l1i, l1i_pop;
 
-  always_ff @(posedge clock) begin
-    if (reset) begin
-      rd_issue_lock <= 1'b0;
-      rd_issue_l1d  <= 1'b0;
-    end else if (mem.rd_req_valid && !mem.rd_req_ready) begin
-      if (!rd_issue_lock) begin
-        rd_issue_lock <= 1'b1;
-        rd_issue_l1d  <= issue_l1d;
-      end
-    end else begin
-      rd_issue_lock <= 1'b0;
-    end
-  end
+  assign rd_skid_available = !rd_skid_valid || mem.rd_req_ready;
+  assign source_l1d = l1d_slot_busy && !l1d_slot_held;
+  assign source_l1i = !source_l1d && !l1i_q_empty;
+  assign source_valid = source_l1d || source_l1i;
+  assign take_l1d = rd_skid_available && source_l1d;
+  assign take_l1i = rd_skid_available && source_l1i;
+  assign l1i_pop = take_l1i;
 
   logic [XLEN-1:0] l1i_q_head_addr;
   logic            l1i_q_head_burst;
@@ -150,11 +152,9 @@ module rapt_bus #(
   assign l1d_bus.rerr = l1d_slot_issued && !l1d_slot_ptw && (mem.rd_rsp_id == L1D)
                      && mem.rd_rsp_valid && mem.rd_rsp_error;
 
-  // Downstream AR drive (combinational; backed by registered slot/queue).
-  assign mem.rd_req_valid = issue_l1d || issue_l1i;
-  assign mem.rd_req_id = issue_l1d ? (l1d_slot_ptw ? 4'(TLBD) : 4'(L1D))
-                                   : (l1i_q_ptw[l1i_q_rdptr] ? 4'(TLBI) : 4'(L1I));
-  assign mem.rd_req_addr = issue_l1d ? l1d_slot_addr : l1i_q_head_addr;
+  assign source_id = source_l1d ? (l1d_slot_ptw ? 4'(TLBD) : 4'(L1D))
+                                : (l1i_q_ptw[l1i_q_rdptr] ? 4'(TLBI) : 4'(L1I));
+  assign source_addr = source_l1d ? l1d_slot_addr : l1i_q_head_addr;
   // RV64 page-table entries are 64 bits.  L1I/PTW requests share the L1I
   // queue, but only ordinary instruction refills are 32-bit reads. Sending
   // a 4-byte PTW read through LiteX's AXI64->AXI32 converter returns only one
@@ -164,10 +164,22 @@ module rapt_bus #(
 `else
   localparam logic [2:0] PtwReadSize = 3'b010;
 `endif
-  assign mem.rd_req_size = issue_l1d ? l1d_slot_size
-                       : (l1i_q_ptw[l1i_q_rdptr] ? PtwReadSize : 3'b010);
-  assign mem.rd_req_burst = (issue_l1i && l1i_q_head_burst) ? 2'b01 : 2'b00;
-  assign mem.rd_req_len = (issue_l1i && l1i_q_head_burst) ? 8'h1 : 8'h0;
+  assign source_size = source_l1d ? l1d_slot_size
+                                  : (l1i_q_ptw[l1i_q_rdptr] ? PtwReadSize : 3'b010);
+  assign source_burst = (source_l1i && l1i_q_head_burst) ? 2'b01 : 2'b00;
+  assign source_len = (source_l1i && l1i_q_head_burst) ? 8'h01 : 8'h00;
+
+  // Bypass when the skid entry is empty; use only registered payload while
+  // stalled.  This is the only driver of the downstream AR channel.
+  assign mem.rd_req_valid = rd_skid_valid || source_valid;
+  assign mem.rd_req_id = rd_skid_valid ? rd_skid_id : source_id;
+  assign mem.rd_req_addr = rd_skid_valid ? rd_skid_addr : source_addr;
+  assign mem.rd_req_size = rd_skid_valid ? rd_skid_size : source_size;
+  assign mem.rd_req_burst = rd_skid_valid ? rd_skid_burst : source_burst;
+  assign mem.rd_req_len = rd_skid_valid ? rd_skid_len : source_len;
+  assign rd_output_fire = mem.rd_req_valid && mem.rd_req_ready;
+  assign rd_capture_source = rd_skid_available && source_valid
+                           && (rd_skid_valid || !mem.rd_req_ready);
   assign mem.rd_rsp_ready = 1'b1;
 
   // L1D arsize from rstrb (matches original encoding).
@@ -180,11 +192,31 @@ module rapt_bus #(
 
   always_ff @(posedge clock) begin
     if (reset) begin
+      rd_skid_valid <= 1'b0;
+      rd_skid_id    <= '0;
+      rd_skid_addr  <= '0;
+      rd_skid_size  <= '0;
+      rd_skid_len   <= '0;
+      rd_skid_burst <= '0;
+    end else if (rd_skid_available) begin
+      rd_skid_valid <= rd_capture_source;
+      if (rd_capture_source) begin
+        rd_skid_id    <= source_id;
+        rd_skid_addr  <= source_addr;
+        rd_skid_size  <= source_size;
+        rd_skid_len   <= source_len;
+        rd_skid_burst <= source_burst;
+      end
+    end
+  end
+
+  always_ff @(posedge clock) begin
+    if (reset) begin
       l1i_q_rdptr <= '0;
       l1i_q_wrptr <= '0;
       l1i_q_cnt   <= '0;
       // l1i_q_* payload and l1d_slot_addr/size stay unreset: every read is
-      // gated by l1i_q_cnt != 0 (issue_l1i) or l1d_slot_busy/issued, both
+      // gated by l1i_q_cnt != 0 (source_l1i) or l1d_slot_busy/held, both
       // of which reset here; push/pop always rewrite the payload together
       // with the pointer/count update.  l1d_slot_mmio/ptw are cleared on
       // slot free.
@@ -192,9 +224,11 @@ module rapt_bus #(
       l1i_last_push_addr <= '0;
       l1i_last_push_ptw  <= 1'b0;
       l1d_slot_busy      <= 1'b0;
+      l1d_slot_held      <= 1'b0;
       l1d_slot_issued    <= 1'b0;
     end else begin
-      // L1I FIFO: push on capture, pop on downstream AR handshake.
+      // L1I FIFO: push on capture, pop when ownership transfers to the
+      // downstream channel or its skid entry.
       if (l1i_push) begin
         l1i_q_addr[l1i_q_wrptr]  <= l1i_bus.araddr;
         l1i_q_burst[l1i_q_wrptr] <= l1i_bus.arburst;
@@ -219,21 +253,27 @@ module rapt_bus #(
         default: l1i_q_cnt <= l1i_q_cnt;
       endcase
 
-      // L1D slot: capture, mark issued on AR handshake, free on rlast.
+      // L1D slot: capture, transfer ownership to the downstream AR channel or
+      // its skid entry, then free on the matching final response beat.
       if (l1d_push) begin
         l1d_slot_busy   <= 1'b1;
+        l1d_slot_held   <= 1'b0;
         l1d_slot_issued <= 1'b0;
         l1d_slot_addr   <= l1d_bus.araddr;
         l1d_slot_size   <= l1d_arsize_enc;
         l1d_slot_mmio   <= rapt_pkg::addr_mmio(l1d_bus.araddr);
         l1d_slot_ptw    <= l1d_bus.ar_ptw;
       end
-      if (issue_l1d && mem.rd_req_ready) begin
+      if (take_l1d) begin
+        l1d_slot_held <= 1'b1;
+      end
+      if (rd_output_fire && (mem.rd_req_id inside {4'(L1D), 4'(TLBD)})) begin
         l1d_slot_issued <= 1'b1;
       end
       if (l1d_slot_busy && l1d_slot_issued && mem.rd_rsp_valid && mem.rd_rsp_last
           && (mem.rd_rsp_id == (l1d_slot_ptw ? 4'(TLBD) : 4'(L1D)))) begin
         l1d_slot_busy   <= 1'b0;
+        l1d_slot_held   <= 1'b0;
         l1d_slot_issued <= 1'b0;
         l1d_slot_mmio   <= 1'b0;
         l1d_slot_ptw    <= 1'b0;
@@ -266,13 +306,14 @@ module rapt_bus #(
   assign mem.wr_req_valid = (write_state == WR_IDLE) && store_awvalid && store_wvalid;
   assign mem.wr_req_id = 4'(store_bridge);
   assign mem.wr_req_addr = store_awaddr;
-  assign mem.wr_req_size =
-      ({3{store_wstrb == 8'h01}} & 3'b000)
-    | ({3{store_wstrb == 8'h03}} & 3'b001)
-    | ({3{store_wstrb == 8'h07}} & 3'b010)
-    | ({3{store_wstrb == 8'h0f}} & 3'b010)
-    | ({3{store_wstrb == 8'h7f}} & 3'b011)
-    | ({3{store_wstrb == 8'hff}} & 3'b011);
+  // Right-aligned one- and two-byte requests can use narrow AXI transfers.
+  // Wider or lane-shifted partial masks come from aligned misaligned-store
+  // beats; cover the highest asserted lane with a 4- or 8-byte transfer and
+  // let WSTRB select the architectural bytes.
+  assign mem.wr_req_size = (store_wstrb == 8'h01) ? 3'b000
+                         : (store_wstrb == 8'h03) ? 3'b001
+                         : (store_wstrb[7:4] == 4'h0) ? 3'b010
+                         : 3'b011;
   assign mem.wr_req_data = store_wdata;
   assign mem.wr_req_strb = store_wstrb[XLEN/8-1:0];
   assign mem.wr_rsp_ready = write_state == WR_WAIT;

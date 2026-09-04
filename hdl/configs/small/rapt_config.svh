@@ -77,4 +77,7 @@
 `define RAPT_L1D_LEN 3
 `define RAPT_L1D_N_WAYS 2
 
+`define RAPT_ITLB_ENTRIES 4
+`define RAPT_DTLB_ENTRIES 4
+
 `endif

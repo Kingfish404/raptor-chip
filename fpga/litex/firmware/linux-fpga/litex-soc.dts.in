@@ -4,7 +4,7 @@
     #address-cells = <1>;
     #size-cells = <1>;
     compatible = "raptor,litex-soc";
-    model = "Raptor LiteX SoC on MLK-CU07-KU15P";
+    model = "@MODEL@";
 
     aliases {
         serial0 = &liteuart0;
@@ -13,6 +13,10 @@
     chosen {
         stdout-path = "/soc/serial@@UART_UNIT_ADDR@";
         bootargs = "@BOOTARGS@";
+        /* The image packer replaces this placeholder from the host CSPRNG.
+         * Never boot a DTB copied directly from this intermediate file. */
+        rng-seed = [00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+                    00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00];
     };
 
     cpus {
@@ -66,8 +70,10 @@
         liteuart0: serial@@UART_UNIT_ADDR@ {
             compatible = "litex,liteuart";
             reg = <@UART_BASE@ 0x100>;
-            interrupt-parent = <&plic>;
-            interrupts = <1>;
+            /* The Linux LiteUART IRQ path currently stalls the userspace
+             * console on Raptor.  Omitting the IRQ selects the driver's
+             * reliable timer-polling fallback while PLIC remains available
+             * to the rest of the platform. */
             status = "okay";
         };
     };

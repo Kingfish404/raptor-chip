@@ -319,7 +319,6 @@ class RaptorMLKCU07SoC(SoCCore):
         with_mig=False,
         mig_size=0x40000000,
         with_sdcard=False,
-        sdcard_boot=False,
         with_led_chaser=False,
         rapt_memspeed_trace=False,
         with_ila=False,
@@ -432,8 +431,6 @@ class RaptorMLKCU07SoC(SoCCore):
 
         if with_sdcard:
             self.add_sdcard(name="sdcard", mode="read+write")
-            if not sdcard_boot:
-                self.add_constant("SDCARD_BOOT_DISABLE")
 
         if with_led_chaser:
             try:
@@ -495,11 +492,6 @@ def main():
         help="Enable the on-board 4-bit SDCard controller and DMA engine.",
     )
     parser.add_target_argument(
-        "--sdcard-boot",
-        action="store_true",
-        help="Automatically try SDCard during BIOS boot (disabled by default).",
-    )
-    parser.add_target_argument(
         "--rapt-memspeed-trace",
         action="store_true",
         help="Enable Raptor LiteX BIOS memspeed phase trace markers.",
@@ -522,9 +514,6 @@ def main():
     parser.set_defaults(cpu_type="raptor", cpu_variant="linux32")
 
     args = parser.parse_args()
-
-    if args.sdcard_boot and not args.with_sdcard:
-        parser.error("--sdcard-boot requires --with-sdcard")
 
     soc_kwargs = dict(parser.soc_argdict)
     soc_kwargs["uart_fifo_depth"] = max(int(soc_kwargs.get("uart_fifo_depth", 16)), 1024)
@@ -560,7 +549,6 @@ def main():
         with_mig=args.with_mig,
         mig_size=args.mig_size,
         with_sdcard=args.with_sdcard,
-        sdcard_boot=args.sdcard_boot,
         with_led_chaser=args.with_led_chaser,
         rapt_memspeed_trace=args.rapt_memspeed_trace,
         with_ila=args.with_ila,

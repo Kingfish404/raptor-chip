@@ -4,9 +4,13 @@ _THIS_DIR := $(dir $(lastword $(MAKEFILE_LIST)))
 APP_HOME  := $(abspath $(_THIS_DIR)/../..)
 include $(APP_HOME)/common.mk
 
-BUILD_DIR := $(APP_HOME)/build/rv$(XLEN)/tests/memory
+BUILD_SUFFIX := $(if $(strip $(MEMTEST_WORDS)),-words$(MEMTEST_WORDS),)
+BUILD_DIR := $(APP_HOME)/build/rv$(XLEN)/tests/memory$(BUILD_SUFFIX)
 
 CFLAGS := $(CFLAGS_COMMON)
+ifneq ($(strip $(MEMTEST_WORDS)),)
+CFLAGS += -DMEMTEST_WORDS=$(MEMTEST_WORDS)
+endif
 SRCS   := $(wildcard $(_THIS_DIR)*.c)
 ELFS   := $(patsubst $(_THIS_DIR)%.c,$(BUILD_DIR)/%.elf,$(SRCS))
 

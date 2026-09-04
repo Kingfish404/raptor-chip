@@ -27,6 +27,7 @@ module tb_lsu_sq_random;
   int cover_flush;
   int cover_concurrent;
   int cover_mmu_alias;
+  int cover_mmu_bypass;
   int cover_exact_fwd;
   int cover_partial_block;
   int cover_bare_bypass;
@@ -49,6 +50,17 @@ module tb_lsu_sq_random;
       if (model_valid[index] && model_vaddr[index][31:2] == addr[31:2]) result = index;
       index = next_index(index);
     end
+    return result;
+  endfunction
+
+  function automatic bit mmu_pageoff_conflict(input logic [31:0] addr);
+    bit result = 1'b0;
+    for (int index = 0; index < SQ_SIZE; index++) begin
+      result |= model_valid[index]
+             && (model_vaddr[index][11:2] == addr[11:2]);
+    end
+    result |= exu_ioq_bcast.valid && exu_ioq_bcast.wen
+           && (exu_ioq_bcast.tval[11:2] == addr[11:2]);
     return result;
   endfunction
 
@@ -97,45 +109,56 @@ module tb_lsu_sq_random;
       probe_addr = 32'h8100_0000 | (($urandom & 16'h03ff) << 2);
       match = -1;
 
-      if ((kind == 0 || kind == 1 || kind == 3) && valid_count() != 0) begin
+      if ((kind == 0 || kind == 1 || kind == 2 || kind == 3) && valid_count() != 0) begin
         candidate = model_head;
         for (int age = 0; age < SQ_SIZE; age++) begin
           if (model_valid[candidate]
               && ((kind == 0 && model_alu[candidate] == `RAPT_SW_WSTRB)
                   || (kind == 1 && model_alu[candidate] != `RAPT_SW_WSTRB)
-                  || kind == 3))
-            probe_addr = model_vaddr[candidate];
+                  || kind == 2 || kind == 3))
+            probe_addr = model_vaddr[candidate]
+                       + ((kind == 2) ? 32'h0040_0000 : 32'h0);
           candidate = next_index(candidate);
         end
         match = youngest_match(probe_addr);
       end else begin
         for (int attempt = 0; attempt < SQ_SIZE + 1; attempt++) begin
-          if (youngest_match(probe_addr) < 0) break;
-          probe_addr += 32'h0000_1000;
+          if ((kind == 4) ? !mmu_pageoff_conflict(probe_addr)
+                          : (youngest_match(probe_addr) < 0)) break;
+          probe_addr += 32'h0000_0004;
         end
       end
 
-      csr_bcast.dmmu_en = (kind == 2);
+      csr_bcast.dmmu_en = (kind == 2 || kind == 4);
       exu_lsu.atomic_lock = (kind == 3);
       exu_lsu.raddr = probe_addr;
       #1;
 
-      if (match >= 0 && model_alu[match] == `RAPT_SW_WSTRB && kind == 0) begin
+      // The address selected for a particular probe kind can alias another
+      // live SQ entry.  Always judge the result from the actual youngest
+      // matching store: an older partial store is irrelevant when a younger
+      // full-width store covers the load, and conversely a younger partial
+      // store must block even if the address was chosen from a full store.
+      if ((kind == 2 || kind == 4) && mmu_pageoff_conflict(probe_addr)) begin
+        check(!exu_lsu.rready && !lsu_l1d.rvalid,
+              "DMMU load bypassed a possible physical alias in SQ");
+        cover_mmu_alias++;
+      end else if (kind == 2 || kind == 4) begin
+        check(lsu_l1d.rvalid,
+              "DMMU load with a disjoint page offset was unnecessarily blocked");
+        cover_mmu_bypass++;
+      end else if (kind == 3 && match >= 0) begin
+        check(!exu_lsu.rready && !lsu_l1d.rvalid,
+          "LR bypassed a matching pending SQ store");
+      end else if (match >= 0 && model_alu[match] == `RAPT_SW_WSTRB) begin
         check(exu_lsu.rready, "youngest full-width SQ match did not forward");
         check(exu_lsu.rdata == model_data[match], "youngest SQ forwarding data mismatch");
         check(!lsu_l1d.rvalid, "forwarded load reached L1D");
         cover_exact_fwd++;
-      end else if (match >= 0 && model_alu[match] != `RAPT_SW_WSTRB && kind == 1) begin
+      end else if (match >= 0) begin
         check(!exu_lsu.rready && !lsu_l1d.rvalid,
               "partial matching store did not block load");
         cover_partial_block++;
-      end else if (kind == 2 && (valid_count() != 0 || dut.sq_alloc_fire)) begin
-        check(!exu_lsu.rready && !lsu_l1d.rvalid,
-              "DMMU load bypassed a possible physical alias in SQ");
-        cover_mmu_alias++;
-      end else if (kind == 3 && match >= 0) begin
-        check(!exu_lsu.rready && !lsu_l1d.rvalid,
-          "LR bypassed a matching pending SQ store");
       end else begin
         check(lsu_l1d.rvalid,
             $sformatf({"unrelated bare load blocked kind=%0d addr=%08x model=%0d ",
@@ -188,6 +211,10 @@ module tb_lsu_sq_random;
         #1;
         check(!lsu_l1d.rvalid,
           "DMMU load entered L1D during same-cycle SQ allocation handoff");
+        exu_lsu.raddr = 32'h4040_000c;
+        #1;
+        check(lsu_l1d.rvalid,
+          "DMMU load with a different page offset did not bypass SQ allocation");
         reset = 1'b1;
         tick(1);
         init_lsu_inputs(1'b0, 32'h5a5a_a5a5, `RAPT_ALU_LW__);
@@ -335,14 +362,15 @@ module tb_lsu_sq_random;
     check(cover_flush > 20, "insufficient flush coverage");
     check(cover_concurrent > 0, "alloc+commit+drain concurrency was not covered");
     check(cover_mmu_alias > 20, "insufficient MMU alias coverage");
+    check(cover_mmu_bypass > 20, "insufficient MMU page-offset bypass coverage");
     check(cover_exact_fwd > 20, "insufficient exact forwarding coverage");
     check(cover_partial_block > 10, "insufficient partial-store coverage");
     check(cover_bare_bypass > 20, "insufficient bare bypass coverage");
     check(drain_count > 100, "insufficient store drain coverage");
 
-    $display("PASS: randomized LSU SQ scoreboard seed=%0d wraps=%0d flush=%0d concurrent=%0d alias=%0d fwd=%0d partial=%0d drains=%0d",
+    $display("PASS: randomized LSU SQ scoreboard seed=%0d wraps=%0d flush=%0d concurrent=%0d alias=%0d mmu_bypass=%0d fwd=%0d partial=%0d drains=%0d",
              seed, cover_wrap, cover_flush, cover_concurrent, cover_mmu_alias,
-             cover_exact_fwd, cover_partial_block, drain_count);
+             cover_mmu_bypass, cover_exact_fwd, cover_partial_block, drain_count);
     $finish;
   end
 endmodule

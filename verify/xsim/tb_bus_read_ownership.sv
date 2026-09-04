@@ -144,6 +144,69 @@ module tb_bus_read_ownership;
     reset = 1'b0;
     tick(1);
 
+    // A later high-priority L1D request must not replace an L1I request that
+    // is already presented while the downstream AR channel is stalled.
+    l1i_bus.arburst = 1'b1;
+    submit_l1i(32'h8000_0800, 1'b0);
+    l1i_bus.arburst = 1'b0;
+    #1;
+    check(mem.rd_req_valid && mem.rd_req_id == 4'd1
+          && mem.rd_req_addr == 32'h8000_0800
+          && mem.rd_req_size == 3'b010
+          && mem.rd_req_len == 8'h01
+          && mem.rd_req_burst == 2'b01,
+          "stalled L1I request was not presented from the AR skid buffer");
+    submit_l1d(32'h8000_0c00, 1'b0);
+    #1;
+    check(mem.rd_req_valid && mem.rd_req_id == 4'd1
+          && mem.rd_req_addr == 32'h8000_0800
+          && mem.rd_req_size == 3'b010
+          && mem.rd_req_len == 8'h01
+          && mem.rd_req_burst == 2'b01,
+          "later L1D request replaced stalled L1I AR payload");
+    tick(2);
+    check(mem.rd_req_valid && mem.rd_req_id == 4'd1
+          && mem.rd_req_addr == 32'h8000_0800
+          && mem.rd_req_size == 3'b010
+          && mem.rd_req_len == 8'h01
+          && mem.rd_req_burst == 2'b01,
+          "stalled L1I AR payload was not held stable");
+
+    @(negedge clock);
+    mem.rd_req_ready = 1'b1;
+    expect_issue(4'd1, 32'h8000_0800);
+    expect_issue(4'd2, 32'h8000_0c00);
+    @(negedge clock);
+    mem.rd_req_ready = 1'b0;
+    drive_response(4'd2, 32'h0c00_0c00);
+    check(l1d_bus.rvalid, "held L1D request response was not routed");
+    finish_response();
+
+    // Transferring an L1D request into the skid buffer must not mark it
+    // issued before the downstream handshake.  Ignore a matching stale
+    // response while AR is stalled, then accept the real response normally.
+    submit_l1d(32'h8000_0e00, 1'b0);
+    @(posedge clock);
+    #1;
+    check(dut.l1d_slot_held && !dut.l1d_slot_issued,
+          "L1D holding state was confused with a downstream AR handshake");
+    drive_response(4'd2, 32'hdead_0002);
+    check(!l1d_bus.rvalid && !l1d_bus.rlast,
+          "unissued L1D slot accepted a stale matching-ID response");
+    finish_response();
+    check(dut.l1d_slot_busy && dut.l1d_slot_held && !dut.l1d_slot_issued,
+          "stale response released the unissued L1D slot");
+
+    @(negedge clock);
+    mem.rd_req_ready = 1'b1;
+    expect_issue(4'd2, 32'h8000_0e00);
+    @(negedge clock);
+    mem.rd_req_ready = 1'b0;
+    drive_response(4'd2, 32'h0e00_0e00);
+    check(l1d_bus.rvalid && l1d_bus.rlast,
+          "L1D response was not routed after its AR handshake");
+    finish_response();
+
     // Queue one request from each independent source while downstream stalls.
     submit_l1d(32'h8000_1000, 1'b0);
     submit_l1i(32'h8000_2000, 1'b0);

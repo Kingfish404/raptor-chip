@@ -5,6 +5,8 @@
 #include <npc_verilog.h>
 #include <verilated.h>
 #include "verilated_fst_c.h"
+#include <string>
+#include <unistd.h>
 #ifdef CONFIG_NVBoard
 #include <nvboard.h>
 #endif
@@ -70,19 +72,21 @@ void npc_abort()
 
 extern "C" void npc_exu_ebreak()
 {
-#if defined(CONFIG_DEBUG)
   if (trap_on_ebreak)
   {
     // Let the RTL trap handler take the exception.
+#if defined(CONFIG_DIFFTEST)
+    // NEMU uses EBREAK as its simulator exit convention.  When the DUT is
+    // intentionally handling EBREAK architecturally, do not ask the reference
+    // to execute the same instruction.
+    difftest_skip_ref();
+#endif
     return;
   }
   contextp->gotFinish(true);
   Log("EBREAK at pc = " FMT_WORD_NO_PREFIX "", *npc.pc);
   npc.host_exit_ok = 0;
   npc.state = NPC_END;
-#elif defined(CONFIG_DIFFTEST)
-  difftest_skip_ref();
-#endif
 }
 
 extern "C" void npc_difftest_skip_ref()
@@ -413,7 +417,20 @@ void engine_free()
   // Persist line/toggle coverage collected during simulation.
   if (contextp && contextp->coveragep())
   {
-    contextp->coveragep()->write("coverage.dat");
+    const char *coverage_dir = getenv("RAPT_COVERAGE_DIR");
+    if (coverage_dir && coverage_dir[0] != '\0')
+    {
+      // Coverage workloads may launch many simulator processes. Give every
+      // process its own file so later runs do not overwrite earlier results.
+      const std::string coverage_file = std::string(coverage_dir) +
+                                        "/coverage-" +
+                                        std::to_string(getpid()) + ".dat";
+      contextp->coveragep()->write(coverage_file);
+    }
+    else
+    {
+      contextp->coveragep()->write();
+    }
   }
 #endif
 

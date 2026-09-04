@@ -117,6 +117,7 @@ module rapt_rou #(
   // Forward declarations (used across sections)
   logic [$clog2(ROB_SIZE)-1:0] rob_head, rob_tail_a;
   rapt_pkg::rob_entry_t rob_entry[ROB_SIZE];
+  logic [ROB_SIZE-1:0] rob_dispatch_a_oh, rob_dispatch_b_oh;
   logic head0_br_p_fail;
   logic head0_valid;
 
@@ -316,6 +317,9 @@ module rapt_rou #(
 
   function automatic logic fp_writes_fpr(input rapt_pkg::uop_t u);
     if (!u.fp_valid || u.trap) return 1'b0;
+    if (u.fp_op == `RAPT_FP_OP_ZFHMIN)
+      return !((u.inst[6:0] == 7'b0100111)  // FSH
+             || (u.inst[31:25] == 7'b1110010));  // FMV.X.H
     case (u.fp_op)
       `RAPT_FP_OP_FMV_X_W, `RAPT_FP_OP_FMV_X_D,
       `RAPT_FP_OP_FLE_S, `RAPT_FP_OP_FLT_S, `RAPT_FP_OP_FEQ_S,
@@ -332,6 +336,10 @@ module rapt_rou #(
 
   function automatic logic fp_uses_rs1(input rapt_pkg::uop_t u);
     if (!u.fp_valid) return 1'b0;
+    if (u.fp_op == `RAPT_FP_OP_ZFHMIN)
+      return !((u.inst[6:0] == 7'b0000111)  // FLH
+             || (u.inst[6:0] == 7'b0100111)  // FSH uses fs2
+             || (u.inst[31:25] == 7'b1111010));  // FMV.H.X
     case (u.fp_op)
       `RAPT_FP_OP_FLW, `RAPT_FP_OP_FLD, `RAPT_FP_OP_FSW, `RAPT_FP_OP_FSD,
       `RAPT_FP_OP_FMV_W_X, `RAPT_FP_OP_FMV_D_X,
@@ -345,6 +353,8 @@ module rapt_rou #(
 
   function automatic logic fp_uses_rs2(input rapt_pkg::uop_t u);
     if (!u.fp_valid) return 1'b0;
+    if (u.fp_op == `RAPT_FP_OP_ZFHMIN)
+      return u.inst[6:0] == 7'b0100111;  // FSH
     case (u.fp_op)
       `RAPT_FP_OP_FSW, `RAPT_FP_OP_FSD,
       `RAPT_FP_OP_FSGNJ_S, `RAPT_FP_OP_FSGNJN_S, `RAPT_FP_OP_FSGNJX_S,
@@ -766,7 +776,6 @@ module rapt_rou #(
   // explicit priority mux. Dynamic addressed writes rely on simulator NBA
   // ordering for same-entry collisions, but FPGA synthesis may implement a
   // different WAW priority across inferred write ports.
-  logic [ROB_SIZE-1:0] rob_dispatch_a_oh, rob_dispatch_b_oh;
   logic [ROB_SIZE-1:0] rob_wb_ioq_oh, rob_wb_exu_oh, rob_wb_exu_b_oh;
   logic [ROB_SIZE-1:0] rob_wb_exu_c_oh, rob_wb_mul_oh;
   logic [ROB_SIZE-1:0] rob_commit_a_oh, rob_commit_b_oh;
@@ -803,6 +812,7 @@ module rapt_rou #(
       recieved_sw_trap <= 1'b0;
       trap_cause       <= '0;
       pmu_rob_full     <= 1'b0;  // A2: Initialize full pulse
+      rob_full_r       <= 1'b0;
       // The dispatch tasks write every field of rob_entry[tail] and
       // uop_pl[tail] before the entry becomes observable, and every read of
       // those arrays is gated by busy/state, so invalid entries are
@@ -942,6 +952,7 @@ module rapt_rou #(
   logic [ROB_SIZE-1:0] upl_sys_vec;  // uop_pl.sys
   logic [ROB_SIZE-1:0] upl_fi_vec;  // uop_pl.f_i
   logic [ROB_SIZE-1:0] upl_ft_vec;  // uop_pl.f_time
+  logic [ROB_SIZE-1:0] upl_mf_vec;  // ordinary FENCE/FENCE.TSO memory ordering
   logic [ROB_SIZE-1:0] upl_atom_vec;  // uop_pl.atom
   for (genvar ge = 0; ge < int'(ROB_SIZE); ge++) begin : gen_rob_elig_vec
     assign rob_wb_vec[ge]   = (rob_entry[ge].state == rapt_pkg::ROB_WB);
@@ -952,6 +963,9 @@ module rapt_rou #(
     assign upl_sys_vec[ge]  = uop_pl[ge].sys;
     assign upl_fi_vec[ge]   = uop_pl[ge].f_i;
     assign upl_ft_vec[ge]   = uop_pl[ge].f_time;
+    assign upl_mf_vec[ge]   = uop_pl[ge].sys
+                            && (uop_pl[ge].inst[6:0] == `RAPT_OP_FENCE_)
+                            && (uop_pl[ge].inst[14:12] == 3'b000);
     assign upl_atom_vec[ge] = uop_pl[ge].atom;
   end
 
@@ -960,7 +974,13 @@ module rapt_rou #(
   logic head0_store_ready;
   logic head0_fence_ready;
   assign head0_store_ready = rou_lsu.sq_ready || !rob_wen_vec[h0];
-  assign head0_fence_ready = !(upl_ft_vec[h0] || upl_fi_vec[h0]) || rou_lsu.sq_empty;
+  // All FENCE variants, including FENCE.TSO, must order predecessor stores
+  // before successor memory operations.  System dispatch already drains the
+  // ROB and blocks younger instructions; waiting for the committed SQ here
+  // closes the remaining store-buffer window without unnecessarily flushing
+  // caches or TLBs for an ordinary memory fence.
+  assign head0_fence_ready = !(upl_ft_vec[h0] || upl_fi_vec[h0] || upl_mf_vec[h0])
+                          || rou_lsu.sq_empty;
   assign head0_valid     = recieved_trap || (
       rob_entry_busy[h0]
       && rob_wb_vec[h0]
@@ -989,7 +1009,8 @@ module rapt_rou #(
   logic pmu_branch_flush;
   logic pmu_nonbranch_flush;
   /* verilator lint_on UNUSEDSIGNAL */
-  assign pmu_branch_flush = head0_valid && head0_br_p_fail;
+  assign pmu_branch_flush = head0_valid && head0_br_p_fail
+      && (uop_pl[h0].ben || uop_pl[h0].jen || uop_pl[h0].jren);
 
   // Kept as a distinct broadcast path for interface compatibility. Pure
   // CSR/f_time currently take the full flush path above so any younger
@@ -1004,7 +1025,8 @@ module rapt_rou #(
   logic head1_store_ready;
   logic head1_fence_ready;
   assign head1_store_ready = rou_lsu.sq_ready || !rob_wen_vec[h1];
-  assign head1_fence_ready = !(upl_ft_vec[h1] || upl_fi_vec[h1]) || rou_lsu.sq_empty;
+  assign head1_fence_ready = !(upl_ft_vec[h1] || upl_fi_vec[h1] || upl_mf_vec[h1])
+                          || rou_lsu.sq_empty;
   assign head1_br_p_fail = rob_mis_vec[h1];
   assign head1_valid     = rob_entry_busy[h1]
       && rob_wb_vec[h1]
@@ -1110,6 +1132,10 @@ module rapt_rou #(
   // (dual_commit ? +2 : +1 when head0_valid commits this cycle, else 0).
   assign rou_cmu.difftest_skip_a = !recieved_trap && rob_entry[h0].difftest_skip;
   assign rou_cmu.valid_a = recieved_trap ? 1'b0 : head0_valid;
+  assign rou_cmu.ben_a = uop_pl[h0].ben;
+  assign rou_cmu.jen_a = uop_pl[h0].jen;
+  assign rou_cmu.jren_a = uop_pl[h0].jren;
+  assign rou_cmu.branch_mispredict_a = head0_valid && rob_mis_vec[h0];
 
   // ---- CMU interface (slot B: dual commit) ----
   assign rou_cmu.rd_b = rob_entry[h1].rd;
@@ -1123,6 +1149,10 @@ module rapt_rou #(
   assign rou_cmu.ebreak_b = dual_commit && uop_pl[h1].ebreak;
   assign rou_cmu.difftest_skip_b = rob_entry[h1].difftest_skip;
   assign rou_cmu.valid_b = dual_commit;
+  assign rou_cmu.ben_b = uop_pl[h1].ben;
+  assign rou_cmu.jen_b = uop_pl[h1].jen;
+  assign rou_cmu.jren_b = uop_pl[h1].jren;
+  assign rou_cmu.branch_mispredict_b = dual_commit && rob_mis_vec[h1];
 
 `ifdef RAPT_RVFI
   // ---- RVFI per-slot data ----
@@ -1155,7 +1185,9 @@ module rapt_rou #(
       || (uop_pl[h0].fp_op == `RAPT_FP_OP_FCVT_W_D)
       || (uop_pl[h0].fp_op == `RAPT_FP_OP_FCVT_WU_D)
       || (uop_pl[h0].fp_op == `RAPT_FP_OP_FCVT_L_D)
-      || (uop_pl[h0].fp_op == `RAPT_FP_OP_FCVT_LU_D);
+      || (uop_pl[h0].fp_op == `RAPT_FP_OP_FCVT_LU_D)
+      || ((uop_pl[h0].fp_op == `RAPT_FP_OP_ZFHMIN)
+          && (uop_pl[h0].inst[31:25] == 7'b1110010));
   assign fp_f2i_from_h1 = (uop_pl[h1].fp_op == `RAPT_FP_OP_FCVT_W_S)
       || (uop_pl[h1].fp_op == `RAPT_FP_OP_FCVT_WU_S)
       || (uop_pl[h1].fp_op == `RAPT_FP_OP_FCVT_L_S)
@@ -1163,10 +1195,14 @@ module rapt_rou #(
       || (uop_pl[h1].fp_op == `RAPT_FP_OP_FCVT_W_D)
       || (uop_pl[h1].fp_op == `RAPT_FP_OP_FCVT_WU_D)
       || (uop_pl[h1].fp_op == `RAPT_FP_OP_FCVT_L_D)
-      || (uop_pl[h1].fp_op == `RAPT_FP_OP_FCVT_LU_D);
+      || (uop_pl[h1].fp_op == `RAPT_FP_OP_FCVT_LU_D)
+      || ((uop_pl[h1].fp_op == `RAPT_FP_OP_ZFHMIN)
+          && (uop_pl[h1].inst[31:25] == 7'b1110010));
   assign fp_dirty_from_h0 = head0_valid && uop_pl[h0].fp_valid && !rob_entry[h0].trap
       && ((uop_pl[h0].fp_op != `RAPT_FP_OP_FSW)
         && (uop_pl[h0].fp_op != `RAPT_FP_OP_FSD)
+        && !((uop_pl[h0].fp_op == `RAPT_FP_OP_ZFHMIN)
+             && (uop_pl[h0].inst[6:0] == 7'b0100111))
         && (uop_pl[h0].fp_op != `RAPT_FP_OP_FMV_X_W)
         && (uop_pl[h0].fp_op != `RAPT_FP_OP_FMV_X_D)
         && (uop_pl[h0].fp_op != `RAPT_FP_OP_FLE_S)
@@ -1182,6 +1218,8 @@ module rapt_rou #(
   assign fp_dirty_from_h1 = dual_commit && uop_pl[h1].fp_valid && !rob_entry[h1].trap
       && ((uop_pl[h1].fp_op != `RAPT_FP_OP_FSW)
         && (uop_pl[h1].fp_op != `RAPT_FP_OP_FSD)
+        && !((uop_pl[h1].fp_op == `RAPT_FP_OP_ZFHMIN)
+             && (uop_pl[h1].inst[6:0] == 7'b0100111))
         && (uop_pl[h1].fp_op != `RAPT_FP_OP_FMV_X_W)
         && (uop_pl[h1].fp_op != `RAPT_FP_OP_FMV_X_D)
         && (uop_pl[h1].fp_op != `RAPT_FP_OP_FLE_S)
@@ -1202,9 +1240,14 @@ module rapt_rou #(
   assign commit_trap = csr_from_h1 ? rob_entry[h1].trap : rob_entry[h0].trap;
 
   assign rou_csr.pc = recieved_trap ? trap_pc : csr_from_h1 ? uop_pl[h1].pc : uop_pl[h0].pc;
+  // csr_wen is produced only by the CSR execution pipe.  Other execution
+  // pipes intentionally do not rewrite that hot ROB field, so qualify it
+  // with the cold, dispatch-time system decode before exposing a side effect.
+  // This also prevents a recycled ROB entry from turning an FP-dirty commit
+  // into a stale CSR write (for example, a C.FLDSP immediate aliasing sstatus).
   assign rou_csr.csr_wen   = (recieved_trap || commit_trap) ? 1'b0
-                           : csr_from_h1   ? rob_entry[h1].csr_wen
-                           :                 rob_entry[h0].csr_wen;
+                           : csr_from_h1 ? (uop_pl[h1].sys && rob_entry[h1].csr_wen)
+                                         : (uop_pl[h0].sys && rob_entry[h0].csr_wen);
   assign rou_csr.csr_wdata = csr_from_h1 ? rob_entry[h1].csr_wdata : rob_entry[h0].csr_wdata;
   assign rou_csr.csr_addr = csr_from_h1 ? uop_pl[h1].csr_addr : uop_pl[h0].csr_addr;
   assign rou_csr.fp_flags_valid = (recieved_trap || commit_trap) ? 1'b0
@@ -1332,8 +1375,14 @@ module rapt_rou #(
   `RAPT_SVA_IMPLY(clock, reset, ROB_SYS_SERIALIZING_FLUSH,
                   (head0_valid && (uop_pl[h0].sys || uop_pl[h0].f_time)), flush_pipe)
 
+  `RAPT_SVA_IMPLY(clock, reset, ROB_MEMORY_FENCE_DRAINS_SQ,
+                  (head0_valid && upl_mf_vec[h0]), rou_lsu.sq_empty)
+
   `RAPT_SVA_IMPLY(clock, reset, ROB_DUAL_SERIALIZING_FLUSH,
                   (dual_commit && (uop_pl[h1].sys || uop_pl[h1].f_time)), flush_pipe)
+
+  `RAPT_SVA_IMPLY(clock, reset, ROB_DUAL_MEMORY_FENCE_DRAINS_SQ,
+                  (dual_commit && upl_mf_vec[h1]), rou_lsu.sq_empty)
 
   `RAPT_SVA_NEXT(clock, reset, ROB_COMMIT_NPC_IS_ARCHITECTURAL, (head0_valid && !recieved_trap),
                  (commit_npc_q == $past(rou_cmu.npc_a)))

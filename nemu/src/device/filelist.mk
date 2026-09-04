@@ -23,6 +23,8 @@ SRCS-$(CONFIG_HAS_KEYBOARD) += src/device/keyboard.c
 SRCS-$(CONFIG_HAS_VGA) += src/device/vga.c
 SRCS-$(CONFIG_HAS_AUDIO) += src/device/audio.c
 SRCS-$(CONFIG_HAS_DISK) += src/device/disk.c
+SRCS-$(CONFIG_HAS_NET) += src/device/net.c
+SRCS-$(CONFIG_HAS_RNG) += src/device/rng.c
 SRCS-$(CONFIG_HAS_SDCARD) += src/device/sdcard.c
 
 SRCS-BLACKLIST-$(CONFIG_TARGET_AM) += src/device/alarm.c
@@ -33,4 +35,15 @@ ifndef CONFIG_TARGET_AM
 LIBS += $(shell sdl2-config --libs)
 endif
 endif
+endif
+
+ifdef CONFIG_HAS_NET
+SLIRP_AVAILABLE := $(shell pkg-config --exists slirp 2>/dev/null && echo y)
+SLIRP_CFLAGS := $(shell pkg-config --cflags slirp 2>/dev/null)
+SLIRP_LIBS := $(shell pkg-config --libs-only-L slirp 2>/dev/null) -lslirp
+ifeq ($(SLIRP_AVAILABLE),)
+$(error CONFIG_HAS_NET requires libslirp development files (pkg-config package 'slirp'))
+endif
+CFLAGS += $(SLIRP_CFLAGS)
+LIBS += $(SLIRP_LIBS)
 endif

@@ -4,7 +4,8 @@
 // RV32 uses Sv32 two-level page tables. RV64 uses the Sv39 three-level format
 // expected by upstream xv6-riscv. Permission checks against the access type and
 // current privilege are performed by the requesters (L1I/L1D) using the returned
-// PTE flags. Leaf PTE A/D bits are updated in hardware on both RV32 and RV64.
+// PTE flags.  RVA20S64 mandates Svade: a leaf with A=0, or a store leaf with
+// D=0, raises a page fault.  The walker therefore never writes page tables.
 module rapt_ptw #(
     parameter int XLEN = `RAPT_XLEN
 ) (
@@ -53,8 +54,7 @@ module rapt_ptw #(
     LVL1_REQ  = 3'b011,
     LVL1_WAIT = 3'b100,
     LVL0_REQ  = 3'b101,
-    LVL0_WAIT = 3'b110,
-    AD_UPD    = 3'b111
+    LVL0_WAIT = 3'b110
   } ptw_state_t;
 
   ptw_state_t state;
@@ -62,8 +62,6 @@ module rapt_ptw #(
   logic [8:0] vpn1, vpn0;
   logic [XLEN-1:12] vtag_q;
   logic [XLEN-1:0] pte_addr;
-  logic [XLEN-1:0] ad_pte_addr;
-  logic [XLEN-1:0] ad_pte_data;
   logic req_store_q;
   logic killed;
 
@@ -77,7 +75,6 @@ module rapt_ptw #(
   logic pte_leaf;
   logic pte_reserved;
   logic pte_needs_ad_update;
-  logic [63:0] pte_data_ad;
   assign pte_data = bus_rdata[63:0];
   assign pte_v = pte_data[0];
   assign pte_r = pte_data[1];
@@ -88,8 +85,6 @@ module rapt_ptw #(
   assign pte_leaf = pte_r || pte_x;
   assign pte_reserved = (pte_w && !pte_r) || (pte_data[63:54] != 10'h0);
   assign pte_needs_ad_update = !pte_a || (req_store_q && !pte_d);
-  assign pte_data_ad = pte_data | 64'h0000_0000_0000_0040
-                     | (req_store_q ? 64'h0000_0000_0000_0080 : 64'h0);
 
   localparam int Rv64PtagPadW = XLEN - 54;
   logic [XLEN-1:10] ptag_lvl2;
@@ -103,11 +98,11 @@ module rapt_ptw #(
   assign bus_arvalid = !kill
                      && (state == LVL2_REQ || state == LVL1_REQ || state == LVL0_REQ);
   assign bus_araddr = pte_addr;
-  assign bus_awvalid = (state == AD_UPD);
-  assign bus_awaddr = ad_pte_addr;
-  assign bus_wvalid = (state == AD_UPD);
-  assign bus_wdata = ad_pte_data;
-  assign bus_wstrb = 8'hff;
+  assign bus_awvalid = 1'b0;
+  assign bus_awaddr = '0;
+  assign bus_wvalid = 1'b0;
+  assign bus_wdata = '0;
+  assign bus_wstrb = '0;
   assign result_vtag = vtag_q;
 
   // SBE is WARL-zero in rapt today. Keep the port so the requester interface
@@ -131,12 +126,19 @@ module rapt_ptw #(
         IDLE: begin
           killed <= 1'b0;
           if (req_valid && mmu_en && !kill) begin
-            vpn1 <= vaddr[29:21];
-            vpn0 <= vaddr[20:12];
-            vtag_q <= vaddr[XLEN-1:12];
-            req_store_q <= req_store;
-            pte_addr <= XLEN'({satp_ppn, 12'b0}) + (XLEN'(vaddr[38:30]) << 3);
-            state <= LVL2_REQ;
+            // Sv39 effective addresses must be the sign extension of bit 38.
+            // Reject a non-canonical address before issuing any implicit PTE
+            // access so the requester reports the original virtual address.
+            if (vaddr[63:39] != {25{vaddr[38]}}) begin
+              fault <= 1'b1;
+            end else begin
+              vpn1 <= vaddr[29:21];
+              vpn0 <= vaddr[20:12];
+              vtag_q <= vaddr[XLEN-1:12];
+              req_store_q <= req_store;
+              pte_addr <= XLEN'({satp_ppn, 12'b0}) + (XLEN'(vaddr[38:30]) << 3);
+              state <= LVL2_REQ;
+            end
           end
         end
         LVL2_REQ: begin
@@ -156,11 +158,10 @@ module rapt_ptw #(
                 state <= IDLE;
               end else begin
                 result_ptag <= ptag_lvl2;
-                result_pte  <= pte_data_ad[7:1];
+                result_pte  <= pte_data[7:1];
                 if (pte_needs_ad_update) begin
-                  ad_pte_addr <= pte_addr;
-                  ad_pte_data <= XLEN'(pte_data_ad);
-                  state <= AD_UPD;
+                  fault <= 1'b1;
+                  state <= IDLE;
                 end else begin
                   done <= 1'b1;
                   state <= IDLE;
@@ -194,11 +195,10 @@ module rapt_ptw #(
                 state <= IDLE;
               end else begin
                 result_ptag <= ptag_lvl1;
-                result_pte  <= pte_data_ad[7:1];
+                result_pte  <= pte_data[7:1];
                 if (pte_needs_ad_update) begin
-                  ad_pte_addr <= pte_addr;
-                  ad_pte_data <= XLEN'(pte_data_ad);
-                  state <= AD_UPD;
+                  fault <= 1'b1;
+                  state <= IDLE;
                 end else begin
                   done <= 1'b1;
                   state <= IDLE;
@@ -228,23 +228,15 @@ module rapt_ptw #(
               state <= IDLE;
             end else begin
               result_ptag <= ptag_lvl0;
-              result_pte  <= pte_data_ad[7:1];
+              result_pte  <= pte_data[7:1];
               if (pte_needs_ad_update) begin
-                ad_pte_addr <= pte_addr;
-                ad_pte_data <= XLEN'(pte_data_ad);
-                state <= AD_UPD;
+                fault <= 1'b1;
+                state <= IDLE;
               end else begin
                 done <= 1'b1;
                 state <= IDLE;
               end
             end
-          end else if (kill) killed <= 1'b1;
-        end
-        AD_UPD: begin
-          if (bus_wready) begin
-            fault <= !(killed || kill) && bus_werr;
-            done  <= !(killed || kill) && !bus_werr;
-            state <= IDLE;
           end else if (kill) killed <= 1'b1;
         end
         default: state <= IDLE;
@@ -262,7 +254,7 @@ module rapt_ptw #(
 
   `RAPT_SVA_NEXT(
       clock, reset, PTW_KILLED_DRAIN_NO_COMPLETE,
-      (killed || kill) && (((state inside {LVL2_WAIT, LVL1_WAIT, LVL0_WAIT}) && bus_rvalid) || ((state == AD_UPD) && bus_wready)),
+      (killed || kill) && ((state inside {LVL2_WAIT, LVL1_WAIT, LVL0_WAIT}) && bus_rvalid),
       !done && !fault)
 `else
   typedef enum logic [2:0] {
@@ -270,8 +262,7 @@ module rapt_ptw #(
     LVL1_REQ  = 3'b001,
     LVL1_WAIT = 3'b010,
     LVL0_REQ  = 3'b011,
-    LVL0_WAIT = 3'b100,
-    AD_UPD    = 3'b101
+    LVL0_WAIT = 3'b100
   } ptw_state_t;
 
   ptw_state_t state;
@@ -285,8 +276,6 @@ module rapt_ptw #(
 
   logic [31:0] pte_raw;
   assign pte_raw = bus_rdata[31:0];
-  logic [XLEN-1:0] ad_pte_addr;
-  logic [31:0] ad_pte_data;
   logic req_store_q;
   logic killed;
 
@@ -301,11 +290,11 @@ module rapt_ptw #(
   assign busy = (state != IDLE);
   assign bus_arvalid = !kill && (state == LVL1_REQ || state == LVL0_REQ);
   assign bus_araddr = ppn_a[XLEN-1:0];
-  assign bus_awvalid = (state == AD_UPD);
-  assign bus_awaddr = ad_pte_addr;
-  assign bus_wvalid = (state == AD_UPD);
-  assign bus_wdata = XLEN'(ad_pte_data);
-  assign bus_wstrb = 8'h0f;
+  assign bus_awvalid = 1'b0;
+  assign bus_awaddr = '0;
+  assign bus_wvalid = 1'b0;
+  assign bus_wdata = '0;
+  assign bus_wstrb = '0;
 
   logic pte_v;
   logic pte_r;
@@ -316,7 +305,6 @@ module rapt_ptw #(
   logic pte_leaf;
   logic pte_reserved;
   logic pte_needs_ad_update;
-  logic [31:0] pte_data_ad;
   logic [XLEN-1:10] ptag_lvl1;
   logic [XLEN-1:10] ptag_lvl0;
   assign pte_v = pte_data[0];
@@ -328,8 +316,6 @@ module rapt_ptw #(
   assign pte_leaf = pte_r || pte_x;
   assign pte_reserved = pte_w && !pte_r;
   assign pte_needs_ad_update = !pte_a || (req_store_q && !pte_d);
-  assign pte_data_ad = pte_data | 32'h0000_0040
-                     | (req_store_q ? 32'h0000_0080 : 32'h0);
 
   assign ptag_lvl1 = {pte_data[31:20], vpn0};
   assign ptag_lvl0 = pte_data[31:10];
@@ -374,11 +360,10 @@ module rapt_ptw #(
                 state <= IDLE;
               end else begin
                 result_ptag <= ptag_lvl1;
-                result_pte  <= pte_data_ad[7:1];
+                result_pte  <= pte_data[7:1];
                 if (pte_needs_ad_update) begin
-                  ad_pte_addr <= ppn_a[XLEN-1:0];
-                  ad_pte_data <= pte_data_ad;
-                  state <= AD_UPD;
+                  fault <= 1'b1;
+                  state <= IDLE;
                 end else begin
                   done <= 1'b1;
                   state <= IDLE;
@@ -408,23 +393,15 @@ module rapt_ptw #(
               state <= IDLE;
             end else begin
               result_ptag <= ptag_lvl0;
-              result_pte  <= pte_data_ad[7:1];
+              result_pte  <= pte_data[7:1];
               if (pte_needs_ad_update) begin
-                ad_pte_addr <= ppn_a[XLEN-1:0];
-                ad_pte_data <= pte_data_ad;
-                state <= AD_UPD;
+                fault <= 1'b1;
+                state <= IDLE;
               end else begin
                 done <= 1'b1;
                 state <= IDLE;
               end
             end
-          end else if (kill) killed <= 1'b1;
-        end
-        AD_UPD: begin
-          if (bus_wready) begin
-            fault <= !(killed || kill) && bus_werr;
-            done  <= !(killed || kill) && !bus_werr;
-            state <= IDLE;
           end else if (kill) killed <= 1'b1;
         end
         default: state <= IDLE;
@@ -442,8 +419,15 @@ module rapt_ptw #(
 
   `RAPT_SVA_NEXT(
       clock, reset, PTW_KILLED_DRAIN_NO_COMPLETE,
-      (killed || kill) && (((state inside {LVL1_WAIT, LVL0_WAIT}) && bus_rvalid) || ((state == AD_UPD) && bus_wready)),
+      (killed || kill) && ((state inside {LVL1_WAIT, LVL0_WAIT}) && bus_rvalid),
       !done && !fault)
 `endif
+
+  // The shared PTW interface retains write-response inputs for wiring
+  // compatibility, but Svade makes the page-table write channel unused.
+  /* verilator lint_off UNUSEDSIGNAL */
+  logic _unused_write_response;
+  assign _unused_write_response = bus_wready ^ bus_werr;
+  /* verilator lint_on UNUSEDSIGNAL */
 
 endmodule

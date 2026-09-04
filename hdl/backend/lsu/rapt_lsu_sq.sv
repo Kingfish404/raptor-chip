@@ -15,6 +15,7 @@ module rapt_lsu_sq #(
 
     lsu_pipe_if.slave exu_lsu,
     cdb_if.in exu_ioq_bcast,
+    input logic [XLEN-1:0] sq_waddr_hi,
     rou_lsu_if.in rou_lsu,
 
     csr_bcast_if.in csr_bcast,
@@ -31,17 +32,29 @@ module rapt_lsu_sq #(
   localparam int PageOffBits = 12;
   localparam int SQLen = $clog2(SQ_SIZE);
   localparam int ROBLen = $clog2(`RAPT_ROB_SIZE);
+  localparam int CboBlockBytes = 64;
+  localparam int CboBeats = CboBlockBytes / (XLEN / 8);
+  localparam int CboBeatBits = $clog2(CboBeats);
+`ifdef RAPT_RV64
+  localparam logic [7:0] FullStoreWstrb = `RAPT_SD_WSTRB;
+`else
+  localparam logic [7:0] FullStoreWstrb = `RAPT_SW_WSTRB;
+`endif
+  localparam logic [7:0] CboBusWstrb = (XLEN == 64) ? 8'hff : 8'h0f;
 
   typedef enum logic [2:0] {
     LS_S_V    = 3'b000,  // present lo beat, wait for wready
     LS_S_R    = 3'b001,  // lo beat retired; aligned case completes here
     LS_S_HI_V = 3'b010,  // misaligned: present hi beat, wait for wready
     LS_S_HI_R = 3'b011, // hi beat retired; SQ entry released next cycle
-    LS_S_X_V  = 3'b100, // RV32D FSD: present the third beat
-    LS_S_X_R  = 3'b101  // third beat retired; SQ entry released next cycle
+    LS_S_X_V   = 3'b100, // RV32D FSD: present the third beat
+    LS_S_X_R   = 3'b101, // third beat retired; SQ entry released next cycle
+    LS_S_CBO_V = 3'b110, // CBO.ZERO: present remaining cache-block beats
+    LS_S_CBO_R = 3'b111  // final zero beat retired; release next cycle
   } state_store_t;
 
   state_store_t state_store;
+  logic [CboBeatBits-1:0] cbo_zero_beat;
 
   logic raddr_valid;
   logic [XLEN-1:0] raddr;
@@ -84,6 +97,7 @@ module rapt_lsu_sq #(
   /* verilator lint_on UNUSEDSIGNAL */
   logic [XLEN-1:0] sq_vaddr[SQ_SIZE];  // virtual : forwarding comparison
   logic [XLEN-1:0] sq_paddr[SQ_SIZE];  // physical: bus write-through
+  logic [XLEN-1:0] sq_paddr_hi[SQ_SIZE]; // translated PA for a cross-page high beat
   logic [XLEN-1:0] sq_wdata[SQ_SIZE];
   logic [63:0] sq_wdata64[SQ_SIZE];
   logic sq_fp64[SQ_SIZE];
@@ -156,12 +170,27 @@ module rapt_lsu_sq #(
                                                  : {2'b0, rou_lsu.alu};
 `endif
 
+  task automatic report_store_diff(
+      input logic [XLEN-1:0] addr,
+      input logic [XLEN-1:0] data,
+      input logic [7:0] strb,
+      input logic [4:0] alu);
+    if (alu == `RAPT_CBO_ZERO_WALU) begin
+      for (int beat = 0; beat < CboBeats; beat++) begin
+        `RAPT_DPI_C_NPC_DIFFTEST_MEM_DIFF(
+            {addr[XLEN-1:6], 6'b0} + XLEN'(beat * (XLEN / 8)), '0, CboBusWstrb)
+      end
+    end else begin
+      `RAPT_DPI_C_NPC_DIFFTEST_MEM_DIFF(addr, data, strb)
+    end
+  endtask
+
   assign raddr = exu_lsu.raddr;
   assign ralu = exu_lsu.ralu;
 
   // Drain completion: FSM signals release of the head entry.
   assign sq_drain_fire = (state_store == LS_S_R || state_store == LS_S_HI_R
-                       || state_store == LS_S_X_R)
+                       || state_store == LS_S_X_R || state_store == LS_S_CBO_R)
                        && sq_valid[sq_head];
 
   logic [SQ_SIZE-1:0] sq_alloc_oh;
@@ -213,8 +242,8 @@ module rapt_lsu_sq #(
         sq_tail <= sq_cmt + SQLen'(sq_commit_fire);
         if (sq_commit_fire) begin
           sq_cmt <= sq_cmt + 1'b1;
-          `RAPT_DPI_C_NPC_DIFFTEST_MEM_DIFF(difftest_store_addr, difftest_store_data,
-                                            difftest_store_wstrb)
+          report_store_diff(difftest_store_addr, difftest_store_data,
+                            difftest_store_wstrb, rou_lsu.alu[4:0]);
         end
       end else begin
         if (sq_alloc_fire) begin
@@ -222,6 +251,7 @@ module rapt_lsu_sq #(
           sq_dest[sq_tail]  <= exu_ioq_bcast.dest;
           sq_vaddr[sq_tail] <= exu_ioq_bcast.tval;      // virtual (forwarding)
           sq_paddr[sq_tail] <= exu_ioq_bcast.sq_waddr;  // physical (drain)
+          sq_paddr_hi[sq_tail] <= sq_waddr_hi;
           sq_wdata[sq_tail] <= exu_ioq_bcast.sq_wdata;
           sq_wdata64[sq_tail] <= exu_ioq_bcast.sq_wdata64;
           sq_fp64[sq_tail] <= exu_ioq_bcast.sq_fp64;
@@ -229,8 +259,8 @@ module rapt_lsu_sq #(
         end
         if (sq_commit_fire) begin
           sq_cmt <= sq_cmt + 1'b1;
-          `RAPT_DPI_C_NPC_DIFFTEST_MEM_DIFF(difftest_store_addr, difftest_store_data,
-                                            difftest_store_wstrb)
+          report_store_diff(difftest_store_addr, difftest_store_data,
+                            difftest_store_wstrb, rou_lsu.alu[4:0]);
         end
       end
 
@@ -262,28 +292,39 @@ module rapt_lsu_sq #(
   logic sq_fwd_ok;
   logic [XLEN-1:0] sq_fwd_data;
   logic [SQ_SIZE-1:0] sq_match_vec;
+  logic [SQ_SIZE-1:0] sq_pageoff_match_vec;
   logic [SQ_SIZE-1:0] sq_fwd_full_vec;  // full-width store (can forward)
-`ifdef RAPT_RV64
-  localparam logic [7:0] FullStoreWstrb = `RAPT_SD_WSTRB;
-`else
-  localparam logic [7:0] FullStoreWstrb = `RAPT_SW_WSTRB;
-`endif
+  logic sq_has_cbo_zero;
+  logic sq_alloc_pageoff_match;
   always_comb begin
+    sq_has_cbo_zero = sq_alloc_fire
+                   && exu_ioq_bcast.alu[4:0] == `RAPT_CBO_ZERO_WALU;
     for (int j = 0; j < SQ_SIZE; j++) begin
       automatic logic [SQLen-1:0] idx = sq_head + j[SQLen-1:0];
+      sq_has_cbo_zero |= sq_valid[idx]
+                      && sq_alu[idx] == `RAPT_CBO_ZERO_WALU;
       sq_match_vec[j] = sq_valid[idx]
           && (sq_vaddr[idx][XLEN-1:WordOffBits] == raddr[XLEN-1:WordOffBits]);
+      sq_pageoff_match_vec[j] = sq_valid[idx]
+          && (sq_vaddr[idx][PageOffBits-1:WordOffBits]
+              == raddr[PageOffBits-1:WordOffBits]);
       sq_fwd_full_vec[j] = sq_match_vec[j] && (sq_vaddr[idx][WordOffBits-1:0] == '0)
         && (sq_alu[idx] == FullStoreWstrb);
     end
   end
+  assign sq_alloc_pageoff_match = sq_alloc_fire
+      && (exu_ioq_bcast.tval[PageOffBits-1:WordOffBits]
+          == raddr[PageOffBits-1:WordOffBits]);
 
   // Youngest match wins: highest j in age order (last set bit)
   always_comb begin
-    // Before translation, a load VA cannot disprove aliasing with an SQ
-    // store's PA. Keep exact-VA forwarding, but conservatively block every
-    // other MMU-mode load until older stores have drained.
-    load_in_sq = csr_bcast.dmmu_en ? (|sq_valid || sq_alloc_fire) : |sq_match_vec;
+    // Page translation preserves bits [11:0], so different page offsets
+    // safely disprove an alias even when the load still carries a VA and the
+    // SQ stores carry PAs. Equal offsets on different VPNs remain blocked;
+    // exact-VA full stores can still forward through sq_match_vec.
+    load_in_sq = csr_bcast.dmmu_en
+        ? (|sq_pageoff_match_vec || sq_alloc_pageoff_match || sq_has_cbo_zero)
+        : (|sq_match_vec || sq_has_cbo_zero);
     sq_fwd_ok = 0;
     sq_fwd_data = 0;
     for (int j = 0; j < SQ_SIZE; j++) begin
@@ -309,8 +350,9 @@ module rapt_lsu_sq #(
   // ==========================================================================
   //  Misaligned load support
   //    Splits a load that crosses a word (RV32) / dword (RV64) boundary into
-  //    two aligned cache/bus transactions, then merges the two halves into a
-  //    single XLEN-wide result before handing it back to the EXU.
+  //    aligned cache/bus transactions, then merges the beats before handing
+  //    the result back to the EXU. Integer accesses need two beats; an
+  //    unaligned RV32 FLD can span three 32-bit words.
   //    Covers LH[U] crossing (raddr[1:0]==3), LW[U] at any non-zero low-bit
   //    alignment, and (RV64) LD with raddr[2:0]!=0.
   // ==========================================================================
@@ -318,13 +360,17 @@ module rapt_lsu_sq #(
   typedef enum logic [1:0] {
     MA_IDLE = 2'b00,  // normal aligned flow
     MA_HI   = 2'b01,  // lo half latched, requesting hi half
-    MA_DONE = 2'b10   // both halves latched, presenting merged rdata
+    MA_X    = 2'b10,  // RV32D unaligned FLD: request the third word
+    MA_DONE = 2'b11   // all beats latched, presenting merged rdata
   } ma_state_t;
   ma_state_t ma_state;
   logic [XLEN-1:0] ma_lo_data;
   logic [XLEN-1:0] ma_hi_data;
+  logic [XLEN-1:0] ma_x_data;
+  logic ma_fault;
+  logic [XLEN-1:0] ma_fault_cause;
 
-  // Detect a misaligned access that must be split into two beats.
+  // Detect an access that must be split into multiple aligned beats.
   logic ma_span;
   logic ma_span_rv64;
   logic ma_span_fp64;
@@ -394,17 +440,27 @@ module rapt_lsu_sq #(
   logic sq_fwd_ok_b;
   logic [XLEN-1:0] sq_fwd_data_b;
   logic [SQ_SIZE-1:0] sq_match_vec_b;
+  logic [SQ_SIZE-1:0] sq_pageoff_match_vec_b;
   logic [SQ_SIZE-1:0] sq_fwd_full_vec_b;
   always_comb begin
     for (int j = 0; j < SQ_SIZE; j++) begin
       automatic logic [SQLen-1:0] idx = sq_head + j[SQLen-1:0];
       sq_match_vec_b[j] = sq_valid[idx]
           && (sq_vaddr[idx][XLEN-1:WordOffBits] == raddr_b[XLEN-1:WordOffBits]);
+      sq_pageoff_match_vec_b[j] = sq_valid[idx]
+          && (sq_vaddr[idx][PageOffBits-1:WordOffBits]
+              == raddr_b[PageOffBits-1:WordOffBits]);
       sq_fwd_full_vec_b[j] = sq_match_vec_b[j] && (sq_alu[idx] == FullStoreWstrb);
     end
   end
   always_comb begin
-    load_in_sq_b = csr_bcast.dmmu_en ? (|sq_valid || sq_alloc_fire) : |sq_match_vec_b;
+    load_in_sq_b = csr_bcast.dmmu_en
+        ? (|sq_pageoff_match_vec_b
+           || (sq_alloc_fire
+               && (exu_ioq_bcast.tval[PageOffBits-1:WordOffBits]
+                   == raddr_b[PageOffBits-1:WordOffBits]))
+           || sq_has_cbo_zero)
+        : (|sq_match_vec_b || sq_has_cbo_zero);
     sq_fwd_ok_b = 0;
     sq_fwd_data_b = 0;
     for (int j = 0; j < SQ_SIZE; j++) begin
@@ -478,8 +534,8 @@ module rapt_lsu_sq #(
 `endif
 
   // --- Pre-split PMP check on the ORIGINAL misaligned address ---
-  // The MA-split path below turns a misaligned load into two aligned
-  // requests; L1D's PMP sees only those aligned addresses and cannot
+  // The MA-split path below turns a misaligned load into aligned requests;
+  // L1D's PMP sees only those beat addresses and cannot
   // detect a partial-region violation that straddles a PMP boundary.
   // Check the un-split access here so partial matches trap correctly.
   logic [1:0] lsu_eff_priv;
@@ -490,27 +546,28 @@ module rapt_lsu_sq #(
   // ==========================================================================
   //  Misaligned store support
   //    SW/SH at `waddr[OFFW-1:0]` crossing a word (RV32) / dword (RV64)
-  //    boundary is split into two aligned beats.  Beat 0 drives the original
-  //    waddr/walu/wdata -- the BUS already shifts wstrb/wdata by `waddr_lo * 8`
-  //    and truncates, so the lo word naturally gets the correct partial
-  //    write.  Beat 1 drives the next word-aligned address with the bytes
-  //    that spilled past the word boundary, shifted down to live at byte 0.
+  //    boundary is split into aligned beats.  Beat 0 is aligned down and its
+  //    mask/data are shifted into the affected low lanes; this also ensures
+  //    the AXI transfer itself never crosses a 4-KiB boundary.  Beat 1 drives
+  //    the next aligned address with the spilled bytes shifted down to byte 0.
   // ==========================================================================
   logic ma_store_span;
   logic ma_store_third;
+  logic [XLEN-1:0] ma_waddr_lo;
   logic [XLEN-1:0] ma_waddr_hi;
   logic [XLEN-1:0] ma_waddr_third;
-  logic [4:0]      ma_walu_hi;
-  logic [4:0]      ma_walu_lo;
-  logic [4:0]      ma_walu_third;
+  logic [7:0]      ma_walu_hi;
+  logic [7:0]      ma_walu_lo;
+  logic [7:0]      ma_walu_third;
+  logic [XLEN-1:0] ma_wdata_lo;
   logic [XLEN-1:0] ma_wdata_hi;
   logic [XLEN-1:0] ma_wdata_third;
   logic [OFFW:0]   ma_w_off;       // byte offset into the aligned word (extra bit)
   logic [OFFW+1:0] ma_w_size;      // store size in bytes, 1/2/4/(8)
   logic [XLEN/8-1:0] ma_wstrb_lo;
   /* verilator lint_off UNUSEDSIGNAL */
-  logic [2*XLEN/8-1:0]   ma_wstrb_wide;  // low half unused (bus path handles lo)
-  logic [2*XLEN-1:0]     ma_wdata_wide;  // low half unused (bus path handles lo)
+  logic [2*XLEN/8-1:0]   ma_wstrb_wide;
+  logic [2*XLEN-1:0]     ma_wdata_wide;
   /* verilator lint_on UNUSEDSIGNAL */
   logic [$clog2(2*XLEN)-1:0] ma_w_shift;
 
@@ -546,21 +603,25 @@ module rapt_lsu_sq #(
       .fault_lo_o()
   );
 
-  // Aligned low and high request addresses for the two beats.
-  logic [XLEN-1:0] ma_raddr_lo, ma_raddr_hi;
+  // Aligned request addresses. MA_X is only used by an unaligned RV32 FLD.
+  logic [XLEN-1:0] ma_raddr_lo, ma_raddr_hi, ma_raddr_x;
+  logic ma_load_third;
   assign ma_raddr_lo = {raddr[XLEN-1:OFFW], {OFFW{1'b0}}};
   assign ma_raddr_hi = ma_raddr_lo + XLEN'(XLEN/8);
+  assign ma_raddr_x  = ma_raddr_hi + XLEN'(XLEN/8);
+  assign ma_load_third = (XLEN == 32) && exu_lsu.fp_rdata64_req
+                       && (raddr[OFFW-1:0] != '0);
 
-  // Merge the two halves into a single XLEN-wide value positioned so that
-  // byte 0 of the merged word corresponds to `raddr`.  Concatenate hi:lo
-  // into a double-wide vector and shift right by the byte offset in bits;
-  // the shift amount is guaranteed non-zero on the MA path (raddr[OFFW-1:0]
-  // is non-zero whenever ma_span is asserted).
+  // Merge aligned words so byte 0 of the result corresponds to `raddr`.
+  // Integer results use hi:lo; RV32 FLD uses x:hi:lo to cover a possible
+  // three-word span.
   logic [2*XLEN-1:0] ma_cat;
+  logic [3*XLEN-1:0] ma_cat3;
   logic [XLEN-1:0]   ma_merged;
   logic [$clog2(2*XLEN)-1:0] ma_shift;
   assign ma_shift  = {{($clog2(2*XLEN)-OFFW-3){1'b0}}, raddr[OFFW-1:0], 3'b000};
   assign ma_cat    = {ma_hi_data, ma_lo_data};
+  assign ma_cat3   = {ma_x_data, ma_hi_data, ma_lo_data};
   assign ma_merged = ma_cat[ma_shift +: XLEN];
 
   // Address/rvalid muxing toward the L1D interface.
@@ -571,12 +632,14 @@ module rapt_lsu_sq #(
 `else
   localparam logic [4:0] MaLoadAlu = `RAPT_ALU_LW__;
 `endif
-  assign ma_req_addr = (ma_state == MA_HI) ? ma_raddr_hi
+  assign ma_req_addr = (ma_state == MA_X)  ? ma_raddr_x
+                     : (ma_state == MA_HI) ? ma_raddr_hi
                      : (ma_load_req)        ? ma_raddr_lo
                      :                        raddr;
   // Force an aligned word/dword load opcode during the split so the L1D
   // never sees a "misaligned" request.
-  assign ma_req_alu = (ma_state == MA_HI || ma_load_req) ? MaLoadAlu : ralu;
+  assign ma_req_alu = (ma_state == MA_HI || ma_state == MA_X || ma_load_req)
+                    ? MaLoadAlu : ralu;
 
   // ==========================================================================
   //  Load data path -- uses the split-merge result when ma_state == MA_DONE.
@@ -600,7 +663,7 @@ module rapt_lsu_sq #(
   assign exu_lsu.fp_rdata64_valid = exu_lsu.fp_rdata64_req
                 && ((ma_state == MA_DONE) || (lsu_l1d.rvalid && lsu_l1d.rready));
   assign exu_lsu.fp_rdata64 = (XLEN == 32)
-            ? ma_cat[ma_shift +: 64]
+            ? ma_cat3[ma_shift +: 64]
             : {{(64-XLEN){1'b0}}, rdata};
 
   logic [XLEN-1:0] rdata_word;
@@ -618,8 +681,9 @@ module rapt_lsu_sq #(
     | ({XLEN{ralu == `RAPT_ALU_LHU_}} & {{XLEN-16{1'b0}}, rdata[15:0]})
     | rdata_word
     );
-  // Swallow per-beat traps on the MA split path (we never issue a misaligned
-  // address to the cache, so any L1D-raised trap on the beats is spurious).
+  // A split beat can raise a real page/access fault, especially when the high
+  // beat crosses into a differently mapped page.  Hold that fault until the
+  // original instruction completes; never expose partially merged data.
   logic ma_active;
   assign ma_active = (ma_state != MA_IDLE) || ma_load_req;
   // Raise the pre-split PMP trap on the cycle the request is seen, so the
@@ -630,16 +694,19 @@ module rapt_lsu_sq #(
                      && (ma_state == MA_IDLE);
   assign exu_lsu.trap = lsu_pmp_trap ? 1'b1
                       : (raddr_valid && fwd_hit) ? 1'b0
+                      : (ma_state == MA_DONE) ? ma_fault
                       : ma_active             ? 1'b0
                       :                         lsu_l1d.trap;
   assign exu_lsu.cause = lsu_pmp_trap ? `RAPT_CAUSE_LOAD_ACC_FAULT
+                         : ((ma_state == MA_DONE) && ma_fault) ? ma_fault_cause
                                        : lsu_l1d.cause;
   assign exu_lsu.difftest_skip = (raddr_valid && fwd_hit) ? 1'b0
+                              : ((ma_state == MA_DONE) && ma_fault) ? 1'b0
                               : ma_active             ? 1'b1
                               :                         lsu_l1d.difftest_skip;
   // rready contract:
   //  - aligned hit / forward: one-cycle rready pulse (as before)
-  //  - MA split:              hold rready low during LO/HI beats; raise it
+  //  - MA split:              hold rready low during LO/HI/X beats; raise it
   //                           once merged data is parked in MA_DONE.
   //  - pre-split PMP trap:    pulse rready immediately so IOQ retires.
   assign exu_lsu.rready = lsu_pmp_trap
@@ -651,14 +718,22 @@ module rapt_lsu_sq #(
   always_ff @(posedge clock) begin
     if (reset) begin
       state_store <= LS_S_V;
+      cbo_zero_beat <= '0;
     end else begin
       unique case (state_store)
         LS_S_V: begin
           if (wvalid) begin
             if (lsu_l1d.wready) begin
-              // Lo beat accepted. If the store straddles a word/dword boundary
-              // we still owe a high beat; otherwise retire.
-              state_store <= ma_store_span ? LS_S_HI_V : LS_S_R;
+              if (walu == `RAPT_CBO_ZERO_WALU) begin
+                // Beat zero is accepted directly from LS_S_V.  Continue over
+                // every naturally aligned XLEN-wide word in the 64-byte block.
+                cbo_zero_beat <= CboBeatBits'(1);
+                state_store <= LS_S_CBO_V;
+              end else begin
+                // Lo beat accepted. If the store straddles a word/dword boundary
+                // we still owe a high beat; otherwise retire.
+                state_store <= ma_store_span ? LS_S_HI_V : LS_S_R;
+              end
             end
           end
         end
@@ -681,6 +756,19 @@ module rapt_lsu_sq #(
         LS_S_X_R: begin
           state_store <= LS_S_V;
         end
+        LS_S_CBO_V: begin
+          if (lsu_l1d.wready) begin
+            if (cbo_zero_beat == CboBeatBits'(CboBeats - 1)) begin
+              state_store <= LS_S_CBO_R;
+            end else begin
+              cbo_zero_beat <= cbo_zero_beat + 1'b1;
+            end
+          end
+        end
+        LS_S_CBO_R: begin
+          cbo_zero_beat <= '0;
+          state_store <= LS_S_V;
+        end
         default: begin
           state_store <= LS_S_V;
         end
@@ -690,7 +778,7 @@ module rapt_lsu_sq #(
 
   assign lsu_l1d.raddr = ma_req_addr;
   assign lsu_l1d.ralu = ma_req_alu;
-  assign lsu_l1d.rvalid = (ma_state == MA_HI)
+  assign lsu_l1d.rvalid = (ma_state == MA_HI) || (ma_state == MA_X)
                        || (raddr_valid && !load_in_sq
                                        && !mmio_load_blocked
                                        && (ma_state == MA_IDLE));
@@ -698,25 +786,44 @@ module rapt_lsu_sq #(
   assign lsu_l1d.ordered = exu_lsu.ordered && sq_all_empty;
 
   // Misalign-split FSM.
-  // ma_lo_data/ma_hi_data are read only in MA_DONE (merged result), so their
-  // data flops are don't-care in MA_IDLE (same principle as rapt_prf); only
-  // the FSM state needs reset.
+  // Beat data is read only in MA_DONE (merged result), so its flops are
+  // don't-care in MA_IDLE (same principle as rapt_prf); only the FSM state
+  // needs reset.
   always_ff @(posedge clock) begin
     if (reset) begin
       ma_state <= MA_IDLE;
+      ma_fault <= 1'b0;
+      ma_fault_cause <= '0;
     end else if (cmu_bcast.flush_pipe) begin
       ma_state <= MA_IDLE;
+      ma_fault <= 1'b0;
     end else begin
       unique case (ma_state)
         MA_IDLE: begin
           if (ma_load_req && lsu_l1d.rready) begin
-            ma_lo_data <= lsu_l1d.rdata;
-            ma_state <= MA_HI;
+            ma_fault <= lsu_l1d.trap;
+            ma_fault_cause <= lsu_l1d.cause;
+            if (lsu_l1d.trap) begin
+              ma_state <= MA_DONE;
+            end else begin
+              ma_lo_data <= lsu_l1d.rdata;
+              ma_state <= MA_HI;
+            end
           end
         end
         MA_HI: begin
           if (lsu_l1d.rready) begin
-            ma_hi_data <= lsu_l1d.rdata;
+            ma_fault <= lsu_l1d.trap;
+            ma_fault_cause <= lsu_l1d.cause;
+            if (!lsu_l1d.trap) ma_hi_data <= lsu_l1d.rdata;
+            ma_state <= (!lsu_l1d.trap && ma_load_third) ? MA_X : MA_DONE;
+          end
+        end
+        MA_X: begin
+          if (lsu_l1d.rready) begin
+            ma_fault <= lsu_l1d.trap;
+            ma_fault_cause <= lsu_l1d.cause;
+            if (!lsu_l1d.trap) ma_x_data <= lsu_l1d.rdata;
             ma_state <= MA_DONE;
           end
         end
@@ -726,6 +833,7 @@ module rapt_lsu_sq #(
           // otherwise-unrelated rvalid bubble.
           if (!exu_lsu.rvalid || exu_lsu.rready) begin
             ma_state <= MA_IDLE;
+            ma_fault <= 1'b0;
           end
         end
         default: ma_state <= MA_IDLE;
@@ -768,38 +876,47 @@ module rapt_lsu_sq #(
   assign ma_w_shift    = {{($clog2(2*XLEN)-OFFW-3){1'b0}}, waddr[OFFW-1:0], 3'b000};
   assign ma_wdata_wide = (wfp64 ? {{XLEN{1'b0}}, wdata64}
                           : {{XLEN{1'b0}}, wdata}) << ma_w_shift;
+  assign ma_wdata_lo   = ma_wdata_wide[XLEN-1:0];
   assign ma_wdata_hi   = ma_wdata_wide[2*XLEN-1:XLEN];
   /* verilator lint_on WIDTHTRUNC */
-  assign ma_waddr_hi = {waddr[XLEN-1:OFFW], {OFFW{1'b0}}} + XLEN'(XLEN/8);
+  // The IOQ pre-translates the next virtual page when the original store
+  // crosses a page boundary.  For the common same-page case this is simply
+  // the next aligned physical word/dword.
+  assign ma_waddr_lo = {waddr[XLEN-1:OFFW], {OFFW{1'b0}}};
+  assign ma_waddr_hi = sq_paddr_hi[sq_head];
 `ifdef RAPT_RV64
-  // walu is 5-bit; XLEN/8 == 8.  Only the low 5 bits of the overflow can
-  // possibly be set (SD has at most 7 spill bytes, so <= 0x7f; but even SW
-  // overflow fits in 3 bits).  Zero-extend safely.
-  assign ma_walu_hi = {1'b0, ma_wstrb_wide[XLEN/8+3:XLEN/8]};
+  assign ma_walu_hi = 8'(ma_wstrb_wide[2*XLEN/8-1:XLEN/8]);
 `else
-  assign ma_walu_hi = wfp64 ? 5'b01111
-                    : {{(5-XLEN/8){1'b0}}, ma_wstrb_wide[2*XLEN/8-1:XLEN/8]};
+  // An RV32 FSD always contributes four middle bytes to beat 1; an
+  // unaligned tail, if any, is emitted separately as beat 2.
+  assign ma_walu_hi = wfp64 ? 8'h0f
+                            : 8'(ma_wstrb_wide[2*XLEN/8-1:XLEN/8]);
 `endif
   always_comb begin
-    ma_walu_lo = walu;
+`ifdef RAPT_RV64
+    ma_walu_lo = (walu == `RAPT_SD_WSTRB) ? 8'hff : {3'b0, walu};
+`else
+    ma_walu_lo = wfp64 ? 8'h0f : {4'b0, walu[3:0]};
+`endif
+    if (ma_store_span)
+      ma_walu_lo = 8'(ma_wstrb_wide[XLEN/8-1:0]);
     ma_walu_third = '0;
     ma_wdata_third = '0;
     if ((XLEN == 32) && wfp64) begin
       unique case (waddr[1:0])
-        2'b00: ma_walu_lo = 5'b01111;
+        2'b00: begin
+          ma_walu_third = '0;
+        end
         2'b01: begin
-          ma_walu_lo = 5'b00111;
-          ma_walu_third = 5'b00001;
+          ma_walu_third = 8'h01;
           ma_wdata_third = wdata64 >> 56;
         end
         2'b10: begin
-          ma_walu_lo = 5'b00011;
-          ma_walu_third = 5'b00011;
+          ma_walu_third = 8'h03;
           ma_wdata_third = wdata64 >> 48;
         end
         default: begin
-          ma_walu_lo = 5'b00001;
-          ma_walu_third = 5'b00111;
+          ma_walu_third = 8'h07;
           ma_wdata_third = wdata64 >> 40;
         end
       endcase
@@ -807,16 +924,30 @@ module rapt_lsu_sq #(
   end
   assign ma_waddr_third = ma_waddr_hi + XLEN'(XLEN/8);
 
+  logic cbo_zero_active;
+  logic [XLEN-1:0] cbo_zero_addr;
+  assign cbo_zero_active = walu == `RAPT_CBO_ZERO_WALU
+                        && (state_store == LS_S_V || state_store == LS_S_CBO_V);
+  assign cbo_zero_addr = {waddr[XLEN-1:6], 6'b0}
+                       + XLEN'((state_store == LS_S_CBO_V ? cbo_zero_beat : '0)
+                              * (XLEN / 8));
+
   // L1D drive muxing.
-  assign lsu_l1d.waddr  = (state_store == LS_S_HI_V) ? ma_waddr_hi
-                       : (state_store == LS_S_X_V)  ? ma_waddr_third : waddr;
-  assign lsu_l1d.walu   = (state_store == LS_S_HI_V) ? ma_walu_hi
+  assign lsu_l1d.waddr  = cbo_zero_active ? cbo_zero_addr
+                       : (state_store == LS_S_HI_V) ? ma_waddr_hi
+                       : (state_store == LS_S_X_V)  ? ma_waddr_third
+                       : ma_store_span              ? ma_waddr_lo : waddr;
+  assign lsu_l1d.walu   = cbo_zero_active ? CboBusWstrb
+                       : (state_store == LS_S_HI_V) ? ma_walu_hi
                        : (state_store == LS_S_X_V)  ? ma_walu_third : ma_walu_lo;
   assign lsu_l1d.wvalid = (state_store == LS_S_V && wvalid)
                        || (state_store == LS_S_HI_V)
-                       || (state_store == LS_S_X_V);
-  assign lsu_l1d.wdata  = (state_store == LS_S_HI_V) ? ma_wdata_hi
-                       : (state_store == LS_S_X_V)  ? ma_wdata_third : wdata;
+                       || (state_store == LS_S_X_V)
+                       || (state_store == LS_S_CBO_V);
+  assign lsu_l1d.wdata  = cbo_zero_active ? '0
+                       : (state_store == LS_S_HI_V) ? ma_wdata_hi
+                       : (state_store == LS_S_X_V)  ? ma_wdata_third
+                       : ma_store_span              ? ma_wdata_lo : wdata;
 
   // ==========================================================================
   //  Assertions (enable with +define+RAPT_ASSERT_EN)
@@ -848,7 +979,8 @@ module rapt_lsu_sq #(
       (csr_bcast.dmmu_en ? (sq_vaddr[sq_cmt][PageOffBits-1:WordOffBits] == rou_lsu.sq_vaddr[PageOffBits-1:WordOffBits]) : (sq_vaddr[sq_cmt][XLEN-1:WordOffBits] == rou_lsu.sq_vaddr[XLEN-1:WordOffBits])))
 
   // HANDSHAKE: the SQ drain target slot must be a valid committed entry.
-  `RAPT_SVA_IMPLY(clock, reset, LSU_SQ_DRAIN_VALID, (state_store == LS_S_R),
+  `RAPT_SVA_IMPLY(clock, reset, LSU_SQ_DRAIN_VALID,
+                  (state_store == LS_S_R || state_store == LS_S_CBO_R),
                   (sq_valid[sq_head] && sq_committed[sq_head]))
 
   // HANDSHAKE: a load/AMO blocked by an older partial store must not complete

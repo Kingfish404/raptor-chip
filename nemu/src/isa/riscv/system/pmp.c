@@ -117,8 +117,8 @@ int pmp_csr_write(uint16_t csr, word_t val)
   if (csr >= CSR_PMPCFG0 && csr <= CSR_PMPCFG3)
   {
 #ifdef CONFIG_RV64
-    /* RV64: odd pmpcfg indices are illegal (fall through to illop). */
-    if (csr & 1) return 0;
+    /* RTL exposes odd RV64 pmpcfg CSRs as legal WARL-zero registers. */
+    if (csr & 1) return 1;
     /* Even pmpcfg holds 8 entries packed in 64 bits. */
     int base = ((csr - CSR_PMPCFG0) / 2) * 8;
     for (int pi = 0; pi < 8; pi++)

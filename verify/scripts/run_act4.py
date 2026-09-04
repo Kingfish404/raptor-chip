@@ -13,6 +13,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import os
 import re
 import subprocess
@@ -48,15 +49,21 @@ def dim(t: str) -> str:
 def run_one(
     elf: Path,
     *,
+    elf_root: Path,
     npc_bin: str,
     objcopy: str,
     mrom_img: str,
     nemu_so: str | None,
     log_dir: Path,
     timeout: int,
+    mem_random_delay: int,
+    mem_random_seed: int,
 ) -> bool:
     """Run a single ELF. Returns True on failure."""
-    log_file = log_dir / elf.with_suffix(".log").name
+    # Preserve the extension/test directory structure.  ACT4 has identically
+    # named ELFs in different suites, so flattening logs silently overwrites
+    # earlier results (and is especially racy with parallel execution).
+    log_file = log_dir / elf.relative_to(elf_root).with_suffix(".log")
     log_file.parent.mkdir(parents=True, exist_ok=True)
 
     # Convert ELF -> raw binary
@@ -73,9 +80,16 @@ def run_one(
             f"  {red('CERR')} {bold(elf.name)}: objcopy failed: {e.stderr.decode()[:200]}"
         )
         return True
+    except OSError as e:
+        print(f"  {red('CERR')} {bold(elf.name)}: cannot run objcopy: {e}")
+        return True
 
     # Build simulator command
     cmd = [npc_bin, "-b", "-n"]
+    cmd += [
+        f"--mem-random-delay={mem_random_delay}",
+        f"--mem-random-seed={mem_random_seed}",
+    ]
     if mrom_img:
         cmd += ["-r", mrom_img]
     if nemu_so:
@@ -92,6 +106,9 @@ def run_one(
         output = result.stdout + result.stderr
     except subprocess.TimeoutExpired:
         print(f"  {red('TIME')} {bold(elf.name)}: timeout after {timeout}s")
+        return True
+    except OSError as e:
+        print(f"  {red('FAIL')} {bold(elf.name)}: cannot run NPC: {e}")
         return True
     finally:
         try:
@@ -141,7 +158,27 @@ def main() -> int:
     p.add_argument("--nemu-so", default="", help="NEMU difftest SO (optional)")
     p.add_argument("--log-dir", type=Path, default=None, help="Log output directory")
     p.add_argument("--timeout", type=int, default=60, help="Per-test timeout (seconds)")
+    p.add_argument(
+        "--jobs",
+        type=int,
+        default=max(1, (os.cpu_count() or 1) // 2),
+        help="parallel simulator processes (default: half of CPUs)",
+    )
+    p.add_argument(
+        "--mem-random-delay",
+        type=int,
+        default=0,
+        help="maximum randomized AXI wait cycles per memory beat",
+    )
+    p.add_argument(
+        "--mem-random-seed",
+        type=int,
+        default=1,
+        help="reproducible randomized AXI timing seed",
+    )
     args = p.parse_args()
+    if args.jobs < 1:
+        p.error("--jobs must be at least 1")
 
     elf_dir = args.elf_dir.resolve()
     log_dir = (args.log_dir or elf_dir.parent / "logs").resolve()
@@ -156,21 +193,28 @@ def main() -> int:
     print(f"  ELFs:   {elf_dir}")
     print(f"  NPC:    {args.npc_bin}")
     print(f"  Logs:   {log_dir}")
+    print(f"  Jobs:   {args.jobs}")
     print()
 
-    failed = 0
-    for elf in elfs:
-        ok = run_one(
+    def run(elf: Path) -> bool:
+        return run_one(
             elf,
+            elf_root=elf_dir,
             npc_bin=args.npc_bin,
             objcopy=args.objcopy,
             mrom_img=args.mrom_img,
             nemu_so=args.nemu_so or None,
             log_dir=log_dir,
             timeout=args.timeout,
+            mem_random_delay=args.mem_random_delay,
+            mem_random_seed=args.mem_random_seed,
         )
-        if ok:
-            failed += 1
+
+    if args.jobs == 1:
+        failed = sum(run(elf) for elf in elfs)
+    else:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
+            failed = sum(pool.map(run, elfs))
 
     passed = len(elfs) - failed
     print()

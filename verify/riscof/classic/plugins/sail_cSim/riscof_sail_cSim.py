@@ -31,7 +31,9 @@ class sail_cSim(pluginTemplate):
             logger.error("sail_cSim plugin: config node missing.")
             raise SystemExit(1)
 
-        self.num_jobs = str(config.get("jobs", 1))
+        self.num_jobs = str(
+            max(1, int(os.environ.get("RAPT_JOBS", config.get("jobs", 1))))
+        )
         self.pluginpath = os.path.abspath(config["pluginpath"])
         self.sail_exe = os.path.join(
             config.get("PATH", ""), "sail_riscv_sim"

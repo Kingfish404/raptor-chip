@@ -66,13 +66,11 @@ uint32_t decompress_c(uint32_t inst)
   uint32_t nzimm_addi16sp = dec_ci_nzimm_addi16sp(s);
   uint32_t nzimm_lui = dec_ci_nzimm_lui(s);
   uint32_t offset_lwsp = dec_ci_offset_lwsp(s);
-  uint32_t shamt = dec_cs_shamt(s);
-  uint32_t imm_candi = dec_cb_imm_candi(s);
-#ifdef CONFIG_RV64
   uint32_t offset_ldsp = dec_ci_offset_ldsp(s);
   uint32_t imm_ld = dec_cld_csd_imm(s);
   uint32_t imm_sd_sp = dec_css_imm_sd(s);
-#endif
+  uint32_t shamt = dec_cs_shamt(s);
+  uint32_t imm_candi = dec_cb_imm_candi(s);
 #define INSTPAT_INST(s) ((s))
 #define INSTPAT_MATCH(s, name, type, ... /* execute body */)   \
   {                                                            \
@@ -85,13 +83,13 @@ uint32_t decompress_c(uint32_t inst)
   // Instruction listing for RVC, Quadrant 0
   INSTPAT("000 00000000 000 00", c.inv, N, { di = 0; });
   INSTPAT("000 ???????? ??? 00", c.addi4spn, IW, { di = itype(imm, 2, 0b000, rd, 0b0010011); }); // res, uimm=0
-  INSTPAT("001 ???????? ??? 00", c.fld, L, { di = 0; });                                         // rv32/64
+  INSTPAT("001 ???????? ??? 00", c.fld, L, { di = itype(imm_ld, rs1, 0b011, rd, 0b0000111); }); // rv32/64 with D
   INSTPAT("001 ???????? ??? 00", c.lq, L, { di = 0; });                                          // rv128
   INSTPAT("010 ???????? ??? 00", c.lw, L, { di = itype(imm, rs1, 0b010, rd, 0b0000011); });
 #ifdef CONFIG_RV64
   INSTPAT("011 ???????? ??? 00", c.ld, L, { di = itype(imm_ld, rs1, 0b011, rd, 0b0000011); }); // rv64
 #else
-  INSTPAT("011 ???????? ??? 00", c.flw, L, { di = 0; }); // rv32
+  INSTPAT("011 ???????? ??? 00", c.flw, L, { di = itype(imm, rs1, 0b010, rd, 0b0000111); }); // rv32 with F
 #endif
   INSTPAT("011 ???????? ??? 00", c.ld, L, { di = 0; }); // rv64/128 fallback
   // Zcb: byte/halfword compressed loads/stores (Q0, funct3=100)
@@ -116,13 +114,13 @@ uint32_t decompress_c(uint32_t inst)
     di = stype(uimm, rs2, rs1, 0b001, 0b0100011);
   });
   INSTPAT("100 ???????? ??? 00", c.rev, N, { di = 0; }); // Reserved (Q0 funct3=100 fallback)
-  INSTPAT("101 ???????? ??? 00", c.fsd, S, { di = 0; }); // rv32/64
+  INSTPAT("101 ???????? ??? 00", c.fsd, S, { di = stype(imm_ld, rs2, rs1, 0b011, 0b0100111); }); // rv32/64 with D
   INSTPAT("101 ???????? ??? 00", c.sq, S, { di = 0; });  // rv128
   INSTPAT("110 ???????? ??? 00", c.sw, S, { di = stype(imm, rs2, rs1, 0b010, 0b0100011); });
 #ifdef CONFIG_RV64
   INSTPAT("111 ???????? ??? 00", c.sd, S, { di = stype(imm_ld, rs2, rs1, 0b011, 0b0100011); }); // rv64
 #else
-  INSTPAT("111 ???????? ??? 00", c.fsw, S, { di = 0; }); // rv32
+  INSTPAT("111 ???????? ??? 00", c.fsw, S, { di = stype(imm, rs2, rs1, 0b010, 0b0100111); }); // rv32 with F
 #endif
   INSTPAT("111 ???????? ??? 00", c.sd, S, { di = 0; }); // rv64/128 fallback
   // Instruction listing for RVC, Quadrant 1
@@ -197,13 +195,13 @@ uint32_t decompress_c(uint32_t inst)
   // Instruction listing for RVC, Quadrant 2
   INSTPAT("000 ???????? ??? 10", c.slli, I, { di = itype(shamt, rd, 0b001, rd, 0b0010011); });      // shamt is zero-extended (not sign-extended like ci_imm); hint,rd=0
   INSTPAT("000 0??????? 000 10", c.slli64, I, { di = 0; });                                         // rv128;rv32/64 hint;hint,rd=0
-  INSTPAT("001 ???????? ??? 10", c.fldsp, I, { di = 0; });                                          // rv32/64
+  INSTPAT("001 ???????? ??? 10", c.fldsp, I, { di = itype(offset_ldsp, 2, 0b011, rd, 0b0000111); }); // rv32/64 with D
   INSTPAT("001 ???????? ??? 10", c.lqsp, I, { di = 0; });                                           // rv128;res,rd=0
   INSTPAT("010 ???????? ??? 10", c.lwsp, I, { di = itype(offset_lwsp, 2, 0b010, rd, 0b0000011); }); // res,rd=0
 #ifdef CONFIG_RV64
   INSTPAT("011 ???????? ??? 10", c.ldsp, I, { di = itype(offset_ldsp, 2, 0b011, rd, 0b0000011); }); // rv64
 #else
-  INSTPAT("011 ???????? ??? 10", c.flwsp, I, { di = 0; }); // rv32
+  INSTPAT("011 ???????? ??? 10", c.flwsp, I, { di = itype(offset_lwsp, 2, 0b010, rd, 0b0000111); }); // rv32 with F
 #endif
   INSTPAT("011 ???????? ??? 10", c.ldsp, I, { di = 0; });                                                                            // rv128 fallback;res,rd=0
   INSTPAT("100 0?????00 000 10", c.jr, R, { di = rtype(0b0000000, 0, rs1, 0b000, 0, 0b1100111); });                                  // res,rs1=0
@@ -211,13 +209,13 @@ uint32_t decompress_c(uint32_t inst)
   INSTPAT("100 10000000 000 10", c.ebreak, R, { di = rtype(0b0000000, 1, 0, 0b000, 0, 0b1110011); });
   INSTPAT("100 1?????00 000 10", c.jalr, R, { di = rtype(0b0000000, 0, rs1, 0b000, 1, 0b1100111); });
   INSTPAT("100 1??????? ??? 10", c.add, R, { di = (rd == 0) ? nop() : rtype(0b0000000, rs2, rd, 0b000, rd, 0b0110011); }); // hint,rd=0
-  INSTPAT("101 ???????? ??? 10", c.fsdsp, SS, { di = stype(imm, rs2, 2, 0b010, 0b0100011); });                             // rv32/64
+  INSTPAT("101 ???????? ??? 10", c.fsdsp, SS, { di = stype(imm_sd_sp, rs2, 2, 0b011, 0b0100111); }); // rv32/64 with D
   INSTPAT("101 ???????? ??? 10", c.sqsp, SS, { di = stype(imm, rs2, 2, 0b010, 0b0100011); });                              // rv128
   INSTPAT("110 ???????? ??? 10", c.swsp, SS, { di = stype(imm, rs2, 2, 0b010, 0b0100011); });
 #ifdef CONFIG_RV64
   INSTPAT("111 ???????? ??? 10", c.sdsp, SS, { di = stype(imm_sd_sp, rs2, 2, 0b011, 0b0100011); }); // rv64
 #else
-  INSTPAT("111 ???????? ??? 10", c.fswsp, SS, { di = stype(imm, rs2, 2, 0b010, 0b0100011); }); // rv32
+  INSTPAT("111 ???????? ??? 10", c.fswsp, SS, { di = stype(imm, rs2, 2, 0b010, 0b0100111); }); // rv32 with F
 #endif
   INSTPAT("111 ???????? ??? 10", c.sdsp, SS, { di = stype(imm, rs2, 2, 0b010, 0b0100011); }); // rv128 fallback
 

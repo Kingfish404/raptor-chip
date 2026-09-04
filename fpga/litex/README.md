@@ -156,6 +156,16 @@ make fpga-console FPGA_BOARD=mlk_cu08_ku15p UART_PORT=/dev/ttyUSB1
 make linux-fpga-rv32-e2e FPGA_BOARD=mlk_cu08_ku15p UART_PORT=/dev/ttyUSB1
 ```
 
+The default Linux command line enters `/bin/sh` directly. This is the preferred
+bring-up path: it avoids spending tens of minutes in Buildroot service scripts
+before a serial prompt appears. To exercise the complete init sequence instead,
+including networking and SSH host-key generation, add `LINUX_FPGA_INIT=full`:
+
+```bash
+make linux-fpga-rv32-e2e FPGA_BOARD=mlk_cu08_ku15p \
+    UART_PORT=/dev/ttyUSB1 LINUX_FPGA_INIT=full
+```
+
 The H13 platform uses the board-specific clock, UART, SD, and DDR pinout while
 reusing the verified KU15P MIG and Vivado load/flash flow. H13 FPGA builds
 always use the external 4 GB DDR4 profile (`VARIANT=linux32`, `WITH_MIG=1`,
@@ -225,7 +235,7 @@ The convenience targets are split by iteration cost:
 
 | Target                                                  | Operations                                                  | Use when                                                 |
 | ------------------------------------------------------- | ----------------------------------------------------------- | -------------------------------------------------------- |
-| `linux-fpga-rv32-upload` / `linux-fpga-rv64-upload`     | Build the selected contiguous Linux image, then upload it   | Debugging without using the SD card                      |
+| `linux-fpga-rv32-upload` / `linux-fpga-rv64-upload`     | Upload payload, seeded DTB, and stage0 without zero gaps    | Debugging without using the SD card                      |
 | `linux-fpga-rv32-run` / `linux-fpga-rv64-run`           | Load the matching timing-clean bitstream, then upload Linux | The FPGA may contain another bitstream                   |
 | `linux-fpga-rv32-e2e` / `linux-fpga-rv64-e2e`           | Build, load, then upload the matching Linux image           | Reproducing the complete boot flow                       |
 | `opensbi-fpga-rv32-upload` / `opensbi-fpga-rv64-upload` | Upload standalone OpenSBI only                              | Iterating OpenSBI or DTB without touching the FPGA image |
@@ -255,12 +265,48 @@ make fpga-img-rv64 RAPT_CONFIG=default
 sha256sum build/firmware/linux-fpga/rv64/linux-fpga.img
 ```
 
+On its first image build, the development flow obtains 32 bytes from the host
+CSPRNG and stores them as `build/firmware/linux-fpga/rv32/rng-seed.bin`. Image
+assembly replaces the all-zero `/chosen/rng-seed` template with that value.
+Linux trusts and consumes the seed during early boot, so a full Buildroot boot
+does not stop indefinitely in `seed_rng()`/`getrandom()` before
+`ssh-keygen -A`. The seed itself is never printed; the build log only prints a
+short SHA-256 fingerprint. Delete `rng-seed.bin` and rebuild to rotate it.
+
+For convenient FPGA development, repeated SD boots reuse this build-directory
+seed. This is sufficient to avoid CRNG startup stalls, but it is not a
+production entropy design: cloned images can produce related or repeated
+secrets. A deployed standalone design needs a reviewed FPGA hardware RNG or
+persistent seed rotation. Never commit or hard-code the generated seed in DTS.
+
+The serial-upload target uses LiteXTerm's multi-image mode and transfers only
+the populated regions (payload, seeded DTB, and stage0). It deliberately skips
+the zero-filled address gaps required by the contiguous SD image, reducing the
+RV32 transfer by about 16 MiB. Passing an explicit `BIN=...` keeps the generic
+single-region upload behavior.
+
 LiteX BIOS reads this image from `boot.bin` in the root of a FAT32 SD-card
 partition. The bundled FatFs configuration has exFAT support disabled
 (`FF_FS_EXFAT=0`), so exFAT and NTFS partitions are not accepted even when the
 host can mount them normally. Use FAT32; do not rely on the exFAT format commonly
 shipped on 64 GB and larger cards. This is an SD-card file copy, not a QSPI flash
-operation. Before inserting the card, run:
+operation.
+
+For the Linux FPGA profile, the BIOS bitstream also embeds the current stage0
+and generated DTB. After `sdcardboot` copies an older contiguous `boot.bin` to
+DDR, BIOS replaces those two small regions before jumping; the large
+OpenSBI/Linux payload is still read from the unchanged SD card. BIOS also
+patches one 4-byte instruction in the loaded release OpenSBI header so its FDT
+relocation uses `0x83f00000`, outside the large Linux Image, rather than the
+overlapping legacy `0x82200000` address. It checks the expected instruction
+sequence and refuses to boot if the SD OpenSBI header does not match. This permits bootargs,
+board-model, and development RNG-seed changes without rewriting the card. The
+embedded stage0 still has to match the payload layout and size on the card;
+replace `boot.bin` when changing to a differently sized Linux payload.
+Changing the embedded stage0, DTB, seed, or OpenSBI patch requires rebuilding
+and reloading the BIOS bitstream; subsequent boots use the fast SD path.
+
+Before inserting the card, run:
 
 ```bash
 lsblk -p -o NAME,SIZE,FSTYPE,LABEL,MOUNTPOINTS,RM,MODEL,TRAN
@@ -331,20 +377,37 @@ sudo fsck.fat -n /dev/sdX1
 ```
 
 Insert the card into the KU15P board, load its Linux bitstream, and open the
-console (`make fpga-load`, `make fpga-console`). At the `litex>` prompt, run
-`sdcardboot`. AXAU15 MIG and BIOS memory validation pass; end-to-end SD Linux
-boot remains pending.
+console (`make linux-fpga-rv32-load FPGA_BOARD=mlk_cu08_ku15p`, then
+`make fpga-console FPGA_BOARD=mlk_cu08_ku15p UART_PORT=/dev/ttyUSB1`). BIOS
+normally tries SD automatically after serialboot times out; at a `litex>` prompt,
+run `sdcardboot` manually. The KU15P flow is verified through an interactive
+BusyBox root shell. Other boards still need their own end-to-end validation.
 
 Key conventions:
 - The bitstream knobs `BOOT_MODE=bios INTEGRATED_MAIN_RAM_SIZE=0 WITH_MIG=1` are all auto-set by the Linux FPGA profile (`VARIANT=linux32`). The board-specific MIG IP maps external DDR4 at `0x80000000`.
-- Linux can boot from the SD card with the BIOS `sdcardboot` command. The SD controller is present by default in both KU15P and AXAU15 Linux builds. Automatic SD boot is disabled by default: after serialboot times out, BIOS enters the `litex>` console. Use `sdcardboot` for an inserted card or `boot <address>` for an image already in memory. Set `SDCARD_BOOT=1` at build time to restore automatic SD boot. A small compatibility shim supplies this `SDCARD_BOOT_DISABLE` behavior for LiteX revisions that do not yet implement it and becomes a no-op once upstream support is present.
-- Default `fpga-upload VARIANT=linux32` is a serial fallback: it uploads the contiguous `linux-fpga.img` at `0x80000000` with `litex_term`, using the same path as RaptOS and other firmware images.
+- The SD controller is present by default in KU15P and AXAU15 Linux builds. LiteX BIOS follows its normal boot sequence, including SDCard boot when a card is available; the `sdcardboot` command can also start it manually from the `litex>` console.
+- Default `fpga-upload VARIANT=linux32` is a serial fallback: it uses LiteXTerm multi-image mode to upload only payload, seeded DTB, and stage0, avoiding the zero-filled holes in the contiguous SD image.
 - KU15P UART and SFL are fixed at 115200 baud because the board's host-to-FPGA path is not reliable at higher rates.
 - Payload-only iteration: once the bitstream is loaded, just re-run the matching upload target (`make fpga-upload VARIANT=linux32`, `make coremark-fpga VARIANT=linux32`, …) — no re-synthesis needed.
 - Raw `BIN` uploads (`make fpga-upload VARIANT=linux32 BIN=…`) carry no OpenSBI args/DTB/relocation; the image must bring its own LiteX MMIO runtime.
 - Hardware-changing knobs require a new bitstream; `make fpga VARIANT=linux32` (build + load) rebuilds first, while `make fpga-load VARIANT=linux32` loads the existing bitstream without rebuilding.
 
-Status: the `default` RV32IMAC preset routes, passes the BIOS DDR test, boots OpenSBI and Linux from SD, and reaches the interactive `tinysh#` initramfs shell. `make coremark-fpga VARIANT=linux32` and the directed privileged/MMU probes also pass from MIG DDR. Do not treat SFL upload completion alone as a successful Linux boot; the end-to-end success marker is an interactive `tinysh#` prompt.
+Status: the `default` RV32GC-capable preset routes, passes the BIOS DDR test,
+boots OpenSBI and Linux from an unchanged legacy SD image, initializes the CRNG
+from the BIOS-embedded DTB at kernel time zero, and reaches the interactive
+BusyBox `~ #` root shell with the default `LINUX_FPGA_INIT=shell`. Use
+`LINUX_FPGA_INIT=full` when Buildroot services are required. Do not treat SFL or
+SD copy completion alone as a successful Linux boot; the end-to-end success
+marker is an interactive shell prompt.
+
+Verified on `mlk_cu08_ku15p` at 50 MHz with the legacy SD Linux 6.18.39:
+OpenSBI passes `Next Arg1=0x83f00000`, `/bin/sh` starts at kernel time 583.5 s,
+`entropy_avail` reads 256, and the live DT model and bootargs remain intact
+after initmem is freed. Long silent intervals during this roughly ten-minute
+kernel startup are still expected; direct-shell mode skips Buildroot service
+startup and SSH host-key generation. The tested bitstream meets timing with
+WNS +0.081 ns and WHS +0.005 ns. JTAG loading is volatile; after power loss,
+reload the bitstream before using the same unchanged SD card.
 
 ## Directory Structure
 

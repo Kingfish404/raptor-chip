@@ -13,6 +13,8 @@ include $(APP_HOME)/common.mk
 SHELL := /bin/bash
 
 ARGS ?= -b -n## Simulator args for sim/NEMU run targets (-b: batch, -n: no wave)
+PK_BUILD_PROFILE ?=## Optional isolated riscv-pk build profile
+PK_PROFILE_SUFFIX := $(if $(strip $(PK_BUILD_PROFILE)),-$(strip $(PK_BUILD_PROFILE)),)
 MAX_INST ?=## Optional maximum instruction limit for tinyos cli-nsim/cli-nemu
 TIMEOUT ?=## Optional wall-clock timeout in seconds for tinyos cli-nsim
 USER_ELF ?=## ELF binary for pk-run
@@ -197,17 +199,20 @@ _log_stem = $(basename $(notdir $(1)))
 
 # Run a single ELF: $(call _pk_run_with,<pk-target>,<elf-path>)
 define _pk_run_with
-	$(if $(filter pk-run,$(1)),mkdir -p $(APP_LOG_DIR) && set -o pipefail && $(MAKE) $(Q) -C $(APP_HOME)/pk $(1) USER_ELF=$(2) 2>&1 | tee "$(APP_LOG_DIR)/$(call _log_stem,$(2)).log",$(MAKE) $(Q) -C $(APP_HOME)/pk $(1) USER_ELF=$(2))
+	+$(if $(filter pk-run,$(1)),mkdir -p $(APP_LOG_DIR) && set -o pipefail && $(MAKE) $(Q) -C $(APP_HOME)/pk $(1) USER_ELF=$(2) 2>&1 | tee "$(APP_LOG_DIR)/$(call _log_stem,$(2)).log",$(MAKE) $(Q) -C $(APP_HOME)/pk $(1) USER_ELF=$(2))
 endef
 
 # Run a list of ELFs: $(call _pk_run_suite_with,<suite-name>,<backend>,<pk-target>,<elf-dir>,<test-list>)
 define _pk_run_suite_with
 	@echo "=== Running $(1) ($(2)) ==="
-	@$(if $(filter npc,$(2)),mkdir -p $(APP_LOG_DIR);)for t in $(5); do \
+	+@fail=0; $(if $(filter npc,$(2)),mkdir -p $(APP_LOG_DIR);)for t in $(5); do \
 		echo "--- $$t ---"; \
 		$(if $(filter npc,$(2)),set -o pipefail && $(MAKE) $(Q) -C $(APP_HOME)/pk $(3) USER_ELF=$(4)/$$t.elf 2>&1 | tee "$(APP_LOG_DIR)/$$t.log",$(MAKE) $(Q) -C $(APP_HOME)/pk $(3) USER_ELF=$(4)/$$t.elf) \
-			|| true; \
-	done
+			|| fail=1; \
+	done; \
+	if [ $$fail -ne 0 ]; then \
+		echo "=== $(1): FAILURES ==="; exit 1; \
+	fi
 	@echo "=== $(1) complete ==="
 endef
 
@@ -235,7 +240,7 @@ EMBENCH_BENCHMARKS := aha-mont64 crc32 depthconv edn huffbench matmult-int \
 					  wikisort xgboost
 
 EMBENCH_JOBS ?= $(NPROC)## Parallel NPC/sim instances for embench-sim
-PK_BUILD     = $(APP_HOME)/build/pk-build-rv$(XLEN)
+PK_BUILD     = $(APP_HOME)/build/pk-build-rv$(XLEN)$(PK_PROFILE_SUFFIX)
 EMBENCH_REF_JSON ?= $(RAPTOR_HOME)/.github/data/embench-m4-ref.json## Cortex-M4 Embench reference data
 EMBENCH_BARE_BUILD_DIR = $(APP_HOME)/build/rv$(XLEN)/embench-baremetal
 EMBENCH_BARE_LOG_DIR = $(APP_LOG_DIR)/embench-baremetal-rv$(XLEN)
@@ -675,16 +680,19 @@ isa-tests-nemu: isa-tests-build ## Build and run all ISA tests on NEMU via pk
 # ============================================================================
 # Memory subsystem tests
 # ============================================================================
+MEMORY_BUILD_SUFFIX := $(if $(strip $(MEMTEST_WORDS)),-words$(MEMTEST_WORDS),)
+MEMORY_BUILD_DIR := $(APP_HOME)/build/rv$(XLEN)/tests/memory$(MEMORY_BUILD_SUFFIX)
+
 memory-tests-build: ## Build memory tests
-	@$(MAKE) $(Q) -C $(APP_HOME)/tests/memory build
+	@$(MAKE) $(Q) -C $(APP_HOME)/tests/memory build MEMTEST_WORDS="$(MEMTEST_WORDS)"
 
 MEMORY_TESTS := load_store memory_pattern stack_test memtest
 
 memory-tests-sim: memory-tests-build ## Build and run all memory tests on NPC/sim via pk
-	$(call _pk_run_suite_with,Memory tests,npc,pk-run,$(APP_HOME)/build/rv$(XLEN)/tests/memory,$(MEMORY_TESTS))
+	$(call _pk_run_suite_with,Memory tests,npc,pk-run,$(MEMORY_BUILD_DIR),$(MEMORY_TESTS))
 
 memory-tests-nemu: memory-tests-build ## Build and run all memory tests on NEMU via pk
-	$(call _pk_run_suite_with,Memory tests,nemu,nemu-run,$(APP_HOME)/build/rv$(XLEN)/tests/memory,$(MEMORY_TESTS))
+	$(call _pk_run_suite_with,Memory tests,nemu,nemu-run,$(MEMORY_BUILD_DIR),$(MEMORY_TESTS))
 
 # ============================================================================
 # Algorithm tests
@@ -703,23 +711,30 @@ algo-tests-nemu: algo-tests-build ## Build and run all algorithm tests on NEMU v
 # ============================================================================
 # Security / side-channel tests
 # ============================================================================
+SECURITY_SIM_FAST ?= 0
+SECURITY_BUILD_SUFFIX := $(if $(filter 1,$(SECURITY_SIM_FAST)),-sim-fast,)
+SECURITY_BUILD_DIR := $(APP_HOME)/build/rv$(XLEN)/tests/security$(SECURITY_BUILD_SUFFIX)
+
 security-tests-build: ## Build security / side-channel tests
-	@$(MAKE) $(Q) -C $(APP_HOME)/tests/security build
+	@$(MAKE) $(Q) -C $(APP_HOME)/tests/security build SECURITY_SIM_FAST=$(SECURITY_SIM_FAST)
 
 SECURITY_TESTS := cache-timing fence-timing bpu-collision \
                   spectre-v1 spectre-v2 spec-store-bypass
 
 security-tests-sim: security-tests-build ## Build and run all security tests on NPC/sim via pk
-	$(call _pk_run_suite_with,Security tests,npc,pk-run,$(APP_HOME)/build/rv$(XLEN)/tests/security,$(SECURITY_TESTS))
+	$(call _pk_run_suite_with,Security tests,npc,pk-run,$(SECURITY_BUILD_DIR),$(SECURITY_TESTS))
 
 security-tests-nemu: security-tests-build ## Build and run all security tests on NEMU via pk
-	$(call _pk_run_suite_with,Security tests,nemu,nemu-run,$(APP_HOME)/build/rv$(XLEN)/tests/security,$(SECURITY_TESTS))
+	$(call _pk_run_suite_with,Security tests,nemu,nemu-run,$(SECURITY_BUILD_DIR),$(SECURITY_TESTS))
 
 # ============================================================================
 # All tests
 # ============================================================================
 tests-build: hello-build isa-tests-build memory-tests-build algo-tests-build security-tests-build ## Build all tests
 
+# Every pk-run relinks the same payload.  Serialize aggregate suites locally
+# instead of forcing `-j1` in a recursive caller (which resets its jobserver).
+.NOTPARALLEL: tests-sim tests-nemu
 tests-sim: hello-sim isa-tests-sim memory-tests-sim algo-tests-sim security-tests-sim ## Run all tests on NPC/sim via pk
 
 tests-nemu: hello-nemu isa-tests-nemu memory-tests-nemu algo-tests-nemu security-tests-nemu ## Run all tests on NEMU via pk

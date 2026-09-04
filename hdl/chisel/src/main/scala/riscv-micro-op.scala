@@ -88,6 +88,8 @@ trait MicroOP {
   def LSU_SH_ = "000011" // alu_op to axi wstrb
   def LSU_SW_ = "001111" // alu_op to axi wstrb
   def LSU_SD_ = "011111" // alu_op to axi wstrb (8 bytes)
+  def LSU_CBO_ZERO = "010000" // internal SQ expansion marker
+  def LSU_CBO_MGMT = "010001" // checked CBO.INVAL/CLEAN/FLUSH marker
 
   // Keep these values aligned with hdl/include/rapt.svh.
   def FP_NONE  = "000000"
@@ -153,6 +155,7 @@ trait MicroOP {
   def FP_FDIV_D = "111100"
   def FP_FSQRT_S = "111101"
   def FP_FSQRT_D = "111110"
+  def FP_ZFHMIN = "111111"
 
   def ATO_LR__ = "000000"
   def ATO_SC__ = "000001"

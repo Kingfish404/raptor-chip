@@ -29,6 +29,8 @@ void init_vga();
 void init_i8042();
 void init_audio();
 void init_disk();
+void init_net();
+void init_rng();
 void init_sdcard();
 void init_alarm();
 
@@ -39,6 +41,10 @@ void vga_update_screen();
 
 #ifdef CONFIG_SERIAL_INPUT_FIFO
 void serial_poll_stdin(void);
+#endif
+
+#ifdef CONFIG_HAS_NET
+void virtio_net_poll(void);
 #endif
 
 void device_update()
@@ -60,6 +66,10 @@ void device_update()
 
 #ifdef CONFIG_SERIAL_INPUT_FIFO
   serial_poll_stdin();
+#endif
+
+#ifdef CONFIG_HAS_NET
+  virtio_net_poll();
 #endif
 
 #if !defined(CONFIG_TARGET_AM) && defined(CONFIG_VGA_SHOW_SCREEN)
@@ -111,6 +121,8 @@ void init_device()
   IFDEF(CONFIG_HAS_KEYBOARD, init_i8042());
   IFDEF(CONFIG_HAS_AUDIO, init_audio());
   IFDEF(CONFIG_HAS_DISK, init_disk());
+  IFDEF(CONFIG_HAS_NET, init_net());
+  IFDEF(CONFIG_HAS_RNG, init_rng());
   IFDEF(CONFIG_HAS_SDCARD, init_sdcard());
 
 #ifndef CONFIG_TARGET_SHARE

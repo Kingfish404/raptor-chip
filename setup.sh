@@ -12,7 +12,7 @@ brew_dep_install() {
   brew install \
     yosys bazelisk ninja ncurses readline flex bison \
     riscv64-elf-binutils riscv64-elf-gcc open-ocd \
-    dtc cmake automake libevent json-c
+    dtc cmake automake libevent json-c libslirp
   if [ "$(uname)" == "Darwin" ]; then
     brew install sdl2 sdl2_image sdl2_ttf
   fi
@@ -24,7 +24,7 @@ apt_install() {
     libsdl2-dev libsdl2-image-dev libsdl2-ttf-dev libreadline-dev libncurses5-dev \
     tcl-dev tcl-tclreadline libeigen3-dev \
     swig autotools-dev libncursesw5-dev device-tree-compiler xxd \
-    libevent-dev libjson-c-dev
+    libevent-dev libjson-c-dev libslirp-dev
 }
 
 pacman_install() {
@@ -44,7 +44,7 @@ pacman_install() {
     riscv64-linux-gnu-gcc \
     sdl2-compat sdl2_image sdl2_ttf \
     readline ncurses \
-    tcl eigen swig \
+    tcl eigen swig libslirp \
     autoconf automake
 
   # xxd is usually provided by vim/gvim; only pull tinyxxd if missing

@@ -9,12 +9,12 @@ DUTS     := $(ROOT)/hdl/backend/feu/fpu/rapt_fpu_convert_widen.sv \
 N        ?= 200000
 
 VERILATOR ?= verilator
-VFLAGS := --cc --exe --build -j 8 -Wno-fatal -Wno-lint -Wno-WIDTH \
+VFLAGS := --cc --exe --build -Wno-fatal -Wno-lint -Wno-WIDTH \
           -CFLAGS -frounding-math -I$(HDL_INC) -I$(CONFIG) \
           --top-module rapt_fpu_convert_tb
 
 obj_dir/tb: $(DUTS) rapt_fpu_convert_tb.sv tb_host_diff.cpp
-	$(VERILATOR) $(VFLAGS) $(DUTS) rapt_fpu_convert_tb.sv tb_host_diff.cpp -o tb
+	+$(VERILATOR) $(VFLAGS) $(DUTS) rapt_fpu_convert_tb.sv tb_host_diff.cpp -o tb
 
 run: obj_dir/tb
 	N=$(N) obj_dir/tb

@@ -106,6 +106,15 @@ void fp_load_d(Decode *s, int rd, vaddr_t addr)
     }
 }
 
+void fp_load_h(Decode *s, int rd, vaddr_t addr)
+{
+    if (fp_access(s, false))
+    {
+        fpr(rd) = riscv_fp_box_h((uint16_t)vaddr_read(addr, 2));
+        fp_mark_dirty();
+    }
+}
+
 void fp_store_s(Decode *s, vaddr_t addr, int rs2)
 {
     if (fp_access(s, false))
@@ -116,6 +125,12 @@ void fp_store_d(Decode *s, vaddr_t addr, int rs2)
 {
     if (fp_access(s, true))
         fp_write_d_mem(addr, fpr(rs2));
+}
+
+void fp_store_h(Decode *s, vaddr_t addr, int rs2)
+{
+    if (fp_access(s, false))
+        vaddr_write(addr, 2, riscv_fp_h_bits(fpr(rs2)));
 }
 
 void fp_move_to_s(Decode *s, int rd, word_t value)
@@ -146,6 +161,21 @@ void fp_move_from_d(Decode *s, int rd, int rs1)
 {
     if (fp_access(s, true))
         R(rd) = fpr(rs1);
+}
+
+void fp_move_to_h(Decode *s, int rd, word_t value)
+{
+    if (fp_access(s, false))
+    {
+        fpr(rd) = riscv_fp_box_h((uint16_t)value);
+        fp_mark_dirty();
+    }
+}
+
+void fp_move_from_h(Decode *s, int rd, int rs1)
+{
+    if (fp_access(s, false))
+        R(rd) = SEXT(riscv_fp_h_bits(fpr(rs1)), 16);
 }
 
 void fp_sign_inject_s(Decode *s, int rd, int rs1, int rs2, unsigned mode)
@@ -368,6 +398,53 @@ void fp_exec_convert_s_to_d(Decode *s, int rd, int rs1)
     {
         uint32_t flags = 0;
         fpr(rd) = riscv_fp_convert_s_to_d(riscv_fp_read_s(fpr(rs1)), fp_rm_resolve(rm), &flags);
+        fp_merge_flags(flags);
+    }
+}
+
+void fp_exec_convert_h_to_s(Decode *s, int rd, int rs1)
+{
+    unsigned rm;
+    if (fp_prepare(s, false, &rm))
+    {
+        uint32_t flags = 0;
+        fpr(rd) = riscv_fp_box_s(riscv_fp_convert_h_to_s(
+            riscv_fp_read_h(fpr(rs1)), &flags));
+        fp_merge_flags(flags);
+    }
+}
+
+void fp_exec_convert_h_to_d(Decode *s, int rd, int rs1)
+{
+    unsigned rm;
+    if (fp_prepare(s, true, &rm))
+    {
+        uint32_t flags = 0;
+        fpr(rd) = riscv_fp_convert_h_to_d(riscv_fp_read_h(fpr(rs1)), &flags);
+        fp_merge_flags(flags);
+    }
+}
+
+void fp_exec_convert_s_to_h(Decode *s, int rd, int rs1)
+{
+    unsigned rm;
+    if (fp_prepare(s, false, &rm))
+    {
+        uint32_t flags = 0;
+        fpr(rd) = riscv_fp_box_h(riscv_fp_convert_s_to_h(
+            riscv_fp_read_s(fpr(rs1)), fp_rm_resolve(rm), &flags));
+        fp_merge_flags(flags);
+    }
+}
+
+void fp_exec_convert_d_to_h(Decode *s, int rd, int rs1)
+{
+    unsigned rm;
+    if (fp_prepare(s, true, &rm))
+    {
+        uint32_t flags = 0;
+        fpr(rd) = riscv_fp_box_h(riscv_fp_convert_d_to_h(
+            fpr(rs1), fp_rm_resolve(rm), &flags));
         fp_merge_flags(flags);
     }
 }

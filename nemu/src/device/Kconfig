@@ -175,6 +175,48 @@ config DISK_IMG_PATH
   default ""
 endif # HAS_DISK
 
+menuconfig HAS_NET
+  bool "Enable virtio network with user-mode NAT"
+  depends on !TARGET_AM
+  default n
+  help
+    Provide a virtio-mmio network adapter backed by libslirp. The guest gets
+    an address from the built-in DHCP server and can reach the host network
+    without root privileges, a TAP device, or host-side bridge setup.
+
+if HAS_NET
+config NET_MMIO
+  hex "MMIO address of the virtio network adapter"
+  default 0x10002000
+
+config NET_PLIC_IRQ
+  int "PLIC interrupt source ID for the virtio network adapter"
+  default 2
+  help
+    Must match the interrupts cell of the virtio,mmio node in the guest DTB.
+endif # HAS_NET
+
+menuconfig HAS_RNG
+  bool "Enable virtio random number generator"
+  depends on !TARGET_AM
+  default n
+  help
+    Provide a virtio-mmio entropy device backed by the host operating
+    system's cryptographically secure random number generator.
+
+if HAS_RNG
+config RNG_MMIO
+  hex "MMIO address of the virtio random number generator"
+  default 0x10003000
+
+config RNG_PLIC_IRQ
+  int "PLIC interrupt source ID for the virtio random number generator"
+  default 3
+  help
+    Must match the interrupts cell of the virtio,mmio RNG node in the guest
+    DTB and must not collide with another emulated device.
+endif # HAS_RNG
+
 menuconfig HAS_SDCARD
   bool "Enable sdcard"
   default n

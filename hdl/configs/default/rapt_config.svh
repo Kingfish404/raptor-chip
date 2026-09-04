@@ -125,6 +125,11 @@
 `define RAPT_L1D_LEN 4
 `define RAPT_L1D_N_WAYS 2
 
+// Fully-associative translation caches.  The data-side arrays are replicated
+// for simultaneous load/store lookup and receive the same fills.
+`define RAPT_ITLB_ENTRIES 16
+`define RAPT_DTLB_ENTRIES 16
+
 // L2 unified cache (between rapt_bus and io_master).
 // `define RAPT_L2_EN  // disabled to isolate STA bottleneck
 // 16 KiB direct-mapped (256 sets x 64B).  Multi-way support reserved.

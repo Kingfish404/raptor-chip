@@ -9,12 +9,17 @@
  */
 #include "bench.h"
 
-#define PROBE_ARRAY_SIZE  (256 * PAGE_SIZE)
+#ifndef SECURITY_PROBE_STRIDE
+#define SECURITY_PROBE_STRIDE PAGE_SIZE
+#endif
+#define PROBE_ARRAY_SIZE  (256 * SECURITY_PROBE_STRIDE)
 
 static uint8_t probe_array[PROBE_ARRAY_SIZE]
     __attribute__((aligned(PAGE_SIZE)));
 
-#define ROUNDS 64
+#ifndef SECURITY_CACHE_ROUNDS
+#define SECURITY_CACHE_ROUNDS 64
+#endif
 
 int main(void) {
   /* Initialize probe array to ensure pages are mapped */
@@ -25,9 +30,9 @@ int main(void) {
 
   /* ---- Measure cache miss (cold access) ---- */
   uint64_t miss_total = 0;
-  for (int r = 0; r < ROUNDS; r++) {
+  for (int r = 0; r < SECURITY_CACHE_ROUNDS; r++) {
     /* Access a different page-aligned slot each round to avoid prefetch */
-    int idx = ((r * 37) % 256) * PAGE_SIZE;
+    int idx = ((r * 37) % 256) * SECURITY_PROBE_STRIDE;
     fence();
     uint32_t t;
     TIMED_ACCESS(&probe_array[idx], t);
@@ -45,14 +50,14 @@ int main(void) {
   fence();
 
   uint64_t hit_total = 0;
-  for (int r = 0; r < ROUNDS; r++) {
+  for (int r = 0; r < SECURITY_CACHE_ROUNDS; r++) {
     uint32_t t;
     TIMED_ACCESS(&probe_array[0], t);
     hit_total += t;
   }
 
-  uint32_t avg_hit  = (uint32_t)(hit_total  / ROUNDS);
-  uint32_t avg_miss = (uint32_t)(miss_total / ROUNDS);
+  uint32_t avg_hit  = (uint32_t)(hit_total  / SECURITY_CACHE_ROUNDS);
+  uint32_t avg_miss = (uint32_t)(miss_total / SECURITY_CACHE_ROUNDS);
   report("cache-timing", avg_hit, avg_miss);
 
   /* Sanity: cache hit should be measurably faster than cache miss */

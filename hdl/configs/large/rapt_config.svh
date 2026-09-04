@@ -87,6 +87,9 @@
 `define RAPT_L1D_LEN 6
 `define RAPT_L1D_N_WAYS 2
 
+`define RAPT_ITLB_ENTRIES 32
+`define RAPT_DTLB_ENTRIES 32
+
 // L2 unified cache: 64B line * 2048 sets * 1 way = 128 KiB
 `define RAPT_L2_EN
 `define RAPT_L2_LINE_LEN $clog2(`RAPT_CACHE_LINE_BYTES / (`RAPT_XLEN / 8))

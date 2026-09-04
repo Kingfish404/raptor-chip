@@ -125,15 +125,89 @@ module tb_csr_sret_roundtrip;
     check_csr_zero(`RAPT_CSR_MIE____, "mie");
     check_csr_zero(`RAPT_CSR_MIP____, "mip");
 
+`ifdef RAPT_RV64
+    // Sv39 ASIDLEN is discoverable through satp WARL behavior.  Raptor's TLB
+    // carries ASID[8:0], so a write of all 16 ASID bits must read back with
+    // ASID[15:9]=0 instead of advertising bits the TLB ignores.
+    write_csr(`RAPT_CSR_SATP___,
+              (64'h8 << 60) | (64'hffff << 44) | 64'h0000_0000_0001_2345);
+      exu_csr.raddr = `RAPT_CSR_SATP___;
+      #1;
+      check(exu_csr.rdata[63:60] == 4'd8, "satp lost supported Sv39 MODE");
+      check(exu_csr.rdata[59:53] == 7'd0,
+            "satp advertised unimplemented high ASID bits");
+      check(exu_csr.rdata[52:44] == 9'h1ff,
+            "satp did not retain all nine implemented ASID bits");
+      check(exu_csr.rdata[43:0] == 44'h0000_0001_2345,
+            "satp ASID WARL mask corrupted the root PPN");
+`endif
+
     // Linux restores senvcfg on every context switch when Zicbom is present.
     write_csr(`RAPT_CSR_SENVCFG, '1);
       exu_csr.raddr = `RAPT_CSR_SENVCFG;
       #1;
-      check(exu_csr.rdata == XLEN'('h70),
-        "senvcfg did not apply the Zicbom WARL mask");
+      check(exu_csr.rdata == XLEN'('hf0),
+        "senvcfg did not apply the Zicbom/Zicboz WARL mask");
     write_csr(`RAPT_CSR_SENVCFG, XLEN'('h40));
+      exu_csr.raddr = `RAPT_CSR_SENVCFG;
+      #1;
       check(exu_csr.rdata == XLEN'('h40),
         "senvcfg rejected Linux's CBCFE context-switch value");
+    write_csr(`RAPT_CSR_SENVCFG, XLEN'('h20));
+      exu_csr.raddr = `RAPT_CSR_SENVCFG;
+      #1;
+      check(exu_csr.rdata == XLEN'('h30),
+        "senvcfg accepted reserved CBIE=2 instead of WARL-mapping it");
+
+    // Zihpm permits counters/event selectors to be hardwired zero, but their
+    // standard CSR addresses remain legal and writes cannot create state.
+    check_csr_zero(`RAPT_CSR_HPMCOUNTER3, "hpmcounter3");
+    check_csr_zero(`RAPT_CSR_HPMCOUNTER31, "hpmcounter31");
+    check_csr_zero(`RAPT_CSR_MHPMCOUNTER3, "mhpmcounter3");
+    check_csr_zero(`RAPT_CSR_MHPMEVENT3, "mhpmevent3");
+    write_csr(`RAPT_CSR_MHPMCOUNTER3, '1);
+    check_csr_zero(`RAPT_CSR_MHPMCOUNTER3, "mhpmcounter3 after write");
+    write_csr(`RAPT_CSR_MHPMEVENT3, '1);
+    check_csr_zero(`RAPT_CSR_MHPMEVENT3, "mhpmevent3 after write");
+
+    // mcycle/minstret are writable architectural counters.  Their high-half
+    // aliases exist only on RV32; the same encodings read as zero here on RV64
+    // and are rejected as illegal by the decoder.
+`ifdef RAPT_RV64
+    write_csr(`RAPT_CSR_MCYCLE_, 64'h1234_5678_9abc_def0);
+      exu_csr.raddr = `RAPT_CSR_MCYCLE_;
+      #1;
+      check(exu_csr.rdata == 64'h1234_5678_9abc_def0,
+            "RV64 mcycle write did not take effect");
+    write_csr(`RAPT_CSR_MINSTRET, 64'h0123_4567_89ab_cdef);
+      exu_csr.raddr = `RAPT_CSR_MINSTRET;
+      #1;
+      check(exu_csr.rdata == 64'h0123_4567_89ab_cdef,
+            "RV64 minstret write did not take effect");
+    check_csr_zero(`RAPT_CSR_MCYCLEH, "RV64 reserved mcycleh");
+    check_csr_zero(`RAPT_CSR_MINSTRETH, "RV64 reserved minstreth");
+`else
+    write_csr(`RAPT_CSR_MCYCLEH, 32'h1234_5678);
+    write_csr(`RAPT_CSR_MCYCLE_, 32'h9abc_def0);
+      exu_csr.raddr = `RAPT_CSR_MCYCLE_;
+      #1;
+      check(exu_csr.rdata == 32'h9abc_def0,
+            "RV32 mcycle write did not take effect");
+      exu_csr.raddr = `RAPT_CSR_CYCLEH_;
+      #1;
+      check(exu_csr.rdata == 32'h1234_5678,
+            "RV32 cycleh alias did not expose mcycleh");
+    write_csr(`RAPT_CSR_MINSTRETH, 32'h0123_4567);
+    write_csr(`RAPT_CSR_MINSTRET, 32'h89ab_cdef);
+      exu_csr.raddr = `RAPT_CSR_INSTRET_;
+      #1;
+      check(exu_csr.rdata == 32'h89ab_cdef,
+            "RV32 instret alias did not expose minstret");
+      exu_csr.raddr = `RAPT_CSR_INSTRETH;
+      #1;
+      check(exu_csr.rdata == 32'h0123_4567,
+            "RV32 instreth alias did not expose minstreth");
+`endif
 
     // pmpaddr WARL readback is architectural and wider than the local
     // physical checker encoding on RV64.

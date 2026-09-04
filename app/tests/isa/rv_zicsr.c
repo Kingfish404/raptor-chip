@@ -30,10 +30,9 @@ static inline uint64_t read_ctr64(unsigned csr_lo, unsigned csr_hi)
 {
 #if __riscv_xlen == 64
     unsigned long v;
-    /* Use generic csrr with explicit CSR number via %c so we don't
-     * depend on the rd*/
-    rdtime / rdinstret pseudos specifically.* /
-        switch (csr_lo)
+    /* Select the CSR explicitly so this does not depend on the rdcycle,
+     * rdtime, or rdinstret pseudo-instructions. */
+    switch (csr_lo)
     {
     case 0xC00:
         asm volatile("csrr %0, cycle" : "=r"(v));

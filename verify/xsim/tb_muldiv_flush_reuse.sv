@@ -86,7 +86,8 @@ module tb_muldiv_flush_reuse;
       input logic [$clog2(`RAPT_ROB_SIZE)-1:0] dest,
       input logic [`RAPT_PHY_LEN-1:0] prd,
       input logic [`RAPT_REG_LEN-1:0] rd,
-      input logic [XLEN-1:0] pc
+      input logic [XLEN-1:0] pc,
+      input logic word_op
   );
     begin
       check(disp.free_found_a, "MULDIV queue had no free dispatch slot");
@@ -95,6 +96,7 @@ module tb_muldiv_flush_reuse;
       rou_exu.uop.pnpc = pc + XLEN'(4);
       rou_exu.uop.alu = {1'b0, alu};
       rou_exu.uop.rd = rd;
+      rou_exu.uop.word = word_op;
       rou_exu.op1 = op1;
       rou_exu.op2 = op2;
       rou_exu.prd = prd;
@@ -116,7 +118,7 @@ module tb_muldiv_flush_reuse;
     tick(1);
 
     dispatch_md(`RAPT_ALU_DIV___, XLEN'(32'h7000_0000), XLEN'(7),
-                5'd3, 6'd17, 5'd5, XLEN'(32'h8000_1000));
+                5'd3, 6'd17, 5'd5, XLEN'(32'h8000_1000), 1'b0);
     tick(1);
     tick(5);
     check(!exu_wb_mul.valid, "old DIV completed before the flush probe");
@@ -130,7 +132,7 @@ module tb_muldiv_flush_reuse;
           "MULDIV flush did not release the original MDQ slot");
 
     dispatch_md(`RAPT_ALU_MUL___, XLEN'(6), XLEN'(7),
-                5'd9, 6'd21, 5'd8, XLEN'(32'h8000_2000));
+                5'd9, 6'd21, 5'd8, XLEN'(32'h8000_2000), 1'b0);
 
     writeback_count = 0;
     for (int cycle = 0; cycle < 48; cycle++) begin
@@ -153,6 +155,71 @@ module tb_muldiv_flush_reuse;
 
     check(writeback_count == 1,
           "flushed DIV leaked a completion or replacement MUL did not complete");
+
+`ifdef RAPT_RV64
+    // W-form DIV/REM must normalize operands to 32 bits before iterating,
+    // then sign-extend the 32-bit architectural result to XLEN.
+    dispatch_md(`RAPT_ALU_REM___, 64'hf641_b4b4_2611_af1e,
+                64'hfc6a_47a7_3bc8_996b,
+                5'd10, 6'd22, 5'd18, 64'h8000_3000, 1'b1);
+    writeback_count = 0;
+    for (int cycle = 0; cycle < 80; cycle++) begin
+      #1;
+      if (exu_wb_mul.valid) begin
+        writeback_count++;
+        check(exu_wb_mul.result == 64'h0000_0000_2611_af1e,
+              "RV64 REMW used upper operand bits");
+      end
+      tick(1);
+    end
+    check(writeback_count == 1, "RV64 REMW did not complete exactly once");
+
+    dispatch_md(`RAPT_ALU_DIVU__, 64'h0123_4567_89ab_cdef,
+                64'hdead_beef_0000_0000,
+                5'd11, 6'd23, 5'd19, 64'h8000_4000, 1'b1);
+    writeback_count = 0;
+    for (int cycle = 0; cycle < 80; cycle++) begin
+      #1;
+      if (exu_wb_mul.valid) begin
+        writeback_count++;
+        check(exu_wb_mul.result == 64'hffff_ffff_ffff_ffff,
+              "RV64 DIVUW did not apply 32-bit divide-by-zero semantics");
+      end
+      tick(1);
+    end
+    check(writeback_count == 1, "RV64 DIVUW did not complete exactly once");
+
+    dispatch_md(`RAPT_ALU_REMU__, 64'hffff_ffff_d109_5000,
+                64'h0000_0000_ffff_ffff,
+                5'd12, 6'd24, 5'd20, 64'h8000_5000, 1'b1);
+    writeback_count = 0;
+    for (int cycle = 0; cycle < 80; cycle++) begin
+      #1;
+      if (exu_wb_mul.valid) begin
+        writeback_count++;
+        check(exu_wb_mul.result == 64'hffff_ffff_d109_5000,
+              "RV64 REMUW did not sign-extend a nonzero remainder");
+      end
+      tick(1);
+    end
+    check(writeback_count == 1, "RV64 REMUW did not complete exactly once");
+
+    dispatch_md(`RAPT_ALU_REMU__, 64'hffff_ffff_d109_5000,
+                64'h1234_5678_0000_0000,
+                5'd13, 6'd25, 5'd21, 64'h8000_6000, 1'b1);
+    writeback_count = 0;
+    for (int cycle = 0; cycle < 80; cycle++) begin
+      #1;
+      if (exu_wb_mul.valid) begin
+        writeback_count++;
+        check(exu_wb_mul.result == 64'hffff_ffff_d109_5000,
+              "RV64 REMUW divide-by-zero result was not sign-extended");
+      end
+      tick(1);
+    end
+    check(writeback_count == 1, "RV64 REMUW divide-by-zero did not complete exactly once");
+`endif
+
     $display("PASS: MULDIV flush-kill and MDQ reuse xsim checks passed");
     $finish;
   end

@@ -78,6 +78,9 @@
 `define RAPT_L1D_LEN 3
 `define RAPT_L1D_N_WAYS 2
 
+`define RAPT_ITLB_ENTRIES 8
+`define RAPT_DTLB_ENTRIES 8
+
 // No L2 in the current KU15P passing profile.
 // `define RAPT_L2_EN
 `define RAPT_L2_LINE_LEN $clog2(`RAPT_CACHE_LINE_BYTES / (`RAPT_XLEN / 8))

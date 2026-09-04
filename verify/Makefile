@@ -35,6 +35,8 @@ OBJCOPY := $(CROSS_COMPILE)objcopy
 OBJDUMP := $(CROSS_COMPILE)objdump
 
 NPROC := $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
+JOBS ?= $(shell awk 'BEGIN { n=$(NPROC); j=int(n / 2); print (j > 0 ? j : 1) }')
+SUBMAKE_JOBS = $(if $(filter --jobserver-auth=% --jobserver-fds=%,$(MAKEFLAGS)),,-j$(NPROC))
 TIMEOUT_BIN := $(shell command -v timeout 2>/dev/null || command -v gtimeout 2>/dev/null)
 PYTHON := $(shell command -v python3 2>/dev/null || command -v python 2>/dev/null)
 
@@ -51,8 +53,14 @@ endif
 # sim scopes outputs per RAPT_CONFIG (hdl/configs/<name>/). Keep this in
 # sync with sim/Makefile; classic RISCOF is validated against the small profile.
 RAPT_CONFIG ?= small
-NPC_BIN_32  := $(NSIM_HOME)/build/$(RAPT_CONFIG)/riscv32-npc-sim
-NPC_BIN_64  := $(NSIM_HOME)/build/$(RAPT_CONFIG)/riscv64-npc-sim
+SIM_BUILD_PROFILE ?= $(if $(strip $(BUILD_PROFILE)),$(strip $(BUILD_PROFILE)),$(RAPT_CONFIG))
+NPC_BIN_32  := $(NSIM_HOME)/build/$(SIM_BUILD_PROFILE)/riscv32-npc-sim
+NPC_BIN_64  := $(NSIM_HOME)/build/$(SIM_BUILD_PROFILE)/riscv64-npc-sim
+# RISCOF needs a simulator built without difftest.  Keep it in an isolated
+# profile so a concurrent coverage/difftest config change cannot remove the
+# binary while the compliance runner is using it.
+RISCOF_BUILD_PROFILE ?= $(RAPT_CONFIG)-riscof
+RISCOF_NPC_BIN_32 := $(NSIM_HOME)/build/$(RISCOF_BUILD_PROFILE)/riscv32-npc-sim
 NEMU_SO_32  := $(NEMU_HOME)/build/riscv32-nemu-interpreter-so
 NEMU_SO_64  := $(NEMU_HOME)/build/riscv64-nemu-interpreter-so
 MROM_IMG    := $(NSIM_HOME)/csrc/mem/mrom-data/build/mrom-data.bin
@@ -63,19 +71,23 @@ FUZZ_NUM ?= 20	## Number of fuzz test programs to generate
 FUZZ_LEN ?= 200	## Instructions per fuzz program
 TIMEOUT  ?= 10	## Per-test timeout in seconds
 ISA      ?= rv32## rv32 or rv64
+MEM_RANDOM_DELAY ?= 0## Maximum randomized AXI wait cycles for NPC workloads
+MEM_RANDOM_SEED  ?= 1## Reproducible randomized AXI timing seed
+NPC_MEM_ARGS = --mem-random-delay=$(MEM_RANDOM_DELAY) --mem-random-seed=$(MEM_RANDOM_SEED)
 
 BUILD_DIR := $(VERIFY_HOME)/build
 FUZZ_DIR  := $(BUILD_DIR)/fuzz
 COV_DIR   := $(BUILD_DIR)/coverage
 AM_KERNELS := $(RAPTOR_HOME)/abstract-machine/app/am-kernels
 
-# riscv-dv uses its pure-Python pyflow generator. Python 3.11 is selected
-# because pyvsc/pyboolector do not currently build with Python 3.14.
+# This pinned riscv-dv revision still imports Python's removed `imp` module,
+# so it requires Python 3.10 or 3.11.  If neither is installed, setup uses
+# uv to provision a local 3.11 interpreter inside the verification venv.
 RISCV_DV_REV        ?= b7a0b4b0b51346a3c64f159f81ea262d867c14a9## Pinned upstream revision
 RISCV_DV_DIR        := $(VERIFY_HOME)/riscv-dv
 RISCV_DV_TARGET     := $(VERIFY_HOME)/riscv-dv-target
 RISCV_DV_VENV       := $(BUILD_DIR)/riscv-dv-venv
-RISCV_DV_PYTHON     ?= python3.11## Python 3.10-3.12 interpreter for pyvsc
+RISCV_DV_PYTHON     ?= $(shell command -v python3.11 2>/dev/null || command -v python3.10 2>/dev/null)## Optional installed Python 3.10/3.11 interpreter
 RISCV_DV_OUT        ?= $(BUILD_DIR)/riscv-dv## Generated programs and logs
 RISCV_DV_TEST       ?= raptor_privileged_smoke## Test name from riscv-dv-target/testlist.yaml
 RISCV_DV_ITERATIONS ?= 1## Override generated program count
@@ -153,8 +165,8 @@ help: ## Show this help message
 # ============================================================================
 $(NPC_BIN):
 	@echo "[verify] Building NPC simulator (difftest enabled)..."
-	$(MAKE) -C $(RAPTOR_HOME) config-rv32-difftest
-	$(MAKE) -C $(NSIM_HOME) -j$(NPROC) RAPT_CONFIG=$(RAPT_CONFIG) VFLAGS="$(VFLAGS)"
+	+$(MAKE) -C $(RAPTOR_HOME) config-rv32-difftest
+	+$(MAKE) -C $(NSIM_HOME) $(SUBMAKE_JOBS) RAPT_CONFIG=$(RAPT_CONFIG) VFLAGS="$(VFLAGS)"
 
 $(NEMU_SO):
 	@echo "[verify] Building NEMU reference SO..."
@@ -188,12 +200,18 @@ $(RISCV_DV_DIR)/.git:
 	git clone https://github.com/chipsalliance/riscv-dv.git $(RISCV_DV_DIR)
 	git -C $(RISCV_DV_DIR) checkout $(RISCV_DV_REV)
 
-$(RISCV_DV_VENV)/.ready: $(RISCV_DV_DIR)/.git $(RISCV_DV_DIR)/requirements.txt
-	@command -v $(RISCV_DV_PYTHON) >/dev/null || { \
-		echo "[riscv-dv] ERROR: $(RISCV_DV_PYTHON) is required (Python 3.10-3.12)."; \
-		exit 1; \
-	}
-	$(RISCV_DV_PYTHON) -m venv $(RISCV_DV_VENV)
+$(RISCV_DV_DIR)/requirements.txt: $(RISCV_DV_DIR)/.git
+	@test -f $@ || { echo "[riscv-dv] ERROR: upstream requirements.txt is missing"; exit 1; }
+
+$(RISCV_DV_VENV)/.ready: $(RISCV_DV_DIR)/requirements.txt
+	@rm -rf "$(RISCV_DV_VENV)"
+	@if [ -n "$(RISCV_DV_PYTHON)" ]; then \
+		"$(RISCV_DV_PYTHON)" -m venv "$(RISCV_DV_VENV)"; \
+	elif command -v uv >/dev/null 2>&1; then \
+		uv venv --python 3.11 --seed "$(RISCV_DV_VENV)"; \
+	else \
+		echo "[riscv-dv] ERROR: Python 3.10/3.11 or uv is required."; exit 1; \
+	fi
 	$(RISCV_DV_VENV)/bin/python -m pip install -r $(RISCV_DV_DIR)/requirements.txt
 	@touch $@
 
@@ -242,11 +260,15 @@ riscv-dv-run: check-prereqs ## Run generated RISCV_DV_TEST binaries with NEMU di
 	[ $$fail -eq 0 ] || { echo "[riscv-dv] Failed:$$fail_list"; exit 1; }
 
 riscv-dv-smoke: ## Generate and run one short M-mode privileged test
-	$(MAKE) --no-print-directory riscv-dv-gen riscv-dv-run \
+	$(MAKE) --no-print-directory riscv-dv-gen \
+		RISCV_DV_TEST=raptor_privileged_smoke RISCV_DV_ITERATIONS=1
+	$(MAKE) --no-print-directory riscv-dv-run \
 		RISCV_DV_TEST=raptor_privileged_smoke RISCV_DV_ITERATIONS=1
 
 riscv-dv-stress: ## Run privileged exception stress with riscv-dv pyflow
-	$(MAKE) --no-print-directory riscv-dv-gen riscv-dv-run \
+	$(MAKE) --no-print-directory riscv-dv-gen \
+		RISCV_DV_TEST=raptor_exception_stress RISCV_DV_MEM_SEEDS="1 42 31337"
+	$(MAKE) --no-print-directory riscv-dv-run \
 		RISCV_DV_TEST=raptor_exception_stress RISCV_DV_MEM_SEEDS="1 42 31337"
 
 riscv-dv-mmu: ## Report the upstream simulator needed for riscv-dv Sv32/MMU tests
@@ -269,7 +291,8 @@ FUZZ_LAST_FAIL := $(FUZZ_DIR)/last_fail
 
 .PHONY: fuzz fuzz-gen fuzz-run fuzz-replay fuzz-run-one fuzz-inf fuzz-clean
 
-fuzz: fuzz-gen fuzz-run ## Generate and run random instruction fuzz tests
+fuzz: fuzz-gen ## Generate and run random instruction fuzz tests
+	$(MAKE) --no-print-directory fuzz-run
 
 fuzz-gen: ## Generate random instruction test programs
 	@mkdir -p $(FUZZ_DIR)
@@ -309,7 +332,7 @@ fuzz-run: check-prereqs ## Run fuzz tests in FUZZ_SRC_DIR with difftest
 			-T $(FUZZ_LINKER) -o "$$elf" "$$src" 2>"$(FUZZ_SRC_DIR)/$${name}.compile.log"; then \
 			echo "  [CERR] $$name"; ERR=$$((ERR+1)); continue; fi; \
 		$(OBJCOPY) -O binary "$$elf" "$$bin"; \
-		set +e; $(TIMEOUT_RUN) $(TIMEOUT) $(NPC_BIN) -b -n -d $(NEMU_SO) -r $(MROM_IMG) "$$bin" </dev/null >"$$log" 2>&1; \
+		set +e; $(TIMEOUT_RUN) $(TIMEOUT) $(NPC_BIN) -b -n $(NPC_MEM_ARGS) -d $(NEMU_SO) -r $(MROM_IMG) "$$bin" </dev/null >"$$log" 2>&1; \
 		rc=$$?; set -e; \
 		if [ $$rc -eq 0 ]; then \
 			if grep -qiE "BAD TRAP|ABORT" "$$log"; then \
@@ -365,7 +388,7 @@ fuzz-run-one: check-prereqs ## Run a single .S test file (SRC=path/to/test.S)
 	$(CC) -march=$(MARCH) -mabi=$(MABI) -nostdlib -nostartfiles \
 		-T $(FUZZ_LINKER) -o "$$elf" "$(SRC)"; \
 	$(OBJCOPY) -O binary "$$elf" "$$bin"; \
-	$(NPC_BIN) -b -n -d $(NEMU_SO) -r $(MROM_IMG) "$$bin" 2>&1 | tee "$$log"; \
+	$(NPC_BIN) -b -n $(NPC_MEM_ARGS) -d $(NEMU_SO) -r $(MROM_IMG) "$$bin" 2>&1 | tee "$$log"; \
 	echo "[fuzz-run-one] Log: $$log"
 
 zbb-strlen: ## Run the Linux RV64 strlen_zbb sequence through NPC/NEMU difftest
@@ -395,27 +418,31 @@ fuzz-clean: ## Clean fuzz artifacts
 ACT4_DIR       := $(VERIFY_HOME)/riscof
 ACT4_REPO      := $(ACT4_DIR)/riscv-arch-test
 ACT4_WORKDIR   := $(BUILD_DIR)/riscof
-ACT4_CONFIG    := $(ACT4_DIR)/raptor-rv32imac/test_config.yaml
+ACT4_CONFIG    := $(ACT4_DIR)/raptor-rv32gc/test_config.yaml
 ifeq ($(ISA),rv64)
   ACT4_CONFIG  := $(ACT4_DIR)/raptor-rv64imac/test_config.yaml
 endif
-ACT4_ELF_DIR    = $(ACT4_WORKDIR)/raptor-rv32imac/elfs
+ACT4_ELF_DIR    = $(ACT4_WORKDIR)/raptor-rv32gc/elfs
 ifeq ($(ISA),rv64)
   ACT4_ELF_DIR  = $(ACT4_WORKDIR)/raptor-rv64imac/elfs
 endif
 # Only generate tests for implemented extensions (positive filter).
 # Using EXTENSIONS instead of EXCLUDE_EXTENSIONS avoids generating tests for
-# F/D/Zfh/etc which bloats tests/ by ~600MB and wastes Sail simulation time.
-ACT4_EXTENSIONS ?= I,M,Zca,Zicsr,Zicntr,Zifencei,Zaamo,Zalrsc,Zba,Zbb,Zbc,Zbs
+# unsupported extensions such as Zfh/V, which bloat tests/ and waste Sail time.
+ACT4_EXTENSIONS ?= I,M,F,D,Zca,Zcf,Zcd,Zicsr,Zicntr,Zifencei,Zaamo,Zalrsc,Zba,Zbb,Zbc,Zbs
 SAIL_VERSION    ?= 0.13.1
 ACT4_SAIL_DIR   ?= $(HOME)/.local/opt/sail-riscv-$(SAIL_VERSION)/bin
 ACT4_RUBY_DIR   ?= $(shell if command -v brew >/dev/null 2>&1; then dir="$$(brew --prefix ruby@3.2 2>/dev/null)/bin"; test -x "$$dir/ruby" && printf '%s' "$$dir"; fi)
 ACT4_GEM_BIN    ?= $(shell if [ -n "$(ACT4_RUBY_DIR)" ]; then PATH="$(ACT4_RUBY_DIR):$(PATH)" ruby -e 'print Gem.bindir' 2>/dev/null; fi)
 ACT4_PATH       := $(if $(ACT4_RUBY_DIR),$(ACT4_RUBY_DIR):)$(if $(ACT4_GEM_BIN),$(ACT4_GEM_BIN):)$(ACT4_SAIL_DIR):$(PATH)
+ACT4_UV_CACHE_DIR ?= $(BUILD_DIR)/uv-cache
+ACT4_XDG_DATA_HOME ?= $(BUILD_DIR)/xdg-data
 
-.PHONY: riscof riscof-setup riscof-gen riscof-run riscof-clean
+.PHONY: riscof riscof-setup riscof-gen riscof-run riscof-build-npc riscof-clean
 
-riscof: riscof-setup riscof-gen riscof-run ## Run ACT4 compliance tests
+riscof: riscof-setup ## Run ACT4 compliance tests
+	+$(MAKE) --no-print-directory riscof-gen
+	+$(MAKE) --no-print-directory riscof-run
 
 riscof-setup: ## Clone ACT4 repo and check prerequisites
 	@if [ ! -d "$(ACT4_REPO)" ]; then \
@@ -443,7 +470,7 @@ riscof-setup: ## Clone ACT4 repo and check prerequisites
 		|| { echo "[act4] ERROR: Sail $(SAIL_VERSION) is required for ACT4."; \
 		echo "  Install under $(ACT4_SAIL_DIR) or set ACT4_SAIL_DIR."; exit 1; }
 	@PATH="$(ACT4_PATH)" sail_riscv_sim --rv32 --config-override \
-		"$(ACT4_DIR)/raptor-rv32imac/sail.json" --validate-config >/dev/null
+		"$(ACT4_DIR)/raptor-rv32gc/sail.json" --validate-config >/dev/null
 	@echo "[act4] Setup complete.  Config: $(ACT4_CONFIG)"
 
 riscof-gen: ## Generate self-checking ELFs via ACT4 framework
@@ -453,9 +480,11 @@ riscof-gen: ## Generate self-checking ELFs via ACT4 framework
 	@echo "[act4] Generating self-checking ELFs..."
 	@echo "  Config:  $(ACT4_CONFIG)"
 	@echo "  Workdir: $(ACT4_WORKDIR)"
-	@mkdir -p "$(ACT4_WORKDIR)"
+	@mkdir -p "$(ACT4_WORKDIR)" "$(ACT4_UV_CACHE_DIR)" "$(ACT4_XDG_DATA_HOME)"
 	cd "$(ACT4_REPO)" && \
-		PATH="$(ACT4_PATH)" $(MAKE) elfs \
+		PATH="$(ACT4_PATH)" UV_CACHE_DIR="$(ACT4_UV_CACHE_DIR)" \
+		XDG_DATA_HOME="$(ACT4_XDG_DATA_HOME)" \
+		$(MAKE) elfs \
 		CONFIG_FILES="$(ACT4_CONFIG)" \
 		WORKDIR="$(ACT4_WORKDIR)" \
 		EXTENSIONS="$(ACT4_EXTENSIONS)" \
@@ -463,19 +492,35 @@ riscof-gen: ## Generate self-checking ELFs via ACT4 framework
 		--jobs $(NPROC)
 	@echo "[act4] ELFs generated in $(ACT4_ELF_DIR)"
 
-riscof-run: check-prereqs ## Run ACT4 ELFs on Raptor NPC
+riscof-build-npc: ## Build the RV32 NPC without difftest for ACT4 self-checking ELFs
+	@# ACT4 binaries report their own result and run without a NEMU -d argument.
+	@# A difftest-configured simulator aborts during initialization instead.
+	@if [ ! -f $(RISCOF_NPC_BIN_32) ] || grep -q '^CONFIG_DIFFTEST=y' $(NSIM_HOME)/.config 2>/dev/null; then \
+		echo "[act4] (Re)building RV32 NPC without difftest (RAPT_CONFIG=$(RAPT_CONFIG), BUILD_PROFILE=$(RISCOF_BUILD_PROFILE))..."; \
+		$(MAKE) -C $(NSIM_HOME) o2_defconfig; \
+	else \
+		echo "[act4] NPC config OK (RV32, no difftest)."; \
+	fi
+	@$(MAKE) -C $(NSIM_HOME) $(SUBMAKE_JOBS) RAPT_CONFIG=$(RAPT_CONFIG) \
+		BUILD_PROFILE=$(RISCOF_BUILD_PROFILE) VFLAGS=""
+	@test -f $(RISCOF_NPC_BIN_32) || { echo "[act4] ERROR: NPC build failed: $(RISCOF_NPC_BIN_32)"; exit 1; }
+
+riscof-run: riscof-build-npc $(MROM_IMG) ## Run ACT4 ELFs on Raptor NPC
 	@test -d "$(ACT4_ELF_DIR)" || { echo "[act4] ERROR: ELF directory not found: $(ACT4_ELF_DIR)"; \
 		echo "  Run 'make riscof-gen' first to generate self-checking ELFs."; exit 1; }
 	@echo "================================================================"
 	@echo "[act4] Running ACT4 tests on Raptor NPC"
-	@echo "  NPC:    $(NPC_BIN)"
+	@echo "  NPC:    $(RISCOF_NPC_BIN_32)"
 	@echo "  ELFs:   $(ACT4_ELF_DIR)"
 	@echo "  Logs:   $(ACT4_WORKDIR)/logs"
 	@echo "================================================================"
 	python3 $(VERIFY_HOME)/scripts/run_act4.py \
-		--npc-bin "$(NPC_BIN)" \
+		--npc-bin "$(RISCOF_NPC_BIN_32)" \
 		--objcopy "$(OBJCOPY)" \
 		--mrom-img "$(MROM_IMG)" \
+		--mem-random-delay $(MEM_RANDOM_DELAY) \
+		--mem-random-seed $(MEM_RANDOM_SEED) \
+		--jobs $(JOBS) \
 		--log-dir "$(ACT4_WORKDIR)/logs" \
 		--timeout $(TIMEOUT) \
 		"$(ACT4_ELF_DIR)"
@@ -507,20 +552,22 @@ RISCOF_CLASSIC_BRANCH   ?= old-framework-3.x
 
 .PHONY: riscof-classic riscof-classic-setup riscof-classic-run riscof-classic-clean riscof-classic-build-npc
 
-riscof-classic: riscof-classic-setup riscof-classic-run ## Run classic RISCOF compliance flow
+riscof-classic: riscof-classic-setup ## Run classic RISCOF compliance flow
+	+$(MAKE) --no-print-directory riscof-classic-run
 
 riscof-classic-build-npc: ## (Re)build NPC simulator without difftest for RISCOF
 	@# RISCOF's DUT plugin invokes sim without `--diff`, so the simulator
 	@# must be built with the plain (non-difftest) config; otherwise
 	@# init_difftest aborts with `ref_so_file != NULL`.
-	@if [ ! -f $(NPC_BIN) ] || grep -q '^CONFIG_DIFFTEST=y' $(NSIM_HOME)/.config 2>/dev/null; then \
-		echo "[riscof-classic] (Re)building NPC without difftest (RAPT_CONFIG=$(RAPT_CONFIG))..."; \
+	@if [ ! -f $(RISCOF_NPC_BIN_32) ] || grep -q '^CONFIG_DIFFTEST=y' $(NSIM_HOME)/.config 2>/dev/null; then \
+		echo "[riscof-classic] (Re)building NPC without difftest (RAPT_CONFIG=$(RAPT_CONFIG), BUILD_PROFILE=$(RISCOF_BUILD_PROFILE))..."; \
 		$(MAKE) -C $(NSIM_HOME) o2_defconfig; \
 	else \
 		echo "[riscof-classic] NPC config OK (no difftest)."; \
 	fi
-	@$(MAKE) -C $(NSIM_HOME) -j$(NPROC) RAPT_CONFIG=$(RAPT_CONFIG) VFLAGS="$(VFLAGS)"
-	@test -f $(NPC_BIN) || { echo "[riscof-classic] ERROR: NPC build failed: $(NPC_BIN)"; exit 1; }
+	@$(MAKE) -C $(NSIM_HOME) $(SUBMAKE_JOBS) RAPT_CONFIG=$(RAPT_CONFIG) \
+		BUILD_PROFILE=$(RISCOF_BUILD_PROFILE) VFLAGS=""
+	@test -f $(RISCOF_NPC_BIN_32) || { echo "[riscof-classic] ERROR: NPC build failed: $(RISCOF_NPC_BIN_32)"; exit 1; }
 
 riscof-classic-setup: ## Clone upstream riscv-arch-test suite
 	@if [ ! -d "$(RISCOF_CLASSIC_SUITE)" ]; then \
@@ -552,15 +599,18 @@ riscof-classic-run: $(MROM_IMG) riscof-classic-build-npc ## Execute classic RISC
 	@mkdir -p "$(RISCOF_CLASSIC_WORKDIR)"
 	@echo "================================================================"
 	@echo "[riscof-classic] Running classic RISCOF flow"
-	@echo "  NPC:     $(NPC_BIN)"
+	@echo "  NPC:     $(RISCOF_NPC_BIN_32)"
 	@echo "  Suite:   $(RISCOF_CLASSIC_SUITE)"
 	@echo "  Workdir: $(RISCOF_CLASSIC_WORKDIR)"
 	@echo "================================================================"
 	@$(PYTHON) "$(RISCOF_CLASSIC_ENV_PATCH)" \
 		--env="$(RISCOF_CLASSIC_SUITE)/riscv-test-suite/env"
 	cd "$(RISCOF_CLASSIC_DIR)" && \
-		export NPC_BIN="$(NPC_BIN)" MROM_IMG="$(MROM_IMG)" \
-			NSIM_HOME="$(NSIM_HOME)" RAPT_TIMEOUT="$(TIMEOUT)"; \
+		export NPC_BIN="$(RISCOF_NPC_BIN_32)" MROM_IMG="$(MROM_IMG)" \
+			NSIM_HOME="$(NSIM_HOME)" RAPT_TIMEOUT="$(TIMEOUT)" \
+			RAPT_JOBS="$(JOBS)" \
+			RAPT_MEM_RANDOM_DELAY="$(MEM_RANDOM_DELAY)" \
+			RAPT_MEM_RANDOM_SEED="$(MEM_RANDOM_SEED)"; \
 		RISCOF_BIN="$(if $(wildcard $(RISCOF_CLASSIC_BIN)),$(RISCOF_CLASSIC_BIN),riscof)"; \
 		"$$RISCOF_BIN" testlist \
 			--config=config.ini \
@@ -571,8 +621,11 @@ riscof-classic-run: $(MROM_IMG) riscof-classic-build-npc ## Execute classic RISC
 			--input="$(RISCOF_CLASSIC_TESTLIST)" \
 			--output="$(RISCOF_CLASSIC_FILTERED_TESTLIST)" \
 			--drop-legacy-ad && \
-		export NPC_BIN="$(NPC_BIN)" MROM_IMG="$(MROM_IMG)" \
-			NSIM_HOME="$(NSIM_HOME)" RAPT_TIMEOUT="$(TIMEOUT)"; \
+		export NPC_BIN="$(RISCOF_NPC_BIN_32)" MROM_IMG="$(MROM_IMG)" \
+			NSIM_HOME="$(NSIM_HOME)" RAPT_TIMEOUT="$(TIMEOUT)" \
+			RAPT_JOBS="$(JOBS)" \
+			RAPT_MEM_RANDOM_DELAY="$(MEM_RANDOM_DELAY)" \
+			RAPT_MEM_RANDOM_SEED="$(MEM_RANDOM_SEED)"; \
 		"$$RISCOF_BIN" run \
 			--config=config.ini \
 			--suite=$(RISCOF_CLASSIC_SUITE)/riscv-test-suite/ \
@@ -622,14 +675,14 @@ $(NEMU_BIN_32):
 
 $(NEMU_BIN_64):
 	@echo "[riscof-classic-nemu] Building NEMU standalone executable (rv64)..."
-	$(MAKE) -C $(NEMU_HOME) riscv64_defconfig
-	$(MAKE) -C $(NEMU_HOME) -j$(NPROC)
+	+$(MAKE) -C $(NEMU_HOME) riscv64_defconfig
+	+$(MAKE) -C $(NEMU_HOME) $(SUBMAKE_JOBS)
 
 riscof-classic-build-nemu: ## Build NEMU standalone executable for classic RISCOF
 ifeq ($(ISA),rv64)
 	@echo "[riscof-classic-nemu] Building NEMU standalone executable (rv64)..."
-	$(MAKE) -C $(NEMU_HOME) riscv64_defconfig
-	$(MAKE) -C $(NEMU_HOME) -j$(NPROC)
+	+$(MAKE) -C $(NEMU_HOME) riscv64_defconfig
+	+$(MAKE) -C $(NEMU_HOME) $(SUBMAKE_JOBS)
 else
 	@echo "[riscof-classic-nemu] Building NEMU standalone executable (rv32)..."
 	$(MAKE) -C $(RAPTOR_HOME) config-nemu32
@@ -708,45 +761,73 @@ COV_FUZZ_SEED       ?= 123## Fuzz seed used by coverage-run
 COV_FUZZ_NUM        ?= 40## Fuzz test count used by coverage-run
 COV_FUZZ_LEN        ?= 200## Fuzz test length used by coverage-run
 COV_MICROBENCH_ARGS ?= test## Microbench mainargs used by coverage-run
-COV_PK_TIMEOUT      ?= 300## Wall-clock timeout for each pk coverage workload
+COV_PK_TIMEOUT      ?= 600## Wall-clock timeout for each pk coverage workload
+COV_COREMARK_ITERATIONS ?= 1## Coverage needs one CoreMark control-flow pass
+COV_MEMTEST_WORDS   ?= 512## Run all memtest algorithms on a coverage-sized buffer
+COV_IRQ_REPEATS     ?= 12## Repeat short directed IRQ tests past coverage hit threshold
+COV_LINE_MIN        ?= 80.0## Minimum accepted aggregate HDL line coverage
+COV_BUILD_PROFILE   ?= $(RAPT_CONFIG)-coverage## Isolate instrumented NPC artifacts
+COV_NPC_BIN         := $(NSIM_HOME)/build/$(COV_BUILD_PROFILE)/$(if $(filter rv64,$(ISA)),riscv64,riscv32)-npc-sim
 
 define RUN_AND_SAVE_COVERAGE
 	@echo "[coverage] Running $(1) workload..."
-	@mkdir -p $(COV_DIR)
-	@rm -f $(NSIM_HOME)/coverage*.dat $(VERIFY_HOME)/coverage*.dat
-	-set +o pipefail; $(2) 2>&1 | tee "$(COV_DIR)/$(1).log"; true
-	@if [ -f "$(NSIM_HOME)/coverage.dat" ]; then \
-		cp "$(NSIM_HOME)/coverage.dat" "$(COV_DIR)/coverage_$(1).dat"; \
-		echo "[coverage] Saved: $(COV_DIR)/coverage_$(1).dat"; \
-	elif [ -f "$(VERIFY_HOME)/coverage.dat" ]; then \
-		cp "$(VERIFY_HOME)/coverage.dat" "$(COV_DIR)/coverage_$(1).dat"; \
-		echo "[coverage] Saved: $(COV_DIR)/coverage_$(1).dat"; \
-	else \
-		echo "[coverage] WARN: $(1) did not produce coverage.dat (workload may have crashed; continuing)"; \
-	fi
+	@set -o pipefail; \
+		raw_dir="$(COV_DIR)/raw/$(1)"; status=0; \
+		rm -rf "$$raw_dir"; mkdir -p "$$raw_dir"; \
+		rm -f $(NSIM_HOME)/coverage*.dat $(VERIFY_HOME)/coverage*.dat; \
+		RAPT_COVERAGE_DIR="$$raw_dir" $(2) 2>&1 \
+			| tee "$(COV_DIR)/$(1).log" || status=$$?; \
+		shopt -s nullglob; coverage_files=("$$raw_dir"/*.dat); \
+		if [ $${#coverage_files[@]} -gt 0 ]; then \
+			if verilator_coverage --write "$(COV_DIR)/coverage_$(1).dat" \
+				"$${coverage_files[@]}"; then \
+				echo "[coverage] Merged $${#coverage_files[@]} run(s): $(COV_DIR)/coverage_$(1).dat"; \
+			else \
+				echo "[coverage] ERROR: failed to merge $(1) data"; status=1; \
+			fi; \
+		elif [ -f "$(NSIM_HOME)/coverage.dat" ]; then \
+			cp "$(NSIM_HOME)/coverage.dat" "$(COV_DIR)/coverage_$(1).dat"; \
+			echo "[coverage] Saved: $(COV_DIR)/coverage_$(1).dat"; \
+		elif [ -f "$(VERIFY_HOME)/coverage.dat" ]; then \
+			cp "$(VERIFY_HOME)/coverage.dat" "$(COV_DIR)/coverage_$(1).dat"; \
+			echo "[coverage] Saved: $(COV_DIR)/coverage_$(1).dat"; \
+		else \
+			echo "[coverage] ERROR: $(1) did not produce coverage data"; status=1; \
+		fi; \
+		exit $$status
 endef
 
 .PHONY: coverage coverage-build coverage-run coverage-run-coremark \
 	coverage-run-coremark-pk coverage-run-hello-pk coverage-run-isa-tests-pk \
-	coverage-run-microbench coverage-run-fuzz coverage-run-sigtest \
+	coverage-run-memory-pk coverage-run-algo-pk coverage-run-security-pk \
+	coverage-run-microbench coverage-run-fp coverage-run-fp-directed \
+	coverage-run-irq coverage-run-jtag coverage-run-fuzz coverage-run-sigtest \
 	coverage-report coverage-clean check-coverage-bin
 
-coverage: coverage-build coverage-run coverage-report ## Full coverage flow
+coverage: coverage-build ## Full coverage flow
+	@status=0; \
+		$(MAKE) --no-print-directory coverage-run || status=$$?; \
+		$(MAKE) --no-print-directory coverage-report || status=$$?; \
+		exit $$status
+
+COV_VERILATOR_EXTRA := --coverage-line -Wno-UNOPTFLAT
 
 coverage-build: ## Build NPC with coverage instrumentation
 	@echo "[coverage] Building NPC with --coverage-line..."
-	@rm -rf $(NSIM_HOME)/build/$(RAPT_CONFIG)/obj_dir $(NSIM_HOME)/build/$(RAPT_CONFIG)/riscv*-npc-*
+	@rm -rf $(NSIM_HOME)/build/$(COV_BUILD_PROFILE)/obj_dir* $(NSIM_HOME)/build/$(COV_BUILD_PROFILE)/riscv*-npc-*
 	$(MAKE) -C $(NSIM_HOME) o2_difftest_defconfig RAPT_CONFIG=$(RAPT_CONFIG)
 	# Coverage build: disable RTL SVA (RAPT_SIM_ASSERT=0) and use line-only
 	# coverage. `--coverage-toggle` was observed to crash the simulator on CI
 	# during microbench (queen) due to combined memory pressure with toggle
 	# counters on a design that has UNOPTFLAT loops. Line coverage is enough
 	# to track structural coverage of RTL.
-	$(MAKE) -C $(NSIM_HOME) -j$(NPROC) RAPT_CONFIG=$(RAPT_CONFIG) VFLAGS="$(VFLAGS)" RAPT_SIM_ASSERT=0 \
-		VERILATOR_EXTRA="--coverage-line -Wno-UNOPTFLAT"
+	+$(MAKE) -C $(NSIM_HOME) $(SUBMAKE_JOBS) RAPT_CONFIG=$(RAPT_CONFIG) BUILD_PROFILE=$(COV_BUILD_PROFILE) \
+		VFLAGS="$(VFLAGS)" RAPT_SIM_ASSERT=0 \
+		VERILATOR_EXTRA="$(COV_VERILATOR_EXTRA)"
 
 coverage-run: ## Run test suite to collect coverage
 	@mkdir -p $(COV_DIR)
+	@rm -rf $(COV_DIR)/raw
 	@rm -f $(COV_DIR)/coverage_*.dat $(COV_DIR)/coverage.dat \
 		$(NSIM_HOME)/coverage*.dat $(VERIFY_HOME)/coverage*.dat
 	@echo "================================================================"
@@ -754,28 +835,35 @@ coverage-run: ## Run test suite to collect coverage
 	@echo "  ISA:    $(ISA)"
 	@echo "  Output: $(COV_DIR)"
 	@echo "================================================================"
-	$(MAKE) --no-print-directory coverage-run-coremark
-	$(MAKE) --no-print-directory coverage-run-coremark-pk
-	$(MAKE) --no-print-directory coverage-run-hello-pk
-	$(MAKE) --no-print-directory coverage-run-isa-tests-pk
-	$(MAKE) --no-print-directory coverage-run-microbench
-	$(MAKE) --no-print-directory coverage-run-fuzz
-	$(MAKE) --no-print-directory coverage-run-sigtest
-	@echo "[coverage] Data collection complete."
+	@status=0; failed=""; \
+		for target in coverage-run-coremark coverage-run-coremark-pk \
+			coverage-run-hello-pk coverage-run-isa-tests-pk \
+			coverage-run-memory-pk coverage-run-algo-pk coverage-run-security-pk \
+			coverage-run-microbench coverage-run-fp coverage-run-fp-directed \
+			coverage-run-irq coverage-run-jtag \
+			coverage-run-fuzz coverage-run-sigtest; do \
+			if ! $(MAKE) --no-print-directory "$$target"; then \
+				status=1; failed="$$failed $${target#coverage-run-}"; \
+			fi; \
+		done; \
+		if [ $$status -eq 0 ]; then \
+			echo "[coverage] All workloads completed successfully."; \
+		else \
+			echo "[coverage] Workloads with failures:$$failed"; \
+		fi; \
+		exit $$status
 	@ls -la "$(COV_DIR)/"coverage_*.dat 2>/dev/null || echo "[coverage] No coverage_*.dat files found (coverage build may be needed)"
 
 # app/ (pk mode) ISA64 flag: rv64 -> 1, rv32 -> empty (unset)
 APP_ISA64 := $(if $(filter rv64,$(ISA)),1,)
 
-# All coverage-run-* targets must propagate the same SIM_VFLAGS that
-# `coverage-build` used; otherwise sim/Makefile's .vflags_stamp invalidates
-# and rebuilds the simulator WITHOUT `VERILATOR_EXTRA="--coverage-line ..."`,
-# losing both coverage instrumentation and (since SVA gets re-enabled by
-# default) potentially turning random-instruction workloads into SVA `$fatal`
-# crashes (manifesting as host SIGSEGV / exit 139 in some Verilator builds).
-# Pass the build profile and assertion setting through every recursive make so
-# workloads reuse the instrumented simulator instead of selecting `default`.
-COV_PASS_ENV := RAPT_CONFIG=$(RAPT_CONFIG) RAPT_SIM_ASSERT=0
+# All coverage-run-* targets must propagate the same simulation and Verilator
+# flags that `coverage-build` used. Recursive workload Makefiles can otherwise
+# rebuild the simulator without coverage instrumentation.
+COV_PASS_ENV := RAPT_CONFIG=$(RAPT_CONFIG) BUILD_PROFILE=$(COV_BUILD_PROFILE) \
+	NPC_BIN=$(COV_NPC_BIN) PK_BUILD_PROFILE=coverage \
+	RAPT_SIM_ASSERT=0 SKIP_CONFIG_INVALIDATION=1 \
+	VERILATOR_EXTRA="$(COV_VERILATOR_EXTRA)"
 
 # Sanity check that the expected NPC sim binary exists. The workload sub-make
 # (am-kernels / app) ultimately invokes `make -C sim run`, which picks
@@ -785,18 +873,20 @@ COV_PASS_ENV := RAPT_CONFIG=$(RAPT_CONFIG) RAPT_SIM_ASSERT=0
 # (wrong memory map). Guard the per-workload runners so they fail fast.
 .PHONY: check-coverage-bin
 check-coverage-bin:
-	@if [ ! -x "$(NPC_BIN)" ]; then \
-		echo "[coverage] ERROR: simulator $(NPC_BIN) not found."; \
+	@if [ ! -x "$(COV_NPC_BIN)" ]; then \
+		echo "[coverage] ERROR: simulator $(COV_NPC_BIN) not found."; \
 		echo "[coverage]        Run 'make -C verify coverage-build' first"; \
 		echo "[coverage]        (the current sim/.config may be a non-NPC variant, e.g. ysyxSoC)."; \
 		exit 1; \
 	fi
 
 coverage-run-coremark: check-coverage-bin ## Run only coremark coverage workload
-	$(call RUN_AND_SAVE_COVERAGE,coremark,$(MAKE) -C $(AM_KERNELS)/benchmarks/coremark_eembc ARCH=$(NPC_ARCH_COV) run ARGS="-b -n" VFLAGS="$(VFLAGS)" $(COV_PASS_ENV))
+	$(MAKE) -C $(AM_KERNELS)/benchmarks/coremark_eembc ARCH=$(NPC_ARCH_COV) clean
+	$(call RUN_AND_SAVE_COVERAGE,coremark,$(MAKE) -C $(AM_KERNELS)/benchmarks/coremark_eembc ARCH=$(NPC_ARCH_COV) run ITERATIONS=$(COV_COREMARK_ITERATIONS) ARGS="-b -n -t $(COV_PK_TIMEOUT)" VFLAGS="$(VFLAGS)" $(COV_PASS_ENV))
 
 coverage-run-coremark-pk: check-coverage-bin ## Run coremark under pk (app/) for coverage
-	$(call RUN_AND_SAVE_COVERAGE,coremark-pk,$(MAKE) -C $(RAPTOR_HOME)/app coremark-sim ISA64=$(APP_ISA64) ARGS="-b -n -t $(COV_PK_TIMEOUT)" VFLAGS="$(VFLAGS)" $(COV_PASS_ENV) DIFF_REF_SO=)
+	$(MAKE) -C $(RAPTOR_HOME)/app/benchmarks/coremark ISA64=$(APP_ISA64) clean
+	$(call RUN_AND_SAVE_COVERAGE,coremark-pk,$(MAKE) -C $(RAPTOR_HOME)/app coremark-sim ISA64=$(APP_ISA64) ITERATIONS=$(COV_COREMARK_ITERATIONS) ARGS="-b -n -t $(COV_PK_TIMEOUT)" VFLAGS="$(VFLAGS)" $(COV_PASS_ENV) DIFF_REF_SO=)
 
 coverage-run-hello-pk: check-coverage-bin ## Run hello under pk (app/) for coverage
 	$(call RUN_AND_SAVE_COVERAGE,hello-pk,$(MAKE) -C $(RAPTOR_HOME)/app hello-sim ISA64=$(APP_ISA64) ARGS="-b -n -t $(COV_PK_TIMEOUT)" VFLAGS="$(VFLAGS)" $(COV_PASS_ENV) DIFF_REF_SO=)
@@ -804,9 +894,43 @@ coverage-run-hello-pk: check-coverage-bin ## Run hello under pk (app/) for cover
 coverage-run-isa-tests-pk: check-coverage-bin ## Run ISA tests under pk (app/) for coverage
 	$(call RUN_AND_SAVE_COVERAGE,isa-tests-pk,$(MAKE) -C $(RAPTOR_HOME)/app isa-tests-sim ISA64=$(APP_ISA64) ARGS="-b -n -t $(COV_PK_TIMEOUT)" VFLAGS="$(VFLAGS)" $(COV_PASS_ENV) DIFF_REF_SO=)
 
+coverage-run-memory-pk: check-coverage-bin ## Run memory subsystem tests under pk
+	$(MAKE) -C $(RAPTOR_HOME)/app/tests/memory clean
+	$(call RUN_AND_SAVE_COVERAGE,memory-pk,$(MAKE) -C $(RAPTOR_HOME)/app memory-tests-sim ISA64=$(APP_ISA64) MEMTEST_WORDS=$(COV_MEMTEST_WORDS) ARGS="-b -n -t $(COV_PK_TIMEOUT)" VFLAGS="$(VFLAGS)" $(COV_PASS_ENV) DIFF_REF_SO=)
+
+coverage-run-algo-pk: check-coverage-bin ## Run algorithm tests under pk
+	$(call RUN_AND_SAVE_COVERAGE,algo-pk,$(MAKE) -C $(RAPTOR_HOME)/app algo-tests-sim ISA64=$(APP_ISA64) ARGS="-b -n -t $(COV_PK_TIMEOUT)" VFLAGS="$(VFLAGS)" $(COV_PASS_ENV) DIFF_REF_SO=)
+
+coverage-run-security-pk: check-coverage-bin ## Run cache and speculation tests under pk
+	$(call RUN_AND_SAVE_COVERAGE,security-pk,$(MAKE) -C $(RAPTOR_HOME)/app security-tests-sim ISA64=$(APP_ISA64) SECURITY_SIM_FAST=1 ARGS="-b -n -t $(COV_PK_TIMEOUT)" VFLAGS="$(VFLAGS)" $(COV_PASS_ENV) DIFF_REF_SO=)
+
 
 coverage-run-microbench: check-coverage-bin ## Run only microbench coverage workload
-	$(call RUN_AND_SAVE_COVERAGE,microbench,$(MAKE) -C $(AM_KERNELS)/benchmarks/microbench ARCH=$(NPC_ARCH_COV) run ARGS="-b -n" mainargs=$(COV_MICROBENCH_ARGS) VFLAGS="$(VFLAGS)" $(COV_PASS_ENV))
+	$(call RUN_AND_SAVE_COVERAGE,microbench,$(MAKE) -C $(AM_KERNELS)/benchmarks/microbench ARCH=$(NPC_ARCH_COV) run ARGS="-b -n -t $(COV_PK_TIMEOUT)" mainargs=$(COV_MICROBENCH_ARGS) VFLAGS="$(VFLAGS)" $(COV_PASS_ENV))
+
+FP_COVERAGE_TARGETS := npc-arith npc-d-arith npc-minmax npc-compare \
+	npc-convert npc-fma npc-divsqrt npc-fcsr npc-rm-illegal npc-fs \
+	npc-fs-mem npc-compressed-mem
+
+coverage-run-fp: check-coverage-bin ## Run RV32 F/D architectural tests for FEU coverage
+	$(call RUN_AND_SAVE_COVERAGE,fp,$(MAKE) -C $(RAPTOR_HOME)/app/tests/fp \
+		ISA=rv32 NPC_VFLAGS= NPC_ARGS="-b -n -t 60 --no-lightsss" \
+		$(COV_PASS_ENV) $(FP_COVERAGE_TARGETS))
+
+coverage-run-fp-directed: check-coverage-bin ## Run directed S/D/H floating-point coverage
+	$(call RUN_AND_SAVE_COVERAGE,fp-directed,$(MAKE) -C $(RAPTOR_HOME)/app/tests/fp \
+		ISA=rv32 NPC_VFLAGS= NPC_ARGS="-b -n -t 60 --no-lightsss" \
+		$(COV_PASS_ENV) npc-coverage)
+
+coverage-run-irq: check-coverage-bin ## Run directed PLIC/CLINT/PMP/interrupt paths
+	$(call RUN_AND_SAVE_COVERAGE,irq,$(MAKE) -C $(RAPTOR_HOME)/app/tests/irq \
+		ISA64=0 IRQ_REPEATS=$(COV_IRQ_REPEATS) \
+		NPC_ARGS="-b -n -t 30 --no-lightsss --trap-on-ebreak" \
+		$(COV_PASS_ENV) npc-coverage)
+
+coverage-run-jtag: check-coverage-bin ## Run DTM/DM compliance probe for debug coverage
+	$(call RUN_AND_SAVE_COVERAGE,jtag,$(COV_NPC_BIN) --jtag-selftest \
+		+verilator+coverage+file+$(COV_DIR)/raw/jtag/coverage-jtag.dat)
 
 coverage-run-fuzz: check-coverage-bin ## Run only fuzz coverage workload
 	$(call RUN_AND_SAVE_COVERAGE,fuzz,$(MAKE) --no-print-directory fuzz SEED=$(COV_FUZZ_SEED) FUZZ_NUM=$(COV_FUZZ_NUM) FUZZ_LEN=$(COV_FUZZ_LEN) TIMEOUT=$(TIMEOUT) $(COV_PASS_ENV))
@@ -817,13 +941,19 @@ coverage-run-sigtest: check-coverage-bin ## Run only sigtest coverage workload
 coverage-report: ## Generate coverage report
 	@echo "[coverage] Generating report..."
 	@if ls $(COV_DIR)/coverage_*.dat 1>/dev/null 2>&1; then \
-		verilator_coverage --annotate $(COV_DIR)/annotated \
-			$(COV_DIR)/coverage_*.dat 2>/dev/null || \
 		verilator_coverage --write $(COV_DIR)/merged.dat \
-			$(COV_DIR)/coverage_*.dat 2>/dev/null; \
+			$(COV_DIR)/coverage_*.dat; \
+		verilator_coverage --report summary $(COV_DIR)/merged.dat \
+			| tee $(COV_DIR)/summary.log; \
+		verilator_coverage --annotate $(COV_DIR)/annotated \
+			$(COV_DIR)/merged.dat 2>/dev/null; \
 		echo "[coverage] Report at $(COV_DIR)/annotated/"; \
+		line_pct=$$(awk '/^[[:space:]]*line[[:space:]]*:/ { gsub(/%/, "", $$3); print $$3 }' $(COV_DIR)/summary.log); \
+		awk -v actual="$$line_pct" -v minimum="$(COV_LINE_MIN)" \
+			'BEGIN { if (actual + 0 < minimum + 0) { printf "[coverage] ERROR: HDL line coverage %.1f%% is below %.1f%%\n", actual, minimum; exit 1 } printf "[coverage] HDL line coverage %.1f%% meets %.1f%% minimum\n", actual, minimum }'; \
 	else \
 		echo "[coverage] No coverage_*.dat files found. Run coverage-run first."; \
+		exit 1; \
 	fi
 
 coverage-clean: ## Clean coverage artifacts
@@ -865,7 +995,7 @@ sigtest-run: check-prereqs ## Run signature tests with difftest
 			head -5 "$(SIGTEST_DIR)/$${name}.compile.log" | sed 's/^/         /'; \
 			ERR=$$((ERR+1)); continue; fi; \
 		$(OBJCOPY) -O binary "$$elf" "$$bin"; \
-		set +e; $(TIMEOUT_RUN) $(TIMEOUT) $(NPC_BIN) -b -n -d $(NEMU_SO) -r $(MROM_IMG) "$$bin" </dev/null >"$$log" 2>&1; \
+		set +e; $(TIMEOUT_RUN) $(TIMEOUT) $(NPC_BIN) -b -n $(NPC_MEM_ARGS) -d $(NEMU_SO) -r $(MROM_IMG) "$$bin" </dev/null >"$$log" 2>&1; \
 		rc=$$?; set -e; \
 		if [ $$rc -eq 0 ]; then \
 			if grep -qiE "BAD TRAP|ABORT" "$$log"; then \
@@ -955,7 +1085,7 @@ formal-clean: ## Formal: clean all formal artifacts
 FPU_TB_DIR := $(VERIFY_HOME)/xsim/fpu
 
 .PHONY: unit-fpu unit-fpu-addsub unit-fpu-mul unit-fpu-fma \
-	unit-fpu-convert unit-fpu-int-to-fp unit-fpu-divsqrt unit-clean
+	unit-fpu-convert unit-fpu-int-to-fp unit-fpu-half unit-fpu-divsqrt unit-clean
 
 unit-fpu: ## Unit: run all FPU RTL component tests
 	$(MAKE) -C $(FPU_TB_DIR) all
@@ -977,6 +1107,9 @@ unit-fpu-int-to-fp: ## Unit: run integer-to-FP differential test
 
 unit-fpu-divsqrt: ## Unit: run FPU divide/sqrt differential test
 	$(MAKE) -C $(FPU_TB_DIR) divsqrt
+
+unit-fpu-half: ## Unit: verify Zfhmin binary16 conversions and NaN boxing
+	$(MAKE) -C $(FPU_TB_DIR) half
 
 unit-clean: ## Unit: clean RTL unit-test artifacts
 	$(MAKE) -C $(FPU_TB_DIR) clean
@@ -1116,6 +1249,12 @@ XSIM_PTW_SOURCES := \
 	"$(RAPTOR_HOME)/hdl/rapt_pkg.sv" \
 	"$(RAPTOR_HOME)/hdl/memory/rapt_ptw.sv"
 
+XSIM_IDU_SOURCES := \
+	"$(RAPTOR_HOME)/hdl/rapt_pkg.sv" \
+	"$(RAPTOR_HOME)/hdl/generated/rapt_idu_decoder.sv" \
+	"$(RAPTOR_HOME)/hdl/generated/rapt_idu_decoder_c.sv" \
+	"$(RAPTOR_HOME)/hdl/frontend/rapt_idu.sv"
+
 XSIM_TLB_SOURCES := \
 	"$(RAPTOR_HOME)/hdl/rapt_pkg.sv" \
 	"$(RAPTOR_HOME)/hdl/memory/rapt_tlb.sv"
@@ -1158,16 +1297,23 @@ XSIM_TARGETS := \
 	xsim-l1d-byte-rom \
 	xsim-l1d-store-coherence \
 	xsim-l1d-flush-ordered \
+	xsim-l1d-cmo-permissions \
 	xsim-l1i-sret-priv-epoch \
 	xsim-ptw-kill-drain \
+	xsim-ptw-profile-negative \
+	xsim-idu-illegal-stval \
+	xsim-idu-zfhmin \
+	xsim-idu-cmo \
 	xsim-tlb-flush-asid \
 	xsim-bus-axi \
 	xsim-bus-read-ownership \
 	xsim-csr-sret-roundtrip \
+	xsim-addr-classification \
 	xsim-pmp-endpoint \
 	xsim-sram-l1d-lutram \
 	xsim-sram-l1d-lutram-post-synth \
 	xsim-lsu-lr-sq-forward \
+	xsim-lsu-cbo-zero \
 	xsim-lsu-sq-random \
 	xsim-ioq \
 	xsim-clint \
@@ -1195,7 +1341,7 @@ define XSIM_RUN
 	xelab -debug typical --timescale 1ns/1ps --override_timeunit \
 		--override_timeprecision $(2) -s $(2)_sim; \
 	xsim $(2)_sim $(5) -runall; \
-	if grep -Eq "^Error:|FATAL_ERROR|FAIL:" xsim.log; then \
+	if grep -Eiq "^error:|FATAL_ERROR|FAIL:" xsim.log; then \
 		echo "[xsim] ERROR: $(2) reported FAIL/FATAL; see $(XSIM_BUILD_DIR)/$(1)/xsim.log"; \
 		exit 1; \
 	fi
@@ -1224,11 +1370,26 @@ xsim-l1d-store-coherence: ## xsim: verify L1D load-after-store coherence
 xsim-l1d-flush-ordered: ## xsim: verify L1D flush drain and non-cacheable ordering
 	$(call XSIM_RUN,l1d_flush_ordered,tb_l1d_flush_ordered,$(XSIM_L1D_SOURCES),-d RAPT_ASSERT_EN)
 
+xsim-l1d-cmo-permissions: ## xsim: verify Zicbom R-or-W/A-only PTE checks and store faults
+	$(call XSIM_RUN,l1d_cmo_permissions,tb_l1d_cmo_permissions,$(XSIM_L1D_SOURCES),-d RAPT_RV64 -d RAPT_ASSERT_EN)
+
 xsim-l1i-sret-priv-epoch: ## xsim: verify SRET target privilege and stale PTW response kill
 	$(call XSIM_RUN,l1i_sret_priv_epoch,tb_l1i_sret_priv_epoch,$(XSIM_L1I_SOURCES),-d RAPT_ASSERT_EN)
 
 xsim-ptw-kill-drain: ## xsim: verify PTW cancel-before-accept and drain-after-accept
 	$(call XSIM_RUN,ptw_kill_drain,tb_ptw_kill_drain,$(XSIM_PTW_SOURCES),-d RAPT_ASSERT_EN)
+
+xsim-ptw-profile-negative: ## xsim: verify RVA20S64 Svade and Sv39 canonical faults
+	$(call XSIM_RUN,ptw_profile_negative,tb_ptw_profile_negative,$(XSIM_PTW_SOURCES),-d RAPT_RV64 -d RAPT_ASSERT_EN)
+
+xsim-idu-illegal-stval: ## xsim: verify Sstvala reports raw illegal C instruction bits
+	$(call XSIM_RUN,idu_illegal_stval,tb_idu_illegal_stval,$(XSIM_IDU_SOURCES),-d RAPT_RV64 -d RAPT_ASSERT_EN)
+
+xsim-idu-zfhmin: ## xsim: verify all mandatory Zfhmin instructions decode and use halfword LSU widths
+	$(call XSIM_RUN,idu_zfhmin,tb_idu_zfhmin,$(XSIM_IDU_SOURCES),-d RAPT_RV64 -d RAPT_ASSERT_EN)
+
+xsim-idu-cmo: ## xsim: verify RVA22 CMO decode and xenvcfg privilege gating
+	$(call XSIM_RUN,idu_cmo,tb_idu_cmo,$(XSIM_IDU_SOURCES),-d RAPT_RV64 -d RAPT_ASSERT_EN)
 
 xsim-tlb-flush-asid: ## xsim: verify TLB ASID matching and flush priority
 	$(call XSIM_RUN,tlb_flush_asid,tb_tlb_flush_asid,$(XSIM_TLB_SOURCES),-d RAPT_ASSERT_EN)
@@ -1244,11 +1405,17 @@ xsim-bus-read-ownership: ## xsim: verify read response ID ownership and interlea
 xsim-csr-sret-roundtrip: ## xsim: verify CSR reset and U-ecall/SRET round trip
 	$(call XSIM_RUN,csr_sret_roundtrip_$(ISA),tb_csr_sret_roundtrip,$(XSIM_CSR_SOURCES),$(if $(filter rv64,$(ISA)),-d RAPT_RV64,))
 
+xsim-addr-classification: ## xsim: reject malformed RV64 physical-address upper bits
+	$(call XSIM_RUN,addr_classification,tb_addr_classification,"$(RAPTOR_HOME)/hdl/rapt_pkg.sv",-d RAPT_RV64)
+
 xsim-pmp-endpoint: ## xsim: verify variable-size PMP endpoint boundary checks
 	$(call XSIM_RUN,pmp_endpoint,tb_pmp_endpoint,"$(RAPTOR_HOME)/hdl/rapt_pkg.sv" "$(RAPTOR_HOME)/hdl/memory/rapt_pmp.sv",)
 
 xsim-lsu-lr-sq-forward: ## xsim: verify LR waits for SQ drain instead of forwarding
 	$(call XSIM_RUN,lsu_lr_sq_forward,tb_lsu_lr_sq_forward,$(XSIM_LSU_SOURCES),-d RAPT_ASSERT_EN)
+
+xsim-lsu-cbo-zero: ## xsim: verify Zicboz emits eight aligned zero dword stores
+	$(call XSIM_RUN,lsu_cbo_zero,tb_lsu_cbo_zero,$(XSIM_LSU_SOURCES),-d RAPT_RV64 -d RAPT_ASSERT_EN)
 
 LSU_SQ_RANDOM_SEED ?= 1370169382
 xsim-lsu-sq-random: ## xsim: constrained-random SQ ordering, alias, wrap, flush, and backpressure
@@ -1274,6 +1441,137 @@ xsim-rou-dual-commit: ## xsim: verify ROU dual commit and slot1 flush serializat
 xsim-clean: ## Clean xsim directed-check artifacts
 	rm -rf $(XSIM_BUILD_DIR)
 
+# ============================================================================
+# Portable Verilator Directed Checks
+# ============================================================================
+# The directed benches above are simulator-neutral SystemVerilog.  Reuse the
+# same DUT source lists and testbench files with Verilator so the main server
+# regression does not require Vivado/XSim.  Invoke this target with `-jN`; each
+# test owns a separate Mdir and can compile/run independently.
+VERILATOR ?= verilator
+VERILATOR_DIRECTED_BUILD_DIR := $(BUILD_DIR)/verilator-directed
+VERILATOR_DIRECTED_FLAGS ?= --binary --timing --assert -Wno-fatal -j 1
+VERILATOR_DIRECTED_DELAY ?= 63## Random response-delay maximum for module checks
+VERILATOR_DIRECTED_SEED ?= 1## Reproducible seed for randomized module checks
+
+VERILATOR_DIRECTED_TARGETS := \
+	verilator-alu-zbb-strlen \
+	verilator-l2 \
+	verilator-l1d-byte-rom \
+	verilator-l1d-store-coherence \
+	verilator-l1d-flush-ordered \
+	verilator-l1d-cmo-permissions \
+	verilator-l1i-sret-priv-epoch \
+	verilator-ptw-kill-drain \
+	verilator-ptw-profile-negative \
+	verilator-idu-illegal-stval \
+	verilator-idu-zfhmin \
+	verilator-idu-cmo \
+	verilator-tlb-flush-asid \
+	verilator-bus-axi \
+	verilator-bus-read-ownership \
+	verilator-csr-sret-roundtrip-rv32 \
+	verilator-csr-sret-roundtrip-rv64 \
+	verilator-addr-classification \
+	verilator-pmp-endpoint \
+	verilator-lsu-lr-sq-forward \
+	verilator-lsu-cbo-zero \
+	verilator-lsu-sq-random \
+	verilator-ioq \
+	verilator-clint \
+	verilator-plic-gateway \
+	verilator-muldiv-flush-reuse \
+	verilator-muldiv-word-rv64 \
+	verilator-rou-dual-commit
+
+# $(1)=build/log stem, $(2)=top/testbench, $(3)=DUT sources,
+# $(4)=XSim-style defines (`-d NAME`, translated to `-DNAME`),
+# $(5)=runtime plusargs.
+define VERILATOR_DIRECTED_RUN
+	+@set -e -o pipefail; \
+	command -v $(VERILATOR) >/dev/null 2>&1 || { \
+		echo "[verilator-directed] ERROR: $(VERILATOR) not found"; exit 1; }; \
+	rm -rf "$(VERILATOR_DIRECTED_BUILD_DIR)/$(1)"; \
+	mkdir -p "$(VERILATOR_DIRECTED_BUILD_DIR)/$(1)"; \
+	$(VERILATOR) $(VERILATOR_DIRECTED_FLAGS) \
+		--timescale 1ns/1ps --top-module $(2) \
+		$(subst -d ,-D,$(4)) \
+		$(addprefix -I,$(patsubst -i%,%,$(XSIM_COMMON_INCLUDES))) \
+		$(3) "$(XSIM_DIR)/$(2).sv" \
+		--Mdir "$(VERILATOR_DIRECTED_BUILD_DIR)/$(1)/obj" -o $(2) \
+		>"$(VERILATOR_DIRECTED_BUILD_DIR)/$(1)/build.log" 2>&1; \
+	"$(VERILATOR_DIRECTED_BUILD_DIR)/$(1)/obj/$(2)" $(5) \
+		2>&1 | tee "$(VERILATOR_DIRECTED_BUILD_DIR)/$(1)/run.log"; \
+	grep -q "PASS:" "$(VERILATOR_DIRECTED_BUILD_DIR)/$(1)/run.log" || { \
+		echo "[verilator-directed] ERROR: $(2) did not report PASS"; exit 1; }; \
+	echo "[verilator-directed] PASS $(1)"
+endef
+
+.PHONY: verilator-directed verilator-directed-clean $(VERILATOR_DIRECTED_TARGETS)
+
+verilator-directed: $(VERILATOR_DIRECTED_TARGETS) ## Run all module checks with portable Verilator
+	@echo "[verilator-directed] all $(words $(VERILATOR_DIRECTED_TARGETS)) checks passed"
+
+verilator-alu-zbb-strlen:
+	$(call VERILATOR_DIRECTED_RUN,alu_zbb_strlen,tb_alu_zbb_strlen,$(XSIM_ALU_SOURCES),-d RAPT_RV64,)
+verilator-l2:
+	$(call VERILATOR_DIRECTED_RUN,l2,tb_l2_ordered_mmio,$(XSIM_L2_SOURCES),-d RAPT_L2_EN,)
+verilator-l1d-byte-rom:
+	$(call VERILATOR_DIRECTED_RUN,l1d_byte_rom,tb_l1d_byte_rom,$(XSIM_L1D_SOURCES),,)
+verilator-l1d-store-coherence:
+	$(call VERILATOR_DIRECTED_RUN,l1d_store_coherence,tb_l1d_store_coherence,$(XSIM_L1D_SOURCES),,+BUS_DELAY_MAX=$(VERILATOR_DIRECTED_DELAY) +SEED=$(VERILATOR_DIRECTED_SEED))
+verilator-l1d-flush-ordered:
+	$(call VERILATOR_DIRECTED_RUN,l1d_flush_ordered,tb_l1d_flush_ordered,$(XSIM_L1D_SOURCES),-d RAPT_ASSERT_EN,)
+verilator-l1d-cmo-permissions:
+	$(call VERILATOR_DIRECTED_RUN,l1d_cmo_permissions,tb_l1d_cmo_permissions,$(XSIM_L1D_SOURCES),-d RAPT_RV64 -d RAPT_ASSERT_EN,)
+verilator-l1i-sret-priv-epoch:
+	$(call VERILATOR_DIRECTED_RUN,l1i_sret_priv_epoch,tb_l1i_sret_priv_epoch,$(XSIM_L1I_SOURCES),-d RAPT_ASSERT_EN,)
+verilator-ptw-kill-drain:
+	$(call VERILATOR_DIRECTED_RUN,ptw_kill_drain,tb_ptw_kill_drain,$(XSIM_PTW_SOURCES),-d RAPT_ASSERT_EN,)
+verilator-ptw-profile-negative:
+	$(call VERILATOR_DIRECTED_RUN,ptw_profile_negative,tb_ptw_profile_negative,$(XSIM_PTW_SOURCES),-d RAPT_RV64 -d RAPT_ASSERT_EN,)
+verilator-idu-illegal-stval:
+	$(call VERILATOR_DIRECTED_RUN,idu_illegal_stval,tb_idu_illegal_stval,$(XSIM_IDU_SOURCES),-d RAPT_RV64 -d RAPT_ASSERT_EN,)
+verilator-idu-zfhmin:
+	$(call VERILATOR_DIRECTED_RUN,idu_zfhmin,tb_idu_zfhmin,$(XSIM_IDU_SOURCES),-d RAPT_RV64 -d RAPT_ASSERT_EN,)
+verilator-idu-cmo:
+	$(call VERILATOR_DIRECTED_RUN,idu_cmo,tb_idu_cmo,$(XSIM_IDU_SOURCES),-d RAPT_RV64 -d RAPT_ASSERT_EN,)
+verilator-tlb-flush-asid:
+	$(call VERILATOR_DIRECTED_RUN,tlb_flush_asid,tb_tlb_flush_asid,$(XSIM_TLB_SOURCES),-d RAPT_ASSERT_EN,)
+verilator-bus-axi:
+	$(call VERILATOR_DIRECTED_RUN,bus_axi,tb_bus_l1d_rlast,$(XSIM_BUS_SOURCES),,)
+verilator-bus-read-ownership:
+	$(call VERILATOR_DIRECTED_RUN,bus_read_ownership,tb_bus_read_ownership,$(XSIM_BUS_SOURCES),,)
+verilator-csr-sret-roundtrip-rv32:
+	$(call VERILATOR_DIRECTED_RUN,csr_sret_roundtrip_rv32,tb_csr_sret_roundtrip,$(XSIM_CSR_SOURCES),,)
+verilator-csr-sret-roundtrip-rv64:
+	$(call VERILATOR_DIRECTED_RUN,csr_sret_roundtrip_rv64,tb_csr_sret_roundtrip,$(XSIM_CSR_SOURCES),-d RAPT_RV64,)
+verilator-addr-classification:
+	$(call VERILATOR_DIRECTED_RUN,addr_classification,tb_addr_classification,"$(RAPTOR_HOME)/hdl/rapt_pkg.sv",-d RAPT_RV64,)
+verilator-pmp-endpoint:
+	$(call VERILATOR_DIRECTED_RUN,pmp_endpoint,tb_pmp_endpoint,"$(RAPTOR_HOME)/hdl/rapt_pkg.sv" "$(RAPTOR_HOME)/hdl/memory/rapt_pmp.sv",,)
+verilator-lsu-lr-sq-forward:
+	$(call VERILATOR_DIRECTED_RUN,lsu_lr_sq_forward,tb_lsu_lr_sq_forward,$(XSIM_LSU_SOURCES),-d RAPT_ASSERT_EN,)
+verilator-lsu-cbo-zero:
+	$(call VERILATOR_DIRECTED_RUN,lsu_cbo_zero,tb_lsu_cbo_zero,$(XSIM_LSU_SOURCES),-d RAPT_RV64 -d RAPT_ASSERT_EN,)
+verilator-lsu-sq-random:
+	$(call VERILATOR_DIRECTED_RUN,lsu_sq_random,tb_lsu_sq_random,$(XSIM_LSU_SOURCES),-d RAPT_ASSERT_EN,+SEED=$(VERILATOR_DIRECTED_SEED))
+verilator-ioq:
+	$(call VERILATOR_DIRECTED_RUN,ioq,tb_ioq_pending_lock,$(XSIM_IOQ_SOURCES),,)
+verilator-clint:
+	$(call VERILATOR_DIRECTED_RUN,clint,tb_clint,"$(RAPTOR_HOME)/hdl/perip/rapt_clint.sv",,)
+verilator-plic-gateway:
+	$(call VERILATOR_DIRECTED_RUN,plic_gateway,tb_plic_gateway,"$(RAPTOR_HOME)/hdl/perip/rapt_plic.sv",,)
+verilator-muldiv-flush-reuse:
+	$(call VERILATOR_DIRECTED_RUN,muldiv_flush_reuse,tb_muldiv_flush_reuse,$(XSIM_MULDIV_SOURCES),-d RAPT_ASSERT_EN,)
+verilator-muldiv-word-rv64:
+	$(call VERILATOR_DIRECTED_RUN,muldiv_word_rv64,tb_muldiv_flush_reuse,$(XSIM_MULDIV_SOURCES),-d RAPT_RV64 -d RAPT_ASSERT_EN,)
+verilator-rou-dual-commit:
+	$(call VERILATOR_DIRECTED_RUN,rou_dual_commit,tb_rou_dual_commit,$(XSIM_ROU_SOURCES),-d RAPT_ASSERT_EN,)
+
+verilator-directed-clean: ## Clean portable Verilator directed-check artifacts
+	rm -rf $(VERILATOR_DIRECTED_BUILD_DIR)
+
 
 # ============================================================================
 # All-in-one
@@ -1282,5 +1580,5 @@ xsim-clean: ## Clean xsim directed-check artifacts
 
 all: fuzz sigtest ## Run all lightweight verification
 
-clean: fuzz-clean riscof-clean coverage-clean sigtest-clean formal-clean jtag-clean uvm-clean xsim-clean ## Clean all verify artifacts
+clean: fuzz-clean riscof-clean coverage-clean sigtest-clean formal-clean jtag-clean uvm-clean xsim-clean verilator-directed-clean ## Clean all verify artifacts
 	rm -rf $(BUILD_DIR)

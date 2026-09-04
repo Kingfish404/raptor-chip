@@ -7,7 +7,7 @@ APP_HOME   := $(abspath $(_THIS_DIR)/../..)
 include $(APP_HOME)/common.mk
 
 # ---- Directories ----
-COREMARK_DIR := $(APP_HOME)/build/src/coremark
+COREMARK_DIR := $(APP_HOME)/../abstract-machine/app/am-kernels/benchmarks/coremark_eembc/src
 BUILD_DIR    := $(APP_HOME)/build/rv$(XLEN)/coremark
 PORTME_DIR   := $(_THIS_DIR)portme
 
@@ -22,13 +22,7 @@ CFLAGS := $(CFLAGS_COMMON) -std=gnu99 \
           -DITERATIONS=$(ITERATIONS) -DPERFORMANCE_RUN=1 \
           -DCOMPILER_FLAGS=\""$(ARCH)"\"
 
-# ---- Source fetching ----
-$(COREMARK_DIR)/core_main.c:
-	@mkdir -p $(dir $(COREMARK_DIR))
-	git clone --depth 1 https://github.com/eembc/coremark.git $(COREMARK_DIR)
-
-# ---- Build rules (gated on source existence) ----
-ifneq ($(wildcard $(COREMARK_DIR)/core_main.c),)
+# ---- Build rules ----
 
 CORE_SRCS := core_list_join.c core_main.c core_matrix.c core_state.c core_util.c
 PORT_SRCS := core_portme.c
@@ -52,11 +46,8 @@ $(ELF): $(OBJS)
 _build: $(ELF)
 	@:
 
-endif # coremark source exists
-
 # ---- Public targets ----
 build: ## Build coremark.elf
-	@$(MAKE) $(Q) $(COREMARK_DIR)/core_main.c
 	@$(MAKE) $(Q) _build
 
 clean:

@@ -38,10 +38,10 @@ typedef word_t vaddr_t;
 #endif
 
 #define MBASE 0x80000000
-#define MSIZE 0x08000000
+#define MSIZE 0x10000000
 
 #define PSRAM_BASE 0x80000000
-#define PSRAM_SIZE 0x08000000
+#define PSRAM_SIZE 0x10000000
 
 #define SDRAM_BASE 0xa0000000
 #define SDRAM_SIZE 0x02000000
@@ -292,6 +292,9 @@ typedef struct
   long long int l1d_cache_miss_cycle;
 
   // for tlb & page table walk
+  long long int itlb_ptw_count;
+  long long int stlb_ptw_count;
+  long long int ltlb_ptw_count;
   long long int itlb_ptw_cycle;
   long long int stlb_ptw_cycle;
   long long int ltlb_ptw_cycle;
@@ -311,7 +314,8 @@ typedef struct
   long long int branch_recovery_overlap_events;
 
   // -------------------------------------------------------------------
-  // Extended PMU counters (gem5-aligned). Sampled in perf_sample_per_cycle.
+  // Extended Raptor-local PMU counters, sampled in perf_sample_per_cycle.
+  // Similar names in other simulators do not imply identical event boundaries.
   // -------------------------------------------------------------------
   // Exact IFU stall decomposition from mutually-exclusive RTL probes.
   long long int ifu_icache_miss_cycle; // no L1I/PTW response
@@ -332,7 +336,8 @@ typedef struct
   long long int fqu_buffered_cycle;
   long long int fqu_occupancy_sum;
 
-  // Structural-full events  (gem5: iqFullEvents / robFullEvents / sqFullEvents)
+  // Structural-full observations. `rs_*` currently covers the integer ALQ
+  // only; it is not an aggregate of the branch and floating-point queues.
   // *_cycle  = cycles spent fully occupied;  *_events = rising-edge count.
   long long int rs_full_cycle;
   long long int rs_full_events;
@@ -347,14 +352,14 @@ typedef struct
   long long int sq_full_cycle;
   long long int sq_full_events;
 
-  // Commit-width distribution  (gem5: commit.committed_per_cycle / numIssuedDist)
+  // Commit-width distribution.
   //   commit_0_cycle == wbu_stall_cycle (no commit)
   //   commit_1_cycle  = wbu_valid && !wbu_valid_b
-  //   commit_2_cycle == dual_commit_cnt  (kept separate for clarity)
+  //   commit_2_cycle  = wbu_valid && wbu_valid_b
   long long int commit_1_cycle;
   long long int commit_2_cycle;
 
-  // Rename/dispatch status mix  (gem5: rename.status::Running/Blocked/Idle/Squashing)
+  // Rename/dispatch status mix.
   long long int dispatch_running_cycle; // rnu_valid && rou_ready
   long long int dispatch_blocked_cycle; // rnu_valid && !rou_ready  (== rou_hazard_cycle)
   long long int dispatch_idle_cycle;    // !rnu_valid && !squash

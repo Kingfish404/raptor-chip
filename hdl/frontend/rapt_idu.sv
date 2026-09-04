@@ -144,7 +144,7 @@ module rapt_idu #(
   logic fp_writes_fpr_a;
   logic fp_i2f_a, fp_rv64_only_a;
   logic fp_load_a, fp_store_a;
-  logic fp_load_d_a, fp_store_d_a;
+  logic fp_load_d_a, fp_store_d_a, fp_load_h_a, fp_store_h_a;
   logic fp_width_d_a;
   logic [2:0] fp_rm_a;
   logic [4:0] fp_rs1_a, fp_rs2_a, fp_rs3_a, fp_rd_a;
@@ -153,6 +153,7 @@ module rapt_idu #(
   logic        is_c_a;
   logic [31:0] inst_de_a;
   logic [31:0] inst_idu_a;
+  logic [XLEN-1:0] illegal_tval_a;
 
   // ================================================================
   // Slot B: Second Instruction Decode (dual-issue)
@@ -165,6 +166,7 @@ module rapt_idu #(
   logic [4:0] rd_b, rs1_b, rs2_b;
   logic ren_dec_b, wen_dec_b;
   logic fp_valid_b, fp_load_b, fp_store_b, fp_load_d_b, fp_store_d_b;
+  logic fp_load_h_b, fp_store_h_b;
   logic [5:0] fp_op_b;
   logic fp_to_int_b, fp_writes_fpr_b;
   logic fp_i2f_b, fp_rv64_only_b;
@@ -176,6 +178,7 @@ module rapt_idu #(
   logic        is_c_b;
   logic [31:0] inst_de_b;  // Expanded from compressed
   logic [31:0] inst_idu_b;
+  logic [XLEN-1:0] illegal_tval_b;
 
   // Decoder output wires (always 64-bit from generated decoder)
   /* verilator lint_off UNUSEDSIGNAL */
@@ -185,6 +188,10 @@ module rapt_idu #(
 
   assign is_c_a     = (inst_a[1:0] != 2'b11);
   assign inst_idu_a = is_c_a ? inst_de_a : inst_a;
+  // Sstvala requires the actual faulting instruction, right-justified. Do
+  // not report the decompressor output: a reserved 16-bit encoding expands
+  // to the decoder's illegal sentinel and would otherwise lose its raw bits.
+  assign illegal_tval_a = is_c_a ? XLEN'(inst_a[15:0]) : XLEN'(inst_a);
 
   rapt_idu_decoder_c idu_de_c (
       .io_cinst  (inst_a[15:0]),
@@ -240,6 +247,8 @@ module rapt_idu #(
 
   assign fp_load_d_a = fp_load_a && fp_width_d_a;
   assign fp_store_d_a = fp_store_a && fp_width_d_a;
+  assign fp_load_h_a = fp_load_a && fp_op_a == `RAPT_FP_OP_ZFHMIN;
+  assign fp_store_h_a = fp_store_a && fp_op_a == `RAPT_FP_OP_ZFHMIN;
   assign fp_i2f_a = (fp_op_a == `RAPT_FP_OP_FCVT_S_W)
     || (fp_op_a == `RAPT_FP_OP_FCVT_S_WU)
     || (fp_op_a == `RAPT_FP_OP_FCVT_S_L)
@@ -247,7 +256,8 @@ module rapt_idu #(
     || (fp_op_a == `RAPT_FP_OP_FCVT_D_W)
     || (fp_op_a == `RAPT_FP_OP_FCVT_D_WU)
     || (fp_op_a == `RAPT_FP_OP_FCVT_D_L)
-    || (fp_op_a == `RAPT_FP_OP_FCVT_D_LU);
+    || (fp_op_a == `RAPT_FP_OP_FCVT_D_LU)
+    || (fp_op_a == `RAPT_FP_OP_ZFHMIN && inst_idu_a[31:25] == 7'b1111010);
   assign fp_rv64_only_a = (fp_op_a == `RAPT_FP_OP_FCVT_L_S)
     || (fp_op_a == `RAPT_FP_OP_FCVT_LU_S)
     || (fp_op_a == `RAPT_FP_OP_FCVT_S_L)
@@ -293,6 +303,9 @@ module rapt_idu #(
   logic is_wfi_a, is_sfence_vma_a;
   logic wfi_illegal_a, sret_illegal_a, sfence_vma_illegal_a, satp_illegal_a;
   logic counter_illegal_a;
+  logic is_hpm_counter_a;
+  logic is_cbo_inval_a, is_cbo_clean_a, is_cbo_flush_a, is_cbo_zero_a;
+  logic cbo_illegal_a;
   logic [2:0] counter_sel_a;
   assign is_wfi_a = (inst_idu_a == `RAPT_INST_WFI);
   assign is_sfence_vma_a = (inst_idu_a[31:25] == `RAPT_F7_SFENCE_VMA)
@@ -310,27 +323,53 @@ module rapt_idu #(
        || (csr_bcast.priv == `RAPT_PRIV_S && csr_bcast.tvm));
   assign satp_illegal_a = (csr_csw_a != `RAPT_CSR_CSW_NONE) && (csr_a == `RAPT_CSR_SATP___)
       && (csr_bcast.priv == `RAPT_PRIV_S) && csr_bcast.tvm;
-  assign counter_sel_a = (csr_a ==
-      `RAPT_CSR_CYCLE__
-      || csr_a == `RAPT_CSR_CYCLEH_) ?
+  assign counter_sel_a = (csr_a == `RAPT_CSR_CYCLE__
+      || (XLEN == 32 && csr_a == `RAPT_CSR_CYCLEH_)) ?
       `RAPT_CTR_SEL_CY__
-      : (csr_a == `RAPT_CSR_TIME___ || csr_a == `RAPT_CSR_TIMEH__) ?
+      : (csr_a == `RAPT_CSR_TIME___ || (XLEN == 32 && csr_a == `RAPT_CSR_TIMEH__)) ?
       `RAPT_CTR_SEL_TM__
-      : (csr_a == `RAPT_CSR_INSTRET_ || csr_a == `RAPT_CSR_INSTRETH) ?
+      : (csr_a == `RAPT_CSR_INSTRET_ || (XLEN == 32 && csr_a == `RAPT_CSR_INSTRETH)) ?
       `RAPT_CTR_SEL_IR__
       : `RAPT_CTR_SEL_NONE;
+  assign is_hpm_counter_a = (csr_a >= `RAPT_CSR_HPMCOUNTER3
+                          && csr_a <= `RAPT_CSR_HPMCOUNTER31)
+      || (XLEN == 32 && csr_a >= `RAPT_CSR_HPMCOUNTER3H
+                     && csr_a <= `RAPT_CSR_HPMCOUNTER31H);
   assign counter_illegal_a = (csr_csw_a != `RAPT_CSR_CSW_NONE)
-        && (counter_sel_a != `RAPT_CTR_SEL_NONE)
-      && ((csr_bcast.priv ==
+      && (((counter_sel_a != `RAPT_CTR_SEL_NONE) && ((csr_bcast.priv ==
       `RAPT_PRIV_U
       && (((counter_sel_a & csr_bcast.mcounteren) == `RAPT_CTR_SEL_NONE) ||
           ((counter_sel_a & csr_bcast.scounteren) == `RAPT_CTR_SEL_NONE))) || (csr_bcast.priv ==
       `RAPT_PRIV_S
-      && ((counter_sel_a & csr_bcast.mcounteren) == `RAPT_CTR_SEL_NONE)));
+      && ((counter_sel_a & csr_bcast.mcounteren) == `RAPT_CTR_SEL_NONE))))
+      // All HPM enable bits are WARL-zero because every HPM counter is the
+      // architecturally permitted read-only-zero implementation.
+      || (is_hpm_counter_a && csr_bcast.priv != `RAPT_PRIV_M));
+
+  assign is_cbo_inval_a = inst_idu_a[31:20] == 12'h000
+      && inst_idu_a[14:12] == 3'b010 && inst_idu_a[11:7] == 0
+      && inst_idu_a[6:0] == `RAPT_OP_FENCE_;
+  assign is_cbo_clean_a = inst_idu_a[31:20] == 12'h001
+      && inst_idu_a[14:12] == 3'b010 && inst_idu_a[11:7] == 0
+      && inst_idu_a[6:0] == `RAPT_OP_FENCE_;
+  assign is_cbo_flush_a = inst_idu_a[31:20] == 12'h002
+      && inst_idu_a[14:12] == 3'b010 && inst_idu_a[11:7] == 0
+      && inst_idu_a[6:0] == `RAPT_OP_FENCE_;
+  assign is_cbo_zero_a = inst_idu_a[31:20] == 12'h004
+      && inst_idu_a[14:12] == 3'b010 && inst_idu_a[11:7] == 0
+      && inst_idu_a[6:0] == `RAPT_OP_FENCE_;
+  assign cbo_illegal_a = (csr_bcast.priv != `RAPT_PRIV_M) && (
+      (is_cbo_inval_a && (csr_bcast.menvcfg_cbie == 2'b00
+        || (csr_bcast.priv == `RAPT_PRIV_U && csr_bcast.senvcfg_cbie == 2'b00)))
+      || ((is_cbo_clean_a || is_cbo_flush_a) && (!csr_bcast.menvcfg_cbcfe
+        || (csr_bcast.priv == `RAPT_PRIV_U && !csr_bcast.senvcfg_cbcfe)))
+      || (is_cbo_zero_a && (!csr_bcast.menvcfg_cbze
+        || (csr_bcast.priv == `RAPT_PRIV_U && !csr_bcast.senvcfg_cbze))));
 
   assign is_illegal_a = (illegal_inst_a && !fp_valid_a) || illegal_csr_a
       || wfi_illegal_a || sret_illegal_a || sfence_vma_illegal_a
       || satp_illegal_a || counter_illegal_a || fp_disabled_a
+      || cbo_illegal_a
       || (fp_rv64_only_a && XLEN != 64);
 
   // CSR address validity check - returns 1 if the CSR address is legal.
@@ -340,6 +379,19 @@ module rapt_idu #(
     // pmpcfg2/3 and pmpaddr8..15 are WARL-hardwired to zero but remain legal addresses.
     if (addr >= `RAPT_CSR_PMPCFG0 && addr <= `RAPT_CSR_PMPCFG3) return 1'b1;  // pmpcfg0-3
     if (addr >= `RAPT_CSR_PMPADDR0 && addr <= `RAPT_CSR_PMPADDR15) return 1'b1;  // pmpaddr0-15
+    // Zihpm zero-counter implementation: all standard machine/user counter
+    // and event-selector CSRs exist and read zero.  RV32 additionally exposes
+    // the high-half aliases; those encodings remain illegal in RV64.
+    if (addr >= `RAPT_CSR_MHPMCOUNTER3 && addr <= `RAPT_CSR_MHPMCOUNTER31) return 1'b1;
+    if (addr >= `RAPT_CSR_MHPMEVENT3 && addr <= `RAPT_CSR_MHPMEVENT31) return 1'b1;
+    if (addr >= `RAPT_CSR_HPMCOUNTER3 && addr <= `RAPT_CSR_HPMCOUNTER31) return 1'b1;
+    if (XLEN == 32 && addr >= `RAPT_CSR_MHPMCOUNTER3H
+                   && addr <= `RAPT_CSR_MHPMCOUNTER31H) return 1'b1;
+    if (XLEN == 32 && addr >= `RAPT_CSR_HPMCOUNTER3H
+                   && addr <= `RAPT_CSR_HPMCOUNTER31H) return 1'b1;
+    if (XLEN == 32 && (addr == `RAPT_CSR_MCYCLEH || addr == `RAPT_CSR_CYCLEH_
+        || addr == `RAPT_CSR_TIMEH__ || addr == `RAPT_CSR_MINSTRETH
+        || addr == `RAPT_CSR_INSTRETH)) return 1'b1;
     case (addr)
       `RAPT_CSR_FFLAGS, `RAPT_CSR_FRM, `RAPT_CSR_FCSR,
       // Supervisor-level CSRs
@@ -355,9 +407,8 @@ module rapt_idu #(
       `RAPT_CSR_MSCRATCH, `RAPT_CSR_MEPC___,  `RAPT_CSR_MCAUSE_,  `RAPT_CSR_MTVAL__,
       `RAPT_CSR_MIP____,
       // Machine Counters
-      `RAPT_CSR_MCYCLE_, `RAPT_CSR_MCYCLEH, `RAPT_CSR_CYCLE__, `RAPT_CSR_CYCLEH_,
-      `RAPT_CSR_TIME___, `RAPT_CSR_TIMEH__,
-      `RAPT_CSR_MINSTRET, `RAPT_CSR_MINSTRETH, `RAPT_CSR_INSTRET_, `RAPT_CSR_INSTRETH,
+      `RAPT_CSR_MCYCLE_, `RAPT_CSR_CYCLE__, `RAPT_CSR_TIME___,
+      `RAPT_CSR_MINSTRET, `RAPT_CSR_INSTRET_,
       // Machine Information
       `RAPT_CSR_MVENDORID, `RAPT_CSR_MARCHID__, `RAPT_CSR_IMPID____, `RAPT_CSR_MHARTID__:
       return 1'b1;
@@ -373,10 +424,12 @@ module rapt_idu #(
   // For atomics, use funct3=010 to mark 32-bit variant on RV64.
   assign idu_rnu.uop_a.word = word_flag_a
       || (idu_rnu.uop_a.atom && inst_idu_a[14:12] == `RAPT_F3_AMO_W_);
-  assign idu_rnu.uop_a.alu = fp_load_d_a ? `RAPT_ALU_LD__
+  assign idu_rnu.uop_a.alu = fp_load_h_a ? `RAPT_ALU_LH__
+      : (fp_store_h_a ? `RAPT_SH_WSTRB
+      : (fp_load_d_a ? `RAPT_ALU_LD__
       : (fp_store_d_a ? `RAPT_SD_WSTRB
       : (fp_load_a ? `RAPT_ALU_LW__
-      : (fp_store_a ? `RAPT_SW_WSTRB : alu_a)));
+      : (fp_store_a ? `RAPT_SW_WSTRB : alu_a)))));
   assign idu_rnu.uop_a.fp_valid = fp_valid_a;
   assign idu_rnu.uop_a.fp_op = fp_op_a;
   assign idu_rnu.uop_a.fp_rm = fp_rm_a;
@@ -393,7 +446,8 @@ module rapt_idu #(
 
   // Trap aggregation: IFU traps (e.g., page fault) or decode-time illegality
   assign idu_rnu.uop_a.trap = ifu_trap || is_illegal_a;
-  assign idu_rnu.uop_a.tval = ifu_trap ? ifu_tval : is_illegal_a ? inst_idu_a : '0;
+  assign idu_rnu.uop_a.tval = ifu_trap ? ifu_tval
+                             : is_illegal_a ? illegal_tval_a : '0;
   assign idu_rnu.uop_a.cause = ifu_trap ? ifu_cause : is_illegal_a ? `RAPT_CAUSE_ILLEGAL_INST : '0;
 
   // Group-sequential PC (= next PC if every slot in the group falls through).
@@ -561,6 +615,7 @@ module rapt_idu #(
 `ifdef RAPT_DUAL_ISSUE
   assign is_c_b     = (inst_b[1:0] != 2'b11);
   assign inst_idu_b = is_c_b ? inst_de_b : inst_b;
+  assign illegal_tval_b = is_c_b ? XLEN'(inst_b[15:0]) : XLEN'(inst_b);
 
   rapt_idu_decoder_c idu_de_c_b (
       .io_cinst  (inst_b[15:0]),
@@ -616,6 +671,8 @@ module rapt_idu #(
 
   assign fp_load_d_b = fp_load_b && fp_width_d_b;
   assign fp_store_d_b = fp_store_b && fp_width_d_b;
+  assign fp_load_h_b = fp_load_b && fp_op_b == `RAPT_FP_OP_ZFHMIN;
+  assign fp_store_h_b = fp_store_b && fp_op_b == `RAPT_FP_OP_ZFHMIN;
   assign fp_i2f_b = (fp_op_b == `RAPT_FP_OP_FCVT_S_W)
     || (fp_op_b == `RAPT_FP_OP_FCVT_S_WU)
     || (fp_op_b == `RAPT_FP_OP_FCVT_S_L)
@@ -623,7 +680,8 @@ module rapt_idu #(
     || (fp_op_b == `RAPT_FP_OP_FCVT_D_W)
     || (fp_op_b == `RAPT_FP_OP_FCVT_D_WU)
     || (fp_op_b == `RAPT_FP_OP_FCVT_D_L)
-    || (fp_op_b == `RAPT_FP_OP_FCVT_D_LU);
+    || (fp_op_b == `RAPT_FP_OP_FCVT_D_LU)
+    || (fp_op_b == `RAPT_FP_OP_ZFHMIN && inst_idu_b[31:25] == 7'b1111010);
   assign fp_rv64_only_b = (fp_op_b == `RAPT_FP_OP_FCVT_L_S)
     || (fp_op_b == `RAPT_FP_OP_FCVT_LU_S)
     || (fp_op_b == `RAPT_FP_OP_FCVT_S_L)
@@ -644,6 +702,9 @@ module rapt_idu #(
   logic is_wfi_b, is_sfence_vma_b;
   logic wfi_illegal_b, sret_illegal_b, sfence_vma_illegal_b, satp_illegal_b;
   logic counter_illegal_b, fp_disabled_b;
+  logic is_hpm_counter_b;
+  logic is_cbo_inval_b, is_cbo_clean_b, is_cbo_flush_b, is_cbo_zero_b;
+  logic cbo_illegal_b;
   logic [2:0] counter_sel_b;
   assign fp_disabled_b = fp_valid_b && (csr_bcast.fs == 2'b00);
   assign is_wfi_b = (inst_idu_b == `RAPT_INST_WFI);
@@ -662,27 +723,50 @@ module rapt_idu #(
        || (csr_bcast.priv == `RAPT_PRIV_S && csr_bcast.tvm));
   assign satp_illegal_b = (csr_csw_b != `RAPT_CSR_CSW_NONE) && (csr_b == `RAPT_CSR_SATP___)
       && (csr_bcast.priv == `RAPT_PRIV_S) && csr_bcast.tvm;
-  assign counter_sel_b = (csr_b ==
-      `RAPT_CSR_CYCLE__
-      || csr_b == `RAPT_CSR_CYCLEH_) ?
+  assign counter_sel_b = (csr_b == `RAPT_CSR_CYCLE__
+      || (XLEN == 32 && csr_b == `RAPT_CSR_CYCLEH_)) ?
       `RAPT_CTR_SEL_CY__
-      : (csr_b == `RAPT_CSR_TIME___ || csr_b == `RAPT_CSR_TIMEH__) ?
+      : (csr_b == `RAPT_CSR_TIME___ || (XLEN == 32 && csr_b == `RAPT_CSR_TIMEH__)) ?
       `RAPT_CTR_SEL_TM__
-      : (csr_b == `RAPT_CSR_INSTRET_ || csr_b == `RAPT_CSR_INSTRETH) ?
+      : (csr_b == `RAPT_CSR_INSTRET_ || (XLEN == 32 && csr_b == `RAPT_CSR_INSTRETH)) ?
       `RAPT_CTR_SEL_IR__
       : `RAPT_CTR_SEL_NONE;
+  assign is_hpm_counter_b = (csr_b >= `RAPT_CSR_HPMCOUNTER3
+                          && csr_b <= `RAPT_CSR_HPMCOUNTER31)
+      || (XLEN == 32 && csr_b >= `RAPT_CSR_HPMCOUNTER3H
+                     && csr_b <= `RAPT_CSR_HPMCOUNTER31H);
   assign counter_illegal_b = (csr_csw_b != `RAPT_CSR_CSW_NONE)
-        && (counter_sel_b != `RAPT_CTR_SEL_NONE)
-      && ((csr_bcast.priv ==
+      && (((counter_sel_b != `RAPT_CTR_SEL_NONE) && ((csr_bcast.priv ==
       `RAPT_PRIV_U
       && (((counter_sel_b & csr_bcast.mcounteren) == `RAPT_CTR_SEL_NONE) ||
           ((counter_sel_b & csr_bcast.scounteren) == `RAPT_CTR_SEL_NONE))) || (csr_bcast.priv ==
       `RAPT_PRIV_S
-      && ((counter_sel_b & csr_bcast.mcounteren) == `RAPT_CTR_SEL_NONE)));
+      && ((counter_sel_b & csr_bcast.mcounteren) == `RAPT_CTR_SEL_NONE))))
+      || (is_hpm_counter_b && csr_bcast.priv != `RAPT_PRIV_M));
+  assign is_cbo_inval_b = inst_idu_b[31:20] == 12'h000
+      && inst_idu_b[14:12] == 3'b010 && inst_idu_b[11:7] == 0
+      && inst_idu_b[6:0] == `RAPT_OP_FENCE_;
+  assign is_cbo_clean_b = inst_idu_b[31:20] == 12'h001
+      && inst_idu_b[14:12] == 3'b010 && inst_idu_b[11:7] == 0
+      && inst_idu_b[6:0] == `RAPT_OP_FENCE_;
+  assign is_cbo_flush_b = inst_idu_b[31:20] == 12'h002
+      && inst_idu_b[14:12] == 3'b010 && inst_idu_b[11:7] == 0
+      && inst_idu_b[6:0] == `RAPT_OP_FENCE_;
+  assign is_cbo_zero_b = inst_idu_b[31:20] == 12'h004
+      && inst_idu_b[14:12] == 3'b010 && inst_idu_b[11:7] == 0
+      && inst_idu_b[6:0] == `RAPT_OP_FENCE_;
+  assign cbo_illegal_b = (csr_bcast.priv != `RAPT_PRIV_M) && (
+      (is_cbo_inval_b && (csr_bcast.menvcfg_cbie == 2'b00
+        || (csr_bcast.priv == `RAPT_PRIV_U && csr_bcast.senvcfg_cbie == 2'b00)))
+      || ((is_cbo_clean_b || is_cbo_flush_b) && (!csr_bcast.menvcfg_cbcfe
+        || (csr_bcast.priv == `RAPT_PRIV_U && !csr_bcast.senvcfg_cbcfe)))
+      || (is_cbo_zero_b && (!csr_bcast.menvcfg_cbze
+        || (csr_bcast.priv == `RAPT_PRIV_U && !csr_bcast.senvcfg_cbze))));
 
   assign is_illegal_b = (illegal_inst_b && !fp_valid_b) || illegal_csr_b
       || wfi_illegal_b || sret_illegal_b || sfence_vma_illegal_b
       || satp_illegal_b || counter_illegal_b || fp_disabled_b
+      || cbo_illegal_b
       || (fp_rv64_only_b && XLEN != 64);
 
   // Slot B UOP assembly
@@ -696,18 +780,21 @@ module rapt_idu #(
   assign idu_rnu.uop_b.fp_rd = fp_rd_b;
   assign idu_rnu.uop_b.word = word_flag_b
       || (idu_rnu.uop_b.atom && inst_idu_b[14:12] == `RAPT_F3_AMO_W_);
-  assign idu_rnu.uop_b.alu = fp_load_d_b ? `RAPT_ALU_LD__
+  assign idu_rnu.uop_b.alu = fp_load_h_b ? `RAPT_ALU_LH__
+      : (fp_store_h_b ? `RAPT_SH_WSTRB
+      : (fp_load_d_b ? `RAPT_ALU_LD__
       : (fp_store_d_b ? `RAPT_SD_WSTRB
       : (fp_load_b ? `RAPT_ALU_LW__
-      : (fp_store_b ? `RAPT_SW_WSTRB : alu_b)));
-  assign idu_rnu.uop_b.rd[RLEN-1:0] = (is_illegal_b || fp_writes_fpr_b) ? '0
+      : (fp_store_b ? `RAPT_SW_WSTRB : alu_b)))));
+  assign idu_rnu.uop_b.rd[RLEN-1:0] =
+      (is_illegal_b || fp_writes_fpr_b || fp_store_b || fp_store_d_b) ? '0
       : (fp_valid_b ? fp_rd_b[RLEN-1:0] : rd_b[RLEN-1:0]);
   assign idu_rnu.uop_b.ren = ren_dec_b || fp_load_b || fp_load_d_b;
   assign idu_rnu.uop_b.wen = wen_dec_b || fp_store_b || fp_store_d_b;
   assign idu_rnu.uop_b.csr_csw = csr_csw_b;
 
   assign idu_rnu.uop_b.trap = is_illegal_b;
-  assign idu_rnu.uop_b.tval = is_illegal_b ? inst_idu_b : '0;
+  assign idu_rnu.uop_b.tval = is_illegal_b ? illegal_tval_b : '0;
   assign idu_rnu.uop_b.cause = is_illegal_b ? `RAPT_CAUSE_ILLEGAL_INST : '0;
 
   assign idu_rnu.uop_b.pnpc = (slot_b_direct_jal || slot_b_cond_branch)

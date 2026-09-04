@@ -58,6 +58,24 @@ static bool isnan_bits(uint64_t b,bool dbl){
 int main(int argc,char**argv){
     Verilated::commandArgs(argc,argv); top=new Vrapt_fpu_addsub_tb; reset();
     int N=getenv("N")?atoi(getenv("N")):100000; int fails=0,total=0,nanok=0;
+    // FLEN=64 requires single-precision inputs to be NaN-boxed. Exercise an
+    // invalid box explicitly; the random differential loop boxes all singles.
+    for (bool sub : {false, true}) {
+        top->is_double=0; top->op=sub?OP_FSUB_S:OP_FADD_S;
+        top->rounding_mode=0;
+        top->operand_a=0xffffefff00000000ULL;
+        top->operand_b=0xffffffff3f800000ULL;
+        top->valid=1; tick(); top->valid=0;
+        int c=0; while(!top->dut_valid&&c<40){tick();c++;}
+        total++;
+        if(!top->dut_valid || top->dut_result!=0xffffffff7fc00000ULL
+            || top->dut_flags!=0){
+            fails++;
+            printf("BAD NAN BOX sub=%d dut=%016llx f=%02x\n",sub,
+                   (unsigned long long)top->dut_result,top->dut_flags);
+        }
+        tick();
+    }
     for(int it=0;it<N;it++){
         bool dbl=xr()&1, sub=xr()&1; int rm=xr()%4; // RNE/RTZ/RDN/RUP
         uint64_t a=gen(xr()),b=gen(xr());

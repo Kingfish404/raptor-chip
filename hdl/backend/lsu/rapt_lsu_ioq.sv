@@ -43,6 +43,7 @@ module rapt_lsu_ioq #(
     lsu_l1d_mmu_if.master exu_l1d,
     fpr_if.ioq            fpr,
     cdb_if.out            exu_ioq_bcast,
+    output logic [XLEN-1:0] sq_waddr_hi,
     load_fast_if.source   load_fast,
 
     // A2: PMU: one-cycle pulse when IOQ becomes full
@@ -52,9 +53,16 @@ module rapt_lsu_ioq #(
 );
   localparam unsigned IOQLen = $clog2(IOQ_SIZE);
   localparam unsigned ROBLen = $clog2(ROB_SIZE);
+  localparam unsigned WordOffBits = $clog2(XLEN / 8);
+  localparam unsigned PageOffBits = 12;
 
   // === IOQ state ===
   logic [IOQ_SIZE-1:0] ioq_valid;
+  // Width-stable occupancy probes for the C++ PMU. Reading ioq_valid through
+  // a uint8_t silently truncated configurations with more than eight entries,
+  // while comparing it with 8'hff never detected full 2/4-entry queues.
+  logic pmu_ioq_any_valid /*verilator public_flat_rd*/;
+  logic pmu_ioq_all_full  /*verilator public_flat_rd*/;
   logic [  IOQLen-1:0] ioq_tail_a;
   logic [  IOQLen-1:0] ioq_head;
 
@@ -80,6 +88,8 @@ module rapt_lsu_ioq #(
   logic [IOQ_SIZE-1:0] ioq_trap;
   logic [    XLEN-1:0] ioq_cause        [IOQ_SIZE];
   logic [    XLEN-1:0] ioq_paddr        [IOQ_SIZE];
+  logic [    XLEN-1:0] ioq_paddr_hi     [IOQ_SIZE];
+  logic [IOQ_SIZE-1:0] ioq_mmu_second;
   logic [IOQ_SIZE-1:0] ioq_ren;
   logic [IOQ_SIZE-1:0] ioq_atom;
   logic [IOQ_SIZE-1:0] ioq_fp_valid;
@@ -111,8 +121,25 @@ module rapt_lsu_ioq #(
   logic [IOQ_SIZE-1:0] ioq_load_issue_vec;
   logic [IOQ_SIZE-1:0] ioq_older_store_blk;
 
+  // Registered A-channel request stage.  Besides holding the request stable
+  // across LSU backpressure, this is the timing boundary between the IOQ's
+  // age/hazard arbitration and the L1D/PMP/fast-wakeup response cone.
+  logic                load_req_valid_q;
+  logic [  IOQLen-1:0] load_req_idx_q;
+  logic [    XLEN-1:0] load_req_addr_q;
+  logic [         4:0] load_req_alu_q;
+  logic                load_req_atomic_q;
+  logic                load_req_ordered_q;
+  logic [    XLEN-1:0] load_req_pc_q;
+  logic                load_req_fp64_q;
+  logic                load_req_fast_eligible_q;
+  logic [    PLEN-1:0] load_req_prd_q;
+
   logic                ioq_valid_found;
   logic                reservation_match;
+
+  assign pmu_ioq_any_valid = |ioq_valid;
+  assign pmu_ioq_all_full  = &ioq_valid;
 
   // === Status outputs to top-level dispatch ===
   logic [  IOQLen-1:0] ioq_tail_b;
@@ -150,11 +177,18 @@ module rapt_lsu_ioq #(
         age_j = ({1'b0, j[$clog2(IOQ_SIZE)-1:0]} - {1'b0, ioq_head}) &
             ((1 << $clog2(IOQ_SIZE)) - 1);
         if (ioq_valid[j] && ioq_wen[j] && age_j < age_i) begin
-          if (|ioq_pr1[j] || ioq_mmu_en[j] || (ioq_valid[i] && (ioq_eff_addr[j][XLEN-1:$clog2(
-                  XLEN/8
-              )] == ioq_eff_addr[i][XLEN-1:$clog2(
-                  XLEN/8
-              )]))) begin
+          // Translation preserves the 4 KiB page offset. Even before either
+          // VPN has been translated, different word offsets therefore prove
+          // that the accesses cannot alias. Same-offset accesses on different
+          // virtual pages remain conservatively blocked until the store leaves
+          // the IOQ; exact physical disambiguation is performed downstream.
+          if (|ioq_pr1[j]
+              || (ioq_valid[i]
+                  && (csr_bcast.dmmu_en
+                    ? (ioq_eff_addr[j][PageOffBits-1:WordOffBits]
+                       == ioq_eff_addr[i][PageOffBits-1:WordOffBits])
+                    : (ioq_eff_addr[j][XLEN-1:WordOffBits]
+                       == ioq_eff_addr[i][XLEN-1:WordOffBits])))) begin
             ioq_older_store_blk[i] = 1'b1;
           end
         end
@@ -198,48 +232,42 @@ module rapt_lsu_ioq #(
     end
   end
 
-  // active_idx = pending_idx during miss; else PE output (atomics preempt)
+  // Atomics preempt ordinary loads at the request-stage input.  Completed
+  // atomics must not be restaged during the cycle before head writeback.
   logic [$clog2(IOQ_SIZE)-1:0] active_idx;
   logic head_is_atomic_ready;
   assign head_is_atomic_ready = ioq_valid[ioq_head] && ioq_atom[ioq_head]
+      && !ioq_complete[ioq_head]
       && ioq_pr1[ioq_head] == 0 && ioq_pr2[ioq_head] == 0;
-  assign active_idx = oo_pending ? oo_pending_idx
-                     : (head_is_atomic_ready ? ioq_head : ioq_issue_idx);
 
-  logic issue_valid_now;
-  assign issue_valid_now = oo_pending
-      ? ioq_valid[oo_pending_idx]
-      : (head_is_atomic_ready || ioq_issue_found);
+  logic [IOQLen-1:0] load_req_sel_idx;
+  logic [XLEN-1:0] load_req_sel_addr;
+  logic load_req_sel_valid;
+  assign load_req_sel_idx = head_is_atomic_ready ? ioq_head : ioq_issue_idx;
+  assign load_req_sel_addr = ioq_atom[load_req_sel_idx]
+      ? ioq_vj[load_req_sel_idx]
+      : ioq_vj[load_req_sel_idx] + ioq_imm[load_req_sel_idx];
+  assign load_req_sel_valid = (head_is_atomic_ready || ioq_issue_found)
+      && ioq_valid[load_req_sel_idx]
+      && ioq_ren[load_req_sel_idx]
+      && !ioq_complete[load_req_sel_idx]
+      && ioq_pr1[load_req_sel_idx] == 0 && ioq_pr2[load_req_sel_idx] == 0
+      && (csr_bcast.dmmu_en
+          || rapt_pkg::addr_cacheable(load_req_sel_addr)
+          || (load_req_sel_idx == ioq_head && ioq_at_rob_head));
 
-  logic active_load_done;
-  assign active_load_done = ioq_complete[active_idx];
+  assign active_idx = load_req_idx_q;
 
   // === LSU output ===
-  // issue_valid_now guarantees ioq_valid[active_idx] (or an in-flight pending
-  // entry), so the payload reads below are always of a live entry.
-  assign exu_lsu.rvalid = (issue_valid_now
-      && ioq_ren[active_idx]
-      && !active_load_done
-      && ioq_pr1[active_idx] == 0 && ioq_pr2[active_idx] == 0
-      && (csr_bcast.dmmu_en
-          || (issue_valid_now && rapt_pkg::addr_cacheable(
-      exu_lsu.raddr
-  )) || (active_idx == ioq_head && ioq_at_rob_head)));
-  assign exu_lsu.raddr = ioq_atom[active_idx]
-      ? ioq_vj[active_idx]
-      : ioq_vj[active_idx] + ioq_imm[active_idx];
-  assign exu_lsu.ralu = ioq_atom[active_idx]
-      ? (ioq_word[active_idx] ? `RAPT_ALU_LW__ : `RAPT_ALU_LD__)
-      : ((ioq_fp_valid[active_idx] && ioq_fp_op[active_idx] == `RAPT_FP_OP_FLD)
-        ?
-      `RAPT_ALU_LD__
-      : ((ioq_fp_valid[active_idx] && ioq_fp_op[active_idx] == `RAPT_FP_OP_FLW) ? `RAPT_ALU_LW__ :
-         ioq_alu[active_idx][4:0]));
-  assign exu_lsu.fp_rdata64_req = ioq_fp_valid[active_idx]
-      && ioq_fp_op[active_idx] == `RAPT_FP_OP_FLD;
-  assign exu_lsu.atomic_lock = ioq_atom[active_idx] && ioq_alu[active_idx] == `RAPT_ATO_LR__;
-  assign exu_lsu.ordered = (active_idx == ioq_head) && ioq_at_rob_head;
-  assign exu_lsu.pc = ioq_pc[active_idx];
+  // All fields come from the same register bank and remain stable until the
+  // response handshake.  This is a deliberate one-cycle issue pipeline.
+  assign exu_lsu.rvalid         = load_req_valid_q;
+  assign exu_lsu.raddr          = load_req_addr_q;
+  assign exu_lsu.ralu           = load_req_alu_q;
+  assign exu_lsu.fp_rdata64_req = load_req_fp64_q;
+  assign exu_lsu.atomic_lock    = load_req_atomic_q;
+  assign exu_lsu.ordered        = load_req_ordered_q;
+  assign exu_lsu.pc             = load_req_pc_q;
 
   assign fpr.ioq_raddr = ioq_fp_rs2[ioq_head];
 
@@ -285,13 +313,45 @@ module rapt_lsu_ioq #(
 `else
   assign head_store_walu = ioq_atom[ioq_head] ? `RAPT_SW_WSTRB : ioq_alu[ioq_head][4:0];
 `endif
+  logic head_is_cbo_mgmt;
+  assign head_is_cbo_mgmt = head_store_walu == `RAPT_CBO_MGMT_WALU;
+
+  // A misaligned store may touch two virtual pages whose physical pages are
+  // not contiguous.  Translate the second page before the store is allowed
+  // to leave the IOQ, so a fault remains precise and the SQ has both PAs.
+  logic [XLEN-1:0] head_store_vaddr;
+  logic [XLEN-1:0] head_store_last_vaddr;
+  logic [XLEN-1:0] head_store_hi_vaddr;
+  logic [3:0] head_store_size;
+  logic head_store_cross_page;
+  assign head_store_vaddr = ioq_vj[ioq_head] + ioq_imm[ioq_head];
+  always_comb begin
+    unique case (head_store_walu)
+      `RAPT_SB_WSTRB: head_store_size = 4'd1;
+      `RAPT_SH_WSTRB: head_store_size = 4'd2;
+      `RAPT_SW_WSTRB: head_store_size = 4'd4;
+      `RAPT_SD_WSTRB: head_store_size = 4'd8;
+      `RAPT_CBO_ZERO_WALU,
+      `RAPT_CBO_MGMT_WALU: head_store_size = 4'd1;
+      default:        head_store_size = 4'd4;
+    endcase
+    if ((XLEN == 32) && ioq_fp_valid[ioq_head]
+        && ioq_fp_op[ioq_head] == `RAPT_FP_OP_FSD)
+      head_store_size = 4'd8;
+  end
+  assign head_store_last_vaddr = head_store_vaddr + XLEN'(head_store_size - 1'b1);
+  assign head_store_cross_page =
+      head_store_vaddr[XLEN-1:12] != head_store_last_vaddr[XLEN-1:12];
+  assign head_store_hi_vaddr = {head_store_last_vaddr[XLEN-1:12], 12'b0};
 
   // === MMU for Store at head ===
   assign exu_l1d.mmu_en = (ioq_wen[ioq_head]
       && ioq_mmu_en[ioq_head]
       && ioq_pr1[ioq_head] == 0 && ioq_pr2[ioq_head] == 0);
-  assign exu_l1d.vaddr = ioq_vj[ioq_head] + ioq_imm[ioq_head];
+  assign exu_l1d.vaddr = ioq_mmu_second[ioq_head]
+      ? head_store_hi_vaddr : head_store_vaddr;
   assign exu_l1d.walu = head_store_walu;
+  assign exu_l1d.cmo_mgmt = head_is_cbo_mgmt;
   assign exu_l1d.valid = (ioq_wen[ioq_head] && ioq_pr1[ioq_head] == 0 && ioq_pr2[ioq_head] == 0);
 
   // === PMP check for bare-mode (non-MMU) stores at head ===
@@ -302,6 +362,7 @@ module rapt_lsu_ioq #(
   // MPRV still takes effect on effective privilege for memory accesses.
   logic [1:0] ioq_store_eff_priv;
   logic       pmp_store_bare_fault;
+  logic       pmp_load_bare_fault;
   assign ioq_store_eff_priv = (csr_bcast.priv == `RAPT_PRIV_M && csr_bcast.mprv)
                               ? csr_bcast.mpp
                               : csr_bcast.priv;
@@ -312,6 +373,8 @@ module rapt_lsu_ioq #(
       `RAPT_SH_WSTRB: store_bare_size_m1 = 4'd1;
       `RAPT_SW_WSTRB: store_bare_size_m1 = 4'd3;
       `RAPT_SD_WSTRB: store_bare_size_m1 = 4'd7;
+      `RAPT_CBO_ZERO_WALU,
+      `RAPT_CBO_MGMT_WALU: store_bare_size_m1 = 4'd0;
       default:        store_bare_size_m1 = 4'd3;
     endcase
   end
@@ -335,11 +398,36 @@ module rapt_lsu_ioq #(
       .fault         (pmp_store_bare_fault),
       .fault_lo_o    ()
   );
+  // Zicbom management operations are permitted when either an ordinary load
+  // or an ordinary store is permitted.  Keep the two PMP predicates separate
+  // so a read-only or write-only region is accepted as required.
+  rapt_pmp u_pmp_load_for_cbo (
+      .addr          (ioq_vj[ioq_head] + ioq_imm[ioq_head]),
+      .size_m1       (store_bare_size_m1),
+      .priv          (ioq_store_eff_priv),
+      .op_r          (1'b1),
+      .op_w          (1'b0),
+      .op_x          (1'b0),
+      .pmp_raw_addr  (pmp_state.pmp_raw_addr),
+      .pmp_napot_mask(pmp_state.pmp_napot_mask),
+      .pmp_cfg_r     (pmp_state.pmp_cfg_r),
+      .pmp_cfg_w     (pmp_state.pmp_cfg_w),
+      .pmp_cfg_x     (pmp_state.pmp_cfg_x),
+      .pmp_cfg_l     (pmp_state.pmp_cfg_l),
+      .pmp_mode_off  (pmp_state.pmp_mode_off),
+      .pmp_mode_tor  (pmp_state.pmp_mode_tor),
+      .pmp_mode_na4  (pmp_state.pmp_mode_na4),
+      .pmp_mode_napot(pmp_state.pmp_mode_napot),
+      .fault         (pmp_load_bare_fault),
+      .fault_lo_o    ()
+  );
   logic store_bare_pmp_trap;
   assign store_bare_pmp_trap = ioq_wen[ioq_head]
                                && !ioq_mmu_en[ioq_head]
                                && !csr_bcast.dmmu_en
-                               && (pmp_store_bare_fault
+                               && ((head_is_cbo_mgmt
+                                      ? (pmp_store_bare_fault && pmp_load_bare_fault)
+                                      : pmp_store_bare_fault)
                                    || !rapt_pkg::addr_mapped(
       ioq_vj[ioq_head] + ioq_imm[ioq_head]
   ));
@@ -405,26 +493,39 @@ module rapt_lsu_ioq #(
   assign exu_ioq_bcast.dest = ioq_dest[ioq_head];
   assign exu_ioq_bcast.prd = ioq_prd[ioq_head];
   assign exu_ioq_bcast.rd = ioq_rd[ioq_head];
-  assign exu_ioq_bcast.wen      = (ioq_atom[ioq_head] && ioq_alu[ioq_head] == `RAPT_ATO_SC__)
+  assign exu_ioq_bcast.wen      = head_is_cbo_mgmt ? 1'b0
+      : (ioq_atom[ioq_head] && ioq_alu[ioq_head] == `RAPT_ATO_SC__)
       ? (reservation_match ? 1 : 0)
       : (ioq_wen[ioq_head]);
   assign exu_ioq_bcast.alu = ioq_atom[ioq_head] ? {1'b0, head_store_walu} : ioq_alu[ioq_head];
   assign exu_ioq_bcast.sq_waddr = csr_bcast.dmmu_en
       ? ioq_paddr[ioq_head]
       : ioq_vj[ioq_head] + ioq_imm[ioq_head];
+  assign sq_waddr_hi = (csr_bcast.dmmu_en && head_store_cross_page)
+      ? ioq_paddr_hi[ioq_head]
+      : {exu_ioq_bcast.sq_waddr[XLEN-1:$clog2(XLEN/8)], {$clog2(XLEN/8){1'b0}}}
+        + XLEN'(XLEN/8);
   assign exu_ioq_bcast.sq_wdata = ioq_atom[ioq_head] ? head_amo_wdata
       : ((ioq_fp_valid[ioq_head] && ioq_fp_op[ioq_head] == `RAPT_FP_OP_FSW)
         ? fpr.ioq_rdata[XLEN-1:0]
         : ((ioq_fp_valid[ioq_head] && ioq_fp_op[ioq_head] == `RAPT_FP_OP_FSD)
-          ? fpr.ioq_rdata[XLEN-1:0] : ioq_vk[ioq_head]));
+          ? fpr.ioq_rdata[XLEN-1:0]
+          : ((ioq_fp_valid[ioq_head] && ioq_fp_op[ioq_head] == `RAPT_FP_OP_ZFHMIN
+              && ioq_wen[ioq_head])
+            ? fpr.ioq_rdata[XLEN-1:0] : ioq_vk[ioq_head])));
   assign exu_ioq_bcast.sq_wdata64 = fpr.ioq_rdata;
   assign exu_ioq_bcast.sq_fp64 = ioq_fp_valid[ioq_head] && ioq_fp_op[ioq_head] == `RAPT_FP_OP_FSD;
   assign fpr.ioq_wvalid = exu_ioq_bcast.valid && ioq_fp_valid[ioq_head] && (ioq_fp_op[ioq_head] ==
       `RAPT_FP_OP_FLW
-      || ioq_fp_op[ioq_head] == `RAPT_FP_OP_FLD) && !head_trap_lsu;
+      || ioq_fp_op[ioq_head] == `RAPT_FP_OP_FLD
+      || (ioq_fp_op[ioq_head] == `RAPT_FP_OP_ZFHMIN && ioq_ren[ioq_head]))
+      && !head_trap_lsu;
   assign fpr.ioq_waddr = ioq_fp_rd[ioq_head];
   assign fpr.ioq_wdata = (ioq_fp_op[ioq_head] == `RAPT_FP_OP_FLD)
-      ? ioq_fp_rdata64[ioq_head] : {32'hffff_ffff, head_rdata[31:0]};
+      ? ioq_fp_rdata64[ioq_head]
+      : (ioq_fp_op[ioq_head] == `RAPT_FP_OP_ZFHMIN)
+        ? {48'hffff_ffff_ffff, head_rdata[15:0]}
+        : {32'hffff_ffff, head_rdata[31:0]};
   // For AMO RW (atomic with both R and W), PMP/page fault on either side
   // is reported as a store access fault per RISC-V spec.  LR is treated as a
   // pure load; SC as a pure store (PMP store path).
@@ -447,7 +548,7 @@ module rapt_lsu_ioq #(
       : ioq_cause[ioq_head]));
   assign exu_ioq_bcast.difftest_skip =
       (ioq_ren[ioq_head] && head_skip_lsu)
-      || (ioq_wen[ioq_head] && rapt_pkg::addr_mmio(
+      || (ioq_wen[ioq_head] && !head_is_cbo_mgmt && rapt_pkg::addr_mmio(
       exu_ioq_bcast.sq_waddr
   ));
 
@@ -483,16 +584,13 @@ module rapt_lsu_ioq #(
   logic fast_load_confirm;
   logic fast_load_rebusy;
 
-  assign fast_load_fire = exu_lsu.rvalid
+  assign fast_load_fire = load_req_valid_q
       && exu_lsu.rready
-      && (active_idx == ioq_head)
-      && ioq_valid[active_idx]
-      && ioq_ren[active_idx]
-      && !ioq_atom[active_idx]
+      && (load_req_idx_q == ioq_head)
+      && load_req_fast_eligible_q
       && !exu_lsu.trap
       && !exu_lsu.difftest_skip
-      && (ioq_rd[active_idx] != '0)
-      && (ioq_prd[active_idx] != '0);
+      && (load_req_prd_q != '0);
   assign fast_load_confirm = fast_load_pending
       && exu_ioq_bcast.valid
       && (exu_ioq_bcast.prd == fast_load_prd_q);
@@ -500,7 +598,7 @@ module rapt_lsu_ioq #(
 
   assign load_fast.valid = fast_load_fire || fast_load_rebusy;
   assign load_fast.rebusy = fast_load_rebusy;
-  assign load_fast.prd = fast_load_rebusy ? fast_load_prd_q : ioq_prd[active_idx];
+  assign load_fast.prd = fast_load_rebusy ? fast_load_prd_q : load_req_prd_q;
 
   // === Sequential: enqueue / dequeue / forwarding / OoO LSU FSM ===
   logic ioq_full_r;  // Previous cycle full state (for pmu_ioq_full rising-edge detection)
@@ -583,6 +681,7 @@ module rapt_lsu_ioq #(
       ioq_ren           <= '0;
       ioq_wen           <= '0;
       ioq_mmu_en        <= '0;
+      ioq_mmu_second    <= '0;
       ioq_valid         <= '0;
       ioq_head          <= '0;
       ioq_tail_a        <= '0;
@@ -592,6 +691,8 @@ module rapt_lsu_ioq #(
       ioq_fp_dep2_busy  <= '0;
       oo_pending        <= 1'b0;
       oo_pending_idx    <= '0;
+      load_req_valid_q  <= 1'b0;
+      load_req_idx_q    <= '0;
       ioq_full_r        <= 1'b0;  // A2: Initialize full state tracker
       fast_load_pending <= 1'b0;
       fast_load_prd_q   <= '0;
@@ -611,8 +712,47 @@ module rapt_lsu_ioq #(
       end
       if (fast_load_fire) begin
         fast_load_pending <= 1'b1;
-        fast_load_prd_q   <= ioq_prd[active_idx];
+        fast_load_prd_q   <= load_req_prd_q;
       end
+
+      // ---- Registered load-request pipeline ----
+      // An occupied stage is held verbatim until the LSU response handshake.
+      // Deliberately do not refill it on the handshake edge: ioq_complete for
+      // the returning entry is written on that same edge, so the one-cycle
+      // bubble also prevents the just-completed entry from being reselected.
+      if (!load_req_valid_q) begin
+        if (load_req_sel_valid) begin
+          load_req_valid_q <= 1'b1;
+          load_req_idx_q   <= load_req_sel_idx;
+          load_req_addr_q  <= load_req_sel_addr;
+          load_req_alu_q   <= ioq_atom[load_req_sel_idx]
+              ? (ioq_word[load_req_sel_idx] ? `RAPT_ALU_LW__ : `RAPT_ALU_LD__)
+              : ((ioq_fp_valid[load_req_sel_idx]
+                    && ioq_fp_op[load_req_sel_idx] == `RAPT_FP_OP_FLD)
+                  ? `RAPT_ALU_LD__
+                  : ((ioq_fp_valid[load_req_sel_idx]
+                        && ioq_fp_op[load_req_sel_idx] == `RAPT_FP_OP_FLW)
+                      ? `RAPT_ALU_LW__ : ioq_alu[load_req_sel_idx][4:0]));
+          load_req_atomic_q <= ioq_atom[load_req_sel_idx]
+              && ioq_alu[load_req_sel_idx] == `RAPT_ATO_LR__;
+          load_req_ordered_q <= (load_req_sel_idx == ioq_head) && ioq_at_rob_head;
+          load_req_pc_q <= ioq_pc[load_req_sel_idx];
+          load_req_fp64_q <= ioq_fp_valid[load_req_sel_idx]
+              && ioq_fp_op[load_req_sel_idx] == `RAPT_FP_OP_FLD;
+          load_req_fast_eligible_q <= !ioq_atom[load_req_sel_idx]
+              && (ioq_rd[load_req_sel_idx] != '0);
+          load_req_prd_q <= ioq_prd[load_req_sel_idx];
+        end
+      end else if (exu_lsu.rready) begin
+        load_req_valid_q <= 1'b0;
+      end
+      // A translated MMU load can turn out to be MMIO even though its virtual
+      // address looked like an ordinary kernel mapping when it was selected
+      // out of order.  L1D parks such a request until `ordered` is asserted.
+      // Promote the held request once it reaches both queue heads; otherwise
+      // its issue-time ordered=0 snapshot can deadlock forever in L1D LD_A.
+      if (load_req_valid_q && (load_req_idx_q == ioq_head) && ioq_at_rob_head)
+        load_req_ordered_q <= 1'b1;
       // ---- Static per-entry enqueue mux (B > A on any selector alias) ----
       for (int i = 0; i < IOQ_SIZE; i++) begin
         if (disp_b_selects_entry(i)) begin
@@ -632,6 +772,7 @@ module rapt_lsu_ioq #(
           ioq_imm[i]          <= rou_exu.uop_b.imm;
           ioq_wen[i]          <= rou_exu.uop_b.wen;
           ioq_mmu_en[i]       <= csr_bcast.dmmu_en;
+          ioq_mmu_second[i]   <= 1'b0;
           ioq_ren[i]          <= rou_exu.uop_b.ren;
           ioq_atom[i]         <= rou_exu.uop_b.atom;
           ioq_fp_valid[i]     <= rou_exu.uop_b.fp_valid;
@@ -661,6 +802,7 @@ module rapt_lsu_ioq #(
           ioq_imm[i]          <= rou_exu.uop.imm;
           ioq_wen[i]          <= rou_exu.uop.wen;
           ioq_mmu_en[i]       <= csr_bcast.dmmu_en;
+          ioq_mmu_second[i]   <= 1'b0;
           ioq_ren[i]          <= rou_exu.uop.ren;
           ioq_atom[i]         <= rou_exu.uop.atom;
           ioq_fp_valid[i]     <= rou_exu.uop.fp_valid;
@@ -678,15 +820,26 @@ module rapt_lsu_ioq #(
         // Preserve the original NBA priority while keeping every IOQ array
         // update on this single static entry selector.
         if (exu_l1d.ready && ioq_mmu_en[ioq_head] && i == int'(ioq_head)) begin
-          ioq_paddr[i]  <= exu_l1d.paddr;
-          ioq_mmu_en[i] <= 1'b0;
-          ioq_trap[i]   <= exu_l1d.trap;
-          ioq_cause[i]  <= exu_l1d.cause;
+          if (ioq_mmu_second[i]) begin
+            ioq_paddr_hi[i]   <= exu_l1d.paddr;
+            ioq_mmu_second[i] <= 1'b0;
+            ioq_mmu_en[i]     <= 1'b0;
+          end else begin
+            ioq_paddr[i] <= exu_l1d.paddr;
+            if (head_store_cross_page && !exu_l1d.trap) begin
+              ioq_mmu_second[i] <= 1'b1;
+            end else begin
+              ioq_mmu_en[i] <= 1'b0;
+            end
+          end
+          ioq_trap[i]  <= exu_l1d.trap;
+          ioq_cause[i] <= exu_l1d.cause;
         end
 
         if (ioq_valid_found && i == int'(ioq_head)) begin
           ioq_wen[i]    <= 1'b0;
           ioq_mmu_en[i] <= 1'b0;
+          ioq_mmu_second[i] <= 1'b0;
           ioq_trap[i]   <= 1'b0;
           ioq_ren[i]    <= 1'b0;
           ioq_valid[i]  <= 1'b0;
@@ -757,11 +910,14 @@ module rapt_lsu_ioq #(
       end
 
       // ---- OoO LSU scalar state ----
-      if (exu_lsu.rvalid && exu_lsu.rready) begin
+      // `oo_pending` means the registered A request has survived at least one
+      // cycle without a response; only then may the optional HUM B port probe
+      // a younger load.
+      if (!load_req_valid_q || (exu_lsu.rvalid && exu_lsu.rready)) begin
         oo_pending <= 1'b0;
       end else if (!oo_pending && exu_lsu.rvalid && !exu_lsu.rready) begin
         oo_pending     <= 1'b1;
-        oo_pending_idx <= active_idx;
+        oo_pending_idx <= load_req_idx_q;
       end
     end
   end

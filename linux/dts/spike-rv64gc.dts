@@ -8,7 +8,19 @@
 
 	chosen {
 		stdout-path = "/soc/ns16550@10000000";
-		bootargs = "console=ttyS0 earlycon init=/init";
+		/* Deterministic simulation seed: without a hardware RNG, waiting for
+		 * the CRNG to collect timer entropy costs billions of RTL cycles. */
+		rng-seed = [72 61 70 74 6f 72 2d 63 68 69 70 2d 72 76 36 34
+		            2d 67 63 2d 73 69 6d 2d 62 6f 6f 74 2d 73 65
+		            65 64 2d 30 31 2d 64 65 74 65 72 6d 69 6e 69
+		            73 74 69 63 2d 6f 6e 6c 79 2d 30 30 30 31 21];
+		/* The fast Buildroot kernel omits binfmt_script, while /init is a
+		 * shell script. Run its devtmpfs setup through BusyBox sh, then enter
+		 * the lp64d init ELF. Arguments after "--" are passed to rdinit. */
+		/* NPC's scalar misaligned accesses have been measured as fast.  Tell
+		 * Linux explicitly so cycle-accurate simulation does not spend tens of
+		 * minutes repeating the boot-time speed benchmark. */
+		bootargs = "console=ttyS0 earlycon unaligned_scalar_speed=fast cryptomgr.notests=1 initcall_blacklist=jent_mod_init random.trust_bootloader=on rdinit=/bin/sh -- -c \"mount -t devtmpfs devtmpfs /dev; exec /sbin/init\"";
 	};
 
 	cpus {
@@ -42,7 +54,7 @@
 
 	memory@80000000 {
 		device_type = "memory";
-		reg = <0x00 0x80000000 0x00 0x8000000>;
+		reg = <0x00 0x80000000 0x00 0x10000000>;
 	};
 
 	soc {
@@ -57,7 +69,7 @@
 			reg = <0x00 0x2000000 0x00 0xc0000>;
 		};
 
-		plic@c000000 {
+		plic0: plic@c000000 {
 			compatible = "riscv,plic0";
 			#address-cells = <0x02>;
 			interrupts-extended = <&cpu0_intc 0x0b &cpu0_intc 0x09>;
@@ -72,7 +84,7 @@
 		ns16550@10000000 {
 			compatible = "ns16550a";
 			clock-frequency = <0x989680>;
-			interrupt-parent = <0x02>;
+			interrupt-parent = <&plic0>;
 			interrupts = <0x01>;
 			reg = <0x00 0x10000000 0x00 0x100>;
 			reg-shift = <0x00>;

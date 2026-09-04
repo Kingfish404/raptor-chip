@@ -11,6 +11,10 @@ include $(APP_HOME)/common.mk
 
 BUILD_DIR ?= $(APP_HOME)/build/rv$(XLEN)/tests/irq
 EXTRA_CFLAGS ?=
+NPC_ARGS ?= -b -n -t 30 --no-lightsss --trap-on-ebreak
+IRQ_REPEATS ?= 1
+IRQ_LOG_DIR ?= $(BUILD_DIR)/logs
+MROM_IMG ?= $(NSIM_HOME)/csrc/mem/mrom-data/build/rv$(XLEN)-spike-rv$(XLEN)ima/mrom-data.bin
 
 # Bare-metal: bypass picolibc, freestanding, no stdlib, custom linker.
 BM_CFLAGS := -march=$(ARCH) -mabi=$(ABI) -mcmodel=medany -O2 -g -Wall $(EXTRA_CFLAGS) \
@@ -39,7 +43,39 @@ $(BUILD_DIR)/%.bin: $(BUILD_DIR)/%.elf
 build: $(BINS)
 	@echo "Built $(words $(BINS)) IRQ tests in $(BUILD_DIR)/"
 
+npc-run: build
+	@set -e; \
+		npc_cmd="$(NPC_BIN)"; \
+		if [ -n "$$npc_cmd" ]; then \
+			npc_cmd="$$npc_cmd -r $(MROM_IMG)"; \
+		else \
+			npc_cmd="$$( $(MAKE) --no-print-directory -C $(NSIM_HOME) \
+				ISA=riscv$(XLEN) print-npc-exec 2>/dev/null | tail -1 )"; \
+		fi; \
+		npc_bin="$${npc_cmd%% *}"; \
+		if [ ! -x "$$npc_bin" ]; then \
+			echo "ERROR: invalid NPC binary: $$npc_bin"; exit 1; \
+		fi; \
+		mkdir -p "$(IRQ_LOG_DIR)"; \
+		repeat=1; \
+		while [ $$repeat -le $(IRQ_REPEATS) ]; do \
+			for bin in $(BINS); do \
+				name="$$(basename "$$bin" .bin)"; \
+				log="$(IRQ_LOG_DIR)/$${name}-$${repeat}.log"; \
+				echo "[irq] run $$repeat/$(IRQ_REPEATS): $$name"; \
+				if ! (cd "$(NSIM_HOME)" && $$npc_cmd $(NPC_ARGS) "$$bin") >"$$log" 2>&1; then \
+					cat "$$log"; exit 1; \
+				fi; \
+				cat "$$log"; \
+				grep -q "PASS" "$$log" && grep -q "HIT GOOD TRAP" "$$log" || \
+					{ echo "[irq] FAIL: $$name"; exit 1; }; \
+			done; \
+			repeat=$$((repeat + 1)); \
+		done
+
+npc-coverage: npc-run
+
 clean:
 	rm -rf $(BUILD_DIR)
 
-.PHONY: build clean
+.PHONY: build npc-run npc-coverage clean

@@ -244,7 +244,6 @@ class RaptorAlinxAXAU15SoC(SoCCore):
         with_mig=False,
         mig_size=0x40000000,
         with_sdcard=False,
-        sdcard_boot=False,
         with_led_chaser=False,
         **kwargs,
     ):
@@ -306,8 +305,6 @@ class RaptorAlinxAXAU15SoC(SoCCore):
 
         if with_sdcard:
             self.add_sdcard(name="sdcard", mode="read+write")
-            if not sdcard_boot:
-                self.add_constant("SDCARD_BOOT_DISABLE")
 
         if with_led_chaser:
             self.leds = LedChaser(
@@ -355,11 +352,6 @@ def main():
         help="Enable the on-board 4-bit SDCard controller and DMA engine.",
     )
     parser.add_target_argument(
-        "--sdcard-boot",
-        action="store_true",
-        help="Automatically try SDCard during BIOS boot.",
-    )
-    parser.add_target_argument(
         "--vivado-incremental",
         action="store_true",
         help="Reserved for compatibility with the common FPGA Makefile.",
@@ -367,9 +359,6 @@ def main():
     parser.set_defaults(cpu_type="raptor", cpu_variant="linux32")
 
     args = parser.parse_args()
-    if args.sdcard_boot and not args.with_sdcard:
-        parser.error("--sdcard-boot requires --with-sdcard")
-
     soc_kwargs = dict(parser.soc_argdict)
     builder_kwargs = dict(parser.builder_argdict)
     has_integrated_rom_init = soc_kwargs.get("integrated_rom_init") not in (
@@ -395,7 +384,6 @@ def main():
         with_mig=args.with_mig,
         mig_size=args.mig_size,
         with_sdcard=args.with_sdcard,
-        sdcard_boot=args.sdcard_boot,
         with_led_chaser=args.with_led_chaser,
         **soc_kwargs,
     )

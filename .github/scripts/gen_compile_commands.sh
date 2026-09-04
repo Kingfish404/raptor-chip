@@ -91,8 +91,8 @@ TMP_PARENT="${TMP_PARENT%/}"
 SIM_LOG="$(mktemp "${TMP_PARENT}/sim-cdb.XXXXXX")"
 make -C "${NSIM_HOME}" -B -j"${NPROC}" >"${SIM_LOG}" 2>&1
 
-# Verilator's nested build emits the real C++ compile lines in obj_dir.
-awk -v objdir="${NSIM_BUILD_DIR}/obj_dir" '
+# Verilator's nested build emits the real C++ compile lines in the RV32 object directory.
+awk -v objdir="${NSIM_BUILD_DIR}/obj_dir-riscv32" '
   /^(c\+\+|clang\+\+|g\+\+)/ && / -c / {
     cmd = $0
     n = split(cmd, a, " ")

@@ -169,7 +169,7 @@ module rapt_l1d #(
   logic [XLEN-1:0] l1d_rmw_wdata;
   logic [L1dOffsetBits-1:0] l1d_rmw_waddr_lo;
   /* verilator lint_off UNUSEDSIGNAL */
-  logic [4:0] l1d_rmw_walu;
+  logic [7:0] l1d_rmw_walu;
   /* verilator lint_on UNUSEDSIGNAL */
 
   // RMW trigger: partial store that hits in cache, SRAM read port is free.
@@ -191,11 +191,7 @@ module rapt_l1d #(
   logic [L1D_LEN-1:0] b_idx_in;
 `endif
 
-`ifdef RAPT_RV64
-  localparam logic [7:0] FullStoreWstrb = `RAPT_SD_WSTRB;
-`else
-  localparam logic [7:0] FullStoreWstrb = `RAPT_SW_WSTRB;
-`endif
+  localparam logic [7:0] FullStoreWstrb = 8'({XLEN/8{1'b1}});
   assign partial_store_rmw = !l1d_rmw && !l1d_update
       && (l1d_state == IDLE)  // Only in IDLE; PTWAIT/LD_D would steal read port
       && !load_speculate  // load speculation uses SRAM read port
@@ -304,11 +300,7 @@ module rapt_l1d #(
   logic [XLEN-1:0] rmw_data_shifted;
   logic [XLEN-1:0] rmw_merged_data;
 
-`ifdef RAPT_RV64
-  assign rmw_byte_mask = {3'b0, l1d_rmw_walu[4:0]} << l1d_rmw_waddr_lo;
-`else
-  assign rmw_byte_mask = l1d_rmw_walu[3:0] << l1d_rmw_waddr_lo;
-`endif
+  assign rmw_byte_mask = l1d_rmw_walu[XLEN/8-1:0] << l1d_rmw_waddr_lo;
   always_comb begin
     for (int i = 0; i < XLEN / 8; i++) begin
       rmw_bit_mask[i*8+:8] = {8{rmw_byte_mask[i]}};
@@ -320,13 +312,17 @@ module rapt_l1d #(
 
   assign mmu_en = csr_bcast.dmmu_en;
 
-  // Load/Store TLB fill: from shared PTW, only while PTWAIT is active
+  // The load/store lookup arrays are replicas (two combinational read ports),
+  // so every successful data walk warms both of them.  Besides avoiding a
+  // second walk for pages used by both loads and stores, this keeps their
+  // replacement state/content coherent.
   logic dtlb_fill, dstlb_fill;
-  assign dtlb_fill  = (l1d_state == PTWAIT) && ptw_done && !stlb_mmu;
-  assign dstlb_fill = (l1d_state == PTWAIT) && ptw_done &&  stlb_mmu;
+  assign dtlb_fill  = (l1d_state == PTWAIT) && ptw_done;
+  assign dstlb_fill = (l1d_state == PTWAIT) && ptw_done;
 
   rapt_tlb #(
-      .XLEN(XLEN)
+      .XLEN   (XLEN),
+      .ENTRIES(`RAPT_DTLB_ENTRIES)
   ) u_dtlb (
       .clock(clock),
       .reset(reset),
@@ -344,7 +340,8 @@ module rapt_l1d #(
   );
 
   rapt_tlb #(
-      .XLEN(XLEN)
+      .XLEN   (XLEN),
+      .ENTRIES(`RAPT_DTLB_ENTRIES)
   ) u_dstlb (
       .clock(clock),
       .reset(reset),
@@ -384,7 +381,9 @@ module rapt_l1d #(
       .satp_ppn(csr_bcast.satp_ppn),
       .mmu_en(mmu_en),
       .sbe(csr_bcast.sbe),
-      .req_store(store_tlb_miss),
+      // CBO management checks A but not D; make the Svade walker treat it as
+      // a non-store while the requester applies the CMO R-or-W permission.
+      .req_store(store_tlb_miss && !exu_l1d.cmo_mgmt),
       .bus_arvalid(ptw_arvalid),
       .bus_araddr(ptw_araddr),
       .bus_arready(l1d_bus.rready),
@@ -767,6 +766,8 @@ module rapt_l1d #(
     endcase
   end
   logic pmp_store_fault_mmu;
+  logic pmp_store_fault_mmu_w;
+  logic pmp_store_fault_mmu_r;
   rapt_pmp #(
       .XLEN(XLEN)
   ) u_pmp_store_mmu (
@@ -786,9 +787,34 @@ module rapt_l1d #(
       .pmp_mode_tor   (pmp_state.pmp_mode_tor),
       .pmp_mode_na4   (pmp_state.pmp_mode_na4),
       .pmp_mode_napot (pmp_state.pmp_mode_napot),
-      .fault  (pmp_store_fault_mmu),
+      .fault  (pmp_store_fault_mmu_w),
       .fault_lo_o()
   );
+  rapt_pmp #(
+      .XLEN(XLEN)
+  ) u_pmp_load_for_cbo_mmu (
+      .addr   (exu_l1d.paddr),
+      .size_m1(store_size_m1),
+      .priv   (eff_priv),
+      .op_r   (1'b1),
+      .op_w   (1'b0),
+      .op_x   (1'b0),
+      .pmp_raw_addr   (pmp_state.pmp_raw_addr),
+      .pmp_napot_mask (pmp_state.pmp_napot_mask),
+      .pmp_cfg_r      (pmp_state.pmp_cfg_r),
+      .pmp_cfg_w      (pmp_state.pmp_cfg_w),
+      .pmp_cfg_x      (pmp_state.pmp_cfg_x),
+      .pmp_cfg_l      (pmp_state.pmp_cfg_l),
+      .pmp_mode_off   (pmp_state.pmp_mode_off),
+      .pmp_mode_tor   (pmp_state.pmp_mode_tor),
+      .pmp_mode_na4   (pmp_state.pmp_mode_na4),
+      .pmp_mode_napot (pmp_state.pmp_mode_napot),
+      .fault  (pmp_store_fault_mmu_r),
+      .fault_lo_o()
+  );
+  assign pmp_store_fault_mmu = exu_l1d.cmo_mgmt
+                             ? (pmp_store_fault_mmu_w && pmp_store_fault_mmu_r)
+                             : pmp_store_fault_mmu_w;
   // P3: PMA pre-check on the translated store PA. Mirrors load_unmapped_fault
   // -- stops a store to a region with no bus slave from issuing on AXI and
   // hanging the LSU. Bare-mode stores get the same check at the IOQ.
@@ -800,6 +826,7 @@ module rapt_l1d #(
   // Bit [4]=G (global) does not affect data fault and is not consumed below.
   /* verilator lint_off UNUSEDSIGNAL */
   function automatic logic pte_fault_data(input logic [6:0] pte, input logic is_store,
+                                          input logic is_cmo,
                                           input logic [1:0] priv_eff, input logic sum_i,
                                           input logic mxr_i);
     logic r, w, x, u, a, d;
@@ -819,7 +846,12 @@ module rapt_l1d #(
     end else if (priv_eff == `RAPT_PRIV_S) begin
       if (u && !sum_i) fault = 1'b1;
     end
-    if (is_store) begin
+    if (is_cmo) begin
+      // Zicbom access permission is load OR store.  Like a load it requires
+      // A, but D is deliberately neither checked nor updated.
+      if (!(can_read || w)) fault = 1'b1;
+      if (!a) fault = 1'b1;
+    end else if (is_store) begin
       if (!w) fault = 1'b1;
       if (!a || !d) fault = 1'b1;
     end else begin
@@ -832,13 +864,15 @@ module rapt_l1d #(
 
   // Perm-fault signals evaluated against currently-visible PTEs.
   logic pf_load_tlb, pf_store_tlb, pf_load_ptw, pf_store_ptw;
-  assign pf_load_tlb  = tlb_hit  && pte_fault_data(dtlb_pte,  1'b0, eff_priv,
+  assign pf_load_tlb  = tlb_hit  && pte_fault_data(dtlb_pte,  1'b0, 1'b0, eff_priv,
                                                     csr_bcast.sum, csr_bcast.mxr);
-  assign pf_store_tlb = stlb_hit && pte_fault_data(dstlb_pte, 1'b1, eff_priv,
+  assign pf_store_tlb = stlb_hit && pte_fault_data(dstlb_pte, 1'b1,
+                                                    exu_l1d.cmo_mgmt, eff_priv,
                                                     csr_bcast.sum, csr_bcast.mxr);
-  assign pf_load_ptw  = pte_fault_data(ptw_result_pte, 1'b0, eff_priv,
+  assign pf_load_ptw  = pte_fault_data(ptw_result_pte, 1'b0, 1'b0, eff_priv,
                                         csr_bcast.sum, csr_bcast.mxr);
-  assign pf_store_ptw = pte_fault_data(ptw_result_pte, 1'b1, eff_priv,
+  assign pf_store_ptw = pte_fault_data(ptw_result_pte, 1'b1,
+                                        exu_l1d.cmo_mgmt, eff_priv,
                                         csr_bcast.sum, csr_bcast.mxr);
 
   // --- PMP check on PTW memory (PTE) reads ---
@@ -869,15 +903,14 @@ module rapt_l1d #(
       .fault_lo_o()
   );
 
-  // Misaligned accesses are split by the LSU's MA-split FSM into two aligned
-  // beats (load: ma_state_t in MA_HI; store: state_store == LS_S_HI_V) before
-  // they reach this L1D, so we never see a true misaligned cache request.
-  // The early STLB-lookup path (exu_l1d) does observe the original misaligned
-  // virtual address, but the page-translation only depends on VPN bits and is
-  // unaffected by the low alignment bits, so suppressing the misalign trap
-  // here is safe for any access that does not cross a page boundary. (The
-  // very rare cross-page case would need a second TLB walk and is not yet
-  // handled -- Linux's misaligned memcpy stays within a page.)
+  // Misaligned accesses are split by the LSU's MA-split FSM into aligned
+  // beats (including an optional third RV32D beat) before they reach this
+  // L1D, so we never see a true misaligned cache request.
+  // The LSU issues each load beat with its own virtual address, so a high beat
+  // on the next page receives an independent DTLB lookup/PTW.  Stores are
+  // pre-translated in the IOQ before allocation and carry the second page's PA
+  // into the SQ.  Suppress address-misaligned traps here because Zicclsm is
+  // implemented by those split paths; page/access faults still propagate.
   assign mis_align_load  = 1'b0;
   assign mis_align_store = 1'b0;
 
@@ -919,14 +952,7 @@ module rapt_l1d #(
   assign l1d_bus.awvalid = ptw_awvalid ? 1'b1 : lsu_l1d.wvalid;
   assign l1d_bus.awaddr = ptw_awvalid ? ptw_awaddr : lsu_l1d.waddr;
   assign l1d_bus.aw_ptw = ptw_awvalid;
-`ifdef RAPT_RV64
-  // Decode walu (5-bit store mask) to full 8-bit wstrb for RV64
-  // SB: 5'b00001->8'h01, SH: 5'b00011->8'h03, SW: 5'b01111->8'h0f, SD: 5'b11111->8'hff
-  assign l1d_bus.wstrb = ptw_wvalid ? ptw_wstrb
-    : (lsu_l1d.walu == 5'b11111) ? 8'hff : {3'b0, lsu_l1d.walu[4:0]};
-`else
-  assign l1d_bus.wstrb = ptw_wvalid ? ptw_wstrb : {4'b0, lsu_l1d.walu[3:0]};
-`endif
+  assign l1d_bus.wstrb = ptw_wvalid ? ptw_wstrb : lsu_l1d.walu;
   assign l1d_bus.wvalid = ptw_wvalid ? 1'b1 : lsu_l1d.wvalid;
   assign l1d_bus.wdata = ptw_wvalid ? ptw_wdata : lsu_l1d.wdata;
 
@@ -1248,9 +1274,10 @@ module rapt_l1d #(
         l1d_valid_u <= 1'b1;
         // l1d_idx, l1d_off, l1d_tag_u already set at RMW trigger
       end else if (lsu_l1d.wvalid && l1d_bus.wready && cacheable_w) begin
-        // Treat misaligned full-width store as partial: cache must not be
-        // updated as if the natural-aligned word/dword was fully written,
-        // because the BUS shifts wstrb/wdata by waddr_lo.
+        // Treat any full-width request at an unaligned cache offset as
+        // partial. Split stores normally arrive aligned with an already
+        // lane-shifted mask/data pair; unsplit requests may still rely on
+        // their address offset during the RMW merge.
         if (lsu_l1d.walu == FullStoreWstrb && lsu_l1d.waddr[L1dOffsetBits-1:0] == '0) begin
           l1d_update <= 1'b1;
           l1d_data_u <= lsu_l1d.wdata;

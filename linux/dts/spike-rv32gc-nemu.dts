@@ -1,0 +1,26 @@
+/* NEMU-only peripherals layered on the shared RV32GC simulation platform. */
+/include/ "spike-rv32gc.dts"
+
+/ {
+	chosen {
+		/* NEMU overwrites this placeholder from /dev/urandom before boot. */
+		rng-seed = [00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+		            00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00];
+	};
+
+	soc {
+		virtio_net@10002000 {
+			compatible = "virtio,mmio";
+			reg = <0x00 0x10002000 0x00 0x1000>;
+			interrupt-parent = <&plic0>;
+			interrupts = <0x02>;
+		};
+
+		virtio_rng@10003000 {
+			compatible = "virtio,mmio";
+			reg = <0x00 0x10003000 0x00 0x1000>;
+			interrupt-parent = <&plic0>;
+			interrupts = <0x03>;
+		};
+	};
+};

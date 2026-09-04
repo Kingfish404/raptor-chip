@@ -37,18 +37,12 @@ module rapt_ieu_pipe_alu_csr #(
     | ({XLEN{uop_payload.csr_csw[1]}} & (exu_csr.rdata | iss.op1))
     | ({XLEN{uop_payload.csr_csw[2]}} & (exu_csr.rdata & ~iss.op1));
 
-  logic [$clog2(ROB_SIZE)-1:0] instret_correction;
-  logic is_instret_read;
-  logic [XLEN-1:0] csr_rdata_corrected;
-  assign instret_correction = iss.dest - cmu_bcast.rob_head + 1'b1;
-  assign is_instret_read = iss.imm[11:0] ==
-      `RAPT_CSR_INSTRET_
-      || iss.imm[11:0] == `RAPT_CSR_MINSTRET;
-  assign csr_rdata_corrected = is_instret_read
-    ? exu_csr.rdata + XLEN'(instret_correction) : exu_csr.rdata;
-
   assign wb_alu_csr.dest = iss.dest;
-  assign wb_alu_csr.result = uop_payload.sys ? csr_rdata_corrected
+  // CSR instructions are serializing, so by the time one executes all older
+  // instructions have already updated minstret. The CSR instruction itself
+  // must not be included in the value it reads; the former ROB-distance + 1
+  // correction therefore made every rdinstret result at least one too large.
+  assign wb_alu_csr.result = uop_payload.sys ? exu_csr.rdata
     : iss.jen ? iss.pc + (iss.c ? 2 : 4) : alu_result;
   assign wb_alu_csr.npc = (uop_payload.ecall || uop_payload.ebreak) ? csr_bcast.mtvec
     : iss.trap ? csr_bcast.tvec

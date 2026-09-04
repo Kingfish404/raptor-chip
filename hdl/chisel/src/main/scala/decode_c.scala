@@ -203,13 +203,26 @@ class rapt_idu_decoder_c extends RawModule with Instr {
   var cinst = io.cinst
   val is_rv64 = io.is_rv64.asBool
 
-  // RV64C: C.LD  -> ld  rd', offset(rs1')  (opcode=0000011, funct3=011)
-  // RV64C: C.SD  -> sd  rs2', offset(rs1') (opcode=0100011, funct3=011)
-  // RV64C: C.LDSP -> ld rd, offset(x2)
-  // RV64C: C.SDSP -> sd rs2, offset(x2)
+  // Compressed integer and floating-point memory operations expand to their
+  // ordinary 32-bit encodings.  The register fields are bit-identical for
+  // integer and FP registers; the LOAD-FP/STORE-FP opcode selects the FPR
+  // bank in the main decoder.
+  //
+  // C.FLD/C.FSD and their SP forms exist in both RV32C+D and RV64C+D.
+  // The quadrant-0/2 funct3=011/111 encodings are C.FLW/C.FSW on RV32 but
+  // C.LD/C.SD on RV64, so those four instructions are selected below using
+  // is_rv64.
   // RV64C: C.ADDIW -> addiw rd, rd, imm   (opcode=0011011, funct3=000)
   // RV64C: C.SUBW  -> subw  rd', rd', rs2' (opcode=0111011, funct7=0100000, funct3=000)
   // RV64C: C.ADDW  -> addw  rd', rd', rs2' (opcode=0111011, funct7=0000000, funct3=000)
+  val c_fld_inst  = itype(decCldCsdImm(cinst), decRs1Short(cinst), "b011".U(3.W), decRdShort(cinst), "b0000111".U(7.W))
+  val c_fsd_inst  = stype(decCldCsdImm(cinst), decRs2Short(cinst), decRs1Short(cinst), "b011".U(3.W), "b0100111".U(7.W))
+  val c_flw_inst  = itype(decClwCswImm(cinst), decRs1Short(cinst), "b010".U(3.W), decRdShort(cinst), "b0000111".U(7.W))
+  val c_fsw_inst  = stype(decClwCswImm(cinst), decRs2Short(cinst), decRs1Short(cinst), "b010".U(3.W), "b0100111".U(7.W))
+  val c_fldsp_inst = itype(decCiOffsetLdsp(cinst), 2.U(5.W), "b011".U(3.W), decRd(cinst), "b0000111".U(7.W))
+  val c_fsdsp_inst = stype(decCssdImm(cinst), decRs2(cinst), 2.U(5.W), "b011".U(3.W), "b0100111".U(7.W))
+  val c_flwsp_inst = itype(decCiOffsetLwsp(cinst), 2.U(5.W), "b010".U(3.W), decRd(cinst), "b0000111".U(7.W))
+  val c_fswsp_inst = stype(decCssImm(cinst), decRs2(cinst), 2.U(5.W), "b010".U(3.W), "b0100111".U(7.W))
   val c_ld_inst   = itype(decCldCsdImm(cinst), decRs1Short(cinst), "b011".U(3.W), decRdShort(cinst), "b0000011".U(7.W))
   val c_sd_inst   = stype(decCldCsdImm(cinst), decRs2Short(cinst), decRs1Short(cinst), "b011".U(3.W), "b0100011".U(7.W))
   val c_ldsp_inst = itype(decCiOffsetLdsp(cinst), 2.U(5.W), "b011".U(3.W), decRd(cinst), "b0000011".U(7.W))
@@ -222,10 +235,10 @@ class rapt_idu_decoder_c extends RawModule with Instr {
     // Instruction listing for RVC, Quadrant 0
     C_INV_     -> List(0.U),
     C_ADDI4SPN -> List(itype(decCiwImm(cinst), 2.U(5.W), "b000".U(3.W), decRdShort(cinst), "b0010011".U(7.W))),
-    C_FLD_     -> List(0.U),
+    C_FLD_     -> List(c_fld_inst),
     C_LQ__     -> List(0.U),
     C_LW__     -> List(itype(decClwCswImm(cinst), decRs1Short(cinst), "b010".U(3.W), decRdShort(cinst), "b0000011".U(7.W))),
-    C_FLW_     -> List(0.U),           // RV32: C.FLW (F ext, unsupported); RV64: handled via C_LD__
+    C_FLW_     -> List(c_flw_inst),     // RV32: C.FLW; RV64: handled via C_LD__
     C_LD__     -> List(c_ld_inst),     // RV64: C.LD
     // Zcb Q0 byte/halfword loads and stores (funct3=100)
     C_LBU_     -> List(itype(decZcbImmB(cinst), decRs1Short(cinst), "b100".U(3.W), decRdShort(cinst), "b0000011".U(7.W))),
@@ -234,10 +247,10 @@ class rapt_idu_decoder_c extends RawModule with Instr {
     C_SB__     -> List(stype(decZcbImmB(cinst), decRs2Short(cinst), decRs1Short(cinst), "b000".U(3.W), "b0100011".U(7.W))),
     C_SH__     -> List(stype(decZcbImmH(cinst), decRs2Short(cinst), decRs1Short(cinst), "b001".U(3.W), "b0100011".U(7.W))),
     C_ZCB_R    -> List(0.U),
-    C_FSD_     -> List(0.U),
+    C_FSD_     -> List(c_fsd_inst),
     C_SQ__     -> List(0.U),
     C_SW__     -> List(stype(decClwCswImm(cinst), decRs2Short(cinst), decRs1Short(cinst), "b010".U(3.W), "b0100011".U(7.W))),
-    C_FSW_     -> List(0.U),           // RV32: C.FSW (F ext, unsupported); RV64: handled via C_SD__
+    C_FSW_     -> List(c_fsw_inst),     // RV32: C.FSW; RV64: handled via C_SD__
     C_SD__     -> List(c_sd_inst),     // RV64: C.SD
     // Instruction listing for RVC, Quadrant 1
     C_NOP_     -> List(itype(decCiImm(cinst), 0.U(5.W), "b000".U(3.W), 0.U(5.W), "b0010011".U(7.W))),
@@ -279,10 +292,10 @@ class rapt_idu_decoder_c extends RawModule with Instr {
     // Instruction listing for RVC, Quadrant 2
     C_SLLI   -> List(itype(Cat(0.U(6.W), decCshamtFull(cinst)), decRd(cinst), "b001".U(3.W), decRd(cinst), "b0010011".U(7.W))), // hint,rd=0
     C_SLLI64 -> List(0.U),
-    C_FLDSP  -> List(0.U),
+    C_FLDSP  -> List(c_fldsp_inst),
     C_LQSP   -> List(0.U),
     C_LWSP   -> List(itype(decCiOffsetLwsp(cinst), 2.U(5.W), "b010".U(3.W), decRd(cinst), "b0000011".U(7.W))), // res,rd=0
-    C_FLWSP  -> List(0.U),         // RV32: C.FLWSP (F ext); RV64: handled via C_LDSP
+    C_FLWSP  -> List(c_flwsp_inst), // RV32: C.FLWSP; RV64: handled via C_LDSP
     C_LDSP   -> List(c_ldsp_inst), // RV64: C.LDSP -> ld rd, offset(x2)
     C_JR__   -> List(itype(0.U, decRs1(cinst), "b000".U(3.W), 0.U(5.W), "b1100111".U(7.W))), // res,rs1=0
     C_MV__   -> List(Mux(decRd(cinst) === 0.U || decRs2(cinst) === 0.U, cNop,
@@ -291,10 +304,10 @@ class rapt_idu_decoder_c extends RawModule with Instr {
     C_JALR   -> List(rtype(0b0000000.U(7.W), 0.U(5.W), decRs1(cinst), "b000".U(3.W), 1.U(5.W), "b1100111".U(7.W))),
     C_ADD_   -> List(Mux(decRd(cinst) === 0.U, cNop,
                      rtype(0b0000000.U(7.W), decRs2(cinst), decRd(cinst), "b000".U(3.W), decRd(cinst), "b0110011".U(7.W)))), // hint,rd=0
-    C_FSDSP  -> List(stype(decCssImm(cinst), decRs2(cinst), 2.U(5.W), "b010".U(3.W), "b0100011".U(7.W))), // rv32/64
+    C_FSDSP  -> List(c_fsdsp_inst), // RV32/RV64 with D
     C_SQSP   -> List(stype(decCssImm(cinst), decRs2(cinst), 2.U(5.W), "b010".U(3.W), "b0100011".U(7.W))), // rv128
     C_SWSP   -> List(stype(decCssImm(cinst), decRs2(cinst), 2.U(5.W), "b010".U(3.W), "b0100011".U(7.W))),
-    C_FSWSP  -> List(stype(decCssImm(cinst), decRs2(cinst), 2.U(5.W), "b010".U(3.W), "b0100011".U(7.W))), // rv32
+    C_FSWSP  -> List(c_fswsp_inst), // RV32 with F
     C_SDSP   -> List(c_sdsp_inst) // rv64: C.SDSP -> sd rs2, offset(x2)
   )
   val var_decoder = ListLookup(io.cinst, List(0.U), op_table)
@@ -312,23 +325,22 @@ class rapt_idu_decoder_c extends RawModule with Instr {
   // Zcb: precompute the RV64 form of C.ZEXT.H (add.uw-like opcode 0111011)
   val c_zexth_rv64 = rtype(0b0000100.U(7.W), 0b00000.U(5.W), decRs1Short(cinst), "b100".U(3.W), decRs1Short(cinst), "b0111011".U(7.W))
   val fixed_inst = MuxCase(raw_inst, Seq(
-    // Q0, funct3=011: RV32->C.FLW(unsupported), RV64->C.LD
+    // Q0, funct3=011: RV32->C.FLW, RV64->C.LD
     (quadrant === "b00".U && funct3 === "b011".U) ->
-      Mux(is_rv64, c_ld_inst, 0.U(32.W)),
-    // Q0, funct3=111: RV32->C.FSW(unsupported), RV64->C.SD
+      Mux(is_rv64, c_ld_inst, c_flw_inst),
+    // Q0, funct3=111: RV32->C.FSW, RV64->C.SD
     (quadrant === "b00".U && funct3 === "b111".U) ->
-      Mux(is_rv64, c_sd_inst, 0.U(32.W)),
+      Mux(is_rv64, c_sd_inst, c_fsw_inst),
     // Q1, funct3=001: RV32->C.JAL, RV64->C.ADDIW
     (quadrant === "b01".U && funct3 === "b001".U) ->
       Mux(is_rv64, c_addiw_inst,
         jtype(decCjImm(cinst), 1.U(5.W), "b1101111".U(7.W))),
-    // Q2, funct3=011: RV32->C.FLWSP(unsupported), RV64->C.LDSP
+    // Q2, funct3=011: RV32->C.FLWSP, RV64->C.LDSP
     (quadrant === "b10".U && funct3 === "b011".U) ->
-      Mux(is_rv64, c_ldsp_inst, 0.U(32.W)),
-    // Q2, funct3=111: RV32->C.FSWSP(sw), RV64->C.SDSP
+      Mux(is_rv64, c_ldsp_inst, c_flwsp_inst),
+    // Q2, funct3=111: RV32->C.FSWSP, RV64->C.SDSP
     (quadrant === "b10".U && funct3 === "b111".U) ->
-      Mux(is_rv64, c_sdsp_inst,
-        stype(decCssImm(cinst), decRs2(cinst), 2.U(5.W), "b010".U(3.W), "b0100011".U(7.W))),
+      Mux(is_rv64, c_sdsp_inst, c_fswsp_inst),
     // Zcb Q1 funct6=100111 funct2=11: C.ZEXT.H (inst[4:2]=010): RV64 opcode differs from RV32
     (quadrant === "b01".U && funct3 === "b100".U && cinst(12, 10) === "b111".U &&
       cinst(6, 5) === "b11".U && cinst(4, 2) === "b010".U) -> Mux(is_rv64, c_zexth_rv64, raw_inst),

@@ -32,7 +32,7 @@ verify/
 │   └── iq/               # Issue-queue UVM environment
 ├── scripts/            # Test generation and orchestration scripts
 ├── riscof/             # ACT4 compliance testing
-│   ├── raptor-rv32imac/  # RV32 test config, UDB config, model macros
+│   ├── raptor-rv32gc/    # RV32GC test config, UDB config, model macros
 │   └── riscv-arch-test/  # ACT4 repo (cloned on setup, gitignored)
 ├── formal/             # Formal verification (SymbiYosys)
 │   ├── rvfi/             # Raptor riscv-formal config (project-owned)
@@ -115,7 +115,9 @@ deviation between NPC and NEMU.
 
 [ACT4](https://github.com/riscv-non-isa/riscv-arch-test) (riscv-arch-test act4
 branch) is the RISC-V official architectural certification framework using
-Sail as the reference model.
+Sail as the reference model. The default `raptor-rv32gc` profile covers the
+RV32 I/M/A/F/D/C extensions, including Zcf/Zcd compressed floating-point
+loads and stores, together with the implemented Z* extensions.
 
 **First-time setup:**
 ```bash
@@ -146,8 +148,8 @@ pure-Python generator with a Raptor RV32IMC M-mode target. Generated binaries
 run on NPC with NEMU instruction-by-instruction difftest; no commercial UVM
 simulator is needed for M-mode CSR and trap-handler stress.
 This riscv-dv target is an IMAC smoke configuration and does not represent the
-full implemented ISA; use the RISCOF classic profile and `app/tests/fp` for the
-broader architectural and F/D coverage.
+full implemented ISA; use the ACT4 RV32GC profile, the RISCOF classic profile,
+and `app/tests/fp` for broader architectural and F/D coverage.
 
 ```bash
 make riscv-dv                         # one short privileged smoke test

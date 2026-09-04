@@ -18,12 +18,12 @@ Core description: **Super-scalar, out-of-order RISC-V core** with register renam
 
 ```
 Core name:  raptor-falcon (M/S/U + Sv32/Sv39 + PMP, Linux-capable)
-ISA:        rv32/rv64 imafdc_zicbom_zicbop_zicntr_zicond_zicsr_zifencei_zihintntl_zihintpause_zimop_zca_zcb_zcmop_zba_zbb_zbc_zbs
+ISA:        rv32/rv64 imafdc_zba_zbb_zbs_zfhmin_zicbom_zicbop_zicboz_zicntr_zicond_zicsr_zifencei_zihintntl_zihintpause_zihpm_zimop_zca_zcb_zcmop
 Modes:      Machine, Supervisor, User
 MMU:        riscv,sv32 (RV32) / riscv,sv39 (RV64) / riscv,none (Bare)
 PMP:        16 entries, TOR / NA4 / NAPOT, L-bit lockable
 Interrupts: CLINT (mtime, mtimecmp, msip) + PLIC (31 sources, M/S contexts)
-Profile:    n/a (closest peer: RVM23U32 / RVA20S64)
+Profiles:   RVI20U32 / RVA20S64 / RVA22U64 (default SoC main-memory PMAs; RVA22S64 not yet claimed)
 
 Bus Interface:  AXI4, XLEN-bit data/addr, 4-bit ID; burst-capable reads (up to 8 outstanding), one outstanding single-beat write with independent AW/W handshakes
 Default uarch: dual issue / dual commit, ROB=64, ALQ=8 (2 issue ports), BRQ=4, MDQ=4, FPQ=4, IOQ=8, SQ=16, integer PRF=128, FPR=32 x 64-bit, L1I=4 KiB, L1D=2 KiB, 64 B cache lines, optional L2 passthrough/cache stage
@@ -31,10 +31,14 @@ Default uarch: dual issue / dual commit, ROB=64, ALQ=8 (2 issue ports), BRQ=4, M
 Verifying:  RISCOF (riscv-arch-test), full-core F/D directed/differential tests, RVFI, SVA
 ```
 
-The F/D implementation covers scalar floating-point load/store, arithmetic,
+The F/D/Zfhmin implementation covers scalar floating-point load/store, arithmetic,
 FMA, divide/square-root, conversion, comparison/classification, rounding modes,
-and accrued exception flags. Compressed floating-point instructions are not
-part of the currently supported compressed subset.
+accrued exception flags, and binary16 load/store, transfer, and conversion. The compressed subset includes the C-extension
+floating-point memory forms required with F/D (C.FLW/C.FSW on RV32 and
+C.FLD/C.FSD plus their stack-pointer forms on RV32/RV64).
+
+See [RISC-V profile conformance](./docs/riscv-profiles.md) for the requirement
+matrix, PMA scope, and regression evidence.
 
 See [documentation](./docs/README.md) for more details.
 
@@ -79,7 +83,7 @@ flowchart TD
     subgraph DMEM["D-side · IS/EX-WB (2-cyc hit, 3-cyc load-use)"]
       L1D["L1D 2 KiB 2-way (banked SRAM, VIPT, write-through)"]
       DTLB["DTLB/DSTLB"]
-      DPTW["DPTW (Sv32/Sv39, hw A/D)"]
+      DPTW["DPTW (Sv32/Sv39, Svade)"]
     end
     PMPC["PMP ×16 (TOR/NA4/NAPOT): fetch + ld/st + PTW checks"]
     BUS["BUS (mem_link arbiter, request IDs, L1D > L1I)"]
@@ -222,13 +226,20 @@ make app-clean
 ```shell
 # Boot Linux on NEMU (requires OpenSBI payload built first)
 make linux-boot-nemu32
-# Boot Linux on NPC
+# Boot RV32GC Buildroot Linux on NEMU (downloads/re-wraps the image as needed)
+make linux-boot-nemu32gc
+# RV64GC equivalent
+make linux-boot-nemu64gc
+# Boot Linux on NPC (NEMU difftest is enabled by default)
 make linux-boot-rv32
-# Boot Linux on NPC with difftest (vs NEMU reference)
-make linux-boot-rv32-difftest
 # See detailed instructions
 # docs/linux_kernel.md, linux/README.md
 ```
+
+The two GC NEMU targets enable a virtio-mmio NIC by default. It uses libslirp
+for unprivileged outbound NAT (guest DHCP `10.0.2.15`, gateway `10.0.2.2`, DNS
+`10.0.2.3`); install the libslirp development package if it is not already
+available (`libslirp-dev` on Debian/Ubuntu).
 
 ### 6. Verification
 

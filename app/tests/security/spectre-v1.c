@@ -11,7 +11,10 @@
 
 #define ARRAY_SIZE     16
 #define PROBE_ENTRIES  256
-#define PROBE_STRIDE   PAGE_SIZE
+#ifndef SECURITY_PROBE_STRIDE
+#define SECURITY_PROBE_STRIDE PAGE_SIZE
+#endif
+#define PROBE_STRIDE   SECURITY_PROBE_STRIDE
 #define PROBE_SIZE     (PROBE_ENTRIES * PROBE_STRIDE)
 
 static uint8_t allowed_array[ARRAY_SIZE];
@@ -37,7 +40,9 @@ static void evict_probe(void) {
 }
 
 #define TRAIN_ROUNDS  20
-#define ATTACK_ROUNDS 100
+#ifndef SECURITY_ATTACK_ROUNDS
+#define SECURITY_ATTACK_ROUNDS 100
+#endif
 #define THRESHOLD_MULTIPLIER 2
 
 int main(void) {
@@ -67,7 +72,7 @@ int main(void) {
   uint32_t scores[PROBE_ENTRIES];
   memset(scores, 0, sizeof(scores));
 
-  for (int round = 0; round < ATTACK_ROUNDS; round++) {
+  for (int round = 0; round < SECURITY_ATTACK_ROUNDS; round++) {
     evict_probe();
 
     for (int t = 0; t < TRAIN_ROUNDS; t++)
@@ -100,9 +105,10 @@ int main(void) {
          (uint8_t)secret[0], secret[0],
          leaked_byte >= 0 ? leaked_byte : 0,
          (leaked_byte >= 0x20 && leaked_byte < 0x7f) ? leaked_byte : '?',
-         max_score, (uint32_t)ATTACK_ROUNDS);
+         max_score, (uint32_t)SECURITY_ATTACK_ROUNDS);
 
-  if (leaked_byte == (uint8_t)secret[0] && max_score > ATTACK_ROUNDS / 4)
+  if (leaked_byte == (uint8_t)secret[0] &&
+      max_score > SECURITY_ATTACK_ROUNDS / 4)
     printf("[spectre-v1] VULNERABLE: speculative leak detected\n");
   else
     printf("[spectre-v1] NOT VULNERABLE or insufficient signal\n");

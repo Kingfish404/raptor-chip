@@ -31,6 +31,16 @@
 `define RAPT_CACHE_LINE_BYTES 64
 `endif
 
+// Translation-cache sizing. Presets may override these before including this
+// file; the fallbacks preserve the original small implementation for external
+// configurations that have not selected explicit TLB depths yet.
+`ifndef RAPT_ITLB_ENTRIES
+`define RAPT_ITLB_ENTRIES 4
+`endif
+`ifndef RAPT_DTLB_ENTRIES
+`define RAPT_DTLB_ENTRIES 4
+`endif
+
 // Instruction Set Opcodes
 `define RAPT_INST_FENCE_I 32'h0000100f
 
@@ -164,6 +174,10 @@
 `define RAPT_FP_OP_FDIV_D 6'd60
 `define RAPT_FP_OP_FSQRT_S 6'd61
 `define RAPT_FP_OP_FSQRT_D 6'd62
+// Zfhmin instructions share the final 6-bit FP operation tag.  The FEU and
+// IOQ distinguish the individual operation from the architected instruction
+// retained in the ROB payload (or from the memory-operation width).
+`define RAPT_FP_OP_ZFHMIN 6'd63
 
 `define RAPT_ALU_ADD_ 'b00000
 `define RAPT_ALU_SUB_ 'b01000
@@ -331,6 +345,15 @@
 `define RAPT_CSR_MCYCLEH 'hb80
 `define RAPT_CSR_MINSTRETH 'hb82
 
+// Zihpm permits any individual HPM counter to be hardwired read-only zero.
+// Raptor exposes the complete architectural CSR ranges in that form.
+`define RAPT_CSR_MHPMCOUNTER3 'hb03
+`define RAPT_CSR_MHPMCOUNTER31 'hb1f
+`define RAPT_CSR_MHPMCOUNTER3H 'hb83
+`define RAPT_CSR_MHPMCOUNTER31H 'hb9f
+`define RAPT_CSR_MHPMEVENT3 'h323
+`define RAPT_CSR_MHPMEVENT31 'h33f
+
 `define RAPT_CSR_CYCLE__ 'hc00
 `define RAPT_CSR_TIME___ 'hc01
 `define RAPT_CSR_INSTRET_ 'hc02
@@ -338,6 +361,10 @@
 `define RAPT_CSR_CYCLEH_ 'hc80
 `define RAPT_CSR_TIMEH__ 'hc81
 `define RAPT_CSR_INSTRETH 'hc82
+`define RAPT_CSR_HPMCOUNTER3 'hc03
+`define RAPT_CSR_HPMCOUNTER31 'hc1f
+`define RAPT_CSR_HPMCOUNTER3H 'hc83
+`define RAPT_CSR_HPMCOUNTER31H 'hc9f
 
 // Machine Information Registers
 `define RAPT_CSR_MVENDORID 'hf11
@@ -365,7 +392,8 @@
 `define RAPT_CSR_COUNTEREN_CY 0
 `define RAPT_CSR_COUNTEREN_TM 1
 `define RAPT_CSR_COUNTEREN_IR 2
-// WARL write mask: only CY/TM/IR are supported (no HPM counters).
+// CY/TM/IR are implemented.  HPM counters and their event selectors are
+// architecturally present but hardwired zero, so their enable bits are zero.
 `define RAPT_CSR_COUNTEREN_WMASK 32'h00000007
 
 // mideleg WARL: only SSI(1)/STI(5)/SEI(9) delegatable.
@@ -381,15 +409,19 @@
 `define RAPT_CSR_SIP_WMASK 32'h00000002
 `define RAPT_CSR_MIP_WMASK 32'h00000222
 
-// Zicbom environment controls: CBIE[5:4] and CBCFE[6]. CBZE[7] remains
-// WARL-zero because Raptor does not advertise Zicboz.
-`define RAPT_CSR_SENVCFG_WMASK 32'h00000070
+// RVA22 CMO environment controls: CBIE[5:4], CBCFE[6], and CBZE[7].
+`define RAPT_CSR_SENVCFG_WMASK 32'h000000f0
 `ifdef RAPT_RV64
 `define RAPT_CSR_MENVCFG_STCE 63
-`define RAPT_CSR_MENVCFG_WMASK 64'h8000_0000_0000_0070
+`define RAPT_CSR_MENVCFG_WMASK 64'h8000_0000_0000_00f0
 `else
-`define RAPT_CSR_MENVCFG_WMASK 32'h0000_0070
+`define RAPT_CSR_MENVCFG_WMASK 32'h0000_00f0
 `endif
+
+// Internal LSU operation tags used only between decode/IOQ/SQ.  They do not
+// escape as AXI byte strobes.
+`define RAPT_CBO_ZERO_WALU 5'b10000
+`define RAPT_CBO_MGMT_WALU 5'b10001
 
 // tvec MODE field encodings
 `define RAPT_TVEC_MODE_DIRECT 2'b00

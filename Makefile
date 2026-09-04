@@ -48,10 +48,51 @@ NPROC := $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 # member tests one-by-one. We parallelize the run phase across $(JOBS) sim
 # instances. Build phase stays sequential (cheap; shares AM lib state).
 #
-# Override `JOBS=N` to cap parallelism (default = NPROC).
+# Override `JOBS=N` to cap parallelism (default = half of NPROC).
 # Override `JOBS=1` to recover deterministic interleaved output.
 # ============================================================================
-JOBS ?= $(NPROC)## Parallel simulator instances for multi-binary test suites
+JOBS ?= $(shell awk 'BEGIN { n=$(NPROC); j=int(n / 2); print (j > 0 ? j : 1) }')## Parallel simulator instances (default: half of CPUs)
+
+# Reuse GNU make's jobserver when this Makefile is entered recursively.  An
+# explicit nested `-jN` disconnects that submake from the shared token pool,
+# produces "resetting jobserver mode" warnings, and can oversubscribe a gate.
+# Direct top-level invocations retain the historical NPROC parallel default.
+SUBMAKE_JOBS = $(if $(filter --jobserver-auth=% --jobserver-fds=%,$(MAKEFLAGS)),,-j$(NPROC))
+
+# Portable, pure-Verilator regression defaults.  The top-level gate runs
+# independent suites concurrently, while keeping RV32/RV64/config-changing
+# phases serialized so shared simulator and NEMU configuration cannot race.
+VERILATOR_VERIFY_JOBS ?= $(JOBS)## Parallel suites/simulators in verify-verilator
+VERILATOR_VERIFY_SUBMAKE_JOBS = $(if $(filter --jobserver-auth=% --jobserver-fds=%,$(MAKEFLAGS)),,-j$(VERILATOR_VERIFY_JOBS))
+VERILATOR_VERIFY_BUILD_PROFILE ?= $(RAPT_CONFIG)-verify-verilator## Isolated NPC artifacts for the portable gate
+VERILATOR_VERIFY_LINUX_BUILD_PROFILE ?= $(VERILATOR_VERIFY_BUILD_PROFILE)-linux-rv32## Keep Linux config/artifacts isolated
+VERILATOR_VERIFY_RUN_JOBS ?= $(shell awk 'BEGIN { n=$(VERILATOR_VERIFY_JOBS); j=int(n / 2); print (j > 0 ? j : 1) }')## Per-suite jobs when CPU and IRQ run together
+VERILATOR_VERIFY_SUITE_JOBS ?= $(shell awk 'BEGIN { n=$(VERILATOR_VERIFY_JOBS); print (n > 1 ? 2 : 1) }')## Concurrent CPU/IRQ suite drivers
+VERILATOR_VERIFY_SUITE_SUBMAKE_JOBS = $(if $(filter --jobserver-auth=% --jobserver-fds=%,$(MAKEFLAGS)),,-j$(VERILATOR_VERIFY_SUITE_JOBS))
+VERILATOR_VERIFY_DELAY ?= 31## Maximum randomized AXI wait cycles
+VERILATOR_VERIFY_APP_DELAY ?= 3## App/PK AXI delay; high-delay stress runs in the other suites
+VERILATOR_VERIFY_SEED ?= 1## Reproducible program and AXI timing seed
+VERILATOR_VERIFY_TIMEOUT ?= 900## Wall-clock limit per whole-core test
+VERILATOR_VERIFY_LINUX_DELAY ?= 7## Linux AXI delay; bounded so multi-seed boots remain practical
+VERILATOR_VERIFY_LINUX_DT_SOURCE ?= spike-rv32ima-verilator.dts## Fast-boot DT used only by this gate
+VERILATOR_VERIFY_FUZZ_NUM ?= 50## Random programs per XLEN in the gate
+VERILATOR_VERIFY_FUZZ_LEN ?= 500## Instructions per random program
+VERILATOR_VERIFY_RV64 ?= 1## Include RV64 whole-core fuzz/sigtest/app tests
+VERILATOR_VERIFY_RISCV_DV ?= 1## Include riscv-dv delay/seed matrix
+VERILATOR_VERIFY_RAPTOS ?= 1## Include modular RaptOS memory/atomic stress
+VERILATOR_VERIFY_RISCOF ?= 1## Include ACT4 and classic RISCOF compliance
+VERILATOR_VERIFY_LINUX ?= 1## Include RV32 Linux randomized-latency boots
+VERILATOR_VERIFY_LINUX_TIMEOUT ?= 7200## Wall-clock limit per randomized Linux boot
+VERILATOR_VERIFY_LINUX_SEEDS ?= 1## One deep Linux kernel-boot seed; override for soak runs
+VERILATOR_VERIFY_MEM_SEEDS ?= 1 2 7## Multi-seed RaptOS memory/atomic stress
+VERILATOR_VERIFY_DV_DELAYS ?= 0 7 31 63 233## AXI delay maxima for riscv-dv
+VERILATOR_VERIFY_DV_SEEDS ?= 1 2 7## Preserve a multi-seed riscv-dv timing matrix
+VERILATOR_VERIFY_ARGS = $(ARGS) -t $(VERILATOR_VERIFY_TIMEOUT) --no-lightsss \
+	--mem-random-delay=$(VERILATOR_VERIFY_DELAY) \
+	--mem-random-seed=$(VERILATOR_VERIFY_SEED)
+VERILATOR_VERIFY_APP_ARGS = $(ARGS) -t $(VERILATOR_VERIFY_TIMEOUT) --no-lightsss \
+	--mem-random-delay=$(VERILATOR_VERIFY_APP_DELAY) \
+	--mem-random-seed=$(VERILATOR_VERIFY_SEED)
 
 # ============================================================================
 # Test/benchmark output logging (tee to sim/build/<config>/logs/)
@@ -68,7 +109,7 @@ JOBS ?= $(NPROC)## Parallel simulator instances for multi-binary test suites
 # Generic escape hatch for any target not pre-wrapped:
 #   make log TARGET=<existing-target> [LOG_NAME=<filename-stem>]
 # ============================================================================
-NPC_LOG_DIR  := $(NSIM_HOME)/build/$(RAPT_CONFIG)/logs
+NPC_LOG_DIR  = $(NSIM_HOME)/build/$(or $(strip $(BUILD_PROFILE)),$(RAPT_CONFIG))/logs
 NEMU_LOG_DIR := $(NEMU_HOME)/build/logs
 APP_LOG_DIR  := $(NSIM_HOME)/build/$(RAPT_CONFIG)/logs/app
 VERIFY_LOG_DIR := $(NSIM_HOME)/build/$(RAPT_CONFIG)/logs/verify
@@ -156,8 +197,8 @@ NEMU_SDCARD_ARG = $(if $(SDCARD),--sdcard=$(SDCARD),)
 
 # Canned recipe: apply a NEMU defconfig then build. $(1) = defconfig name.
 define nemu_config
-	$(MAKE) -C $(NEMU_HOME) $(1)
-	$(MAKE) -C $(NEMU_HOME) -j$(NPROC)
+	+$(MAKE) -C $(NEMU_HOME) $(1)
+	+$(MAKE) -C $(NEMU_HOME) $(SUBMAKE_JOBS)
 endef
 
 config-nemu32: ## Configure NEMU (riscv32 default)
@@ -165,6 +206,9 @@ config-nemu32: ## Configure NEMU (riscv32 default)
 
 config-nemu32-linux:
 	$(call nemu_config,riscv32_linux_defconfig)
+
+config-nemu32gc-linux: ## Configure NEMU for RV32GC Buildroot Linux
+	$(call nemu_config,riscv32gc_linux_defconfig)
 
 config-nemu32-ref:
 	$(call nemu_config,riscv32_ref_defconfig)
@@ -204,6 +248,9 @@ run-nemu64: build-nemu64 ## Build and run NEMU (riscv64)
 config-nemu64-linux:
 	$(call nemu_config,riscv64_linux_defconfig)
 
+config-nemu64gc-linux: ## Configure NEMU for RV64GC Buildroot Linux
+	$(call nemu_config,riscv64gc_linux_defconfig)
+
 config-nemu64-linux-device:
 	$(call nemu_config,riscv64_linux_device_defconfig)
 
@@ -232,11 +279,11 @@ build-spike-diff64: ## Build spike-diff reference SO for RV64 (used by NEMU --di
 # instruction-level cross-check against spike.
 config-nemu32-difftest: build-spike-diff32 ## Configure NEMU RV32 binary with spike-diff enabled
 	$(MAKE) -C $(NEMU_HOME) riscv32_difftest_defconfig
-	$(MAKE) -C $(NEMU_HOME) -j$(NPROC)
+	$(MAKE) -C $(NEMU_HOME) $(SUBMAKE_JOBS)
 
 config-nemu64-difftest: build-spike-diff64 ## Configure NEMU RV64 binary with spike-diff enabled
 	$(MAKE) -C $(NEMU_HOME) riscv64_difftest_defconfig
-	$(MAKE) -C $(NEMU_HOME) -j$(NPROC)
+	$(MAKE) -C $(NEMU_HOME) $(SUBMAKE_JOBS)
 
 .PHONY: build-spike-diff32 build-spike-diff64 config-nemu32-difftest config-nemu64-difftest
 
@@ -257,17 +304,17 @@ export RAPT_SIM_ASSERT
 
 config-rv32: ## Configure NPC simulator (o2 default)
 	$(MAKE) -C $(NSIM_HOME) o2_difftest_defconfig
-	@$(MAKE) --no-print-directory -C $(NSIM_HOME)
+	@$(MAKE) --no-print-directory -C $(NSIM_HOME) VFLAGS="$(VFLAGS)"
 
 config-rv32-difftest: config-rv32 ## Configure NPC simulator with difftest
 
 config-rv32-linux:
 	$(MAKE) -C $(NSIM_HOME) o2linux_difftest_defconfig
-	$(MAKE) -C $(NSIM_HOME) -j$(NPROC)
+	$(MAKE) -C $(NSIM_HOME) $(SUBMAKE_JOBS) VFLAGS="$(VFLAGS)"
 
 config-rv32-ysyxsoc:
 	$(MAKE) -C $(NSIM_HOME) o2soc_defconfig
-	$(MAKE) -C $(NSIM_HOME) -j$(NPROC)
+	$(MAKE) -C $(NSIM_HOME) $(SUBMAKE_JOBS)
 
 
 # Auto-generate RTL from Chisel if generated/ doesn't exist
@@ -278,7 +325,7 @@ $(GENERATED_DIR):
 
 build-rv32: config-rv32 | $(GENERATED_DIR) ## Build NPC simulator
 	@$(MAKE) --no-print-directory -q -C $(NSIM_HOME) VFLAGS="$(VFLAGS)" 2>/dev/null \
-		|| $(MAKE) --no-print-directory -C $(NSIM_HOME) -j$(NPROC) VFLAGS="$(VFLAGS)"
+		|| $(MAKE) --no-print-directory -C $(NSIM_HOME) $(SUBMAKE_JOBS) VFLAGS="$(VFLAGS)"
 
 run-rv32: build-rv32 ## Build and run NPC simulator
 	$(MAKE) -C $(NSIM_HOME) run ARGS="$(ARGS)" VFLAGS="$(VFLAGS)" $(if $(IMG),IMG=$(IMG)) $(if $(DISK),DISK=$(DISK)) $(if $(SDCARD),SDCARD=$(SDCARD))
@@ -350,9 +397,10 @@ define run_cpu_tests_parallel
 	  for t in $(CPU_TESTS); do \
 	    printf 'NAME = %s\nSRCS = tests/%s.c\ninclude $${AM_HOME}/Makefile\n' "$$t" "$$t" > Makefile.$$t; \
 	    $(MAKE) -s -f Makefile.$$t ARCH=$$arch CROSS_COMPILE=$(CROSS_COMPILE) image >/dev/null 2>&1 \
-	      || echo "[cpu-tests-$(1)] BUILD FAIL: $$t"; \
+	      || { echo "[cpu-tests-$(1)] BUILD FAIL: $$t"; build_fail=1; }; \
 	  done; \
 	  rm -f Makefile.*; \
+	  if [ "$${build_fail:-0}" -ne 0 ]; then exit 1; fi; \
 	  SIM_CMD=$(2); \
 	  echo "=== cpu-tests-$(1): running in parallel (JOBS=$(JOBS)) ==="; \
 	  ( for t in $(CPU_TESTS); do \
@@ -380,8 +428,10 @@ endef
 cpu-tests-nemu32: build-nemu32 ## Run AM cpu-tests on NEMU (sequential; NEMU is not concurrency-safe here)
 	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/tests/cpu-tests ARCH=riscv32-nemu run ARGS="$(ARGS)" mainargs="i" VME=1 $(call tee_nemu,cpu-tests-nemu32)
 
-cpu-tests-rv32: build-rv32 ## Run AM cpu-tests on NPC (parallel)
-	@set -o pipefail; \
+cpu-tests-rv32: build-rv32 cpu-tests-rv32-run ## Build and run AM cpu-tests on NPC (parallel)
+
+cpu-tests-rv32-run: ## Run AM cpu-tests on an already-built NPC (parallel)
+	+@set -o pipefail; \
 	  NPC_CMD=$$($(MAKE) --no-print-directory -C $(NSIM_HOME) VFLAGS="$(VFLAGS)" print-npc-exec | tail -1) \
 	    || { echo "[cpu-tests-rv32] ERROR: print-npc-exec failed"; exit 1; }; \
 	  $(call run_cpu_tests_parallel,rv32,"$$NPC_CMD",$(NPC_ARCH),$(NPC_LOG_DIR)/cpu-tests-rv32.log)
@@ -399,13 +449,13 @@ irq-tests-build: ## Build bare-metal PLIC IRQ tests
 # Parallel bare-metal IRQ test runner shared by plain/difftest variants.
 # $(1) = suite label (shown in headers), $(2) = log stem for tee_npc.
 define run_irq_tests_parallel
-	@set -o pipefail; \
+	+@set -o pipefail; \
 	  NPC_CMD=$$($(MAKE) --no-print-directory -C $(NSIM_HOME) VFLAGS="$(VFLAGS)" print-npc-exec | tail -1) \
 	    || { echo "[$(2)] ERROR: print-npc-exec failed"; exit 1; }; \
 	  { \
 	    echo "=== IRQ tests ($(1), parallel JOBS=$(JOBS)) ==="; \
 	    ( for t in $(IRQ_TESTS); do printf '%s|%s\n' "$$t" "$(IRQ_TESTS_DIR)/$$t.bin"; done ) \
-	    | NPC_CMD="$$NPC_CMD" SIM_ARGS="$(ARGS)" NSIM_HOME="$(NSIM_HOME)" \
+	    | NPC_CMD="$$NPC_CMD" SIM_ARGS="$(ARGS) --trap-on-ebreak" NSIM_HOME="$(NSIM_HOME)" \
 	      xargs -P $(JOBS) -n1 sh -c ' \
 	        line="$$1"; name="$${line%%|*}"; bin="$${line#*|}"; \
 	        out=$$(cd "$$NSIM_HOME" && $$NPC_CMD $$SIM_ARGS "$$bin" 2>&1); \
@@ -423,7 +473,9 @@ define run_irq_tests_parallel
 	  } $(call tee_npc,$(2))
 endef
 
-irq-tests-rv32: build-rv32 irq-tests-build ## Build & run bare-metal PLIC IRQ tests on NPC (parallel)
+irq-tests-rv32: build-rv32 irq-tests-rv32-run ## Build & run bare-metal PLIC IRQ tests on NPC (parallel)
+
+irq-tests-rv32-run: irq-tests-build ## Run bare-metal PLIC IRQ tests on an already-built NPC
 	$(call run_irq_tests_parallel,bare-metal,irq-tests-rv32)
 
 irq-tests-rv32-difftest: build-rv32 config-nemu32-ref irq-tests-build ## Build & run bare-metal PLIC IRQ tests on NPC with difftest (parallel)
@@ -497,10 +549,12 @@ COREMARK_OPTIM_CFLAGS := \
 	--param=uninlined-function-insns=8 --param=loop-max-datarefs-for-datadeps=0 \
 	-fipa-pta -fno-tree-vrp -fwrapv
 
-# Parse a tee'd CoreMark + sim run log and print the CoreMark/MHz score.
+# Parse a tee'd CoreMark + sim run log and print the CoreMark/MHz score. The pk
+# port publishes cycle/instret deltas for CoreMark's timed region; older ports
+# fall back to the simulator-wide PMU cycle count.
 # $(1) = path to the log file produced by tee_npc.
 define coremark_mhz_report
-@awk '/^[ \t]*Iterations[ \t]*:/{for(i=1;i<=NF;i++)if($$i~/^[0-9]+$$/)it=$$i} /#inst:/{if(match($$0,/cycle:[ \t]*[0-9]+/)){c=substr($$0,RSTART,RLENGTH);gsub(/[^0-9]/,"",c);cy=c}} END{if(it+0>0&&cy+0>0){printf "\n==================== CoreMark/MHz ====================\n";printf "Iterations    : %d\n",it;printf "Active cycles : %d\n",cy;printf "CoreMark/MHz  : %.4f  (= %d * 1e6 / %d)\n",it*1000000.0/cy,it,cy;printf "======================================================\n"}else{printf "[CoreMark/MHz] WARN: could not parse iterations(%s) / cycles(%s) from %s\n",it,cy,"$(1)"}}' "$(1)"
+@awk '/^[ \t]*Iterations[ \t]*:/{for(i=1;i<=NF;i++)if($$i~/^[0-9]+$$/)it=$$i} /^CoreMark ROI cycles[ \t]*:/{roi_cy=$$NF} /^CoreMark ROI instructions[ \t]*:/{roi_in=$$NF} /#inst:/{if(match($$0,/cycle:[ \t]*[0-9]+/)){c=substr($$0,RSTART,RLENGTH);gsub(/[^0-9]/,"",c);sim_cy=c}} END{cy=(roi_cy+0>0)?roi_cy:sim_cy;label=(roi_cy+0>0)?"ROI cycles":"Active cycles (fallback)";if(it+0>0&&cy+0>0){printf "\n==================== CoreMark/MHz ====================\n";printf "Iterations    : %d\n",it;printf "%-14s: %d\n",label,cy;printf "CoreMark/MHz  : %.4f  (= %d * 1e6 / %d)\n",it*1000000.0/cy,it,cy;if(roi_in+0>0)printf "Core IPC      : %.4f  (= %d / %d)\n",roi_in/cy,roi_in,cy;printf "======================================================\n"}else{printf "[CoreMark/MHz] WARN: could not parse iterations(%s) / cycles(%s) from %s\n",it,cy,"$(1)"}}' "$(1)"
 endef
 
 coremark-rv32-optim: $(AM_KERNELS) config-rv32 ## Run  CoreMark on NPC with aggressive optim flags + CoreMark/MHz report
@@ -599,11 +653,29 @@ nanos-rv32: ## Build and run nanos-lite on NPC
 LINUX_HOME          := $(RAPTOR_HOME)/linux
 include $(LINUX_HOME)/vars.mk
 
+# Linux/OpenSBI legitimately executes EBREAK while probing semihosting and
+# handles the resulting breakpoint through mtvec.  Do not interpret those
+# instructions as the bare-metal AM good/bad-trap convention.
+LINUX_NPC_ARGS ?= --trap-on-ebreak
+# Stop as soon as the boot milestone checked by check_linux_boot.py is complete;
+# waiting for a later interactive-shell prompt adds userspace work to this CPU
+# boot gate without strengthening the milestone that the checker validates.
+LINUX_VERIFY_NPC_ARGS ?= $(LINUX_NPC_ARGS) --serial-exit-on=process --no-lightsss
+
 linux-download-rv32: ## Download pre-built Linux (RV32 only)
 	$(MAKE) -C $(LINUX_HOME) download-rv32
 
 linux-download-rv64: ## Download pre-built Linux (RV64 only)
 	$(MAKE) -C $(LINUX_HOME) download-rv64
+
+linux-download-rv32gc: ## Download fast RV32GC Buildroot Linux for simulation
+	$(MAKE) -C $(LINUX_HOME) download-rv32gc
+
+linux-download-rv64gc: ## Download fast RV64GC Buildroot Linux for simulation
+	$(MAKE) -C $(LINUX_HOME) download-rv64gc
+
+linux-download-rv32gc-fpga: ## Download complete RV32GC Buildroot Linux for FPGA
+	$(MAKE) -C $(LINUX_HOME) download-rv32gc-fpga
 
 linux-download: ## Download pre-built Linux (RV32 + RV64)
 	$(MAKE) -C $(LINUX_HOME) download
@@ -611,13 +683,15 @@ linux-download: ## Download pre-built Linux (RV32 + RV64)
 # Canned recipes: download payload, (re)build sim with VFLAGS, run + tee log.
 # $(1) = rv32|rv64 (linux/Makefile download suffix), $(2) = payload image,
 # $(3) = log stem.
-# $(4) = optional sim variable override.
+# $(4) = optional sim variable override. Linux NPC targets leave this unset so
+#        sim/Makefile supplies the matching NEMU difftest reference by default;
+#        pass DIFF_REF_SO= explicitly only when isolating a simulator failure.
 # $(5) = optional extra variables propagated to BOTH the `make -C sim` build
 #        and the `make -C sim run` invocation (e.g. DT_SOURCE=...).
 define linux_boot_npc
 	$(MAKE) -C $(LINUX_HOME) download-$(1)
-	$(MAKE) -C $(NSIM_HOME) -j$(NPROC) VFLAGS="$(VFLAGS)" $(5)
-	@set -o pipefail; $(MAKE) -C $(NSIM_HOME) run IMG=$(2) ARGS="$(ARGS) $(if $(MAX_INST),-m $(MAX_INST))" VFLAGS="$(VFLAGS)" $(4) $(5) $(call tee_npc,$(3))
+	+$(MAKE) -C $(NSIM_HOME) $(SUBMAKE_JOBS) VFLAGS="$(VFLAGS)" $(5)
+	+@set -o pipefail; $(MAKE) -C $(NSIM_HOME) run IMG=$(2) ARGS="$(LINUX_NPC_ARGS) $(ARGS) $(if $(MAX_INST),-m $(MAX_INST))" VFLAGS="$(VFLAGS)" $(4) $(5) $(call tee_npc,$(3))
 endef
 
 define linux_boot_nemu
@@ -628,66 +702,99 @@ endef
 linux-boot-nemu32: config-nemu32-linux ## Boot Linux on NEMU (riscv32)
 	$(call linux_boot_nemu,rv32,$(LINUX_RV32_PAYLOAD),linux-boot-nemu32)
 
+linux-boot-nemu32gc: config-nemu32gc-linux ## Boot RV32GC Buildroot Linux on NEMU
+	$(if $(filter $(LINUX_RV32GC_SIM_PAYLOAD),$(LINUX_RV32GC_PAYLOAD)),$(MAKE) -C $(LINUX_HOME) opensbi-rv32gc-payload)
+	@test -f "$(LINUX_RV32GC_PAYLOAD)" || { echo "[ERR] rv32gc payload not found: $(LINUX_RV32GC_PAYLOAD)"; \
+		echo "      Run 'make linux-download-rv32gc' or override LINUX_RV32GC_PAYLOAD=/path/to/fw_payload.bin"; exit 1; }
+	@set -o pipefail; $(MAKE) -C $(NEMU_HOME) run IMG=$(LINUX_RV32GC_PAYLOAD) \
+		ARGS="$(ARGS) $(if $(MAX_INST),-m $(MAX_INST))" $(call tee_nemu,linux-boot-nemu32gc)
+
 linux-boot-nemu64: config-nemu64-linux ## Boot Linux on NEMU (riscv64)
 	$(call linux_boot_nemu,rv64,$(LINUX_RV64_PAYLOAD),linux-boot-nemu64)
 
-linux-boot-rv32: config-rv32-linux ## Boot Linux on NPC (riscv32)
-	$(call linux_boot_npc,rv32,$(LINUX_RV32_PAYLOAD),linux-boot-rv32,DIFF_REF_SO=)
+linux-boot-nemu64gc: config-nemu64gc-linux ## Boot RV64GC Buildroot Linux on NEMU
+	$(if $(filter $(LINUX_RV64GC_SIM_PAYLOAD),$(LINUX_RV64GC_PAYLOAD)),$(MAKE) -C $(LINUX_HOME) opensbi-rv64gc-payload)
+	@test -f "$(LINUX_RV64GC_PAYLOAD)" || { echo "[ERR] rv64gc payload not found: $(LINUX_RV64GC_PAYLOAD)"; \
+		echo "      Run 'make linux-download-rv64gc' or override LINUX_RV64GC_PAYLOAD=/path/to/fw_payload.bin"; exit 1; }
+	@set -o pipefail; $(MAKE) -C $(NEMU_HOME) run IMG=$(LINUX_RV64GC_PAYLOAD) \
+		ARGS="$(ARGS) $(if $(MAX_INST),-m $(MAX_INST))" $(call tee_nemu,linux-boot-nemu64gc)
 
-linux-boot-rv32-difftest: config-nemu32-ref config-rv32-linux ## Boot Linux on NPC with difftest
-	$(call linux_boot_npc,rv32,$(LINUX_RV32_PAYLOAD),linux-boot-rv32-difftest)
+linux-boot-rv32: config-nemu32-ref config-rv32-linux ## Boot Linux on NPC with NEMU difftest (riscv32)
+	$(call linux_boot_npc,rv32,$(LINUX_RV32_PAYLOAD),linux-boot-rv32)
 
 # rv32gc Buildroot (hard-float F/D userspace) boot. Uses the spike-rv32gc.dts
-# DTB (riscv,isa=rv32imafdc...) so the kernel sees the F/D extensions; payload
-# defaults to third_party/linux-build's rv32 Buildroot fw_payload.bin and is NOT
-# auto-downloaded (override LINUX_RV32GC_PAYLOAD to use a different image).
-linux-boot-rv32gc: config-rv32-linux ## Boot rv32gc Buildroot Linux on NPC (hard-float F/D)
+# DTB (riscv,isa=rv32imafdc...) so the kernel sees the F/D extensions. By
+# default, the fast Buildroot Image is re-wrapped with simulation-safe OpenSBI;
+# override LINUX_RV32GC_PAYLOAD to use a different ready-made payload.
+linux-boot-rv32gc: config-nemu32-ref config-rv32-linux ## Boot rv32gc Buildroot Linux on NPC with NEMU difftest
+	$(if $(filter $(LINUX_RV32GC_SIM_PAYLOAD),$(LINUX_RV32GC_PAYLOAD)),$(MAKE) -C $(LINUX_HOME) opensbi-rv32gc-payload)
 	@test -f "$(LINUX_RV32GC_PAYLOAD)" || { echo "[ERR] rv32gc payload not found: $(LINUX_RV32GC_PAYLOAD)"; \
-		echo "      Build it via third_party/linux-build (qemu-rv32 buildroot preset),"; \
+		echo "      Run 'make linux-download-rv32gc' to fetch the release image,"; \
 		echo "      or override LINUX_RV32GC_PAYLOAD=/path/to/fw_payload.bin"; exit 1; }
-	$(call linux_boot_npc,rv32,$(LINUX_RV32GC_PAYLOAD),linux-boot-rv32gc,DIFF_REF_SO=,DT_SOURCE=spike-rv32gc.dts)
+	$(call linux_boot_npc,rv32,$(LINUX_RV32GC_PAYLOAD),linux-boot-rv32gc,,DT_SOURCE=spike-rv32gc.dts)
 
 # rv64gc Buildroot (hard-float F/D userspace) boot; mirrors linux-boot-rv32gc.
 # RV64 datapath via VFLAGS=-DRAPT_RV64; DTB via spike-rv64gc.dts (sv39).
 linux-boot-rv64gc: VFLAGS := -DRAPT_RV64
-linux-boot-rv64gc: config-rv32-linux ## Boot rv64gc Buildroot Linux on NPC (hard-float F/D)
+linux-boot-rv64gc: config-nemu64-ref config-rv32-linux ## Boot rv64gc Buildroot Linux on NPC with NEMU difftest
+	$(if $(filter $(LINUX_RV64GC_SIM_PAYLOAD),$(LINUX_RV64GC_PAYLOAD)),$(MAKE) -C $(LINUX_HOME) opensbi-rv64gc-payload)
 	@test -f "$(LINUX_RV64GC_PAYLOAD)" || { echo "[ERR] rv64gc payload not found: $(LINUX_RV64GC_PAYLOAD)"; \
-		echo "      Build it via third_party/linux-build (qemu-rv64 buildroot preset),"; \
+		echo "      Run 'make linux-download-rv64gc' to fetch the release image,"; \
 		echo "      or override LINUX_RV64GC_PAYLOAD=/path/to/fw_payload.bin"; exit 1; }
-	$(call linux_boot_npc,rv64,$(LINUX_RV64GC_PAYLOAD),linux-boot-rv64gc,DIFF_REF_SO=,DT_SOURCE=spike-rv64gc.dts)
+	$(call linux_boot_npc,rv64,$(LINUX_RV64GC_PAYLOAD),linux-boot-rv64gc,,DT_SOURCE=spike-rv64gc.dts)
 
 LINUX_BOOT_MAX_INST ?= 120000000
 LINUX_MEM_RANDOM_DELAY ?= 7
 LINUX_MEM_STRESS_SEEDS ?= 1 2 7
 LINUX_MEM_STRESS_MAX_INST ?= 400000000
+LINUX_MEM_STRESS_TIMEOUT ?= 7200
+LINUX_MEM_PROGRESS_CYCLES ?= 10000000
+# The portable gate stops after memory, IRQ, timer, networking/DMA, and S-mode
+# exception-delegation initialization.  Later debug-kernel initcalls take longer
+# than the outer CI process lifetime under cycle-accurate simulation;
+# verify-linux-boot-rv32 retains the full /init requirement.
+LINUX_MEM_STRESS_MILESTONE ?= SBI misaligned access exception delegation ok
+LINUX_MEM_STRESS_NPC_ARGS ?= $(LINUX_NPC_ARGS) --serial-exit-on='delegation ok' --no-lightsss
 LINUX_CKPT_STRESS_MAX_INST ?= 300000000
 LINUX_BOOT_CHECK := $(RAPTOR_HOME)/verify/scripts/check_linux_boot.py
+LINUX_MEM_STRESS_PROFILE := $(or $(strip $(BUILD_PROFILE)),$(RAPT_CONFIG))
+LINUX_MEM_STRESS_DT_SOURCE := $(if $(strip $(DT_SOURCE)),$(DT_SOURCE),spike-rv32ima.dts)
+LINUX_MEM_STRESS_MROM_DIR := $(NSIM_HOME)/csrc/mem/mrom-data/build/rv32-$(basename $(notdir $(LINUX_MEM_STRESS_DT_SOURCE)))
+LINUX_MEM_STRESS_MROM_IMG := $(LINUX_MEM_STRESS_MROM_DIR)/mrom-data.bin
+LINUX_MEM_STRESS_NPC_BIN := $(NSIM_HOME)/build/$(LINUX_MEM_STRESS_PROFILE)/riscv32-npc-sim
+LINUX_MEM_STRESS_NEMU_REF := $(NEMU_HOME)/build/riscv32-nemu-interpreter-so
 
 verify-linux-boot-rv32: ## Boot RV32 Linux with difftest and require the /init milestone
-	$(MAKE) --no-print-directory linux-boot-rv32-difftest \
-		ARGS="$(ARGS)" MAX_INST=$(LINUX_BOOT_MAX_INST)
-	python3 $(LINUX_BOOT_CHECK) $(NPC_LOG_DIR)/linux-boot-rv32-difftest.log
+	$(MAKE) --no-print-directory linux-boot-rv32 \
+		ARGS="$(ARGS)" LINUX_NPC_ARGS="$(LINUX_VERIFY_NPC_ARGS)" \
+		MAX_INST=$(LINUX_BOOT_MAX_INST)
+	python3 $(LINUX_BOOT_CHECK) $(NPC_LOG_DIR)/linux-boot-rv32.log
 
 verify-linux-memory-stress-rv32: config-nemu32-ref config-rv32-linux ## Boot RV32 Linux under randomized memory latency
 	$(MAKE) -C $(LINUX_HOME) download-rv32
+	+$(MAKE) -C $(NSIM_HOME)/csrc/mem/mrom-data BUILD_DIR=$(LINUX_MEM_STRESS_MROM_DIR) \
+		ISA64=0 DT_SOURCE=$(LINUX_MEM_STRESS_DT_SOURCE)
 	@set -eu -o pipefail; \
 	mkdir -p $(NPC_LOG_DIR); \
+	test -x "$(LINUX_MEM_STRESS_NPC_BIN)"; \
+	test -f "$(LINUX_MEM_STRESS_NEMU_REF)"; \
+	test -f "$(LINUX_MEM_STRESS_MROM_IMG)"; \
 	for seed in $(LINUX_MEM_STRESS_SEEDS); do \
 		echo "[Linux memory-stress] delay=$(LINUX_MEM_RANDOM_DELAY) seed=$$seed"; \
 		log="$(NPC_LOG_DIR)/linux-memory-stress-delay$(LINUX_MEM_RANDOM_DELAY)-seed$$seed.log"; \
-		$(MAKE) --no-print-directory -C $(NSIM_HOME) run IMG=$(LINUX_RV32_PAYLOAD) \
-			ARGS="-b -n -m $(LINUX_MEM_STRESS_MAX_INST) --mem-random-delay=$(LINUX_MEM_RANDOM_DELAY) --mem-random-seed=$$seed" \
+		( cd "$(NSIM_HOME)" && NSIM_PROGRESS_CYCLES=$(LINUX_MEM_PROGRESS_CYCLES) \
+			"$(LINUX_MEM_STRESS_NPC_BIN)" $(LINUX_MEM_STRESS_NPC_ARGS) -b -n \
+			-t $(LINUX_MEM_STRESS_TIMEOUT) -m $(LINUX_MEM_STRESS_MAX_INST) \
+			--mem-random-delay=$(LINUX_MEM_RANDOM_DELAY) --mem-random-seed=$$seed \
+			-d "$(LINUX_MEM_STRESS_NEMU_REF)" -r "$(LINUX_MEM_STRESS_MROM_IMG)" \
+			"$(LINUX_RV32_PAYLOAD)" ) \
 			2>&1 | tee "$$log"; \
-		python3 $(LINUX_BOOT_CHECK) "$$log"; \
+		python3 $(LINUX_BOOT_CHECK) --success-marker "$(LINUX_MEM_STRESS_MILESTONE)" "$$log"; \
 	done
 
 linux-boot-rv64: VFLAGS := -DRAPT_RV64
-linux-boot-rv64: config-rv32-linux ## Boot Linux on NPC (riscv64)
-	$(call linux_boot_npc,rv64,$(LINUX_RV64_PAYLOAD),linux-boot-rv64,DIFF_REF_SO=)
-
-linux-boot-rv64-difftest: VFLAGS := -DRAPT_RV64
-linux-boot-rv64-difftest: config-nemu64-ref config-rv32-linux ## Boot Linux on NPC RV64 with difftest
-	$(call linux_boot_npc,rv64,$(LINUX_RV64_PAYLOAD),linux-boot-rv64-difftest)
+linux-boot-rv64: config-nemu64-ref config-rv32-linux ## Boot Linux on NPC with NEMU difftest (riscv64)
+	$(call linux_boot_npc,rv64,$(LINUX_RV64_PAYLOAD),linux-boot-rv64)
 
 linux-boot-nemu32-device: config-nemu32-linux-device ## Boot Linux on NEMU RV32 (auto-download)
 	$(MAKE) -C $(LINUX_HOME) download-rv32
@@ -710,15 +817,15 @@ CKPT_CYCLE ?= 100000000
 
 linux-boot-rv32-ckpt-save: config-nemu32-ref config-rv32-linux ## Boot Linux on NPC, save checkpoint at CKPT_CYCLE -> CKPT_DIR
 	$(MAKE) -C $(LINUX_HOME) download-rv32
-	$(MAKE) -C $(NSIM_HOME) -j$(NPROC)
+	+$(MAKE) -C $(NSIM_HOME) $(SUBMAKE_JOBS)
 	rm -rf $(CKPT_DIR)
 	$(MAKE) -C $(NSIM_HOME) run IMG=$(LINUX_RV32_PAYLOAD) \
-		ARGS="$(ARGS) --ckpt-cycle=$(CKPT_CYCLE) --ckpt-save=$(CKPT_DIR) --ckpt-save-exit"
+		ARGS="$(LINUX_NPC_ARGS) $(ARGS) --ckpt-cycle=$(CKPT_CYCLE) --ckpt-save=$(CKPT_DIR) --ckpt-save-exit"
 
 linux-boot-rv32-ckpt-load: config-nemu32-ref config-rv32-linux ## Resume Linux boot on NPC from CKPT_DIR
-	$(MAKE) -C $(NSIM_HOME) -j$(NPROC)
+	+$(MAKE) -C $(NSIM_HOME) $(SUBMAKE_JOBS)
 	$(MAKE) -C $(NSIM_HOME) run IMG=$(LINUX_RV32_PAYLOAD) \
-		ARGS="$(ARGS) --ckpt-load=$(CKPT_DIR) $(if $(MAX_INST),-m $(MAX_INST))"
+		ARGS="$(LINUX_NPC_ARGS) $(ARGS) --ckpt-load=$(CKPT_DIR) $(if $(MAX_INST),-m $(MAX_INST))"
 
 # ============================================================================
 # FPGA Targets
@@ -736,19 +843,33 @@ VERIBLE_FLAGS := $(RAPTOR_HOME)/.verible-format.flags
 HDL_FORMAT_SOURCES := $(addprefix $(RAPTOR_HOME)/,$(shell git -C $(RAPTOR_HOME) ls-files \
 	'hdl/*.v' 'hdl/*.vh' 'hdl/*.sv' 'hdl/*.svh' \
 	'hdl/**/*.v' 'hdl/**/*.vh' 'hdl/**/*.sv' 'hdl/**/*.svh'))
+# Extend hdl-format with every tracked SystemVerilog compilation unit.  Keep
+# non-HDL .svh include fragments out: many are not parseable as standalone files.
+ALL_SV_FORMAT_SOURCES := $(sort $(HDL_FORMAT_SOURCES) \
+	$(addprefix $(RAPTOR_HOME)/,$(shell git -C $(RAPTOR_HOME) ls-files '*.sv')))
 
-.PHONY: hdl-format hdl-format-check
-hdl-format: HDL_FORMAT_MODE := --inplace
+.PHONY: hdl-format hdl-format-check all-sv-format all-sv-format-check
+hdl-format: VERIBLE_FORMAT_MODE := --inplace
+hdl-format: VERIBLE_FORMAT_SOURCES := $(HDL_FORMAT_SOURCES)
 hdl-format: ## Format tracked hand-written HDL sources with Verible
 
-hdl-format-check: HDL_FORMAT_MODE := --verify --inplace
+hdl-format-check: VERIBLE_FORMAT_MODE := --verify --inplace
+hdl-format-check: VERIBLE_FORMAT_SOURCES := $(HDL_FORMAT_SOURCES)
 hdl-format-check: ## Fail if tracked hand-written HDL is not Verible-formatted
 
-hdl-format hdl-format-check:
+all-sv-format: VERIBLE_FORMAT_MODE := --inplace
+all-sv-format: VERIBLE_FORMAT_SOURCES := $(ALL_SV_FORMAT_SOURCES)
+all-sv-format: ## Format tracked HDL sources and SystemVerilog testbenches with Verible
+
+all-sv-format-check: VERIBLE_FORMAT_MODE := --verify --inplace
+all-sv-format-check: VERIBLE_FORMAT_SOURCES := $(ALL_SV_FORMAT_SOURCES)
+all-sv-format-check: ## Fail if tracked HDL sources or SystemVerilog testbenches need formatting
+
+hdl-format hdl-format-check all-sv-format all-sv-format-check:
 	@command -v $(VERIBLE_FORMAT) >/dev/null || { \
 		echo "ERROR: $(VERIBLE_FORMAT) not found (brew install verible)" >&2; exit 1; }
 	@$(VERIBLE_FORMAT) --flagfile="$(VERIBLE_FLAGS)" --failsafe_success=false \
-		$(HDL_FORMAT_MODE) $(HDL_FORMAT_SOURCES)
+		$(VERIBLE_FORMAT_MODE) $(VERIBLE_FORMAT_SOURCES)
 
 pack: ## Pack all SV files into one
 	$(MAKE) -C $(NSIM_HOME) pack VFLAGS="$(VFLAGS)"
@@ -769,6 +890,7 @@ compile-commands: ## Generate root compile_commands.json from real NEMU+sim buil
 
 STA_PLATFORM ?= nangate45 ## STA platform: nangate45, asap7, sky130hd
 CLK_FREQ_MHZ ?= 50 ## Target clock frequency for STA (MHz)
+STA_SUMMARY_DETAIL ?= 0 ## Show per-module LSPD STA rows (0=grouped summary, 1=detail)
 
 sta: ## Static timing analysis (VFLAGS="-DRAPT_RV64" for RV64)
 	$(MAKE) -C $(NSIM_HOME) sta STA_PLATFORM=$(STA_PLATFORM) CLK_FREQ_MHZ=$(CLK_FREQ_MHZ) VFLAGS="$(VFLAGS)"
@@ -784,6 +906,12 @@ sta-rv64: sta ## Static timing analysis in RV64 mode
 sta-detail-rv64: VFLAGS := -DRAPT_RV64
 sta-detail-rv64: CLK_FREQ_MHZ := 25
 sta-detail-rv64: sta-detail ## Detailed static timing analysis in RV64 mode
+
+sta-summary: ## Display all existing STA results without running STA
+	@python3 "$(RAPTOR_HOME)/verify/scripts/sta_summary.py" \
+		--whole-root "$(RAPTOR_HOME)/third_party/yosys-opensta/result" \
+		--module-root "$(RAPTOR_HOME)/lspd/syn/build" \
+		$(if $(filter 1,$(STA_SUMMARY_DETAIL)),--detail,)
 
 SRAM_PLATFORM ?= sky130 ## OpenRAM technology for SRAM macros (sky130, freepdk45)
 
@@ -873,13 +1001,13 @@ verify-sigtest: ## Signature-based ISA corner-case tests
 	@set -o pipefail; $(MAKE) -C $(VERIFY_HOME) sigtest $(call tee_verify,sigtest)
 
 verify-riscof-classic: ## RISCOF classic compliance tests (legacy, no difftest)
-	@set -o pipefail; $(MAKE) -C $(VERIFY_HOME) riscof-classic $(call tee_verify,riscof-classic)
+	@set -o pipefail; $(MAKE) -C $(VERIFY_HOME) riscof-classic RAPT_CONFIG=$(RAPT_CONFIG) $(call tee_verify,riscof-classic)
 
 verify-riscof-classic-nemu: ## RISCOF classic compliance tests on NEMU reference
 	@set -o pipefail; $(MAKE) -C $(VERIFY_HOME) riscof-classic-nemu $(call tee_verify,riscof-classic-nemu)
 
 verify-riscof: ## RISCOF official compliance tests
-	@set -o pipefail; $(MAKE) -C $(VERIFY_HOME) riscof $(call tee_verify,riscof)
+	@set -o pipefail; $(MAKE) -C $(VERIFY_HOME) riscof RAPT_CONFIG=$(RAPT_CONFIG) $(call tee_verify,riscof)
 
 verify-riscv-dv: ## riscv-dv privileged smoke across the memory-delay matrix
 	@set -o pipefail; $(MAKE) -C $(VERIFY_HOME) riscv-dv $(call tee_verify,riscv-dv)
@@ -899,8 +1027,145 @@ verify-all: ## Run all verification targets
 verify-memory-stress-rv32: ## RaptOS: randomized Sv32 memory/atomic integration matrix
 	$(MAKE) -C $(RAPTOR_HOME)/app/tinyos/raptos memory-stress \
 		MEM_RANDOM_DELAY=$(or $(MEM_RANDOM_DELAY),32) \
+		$(if $(TIMEOUT),TIMEOUT=$(TIMEOUT),) \
+		$(if $(MEM_STRESS_FAST),MEM_STRESS_FAST=$(MEM_STRESS_FAST),) \
 		$(if $(MEM_STRESS_SEEDS),MEM_STRESS_SEEDS="$(MEM_STRESS_SEEDS)",) \
 		$(if $(MEM_STRESS_PAYLOADS),MEM_STRESS_PAYLOADS="$(MEM_STRESS_PAYLOADS)",)
+
+# --------------------------------------------------------------------------
+# Portable server gate: every DUT simulation below is Verilator based.  The
+# phase barriers are deliberate: sim/.config and NEMU's selected ISA are
+# shared mutable state, so RV32, RV64, compliance, and Linux builds must not
+# overlap.  Within a stable phase, independent test families run concurrently.
+# --------------------------------------------------------------------------
+.PHONY: verify-verilator \
+	_verify-verilator-directed _verify-verilator-rv32-build \
+	_verify-verilator-fuzz32 _verify-verilator-sig32 \
+	_verify-verilator-riscv-dv _verify-verilator-fpu \
+	_verify-verilator-app32 _verify-verilator-cpu32 _verify-verilator-irq32 \
+	_verify-verilator-rv64-build _verify-verilator-fuzz64 \
+	_verify-verilator-sig64 _verify-verilator-app64
+
+verify-verilator: export BUILD_PROFILE := $(VERILATOR_VERIFY_BUILD_PROFILE)
+verify-verilator: ## Pure-Verilator parallel regression: modules, RV32/RV64, apps, random AXI, RISCOF, Linux
+	@set -eu; \
+	command -v verilator >/dev/null || { echo "[verify-verilator] ERROR: verilator not found"; exit 1; }; \
+	command -v $(CROSS_COMPILE)gcc >/dev/null || { echo "[verify-verilator] ERROR: $(CROSS_COMPILE)gcc not found"; exit 1; }; \
+	command -v python3 >/dev/null || { echo "[verify-verilator] ERROR: python3 not found"; exit 1; }; \
+	echo "[verify-verilator] jobs=$(VERILATOR_VERIFY_JOBS) profile=$(BUILD_PROFILE) delay=0..$(VERILATOR_VERIFY_DELAY) app-delay=0..$(VERILATOR_VERIFY_APP_DELAY) linux-delay=0..$(VERILATOR_VERIFY_LINUX_DELAY) seed=$(VERILATOR_VERIFY_SEED)"
+	+@$(MAKE) --no-print-directory $(VERILATOR_VERIFY_SUBMAKE_JOBS) \
+		_verify-verilator-directed _verify-verilator-rv32-build
+	+@$(MAKE) --no-print-directory $(VERILATOR_VERIFY_SUBMAKE_JOBS) \
+		_verify-verilator-fuzz32 _verify-verilator-sig32 \
+		_verify-verilator-fpu _verify-verilator-app32 \
+		$(if $(filter 1,$(VERILATOR_VERIFY_RISCV_DV)),_verify-verilator-riscv-dv,)
+	+@$(MAKE) --no-print-directory -C $(NSIM_HOME) VFLAGS="$(VFLAGS)" print-npc-exec >/dev/null
+	+@$(MAKE) --no-print-directory $(VERILATOR_VERIFY_SUITE_SUBMAKE_JOBS) \
+		_verify-verilator-cpu32 _verify-verilator-irq32
+	+@set -eu; if [ "$(VERILATOR_VERIFY_RAPTOS)" = "1" ]; then \
+		$(MAKE) --no-print-directory verify-memory-stress-rv32 \
+			NPROC=$(VERILATOR_VERIFY_JOBS) JOBS=$(VERILATOR_VERIFY_JOBS) \
+			MEM_RANDOM_DELAY=$(VERILATOR_VERIFY_DELAY) \
+			MEM_STRESS_FAST=1 \
+			TIMEOUT=$(VERILATOR_VERIFY_TIMEOUT) \
+			MEM_STRESS_SEEDS="$(VERILATOR_VERIFY_MEM_SEEDS)"; \
+	else echo "[verify-verilator] SKIP RaptOS (VERILATOR_VERIFY_RAPTOS=0)"; fi
+	+@set -eu; if [ "$(VERILATOR_VERIFY_RV64)" = "1" ]; then \
+		$(MAKE) --no-print-directory _verify-verilator-rv64-build; \
+		$(MAKE) --no-print-directory $(VERILATOR_VERIFY_SUBMAKE_JOBS) \
+			_verify-verilator-fuzz64 _verify-verilator-sig64 _verify-verilator-app64; \
+	else echo "[verify-verilator] SKIP RV64 (VERILATOR_VERIFY_RV64=0)"; fi
+	+@set -eu; if [ "$(VERILATOR_VERIFY_RISCOF)" = "1" ]; then \
+		$(MAKE) --no-print-directory verify-riscof \
+			NPROC=$(VERILATOR_VERIFY_JOBS) JOBS=$(VERILATOR_VERIFY_JOBS) \
+			MEM_RANDOM_DELAY=$(VERILATOR_VERIFY_DELAY) MEM_RANDOM_SEED=$(VERILATOR_VERIFY_SEED) \
+			TIMEOUT=$(VERILATOR_VERIFY_TIMEOUT); \
+		$(MAKE) --no-print-directory verify-riscof-classic \
+			NPROC=$(VERILATOR_VERIFY_JOBS) JOBS=$(VERILATOR_VERIFY_JOBS) \
+			MEM_RANDOM_DELAY=$(VERILATOR_VERIFY_DELAY) MEM_RANDOM_SEED=$(VERILATOR_VERIFY_SEED) \
+			TIMEOUT=$(VERILATOR_VERIFY_TIMEOUT); \
+	else echo "[verify-verilator] SKIP RISCOF (VERILATOR_VERIFY_RISCOF=0)"; fi
+	+@set -eu; if [ "$(VERILATOR_VERIFY_LINUX)" = "1" ]; then \
+		$(MAKE) --no-print-directory verify-linux-memory-stress-rv32 \
+			NPROC=$(VERILATOR_VERIFY_JOBS) JOBS=$(VERILATOR_VERIFY_JOBS) \
+			BUILD_PROFILE=$(VERILATOR_VERIFY_LINUX_BUILD_PROFILE) \
+			VFLAGS="" DT_SOURCE=$(VERILATOR_VERIFY_LINUX_DT_SOURCE) \
+			LINUX_MEM_RANDOM_DELAY=$(VERILATOR_VERIFY_LINUX_DELAY) \
+			LINUX_MEM_STRESS_TIMEOUT=$(VERILATOR_VERIFY_LINUX_TIMEOUT) \
+			LINUX_MEM_STRESS_SEEDS="$(VERILATOR_VERIFY_LINUX_SEEDS)"; \
+	else echo "[verify-verilator] SKIP Linux (VERILATOR_VERIFY_LINUX=0)"; fi
+	@echo "[verify-verilator] PASS: portable Verilator regression completed"
+
+_verify-verilator-directed:
+	$(MAKE) -C $(VERIFY_HOME) verilator-directed \
+		RAPT_CONFIG=$(RAPT_CONFIG) XSIM_RAPT_CONFIG=$(RAPT_CONFIG) \
+		VERILATOR_DIRECTED_DELAY=$(VERILATOR_VERIFY_DELAY) \
+		VERILATOR_DIRECTED_SEED=$(VERILATOR_VERIFY_SEED)
+
+_verify-verilator-rv32-build:
+	$(MAKE) --no-print-directory config-nemu32-ref NPROC=$(VERILATOR_VERIFY_JOBS)
+	$(MAKE) --no-print-directory build-rv32 NPROC=$(VERILATOR_VERIFY_JOBS)
+
+_verify-verilator-fuzz32:
+	$(MAKE) -C $(VERIFY_HOME) fuzz ISA=rv32 RAPT_CONFIG=$(RAPT_CONFIG) \
+		SEED=$(VERILATOR_VERIFY_SEED) FUZZ_NUM=$(VERILATOR_VERIFY_FUZZ_NUM) \
+		FUZZ_LEN=$(VERILATOR_VERIFY_FUZZ_LEN) TIMEOUT=$(VERILATOR_VERIFY_TIMEOUT) \
+		MEM_RANDOM_DELAY=$(VERILATOR_VERIFY_DELAY) MEM_RANDOM_SEED=$(VERILATOR_VERIFY_SEED)
+
+_verify-verilator-sig32:
+	$(MAKE) -C $(VERIFY_HOME) sigtest ISA=rv32 RAPT_CONFIG=$(RAPT_CONFIG) \
+		TIMEOUT=$(VERILATOR_VERIFY_TIMEOUT) MEM_RANDOM_DELAY=$(VERILATOR_VERIFY_DELAY) \
+		MEM_RANDOM_SEED=$(VERILATOR_VERIFY_SEED)
+
+_verify-verilator-riscv-dv:
+	$(MAKE) -C $(VERIFY_HOME) riscv-dv RAPT_CONFIG=$(RAPT_CONFIG) \
+		RISCV_DV_MEM_DELAYS="$(VERILATOR_VERIFY_DV_DELAYS)" \
+		RISCV_DV_MEM_SEEDS="$(VERILATOR_VERIFY_DV_SEEDS)" \
+		RISCV_DV_TIMEOUT=$(VERILATOR_VERIFY_TIMEOUT)
+
+_verify-verilator-fpu:
+	$(MAKE) -C $(VERIFY_HOME) unit-fpu
+
+_verify-verilator-app32:
+	$(MAKE) -C $(RAPTOR_HOME)/app tests-sim ISA64=0 \
+		NPROC=$(VERILATOR_VERIFY_JOBS) \
+		PK_BUILD_PROFILE=verify-verilator \
+		MEMTEST_WORDS=512 \
+		SECURITY_SIM_FAST=1 \
+		DT_SOURCE=spike-rv32ima-app.dts \
+		ARGS="$(VERILATOR_VERIFY_APP_ARGS)"
+
+_verify-verilator-cpu32:
+	$(MAKE) --no-print-directory cpu-tests-rv32-run JOBS=$(VERILATOR_VERIFY_RUN_JOBS) \
+		ARGS="$(VERILATOR_VERIFY_ARGS)"
+
+_verify-verilator-irq32:
+	$(MAKE) --no-print-directory irq-tests-rv32-run JOBS=$(VERILATOR_VERIFY_RUN_JOBS) \
+		ARGS="$(VERILATOR_VERIFY_ARGS)"
+
+_verify-verilator-rv64-build:
+	$(MAKE) --no-print-directory config-nemu64-ref NPROC=$(VERILATOR_VERIFY_JOBS)
+	$(MAKE) --no-print-directory build-rv64 NPROC=$(VERILATOR_VERIFY_JOBS)
+
+_verify-verilator-fuzz64:
+	$(MAKE) -C $(VERIFY_HOME) fuzz ISA=rv64 RAPT_CONFIG=$(RAPT_CONFIG) \
+		SEED=$(VERILATOR_VERIFY_SEED) FUZZ_NUM=$(VERILATOR_VERIFY_FUZZ_NUM) \
+		FUZZ_LEN=$(VERILATOR_VERIFY_FUZZ_LEN) TIMEOUT=$(VERILATOR_VERIFY_TIMEOUT) \
+		MEM_RANDOM_DELAY=$(VERILATOR_VERIFY_DELAY) MEM_RANDOM_SEED=$(VERILATOR_VERIFY_SEED)
+
+_verify-verilator-sig64:
+	$(MAKE) -C $(VERIFY_HOME) sigtest ISA=rv64 RAPT_CONFIG=$(RAPT_CONFIG) \
+		TIMEOUT=$(VERILATOR_VERIFY_TIMEOUT) MEM_RANDOM_DELAY=$(VERILATOR_VERIFY_DELAY) \
+		MEM_RANDOM_SEED=$(VERILATOR_VERIFY_SEED)
+
+_verify-verilator-app64:
+	$(MAKE) -C $(RAPTOR_HOME)/app tests-sim ISA64=1 \
+		NPROC=$(VERILATOR_VERIFY_JOBS) \
+		PK_BUILD_PROFILE=verify-verilator \
+		MEMTEST_WORDS=512 \
+		SECURITY_SIM_FAST=1 \
+		DT_SOURCE=spike-rv64ima-app.dts \
+		ARGS="$(VERILATOR_VERIFY_APP_ARGS)"
 
 verify-clean: ## Clean verification artifacts
 	$(MAKE) -C $(VERIFY_HOME) clean
@@ -1029,12 +1294,12 @@ app-clean: ## [app] Clean app build artifacts
 	@$(MAKE) --no-print-directory -C $(APP_HOME) clean
 
 .PHONY: help setup setup-rtl verilog log logs-show logs-clean \
-	config-nemu32 config-nemu32-linux config-nemu32-ref config-nemu32-linux-device menuconfig-nemu32 build-nemu32 run-nemu32 run-nemu32-linux run-nemu32-linux-device \
-	config-nemu64 config-nemu64-ref config-nemu64-linux config-nemu64-linux-device build-nemu64 run-nemu64 run-nemu64-linux-device \
+	config-nemu32 config-nemu32-linux config-nemu32gc-linux config-nemu32-ref config-nemu32-linux-device menuconfig-nemu32 build-nemu32 run-nemu32 run-nemu32-linux run-nemu32-linux-device \
+	config-nemu64 config-nemu64-ref config-nemu64-linux config-nemu64gc-linux config-nemu64-linux-device build-nemu64 run-nemu64 run-nemu64-linux-device \
 	config-rv32 config-rv32-difftest config-rv32-linux config-rv32-ysyxsoc build-rv32 run-rv32 sim-rv32 \
 	build-rv64 run-rv64 lint-rv64 \
 	am-kernels-hello-rv32 am-tests-cache-tests-rv32 am-tests-nemu32 am-tests-rv32 \
-	cpu-tests-nemu32 cpu-tests-rv32 irq-tests-build irq-tests-rv32 irq-tests-rv32-difftest \
+	cpu-tests-nemu32 cpu-tests-rv32 cpu-tests-rv32-run irq-tests-build irq-tests-rv32 irq-tests-rv32-run irq-tests-rv32-difftest \
 	repro-tests-build linux-ticket-spinlock-repro-rv32 sv32-sq-alias-repro-rv32 \
 	coremark-rv32 coremark-rv64 coremark-rv32-optim coremark-rv64-optim coremark-rv32-difftest coremark-rv64-difftest coremark-ysyxsoc \
 	microbench-rv32 microbench-rv64 microbench-rv32-difftest micorbench-rv32-difftest microbench-rv64-difftest microbench-ysyxsoc \
@@ -1042,11 +1307,11 @@ app-clean: ## [app] Clean app build artifacts
 	coremark-nemu32 microbench-nemu32 coremark-nemu64 microbench-nemu64 \
 	archtest-rv32 archtest-rv32e \
 	nanos-nemu32 nanos-rv32 \
-	linux-download linux-download-rv32 linux-download-rv64 \
-	linux-boot-nemu32 linux-boot-nemu64 linux-boot-rv32 linux-boot-rv32-difftest linux-boot-rv32gc linux-boot-rv64 linux-boot-rv64-difftest linux-boot-rv64gc linux-boot-nemu32-device linux-boot-nemu64-device \
+	linux-download linux-download-rv32 linux-download-rv64 linux-download-rv32gc linux-download-rv64gc linux-download-rv32gc-fpga \
+	linux-boot-nemu32 linux-boot-nemu32gc linux-boot-nemu64 linux-boot-nemu64gc linux-boot-rv32 linux-boot-rv32gc linux-boot-rv64 linux-boot-rv64gc linux-boot-nemu32-device linux-boot-nemu64-device \
 	verify-linux-boot-rv32 verify-linux-memory-stress-rv32 verify-linux-memory-stress-from-ckpt-rv32 \
 	linux-boot-rv32-ckpt-save linux-boot-rv32-ckpt-load \
-	fpga-syn fpga-pnr pack lint lint-verible ide-setup compile-commands sta sta-detail sta-rv64 sta-detail-rv64 clean-npc clean \
+	fpga-syn fpga-pnr pack lint lint-verible ide-setup compile-commands sta sta-detail sta-rv64 sta-detail-rv64 sta-summary clean-npc clean \
 	verify-fuzz verify-fp-smoke-rv32 verify-fp-smoke-rv64 verify-fp-spike-rv32 verify-fp-spike-rv64 verify-fp-arith-rv32 verify-fp-arith-rv64 verify-fp-arith-spike-rv32 verify-fp-arith-spike-rv64 verify-fp-double-rv32 verify-fp-double-rv64 verify-fuzz-inf verify-fuzz-replay verify-sigtest verify-riscof-classic verify-riscof-classic-nemu verify-riscof verify-riscv-dv verify-riscv-dv-stress verify-riscv-dv-mmu verify-coverage verify-all verify-clean \
 	tinyos-sync os-cli-qemu egos-cli-qemu xv6-cli-qemu os-cli-nsim os-cli-nemu egos-cli-nsim egos-cli-nemu xv6-cli-nsim xv6-cli-nemu \
 	app-hello-rv32 app-coremark-rv32 app-coremark-rv32-optim app-coremark-rv64-optim app-coremark-nemu32 \

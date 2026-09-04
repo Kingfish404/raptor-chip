@@ -31,10 +31,14 @@ override ARGS += $(ARGS_DIFF)
 IMG ?=
 NEMU_EXEC := $(BINARY) $(ARGS) $(IMG)
 
-$(CONFIG_ROM_DTB_PATH):
-	$(MAKE) -C $(NEMU_HOME)/src/memory/rom build_dtb
+NEMU_ROM_DTB_PATH := $(call remove_quote,$(CONFIG_ROM_DTB_PATH))
+NEMU_ROM_DTB_SOURCE := $(NEMU_HOME)/../linux/dts/$(patsubst %.dtb,%.dts,$(notdir $(NEMU_ROM_DTB_PATH)))
+NEMU_ROM_DTB_BASE_SOURCE := $(patsubst %-nemu.dts,%.dts,$(NEMU_ROM_DTB_SOURCE))
 
-run-env: $(BINARY) $(DIFF_REF_SO) $(CONFIG_ROM_DTB_PATH)
+$(NEMU_ROM_DTB_PATH): $(NEMU_ROM_DTB_SOURCE) $(wildcard $(NEMU_ROM_DTB_BASE_SOURCE))
+	$(MAKE) -C $(NEMU_HOME)/src/memory/rom $(notdir $(NEMU_ROM_DTB_PATH))
+
+run-env: $(BINARY) $(DIFF_REF_SO) $(NEMU_ROM_DTB_PATH)
 
 run: run-env
 	$(NEMU_EXEC)

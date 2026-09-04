@@ -14,10 +14,13 @@ void (*ref_difftest_exec)(uint64_t n) = NULL;
 void (*ref_difftest_raise_intr)(uint64_t NO) = NULL;
 uint32_t (*ref_difftest_state_version)(void) = NULL;
 void (*ref_difftest_set_meip)(uint8_t val) = NULL;
+void (*ref_difftest_set_msip)(uint8_t val) = NULL;
+void (*ref_difftest_set_mtip)(uint8_t val) = NULL;
 void (*ref_difftest_set_stip)(uint8_t val) = NULL;
 void (*ref_difftest_plic_raise)(uint32_t src) = NULL;
 static void (*ref_difftest_checkpoint_sync)(void *dut, uint32_t plic_ndev,
                                             uint32_t plic_nctx) = NULL;
+static void (*ref_difftest_clear_reservation)(void) = NULL;
 
 static bool is_skip_ref = false;
 static bool should_diff_mem = false;
@@ -143,10 +146,14 @@ void init_difftest(char *ref_so_file, long img_size, int port)
 
   // Optional: present in newer NEMU builds; absent in older refs (skip if missing).
   ref_difftest_set_meip = (void (*)(uint8_t))dlsym(handle, "difftest_set_meip");
+  ref_difftest_set_msip = (void (*)(uint8_t))dlsym(handle, "difftest_set_msip");
+  ref_difftest_set_mtip = (void (*)(uint8_t))dlsym(handle, "difftest_set_mtip");
   ref_difftest_set_stip = (void (*)(uint8_t))dlsym(handle, "difftest_set_stip");
   ref_difftest_plic_raise = (void (*)(uint32_t))dlsym(handle, "difftest_plic_raise");
   ref_difftest_checkpoint_sync =
       (void (*)(void *, uint32_t, uint32_t))dlsym(handle, "difftest_checkpoint_sync");
+  ref_difftest_clear_reservation =
+      (void (*)(void))dlsym(handle, "difftest_clear_reservation");
 
   void (*ref_difftest_init)(int) = (void (*)(int))dlsym(handle, "difftest_init");
   assert(ref_difftest_init);
@@ -385,6 +392,27 @@ void difftest_step(vaddr_t pc)
     is_skip_ref = false;
     should_diff_mem = false;
     return;
+  }
+
+  /* LR/SC permits a conforming implementation to fail SC spuriously.  When
+   * the DUT reports such a failure, invalidate the reference reservation
+   * before executing the same SC.  NEMU then also returns failure and does
+   * not perform a memory write that the DUT did not make. */
+  const uint32_t dut_inst = *npc.inst;
+  const bool dut_is_sc = (dut_inst & 0x7f) == 0x2f
+      && ((dut_inst >> 27) & 0x1f) == 0x03;
+  const uint32_t dut_rd = (dut_inst >> 7) & 0x1f;
+  if (dut_is_sc && npc.gpr[dut_rd] != 0)
+  {
+    if (ref_difftest_clear_reservation != NULL)
+      ref_difftest_clear_reservation();
+    else
+    {
+      /* Compatibility with an older reference shared object. */
+      ref_difftest_regcpy(&npc, DIFFTEST_TO_REF);
+      should_diff_mem = false;
+      return;
+    }
   }
 
   ref_difftest_exec(1);

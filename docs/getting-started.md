@@ -109,8 +109,7 @@ make app-clean
 
 ```shell
 make linux-boot-nemu32              # NEMU
-make linux-boot-rv32               # NPC (Verilator)
-make linux-boot-rv32-difftest      # NPC + difftest vs NEMU
+make linux-boot-rv32               # NPC + difftest vs NEMU (default)
 ```
 
 Details: **[Linux Kernel Boot](./linux_kernel.md)**.
@@ -148,7 +147,7 @@ make clean    # clean all build artifacts
 | Run MicroBench on NPC           | `make microbench-rv32 ARGS="-b -n"`    |
 | Run nanos-lite on NEMU          | `make nanos-nemu32`                    |
 | Boot Linux on NEMU              | `make linux-boot-nemu32`               |
-| Boot Linux on NPC w/ difftest   | `make linux-boot-rv32-difftest`        |
+| Boot Linux on NPC w/ difftest   | `make linux-boot-rv32`                 |
 | FPGA synthesis                  | `make fpga-syn`                        |
 | Pack SV / Lint / STA            | `make pack` / `make lint` / `make sta` |
 | Clean all                       | `make clean`                           |

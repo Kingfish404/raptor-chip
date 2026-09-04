@@ -169,12 +169,12 @@ Broadcast unit. Outputs: `rpc`, `cpc`, branch resolution, `flush_pipe`, `fence_i
 
 #### LSU (`lsu/rapt_lsu.sv`)
 
-- **IOQ / AGU** (`lsu/rapt_lsu_ioq.sv`): `IOQ_SIZE` entries (default 8) for loads, stores and atomics. A younger ready load may issue ahead of older work only after older stores have resolved and are known non-conflicting. `oo_pending` retains the selected entry across a multicycle L1D request; atomics and uncacheable/MMIO accesses remain ordered. The IOQ drives CDB3 and the early `load_fast_if` wakeup path to IEU/FEU.
+- **IOQ / AGU** (`lsu/rapt_lsu_ioq.sv`): `IOQ_SIZE` entries (default 8) for loads, stores and atomics. A younger ready load may issue ahead of older work only after older stores have resolved and are known non-conflicting. With translation enabled, unequal 4 KiB page word offsets are sufficient to prove non-aliasing before the physical address is available; equal offsets remain conservatively ordered. `oo_pending` retains the selected entry across a multicycle L1D request; atomics and uncacheable/MMIO accesses remain ordered. The IOQ drives CDB3 and the early `load_fast_if` wakeup path to IEU/FEU.
 - **Unified SQ**: `SQ_SIZE` entries (default 16). One ring stores each store from execute/writeback through commit and drain. `[head,cmt)` entries are committed and survive flush; `[cmt,tail)` entries are speculative and are discarded on flush.
 - Store FSM: six states (`LS_S_V`/`LS_S_R`, `LS_S_HI_V`/`LS_S_HI_R`,
   `LS_S_X_V`/`LS_S_X_R`) handle aligned drains, split misaligned drains, and
   the third RV32D FSD beat.
-- Store-to-load forwarding: single SQ CAM by virtual word address, youngest-match-wins for full-width stores; partial or conflicting stores conservatively block/retry.
+- Store-to-load forwarding: single SQ CAM by virtual word address, youngest-match-wins for full-width stores. In MMU mode, loads bypass SQ entries with a different page word offset; equal-offset or partial conflicts conservatively block/retry until physical aliasing is resolved.
 
 #### Backend optimization handoff
 
@@ -186,11 +186,12 @@ remain separate microarchitecture projects, now rooted at their owning module:
   tag-compare stage while retaining `rebusy` cancellation in
   [`rapt_iq.sv`](../hdl/backend/rapt_iq.sv). The current refactor preserves the
   existing data-return-cycle wakeup behavior.
-- **P0-2 — precise memory disambiguation / store sets**: replace the
-  conservative unknown-address portion of `ioq_older_store_blk` in
+- **P0-2 — precise memory disambiguation / store sets**: page-offset
+  disambiguation now removes provably non-aliasing MMU dependencies. Replace
+  the remaining same-offset/unknown-address portion of `ioq_older_store_blk` in
   [`lsu/rapt_lsu_ioq.sv`](../hdl/backend/lsu/rapt_lsu_ioq.sv) with violation
   detection, replay, and eventually a load-PC-to-store-set predictor. IOQ and
-  SQ now share the LSU hierarchy, but this refactor does not relax ordering.
+  SQ now share the LSU hierarchy; possible aliases remain ordered.
 - **P1-2 — multiple outstanding L1D misses**: extract the single-miss state in
   [`memory/rapt_l1d.sv`](../hdl/memory/rapt_l1d.sv) into a small MSHR file and
   return completions to the per-entry IOQ completion storage. The current L1D
@@ -211,15 +212,30 @@ remain separate microarchitecture projects, now rooted at their owning module:
 
 Write-through policy. Partial stores (SB/SH): read-modify-write (RMW) 2-cycle merge in IDLE. Speculative SRAM read: VIPT-safe virtual index in IDLE. Separate DTLB + DSTLB instances; shared DPTW for both. Reservation register for LR/SC. Cacheability via `addr_cacheable()`.
 
-Zicbom `cbo.inval`, `cbo.clean`, and `cbo.flush` are serializing operations. Retirement waits for the unified SQ to become empty, then the existing `fence_time` maintenance path invalidates every L1D valid entry and flushes the data-side TLBs. This is a conservative whole-L1D implementation: the encoded `rs1` address is accepted but does not yet select one cache block. Because L1D is write-through, treating `cbo.clean` as the same stronger whole-cache operation is functionally correct. LiteX uses this behavior as its full-cache fallback after non-coherent DMA.
+Zicbom `cbo.inval`, `cbo.clean`, and `cbo.flush` are serializing operations. Their
+effective address is translated and checked as a CMO access before retirement:
+load or store permission is sufficient, the PTE A bit is required, the D bit is
+not, and failures use store/AMO page- or access-fault causes. M/S/U execution is
+gated by the corresponding `menvcfg`/`senvcfg` CBIE and CBCFE controls. After the
+unified SQ drains, the existing `fence_time` maintenance path invalidates every
+L1D valid entry and flushes the data-side TLBs. This is a conservative whole-L1D
+implementation; because L1D is write-through, it is architecturally at least as
+strong as cleaning or invalidating the selected 64-byte architectural block.
+
+Zicboz `cbo.zero` uses the same checked effective-address path with ordinary
+store permissions, including PTE A and D checks and CBZE gating. At commit, the
+SQ expands it into eight 64-bit writes in RV64 (sixteen 32-bit writes in RV32),
+zeroing exactly the naturally aligned 64-byte architectural cache block. This
+also implements Zic64b on physical configurations whose cache lines are only
+16 bytes. Zicbop prefetch encodings are accepted as non-faulting HINTs.
 
 #### TLB (`rapt_tlb.sv`)
 
-Reusable fully-associative Sv32/Sv39 TLB. `ENTRIES` param (default 4), ASID-aware. Combinational lookup, sequential fill (no duplicates), round-robin replacement, bulk flush. Instantiated as: `u_itlb` (L1I), `u_dtlb` (L1D load), `u_dstlb` (L1D store).
+Reusable fully-associative Sv32/Sv39 TLB. `ENTRIES` is configured independently for instruction and data translation (`RAPT_ITLB_ENTRIES` / `RAPT_DTLB_ENTRIES`; both 16 in the default configuration). Lookup is combinational and honors global PTEs. Fill first refreshes an existing translation, then consumes an invalid entry, and finally uses round-robin replacement. L1D instantiates separate load/store lookup replicas (`u_dtlb` and `u_dstlb`) but cross-fills both from every completed DPTW, avoiding a second walk when a page changes access direction. Bulk flush clears all entries.
 
 #### PTW (`rapt_ptw.sv`)
 
-Reusable page-table walker. RV32 uses a Sv32 two-level FSM (`IDLE`->`LVL1`->`LVL0`); RV64 uses a Sv39 three-level FSM (`IDLE`->`LVL2`->`LVL1`->`LVL0`). Leaf detection follows `PTE.R||PTE.X`, with hardware A/D-bit writeback before `done`. Instantiated as: `u_iptw` (L1I), `u_dptw` (L1D).
+Reusable page-table walker. RV32 uses a Sv32 two-level FSM (`IDLE`->`LVL1`->`LVL0`); RV64 uses a Sv39 three-level FSM (`IDLE`->`LVL2`->`LVL1`->`LVL0`). Leaf detection follows `PTE.R||PTE.X`. Svade is implemented: A=0, or D=0 for a store, produces a page fault and the walker never modifies a PTE. Instantiated as: `u_iptw` (L1I), `u_dptw` (L1D).
 
 #### BUS (`rapt_bus.sv`)
 
@@ -301,6 +317,8 @@ Cluster-level Platform-Level Interrupt Controller. Default `NDEV=31` sources and
 | `RAPT_L1D_LINE_LEN`  | 4 / 3     | RV32: 16 words/line; RV64: 8 words/line    |
 | `RAPT_L1D_LEN`       | 4         | L1D sets: 2⁴ = 16                          |
 | `RAPT_L1D_N_WAYS`    | 2         | L1D ways (2-way SA)                        |
+| `RAPT_ITLB_ENTRIES`   | 16        | Fully-associative ITLB entries             |
+| `RAPT_DTLB_ENTRIES`   | 16        | Entries in each L1D DTLB lookup replica    |
 | `RAPT_L2_EN`         | undefined | Optional L2 defaults to passthrough        |
 | `RAPT_L2_LEN`        | 8         | L2 sets: 2⁸ = 256 when enabled             |
 | `RAPT_L2_N_WAYS`     | 1         | L2 ways when enabled                       |

@@ -6,6 +6,9 @@
 #include <stdio.h>
 #include <termios.h>
 #include <unistd.h>
+#include <verilated.h>
+
+#include <string>
 
 // https://github.com/riscv-software-src/riscv-isa-sim/blob/master/riscv/ns16550.cc
 #define UART_QUEUE_SIZE 64
@@ -90,9 +93,13 @@ static bool tty_fallback_attempted;
 static bool tty_termios_saved;
 static struct termios tty_saved_termios;
 static bool serial_lf_to_cr;
+static std::string serial_exit_pattern;
+static std::string serial_tx_window;
 
 void nsim_plic_raise(uint32_t irq);
 bool sdb_is_batch_mode();
+extern NPCState npc;
+extern VerilatedContext *contextp;
 
 static void serial_restore_stdin()
 {
@@ -218,10 +225,29 @@ void serial_set_lf_to_cr(bool enable)
     serial_lf_to_cr = enable;
 }
 
+void serial_set_exit_pattern(const char *pattern)
+{
+    serial_exit_pattern = pattern != nullptr ? pattern : "";
+    serial_tx_window.clear();
+}
+
 static void serial_write_host_byte(uint8_t ch)
 {
     if (fputc((int)ch, stderr) != EOF)
         fflush(stderr);
+
+    if (serial_exit_pattern.empty() || npc.state != NPC_RUNNING)
+        return;
+    serial_tx_window.push_back((char)ch);
+    if (serial_tx_window.size() > serial_exit_pattern.size())
+        serial_tx_window.erase(0, serial_tx_window.size() - serial_exit_pattern.size());
+    if (serial_tx_window == serial_exit_pattern)
+    {
+        Log("serial exit milestone reached: %s", serial_exit_pattern.c_str());
+        contextp->gotFinish(true);
+        npc.host_exit_ok = 1;
+        npc.state = NPC_END;
+    }
 }
 
 static void serial_update_irq()

@@ -3,7 +3,7 @@ ROOT := ../../../..
 .PHONY: run clean
 
 run:
-	verilator --binary -j 8 -Wno-fatal -I$(ROOT)/hdl/include \
+	+verilator --binary -Wno-fatal -I$(ROOT)/hdl/include \
 		-I$(ROOT)/hdl/configs/small --top-module misc_tb \
 		$(ROOT)/hdl/backend/feu/fpu/rapt_fpu_compare.sv \
 		$(ROOT)/hdl/backend/feu/fpu/rapt_fpu_classify.sv \

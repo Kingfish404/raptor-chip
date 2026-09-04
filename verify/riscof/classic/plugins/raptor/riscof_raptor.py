@@ -9,6 +9,7 @@ the sail reference signature.
 
 from __future__ import annotations
 
+import concurrent.futures
 import logging
 import os
 import re
@@ -38,7 +39,9 @@ class raptor(pluginTemplate):
         self.pluginpath = os.path.abspath(config["pluginpath"])
         self.isa_spec = os.path.abspath(config["ispec"])
         self.platform_spec = os.path.abspath(config["pspec"])
-        self.num_jobs = str(config.get("jobs", 1))
+        self.num_jobs = max(
+            1, int(os.environ.get("RAPT_JOBS", config.get("jobs", 1)))
+        )
         self.target_run = config.get("target_run", "1") != "0"
 
         # Raptor-specific paths picked up from environment.  The verify
@@ -46,6 +49,8 @@ class raptor(pluginTemplate):
         self.npc_bin = os.environ.get("NPC_BIN")
         self.mrom_img = os.environ.get("MROM_IMG")
         self.timeout = os.environ.get("RAPT_TIMEOUT", "30")
+        self.mem_random_delay = os.environ.get("RAPT_MEM_RANDOM_DELAY", "0")
+        self.mem_random_seed = os.environ.get("RAPT_MEM_RANDOM_SEED", "1")
         # The sim binary expects its working directory to be $NSIM_HOME
         # because it dlopen()s capstone via a relative path. All test
         # inputs/outputs we pass on the command line are absolute.
@@ -132,8 +137,9 @@ class raptor(pluginTemplate):
     # ------------------------------------------------------------------
     def runTests(self, testList):
         total = len(testList)
-        for idx, testname in enumerate(testList, 1):
-            entry = testList[testname]
+
+        def run_one(indexed_test):
+            idx, (testname, entry) = indexed_test
             test_dir = entry["work_dir"]
             asm = entry["test_path"]
             marchstr = entry["isa"].lower()
@@ -157,11 +163,13 @@ class raptor(pluginTemplate):
             print(f"[{idx}/{total}] {os.path.basename(testname)}")
 
             if not self.target_run:
-                continue
+                return
 
             beg, end = self._extract_sig_range(elf)
             run_cmd = (
                 f"{self.npc_bin} -b -n --trap-on-ebreak -r {self.mrom_img} "
+                f"--mem-random-delay={self.mem_random_delay} "
+                f"--mem-random-seed={self.mem_random_seed} "
                 f"--sig={beg:x}-{end:x}:{sig} "
                 f"-t {self.timeout} {bin_}"
             )
@@ -177,3 +185,13 @@ class raptor(pluginTemplate):
                 # rather than aborting the whole run.
                 if not os.path.exists(sig):
                     open(sig, "w").close()
+
+        indexed_tests = enumerate(testList.items(), 1)
+        if self.num_jobs == 1:
+            for indexed_test in indexed_tests:
+                run_one(indexed_test)
+        else:
+            with concurrent.futures.ThreadPoolExecutor(
+                max_workers=self.num_jobs
+            ) as pool:
+                list(pool.map(run_one, indexed_tests))

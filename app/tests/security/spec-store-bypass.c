@@ -12,7 +12,10 @@
 #include "bench.h"
 
 #define PROBE_ENTRIES 256
-#define PROBE_STRIDE  PAGE_SIZE
+#ifndef SECURITY_PROBE_STRIDE
+#define SECURITY_PROBE_STRIDE PAGE_SIZE
+#endif
+#define PROBE_STRIDE  SECURITY_PROBE_STRIDE
 #define PROBE_SIZE    (PROBE_ENTRIES * PROBE_STRIDE)
 
 static uint8_t probe_array[PROBE_SIZE]
@@ -20,7 +23,9 @@ static uint8_t probe_array[PROBE_SIZE]
 
 static volatile uint8_t shared_var = 0;
 
-#define ATTACK_ROUNDS 100
+#ifndef SECURITY_ATTACK_ROUNDS
+#define SECURITY_ATTACK_ROUNDS 100
+#endif
 
 int main(void) {
   const uint8_t secret_val = 0x55;
@@ -51,7 +56,7 @@ int main(void) {
   uint32_t scores[PROBE_ENTRIES];
   memset(scores, 0, sizeof(scores));
 
-  for (int round = 0; round < ATTACK_ROUNDS; round++) {
+  for (int round = 0; round < SECURITY_ATTACK_ROUNDS; round++) {
     /* Evict probe */
     for (int i = 0; i < PROBE_SIZE; i += CACHE_LINE_SIZE)
       ((volatile uint8_t *)probe_array)[i];
@@ -95,9 +100,10 @@ int main(void) {
   printf("[spec-store-bypass] secret = 0x%02x, detected = 0x%02x, "
          "score = %u/%u\n",
          secret_val, detected_byte >= 0 ? detected_byte : 0,
-         max_score, (uint32_t)ATTACK_ROUNDS);
+         max_score, (uint32_t)SECURITY_ATTACK_ROUNDS);
 
-  if (detected_byte == secret_val && max_score > ATTACK_ROUNDS / 4) {
+  if (detected_byte == secret_val &&
+      max_score > SECURITY_ATTACK_ROUNDS / 4) {
     printf("[spec-store-bypass] VULNERABLE: speculative store bypass detected\n");
   } else {
     printf("[spec-store-bypass] NOT VULNERABLE or insufficient signal\n");

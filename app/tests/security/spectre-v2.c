@@ -8,7 +8,10 @@
 #include "bench.h"
 
 #define PROBE_ENTRIES 256
-#define PROBE_STRIDE  PAGE_SIZE
+#ifndef SECURITY_PROBE_STRIDE
+#define SECURITY_PROBE_STRIDE PAGE_SIZE
+#endif
+#define PROBE_STRIDE  SECURITY_PROBE_STRIDE
 #define PROBE_SIZE    (PROBE_ENTRIES * PROBE_STRIDE)
 
 static uint8_t probe_array[PROBE_SIZE]
@@ -42,7 +45,9 @@ static void evict_probe(void) {
 }
 
 #define TRAIN_ROUNDS   30
-#define ATTACK_ROUNDS  100
+#ifndef SECURITY_ATTACK_ROUNDS
+#define SECURITY_ATTACK_ROUNDS 100
+#endif
 #define THRESHOLD_MULTIPLIER 2
 
 int main(void) {
@@ -68,7 +73,7 @@ int main(void) {
   uint32_t scores[PROBE_ENTRIES];
   memset(scores, 0, sizeof(scores));
 
-  for (int round = 0; round < ATTACK_ROUNDS; round++) {
+  for (int round = 0; round < SECURITY_ATTACK_ROUNDS; round++) {
     evict_probe();
 
     /* Train indirect branch predictor toward gadget */
@@ -106,9 +111,9 @@ int main(void) {
 
   printf("[spectre-v2] secret = 0x%02x, leaked = 0x%02x, score = %u/%u\n",
          real_secret, leaked_byte >= 0 ? leaked_byte : 0,
-         max_score, (uint32_t)ATTACK_ROUNDS);
+         max_score, (uint32_t)SECURITY_ATTACK_ROUNDS);
 
-  if (leaked_byte == real_secret && max_score > ATTACK_ROUNDS / 4)
+  if (leaked_byte == real_secret && max_score > SECURITY_ATTACK_ROUNDS / 4)
     printf("[spectre-v2] VULNERABLE: indirect branch misprediction leak\n");
   else
     printf("[spectre-v2] NOT VULNERABLE or insufficient signal\n");

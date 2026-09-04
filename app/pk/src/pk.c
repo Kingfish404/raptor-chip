@@ -36,7 +36,11 @@ static void run_loaded_program(size_t argc, char** argv, uintptr_t kstack_top)
 {
   size_t mem_pages = mem_size >> RISCV_PGSHIFT;
   size_t stack_size = MIN(mem_pages >> 5, 2048) * RISCV_PGSIZE;
-  size_t stack_bottom = __do_mmap(current.mmap_max - stack_size, stack_size, PROT_READ|PROT_WRITE|PROT_EXEC, MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED|MAP_POPULATE, 0, 0);
+  // Reserve the full stack, but allocate and zero pages on first access.
+  // MAP_POPULATE clears up to 8 MiB before the payload even starts, which
+  // can exhaust the wall-clock timeout on coverage-instrumented RTL sims.
+  // PK handles faults both here (copying argv/auxv) and later in user mode.
+  size_t stack_bottom = __do_mmap(current.mmap_max - stack_size, stack_size, PROT_READ|PROT_WRITE|PROT_EXEC, MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED, 0, 0);
   kassert(stack_bottom != (uintptr_t)-1);
   current.stack_top = stack_bottom + stack_size;
 

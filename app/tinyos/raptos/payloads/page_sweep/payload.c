@@ -9,7 +9,10 @@
 #include "payload.h"
 
 #define PAGE_TOTAL 128u
-#define ROUNDS 150u
+#ifndef RAPTOS_PAGE_SWEEP_ROUNDS
+#define RAPTOS_PAGE_SWEEP_ROUNDS 150
+#endif
+#define ROUNDS ((uint32_t)RAPTOS_PAGE_SWEEP_ROUNDS)
 #define POINTER_MARKER 0x40000000u
 #define POINTER_MASK (~POINTER_MARKER)
 #define SWEEP_COOKIE 0x5eed5eedu

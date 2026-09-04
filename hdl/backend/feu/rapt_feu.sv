@@ -104,6 +104,10 @@ module rapt_feu #(
   logic fp_double_to_int_w_ready, fp_double_to_int_l_ready;
   logic fp_single_to_int_w_valid, fp_single_to_int_l_valid;
   logic fp_double_to_int_w_valid, fp_double_to_int_l_valid;
+  logic [63:0] fp_half_to_fp_result, fp_fp_to_half_result;
+  logic [4:0] fp_half_to_fp_flags, fp_fp_to_half_flags;
+  logic fp_half_to_fp_ready, fp_half_to_fp_valid;
+  logic fp_fp_to_half_ready, fp_fp_to_half_valid;
   logic [63:0] divsqrt_result;
   logic [ 4:0] divsqrt_flags;
   logic divsqrt_ready, divsqrt_result_valid;
@@ -112,6 +116,9 @@ module rapt_feu #(
   logic fp_addsub_s, fp_addsub_d, fp_mul_s, fp_mul_d, fp_fma_s, fp_fma_d;
   logic fp_divide, fp_sqrt, fp_divsqrt, fp_minmax, fp_compare, fp_classify;
   logic fp_convert_widen, fp_convert_narrow;
+  logic fp_zfhmin, fp_fmv_x_h, fp_fmv_h_x;
+  logic fp_fcvt_s_h, fp_fcvt_d_h, fp_fcvt_h_s, fp_fcvt_h_d;
+  logic fp_half_to_fp, fp_fp_to_half;
   logic fp_int_to_double_w, fp_int_to_double_l, fp_int_to_single_w, fp_int_to_single_l;
   logic fp_single_to_int_w, fp_single_to_int_l, fp_double_to_int_w, fp_double_to_int_l;
   logic fp_double, fp_rm_invalid, fp_trap;
@@ -134,13 +141,16 @@ module rapt_feu #(
     FP_PENDING_SINGLE_TO_INT_W,
     FP_PENDING_SINGLE_TO_INT_L,
     FP_PENDING_DOUBLE_TO_INT_W,
-    FP_PENDING_DOUBLE_TO_INT_L
+    FP_PENDING_DOUBLE_TO_INT_L,
+    FP_PENDING_HALF_TO_FP,
+    FP_PENDING_FP_TO_HALF
   } fp_pending_kind_e;
 
   logic fp_long_op, fp_selected_ready, fp_launch, fp_complete;
   logic fp_divsqrt_launch, fp_fma_launch, fp_addsub_launch, fp_mul_launch;
   logic fp_convert_narrow_launch;
   logic fp_convert_widen_launch;
+  logic fp_half_to_fp_launch, fp_fp_to_half_launch;
   logic fp_int_to_fp_launch;
   logic fp_to_int_launch;
   logic fp_pending_q, fp_pending_result_valid;
@@ -210,13 +220,27 @@ module rapt_feu #(
       || iss.fp_op == `RAPT_FP_OP_FCVT_D_LU;
   assign fp_convert_widen = iss.fp_op == `RAPT_FP_OP_FCVT_D_S;
   assign fp_convert_narrow = iss.fp_op == `RAPT_FP_OP_FCVT_S_D;
+  assign fp_zfhmin = iss.fp_op == `RAPT_FP_OP_ZFHMIN;
+  assign fp_fmv_x_h = fp_zfhmin && uop_payload.inst[31:25] == 7'b1110010;
+  assign fp_fmv_h_x = fp_zfhmin && uop_payload.inst[31:25] == 7'b1111010;
+  assign fp_fcvt_s_h = fp_zfhmin && uop_payload.inst[31:25] == 7'b0100000
+      && uop_payload.inst[24:20] == 5'b00010;
+  assign fp_fcvt_d_h = fp_zfhmin && uop_payload.inst[31:25] == 7'b0100001
+      && uop_payload.inst[24:20] == 5'b00010;
+  assign fp_fcvt_h_s = fp_zfhmin && uop_payload.inst[31:25] == 7'b0100010
+      && uop_payload.inst[24:20] == 5'b00000;
+  assign fp_fcvt_h_d = fp_zfhmin && uop_payload.inst[31:25] == 7'b0100010
+      && uop_payload.inst[24:20] == 5'b00001;
+  assign fp_half_to_fp = fp_fcvt_s_h || fp_fcvt_d_h;
+  assign fp_fp_to_half = fp_fcvt_h_s || fp_fcvt_h_d;
   assign fp_double = iss.fp_op == `RAPT_FP_OP_FDIV_D || iss.fp_op == `RAPT_FP_OP_FSQRT_D;
   assign fp_rounding_mode = iss.fp_rm == 3'b111 ? csr_bcast.frm : iss.fp_rm;
   assign fp_rm_invalid = (fp_fma_s || fp_fma_d || fp_divsqrt || fp_convert_widen
     || fp_convert_narrow || fp_int_to_double_w || fp_int_to_single_w
     || fp_int_to_double_l || fp_int_to_single_l || fp_single_to_int_w
     || fp_single_to_int_l || fp_double_to_int_w || fp_double_to_int_l
-    || fp_addsub_s || fp_addsub_d || fp_mul_s || fp_mul_d) && fp_rounding_mode > 3'b100;
+    || fp_addsub_s || fp_addsub_d || fp_mul_s || fp_mul_d
+    || fp_half_to_fp || fp_fp_to_half) && fp_rounding_mode > 3'b100;
   assign fp_trap = iss.trap || fp_rm_invalid;
   assign fp_long_op = fp_divsqrt || fp_fma_s || fp_fma_d
           || fp_addsub_s || fp_addsub_d || fp_mul_s || fp_mul_d
@@ -224,7 +248,8 @@ module rapt_feu #(
           || fp_int_to_double_w || fp_int_to_double_l
           || fp_int_to_single_w || fp_int_to_single_l
           || fp_single_to_int_w || fp_single_to_int_l
-          || fp_double_to_int_w || fp_double_to_int_l;
+          || fp_double_to_int_w || fp_double_to_int_l
+          || fp_half_to_fp || fp_fp_to_half;
   assign fp_selected_ready = fp_divsqrt ? divsqrt_ready
             : fp_fma_d ? fp_fma_d_ready : fp_fma_s ? fp_fma_s_ready
           : fp_addsub_d ? fp_addsub_d_ready : fp_addsub_s ? fp_addsub_s_ready
@@ -238,7 +263,9 @@ module rapt_feu #(
           : fp_single_to_int_w ? fp_single_to_int_w_ready
           : fp_single_to_int_l ? fp_single_to_int_l_ready
           : fp_double_to_int_w ? fp_double_to_int_w_ready
-          : fp_double_to_int_l_ready;
+          : fp_double_to_int_l ? fp_double_to_int_l_ready
+          : fp_half_to_fp ? fp_half_to_fp_ready
+          : fp_fp_to_half_ready;
 
   always_comb begin
     fp_launch_kind = FP_PENDING_DIVSQRT;
@@ -258,6 +285,8 @@ module rapt_feu #(
     else if (fp_single_to_int_l) fp_launch_kind = FP_PENDING_SINGLE_TO_INT_L;
     else if (fp_double_to_int_w) fp_launch_kind = FP_PENDING_DOUBLE_TO_INT_W;
     else if (fp_double_to_int_l) fp_launch_kind = FP_PENDING_DOUBLE_TO_INT_L;
+    else if (fp_half_to_fp) fp_launch_kind = FP_PENDING_HALF_TO_FP;
+    else if (fp_fp_to_half) fp_launch_kind = FP_PENDING_FP_TO_HALF;
   end
 
   assign fp_launch = iss.valid && fp_long_op && !fp_trap && !fp_pending_q && fp_selected_ready;
@@ -267,6 +296,8 @@ module rapt_feu #(
   assign fp_mul_launch = fp_launch && (fp_mul_s || fp_mul_d);
   assign fp_convert_narrow_launch = fp_launch && fp_convert_narrow;
   assign fp_convert_widen_launch = fp_launch && fp_convert_widen;
+  assign fp_half_to_fp_launch = fp_launch && fp_half_to_fp;
+  assign fp_fp_to_half_launch = fp_launch && fp_fp_to_half;
   assign fp_int_to_fp_launch = fp_launch && (fp_int_to_double_w
         || fp_int_to_double_l || fp_int_to_single_w || fp_int_to_single_l);
   assign fp_to_int_launch = fp_launch && (fp_single_to_int_w
@@ -362,6 +393,16 @@ module rapt_feu #(
         fp_pending_result = fp_double_to_int_l_result;
         fp_pending_flags = fp_double_to_int_l_flags;
       end
+      FP_PENDING_HALF_TO_FP: begin
+        fp_pending_result_valid = fp_half_to_fp_valid;
+        fp_pending_result = fp_half_to_fp_result;
+        fp_pending_flags = fp_half_to_fp_flags;
+      end
+      FP_PENDING_FP_TO_HALF: begin
+        fp_pending_result_valid = fp_fp_to_half_valid;
+        fp_pending_result = fp_fp_to_half_result;
+        fp_pending_flags = fp_fp_to_half_flags;
+      end
       default: ;
     endcase
   end
@@ -453,6 +494,31 @@ module rapt_feu #(
       .result(fp_convert_narrow_result),
       .flags(fp_convert_narrow_flags),
       .result_valid(fp_convert_narrow_valid)
+  );
+  rapt_fpu_half_to_fp u_fpu_half_to_fp (
+      .clock(clock),
+      .reset(reset),
+      .flush(cmu_bcast.flush_pipe),
+      .valid(fp_half_to_fp_launch),
+      .ready(fp_half_to_fp_ready),
+      .operand(fpr.alu_rdata_a),
+      .target_double(fp_fcvt_d_h),
+      .result(fp_half_to_fp_result),
+      .flags(fp_half_to_fp_flags),
+      .result_valid(fp_half_to_fp_valid)
+  );
+  rapt_fpu_fp_to_half u_fpu_fp_to_half (
+      .clock(clock),
+      .reset(reset),
+      .flush(cmu_bcast.flush_pipe),
+      .valid(fp_fp_to_half_launch),
+      .ready(fp_fp_to_half_ready),
+      .operand(fpr.alu_rdata_a),
+      .source_double(fp_fcvt_h_d),
+      .rounding_mode(fp_rounding_mode),
+      .result(fp_fp_to_half_result),
+      .flags(fp_fp_to_half_flags),
+      .result_valid(fp_fp_to_half_valid)
   );
   rapt_fpu_int_to_fp #(
       .TARGET_DOUBLE(1'b1),
@@ -674,11 +740,13 @@ module rapt_feu #(
   assign fpr.alu_wvalid = (fp_complete && !fp_pending_to_gpr_q)
         || (iss.valid && !fp_long_op && iss.fp_valid && !fp_trap
         && !(fp_classify || fp_compare || fp_single_to_int_w
-    || fp_single_to_int_l || fp_double_to_int_w || fp_double_to_int_l)
-    && iss.fp_op != `RAPT_FP_OP_FMV_X_W && iss.fp_op != `RAPT_FP_OP_FMV_X_D);
+	    || fp_single_to_int_l || fp_double_to_int_w || fp_double_to_int_l)
+	    && iss.fp_op != `RAPT_FP_OP_FMV_X_W && iss.fp_op != `RAPT_FP_OP_FMV_X_D
+        && !fp_fmv_x_h);
   assign fpr.alu_waddr = fp_pending_q ? fp_pending_frd_q : fp_rd;
   assign fpr.alu_wdata = fp_pending_q ? fp_pending_result
     : fp_minmax ? fp_compare_result : fp_single_to_int_w ? fp_single_to_int_w_result
+    : fp_fmv_h_x ? {48'hffff_ffff_ffff, iss.op1[15:0]}
     : iss.fp_op == `RAPT_FP_OP_FMV_W_X ? {32'hffff_ffff, iss.op1[31:0]}
     : iss.fp_op == `RAPT_FP_OP_FMV_D_X ? iss.op1 : fp_sgnj_result;
 
@@ -686,7 +754,8 @@ module rapt_feu #(
   assign wb_fpu.result = fp_pending_q
         ? (fp_pending_to_gpr_q ? fp_pending_result[XLEN-1:0] : '0)
     : (iss.fp_op == `RAPT_FP_OP_FMV_X_W ? {{(XLEN-32){fp_s1[31]}}, fp_s1}
-    : iss.fp_op == `RAPT_FP_OP_FMV_X_D ? fp_d1[XLEN-1:0]
+	    : iss.fp_op == `RAPT_FP_OP_FMV_X_D ? fp_d1[XLEN-1:0]
+    : fp_fmv_x_h ? {{(XLEN-16){fpr.alu_rdata_a[15]}}, fpr.alu_rdata_a[15:0]}
     : fp_compare ? fp_compare_result[XLEN-1:0]
     : fp_classify ? {{(XLEN-10){1'b0}}, fp_classify_result}
     : fp_single_to_int_w ? fp_single_to_int_w_result[XLEN-1:0]

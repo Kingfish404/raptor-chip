@@ -191,6 +191,12 @@ static void print_configured_mmio_maps(FILE *out)
 #ifdef CONFIG_HAS_DISK
   entries[count++] = (map_print_entry_t){"virtio-blk", 0x10001000, 0x1000, "QEMU virtio-mmio block device"};
 #endif
+#ifdef CONFIG_HAS_NET
+  entries[count++] = (map_print_entry_t){"virtio-net", CONFIG_NET_MMIO, 0x1000, "virtio-mmio network with user-mode NAT"};
+#endif
+#ifdef CONFIG_HAS_RNG
+  entries[count++] = (map_print_entry_t){"virtio-rng", CONFIG_RNG_MMIO, 0x1000, "virtio-mmio host entropy source"};
+#endif
 #ifdef CONFIG_HAS_SDCARD
   entries[count++] = (map_print_entry_t){"sdhci-pci-ecam", 0x30008000, 0x1000, "QEMU SDHCI PCI ECAM stub"};
   entries[count++] = (map_print_entry_t){"sdhci", CONFIG_SDCARD_CTL_MMIO, 0x100, "QEMU SDHCI SD-card controller"};

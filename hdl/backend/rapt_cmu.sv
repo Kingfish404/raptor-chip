@@ -23,6 +23,9 @@ module rapt_cmu #(
   // Keep it out of FPGA/ASIC synthesis so verification hooks do not add
   // architectural flops or timing load.
   logic [XLEN-1:0] rpc_a, rpc_b, npc_a, npc_b;
+  logic [31:0] pmu_inst_a, pmu_inst_b;
+  logic pmu_ben_a, pmu_jen_a, pmu_jren_a, pmu_mispredict_a;
+  logic pmu_ben_b, pmu_jen_b, pmu_jren_b, pmu_mispredict_b;
 `endif
   /* verilator lint_on UNUSEDSIGNAL */
 
@@ -92,6 +95,16 @@ module rapt_cmu #(
       rpc_b <= '0;
       npc_a <= '0;
       npc_b <= '0;
+      pmu_inst_a <= '0;
+      pmu_inst_b <= '0;
+      pmu_ben_a <= 1'b0;
+      pmu_jen_a <= 1'b0;
+      pmu_jren_a <= 1'b0;
+      pmu_mispredict_a <= 1'b0;
+      pmu_ben_b <= 1'b0;
+      pmu_jen_b <= 1'b0;
+      pmu_jren_b <= 1'b0;
+      pmu_mispredict_b <= 1'b0;
 `endif
       pmu_inst_retire <= 0;
       ben_r <= 0;
@@ -132,6 +145,16 @@ module rapt_cmu #(
         rpc_b <= rou_cmu.pc_b;
         npc_a <= rou_cmu.npc_a;
         npc_b <= rou_cmu.npc_b;
+        pmu_inst_a <= rou_cmu.inst_a;
+        pmu_inst_b <= rou_cmu.inst_b;
+        pmu_ben_a <= rou_cmu.ben_a;
+        pmu_jen_a <= rou_cmu.jen_a;
+        pmu_jren_a <= rou_cmu.jren_a;
+        pmu_mispredict_a <= rou_cmu.branch_mispredict_a;
+        pmu_ben_b <= rou_cmu.ben_b;
+        pmu_jen_b <= rou_cmu.jen_b;
+        pmu_jren_b <= rou_cmu.jren_b;
+        pmu_mispredict_b <= rou_cmu.branch_mispredict_b;
 `endif
       end else begin
         valid   <= 0;

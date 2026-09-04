@@ -194,6 +194,14 @@ interface rou_cmu_if #(
   logic ebreak_a;
   logic difftest_skip_a;
   logic valid_a;
+  // Per-slot control-flow classification for simulation PMU accounting.
+  // Keep these separate from the shared BPU-training signals below: on a
+  // dual commit the shared signals select slot B and would otherwise hide a
+  // correctly-predicted branch retiring in slot A.
+  logic ben_a;
+  logic jen_a;
+  logic jren_a;
+  logic branch_mispredict_a;
 
   // Commit slot B (ROB head+1, dual commit)
   logic [RLEN-1:0] rd_b;
@@ -205,6 +213,10 @@ interface rou_cmu_if #(
   logic ebreak_b;
   logic difftest_skip_b;
   logic valid_b;
+  logic ben_b;
+  logic jen_b;
+  logic jren_b;
+  logic branch_mispredict_b;
 
   // Shared commit signals (merged from active slot)
   logic btaken;
@@ -247,8 +259,10 @@ interface rou_cmu_if #(
   modport out(
       output rd_a, inst_a, pc_a, prd_a, prs_a, npc_a,
       output ebreak_a, difftest_skip_a, valid_a,
+      output ben_a, jen_a, jren_a, branch_mispredict_a,
       output rd_b, inst_b, pc_b, prd_b, prs_b, npc_b,
       output ebreak_b, difftest_skip_b, valid_b,
+      output ben_b, jen_b, jren_b, branch_mispredict_b,
       output btaken, ben, jen, jren, atomic_sc,
       output fence_time, fence_i, flush_pipe, flush_redirect, sys_resume, time_trap,
       output redirect_pc, rob_head,
@@ -261,8 +275,10 @@ interface rou_cmu_if #(
   modport in(
       input rd_a, inst_a, pc_a, prd_a, prs_a, npc_a,
       input ebreak_a, difftest_skip_a, valid_a,
+      input ben_a, jen_a, jren_a, branch_mispredict_a,
       input rd_b, inst_b, pc_b, prd_b, prs_b, npc_b,
       input ebreak_b, difftest_skip_b, valid_b,
+      input ben_b, jen_b, jren_b, branch_mispredict_b,
       input btaken, ben, jen, jren, atomic_sc,
       input fence_time, fence_i, flush_pipe, flush_redirect, sys_resume, time_trap,
       input redirect_pc, rob_head,
@@ -276,8 +292,10 @@ interface rou_cmu_if #(
   modport out(
       output rd_a, inst_a, pc_a, prd_a, prs_a, npc_a,
       output ebreak_a, difftest_skip_a, valid_a,
+      output ben_a, jen_a, jren_a, branch_mispredict_a,
       output rd_b, inst_b, pc_b, prd_b, prs_b, npc_b,
       output ebreak_b, difftest_skip_b, valid_b,
+      output ben_b, jen_b, jren_b, branch_mispredict_b,
       output btaken, ben, jen, jren, atomic_sc,
       output fence_time, fence_i, flush_pipe, flush_redirect, sys_resume, time_trap,
       output redirect_pc, rob_head
@@ -285,8 +303,10 @@ interface rou_cmu_if #(
   modport in(
       input rd_a, inst_a, pc_a, prd_a, prs_a, npc_a,
       input ebreak_a, difftest_skip_a, valid_a,
+      input ben_a, jen_a, jren_a, branch_mispredict_a,
       input rd_b, inst_b, pc_b, prd_b, prs_b, npc_b,
       input ebreak_b, difftest_skip_b, valid_b,
+      input ben_b, jen_b, jren_b, branch_mispredict_b,
       input btaken, ben, jen, jren, atomic_sc,
       input fence_time, fence_i, flush_pipe, flush_redirect, sys_resume, time_trap,
       input redirect_pc, rob_head

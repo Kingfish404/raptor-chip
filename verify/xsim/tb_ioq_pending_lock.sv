@@ -64,6 +64,27 @@ module tb_ioq_pending_lock;
     end
   endtask
 
+  task automatic drive_store(input logic [31:0] addr, input logic [4:0] dest);
+    begin
+      rou_exu.uop = '0;
+      rou_exu.uop.pc = 32'h2000_0000 + {25'h0, dest, 2'b00};
+      rou_exu.uop.pnpc = rou_exu.uop.pc + 32'd4;
+      rou_exu.uop.wen = 1'b1;
+      rou_exu.uop.alu = `RAPT_SW_WSTRB;
+      rou_exu.op1 = addr;
+      rou_exu.op2 = 32'h55aa_1234;
+      rou_exu.pr1 = '0;
+      rou_exu.pr2 = '0;
+      rou_exu.prd = '0;
+      rou_exu.dest = dest;
+      rou_exu.valid = 1'b1;
+      disp.accept_a = 1'b1;
+      tick(1);
+      disp.accept_a = 1'b0;
+      rou_exu.valid = 1'b0;
+    end
+  endtask
+
   task automatic expect_pending_addr(input logic [31:0] addr);
     begin
       check(exu_lsu.rvalid, "exu_lsu.rvalid dropped while pending");
@@ -120,6 +141,28 @@ module tb_ioq_pending_lock;
     end
   endtask
 
+  task automatic complete_fast_load(input logic [31:0] data,
+                                    input logic [5:0] expected_prd);
+    begin
+      exu_lsu.rdata = data;
+      exu_lsu.rready = 1'b1;
+      for (int wait_cycle = 0; wait_cycle < 16; wait_cycle++) begin
+        if (exu_lsu.rvalid) begin
+          #1;
+          check(load_fast.valid, "head integer load did not emit fast wake");
+          check(!load_fast.rebusy, "head integer load emitted rebusy on return");
+          check(load_fast.prd == expected_prd, "fast-wake physical destination mismatch");
+          tick(1);
+          exu_lsu.rready = 1'b0;
+          return;
+        end
+        tick(1);
+      end
+      exu_lsu.rready = 1'b0;
+      fail("timed out waiting for fast LSU load handshake");
+    end
+  endtask
+
   task automatic expect_flush_drops_late_response;
     begin
       cmu_bcast.flush_pipe = 1'b1;
@@ -151,7 +194,7 @@ module tb_ioq_pending_lock;
 
       drive_load(32'hc000_4000, 5'd8, 6'd10);
       wait_for_addr(32'hc000_4000);
-      complete_lsu_load(32'h1234_abcd);
+      complete_fast_load(32'h1234_abcd, 6'd10);
       expect_load_broadcast(32'h1234_abcd, "post-flush reused load");
       check(exu_ioq_bcast.dest == 5'd8,
             "post-flush reused load broadcast a stale ROB destination");
@@ -169,6 +212,50 @@ module tb_ioq_pending_lock;
     drive_sc(32'h0000_0000, 32'h1234_5678, 1'b0, 32'd1);
     drive_sc(32'h8000_0080, 32'h89ab_cdef, 1'b1, 32'd0);
     $display("PASS: IOQ LR/SC reservation checks passed");
+
+    reset = 1'b1;
+    init_ioq_inputs(1'b1);
+    tick(2);
+    reset = 1'b0;
+    tick(2);
+    csr_bcast.dmmu_en = 1'b1;
+
+    // Keep an older translating store at the IOQ/ROB head, then issue a
+    // non-aliasing younger MMU load.  Its physical address (and therefore MMIO
+    // classification) is only known after DTLB translation.  If L1D discovers
+    // MMIO it waits for ordered=1, so the held request must be promoted only
+    // after both the IOQ and ROB heads advance to it.
+    cmu_bcast.rob_head = 5'd11;
+    exu_lsu.stq_ready = 1'b0;
+    drive_store(32'hc000_0000, 5'd11);
+    drive_load(32'hc000_0800, 5'd12, 6'd12);
+    wait_for_addr(32'hc000_0800);
+    check(!exu_lsu.ordered, "out-of-order MMU load started ordered");
+    repeat (3) begin
+      check(!exu_lsu.ordered, "MMU load promoted before reaching ROB head");
+      tick(1);
+    end
+
+    // Finish the older store's DTLB request and let it retire.  The pending
+    // load is now IOQ head, but must remain unordered until ROB catches up.
+    exu_l1d.paddr = 32'h8000_0000;
+    exu_l1d.ready = 1'b1;
+    tick(1);
+    exu_l1d.ready = 1'b0;
+    exu_lsu.stq_ready = 1'b1;
+    #1;
+    check(exu_ioq_bcast.valid && exu_ioq_bcast.dest == 5'd11,
+          "older translated store did not become retireable");
+    tick(1);
+    #1;
+    check(dut.ioq_head == 1, "IOQ head did not advance to pending load");
+    check(!exu_lsu.ordered, "MMU load promoted before reaching ROB head");
+
+    cmu_bcast.rob_head = 5'd12;
+    tick(1);
+    check(exu_lsu.ordered, "held MMU load did not become ordered at ROB head");
+    complete_lsu_load(32'hfeed_1200);
+    expect_load_broadcast(32'hfeed_1200, "ROB-head promoted MMU load");
 
     reset = 1'b1;
     init_ioq_inputs(1'b1);

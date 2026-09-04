@@ -58,12 +58,15 @@ int main(void) {
     TEST_ASSERT((MMIO32(PLIC_ENABLE_W0(CTX_M)) & (1u << SRC_ID)) != 0,
                 "enable readback");
 
-    /* 4. Enable M-mode external interrupts. */
+    /* 4. Raise the IRQ while globally masked so pending can be read back
+     * deterministically before claim clears it. */
+    MMIO32(PLIC_PENDING_W0) = (1u << SRC_ID);
+    TEST_ASSERT((MMIO32(PLIC_PENDING_W0) & (1u << SRC_ID)) != 0,
+                "pending readback");
+
+    /* 5. Enable M-mode external interrupts. */
     csr_set(mie, MIE_MEIE);
     csr_set(mstatus, MSTATUS_MIE);
-
-    /* 5. Raise the IRQ via SW pending-set. */
-    MMIO32(PLIC_PENDING_W0) = (1u << SRC_ID);
 
     /* 6. Wait for the trap handler. Use a bounded loop. */
     for (int i = 0; i < 100000 && irq_count == 0; i++) {

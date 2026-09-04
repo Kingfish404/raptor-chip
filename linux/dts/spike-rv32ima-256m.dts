@@ -27,7 +27,7 @@
 			riscv,pmpgranularity = <0x04>;
 			clock-frequency = <0x3b9aca00>;
 
-			interrupt-controller {
+			cpu0_intc: interrupt-controller {
 				#address-cells = <0x02>;
 				#interrupt-cells = <0x01>;
 				interrupt-controller;
@@ -50,14 +50,14 @@
 
 		clint@2000000 {
 			compatible = "riscv,clint0";
-			interrupts-extended = <0x01 0x03 0x01 0x07>;
+			interrupts-extended = <&cpu0_intc 0x03 &cpu0_intc 0x07>;
 			reg = <0x00 0x2000000 0x00 0xc0000>;
 		};
 
-		plic@c000000 {
+		plic0: plic@c000000 {
 			compatible = "riscv,plic0";
 			#address-cells = <0x02>;
-			interrupts-extended = <0x01 0x0b 0x01 0x09>;
+			interrupts-extended = <&cpu0_intc 0x0b &cpu0_intc 0x09>;
 			reg = <0x00 0xc000000 0x00 0x1000000>;
 			riscv,ndev = <0x1f>;
 			riscv,max-priority = <0x0f>;
@@ -69,7 +69,7 @@
 		ns16550@10000000 {
 			compatible = "ns16550a";
 			clock-frequency = <0x989680>;
-			interrupt-parent = <0x02>;
+			interrupt-parent = <&plic0>;
 			interrupts = <0x01>;
 			reg = <0x00 0x10000000 0x00 0x100>;
 			reg-shift = <0x00>;

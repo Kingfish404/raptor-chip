@@ -52,6 +52,9 @@ interface lsu_l1d_mmu_if #(
   logic mmu_en;
   logic [XLEN-1:0] vaddr;
   logic [4:0] walu;
+  // Cache-block management is authorized by load OR store permission and
+  // checks A but not D.  It otherwise uses the precise store-fault path.
+  logic cmo_mgmt;
   logic valid;
   logic [XLEN-1:0] paddr;
   logic trap;
@@ -62,11 +65,11 @@ interface lsu_l1d_mmu_if #(
   logic ready;
 
   modport master(
-      output mmu_en, vaddr, walu, valid, reservation_clear,
+      output mmu_en, vaddr, walu, cmo_mgmt, valid, reservation_clear,
       input paddr, trap, cause, reservation, reservation_valid, ready
   );
   modport slave(
-      input mmu_en, vaddr, walu, valid, reservation_clear,
+      input mmu_en, vaddr, walu, cmo_mgmt, valid, reservation_clear,
       output paddr, trap, cause, reservation, reservation_valid, ready
   );
 endinterface

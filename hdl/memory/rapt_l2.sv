@@ -176,6 +176,7 @@ module rapt_l2 #(
     R_MISS_AR,
     R_MISS_R,
     R_INSTALL_WAIT,
+    R_INSTALL_READ,
     R_BYPASS_WAIT,
     R_BYPASS_AR,
     R_BYPASS_R
@@ -586,8 +587,14 @@ module rapt_l2 #(
         // -----------------------------------------------------------------
         R_INSTALL_WAIT: begin
           // cache_install is a registered pulse asserted after the final fill
-          // beat. Wait one cycle so tag/valid commit and the single-port SRAM
-          // write at install_idx settle before R_HIT re-reads line_data_r.
+          // beat. This cycle performs the single-port SRAM write.
+          rs <= R_INSTALL_READ;
+        end
+
+        R_INSTALL_READ: begin
+          // The SRAM has a synchronous read port. After the install write,
+          // allow one read edge to refresh line_data_r before R_HIT consumes
+          // it on the following edge.
           rs <= R_HIT;
         end
 

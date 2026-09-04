@@ -21,8 +21,8 @@ ifeq ($(ISA),rv32)
   MARCH := rv32imafc
   MABI := ilp32f
   TEST_NAME := fp_moves_rv32
-	NPC_NEMU_F_DEFCONFIG := riscv32_difftest_defconfig
-	NPC_NEMU_D_DEFCONFIG := riscv32_difftest_defconfig
+	NPC_NEMU_F_DEFCONFIG := riscv32_ref_defconfig
+	NPC_NEMU_D_DEFCONFIG := riscv32_ref_defconfig
 	NPC_DIFF_REF_SO := $(NEMU_HOME)/build/riscv32-nemu-interpreter-so
 	NPC_VFLAGS := -DRAPT_ASSERT_EN
 else
@@ -34,8 +34,8 @@ else
   MARCH := rv64imafc
   MABI := lp64f
   TEST_NAME := fp_moves
-	NPC_NEMU_F_DEFCONFIG := riscv64_difftest_defconfig
-	NPC_NEMU_D_DEFCONFIG := riscv64_difftest_defconfig
+	NPC_NEMU_F_DEFCONFIG := riscv64_ref_defconfig
+	NPC_NEMU_D_DEFCONFIG := riscv64_ref_defconfig
 	NPC_DIFF_REF_SO := $(NEMU_HOME)/build/riscv64-nemu-interpreter-so
 	NPC_VFLAGS := -DRAPT_RV64 -DRAPT_ASSERT_EN
 endif
@@ -44,7 +44,7 @@ ELF := $(BUILD_DIR)/$(TEST_NAME).elf
 BIN := $(BUILD_DIR)/$(TEST_NAME).bin
 LOG := $(BUILD_DIR)/$(TEST_NAME).nemu.log
 
-.PHONY: all build fp-config spike-config run arith arith-spike fcsr fcsr-spike rm-illegal-spike fs-spike fs-mem-spike d-arith d-arith-spike minmax-spike compare-spike convert-spike fma-spike divsqrt-spike double double-unaligned npc-arith npc-fcsr npc-rm-illegal npc-fs npc-fs-mem npc-d-arith npc-minmax npc-compare npc-convert npc-fma npc-divsqrt npc-matrix clean
+.PHONY: all build fp-config spike-config run arith arith-spike fcsr fcsr-spike rm-illegal-spike fs-spike fs-mem-spike compressed-mem-spike d-arith d-arith-spike minmax-spike compare-spike convert-spike fma-spike divsqrt-spike double double-unaligned npc-arith npc-fcsr npc-rm-illegal npc-fs npc-fs-mem npc-compressed-mem npc-d-arith npc-minmax npc-compare npc-convert npc-fma npc-divsqrt npc-coverage npc-matrix clean
 
 all: run
 
@@ -148,6 +148,19 @@ fs-mem-spike: fp-config
 	cd $(NEMU_HOME) && ./build/$(if $(filter rv32,$(ISA)),riscv32-nemu-interpreter,riscv64-nemu-interpreter) \
 		-b -n --diff=$(SPIKE_SO) $(BUILD_DIR)/fp_fs_mem_$(ISA).bin
 
+compressed-mem-spike: fp-config
+	$(MAKE) -C $(NEMU_HOME) $(NEMU_SPIKE_DEFCONFIG)
+	$(MAKE) -C $(NEMU_HOME) -j$$(nproc)
+	$(MAKE) -C $(NEMU_HOME)/tools/spike-diff \
+		CONFIG_RV64=$(SPIKE_RV64) GUEST_ISA=riscv -j$$(nproc)
+	mkdir -p $(BUILD_DIR)
+	$(CC) -march=$(if $(filter rv32,$(ISA)),rv32imafdc,rv64imafdc) \
+		-mabi=$(if $(filter rv32,$(ISA)),ilp32d,lp64d) -nostdlib -nostartfiles \
+		-T $(LINKER) -o $(BUILD_DIR)/fp_compressed_mem_$(ISA).elf fp_compressed_mem.S
+	$(OBJCOPY) -O binary $(BUILD_DIR)/fp_compressed_mem_$(ISA).elf $(BUILD_DIR)/fp_compressed_mem_$(ISA).bin
+	cd $(NEMU_HOME) && ./build/$(if $(filter rv32,$(ISA)),riscv32-nemu-interpreter,riscv64-nemu-interpreter) \
+		-b -n --diff=$(SPIKE_SO) $(BUILD_DIR)/fp_compressed_mem_$(ISA).bin
+
 d-arith: fp-config
 	$(MAKE) -C $(NEMU_HOME) $(NEMU_DEFCONFIG)
 	$(MAKE) -C $(NEMU_HOME) -j$$(nproc)
@@ -244,7 +257,7 @@ npc-arith:
 	$(CC) -march=$(MARCH) -mabi=$(MABI) -nostdlib -nostartfiles \
 		-T $(LINKER) -o $(BUILD_DIR)/fp_arith_$(ISA).elf fp_arith.S
 	$(OBJCOPY) -O binary $(BUILD_DIR)/fp_arith_$(ISA).elf $(BUILD_DIR)/fp_arith_$(ISA).bin
-	$(MAKE) -B -C $(SIM_HOME) run NPROC=$(NPC_NPROC) \
+	$(MAKE) -C $(SIM_HOME) run NPROC=$(NPC_NPROC) \
 		VFLAGS='$(NPC_VFLAGS)' \
 		DIFF_REF_SO='-d $(NPC_DIFF_REF_SO)' \
 		IMG=$(BUILD_DIR)/fp_arith_$(ISA).bin ARGS='$(NPC_ARGS)'
@@ -256,7 +269,7 @@ npc-fcsr:
 	$(CC) -march=$(MARCH) -mabi=$(MABI) -nostdlib -nostartfiles \
 		-T $(LINKER) -o $(BUILD_DIR)/fp_fcsr_$(ISA).elf fp_fcsr.S
 	$(OBJCOPY) -O binary $(BUILD_DIR)/fp_fcsr_$(ISA).elf $(BUILD_DIR)/fp_fcsr_$(ISA).bin
-	$(MAKE) -B -C $(SIM_HOME) run NPROC=$(NPC_NPROC) \
+	$(MAKE) -C $(SIM_HOME) run NPROC=$(NPC_NPROC) \
 		VFLAGS='$(NPC_VFLAGS)' \
 		DIFF_REF_SO='-d $(NPC_DIFF_REF_SO)' \
 		IMG=$(BUILD_DIR)/fp_fcsr_$(ISA).bin ARGS='$(NPC_ARGS)'
@@ -268,7 +281,7 @@ npc-rm-illegal:
 	$(CC) -march=$(MARCH) -mabi=$(MABI) -nostdlib -nostartfiles \
 		-T $(LINKER) -o $(BUILD_DIR)/fp_rm_illegal_$(ISA).elf fp_rm_illegal.S
 	$(OBJCOPY) -O binary $(BUILD_DIR)/fp_rm_illegal_$(ISA).elf $(BUILD_DIR)/fp_rm_illegal_$(ISA).bin
-	$(MAKE) -B -C $(SIM_HOME) run NPROC=$(NPC_NPROC) \
+	$(MAKE) -C $(SIM_HOME) run NPROC=$(NPC_NPROC) \
 		VFLAGS='$(NPC_VFLAGS)' \
 		DIFF_REF_SO='-d $(NPC_DIFF_REF_SO)' \
 		IMG=$(BUILD_DIR)/fp_rm_illegal_$(ISA).bin ARGS='$(NPC_ARGS)'
@@ -280,7 +293,7 @@ npc-fs:
 	$(CC) -march=$(MARCH) -mabi=$(MABI) -nostdlib -nostartfiles \
 		-T $(LINKER) -o $(BUILD_DIR)/fp_fs_$(ISA).elf fp_fs.S
 	$(OBJCOPY) -O binary $(BUILD_DIR)/fp_fs_$(ISA).elf $(BUILD_DIR)/fp_fs_$(ISA).bin
-	$(MAKE) -B -C $(SIM_HOME) run NPROC=$(NPC_NPROC) \
+	$(MAKE) -C $(SIM_HOME) run NPROC=$(NPC_NPROC) \
 		VFLAGS='$(NPC_VFLAGS)' \
 		DIFF_REF_SO='-d $(NPC_DIFF_REF_SO)' \
 		IMG=$(BUILD_DIR)/fp_fs_$(ISA).bin ARGS='$(NPC_ARGS)'
@@ -293,10 +306,23 @@ npc-fs-mem:
 		-mabi=$(if $(filter rv32,$(ISA)),ilp32d,lp64d) -nostdlib -nostartfiles \
 		-T $(LINKER) -o $(BUILD_DIR)/fp_fs_mem_$(ISA).elf fp_fs_mem.S
 	$(OBJCOPY) -O binary $(BUILD_DIR)/fp_fs_mem_$(ISA).elf $(BUILD_DIR)/fp_fs_mem_$(ISA).bin
-	$(MAKE) -B -C $(SIM_HOME) run NPROC=$(NPC_NPROC) \
+	$(MAKE) -C $(SIM_HOME) run NPROC=$(NPC_NPROC) \
 		VFLAGS='$(NPC_VFLAGS)' \
 		DIFF_REF_SO='-d $(NPC_DIFF_REF_SO)' \
 		IMG=$(BUILD_DIR)/fp_fs_mem_$(ISA).bin ARGS='$(NPC_ARGS)'
+
+npc-compressed-mem:
+	$(MAKE) -C $(NEMU_HOME) $(NPC_NEMU_D_DEFCONFIG)
+	$(MAKE) -C $(NEMU_HOME) -j$$(nproc)
+	mkdir -p $(BUILD_DIR)
+	$(CC) -march=$(if $(filter rv32,$(ISA)),rv32imafdc,rv64imafdc) \
+		-mabi=$(if $(filter rv32,$(ISA)),ilp32d,lp64d) -nostdlib -nostartfiles \
+		-T $(LINKER) -o $(BUILD_DIR)/fp_compressed_mem_$(ISA).elf fp_compressed_mem.S
+	$(OBJCOPY) -O binary $(BUILD_DIR)/fp_compressed_mem_$(ISA).elf $(BUILD_DIR)/fp_compressed_mem_$(ISA).bin
+	$(MAKE) -C $(SIM_HOME) run NPROC=$(NPC_NPROC) \
+		VFLAGS='$(NPC_VFLAGS)' \
+		DIFF_REF_SO='-d $(NPC_DIFF_REF_SO)' \
+		IMG=$(BUILD_DIR)/fp_compressed_mem_$(ISA).bin ARGS='$(NPC_ARGS)'
 
 npc-d-arith:
 	$(MAKE) -C $(NEMU_HOME) $(NPC_NEMU_D_DEFCONFIG)
@@ -306,7 +332,7 @@ npc-d-arith:
 		-mabi=$(if $(filter rv32,$(ISA)),ilp32d,lp64d) -nostdlib -nostartfiles \
 		-T $(LINKER) -o $(BUILD_DIR)/fp_d_arith_$(ISA).elf fp_d_arith.S
 	$(OBJCOPY) -O binary $(BUILD_DIR)/fp_d_arith_$(ISA).elf $(BUILD_DIR)/fp_d_arith_$(ISA).bin
-	$(MAKE) -B -C $(SIM_HOME) run NPROC=$(NPC_NPROC) \
+	$(MAKE) -C $(SIM_HOME) run NPROC=$(NPC_NPROC) \
 		VFLAGS='$(NPC_VFLAGS)' \
 		DIFF_REF_SO='-d $(NPC_DIFF_REF_SO)' \
 		IMG=$(BUILD_DIR)/fp_d_arith_$(ISA).bin ARGS='$(NPC_ARGS)'
@@ -319,7 +345,7 @@ npc-minmax:
 		-mabi=$(if $(filter rv32,$(ISA)),ilp32d,lp64d) -nostdlib -nostartfiles \
 		-T $(LINKER) -o $(BUILD_DIR)/fp_minmax_$(ISA).elf fp_minmax.S
 	$(OBJCOPY) -O binary $(BUILD_DIR)/fp_minmax_$(ISA).elf $(BUILD_DIR)/fp_minmax_$(ISA).bin
-	$(MAKE) -B -C $(SIM_HOME) run NPROC=$(NPC_NPROC) \
+	$(MAKE) -C $(SIM_HOME) run NPROC=$(NPC_NPROC) \
 		VFLAGS='$(NPC_VFLAGS)' \
 		DIFF_REF_SO='-d $(NPC_DIFF_REF_SO)' \
 		IMG=$(BUILD_DIR)/fp_minmax_$(ISA).bin ARGS='$(NPC_ARGS)'
@@ -332,7 +358,7 @@ npc-compare:
 		-mabi=$(if $(filter rv32,$(ISA)),ilp32d,lp64d) -nostdlib -nostartfiles \
 		-T $(LINKER) -o $(BUILD_DIR)/fp_compare_$(ISA).elf fp_compare.S
 	$(OBJCOPY) -O binary $(BUILD_DIR)/fp_compare_$(ISA).elf $(BUILD_DIR)/fp_compare_$(ISA).bin
-	$(MAKE) -B -C $(SIM_HOME) run NPROC=$(NPC_NPROC) \
+	$(MAKE) -C $(SIM_HOME) run NPROC=$(NPC_NPROC) \
 		VFLAGS='$(NPC_VFLAGS)' \
 		DIFF_REF_SO='-d $(NPC_DIFF_REF_SO)' \
 		IMG=$(BUILD_DIR)/fp_compare_$(ISA).bin ARGS='$(NPC_ARGS)'
@@ -345,7 +371,7 @@ npc-convert:
 		-mabi=$(if $(filter rv32,$(ISA)),ilp32d,lp64d) -nostdlib -nostartfiles \
 		-T $(LINKER) -o $(BUILD_DIR)/fp_convert_$(ISA).elf fp_convert.S
 	$(OBJCOPY) -O binary $(BUILD_DIR)/fp_convert_$(ISA).elf $(BUILD_DIR)/fp_convert_$(ISA).bin
-	$(MAKE) -B -C $(SIM_HOME) run NPROC=$(NPC_NPROC) \
+	$(MAKE) -C $(SIM_HOME) run NPROC=$(NPC_NPROC) \
 		VFLAGS='$(NPC_VFLAGS)' \
 		DIFF_REF_SO='-d $(NPC_DIFF_REF_SO)' \
 		IMG=$(BUILD_DIR)/fp_convert_$(ISA).bin ARGS='$(NPC_ARGS)'
@@ -358,7 +384,7 @@ npc-fma:
 		-mabi=$(if $(filter rv32,$(ISA)),ilp32d,lp64d) -nostdlib -nostartfiles \
 		-T $(LINKER) -o $(BUILD_DIR)/fp_fma_$(ISA).elf fp_fma.S
 	$(OBJCOPY) -O binary $(BUILD_DIR)/fp_fma_$(ISA).elf $(BUILD_DIR)/fp_fma_$(ISA).bin
-	$(MAKE) -B -C $(SIM_HOME) run NPROC=$(NPC_NPROC) \
+	$(MAKE) -C $(SIM_HOME) run NPROC=$(NPC_NPROC) \
 		VFLAGS='$(NPC_VFLAGS)' \
 		DIFF_REF_SO='-d $(NPC_DIFF_REF_SO)' \
 		IMG=$(BUILD_DIR)/fp_fma_$(ISA).bin ARGS='$(NPC_ARGS)'
@@ -371,10 +397,20 @@ npc-divsqrt:
 		-mabi=$(if $(filter rv32,$(ISA)),ilp32d,lp64d) -nostdlib -nostartfiles \
 		-T $(LINKER) -o $(BUILD_DIR)/fp_divsqrt_$(ISA).elf fp_divsqrt.S
 	$(OBJCOPY) -O binary $(BUILD_DIR)/fp_divsqrt_$(ISA).elf $(BUILD_DIR)/fp_divsqrt_$(ISA).bin
-	$(MAKE) -B -C $(SIM_HOME) run NPROC=$(NPC_NPROC) \
+	$(MAKE) -C $(SIM_HOME) run NPROC=$(NPC_NPROC) \
 		VFLAGS='$(NPC_VFLAGS)' \
 		DIFF_REF_SO='-d $(NPC_DIFF_REF_SO)' \
 		IMG=$(BUILD_DIR)/fp_divsqrt_$(ISA).bin ARGS='$(NPC_ARGS)'
+
+npc-coverage:
+	mkdir -p $(BUILD_DIR)
+	$(CC) -march=rv32imafdc_zfhmin -mabi=ilp32d -nostdlib -nostartfiles \
+		-T $(LINKER) -o $(BUILD_DIR)/fp_coverage_rv32.elf fp_coverage.S
+	$(OBJCOPY) -O binary $(BUILD_DIR)/fp_coverage_rv32.elf \
+		$(BUILD_DIR)/fp_coverage_rv32.bin
+	$(MAKE) -C $(SIM_HOME) run NPROC=$(NPC_NPROC) \
+		VFLAGS='$(NPC_VFLAGS)' DIFF_REF_SO= \
+		IMG=$(BUILD_DIR)/fp_coverage_rv32.bin ARGS='$(NPC_ARGS)'
 
 npc-matrix:
 	$(MAKE) ISA=rv32 NPC_NPROC=$(NPC_NPROC) NPC_ARGS='$(NPC_ARGS)' npc-arith
@@ -388,6 +424,7 @@ npc-matrix:
 	$(MAKE) ISA=rv32 NPC_NPROC=$(NPC_NPROC) NPC_ARGS='$(NPC_ARGS)' npc-rm-illegal
 	$(MAKE) ISA=rv32 NPC_NPROC=$(NPC_NPROC) NPC_ARGS='$(NPC_ARGS)' npc-fs
 	$(MAKE) ISA=rv32 NPC_NPROC=$(NPC_NPROC) NPC_ARGS='$(NPC_ARGS)' npc-fs-mem
+	$(MAKE) ISA=rv32 NPC_NPROC=$(NPC_NPROC) NPC_ARGS='$(NPC_ARGS)' npc-compressed-mem
 	$(MAKE) ISA=rv64 NPC_NPROC=$(NPC_NPROC) NPC_ARGS='$(NPC_ARGS)' npc-arith
 	$(MAKE) ISA=rv64 NPC_NPROC=$(NPC_NPROC) NPC_ARGS='$(NPC_ARGS)' npc-d-arith
 	$(MAKE) ISA=rv64 NPC_NPROC=$(NPC_NPROC) NPC_ARGS='$(NPC_ARGS)' npc-minmax
@@ -399,6 +436,7 @@ npc-matrix:
 	$(MAKE) ISA=rv64 NPC_NPROC=$(NPC_NPROC) NPC_ARGS='$(NPC_ARGS)' npc-rm-illegal
 	$(MAKE) ISA=rv64 NPC_NPROC=$(NPC_NPROC) NPC_ARGS='$(NPC_ARGS)' npc-fs
 	$(MAKE) ISA=rv64 NPC_NPROC=$(NPC_NPROC) NPC_ARGS='$(NPC_ARGS)' npc-fs-mem
+	$(MAKE) ISA=rv64 NPC_NPROC=$(NPC_NPROC) NPC_ARGS='$(NPC_ARGS)' npc-compressed-mem
 
 double: fp-config
 	$(MAKE) -C $(NEMU_HOME) $(NEMU_DEFCONFIG)

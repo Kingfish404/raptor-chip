@@ -181,6 +181,7 @@ static paddr_t sv39_translate(vaddr_t vaddr, int len, int type)
   bool is_fetch = (type == MEM_TYPE_IFETCH);
   bool is_write = (type == MEM_TYPE_WRITE);
   bool is_read = (type == MEM_TYPE_READ);
+  bool is_cmo = (type == MEM_TYPE_CMO);
   if (eff_priv == PRV_S)
   {
     if (pte_u)
@@ -214,6 +215,15 @@ static paddr_t sv39_translate(vaddr_t vaddr, int len, int type)
   {
     bool readable = pte_r || (mstatus_for_prm.mstatus.mxr && pte_x);
     if (!readable)
+    {
+      cause = pf_cause;
+      nemu_longjmp(exec_jmp_buf, 9);
+    }
+  }
+  if (is_cmo)
+  {
+    bool readable = pte_r || (mstatus_for_prm.mstatus.mxr && pte_x);
+    if (!readable && !pte_w)
     {
       cause = pf_cause;
       nemu_longjmp(exec_jmp_buf, 9);
@@ -351,6 +361,7 @@ paddr_t isa_mmu_translate(vaddr_t vaddr, int len, int type)
   bool is_fetch = (type == MEM_TYPE_IFETCH);
   bool is_write = (type == MEM_TYPE_WRITE);
   bool is_read = (type == MEM_TYPE_READ);
+  bool is_cmo = (type == MEM_TYPE_CMO);
   if (eff_priv == PRV_S)
   {
     if (pte.pte.u == 1)
@@ -386,6 +397,16 @@ paddr_t isa_mmu_translate(vaddr_t vaddr, int len, int type)
     bool readable = (pte.pte.r == 1) ||
                     (mstatus_for_prm.mstatus.mxr == 1 && pte.pte.x == 1);
     if (!readable)
+    {
+      cause = pf_cause;
+      nemu_longjmp(exec_jmp_buf, 9);
+    }
+  }
+  if (is_cmo)
+  {
+    bool readable = (pte.pte.r == 1) ||
+                    (mstatus_for_prm.mstatus.mxr == 1 && pte.pte.x == 1);
+    if (!readable && pte.pte.w == 0)
     {
       cause = pf_cause;
       nemu_longjmp(exec_jmp_buf, 9);

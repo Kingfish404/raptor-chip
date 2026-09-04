@@ -7,12 +7,15 @@ PK_HOME  := $(dir $(lastword $(MAKEFILE_LIST)))
 include $(APP_HOME)/common.mk
 
 ARGS ?= -b ## NPC simulator args (-b: batch, -n: no wave)
+SUBMAKE_JOBS = $(if $(filter --jobserver-auth=% --jobserver-fds=%,$(MAKEFLAGS)),,-j$(NPROC))
 
 # ---- Directories ----
+PK_BUILD_PROFILE ?=## Optional isolated PK artifact profile (e.g. verify-verilator)
+PK_PROFILE_SUFFIX := $(if $(strip $(PK_BUILD_PROFILE)),-$(strip $(PK_BUILD_PROFILE)),)
 PK_SRC_DIR := $(RAPTOR_HOME)/third_party/riscv-software-src/riscv-pk
-PK_STAGING := $(APP_HOME)/build/pk-staging-rv$(XLEN)
-PK_BUILD   := $(APP_HOME)/build/pk-build-rv$(XLEN)
-BBL_BUILD  := $(APP_HOME)/build/bbl-build-rv$(XLEN)
+PK_STAGING := $(APP_HOME)/build/pk-staging-rv$(XLEN)$(PK_PROFILE_SUFFIX)
+PK_BUILD   := $(APP_HOME)/build/pk-build-rv$(XLEN)$(PK_PROFILE_SUFFIX)
+BBL_BUILD  := $(APP_HOME)/build/bbl-build-rv$(XLEN)$(PK_PROFILE_SUFFIX)
 
 # ---- NPC runner ----
 NPC_RUN = $(MAKE) $(Q) -C $(NSIM_HOME) ISA=riscv$(XLEN) run ARGS="$(ARGS)" VFLAGS="$(VFLAGS)"
@@ -126,7 +129,7 @@ $(PK_BUILD)/Makefile: $(PK_STAGING)/.stamp
 # Build pk with current payload
 # ============================================================================
 $(PK_BUILD)/pk: $(PK_BUILD)/Makefile
-	@env -u CFLAGS -u CPPFLAGS -u LDFLAGS $(MAKE) $(Q) -C $(PK_BUILD) -j$(NPROC)
+	+@env -u CFLAGS -u CPPFLAGS -u LDFLAGS $(MAKE) $(Q) -C $(PK_BUILD) $(SUBMAKE_JOBS)
 
 pk-build: $(PK_BUILD)/pk ## Build pk (proxy kernel)
 	@echo "=== pk built: $(PK_BUILD)/pk ==="
@@ -148,11 +151,11 @@ endif
 	@echo "=== Embedding $(notdir $(_ABS_USER_ELF)) into pk ==="
 	@cp $(_ABS_USER_ELF) $(PK_BUILD)/payload.elf
 	@rm -f $(PK_BUILD)/pk_payload.o $(PK_BUILD)/pk
-	@env -u CFLAGS -u CPPFLAGS -u LDFLAGS $(MAKE) $(Q) -C $(PK_BUILD) -j$(NPROC) > /dev/null
+	+@env -u CFLAGS -u CPPFLAGS -u LDFLAGS $(MAKE) $(Q) -C $(PK_BUILD) $(SUBMAKE_JOBS) > /dev/null
 	@$(OBJCOPY) -S -O binary $(PK_BUILD)/pk $(PK_BUILD)/pk.bin
 	@$(SIZE) $(PK_BUILD)/pk
 	@echo "=== Running on NPC ==="
-	@$(NPC_RUN) IMG=$(PK_BUILD)/pk.bin
+	+@$(NPC_RUN) IMG=$(PK_BUILD)/pk.bin
 
 # ============================================================================
 # Run USER_ELF via pk on NEMU
@@ -166,7 +169,7 @@ endif
 	@echo "=== Embedding $(notdir $(_ABS_USER_ELF)) into pk ==="
 	@cp $(_ABS_USER_ELF) $(PK_BUILD)/payload.elf
 	@rm -f $(PK_BUILD)/pk_payload.o $(PK_BUILD)/pk
-	@env -u CFLAGS -u CPPFLAGS -u LDFLAGS $(MAKE) $(Q) -C $(PK_BUILD) -j$(NPROC) > /dev/null
+	+@env -u CFLAGS -u CPPFLAGS -u LDFLAGS $(MAKE) $(Q) -C $(PK_BUILD) $(SUBMAKE_JOBS) > /dev/null
 	@$(OBJCOPY) -S -O binary $(PK_BUILD)/pk $(PK_BUILD)/pk.bin
 	@$(SIZE) $(PK_BUILD)/pk
 	@echo "=== Running on NEMU ==="
@@ -191,7 +194,7 @@ bbl-linux: $(PK_STAGING)/.stamp ## Build BBL with Linux payload, run on NPC
 		--with-payload=$(LINUX_IMAGE) \
 		--disable-fp-emulation \
 		--prefix=$(BBL_BUILD)/install
-	$(MAKE) -C $(BBL_BUILD) -j$(NPROC)
+	$(MAKE) -C $(BBL_BUILD) $(SUBMAKE_JOBS)
 	$(OBJCOPY) -S -O binary $(BBL_BUILD)/bbl $(BBL_BUILD)/bbl.bin
 	@echo "=== Running BBL + Linux on NPC ==="
 	$(NPC_RUN) IMG=$(BBL_BUILD)/bbl.bin

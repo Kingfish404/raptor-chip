@@ -16,6 +16,24 @@ PMUState pmu;
 word_t start_timer = 0;
 word_t g_timer = 0;
 
+struct PMUSamplerState
+{
+  bool branch_recovery_active;
+  bool prev_rs_full;
+  bool prev_ioq_full;
+  bool prev_uoq_blocked;
+  bool prev_sq_full;
+  uint8_t prev_l1i_state;
+  uint8_t prev_l1d_state;
+};
+
+static PMUSamplerState sampler_state = {};
+
+void perf_reset_sampler_state()
+{
+  sampler_state = {};
+}
+
 void reg_display(int n);
 void cpu_show_itrace();
 void perf();
@@ -50,9 +68,10 @@ static void save_status_to_file(const char *filename)
   close(fd);
 
   uint64_t current_time = get_time();
+  const double elapsed_s = (current_time - start_timer) / 1000000.0;
   printf(" Simulated Time: %.3f s\n", (current_time - start_timer) / 1000000.0);
   printf("Simulated Speed: %.3f MIPS\n",
-         (pmu.instr_cnt / 1000000.0) / ((current_time - start_timer) / 1000000.0));
+         elapsed_s > 0.0 ? (pmu.instr_cnt / 1000000.0) / elapsed_s : 0.0);
   printf("\n");
 
   reg_display(GPR_SIZE);
@@ -68,10 +87,22 @@ static void save_status_to_file(const char *filename)
   close(saved_stdout);
 }
 
-static float percentage(int a, int b)
+static double percentage(long long int a, long long int b)
 {
-  float ret = (b == 0) ? 0 : (100.0 * a / b);
-  return ret == 100.0 ? 99.0 : ret;
+  return (b == 0) ? 0.0 : (100.0 * static_cast<double>(a) / static_cast<double>(b));
+}
+
+static void sample_branch(bool valid, bool b, bool j, bool jr, bool mispredict)
+{
+  if (!valid)
+    return;
+  const bool is_control_flow = b || j || jr;
+  pmu.bpu_cnt += is_control_flow ? 1 : 0;
+  pmu.bpu_fail_cnt += is_control_flow && mispredict ? 1 : 0;
+  pmu.bpu_b_fail += b && mispredict ? 1 : 0;
+  // `jen` is set for both JAL and JALR; keep the failure subtypes exclusive.
+  pmu.bpu_j_fail += j && !jr && mispredict ? 1 : 0;
+  pmu.bpu_jr_fail += jr && mispredict ? 1 : 0;
 }
 
 void perf_sample_per_cycle()
@@ -79,38 +110,24 @@ void perf_sample_per_cycle()
   bool reset = (uint8_t)(VERILOG_RESET);
   if (reset)
   {
+    perf_reset_sampler_state();
     return;
   }
   pmu.active_cycle++;
-  // BPU: use registered ben_r/jen_r/flush_pipe_r from CMU for correct timing
-  // alignment with the registered 'valid' signal (all sampled at the same posedge)
-  bool b = *(uint8_t *)&VERILOG_CPU(cmu__DOT__ben_r);
-  bool j = *(uint8_t *)&VERILOG_CPU(cmu__DOT__jen_r);
-  bool jr = *(uint8_t *)&VERILOG_CPU(cmu__DOT__jren_r);
+  // Sample both registered commit slots. The shared CMU branch flags select
+  // slot B on a dual commit and therefore cannot account for a branch in A.
   bool wb_valid = *(uint8_t *)&VERILOG_CPU(cmu__DOT__valid);
-  if (wb_valid)
-  {
-    bool is_br = b || j || jr;
-    bool br_predict_fail = *(uint8_t *)&VERILOG_CPU(cmu__DOT__flush_pipe_r);
-    pmu.bpu_cnt += is_br ? 1 : 0;
-    pmu.bpu_fail_cnt += is_br && br_predict_fail ? 1 : 0;
-    pmu.bpu_b_fail += br_predict_fail && b ? 1 : 0;
-    pmu.bpu_j_fail += br_predict_fail && j ? 1 : 0;
-    pmu.bpu_jr_fail += br_predict_fail && jr ? 1 : 0;
-
-    // A7: RVC branch detection
-    // CMU holds the committed instruction for this cycle in cmu_inst_r
-    uint32_t inst = *(uint32_t *)&VERILOG_CPU(cmu__DOT__inst);
-    uint16_t inst_lo = inst & 0xFFFF; // Lower 16 bits for RVC decoding
-    if ((inst_lo & 0x0003) == 0x01)
-    { // C-type encoding (bits [1:0] = 01)
-      uint8_t funct3 = (inst_lo >> 13) & 0x7;
-      // C.BEQZ (funct3 = 3'b110), C.BNEZ (funct3 = 3'b111), C.J (funct3 = 3'b101)
-      bool is_c_branch = (funct3 == 0x6) || (funct3 == 0x7) || (funct3 == 0x5);
-      pmu.bpu_cnt += is_c_branch ? 1 : 0;
-      pmu.bpu_fail_cnt += is_c_branch && br_predict_fail ? 1 : 0;
-    }
-  }
+  bool wb_valid_b = *(uint8_t *)&VERILOG_CPU(cmu__DOT__valid_b);
+  sample_branch(wb_valid,
+                *(uint8_t *)&VERILOG_CPU(cmu__DOT__pmu_ben_a),
+                *(uint8_t *)&VERILOG_CPU(cmu__DOT__pmu_jen_a),
+                *(uint8_t *)&VERILOG_CPU(cmu__DOT__pmu_jren_a),
+                *(uint8_t *)&VERILOG_CPU(cmu__DOT__pmu_mispredict_a));
+  sample_branch(wb_valid_b,
+                *(uint8_t *)&VERILOG_CPU(cmu__DOT__pmu_ben_b),
+                *(uint8_t *)&VERILOG_CPU(cmu__DOT__pmu_jen_b),
+                *(uint8_t *)&VERILOG_CPU(cmu__DOT__pmu_jren_b),
+                *(uint8_t *)&VERILOG_CPU(cmu__DOT__pmu_mispredict_b));
   bool ifu_hazard = *(uint8_t *)&VERILOG_CPU(ifu__DOT__ifu_hazard);
   bool ifu_fetch_fire = *(uint8_t *)&VERILOG_CPU(ifu__DOT__pmu_fetch_fire);
   uint8_t ifu_fetch_slots = *(uint8_t *)&VERILOG_CPU(ifu__DOT__pmu_fetch_slots);
@@ -149,7 +166,8 @@ void perf_sample_per_cycle()
   // issued this cycle. The IOQ is owned by the LSU.
   bool exu_ooo_valid = *(uint8_t *)&VERILOG_CPU(ieu__DOT__pmu_ooo_valid);
   bool exu_ooo_valid_found = *(uint8_t *)&VERILOG_CPU(ieu__DOT__pmu_ooo_valid_found);
-  uint32_t exu_ioq_valid = *(uint8_t *)&VERILOG_CPU(lsu__DOT__u_ioq__DOT__ioq_valid);
+  bool exu_ioq_valid = *(uint8_t *)&VERILOG_CPU(lsu__DOT__u_ioq__DOT__pmu_ioq_any_valid);
+  bool exu_ioq_full = *(uint8_t *)&VERILOG_CPU(lsu__DOT__u_ioq__DOT__pmu_ioq_all_full);
   bool exu_ioq_valid_found = *(uint8_t *)&VERILOG_CPU(lsu__DOT__u_ioq__DOT__ioq_valid_found);
   uint8_t l1d_state = *(uint8_t *)&VERILOG_CPU(l1d_cache__DOT__l1d_state);
   bool lsu_l1d_hit = *(uint8_t *)&VERILOG_CPU(l1d_cache__DOT__tag_hit);
@@ -157,7 +175,7 @@ void perf_sample_per_cycle()
   bool lsu_load_in_sq = *(uint8_t *)&VERILOG_CPU(lsu__DOT__u_sq__DOT__load_in_sq);
   bool lsu_raddr_valid = *(uint8_t *)&VERILOG_CPU(lsu__DOT__u_sq__DOT__raddr_valid);
   bool wbu_valid = *(uint8_t *)&VERILOG_CPU(cmu__DOT__valid);
-  bool wbu_valid_b = *(uint8_t *)&VERILOG_CPU(cmu__DOT__valid_b);
+  bool wbu_valid_b = wb_valid_b;
   uint8_t l1i_state = *(uint8_t *)&VERILOG_CPU(l1i_cache__DOT__l1i_state);
   if (ifu_fetch_fire)
   {
@@ -202,22 +220,29 @@ void perf_sample_per_cycle()
   // Measure the end-to-end frontend recovery after an exact branch-caused
   // commit flush. This intentionally includes any downstream backpressure
   // encountered before the corrected path can supply its first packet.
-  bool branch_flush = *(uint8_t *)&VERILOG_ROU(pmu_branch_flush);
-  bool nonbranch_flush = *(uint8_t *)&VERILOG_ROU(pmu_nonbranch_flush);
-  static bool branch_recovery_active = false;
+  // The ROU head/flush classification is combinational and has advanced by
+  // the time the C++ sampler runs after the clock edge.  Use CMU's registered
+  // flush and per-slot commit snapshots, which are aligned with `wb_valid`.
+  bool flush_pipe_r = *(uint8_t *)&VERILOG_CPU(cmu__DOT__flush_pipe_r);
+  bool branch_flush = flush_pipe_r && wb_valid
+      && *(uint8_t *)&VERILOG_CPU(cmu__DOT__pmu_mispredict_a)
+      && (*(uint8_t *)&VERILOG_CPU(cmu__DOT__pmu_ben_a)
+          || *(uint8_t *)&VERILOG_CPU(cmu__DOT__pmu_jen_a)
+          || *(uint8_t *)&VERILOG_CPU(cmu__DOT__pmu_jren_a));
+  bool nonbranch_flush = flush_pipe_r && !branch_flush;
   if (branch_flush)
   {
     pmu.branch_flush_events++;
-    pmu.branch_recovery_overlap_events += branch_recovery_active ? 1 : 0;
-    branch_recovery_active = true;
+    pmu.branch_recovery_overlap_events += sampler_state.branch_recovery_active ? 1 : 0;
+    sampler_state.branch_recovery_active = true;
   }
-  else if (branch_recovery_active)
+  else if (sampler_state.branch_recovery_active)
   {
     pmu.branch_recovery_wait_cycles++;
     if (ifu_fetch_fire)
     {
       pmu.branch_recovery_completed++;
-      branch_recovery_active = false;
+      sampler_state.branch_recovery_active = false;
     }
   }
   pmu.nonbranch_flush_events += nonbranch_flush ? 1 : 0;
@@ -230,17 +255,12 @@ void perf_sample_per_cycle()
   }
 
   // -------------------------------------------------------------------
-  // Extended (gem5-aligned) PMU samples
+  // Extended PMU samples. These are Raptor-local event definitions; some are
+  // useful for comparison with similarly named gem5 statistics, but they are
+  // not assumed to have identical sampling boundaries.
   // -------------------------------------------------------------------
   // 1. IFU stall decomposition. The IFU publishes registered, mutually
   // exclusive root causes; do not approximate flush cost with a fixed timer.
-  static int flush_drain_window = 0;
-  bool flush_pipe_r = *(uint8_t *)&VERILOG_CPU(cmu__DOT__flush_pipe_r);
-  if (flush_pipe_r)
-    flush_drain_window = 5; // ~5 cycles for IF->ID bubble
-  else if (flush_drain_window > 0)
-    flush_drain_window--;
-
   pmu.ifu_icache_miss_cycle += ifu_icache_stall ? 1 : 0;
   pmu.ifu_flush_cycle += ifu_flush_stall ? 1 : 0;
   pmu.ifu_empty_cycle += ifu_empty_stall ? 1 : 0;
@@ -263,47 +283,45 @@ void perf_sample_per_cycle()
   pmu.fqu_occupancy_sum += fqu_count;
 
   // 2. Structural full cycles + rising-edge events.
-  //    RS-full proxy: both distributed ALU IQs full (aggregated in rapt_ieu);
-  //    IOQ is 8 entries (IIQ_SIZE=8) -> full when uint8 == 0xFF.
+  //    ALQ-full proxy: the integer ALU reservation station is full.
+  //    IOQ probes are one-bit reductions and work for every configured depth.
   //    UOQ-blocked: rnu has a renamed uop but the dispatch path cannot accept it.
   //    True ROB-full is the rapt_rou all-entry-busy event pulse.
   //    SQ-full: width-stable 1-bit probe from the LSU (&sq_valid).
   bool rs_full = *(uint8_t *)&VERILOG_CPU(ieu__DOT__pmu_ooo_full);
-  bool ioq_full = (exu_ioq_valid == 0xFFu);
+  bool ioq_full = exu_ioq_full;
   bool uoq_blocked = rnu_valid && !rou_ready;
   bool rob_full_event = *(uint8_t *)&VERILOG_ROU(pmu_rob_full);
   bool sq_full = npc.sq_full && (*npc.sq_full != 0);
-  static bool prev_rs_full = false, prev_ioq_full = false;
-  static bool prev_uoq_blocked = false, prev_sq_full = false;
   if (rs_full)
   {
     pmu.rs_full_cycle++;
-    if (!prev_rs_full)
+    if (!sampler_state.prev_rs_full)
       pmu.rs_full_events++;
   }
   if (ioq_full)
   {
     pmu.ioq_full_cycle++;
-    if (!prev_ioq_full)
+    if (!sampler_state.prev_ioq_full)
       pmu.ioq_full_events++;
   }
   if (uoq_blocked)
   {
     pmu.uoq_blocked_cycle++;
-    if (!prev_uoq_blocked)
+    if (!sampler_state.prev_uoq_blocked)
       pmu.uoq_blocked_events++;
   }
   pmu.rob_full_events += rob_full_event ? 1 : 0;
   if (sq_full)
   {
     pmu.sq_full_cycle++;
-    if (!prev_sq_full)
+    if (!sampler_state.prev_sq_full)
       pmu.sq_full_events++;
   }
-  prev_rs_full = rs_full;
-  prev_ioq_full = ioq_full;
-  prev_uoq_blocked = uoq_blocked;
-  prev_sq_full = sq_full;
+  sampler_state.prev_rs_full = rs_full;
+  sampler_state.prev_ioq_full = ioq_full;
+  sampler_state.prev_uoq_blocked = uoq_blocked;
+  sampler_state.prev_sq_full = sq_full;
 
   // 3. Commit-width distribution (per cycle).
   if (wbu_valid && wbu_valid_b)
@@ -313,7 +331,9 @@ void perf_sample_per_cycle()
   // commit_0_cycle implicitly == wbu_stall_cycle (already accumulated above).
 
   // 4. Rename/dispatch status mix.
-  if (flush_drain_window)
+  // Raptor clears rename/dispatch queues in one edge; this registered pulse is
+  // the exact squash interval. A fixed five-cycle estimate overstated it.
+  if (flush_pipe_r)
     pmu.dispatch_squash_cycle++;
   else if (rnu_valid && rou_ready)
     pmu.dispatch_running_cycle++;
@@ -321,38 +341,29 @@ void perf_sample_per_cycle()
     pmu.dispatch_blocked_cycle++;
   else
     pmu.dispatch_idle_cycle++;
-  // L1I cache sample: state-transition-based tracking
+  // L1I cache sample: explicit refill starts and service states.
   // L1I FSM states: IDLE=000, RD_A=001, RD_0=010, PTWAIT=100, TRAP=101, RD_1=110, FINA=111
-  static uint8_t prev_l1i_state = 0;
-  bool l1i_busy = (l1i_state == 0b001)     // RD_A
-                  || (l1i_state == 0b010)  // RD_0
-                  || (l1i_state == 0b110)  // RD_1
-                  || (l1i_state == 0b111)  // FINA
-                  || (l1i_state == 0b100); // PTWAIT
-
-  // Miss: L1I transitions from IDLE to a busy state (cache miss or TLB miss)
-  if (prev_l1i_state == 0b000 && l1i_busy)
-  {
+  bool entering_i_ptw = (sampler_state.prev_l1i_state != 0b100) && (l1i_state == 0b100);
+  // Count a cache miss only when the RTL starts a refill. IDLE->PTWAIT is an
+  // ITLB miss and RD_A can be only a translated-address/SRAM recheck.
+  if (l1i_refill_start_line_miss || l1i_refill_start_current_hole ||
+      l1i_refill_start_next_line_miss || l1i_refill_start_next_hole)
     pmu.l1i_cache_miss_cnt++;
-  }
-  // Miss cycles: accumulate while L1I is in any fetching/PTW state
-  if (l1i_busy)
-  {
+  // Only the cache-refill FSM contributes cache miss service cycles; page-table
+  // walk time remains in the dedicated ITLB counters below.
+  if (l1i_state == 0b010 || l1i_state == 0b110 || l1i_state == 0b111)
     pmu.l1i_cache_miss_cycle++;
-  }
-  // Hit count and hit cycles are computed at report time:
-  //   hit_cnt = ifu_fetch_cnt - miss_cnt,  hit_cycle ~= hit_cnt (1 SRAM cycle/hit)
-  prev_l1i_state = l1i_state;
+  sampler_state.prev_l1i_state = l1i_state;
   // L1D cache sample: state-transition-based tracking (load path only)
   // L1D FSM states: IDLE=000, LD_A=001, LD_D=010, PTWAIT=100, TRAP=101
-  static uint8_t prev_l1d_state = 0;
+  bool entering_d_ptw = (sampler_state.prev_l1d_state != 0b100) && (l1d_state == 0b100);
   // Hit: LD_A with tag_hit (1-cycle load hit)
   if (l1d_state == 0b001 && lsu_l1d_hit)
   {
     pmu.l1d_cache_hit_cnt++;
   }
   // Miss: transition from LD_A to LD_D (tag miss, going to memory)
-  if (prev_l1d_state == 0b001 && l1d_state == 0b010)
+  if (sampler_state.prev_l1d_state == 0b001 && l1d_state == 0b010)
   {
     pmu.l1d_cache_miss_cnt++;
   }
@@ -361,15 +372,23 @@ void perf_sample_per_cycle()
   {
     pmu.l1d_cache_miss_cycle++;
   }
-  prev_l1d_state = l1d_state;
+  sampler_state.prev_l1d_state = l1d_state;
   // tlb & page table walk sample
   char stlb_mmu = *(char *)&VERILOG_CPU(l1d_cache__DOT__stlb_mmu);
   bool i_ptw = (l1i_state == 0b100); // PTWAIT
+  pmu.itlb_ptw_count += entering_i_ptw ? 1 : 0;
   if (i_ptw)
   {
     pmu.itlb_ptw_cycle++;
   }
   bool dtlb_ptw = (l1d_state == 0b100); // PTWAIT
+  if (entering_d_ptw)
+  {
+    if (stlb_mmu)
+      pmu.stlb_ptw_count++;
+    else
+      pmu.ltlb_ptw_count++;
+  }
   if (dtlb_ptw)
   {
     if (stlb_mmu)
@@ -385,27 +404,17 @@ void perf_sample_per_cycle()
 
 typedef enum
 {
-  INST_ECALL = 0x00000073,
-  INST_MRET = 0x30200073,
-  INST_SRET = 0x10200073,
-  INST_RET_ = 0x00008067,
-  INST_EBREAK = 0x00100073,
-} rv_inst_t;
-
-typedef enum
-{
   OP_JAL_ = 0b1101111,
   OP_JALR = 0b1100111,
 } rv_opcode_t;
 
-void perf_sample_per_inst()
+void perf_sample_per_inst(uint32_t inst)
 {
-  if (top->reset)
+  if ((uint8_t)(VERILOG_RESET))
   {
     return;
   }
   pmu.instr_cnt++;
-  uint32_t inst = *(npc.inst);
   uint32_t opcode = inst & 0x7f;
   switch (opcode)
   {
@@ -417,6 +426,10 @@ void perf_sample_per_inst()
     break;
   case 0b0110011: // R type: add, sub, sll, slt, sltu, xor, srl, sra, or, and
   case 0b0010011: // I type: addi, slti, sltiu, xori, ori, andi, slli, srli, srai
+  case 0b0111011: // RV64 OP-32: addw/subw/shifts and M-extension word ops
+  case 0b0011011: // RV64 OP-IMM-32
+  case 0b0110111: // LUI
+  case 0b0010111: // AUIPC
     pmu.alu_inst_cnt++;
     break;
   case 0b1100011: // B type: beq, bne, blt, bge, bltu, bgeu
@@ -424,11 +437,11 @@ void perf_sample_per_inst()
     break;
   case OP_JAL_: // J type: jal
     pmu.jal_inst_cnt++;
-    pmu.call_inst_cnt += ((inst & 0xfff) != 0x0000006f ? 1 : 0);
+    pmu.call_inst_cnt += ((((inst >> 7) & 0x1f) == 1 || ((inst >> 7) & 0x1f) == 5) ? 1 : 0);
     break;
   case OP_JALR: // I type: jalr
     pmu.jalr_inst_cnt++;
-    pmu.call_inst_cnt += ((inst & 0xfff) != 0x00000067 ? 1 : 0);
+    pmu.call_inst_cnt += ((((inst >> 7) & 0x1f) == 1 || ((inst >> 7) & 0x1f) == 5) ? 1 : 0);
     break;
   case 0b1110011: // N type: ecall, ebreak, csrrw, csrrs, csrrc, csrrwi, csrrsi, csrrci, mert
     pmu.csr_inst_cnt++;
@@ -437,16 +450,11 @@ void perf_sample_per_inst()
     pmu.other_inst_cnt++;
     break;
   }
-  switch (inst)
-  {
-  case INST_MRET:
-  case INST_SRET:
-  case INST_RET_:
-    pmu.ret_inst_cnt++;
-    break;
-  default:
-    break;
-  }
+  const uint32_t rd = (inst >> 7) & 0x1f;
+  const uint32_t rs1 = (inst >> 15) & 0x1f;
+  const int32_t jalr_imm = static_cast<int32_t>(inst) >> 20;
+  const bool is_return = opcode == OP_JALR && rd == 0 && jalr_imm == 0 && (rs1 == 1 || rs1 == 5);
+  pmu.ret_inst_cnt += is_return ? 1 : 0;
 
   if ((pmu.instr_cnt % 1000000) == 0) // every million instructions
   {
@@ -478,9 +486,13 @@ void perf()
   uint64_t time_clint = *(uint64_t *)&VERILOG_CLINT(mtime);
   // Convert mtime (ticking at RAPT_MTIME_FREQ_MHZ) to microseconds.
   long long int time_clint_us = (long long int)(time_clint / RAPT_MTIME_FREQ_MHZ);
-  float IPC = (1.0 * pmu.instr_cnt / pmu.active_cycle);
-  float MIPS = (double)((pmu.instr_cnt / 1e6) / (time_clint_us / 1e6));
-  Log("#inst: %lld, cycle: %llu, "
+  double IPC = pmu.active_cycle
+      ? static_cast<double>(pmu.instr_cnt) / pmu.active_cycle
+      : 0.0;
+  double MIPS = time_clint_us
+      ? static_cast<double>(pmu.instr_cnt) / time_clint_us
+      : 0.0;
+  Log("#inst: %lld, cycle: %lld, "
       "IPC: %2.3f, CLINT: %lld (us), %2.3f MIPS",
       pmu.instr_cnt, pmu.active_cycle, IPC,
       (time_clint_us), MIPS);
@@ -499,9 +511,9 @@ void perf()
 
       (double)pmu.jal_inst_cnt, percentage(pmu.jal_inst_cnt, pmu.instr_cnt),
       (double)pmu.jalr_inst_cnt, percentage(pmu.jalr_inst_cnt, pmu.instr_cnt));
-  Log("======== TOP DOWN Stall Analysis ========");
+  Log("======== Stall Probes (categories may overlap) ========");
   Log("|%6s, %%|%6s, %%|%6s, %%|%6s, %%|%6s, %%|%6s, %%|",
-      "IFU", "EX|RS", "EX|IoQ", "L1D", "SQ", "Bubble");
+      "IFU", "EX|RS", "EX|IoQ", "L1D", "SQ", "NO COMMIT");
   Log("|%6.0e,%2.0f|%6.0e,%2.0f|%6.0e,%2.0f|%6.0e,%2.0f|%6.0e,%2.0f|%6.0e,%2.0f|",
       (double)pmu.ifu_stall_cycle, percentage(pmu.ifu_stall_cycle, pmu.active_cycle),
       (double)pmu.exu_ooo_stall_cycle, percentage(pmu.exu_ooo_stall_cycle, pmu.active_cycle),
@@ -518,7 +530,7 @@ void perf()
       pmu.ifu_sys_hazard_cycle, percentage(pmu.ifu_sys_hazard_cycle, pmu.active_cycle),
       pmu.rou_hazard_cycle, percentage(pmu.rou_hazard_cycle, pmu.active_cycle));
   Log("LSU fwd: %lld, sq_conflict: %lld", pmu.lsu_fwd_cnt, pmu.lsu_sq_conflict_cnt);
-  // Dual-commit: report two perspectives consistent with gem5:
+  // Dual-commit: report both commit-cycle and retired-instruction shares.
   //   * fraction of commit cycles (i.e. cycles where >=1 inst committed)
   //   * fraction of total instructions committed in dual mode (2*dual / instr)
   long long int commit_cycles = pmu.commit_1_cycle + pmu.commit_2_cycle;
@@ -538,7 +550,7 @@ void perf()
       pmu.branch_recovery_overlap_events);
 
   // -------------------------------------------------------------------
-  // IFU stall decomposition  (gem5: fetch.icacheStallCycles / squashCycles)
+  // IFU stall decomposition (Raptor-local, mutually exclusive roots).
   // -------------------------------------------------------------------
   Log("======== IFU Stall Decomposition ========");
   Log("|%10s, %%|%10s, %%|%10s, %%|%10s, %%|",
@@ -562,7 +574,7 @@ void perf()
   Log("L1I refill starts: line miss %lld, current-word hole %lld, next-line miss %lld, next-word hole %lld",
       pmu.l1i_refill_start_line_miss, pmu.l1i_refill_start_current_hole,
       pmu.l1i_refill_start_next_line_miss, pmu.l1i_refill_start_next_hole);
-    Log("FQU: full %lld cycles, buffered %lld cycles, avg occupancy %4.2f / 2",
+  Log("FQU: full %lld cycles, buffered %lld cycles, avg occupancy %4.2f / 2",
       pmu.fqu_full_cycle, pmu.fqu_buffered_cycle,
       pmu.active_cycle ? (double)pmu.fqu_occupancy_sum / pmu.active_cycle : 0.0);
 
@@ -571,7 +583,7 @@ void perf()
       pmu.ifu_fetch_cnt, pmu.ifu_fetch_inst_cnt,
       pmu.ifu_fetch_cnt ? (double)pmu.ifu_fetch_inst_cnt / pmu.ifu_fetch_cnt : 0.0,
       pmu.ifu_dual_fetch_cnt, percentage(pmu.ifu_dual_fetch_cnt, pmu.ifu_fetch_cnt));
-  Log("L1I response consumes: %lld; gem5-aligned B-CFI deferrals: %lld (%2.1f%% consumes, %4.1f / 1K active cycles)",
+  Log("L1I response consumes: %lld; slot-B CFI deferrals: %lld (%2.1f%% consumes, %4.1f / 1K active cycles)",
       pmu.ifu_fetch_response_cnt, pmu.ifu_fetch_slot_b_control_cnt,
       percentage(pmu.ifu_fetch_slot_b_control_cnt, pmu.ifu_fetch_response_cnt),
       pmu.active_cycle
@@ -601,11 +613,12 @@ void perf()
       percentage(pmu.ifu_fetch_downstream_blocked_cycle, pmu.active_cycle));
 
   // -------------------------------------------------------------------
-  // Structural-full events  (gem5: iqFullEvents / robFullEvents / sqFullEvents)
+  // Structural-full events. ALQ is the integer ALU reservation station;
+  // it must not be presented as an aggregate of every reservation station.
   // -------------------------------------------------------------------
   Log("======== Structural Full (events / cycles, %% of total) ========");
   Log("|%10s|%14s|%10s|%13s|%10s|%13s|%10s|%10s|",
-      "RS EVT", "RS CYC, %", "IOQ EVT", "IOQ CYC, %",
+      "ALQ EVT", "ALQ CYC, %", "IOQ EVT", "IOQ CYC, %",
       "UOQ EVT", "UOQ CYC, %", "ROB EVT", "SQ EVT/CYC");
   Log("|%10lld|%9.0e,%4.1f|%10lld|%8.0e,%4.1f|%10lld|%8.0e,%4.1f|%10lld|%5lld/%4.1f|",
       pmu.rs_full_events, (double)pmu.rs_full_cycle, percentage(pmu.rs_full_cycle, pmu.active_cycle),
@@ -614,7 +627,7 @@ void perf()
       pmu.rob_full_events, pmu.sq_full_events, percentage(pmu.sq_full_cycle, pmu.active_cycle));
 
   // -------------------------------------------------------------------
-  // Commit-width distribution  (gem5: commit.committed_per_cycle)
+  // Commit-width distribution.
   // -------------------------------------------------------------------
   Log("======== Commit Width Distribution ========");
   Log("|%13s, %%|%13s, %%|%13s, %%|  avg/cycle: %5.3f",
@@ -626,7 +639,7 @@ void perf()
       (double)pmu.commit_2_cycle, percentage(pmu.commit_2_cycle, pmu.active_cycle));
 
   // -------------------------------------------------------------------
-  // Rename / Dispatch status mix  (gem5: rename.status)
+  // Rename / dispatch status mix.
   // -------------------------------------------------------------------
   Log("======== Rename/Dispatch Status ========");
   Log("|%13s, %%|%13s, %%|%13s, %%|%13s, %%|",
@@ -641,27 +654,18 @@ void perf()
       (pmu.ld_inst_cnt + pmu.st_inst_cnt + pmu.alu_inst_cnt +
        pmu.b_inst_cnt + pmu.csr_inst_cnt + pmu.other_inst_cnt +
        pmu.jal_inst_cnt + pmu.jalr_inst_cnt));
-  Log("======== Cache Analysis ========");
-  // AMAT: Average Memory Access Time
-  // Compute hit count at report time: hits = total fetches - misses
-  long long int l1i_hit_cnt = pmu.ifu_fetch_cnt - pmu.l1i_cache_miss_cnt;
-  if (l1i_hit_cnt < 0)
-    l1i_hit_cnt = 0;
-  long long int l1i_hit_cycle = l1i_hit_cnt; // ~1 SRAM cycle per hit
-  Log("|%6s, %%|%8s, %%|%8s, %%|%8s,  %%|%13s|%13s|%13s|",
-      "L1I HIT", "L1I MISS", "HIT CYC", "MISS CYC", "HIT Cost AVG", "MISS Cost AVG", "AMAT");
-  double l1i_hit_rate = percentage(l1i_hit_cnt, l1i_hit_cnt + pmu.l1i_cache_miss_cnt);
-  double l1i_access_time = l1i_hit_cnt > 0 ? (double)l1i_hit_cycle / l1i_hit_cnt : 0;
-  double l1i_miss_penalty = pmu.l1i_cache_miss_cnt > 0 ? (double)pmu.l1i_cache_miss_cycle / pmu.l1i_cache_miss_cnt : 0;
-  Log("|%6.0e,%3.0f|%8.0e,%2.0f|%8.0e,%2.0f|%8.0e,%3.0f|%13lld|%13lld|%13.1f|",
-      (double)l1i_hit_cnt, l1i_hit_rate,
-      (double)pmu.l1i_cache_miss_cnt, 100 - l1i_hit_rate,
-      (double)l1i_hit_cycle,
-      percentage(l1i_hit_cycle, l1i_hit_cycle + pmu.l1i_cache_miss_cycle),
-      (double)pmu.l1i_cache_miss_cycle,
-      percentage(pmu.l1i_cache_miss_cycle, l1i_hit_cycle + pmu.l1i_cache_miss_cycle),
-      (long long)l1i_access_time, (long long)l1i_miss_penalty,
-      l1i_access_time + (100 - l1i_hit_rate) / 100.0 * l1i_miss_penalty);
+  Log("======== Cache/Translation Analysis ========");
+  // A fetch packet can cause more than one sector/line refill and can be
+  // redirected before it completes.  Therefore `fetch packets - refills` is
+  // not a cache-hit count and must not be used to manufacture a hit rate or
+  // AMAT.  Report only directly observed L1I refill events/service cycles.
+  Log("L1I: %lld refill starts, %lld refill-FSM service cycles, %4.2f cycles/start; "
+      "%lld response consumes, %lld delivered packets",
+      pmu.l1i_cache_miss_cnt, pmu.l1i_cache_miss_cycle,
+      pmu.l1i_cache_miss_cnt
+          ? (double)pmu.l1i_cache_miss_cycle / pmu.l1i_cache_miss_cnt
+          : 0.0,
+      pmu.ifu_fetch_response_cnt, pmu.ifu_fetch_cnt);
   // L1D cache (load path only; stores are write-through and don't stall)
   long long int l1d_total = pmu.l1d_cache_hit_cnt + pmu.l1d_cache_miss_cnt;
   long long int l1d_hit_cycle = pmu.l1d_cache_hit_cnt; // ~1 SRAM cycle per hit
@@ -681,14 +685,17 @@ void perf()
       l1d_access_time + (100 - l1d_hit_rate) / 100.0 * l1d_miss_penalty);
   // tlb & page table walk
   Log("|======= TLB & Page Table Walk Analysis ========");
-  Log("|%8s, %%|%8s, %%|%8s, %%|",
-      "ITLB PTW", "STLB PTW", "LTLB PTW");
-  Log("|%8.0e,%2.0f|%8.0e,%2.0f|%8.0e,%2.0f|",
-      (double)pmu.itlb_ptw_cycle,
+  Log("|%9s|%9s|%9s|%8s, %%|%8s, %%|%8s, %%|",
+      "ITLB miss", "STLB miss", "LTLB miss", "ITLB PTW", "STLB PTW", "LTLB PTW");
+  Log("|%9lld|%9lld|%9lld|%8lld,%4.1f|%8lld,%4.1f|%8lld,%4.1f|",
+      pmu.itlb_ptw_count,
+      pmu.stlb_ptw_count,
+      pmu.ltlb_ptw_count,
+      pmu.itlb_ptw_cycle,
       percentage(pmu.itlb_ptw_cycle, pmu.active_cycle),
-      (double)pmu.stlb_ptw_cycle,
+      pmu.stlb_ptw_cycle,
       percentage(pmu.stlb_ptw_cycle, pmu.active_cycle),
-      (double)pmu.ltlb_ptw_cycle,
+      pmu.ltlb_ptw_cycle,
       percentage(pmu.ltlb_ptw_cycle, pmu.active_cycle));
 }
 
@@ -696,12 +703,13 @@ void statistic()
 {
   perf();
   double time_s = g_timer / 1e6;
-  double frequency = pmu.active_cycle / time_s;
+  double frequency = time_s > 0.0 ? pmu.active_cycle / time_s : 0.0;
+  double ips = time_s > 0.0 ? pmu.instr_cnt / time_s : 0.0;
   Log("Simulate time:"
       " " FMT_WORD_NO_PREFIX " us, " FMT_WORD_NO_PREFIX " ms, Freq: %5.3f MHz, Inst: %6.0f I/s, %5.3f MIPS",
       (word_t)g_timer, (word_t)(g_timer / 1000),
       (double)(frequency * 1.0 / 1e6),
-      pmu.instr_cnt / time_s, pmu.instr_cnt / time_s / 1e6);
+      ips, ips / 1e6);
   Log("%s at pc: " FMT_WORD_NO_PREFIX ", inst: " FMT_WORD_NO_PREFIX,
       ((npc.state == NPC_QUIT) ? FMT_BLUE("NPC QUIT")
                                : ((npc.host_exit_ok || *npc.ret == 0) && npc.state != NPC_ABORT

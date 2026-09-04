@@ -6,7 +6,7 @@
     "scounteren_writable_bits": { "value": "0x0000_0000" },
     "mcounteren_writable_bits": { "value": "0x0000_0007" },
     "mstatus": {
-      "fs_legal_states": "ExtContext_Off",
+      "fs_legal_states": "ExtContext_FourState",
       "vs_legal_states": "ExtContext_Off"
     }
   },
@@ -77,8 +77,8 @@
     ]
   },
   "extensions": {
-    "F": { "supported": false },
-    "D": { "supported": false },
+    "F": { "supported": true },
+    "D": { "supported": true },
     "V": { "support_level": "Disabled" },
     "B": { "supported": false },
     "S": { "supported": false },
@@ -101,8 +101,8 @@
     "Ssqosid": { "supported": false },
     "Svvptc": { "supported": false },
     "Zca": { "supported": true },
-    "Zcf": { "supported": false },
-    "Zcd": { "supported": false },
+    "Zcf": { "supported": true },
+    "Zcd": { "supported": true },
     "Zba": { "supported": true },
     "Zbb": { "supported": true },
     "Zbs": { "supported": true },

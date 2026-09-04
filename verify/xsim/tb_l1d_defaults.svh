@@ -41,6 +41,7 @@ task automatic init_l1d_inputs;
     exu_l1d.mmu_en = 1'b0;
     exu_l1d.vaddr = '0;
     exu_l1d.walu = '0;
+    exu_l1d.cmo_mgmt = 1'b0;
     exu_l1d.valid = 1'b0;
     exu_l1d.reservation_clear = 1'b0;
 

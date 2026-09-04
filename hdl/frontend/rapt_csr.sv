@@ -39,6 +39,20 @@ module rapt_csr #(
 
     input reset
 );
+
+  // CBIE=2 is reserved.  Preserve the three architectural choices and map
+  // an attempted reserved write to CBIE=3 (invalidate) as a legal WARL value.
+  function automatic logic [XLEN-1:0] envcfg_warl(
+      input logic [XLEN-1:0] value,
+      input logic [XLEN-1:0] write_mask
+  );
+    logic [XLEN-1:0] result;
+    begin
+      result = value & write_mask;
+      if (result[5:4] == 2'b10) result[5:4] = 2'b11;
+      return result;
+    end
+  endfunction
   typedef enum logic [REG_W-1:0] {
     MNONE__ = 0,
     FFLAGS,
@@ -179,8 +193,10 @@ module rapt_csr #(
       `RAPT_CSR_MCAUSE_:   waddr_reg = MCAUSE_;
       `RAPT_CSR_MTVAL__:   waddr_reg = MTVAL__;
       `RAPT_CSR_MIP____:   waddr_reg = MIP____;
+      `RAPT_CSR_MCYCLE_:   waddr_reg = MCYCLE_;
+      `RAPT_CSR_MCYCLEH:   waddr_reg = (XLEN == 32) ? MCYCLEH : MNONE__;
       `RAPT_CSR_MINSTRET:  waddr_reg = MINSTRET;
-      `RAPT_CSR_MINSTRETH: waddr_reg = MINSTRETH;
+      `RAPT_CSR_MINSTRETH: waddr_reg = (XLEN == 32) ? MINSTRETH : MNONE__;
       default:             waddr_reg = MNONE__;
     endcase
   end
@@ -217,15 +233,15 @@ module rapt_csr #(
       `RAPT_CSR_MTVAL__:   raddr_reg = MTVAL__;
       `RAPT_CSR_MIP____:   raddr_reg = MIP____;
       `RAPT_CSR_MCYCLE_:   raddr_reg = MCYCLE_;
-      `RAPT_CSR_MCYCLEH:   raddr_reg = MCYCLEH;
+      `RAPT_CSR_MCYCLEH:   raddr_reg = (XLEN == 32) ? MCYCLEH : MNONE__;
       `RAPT_CSR_CYCLE__:   raddr_reg = MCYCLE_;
-      `RAPT_CSR_CYCLEH_:   raddr_reg = MCYCLEH;
+      `RAPT_CSR_CYCLEH_:   raddr_reg = (XLEN == 32) ? MCYCLEH : MNONE__;
       `RAPT_CSR_TIME___:   raddr_reg = TIME___;
-      `RAPT_CSR_TIMEH__:   raddr_reg = TIMEH__;
+      `RAPT_CSR_TIMEH__:   raddr_reg = (XLEN == 32) ? TIMEH__ : MNONE__;
       `RAPT_CSR_MINSTRET:  raddr_reg = MINSTRET;
-      `RAPT_CSR_MINSTRETH: raddr_reg = MINSTRETH;
+      `RAPT_CSR_MINSTRETH: raddr_reg = (XLEN == 32) ? MINSTRETH : MNONE__;
       `RAPT_CSR_INSTRET_:  raddr_reg = MINSTRET;
-      `RAPT_CSR_INSTRETH:  raddr_reg = MINSTRETH;
+      `RAPT_CSR_INSTRETH:  raddr_reg = (XLEN == 32) ? MINSTRETH : MNONE__;
       `RAPT_CSR_MVENDORID: raddr_reg = MVENDORID;
       `RAPT_CSR_MARCHID__: raddr_reg = MARCHID;
       `RAPT_CSR_IMPID____: raddr_reg = IMPID__;
@@ -448,6 +464,12 @@ module rapt_csr #(
   assign csr_bcast.tw         = csr[MSTATUS][`RAPT_CSR_MSTATUS_TW__];
   assign csr_bcast.mcounteren = csr[MCOUNTE][2:0];
   assign csr_bcast.scounteren = csr[SCOUNTE][2:0];
+  assign csr_bcast.menvcfg_cbie = csr[MENVCFG][5:4];
+  assign csr_bcast.menvcfg_cbcfe = csr[MENVCFG][6];
+  assign csr_bcast.menvcfg_cbze = csr[MENVCFG][7];
+  assign csr_bcast.senvcfg_cbie = csr[SENVCFG][5:4];
+  assign csr_bcast.senvcfg_cbcfe = csr[SENVCFG][6];
+  assign csr_bcast.senvcfg_cbze = csr[SENVCFG][7];
   assign csr_bcast.sum        = csr[MSTATUS][`RAPT_CSR_MSTATUS_SUM_];
   assign csr_bcast.mxr        = csr[MSTATUS][`RAPT_CSR_MSTATUS_MXR_];
   assign csr_bcast.sbe        = csr[MSTATUSH][`RAPT_CSR_MSTATUSH_SBE];
@@ -594,11 +616,13 @@ module rapt_csr #(
         time_div_cnt <= time_div_cnt + RAPTTimeDIVW'(1);
       end
       csr[MCYCLE_] <= csr[MCYCLE_] + 1;
-      if (csr[MCYCLE_] == ~'h0) begin
+      if (csr[MCYCLE_] == ~'h0
+          && !(rou_csr.valid && rou_csr.csr_wen && waddr_reg == MCYCLE_)) begin
         csr[MCYCLEH] <= csr[MCYCLEH] + 1;
       end
       csr[MINSTRET] <= csr[MINSTRET] + XLEN'(rou_csr.retire_a) + XLEN'(rou_csr.retire_b);
-      if (csr[MINSTRET] + XLEN'(rou_csr.retire_a) + XLEN'(rou_csr.retire_b) < csr[MINSTRET]) begin
+      if (csr[MINSTRET] + XLEN'(rou_csr.retire_a) + XLEN'(rou_csr.retire_b) < csr[MINSTRET]
+          && !(rou_csr.valid && rou_csr.csr_wen && waddr_reg == MINSTRET)) begin
         csr[MINSTRETH] <= csr[MINSTRETH] + 1;
       end
       if (rou_csr.valid) begin
@@ -671,9 +695,11 @@ module rapt_csr #(
             // Only CY/TM/IR (bits [2:0]) modeled; HPM bits WARL-zero.
             csr[waddr_reg] <= (rou_csr.csr_wdata & `RAPT_CSR_COUNTEREN_WMASK);
           end else if (waddr_reg == SENVCFG) begin
-            csr[SENVCFG] <= (rou_csr.csr_wdata & `RAPT_CSR_SENVCFG_WMASK);
+            csr[SENVCFG] <= envcfg_warl(rou_csr.csr_wdata,
+                                        XLEN'(`RAPT_CSR_SENVCFG_WMASK));
           end else if (waddr_reg == MENVCFG) begin
-            csr[MENVCFG] <= (rou_csr.csr_wdata & `RAPT_CSR_MENVCFG_WMASK);
+            csr[MENVCFG] <= envcfg_warl(rou_csr.csr_wdata,
+                                        XLEN'(`RAPT_CSR_MENVCFG_WMASK));
           end else if (waddr_reg == STIMECMP) begin
             if (XLEN == 64) begin
               stimecmp <= 64'(rou_csr.csr_wdata);
@@ -742,9 +768,13 @@ module rapt_csr #(
             // unsupported modes is required for that probe to converge.
 `ifdef RAPT_RV64
             // RV64: MODE is bits [63:60]. Accept 0 (Bare) or 8 (Sv39) only.
+            // Raptor implements ASID[8:0].  ASID[15:9] are WARL-zero so the
+            // architectural write/read probe reports ASIDLEN=9, matching the
+            // nine bits carried by the TLB interface.
             if (rou_csr.csr_wdata[XLEN-1:XLEN-4] == 4'd0
                 || rou_csr.csr_wdata[XLEN-1:XLEN-4] == 4'd8) begin
-              csr[waddr_reg] <= rou_csr.csr_wdata;
+              csr[waddr_reg] <= {rou_csr.csr_wdata[63:60], 7'b0,
+                                  rou_csr.csr_wdata[52:0]};
             end
             // else: write rejected, satp unchanged
 `else
@@ -856,8 +886,8 @@ module rapt_csr #(
     end
   end
 
-  // Difftest / external visibility shadow: keep csr[SIE____] and
-  // csr[SIP____] in lockstep with the masked M-side storage. The sie/sip
+  // Difftest / external visibility shadows: keep sie/sip/mip in lockstep
+  // with their architectural read values. The sie/sip
   // CSRs are restricted views of mie/mip; software writes are redirected
   // into csr[MIE____] / csr[MIP____] above, so the SIE/SIP slots would
   // otherwise stay 0 and break difftest's pointer compare against NEMU
@@ -866,6 +896,11 @@ module rapt_csr #(
   // so the value is current within the same eval as the MIE write.
   logic [XLEN-1:0] csr_sie_shadow /* verilator public_flat_rd */;
   logic [XLEN-1:0] csr_sip_shadow /* verilator public_flat_rd */;
+  logic [XLEN-1:0] csr_mip_shadow /* verilator public_flat_rd */;
   assign csr_sie_shadow = csr[MIE____] & `RAPT_CSR_SIE_RMASK;
   assign csr_sip_shadow = mip_eff      & `RAPT_CSR_SIP_RMASK;
+  // csr[MIP____] only holds software-writable pending bits.  MSIP/MTIP and
+  // external interrupt levels are folded in by mip_eff, so exporting the raw
+  // storage slot makes a following csrr mip diverge from the reference model.
+  assign csr_mip_shadow = mip_eff;
 endmodule

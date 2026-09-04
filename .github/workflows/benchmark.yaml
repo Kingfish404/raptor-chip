@@ -34,6 +34,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  RAPT_CONFIG: default
+
 jobs:
   rv-benchmark:
     runs-on: ubuntu-latest
@@ -391,7 +394,7 @@ jobs:
         run: |
           report_rc=0
           make app-embench-baremetal-report-rv32 || report_rc=$?
-          cat sim/build/default/logs/app/embench-baremetal-rv32.md \
+          cat sim/build/${{ env.RAPT_CONFIG }}/logs/app/embench-baremetal-rv32.md \
             >> "$GITHUB_STEP_SUMMARY"
           exit "$report_rc"
 
@@ -401,9 +404,9 @@ jobs:
         with:
           name: app-embench-logs-${{ github.sha }}
           path: |
-            sim/build/default/logs/app/embench-baremetal-rv32.log
-            sim/build/default/logs/app/embench-baremetal-rv32.md
-            sim/build/default/logs/app/embench-baremetal-rv32/
+            sim/build/${{ env.RAPT_CONFIG }}/logs/app/embench-baremetal-rv32.log
+            sim/build/${{ env.RAPT_CONFIG }}/logs/app/embench-baremetal-rv32.md
+            sim/build/${{ env.RAPT_CONFIG }}/logs/app/embench-baremetal-rv32/
           retention-days: 30
           overwrite: true
 
@@ -445,7 +448,7 @@ jobs:
         run: |
           report_rc=0
           make app-embench-pk-report-rv32 || report_rc=$?
-          cat sim/build/default/logs/app/embench-pk-rv32.md \
+          cat sim/build/${{ env.RAPT_CONFIG }}/logs/app/embench-pk-rv32.md \
             >> "$GITHUB_STEP_SUMMARY"
           exit "$report_rc"
 
@@ -455,8 +458,8 @@ jobs:
         with:
           name: app-pk-embench-logs-${{ github.sha }}
           path: |
-            sim/build/default/logs/app/embench-pk-rv32.log
-            sim/build/default/logs/app/embench-pk-rv32.md
-            sim/build/default/logs/app/embench-pk-rv32/
+            sim/build/${{ env.RAPT_CONFIG }}/logs/app/embench-pk-rv32.log
+            sim/build/${{ env.RAPT_CONFIG }}/logs/app/embench-pk-rv32.md
+            sim/build/${{ env.RAPT_CONFIG }}/logs/app/embench-pk-rv32/
           retention-days: 30
           overwrite: true

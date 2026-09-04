@@ -37,6 +37,145 @@ static uint8_t sram[CONFIG_SRAM_SIZE] PG_ALIGN = {};
 static uint8_t mrom[CONFIG_MROM_SIZE] PG_ALIGN = {};
 static uint8_t flash[CONFIG_FLASH_SIZE] PG_ALIGN = {};
 
+#if defined(CONFIG_ROM_DTB) && !defined(CONFIG_TARGET_SHARE)
+/* Flattened device tree constants, encoded as big-endian 32-bit words. */
+#define FDT_MAGIC       0xd00dfeedu
+#define FDT_BEGIN_NODE  0x1u
+#define FDT_END_NODE    0x2u
+#define FDT_PROP        0x3u
+#define FDT_NOP         0x4u
+#define FDT_END         0x9u
+#define FDT_HEADER_SIZE 40u
+#define DTB_RNG_SEED_SIZE 32u
+
+static uint32_t read_be32(const uint8_t *p)
+{
+  return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) |
+         ((uint32_t)p[2] << 8) | (uint32_t)p[3];
+}
+
+static uint8_t *align_fdt_ptr(uint8_t *p, uint8_t *base, uint8_t *end)
+{
+  size_t offset = (size_t)(p - base);
+  size_t aligned = (offset + 3u) & ~(size_t)3u;
+  return aligned <= (size_t)(end - base) ? base + aligned : NULL;
+}
+
+/*
+ * Locate /chosen/rng-seed without adding a host libfdt dependency. The NEMU
+ * GC device trees contain a fixed-size placeholder, so no blob resizing is
+ * needed at runtime.
+ */
+static uint8_t *find_dtb_rng_seed(uint8_t *dtb, size_t blob_size,
+                                  size_t *seed_size, bool *malformed)
+{
+  *seed_size = 0;
+  *malformed = true;
+  if (blob_size < FDT_HEADER_SIZE || read_be32(dtb) != FDT_MAGIC)
+    return NULL;
+
+  uint32_t total_size = read_be32(dtb + 4);
+  uint32_t struct_offset = read_be32(dtb + 8);
+  uint32_t strings_offset = read_be32(dtb + 12);
+  uint32_t strings_size = read_be32(dtb + 32);
+  uint32_t struct_size = read_be32(dtb + 36);
+  if (total_size > blob_size || struct_offset > total_size ||
+      struct_size > total_size - struct_offset ||
+      strings_offset > total_size || strings_size > total_size - strings_offset)
+    return NULL;
+
+  uint8_t *struct_base = dtb + struct_offset;
+  uint8_t *p = struct_base;
+  uint8_t *struct_end = struct_base + struct_size;
+  const char *strings = (const char *)(dtb + strings_offset);
+  int depth = -1;
+  int chosen_depth = -1;
+
+  while (p + sizeof(uint32_t) <= struct_end)
+  {
+    uint32_t token = read_be32(p);
+    p += sizeof(uint32_t);
+    switch (token)
+    {
+    case FDT_BEGIN_NODE:
+    {
+      uint8_t *name_end = memchr(p, '\0', (size_t)(struct_end - p));
+      if (name_end == NULL)
+        return NULL;
+      const char *name = (const char *)p;
+      depth++;
+      if (depth == 1 &&
+          (strcmp(name, "chosen") == 0 || strncmp(name, "chosen@", 7) == 0))
+        chosen_depth = depth;
+      p = align_fdt_ptr(name_end + 1, struct_base, struct_end);
+      if (p == NULL)
+        return NULL;
+      break;
+    }
+    case FDT_END_NODE:
+      if (depth == chosen_depth)
+        chosen_depth = -1;
+      if (depth-- < 0)
+        return NULL;
+      break;
+    case FDT_PROP:
+    {
+      if (p + 2 * sizeof(uint32_t) > struct_end)
+        return NULL;
+      uint32_t len = read_be32(p);
+      uint32_t name_offset = read_be32(p + 4);
+      p += 2 * sizeof(uint32_t);
+      size_t padded_len = ((size_t)len + 3u) & ~(size_t)3u;
+      if (padded_len > (size_t)(struct_end - p) || name_offset >= strings_size)
+        return NULL;
+      const char *name = strings + name_offset;
+      if (memchr(name, '\0', strings_size - name_offset) == NULL)
+        return NULL;
+      if (depth == chosen_depth && strcmp(name, "rng-seed") == 0)
+      {
+        *seed_size = len;
+        *malformed = false;
+        return p;
+      }
+      p += padded_len;
+      break;
+    }
+    case FDT_NOP:
+      break;
+    case FDT_END:
+      *malformed = false;
+      return NULL;
+    default:
+      return NULL;
+    }
+  }
+  return NULL;
+}
+
+static void inject_dtb_rng_seed(uint8_t *dtb, size_t blob_size)
+{
+  size_t seed_size;
+  bool malformed;
+  uint8_t *seed = find_dtb_rng_seed(dtb, blob_size, &seed_size, &malformed);
+  Assert(!malformed, "Malformed flattened device tree while locating /chosen/rng-seed");
+  if (seed == NULL)
+    return;
+
+  Assert(seed_size == DTB_RNG_SEED_SIZE,
+         "/chosen/rng-seed must be %u bytes, got %zu",
+         DTB_RNG_SEED_SIZE, seed_size);
+  FILE *fp = fopen("/dev/urandom", "rb");
+  Assert(fp != NULL, "Can not open /dev/urandom for the DTB RNG seed");
+  size_t bytes_read = fread(seed, 1, seed_size, fp);
+  int read_failed = ferror(fp);
+  fclose(fp);
+  Assert(bytes_read == seed_size && !read_failed,
+         "Can not read %zu bytes from /dev/urandom for the DTB RNG seed",
+         seed_size);
+  Log("Injected %zu host-random bytes into DTB /chosen/rng-seed", seed_size);
+}
+#endif
+
 uint8_t *guest_to_host(paddr_t paddr)
 {
   if (in_pmem(paddr))
@@ -136,6 +275,7 @@ void init_mem()
   int ret = fread(rom + reset_vec_size * 4, size, 1, fp);
   assert(ret == 1);
   fclose(fp);
+  inject_dtb_rng_seed(rom + reset_vec_size * 4, (size_t)size);
   Log("The dtb: %s, size: %ld, loaded to " FMT_PADDR "",
       filename, size, (paddr_t)(CONFIG_ROM_BASE + reset_vec_size * 4));
 #endif

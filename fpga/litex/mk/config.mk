@@ -268,9 +268,6 @@ endif
 ifneq (,$(filter 1 yes true on,$(WITH_SDCARD)))
 FPGA_FLAVOR := $(FPGA_FLAVOR)-sdcard
 endif
-ifneq (,$(filter 1 yes true on,$(SDCARD_BOOT)))
-FPGA_FLAVOR := $(FPGA_FLAVOR)-boot
-endif
 FPGA_FLAVOR := $(FPGA_FLAVOR)-$(RAPT_CONFIG)
 FPGA_FLAVOR_SUFFIX := $(strip $(FPGA_FLAVOR_SUFFIX))
 ifneq ($(FPGA_FLAVOR_SUFFIX),)
@@ -310,7 +307,6 @@ LITEDRAM_SIZE_FLAG := $(if $(WITH_LITEDRAM_FLAG),--litedram-size=$(LITEDRAM_SIZE
 WITH_MIG_FLAG := $(if $(filter 1 yes true on,$(WITH_MIG)),--with-mig,)
 MIG_SIZE_FLAG := $(if $(WITH_MIG_FLAG),--mig-size=$(MIG_SIZE),)
 WITH_SDCARD_FLAG := $(if $(filter 1 yes true on,$(WITH_SDCARD)),--with-sdcard,)
-SDCARD_BOOT_FLAG := $(if $(filter 1 yes true on,$(SDCARD_BOOT)),--sdcard-boot,)
 VIVADO_INCREMENTAL_FLAG := $(if $(filter 1 yes true on,$(VIVADO_INCREMENTAL)),--vivado-incremental,)
 
 ifneq ($(WITH_LITEDRAM_FLAG),)
@@ -324,7 +320,7 @@ _FPGA_BOOT_FLAGS := --boot-mode=custom --integrated-rom-init=$(FW_FPGA_BIN)
 _FPGA_FW_DEP     := $(FW_FPGA_BIN)
 else
 _FPGA_BOOT_FLAGS := --boot-mode=bios
-_FPGA_FW_DEP     :=
+_FPGA_FW_DEP     := $(if $(filter 1,$(LINUX_FPGA_PROFILE)),$(FW_LINUX_FPGA_BIN) $(FW_LINUX_FPGA_SEEDED_DTB) $(LINUX_FPGA_PAYLOAD),)
 endif
 
 _FPGA_FLAGS = --output-dir=$(FPGA_DIR) \
@@ -334,17 +330,18 @@ _FPGA_FLAGS = --output-dir=$(FPGA_DIR) \
 	$(_FPGA_BOOT_FLAGS) \
 	$(_MAIN_RAM_FLAG) \
 	$(WITH_LED_CHASER_FLAG) $(WITH_LITEDRAM_FLAG) $(LITEDRAM_SIZE_FLAG) \
-	$(WITH_MIG_FLAG) $(MIG_SIZE_FLAG) $(WITH_SDCARD_FLAG) $(SDCARD_BOOT_FLAG) $(EXTRA_FLAGS)
+	$(WITH_MIG_FLAG) $(MIG_SIZE_FLAG) $(WITH_SDCARD_FLAG) $(EXTRA_FLAGS)
 
 FPGA_STAMP := $(FPGA_DIR)/.bitstream_stamp
 _FPGA_HASH_COMMON_INPUTS = $(PACK_SV) $(FPGA_PY) $(LITEX_DIR)/Makefile \
 	$(LITEX_DIR)/mk/config.mk $(LITEX_DIR)/mk/recipes.mk \
-	$(LITEX_DIR)/scripts/patch_litex_sdcard_boot.py \
 	$(if $(WITH_MIG_FLAG),$(LITEX_DIR)/$(BOARD_$(FPGA_BOARD)_MIG_TCL),)
 ifeq ($(BOOT_MODE),custom)
 _FPGA_HASH_INPUTS = $(_FPGA_HASH_COMMON_INPUTS) $(FW_FPGA_BIN)
 else
-_FPGA_HASH_INPUTS = $(_FPGA_HASH_COMMON_INPUTS)
+_FPGA_HASH_INPUTS = $(_FPGA_HASH_COMMON_INPUTS) \
+	$(LITEX_DIR)/scripts/patch_litex_sdcard_linux_override.py \
+	$(if $(filter 1,$(LINUX_FPGA_PROFILE)),$(FW_LINUX_FPGA_BIN) $(FW_LINUX_FPGA_SEEDED_DTB) $(FW_LINUX_FPGA_RNG_SEED) $(LINUX_FPGA_PAYLOAD),)
 endif
 # Keep this as a shell command instead of a parse-time value: LiteX finalization
 # can refresh PACK_SV, so fpga-build must recompute the stamp after generation.

@@ -5,7 +5,10 @@
 #define SET_STRIDE 1024u
 #define CONFLICT_LINES 8u
 #define WORDS_PER_LINE 16u
-#define ROUNDS 20000u
+#ifndef RAPTOS_CACHE_REFILL_ROUNDS
+#define RAPTOS_CACHE_REFILL_ROUNDS 20000
+#endif
+#define ROUNDS ((uint32_t)RAPTOS_CACHE_REFILL_ROUNDS)
 
 static uint8_t arena[SET_STRIDE * CONFLICT_LINES + 64u] USER_BSS __attribute__((aligned(4096)));
 static uint32_t expected[CONFLICT_LINES][WORDS_PER_LINE] USER_BSS;

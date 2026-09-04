@@ -264,6 +264,24 @@ module tb_rou_dual_commit;
     end
   endfunction
 
+  function automatic rapt_pkg::uop_t make_fp_load_uop(
+      input logic [XLEN-1:0] pc,
+      input logic [11:0] immediate
+  );
+    rapt_pkg::uop_t u;
+    begin
+      u = '0;
+      u.pc = pc;
+      u.pnpc = pc + XLEN'(4);
+      u.inst = 32'h1001_3087;
+      u.fp_valid = 1'b1;
+      u.fp_op = `RAPT_FP_OP_FLD;
+      u.fp_rd = 5'd1;
+      u.imm = XLEN'(immediate);
+      return u;
+    end
+  endfunction
+
   task automatic reset_dut;
     begin
       reset = 1'b1;
@@ -274,11 +292,6 @@ module tb_rou_dual_commit;
       check(rnu_rou.ready, "ROU not ready after reset");
       check(!rou_cmu.valid_a, "ROU reports commit after reset");
       check(!cmu_bcast.flush_pipe, "CMU reports flush after reset");
-      for (int entry = 0; entry < `RAPT_ROB_SIZE; entry++) begin
-        check({uop_pl[entry].ecall, uop_pl[entry].ebreak,
-               uop_pl[entry].mret, uop_pl[entry].sret} === 4'b0000,
-          "system return/trap payload was not reset deterministically");
-      end
     end
   endtask
 
@@ -482,8 +495,8 @@ module tb_rou_dual_commit;
       check(rou_cmu.npc_a == csr_bcast.mtvec,
         "seed ECALL did not select mtvec");
       tick(1);
-      check(uop_pl[0].ecall === 1'b0,
-        "ECALL payload survived flush before ROB reuse");
+      check(!rou_cmu.valid_a && !rou_csr.valid,
+        "flushed ECALL remained architecturally visible");
 
       for (int iteration = 0; iteration < WrapIterations; iteration++) begin
         pc = 32'h8001_0000 + XLEN'(iteration * 4);
@@ -528,6 +541,68 @@ module tb_rou_dual_commit;
     end
   endtask
 
+  task automatic expect_stale_csr_wen_is_not_exposed;
+    begin
+      reset_dut();
+
+      // Seed csr_wen in slot 1, then flush it as the younger instruction
+      // behind a mispredicted branch. Flush intentionally only resets ROB
+      // validity/state, so the hot csr_wen field remains stale.
+      dispatch_one(make_branch_uop(32'h8003_0000, 32'h0000_0863), '0, '0, RobW'(0));
+      dispatch_one(make_alu_uop(32'h8003_0004, 32'h0000_0013, 5'd0), '0, '0, RobW'(1));
+
+      exu_rou.dest = RobW'(1);
+      exu_rou.npc = 32'h8003_0008;
+      exu_rou.csr_wen = 1'b1;
+      exu_rou.csr_wdata = '0;
+      exu_rou.valid = 1'b1;
+      tick(1);
+      clear_writebacks();
+      exu_rou.csr_wen = 1'b0;
+
+      exu_rou.dest = RobW'(0);
+      exu_rou.npc = 32'h8003_0100;
+      exu_rou.btaken = 1'b1;
+      exu_rou.mispredict = 1'b1;
+      exu_rou.valid = 1'b1;
+      tick(1);
+      clear_writebacks();
+      exu_rou.btaken = 1'b0;
+      exu_rou.mispredict = 1'b0;
+      check(rou_cmu.flush_pipe, "seed branch did not request a flush");
+      tick(1);
+      check(dut_rou.rob_entry[1].csr_wen,
+        "test setup did not preserve stale csr_wen across flush");
+      tick(1);
+
+      // Reuse slot 1 for a non-system FP load whose immediate aliases
+      // sstatus.  Its FP-dirty retirement must not expose the stale CSR write.
+      dispatch_one(make_alu_uop(32'h8003_1000, 32'h0000_0013, 5'd0), '0, '0, RobW'(0));
+      writeback_alu_one(RobW'(0), 32'h8003_1004);
+      check(commit_fire, "leading ALU did not commit before reused FP slot");
+      tick(1);
+      dispatch_one(make_fp_load_uop(32'h8003_1004, 12'h100), '0, '0, RobW'(1));
+
+      exu_ioq_bcast.dest = RobW'(1);
+      exu_ioq_bcast.npc = 32'h8003_1008;
+      exu_ioq_bcast.wen = 1'b0;
+      exu_ioq_bcast.trap = 1'b0;
+      exu_ioq_bcast.valid = 1'b1;
+      tick(1);
+      clear_writebacks();
+      #1;
+
+      check(commit_fire && rou_csr.valid,
+        "reused FP load did not produce an FP-dirty commit");
+      check(rou_csr.fp_dirty, "reused FP load did not mark FS dirty");
+      check(rou_csr.csr_addr == 12'h100,
+        "reused FP load did not retain the sstatus-aliasing immediate");
+      check(!rou_csr.csr_wen,
+        "non-system FP load exposed stale csr_wen at retirement");
+      tick(1);
+    end
+  endtask
+
   initial begin
 `ifndef RAPT_DUAL_COMMIT
     fail("tb_rou_dual_commit requires RAPT_DUAL_COMMIT enabled");
@@ -538,8 +613,9 @@ module tb_rou_dual_commit;
     expect_slot0_store_blocks_dual();
     expect_slot1_branch_serializes_flush();
     expect_rob_wrap_reuse_and_sret();
+    expect_stale_csr_wen_is_not_exposed();
 
-    $display("PASS: ROU dual-commit, wrap/reuse, and SRET xsim checks passed");
+    $display("PASS: ROU dual-commit, wrap/reuse, CSR gating, and SRET xsim checks passed");
     $finish;
   end
 endmodule

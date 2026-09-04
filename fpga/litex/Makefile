@@ -121,7 +121,6 @@ LITEDRAM_SIZE ?= $(BOARD_$(FPGA_BOARD)_LITEDRAM_SIZE) ## Mapped external LiteDRA
 WITH_MIG ?= $(if $(LINUX_FPGA_PROFILE),$(BOARD_$(FPGA_BOARD)_LINUX_WITH_MIG),0) ## Set to 1 to use board-supported Xilinx DDR4 MIG as FPGA main_ram
 MIG_SIZE ?= 0x40000000 ## Mapped external MIG main_ram size in bytes
 WITH_SDCARD ?= $(if $(LINUX_FPGA_PROFILE),$(BOARD_$(FPGA_BOARD)_LINUX_WITH_SDCARD),$(BOARD_$(FPGA_BOARD)_DEFAULT_WITH_SDCARD)) ## Add the board-supported SDCard controller/DMA when available
-SDCARD_BOOT ?= 0 ## Set to 1 to make LiteX BIOS automatically try SDCard boot
 ifneq (,$(filter 1 yes true on,$(WITH_LITEDRAM)))
 ifeq ($(BOARD_$(FPGA_BOARD)_HAS_LITEDRAM),0)
 $(error WITH_LITEDRAM is not implemented for FPGA_BOARD=$(FPGA_BOARD))
@@ -135,11 +134,6 @@ endif
 ifneq (,$(filter 1 yes true on,$(WITH_MIG)))
 ifeq ($(BOARD_$(FPGA_BOARD)_HAS_MIG),0)
 $(error WITH_MIG is not implemented for FPGA_BOARD=$(FPGA_BOARD))
-endif
-endif
-ifneq (,$(filter 1 yes true on,$(SDCARD_BOOT)))
-ifeq (,$(filter 1 yes true on,$(WITH_SDCARD)))
-$(error SDCARD_BOOT requires WITH_SDCARD=1)
 endif
 endif
 # Auto-detect the serial device. Prefer /dev/ttyUSB0 (the common UART channel,
@@ -158,7 +152,7 @@ TRACE ?= none ## Wave dump mode (none|fst|vcd)
 TRACE_START ?= 0 ## Start dump at cycle N (0=from t=0)
 TRACE_END   ?= -1 ## Stop dump at cycle N (-1=no end)
 
-_VSTRIP1 := VARIANT SYS_CLK SIM_TIMEOUT GOWIN_APP FPGA_DETECT_REFRESH FPGA_DETECT_CACHE WITH_LED_CHASER WITH_LITEDRAM LITEDRAM_SIZE WITH_MIG MIG_SIZE WITH_SDCARD SDCARD_BOOT UART_PORT UART_BAUD SERIALBOOT_SAFE SIM_THREADS TRACE TRACE_START TRACE_END
+_VSTRIP1 := VARIANT SYS_CLK SIM_TIMEOUT GOWIN_APP FPGA_DETECT_REFRESH FPGA_DETECT_CACHE WITH_LED_CHASER WITH_LITEDRAM LITEDRAM_SIZE WITH_MIG MIG_SIZE WITH_SDCARD UART_PORT UART_BAUD SERIALBOOT_SAFE SIM_THREADS TRACE TRACE_START TRACE_END
 $(foreach v,$(_VSTRIP1),$(eval $v := $(strip $($v))))
 SERIALBOOT_SAFE_FLAG := $(if $(filter 1 yes true on,$(SERIALBOOT_SAFE)),--safe,)
 
@@ -376,14 +370,20 @@ LINUX_DOWNLOAD_TARGET := download-rv$(LINUX_XLEN)
 OPENSBI_BUILD_TARGET  := opensbi-rv$(LINUX_XLEN)
 OPENSBI_FW_DIR  := $(LINUX_DIR)/opensbi/build-rv$(LINUX_XLEN)/platform/generic/firmware
 OPENSBI_BIN     := $(OPENSBI_FW_DIR)/fw_payload.bin
-LINUX_IMG        = $(if $(filter 64,$(LINUX_XLEN)),$(LINUX_RV64_PAYLOAD),$(LINUX_RV32_PAYLOAD))
+LINUX_IMG        = $(if $(filter 64,$(LINUX_XLEN)),$(LINUX_RV64_PAYLOAD),$(LINUX_RV32GC_FPGA_PAYLOAD))
 
 LINUX_FPGA_RAM_SIZE ?= 0x10000000 ## DTB RAM size: matches Raptor's 0x80000000..0x8fffffff PMEM window
-LINUX_FPGA_BOOTARGS ?= console=liteuart0,115200 earlycon=sbi rdinit=/init ## Linux FPGA kernel command line
+LINUX_FPGA_INIT ?= shell ## Userspace startup mode: shell (fast serial bring-up) or full (Buildroot init/services)
+ifneq (,$(filter-out shell full,$(LINUX_FPGA_INIT)))
+$(error LINUX_FPGA_INIT must be shell or full, got '$(LINUX_FPGA_INIT)')
+endif
+LINUX_FPGA_BOOTARGS_BASE ?= console=liteuart0,115200 earlycon=sbi unaligned_scalar_speed=fast cryptomgr.notests=1 random.trust_bootloader=on
+LINUX_FPGA_BOOTARGS ?= $(LINUX_FPGA_BOOTARGS_BASE) $(if $(filter full,$(LINUX_FPGA_INIT)),rdinit=/init,rdinit=/bin/sh) ## Linux FPGA kernel command line
+LINUX_FPGA_MODEL ?= Raptor LiteX SoC on $(FPGA_BOARD) ## Linux model string reported from the generated DTB
 LINUX_FPGA_PAYLOAD ?= $(LINUX_IMG) ## Legacy stage0-bundled payload for fpga-img
 LINUX_FPGA_OPENSBI_PAYLOAD ?= $(OPENSBI_BIN) ## Standalone linux/opensbi fw_payload.bin for fpga-opensbi-upload
 LINUX_FPGA_PAYLOAD_OFFSET ?= 0x00100000 ## Offset of fw_payload source inside uploaded image
-LINUX_FPGA_DTB_OFFSET ?= 0x02000000 ## Offset of DTB source inside uploaded image
+LINUX_FPGA_DTB_OFFSET ?= $(if $(filter 32,$(LINUX_XLEN)),0x04000000,0x02000000) ## Offset of DTB source inside uploaded image; RV32GC Buildroot needs the 64 MiB slot
 LINUX_FPGA_OPENSBI_DTB_OFFSET ?= 0x00800000 ## Offset of DTB source inside OpenSBI-only upload image
 LINUX_FPGA_DTB_ADDR ?= 0x83f00000 ## DTB runtime address passed to OpenSBI in a1
 LINUX_FPGA_STAGE0_SRAM ?= 0x0f000000 ## SRAM address for stage0 relocation loop
@@ -396,7 +396,7 @@ LINUX_FPGA_EGOS_KU15P_IMAGE ?= $(RAPTOR_HOME)/app/build/tinyos-sim-src/egos-2000
 LINUX_FPGA_EGOS_STAGE_ADDR := 0x82000000
 LINUX_FPGA_XV6_KERNEL ?= $(RAPTOR_HOME)/app/build/tinyos-sim-src/xv6-riscv/kernel/kernel.bin ## Prepared xv6 kernel.bin path
 LINUX_FPGA_XV6_DISK ?= $(RAPTOR_HOME)/app/build/tinyos-sim-src/xv6-riscv/fs.img ## Prepared xv6 fs.img path
-_VSTRIP2 := LINUX_FPGA_RAM_SIZE LINUX_FPGA_BOOTARGS LINUX_FPGA_PAYLOAD LINUX_FPGA_OPENSBI_PAYLOAD LINUX_FPGA_PAYLOAD_OFFSET LINUX_FPGA_OPENSBI_DTB_OFFSET LINUX_FPGA_DTB_OFFSET LINUX_FPGA_DTB_ADDR LINUX_FPGA_STAGE0_SRAM LINUX_FPGA_UART_BASE LINUX_FPGA_EGOS_IMAGE LINUX_FPGA_EGOS_DISK LINUX_FPGA_EGOS_KU15P_IMAGE LINUX_FPGA_XV6_KERNEL LINUX_FPGA_XV6_DISK
+_VSTRIP2 := LINUX_FPGA_RAM_SIZE LINUX_FPGA_INIT LINUX_FPGA_BOOTARGS_BASE LINUX_FPGA_BOOTARGS LINUX_FPGA_MODEL LINUX_FPGA_PAYLOAD LINUX_FPGA_OPENSBI_PAYLOAD LINUX_FPGA_PAYLOAD_OFFSET LINUX_FPGA_OPENSBI_DTB_OFFSET LINUX_FPGA_DTB_OFFSET LINUX_FPGA_DTB_ADDR LINUX_FPGA_STAGE0_SRAM LINUX_FPGA_UART_BASE LINUX_FPGA_EGOS_IMAGE LINUX_FPGA_EGOS_DISK LINUX_FPGA_EGOS_KU15P_IMAGE LINUX_FPGA_XV6_KERNEL LINUX_FPGA_XV6_DISK
 $(foreach v,$(_VSTRIP2),$(eval $v := $(strip $($v))))
 LINUX_FPGA_TINYOS_OS := $(strip $(if $(OS),$(OS),$(TINYOS_OS)))
 LINUX_FPGA_UART_UNIT_ADDR := $(patsubst 0x%,%,$(LINUX_FPGA_UART_BASE))
@@ -415,6 +415,9 @@ FW_LINUX_FPGA_DIR    := $(BUILD_DIR)/firmware/linux-fpga/rv$(LINUX_XLEN)
 FW_LINUX_FPGA_BIN    := $(FW_LINUX_FPGA_DIR)/stage0.bin
 FW_LINUX_FPGA_ELF    := $(FW_LINUX_FPGA_DIR)/stage0.elf
 FW_LINUX_FPGA_DTB    := $(FW_LINUX_FPGA_DIR)/litex-soc.dtb
+FW_LINUX_FPGA_SEEDED_DTB := $(FW_LINUX_FPGA_DIR)/litex-soc-seeded.dtb
+FW_LINUX_FPGA_RNG_SEED := $(FW_LINUX_FPGA_DIR)/rng-seed.bin
+FW_LINUX_FPGA_UPLOAD_IMAGES := $(FW_LINUX_FPGA_DIR)/linux-fpga-upload.json
 FW_LINUX_FPGA_DTS    := $(FW_LINUX_FPGA_DIR)/litex-soc.dts
 FW_LINUX_FPGA_DTS_IN := $(FW_LINUX_FPGA_SRC)/litex-soc.dts.in
 FW_LINUX_FPGA_IMAGE  := $(FW_LINUX_FPGA_DIR)/linux-fpga.img
@@ -631,7 +634,7 @@ egos-ku15p-sim-trace: fpga-egos-prepare ## Simulate egos-ku15p with FST waveform
 raptos-bios-sim-rv32: ## Simulate RV32 RaptOS booting through LiteX BIOS (boot 0x80000000)
 raptos-bios-sim-rv64: ## Simulate RV64 RaptOS booting through LiteX BIOS (boot 0x80000000)
 
-linux32-build: ## Download pre-built RV32 Linux payload
+linux32-build: ## Download the complete RV32GC Buildroot Linux payload from release
 linux64-build: ## Download pre-built RV64 Linux payload
 
 linux32: ## Simulate RV32 Linux
@@ -759,9 +762,11 @@ fpga-console: ## Open serial terminal on the FPGA UART at fixed 115200 baud; boa
 # LiteX's maintained litex_term implementation. BIN=... selects a raw image.
 ifeq ($(LINUX_FPGA_PROFILE),1)
 _FPGA_UPLOAD_DEFAULT_BIN := $(FW_LINUX_FPGA_IMAGE)
-_FPGA_UPLOAD_DEPS := fpga-timing-ok $(if $(strip $(BIN)),,$(FW_LINUX_FPGA_IMAGE))
+_FPGA_UPLOAD_DEFAULT_IMAGES := $(FW_LINUX_FPGA_UPLOAD_IMAGES)
+_FPGA_UPLOAD_DEPS := fpga-timing-ok $(if $(strip $(BIN)),,$(FW_LINUX_FPGA_UPLOAD_IMAGES))
 else
 _FPGA_UPLOAD_DEFAULT_BIN := $(FW_FPGA_BIN)
+_FPGA_UPLOAD_DEFAULT_IMAGES :=
 _FPGA_UPLOAD_DEPS :=
 endif
 
@@ -781,7 +786,7 @@ clean-all: clean firmware-clean ## Remove build artifacts + firmware + venv
 
 lint: ## Lint RTL (via sim)
 
-_INFO_VARS := RAPTOR_HOME LITEX_DIR VARIANT LINUX_XLEN LINUX_IMG LINUX_FPGA_BOOTARGS SYS_CLK RAPT_CONFIG GOWIN_APP GOWIN_BIN_DIR OFL OFL_CABLE FPGA_AUTO_DETECT FPGA_DETECT_REFRESH FPGA_DETECT_CACHE FPGA_DETECT_INFO_CACHE FPGA_DETECT_COUNT_CACHE FPGA_DETECTED_COUNT FPGA_DETECTED_PARTS FPGA_DETECTED_INFO FPGA_BOARD_SOURCE FPGA_DEVICE FPGA_PART WITH_LITEDRAM LITEDRAM_SIZE WITH_MIG MIG_SIZE WITH_SDCARD SDCARD_BOOT VIVADO_ROUTE_DIRECTIVE UART_PORT UART_BAUD SIM_TIMEOUT PACK_SV BUILD_DIR PYTHON
+_INFO_VARS := RAPTOR_HOME LITEX_DIR VARIANT LINUX_XLEN LINUX_IMG LINUX_FPGA_BOOTARGS SYS_CLK RAPT_CONFIG GOWIN_APP GOWIN_BIN_DIR OFL OFL_CABLE FPGA_AUTO_DETECT FPGA_DETECT_REFRESH FPGA_DETECT_CACHE FPGA_DETECT_INFO_CACHE FPGA_DETECT_COUNT_CACHE FPGA_DETECTED_COUNT FPGA_DETECTED_PARTS FPGA_DETECTED_INFO FPGA_BOARD_SOURCE FPGA_DEVICE FPGA_PART WITH_LITEDRAM LITEDRAM_SIZE WITH_MIG MIG_SIZE WITH_SDCARD VIVADO_ROUTE_DIRECTIVE UART_PORT UART_BAUD SIM_TIMEOUT PACK_SV BUILD_DIR PYTHON
 
 info: ## Show configuration info
 

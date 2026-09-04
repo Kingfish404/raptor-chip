@@ -25,6 +25,7 @@
 #define PLIC_CLAIM(ctx) (PLIC_BASE + 0x200000UL + 0x1000UL * (ctx) + 4)
 
 #define CLINT_BASE 0x02000000UL
+#define CLINT_MSIP CLINT_BASE
 #define CLINT_MTIMECMP (CLINT_BASE + 0x4000UL)
 #define CLINT_MTIME (CLINT_BASE + 0xbff8UL)
 
@@ -97,6 +98,10 @@ static inline void test_fail(const char *msg)
     __asm__ volatile("csrs " #reg ", %0" ::"r"((uint32_t)(v)))
 #define csr_clear(reg, v) \
     __asm__ volatile("csrc " #reg ", %0" ::"r"((uint32_t)(v)))
+#define csr_read_num(csr_num) ({ uint32_t v; \
+    __asm__ volatile ("csrr %0, %1" : "=r"(v) : "i"(csr_num)); v; })
+#define csr_write_num(csr_num, v) \
+    __asm__ volatile ("csrw %0, %1" :: "i"(csr_num), "r"((uint32_t)(v)))
 
 /* mstatus bits */
 #define MSTATUS_SIE (1u << 1)
@@ -108,14 +113,17 @@ static inline void test_fail(const char *msg)
 #define MSTATUS_MPP_S (1u << 11)
 /* mie / mip bits */
 #define MIE_STIE (1u << 5)
+#define MIE_MSIE (1u << 3)
 #define MIE_MEIE (1u << 11)
 #define MIE_MTIE (1u << 7)
 #define MIP_STIP (1u << 5)
+#define MIP_MSIP (1u << 3)
 #define MIP_MEIP (1u << 11)
 #define MIP_MTIP (1u << 7)
 
 /* mcause: interrupt bit + code */
 #define MCAUSE_INT_BIT (1u << 31)
+#define MCAUSE_M_SW_INT (MCAUSE_INT_BIT | 3u)
 #define MCAUSE_S_TIMER_INT (MCAUSE_INT_BIT | 5u)
 #define MCAUSE_M_EXT_INT (MCAUSE_INT_BIT | 11u)
 #define MCAUSE_M_TIMER_INT (MCAUSE_INT_BIT | 7u)

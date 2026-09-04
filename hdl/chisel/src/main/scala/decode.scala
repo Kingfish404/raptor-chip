@@ -130,9 +130,13 @@ class rapt_idu_decoder extends RawModule with Instr with MicroOP {
     // format: off
    FENCE____ -> BitPat("b" + "00" + ALU_ADD_), // N (also covers FENCE.TSO)
    FENCE_I__ -> BitPat("b" + "00" + ALU_ADD_), // N
-  CBO_INVAL -> BitPat("b" + "00" + ALU_ADD_), // Zicbom
-  CBO_CLEAN -> BitPat("b" + "00" + ALU_ADD_), // Zicbom
-  CBO_FLUSH -> BitPat("b" + "00" + ALU_ADD_), // Zicbom
+  CBO_INVAL -> BitPat("b" + "01" + LSU_CBO_MGMT), // Zicbom: checked CMO access
+  CBO_CLEAN -> BitPat("b" + "01" + LSU_CBO_MGMT), // Zicbom: checked CMO access
+  CBO_FLUSH -> BitPat("b" + "01" + LSU_CBO_MGMT), // Zicbom: checked CMO access
+  CBO_ZERO  -> BitPat("b" + "01" + LSU_CBO_ZERO), // Zicboz: SQ block-zero expansion
+  PREFETCH_I -> BitPat("b" + "00" + ALU_ADD_), // Zicbop HINT
+  PREFETCH_R -> BitPat("b" + "00" + ALU_ADD_), // Zicbop HINT
+  PREFETCH_W -> BitPat("b" + "00" + ALU_ADD_), // Zicbop HINT
 
    SFENCE_VM -> BitPat("b" + "00" + ALU_ADD_), // N
     // format: on
@@ -381,6 +385,7 @@ class rapt_idu_decoder extends RawModule with Instr with MicroOP {
   CBO_INVAL -> BitPat("b" + "000 0  0  0  0  1"), // Zicbom
   CBO_CLEAN -> BitPat("b" + "000 0  0  0  0  1"), // Zicbom
   CBO_FLUSH -> BitPat("b" + "000 0  0  0  0  1"), // Zicbom
+  CBO_ZERO -> BitPat("b" + "000 0  0  0  0  1"), // Zicboz
 
    SFENCE_VM -> BitPat("b" + "000 0  0  0  0  1"), // N
     // format: on
@@ -417,6 +422,7 @@ class rapt_idu_decoder extends RawModule with Instr with MicroOP {
       CBO_INVAL -> BitPat("b" + "1" + "0"), // Zicbom: conservative whole-L1 maintenance
       CBO_CLEAN -> BitPat("b" + "1" + "0"), // Zicbom: write-through clean is ordering-only
       CBO_FLUSH -> BitPat("b" + "1" + "0"), // Zicbom: conservative whole-L1 maintenance
+      CBO_ZERO -> BitPat("b" + "1" + "0"), // Zicboz: serialize block stores
       SFENCE_VM -> BitPat("b" + "1" + "1")  // N: flush TLBs + I-cache
     ),
     BitPat("b" + "0" + "0")
@@ -441,6 +447,14 @@ class rapt_idu_decoder extends RawModule with Instr with MicroOP {
       FSW___   -> BitPat("b" + FP_FSW),
       FLD___   -> BitPat("b" + FP_FLD),
       FSD___   -> BitPat("b" + FP_FSD),
+      FLH___   -> BitPat("b" + FP_ZFHMIN),
+      FSH___   -> BitPat("b" + FP_ZFHMIN),
+      FMV_H_X  -> BitPat("b" + FP_ZFHMIN),
+      FMV_X_H  -> BitPat("b" + FP_ZFHMIN),
+      FCVT_S_H -> BitPat("b" + FP_ZFHMIN),
+      FCVT_H_S -> BitPat("b" + FP_ZFHMIN),
+      FCVT_D_H -> BitPat("b" + FP_ZFHMIN),
+      FCVT_H_D -> BitPat("b" + FP_ZFHMIN),
       FMADD_S  -> BitPat("b" + FP_FMADD_S),
       FMADD_D  -> BitPat("b" + FP_FMADD_D),
       FMSUB_S  -> BitPat("b" + FP_FMSUB_S),
@@ -499,6 +513,10 @@ class rapt_idu_decoder extends RawModule with Instr with MicroOP {
   val fp_fsw = ("b" + FP_FSW).U(6.W)
   val fp_fld = ("b" + FP_FLD).U(6.W)
   val fp_fsd = ("b" + FP_FSD).U(6.W)
+  val fp_zfhmin = ("b" + FP_ZFHMIN).U(6.W)
+  val fp_half_load = fp_op_decoded === fp_zfhmin && opcode === "b0000111".U
+  val fp_half_store = fp_op_decoded === fp_zfhmin && opcode === "b0100111".U
+  val fp_half_to_int = fp_op_decoded === fp_zfhmin && funct7 === "b1110010".U
   val fp_fmv_d_x = ("b" + FP_FMV_D_X).U(6.W)
   val fp_fsgnj_d = ("b" + FP_FSGNJ_D).U(6.W)
   val fp_fsgnjn_d = ("b" + FP_FSGNJN_D).U(6.W)
@@ -550,9 +568,10 @@ class rapt_idu_decoder extends RawModule with Instr with MicroOP {
     (fp_op_decoded === fp_fcvt_w_s) || (fp_op_decoded === fp_fcvt_wu_s) ||
     (fp_op_decoded === fp_fcvt_l_s) || (fp_op_decoded === fp_fcvt_lu_s) ||
     (fp_op_decoded === fp_fcvt_w_d) || (fp_op_decoded === fp_fcvt_wu_d) ||
-    (fp_op_decoded === fp_fcvt_l_d) || (fp_op_decoded === fp_fcvt_lu_d)
+    (fp_op_decoded === fp_fcvt_l_d) || (fp_op_decoded === fp_fcvt_lu_d) ||
+    fp_half_to_int
   )
-  val fp_store_decoded = (fp_op_decoded === fp_fsw) || (fp_op_decoded === fp_fsd)
+  val fp_store_decoded = (fp_op_decoded === fp_fsw) || (fp_op_decoded === fp_fsd) || fp_half_store
   out_fp.valid := fp_valid_decoded.asUInt
   out_fp.op := fp_op_decoded
   out_fp.rm := funct3
@@ -560,7 +579,7 @@ class rapt_idu_decoder extends RawModule with Instr with MicroOP {
   out_fp.rs2 := rs2
   out_fp.rs3 := rs3
   out_fp.rd := rd
-  out_fp.load := ((fp_op_decoded === fp_flw) || (fp_op_decoded === fp_fld)).asUInt
+  out_fp.load := ((fp_op_decoded === fp_flw) || (fp_op_decoded === fp_fld) || fp_half_load).asUInt
   out_fp.store := fp_store_decoded.asUInt
   out_fp.width_d := (
     (fp_op_decoded === fp_fmv_d_x) || (fp_op_decoded === fp_fmv_x_d) ||
@@ -607,12 +626,14 @@ class rapt_idu_decoder extends RawModule with Instr with MicroOP {
     LHU___ -> List( rd,  imm_i,   0.U,   0.U, rs1, 0.U), // I
     FLW___ -> List( rd,  imm_i,   0.U,   0.U, rs1, 0.U), // FP I
     FLD___ -> List( rd,  imm_i,   0.U,   0.U, rs1, 0.U), // FP I
+    FLH___ -> List( rd,  imm_i,   0.U,   0.U, rs1, 0.U), // Zfhmin I
     
     SB____ -> List(0.U,  imm_s,   0.U,   0.U, rs1, rs2), // S
     SH____ -> List(0.U,  imm_s,   0.U,   0.U, rs1, rs2), // S
     SW____ -> List(0.U,  imm_s,   0.U,   0.U, rs1, rs2), // S
     FSW___ -> List(0.U,  imm_s,   0.U,   0.U, rs1, rs2), // FP S
     FSD___ -> List(0.U,  imm_s,   0.U,   0.U, rs1, rs2), // FP S
+    FSH___ -> List(0.U,  imm_s,   0.U,   0.U, rs1, rs2), // Zfhmin S
 
     ADDI__ -> List( rd,  imm_i,   0.U, imm_i, rs1, 0.U), // I
     SLTI__ -> List( rd,  imm_i,   0.U, imm_i, rs1, 0.U), // I
@@ -644,6 +665,7 @@ class rapt_idu_decoder extends RawModule with Instr with MicroOP {
     CBO_INVAL -> List(0.U, 0.U,   0.U,   0.U, rs1, 0.U), // Zicbom
     CBO_CLEAN -> List(0.U, 0.U,   0.U,   0.U, rs1, 0.U), // Zicbom
     CBO_FLUSH -> List(0.U, 0.U,   0.U,   0.U, rs1, 0.U), // Zicbom
+    CBO_ZERO  -> List(0.U, 0.U,   0.U,   0.U, rs1, 0.U), // Zicboz
 
     SFENCE_VM -> List(0.U,    0.U,   0.U,   0.U, 0.U, 0.U), // N   
 

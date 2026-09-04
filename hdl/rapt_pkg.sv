@@ -176,16 +176,29 @@ package rapt_pkg;
     return (XLENPkg == 64) ? XLENPkg'({32'b0, addr[31:0]}) : addr;
   endfunction
 
+  // The implemented physical map is 32-bit. RV64 code may present those
+  // addresses either zero-extended or with an all-ones upper half (for
+  // example, an address materialised by a sign-extending LUI). Do not simply
+  // truncate any other upper half: doing so can turn an invalid speculative
+  // address such as 0x00000002_8014572c into a real PMEM request.
+  function automatic logic addr_upper_valid(input logic [XLENPkg-1:0] addr);
+    logic [XLENPkg-1:0] zero_extended;
+    logic [XLENPkg-1:0] ones_extended;
+    zero_extended = XLENPkg'({32'h0000_0000, addr[31:0]});
+    ones_extended = XLENPkg'({32'hffff_ffff, addr[31:0]});
+    return (addr == zero_extended) || (addr == ones_extended);
+  endfunction
+
   function automatic logic addr_cacheable(input logic [XLENPkg-1:0] addr);
     logic [XLENPkg-1:0] a;
     a = canonical_addr(addr);
-    return (0)  // --- IGNORE ---
+    return addr_upper_valid(addr) && ((0)  // --- IGNORE ---
     || (a >= 'h0f000000 && a < 'h0f010000)  // sram (litex + raptSoC)
     || (a >= 'h20000000 && a < 'h20010000)  // mrom (64KB)
     || (a >= 'h30000000 && a < 'h40000000)  // flash
     || (a >= 'h80000000 && a < 'h90000000)  // psram (cacheable)
     || (a >= 'ha0000000 && a < 'ha2000000)  // sdram
-    ;
+    );
   endfunction
 
   // Any physical address that corresponds to a real bus target
@@ -195,7 +208,7 @@ package rapt_pkg;
   function automatic logic addr_mapped(input logic [XLENPkg-1:0] addr);
     logic [XLENPkg-1:0] a;
     a = canonical_addr(addr);
-    return (0)  // --- IGNORE ---
+    return addr_upper_valid(addr) && ((0)  // --- IGNORE ---
     || (a >= 'h00100000 && a < 'h00101000)  // sifive,test finisher
     || (a >= 'h02000000 && a < 'h020c0000)  // CLINT
     || (a >= 'h0c000000 && a < 'h0d000000)  // PLIC
@@ -209,14 +222,14 @@ package rapt_pkg;
     || (a >= 'hf0008000 && a < 'hf0008100)  // LiteX SPI SD-card controller
     || (a >= 'hf0001000 && a < 'hf0001100)  // LiteX UART (egos HARDWARE)
     || (a >= 'hf0010000 && a < 'hf0020000)  // CLINT alias (egos HARDWARE)
-    || (a >= 'hc0000000);  // raptSoC MMIO window
+    || (a >= 'hc0000000));  // raptSoC MMIO window
   endfunction
 
   // MMIO regions for difftest skip (not modelled in reference ISS)
   function automatic logic addr_mmio(input logic [XLENPkg-1:0] addr);
     logic [XLENPkg-1:0] a;
     a = canonical_addr(addr);
-    return (0)  // --- IGNORE ---
+    return addr_upper_valid(addr) && ((0)  // --- IGNORE ---
     || (a >= 'h00100000 && a <= 'h00100fff)  // finisher (sifive,test)
     || (a >= 'h02000000 && a <= 'h020bffff)  // CLINT (mtime / mtimecmp / msip)
     || (a >= 'h0c000000 && a <= 'h0cffffff)  // PLIC (claim/complete RMW)
@@ -227,7 +240,7 @@ package rapt_pkg;
     || (a >= 'h10002000 && a <= 'h1000200f)  // gpio
     || (a >= 'h10011000 && a <= 'h10012000)  // legacy ysyxSoC clint (kept for back-compat)
     || (a >= 'h21000000 && a <= 'h211fffff)  // vga
-    || (a >= 'hc0000000);  // raptSoC memory-mapped I/O
+    || (a >= 'hc0000000));  // raptSoC memory-mapped I/O
   endfunction
 
 endpackage

@@ -90,21 +90,16 @@ module tb_ptw_kill_drain;
     bus_arready = 1'b1;
     tick(1);
     bus_arready = 1'b0;
-    bus_rdata = 32'h1230_0003;
+    // Svade: an otherwise-valid megapage leaf with A=0 must fault.  The PTW
+    // must not enter the former hardware A/D writeback state.
+    bus_rdata = 32'h2000_0003;
     bus_rvalid = 1'b1;
     tick(1);
     bus_rvalid = 1'b0;
-    check(bus_awvalid && bus_wvalid && busy, "PTW did not enter A/D update state");
-    kill = 1'b1;
-    tick(1);
-    kill = 1'b0;
-    check(bus_awvalid && bus_wvalid && busy, "killed A/D update did not remain drainable");
-    bus_wready = 1'b1;
-    tick(1);
-    bus_wready = 1'b0;
-    check(!busy && !done && !fault, "killed A/D update completed architecturally");
+    check(fault && !done && !busy, "Sv32 A=0 leaf did not raise a page fault");
+    check(!bus_awvalid && !bus_wvalid, "Svade PTW attempted an A/D writeback");
 
-    $display("PASS: PTW kill and drain xsim checks passed");
+    $display("PASS: PTW kill/drain and Svade xsim checks passed");
     $finish;
   end
 endmodule

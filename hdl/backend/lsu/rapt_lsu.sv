@@ -30,6 +30,7 @@ module rapt_lsu #(
   lsu_pipe_if #(.XLEN(XLEN)) exu_lsu ();
   pmp_state_if #(.XLEN(XLEN)) pmp_state ();
   logic pmu_ioq_full_unused;
+  logic [XLEN-1:0] sq_waddr_hi;
 
   rapt_pmp_state pmp_state_regs (
       .clock,
@@ -59,6 +60,7 @@ module rapt_lsu #(
       .exu_l1d      (exu_l1d),
       .fpr          (fpr),
       .exu_ioq_bcast(exu_ioq_bcast),
+      .sq_waddr_hi  (sq_waddr_hi),
       .load_fast    (load_fast),
       .pmu_ioq_full (pmu_ioq_full_unused)
   );
@@ -72,6 +74,7 @@ module rapt_lsu #(
       .lsu_l1d      (lsu_l1d),
       .exu_lsu      (exu_lsu),
       .exu_ioq_bcast(exu_ioq_bcast),
+      .sq_waddr_hi  (sq_waddr_hi),
       .rou_lsu      (rou_lsu),
       .csr_bcast    (csr_bcast),
       .pmp_state    (pmp_state),

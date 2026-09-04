@@ -44,7 +44,9 @@ interface lsu_l1d_if #(
   logic rready_b;
 
   logic [XLEN-1:0] waddr;
-  logic [4:0] walu;
+  // Unshifted byte-enable mask.  Eight bits are required for arbitrary
+  // RV64 misaligned-store spill sizes (for example, 5--7 bytes of SD).
+  logic [7:0] walu;
   logic wvalid;
   logic [XLEN-1:0] wdata;
   logic wready;
@@ -235,6 +237,8 @@ interface csr_bcast_if #(
 );
   logic [1:0] priv;
   logic [`RAPT_CSR_SATP_PPN_W-1:0] satp_ppn;
+  // The low nine satp.ASID bits are implemented; RV64 ASID[15:9] are
+  // WARL-zero so software discovers ASIDLEN=9.
   logic [8:0] satp_asid;
   logic immu_en;
   logic dmmu_en;
@@ -266,20 +270,30 @@ interface csr_bcast_if #(
   logic [2:0] scounteren;
   logic [2:0] frm;
   logic [1:0] fs;
+  logic [1:0] menvcfg_cbie;
+  logic       menvcfg_cbcfe;
+  logic       menvcfg_cbze;
+  logic [1:0] senvcfg_cbie;
+  logic       senvcfg_cbcfe;
+  logic       senvcfg_cbze;
 
   modport in(
       input priv, satp_ppn, satp_asid,
       input immu_en, dmmu_en, mtvec, tvec, timer_int_en, sw_int_en, ext_int_en,
       input mprv, mpp,
       input tsr, tvm, tw, mcounteren, scounteren,
-      input sum, mxr, sbe, frm, fs
+      input sum, mxr, sbe, frm, fs,
+      input menvcfg_cbie, menvcfg_cbcfe, menvcfg_cbze,
+      input senvcfg_cbie, senvcfg_cbcfe, senvcfg_cbze
   );
   modport out(
       output priv, satp_ppn, satp_asid,
       output immu_en, dmmu_en, mtvec, tvec, timer_int_en, sw_int_en, ext_int_en,
       output mprv, mpp,
       output tsr, tvm, tw, mcounteren, scounteren,
-      output sum, mxr, sbe, frm, fs
+      output sum, mxr, sbe, frm, fs,
+      output menvcfg_cbie, menvcfg_cbcfe, menvcfg_cbze,
+      output senvcfg_cbie, senvcfg_cbcfe, senvcfg_cbze
   );
 endinterface
 

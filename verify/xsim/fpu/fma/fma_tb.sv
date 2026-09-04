@@ -10,6 +10,9 @@ module tb;
   logic [63:0] res;
   logic [4:0]  flags;
   logic        rdy, rv;
+  logic        rdy_s, rv_s;
+  logic [63:0] res_s;
+  logic [4:0]  flags_s;
 
   int errors = 0;
 
@@ -18,12 +21,17 @@ module tb;
     .op(op), .operand_a(a), .operand_b(b), .operand_c(c),
     .rounding_mode(rm), .result(res), .flags(flags), .result_valid(rv));
 
+  rapt_fpu_fma #(.TARGET_DOUBLE(1'b0)) dut_s (
+    .clock(clock), .reset(reset), .flush(flush), .valid(valid), .ready(rdy_s),
+    .op(op), .operand_a(a), .operand_b(b), .operand_c(c),
+    .rounding_mode(rm), .result(res_s), .flags(flags_s), .result_valid(rv_s));
+
   always #5 clock = ~clock;
 
-  // FMADD.D
-  task td(input [63:0] x, y, z, input [63:0] er, input [4:0] ef);
+  task td_rm(input [63:0] x, y, z, input [2:0] rm_value,
+             input [63:0] er, input [4:0] ef);
     begin
-      @(negedge clock); a = x; b = y; c = z; rm = 0; op = 52; valid = 1;
+      @(negedge clock); a = x; b = y; c = z; rm = rm_value; op = 52; valid = 1;
       @(negedge clock); valid = 0;
       while (!rv) @(negedge clock);
       if (res !== er || flags !== ef) begin
@@ -31,6 +39,26 @@ module tb;
         $display("FAIL fmadd.d(%h,%h,%h)=%h flags=%b  expect %h/%b", x, y, z, res, flags, er, ef);
       end else
         $display("OK   fmadd.d(%h,%h,%h)=%h flags=%b", x, y, z, res, flags);
+    end
+  endtask
+
+  // FMADD.D, round-to-nearest-even.
+  task td(input [63:0] x, y, z, input [63:0] er, input [4:0] ef);
+    td_rm(x, y, z, 3'b000, er, ef);
+  endtask
+
+  // FMADD.S; all ordinary single inputs are passed in architectural
+  // NaN-boxed form.  A deliberately unboxed operand is passed unchanged.
+  task ts(input [63:0] x, y, z, input [63:0] er, input [4:0] ef);
+    begin
+      @(negedge clock); a = x; b = y; c = z; rm = 0; op = 48; valid = 1;
+      @(negedge clock); valid = 0;
+      while (!rv_s) @(negedge clock);
+      if (res_s !== er || flags_s !== ef) begin
+        errors++;
+        $display("FAIL fmadd.s(%h,%h,%h)=%h flags=%b  expect %h/%b", x, y, z, res_s, flags_s, er, ef);
+      end else
+        $display("OK   fmadd.s(%h,%h,%h)=%h flags=%b", x, y, z, res_s, flags_s);
     end
   endtask
 
@@ -56,6 +84,19 @@ module tb;
     // total underflow -> +0 with NX|UF
     td(64'h0000000000000001, 64'h0000000000000001, 64'h0,
        64'h0000000000000000, 5'b00011);              // minsub*minsub
+
+    // A tiny opposite-sign product leaves the addend just below the minimum
+    // normal value and must round back up to that minimum normal value.
+    td(64'h0010000000000000, 64'h93baee6bce4426c6, 64'h0010000000000000,
+       64'h0010000000000000, 5'b00001);
+    td_rm(64'h0010000000000000, 64'h99a6baae71eb5a39, 64'h800fffffffffffff,
+       3'b010, 64'h8010000000000000, 5'b00011);
+    ts(64'hffff_ffff_00800000, 64'hffff_ffff_8b3c5d89,
+       64'hffff_ffff_00800000, 64'hffff_ffff_00800000, 5'b00001);
+
+    // Unboxed single-precision operands are canonical quiet NaNs.
+    ts(64'hffff_eff0_3f800000, 64'hffff_ffff_3f800000,
+       64'hffff_ffff_3f800000, 64'hffff_ffff_7fc00000, 5'b00000);
 
     if (errors == 0) $display("FMA-UNIT PASS");
     else             $display("FMA-UNIT FAIL (%0d errors)", errors);
