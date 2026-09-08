@@ -9,14 +9,17 @@ module tb_rapt_csr_uvm;
   logic clock = 1'b0;
   always #5 clock = ~clock;
 
-  rapt_csr_uvm_if tb_if(clock);
-  rou_csr_if #(.XLEN(32)) rou_csr();
-  exu_csr_if #(.XLEN(32)) exu_csr();
-  csr_bcast_if #(.XLEN(32)) csr_bcast();
+  rapt_csr_uvm_if tb_if (clock);
+  rou_csr_if #(.XLEN(32)) rou_csr ();
+  exu_csr_if #(.XLEN(32)) exu_csr ();
+  csr_bcast_if #(.XLEN(32)) csr_bcast ();
 
-  rapt_csr #(.XLEN(32)) dut (
+  rapt_csr #(
+      .XLEN(32)
+  ) dut (
       .clock,
       .hart_id_i('0),
+      .mtime_i(64'd0),
       .rou_csr,
       .exu_csr,
       .csr_bcast,
@@ -25,6 +28,9 @@ module tb_rapt_csr_uvm;
       .timer_irq_i(tb_if.timer_irq),
       .sw_irq_i(tb_if.sw_irq),
       .m_ext_irq_i(tb_if.m_ext_irq),
+      .store_error_i(1'b0),
+      .store_error_addr_i('0),
+      .store_error_strb_i('0),
       .s_ext_irq_i(tb_if.s_ext_irq),
       .reset(tb_if.reset)
   );
@@ -42,8 +48,7 @@ module tb_rapt_csr_uvm;
     rou_csr.tval = tb_if.tval;
     rou_csr.cause = tb_if.cause;
     rou_csr.valid = tb_if.valid;
-    rou_csr.retire_a = tb_if.retire_a;
-    rou_csr.retire_b = tb_if.retire_b;
+    rou_csr.retire_count = tb_if.retire_a;
     exu_csr.raddr = `RAPT_CSR_STVEC__;
     tb_if.sepc = exu_csr.sepc;
     tb_if.mtvec = exu_csr.mtvec;

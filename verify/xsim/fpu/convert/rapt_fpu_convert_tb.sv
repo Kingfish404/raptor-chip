@@ -17,17 +17,29 @@ module rapt_fpu_convert_tb (
   logic widen_valid, narrow_valid;
 
   rapt_fpu_convert_widen dut_widen (
-      .clock(clock), .reset(reset), .flush(flush),
-      .valid(valid && !narrow), .ready(widen_ready),
-      .operand(operand), .result(widen_result), .flags(widen_flags),
-      .result_valid(widen_valid));
+      .clock(clock),
+      .reset(reset),
+      .flush(flush),
+      .valid(valid && !narrow),
+      .ready(widen_ready),
+      .operand(operand),
+      .result(widen_result),
+      .flags(widen_flags),
+      .result_valid(widen_valid)
+  );
 
   rapt_fpu_convert_narrow dut_narrow (
-      .clock(clock), .reset(reset), .flush(flush),
-      .valid(valid && narrow), .ready(narrow_ready),
-      .operand(operand), .rounding_mode(rounding_mode),
-      .result(narrow_result), .flags(narrow_flags),
-      .result_valid(narrow_valid));
+      .clock(clock),
+      .reset(reset),
+      .flush(flush),
+      .valid(valid && narrow),
+      .ready(narrow_ready),
+      .operand(operand),
+      .rounding_mode(rounding_mode),
+      .result(narrow_result),
+      .flags(narrow_flags),
+      .result_valid(narrow_valid)
+  );
 
   assign ready = narrow ? narrow_ready : widen_ready;
   assign dut_result = narrow ? narrow_result : widen_result;

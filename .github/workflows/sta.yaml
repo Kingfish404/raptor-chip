@@ -76,7 +76,7 @@ jobs:
         run: |
           mkdir -p .github/results
           [ -d third_party/yosys-opensta ] || git clone --depth 1 https://github.com/Kingfish404/yosys-opensta third_party/yosys-opensta
-          make -C third_party/yosys-opensta setup-opensta setup-${{ matrix.platform }}
+          make -C third_party/yosys-opensta setup-opensta setup-sv-elab setup-${{ matrix.platform }}
 
       - name: Run STA (${{ matrix.xlen }}, ${{ matrix.platform }})
         shell: bash -l {0}
@@ -113,13 +113,3 @@ jobs:
             echo "| Area   | ${AREA} |"
             echo "| Power  | ${POWER} W |"
           } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Upload STA results
-        uses: actions/upload-artifact@v7
-        with:
-          name: sta-results-${{ matrix.xlen }}-${{ matrix.platform }}-${{ github.sha }}
-          path: |
-            .github/results/sta-${{ matrix.xlen }}-${{ matrix.platform }}.txt
-            .github/results/sta-${{ matrix.xlen }}-${{ matrix.platform }}.log
-          retention-days: 90
-          overwrite: true

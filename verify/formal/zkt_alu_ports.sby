@@ -1,0 +1,28 @@
+[tasks]
+rv32_check rv32 check
+rv64_check rv64 check
+rv32_cover rv32 cover
+rv64_cover rv64 cover
+
+[options]
+check: mode bmc
+cover: mode cover
+depth 1
+
+[engines]
+smtbmc boolector
+
+[script]
+plugin -i slang
+rv32: read_slang --single-unit -DFORMAL -Iinclude -Iconfig rapt_pkg.sv formal_zkt_alu_ports.sv rapt_ieu_alu.sv rapt_ieu_pipe_alu.sv rapt_ieu_pipe_alu_csr.sv
+rv64: read_slang --single-unit -DFORMAL -DRAPT_RV64 -Iinclude -Iconfig rapt_pkg.sv formal_zkt_alu_ports.sv rapt_ieu_alu.sv rapt_ieu_pipe_alu.sv rapt_ieu_pipe_alu_csr.sv
+prep -top formal_zkt_alu_ports
+
+[files]
+formal_zkt_alu_ports.sv
+include ../../hdl/include
+config ../../hdl/configs/default
+rapt_pkg.sv ../../hdl/rapt_pkg.sv
+rapt_ieu_alu.sv ../../hdl/backend/ieu/rapt_ieu_alu.sv
+rapt_ieu_pipe_alu.sv ../../hdl/backend/ieu/rapt_ieu_pipe_alu.sv
+rapt_ieu_pipe_alu_csr.sv ../../hdl/backend/ieu/rapt_ieu_pipe_alu_csr.sv

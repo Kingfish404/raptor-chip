@@ -439,7 +439,7 @@ void init_monitor(int argc, char *argv[])
 
   /* Apply checkpoint memory load AFTER load_img() so the captured snapshot
    * overrides any image just loaded. The MROM trampoline written here will
-   * survive into RTL execution because mrom_read() reads from the same host
+   * survive into RTL execution because pmem_read() reads from the same host
    * buffer that checkpoint_configure_load() populated. */
   if (_pending_ckpt_load_dir != NULL)
   {

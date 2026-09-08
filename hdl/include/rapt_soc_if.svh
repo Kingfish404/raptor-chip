@@ -13,6 +13,7 @@ interface axi4_if #(
     parameter int XLEN = `RAPT_XLEN,
     parameter int ID_W = 4
 );
+  logic [       3:0] arcache;
   logic [       1:0] arburst;
   logic [       2:0] arsize;
   logic [       7:0] arlen;
@@ -28,6 +29,7 @@ interface axi4_if #(
   logic              rvalid;
   logic              rready;
 
+  logic [       3:0] awcache;
   logic [       1:0] awburst;
   logic [       2:0] awsize;
   logic [       7:0] awlen;
@@ -48,13 +50,13 @@ interface axi4_if #(
   logic              bready;
 
   modport master(
-      output arburst, arsize, arlen, arid, araddr, arvalid,
+      output arburst, arcache, arsize, arlen, arid, araddr, arvalid,
       input arready,
 
       input rid, rlast, rdata, rresp, rvalid,
       output rready,
 
-      output awburst, awsize, awlen, awid, awaddr, awvalid,
+      output awburst, awcache, awsize, awlen, awid, awaddr, awvalid,
       input awready,
 
       output wlast, wdata, wstrb, wvalid,
@@ -65,13 +67,13 @@ interface axi4_if #(
   );
 
   modport slave(
-      input arburst, arsize, arlen, arid, araddr, arvalid,
+      input arburst, arcache, arsize, arlen, arid, araddr, arvalid,
       output arready,
 
       output rid, rlast, rdata, rresp, rvalid,
       input rready,
 
-      input awburst, awsize, awlen, awid, awaddr, awvalid,
+      input awburst, awcache, awsize, awlen, awid, awaddr, awvalid,
       output awready,
 
       input wlast, wdata, wstrb, wvalid,
@@ -95,6 +97,7 @@ interface mem_link_if #(
   logic [       2:0] rd_req_size;
   logic [       7:0] rd_req_len;
   logic [       1:0] rd_req_burst;
+  logic [       1:0] rd_req_pbmt;
 
   logic              rd_rsp_valid;
   logic              rd_rsp_ready;
@@ -108,6 +111,7 @@ interface mem_link_if #(
   logic [    ID_W-1:0] wr_req_id;
   logic [    XLEN-1:0] wr_req_addr;
   logic [         2:0] wr_req_size;
+  logic [         1:0] wr_req_pbmt;
   logic [    XLEN-1:0] wr_req_data;
   logic [XLEN/8-1:0] wr_req_strb;
 
@@ -117,24 +121,24 @@ interface mem_link_if #(
   logic              wr_rsp_error;
 
   modport master(
-      output rd_req_valid, rd_req_id, rd_req_addr, rd_req_size, rd_req_len, rd_req_burst,
+      output rd_req_valid, rd_req_id, rd_req_addr, rd_req_size, rd_req_len, rd_req_burst, rd_req_pbmt,
       input rd_req_ready,
       input rd_rsp_valid, rd_rsp_id, rd_rsp_data, rd_rsp_last, rd_rsp_error,
       output rd_rsp_ready,
 
-      output wr_req_valid, wr_req_id, wr_req_addr, wr_req_size, wr_req_data, wr_req_strb,
+      output wr_req_valid, wr_req_id, wr_req_addr, wr_req_size, wr_req_pbmt, wr_req_data, wr_req_strb,
       input wr_req_ready,
       input wr_rsp_valid, wr_rsp_id, wr_rsp_error,
       output wr_rsp_ready
   );
 
   modport slave(
-      input rd_req_valid, rd_req_id, rd_req_addr, rd_req_size, rd_req_len, rd_req_burst,
+      input rd_req_valid, rd_req_id, rd_req_addr, rd_req_size, rd_req_len, rd_req_burst, rd_req_pbmt,
       output rd_req_ready,
       output rd_rsp_valid, rd_rsp_id, rd_rsp_data, rd_rsp_last, rd_rsp_error,
       input rd_rsp_ready,
 
-      input wr_req_valid, wr_req_id, wr_req_addr, wr_req_size, wr_req_data, wr_req_strb,
+      input wr_req_valid, wr_req_id, wr_req_addr, wr_req_size, wr_req_pbmt, wr_req_data, wr_req_strb,
       output wr_req_ready,
       output wr_rsp_valid, wr_rsp_id, wr_rsp_error,
       input wr_rsp_ready
@@ -149,14 +153,26 @@ interface clint_bus_if #(
 
   logic [XLEN-1:0] awaddr;
   logic [XLEN-1:0] wdata;
+  logic [XLEN/8-1:0] wstrb;
   logic            wvalid;
 
   logic            timer_int;
   logic            sw_int;
+  logic [63:0]     mtime_value;
 
-  modport master(output araddr, input rdata, output awaddr, wdata, wvalid, input timer_int, sw_int);
+  modport master(
+      output araddr,
+      input rdata,
+      output awaddr, wdata, wstrb, wvalid,
+      input timer_int, sw_int, mtime_value
+  );
 
-  modport slave(input araddr, output rdata, input awaddr, wdata, wvalid, output timer_int, sw_int);
+  modport slave(
+      input araddr,
+      output rdata,
+      input awaddr, wdata, wstrb, wvalid,
+      output timer_int, sw_int, mtime_value
+  );
 endinterface
 
 interface plic_bus_if #(
@@ -173,6 +189,7 @@ interface plic_bus_if #(
 
   logic [ XLEN-1:0] awaddr;
   logic [ XLEN-1:0] wdata;
+  logic [XLEN/8-1:0] wstrb;
   logic             wvalid;
 
   logic [NHART-1:0] meip;
@@ -187,7 +204,7 @@ interface plic_bus_if #(
       output araddr, ar_commit,
       input rdata,
 
-      output awaddr, wdata, wvalid,
+      output awaddr, wdata, wstrb, wvalid,
 
       input meip, seip
   );
@@ -198,7 +215,7 @@ interface plic_bus_if #(
       input araddr, ar_commit,
       output rdata,
 
-      input awaddr, wdata, wvalid,
+      input awaddr, wdata, wstrb, wvalid,
 
       output meip, seip
   );

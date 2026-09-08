@@ -1,7 +1,7 @@
 `include "rapt.svh"
 `include "rapt_if.svh"
 `include "rapt_dpi_c.svh"
-`include "rapt_soc.svh"  // RAPT_MTIME_DIV (CSR `time` paces with CLINT mtime)
+`include "rapt_soc.svh"
 
 module rapt_csr #(
     parameter int XLEN = `RAPT_XLEN,
@@ -15,6 +15,7 @@ module rapt_csr #(
     // CSR reads of `mhartid` (RV Priv Sec.3.1.5). Tied to '0 today since the
     // cluster only instantiates one core; the multi-core wiring is in place.
     input [XLEN-1:0] hart_id_i,
+    input logic [63:0] mtime_i,
 
     rou_csr_if.in    rou_csr,
     exu_csr_if.slave exu_csr,
@@ -37,15 +38,18 @@ module rapt_csr #(
     input m_ext_irq_i,
     input s_ext_irq_i,
 
+    // Completed failed posted store beat; independent of trap/retire valid.
+    input store_error_i,
+    input [XLEN-1:0] store_error_addr_i,
+    input [7:0] store_error_strb_i,
+
     input reset
 );
 
   // CBIE=2 is reserved.  Preserve the three architectural choices and map
   // an attempted reserved write to CBIE=3 (invalidate) as a legal WARL value.
-  function automatic logic [XLEN-1:0] envcfg_warl(
-      input logic [XLEN-1:0] value,
-      input logic [XLEN-1:0] write_mask
-  );
+  function automatic logic [XLEN-1:0] envcfg_warl(input logic [XLEN-1:0] value,
+                                                  input logic [XLEN-1:0] write_mask);
     logic [XLEN-1:0] result;
     begin
       result = value & write_mask;
@@ -101,7 +105,9 @@ module rapt_csr #(
     MARCHID,
     IMPID__,
     MHARTID,
-    SENVCFG
+    SENVCFG,
+    // Append new storage slots: the simulator observes legacy CSR indices.
+    MENVCFGH
   } csr_t;
 
   logic [1:0] priv_mode;
@@ -110,42 +116,71 @@ module rapt_csr #(
   csr_t waddr_reg, raddr_reg;
   logic [R_W-1:0] raddr;
 
-  // CSR `time` MUST advance in lockstep with CLINT `mtime` (RV Priv Sec.10).
-  // Both are paced by RAPT_MTIME_DIV = RAPT_CORE_CLOCK_MHZ / RAPT_MTIME_FREQ_MHZ
-  // so the kernel sees the same Hz the DTS declared. Override via VFLAGS or by
-  // re-defining RAPT_MTIME_FREQ_MHZ in rapt_soc.svh.
-  localparam int RAPTTimeDIV  = `RAPT_MTIME_DIV;
-  localparam int RAPTTimeDIVW = (RAPTTimeDIV <= 1) ? 1 : $clog2(RAPTTimeDIV);
-  logic [RAPTTimeDIVW-1:0] time_div_cnt;
-  logic                    time_tick;
-  logic [63:0]             time64;
-  logic [63:0]             stimecmp;
-  logic                    sstc_en;
-  logic                    stime_irq;
-  assign time_tick = (RAPTTimeDIV <= 1) ? 1'b1 : (time_div_cnt == RAPTTimeDIVW'(RAPTTimeDIV - 1));
-
-  generate
-    if (XLEN == 64) begin : gen_time64_rv64
-      assign time64 = csr[TIME___][63:0];
-    end else begin : gen_time64_rv32
-      assign time64 = {csr[TIMEH__][31:0], csr[TIME___][31:0]};
+  logic bus_error_pending, bus_error_overflow;
+  logic [XLEN-1:0] bus_error_addr;
+  logic [7:0] bus_error_strb;
+  logic bus_error_ack;
+  assign bus_error_ack = rou_csr.valid && rou_csr.csr_wen
+      && rou_csr.csr_addr == `RAPT_CSR_MBERR_STATUS;
+  always_ff @(posedge clock) begin
+    if (reset) begin
+      bus_error_pending <= 0;
+      bus_error_overflow <= 0;
+      bus_error_addr <= '0;
+      bus_error_strb <= '0;
+    end else begin
+      if (bus_error_ack && rou_csr.csr_wdata[0]) bus_error_pending <= 0;
+      if (bus_error_ack && rou_csr.csr_wdata[1]) bus_error_overflow <= 0;
+      if (store_error_i) begin
+`ifndef SYNTHESIS
+`ifdef USE_DPI_C
+        npc_store_error_event(64'(store_error_addr_i), store_error_strb_i);
+`endif
+`endif
+        // Keep the first unacknowledged event. Hardware wins W1C races.
+        bus_error_pending <= 1;
+        if (!bus_error_pending || (bus_error_ack && rou_csr.csr_wdata[0])) begin
+          bus_error_addr <= store_error_addr_i;
+          bus_error_strb <= store_error_strb_i;
+        end else bus_error_overflow <= 1;
+      end
     end
-  endgenerate
+  end
+
+  // All architectural time observations use the shared platform counter,
+  // including software writes to mtime and Sstc comparisons.
+  logic [63:0] time64;
+  logic [63:0] stimecmp;
+  logic sstc_en, stime_irq;
+  assign time64 = mtime_i;
 
 `ifdef RAPT_RV64
   assign sstc_en = csr[MENVCFG][`RAPT_CSR_MENVCFG_STCE];
 `else
-  assign sstc_en = 1'b0;
+  assign sstc_en = csr[MENVCFGH][31];
 `endif
   assign stime_irq = sstc_en && (time64 >= stimecmp);
 
-  // PMP state: 8 active entries (pmpcfg0/pmpcfg1; pmpcfg2/3 hardwired 0).
+  // PMP state: 16 entries, packed according to XLEN.
   // Reserved bits [6:5] of each cfg byte are WARL-zero (mask 8'h9F).
   // pmpaddr is stored in its raw CSR form (byte_addr >> 2).
   localparam int PMPAddrW = `RAPT_PMPADDR_BITS;
   localparam int PMPCheckAddrW = `RAPT_PADDR_BITS - 2;
   localparam logic [11:0] PMPAddrBase = `RAPT_CSR_PMPADDR0;
   localparam logic [11:0] PMPAddrLast = `RAPT_CSR_PMPADDR15;
+  // Legalize reserved W=1/R=0 to no permissions, preserving mode and lock.
+  // Storage and distributed permission replicas must receive the same byte.
+  function automatic logic [7:0] legalize_pmpcfg(input logic [7:0] raw);
+    logic [7:0] value;
+    value = raw & 8'h9f;
+    if (!value[0] && value[1]) value[2:0] = 3'b000;
+    return value;
+  endfunction
+
+  logic [XLEN-1:0] pmpcfg_legal_wdata;
+  for (genvar lane = 0; lane < XLEN / 8; lane++) begin : g_pmpcfg_legal
+    assign pmpcfg_legal_wdata[lane*8+:8] = legalize_pmpcfg(rou_csr.csr_wdata[lane*8+:8]);
+  end
   logic [7:0]          pmpcfg_r [`RAPT_PMP_NUM];
   logic [PMPAddrW-1:0] pmpaddr_r[`RAPT_PMP_NUM];
 
@@ -160,6 +195,24 @@ module rapt_csr #(
   // ORed with the PLIC S-context line so M-mode can still inject S external
   // interrupts if needed.
   logic [XLEN-1:0] mip_eff;
+  logic [XLEN-1:0] mstatus_write, sstatus_write;
+  always_comb begin
+    // WARL fields are normalized before deriving the shared S-mode view.
+    mstatus_write = (rou_csr.csr_wdata & XLEN'(`RAPT_CSR_MSTATUS_WMASK)) | `RAPT_CSR_MSTATUS_HW;
+    if (mstatus_write[12:11] == 2'b10) mstatus_write[12:11] = 2'b00;
+    mstatus_write[XLEN-1] = mstatus_write[14:13] == 2'b11;
+    sstatus_write = (mstatus_write & `RAPT_CSR_SSTATUS_CMASK) | `RAPT_CSR_SSTATUS_HW;
+  end
+  always_comb begin
+    exu_csr.rmw_data = exu_csr.rdata;
+    if (raddr_reg == MIP____)
+      exu_csr.rmw_data[`RAPT_CSR_MIE_SEIE] = csr[MIP____][`RAPT_CSR_MIE_SEIE];
+  end
+
+  logic [XLEN-1:0] mip_write_mask;
+  // With STCE set, STIP is driven exclusively by time >= stimecmp.
+  assign mip_write_mask = XLEN'(`RAPT_CSR_MIP_WMASK)
+      & ~(sstc_en ? (XLEN'(1) << `RAPT_CSR_MIE_STIE) : XLEN'(0));
 
   assign raddr = exu_csr.raddr;
   always_comb begin
@@ -187,6 +240,7 @@ module rapt_csr #(
       `RAPT_CSR_MTVEC__:   waddr_reg = MTVEC__;
       `RAPT_CSR_MCOUNTE:   waddr_reg = MCOUNTE;
       `RAPT_CSR_MENVCFG:   waddr_reg = MENVCFG;
+      `RAPT_CSR_MENVCFGH: waddr_reg = (XLEN == 32) ? MENVCFGH : MNONE__;
       `RAPT_CSR_MSTATUSH:  waddr_reg = MSTATUSH;
       `RAPT_CSR_MSCRATCH:  waddr_reg = MSCRATCH;
       `RAPT_CSR_MEPC___:   waddr_reg = MEPC___;
@@ -225,6 +279,7 @@ module rapt_csr #(
       `RAPT_CSR_MIE____:   raddr_reg = MIE____;
       `RAPT_CSR_MCOUNTE:   raddr_reg = MCOUNTE;
       `RAPT_CSR_MENVCFG:   raddr_reg = MENVCFG;
+      `RAPT_CSR_MENVCFGH: raddr_reg = (XLEN == 32) ? MENVCFGH : MNONE__;
       `RAPT_CSR_MTVEC__:   raddr_reg = MTVEC__;
       `RAPT_CSR_MSTATUSH:  raddr_reg = MSTATUSH;
       `RAPT_CSR_MSCRATCH:  raddr_reg = MSCRATCH;
@@ -252,11 +307,11 @@ module rapt_csr #(
 
   always_comb begin
     case (raddr_reg)
-      FFLAGS:    exu_csr.rdata = csr[FCSR][4:0];
-      FRM:       exu_csr.rdata = csr[FCSR][7:5];
-      FCSR:      exu_csr.rdata = csr[FCSR][7:0];
+      FFLAGS:    exu_csr.rdata = XLEN'(csr[FCSR][4:0]);
+      FRM:       exu_csr.rdata = XLEN'(csr[FCSR][7:5]);
+      FCSR:      exu_csr.rdata = XLEN'(csr[FCSR][7:0]);
       SSTATUS:   exu_csr.rdata = csr[SSTATUS];
-      SIE____:   exu_csr.rdata = csr[MIE____] & `RAPT_CSR_SIE_RMASK;
+      SIE____:   exu_csr.rdata = csr[MIE____] & csr[MIDELEG] & XLEN'(`RAPT_CSR_SIE_RMASK);
       STVEC__:   exu_csr.rdata = csr[STVEC__];
       SCOUNTE:   exu_csr.rdata = csr[SCOUNTE];
       SENVCFG:   exu_csr.rdata = csr[SENVCFG];
@@ -265,7 +320,7 @@ module rapt_csr #(
       SEPC___:   exu_csr.rdata = csr[SEPC___];
       SCAUSE_:   exu_csr.rdata = csr[SCAUSE_];
       STVAL__:   exu_csr.rdata = csr[STVAL__];
-      SIP____:   exu_csr.rdata = mip_eff & `RAPT_CSR_SIP_RMASK;
+      SIP____:   exu_csr.rdata = mip_eff & csr[MIDELEG] & XLEN'(`RAPT_CSR_SIP_RMASK);
       STIMECMP:  exu_csr.rdata = XLEN'(stimecmp[XLEN-1:0]);
       STIMECMPH: exu_csr.rdata = (XLEN == 32) ? XLEN'(stimecmp[63:32]) : '0;
       SATP___:   exu_csr.rdata = csr[SATP___];
@@ -276,6 +331,7 @@ module rapt_csr #(
       MIE____:   exu_csr.rdata = csr[MIE____];
       MTVEC__:   exu_csr.rdata = csr[MTVEC__];
       MENVCFG:   exu_csr.rdata = csr[MENVCFG];
+      MENVCFGH:  exu_csr.rdata = csr[MENVCFGH];
       MSTATUSH:  exu_csr.rdata = csr[MSTATUSH];
       MSCRATCH:  exu_csr.rdata = csr[MSCRATCH];
       MEPC___:   exu_csr.rdata = csr[MEPC___];
@@ -284,8 +340,8 @@ module rapt_csr #(
       MIP____:   exu_csr.rdata = mip_eff;
       MCYCLE_:   exu_csr.rdata = csr[MCYCLE_];
       MCYCLEH:   exu_csr.rdata = csr[MCYCLEH];
-      TIME___:   exu_csr.rdata = csr[TIME___];
-      TIMEH__:   exu_csr.rdata = csr[TIMEH__];
+      TIME___:   exu_csr.rdata = XLEN'(mtime_i);
+      TIMEH__:   exu_csr.rdata = XLEN'(mtime_i[63:32]);
       MINSTRET:  exu_csr.rdata = csr[MINSTRET];
       MINSTRETH: exu_csr.rdata = csr[MINSTRETH];
       MVENDORID: exu_csr.rdata = XLEN'('d0);
@@ -302,7 +358,7 @@ module rapt_csr #(
                                  pmpcfg_r[3], pmpcfg_r[2], pmpcfg_r[1], pmpcfg_r[0]})
                         : XLEN'({pmpcfg_r[3], pmpcfg_r[2], pmpcfg_r[1], pmpcfg_r[0]});
         end else if (raddr == `RAPT_CSR_PMPCFG1) begin
-          exu_csr.rdata = (XLEN == 64) ? '0 : {pmpcfg_r[7], pmpcfg_r[6], pmpcfg_r[5], pmpcfg_r[4]};
+          exu_csr.rdata = (XLEN == 64) ? '0 : XLEN'({pmpcfg_r[7], pmpcfg_r[6], pmpcfg_r[5], pmpcfg_r[4]});
         end else if (raddr == `RAPT_CSR_PMPCFG2) begin
           exu_csr.rdata = (XLEN == 64)
                         ? XLEN'({pmpcfg_r[15], pmpcfg_r[14], pmpcfg_r[13], pmpcfg_r[12],
@@ -310,12 +366,16 @@ module rapt_csr #(
                         : XLEN'({pmpcfg_r[11], pmpcfg_r[10], pmpcfg_r[9], pmpcfg_r[8]});
         end else if (raddr == `RAPT_CSR_PMPCFG3) begin
           exu_csr.rdata = (XLEN == 64) ? '0
-                        : {pmpcfg_r[15], pmpcfg_r[14], pmpcfg_r[13], pmpcfg_r[12]};
+                        : XLEN'({pmpcfg_r[15], pmpcfg_r[14], pmpcfg_r[13], pmpcfg_r[12]});
         end else if (raddr >= PMPAddrBase && raddr <= PMPAddrLast)
-          exu_csr.rdata = pmpaddr_r[raddr[3:0]];
+          exu_csr.rdata = XLEN'(pmpaddr_r[raddr[3:0]]);
         else exu_csr.rdata = '0;
       end
     endcase
+    if (raddr == `RAPT_CSR_MBERR_STATUS)
+      exu_csr.rdata = (XLEN'(bus_error_strb) << 8)
+          | (XLEN'(bus_error_overflow) << 1) | XLEN'(bus_error_pending);
+    if (raddr == `RAPT_CSR_MBERR_ADDR) exu_csr.rdata = bus_error_addr;
   end
 
   assign exu_csr.mepc = csr[MEPC___];
@@ -423,15 +483,20 @@ module rapt_csr #(
   assign csr_bcast.sw_int_en    = m_int_mask && csr[MIE____][`RAPT_CSR_MIE_MSIE];
   assign csr_bcast.ext_int_en   = m_int_mask && csr[MIE____][`RAPT_CSR_MIE_MEIE];
 
+  assign csr_bcast.bus_error_int = bus_error_pending && m_int_mask
+      && csr[MIE____][`RAPT_BUS_ERROR_IRQ];
+
   assign mip_eff = (csr[MIP____]
                     & ~((XLEN'(1) << `RAPT_CSR_MIE_MSIE)
                       | (XLEN'(1) << `RAPT_CSR_MIE_MTIE)
-                      | (XLEN'(1) << `RAPT_CSR_MIE_MEIE)))
+                      | (XLEN'(1) << `RAPT_CSR_MIE_MEIE)
+                      | (sstc_en ? (XLEN'(1) << `RAPT_CSR_MIE_STIE) : XLEN'(0))))
                  | ({{(XLEN-1){1'b0}}, sw_irq_i} << `RAPT_CSR_MIE_MSIE)
                  | ({{(XLEN-1){1'b0}}, timer_irq_i} << `RAPT_CSR_MIE_MTIE)
                  | ({{(XLEN-1){1'b0}}, stime_irq} << `RAPT_CSR_MIE_STIE)
                  | ({{(XLEN-1){1'b0}}, m_ext_irq_i} << `RAPT_CSR_MIE_MEIE)
-                 | ({{(XLEN-1){1'b0}}, s_ext_irq_i} << `RAPT_CSR_MIE_SEIE);
+                 | ({{(XLEN-1){1'b0}}, s_ext_irq_i} << `RAPT_CSR_MIE_SEIE)
+                 | (XLEN'(bus_error_pending) << `RAPT_BUS_ERROR_IRQ);
 
   // ----- S-mode delegated interrupt evaluation (Priv Sec.3.1.9) --------------
   // An S-mode interrupt i fires iff: mip[i] && mie[i] && mideleg[i] && enable,
@@ -467,6 +532,13 @@ module rapt_csr #(
   assign csr_bcast.menvcfg_cbie = csr[MENVCFG][5:4];
   assign csr_bcast.menvcfg_cbcfe = csr[MENVCFG][6];
   assign csr_bcast.menvcfg_cbze = csr[MENVCFG][7];
+  assign csr_bcast.menvcfg_stce = sstc_en;
+`ifdef RAPT_RV64
+  assign csr_bcast.menvcfg_pbmte = csr[MENVCFG][62];
+`else
+  // Sv32 has no PBMT field.
+  assign csr_bcast.menvcfg_pbmte = 1'b0;
+`endif
   assign csr_bcast.senvcfg_cbie = csr[SENVCFG][5:4];
   assign csr_bcast.senvcfg_cbcfe = csr[SENVCFG][6];
   assign csr_bcast.senvcfg_cbze = csr[SENVCFG][7];
@@ -531,17 +603,17 @@ module rapt_csr #(
       for (int i = 0; i < `RAPT_PMP_NUM; i++) begin
         if (i >= cfg_base && i < cfg_base + cfg_count && !pmpcfg_r[i][`RAPT_PMPCFG_L_]) begin
           pmp_update.cfg_we[i]      = 1'b1;
-          pmp_update.cfg_r[i]       = rou_csr.csr_wdata[(i-cfg_base)*8 + `RAPT_PMPCFG_R_];
-          pmp_update.cfg_w[i]       = rou_csr.csr_wdata[(i-cfg_base)*8 + `RAPT_PMPCFG_W_];
-          pmp_update.cfg_x[i]       = rou_csr.csr_wdata[(i-cfg_base)*8 + `RAPT_PMPCFG_X_];
-          pmp_update.cfg_l[i]       = rou_csr.csr_wdata[(i-cfg_base)*8 + `RAPT_PMPCFG_L_];
-          pmp_update.mode_off[i]    = (rou_csr.csr_wdata[(i-cfg_base)*8 + 3 +: 2]
+          pmp_update.cfg_r[i]       = pmpcfg_legal_wdata[(i-cfg_base)*8 + `RAPT_PMPCFG_R_];
+          pmp_update.cfg_w[i]       = pmpcfg_legal_wdata[(i-cfg_base)*8 + `RAPT_PMPCFG_W_];
+          pmp_update.cfg_x[i]       = pmpcfg_legal_wdata[(i-cfg_base)*8 + `RAPT_PMPCFG_X_];
+          pmp_update.cfg_l[i]       = pmpcfg_legal_wdata[(i-cfg_base)*8 + `RAPT_PMPCFG_L_];
+          pmp_update.mode_off[i]    = (pmpcfg_legal_wdata[(i-cfg_base)*8 + 3 +: 2]
                                        == `RAPT_PMP_A_OFF);
-          pmp_update.mode_tor[i]    = (rou_csr.csr_wdata[(i-cfg_base)*8 + 3 +: 2]
+          pmp_update.mode_tor[i]    = (pmpcfg_legal_wdata[(i-cfg_base)*8 + 3 +: 2]
                                        == `RAPT_PMP_A_TOR);
-          pmp_update.mode_na4[i]    = (rou_csr.csr_wdata[(i-cfg_base)*8 + 3 +: 2]
+          pmp_update.mode_na4[i]    = (pmpcfg_legal_wdata[(i-cfg_base)*8 + 3 +: 2]
                                        == `RAPT_PMP_A_NA4);
-          pmp_update.mode_napot[i]  = (rou_csr.csr_wdata[(i-cfg_base)*8 + 3 +: 2]
+          pmp_update.mode_napot[i]  = (pmpcfg_legal_wdata[(i-cfg_base)*8 + 3 +: 2]
                                        == `RAPT_PMP_A_NAPOT);
         end
       end
@@ -589,12 +661,11 @@ module rapt_csr #(
       csr[MIP____] <= '0;
       csr[MCYCLE_] <= RESET_VAL;
       csr[MCYCLEH] <= RESET_VAL;
-      csr[TIME___] <= RESET_VAL;
-      csr[TIMEH__] <= RESET_VAL;
       csr[MINSTRET] <= RESET_VAL;
       csr[MINSTRETH] <= RESET_VAL;
       csr[MSTATUSH] <= '0;
       csr[MENVCFG] <= '0;
+      csr[MENVCFGH] <= '0;
       csr[MCOUNTE] <= '0;
       csr[SCOUNTE] <= '0;
       csr[SENVCFG] <= '0;
@@ -604,24 +675,13 @@ module rapt_csr #(
         pmpcfg_r[i]  <= '0;
         pmpaddr_r[i] <= '0;
       end
-      time_div_cnt <= '0;
     end else begin
-      if (time_tick) begin
-        csr[TIME___] <= csr[TIME___] + 1;
-        if (csr[TIME___] == ~'h0) begin
-          csr[TIMEH__] <= csr[TIMEH__] + 1;
-        end
-        time_div_cnt <= '0;
-      end else begin
-        time_div_cnt <= time_div_cnt + RAPTTimeDIVW'(1);
-      end
       csr[MCYCLE_] <= csr[MCYCLE_] + 1;
-      if (csr[MCYCLE_] == ~'h0
-          && !(rou_csr.valid && rou_csr.csr_wen && waddr_reg == MCYCLE_)) begin
+      if (csr[MCYCLE_] == ~'h0 && !(rou_csr.valid && rou_csr.csr_wen && waddr_reg == MCYCLE_)) begin
         csr[MCYCLEH] <= csr[MCYCLEH] + 1;
       end
-      csr[MINSTRET] <= csr[MINSTRET] + XLEN'(rou_csr.retire_a) + XLEN'(rou_csr.retire_b);
-      if (csr[MINSTRET] + XLEN'(rou_csr.retire_a) + XLEN'(rou_csr.retire_b) < csr[MINSTRET]
+      csr[MINSTRET] <= csr[MINSTRET] + XLEN'(rou_csr.retire_count);
+      if (csr[MINSTRET] + XLEN'(rou_csr.retire_count) < csr[MINSTRET]
           && !(rou_csr.valid && rou_csr.csr_wen && waddr_reg == MINSTRET)) begin
         csr[MINSTRETH] <= csr[MINSTRETH] + 1;
       end
@@ -638,7 +698,9 @@ module rapt_csr #(
             csr[MSTATUS] <= csr[MSTATUS] | `RAPT_CSR_MSTATUS_SD | (XLEN'(3) << 13);
             csr[SSTATUS] <= csr[SSTATUS] | `RAPT_CSR_MSTATUS_SD | (XLEN'(3) << 13);
           end
-          if (waddr_reg == FFLAGS) begin
+          if (rou_csr.csr_addr == `RAPT_CSR_MBERR_STATUS) begin
+            // No generic CSR storage write for platform W1C status.
+          end else if (waddr_reg == FFLAGS) begin
             csr[FCSR][4:0] <= rou_csr.csr_wdata[4:0];
           end else if (waddr_reg == FRM) begin
             csr[FCSR][7:5] <= rou_csr.csr_wdata[2:0];
@@ -650,28 +712,28 @@ module rapt_csr #(
             // Reserved bits [6:5] are WARL-zero (mask 8'h9F).
             for (int pi = 0; pi < (XLEN == 64 ? 8 : 4); pi++) begin
               if (!pmpcfg_r[pi][`RAPT_PMPCFG_L_]) begin
-                pmpcfg_r[pi] <= rou_csr.csr_wdata[pi*8+:8] & 8'h9F;
+                pmpcfg_r[pi] <= legalize_pmpcfg(rou_csr.csr_wdata[pi*8+:8]);
               end
             end
           end else if (rou_csr.csr_addr == `RAPT_CSR_PMPCFG1 && XLEN == 32) begin
             // pmpcfg1 only exists on RV32. On RV64 it is reserved; ignore writes.
             for (int pi = 0; pi < 4; pi++) begin
               if (!pmpcfg_r[pi+4][`RAPT_PMPCFG_L_]) begin
-                pmpcfg_r[pi+4] <= rou_csr.csr_wdata[pi*8+:8] & 8'h9F;
+                pmpcfg_r[pi+4] <= legalize_pmpcfg(rou_csr.csr_wdata[pi*8+:8]);
               end
             end
           end else if (rou_csr.csr_addr == `RAPT_CSR_PMPCFG2) begin
             // pmpcfg2: RV32 packs entries 8..11 (4 bytes); RV64 packs entries 8..15 (8 bytes).
             for (int pi = 0; pi < (XLEN == 64 ? 8 : 4); pi++) begin
               if (!pmpcfg_r[pi+8][`RAPT_PMPCFG_L_]) begin
-                pmpcfg_r[pi+8] <= rou_csr.csr_wdata[pi*8+:8] & 8'h9F;
+                pmpcfg_r[pi+8] <= legalize_pmpcfg(rou_csr.csr_wdata[pi*8+:8]);
               end
             end
           end else if (rou_csr.csr_addr == `RAPT_CSR_PMPCFG3 && XLEN == 32) begin
             // pmpcfg3 only exists on RV32.
             for (int pi = 0; pi < 4; pi++) begin
               if (!pmpcfg_r[pi+12][`RAPT_PMPCFG_L_]) begin
-                pmpcfg_r[pi+12] <= rou_csr.csr_wdata[pi*8+:8] & 8'h9F;
+                pmpcfg_r[pi+12] <= legalize_pmpcfg(rou_csr.csr_wdata[pi*8+:8]);
               end
             end
           end else if (rou_csr.csr_addr >= PMPAddrBase && rou_csr.csr_addr <= PMPAddrLast) begin
@@ -690,16 +752,18 @@ module rapt_csr #(
             csr[waddr_reg] <= (rou_csr.csr_wdata & `RAPT_CSR_MEDELEG_WMASK);
           end else if (waddr_reg == MIDELEG) begin
             // Only SSI(1)/STI(5)/SEI(9) are delegatable.
-            csr[waddr_reg] <= (rou_csr.csr_wdata & `RAPT_CSR_MIDELEG_WMASK);
+            csr[waddr_reg] <= (rou_csr.csr_wdata & XLEN'(`RAPT_CSR_MIDELEG_WMASK));
+          end else if (waddr_reg == MIE____) begin
+            csr[MIE____] <= rou_csr.csr_wdata & XLEN'(`RAPT_CSR_MIE_WMASK);
           end else if (waddr_reg == MCOUNTE || waddr_reg == SCOUNTE) begin
             // Only CY/TM/IR (bits [2:0]) modeled; HPM bits WARL-zero.
-            csr[waddr_reg] <= (rou_csr.csr_wdata & `RAPT_CSR_COUNTEREN_WMASK);
+            csr[waddr_reg] <= (rou_csr.csr_wdata & XLEN'(`RAPT_CSR_COUNTEREN_WMASK));
           end else if (waddr_reg == SENVCFG) begin
-            csr[SENVCFG] <= envcfg_warl(rou_csr.csr_wdata,
-                                        XLEN'(`RAPT_CSR_SENVCFG_WMASK));
+            csr[SENVCFG] <= envcfg_warl(rou_csr.csr_wdata, XLEN'(`RAPT_CSR_SENVCFG_WMASK));
           end else if (waddr_reg == MENVCFG) begin
-            csr[MENVCFG] <= envcfg_warl(rou_csr.csr_wdata,
-                                        XLEN'(`RAPT_CSR_MENVCFG_WMASK));
+            csr[MENVCFG] <= envcfg_warl(rou_csr.csr_wdata, XLEN'(`RAPT_CSR_MENVCFG_WMASK));
+          end else if (waddr_reg == MENVCFGH) begin
+            csr[MENVCFGH] <= rou_csr.csr_wdata & XLEN'(32'h8000_0000);
           end else if (waddr_reg == STIMECMP) begin
             if (XLEN == 64) begin
               stimecmp <= 64'(rou_csr.csr_wdata);
@@ -714,39 +778,21 @@ module rapt_csr #(
             // SBE/MBE are WARL-zero (little-endian only).
             csr[MSTATUSH] <= '0;
           end else if (waddr_reg == MSTATUS) begin
-            // Write mask: exclude SD(XLEN-1, read-only) and VS(10:9, hardwired 0 -- no V ext)
-            // SD recomputed from FS dirty (14:13==2'b11) or XS dirty (16:15==2'b11)
-            // SXL/UXL (RV64 only, bits 35:32) are hardwired to 2 (RV64) -- OR back in.
-            csr[MSTATUS] <= (rou_csr.csr_wdata & `RAPT_CSR_MSTATUS_WMASK)
-                          | ((rou_csr.csr_wdata[14:13] == 2'b11
-                            || rou_csr.csr_wdata[16:15] == 2'b11) ? `RAPT_CSR_MSTATUS_SD : 32'h0)
-                          | `RAPT_CSR_MSTATUS_HW;
-            csr[SSTATUS] <= (rou_csr.csr_wdata & `RAPT_CSR_SSTATUS_WMASK)
-                          | ((rou_csr.csr_wdata[14:13] == 2'b11
-                            || rou_csr.csr_wdata[16:15] == 2'b11) ? `RAPT_CSR_MSTATUS_SD : 32'h0)
-                          | `RAPT_CSR_SSTATUS_HW;
+            csr[MSTATUS] <= mstatus_write;
+            csr[SSTATUS] <= sstatus_write;
           end else if (waddr_reg == SSTATUS) begin
-            // sstatus-writable fields: SIE(1) SPIE(5) UBE(6) SPP(8) FS(14:13) XS(16:15) SUM(18) MXR(19)
-            csr[SSTATUS] <= (rou_csr.csr_wdata & `RAPT_CSR_SSTATUS_WMASK)
-                          | ((rou_csr.csr_wdata[14:13] == 2'b11
-                            || rou_csr.csr_wdata[16:15] == 2'b11) ? `RAPT_CSR_MSTATUS_SD : 32'h0)
-                          | `RAPT_CSR_SSTATUS_HW;
-            csr[MSTATUS] <= (csr[MSTATUS] & ~`RAPT_CSR_SSTATUS_CMASK)
-                          | (rou_csr.csr_wdata & `RAPT_CSR_SSTATUS_WMASK)
-                          | ((rou_csr.csr_wdata[14:13] == 2'b11
-                            || csr[MSTATUS][16:15] == 2'b11) ? `RAPT_CSR_MSTATUS_SD : 32'h0)
-                          | `RAPT_CSR_MSTATUS_HW;
+            csr[SSTATUS] <= sstatus_write;
+            csr[MSTATUS] <= (csr[MSTATUS] & ~`RAPT_CSR_SSTATUS_CMASK) | sstatus_write;
           end else if (waddr_reg == SIE____) begin
             // sie is a restricted view of mie; write only the SIE-visible bits.
-            csr[MIE____] <= (csr[MIE____] & ~`RAPT_CSR_SIE_WMASK)
-                          | (rou_csr.csr_wdata & `RAPT_CSR_SIE_WMASK);
+            csr[MIE____] <= (csr[MIE____] & ~(csr[MIDELEG] & XLEN'(`RAPT_CSR_SIE_WMASK)))
+                          | (rou_csr.csr_wdata & csr[MIDELEG] & XLEN'(`RAPT_CSR_SIE_WMASK));
           end else if (waddr_reg == SIP____) begin
             // sip is a restricted view of mip; only SSIP (bit 1) is software-writable.
-            csr[MIP____] <= (csr[MIP____] & ~`RAPT_CSR_SIP_WMASK)
-                          | (rou_csr.csr_wdata & `RAPT_CSR_SIP_WMASK);
+            csr[MIP____] <= (csr[MIP____] & ~(csr[MIDELEG] & XLEN'(`RAPT_CSR_SIP_WMASK)))
+                          | (rou_csr.csr_wdata & csr[MIDELEG] & XLEN'(`RAPT_CSR_SIP_WMASK));
           end else if (waddr_reg == MIP____) begin
-            csr[MIP____] <= (csr[MIP____] & ~`RAPT_CSR_MIP_WMASK)
-                          | (rou_csr.csr_wdata & `RAPT_CSR_MIP_WMASK);
+            csr[MIP____] <= (csr[MIP____] & ~mip_write_mask) | (rou_csr.csr_wdata & mip_write_mask);
           end else if (waddr_reg == MTVEC__ || waddr_reg == STVEC__) begin
             // WARL on MODE field [1:0]: only Direct(00) and Vectored(01) are
             // defined; reserved values (10/11) coerce to Direct(00).
@@ -773,8 +819,7 @@ module rapt_csr #(
             // nine bits carried by the TLB interface.
             if (rou_csr.csr_wdata[XLEN-1:XLEN-4] == 4'd0
                 || rou_csr.csr_wdata[XLEN-1:XLEN-4] == 4'd8) begin
-              csr[waddr_reg] <= {rou_csr.csr_wdata[63:60], 7'b0,
-                                  rou_csr.csr_wdata[52:0]};
+              csr[waddr_reg] <= {rou_csr.csr_wdata[63:60], 7'b0, rou_csr.csr_wdata[52:0]};
             end
             // else: write rejected, satp unchanged
 `else
@@ -897,8 +942,8 @@ module rapt_csr #(
   logic [XLEN-1:0] csr_sie_shadow /* verilator public_flat_rd */;
   logic [XLEN-1:0] csr_sip_shadow /* verilator public_flat_rd */;
   logic [XLEN-1:0] csr_mip_shadow /* verilator public_flat_rd */;
-  assign csr_sie_shadow = csr[MIE____] & `RAPT_CSR_SIE_RMASK;
-  assign csr_sip_shadow = mip_eff      & `RAPT_CSR_SIP_RMASK;
+  assign csr_sie_shadow = csr[MIE____] & csr[MIDELEG] & XLEN'(`RAPT_CSR_SIE_RMASK);
+  assign csr_sip_shadow = mip_eff & csr[MIDELEG] & XLEN'(`RAPT_CSR_SIP_RMASK);
   // csr[MIP____] only holds software-writable pending bits.  MSIP/MTIP and
   // external interrupt levels are folded in by mip_eff, so exporting the raw
   // storage slot makes a following csrr mip diverge from the reference model.

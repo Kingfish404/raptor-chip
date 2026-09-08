@@ -1,5 +1,3 @@
-`include "rapt.svh"
-
 module rapt_fpu_single_to_int_w #(
     parameter bit SOURCE_DOUBLE = 1'b0
 ) (
@@ -38,7 +36,7 @@ module rapt_fpu_single_to_int_w #(
   logic [4:0] flags_q;
 
   logic [10:0] exponent_c;
-  logic [51:0] fraction_c;
+  logic [FracBits-1:0] fraction_c;
   logic sign_c, nan_c, inf_c, zero_c;
   logic signed [13:0] unbiased_exponent_c;
   logic [52:0] significand_c;
@@ -55,11 +53,11 @@ module rapt_fpu_single_to_int_w #(
     sign_c = SOURCE_DOUBLE ? operand[63] : operand[31];
     if (SOURCE_DOUBLE) begin
       exponent_c = operand[62:52];
-      fraction_c = operand[51:0];
+      fraction_c = FracBits'(operand[51:0]);
     end else begin
       exponent_c = operand[63:32] == '1 ? {3'b0, operand[30:23]} : 11'h0ff;
       fraction_c = operand[63:32] == '1
-          ? {29'b0, operand[22:0]} : {29'b0, 23'h40_0000};
+          ? FracBits'(operand[22:0]) : FracBits'(23'h40_0000);
     end
     nan_c = exponent_c == InfExponent && fraction_c[FracBits-1:0] != '0;
     inf_c = exponent_c == InfExponent && fraction_c[FracBits-1:0] == '0;

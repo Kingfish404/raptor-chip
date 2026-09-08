@@ -1,5 +1,6 @@
 #include <common.h>
 #include <memory.h>
+#include <device_write.h>
 
 #include <assert.h>
 #include <errno.h>
@@ -7,6 +8,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <deque>
+#include <utility>
+#include <limits>
 
 // Provided by difftest_dut.cc; NULL when difftest is not enabled.
 extern void (*ref_difftest_memcpy)(paddr_t addr, void *buf, size_t n, bool direction);
@@ -122,9 +126,26 @@ static bool guest_mem_read(uint64_t addr, void *buf, size_t len)
     return true;
 }
 
+static std::deque<std::pair<uint64_t, uint64_t>> device_writes;
+bool device_write_front(uint64_t *first, uint64_t *last)
+{
+    if (device_writes.empty()) return false;
+    *first = device_writes.front().first;
+    *last = device_writes.front().second;
+    return true;
+}
+void device_write_consume() { assert(!device_writes.empty()); device_writes.pop_front(); }
+void device_write_reset() { device_writes.clear(); }
+
 static bool guest_mem_write(uint64_t addr, const void *buf, size_t len)
 {
     const uint8_t *src = (const uint8_t *)buf;
+    const uint64_t max_pa = std::numeric_limits<paddr_t>::max();
+    if (addr > max_pa || (len && len - 1 > max_pa - addr)) return false;
+    for (size_t i = 0; i < len; i++)
+        if (guest_to_host((paddr_t)(addr + i)) == NULL) return false;
+    // CPU eval consumes these notifications before allowing a later SC.
+    if (len) device_writes.emplace_back(addr, addr + len - 1);
     for (size_t i = 0; i < len; i++)
     {
         uint8_t *dst = guest_to_host((paddr_t)(addr + i));
@@ -150,26 +171,25 @@ static bool read_desc(uint16_t idx, struct virtq_desc_host *desc)
     return guest_mem_read(blk.desc_addr + idx * sizeof(*desc), desc, sizeof(*desc));
 }
 
-static void write_reg32(uint32_t *reg, paddr_t offset, word_t wdata)
+static void write_reg32(uint32_t *reg, paddr_t offset, word_t wdata, char wmask)
 {
-    uint32_t shift = (uint32_t)(offset & 0x3u) * 8u;
-    uint32_t mask = 0xffu << shift;
-    *reg = (*reg & ~mask) | (((uint32_t)wdata & 0xffu) << shift);
+    for (unsigned i = 0; i < sizeof(word_t); i++) {
+        if (!((uint8_t)wmask & (1u << i))) continue;
+        unsigned shift = ((offset + i) & 3u) * 8u;
+        uint32_t mask = 0xffu << shift;
+        *reg = (*reg & ~mask) | ((uint32_t)((wdata >> (8*i)) & 0xffu) << shift);
+    }
 }
 
-static void write_reg64(uint64_t *reg, paddr_t offset, word_t wdata)
+static void write_reg64(uint64_t *reg, paddr_t offset, word_t wdata, char wmask)
 {
-    uint32_t shift = (uint32_t)(offset & 0x3u) * 8u;
-    uint64_t mask = 0xffull << shift;
-    uint64_t low = (*reg & ~0xffffffffull) | (((*reg & 0xffffffffull) & ~mask) |
-                   (((uint64_t)wdata & 0xffull) << shift));
-    uint64_t high = ((*reg >> 32) & ~mask) | (((uint64_t)wdata & 0xffull) << shift);
-    if ((offset & ~0x3u) == VIRTIO_MMIO_QUEUE_DESC_HIGH ||
-        (offset & ~0x3u) == VIRTIO_MMIO_DRIVER_DESC_HIGH ||
-        (offset & ~0x3u) == VIRTIO_MMIO_DEVICE_DESC_HIGH)
-        *reg = (*reg & 0xffffffffull) | (high << 32);
-    else
-        *reg = low;
+    bool high = (offset & ~0x3u) == VIRTIO_MMIO_QUEUE_DESC_HIGH ||
+                (offset & ~0x3u) == VIRTIO_MMIO_DRIVER_DESC_HIGH ||
+                (offset & ~0x3u) == VIRTIO_MMIO_DEVICE_DESC_HIGH;
+    uint32_t part = high ? (uint32_t)(*reg >> 32) : (uint32_t)*reg;
+    write_reg32(&part, offset, wdata, wmask);
+    *reg = high ? ((*reg & 0xffffffffull) | ((uint64_t)part << 32))
+                : ((*reg & ~0xffffffffull) | part);
 }
 
 static bool write_used_elem(uint16_t id, uint32_t len)
@@ -344,6 +364,7 @@ void virtio_blk_set_disk_image(const char *path)
 
 void init_virtio_blk()
 {
+    device_write_reset();
     reset_regs();
     free(blk.disk);
     blk.disk = NULL;
@@ -387,7 +408,7 @@ void init_virtio_blk()
     Log("virtio-blk: loaded %s (%zu bytes, writes are in-memory)", blk.path, blk.disk_size);
 }
 
-void mmio_virtio_blk_handle(paddr_t offset, word_t wdata, bool is_write, word_t *data)
+void mmio_virtio_blk_handle(paddr_t offset, word_t wdata, char wmask, bool is_write, word_t *data)
 {
     offset &= VIRTIO_BLK_SIZE - 1;
     uint32_t base = (uint32_t)offset & ~0x3u;
@@ -396,52 +417,53 @@ void mmio_virtio_blk_handle(paddr_t offset, word_t wdata, bool is_write, word_t 
         switch (base)
         {
         case VIRTIO_MMIO_DEVICE_FEATURES_SEL:
-            write_reg32(&blk.device_features_sel, offset, wdata);
+            write_reg32(&blk.device_features_sel, offset, wdata, wmask);
             break;
         case VIRTIO_MMIO_DRIVER_FEATURES:
-            write_reg32(&blk.driver_features[blk.driver_features_sel & 1u], offset, wdata);
+            write_reg32(&blk.driver_features[blk.driver_features_sel & 1u], offset, wdata, wmask);
             break;
         case VIRTIO_MMIO_DRIVER_FEATURES_SEL:
-            write_reg32(&blk.driver_features_sel, offset, wdata);
+            write_reg32(&blk.driver_features_sel, offset, wdata, wmask);
             break;
         case VIRTIO_MMIO_QUEUE_SEL:
-            write_reg32(&blk.queue_sel, offset, wdata);
+            write_reg32(&blk.queue_sel, offset, wdata, wmask);
             break;
         case VIRTIO_MMIO_QUEUE_NUM:
-            write_reg32(&blk.queue_num, offset, wdata);
+            write_reg32(&blk.queue_num, offset, wdata, wmask);
             if (blk.queue_num > VIRTIO_QUEUE_NUM_MAX)
                 blk.queue_num = VIRTIO_QUEUE_NUM_MAX;
             break;
         case VIRTIO_MMIO_QUEUE_READY:
-            write_reg32(&blk.queue_ready, offset, wdata);
+            write_reg32(&blk.queue_ready, offset, wdata, wmask);
             blk.queue_ready &= 1u;
             break;
         case VIRTIO_MMIO_QUEUE_NOTIFY:
-            if ((offset & 0x3u) == 0)
+            if ((offset & 0x3u) == 0 && ((uint8_t)wmask & 1u))
                 service_queue();
             break;
         case VIRTIO_MMIO_INTERRUPT_ACK:
         {
-            uint32_t ack = ((uint32_t)wdata & 0xffu) << ((offset & 0x3u) * 8u);
+            uint32_t ack = 0;
+            write_reg32(&ack, offset, wdata, wmask);
             blk.interrupt_status &= ~ack;
             break;
         }
         case VIRTIO_MMIO_STATUS:
-            write_reg32(&blk.status, offset, wdata);
+            write_reg32(&blk.status, offset, wdata, wmask);
             if (blk.status == 0)
                 reset_regs();
             break;
         case VIRTIO_MMIO_QUEUE_DESC_LOW:
         case VIRTIO_MMIO_QUEUE_DESC_HIGH:
-            write_reg64(&blk.desc_addr, offset, wdata);
+            write_reg64(&blk.desc_addr, offset, wdata, wmask);
             break;
         case VIRTIO_MMIO_DRIVER_DESC_LOW:
         case VIRTIO_MMIO_DRIVER_DESC_HIGH:
-            write_reg64(&blk.driver_addr, offset, wdata);
+            write_reg64(&blk.driver_addr, offset, wdata, wmask);
             break;
         case VIRTIO_MMIO_DEVICE_DESC_LOW:
         case VIRTIO_MMIO_DEVICE_DESC_HIGH:
-            write_reg64(&blk.device_addr, offset, wdata);
+            write_reg64(&blk.device_addr, offset, wdata, wmask);
             break;
         default:
             break;

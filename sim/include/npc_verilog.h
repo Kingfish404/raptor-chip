@@ -15,22 +15,25 @@
 // All hierarchical accessors below thread through that extra `core->` step.
 #ifdef RAPT_SOC
 // Verilator 5.x hierarchical cell access:
-//   rootp -> ysyxSoCFull -> asic -> cpu -> cpu (rapt) -> core (rapt_core)
+//   rootp -> ysyxSoCFull -> asic -> cpu -> cpu -> adapter -> cpu (rapt) -> core
+// MemoryReadCredits=1 gives the generated rapt/core classes their __M1 suffix.
 #include CONCAT_HEAD(CONCAT(TOP_NAME, _ysyxSoCFull))
 #include CONCAT_HEAD(CONCAT(TOP_NAME, _ysyxSoCASIC__pi1))
 #include CONCAT_HEAD(CONCAT(TOP_NAME, _CPU))
-#include CONCAT_HEAD(CONCAT(TOP_NAME, _rapt))
-#include CONCAT_HEAD(CONCAT(TOP_NAME, _rapt_core))
+#include CONCAT_HEAD(CONCAT(TOP_NAME, _ysyx_00000000))
+#include CONCAT_HEAD(CONCAT(TOP_NAME, _wrap_ysyxsoc))
+#include CONCAT_HEAD(CONCAT(TOP_NAME, _rapt__M1))
+#include CONCAT_HEAD(CONCAT(TOP_NAME, _rapt_core__M1))
 #include CONCAT_HEAD(CONCAT(TOP_NAME, _rapt_rou))
-#define VERILOG_CPU(m) (top->rootp->ysyxSoCFull->asic->cpu->cpu->core->m)
-#define VERILOG_ROU(m) (top->rootp->ysyxSoCFull->asic->cpu->cpu->core->rou->m)
+#define VERILOG_CPU(m) (top->rootp->ysyxSoCFull->asic->cpu->cpu->adapter->cpu->core->m)
+#define VERILOG_ROU(m) (top->rootp->ysyxSoCFull->asic->cpu->cpu->adapter->cpu->core->rou->m)
 // CLINT lives at the cluster level (rapt). Verilator inlines the small
 // rapt_clint module, so its registers are reached via the __DOT__ name
 // from the parent `rapt` cell rather than a dedicated cell pointer.
-#define VERILOG_CLINT(m) CONCAT(top->rootp->ysyxSoCFull->asic->cpu->cpu->clint_inst__DOT__, m)
-#define VERILOG_PLIC(m) CONCAT(top->rootp->ysyxSoCFull->asic->cpu->cpu->plic__DOT__, m)
-#define VERILOG_CLUSTER(m) (top->rootp->ysyxSoCFull->asic->cpu->cpu->m)
-#define VERILOG_RESET (top->rootp->ysyxSoCFull->asic->cpu_reset_chain__DOT__output_chain__DOT__sync_0)
+#define VERILOG_CLINT(m) CONCAT(top->rootp->ysyxSoCFull->asic->cpu->cpu->adapter->cpu->clint_inst__DOT__, m)
+#define VERILOG_PLIC(m) CONCAT(top->rootp->ysyxSoCFull->asic->cpu->cpu->adapter->cpu->plic__DOT__, m)
+#define VERILOG_CLUSTER(m) (top->rootp->ysyxSoCFull->asic->cpu->cpu->adapter->cpu->m)
+#define VERILOG_RESET (top->reset || top->rootp->ysyxSoCFull->asic->cpu_reset_chain__DOT__output_chain__DOT__sync_0)
 #else
 
 #ifdef CONFIG_wrapBus
@@ -100,6 +103,12 @@ static inline void verilog_connect(TOP_NAME *top, NPCState *npc)
   npc->mie____ = csr + MIE____;
   npc->mtvec__ = csr + MTVEC__;
   npc->menvcfg = csr + MENVCFG;
+  npc->menvcfgh = csr + MENVCFGH;
+  npc->stimecmp = (uint64_t *)&VERILOG_CPU(csrs__DOT__stimecmp);
+  npc->bus_error_pending = (uint8_t *)&VERILOG_CPU(csrs__DOT__bus_error_pending);
+  npc->bus_error_overflow = (uint8_t *)&VERILOG_CPU(csrs__DOT__bus_error_overflow);
+  npc->bus_error_strb = (uint8_t *)&VERILOG_CPU(csrs__DOT__bus_error_strb);
+  npc->bus_error_addr = (word_t *)&VERILOG_CPU(csrs__DOT__bus_error_addr);
 
   npc->mstatush = csr + MSTATUSH;
   npc->mscratch = csr + MSCRATCH;
@@ -112,8 +121,6 @@ static inline void verilog_connect(TOP_NAME *top, NPCState *npc)
   npc->mcycleh = csr + MCYCLEH;
   npc->minstret = csr + MINSTRET;
   npc->minstreth = csr + MINSTRETH;
-  npc->time___ = csr + TIME___;
-  npc->timeh__ = csr + TIMEH__;
 
   npc->fpr = (uint64_t *)&VERILOG_CPU(fpr_bank__DOT__regs);
   npc->fcsr = (uint32_t *)(csr + FCSR);

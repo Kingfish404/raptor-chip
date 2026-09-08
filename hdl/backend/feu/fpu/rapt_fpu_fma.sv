@@ -1,4 +1,4 @@
-`include "rapt.svh"
+`include "rapt_fp_ops.svh"
 
 // Six-stage, one-operation-at-a-time IEEE-754 fused multiply-add unit.
 //
@@ -54,12 +54,57 @@ module rapt_fpu_prefix_adder #(
 
   assign sum[0] = bit_propagate[0];
   for (genvar bit_index = 1; bit_index < WIDTH; bit_index++) begin : gen_sum_bit
-    assign sum[bit_index] = bit_propagate[bit_index]
-        ^ prefix_generate[LEVELS][bit_index-1];
+    assign sum[bit_index] = bit_propagate[bit_index] ^ prefix_generate[LEVELS][bit_index-1];
   end
 endmodule
 
+// Standalone compatibility wrapper: no changes to the six-stage API.
 module rapt_fpu_fma #(
+    parameter bit TARGET_DOUBLE = 1'b0
+) (
+    input logic clock,
+    reset,
+    flush,
+    valid,
+    output logic ready,
+    input logic [5:0] op,
+    input logic [63:0] operand_a,
+    operand_b,
+    operand_c,
+    input logic [2:0] rounding_mode,
+    output logic [63:0] result,
+    output logic [4:0] flags,
+    output logic result_valid
+);
+  localparam int MantBits = TARGET_DOUBLE ? 53 : 24;
+  logic [MantBits-1:0] product_a, product_b;
+  logic [2*MantBits-1:0] product;
+  assign product = product_a * product_b;
+  rapt_fpu_fma_pipeline #(
+      .TARGET_DOUBLE(TARGET_DOUBLE)
+  ) u_pipeline (
+      .clock(clock),
+      .reset(reset),
+      .flush(flush),
+      .valid(valid),
+      .ready(ready),
+      .op(op),
+      .operand_a(operand_a),
+      .operand_b(operand_b),
+      .operand_c(operand_c),
+      .rounding_mode(rounding_mode),
+      .result(result),
+      .flags(flags),
+      .result_valid(result_valid),
+      .product_a(product_a),
+      .product_b(product_b),
+      .product(product),
+      .product_valid()
+  );
+endmodule
+
+// Product is consumed in the original first pipeline stage.
+module rapt_fpu_fma_pipeline #(
     parameter bit TARGET_DOUBLE = 1'b0
 ) (
     input  logic        clock,
@@ -74,7 +119,11 @@ module rapt_fpu_fma #(
     input  logic [2:0]  rounding_mode,
     output logic [63:0] result,
     output logic [4:0]  flags,
-    output logic        result_valid
+    output logic        result_valid,
+    output logic [(TARGET_DOUBLE ? 53 : 24)-1:0] product_a,
+    product_b,
+    output logic product_valid,
+    input logic [2*(TARGET_DOUBLE ? 53 : 24)-1:0] product
 );
   localparam int FracBits = TARGET_DOUBLE ? 52 : 23;
   localparam int MantBits = FracBits + 1;
@@ -306,8 +355,12 @@ module rapt_fpu_fma #(
       special_result_c = TARGET_DOUBLE ? {addend_sign_c, 11'h7ff, 52'b0}
         : {32'hffff_ffff, addend_sign_c, 8'hff, 23'b0};
     end
-    product_c = mant_a_c * mant_b_c;
   end
+
+  assign product_a = mant_a_c;
+  assign product_b = mant_b_c;
+  assign product_valid = valid && ready;
+  assign product_c = product;
 
   always_comb begin
     logic [WorkBits-1:0] product_term;
@@ -433,7 +486,9 @@ module rapt_fpu_fma #(
         | (signed_addend_c & sign_bias_c)) << 1;
   end
 
-  rapt_fpu_prefix_adder #(.WIDTH(WorkBits)) u_total_adder (
+  rapt_fpu_prefix_adder #(
+      .WIDTH(WorkBits)
+  ) u_total_adder (
       .lhs(carry_save_sum_c),
       .rhs(carry_save_carry_c),
       .sum(s2_total_c)
@@ -465,7 +520,9 @@ module rapt_fpu_fma #(
     end
   end
 
-  rapt_fpu_prefix_adder #(.WIDTH(WorkBits)) u_magnitude_adder (
+  rapt_fpu_prefix_adder #(
+      .WIDTH(WorkBits)
+  ) u_magnitude_adder (
       .lhs(magnitude_base_c),
       .rhs(magnitude_adjust_c),
       .sum(s3_magnitude_c)
@@ -477,7 +534,9 @@ module rapt_fpu_fma #(
     logic [FracBits+1:0] rounded;
     logic result_sign;
     logic guard_bit, sticky_bit, inexact, round_up, invalid;
-    logic tiny_before_rounding;
+    logic tiny_after_rounding;
+    logic precision_guard, precision_sticky, precision_up;
+    logic [FracBits:0] precision_retained;
     logic signed [13:0] exponent_value;
     logic [10:0] result_exponent;
     integer shift_amount;
@@ -493,7 +552,11 @@ module rapt_fpu_fma #(
     inexact = 1'b0;
     round_up = 1'b0;
     invalid = 1'b0;
-    tiny_before_rounding = 1'b0;
+    tiny_after_rounding = 1'b0;
+    precision_guard = 1'b0;
+    precision_sticky = s4_sticky_q;
+    precision_up = 1'b0;
+    precision_retained = '0;
     exponent_value = '0;
     result_exponent = '0;
     shift_amount = 0;
@@ -515,7 +578,25 @@ module rapt_fpu_fma #(
       exponent_value = 14'(s4_leading_one_q) + s4_common_base_q - 1;
       shift_amount = integer'(s4_leading_one_q) > MantBits
         ? integer'(s4_leading_one_q) - MantBits : 0;
-      tiny_before_rounding = exponent_value < MinExp;
+      // Round at target precision before clamping the exponent. Final
+      // subnormal rounding can produce a normal encoding while still tiny.
+      magnitude_aligned = shift_amount == 0
+        ? s4_magnitude_q << (MantBits - integer'(s4_leading_one_q))
+        : s4_magnitude_q >> shift_amount;
+      precision_retained = magnitude_aligned[MantBits-1:0];
+      precision_guard = shift_amount > 0 ? s4_magnitude_q[shift_amount-1] : 1'b0;
+      for (index = 0; index < WorkBits; index = index + 1)
+      if (index < shift_amount - 1) precision_sticky |= s4_magnitude_q[index];
+      case (s4_rounding_mode_q)
+        3'b000: precision_up = precision_guard && (precision_sticky || precision_retained[0]);
+        3'b001: precision_up = 1'b0;
+        3'b010: precision_up = (precision_guard || precision_sticky) && result_sign;
+        3'b011: precision_up = (precision_guard || precision_sticky) && !result_sign;
+        3'b100: precision_up = precision_guard;
+        default: precision_up = 1'b0;
+      endcase
+      tiny_after_rounding = (exponent_value < MinExp)
+        && !((exponent_value == MinExp-1) && precision_up && (&precision_retained));
       if (exponent_value < MinExp) begin
         shift_amount = shift_amount + (MinExp - exponent_value);
         // The extra shift expresses the result at Emin.  Packing must use
@@ -573,19 +654,14 @@ module rapt_fpu_fma #(
         stage4_result_c = TARGET_DOUBLE
           ? {result_sign, 11'b0, retained[51:0]}
           : {32'hffff_ffff, result_sign, 8'b0, retained[22:0]};
-        stage4_flags_c[1] = inexact;
+        stage4_flags_c[1] = inexact && tiny_after_rounding;
         stage4_flags_c[0] = inexact;
       end else begin
         result_exponent = exponent_value + ExpBias;
         stage4_result_c = TARGET_DOUBLE
           ? {result_sign, result_exponent, retained[51:0]}
           : {32'hffff_ffff, result_sign, result_exponent[7:0], retained[22:0]};
-        // With directed rounding, a sticky-only tiny magnitude can round to
-        // the minimum normal encoding while still satisfying SoftFloat's
-        // after-rounding tininess test.  A guard-bit carry (the nearest-mode
-        // boundary case) is not tiny after rounding and must suppress UF.
-        stage4_flags_c[1] = inexact && tiny_before_rounding
-          && round_up && !guard_bit;
+        stage4_flags_c[1] = inexact && tiny_after_rounding;
         stage4_flags_c[0] = inexact;
       end
     end

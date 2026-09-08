@@ -6,7 +6,49 @@
 // Stage 2: calculate the full-precision significand product.
 // Stage 3: normalize the product and form guard/round/sticky bits.
 // Stage 4: round, pack, and raise flags.
+// Standalone compatibility wrapper: the pipeline's product resource is local.
 module rapt_fpu_mul #(
+    parameter bit TARGET_DOUBLE = 1'b0
+) (
+    input logic clock,
+    reset,
+    flush,
+    valid,
+    output logic ready,
+    input logic [63:0] operand_a,
+    operand_b,
+    input logic [2:0] rounding_mode,
+    output logic [63:0] result,
+    output logic [4:0] flags,
+    output logic result_valid
+);
+  localparam int MantBits = TARGET_DOUBLE ? 53 : 24;
+  logic [MantBits-1:0] product_a, product_b;
+  logic [2*MantBits-1:0] product;
+  assign product = product_a * product_b;
+  rapt_fpu_mul_pipeline #(
+      .TARGET_DOUBLE(TARGET_DOUBLE)
+  ) u_pipeline (
+      .clock(clock),
+      .reset(reset),
+      .flush(flush),
+      .valid(valid),
+      .ready(ready),
+      .operand_a(operand_a),
+      .operand_b(operand_b),
+      .rounding_mode(rounding_mode),
+      .result(result),
+      .flags(flags),
+      .result_valid(result_valid),
+      .product_a(product_a),
+      .product_b(product_b),
+      .product(product),
+      .product_valid()
+  );
+endmodule
+
+// Product is consumed in the original second pipeline stage.
+module rapt_fpu_mul_pipeline #(
     parameter bit TARGET_DOUBLE = 1'b0
 ) (
     input  logic        clock,
@@ -19,7 +61,11 @@ module rapt_fpu_mul #(
     input  logic [2:0]  rounding_mode,
     output logic [63:0] result,
     output logic [4:0]  flags,
-    output logic        result_valid
+    output logic        result_valid,
+    output logic [(TARGET_DOUBLE ? 53 : 24)-1:0] product_a,
+    product_b,
+    output logic product_valid,
+    input logic [2*(TARGET_DOUBLE ? 53 : 24)-1:0] product
 );
   localparam int FracBits = TARGET_DOUBLE ? 52 : 23;
   localparam int MantBits = FracBits + 1;
@@ -50,6 +96,7 @@ module rapt_fpu_mul #(
   logic [ExtBits-1:0] s3_mant_q;
   logic signed [13:0] s3_exponent_q;
   logic s3_result_sign_q, s3_special_q;
+  logic s3_tiny_q;
   logic [63:0] s3_special_result_q;
   logic [4:0] s3_special_flags_q;
   logic [2:0] s3_rounding_mode_q;
@@ -74,6 +121,7 @@ module rapt_fpu_mul #(
   logic [ExtBits-1:0] stage3_mant_c;
   logic signed [13:0] stage3_exponent_c;
   integer subnormal_shift_c;
+  logic stage3_tiny_c, precision_guard_c, precision_sticky_c, precision_up_c;
 
   logic [63:0] stage4_result_c;
   logic [4:0] stage4_flags_c;
@@ -185,13 +233,20 @@ module rapt_fpu_mul #(
     end
   end
 
-  assign product_c = s1_mant_a_q * s1_mant_b_q;
+  assign product_a = s1_mant_a_q;
+  assign product_b = s1_mant_b_q;
+  assign product_valid = s1_valid_q;
+  assign product_c = product;
   assign exponent_sum_c = s1_exp_a_q + s1_exp_b_q;
 
   always_comb begin
     stage3_mant_c = '0;
     stage3_exponent_c = s2_exp_sum_q;
     subnormal_shift_c = 0;
+    stage3_tiny_c = 1'b0;
+    precision_guard_c = 1'b0;
+    precision_sticky_c = 1'b0;
+    precision_up_c = 1'b0;
     if (s2_product_q[ProductBits-1]) begin
       stage3_mant_c = s2_product_q >> (ProductBits - ExtBits);
       stage3_mant_c[0] = stage3_mant_c[0]
@@ -202,6 +257,22 @@ module rapt_fpu_mul #(
       stage3_mant_c[0] = stage3_mant_c[0]
           | (|s2_product_q[ProductBits-ExtBits-2:0]);
     end
+    // Detect tininess at target precision with an unbounded exponent,
+    // before the subnormal shift reduces available precision.
+    precision_guard_c = stage3_mant_c[RoundBits-1];
+    precision_sticky_c = |stage3_mant_c[RoundBits-2:0];
+    case (s2_rounding_mode_q)
+      3'b000: precision_up_c = precision_guard_c
+          && (precision_sticky_c || stage3_mant_c[RoundBits]);
+      3'b001: precision_up_c = 1'b0;
+      3'b010: precision_up_c = (precision_guard_c || precision_sticky_c) && s2_result_sign_q;
+      3'b011: precision_up_c = (precision_guard_c || precision_sticky_c) && !s2_result_sign_q;
+      3'b100: precision_up_c = precision_guard_c;
+      default: precision_up_c = 1'b0;
+    endcase
+    stage3_tiny_c = (stage3_exponent_c < MinExp)
+        && !((stage3_exponent_c == MinExp-1) && precision_up_c
+             && (&stage3_mant_c[ExtBits-1-:MantBits]));
     if (stage3_exponent_c < MinExp) begin
       subnormal_shift_c = MinExp - stage3_exponent_c;
       stage3_mant_c = shift_sticky(stage3_mant_c, subnormal_shift_c);
@@ -260,13 +331,14 @@ module rapt_fpu_mul #(
         stage4_result_c = TARGET_DOUBLE
             ? {s3_result_sign_q, 11'b0, significand_4[51:0]}
             : {32'hffff_ffff, s3_result_sign_q, 8'b0, significand_4[22:0]};
-        stage4_flags_c[1] = inexact_4;
+        stage4_flags_c[1] = inexact_4 && s3_tiny_q;
       end else begin
         stage4_result_c = TARGET_DOUBLE
             ? {s3_result_sign_q, 11'(exponent_4 + Bias), significand_4[51:0]}
             : {32'hffff_ffff, s3_result_sign_q, 8'(exponent_4 + Bias),
                significand_4[22:0]};
       end
+      stage4_flags_c[1] = inexact_4 && s3_tiny_q;
       stage4_flags_c[0] = inexact_4;
     end
   end
@@ -311,6 +383,7 @@ module rapt_fpu_mul #(
       end
       if (s2_valid_q) begin
         s3_mant_q <= stage3_mant_c;
+        s3_tiny_q <= stage3_tiny_c;
         s3_exponent_q <= stage3_exponent_c;
         s3_result_sign_q <= s2_result_sign_q;
         s3_special_q <= s2_special_q;

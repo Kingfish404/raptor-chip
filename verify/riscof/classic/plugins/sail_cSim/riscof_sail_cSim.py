@@ -1,8 +1,8 @@
 """RISCOF reference plugin: sail-riscv C simulator.
 
-Minimal, DUT-agnostic variant of the upstream RISCOF sail_cSim plugin.
-Adapted for modern `sail_riscv_sim` (config JSON based) and stripped of
-neorv32-specific overrides.
+Adapted for modern `sail_riscv_sim` with Raptor's page-local, whole-access
+PMP checking policy in raptor.json. Sail still splits at page boundaries;
+the classic filter relocates the three PMP straddle tests within a page.
 """
 
 from __future__ import annotations
@@ -118,9 +118,12 @@ class sail_cSim(pluginTemplate):
                 test_dir, self.name[:-1] + ".signature"
             )
 
+            # Match the pre-split PMP check in Raptor's LSU. Sail's default
+            # decomposes even page-local misaligned accesses before PMP.
             execute += (
                 f"{self.sail_exe}"
                 f"{sail_arch_flag}"
+                f" --config-override={self.pluginpath}/raptor.json"
                 f" --signature-granularity=4"
                 f" --test-signature={sig_file}"
                 f" {elf} > {test_name}.log 2>&1"

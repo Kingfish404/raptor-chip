@@ -21,6 +21,11 @@
 word_t vaddr_ifetch(vaddr_t addr, int len);
 word_t vaddr_read(vaddr_t addr, int len);
 void vaddr_write(vaddr_t addr, int len, word_t data);
+void vaddr_check_amo(vaddr_t addr, int len);
+paddr_t vaddr_check_reservation(vaddr_t addr, int len, bool store);
+void vaddr_check_store(vaddr_t addr, int len);
+word_t vaddr_read_piece(vaddr_t addr, int len, int original_len, bool original_misaligned);
+void vaddr_check_zero(vaddr_t addr);
 void vaddr_check_cmo(vaddr_t addr);
 void vaddr_show(vaddr_t addr, int n);
 

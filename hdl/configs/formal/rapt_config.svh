@@ -4,7 +4,7 @@
  * Formal-verification uarch preset (riscv-formal / RVFI).
  *
  * Functionally a full RV32IMC core (32 architectural registers, I/M/C
- * extensions, dual-issue / dual-commit so RVFI channel 1 stays exercised),
+ * extensions, two parameterized lanes so RVFI channel 1 stays exercised),
  * but every memory array is shrunk to the minimum legal size so the
  * flattened netlist that riscv-formal feeds to yosys `prep`/`check` and the
  * BMC engine stays tractable.
@@ -41,8 +41,8 @@
 `define RAPT_RSB_SIZE 2
 `define RAPT_BPU_DIRP_BIMODAL
 
-// OoO window: keep dual issue/commit but the smallest window that still
-// retires two consecutive entries.
+// OoO window: keep two dispatch/commit lanes but the smallest window that
+// still retires two consecutive entries.
 `define RAPT_RIQ_SIZE 2
 `define RAPT_IIQ_SIZE 2
 `define RAPT_ROB_SIZE 4
@@ -55,7 +55,30 @@
 // RVFI is enabled through the formal Makefile (-DRAPT_RVFI); leave the source
 // default off so the preset is also usable for non-RVFI submodule proofs.
 
-// Dual commit / dual issue retained so RVFI channel 1 is exercised.
+// Authoritative ordered-stage widths; two commit lanes exercise RVFI arrays.
+`ifndef RAPT_INTEGER_ISSUE_PORTS
+`define RAPT_INTEGER_ISSUE_PORTS 2
+`endif
+`ifndef RAPT_INTEGER_SYSTEM_PORT
+`define RAPT_INTEGER_SYSTEM_PORT 0
+`endif
+`ifndef RAPT_DECODE_WIDTH
+`define RAPT_DECODE_WIDTH 2
+`endif
+`ifndef RAPT_RENAME_WIDTH
+`define RAPT_RENAME_WIDTH 2
+`endif
+`ifndef RAPT_DISPATCH_WIDTH
+`define RAPT_DISPATCH_WIDTH 2
+`endif
+`ifndef RAPT_COMMIT_WIDTH
+`define RAPT_COMMIT_WIDTH 2
+`endif
+`ifndef RAPT_FETCH_LOOKAHEAD
+`define RAPT_FETCH_LOOKAHEAD
+`endif
+
+// Deprecated compatibility markers for historical modules/testbenches.
 `define RAPT_DUAL_COMMIT
 `define RAPT_DUAL_ISSUE
 

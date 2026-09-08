@@ -42,16 +42,16 @@ endef
 
 define _litex_bios_patches_apply
 	$(PYTHON) $(LITEX_DIR)/scripts/patch_litex_picolibc.py $(LITEX_PATH) && \
-	$(PYTHON) $(LITEX_DIR)/scripts/patch_litex_uart_polling.py $(LITEX_PATH) && \
 	{ [ "$(LINUX_FPGA_PROFILE)" != "1" ] || \
 	  $(PYTHON) $(LITEX_DIR)/scripts/patch_litex_sdcard_linux_override.py \
 		$(LITEX_PATH) $(FW_LINUX_FPGA_BIN) $(FW_LINUX_FPGA_SEEDED_DTB) \
 		$(LINUX_FPGA_PAYLOAD) $(LINUX_FPGA_PAYLOAD_OFFSET) \
-		$(LINUX_FPGA_DTB_OFFSET) $(LINUX_FPGA_DTB_ADDR) $(MAIN_RAM_BASE); }
+		$(LINUX_FPGA_DTB_OFFSET) $(LINUX_FPGA_DTB_ADDR) $(MAIN_RAM_BASE) \
+		--output-dir "$(FPGA_DIR)/bios-src"; }
 endef
 
 define _litex_bios_patches_restore
-	cd $(LITEX_PATH) && git checkout -- litex/soc/software/common.mak litex/soc/software/libc/Makefile litex/soc/software/libbase/uart.c litex/soc/software/bios/boot.c 2>/dev/null || true
+	cd $(LITEX_PATH) && git checkout -- litex/soc/software/common.mak litex/soc/software/libc/Makefile 2>/dev/null || true
 endef
 
 # $(call _run_litex_target,arguments)
@@ -59,6 +59,7 @@ define _run_litex_target
 trap '[ "$(BOOT_MODE)" = "bios" ] && { $(call _litex_bios_patches_restore); } || true' EXIT; \
 if [ "$(BOOT_MODE)" = "bios" ]; then $(call _litex_bios_patches_apply); fi; \
 source $(VENV_DIR)/bin/activate && \
+RAPT_BIOS_SOURCE_DIR="$(if $(and $(filter bios,$(BOOT_MODE)),$(filter 1,$(LINUX_FPGA_PROFILE))),$(FPGA_DIR)/bios-src,)" \
 $(PYTHON) $(FPGA_PY) $(1)
 endef
 
@@ -83,7 +84,9 @@ define _compile_if_needed
 	OLD_HASH=$$(cat $(1)/.sim_v_hash 2>/dev/null || echo ""); \
 	if [ ! -f $(1)/obj_dir/Vsim ] || [ "$$SIM_V_HASH" != "$$OLD_HASH" ]; then \
 		echo "[INFO] Compiling Verilator simulation (this may take several minutes)..."; \
-		cd $(1) && bash build_sim.sh; \
+		rm -f $(1)/.sim_v_hash; \
+		(cd $(1) && bash build_sim.sh) || exit $$?; \
+		test -x $(1)/obj_dir/Vsim || { echo "[ERR] Compilation did not produce an executable Vsim."; exit 1; }; \
 		echo "$$SIM_V_HASH" > $(1)/.sim_v_hash; \
 		echo "[INFO] Verilator compilation complete."; \
 	else \
@@ -147,10 +150,10 @@ $(CHISEL_GENERATED_SRCS) &: $(CHISEL_INPUTS)
 	$(MAKE) -C $(CHISEL_DIR) verilog
 
 pack:
-	$(MAKE) -C $(NSIM_DIR) pack RAPT_CONFIG=$(RAPT_CONFIG) VFLAGS="$(RAPT_PACK_VFLAGS)" CONFIG_MODE=
+	$(MAKE) -C $(NSIM_DIR) pack RAPT_CONFIG=$(RAPT_CONFIG) VFLAGS="$(RAPT_PACK_VFLAGS)"
 
 $(PACK_SV): $(RTL_SOURCES) $(RAPT_CONFIG_STAMP) $(RAPT_PACK_VFLAGS_STAMP)
-	$(MAKE) -C $(NSIM_DIR) pack RAPT_CONFIG=$(RAPT_CONFIG) VFLAGS="$(RAPT_PACK_VFLAGS)" CONFIG_MODE=
+	$(MAKE) -C $(NSIM_DIR) pack RAPT_CONFIG=$(RAPT_CONFIG) VFLAGS="$(RAPT_PACK_VFLAGS)"
 
 $(FW_SIM_DIR):
 	@mkdir -p $@
@@ -705,6 +708,7 @@ fpga-detect:
 	fi
 
 fpga-gen: $(PACK_SV) $(_FPGA_FW_DEP)
+	@rm -f "$(FPGA_STAMP)"
 	@$(call _run_litex_target,$(_FPGA_FLAGS) --build --no-compile-gateware)
 	@echo "[INFO] Sources generated under $(FPGA_BUILD_DIR) (BOOT_MODE=$(BOOT_MODE))"
 
@@ -729,6 +733,7 @@ endif
 		$(MAKE) --no-print-directory fpga-reports-index $(_FPGA_REPORTS_INDEX_ARGS); \
 		exit 0; \
 	fi; \
+	rm -f "$(FPGA_STAMP)"; \
 	echo "[INFO] Bitstream stale (old=$${OLD_HASH:0:12} new=$${NEW_HASH:0:12}); running $(FPGA_VENDOR)..."; \
 	if [ "$(FPGA_VENDOR)" = "vivado" ]; then \
 		$(VIVADO) -mode batch -nojournal -nolog -notrace \
@@ -807,18 +812,23 @@ fpga-build-force:
 	@rm -f $(FPGA_STAMP)
 	@$(call _make,fpga-build)
 
-fpga-bitstream-current:
+.PHONY: fpga-bitstream-current fpga-bitstream-warn
+fpga-bitstream-current fpga-bitstream-warn:
 	@OLD_HASH=$$(cat $(FPGA_STAMP) 2>/dev/null || echo ""); \
 	NEW_HASH=$$($(_FPGA_HASH_COMMAND)); \
 	if [ -z "$$OLD_HASH" ] || [ "$$OLD_HASH" != "$$NEW_HASH" ]; then \
-		echo "[ERR] Refusing to program a stale or untracked bitstream."; \
-		echo "[ERR] Bitstream stamp: $${OLD_HASH:-missing}"; \
-		echo "[ERR] Current input hash: $$NEW_HASH"; \
-		echo "[ERR] Run 'make fpga-build' with the same FPGA_BOARD, VARIANT, BOOT_MODE, and RAPT_CONFIG."; \
-		exit 1; \
+		if [ "$@" = fpga-bitstream-warn ]; then \
+			level=WARN; echo "[WARN] Loading an existing bitstream whose input hash differs or is untracked."; \
+		else \
+			level=ERR; echo "[ERR] Refusing to program a stale or untracked bitstream."; \
+		fi; \
+		echo "[$$level] Bitstream stamp: $${OLD_HASH:-missing}"; \
+		echo "[$$level] Current input hash: $$NEW_HASH"; \
+		echo "[$$level] Run 'make fpga-build' with the same FPGA_BOARD, VARIANT, BOOT_MODE, and RAPT_CONFIG to rebuild."; \
+		if [ "$$level" = ERR ]; then exit 1; fi; \
 	fi
 
-fpga-load:
+fpga-load: fpga-bitstream-warn
 	@echo "[INFO] FPGA board: $(FPGA_BOARD) (source=$(FPGA_BOARD_SOURCE), vendor=$(FPGA_VENDOR), device=$(if $(FPGA_DEVICE),$(FPGA_DEVICE),n/a))"
 	$(call _require_file,$(FPGA_BITSTREAM),$(FPGA_BITSTREAM) not found — run 'make fpga-build' first.)
 	@$(FPGA_LOAD_TOOL_CHECK)

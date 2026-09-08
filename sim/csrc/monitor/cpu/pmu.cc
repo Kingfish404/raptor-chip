@@ -3,6 +3,10 @@
 #include <readline/readline.h>
 #include <readline/history.h>
 #include <npc_verilog.h>
+#include CONCAT_HEAD(CONCAT(TOP_NAME, _rapt_pkg))
+#include <algorithm>
+#include <array>
+#include <recovery_metrics.h>
 
 #include <unistd.h>
 #include <fcntl.h>
@@ -28,10 +32,102 @@ struct PMUSamplerState
 };
 
 static PMUSamplerState sampler_state = {};
+using RtlConfig = CONCAT(TOP_NAME, _rapt_pkg);
+struct DispatchMetrics
+{
+  std::array<uint64_t, RtlConfig::DispatchStopCount> cycles, zero_progress_cycles, unfilled_slots;
+  std::array<uint64_t, RtlConfig::ExecutionDomains> endpoint_cycles;
+  std::array<uint64_t, RtlConfig::DispatchWidth + 1> histogram;
+  uint64_t accepted;
+};
+static DispatchMetrics dispatch_metrics = {};
+struct RobDispatchMetrics
+{
+  std::array<uint64_t, RtlConfig::ExecutionDomains> blocked_domains;
+  std::array<uint64_t, RtlConfig::ExecutionDomains> pending_domain_sum, pending_domain_peak;
+  std::array<uint64_t, RtlConfig::ROBEntries + 1> pending_histogram;
+  uint64_t candidates, accepted, bypass, oldest_blocked_cycles, pending_sum, pending_peak;
+};
+static RobDispatchMetrics rob_dispatch_metrics = {};
+// Mirrors rapt_pkg::DOMAIN_BRANCH and rapt_iq's simulation-only reason codes.
+static constexpr unsigned BranchDomain = 1;
+static std::array<uint64_t, 7> branch_capacity_reasons = {};
+static std::array<uint64_t, RtlConfig::IntegerIssuePorts + 1> alq_issue_histogram = {};
+using ControlRecoveryMetrics = RecoveryMetrics<RtlConfig::ROBEntries,
+    RtlConfig::CfAllocate, RtlConfig::CfResolve, RtlConfig::CfMispredict,
+    RtlConfig::CfRetire, RtlConfig::CfTrap>;
+static ControlRecoveryMetrics recovery_metrics;
+struct RecoveryHeadMetrics {
+  std::array<uint64_t, RtlConfig::ExecutionDomains> waiting{};
+  uint64_t ready = 0, empty = 0;
+};
+static RecoveryHeadMetrics recovery_head;
+
+static void report_recovery_metrics()
+{
+  const auto &m = recovery_metrics;
+  const auto u = [](uint64_t n) { return static_cast<unsigned long long>(n); };
+  assert(m.conserved());
+  Log("Control lifecycle: allocated %llu, resolved %llu, retired %llu, traps %llu, "
+      "killed unresolved %llu, killed correct %llu, killed wrong %llu, reset discarded %llu, live %llu",
+      u(m.allocated), u(m.resolved), u(m.retired), u(m.trap_retired), u(m.killed_unresolved),
+      u(m.killed_correct), u(m.wrong_killed.count), u(m.reset_discarded), u(m.live_count()));
+  const auto latency = [&](const char *name, const ControlRecoveryMetrics::Latency &v) {
+    Log("Control latency %s: count %llu, cycles %llu, max %llu", name, u(v.count), u(v.cycles), u(v.maximum));
+    for (unsigned bucket = 0; bucket < v.histogram.size(); ++bucket)
+      Log("Control histogram %s bucket %u: count %llu", name, bucket, u(v.histogram[bucket]));
+  };
+  latency("correct_retire", m.correct_retire);
+  latency("wrong_retire", m.wrong_retire);
+  latency("wrong_killed", m.wrong_killed);
+  Log("Control pending wrong: union cycles %llu, instruction cycles %llu, max concurrent %llu, live %llu",
+      u(m.pending_wrong_cycles), u(m.pending_wrong_integral), u(m.pending_wrong_max), u(m.pending_wrong()));
+  Log("Control pending residual: trap cycles %llu, reset cycles %llu, live cycles %llu",
+      u(m.wrong_trap_cycles), u(m.wrong_reset_cycles), u(m.live_wrong_age()));
+  uint64_t head_total = recovery_head.ready + recovery_head.empty;
+  for (unsigned domain = 0; domain < recovery_head.waiting.size(); ++domain) {
+    head_total += recovery_head.waiting[domain];
+    Log("Control pending head domain %u: waiting cycles %llu", domain, u(recovery_head.waiting[domain]));
+  }
+  assert(head_total == m.pending_wrong_cycles);
+  Log("Control pending head: ready cycles %llu, empty cycles %llu", u(recovery_head.ready), u(recovery_head.empty));
+}
+
+static const char *dispatch_reason_name(unsigned reason)
+{
+  switch (reason)
+  {
+  case RtlConfig::DispatchStopWidth: return "width";
+  case RtlConfig::DispatchStopEmpty: return "empty";
+  case RtlConfig::DispatchStopFlush: return "flush";
+  case RtlConfig::DispatchStopHalt: return "halt";
+  case RtlConfig::DispatchStopSerialBusy: return "serial_busy";
+  case RtlConfig::DispatchStopSerialWait: return "serial_wait";
+  case RtlConfig::DispatchStopSerialBoundary: return "serial_boundary";
+  case RtlConfig::DispatchStopRob: return "rob";
+  case RtlConfig::DispatchStopEndpoint: return "endpoint";
+  case RtlConfig::DispatchStopReset: return "reset";
+  case RtlConfig::DispatchStopRecovery: return "recovery";
+  default: return "unknown";
+  }
+}
+
+void perf_reset_counters()
+{
+  memset(&pmu, 0, sizeof(pmu));
+  dispatch_metrics = {};
+  rob_dispatch_metrics = {};
+  branch_capacity_reasons = {};
+  alq_issue_histogram = {};
+  recovery_metrics = {};
+  recovery_head = {};
+  sampler_state = {};
+}
 
 void perf_reset_sampler_state()
 {
   sampler_state = {};
+  recovery_metrics.reset_epoch();
 }
 
 void reg_display(int n);
@@ -114,30 +210,95 @@ void perf_sample_per_cycle()
     return;
   }
   pmu.active_cycle++;
-  // Sample both registered commit slots. The shared CMU branch flags select
-  // slot B on a dual commit and therefore cannot account for a branch in A.
+  if (recovery_metrics.pending_wrong()) {
+    if (!VERILOG_ROU(pmu_cf_head_busy)) ++recovery_head.empty;
+    else if (!VERILOG_ROU(pmu_cf_head_waiting)) ++recovery_head.ready;
+    else {
+      const unsigned domain = VERILOG_ROU(pmu_cf_head_domain);
+      assert(domain < recovery_head.waiting.size());
+      ++recovery_head.waiting[domain];
+    }
+  }
+  recovery_metrics.sample(VERILOG_ROU(pmu_cf_events), VERILOG_CPU(cmu__DOT__flush_pipe_r));
+  const unsigned dispatch_count = VERILOG_ROU(pmu_dispatch_count);
+  const unsigned dispatch_reason = VERILOG_ROU(pmu_dispatch_reason);
+  assert(dispatch_count <= RtlConfig::DispatchWidth && dispatch_reason < RtlConfig::DispatchStopCount);
+  dispatch_metrics.cycles[dispatch_reason]++;
+  dispatch_metrics.zero_progress_cycles[dispatch_reason] += dispatch_count == 0;
+  dispatch_metrics.unfilled_slots[dispatch_reason] += RtlConfig::DispatchWidth - dispatch_count;
+  dispatch_metrics.histogram[dispatch_count]++;
+  dispatch_metrics.accepted += dispatch_count;
+  if (dispatch_reason == RtlConfig::DispatchStopEndpoint)
+  {
+    const unsigned domain = VERILOG_ROU(pmu_dispatch_stop_domain);
+    assert(domain < RtlConfig::ExecutionDomains);
+    dispatch_metrics.endpoint_cycles[domain]++;
+  }
+  const unsigned steer_candidates = VERILOG_ROU(pmu_steer_candidates);
+  const unsigned steer_accepted = VERILOG_ROU(pmu_steer_accepted);
+  const unsigned steer_bypass = VERILOG_ROU(pmu_steer_bypass);
+  const unsigned steer_pending = VERILOG_ROU(pmu_steer_pending);
+  const bool steer_oldest_blocked = VERILOG_ROU(pmu_steer_oldest_blocked);
+  assert(steer_accepted <= steer_candidates && steer_accepted <= RtlConfig::DispatchWidth
+         && steer_candidates <= RtlConfig::SteerScanEntries);
+  assert(steer_bypass <= steer_accepted && steer_pending <= RtlConfig::ROBEntries);
+  rob_dispatch_metrics.candidates += steer_candidates;
+  rob_dispatch_metrics.accepted += steer_accepted;
+  rob_dispatch_metrics.bypass += steer_bypass;
+  rob_dispatch_metrics.oldest_blocked_cycles += steer_oldest_blocked;
+  rob_dispatch_metrics.pending_sum += steer_pending;
+  rob_dispatch_metrics.pending_histogram[steer_pending]++;
+  rob_dispatch_metrics.pending_peak = std::max(rob_dispatch_metrics.pending_peak,
+                                               static_cast<uint64_t>(steer_pending));
+  unsigned steer_pending_domain_total = 0;
+  for (unsigned domain = 0; domain < RtlConfig::ExecutionDomains; ++domain)
+  {
+    const unsigned count = VERILOG_ROU(pmu_steer_pending_domain)[domain];
+    steer_pending_domain_total += count;
+    rob_dispatch_metrics.pending_domain_sum[domain] += count;
+    rob_dispatch_metrics.pending_domain_peak[domain] = std::max(
+        rob_dispatch_metrics.pending_domain_peak[domain], static_cast<uint64_t>(count));
+  }
+  assert(steer_pending_domain_total == steer_pending);
+  if (steer_oldest_blocked)
+  {
+    const unsigned domain = VERILOG_ROU(pmu_steer_blocked_domain);
+    assert(domain < RtlConfig::ExecutionDomains);
+    rob_dispatch_metrics.blocked_domains[domain]++;
+    if (domain == BranchDomain)
+    {
+      // Both observations capture the same pre-edge queue/candidate state.
+      const unsigned reason = VERILOG_CPU(ieu__DOT__u_brq__DOT__pmu_capacity_reason);
+      assert(reason > 0 && reason < branch_capacity_reasons.size());
+      branch_capacity_reasons[reason]++;
+    }
+  }
+  pmu.alq_ready_entry_cycles += VERILOG_CPU(ieu__DOT__u_alq__DOT__pmu_select_ready);
+  const unsigned alq_issue_count = VERILOG_CPU(ieu__DOT__u_alq__DOT__pmu_select_issued);
+  assert(alq_issue_count <= RtlConfig::IntegerIssuePorts);
+  pmu.alq_issued += alq_issue_count;
+  alq_issue_histogram[alq_issue_count]++;
+  pmu.alq_rebalance_gain += VERILOG_CPU(ieu__DOT__u_alq__DOT__pmu_select_gain);
+  pmu.alq_reclaim_allocations += VERILOG_CPU(ieu__DOT__u_alq__DOT__pmu_reclaim_allocations);
+  pmu.alq_extra_port_issues += VERILOG_CPU(ieu__DOT__pmu_alq_extra_port_count);
+  // Sample every registered retirement, independently of physical issue ports.
   bool wb_valid = *(uint8_t *)&VERILOG_CPU(cmu__DOT__valid);
-  bool wb_valid_b = *(uint8_t *)&VERILOG_CPU(cmu__DOT__valid_b);
-  sample_branch(wb_valid,
-                *(uint8_t *)&VERILOG_CPU(cmu__DOT__pmu_ben_a),
-                *(uint8_t *)&VERILOG_CPU(cmu__DOT__pmu_jen_a),
-                *(uint8_t *)&VERILOG_CPU(cmu__DOT__pmu_jren_a),
-                *(uint8_t *)&VERILOG_CPU(cmu__DOT__pmu_mispredict_a));
-  sample_branch(wb_valid_b,
-                *(uint8_t *)&VERILOG_CPU(cmu__DOT__pmu_ben_b),
-                *(uint8_t *)&VERILOG_CPU(cmu__DOT__pmu_jen_b),
-                *(uint8_t *)&VERILOG_CPU(cmu__DOT__pmu_jren_b),
-                *(uint8_t *)&VERILOG_CPU(cmu__DOT__pmu_mispredict_b));
+  const uint32_t retire_count = VERILOG_CPU(cmu__DOT__retire_count);
+  for (uint32_t slot = 0; slot < retire_count; ++slot)
+    sample_branch(true, VERILOG_CPU(cmu__DOT__ben_slots)[slot],
+                  VERILOG_CPU(cmu__DOT__jen_slots)[slot],
+                  VERILOG_CPU(cmu__DOT__jren_slots)[slot],
+                  VERILOG_CPU(cmu__DOT__mispredict_slots)[slot]);
   bool ifu_hazard = *(uint8_t *)&VERILOG_CPU(ifu__DOT__ifu_hazard);
   bool ifu_fetch_fire = *(uint8_t *)&VERILOG_CPU(ifu__DOT__pmu_fetch_fire);
-  uint8_t ifu_fetch_slots = *(uint8_t *)&VERILOG_CPU(ifu__DOT__pmu_fetch_slots);
+  uint32_t ifu_fetch_slots = VERILOG_CPU(ifu__DOT__pmu_fetch_slots);
   bool ifu_fetch_response_consume = *(uint8_t *)&VERILOG_CPU(ifu__DOT__pmu_fetch_response_consume);
-  bool ifu_fetch_dual = *(uint8_t *)&VERILOG_CPU(ifu__DOT__pmu_fetch_dual_fire);
+  bool ifu_fetch_multi = ifu_fetch_slots > 1;
   bool ifu_fetch_bpu_taken = *(uint8_t *)&VERILOG_CPU(ifu__DOT__pmu_fetch_bpu_taken);
-  bool ifu_fetch_slot_a_control = *(uint8_t *)&VERILOG_CPU(ifu__DOT__pmu_fetch_slot_a_control);
-  bool ifu_fetch_slot_b_control = *(uint8_t *)&VERILOG_CPU(ifu__DOT__pmu_fetch_slot_b_control);
-  bool ifu_fetch_slot_b_jal_pack = *(uint8_t *)&VERILOG_CPU(ifu__DOT__pmu_fetch_slot_b_jal_pack);
-  bool ifu_fetch_slot_b_cond_pack = *(uint8_t *)&VERILOG_CPU(ifu__DOT__pmu_fetch_slot_b_cond_pack);
+  bool ifu_fetch_first_control = *(uint8_t *)&VERILOG_CPU(ifu__DOT__pmu_fetch_first_control);
+  bool ifu_fetch_aux_conditional = *(uint8_t *)&VERILOG_CPU(ifu__DOT__pmu_fetch_aux_conditional);
+  bool ifu_fetch_nonfirst_jal_pack = *(uint8_t *)&VERILOG_CPU(ifu__DOT__pmu_fetch_nonfirst_jal_pack);
+  bool ifu_fetch_nonfirst_cond_pack = *(uint8_t *)&VERILOG_CPU(ifu__DOT__pmu_fetch_nonfirst_cond_pack);
   bool ifu_fetch_n1_unavailable = *(uint8_t *)&VERILOG_CPU(ifu__DOT__pmu_fetch_n1_unavailable);
   bool ifu_fetch_n1_unavailable_unaligned = *(uint8_t *)&VERILOG_CPU(ifu__DOT__pmu_fetch_n1_unavailable_unaligned);
   bool ifu_fetch_n1_unavailable_l1i = *(uint8_t *)&VERILOG_CPU(ifu__DOT__pmu_fetch_n1_unavailable_l1i);
@@ -161,7 +322,7 @@ void perf_sample_per_cycle()
   bool fqu_full = *(uint8_t *)&VERILOG_CPU(fqu__DOT__pmu_full);
   uint8_t fqu_count = *(uint8_t *)&VERILOG_CPU(fqu__DOT__pmu_count);
 
-  bool rou_ready = *(uint8_t *)&VERILOG_ROU(ready_a);
+  bool rou_ready = VERILOG_ROU(pmu_enqueue_ready);
   // OoO scheduler stall: any ALU-class IQ holds pending work but no IEU pipe
   // issued this cycle. The IOQ is owned by the LSU.
   bool exu_ooo_valid = *(uint8_t *)&VERILOG_CPU(ieu__DOT__pmu_ooo_valid);
@@ -175,7 +336,6 @@ void perf_sample_per_cycle()
   bool lsu_load_in_sq = *(uint8_t *)&VERILOG_CPU(lsu__DOT__u_sq__DOT__load_in_sq);
   bool lsu_raddr_valid = *(uint8_t *)&VERILOG_CPU(lsu__DOT__u_sq__DOT__raddr_valid);
   bool wbu_valid = *(uint8_t *)&VERILOG_CPU(cmu__DOT__valid);
-  bool wbu_valid_b = wb_valid_b;
   uint8_t l1i_state = *(uint8_t *)&VERILOG_CPU(l1i_cache__DOT__l1i_state);
   if (ifu_fetch_fire)
   {
@@ -183,12 +343,12 @@ void perf_sample_per_cycle()
   }
   pmu.ifu_fetch_inst_cnt += ifu_fetch_slots;
   pmu.ifu_fetch_response_cnt += ifu_fetch_response_consume ? 1 : 0;
-  pmu.ifu_dual_fetch_cnt += ifu_fetch_dual ? 1 : 0;
+  pmu.ifu_multi_fetch_cnt += ifu_fetch_multi ? 1 : 0;
   pmu.ifu_fetch_bpu_taken_cnt += ifu_fetch_bpu_taken ? 1 : 0;
-  pmu.ifu_fetch_slot_a_control_cnt += ifu_fetch_slot_a_control ? 1 : 0;
-  pmu.ifu_fetch_slot_b_control_cnt += ifu_fetch_slot_b_control ? 1 : 0;
-  pmu.ifu_fetch_slot_b_jal_pack_cnt += ifu_fetch_slot_b_jal_pack ? 1 : 0;
-  pmu.ifu_fetch_slot_b_cond_pack_cnt += ifu_fetch_slot_b_cond_pack ? 1 : 0;
+  pmu.ifu_fetch_first_control_cnt += ifu_fetch_first_control ? 1 : 0;
+  pmu.ifu_fetch_aux_conditional_cnt += ifu_fetch_aux_conditional ? 1 : 0;
+  pmu.ifu_fetch_nonfirst_jal_pack_cnt += ifu_fetch_nonfirst_jal_pack ? 1 : 0;
+  pmu.ifu_fetch_nonfirst_cond_pack_cnt += ifu_fetch_nonfirst_cond_pack ? 1 : 0;
   pmu.ifu_fetch_n1_unavailable_cnt += ifu_fetch_n1_unavailable ? 1 : 0;
   pmu.ifu_fetch_n1_unavailable_unaligned_cnt += ifu_fetch_n1_unavailable_unaligned ? 1 : 0;
   pmu.ifu_fetch_n1_unavailable_l1i_cnt += ifu_fetch_n1_unavailable_l1i ? 1 : 0;
@@ -198,9 +358,23 @@ void perf_sample_per_cycle()
   pmu.ifu_stall_cycle += ifu_stall ? 1 : 0;
   pmu.ifu_sys_hazard_cycle += ifu_hazard ? 1 : 0;
   // ROU structural hazard: RNU has renamed work but the dispatch path cannot
-  // accept it. `ready_a` is UOQ-space based, so this is not a ROB-full probe.
-  bool rnu_valid = *(uint8_t *)&VERILOG_CPU(rnu__DOT__rnq_tail_valid_a);
+  // accept it. Ordered UOQ readiness is space based, so this is not a
+  // ROB-full probe.
+  bool rnu_valid = VERILOG_CPU(rnu__DOT__pmu_pending);
   pmu.rou_hazard_cycle += (rnu_valid && !rou_ready) ? 1 : 0;
+  const bool checkpoint_full = VERILOG_CPU(rnu__DOT__pmu_checkpoint_full);
+  const bool checkpoint_stall = VERILOG_CPU(rnu__DOT__pmu_checkpoint_stall);
+  const bool rename_recovery_fence = VERILOG_CPU(rnu__DOT__pmu_recovery_fence);
+  const bool recovery_early_redirect = VERILOG_ROU(pmu_recovery_redirect);
+  const uint32_t checkpoint_occupancy = VERILOG_CPU(rnu__DOT__pmu_checkpoint_occupancy);
+  assert(checkpoint_occupancy <= RtlConfig::BranchCheckpoints);
+  pmu.rename_checkpoint_full_cycle += checkpoint_full;
+  pmu.rename_checkpoint_stall_cycle += checkpoint_stall;
+  pmu.rename_checkpoint_occupancy_sum += checkpoint_occupancy;
+  if (pmu.rename_checkpoint_peak < static_cast<long long>(checkpoint_occupancy))
+    pmu.rename_checkpoint_peak = checkpoint_occupancy;
+  pmu.rename_recovery_fence_cycle += rename_recovery_fence;
+  pmu.recovery_early_redirect_events += recovery_early_redirect;
   if (exu_ooo_valid && !exu_ooo_valid_found)
   {
     pmu.exu_ooo_stall_cycle++;
@@ -213,7 +387,7 @@ void perf_sample_per_cycle()
   // SQ stall: only count when a ready store at ROB head is blocked by full SQ
   bool rou_sq_stall = *(uint8_t *)&VERILOG_ROU(pmu_sq_stall);
   pmu.lsu_sq_stall_cycle += rou_sq_stall ? 1 : 0;
-  // IDU early resteer: statically resolvable IFU correction.
+  // IDU early resteer: static decode or speculative RAS target correction.
   bool early_resteer = *(uint8_t *)&VERILOG_CPU(idu__DOT__pmu_early_resteer);
   pmu.early_resteer_cnt += early_resteer ? 1 : 0;
 
@@ -225,10 +399,10 @@ void perf_sample_per_cycle()
   // flush and per-slot commit snapshots, which are aligned with `wb_valid`.
   bool flush_pipe_r = *(uint8_t *)&VERILOG_CPU(cmu__DOT__flush_pipe_r);
   bool branch_flush = flush_pipe_r && wb_valid
-      && *(uint8_t *)&VERILOG_CPU(cmu__DOT__pmu_mispredict_a)
-      && (*(uint8_t *)&VERILOG_CPU(cmu__DOT__pmu_ben_a)
-          || *(uint8_t *)&VERILOG_CPU(cmu__DOT__pmu_jen_a)
-          || *(uint8_t *)&VERILOG_CPU(cmu__DOT__pmu_jren_a));
+      && VERILOG_CPU(cmu__DOT__mispredict_slots)[0]
+      && (VERILOG_CPU(cmu__DOT__ben_slots)[0]
+          || VERILOG_CPU(cmu__DOT__jen_slots)[0]
+          || VERILOG_CPU(cmu__DOT__jren_slots)[0]);
   bool nonbranch_flush = flush_pipe_r && !branch_flush;
   if (branch_flush)
   {
@@ -248,7 +422,8 @@ void perf_sample_per_cycle()
   pmu.nonbranch_flush_events += nonbranch_flush ? 1 : 0;
   pmu.lsu_fwd_cnt += (lsu_raddr_valid && lsu_fwd_hit) ? 1 : 0;
   pmu.lsu_sq_conflict_cnt += (lsu_raddr_valid && lsu_load_in_sq) ? 1 : 0;
-  pmu.dual_commit_cnt += (wbu_valid && wbu_valid_b) ? 1 : 0;
+  pmu.dual_commit_cnt += retire_count == 2 ? 1 : 0;
+  pmu.commit_multi_inst += retire_count > 1 ? retire_count : 0;
   if (!wbu_valid)
   {
     pmu.wbu_stall_cycle++;
@@ -324,7 +499,9 @@ void perf_sample_per_cycle()
   sampler_state.prev_sq_full = sq_full;
 
   // 3. Commit-width distribution (per cycle).
-  if (wbu_valid && wbu_valid_b)
+  if (retire_count > 2)
+    pmu.commit_wide_cycle++;
+  else if (retire_count == 2)
     pmu.commit_2_cycle++;
   else if (wbu_valid)
     pmu.commit_1_cycle++;
@@ -529,16 +706,20 @@ void perf()
   Log("hazard cycle of ifu_sys: %6lld,%2.0f%%, rou_cycle: %6lld,%2.0f%% (structural)",
       pmu.ifu_sys_hazard_cycle, percentage(pmu.ifu_sys_hazard_cycle, pmu.active_cycle),
       pmu.rou_hazard_cycle, percentage(pmu.rou_hazard_cycle, pmu.active_cycle));
+  Log("Rename checkpoints: pool full %lld cycles, allocation stalls %lld cycles, occupancy avg %.3f, peak %lld; recovery fence %lld cycles",
+      pmu.rename_checkpoint_full_cycle, pmu.rename_checkpoint_stall_cycle,
+      pmu.active_cycle ? (double)pmu.rename_checkpoint_occupancy_sum / pmu.active_cycle : 0.0,
+      pmu.rename_checkpoint_peak, pmu.rename_recovery_fence_cycle);
+  Log("Early recovery: redirects %lld, pending-fence window %lld cycles",
+      pmu.recovery_early_redirect_events, pmu.rename_recovery_fence_cycle);
   Log("LSU fwd: %lld, sq_conflict: %lld", pmu.lsu_fwd_cnt, pmu.lsu_sq_conflict_cnt);
-  // Dual-commit: report both commit-cycle and retired-instruction shares.
-  //   * fraction of commit cycles (i.e. cycles where >=1 inst committed)
-  //   * fraction of total instructions committed in dual mode (2*dual / instr)
-  long long int commit_cycles = pmu.commit_1_cycle + pmu.commit_2_cycle;
-  Log("Dual commit: %lld cycles, %2.1f%% of commit cycles, %2.1f%% of insts",
-      pmu.commit_2_cycle,
-      percentage(pmu.commit_2_cycle, commit_cycles),
-      percentage(2 * pmu.commit_2_cycle, pmu.instr_cnt));
-  Log("Early resteer: %lld events (statically resolvable IFU corrections)",
+  // Multi-commit shares use exact retired-instruction counts, not 2*cycles.
+  long long int multi_cycles = pmu.commit_2_cycle + pmu.commit_wide_cycle;
+  long long int commit_cycles = pmu.commit_1_cycle + multi_cycles;
+  Log("Multi commit: %lld cycles, %2.1f%% of commit cycles, %2.1f%% of insts",
+      multi_cycles, percentage(multi_cycles, commit_cycles),
+      percentage(pmu.commit_multi_inst, pmu.instr_cnt));
+  Log("Early resteer: %lld events (decode-stage IFU corrections)",
       pmu.early_resteer_cnt);
   Log("Commit flush: branch %lld, non-branch %lld; branch recovery: %lld completed, "
       "%lld wait cycles (%4.2f cycles/completed), %lld overlaps",
@@ -548,6 +729,7 @@ void perf()
           ? (double)pmu.branch_recovery_wait_cycles / pmu.branch_recovery_completed
           : 0.0,
       pmu.branch_recovery_overlap_events);
+  report_recovery_metrics();
 
   // -------------------------------------------------------------------
   // IFU stall decomposition (Raptor-local, mutually exclusive roots).
@@ -560,12 +742,11 @@ void perf()
       (double)pmu.ifu_icache_miss_cycle, percentage(pmu.ifu_icache_miss_cycle, pmu.ifu_stall_cycle),
       (double)pmu.ifu_flush_cycle, percentage(pmu.ifu_flush_cycle, pmu.ifu_stall_cycle),
       (double)pmu.ifu_empty_cycle, percentage(pmu.ifu_empty_cycle, pmu.ifu_stall_cycle));
-  Log("IFU roots exact: total %lld, no-response %lld, response-stage %lld, serializing %lld",
+  Log("IFU probes (overlapping): total %lld, no-response %lld, redirect %lld, serializing %lld",
       pmu.ifu_stall_cycle, pmu.ifu_icache_miss_cycle,
       pmu.ifu_flush_cycle, pmu.ifu_empty_cycle);
-  Log("response-stage origin: redirect %lld, prior-L1I-gap %lld, other %lld",
-      pmu.ifu_response_after_redirect_cycle, pmu.ifu_response_after_l1i_gap_cycle,
-      pmu.ifu_flush_cycle - pmu.ifu_response_after_redirect_cycle - pmu.ifu_response_after_l1i_gap_cycle);
+  Log("response activity probes: redirect %lld, empty-buffer arrival %lld",
+      pmu.ifu_response_after_redirect_cycle, pmu.ifu_response_after_l1i_gap_cycle);
   Log("response-stage direct-bypass candidates: %lld", pmu.ifu_response_bypass_candidate_cycle);
   Log("no-response roots: refill/PTW %lld, SRAM warmup %lld, tag miss %lld, next-word miss %lld, other %lld",
       pmu.ifu_no_response_refill_cycle, pmu.ifu_no_response_sram_warmup_cycle,
@@ -574,27 +755,27 @@ void perf()
   Log("L1I refill starts: line miss %lld, current-word hole %lld, next-line miss %lld, next-word hole %lld",
       pmu.l1i_refill_start_line_miss, pmu.l1i_refill_start_current_hole,
       pmu.l1i_refill_start_next_line_miss, pmu.l1i_refill_start_next_hole);
-  Log("FQU: full %lld cycles, buffered %lld cycles, avg occupancy %4.2f / 2",
+  Log("FQU: full %lld cycles, buffered %lld cycles, avg occupancy %4.2f instructions",
       pmu.fqu_full_cycle, pmu.fqu_buffered_cycle,
       pmu.active_cycle ? (double)pmu.fqu_occupancy_sum / pmu.active_cycle : 0.0);
 
   Log("======== Fetch Delivery ========");
-  Log("packets: %lld, instructions: %lld, avg/packet: %4.2f, dual packets: %lld (%2.1f%%)",
+  Log("deliveries: %lld, instructions: %lld, avg/delivery: %4.2f, multi-slot deliveries: %lld (%2.1f%%)",
       pmu.ifu_fetch_cnt, pmu.ifu_fetch_inst_cnt,
       pmu.ifu_fetch_cnt ? (double)pmu.ifu_fetch_inst_cnt / pmu.ifu_fetch_cnt : 0.0,
-      pmu.ifu_dual_fetch_cnt, percentage(pmu.ifu_dual_fetch_cnt, pmu.ifu_fetch_cnt));
-  Log("L1I response consumes: %lld; slot-B CFI deferrals: %lld (%2.1f%% consumes, %4.1f / 1K active cycles)",
-      pmu.ifu_fetch_response_cnt, pmu.ifu_fetch_slot_b_control_cnt,
-      percentage(pmu.ifu_fetch_slot_b_control_cnt, pmu.ifu_fetch_response_cnt),
+      pmu.ifu_multi_fetch_cnt, percentage(pmu.ifu_multi_fetch_cnt, pmu.ifu_fetch_cnt));
+  Log("L1I response consumes: %lld; auxiliary conditional queries: %lld (%2.1f%% consumes, %4.1f / 1K active cycles)",
+      pmu.ifu_fetch_response_cnt, pmu.ifu_fetch_aux_conditional_cnt,
+      percentage(pmu.ifu_fetch_aux_conditional_cnt, pmu.ifu_fetch_response_cnt),
       pmu.active_cycle
-          ? 1000.0 * (double)pmu.ifu_fetch_slot_b_control_cnt / pmu.active_cycle
+          ? 1000.0 * (double)pmu.ifu_fetch_aux_conditional_cnt / pmu.active_cycle
           : 0.0);
-  Log("slot-B direct-JAL packs: %lld (%2.1f%% response consumes)",
-      pmu.ifu_fetch_slot_b_jal_pack_cnt,
-      percentage(pmu.ifu_fetch_slot_b_jal_pack_cnt, pmu.ifu_fetch_response_cnt));
-  Log("slot-B conditional packs: %lld (%2.1f%% response consumes)",
-      pmu.ifu_fetch_slot_b_cond_pack_cnt,
-      percentage(pmu.ifu_fetch_slot_b_cond_pack_cnt, pmu.ifu_fetch_response_cnt));
+  Log("Non-first direct-JAL packs: %lld (%2.1f%% response consumes)",
+      pmu.ifu_fetch_nonfirst_jal_pack_cnt,
+      percentage(pmu.ifu_fetch_nonfirst_jal_pack_cnt, pmu.ifu_fetch_response_cnt));
+  Log("Non-first conditional packs: %lld (%2.1f%% response consumes)",
+      pmu.ifu_fetch_nonfirst_cond_pack_cnt,
+      percentage(pmu.ifu_fetch_nonfirst_cond_pack_cnt, pmu.ifu_fetch_response_cnt));
   Log("predicted target-steered packets: %lld (%2.1f%% response consumes)",
       pmu.ifu_fetch_target_steer_cnt,
       percentage(pmu.ifu_fetch_target_steer_cnt, pmu.ifu_fetch_response_cnt));
@@ -603,11 +784,11 @@ void perf()
       percentage(pmu.ifu_fetch_n1_unavailable_unaligned_cnt, pmu.ifu_fetch_response_cnt),
       pmu.ifu_fetch_n1_unavailable_l1i_cnt,
       percentage(pmu.ifu_fetch_n1_unavailable_l1i_cnt, pmu.ifu_fetch_response_cnt));
-  Log("slot-B loss (%% packets): BPU-taken %lld (%2.1f%%), A-control %lld (%2.1f%%), "
-      "B-control %lld (%2.1f%%), next-word unavailable %lld (%2.1f%%), IDU blocked %lld (%2.1f%%)",
+  Log("Fetch probes (overlapping): BPU-taken %lld (%2.1f%%), first-control %lld (%2.1f%%), "
+      "aux-conditional %lld (%2.1f%%), next-word unavailable %lld (%2.1f%%), downstream blocked %lld (%2.1f%%)",
       pmu.ifu_fetch_bpu_taken_cnt, percentage(pmu.ifu_fetch_bpu_taken_cnt, pmu.ifu_fetch_cnt),
-      pmu.ifu_fetch_slot_a_control_cnt, percentage(pmu.ifu_fetch_slot_a_control_cnt, pmu.ifu_fetch_cnt),
-      pmu.ifu_fetch_slot_b_control_cnt, percentage(pmu.ifu_fetch_slot_b_control_cnt, pmu.ifu_fetch_cnt),
+      pmu.ifu_fetch_first_control_cnt, percentage(pmu.ifu_fetch_first_control_cnt, pmu.ifu_fetch_cnt),
+      pmu.ifu_fetch_aux_conditional_cnt, percentage(pmu.ifu_fetch_aux_conditional_cnt, pmu.ifu_fetch_cnt),
       pmu.ifu_fetch_n1_unavailable_cnt, percentage(pmu.ifu_fetch_n1_unavailable_cnt, pmu.ifu_fetch_cnt),
       pmu.ifu_fetch_downstream_blocked_cycle,
       percentage(pmu.ifu_fetch_downstream_blocked_cycle, pmu.active_cycle));
@@ -637,11 +818,94 @@ void perf()
       (double)pmu.wbu_stall_cycle, percentage(pmu.wbu_stall_cycle, pmu.active_cycle),
       (double)pmu.commit_1_cycle, percentage(pmu.commit_1_cycle, pmu.active_cycle),
       (double)pmu.commit_2_cycle, percentage(pmu.commit_2_cycle, pmu.active_cycle));
+  Log("3+ commits: %lld cycles (%2.1f%%)", pmu.commit_wide_cycle,
+      percentage(pmu.commit_wide_cycle, pmu.active_cycle));
 
   // -------------------------------------------------------------------
   // Rename / dispatch status mix.
   // -------------------------------------------------------------------
   Log("======== Rename/Dispatch Status ========");
+  Log("ALQ selection: ready-entry cycles %lld, issued %lld, rebalance extra issues %lld",
+      pmu.alq_ready_entry_cycles, pmu.alq_issued, pmu.alq_rebalance_gain);
+  Log("ALQ issue-slot reclaim: allocations %lld", pmu.alq_reclaim_allocations);
+  for (unsigned n = 0; n <= RtlConfig::IntegerIssuePorts; ++n)
+    Log("ALQ issue histogram %u: cycles %llu", n,
+        static_cast<unsigned long long>(alq_issue_histogram[n]));
+  Log("ALQ extra physical ports (index >= 2): issues %lld", pmu.alq_extra_port_issues);
+  uint64_t dispatch_cycles = 0, unfilled_slots = 0, zero_progress_cycles = 0;
+  uint64_t histogram_cycles = 0, histogram_instructions = 0, endpoint_cycles = 0;
+  for (unsigned r = 0; r < RtlConfig::DispatchStopCount; r++)
+  {
+    dispatch_cycles += dispatch_metrics.cycles[r];
+    unfilled_slots += dispatch_metrics.unfilled_slots[r];
+    zero_progress_cycles += dispatch_metrics.zero_progress_cycles[r];
+    Log("Dispatch stop %s: cycles %" PRIu64 ", unfilled slots %" PRIu64 ", zero-progress cycles %" PRIu64,
+        dispatch_reason_name(r), dispatch_metrics.cycles[r], dispatch_metrics.unfilled_slots[r],
+        dispatch_metrics.zero_progress_cycles[r]);
+  }
+  for (unsigned n = 0; n <= RtlConfig::DispatchWidth; n++)
+  {
+    histogram_cycles += dispatch_metrics.histogram[n];
+    histogram_instructions += n * dispatch_metrics.histogram[n];
+    Log("Dispatch histogram %u: cycles %" PRIu64, n, dispatch_metrics.histogram[n]);
+  }
+  for (unsigned d = 0; d < RtlConfig::ExecutionDomains; d++)
+  {
+    endpoint_cycles += dispatch_metrics.endpoint_cycles[d];
+    Log("Dispatch endpoint domain %u: cycles %" PRIu64, d, dispatch_metrics.endpoint_cycles[d]);
+  }
+  assert(dispatch_cycles == (uint64_t)pmu.active_cycle && histogram_cycles == dispatch_cycles);
+  assert(histogram_instructions == dispatch_metrics.accepted);
+  assert(zero_progress_cycles == dispatch_metrics.histogram[0]);
+  assert(endpoint_cycles == dispatch_metrics.cycles[RtlConfig::DispatchStopEndpoint]);
+  assert(unfilled_slots + dispatch_metrics.accepted == RtlConfig::DispatchWidth * dispatch_cycles);
+  Log("Dispatch accounting: cycles %" PRIu64 ", width %u, accepted %" PRIu64 ", unfilled %" PRIu64,
+      dispatch_cycles, RtlConfig::DispatchWidth, dispatch_metrics.accepted, unfilled_slots);
+  Log("ROB dispatch steering: candidates %" PRIu64 ", accepted %" PRIu64
+      ", bypass %" PRIu64 ", oldest blocked %" PRIu64
+      ", pending avg %.3f, peak %" PRIu64,
+      rob_dispatch_metrics.candidates, rob_dispatch_metrics.accepted,
+      rob_dispatch_metrics.bypass, rob_dispatch_metrics.oldest_blocked_cycles,
+      pmu.active_cycle
+          ? static_cast<double>(rob_dispatch_metrics.pending_sum) / pmu.active_cycle : 0.0,
+      rob_dispatch_metrics.pending_peak);
+  uint64_t steer_blocked_cycles = 0;
+  for (unsigned d = 0; d < RtlConfig::ExecutionDomains; d++)
+  {
+    steer_blocked_cycles += rob_dispatch_metrics.blocked_domains[d];
+    Log("ROB dispatch blocked domain %u: cycles %" PRIu64,
+        d, rob_dispatch_metrics.blocked_domains[d]);
+  }
+  assert(steer_blocked_cycles == rob_dispatch_metrics.oldest_blocked_cycles);
+  uint64_t branch_classified = 0;
+  for (unsigned reason = 0; reason < branch_capacity_reasons.size(); ++reason)
+  {
+    branch_classified += branch_capacity_reasons[reason];
+    Log("ROB branch capacity reason %u: cycles %" PRIu64,
+        reason, branch_capacity_reasons[reason]);
+  }
+  assert(branch_classified == rob_dispatch_metrics.blocked_domains[BranchDomain]);
+  uint64_t steer_histogram_cycles = 0, steer_histogram_pending = 0;
+  uint64_t steer_histogram_peak = 0;
+  for (unsigned n = 0; n <= RtlConfig::ROBEntries; n++)
+  {
+    const uint64_t cycles = rob_dispatch_metrics.pending_histogram[n];
+    steer_histogram_cycles += cycles;
+    steer_histogram_pending += n * cycles;
+    if (cycles) steer_histogram_peak = n;
+    Log("ROB dispatch pending histogram %u: cycles %" PRIu64, n, cycles);
+  }
+  assert(steer_histogram_cycles == static_cast<uint64_t>(pmu.active_cycle));
+  assert(steer_histogram_pending == rob_dispatch_metrics.pending_sum);
+  assert(steer_histogram_peak == rob_dispatch_metrics.pending_peak);
+  uint64_t steer_pending_domain_sum = 0;
+  for (unsigned d = 0; d < RtlConfig::ExecutionDomains; d++)
+  {
+    steer_pending_domain_sum += rob_dispatch_metrics.pending_domain_sum[d];
+    Log("ROB dispatch pending domain %u: instruction-cycles %" PRIu64 ", peak %" PRIu64,
+        d, rob_dispatch_metrics.pending_domain_sum[d], rob_dispatch_metrics.pending_domain_peak[d]);
+  }
+  assert(steer_pending_domain_sum == rob_dispatch_metrics.pending_sum);
   Log("|%13s, %%|%13s, %%|%13s, %%|%13s, %%|",
       "Running", "Blocked", "Idle", "Squashing");
   Log("|%12.0e,%3.0f|%12.0e,%3.0f|%12.0e,%3.0f|%12.0e,%3.0f|",

@@ -6,10 +6,8 @@
 #include <readline/readline.h>
 #include <readline/history.h>
 #include <npc_verilog.h>
+#include <npc_eval.h>
 #include "verilated_fst_c.h"
-#ifdef CONFIG_NVBoard
-#include <nvboard.h>
-#endif
 
 #define MAX_INST_TO_PRINT 10
 #define MAX_IRING_SIZE 16
@@ -25,8 +23,34 @@ void serial_tick();
 unsigned serial_rx_pending();
 const char *serial_input_source();
 
-extern void (*ref_difftest_exec)(uint64_t n);
 extern long long int max_timeout;
+
+bool cpu_read_sq_snapshot_control(uint32_t *valid, uint32_t *committed,
+                                  uint8_t *capacity, uint8_t *head)
+{
+  *valid = uint32_t(VERILOG_CPU(lsu__DOT__u_sq__DOT__sq_valid));
+  *committed = uint32_t(VERILOG_CPU(lsu__DOT__u_sq__DOT__sq_committed));
+  *capacity = uint8_t(VERILOG_CPU(lsu__DOT__u_sq__DOT__sq_paddr).size());
+  *head = uint8_t(VERILOG_CPU(lsu__DOT__u_sq__DOT__sq_head));
+  if (*capacity == 0 || *capacity > 32)
+    return false;
+  for (uint8_t entry = 0; entry < *capacity; ++entry)
+  {
+    if ((*valid & (1u << entry)) == 0)
+      continue;
+    uint8_t alu = VERILOG_CPU(lsu__DOT__u_sq__DOT__sq_alu)[entry];
+    unsigned size = alu == 0x01 ? 1 : alu == 0x03 ? 2 :
+                    alu == 0x0f ? 4 : alu == 0x1f ? 8 : 0;
+    // The overlay holds one native word at a contiguous physical address.
+    // Let RTL finish FP64/split/CBO stores, including separately translated
+    // high beats, instead of inventing their remaining data or addresses.
+    if (size == 0 || size > sizeof(word_t)
+        || VERILOG_CPU(lsu__DOT__u_sq__DOT__sq_fp64)[entry]
+        || (VERILOG_CPU(lsu__DOT__u_sq__DOT__sq_paddr)[entry] & (size - 1)))
+      return false;
+  }
+  return true;
+}
 
 #ifdef CONFIG_ITRACE
 static char iringbuf[MAX_IRING_SIZE][128] = {};
@@ -51,18 +75,16 @@ static uint64_t tfp_inst = UINT64_MAX;
 static void dump_pipeline_stall_state()
 {
   Log("stall state: ROB head=%u tail=%u busy=%016llx head_valid=%u "
-      "store_ready=%u fence_ready=%u UOQ valid=%02x head=%u tail=%u",
-      (unsigned)VERILOG_ROU(rob_head), (unsigned)VERILOG_ROU(rob_tail_a),
+      "UOQ valid=%02x head=%u tail=%u",
+      (unsigned)VERILOG_ROU(rob_head), (unsigned)VERILOG_ROU(rob_tail),
       (unsigned long long)VERILOG_ROU(rob_entry_busy),
       (unsigned)VERILOG_ROU(head0_valid),
-      (unsigned)VERILOG_ROU(head0_store_ready),
-      (unsigned)VERILOG_ROU(head0_fence_ready),
       (unsigned)VERILOG_ROU(uoq_valid),
-      (unsigned)VERILOG_ROU(uoq_head_a), (unsigned)VERILOG_ROU(uoq_tail_a));
-  Log("stall state: IFU=%u L1I=%u IPTW=%u; L1D=%u DPTW=%u; "
+      (unsigned)VERILOG_ROU(uoq_head), (unsigned)VERILOG_ROU(uoq_tail));
+  Log("stall state: IFU buffered=%u L1I=%u IPTW=%u; L1D=%u DPTW=%u; "
       "AXI rd_out=%u req=%u resp=%u; bus l1d_busy=%u issued=%u "
       "mmio=%u skid=%u source=%u",
-      (unsigned)VERILOG_CPU(ifu__DOT__state_ifu),
+      (unsigned)VERILOG_CPU(ifu__DOT__held_count),
       (unsigned)VERILOG_CPU(l1i_cache__DOT__l1i_state),
       (unsigned)VERILOG_CPU(l1i_cache__DOT__u_iptw__DOT__state),
       (unsigned)VERILOG_CPU(l1d_cache__DOT__l1d_state),
@@ -140,15 +162,9 @@ void cpu_exec_set_threshold(uint64_t cycle, uint64_t inst)
 
 static void cpu_exec_one_cycle()
 {
-#ifdef CONFIG_NVBoard
-  if (!top->reset)
-  {
-    nvboard_update();
-  }
-#endif
 
   top->clock = (top->clock == 0) ? 1 : 0;
-  top->eval();
+  npc_eval(top);
   // Dump-gating semantics: -c/-i specify the START point of waveform capture.
   // Once either threshold is reached, dumping continues for the rest of the
   // run.  An unset threshold is sentinel'd to UINT64_MAX so it never fires on
@@ -160,7 +176,7 @@ static void cpu_exec_one_cycle()
   contextp->timeInc(1);
 
   top->clock = (top->clock == 0) ? 1 : 0;
-  top->eval();
+  npc_eval(top);
   if ((tfp) && ((pmu.active_cycle >= tfp_cycle) | (pmu.instr_cnt >= tfp_inst)))
   {
     tfp->dump(contextp->time());
@@ -231,8 +247,7 @@ void cpu_exec_init()
     iringbuf_rpc[i] = 0;
   }
 #endif
-  memset(&pmu, 0, sizeof(pmu));
-  perf_reset_sampler_state();
+  perf_reset_counters();
   flow_check_init();
 }
 
@@ -275,17 +290,14 @@ void cpu_exec(uint64_t n)
     // Sample the cycle and every committed slot before handling an ebreak or
     // another simulator-side stop.  The old special case counted only one CSR
     // instruction and dropped both the final cycle and slot A when ebreak was
-    // in slot B of a dual commit.
+    // in any position of a multi-instruction commit.
     perf_sample_per_cycle();
     uint8_t cmu_valid = *(uint8_t *)&VERILOG_CPU(cmu__DOT__valid);
-    uint8_t cmu_valid_b = *(uint8_t *)&VERILOG_CPU(cmu__DOT__valid_b);
+    uint32_t cmu_retire_count = VERILOG_CPU(cmu__DOT__retire_count);
     if (cmu_valid)
     {
-      const uint32_t pmu_inst_a = *(uint32_t *)&VERILOG_CPU(cmu__DOT__pmu_inst_a);
-      const uint32_t pmu_inst_b = *(uint32_t *)&VERILOG_CPU(cmu__DOT__pmu_inst_b);
-      perf_sample_per_inst(pmu_inst_a);
-      if (cmu_valid_b)
-        perf_sample_per_inst(pmu_inst_b);
+      for (uint32_t slot = 0; slot < cmu_retire_count; ++slot)
+        perf_sample_per_inst(VERILOG_CPU(cmu__DOT__inst_slots)[slot]);
       cur_inst_cycle = 0;
     }
     else
@@ -346,31 +358,25 @@ void cpu_exec(uint64_t n)
     }
     if (cmu_valid)
     {
-      word_t cmu_rpc_a = *(word_t *)&VERILOG_CPU(cmu__DOT__rpc_a);
-      word_t cmu_rpc_b = *(word_t *)&VERILOG_CPU(cmu__DOT__rpc_b);
-      word_t cmu_npc_a = *(word_t *)&VERILOG_CPU(cmu__DOT__npc_a);
-      word_t cmu_npc_b = *(word_t *)&VERILOG_CPU(cmu__DOT__npc_b);
-      word_t flow_next_a = cmu_valid_b ? cmu_rpc_b : cmu_npc_a;
-      /* Checkpoint load/PC trigger hooks use registered per-slot commit PCs
-       * so dual-commit slot 0 is visible to the simulator. */
-      bool checkpoint_resumed = checkpoint_load_post_trampoline_tick(cmu_rpc_a);
-      checkpoint_note_commit(cmu_rpc_a);
-      flow_check_commit(cmu_rpc_a, flow_next_a, 'A');
-      if (npc.state != NPC_RUNNING)
-        break;
-      if (cmu_valid_b)
+      bool checkpoint_resumed = false;
+      for (uint32_t slot = 0; slot < cmu_retire_count; ++slot)
       {
-        checkpoint_resumed |= checkpoint_load_post_trampoline_tick(cmu_rpc_b);
-        checkpoint_note_commit(cmu_rpc_b);
-        flow_check_commit(cmu_rpc_b, cmu_npc_b, 'B');
-        if (npc.state != NPC_RUNNING)
-          break;
+        word_t slot_pc = VERILOG_CPU(cmu__DOT__rpc_slots)[slot];
+        word_t slot_next = VERILOG_CPU(cmu__DOT__npc_slots)[slot];
+        checkpoint_resumed |= checkpoint_load_post_trampoline_tick(slot_pc);
+        checkpoint_note_commit(slot_pc);
+        flow_check_commit(slot_pc, slot_next, char('0' + slot));
+        if (npc.state != NPC_RUNNING) break;
       }
+      if (npc.state != NPC_RUNNING) break;
       flow_check_async_redirect_after_sample();
 #ifdef CONFIG_ITRACE
-      iringbuf_rpc[iringhead] = *npc.rpc;
-      iringbuf_inst[iringhead] = *(word_t *)(npc.inst);
-      iringhead = (iringhead + 1) % MAX_IRING_SIZE;
+      for (uint32_t slot = 0; slot < cmu_retire_count; ++slot)
+      {
+        iringbuf_rpc[iringhead] = VERILOG_CPU(cmu__DOT__rpc_slots)[slot];
+        iringbuf_inst[iringhead] = VERILOG_CPU(cmu__DOT__inst_slots)[slot];
+        iringhead = (iringhead + 1) % MAX_IRING_SIZE;
+      }
 #endif
 
 #ifdef CONFIG_DIFFTEST
@@ -424,10 +430,21 @@ void cpu_exec(uint64_t n)
         // so we leave it to the regular CSR comparison.
         {
           extern void (*ref_difftest_set_stip)(uint8_t);
-          if (ref_difftest_set_stip && npc.menvcfg != NULL &&
-              (((uint64_t)*npc.menvcfg >> 63) & 1u))
+          extern void (*ref_difftest_set_seip)(uint8_t);
+          // Preserve the distinction between the controller level E and the
+          // software SEIP bit B. CSRRS/CSRRC read B|E but only update B.
+          // Observe the driving PLIC flop for hart 0. Verilator can retain an
+          // unused public core input shadow without updating it after reset.
+          if (ref_difftest_set_seip)
+            ref_difftest_set_seip(VERILOG_PLIC(seip_q) & 1u);
+#ifdef CONFIG_ISA64
+          bool stce = npc.menvcfg != NULL && (((uint64_t)*npc.menvcfg >> 63) & 1u);
+#else
+          bool stce = (VERILOG_CPU(csrs__DOT__csr)[MENVCFGH] >> 31) & 1u;
+#endif
+          if (ref_difftest_set_stip && stce)
           {
-            uint8_t dut_stip = (*npc.sip____ >> 5) & 1u;
+            uint8_t dut_stip = (*npc.mip____ >> 5) & 1u;
             ref_difftest_set_stip(dut_stip);
           }
         }
@@ -446,13 +463,8 @@ void cpu_exec(uint64_t n)
           ref_difftest_plic_raise(1u);
         s_prev_ext_irq = cur_ext_irq;
       }
-      if (cmu_valid_b)
-      {
-        // Dual commit: step NEMU for slot 0 (no comparison).
-        // difftest_skip is guaranteed absent during dual commit,
-        // so just execute NEMU once for the intermediate instruction.
-        ref_difftest_exec(1);
-      }
+      // Intermediate retirements advance REF; compare the final group state.
+      // Skip/CSR/trap instructions retire alone by the ROB's explicit policy.
       if (((*(npc.inst) & 0xfff0707f) == 0xc0102073))
       {
         // rdtime instruction skipped in difftest
@@ -477,7 +489,7 @@ void cpu_exec(uint64_t n)
       // REF must first step for that instruction, then take the interrupt so
       // that sepc correctly points at the following PC (= stvec target on next
       // commit). Order: difftest_step() -> difftest_raise_intr().
-      difftest_step(*npc.rpc);
+      difftest_step(*npc.rpc, cmu_retire_count);
       {
         uint8_t cur_recieved_trap = *(uint8_t *)&VERILOG_ROU(recieved_trap);
         if (cur_recieved_trap)
@@ -496,6 +508,9 @@ void cpu_exec(uint64_t n)
       npc.last_inst = *(npc.inst);
     }
 #ifdef CONFIG_DIFFTEST
+    // Apply external write failures after this cycle's retired CSR writes:
+    // a same-cycle hardware event wins a W1C acknowledgement.
+    difftest_apply_store_error();
     // An interrupt captured while the ROB is empty has no commit pulse on
     // which to synchronize REF. Inject it directly before the first handler
     // instruction commits; commit-associated interrupts are handled above.

@@ -8,7 +8,7 @@ from pathlib import Path
 
 
 AREA_RE = re.compile(r"Chip area for module '\\\S+':\s+(\S+)")
-CELLS_RE = re.compile(r"^\s*(\d+)\s+\S+\s+cells\s*$")
+CELLS_RE = re.compile(r"^\s*(\d+)\s+(?:\S+\s+)?cells\s*$")
 POWER_RE = re.compile(
     r"^Total\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+\S+%\s*$"
 )
@@ -82,21 +82,15 @@ def collect_module(module_dir: Path) -> dict[str, object]:
 
     cells, area = parse_stat(stat_reports[0])
     timing = parse_sta_summary(sta_reports[0])
-    period_min = timing.get("period_min_ns")
-    fmax = timing.get("fmax_mhz")
-    if period_min is None and "period_ns" in timing and "wns_ns" in timing:
-        period_min_value = float(timing["period_ns"]) - float(timing["wns_ns"])
-        period_min = str(period_min_value)
-        if period_min_value > 0.0:
-            fmax = str(1000.0 / period_min_value)
+    if timing.get("status", "ok") != "ok":
+        return {"status": "invalid"}
     return {
         "status": "ok",
         "cells": cells,
         "area": area,
         "wns": timing.get("wns_ns"),
         "tns": timing.get("tns_ns"),
-        "period_min": period_min,
-        "fmax": fmax,
+        "reg_setup_budget": timing.get("reg_setup_budget_ns"),
         "power": parse_total_power(sta_log),
     }
 
@@ -114,15 +108,14 @@ def main() -> None:
             complete += 1
         rows.append(
             "| {module} | {status} | {cells} | {area} | {wns} | {tns} | "
-            "{period_min} | {fmax} | {power} |".format(
+            "{reg_setup_budget} | {power} |".format(
                 module=module,
                 status=result["status"],
                 cells=result.get("cells", "N/A"),
                 area=number(result.get("area")),
                 wns=number(result.get("wns")),
                 tns=number(result.get("tns")),
-                period_min=number(result.get("period_min")),
-                fmax=number(result.get("fmax"), 2),
+                reg_setup_budget=number(result.get("reg_setup_budget")),
                 power=power(result.get("power")),
             )
         )
@@ -137,11 +130,12 @@ def main() -> None:
             f"- Complete reports: `{complete}/{len(args.modules)}`",
             f"- Generated: `{generated}`",
             "",
-            "| Module | Status | Cells | Area (PDK units) | WNS (ns) | TNS (ns) | Min period (ns) | Fmax (MHz) | Total power (W) |",
-            "|---|---:|---:|---:|---:|---:|---:|---:|---:|",
+            "| Module | Status | Cells | Area (PDK units) | WNS (ns) | TNS (ns) | Register setup budget (ns) | Total power (W) |",
+            "|---|---:|---:|---:|---:|---:|---:|---:|",
             *rows,
             "",
             "Power is an OpenSTA vectorless estimate. Area units follow the selected Liberty library.",
+            "Register setup budget is target period minus register-only setup slack; it is not full-design Fmax. Global WNS includes IO constraints. Legacy reports without this metric show N/A.",
             "",
         ]
     )

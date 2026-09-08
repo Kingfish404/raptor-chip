@@ -5,6 +5,8 @@
 !rvfi/
 !rvfi/**
 !formal_*.sv
+!npc_response_stability_main.cpp
+!synthesis_driver_fixture.sv
 !*_formal_if.sv
 !rapt_soc_if.svh
 !*.sby

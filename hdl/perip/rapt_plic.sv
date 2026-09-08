@@ -35,15 +35,17 @@ module rapt_plic #(
     input clock,
     input reset,
 
-    plic_bus_if.slave plic_bus
 `ifdef FORMAL
-    , output logic [2:0] formal_priority[NDEV+1],
+    plic_bus_if.slave plic_bus,
+    output logic [2:0] formal_priority[NDEV+1],
     output logic [NDEV:0] formal_pending,
     output logic [NDEV:0] formal_enable[NCTX],
     output logic [2:0] formal_threshold[NCTX],
     output logic [NDEV:0] formal_gateway_busy,
     output logic [NHART-1:0] formal_meip,
     output logic [NHART-1:0] formal_seip
+`else
+    plic_bus_if.slave plic_bus
 `endif
 );
   // Width helpers (avoid 0-width when NDEV=1).
@@ -178,7 +180,8 @@ module rapt_plic #(
   always_comb begin
     for (int c = 0; c < NCTX; c++) begin
       best_id[c]        = '0;
-      best_prio[c]      = threshold_q[c];
+      // Threshold masks notifications, not polling via claim reads.
+      best_prio[c]      = '0;
       ctx_irq_level[c]  = 1'b0;
       for (int s = 1; s <= NDEV; s++) begin
         if (pending_q[s] && enable_q[c][s] && (priority_q[s] > threshold_q[c])) begin
@@ -252,20 +255,30 @@ module rapt_plic #(
   logic sw_pending_set;
   logic [NDEV:0] pending_next;
   logic [NDEV:0] gateway_busy_next;
+  logic [31:0] write_mask, write_bits;
+  for (genvar byte_idx = 0; byte_idx < 4; byte_idx++) begin : g_write_mask
+    assign write_mask[8*byte_idx+:8] = {8{plic_bus.wstrb[byte_idx]}};
+  end
+  assign write_bits = plic_bus.wdata[31:0] & write_mask;
 
   assign claim_fire = plic_bus.ar_commit && r_cctx >= 0 && r_creg == 12'h4
                       && best_id[r_cctx] != '0;
   assign claim_id = claim_fire ? best_id[r_cctx] : '0;
-  assign complete_id = plic_bus.wdata[IdW-1:0];
+  assign complete_id = write_bits[IdW-1:0];
   assign complete_fire = plic_bus.wvalid && w_cctx >= 0 && w_creg == 12'h4
-                         && complete_id_claimed;
+                         && plic_bus.wstrb[0] && complete_id_claimed;
   assign sw_pending_set = plic_bus.wvalid && is_pending(w_off);
 
   always_comb begin
     complete_id_claimed = 1'b0;
-    for (int s = 1; s <= NDEV; s++) begin
-      if (complete_id == IdW'(s) && gateway_busy_q[s] && !pending_q[s]) begin
-        complete_id_claimed = 1'b1;
+    for (int c = 0; c < NCTX; c++) begin
+      for (int s = 1; s <= NDEV; s++) begin
+        // Compare the complete 32-bit command: truncating an out-of-range ID
+        // can release a different gateway. Any enabled context may complete;
+        // it need not be the context that originally claimed the source.
+        if (w_cctx == c && write_bits == 32'(s) && enable_q[c][s]
+            && gateway_busy_q[s] && !pending_q[s])
+          complete_id_claimed = 1'b1;
       end
     end
   end
@@ -278,8 +291,7 @@ module rapt_plic #(
     pending_next[0] = 1'b0;
     gateway_busy_next[0] = 1'b0;
     for (int s = 1; s <= NDEV; s++) begin
-      if (!gateway_busy_q[s]
-          && (plic_bus.ext_irq[s] || (sw_pending_set && plic_bus.wdata[s]))) begin
+      if (!gateway_busy_q[s] && (plic_bus.ext_irq[s] || (sw_pending_set && write_bits[s]))) begin
         pending_next[s] = 1'b1;
         gateway_busy_next[s] = 1'b1;
       end
@@ -310,15 +322,17 @@ module rapt_plic #(
       // Write side.
       if (plic_bus.wvalid) begin
         if (w_pidx > 0 && w_pidx <= NDEV) begin
-          priority_q[w_pidx] <= plic_bus.wdata[2:0];
+          if (plic_bus.wstrb[0]) priority_q[w_pidx] <= plic_bus.wdata[2:0];
         end else if (is_pending(w_off)) begin
           // SW pending-set extension is handled by the per-source gateway
           // mux above so it obeys the same one-outstanding-request rule.
         end else if (w_ectx >= 0 && w_eoff < 32'h4) begin
           // Source 0 hardwired to 0 in the enable bitmap.
-          enable_q[w_ectx] <= {plic_bus.wdata[NDEV:1], 1'b0};
+          for (int s = 1; s <= NDEV; s++)
+          if (write_mask[s]) enable_q[w_ectx][s] <= plic_bus.wdata[s];
+          enable_q[w_ectx][0] <= 1'b0;
         end else if (w_cctx >= 0 && w_creg == 12'h0) begin
-          threshold_q[w_cctx] <= plic_bus.wdata[2:0];
+          if (plic_bus.wstrb[0]) threshold_q[w_cctx] <= plic_bus.wdata[2:0];
           // w_creg == 12'h4 (complete) is handled by the gateway mux above.
         end
       end

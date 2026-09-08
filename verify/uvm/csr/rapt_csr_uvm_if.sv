@@ -1,6 +1,8 @@
 `include "rapt.svh"
 
-interface rapt_csr_uvm_if(input logic clock);
+interface rapt_csr_uvm_if (
+    input logic clock
+);
   logic reset;
   logic [31:0] pc;
   logic csr_wen;

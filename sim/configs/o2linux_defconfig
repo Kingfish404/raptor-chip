@@ -18,5 +18,3 @@ CONFIG_ITRACE=y
 # end of Testing and Debugging
 
 # CONFIG_wrapBus is not set
-# CONFIG_ysyxSoC is not set
-CONFIG_MODE="none"

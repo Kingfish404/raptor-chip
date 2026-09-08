@@ -60,17 +60,22 @@ module rapt_ieu_alu #(
     return cnt;
   endfunction
 
-  // CPOP helper: population count
-  function automatic logic [ShamtW:0] fn_cpop(input logic [XLEN-1:0] val, input logic w);
-    logic [ShamtW:0] cnt;
-    int upper;
-    cnt   = 0;
-    upper = (w && XLEN > 32) ? 32 : XLEN;
-    for (int i = 0; i < XLEN; i++) begin
-      if (i < upper && val[i]) cnt = cnt + 1;
+  // CPOP: independent bit leaves and a balanced sum tree, not XLEN serial
+  // conditional increments. Mask W operands before reduction; zero padding
+  // keeps the structure well-defined for non-power-of-two widths too.
+  localparam int PopLeaves = 1 << ShamtW;
+  wire [ShamtW:0] pop_count[2*PopLeaves];
+  for (genvar bit_idx = 0; bit_idx < PopLeaves; bit_idx++) begin : g_pop_leaf
+    if (bit_idx < XLEN) begin : g_bit
+      assign pop_count[PopLeaves + bit_idx] = (ShamtW+1)'(
+          s1[bit_idx] && !(word && XLEN > 32 && bit_idx >= 32));
+    end else begin : g_pad
+      assign pop_count[PopLeaves+bit_idx] = '0;
     end
-    return cnt;
-  endfunction
+  end
+  for (genvar node = 1; node < PopLeaves; node++) begin : g_pop_sum
+    assign pop_count[node] = pop_count[2*node] + pop_count[2*node+1];
+  end
 
   always_comb begin
     unique case (op)
@@ -112,7 +117,7 @@ module rapt_ieu_alu #(
       // Zbb: count
       `RAPT_ALU_CLZ_:  begin alu_r = XLEN'(fn_clz(s1, word)); end
       `RAPT_ALU_CTZ_:  begin alu_r = XLEN'(fn_ctz(s1, word)); end
-      `RAPT_ALU_CPOP: begin alu_r = XLEN'(fn_cpop(s1, word)); end
+      `RAPT_ALU_CPOP: begin alu_r = XLEN'(pop_count[1]); end
 
       // Zbb: compare-and-select
       `RAPT_ALU_MAX_:  begin alu_r = ($signed(s1) >= $signed(s2)) ? s1 : s2; end

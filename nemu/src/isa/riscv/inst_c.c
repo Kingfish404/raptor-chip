@@ -82,7 +82,7 @@ uint32_t decompress_c(uint32_t inst)
   INSTPAT_START();
   // Instruction listing for RVC, Quadrant 0
   INSTPAT("000 00000000 000 00", c.inv, N, { di = 0; });
-  INSTPAT("000 ???????? ??? 00", c.addi4spn, IW, { di = itype(imm, 2, 0b000, rd, 0b0010011); }); // res, uimm=0
+  INSTPAT("000 ???????? ??? 00", c.addi4spn, IW, { di = imm == 0 ? 0 : itype(imm, 2, 0b000, rd, 0b0010011); }); // uimm=0 reserved
   INSTPAT("001 ???????? ??? 00", c.fld, L, { di = itype(imm_ld, rs1, 0b011, rd, 0b0000111); }); // rv32/64 with D
   INSTPAT("001 ???????? ??? 00", c.lq, L, { di = 0; });                                          // rv128
   INSTPAT("010 ???????? ??? 00", c.lw, L, { di = itype(imm, rs1, 0b010, rd, 0b0000011); });
@@ -127,14 +127,18 @@ uint32_t decompress_c(uint32_t inst)
   INSTPAT("000 ?00000?? ??? 01", c.nop, I, { di = itype(imm, 0, 0b000, 0, 0b0010011); });                                    // hint,imm=0
   INSTPAT("000 ???????? ??? 01", c.addi, I, { di = (rd == 0 || imm == 0) ? nop() : itype(imm, rd, 0b000, rd, 0b0010011); }); // hint,imm=0
 #ifdef CONFIG_RV64
-  INSTPAT("001 ???????? ??? 01", c.addiw, I, { di = (rd == 0) ? nop() : itype(imm, rd, 0b000, rd, 0b0011011); }); // rv64: addiw
+  INSTPAT("001 ???????? ??? 01", c.addiw, I, { di = (rd == 0) ? 0 : itype(imm, rd, 0b000, rd, 0b0011011); }); // RV64: rd=0 reserved
 #else
   INSTPAT("001 ???????? ??? 01", c.jal, J, { di = jtype(imm, 1, 0b1101111); }); // rv32
 #endif
   INSTPAT("001 ???????? ??? 01", c.addiw, I, { di = (rd == 0 || imm == 0) ? nop() : itype(imm, rd, 0b000, rd, 0b0010011); }); // rv64/128 fallback;res,rd=0
   INSTPAT("010 ???????? ??? 01", c.li, I, { di = (rd == 0) ? nop() : itype(imm, 0, 0b000, rd, 0b0010011); });
-  INSTPAT("011 ?00010?? ??? 01", c.addi16sp, I, { di = (nzimm_addi16sp == 0) ? nop() : itype(nzimm_addi16sp, 2, 0b000, 2, 0b0010011); }); // res,imm=0
-  INSTPAT("011 ???????? ??? 01", c.lui, I, { di = (rd == 0 || nzimm_lui == 0) ? nop() : utype(nzimm_lui, rd, 0b0110111); });              // Zcmop: nzimm=0 -> NOP;hint,rd=0
+  INSTPAT("011 ?00010?? ??? 01", c.addi16sp, I, { di = (nzimm_addi16sp == 0) ? 0 : itype(nzimm_addi16sp, 2, 0b000, 2, 0b0010011); }); // imm=0 reserved
+  INSTPAT("011 ???????? ??? 01", c.lui, I, {
+    // Only odd registers 1..15 with zero immediate encode C.MOP.n.
+    di = nzimm_lui == 0 ? ((rd < 16 && (rd & 1)) ? nop() : 0)
+                        : (rd == 0 ? nop() : utype(nzimm_lui, rd, 0b0110111));
+  });
   INSTPAT("100 ?00????? ??? 01", c.srli, B, { di = rtype(0b0000000, shamt, rs1, 0b101, rs1, 0b0010011); });                               // rv32 custom,uimm[5]=1
   INSTPAT("100 000???00 000 01", c.srli64, B, { di = 0; });                                                                               // rv128; rv32/64 hint
   INSTPAT("100 ?01????? ??? 01", c.srai, B, { di = rtype(0b0100000, shamt, rs1, 0b101, rs1, 0b0010011); });                               // rv32 custom,uimm[5]=1
@@ -193,18 +197,18 @@ uint32_t decompress_c(uint32_t inst)
   INSTPAT("110 ???????? ??? 01", c.beqz, B, { di = btype(imm, 0, rs1, 0b000, 0b1100011); });
   INSTPAT("111 ???????? ??? 01", c.bnez, B, { di = btype(imm, 0, rs1, 0b001, 0b1100011); });
   // Instruction listing for RVC, Quadrant 2
-  INSTPAT("000 ???????? ??? 10", c.slli, I, { di = itype(shamt, rd, 0b001, rd, 0b0010011); });      // shamt is zero-extended (not sign-extended like ci_imm); hint,rd=0
+  INSTPAT("000 ???????? ??? 10", c.slli, I, { di = (rd == 0 && shamt < MUXDEF(CONFIG_RV64, 64, 32)) ? nop() : itype(shamt, rd, 0b001, rd, 0b0010011); }); // Canonicalize legal x0 HINTs; retain illegal RV32 shamt[5].
   INSTPAT("000 0??????? 000 10", c.slli64, I, { di = 0; });                                         // rv128;rv32/64 hint;hint,rd=0
   INSTPAT("001 ???????? ??? 10", c.fldsp, I, { di = itype(offset_ldsp, 2, 0b011, rd, 0b0000111); }); // rv32/64 with D
   INSTPAT("001 ???????? ??? 10", c.lqsp, I, { di = 0; });                                           // rv128;res,rd=0
-  INSTPAT("010 ???????? ??? 10", c.lwsp, I, { di = itype(offset_lwsp, 2, 0b010, rd, 0b0000011); }); // res,rd=0
+  INSTPAT("010 ???????? ??? 10", c.lwsp, I, { di = (rd == 0) ? 0 : itype(offset_lwsp, 2, 0b010, rd, 0b0000011); }); // rd=0 reserved
 #ifdef CONFIG_RV64
-  INSTPAT("011 ???????? ??? 10", c.ldsp, I, { di = itype(offset_ldsp, 2, 0b011, rd, 0b0000011); }); // rv64
+  INSTPAT("011 ???????? ??? 10", c.ldsp, I, { di = (rd == 0) ? 0 : itype(offset_ldsp, 2, 0b011, rd, 0b0000011); }); // RV64: rd=0 reserved
 #else
   INSTPAT("011 ???????? ??? 10", c.flwsp, I, { di = itype(offset_lwsp, 2, 0b010, rd, 0b0000111); }); // rv32 with F
 #endif
   INSTPAT("011 ???????? ??? 10", c.ldsp, I, { di = 0; });                                                                            // rv128 fallback;res,rd=0
-  INSTPAT("100 0?????00 000 10", c.jr, R, { di = rtype(0b0000000, 0, rs1, 0b000, 0, 0b1100111); });                                  // res,rs1=0
+  INSTPAT("100 0?????00 000 10", c.jr, R, { di = (rs1 == 0) ? 0 : rtype(0b0000000, 0, rs1, 0b000, 0, 0b1100111); }); // rs1=0 reserved
   INSTPAT("100 0??????? ??? 10", c.mv, R, { di = (rd == 0 || rs2 == 0) ? nop() : rtype(0b0000000, rs2, 0, 0b000, rd, 0b0110011); }); // hint,rd=0
   INSTPAT("100 10000000 000 10", c.ebreak, R, { di = rtype(0b0000000, 1, 0, 0b000, 0, 0b1110011); });
   INSTPAT("100 1?????00 000 10", c.jalr, R, { di = rtype(0b0000000, 0, rs1, 0b000, 1, 0b1100111); });

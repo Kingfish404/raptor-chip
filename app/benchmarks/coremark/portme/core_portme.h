@@ -97,13 +97,19 @@ static inline unsigned long long _rdinstret64(void)
 #endif
 }
 
-/* CLINT timebase: 1 MHz (from DTS timebase-frequency) */
+/* Default sim CLINT/DTS timebase: 10 MHz. Keep custom builds in sync. */
+#ifndef COREMARK_TIMEBASE_HZ
+#define COREMARK_TIMEBASE_HZ 10000000ULL
+#endif
+#if COREMARK_TIMEBASE_HZ <= 0
+#error "COREMARK_TIMEBASE_HZ must be positive"
+#endif
 #define CORETIMETYPE unsigned long long
 #define GETMYTIME(_t) (*(_t) = _rdtime())
 #define MYTIMEDIFF(fin, ini) ((fin) - (ini))
 #define TIMER_RES_DIVIDER 1
 #define SAMPLE_TIME_IMPLEMENTATION 1
-#define EE_TICKS_PER_SEC 1000000ULL
+#define EE_TICKS_PER_SEC COREMARK_TIMEBASE_HZ
 
 /* ---- Data types ---- */
 typedef int16_t ee_s16;

@@ -8,9 +8,9 @@ paddr_t host_to_guest(uint8_t *addr);
 
 inline word_t host_read(void *addr, int len);
 
-extern "C" void pmem_read(word_t addr, word_t *data);
+extern "C" void pmem_read(word_t addr, unsigned char size, word_t *data);
 
-extern "C" void pmem_write(word_t addr, char data);
+extern "C" void pmem_write(word_t addr, word_t data, char mask);
 
 void vaddr_show(vaddr_t addr, int n);
 

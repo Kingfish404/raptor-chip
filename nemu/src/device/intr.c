@@ -72,17 +72,9 @@ static void plic_update_mip(void)
         }
         else
         {
-            // Context 1 -> SEIP (bit 9 of MIP and SIP)
-            if (has_irq)
-            {
-                cpu.sr[CSR_MIP] |= (1u << 9);
-                cpu.sr[CSR_SIP] |= (1u << 9);
-            }
-            else
-            {
-                cpu.sr[CSR_MIP] &= ~(1u << 9);
-                cpu.sr[CSR_SIP] &= ~(1u << 9);
-            }
+            // External SEIP must not overwrite M-mode's software pending bit.
+            cpu.seip = has_irq;
+            cpu.sr[CSR_SIP] = riscv_mip_value() & cpu.sr[CSR_MIDELEG] & 0x222;
         }
     }
 }

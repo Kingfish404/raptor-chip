@@ -84,7 +84,12 @@ make microbench-rv32      ARGS="-b -n"
 make coremark-rv32-difftest     ARGS="-b -n"
 make microbench-rv32-difftest   ARGS="-b -n"
 
-# raptSoC
+# Reproducible random memory-delay simulation (also supports -rv64)
+make coremark-random-rv32 SIM_RANDOM_DELAY=31 SIM_RANDOM_SEED=1
+make microbench-random-rv32 SIM_RANDOM_DELAY=31 SIM_RANDOM_SEED=42
+make cpu-tests-random-rv64 SIM_RANDOM_DELAY=31 SIM_RANDOM_SEED=1
+
+# ysyxSoC (RV32)
 make coremark-ysyxsoc      ARGS="-b -n"
 make microbench-ysyxsoc    ARGS="-b -n"
 

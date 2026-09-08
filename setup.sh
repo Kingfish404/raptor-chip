@@ -64,19 +64,11 @@ pacman_install() {
 }
 
 repo_clone() {
-  mkdir -p third_party/NJU-ProjectN
-  mkdir -p third_party/kingfish404
   [ -d abstract-machine/app/am-kernels ] || git clone --depth 1 https://github.com/kingfish404/am-kernels abstract-machine/app/am-kernels
-  [ -d third_party/kingfish404/ysyxSoC ] || git clone --depth 1 https://github.com/Kingfish404/ysyxSoC third_party/kingfish404/ysyxSoC
-  [ -d third_party/NJU-ProjectN/nvboard ] || git clone --depth 1 https://github.com/NJU-ProjectN/nvboard third_party/NJU-ProjectN/nvboard
 
   mkdir -p third_party/riscv-software-src/
   [ -d third_party/riscv-software-src/opensbi ] || git clone --depth 1 https://github.com/riscv-software-src/opensbi third_party/riscv-software-src/opensbi
   [ -d third_party/riscv-software-src/riscv-pk ] || git clone --depth 1 https://github.com/riscv-software-src/riscv-pk third_party/riscv-software-src/riscv-pk
-}
-
-repo_init() {
-  make -C ./third_party/kingfish404/ysyxSoC/ dev-init verilog
 }
 
 if [ "$(uname)" == "Linux" ]; then
@@ -116,7 +108,3 @@ echo "Step $step: Cloning repositories..."
 repo_clone
 
 echo "Step $step: Build environment setup complete."
-
-# step=$((step + 1))
-# repo_init
-# echo "Step $step: Initializing Third-party Repositories..."

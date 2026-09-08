@@ -114,6 +114,7 @@ module rapt_router #(
   // ----- AR forwarding -----
   assign offchip_axi.arvalid = core_axi.arvalid && !ar_is_int;
   assign offchip_axi.arburst = core_axi.arburst;
+  assign offchip_axi.arcache = core_axi.arcache;
   assign offchip_axi.arsize  = core_axi.arsize;
   assign offchip_axi.arlen   = core_axi.arlen;
   assign offchip_axi.arid    = core_axi.arid;
@@ -235,6 +236,7 @@ module rapt_router #(
 
   assign offchip_axi.awvalid = (w_state == W_IDLE) && core_axi.awvalid && !aw_is_int;
   assign offchip_axi.awburst = core_axi.awburst;
+  assign offchip_axi.awcache = core_axi.awcache;
   assign offchip_axi.awsize = core_axi.awsize;
   assign offchip_axi.awlen = core_axi.awlen;
   assign offchip_axi.awid = core_axi.awid;
@@ -244,7 +246,7 @@ module rapt_router #(
 
   // W-channel forwarding: AXI4 permits the master to assert AW and W
   // simultaneously, and some downstream slaves (e.g. the AXI4 SDRAM
-  // controller used by ysyxSoC) require WVALID=1 alongside AWVALID
+  // controller) require WVALID=1 alongside AWVALID
   // before they will assert AWREADY. Gating WVALID strictly on the
   // AW handshake completing (W_IO_W) deadlocks against such slaves.
   // Forward WVALID combinationally to offchip whenever the upcoming
@@ -270,7 +272,10 @@ module rapt_router #(
 
   assign w_int_data = axi_wdata_to_internal(core_axi.wdata, w_int_awaddr[IntByteOffW-1:0]);
   assign clint_bus.wdata = w_int_data;
+  // Internal data starts at byte zero of the addressed register half.
+  assign clint_bus.wstrb = core_axi.wstrb >> w_int_awaddr[IntByteOffW-1:0];
   assign plic_bus.wdata = w_int_data;
+  assign plic_bus.wstrb = core_axi.wstrb >> w_int_awaddr[IntByteOffW-1:0];
   assign clint_bus.wvalid = (w_state == W_INT_W) && core_axi.wvalid && core_axi.wready
                             && (w_int_target == INT_CLINT);
   assign plic_bus.wvalid  = (w_state == W_INT_W) && core_axi.wvalid && core_axi.wready

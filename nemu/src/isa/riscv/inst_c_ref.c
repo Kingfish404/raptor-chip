@@ -15,6 +15,9 @@ static uint32_t addi4spn(uint32_t inst)
   const uint32_t nzuimm = dec_ciw_imm(inst);
   const uint32_t rd = dec_rd_short(inst);
 
+  if (nzuimm == 0)
+    return 0;
+
   // encode to addi rd' x2 nzuimm[9:2]
   return itype(nzuimm, 2, 0b000, rd, 0b0010011);
 }
@@ -122,9 +125,10 @@ static uint32_t clui_to_lui(uint32_t inst)
   nzimm |= (inst & (CI_MASK_6_4 | CI_MASK_3_2)) << 10;
   nzimm = sign_extend(nzimm, 17);
 
-  // nzimm == 0: Zcmop (c.mop.N) for odd rd, reserved/HINT otherwise; treat as nop
+  // Only odd registers 1..15 select Zcmop. Other zero-immediate forms
+  // remain reserved; nonzero-immediate rd=0 is handled as a HINT below.
   if (nzimm == 0)
-    return nop();
+    return (rd < 16 && (rd & 1)) ? nop() : 0;
 
   // if rd == 0, marked as HINT, implement as nop
   if (rd == 0)
@@ -263,6 +267,9 @@ static uint32_t alu_(uint32_t inst)
   case 0b10:
     return candi_to_andi(inst);
   default:
+    // This auxiliary checker models RV32C. Bit 12 selects RV64 word
+    // arithmetic or separately handled optional Zcb encodings, not SUB/XOR.
+    if (inst & 0x1000) return 0;
     switch (cs_funct2)
     {
     case 0b00:

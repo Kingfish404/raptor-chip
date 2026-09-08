@@ -27,7 +27,7 @@
 //  Usage examples:
 //    `RAPT_SVA(clock, reset, LSU_SQ_ALIGN,
 //              rou_lsu.valid && rou_lsu.store,
-//              rou_lsu.sq_vaddr[1:0] == rou_lsu.sq_waddr[1:0])
+//              !$isunknown(rou_lsu.sq_vaddr))
 //
 //    `RAPT_SVA_NEXT(clock, reset, ROB_FLUSH_DRAIN,
 //                   cmu_bcast.flush_pipe,

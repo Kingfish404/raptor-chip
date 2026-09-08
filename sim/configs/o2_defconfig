@@ -16,6 +16,3 @@ CONFIG_DEBUG=y
 CONFIG_ITRACE=y
 # CONFIG_DIFFTEST is not set
 # end of Testing and Debugging
-
-# CONFIG_ysyxSoC is not set
-CONFIG_MODE="none"

@@ -25,6 +25,7 @@
 //     interrupt fabric scales from the existing single-hart CLINT/PLIC base.
 module rapt #(
     parameter int XLEN   = `RAPT_XLEN,
+    parameter int MemoryReadCredits = 8,
     // Number of hart contexts in this cluster. Currently fixed at 1; the
     // value is threaded through CSR `mhartid`, the CLINT msip/mtimecmp
     // arrays, and PLIC NCTX so that scaling to N>1 only requires (a) a
@@ -36,8 +37,16 @@ module rapt #(
     /* verilator lint_on UNUSEDPARAM */
 ) (
     input clock,
+    // Device writes are reported before a later SC may complete. Pending
+    // holds SC while the platform drains a finite batch of notifications.
+    input logic external_write_valid_i = 1'b0,
+    input logic external_write_pending_i = 1'b0,
+    input logic [XLEN-1:0] external_write_first_i = '0,
+    input logic [XLEN-1:0] external_write_last_i = '0,
+
 
     // AXI4 Master
+    output [     3:0] io_master_arcache,
     output [     1:0] io_master_arburst,
     output [     2:0] io_master_arsize,
     output [     7:0] io_master_arlen,
@@ -53,6 +62,7 @@ module rapt #(
     input             io_master_rvalid,
     output            io_master_rready,
 
+    output [     3:0] io_master_awcache,
     output [     1:0] io_master_awburst,
     output [     2:0] io_master_awsize,
     output [     7:0] io_master_awlen,
@@ -72,71 +82,30 @@ module rapt #(
     input        io_master_bvalid,
     output       io_master_bready,
 
-`ifdef RAPT_USE_SLAVE
-    // AXI4 Slave (currently unused; preserved for backwards-compat with the
-    // historical top-level port list).
-    // verilator lint_off UNDRIVEN
-    // verilator lint_off UNUSEDSIGNAL
-    input  [     1:0] io_slave_arburst,
-    input  [     2:0] io_slave_arsize,
-    input  [     7:0] io_slave_arlen,
-    input  [     3:0] io_slave_arid,
-    input  [XLEN-1:0] io_slave_araddr,
-    input             io_slave_arvalid,
-    output            io_slave_arready,
-
-    output [     3:0] io_slave_rid,
-    output            io_slave_rlast,
-    output [XLEN-1:0] io_slave_rdata,
-    output [     1:0] io_slave_rresp,
-    output            io_slave_rvalid,
-    input             io_slave_rready,
-
-    input  [     1:0] io_slave_awburst,
-    input  [     2:0] io_slave_awsize,
-    input  [     7:0] io_slave_awlen,
-    input  [     3:0] io_slave_awid,
-    input  [XLEN-1:0] io_slave_awaddr,
-    input             io_slave_awvalid,
-    output            io_slave_awready,
-
-    input             io_slave_wlast,
-    input  [XLEN-1:0] io_slave_wdata,
-    input  [     3:0] io_slave_wstrb,
-    input             io_slave_wvalid,
-    output            io_slave_wready,
-
-    output [3:0] io_slave_bid,
-    output [1:0] io_slave_bresp,
-    output       io_slave_bvalid,
-    input        io_slave_bready,
-    // verilator lint_on UNDRIVEN
-    // verilator lint_on UNUSEDSIGNAL
-`endif
 
 `ifdef RAPT_RVFI
-    // RISC-V Formal Interface (RVFI) outputs -- NRET=2 channels
-    output [1:0] rvfi_valid,
-    output [127:0] rvfi_order,
-    output [63:0] rvfi_insn,
-    output [1:0] rvfi_trap,
-    output [1:0] rvfi_halt,
-    output [1:0] rvfi_intr,
-    output [3:0] rvfi_mode,
-    output [3:0] rvfi_ixl,
-    output [9:0] rvfi_rs1_addr,
-    output [9:0] rvfi_rs2_addr,
-    output [2*XLEN-1:0] rvfi_rs1_rdata,
-    output [2*XLEN-1:0] rvfi_rs2_rdata,
-    output [9:0] rvfi_rd_addr,
-    output [2*XLEN-1:0] rvfi_rd_wdata,
-    output [2*XLEN-1:0] rvfi_pc_rdata,
-    output [2*XLEN-1:0] rvfi_pc_wdata,
-    output [2*XLEN-1:0] rvfi_mem_addr,
-    output [2*(XLEN/8)-1:0] rvfi_mem_rmask,
-    output [2*(XLEN/8)-1:0] rvfi_mem_wmask,
-    output [2*XLEN-1:0] rvfi_mem_rdata,
-    output [2*XLEN-1:0] rvfi_mem_wdata,
+    // RISC-V Formal Interface (RVFI) outputs -- NRET=CommitWidth channels
+    output [rapt_pkg::CommitWidth-1:0] rvfi_valid,
+    output [rapt_pkg::CommitWidth*64-1:0] rvfi_order,
+    output [rapt_pkg::CommitWidth*32-1:0] rvfi_insn,
+    output [rapt_pkg::CommitWidth-1:0] rvfi_trap,
+    output [rapt_pkg::CommitWidth-1:0] rvfi_halt,
+    output [rapt_pkg::CommitWidth-1:0] rvfi_intr,
+    output [rapt_pkg::CommitWidth*2-1:0] rvfi_mode,
+    output [rapt_pkg::CommitWidth*2-1:0] rvfi_ixl,
+    output [rapt_pkg::CommitWidth*5-1:0] rvfi_rs1_addr,
+    output [rapt_pkg::CommitWidth*5-1:0] rvfi_rs2_addr,
+    output [rapt_pkg::CommitWidth*XLEN-1:0] rvfi_rs1_rdata,
+    output [rapt_pkg::CommitWidth*XLEN-1:0] rvfi_rs2_rdata,
+    output [rapt_pkg::CommitWidth*5-1:0] rvfi_rd_addr,
+    output [rapt_pkg::CommitWidth*XLEN-1:0] rvfi_rd_wdata,
+    output [rapt_pkg::CommitWidth*XLEN-1:0] rvfi_pc_rdata,
+    output [rapt_pkg::CommitWidth*XLEN-1:0] rvfi_pc_wdata,
+    output [rapt_pkg::CommitWidth*XLEN-1:0] rvfi_mem_addr,
+    output [rapt_pkg::CommitWidth*(XLEN/8)-1:0] rvfi_mem_rmask,
+    output [rapt_pkg::CommitWidth*(XLEN/8)-1:0] rvfi_mem_wmask,
+    output [rapt_pkg::CommitWidth*XLEN-1:0] rvfi_mem_rdata,
+    output [rapt_pkg::CommitWidth*XLEN-1:0] rvfi_mem_wdata,
 `endif
 
     input io_interrupt,
@@ -147,7 +116,7 @@ module rapt #(
     input [`RAPT_PLIC_NDEV:1] ext_irq_i,
 
     // -----------------------------------------------------------------
-    // JTAG / RISC-V Debug Module ports (P0 -- see docs-ref/dev.jtag.md)
+    // JTAG / RISC-V Debug Module ports (P0 -- see verify/jtag/README.md)
     // -----------------------------------------------------------------
     input  logic jtag_trst_n,
     input  logic jtag_tms,
@@ -188,12 +157,13 @@ module rapt #(
   // DM <-> core debug GPR bus (committed view + write port). x0 writes
   // are dropped inside rapt_prf; caller must hold `dm_halted` before
   // pulsing `dm_dbg_gpr_we`.
-  logic [XLEN-1:0] dm_dbg_gpr_rdata    [`RAPT_REG_SIZE];
+  logic [XLEN-1:0] dm_dbg_gpr_rdata;
   logic            dm_dbg_gpr_we;
   logic [     4:0] dm_dbg_gpr_addr;
   logic [XLEN-1:0] dm_dbg_gpr_wdata;
 
   assign io_master_arburst = offchip_axi.arburst;
+  assign io_master_arcache = offchip_axi.arcache;
   assign io_master_arsize = offchip_axi.arsize;
   assign io_master_arlen = offchip_axi.arlen;
   assign io_master_arid = offchip_axi.arid;
@@ -209,6 +179,7 @@ module rapt #(
   assign io_master_rready = offchip_axi.rready;
 
   assign io_master_awburst = offchip_axi.awburst;
+  assign io_master_awcache = offchip_axi.awcache;
   assign io_master_awsize = offchip_axi.awsize;
   assign io_master_awlen = offchip_axi.awlen;
   assign io_master_awid = offchip_axi.awid;
@@ -280,14 +251,21 @@ module rapt #(
   // CPU core (single hart today; instantiate-per-hart loop in the future).
   // ------------------------------------------------------------------
   rapt_core #(
-      .XLEN(XLEN)
+      .XLEN(XLEN),
+      .MemoryReadCredits(MemoryReadCredits)
   ) core (
+      .external_write_valid_i(external_write_valid_i),
+      .external_write_pending_i(external_write_pending_i),
+      .external_write_first_i(external_write_first_i),
+      .external_write_last_i(external_write_last_i),
+
       .clock(clock),
 
       .io_master(core_axi),
 
       .clint_timer_int_i(clint_bus.timer_int),
       .clint_sw_int_i   (clint_bus.sw_int),
+      .mtime_i          (clint_bus.mtime_value),
 
 `ifdef RAPT_RVFI
       .rvfi_valid(rvfi_valid),
@@ -375,21 +353,5 @@ module rapt #(
       .dbg_gpr_wdata_o(dm_dbg_gpr_wdata)
   );
 
-`ifdef RAPT_USE_SLAVE
-  // Tie off the unused AXI4 slave port at the cluster boundary. The legacy
-  // top kept these in the port list but never wired them; preserving the
-  // behaviour avoids surprises for any external consumer.
-  assign io_slave_arready = 1'b0;
-  assign io_slave_rid     = '0;
-  assign io_slave_rlast   = 1'b0;
-  assign io_slave_rdata   = '0;
-  assign io_slave_rresp   = 2'b00;
-  assign io_slave_rvalid  = 1'b0;
-  assign io_slave_awready = 1'b0;
-  assign io_slave_wready  = 1'b0;
-  assign io_slave_bid     = '0;
-  assign io_slave_bresp   = 2'b00;
-  assign io_slave_bvalid  = 1'b0;
-`endif
 
 endmodule

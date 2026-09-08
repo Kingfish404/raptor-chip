@@ -1,5 +1,5 @@
 NSIM_HOME = $(abspath $(RAPTOR_HOME)/sim)
-AM_SRCS := riscv/ysyxsoc/start.c \
+AM_SRCS := riscv/ysyxsoc/start.S \
            riscv/ysyxsoc/trm.c \
 		   riscv/ysyxsoc/ioe.c \
            riscv/ysyxsoc/input.c \
@@ -12,15 +12,7 @@ AM_SRCS := riscv/ysyxsoc/start.c \
 
 CFLAGS    += -fdata-sections -ffunction-sections
 LDFLAGS   = -T $(AM_HOME)/scripts/linker.ysyxsoc.ld \
-						 --defsym=_pmem_start=0x80000000 \
-						 --defsym=_entry_offset=0x0 \
-						 --defsym=_stack_pointer=0x0f002000 \
-						 --defsym=_heap_start=0x80200000 \
-						#  --defsym=_stack_pointer=0x80200000 \
-						#  --defsym=_heap_start=0x80200000 \
-						#  --defsym=_stack_pointer=0x0f002000 \
-						#  --defsym=_heap_start=0x0f000000 \
-						#  --print-map
+              --defsym=_pmem_start=0xa0000000 --defsym=_entry_offset=0
 LDFLAGS   += --gc-sections -e _start
 CFLAGS += -DMAINARGS=\"$(mainargs)\"
 CFLAGS += -Os -I$(AM_HOME)/am/src/riscv/ysyxsoc/include
@@ -33,5 +25,4 @@ image: $(IMAGE).elf
 	@$(OBJCOPY) -S --set-section-flags .bss=alloc,contents -O binary $(IMAGE).elf $(IMAGE).bin
 
 run: image
-	make -C $(NSIM_HOME) ISA=$(ISA) run ARGS="$(ARGS)" IMG=$(IMAGE).bin
-	# make -C $(NSIM_HOME) ISA=$(ISA) run ARGS="$(ARGS)" IMG=$(IMAGE).bin MROM_IMG=$(IMAGE).bin
+	$(MAKE) -C $(NSIM_HOME) SIM_PLATFORM=ysyxsoc ISA=$(ISA) run ARGS="$(ARGS)" IMG=$(IMAGE).bin

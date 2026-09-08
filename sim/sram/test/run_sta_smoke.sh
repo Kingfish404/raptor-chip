@@ -15,7 +15,7 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SRAM_DIR="$(cd "$HERE/.." && pwd)"
 RAPTOR="$(cd "$SRAM_DIR/../.." && pwd)"
-YOSTA="$RAPTOR/third_party/yosys-opensta"
+YOSTA="${YOSYS_OPENSTA:-$RAPTOR/third_party/yosys-opensta}"
 
 PLATFORM="${STA_PLATFORM:-nangate45}"
 CLK_FREQ_MHZ="${CLK_FREQ_MHZ:-100}"
@@ -38,20 +38,23 @@ fi
 [ -f "$LIB" ] || { echo "FAIL: stub .lib still missing at $LIB"; exit 1; }
 
 # --- Build the design input (preprocessed SV) ------------------------------
-TMP="$HERE/_tmp_sta"
+TMP="${STA_SMOKE_BUILD_DIR:-$HERE/_tmp_sta}"
 mkdir -p "$TMP"
 SV_OUT="$TMP/rapt_sram_test_pack.sv"
-verilator -E -P -DRAPT_USE_SRAM_MACRO \
+# The fixture defines macro mode; place it before the SRAM wrapper so the
+# definition is visible without redefining a command-line macro.
+verilator -E -P \
     -I"$RAPTOR/hdl/configs/default" \
     -I"$RAPTOR/hdl/include" \
     "$RAPTOR/hdl/rapt_pkg.sv" \
-    "$RAPTOR/hdl/memory/rapt_sram_1rw.sv" \
     "$HERE/fixtures/rapt_sram_test_top.sv" \
+    "$RAPTOR/hdl/memory/rapt_sram_1rw.sv" \
     > "$SV_OUT"
 
 # --- Drive yosys-opensta ---------------------------------------------------
+# The flow imports macro cell/port definitions from Liberty before RTL.
+# Loading the same cell again as a Verilog blackbox is a duplicate module.
 EXTRA_LIB_FILES="$LIB" \
-EXTRA_BLACKBOX_V_FILES="$SRAM_DIR/wrappers/rapt_sram_blackbox.v" \
 make -C "$YOSTA" sta \
     DESIGN="$DESIGN" \
     PLATFORM="$PLATFORM" \
@@ -62,7 +65,7 @@ make -C "$YOSTA" sta \
 # --- Assertions on the artefacts ------------------------------------------
 RESULT_DIR="$YOSTA/result/${PLATFORM}-${DESIGN}-${CLK_FREQ_MHZ}MHz"
 NETLIST="$RESULT_DIR/${DESIGN}.netlist.syn.v"
-REPORT="$RESULT_DIR/${DESIGN}.sta.rep"
+REPORT="$RESULT_DIR/sta.log"
 
 fail=0
 trap '[ $fail -ne 0 ] && echo ">>> SMOKE FAILED ($fail check(s))"' EXIT
@@ -83,6 +86,7 @@ check "[ -f '$REPORT' ]"                               "OpenSTA produced timing 
 check "grep -q 'rapt_openram_1rw_32x32' '$NETLIST'"    "macro instance preserved in netlist (not flattened)"
 check "grep -qE 'clk0|clk1' '$REPORT'"                 "STA report references macro clock pins"
 check "[ -s '$REPORT' ]"                               "STA report is non-empty"
+check "! grep -qiE '(^|[[:space:]])(error:|STA failed:)' '$REPORT'" "STA reported no errors"
 
 if [ $fail -ne 0 ]; then
     exit 1

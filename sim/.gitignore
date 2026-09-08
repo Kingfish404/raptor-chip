@@ -15,6 +15,7 @@
 !scripts/*.sh
 !*.sv
 !gsim/*.json
+!ysyxsoc/setup.py
 
 # SRAM macro integration sources (sim/sram/**)
 !sram/scripts/*.py

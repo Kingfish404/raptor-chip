@@ -1,10 +1,119 @@
 # Raptor Chip: Verification Suite
 
+新增 `make -C verify verilator-l1d-permission-stage-rv32 verilator-l1d-permission-stage-rv64`：检查加载权限阶段的 LR 外部干扰、取消和后续恢复。
+
+M-extension privilege/edge regression: `make -C verify rva22s64-m-privileged-edges-run`
+uses the configured `RVA22S64_XLEN`, `RVA22S64_NPC` and matching reference library.
+Set `RVA22S64_TEST_CPPFLAGS=-DM_TEST_PRIV=0` (U), `1` (S), or `3` (M, default),
+and use distinct `BUILD_DIR` values for different configurations. The test checks
+literal arithmetic edge results, source/destination overlap, and RV64 word
+sign extension. Three reserved OP-32 encodings exercise this platform's illegal
+instruction policy, including cause, EPC, original instruction and unchanged rd.
+This is directed coverage, not full M/profile acceptance.
+
+
 Unified verification infrastructure for the Raptor Chip RISC-V processor.
-**Zero RTL modifications required**: all tools reuse the existing Verilator
-simulator (`sim/`) and NEMU difftest reference model.
+Full-core tests use the Verilator simulator (`sim/`); differential tests use
+NEMU. Module, formal, ACT4/Sail and UVM checks have separate harnesses and
+references. Each target defines its own tool and configuration requirements.
+
+Software test sources live in `app/tests/baremetal/` (freestanding RISC-V
+programs and shared headers) and `app/tests/host/` (native simulator/reference
+tests). Build rules, runners, linker scripts and generated vectors stay in
+`verify`. C++ drivers coupled to RTL testbenches stay with their `xsim` or `vpu`
+harnesses. Existing Make target names and output locations are preserved.
+
+## Maintaining verification drivers
+
+The PMA capability/span and instruction-word proofs use the subcommands
+`pma-capabilities`, `pma-span` and `ifetch-word-atomic` of
+`scripts/formal_contract.py` for execution and evidence reporting. Each entry
+retains its own harness, proof command, timeout and success criterion. Include
+the shared module when copying these drivers into an isolated tool bundle.
+Keep scenario assertions in their individual tests; share setup and execution
+only when their contracts match. Task reviews belong in local `docs.agent/`.
+
+The maintenance inventory for `scripts`, `tests` and `experimental` is kept in
+`docs.agent/evaluation/verify-artifact-inventory.md`. Scripts need a recorded
+consumer; requirement tests remain separate when the RI5COF ledger names them;
+experimental RTL is retained only when it has a formal/synthesis consumer or a
+documented opt-in experiment.
+
+## Parameterized test scenarios
+
+- `tb_csr_contract.sv` shares one CSR/IEU fixture. Select `+CASE=identity_time`
+  (default), `trap_storage`, `stimecmp`, `fp_aliases`, `status_fields`,
+  `satp_warl`, or `tvec_routes`. Each invocation runs one scenario in a fresh
+  process with its own assertions and timeout. Unknown names fail. The existing
+  named CSR Make targets select the corresponding case for RV32/RV64.
+- `app/tests/baremetal/zero_pma.S` tests device CBO.ZERO rejection by default;
+  `PMA_READONLY=1` selects ROM/flash write protection. The existing
+  `rva22s64-zero-pma-run` and `rva22s64-readonly-pma-run` targets retain separate
+  images and result directories. Both scenarios include translated accesses
+  and the RAM recovery/neighbor-block checks.
+- `tb_l1d_pma.sv` covers the LR PMA denial and SRAM-hole load/LR/store
+  scenarios. The original `verilator-l1d-lr-pma-*` targets run the default
+  mode; `verilator-l1d-sram-pma-*` supplies `+SRAM`. The two targets retain
+  separate output names while sharing the fixture and the bus/reservation
+  assertions.
+- The ten `tb_idu_*.sv` scenarios share `tb_idu_contract.sv`. Original
+  top-level names and Make targets remain unchanged; the build macros read the
+  shared source while elaborating only the selected top. Assertions and
+  counters therefore remain isolated per scenario.
+- `tb_router_clint_subword.sv` and `tb_router_clint_width.sv` share
+  `tb_router_clint_contract.sv`; the original top names and targets remain
+  separate, so the subword and native-width matrices still run independently.
+- The issue-selection, atomic, load/store, checkpoint, prediction-history and
+  LR families use one shared source per family. The original top names remain
+  separate and the Make macros select the corresponding `*_contract.sv` file;
+  this is source consolidation, not a reduction of scenario coverage.
+- All remaining L1D, IOQ, LSU and CSR TB modules are stored in
+  `tb_l1d_all_contract.sv`, `tb_ioq_all_contract.sv`,
+  `tb_lsu_all_contract.sv` and `tb_csr_all_contract.sv`. The top-level module
+  passed by each existing target still selects one scenario; the shared source
+  is only a physical organization boundary.
+- Router, PTW and SQ scenarios use the same arrangement in
+  `tb_router_all_contract.sv`, `tb_ptw_all_contract.sv` and
+  `tb_sq_all_contract.sv`. Existing top names continue to select one scenario
+  per build.
+
+- `tb_ioq_acquire_publish.sv` covers LR by default and AMOADD with `+AMO`;
+  `+PENDING` selects response blocking. Both relaxed and acquire scenarios run
+  in each invocation. Existing `verilator-ioq-acquire-publish-rv32/-rv64` and
+  `verilator-ioq-amo-acquire-publish-rv32/-rv64` targets remain available; the
+  AMO targets supply `+AMO`. Set `IOQ_ACQUIRE_PLUSARGS=+PENDING` as needed.
+- `app/tests/baremetal/plic_access_width.S` covers loads by default and stores with
+  `PLIC_WIDTH_STORE=1`. `PLIC_WIDTH_CASE=0..4` and `PLIC_WIDTH_TRANSLATED=0/1`
+  retain the width and translation matrix. `scripts/plic_access_width.py`
+  selects both directions and keeps separate results for each scenario.
 
 ## Quick Start
+
+CLINT byte-address checks are available through
+`rva22s64-clint-subword-run`, `rva22s64-clint-subword-write-run`,
+`rva22s64-clint-subword-time-run`, and `rva22s64-clint-subword-msip-run`.
+Select `RVA22S64_XLEN=32` or `64` and the matching simulator/reference paths.
+Set `RVA22S64_TEST_CPPFLAGS=-DCLINT_SUBWORD_TRANSLATED=1` to exercise real
+Sv32/Sv39 walks with MPRV effective S-mode. The write probe uses word reads
+to check every modified and preserved byte independently of subword reads.
+`verilator-router-clint-subword-rv32/-rv64` covers the real router, all
+natural widths and byte offsets, masks, AW/W timing and response backpressure.
+
+PLIC supported-access checks use `scripts/plic_access_width.py`. Supply
+`--xlen 32` or `--xlen 64`, `--npc`, `--reference`, `--mrom`, and an empty
+`--output` directory. Add `--translated` to exercise real Sv32/Sv39 walks
+with MPRV effective S-mode; otherwise accesses use Bare mode. The runner
+builds byte/halfword/FP-double rejection probes and supported word controls
+for both reads and writes, checks exception addresses and subsequent device
+state, and records compiler commands, inputs and six timing/seed runs per
+probe. Use a reference built with the same platform width policy. These
+checks do not establish the supported widths of other devices or complete
+PLIC conformance; interrupt pending injection uses the platform extension.
+
+`verilator-l1d-plic-width-rv32/-rv64` checks rejection before a device read
+request, including captured split metadata. `verilator-ioq-plic-width-rv32/-rv64`
+checks store rejection before SQ allocation. Their translated cases model
+translation results; the core runner supplies the real page-walk coverage.
 
 ```bash
 # Prerequisites: ensure simulator + NEMU are built
@@ -33,6 +142,8 @@ verify/
 ├── scripts/            # Test generation and orchestration scripts
 ├── riscof/             # ACT4 compliance testing
 │   ├── raptor-rv32gc/    # RV32GC test config, UDB config, model macros
+│   ├── raptor-rv64gc/    # RV64 M-mode instruction projection
+│   ├── raptor-rv64s/     # RV64 supervisor projection and requirement ledger
 │   └── riscv-arch-test/  # ACT4 repo (cloned on setup, gitignored)
 ├── formal/             # Formal verification (SymbiYosys)
 │   ├── rvfi/             # Raptor riscv-formal config (project-owned)
@@ -69,7 +180,7 @@ auto-included via `rapt.svh`.
 ```shell
 # Enable assertions for any simulation target
 make sim-rv32                VFLAGS="-DRAPT_ASSERT_EN"
-make microbench-ysyxsoc       VFLAGS="-DRAPT_ASSERT_EN"
+make microbench-random-rv32 SIM_RANDOM_DELAY=31 SIM_RANDOM_SEED=42 VFLAGS="-DRAPT_ASSERT_EN"
 make cpu-tests-rv32 ARGS="-b -n" VFLAGS="-DRAPT_ASSERT_EN"
 ```
 
@@ -126,6 +237,14 @@ make riscof-gen           # Generate self-checking ELFs
 make riscof-run           # Execute tests on NPC
 ```
 
+ACT4 uses a 60-second per-ELF **wall-clock** timeout (`ACT4_TIMEOUT`), separate
+from the generic 10-second unit-test default. Large floating-point ELFs can
+take longer than 10 seconds even without contention. For busy hosts, use
+`make riscof-run JOBS=4 ACT4_TIMEOUT=120`. Explicit legacy `TIMEOUT` overrides
+remain honored unless `ACT4_TIMEOUT` is supplied. Timeout logs retain the
+command, elapsed time and captured output; a timeout always counts as failure,
+even if partial output contains a PASS line.
+
 Requires Sail RISC-V 0.13.1 and `uv` (Python package manager). Install the
 official Linux x86_64 release in the default project location with:
 
@@ -140,6 +259,33 @@ sail_riscv_sim --version
 ```
 
 Both ACT4 and classic RISCOF validate the exact Sail version before running.
+
+Classic RTL RISCOF (`make -C verify riscof-classic`) uses a separate
+`RISCOF_CLASSIC_TIMEOUT=600` second wall-clock budget per DUT test. Large F/D
+vectors can exceed the generic 10-second smoke-test budget, especially with
+parallel jobs. Explicit `TIMEOUT` overrides are still honored unless
+`RISCOF_CLASSIC_TIMEOUT` is supplied. For example:
+
+```bash
+make -C verify riscof-classic JOBS=4 RISCOF_CLASSIC_TIMEOUT=600
+verify/build/riscof-classic-venv/bin/python verify/scripts/test_riscof_classic_runner.py
+```
+
+The classic Sail plugin uses `raptor.json` to check page-local misaligned
+accesses as a whole before splitting, matching Raptor's PMP policy. It keeps
+Sail 0.13.1's ROM/IO/RAM regions but disables its default MAG and Zama16b
+declaration; otherwise the RAM MAG overrides the page-local split setting. The
+`pmpm_misaligned_{na4,napot,tor}` tests use a 16-byte region offset on both
+DUT and reference: this retains the PMP crossings while separating them from
+Sail's mandatory page split. These tests remain in the comparison; cross-page
+behavior is covered separately by the split-page and PMP span regressions.
+
+Each test's `dut/` directory retains `dut.log` and `dut-run.json`. Only a
+successful simulator termination with a complete, well-formed signature is
+passed to the signature comparison. On execution failure, partial output is
+kept as `*.signature.partial` and the comparison signature is empty so the test
+still fails. This distinguishes execution timeouts from completed architectural
+mismatches; it does not suppress either failure or change the test selection.
 
 ### 4. RISCV-DV Privileged Stress (`make riscv-dv`)
 
@@ -328,12 +474,13 @@ make jtag-debug-tests-setup   # Clones riscv-software-src/riscv-tests
 make jtag-debug-tests         # Currently exits 1 with checklist
 ```
 
-Stages the upstream GDB-driven debug-spec suite. The actual run is gated on
-(a) an OpenOCD `remote_bitbang` DPI bridge in `sim/`, (b) halt/resume +
-dcsr/dpc CSRs in the core, (c) abstract `access_register`/`access_memory`
-in `rapt_dm`. None of these exists yet — the target prints the gap list and
-exits non-zero rather than silently passing. OpenOCD config scaffold lives
-at [verify/jtag/openocd.cfg](./jtag/openocd.cfg).
+Stages the upstream GDB-driven debug-spec suite; `debug-tests` remains an
+explicit nonzero-exit stub. The remote-bitbang bridge, drained-core halt/resume
+and 32-bit abstract GPR/selected-CSR access already exist. Debug CSR storage
+is DM-local, and commit-based stepping is a bring-up mechanism. Full Debug
+Mode entry/return, memory access/SBA, program-buffer execution and 64-bit
+abstract transfers remain unsupported. See [JTAG verification](jtag/README.md)
+for the implemented `openocd-halt-reg` and `gdb-smoke` entry points.
 
 ### 7. Module-level UVM (`make uvm`)
 
@@ -349,8 +496,17 @@ make uvm-iq-compile  # Compile the complete issue-queue UVM environment
 ```
 
 See [uvm/README.md](./uvm/README.md) for the installed XSim limitation and
-[uvm/VERIFICATION_PLAN.md](./uvm/VERIFICATION_PLAN.md) for the P0-P2 module
-matrix and closure criteria.
+current environment coverage. The former standalone verification plan is not
+distributed here; executable targets in [Makefile](Makefile) define the
+available checks.
+
+## Linux milestones
+
+The RV32 Linux CI job explicitly uses `--success-marker "Linux version"`: it
+checks kernel entry and the runner's failure diagnostics. It does not require
+userspace startup. From the root, `make verify-linux-boot-rv32` instead requires
+`Run /init as init process`. Memory-stress targets use their separately
+configured milestone; none of these alone certifies a profile or OS stability.
 
 ## Integration with Root Makefile
 
@@ -392,3 +548,59 @@ Then add to `main()`:
 ```python
 all_tests.extend(gen_my_test(args.xlen))
 ```
+
+M decoder enumeration: `make -C verify verilator-idu-m-encodings-rv32`
+and `verilator-idu-m-encodings-rv64` exercise every rd/rs1/rs2 tuple in
+funct7=1 OP/OP-32 across M/S/U. RV32 also sweeps OP-32/OP-IMM-32 funct7,
+funct3 and correlated register fields. The latter is not a Cartesian register
+sweep. `scripts/m_elf_coverage.py --elf-dir <M-ELFs> --output <JSON>` records
+static instruction and register coverage separately from execution results.
+
+The M privilege/edge test also rejects all five RV64 M word operations in RV32,
+checking their precise illegal-instruction trap and preserved destination.
+
+`rva22s64-bit-xlen-legality-run` checks native REV8 and highest-bit BSETI,
+then traps on selected XLEN-incompatible shift/REV8 encodings. Use
+`RVA22S64_TEST_CPPFLAGS=-DBIT_TEST_PRIV=0`, `1`, or `3` for U/S/M.
+`verilator-idu-bit-immediates-rv32` / `-rv64` enumerate eight immediate
+families, every 6-bit shift and rd/rs1 combination, plus both REV8 encodings,
+in M/S/U. A reference with the RV32 shift-immediate matching fix is required.
+
+`verilator-bit-decode-alu-rv32` / `-rv64` assemble deterministic Zba/Zbb/Zbs
+vectors and compare the real decoder+ALU against independent Python integer
+expectations in M/S/U. The vector manifest records the seed, compiler command,
+operands and expected results; it is not an exhaustive operand proof.
+
+`rva22s64-zexth-xlen-run` checks native ZEXT.H, all eight C.ZEXT.H register
+encodings, and the unimplemented other-XLEN native encoding with precise
+cause/EPC/tval, preserved destination and trap return. Set `RVA22S64_XLEN`
+to 32 or 64 and `RVA22S64_TEST_CPPFLAGS=-DZEXTH_TEST_PRIV=0`, `1`, or `3`
+for U/S/M; provide the frozen NPC and matching reference as for other runners.
+`verilator-zexth-decode-alu-rv32` / `-rv64` exercise the real decoder and ALU:
+all 65,536 low-halfword values with upper bits set, both native/compressed
+forms, every native rd/rs1 pair and all compressed short registers in M/S/U.
+Each XLEN checks 399,384 cases. This is bounded operand coverage; rejecting
+the counterpart encoding is the selected platform's unimplemented-encoding
+policy. C.ZEXT.H interaction coverage does not add Zcb to RVA22's mandatory set.
+
+`verilator-compressed-register-legality-rv32` / `-rv64` check every register and
+immediate field of C.LWSP, C.LDSP/C.FLWSP and C.ADDIW/C.JAL, plus every C.JR
+register in M/S/U: 18,528 cases per XLEN. Reserved integer zero-register forms
+must report illegal instruction with the raw lower parcel as tval; RV32 C.FLWSP
+f0 and overlapping C.JAL remain legal. FP state is enabled in this module test.
+`rva22s64-compressed-register-legality-run` exercises representative illegal
+forms and legal controls on a frozen core. Select `RVA22S64_XLEN=32` or `64`
+and `RVA22S64_TEST_CPPFLAGS=-DC_REGISTER_TEST_PRIV=0`, `1`, or `3` for U/S/M;
+the reference must include the compressed zero-register legality repair.
+These tests cover the selected platform policy, not all compressed encodings.
+
+`verilator-compressed-zero-immediate-rv32` / `-rv64` enumerate all immediate
+and register fields of C.ADDI4SPN and C.LUI/C.ADDI16SP in M/S/U: 12,288 checks
+per XLEN. Zero immediates are rejected except the eight existing C.MOP.n
+encodings (odd n in 1..15); nonzero-immediate C.LUI x0 HINTs remain valid.
+MOP/HINT checks also require no architectural destination. The core target
+`rva22s64-compressed-zero-immediate-run` tests all 32 reserved zero-immediate
+forms, all eight C.MOP.n controls, HINTs and representative legal arithmetic.
+Set `RVA22S64_TEST_CPPFLAGS=-DC_IMMEDIATE_TEST_PRIV=0`, `1`, or `3`, with the
+selected XLEN, frozen NPC and corrected reference. Zcmop remains an existing
+extra implementation; these checks do not make it mandatory for RVA22.

@@ -7,66 +7,36 @@
 /* verilator lint_off UNUSEDPARAM */
 
 interface load_fast_if #(
-    parameter unsigned PLEN = `RAPT_PHY_LEN
+    parameter unsigned PLEN = `RAPT_PHY_LEN,
+    parameter unsigned ROBLEN = $clog2(`RAPT_ROB_SIZE),
+    parameter unsigned GENERATION_BITS = `RAPT_ROB_GENERATION_BITS,
+    parameter unsigned RLEN = `RAPT_REG_LEN,
+    parameter unsigned XLEN = `RAPT_XLEN
 );
   logic valid;
   logic rebusy;
   logic [PLEN-1:0] prd;
-
-  modport source(output valid, rebusy, prd);
-  modport sink(input valid, rebusy, prd);
-endinterface
-
-interface cdb_if #(
-    parameter unsigned PLEN = `RAPT_PHY_LEN,
-    parameter unsigned RLEN = `RAPT_REG_LEN,
-    parameter int XLEN = `RAPT_XLEN
-);
-  /* verilator lint_off UNUSEDSIGNAL */
-  logic [XLEN-1:0] pc;
-  logic [XLEN-1:0] npc;
-  logic btaken;
-  logic mispredict;
-  logic [$clog2(`RAPT_ROB_SIZE)-1:0] dest;
-  logic [XLEN-1:0] result;
-  logic [PLEN-1:0] prd;
+  logic [ROBLEN-1:0] dest;
+  logic [GENERATION_BITS-1:0] generation;
   logic [RLEN-1:0] rd;
-  logic csr_wen;
-  logic [XLEN-1:0] csr_wdata;
-  logic fp_flags_valid;
-  logic [4:0] fp_flags;
-  logic wen;
-  logic [5:0] alu;
-  logic [XLEN-1:0] sq_waddr;
-  logic [XLEN-1:0] sq_wdata;
-  logic [63:0] sq_wdata64;
-  logic sq_fp64;
-  logic trap;
-  logic [XLEN-1:0] tval;
-  logic [XLEN-1:0] cause;
-  logic difftest_skip;
-  logic valid;
-  /* verilator lint_on UNUSEDSIGNAL */
+  // Confirmation belongs to the early-wakeup protocol, not the global
+  // completion fan-in. Only a latency-predictable producer drives this path.
+  logic confirmed;
+  logic [PLEN-1:0] confirmed_prd;
+  logic [ROBLEN-1:0] confirmed_dest;
+  logic [GENERATION_BITS-1:0] confirmed_generation;
+  logic [RLEN-1:0] confirmed_rd;
+  logic [XLEN-1:0] result;
 
-  modport in(
-      input pc, npc, btaken, mispredict,
-      input dest, result,
-      input prd, rd,
-      input csr_wen, csr_wdata, fp_flags_valid, fp_flags,
-      input wen, alu, sq_waddr, sq_wdata, sq_wdata64, sq_fp64,
-      input trap, tval, cause,
-      input difftest_skip,
-      input valid
+  modport source(
+      output valid, rebusy, prd, dest, generation, rd,
+                        confirmed, confirmed_prd, confirmed_dest, confirmed_generation,
+                        confirmed_rd, result
   );
-  modport out(
-      output pc, npc, btaken, mispredict,
-      output dest, result,
-      output prd, rd,
-      output csr_wen, csr_wdata, fp_flags_valid, fp_flags,
-      output wen, alu, sq_waddr, sq_wdata, sq_wdata64, sq_fp64,
-      output trap, tval, cause,
-      output difftest_skip,
-      output valid
+  modport sink(
+      input valid, rebusy, prd, dest, generation, rd,
+                      confirmed, confirmed_prd, confirmed_dest, confirmed_generation,
+                      confirmed_rd, result
   );
 endinterface
 

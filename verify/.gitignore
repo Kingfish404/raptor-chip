@@ -9,6 +9,7 @@
 !*.h
 !*.c
 !*.ini
+!/vpu/vendor/riscv-opcodes/rv_v
 
 __pycache__/
 build/
@@ -23,3 +24,7 @@ obj_*
 *.bin
 *.o
 *.out
+
+# Keep operational READMEs; put task reviews and progress notes in docs.agent/.
+*.md
+!README.md

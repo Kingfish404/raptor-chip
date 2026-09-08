@@ -1,5 +1,3 @@
-`include "rapt.svh"
-
 module rapt_fpu_convert_narrow (
     input  logic        clock,
     input  logic        reset,
@@ -22,7 +20,7 @@ module rapt_fpu_convert_narrow (
   logic [2:0] s1_rounding_mode_q;
 
   logic s2_sign_q, s2_normal_q, s2_guard_q, s2_sticky_q;
-  logic s2_special_q;
+  logic s2_special_q, s2_tiny_q;
   logic signed [12:0] s2_exponent_q;
   logic [23:0] s2_retained_q;
   logic [63:0] s2_special_result_q;
@@ -45,6 +43,7 @@ module rapt_fpu_convert_narrow (
   integer leading_scan_index_c;
 
   logic normal_c;
+  logic precision_guard_c, precision_sticky_c, precision_round_up_c, tiny_c;
   logic [23:0] retained_c;
   logic guard_c, sticky_c;
   integer shift_count_c;
@@ -96,6 +95,21 @@ module rapt_fpu_convert_narrow (
 
   always_comb begin
     normal_c = s1_exponent_q >= -13'sd126;
+    // Detect tininess after rounding to 24 bits with an unbounded exponent.
+    // The final subnormal rounding can produce min-normal while UF still applies.
+    precision_guard_c = s1_significand_q[28];
+    precision_sticky_c = |s1_significand_q[27:0];
+    case (s1_rounding_mode_q)
+      3'b000: precision_round_up_c = precision_guard_c
+          && (precision_sticky_c || s1_significand_q[29]);
+      3'b001: precision_round_up_c = 1'b0;
+      3'b010: precision_round_up_c = (precision_guard_c || precision_sticky_c) && s1_sign_q;
+      3'b011: precision_round_up_c = (precision_guard_c || precision_sticky_c) && !s1_sign_q;
+      3'b100: precision_round_up_c = precision_guard_c;
+      default: precision_round_up_c = 1'b0;
+    endcase
+    tiny_c = !normal_c && !((s1_exponent_q == -13'sd127)
+        && precision_round_up_c && (&s1_significand_q[52:29]));
     shift_count_c = normal_c ? 29 : -integer'(s1_exponent_q) - 97;
     retained_c = '0;
     guard_c = 1'b0;
@@ -149,7 +163,7 @@ module rapt_fpu_convert_narrow (
         stage3_result_c[31:0] = rounded_c[23]
             ? {s2_sign_q, 8'h01, 23'b0}
             : {s2_sign_q, 8'h00, rounded_c[22:0]};
-        stage3_flags_c[1] = inexact_c && !rounded_c[23];
+        stage3_flags_c[1] = inexact_c && s2_tiny_q;
         stage3_flags_c[0] = inexact_c;
       end
     end
@@ -184,6 +198,7 @@ module rapt_fpu_convert_narrow (
         s2_sign_q <= s1_sign_q;
         s2_exponent_q <= s1_exponent_q;
         s2_normal_q <= normal_c;
+        s2_tiny_q <= tiny_c;
         s2_retained_q <= retained_c;
         s2_guard_q <= guard_c;
         s2_sticky_q <= sticky_c;

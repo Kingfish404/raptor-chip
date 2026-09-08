@@ -43,10 +43,31 @@
 
 `define RAPT_SQ_SIZE 16
 
-// Dual commit: retire up to 2 consecutive ROB entries per cycle.
-`define RAPT_DUAL_COMMIT
+// Authoritative ordered-stage widths and independent cache lookahead.
+`ifndef RAPT_INTEGER_ISSUE_PORTS
+`define RAPT_INTEGER_ISSUE_PORTS 2
+`endif
+`ifndef RAPT_INTEGER_SYSTEM_PORT
+`define RAPT_INTEGER_SYSTEM_PORT 0
+`endif
+`ifndef RAPT_DECODE_WIDTH
+`define RAPT_DECODE_WIDTH 2
+`endif
+`ifndef RAPT_RENAME_WIDTH
+`define RAPT_RENAME_WIDTH 2
+`endif
+`ifndef RAPT_DISPATCH_WIDTH
+`define RAPT_DISPATCH_WIDTH 2
+`endif
+`ifndef RAPT_COMMIT_WIDTH
+`define RAPT_COMMIT_WIDTH 2
+`endif
+`ifndef RAPT_FETCH_LOOKAHEAD
+`define RAPT_FETCH_LOOKAHEAD
+`endif
 
-// Dual issue: dispatch up to 2 instructions per cycle through the pipeline.
+// Deprecated compatibility markers for historical modules/testbenches.
+`define RAPT_DUAL_COMMIT
 `define RAPT_DUAL_ISSUE
 
 `ifdef RAPT_DUAL_ISSUE

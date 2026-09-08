@@ -1,6 +1,17 @@
-# app/ — RISC-V User-Space Programs
+# app/ — Programs and Software Test Cases
 
 Standalone RISC-V programs that compile to standard ELFs and run on any RISC-V Linux environment (real hardware, QEMU user-mode, or via Raptor's riscv-pk proxy kernel).
+
+`tests/baremetal/` contains freestanding architectural and platform regression
+programs, including their shared assembly headers. `tests/host/` contains native
+C/C++ tests for the simulator and reference model. These suites are built and
+run by `verify/Makefile` and `verify/scripts`; they are separate from the
+user-space `tests-build` flow. For example, from the repository root:
+
+```sh
+make -C verify rva22s64-csr-architectural-run
+make -C verify mmio-spi-read-mask-check mmio-virtio-mask-check
+```
 
 ## Quick Start
 

@@ -3,41 +3,34 @@
 
 `ifdef RAPT_RVFI
 `define RAPT_PRF_RVFI_PORTS \
-  , output [XLEN-1:0] rvfi_rd_wdata_a \
-  , output [XLEN-1:0] rvfi_rd_wdata_b
+  , output [XLEN-1:0] rvfi_rd_data[CommitWidth]
 `else
 `define RAPT_PRF_RVFI_PORTS
 `endif
 
 // Physical Register File - multi-ported register storage with valid/transient tracking.
-// Instantiated at the top level (rapt.sv) as a shared resource:
+// Shared backend resource in rapt_core:
 //   - Read by ROU (operand fetch via exu_prf_if)
-//   - Written by EXU ALU (exu_rou_if) and IOQ (exu_ioq_bcast_if)
+//   - Written by the typed completion array
 //   - Commit/dealloc controlled by CMU (rou_cmu_if, cmu_bcast_if)
-// On flush, registers marked transient are invalidated and zeroed.
+// On flush, registers marked transient are invalidated (data remains don't-care).
 module rapt_prf #(
-    parameter unsigned RNUM = `RAPT_REG_SIZE,
-    parameter unsigned PNUM = `RAPT_PHY_SIZE,
-    parameter unsigned PLEN = `RAPT_PHY_LEN,
-    parameter unsigned XLEN = `RAPT_XLEN
+    parameter rapt_pkg::core_config_t Cfg = rapt_pkg::CoreConfig,
+    parameter int RenameWidth = Cfg.rename_width,
+    parameter int CommitWidth = Cfg.commit_width,
+    parameter int unsigned NumCompletions = Cfg.completion_ports,
+    parameter type CompletionT = rapt_pkg::completion_t,
+    parameter unsigned RNUM = Cfg.arch_regs,
+    parameter unsigned PNUM = Cfg.phys_regs,
+    parameter unsigned PLEN = rapt_pkg::index_bits(Cfg.phys_regs),
+    parameter unsigned XLEN = Cfg.xlen
 ) (
+    input CompletionT completion[NumCompletions],
     input clock,
     input reset,
 
     // Read ports (from ROU operand fetch)
     exu_prf_if.slave prf_rd,
-
-    // Write source A: EXU ALU result
-    cdb_if.in exu_rou,
-
-    // Write source C: EXU ALU slot-B (pure arithmetic)
-    cdb_if.in exu_rou_b,
-
-    // Write source B: IOQ broadcast (LSU/CSR)
-    cdb_if.in exu_ioq_bcast,
-
-    // Write source D: MUL/DIV pipe
-    cdb_if.in exu_wb_mul,
 
     // Commit / dealloc / flush
     rou_cmu_if.in   rou_cmu,
@@ -58,90 +51,93 @@ module rapt_prf #(
     // otherwise the write races with normal commit-time updates.
     input  logic            dbg_we_i,
     input  logic [4:0]      dbg_addr_i,
-    input  logic [XLEN-1:0] dbg_wdata_i
+    input  logic [XLEN-1:0] dbg_wdata_i,
+    // Addressed committed read: select the narrow RAT entry before PRF data.
+    // The full rf/rf_map arrays remain available for RVFI and simulation.
+    output logic [XLEN-1:0] dbg_rdata_o
     `RAPT_PRF_RVFI_PORTS
 );
+  if (RenameWidth < 1 || CommitWidth < 1 || NumCompletions < 1
+      || RNUM < 1 || RNUM > 32 || PNUM < RNUM || XLEN < 1
+      || PLEN < rapt_pkg::index_bits(
+          PNUM
+      )) begin : g_invalid_shape
+    $error("Invalid rapt_prf configuration: storage/port shape");
+  end
+  if (prf_rd.Width != RenameWidth || prf_rd.PLEN != PLEN || prf_rd.XLEN != XLEN
+      || rou_cmu.Width != CommitWidth || rou_cmu.PLEN != PLEN
+      || rou_cmu.XLEN != XLEN) begin : g_invalid_interfaces
+    $error("Invalid rapt_prf configuration: interface dimensions");
+  end
+  if ($bits(
+          completion[0].prd
+      ) != PLEN || $bits(
+          completion[0].result
+      ) != XLEN || $bits(
+          completion[0].valid
+      ) != 1) begin : g_invalid_completion
+    $error("Invalid rapt_prf configuration: completion field widths");
+  end
+
   logic [XLEN-1:0] prf_arr           [PNUM];
   logic [PNUM-1:0] prf_valid;
   logic [PNUM-1:0] prf_transient;
+  localparam int ArchIndexBits = rapt_pkg::index_bits(RNUM);
+
+  assign dbg_rdata_o = int'(dbg_addr_i) < RNUM
+      ? prf_arr[rat_snapshot[ArchIndexBits'(dbg_addr_i)]] : '0;
 
 `ifdef RAPT_RVFI
-  assign rvfi_rd_wdata_a = (rou_cmu.rd_a != 0) ? prf_arr[rou_cmu.prd_a] : '0;
-  assign rvfi_rd_wdata_b = (rou_cmu.rd_b != 0) ? prf_arr[rou_cmu.prd_b] : '0;
+  for (genvar c = 0; c < CommitWidth; c++)
+    assign rvfi_rd_data[c] = rou_cmu.slot[c].rd != 0 ? prf_arr[rou_cmu.slot[c].prd] : '0;
 `endif
 
-  // ---- Read ports (combinational) ----
-  assign prf_rd.pv1_a       = prf_arr[prf_rd.pr1_a];
-  assign prf_rd.pv1_a_valid = prf_valid[prf_rd.pr1_a];
-  assign prf_rd.pv2_a       = prf_arr[prf_rd.pr2_a];
-  assign prf_rd.pv2_a_valid = prf_valid[prf_rd.pr2_a];
-
-`ifdef RAPT_DUAL_ISSUE
-  assign prf_rd.pv1_b       = prf_arr[prf_rd.pr1_b];
-  assign prf_rd.pv1_b_valid = prf_valid[prf_rd.pr1_b];
-  assign prf_rd.pv2_b       = prf_arr[prf_rd.pr2_b];
-  assign prf_rd.pv2_b_valid = prf_valid[prf_rd.pr2_b];
-`endif
-
+  for (genvar s = 0; s < RenameWidth; s++) begin : g_read
+    assign prf_rd.pv1[s] = prf_arr[prf_rd.pr1[s]];
+    assign prf_rd.pv2[s] = prf_arr[prf_rd.pr2[s]];
+    assign prf_rd.pv1_valid[s] = prf_valid[prf_rd.pr1[s]];
+    assign prf_rd.pv2_valid[s] = prf_valid[prf_rd.pr2[s]];
+  end
   // ---- Write port extraction (unified CDB) ----
-  // One slot per value-producing writeback pipe:
-  //   [0]=ALU-CSR [1]=ALU [2]=MEM [3]=MULDIV.
-  // The Branch pipe never writes rd (prd/rd tied 0) so it has no slot here.
-  // Rename guarantees a unique producer per physical register, so at most
-  // one port targets a given prd in any cycle and slot order is irrelevant.
-  localparam int unsigned NWB = 4;
+  // Every completion may carry a register write; non-writers have rd=0.
+  // Rename guarantees one live producer per physical destination.
+  localparam int unsigned NWB = NumCompletions;
   logic            wr_en  [NWB];
   logic [PLEN-1:0] wr_addr[NWB];
   logic [XLEN-1:0] wr_data[NWB];
 
-  assign wr_en[0]   = exu_rou.valid && exu_rou.rd != 0;
-  assign wr_addr[0] = exu_rou.prd;
-  assign wr_data[0] = exu_rou.result;
+  for (genvar p = 0; p < NWB; p++) begin : g_write_ports
+    assign wr_en[p] = completion[p].valid && completion[p].rd != 0;
+    assign wr_addr[p] = completion[p].prd;
+    assign wr_data[p] = completion[p].result;
+  end
 
-  assign wr_en[1]   = exu_rou_b.valid && exu_rou_b.rd != 0;
-  assign wr_addr[1] = exu_rou_b.prd;
-  assign wr_data[1] = exu_rou_b.result;
-
-  assign wr_en[2]   = exu_ioq_bcast.valid && exu_ioq_bcast.rd != 0;
-  assign wr_addr[2] = exu_ioq_bcast.prd;
-  assign wr_data[2] = exu_ioq_bcast.result;
-
-  assign wr_en[3]   = exu_wb_mul.valid && exu_wb_mul.rd != 0;
-  assign wr_addr[3] = exu_wb_mul.prd;
-  assign wr_data[3] = exu_wb_mul.result;
-
-  // ---- Commit / dealloc ----
-  logic commit_dealloc;
-  assign commit_dealloc = rou_cmu.valid_a && rou_cmu.rd_a != 0;
-
-  logic commit_dealloc_b;
-  assign commit_dealloc_b = rou_cmu.valid_b && rou_cmu.rd_b != 0;
-
-  // Pre-decode addresses to one-hot vectors (shared decoders, reduce per-entry fanin)
-  logic [PNUM-1:0] dealloc_prs_oh, dealloc_prs_b_oh;
-  logic [PNUM-1:0] settle_prd_oh, settle_prd_b_oh;
+  // One decoded update mask per physical entry. Reclaim wins over settle
+  // for intermediate mappings in a same-cycle WAW chain.
+  logic [PNUM-1:0] dealloc_prs_oh, settle_prd_oh;
   logic [PNUM-1:0] wr_oh[NWB];
-
   always_comb begin
-    dealloc_prs_oh   = '0;
-    dealloc_prs_b_oh = '0;
-    settle_prd_oh    = '0;
-    settle_prd_b_oh  = '0;
-    for (int p = 0; p < NWB; p++) wr_oh[p] = '0;
-    if (commit_dealloc_b) dealloc_prs_b_oh[rou_cmu.prs_b] = 1'b1;
-    if (commit_dealloc) dealloc_prs_oh[rou_cmu.prs_a] = 1'b1;
-    if (commit_dealloc_b) settle_prd_b_oh[rou_cmu.prd_b] = 1'b1;
-    if (commit_dealloc) settle_prd_oh[rou_cmu.prd_a] = 1'b1;
+    dealloc_prs_oh = '0;
+    settle_prd_oh = '0;
+    for (int c = 0; c < CommitWidth; c++) begin
+      if (rou_cmu.slot[c].valid && rou_cmu.slot[c].rd != 0) begin
+        dealloc_prs_oh[rou_cmu.slot[c].prs] = 1'b1;
+        settle_prd_oh[rou_cmu.slot[c].prd] = 1'b1;
+      end
+    end
     for (int p = 0; p < NWB; p++) begin
+      wr_oh[p] = '0;
       if (wr_en[p]) wr_oh[p][wr_addr[p]] = 1'b1;
     end
   end
-
   // Any-port write select per entry (unique by rename invariant).
   logic [PNUM-1:0] wr_any_oh;
   logic [XLEN-1:0] wr_mux_data[PNUM];
-  always_comb begin
-    for (int i = 0; i < PNUM; i++) begin
+  // Each entry owns its write selection and state. The small inner scan
+  // expresses the existing lowest-port priority; physical entries are not
+  // one large procedural unroll domain.
+  for (genvar i = 0; i < PNUM; i++) begin : g_entry
+    always_comb begin
       wr_any_oh[i]   = 1'b0;
       wr_mux_data[i] = wr_data[0];
       for (int p = NWB - 1; p >= 0; p--) begin
@@ -151,28 +147,18 @@ module rapt_prf #(
         end
       end
     end
-  end
-
-  // ---- Write / state update ----
-  always_ff @(posedge clock) begin
-    if (reset) begin
-      // Only valid/transient need a defined reset value; `prf_arr` data is
-      // don't-care because every read is gated by `prf_valid[]`. Skipping
-      // PNUM*XLEN data flop reset endpoints removes that fanout from the
-      // global reset network (helped STA recovery on reset's BUF_X1 hot
-      // path).
-      prf_valid     <= {{(PNUM - RNUM) {1'b0}}, {RNUM{1'b1}}};
-      prf_transient <= '0;
-    end else begin
-      for (integer i = 0; i < PNUM; i = i + 1) begin
-        // Free old physical register (prs): slot 1 then slot 0 priority
-        if (dealloc_prs_b_oh[i]) begin
-          prf_valid[i] <= 1'b0;
-        end else if (dealloc_prs_oh[i]) begin
+    // ---- Write / state update ----
+    always_ff @(posedge clock) begin
+      if (reset) begin
+        // Data has no reset endpoints; only validity/transience is reset.
+        // Architectural reset mappings retain the existing valid policy.
+        prf_valid[i]     <= (i < RNUM);
+        prf_transient[i] <= 1'b0;
+      end else begin
+        // Free stale mappings; a younger WAW deallocation wins over an older settlement
+        if (dealloc_prs_oh[i]) begin
           prf_valid[i] <= 1'b0;
           // Settle committed register (prd): no longer transient
-        end else if (settle_prd_b_oh[i]) begin
-          prf_transient[i] <= 1'b0;
         end else if (settle_prd_oh[i]) begin
           prf_transient[i] <= 1'b0;
         end else if (cmu_bcast.flush_pipe && prf_transient[i]) begin
@@ -186,7 +172,8 @@ module rapt_prf #(
           prf_arr[i]       <= wr_mux_data[i];
           prf_valid[i]     <= 1'b1;
           prf_transient[i] <= 1'b1;
-        end else if (dbg_we_i && dbg_addr_i != 5'd0 && rat_snapshot[dbg_addr_i] == PLEN'(i)) begin
+        end else if (dbg_we_i && dbg_addr_i != 5'd0 && int'(dbg_addr_i) < RNUM
+                     && rat_snapshot[ArchIndexBits'(dbg_addr_i)] == PLEN'(i)) begin
           // Halt-time abstract write: target the committed phys reg of
           // architectural reg `dbg_addr_i`. Caller must hold halted=1.
           prf_arr[i] <= dbg_wdata_i;

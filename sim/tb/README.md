@@ -72,8 +72,8 @@ Storage uses sparse associative byte arrays, so the large PMEM/FLASH windows are
 
 The rnp interface and its `axi2rnp`/`rnp2axi` adapters carry exactly **one word per transaction** (the adapters hardwire `arlen=0`, `arsize=2`, `arburst=0`). The chip's internal AXI master must therefore **never issue a burst**. This requires:
 
-- `-DRAPT_SOC` — the single-outstanding, ysyxSoC-style bus (added automatically by the Makefile).
-- a config **without** the L2 cache (`RAPT_L2_EN`). The `default` and `large` presets enable `RAPT_L2_EN` (16-beat line fills) and are **not** compatible with the rnp interface. The Makefile defaults to the no-L2 `small` preset.
+- `MemoryReadCredits=1` — explicitly set by `wrap_rnp_soc.sv` for the single-outstanding RNP adapter.
+- a config **without** the L2 cache (`RAPT_L2_EN`). The `large` preset enables `RAPT_L2_EN` and is **not** compatible with the rnp interface. The current `default` preset disables L2; any explicit L2 enable must also be excluded. The Makefile defaults to the no-L2 `small` preset.
 
 If you build with an L2-enabled config the chip will issue `arlen=15` bursts, the single-word host returns `rlast` after the first beat, and the chip deadlocks waiting for the remaining beats.
 
@@ -104,6 +104,6 @@ For gate-level runs you must provide your own `NETLIST` (the `soc_pad` post-layo
 
 ## Termination
 
-- **RTL alignment** (`verilator`): the AM `npc` target commits an `ebreak`; the harness taps `ebreak_a`/`ebreak_b` in the commit unit (`RAPT_TB_EBREAK_HALT`) and reports `HIT GOOD TRAP` / `HIT BAD TRAP`, matching `sim`'s DPI `npc_exu_ebreak` hook.
+- **RTL alignment** (`verilator`): the AM `npc` target commits an `ebreak`; the harness scans `rou_cmu.slot[s].ebreak` across `CommitWidth` (`RAPT_TB_EBREAK_HALT`) and reports `HIT GOOD TRAP` on any committed ebreak. It does not inspect a return code or reproduce NPC's GOOD/BAD distinction; use the finisher path when a failure code must be observed.
 - **Gate-level / commercial** (`RAPT_TB_GLS`): no RTL hierarchy is available, so termination is driven by the `sifive,test` finisher MMIO at `0x0010_0000` (`FIN_PASS`/`FIN_FAIL`).
 - In all flows a watchdog (`+MAX_CYCLES`) `$fatal`s on timeout.

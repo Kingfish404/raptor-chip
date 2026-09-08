@@ -39,21 +39,29 @@ module formal_divsqrt (
   logic        dut_valid;
 
   rapt_fpu_divsqrt dut (
-      .clock(clock), .reset(reset),
-      .operand_a(operand_a), .operand_b(operand_b),
+      .clock(clock),
+      .reset(reset),
+      .operand_a(operand_a),
+      .operand_b(operand_b),
       .rounding_mode(rounding_mode),
-      .src_is_double(src_is_double), .dst_is_double(src_is_double),
-      .divide(divide), .sqrt(sqrt), .flush(flush),
-      .valid(valid), .ready(dut_ready),
-      .result(dut_result), .flags(dut_flags), .result_valid(dut_valid)
+      .src_is_double(src_is_double),
+      .dst_is_double(src_is_double),
+      .divide(divide),
+      .sqrt(sqrt),
+      .flush(flush),
+      .valid(valid),
+      .ready(dut_ready),
+      .result(dut_result),
+      .flags(dut_flags),
+      .result_valid(dut_valid)
   );
 
   // Legal launch contract (mirrors the EXU issue stage).
   always_comb begin
-    asm_rm:    assume (rounding_mode <= 3'd4);
-    asm_rdy:   assume (!(valid && !dut_ready));        // never launch while busy
-    asm_mutex: assume (!(valid && divide && sqrt));    // mutually exclusive
-    asm_op:    assume (!(valid && !divide && !sqrt));  // exactly one op
+    asm_rm : assume (rounding_mode <= 3'd4);
+    asm_rdy : assume (!(valid && !dut_ready));  // never launch while busy
+    asm_mutex : assume (!(valid && divide && sqrt));  // mutually exclusive
+    asm_op : assume (!(valid && !divide && !sqrt));  // exactly one op
   end
 
   // Initialisation: force a reset on the very first frame so the proof starts
@@ -63,7 +71,7 @@ module formal_divsqrt (
   initial f_past_valid = 1'b0;
   always_ff @(posedge clock) f_past_valid <= 1'b1;
   always_comb begin
-    asm_init: assume (f_past_valid || reset);
+    asm_init : assume (f_past_valid || reset);
   end
 
   wire launch = valid && dut_ready && (divide || sqrt);
@@ -74,7 +82,7 @@ module formal_divsqrt (
   // ------------------------------------------------------------------------
   logic [10:0] exp_a, exp_b;
   logic [51:0] frac_a, frac_b;
-  logic        sign_a, a_nan, b_nan, a_inf, b_inf, a_zero, b_zero;
+  logic sign_a, a_nan, b_nan, a_inf, b_inf, a_zero, b_zero;
   assign exp_a  = src_is_double ? operand_a[62:52] : {3'b0, operand_a[30:23]};
   assign exp_b  = src_is_double ? operand_b[62:52] : {3'b0, operand_b[30:23]};
   assign frac_a = src_is_double ? operand_a[51:0]  : {29'b0, operand_a[22:0]};
@@ -114,7 +122,7 @@ module formal_divsqrt (
         in_flight_q <= 1'b0;
         cycles_q    <= '0;
       end else if (in_flight_q) begin
-        cycles_q    <= cycles_q + 7'd1;
+        cycles_q <= cycles_q + 7'd1;
       end
     end
   end
@@ -143,15 +151,15 @@ module formal_divsqrt (
   always_ff @(posedge clock) begin
     if (!reset) begin
       // ---- Liveness: an iterative op completes within 63 cycles ----
-      live: assert (!(in_flight_q && cycles_q == 7'd62) || dut_valid || flush);
+      live : assert (!(in_flight_q && cycles_q == 7'd62) || dut_valid || flush);
 
       // ---- No spurious result_valid without a launched operation ----
-      nospur: assert (!(dut_valid && !any_op_q && !launch));
+      nospur : assert (!(dut_valid && !any_op_q && !launch));
 
       // ---- Stability: result/flags only change when result_valid fires ----
       if (result_valid_d && !dut_valid) begin
-        stab_r: assert (dut_result == dut_result_d);
-        stab_f: assert (dut_flags  == dut_flags_d);
+        stab_r : assert (dut_result == dut_result_d);
+        stab_f : assert (dut_flags == dut_flags_d);
       end
     end
   end
@@ -162,11 +170,11 @@ module formal_divsqrt (
   logic launch_special_q;
   always_ff @(posedge clock) begin
     if (reset || flush) launch_special_q <= 1'b0;
-    else                launch_special_q <= (launch && is_special);
+    else launch_special_q <= (launch && is_special);
   end
   always_ff @(posedge clock) begin
     if (!reset && launch_special_q && !flush) begin
-      spec1: assert (dut_valid);
+      spec1 : assert (dut_valid);
     end
   end
 
@@ -174,22 +182,22 @@ module formal_divsqrt (
   logic flush_d;
   always_ff @(posedge clock) begin
     if (reset) flush_d <= 1'b0;
-    else       flush_d <= flush;
+    else flush_d <= flush;
   end
   always_ff @(posedge clock) begin
     if (!reset && flush_d && !flush) begin
-      flclean: assert (!dut_valid);
+      flclean : assert (!dut_valid);
     end
   end
 
   // ---- Coverage witnesses ----
   always_ff @(posedge clock) begin
     if (!reset) begin
-      cov_div_dp:  cover (dut_valid &&  divide &&  src_is_double);
-      cov_div_sp:  cover (dut_valid &&  divide && !src_is_double);
-      cov_sqrt_dp: cover (dut_valid &&  sqrt   &&  src_is_double);
-      cov_sqrt_sp: cover (dut_valid &&  sqrt   && !src_is_double);
-      cov_special: cover (dut_valid &&  launch_special_q);
+      cov_div_dp : cover (dut_valid && divide && src_is_double);
+      cov_div_sp : cover (dut_valid && divide && !src_is_double);
+      cov_sqrt_dp : cover (dut_valid && sqrt && src_is_double);
+      cov_sqrt_sp : cover (dut_valid && sqrt && !src_is_double);
+      cov_special : cover (dut_valid && launch_special_q);
     end
   end
 `endif

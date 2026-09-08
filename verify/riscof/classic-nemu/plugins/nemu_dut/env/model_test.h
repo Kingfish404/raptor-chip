@@ -19,6 +19,10 @@
 #define ALIGNMENT 2
 
 #define RVMODEL_DATA_SECTION                 \
+  .pushsection .tohost,"aw",@progbits;       \
+  .align 8; .global tohost; tohost: .dword 0; \
+  .align 8; .global fromhost; fromhost: .dword 0; \
+  .popsection;                              \
   .align 8; .global begin_regstate;          \
   begin_regstate:                            \
   .word 128;                                 \

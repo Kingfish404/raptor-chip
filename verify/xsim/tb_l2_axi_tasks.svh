@@ -1,15 +1,17 @@
 task automatic init_l2_axi(input bit upstream_bready_init);
   begin
+    axi_s.arcache = 4'hf;
     axi_s.arburst = 2'b01;
-    axi_s.arsize = 3'd2;
+    axi_s.arsize = 3'($clog2(XLEN/8));
     axi_s.arlen = 8'd0;
     axi_s.arid = '0;
     axi_s.araddr = '0;
     axi_s.arvalid = 1'b0;
     axi_s.rready = 1'b1;
 
+    axi_s.awcache = 4'hf;
     axi_s.awburst = 2'b01;
-    axi_s.awsize = 3'd2;
+    axi_s.awsize = 3'($clog2(XLEN/8));
     axi_s.awlen = 8'd0;
     axi_s.awid = '0;
     axi_s.awaddr = '0;
@@ -36,13 +38,14 @@ task automatic init_l2_axi(input bit upstream_bready_init);
 endtask
 
 
-task automatic send_l2_aw(input logic [XLEN-1:0] addr, input logic [IdW-1:0] id);
+task automatic send_l2_aw(input logic [XLEN-1:0] addr, input logic [IdW-1:0] id, input logic [3:0] cache_attr = 4'hf);
   bit accepted;
   begin
     axi_s.awaddr = addr;
+    axi_s.awcache = cache_attr;
     axi_s.awid = id;
     axi_s.awlen = 8'd0;
-    axi_s.awsize = 3'd2;
+    axi_s.awsize = 3'($clog2(XLEN/8));
     axi_s.awburst = 2'b01;
     axi_s.awvalid = 1'b1;
     accepted = 1'b0;
@@ -85,14 +88,16 @@ task automatic send_l2_ar_len(
     input logic [XLEN-1:0] addr,
     input logic [IdW-1:0] id,
     input logic [7:0] len,
-    input logic [1:0] burst
+    input logic [1:0] burst,
+    input logic [3:0] cache_attr = 4'hf
 );
   bit accepted;
   begin
     axi_s.araddr = addr;
+    axi_s.arcache = cache_attr;
     axi_s.arid = id;
     axi_s.arlen = len;
-    axi_s.arsize = 3'd2;
+    axi_s.arsize = 3'($clog2(XLEN/8));
     axi_s.arburst = burst;
     axi_s.arvalid = 1'b1;
     accepted = 1'b0;
@@ -106,9 +111,9 @@ task automatic send_l2_ar_len(
   end
 endtask
 
-task automatic send_l2_ar(input logic [XLEN-1:0] addr, input logic [IdW-1:0] id);
+task automatic send_l2_ar(input logic [XLEN-1:0] addr, input logic [IdW-1:0] id, input logic [3:0] cache_attr = 4'hf);
   begin
-    send_l2_ar_len(addr, id, 8'd0, 2'b01);
+    send_l2_ar_len(addr, id, 8'd0, 2'b01, cache_attr);
   end
 endtask
 

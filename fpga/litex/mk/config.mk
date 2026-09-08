@@ -335,11 +335,21 @@ _FPGA_FLAGS = --output-dir=$(FPGA_DIR) \
 FPGA_STAMP := $(FPGA_DIR)/.bitstream_stamp
 _FPGA_HASH_COMMON_INPUTS = $(PACK_SV) $(FPGA_PY) $(LITEX_DIR)/Makefile \
 	$(LITEX_DIR)/mk/config.mk $(LITEX_DIR)/mk/recipes.mk \
+	$(LITEX_DIR)/cores/cpu/raptor/core.py \
+	$(wildcard $(LITEX_DIR)/cores/cpu/raptor/*.h $(LITEX_DIR)/cores/cpu/raptor/*.S) \
+	$(if $(filter mlk_cu07_ku15p mlk_cu08_ku15p,$(FPGA_BOARD)),$(LITEX_DIR)/scripts/vivado_retry_timing.tcl,) \
+	$(if $(filter mlk_cu08_ku15p,$(FPGA_BOARD)),$(LITEX_DIR)/mlk_cu07_ku15p.py $(LITEX_DIR)/mlk_cu08_ku15p_platform.py,) \
 	$(if $(WITH_MIG_FLAG),$(LITEX_DIR)/$(BOARD_$(FPGA_BOARD)_MIG_TCL),)
 ifeq ($(BOOT_MODE),custom)
 _FPGA_HASH_INPUTS = $(_FPGA_HASH_COMMON_INPUTS) $(FW_FPGA_BIN)
 else
+# BIOS boot policy lives in LiteX main.c, not just the board's generated soc.h.
+# Include the package sources so a BIOS update cannot reuse an older ROM image.
+_FPGA_BIOS_DIR = $(LITEX_PATH)/litex/soc/software/bios
 _FPGA_HASH_INPUTS = $(_FPGA_HASH_COMMON_INPUTS) \
+	$(wildcard $(_FPGA_BIOS_DIR)/*.c $(_FPGA_BIOS_DIR)/*.h $(_FPGA_BIOS_DIR)/*.S $(_FPGA_BIOS_DIR)/*.ld $(_FPGA_BIOS_DIR)/cmds/*.c) \
+	$(_FPGA_BIOS_DIR)/Makefile \
+	$(LITEX_DIR)/scripts/patch_litex_picolibc.py \
 	$(LITEX_DIR)/scripts/patch_litex_sdcard_linux_override.py \
 	$(if $(filter 1,$(LINUX_FPGA_PROFILE)),$(FW_LINUX_FPGA_BIN) $(FW_LINUX_FPGA_SEEDED_DTB) $(FW_LINUX_FPGA_RNG_SEED) $(LINUX_FPGA_PAYLOAD),)
 endif

@@ -4,10 +4,6 @@
 - __[Tango Nano 20K-Aliexpress](https://www.aliexpress.com/item/1005005581148230.html)__ (38.77 $) or [Tang Nano 20K FPGA-淘宝网](https://item.taobao.com/item.htm?id=717932028073) (169 RMB)
   - or [Tang Nano 9K FPGA-淘宝网](https://item.taobao.com/item.htm?id=666055424174) (89-108 RMB)
 
-## For ysyx chips
-
-`cat` all your related `*.v` or `*.sv` file to `src/ysyx.v`, put the `*.vh` or `*.svh` to `src/include`.
-
 ## Configuration
 `configuration.py` contains data used by `generate-config.py` to generate:
   - `src/Config.v`, `os/os_config.h`, `os/os_start.S`

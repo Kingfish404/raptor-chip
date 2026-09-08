@@ -10,6 +10,13 @@ module raptSoC #(
     parameter int XLEN = `RAPT_XLEN
 ) (
     input  clock,
+    // Device writes are reported before a later SC may complete. Pending
+    // holds SC while the platform drains a finite batch of notifications.
+    input logic external_write_valid_i = 1'b0,
+    input logic external_write_pending_i = 1'b0,
+    input logic [XLEN-1:0] external_write_first_i = '0,
+    input logic [XLEN-1:0] external_write_last_i = '0,
+
     // JTAG ports (P0). tck implicit = clock. Always present.
     input  jtag_trst_n,
     input  jtag_tms,
@@ -17,6 +24,11 @@ module raptSoC #(
     output jtag_tdo,
     input  reset
 );
+`ifdef RAPT_LRSC_OBSERVE
+`ifndef SYNTHESIS
+  `include "rapt_lrsc_observe.svh"
+`endif
+`endif
   logic auto_master_out_awready;
   logic auto_master_out_awvalid;
   logic [3:0] auto_master_out_awid;
@@ -46,6 +58,110 @@ module raptSoC #(
   logic [XLEN-1:0] auto_master_out_rdata;
   logic [1:0] auto_master_out_rresp;
   logic auto_master_out_rlast;
+  logic [3:0] auto_master_out_arcache, auto_master_out_awcache;
+
+`ifdef RAPT_AXI_OBSERVE
+`ifndef SYNTHESIS
+  // Observation only: record accepted transfers at the external CPU boundary.
+  // Separate AW/W/B records preserve their independent handshake timing.
+  longint unsigned axi_observe_cycle = 0;
+  always @(posedge clock) begin
+    if (reset) axi_observe_cycle <= 0;
+    else begin
+      axi_observe_cycle <= axi_observe_cycle + 1;
+`ifdef RAPT_SPEC_OBSERVE
+      if (cpu.core.l1i_cache.slow_active)
+        $display(
+            "IFETCH_OBS %0d STATE %h %h %h %h %h %h",
+            axi_observe_cycle,
+            cpu.core.ifetch_io_owner_pc,
+            cpu.core.l1i_cache.u_word_fetch.state,
+            cpu.core.l1i_cache.slow_read_pbmt,
+            cpu.core.ifetch_io_authorized,
+            cpu.core.l1i_cache.slow_cancel,
+            cpu.core.l1i_cache.u_word_fetch.io_owned
+        );
+      if (cpu.core.ifetch_io_start)
+        $display("IFETCH_OBS %0d START %h", axi_observe_cycle, cpu.core.ifetch_io_owner_pc);
+      // Correlate wrong-path queue residency with actual recovery and commit.
+      // These hierarchical probes are test observations, never control inputs.
+      for (int q = 0; q < rapt_pkg::CoreConfig.ioq_entries; q++) begin
+        if (cpu.core.lsu.u_ioq.ioq_valid[q] && cpu.core.lsu.u_ioq.ioq_ren[q]
+            && cpu.core.lsu.u_ioq.ioq_pr1[q] == 0
+            && cpu.core.lsu.u_ioq.ioq_pr2[q] == 0)
+          $display(
+              "SPEC_OBS %0d Q %h %h %h %h %h",
+              axi_observe_cycle,
+              cpu.core.lsu.u_ioq.ioq_pc[q],
+              cpu.core.lsu.u_ioq.ioq_eff_addr[q],
+              cpu.core.lsu.u_ioq.ioq_dest[q],
+              cpu.core.lsu.u_ioq.ioq_generation[q],
+              cpu.core.cmu_bcast.rob_head
+          );
+      end
+      if (cpu.core.recovery.redirect_valid)
+        $display(
+            "SPEC_OBS %0d REDIRECT %h %h",
+            axi_observe_cycle,
+            cpu.core.rou.uop_pl[cpu.core.recovery.owner].pc,
+            cpu.core.recovery.target
+        );
+      if (cpu.core.cmu_bcast.flush_pipe) $display("SPEC_OBS %0d FLUSH", axi_observe_cycle);
+      for (int c = 0; c < rapt_pkg::CommitWidth; c++)
+      if (cpu.core.rou_cmu.slot[c].valid)
+        $display(
+            "SPEC_OBS %0d COMMIT %h %h",
+            axi_observe_cycle,
+            cpu.core.rou_cmu.slot[c].pc,
+            cpu.core.rou_cmu.slot[c].npc
+        );
+`endif
+      if (auto_master_out_arvalid && auto_master_out_arready)
+        $display(
+            "AXI_OBS %0d AR %h %h %h %h %h %h",
+            axi_observe_cycle,
+            auto_master_out_arid,
+            auto_master_out_araddr,
+            auto_master_out_arsize,
+            auto_master_out_arlen,
+            auto_master_out_arburst,
+            auto_master_out_arcache
+        );
+      if (auto_master_out_rvalid && auto_master_out_rready)
+        $display(
+            "AXI_OBS %0d R %h %h %h",
+            axi_observe_cycle,
+            auto_master_out_rid,
+            auto_master_out_rresp,
+            auto_master_out_rlast
+        );
+      if (auto_master_out_awvalid && auto_master_out_awready)
+        $display(
+            "AXI_OBS %0d AW %h %h %h %h %h %h",
+            axi_observe_cycle,
+            auto_master_out_awid,
+            auto_master_out_awaddr,
+            auto_master_out_awsize,
+            auto_master_out_awlen,
+            auto_master_out_awburst,
+            auto_master_out_awcache
+        );
+      if (auto_master_out_wvalid && auto_master_out_wready)
+        $display(
+            "AXI_OBS %0d W %h %h %h",
+            axi_observe_cycle,
+            auto_master_out_wdata,
+            auto_master_out_wstrb,
+            auto_master_out_wlast
+        );
+      if (auto_master_out_bvalid && auto_master_out_bready)
+        $display(
+            "AXI_OBS %0d B %h %h", axi_observe_cycle, auto_master_out_bid, auto_master_out_bresp
+        );
+    end
+  end
+`endif
+`endif
 
   // ---------------------------------------------------------------
   // External IRQ delivery (replaces legacy backdoor pokes).
@@ -64,7 +180,12 @@ module raptSoC #(
     end
   end
 
-  rapt cpu (  // src/CPU.scala:38:21
+  rapt cpu (
+      .external_write_valid_i,
+      .external_write_pending_i,
+      .external_write_first_i,
+      .external_write_last_i,
+      // src/CPU.scala:38:21
       .clock            (clock),
       .io_interrupt     (1'h0),
       .ext_irq_i        (ext_irq_pulse_q[`RAPT_PLIC_NDEV:1]),
@@ -75,6 +196,7 @@ module raptSoC #(
       .io_master_awlen  (auto_master_out_awlen),
       .io_master_awsize (auto_master_out_awsize),
       .io_master_awburst(auto_master_out_awburst),
+      .io_master_awcache(auto_master_out_awcache),
       .io_master_wready (auto_master_out_wready),
       .io_master_wvalid (auto_master_out_wvalid),
       .io_master_wdata  (auto_master_out_wdata),
@@ -91,6 +213,7 @@ module raptSoC #(
       .io_master_arlen  (auto_master_out_arlen),
       .io_master_arsize (auto_master_out_arsize),
       .io_master_arburst(auto_master_out_arburst),
+      .io_master_arcache(auto_master_out_arcache),
       .io_master_rready (auto_master_out_rready),
       .io_master_rvalid (auto_master_out_rvalid),
       .io_master_rid    (auto_master_out_rid),
@@ -98,37 +221,6 @@ module raptSoC #(
       .io_master_rresp  (auto_master_out_rresp),
       .io_master_rlast  (auto_master_out_rlast),
 
-`ifdef RAPT_USE_SLAVE
-      .io_slave_awready(  /* unused */),
-      .io_slave_awvalid(1'h0),
-      .io_slave_awid   (4'h0),
-      .io_slave_awaddr ('h0),
-      .io_slave_awlen  (8'h0),
-      .io_slave_awsize (3'h0),
-      .io_slave_awburst(2'h0),
-      .io_slave_wready (  /* unused */),
-      .io_slave_wvalid (1'h0),
-      .io_slave_wdata  ('h0),
-      .io_slave_wstrb  (4'h0),
-      .io_slave_wlast  (1'h0),
-      .io_slave_bready (1'h0),
-      .io_slave_bvalid (  /* unused */),
-      .io_slave_bid    (  /* unused */),
-      .io_slave_bresp  (  /* unused */),
-      .io_slave_arready(  /* unused */),
-      .io_slave_arvalid(1'h0),
-      .io_slave_arid   (4'h0),
-      .io_slave_araddr ('h0),
-      .io_slave_arlen  (8'h0),
-      .io_slave_arsize (3'h0),
-      .io_slave_arburst(2'h0),
-      .io_slave_rready (1'h0),
-      .io_slave_rvalid (  /* unused */),
-      .io_slave_rid    (  /* unused */),
-      .io_slave_rdata  (  /* unused */),
-      .io_slave_rresp  (  /* unused */),
-      .io_slave_rlast  (  /* unused */),
-`endif
 
       .jtag_trst_n(jtag_trst_n),
       .jtag_tms   (jtag_tms),
@@ -220,7 +312,7 @@ module rapt_npc_soc #(
   // burst_next_addr below — no current master uses WRAP).
   localparam logic [1:0] AXIBurstFixed = 2'b00;
 
-  localparam logic [XLEN-1:0] AlignMask = ~(XLEN / 8 - 1);
+  localparam logic [XLEN-1:0] AlignMask = ~XLEN'(int'(XLEN / 8 - 1));
 
   // -------------------------------------------------------------------------
   // Address range validation: check if address falls within any known region.
@@ -387,13 +479,13 @@ module rapt_npc_soc #(
           automatic logic [XLEN-1:0] na = r_next_addr;
           automatic logic [XLEN-1:0] tmp;
           if (addr_valid(na)) begin
-            `RAPT_DPI_C_PMEM_READ(na, tmp);
+            `RAPT_DPI_C_PMEM_READ(na, {5'b0, r_size_q}, tmp);
             r_data_q <= tmp;
             r_resp_q <= AXIRespOKAY;
           end else begin
             tmp = '0;
             r_data_q <= '0;
-            r_resp_q <= AXIRespOKAY;  // tolerate speculative prefetch
+            r_resp_q <= AXIRespDecerr;
           end
           r_next_addr  <= burst_next_addr(na, r_size_q, r_burst_q);
           r_beats_left <= r_beats_left - 8'd1;
@@ -409,15 +501,17 @@ module rapt_npc_soc #(
         automatic logic            v;
         v = addr_valid(araddr);
         if (v) begin
-          `RAPT_DPI_C_PMEM_READ(araddr, tmp);
+          `RAPT_DPI_C_PMEM_READ(araddr, {5'b0, arsize}, tmp);
         end else begin
           tmp = '0;
-          $display("NPC_SOC: [ERROR] AXI read from invalid addr=%0h, arid=%0d", araddr, arid);
+          $display("NPC_SOC: AXI read decode error addr=%0h, arid=%0d", araddr, arid);
         end
         r_busy       <= 1'b1;
         r_id_q       <= arid;
         r_data_q     <= tmp;
-        r_resp_q     <= AXIRespOKAY;  // map decode errors to zero+OKAY for prefetch tolerance
+        // Speculative consumers own cancellation; the target must report an
+        // actual decode error rather than turn an invalid read into data.
+        r_resp_q     <= v ? AXIRespOKAY : AXIRespDecerr;
         r_size_q     <= arsize;
         r_burst_q    <= arburst;
         r_beats_left <= arlen;  // beats remaining after first
@@ -444,20 +538,18 @@ module rapt_npc_soc #(
         aw_resp_acc   <= addr_valid(awaddr) ? AXIRespOKAY : AXIRespDecerr;
         w_delay_q     <= random_delay();
         if (!addr_valid(awaddr)) begin
-          $display("NPC_SOC: [ERROR] AXI write to invalid addr=%0h, awid=%0d", awaddr, awid);
+          $display("NPC_SOC: AXI write decode error addr=%0h, awid=%0d", awaddr, awid);
         end
       end
 
       // (2) Consume W beat: gated by the actual wready handshake (which also
       //     stalls a final beat against a busy B slot, see out_wready above).
       if (wvalid && out_wready) begin
-        // Issue per-byte DPI writes for the lanes whose wstrb bit is set.
-        // Use aw_addr_q as the current beat base. Alignment matches HW.
-        for (int i = 0; i < XLEN / 8; i++) begin
-          if (wstrb[i] && (aw_resp_acc == AXIRespOKAY)) begin
-            `RAPT_DPI_C_PMEM_WRITE((aw_addr_q & AlignMask) + i, {wdata >> (i*8)}[XLEN-1:0], 1);
-          end
-        end
+        // Deliver one accepted AXI beat with its complete byte enables.
+        // Device models must see a register command once, after all its
+        // selected bytes are available; RAM applies the same byte mask.
+        if (aw_resp_acc == AXIRespOKAY)
+          `RAPT_DPI_C_PMEM_WRITE(aw_addr_q & AlignMask, wdata, 8'(wstrb));
         if (wlast) begin
           // out_wready gating guarantees b_busy is false here, so the post
           // always succeeds.
@@ -478,29 +570,20 @@ module rapt_npc_soc #(
         b_busy <= 1'b0;
       end
 
-      // -------------------- Timeout watchdog --------------------
-      if (r_busy) begin
-        r_timeout_cnt <= r_timeout_cnt + 1;
-        if (r_timeout_cnt >= AXITimeout) begin
-          $display("NPC_SOC: [ERROR] AXI read timeout, dropping R (rid=%0d)", r_id_q);
-          r_busy        <= 1'b0;
-          r_resp_q      <= AXIRespDecerr;
-          r_timeout_cnt <= '0;
-        end
+      // Diagnostic only: AXI has no response cancellation on timeout.
+      // Keep all accepted transaction state and stalled payloads intact.
+      // Count cycles without progress, saturating to report once per stall.
+      if (r_busy && !(out_rvalid && rready)) begin
+        if (r_timeout_cnt != AXITimeout) r_timeout_cnt <= r_timeout_cnt + 1'b1;
+        if (r_timeout_cnt == AXITimeout - 1'b1)
+          $display("NPC_SOC: [WARNING] AXI read stalled (rid=%0d)", r_id_q);
       end else begin
         r_timeout_cnt <= '0;
       end
-      if (aw_busy || b_busy) begin
-        w_timeout_cnt <= w_timeout_cnt + 1;
-        if (w_timeout_cnt >= AXITimeout) begin
-          $display("NPC_SOC: [ERROR] AXI write timeout, dropping AW/B (id=%0d)",
-                   aw_busy ? aw_id_q : b_id_q);
-          aw_busy       <= 1'b0;
-          b_busy        <= 1'b1;
-          b_id_q        <= aw_busy ? aw_id_q : b_id_q;
-          b_resp_q      <= AXIRespDecerr;
-          w_timeout_cnt <= '0;
-        end
+      if ((aw_busy || b_busy) && !(out_wready && wvalid) && !(out_bvalid && bready)) begin
+        if (w_timeout_cnt != AXITimeout) w_timeout_cnt <= w_timeout_cnt + 1'b1;
+        if (w_timeout_cnt == AXITimeout - 1'b1)
+          $display("NPC_SOC: [WARNING] AXI write stalled (id=%0d)", aw_busy ? aw_id_q : b_id_q);
       end else begin
         w_timeout_cnt <= '0;
       end

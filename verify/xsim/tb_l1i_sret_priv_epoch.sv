@@ -2,22 +2,30 @@
 `include "rapt_if.svh"
 
 module tb_l1i_sret_priv_epoch;
-  localparam int XLEN = 32;
-  localparam logic [31:0] OldSupervisorPc = 32'hc000_1000;
-  localparam logic [31:0] UserTargetPc = 32'h0001_0000;
-  localparam logic [31:0] RedirectedUserPc = 32'h0002_0000;
-  localparam logic [31:0] UserLeafPte = 32'h2000_0059;
+  localparam int XLEN = `RAPT_XLEN;
+  localparam logic [XLEN-1:0] OldSupervisorPc = XLEN'(32'hc000_1000);
+`ifdef RAPT_TEST_ZERO_PC
+  localparam logic [XLEN-1:0] UserTargetPc = '0;
+`else
+  localparam logic [XLEN-1:0] UserTargetPc = XLEN'(32'h0001_0000);
+`endif
+  localparam logic [XLEN-1:0] RedirectedUserPc = XLEN'(32'h0002_0000);
+  // PA 0x80000000 is aligned for a root-level leaf in both Sv32 and Sv39.
+  localparam logic [XLEN-1:0] UserLeafPte = XLEN'(32'h2000_0059);
 
   logic clock = 1'b0;
   logic reset = 1'b1;
 
-  cmu_bcast_if cmu_bcast();
-  ifu_l1i_if ifu_l1i();
-  l1i_bus_if l1i_bus();
-  csr_bcast_if csr_bcast();
-  pmp_state_if pmp_state();
+  cmu_bcast_if cmu_bcast ();
+  ifu_l1i_if ifu_l1i ();
+  l1i_bus_if l1i_bus ();
+  csr_bcast_if csr_bcast ();
+  pmp_state_if pmp_state ();
 
   rapt_l1i dut (
+      .io_authorized(1'b0),
+      .io_start(),
+      .io_owner_pc(),
       .clock(clock),
       .cmu_bcast(cmu_bcast),
       .ifu_l1i(ifu_l1i),
@@ -40,6 +48,8 @@ module tb_l1i_sret_priv_epoch;
       init_pmp_state_defaults(1'b0);
 
       ifu_l1i.pc = OldSupervisorPc;
+      ifu_l1i.consumed = 0;
+      ifu_l1i.cancel = 0;
       ifu_l1i.invalid = 1'b0;
       ifu_l1i.prefetch_pc = '0;
       ifu_l1i.prefetch_valid = 1'b0;
@@ -47,6 +57,7 @@ module tb_l1i_sret_priv_epoch;
       l1i_bus.rready = 1'b0;
       l1i_bus.rdata = '0;
       l1i_bus.rvalid = 1'b0;
+      l1i_bus.ptw_rerr = 0;
       l1i_bus.ptw_rvalid = 1'b0;
       l1i_bus.rlast = 1'b1;
       l1i_bus.rerr = 1'b0;
@@ -92,7 +103,7 @@ module tb_l1i_sret_priv_epoch;
     end
   endtask
 
-  task automatic return_ptw_pte(input logic [31:0] pte);
+  task automatic return_ptw_pte(input logic [XLEN-1:0] pte);
     begin
       l1i_bus.rdata = pte;
       l1i_bus.ptw_rvalid = 1'b1;
@@ -116,19 +127,16 @@ module tb_l1i_sret_priv_epoch;
     tick(1);
     cmu_bcast.flush_pipe = 1'b0;
     csr_bcast.priv = `RAPT_PRIV_U;
-        cmu_bcast.flush_redirect = 1'b1;
+    cmu_bcast.flush_redirect = 1'b1;
 
-    return_ptw_pte(32'h0000_0000);
-        #1;
-        check(!dut.ptw_req,
-          "SRET redirect cycle restarted PTW for the old PC under U privilege");
-        ifu_l1i.pc = UserTargetPc;
-        cmu_bcast.flush_redirect = 1'b0;
+    return_ptw_pte('0);
+    #1;
+    check(!dut.ptw_req, "SRET redirect cycle restarted PTW for the old PC under U privilege");
+    ifu_l1i.pc = UserTargetPc;
+    cmu_bcast.flush_redirect = 1'b0;
     repeat (3) begin
-      check(!ifu_l1i.trap,
-            "pre-SRET PTW fault leaked into the post-SRET user fetch");
-      check(!ifu_l1i.valid,
-            "pre-SRET PTW response produced a post-SRET instruction");
+      check(!ifu_l1i.trap, "pre-SRET PTW fault leaked into the post-SRET user fetch");
+      check(!ifu_l1i.valid, "pre-SRET PTW response produced a post-SRET instruction");
       tick(1);
     end
 
@@ -139,35 +147,33 @@ module tb_l1i_sret_priv_epoch;
     saw_user_refill = 1'b0;
     for (int cycle = 0; cycle < 32; cycle++) begin
       #1;
-      check(!ifu_l1i.trap,
-            "U-mode executable user PTE was rejected after SRET");
+      check(!ifu_l1i.trap, "U-mode executable user PTE was rejected after SRET");
       if (l1i_bus.arvalid && !l1i_bus.ar_ptw) begin
         saw_user_refill = 1'b1;
-          check(l1i_bus.araddr[31:12] == 20'h80010,
+        check(l1i_bus.araddr[31:12] == (20'h80000 + UserTargetPc[31:12]),
               "post-SRET user PTE translated to the wrong physical page");
         cycle = 32;
       end else begin
         tick(1);
       end
     end
-    check(saw_user_refill,
-          "post-SRET U-mode target did not reach instruction-cache refill");
+    check(saw_user_refill, "post-SRET U-mode target did not reach instruction-cache refill");
 
-        cmu_bcast.flush_pipe = 1'b1;
-        tick(1);
-        cmu_bcast.flush_pipe = 1'b0;
-        ifu_l1i.pc = RedirectedUserPc;
+    cmu_bcast.flush_pipe = 1'b1;
+    tick(1);
+    cmu_bcast.flush_pipe = 1'b0;
+    ifu_l1i.pc = RedirectedUserPc;
 
-        l1i_bus.rerr = 1'b1;
-        l1i_bus.rready = 1'b1;
-        tick(1);
-        l1i_bus.rready = 1'b0;
-        l1i_bus.rerr = 1'b0;
-        #1;
-        check(!ifu_l1i.trap,
-          "pre-redirect refill error was attributed to the redirected PC");
+    l1i_bus.rerr = 1'b1;
+    l1i_bus.rready = 1'b1;
+    tick(1);
+    l1i_bus.rready = 1'b0;
+    l1i_bus.rerr = 1'b0;
+    #1;
+    check(!ifu_l1i.trap, "pre-redirect refill error was attributed to the redirected PC");
 
-        $display("PASS: L1I SRET privilege, PTW epoch, and refill ownership checks passed");
+    $display("PASS: L1I XLEN=%0d target=%h SRET privilege, PTW epoch, and refill ownership", XLEN,
+             UserTargetPc);
     $finish;
   end
 endmodule

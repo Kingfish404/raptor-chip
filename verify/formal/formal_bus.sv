@@ -67,6 +67,7 @@ module formal_bus #(
   assign l1i_bus.araddr = l1i_araddr;
   assign l1i_bus.arburst = l1i_arburst;
   assign l1i_bus.ar_ptw = 1'b0;
+  assign l1i_bus.rpbmt = 2'b00;
   assign l1i_bus.awvalid = 1'b0;
   assign l1i_bus.awaddr = '0;
   assign l1i_bus.aw_ptw = 1'b0;
@@ -78,6 +79,8 @@ module formal_bus #(
   assign l1d_bus.arvalid = l1d_arvalid;
   assign l1d_bus.araddr = l1d_araddr;
   assign l1d_bus.rstrb = l1d_rstrb;
+  assign l1d_bus.rpbmt = 2'b00;
+  assign l1d_bus.wpbmt = 2'b00;
   assign l1d_bus.ar_ptw = 1'b0;
   assign l1d_bus.awvalid = l1d_awvalid;
   assign l1d_bus.awaddr = l1d_awaddr;
@@ -98,13 +101,15 @@ module formal_bus #(
   // Tie off cmu_bcast inputs
   assign cmu_bcast.rpc = '0;
   assign cmu_bcast.cpc = '0;
-  assign cmu_bcast.rd_a = '0;
-  assign cmu_bcast.rd_b = '0;
-  assign cmu_bcast.valid_b = 1'b0;
+  assign cmu_bcast.redirect_pc = '0;
+  assign cmu_bcast.rob_head = '0;
+  assign cmu_bcast.flush_redirect = 1'b0;
+  assign cmu_bcast.sys_resume = 1'b0;
   assign cmu_bcast.ben = 1'b0;
   assign cmu_bcast.jen = 1'b0;
   assign cmu_bcast.jren = 1'b0;
   assign cmu_bcast.btaken = 1'b0;
+  assign cmu_bcast.atomic_retired = 1'b0;
   assign cmu_bcast.call = 1'b0;
   assign cmu_bcast.ret = 1'b0;
   assign cmu_bcast.rvc = 1'b0;
@@ -156,12 +161,14 @@ module formal_bus #(
       .reset(reset)
   );
 
-      rapt_axi_master #(.XLEN(XLEN)) axi_master (
-        .clock(clock),
-        .reset(reset),
-        .mem(mem),
-        .axi(axi)
-      );
+  rapt_axi_master #(
+      .XLEN(XLEN)
+  ) axi_master (
+      .clock(clock),
+      .reset(reset),
+      .mem(mem),
+      .axi(axi)
+  );
 
 `ifdef FORMAL
   // Standard formal past-valid register: skip initial state checks
@@ -170,21 +177,23 @@ module formal_bus #(
 
   // Assume reset held at start, released after first cycle
   always_comb begin
-    if (!f_past_valid) assume(reset);
-    if (f_past_valid) assume(!reset);
+    if (!f_past_valid) assume (reset);
+    if (f_past_valid) assume (!reset);
   end
 
   // Model the cache-side request contract.  Transfer masks are the canonical
   // unshifted masks produced by L1D; AW and W are issued as one local request.
   always_comb begin
     if (l1d_arvalid) begin
-      if (XLEN == 32) assume(l1d_rstrb inside {8'h01, 8'h03, 8'h0f});
-      else            assume(l1d_rstrb inside {8'h01, 8'h03, 8'h0f, 8'hff});
+      if (XLEN == 32)
+        assume (l1d_rstrb inside {8'h01, 8'h03, 8'h0f});
+        else assume (l1d_rstrb inside {8'h01, 8'h03, 8'h0f, 8'hff});
     end
     if (l1d_awvalid || l1d_wvalid) begin
-      assume(l1d_awvalid && l1d_wvalid);
-      if (XLEN == 32) assume(l1d_wstrb inside {8'h01, 8'h03, 8'h07, 8'h0f});
-      else assume(l1d_wstrb inside {8'h01, 8'h03, 8'h07, 8'h0f, 8'h7f, 8'hff});
+      assume (l1d_awvalid && l1d_wvalid);
+      if (XLEN == 32)
+        assume (l1d_wstrb inside {8'h01, 8'h03, 8'h07, 8'h0f});
+        else assume (l1d_wstrb inside {8'h01, 8'h03, 8'h07, 8'h0f, 8'h7f, 8'hff});
     end
   end
 
@@ -204,12 +213,20 @@ module formal_bus #(
       ar_stalled_q <= 1'b0;
       aw_stalled_q <= 1'b0;
       w_stalled_q <= 1'b0;
-      araddr_q <= '0; arsize_q <= '0; arid_q <= '0;
-      arlen_q <= '0; arburst_q <= '0;
-      awaddr_q <= '0; awsize_q <= '0; awid_q <= '0;
-      wdata_q <= '0; wstrb_q <= '0;
+      araddr_q <= '0;
+      arsize_q <= '0;
+      arid_q <= '0;
+      arlen_q <= '0;
+      arburst_q <= '0;
+      awaddr_q <= '0;
+      awsize_q <= '0;
+      awid_q <= '0;
+      wdata_q <= '0;
+      wstrb_q <= '0;
     end else begin
-      unique case ({f_ar_fire, f_r_fire})
+      unique case ({
+        f_ar_fire, f_r_fire
+      })
         2'b10: f_read_outstanding <= f_read_outstanding + 1'b1;
         2'b01: f_read_outstanding <= f_read_outstanding - 1'b1;
         default: f_read_outstanding <= f_read_outstanding;
@@ -217,10 +234,16 @@ module formal_bus #(
       ar_stalled_q <= io_master_arvalid && !io_master_arready;
       aw_stalled_q <= io_master_awvalid && !io_master_awready;
       w_stalled_q  <= io_master_wvalid && !io_master_wready;
-      araddr_q <= io_master_araddr; arsize_q <= io_master_arsize; arid_q <= io_master_arid;
-      arlen_q <= io_master_arlen; arburst_q <= io_master_arburst;
-      awaddr_q <= io_master_awaddr; awsize_q <= io_master_awsize; awid_q <= io_master_awid;
-      wdata_q <= io_master_wdata; wstrb_q <= io_master_wstrb;
+      araddr_q <= io_master_araddr;
+      arsize_q <= io_master_arsize;
+      arid_q <= io_master_arid;
+      arlen_q <= io_master_arlen;
+      arburst_q <= io_master_arburst;
+      awaddr_q <= io_master_awaddr;
+      awsize_q <= io_master_awsize;
+      awid_q <= io_master_awid;
+      wdata_q <= io_master_wdata;
+      wstrb_q <= io_master_wstrb;
     end
   end
 
@@ -228,33 +251,33 @@ module formal_bus #(
   // prevents an unconstrained spurious R beat from underflowing the DUT's
   // outstanding counter and creating a false AR-stability counterexample.
   always_comb begin
-    assume(!io_master_rlast || io_master_rvalid);
-    if (f_r_fire) assume((f_read_outstanding != '0) || f_ar_fire);
+    assume (!io_master_rlast || io_master_rvalid);
+    if (f_r_fire) assume ((f_read_outstanding != '0) || f_ar_fire);
   end
 
   // Legal RV32 transfer sizes and AXI payload stability under backpressure.
   always @(posedge clock) begin
     if (f_past_valid && !reset) begin
-      if (XLEN == 32 && io_master_arvalid)
-        arsize_assert : assert (io_master_arsize <= 3'b010);
-      if (XLEN == 32 && io_master_awvalid)
-        awsize_assert : assert (io_master_awsize <= 3'b010);
+      if (XLEN == 32 && io_master_arvalid) arsize_assert : assert (io_master_arsize <= 3'b010);
+      if (XLEN == 32 && io_master_awvalid) awsize_assert : assert (io_master_awsize <= 3'b010);
       if (ar_stalled_q) begin
-        arhold_valid: assert(io_master_arvalid);
-        arhold_data: assert({io_master_araddr, io_master_arsize, io_master_arid,
+        arhold_valid : assert (io_master_arvalid);
+        arhold_data :
+        assert({io_master_araddr, io_master_arsize, io_master_arid,
                             io_master_arlen, io_master_arburst}
                             == {araddr_q, arsize_q, arid_q, arlen_q, arburst_q});
       end
       if (aw_stalled_q) begin
-        awhold_valid: assert(io_master_awvalid);
-        awhold_data: assert({io_master_awaddr, io_master_awsize, io_master_awid}
+        awhold_valid : assert (io_master_awvalid);
+        awhold_data :
+        assert({io_master_awaddr, io_master_awsize, io_master_awid}
                             == {awaddr_q, awsize_q, awid_q});
       end
       if (w_stalled_q) begin
-        whold_valid: assert(io_master_wvalid);
-        whold_data: assert({io_master_wdata, io_master_wstrb} == {wdata_q, wstrb_q});
+        whold_valid : assert (io_master_wvalid);
+        whold_data : assert ({io_master_wdata, io_master_wstrb} == {wdata_q, wstrb_q});
       end
-      if (io_master_wvalid) wlast_assert: assert(io_master_wlast);
+      if (io_master_wvalid) wlast_assert : assert (io_master_wlast);
     end
   end
 `endif  // FORMAL

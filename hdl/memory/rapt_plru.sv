@@ -30,9 +30,11 @@ module rapt_plru #(
     input  logic                 lru_write_en,
     input  logic [SETLEN-1:0]    paddr_set,       // unused in this design; kept for CVW compatibility
     input  logic                 invalidate_cache,
-    input  logic                 invalidate_flush
 `ifdef FORMAL
-    , output logic [NUMWAYS-2:0] formal_lru_state[NSETS]
+    input  logic                 invalidate_flush,
+    output logic [NUMWAYS-2:0] formal_lru_state[NSETS]
+`else
+    input  logic                 invalidate_flush
 `endif
 );
 
@@ -41,7 +43,7 @@ module rapt_plru #(
   /* verilator lint_on UNUSEDSIGNAL */
 
   // Per-set tree state: TreeBits wide register array
-  logic [TreeBits-1:0] lru_state [NSETS];
+  logic [TreeBits-1:0] lru_state[NSETS];
 `ifdef FORMAL
   for (genvar fs = 0; fs < NSETS; fs++) begin : g_formal_state
     assign formal_lru_state[fs] = lru_state[fs];
@@ -57,8 +59,8 @@ module rapt_plru #(
 
   // Suppress unused warnings for signals kept for interface compatibility
   /* verilator lint_off UNUSEDSIGNAL */
-  logic _unused_paddr = |paddr_set;
-  logic _unused_hit0 = hit_way[0];
+  wire _unused_paddr = |paddr_set;
+  wire _unused_hit0 = hit_way[0];
   /* verilator lint_on UNUSEDSIGNAL */
 
   // --- Victim way selection (combinational) ---
@@ -82,12 +84,13 @@ module rapt_plru #(
           victim_comb[1] = 1'b1;
         end else begin
           // The state bit records the MRU child, so replace the opposite one.
-          victim_comb[lru_read[0] ? 0 : 1] = 1'b1;
+          victim_comb[lru_read[0]?0 : 1] = 1'b1;
         end
       end
     end else if (NUMWAYS == 4) begin : g_victim_4
       logic [1:0] victim_idx;
       always_comb begin
+        victim_idx = '0;
         victim_comb = '0;
         if (!valid_way[0]) begin
           victim_comb[0] = 1'b1;
@@ -106,6 +109,7 @@ module rapt_plru #(
     end else if (NUMWAYS == 8) begin : g_victim_8
       logic [2:0] victim_idx;
       always_comb begin
+        victim_idx = '0;
         victim_comb = '0;
         if (!valid_way[0]) begin
           victim_comb[0] = 1'b1;

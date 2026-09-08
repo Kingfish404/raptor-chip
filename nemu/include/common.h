@@ -31,7 +31,10 @@
 #include <stdlib.h>
 #endif
 
-#if CONFIG_MBASE + CONFIG_MSIZE > 0x100000000ul
+/* Sv32 has 34-bit PAs and Sv39 has 56-bit PAs, even when installed RAM
+ * fits below 4 GiB. Preserve high bits until PMA/PMP rejects unmapped PAs;
+ * truncating them here silently aliases page tables and data to low RAM. */
+#if defined(CONFIG_ISA_riscv) || CONFIG_MBASE + CONFIG_MSIZE > 0x100000000ul
 #define PMEM64 1
 #endif
 

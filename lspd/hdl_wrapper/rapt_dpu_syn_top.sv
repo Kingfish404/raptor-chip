@@ -1,69 +1,77 @@
 `include "rapt.svh"
 `include "rapt_if.svh"
 
-module rapt_dpu_syn_top (
+// Tool-facing wrapper for the current K-candidate/W-winner DPU boundary.
+// It deliberately mirrors the product domain/token interface; no historical
+// A/B issue-lane interfaces are instantiated here.
+module rapt_dpu_syn_top #(
+    parameter int unsigned NumCandidates = rapt_pkg::SteerScanEntries,
+    parameter int unsigned NumSlots = rapt_pkg::DispatchWidth,
+    parameter int unsigned NumDomains = rapt_pkg::ExecutionDomains,
+    parameter int unsigned StimulusBits =
+        NumCandidates * $bits(rapt_pkg::execution_domain_t) + NumCandidates
+        + NumDomains * $bits(rapt_pkg::dispatch_capacity_t),
+    parameter int unsigned ResponseBits = NumCandidates + NumSlots
+        + NumSlots * rapt_pkg::index_bits(NumCandidates) + NumDomains * NumSlots
+        + NumDomains * NumSlots * $bits(rapt_pkg::queue_index_t)
+) (
     input  logic          clock,
     input  logic          reset,
-    input  logic [1023:0] stimulus,
-    output logic          response
+    input  logic [StimulusBits-1:0] stimulus,
+    output logic [ResponseBits-1:0] response
 );
-  rou_exu_if rou_exu ();
-  dpu_iq_if disp_alq ();
-  dpu_iq_if #(.RS_SIZE(4)) disp_brq ();
-  dpu_iq_if #(.RS_SIZE(4)) disp_mdq ();
-  dpu_iq_if #(.RS_SIZE(4)) disp_fpq ();
-  dpu_ioq_if disp_ioq ();
+  localparam int unsigned DomainBits = $bits(rapt_pkg::execution_domain_t);
+  localparam int unsigned CandidateBits = rapt_pkg::index_bits(NumCandidates);
+  localparam int unsigned QueueBits = $bits(rapt_pkg::queue_index_t);
+  localparam int unsigned CapacityBits = $bits(rapt_pkg::dispatch_capacity_t);
+  localparam int unsigned ValidBase = NumCandidates * DomainBits;
+  localparam int unsigned CapacityBase = ValidBase + NumCandidates;
 
-  assign rou_exu.uop   = rapt_pkg::uop_t'(stimulus);
-  assign rou_exu.valid = stimulus[255];
-`ifdef RAPT_DUAL_ISSUE
-  assign rou_exu.uop_b   = rapt_pkg::uop_t'(stimulus >> 256);
-  assign rou_exu.valid_b = stimulus[511];
-`endif
+  rapt_pkg::execution_domain_t candidate_domain[NumCandidates];
+  logic candidate_valid[NumCandidates], candidate_ready[NumCandidates];
+  logic selected_valid[NumSlots];
+  logic [CandidateBits-1:0] selected_candidate[NumSlots];
+  rapt_pkg::dispatch_capacity_t capacity[NumDomains];
+  rapt_pkg::dispatch_grant_t grant[NumDomains];
 
-  assign disp_alq.free_found_a = stimulus[512];
-  assign disp_alq.free_found_b = stimulus[513];
-  assign disp_alq.free_idx_a = stimulus >> 514;
-  assign disp_alq.free_idx_b = stimulus >> 522;
-  assign disp_brq.free_found_a = stimulus[530];
-  assign disp_brq.free_found_b = stimulus[531];
-  assign disp_brq.free_idx_a = stimulus >> 532;
-  assign disp_brq.free_idx_b = stimulus >> 536;
-  assign disp_mdq.free_found_a = stimulus[540];
-  assign disp_mdq.free_found_b = stimulus[541];
-  assign disp_mdq.free_idx_a = stimulus >> 542;
-  assign disp_mdq.free_idx_b = stimulus >> 546;
-  assign disp_fpq.free_found_a = stimulus[550];
-  assign disp_fpq.free_found_b = stimulus[551];
-  assign disp_fpq.free_idx_a = stimulus >> 552;
-  assign disp_fpq.free_idx_b = stimulus >> 556;
-  assign disp_ioq.ready = stimulus[560];
-  assign disp_ioq.ready_b = stimulus[561];
+  logic [NumCandidates-1:0] candidate_ready_packed;
+  logic [NumSlots-1:0] selected_valid_packed;
+  logic [NumSlots*CandidateBits-1:0] selected_candidate_packed;
+  logic [NumDomains*NumSlots-1:0] grant_accept_packed;
+  logic [NumDomains*NumSlots*QueueBits-1:0] grant_index_packed;
 
-  logic ready_b;
-`ifdef RAPT_DUAL_ISSUE
-  assign ready_b = rou_exu.ready_b;
-`else
-  assign ready_b = 1'b0;
-`endif
+  for (genvar c = 0; c < NumCandidates; c++) begin : g_candidate
+    assign candidate_domain[c] = rapt_pkg::execution_domain_t'(
+        stimulus[c*DomainBits +: DomainBits]);
+    assign candidate_valid[c] = stimulus[ValidBase+c];
+    assign candidate_ready_packed[c] = candidate_ready[c];
+  end
+  for (genvar d = 0; d < NumDomains; d++) begin : g_capacity
+    assign capacity[d] = rapt_pkg::dispatch_capacity_t'(
+        stimulus[CapacityBase+d*CapacityBits +: CapacityBits]);
+    for (genvar s = 0; s < NumSlots; s++) begin : g_grant
+      assign grant_accept_packed[d*NumSlots+s] = grant[d].accept[s];
+      assign grant_index_packed[(d*NumSlots+s)*QueueBits +: QueueBits] = grant[d].index[s];
+    end
+  end
+  for (genvar s = 0; s < NumSlots; s++) begin : g_selected
+    assign selected_valid_packed[s] = selected_valid[s];
+    assign selected_candidate_packed[s*CandidateBits +: CandidateBits] = selected_candidate[s];
+  end
 
-  assign response = ^{
-    rou_exu.ready, ready_b,
-    disp_alq.accept_a, disp_alq.accept_b, disp_alq.b_rs_idx,
-    disp_brq.accept_a, disp_brq.accept_b, disp_brq.b_rs_idx,
-    disp_mdq.accept_a, disp_mdq.accept_b, disp_mdq.b_rs_idx,
-    disp_fpq.accept_a, disp_fpq.accept_b, disp_fpq.b_rs_idx,
-    disp_ioq.accept_a, disp_ioq.accept_b_paired, disp_ioq.accept_b_alone
+  assign response = {
+    grant_index_packed,
+    grant_accept_packed,
+    selected_candidate_packed,
+    selected_valid_packed,
+    candidate_ready_packed
   };
 
-  rapt_dpu dut (
-      .clock,
-      .reset,
-      .rou_exu,
-      .disp_alq,
-      .disp_brq,
-      .disp_mdq,
-      .disp_fpq,
-      .disp_ioq
+  rapt_dpu #(
+      .NumDomains(NumDomains),
+      .NumSlots(NumSlots),
+      .NumCandidates(NumCandidates)
+  ) dut (
+      .*
   );
 endmodule

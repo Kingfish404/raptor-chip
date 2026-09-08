@@ -431,6 +431,8 @@ class RaptorMLKCU07SoC(SoCCore):
 
         if with_sdcard:
             self.add_sdcard(name="sdcard", mode="read+write")
+            # Keep SD boot explicit at the BIOS prompt: `sdcardboot`.
+            self.add_constant("SDCARD_BOOT_DISABLE")
 
         if with_led_chaser:
             try:
@@ -624,6 +626,21 @@ def main():
     # from its kwargs (CLI default "default") and would overwrite a value set
     # directly on the toolchain object before builder.build().
     toolchain_argdict = dict(parser.toolchain_argdict)
+    # Optimize placement before routing the CPU and the 300 MHz MIG UI.
+    # LiteX otherwise only runs phys_opt after routing, when replication and
+    # movement have fewer opportunities. Explicit CLI directives still win.
+    if args.with_mig and toolchain_argdict.get("vivado_post_place_phys_opt_directive") is None:
+        toolchain_argdict["vivado_post_place_phys_opt_directive"] = "AggressiveExplore"
+    if args.with_mig:
+        # A second route can exploit the netlist changes made by post-route
+        # phys_opt. Run it only when setup still fails, before write_bitstream,
+        # and regenerate timing/DRC reports for the resulting implementation.
+        retry_tcl = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                 "scripts", "vivado_retry_timing.tcl")
+        soc.platform.toolchain.bitstream_commands.extend([
+            f'source "{retry_tcl}"',
+            "raptor_retry_timing {build_name}",
+        ])
     toolchain_argdict["vivado_synth_directive"] = (
         str(toolchain_argdict.get("vivado_synth_directive") or "default")
         + " -resource_sharing off -no_lc -fanout_limit 24"

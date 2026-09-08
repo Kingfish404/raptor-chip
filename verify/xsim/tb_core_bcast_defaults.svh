@@ -6,6 +6,7 @@ task automatic init_cmu_bcast_defaults;
     cmu_bcast.jen = 1'b0;
     cmu_bcast.jren = 1'b0;
     cmu_bcast.btaken = 1'b0;
+    cmu_bcast.atomic_retired = 1'b0;
     cmu_bcast.call = 1'b0;
     cmu_bcast.ret = 1'b0;
     cmu_bcast.rvc = 1'b0;
@@ -17,9 +18,6 @@ task automatic init_cmu_bcast_defaults;
     cmu_bcast.sys_resume = 1'b0;
     cmu_bcast.time_trap = 1'b0;
     cmu_bcast.rob_head = '0;
-    cmu_bcast.rd_a = '0;
-    cmu_bcast.rd_b = '0;
-    cmu_bcast.valid_b = 1'b0;
   end
 endtask
 
@@ -39,6 +37,7 @@ task automatic init_csr_bcast_defaults(
     csr_bcast.timer_int_en = 1'b0;
     csr_bcast.sw_int_en = 1'b0;
     csr_bcast.ext_int_en = 1'b0;
+    csr_bcast.bus_error_int = 1'b0;
     csr_bcast.mprv = 1'b0;
     csr_bcast.mpp = priv_value;
     csr_bcast.sum = 1'b0;
@@ -54,6 +53,8 @@ task automatic init_csr_bcast_defaults(
     csr_bcast.menvcfg_cbie = '0;
     csr_bcast.menvcfg_cbcfe = 1'b0;
     csr_bcast.menvcfg_cbze = 1'b0;
+    csr_bcast.menvcfg_stce = 1'b0;
+    csr_bcast.menvcfg_pbmte = 1'b0;
     csr_bcast.senvcfg_cbie = '0;
     csr_bcast.senvcfg_cbcfe = 1'b0;
     csr_bcast.senvcfg_cbze = 1'b0;

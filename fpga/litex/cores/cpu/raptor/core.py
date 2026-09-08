@@ -105,6 +105,7 @@ class Raptor(CPU):
             o_io_master_awlen=axi_if.aw.len,
             o_io_master_awsize=axi_if.aw.size,
             o_io_master_awburst=axi_if.aw.burst,
+            o_io_master_awcache=axi_if.aw.cache,
             # AXI4 Master — Write Data Channel.
             o_io_master_wvalid=axi_if.w.valid,
             i_io_master_wready=axi_if.w.ready,
@@ -124,6 +125,7 @@ class Raptor(CPU):
             o_io_master_arlen=axi_if.ar.len,
             o_io_master_arsize=axi_if.ar.size,
             o_io_master_arburst=axi_if.ar.burst,
+            o_io_master_arcache=axi_if.ar.cache,
             # AXI4 Master — Read Data Channel.
             i_io_master_rvalid=axi_if.r.valid,
             o_io_master_rready=axi_if.r.ready,
@@ -182,11 +184,6 @@ class Raptor(CPU):
             cmd.append(f"VFLAGS={env_vflags}")
         if env_config:
             cmd.append(f"RAPT_CONFIG={env_config}")
-        # Force the NPC (non-ysyxSoC) source set regardless of sim's Kconfig
-        # state: a leftover CONFIG_MODE="soc" (from ysyxsoc sim targets) would
-        # otherwise pull ysyxSoC peripherals (PSRAM/SPI, `default_nettype none)
-        # into the pack and break Vivado synthesis.
-        cmd.append("CONFIG_MODE=")
         try:
             subprocess.run(cmd, check=True)
         except subprocess.CalledProcessError as exc:
@@ -195,6 +192,19 @@ class Raptor(CPU):
             raise RuntimeError(f"Pack succeeded but {pack_sv} missing")
 
         platform.add_source(pack_sv)
+
+    def add_software_packages(self, builder):
+        # Linux's embedded stage0/DTB belongs to this build, not to a shared
+        # patched LiteX checkout (another preset can have a different CBOM size).
+        bios_dir = os.environ.get("RAPT_BIOS_SOURCE_DIR", "")
+        if bios_dir:
+            bios_dir = os.path.abspath(bios_dir)
+            if not os.path.isfile(os.path.join(bios_dir, "boot.c")):
+                raise RuntimeError(f"Private BIOS sources missing: {bios_dir}")
+            builder.software_packages = [
+                (name, bios_dir if name == "bios" else src_dir)
+                for name, src_dir in builder.software_packages
+            ]
 
     def add_soc_components(self, soc):
         soc.add_config("CPU_HAS_DCACHE")

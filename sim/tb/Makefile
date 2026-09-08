@@ -6,6 +6,7 @@
 #
 # Targets:
 #   make verilator IMG=foo.bin            RTL sim under Verilator (alignment)
+#   make verilator-middle-smoke            Compile/run a multi-commit smoke test
 #   make vcs       IMG=foo.bin            RTL sim under Synopsys VCS
 #   make xrun      IMG=foo.bin            RTL sim under Cadence Xcelium
 #   make vsim      IMG=foo.bin            RTL sim under Siemens Questa
@@ -34,10 +35,10 @@
 # NOTE: the chip drives the host memory through the single-word rnp interface
 # (axi2rnp -> pins -> rnp2axi), which only carries one beat per transaction.
 # The DUT must therefore be built so its internal AXI master never issues a
-# burst (arlen must stay 0). This requires the single-outstanding bus
-# (-DRAPT_SOC) and a config WITHOUT the L2 cache (RAPT_L2_EN). The `default`
-# and `large` presets enable RAPT_L2_EN (16-beat line fills) and are NOT
-# compatible with the rnp interface; use a no-L2 preset such as `small`.
+# burst (arlen must stay 0). The wrapper sets MemoryReadCredits=1 and
+# requires a config WITHOUT the L2 cache (RAPT_L2_EN). The `large`
+# preset enables L2 and is incompatible. Current `default` disables L2;
+# this harness defaults to the no-L2 `small` preset.
 # =============================================================================
 
 RAPTOR_HOME ?= $(abspath $(CURDIR)/../..)
@@ -66,9 +67,6 @@ TB_SRC   := $(TB_DIR)/rapt_tb_mem.sv $(TB_DIR)/rapt_tb_top.sv
 
 VSRCS := $(PKG_SRC) $(RTL_REST) $(TB_SRC)
 
-# The rnp single-word interface requires the single-outstanding ysyxSoC-style
-# bus so the chip never issues a burst on its internal AXI master.
-DEFINES += RAPT_SOC
 
 # The rnp interface (and its axi2rnp/rnp2axi adapters) is hardwired 32-bit
 # (rnp_mdata/rnp_cdata are 32 bits, arsize is fixed at 2). The tapeout chip is
@@ -120,6 +118,7 @@ PLUSARGS += +SDF=$(abspath $(SDF)) +SDF_MTM=$(or $(SDF_MTM),MAXIMUM)
 endif
 
 TOP := rapt_tb_top
+VL_MDIR := build/vl-$(RAPT_CONFIG)
 
 # -----------------------------------------------------------------------------
 .PHONY: help
@@ -131,6 +130,7 @@ help:
 # -----------------------------------------------------------------------------
 VERILATOR ?= verilator
 VL_FLAGS  := --binary -j 0 --timing --top-module $(TOP) \
+	-Wno-fatal \
 	-Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-UNUSED -Wno-DECLFILENAME \
 	-Wno-PINMISSING -Wno-CASEINCOMPLETE -Wno-UNOPTFLAT -Wno-LATCH \
 	-Wno-VARHIDDEN -Wno-TIMESCALEMOD \
@@ -139,15 +139,37 @@ ifneq ($(filter-out 0,$(WAVE)),)
 VL_FLAGS += --trace-fst
 endif
 
-.PHONY: verilator
-verilator: ## RTL sim under Verilator
-	mkdir -p build/vl
+.PHONY: verilator-build
+verilator-build: ## Compile the RTL testbench under Verilator without running it
+	mkdir -p $(VL_MDIR)
 	$(VERILATOR) $(VL_FLAGS) \
 		$(addprefix +define+,$(DEFINES) RAPT_TB_EBREAK_HALT) \
 		$(addprefix -I,$(INCDIRS)) \
 		$(VSRCS) \
-		--Mdir build/vl -o $(TOP)
-	./build/vl/$(TOP) $(PLUSARGS)
+		--Mdir $(VL_MDIR) -o $(TOP)
+
+.PHONY: verilator
+verilator: verilator-build ## Compile and run the RTL testbench under Verilator
+	./$(VL_MDIR)/$(TOP) $(PLUSARGS)
+
+# Keep this separate from the generic `verilator` target: the single-port small
+# preset is still a useful default for the pin-level harness, whereas this
+# regression deliberately requires a configuration with more than one commit
+# slot and proves that a non-first slot reaches the testbench monitor.
+SMOKE_IMG ?= $(RAPTOR_HOME)/abstract-machine/app/am-kernels/tests/cpu-tests/build/dummy-riscv32-npc.bin
+SMOKE_MROM ?= $(RAPTOR_HOME)/sim/csrc/mem/mrom-data/build/mrom-data.bin
+SMOKE_LOG := build/vl-middle/smoke.log
+
+.PHONY: verilator-middle-smoke
+verilator-middle-smoke: ## Build middle and require GOOD TRAP plus a non-first commit slot
+	$(MAKE) --no-print-directory verilator-build RAPT_CONFIG=middle
+	test -f "$(SMOKE_IMG)"
+	./build/vl-middle/$(TOP) +IMG=$(abspath $(SMOKE_IMG)) \
+		+MROM=$(abspath $(SMOKE_MROM)) +MAX_CYCLES=10000 +COMMIT_TRACE=1 \
+		>$(SMOKE_LOG)
+	grep -q "GOOD TRAP" $(SMOKE_LOG)
+	grep -Eq '\[commit_trace\].*slot=[1-9][0-9]*' $(SMOKE_LOG)
+	@echo "[verilator-middle-smoke] GOOD TRAP and non-first commit slot: PASS"
 
 # -----------------------------------------------------------------------------
 # Synopsys VCS (RTL).

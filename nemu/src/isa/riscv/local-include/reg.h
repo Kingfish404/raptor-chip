@@ -115,6 +115,17 @@ typedef enum
 static inline CSR_status check_csr_exist(uint16_t csr)
 {
   csr = csr & 0xfff;
+#ifdef CONFIG_RV_RVA22S64
+  if (csr == CSR_MCOUNTINHIBIT) return CSR_EXIST;
+#endif
+#ifdef CONFIG_RAPTOR_MEMORY_MAP
+  if (csr == CSR_MBERR_STATUS || csr == CSR_MBERR_ADDR) return CSR_EXIST;
+#endif
+#ifdef CONFIG_RV64
+  if (csr == CSR_MSTATUSH || csr == CSR_MENVCFGH || csr == 0x15d ||
+      csr == 0x3a1 || csr == 0x3a3)
+    return CSR_NOT_EXIST;
+#endif
   if (likely(
           csr == CSR_SSTATUS ||
           csr == CSR_FFLAGS ||
@@ -141,6 +152,7 @@ static inline CSR_status check_csr_exist(uint16_t csr)
           csr == CSR_MTVEC ||
 
           csr == CSR_MSTATUSH ||
+          csr == CSR_MENVCFGH ||
 
           csr == CSR_MSCRATCH ||
           csr == CSR_MEPC ||
@@ -161,7 +173,7 @@ static inline CSR_status check_csr_exist(uint16_t csr)
           csr == CSR_MHARTID ||
 
           csr == 0x14d ||  // stimecmp
-          csr == 0x15d ||  // stimecmph (RV32 view; harmless in RV64 table)
+          csr == 0x15d ||  // stimecmph (RV32 only; checked above)
           csr == CSR_MCOUNTEREN ||
           csr == 0x30a ||  // menvcfg
           is_hpm_zero_csr(csr) ||
@@ -183,10 +195,6 @@ static inline CSR_status check_csr_exist(uint16_t csr)
         || (csr == CSR_IMPID)     //
         || (csr == CSR_MHARTID)   //
 
-        || csr == 0x14d   // stimecmp
-        || csr == 0x15d   // stimecmph
-        || csr == CSR_MCOUNTEREN
-        || csr == 0x30a   // menvcfg
     )
     {
       return CSR_EXIST_DIFF_SKIP;

@@ -10,11 +10,13 @@ the sail reference signature.
 from __future__ import annotations
 
 import concurrent.futures
+import json
 import logging
 import os
 import re
 import shutil
 import subprocess
+import time
 
 import riscof.utils as utils
 from riscof.pluginTemplate import pluginTemplate
@@ -48,7 +50,7 @@ class raptor(pluginTemplate):
         # Makefile exports these before invoking `riscof run`.
         self.npc_bin = os.environ.get("NPC_BIN")
         self.mrom_img = os.environ.get("MROM_IMG")
-        self.timeout = os.environ.get("RAPT_TIMEOUT", "30")
+        self.timeout = os.environ.get("RAPT_TIMEOUT", "600")
         self.mem_random_delay = os.environ.get("RAPT_MEM_RANDOM_DELAY", "0")
         self.mem_random_seed = os.environ.get("RAPT_MEM_RANDOM_SEED", "1")
         # The sim binary expects its working directory to be $NSIM_HOME
@@ -135,6 +137,70 @@ class raptor(pluginTemplate):
         return begin, end
 
     # ------------------------------------------------------------------
+    def _run_dut(self, bin_, sig, beg, end, test_dir):
+        """Keep execution failures distinct from completed signature mismatches."""
+        run_cmd = [
+            self.npc_bin, "-b", "-n", "--no-lightsss", "--trap-on-ebreak",
+            "-r", self.mrom_img,
+            f"--mem-random-delay={self.mem_random_delay}",
+            f"--mem-random-seed={self.mem_random_seed}",
+            f"--sig={beg:x}-{end:x}:{sig}", "-t", str(self.timeout), bin_,
+        ]
+        log_path = os.path.join(test_dir, "dut.log")
+        status_path = os.path.join(test_dir, "dut-run.json")
+        status = {"command": run_cmd, "cwd": self.nsim_home or test_dir,
+                  "timeout_seconds": int(self.timeout), "completed": False,
+                  "returncode": None, "reason": None}
+        started = time.monotonic()
+        # A reused test directory must not pass using an earlier signature.
+        if os.path.exists(sig):
+            os.replace(sig, sig + ".previous")
+        try:
+            with open(log_path, "w") as log:
+                result = subprocess.run(run_cmd, cwd=status["cwd"],
+                                        stdout=log, stderr=subprocess.STDOUT,
+                                        timeout=int(self.timeout) + 30)
+            status["returncode"] = result.returncode
+            with open(log_path) as log:
+                output = log.read()
+            if "Wall-clock timeout" in output:
+                status["reason"] = "simulator-timeout"
+            elif result.returncode != 0:
+                status["reason"] = "simulator-exit"
+            elif "HIT GOOD TRAP" not in output:
+                status["reason"] = "missing-successful-termination"
+            elif re.search(r"Too many cycles|HIT BAD TRAP|\[ERROR\]", output):
+                status["reason"] = "simulator-error"
+            elif not os.path.isfile(sig):
+                status["reason"] = "missing-signature"
+            else:
+                with open(sig) as signature:
+                    words = signature.read().splitlines()
+                if len(words) != (end - beg) // 4 or any(
+                        re.fullmatch(r"[0-9a-fA-F]{8}", word) is None for word in words):
+                    status["reason"] = "invalid-signature"
+                else:
+                    status["completed"] = True
+        except subprocess.TimeoutExpired:
+            status["reason"] = "runner-timeout"
+        except OSError as exc:
+            status["reason"] = f"runner-error: {exc}"
+
+        if not status["completed"]:
+            # Preserve partial output for debugging, but do not compare it as
+            # an architectural result or accidentally reuse an old signature.
+            if os.path.exists(sig):
+                os.replace(sig, sig + ".partial")
+            with open(sig, "w"):
+                pass
+            logger.warning("DUT execution failed (%s); see %s", status["reason"], log_path)
+        status["elapsed_seconds"] = time.monotonic() - started
+        with open(status_path, "w") as report:
+            json.dump(status, report, indent=2)
+            report.write("\n")
+        return status["completed"]
+
+    # ------------------------------------------------------------------
     def runTests(self, testList):
         total = len(testList)
 
@@ -160,31 +226,13 @@ class raptor(pluginTemplate):
                 f"{self.objcopy} -O binary {elf} {bin_}"
             ).run(cwd=test_dir)
 
-            print(f"[{idx}/{total}] {os.path.basename(testname)}")
+            print(f"[{idx}/{total}] {os.path.basename(testname)}", flush=True)
 
             if not self.target_run:
                 return
 
             beg, end = self._extract_sig_range(elf)
-            run_cmd = (
-                f"{self.npc_bin} -b -n --trap-on-ebreak -r {self.mrom_img} "
-                f"--mem-random-delay={self.mem_random_delay} "
-                f"--mem-random-seed={self.mem_random_seed} "
-                f"--sig={beg:x}-{end:x}:{sig} "
-                f"-t {self.timeout} {bin_}"
-            )
-            logger.debug("DUT run: %s", run_cmd)
-            try:
-                utils.shellCommand(run_cmd).run(
-                    cwd=self.nsim_home or test_dir,
-                    timeout=int(self.timeout) + 30,
-                )
-            except Exception as exc:
-                logger.warning("DUT run failed for %s: %s", testname, exc)
-                # Produce an empty signature so RISCOF flags the failure
-                # rather than aborting the whole run.
-                if not os.path.exists(sig):
-                    open(sig, "w").close()
+            self._run_dut(bin_, sig, beg, end, test_dir)
 
         indexed_tests = enumerate(testList.items(), 1)
         if self.num_jobs == 1:

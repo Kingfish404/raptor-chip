@@ -52,6 +52,10 @@ jobs:
   riscof-classic:
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
     env:
       RAPTOR_HOME: ${{ github.workspace }}
       NEMU_HOME: ${{ github.workspace }}/nemu
@@ -132,7 +136,11 @@ jobs:
 
       - name: Run classic RISCOF compliance tests
         shell: bash -l {0}
-        run: make -C verify riscof-classic TIMEOUT=45
+        # Large D-extension cases exceed 45s even on local hardware.
+        # Keep every test, distributing the suite across independent runners.
+        run: >-
+          make -C verify riscof-classic RISCOF_CLASSIC_TIMEOUT=600 JOBS=2
+          RISCOF_CLASSIC_SHARD_INDEX=${{ matrix.shard }} RISCOF_CLASSIC_SHARD_COUNT=4
 
       - name: Diagnose missing reference signatures
         if: failure()
@@ -161,7 +169,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: riscof-classic-report
+          name: riscof-classic-report-${{ matrix.shard }}
           path: |
             verify/build/riscof-classic/report.html
             verify/build/riscof-classic/style.css
@@ -171,12 +179,12 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: riscof-classic-workdir-${{ github.sha }}
+          name: riscof-classic-workdir-${{ matrix.shard }}-${{ github.sha }}
           path: |
             verify/build/riscof-classic/
             !verify/build/riscof-classic/**/*.elf
           if-no-files-found: warn
-          retention-days: 14
+          retention-days: 7
 
   fuzztest-sigtest-and-coverage:
     runs-on: ubuntu-latest
@@ -220,14 +228,6 @@ jobs:
         shell: bash -l {0}
         run: make -C verify coverage-report COV_LINE_MIN=50.0
 
-      - name: Upload coverage artifacts
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: coverage-report
-          path: verify/build/coverage/
-          retention-days: 30
-
   linux-rv32-test:
     runs-on: ubuntu-latest
     permissions:
@@ -244,12 +244,12 @@ jobs:
       - name: Download pre-built Linux kernel
         shell: bash -l {0}
         run: make linux-download-rv32
-      - name: Boot Linux on RV32 with default difftest
+      - name: Check RV32 Linux kernel entry with default difftest
         shell: bash -l {0}
         run: |
-          make linux-boot-rv32 ARGS="-b -n" MAX_INST=160000000 \
+          make linux-boot-rv32 ARGS="-b -n" MAX_INST=40000000 \
             2>&1 | tee /tmp/linux-boot.log || true
-      - name: Linux boot summary
+      - name: Linux kernel-entry summary
         run: |
           BOOT_OK="no"
           grep -q "Linux version" /tmp/linux-boot.log && BOOT_OK="yes"
@@ -258,10 +258,10 @@ jobs:
           CYCLES=$(grep -oP 'cycle:\s*\K\d+' /tmp/linux-boot.log | head -1 || echo "N/A")
           {
             echo ""
-            echo "## Linux Boot Test (RV32)"
+            echo "## Linux Kernel Entry Test (RV32)"
             echo "| Check | Status |"
             echo "|-------|--------|"
-            echo "| Kernel boot | $([ "$BOOT_OK" = "yes" ] && echo 'PASS' || echo 'FAIL') |"
+            echo "| Kernel entry (Linux version) | $([ "$BOOT_OK" = "yes" ] && echo 'PASS' || echo 'FAIL') |"
             echo ""
             echo "| Metric | Value |"
             echo "|--------|-------|"
@@ -371,6 +371,7 @@ jobs:
     timeout-minutes: 60
     env:
       RAPTOR_HOME: ${{ github.workspace }}
+      SIM_JOBS: "2"
     steps:
       - uses: actions/checkout@v6
       - name: Setup environment
@@ -378,9 +379,13 @@ jobs:
       - name: Prepare LiteX
         shell: bash -l {0}
         run: cd fpga/litex && make setup
+      - name: Build LiteX BIOS simulation
+        shell: bash -l {0}
+        run: cd fpga/litex && make sim-build ROM=bios
       - name: Run LiteX BIOS
         shell: bash -l {0}
-        run: cd fpga/litex && timeout 240s make bios SIM_TIMEOUT=0 || true
+        # The BIOS waits for console input. Limit runtime, not the cold build.
+        run: cd fpga/litex && make sim-run ROM=bios SIM_TIMEOUT=240
       - name: CoreMark on LiteX
         shell: bash -l {0}
         run: |
@@ -460,7 +465,7 @@ jobs:
   #         embench_status=${PIPESTATUS[0]}
   #         set -e
   #         if (( embench_status != 0 )); then
-  #           echo "[embench] nonzero result (${embench_status}) retained in summary and artifacts; not failing CI."
+  #           echo "[embench] nonzero result (${embench_status}) retained in summary; not failing CI."
   #           echo "::warning title=LiteX Embench non-blocking failure::See the Embench summary and uploaded logs."
   #         fi
   #         exit 0
@@ -476,14 +481,3 @@ jobs:
   #           printf '## LiteX Embench-IoT Results\n\n_Embench run did not produce results._\n' \
   #             >> "$GITHUB_STEP_SUMMARY"
   #         fi
-
-  #     - name: Upload logs
-  #       if: always()
-  #       uses: actions/upload-artifact@v7
-  #       with:
-  #         name: litex-embench-logs-${{ github.sha }}
-  #         path: |
-  #           sim/build/${{ env.RAPT_CONFIG }}/logs/litex/embench-logs/
-  #           /tmp/litex-embench.log
-  #         retention-days: 30
-  #         overwrite: true

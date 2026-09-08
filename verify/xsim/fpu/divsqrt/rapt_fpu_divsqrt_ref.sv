@@ -37,21 +37,14 @@ module rapt_fpu_divsqrt_ref #(
       for (bit_index = 63; bit_index >= 0; bit_index = bit_index - 1) begin
         trial = integer_sqrt | (128'(1) << bit_index);
         square = trial * trial;
-        if (square <= radicand)
-          integer_sqrt = trial[63:0];
+        if (square <= radicand) integer_sqrt = trial[63:0];
       end
     end
   endfunction
 
-  task automatic calculate(
-      input  logic [63:0] input_a,
-      input  logic [63:0] input_b,
-      input  logic [2:0]  rm,
-      input  logic        is_double,
-      input  logic        do_divide,
-      output logic [63:0] result_value,
-      output logic [4:0]  flag_value
-  );
+  task automatic calculate(input logic [63:0] input_a, input logic [63:0] input_b,
+                           input logic [2:0] rm, input logic is_double, input logic do_divide,
+                           output logic [63:0] result_value, output logic [4:0] flag_value);
     logic sign_a, sign_b, result_sign;
     logic [10:0] exponent_a, exponent_b;
     logic [51:0] fraction_a, fraction_b;
@@ -115,19 +108,16 @@ module rapt_fpu_divsqrt_ref #(
           : {32'hffff_ffff, result_sign, 8'hff, 23'b0};
       end else if (a_inf || (do_divide && b_inf)) begin
         if (do_divide && b_inf)
-          result_value = is_double ? {result_sign, 63'b0}
-            : {32'hffff_ffff, result_sign, 31'b0};
+          result_value = is_double ? {result_sign, 63'b0} : {32'hffff_ffff, result_sign, 31'b0};
         else
           result_value = is_double ? {result_sign, 11'h7ff, 52'b0}
             : {32'hffff_ffff, result_sign, 8'hff, 23'b0};
       end else if (a_zero) begin
-        result_value = is_double ? {result_sign, 63'b0}
-          : {32'hffff_ffff, result_sign, 31'b0};
+        result_value = is_double ? {result_sign, 63'b0} : {32'hffff_ffff, result_sign, 31'b0};
       end else begin
         mantissa_a = fraction_a;
         exponent_value = exponent_a == '0 ? min_exponent : exponent_a - bias;
-        if (exponent_a != '0)
-          mantissa_a = mantissa_a | hidden_bit;
+        if (exponent_a != '0) mantissa_a = mantissa_a | hidden_bit;
         for (bit_index = 0; bit_index < 64; bit_index = bit_index + 1) begin
           if ((mantissa_a & hidden_bit) == '0) begin
             mantissa_a = mantissa_a << 1;
@@ -138,8 +128,7 @@ module rapt_fpu_divsqrt_ref #(
         if (do_divide) begin
           mantissa_b = fraction_b;
           packed_exponent = exponent_b == '0 ? min_exponent : exponent_b - bias;
-          if (exponent_b != '0)
-            mantissa_b = mantissa_b | hidden_bit;
+          if (exponent_b != '0) mantissa_b = mantissa_b | hidden_bit;
           for (bit_index = 0; bit_index < 64; bit_index = bit_index + 1) begin
             if ((mantissa_b & hidden_bit) == '0) begin
               mantissa_b = mantissa_b << 1;
@@ -174,8 +163,7 @@ module rapt_fpu_divsqrt_ref #(
             quotient = '0;
           end else begin
             for (bit_index = 0; bit_index < 128; bit_index = bit_index + 1)
-              if (bit_index < shift_amount)
-                remainder = remainder | quotient[bit_index];
+            if (bit_index < shift_amount) remainder = remainder | quotient[bit_index];
             quotient = quotient >> shift_amount;
           end
           exponent_value = min_exponent;
@@ -201,8 +189,7 @@ module rapt_fpu_divsqrt_ref #(
 
         if (exponent_value > bias) begin
           flag_value[2] = 1'b1;
-          if (rm == 3'b001 || (rm == 3'b010 && !result_sign)
-              || (rm == 3'b011 && result_sign))
+          if (rm == 3'b001 || (rm == 3'b010 && !result_sign) || (rm == 3'b011 && result_sign))
             result_value = is_double ? {result_sign, 11'h7fe, 52'hf_ffff_ffff_ffff}
               : {32'hffff_ffff, result_sign, 8'hfe, 23'h7f_ffff};
           else
@@ -210,12 +197,9 @@ module rapt_fpu_divsqrt_ref #(
               : {32'hffff_ffff, result_sign, 8'hff, 23'b0};
         end else begin
           packed_exponent = exponent_value + bias;
-          if (subnormal && significand < hidden_bit)
-            packed_exponent = 0;
-          if (is_double)
-            result_value = {result_sign, packed_exponent[10:0], significand[51:0]};
-          else
-            result_value = {32'hffff_ffff, result_sign, packed_exponent[7:0], significand[22:0]};
+          if (subnormal && significand < hidden_bit) packed_exponent = 0;
+          if (is_double) result_value = {result_sign, packed_exponent[10:0], significand[51:0]};
+          else result_value = {32'hffff_ffff, result_sign, packed_exponent[7:0], significand[22:0]};
           flag_value[1] = (packed_exponent == 0) && inexact;
         end
         flag_value[0] = inexact;
@@ -231,12 +215,9 @@ module rapt_fpu_divsqrt_ref #(
   endtask
 
   always_comb begin
-    calculate(src_is_double || operand_a[63:32] == '1 ? operand_a
-        : {32'hffff_ffff, 32'h7fc0_0000},
-      src_is_double || operand_b[63:32] == '1 ? operand_b
-        : {32'hffff_ffff, 32'h7fc0_0000},
-      rounding_mode, src_is_double, divide,
-      next_result, next_flags);
+    calculate(src_is_double || operand_a[63:32] == '1 ? operand_a : {32'hffff_ffff, 32'h7fc0_0000},
+              src_is_double || operand_b[63:32] == '1 ? operand_b : {32'hffff_ffff, 32'h7fc0_0000},
+              rounding_mode, src_is_double, divide, next_result, next_flags);
   end
 
   assign ready = !busy_q;

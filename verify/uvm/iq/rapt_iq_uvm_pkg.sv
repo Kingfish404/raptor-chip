@@ -3,9 +3,9 @@ package rapt_iq_uvm_pkg;
   `include "uvm_macros.svh"
 
   localparam int IQSize = 8;
-  localparam int XLEN = 32;
-  localparam int PLEN = 7;
-  localparam int RLEN = 5;
+  localparam int XLEN   = 32;
+  localparam int PLEN   = 7;
+  localparam int RLEN   = 5;
   localparam int ROBLEN = 6;
 
   typedef virtual rapt_iq_uvm_if iq_vif_t;
@@ -250,60 +250,60 @@ package rapt_iq_uvm_pkg;
       iq_cycle_item sample = iq_cycle_item::type_id::create("sample");
       @(vif.mon_cb);
       sample.reset = vif.mon_cb.reset;
-        sample.flush_pipe = vif.mon_cb.flush_pipe;
-        sample.accept_a = vif.mon_cb.accept_a;
-        sample.accept_b = vif.mon_cb.accept_b;
-        sample.b_rs_idx = vif.mon_cb.b_rs_idx;
-        sample.iss_b_block_a = vif.mon_cb.iss_b_block_a;
-        sample.iss_b_block_b = vif.mon_cb.iss_b_block_b;
-        sample.pc_a = vif.mon_cb.pc_a;
-        sample.op1_a = vif.mon_cb.op1_a;
-        sample.op2_a = vif.mon_cb.op2_a;
-        sample.pr1_a = vif.mon_cb.pr1_a;
-        sample.pr2_a = vif.mon_cb.pr2_a;
-        sample.prd_a = vif.mon_cb.prd_a;
-        sample.rd_a = vif.mon_cb.rd_a;
-        sample.dest_a = vif.mon_cb.dest_a;
-        sample.pc_b = vif.mon_cb.pc_b;
-        sample.op1_b = vif.mon_cb.op1_b;
-        sample.op2_b = vif.mon_cb.op2_b;
-        sample.pr1_b = vif.mon_cb.pr1_b;
-        sample.pr2_b = vif.mon_cb.pr2_b;
-        sample.prd_b = vif.mon_cb.prd_b;
-        sample.rd_b = vif.mon_cb.rd_b;
-        sample.dest_b = vif.mon_cb.dest_b;
-        sample.wb_valid = vif.mon_cb.wb_valid;
-        sample.wb_prd_0 = vif.mon_cb.wb_prd_0;
-        sample.wb_prd_1 = vif.mon_cb.wb_prd_1;
-        sample.wb_prd_2 = vif.mon_cb.wb_prd_2;
-        sample.wb_prd_3 = vif.mon_cb.wb_prd_3;
-        sample.wb_result_0 = vif.mon_cb.wb_result_0;
-        sample.wb_result_1 = vif.mon_cb.wb_result_1;
-        sample.wb_result_2 = vif.mon_cb.wb_result_2;
-        sample.wb_result_3 = vif.mon_cb.wb_result_3;
-        sample.load_fast_valid = vif.mon_cb.load_fast_valid;
-        sample.load_fast_rebusy = vif.mon_cb.load_fast_rebusy;
-        sample.load_fast_prd = vif.mon_cb.load_fast_prd;
-        sample.free_found_a = vif.mon_cb.free_found_a;
-        sample.free_found_b = vif.mon_cb.free_found_b;
-        sample.free_idx_a = vif.mon_cb.free_idx_a;
-        sample.free_idx_b = vif.mon_cb.free_idx_b;
-        sample.occ = vif.mon_cb.occ;
-        sample.pmu_iq_full = vif.mon_cb.pmu_iq_full;
-        sample.iss_valid = vif.mon_cb.iss_valid;
-        sample.iss_pc = vif.mon_cb.iss_pc;
-        sample.iss_op1 = vif.mon_cb.iss_op1;
-        sample.iss_op2 = vif.mon_cb.iss_op2;
-        sample.iss_prd = vif.mon_cb.iss_prd;
-        sample.iss_rd = vif.mon_cb.iss_rd;
-        sample.iss_dest = vif.mon_cb.iss_dest;
-        sample.iss_b_valid = vif.mon_cb.iss_b_valid;
-        sample.iss_b_pc = vif.mon_cb.iss_b_pc;
-        sample.iss_b_op1 = vif.mon_cb.iss_b_op1;
-        sample.iss_b_op2 = vif.mon_cb.iss_b_op2;
-        sample.iss_b_prd = vif.mon_cb.iss_b_prd;
-        sample.iss_b_rd = vif.mon_cb.iss_b_rd;
-        sample.iss_b_dest = vif.mon_cb.iss_b_dest;
+      sample.flush_pipe = vif.mon_cb.flush_pipe;
+      sample.accept_a = vif.mon_cb.accept_a;
+      sample.accept_b = vif.mon_cb.accept_b;
+      sample.b_rs_idx = vif.mon_cb.b_rs_idx;
+      sample.iss_b_block_a = vif.mon_cb.iss_b_block_a;
+      sample.iss_b_block_b = vif.mon_cb.iss_b_block_b;
+      sample.pc_a = vif.mon_cb.pc_a;
+      sample.op1_a = vif.mon_cb.op1_a;
+      sample.op2_a = vif.mon_cb.op2_a;
+      sample.pr1_a = vif.mon_cb.pr1_a;
+      sample.pr2_a = vif.mon_cb.pr2_a;
+      sample.prd_a = vif.mon_cb.prd_a;
+      sample.rd_a = vif.mon_cb.rd_a;
+      sample.dest_a = vif.mon_cb.dest_a;
+      sample.pc_b = vif.mon_cb.pc_b;
+      sample.op1_b = vif.mon_cb.op1_b;
+      sample.op2_b = vif.mon_cb.op2_b;
+      sample.pr1_b = vif.mon_cb.pr1_b;
+      sample.pr2_b = vif.mon_cb.pr2_b;
+      sample.prd_b = vif.mon_cb.prd_b;
+      sample.rd_b = vif.mon_cb.rd_b;
+      sample.dest_b = vif.mon_cb.dest_b;
+      sample.wb_valid = vif.mon_cb.wb_valid;
+      sample.wb_prd_0 = vif.mon_cb.wb_prd_0;
+      sample.wb_prd_1 = vif.mon_cb.wb_prd_1;
+      sample.wb_prd_2 = vif.mon_cb.wb_prd_2;
+      sample.wb_prd_3 = vif.mon_cb.wb_prd_3;
+      sample.wb_result_0 = vif.mon_cb.wb_result_0;
+      sample.wb_result_1 = vif.mon_cb.wb_result_1;
+      sample.wb_result_2 = vif.mon_cb.wb_result_2;
+      sample.wb_result_3 = vif.mon_cb.wb_result_3;
+      sample.load_fast_valid = vif.mon_cb.load_fast_valid;
+      sample.load_fast_rebusy = vif.mon_cb.load_fast_rebusy;
+      sample.load_fast_prd = vif.mon_cb.load_fast_prd;
+      sample.free_found_a = vif.mon_cb.free_found_a;
+      sample.free_found_b = vif.mon_cb.free_found_b;
+      sample.free_idx_a = vif.mon_cb.free_idx_a;
+      sample.free_idx_b = vif.mon_cb.free_idx_b;
+      sample.occ = vif.mon_cb.occ;
+      sample.pmu_iq_full = vif.mon_cb.pmu_iq_full;
+      sample.iss_valid = vif.mon_cb.iss_valid;
+      sample.iss_pc = vif.mon_cb.iss_pc;
+      sample.iss_op1 = vif.mon_cb.iss_op1;
+      sample.iss_op2 = vif.mon_cb.iss_op2;
+      sample.iss_prd = vif.mon_cb.iss_prd;
+      sample.iss_rd = vif.mon_cb.iss_rd;
+      sample.iss_dest = vif.mon_cb.iss_dest;
+      sample.iss_b_valid = vif.mon_cb.iss_b_valid;
+      sample.iss_b_pc = vif.mon_cb.iss_b_pc;
+      sample.iss_b_op1 = vif.mon_cb.iss_b_op1;
+      sample.iss_b_op2 = vif.mon_cb.iss_b_op2;
+      sample.iss_b_prd = vif.mon_cb.iss_b_prd;
+      sample.iss_b_rd = vif.mon_cb.iss_b_rd;
+      sample.iss_b_dest = vif.mon_cb.iss_b_dest;
       analysis_port.write(sample);
       capture_next_cycle();
     endtask
@@ -360,15 +360,15 @@ package rapt_iq_uvm_pkg;
     function bit wb_hit(iq_cycle_item item, bit [PLEN-1:0] pr);
       wb_hit = 0;
       for (int p = 0; p < 4; p++)
-        wb_hit |= (pr != 0) && item.wb_valid[p] && (wb_prd_at(item, p) == pr);
+      wb_hit |= (pr != 0) && item.wb_valid[p] && (wb_prd_at(item, p) == pr);
     endfunction
 
     function bit [XLEN-1:0] wb_value(iq_cycle_item item, bit [PLEN-1:0] pr,
                                      bit [XLEN-1:0] old_value);
       wb_value = old_value;
       for (int p = 3; p >= 0; p--)
-        if ((pr != 0) && item.wb_valid[p] && (wb_prd_at(item, p) == pr))
-          wb_value = wb_result_at(item, p);
+      if ((pr != 0) && item.wb_valid[p] && (wb_prd_at(item, p) == pr))
+        wb_value = wb_result_at(item, p);
     endfunction
 
     function bit fast_wake(iq_cycle_item item, bit [PLEN-1:0] pr);
@@ -381,17 +381,16 @@ package rapt_iq_uvm_pkg;
     endfunction
 
     function bit fast_rebusy(iq_cycle_item item, bit is_fast, bit [PLEN-1:0] pr);
-      return is_fast && item.load_fast_valid && item.load_fast_rebusy
-             && (item.load_fast_prd == pr);
+      return is_fast && item.load_fast_valid && item.load_fast_rebusy && (item.load_fast_prd == pr);
     endfunction
 
     function bit entry_ready(iq_cycle_item item, int index);
       return entries[index].valid
              && !entries[index].pr1_busy && !entries[index].pr2_busy
              && (!entries[index].pr1_fast
-                 || fast_confirm(item, entries[index].pr1_fast, entries[index].pr1))
-             && (!entries[index].pr2_fast
-                 || fast_confirm(item, entries[index].pr2_fast, entries[index].pr2));
+                 || fast_confirm(item, entries[index].pr1_fast, entries[index].pr1)) &&
+          (!entries[index].pr2_fast ||
+           fast_confirm(item, entries[index].pr2_fast, entries[index].pr2));
     endfunction
 
     function int oldest_ready(iq_cycle_item item, bit port_b, int exclude);
@@ -420,8 +419,8 @@ package rapt_iq_uvm_pkg;
       bit [XLEN-1:0] expected_op2;
 
       if (actual_valid != (index >= 0))
-        `uvm_error("IQ_VALID", $sformatf("port %s valid=%0b expected=%0b", port_name,
-                                        actual_valid, index >= 0))
+        `uvm_error("IQ_VALID", $sformatf(
+                   "port %s valid=%0b expected=%0b", port_name, actual_valid, index >= 0))
       if (index < 0 || !actual_valid) return;
       expected_op1 = fast_confirm(item, entries[index].pr1_fast, entries[index].pr1)
                      ? item.wb_result_0 : entries[index].op1;
@@ -430,10 +429,20 @@ package rapt_iq_uvm_pkg;
       if (actual_pc != entries[index].pc || actual_prd != entries[index].prd
           || actual_op1 != expected_op1 || actual_op2 != expected_op2)
         `uvm_error("IQ_PAYLOAD", $sformatf(
-          {"port %s got pc=%08h prd=%0d op1=%08h op2=%08h ",
-           "expected pc=%08h prd=%0d op1=%08h op2=%08h"},
-          port_name, actual_pc, actual_prd, actual_op1, actual_op2,
-          entries[index].pc, entries[index].prd, expected_op1, expected_op2))
+                   {
+                     "port %s got pc=%08h prd=%0d op1=%08h op2=%08h ",
+                     "expected pc=%08h prd=%0d op1=%08h op2=%08h"
+                   },
+                   port_name,
+                   actual_pc,
+                   actual_prd,
+                   actual_op1,
+                   actual_op2,
+                   entries[index].pc,
+                   entries[index].prd,
+                   expected_op1,
+                   expected_op2
+                   ))
     endfunction
 
     function void allocate_entry(int index, bit slot_b, iq_cycle_item item,
@@ -509,8 +518,9 @@ package rapt_iq_uvm_pkg;
       if (item.occ != model_occ())
         `uvm_error("IQ_OCC", $sformatf("occupancy=%0d expected=%0d", item.occ, model_occ()))
 
-      issue_a = oldest_ready(item, 0, -1);
-      issue_b = oldest_ready(item, 1, issue_a);
+      // Flush suppresses the execution boundary, even for ready residents.
+      issue_a = item.flush_pipe ? -1 : oldest_ready(item, 0, -1);
+      issue_b = item.flush_pipe ? -1 : oldest_ready(item, 1, issue_a);
       check_issue(item, issue_a, 0);
       check_issue(item, issue_b, 1);
       for (int i = 0; i < IQSize; i++) ready[i] = entry_ready(item, i);
@@ -539,8 +549,8 @@ package rapt_iq_uvm_pkg;
     endfunction
 
     function void report_phase(uvm_phase phase);
-      `uvm_info("IQ_SCOREBOARD",
-            $sformatf("checked %0d issue-queue cycles", checked_cycles), UVM_LOW)
+      `uvm_info("IQ_SCOREBOARD", $sformatf("checked %0d issue-queue cycles", checked_cycles),
+                UVM_LOW)
     endfunction
   endclass
 
@@ -577,12 +587,24 @@ package rapt_iq_uvm_pkg;
 
     function void report_phase(uvm_phase phase);
       `uvm_info("IQ_COVERAGE", $sformatf(
-        {"occ(empty/partial/full)=%0d/%0d/%0d dispatch(A/B/dual)=%0d/%0d/%0d ",
-         "wb=%0d/%0d/%0d/%0d fast(wake/rebusy)=%0d/%0d flush=%0d"},
-        occ_empty_hits, occ_partial_hits, occ_full_hits,
-        dispatch_a_hits, dispatch_b_hits, dual_dispatch_hits,
-        wb_port_hits[0], wb_port_hits[1], wb_port_hits[2], wb_port_hits[3],
-        fast_wake_hits, fast_rebusy_hits, flush_hits), UVM_LOW)
+                {
+                  "occ(empty/partial/full)=%0d/%0d/%0d dispatch(A/B/dual)=%0d/%0d/%0d ",
+                  "wb=%0d/%0d/%0d/%0d fast(wake/rebusy)=%0d/%0d flush=%0d"
+                },
+                occ_empty_hits,
+                occ_partial_hits,
+                occ_full_hits,
+                dispatch_a_hits,
+                dispatch_b_hits,
+                dual_dispatch_hits,
+                wb_port_hits[0],
+                wb_port_hits[1],
+                wb_port_hits[2],
+                wb_port_hits[3],
+                fast_wake_hits,
+                fast_rebusy_hits,
+                flush_hits
+                ), UVM_LOW)
     endfunction
   endclass
 

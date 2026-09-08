@@ -1,6 +1,6 @@
 mtime:
   implemented: true
-  address: 0x02000048
+  address: 0x0200bff8
 mtimecmp:
   implemented: true
   address: 0x02004000

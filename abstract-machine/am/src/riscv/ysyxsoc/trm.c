@@ -4,7 +4,8 @@
 #include <ysyxsoc.h>
 #include <klib-macros.h>
 
-extern char _heap_start;
+extern char _heap_start, _heap_end;
+extern uint8_t _bss_start[], _bss_end[];
 int main(const char *args);
 void _second_stage_bootloader();
 void _trm_init();
@@ -31,7 +32,7 @@ extern uint8_t _data_load_start[];
 #define PMEM_SIZE (4 * 1024 * 1024)
 #define PMEM_END ((uintptr_t)&_pmem_start + PMEM_SIZE)
 
-Area heap = RANGE(&_heap_start, PMEM_END);
+Area heap = RANGE(&_heap_start, &_heap_end);
 #ifndef MAINARGS
 #define MAINARGS ""
 #endif
@@ -54,7 +55,7 @@ void putch(char ch)
 
 void halt(int code)
 {
-  asm volatile("ebreak");
+  asm volatile("mv a0, %0; ebreak" : : "r"(code) : "a0");
   while (1)
     ;
 }
@@ -64,11 +65,12 @@ __attribute__((section(".first_boot"))) void _first_stage_bootloader(void)
   if ((size_t)_second_boot_start != (size_t)_second_boot_load_start)
   {
     size_t text_size = _second_boot_end - _second_boot_start;
-    for (size_t i = 0; i <= text_size; i++)
+    for (size_t i = 0; i < text_size; i++)
     {
       _second_boot_start[i] = _second_boot_load_start[i];
     }
   }
+  asm volatile("fence.i" ::: "memory");
   _second_stage_bootloader();
 }
 
@@ -76,17 +78,17 @@ size_t ssb_start, ssb_end;
 
 __attribute__((section(".second_boot"))) void _second_stage_bootloader(void)
 {
-  asm volatile(
-      "rdtime %0"
-      : "=r"(ssb_start) :);
+  size_t boot_start;
+  asm volatile("rdtime %0" : "=r"(boot_start));
   if ((size_t)_text_start != (size_t)_text_load_start)
   {
     size_t text_size = _text_end - _text_start;
-    for (size_t i = 0; i <= text_size; i++)
+    for (size_t i = 0; i < text_size; i++)
     {
       _text_start[i] = _text_load_start[i];
     }
   }
+  asm volatile("fence.i" ::: "memory");
   if ((size_t)_rodata_start != (size_t)_rodata_load_start)
   {
     size_t rodata_size = _rodata_end - _rodata_start;
@@ -97,9 +99,9 @@ __attribute__((section(".second_boot"))) void _second_stage_bootloader(void)
     size_t data_size = _data_end - _data_start;
     memcpy(_data_start, _data_load_start, (size_t)data_size);
   }
-  asm volatile(
-      "rdtime %0"
-      : "=r"(ssb_end) :);
+  memset(_bss_start, 0, (size_t)(_bss_end - _bss_start));
+  ssb_start = boot_start;
+  asm volatile("rdtime %0" : "=r"(ssb_end));
   _trm_init();
 }
 

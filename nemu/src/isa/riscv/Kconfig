@@ -4,17 +4,29 @@ config RV64
   bool "64-bit RISC-V architecture"
   default n
 
+config RV_ASID_BITS
+  int "Implemented RV64 satp ASID bits"
+  depends on RV64
+  range 0 16
+  default 16
+  help
+    Generic RV64 platforms implement all 16 ASID bits, matching Sail.
+    Set to 9 for the Raptor reference model. Unimplemented high ASID
+    bits read as zero; MODE and PPN retain their existing WARL behavior.
+
 config RVE
   bool "Use E extension"
   default n
 
 config RV_F
   bool "F: single-precision floating-point extension"
+  default y if RV64
   default n
 
 config RV_D
   bool "D: double-precision floating-point extension"
   depends on RV_F
+  default y if RV64
   default n
 
 config RV_SVADE
@@ -24,4 +36,26 @@ config RV_SVADE
     Match the Raptor HDL page-table walker: an access with PTE.A=0, or a
     store with PTE.D=0, raises a page fault and never updates the PTE in
     hardware. Disable only when intentionally modeling a Svadu target.
+
+config RV_RVA22S64
+  bool "RVA22S64 architectural execution environment"
+  depends on RV64 && RV_F && RV_D && RV_SVADE
+  default y
+  help
+    Enable the existing RVA22S64 execution-environment support by default
+    for RV64. This does not imply full profile certification.
+    Expose the optional mcountinhibit CSR as read-only zero so firmware
+    such as OpenSBI can discover privileged architecture 1.12 through
+    mcounteren, mcountinhibit and menvcfg. Counters always run.
+
+config RV_EBREAK_HOST_EXIT
+  bool "Legacy EBREAK host-exit convention"
+  depends on DEBUG
+  default y if !RV64
+  default n
+  help
+    Treat EBREAK (including C.EBREAK) as a host test exit using a0,
+    except while signature testing. Enable for legacy AM/test payloads
+    that use this convention. Otherwise EBREAK raises a guest breakpoint
+    exception, including in debug builds. Independent of ISA support.
 endmenu

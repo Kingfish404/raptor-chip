@@ -129,6 +129,11 @@ typedef struct
   uint32_t *fcsr;
   uint32_t difftest_state_version;
   uint32_t xlen;
+  // Append-only checkpoint observation of platform write-error diagnostics.
+  uint8_t *bus_error_pending;
+  uint8_t *bus_error_overflow;
+  uint8_t *bus_error_strb;
+  word_t *bus_error_addr;
 } NPCState;
 
 __EXPORT void difftest_memcpy(paddr_t addr, void *buf, size_t n, bool direction)
@@ -196,7 +201,17 @@ __EXPORT void difftest_regcpy(void *dut, bool direction)
     cpu.sr[CSR_MEPC] = *npc->mepc___;
     cpu.sr[CSR_MCAUSE] = *npc->mcause_;
     cpu.sr[CSR_MTVAL] = *npc->mtval__;
-    cpu.sr[CSR_MIP] = *npc->mip____;
+    cpu.stip = (*npc->mip____ & 0x20) != 0;
+    // A resync must not overwrite the hidden software STIP latch with the
+    // hardware comparator level while STCE selects the latter.
+#ifdef CONFIG_RV64
+    bool stce = (cpu.sr[CSR_MENVCFG] >> 63) != 0;
+#else
+    bool stce = (cpu.sr[CSR_MENVCFGH] >> 31) != 0;
+#endif
+    word_t hidden_pending = (stce ? (word_t)0x20 : 0) | (cpu.seip ? (word_t)0x200 : 0);
+    cpu.sr[CSR_MIP] = (*npc->mip____ & ~hidden_pending) |
+                       (cpu.sr[CSR_MIP] & hidden_pending);
     cpu.skip = 0; // reset skip flag
   }
   else if (direction == DIFFTEST_TO_DUT)
@@ -225,6 +240,7 @@ __EXPORT void difftest_regcpy(void *dut, bool direction)
     npc->satp___ = &cpu.sr[CSR_SATP];
 
     npc->mstatus = &cpu.sr[CSR_MSTATUS];
+    npc->misa___ = &cpu.sr[CSR_MISA];
     npc->medeleg = &cpu.sr[CSR_MEDELEG];
     npc->mideleg = &cpu.sr[CSR_MIDELEG];
     npc->mie____ = &cpu.sr[CSR_MIE];
@@ -236,7 +252,16 @@ __EXPORT void difftest_regcpy(void *dut, bool direction)
     npc->mepc___ = &cpu.sr[CSR_MEPC];
     npc->mcause_ = &cpu.sr[CSR_MCAUSE];
     npc->mtval__ = &cpu.sr[CSR_MTVAL];
-    npc->mip____ = &cpu.sr[CSR_MIP];
+    npc->mcycle_ = &cpu.sr[CSR_MCYCLE];
+    npc->mcycleh = &cpu.sr[CSR_MCYCLEH];
+    npc->minstret = &cpu.sr[CSR_MINSTRET];
+    npc->minstreth = &cpu.sr[CSR_MINSTRETH];
+    npc->time___ = &cpu.sr[CSR_TIME];
+    npc->timeh__ = &cpu.sr[CSR_TIMEH];
+    static word_t mip_effective;
+    mip_effective = riscv_mip_value();
+    cpu.sr[CSR_SIP] = mip_effective & cpu.sr[CSR_MIDELEG] & (word_t)0x222;
+    npc->mip____ = &mip_effective;
 
     npc->vwaddr = cpu.vwaddr;
     npc->pwaddr = cpu.pwaddr;
@@ -302,12 +327,27 @@ __EXPORT void difftest_checkpoint_sync(void *dut, uint32_t plic_ndev,
 #endif
 }
 
+/* Fixed-width checkpoint API; does not extend the shared NPCState layout.
+ * Called only on architectural resumption, never to repair executed results. */
+__EXPORT void difftest_restore_sstc(uint64_t menvcfgh, uint64_t stimecmp)
+{
+#ifdef CONFIG_RV64
+  (void)menvcfgh;
+  cpu.sr[0x14d] = stimecmp;
+#else
+  cpu.sr[CSR_MENVCFGH] = (word_t)menvcfgh;
+  cpu.sr[0x14d] = (word_t)stimecmp;
+  cpu.sr[0x15d] = (word_t)(stimecmp >> 32);
+#endif
+}
+
 /* An SC is architecturally permitted to fail even when the reservation still
  * matches.  The DUT difftest driver uses this hook before stepping a failed
  * DUT SC so that the reference also fails without writing memory. */
 __EXPORT void difftest_clear_reservation(void)
 {
   cpu.reservation = 0;
+  cpu.reservation_bytes = 0;
 }
 
 __EXPORT void difftest_exec(uint64_t n)
@@ -362,14 +402,12 @@ __EXPORT void difftest_set_mtip(uint8_t val)
 // the regular instruction replay instead.
 __EXPORT void difftest_set_stip(uint8_t val)
 {
-#ifdef CSR_MIP
-  if (val)
-    cpu.sr[CSR_MIP] |= (1u << 5);
-  else
-    cpu.sr[CSR_MIP] &= ~(1u << 5);
-#else
-  (void)val;
-#endif
+  cpu.stip = val != 0;
+}
+
+__EXPORT void difftest_set_seip(uint8_t val)
+{
+  cpu.seip = val != 0;
 }
 
 // Forward an external IRQ source rising edge into NEMU's PLIC, keeping the
@@ -401,3 +439,27 @@ __EXPORT void difftest_init(int port)
   /* Perform ISA dependent initialization. */
   init_isa();
 }
+
+#ifdef CONFIG_RAPTOR_MEMORY_MAP
+/* External completed-write error, applied after same-cycle retired CSR writes.
+ * This receives event inputs, not a copy of DUT diagnostic state. */
+__EXPORT void difftest_store_error(uint64_t addr, uint8_t strb)
+{
+  word_t status = cpu.sr[CSR_MBERR_STATUS];
+  if (!(status & 1)) {
+    cpu.sr[CSR_MBERR_ADDR] = (word_t)addr;
+    status = (status & (word_t)2) | ((word_t)strb << 8);
+  } else status |= 2;
+  cpu.sr[CSR_MBERR_STATUS] = status | 1;
+}
+#endif
+
+#ifdef CONFIG_RAPTOR_MEMORY_MAP
+/* Restore latched diagnostic state; unlike a new event this must preserve
+ * an acknowledged record and overflow independently of pending. */
+__EXPORT void difftest_restore_store_error(uint64_t status, uint64_t addr)
+{
+  cpu.sr[CSR_MBERR_STATUS] = (word_t)status & (word_t)0xff03;
+  cpu.sr[CSR_MBERR_ADDR] = (word_t)addr;
+}
+#endif

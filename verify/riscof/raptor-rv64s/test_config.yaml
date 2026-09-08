@@ -1,0 +1,8 @@
+name: raptor-rv64s
+compiler_exe: riscv64-elf-gcc
+objdump_exe: riscv64-elf-objdump
+ref_model_exe: sail_riscv_sim
+udb_config: raptor-rv64s.yaml
+linker_script: link.ld
+dut_include_dir: .
+include_priv_tests: true

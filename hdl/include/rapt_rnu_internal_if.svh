@@ -6,7 +6,7 @@
 // ============================================================================
 // RNU Internal Interfaces - connect RNU sub-modules (freelist, maptable).
 // PRF interfaces have been removed: PRF now accepts source interfaces
-// (cdb_if, rou_cmu_if, cmu_bcast_if) directly.
+// (typed completion messages, rou_cmu_if, cmu_bcast_if) directly.
 // For multi-issue, scale read/write port counts via ISSUE_WIDTH parameter.
 // ============================================================================
 

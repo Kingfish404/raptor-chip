@@ -48,22 +48,26 @@ OPENSTA ?= $(shell command -v sta 2>/dev/null || echo $(FLOW_ROOT)/third_party/O
 
 BUILD_DIR := $(abspath build/$(RAPT_CONFIG)/$(PDK)/$(MODULE)/$(CLK_FREQ_MHZ)MHz)
 NETLIST := $(BUILD_DIR)/$(TOP).netlist.v
+SYNTH_CONFIG_STAMP := $(BUILD_DIR)/.synth_config
 SRAM_DIR := $(RAPT_HOME)/sim/sram
 SRAM_BLACKBOX := $(SRAM_DIR)/wrappers/rapt_sram_blackbox.v
 SRAM_STAMP := $(SRAM_DIR)/build/$(SRAM_PLATFORM)/.lspd-stubs.ok
-SRAM_LIB_FILES := $(shell $(MAKE) -s -C $(SRAM_DIR) print-libs PLATFORM=$(SRAM_PLATFORM))
+SRAM_LIB_FILES = $(shell $(MAKE) -s -C $(SRAM_DIR) print-libs PLATFORM=$(SRAM_PLATFORM))
 
+TOP_WRAPPER := $(wildcard $(HDL_WRAPPER_DIR)/$(TOP).sv)
 HDL_SV := $(HDL_ROOT)/rapt_pkg.sv \
           $(filter-out $(HDL_ROOT)/rapt_pkg.sv,$(shell find $(HDL_ROOT) -path '$(HDL_ROOT)/chisel' -prune -o -path '$(HDL_ROOT)/generated' -prune -o -name '*.sv' -print | sort)) \
           $(HDL_ROOT)/generated/rapt_idu_decoder.sv \
           $(HDL_ROOT)/generated/rapt_idu_decoder_c.sv \
-          $(shell find $(HDL_WRAPPER_DIR) -name '*.sv' -print | sort)
+          $(TOP_WRAPPER)
 INCLUDE_DIRS := $(HDL_ROOT)/configs/$(RAPT_CONFIG) \
                 $(HDL_ROOT) \
                 $(HDL_ROOT)/include \
                 $(HDL_ROOT)/include/npc \
                 $(HDL_ROOT)/include/dpic_mock
-SLANG_FLAGS := --single-unit --allow-use-before-declare --allow-toplevel-iface-ports \
+HDL_HEADERS := $(HDL_ROOT)/configs/$(RAPT_CONFIG)/rapt_config.svh \
+               $(shell find $(HDL_ROOT)/include -name '*.svh' -print | sort)
+SLANG_FLAGS := --single-unit --allow-toplevel-iface-ports \
 			   -DSYNTHESIS $(EXTRA_DEFINES) \
                $(addprefix -I,$(INCLUDE_DIRS))
 
@@ -157,10 +161,33 @@ $(SRAM_STAMP): $(SRAM_DIR)/Makefile $(SRAM_DIR)/scripts/gen_stub_lib.py $(SRAM_B
 
 syn: $(NETLIST) ## Synthesize MODULE and write its mapped netlist
 
-$(NETLIST): $(HDL_SV) scripts/synth.tcl $(LSPD_DIR)/modules.mk Makefile $(SRAM_PREREQUISITES)
+# Do not leave a newly generated target reusable after a failed source check.
+.DELETE_ON_ERROR:
+
+.PHONY: elaborate structure-check
+structure-check: ## Check optimized RTL connectivity after native elaboration (not technology mapping)
+elaborate structure-check: $(SRAM_PREREQUISITES) ## Check native RTL elaboration with default frontend limits
+	@mkdir -p $(BUILD_DIR)
+	@$(YOSYS) -Q -T -m slang -p 'read_slang $(SLANG_FLAGS) --top $(TOP) $(SYNTH_SV_FILES); hierarchy -check -top $(TOP); select -assert-none t:$$check t:$$assert t:$$assume t:$$cover$(if $(filter structure-check,$@),; opt; check -assert)' \
+		> $(BUILD_DIR)/elaborate.log 2>&1 || { tail -60 $(BUILD_DIR)/elaborate.log; exit 1; }
+	@echo "[$@] PASS $(MODULE) config=$(RAPT_CONFIG) $(EXTRA_DEFINES)"
+
+$(SYNTH_CONFIG_STAMP): FORCE
+	@mkdir -p $(BUILD_DIR)
+	@printf 'module=%s\ntop=%s\npdk=%s\nconfig=%s\nclock_mhz=%s\nperiod_ns=%s\nextra_defines=%s\nsram_mode=%s\nsram_platform=%s\n' \
+		'$(MODULE)' '$(TOP)' '$(PDK)' '$(RAPT_CONFIG)' '$(CLK_FREQ_MHZ)' \
+		'$(PERIOD_NS)' '$(EXTRA_DEFINES)' \
+		'$(SRAM_MODE)' '$(SRAM_PLATFORM)' \
+		> $@.tmp
+	@if ! cmp -s $@.tmp $@; then mv $@.tmp $@; else rm -f $@.tmp; fi
+
+$(NETLIST): $(HDL_SV) $(HDL_HEADERS) scripts/synth.tcl $(LSPD_DIR)/modules.mk Makefile $(SYNTH_CONFIG_STAMP) $(SRAM_PREREQUISITES)
 	@mkdir -p $(BUILD_DIR)
 	@echo "[syn] module=$(MODULE) top=$(TOP) pdk=$(PDK) config=$(RAPT_CONFIG) target=$(CLK_FREQ_MHZ)MHz sram=$(SRAM_MODE)"
 	@printf 'mode=%s\nmodel=%s\nplatform=%s\n' '$(SRAM_MODE)' '$(if $(filter macro,$(SRAM_MODE)),abstract-liberty,logic-mapped)' '$(if $(filter macro,$(SRAM_MODE)),$(SRAM_PLATFORM),none)' > $(BUILD_DIR)/sram_model.txt
+	@sha256sum $(SYNTH_SV_FILES) $(HDL_HEADERS) $(abspath scripts/synth.tcl) \
+		$(LSPD_DIR)/modules.mk $(abspath Makefile) \
+		> $(BUILD_DIR)/source_manifest.sha256
 	@YS_TOP='$(TOP)' \
 	 YS_OUT='$(BUILD_DIR)' \
 	 YS_SV_FILES='$(SYNTH_SV_FILES)' \
@@ -172,9 +199,17 @@ $(NETLIST): $(HDL_SV) scripts/synth.tcl $(LSPD_DIR)/modules.mk Makefile $(SRAM_P
 	 $(TIME) -o '$(BUILD_DIR)/synth.profile' \
 	 	-f 'status=%x\nelapsed_sec=%e\nuser_sec=%U\nsystem_sec=%S\nmax_rss_kb=%M' \
 	 	$(YOSYS) -m slang -p 'tcl scripts/synth.tcl' 2>&1 | tee $(BUILD_DIR)/synth.log
+	@sha256sum --check --status $(BUILD_DIR)/source_manifest.sha256 || \
+		{ echo '[syn] ERROR: sources changed during synthesis; rerun on a stable revision'; exit 1; }
+	@sha256sum $(NETLIST) > $(BUILD_DIR)/netlist.sha256
 
 sta: $(NETLIST) ## Run static timing and vectorless power analysis
 	@echo "[sta] module=$(MODULE) pdk=$(PDK) period=$(PERIOD_NS)ns"
+	@printf 'module=%s\ntop=%s\npdk=%s\nconfig=%s\nclock_mhz=%s\nperiod_ns=%s\nio_delay_frac=%s\noutput_load_ff=%s\nextra_defines=%s\nsram_mode=%s\nsram_platform=%s\n' \
+		'$(MODULE)' '$(TOP)' '$(PDK)' '$(RAPT_CONFIG)' '$(CLK_FREQ_MHZ)' \
+		'$(PERIOD_NS)' '$(IO_DELAY_FRAC)' '$(OUTPUT_LOAD_FF)' '$(EXTRA_DEFINES)' \
+		'$(SRAM_MODE)' '$(SRAM_PLATFORM)' \
+		> $(BUILD_DIR)/run_config.txt
 	@STA_TOP='$(TOP)' \
 	 STA_NETLIST='$(NETLIST)' \
 	 STA_LIB_FILES='$(STA_LIB_FILES)' \

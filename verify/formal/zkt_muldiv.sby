@@ -1,0 +1,28 @@
+[tasks]
+rv32_prove rv32 prove
+rv64_prove rv64 prove
+rv32_cover rv32 cover
+rv64_cover rv64 cover
+
+[options]
+prove: mode prove
+prove: depth 8
+cover: mode cover
+cover: depth 75
+
+[engines]
+smtbmc boolector
+
+[script]
+plugin -i slang
+rv32: read_slang --single-unit -DFORMAL formal_zkt_muldiv.sv rapt_ieu_mul.sv
+rv64: read_slang --single-unit -DFORMAL -DRAPT_RV64 formal_zkt_muldiv.sv rapt_ieu_mul.sv
+prep -top formal_zkt_muldiv
+
+[files]
+formal_zkt_muldiv.sv
+rapt_ieu_mul.sv ../../hdl/backend/ieu/rapt_ieu_mul.sv
+rapt.svh ../../hdl/include/rapt.svh
+rapt_config.svh ../../hdl/configs/default/rapt_config.svh
+rapt_sva.svh ../../hdl/include/rapt_sva.svh
+rapt_fp_ops.svh ../../hdl/include/rapt_fp_ops.svh

@@ -17,19 +17,37 @@ module rapt_fpu_mul_tb (
   logic [4:0] flags_s, flags_d;
   logic valid_s, valid_d;
 
-  rapt_fpu_mul #(.TARGET_DOUBLE(1'b0)) dut_s (
-      .clock(clock), .reset(reset), .flush(flush),
-      .valid(valid && !is_double), .ready(ready_s),
-      .operand_a(operand_a), .operand_b(operand_b),
+  rapt_fpu_mul #(
+      .TARGET_DOUBLE(1'b0)
+  ) dut_s (
+      .clock(clock),
+      .reset(reset),
+      .flush(flush),
+      .valid(valid && !is_double),
+      .ready(ready_s),
+      .operand_a(operand_a),
+      .operand_b(operand_b),
       .rounding_mode(rounding_mode),
-      .result(result_s), .flags(flags_s), .result_valid(valid_s));
+      .result(result_s),
+      .flags(flags_s),
+      .result_valid(valid_s)
+  );
 
-  rapt_fpu_mul #(.TARGET_DOUBLE(1'b1)) dut_d (
-      .clock(clock), .reset(reset), .flush(flush),
-      .valid(valid && is_double), .ready(ready_d),
-      .operand_a(operand_a), .operand_b(operand_b),
+  rapt_fpu_mul #(
+      .TARGET_DOUBLE(1'b1)
+  ) dut_d (
+      .clock(clock),
+      .reset(reset),
+      .flush(flush),
+      .valid(valid && is_double),
+      .ready(ready_d),
+      .operand_a(operand_a),
+      .operand_b(operand_b),
       .rounding_mode(rounding_mode),
-      .result(result_d), .flags(flags_d), .result_valid(valid_d));
+      .result(result_d),
+      .flags(flags_d),
+      .result_valid(valid_d)
+  );
 
   assign ready = is_double ? ready_d : ready_s;
   assign dut_result = is_double ? result_d : result_s;

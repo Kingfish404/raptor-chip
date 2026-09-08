@@ -52,6 +52,7 @@ static void restart()
   cpu.raise_intr = INTR_EMPTY;
   cpu.last_inst_priv = PRV_M;
   cpu.reservation = 0;
+  cpu.reservation_bytes = 0;
   cpu.mtimecmp = ~(uint64_t)0;
   cpu.sr[0x14d] = ~(word_t)0; // stimecmp
   cpu.sr[0x15d] = ~(word_t)0; // stimecmph

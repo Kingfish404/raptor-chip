@@ -305,6 +305,8 @@ class RaptorAlinxAXAU15SoC(SoCCore):
 
         if with_sdcard:
             self.add_sdcard(name="sdcard", mode="read+write")
+            # Keep SD boot explicit at the BIOS prompt: `sdcardboot`.
+            self.add_constant("SDCARD_BOOT_DISABLE")
 
         if with_led_chaser:
             self.leds = LedChaser(

@@ -282,21 +282,69 @@ void init_mem()
 #endif
 }
 
-word_t ref_paddr_io(paddr_t addr)
+static bool ref_paddr_is_io(paddr_t addr)
 {
-  if ((addr >= 0x02000000 && addr < 0x020c0000) ||
+  return (addr >= 0x02000000 && addr < 0x020c0000) ||
       (addr >= 0x0c000000 && addr < 0x0d000000) ||
       (addr >= 0x10000000 && addr < 0x10000100) ||
       (addr >= 0xf0001000 && addr < 0xf0001100) ||  // LiteX UART
       (addr >= 0xf0008000 && addr < 0xf0008100) ||  // LiteX SPI SD
       (addr >= 0xf0010000 && addr < 0xf0020000) ||  // CLINT alias (egos HARDWARE)
-      (0))
-  {
-    cpu.iomm_addr = addr;
-    cpu.skip = 1; // skip the instruction
-    return 1;
-  }
-  return 0;
+      (0);
+}
+
+word_t ref_paddr_io(paddr_t addr)
+{
+  if (!ref_paddr_is_io(addr)) return 0;
+  cpu.iomm_addr = addr;
+  cpu.skip = 1;
+  return 1;
+}
+
+bool paddr_is_mapped(paddr_t addr)
+{
+  if (paddr_is_memory_span(addr, 1)) return true;
+#ifdef CONFIG_DEVICE
+  if (mmio_map_contains(addr)) return true;
+#endif
+#ifdef CONFIG_TARGET_SHARE
+  if (ref_paddr_is_io(addr)) return true;
+#endif
+  return false;
+}
+
+bool paddr_is_readonly(paddr_t addr)
+{
+  // Preserve device-map priority where the reference flash backing range
+  // overlaps a real device (for example virt SDHCI). No difftest skip here.
+#ifdef CONFIG_DEVICE
+  if (mmio_map_contains(addr)) return false;
+#endif
+  return in_rom(addr) || in_mrom(addr) || in_flash(addr);
+}
+
+static bool paddr_is_writable_ram_span(paddr_t addr, int len)
+{
+  if (len <= 0) return false;
+  paddr_t last = addr + len - 1;
+  if (last < addr) return false;
+#ifdef CONFIG_DEVICE
+  if (mmio_map_contains(addr) || mmio_map_contains(last)) return false;
+#endif
+  return (in_pmem(addr) && in_pmem(last))
+      || (in_sram(addr) && in_sram(last))
+      || (in_sdram(addr) && in_sdram(last));
+}
+
+bool paddr_supports_atomic(paddr_t addr, int len)
+{
+  return (len == 4 || len == 8) && !(addr & (len - 1))
+      && paddr_is_writable_ram_span(addr, len);
+}
+
+bool paddr_supports_zero(paddr_t addr)
+{
+  return paddr_is_writable_ram_span(addr & ~(paddr_t)63, 64);
 }
 
 word_t paddr_read(paddr_t addr, int len)

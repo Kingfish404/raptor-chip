@@ -5,6 +5,7 @@
 `include "rapt_ifu_if.svh"
 `include "rapt_idu_if.svh"
 `include "rapt_rnu_if.svh"
+`include "rapt_recovery_if.svh"
 `include "rapt_rou_if.svh"
 `include "rapt_dpu_if.svh"
 `include "rapt_cdb_if.svh"
@@ -23,6 +24,15 @@ interface lsu_l1d_if #(
   logic [XLEN-1:0] raddr;
   logic [4:0] ralu;
   logic rvalid;
+  logic idle; // No L1D owner, PTW, maintenance, or incoming request.
+  // Original architectural alignment, preserved across aligned split beats.
+  logic rmisaligned;
+  // Split read: permission/PMA footprint within the aligned data beat.
+  logic rcheck_valid;
+  logic [2:0] rcheck_offset;
+  logic [3:0] rcheck_size_m1;
+  // Original architecture width for split requests (rcheck_valid).
+  logic [3:0] rorig_size_m1;
   logic atomic_lock;
   logic ordered;
 
@@ -44,28 +54,31 @@ interface lsu_l1d_if #(
   logic rready_b;
 
   logic [XLEN-1:0] waddr;
+  // Translation attribute of this committed store beat, held with its PA.
+  logic [1:0] wpbmt;
   // Unshifted byte-enable mask.  Eight bits are required for arbitrary
   // RV64 misaligned-store spill sizes (for example, 5--7 bytes of SD).
   logic [7:0] walu;
   logic wvalid;
   logic [XLEN-1:0] wdata;
   logic wready;
+  logic werr; // Failed committed write beat, qualified by wready.
 
   modport master(
-      output raddr, ralu, rvalid, atomic_lock, ordered,
-      input rdata, trap, cause, difftest_skip, rready,
+      output raddr, ralu, rvalid, rmisaligned, rcheck_valid, rcheck_offset, rcheck_size_m1, rorig_size_m1, atomic_lock, ordered,
+      input idle, rdata, trap, cause, difftest_skip, rready,
       output raddr_b, ralu_b, rvalid_b,
       input rdata_b, rready_b,
-      output waddr, walu, wvalid, wdata,
-      input wready
+      output waddr, wpbmt, walu, wvalid, wdata,
+      input wready, werr
   );
   modport slave(
-      input raddr, ralu, rvalid, atomic_lock, ordered,
-      output rdata, trap, cause, difftest_skip, rready,
+      input raddr, ralu, rvalid, rmisaligned, rcheck_valid, rcheck_offset, rcheck_size_m1, rorig_size_m1, atomic_lock, ordered,
+      output idle, rdata, trap, cause, difftest_skip, rready,
       input raddr_b, ralu_b, rvalid_b,
       output rdata_b, rready_b,
-      input waddr, walu, wvalid, wdata,
-      output wready
+      input waddr, wpbmt, walu, wvalid, wdata,
+      output wready, werr
   );
 endinterface
 
@@ -75,6 +88,7 @@ interface l1i_bus_if #(
 );
   // load
   logic arvalid;
+  logic [1:0] rpbmt;
   logic [XLEN-1:0] araddr;
   logic arburst;  // request 2-beat INCR burst (SDRAM)
   logic ar_ptw;
@@ -83,6 +97,7 @@ interface l1i_bus_if #(
   logic [XLEN-1:0] rdata;
   logic rvalid;
   logic ptw_rvalid;
+  logic ptw_rerr;
   logic rlast;
   // Bus-error indicator: AXI rresp != OKAY for the routed response beat.
   // Asserted in the same cycle as `rvalid`; treat as fetch access-fault.
@@ -101,14 +116,14 @@ interface l1i_bus_if #(
   logic ptw_werr;
 
   modport master(
-      output arvalid, araddr, arburst, ar_ptw,
-      input rready, rdata, rvalid, ptw_rvalid, rlast, rerr,
+      output arvalid, rpbmt, araddr, arburst, ar_ptw,
+      input rready, rdata, rvalid, ptw_rvalid, ptw_rerr, rlast, rerr,
       output awvalid, awaddr, wvalid, wdata, wstrb, aw_ptw,
       input wready, werr, ptw_wready, ptw_werr
   );
   modport slave(
-      input arvalid, araddr, arburst, ar_ptw,
-      output rready, rdata, rvalid, ptw_rvalid, rlast, rerr,
+      input arvalid, rpbmt, araddr, arburst, ar_ptw,
+      output rready, rdata, rvalid, ptw_rvalid, ptw_rerr, rlast, rerr,
       input awvalid, awaddr, wvalid, wdata, wstrb, aw_ptw,
       output wready, werr, ptw_wready, ptw_werr
   );
@@ -120,14 +135,17 @@ interface l1d_bus_if #(
 );
   // load
   logic arvalid;
+  logic idle; // D-side reads and all writes have completed at mem_link.
   logic [XLEN-1:0] araddr;
   logic [7:0] rstrb;
+  logic [1:0] rpbmt;
   logic ar_ptw;
   logic rready;
 
   logic [XLEN-1:0] rdata;
   logic rvalid;
   logic ptw_rvalid;
+  logic ptw_rerr; // Qualified PTE read error; separate from ordinary data.
   logic rlast;
   logic difftest_skip;
   // Bus-error indicator on the read channel (AXI rresp != OKAY).
@@ -140,6 +158,7 @@ interface l1d_bus_if #(
   logic wvalid;
   logic [XLEN-1:0] wdata;
   logic [7:0] wstrb;
+  logic [1:0] wpbmt;
   logic wready;
   // Bus-error indicator on the write response channel (AXI bresp != OKAY).
   // Asserted in the same cycle as the store handshake (`wready` pulse).
@@ -152,19 +171,19 @@ interface l1d_bus_if #(
   logic ptw_werr;
 
   modport master(
-      output arvalid, araddr, rstrb, ar_ptw,
+      output arvalid, araddr, rstrb, rpbmt, ar_ptw,
       input rready,
-      input rdata, rvalid, ptw_rvalid, rlast, difftest_skip, rerr,
+      input idle, rdata, rvalid, ptw_rvalid, ptw_rerr, rlast, difftest_skip, rerr,
 
-      output awvalid, awaddr, wvalid, wdata, wstrb, aw_ptw,
+      output awvalid, awaddr, wvalid, wdata, wstrb, wpbmt, aw_ptw,
       input wready, werr, ptw_wready, ptw_werr
   );
   modport slave(
-      input arvalid, araddr, rstrb, ar_ptw,
+      input arvalid, araddr, rstrb, rpbmt, ar_ptw,
       output rready,
-      output rdata, rvalid, ptw_rvalid, rlast, difftest_skip, rerr,
+      output idle, rdata, rvalid, ptw_rvalid, ptw_rerr, rlast, difftest_skip, rerr,
 
-      input awvalid, awaddr, wvalid, wdata, wstrb, aw_ptw,
+      input awvalid, awaddr, wvalid, wdata, wstrb, wpbmt, aw_ptw,
       output wready, werr, ptw_wready, ptw_werr
   );
 endinterface
@@ -248,6 +267,7 @@ interface csr_bcast_if #(
   logic timer_int_en;
   logic sw_int_en;
   logic ext_int_en;
+  logic bus_error_int; // Eligible nondelegatable platform machine interrupt 16.
 
   // MPRV/MPP for load/store effective privilege
   logic mprv;
@@ -273,26 +293,28 @@ interface csr_bcast_if #(
   logic [1:0] menvcfg_cbie;
   logic       menvcfg_cbcfe;
   logic       menvcfg_cbze;
+  logic       menvcfg_stce;
+  logic       menvcfg_pbmte;
   logic [1:0] senvcfg_cbie;
   logic       senvcfg_cbcfe;
   logic       senvcfg_cbze;
 
   modport in(
       input priv, satp_ppn, satp_asid,
-      input immu_en, dmmu_en, mtvec, tvec, timer_int_en, sw_int_en, ext_int_en,
+      input immu_en, dmmu_en, mtvec, tvec, timer_int_en, sw_int_en, ext_int_en, bus_error_int,
       input mprv, mpp,
       input tsr, tvm, tw, mcounteren, scounteren,
       input sum, mxr, sbe, frm, fs,
-      input menvcfg_cbie, menvcfg_cbcfe, menvcfg_cbze,
+      input menvcfg_cbie, menvcfg_cbcfe, menvcfg_cbze, menvcfg_stce, menvcfg_pbmte,
       input senvcfg_cbie, senvcfg_cbcfe, senvcfg_cbze
   );
   modport out(
       output priv, satp_ppn, satp_asid,
-      output immu_en, dmmu_en, mtvec, tvec, timer_int_en, sw_int_en, ext_int_en,
+      output immu_en, dmmu_en, mtvec, tvec, timer_int_en, sw_int_en, ext_int_en, bus_error_int,
       output mprv, mpp,
       output tsr, tvm, tw, mcounteren, scounteren,
       output sum, mxr, sbe, frm, fs,
-      output menvcfg_cbie, menvcfg_cbcfe, menvcfg_cbze,
+      output menvcfg_cbie, menvcfg_cbcfe, menvcfg_cbze, menvcfg_stce, menvcfg_pbmte,
       output senvcfg_cbie, senvcfg_cbcfe, senvcfg_cbze
   );
 endinterface
@@ -309,6 +331,7 @@ interface cmu_bcast_if #(
   logic jen;
   logic jren;
   logic btaken;
+  logic atomic_retired;
   logic call;
   logic ret;
   logic rvc;
@@ -327,22 +350,18 @@ interface cmu_bcast_if #(
   logic [$clog2(`RAPT_ROB_SIZE)-1:0] rob_head;
 
   // Per-slot commit info (dual commit)
-  logic [RLEN-1:0] rd_a;
-  logic [RLEN-1:0] rd_b;
-  logic valid_b;
+
 
   modport in(
-      input rpc, cpc, rd_a, ben, jen, jren, btaken, call, ret, rvc,
+      input rpc, cpc, ben, jen, jren, btaken, atomic_retired, call, ret, rvc,
       input fence_time, fence_i, flush_pipe, flush_redirect, sys_resume, time_trap,
       input redirect_pc,
-      input rd_b, valid_b,
       input rob_head
   );
   modport out(
-      output rpc, cpc, rd_a, ben, jen, jren, btaken, call, ret, rvc,
+      output rpc, cpc, ben, jen, jren, btaken, atomic_retired, call, ret, rvc,
       output fence_time, fence_i, flush_pipe, flush_redirect, sys_resume, time_trap,
       output redirect_pc,
-      output rd_b, valid_b,
       output rob_head
   );
 endinterface

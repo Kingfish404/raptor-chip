@@ -18,31 +18,40 @@ interface ifu_bpu_if #(
 
   logic [XLEN-1:0] npc;
   logic taken;
-`ifdef RAPT_DUAL_ISSUE
-  // Slot-B conditional prediction uses a small independent combinational
+  // Accepted conditional (primary or auxiliary), never a raw predictor query.
+  logic history_valid, history_taken, history_pc_bit;
+`ifdef RAPT_FETCH_LOOKAHEAD
+  // Auxiliary conditional prediction uses a small independent combinational
   // direction table. Its target is derived statically by IFU.
-  logic            slot_b_query;
-  logic [XLEN-1:0] slot_b_pc;
-  logic            slot_b_pred_valid;
-  logic            slot_b_taken;
+  logic            aux_query;
+  logic [XLEN-1:0] aux_pc;
+  logic            aux_taken;
 `endif
 
-`ifdef RAPT_DUAL_ISSUE
+`ifdef RAPT_FETCH_LOOKAHEAD
   modport out(
       output pc, nextpc, pc_update,
-      output slot_b_query, slot_b_pc, slot_b_pred_valid,
-      input slot_b_taken,
+      output history_valid, history_taken, history_pc_bit,
+      output aux_query, aux_pc,
+      input aux_taken,
       input npc, taken
   );
   modport in(
       input pc, nextpc, pc_update,
-      input slot_b_query, slot_b_pc, slot_b_pred_valid,
-      output slot_b_taken,
+      input history_valid, history_taken, history_pc_bit,
+      input aux_query, aux_pc,
+      output aux_taken,
       output npc, taken
   );
 `else
-  modport out(output pc, nextpc, pc_update, input npc, taken);
-  modport in(input pc, nextpc, pc_update, output npc, taken);
+  modport out(
+      output pc, nextpc, pc_update, history_valid, history_taken, history_pc_bit,
+      input npc, taken
+  );
+  modport in(
+      input pc, nextpc, pc_update, history_valid, history_taken, history_pc_bit,
+      output npc, taken
+  );
 `endif
 endinterface
 
@@ -52,6 +61,7 @@ endinterface
 // failure that can be resolved with the *static* portion of the instruction:
 //   - JAL with wrong / missing BTB target (BPU not-taken, or wrong target)
 //   - B-type with BPU-taken but wrong BTB target (stale entry)
+//   - Return with a decode-ordered RAS target (speculative; execution validates)
 //
 // Without this channel an IDU early-resteer would starve the BTB of the
 // flush-time training that normally fires on commit-flush, causing the same
@@ -67,17 +77,25 @@ interface idu_bpu_if #(
   logic            train_en;     // 1-cycle pulse aligned with ifu_idu.resteer
   logic [XLEN-1:0] train_pc;     // PC of the offending instruction
   logic [XLEN-1:0] train_target; // Correct target PC
-  logic [1:0]      train_type;   // 00=COND, 01=DIRE (matches BPU enum)
+  logic [1:0]      train_type;   // 00=COND, 01=DIRE, 11=RETU (matches BPU enum)
 
-  // Speculative RSB push channel: pulsed when IDU sees a CALL (jal/jalr with
-  // link rd) in either issue slot, so the BPU's RSB top is updated before
-  // the corresponding RET is predicted. Push address is the call's return
-  // address (pc + 4 or pc + 2 for compressed).
-  logic            push_en;
+  // One accepted decode-order RAS action; both enables mean pop then push.
+  // Queries have no side effects. IDU uses the pre-action top for return repair.
+  logic push_en, pop_en, ras_valid;
   logic [XLEN-1:0] push_addr;
+  logic [XLEN-1:0] ras_addr;
+  logic history_valid, history_taken, history_pc_bit, history_recover;
 
-  modport out(output train_en, train_pc, train_target, train_type, push_en, push_addr);
-  modport in(input train_en, train_pc, train_target, train_type, push_en, push_addr);
+  modport out(
+      output train_en, train_pc, train_target, train_type, push_en, pop_en, push_addr,
+      output history_valid, history_taken, history_pc_bit, history_recover,
+      input ras_valid, ras_addr
+  );
+  modport in(
+      input train_en, train_pc, train_target, train_type, push_en, pop_en, push_addr,
+      input history_valid, history_taken, history_pc_bit, history_recover,
+      output ras_valid, ras_addr
+  );
 endinterface
 
 interface ifu_l1i_if #(
@@ -87,6 +105,8 @@ interface ifu_l1i_if #(
 );
   logic [XLEN-1:0] pc;
   logic invalid;
+  // Response acceptance and frontend cancellation, including same-PC redirects.
+  logic consumed, cancel;
   // An accepted predicted non-sequential next PC. L1I uses this only as a
   // data-SRAM read-ahead hint; it neither changes cache state nor issues a
   // request, so incorrect predictions remain architecturally harmless.
@@ -94,11 +114,11 @@ interface ifu_l1i_if #(
   logic            prefetch_valid;
 
   logic [31:0] inst_n0;
-`ifdef RAPT_DUAL_ISSUE
-  logic [31:0] inst_n1;       // Next 4-byte-aligned word for dual-issue
+`ifdef RAPT_FETCH_LOOKAHEAD
+  logic [31:0] inst_n1;       // Next 4-byte-aligned word of the fetch window
   logic        inst_n1_valid; // inst_n1 is tag-matched and SRAM-ready
   // Third word needed only for an unaligned R32+R32 pair. It contains the
-  // upper halfword of slot B at pc+6.
+  // upper halfword at pc+6.
   logic [31:0] inst_n2;
   logic        inst_n2_valid;
 `endif
@@ -107,78 +127,39 @@ interface ifu_l1i_if #(
   logic [XLEN-1:0] tval;
   logic valid;
 
-`ifdef RAPT_DUAL_ISSUE
+`ifdef RAPT_FETCH_LOOKAHEAD
   modport master(
-      output pc, invalid, prefetch_pc, prefetch_valid,
+      output pc, invalid, consumed, cancel, prefetch_pc, prefetch_valid,
       input inst_n0, inst_n1, inst_n1_valid, inst_n2, inst_n2_valid,
       input trap, cause, tval, valid
   );
   modport slave(
-      input pc, invalid, prefetch_pc, prefetch_valid,
+      input pc, invalid, consumed, cancel, prefetch_pc, prefetch_valid,
       output inst_n0, inst_n1, inst_n1_valid, inst_n2, inst_n2_valid,
       output trap, cause, tval, valid
   );
 `else
   modport master(
-      output pc, invalid, prefetch_pc, prefetch_valid,
+      output pc, invalid, consumed, cancel, prefetch_pc, prefetch_valid,
       input inst_n0, trap, cause, tval, valid
   );
   modport slave(
-      input pc, invalid, prefetch_pc, prefetch_valid,
+      input pc, invalid, consumed, cancel, prefetch_pc, prefetch_valid,
       output inst_n0, trap, cause, tval, valid
   );
 `endif
 endinterface
 
 interface ifu_idu_if #(
-    parameter int XLEN = `RAPT_XLEN
+    parameter int XLEN = `RAPT_XLEN,
+    parameter int Width = rapt_pkg::DecodeWidth
 );
-  logic [31:0] inst_a;
-  logic [XLEN-1:0] pc_a;
-  logic valid_a;
-
-`ifdef RAPT_DUAL_ISSUE
-  // Slot B: second instruction from same fetch group
-  logic [31:0] inst_b;
-  logic [XLEN-1:0] pc_b;
-  logic valid_b;  // IFU determined a second instruction is available
-`endif
-
-  logic trap;
-  logic [XLEN-1:0] cause;
-  logic [XLEN-1:0] tval;
-  logic [XLEN-1:0] pnpc;
-  logic ready;
-
-  // Early resteer: IDU detected BPU misprediction on non-branch instruction
+  rapt_pkg::fetch_slot_t slot[Width];
+  logic valid[Width], ready[Width];
   logic resteer;
   logic [XLEN-1:0] resteer_pc;
-
-`ifdef RAPT_DUAL_ISSUE
-  modport master(
-      output inst_a, pc_a, valid_a,
-      output inst_b, pc_b, valid_b,
-      output pnpc, trap, cause, tval,
-      input ready, resteer, resteer_pc
-  );
-  modport slave(
-      input inst_a, pc_a, valid_a,
-      input inst_b, pc_b, valid_b,
-      input pnpc, trap, cause, tval,
-      output ready, resteer, resteer_pc
-  );
-`else
-  modport master(
-      output inst_a, pc_a, valid_a,
-      output pnpc, trap, cause, tval,
-      input ready, resteer, resteer_pc
-  );
-  modport slave(
-      input inst_a, pc_a, valid_a,
-      input pnpc, trap, cause, tval,
-      output ready, resteer, resteer_pc
-  );
-`endif
+  modport master(output slot, valid, input ready, resteer, resteer_pc);
+  modport slave(input slot, valid, output ready, resteer, resteer_pc);
 endinterface
 
 /* verilator lint_on UNUSEDSIGNAL */

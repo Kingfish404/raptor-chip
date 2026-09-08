@@ -17,17 +17,17 @@ module rapt_fpu_double_to_int_w (
   rapt_fpu_single_to_int_w #(
       .SOURCE_DOUBLE(1'b1)
   ) u_fpu_to_int (
-      .clock,
-      .reset,
-      .flush,
-      .valid,
-      .ready,
-      .operand,
-      .unsigned_result,
-      .int64_target,
-      .rounding_mode,
-      .result,
-      .flags,
-      .result_valid
+      .clock(clock),
+      .reset(reset),
+      .flush(flush),
+      .valid(valid),
+      .ready(ready),
+      .operand(operand),
+      .unsigned_result(unsigned_result),
+      .int64_target(int64_target),
+      .rounding_mode(rounding_mode),
+      .result(result),
+      .flags(flags),
+      .result_valid(result_valid)
   );
 endmodule

@@ -5,9 +5,11 @@ Please see `/linux/Makefile` in this directory for details.
 ## Pre-built release images
 
 Raptor downloads its pre-built Linux images from the
-[`linux-build` rv-v6.18.49 release](https://github.com/Kingfish404/linux-build/releases/tag/rv-v6.18.49)
+[`linux-build` rv-v6.18.50 release](https://github.com/Kingfish404/linux-build/releases/tag/rv-v6.18.50)
 into the ignored `linux/build/` directory. Downloads are checked against the
-SHA-256 digests published by GitHub before extraction.
+SHA-256 digests from the release SHA256SUMS before extraction.
+The current release uses Linux 6.18.50 with `CONFIG_HZ=100` for all five
+assets selected here. Older version directories remain available.
 
 ```sh
 # Standard RV32/RV64 simulator payloads.
@@ -24,9 +26,10 @@ make download-all
 ```
 
 The release tag and asset version are separate variables. The current
-`rv-v6.18.49` release publishes files suffixed with `v6.18.49`. Override `LINUX_BUILD_RELEASE`,
+`rv-v6.18.50` release publishes files suffixed with `v6.18.50`. Override `LINUX_BUILD_RELEASE`,
 `LINUX_BUILD_VERSION`, and the corresponding `*_SHA256` value together when
 selecting another release.
+
 
 ## Linux Dependencies
 

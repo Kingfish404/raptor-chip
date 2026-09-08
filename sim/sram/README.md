@@ -16,8 +16,7 @@ maps inferred memories, so the OpenRAM path replaces it with characterised SRAM 
 - **Realistic timing** (single-cycle synchronous read with `t_CQ` from `.lib`)
 - **Realistic power** (active vs leakage modelled per macro)
 
-Compare [docs-ref/plan/plan.sram.md](../../docs-ref/plan/plan.sram.md) §4 and
-[docs-ref/uarch.sram.md](../../docs-ref/uarch.sram.md) §6.
+See [SRAM validation](test/README.md) for the current integration and check scope.
 
 ## What gets generated
 
@@ -26,13 +25,13 @@ For the default config (see [hdl/configs/default/rapt_config.svh](../../hdl/conf
 | Shape (depth × width) | Use site                        | Instances                                    |
 | --------------------- | ------------------------------- | -------------------------------------------- |
 | `32 × 32`             | `rapt_l1i.sv` data banks        | `L1I_N_WAYS × L1I_LINE_SIZE` = `2 × 16` = 32 |
-| `16 × 32`             | `rapt_l1d.sv` data banks (RV32) | `L1D_N_WAYS × subarrays/way` = `2 × 4` = 8   |
-| `16 × 64`             | `rapt_l1d.sv` data banks (RV64) | `2 × 4` = 8                                  |
+| `16 × 128` | `rapt_l1d_data.sv` data subarrays (RV32/RV64) | `L1D_N_WAYS × subarrays/way` = `2 × 4` = 8 |
 
 All macros are **single-port (1RW)** since the RTL was migrated to
 [rapt_sram_1rw.sv](../../hdl/memory/rapt_sram_1rw.sv): the cache controllers
 time-multiplex reads and writes onto the shared port. Legacy 1R1W configs
-are kept for reference and can be built with `make PORTS=1r1w`.
+are kept for reference; the current Makefile explicitly selects its 1RW
+config list, so overriding `PORTS` alone does not select a legacy build.
 
 The RTL and OpenRAM models share the same port contract: writes occur on the
 rising edge, reads register `rdata` on the rising edge, and `rdata` holds during

@@ -18,22 +18,58 @@ module formal_plru (
   logic [2:0] state4[2];
   logic [6:0] state8[2];
 
-  rapt_plru #(.NUMWAYS(2), .SETLEN(1), .NSETS(2)) dut2 (
-      .clock, .reset, .cache_en, .hit_way(hit_way[1:0]),
-      .valid_way(valid_way[1:0]), .victim_way(victim2), .cache_set,
-      .lru_write_en, .paddr_set(1'b0), .invalidate_cache, .invalidate_flush,
+  rapt_plru #(
+      .NUMWAYS(2),
+      .SETLEN(1),
+      .NSETS(2)
+  ) dut2 (
+      .clock,
+      .reset,
+      .cache_en,
+      .hit_way(hit_way[1:0]),
+      .valid_way(valid_way[1:0]),
+      .victim_way(victim2),
+      .cache_set,
+      .lru_write_en,
+      .paddr_set(1'b0),
+      .invalidate_cache,
+      .invalidate_flush,
       .formal_lru_state(state2)
   );
-  rapt_plru #(.NUMWAYS(4), .SETLEN(1), .NSETS(2)) dut4 (
-      .clock, .reset, .cache_en, .hit_way(hit_way[3:0]),
-      .valid_way(valid_way[3:0]), .victim_way(victim4), .cache_set,
-      .lru_write_en, .paddr_set(1'b0), .invalidate_cache, .invalidate_flush,
+  rapt_plru #(
+      .NUMWAYS(4),
+      .SETLEN(1),
+      .NSETS(2)
+  ) dut4 (
+      .clock,
+      .reset,
+      .cache_en,
+      .hit_way(hit_way[3:0]),
+      .valid_way(valid_way[3:0]),
+      .victim_way(victim4),
+      .cache_set,
+      .lru_write_en,
+      .paddr_set(1'b0),
+      .invalidate_cache,
+      .invalidate_flush,
       .formal_lru_state(state4)
   );
-  rapt_plru #(.NUMWAYS(8), .SETLEN(1), .NSETS(2)) dut8 (
-      .clock, .reset, .cache_en, .hit_way,
-      .valid_way, .victim_way(victim8), .cache_set,
-      .lru_write_en, .paddr_set(1'b0), .invalidate_cache, .invalidate_flush,
+  rapt_plru #(
+      .NUMWAYS(8),
+      .SETLEN(1),
+      .NSETS(2)
+  ) dut8 (
+      .clock,
+      .reset,
+      .cache_en,
+      .hit_way,
+      .valid_way,
+      .victim_way(victim8),
+      .cache_set,
+      .lru_write_en,
+      .paddr_set(1'b0),
+      .invalidate_cache,
+      .invalidate_flush,
       .formal_lru_state(state8)
   );
 
@@ -50,7 +86,7 @@ module formal_plru (
     exp2 = '0;
     if (!valid_way[0]) exp2[0] = 1'b1;
     else if (!valid_way[1]) exp2[1] = 1'b1;
-    else exp2[ref2[cache_set] ? 0 : 1] = 1'b1;
+    else exp2[ref2[cache_set]?0 : 1] = 1'b1;
 
     exp4 = '0;
     if (!valid_way[0]) exp4[0] = 1'b1;
@@ -89,14 +125,20 @@ module formal_plru (
   always_ff @(posedge clock) begin
     f_past_valid <= 1'b1;
     if (reset) begin
-      ref2[0] <= '0; ref2[1] <= '0;
-      ref4[0] <= '0; ref4[1] <= '0;
-      ref8[0] <= '0; ref8[1] <= '0;
+      ref2[0] <= '0;
+      ref2[1] <= '0;
+      ref4[0] <= '0;
+      ref4[1] <= '0;
+      ref8[0] <= '0;
+      ref8[1] <= '0;
     end else if (cache_en) begin
       if (invalidate_cache && !invalidate_flush) begin
-        ref2[0] <= '0; ref2[1] <= '0;
-        ref4[0] <= '0; ref4[1] <= '0;
-        ref8[0] <= '0; ref8[1] <= '0;
+        ref2[0] <= '0;
+        ref2[1] <= '0;
+        ref4[0] <= '0;
+        ref4[1] <= '0;
+        ref8[0] <= '0;
+        ref8[1] <= '0;
       end else if (lru_write_en) begin
         ref2[cache_set] <= hit_way[1];
         ref4[cache_set][0] <= |hit_way[3:2];
@@ -114,29 +156,28 @@ module formal_plru (
   end
 
   always_comb begin
-    assume(f_past_valid || reset);
-    if (lru_write_en)
-      assume((hit_way != '0) && ((hit_way & (hit_way - 8'd1)) == '0));
+    assume (f_past_valid || reset);
+    if (lru_write_en) assume ((hit_way != '0) && ((hit_way & (hit_way - 8'd1)) == '0));
     if (f_past_valid) begin
-      assert(state2[0] == ref2[0]);
-      assert(state2[1] == ref2[1]);
-      assert(state4[0] == ref4[0]);
-      assert(state4[1] == ref4[1]);
-      assert(state8[0] == ref8[0]);
-      assert(state8[1] == ref8[1]);
-      assert(victim2 == exp2);
-      assert(victim4 == exp4);
-      assert(victim8 == exp8);
-      assert((victim2 != '0) && ((victim2 & (victim2 - 2'd1)) == '0));
-      assert((victim4 != '0) && ((victim4 & (victim4 - 4'd1)) == '0));
-      assert((victim8 != '0) && ((victim8 & (victim8 - 8'd1)) == '0));
+      assert (state2[0] == ref2[0]);
+      assert (state2[1] == ref2[1]);
+      assert (state4[0] == ref4[0]);
+      assert (state4[1] == ref4[1]);
+      assert (state8[0] == ref8[0]);
+      assert (state8[1] == ref8[1]);
+      assert (victim2 == exp2);
+      assert (victim4 == exp4);
+      assert (victim8 == exp8);
+      assert ((victim2 != '0) && ((victim2 & (victim2 - 2'd1)) == '0));
+      assert ((victim4 != '0) && ((victim4 & (victim4 - 4'd1)) == '0));
+      assert ((victim8 != '0) && ((victim8 & (victim8 - 8'd1)) == '0));
     end
   end
 
   always_ff @(posedge clock) begin
     if (f_past_valid && !reset) begin
-      cover(lru_write_en && cache_set && (&valid_way));
-      cover(invalidate_cache && !invalidate_flush);
+      cover (lru_write_en && cache_set && (&valid_way));
+      cover (invalidate_cache && !invalidate_flush);
     end
   end
 endmodule

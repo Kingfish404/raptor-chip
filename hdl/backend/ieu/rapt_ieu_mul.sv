@@ -22,7 +22,8 @@ module rapt_ieu_mul #(
 `ifdef RAPT_M_FAST
   // Hybrid fast MUL + iterative DIV/REM:
   //   MUL/MULH/MULHSU/MULHU: fully pipelined (2-cycle latency, 1/cycle throughput)
-  //   DIV/DIVU/REM/REMU: iterative restoring divider, XLEN+1 cycles (serial)
+  //   DIV/DIVU/REM/REMU: iterative restoring divider, operand bits + 1 cycles
+  //   (32 bits for RV64 W forms, otherwise XLEN; serial).
   //
   // MUL and DIV datapaths are split: MUL has its own 2-stage pipe (m1_*, m2_*)
   // with tag pass-through; DIV runs serial in (div_*) state and blocks new
@@ -67,6 +68,11 @@ module rapt_ieu_mul #(
   logic [XLEN-1:0] abs_a, abs_b;
   assign abs_a = (signed_div && div_input_a[XLEN-1]) ? -div_input_a : div_input_a;
   assign abs_b = (signed_div && div_input_b[XLEN-1]) ? -div_input_b : div_input_b;
+  // W operands have only 32 magnitude bits. Align them with the existing
+  // serial input and skip the known-zero upper iterations; quotient bit
+  // numbering and the restoring datapath remain unchanged.
+  logic [XLEN-1:0] div_aligned_a;
+  assign div_aligned_a = (XLEN > 32 && in_word) ? abs_a << (XLEN - 32) : abs_a;
 
   logic in_is_div;
   assign in_is_div = (in_op == `RAPT_ALU_DIV___ || in_op ==
@@ -225,10 +231,10 @@ module rapt_ieu_mul #(
         div_tag              <= in_tag;
 
         div_quotient         <= 0;
-        div_remainder        <= {{XLEN{1'b0}}, abs_a[XLEN-1]};
+        div_remainder        <= {{XLEN{1'b0}}, div_aligned_a[XLEN-1]};
         div_divisor          <= abs_b;
-        div_dividend_shifted <= abs_a << 1;
-        div_counter          <= 0;
+        div_dividend_shifted <= div_aligned_a << 1;
+        div_counter          <= (XLEN > 32 && in_word) ? $clog2(XLEN+1)'(XLEN - 32) : '0;
         div_sign             <= {div_input_a[XLEN-1], div_input_b[XLEN-1]};
         div_active           <= 1'b1;
         div_out_valid        <= 1'b0;
@@ -243,8 +249,7 @@ module rapt_ieu_mul #(
               if (div_s2 == 0) div_out_r <= ~'h0;
               else if (!div_word && div_s1 == ('b1 << (XLEN - 1)) && div_s2 == ~'h0)
                 div_out_r <= 'b1 << (XLEN - 1);
-              else if (div_word && div_s1[31:0] == 32'h8000_0000
-                       && div_s2[31:0] == 32'hffff_ffff)
+              else if (div_word && div_s1[31:0] == 32'h8000_0000 && div_s2[31:0] == 32'hffff_ffff)
                 div_out_r <= {{XLEN - 32{1'b1}}, 32'h8000_0000};
               else if (div_word) div_out_r <= {{XLEN - 32{div_q_signed[31]}}, div_q_signed[31:0]};
               else div_out_r <= div_q_signed;
@@ -262,8 +267,7 @@ module rapt_ieu_mul #(
             `RAPT_ALU_REMU__: begin
               // REMUW by zero returns the low 32-bit dividend and, like
               // every W-form result, sign-extends it to XLEN.
-              if (div_s2 == 0 && div_word)
-                div_out_r <= {{XLEN - 32{div_s1[31]}}, div_s1[31:0]};
+              if (div_s2 == 0 && div_word) div_out_r <= {{XLEN - 32{div_s1[31]}}, div_s1[31:0]};
               else if (div_s2 == 0) div_out_r <= div_s1;
               else if (div_word) div_out_r <= {{XLEN - 32{div_remainder[32]}}, div_remainder[32:1]};
               else div_out_r <= div_remainder[XLEN:1];

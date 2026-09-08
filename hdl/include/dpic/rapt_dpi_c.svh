@@ -8,12 +8,9 @@
 `define RAPT_DPI_C_NPC_DIFFTEST_MEM_DIFF(waddr, wdata, wstrb) \
     npc_difftest_mem_diff(waddr, wdata, wstrb);
 
-`define RAPT_DPI_C_PMEM_READ(pm_raddr, pm_rdata) pmem_read(pm_raddr, pm_rdata)
+`define RAPT_DPI_C_PMEM_READ(pm_raddr, pm_rsize, pm_rdata) pmem_read(pm_raddr, pm_rsize, pm_rdata)
 `define RAPT_DPI_C_PMEM_WRITE(pm_waddr, pm_wdata, pm_wmask) pmem_write(pm_waddr, pm_wdata, pm_wmask)
 
-`define RAPT_DPI_C_SDRAM_READ(sd_raddr, sd_rdata) sdram_read(sd_raddr, sd_rdata)
-`define RAPT_DPI_C_SDRAM_WRITE(sd_waddr, sd_wdata, sd_wmask) \
-    sdram_write(sd_waddr, sd_wdata, sd_wmask)
 
 `define RAPT_ASSERT(cond, msg) \
     if (!(cond)) begin \

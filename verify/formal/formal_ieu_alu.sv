@@ -19,13 +19,17 @@ module formal_ieu_alu #(
   logic found;
   logic is_uw_op;
 
-  rapt_ieu_alu #(.XLEN(XLEN)) dut (.*,.out_r(dut_result));
+  rapt_ieu_alu #(
+      .XLEN(XLEN)
+  ) dut (
+      .*,
+      .out_r(dut_result)
+  );
 
   always_comb begin
     cl_product = '0;
 `ifdef FORMAL_ALU_CLMUL
-    for (int i = 0; i < XLEN; i++)
-      if (s2[i]) cl_product = cl_product ^ (2*XLEN)'(s1) << i;
+    for (int i = 0; i < XLEN; i++) if (s2[i]) cl_product = cl_product ^ (2 * XLEN)'(s1) << i;
 `endif
 
     ref_base = '0;
@@ -124,28 +128,27 @@ module formal_ieu_alu #(
     is_uw_op = (op == `RAPT_ALU_ADD_UW) || (op == `RAPT_ALU_SLLI_UW)
         || (op == `RAPT_ALU_SH1ADD) || (op == `RAPT_ALU_SH2ADD)
         || (op == `RAPT_ALU_SH3ADD);
-    if (word && XLEN > 32 && !is_uw_op)
-      ref_result = {{XLEN-32{ref_base[31]}}, ref_base[31:0]};
+    if (word && XLEN > 32 && !is_uw_op) ref_result = {{XLEN - 32{ref_base[31]}}, ref_base[31:0]};
     else ref_result = ref_base;
   end
 
   always_comb begin
 `ifdef FORMAL_ALU_CLMUL
 `ifdef FORMAL_ALU_CLMULH
-    assume(op == `RAPT_ALU_CLMULH);
+    assume (op == `RAPT_ALU_CLMULH);
     // CLMULH's upper-half XOR cone is expensive for SMT.  Exhaustively prove
     // every polynomial basis term (and zero); the RTL accumulation is a
     // linear XOR reduction of exactly these terms.
-    assume((s2 & (s2 - XLEN'(1))) == '0);
+    assume ((s2 & (s2 - XLEN'(1))) == '0);
 `elsif FORMAL_ALU_CLMULR
-    assume(op == `RAPT_ALU_CLMULR);
+    assume (op == `RAPT_ALU_CLMULR);
 `else
-    assume(op == `RAPT_ALU_CLMUL);
+    assume (op == `RAPT_ALU_CLMUL);
 `endif
 `else
-    assume(!(op inside {`RAPT_ALU_CLMUL, `RAPT_ALU_CLMULH, `RAPT_ALU_CLMULR}));
+    assume (!(op inside {`RAPT_ALU_CLMUL, `RAPT_ALU_CLMULH, `RAPT_ALU_CLMULR}));
 `endif
   end
 
-  always_comb result_equivalence: assert(dut_result == ref_result);
+  always_comb result_equivalence : assert (dut_result == ref_result);
 endmodule

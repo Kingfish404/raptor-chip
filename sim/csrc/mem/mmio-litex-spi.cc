@@ -298,6 +298,7 @@ void mmio_litex_spi_handle(paddr_t addr, word_t wdata, char wmask, bool is_write
     word_t value = 0;
     uint32_t word_off = (uint32_t)offset & (sizeof(word_t) - 1u);
     for (uint32_t i = 0; i + word_off < sizeof(word_t); i++) {
+        if (((uint8_t)wmask & (1u << i)) == 0) continue;
         uint32_t byte_off = (uint32_t)offset + i;
         uint32_t reg_off = byte_off & ~0x3u;
         uint32_t reg_byte = byte_off & 0x3u;

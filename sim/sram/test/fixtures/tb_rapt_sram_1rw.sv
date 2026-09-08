@@ -41,12 +41,14 @@ module tb_rapt_sram_1rw;
     wen = 1'b0;
     addr = 3'd2;
     cycle();
-    assert (rdata == 32'h1122_3344) else $fatal(1, "synchronous read failed");
+    assert (rdata == 32'h1122_3344)
+    else $fatal(1, "synchronous read failed");
 
     en = 1'b0;
     addr = 3'd0;
     cycle();
-    assert (rdata == 32'h1122_3344) else $fatal(1, "disabled read did not hold rdata");
+    assert (rdata == 32'h1122_3344)
+    else $fatal(1, "disabled read did not hold rdata");
 
     en = 1'b1;
     wen = 1'b1;
@@ -54,11 +56,13 @@ module tb_rapt_sram_1rw;
     wdata = 32'haabb_ccdd;
     bwe = 4'b0101;
     cycle();
-    assert (rdata == 32'h1122_3344) else $fatal(1, "write cycle did not hold rdata");
+    assert (rdata == 32'h1122_3344)
+    else $fatal(1, "write cycle did not hold rdata");
 
     wen = 1'b0;
     cycle();
-    assert (rdata == 32'h11bb_33dd) else $fatal(1, "byte write enable failed");
+    assert (rdata == 32'h11bb_33dd)
+    else $fatal(1, "byte write enable failed");
 
     $display("PASS: rapt_sram_1rw synchronous-read contract");
     $finish;

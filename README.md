@@ -23,7 +23,7 @@ Modes:      Machine, Supervisor, User
 MMU:        riscv,sv32 (RV32) / riscv,sv39 (RV64) / riscv,none (Bare)
 PMP:        16 entries, TOR / NA4 / NAPOT, L-bit lockable
 Interrupts: CLINT (mtime, mtimecmp, msip) + PLIC (31 sources, M/S contexts)
-Profiles:   RVI20U32 / RVA20S64 / RVA22U64 (default SoC main-memory PMAs; RVA22S64 not yet claimed)
+Profiles:   RVI20U32; RVA22S64 supported (default config, RV64)
 
 Bus Interface:  AXI4, XLEN-bit data/addr, 4-bit ID; burst-capable reads (up to 8 outstanding), one outstanding single-beat write with independent AW/W handshakes
 Default uarch: dual issue / dual commit, ROB=64, ALQ=8 (2 issue ports), BRQ=4, MDQ=4, FPQ=4, IOQ=8, SQ=16, integer PRF=128, FPR=32 x 64-bit, L1I=4 KiB, L1D=2 KiB, 64 B cache lines, optional L2 passthrough/cache stage
@@ -36,9 +36,6 @@ FMA, divide/square-root, conversion, comparison/classification, rounding modes,
 accrued exception flags, and binary16 load/store, transfer, and conversion. The compressed subset includes the C-extension
 floating-point memory forms required with F/D (C.FLW/C.FSW on RV32 and
 C.FLD/C.FSD plus their stack-pointer forms on RV32/RV64).
-
-See [RISC-V profile conformance](./docs/riscv-profiles.md) for the requirement
-matrix, PMA scope, and regression evidence.
 
 See [documentation](./docs/README.md) for more details.
 
@@ -53,22 +50,20 @@ flowchart TD
     RSB["RSB (4 entries)"]
     TAGE["TAGE (default DIRP)"]
   end
-  subgraph FE["Frontend (dual-fetch) · IF0-IF1-ID-RN"]
+  subgraph FE["Frontend (default decode/rename widths: 2/2)"]
     BPU["BPU (TAGE/BTB/RSB)"]
-    IFU["IFU (dual fetch, 2x16B)"]
-    IDU["IDU (dual decode)"]
-    RNU["RNU (rename, PHY 128)"]
-    FL["Freelist (PHY 128)"]
-    MAP["Maptable (ARCH 32/64)"]
+    IFU["IFU (instruction prefix + held suffix)"]
+    IDU["IDU (DecodeWidth slots)"]
+    RNU["RNU (RenameWidth slots, integrated MAP/RAT/free bitmap + checkpoints)"]
   end
-  subgraph BE["Backend (dual-issue / dual-commit) · DI-IS/EX-WB-CM"]
+  subgraph BE["Backend (default dispatch/commit widths: 2/2)"]
     ROU["ROU (UOQ + ROB 64)"]
     DPU{{"DPU dispatch router"}}
     IEU["IEU: ALQ 8 + BRQ 4 + MDQ 4"]
     FEU["FEU: FPQ 4 + scalar F/D"]
     LSU["LSU: IOQ 8 + SQ 16"]
     CDB(("CDB ×5"))
-    PRF["PRF (4R/4W)"]
+    PRF["PRF (2 × RenameWidth reads, CompletionPorts writes; default 4R/5W)"]
     FPR["FPR (32 × 64-bit)"]
     CMU["CMU (commit)"]
     CSR
@@ -77,12 +72,12 @@ flowchart TD
     direction TD
     subgraph IMEM["I-side · IF0 (0-bubble seq fetch)"]
       L1I["L1I 4 KiB 2-way (banked SRAM)"]
-      ITLB["ITLB (4e, FA)"]
+      ITLB["ITLB (default 16 entries, FA)"]
       IPTW["IPTW (Sv32 2-lvl / Sv39 3-lvl)"]
     end
     subgraph DMEM["D-side · IS/EX-WB (2-cyc hit, 3-cyc load-use)"]
       L1D["L1D 2 KiB 2-way (banked SRAM, VIPT, write-through)"]
-      DTLB["DTLB/DSTLB"]
+      DTLB["DTLB (default 16 entries, replicated load/store views)"]
       DPTW["DPTW (Sv32/Sv39, Svade)"]
     end
     PMPC["PMP ×16 (TOR/NA4/NAPOT): fetch + ld/st + PTW checks"]
@@ -95,9 +90,9 @@ flowchart TD
     EXT["off-chip AXI (memory / LiteX SoC)"]
   end
   BPU --- IFU
-  IFU --> IDU --> RNU --> FL & MAP
+  IFU --> IDU --> RNU
   IDU -."Early Resteer".-> IFU
-  IDU --> RNU --> FL & MAP --> ROU --> DPU
+  RNU --> ROU --> DPU
   DPU --> IEU & FEU & LSU
   IEU & FEU & LSU --> CDB
   CDB -->|"writeback + wakeup"| ROU & PRF
@@ -198,6 +193,10 @@ make microbench-rv32 ARGS="-b -n"
 # Run with difftest (vs NEMU reference)
 make coremark-rv32-difftest ARGS="-b -n"
 make microbench-rv32-difftest ARGS="-b -n"
+# Run sim with reproducible random AXI memory delays (also supports -rv64)
+make coremark-random-rv32 SIM_RANDOM_DELAY=31 SIM_RANDOM_SEED=1
+make microbench-random-rv32 SIM_RANDOM_DELAY=31 SIM_RANDOM_SEED=42
+make cpu-tests-random-rv64 SIM_RANDOM_DELAY=31 SIM_RANDOM_SEED=1
 # Run on ysyxSoC
 make coremark-ysyxsoc ARGS="-b -n"
 make microbench-ysyxsoc ARGS="-b -n"

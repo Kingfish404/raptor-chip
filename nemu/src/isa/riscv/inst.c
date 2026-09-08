@@ -27,9 +27,34 @@
 
 #define R(i) gpr(i)
 #define CSR(i) sr(i)
+static inline bool sstc_enabled(void)
+{
+#ifdef CONFIG_RV64
+  return (CSR(CSR_MENVCFG) >> 63) != 0;
+#else
+  return (CSR(CSR_MENVCFGH) >> 31) != 0;
+#endif
+}
+word_t riscv_mip_value(void)
+{
+  word_t value = CSR(CSR_MIP) | (cpu.seip ? (word_t)0x200 : 0);
+#ifdef CONFIG_RAPTOR_MEMORY_MAP
+  value = (value & ~((word_t)1 << 16)) | ((CSR(CSR_MBERR_STATUS) & 1) << 16);
+#endif
+  if (sstc_enabled())
+  {
+    // Standalone CLINT computes this level. A differential reference gets
+    // the DUT timer input at each step, rather than using its unrelated clock.
+    value = (value & ~(word_t)0x20) | (cpu.stip ? 0x20 : 0);
+  }
+  return value;
+}
 static inline word_t csr_read_value(uint16_t csr)
 {
   csr &= 0xfff;
+  if (csr == CSR_MIP) return riscv_mip_value();
+  if (csr == CSR_SIP) return riscv_mip_value() & CSR(CSR_MIDELEG) & (word_t)0x222;
+  if (csr == CSR_SIE) return CSR(CSR_MIE) & CSR(CSR_MIDELEG) & (word_t)0x222;
   if (is_hpm_zero_csr(csr))
     return 0;
   if (csr == CSR_FFLAGS)
@@ -54,6 +79,12 @@ static inline word_t csr_read_value(uint16_t csr)
   return CSR(csr);
 }
 #define CSR_READ(i) csr_read_value(i)
+static inline word_t csr_rmw_value(uint16_t csr)
+{
+  if (csr == CSR_MIP)
+    return (riscv_mip_value() & ~(word_t)0x200) | (CSR(CSR_MIP) & (word_t)0x200);
+  return csr_read_value(csr);
+}
 /* CSR write with PMP hook: routes writes to pmpcfg/pmpaddr through
  * pmp_csr_write() which enforces WARL masking and L-bit lockdown.  All
  * other CSRs fall through to the raw cpu.sr[] store. */
@@ -78,6 +109,9 @@ static inline bool csrw_satp_accept(word_t v)
 static inline word_t csrw_warl(uint16_t c, word_t v)
 {
   c &= 0xfff;
+#ifdef CONFIG_RV_RVA22S64
+  if (c == CSR_MCOUNTINHIBIT) return 0;
+#endif
   if (c == CSR_MTVEC || c == CSR_STVEC)
   {
     return (v & ~(word_t)0x3) | ((v & 0x2) ? 0 : (v & 0x3));
@@ -89,9 +123,10 @@ static inline word_t csrw_warl(uint16_t c, word_t v)
   if (c == CSR_SATP)
   {
 #ifdef CONFIG_RV64
-    /* Raptor implements ASID[8:0].  Keep MODE and the low nine ASID bits,
-     * while making ASID[15:9] WARL-zero exactly as rapt_csr.sv does. */
-    return v & ~((word_t)0x7f << 53);
+    /* ASID width is a platform choice: generic RV64 uses 16 bits, while
+     * riscv64_ref_defconfig selects Raptor's nine-bit ASID contract. */
+    const word_t asid_mask = (((word_t)1 << CONFIG_RV_ASID_BITS) - 1) << 44;
+    return v & (~((word_t)0xffff << 44) | asid_mask);
 #else
     return v;
 #endif
@@ -100,6 +135,14 @@ static inline word_t csrw_warl(uint16_t c, word_t v)
   {
     return v & (word_t)0x7;
   }
+#ifdef CONFIG_RAPTOR_MEMORY_MAP
+  if (c == CSR_MIE) return v & (word_t)0x10aaa;
+  if (c == CSR_MBERR_STATUS) return CSR(CSR_MBERR_STATUS) & ~(v & (word_t)3);
+#else
+  if (c == CSR_MIE) return v & (word_t)0xaaa;
+#endif
+  if (c == CSR_MENVCFGH)
+    return v & (word_t)0x80000000;
   if (c == CSR_MSTATUSH)
   {
     /* Raptor is little-endian only, so MBE/SBE are WARL-zero. */
@@ -114,7 +157,7 @@ static inline word_t csrw_warl(uint16_t c, word_t v)
   if (c == CSR_MENVCFG)
   {
 #ifdef CONFIG_RV64
-    word_t result = v & ((word_t)0x8000000000000000ull | (word_t)0xf0);
+    word_t result = v & ((word_t)0xc000000000000000ull | (word_t)0xf0);
 #else
     word_t result = v & (word_t)0xf0;
 #endif
@@ -152,7 +195,10 @@ static inline word_t csrw_warl(uint16_t c, word_t v)
     else if (!pmp_csr_write(_c, _v))                                                    \
     {                                                                                   \
       if (_c == CSR_MIP)                                                                \
-        sr(_c) = (sr(_c) & ~(word_t)0x222) | (_v & (word_t)0x222);                      \
+      {                                                                                \
+        word_t mask = (word_t)0x222 & ~(sstc_enabled() ? (word_t)0x20 : 0);                \
+        sr(_c) = (sr(_c) & ~mask) | (_v & mask);                                          \
+      }                      \
       else                                                                              \
         sr(_c) = _v;                                                                    \
     }                                                                                   \
@@ -265,6 +311,12 @@ bool csr_valid(Decode *s, uint16_t csr, bool is_write)
       difftest_skip_ref();
       return false;
     }
+  }
+  if ((csr == 0x14d || csr == 0x15d) && cpu.priv != PRV_M &&
+      (!sstc_enabled() || !(CSR(CSR_MCOUNTEREN) & 2)))
+  {
+    s->dnpc = isa_raise_intr(MCA_ILLEGAL_INS, s->pc);
+    return false;
   }
   unsigned counter_bit = counteren_bit(csr);
   if (counter_bit != 0 && cpu.priv != PRV_M)
@@ -567,13 +619,17 @@ static int decode_exec(Decode *s)
   INSTPAT("??????? ????? ????? 100 ????? 00100 11", xori, I, R(rd) = src1 ^ imm);
   INSTPAT("??????? ????? ????? 110 ????? 00100 11", ori, I, R(rd) = src1 | imm);
   INSTPAT("??????? ????? ????? 111 ????? 00100 11", andi, I, R(rd) = src1 & imm);
+#ifndef CONFIG_RV64
   INSTPAT("0000000 ????? ????? 001 ????? 00100 11", slli, I, R(rd) = src1 << (imm & 0x1f));
   INSTPAT("0000000 ????? ????? 101 ????? 00100 11", srli, I, R(rd) = ((word_t)src1) >> (imm & 0x1f));
   INSTPAT("0100000 ????? ????? 101 ????? 00100 11", srai, I, R(rd) = ((sword_t)src1) >> (imm & 0x1f));
-  // RV64I shift-imm (overrides RV32 versions when CONFIG_RV64)
+#else
+  // RV64I shift-immediate permits shamt[5]; RV32 must reject that bit.
   INSTPAT("000000? ????? ????? 001 ????? 00100 11", slli, I, R(rd) = src1 << (imm & 0x3f));
   INSTPAT("000000? ????? ????? 101 ????? 00100 11", srli, I, R(rd) = (word_t)src1 >> (imm & 0x3f));
   INSTPAT("010000? ????? ????? 101 ????? 00100 11", srai, I, R(rd) = (sword_t)src1 >> (imm & 0x3f));
+
+#endif
 
   // Zbb Extension (OP-IMM encoded)
   INSTPAT("0110000 00000 ????? 001 ????? 00100 11", clz, I, {
@@ -794,6 +850,9 @@ static int decode_exec(Decode *s)
   });
   INSTPAT("0000000 00100 ????? 010 00000 00011 11", cbo.zero, I, {
     if (cbo_prepare(s, CBO_ZERO)) {
+      // Check the original operand before expanding the block so a PMA
+      // denial reports that VA and produces no partial zeroing side effect.
+      vaddr_check_zero(src1);
       word_t block = src1 & ~(word_t)0x3f;
       for (int off = 0; off < 64; off += sizeof(word_t))
         vaddr_write(block + off, sizeof(word_t), 0);
@@ -806,7 +865,7 @@ static int decode_exec(Decode *s)
           s->dnpc = isa_raise_intr(
               ((cpu.priv == PRV_U) ? MCA_ENV_CAL_UMO : ((cpu.priv == PRV_S) ? MCA_ENV_CAL_SMO : MCA_ENV_CAL_MMO)),
               s->pc));
-#if defined(CONFIG_DEBUG)
+#ifdef CONFIG_RV_EBREAK_HOST_EXIT
   INSTPAT("0000000 00001 00000 000 00000 11100 11", ebreak, N, {
     extern int sig_is_enabled(void);
     if (sig_is_enabled())
@@ -833,24 +892,41 @@ static int decode_exec(Decode *s)
       soft_tlb_flush();
     }
   });
+  INSTPAT("0001011 ????? ????? 000 00000 11100 11", sinval.vma, N, {
+    csr_t ms = {.val = CSR(CSR_MSTATUS)};
+    if (cpu.priv == PRV_U || (cpu.priv == PRV_S && ms.mstatus.tvm))
+      s->dnpc = isa_raise_intr(MCA_ILLEGAL_INS, s->pc);
+    else
+      soft_tlb_flush();
+  });
+  INSTPAT("0001100 0000? 00000 000 00000 11100 11", sfence.inval, N, {
+    if (cpu.priv == PRV_U)
+      s->dnpc = isa_raise_intr(MCA_ILLEGAL_INS, s->pc);
+  });
   // RV32/RV64 Zicsr Extension
   INSTPAT("??????? ????? ????? 001 ????? 11100 11", csrrw, I, { if (csr_valid(s, imm, true)) {R(rd) = CSR_READ(imm); CSRW(imm, src1); } });
-  INSTPAT("??????? ????? ????? 010 ????? 11100 11", csrrs, I, { if (csr_valid(s, imm, rs1 != 0)) {R(rd) = CSR_READ(imm); if (rs1 != 0) { CSRW(imm, CSR_READ(imm) | src1);}; } });
-  INSTPAT("??????? ????? ????? 011 ????? 11100 11", csrrc, I, { if (csr_valid(s, imm, rs1 != 0)) {R(rd) = CSR_READ(imm); if (rs1 != 0) { CSRW(imm, CSR_READ(imm) & ~src1);}; } });
+  INSTPAT("??????? ????? ????? 010 ????? 11100 11", csrrs, I, { if (csr_valid(s, imm, rs1 != 0)) {R(rd) = CSR_READ(imm); if (rs1 != 0) { CSRW(imm, csr_rmw_value(imm) | src1);}; } });
+  INSTPAT("??????? ????? ????? 011 ????? 11100 11", csrrc, I, { if (csr_valid(s, imm, rs1 != 0)) {R(rd) = CSR_READ(imm); if (rs1 != 0) { CSRW(imm, csr_rmw_value(imm) & ~src1);}; } });
   INSTPAT("??????? ????? ????? 101 ????? 11100 11", csrrwi, I_I, { if (csr_valid(s, imm, true)) { R(rd) = CSR_READ(imm); CSRW(imm, src1);} });
-  INSTPAT("??????? ????? ????? 110 ????? 11100 11", csrrsi, I_I, { if (csr_valid(s, imm, rs1 != 0)) {R(rd) = CSR_READ(imm); if (rs1 != 0) { CSRW(imm, CSR_READ(imm) | src1); };} });
-  INSTPAT("??????? ????? ????? 111 ????? 11100 11", csrrci, I_I, { if (csr_valid(s, imm, rs1 != 0)) {R(rd) = CSR_READ(imm); if (rs1 != 0) { CSRW(imm, CSR_READ(imm) & ~src1); };} });
+  INSTPAT("??????? ????? ????? 110 ????? 11100 11", csrrsi, I_I, { if (csr_valid(s, imm, rs1 != 0)) {R(rd) = CSR_READ(imm); if (rs1 != 0) { CSRW(imm, csr_rmw_value(imm) | src1); };} });
+  INSTPAT("??????? ????? ????? 111 ????? 11100 11", csrrci, I_I, { if (csr_valid(s, imm, rs1 != 0)) {R(rd) = CSR_READ(imm); if (rs1 != 0) { CSRW(imm, csr_rmw_value(imm) & ~src1); };} });
   // Trap-Return Instructions
-  INSTPAT("0011000 00010 00000 000 00000 11100 11", mret, N, s->dnpc = CSR(CSR_MEPC);
-          csr_t reg = {.val = CSR(CSR_MSTATUS)};
-          cpu.last_inst_priv = cpu.priv;
-          cpu.priv = reg.mstatus.mpp;
-          if (cpu.priv != PRV_M) reg.mstatus.mprv = 0;
-          reg.mstatus.mie = reg.mstatus.mpie;
-          reg.mstatus.mpie = 1;
-          reg.mstatus.mpp = PRV_U;
-          CSR(CSR_MSTATUS) = reg.val;
-          soft_tlb_flush(););
+  INSTPAT("0011000 00010 00000 000 00000 11100 11", mret, N, {
+    if (cpu.priv != PRV_M) {
+      s->dnpc = isa_raise_intr(MCA_ILLEGAL_INS, s->pc);
+    } else {
+      s->dnpc = CSR(CSR_MEPC);
+      csr_t reg = {.val = CSR(CSR_MSTATUS)};
+      cpu.last_inst_priv = cpu.priv;
+      cpu.priv = reg.mstatus.mpp;
+      if (cpu.priv != PRV_M) reg.mstatus.mprv = 0;
+      reg.mstatus.mie = reg.mstatus.mpie;
+      reg.mstatus.mpie = 1;
+      reg.mstatus.mpp = PRV_U;
+      CSR(CSR_MSTATUS) = reg.val;
+      soft_tlb_flush();
+    }
+  });
   INSTPAT("0001000 00010 00000 000 00000 11100 11", sret, N, {
     csr_t reg = {.val = CSR(CSR_MSTATUS)};
     if (cpu.priv == PRV_U || (cpu.priv == PRV_S && reg.mstatus.tsr)) {
@@ -879,7 +955,7 @@ static int decode_exec(Decode *s)
     } else {
 #if !defined(CONFIG_TARGET_SHARE)
       // WFI acceleration: if no interrupt pending, advance time to mtimecmp
-      word_t pending = cpu.sr[CSR_MIP] & cpu.sr[CSR_MIE];
+      word_t pending = riscv_mip_value() & cpu.sr[CSR_MIE];
       if (pending == 0)
         clint_wfi_advance();
 #endif
@@ -895,66 +971,50 @@ static int decode_exec(Decode *s)
   INSTPAT_CASE_END(grp_system)
 
   INSTPAT_CASE(0b01011, grp_amo) // AMO (RV32A + RV64A)
-  /* AMO_PRECHECK: AMOs must report store/AMO-access-fault (cause=7) on ANY
-   * PMP violation (load OR store side), per RISC-V priv spec 3.7.  Without
-   * this precheck, NEMU's Mr-then-Mw sequence would emit load-fault (5)
-   * when only the R bit is clear, diverging from sail/RTL. */
-  extern bool pmp_check(paddr_t addr, int size, uint32_t priv, bool op_r, bool op_w, bool op_x);
-  extern uint32_t pmp_effective_priv_ls(void);
-  extern jmp_buf exec_jmp_buf;
-  extern int cause;
-  extern word_t g_vaddr;
-  extern word_t pmp_last_fault_addr;
-#define AMO_PRECHECK(addr, len)                                    \
-  do                                                               \
-  {                                                                \
-    if (pmp_check((paddr_t)(addr), (len), pmp_effective_priv_ls(), \
-                  true, true, false))                              \
-    {                                                              \
-      g_vaddr = pmp_last_fault_addr;                               \
-      cause = MCA_STO_ACC_FAU;                                     \
-      nemu_longjmp(exec_jmp_buf, 24);                              \
-    }                                                              \
-  } while (0)
+  /* Translate with store permissions before reading; PMP checks use PA and
+   * require both R/W. Unreadable or unwritable PTEs report store page fault. */
+#define AMO_PRECHECK(addr, len) vaddr_check_amo((addr), (len))
   // RV32A Extension
-  INSTPAT("00010?? 00000 ????? 010 ????? 01011 11", lr.w, R, { R(rd) = SEXT(Mr(src1, 4), 32); cpu.reservation = get_paddr(src1, 4); });
+  INSTPAT("00010?? 00000 ????? 010 ????? 01011 11", lr.w, R, { paddr_t pa = vaddr_check_reservation(src1, 4, false); R(rd) = SEXT(Mr(src1, 4), 32); cpu.reservation = pa; cpu.reservation_bytes = 4; });
   INSTPAT("00011?? ????? ????? 010 ????? 01011 11", sc.w, R, {
-    if (cpu.reservation == get_paddr(src1, 4)) { R(rd) = 0; Mw(src1, 4, src2); } else { R(rd) = 1; }; cpu.reservation = 0; });
+    paddr_t pa = vaddr_check_reservation(src1, 4, true);
+    if (cpu.reservation_bytes >= 4 && pa >= cpu.reservation
+        && pa - cpu.reservation <= cpu.reservation_bytes - 4) { R(rd) = 0; Mw(src1, 4, src2); } else { R(rd) = 1; }; cpu.reservation = 0; cpu.reservation_bytes = 0; });
   INSTPAT("00001?? ????? ????? 010 ????? 01011 11", amoswap.w, R, {AMO_PRECHECK(src1, 4); sword_t tmp = Mr(src1, 4); Mw(src1, 4, src2); R(rd) = SEXT(tmp, 32); });
   INSTPAT("00000?? ????? ????? 010 ????? 01011 11", amoadd.w, R, {AMO_PRECHECK(src1, 4); sword_t  tmp = Mr(src1, 4); Mw(src1, 4, src2 + tmp); R(rd) = SEXT(tmp, 32); });
   INSTPAT("00100?? ????? ????? 010 ????? 01011 11", amoxor.w, R, { AMO_PRECHECK(src1, 4); sword_t tmp = Mr(src1, 4); Mw(src1, 4, src2 ^ tmp); R(rd) = SEXT(tmp, 32); });
   INSTPAT("01100?? ????? ????? 010 ????? 01011 11", amoand.w, R, { AMO_PRECHECK(src1, 4); sword_t tmp = Mr(src1, 4); Mw(src1, 4, src2 & tmp); R(rd) = SEXT(tmp, 32); });
   INSTPAT("01000?? ????? ????? 010 ????? 01011 11", amoor.w, R, { AMO_PRECHECK(src1, 4); sword_t  tmp = Mr(src1, 4); Mw(src1, 4, src2 | tmp); R(rd) = SEXT(tmp, 32); });
-  INSTPAT("10000?? ????? ????? 010 ????? 01011 11", amomin.w, R, {AMO_PRECHECK(src1, 4); sword_t  tmp = Mr(src1, 4); Mw(src1, 4, (tmp < (sword_t)src2) ? tmp : src2);R(rd) = SEXT(tmp, 32); });
-  INSTPAT("10100?? ????? ????? 010 ????? 01011 11", amomax.w, R, {AMO_PRECHECK(src1, 4); sword_t  tmp = Mr(src1, 4); Mw(src1, 4, (tmp > (sword_t)src2) ? tmp : src2);R(rd) = SEXT(tmp, 32); });
+  INSTPAT("10000?? ????? ????? 010 ????? 01011 11", amomin.w, R, {AMO_PRECHECK(src1, 4); int32_t tmp = (int32_t)Mr(src1, 4); Mw(src1, 4, (tmp < (int32_t)src2) ? tmp : src2);R(rd) = SEXT(tmp, 32); });
+  INSTPAT("10100?? ????? ????? 010 ????? 01011 11", amomax.w, R, {AMO_PRECHECK(src1, 4); int32_t tmp = (int32_t)Mr(src1, 4); Mw(src1, 4, (tmp > (int32_t)src2) ? tmp : src2);R(rd) = SEXT(tmp, 32); });
   INSTPAT("11000?? ????? ????? 010 ????? 01011 11", amominu.w, R, {AMO_PRECHECK(src1, 4); word_t tmp = Mr(src1, 4); Mw(src1, 4, (tmp < (uint32_t)src2) ? tmp : src2);R(rd) = SEXT(tmp, 32); });
   INSTPAT("11100?? ????? ????? 010 ????? 01011 11", amomaxu.w, R, {AMO_PRECHECK(src1, 4); word_t tmp = Mr(src1, 4); Mw(src1, 4, (tmp > (uint32_t)src2) ? tmp : src2);R(rd) = SEXT(tmp, 32); });
   // RV64A Extension
+#ifdef CONFIG_RV64
   INSTPAT("00010?? 00000 ????? 011 ????? 01011 11", lr.d, R, {
-    R(rd) = Mr(src1, 8); cpu.reservation = get_paddr(src1, 8); });
+    paddr_t pa = vaddr_check_reservation(src1, 8, false); R(rd) = Mr(src1, 8); cpu.reservation = pa; cpu.reservation_bytes = 8; });
   INSTPAT("00011?? ????? ????? 011 ????? 01011 11", sc.d, R, {
-    if (cpu.reservation == get_paddr(src1, 8)) { R(rd) = 0; Mw(src1, 8, src2); } else { R(rd) = 1; }; cpu.reservation = 0; });
+    paddr_t pa = vaddr_check_reservation(src1, 8, true);
+    if (cpu.reservation_bytes >= 8 && pa >= cpu.reservation
+        && pa - cpu.reservation <= cpu.reservation_bytes - 8) { R(rd) = 0; Mw(src1, 8, src2); } else { R(rd) = 1; }; cpu.reservation = 0; cpu.reservation_bytes = 0; });
   INSTPAT("00001?? ????? ????? 011 ????? 01011 11", amoswap.d, R, {AMO_PRECHECK(src1, 8); sword_t tmp = Mr(src1, 8);Mw(src1, 8, src2);R(rd) = tmp; });
   INSTPAT("00000?? ????? ????? 011 ????? 01011 11", amoadd.d, R, {AMO_PRECHECK(src1, 8); sword_t tmp = Mr(src1, 8);Mw(src1, 8, src2 + tmp);R(rd) = tmp; });
   INSTPAT("00100?? ????? ????? 011 ????? 01011 11", amoxor.d, R, {AMO_PRECHECK(src1, 8); sword_t tmp = Mr(src1, 8);Mw(src1, 8, src2 ^ tmp);R(rd) = tmp; });
   INSTPAT("01100?? ????? ????? 011 ????? 01011 11", amoand.d, R, {AMO_PRECHECK(src1, 8); sword_t tmp = Mr(src1, 8);Mw(src1, 8, src2 & tmp);R(rd) = tmp; });
   INSTPAT("01000?? ????? ????? 011 ????? 01011 11", amoor.d, R, {AMO_PRECHECK(src1, 8); sword_t tmp = Mr(src1, 8);Mw(src1, 8, src2 | tmp);R(rd) = tmp; });
-  INSTPAT("10000?? ????? ????? 011 ????? 01011 11", amomin.d, R, {AMO_PRECHECK(src1, 8); sword_t tmp = Mr(src1, 8);Mw(src1, 8, (tmp < src2) ? tmp : src2);R(rd) = tmp; });
-  INSTPAT("10100?? ????? ????? 011 ????? 01011 11", amomax.d, R, {AMO_PRECHECK(src1, 8); sword_t tmp = Mr(src1, 8);Mw(src1, 8, (tmp > src2) ? tmp : src2);R(rd) = tmp; });
-  INSTPAT("11000?? ????? ????? 011 ????? 01011 11", amominu.d, R, {AMO_PRECHECK(src1, 8); sword_t tmp = Mr(src1, 8);Mw(src1, 8, (tmp < src2) ? src2 : tmp);R(rd) = tmp; });
-  INSTPAT("11100?? ????? ????? 011 ????? 01011 11", amomaxu.d, R, {AMO_PRECHECK(src1, 8); AMO_PRECHECK(src1, 8); sword_t tmp = Mr(src1, 8);Mw(src1, 8, (tmp > src2) ? src2 : tmp);R(rd) = tmp; });
+  INSTPAT("10000?? ????? ????? 011 ????? 01011 11", amomin.d, R, {AMO_PRECHECK(src1, 8); sword_t tmp = Mr(src1, 8);Mw(src1, 8, (tmp < (sword_t)src2) ? tmp : src2);R(rd) = tmp; });
+  INSTPAT("10100?? ????? ????? 011 ????? 01011 11", amomax.d, R, {AMO_PRECHECK(src1, 8); sword_t tmp = Mr(src1, 8);Mw(src1, 8, (tmp > (sword_t)src2) ? tmp : src2);R(rd) = tmp; });
+  INSTPAT("11000?? ????? ????? 011 ????? 01011 11", amominu.d, R, {AMO_PRECHECK(src1, 8); word_t tmp = Mr(src1, 8);Mw(src1, 8, (tmp < src2) ? tmp : src2);R(rd) = tmp; });
+  INSTPAT("11100?? ????? ????? 011 ????? 01011 11", amomaxu.d, R, {AMO_PRECHECK(src1, 8); word_t tmp = Mr(src1, 8);Mw(src1, 8, (tmp > src2) ? tmp : src2);R(rd) = tmp; });
+#endif
   INSTPAT_CASE_END(grp_amo)
 
   INSTPAT_DEFAULT()
   INSTPAT("??????? ????? ????? ??? ????? ????? ??", inv, N, {
-    if (CSR(CSR_MTVEC))
-    {
-      s->dnpc = isa_raise_intr(MCA_ILLEGAL_INS, s->pc);
-    }
-    else
-    {
-      INV(s->pc);
-    } });
+    // A zero trap vector is legal; it does not turn a guest exception into
+    // a host abort. The next fetch at address zero may itself fault.
+    s->dnpc = isa_raise_intr(MCA_ILLEGAL_INS, s->pc);
+  });
   INSTPAT_SWITCH_END();
 
   // mstatus write mask: clear non-writable bits.
@@ -962,9 +1022,9 @@ static int decode_exec(Decode *s)
   // RV64: SXL[35:34] and UXL[33:32] are WARL fields that hold XLEN==2 and are
   // enforced below regardless of writes.
 #ifdef CONFIG_RV64
-#define MSTATUS_WMASK 0x000000FF007FF9EAULL
+#define MSTATUS_WMASK 0x007E79AAULL
 #else
-#define MSTATUS_WMASK 0x007FF9EA
+#define MSTATUS_WMASK 0x007E79AA
 #endif
   CSR(CSR_MSTATUS) = CSR(CSR_MSTATUS) & MSTATUS_WMASK;
   CSR(CSR_MISA) = CSR_MISA_VALUE;
@@ -979,9 +1039,9 @@ static int decode_exec(Decode *s)
   // Propagate direct writes back to mstatus/mie at any privilege level.
   // sstatus read mask: includes SD (computed), excludes VS.
 #ifdef CONFIG_RV64
-#define SSTATUS_RMASK 0x80000003000DE162ULL
+#define SSTATUS_RMASK 0x80000003000C6122ULL
 #else
-#define SSTATUS_RMASK 0x800de162
+#define SSTATUS_RMASK 0x800c6122
 #endif
 #define SIE_RMASK 0x222
 #define SIP_RMASK 0x222
@@ -998,15 +1058,36 @@ static int decode_exec(Decode *s)
   }
   if (cpu.last_csr_wr == CSR_SIE)
   {
-    word_t mie_bits = CSR(CSR_SIE) & SIE_RMASK;
-    CSR(CSR_MIE) = (CSR(CSR_MIE) & ~SIE_RMASK) | mie_bits;
+    word_t mask = CSR(CSR_MIDELEG) & SIE_RMASK;
+    word_t mie_bits = CSR(CSR_SIE) & mask;
+    CSR(CSR_MIE) = (CSR(CSR_MIE) & ~mask) | mie_bits;
   }
   if (cpu.last_csr_wr == CSR_SIP)
   {
-    word_t mip_bits = CSR(CSR_SIP) & SIP_WMASK;
-    CSR(CSR_MIP) = (CSR(CSR_MIP) & ~SIP_WMASK) | mip_bits;
+    word_t mask = CSR(CSR_MIDELEG) & SIP_WMASK;
+    word_t mip_bits = CSR(CSR_SIP) & mask;
+    CSR(CSR_MIP) = (CSR(CSR_MIP) & ~mask) | mip_bits;
   }
+#if !defined(CONFIG_TARGET_SHARE) && defined(CONFIG_DEVICE)
+  if (cpu.last_csr_wr == 0x14d || cpu.last_csr_wr == 0x15d ||
+      cpu.last_csr_wr == CSR_MENVCFG || cpu.last_csr_wr == CSR_MENVCFGH)
+    clint_update_mip();
+#endif
+  /* Explicit writes to either half override this instruction's increment
+   * of the underlying 64-bit counter, including non-x0 zero-mask RMWs. */
+  const bool wrote_mcycle = cpu.last_csr_wr == CSR_MCYCLE
+#ifndef CONFIG_RV64
+      || cpu.last_csr_wr == CSR_MCYCLEH
+#endif
+      ;
+  const bool wrote_minstret = cpu.last_csr_wr == CSR_MINSTRET
+#ifndef CONFIG_RV64
+      || cpu.last_csr_wr == CSR_MINSTRETH
+#endif
+      ;
   cpu.last_csr_wr = 0;
+  if (((CSR(CSR_MSTATUS) >> 11) & 3) == 2)
+    CSR(CSR_MSTATUS) &= ~((word_t)3 << 11);
 #ifdef CONFIG_RV64
   /* SXL/UXL are WARL: pin to XLEN=64 (encoding 2) after all MSTATUS writes.
    * Must come after SSTATUS propagation which applies MSTATUS_WMASK again. */
@@ -1028,10 +1109,10 @@ static int decode_exec(Decode *s)
   // Derive sstatus/sie from mstatus/mie
 #ifdef CONFIG_RV64
   CSR(CSR_SSTATUS) = CSR(CSR_MSTATUS) & SSTATUS_RMASK;
-  CSR(CSR_SIE) = CSR(CSR_MIE) & SIE_RMASK;
+  CSR(CSR_SIE) = CSR(CSR_MIE) & CSR(CSR_MIDELEG) & SIE_RMASK;
 #else
   CSR(CSR_SSTATUS) = CSR(CSR_MSTATUS) & SSTATUS_RMASK;
-  CSR(CSR_SIE) = CSR(CSR_MIE) & SIE_RMASK;
+  CSR(CSR_SIE) = CSR(CSR_MIE) & CSR(CSR_MIDELEG) & SIE_RMASK;
 #endif
 
   word_t inst_advance = 1;
@@ -1039,8 +1120,8 @@ static int decode_exec(Decode *s)
   word_t old_mcycle = CSR(CSR_MCYCLE);
   word_t old_minstret = CSR(CSR_MINSTRET);
 #endif
-  CSR(CSR_MCYCLE) += inst_advance;
-  CSR(CSR_MINSTRET) += inst_advance;
+  if (!wrote_mcycle) CSR(CSR_MCYCLE) += inst_advance;
+  if (!wrote_minstret && !cpu.instruction_trapped) CSR(CSR_MINSTRET) += inst_advance;
 #ifndef CONFIG_RV64
   if (CSR(CSR_MCYCLE) < old_mcycle) CSR(CSR_MCYCLEH)++;
   if (CSR(CSR_MINSTRET) < old_minstret) CSR(CSR_MINSTRETH)++;
@@ -1065,7 +1146,7 @@ static int decode_exec(Decode *s)
   // sip is a restricted view of mip per the privileged spec; this mirror
   // must run unconditionally (also under CONFIG_TARGET_SHARE difftest builds)
   // so that M-mode writes to mip.STIP/SSIP/SEIP become visible via sip.
-  CSR(CSR_SIP) = CSR(CSR_MIP) & SIP_RMASK;
+  CSR(CSR_SIP) = riscv_mip_value() & CSR(CSR_MIDELEG) & SIP_RMASK;
 #undef TIMER_TICK_INTERVAL
 
   R(0) = 0; // reset $zero to 0
@@ -1082,6 +1163,8 @@ int cause;
 
 int isa_exec_once(Decode *s)
 {
+  cpu.instruction_trapped = false;
+  cpu.last_csr_wr = 0;
   // instruction fetch (skipped on decode-cache hit)
   int jmp_value = nemu_setjmp(exec_jmp_buf);
   if (jmp_value)
@@ -1090,8 +1173,16 @@ int isa_exec_once(Decode *s)
     s->isa.inst = 0x13; // addi x0, x0, 0; a.k.a. NOP
     return 0;
   }
+  /* Conservatively bypass decoded-instruction caching while PBMT can be
+   * active. A cached decode must not elide reads from an NC/IO mapping.
+   * This also covers mixed-type pages within one fetched instruction. */
+#ifdef CONFIG_ISA64
+  const bool cache_decode = (cpu.sr[CSR_MENVCFG] & (1ull << 62)) == 0;
+#else
+  const bool cache_decode = true;
+#endif
   icache_entry_t *e = icache_slot(s->pc);
-  if (icache_hit(e, s->pc))
+  if (cache_decode && icache_hit(e, s->pc))
   {
     s->isa.inst = e->inst;
     s->snpc = s->pc + e->ilen;
@@ -1111,8 +1202,11 @@ int isa_exec_once(Decode *s)
     return 0;
   }
   vaddr_t fill_pc = s->pc; // decode_exec will clobber s->pc <- dnpc
+  const uint32_t fetch_epoch = icache_epoch;
   int ret = decode_exec(s);
-  if (!icache_hit(e, fill_pc))
+  // A CSR write, xRET, trap or fence can invalidate the context that
+  // authorized this fetch. Never resurrect its decode in the new epoch.
+  if (cache_decode && fetch_epoch == icache_epoch && !icache_hit(e, fill_pc))
   {
     icache_fill(e, fill_pc, s->isa.inst, (uint16_t)(s->snpc - fill_pc));
   }

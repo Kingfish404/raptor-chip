@@ -1,0 +1,181 @@
+{
+  "spec": "Scalar Cryptography 1.0.1, sections 31.6.3 and 31.6.5",
+  "url": "https://docs.riscv.org/reference/isa/v20240411/unpriv/scalar-crypto.html",
+  "target": "RV64/default frozen production configuration; Zkt accepted in phase68 with documented design/proof/finite-test rationale",
+  "instruction_groups": {
+    "I": [
+      "lui",
+      "auipc",
+      "addi",
+      "slti",
+      "sltiu",
+      "xori",
+      "ori",
+      "andi",
+      "slli",
+      "srli",
+      "srai",
+      "add",
+      "sub",
+      "sll",
+      "slt",
+      "sltu",
+      "xor",
+      "srl",
+      "sra",
+      "or",
+      "and",
+      "addiw",
+      "slliw",
+      "srliw",
+      "sraiw",
+      "addw",
+      "subw",
+      "sllw",
+      "srlw",
+      "sraw"
+    ],
+    "M": [
+      "mul",
+      "mulh",
+      "mulhsu",
+      "mulhu",
+      "mulw"
+    ],
+    "C": [
+      "c.nop",
+      "c.addi",
+      "c.addiw",
+      "c.lui",
+      "c.srli",
+      "c.srai",
+      "c.andi",
+      "c.sub",
+      "c.xor",
+      "c.or",
+      "c.and",
+      "c.subw",
+      "c.addw",
+      "c.slli",
+      "c.mv",
+      "c.add"
+    ],
+    "implemented_B_list_subset": [
+      "clmul",
+      "clmulh",
+      "ror",
+      "rol",
+      "rori",
+      "rorw",
+      "rolw",
+      "roriw",
+      "andn",
+      "orn",
+      "xnor",
+      "rev8"
+    ]
+  },
+  "encoding_aliases": [
+    {
+      "mnemonic": "zext.h",
+      "reason": "RV64 PACKW with rs2=x0 is implemented; audit this encoding although general PACKW is not implemented."
+    }
+  ],
+  "scope_notes": [
+    "HINT forms are exempt, including c.nop despite its appearance in the source table.",
+    "Division/remainder, load/store, branches, FP and CSR are outside the specified timing subset.",
+    "Do not impose Zkt timing on all Zba/Zbb/Zbs instructions merely because they are mandatory in RVA22.",
+    "K-specific instructions and general xperm/pack/brev8 are not implemented in the inspected decoder; recheck when extending decode."
+  ],
+  "paths": {
+    "I_C_B": [
+      "hdl/chisel/src/main/scala/decode.scala",
+      "hdl/chisel/src/main/scala/decode_c.scala",
+      "hdl/frontend/rapt_decode_slot.sv",
+      "hdl/backend/ieu/rapt_ieu_pipe_alu.sv",
+      "hdl/backend/ieu/rapt_ieu_pipe_alu_csr.sv",
+      "hdl/backend/ieu/rapt_ieu_alu.sv"
+    ],
+    "M": [
+      "hdl/backend/ieu/rapt_ieu_mul.sv",
+      "hdl/backend/ieu/rapt_ieu_muldiv.sv"
+    ]
+  },
+  "evidence": [
+    {
+      "scope": "default fast multiply port timing only, RV32/RV64",
+      "harness": "verify/formal/formal_zkt_mul.sv",
+      "config": "verify/formal/zkt_mul.sby",
+      "manifest": "/tmp/raptor-rva22s64-phase57/final-manifest.json"
+    },
+    {
+      "scope": "shared fast MUL/iterative DIV port with arbitrary independent operand streams, RV32/RV64",
+      "harness": "verify/formal/formal_zkt_muldiv.sv",
+      "config": "verify/formal/zkt_muldiv.sby",
+      "manifest": "/tmp/raptor-rva22s64-phase58/final-manifest.json"
+    },
+    {
+      "scope": "both actual integer ALU completion control paths, independent operands, pure integer issue packets, RV32/RV64",
+      "harness": "verify/formal/formal_zkt_alu_ports.sv",
+      "config": "verify/formal/zkt_alu_ports.sby",
+      "manifest": "/tmp/raptor-rva22s64-phase59/final-manifest.json"
+    },
+    {
+      "scope": "95 RV32 and 127 RV64 sampled encodings in M/S/U, actual decode and schedule domain",
+      "generator": "verify/scripts/zkt_decode_vectors.py",
+      "testbench": "verify/xsim/tb_idu_contract.sv",
+      "manifest": "/tmp/raptor-rva22s64-phase60/final-manifest.json"
+    },
+    {
+      "scope": "24 finite whole-core dependent streams, same code with four seed payloads, delay0/7/63 seed42, both XLENs",
+      "runner": "verify/scripts/zkt_core_timing.py",
+      "manifest": "/tmp/raptor-rva22s64-phase61/final-manifest.json"
+    },
+    {
+      "scope": "shared CDB result-independent control with static IQ/ROU/guard path review",
+      "harness": "verify/formal/formal_zkt_cdb.sv",
+      "config": "verify/formal/zkt_cdb.sby",
+      "manifest": "/tmp/raptor-rva22s64-phase62/final-manifest.json"
+    },
+    {
+      "scope": "finite paired default IQ with complemented dispatch/wakeup operands, RV32/RV64 seeds1/42",
+      "testbench": "verify/xsim/tb_iq_reclaim_random.sv",
+      "parameter": "CheckOperandIndependence=1",
+      "manifest": "/tmp/raptor-rva22s64-phase63/final-manifest.json"
+    },
+    {
+      "scope": "finite paired actual IQ recovery, entries7/dispatch2, ordered1/unordered2 ports, cancel0/1, both XLENs; fast confirmation/stale generation/rebusy and recovery",
+      "testbench": "verify/xsim/tb_iq_recovery_window.sv",
+      "parameter": "CheckOperandIndependence=1",
+      "manifest": "/tmp/raptor-rva22s64-phase64/final-manifest.json"
+    },
+    {
+      "scope": "finite paired actual IQ: three completion dependencies, wrong tag/generation/invalid rejection, sequential and dispatch-cycle resolution, cancellation/flush; RV32/RV64",
+      "testbench": "verify/xsim/tb_iq_recovery_window.sv",
+      "parameters": "CheckOperandIndependence=1 CheckDependencyCases=1",
+      "manifest": "/tmp/raptor-rva22s64-phase65/final-manifest.json"
+    },
+    {
+      "scope": "finite paired actual ROU rename/dispatch/retire/recovery/owner control, 289 dispatches and 283 commits per XLEN; ready data complement and prior functional lifecycle checks",
+      "testbench": "verify/xsim/tb_rou_dual_commit.sv",
+      "checker": "verify/xsim/tb_rou_operand_pair.svh",
+      "parameter": "CheckOperandIndependence=1",
+      "manifest": "/tmp/raptor-rva22s64-phase66/final-manifest.json"
+    },
+    {
+      "scope": "actual private MDQ and MUL/DIV pair, enqueue/resident wakeup, own-result dependent chain, divide flush/reuse and RV64 word cases",
+      "testbench": "verify/xsim/tb_muldiv_flush_reuse.sv",
+      "parameter": "CheckOperandIndependence=1",
+      "manifest": "/tmp/raptor-rva22s64-phase67/final-manifest.json"
+    },
+    {
+      "scope": "consolidated design/evidence/configuration review; not additional timing tests",
+      "manifest": "/tmp/raptor-rva22s64-phase68/final-manifest.json"
+    }
+  ],
+  "remaining": [],
+  "integration_review": "verify/riscof/raptor-rv64s/zkt-integration-review.md",
+  "acceptance": "verified_for_frozen_configuration",
+  "acceptance_review": "verify/riscof/raptor-rv64s/zkt-integration-review.md",
+  "invalidation_rule": "Reaudit changed instruction scope, decode/routing, timing/control/data connections, queue/retirement protocol, generated RTL, preset or relevant platform assumptions; preserve proof assumptions and public/secret boundary."
+}

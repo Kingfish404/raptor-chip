@@ -29,6 +29,7 @@ module rapt_axi_master #(
   assign axi.arsize = mem.rd_req_size;
   assign axi.arlen = mem.rd_req_len;
   assign axi.arburst = mem.rd_req_burst;
+  assign axi.arcache = rapt_pkg::axi_cache_attr(mem.rd_req_addr, mem.rd_req_pbmt);
   assign mem.rd_req_ready = axi.arready && read_capacity;
   assign read_request_fire = mem.rd_req_valid && mem.rd_req_ready;
 
@@ -74,6 +75,7 @@ module rapt_axi_master #(
   logic [ID_W-1:0] write_id;
   logic [XLEN-1:0] write_addr;
   logic [2:0] write_size;
+  logic [3:0] write_cache;
   logic [XLEN-1:0] write_data;
   logic [XLEN/8-1:0] write_strb;
   logic write_request_fire;
@@ -88,6 +90,7 @@ module rapt_axi_master #(
   assign axi.awid = write_id;
   assign axi.awaddr = write_addr;
   assign axi.awsize = write_size;
+  assign axi.awcache = write_cache;
   assign axi.awlen = 8'h00;
   assign axi.awburst = 2'b00;
 
@@ -110,6 +113,7 @@ module rapt_axi_master #(
       write_id <= '0;
       write_addr <= '0;
       write_size <= '0;
+      write_cache <= '0;
       write_data <= '0;
       write_strb <= '0;
     end else begin
@@ -120,6 +124,7 @@ module rapt_axi_master #(
         write_id <= mem.wr_req_id;
         write_addr <= mem.wr_req_addr;
         write_size <= mem.wr_req_size;
+        write_cache <= rapt_pkg::axi_cache_attr(mem.wr_req_addr, mem.wr_req_pbmt);
         write_data <= mem.wr_req_data << (write_addr_offset * 8);
         write_strb <= mem.wr_req_strb << write_addr_offset;
       end else begin

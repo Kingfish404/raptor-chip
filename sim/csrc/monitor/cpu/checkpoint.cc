@@ -57,20 +57,23 @@ typedef struct
   word_t rpc;
   int priv;
   word_t gpr[GPR_SIZE];
+  uint64_t fpr[32]; /* FLEN=64 even when XLEN=32 */
+  uint32_t fcsr;
   /* CSRs -- keep in same logical groups as the live npc struct. */
   word_t sstatus, sie_, stvec, sscratch, sepc, scause, stval, sip, satp;
   word_t mstatus, medeleg, mideleg, mie_, mtvec;
+  word_t menvcfg, menvcfgh, stimecmp, stimecmph;
   word_t mscratch, mepc, mcause, mtval, mip;
+  word_t mberr_status, mberr_addr;
   /* Additional CSRs (see follow-up audit 2026-04-30):
    *   counteren: gates rdtime/rdcycle/rdinstret access from lower priv;
    *              if not restored, S-mode rdtime traps -> ECALL loops.
    *   mstatush:  RV32-only upper half of mstatus (SBE/MBE).
    *   m-counters: free-running but software-writable; preserves time bookkeeping.
-   *   time/timeh: RTL-internal architectural counter (separate from CLINT mtime). */
+   * Architectural time/timeh are projections of the saved CLINT mtime. */
   word_t scounteren, mcounteren;
   word_t mstatush;
   word_t mcycle, mcycleh, minstret, minstreth;
-  word_t time_, timeh;
   uint8_t pmpcfg[NPC_PMP_NUM];
   word_t pmpaddr[NPC_PMP_NUM];
   uint64_t clint_mtime;
@@ -266,6 +269,9 @@ static void write_state_txt(const char *path)
   for (int i = 0; i < GPR_SIZE; i++)
     fprintf(fp, "gpr%d=" FMT_WORD "\n", i, npc.gpr[i]);
   /* CSRs */
+  for (int i = 0; i < 32; i++)
+    fprintf(fp, "fpr%d=0x%016llx\n", i, (unsigned long long)npc.fpr[i]);
+  fprintf(fp, "csr_fcsr=0x%02x\n", (unsigned int)*npc.fcsr);
   fprintf(fp, "csr_sstatus=" FMT_WORD "\n", *npc.sstatus);
   fprintf(fp, "csr_sie=" FMT_WORD "\n", *npc.sie____);
   fprintf(fp, "csr_stvec=" FMT_WORD "\n", *npc.stvec__);
@@ -276,6 +282,12 @@ static void write_state_txt(const char *path)
   fprintf(fp, "csr_sip=" FMT_WORD "\n", *npc.sip____);
   fprintf(fp, "csr_satp=" FMT_WORD "\n", *npc.satp___);
   fprintf(fp, "csr_mstatus=" FMT_WORD "\n", *npc.mstatus);
+  fprintf(fp, "csr_menvcfg=" FMT_WORD "\n", *npc.menvcfg);
+  fprintf(fp, "csr_stimecmp=" FMT_WORD "\n", (word_t)*npc.stimecmp);
+#ifndef CONFIG_ISA64
+  fprintf(fp, "csr_menvcfgh=" FMT_WORD "\n", *npc.menvcfgh);
+  fprintf(fp, "csr_stimecmph=" FMT_WORD "\n", (word_t)(*npc.stimecmp >> 32));
+#endif
   fprintf(fp, "csr_medeleg=" FMT_WORD "\n", *npc.medeleg);
   fprintf(fp, "csr_mideleg=" FMT_WORD "\n", *npc.mideleg);
   fprintf(fp, "csr_mie=" FMT_WORD "\n", *npc.mie____);
@@ -285,6 +297,11 @@ static void write_state_txt(const char *path)
   fprintf(fp, "csr_mcause=" FMT_WORD "\n", *npc.mcause_);
   fprintf(fp, "csr_mtval=" FMT_WORD "\n", *npc.mtval__);
   fprintf(fp, "csr_mip=" FMT_WORD "\n", *npc.mip____);
+  fprintf(fp, "csr_mberr_status=" FMT_WORD "\n",
+          (word_t)((*npc.bus_error_pending & 1u) |
+                   ((*npc.bus_error_overflow & 1u) << 1) |
+                   ((word_t)*npc.bus_error_strb << 8)));
+  fprintf(fp, "csr_mberr_addr=" FMT_WORD "\n", *npc.bus_error_addr);
 
   /* Counter-enable + RV32 upper-half + counters (see audit 2026-04-30). */
   if (npc.scounte != NULL)
@@ -301,10 +318,6 @@ static void write_state_txt(const char *path)
     fprintf(fp, "csr_minstret=" FMT_WORD "\n", *npc.minstret);
   if (npc.minstreth != NULL)
     fprintf(fp, "csr_minstreth=" FMT_WORD "\n", *npc.minstreth);
-  if (npc.time___ != NULL)
-    fprintf(fp, "csr_time=" FMT_WORD "\n", *npc.time___);
-  if (npc.timeh__ != NULL)
-    fprintf(fp, "csr_timeh=" FMT_WORD "\n", *npc.timeh__);
 
   /* PMP state */
   if (npc.pmpcfg != NULL && npc.pmpaddr != NULL)
@@ -321,6 +334,10 @@ static void write_state_txt(const char *path)
     uint64_t mtime = (npc.clint_mtime != NULL) ? *npc.clint_mtime : 0;
     uint64_t mtimecmp = (npc.clint_mtimecmp != NULL) ? *npc.clint_mtimecmp : ~0ull;
     uint8_t msip = (npc.clint_msip != NULL) ? *npc.clint_msip : 0;
+    /* Retain these legacy metadata keys for readers of version-1 snapshots.
+     * They are views of mtime, never independent writable counter state. */
+    fprintf(fp, "csr_time=" FMT_WORD "\n", (word_t)mtime);
+    fprintf(fp, "csr_timeh=" FMT_WORD "\n", (word_t)(mtime >> 32));
     fprintf(fp, "clint_mtime=0x%016llx\n", (unsigned long long)mtime);
     fprintf(fp, "clint_mtimecmp=0x%016llx\n", (unsigned long long)mtimecmp);
     fprintf(fp, "clint_msip=0x%02x\n", (unsigned int)(msip & 0x1u));
@@ -481,10 +498,14 @@ static bool overlay_committed_sq(SqOverlayByte *bytes, size_t *byte_count)
   if (npc.sq_snapshot_valid == NULL)
     return true;
 
-  uint32_t valid = *npc.sq_snapshot_valid;
-  uint32_t committed = *npc.sq_snapshot_committed;
-  uint8_t capacity = *npc.sq_snapshot_capacity;
-  uint8_t head = *npc.sq_snapshot_head;
+  // Read functional storage, with a value conversion for the preset's width.
+  // Unconsumed RTL alias assignments can be optimized away by Verilator even
+  // when their backing fields remain public; those fields then stay at reset
+  // and silently omit committed stores from an otherwise valid checkpoint.
+  uint32_t valid, committed;
+  uint8_t capacity, head;
+  if (!cpu_read_sq_snapshot_control(&valid, &committed, &capacity, &head))
+    return false;
   if ((valid & ~committed) != 0 || capacity == 0 || capacity > 32 || head >= capacity)
     return false;
 
@@ -649,6 +670,8 @@ static int read_state_txt(const char *path, arch_snapshot_t *s)
     Error("checkpoint: cannot open %s: %s", path, strerror(errno));
     return -1;
   }
+  uint32_t fp_seen = 0;
+  bool fcsr_seen = false;
   char line[256];
   while (fgets(line, sizeof(line), fp))
   {
@@ -658,6 +681,25 @@ static int read_state_txt(const char *path, arch_snapshot_t *s)
     if (sscanf(line, "%63[^=]=%127s", key, val) != 2)
       continue;
     word_t w = 0;
+    if (strncmp(key, "fpr", 3) == 0 || strcmp(key, "csr_fcsr") == 0)
+    {
+      unsigned long long v;
+      char trailing;
+      int idx = -1;
+      bool is_fcsr = strcmp(key, "csr_fcsr") == 0;
+      if (sscanf(val, "%llx%c", &v, &trailing) != 1 ||
+          (is_fcsr ? (v > 0xff || fcsr_seen) :
+           (sscanf(key, "fpr%d%c", &idx, &trailing) != 1 || idx < 0 || idx >= 32 ||
+            (fp_seen & (uint32_t(1) << idx)))))
+      {
+        fclose(fp);
+        Error("checkpoint: invalid or duplicate floating-point field %s", key);
+        return -1;
+      }
+      if (is_fcsr) { s->fcsr = (uint32_t)v; fcsr_seen = true; }
+      else { s->fpr[idx] = (uint64_t)v; fp_seen |= uint32_t(1) << idx; }
+      continue;
+    }
     if (strncmp(key, "gpr", 3) == 0)
     {
       int idx = atoi(key + 3);
@@ -760,6 +802,10 @@ static int read_state_txt(const char *path, arch_snapshot_t *s)
       parse_word(val, &s->mcause);
     else if (strcmp(key, "csr_mtval") == 0)
       parse_word(val, &s->mtval);
+    else if (strcmp(key, "csr_mberr_status") == 0)
+      parse_word(val, &s->mberr_status);
+    else if (strcmp(key, "csr_mberr_addr") == 0)
+      parse_word(val, &s->mberr_addr);
     else if (strcmp(key, "csr_mip") == 0)
       parse_word(val, &s->mip);
     else if (strcmp(key, "csr_scounteren") == 0)
@@ -776,10 +822,19 @@ static int read_state_txt(const char *path, arch_snapshot_t *s)
       parse_word(val, &s->minstret);
     else if (strcmp(key, "csr_minstreth") == 0)
       parse_word(val, &s->minstreth);
-    else if (strcmp(key, "csr_time") == 0)
-      parse_word(val, &s->time_);
-    else if (strcmp(key, "csr_timeh") == 0)
-      parse_word(val, &s->timeh);
+    else if (strcmp(key, "csr_time") == 0 || strcmp(key, "csr_timeh") == 0)
+    {
+      /* Legacy redundant fields may disagree in older snapshots. CLINT mtime
+       * is authoritative; never restore a second architectural time source. */
+    }
+    else if (strcmp(key, "csr_menvcfg") == 0)
+      parse_word(val, &s->menvcfg);
+    else if (strcmp(key, "csr_menvcfgh") == 0)
+      parse_word(val, &s->menvcfgh);
+    else if (strcmp(key, "csr_stimecmp") == 0)
+      parse_word(val, &s->stimecmp);
+    else if (strcmp(key, "csr_stimecmph") == 0)
+      parse_word(val, &s->stimecmph);
     else if (strcmp(key, "clint_mtime") == 0)
     {
       unsigned long long v = 0;
@@ -818,6 +873,11 @@ static int read_state_txt(const char *path, arch_snapshot_t *s)
     }
   }
   fclose(fp);
+  if (fp_seen != UINT32_MAX || !fcsr_seen)
+  {
+    Error("checkpoint: missing FPR/FCSR state; regenerate this legacy or incomplete snapshot");
+    return -1;
+  }
   return 0;
 }
 
@@ -1023,6 +1083,16 @@ typedef struct
 } csr_entry_t;
 
 static const csr_entry_t kCsrRestoreList[] = {
+    /* Install the deadline before enabling STCE. CSR instructions preserve
+     * WARL semantics and update the real comparator, not unused array slots. */
+#ifndef CONFIG_ISA64
+    {0x15d, &arch_snapshot_t::stimecmph, "stimecmph"},
+#endif
+    {0x14d, &arch_snapshot_t::stimecmp, "stimecmp"},
+    {0x30a, &arch_snapshot_t::menvcfg, "menvcfg"},
+#ifndef CONFIG_ISA64
+    {0x31a, &arch_snapshot_t::menvcfgh, "menvcfgh"},
+#endif
     {CSR_MTVEC, &arch_snapshot_t::mtvec, "mtvec"},
     {CSR_MSCRATCH, &arch_snapshot_t::mscratch, "mscratch"},
     {CSR_MCAUSE, &arch_snapshot_t::mcause, "mcause"},
@@ -1065,6 +1135,9 @@ static void build_trampoline(uint8_t *mrom, const arch_snapshot_t *s)
    *   1                       (fence.i -- flush stale prefetch of trampoline)
    *   1                       (mret)
    */
+  const int pmp_banks = 16 / XLEN_BYTES;
+  const int n_pmp = 2 * (16 + pmp_banks);
+  const int n_fp = 36; /* enable FS, 32 FLD, restore FCSR */
   const int n_setup = 2;
   const int n_csr = 2 * (int)NR_CSR_RESTORE;
   const int n_sfence = 1;
@@ -1073,10 +1146,13 @@ static void build_trampoline(uint8_t *mrom, const arch_snapshot_t *s)
   const int n_final = 2;
   const int n_fencei = 1;
   const int n_mret = 1;
-  const int n_total = n_setup + n_csr + n_sfence + n_gpr + n_mstatus +
+  const int n_total = n_setup + n_fp + n_pmp + n_csr + n_sfence + n_gpr + n_mstatus +
                       n_final + n_fencei + n_mret;
   const int code_bytes = n_total * 4;
-  const int data_off = code_bytes;
+  const int data_off = (code_bytes + 7) & ~7;
+  const int fcsr_off = (SLOT_OTHER_CSR0 + NR_CSR_RESTORE) * XLEN_BYTES;
+  const int fpr_off = (fcsr_off + XLEN_BYTES + 7) & ~7;
+  const int pmp_off = fpr_off + 32 * 8;
 
   uint32_t *code = (uint32_t *)mrom;
   int i = 0;
@@ -1084,6 +1160,31 @@ static void build_trampoline(uint8_t *mrom, const arch_snapshot_t *s)
   /* Setup: t0 = MROM_BASE + DATA_OFF (= base of data table). */
   code[i++] = ENC_AUIPC(X_T0, 0);
   code[i++] = ENC_ADDI(X_T0, X_T0, data_off);
+
+  /* Restore through real instructions before enabling translation/interrupts.
+   * Temporary FS=Dirty permits FLD even for a saved FS=Off context. The
+   * final mstatus write below restores the saved FS state without data loss. */
+  code[i++] = (6u << 12) | (X_T1 << 7) | 0x37u; /* lui t1,6: FS=Dirty */
+  code[i++] = ENC_CSRRW_X0(CSR_MSTATUS, X_T1);
+  for (int r = 0; r < 32; r++)
+    code[i++] = ((uint32_t)(fpr_off + r * 8) << 20) | (X_T0 << 15) |
+                (3u << 12) | ((uint32_t)r << 7) | 0x07u; /* fld */
+  code[i++] = ENC_LXLEN(X_T1, X_T0, fcsr_off);
+  code[i++] = ENC_CSRRW_X0(0x003, X_T1);
+
+  /* PMP CSR writes also update the distributed permission replicas.
+   * Restore addresses before configurations, so lock bits cannot suppress
+   * address writes. Host writes to CSR storage alone leave replicas reset. */
+  for (int r = 0; r < 16; r++)
+  {
+    code[i++] = ENC_LXLEN(X_T1, X_T0, pmp_off + r * XLEN_BYTES);
+    code[i++] = ENC_CSRRW_X0(0x3b0 + r, X_T1);
+  }
+  for (int bank = 0; bank < pmp_banks; bank++)
+  {
+    code[i++] = ENC_LXLEN(X_T1, X_T0, pmp_off + (16 + bank) * XLEN_BYTES);
+    code[i++] = ENC_CSRRW_X0(0x3a0 + bank * (XLEN_BYTES / 4), X_T1);
+  }
 
   /* CSR restore: lw t1, slot*XB(t0); csrw <csr>, t1. */
   for (size_t k = 0; k < NR_CSR_RESTORE; k++)
@@ -1158,6 +1259,19 @@ static void build_trampoline(uint8_t *mrom, const arch_snapshot_t *s)
 
   /* Write data table. */
   uint8_t *data = mrom + data_off;
+  put_word(data, fcsr_off / XLEN_BYTES, s->fcsr);
+  for (int r = 0; r < 32; r++)
+    for (int b = 0; b < 8; b++)
+      data[fpr_off + r * 8 + b] = (uint8_t)(s->fpr[r] >> (b * 8));
+  for (int r = 0; r < 16; r++)
+    put_word(data, pmp_off / XLEN_BYTES + r, s->pmpaddr[r]);
+  for (int bank = 0; bank < pmp_banks; bank++)
+  {
+    word_t packed = 0;
+    for (int b = 0; b < XLEN_BYTES; b++)
+      packed |= word_t(s->pmpcfg[bank * XLEN_BYTES + b]) << (b * 8);
+    put_word(data, pmp_off / XLEN_BYTES + 16 + bank, packed);
+  }
   /* GPRs */
   for (int r = 0; r < 32; r++)
   {
@@ -1187,6 +1301,9 @@ void checkpoint_configure_load(const char *dir)
   resume_pmu_cycle_base = 0;
   resume_pmu_instr_base = 0;
   memset(&loaded_snap, 0, sizeof(loaded_snap));
+  /* Version-1 snapshots predating Sstc persistence retain reset defaults. */
+  loaded_snap.stimecmp = ~(word_t)0;
+  loaded_snap.stimecmph = ~(word_t)0;
   strncpy(load_dir, dir, sizeof(load_dir) - 1);
   load_dir[sizeof(load_dir) - 1] = '\0';
 
@@ -1215,7 +1332,7 @@ void checkpoint_configure_load(const char *dir)
     Error("checkpoint: MROM has no host backing -- cannot install trampoline");
     exit(1);
   }
-  memset(mrom, 0, 256); /* clear leading region; trampoline is < 256 bytes */
+  memset(mrom, 0, 256); /* build_trampoline overwrites its complete code/data extent */
   build_trampoline(mrom, &loaded_snap);
 }
 
@@ -1263,6 +1380,15 @@ void checkpoint_inject_after_reset(void)
    * writes don't update derived fields). The trampoline runs first thing
    * after reset and ends with `mret -> ckpt_pc, priv = ckpt_priv`. */
 
+  /* These are flops, not the read-only MIP/status combinational shadows.
+   * Install pending before the trampoline enables interrupts/returns, so a
+   * pending machine error can be delivered immediately on lower-mode entry.
+   * Missing keys in old snapshots retain the reset-zero defaults. */
+  *npc.bus_error_pending = loaded_snap.mberr_status & 1u;
+  *npc.bus_error_overflow = (loaded_snap.mberr_status >> 1) & 1u;
+  *npc.bus_error_strb = (loaded_snap.mberr_status >> 8) & 0xffu;
+  *npc.bus_error_addr = loaded_snap.mberr_addr;
+
   /* Restore CLINT timer/software-interrupt registers that are not part of any
    * RAM region dump. Without this, Linux/OpenSBI timer state diverges and may
    * spin in M-mode wait loops after checkpoint load. */
@@ -1289,18 +1415,11 @@ void checkpoint_inject_after_reset(void)
     *npc.plic_gateway_busy = loaded_snap.plic_gateway_busy & ~1u;
   }
 
-  if (npc.pmpcfg != NULL && npc.pmpaddr != NULL)
-  {
-    for (int i = 0; i < NPC_PMP_NUM; i++)
-    {
-      npc.pmpcfg[i] = loaded_snap.pmpcfg[i];
-      npc.pmpaddr[i] = loaded_snap.pmpaddr[i];
-    }
-  }
 
-  /* Counters / RTL-internal time CSR are restored AFTER the trampoline
-   * retires (see checkpoint_load_post_trampoline_tick) so the ~70-cycle
-   * trampoline skid does not accumulate into the visible counters. */
+  /* Machine cycle/retirement counters are restored after the trampoline.
+   * CLINT mtime runs during restore, as it did before unified CSR time.
+   * Do not rewind it at first resumed commit: time may already have been
+   * sampled or a timer interrupt taken during the return from MROM. */
   if (npc.mstatush != NULL)
     *npc.mstatush = loaded_snap.mstatush;
 
@@ -1330,7 +1449,7 @@ void checkpoint_inject_after_reset(void)
 
   if (npc.pmpcfg != NULL && npc.pmpaddr != NULL)
   {
-    Log("checkpoint: restored PMP state pmpcfg0=0x%02x pmpaddr0=" FMT_WORD,
+    Log("checkpoint: queued PMP CSR restore pmpcfg0=0x%02x pmpaddr0=" FMT_WORD,
         (unsigned int)loaded_snap.pmpcfg[0], loaded_snap.pmpaddr[0]);
   }
 
@@ -1357,7 +1476,7 @@ bool checkpoint_load_post_trampoline_tick(word_t committed_pc)
 
   /* Trampoline has retired (first commit at ckpt_pc means mret transferred
    * control). Now overwrite host-visible state that the trampoline perturbed:
-   *   - mcycle/h, minstret/h, time/h: skid by ~70 cycles + ~70 retires
+   *   - mcycle/h, minstret/h: skid during trampoline execution
    *   - mepc: trampoline wrote ckpt_pc into mepc to drive mret; saved mepc
    *           is recoverable now since mret has already consumed it.
    * Note: mret itself also forced mstatus.MPP/MPIE/MPRV per spec (architectural
@@ -1370,10 +1489,6 @@ bool checkpoint_load_post_trampoline_tick(word_t committed_pc)
     *npc.minstret = loaded_snap.minstret;
   if (npc.minstreth != NULL)
     *npc.minstreth = loaded_snap.minstreth;
-  if (npc.time___ != NULL)
-    *npc.time___ = loaded_snap.time_;
-  if (npc.timeh__ != NULL)
-    *npc.timeh__ = loaded_snap.timeh;
   if (npc.mepc___ != NULL)
     *npc.mepc___ = loaded_snap.mepc;
 

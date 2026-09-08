@@ -62,6 +62,9 @@ static uint64_t sstc_get_stimecmp(void)
 #endif
 }
 
+#if !defined(CONFIG_TARGET_SHARE) && defined(CONFIG_TIMER_CYCLE)
+// Only the instruction-count timer's WFI fast-forward path needs STCE here.
+// The live STIP level is kept separately and gated when CSR MIP is read.
 static bool sstc_enabled(void)
 {
 #if defined(CONFIG_RV64)
@@ -70,6 +73,7 @@ static bool sstc_enabled(void)
   return (cpu.sr[CSR_MENVCFGH] >> 31) & 0x1;
 #endif
 }
+#endif
 
 // Update MIP.MTIP and MIP.MSIP based on current CLINT state.
 // Called after every instruction (from decode_exec) and on CLINT MMIO writes.
@@ -84,13 +88,7 @@ void clint_update_mip(void)
   else
     cpu.sr[CSR_MIP] &= ~MIP_MTIP_BIT;
 
-  if (sstc_enabled())
-  {
-    if (ticks >= sstc_get_stimecmp())
-      cpu.sr[CSR_MIP] |= MIP_STIP_BIT;
-    else
-      cpu.sr[CSR_MIP] &= ~MIP_STIP_BIT;
-  }
+  cpu.stip = ticks >= sstc_get_stimecmp();
 
   // MSIP: software interrupt from CLINT MSIP register
   if (clint_msip & 1u)
@@ -123,7 +121,7 @@ bool clint_wfi_advance(void)
   uint64_t ticks = clint_get_ticks();
   uint64_t next_cmp = cpu.mtimecmp;
   uint64_t stimecmp = sstc_get_stimecmp();
-  if (stimecmp < next_cmp)
+  if (sstc_enabled() && stimecmp < next_cmp)
     next_cmp = stimecmp;
   // Only advance if timer interrupt is not already pending
   if (ticks < next_cmp)

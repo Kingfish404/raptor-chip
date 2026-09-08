@@ -3,18 +3,110 @@
 `include "rapt_config.svh"
 `include "rapt_sva.svh"
 
-// Implemented physical-address width. RV64 does not imply a 64-bit physical
-// address space; Sv39-capable systems conventionally implement up to 48 bits.
+// Bounded port reassignment policy; independent of ordered stage widths.
+// Off by default: current CSR/system operations serialize, and the
+// measured workloads do not justify the extra select-path logic. Custom
+// heterogeneous execution domains may enable it after timing evaluation.
+`ifndef RAPT_ISSUE_REBALANCE
+`define RAPT_ISSUE_REBALANCE 0
+`endif
+`ifndef RAPT_IQ_RECLAIM_ON_ISSUE
+`define RAPT_IQ_RECLAIM_ON_ISSUE 1
+`endif
+
+// Physical integer issue topology is independent of every ordered pipeline
+// boundary. One selected port carries the system/CSR capability; the remaining
+// ports are interchangeable simple-ALU capabilities. The completion fabric
+// derives one endpoint per integer port plus branch, memory and MUL/DIV.
+`ifndef RAPT_INTEGER_ISSUE_PORTS
+`define RAPT_INTEGER_ISSUE_PORTS 2
+`endif
+`ifndef RAPT_INTEGER_SYSTEM_PORT
+`define RAPT_INTEGER_SYSTEM_PORT 0
+`endif
+
+// Stop allocating younger work after a registered misprediction request.
+// Recovery itself remains retirement-triggered until selective repair exists.
+`ifndef RAPT_RECOVERY_DISPATCH_FENCE
+`define RAPT_RECOVERY_DISPATCH_FENCE 1
+`endif
+
+// Split ordered ROB allocation from execution-domain queue admission. Pending
+// ROB owners may steer independently across domains, so a full BRQ/IOQ does
+// not unnecessarily block an unrelated integer or multiply uop behind it.
+// Serializing operations still allocate alone at an empty ROB boundary.
+`ifndef RAPT_ROB_DISPATCH_BUFFERED
+`define RAPT_ROB_DISPATCH_BUFFERED 1
+`endif
+
+// Number of oldest ROB_DP owners exposed to the capacity-aware dispatch
+// router each cycle.  This is deliberately independent of dispatch width:
+// the router may look past several blocked domains while still admitting at
+// most RAPT_DISPATCH_WIDTH uops into execution queues.
+`ifndef RAPT_STEER_SCAN_ENTRIES
+`define RAPT_STEER_SCAN_ENTRIES 4
+`endif
+
+// ROB slot numbers are recycled.  Carry an allocation generation beside the
+// slot through dispatch, issue and completion so the ROB can distinguish a
+// current owner from a delayed result left by an older use of the same slot.
+// This is an identity discriminator, not by itself a cancellation protocol:
+// a future selective-recovery implementation must still prevent wrap while a
+// killed producer can remain outstanding.
+`ifndef RAPT_ROB_GENERATION_BITS
+`define RAPT_ROB_GENERATION_BITS 4
+`endif
+
+// Rename checkpoints are allocated to control-flow uops and released on
+// resolution.  They are a distinct resource from ROB entries: capacity
+// pressure stops at the ordered rename boundary instead of silently dropping
+// recovery state.
+`ifndef RAPT_BRANCH_CHECKPOINTS
+`define RAPT_BRANCH_CHECKPOINTS 16
+`endif
+
+// Stage widths are independent elaboration choices. Current presets declare
+// them directly; the legacy issue-width fallback exists only for out-of-tree
+// configurations. Ordered slot-control algorithms never select A/B variants.
+// Cache lookahead is a separate physical capability, not a slot count.
+`ifdef RAPT_DUAL_ISSUE
+`ifndef RAPT_FETCH_LOOKAHEAD
+`define RAPT_FETCH_LOOKAHEAD
+`endif
+`endif
+`ifndef RAPT_DECODE_WIDTH
+`ifdef RAPT_ISSUE_WIDTH
+`define RAPT_DECODE_WIDTH `RAPT_ISSUE_WIDTH
+`else
+`define RAPT_DECODE_WIDTH 1
+`endif
+`endif
+`ifndef RAPT_RENAME_WIDTH
+`define RAPT_RENAME_WIDTH `RAPT_DECODE_WIDTH
+`endif
+`ifndef RAPT_DISPATCH_WIDTH
+`define RAPT_DISPATCH_WIDTH `RAPT_RENAME_WIDTH
+`endif
+`ifndef RAPT_COMMIT_WIDTH
+`ifdef RAPT_DUAL_COMMIT
+`define RAPT_COMMIT_WIDTH 2
+`else
+`define RAPT_COMMIT_WIDTH 1
+`endif
+`endif
+
+// Physical-address comparison width. Preserve every implemented pmpaddr bit
+// through broadcast and range matching; mapped regions remain defined by PMA.
 `ifndef RAPT_PADDR_BITS
 `ifdef RAPT_RV64
-`define RAPT_PADDR_BITS 48
+`define RAPT_PADDR_BITS 56
 `else
 `define RAPT_PADDR_BITS 32
 `endif
 `endif
 
 // Architectural pmpaddr CSR width. RV64 reserves bits 63:54, independently
-// of the narrower physical address width implemented by the checker.
+// of XLEN. The default RV64 checker retains all 54 raw address bits.
 `ifndef RAPT_PMPADDR_BITS
 `ifdef RAPT_RV64
 `define RAPT_PMPADDR_BITS 54
@@ -111,73 +203,7 @@
 
 `define RAPT_ALU_ILL_ 'b01001
 
-// Serializing scalar-FP bring-up operation identifiers.
-`define RAPT_FP_OP_FMV_W_X 6'd1
-`define RAPT_FP_OP_FMV_X_W 6'd2
-`define RAPT_FP_OP_FSGNJ_S 6'd3
-`define RAPT_FP_OP_FSGNJN_S 6'd4
-`define RAPT_FP_OP_FSGNJX_S 6'd5
-`define RAPT_FP_OP_FLW 6'd6
-`define RAPT_FP_OP_FSW 6'd7
-`define RAPT_FP_OP_FMV_D_X 6'd8
-`define RAPT_FP_OP_FMV_X_D 6'd9
-`define RAPT_FP_OP_FSGNJ_D 6'd10
-`define RAPT_FP_OP_FSGNJN_D 6'd11
-`define RAPT_FP_OP_FSGNJX_D 6'd12
-`define RAPT_FP_OP_FLD 6'd13
-`define RAPT_FP_OP_FSD 6'd14
-`define RAPT_FP_OP_FADD_S 6'd15
-`define RAPT_FP_OP_FSUB_S 6'd16
-`define RAPT_FP_OP_FADD_D 6'd17
-`define RAPT_FP_OP_FSUB_D 6'd18
-`define RAPT_FP_OP_FMUL_S 6'd19
-`define RAPT_FP_OP_FMUL_D 6'd20
-`define RAPT_FP_OP_FMIN_S 6'd21
-`define RAPT_FP_OP_FMAX_S 6'd22
-`define RAPT_FP_OP_FMIN_D 6'd23
-`define RAPT_FP_OP_FMAX_D 6'd24
-`define RAPT_FP_OP_FLE_S 6'd25
-`define RAPT_FP_OP_FLT_S 6'd26
-`define RAPT_FP_OP_FEQ_S 6'd27
-`define RAPT_FP_OP_FCLASS_S 6'd28
-`define RAPT_FP_OP_FLE_D 6'd29
-`define RAPT_FP_OP_FLT_D 6'd30
-`define RAPT_FP_OP_FEQ_D 6'd31
-`define RAPT_FP_OP_FCLASS_D 6'd32
-`define RAPT_FP_OP_FCVT_W_S 6'd33
-`define RAPT_FP_OP_FCVT_WU_S 6'd34
-`define RAPT_FP_OP_FCVT_L_S 6'd35
-`define RAPT_FP_OP_FCVT_LU_S 6'd36
-`define RAPT_FP_OP_FCVT_S_W 6'd37
-`define RAPT_FP_OP_FCVT_S_WU 6'd38
-`define RAPT_FP_OP_FCVT_S_L 6'd39
-`define RAPT_FP_OP_FCVT_S_LU 6'd40
-`define RAPT_FP_OP_FCVT_W_D 6'd41
-`define RAPT_FP_OP_FCVT_WU_D 6'd42
-`define RAPT_FP_OP_FCVT_L_D 6'd43
-`define RAPT_FP_OP_FCVT_LU_D 6'd44
-`define RAPT_FP_OP_FCVT_D_W 6'd45
-`define RAPT_FP_OP_FCVT_D_WU 6'd46
-`define RAPT_FP_OP_FCVT_D_L 6'd47
-`define RAPT_FP_OP_FCVT_D_LU 6'd48
-`define RAPT_FP_OP_FCVT_S_D 6'd49
-`define RAPT_FP_OP_FCVT_D_S 6'd50
-`define RAPT_FP_OP_FMADD_S 6'd51
-`define RAPT_FP_OP_FMADD_D 6'd52
-`define RAPT_FP_OP_FMSUB_S 6'd53
-`define RAPT_FP_OP_FMSUB_D 6'd54
-`define RAPT_FP_OP_FNMSUB_S 6'd55
-`define RAPT_FP_OP_FNMSUB_D 6'd56
-`define RAPT_FP_OP_FNMADD_S 6'd57
-`define RAPT_FP_OP_FNMADD_D 6'd58
-`define RAPT_FP_OP_FDIV_S 6'd59
-`define RAPT_FP_OP_FDIV_D 6'd60
-`define RAPT_FP_OP_FSQRT_S 6'd61
-`define RAPT_FP_OP_FSQRT_D 6'd62
-// Zfhmin instructions share the final 6-bit FP operation tag.  The FEU and
-// IOQ distinguish the individual operation from the architected instruction
-// retained in the ROB payload (or from the memory-operation width).
-`define RAPT_FP_OP_ZFHMIN 6'd63
+`include "rapt_fp_ops.svh"
 
 `define RAPT_ALU_ADD_ 'b00000
 `define RAPT_ALU_SUB_ 'b01000
@@ -332,6 +358,7 @@
 `define RAPT_CSR_MENVCFG 'h30a
 
 `define RAPT_CSR_MSTATUSH 'h310
+`define RAPT_CSR_MENVCFGH 'h31a
 
 // Machine Trap Handling
 `define RAPT_CSR_MSCRATCH 'h340
@@ -405,6 +432,7 @@
 // the writable mask (SSIP only on sip; SSIE/STIE/SEIE on sie).
 `define RAPT_CSR_SIE_RMASK 32'h00000222
 `define RAPT_CSR_SIE_WMASK 32'h00000222
+`define RAPT_CSR_MIE_WMASK 32'h00010AAA
 `define RAPT_CSR_SIP_RMASK 32'h00000222
 `define RAPT_CSR_SIP_WMASK 32'h00000002
 `define RAPT_CSR_MIP_WMASK 32'h00000222
@@ -413,7 +441,7 @@
 `define RAPT_CSR_SENVCFG_WMASK 32'h000000f0
 `ifdef RAPT_RV64
 `define RAPT_CSR_MENVCFG_STCE 63
-`define RAPT_CSR_MENVCFG_WMASK 64'h8000_0000_0000_00f0
+`define RAPT_CSR_MENVCFG_WMASK 64'hc000_0000_0000_00f0
 `else
 `define RAPT_CSR_MENVCFG_WMASK 32'h0000_00f0
 `endif
@@ -462,7 +490,9 @@
 `define RAPT_CAUSE_INSTR_ACC_FAULT 'h1
 `define RAPT_CAUSE_ILLEGAL_INST 'h2
 `define RAPT_CAUSE_BREAKPOINT 'h3
+`define RAPT_CAUSE_LOAD_MISALIGNED 'h4
 `define RAPT_CAUSE_LOAD_ACC_FAULT 'h5
+`define RAPT_CAUSE_STORE_MISALIGNED 'h6
 `define RAPT_CAUSE_STORE_ACC_FAULT 'h7
 `define RAPT_CAUSE_ECALL_U 'h8
 `define RAPT_CAUSE_ECALL_S 'h9
@@ -480,6 +510,7 @@
 `define RAPT_CAUSE_MEI 'hb
 
 // CSR Write Masks
+// UBE is WARL-zero: every supported privilege mode is little-endian.
 // medeleg (WARL): delegable synchronous exceptions only, matching the Spike
 // reference for this extension set (RV32IMAC+S, Zicntr, no Zicfiss/Zicfilp/H):
 //   bits 1-9   fetch-access/illegal/breakpoint/misaligned-LS/LS-access/ecall-U/S
@@ -489,8 +520,9 @@
 // bit 18 (software check; needs Zicfiss/Zicfilp), reserved/hypervisor bits.
 // Bit 18 leak caused a Spike-difftest ABORT on the OpenSBI medeleg write.
 `define RAPT_CSR_MEDELEG_WMASK 'h8b3fe
-`define RAPT_CSR_MSTATUS_WMASK 32'h007FF9EA
-`define RAPT_CSR_SSTATUS_WMASK 32'h000DE162
+// XS is read-only zero: no additional user extension has architectural state.
+`define RAPT_CSR_MSTATUS_WMASK 32'h007E79AA
+`define RAPT_CSR_SSTATUS_WMASK 32'h000C6122
 
 // Hardwired mstatus/sstatus bits per RISC-V Priv Sec.3.1.6: in RV64 the SXL/UXL
 // fields are WARL but our implementation only supports XLEN=64 in S/U modes,
@@ -499,14 +531,19 @@
 // In RV32 these fields don't exist so the constants are zero.
 `ifdef RAPT_RV64
 `define RAPT_CSR_MSTATUS_SD 64'h8000_0000_0000_0000
-`define RAPT_CSR_SSTATUS_CMASK 64'h8000_0000_000D_E162
+`define RAPT_CSR_SSTATUS_CMASK 64'h8000_0000_000C_6122
 `define RAPT_CSR_MSTATUS_HW 64'h0000_000A_0000_0000
 `define RAPT_CSR_SSTATUS_HW 64'h0000_0002_0000_0000
 `else
 `define RAPT_CSR_MSTATUS_SD 32'h80000000
-`define RAPT_CSR_SSTATUS_CMASK 32'h800DE162
+`define RAPT_CSR_SSTATUS_CMASK 32'h800C6122
 `define RAPT_CSR_MSTATUS_HW 32'h0
 `define RAPT_CSR_SSTATUS_HW 32'h0
 `endif
+
+// Raptor platform posted-write error diagnostics. Not a standard ISA extension.
+`define RAPT_CSR_MBERR_STATUS 12'h7c0
+`define RAPT_CSR_MBERR_ADDR 12'hfc0
+`define RAPT_BUS_ERROR_IRQ 16
 
 `endif

@@ -56,6 +56,7 @@ CONFIG_DIFFTEST_REF_NAME="none"
 # Memory Configuration
 #
 CONFIG_ROM=y
+CONFIG_RAPTOR_MEMORY_MAP=y
 CONFIG_ROM_DTB=y
 CONFIG_ROM_DTB_PATH="./src/memory/rom/spike-rv32ima.dtb"
 CONFIG_MBASE=0x80000000

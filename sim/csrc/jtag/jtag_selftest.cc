@@ -17,34 +17,36 @@
 // Activated by passing --jtag-selftest on the sim CLI. Returns 0 on PASS,
 // 1 on any FAIL. No NEMU / image / mrom is touched.
 //
-// Build gating: only the npc top (VraptSoC / wrap_rnp) exposes the JTAG
-// pins at the Verilator top boundary. The ysyxSoC build (`-DRAPT_SOC`,
-// top = VysyxSoCFull) wraps them internally and ties the DTM in TLR, so
+// Build gating: the NPC top (VraptSoC) exposes JTAG pins at the
+// Verilator boundary. The wrapBus build (CONFIG_wrapBus,
+// top = VwrapSoC) wraps them internally and ties the DTM in TLR, so
 // the probe is not driveable from the C++ testbench. Compile to a stub
-// in that mode so the regular ysyxSoC binary still links.
-#ifdef RAPT_SOC
+// in that mode so the regular wrapBus binary still links.
+#include <common.h>
+
+#if defined(RAPT_SOC) || defined(CONFIG_wrapBus)
 
 #include <cstdio>
 
 extern "C" int jtag_selftest_main(int /*argc*/, char * /*argv*/[])
 {
   fprintf(stderr,
-          "[jtag-selftest] not supported in ysyxSoC build (RAPT_SOC defined): "
+          "[jtag-selftest] not supported in ysyxSoC/wrapBus builds: "
           "JTAG pins are tied off internally. Use the npc build instead.\n");
   return 1;
 }
 
-#else // !RAPT_SOC -- npc build with JTAG pins on the Verilator top
+#else // !CONFIG_wrapBus -- npc build with JTAG pins on the Verilator top
 
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 
-#include <common.h>
 #include "verilated.h"
 
 #include CONCAT_HEAD(TOP_NAME)
+#include <npc_eval.h>
 
 namespace
 {
@@ -95,10 +97,10 @@ namespace
   inline void clk_pulse()
   {
     g_top->clock = 0;
-    g_top->eval();
+    npc_eval(g_top);
     g_ctx->timeInc(1);
     g_top->clock = 1;
-    g_top->eval();
+    npc_eval(g_top);
     g_ctx->timeInc(1);
   }
 
@@ -490,6 +492,34 @@ namespace
     CHECK(misa != 0 && misa != 0xFFFFFFFF,
           "MISA read returns plausible value (got 0x%08x)", misa);
 
+    // Exercise addressed PRF reads across distinct registers. Keep all patterns
+    // resident until the reverse-order readback so a stale/aliased address fails.
+    // This DM probe uses 32-bit abstract transfers, including on RV64.
+    const unsigned arch_regs = (misa & (1u << 4)) ? 16u : 32u;
+    uint32_t saved[32] = {};
+    for (unsigned reg = 1; reg < arch_regs; ++reg) {
+      dmi_write(kAddrCommand, mk_acc_reg(0x1000 + reg, false));
+      saved[reg] = dmi_read(kAddrData0);
+      dmi_write(kAddrData0, 0xA5010000u ^ (0x01010101u * reg));
+      dmi_write(kAddrCommand, mk_acc_reg(0x1000 + reg, true));
+    }
+    for (unsigned reg = arch_regs - 1; reg > 0; --reg) {
+      dmi_write(kAddrCommand, mk_acc_reg(0x1000 + reg, false));
+      const uint32_t got = dmi_read(kAddrData0);
+      CHECK(got == (0xA5010000u ^ (0x01010101u * reg)),
+            "addressed GPR x%u pattern (got 0x%08x)", reg, got);
+    }
+    for (unsigned reg = 1; reg < arch_regs; ++reg) {
+      dmi_write(kAddrData0, saved[reg]);
+      dmi_write(kAddrCommand, mk_acc_reg(0x1000 + reg, true));
+    }
+    dmi_write(kAddrData0, 0xFFFFFFFFu);
+    dmi_write(kAddrCommand, mk_acc_reg(0x1000, true));
+    dmi_write(kAddrCommand, mk_acc_reg(0x1000, false));
+    CHECK(dmi_read(kAddrData0) == 0, "x0 abstract write is ignored");
+    CHECK(((dmi_read(kAddrAbstractcs) >> 8) & 7) == 0,
+          "addressed GPR sweep completes without cmderr");
+
     // 4) dcsr round-trip.
     dmi_write(kAddrData0, 0x40000003); // xdebugver=4, ebreakm=1, prv=11
     dmi_write(kAddrCommand, mk_acc_reg(0x07B0, /*write=*/true));
@@ -741,4 +771,4 @@ extern "C" int jtag_selftest_main(int argc, char *argv[])
   return 1;
 }
 
-#endif // RAPT_SOC
+#endif // CONFIG_wrapBus

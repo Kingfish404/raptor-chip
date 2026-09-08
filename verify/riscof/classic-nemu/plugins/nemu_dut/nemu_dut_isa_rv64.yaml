@@ -1,0 +1,52 @@
+hart_ids: [0]
+hart0:
+  ISA: RV64IMAFDCSUZicntr_Zicond_Zicsr_Zifencei_Zca_Zcb_Zba_Zbb_Zbc_Zbs
+  physical_addr_sz: 56
+  User_Spec_Version: "2.3"
+  Privilege_Spec_Version: "1.11"
+  hw_data_misaligned_support: true
+  pmp_granularity: 4
+  supported_xlen: [64]
+  misa:
+    reset-val: 0x800000000014112d
+    rv64:
+      accessible: true
+      mxl:
+        implemented: true
+        type:
+          warl:
+            dependency_fields: []
+            legal:
+              - mxl[1:0] in [0x2]
+            wr_illegal:
+              - unchanged
+      extensions:
+        implemented: true
+        type:
+          warl:
+            dependency_fields: []
+            legal:
+              - extensions[25:0] in [0x014112d]
+            wr_illegal:
+              - unchanged
+  satp:
+    rv64:
+      accessible: true
+      asid:
+        implemented: true
+        type:
+          warl:
+            dependency_fields: []
+            legal:
+              - asid[15:0] in [0:0xffff]
+            wr_illegal:
+              - unchanged
+      mode:
+        implemented: true
+        type:
+          warl:
+            dependency_fields: []
+            legal:
+              - mode[3:0] in [0, 8]
+            wr_illegal:
+              - unchanged

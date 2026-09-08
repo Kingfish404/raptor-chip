@@ -10,7 +10,7 @@
 //
 // Responsibilities:
 //   * Buffer dispatched MUL/DIV uops with operands (small age-ordered IQ)
-//   * Wake operands from the slow CDB ports (ALU-CSR / ALU / MEM / self).
+//   * Wake operands from the typed completion array (integer / MEM / self).
 //     No fast load-use path here: a load-fed MUL wakes one cycle later on
 //     the confirming MEM broadcast, trading a cycle of mul latency for a
 //     narrow wakeup network.
@@ -22,30 +22,34 @@
 // (see `a_to_mdq` in rapt_dpu): never memory / system / trap / branch,
 // so this pipe carries no CSR, trap, or store sideband (tied 0).
 module rapt_ieu_muldiv #(
+    parameter rapt_pkg::core_config_t Cfg = rapt_pkg::CoreConfig,
+    parameter type SlotT = rapt_pkg::dispatch_slot_t,
+    parameter int unsigned NumSlots = Cfg.dispatch_width,
+    parameter int unsigned NumCompletions = Cfg.completion_ports,
+    parameter type CompletionT = rapt_pkg::completion_t,
     parameter unsigned MDQ_SIZE = 4,
-    parameter unsigned ROB_SIZE = `RAPT_ROB_SIZE,
-    parameter unsigned PLEN     = `RAPT_PHY_LEN,
-    parameter unsigned RLEN     = `RAPT_REG_LEN,
-    parameter unsigned XLEN     = `RAPT_XLEN
+    parameter unsigned ROB_SIZE = Cfg.rob_entries,
+    parameter unsigned PLEN     = rapt_pkg::index_bits(Cfg.phys_regs),
+    parameter unsigned RLEN     = rapt_pkg::index_bits(Cfg.arch_regs),
+    parameter unsigned XLEN     = Cfg.xlen
 ) (
+    input CompletionT completion[NumCompletions],
     input clock,
     input reset,
 
     cmu_bcast_if.in cmu_bcast,
 
     // Dispatch source + arbitration (same handshake shape as the RS)
-    rou_exu_if.monitor rou_exu,
+    input SlotT dispatch[NumSlots],
     dpu_iq_if.rs  disp,
 
     // CDB forwarding sources (other value-producing pipes)
-    cdb_if.in exu_rou,
-    cdb_if.in exu_rou_b,
-    cdb_if.in exu_ioq_bcast,
 
     // Own writeback
-    cdb_if.out exu_wb_mul
+    output CompletionT exu_wb_mul
 );
   localparam unsigned MDQLen = (MDQ_SIZE > 1) ? $clog2(MDQ_SIZE) : 1;
+  localparam unsigned GenBits = $bits(dispatch[0].generation);
 
   // === IQ state ===
   logic [MDQ_SIZE-1:0] mdq_valid;
@@ -59,6 +63,7 @@ module rapt_ieu_muldiv #(
   logic [    PLEN-1:0] mdq_prd     [MDQ_SIZE];
   logic [    RLEN-1:0] mdq_rd      [MDQ_SIZE];
   logic [$clog2(ROB_SIZE)-1:0] mdq_dest[MDQ_SIZE];
+  logic [GenBits-1:0] mdq_generation[MDQ_SIZE];
   logic [    XLEN-1:0] mdq_pc      [MDQ_SIZE];
   logic [MDQ_SIZE-1:0] mdq_c;
   logic [MDQ_SIZE-1:0] mdq_word;
@@ -66,24 +71,16 @@ module rapt_ieu_muldiv #(
   logic [    XLEN-1:0] mdq_pnpc    [MDQ_SIZE];
 
   // === Unified CDB view for operand wakeup ===
-  // [0]=MEM [1]=ALU-CSR [2]=ALU [3]=self. Rename guarantees a unique
-  // producer per physical register, so port order is don't-care.
-  localparam int unsigned NWB = 4;
+  // All sources use one typed completion array.
+  localparam int unsigned NWB = NumCompletions;
   logic            wb_valid [NWB];
   logic [PLEN-1:0] wb_prd   [NWB];
   logic [XLEN-1:0] wb_result[NWB];
-  assign wb_valid[0]  = exu_ioq_bcast.valid;
-  assign wb_prd[0]    = exu_ioq_bcast.prd;
-  assign wb_result[0] = exu_ioq_bcast.result;
-  assign wb_valid[1]  = exu_rou.valid;
-  assign wb_prd[1]    = exu_rou.prd;
-  assign wb_result[1] = exu_rou.result;
-  assign wb_valid[2]  = exu_rou_b.valid;
-  assign wb_prd[2]    = exu_rou_b.prd;
-  assign wb_result[2] = exu_rou_b.result;
-  assign wb_valid[3]  = exu_wb_mul.valid;
-  assign wb_prd[3]    = exu_wb_mul.prd;
-  assign wb_result[3] = exu_wb_mul.result;
+  for (genvar p = 0; p < NWB; p++) begin : g_completion_view
+    assign wb_valid[p] = completion[p].valid;
+    assign wb_prd[p] = completion[p].prd;
+    assign wb_result[p] = completion[p].result;
+  end
 
   function automatic logic wb_hit(input logic [PLEN-1:0] pr);
     wb_hit = 1'b0;
@@ -124,43 +121,36 @@ module rapt_ieu_muldiv #(
     end
   end
 
-  // === Free-slot PEs (exposed via disp) ===
-  logic [MDQ_SIZE-1:0] mdq_free_vec;
-  assign mdq_free_vec = ~mdq_valid;
-
-  logic [MDQLen-1:0] free_idx_a, free_idx_b;
-  logic free_found_a, free_found_b;
+  int alloc_slot[MDQ_SIZE];
   always_comb begin
-    free_idx_a   = '0;
-    free_found_a = 1'b0;
-    for (int i = 0; i < MDQ_SIZE; i++) begin
-      if (!free_found_a && mdq_free_vec[i]) begin
-        free_idx_a   = i[MDQLen-1:0];
-        free_found_a = 1'b1;
+    automatic logic [MDQ_SIZE-1:0] remaining;
+    remaining = ~mdq_valid;
+    for (int s = 0; s < NumSlots; s++) begin
+      disp.free_found[s] = 1'b0;
+      disp.free_idx[s] = '0;
+      for (int e = 0; e < MDQ_SIZE; e++)
+      if (!disp.free_found[s] && remaining[e]) begin
+        disp.free_found[s] = 1'b1;
+        disp.free_idx[s] = MDQLen'(e);
+        remaining[e] = 1'b0;
       end
     end
   end
-`ifdef RAPT_DUAL_ISSUE
-  always_comb begin
-    free_idx_b   = '0;
-    free_found_b = 1'b0;
-    for (int i = 0; i < MDQ_SIZE; i++) begin
-      if (!free_found_b && mdq_free_vec[i] && !(free_found_a && i[MDQLen-1:0] == free_idx_a)) begin
-        free_idx_b   = i[MDQLen-1:0];
-        free_found_b = 1'b1;
-      end
+  for (genvar s = 0; s < NumSlots; s++) begin : g_alloc_contract
+    `RAPT_SVA_IMPLY(clock, reset || cmu_bcast.flush_pipe, QUEUE_ALLOC_FREE, disp.accept[s],
+                    !mdq_valid[disp.rs_idx[s]])
+    for (genvar t = s + 1; t < NumSlots; t++) begin : g_unique
+      `RAPT_SVA_IMPLY(clock, reset || cmu_bcast.flush_pipe, QUEUE_ALLOC_UNIQUE,
+                      disp.accept[s] && disp.accept[t], disp.rs_idx[s] != disp.rs_idx[t])
     end
   end
-`else
-  assign free_idx_b   = '0;
-  assign free_found_b = 1'b0;
-`endif
-
-  assign disp.free_found_a = free_found_a;
-  assign disp.free_found_b = free_found_b;
-  assign disp.free_idx_a   = free_idx_a;
-  assign disp.free_idx_b   = free_idx_b;
-
+  always_comb begin
+    for (int e = 0; e < MDQ_SIZE; e++) begin
+      alloc_slot[e] = -1;
+      for (int s = 0; s < NumSlots; s++)
+      if (disp.accept[s] && int'(disp.rs_idx[s]) == e) alloc_slot[e] = s;
+    end
+  end
   // === Age matrix (same strict-partial-order pattern as the RS) ===
   logic [MDQ_SIZE-1:0] age_mat[MDQ_SIZE];
   logic [MDQ_SIZE-1:0] age_col[MDQ_SIZE];
@@ -243,6 +233,7 @@ module rapt_ieu_muldiv #(
 
   assign exu_wb_mul.valid = fu_out_valid;
   assign exu_wb_mul.dest = mdq_dest[fu_out_tag];
+  assign exu_wb_mul.generation = mdq_generation[fu_out_tag];
   assign exu_wb_mul.result = fu_out_r;
   assign exu_wb_mul.prd = mdq_prd[fu_out_tag];
   assign exu_wb_mul.rd = mdq_rd[fu_out_tag];
@@ -281,46 +272,26 @@ module rapt_ieu_muldiv #(
       // is set (same argument as rapt_iq).  Only valid/issued/busy
       // control bits stay on the reset network.
     end else begin
-      // ---- Allocation (slot A / slot B write distinct free slots) ----
-      if (disp.accept_a) begin
-        mdq_valid[free_idx_a]    <= 1'b1;
-        mdq_issued[free_idx_a]   <= 1'b0;
-        mdq_vj[free_idx_a]       <= wake_val(rou_exu.pr1, rou_exu.op1);
-        mdq_vk[free_idx_a]       <= wake_val(rou_exu.pr2, rou_exu.op2);
-        mdq_pr1[free_idx_a]      <= wake_pr(rou_exu.pr1);
-        mdq_pr2[free_idx_a]      <= wake_pr(rou_exu.pr2);
-        mdq_pr1_busy[free_idx_a] <= |wake_pr(rou_exu.pr1);
-        mdq_pr2_busy[free_idx_a] <= |wake_pr(rou_exu.pr2);
-        mdq_prd[free_idx_a]      <= rou_exu.prd;
-        mdq_rd[free_idx_a]       <= rou_exu.uop.rd;
-        mdq_dest[free_idx_a]     <= rou_exu.dest;
-        mdq_pc[free_idx_a]       <= rou_exu.uop.pc;
-        mdq_c[free_idx_a]        <= rou_exu.uop.c;
-        mdq_word[free_idx_a]     <= rou_exu.uop.word;
-        mdq_alu[free_idx_a]      <= rou_exu.uop.alu[4:0];
-        mdq_pnpc[free_idx_a]     <= rou_exu.uop.pnpc;
+      for (int e = 0; e < MDQ_SIZE; e++)
+      if (alloc_slot[e] >= 0) begin
+        mdq_valid[e]    <= 1'b1;
+        mdq_issued[e]   <= 1'b0;
+        mdq_vj[e]       <= wake_val(dispatch[alloc_slot[e]].pr1, dispatch[alloc_slot[e]].op1);
+        mdq_vk[e]       <= wake_val(dispatch[alloc_slot[e]].pr2, dispatch[alloc_slot[e]].op2);
+        mdq_pr1[e]      <= wake_pr(dispatch[alloc_slot[e]].pr1);
+        mdq_pr2[e]      <= wake_pr(dispatch[alloc_slot[e]].pr2);
+        mdq_pr1_busy[e] <= |wake_pr(dispatch[alloc_slot[e]].pr1);
+        mdq_pr2_busy[e] <= |wake_pr(dispatch[alloc_slot[e]].pr2);
+        mdq_prd[e]      <= dispatch[alloc_slot[e]].prd;
+        mdq_rd[e]       <= dispatch[alloc_slot[e]].uop.rd;
+        mdq_dest[e]     <= dispatch[alloc_slot[e]].dest;
+        mdq_generation[e] <= dispatch[alloc_slot[e]].generation;
+        mdq_pc[e]       <= dispatch[alloc_slot[e]].uop.pc;
+        mdq_c[e]        <= dispatch[alloc_slot[e]].uop.c;
+        mdq_word[e]     <= dispatch[alloc_slot[e]].uop.execute.int_op.word;
+        mdq_alu[e]      <= dispatch[alloc_slot[e]].uop.execute.int_op.alu[4:0];
+        mdq_pnpc[e]     <= dispatch[alloc_slot[e]].uop.pnpc;
       end
-`ifdef RAPT_DUAL_ISSUE
-      if (disp.accept_b) begin
-        mdq_valid[disp.b_rs_idx]    <= 1'b1;
-        mdq_issued[disp.b_rs_idx]   <= 1'b0;
-        mdq_vj[disp.b_rs_idx]       <= wake_val(rou_exu.pr1_b, rou_exu.op1_b);
-        mdq_vk[disp.b_rs_idx]       <= wake_val(rou_exu.pr2_b, rou_exu.op2_b);
-        mdq_pr1[disp.b_rs_idx]      <= wake_pr(rou_exu.pr1_b);
-        mdq_pr2[disp.b_rs_idx]      <= wake_pr(rou_exu.pr2_b);
-        mdq_pr1_busy[disp.b_rs_idx] <= |wake_pr(rou_exu.pr1_b);
-        mdq_pr2_busy[disp.b_rs_idx] <= |wake_pr(rou_exu.pr2_b);
-        mdq_prd[disp.b_rs_idx]      <= rou_exu.prd_b;
-        mdq_rd[disp.b_rs_idx]       <= rou_exu.uop_b.rd;
-        mdq_dest[disp.b_rs_idx]     <= rou_exu.dest_b;
-        mdq_pc[disp.b_rs_idx]       <= rou_exu.uop_b.pc;
-        mdq_c[disp.b_rs_idx]        <= rou_exu.uop_b.c;
-        mdq_word[disp.b_rs_idx]     <= rou_exu.uop_b.word;
-        mdq_alu[disp.b_rs_idx]      <= rou_exu.uop_b.alu[4:0];
-        mdq_pnpc[disp.b_rs_idx]     <= rou_exu.uop_b.pnpc;
-      end
-`endif
-
       // ---- Resident operand wakeup (skip slots being allocated) ----
       for (int i = 0; i < MDQ_SIZE; i++) begin
         if (mdq_valid[i]) begin
@@ -348,32 +319,16 @@ module rapt_ieu_muldiv #(
         mdq_issued[fu_out_tag] <= 1'b0;
       end
 
-      // ---- Age matrix updates on allocation (same pattern as the RS) ----
-`ifdef RAPT_DUAL_ISSUE
+      // New entries are younger than residents and ordered by dispatch slot.
       for (int i = 0; i < MDQ_SIZE; i++) begin
         for (int j = 0; j < MDQ_SIZE; j++) begin
-          if (disp.accept_a && disp.accept_b
-              && i == int'(free_idx_a) && j == int'(disp.b_rs_idx)) begin
-            age_mat[i][j] <= 1'b1;
-          end else if (disp.accept_b && i == int'(disp.b_rs_idx)) begin
-            age_mat[i][j] <= 1'b0;
-          end else if (disp.accept_b && j == int'(disp.b_rs_idx) && i != int'(disp.b_rs_idx)) begin
-            age_mat[i][j] <= mdq_valid[i];
-          end else if (disp.accept_a && i == int'(free_idx_a)) begin
-            age_mat[i][j] <= 1'b0;
-          end else if (disp.accept_a && j == int'(free_idx_a) && i != int'(free_idx_a)) begin
-            age_mat[i][j] <= mdq_valid[i];
-          end
+          if (alloc_slot[i] >= 0 && alloc_slot[j] >= 0)
+            age_mat[i][j] <= alloc_slot[i] < alloc_slot[j];
+          else if (alloc_slot[i] >= 0) age_mat[i][j] <= 1'b0;
+          else if (alloc_slot[j] >= 0) age_mat[i][j] <= mdq_valid[i];
         end
       end
-`else
-      if (disp.accept_a) begin
-        for (int j = 0; j < MDQ_SIZE; j++) begin
-          age_mat[free_idx_a][j] <= 1'b0;
-          if (j != int'(free_idx_a)) age_mat[j][free_idx_a] <= mdq_valid[j];
-        end
-      end
-`endif
+
     end
   end
 
@@ -388,4 +343,5 @@ module rapt_ieu_muldiv #(
   `RAPT_SVA_IMPLY(clock, reset, MDQ_WB_VALID_ENTRY, fu_out_valid,
                   (mdq_valid[fu_out_tag] && mdq_issued[fu_out_tag]))
 
+  assign exu_wb_mul.updates = '{control_flow: 1'b1, default: '0};
 endmodule

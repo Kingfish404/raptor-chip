@@ -70,6 +70,9 @@ trait Instr {
   def PREFETCH_W = BitPat("b0000000 00011 ????? 110 00000 0010011")
 
   def SFENCE_VM = BitPat("b0001001 ????? ????? 000 00000 1110011")
+  def SINVAL_VM = BitPat("b0001011 ????? ????? 000 00000 1110011")
+  def SFENCE_W_INVAL = BitPat("b0001100 00000 00000 000 00000 1110011")
+  def SFENCE_INVAL_IR = BitPat("b0001100 00001 00000 000 00000 1110011")
 
   // RV32/RV64 Zicsr              csr   rs1 func3  rd  opcode
   def CSRRW_ = BitPat("b??????? ????? ????? 001 ????? 1110011")

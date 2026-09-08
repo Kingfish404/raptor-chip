@@ -7,6 +7,13 @@ The flow uses Yosys with the slang SystemVerilog frontend and OpenSTA. It reuses
 the open PDK data and mapping configuration under `third_party/yosys-opensta`
 for ASAP7, NanGate45, and SKY130 HD.
 
+RTL parameter contracts use generate-time error checks: invalid configurations
+fail elaboration and valid configurations contain no assertion hardware. The
+flow uses the frontend's default unroll limit, without ignoring initial blocks
+or removing assertion cells. `make -C lspd/syn elaborate MODULE=core` checks
+this boundary before technology mapping. ROB/UOQ/IQ entries use generated local
+state writers; small procedural port loops express priority within an entry.
+
 The physical-design flow uses the mapped synthesis netlist as OpenROAD input.
 It currently enables NanGate45, which has a complete local LEF, Liberty, RC,
 and GDS platform setup in this repository. The interface is intentionally
@@ -14,6 +21,21 @@ parallel to the synthesis flow so more physical-design platforms can be added
 without changing module-level usage.
 
 ## Quick start
+
+The root `make sta` entry uses `sim`'s packed whole-chip flow; the module
+commands below use LSPD. Normal STA checks the installed tools without fetching
+or updating repositories. For explicit whole-chip tool provisioning, run
+`make -C sim sta-setup STA_PLATFORM=nangate45` (network access and installation
+permissions required). `make -C sim sta-deps` only checks readiness.
+The packed-RTL checks first run `synth-frontend-check`. After upgrading Yosys,
+rerun `sta-setup`: the Slang plugin must match the new Yosys ABI and be installed
+in that version's plugin directory. Copying an old `slang.so` is insufficient.
+
+Before mapping, `make -C sim pack-sram-synth-check` checks the whole-chip RTL
+against SRAM macro port contracts; `pack-synth-check` checks behavioral SRAM.
+Both use native Slang declaration rules and default expansion limits. Add
+`VFLAGS=-DRAPT_RV64` for RV64 and `BUILD_PROFILE=sta-check-rv64` to isolate
+outputs; neither check changes the shared simulator configuration.
 
 ```sh
 make -C lspd list
@@ -52,16 +74,98 @@ Large cache/core configurations can consume substantially more memory than
 small frontend blocks. Reduce `PARALLEL_JOBS` or increase `JOB_MEMORY_MB` when
 running `core`, `l1i`, `l1d`, and enabled `l2` together.
 
-Supported module names are `core`, `bpu`, `ifu`, `fqu`, `l1i`, `idu`, `rnu`,
-`rou`, `prf`, `fpr`, `dpu`, `ieu`, `feu`, `cmu`, `csr`, `lsu`, `l1d`, `bus`,
-`axi`, and `l2`.
+Supported module names are `core`, `bpu`, `ifu`, `fqu`, `stream_queue`, `l1i`, `idu`, `rnu`, `rename_checkpoint`,
+`rou`, `prf`, `fpr`, `dpu`, `dispatch_select`, `dispatch_steer`, `issue_select`, `muldiv_fu`, `ieu`, `feu`, `cmu`, `csr`, `lsu`,
+`l1d`, `bus`, `axi`, and `l2`. `dpu` isolates K-to-W domain/token compaction;
+`dispatch_select` isolates ROB rotation/rank and acceptance accounting;
+`dispatch_steer` combines both with indexed domain lookup and selected physical
+identities, but not the wide operand payload read.
+`issue_select` exposes the combinational issue-selection cone with a clock port
+used only as an IO timing reference; it inserts no pipeline registers.
+`muldiv_fu` exposes the complete `rapt_ieu_mul` arithmetic unit, including both
+multiply and divide paths, with native independent operands, operation, word
+mode, tag, and handshake ports. It excludes the MDQ and completion arbiter.
+For the RV64 four-entry MDQ tag shape, use `EXTRA_DEFINES='-DRAPT_RV64 -GTAG_W=2'`;
+select `SRAM_MODE=flops` because this leaf contains no SRAM. A full-unit worst
+path can be in the multiplier and need not describe divider-specific timing.
 Use `make -C lspd list` to show the corresponding RTL top modules.
 
-Module-only synthesis adapters live in `lspd/hdl_wrapper/`. They are appended
-only to the LSPD source set and do not enter the product `hdl/` tree, simulator
-pack, or tapeout RTL file list. DPU, IEU, FEU, and LSU use these adapters to
-present tool-friendly `stimulus` / `response` boundaries while preserving the
-product modules' native interface topology.
+Module-only synthesis adapters live in `lspd/hdl_wrapper/`. Only the selected
+top's adapter is parsed, so an unrelated stale wrapper cannot invalidate a
+module's report after an interface refactor. They do not enter the product
+`hdl/` tree, simulator pack, or tapeout RTL file list. DPU retains its
+`stimulus` / `response` adapter. IEU, FEU and LSU expose independent typed dispatch
+and completion arrays plus native interface ports; their queue grants and
+capacity outputs are flattened per slot with queue-specific index widths.
+They add no output reduction or correlated stimulus fan-in to the measured
+logic. Select XLEN/ROB/payload types through the preset and `-DRAPT_RV64`, not
+independent wrapper width overrides. FPR A/B/C names denote three operands,
+not dispatch lanes.
+
+The focused native elaboration gate covers IEU/FEU in RV32, RV64, and scaled
+configurations (three dispatch slots, seven completions, seven-entry queue;
+IEU also has four integer ports with system port 2):
+
+```sh
+python3 verify/scripts/rtl_synthesis_check.py --only execution \
+  --output /tmp/execution-wrapper-native-final
+```
+
+This gate uses default frontend limits and fingerprints HDL, wrappers and
+flow Makefiles. It is elaboration evidence, not mapped area or timing closure;
+old stimulus-wrapper PPA is not directly comparable to this new boundary.
+
+LSU has a separate focused group covering RV32, RV64 and an expanded RV64
+configuration (three dispatch slots, seven completions, IOQ 16, SQ 32).
+Its wrapper preserves the committed-store interface and completion acceptance;
+it does not add selective cancellation to the LSU or alter store draining.
+Use `--check-structure` to additionally run ordinary `opt` followed by
+`check -assert`, failing on remaining structural problems:
+
+```sh
+python3 verify/scripts/rtl_synthesis_check.py --only lsu --check-structure \
+  --output /tmp/lsu-wrapper-structure-final
+# The same stronger check is available for any individual synthesis top:
+make -C lspd/syn structure-check MODULE=lsu BUILD_DIR=/tmp/lsu-structure
+```
+
+Reports distinguish elaboration-only from optimized structural checks.
+Neither performs technology mapping or proves protocol/ISA correctness.
+
+The mapped synthesis flow also fails closed on structural problems: ordinary
+`opt; check -assert` runs before synthesis and undriven-value normalization,
+and a second `check -assert` guards the final mapped netlist. A missing live
+driver must not silently become a constant through `setundef -zero`.
+Exercise the actual Tcl flow with valid and deliberately undriven fixtures:
+
+```sh
+make -C verify synthesis-driver-check
+```
+
+This check uses the installed Yosys/slang and Nangate45 library. It is a tool-flow
+regression test, not evidence that every production configuration synthesizes.
+
+STA runs a fatal `check_setup -verbose` constraint audit before timing reports.
+Each run first writes `status incomplete` to invalidate an earlier successful
+summary; only a completed run writes `status ok`. The summary collector rejects
+explicitly incomplete reports even if old netlists/logs remain. Legacy summaries
+without a status field remain readable, but are not retroactively certified by
+the new audit. Exercise real constrained/unconstrained-clock fixtures with:
+
+```sh
+make -C verify sta-constraint-check
+```
+
+Constraint coverage is not timing closure: negative slack remains a reported
+timing result, not an unconstrained-path error.
+
+Timing schema 2 reports global WNS/TNS and, when a register-to-register path
+exists, `reg_setup_budget_ns` (target period minus register-only setup slack).
+It no longer estimates `period_min_ns`/`fmax_mhz` from global slack: IO delays
+can dominate that slack. The summary table shows register setup budget rather
+than Fmax; legacy reports without a register-only metric show N/A. The metric
+still depends on the clocks, exceptions, library and interconnect model and is
+not a full-design frequency guarantee.
 
 Results are isolated by configuration, PDK, module, and target frequency:
 
@@ -74,6 +178,9 @@ lspd/syn/build/<config>/<pdk>/<module>/<frequency>MHz/
   sta.log
   synth.profile             # synthesis wall/CPU time and peak RSS
   sta.profile               # STA wall/CPU time and peak RSS
+  run_config.txt            # exact module/config/constraint/define tuple
+  source_manifest.sha256    # source hashes used by synthesis
+  netlist.sha256            # mapped-netlist hash
   sram_model.txt            # SRAM implementation mode and model provenance
 ```
 

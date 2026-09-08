@@ -9,6 +9,11 @@ extern "C" {
 #include <generated/csr.h>
 #include <generated/soc.h>
 
+// Keep the BIOS UART synchronous without modifying LiteX's shared uart.c.
+#ifndef UART_POLLING
+#define UART_POLLING
+#endif
+
 /*
  * Raptor connects all LiteX peripheral IRQs onto the standard RISC-V
  * external-interrupt line (mip[MEIP] / mie[MEIE], bit 11). LiteX BIOS,

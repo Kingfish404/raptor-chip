@@ -161,6 +161,8 @@ typedef struct
   word_t *mcycleh;
   word_t *minstret;
   word_t *minstreth;
+  // Reserved ABI slots: older reference libraries include these pointers.
+  // Architectural time now comes from CLINT; neither slot is bound or used.
   word_t *time___;
   word_t *timeh__;
 
@@ -227,6 +229,14 @@ typedef struct
   uint32_t *fcsr;
   uint32_t difftest_state_version;
   uint32_t xlen;
+  // Append-only checkpoint observation of platform write-error diagnostics.
+  uint8_t *bus_error_pending;
+  uint8_t *bus_error_overflow;
+  uint8_t *bus_error_strb;
+  word_t *bus_error_addr;
+  // Append-only timer checkpoint observations; preserve the reference ABI.
+  word_t *menvcfgh;
+  uint64_t *stimecmp;
 } NPCState;
 
 typedef struct
@@ -237,12 +247,12 @@ typedef struct
   long long int ifu_fetch_cnt;
   long long int ifu_fetch_inst_cnt;
   long long int ifu_fetch_response_cnt;
-  long long int ifu_dual_fetch_cnt;
+  long long int ifu_multi_fetch_cnt;
   long long int ifu_fetch_bpu_taken_cnt;
-  long long int ifu_fetch_slot_a_control_cnt;
-  long long int ifu_fetch_slot_b_control_cnt;
-  long long int ifu_fetch_slot_b_jal_pack_cnt;
-  long long int ifu_fetch_slot_b_cond_pack_cnt;
+  long long int ifu_fetch_first_control_cnt;
+  long long int ifu_fetch_aux_conditional_cnt;
+  long long int ifu_fetch_nonfirst_jal_pack_cnt;
+  long long int ifu_fetch_nonfirst_cond_pack_cnt;
   long long int ifu_fetch_n1_unavailable_cnt;
   long long int ifu_fetch_n1_unavailable_unaligned_cnt;
   long long int ifu_fetch_n1_unavailable_l1i_cnt;
@@ -312,6 +322,11 @@ typedef struct
   long long int branch_recovery_completed;
   long long int branch_recovery_wait_cycles;
   long long int branch_recovery_overlap_events;
+  long long int alq_ready_entry_cycles;
+  long long int alq_issued;
+  long long int alq_rebalance_gain;
+  long long int alq_reclaim_allocations;
+  long long int alq_extra_port_issues;
 
   // -------------------------------------------------------------------
   // Extended Raptor-local PMU counters, sampled in perf_sample_per_cycle.
@@ -347,6 +362,15 @@ typedef struct
   // dispatch backpressure, not an all-busy ROB.
   long long int uoq_blocked_cycle;
   long long int uoq_blocked_events;
+  // Rename checkpoint occupancy and conservative post-mispredict fence.
+  // `full` is pool state; `stall` excludes cycles where another earlier
+  // resource would have blocked ordered rename anyway.
+  long long int rename_checkpoint_full_cycle;
+  long long int rename_checkpoint_stall_cycle;
+  long long int rename_checkpoint_occupancy_sum;
+  long long int rename_checkpoint_peak;
+  long long int rename_recovery_fence_cycle;
+  long long int recovery_early_redirect_events;
   // Exact all-ROB-entries-busy rising-edge probe exported by rapt_rou.
   long long int rob_full_events;
   long long int sq_full_cycle;
@@ -354,10 +378,12 @@ typedef struct
 
   // Commit-width distribution.
   //   commit_0_cycle == wbu_stall_cycle (no commit)
-  //   commit_1_cycle  = wbu_valid && !wbu_valid_b
-  //   commit_2_cycle  = wbu_valid && wbu_valid_b
+  //   commit_1_cycle / commit_2_cycle count exactly one / two retirements.
+  //   commit_wide_cycle counts three or more; multi_inst preserves exact total.
   long long int commit_1_cycle;
   long long int commit_2_cycle;
+  long long int commit_wide_cycle;
+  long long int commit_multi_inst;
 
   // Rename/dispatch status mix.
   long long int dispatch_running_cycle; // rnu_valid && rou_ready

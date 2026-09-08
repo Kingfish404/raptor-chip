@@ -79,16 +79,33 @@
 // Adds RVFI output ports to the core; enable only for riscv-formal checks.
 // `define RAPT_RVFI
 
-// Dual commit: retire up to 2 consecutive ROB entries per cycle.
-// Comment out or undefine to disable for A/B benchmarking.
+// Ordered stage widths are authoritative and independently overrideable.
+`ifndef RAPT_INTEGER_ISSUE_PORTS
+`define RAPT_INTEGER_ISSUE_PORTS 2
+`endif
+`ifndef RAPT_INTEGER_SYSTEM_PORT
+`define RAPT_INTEGER_SYSTEM_PORT 0
+`endif
+`ifndef RAPT_DECODE_WIDTH
+`define RAPT_DECODE_WIDTH 2
+`endif
+`ifndef RAPT_RENAME_WIDTH
+`define RAPT_RENAME_WIDTH 2
+`endif
+`ifndef RAPT_DISPATCH_WIDTH
+`define RAPT_DISPATCH_WIDTH 2
+`endif
+`ifndef RAPT_COMMIT_WIDTH
+`define RAPT_COMMIT_WIDTH 2
+`endif
+`ifndef RAPT_FETCH_LOOKAHEAD
+`define RAPT_FETCH_LOOKAHEAD
+`endif
+
+// Deprecated compatibility markers for historical modules/testbenches. The
+// active IFU/IDU/RNU/ROU path uses the independent widths above, not A/B mode.
 `define RAPT_DUAL_COMMIT
-
-// Dual issue: dispatch up to 2 instructions per cycle through the pipeline.
-// Widens IFU, IDU, RNU, ROU, EXU dispatch paths. Comment out to revert to single-issue.
 `define RAPT_DUAL_ISSUE
-
-// Issue width (number of instructions dispatched per cycle)
-// Set to 1 for single-issue; increase for multi-issue
 `ifdef RAPT_DUAL_ISSUE
 `define RAPT_ISSUE_WIDTH 2
 `else

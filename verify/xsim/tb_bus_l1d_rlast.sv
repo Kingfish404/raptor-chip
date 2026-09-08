@@ -4,7 +4,7 @@
 
 module tb_bus_l1d_rlast;
   localparam int XLEN = 32;
-  localparam int IdW = 4;
+  localparam int IdW  = 4;
 
   logic clock = 1'b0;
   logic reset = 1'b1;
@@ -13,14 +13,19 @@ module tb_bus_l1d_rlast;
       .XLEN(XLEN),
       .ID_W(IdW)
   ) axi ();
-  mem_link_if #(.XLEN(XLEN), .ID_W(IdW)) mem ();
+  mem_link_if #(
+      .XLEN(XLEN),
+      .ID_W(IdW)
+  ) mem ();
 
   l1i_bus_if #(.XLEN(XLEN)) l1i_bus ();
   l1d_bus_if #(.XLEN(XLEN)) l1d_bus ();
   csr_bcast_if #(.XLEN(XLEN)) csr_bcast ();
   cmu_bcast_if #(.XLEN(XLEN)) cmu_bcast ();
 
-  rapt_bus #(.XLEN(XLEN)) dut (
+  rapt_bus #(
+      .XLEN(XLEN)
+  ) dut (
       .clock(clock),
       .mem(mem),
       .l1i_bus(l1i_bus),
@@ -30,12 +35,15 @@ module tb_bus_l1d_rlast;
       .reset(reset)
   );
 
-      rapt_axi_master #(.XLEN(XLEN), .ID_W(IdW)) adapter (
-        .clock(clock),
-        .reset(reset),
-        .mem(mem),
-        .axi(axi)
-      );
+  rapt_axi_master #(
+      .XLEN(XLEN),
+      .ID_W(IdW)
+  ) adapter (
+      .clock(clock),
+      .reset(reset),
+      .mem(mem),
+      .axi(axi)
+  );
 
   always #5 clock = ~clock;
 
@@ -67,6 +75,8 @@ module tb_bus_l1d_rlast;
 
     l1d_bus.araddr = 32'h8000_1000;
     l1d_bus.rstrb = 8'h0f;
+    l1d_bus.rpbmt = 2'b00;
+    l1d_bus.wpbmt = 2'b00;
     l1d_bus.arvalid = 1'b1;
     #1;
     check(l1d_bus.rready, "L1D request was not captured");

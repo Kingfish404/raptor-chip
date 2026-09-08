@@ -46,6 +46,10 @@ void checkpoint_configure_save(bool has_cycle, uint64_t cycle,
 /* Hook called on each committed instruction. Records PC-triggered save points. */
 void checkpoint_note_commit(word_t committed_pc);
 
+/* Normalize functional SQ storage; false means a split/complex store must drain. */
+bool cpu_read_sq_snapshot_control(uint32_t *valid, uint32_t *committed,
+                                  uint8_t *capacity, uint8_t *head);
+
 /* Configure load: read checkpoint dir and stash arch state to inject after
  * reset. Memory regions are loaded into the host buffers and an MROM
  * trampoline is generated. */

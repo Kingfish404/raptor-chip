@@ -9,8 +9,10 @@ cross-check the Raptor DUT results.
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 import logging
 import os
+import shlex
 import shutil
 import subprocess
 
@@ -36,7 +38,7 @@ class nemu_dut(pluginTemplate):
         self.pluginpath = os.path.abspath(config["pluginpath"])
         self.isa_spec = os.path.abspath(config["ispec"])
         self.platform_spec = os.path.abspath(config["pspec"])
-        self.num_jobs = str(config.get("jobs", 1))
+        self.num_jobs = max(1, int(os.environ.get("RAPT_JOBS", config.get("jobs", 4))))
         self.target_run = config.get("target_run", "1") != "0"
 
         # NEMU-specific paths picked up from the environment.  The verify
@@ -111,46 +113,56 @@ class nemu_dut(pluginTemplate):
     # ------------------------------------------------------------------
     def runTests(self, testList):
         total = len(testList)
-        for idx, testname in enumerate(testList, 1):
-            entry = testList[testname]
-            test_dir = entry["work_dir"]
-            asm = entry["test_path"]
-            marchstr = entry["isa"].lower()
+        if not total:
+            raise RuntimeError("No NEMU tests selected")
+        jobs = ((idx, total, name, testList[name]) for idx, name in enumerate(testList, 1))
+        with ThreadPoolExecutor(max_workers=self.num_jobs) as pool:
+            failures = [name for name in pool.map(self._run_test, jobs) if name]
+        if failures:
+            raise RuntimeError(f"{len(failures)}/{total} NEMU runs failed; see dut/nemu.log")
 
-            os.makedirs(test_dir, exist_ok=True)
-            elf = os.path.join(test_dir, "dut.elf")
-            bin_ = os.path.join(test_dir, "dut.bin")
-            sig = os.path.join(test_dir, self.name[:-1] + ".signature")
+    def _run_test(self, job):
+        idx, total, testname, entry = job
+        test_dir = entry["work_dir"]
+        asm = entry["test_path"]
+        marchstr = entry["isa"].lower()
 
-            macros = " -D" + " -D".join(entry["macros"])
-            cmd = self.compile_cmd.format(marchstr, self.xlen, asm, elf, macros)
-            logger.debug("[%d/%d] compile: %s", idx, total, cmd)
-            utils.shellCommand(cmd).run(cwd=test_dir)
+        os.makedirs(test_dir, exist_ok=True)
+        elf = os.path.join(test_dir, "dut.elf")
+        bin_ = os.path.join(test_dir, "dut.bin")
+        sig = os.path.join(test_dir, self.name[:-1] + ".signature")
 
-            utils.shellCommand(
-                f"{self.objcopy} -O binary {elf} {bin_}"
-            ).run(cwd=test_dir)
+        macros = " -D" + " -D".join(entry["macros"])
+        cmd = self.compile_cmd.format(marchstr, self.xlen, asm, elf, macros)
+        logger.debug("[%d/%d] compile: %s", idx, total, cmd)
+        with open(os.path.join(test_dir, "build.log"), "w") as log:
+            subprocess.run(shlex.split(cmd), cwd=test_dir, stdout=log,
+                           stderr=subprocess.STDOUT, check=True)
+            subprocess.run([self.objcopy, "-O", "binary", elf, bin_],
+                           cwd=test_dir, stdout=log,
+                           stderr=subprocess.STDOUT, check=True)
 
-            print(f"[{idx}/{total}] {os.path.basename(testname)}")
+        print(f"[{idx}/{total}] {os.path.basename(testname)}", flush=True)
 
-            if not self.target_run:
-                continue
+        if not self.target_run:
+            return None
 
-            beg, end = self._extract_sig_range(elf)
-            # NEMU must be invoked from its own source tree because it
-            # dereferences the DTB with a path relative to $NEMU_HOME.
-            run_cmd = (
-                f"{self.nemu_bin} -b -n "
-                f"--sig={beg:x}-{end:x}:{sig} "
-                f"{bin_}"
-            )
-            logger.debug("DUT run: %s", run_cmd)
-            try:
-                utils.shellCommand(run_cmd).run(
-                    cwd=self.nemu_home,
-                    timeout=int(self.timeout) + 30,
-                )
-            except Exception as exc:
-                logger.warning("DUT run failed for %s: %s", testname, exc)
-                if not os.path.exists(sig):
-                    open(sig, "w").close()
+        beg, end = self._extract_sig_range(elf)
+        # NEMU must be invoked from its own source tree because it
+        # dereferences the DTB with a path relative to $NEMU_HOME.
+        run_cmd = [self.nemu_bin, "-b", "-n",
+                   f"--sig={beg:x}-{end:x}:{sig}", bin_]
+        logger.debug("DUT run: %s", run_cmd)
+        if os.path.exists(sig):
+            os.remove(sig)
+        try:
+            with open(os.path.join(test_dir, "nemu.log"), "w") as log:
+                subprocess.run(run_cmd, cwd=self.nemu_home, stdout=log,
+                               stderr=subprocess.STDOUT,
+                               timeout=int(self.timeout) + 30, check=True)
+            if not os.path.isfile(sig) or os.path.getsize(sig) == 0:
+                raise RuntimeError("NEMU produced no signature")
+        except (subprocess.SubprocessError, OSError, RuntimeError) as exc:
+            logger.error("DUT run failed for %s: %s", testname, exc)
+            return testname
+        return None

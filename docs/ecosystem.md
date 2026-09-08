@@ -8,17 +8,16 @@ Simulators, FPGA boards, ASIC flow, software stack, and memory maps.
 | ----------- | --------------------------------- | ------------------------------------------------------------- |
 | NEMU        | Software ISS (difftest reference) | `nemu/README.md`                                              |
 | NPC         | Verilator simulator               | `sim/`                                                        |
-| ysyxSoC     | Chisel SoC for testing            | [memory map](#ysyxsoc-memory-map)                             |
 | FPGA        | Gowin boards and LiteX KU15P      | `fpga/gowin-tang-nano-20k/README.md`, `fpga/litex/README.md`  |
 | ASIC (open) | Yosys + OpenSTA flow              | [yosys-opensta](https://github.com/Kingfish404/yosys-opensta) |
 
 ## Simulators
 
-| Simulator   | Role                                 | Entry                        |
-| ----------- | ------------------------------------ | ---------------------------- |
-| **NEMU**    | Software ISS, reference model        | `make run-nemu32`, `nemu/`   |
-| **NPC**     | Verilator, cycle-accurate, waveform  | `make sim-rv32`, `sim/`      |
-| **raptSoC** | Chisel SoC wrapping Raptor + devices | `make coremark-ysyxsoc` etc. |
+| Simulator   | Role                                     | Entry                      |
+| ----------- | ---------------------------------------- | -------------------------- |
+| **NEMU**    | Software ISS, reference model            | `make run-nemu32`, `nemu/` |
+| **NPC**     | Verilator, cycle-accurate, waveform      | `make sim-rv32`, `sim/`    |
+| **raptSoC** | SystemVerilog NPC top + AXI memory model | `sim/rtl/rapt_npc_soc.sv`  |
 
 NPC is the primary development simulator. NEMU acts as the difftest reference for every commit.
 
@@ -41,7 +40,9 @@ See [`fpga/litex/README.md`](../fpga/litex/README.md) for the LiteX BIOS + Linux
 - **PDK**: open-source cell libraries; PPA results published under
   [openppa](https://github.com/Kingfish404/openppa).
 
-See **[PROFILE.md](./PROFILE.md)** for the latest Freq / Power / Area results and
+See **[PROFILE.md](./PROFILE.md)** for archived Freq / Power / Area results,
+[Performance Iterations](./perf-iterations.md) for recorded configuration-specific
+measurements, and
 **[REFERENCE.md](./REFERENCE.md)** for the PPA benchmark framework.
 
 ## Software Stack
@@ -71,29 +72,12 @@ See **[PROFILE.md](./PROFILE.md)** for the latest Freq / Power / Area results an
 
 Reset vector `PC_INIT` = `0x2000_0000` (MROM).
 
-## raptSoC Memory Map
+## Random Memory-Delay Simulation
 
-| Device            | Range                       |
-| ----------------- | --------------------------- |
-| Finisher          | `0x0010_0000 – 0x0010_0fff` |
-| CLINT             | `0x0200_0000 – 0x020b_ffff` |
-| PLIC              | `0x0c00_0000 – 0x0cff_ffff` |
-| SRAM              | `0x0f00_0000 – 0x0f00_ffff` |
-| UART 16550        | `0x1000_0000 – 0x1000_0fff` |
-| SPI master        | `0x1000_1000 – 0x1000_1fff` |
-| GPIO              | `0x1000_2000 – 0x1000_200f` |
-| Legacy ysyx CLINT | `0x1001_1000 – 0x1001_1fff` |
-| MROM              | `0x2000_0000 – 0x2000_ffff` |
-| VGA               | `0x2100_0000 – 0x211f_ffff` |
-| QEMU SDHCI ECAM   | `0x3000_8000 – 0x3000_8fff` |
-| Flash             | `0x3000_0000 – 0x3fff_ffff` |
-| QEMU SDHCI        | `0x4000_0000 – 0x4000_00ff` |
-| PMEM / PSRAM      | `0x8000_0000 – 0x8fff_ffff` |
-| SDRAM             | `0xa000_0000 – 0xa1ff_ffff` |
-| raptSoC MMIO      | `0xc000_0000 – 0xffff_ffff` |
-
-Reset vector `PC_INIT` = `0x3000_0000` (Flash). A First-Stage / Second-Stage Bootloader
-(FSBL/SSBL) copies the program into SRAM before running it — see `trm.c`.
+Use `make microbench-random-rv32` or `make coremark-random-rv64` with
+`SIM_RANDOM_DELAY=31 SIM_RANDOM_SEED=42` to exercise reproducible AXI memory
+wait states. `cpu-tests-random-rv32` / `cpu-tests-random-rv64` run AM CPU tests
+under the same delay model. These targets use the NPC memory map above.
 
 ## Reference Device Trees
 

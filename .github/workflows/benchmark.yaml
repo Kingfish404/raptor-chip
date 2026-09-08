@@ -1,11 +1,12 @@
-name: Benchmark (AM + bare metal + pk + ysyxSoC)
+name: Benchmark (AM + bare metal + pk + ysyxSoC + random memory)
 
 # Combined performance / functional benchmark workflow:
 #   - rv-benchmark / rv32-cpu-tests   : abstract-machine on the Raptor
 #   - app-pk-coremark                 : pk-hosted hello + CoreMark
 #   - app-pk-embench                  : pk/MMU-hosted Embench-IoT suite
 #   - app-baremetal-embench           : bare-metal Embench-IoT suite
-#   - ysyxsoc-benchmark / ysyxsoc-cpu-tests : ysyxSoC integration
+#   - ysyxsoc-benchmark / ysyxsoc-cpu-tests : ysyxSoC wrapper integration
+#   - sim-random-memory              : RV32/RV64 random AXI memory delays
 # STA / PPA evaluation lives in the dedicated `sta.yaml` workflow.
 
 on:
@@ -112,16 +113,6 @@ jobs:
             "MicroBench rv32e" /tmp/microbench-rv32e.log \
             >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload benchmark results
-        uses: actions/upload-artifact@v7
-        with:
-          name: benchmark-results-${{ github.sha }}
-          path: |
-            .github/benchmark-results.json
-            .github/results/
-          retention-days: 90
-          overwrite: true
-
   rv32-cpu-tests:
     runs-on: ubuntu-latest
     env:
@@ -156,9 +147,17 @@ jobs:
       - uses: actions/checkout@v6
       - name: Setup environment
         run: ./setup.sh
-      - name: Generate ysyxSoC
+      - name: Set up JDK 17 for upstream ysyxSoC
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Generate pinned upstream ysyxSoC
         shell: bash -l {0}
-        run: make -C ./third_party/kingfish404/ysyxSoC/ dev-init verilog
+        run: |
+          curl -fL --retry 3 https://github.com/com-lihaoyi/mill/releases/download/0.12.4/0.12.4 \
+            -o "$RUNNER_TEMP/mill-0.12.4"
+          make ysyxsoc-setup YSYXSOC_MILL="$RUNNER_TEMP/mill-0.12.4" YSYXSOC_JAVA_HOME="$JAVA_HOME"
       - name: Build simulator (ysyxSoC config) and NEMU-Ref
         shell: bash -l {0}
         run: |
@@ -166,18 +165,18 @@ jobs:
           make config-nemu32-ref
       - name: Run microbench riscv32-ysyxsoc
         shell: bash -l {0}
-        run: make microbench-ysyxsoc ARGS="-b -n" 2>&1 | tee /tmp/mb-soc.log
+        run: make microbench-ysyxsoc MAINARGS=test ARGS="-b -n" 2>&1 | tee /tmp/mb-soc.log
       - name: Run microbench riscv32e-ysyxsoc
         shell: bash -l {0}
         run: |
-          make -C $RAPTOR_HOME/abstract-machine/app/am-kernels/benchmarks/microbench ARCH=riscv32e-ysyxsoc run mainargs="test" ARGS="-b -n" 2>&1 | tee /tmp/mb-soce.log
+          make microbench-ysyxsoc YSYXSOC_ARCH=riscv32e-ysyxsoc MAINARGS=test ARGS="-b -n" 2>&1 | tee /tmp/mb-soce.log
       - name: Run coremark riscv32-ysyxsoc
         shell: bash -l {0}
         run: make coremark-ysyxsoc ARGS="-b -n" 2>&1 | tee /tmp/cm-soc.log
       - name: Run coremark riscv32e-ysyxsoc
         shell: bash -l {0}
         run: |
-          make -C $RAPTOR_HOME/abstract-machine/app/am-kernels/benchmarks/coremark_eembc ARCH=riscv32e-ysyxsoc run ARGS="-b -n" 2>&1 | tee /tmp/cm-soce.log
+          make coremark-ysyxsoc YSYXSOC_ARCH=riscv32e-ysyxsoc ARGS="-b -n" 2>&1 | tee /tmp/cm-soce.log
       - name: ysyxSoC benchmark summary
         shell: bash -l {0}
         run: |
@@ -216,9 +215,17 @@ jobs:
       - uses: actions/checkout@v6
       - name: Setup environment
         run: ./setup.sh
-      - name: Generate ysyxSoC
+      - name: Set up JDK 17 for upstream ysyxSoC
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Generate pinned upstream ysyxSoC
         shell: bash -l {0}
-        run: make -C ./third_party/kingfish404/ysyxSoC/ dev-init verilog
+        run: |
+          curl -fL --retry 3 https://github.com/com-lihaoyi/mill/releases/download/0.12.4/0.12.4 \
+            -o "$RUNNER_TEMP/mill-0.12.4"
+          make ysyxsoc-setup YSYXSOC_MILL="$RUNNER_TEMP/mill-0.12.4" YSYXSOC_JAVA_HOME="$JAVA_HOME"
       - name: Build simulator (ysyxSoC config) and NEMU-Ref
         shell: bash -l {0}
         run: |
@@ -233,6 +240,82 @@ jobs:
         run: make -C $RAPTOR_HOME/abstract-machine/app/am-kernels/tests/cpu-tests
           ARCH=riscv32e-ysyxsoc run ARGS="-b -n"
 
+  sim-random-memory:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        xlen: [32, 64]
+        seed: [1, 42]
+    env:
+      RAPTOR_HOME: ${{ github.workspace }}
+      NEMU_HOME: ${{ github.workspace }}/nemu
+      AM_HOME: ${{ github.workspace }}/abstract-machine
+      CROSS_COMPILE: riscv64-elf-
+      SIM_RANDOM_DELAY: "31"
+      SIM_RANDOM_SEED: ${{ matrix.seed }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Setup environment
+        run: ./setup.sh
+      - name: Build NEMU reference
+        shell: bash -l {0}
+        run: make config-nemu${{ matrix.xlen }}-ref
+      - name: CPU tests with random memory delays
+        shell: bash -l {0}
+        run: |
+          set -o pipefail
+          make cpu-tests-random-rv${{ matrix.xlen }} ARGS="-b -n -t 120" 2>&1 | tee /tmp/cpu-random.log
+      - name: MicroBench with random memory delays
+        shell: bash -l {0}
+        run: |
+          set -o pipefail
+          make microbench-random-rv${{ matrix.xlen }} ARGS="-b -n -t 900" 2>&1 | tee /tmp/microbench-random.log
+      - name: CoreMark with random memory delays
+        shell: bash -l {0}
+        run: |
+          set -o pipefail
+          # This is a CRC-checked functional stress run. The AM port uses
+          # compile-time ITERATIONS (mainargs=test does not reduce its default 10).
+          make coremark-random-rv${{ matrix.xlen }} ITERATIONS=1 ARGS="-b -n -t 900" 2>&1 | tee /tmp/coremark-random.log
+          python3 - <<'PY'
+          import re
+          from pathlib import Path
+          log = re.sub(r'\x1b\[[0-9;]*m', '', Path('/tmp/coremark-random.log').read_text())
+          expected = {'Iterations': '1', 'CoreMark Size': '666'}
+          for label, value in expected.items():
+              found = re.findall(r'^' + re.escape(label) + r'\s*:\s*(\S+)\s*$', log, re.M)
+              if not found or any(item.lower() != value for item in found):
+                  raise SystemExit(f'CoreMark smoke validation failed: {label}={found}, expected {value}')
+          if re.findall(r'HIT (?:GOOD|BAD) TRAP', log) != ['HIT GOOD TRAP']:
+              raise SystemExit('CoreMark did not terminate successfully')
+          # AM klib does not format %04x correctly. Use CoreMark's internal
+          # known-profile CRC comparisons and error summary, not printed hex.
+          if '2K performance run parameters for coremark.' not in log:
+              raise SystemExit('CoreMark did not select a known CRC validation profile')
+          # A sub-10-second run is not a valid benchmark score; CRCs still apply.
+          short = 'ERROR! Must execute for at least 10 secs for a valid result!'
+          if any('ERROR!' in line and line.strip() != short for line in log.splitlines()):
+              raise SystemExit('CoreMark reported an additional validation error')
+          if short in log:
+              if log.count(short) != 1 or log.count('Errors detected') != 1:
+                  raise SystemExit('Incomplete CoreMark short-run validation summary')
+          elif log.count('Correct operation validated.') != 1 or 'Errors detected' in log:
+              raise SystemExit('CoreMark CRC validation failed')
+          print('CoreMark random-memory CRC smoke PASS (1 iteration; not a benchmark score)')
+          PY
+      - name: Summarize stress configuration
+        if: always()
+        run: |
+          {
+            echo "## Sim random memory delays"
+            echo "RV${{ matrix.xlen }}, preset=$RAPT_CONFIG, delay=0..$SIM_RANDOM_DELAY cycles/beat, seed=$SIM_RANDOM_SEED"
+            echo "CoreMark: 1 iteration with CRC validation (functional smoke, not a benchmark score)."
+          } >> "$GITHUB_STEP_SUMMARY"
+          bash .github/scripts/parse-pmu.sh \
+            "CoreMark random" /tmp/coremark-random.log \
+            "MicroBench random" /tmp/microbench-random.log \
+            >> "$GITHUB_STEP_SUMMARY"
   app-pk-coremark:
     runs-on: ubuntu-latest
     env:
@@ -242,6 +325,9 @@ jobs:
       CROSS_COMPILE: riscv64-unknown-elf-
     steps:
       - uses: actions/checkout@v6
+
+      - name: Check CoreMark summary validation
+        run: python3 .github/scripts/test_summarize_pk_coremark.py
 
       - name: Setup base environment
         run: |
@@ -272,93 +358,25 @@ jobs:
           mkdir -p .github/results
           make app-hello-rv32 ARGS="-b -n" 2>&1 | tee /tmp/app-hello.log
 
-      # ---- CoreMark ----
+      # CRC-checked smoke run; standard CoreMark validation still requires 10 seconds.
       - name: Run CoreMark
         shell: bash -l {0}
         run: |
-          make app-coremark-rv32 ARGS="-b -n" 2>&1 | tee /tmp/app-coremark.log
+          make app-coremark-rv32 ITERATIONS=1 ARGS="-b -n" 2>&1 | tee /tmp/app-coremark.log
 
       # ---- Summary ----
       - name: Generate summary
         if: always()
         run: |
-          # ---- Parse hello ----
-          HELLO_TRAP=$(grep -oE 'HIT (GOOD|BAD) TRAP' /tmp/app-hello.log | head -1 || echo "UNKNOWN")
-          HELLO_OK=$( [ "$HELLO_TRAP" = "HIT GOOD TRAP" ] && echo "PASS" || echo "FAIL" )
-          HELLO_IPC=$(grep -oP 'IPC:\s*\K[0-9.]+' /tmp/app-hello.log | head -1 || echo "N/A")
-
-          # ---- Parse CoreMark (bare-metal pk port) ----
-          # The bare-metal port prints:
-          #   CoreMark Size    : 666
-          #   Total ticks      : <N>
-          #   Total time (secs): <s>
-          #   Iterations/Sec   : <n>     (integer-truncated)
-          #   Iterations       : <n>
-          # So we compute the standard CoreMark/MHz metric from PMU cycles:
-          #   CoreMark/MHz = iterations * 1e6 / cycles
-          CM_VALID=$(grep -cE 'Correct operation validated' /tmp/app-coremark.log || echo "0")
-          CM_ITERS=$(grep -oP '^Iterations\s*:\s*\K\d+' /tmp/app-coremark.log | head -1 || echo "")
-          CM_TICKS=$(grep -oP '^Total ticks\s*:\s*\K\d+' /tmp/app-coremark.log | head -1 || echo "")
-          CM_SECS=$(grep -oP '^Total time \(secs\):\s*\K\d+' /tmp/app-coremark.log | head -1 || echo "")
-          CM_ITERSEC=$(grep -oP '^Iterations/Sec\s*:\s*\K\d+' /tmp/app-coremark.log | head -1 || echo "")
-          CM_IPC=$(grep -oP 'IPC:\s*\K[0-9.]+' /tmp/app-coremark.log | head -1 || echo "N/A")
-          CM_CYCLES=$(grep -oP 'cycle:\s*\K\d+' /tmp/app-coremark.log | head -1 || echo "")
-          CM_INSTS=$(grep -oP '#inst:\s*\K\d+' /tmp/app-coremark.log | head -1 || echo "")
-          CM_TRAP=$(grep -oE 'HIT (GOOD|BAD) TRAP' /tmp/app-coremark.log | head -1 || echo "UNKNOWN")
-          CM_OK=$( [ "$CM_TRAP" = "HIT GOOD TRAP" ] && [ "$CM_VALID" -ge 1 ] && echo "PASS" || echo "FAIL" )
-
-          CM_CMARK_PER_MHZ=$(grep -oP '^CoreMark/MHz\s*:\s*\K[0-9]+(?:\.[0-9]+)?' /tmp/app-coremark.log | tail -1 || true)
-          if [ -z "$CM_CMARK_PER_MHZ" ] && [ -n "$CM_ITERS" ] && [ -n "$CM_CYCLES" ] && [ "$CM_CYCLES" -gt 0 ]; then
-            CM_CMARK_PER_MHZ=$(awk -v i="$CM_ITERS" -v c="$CM_CYCLES" \
-              'BEGIN{ printf "%.4f", i*1e6/c }')
-          fi
-          CM_CMARK_PER_MHZ=${CM_CMARK_PER_MHZ:-N/A}
-
-          # ---- Write summary ----
-          {
-            echo "## App Tests — CoreMark (pk on sim)"
-            echo ""
-            echo "### Overview"
-            echo ""
-            echo "| Test | Status | IPC | Details |"
-            echo "|------|--------|-----|---------|"
-            echo "| Hello | ${HELLO_OK} | ${HELLO_IPC} | ${HELLO_TRAP} |"
-            echo "| CoreMark | ${CM_OK} | ${CM_IPC} | ${CM_CMARK_PER_MHZ} CoreMark/MHz, iters=${CM_ITERS:-N/A} |"
-            echo ""
-
-            # ---- CoreMark detail ----
-            echo "### CoreMark"
-            echo ""
-            echo "| Metric | Value |"
-            echo "|--------|-------|"
-            echo "| CoreMark/MHz (iters*1e6/cycles) | **${CM_CMARK_PER_MHZ}** |"
-            echo "| Iterations | ${CM_ITERS:-N/A} |"
-            echo "| Cycles | ${CM_CYCLES:-N/A} |"
-            echo "| Instructions | ${CM_INSTS:-N/A} |"
-            echo "| IPC | ${CM_IPC} |"
-            echo "| Reported Total ticks | ${CM_TICKS:-N/A} |"
-            echo "| Reported Total time (secs) | ${CM_SECS:-N/A} |"
-            echo "| Reported Iterations/Sec | ${CM_ITERSEC:-N/A} |"
-            echo "| Validation | $( [ "$CM_VALID" -ge 1 ] && echo 'Correct operation validated' || echo 'NOT VALIDATED' ) |"
-            echo ""
-          } >> "$GITHUB_STEP_SUMMARY"
-
-          # PMU details (collapsed)
+          report_rc=0
+          python3 .github/scripts/summarize-pk-coremark.py \
+            /tmp/app-hello.log /tmp/app-coremark.log "$GITHUB_STEP_SUMMARY" \
+            --expected-iterations 1 --allow-short || report_rc=$?
           bash .github/scripts/parse-pmu.sh \
             "Hello (pk)" /tmp/app-hello.log \
             "CoreMark (pk)" /tmp/app-coremark.log \
             >> "$GITHUB_STEP_SUMMARY" || true
-
-      - name: Upload logs
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: app-coremark-logs-${{ github.sha }}
-          path: |
-            /tmp/app-hello.log
-            /tmp/app-coremark.log
-          retention-days: 30
-          overwrite: true
+          exit "$report_rc"
 
   app-baremetal-embench:
     runs-on: ubuntu-latest
@@ -397,18 +415,6 @@ jobs:
           cat sim/build/${{ env.RAPT_CONFIG }}/logs/app/embench-baremetal-rv32.md \
             >> "$GITHUB_STEP_SUMMARY"
           exit "$report_rc"
-
-      - name: Upload logs
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: app-embench-logs-${{ github.sha }}
-          path: |
-            sim/build/${{ env.RAPT_CONFIG }}/logs/app/embench-baremetal-rv32.log
-            sim/build/${{ env.RAPT_CONFIG }}/logs/app/embench-baremetal-rv32.md
-            sim/build/${{ env.RAPT_CONFIG }}/logs/app/embench-baremetal-rv32/
-          retention-days: 30
-          overwrite: true
 
   app-pk-embench:
     runs-on: ubuntu-latest
@@ -451,15 +457,3 @@ jobs:
           cat sim/build/${{ env.RAPT_CONFIG }}/logs/app/embench-pk-rv32.md \
             >> "$GITHUB_STEP_SUMMARY"
           exit "$report_rc"
-
-      - name: Upload pk/MMU logs
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: app-pk-embench-logs-${{ github.sha }}
-          path: |
-            sim/build/${{ env.RAPT_CONFIG }}/logs/app/embench-pk-rv32.log
-            sim/build/${{ env.RAPT_CONFIG }}/logs/app/embench-pk-rv32.md
-            sim/build/${{ env.RAPT_CONFIG }}/logs/app/embench-pk-rv32/
-          retention-days: 30
-          overwrite: true

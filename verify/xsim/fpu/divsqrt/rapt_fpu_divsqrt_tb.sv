@@ -23,13 +23,21 @@ module rapt_fpu_divsqrt_tb (
 
   // Iterative unit under test
   rapt_fpu_divsqrt dut (
-      .clock(clock), .reset(reset),
-      .operand_a(operand_a), .operand_b(operand_b),
+      .clock(clock),
+      .reset(reset),
+      .operand_a(operand_a),
+      .operand_b(operand_b),
       .rounding_mode(rounding_mode),
-      .src_is_double(src_is_double), .dst_is_double(dst_is_double),
-      .divide(divide), .sqrt(sqrt), .flush(flush),
-      .valid(valid), .ready(ready),
-      .result(dut_result), .flags(dut_flags), .result_valid(dut_valid)
+      .src_is_double(src_is_double),
+      .dst_is_double(dst_is_double),
+      .divide(divide),
+      .sqrt(sqrt),
+      .flush(flush),
+      .valid(valid),
+      .ready(ready),
+      .result(dut_result),
+      .flags(dut_flags),
+      .result_valid(dut_valid)
   );
 
   // Combinational reference (original implementation)
@@ -38,23 +46,34 @@ module rapt_fpu_divsqrt_tb (
   logic [4:0]  ref_flg_c;
   logic        ref_valid_c;
   rapt_fpu_divsqrt_ref ref_i (
-      .clock(clock), .reset(reset),
-      .operand_a(operand_a), .operand_b(operand_b),
+      .clock(clock),
+      .reset(reset),
+      .operand_a(operand_a),
+      .operand_b(operand_b),
       .rounding_mode(rounding_mode),
-      .src_is_double(src_is_double), .dst_is_double(dst_is_double),
-      .divide(divide), .sqrt(sqrt), .flush(flush),
-      .valid(valid), .ready(ref_ready),
-      .result(ref_res_c), .flags(ref_flg_c), .result_valid(ref_valid_c)
+      .src_is_double(src_is_double),
+      .dst_is_double(dst_is_double),
+      .divide(divide),
+      .sqrt(sqrt),
+      .flush(flush),
+      .valid(valid),
+      .ready(ref_ready),
+      .result(ref_res_c),
+      .flags(ref_flg_c),
+      .result_valid(ref_valid_c)
   );
 
   // Latch reference outputs at launch (its result_valid is 1 cycle later)
   logic [63:0] a_q, b_q;
-  logic [2:0]  rm_q;
-  logic        dbl_q, div_q;
+  logic [2:0] rm_q;
+  logic dbl_q, div_q;
   always_ff @(posedge clock) begin
     if (valid) begin
-      a_q <= operand_a; b_q <= operand_b;
-      rm_q <= rounding_mode; dbl_q <= src_is_double; div_q <= divide;
+      a_q <= operand_a;
+      b_q <= operand_b;
+      rm_q <= rounding_mode;
+      dbl_q <= src_is_double;
+      div_q <= divide;
     end
   end
 

@@ -1,0 +1,26 @@
+[tasks]
+rv32_check rv32 check
+rv64_check rv64 check
+rv32_cover rv32 cover
+rv64_cover rv64 cover
+
+[options]
+check: mode bmc
+cover: mode cover
+depth 1
+
+[engines]
+smtbmc boolector
+
+[script]
+plugin -i slang
+rv32: read_slang --single-unit -DFORMAL -Iinclude -Iconfig rapt_pkg.sv formal_zkt_cdb.sv rapt_cdb_arb.sv
+rv64: read_slang --single-unit -DFORMAL -DRAPT_RV64 -Iinclude -Iconfig rapt_pkg.sv formal_zkt_cdb.sv rapt_cdb_arb.sv
+prep -top formal_zkt_cdb
+
+[files]
+formal_zkt_cdb.sv
+include ../../hdl/include
+config ../../hdl/configs/default
+rapt_pkg.sv ../../hdl/rapt_pkg.sv
+rapt_cdb_arb.sv ../../hdl/backend/rapt_cdb_arb.sv

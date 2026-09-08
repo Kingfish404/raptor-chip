@@ -1,19 +1,24 @@
 # Friendly module name -> synthesizable SystemVerilog top and clock port.
-# Keep this list at the rapt_core first-level hierarchy so reports remain easy
-# to compare with the core integration hierarchy.
-MODULES := core bpu ifu fqu l1i idu rnu rou prf fpr dpu ieu feu cmu csr lsu l1d bus axi l2
+# Core hierarchy blocks and selected scalable leaves for isolated comparison.
+MODULES := core bpu ifu fqu stream_queue l1i idu rnu rename_checkpoint rou prf fpr dpu dispatch_select dispatch_steer issue_select muldiv_fu ieu feu cmu csr lsu l1d bus axi l2
 
 TOP_core := rapt_core
 TOP_bpu  := rapt_bpu
 TOP_ifu  := rapt_ifu
 TOP_fqu  := rapt_fqu
+TOP_stream_queue := rapt_stream_queue
 TOP_l1i  := rapt_l1i
 TOP_idu  := rapt_idu
 TOP_rnu  := rapt_rnu
+TOP_rename_checkpoint := rapt_rename_checkpoint
 TOP_rou  := rapt_rou
 TOP_prf  := rapt_prf
 TOP_fpr  := rapt_fpr
 TOP_dpu  := rapt_dpu_syn_top
+TOP_dispatch_select := rapt_dispatch_select_syn_top
+TOP_dispatch_steer := rapt_dispatch_steer_syn_top
+TOP_issue_select := rapt_issue_select_syn_top
+TOP_muldiv_fu := rapt_ieu_mul
 TOP_ieu  := rapt_ieu_syn_top
 TOP_feu  := rapt_feu_syn_top
 TOP_cmu  := rapt_cmu

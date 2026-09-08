@@ -22,3 +22,15 @@ clean:
 	rm -rf obj_dir
 
 .PHONY: run clean
+
+# Independent reference for all five RISC-V rounding modes, including RMM.
+# SOFTFLOAT_DIR must contain include/softfloat.h and softfloat.a.
+SOFTFLOAT_DIR ?=
+.PHONY: run-softfloat
+run-softfloat:
+	@test -f "$(SOFTFLOAT_DIR)/include/softfloat.h" -a -f "$(SOFTFLOAT_DIR)/softfloat.a"
+	+$(VERILATOR) --cc --exe --build -j 2 --assert -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC \
+		--top-module rapt_fpu_int_to_fp_tb $(DUT) rapt_fpu_int_to_fp_tb.sv tb_softfloat.cpp \
+		--Mdir obj_softfloat -CFLAGS "-I$(abspath $(SOFTFLOAT_DIR))/include" \
+		-LDFLAGS "$(abspath $(SOFTFLOAT_DIR))/softfloat.a" -o tb
+	./obj_softfloat/tb

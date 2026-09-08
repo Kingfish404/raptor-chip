@@ -12,16 +12,28 @@ module rapt_fpu_half_tb (
   logic [4:0] narrow_flags;
 
   rapt_fpu_half_to_fp widen (
-      .clock, .reset, .flush,
-      .valid(widen_valid), .ready(widen_ready), .operand(widen_operand),
-      .target_double(widen_double), .result(widen_result),
-      .flags(widen_flags), .result_valid(widen_result_valid)
+      .clock,
+      .reset,
+      .flush,
+      .valid(widen_valid),
+      .ready(widen_ready),
+      .operand(widen_operand),
+      .target_double(widen_double),
+      .result(widen_result),
+      .flags(widen_flags),
+      .result_valid(widen_result_valid)
   );
   rapt_fpu_fp_to_half narrow (
-      .clock, .reset, .flush,
-      .valid(narrow_valid), .ready(narrow_ready), .operand(narrow_operand),
-      .source_double(narrow_double), .rounding_mode(narrow_rm),
-      .result(narrow_result), .flags(narrow_flags),
+      .clock,
+      .reset,
+      .flush,
+      .valid(narrow_valid),
+      .ready(narrow_ready),
+      .operand(narrow_operand),
+      .source_double(narrow_double),
+      .rounding_mode(narrow_rm),
+      .result(narrow_result),
+      .flags(narrow_flags),
       .result_valid(narrow_result_valid)
   );
 
@@ -32,12 +44,8 @@ module rapt_fpu_half_tb (
     end
   endtask
 
-  task automatic test_widen(
-      input logic [63:0] operand,
-      input logic target_double,
-      input logic [63:0] expected,
-      input logic [4:0] expected_flags
-  );
+  task automatic test_widen(input logic [63:0] operand, input logic target_double,
+                            input logic [63:0] expected, input logic [4:0] expected_flags);
     while (!widen_ready) @(posedge clock);
     widen_operand = operand;
     widen_double = target_double;
@@ -50,13 +58,9 @@ module rapt_fpu_half_tb (
     @(posedge clock);
   endtask
 
-  task automatic test_narrow(
-      input logic [63:0] operand,
-      input logic source_double,
-      input logic [2:0] rm,
-      input logic [15:0] expected,
-      input logic [4:0] expected_flags
-  );
+  task automatic test_narrow(input logic [63:0] operand, input logic source_double,
+                             input logic [2:0] rm, input logic [15:0] expected,
+                             input logic [4:0] expected_flags);
     while (!narrow_ready) @(posedge clock);
     narrow_operand = operand;
     narrow_double = source_double;

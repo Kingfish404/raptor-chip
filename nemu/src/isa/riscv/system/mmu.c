@@ -30,6 +30,14 @@ uint32_t pmp_effective_priv_ls(void);
 #define SV32_MODE 1
 #define SV39_MODE 8
 
+// Implicit page-table reads are supported by physical memory, not devices.
+// Use this reference platform's backing-region map (also includes virt ROM),
+// independently of the translated leaf's permissions or memory type.
+static bool ptw_memory_readable(paddr_t addr, unsigned size)
+{
+  return (addr & (size - 1)) == 0 && paddr_is_memory_span(addr, size);
+}
+
 typedef union
 {
   struct
@@ -50,7 +58,7 @@ typedef union
     word_t d : 1;
     word_t psw : 2;
     word_t ppn0 : 10;
-    word_t ppn1 : 10;
+    word_t ppn1 : 12;
   } pte;
   struct
   {
@@ -63,7 +71,7 @@ typedef union
     word_t a : 1;
     word_t d : 1;
     word_t psw : 2;
-    word_t ppn : 20;
+    word_t ppn : 22;
   } pte_ppn;
   word_t val;
 } addr_t;
@@ -95,7 +103,7 @@ int isa_mmu_check(vaddr_t vaddr, int len, int type)
 /* Sv39 page table walk. paddr_t is 64-bit when PMEM64 is set; otherwise the
  * caller relies on guest physical addresses fitting in 32 bits (true for the
  * default 256 MiB DRAM at 0x80000000). */
-static paddr_t sv39_translate(vaddr_t vaddr, int len, int type)
+static paddr_t sv39_translate(vaddr_t vaddr, int len, int type, uint8_t *out_pbmt)
 {
   csr_t reg = {.val = cpu.sr[CSR_SATP]};
   csr_t mstatus_for_prm = {.val = cpu.sr[CSR_MSTATUS]};
@@ -130,7 +138,8 @@ static paddr_t sv39_translate(vaddr_t vaddr, int len, int type)
   for (level = 2; level >= 0; level--)
   {
     pte_addr = a + vpn[level] * 8;
-    if (pmp_check(pte_addr, 8, eff_priv, true, false, false))
+    if (!ptw_memory_readable(pte_addr, 8)
+        || pmp_check(pte_addr, 8, PRV_S, true, false, false))
     {
       cause = af_cause;
       nemu_longjmp(exec_jmp_buf, 25);
@@ -140,7 +149,16 @@ static paddr_t sv39_translate(vaddr_t vaddr, int len, int type)
     word_t r = (pte_val >> 1) & 1;
     word_t w = (pte_val >> 2) & 1;
     word_t x = (pte_val >> 3) & 1;
-    if (!v || (w && !r))
+    /* Svpbmt uses only bits 62:61 of a leaf PTE. N (63) and 60:54
+     * remain reserved without Svnapot/other extensions. A nonzero PBMT
+     * requires menvcfg.PBMTE and is never legal in a non-leaf entry.
+     * CSR software exposure is gated separately until the full attribute
+     * path is ready; do not infer that all high PTE bits become legal. */
+    const unsigned pbmt = (unsigned)((pte_val >> 61) & 3);
+    const bool pbmte = ((cpu.sr[CSR_MENVCFG] >> 62) & 1) != 0;
+    const bool reserved = (pte_val & ((1ull << 63) | (0x7full << 54))) != 0
+        || pbmt == 3 || (pbmt != 0 && (!pbmte || !(r || x)));
+    if (!v || (w && !r) || reserved)
     {
       cause = pf_cause;
       nemu_longjmp(exec_jmp_buf, 2);
@@ -148,6 +166,13 @@ static paddr_t sv39_translate(vaddr_t vaddr, int len, int type)
     if (r || x)
     {
       break; /* leaf */
+    }
+    /* Non-leaf G is legal; D/A/U are reserved. This reference flushes
+     * its whole software TLB and does not need to retain global tags. */
+    if (pte_val & (word_t)0xd0)
+    {
+      cause = pf_cause;
+      nemu_longjmp(exec_jmp_buf, 2);
     }
     /* pointer to next level */
     if (level == 0)
@@ -274,21 +299,23 @@ static paddr_t sv39_translate(vaddr_t vaddr, int len, int type)
   }
   else /* level == 2 */
   {
-    paddr = ((ppn & ~0x3ffffULL) << 12) | (vpn[1] << 12) | (vpn[0] << 12) | offset;
+    paddr = ((ppn & ~0x3ffffULL) << 12) | (vpn[1] << 21) | (vpn[0] << 12) | offset;
   }
+  if (out_pbmt != NULL) *out_pbmt = (uint8_t)((pte_val >> 61) & 3);
   return (paddr_t)paddr;
 }
 #endif
 
 // a.k.a. Page Table Walk
-paddr_t isa_mmu_translate(vaddr_t vaddr, int len, int type)
+paddr_t isa_mmu_translate_attrs(vaddr_t vaddr, int len, int type, uint8_t *pbmt)
 {
+  if (pbmt != NULL) *pbmt = 0;
   csr_t reg = {.val = cpu.sr[CSR_SATP]};
   addr_t addr = {.val = vaddr};
 #ifdef CONFIG_ISA64
   if (reg.satp.mode == SV39_MODE)
   {
-    return sv39_translate(vaddr, len, type);
+    return sv39_translate(vaddr, len, type, pbmt);
   }
 #endif
   if (reg.satp.mode == 0 || reg.satp.mode != SV32_MODE)
@@ -298,7 +325,9 @@ paddr_t isa_mmu_translate(vaddr_t vaddr, int len, int type)
 
   word_t offset = addr.vaddr.offset;
   word_t vpn[2] = {addr.vaddr.vpn0, addr.vaddr.vpn1};
-  word_t a = reg.satp.ppn * 4096;
+  // Unsigned 22-bit fields promote to signed int. Cast before shifting so
+  // physical addresses above 2 GiB never invoke signed-overflow UB.
+  paddr_t a = (paddr_t)reg.satp.ppn << 12;
   addr_t pte = {.val = 0};
   csr_t mstatus_for_prm = {.val = cpu.sr[CSR_MSTATUS]};
   uint32_t eff_priv = (type == MEM_TYPE_IFETCH)
@@ -307,18 +336,13 @@ paddr_t isa_mmu_translate(vaddr_t vaddr, int len, int type)
   int pf_cause = type == MEM_TYPE_IFETCH
                      ? MCA_INS_PAG_FAU
                      : (type == MEM_TYPE_READ ? MCA_LOA_PAG_FAU : MCA_STO_PAG_FAU);
-  word_t pte_addr = 0;
+  paddr_t pte_addr = 0;
   for (int i = 1; i >= 0; i--)
   {
     pte_addr = a + (vpn[i] * 4);
-    if (pte_addr == 0)
     {
-      cause = pf_cause;
-      nemu_longjmp(exec_jmp_buf, 1);
-    }
-    {
-      uint32_t ptw_priv = (type == MEM_TYPE_IFETCH) ? cpu.priv : pmp_effective_priv_ls();
-      if (pmp_check(pte_addr, 4, ptw_priv, true, false, false))
+      if (!ptw_memory_readable(pte_addr, 4)
+          || pmp_check(pte_addr, 4, PRV_S, true, false, false))
       {
         cause = type == MEM_TYPE_IFETCH
                     ? MCA_INS_ACC_FAU
@@ -355,7 +379,7 @@ paddr_t isa_mmu_translate(vaddr_t vaddr, int len, int type)
       cause = pf_cause;
       nemu_longjmp(exec_jmp_buf, 4);
     }
-    a = pte.pte_ppn.ppn * 4096;
+    a = (paddr_t)pte.pte_ppn.ppn << 12;
   }
 
   bool is_fetch = (type == MEM_TYPE_IFETCH);
@@ -444,5 +468,12 @@ paddr_t isa_mmu_translate(vaddr_t vaddr, int len, int type)
   }
 #endif
 
-  return (pte.pte_ppn.ppn * 4096) | offset;
+  return ((paddr_t)pte.pte_ppn.ppn << 12) | offset;
+}
+
+/* Preserve the existing PA-only API while access and software-TLB clients
+ * migrate to carrying the attribute explicitly. */
+paddr_t isa_mmu_translate(vaddr_t vaddr, int len, int type)
+{
+  return isa_mmu_translate_attrs(vaddr, len, type, NULL);
 }

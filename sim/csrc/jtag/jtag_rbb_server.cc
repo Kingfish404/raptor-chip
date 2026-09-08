@@ -15,7 +15,7 @@
 // Pairing:
 //   * verify/jtag/openocd.cfg points OpenOCD at TCP 127.0.0.1:9824 (default;
 //     overridable via `--jtag-port=<n>`).
-//   * Build: only the npc top exposes JTAG pins; ysyxSoC ties them off
+//   * Build: only the npc top exposes JTAG pins; wrapBus ties them off
 //     internally, so this mode is a no-op there (matches jtag_selftest).
 //
 // Scope today (matches rapt_dm capability):
@@ -24,22 +24,22 @@
 //     (dmcontrol), `0x04` (data0) all transact correctly.
 //   * `target halt` will *fail* -- `haltreq_o` is wired but the core's
 //     CMU/IFU do not yet act on it. That is expected and is the next RTL
-//     milestone in docs-ref/dev.jtag.md.
+//     milestone in verify/jtag/README.md.
 // =============================================================================
 
 #include <common.h>
 #include <cstdio>
 
-#ifdef RAPT_SOC
+#if defined(RAPT_SOC) || defined(CONFIG_wrapBus)
 
 extern "C" int jtag_rbb_server_main(int /*argc*/, char * /*argv*/[]) {
   fprintf(stderr,
-          "[jtag-server] not supported in ysyxSoC build (RAPT_SOC defined): "
+          "[jtag-server] not supported in ysyxSoC/wrapBus builds: "
           "JTAG pins are tied off internally. Use the npc build instead.\n");
   return 1;
 }
 
-#else  // !RAPT_SOC -- npc build with JTAG pins on the Verilator top
+#else  // !CONFIG_wrapBus -- npc build with JTAG pins on the Verilator top
 
 #include <arpa/inet.h>
 #include <cerrno>
@@ -57,6 +57,7 @@ extern "C" int jtag_rbb_server_main(int /*argc*/, char * /*argv*/[]) {
 #include "verilated.h"
 
 #include CONCAT_HEAD(TOP_NAME)
+#include <npc_eval.h>
 
 namespace {
 
@@ -75,10 +76,10 @@ void sigint_handler(int) { g_should_quit = 1; }
 // One Verilator clock pulse with current jtag_* port values latched.
 inline void clk_pulse() {
   g_top->clock = 0;
-  g_top->eval();
+  npc_eval(g_top);
   g_ctx->timeInc(1);
   g_top->clock = 1;
-  g_top->eval();
+  npc_eval(g_top);
   g_ctx->timeInc(1);
 }
 
@@ -317,4 +318,4 @@ extern "C" int jtag_rbb_server_main(int argc, char *argv[]) {
   return rc;
 }
 
-#endif  // !RAPT_SOC
+#endif  // !CONFIG_wrapBus

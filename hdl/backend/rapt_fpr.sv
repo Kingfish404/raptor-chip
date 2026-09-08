@@ -26,21 +26,20 @@ module rapt_fpr (
     fpr_read = regs_valid[addr] ? regs[addr] : 64'h0;
   endfunction
 
-  assign fpr.alu_rdata_a = (fpr.ioq_wvalid && fpr.ioq_waddr == fpr.alu_raddr_a)
-      ? fpr.ioq_wdata
-      : (alu_bypass_valid_q && alu_bypass_addr_q == fpr.alu_raddr_a)
-        ? alu_bypass_data_q : fpr_read(fpr.alu_raddr_a);
-  assign fpr.alu_rdata_b = (fpr.ioq_wvalid && fpr.ioq_waddr == fpr.alu_raddr_b)
-      ? fpr.ioq_wdata
-      : (alu_bypass_valid_q && alu_bypass_addr_q == fpr.alu_raddr_b)
+  // FPR writes terminate at this registered bank boundary.  In particular,
+  // do not feed the combinational IOQ write port straight into the FPU read
+  // ports: completion ownership controls that write enable, and a write-through
+  // path would close a cross-producer candidate -> guard -> FPR -> candidate
+  // loop.  FP operations are serialized today, so the stored value is visible
+  // before a dependent FP instruction can issue.  The registered ALU bypass
+  // remains for the following-cycle read case.
+  assign fpr.alu_rdata_a = (alu_bypass_valid_q && alu_bypass_addr_q == fpr.alu_raddr_a)
+      ? alu_bypass_data_q : fpr_read(fpr.alu_raddr_a);
+  assign fpr.alu_rdata_b = (alu_bypass_valid_q && alu_bypass_addr_q == fpr.alu_raddr_b)
         ? alu_bypass_data_q : fpr_read(fpr.alu_raddr_b);
-  assign fpr.alu_rdata_c = (fpr.ioq_wvalid && fpr.ioq_waddr == fpr.alu_raddr_c)
-      ? fpr.ioq_wdata
-      : (alu_bypass_valid_q && alu_bypass_addr_q == fpr.alu_raddr_c)
+  assign fpr.alu_rdata_c = (alu_bypass_valid_q && alu_bypass_addr_q == fpr.alu_raddr_c)
         ? alu_bypass_data_q : fpr_read(fpr.alu_raddr_c);
-  assign fpr.ioq_rdata   = (fpr.ioq_wvalid && fpr.ioq_waddr == fpr.ioq_raddr)
-      ? fpr.ioq_wdata
-      : fpr_read(fpr.ioq_raddr);
+  assign fpr.ioq_rdata = fpr_read(fpr.ioq_raddr);
 
   always_ff @(posedge clock) begin
     if (reset) begin

@@ -1,6 +1,6 @@
 # Performance Profile
 
-> Legacy performance archive. These tables preserve early NPC/SoC measurements and do not describe the current default RTL configuration. For current dual-issue OoO benchmark history, cache/window sizes, and STA baselines, use [Performance Iterations](./perf-iterations.md).
+> Legacy performance archive. These tables preserve early NPC/SoC measurements and do not describe the current default RTL configuration. For benchmark history of the current default two-wide parameterized OoO configuration, cache/window sizes, and STA baselines, use [Performance Iterations](./perf-iterations.md).
 
 使用`am-kernels`中的`microbench`测试程序进行性能测试.
 
@@ -267,4 +267,3 @@ npc pmu.cc:244 statistic HIT GOOD TRAP at pc: a0003930, inst: 00100073
 | 12     | Instruction page fault         | IFU      |     |
 | 13     | Load page fault                | LSU      |     |
 | 15     | Store/AMO page fault           | LSU      |     |
-

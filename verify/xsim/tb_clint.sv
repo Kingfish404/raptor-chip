@@ -10,7 +10,7 @@ module tb_clint;
 
   logic clock = 1'b0;
   logic reset = 1'b1;
-  clint_bus_if #(.XLEN(XLEN)) clint_bus();
+  clint_bus_if #(.XLEN(XLEN)) clint_bus ();
 
   rapt_clint #(
       .XLEN(XLEN),
@@ -50,6 +50,7 @@ module tb_clint;
     clint_bus.araddr = '0;
     clint_bus.awaddr = '0;
     clint_bus.wdata = '0;
+    clint_bus.wstrb = '1;
     clint_bus.wvalid = 1'b0;
 
     tick(2);

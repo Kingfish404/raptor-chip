@@ -128,18 +128,12 @@ package rapt_csr_uvm_pkg;
         sample.data = vif.csr_wdata;
         sample.cause = vif.cause;
         sample.tval = vif.tval;
-        if (vif.csr_wen && vif.valid)
-          sample.op = CSR_WRITE;
-        else if (vif.ecall && vif.valid)
-          sample.op = CSR_ECALL;
-        else if (vif.mret && vif.valid)
-          sample.op = CSR_MRET;
-        else if (vif.sret && vif.valid)
-          sample.op = CSR_SRET;
-        else if (vif.trap && vif.valid)
-          sample.op = CSR_TRAP;
-        else
-          sample.op = CSR_IDLE;
+        if (vif.csr_wen && vif.valid) sample.op = CSR_WRITE;
+        else if (vif.ecall && vif.valid) sample.op = CSR_ECALL;
+        else if (vif.mret && vif.valid) sample.op = CSR_MRET;
+        else if (vif.sret && vif.valid) sample.op = CSR_SRET;
+        else if (vif.trap && vif.valid) sample.op = CSR_TRAP;
+        else sample.op = CSR_IDLE;
         sample.observed_sepc = vif.sepc;
         sample.observed_mtvec = vif.mtvec;
         sample.observed_stvec = vif.stvec;
@@ -174,7 +168,9 @@ package rapt_csr_uvm_pkg;
         bins trap = {CSR_TRAP};
       }
       cp_priv: coverpoint cov_priv;
-      cp_mtvec_alias: coverpoint cov_mtvec_alias { bins clean = {0}; illegal_bins contaminated = {1}; }
+      cp_mtvec_alias: coverpoint cov_mtvec_alias {
+        bins clean = {0}; illegal_bins contaminated = {1};
+      }
       op_priv: cross cp_op, cp_priv;
     endgroup
 
@@ -245,13 +241,19 @@ package rapt_csr_uvm_pkg;
       endcase
 
       if (item.observed_sepc !== expected_sepc)
-        `uvm_error("SEPC", $sformatf("op=%0d expected sepc=%08x observed=%08x", item.op, expected_sepc, item.observed_sepc))
+        `uvm_error(
+            "SEPC", $sformatf(
+            "op=%0d expected sepc=%08x observed=%08x", item.op, expected_sepc, item.observed_sepc))
       if (item.observed_priv !== expected_priv)
-        `uvm_error("PRIV", $sformatf("op=%0d expected priv=%0d observed=%0d", item.op, expected_priv, item.observed_priv))
+        `uvm_error(
+            "PRIV", $sformatf(
+            "op=%0d expected priv=%0d observed=%0d", item.op, expected_priv, item.observed_priv))
       if (item.observed_mtvec !== expected_mtvec)
-        `uvm_error("MTVEC", $sformatf("expected mtvec=%08x observed=%08x", expected_mtvec, item.observed_mtvec))
+        `uvm_error("MTVEC", $sformatf(
+                   "expected mtvec=%08x observed=%08x", expected_mtvec, item.observed_mtvec))
       if (item.observed_stvec !== expected_stvec)
-        `uvm_error("STVEC", $sformatf("expected stvec=%08x observed=%08x", expected_stvec, item.observed_stvec))
+        `uvm_error("STVEC", $sformatf(
+                   "expected stvec=%08x observed=%08x", expected_stvec, item.observed_stvec))
       if (item.op == CSR_SRET && item.observed_sepc == item.observed_mtvec)
         `uvm_error("SRET_MTVEC", "SRET return target was contaminated by mtvec")
 
@@ -266,7 +268,9 @@ package rapt_csr_uvm_pkg;
       if (checked_sret < 2000)
         `uvm_error("COVERAGE", $sformatf("only %0d SRET operations checked", checked_sret))
       else
-        `uvm_info("CSR_SCOREBOARD", $sformatf("checked %0d SRET operations without mtvec contamination", checked_sret), UVM_NONE)
+        `uvm_info("CSR_SCOREBOARD", $sformatf(
+                  "checked %0d SRET operations without mtvec contamination", checked_sret),
+                  UVM_NONE)
     endfunction
   endclass
 
@@ -321,8 +325,8 @@ package rapt_csr_uvm_pkg;
       super.new(name);
     endfunction
 
-    task send(csr_op_t op, bit [31:0] pc = 0, bit [11:0] address = 0,
-              bit [31:0] data = 0, bit [31:0] cause = 0);
+    task send(csr_op_t op, bit [31:0] pc = 0, bit [11:0] address = 0, bit [31:0] data = 0,
+              bit [31:0] cause = 0);
       csr_item item = csr_item::type_id::create("item");
       start_item(item);
       item.op = op;

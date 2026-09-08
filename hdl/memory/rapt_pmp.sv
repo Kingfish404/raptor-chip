@@ -13,7 +13,9 @@ module rapt_pmp_state #(
     if (reset) begin
       for (int i = 0; i < N; i++) begin
         state.pmp_raw_addr[i]   <= '0;
-        state.pmp_napot_mask[i] <= '0;
+        // pmpaddr resets to zero: raw ^ (raw + 1) is one, encoding
+        // the minimum eight-byte NAPOT region if cfg enables it first.
+        state.pmp_napot_mask[i] <= 1;
       end
       state.pmp_cfg_r      <= '0;
       state.pmp_cfg_w      <= '0;
@@ -56,8 +58,8 @@ endmodule
 //   * one-hot lowest-set-bit priority via `fm = match & (~match + 1)`
 //   * permission select via `perm_x = |(fm & cfg_x_vec)` (1 LUT level)
 //
-// Functionality is bit-identical to the previous implementation; this is
-// purely a synthesis-friendly restructuring (area-for-frequency).
+// Data accesses also select the first entry overlapping any byte and reject
+// partial coverage. Endpoint permission checks alone are insufficient.
 //
 // Inputs (live):
 //   addr     - byte address
@@ -106,23 +108,40 @@ module rapt_pmp #(
   // Per-byte-end match vectors.
   logic [N-1:0] entry_match_lo;
   logic [N-1:0] entry_match_hi;
+  logic [N-1:0] entry_overlap;
+  logic [N-1:0] entry_contains_all;
 
   // pmpaddr granularity = words (G=0 -> byte_addr >> 2). We compute
   // addr_hi_w directly via (addr + size_m1) >> 2 to avoid carrying the
   // unused byte-offset bits of the sum.
   logic [PADDR_BITS-1:0] addr_phys;
   logic [PADDR_BITS-1:0] addr_hi_phys;
+  logic [PADDR_BITS:0] addr_end;
   logic [PMPAddrBits-1:0] addr_lo_w;
   logic [PMPAddrBits-1:0] addr_hi_w;
   assign addr_phys = addr[PADDR_BITS-1:0];
-  assign addr_hi_phys = addr_phys + {{(PADDR_BITS - 4) {1'b0}}, size_m1};
+  assign addr_end = {1'b0, addr_phys} + (PADDR_BITS+1)'(size_m1);
+  assign addr_hi_phys = addr_end[PADDR_BITS-1:0];
   assign addr_lo_w = addr_phys[PADDR_BITS-1:2];
   assign addr_hi_w = addr_hi_phys[PADDR_BITS-1:2];
+  // At most sixteen bytes visit at most two aligned eight-word blocks.
+  // Test a region start with wide equality and three-bit comparisons rather
+  // than cascading full physical-address magnitude comparators after addr_hi.
+  function automatic logic start_inside(input logic [PMPAddrBits-1:0] start_word);
+    logic same_block, in_first, in_last;
+    same_block = addr_lo_w[PMPAddrBits-1:3] == addr_hi_w[PMPAddrBits-1:3];
+    in_first = start_word[PMPAddrBits-1:3] == addr_lo_w[PMPAddrBits-1:3]
+        && start_word[2:0] >= addr_lo_w[2:0];
+    in_last = start_word[PMPAddrBits-1:3] == addr_hi_w[PMPAddrBits-1:3]
+        && start_word[2:0] <= addr_hi_w[2:0];
+    return same_block ? (in_first && in_last) : (in_first || in_last);
+  endfunction
   for (genvar i = 0; i < N; i++) begin : gen_entry
     logic [PMPAddrBits-1:0] tor_lo;
     logic [PMPAddrBits-1:0] napot_base;
     logic match_tor_lo, match_na4_lo, match_napot_lo;
     logic match_tor_hi, match_na4_hi, match_napot_hi;
+    logic tor_start_inside, na4_start_inside, napot_start_inside;
     if (i == 0) begin : gen_first_tor
       assign tor_lo = '0;
     end else begin : gen_next_tor
@@ -138,6 +157,21 @@ module rapt_pmp #(
     assign match_napot_lo = ((addr_lo_w & ~pmp_napot_mask[i]) == napot_base);
     assign match_napot_hi = ((addr_hi_w & ~pmp_napot_mask[i]) == napot_base);
 
+    // Endpoints alone miss an entry contained inside the access. For the
+    // contiguous ranges produced by PMP CSR decoding, overlap occurs when
+    // either endpoint matches or the region's start lies inside the access.
+    // Handle wrapping physical-word arithmetic consistently with endpoints.
+    if (i == 0) begin : gen_zero_tor_start
+      // Entry zero starts at word zero: it lies in the access only when
+      // the access starts there or wraps across the physical address limit.
+      assign tor_start_inside = (pmp_raw_addr[i] != '0)
+          && ((addr_lo_w == '0) || addr_end[PADDR_BITS]);
+    end else begin : gen_nonzero_tor_start
+      assign tor_start_inside = (tor_lo < pmp_raw_addr[i]) && start_inside(tor_lo);
+    end
+    assign na4_start_inside = start_inside(pmp_raw_addr[i]);
+    assign napot_start_inside = start_inside(napot_base);
+
     // OR-of-AND with mode one-hot vectors.  Equivalent to the previous
     // unique-case but synthesises as 4xAND + OR-reduce instead of a
     // 4-way mux that may share priority logic with the rest of the chain.
@@ -147,13 +181,24 @@ module rapt_pmp #(
     assign entry_match_hi[i] = (pmp_mode_tor[i]   & match_tor_hi)
                              | (pmp_mode_na4[i]   & match_na4_hi)
                              | (pmp_mode_napot[i] & match_napot_hi);
+    assign entry_overlap[i] = entry_match_lo[i] | entry_match_hi[i]
+                             | (pmp_mode_tor[i] & tor_start_inside)
+                             | (pmp_mode_na4[i] & na4_start_inside)
+                             | (pmp_mode_napot[i] & napot_start_inside);
+    // On physical-address wrap, endpoints in one range do not prove that
+    // the intervening top and bottom addresses are covered. Only a NAPOT
+    // range covering the entire physical address space can contain both.
+    assign entry_contains_all[i] = entry_match_lo[i] & entry_match_hi[i]
+        & ((!addr_end[PADDR_BITS])
+           | (pmp_mode_napot[i] && (&pmp_napot_mask[i])));
   end
 
   // Lowest-set-bit one-hot priority encoder.
   // Carry-chain isolates the LSB -> ~1 LUT level vs N-deep priority chain.
-  logic [N-1:0] fm_lo, fm_hi;
+  logic [N-1:0] fm_lo, fm_hi, fm_any;
   assign fm_lo = entry_match_lo & ((~entry_match_lo) + {{(N - 1) {1'b0}}, 1'b1});
   assign fm_hi = entry_match_hi & ((~entry_match_hi) + {{(N - 1) {1'b0}}, 1'b1});
+  assign fm_any = entry_overlap & ((~entry_overlap) + {{(N - 1) {1'b0}}, 1'b1});
 
   logic any_match_lo, any_match_hi;
   assign any_match_lo = |entry_match_lo;
@@ -196,7 +241,10 @@ module rapt_pmp #(
   logic data_partial_match_fault;
   assign fault_lo = byte_fault(any_match_lo, perm_r_lo, perm_w_lo, perm_x_lo, perm_l_lo);
   assign fault_hi = byte_fault(any_match_hi, perm_r_hi, perm_w_hi, perm_x_hi, perm_l_hi);
-  assign data_partial_match_fault = (op_r || op_w) && any_match_lo && !(|(fm_lo & entry_match_hi));
+  // The highest-priority entry matching ANY byte must cover ALL bytes,
+  // even for unlocked M-mode accesses and even if every region permits R/W.
+  assign data_partial_match_fault = (op_r || op_w) && (|entry_overlap)
+      && !(|(fm_any & entry_contains_all));
   assign fault_lo_o = fault_lo;
   assign fault = fault_lo | fault_hi | data_partial_match_fault;
 

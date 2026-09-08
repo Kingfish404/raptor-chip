@@ -204,6 +204,10 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", required=True, help="RISCOF test list")
     parser.add_argument("--output", required=True, help="filtered test list")
+    parser.add_argument("--shard-index", type=int, default=0)
+    parser.add_argument("--shard-count", type=int, default=1)
+    parser.add_argument("--target", choices=("raptor", "nemu"), default="raptor",
+                        help="NEMU does not inherit RTL U-mode VM quarantines")
     parser.add_argument(
         "--drop-legacy-ad",
         action="store_true",
@@ -216,6 +220,8 @@ def main() -> None:
         help="handle classic software-A/D tests: rewrite to hardware A/D, drop them, or keep unchanged",
     )
     args = parser.parse_args()
+    if args.shard_count < 1 or not 0 <= args.shard_index < args.shard_count:
+        parser.error("require shard-count >= 1 and 0 <= shard-index < shard-count")
 
     ad_policy = args.ad_policy or ("hardware" if args.drop_legacy_ad else "keep")
 
@@ -225,17 +231,39 @@ def main() -> None:
     dropped_ad = []
     dropped_incompat = []
     dropped_profile = []
+    dropped_reference = []
     rewritten_ad = []
     marked_hardware_ad = []
+    relocated_pmp = []
     for test_name, entry in tests.items():
         macros = entry.get("macros", []) or []
         test_path = entry.get("test_path", test_name)
+        if args.target == "nemu" and "/rv64i_m/vm_sv39/" in test_path and Path(test_path).name == "vm_satp_access_tests.S":
+            # Sail 0.13.1 fixes ASIDLEN=16; NEMU/Raptor implement 9 bits.
+            # Both are legal. Do not change the DUT's WARL behavior or mask
+            # signatures to agree. nemu-satp-warl-check covers this directly.
+            # https://github.com/riscv/sail-riscv/issues/1859
+            dropped_reference.append(test_name)
+            continue
 
-        if is_classic_incompat_test(test_path):
+        incompatible = is_classic_incompat_test(test_path)
+        if args.target == "nemu":
+            incompatible = Path(test_path).name in {
+                "vm_mstatus_sbe_set_S_mode.S",
+                "vm_mstatus_sbe_set_sum_set_S_mode.S",
+            }
+        if incompatible:
             dropped_incompat.append(test_name)
             continue
 
-        if Path(test_path).name in UNSUPPORTED_PROFILE_TESTS:
+        # The classic VM tests select on XLEN/S alone, without consulting
+        # satp.MODE. NEMU implements Sv32/Sv39, not optional Sv48/Sv57.
+        unsupported_vm = args.target == "nemu" and (
+            "/vm_sv48/" in Path(test_path).as_posix()
+            or "/vm_sv57/" in Path(test_path).as_posix()
+            or Path(test_path).name.startswith(("sv48_", "sv57_"))
+        )
+        if Path(test_path).name in UNSUPPORTED_PROFILE_TESTS or unsupported_vm:
             dropped_profile.append(test_name)
             continue
 
@@ -253,19 +281,48 @@ def main() -> None:
             marked_hardware_ad.append(test_name)
             continue
 
+        if "/rv32i_m/pmp/" in test_path and Path(test_path).name in {
+            "pmpm_misaligned_na4.S", "pmpm_misaligned_napot.S", "pmpm_misaligned_tor.S"
+        }:
+            # Test the same PMP crossings wholly within one page. Otherwise
+            # Sail's page split and Raptor/NEMU's unsplit Bare PMP check
+            # legitimately produce different signatures at 0x80002000-1.
+            entry = copy.deepcopy(entry)
+            entry["macros"] = [*macros, "RVMODEL_PMP_REGION_OFFSET=16"]
+            relocated_pmp.append(test_name)
         kept[test_name] = entry
 
+    eligible_count = len(kept)
+    # Sorted round-robin assignment spreads the large floating-point families
+    # across runners. Apply it after filtering so every eligible test runs once.
+    kept = {name: kept[name] for index, name in enumerate(sorted(kept))
+            if index % args.shard_count == args.shard_index}
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     dump_testlist(kept, output)
+    if args.target == "nemu":
+        selection = {
+            "target": args.target, "ad_policy": ad_policy,
+            "input_count": len(tests), "selected_count": len(kept),
+            "excluded_big_endian": dropped_incompat,
+            "excluded_64_pmp_or_sv48_sv57": dropped_profile,
+            "excluded_ad": dropped_ad,
+            "excluded_sail_asid_width": dropped_reference,
+            "relocated_pmp_boundaries_within_page": relocated_pmp,
+        }
+        output.with_suffix(".selection.json").write_text(
+            json.dumps(selection, indent=2) + "\n", encoding="utf-8")
 
     print(
-        f"[riscof-filter] policy={ad_policy} kept {len(kept)} tests, "
+        f"[riscof-filter] policy={ad_policy} kept {len(kept)}/{eligible_count} tests "
+        f"in shard {args.shard_index}/{args.shard_count}, "
         f"rewrote {len(rewritten_ad)} A/D tests, "
         f"marked {len(marked_hardware_ad)} Sv32 VM tests for hardware A/D, "
         f"dropped {len(dropped_ad)} A/D tests, "
         f"quarantined {len(dropped_incompat)} classic-incompat tests, "
-        f"quarantined {len(dropped_profile)} unsupported-profile tests"
+        f"quarantined {len(dropped_profile)} unsupported-profile tests, "
+        f"excluded {len(dropped_reference)} Sail ASID-width incompatibilities, "
+        f"relocated {len(relocated_pmp)} PMP boundary tests within a page"
     )
 
 

@@ -57,6 +57,7 @@ module rapt_bus #(
   // L1I AR FIFO (one entry per refill word)
   logic [XLEN-1:0] l1i_q_addr                                     [L1iARDepth];
   logic            l1i_q_burst                                    [L1iARDepth];
+  logic [1:0]      l1i_q_pbmt [L1iARDepth];
   logic            l1i_q_ptw                                      [L1iARDepth];
   logic [L1iARPtrW-1:0] l1i_q_rdptr;
   logic [L1iARPtrW-1:0] l1i_q_wrptr;
@@ -73,6 +74,7 @@ module rapt_bus #(
   logic [     2:0] l1d_slot_size;
   logic            l1d_slot_mmio;
   logic            l1d_slot_ptw;
+  logic [1:0]      l1d_slot_pbmt;
 
   // Master-side capture handshakes (each pulses *_bus.rready for one cycle).
   //
@@ -107,12 +109,14 @@ module rapt_bus #(
   logic [2:0] rd_skid_size;
   logic [7:0] rd_skid_len;
   logic [1:0] rd_skid_burst;
+  logic [1:0] rd_skid_pbmt;
   logic source_l1d, source_l1i, source_valid;
   logic [3:0] source_id;
   logic [XLEN-1:0] source_addr;
   logic [2:0] source_size;
   logic [7:0] source_len;
   logic [1:0] source_burst;
+  logic [1:0] source_pbmt;
   logic rd_skid_available, rd_capture_source, rd_output_fire;
   logic take_l1d, take_l1i, l1i_pop;
 
@@ -133,13 +137,14 @@ module rapt_bus #(
   assign l1i_bus.rdata = mem.rd_rsp_data;
   assign l1i_bus.rvalid = (mem.rd_rsp_id == L1I) && mem.rd_rsp_valid;
   assign l1i_bus.ptw_rvalid = (mem.rd_rsp_id == TLBI) && mem.rd_rsp_valid;
+  assign l1i_bus.ptw_rerr = l1i_bus.ptw_rvalid && mem.rd_rsp_error;
   assign l1i_bus.rlast = (mem.rd_rsp_id == L1I) && mem.rd_rsp_last;
   assign l1i_bus.rerr = (mem.rd_rsp_id == L1I) && mem.rd_rsp_valid && mem.rd_rsp_error;
 
   // lsu read demux
   // Gate L1D response by slot_issued: do not forward a response to L1D until
   // our AR has been handed to the slave. This prevents accepting stale
-  // responses (e.g. ysyxSoC `sdram_axi` response-FIFO mis-sync) that arrive
+  // responses that arrive
   // before our request has been issued.
   assign l1d_bus.rdata = mem.rd_rsp_data;
   assign l1d_bus.rvalid = l1d_slot_issued && !l1d_slot_ptw
@@ -151,9 +156,11 @@ module rapt_bus #(
   assign l1d_bus.difftest_skip = l1d_slot_busy && l1d_slot_mmio;
   assign l1d_bus.rerr = l1d_slot_issued && !l1d_slot_ptw && (mem.rd_rsp_id == L1D)
                      && mem.rd_rsp_valid && mem.rd_rsp_error;
+  assign l1d_bus.ptw_rerr = l1d_bus.ptw_rvalid && mem.rd_rsp_error;
 
   assign source_id = source_l1d ? (l1d_slot_ptw ? 4'(TLBD) : 4'(L1D))
                                 : (l1i_q_ptw[l1i_q_rdptr] ? 4'(TLBI) : 4'(L1I));
+  assign source_pbmt = source_l1d ? l1d_slot_pbmt : l1i_q_pbmt[l1i_q_rdptr];
   assign source_addr = source_l1d ? l1d_slot_addr : l1i_q_head_addr;
   // RV64 page-table entries are 64 bits.  L1I/PTW requests share the L1I
   // queue, but only ordinary instruction refills are 32-bit reads. Sending
@@ -176,6 +183,7 @@ module rapt_bus #(
   assign mem.rd_req_addr = rd_skid_valid ? rd_skid_addr : source_addr;
   assign mem.rd_req_size = rd_skid_valid ? rd_skid_size : source_size;
   assign mem.rd_req_burst = rd_skid_valid ? rd_skid_burst : source_burst;
+  assign mem.rd_req_pbmt = rd_skid_valid ? rd_skid_pbmt : source_pbmt;
   assign mem.rd_req_len = rd_skid_valid ? rd_skid_len : source_len;
   assign rd_output_fire = mem.rd_req_valid && mem.rd_req_ready;
   assign rd_capture_source = rd_skid_available && source_valid
@@ -198,6 +206,7 @@ module rapt_bus #(
       rd_skid_size  <= '0;
       rd_skid_len   <= '0;
       rd_skid_burst <= '0;
+      rd_skid_pbmt <= '0;
     end else if (rd_skid_available) begin
       rd_skid_valid <= rd_capture_source;
       if (rd_capture_source) begin
@@ -206,6 +215,7 @@ module rapt_bus #(
         rd_skid_size  <= source_size;
         rd_skid_len   <= source_len;
         rd_skid_burst <= source_burst;
+        rd_skid_pbmt <= source_pbmt;
       end
     end
   end
@@ -233,6 +243,7 @@ module rapt_bus #(
         l1i_q_addr[l1i_q_wrptr]  <= l1i_bus.araddr;
         l1i_q_burst[l1i_q_wrptr] <= l1i_bus.arburst;
         l1i_q_ptw[l1i_q_wrptr]   <= l1i_bus.ar_ptw;
+        l1i_q_pbmt[l1i_q_wrptr] <= l1i_bus.ar_ptw ? 2'b00 : l1i_bus.rpbmt;
         l1i_q_wrptr              <= l1i_q_wrptr + 1'b1;
         l1i_captured             <= 1'b1;
         l1i_last_push_addr       <= l1i_bus.araddr;
@@ -263,6 +274,7 @@ module rapt_bus #(
         l1d_slot_size   <= l1d_arsize_enc;
         l1d_slot_mmio   <= rapt_pkg::addr_mmio(l1d_bus.araddr);
         l1d_slot_ptw    <= l1d_bus.ar_ptw;
+        l1d_slot_pbmt <= l1d_bus.ar_ptw ? 2'b00 : l1d_bus.rpbmt;
       end
       if (take_l1d) begin
         l1d_slot_held <= 1'b1;
@@ -303,9 +315,13 @@ module rapt_bus #(
   assign store_awvalid = (store_bridge inside {L1I, TLBI}) ? l1i_bus.awvalid : l1d_bus.awvalid;
   assign store_wvalid = (store_bridge inside {L1I, TLBI}) ? l1i_bus.wvalid : l1d_bus.wvalid;
 
+  assign l1d_bus.idle = !l1d_slot_busy && !l1d_bus.arvalid
+      && write_state == WR_IDLE && !store_awvalid && !store_wvalid;
+
   assign mem.wr_req_valid = (write_state == WR_IDLE) && store_awvalid && store_wvalid;
   assign mem.wr_req_id = 4'(store_bridge);
   assign mem.wr_req_addr = store_awaddr;
+  assign mem.wr_req_pbmt = store_bridge == L1D ? l1d_bus.wpbmt : 2'b00;
   // Right-aligned one- and two-byte requests can use narrow AXI transfers.
   // Wider or lane-shifted partial masks come from aligned misaligned-store
   // beats; cover the highest asserted lane with a 4- or 8-byte transfer and
@@ -353,6 +369,7 @@ module rapt_bus #(
     end
   end
 
-  `RAPT_SVA_IMPLY(clock, reset, BUS_STORE_RESPONSE_OK, mem.wr_rsp_valid, !mem.wr_rsp_error)
+  `RAPT_SVA_IMPLY(clock, reset, BUS_STORE_RESPONSE_OWNED, mem.wr_rsp_valid,
+                  write_state == WR_WAIT && mem.wr_rsp_id == 4'(store_source))
 
 endmodule

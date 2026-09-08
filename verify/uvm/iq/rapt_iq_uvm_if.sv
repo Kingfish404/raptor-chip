@@ -1,6 +1,8 @@
 `include "rapt.svh"
 
-interface rapt_iq_uvm_if (input logic clock);
+interface rapt_iq_uvm_if (
+    input logic clock
+);
   localparam int IQSize = 8;
   localparam int XLEN = `RAPT_XLEN;
   localparam int PLEN = `RAPT_PHY_LEN;

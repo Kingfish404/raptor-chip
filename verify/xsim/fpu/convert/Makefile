@@ -23,3 +23,10 @@ clean:
 	rm -rf obj_dir
 
 .PHONY: run clean
+
+.PHONY: run-widen-box
+run-widen-box:
+	+$(VERILATOR) --cc --exe --build -j 2 --assert -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC \
+		--top-module rapt_fpu_convert_widen -I$(ROOT)/hdl/include -I$(ROOT)/hdl/configs/default \
+		$(ROOT)/hdl/backend/feu/fpu/rapt_fpu_convert_widen.sv tb_widen_box.cpp --Mdir obj_widen_box -o tb
+	./obj_widen_box/tb

@@ -30,6 +30,7 @@ module rapt_fpu_fp_to_half (
   logic [52:0] significand;
   logic [10:0] retained;
   logic guard_bit, sticky_bit, inexact, round_up;
+  logic precision_guard, precision_sticky, precision_round_up, tiny;
   logic [11:0] rounded;
   integer rounded_exp;
   logic overflow_to_inf;
@@ -92,21 +93,33 @@ module rapt_fpu_fp_to_half (
       end
     end
 
+    // Round at binary16 precision with an unbounded exponent for tininess.
+    // Rounding again onto the subnormal grid can produce min-normal with UF.
+    precision_guard = significand[41];
+    precision_sticky = |significand[40:0];
+    case (rounding_mode)
+      3'b000: precision_round_up = precision_guard && (precision_sticky || significand[42]);
+      3'b001: precision_round_up = 1'b0;
+      3'b010: precision_round_up = (precision_guard || precision_sticky) && sign;
+      3'b011: precision_round_up = (precision_guard || precision_sticky) && !sign;
+      3'b100: precision_round_up = precision_guard;
+      default: precision_round_up = 1'b0;
+    endcase
+    tiny = (unbiased < -14)
+        && !((unbiased == -15) && precision_round_up && (&significand[52:42]));
+
     retained = '0;
     guard_bit = 1'b0;
     sticky_bit = 1'b0;
     shift_count = 0;
     if (!(is_zero || is_inf || is_nan)) begin
       shift_count = (unbiased >= -14) ? 42 : (28 - unbiased);
-      if (shift_count <= 52)
-        retained = 11'(significand >> shift_count);
-      if (shift_count > 0 && shift_count <= 53)
-        guard_bit = significand[shift_count-1];
-      if (shift_count > 53)
-        sticky_bit = |significand;
+      if (shift_count <= 52) retained = 11'(significand >> shift_count);
+      if (shift_count > 0 && shift_count <= 53) guard_bit = significand[shift_count-1];
+      if (shift_count > 53) sticky_bit = |significand;
       else if (shift_count > 1)
         for (scan = 0; scan < 53; scan = scan + 1)
-          if (scan < shift_count - 1) sticky_bit |= significand[scan];
+        if (scan < shift_count - 1) sticky_bit |= significand[scan];
     end
 
     inexact = guard_bit | sticky_bit;
@@ -144,7 +157,7 @@ module rapt_fpu_fp_to_half (
       end else begin
         if (rounded[10]) half_result = {sign, 5'h01, 10'b0};
         else half_result = {sign, 5'h00, rounded[9:0]};
-        flags_c[1] = inexact && !rounded[10];
+        flags_c[1] = inexact && tiny;
         flags_c[0] = inexact;
       end
     end

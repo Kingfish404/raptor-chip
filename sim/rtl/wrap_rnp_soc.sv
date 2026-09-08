@@ -129,7 +129,10 @@ module rng_chip #(
     end
   end
 
-  rapt cpu (  // src/CPU.scala:38:21
+  // The single-word RNP adapter can track only one read at a time.
+  rapt #(
+      .MemoryReadCredits(1)
+  ) cpu (
       .clock            (clock),
       .io_interrupt     (1'h0),
       .ext_irq_i        (ext_irq_pulse_q[`RAPT_PLIC_NDEV:1]),
@@ -140,6 +143,7 @@ module rng_chip #(
       .io_master_awlen  (auto_master_out_awlen_cpu),
       .io_master_awsize (auto_master_out_awsize_cpu),
       .io_master_awburst(auto_master_out_awburst_cpu),
+      .io_master_awcache(),
 
       .io_master_wready(auto_master_out_wready_cpu),
       .io_master_wvalid(auto_master_out_wvalid_cpu),
@@ -159,6 +163,7 @@ module rng_chip #(
       .io_master_arlen  (auto_master_out_arlen_cpu),
       .io_master_arsize (auto_master_out_arsize_cpu),
       .io_master_arburst(auto_master_out_arburst_cpu),
+      .io_master_arcache(),
       .io_master_rready (auto_master_out_rready_cpu),
       .io_master_rvalid (auto_master_out_rvalid_cpu),
       .io_master_rid    (auto_master_out_rid_cpu),
@@ -167,44 +172,13 @@ module rng_chip #(
       .io_master_rlast  (auto_master_out_rlast_cpu),
 
 
-`ifdef RAPT_USE_SLAVE
-      .io_slave_awready(  /* unused */),
-      .io_slave_awvalid(1'h0),
-      .io_slave_awid   (4'h0),
-      .io_slave_awaddr ('h0),
-      .io_slave_awlen  (8'h0),
-      .io_slave_awsize (3'h0),
-      .io_slave_awburst(2'h0),
-      .io_slave_wready (  /* unused */),
-      .io_slave_wvalid (1'h0),
-      .io_slave_wdata  ('h0),
-      .io_slave_wstrb  (4'h0),
-      .io_slave_wlast  (1'h0),
-      .io_slave_bready (1'h0),
-      .io_slave_bvalid (  /* unused */),
-      .io_slave_bid    (  /* unused */),
-      .io_slave_bresp  (  /* unused */),
-      .io_slave_arready(  /* unused */),
-      .io_slave_arvalid(1'h0),
-      .io_slave_arid   (4'h0),
-      .io_slave_araddr ('h0),
-      .io_slave_arlen  (8'h0),
-      .io_slave_arsize (3'h0),
-      .io_slave_arburst(2'h0),
-      .io_slave_rready (1'h0),
-      .io_slave_rvalid (  /* unused */),
-      .io_slave_rid    (  /* unused */),
-      .io_slave_rdata  (  /* unused */),
-      .io_slave_rresp  (  /* unused */),
-      .io_slave_rlast  (  /* unused */),
-`endif
 
       // Tie off JTAG for this wrapper (no JTAG header on wrapBus); the
       // jtag-selftest path uses raptSoC instead.
       .jtag_trst_n(1'b0),
       .jtag_tms   (1'b1),
       .jtag_tdi   (1'b0),
-        .jtag_tdo   (jtag_tdo_unused),
+      .jtag_tdo   (jtag_tdo_unused),
 
       .reset(reset)
   );

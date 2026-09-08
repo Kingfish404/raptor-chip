@@ -45,8 +45,9 @@ module formal_ieu_mul #(
 
     if (!past_valid) assume (reset);
     if (in_valid) begin
-      assume(in_op == `RAPT_ALU_MUL___ || in_op == `RAPT_ALU_MULH__
-             || in_op == `RAPT_ALU_MULHSU || in_op == `RAPT_ALU_MULHU_);
+      assume (in_op == `RAPT_ALU_MUL___ || in_op ==
+      `RAPT_ALU_MULH__
+      || in_op == `RAPT_ALU_MULHSU || in_op == `RAPT_ALU_MULHU_);
     end
   end
 
@@ -72,8 +73,8 @@ module formal_ieu_mul #(
 
   always_comb begin
     if (!reset) begin
-      valid_assert: assert (out_valid == ref_valid_qq);
-      if (out_valid) result_assert: assert (out_r == ref_result_qq);
+      valid_assert : assert (out_valid == ref_valid_qq);
+      if (out_valid) result_assert : assert (out_r == ref_result_qq);
     end
   end
 `endif  // FORMAL

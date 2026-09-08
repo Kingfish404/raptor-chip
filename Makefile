@@ -6,7 +6,6 @@ export NEMU_HOME := $(RAPTOR_HOME)/nemu
 export NSIM_HOME := $(RAPTOR_HOME)/sim
 export AM_HOME   := $(RAPTOR_HOME)/abstract-machine
 export NAVY_HOME := $(RAPTOR_HOME)/abstract-machine/app/navy-apps
-export NVBOARD_HOME := $(RAPTOR_HOME)/third_party/NJU-ProjectN/nvboard
 export CROSS_COMPILE ?= riscv64-elf-
 VERIBLE_FORMAT ?= verible-verilog-format
 
@@ -292,7 +291,6 @@ config-nemu64-difftest: build-spike-diff64 ## Configure NEMU RV64 binary with sp
 # ============================================================================
 NPC_DEFCONFIG ?= o2_defconfig ## NPC simulator defconfig profile
 NPC_ARCH ?= riscv32-npc ## Override ARCH for AM targets
-YSYXSOC_ARCH ?= riscv32-ysyxsoc ## Override ARCH for ysyxSoC targets
 
 # RV64 mode: set via `make run-rv64` or explicitly `make run-rv32 VFLAGS="-DRAPT_RV64"`.
 # sim Verilator simulation enables RTL assertions by default via RAPT_SIM_ASSERT;
@@ -311,10 +309,6 @@ config-rv32-difftest: config-rv32 ## Configure NPC simulator with difftest
 config-rv32-linux:
 	$(MAKE) -C $(NSIM_HOME) o2linux_difftest_defconfig
 	$(MAKE) -C $(NSIM_HOME) $(SUBMAKE_JOBS) VFLAGS="$(VFLAGS)"
-
-config-rv32-ysyxsoc:
-	$(MAKE) -C $(NSIM_HOME) o2soc_defconfig
-	$(MAKE) -C $(NSIM_HOME) $(SUBMAKE_JOBS)
 
 
 # Auto-generate RTL from Chisel if generated/ doesn't exist
@@ -436,6 +430,15 @@ cpu-tests-rv32-run: ## Run AM cpu-tests on an already-built NPC (parallel)
 	    || { echo "[cpu-tests-rv32] ERROR: print-npc-exec failed"; exit 1; }; \
 	  $(call run_cpu_tests_parallel,rv32,"$$NPC_CMD",$(NPC_ARCH),$(NPC_LOG_DIR)/cpu-tests-rv32.log)
 
+cpu-tests-rv64-run: VFLAGS := -DRAPT_RV64
+cpu-tests-rv64-run: ## Run AM cpu-tests on an already-built RV64 NPC (parallel)
+	+@set -o pipefail; \
+	  NPC_CMD=$$($(MAKE) --no-print-directory -C $(NSIM_HOME) VFLAGS="$(VFLAGS)" print-npc-exec | tail -1) \
+	    || { echo "[cpu-tests-rv64] ERROR: print-npc-exec failed"; exit 1; }; \
+	  $(call run_cpu_tests_parallel,rv64,"$$NPC_CMD",riscv64-npc,$(NPC_LOG_DIR)/cpu-tests-rv64.log)
+
+.PHONY: cpu-tests-rv64-run
+
 # --- Bare-metal IRQ tests (PLIC, etc) -------------------------------------
 # Each test is a standalone M-mode .bin loaded directly at 0x80000000 via
 # the sim positional IMG argument. No pk/AM dependency.
@@ -500,10 +503,6 @@ coremark-rv32-difftest: $(AM_KERNELS) config-rv32 config-nemu32-ref ## Run CoreM
 	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/coremark_eembc ARCH=$(NPC_ARCH) run ARGS="$(ARGS)" mainargs=test $(call tee_npc,coremark-rv32-difftest)
 	$(call coremark_mhz_report,$(NPC_LOG_DIR)/coremark-rv32-difftest.log)
 
-coremark-ysyxsoc: $(AM_KERNELS) config-rv32-ysyxsoc config-nemu32-ref ## Run CoreMark on ysyxSoC
-	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/coremark_eembc ARCH=$(YSYXSOC_ARCH) run ARGS="$(ARGS)" mainargs=test $(call tee_npc,coremark-ysyxsoc)
-	$(call coremark_mhz_report,$(NPC_LOG_DIR)/coremark-ysyxsoc.log)
-
 microbench-rv32: $(AM_KERNELS) config-rv32 ## Run MicroBench on NPC
 	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/microbench ARCH=$(NPC_ARCH) run ARGS="$(ARGS)" mainargs=$(MAINARGS) $(call tee_npc,microbench-rv32-$(MAINARGS))
 
@@ -531,8 +530,24 @@ microbench-rv64-difftest: $(AM_KERNELS) config-rv32 config-nemu64-ref ## Run Mic
 microbench-rv32-difftest: $(AM_KERNELS) config-rv32 config-nemu32-ref ## Run MicroBench on NPC with difftest
 	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/microbench ARCH=$(NPC_ARCH) run ARGS="$(ARGS)" mainargs=$(MAINARGS) $(call tee_npc,microbench-rv32-difftest-$(MAINARGS))
 
-microbench-ysyxsoc: $(AM_KERNELS) config-rv32-ysyxsoc config-nemu32-ref ## Run MicroBench on ysyxSoC
-	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/microbench ARCH=$(YSYXSOC_ARCH) run ARGS="$(ARGS)" mainargs=test $(call tee_npc,microbench-ysyxsoc)
+# --- Reproducible AXI memory-delay stress runs ---
+SIM_RANDOM_DELAY ?= 31## Maximum extra wait cycles per AXI memory beat
+SIM_RANDOM_SEED ?= 1## Deterministic random-delay seed
+SIM_RANDOM_ARGS = --mem-random-delay=$(strip $(SIM_RANDOM_DELAY)) --mem-random-seed=$(strip $(SIM_RANDOM_SEED))
+
+coremark-random-rv32 coremark-random-rv64: ## Run CoreMark on sim with random AXI memory delays
+	$(MAKE) --no-print-directory $(subst -random,,$@) ARGS="$(ARGS) $(SIM_RANDOM_ARGS)"
+
+microbench-random-rv32 microbench-random-rv64: ## Run MicroBench on sim with random AXI memory delays
+	$(MAKE) --no-print-directory $(subst -random,,$@) ARGS="$(ARGS) $(SIM_RANDOM_ARGS)"
+
+# Build and run in separate recursive calls: sim/.config is shared even with
+# BUILD_PROFILE isolation, so the runner must not overlap configuration/build.
+cpu-tests-random-rv32 cpu-tests-random-rv64: ## Run AM cpu-tests on sim with random AXI memory delays
+	$(MAKE) --no-print-directory build-$(lastword $(subst -, ,$@))
+	$(MAKE) --no-print-directory $(subst -random,,$@)-run ARGS="$(ARGS) $(SIM_RANDOM_ARGS)"
+
+.PHONY: coremark-random-rv32 coremark-random-rv64 microbench-random-rv32 microbench-random-rv64 cpu-tests-random-rv32 cpu-tests-random-rv64
 
 # --- CoreMark "optimized" runs with CoreMark/MHz reporting ----------------
 # COREMARK_OPTIM_CFLAGS holds aggressive GCC flags that maximize CoreMark/MHz on
@@ -888,7 +903,7 @@ ide-setup: compile-commands ## Generate compile_commands.json for IDE/LSP setup
 compile-commands: ## Generate root compile_commands.json from real NEMU+sim build commands
 	bash $(RAPTOR_HOME)/.github/scripts/gen_compile_commands.sh
 
-STA_PLATFORM ?= nangate45 ## STA platform: nangate45, asap7, sky130hd
+STA_PLATFORM ?= nangate45 ## STA platform: nangate45, asap7, sky130hd (alias: sky130)
 CLK_FREQ_MHZ ?= 50 ## Target clock frequency for STA (MHz)
 STA_SUMMARY_DETAIL ?= 0 ## Show per-module LSPD STA rows (0=grouped summary, 1=detail)
 
@@ -1191,9 +1206,9 @@ app-coremark-rv32: build-rv32 ## [app] CoreMark via pk (rv32)
 	@set -o pipefail; $(MAKE) --no-print-directory -C $(APP_HOME) coremark-sim ARGS="$(ARGS)" $(call tee_app,coremark-rv32)
 	$(call coremark_mhz_report,$(APP_LOG_DIR)/coremark-rv32.log)
 
-# CoreMark via pk with aggressive optim flags + CoreMark/MHz report. The app
-# CoreMark build (app/benchmarks/coremark) does not track CFLAGS changes, so its
-# build dir is cleaned first to force a rebuild with COREMARK_OPTIM_CFLAGS.
+# CoreMark via pk with aggressive optim flags + CoreMark/MHz report.
+# Start optimized benchmark runs from fresh application objects; regular builds
+# also track iteration and compiler-flag changes in their configuration stamp.
 app-coremark-rv32-optim: build-rv32 ## [app] CoreMark via pk (rv32) with aggressive optim flags + CoreMark/MHz report
 	@$(MAKE) --no-print-directory -C $(APP_HOME)/benchmarks/coremark clean
 	@set -o pipefail; $(MAKE) --no-print-directory -C $(APP_HOME) coremark-sim ARGS="$(ARGS)" COREMARK_OPTIM_CFLAGS="$(COREMARK_OPTIM_CFLAGS)" $(call tee_app,coremark-rv32-optim)
@@ -1296,13 +1311,13 @@ app-clean: ## [app] Clean app build artifacts
 .PHONY: help setup setup-rtl verilog log logs-show logs-clean \
 	config-nemu32 config-nemu32-linux config-nemu32gc-linux config-nemu32-ref config-nemu32-linux-device menuconfig-nemu32 build-nemu32 run-nemu32 run-nemu32-linux run-nemu32-linux-device \
 	config-nemu64 config-nemu64-ref config-nemu64-linux config-nemu64gc-linux config-nemu64-linux-device build-nemu64 run-nemu64 run-nemu64-linux-device \
-	config-rv32 config-rv32-difftest config-rv32-linux config-rv32-ysyxsoc build-rv32 run-rv32 sim-rv32 \
+	config-rv32 config-rv32-difftest config-rv32-linux build-rv32 run-rv32 sim-rv32 \
 	build-rv64 run-rv64 lint-rv64 \
 	am-kernels-hello-rv32 am-tests-cache-tests-rv32 am-tests-nemu32 am-tests-rv32 \
 	cpu-tests-nemu32 cpu-tests-rv32 cpu-tests-rv32-run irq-tests-build irq-tests-rv32 irq-tests-rv32-run irq-tests-rv32-difftest \
 	repro-tests-build linux-ticket-spinlock-repro-rv32 sv32-sq-alias-repro-rv32 \
-	coremark-rv32 coremark-rv64 coremark-rv32-optim coremark-rv64-optim coremark-rv32-difftest coremark-rv64-difftest coremark-ysyxsoc \
-	microbench-rv32 microbench-rv64 microbench-rv32-difftest micorbench-rv32-difftest microbench-rv64-difftest microbench-ysyxsoc \
+	coremark-rv32 coremark-rv64 coremark-rv32-optim coremark-rv64-optim coremark-rv32-difftest coremark-rv64-difftest \
+	microbench-rv32 microbench-rv64 microbench-rv32-difftest micorbench-rv32-difftest microbench-rv64-difftest \
 	dhrystone-rv32 dhrystone-rv32-difftest dhrystone-rv64 dhrystone-nemu32 dhrystone-rv32-optim dhrystone-rv64-optim \
 	coremark-nemu32 microbench-nemu32 coremark-nemu64 microbench-nemu64 \
 	archtest-rv32 archtest-rv32e \
@@ -1327,5 +1342,27 @@ app-clean: ## [app] Clean app build artifacts
 # ============================================================================
 # Copy Makefile.local.example -> Makefile.local and fill in site-specific values.
 -include Makefile.local
+
+# Upstream ysyxSoC integration through hdl/perip/wrap_ysyxsoc.sv.
+YSYXSOC_ARCH ?= riscv32-ysyxsoc
+YSYXSOC_HOME ?= $(RAPTOR_HOME)/third_party/OSCPU/ysyxSoC
+config-rv32-ysyxsoc:
+	$(MAKE) -C $(NSIM_HOME) o2soc_defconfig
+	$(MAKE) -C $(NSIM_HOME) all SIM_PLATFORM=ysyxsoc SOC_HOME=$(YSYXSOC_HOME)
+
+coremark-ysyxsoc: $(AM_KERNELS) config-rv32-ysyxsoc ## Run CoreMark on upstream ysyxSoC (RV32)
+	$(MAKE) -C $(AM_KERNELS)/benchmarks/coremark_eembc ARCH=$(YSYXSOC_ARCH) run ARGS="$(ARGS)" mainargs=test SOC_HOME=$(YSYXSOC_HOME)
+
+microbench-ysyxsoc: $(AM_KERNELS) config-rv32-ysyxsoc ## Run MicroBench on upstream ysyxSoC (RV32)
+	$(MAKE) -C $(AM_KERNELS)/benchmarks/microbench ARCH=$(YSYXSOC_ARCH) run ARGS="$(ARGS)" mainargs=$(MAINARGS) SOC_HOME=$(YSYXSOC_HOME)
+
+.PHONY: config-rv32-ysyxsoc coremark-ysyxsoc microbench-ysyxsoc
+
+YSYXSOC_MILL ?=
+YSYXSOC_JAVA_HOME ?=
+ysyxsoc-setup: ## Fetch and generate the pinned, unmodified upstream ysyxSoC
+	python3 sim/ysyxsoc/setup.py --soc $(YSYXSOC_HOME) $(if $(YSYXSOC_MILL),--mill $(YSYXSOC_MILL),) $(if $(YSYXSOC_JAVA_HOME),--java-home $(YSYXSOC_JAVA_HOME),)
+
+.PHONY: ysyxsoc-setup
 
 endif # Guard: root-only targets

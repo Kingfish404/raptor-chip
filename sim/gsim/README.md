@@ -1,7 +1,7 @@
 # gem5 SE-mode runner for raptor-chip
 
-A gem5 model of the raptor-chip dual-issue OoO RISC-V core for **design
-space exploration** and **performance bug analysis**, parameterised
+A gem5 model of the raptor-chip parameterized superscalar OoO RISC-V core for
+**design space exploration** and **performance bug analysis**, parameterised
 directly from `raptor-chip/hdl/configs/<preset>/rapt_config.svh`.
 
 ## Why SE mode?
@@ -28,22 +28,38 @@ If you need OS-level workloads on raptor-chip, run them on
 
 | `rapt_config.svh`         | gem5 O3                                          |
 | ------------------------- | ------------------------------------------------ |
-| `RAPT_L1{I,D}_LINE_LEN`   | `cache_line_size = 4 << LINE_LEN` bytes          |
+| `RAPT_L1I_LINE_LEN` | I-side line bytes = `4 << LINE_LEN` |
+| `RAPT_L1D_LINE_LEN` | D-side line bytes = `(XLEN / 8) << LINE_LEN` |
 | `RAPT_L1{I,D}_LEN`        | sets = `1 << LEN`                                |
 | `RAPT_L1{I,D}_N_WAYS`     | `Cache.assoc`                                    |
 | `RAPT_ROB_SIZE`           | `numROBEntries`                                  |
 | `RAPT_PHY_SIZE`           | `numPhysIntRegs`, `numPhysFloatRegs`             |
 | `RAPT_RS_SIZE+IOQ_SIZE`   | `IQUnit.numEntries`                              |
 | `RAPT_SQ_SIZE`            | `LQEntries`, `SQEntries`                         |
-| `RAPT_ISSUE_WIDTH`        | `fetch/decode/rename/dispatch/issue/wb` width    |
-| `RAPT_DUAL_COMMIT`        | `commitWidth = 2`                                |
+| `RAPT_DECODE_WIDTH`       | `fetchWidth`, `decodeWidth`                      |
+| `RAPT_RENAME_WIDTH`       | `renameWidth`                                    |
+| `RAPT_DISPATCH_WIDTH`     | `dispatchWidth`; also approximates global `issueWidth`/`wbWidth` |
+| `RAPT_COMMIT_WIDTH`       | `commitWidth`                                    |
+| `RAPT_INTEGER_ISSUE_PORTS`| `IntALU.count` with `--rtl-execution-resources`  |
+| `RAPT_INTEGER_SYSTEM_PORT`| Validated against the RTL port count; physical index has no gem5 O3 analogue |
 | `RAPT_BTB_SIZE/WAYS`      | `SimpleBTB(numEntries, associativity)`           |
 | `RAPT_PHT_SIZE`           | `BiModeBP(globalPredictorSize, choicePredictorSize)` |
 | `RAPT_RSB_SIZE`           | `ReturnAddrStack(numEntries)`                    |
 
-Cache line derivation: a `LINE_LEN=2` raptor cache stores 2² 32-bit words
-per line = 16 B; `LINE_LEN=1` ⇒ 8 B. This matches the comments in
-`hdl/configs/large/rapt_config.svh` ("16B line * 256 sets * 2 ways = 8 KiB").
+L1I stores 32-bit instruction words; L1D stores XLEN-bit data words. Current
+presets derive both from `RAPT_CACHE_LINE_BYTES`, so byte capacities stay
+constant across RV32/RV64. Default lines are 64 B, L1I is 4 KiB and L1D is
+2 KiB; large has 32 KiB L1I and 8 KiB L1D. The model uses the larger derived
+line size as gem5's global cache line size for historical unequal-line presets.
+The FP register count is a gem5 OoO modeling choice: RTL has a separate
+32 × 64-bit architectural FPR bank, not a renamed FP register file.
+RV64 DSE results produced before the XLEN-aware cache fix used half the
+configured L1D capacity and must be rerun for comparisons with current RTL.
+The old `RAPT_ISSUE_WIDTH` and `RAPT_DUAL_*` declarations are accepted only as
+fallbacks for historical presets; direct ordered-stage widths always win.
+Raptor's heterogeneous execution domains do not have a single RTL issue-width
+boundary, so gem5's global issue/writeback widths are a throughput
+approximation rather than a structural equivalence.
 
 ## Prerequisites
 
@@ -58,6 +74,19 @@ make coremark                 # rv32 by default
 make coremark ISA64=1         # rv64
 make embench                  # all of Embench-IoT
 ```
+
+## Configuration precedence
+
+The default Makefile run derives widths, capacities and execution-resource
+counts from the selected preset without a JSON overlay. Simulator-only
+settings retain script defaults (including the local predictor); select
+`BP=tage` explicitly for a TAGE experiment.
+Use `JSON_CONFIG=dse-config.json` explicitly for the provided TAGE study
+configuration; its cache, width and window settings override the preset.
+`SET` overrides are applied after JSON. Output names retain the preset and
+append the JSON basename, so the same overlay on different presets stays
+separate. Use an explicit `OUTDIR` for JSON files with identical basenames
+or for repeated experiments whose evidence must be retained.
 
 ## Quick start
 
@@ -92,7 +121,8 @@ make timing BENCH=coremark
 make sweep BENCH=coremark
 ```
 
-Each run lands in `raptor-chip/sim/build/gsim/<bench>-<preset>-<cpu>-rv$XLEN/`
+Each run lands in `raptor-chip/sim/build/gsim/<bench>-<preset>[.<json>]-rv$XLEN[.cpu=<cpu>][.<set>]/`
+(the default `o3` CPU suffix is omitted)
 with the following persisted artifacts:
 
 | file           | purpose                                                       |
@@ -137,8 +167,8 @@ Useful flags:
 * `--config-svh <path>` — point at a custom `rapt_config.svh` (skips `--preset`).
 * `--no-l2` — drop the model L2; L1s connect directly to membus
   (closer to raptor-chip's RTL today, which has no L2).
-* `--rtl-execution-resources` — use two integer ALUs, one MULDIV unit, and
-  one load/store request port. This is opt-in because gem5's default FUPool is
+* `--rtl-execution-resources` — use the configured integer-ALU port count,
+  one MULDIV unit, and one load/store request port. This is opt-in because gem5's default FUPool is
   deliberately more provisioned; it isolates execution-resource effects from
   branch-predictor DSE results.
 * `--fetch-queue-size N` — override gem5's default 32-uop per-thread fetch
@@ -171,12 +201,13 @@ Useful flags:
 * gem5 O3 is **a different uarch** from raptor-chip — same parameter
   *names* don't guarantee same *cycle behaviour*. Use this for trends and
   scaling, not absolute IPC matching.
-* `IOQ` (raptor's in-order load queue) is folded into gem5's unified IQ.
+* RTL IOQ schedules loads, stores and atomics, with conditional out-of-order
+  load issue; its capacity is folded into gem5's unified IQ.
   An IOQ-specific stall in raptor will not appear in gem5 stats.
-* `RAPT_M_FAST` (1-cycle MUL) is the gem5 default for `IntMult`; nothing
-  to do. If you toggle it off in raptor and want to mirror that, edit
-  `IntMultDiv.opLat` in `src/cpu/o3/FuncUnitConfig.py` or expose a CLI
-  knob here.
+* `RAPT_M_FAST` is parsed as metadata; the runner does not apply it to
+  gem5 operation latency. The optional RTL-resource pool uses gem5's
+  `IntMultDiv` timing defaults. RTL multiply/divide timing and queue behavior
+  require separate calibration; this knob does not establish cycle parity.
 * RV32 SE is supported by gem5 but is less battle-tested than RV64; if
   you hit a decoder gap, retry with `--rv64` after building the rv64
   ELF (`make -C app coremark ISA64=1`).

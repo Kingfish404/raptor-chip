@@ -1,0 +1,30 @@
+[tasks]
+ranges32
+ranges64
+selector32
+selector64
+
+[options]
+mode prove
+depth 1
+timeout 300
+
+[engines]
+smtbmc
+
+[script]
+plugin -i slang
+ranges32: read_slang --single-unit -DRAPT_PMP_PROVE_RANGES pmp_formal_if.sv formal_pmp.sv rapt_pmp.sv
+ranges64: read_slang --single-unit -DRAPT_RV64 -DRAPT_PMP_PROVE_RANGES pmp_formal_if.sv formal_pmp.sv rapt_pmp.sv
+selector32: read_slang --single-unit -DRAPT_PMP_USE_RANGE_LEMMAS pmp_formal_if.sv formal_pmp.sv rapt_pmp.sv
+selector64: read_slang --single-unit -DRAPT_RV64 -DRAPT_PMP_USE_RANGE_LEMMAS pmp_formal_if.sv formal_pmp.sv rapt_pmp.sv
+prep -top formal_pmp
+
+[files]
+formal_pmp.sv
+rapt_pmp.sv ../../hdl/memory/rapt_pmp.sv
+rapt.svh ../../hdl/include/rapt.svh
+rapt_config.svh ../../hdl/configs/formal/rapt_config.svh
+rapt_sva.svh ../../hdl/include/rapt_sva.svh
+rapt_fp_ops.svh ../../hdl/include/rapt_fp_ops.svh
+pmp_formal_if.sv

@@ -20,6 +20,7 @@ prep -top formal_rnu_maptable
 formal_rnu_maptable.sv
 rapt_rnu_maptable.sv ../../hdl/frontend/rapt_rnu_maptable.sv
 rapt.svh ../../hdl/include/rapt.svh
+rapt_fp_ops.svh ../../hdl/include/rapt_fp_ops.svh
 rapt_config.svh ../../hdl/configs/formal/rapt_config.svh
 rapt_sva.svh ../../hdl/include/rapt_sva.svh
 rapt_rnu_internal_if.svh ../../hdl/include/rapt_rnu_internal_if.svh

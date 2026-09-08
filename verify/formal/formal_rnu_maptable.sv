@@ -29,7 +29,10 @@ module formal_rnu_maptable #(
     input logic [RLEN-1:0] watch_addr
 );
 
-  rnu_mt_if #(.RLEN(RLEN), .PLEN(PLEN)) mt();
+  rnu_mt_if #(
+      .RLEN(RLEN),
+      .PLEN(PLEN)
+  ) mt ();
   logic [PLEN-1:0] formal_map_watch, formal_rat_watch;
   assign mt.flush_pipe = flush_pipe;
   assign mt.map_wen_a = map_wen_a;
@@ -51,11 +54,18 @@ module formal_rnu_maptable #(
   assign mt.map_raddr_e = read_addr;
   assign mt.map_raddr_f = read_addr;
 
-  rapt_rnu_maptable #(.RNUM(RNUM), .PLEN(PLEN)) dut (
-      .clock, .reset, .mt,
-      .map_snapshot(), .rat_snapshot(),
+  rapt_rnu_maptable #(
+      .RNUM(RNUM),
+      .PLEN(PLEN)
+  ) dut (
+      .clock,
+      .reset,
+      .mt,
+      .map_snapshot(),
+      .rat_snapshot(),
       .formal_watch_addr(watch_addr),
-      .formal_map_watch, .formal_rat_watch
+      .formal_map_watch,
+      .formal_rat_watch
   );
 
   logic [PLEN-1:0] ref_map, ref_rat;
@@ -68,18 +78,13 @@ module formal_rnu_maptable #(
       ref_map <= PLEN'(watch_addr);
       ref_rat <= PLEN'(watch_addr);
     end else begin
-      if (rat_wen_b && rat_waddr_b == watch_addr)
-        ref_rat <= rat_wdata_b;
-      else if (rat_wen_a && rat_waddr_a == watch_addr)
-        ref_rat <= rat_wdata_a;
+      if (rat_wen_b && rat_waddr_b == watch_addr) ref_rat <= rat_wdata_b;
+      else if (rat_wen_a && rat_waddr_a == watch_addr) ref_rat <= rat_wdata_a;
 
       if (flush_pipe) begin
-        if (rat_wen_b && rat_waddr_b == watch_addr)
-          ref_map <= rat_wdata_b;
-        else if (rat_wen_a && rat_waddr_a == watch_addr)
-          ref_map <= rat_wdata_a;
-        else
-          ref_map <= ref_rat;
+        if (rat_wen_b && rat_waddr_b == watch_addr) ref_map <= rat_wdata_b;
+        else if (rat_wen_a && rat_waddr_a == watch_addr) ref_map <= rat_wdata_a;
+        else ref_map <= ref_rat;
       end else if (map_wen_b && map_waddr_b == watch_addr) begin
         ref_map <= map_wdata_b;
       end else if (map_wen_a && map_waddr_a == watch_addr) begin
@@ -89,26 +94,26 @@ module formal_rnu_maptable #(
   end
 
   always_comb begin
-    assume(f_past_valid || reset);
-    if (f_past_valid) assume(watch_addr == watch_addr_q);
+    assume (f_past_valid || reset);
+    if (f_past_valid) assume (watch_addr == watch_addr_q);
     if (f_past_valid) begin
-      assert(formal_map_watch == ref_map);
-      assert(formal_rat_watch == ref_rat);
+      assert (formal_map_watch == ref_map);
+      assert (formal_rat_watch == ref_rat);
       if (read_addr == watch_addr) begin
-        assert(mt.map_rdata_a == formal_map_watch);
-        assert(mt.map_rdata_b == formal_map_watch);
-        assert(mt.map_rdata_c == formal_map_watch);
-        assert(mt.map_rdata_d == formal_map_watch);
-        assert(mt.map_rdata_e == formal_map_watch);
-        assert(mt.map_rdata_f == formal_map_watch);
+        assert (mt.map_rdata_a == formal_map_watch);
+        assert (mt.map_rdata_b == formal_map_watch);
+        assert (mt.map_rdata_c == formal_map_watch);
+        assert (mt.map_rdata_d == formal_map_watch);
+        assert (mt.map_rdata_e == formal_map_watch);
+        assert (mt.map_rdata_f == formal_map_watch);
       end
     end
   end
 
   always_ff @(posedge clock) begin
     if (f_past_valid && !reset) begin
-      cover(map_wen_a && map_wen_b && map_waddr_a == map_waddr_b);
-      cover(flush_pipe && rat_wen_a && rat_wen_b && rat_waddr_a == rat_waddr_b);
+      cover (map_wen_a && map_wen_b && map_waddr_a == map_waddr_b);
+      cover (flush_pipe && rat_wen_a && rat_wen_b && rat_waddr_a == rat_waddr_b);
     end
   end
 endmodule

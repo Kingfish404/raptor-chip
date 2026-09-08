@@ -1,6 +1,6 @@
 PWD_DIR=$(abspath .)
 RAPTOR_HOME ?= $(abspath ..)
-KERNEL_VERSION:=6.18.49
+KERNEL_VERSION:=6.18.50
 NPROC := $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 
 # ==============================================================================
@@ -235,10 +235,9 @@ opensbi-with-kernel: $(OPENSBI_SRC_DIR)/Makefile ## Build OpenSBI with Linux ker
 		FW_PAYLOAD_PATH=$(PWD_DIR)/linux/arch/riscv/boot/Image \
 		$(OPENSBI_RV32_FLAGS)
 
-# The pre-built GC releases use OpenSBI's QEMU-oriented 0x82200000 FDT
-# relocation address.  Their embedded Images extend beyond that address, so
-# the relocation overwrites live kernel data.  Re-wrap the unchanged Image and
-# place the small FDT at the top of the simulated 256 MiB DRAM instead.
+# Keep the simulator-specific FDT layout when re-wrapping the release Image.
+# v6.18.50 already fixes the old release overlap with a +63 MiB offset;
+# these payloads retain the FDT at the top of the simulated 256 MiB DRAM.
 $(LINUX_RV32GC_SIM_PAYLOAD): force-opensbi-config-check $(LINUX_RV32GC_IMAGE) $(OPENSBI_SRC_DIR)/Makefile $(PWD_DIR)/Makefile $(PWD_DIR)/vars.mk
 	$(call prepare_opensbi_build,compiler=gnu mode=gc-payload xlen=32 isa=rv32imafdc_zicntr_zicsr_zifencei fdt=$(OPENSBI_GC_FDT_ADDR) image=$(LINUX_RV32GC_IMAGE),$(OPENSBI_RV32GC_BUILD_DIR))
 	make -C $(OPENSBI_SRC_DIR) CROSS_COMPILE=riscv64-linux-gnu- \

@@ -23,6 +23,7 @@ typedef struct
 {
   vaddr_t vpn;    /* virtual page number (vaddr >> PAGE_SHIFT), acts as tag */
   paddr_t ppn;    /* physical page base  (paddr with offset=0)              */
+  uint8_t pbmt; /* leaf type travels with this translation */
   uint32_t epoch; /* version stamp; entry valid iff epoch == soft_tlb_epoch */
 } soft_tlb_entry_t;
 
@@ -44,28 +45,36 @@ void soft_tlb_flush(void);
 
 /* ----- inline fast-path lookup ----- */
 
-static inline bool soft_tlb_lookup(
-    const soft_tlb_entry_t *tlb, vaddr_t vaddr, paddr_t *out_paddr)
+static inline bool soft_tlb_lookup_attrs(
+    const soft_tlb_entry_t *tlb, vaddr_t vaddr, paddr_t *out_paddr, uint8_t *out_pbmt)
 {
+  if (out_pbmt != NULL) *out_pbmt = 0;
   vaddr_t vpn = vaddr >> PAGE_SHIFT;
   unsigned idx = vpn & SOFT_TLB_MASK;
   const soft_tlb_entry_t *e = &tlb[idx];
   if (e->vpn == vpn && e->epoch == soft_tlb_epoch)
   {
     *out_paddr = e->ppn | (vaddr & PAGE_MASK);
+    if (out_pbmt != NULL) *out_pbmt = e->pbmt;
     return true;
   }
   return false;
 }
 
-static inline void soft_tlb_refill(
-    soft_tlb_entry_t *tlb, vaddr_t vaddr, paddr_t paddr)
+static inline void soft_tlb_refill_attrs(
+    soft_tlb_entry_t *tlb, vaddr_t vaddr, paddr_t paddr, uint8_t pbmt)
 {
   vaddr_t vpn = vaddr >> PAGE_SHIFT;
   unsigned idx = vpn & SOFT_TLB_MASK;
   tlb[idx].vpn = vpn;
   tlb[idx].ppn = paddr & ~((paddr_t)PAGE_MASK);
+  tlb[idx].pbmt = pbmt;
   tlb[idx].epoch = soft_tlb_epoch;
 }
 
+/* Compatibility for PA-only clients; new access paths use typed entries. */
+static inline bool soft_tlb_lookup(const soft_tlb_entry_t *tlb, vaddr_t addr, paddr_t *pa)
+{ return soft_tlb_lookup_attrs(tlb, addr, pa, NULL); }
+static inline void soft_tlb_refill(soft_tlb_entry_t *tlb, vaddr_t addr, paddr_t pa)
+{ soft_tlb_refill_attrs(tlb, addr, pa, 0); }
 #endif /* __MEMORY_TLB_H__ */

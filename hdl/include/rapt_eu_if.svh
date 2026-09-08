@@ -7,43 +7,15 @@
 /* verilator lint_off UNUSEDPARAM */
 
 interface exu_prf_if #(
+    parameter int Width = rapt_pkg::RenameWidth,
     parameter unsigned PLEN = `RAPT_PHY_LEN,
     parameter unsigned XLEN = `RAPT_XLEN
 );
-  logic [PLEN-1:0] pr1_a;
-  logic [PLEN-1:0] pr2_a;
-
-  logic [XLEN-1:0] pv1_a;
-  logic [XLEN-1:0] pv2_a;
-  logic pv1_a_valid;
-  logic pv2_a_valid;
-
-`ifdef RAPT_DUAL_ISSUE
-  // Slot B read ports (dual issue)
-  logic [PLEN-1:0] pr1_b;
-  logic [PLEN-1:0] pr2_b;
-
-  logic [XLEN-1:0] pv1_b;
-  logic [XLEN-1:0] pv2_b;
-  logic pv1_b_valid;
-  logic pv2_b_valid;
-`endif
-
-`ifdef RAPT_DUAL_ISSUE
-  modport master(
-      output pr1_a, pr2_a, pr1_b, pr2_b,
-      input pv1_a, pv1_a_valid, pv2_a, pv2_a_valid,
-      input pv1_b, pv1_b_valid, pv2_b, pv2_b_valid
-  );
-  modport slave(
-      input pr1_a, pr2_a, pr1_b, pr2_b,
-      output pv1_a, pv1_a_valid, pv2_a, pv2_a_valid,
-      output pv1_b, pv1_b_valid, pv2_b, pv2_b_valid
-  );
-`else
-  modport master(output pr1_a, pr2_a, input pv1_a, pv1_a_valid, pv2_a, pv2_a_valid);
-  modport slave(input pr1_a, pr2_a, output pv1_a, pv1_a_valid, pv2_a, pv2_a_valid);
-`endif
+  logic [PLEN-1:0] pr1[Width], pr2[Width];
+  logic [XLEN-1:0] pv1[Width], pv2[Width];
+  logic pv1_valid[Width], pv2_valid[Width];
+  modport master(output pr1, pr2, input pv1, pv2, pv1_valid, pv2_valid);
+  modport slave(input pr1, pr2, output pv1, pv2, pv1_valid, pv2_valid);
 endinterface
 
 // Architectural FPR bank interface. The serializing FP pipe needs three read
@@ -82,12 +54,15 @@ interface exu_csr_if #(
   logic [ R_W-1:0] raddr;
 
   logic [XLEN-1:0] rdata;
+  // CSRRS/CSRRC update source. MIP.SEIP excludes the external interrupt
+  // level here, while architectural rdata includes it for rd.
+  logic [XLEN-1:0] rmw_data;
   logic [XLEN-1:0] mtvec;
   logic [XLEN-1:0] mepc;
   logic [XLEN-1:0] sepc;
 
-  modport master(output raddr, input rdata, mtvec, mepc, sepc);
-  modport slave(input raddr, output rdata, mtvec, mepc, sepc);
+  modport master(output raddr, input rdata, rmw_data, mtvec, mepc, sepc);
+  modport slave(input raddr, output rdata, rmw_data, mtvec, mepc, sepc);
 endinterface
 
 /* verilator lint_on UNUSEDSIGNAL */

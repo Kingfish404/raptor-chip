@@ -1,23 +1,29 @@
 `include "rapt.svh"
 
 module tb_tlb_flush_asid;
-  localparam int XLEN = 32;
+  localparam int XLEN = `RAPT_XLEN;
 
   logic clock = 1'b0;
   logic reset = 1'b1;
   logic flush;
-  logic [31:12] lookup_vtag;
+  logic [XLEN-1:12] lookup_vtag;
   logic [8:0] lookup_asid;
   logic hit;
-  logic [31:10] ptag;
+  logic [XLEN-1:10] ptag;
   logic [6:0] pte_flags;
   logic fill_valid;
-  logic [31:10] fill_ptag;
-  logic [31:12] fill_vtag;
+  logic [XLEN-1:10] fill_ptag;
+  logic [XLEN-1:12] fill_vtag;
   logic [8:0] fill_asid;
   logic [6:0] fill_pte;
+  logic [1:0] pbmt, fill_pbmt = 0;
 
-  rapt_tlb #(.XLEN(XLEN), .ENTRIES(4)) dut (.*);
+  rapt_tlb #(
+      .XLEN(XLEN),
+      .ENTRIES(4)
+  ) dut (
+      .*
+  );
 
   always #5 clock = ~clock;
 
@@ -73,8 +79,7 @@ module tb_tlb_flush_asid;
     fill_valid = 1'b0;
     lookup_vtag = fill_vtag;
     #1;
-    check(hit && ptag == fill_ptag,
-          "unrelated lookup hit incorrectly suppressed a TLB fill");
+    check(hit && ptag == fill_ptag, "unrelated lookup hit incorrectly suppressed a TLB fill");
 
     // Global PTEs ignore ASID on lookup.
     fill_vtag = 20'h67890;
@@ -88,6 +93,44 @@ module tb_tlb_flush_asid;
     lookup_asid = 9'h1fe;
     #1;
     check(hit && ptag == fill_ptag, "global TLB entry did not match another ASID");
+
+    // A global refill must update PBMT despite a different lookup ASID.
+    for (int attr = 0; attr < 3; attr++) begin
+      fill_pbmt = 2'(attr);
+      fill_valid = 1'b1;
+      tick(1);
+      fill_valid = 1'b0;
+      check(hit && pbmt == fill_pbmt, "duplicate refill lost updated PBMT");
+    end
+    flush = 1'b1;
+    tick(1);
+    flush = 1'b0;
+    check(!hit && pbmt == 0, "flushed PBMT remained visible");
+
+    // Fill past capacity with alternating attributes and unrelated lookup.
+    fill_pte = 7'b110_0011;
+    for (int entry = 0; entry < 9; entry++) begin
+      fill_vtag = 20'(entry + 1);
+      fill_ptag = 22'(entry + 256);
+      fill_asid = 9'(entry);
+      fill_pbmt = 2'(entry % 3);
+      fill_valid = 1'b1;
+      tick(1);
+      fill_valid = 1'b0;
+      lookup_vtag = fill_vtag;
+      lookup_asid = fill_asid;
+      #1;
+      check(hit && pbmt == fill_pbmt && ptag == fill_ptag,
+            "replacement/fill mixed translation and PBMT payloads");
+    end
+
+    flush = 1'b1;
+    fill_valid = 1'b1;
+    fill_pbmt = 2;
+    tick(1);
+    flush = 1'b0;
+    fill_valid = 1'b0;
+    check(!hit && pbmt == 0, "simultaneous PBMT fill defeated flush");
 
     $display("PASS: TLB flush and ASID xsim checks passed");
     $finish;

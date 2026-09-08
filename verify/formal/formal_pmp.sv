@@ -6,7 +6,8 @@
 module formal_pmp #(
     parameter int XLEN = `RAPT_XLEN,
     parameter int PADDR_BITS = `RAPT_PADDR_BITS,
-    parameter int N = `RAPT_PMP_NUM
+    parameter int N = `RAPT_PMP_NUM,
+    parameter int RangeIndex = -1
 ) (
     input logic [XLEN-1:0] addr,
     input logic [3:0] size_m1,
@@ -26,8 +27,8 @@ module formal_pmp #(
     input logic [N-1:0] pmp_mode_napot
 );
   logic dut_fault, dut_fault_lo;
-  pmp_update_if unused_update();
-  pmp_state_if unused_state();
+  pmp_update_if unused_update ();
+  pmp_state_if unused_state ();
   assign unused_update.addr_we = 1'b0;
   assign unused_update.addr_idx = '0;
   assign unused_update.raw_addr = '0;
@@ -41,10 +42,20 @@ module formal_pmp #(
   assign unused_update.mode_tor = '0;
   assign unused_update.mode_na4 = '0;
   assign unused_update.mode_napot = '0;
-  rapt_pmp_state unused_state_dut (.clock(1'b0), .reset(1'b1),
-      .update(unused_update), .state(unused_state));
-  rapt_pmp #(.XLEN(XLEN), .PADDR_BITS(PADDR_BITS)) dut (.*,
-      .fault(dut_fault), .fault_lo_o(dut_fault_lo));
+  rapt_pmp_state unused_state_dut (
+      .clock(1'b0),
+      .reset(1'b1),
+      .update(unused_update),
+      .state(unused_state)
+  );
+  rapt_pmp #(
+      .XLEN(XLEN),
+      .PADDR_BITS(PADDR_BITS)
+  ) dut (
+      .*,
+      .fault(dut_fault),
+      .fault_lo_o(dut_fault_lo)
+  );
 
   localparam int AW = PADDR_BITS - 2;
   logic [PADDR_BITS-1:0] addr_hi;
@@ -54,8 +65,11 @@ module formal_pmp #(
   logic lo_found, hi_found;
   logic lo_perm, hi_perm;
   logic lo_locked, hi_locked;
-  logic same_entry_hi;
+  logic access_found, entry_any, entry_all, byte_match;
+  logic [PADDR_BITS-1:0] byte_addr;
+  logic [AW-1:0] byte_word;
   logic ref_fault_lo, ref_fault_hi, ref_partial, ref_fault;
+  logic [N-1:0] ref_entry_any, ref_entry_all;
 
   always_comb begin
     addr_hi = addr[PADDR_BITS-1:0] + PADDR_BITS'(size_m1);
@@ -67,7 +81,15 @@ module formal_pmp #(
     hi_perm = 1'b0;
     lo_locked = 1'b0;
     hi_locked = 1'b0;
-    same_entry_hi = 1'b0;
+    access_found = 1'b0;
+    ref_partial = 1'b0;
+    entry_any = 1'b0;
+    entry_all = 1'b0;
+    byte_match = 1'b0;
+    byte_addr = '0;
+    byte_word = '0;
+    ref_entry_any = '0;
+    ref_entry_all = '0;
 
     // First match wins.  The loop guards deliberately express priority
     // directly rather than using the DUT's lowest-set-bit encoder.
@@ -85,7 +107,6 @@ module formal_pmp #(
         lo_perm = (!op_r || pmp_cfg_r[i]) && (!op_w || pmp_cfg_w[i])
             && (!op_x || pmp_cfg_x[i]);
         lo_locked = pmp_cfg_l[i];
-        same_entry_hi = hi_match;
       end
       if (!hi_found && hi_match) begin
         hi_found = 1'b1;
@@ -93,25 +114,65 @@ module formal_pmp #(
             && (!op_x || pmp_cfg_x[i]);
         hi_locked = pmp_cfg_l[i];
       end
+      // Independent byte enumeration: unlike the RTL's interval overlap,
+      // inspect every byte of the request before selecting the first entry.
+      entry_any = 1'b0;
+      entry_all = 1'b1;
+      for (int b = 0; b < 16; b++) begin
+        byte_addr = addr[PADDR_BITS-1:0] + PADDR_BITS'(b);
+        byte_word = byte_addr[PADDR_BITS-1:2];
+        byte_match = (pmp_mode_tor[i] && byte_word >= tor_base && byte_word < pmp_raw_addr[i])
+            || (pmp_mode_na4[i] && byte_word == pmp_raw_addr[i])
+            || (pmp_mode_napot[i] && ((byte_word & ~pmp_napot_mask[i]) == napot_base));
+        if (b <= int'(size_m1)) begin
+          entry_any |= byte_match;
+          entry_all &= byte_match;
+        end
+      end
+      if (!access_found && entry_any) begin
+        access_found = 1'b1;
+        ref_partial = (op_r || op_w) && !entry_all;
+      end
+      ref_entry_any[i] = entry_any;
+      ref_entry_all[i] = entry_all;
     end
 
     ref_fault_lo = !lo_found ? (priv != `RAPT_PRIV_M)
         : ((priv == `RAPT_PRIV_M && !lo_locked) ? 1'b0 : !lo_perm);
     ref_fault_hi = !hi_found ? (priv != `RAPT_PRIV_M)
         : ((priv == `RAPT_PRIV_M && !hi_locked) ? 1'b0 : !hi_perm);
-    ref_partial = (op_r || op_w) && lo_found && !same_entry_hi;
     ref_fault = ref_fault_lo || ref_fault_hi || ref_partial;
   end
 
   always_comb begin
     for (int i = 0; i < N; i++) begin
+      // CSR napot_mask generation yields contiguous low ones. Arbitrary
+      // sparse masks do not represent a PMP NAPOT range.
+      assume ((pmp_napot_mask[i] & (pmp_napot_mask[i] + AW'(1))) == '0);
       // CSR decode always produces exactly one address-matching mode.
       assume(({pmp_mode_off[i], pmp_mode_tor[i], pmp_mode_na4[i], pmp_mode_napot[i]} != 4'b0)
           && (({pmp_mode_off[i], pmp_mode_tor[i], pmp_mode_na4[i], pmp_mode_napot[i]}
               & ({pmp_mode_off[i], pmp_mode_tor[i], pmp_mode_na4[i], pmp_mode_napot[i]}
                  - 4'd1)) == 4'b0));
     end
-    assert(dut_fault_lo == ref_fault_lo);
-    assert(dut_fault == ref_fault);
+`ifdef RAPT_PMP_PROVE_RANGES
+    if (RangeIndex < 0) begin
+      assert (dut.entry_overlap == ref_entry_any);
+      assert (dut.entry_contains_all == ref_entry_all);
+    end else begin
+      assert (dut.entry_overlap[RangeIndex] == ref_entry_any[RangeIndex]);
+      assert (dut.entry_contains_all[RangeIndex] == ref_entry_all[RangeIndex]);
+    end
+`else
+`ifdef RAPT_PMP_USE_RANGE_LEMMAS
+    // Valid only as a composed proof with PROVE_RANGES passing under the
+    // same configuration and input assumptions. These are not new platform
+    // constraints: they are the separately proved interval/byte identities.
+    assume (dut.entry_overlap == ref_entry_any);
+    assume (dut.entry_contains_all == ref_entry_all);
+`endif
+    assert (dut_fault_lo == ref_fault_lo);
+    assert (dut_fault == ref_fault);
+`endif
   end
 endmodule

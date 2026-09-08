@@ -87,9 +87,9 @@ module rapt_tb_mem #(
   localparam logic [31:0] FinisherSize = 32'h0000_1000;
   localparam logic [31:0] SramBase = 32'h0f00_0000;
   localparam logic [31:0] SramSize = 32'h0000_2000;
-  localparam logic [31:0] SerialBase = 32'h1000_0000;   // NS16550 (QEMU / non-KU15P)
+  localparam logic [31:0] SerialBase = 32'h1000_0000;  // NS16550 (QEMU / non-KU15P)
   localparam logic [31:0] SerialSize = 32'h0000_0100;
-  localparam logic [31:0] LiteXUartBase = 32'hF000_1800; // LiteX UART (KU15P / HARDWARE)
+  localparam logic [31:0] LiteXUartBase = 32'hF000_1800;  // LiteX UART (KU15P / HARDWARE)
   localparam logic [31:0] LiteXUartSize = 32'h0000_0020;
   localparam logic [31:0] MromBase = 32'h2000_0000;
   localparam logic [31:0] MromSize = 32'h0001_0000;
@@ -180,8 +180,7 @@ module rapt_tb_mem #(
   endfunction
 
   function automatic logic is_text_trace_addr(input logic [31:0] a);
-    return in_region(a, 32'h8020_0000, 32'h0000_0040) ||
-        in_region(a, 32'h8040_0000, 32'h0000_0040);
+    return in_region(a, 32'h8020_0000, 32'h0000_0040) || in_region(a, 32'h8040_0000, 32'h0000_0040);
   endfunction
 
   function automatic logic is_valid(input logic [31:0] a);
@@ -352,16 +351,13 @@ module rapt_tb_mem #(
     end
     if (text_trace && is_text_trace_addr(a) && text_trace_events < 256) begin
       text_trace_events++;
-      $display("[text_trace] write t=%0t addr=0x%08h data=0x%08h strb=%b now=0x%08h",
-               $time, a, wd, strb, read_word(aa));
+      $display("[text_trace] write t=%0t addr=0x%08h data=0x%08h strb=%b now=0x%08h", $time, a, wd,
+               strb, read_word(aa));
     end
-    if (syscall_trace && is_syscall_arg(a) &&
-        ((a - SyscallArgBase) <= 32'h0000_0008)) begin
+    if (syscall_trace && is_syscall_arg(a) && ((a - SyscallArgBase) <= 32'h0000_0008)) begin
       $display("[sysarg] off=0x%03h data=0x%08h strb=%b type=%0d sender=%0d receiver=%0d",
-               a - SyscallArgBase, wd, strb,
-               int'(read_word(SyscallArgBase)),
-               int'(read_word(SyscallArgBase + 32'd4)),
-               int'(read_word(SyscallArgBase + 32'd8)));
+               a - SyscallArgBase, wd, strb, int'(read_word(SyscallArgBase)), int'(read_word(
+               SyscallArgBase + 32'd4)), int'(read_word(SyscallArgBase + 32'd8)));
     end
   endtask
 
@@ -440,8 +436,8 @@ module rapt_tb_mem #(
       sim_finish    <= 1'b0;
       sim_exit_code <= '0;
       uart_lcr      <= 8'h00;
-      uart_line     = "";
-      uart_ansi     <= 1'b0;
+      uart_line = "";
+      uart_ansi <= 1'b0;
     end else begin
       sim_finish <= 1'b0;  // single-cycle pulse default
 
@@ -466,8 +462,8 @@ module rapt_tb_mem #(
           $display("[rapt_tb_mem] ERROR: read from invalid addr 0x%08h", lo32(araddr));
         if (text_trace && is_text_trace_addr(lo32(araddr)) && text_trace_events < 256) begin
           text_trace_events++;
-          $display("[text_trace] read  t=%0t addr=0x%08h data=0x%08h arlen=%0d arsize=%0d",
-                   $time, lo32(araddr), rd, arlen, arsize);
+          $display("[text_trace] read  t=%0t addr=0x%08h data=0x%08h arlen=%0d arsize=%0d", $time,
+                   lo32(araddr), rd, arlen, arsize);
         end
         r_busy       <= 1'b1;
         r_id_q       <= arid;

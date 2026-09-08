@@ -34,6 +34,8 @@
 `define RAPT_RIQ_SIZE 2
 `define RAPT_IIQ_SIZE 2
 `define RAPT_ROB_SIZE 2
+// The capacity-minimized profile cannot expose more candidates than ROB slots.
+`define RAPT_STEER_SCAN_ENTRIES 2
 
 `define RAPT_RS_SIZE 2
 `define RAPT_IOQ_SIZE 2
@@ -42,7 +44,30 @@
 // replacing the former split STQ(4)+SQ(4); 8 preserves aggregate capacity.
 `define RAPT_SQ_SIZE 2
 
-// Middle enables dual commit
+// Authoritative ordered-stage widths and independent cache lookahead.
+`ifndef RAPT_INTEGER_ISSUE_PORTS
+`define RAPT_INTEGER_ISSUE_PORTS 2
+`endif
+`ifndef RAPT_INTEGER_SYSTEM_PORT
+`define RAPT_INTEGER_SYSTEM_PORT 0
+`endif
+`ifndef RAPT_DECODE_WIDTH
+`define RAPT_DECODE_WIDTH 2
+`endif
+`ifndef RAPT_RENAME_WIDTH
+`define RAPT_RENAME_WIDTH 2
+`endif
+`ifndef RAPT_DISPATCH_WIDTH
+`define RAPT_DISPATCH_WIDTH 2
+`endif
+`ifndef RAPT_COMMIT_WIDTH
+`define RAPT_COMMIT_WIDTH 2
+`endif
+`ifndef RAPT_FETCH_LOOKAHEAD
+`define RAPT_FETCH_LOOKAHEAD
+`endif
+
+// Deprecated compatibility markers for historical modules/testbenches.
 `define RAPT_DUAL_COMMIT
 `define RAPT_DUAL_ISSUE
 

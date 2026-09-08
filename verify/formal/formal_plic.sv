@@ -16,6 +16,7 @@ module formal_plic #(
     input logic ar_commit,
     input logic [XLEN-3:0] awaddr_word,
     input logic [XLEN-1:0] wdata,
+    input logic [XLEN/8-1:0] wstrb,
     input logic wvalid
 );
   localparam int IdW = (NDEV <= 1) ? 1 : $clog2(NDEV + 1);
@@ -32,12 +33,18 @@ module formal_plic #(
   assign araddr = {araddr_word, 2'b00};
   assign awaddr = {awaddr_word, 2'b00};
 
-  plic_bus_if #(.XLEN(XLEN), .NDEV(NDEV), .NCTX(NCTX), .NHART(NHART)) bus();
+  plic_bus_if #(
+      .XLEN(XLEN),
+      .NDEV(NDEV),
+      .NCTX(NCTX),
+      .NHART(NHART)
+  ) bus ();
   assign bus.ext_irq = ext_irq;
   assign bus.araddr = araddr;
   assign bus.ar_commit = ar_commit;
   assign bus.awaddr = awaddr;
   assign bus.wdata = wdata;
+  assign bus.wstrb = wstrb;
   assign bus.wvalid = wvalid;
 
   logic [2:0] dut_priority[NDEV+1];
@@ -46,8 +53,15 @@ module formal_plic #(
   logic [2:0] dut_threshold[NCTX];
   logic [NDEV:0] dut_gateway_busy;
   logic [NHART-1:0] dut_meip, dut_seip;
-  rapt_plic #(.XLEN(XLEN), .NDEV(NDEV), .NCTX(NCTX), .NHART(NHART)) dut (
-      .clock, .reset, .plic_bus(bus),
+  rapt_plic #(
+      .XLEN(XLEN),
+      .NDEV(NDEV),
+      .NCTX(NCTX),
+      .NHART(NHART)
+  ) dut (
+      .clock,
+      .reset,
+      .plic_bus(bus),
       .formal_priority(dut_priority),
       .formal_pending(dut_pending),
       .formal_enable(dut_enable),
@@ -74,16 +88,14 @@ module formal_plic #(
   always_comb begin
     for (int c = 0; c < NCTX; c++) begin
       ref_best_id[c] = '0;
-      ref_best_prio[c] = ref_threshold[c];
+      ref_best_prio[c] = '0;
       ref_ctx_irq[c] = 1'b0;
       for (int s = 1; s <= NDEV; s++) begin
-        if (ref_pending[s] && ref_enable[c][s]
-            && ref_priority[s] > ref_threshold[c]) begin
+        if (ref_pending[s] && ref_enable[c][s] && ref_priority[s] > ref_threshold[c]) begin
           ref_ctx_irq[c] = 1'b1;
         end
         // Strict greater-than preserves the lowest source ID on ties.
-        if (ref_pending[s] && ref_enable[c][s]
-            && ref_priority[s] > ref_best_prio[c]) begin
+        if (ref_pending[s] && ref_enable[c][s] && ref_priority[s] > ref_best_prio[c]) begin
           ref_best_prio[c] = ref_priority[s];
           ref_best_id[c] = IdW'(s);
         end
@@ -108,12 +120,16 @@ module formal_plic #(
   logic ref_complete_fire;
   logic [IdW-1:0] ref_complete_id;
   logic ref_sw_pending_set;
+  logic [31:0] command_bits;
+  always_comb begin
+    for (int bit_idx = 0; bit_idx < 32; bit_idx++)
+    command_bits[bit_idx] = wstrb[bit_idx/8] && wdata[bit_idx];
+  end
   always_comb begin
     ref_claim_fire = 1'b0;
     ref_claim_id = '0;
     for (int c = 0; c < NCTX; c++) begin
-      if (ar_commit && r_off == CtxBase + CtxStride * c + 32'd4
-          && ref_best_id[c] != '0) begin
+      if (ar_commit && r_off == CtxBase + CtxStride * c + 32'd4 && ref_best_id[c] != '0) begin
         ref_claim_fire = 1'b1;
         ref_claim_id = ref_best_id[c];
       end
@@ -123,8 +139,8 @@ module formal_plic #(
     ref_complete_id = wdata[IdW-1:0];
     for (int c = 0; c < NCTX; c++) begin
       for (int s = 1; s <= NDEV; s++) begin
-        if (wvalid && w_off == CtxBase + CtxStride * c + 32'd4
-            && ref_complete_id == IdW'(s)
+        if (wvalid && wstrb[0] && w_off == CtxBase + CtxStride * c + 32'd4
+            && command_bits == 32'(s) && ref_enable[c][s]
             && ref_gateway_busy[s] && !ref_pending[s]) begin
           ref_complete_fire = 1'b1;
         end
@@ -141,14 +157,12 @@ module formal_plic #(
     ref_gateway_next[0] = 1'b0;
     for (int s = 1; s <= NDEV; s++) begin
       if (!ref_gateway_busy[s]
-          && (ext_irq[s] || (ref_sw_pending_set && wdata[s]))) begin
+          && (ext_irq[s] || (ref_sw_pending_set && wstrb[s/8] && wdata[s]))) begin
         ref_pending_next[s] = 1'b1;
         ref_gateway_next[s] = 1'b1;
       end
-      if (ref_claim_fire && ref_claim_id == IdW'(s))
-        ref_pending_next[s] = 1'b0;
-      if (ref_complete_fire && ref_complete_id == IdW'(s))
-        ref_gateway_next[s] = 1'b0;
+      if (ref_claim_fire && ref_claim_id == IdW'(s)) ref_pending_next[s] = 1'b0;
+      if (ref_complete_fire && ref_complete_id == IdW'(s)) ref_gateway_next[s] = 1'b0;
     end
   end
 
@@ -162,8 +176,7 @@ module formal_plic #(
     for (int c = 0; c < NCTX; c++) begin
       if (r_off == EnBase + EnStride * c) ref_rdata = XLEN'(ref_enable[c]);
       if (r_off == CtxBase + CtxStride * c) ref_rdata = XLEN'(ref_threshold[c]);
-      if (r_off == CtxBase + CtxStride * c + 32'd4)
-        ref_rdata = XLEN'(ref_best_id[c]);
+      if (r_off == CtxBase + CtxStride * c + 32'd4) ref_rdata = XLEN'(ref_best_id[c]);
     end
   end
 
@@ -186,13 +199,13 @@ module formal_plic #(
 
       if (wvalid) begin
         for (int s = 1; s <= NDEV; s++) begin
-          if (w_off == 32'(4 * s)) ref_priority[s] <= wdata[2:0];
+          if (wstrb[0] && w_off == 32'(4 * s)) ref_priority[s] <= wdata[2:0];
         end
         for (int c = 0; c < NCTX; c++) begin
-          if (w_off == EnBase + EnStride * c)
-            ref_enable[c] <= {wdata[NDEV:1], 1'b0};
-          if (w_off == CtxBase + CtxStride * c)
-            ref_threshold[c] <= wdata[2:0];
+          if (w_off == EnBase + EnStride * c) begin
+            for (int s = 1; s <= NDEV; s++) if (wstrb[s/8]) ref_enable[c][s] <= wdata[s];
+          end
+          if (wstrb[0] && w_off == CtxBase + CtxStride * c) ref_threshold[c] <= wdata[2:0];
         end
       end
     end
@@ -202,23 +215,22 @@ module formal_plic #(
   always_ff @(posedge clock) f_past_valid <= 1'b1;
 
   always_comb begin
-    assume(f_past_valid || reset);
+    assume (f_past_valid || reset);
     if (f_past_valid) begin
-      assert(dut_pending == ref_pending);
-      assert(dut_gateway_busy == ref_gateway_busy);
-      assert(dut_meip == ref_meip);
-      assert(dut_seip == ref_seip);
-      assert(bus.meip == ref_meip);
-      assert(bus.seip == ref_seip);
-      assert(bus.rdata == ref_rdata);
-      assert(ref_pending[0] == 1'b0);
-      assert(ref_gateway_busy[0] == 1'b0);
-      for (int s = 0; s <= NDEV; s++)
-        assert(dut_priority[s] == ref_priority[s]);
+      assert (dut_pending == ref_pending);
+      assert (dut_gateway_busy == ref_gateway_busy);
+      assert (dut_meip == ref_meip);
+      assert (dut_seip == ref_seip);
+      assert (bus.meip == ref_meip);
+      assert (bus.seip == ref_seip);
+      assert (bus.rdata == ref_rdata);
+      assert (ref_pending[0] == 1'b0);
+      assert (ref_gateway_busy[0] == 1'b0);
+      for (int s = 0; s <= NDEV; s++) assert (dut_priority[s] == ref_priority[s]);
       for (int c = 0; c < NCTX; c++) begin
-        assert(dut_enable[c] == ref_enable[c]);
-        assert(dut_threshold[c] == ref_threshold[c]);
-        assert(ref_enable[c][0] == 1'b0);
+        assert (dut_enable[c] == ref_enable[c]);
+        assert (dut_threshold[c] == ref_threshold[c]);
+        assert (ref_enable[c][0] == 1'b0);
       end
     end
   end
@@ -230,15 +242,14 @@ module formal_plic #(
       saw_complete <= 1'b0;
     end else begin
       if (ref_claim_fire && ref_claim_id == IdW'(1)) saw_claim <= 1'b1;
-      if (saw_claim && ref_complete_fire && ref_complete_id == IdW'(1))
-        saw_complete <= 1'b1;
+      if (saw_claim && ref_complete_fire && ref_complete_id == IdW'(1)) saw_complete <= 1'b1;
       cover(ref_pending[1] && ref_pending[2]
             && ref_enable[0][1] && ref_enable[0][2]
             && ref_priority[1] == ref_priority[2]
             && ref_priority[1] > ref_threshold[0]
             && ref_best_id[0] == IdW'(1));
-      cover(ref_meip[0] && ref_seip[0]);
-      cover(saw_complete && ref_pending[1]);
+      cover (ref_meip[0] && ref_seip[0]);
+      cover (saw_complete && ref_pending[1]);
     end
   end
 endmodule

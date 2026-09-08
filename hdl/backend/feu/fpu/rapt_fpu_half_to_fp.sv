@@ -46,20 +46,17 @@ module rapt_fpu_half_to_fp (
 
     if (!boxed) begin
       // A non-NaN-boxed narrower input is the canonical quiet NaN.
-      result_c = target_double ? 64'h7ff8_0000_0000_0000
-                               : 64'hffff_ffff_7fc0_0000;
+      result_c = target_double ? 64'h7ff8_0000_0000_0000 : 64'hffff_ffff_7fc0_0000;
     end else if (exponent == 5'h1f) begin
       if (fraction == 0)
-        result_c = target_double ? {sign, 11'h7ff, 52'b0}
-                                 : {32'hffff_ffff, sign, 8'hff, 23'b0};
+        result_c = target_double ? {sign, 11'h7ff, 52'b0} : {32'hffff_ffff, sign, 8'hff, 23'b0};
       else begin
         result_c = target_double ? 64'h7ff8_0000_0000_0000
                                  : 64'hffff_ffff_7fc0_0000;
         flags_c[4] = !fraction[9];
       end
     end else if (exponent == 0 && fraction == 0) begin
-      result_c = target_double ? {sign, 63'b0}
-                               : {32'hffff_ffff, sign, 31'b0};
+      result_c = target_double ? {sign, 63'b0} : {32'hffff_ffff, sign, 31'b0};
     end else begin
       if (exponent == 0) begin
         for (scan = 9; scan >= 0; scan = scan - 1) begin
@@ -75,11 +72,8 @@ module rapt_fpu_half_to_fp (
         normalized_fraction = fraction;
       end
 
-      if (target_double)
-        result_c = {sign, 11'(unbiased + 1023), normalized_fraction, 42'b0};
-      else
-        result_c = {32'hffff_ffff, sign, 8'(unbiased + 127),
-                    normalized_fraction, 13'b0};
+      if (target_double) result_c = {sign, 11'(unbiased + 1023), normalized_fraction, 42'b0};
+      else result_c = {32'hffff_ffff, sign, 8'(unbiased + 127), normalized_fraction, 13'b0};
     end
   end
 

@@ -5,9 +5,9 @@
 
 // RVFI (RISC-V Formal Interface) output generation.
 // Produces per-channel RVFI signals from commit metadata for formal verification.
-// NRET = 2 (dual-commit): channel 0 = slot A (ROB head), channel 1 = slot B (head+1).
+// NRET = CommitWidth: channel order is program order starting at ROB head.
 module rapt_rvfi #(
-    parameter int NRET = 2,
+    parameter int NRET = rapt_pkg::CommitWidth,
     parameter int XLEN = `RAPT_XLEN,
     parameter int ILEN = 32,
     parameter int RNUM = `RAPT_REG_SIZE
@@ -25,8 +25,7 @@ module rapt_rvfi #(
     input [XLEN-1:0] rf[RNUM],
 
     // PRF read for rd_wdata (value written to destination register)
-    input [XLEN-1:0] rvfi_rd_wdata_a,
-    input [XLEN-1:0] rvfi_rd_wdata_b,
+    input [XLEN-1:0] rd_wdata[NRET],
 
     // RVFI outputs -- flat, NRET channels concatenated
     output logic [     NRET-1:0] rvfi_valid,
@@ -55,214 +54,78 @@ module rapt_rvfi #(
     output logic [    NRET*XLEN-1:0] rvfi_mem_wdata
 );
 
-  // ----------------------------------------------------------------
-  // Instruction order counter (monotonic, no gaps)
-  // ----------------------------------------------------------------
   logic [63:0] order_cnt;
-
-  always_ff @(posedge clock) begin
-    if (reset) begin
-      order_cnt <= '0;
-    end else begin
-      order_cnt <= order_cnt
-                 + (rou_cmu.valid_a ? 64'd1 : 64'd0)
-                 + (rou_cmu.valid_b ? 64'd1 : 64'd0);
-    end
-  end
-
-  // ----------------------------------------------------------------
-  // Interrupt detection: first instruction of a trap handler has
-  // pc_rdata != previous instruction's pc_wdata.
-  // ----------------------------------------------------------------
   logic [XLEN-1:0] prev_npc;
-  logic            prev_valid;
-
+  logic prev_valid;
+  int unsigned count;
+  always_comb begin
+    count = 0;
+    for (int c = 0; c < NRET; c++) count += int'(rou_cmu.slot[c].valid);
+  end
   always_ff @(posedge clock) begin
     if (reset) begin
-      prev_npc   <= '0;
-      prev_valid <= 1'b0;
-    end else if (rou_cmu.valid_a) begin
-      prev_npc   <= rou_cmu.valid_b ? rou_cmu.npc_b : rou_cmu.rvfi_npc_a;
+      order_cnt  <= 0;
+      prev_npc   <= 0;
+      prev_valid <= 0;
+    end else if (count != 0) begin
+      order_cnt  <= order_cnt + 64'(count);
+      prev_npc   <= rou_cmu.slot[count-1].npc;
       prev_valid <= 1'b1;
     end
   end
-
-  // ----------------------------------------------------------------
-  // Decode register addresses from instruction word
-  // ----------------------------------------------------------------
-  logic [4:0] rs1_a;
-  logic [4:0] rs2_a;
-  logic [4:0] rs1_b;
-  logic [4:0] rs2_b;
-  assign rs1_a = rou_cmu.inst_a[19:15];
-  assign rs2_a = rou_cmu.inst_a[24:20];
-  assign rs1_b = rou_cmu.inst_b[19:15];
-  assign rs2_b = rou_cmu.inst_b[24:20];
-
-  // ----------------------------------------------------------------
-  // Memory type detection from instruction opcode
-  // ----------------------------------------------------------------
-  logic is_load_a;
-  logic is_store_a;
-  logic is_amo_a;
-  logic is_lr_a;
-  logic is_sc_a;
-  logic is_amo_rw_a;
-  logic has_mem_read_a;
-  logic has_mem_write_a;
-  logic is_load_b;
-  logic is_store_b;
-  logic is_amo_b;
-  logic is_lr_b;
-  logic is_sc_b;
-  logic is_amo_rw_b;
-  logic has_mem_read_b;
-  logic has_mem_write_b;
-  logic is_mem_a;
-  logic is_mem_b;
-
-  assign is_load_a       = (rou_cmu.inst_a[6:0] == `RAPT_OP_IL_TYPE);
-  assign is_store_a      = (rou_cmu.inst_a[6:0] == `RAPT_OP_S_TYPE_);
-  assign is_amo_a        = (rou_cmu.inst_a[6:0] == `RAPT_OP_AMO___);
-  assign is_lr_a         = is_amo_a && (rou_cmu.inst_a[31:27] == `RAPT_F5_AMO_LR);
-  assign is_sc_a         = is_amo_a && (rou_cmu.inst_a[31:27] == `RAPT_F5_AMO_SC);
-  assign is_amo_rw_a     = is_amo_a && !is_lr_a && !is_sc_a;
-  assign has_mem_read_a  = is_load_a || is_lr_a || is_amo_rw_a;
-  assign has_mem_write_a = is_store_a || (is_sc_a && rvfi_rd_wdata_a == '0) || is_amo_rw_a;
-
-  assign is_load_b       = (rou_cmu.inst_b[6:0] == `RAPT_OP_IL_TYPE);
-  assign is_store_b      = (rou_cmu.inst_b[6:0] == `RAPT_OP_S_TYPE_);
-  assign is_amo_b        = (rou_cmu.inst_b[6:0] == `RAPT_OP_AMO___);
-  assign is_lr_b         = is_amo_b && (rou_cmu.inst_b[31:27] == `RAPT_F5_AMO_LR);
-  assign is_sc_b         = is_amo_b && (rou_cmu.inst_b[31:27] == `RAPT_F5_AMO_SC);
-  assign is_amo_rw_b     = is_amo_b && !is_lr_b && !is_sc_b;
-  assign has_mem_read_b  = is_load_b || is_lr_b || is_amo_rw_b;
-  assign has_mem_write_b = is_store_b || (is_sc_b && rvfi_rd_wdata_b == '0) || is_amo_rw_b;
-
-  assign is_mem_a = is_load_a || is_store_a || is_amo_a;
-  assign is_mem_b = is_load_b || is_store_b || is_amo_b;
-
-  // ----------------------------------------------------------------
-  // Byte mask from instruction funct3 size encoding (inst[13:12])
-  // 00 = byte, 01 = half, 10 = word, 11 = double
-  // ----------------------------------------------------------------
-  function automatic logic [XLEN/8-1:0] mem_byte_mask(input logic [1:0] size);
-    logic [XLEN/8-1:0] m;
-    case (size)
-      2'b00:   m = {{(XLEN / 8 - 1) {1'b0}}, 1'b1};
-      2'b01:   m = {{(XLEN / 8 - 2) {1'b0}}, 2'b11};
-      2'b10:   m = (XLEN / 8 >= 4) ? {{(XLEN / 8 - 4) {1'b0}}, 4'b1111} : {(XLEN / 8) {1'b1}};
-      default: m = {(XLEN / 8) {1'b1}};  // double (RV64)
-    endcase
-    return m;
-  endfunction
-
-  logic [XLEN/8-1:0] mask_a;
-  logic [XLEN/8-1:0] mask_b;
-  logic [XLEN/8-1:0] rmask_a;
-  logic [XLEN/8-1:0] wmask_a;
-  logic [XLEN/8-1:0] rmask_b;
-  logic [XLEN/8-1:0] wmask_b;
-  assign mask_a  = mem_byte_mask(rou_cmu.inst_a[13:12]);
-  assign mask_b  = mem_byte_mask(rou_cmu.inst_b[13:12]);
-  assign rmask_a = has_mem_read_a ? mask_a : '0;
-  assign wmask_a = has_mem_write_a ? mask_a : '0;
-  assign rmask_b = has_mem_read_b ? mask_b : '0;
-  assign wmask_b = has_mem_write_b ? mask_b : '0;
-
-  // ----------------------------------------------------------------
-  // Source register pre-state values from committed register file
-  // ----------------------------------------------------------------
-  // Slot A: direct read from committed state (rf)
-  logic [XLEN-1:0] rs1_rdata_a;
-  logic [XLEN-1:0] rs2_rdata_a;
-  assign rs1_rdata_a = (rs1_a != 0) ? rf[rs1_a] : '0;
-  assign rs2_rdata_a = (rs2_a != 0) ? rf[rs2_a] : '0;
-
-  // Slot B: forward from slot A if slot A writes the same register
-  logic [XLEN-1:0] rs1_rdata_b;
-  logic [XLEN-1:0] rs2_rdata_b;
-  assign rs1_rdata_b = (rs1_b == 5'd0) ? '0
-      : (rou_cmu.rd_a != 5'd0 && rou_cmu.rd_a == rs1_b) ? rvfi_rd_wdata_a
-      : rf[rs1_b];
-  assign rs2_rdata_b = (rs2_b == 5'd0) ? '0
-      : (rou_cmu.rd_a != 5'd0 && rou_cmu.rd_a == rs2_b) ? rvfi_rd_wdata_a
-      : rf[rs2_b];
-
-  // ----------------------------------------------------------------
-  // Interrupt detection
-  // ----------------------------------------------------------------
-  logic intr_a;
-  logic intr_b;
-  assign intr_a = prev_valid && (rou_cmu.pc_a != prev_npc);
-  assign intr_b = rou_cmu.valid_b && (rou_cmu.pc_b != rou_cmu.rvfi_npc_a);
-
-  // ----------------------------------------------------------------
-  // Privilege mode & IXL encodings
-  // ----------------------------------------------------------------
-  logic [1:0] mode;
-  assign mode = csr_bcast.priv;
-  localparam logic [1:0] IXL = (XLEN == 64) ? 2'd2 : 2'd1;
-
-  // ================================================================
-  // Channel 0 -- Slot A (ROB head)
-  // ================================================================
-  assign rvfi_valid[0]                       = rou_cmu.valid_a;
-  assign rvfi_order[63:0]                    = order_cnt;
-  assign rvfi_insn[ILEN-1:0]                 = rou_cmu.rvfi_inst_a;
-  assign rvfi_trap[0]                        = rou_cmu.valid_a && rou_cmu.rvfi_trap_a;
-  assign rvfi_halt[0]                        = rou_cmu.ebreak_a;
-  assign rvfi_intr[0]                        = rou_cmu.valid_a && intr_a;
-  assign rvfi_mode[1:0]                      = mode;
-  assign rvfi_ixl[1:0]                       = IXL;
-
-  assign rvfi_rs1_addr[4:0]                  = rs1_a;
-  assign rvfi_rs2_addr[4:0]                  = rs2_a;
-  assign rvfi_rs1_rdata[XLEN-1:0]            = rs1_rdata_a;
-  assign rvfi_rs2_rdata[XLEN-1:0]            = rs2_rdata_a;
-  assign rvfi_rd_addr[4:0]                   = rou_cmu.rd_a;
-  assign rvfi_rd_wdata[XLEN-1:0]             = rvfi_rd_wdata_a;
-
-  assign rvfi_pc_rdata[XLEN-1:0]             = rou_cmu.pc_a;
-  assign rvfi_pc_wdata[XLEN-1:0]             = rou_cmu.rvfi_npc_a;
-
-  assign rvfi_mem_addr[XLEN-1:0]             = is_mem_a ? rou_cmu.rvfi_sq_waddr_a : '0;
-  assign rvfi_mem_rmask[XLEN/8-1:0]          = rmask_a;
-  assign rvfi_mem_wmask[XLEN/8-1:0]          = wmask_a;
-  // Load/LR/AMO rdata: use the register write value (lower bytes match raw memory)
-  assign rvfi_mem_rdata[XLEN-1:0]            = has_mem_read_a ? rvfi_rd_wdata_a : '0;
-  // Store/SC/AMO wdata: use sq_wdata (rs2 value).
-  // NOTE: For AMO read-modify-write, this provides rs2 not the computed value.
-  assign rvfi_mem_wdata[XLEN-1:0]            = has_mem_write_a ? rou_cmu.rvfi_sq_wdata_a : '0;
-
-  // ================================================================
-  // Channel 1 -- Slot B (ROB head+1, dual commit)
-  // ================================================================
-  assign rvfi_valid[1]                       = rou_cmu.valid_b;
-  assign rvfi_order[127:64]                  = order_cnt + 64'd1;
-  assign rvfi_insn[2*ILEN-1:ILEN]            = rou_cmu.rvfi_inst_b;
-  assign rvfi_trap[1]                        = rou_cmu.valid_b && rou_cmu.rvfi_trap_b;
-  assign rvfi_halt[1]                        = rou_cmu.ebreak_b;
-  assign rvfi_intr[1]                        = rou_cmu.valid_b && intr_b;
-  assign rvfi_mode[3:2]                      = mode;
-  assign rvfi_ixl[3:2]                       = IXL;
-
-  assign rvfi_rs1_addr[9:5]                  = rs1_b;
-  assign rvfi_rs2_addr[9:5]                  = rs2_b;
-  assign rvfi_rs1_rdata[2*XLEN-1:XLEN]       = rs1_rdata_b;
-  assign rvfi_rs2_rdata[2*XLEN-1:XLEN]       = rs2_rdata_b;
-  assign rvfi_rd_addr[9:5]                   = rou_cmu.rd_b;
-  assign rvfi_rd_wdata[2*XLEN-1:XLEN]        = rvfi_rd_wdata_b;
-
-  assign rvfi_pc_rdata[2*XLEN-1:XLEN]        = rou_cmu.pc_b;
-  assign rvfi_pc_wdata[2*XLEN-1:XLEN]        = rou_cmu.npc_b;
-
-  assign rvfi_mem_addr[2*XLEN-1:XLEN]        = is_mem_b ? rou_cmu.rvfi_sq_waddr_b : '0;
-  assign rvfi_mem_rmask[2*(XLEN/8)-1:XLEN/8] = rmask_b;
-  assign rvfi_mem_wmask[2*(XLEN/8)-1:XLEN/8] = wmask_b;
-  assign rvfi_mem_rdata[2*XLEN-1:XLEN]       = has_mem_read_b ? rvfi_rd_wdata_b : '0;
-  assign rvfi_mem_wdata[2*XLEN-1:XLEN]       = has_mem_write_b ? rou_cmu.rvfi_sq_wdata_b : '0;
-
+  if (!(NRET == rou_cmu.Width)) begin : g_invalid_config_0
+    $error("Invalid rapt_rvfi configuration");
+  end
+  for (genvar c = 0; c < NRET; c++) begin : g_retirement
+    logic [4:0] rs1, rs2;
+    logic [XLEN-1:0] source1, source2;
+    logic load_op, store_op, atomic_op, lr_op, sc_op, atomic_rw, reads_mem, writes_mem;
+    logic [XLEN/8-1:0] mask;
+    assign rs1 = rou_cmu.slot[c].inst[19:15];
+    assign rs2 = rou_cmu.slot[c].inst[24:20];
+    // Forward the youngest older retirement to each source's pre-state.
+    always_comb begin
+      source1 = rs1 == 0 ? '0 : rf[rs1];
+      source2 = rs2 == 0 ? '0 : rf[rs2];
+      for (int older = 0; older < c; older++) begin
+        if (rou_cmu.slot[older].valid && rou_cmu.slot[older].rd != 0) begin
+          if (rou_cmu.slot[older].rd == rs1) source1 = rd_wdata[older];
+          if (rou_cmu.slot[older].rd == rs2) source2 = rd_wdata[older];
+        end
+      end
+    end
+    assign load_op = rou_cmu.slot[c].inst[6:0] == `RAPT_OP_IL_TYPE;
+    assign store_op = rou_cmu.slot[c].inst[6:0] == `RAPT_OP_S_TYPE_;
+    assign atomic_op = rou_cmu.slot[c].inst[6:0] == `RAPT_OP_AMO___;
+    assign lr_op = atomic_op && rou_cmu.slot[c].inst[31:27] == `RAPT_F5_AMO_LR;
+    assign sc_op = atomic_op && rou_cmu.slot[c].inst[31:27] == `RAPT_F5_AMO_SC;
+    assign atomic_rw = atomic_op && !lr_op && !sc_op;
+    assign reads_mem = load_op || lr_op || atomic_rw;
+    assign writes_mem = store_op || (sc_op && rd_wdata[c] == 0) || atomic_rw;
+    assign mask = (XLEN / 8)'((1 << (1 << rou_cmu.slot[c].inst[13:12])) - 1);
+    assign rvfi_valid[c] = rou_cmu.slot[c].valid;
+    assign rvfi_order[c*64+:64] = order_cnt + 64'(c);
+    assign rvfi_insn[c*ILEN+:ILEN] = rou_cmu.slot[c].rvfi_inst;
+    assign rvfi_trap[c] = rou_cmu.slot[c].valid && rou_cmu.slot[c].rvfi_trap;
+    assign rvfi_halt[c] = rou_cmu.slot[c].ebreak;
+    if (c == 0)
+      assign rvfi_intr[c] = rou_cmu.slot[c].valid && prev_valid && rou_cmu.slot[c].pc != prev_npc;
+    else assign rvfi_intr[c] = rou_cmu.slot[c].valid && rou_cmu.slot[c].pc != rou_cmu.slot[c-1].npc;
+    assign rvfi_mode[c*2+:2] = csr_bcast.priv;
+    assign rvfi_ixl[c*2+:2] = XLEN == 64 ? 2'd2 : 2'd1;
+    assign rvfi_rs1_addr[c*5+:5] = rs1;
+    assign rvfi_rs2_addr[c*5+:5] = rs2;
+    assign rvfi_rs1_rdata[c*XLEN+:XLEN] = source1;
+    assign rvfi_rs2_rdata[c*XLEN+:XLEN] = source2;
+    assign rvfi_rd_addr[c*5+:5] = rou_cmu.slot[c].rd;
+    assign rvfi_rd_wdata[c*XLEN+:XLEN] = rd_wdata[c];
+    assign rvfi_pc_rdata[c*XLEN+:XLEN] = rou_cmu.slot[c].pc;
+    assign rvfi_pc_wdata[c*XLEN+:XLEN] = rou_cmu.slot[c].npc;
+    assign rvfi_mem_addr[c*XLEN+:XLEN] = (load_op || store_op || atomic_op) ? rou_cmu.slot[c].rvfi_sq_waddr : '0;
+    assign rvfi_mem_rmask[c*(XLEN/8)+:(XLEN/8)] = reads_mem ? mask : '0;
+    assign rvfi_mem_wmask[c*(XLEN/8)+:(XLEN/8)] = writes_mem ? mask : '0;
+    assign rvfi_mem_rdata[c*XLEN+:XLEN] = reads_mem ? rd_wdata[c] : '0;
+    assign rvfi_mem_wdata[c*XLEN+:XLEN] = writes_mem ? rou_cmu.slot[c].rvfi_sq_wdata : '0;
+  end
 endmodule
-
-`endif  // RAPT_RVFI
+`endif

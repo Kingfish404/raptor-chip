@@ -1,5 +1,3 @@
-`include "rapt.svh"
-
 module rapt_fpu_int_to_fp #(
     parameter bit TARGET_DOUBLE = 1'b0,
     parameter bit INT64_INPUT   = 1'b0
@@ -26,7 +24,7 @@ module rapt_fpu_int_to_fp #(
   logic [2:0] s1_rounding_mode_q;
 
   logic s2_sign_q, s2_guard_q, s2_sticky_q, s2_zero_q;
-  logic [63:0] s2_retained_q;
+  logic [Precision-1:0] s2_retained_q;
   logic [6:0] s2_leading_one_q;
   logic [2:0] s2_rounding_mode_q;
 
@@ -38,7 +36,7 @@ module rapt_fpu_int_to_fp #(
   logic [6:0] leading_one_c;
   integer leading_index_c;
 
-  logic [63:0] retained_c;
+  logic [Precision-1:0] retained_c;
   logic guard_c, sticky_c;
   integer shift_count_c;
   integer sticky_index_c;
@@ -46,7 +44,7 @@ module rapt_fpu_int_to_fp #(
   logic [63:0] stage3_result_c;
   logic [4:0] stage3_flags_c;
   logic inexact_c, round_up_c;
-  logic [53:0] rounded_c;
+  logic [Precision:0] rounded_c;
   logic [10:0] exponent_c;
 
   always_comb begin
@@ -73,9 +71,9 @@ module rapt_fpu_int_to_fp #(
     guard_c = 1'b0;
     sticky_c = 1'b0;
     if (s1_leading_one_q != 0) begin
-      retained_c = shift_count_c == 0
+      retained_c = Precision'(shift_count_c == 0
           ? s1_magnitude_q << (Precision - integer'(s1_leading_one_q))
-          : s1_magnitude_q >> shift_count_c;
+          : s1_magnitude_q >> shift_count_c);
       if (shift_count_c > 0) begin
         guard_c = s1_magnitude_q[shift_count_c-1];
         for (sticky_index_c = 0; sticky_index_c < 64; sticky_index_c = sticky_index_c + 1)
@@ -103,11 +101,11 @@ module rapt_fpu_int_to_fp #(
         3'b100: round_up_c = s2_guard_q;
         default: round_up_c = 1'b0;
       endcase
-      rounded_c = {1'b0, s2_retained_q[52:0]} + round_up_c;
+      rounded_c = {1'b0, s2_retained_q} + round_up_c;
       exponent_c = 11'(Bias - 1) + {4'b0, s2_leading_one_q}
-          + {{10{1'b0}}, TARGET_DOUBLE ? rounded_c[53] : rounded_c[24]};
-      if (TARGET_DOUBLE) stage3_result_c = {s2_sign_q, exponent_c[10:0], rounded_c[51:0]};
-      else stage3_result_c[31:0] = {s2_sign_q, exponent_c[7:0], rounded_c[22:0]};
+          + {{10{1'b0}}, rounded_c[Precision]};
+      if (TARGET_DOUBLE) stage3_result_c = {s2_sign_q, exponent_c[10:0], 52'(rounded_c)};
+      else stage3_result_c[31:0] = {s2_sign_q, exponent_c[7:0], 23'(rounded_c)};
       stage3_flags_c[0] = inexact_c;
     end
   end

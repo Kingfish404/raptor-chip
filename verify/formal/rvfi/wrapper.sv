@@ -52,6 +52,7 @@ module rvfi_wrapper (
 
       // AXI4 master — AR channel
       .io_master_arburst(m_arburst),
+      .io_master_arcache(),
       .io_master_arsize (m_arsize),
       .io_master_arlen  (m_arlen),
       .io_master_arid   (m_arid),
@@ -69,6 +70,7 @@ module rvfi_wrapper (
 
       // AXI4 master — AW channel
       .io_master_awburst(m_awburst),
+      .io_master_awcache(),
       .io_master_awsize (m_awsize),
       .io_master_awlen  (m_awlen),
       .io_master_awid   (m_awid),

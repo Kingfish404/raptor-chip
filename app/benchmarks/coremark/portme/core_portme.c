@@ -58,8 +58,12 @@ CORE_TICKS get_time(void)
 
 secs_ret time_in_secs(CORE_TICKS ticks)
 {
-  secs_ret retval = ((secs_ret)ticks) / (secs_ret)EE_TICKS_PER_SEC;
-  return retval;
+#if HAS_FLOAT
+  return (secs_ret)ticks / (secs_ret)EE_TICKS_PER_SEC;
+#else
+  /* Divide the 64-bit tick count before narrowing the integer seconds. */
+  return (secs_ret)(ticks / (CORE_TICKS)EE_TICKS_PER_SEC);
+#endif
 }
 
 /* ---- Portable initialization ---- */
@@ -72,6 +76,7 @@ void portable_init(core_portable *p, int *argc, char *argv[])
   printf("CoreMark: NPC pk userspace port (rv%d, newlib)\n",
          (int)(sizeof(void *) * 8));
   printf("Iterations: %d\n", ITERATIONS);
+  printf("CoreMark timer Hz : %llu\n", (unsigned long long)EE_TICKS_PER_SEC);
 }
 
 void portable_fini(core_portable *p)

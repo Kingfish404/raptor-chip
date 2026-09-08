@@ -12,9 +12,11 @@ module tb_plic_gateway;
 
   logic clock = 1'b0;
   logic reset = 1'b1;
-  plic_bus_if #(.XLEN(XLEN)) plic_bus();
+  plic_bus_if #(.XLEN(XLEN)) plic_bus ();
 
-  rapt_plic #(.XLEN(XLEN)) dut (
+  rapt_plic #(
+      .XLEN(XLEN)
+  ) dut (
       .clock(clock),
       .reset(reset),
       .plic_bus(plic_bus)
@@ -28,6 +30,7 @@ module tb_plic_gateway;
     begin
       plic_bus.awaddr = addr;
       plic_bus.wdata = data;
+      plic_bus.wstrb = '1;
       plic_bus.wvalid = 1'b1;
       tick(1);
       plic_bus.wvalid = 1'b0;

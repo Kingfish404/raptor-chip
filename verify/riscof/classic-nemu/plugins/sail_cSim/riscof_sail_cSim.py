@@ -10,7 +10,9 @@ from __future__ import annotations
 import logging
 import os
 import re
+import shlex
 import shutil
+import sys
 
 import riscof.utils as utils
 from riscof.pluginTemplate import pluginTemplate
@@ -31,7 +33,7 @@ class sail_cSim(pluginTemplate):
             logger.error("sail_cSim plugin: config node missing.")
             raise SystemExit(1)
 
-        self.num_jobs = str(config.get("jobs", 1))
+        self.num_jobs = str(max(1, int(os.environ.get("RAPT_JOBS", config.get("jobs", 4)))))
         self.pluginpath = os.path.abspath(config["pluginpath"])
         self.sail_exe = os.path.join(
             config.get("PATH", ""), "sail_riscv_sim"
@@ -39,6 +41,7 @@ class sail_cSim(pluginTemplate):
         self.isa_spec = os.path.abspath(config.get("ispec", ""))
         self.platform_spec = os.path.abspath(config.get("pspec", ""))
         self.make = config.get("make", "make")
+        self.timeout = max(1, int(os.environ.get("RAPT_TIMEOUT", "10"))) + 30
 
         return sclass
 
@@ -110,7 +113,7 @@ class sail_cSim(pluginTemplate):
                 + " " + test + " -o " + elf
                 + " -D" + " -D".join(entry["macros"])
             )
-            execute += compile_cmd + " &&"
+            execute += "(" + compile_cmd + ") > build.log 2>&1 &&"
             execute += self.objdump_cmd.format(elf, self.xlen, "ref.disass")
 
             sig_file = os.path.join(
@@ -118,15 +121,24 @@ class sail_cSim(pluginTemplate):
             )
 
             execute += (
-                f"{self.sail_exe}"
+                f"{shlex.quote(sys.executable)} "
+                f"{shlex.quote(os.path.abspath(os.path.join(self.pluginpath, '../../../../scripts/run_with_timeout.py')))} "
+                f"{self.timeout} {shlex.quote(self.sail_exe)}"
                 f"{sail_arch_flag}"
+                f" --config-override={self.pluginpath}/nemu.json"
                 f" --signature-granularity=4"
                 f" --test-signature={sig_file}"
                 f" {elf} > {test_name}.log 2>&1"
             )
             make.add_target(execute)
 
-        make.execute_all(self.work_dir)
+        # The RISCOF helper defaults to 300 s for the *whole* suite and
+        # returns errors without raising. Bound each Sail run above, allow
+        # the full batch to finish, and propagate compiler/simulator errors.
+        batches = (len(testList) + int(self.num_jobs) - 1) // int(self.num_jobs)
+        result = make.execute_all(self.work_dir, timeout=max(300, batches * (self.timeout + 30)))
+        if result != 0:
+            raise RuntimeError("Sail build/run failed; see per-test ref/build.log and ref/*.log")
 
     @staticmethod
     def _mabi_for_isa(march):

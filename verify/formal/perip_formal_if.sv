@@ -11,9 +11,13 @@ interface clint_bus_if #(
 );
   logic [XLEN-1:0] araddr, rdata;
   logic [XLEN-1:0] awaddr, wdata;
+  logic [XLEN/8-1:0] wstrb;
   logic wvalid, timer_int, sw_int;
-  modport slave(input araddr, awaddr, wdata, wvalid,
-                output rdata, timer_int, sw_int);
+  logic [63:0] mtime_value;
+  modport slave(
+      input araddr, awaddr, wdata, wstrb, wvalid,
+      output rdata, timer_int, sw_int, mtime_value
+  );
 endinterface
 
 interface plic_bus_if #(
@@ -24,10 +28,13 @@ interface plic_bus_if #(
 );
   logic [NDEV:0] ext_irq;
   logic [XLEN-1:0] araddr, rdata, awaddr, wdata;
+  logic [XLEN/8-1:0] wstrb;
   logic ar_commit, wvalid;
   logic [NHART-1:0] meip, seip;
-  modport slave(input ext_irq, araddr, ar_commit, awaddr, wdata, wvalid,
-                output rdata, meip, seip);
+  modport slave(
+      input ext_irq, araddr, ar_commit, awaddr, wdata, wstrb, wvalid,
+      output rdata, meip, seip
+  );
 endinterface
 
 `endif

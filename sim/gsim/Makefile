@@ -16,8 +16,8 @@ BENCH   ?= coremark ## Benchmark name or explicit ELF path
 OPTIONS ?= ## Benchmark argv, semicolon-separated
 ARGS    ?= ## Extra args forwarded verbatim to raptor_se.py
 # Microarchitecture-fidelity knobs (forwarded to raptor_se.py).
-# Defaults track raptor RTL: no L2, single-outstanding L1 miss, bimodal-only
-# PHT, and StoreSet load speculation disabled.
+# Simulator defaults: no L2, one L1 MSHR, local predictor, no StoreSet.
+# RTL defaults to TAGE; choose BP=tage or an explicit study JSON to compare.
 BP          ?= local ## Branch predictor flavor (local|bimodal|bimode|gshare|tage|ltage|...)
 MSHRS       ?= 1 ## L1 MSHRs per cache (RTL default: 1)
 MEM_LATENCY ?= ## Override raptor_se.py default --mem-latency (e.g. 30ns)
@@ -25,14 +25,10 @@ WITH_L2     ?= 0 ## Set to 1 to re-enable gem5's optional 64KiB L2
 
 # DSE config overrides (applied on top of PRESET's rapt_config.svh).
 # JSON_CONFIG: path to a ChampSim-style JSON file (ooo_cpu/L1I/L1D/BTB/...).
-# Defaults to dse-config.json in this directory so the canonical raptor-chip
-# reference predictor / cache / BPU sizing (TAGE, etc.) is the actual default
-# `make coremark` run, matching the comment header of dse-config.json itself.
-# Pass JSON_CONFIG= (empty) to fall back to the pure --preset / svh-derived
-# defaults from raptor_se.py.
+# JSON overrides are opt-in; an unqualified run uses only the selected preset.
 # SET: comma-separated key.path=value pairs (no spaces around commas).
 #      e.g.  SET=ooo_cpu.0.rob_size=128,ooo_cpu.0.scheduler_size=64,L1D.mshr_size=4
-JSON_CONFIG ?= $(CURDIR)/dse-config.json ## Path to ChampSim-style DSE JSON override (empty to disable)
+JSON_CONFIG ?= ## Path to ChampSim-style DSE JSON override (empty to disable)
 SET         ?= ## Comma-separated key.path=value overrides applied last
 DSE_DIR     ?= $(CURDIR) ## Directory of *.json configs for dse-sweep
 
@@ -89,13 +85,13 @@ CPU_FLAG := $(if $(_CPU_FROM_USER),--cpu $(CPU),)
 # All gem5 / gsim artifacts live under sim/build/gsim/, alongside the
 # Verilator builds in sim/build/<preset>/. Per-run dirs are named so
 # they sort by benchmark, config, cpu, and XLEN.
-# When JSON_CONFIG is set, its basename (without .json) replaces PRESET in the
-# dir name so sweeps across configs don't overwrite each other. When SET is
+# When JSON_CONFIG is set, append its basename to PRESET so different
+# presets keep separate outputs even with the same JSON overlay. When SET is
 # used, append a `.ooo_cpu.0.foo=...-L1D.bar=...` suffix so ad-hoc overrides land
 # in a distinct folder. Omit CPU from the tag for the default `o3` case.
 GSIM_BUILD   := $(RAPTOR_HOME)/sim/build/gsim
 _JSON_SLUG   := $(if $(JSON_CONFIG),$(basename $(notdir $(JSON_CONFIG))),)
-_CONFIG_TAG  := $(if $(_JSON_SLUG),$(_JSON_SLUG),$(PRESET))
+_CONFIG_TAG  := $(PRESET)$(if $(_JSON_SLUG),.$(_JSON_SLUG),)
 _CPU_SUFFIX  := $(if $(filter o3,$(CPU)),,.cpu=$(CPU))
 _RUN_TAG     := $(_CONFIG_TAG)-rv$(XLEN)$(_CPU_SUFFIX)$(_SET_SUFFIX)
 OUTDIR      ?= $(GSIM_BUILD)/$(BENCH)-$(_RUN_TAG)
@@ -143,7 +139,7 @@ BP_STUDY_BENCHES := $(strip $(BP_STUDY_BENCHES))
 #   make dse-sweep BENCH=coremark DSE_DIR=sweep-rob
 #   make print-config PRESET=default SET=ooo_cpu.0.rob_size=96
 
-.PHONY: help check-gem5 build-coremark build-microbench build-embench \
+.PHONY: help test check-gem5 build-coremark build-microbench build-embench \
 	coremark microbench embench-% timing run summary sweep aggregate \
 		bp-study dse-sweep dse-aggregate print-config clean
 
@@ -152,6 +148,9 @@ BP_STUDY_BENCHES := $(strip $(BP_STUDY_BENCHES))
 # Default target
 # ============================================================================
 .DEFAULT_GOAL := help
+
+test: ## Run config parser and RTL-to-gem5 mapping unit tests
+	$(PYTHON) -m unittest -v test_raptor_dse.py
 
 help: ## Show this help message
 	@echo "Usage: make <target> [VAR=value ...]"

@@ -95,38 +95,6 @@ static bool map_contains(paddr_t addr, paddr_t base, paddr_t size)
   return addr >= base && addr < base + size;
 }
 
-static bool map_range_offset(paddr_t addr, paddr_t base, paddr_t size,
-                             size_t len, size_t *offset)
-{
-  addr = canonical_paddr(addr);
-  if (!map_contains(addr, base, size))
-    return false;
-  uint64_t off = (uint64_t)(addr - base);
-  if (off + (uint64_t)len > (uint64_t)size)
-    return false;
-  if (offset != NULL)
-    *offset = (size_t)off;
-  return true;
-}
-
-static void report_invalid_host_access(const char *name, const char *op,
-                                       uint64_t addr, size_t len)
-{
-  static unsigned log_count = 0;
-  if (log_count < 16)
-  {
-    fprintf(stderr, "memory.cc: invalid %s %s at 0x%08" PRIx64 " len %zu\n",
-            name, op, addr, len);
-    fflush(stderr);
-  }
-  else if (log_count == 16)
-  {
-    fprintf(stderr, "memory.cc: suppressing further invalid memory access logs\n");
-    fflush(stderr);
-  }
-  log_count++;
-}
-
 static const host_map_t *find_host_map(paddr_t addr)
 {
   for (size_t i = 0; i < ARRLEN(host_maps); i++)
@@ -141,7 +109,7 @@ static void finisher_handle(paddr_t addr, word_t wdata, char wmask, bool is_writ
 {
   (void)wmask;
   (void)data;
-  if (is_write && (addr == FINISHER_BASE))
+  if (is_write && (addr == FINISHER_BASE) && ((uint8_t)wmask & 3u) == 3u)
   {
     uint32_t val = (uint32_t)wdata;
     uint16_t cmd = val & 0xffff;
@@ -171,14 +139,32 @@ static void serial_handle(paddr_t addr, word_t wdata, char wmask, bool is_write,
 {
   (void)wmask;
   void mmio_serial_handle(paddr_t addr, word_t wdata, bool is_write, word_t *data);
-  mmio_serial_handle(addr - NS16550_BASE, wdata, is_write, data);
+  if (!is_write) {
+    mmio_serial_handle(addr - NS16550_BASE, wdata, false, data);
+    return;
+  }
+  // NS16550 registers are byte-addressed, unlike word-wide LiteX CSRs.
+  for (unsigned i = 0; i < sizeof(word_t); i++)
+    if ((uint8_t)wmask & (1u << i))
+      mmio_serial_handle(addr - NS16550_BASE + i, (wdata >> (8*i)) & 0xff, true, nullptr);
 }
 
 static void virtio_blk_handle(paddr_t addr, word_t wdata, char wmask, bool is_write, word_t *data)
 {
   (void)wmask;
-  void mmio_virtio_blk_handle(paddr_t addr, word_t wdata, bool is_write, word_t *data);
-  mmio_virtio_blk_handle(addr - VIRTIO_BLK_BASE, wdata, is_write, data);
+  void mmio_virtio_blk_handle(paddr_t addr, word_t wdata, char wmask, bool is_write, word_t *data);
+  if (!is_write) {
+    mmio_virtio_blk_handle(addr - VIRTIO_BLK_BASE, wdata, 0, false, data);
+    return;
+  }
+  // Present each touched 32-bit register once, preserving all selected bytes.
+  for (unsigned i = 0; i < sizeof(word_t);) {
+    unsigned count = 4u - ((addr + i) & 3u);
+    uint8_t mask = ((uint8_t)wmask >> i) & ((1u << count) - 1u);
+    if (mask) mmio_virtio_blk_handle(addr - VIRTIO_BLK_BASE + i,
+                                    wdata >> (8*i), (char)mask, true, nullptr);
+    i += count;
+  }
 }
 
 static void sdhci_handle(paddr_t addr, word_t wdata, char wmask, bool is_write, word_t *data)
@@ -205,7 +191,15 @@ static void litex_uart_hw_handle(paddr_t addr, word_t wdata, char wmask, bool is
 {
   (void)wmask;
   void mmio_litex_uart_handle(paddr_t offset, word_t wdata, bool is_write, word_t *data);
-  mmio_litex_uart_handle(addr - LITEX_UART_HW_BASE, wdata, is_write, data);
+  if (!is_write) {
+    mmio_litex_uart_handle(addr - LITEX_UART_HW_BASE, wdata, false, data);
+    return;
+  }
+  // LiteX UART CSRs carry an 8-bit value in the low byte of each 32-bit word.
+  for (unsigned i = 0; i < sizeof(word_t); i++)
+    if (((uint8_t)wmask & (1u << i)) && ((addr + i) & 3u) == 0)
+      mmio_litex_uart_handle(addr - LITEX_UART_HW_BASE + i,
+                            (wdata >> (8*i)) & 0xff, true, nullptr);
 }
 
 static mmio_map_t mmio_maps[] = {
@@ -437,32 +431,7 @@ static void log_watched_write(word_t addr, word_t data, char wmask,
       old_data, data, wmask & 0xff);
 }
 
-extern "C" void sdram_read(word_t addr, uint8_t *data)
-{
-  size_t offset;
-  if (!map_range_offset(addr, SDRAM_BASE, SDRAM_SIZE, 1, &offset))
-  {
-    report_invalid_host_access("sdram", "read", (uint32_t)addr, 1);
-    *data = 0;
-    return;
-  }
-  *data = memory.sdram[offset];
-  // Log(" sdram raddr: 0x%x, rdata: 0x%02x, offest: 0x%02x", (uint32_t)addr, *data, offset);
-}
-
-extern "C" void sdram_write(word_t addr, uint8_t data, uint8_t wmask)
-{
-  size_t offset;
-  if (!map_range_offset(addr, SDRAM_BASE, SDRAM_SIZE, 1, &offset))
-  {
-    report_invalid_host_access("sdram", "write", (uint32_t)addr, 1);
-    return;
-  }
-  memory.sdram[offset] = data;
-  // Log("sdram waddr: 0x%x, wdata: 0x%02x, offest: 0x%02x", (uint32_t)addr, data, offset);
-}
-
-extern "C" void pmem_read(word_t raddr, word_t *rdata)
+extern "C" void pmem_read(word_t raddr, unsigned char rsize, word_t *rdata)
 {
 #ifdef CONFIG_ISA64
   // Canonicalise RV64 sign-extended physical addresses (0xffffffff8xxxxxxx)
@@ -470,6 +439,13 @@ extern "C" void pmem_read(word_t raddr, word_t *rdata)
 #endif
   word_t addr = raddr;
   word_t data = 0;
+  // AXI SIZE describes bytes selected starting at the transaction address.
+  // MMIO handlers receive a mask relative to that address, just like writes.
+  assert(rsize <= (sizeof(word_t) == 8 ? 3 : 2));
+  const unsigned bytes = 1u << rsize;
+  // An unaligned first beat ends at the next SIZE-aligned boundary.
+  const unsigned active_bytes = bytes - ((unsigned)addr & (bytes - 1u));
+  const uint8_t read_mask = (uint8_t)((1u << active_bytes) - 1u);
   // Log("raddr: " FMT_WORD_NO_PREFIX, addr);
 #ifdef CONFIG_SOFT_MMIO
   if (raddr == RTC_ADDR_ + 4)
@@ -491,7 +467,7 @@ extern "C" void pmem_read(word_t raddr, word_t *rdata)
     return;
   }
 #endif
-  if (mmio_check_and_handle(addr, 0, 0, false, &data))
+  if (mmio_check_and_handle(addr, 0, (char)read_mask, false, &data))
   {
     // Log("  MMIO read: addr = " FMT_WORD ", data = " FMT_WORD,
     //     addr, data);
@@ -519,6 +495,16 @@ extern "C" void pmem_write(word_t waddr, word_t wdata, char wmask)
 #ifdef CONFIG_ISA64
   waddr = (word_t)((uint32_t)waddr);
 #endif
+  uint8_t mask = (uint8_t)wmask;
+  if (mask == 0) return;
+  // Normalize the first selected lane. Handlers receive byte enables relative
+  // to this address; holes remain holes, not separate device transactions.
+  while ((mask & 1u) == 0) {
+    ++waddr;
+    wdata >>= 8;
+    mask >>= 1;
+  }
+  wmask = (char)mask;
   word_t addr = waddr;
   word_t data = wdata;
   // Log("waddr: " FMT_WORD ", wdata: " FMT_WORD ", wmask = 0x%02x",
@@ -538,73 +524,14 @@ extern "C" void pmem_write(word_t waddr, word_t wdata, char wmask)
     //     addr, data, wmask & 0xff);
     return;
   }
-  uint8_t *host_addr = guest_to_host(addr);
-  if (host_addr == NULL)
-  {
-    // Unmapped physical write: drop silently so RTL can continue
-    // (matches RISCOF sail reference behavior).
-    return;
+  for (unsigned i = 0; i < sizeof(word_t); i++) {
+    if (!(mask & (1u << i))) continue;
+    uint8_t *host_addr = guest_to_host(addr + i);
+    if (host_addr == nullptr) continue;
+    word_t byte = (data >> (8*i)) & 0xff;
+    log_watched_write(addr + i, byte, 1, host_addr, 1);
+    host_write(host_addr, byte, 1);
   }
-  switch (wmask)
-  {
-  case 0x1:
-    log_watched_write(addr, data, wmask, host_addr, 1);
-    host_write(host_addr, data, 1);
-    break;
-  case 0x3:
-    log_watched_write(addr, data, wmask, host_addr, 2);
-    host_write(host_addr, data, 2);
-    break;
-  case 0x7:
-    log_watched_write(addr, data, wmask, host_addr, 3);
-    host_write(host_addr, data, 3);
-    break;
-  case 0xf:
-    log_watched_write(addr, data, wmask, host_addr, 4);
-    host_write(host_addr, data, 4);
-    break;
-  case 0x7f:
-    log_watched_write(addr, data, wmask, host_addr, 7);
-    host_write(host_addr, data, 7);
-    break;
-  case (char)0xff:
-    log_watched_write(addr, data, wmask, host_addr, 8);
-    host_write(host_addr, data, 8);
-    break;
-  default:
-    Log(FMT_RED("Invalid write: addr = " FMT_WORD ", data = " FMT_WORD ", mask = %02x"),
-        addr, data, wmask & 0xff);
-    break;
-  }
-}
-
-extern "C" void flash_read(uint32_t addr, uint32_t *data)
-{
-  uint32_t flash_addr = addr;
-  if (flash_addr >= FLASH_BASE)
-    flash_addr -= FLASH_BASE;
-  if ((uint64_t)flash_addr + sizeof(uint32_t) > FLASH_SIZE)
-  {
-    report_invalid_host_access("flash", "read", addr, sizeof(uint32_t));
-    *data = 0;
-    return;
-  }
-  *data = host_read(memory.flash + flash_addr, sizeof(uint32_t));
-  // Log("flash raddr: 0x%08x, rdata: 0x%08x, offest: 0x%08x", addr, *data, offset);
-}
-
-extern "C" void mrom_read(uint32_t addr, uint32_t *data)
-{
-  paddr_t aligned_addr = (paddr_t)(addr & 0xfffffffcu);
-  size_t offset;
-  if (!map_range_offset(aligned_addr, MROM_BASE, MROM_SIZE, sizeof(uint32_t), &offset))
-  {
-    report_invalid_host_access("mrom", "read", addr, sizeof(uint32_t));
-    *data = 0;
-    return;
-  }
-  *data = host_read(memory.mrom + offset, sizeof(uint32_t));
-  // Log("mrom raddr: 0x%x, rdata: 0x%x, offest: 0x%x", addr, *data, offset);
 }
 
 void vaddr_show(vaddr_t addr, int n)
@@ -651,3 +578,23 @@ void init_mem()
   void init_litex_uart();
   init_litex_uart();
 }
+#ifdef RAPT_SOC
+extern "C" void flash_read(uint32_t addr, uint32_t *data)
+{
+  const uint32_t offset = addr >= FLASH_BASE ? addr - FLASH_BASE : addr;
+  if ((uint64_t)offset + 4 > FLASH_SIZE) {
+    Error("ysyxSoC flash read out of range: 0x%x", addr);
+    abort();
+  }
+  *data = host_read(memory.flash + offset, 4);
+}
+extern "C" void mrom_read(uint32_t addr, uint32_t *data)
+{
+  const uint32_t aligned = addr & ~3u;
+  if (aligned < MROM_BASE || (uint64_t)aligned + 4 > MROM_BASE + MROM_SIZE) {
+    Error("ysyxSoC MROM read out of range: 0x%x", addr);
+    abort();
+  }
+  *data = host_read(memory.mrom + aligned - MROM_BASE, 4);
+}
+#endif

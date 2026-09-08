@@ -39,15 +39,17 @@ module rapt_dtm #(
     output logic [ 6:0] dmi_addr,
     output logic [31:0] dmi_wdata,
     input  logic [31:0] dmi_rdata,
-    input  logic [ 1:0] dmi_resp
 `ifdef FORMAL
-    , output logic [3:0] formal_state,
+    input  logic [ 1:0] dmi_resp,
+    output logic [3:0] formal_state,
     output logic [4:0] formal_ir_shift,
     output logic [4:0] formal_ir,
     output logic [40:0] formal_dr,
     output logic [6:0] formal_dmi_addr_q,
     output logic [31:0] formal_dmi_data_q,
     output logic [1:0] formal_dmi_op_q
+`else
+    input  logic [ 1:0] dmi_resp
 `endif
 );
 

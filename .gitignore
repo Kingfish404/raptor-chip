@@ -29,6 +29,8 @@
 # ---- GitHub CI/CD ----
 !/.github/**
 /.github/*.md
+/.github/*.json
+/.github/results/**
 
 # ---- HDL sources (global whitelist for hdl/) ----
 !*.v
@@ -55,6 +57,10 @@
 
 # ---- Re-ignore: generated, third-party, synthesis, local config ----
 /hdl/generated/
+/nsim/include/config/
+/nsim/include/generated/
+/nsim/tools/kconfig/build/
+/nsim/csrc/mem/mrom-data/dtb.c
 /hdl/chisel/target/
 /third_party/
 /docs.*/

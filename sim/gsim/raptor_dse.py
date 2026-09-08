@@ -109,16 +109,21 @@ def _parse_constant_expr(expr: str, cfg: dict) -> int:
 def parse_rapt_config(svh_path: Path, rv64: bool) -> dict:
     """Extract `define RAPT_<KEY> <int>` from a rapt_config.svh.
 
-    Honors `ifdef RAPT_RV64` / `ifndef` blocks for the XLEN/MISA selection.
-    Boolean knobs (RAPT_DUAL_ISSUE, RAPT_DUAL_COMMIT) are tracked as flags
-    when defined without a value.
+    Tracks macro definition, undefinition and conditional branches, including
+    `elsif` and nested inactive blocks. RV64 predefines `RAPT_RV64`.
+    Valueless compatibility knobs are tracked as boolean flags.  Current
+    presets provide the ordered-stage widths directly; the old
+    RAPT_DUAL_ISSUE/RAPT_DUAL_COMMIT flags are retained only so historical
+    out-of-tree presets can still be modelled.
     """
     cfg: dict = {"RAPT_DUAL_ISSUE": False, "RAPT_DUAL_COMMIT": False}
-    define_re = re.compile(r"^\s*`define\s+(RAPT_\w+)(?:\s+(.*?))?\s*$")
-    cond_stack: list[bool] = [True]
+    defined = {"RAPT_RV64"} if rv64 else set()
+    define_re = re.compile(r"^\s*`define\s+(\w+)(?:\s+(.*?))?\s*$")
+    # Each frame stores active, any branch taken, and whether else appeared.
+    frames: list[list[bool]] = []
 
     def cond_active() -> bool:
-        return all(cond_stack)
+        return all(frame[0] for frame in frames)
 
     with svh_path.open() as f:
         for raw in f:
@@ -126,20 +131,30 @@ def parse_rapt_config(svh_path: Path, rv64: bool) -> dict:
             stripped = line.strip()
             if not stripped:
                 continue
-            if stripped.startswith("`ifdef"):
-                tok = stripped.split()[1]
-                cond_stack.append(rv64 if tok == "RAPT_RV64" else True)
+            directive = stripped.split()
+            op = directive[0]
+            if op in ("`ifdef", "`ifndef"):
+                matched = directive[1] in defined
+                if op == "`ifndef":
+                    matched = not matched
+                frames.append([matched, matched, False])
                 continue
-            if stripped.startswith("`ifndef"):
-                tok = stripped.split()[1]
-                cond_stack.append(not rv64 if tok == "RAPT_RV64" else True)
+            if op in ("`elsif", "`else", "`endif"):
+                if not frames or frames[-1][2] and op != "`endif":
+                    raise ValueError(f"invalid conditional: {stripped}")
+                if op == "`endif":
+                    frames.pop()
+                else:
+                    frame = frames[-1]
+                    matched = op == "`else" or directive[1] in defined
+                    frame[0] = not frame[1] and matched
+                    frame[1] |= matched
+                    frame[2] = op == "`else"
                 continue
-            if stripped.startswith("`else"):
-                cond_stack[-1] = not cond_stack[-1]
-                continue
-            if stripped.startswith("`endif"):
-                if len(cond_stack) > 1:
-                    cond_stack.pop()
+            if op == "`undef":
+                if cond_active():
+                    defined.discard(directive[1])
+                    cfg.pop(directive[1], None)
                 continue
             if not cond_active():
                 continue
@@ -148,6 +163,9 @@ def parse_rapt_config(svh_path: Path, rv64: bool) -> dict:
             if not m:
                 continue
             key, val = m.group(1), m.group(2)
+            defined.add(key)
+            if not key.startswith("RAPT_"):
+                continue
             if val is None or val == "":
                 cfg[key] = True
                 continue
@@ -159,28 +177,57 @@ def parse_rapt_config(svh_path: Path, rv64: bool) -> dict:
                     cfg[key] = _parse_constant_expr(value, cfg)
                 except (SyntaxError, ValueError):
                     cfg[key] = value
+    if frames:
+        raise ValueError("unterminated conditional in configuration")
     return cfg
 
 
 def derive_uarch(cfg: dict) -> dict:
     """Translate a parsed rapt_config dict into gem5 O3 parameters."""
 
-    def cache_geom(line_len, sets_len, ways):
-        line_bytes = 4 << int(line_len)
+    def positive_width(name: str, fallback: int) -> int:
+        value = int(cfg.get(name, fallback))
+        if value <= 0:
+            raise ValueError(f"{name} must be positive, got {value}")
+        return value
+
+    # I-cache offsets count 32-bit instruction words; D-cache offsets count
+    # XLEN-bit data words. Keep byte capacity invariant when XLEN changes.
+    def cache_geom(line_len, sets_len, ways, word_bytes):
+        line_bytes = word_bytes << int(line_len)
         sets = 1 << int(sets_len)
         size = line_bytes * sets * int(ways)
         return line_bytes, int(ways), size
 
     l1i_line, l1i_assoc, l1i_size = cache_geom(
-        cfg["RAPT_L1I_LINE_LEN"], cfg["RAPT_L1I_LEN"], cfg["RAPT_L1I_N_WAYS"]
+        cfg["RAPT_L1I_LINE_LEN"], cfg["RAPT_L1I_LEN"], cfg["RAPT_L1I_N_WAYS"], 4
     )
     l1d_line, l1d_assoc, l1d_size = cache_geom(
-        cfg["RAPT_L1D_LINE_LEN"], cfg["RAPT_L1D_LEN"], cfg["RAPT_L1D_N_WAYS"]
+        cfg["RAPT_L1D_LINE_LEN"], cfg["RAPT_L1D_LEN"], cfg["RAPT_L1D_N_WAYS"],
+        int(cfg.get("RAPT_XLEN", 32)) // 8,
     )
     line_bytes = max(l1i_line, l1d_line)
 
-    issue_w = 2 if cfg.get("RAPT_DUAL_ISSUE") else 1
-    commit_w = 2 if cfg.get("RAPT_DUAL_COMMIT") else issue_w
+    # Mirror the compatibility rules in hdl/include/rapt.svh, while keeping
+    # the four ordered boundaries independent.  gem5 has extra global
+    # issue/writeback/squash knobs for which Raptor has no one-to-one ordered
+    # stage: dispatch width is the sustainable input rate to the execution
+    # domains, and max(dispatch, commit) is the closest bounded squash rate.
+    legacy_issue_w = int(
+        cfg.get("RAPT_ISSUE_WIDTH", 2 if cfg.get("RAPT_DUAL_ISSUE") else 1)
+    )
+    decode_w = positive_width("RAPT_DECODE_WIDTH", legacy_issue_w)
+    rename_w = positive_width("RAPT_RENAME_WIDTH", decode_w)
+    dispatch_w = positive_width("RAPT_DISPATCH_WIDTH", rename_w)
+    legacy_commit_w = 2 if cfg.get("RAPT_DUAL_COMMIT") else 1
+    commit_w = positive_width("RAPT_COMMIT_WIDTH", legacy_commit_w)
+    integer_issue_ports = positive_width("RAPT_INTEGER_ISSUE_PORTS", 2)
+    integer_system_port = int(cfg.get("RAPT_INTEGER_SYSTEM_PORT", 0))
+    if not 0 <= integer_system_port < integer_issue_ports:
+        raise ValueError(
+            "RAPT_INTEGER_SYSTEM_PORT must select an existing integer issue port, "
+            f"got {integer_system_port} for {integer_issue_ports} ports"
+        )
 
     iq_entries = int(cfg["RAPT_RS_SIZE"]) + int(cfg["RAPT_IOQ_SIZE"])
     phys_int = int(cfg["RAPT_PHY_SIZE"])
@@ -199,14 +246,15 @@ def derive_uarch(cfg: dict) -> dict:
         lq=int(cfg["RAPT_SQ_SIZE"]),
         phys_int=phys_int,
         phys_fp=phys_fp,
-        fetch_w=issue_w,
-        decode_w=issue_w,
-        rename_w=issue_w,
-        dispatch_w=issue_w,
-        issue_w=issue_w,
-        wb_w=issue_w,
+        fetch_w=decode_w,
+        decode_w=decode_w,
+        rename_w=rename_w,
+        dispatch_w=dispatch_w,
+        issue_w=dispatch_w,
+        wb_w=dispatch_w,
         commit_w=commit_w,
-        squash_w=issue_w,
+        squash_w=max(dispatch_w, commit_w),
+        integer_issue_ports=integer_issue_ports,
         btb_entries=int(cfg["RAPT_BTB_SIZE"]),
         btb_assoc=int(cfg["RAPT_BTB_WAYS"]),
         # Mirror rapt_bpu_btb.sv (BTB_TAG_LEN=7); JSON/SET can override.
@@ -265,6 +313,7 @@ _UARCH_TYPES: dict = {
     "wb_w": int,
     "commit_w": int,
     "squash_w": int,
+    "integer_issue_ports": int,
     "btb_entries": int,
     "btb_assoc": int,
     "btb_tag_bits": int,

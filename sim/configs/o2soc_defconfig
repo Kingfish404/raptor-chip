@@ -14,9 +14,8 @@ CONFIG_CC_OPT="-O2"
 CONFIG_DEBUG=y
 CONFIG_WTRACE=y
 CONFIG_ITRACE=y
-CONFIG_ITRACE=y
+CONFIG_DIFFTEST=y
+# CONFIG_MEM_DIFFTEST is not set
 # end of Testing and Debugging
 
-CONFIG_ysyxSoC=y
-CONFIG_MODE="soc"
-# CONFIG_NVBoard is not set
+# CONFIG_wrapBus is not set

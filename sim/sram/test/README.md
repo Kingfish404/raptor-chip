@@ -46,14 +46,21 @@ make -C sim/sram/test clean
 
 Generates stubs if needed, preprocesses `fixtures/rapt_sram_test_top.sv`
 (a 1-instance wrapper around the L1I 32×32 shape), and drives the
-`third_party/yosys-opensta` flow with `EXTRA_LIB_FILES` /
-`EXTRA_BLACKBOX_V_FILES` set to the stub artefacts. Then it asserts:
+`third_party/yosys-opensta` flow with `EXTRA_LIB_FILES` set to the stub
+Liberty. The flow imports macro port definitions from Liberty before reading
+RTL; loading the same macro again as a Verilog blackbox would duplicate the
+module. Then it asserts:
 
 - Yosys produced a synthesised netlist.
 - The macro instance (`rapt_openram_1rw_32x32`) survives synthesis
   (i.e. the blackbox was preserved, not flattened).
 - The OpenSTA timing report is non-empty and references the macro's
   `clk0` pin (proving the `.lib` arcs were actually used).
+- The flow's `sta.log` contains no STA error diagnostics.
+
+`STA_SMOKE_BUILD_DIR` overrides the packed-input and driver-log directory.
+`YOSYS_OPENSTA` selects an alternate flow tree (and its result directory) for
+isolated runs. Stub timing validates integration, not SRAM physical signoff.
 
 If `yosys-slang` is missing on the host (e.g. on macOS without the
 plugin) the smoke target exits with a clear `FAIL: yosys-slang plugin

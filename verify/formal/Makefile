@@ -34,6 +34,14 @@ OSS_CAD_DATE    := $(subst -,,$(OSS_CAD_VERSION))
 OSS_CAD_TARBALL := oss-cad-suite-$(OSS_CAD_PLATFORM)-$(OSS_CAD_DATE).tgz
 OSS_CAD_URL     := $(OSS_CAD_REPO)/$(OSS_CAD_VERSION)/$(OSS_CAD_TARBALL)
 
+# Resolve Yosys before prepending the bundled solver tools. Otherwise an older
+# bundled slang frontend silently shadows a compatible system installation.
+# RAPTOR_YOSYS_REAL also overrides the executable used by the SBY wrapper.
+ifeq ($(strip $(RAPTOR_YOSYS_REAL)),)
+RAPTOR_YOSYS_REAL := $(or $(shell command -v yosys 2>/dev/null),$(OSS_CAD_BIN)/yosys)
+endif
+export RAPTOR_YOSYS_REAL
+
 # Prepend oss-cad-suite/bin to PATH for all recipes
 export PATH := $(OSS_CAD_BIN):$(PATH)
 NPROC ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
@@ -41,6 +49,22 @@ FORMAL_JOBS ?= 4
 FORMAL_SBY := $(OSS_CAD_BIN)/sby
 FORMAL_YOSYS := $(RAPTOR_HOME)/verify/formal/yosys-rvfi-compat.sh
 FORMAL_BUS_PACK := build/formal_bus_pack.sv
+
+.PHONY: zkt-mul
+zkt-mul: ## Prove default RV32/RV64 multiply operand-independent completion timing
+	$(FORMAL_SBY) -f zkt_mul.sby
+
+.PHONY: zkt-muldiv
+zkt-muldiv: ## Prove shared multiply/divide port timing under independent operand streams
+	$(FORMAL_SBY) -f zkt_muldiv.sby
+
+.PHONY: zkt-alu-ports
+zkt-alu-ports: ## Check both actual integer ALU ports for operand-independent control
+	$(FORMAL_SBY) -f zkt_alu_ports.sby
+
+.PHONY: zkt-cdb
+zkt-cdb: ## Check shared ALU/FP endpoint control independently of result values
+	$(FORMAL_SBY) -f zkt_cdb.sby
 
 # ============================================================================
 # Help
@@ -65,6 +89,7 @@ help: ## Show this help message
 	@echo ""
 	@echo "Variables:"
 	@echo "  OSS_CAD_VERSION=YYYY-MM-DD  oss-cad-suite release (default: $(OSS_CAD_VERSION))"
+	@echo "  RAPTOR_YOSYS_REAL=/path/to/yosys  RVFI frontend (default: $(RAPTOR_YOSYS_REAL))"
 
 # ============================================================================
 # Setup / Init
@@ -109,17 +134,26 @@ check-tools: ## Verify sby and yosys are available
 # ============================================================================
 all: formal_ieu_alu formal_ieu_mul formal_pmp formal_plru formal_rnu_maptable formal_clint formal_plic formal_dtm formal_bus formal_divsqrt ## Run all formal verification (excludes RVFI)
 
-$(FORMAL_BUS_PACK): \
+FORMAL_BUS_SRCS := \
 		$(RAPTOR_HOME)/hdl/rapt_pkg.sv \
 		$(RAPTOR_HOME)/hdl/memory/rapt_bus.sv \
 		$(RAPTOR_HOME)/hdl/memory/rapt_axi_master.sv
+# Preprocessing consumes these headers too. Keep them as dependencies, not
+# standalone Verilator inputs, so header/config edits invalidate cached packs.
+FORMAL_COMMON_HEADERS := $(wildcard $(RAPTOR_HOME)/hdl/include/*.svh)
+FORMAL_BUS_HEADERS := $(FORMAL_COMMON_HEADERS) \
+	$(wildcard $(RAPTOR_HOME)/hdl/configs/formal/*.svh) \
+	$(wildcard $(RAPTOR_HOME)/hdl/include/npc/*.svh) \
+	$(wildcard $(RAPTOR_HOME)/hdl/include/dpic_mock/*.svh)
+
+$(FORMAL_BUS_PACK): $(FORMAL_BUS_SRCS) $(FORMAL_BUS_HEADERS)
 	@mkdir -p $(@D)
 	verilator -E -P \
 		-I$(RAPTOR_HOME)/hdl/configs/formal \
 		-I$(RAPTOR_HOME)/hdl/include \
 		-I$(RAPTOR_HOME)/hdl/include/npc \
 		-I$(RAPTOR_HOME)/hdl/include/dpic_mock \
-		$^ > $@
+		$(FORMAL_BUS_SRCS) > $@
 
 formal_bus: check-tools $(FORMAL_BUS_PACK) ## Verify AXI bus
 	sby -f bus.sby
@@ -132,6 +166,16 @@ formal_ieu_alu: check-tools ## Verify RV32 IEU ALU and bitmanip equivalence
 
 formal_pmp: check-tools ## Prove RV32/RV64 PMP matching, priority and permissions
 	sby -f pmp.sby
+
+.PHONY: formal_pmp_composed
+formal_pmp_composed: check-tools ## Prove every PMP range, then compose with priority/permissions
+	@set -e; for bits in 32 64; do \
+	  for base in 0 4 8 12; do \
+	    tasks=(); for offset in 0 1 2 3; do tasks+=("range$${bits}_$$((base + offset))"); done; \
+	    sby -j 8 -f pmp_ranges.sby "$${tasks[@]}"; \
+	  done; \
+	done
+	sby -f pmp_composed.sby selector32 selector64
 
 formal_plru: check-tools ## Prove 2/4/8-way PLRU selection and state updates
 	sby -f plru.sby
@@ -150,11 +194,13 @@ formal_dtm: check-tools ## Prove single-clock JTAG TAP and DMI transport behavio
 
 DIVSQRT_PACK := build/divsqrt_pack.sv
 $(DIVSQRT_PACK): \
-		$(RAPTOR_HOME)/hdl/backend/feu/fpu/rapt_fpu_divsqrt.sv
+		$(RAPTOR_HOME)/hdl/backend/feu/fpu/rapt_fpu_divsqrt.sv \
+		$(FORMAL_COMMON_HEADERS) \
+		$(wildcard $(RAPTOR_HOME)/hdl/configs/small/*.svh)
 	@mkdir -p $(@D)
 	verilator -E -P \
 		-I$(RAPTOR_HOME)/hdl/configs/small -I$(RAPTOR_HOME)/hdl/include \
-		$^ > $@
+		$< > $@
 
 formal_divsqrt: check-tools $(DIVSQRT_PACK) ## Verify FPU divider/sqrt safety+liveness (BMC)
 	sby -f divsqrt.sby bmc
@@ -218,25 +264,55 @@ FORCE_RVFI_PACK:
 $(RVFI_PACK): FORCE_RVFI_PACK $(VSRCS_RVFI)
 	@mkdir -p build
 	@echo "[formal] Generating RVFI-enabled pack: $@"
-	verilator -E -P -DRAPT_RVFI \
+	# Preprocess for formal synthesis, not Verilator runtime observation.
+	verilator -E -P -DRAPT_RVFI -DSYNTHESIS -UVERILATOR \
 		-I$(RVFI_CFG_DIR) -I$(VSRC_PATH)/include -I$(VSRC_PATH)/include/npc -I$(VSRC_PATH)/include/dpic_mock \
 		$(VSRCS_RVFI) > $@
 
 # --- Generate checks from config ---
-$(RVFI_CHECKS)/Makefile: $(RVFI_CORE_DIR)/checks.cfg $(RVFI_PACK)
+$(RVFI_CHECKS)/makefile: $(RVFI_CORE_DIR)/checks.cfg $(RVFI_PACK) Makefile
 	@echo "[formal] Generating riscv-formal checks..."
 	cd $(RVFI_CORE_DIR) && python3 ../../checks/genchecks.py checks
 	@echo "[formal] Patching .sby files for abc engine (removing unsupported 'skip' option)..."
 	@sed -i.bak '/^skip /d' $(RVFI_CHECKS)/*.sby && rm -f $(RVFI_CHECKS)/*.sby.bak
+	# Upstream emits literal 'sby', so make SBY= would otherwise be ignored.
+	@sed -i.bak 's/^\tsby /\t+$$(SBY) /' $(RVFI_CHECKS)/makefile && rm -f $(RVFI_CHECKS)/makefile.bak
 
-formal_rvfi_gen: $(RVFI_CHECKS)/Makefile ## Generate riscv-formal check .sby files
+formal_rvfi_gen: $(RVFI_CHECKS)/makefile ## Generate riscv-formal check .sby files
 
-formal_rvfi: check-tools $(RVFI_CHECKS)/Makefile ## Run all riscv-formal checks
-	PATH=$(RAPTOR_HOME)/verify/formal:$(PATH) $(MAKE) -C $(RVFI_CHECKS) -j$(FORMAL_JOBS) SBY=$(FORMAL_SBY)
+.PHONY: check-rvfi-tools
+check-rvfi-tools: check-tools
+	@mkdir -p build
+	@echo "[formal] RVFI Yosys: $(RAPTOR_YOSYS_REAL)"
+	@"$(RAPTOR_YOSYS_REAL)" -Q -T -m slang -p \
+		'read_slang --top rvfi_tool_probe $(RVFI_SRC_DIR)/tool_probe.sv; select -assert-none a:init' \
+		> build/rvfi-tool-check.log 2>&1 || { \
+		cat build/rvfi-tool-check.log; \
+		echo 'ERROR: RVFI requires a yosys-slang frontend with $$countones support and correct combinational int initialization.'; \
+		echo 'Set RAPTOR_YOSYS_REAL=/absolute/path/to/compatible/yosys (validated with Yosys 0.64 + slang).'; \
+		exit 1; }
 
-formal_rvfi_check: check-tools $(RVFI_CHECKS)/Makefile ## Run a single check (CHECK=insn_add_ch0)
+formal_rvfi: check-rvfi-tools $(RVFI_CHECKS)/makefile ## Run all riscv-formal checks
+	PATH=$(RAPTOR_HOME)/verify/formal:$(PATH) $(MAKE) -C $(RVFI_CHECKS) -j$(FORMAL_JOBS) SBY="$(FORMAL_SBY) --yosys $(FORMAL_YOSYS)"
+
+formal_rvfi_check: check-rvfi-tools $(RVFI_CHECKS)/makefile ## Run a single check (CHECK=insn_add_ch0)
 	@test -n "$(CHECK)" || { echo "Usage: make formal_rvfi_check CHECK=insn_add_ch0"; exit 1; }
 	cd $(RVFI_CHECKS) && PATH=$(RAPTOR_HOME)/verify/formal:$(PATH) sby -f $(CHECK).sby --yosys $(FORMAL_YOSYS)
 
 formal_rvfi_clean: ## Clean generated riscv-formal checks
 	rm -rf $(RVFI_CHECKS) $(RVFI_PACK)
+
+.PHONY: pma-capabilities
+PMA_PROOF_OUTPUT ?= $(RAPTOR_HOME)/build/rva22s64/pma-capabilities
+pma-capabilities: ## Prove all-address storage-region PMA capability logic in RV32/RV64
+	python3 "$(RAPTOR_HOME)/verify/scripts/formal_contract.py" pma-capabilities --output "$(PMA_PROOF_OUTPUT)"
+
+.PHONY: ifetch-word-atomic
+IFETCH_ATOMIC_OUTPUT ?= $(RAPTOR_HOME)/build/rva22s64/ifetch-word-atomic
+ifetch-word-atomic: ## Prove aligned instruction-word assembly integrity in RV32/RV64
+	python3 "$(RAPTOR_HOME)/verify/scripts/formal_contract.py" ifetch-word-atomic --output "$(IFETCH_ATOMIC_OUTPUT)"
+
+.PHONY: npc-response-stability
+NPC_RESPONSE_OUTPUT ?= $(RAPTOR_HOME)/build/rva22s64/npc-response-stability
+npc-response-stability: ## Prove NPC R/B holds and test real watchdog-duration stalls in RV32/RV64
+	python3 "$(RAPTOR_HOME)/verify/scripts/npc_response_stability_check.py" --output "$(NPC_RESPONSE_OUTPUT)"

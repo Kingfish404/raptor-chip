@@ -1,429 +1,341 @@
 `include "rapt.svh"
 `include "rapt_if.svh"
-`include "rapt_rnu_internal_if.svh"
-`include "rapt_dpi_c.svh"
 
-// Rename Unit (RNU): pure rename stage.
-// Contains:
-//   - Rename Queue (RNQ): buffers decoded uops before renaming
-//   - Free List: allocates / deallocates physical registers
-//   - Map Table: speculative (MAP) + committed (RAT) rename maps
-//
-// Dual-issue: renames up to 2 instructions per cycle with RAW dependency
-// handling between the two rename slots (slot B sees slot A's rename result
-// when they share the same architectural register).
+// Ordered rename: incoming decode groups are flattened by RNQ. The rename
+// group sees a program-order fold of MAP, including RAW and stale-destination
+// WAW bypass. Free registers are selected once per actual destination writer.
 module rapt_rnu #(
-    parameter unsigned RIQ_SIZE = `RAPT_RIQ_SIZE,
-    parameter unsigned RNUM = `RAPT_REG_SIZE,
-    parameter unsigned RLEN = `RAPT_REG_LEN,
-    parameter unsigned PNUM = `RAPT_PHY_SIZE,
-    parameter unsigned PLEN = `RAPT_PHY_LEN,
-    /* verilator lint_off UNUSEDPARAM */
-    parameter unsigned XLEN = `RAPT_XLEN
-    /* verilator lint_on UNUSEDPARAM */
+    parameter rapt_pkg::core_config_t Cfg = rapt_pkg::CoreConfig,
+    parameter type UopT = rapt_pkg::uop_t,
+    parameter int DecodeWidth = Cfg.decode_width,
+    parameter int RenameWidth = Cfg.rename_width,
+    parameter int CommitWidth = Cfg.commit_width,
+    parameter unsigned RIQ_SIZE = Cfg.rename_entries,
+    parameter unsigned RNUM = Cfg.arch_regs,
+    parameter unsigned RLEN = rapt_pkg::index_bits(Cfg.arch_regs),
+    parameter unsigned PNUM = Cfg.phys_regs,
+    parameter unsigned PLEN = rapt_pkg::index_bits(Cfg.phys_regs),
+    parameter unsigned CheckpointEntries = Cfg.branch_checkpoints,
+    parameter unsigned CheckpointBits = rapt_pkg::index_bits(CheckpointEntries),
+    parameter unsigned ResolvePorts = Cfg.completion_ports,
+    parameter unsigned XLEN = Cfg.xlen
 ) (
-    input clock,
-
-    rou_cmu_if.in   rou_cmu,
+    input logic clock,
+    reset,
+    rou_cmu_if.in rou_cmu,
     cmu_bcast_if.in cmu_bcast,
-
-    idu_rnu_if.slave  idu_rnu,
+    idu_rnu_if.slave idu_rnu,
     rnu_rou_if.master rnu_rou,
-
-    // Debug: MAP and RAT snapshots for architectural register view
-    output [PLEN-1:0] map_snapshot[RNUM],
-    output [PLEN-1:0] rat_snapshot[RNUM],
-
-    input reset
+    rapt_recovery_if.sink recovery,
+    checkpoint_release_if.sink checkpoint_release,
+    output logic [PLEN-1:0] map_snapshot[RNUM],
+    output logic [PLEN-1:0] rat_snapshot[RNUM]
 );
-  // ================================================================
-  // Rename Queue (RNQ)
-  // ================================================================
-  logic [$clog2(RIQ_SIZE)-1:0] rnq_head_a;
-  (* keep = "true" *) logic [RIQ_SIZE-1:0] rnq_tail_oh_a;
-  logic           [RIQ_SIZE-1:0] rnq_valid;
+  localparam int CheckpointOccupancyBits = rapt_pkg::index_bits(CheckpointEntries + 1);
 
-  (* ram_style = "registers" *) rapt_pkg::uop_t rnq_uops[RIQ_SIZE];
-  (* ram_style = "registers" *) logic [RLEN-1:0] rnq_rd[RIQ_SIZE];
-  (* ram_style = "registers" *) logic [XLEN-1:0] rnq_op1[RIQ_SIZE];
-  (* ram_style = "registers" *) logic [XLEN-1:0] rnq_op2[RIQ_SIZE];
-  (* ram_style = "registers" *) logic [RLEN-1:0] rnq_rs1[RIQ_SIZE];
-  (* ram_style = "registers" *) logic [RLEN-1:0] rnq_rs2[RIQ_SIZE];
-
-  // ================================================================
-  // Rename Pipeline Registers (2-sub-stage rename)
-  // Stage 1: Read maptable + freelist allocate (combinational)
-  // Stage 2: Present registered results to ROU
-  // ================================================================
-  // Slot A
-  logic                          rn_pipe_valid_a;
-  rapt_pkg::uop_t                rn_pipe_uop_a;
-  logic [PLEN-1:0] rn_pipe_pr1_a, rn_pipe_pr2_a, rn_pipe_prd_a, rn_pipe_prs_a;
-  logic [XLEN-1:0] rn_pipe_op1_a, rn_pipe_op2_a;
-
-`ifdef RAPT_DUAL_ISSUE
-  // Slot B
-  logic rn_pipe_valid_b;
-  rapt_pkg::uop_t rn_pipe_uop_b;
-  logic [PLEN-1:0] rn_pipe_pr1_b, rn_pipe_pr2_b, rn_pipe_prd_b, rn_pipe_prs_b;
-  logic [XLEN-1:0] rn_pipe_op1_b, rn_pipe_op2_b;
-`endif
-  // Second RNQ enqueue (when IDU provides 2 instructions)
-  logic [$clog2(RIQ_SIZE)-1:0] rnq_head_b;
-
-  // Stage 1 fires when RNQ has entry AND pipeline register is free (or being consumed)
-  logic rn_pipe_ready_a;
-  assign rn_pipe_ready_a = !rn_pipe_valid_a || rnu_rou.ready;
-
-  rapt_pkg::uop_t rnq_tail_uop_a;
-  logic [RLEN-1:0] rnq_tail_rd_a, rnq_tail_rs1_a, rnq_tail_rs2_a;
-  logic [XLEN-1:0] rnq_tail_op1_a, rnq_tail_op2_a;
-  logic rnq_tail_valid_a;
-  logic rnq_enq_fire_a, rnq_deq_fire_a;
-
-`ifdef RAPT_DUAL_ISSUE
-  logic [RIQ_SIZE-1:0] rnq_tail_oh_b;
-  rapt_pkg::uop_t rnq_tail_uop_b;
-  logic [RLEN-1:0] rnq_tail_rd_b, rnq_tail_rs1_b, rnq_tail_rs2_b;
-  logic [XLEN-1:0] rnq_tail_op1_b, rnq_tail_op2_b;
-  logic rnq_tail_valid_b, rnq_tail_is_pair_b;
-  assign rnq_tail_oh_b = {rnq_tail_oh_a[RIQ_SIZE-2:0], rnq_tail_oh_a[RIQ_SIZE-1]};
-
-  // Second RNQ dequeue: can dequeue slot B if slot A fires, next entry valid,
-  // is actually a dual-pair B-slot, and freelist has enough registers.
-  logic [RIQ_SIZE-1:0] rnq_is_pair;
-  logic rnq_deq_fire_b;
-  assign rnq_deq_fire_b = rnq_deq_fire_a && rnq_tail_is_pair_b
-      && rnq_tail_valid_b
-      && (rnq_tail_rd_b == 0 || !fl_bus.alloc_empty_b);
-
-  assign rnq_head_b = rnq_head_a + 1;
-  logic rnq_enq_fire_b;
-  assign rnq_enq_fire_b = idu_rnu.valid_b && rnq_enq_fire_a && !rnq_valid[rnq_head_b];
-`endif
-
-  always_comb begin
-    rnq_tail_uop_a = '0;
-    rnq_tail_rd_a = '0;
-    rnq_tail_rs1_a = '0;
-    rnq_tail_rs2_a = '0;
-    rnq_tail_op1_a = '0;
-    rnq_tail_op2_a = '0;
-    rnq_tail_valid_a = 1'b0;
-`ifdef RAPT_DUAL_ISSUE
-    rnq_tail_uop_b = '0;
-    rnq_tail_rd_b = '0;
-    rnq_tail_rs1_b = '0;
-    rnq_tail_rs2_b = '0;
-    rnq_tail_op1_b = '0;
-    rnq_tail_op2_b = '0;
-    rnq_tail_valid_b = 1'b0;
-    rnq_tail_is_pair_b = 1'b0;
-`endif
-    for (int i = 0; i < RIQ_SIZE; i++) begin
-      if (rnq_tail_oh_a[i]) begin
-        rnq_tail_uop_a = rnq_uops[i];
-        rnq_tail_rd_a = rnq_rd[i];
-        rnq_tail_rs1_a = rnq_rs1[i];
-        rnq_tail_rs2_a = rnq_rs2[i];
-        rnq_tail_op1_a = rnq_op1[i];
-        rnq_tail_op2_a = rnq_op2[i];
-        rnq_tail_valid_a = rnq_valid[i];
-      end
-`ifdef RAPT_DUAL_ISSUE
-      if (rnq_tail_oh_b[i]) begin
-        rnq_tail_uop_b = rnq_uops[i];
-        rnq_tail_rd_b = rnq_rd[i];
-        rnq_tail_rs1_b = rnq_rs1[i];
-        rnq_tail_rs2_b = rnq_rs2[i];
-        rnq_tail_op1_b = rnq_op1[i];
-        rnq_tail_op2_b = rnq_op2[i];
-        rnq_tail_valid_b = rnq_valid[i];
-        rnq_tail_is_pair_b = rnq_is_pair[i];
-      end
-`endif
-    end
-  end
-
-`ifdef RAPT_DUAL_ISSUE
-  // When valid_b is set, both RNQ slots must be free to enqueue.
-  // This prevents slot A from enqueuing without slot B, avoiding duplication.
-  assign rnq_enq_fire_a = idu_rnu.valid_a && !rnq_valid[rnq_head_a]
-      && (!idu_rnu.valid_b || !rnq_valid[rnq_head_b]);
-`else
-  assign rnq_enq_fire_a = idu_rnu.valid_a && !rnq_valid[rnq_head_a];
-`endif
-  assign rnq_deq_fire_a = rn_pipe_ready_a && rnq_tail_valid_a;
-
-  // Output uses pipeline register (stage 2)
-  assign rnu_rou.valid_a = rn_pipe_valid_a;
-`ifdef RAPT_DUAL_ISSUE
-  // When IDU sends valid_b, RNQ must have room for both entries.
-  // If only head is free but head_b isn't, reject to avoid dropping slot B.
-  assign idu_rnu.ready = !rnq_valid[rnq_head_a] && (!idu_rnu.valid_b || !rnq_valid[rnq_head_b]);
-`else
-  assign idu_rnu.ready = !rnq_valid[rnq_head_a];
-`endif
-
-`ifdef RAPT_DUAL_ISSUE
-  assign rnu_rou.valid_b = rn_pipe_valid_b;
-`endif
-
-  // ================================================================
-  // Dual-issue rename dependency detection (combinational)
-  // Slot B must see slot A's rename result when they share arch registers.
-  // ================================================================
-`ifdef RAPT_DUAL_ISSUE
-  logic slot_a_writes_rd;
-  assign slot_a_writes_rd = rnq_deq_fire_a && (rnq_tail_rd_a != 0);
-
-  // RAW bypass: slot B's source registers match slot A's destination
-  logic dep_b_rs1_from_a;
-  logic dep_b_rs2_from_a;
-  logic dep_b_rdold_from_a;
-  assign dep_b_rs1_from_a   = slot_a_writes_rd && (rnq_tail_rs1_b == rnq_tail_rd_a);
-  assign dep_b_rs2_from_a   = slot_a_writes_rd && (rnq_tail_rs2_b == rnq_tail_rd_a);
-  assign dep_b_rdold_from_a = slot_a_writes_rd && (rnq_tail_rd_b == rnq_tail_rd_a);
-`endif
-
-  always_ff @(posedge clock) begin
-    if (reset || cmu_bcast.flush_pipe) begin
-      rnq_head_a <= '0;
-      rnq_tail_oh_a <= {{RIQ_SIZE-1{1'b0}}, 1'b1};
-      rnq_valid <= '0;
-      rn_pipe_valid_a <= 1'b0;
-`ifdef RAPT_DUAL_ISSUE
-      rn_pipe_valid_b <= 1'b0;
-      rnq_is_pair <= '0;
-`endif
-      // RNQ payload arrays (uops/rd/op*/rs*) are intentionally NOT reset:
-      // every read is gated by rnq_valid[] (dequeue-side reads index
-      // rnq_tail_* whose valid was checked), so the data flops are
-      // don't-care (same principle as rapt_prf).  This removes
-      // ~RIQ_SIZE*uop_width endpoints from the reset/flush network.
-    end else begin
-      // One static write cone per RNQ entry. Preserve the former NBA
-      // priority: dequeue wins over enqueue on any selector alias.
-      for (int i = 0; i < RIQ_SIZE; i++) begin
-`ifdef RAPT_DUAL_ISSUE
-        if (rnq_deq_fire_b && rnq_tail_oh_b[i]) begin
-          rnq_valid[i]   <= 1'b0;
-          rnq_is_pair[i] <= 1'b0;
-        end else if (rnq_deq_fire_a && rnq_tail_oh_a[i]) begin
-          rnq_valid[i]   <= 1'b0;
-          rnq_is_pair[i] <= 1'b0;
-        end else if (rnq_enq_fire_b && i == int'(rnq_head_b)) begin
-          rnq_valid[i]   <= 1'b1;
-          rnq_uops[i]    <= idu_rnu.uop_b;
-          rnq_rd[i]      <= idu_rnu.uop_b.rd;
-          rnq_op1[i]     <= idu_rnu.op1_b;
-          rnq_op2[i]     <= idu_rnu.op2_b;
-          rnq_rs1[i]     <= idu_rnu.rs1_b;
-          rnq_rs2[i]     <= idu_rnu.rs2_b;
-          rnq_is_pair[i] <= 1'b1;
-        end else if (rnq_enq_fire_a && i == int'(rnq_head_a)) begin
-          rnq_valid[i]   <= 1'b1;
-          rnq_uops[i]    <= idu_rnu.uop_a;
-          rnq_rd[i]      <= idu_rnu.uop_a.rd;
-          rnq_op1[i]     <= idu_rnu.op1_a;
-          rnq_op2[i]     <= idu_rnu.op2_a;
-          rnq_rs1[i]     <= idu_rnu.rs1_a;
-          rnq_rs2[i]     <= idu_rnu.rs2_a;
-          rnq_is_pair[i] <= 1'b0;
-        end
-`else
-        if (rnq_deq_fire_a && rnq_tail_oh_a[i]) begin
-          rnq_valid[i] <= 1'b0;
-        end else if (rnq_enq_fire_a && i == int'(rnq_head_a)) begin
-          rnq_valid[i] <= 1'b1;
-          rnq_uops[i]  <= idu_rnu.uop_a;
-          rnq_rd[i]    <= idu_rnu.uop_a.rd;
-          rnq_op1[i]   <= idu_rnu.op1_a;
-          rnq_op2[i]   <= idu_rnu.op2_a;
-          rnq_rs1[i]   <= idu_rnu.rs1_a;
-          rnq_rs2[i]   <= idu_rnu.rs2_a;
-        end
-`endif
-      end
-
-      // ---- RNQ Enqueue pointer ----
-      if (rnq_enq_fire_a) begin
-`ifdef RAPT_DUAL_ISSUE
-        if (rnq_enq_fire_b) begin
-          rnq_head_a <= rnq_head_a + 2;
-        end else begin
-          rnq_head_a <= rnq_head_a + 1;
-        end
-`else
-        rnq_head_a <= rnq_head_a + 1;
-`endif
-      end
-
-      // ---- RNQ Dequeue + Rename Stage 1 -> Stage 2 ----
-      if (rnq_deq_fire_a) begin
-        // Slot A: register rename results
-        rn_pipe_valid_a <= 1'b1;
-        rn_pipe_uop_a <= rnq_tail_uop_a;
-        rn_pipe_op1_a <= rnq_tail_op1_a;
-        rn_pipe_op2_a <= rnq_tail_op2_a;
-        rn_pipe_pr1_a <= mt_bus.map_rdata_a;
-        rn_pipe_pr2_a <= mt_bus.map_rdata_b;
-        rn_pipe_prd_a <= (rnq_tail_rd_a != 0) ? fl_bus.alloc_pr_a : '0;
-        rn_pipe_prs_a <= mt_bus.map_rdata_c;
-
-`ifdef RAPT_DUAL_ISSUE
-        if (rnq_deq_fire_b) begin
-          rnq_tail_oh_a <= (rnq_tail_oh_a << 2) | (rnq_tail_oh_a >> (RIQ_SIZE - 2));
-
-          // Slot B: rename with RAW dependency bypass from slot A
-          rn_pipe_valid_b <= 1'b1;
-          rn_pipe_uop_b <= rnq_tail_uop_b;
-          rn_pipe_op1_b <= rnq_tail_op1_b;
-          rn_pipe_op2_b <= rnq_tail_op2_b;
-          // rs1_b: bypass from slot A if dependency
-          rn_pipe_pr1_b <= dep_b_rs1_from_a ? fl_bus.alloc_pr_a : mt_bus.map_rdata_d;
-          // rs2_b: bypass from slot A if dependency
-          rn_pipe_pr2_b <= dep_b_rs2_from_a ? fl_bus.alloc_pr_a : mt_bus.map_rdata_e;
-          // prd_b: new physical register from freelist slot B
-          rn_pipe_prd_b <= (rnq_tail_rd_b != 0) ? fl_bus.alloc_pr_b : '0;
-          // prs_b: old mapping: bypass from slot A if same rd
-          rn_pipe_prs_b <= dep_b_rdold_from_a ? fl_bus.alloc_pr_a : mt_bus.map_rdata_f;
-        end else begin
-          rnq_tail_oh_a <= rnq_tail_oh_b;
-          rn_pipe_valid_b <= 1'b0;
-        end
-`else
-        rnq_tail_oh_a <= {rnq_tail_oh_a[RIQ_SIZE-2:0], rnq_tail_oh_a[RIQ_SIZE-1]};
-`endif
-      end else if (rnu_rou.ready) begin
-        rn_pipe_valid_a <= 1'b0;
-`ifdef RAPT_DUAL_ISSUE
-        rn_pipe_valid_b <= 1'b0;
-`endif
-      end
-    end
-  end
-
-  // RNQ read-side outputs (stage 2: from pipeline register)
-  assign rnu_rou.uop_a = rn_pipe_uop_a;
-  assign rnu_rou.op1_a = rn_pipe_op1_a;
-  assign rnu_rou.op2_a = rn_pipe_op2_a;
-
-  // ================================================================
-  // Commit signals (shared by freelist, maptable, PRF)
-  // ================================================================
-  logic commit_dealloc;
-  assign commit_dealloc = rou_cmu.valid_a && rou_cmu.rd_a != 0;
-
-  logic commit_dealloc_b;
-  assign commit_dealloc_b = rou_cmu.valid_b && rou_cmu.rd_b != 0;
-
-  // ================================================================
-  // Internal interface instances
-  // ================================================================
-  rnu_fl_if fl_bus ();  // RNU <-> Free List
-  rnu_mt_if mt_bus ();  // RNU <-> Map Table
-
-  // ================================================================
-  // Free List - interface drive
-  // ================================================================
-  assign fl_bus.flush_pipe  = cmu_bcast.flush_pipe;
-  assign fl_bus.flush_rd_a  = cmu_bcast.rd_a;
-  assign fl_bus.flush_rd_b  = cmu_bcast.valid_b ? cmu_bcast.rd_b : '0;
-  assign fl_bus.alloc_req_a = rnq_deq_fire_a && !fl_bus.alloc_empty_a && rnq_tail_rd_a != 0;
-`ifdef RAPT_DUAL_ISSUE
-  assign fl_bus.alloc_req_b = rnq_deq_fire_b && !fl_bus.alloc_empty_b && rnq_tail_rd_b != 0;
-`endif
-  assign fl_bus.dealloc_req_a = commit_dealloc;
-  assign fl_bus.dealloc_pr_a  = rou_cmu.prs_a;
-  assign fl_bus.dealloc_req_b = commit_dealloc_b;
-  assign fl_bus.dealloc_pr_b  = rou_cmu.prs_b;
-
-  rapt_rnu_freelist #(
-      .RNUM(RNUM),
-      .PNUM(PNUM),
-      .PLEN(PLEN),
-      .RLEN(RLEN)
-  ) u_freelist (
+  typedef struct packed {
+    UopT uop;
+    logic [XLEN-1:0] op1, op2;
+    logic [RLEN-1:0] rs1, rs2;
+  } decoded_t;
+  typedef struct packed {
+    UopT uop;
+    logic [XLEN-1:0] op1, op2;
+    logic [PLEN-1:0] pr1, pr2, prd, prs;
+    logic checkpoint_valid;
+    logic [CheckpointBits-1:0] checkpoint;
+  } renamed_t;
+  logic [rapt_pkg::index_bits(RIQ_SIZE+1)-1:0] decoded_count;
+  logic [rapt_pkg::index_bits(2*RenameWidth+1)-1:0] renamed_count;
+  assign rnu_rou.empty = decoded_count == 0 && renamed_count == 0;
+  decoded_t decoded[DecodeWidth], candidate[RenameWidth];
+  logic candidate_valid[RenameWidth], candidate_ready[RenameWidth];
+  renamed_t renamed[RenameWidth], buffered[RenameWidth];
+  logic renamed_valid[RenameWidth], renamed_ready[RenameWidth];
+  logic [PLEN-1:0] map_q[RNUM], rat_q[RNUM], map_next[RNUM], rat_next[RNUM];
+  logic [PNUM-1:0] free_q, free_next, free_after_commit;
+  logic allocation_found[RenameWidth];
+  logic [PLEN-1:0] allocation_index[RenameWidth];
+  logic [CheckpointEntries-1:0] checkpoint_available, checkpoint_live;
+  logic checkpoint_found[RenameWidth], checkpoint_allocate_valid[RenameWidth];
+  logic [CheckpointBits-1:0] checkpoint_index[RenameWidth], checkpoint_allocate_id[RenameWidth];
+  logic [PLEN-1:0] checkpoint_allocate_map[RenameWidth][RNUM];
+  logic [PNUM-1:0] checkpoint_allocate_free[RenameWidth];
+  logic checkpoint_restore_hit;
+  logic [PLEN-1:0] checkpoint_restore_map[RNUM];
+  logic [PNUM-1:0] checkpoint_restore_free;
+  int allocation_rank;
+  int checkpoint_rank;
+  logic destination_needed[RenameWidth], checkpoint_needed[RenameWidth];
+  int chosen;
+  int checkpoint_chosen;
+  logic pmu_pending;
+  logic pmu_checkpoint_full /* verilator public_flat_rd */;
+  logic pmu_checkpoint_stall /* verilator public_flat_rd */;
+  logic pmu_recovery_fence /* verilator public_flat_rd */;
+  logic [rapt_pkg::index_bits(CheckpointEntries+1)-1:0]
+      pmu_checkpoint_occupancy /* verilator public_flat_rd */;
+  // Match the ROU enqueue-ready probe: work already renamed, not RNQ input.
+  assign pmu_pending = rnu_rou.valid[0];
+  assign pmu_checkpoint_full = &checkpoint_live;
+  assign pmu_recovery_fence = recovery.pending;
+  assign pmu_checkpoint_occupancy = CheckpointOccupancyBits'(
+      $countones(checkpoint_live));
+  rapt_rank_select #(
+      .Entries  (PNUM),
+      .NumSelect(RenameWidth),
+      .IndexBits(PLEN)
+  ) allocator (
+      .available(free_q),
+      .found(allocation_found),
+      .index(allocation_index)
+  );
+  rapt_rank_select #(
+      .Entries  (CheckpointEntries),
+      .NumSelect(RenameWidth),
+      .IndexBits(CheckpointBits)
+  ) checkpoint_allocator (
+      .available(checkpoint_available),
+      .found(checkpoint_found),
+      .index(checkpoint_index)
+  );
+  rapt_rename_checkpoint #(
+      .Entries(CheckpointEntries),
+      .RenameWidth(RenameWidth),
+      .ResolvePorts(ResolvePorts),
+      .MapEntries(RNUM),
+      .PhysRegs(PNUM),
+      .MapBits(PLEN),
+      .CheckpointBits(CheckpointBits)
+  ) checkpoints (
       .clock(clock),
       .reset(reset),
-      .fl   (fl_bus)
+      .flush(cmu_bcast.flush_pipe),
+      .available(checkpoint_available),
+      .allocate_valid(checkpoint_allocate_valid),
+      .allocate_id(checkpoint_allocate_id),
+      .allocate_map(checkpoint_allocate_map),
+      .allocate_free(checkpoint_allocate_free),
+      .release_valid(checkpoint_release.valid),
+      .release_id(checkpoint_release.checkpoint),
+      .restore_valid(recovery.redirect_valid && recovery.checkpoint_valid),
+      .restore_id(recovery.checkpoint),
+      .restore_hit(checkpoint_restore_hit),
+      .restore_map(checkpoint_restore_map),
+      .restore_free(checkpoint_restore_free),
+      .live(checkpoint_live)
   );
-
-  // ================================================================
-  // Map Table - interface drive
-  // ================================================================
-  assign mt_bus.flush_pipe  = cmu_bcast.flush_pipe;
-  // Speculative write A (on allocation)
-  assign mt_bus.map_wen_a   = fl_bus.alloc_req_a;
-  assign mt_bus.map_waddr_a = rnq_tail_rd_a;
-  assign mt_bus.map_wdata_a = fl_bus.alloc_pr_a;
-  // Speculative read: rs1, rs2
-  assign mt_bus.map_raddr_a = rnq_tail_rs1_a;
-  assign mt_bus.map_raddr_b = rnq_tail_rs2_a;
-  // Speculative read: rd old mapping (prs for ROB dealloc)
-  assign mt_bus.map_raddr_c = rnq_tail_rd_a;
-
-`ifdef RAPT_DUAL_ISSUE
-  // Speculative write B (slot B allocation: younger, wins on conflict)
-  assign mt_bus.map_wen_b   = fl_bus.alloc_req_b;
-  assign mt_bus.map_waddr_b = rnq_tail_rd_b;
-  assign mt_bus.map_wdata_b = fl_bus.alloc_pr_b;
-  // Speculative read slot B: rs1_b, rs2_b, rd_old_b
-  assign mt_bus.map_raddr_d = rnq_tail_rs1_b;
-  assign mt_bus.map_raddr_e = rnq_tail_rs2_b;
-  assign mt_bus.map_raddr_f = rnq_tail_rd_b;
-`endif
-
-  // Committed write A
-  assign mt_bus.rat_wen_a   = commit_dealloc;
-  assign mt_bus.rat_waddr_a = rou_cmu.rd_a;
-  assign mt_bus.rat_wdata_a = rou_cmu.prd_a;
-  // Committed write B (dual commit)
-  assign mt_bus.rat_wen_b   = commit_dealloc_b;
-  assign mt_bus.rat_waddr_b = rou_cmu.rd_b;
-  assign mt_bus.rat_wdata_b = rou_cmu.prd_b;
-
-  logic [PLEN-1:0] mt_rat_snapshot[RNUM];
-  logic [PLEN-1:0] mt_map_snapshot[RNUM];
-
-  rapt_rnu_maptable #(
-      .RNUM(RNUM),
-      .PLEN(PLEN)
-  ) u_maptable (
-      .clock       (clock),
-      .reset       (reset),
-      .mt          (mt_bus),
-      .map_snapshot(mt_map_snapshot),
-      .rat_snapshot(mt_rat_snapshot)
+  if (!(idu_rnu.Width == DecodeWidth && rnu_rou.Width == RenameWidth)) begin : g_invalid_config_0
+    $error("Invalid rapt_rnu configuration");
+  end
+  if (!(rou_cmu.Width == CommitWidth)) begin : g_invalid_config_1
+    $error("Invalid rapt_rnu configuration");
+  end
+  if (!(PNUM > RNUM && RenameWidth > 0 && CheckpointEntries > 0)) begin : g_invalid_config_2
+    $error("Invalid rapt_rnu configuration");
+  end
+  if (!(checkpoint_release.Ports == ResolvePorts)) begin : g_invalid_config_3
+    $error("Invalid rapt_rnu configuration");
+  end
+  if (!(rnu_rou.CheckpointBits == CheckpointBits)) begin : g_invalid_config_4
+    $error("Invalid rapt_rnu configuration");
+  end
+  if (!(recovery.CheckpointBits == CheckpointBits)) begin : g_invalid_config_5
+    $error("Invalid rapt_rnu configuration");
+  end
+  for (genvar s = 0; s < DecodeWidth; s++) assign decoded[s] = idu_rnu.slot[s];
+  rapt_stream_queue #(
+      .ItemT(decoded_t),
+      .Depth(RIQ_SIZE),
+      .InWidth(DecodeWidth),
+      .OutWidth(RenameWidth)
+  ) rnq (
+      .clock(clock),
+      .reset(reset),
+      .flush(cmu_bcast.flush_pipe || recovery.pending),
+      .in_data(decoded),
+      .in_valid(idu_rnu.valid),
+      .in_ready(idu_rnu.ready),
+      .out_data(candidate),
+      .out_valid(candidate_valid),
+      .out_ready(candidate_ready),
+      .occupancy(decoded_count)
   );
-
-  // Expose snapshots to top level
-  genvar gi;
-  generate
-    for (gi = 0; gi < RNUM; gi = gi + 1) begin : gen_snapshot_out
-      assign map_snapshot[gi] = mt_map_snapshot[gi];
-      assign rat_snapshot[gi] = mt_rat_snapshot[gi];
+  rapt_stream_queue #(
+      .ItemT(renamed_t),
+      .Depth(2 * RenameWidth),
+      .InWidth(RenameWidth),
+      .OutWidth(RenameWidth)
+  ) rename_pipe (
+      .clock(clock),
+      .reset(reset),
+      .flush(cmu_bcast.flush_pipe || recovery.pending),
+      .in_data(renamed),
+      .in_valid(renamed_valid),
+      .in_ready(renamed_ready),
+      .out_data(buffered),
+      .out_valid(rnu_rou.valid),
+      .out_ready(rnu_rou.ready),
+      .occupancy(renamed_count)
+  );
+  for (genvar s = 0; s < RenameWidth; s++) begin
+    always_comb begin
+      rnu_rou.slot[s] = '0;
+      rnu_rou.slot[s].uop = buffered[s].uop;
+      rnu_rou.slot[s].op1 = buffered[s].op1;
+      rnu_rou.slot[s].op2 = buffered[s].op2;
+      rnu_rou.slot[s].pr1 = buffered[s].pr1;
+      rnu_rou.slot[s].pr2 = buffered[s].pr2;
+      rnu_rou.slot[s].prd = buffered[s].prd;
+      rnu_rou.slot[s].prs = buffered[s].prs;
     end
-  endgenerate
+    assign rnu_rou.checkpoint_valid[s] = buffered[s].checkpoint_valid;
+    assign rnu_rou.checkpoint[s] = buffered[s].checkpoint;
+  end
 
-  // ================================================================
-  // Register Renaming outputs (stage 2: from pipeline register)
-  // ================================================================
-  assign rnu_rou.pr1_a = rn_pipe_pr1_a;
-  assign rnu_rou.pr2_a = rn_pipe_pr2_a;
-  assign rnu_rou.prd_a = rn_pipe_prd_a;
-  // prs = old physical mapping for rd (before rename), needed by ROB for dealloc
-  assign rnu_rou.prs_a = rn_pipe_prs_a;
+  function automatic logic control_flow(input UopT u);
+    return u.execute.branch.conditional || u.execute.branch.jump || u.execute.branch.indirect;
+  endfunction
 
-`ifdef RAPT_DUAL_ISSUE
-  assign rnu_rou.uop_b = rn_pipe_uop_b;
-  assign rnu_rou.op1_b = rn_pipe_op1_b;
-  assign rnu_rou.op2_b = rn_pipe_op2_b;
-  assign rnu_rou.pr1_b = rn_pipe_pr1_b;
-  assign rnu_rou.pr2_b = rn_pipe_pr2_b;
-  assign rnu_rou.prd_b = rn_pipe_prd_b;
-  assign rnu_rou.prs_b = rn_pipe_prs_b;
-`endif
+  for (genvar s = 0; s < RenameWidth; s++) begin : g_resource_demand
+    assign destination_needed[s] = candidate[s].uop.rd != 0;
+    assign checkpoint_needed[s] = control_flow(candidate[s].uop);
+  end
+  rapt_rename_admit #(
+      .Width(RenameWidth)
+  ) admission (
+      .enable(!reset && !cmu_bcast.flush_pipe && !recovery.pending),
+      .valid(candidate_valid),
+      .downstream_ready(renamed_ready),
+      .destination_needed(destination_needed),
+      .checkpoint_needed(checkpoint_needed),
+      .physical_found(allocation_found),
+      .checkpoint_found(checkpoint_found),
+      .ready(candidate_ready),
+      .fire(renamed_valid),
+      .checkpoint_stall(pmu_checkpoint_stall)
+  );
 
+  // Shared retirement view for next-state and every checkpoint snapshot.
+  // Allocation still reads free_q, never these same-cycle releases.
+  always_comb begin
+    free_after_commit = free_q;
+    for (int c = 0; c < CommitWidth; c++)
+    if (rou_cmu.slot[c].valid && rou_cmu.slot[c].rd != 0)
+      free_after_commit[rou_cmu.slot[c].prs] = 1'b1;
+  end
+  // Snapshots depend on accepted rename tags, not on another slot's snapshot.
+  // Each generated map entry has one owner and youngest-accepted-writer priority.
+  for (genvar s = 0; s < RenameWidth; s++) begin : g_checkpoint_snapshot
+    always_comb begin
+      checkpoint_allocate_free[s] = free_after_commit;
+      for (int prior = 0; prior <= s; prior++)
+      if (renamed_valid[prior] && candidate[prior].uop.rd != 0)
+        checkpoint_allocate_free[s][renamed[prior].prd] = 1'b0;
+      checkpoint_allocate_free[s][0] = 1'b0;
+    end
+    for (genvar r = 0; r < RNUM; r++) begin : g_map_entry
+      if (r == 0) begin : g_zero
+        assign checkpoint_allocate_map[s][r] = '0;
+      end else begin : g_mapping
+        always_comb begin
+          checkpoint_allocate_map[s][r] = map_q[r];
+          for (int prior = 0; prior <= s; prior++)
+          if (renamed_valid[prior] && candidate[prior].uop.rd != 0
+                && int'(candidate[prior].uop.rd) == r)
+            checkpoint_allocate_map[s][r] = renamed[prior].prd;
+        end
+      end
+    end
+  end
+
+  always_comb begin
+    for (int r = 0; r < RNUM; r++) begin
+      rat_next[r] = rat_q[r];
+      map_next[r] = map_q[r];
+      // Explicit per-entry youngest-writer priority, not addressed NBA writes.
+      for (int c = 0; c < CommitWidth; c++)
+      if (rou_cmu.slot[c].valid && rou_cmu.slot[c].rd != 0 && int'(rou_cmu.slot[c].rd) == r)
+        rat_next[r] = rou_cmu.slot[c].prd;
+    end
+    free_next = free_after_commit;
+    // Deliberately no same-cycle commit-to-allocation reuse: PRF retirement
+    // and writeback arbitration must never race a newly allocated identity.
+    allocation_rank = 0;
+    checkpoint_rank = 0;
+    chosen = 0;
+    checkpoint_chosen = 0;
+    for (int s = 0; s < RenameWidth; s++) begin
+      chosen = int'(allocation_index[allocation_rank]);
+      checkpoint_chosen = int'(checkpoint_index[checkpoint_rank]);
+      renamed[s] = '0;
+      renamed[s].uop = candidate[s].uop;
+      renamed[s].op1 = candidate[s].op1;
+      renamed[s].op2 = candidate[s].op2;
+      // Read the cycle-start MAP once, then bypass only older slot tags.
+      // Do not cascade a full RNUM-entry updated MAP through every slot.
+      renamed[s].pr1 = map_q[candidate[s].rs1];
+      renamed[s].pr2 = map_q[candidate[s].rs2];
+      renamed[s].prs = map_q[candidate[s].uop.rd];
+      for (int older = 0; older < s; older++) begin
+        if (renamed_valid[older] && candidate[older].uop.rd != 0) begin
+          if (candidate[s].rs1 == candidate[older].uop.rd) renamed[s].pr1 = renamed[older].prd;
+          if (candidate[s].rs2 == candidate[older].uop.rd) renamed[s].pr2 = renamed[older].prd;
+          if (candidate[s].uop.rd == candidate[older].uop.rd) renamed[s].prs = renamed[older].prd;
+        end
+      end
+      if (renamed_valid[s] && candidate[s].uop.rd != 0) begin
+        renamed[s].prd = PLEN'(chosen);
+        allocation_rank++;
+        free_next[chosen] = 1'b0;
+        map_next[candidate[s].uop.rd] = PLEN'(chosen);
+      end
+      renamed[s].checkpoint_valid = renamed_valid[s] && control_flow(candidate[s].uop);
+      renamed[s].checkpoint = CheckpointBits'(checkpoint_chosen);
+      checkpoint_allocate_valid[s] = renamed[s].checkpoint_valid;
+      checkpoint_allocate_id[s] = renamed[s].checkpoint;
+      if (renamed[s].checkpoint_valid) checkpoint_rank++;
+
+    end
+    if (checkpoint_restore_hit) begin
+      // Registers allocated after the branch become free; registers released
+      // meanwhile by older retirement remain free as well.
+      free_next = checkpoint_restore_free | free_next;
+      for (int r = 0; r < RNUM; r++) map_next[r] = checkpoint_restore_map[r];
+    end
+    if (cmu_bcast.flush_pipe) begin
+      // All speculative identities, including those buffered before ROB,
+      // are discarded. Rebuild from the post-commit architectural map.
+      free_next = '1;
+      for (int r = 0; r < RNUM; r++) begin
+        map_next[r] = rat_next[r];
+        free_next[rat_next[r]] = 1'b0;
+      end
+    end
+    free_next[0] = 1'b0;
+    map_next[0]  = '0;
+    rat_next[0]  = '0;
+  end
+  always_ff @(posedge clock) begin
+    if (reset) begin
+      free_q <= {PNUM{1'b1}} << RNUM;
+      for (int r = 0; r < RNUM; r++) begin
+        map_q[r] <= PLEN'(r);
+        rat_q[r] <= PLEN'(r);
+      end
+    end else begin
+      free_q <= free_next;
+      for (int r = 0; r < RNUM; r++) begin
+        map_q[r] <= map_next[r];
+        rat_q[r] <= rat_next[r];
+      end
+    end
+  end
+  for (genvar r = 0; r < RNUM; r++) begin : g_snapshot
+    assign map_snapshot[r] = map_q[r];
+    assign rat_snapshot[r] = rat_q[r];
+    `RAPT_SVA(clock, reset, RENAME_MAP_ALLOCATED, !free_q[map_q[r]])
+  end
+  `RAPT_SVA_IMPLY(clock, reset || cmu_bcast.flush_pipe, RENAME_RECOVERY_FENCES_ACCEPT,
+                  recovery.pending, !candidate_valid[0] || !candidate_ready[0])
 endmodule

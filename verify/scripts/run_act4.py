@@ -16,9 +16,11 @@ import argparse
 import concurrent.futures
 import os
 import re
+import shlex
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 _SUMMARY_RE = re.compile(r"RVCP-SUMMARY: TEST (PASSED|FAILED|SIGRUN)")
@@ -58,6 +60,7 @@ def run_one(
     timeout: int,
     mem_random_delay: int,
     mem_random_seed: int,
+    trap_on_ebreak: bool = False,
 ) -> bool:
     """Run a single ELF. Returns True on failure."""
     # Preserve the extension/test directory structure.  ACT4 has identically
@@ -65,6 +68,7 @@ def run_one(
     # earlier results (and is especially racy with parallel execution).
     log_file = log_dir / elf.relative_to(elf_root).with_suffix(".log")
     log_file.parent.mkdir(parents=True, exist_ok=True)
+    log_file.write_text(f"ELF: {elf}\nStatus: converting\n")
 
     # Convert ELF -> raw binary
     with tempfile.NamedTemporaryFile(suffix=".bin", delete=False) as tmp:
@@ -76,16 +80,23 @@ def run_one(
             capture_output=True,
         )
     except subprocess.CalledProcessError as e:
+        Path(bin_path).unlink(missing_ok=True)
+        diagnostic = e.stderr.decode(errors="replace")
+        log_file.write_text(f"ELF: {elf}\nStatus: objcopy failed\n{diagnostic}")
         print(
-            f"  {red('CERR')} {bold(elf.name)}: objcopy failed: {e.stderr.decode()[:200]}"
+            f"  {red('CERR')} {bold(elf.name)}: objcopy failed: {diagnostic[:200]}"
         )
         return True
     except OSError as e:
+        Path(bin_path).unlink(missing_ok=True)
+        log_file.write_text(f"ELF: {elf}\nStatus: objcopy unavailable\n{e}\n")
         print(f"  {red('CERR')} {bold(elf.name)}: cannot run objcopy: {e}")
         return True
 
     # Build simulator command
     cmd = [npc_bin, "-b", "-n"]
+    if trap_on_ebreak:
+        cmd.append("--trap-on-ebreak")
     cmd += [
         f"--mem-random-delay={mem_random_delay}",
         f"--mem-random-seed={mem_random_seed}",
@@ -96,18 +107,32 @@ def run_one(
         cmd += ["-d", nemu_so]
     cmd.append(bin_path)
 
+    started = time.monotonic()
+    command_header = f"ELF: {elf}\nCommand: {shlex.join(cmd)}\n"
+    log_file.write_text(command_header + "Status: running\n")
     try:
         result = subprocess.run(
             cmd,
+            cwd=Path(__file__).resolve().parents[2] / "sim",
             capture_output=True,
             timeout=timeout,
             text=True,
         )
         output = result.stdout + result.stderr
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as e:
+        # TimeoutExpired carries bytes even when subprocess uses text=True.
+        def decoded(part: str | bytes | None) -> str:
+            return part.decode(errors="replace") if isinstance(part, bytes) else (part or "")
+        output = decoded(e.stdout) + decoded(e.stderr)
+        log_file.write_text(
+            command_header + f"Exit: TIMEOUT\nElapsed: {time.monotonic() - started:.3f}s\n"
+            + f"Wall timeout: {timeout}s\n\n{output}"
+        )
         print(f"  {red('TIME')} {bold(elf.name)}: timeout after {timeout}s")
+        print(f"         Log: {dim(str(log_file))}")
         return True
     except OSError as e:
+        log_file.write_text(command_header + f"Status: NPC launch failed\n{e}\n")
         print(f"  {red('FAIL')} {bold(elf.name)}: cannot run NPC: {e}")
         return True
     finally:
@@ -118,7 +143,8 @@ def run_one(
 
     # Write log
     log_file.write_text(
-        f"Command: {' '.join(cmd)}\nExit: {result.returncode}\n\n{output}"
+        command_header + f"Exit: {result.returncode}\n"
+        + f"Elapsed: {time.monotonic() - started:.3f}s\n\n{output}"
     )
 
     # Check results
@@ -157,7 +183,9 @@ def main() -> int:
     p.add_argument("--mrom-img", default="", help="MROM image path")
     p.add_argument("--nemu-so", default="", help="NEMU difftest SO (optional)")
     p.add_argument("--log-dir", type=Path, default=None, help="Log output directory")
-    p.add_argument("--timeout", type=int, default=60, help="Per-test timeout (seconds)")
+    p.add_argument("--timeout", type=int, default=60, help="Per-test wall-clock timeout (seconds)")
+    p.add_argument("--trap-on-ebreak", action="store_true",
+                   help="execute architectural breakpoint tests; requires finisher-based DUT halt macros")
     p.add_argument(
         "--jobs",
         type=int,
@@ -177,8 +205,17 @@ def main() -> int:
         help="reproducible randomized AXI timing seed",
     )
     args = p.parse_args()
+    args.npc_bin = str(Path(args.npc_bin).resolve())
+    if args.mrom_img:
+        args.mrom_img = str(Path(args.mrom_img).resolve())
+    if args.nemu_so:
+        args.nemu_so = str(Path(args.nemu_so).resolve())
     if args.jobs < 1:
         p.error("--jobs must be at least 1")
+    if args.timeout < 1:
+        p.error("--timeout must be at least 1")
+    if not Path(args.npc_bin).is_file() or not os.access(args.npc_bin, os.X_OK):
+        p.error(f"NPC binary is missing or not executable: {args.npc_bin}")
 
     elf_dir = args.elf_dir.resolve()
     log_dir = (args.log_dir or elf_dir.parent / "logs").resolve()
@@ -208,6 +245,7 @@ def main() -> int:
             timeout=args.timeout,
             mem_random_delay=args.mem_random_delay,
             mem_random_seed=args.mem_random_seed,
+            trap_on_ebreak=args.trap_on_ebreak,
         )
 
     if args.jobs == 1:

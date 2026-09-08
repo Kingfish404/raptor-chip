@@ -13,8 +13,9 @@
  *     csr_write_pmp() at CSR-write time.
  *
  * Check semantics (RISC-V Privileged spec 3.7):
- *   - Per-byte first-match priority encoding on both the first and last byte
- *     of the access (straddle support).
+ *   - Data operations select the lowest-numbered entry matching any byte;
+ *     that entry must cover the entire operation, including in M-mode.
+ *   - Instruction fetches are decomposed into halfword parcels by vaddr.c.
  *   - No matching entry with priv<M => access-fault; priv==M => allow.
  *   - Matching entry with L=0 and priv==M => allow (M-mode bypass unlocked).
  *   - Otherwise require that the requested permission bit is set in cfg.
@@ -117,7 +118,7 @@ int pmp_csr_write(uint16_t csr, word_t val)
   if (csr >= CSR_PMPCFG0 && csr <= CSR_PMPCFG3)
   {
 #ifdef CONFIG_RV64
-    /* RTL exposes odd RV64 pmpcfg CSRs as legal WARL-zero registers. */
+    /* Instruction legality is checked upstream; ignore reserved odd banks here. */
     if (csr & 1) return 1;
     /* Even pmpcfg holds 8 entries packed in 64 bits. */
     int base = ((csr - CSR_PMPCFG0) / 2) * 8;
@@ -131,6 +132,7 @@ int pmp_csr_write(uint16_t csr, word_t val)
       if (old & (1u << PMPCFG_L_BIT))
         continue;                                        /* locked */
       uint8_t nb = (uint8_t)((val >> (pi * 8)) & 0x9Fu); /* mask [6:5] WARL 0 */
+      if ((nb & 3u) == 2u) nb &= (uint8_t)~7u; /* reserved RW: clear RWX */
       pmp_cfg_set(base + pi, nb);
     }
     pmp_rebuild_active();
@@ -169,9 +171,9 @@ struct pmp_match
   uint8_t cfg;
 };
 
-static void pmp_byte_lookup(word_t addr_bytes, struct pmp_match *m)
+static void pmp_byte_lookup(paddr_t addr_bytes, struct pmp_match *m)
 {
-  word_t addr_w = addr_bytes >> 2;
+  paddr_t addr_w = addr_bytes >> 2;
   m->any_match = false;
   m->entry = -1;
   m->cfg = 0;
@@ -195,7 +197,7 @@ static void pmp_byte_lookup(word_t addr_bytes, struct pmp_match *m)
     else
     { /* NAPOT */
       /* Compute mask: trailing ones in pa define region size (in words). */
-      word_t mask = 1;
+      paddr_t mask = 1;
       for (int j = 1; j < (int)sizeof(word_t) * 8; j++)
       {
         if (pa & ((word_t)1 << (j - 1)))
@@ -203,7 +205,7 @@ static void pmp_byte_lookup(word_t addr_bytes, struct pmp_match *m)
         else
           break;
       }
-      word_t base = pa & ~mask;
+      paddr_t base = pa & ~mask;
       match = ((addr_w & ~mask) == base);
     }
     if (match)
@@ -216,11 +218,11 @@ static void pmp_byte_lookup(word_t addr_bytes, struct pmp_match *m)
   }
 }
 
-static bool pmp_entry_matches(int entry, word_t addr_bytes)
+static bool pmp_entry_matches(int entry, paddr_t addr_bytes)
 {
   uint8_t cfg = pmp_cfg(entry);
   int a = (cfg >> PMPCFG_A_LSB) & 0x3;
-  word_t addr_w = addr_bytes >> 2;
+  paddr_t addr_w = addr_bytes >> 2;
   word_t pa = pmp_addr(entry);
   if (a == PMP_A_TOR)
   {
@@ -231,7 +233,7 @@ static bool pmp_entry_matches(int entry, word_t addr_bytes)
     return addr_w == pa;
   if (a == PMP_A_NAPOT)
   {
-    word_t mask = 1;
+    paddr_t mask = 1;
     for (int j = 1; j < (int)sizeof(word_t) * 8; j++)
     {
       if (pa & ((word_t)1 << (j - 1)))
@@ -270,14 +272,27 @@ bool pmp_check(paddr_t addr, int size, uint32_t priv,
     size = 1;
   paddr_t addr_hi = addr + (paddr_t)(size - 1);
   struct pmp_match lo, hi;
-  pmp_byte_lookup((word_t)addr, &lo);
-  pmp_byte_lookup((word_t)addr_hi, &hi);
+  pmp_byte_lookup(addr, &lo);
+  pmp_byte_lookup(addr_hi, &hi);
   bool is_m = (priv == PRV_M);
 
-  /* Data accesses use first-byte priority and require that entry to cover
-   * the complete access. Instruction fetch retains endpoint permissions. */
+  /* Priority is over ANY byte, not just the first byte. A low-priority
+   * background region covering the first byte cannot hide an earlier NA4,
+   * TOR or NAPOT entry that intersects only the middle/end of this access.
+   * PMP boundaries are four-byte aligned, so inspect each touched grain. */
+  if (!op_x)
+  {
+    for (int offset = 4 - (int)(addr & 3); offset < size; offset += 4)
+    {
+      struct pmp_match part;
+      pmp_byte_lookup(addr + (paddr_t)offset, &part);
+      if (part.any_match && (!lo.any_match || part.entry < lo.entry))
+        lo = part;
+    }
+  }
   if (!op_x && lo.any_match &&
-      !pmp_entry_matches(lo.entry, (word_t)addr_hi))
+      (!pmp_entry_matches(lo.entry, addr) ||
+       !pmp_entry_matches(lo.entry, addr_hi)))
   {
     pmp_last_fault_addr = addr;
     return true;

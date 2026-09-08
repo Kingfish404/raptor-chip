@@ -19,7 +19,6 @@ export NSIM_HOME=$RAPTOR_HOME/sim
 
 export AM_HOME=$RAPTOR_HOME/abstract-machine
 export NAVY_HOME=$RAPTOR_HOME/abstract-machine/app/navy-apps
-export NVBOARD_HOME=$RAPTOR_HOME/third_party/NJU-ProjectN/nvboard
 
 export CROSS_COMPILE=riscv64-elf-
 

@@ -2,529 +2,281 @@
 `include "rapt_if.svh"
 `include "rapt_soc.svh"
 
-/* verilator lint_off UNUSEDPARAM */
+// The cache owns cross-word/page assembly of the first instruction. Its fixed
+// lookahead window is an input bandwidth limit, NOT a decode/rename slot count.
+// This stage walks complete 16/32-bit instructions and holds any unconsumed
+// suffix. A control instruction terminates the fetched prefix.
 module rapt_ifu #(
-    parameter bit [$clog2(`RAPT_PHT_SIZE):0] PHT_SIZE = `RAPT_PHT_SIZE,
-    parameter bit [$clog2(`RAPT_BTB_SIZE):0] BTB_SIZE = `RAPT_BTB_SIZE,
-    parameter bit [$clog2(`RAPT_RSB_SIZE):0] RSB_SIZE = `RAPT_RSB_SIZE,
-    parameter int XLEN = `RAPT_XLEN
+    parameter int XLEN  = `RAPT_XLEN,
+    parameter int Width = rapt_pkg::DecodeWidth
 ) (
-    input clock,
-
+    input logic clock,
     cmu_bcast_if.in cmu_bcast,
-
+    rapt_recovery_if.sink recovery,
     ifu_bpu_if.out ifu_bpu,
     ifu_l1i_if.master ifu_l1i,
     ifu_idu_if.master ifu_idu,
-
-    input reset
+    output logic ifu_hazard,
+    input logic reset
 );
-  /* verilator lint_on UNUSEDPARAM */
-  /* verilator lint_off UNUSEDSIGNAL */
-  typedef enum logic [1:0] {
-    IDLE  = 'b00,
-    VALID = 'b01,
-    STALL = 'b10
-  } state_ifu_t;
-
-  typedef enum logic [1:0] {
-    IDLE_ORIGIN_NONE     = 2'b00,
-    IDLE_ORIGIN_REDIRECT = 2'b01,
-    IDLE_ORIGIN_L1I_GAP  = 2'b10
-  } idle_origin_t;
-
-  state_ifu_t state_ifu;
-  idle_origin_t idle_origin;
-  logic [XLEN-1:0] pc_ifu;
-  logic [XLEN-1:0] seqpc;
-  logic [XLEN-1:0] nextpc;
-
-  // Sequential PC candidates derived combinationally from pc_ifu.
-  //
-  // Previously these were registered from (nextpc + N) to avoid a pc_ifu
-  // self-loop through the adder. But STA showed the BTB r_raddr fanout cone
-  // drives nextpc with a >10 ns delay, and the +4 adder sitting between
-  // nextpc and the seq4/D register turned the BTB path into the chip's
-  // global critical path terminating at ifu.seq4[28].
-  //
-  // Phase A': compute seq* combinationally from the registered pc_ifu. This
-  // moves the +2/+4/+6/+8 adders out of the BTB -> nextpc cone. The new
-  // pc_ifu self-loop (pc_ifu/Q -> +N -> seqpc mux -> nextpc mux -> pc_ifu/D)
-  // is short (~3 ns) because it no longer involves the BTB mux tree.
-  logic [XLEN-1:0] seq2;
-  logic [XLEN-1:0] seq4;
-`ifdef RAPT_DUAL_ISSUE
-  logic [XLEN-1:0] seq6;
-  logic [XLEN-1:0] seq8;
-`endif
-
-  logic ifu_hazard;
-  logic recv_ready;
-  logic redirect_event;
-  logic valid;
-
-  // --- Unified redirect arbiter (Phase 0) ---------------------------------
-  // Single prioritized frontend redirect channel. Priority (highest first):
-  //   1. commit flush  (cmu_bcast.flush_pipe -> cpc)   [pipeline squash]
-  //   2. sys resume    (cmu_bcast.sys_resume -> cpc)    [pipeline squash]
-  //   3. IDU resteer   (ifu_idu.resteer -> resteer_pc)  [decode redirect]
-  //   4. BPU taken     (ifu_bpu.taken -> npc)           [predicted steer]
-  // `redirect_squash` covers sources 1-3 (they squash in-flight uops). The BPU
-  // predicted-taken steer is a normal fetch redirection and is intentionally
-  // excluded from the squash/`redirect_event` set (matches legacy behavior).
-  logic            redirect_squash;
-  logic [XLEN-1:0] redirect_squash_pc;
-
-
-  // PMU: registered signals for accurate cycle-level sampling
-  /* verilator lint_off UNUSEDSIGNAL */
-  logic pmu_fetch_fire;
-  logic [1:0] pmu_fetch_slots;
-  logic pmu_ifu_stall;  // Total stall (deprecated; use decomposed below)
-  // A1: Decomposed IFU stall root causes (mutually exclusive).
-  // `flush_stall` is the one-cycle response staging bubble after an IFU
-  // invalid interval; branch-recovery duration is measured separately by
-  // the ROU-to-first-fetch PMU path.
-  logic pmu_ifu_icache_stall;  // No L1I/PTW response while not serializing
-  logic pmu_ifu_flush_stall;  // IDLE response staging (valid L1I response)
-  logic pmu_ifu_empty_stall;  // Serialization/trap hold (STALL state)
-  logic pmu_ifu_response_after_redirect;
-  logic pmu_ifu_response_after_l1i_gap;
-  logic pmu_ifu_response_bypass_candidate;
-  // Slot-B opportunity loss, sampled only when the IFU consumes an L1I
-  // response. The four causes are mutually exclusive and deliberately omit
-  // IDU backpressure, which is reported separately.
-  logic pmu_fetch_response_consume;
-  logic pmu_fetch_dual_fire;
-  logic pmu_fetch_bpu_taken;
-  logic pmu_fetch_slot_a_control;
-  logic pmu_fetch_slot_b_control;
-  logic pmu_fetch_slot_b_jal_pack;
-  logic pmu_fetch_slot_b_cond_pack;
-  logic pmu_fetch_n1_unavailable;
-  logic pmu_fetch_n1_unavailable_unaligned;
-  logic pmu_fetch_n1_unavailable_l1i;
-  logic pmu_fetch_downstream_blocked;
-  logic pmu_fetch_target_steer;
-  /* verilator lint_on UNUSEDSIGNAL */
-
-  logic [XLEN-1:0] pc_a;
-  logic [XLEN-1:0] inst_a;
-  logic pre_is_c_a;
-  logic is_c_a;
-  logic [6:0] opcode_a;
-  logic is_sys_a;
-  logic is_atomic_a;
-
-  // Zimop occupies encodings in the SYSTEM opcode space, but MOP.R.n and
-  // MOP.RR.n are ordinary, non-serializing instructions.  Treating every
-  // SYSTEM opcode as serializing leaves the IFU in STALL forever because a
-  // MOP correctly decodes with uop.system=0 and therefore never produces a
-  // system-resume redirect at retirement.
+  logic [XLEN-1:0] pc_ifu, nextpc, redirect_pc;
+  rapt_pkg::fetch_slot_t held[Width], fetched[Width];
+  logic [15:0] halfword[6];
+  logic half_valid[6];
+  int unsigned held_count, consumed, fetched_count;
+  logic redirect_event, recv_ready, stopped;
+  logic [31:0] raw[Width], expanded[Width];
+  logic [XLEN-1:0] candidate_pc[Width];
+  int offset[Width+1];
+  logic available[Width], is_control[Width], is_serial[Width], is_cond[Width];
+  logic [XLEN-1:0] sequential[Width];
+  logic [XLEN-1:0] cond_target[Width];
+  logic secondary_query;
+  int secondary_index;
+  logic blocked;
   function automatic logic is_zimop(input logic [31:0] inst);
-    return inst[6:0] == `RAPT_OP_SYSTEM
-        && inst[14:12] == 3'b100
-        && inst[31]
-        && inst[29:28] == 2'b00
-        && (inst[25] || inst[24:22] == 3'b111);
+    return inst[6:0] == `RAPT_OP_SYSTEM && inst[14:12] == 3'b100 && inst[31]
+        && inst[29:28] == 2'b00 && (inst[25] || inst[24:22] == 3'b111);
   endfunction
-
-  logic trap;
-  logic [XLEN-1:0] cause;
-  logic [XLEN-1:0] tval;
-
-  assign ifu_hazard = state_ifu == STALL;
-  assign pre_is_c_a = !(ifu_l1i.inst_n0[1:0] == 2'b11);
-  assign is_c_a = !(inst_a[1:0] == 2'b11);
-  assign opcode_a = is_c_a ? {2'b0, {inst_a[15:13]}, {inst_a[1:0]}} : inst_a[6:0];
-  assign is_sys_a = ((opcode_a == `RAPT_OP_SYSTEM) && !is_zimop(inst_a))
-                  || (opcode_a == `RAPT_OP_FENCE_);
-  assign is_atomic_a = (opcode_a == `RAPT_OP_AMO___);
-
-  assign valid = state_ifu == VALID;
-
-`ifdef RAPT_DUAL_ISSUE
-  // --- Generalized dual-fetch ---
-  // Supports C+C, C+R32, R32+C, and R32+R32 at either halfword alignment.
-  //
-  // Data sources:
-  //   ifu_l1i.inst[31:0]    : 32 bits assembled starting from PC
-  //   ifu_l1i.inst_n1[31:0] : next 4-byte-aligned word from L1I
-  //     pc[1]=0: {hw@pc+6, hw@pc+4}   pc[1]=1: {hw@pc+4, hw@pc+2}
-  logic [15:0] hw_pc4;
-  logic [15:0] inst_b_lo_pre;
-  logic pre_is_c_b;
-  logic pre_is_branch_a;
-  logic pre_is_branch_b;
-  logic pre_is_direct_jal_b;
-  logic slot_b_r32_r32_unaligned;
-  logic pre_is_cond_branch_b;
-  logic inst_b_needs_n1;
-  logic inst_b_data_avail;
-  logic dual_fetch;
-  logic slot_b_direct_jal;
-  logic slot_b_cond_branch;
-  logic [XLEN-1:0] pc_b_pre;
-  logic [15:0] inst_b_hi_pre;
-  logic [31:0] inst_b_pre;
-  logic [20:0] jal_imm21_b;
-  logic [11:0] cjal_imm12_b;
-  logic [XLEN-1:0] direct_jal_target_b;
-  logic [12:0] branch_imm13_b;
-  logic [8:0] cbranch_imm9_b;
-  logic [XLEN-1:0] cond_branch_target_b;
-
-  // Halfword at pc+4 extracted from inst_n1 based on alignment
-  assign hw_pc4 = pc_ifu[1] ? ifu_l1i.inst_n1[31:16] : ifu_l1i.inst_n1[15:0];
-
-  // inst_b lower halfword: at pc+2 (C inst_a) or pc+4 (R32 inst_a)
-  assign inst_b_lo_pre = pre_is_c_a ? ifu_l1i.inst_n0[31:16] : hw_pc4;
-  assign pre_is_c_b = !(inst_b_lo_pre[1:0] == 2'b11);
-  assign pc_b_pre = pc_ifu + (pre_is_c_a ? XLEN'('d2) : XLEN'('d4));
-
-  // Assemble inst_b before classifying a direct jump so the 32-bit immediate
-  // and compressed C.J/C.JAL immediate both use the complete instruction.
-  // An unaligned R32 slot A leaves slot B's upper halfword in L1I's third
-  // lookahead word; all other forms are fully covered by inst_n1.
-  assign inst_b_hi_pre = pre_is_c_a ? hw_pc4
-                     : slot_b_r32_r32_unaligned ? ifu_l1i.inst_n2[15:0]
-                     : ifu_l1i.inst_n1[31:16];
-  assign inst_b_pre = pre_is_c_b ? {16'b0, inst_b_lo_pre} : {inst_b_hi_pre, inst_b_lo_pre};
-
-  // Slot A pre-decode: suppress dual-fetch for branches/jumps/serialization.
-  // C-type: C.BEQZ, C.BNEZ, C.J, C.JAL (C1), C.JR, C.JALR/C.EBREAK (C2)
-  // R32: BRANCH, JAL, JALR, SYSTEM, FENCE, AMO
-  assign pre_is_branch_a = pre_is_c_a
-    ? (((ifu_l1i.inst_n0[1:0] == 2'b01)
-          && ((ifu_l1i.inst_n0[15] && ifu_l1i.inst_n0[14])
-           || (ifu_l1i.inst_n0[13] && !ifu_l1i.inst_n0[14])))
-      || ((ifu_l1i.inst_n0[1:0] == 2'b10)
-          && ifu_l1i.inst_n0[15] && (ifu_l1i.inst_n0[6:2] == 5'b0)))
-      : ((ifu_l1i.inst_n0[6:0] == `RAPT_OP_B_TYPE_)
-      || (ifu_l1i.inst_n0[6:0] == `RAPT_OP_JAL___)
-      || (ifu_l1i.inst_n0[6:0] == `RAPT_OP_JALR__)
-      || ((ifu_l1i.inst_n0[6:0] == `RAPT_OP_SYSTEM)
-          && !is_zimop(ifu_l1i.inst_n0))
-      || (ifu_l1i.inst_n0[6:0] == `RAPT_OP_FENCE_)
-      || (ifu_l1i.inst_n0[6:0] == `RAPT_OP_AMO___));
-
-  // Slot B pre-decode: suppress dual-fetch for branches/jumps/serialization.
-  // Slot B has no BPU prediction: branches would always be mispredicted.
-  assign pre_is_branch_b = pre_is_c_b
-    ? (((inst_b_lo_pre[1:0] == 2'b01)
-          && ((inst_b_lo_pre[15] && inst_b_lo_pre[14])
-           || (inst_b_lo_pre[13] && !inst_b_lo_pre[14])))
-      || ((inst_b_lo_pre[1:0] == 2'b10)
-          && inst_b_lo_pre[15] && (inst_b_lo_pre[6:2] == 5'b0)))
-      : ((inst_b_lo_pre[6:0] == `RAPT_OP_B_TYPE_)
-      || (inst_b_lo_pre[6:0] == `RAPT_OP_JAL___)
-      || (inst_b_lo_pre[6:0] == `RAPT_OP_JALR__)
-      || ((inst_b_lo_pre[6:0] == `RAPT_OP_SYSTEM)
-          && !is_zimop(inst_b_pre))
-      || (inst_b_lo_pre[6:0] == `RAPT_OP_FENCE_)
-      || (inst_b_lo_pre[6:0] == `RAPT_OP_AMO___));
-
-  // The first B-CFI pack form is statically resolvable: R32 JAL, C.J, and
-  // RV32 C.JAL. Conditional branches and JALR still require a second BPU
-  // lookup and remain packet terminators.
-  assign pre_is_direct_jal_b = pre_is_c_b
-    ? ((inst_b_lo_pre[1:0] == 2'b01)
-      && ((inst_b_lo_pre[15:13] == 3'b101)
-       || ((XLEN == 32) && (inst_b_lo_pre[15:13] == 3'b001))))
-    : (inst_b_lo_pre[6:0] == `RAPT_OP_JAL___);
-  assign pre_is_cond_branch_b = pre_is_c_b
-    ? ((inst_b_lo_pre[1:0] == 2'b01)
-      && ((inst_b_lo_pre[15:13] == 3'b110) || (inst_b_lo_pre[15:13] == 3'b111)))
-    : (inst_b_lo_pre[6:0] == `RAPT_OP_B_TYPE_);
-  assign jal_imm21_b = {inst_b_pre[31], inst_b_pre[19:12], inst_b_pre[20], inst_b_pre[30:21], 1'b0};
-  assign cjal_imm12_b = {inst_b_lo_pre[12], inst_b_lo_pre[8], inst_b_lo_pre[10:9],
-                         inst_b_lo_pre[6], inst_b_lo_pre[7], inst_b_lo_pre[2],
-                         inst_b_lo_pre[11], inst_b_lo_pre[5:3], 1'b0};
-  assign direct_jal_target_b = pc_b_pre + (pre_is_c_b
-    ? {{(XLEN - 12) {cjal_imm12_b[11]}}, cjal_imm12_b}
-    : {{(XLEN - 21) {jal_imm21_b[20]}}, jal_imm21_b});
-  assign branch_imm13_b = {inst_b_pre[31], inst_b_pre[7], inst_b_pre[30:25],
-                           inst_b_pre[11:8], 1'b0};
-  assign cbranch_imm9_b = {inst_b_lo_pre[12], inst_b_lo_pre[6:5], inst_b_lo_pre[2],
-                            inst_b_lo_pre[11:10], inst_b_lo_pre[4:3], 1'b0};
-  assign cond_branch_target_b = pc_b_pre + (pre_is_c_b
-    ? {{(XLEN - 9) {cbranch_imm9_b[8]}}, cbranch_imm9_b}
-    : {{(XLEN - 13) {branch_imm13_b[12]}}, branch_imm13_b});
-
-  // inst_b needs inst_n1 data unless both are C at word-aligned PC
-  assign inst_b_needs_n1 = !pre_is_c_a || !pre_is_c_b || pc_ifu[1];
-
-  // Data availability: an unaligned R32+R32 pair additionally needs inst_n2.
-  assign slot_b_r32_r32_unaligned = !pre_is_c_a && !pre_is_c_b && pc_ifu[1];
-  assign inst_b_data_avail = (!inst_b_needs_n1 || ifu_l1i.inst_n1_valid)
-                           && (!slot_b_r32_r32_unaligned || ifu_l1i.inst_n2_valid);
-
-  assign dual_fetch = ifu_l1i.valid && !ifu_bpu.taken && !ifu_l1i.trap
-                    && !pre_is_branch_a
-                    && (!pre_is_branch_b || pre_is_direct_jal_b || pre_is_cond_branch_b)
-                    && inst_b_data_avail;
-  assign slot_b_direct_jal = dual_fetch && pre_is_direct_jal_b;
-  assign slot_b_cond_branch = dual_fetch && pre_is_cond_branch_b;
-
-  logic [31:0] inst_b_raw;
-  logic [XLEN-1:0] pc_b;
-  logic inst_b_valid;
-
-  assign ifu_idu.inst_b  = inst_b_raw;
-  assign ifu_idu.pc_b    = pc_b;
-  assign ifu_idu.valid_b = inst_b_valid && valid && !redirect_event;
-`endif
-
-  assign ifu_bpu.pc = pc_ifu;
-  assign ifu_bpu.nextpc = nextpc;
-`ifdef RAPT_DUAL_ISSUE
-  assign ifu_bpu.slot_b_query = ifu_l1i.valid && !ifu_bpu.taken && !ifu_l1i.trap
-                              && !pre_is_branch_a && pre_is_cond_branch_b
-                              && inst_b_data_avail;
-  assign ifu_bpu.slot_b_pc = pc_b_pre;
-  assign ifu_bpu.slot_b_pred_valid = recv_ready && slot_b_cond_branch;
-`endif
-
-  // Phase 1: two-level redirect.
-  //   redirect_squash (state invalidation): fires immediately when flush_pipe=1
-  //     (cycle N), killing the wrong-path instruction before it enters the IDU.
-  //   redirect_pc_update (PC update): fires one cycle later (N+1) via the
-  //     registered flush_redirect+redirect_pc pair, breaking the long
-  //     ROB->...->pc_ifu->L1I combinational path.
-  logic redirect_pc_update;
-  assign redirect_pc_update = cmu_bcast.flush_redirect || cmu_bcast.sys_resume || ifu_idu.resteer;
-  assign redirect_squash = cmu_bcast.flush_pipe || redirect_pc_update;
-  assign redirect_squash_pc = cmu_bcast.flush_redirect ? cmu_bcast.redirect_pc
-                            : cmu_bcast.flush_pipe     ? cmu_bcast.cpc
-                            : cmu_bcast.sys_resume      ? cmu_bcast.cpc
-                            :                             ifu_idu.resteer_pc;
-  assign redirect_event = redirect_squash;
-  assign ifu_bpu.pc_update = recv_ready || redirect_event;
-
-  assign ifu_l1i.pc = pc_ifu;
-  assign ifu_l1i.invalid = cmu_bcast.fence_i;
-  // The current packet is already backed by the previous SRAM read. Dedicate
-  // the next data-SRAM read to the exact next PC of every accepted packet;
-  // this covers sequential +2/+4/+6/+8 strides as well as predicted targets.
-  // Redirect targets use the same side-effect-free hint path.
-  assign ifu_l1i.prefetch_valid = redirect_event || recv_ready;
-  assign ifu_l1i.prefetch_pc = redirect_event ? redirect_squash_pc : nextpc;
-
-  assign ifu_idu.inst_a = inst_a;
-  assign ifu_idu.pc_a = pc_a;
-  assign ifu_idu.valid_a = valid && !redirect_event;
-  assign ifu_idu.pnpc = pc_ifu;
-  assign ifu_idu.trap = trap;
-  assign ifu_idu.cause = cause;
-  assign ifu_idu.tval = tval;
-
-
-`ifdef RAPT_DUAL_ISSUE
-  // Stride: +2 (single C), +4 (single R32 or C+C), +6 (C+R32 or R32+C), +8 (R32+R32)
-  assign seqpc = !dual_fetch ? (pre_is_c_a ? seq2 : seq4)
-               : (pre_is_c_a ? (pre_is_c_b ? seq4 : seq6)
-                              : (pre_is_c_b ? seq6 : seq8));
+  function automatic logic is_inval_order(input logic [31:0] inst);
+    // SINVAL.VMA performs a complete translation fence. Its two ordering
+    // companions retire as ordinary no-ops and produce no system resume.
+    return inst == 32'h18000073 || inst == 32'h18100073;
+  endfunction
+  assign halfword[0]   = ifu_l1i.inst_n0[15:0];
+  assign halfword[1]   = ifu_l1i.inst_n0[31:16];
+  assign half_valid[0] = ifu_l1i.valid;
+`ifdef RAPT_FETCH_LOOKAHEAD
+  assign halfword[2]   = pc_ifu[1] ? ifu_l1i.inst_n1[31:16] : ifu_l1i.inst_n1[15:0];
+  assign halfword[3]   = pc_ifu[1] ? ifu_l1i.inst_n2[15:0] : ifu_l1i.inst_n1[31:16];
+  assign halfword[4]   = pc_ifu[1] ? ifu_l1i.inst_n2[31:16] : ifu_l1i.inst_n2[15:0];
+  assign halfword[5]   = ifu_l1i.inst_n2[31:16];
+  assign half_valid[1] = ifu_l1i.valid && (!pc_ifu[1] || ifu_l1i.inst_n1_valid);
+  assign half_valid[2] = ifu_l1i.inst_n1_valid;
+  assign half_valid[3] = pc_ifu[1] ? ifu_l1i.inst_n2_valid : ifu_l1i.inst_n1_valid;
+  assign half_valid[4] = ifu_l1i.inst_n2_valid;
+  assign half_valid[5] = !pc_ifu[1] && ifu_l1i.inst_n2_valid;
 `else
-  assign seqpc = pre_is_c_a ? seq2 : seq4;
+  assign half_valid[1] = ifu_l1i.valid;
+  for (genvar h = 2; h < 6; h++) begin
+    assign halfword[h]   = '0;
+    assign half_valid[h] = 1'b0;
+  end
 `endif
-  logic [XLEN-1:0] nextpc_fallback;
-`ifdef RAPT_DUAL_ISSUE
-  assign nextpc_fallback = slot_b_direct_jal ? direct_jal_target_b
-                         : slot_b_cond_branch && ifu_bpu.slot_b_taken ? cond_branch_target_b
-                         : seqpc;
-`else
-  assign nextpc_fallback = seqpc;
-`endif
-  assign nextpc = redirect_squash ? redirect_squash_pc
-                : ifu_bpu.taken   ? ifu_bpu.npc
-                :                   nextpc_fallback;
-  assign recv_ready = ifu_l1i.valid && (ifu_idu.ready || (state_ifu == IDLE)) && !ifu_hazard
-                    && !redirect_event;
-
-  logic [1:0] pmu_fetch_slots_next;
-`ifdef RAPT_DUAL_ISSUE
-  assign pmu_fetch_slots_next = ifu_idu.valid_b ? 2'd2 : 2'd1;
-`else
-  assign pmu_fetch_slots_next = 2'd1;
-`endif
-
-  // Combinational sequential-PC candidates (see declaration for rationale).
-  assign seq2 = pc_ifu + 'h2;
-  assign seq4 = pc_ifu + 'h4;
-`ifdef RAPT_DUAL_ISSUE
-  assign seq6 = pc_ifu + 'h6;
-  assign seq8 = pc_ifu + 'h8;
-`endif
-
-  always_ff @(posedge clock) begin
-    if (reset) begin
-      state_ifu <= IDLE;
-      idle_origin <= IDLE_ORIGIN_NONE;
-      pc_ifu <= `RAPT_PC_INIT;
-      trap <= 0;
-      tval <= 0;
-      pmu_fetch_fire <= 0;
-      pmu_fetch_slots <= '0;
-      pmu_ifu_stall <= 0;
-      pmu_ifu_icache_stall <= 0;
-      pmu_ifu_flush_stall <= 0;
-      pmu_ifu_empty_stall <= 0;
-      pmu_ifu_response_after_redirect <= 0;
-      pmu_ifu_response_after_l1i_gap <= 0;
-      pmu_ifu_response_bypass_candidate <= 0;
-      pmu_fetch_response_consume <= 0;
-      pmu_fetch_dual_fire <= 0;
-      pmu_fetch_bpu_taken <= 0;
-      pmu_fetch_slot_a_control <= 0;
-      pmu_fetch_slot_b_control <= 0;
-      pmu_fetch_slot_b_jal_pack <= 0;
-      pmu_fetch_slot_b_cond_pack <= 0;
-      pmu_fetch_n1_unavailable <= 0;
-      pmu_fetch_n1_unavailable_unaligned <= 0;
-      pmu_fetch_n1_unavailable_l1i <= 0;
-      pmu_fetch_downstream_blocked <= 0;
-      pmu_fetch_target_steer <= 0;
-`ifdef RAPT_DUAL_ISSUE
-      inst_b_valid <= 0;
-`endif
-    end else begin
-      pmu_fetch_fire <= valid && ifu_idu.ready;
-      pmu_fetch_slots <= !(valid && ifu_idu.ready) ? 2'd0 : pmu_fetch_slots_next;
-      pmu_ifu_stall <= !valid && ifu_idu.ready;  // Total (sum of below)
-      // A1: Decomposed stall causes. Give serializing STALL priority, then
-      // split IDLE by whether L1I has supplied the next response. The three
-      // probes exactly partition `pmu_ifu_stall`.
-      pmu_ifu_empty_stall <= !valid && ifu_idu.ready && (state_ifu == STALL);
-      pmu_ifu_icache_stall <= !valid && ifu_idu.ready && (state_ifu != STALL)
-                && !ifu_l1i.valid;
-      pmu_ifu_flush_stall <= !valid && ifu_idu.ready && (state_ifu == IDLE)
-               && ifu_l1i.valid;
-      pmu_ifu_response_after_redirect <= !valid && ifu_idu.ready && (state_ifu == IDLE)
-                   && ifu_l1i.valid && (idle_origin == IDLE_ORIGIN_REDIRECT);
-      pmu_ifu_response_after_l1i_gap <= !valid && ifu_idu.ready && (state_ifu == IDLE)
-                  && ifu_l1i.valid && (idle_origin == IDLE_ORIGIN_L1I_GAP);
-      // A non-control packet can bypass the IDLE->VALID register if the
-      // downstream fetch-bundle queue is ready. Control and trap packets keep
-      // the registered path until their redirect/serialization contract is
-      // explicitly handled by a later change.
-`ifdef RAPT_DUAL_ISSUE
-      pmu_ifu_response_bypass_candidate <= !valid && ifu_idu.ready && (state_ifu == IDLE)
-                    && ifu_l1i.valid && !redirect_event
-                    && !pre_is_branch_a && !ifu_l1i.trap;
-`else
-      pmu_ifu_response_bypass_candidate <= 1'b0;
-`endif
-      // These packet-level probes are meaningful in both single- and
-      // dual-issue configurations.
-      pmu_fetch_response_consume <= recv_ready;
-      pmu_fetch_bpu_taken <= recv_ready && ifu_bpu.taken;
-      pmu_fetch_target_steer <= recv_ready && !redirect_event && (nextpc != seqpc);
-`ifdef RAPT_DUAL_ISSUE
-      pmu_fetch_dual_fire <= valid && ifu_idu.ready && ifu_idu.valid_b;
-      pmu_fetch_slot_a_control <= recv_ready && !ifu_bpu.taken && !ifu_l1i.trap
-          && pre_is_branch_a;
-      pmu_fetch_slot_b_control <= recv_ready && !ifu_bpu.taken && !ifu_l1i.trap
-          && !pre_is_branch_a && inst_b_data_avail && pre_is_branch_b
-          && !pre_is_direct_jal_b && !pre_is_cond_branch_b;
-      pmu_fetch_slot_b_jal_pack <= recv_ready && slot_b_direct_jal;
-      pmu_fetch_slot_b_cond_pack <= recv_ready && slot_b_cond_branch;
-      pmu_fetch_n1_unavailable <= recv_ready && !ifu_bpu.taken && !ifu_l1i.trap
-          && !pre_is_branch_a && !inst_b_data_avail;
-      pmu_fetch_n1_unavailable_unaligned <= recv_ready && !ifu_bpu.taken && !ifu_l1i.trap
-          && !pre_is_branch_a && slot_b_r32_r32_unaligned
-          && !inst_b_data_avail;
-      pmu_fetch_n1_unavailable_l1i <= recv_ready && !ifu_bpu.taken && !ifu_l1i.trap
-          && !pre_is_branch_a && !slot_b_r32_r32_unaligned
-          && !inst_b_data_avail;
-`else
-      pmu_fetch_dual_fire <= 1'b0;
-      pmu_fetch_slot_a_control <= 1'b0;
-      pmu_fetch_slot_b_control <= 1'b0;
-      pmu_fetch_slot_b_jal_pack <= 1'b0;
-      pmu_fetch_slot_b_cond_pack <= 1'b0;
-      pmu_fetch_n1_unavailable <= 1'b0;
-      pmu_fetch_n1_unavailable_unaligned <= 1'b0;
-      pmu_fetch_n1_unavailable_l1i <= 1'b0;
-`endif
-      // Backpressure exists in both single- and dual-issue configurations.
-      pmu_fetch_downstream_blocked <= valid && !ifu_idu.ready;
-      unique case (state_ifu)
-        IDLE: begin
-          if (redirect_event) begin
-            state_ifu <= IDLE;
-          end else if (ifu_l1i.valid) begin
-            state_ifu <= VALID;
-          end
-        end
-        VALID: begin
-          if (redirect_event) begin
-            state_ifu <= IDLE;
-          end else if (ifu_idu.ready) begin
-            if (is_sys_a || is_atomic_a || trap) begin
-              state_ifu <= STALL;
-            end else
-            if (ifu_l1i.valid) begin
-            end else begin
-              state_ifu <= IDLE;
-            end
-          end
-        end
-        STALL: begin
-          if (redirect_event) begin
-            state_ifu <= IDLE;
-            trap <= 0;
-          end
-        end
-        default: begin
-          state_ifu <= IDLE;
-        end
-      endcase
-      if (recv_ready || redirect_pc_update) begin
-        pc_ifu <= nextpc;
-      end
-      if (redirect_event) begin
-        idle_origin <= IDLE_ORIGIN_REDIRECT;
-      end else if ((state_ifu == VALID) && ifu_idu.ready && !ifu_l1i.valid) begin
-        idle_origin <= IDLE_ORIGIN_L1I_GAP;
-      end else if ((state_ifu == IDLE) && ifu_l1i.valid) begin
-        idle_origin <= IDLE_ORIGIN_NONE;
-      end
-      if (recv_ready) begin
-        pc_a   <= pc_ifu;
-        inst_a <= ifu_l1i.inst_n0;
-        trap   <= ifu_l1i.trap;
-        cause  <= ifu_l1i.cause;
-        tval   <= ifu_l1i.tval;
-`ifdef RAPT_DUAL_ISSUE
-        pc_b         <= pc_b_pre;
-        inst_b_raw   <= inst_b_pre;
-        inst_b_valid <= dual_fetch;
-`endif
+  assign offset[0] = 0;
+  for (genvar s = 0; s < Width; s++) begin : g_boundary
+    logic compressed;
+    assign compressed = offset[s] < 6 && halfword[offset[s]][1:0] != 2'b11;
+    assign offset[s+1] = offset[s] + (compressed ? 1 : 2);
+    assign raw[s] = offset[s] >= 6 ? '0 : compressed ? {16'b0,halfword[offset[s]]}
+        : offset[s]+1 < 6 ? {halfword[offset[s]+1],halfword[offset[s]]} : '0;
+    logic [31:0] decompressed;
+    rapt_idu_decoder_c decompressor (
+        .io_cinst(raw[s][15:0]),
+        .io_is_rv64(XLEN == 64),
+        .io_inst(decompressed)
+    );
+    assign expanded[s] = compressed ? decompressed : raw[s];
+    // L1I.valid guarantees a complete first instruction even on a straddle;
+    // later lookahead instructions require every contributing word's validity.
+    assign available[s] = s == 0 ? ifu_l1i.valid
+        : offset[s+1] <= 6 && half_valid[offset[s]]
+          && (compressed || half_valid[offset[s]+1]);
+    assign candidate_pc[s] = pc_ifu + XLEN'(2 * offset[s]);
+    assign sequential[s] = pc_ifu + XLEN'(2 * offset[s+1]);
+    assign is_cond[s] = expanded[s][6:0] == `RAPT_OP_B_TYPE_;
+    assign is_control[s] = is_cond[s] || expanded[s][6:0] ==
+        `RAPT_OP_JAL___
+        || expanded[s][6:0] == `RAPT_OP_JALR__;
+    assign is_serial[s] = (expanded[s][6:0] == `RAPT_OP_SYSTEM && !is_zimop(
+        expanded[s]
+    ) && !is_inval_order(expanded[s]))
+        || expanded[s][6:0] == `RAPT_OP_FENCE_ || expanded[s][6:0] == `RAPT_OP_AMO___;
+    wire [12:0] branch_imm = {
+      expanded[s][31], expanded[s][7], expanded[s][30:25], expanded[s][11:8], 1'b0
+    };
+    assign cond_target[s] = candidate_pc[s] + {{(XLEN - 13) {branch_imm[12]}}, branch_imm};
+  end
+  // Existing predictor provides a primary query and one auxiliary conditional
+  // query. It is sufficient because the fetched group ends at its first CFU.
+  always_comb begin
+    secondary_query = 1'b0;
+    secondary_index = 0;
+    for (int s = 1; s < Width; s++) begin
+      automatic logic before_control;
+      before_control = available[s] && !ifu_bpu.taken && !ifu_l1i.trap;
+      for (int older = 0; older < s; older++)
+      before_control &= available[older] && !is_control[older] && !is_serial[older];
+      if (before_control && is_cond[s]) begin
+        secondary_query = 1'b1;
+        secondary_index = s;
       end
     end
   end
-  /* verilator lint_on UNUSEDPARAM */
-  /* verilator lint_on UNUSEDSIGNAL */
-
-  // ==========================================================================
-  //  Assertions (enable with +define+RAPT_ASSERT_EN)
-  // ==========================================================================
-
-  // HANDSHAKE: no L1I response may be consumed in the same cycle as a redirect.
-  // Redirect priority is pc-only; accepting instruction data here can create
-  // ghost frontend uops from the pre-redirect path.
-  `RAPT_SVA_IMPLY(clock, reset, IFU_REDIRECT_NOT_RECV_READY, redirect_event, !recv_ready)
-
-`ifdef RAPT_DUAL_ISSUE
-  `RAPT_SVA_IMPLY(clock, reset, IFU_SLOT_B_IMPLIES_SLOT_A, ifu_idu.valid_b, ifu_idu.valid_a)
-  `RAPT_SVA_IMPLY(clock, reset, IFU_SLOT_B_DIRECT_JAL_STEERS, recv_ready && slot_b_direct_jal,
-                  nextpc == direct_jal_target_b)
-  `RAPT_SVA_IMPLY(clock, reset, IFU_SLOT_B_COND_STEERS,
-                  recv_ready && slot_b_cond_branch && ifu_bpu.slot_b_taken,
-                  nextpc == cond_branch_target_b)
+`ifdef RAPT_FETCH_LOOKAHEAD
+  assign ifu_bpu.aux_query = secondary_query;
+  assign ifu_bpu.aux_pc = candidate_pc[secondary_index];
 `endif
+  always_comb begin
+    stopped = 1'b0;
+    fetched_count = 0;
+    nextpc = pc_ifu;
+    for (int s = 0; s < Width; s++) begin
+      fetched[s] = '0;
+      fetched[s].inst = raw[s];
+      fetched[s].pc = candidate_pc[s];
+      fetched[s].pnpc = sequential[s];
+      fetched[s].predicted_taken = is_cond[s] && s == 0 && ifu_bpu.taken;
+      if (s == 0 && ifu_bpu.taken) fetched[s].pnpc = ifu_bpu.npc;
+`ifdef RAPT_FETCH_LOOKAHEAD
+      if (s != 0 && is_cond[s] && ifu_bpu.aux_taken) fetched[s].pnpc = cond_target[s];
+      if (s != 0 && is_cond[s]) fetched[s].predicted_taken = ifu_bpu.aux_taken;
+`endif
+      if (s != 0 && expanded[s][6:0] == `RAPT_OP_JAL___) begin
+        automatic logic [20:0] immediate;
+        immediate = {
+          expanded[s][31], expanded[s][19:12], expanded[s][20], expanded[s][30:21], 1'b0
+        };
+        fetched[s].pnpc = candidate_pc[s] + {{(XLEN - 21) {immediate[20]}}, immediate};
+      end
+      fetched[s].trap  = s == 0 && ifu_l1i.trap;
+      fetched[s].tval  = ifu_l1i.tval;
+      fetched[s].cause = ifu_l1i.cause;
+      if (!stopped && available[s]) begin
+        fetched_count++;
+        nextpc = fetched[s].pnpc;
+      end
+      stopped |= !available[s] || is_control[s] || is_serial[s]
+          || (s == 0 && (ifu_bpu.taken || ifu_l1i.trap));
+    end
+  end
+  assign redirect_event = cmu_bcast.flush_pipe || cmu_bcast.flush_redirect
+      || cmu_bcast.sys_resume || recovery.redirect_valid || ifu_idu.resteer;
+  assign redirect_pc = cmu_bcast.flush_redirect ? cmu_bcast.redirect_pc
+      : (cmu_bcast.flush_pipe || cmu_bcast.sys_resume) ? cmu_bcast.cpc
+      : recovery.redirect_valid ? recovery.target : ifu_idu.resteer_pc;
+  always_comb begin
+    consumed = 0;
+    for (int s = 0; s < Width; s++) begin
+      ifu_idu.slot[s]  = held[s];
+      ifu_idu.valid[s] = s < held_count && !redirect_event && !reset;
+      if (s == consumed && ifu_idu.valid[s] && ifu_idu.ready[s]) consumed++;
+    end
+  end
+  // The completion-time redirect is allowed to launch a read-ahead, but the
+  // returned line must not repopulate fetch state until precise backend
+  // cleanup releases the recovery fence.  This also prevents speculative
+  // history updates from the recovery target while retirement is pending.
+  assign recv_ready = held_count == consumed && !blocked && !redirect_event
+      && !recovery.pending && !reset && ifu_l1i.valid;
+  always_comb begin
+    ifu_bpu.history_valid = 0;
+    ifu_bpu.history_taken = 0;
+    ifu_bpu.history_pc_bit = 0;
+    for (int s = 0; s < Width; s++)
+    if (recv_ready && s < fetched_count && is_cond[s] && !fetched[s].trap
+        && !(expanded[s][14:12] inside {3'b010, 3'b011})) begin
+      ifu_bpu.history_valid = 1;
+      ifu_bpu.history_taken = fetched[s].predicted_taken;
+      ifu_bpu.history_pc_bit = fetched[s].pc[1];
+    end
+  end
+  assign ifu_hazard = blocked;
+  assign ifu_bpu.pc = pc_ifu;
+  assign ifu_bpu.nextpc = redirect_event ? redirect_pc : nextpc;
+  assign ifu_bpu.pc_update = recv_ready || redirect_event;
+  assign ifu_l1i.consumed = recv_ready;
+  assign ifu_l1i.cancel = redirect_event || recovery.pending;
+  assign ifu_l1i.pc = pc_ifu;
+  assign ifu_l1i.invalid = cmu_bcast.fence_i;
+  // Ordinary reads use pc_ifu's registered address. L1I already reads the
+  // current and following words in parallel; feeding the just-decoded nextpc
+  // back to its SRAM ports adds a cache-data -> decode -> address path.
+  // Keep immediate read-ahead for recovery/redirect targets.
+  assign ifu_l1i.prefetch_valid = redirect_event;
+  assign ifu_l1i.prefetch_pc = redirect_pc;
+  logic pmu_fetch_fire, pmu_ifu_stall, pmu_ifu_icache_stall, pmu_ifu_empty_stall;
+  logic pmu_fetch_response_consume, pmu_fetch_bpu_taken, pmu_fetch_target_steer;
+  logic [31:0] pmu_fetch_slots;
+  // Compatibility projections for the existing PMU report schema. They are
+  // observations of the stream, never functional slot-control signals. All
+  // probes sample the same pre-edge state; the simulator reads after the edge.
+  logic pmu_fetch_multi_fire, pmu_fetch_first_control, pmu_fetch_aux_conditional;
+  logic pmu_fetch_nonfirst_jal_pack, pmu_fetch_nonfirst_cond_pack;
+  logic pmu_fetch_n1_unavailable, pmu_fetch_n1_unavailable_unaligned, pmu_fetch_n1_unavailable_l1i;
+  logic pmu_fetch_downstream_blocked, pmu_ifu_flush_stall;
+  logic
+      pmu_ifu_response_after_redirect,
+      pmu_ifu_response_after_l1i_gap,
+      pmu_ifu_response_bypass_candidate;
+  always_ff @(posedge clock) begin
+    if (reset) begin
+      pc_ifu <= XLEN'(`RAPT_PC_INIT);
+      held_count <= 0;
+      blocked <= 1'b0;
+      pmu_fetch_fire <= 1'b0;
+      pmu_fetch_slots <= 0;
+      pmu_ifu_stall <= 0;
+      pmu_ifu_icache_stall <= 0;
+      pmu_ifu_empty_stall <= 0;
+      pmu_fetch_response_consume <= 0;
+      pmu_fetch_bpu_taken <= 0;
+      pmu_fetch_target_steer <= 0;
+      pmu_fetch_multi_fire <= '0;
+      pmu_fetch_first_control <= '0;
+      pmu_fetch_aux_conditional <= '0;
+      pmu_fetch_nonfirst_jal_pack <= '0;
+      pmu_fetch_nonfirst_cond_pack <= '0;
+      pmu_fetch_n1_unavailable <= '0;
+      pmu_fetch_n1_unavailable_unaligned <= '0;
+      pmu_fetch_n1_unavailable_l1i <= '0;
+      pmu_fetch_downstream_blocked <= '0;
+      pmu_ifu_flush_stall <= '0;
+      pmu_ifu_response_after_redirect <= '0;
+      pmu_ifu_response_after_l1i_gap <= '0;
+      pmu_ifu_response_bypass_candidate <= '0;
 
-  `RAPT_COVER(clock, reset, IFU_RESTEER_EVENT, ifu_idu.resteer)
-  `RAPT_COVER(clock, reset, IFU_SYS_RESUME_EVENT, cmu_bcast.sys_resume)
-
+    end else begin
+      pmu_fetch_multi_fire <= consumed > 1;
+      pmu_fetch_first_control <= recv_ready && is_control[0];
+      pmu_fetch_aux_conditional <= recv_ready && secondary_query;
+      pmu_fetch_nonfirst_jal_pack <= recv_ready && fetched_count > 1
+      && expanded[fetched_count-1][6:0] == `RAPT_OP_JAL___;
+      pmu_fetch_nonfirst_cond_pack <= recv_ready && secondary_query;
+      pmu_fetch_n1_unavailable <= ifu_l1i.valid && !half_valid[2];
+      pmu_fetch_n1_unavailable_unaligned <= ifu_l1i.valid && !half_valid[2] && pc_ifu[1];
+      pmu_fetch_n1_unavailable_l1i <= ifu_l1i.valid && !half_valid[2];
+      pmu_fetch_downstream_blocked <= held_count != 0 && consumed == 0;
+      pmu_ifu_flush_stall <= redirect_event;
+      pmu_ifu_response_after_redirect <= redirect_event && ifu_l1i.valid;
+      pmu_ifu_response_after_l1i_gap <= recv_ready && held_count == 0;
+      pmu_ifu_response_bypass_candidate <= recv_ready && held_count == 0 && !is_control[0];
+      pmu_fetch_fire <= consumed != 0;
+      pmu_fetch_slots <= consumed;
+      pmu_ifu_stall <= held_count == 0 && ifu_idu.ready[0];
+      pmu_ifu_icache_stall <= held_count == 0 && !blocked && !ifu_l1i.valid;
+      pmu_ifu_empty_stall <= blocked;
+      pmu_fetch_response_consume <= recv_ready;
+      pmu_fetch_bpu_taken <= recv_ready && ifu_bpu.taken;
+      pmu_fetch_target_steer <= recv_ready && nextpc != pc_ifu + XLEN'(2 * offset[fetched_count]);
+      if (redirect_event) begin
+        pc_ifu <= redirect_pc;
+        held_count <= 0;
+        blocked <= 1'b0;
+      end else if (recv_ready) begin
+        pc_ifu <= nextpc;
+        held_count <= fetched_count;
+        for (int s = 0; s < Width; s++) begin
+          held[s] <= fetched[s];
+          if (s < fetched_count && (is_serial[s] || fetched[s].trap)) blocked <= 1'b1;
+        end
+      end else begin
+        held_count <= held_count - consumed;
+        for (int s = 0; s < Width; s++) if (s + consumed < held_count) held[s] <= held[s+consumed];
+      end
+    end
+  end
+  `RAPT_SVA_IMPLY(clock, reset, IFU_RECOVERY_NO_RESPONSE_ACCEPT, recovery.pending,
+                  !recv_ready && !ifu_bpu.history_valid)
+  `RAPT_SVA_IMPLY(clock, reset, IFU_RECOVERY_NO_STREAM_OUTPUT, recovery.pending, !ifu_idu.valid[0])
 endmodule

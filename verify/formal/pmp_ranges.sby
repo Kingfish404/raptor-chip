@@ -1,0 +1,86 @@
+[tasks]
+range32_0
+range32_1
+range32_2
+range32_3
+range32_4
+range32_5
+range32_6
+range32_7
+range32_8
+range32_9
+range32_10
+range32_11
+range32_12
+range32_13
+range32_14
+range32_15
+range64_0
+range64_1
+range64_2
+range64_3
+range64_4
+range64_5
+range64_6
+range64_7
+range64_8
+range64_9
+range64_10
+range64_11
+range64_12
+range64_13
+range64_14
+range64_15
+
+[options]
+mode prove
+depth 1
+timeout 300
+
+[engines]
+smtbmc
+
+[script]
+plugin -i slang
+range32_0: read_slang --single-unit --top formal_pmp -G RangeIndex=0 -DRAPT_PMP_PROVE_RANGES pmp_formal_if.sv formal_pmp.sv rapt_pmp.sv
+range32_1: read_slang --single-unit --top formal_pmp -G RangeIndex=1 -DRAPT_PMP_PROVE_RANGES pmp_formal_if.sv formal_pmp.sv rapt_pmp.sv
+range32_2: read_slang --single-unit --top formal_pmp -G RangeIndex=2 -DRAPT_PMP_PROVE_RANGES pmp_formal_if.sv formal_pmp.sv rapt_pmp.sv
+range32_3: read_slang --single-unit --top formal_pmp -G RangeIndex=3 -DRAPT_PMP_PROVE_RANGES pmp_formal_if.sv formal_pmp.sv rapt_pmp.sv
+range32_4: read_slang --single-unit --top formal_pmp -G RangeIndex=4 -DRAPT_PMP_PROVE_RANGES pmp_formal_if.sv formal_pmp.sv rapt_pmp.sv
+range32_5: read_slang --single-unit --top formal_pmp -G RangeIndex=5 -DRAPT_PMP_PROVE_RANGES pmp_formal_if.sv formal_pmp.sv rapt_pmp.sv
+range32_6: read_slang --single-unit --top formal_pmp -G RangeIndex=6 -DRAPT_PMP_PROVE_RANGES pmp_formal_if.sv formal_pmp.sv rapt_pmp.sv
+range32_7: read_slang --single-unit --top formal_pmp -G RangeIndex=7 -DRAPT_PMP_PROVE_RANGES pmp_formal_if.sv formal_pmp.sv rapt_pmp.sv
+range32_8: read_slang --single-unit --top formal_pmp -G RangeIndex=8 -DRAPT_PMP_PROVE_RANGES pmp_formal_if.sv formal_pmp.sv rapt_pmp.sv
+range32_9: read_slang --single-unit --top formal_pmp -G RangeIndex=9 -DRAPT_PMP_PROVE_RANGES pmp_formal_if.sv formal_pmp.sv rapt_pmp.sv
+range32_10: read_slang --single-unit --top formal_pmp -G RangeIndex=10 -DRAPT_PMP_PROVE_RANGES pmp_formal_if.sv formal_pmp.sv rapt_pmp.sv
+range32_11: read_slang --single-unit --top formal_pmp -G RangeIndex=11 -DRAPT_PMP_PROVE_RANGES pmp_formal_if.sv formal_pmp.sv rapt_pmp.sv
+range32_12: read_slang --single-unit --top formal_pmp -G RangeIndex=12 -DRAPT_PMP_PROVE_RANGES pmp_formal_if.sv formal_pmp.sv rapt_pmp.sv
+range32_13: read_slang --single-unit --top formal_pmp -G RangeIndex=13 -DRAPT_PMP_PROVE_RANGES pmp_formal_if.sv formal_pmp.sv rapt_pmp.sv
+range32_14: read_slang --single-unit --top formal_pmp -G RangeIndex=14 -DRAPT_PMP_PROVE_RANGES pmp_formal_if.sv formal_pmp.sv rapt_pmp.sv
+range32_15: read_slang --single-unit --top formal_pmp -G RangeIndex=15 -DRAPT_PMP_PROVE_RANGES pmp_formal_if.sv formal_pmp.sv rapt_pmp.sv
+range64_0: read_slang --single-unit --top formal_pmp -G RangeIndex=0 -DRAPT_RV64 -DRAPT_PMP_PROVE_RANGES pmp_formal_if.sv formal_pmp.sv rapt_pmp.sv
+range64_1: read_slang --single-unit --top formal_pmp -G RangeIndex=1 -DRAPT_RV64 -DRAPT_PMP_PROVE_RANGES pmp_formal_if.sv formal_pmp.sv rapt_pmp.sv
+range64_2: read_slang --single-unit --top formal_pmp -G RangeIndex=2 -DRAPT_RV64 -DRAPT_PMP_PROVE_RANGES pmp_formal_if.sv formal_pmp.sv rapt_pmp.sv
+range64_3: read_slang --single-unit --top formal_pmp -G RangeIndex=3 -DRAPT_RV64 -DRAPT_PMP_PROVE_RANGES pmp_formal_if.sv formal_pmp.sv rapt_pmp.sv
+range64_4: read_slang --single-unit --top formal_pmp -G RangeIndex=4 -DRAPT_RV64 -DRAPT_PMP_PROVE_RANGES pmp_formal_if.sv formal_pmp.sv rapt_pmp.sv
+range64_5: read_slang --single-unit --top formal_pmp -G RangeIndex=5 -DRAPT_RV64 -DRAPT_PMP_PROVE_RANGES pmp_formal_if.sv formal_pmp.sv rapt_pmp.sv
+range64_6: read_slang --single-unit --top formal_pmp -G RangeIndex=6 -DRAPT_RV64 -DRAPT_PMP_PROVE_RANGES pmp_formal_if.sv formal_pmp.sv rapt_pmp.sv
+range64_7: read_slang --single-unit --top formal_pmp -G RangeIndex=7 -DRAPT_RV64 -DRAPT_PMP_PROVE_RANGES pmp_formal_if.sv formal_pmp.sv rapt_pmp.sv
+range64_8: read_slang --single-unit --top formal_pmp -G RangeIndex=8 -DRAPT_RV64 -DRAPT_PMP_PROVE_RANGES pmp_formal_if.sv formal_pmp.sv rapt_pmp.sv
+range64_9: read_slang --single-unit --top formal_pmp -G RangeIndex=9 -DRAPT_RV64 -DRAPT_PMP_PROVE_RANGES pmp_formal_if.sv formal_pmp.sv rapt_pmp.sv
+range64_10: read_slang --single-unit --top formal_pmp -G RangeIndex=10 -DRAPT_RV64 -DRAPT_PMP_PROVE_RANGES pmp_formal_if.sv formal_pmp.sv rapt_pmp.sv
+range64_11: read_slang --single-unit --top formal_pmp -G RangeIndex=11 -DRAPT_RV64 -DRAPT_PMP_PROVE_RANGES pmp_formal_if.sv formal_pmp.sv rapt_pmp.sv
+range64_12: read_slang --single-unit --top formal_pmp -G RangeIndex=12 -DRAPT_RV64 -DRAPT_PMP_PROVE_RANGES pmp_formal_if.sv formal_pmp.sv rapt_pmp.sv
+range64_13: read_slang --single-unit --top formal_pmp -G RangeIndex=13 -DRAPT_RV64 -DRAPT_PMP_PROVE_RANGES pmp_formal_if.sv formal_pmp.sv rapt_pmp.sv
+range64_14: read_slang --single-unit --top formal_pmp -G RangeIndex=14 -DRAPT_RV64 -DRAPT_PMP_PROVE_RANGES pmp_formal_if.sv formal_pmp.sv rapt_pmp.sv
+range64_15: read_slang --single-unit --top formal_pmp -G RangeIndex=15 -DRAPT_RV64 -DRAPT_PMP_PROVE_RANGES pmp_formal_if.sv formal_pmp.sv rapt_pmp.sv
+prep -top formal_pmp
+
+[files]
+formal_pmp.sv
+rapt_pmp.sv ../../hdl/memory/rapt_pmp.sv
+rapt.svh ../../hdl/include/rapt.svh
+rapt_config.svh ../../hdl/configs/formal/rapt_config.svh
+rapt_sva.svh ../../hdl/include/rapt_sva.svh
+rapt_fp_ops.svh ../../hdl/include/rapt_fp_ops.svh
+pmp_formal_if.sv

@@ -12,7 +12,7 @@ MEMORY {
   flash : ORIGIN = 0x30000000, LENGTH = 15M
   sram  : ORIGIN = 0x0f000000, LENGTH = 8K
   psram : ORIGIN = 0x80000000, LENGTH = 4M
-  sdram : ORIGIN = 0xa0000000, LENGTH = 1M
+  sdram : ORIGIN = 0xa0000000, LENGTH = 32M
 }
 
 SECTIONS {
@@ -86,14 +86,14 @@ SECTIONS {
     } > sdram AT> flash : data
   _data_end = ADDR(.bss);
   _data_load_start = LOADADDR(.data);
-  .bss :
+  .bss (NOLOAD) :
   {
     _bss_start = .;
     *(.bss*)
     *(.sbss*)
     *(.scommon)
   } > sdram AT> flash : bss
-  .bss.extra :
+  .bss.extra (NOLOAD) :
   {
     __am_apps_bss_start = .;
     *(__am_apps.bss*)
@@ -101,11 +101,12 @@ SECTIONS {
     *(__am_apps.scommon*)
     __am_apps_bss_end = .;
   } > sdram AT> flash : bss 
+  _bss_end = .;
   _stack_top = ALIGN(0x1000);
   . = _stack_top + 0x8000;
   _stack_pointer = .;
   end = .;
   _end = .;
   _heap_start = ALIGN(0x1000);
-  _heap_end = ORIGIN(psram) + LENGTH(psram);
+  _heap_end = ORIGIN(sdram) + LENGTH(sdram);
 }

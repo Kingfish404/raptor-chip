@@ -73,18 +73,9 @@ module rapt_l2 #(
     axi4_if.master axi_m
 );
 
-  // The active L2 cache is only instantiated when explicitly enabled
-  // (`RAPT_L2_EN`) AND the build does not target the third-party ysyxSoC
-  // (`RAPT_SOC`). The ysyxSoC `sdram_axi` / xbar slaves cannot service the
-  // L2's multi-beat burst line fills (the same incompatibility that forces
-  // the legacy single-outstanding bus FSM under `RAPT_SOC`); an allocate on a
-  // store/load miss never completes, hanging the SQ/ROB on the first SDRAM
-  // store (e.g. `sb` to 0xa000_000a during the MROM->SDRAM copy loop). For
-  // SoC builds the L2 therefore collapses to a pure passthrough.
+  // Explicit cache enable; otherwise the AXI interface is a passthrough.
 `ifdef RAPT_L2_EN
-`ifndef RAPT_SOC
   `define RAPT_L2_ACTIVE
-`endif
 `endif
 
 `ifndef RAPT_L2_ACTIVE
@@ -97,6 +88,7 @@ module rapt_l2 #(
   assign axi_m.arlen   = axi_s.arlen;
   assign axi_m.arsize  = axi_s.arsize;
   assign axi_m.arburst = axi_s.arburst;
+  assign axi_m.arcache = axi_s.arcache;
   assign axi_s.arready = axi_m.arready;
 
   assign axi_s.rvalid  = axi_m.rvalid;
@@ -112,6 +104,7 @@ module rapt_l2 #(
   assign axi_m.awlen   = axi_s.awlen;
   assign axi_m.awsize  = axi_s.awsize;
   assign axi_m.awburst = axi_s.awburst;
+  assign axi_m.awcache = axi_s.awcache;
   assign axi_s.awready = axi_m.awready;
 
   assign axi_m.wvalid  = axi_s.wvalid;
@@ -188,6 +181,7 @@ module rapt_l2 #(
   logic [7:0] r_len;  // remaining beats - 1 of upstream burst
   logic [2:0] r_size;
   logic [1:0] r_burst;
+  logic [3:0] r_cache;
   logic [L2_LINE_LEN-1:0] r_word;  // current word offset within line
   logic [XLEN-1:0] r_line_buf[LineSize];
   logic [L2_LINE_LEN-1:0] r_fill_cnt;  // next word slot to write on fill
@@ -222,7 +216,7 @@ module rapt_l2 #(
   logic [IndexBits-1:0] data_sram_raddr;
   assign r_hit_beat_fire = (rs == R_HIT) && r_hit_q && (!rs_rvalid || axi_s.rready);
   assign data_sram_raddr =
-      (rs == R_IDLE && axi_s.arvalid && axi_s.arready && cacheable(axi_s.araddr))
+      (rs == R_IDLE && axi_s.arvalid && axi_s.arready && (cacheable(axi_s.araddr) && |axi_s.arcache[3:2]))
         ? axi_s.araddr[IndexMsb:IndexLsb]
       : (r_hit_beat_fire && (r_len != 8'd0) && (r_word == L2_LINE_LEN'(LineSize - 1)))
           ? (r_idx_q + IndexBits'(1))
@@ -242,6 +236,7 @@ module rapt_l2 #(
   logic [     7:0] m_arlen;
   logic [     2:0] m_arsize;
   logic [     1:0] m_arburst;
+  logic [     3:0] m_arcache;
 
   assign axi_m.arvalid = m_arvalid;
   assign axi_m.araddr  = m_araddr;
@@ -249,6 +244,7 @@ module rapt_l2 #(
   assign axi_m.arlen   = m_arlen;
   assign axi_m.arsize  = m_arsize;
   assign axi_m.arburst = m_arburst;
+  assign axi_m.arcache = m_arcache;
 
   // Miss fills can always be accepted into the line buffer. Bypass reads only
   // accept a downstream beat when the single upstream holding register is free.
@@ -295,6 +291,7 @@ module rapt_l2 #(
     logic [2:0]        size;
     logic [7:0]        len;    // 0 for single-beat stores from rapt_bus
     logic [1:0]        burst;
+    logic [3:0]        cache;
     logic [XLEN-1:0]   wdata;
     logic [XLEN/8-1:0] wstrb;
     logic              wlast;
@@ -407,6 +404,7 @@ module rapt_l2 #(
       r_len      <= '0;
       r_size     <= '0;
       r_burst    <= '0;
+      r_cache <= '0;
       r_word     <= '0;
       r_fill_cnt <= '0;
       r_resp     <= 2'b00;
@@ -445,9 +443,10 @@ module rapt_l2 #(
             r_len   <= axi_s.arlen;
             r_size  <= axi_s.arsize;
             r_burst <= axi_s.arburst;
+            r_cache <= axi_s.arcache;
             r_word  <= axi_s.araddr[WordOffsetMsb:WordOffsetLsb];
             r_resp  <= 2'b00;
-            if (cacheable(axi_s.araddr)) begin
+            if ((cacheable(axi_s.araddr) && |axi_s.arcache[3:2])) begin
               // Lookup is combinational on r_addr_next; but since we
               // sample on the same edge we must wait one cycle for
               // r_addr to be latched, then decide. Use a transient state:
@@ -463,6 +462,7 @@ module rapt_l2 #(
                 m_arlen   <= axi_s.arlen;
                 m_arsize  <= axi_s.arsize;
                 m_arburst <= axi_s.arburst;
+                m_arcache <= axi_s.arcache;
                 rs <= R_BYPASS_AR;
               end
             end
@@ -529,6 +529,7 @@ module rapt_l2 #(
               m_arid     <= r_id;
               m_arlen    <= 8'(LineSize - 1);
               m_arsize   <= 3'($clog2(WordBytes));
+              m_arcache <= r_cache;
               m_arburst  <= 2'b01;  // INCR
               rs         <= R_MISS_AR;
             end
@@ -607,6 +608,7 @@ module rapt_l2 #(
             m_arlen   <= r_len;
             m_arsize  <= r_size;
             m_arburst <= r_burst;
+            m_arcache <= r_cache;
             rs <= R_BYPASS_AR;
           end
         end
@@ -662,7 +664,9 @@ module rapt_l2 #(
   // ---- Snoop hit/update (fires same cycle as W capture) ----
   always_comb begin
     w_hit_update = 1'b0;
-    if (axi_s.wvalid && axi_s.wready && cacheable(w_snoop_addr) && w_hit_q) begin
+    if (axi_s.wvalid && axi_s.wready && cacheable(
+            w_snoop_addr
+        ) && |wbuf[w_wptr].cache[3:2] && w_hit_q) begin
       w_hit_update = 1'b1;
     end
   end
@@ -700,6 +704,7 @@ module rapt_l2 #(
   assign axi_m.awlen   = wbuf[d_rptr].len;
   assign axi_m.awsize  = wbuf[d_rptr].size;
   assign axi_m.awburst = wbuf[d_rptr].burst;
+  assign axi_m.awcache = wbuf[d_rptr].cache;
 
   assign axi_m.wvalid  = (ws == W_W);
   assign axi_m.wdata   = wbuf[d_rptr].wdata;
@@ -764,7 +769,8 @@ module rapt_l2 #(
         wbuf[aw_wptr].size  <= axi_s.awsize;
         wbuf[aw_wptr].len   <= axi_s.awlen;
         wbuf[aw_wptr].burst <= axi_s.awburst;
-        wbuf[aw_wptr].posted <= cacheable(axi_s.awaddr);
+        wbuf[aw_wptr].cache <= axi_s.awcache;
+        wbuf[aw_wptr].posted <= cacheable(axi_s.awaddr) && axi_s.awcache[0] && |axi_s.awcache[3:2];
         // TODO(coalesce): if wbuf[*] has a busy entry to the same line
         // with !has_drained_yet, we could merge wstrb into it and skip
         // the enqueue. Saves a downstream beat for adjacent stores.

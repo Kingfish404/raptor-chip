@@ -12,7 +12,6 @@
 # ---- Build artifacts ----
 /impl/
 /build/
-ysyx.v
 rapt.v
 *.vcd
 *.gprj.user

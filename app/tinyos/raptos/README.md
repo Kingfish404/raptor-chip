@@ -35,8 +35,6 @@ IPC uses one 64-byte mailbox per process without dynamic allocation. `send` fail
 
 The RFS3 RAM filesystem supports hierarchical directories, 16 inodes, and 29 allocatable 512-byte data blocks in a 16 KiB image. Each inode has eight direct blocks, giving regular files a 4 KiB maximum size. A block bitmap supports allocation, reuse, truncation, and sparse extension; unwritten ranges read as zero. Full paths are limited to 31 bytes. The initial tree contains `/dev`, `/etc/motd`, and `/share/hello`; directories and files remain writable until reset. Empty directories can be removed unless they are active process working directories. There is not yet `fork`, `exec`, pipe, permissions, hard links, a buffer cache, or persistent storage.
 
-The layering and debug-capability model are in [ARCHITECTURE.md](ARCHITECTURE.md), and the staged Unix, filesystem, and peripheral plan is in [ROADMAP.md](ROADMAP.md). Hardware validation remains the acceptance criterion rather than treating POSIX surface area as an end in itself.
-
 ## Build And Run
 
 ```bash

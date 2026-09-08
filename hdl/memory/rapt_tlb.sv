@@ -18,13 +18,15 @@ module rapt_tlb #(
     output logic             hit,
     output logic [XLEN-1:10] ptag,
     output logic [      6:0] pte_flags,  // {D,A,G,U,X,W,R}
+    output logic [      1:0] pbmt,
 
     // Fill (sequential, latched on posedge clock)
     input logic             fill_valid,
     input logic [XLEN-1:10] fill_ptag,
     input logic [XLEN-1:12] fill_vtag,
     input logic [      8:0] fill_asid,
-    input logic [      6:0] fill_pte
+    input logic [      6:0] fill_pte,
+    input logic [      1:0] fill_pbmt
 );
 
   logic [        ENTRIES-1:0] valid;
@@ -32,6 +34,7 @@ module rapt_tlb #(
   logic [          XLEN-1:10] ptags     [ENTRIES];
   logic [                8:0] asids     [ENTRIES];
   logic [                6:0] ptes      [ENTRIES];
+  logic [                1:0] pbmts     [ENTRIES];
 
   localparam int unsigned EntryIdxW = (ENTRIES <= 1) ? 1 : $clog2(ENTRIES);
 
@@ -71,9 +74,11 @@ module rapt_tlb #(
     hit       = |match_vec;
     ptag      = '0;
     pte_flags = '0;
+    pbmt      = '0;
     for (int i = 0; i < ENTRIES; i++) begin
-      ptag      |= match_ptag[i];
+      ptag |= match_ptag[i];
       pte_flags |= match_pte[i];
+      pbmt |= {2{match_vec[i]}} & pbmts[i];
     end
   end
 
@@ -105,18 +110,21 @@ module rapt_tlb #(
         ptags[fill_match_idx] <= fill_ptag;
         asids[fill_match_idx] <= fill_asid;
         ptes[fill_match_idx]  <= fill_pte;
+        pbmts[fill_match_idx] <= fill_pbmt;
       end else if (has_invalid) begin
         valid[first_invalid_idx] <= 1'b1;
         vtags[first_invalid_idx] <= fill_vtag;
         ptags[first_invalid_idx] <= fill_ptag;
         asids[first_invalid_idx] <= fill_asid;
         ptes[first_invalid_idx]  <= fill_pte;
+        pbmts[first_invalid_idx] <= fill_pbmt;
       end else begin
         valid[rr_ptr] <= 1'b1;
         vtags[rr_ptr] <= fill_vtag;
         ptags[rr_ptr] <= fill_ptag;
         asids[rr_ptr] <= fill_asid;
         ptes[rr_ptr]  <= fill_pte;
+        pbmts[rr_ptr] <= fill_pbmt;
         rr_ptr <= (rr_ptr == EntryIdxW'(ENTRIES - 1)) ? '0 : rr_ptr + 1'b1;
       end
     end

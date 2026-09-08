@@ -48,6 +48,9 @@ enum { MEM_RET_OK, MEM_RET_FAIL, MEM_RET_CROSS_PAGE };
 int isa_mmu_check(vaddr_t vaddr, int len, int type);
 #endif
 paddr_t isa_mmu_translate(vaddr_t vaddr, int len, int type);
+/* Translation plus leaf memory type. PBMT is PMA (0) for Bare/Sv32;
+ * callers must use the output only after successful translation. */
+paddr_t isa_mmu_translate_attrs(vaddr_t vaddr, int len, int type, uint8_t *pbmt);
 
 // interrupt/exception
 vaddr_t isa_raise_intr(word_t NO, vaddr_t epc);

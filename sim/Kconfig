@@ -55,19 +55,3 @@ endmenu
 menuconfig wrapBus
     bool "Enable wrapBus"
     default n
-
-menuconfig ysyxSoC
-    bool "Enable ysyxSoC"
-    default y
-
-config MODE
-    string
-    default "soc" if ysyxSoC
-    default "none"
-
-menuconfig NVBoard
-    depends on ysyxSoC
-    bool "Enable NVBoard"
-    default n
-    help
-      Enable NVBoard for IO.

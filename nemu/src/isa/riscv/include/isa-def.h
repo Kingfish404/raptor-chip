@@ -99,8 +99,10 @@ enum CSR
   CSR_MIE = 0x304,
   CSR_MTVEC = 0x305,
   CSR_MCOUNTEREN = 0x306,
+  CSR_MCOUNTINHIBIT = 0x320,
 
   CSR_MENVCFG = 0x30a,
+  CSR_MENVCFGH = 0x31a,
   CSR_MSTATUSH = 0x310,
 
   // Machine Trap Handling
@@ -109,6 +111,8 @@ enum CSR
   CSR_MCAUSE = 0x342,
   CSR_MTVAL = 0x343,
   CSR_MIP = 0x344,
+  CSR_MBERR_STATUS = 0x7c0,
+  CSR_MBERR_ADDR = 0xfc0,
 
   // PMP Configuration (read-as-zero, no PMP implemented)
   CSR_PMPCFG0 = 0x3a0,
@@ -382,8 +386,12 @@ typedef struct
   word_t raise_intr;
   uint32_t last_inst_priv;
   uint16_t last_csr_wr;
+  bool instruction_trapped; // Synchronous trap: this attempt did not retire.
   uint64_t mtimecmp;
+  bool stip; // Hardware Sstc level; separate from software-writable mip.STIP.
+  bool seip; // External S interrupt level, independent of software mip.SEIP.
   vaddr_t reservation;
+  uint8_t reservation_bytes; // zero means no valid reservation
 
   vaddr_t vwaddr;
   word_t pwaddr;
@@ -399,6 +407,8 @@ typedef struct
   word_t iomm_addr; // for iomm
   word_t skip;      // for iomm
 } riscv_CPU_state;
+
+word_t riscv_mip_value(void);
 
 // decode
 typedef struct

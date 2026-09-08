@@ -139,6 +139,9 @@ class rapt_idu_decoder extends RawModule with Instr with MicroOP {
   PREFETCH_W -> BitPat("b" + "00" + ALU_ADD_), // Zicbop HINT
 
    SFENCE_VM -> BitPat("b" + "00" + ALU_ADD_), // N
+   SINVAL_VM -> BitPat("b" + "00" + ALU_ADD_), // N
+   SFENCE_W_INVAL -> BitPat("b" + "00" + ALU_ADD_), // N
+   SFENCE_INVAL_IR -> BitPat("b" + "00" + ALU_ADD_), // N
     // format: on
 
       CSRRW_ -> BitPat("b" + "00" + ALU_ADD_), // CSR
@@ -388,6 +391,7 @@ class rapt_idu_decoder extends RawModule with Instr with MicroOP {
   CBO_ZERO -> BitPat("b" + "000 0  0  0  0  1"), // Zicboz
 
    SFENCE_VM -> BitPat("b" + "000 0  0  0  0  1"), // N
+   SINVAL_VM -> BitPat("b" + "000 0  0  0  0  1"), // N
     // format: on
 
       MRET__ -> BitPat("b" + "000 0  1  0  0  1"), // N
@@ -423,7 +427,8 @@ class rapt_idu_decoder extends RawModule with Instr with MicroOP {
       CBO_CLEAN -> BitPat("b" + "1" + "0"), // Zicbom: write-through clean is ordering-only
       CBO_FLUSH -> BitPat("b" + "1" + "0"), // Zicbom: conservative whole-L1 maintenance
       CBO_ZERO -> BitPat("b" + "1" + "0"), // Zicboz: serialize block stores
-      SFENCE_VM -> BitPat("b" + "1" + "1")  // N: flush TLBs + I-cache
+      SFENCE_VM -> BitPat("b" + "1" + "1"), // N: flush TLBs + I-cache
+      SINVAL_VM -> BitPat("b" + "1" + "1") // full SFENCE.VMA implementation
     ),
     BitPat("b" + "0" + "0")
   )
@@ -516,7 +521,7 @@ class rapt_idu_decoder extends RawModule with Instr with MicroOP {
   val fp_zfhmin = ("b" + FP_ZFHMIN).U(6.W)
   val fp_half_load = fp_op_decoded === fp_zfhmin && opcode === "b0000111".U
   val fp_half_store = fp_op_decoded === fp_zfhmin && opcode === "b0100111".U
-  val fp_half_to_int = fp_op_decoded === fp_zfhmin && funct7 === "b1110010".U
+  val fp_half_to_int = fp_op_decoded === fp_zfhmin && opcode === "b1010011".U && funct7 === "b1110010".U
   val fp_fmv_d_x = ("b" + FP_FMV_D_X).U(6.W)
   val fp_fsgnj_d = ("b" + FP_FSGNJ_D).U(6.W)
   val fp_fsgnjn_d = ("b" + FP_FSGNJN_D).U(6.W)
@@ -668,6 +673,9 @@ class rapt_idu_decoder extends RawModule with Instr with MicroOP {
     CBO_ZERO  -> List(0.U, 0.U,   0.U,   0.U, rs1, 0.U), // Zicboz
 
     SFENCE_VM -> List(0.U,    0.U,   0.U,   0.U, 0.U, 0.U), // N   
+    SINVAL_VM -> List(0.U,    0.U,   0.U,   0.U, 0.U, 0.U), // N
+    SFENCE_W_INVAL -> List(0.U,    0.U,   0.U,   0.U, 0.U, 0.U), // N
+    SFENCE_INVAL_IR -> List(0.U,    0.U,   0.U,   0.U, 0.U, 0.U), // N
 
     CSRRW_ -> List( rd,    csr,   0.U,   0.U, rs1, 0.U), // CSR
     CSRRS_ -> List( rd,    csr,   0.U,   0.U, rs1, 0.U), // CSR

@@ -10,6 +10,9 @@ SECTIONS
   . = 0x80000000;
   .text.init : { *(.text.init) }
   . = ALIGN(0x1000);
+  /* Match Sail's HTIF section so address-valued VM signatures agree. */
+  .tohost : { *(.tohost) }
+  . = ALIGN(0x1000);
   .text : { *(.text) *(.text.*) }
   . = ALIGN(0x1000);
   .data : { *(.data) *(.data.*) }

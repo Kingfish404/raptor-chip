@@ -20,5 +20,6 @@ prep -top formal_dtm
 formal_dtm.sv
 rapt_dtm.sv ../../hdl/perip/rapt_dtm.sv
 rapt.svh ../../hdl/include/rapt.svh
+rapt_fp_ops.svh ../../hdl/include/rapt_fp_ops.svh
 rapt_config.svh ../../hdl/configs/formal/rapt_config.svh
 rapt_sva.svh ../../hdl/include/rapt_sva.svh

@@ -1,5 +1,16 @@
 menu "Memory Configuration"
 
+config RAPTOR_MEMORY_MAP
+  bool "Use Raptor physical backing memory map"
+  depends on ISA_riscv && MODE_SYSTEM
+  default n
+  help
+    Match Raptor/NPC's 32 MiB SDRAM and 256 MiB flash backing windows.
+    The low QEMU virt boot ROM is not mapped on Raptor. Main RAM remains
+    controlled by MBASE/MSIZE. This option does not configure peripherals.
+    Select this for the Raptor reference model; native virt configurations
+    keep their existing memory layout unless explicitly selected.
+
 config ROM
   bool "Enable ROM"
   default y

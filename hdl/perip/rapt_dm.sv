@@ -12,9 +12,9 @@
 //
 // Halt path (Phase 1): `haltreq_o` is consumed by rapt_core/ROU which gates
 // dispatch; `halted_i` (= ROB drained while haltreq) is reflected in
-// dmstatus. `resumereq_o` is currently a hint --- ROU resumes automatically
-// when haltreq deasserts, and `{any,all}resumeack` latches when the core
-// leaves halted with resumereq pending.
+// dmstatus. A sticky DM halt state retains the request until resume;
+// `{any,all}resumeack` latches when the core leaves halted with resume pending.
+// Commit-based stepping releases and reasserts this latch for bring-up.
 //
 // Abstract `access_register` (Phase 3, RV32 only, aarsize=2 / 32-bit):
 //   - regno 0x1000..0x101F : GPR x0..x31 via the cluster debug GPR bus
@@ -37,7 +37,8 @@
 // NOT IMPLEMENTED (TODO):
 //   - access_memory / SBA (sbcs/sbaddr/sbdata/sbcs busy)
 //   - progbuf execution (progbufsize=0)
-//   - dcsr.{ebreakm,ebreaks,ebreaku,step} side-effects (storage only)
+//   - architectural dcsr.{ebreakm,ebreaks,ebreaku} entry side-effects
+//     (dcsr.step already controls commit-based bring-up stepping)
 //   - aarsize=3 (RV64) -- needs data1 pairing
 //   - real Debug Mode FSM (fetch redirect to dm_haltaddr, dret)
 //
@@ -76,7 +77,8 @@ module rapt_dm #(
 
     // Debug GPR bus to the core (committed view + write port). Caller-side
     // (rapt_prf) must hold halted_i before honouring `dbg_gpr_we_o`.
-    input  logic [XLEN-1:0] dbg_gpr_rdata_i[32],
+    // Combinational response to dbg_gpr_addr_o; no extra command cycle.
+    input  logic [XLEN-1:0] dbg_gpr_rdata_i,
     output logic            dbg_gpr_we_o,
     output logic [     4:0] dbg_gpr_addr_o,
     output logic [XLEN-1:0] dbg_gpr_wdata_o
@@ -180,7 +182,7 @@ module rapt_dm #(
   logic [XLEN-1:0] reg_rdata;
   always_comb begin
     reg_rdata = '0;
-    if (cmd_is_gpr) reg_rdata = dbg_gpr_rdata_i[cmd_gpr_idx];
+    if (cmd_is_gpr) reg_rdata = dbg_gpr_rdata_i;
     else if (cmd_is_misa) reg_rdata = `RAPT_MISA;
     else if (cmd_is_dcsr) reg_rdata = XLEN'(dcsr_q);
     else if (cmd_is_dpc) reg_rdata = dpc_q;

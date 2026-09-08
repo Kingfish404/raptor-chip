@@ -3,6 +3,10 @@
 `ifdef USE_DPI_C
 import "DPI-C" function void npc_exu_ebreak();
 import "DPI-C" function void npc_difftest_skip_ref();
+import "DPI-C" function void npc_store_error_event(
+  input longint unsigned addr,
+  input byte unsigned strb
+);
 
 // Pull-and-clear pending external-interrupt bitmap from the C++ side.
 // Returns a 32-bit pulse vector indexed by IRQ number; the call atomically
@@ -21,20 +25,12 @@ import "DPI-C" function void npc_difftest_mem_diff(
 );
 import "DPI-C" function void pmem_read(
   input  longint raddr,
+  input  byte unsigned rsize,
   output longint rdata
 );
 import "DPI-C" function void pmem_write(
   input longint waddr,
   input longint wdata,
-  input byte    wmask
-);
-import "DPI-C" function void sdram_read(
-  input  longint raddr,
-  output byte    rdata
-);
-import "DPI-C" function void sdram_write(
-  input longint waddr,
-  input byte    wdata,
   input byte    wmask
 );
 `else
@@ -45,20 +41,12 @@ import "DPI-C" function void npc_difftest_mem_diff(
 );
 import "DPI-C" function void pmem_read(
   input  int raddr,
+  input  byte unsigned rsize,
   output int rdata
 );
 import "DPI-C" function void pmem_write(
   input int  waddr,
   input int  wdata,
-  input byte wmask
-);
-import "DPI-C" function void sdram_read(
-  input  int  raddr,
-  output byte rdata
-);
-import "DPI-C" function void sdram_write(
-  input int  waddr,
-  input byte wdata,
   input byte wmask
 );
 `endif

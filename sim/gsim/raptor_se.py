@@ -17,8 +17,8 @@ which gem5's RISCV SE workload handles directly via `RiscvEmuLinux`
 
 Param mapping (raptor → gem5 O3)
 --------------------------------
-* line_bytes   = 4 << LINE_LEN          (RTL stores cache line as 2^LINE_LEN
-                                         32-bit words)
+* I-side line bytes = 4 << L1I_LINE_LEN
+* D-side line bytes = (XLEN / 8) << L1D_LINE_LEN
 * num_sets     = 1 << LEN
 * cache size   = line * sets * ways
 * numROBEntries          = ROB_SIZE
@@ -544,13 +544,9 @@ def build_o3_cpu(
 ) -> RiscvO3CPU:
     """Build a RiscvO3CPU configured to match raptor-chip microarchitecture.
 
-    Alignment with RTL (raptor-chip) ISA profile:
-      RV32: MISA = 0x40141107 → RV32IMACU
-      RV64: MISA = 0x8000000000141107 → RV64IMACU
-      Additional Z-extensions in RTL: Zicbop, Zicntr, Zicond, Zicsr, Zifencei,
-                                      Zihintntl, Zihintpause, Zimop, Zcb, Zcmop,
-                                      Zba, Zbb, Zbc, Zbs
-      gem5 support: LocalBP (not all Z-extensions yet; evaluate per version).
+    RTL default MISA and model scope:
+      RV32: MISA = 0x4014112f; RV64: MISA = 0x800000000014112f.
+      RTL implements IMAFDC with M/S/U.
     """
     cpu = RiscvO3CPU(
         cpu_id=cpu_id,
@@ -558,11 +554,9 @@ def build_o3_cpu(
     )
     # C5: ISA extension alignment.
     # gem5's RiscvISA sets base ISA (I/M/A/F/D + C compressed) via riscv_type;
-    # IMAFDC is enabled by default for RV32/RV64. raptor-chip RTL MISA = IMACU.
-    # Z-extensions (Zba/Zbb/Zbc/Zbs/Zicbop/Zicntr/Zicond/Zicsr/Zifencei/Zihintntl
-    #                /Zihintpause/Zimop/Zcb/Zcmop) are not user-tunable on
-    # gem5 25.x's RiscvISA — they are baked in via `enable_*` build flags
-    # and reported through MISA at runtime. No-op here; documented for parity.
+    # The selected XLEN does not establish RTL/gem5 extension parity.
+    # Check workload instructions against the installed gem5 build; MISA
+    # does not enumerate Z-extensions.
 
     # Microarchitecture parameters from raptor-chip config
     # C1: IQ configuration (unified instruction queue model).
@@ -595,7 +589,7 @@ def build_o3_cpu(
                 numEntries=u["iq"],
                 fuPool=FUPool(
                     FUList=[
-                        IntALU(count=2),
+                        IntALU(count=u["integer_issue_ports"]),
                         IntMultDiv(count=1),
                         FP_ALU(),
                         FP_MultDiv(),

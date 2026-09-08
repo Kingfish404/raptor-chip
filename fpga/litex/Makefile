@@ -145,7 +145,12 @@ UART_PORT   ?= $(firstword $(wildcard $(BOARD_$(FPGA_BOARD)_UART)) $(UART_PORT_A
 override UART_BAUD := 115200 ## Fixed FPGA UART/SFL baud; command-line and environment overrides are intentionally ignored
 SERIALBOOT_SAFE ?= 1 ## Set to 0 to re-enable litex_term upload speed optimizations
 
-SIM_THREADS ?= 4 ## Verilator simulation threads (1=off)
+SIM_JOBS ?= $(shell n='$(NPROC)'; if [ "$$n" -gt 4 ]; then echo 4; else echo "$$n"; fi) ## Maximum concurrent C++ compiler jobs (default capped at 4)
+SIM_JOBS := $(strip $(SIM_JOBS))
+ifneq ($(shell test "$(SIM_JOBS)" -gt 0 2>/dev/null && echo yes),yes)
+$(error SIM_JOBS must be a positive integer; zero/unset LiteX jobs can cause unlimited make -j)
+endif
+SIM_THREADS ?= 4 ## Verilator simulation threads (1=off; independent of SIM_JOBS)
 
 TRACE ?= none ## Wave dump mode (none|fst|vcd)
 
@@ -373,12 +378,12 @@ OPENSBI_BIN     := $(OPENSBI_FW_DIR)/fw_payload.bin
 LINUX_IMG        = $(if $(filter 64,$(LINUX_XLEN)),$(LINUX_RV64_PAYLOAD),$(LINUX_RV32GC_FPGA_PAYLOAD))
 
 LINUX_FPGA_RAM_SIZE ?= 0x10000000 ## DTB RAM size: matches Raptor's 0x80000000..0x8fffffff PMEM window
-LINUX_FPGA_INIT ?= shell ## Userspace startup mode: shell (fast serial bring-up) or full (Buildroot init/services)
-ifneq (,$(filter-out shell full,$(LINUX_FPGA_INIT)))
-$(error LINUX_FPGA_INIT must be shell or full, got '$(LINUX_FPGA_INIT)')
+LINUX_FPGA_INIT ?= full ## Startup: full (default Buildroot services), prepared-shell (runtime mounts), shell (bare legacy diagnostics)
+ifneq (,$(filter-out shell prepared-shell full,$(LINUX_FPGA_INIT)))
+$(error LINUX_FPGA_INIT must be shell, prepared-shell or full, got '$(LINUX_FPGA_INIT)')
 endif
 LINUX_FPGA_BOOTARGS_BASE ?= console=liteuart0,115200 earlycon=sbi unaligned_scalar_speed=fast cryptomgr.notests=1 random.trust_bootloader=on
-LINUX_FPGA_BOOTARGS ?= $(LINUX_FPGA_BOOTARGS_BASE) $(if $(filter full,$(LINUX_FPGA_INIT)),rdinit=/init,rdinit=/bin/sh) ## Linux FPGA kernel command line
+LINUX_FPGA_BOOTARGS ?= $(LINUX_FPGA_BOOTARGS_BASE) $(if $(filter full,$(LINUX_FPGA_INIT)),rdinit=/init,$(if $(filter prepared-shell,$(LINUX_FPGA_INIT)),rdinit=/sbin/raptor-shell,rdinit=/bin/sh)) ## Linux FPGA kernel command line
 LINUX_FPGA_MODEL ?= Raptor LiteX SoC on $(FPGA_BOARD) ## Linux model string reported from the generated DTB
 LINUX_FPGA_PAYLOAD ?= $(LINUX_IMG) ## Legacy stage0-bundled payload for fpga-img
 LINUX_FPGA_OPENSBI_PAYLOAD ?= $(OPENSBI_BIN) ## Standalone linux/opensbi fw_payload.bin for fpga-opensbi-upload
@@ -502,7 +507,7 @@ include $(LITEX_DIR)/mk/config.mk
 SIM_DIR    := $(BUILD_DIR)/sim/$(VARIANT)-$(ROM)-$(SOC)
 SIM_BUILD_DIR := $(SIM_DIR)/gateware
 
-_BASE_FLAGS = --sys-clk-freq=$(SYS_CLK) --threads=$(SIM_THREADS) $(TRACE_FLAGS)
+_BASE_FLAGS = --sys-clk-freq=$(SYS_CLK) --jobs=$(SIM_JOBS) --threads=$(SIM_THREADS) $(TRACE_FLAGS)
 SIM_FLAGS   = --output-dir=$(SIM_DIR) --cpu-variant=$(VARIANT) \
               $(SIM_ROM_FLAGS) $(SIM_SOC_FLAGS) $(SIM_PAYLOAD_FLAG) $(_BASE_FLAGS)
 

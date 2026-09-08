@@ -43,7 +43,7 @@ class Platform(sipeed_tang_mega_138k_pro.Platform):
         # 138C variant override that works on the non-Pro PBGA484 part is
         # rejected by gw_sh `set_device` here. Keep the platform default
         # (GW5AST-138B). PnR density on the Pro must be addressed via
-        # design-side levers (see docs-ref/uarch.memory-subsystem.md).
+        # design-side levers (see docs/uarch.md).
         # Gowin's Tcl frontend accepts `verilog_std=sysv2017`; without it, the
         # default LiteX flow falls back to Verilog 2001 and rejects the
         # SystemVerilog packages/packed structs in rapt_pack.sv.

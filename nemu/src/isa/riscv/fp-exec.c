@@ -51,8 +51,9 @@ static inline uint64_t fp_read_d_mem(vaddr_t addr)
 #ifdef CONFIG_RV64
     return (uint64_t)vaddr_read(addr, 8);
 #else
-    uint64_t lo = (uint32_t)vaddr_read(addr, 4);
-    uint64_t hi = (uint32_t)vaddr_read(addr + 4, 4);
+    const bool misaligned = (addr & 7) != 0;
+    uint64_t lo = (uint32_t)vaddr_read_piece(addr, 4, 8, misaligned);
+    uint64_t hi = (uint32_t)vaddr_read_piece(addr + 4, 4, 8, misaligned);
     return lo | (hi << 32);
 #endif
 }
@@ -62,6 +63,7 @@ static inline void fp_write_d_mem(vaddr_t addr, uint64_t data)
 #ifdef CONFIG_RV64
     vaddr_write(addr, 8, (word_t)data);
 #else
+    vaddr_check_store(addr, 8);
     vaddr_write(addr, 4, (word_t)data);
     vaddr_write(addr + 4, 4, (word_t)(data >> 32));
 #endif

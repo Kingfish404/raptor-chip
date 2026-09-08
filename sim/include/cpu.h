@@ -1,6 +1,8 @@
 #ifndef __NPC_CPU_H__
 #define __NPC_CPU_H__
 
+void perf_reset_counters();
+
 typedef enum
 {
   MNONE__ = 0,
@@ -56,7 +58,9 @@ typedef enum
   MVENDORID,
   MARCHID,
   IMPID__,
-  MHARTID
+  MHARTID,
+  SENVCFG,
+  MENVCFGH
 } csr_t;
 
 void cpu_exec_init();

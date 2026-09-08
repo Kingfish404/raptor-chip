@@ -17,10 +17,12 @@ void (*ref_difftest_set_meip)(uint8_t val) = NULL;
 void (*ref_difftest_set_msip)(uint8_t val) = NULL;
 void (*ref_difftest_set_mtip)(uint8_t val) = NULL;
 void (*ref_difftest_set_stip)(uint8_t val) = NULL;
+void (*ref_difftest_set_seip)(uint8_t val) = NULL;
 void (*ref_difftest_plic_raise)(uint32_t src) = NULL;
 static void (*ref_difftest_checkpoint_sync)(void *dut, uint32_t plic_ndev,
                                             uint32_t plic_nctx) = NULL;
 static void (*ref_difftest_clear_reservation)(void) = NULL;
+static void (*ref_difftest_restore_sstc)(uint64_t, uint64_t) = NULL;
 
 static bool is_skip_ref = false;
 static bool should_diff_mem = false;
@@ -30,6 +32,27 @@ static int skip_dut_nr_inst = 0;
 // exercise paths the current REF doesn't model identically (e.g. Sv32 paging,
 // medeleg-driven exception delegation). Set in init_difftest().
 static bool difftest_enabled = false;
+
+static void (*ref_difftest_store_error)(uint64_t, uint8_t) = nullptr;
+static void (*ref_difftest_restore_store_error)(uint64_t, uint64_t) = nullptr;
+static bool store_error_queued = false;
+static uint64_t store_error_addr = 0;
+static uint8_t store_error_strb = 0;
+extern "C" void npc_store_error_event(uint64_t addr, uint8_t strb)
+{
+  if (!difftest_enabled) return;
+  assert(!store_error_queued);
+  store_error_queued = true;
+  store_error_addr = addr;
+  store_error_strb = strb;
+}
+void difftest_apply_store_error()
+{
+  if (!store_error_queued) return;
+  assert(difftest_enabled && ref_difftest_store_error != nullptr);
+  ref_difftest_store_error(store_error_addr, store_error_strb);
+  store_error_queued = false;
+}
 
 bool difftest_is_enabled() { return difftest_enabled; }
 
@@ -41,11 +64,27 @@ void difftest_checkpoint_resync()
   ref_difftest_memcpy(MBASE, guest_to_host(MBASE), MSIZE, DIFFTEST_TO_REF);
   ref_difftest_memcpy(MROM_BASE, guest_to_host(MROM_BASE), MROM_SIZE, DIFFTEST_TO_REF);
   ref_difftest_memcpy(FLASH_BASE, guest_to_host(FLASH_BASE), FLASH_SIZE, DIFFTEST_TO_REF);
+  // Trampoline execution is not replayed by REF. Install its saved timer CSR
+  // state before regcpy interprets STCE and the software STIP latch.
+  if (ref_difftest_restore_sstc != nullptr)
+    ref_difftest_restore_sstc(*npc.menvcfgh, *npc.stimecmp);
+  else
+    assert(*npc.menvcfgh == 0 && *npc.stimecmp == UINT64_MAX &&
+           "checkpoint Sstc state requires a reference with difftest_restore_sstc");
   if (ref_difftest_checkpoint_sync != NULL)
     ref_difftest_checkpoint_sync(&npc, NPC_PLIC_NDEV, NPC_PLIC_NCTX);
   else
     ref_difftest_regcpy(&npc, DIFFTEST_TO_REF);
 
+  uint64_t error_status = (*npc.bus_error_pending & 1u) |
+      ((*npc.bus_error_overflow & 1u) << 1) | ((uint64_t)*npc.bus_error_strb << 8);
+  if (ref_difftest_restore_store_error != nullptr)
+    ref_difftest_restore_store_error(error_status, *npc.bus_error_addr);
+  else
+    assert(error_status == 0 && *npc.bus_error_addr == 0);
+  // Snapshot state includes all completed errors; a pre-resync queued event
+  // must not be applied again as an additional failure.
+  store_error_queued = false;
   is_skip_ref = false;
   should_diff_mem = false;
   skip_dut_nr_inst = 0;
@@ -136,6 +175,9 @@ void init_difftest(char *ref_so_file, long img_size, int port)
 
   ref_difftest_raise_intr = (void (*)(uint64_t))dlsym(handle, "difftest_raise_intr");
   assert(ref_difftest_raise_intr);
+  ref_difftest_store_error = (void (*)(uint64_t, uint8_t))dlsym(handle, "difftest_store_error");
+  ref_difftest_restore_store_error = (void (*)(uint64_t, uint64_t))dlsym(handle, "difftest_restore_store_error");
+  store_error_queued = false;
 
   ref_difftest_state_version =
       (uint32_t (*)(void))dlsym(handle, "difftest_state_version");
@@ -149,11 +191,14 @@ void init_difftest(char *ref_so_file, long img_size, int port)
   ref_difftest_set_msip = (void (*)(uint8_t))dlsym(handle, "difftest_set_msip");
   ref_difftest_set_mtip = (void (*)(uint8_t))dlsym(handle, "difftest_set_mtip");
   ref_difftest_set_stip = (void (*)(uint8_t))dlsym(handle, "difftest_set_stip");
+  ref_difftest_set_seip = (void (*)(uint8_t))dlsym(handle, "difftest_set_seip");
   ref_difftest_plic_raise = (void (*)(uint32_t))dlsym(handle, "difftest_plic_raise");
   ref_difftest_checkpoint_sync =
       (void (*)(void *, uint32_t, uint32_t))dlsym(handle, "difftest_checkpoint_sync");
   ref_difftest_clear_reservation =
       (void (*)(void))dlsym(handle, "difftest_clear_reservation");
+  ref_difftest_restore_sstc =
+      (void (*)(uint64_t, uint64_t))dlsym(handle, "difftest_restore_sstc");
 
   void (*ref_difftest_init)(int) = (void (*)(int))dlsym(handle, "difftest_init");
   assert(ref_difftest_init);
@@ -350,7 +395,7 @@ static void checkregs(NPCState *ref, vaddr_t pc)
   }
 }
 
-void difftest_step(vaddr_t pc)
+void difftest_step(vaddr_t pc, uint32_t retire_count)
 {
   if (!difftest_enabled)
     return;
@@ -359,7 +404,8 @@ void difftest_step(vaddr_t pc)
   // TEST-ONLY: deterministic fault injection to validate the LightSSS
   // snapshot-on-divergence path without perturbing the RTL/reference model.
   // When NSIM_FAULT_DIFFTEST_AT=<N> is set, force a clean difftest divergence
-  // (NPC_ABORT) after N committed instructions. N must be large enough that at
+  // (NPC_ABORT) at the group boundary reaching N committed instructions.
+  // For snapshot tests, N must be large enough that at
   // least one LightSSS progress-fork has already happened (see
   // NSIM_PROGRESS_CYCLES). Never active unless the env var is present.
   static long fault_at = []() -> long
@@ -370,10 +416,13 @@ void difftest_step(vaddr_t pc)
   static long commit_seen = 0;
   if (fault_at > 0)
   {
-    if (++commit_seen == fault_at)
+    long previous_seen = commit_seen;
+    commit_seen += retire_count;
+    if (previous_seen < fault_at && commit_seen >= fault_at)
     {
-      printf(FMT_RED("[ERROR]") " injected difftest fault at commit %ld, pc=" FMT_WORD_NO_PREFIX "\n",
-             commit_seen, pc);
+      // Architectural snapshots are available only at group boundaries.
+      printf(FMT_RED("[ERROR]") " injected difftest fault at retirement group ending %ld (requested %ld), pc=" FMT_WORD_NO_PREFIX "\n",
+             commit_seen, fault_at, pc);
       npc.state = NPC_ABORT;
       return;
     }
@@ -415,7 +464,13 @@ void difftest_step(vaddr_t pc)
     }
   }
 
-  ref_difftest_exec(1);
+  // Group stepping belongs after reset/checkpoint/MMIO skip handling. No
+  // intermediate retirement may execute REF before its state is synchronized.
+  ref_difftest_exec(retire_count);
+  // DUT flops already include this edge's external write response. Apply it
+  // after retired CSR semantics (hardware wins W1C), before comparing MIP.
+  // The cycle-level call remains necessary for no-commit/skip paths.
+  difftest_apply_store_error();
   ref_difftest_regcpy(&ref_r, DIFFTEST_TO_DUT);
 
   if (ref_r.skip)

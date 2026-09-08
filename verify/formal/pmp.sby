@@ -22,4 +22,5 @@ rapt_pmp.sv ../../hdl/memory/rapt_pmp.sv
 rapt.svh ../../hdl/include/rapt.svh
 rapt_config.svh ../../hdl/configs/formal/rapt_config.svh
 rapt_sva.svh ../../hdl/include/rapt_sva.svh
+rapt_fp_ops.svh ../../hdl/include/rapt_fp_ops.svh
 pmp_formal_if.sv

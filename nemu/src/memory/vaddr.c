@@ -91,9 +91,21 @@ word_t get_paddr(vaddr_t addr, int len)
 
 word_t vaddr_ifetch(vaddr_t addr, int len)
 {
+  /* A halfword-aligned 32-bit instruction can span independently mapped
+   * pages. Read its first half before deciding whether a second is needed;
+   * a compressed instruction must not fault on an unused following page. */
+  if (len == 4 && (addr & 2))
+  {
+    const word_t first = vaddr_ifetch(addr, 2);
+    if ((first & 3) != 3) return first;
+    const word_t second = vaddr_ifetch(addr + 2, 2);
+    g_vaddr = addr;
+    return first | (second << 16);
+  }
   g_vaddr = addr;
   paddr_t paddr = addr;
   bool mmu_on = false;
+  uint8_t pbmt = 0;
   if (isa_mmu_check(addr, len, MEM_TYPE_IFETCH) == MMU_DIRECT)
   {
     paddr = addr;
@@ -101,19 +113,20 @@ word_t vaddr_ifetch(vaddr_t addr, int len)
   else
   {
     mmu_on = true;
-    if (soft_tlb_lookup(soft_tlb_ifetch, addr, &paddr))
+    if (soft_tlb_lookup_attrs(soft_tlb_ifetch, addr, &paddr, &pbmt))
     {
-      if (pmp_check(paddr, len, cpu.priv, false, false, true))
+      if (!paddr_is_memory_span(paddr, len)
+          || pmp_check(paddr, len, cpu.priv, false, false, true))
       {
         cause = MCA_INS_ACC_FAU;
         nemu_longjmp(exec_jmp_buf, 22);
       }
       return paddr_read(paddr, len);
     }
-    paddr = isa_mmu_translate(addr, len, MEM_TYPE_IFETCH);
-    soft_tlb_refill(soft_tlb_ifetch, addr, paddr);
+    paddr = isa_mmu_translate_attrs(addr, len, MEM_TYPE_IFETCH, &pbmt);
+    soft_tlb_refill_attrs(soft_tlb_ifetch, addr, paddr, pbmt);
   }
-  if (!mmu_on && paddr == 0)
+  if (!paddr_is_memory_span(paddr, len))
   {
     cause = MCA_INS_ACC_FAU;
     nemu_longjmp(exec_jmp_buf, 20);
@@ -130,11 +143,143 @@ word_t vaddr_ifetch(vaddr_t addr, int len)
   return paddr_read(paddr, len);
 }
 
-word_t vaddr_read(vaddr_t addr, int len)
+/* A virtual page boundary need not be physically contiguous. Validate both
+ * parts before issuing data accesses, retaining the faulting virtual page. */
+static void check_data_pma(paddr_t pa, int len, bool store)
+{
+  /* Probe without MMIO/skip side effects before any host access. A mapped
+   * first byte does not authorize an unaligned access past its backing. */
+  bool allowed = len > 0;
+  int fault_offset = 0;
+  for (int i = 0; allowed && i < len; i++)
+  {
+    const paddr_t byte_addr = pa + (paddr_t)i;
+    allowed = byte_addr >= pa && paddr_is_mapped(byte_addr)
+        && (!store || !paddr_is_readonly(byte_addr));
+    if (!allowed) fault_offset = i;
+  }
+  if (!allowed)
+  {
+    g_vaddr += (word_t)fault_offset;
+    cause = store ? MCA_STO_ACC_FAU : MCA_LOA_ACC_FAU;
+    nemu_longjmp(exec_jmp_buf, store ? 24 : 23);
+  }
+}
+
+/* Raptor rejects misaligned explicit IO accesses before device activity.
+ * Keep the original operation's alignment when checking cross-page pieces. */
+static void check_data_type(paddr_t pa, uint8_t pbmt, bool misaligned, bool store, int original_len)
+{
+  bool device = false;
+#ifdef CONFIG_RAPTOR_MEMORY_MAP
+  device = paddr_is_mapped(pa) && !paddr_is_memory_span(pa, 1);
+#else
+  (void)pa;
+#endif
+  bool width_fault = false;
+#ifdef CONFIG_RAPTOR_MEMORY_MAP
+  /* Physical PLIC width is not changed by page memory types or splitting. */
+  width_fault = pa >= 0x0c000000u && pa < 0x0d000000u
+      && (original_len != 4 || (pa & 3) != 0);
+#else
+  (void)original_len;
+#endif
+  if (width_fault || ((pbmt == 2 || device) && misaligned)) {
+    cause = store ? MCA_STO_ACC_FAU : MCA_LOA_ACC_FAU;
+    nemu_longjmp(exec_jmp_buf, store ? 24 : 23);
+  }
+}
+
+static paddr_t checked_data_piece(vaddr_t addr, int len, bool store, bool misaligned, int original_len)
+{
+  g_vaddr = addr;
+  const int type = store ? MEM_TYPE_WRITE : MEM_TYPE_READ;
+  const bool translated = isa_mmu_check(addr, len, type) != MMU_DIRECT;
+  uint8_t pbmt = 0;
+  paddr_t pa = translated ? isa_mmu_translate_attrs(addr, len, type, &pbmt) : addr;
+  check_data_type(pa, pbmt, misaligned, store, original_len);
+  check_data_pma(pa, len, store);
+  if (pmp_check(pa, len, pmp_effective_priv_ls(), !store, store, false))
+  {
+    if (!translated) g_vaddr = pmp_last_fault_addr;
+    cause = store ? MCA_STO_ACC_FAU : MCA_LOA_ACC_FAU;
+    nemu_longjmp(exec_jmp_buf, store ? 24 : 23);
+  }
+  return pa;
+}
+
+static paddr_t checked_data_address(vaddr_t addr, int len, bool store)
+{
+  return checked_data_piece(addr, len, store, (addr & (len - 1)) != 0, len);
+}
+
+/* A valid writable PTE also grants reads. Check write translation first so
+ * AMO page faults have the store class, then check both physical permissions. */
+paddr_t vaddr_check_reservation(vaddr_t addr, int len, bool store)
+{
+  paddr_t pa = checked_data_address(addr, len, store);
+  if (!paddr_supports_atomic(pa, len))
+  {
+    g_vaddr = addr;
+    cause = store ? MCA_STO_ACC_FAU : MCA_LOA_ACC_FAU;
+    nemu_longjmp(exec_jmp_buf, store ? 24 : 23);
+  }
+  return pa;
+}
+
+void vaddr_check_amo(vaddr_t addr, int len)
+{
+  const paddr_t pa = vaddr_check_reservation(addr, len, true);
+  if (pmp_check(pa, len, pmp_effective_priv_ls(), true, true, false))
+  {
+    g_vaddr = addr;
+    cause = MCA_STO_ACC_FAU;
+    nemu_longjmp(exec_jmp_buf, 24);
+  }
+}
+
+void vaddr_check_zero(vaddr_t addr)
+{
+  paddr_t pa = checked_data_address(addr, 1, true);
+  if (!paddr_supports_zero(pa))
+  {
+    g_vaddr = addr;
+    cause = MCA_STO_ACC_FAU;
+    nemu_longjmp(exec_jmp_buf, 24);
+  }
+}
+
+void vaddr_check_store(vaddr_t addr, int len)
+{
+  const int first = 4096 - (int)(addr & 4095);
+  if (len > first && isa_mmu_check(addr, len, MEM_TYPE_WRITE) != MMU_DIRECT)
+  {
+    checked_data_piece(addr, first, true, true, len);
+    checked_data_piece(addr + first, len - first, true, true, len);
+  }
+  else checked_data_address(addr, len, true);
+}
+
+/* Keep original width/alignment across RV32 FLD pieces without widening
+ * each piece's PMP footprint or reading a device during validation. */
+word_t vaddr_read_piece(vaddr_t addr, int len, int original_len, bool original_misaligned)
 {
   g_vaddr = addr;
   cpu.rvaddr = addr;
   cpu.rlen = len;
+  const int first = 4096 - (int)(addr & 4095);
+  if (len > first && isa_mmu_check(addr, len, MEM_TYPE_READ) != MMU_DIRECT)
+  {
+    paddr_t lo = checked_data_piece(addr, first, false, original_misaligned, original_len);
+    paddr_t hi = checked_data_piece(addr + first, len - first, false, original_misaligned, original_len);
+    word_t value = 0;
+    for (int i = 0; i < len; i++)
+      value |= (word_t)paddr_read(i < first ? lo + i : hi + i - first, 1) << (8*i);
+    g_vaddr = addr;
+    cpu.rpaddr = lo;
+    cpu.rdata = value;
+    return value;
+  }
   /* Misaligned ordinary loads are allowed (Zicclsm). The rapt RTL LSU
    * splits misaligned beats via the MA_HI / LS_S_HI_V FSM, and the
    * spike-diff reference is configured with `zicclsm` so it permits
@@ -145,6 +290,7 @@ word_t vaddr_read(vaddr_t addr, int len)
   }
   paddr_t paddr = addr;
   bool mmu_on = false;
+  uint8_t pbmt = 0;
   if (isa_mmu_check(addr, len, MEM_TYPE_READ) == MMU_DIRECT)
   {
     paddr = addr;
@@ -152,8 +298,10 @@ word_t vaddr_read(vaddr_t addr, int len)
   else
   {
     mmu_on = true;
-    if (soft_tlb_lookup(soft_tlb_load, addr, &paddr))
+    if (soft_tlb_lookup_attrs(soft_tlb_load, addr, &paddr, &pbmt))
     {
+      check_data_type(paddr, pbmt, original_misaligned, false, original_len);
+      check_data_pma(paddr, len, false);
       if (pmp_check(paddr, len, pmp_effective_priv_ls(), true, false, false))
       {
         if (!mmu_on)
@@ -167,9 +315,11 @@ word_t vaddr_read(vaddr_t addr, int len)
       cpu.rdata = paddr_read(paddr, len);
       return cpu.rdata;
     }
-    paddr = isa_mmu_translate(addr, len, MEM_TYPE_READ);
-    soft_tlb_refill(soft_tlb_load, addr, paddr);
+    paddr = isa_mmu_translate_attrs(addr, len, MEM_TYPE_READ, &pbmt);
+    soft_tlb_refill_attrs(soft_tlb_load, addr, paddr, pbmt);
   }
+  check_data_type(paddr, pbmt, original_misaligned, false, original_len);
+  check_data_pma(paddr, len, false);
   if (pmp_check(paddr, len, pmp_effective_priv_ls(), true, false, false))
   {
     if (!mmu_on)
@@ -184,12 +334,32 @@ word_t vaddr_read(vaddr_t addr, int len)
   return cpu.rdata;
 }
 
+word_t vaddr_read(vaddr_t addr, int len)
+{
+  return vaddr_read_piece(addr, len, len, (addr & (len - 1)) != 0);
+}
+
 void vaddr_write(vaddr_t addr, int len, word_t data)
 {
   g_vaddr = addr;
   cpu.vwaddr = addr;
   cpu.wdata = data;
   cpu.len = len;
+  const int first = 4096 - (int)(addr & 4095);
+  if (len > first && isa_mmu_check(addr, len, MEM_TYPE_WRITE) != MMU_DIRECT)
+  {
+    paddr_t lo = checked_data_piece(addr, first, true, true, len);
+    paddr_t hi = checked_data_piece(addr + first, len - first, true, true, len);
+    for (int i = 0; i < len; i++)
+    {
+      paddr_t pa = i < first ? lo + i : hi + i - first;
+      paddr_write(pa, 1, (data >> (8*i)) & 0xff);
+      if ((cpu.reservation & ~(word_t)3) == (pa & ~(paddr_t)3)) { cpu.reservation = 0; cpu.reservation_bytes = 0; }
+    }
+    g_vaddr = addr;
+    cpu.pwaddr = lo;
+    return;
+  }
   /* Misaligned ordinary stores are allowed (Zicclsm); see vaddr_read note. */
   if (mem_trace != NULL)
   {
@@ -197,6 +367,7 @@ void vaddr_write(vaddr_t addr, int len, word_t data)
   }
   paddr_t paddr = 0;
   bool mmu_on = false;
+  uint8_t pbmt = 0;
   if (isa_mmu_check(addr, len, MEM_TYPE_WRITE) == MMU_DIRECT)
   {
     paddr = addr;
@@ -204,8 +375,10 @@ void vaddr_write(vaddr_t addr, int len, word_t data)
   else
   {
     mmu_on = true;
-    if (soft_tlb_lookup(soft_tlb_store, addr, &paddr))
+    if (soft_tlb_lookup_attrs(soft_tlb_store, addr, &paddr, &pbmt))
     {
+      check_data_type(paddr, pbmt, (addr & (len - 1)) != 0, true, len);
+      check_data_pma(paddr, len, true);
       if (pmp_check(paddr, len, pmp_effective_priv_ls(), false, true, false))
       {
         if (!mmu_on)
@@ -220,12 +393,15 @@ void vaddr_write(vaddr_t addr, int len, word_t data)
       if ((cpu.reservation & ~0x3) == (paddr & ~0x3))
       {
         cpu.reservation = 0;
+        cpu.reservation_bytes = 0;
       }
       return;
     }
-    paddr = isa_mmu_translate(addr, len, MEM_TYPE_WRITE);
-    soft_tlb_refill(soft_tlb_store, addr, paddr);
+    paddr = isa_mmu_translate_attrs(addr, len, MEM_TYPE_WRITE, &pbmt);
+    soft_tlb_refill_attrs(soft_tlb_store, addr, paddr, pbmt);
   }
+  check_data_type(paddr, pbmt, (addr & (len - 1)) != 0, true, len);
+  check_data_pma(paddr, len, true);
   if (pmp_check(paddr, len, pmp_effective_priv_ls(), false, true, false))
   {
     if (!mmu_on)
@@ -240,6 +416,7 @@ void vaddr_write(vaddr_t addr, int len, word_t data)
   if ((cpu.reservation & ~0x3) == (paddr & ~0x3))
   {
     cpu.reservation = 0;
+    cpu.reservation_bytes = 0;
   }
 }
 
@@ -250,17 +427,25 @@ void vaddr_check_cmo(vaddr_t addr)
 {
   g_vaddr = addr;
   paddr_t paddr = addr;
-  if (isa_mmu_check(addr, 1, MEM_TYPE_CMO) != MMU_DIRECT)
+  const bool translated = isa_mmu_check(addr, 1, MEM_TYPE_CMO) != MMU_DIRECT;
+  if (translated)
   {
-    paddr = isa_mmu_translate(addr, 1, MEM_TYPE_CMO);
+    uint8_t pbmt;
+    paddr = isa_mmu_translate_attrs(addr, 1, MEM_TYPE_CMO, &pbmt);
   }
 
+  if (!paddr_is_mapped(paddr))
+  {
+    cause = MCA_STO_ACC_FAU;
+    nemu_longjmp(exec_jmp_buf, 24);
+  }
   uint32_t priv = pmp_effective_priv_ls();
   bool read_fault = pmp_check(paddr, 1, priv, true, false, false);
   bool write_fault = pmp_check(paddr, 1, priv, false, true, false);
   if (read_fault && write_fault)
   {
-    g_vaddr = pmp_last_fault_addr;
+    // PMP checks physical addresses; tval must retain the virtual operand.
+    if (!translated) g_vaddr = pmp_last_fault_addr;
     cause = MCA_STO_ACC_FAU;
     nemu_longjmp(exec_jmp_buf, 24);
   }

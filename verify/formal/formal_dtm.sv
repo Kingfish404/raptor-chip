@@ -28,11 +28,25 @@ module formal_dtm (
   logic [31:0] dut_dmi_data_q;
   logic [1:0] dut_dmi_op_q;
 
-  rapt_dtm #(.IDCODE(Idcode)) dut (
-      .clock, .reset, .trst_n(1'b1), .tms, .tdi, .tdo,
-      .dmi_req, .dmi_wr, .dmi_addr, .dmi_wdata, .dmi_rdata, .dmi_resp,
-      .formal_state(dut_state), .formal_ir_shift(dut_ir_shift),
-      .formal_ir(dut_ir), .formal_dr(dut_dr),
+  rapt_dtm #(
+      .IDCODE(Idcode)
+  ) dut (
+      .clock,
+      .reset,
+      .trst_n(1'b1),
+      .tms,
+      .tdi,
+      .tdo,
+      .dmi_req,
+      .dmi_wr,
+      .dmi_addr,
+      .dmi_wdata,
+      .dmi_rdata,
+      .dmi_resp,
+      .formal_state(dut_state),
+      .formal_ir_shift(dut_ir_shift),
+      .formal_ir(dut_ir),
+      .formal_dr(dut_dr),
       .formal_dmi_addr_q(dut_dmi_addr_q),
       .formal_dmi_data_q(dut_dmi_data_q),
       .formal_dmi_op_q(dut_dmi_op_q)
@@ -130,28 +144,28 @@ module formal_dtm (
   always_ff @(posedge clock) f_past_valid <= 1'b1;
 
   always_comb begin
-    assume(f_past_valid || reset);
+    assume (f_past_valid || reset);
     if (f_past_valid) begin
-      assert(dut_state == ref_state);
-      assert(dut_ir_shift == ref_ir_shift);
-      assert(dut_ir == ref_ir);
-      assert(dut_dr == ref_dr);
-      assert(dut_dmi_addr_q == ref_dmi_addr_q);
-      assert(dut_dmi_data_q == ref_dmi_data_q);
-      assert(dut_dmi_op_q == ref_dmi_op_q);
-      assert(tdo == ref_tdo);
-      assert(dmi_req == ref_dmi_req);
-      assert(dmi_wr == (ref_dr[1:0] == 2'b10));
-      assert(dmi_addr == ref_dr[40:34]);
-      assert(dmi_wdata == ref_dr[33:2]);
+      assert (dut_state == ref_state);
+      assert (dut_ir_shift == ref_ir_shift);
+      assert (dut_ir == ref_ir);
+      assert (dut_dr == ref_dr);
+      assert (dut_dmi_addr_q == ref_dmi_addr_q);
+      assert (dut_dmi_data_q == ref_dmi_data_q);
+      assert (dut_dmi_op_q == ref_dmi_op_q);
+      assert (tdo == ref_tdo);
+      assert (dmi_req == ref_dmi_req);
+      assert (dmi_wr == (ref_dr[1:0] == 2'b10));
+      assert (dmi_addr == ref_dr[40:34]);
+      assert (dmi_wdata == ref_dr[33:2]);
     end
   end
 
   always_ff @(posedge clock) begin
     if (f_past_valid && !reset) begin
-      cover(dmi_req && !dmi_wr);
-      cover(dmi_req && dmi_wr);
-      cover(ref_state == 4'd3 && ref_ir == IrDtmcs);
+      cover (dmi_req && !dmi_wr);
+      cover (dmi_req && dmi_wr);
+      cover (ref_state == 4'd3 && ref_ir == IrDtmcs);
     end
   end
 endmodule

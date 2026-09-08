@@ -29,5 +29,6 @@ prep -top formal_ieu_alu
 formal_ieu_alu.sv
 rapt_ieu_alu.sv ../../hdl/backend/ieu/rapt_ieu_alu.sv
 rapt.svh ../../hdl/include/rapt.svh
+rapt_fp_ops.svh ../../hdl/include/rapt_fp_ops.svh
 rapt_config.svh ../../hdl/configs/formal/rapt_config.svh
 rapt_sva.svh ../../hdl/include/rapt_sva.svh

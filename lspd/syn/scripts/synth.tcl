@@ -24,6 +24,13 @@ foreach lib $::env(YS_SRAM_LIB_FILES) {
 set slang_cmd [concat read_slang $::env(YS_SLANG_FLAGS) --top $top $::env(YS_SV_FILES)]
 read_slang {*}[lrange $slang_cmd 1 end]
 hierarchy -check -top $top
+# Parameter contracts are checked at elaboration in RTL. Unexpected assertion
+# cells are an error here, rather than silently removed from the netlist.
+select -assert-none {t:$check} {t:$assert} {t:$assume} {t:$cover}
+# Check live connectivity before synthesis/undriven normalization can hide a
+# missing functional driver. Ordinary opt removes transient frontend mux loops.
+opt
+check -assert
 synth -top $top
 opt -purge
 
@@ -62,7 +69,7 @@ hilomap -singleton -hicell {*}$TIEHI_CELL_AND_PORT -locell {*}$TIELO_CELL_AND_PO
 insbuf -buf {*}$MIN_BUF_CELL_AND_PORTS
 opt_clean -purge
 
-check
+check -assert
 tee -o $out/$top.stat.rpt stat {*}$stat_liberty_args
 write_json $out/$top.json
 write_verilog -noattr -noexpr -nohex -nodec $out/$top.netlist.v

@@ -15,6 +15,12 @@ make sim
 make coremark
 ```
 
+`SIM_JOBS` limits concurrent C++ compilations (default: up to 4); use
+`make sim-build ROM=bios SIM_JOBS=2` on memory-limited CI runners.
+`SIM_THREADS` controls runtime simulation threads independently. Always pass a
+positive build limit: LiteX's omitted job count otherwise produces unlimited
+`make -j`. `SIM_TIMEOUT` applies to simulation execution, not compilation.
+
 ## Tang Mega 138K Pro Hardware Flow
 
 ```bash
@@ -49,6 +55,11 @@ require an explicit board when multiple boards share the same FPGA part.
 Vivado load and flash scripts require exactly one JTAG device matching the board's
 registered part. They never fall back to the first device in the chain, so a
 KU15P bitstream cannot accidentally be assigned to an AU15P.
+
+`fpga-load` warns when the saved bitstream input hash differs from the current
+inputs or its stamp is missing, then continues loading the existing bitstream.
+Missing bitstream files and failed timing checks still stop loading.
+`fpga-flash` requires a matching input hash.
 
 ## ALINX AXAU15 Hardware Flow (Xilinx Vivado)
 
@@ -156,12 +167,23 @@ make fpga-console FPGA_BOARD=mlk_cu08_ku15p UART_PORT=/dev/ttyUSB1
 make linux-fpga-rv32-e2e FPGA_BOARD=mlk_cu08_ku15p UART_PORT=/dev/ttyUSB1
 ```
 
-The default Linux command line enters `/bin/sh` directly. This is the preferred
-bring-up path: it avoids spending tens of minutes in Buildroot service scripts
-before a serial prompt appears. To exercise the complete init sequence instead,
-including networking and SSH host-key generation, add `LINUX_FPGA_INIT=full`:
+The default `LINUX_FPGA_INIT=full` runs `/init`, mounts the runtime filesystems,
+starts Buildroot services, and provides a console login. The explicit diagnostic
+option `LINUX_FPGA_INIT=shell` enters `/bin/sh` directly and skips
+runtime mounts as well as services. Missing `/proc/cpuinfo`, `/sys/devices` or
+`/dev/null` in this mode does not imply that the kernel lacks those features.
+With linux-build packages containing `/sbin/raptor-shell`, select
+`LINUX_FPGA_INIT=prepared-shell` for a fast shell with procfs, sysfs, devtmpfs
+and devpts mounted. Older packages can use `LINUX_FPGA_INIT=full` for the
+complete Buildroot init sequence, including networking and SSH host-key
+generation:
 
 ```bash
+# New linux-build packages: mounts runtime filesystems, skips services.
+make linux-fpga-rv32-e2e FPGA_BOARD=mlk_cu08_ku15p \
+    UART_PORT=/dev/ttyUSB1 LINUX_FPGA_INIT=prepared-shell
+
+# Full Buildroot initialization, also supported by older packages.
 make linux-fpga-rv32-e2e FPGA_BOARD=mlk_cu08_ku15p \
     UART_PORT=/dev/ttyUSB1 LINUX_FPGA_INIT=full
 ```
@@ -379,24 +401,25 @@ sudo fsck.fat -n /dev/sdX1
 Insert the card into the KU15P board, load its Linux bitstream, and open the
 console (`make linux-fpga-rv32-load FPGA_BOARD=mlk_cu08_ku15p`, then
 `make fpga-console FPGA_BOARD=mlk_cu08_ku15p UART_PORT=/dev/ttyUSB1`). BIOS
-normally tries SD automatically after serialboot times out; at a `litex>` prompt,
-run `sdcardboot` manually. The KU15P flow is verified through an interactive
+waits at the `litex>` prompt after serialboot times out, even with an SD card
+inserted. Run `sdcardboot` to start from SD manually. The KU15P flow is verified through an interactive
 BusyBox root shell. Other boards still need their own end-to-end validation.
 
 Key conventions:
 - The bitstream knobs `BOOT_MODE=bios INTEGRATED_MAIN_RAM_SIZE=0 WITH_MIG=1` are all auto-set by the Linux FPGA profile (`VARIANT=linux32`). The board-specific MIG IP maps external DDR4 at `0x80000000`.
-- The SD controller is present by default in KU15P and AXAU15 Linux builds. LiteX BIOS follows its normal boot sequence, including SDCard boot when a card is available; the `sdcardboot` command can also start it manually from the `litex>` console.
+- The SD controller is present by default in KU15P and AXAU15 Linux builds. `SDCARD_BOOT_DISABLE` excludes SD from automatic BIOS boot; enter `sdcardboot` at the `litex>` console to start it. Serialboot remains available.
 - Default `fpga-upload VARIANT=linux32` is a serial fallback: it uses LiteXTerm multi-image mode to upload only payload, seeded DTB, and stage0, avoiding the zero-filled holes in the contiguous SD image.
 - KU15P UART and SFL are fixed at 115200 baud because the board's host-to-FPGA path is not reliable at higher rates.
 - Payload-only iteration: once the bitstream is loaded, just re-run the matching upload target (`make fpga-upload VARIANT=linux32`, `make coremark-fpga VARIANT=linux32`, …) — no re-synthesis needed.
 - Raw `BIN` uploads (`make fpga-upload VARIANT=linux32 BIN=…`) carry no OpenSBI args/DTB/relocation; the image must bring its own LiteX MMIO runtime.
-- Hardware-changing knobs require a new bitstream; `make fpga VARIANT=linux32` (build + load) rebuilds first, while `make fpga-load VARIANT=linux32` loads the existing bitstream without rebuilding.
+- Hardware-changing knobs and BIOS source changes require a new bitstream; `make fpga VARIANT=linux32` (build + load) rebuilds first, while `make fpga-load VARIANT=linux32` checks the build stamp and loads the existing bitstream without rebuilding. Source-only generation (`fpga-gen`) invalidates that stamp: a newly generated `bios.bin` or `soc.h` does not update the ROM in an existing `.bit`. Use the same `FPGA_BOARD`, `VARIANT`, and preset for build and load. `fpga-load` is volatile; after power cycling, the board uses the image in flash.
 
 Status: the `default` RV32GC-capable preset routes, passes the BIOS DDR test,
 boots OpenSBI and Linux from an unchanged legacy SD image, initializes the CRNG
 from the BIOS-embedded DTB at kernel time zero, and reaches the interactive
-BusyBox `~ #` root shell with the default `LINUX_FPGA_INIT=shell`. Use
-`LINUX_FPGA_INIT=full` when Buildroot services are required. Do not treat SFL or
+BusyBox `~ #` root shell with the historical `LINUX_FPGA_INIT=shell` setting.
+The current default is `LINUX_FPGA_INIT=full`; that full-service startup still
+needs separate board acceptance. Do not treat SFL or
 SD copy completion alone as a successful Linux boot; the end-to-end success
 marker is an interactive shell prompt.
 

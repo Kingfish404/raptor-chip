@@ -8,12 +8,13 @@ void difftest_skip_ref();
 void difftest_skip_dut(int nr_ref, int nr_dut);
 
 void difftest_raise_intr(uint64_t NO);
+void difftest_apply_store_error();
 
 bool difftest_is_enabled();
 
 void difftest_checkpoint_resync();
 
-void difftest_step(vaddr_t pc);
+void difftest_step(vaddr_t pc, uint32_t retire_count = 1);
 
 void init_difftest(char *ref_so_file, long img_size, int port);
 

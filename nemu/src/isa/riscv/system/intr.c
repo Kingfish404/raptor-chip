@@ -31,6 +31,7 @@ extern word_t g_vaddr;
 
 word_t isa_raise_intr(word_t NO, vaddr_t epc)
 {
+  if (!(NO & MCA_INTR_BIT)) cpu.instruction_trapped = true;
 #ifdef CONFIG_ETRACE
   printf("ETRACE | NO: %d at epc: " FMT_WORD " trap-handler base address: " FMT_WORD,
          NO, epc, cpu.sr[CSR_MTVEC]);
@@ -42,7 +43,9 @@ word_t isa_raise_intr(word_t NO, vaddr_t epc)
     switch (NO)
     {
     case MCA_ILLEGAL_INS:
-      tval = cpu.inst;
+      // RV32 fetch may retain the following parcel in cpu.inst. Illegal
+      // compressed instructions report only their own 16-bit encoding.
+      tval = (cpu.inst & 3) == 3 ? cpu.inst : (cpu.inst & 0xffff);
       break;
     case MCA_INS_ADD_MIS:
     case MCA_INS_ACC_FAU:
@@ -72,7 +75,9 @@ word_t isa_raise_intr(word_t NO, vaddr_t epc)
       tval = 0;
       break;
     case MCA_INS_PAG_FAU:
-      tval = epc;
+      /* epc identifies the instruction; a straddling instruction can fault
+       * on the second halfword, whose VA is retained by vaddr_ifetch. */
+      tval = g_vaddr;
       break;
     case MCA_LOA_PAG_FAU:
     case MCA_STO_PAG_FAU:
@@ -84,11 +89,14 @@ word_t isa_raise_intr(word_t NO, vaddr_t epc)
     }
   }
   word_t ret_pc = 0;
+  const bool is_interrupt = (NO & MCA_INTR_BIT) != 0;
+  const word_t cause = NO & ~MCA_INTR_BIT;
+  const word_t delegation = cpu.sr[is_interrupt ? CSR_MIDELEG : CSR_MEDELEG];
   if (cpu.priv <= PRV_S)
   {
-    if ((cpu.sr[CSR_MEDELEG] & ((word_t)1 << NO)) //
-        || ((NO & ((word_t)1 << (XLEN - 1)))      //
-            && (cpu.sr[CSR_MIDELEG] & ((word_t)1 << (NO & ~((word_t)1 << (XLEN - 1)))))))
+    // Interrupts consult only mideleg, exceptions only medeleg. Never shift
+    // by the interrupt flag or by an unrepresentable delegation bit number.
+    if (cause < XLEN && ((delegation >> cause) & 1))
     {
       // printf("NO: %x, (NO & (1 << (XLEN - 1))): %x, "
       //        "(1 << (NO & ~(1 << (XLEN - 1)))): %x\n",
@@ -178,7 +186,7 @@ word_t isa_query_intr()
   return INTR_EMPTY;
 #else
   csr_t reg_mstatus = {.val = cpu.sr[CSR_MSTATUS]};
-  word_t mip = cpu.sr[CSR_MIP];
+  word_t mip = riscv_mip_value();
   word_t mie = cpu.sr[CSR_MIE];
   word_t pending = mip & mie;
 

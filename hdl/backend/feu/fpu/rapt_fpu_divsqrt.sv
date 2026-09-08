@@ -1,4 +1,3 @@
-`include "rapt.svh"
 
 // One-operation-at-a-time IEEE-754 divider/square-root unit, multi-cycle
 // iterative implementation. One quotient/root bit is retired per clock using
@@ -19,7 +18,10 @@
 // in the same cycle. flush aborts any in-flight operation.
 
 module rapt_fpu_divsqrt #(
-    parameter int XLEN = `RAPT_XLEN
+    // Compatibility parameter: arithmetic width is selected by src_is_double.
+    /* verilator lint_off UNUSEDPARAM */
+    parameter int XLEN = 64
+    /* verilator lint_on UNUSEDPARAM */
 ) (
     input  logic        clock,
     input  logic        reset,
@@ -27,7 +29,10 @@ module rapt_fpu_divsqrt #(
     input  logic [63:0] operand_b,
     input  logic [2:0]  rounding_mode,
     input  logic        src_is_double,
+    // Retained scalar interface port; this unit has same-width results.
+    /* verilator lint_off UNUSEDSIGNAL */
     input  logic        dst_is_double,
+    /* verilator lint_on UNUSEDSIGNAL */
     input  logic        divide,
     input  logic        sqrt,
     input  logic        flush,
@@ -151,23 +156,45 @@ module rapt_fpu_divsqrt #(
   function automatic logic [52:0] norm_mant(input logic [51:0] frac, input logic [10:0] exp,
                                             input logic dbl, output int adj);
     logic [52:0] m;
-    int          i;
+    logic [5:0] shift;
+    logic zero_mant;
     begin
-      // Unified 1.f format with the leading 1 at bit 52 for both precisions.
-      // Single precision left-aligns its 23-bit fraction just below bit 52.
       if (dbl) m = {1'b1, frac};
       else m = {1'b1, frac[22:0], 29'b0};
       adj = 0;
+      shift = '0;
+      zero_mant = 1'b0;
       if (exp == '0) begin
-        // subnormal: strip the implicit hidden bit, then normalise upward
         if (dbl) m = {1'b0, frac};
         else m = {1'b0, frac[22:0], 29'b0};
-        for (i = 0; i < 52; i = i + 1) begin
-          if (!m[52]) begin
-            m   = m << 1;
-            adj = adj - 1;
-          end
+        zero_mant = (m == '0);
+        // Six bounded stages replace 52 serial conditional shifts. Keep
+        // the original zero-input adjustment (-52), including special cases.
+        if (m[52:21] == '0) begin
+          m = m << 32;
+          shift[5] = 1'b1;
         end
+        if (m[52:37] == '0) begin
+          m = m << 16;
+          shift[4] = 1'b1;
+        end
+        if (m[52:45] == '0) begin
+          m = m <<  8;
+          shift[3] = 1'b1;
+        end
+        if (m[52:49] == '0) begin
+          m = m <<  4;
+          shift[2] = 1'b1;
+        end
+        if (m[52:51] == '0) begin
+          m = m <<  2;
+          shift[1] = 1'b1;
+        end
+        if (!m[52]) begin
+          m = m <<  1;
+          shift[0] = 1'b1;
+        end
+        adj = zero_mant ? -52 : -int'(shift);
       end
       return m;
     end
@@ -306,6 +333,7 @@ module rapt_fpu_divsqrt #(
     logic [57:0]        sig_round;
     logic signed [13:0] e_round;
     logic sub_norm, overflow, uf;
+    logic tiny_after_rounding, precision_round_up, precision_carry;
     int                 sh;
     logic [57:0]        sticky_mask;
     logic               sign_r;
@@ -336,6 +364,9 @@ module rapt_fpu_divsqrt #(
     sub_norm   = 1'b0;
     overflow   = 1'b0;
     uf         = 1'b0;
+    tiny_after_rounding = 1'b0;
+    precision_round_up = 1'b0;
+    precision_carry = 1'b0;
     sh         = 0;
     sticky_mask = '0;
     pe         = '0;
@@ -362,8 +393,28 @@ module rapt_fpu_divsqrt #(
     // subnormal: shift right until exponent reaches emin
     sub_norm = 1'b0;
     final_emin = is_double_q ? -14'sd1022 : -14'sd126;
+    // Tininess after rounding is measured at target precision with an
+    // unbounded exponent range, before reducing precision for subnormals.
+    // The final packed value can round up to minimum normal and still be
+    // tiny under that rule (for example, max-subnormal / next-below-one).
+    g = is_double_q ? sig_ext[2] : sig_ext[31];
+    r = is_double_q ? sig_ext[1] : sig_ext[30];
+    s = is_double_q ? sig_ext[0] : |sig_ext[29:0];
+    unique case (rm_q)
+      3'b000: precision_round_up = g && (r || s
+          || (is_double_q ? sig_ext[3] : sig_ext[32]));
+      3'b001: precision_round_up = 1'b0;
+      3'b010: precision_round_up = (g || r || s) && sign_r;
+      3'b011: precision_round_up = (g || r || s) && !sign_r;
+      3'b100: precision_round_up = g;
+      default: precision_round_up = 1'b0;
+    endcase
+    precision_carry = precision_round_up
+        && (is_double_q ? (&sig_ext[55:3]) : (&sig_ext[55:32]));
+    tiny_after_rounding = (e < final_emin)
+        && !((e == final_emin - 14'sd1) && precision_carry);
     if (e < final_emin) begin
-      sh = final_emin - e;
+      sh = int'(final_emin) - int'(e);
       if (sh > 57) sh = 58;
       sticky_mask = (58'd1 << sh) - 58'd1;
       if ((sig_ext & sticky_mask) != '0) begin
@@ -404,7 +455,7 @@ module rapt_fpu_divsqrt #(
         3'b100:  round_up = g;
         default: round_up = 1'b0;
       endcase
-      sig_round = {26'b0, sig_ext[55:32]} + 58'(round_up);
+      sig_round = {34'b0, sig_ext[55:32]} + 58'(round_up);
     end
     e_round = e;
     if (is_double_q) begin
@@ -435,11 +486,11 @@ module rapt_fpu_divsqrt #(
       uf = 1'b0;
       if (is_double_q) begin
         if (sub_norm && !sig_round[52]) pe = '0;
-        uf = (pe == '0) && inexact;
+        uf = tiny_after_rounding && inexact;
         final_result = {sign_r, pe, sig_round[51:0]};
       end else begin
         if (sub_norm && !sig_round[23]) pe = '0;
-        uf = (pe == '0) && inexact;
+        uf = tiny_after_rounding && inexact;
         final_result = {32'hffff_ffff, sign_r, pe[7:0], sig_round[22:0]};
       end
       final_flags = {3'b000, uf, inexact};

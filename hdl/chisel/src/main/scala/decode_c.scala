@@ -234,7 +234,8 @@ class rapt_idu_decoder_c extends RawModule with Instr {
   val op_table    = Array(
     // Instruction listing for RVC, Quadrant 0
     C_INV_     -> List(0.U),
-    C_ADDI4SPN -> List(itype(decCiwImm(cinst), 2.U(5.W), "b000".U(3.W), decRdShort(cinst), "b0010011".U(7.W))),
+    C_ADDI4SPN -> List(Mux(decCiwImm(cinst) === 0.U, 0.U(32.W),
+                     itype(decCiwImm(cinst), 2.U(5.W), "b000".U(3.W), decRdShort(cinst), "b0010011".U(7.W)))),
     C_FLD_     -> List(c_fld_inst),
     C_LQ__     -> List(0.U),
     C_LW__     -> List(itype(decClwCswImm(cinst), decRs1Short(cinst), "b010".U(3.W), decRdShort(cinst), "b0000011".U(7.W))),
@@ -260,9 +261,14 @@ class rapt_idu_decoder_c extends RawModule with Instr {
     C_ADDIW    -> List(c_addiw_inst), // rv64: C.ADDIW -> addiw rd, rd, imm
     C_LI__     -> List(Mux(decRdShort(cinst) === 0.U, cNop, itype(decCiImm(cinst), 0.U(5.W), "b000".U(3.W), decRd(cinst), "b0010011".U(7.W)))),
     
-    C_ADDI16sp -> List(Mux(decCiNzimmAddi16sp(cinst) === 0.U, cNop,
+    C_ADDI16sp -> List(Mux(decCiNzimmAddi16sp(cinst) === 0.U, 0.U(32.W),
                      itype(decCiNzimmAddi16sp(cinst), 2.U(5.W), "b000".U(3.W), 2.U(5.W), "b0010011".U(7.W)))), // res,imm=0
-    C_LUI_   -> List(Mux(decRd(cinst) === 0.U || decCiNzimmLui(cinst) === 0.U, cNop, utype(decCiNzimmLui(cinst), decRd(cinst), "b0110111".U(7.W)))), // Zcmop: nzimm=0 -> NOP
+    // Zcmop uses only C.LUI xn,0 for odd n in 1..15. Other zero-immediate
+    // forms remain reserved; rd=x0 with a nonzero immediate remains a HINT.
+    C_LUI_   -> List(Mux(decCiNzimmLui(cinst) === 0.U,
+                     Mux(decRd(cinst) < 16.U && cinst(7), cNop, 0.U(32.W)),
+                     Mux(decRd(cinst) === 0.U, cNop,
+                         utype(decCiNzimmLui(cinst), decRd(cinst), "b0110111".U(7.W))))),
     C_SRLI   -> List(itype(Cat(0.U(6.W), decCshamtFull(cinst)), decRs1Short(cinst), "b101".U(3.W), decRs1Short(cinst), "b0010011".U(7.W))), // hint,rd=0;rv32 custom,uimm[5]=1
     C_SRLI64 -> List(0.U), // rv128; rv32/64 hint;hint,rd=0
     C_SRAI   -> List(itype(Cat("b010000".U(6.W), decCshamtFull(cinst)), decRs1Short(cinst), "b101".U(3.W), decRs1Short(cinst), "b0010011".U(7.W))), // rv32 custom,uimm[5]=1
@@ -349,5 +355,13 @@ class rapt_idu_decoder_c extends RawModule with Instr {
       cinst(6, 5) === "b11".U && cinst(4, 2) === "b100".U) -> Mux(is_rv64, raw_inst, 0.U(32.W))
   ))
 
-  io.inst := fixed_inst
+  // These integer encodings require a nonzero architectural register.
+  // Keep RV32 C.FLWSP f0 and C.JAL legal at the overlapping code points.
+  val zeroRegisterReserved = decRd(cinst) === 0.U && (
+    (quadrant === "b10".U && funct3 === "b010".U) ||
+    (is_rv64 && quadrant === "b10".U && funct3 === "b011".U) ||
+    (is_rv64 && quadrant === "b01".U && funct3 === "b001".U) ||
+    cinst === "h8002".U(16.W)
+  )
+  io.inst := Mux(zeroRegisterReserved, 0.U(32.W), fixed_inst)
 }

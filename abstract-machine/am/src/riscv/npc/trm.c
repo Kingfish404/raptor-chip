@@ -22,7 +22,9 @@ void putch(char ch)
 
 void halt(int code)
 {
-  asm volatile("ebreak");
+  // EBREAK stops the simulator immediately. Complete pending UART/MMIO and
+  // memory stores first, including beats held up by random AXI backpressure.
+  asm volatile("fence iorw, iorw\n\tebreak" ::: "memory");
   while (1)
     ;
 }

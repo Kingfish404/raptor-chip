@@ -47,11 +47,4 @@
 
 `define RAPT_BUS_FINISHER_ADDR 'h00100000
 
-// `define RAPT_USE_SLAVE 1
-
-`define RAPT_I_SDRAM_ARBURST 0
-
-// random test setting
-`define RAPT_IFSR_ENABLE 0
-
 `endif

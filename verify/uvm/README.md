@@ -48,7 +48,6 @@ in this environment.
 ```text
 uvm/
 ├── README.md
-├── VERIFICATION_PLAN.md
 ├── xsim_uvm_smoke.sv
 └── iq/
     ├── rapt_iq_uvm_if.sv
