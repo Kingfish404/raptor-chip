@@ -221,6 +221,9 @@ module rapt_router #(
   } w_state_t;
 
   w_state_t w_state, w_state_next;
+  // AXI permits the last W beat to handshake before its AW. Retain that
+  // completion until the address arrives instead of waiting for W twice.
+  logic offchip_w_done_q;
   int_slave_t            w_int_target;
   logic       [     3:0] w_int_id;
   logic       [XLEN-1:0] w_int_awaddr;
@@ -254,7 +257,8 @@ module rapt_router #(
   // have already entered W_IO_W, or we are still in W_IDLE with a
   // valid offchip AW request pending.
   assign offchip_axi.wvalid = ((w_state == W_IO_W) ||
-                               (w_state == W_IDLE && core_axi.awvalid && !aw_is_int))
+                               (w_state == W_IDLE && core_axi.awvalid && !aw_is_int
+                                && !offchip_w_done_q))
                               && core_axi.wvalid;
   assign offchip_axi.wlast = core_axi.wlast;
   assign offchip_axi.wdata = core_axi.wdata;
@@ -268,7 +272,7 @@ module rapt_router #(
   assign core_axi.wready = (w_state == W_INT_W)
                          || ((w_state == W_IO_W) && offchip_axi.wready)
                          || (w_state == W_IDLE && core_axi.awvalid && !aw_is_int
-                             && offchip_axi.wready);
+                             && !offchip_w_done_q && offchip_axi.wready);
 
   assign w_int_data = axi_wdata_to_internal(core_axi.wdata, w_int_awaddr[IntByteOffW-1:0]);
   assign clint_bus.wdata = w_int_data;
@@ -294,9 +298,10 @@ module rapt_router #(
         if (core_axi.awvalid && core_axi.awready) begin
           if (aw_is_int) begin
             w_state_next = W_INT_W;
-          end else if (core_axi.wvalid && core_axi.wready && core_axi.wlast) begin
-            // AW+W handshake fired in the same cycle (allowed when target
-            // is offchip). Skip W_IO_W and wait for the B response.
+          end else if (offchip_w_done_q
+                       || (core_axi.wvalid && core_axi.wready && core_axi.wlast)) begin
+            // W completed earlier or together with AW. Skip W_IO_W and
+            // wait for the downstream response to this write.
             w_state_next = W_IO_B;
           end else begin
             w_state_next = W_IO_W;
@@ -325,8 +330,14 @@ module rapt_router #(
       w_int_target <= INT_NONE;
       w_int_id     <= '0;
       w_int_awaddr <= '0;
+      offchip_w_done_q <= 1'b0;
     end else begin
       w_state <= w_state_next;
+      if (w_state == W_IDLE && core_axi.awvalid && core_axi.awready)
+        offchip_w_done_q <= 1'b0;
+      else if (w_state == W_IDLE && offchip_axi.wvalid
+               && offchip_axi.wready && offchip_axi.wlast)
+        offchip_w_done_q <= 1'b1;
       if (w_state == W_IDLE && core_axi.awvalid && core_axi.awready && aw_is_int) begin
         w_int_target <= aw_int;
         w_int_id     <= core_axi.awid;

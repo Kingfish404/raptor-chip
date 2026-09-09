@@ -189,7 +189,17 @@ module rapt_rou #(
   end
   assign h0 = rob_head;
   assign rob_empty = !(|rob_entry_busy);
-  assign halted_o = dm_haltreq_i && rob_empty;
+  // UOQ entries can already contain PRF operand snapshots when admission
+  // stops. Discard all speculative state at the drained boundary before a
+  // debugger may modify architectural registers; resume refetches that PC.
+  logic debug_halt_flushed, debug_halt_flush;
+  assign debug_halt_flush = dm_haltreq_i && rob_empty && !head0_valid
+      && !debug_halt_flushed;
+  always_ff @(posedge clock) begin
+    if (reset || !dm_haltreq_i) debug_halt_flushed <= 1'b0;
+    else if (debug_halt_flush) debug_halt_flushed <= 1'b1;
+  end
+  assign halted_o = dm_haltreq_i && rob_empty && debug_halt_flushed;
   assign halt_pc_o = commit_npc_q;
   assign commit_fire_o = commit_count != 0;
   assign async_trap_pending = csr_bcast.bus_error_int || clint_sw_trap || clint_timer_trap || clint_ext_trap || s_int_pending;
@@ -589,8 +599,8 @@ module rapt_rou #(
       available = !uoq_valid[enq_index[s]];
       for (int d = 0; d < NumSlots; d++) available |= deq_fire[d] && deq_index[d] == enq_index[s];
     end
-    if (s == 0) assign rnu_rou.ready[s] = available && !flush_pipe && !reset;
-    else assign rnu_rou.ready[s] = available && enq_fire[s-1] && !flush_pipe && !reset;
+    if (s == 0) assign rnu_rou.ready[s] = available && !flush_pipe && !reset && !dm_haltreq_i;
+    else assign rnu_rou.ready[s] = available && enq_fire[s-1] && !flush_pipe && !reset && !dm_haltreq_i;
     assign enq_fire[s] = rnu_rou.valid[s] && rnu_rou.ready[s];
     assign exu_prf.pr1[s] = rnu_rou.slot[s].pr1;
     assign exu_prf.pr2[s] = rnu_rou.slot[s].pr2;
@@ -819,8 +829,9 @@ module rapt_rou #(
   assign head0_flush = recieved_trap || (commit_fire[0] && (
       serializing(uop_pl[h0]) && !uop_pl[h0].execute.fp.valid
       || rob_entry[h0].trap || rob_entry[h0].mispredict || uop_pl[h0].execute.memory.atomic));
-  assign flush_pipe = head0_flush;
-  assign rou_cmu.next_pc = recieved_trap || rob_entry[youngest_commit].trap
+  assign flush_pipe = head0_flush || debug_halt_flush;
+  assign rou_cmu.next_pc = debug_halt_flush ? commit_npc_q :
+      recieved_trap || rob_entry[youngest_commit].trap
       || uop_pl[youngest_commit].execute.sys.ecall || uop_pl[youngest_commit].execute.sys.ebreak
       ? csr_bcast.tvec : rob_entry[youngest_commit].npc;
   for (genvar entry = 0; entry < ROB_SIZE; entry++) begin : g_generation

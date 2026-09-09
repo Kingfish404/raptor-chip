@@ -1,4 +1,26 @@
-# Raptor Module-Level UVM Verification
+# Raptor UVM Verification
+
+## Whole-chip verification
+
+[`chip/`](chip/README.md) instantiates the complete `rapt` RTL with a reactive
+UVM AXI memory model, independent bus monitor/scoreboard, pin-control sequencer,
+and self-checking bare-metal firmware. A second top exercises the RV32 RNP
+package wrapper. It uses class-capable Verilator and Accellera UVM sources;
+it does not depend on XSim's larger-class elaboration support.
+
+```sh
+make -C verify uvm-chip-rv32 UVM_HOME=/path/to/uvm-core
+make -C verify uvm-chip-rv64 UVM_HOME=/path/to/uvm-core
+make -C verify uvm-chip-regress UVM_HOME=/path/to/uvm-core
+```
+
+The matrix covers default RV32/RV64, small RV32, large RV64 with L2, and RV32
+RNP. The runner saves source/firmware hashes, commands, seeds, coverage counters
+and results in `verify/build/uvm/`. A missing tool, watchdog, UVM error/fatal,
+missing completion marker or incomplete transaction drain fails the run.
+See the [scenario ledger and limitations](chip/README.md).
+
+## Module-level verification
 
 This directory adds a module-level verification layer below architectural
 difftest and Linux boot. It is intended to find local protocol, arbitration,

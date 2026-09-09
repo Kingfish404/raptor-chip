@@ -124,7 +124,12 @@ module rapt_axi_master #(
         write_id <= mem.wr_req_id;
         write_addr <= mem.wr_req_addr;
         write_size <= mem.wr_req_size;
-        write_cache <= rapt_pkg::axi_cache_attr(mem.wr_req_addr, mem.wr_req_pbmt);
+        // The SQ/MBERR path must observe the real downstream B response.
+        // Allowing an intermediate cache to acknowledge a bufferable write
+        // early loses a later error (there is no separate late-error channel).
+        // Retain normal cache/allocation attributes, but require completion
+        // at the final destination rather than a posted intermediate B.
+        write_cache <= rapt_pkg::axi_cache_attr(mem.wr_req_addr, mem.wr_req_pbmt) & 4'b1110;
         write_data <= mem.wr_req_data << (write_addr_offset * 8);
         write_strb <= mem.wr_req_strb << write_addr_offset;
       end else begin

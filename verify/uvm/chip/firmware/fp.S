@@ -1,0 +1,63 @@
+#include "common.h"
+test_main:
+  li t0,0x6000
+  csrs mstatus,t0
+  li a0,3
+  li a1,5
+  fcvt.s.w f0,a0
+  fcvt.s.w f1,a1
+  fadd.s f2,f0,f1
+  fcvt.w.s a2,f2,rtz
+  li a3,8
+  CHECK a2,a3
+  fmul.s f2,f0,f1
+  fcvt.w.s a2,f2,rtz
+  li a3,15
+  CHECK a2,a3
+  li a0,0
+  fmv.w.x f3,a0
+  csrw fflags,zero
+  fdiv.s f4,f0,f3
+  csrr a1,fflags
+  li a2,8
+  CHECK a1,a2
+  csrw fflags,zero
+  fdiv.s f4,f3,f3
+  csrr a1,fflags
+  li a2,16
+  CHECK a1,a2
+  STAGE
+  li a0,19
+  li a1,23
+  fcvt.d.w f0,a0
+  fcvt.d.w f1,a1
+  fadd.d f2,f0,f1
+  fcvt.w.d a2,f2,rtz
+  li a3,42
+  CHECK a2,a3
+  li a0,0x80000000
+  fsd f2,0(a0)
+  fld f3,0(a0)
+  feq.d a1,f2,f3
+  li a2,1
+  CHECK a1,a2
+  fmul.d f2,f0,f1
+  fcvt.w.d a2,f2,rtz
+  li a3,437
+  CHECK a2,a3
+  STAGE
+  li a0,1
+  fcvt.s.w f0,a0
+  fcvt.h.s f1,f0
+  li a0,0x80000000
+  fsh f1,6(a0)
+  lhu a1,6(a0)
+  li a2,0x3c00
+  CHECK a1,a2
+  flh f2,6(a0)
+  fcvt.s.h f3,f2
+  fcvt.w.s a1,f3,rtz
+  li a2,1
+  CHECK a1,a2
+  STAGE
+  j pass

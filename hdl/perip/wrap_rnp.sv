@@ -68,136 +68,64 @@ module axi2rnp #(
     output logic [1:0] rnp_rwstate
 );
 
-  assign rnp_arvalid = axi_arvalid;
-  // assign axi_arready = rnp_arready;
+  // The shared payload pins carry one address or one data word at a time.
+  // Keep exactly one transaction in flight and retain its AXI response ID.
+  typedef enum logic [2:0] {
+    IDLE, READ_ADDR, READ_DATA, WRITE_ADDR, WRITE_DATA, WRITE_RESP
+  } state_t;
+  state_t state;
+  logic [3:0] read_id, write_id;
 
-  assign axi_rid = axi_arid;
-  assign axi_rlast = rnp_rvalid && axi_rready;
+  always_ff @(posedge clk) begin
+    if (reset) begin
+      state <= IDLE;
+      read_id <= '0;
+      write_id <= '0;
+    end else begin
+      case (state)
+        IDLE: begin
+          if (axi_awvalid) state <= WRITE_ADDR;
+          else if (axi_arvalid) state <= READ_ADDR;
+        end
+        READ_ADDR: if (axi_arvalid && axi_arready) begin
+          read_id <= axi_arid;
+          state <= READ_DATA;
+        end
+        READ_DATA: if (axi_rvalid && axi_rready) state <= IDLE;
+        WRITE_ADDR: if (axi_awvalid && axi_awready) begin
+          write_id <= axi_awid;
+          state <= WRITE_DATA;
+        end
+        WRITE_DATA: if (axi_wvalid && axi_wready) state <= WRITE_RESP;
+        WRITE_RESP: if (axi_bvalid && axi_bready) state <= IDLE;
+        default: state <= IDLE;
+      endcase
+    end
+  end
+
+  assign rnp_rwstate = (state == READ_ADDR || state == READ_DATA) ? 2'b01
+                    : (state == WRITE_ADDR || state == WRITE_DATA || state == WRITE_RESP) ? 2'b10
+                    : 2'b00;
+  assign rnp_cdata = state == READ_ADDR ? axi_araddr
+                  : state == WRITE_ADDR ? axi_awaddr : axi_wdata;
+  assign rnp_arvalid = !reset && state == READ_ADDR && axi_arvalid;
+  assign axi_arready = !reset && state == READ_ADDR && rnp_arready;
+  assign rnp_rready = !reset && state == READ_DATA && axi_rready;
+  assign axi_rvalid = !reset && state == READ_DATA && rnp_rvalid;
+  assign axi_rid = read_id;
+  assign axi_rlast = 1'b1;
   assign axi_rdata = rnp_mdata;
-  assign axi_rresp = 0;
-  // assign axi_rvalid = rnp_rvalid;
-  assign rnp_rready = axi_rready;
+  assign axi_rresp = 2'b00;
 
-  assign rnp_awvalid = axi_awvalid;
-  // assign axi_awready = rnp_awready;
-
-
+  assign rnp_awvalid = !reset && state == WRITE_ADDR && axi_awvalid;
+  assign axi_awready = !reset && state == WRITE_ADDR && rnp_awready;
+  assign rnp_wvalid = !reset && state == WRITE_DATA && axi_wvalid;
+  assign axi_wready = !reset && state == WRITE_DATA && rnp_wready;
   assign rnp_wstrb = axi_wstrb;
-  // Suppress W when AW is active: rnp_cdata carries the address during AW phase,
-  // so forwarding wvalid would cause rnp2axi to see the address as write data.
-  assign rnp_wvalid = axi_wvalid && !axi_awvalid;
-  // assign axi_wready = rnp_wready;
-
-  assign axi_bid = axi_awid;
-  assign axi_bresp = 0;
-  // assign axi_bvalid = rnp_bvalid;
-  assign rnp_bready = axi_bready;
-
-  logic [1:0] rwstate_last;  // 00: idle, 01: read, 10: write, 11: undefined
-  logic [1:0] rwstate;
-
-  assign rnp_rwstate = rwstate;
-
-  logic state_rst;
-  logic [19:0] state_rst_cnt;
-  logic state_rst_cnt_rst;
-
-  always_ff @(posedge clk) begin
-    if (reset || state_rst_cnt_rst) begin
-      state_rst_cnt <= 0;
-    end else begin
-      state_rst_cnt <= state_rst_cnt + 1;
-    end
-  end
-
-  assign state_rst = &state_rst_cnt;
-
-  always_ff @(posedge clk) begin
-    if (reset || state_rst) begin
-      rwstate_last <= 2'b00;
-    end else begin
-      rwstate_last <= rwstate;
-    end
-  end
-
-  always_comb begin
-    if (reset || state_rst) begin
-      rwstate = 2'b00;
-      state_rst_cnt_rst = 1;
-    end else begin
-      if (rwstate_last == 2'b00) begin  // idle
-        state_rst_cnt_rst = 1;
-        if (axi_awvalid) begin
-          rwstate = 2'b10;
-        end else if (axi_arvalid) begin
-          rwstate = 2'b01;
-        end else begin
-          rwstate = 2'b00;
-        end
-      end else if (rwstate_last == 2'b01) begin  // read
-        if (rnp_rvalid && axi_rready) begin  // read end
-          state_rst_cnt_rst = 1;
-          if (axi_awvalid) begin
-            rwstate = 2'b10;
-          end else if (axi_arvalid) begin
-            rwstate = 2'b01;
-          end else begin
-            rwstate = 2'b00;
-          end
-        end else begin
-          state_rst_cnt_rst = 0;
-          rwstate = 2'b01;  // read
-        end
-      end else begin  // write
-        if (rnp_bvalid && axi_bready) begin  // write end
-          state_rst_cnt_rst = 1;
-          if (axi_awvalid) begin
-            rwstate = 2'b10;
-          end else if (axi_arvalid) begin
-            rwstate = 2'b01;
-          end else begin
-            rwstate = 2'b00;
-          end
-        end else begin
-          state_rst_cnt_rst = 0;
-          rwstate = 2'b10;  // write
-        end
-      end
-    end
-  end
-
-  always_comb begin
-    case (rwstate)
-      2'b01: begin
-        axi_arready = rnp_arready;
-        axi_rvalid  = rnp_rvalid;
-        axi_awready = 0;
-        axi_wready  = rnp_wready;
-        axi_bvalid  = rnp_bvalid;
-        rnp_cdata   = axi_araddr;
-      end
-      2'b10: begin
-        axi_arready = 0;
-        axi_rvalid  = rnp_rvalid;
-        axi_awready = rnp_awready;
-        axi_wready  = rnp_wready;
-        axi_bvalid  = rnp_bvalid;
-        if (axi_awvalid) begin
-          rnp_cdata = axi_awaddr;
-        end else begin
-          rnp_cdata = axi_wdata;
-        end
-      end
-      default: begin
-        axi_arready = rnp_arready;
-        axi_rvalid  = rnp_rvalid;
-        axi_awready = rnp_awready;
-        axi_wready  = rnp_wready;
-        axi_bvalid  = rnp_bvalid;
-        rnp_cdata   = 0;
-      end
-    endcase
-  end
+  assign rnp_bready = !reset && state == WRITE_RESP && axi_bready;
+  assign axi_bvalid = !reset && state == WRITE_RESP && rnp_bvalid;
+  assign axi_bid = write_id;
+  assign axi_bresp = 2'b00;
 
 endmodule
 
@@ -284,7 +212,8 @@ module rnp2axi #(
   // assign axi_awvalid = rnp_awvalid;
   assign rnp_awready = axi_awready;
 
-  assign axi_wlast = rnp_wvalid && axi_wready;
+  // RNP transports single-beat writes; LAST is payload, independent of READY.
+  assign axi_wlast = 1'b1;
   assign axi_wdata = rnp_cdata;
   assign axi_wstrb = rnp_wstrb;
   // assign axi_wvalid = rnp_wvalid;

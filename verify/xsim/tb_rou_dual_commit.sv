@@ -1142,6 +1142,32 @@ rapt_cmu dut_cmu (
   `include "tb_rou_exception_rd.svh"
 `endif
 
+  task automatic expect_debug_halt_discards_queued_operands;
+    reset_dut();
+    dispatch_one(make_alu_uop(32'h8000_1000,32'h0010_0093,5'd1),6'd33,6'd1,RobW'(0));
+    rnu_rou.slot[0]='0;
+    rnu_rou.slot[0].uop=make_alu_uop(32'h8000_1004,32'h0020_0113,5'd2);
+    rnu_rou.slot[0].prd=6'd34;
+    rnu_rou.slot[0].prs=6'd2;
+    rnu_rou.valid[0]=1;
+    tick(1); rnu_rou.valid[0]=0; dm_haltreq=1;
+    check(!halted && |dut_rou.uoq_valid,"halt drain setup did not retain queued uop");
+    writeback_alu_one(RobW'(0),32'h8000_1004);
+    tick(1);
+    check(cmu_bcast.flush_pipe && !halted,"debug halt reported before flushing cached operands");
+    check(rou_cmu.next_pc==XLEN'('h80001004),"halt flush did not use committed frontier");
+    tick(1);
+    check(halted && !(|dut_rou.uoq_valid),"halt did not discard queued operand snapshots");
+    check(cmu_bcast.flush_redirect && cmu_bcast.redirect_pc==XLEN'('h80001004),"halt frontier not redirected");
+    rnu_rou.valid[0]=1;
+    tick(3);
+    check(!rnu_rou.ready[0] && !(|dut_rou.uoq_valid),"halted queue recaptured stale operands");
+    rnu_rou.valid[0]=0;
+    check(halted && !cmu_bcast.flush_pipe && !commit_fire,"held halt repeated flush or committed work");
+    dm_haltreq=0; tick(2);
+    check(!halted && !dispatch_valid[0],"stale pre-debug uop survived resume");
+  endtask
+
   initial begin
 `ifndef RAPT_DUAL_COMMIT
     fail("tb_rou_dual_commit requires RAPT_DUAL_COMMIT enabled");
@@ -1161,6 +1187,7 @@ rapt_cmu dut_cmu (
     $finish;
 `else
     init_inputs();
+    expect_debug_halt_discards_queued_operands();
     expect_basic_dual_commit();
     expect_slot0_store_blocks_dual();
     expect_slot1_branch_serializes_flush();

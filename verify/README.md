@@ -137,7 +137,7 @@ make coverage                       # Verilator line/toggle coverage
 
 ```
 verify/
-├── uvm/                # Module-level UVM agents, scoreboards, and test plan
+├── uvm/                # Whole-chip and module-level UVM verification
 │   └── iq/               # Issue-queue UVM environment
 ├── scripts/            # Test generation and orchestration scripts
 ├── riscof/             # ACT4 compliance testing
@@ -482,7 +482,23 @@ Mode entry/return, memory access/SBA, program-buffer execution and 64-bit
 abstract transfers remain unsupported. See [JTAG verification](jtag/README.md)
 for the implemented `openocd-halt-reg` and `gdb-smoke` entry points.
 
-### 7. Module-level UVM (`make uvm`)
+### 7. UVM verification
+
+The whole-chip environment boots self-checking firmware on the actual `rapt`
+RTL and drives randomized AXI timing, cross-ID response ordering, interrupts,
+JTAG, reset and external-write notifications through top-level pins. It covers
+RV32/RV64 and the RV32 RNP wrapper with explicit protocol and result checks.
+
+```bash
+make uvm-chip-rv32 UVM_HOME=/path/to/uvm-core
+make uvm-chip-rv64 UVM_HOME=/path/to/uvm-core
+make uvm-chip-regress UVM_HOME=/path/to/uvm-core
+```
+
+See [whole-chip UVM](uvm/chip/README.md) for the scenario matrix, dependencies,
+reproducible single-case commands and result format.
+
+#### Module-level UVM (`make uvm`)
 
 The module-level layer targets local ordering and protocol bugs that are hard
 to diagnose through full-core software alone. The first environment covers the

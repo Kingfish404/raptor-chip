@@ -95,7 +95,9 @@ module tb_bus_pbmt;
   endtask
   task automatic write_case(input int attr, input bit data_first);
     logic [3:0] expected;
-    expected = attr == 0 ? 4'hf : attr == 1 ? 4'h2 : 4'h0;
+    // Cacheable core writes retain allocation but cannot be acknowledged
+    // by an intermediate buffer: downstream errors belong to this owner.
+    expected = attr == 0 ? 4'he : attr == 1 ? 4'h2 : 4'h0;
     l1d_bus.awaddr = 'h80000000;
     l1d_bus.wdata = 'h12345678;
     l1d_bus.wstrb = 8'h0f;

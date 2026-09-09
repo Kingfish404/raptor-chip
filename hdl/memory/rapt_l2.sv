@@ -170,6 +170,7 @@ module rapt_l2 #(
     R_MISS_R,
     R_INSTALL_WAIT,
     R_INSTALL_READ,
+    R_ERROR,
     R_BYPASS_WAIT,
     R_BYPASS_AR,
     R_BYPASS_R
@@ -213,19 +214,23 @@ module rapt_l2 #(
   assign axi_s.rid    = rs_rid;
 
   logic r_hit_beat_fire;
+  logic [XLEN-1:0] r_next_addr;
+  assign r_next_addr = (r_burst == 2'b01) ? r_addr + (XLEN'(1) << r_size) : r_addr;
   logic [IndexBits-1:0] data_sram_raddr;
   assign r_hit_beat_fire = (rs == R_HIT) && r_hit_q && (!rs_rvalid || axi_s.rready);
   assign data_sram_raddr =
       (rs == R_IDLE && axi_s.arvalid && axi_s.arready && (cacheable(axi_s.araddr) && |axi_s.arcache[3:2]))
         ? axi_s.araddr[IndexMsb:IndexLsb]
-      : (r_hit_beat_fire && (r_len != 8'd0) && (r_word == L2_LINE_LEN'(LineSize - 1)))
-          ? (r_idx_q + IndexBits'(1))
+      : (r_hit_beat_fire && (r_len != 8'd0))
+          ? r_next_addr[IndexMsb:IndexLsb]
       : r_idx_q;
 
   // ---------------------------------------------------------------------
   // AR acceptance: only when read FSM idle.
   // ---------------------------------------------------------------------
-  assign axi_s.arready = (rs == R_IDLE);
+  // An early-restarted refill can return to IDLE before its registered
+  // install pulse writes SRAM. A new lookup needs a real read edge.
+  assign axi_s.arready = (rs == R_IDLE) && !cache_install;
 
   // ---------------------------------------------------------------------
   // Master-side AR (issued during R_MISS_AR or R_BYPASS_AR).
@@ -386,6 +391,12 @@ module rapt_l2 #(
   } state_w_t;
 
   state_w_t ws;
+  logic write_response_error;
+  logic [IndexBits-1:0] write_error_idx;
+  logic [TagBits-1:0] write_error_tag;
+  assign write_response_error = axi_m.bvalid && axi_m.bready && axi_m.bresp != 2'b00;
+  assign write_error_idx = wbuf[d_rptr].addr[IndexMsb:IndexLsb];
+  assign write_error_tag = wbuf[d_rptr].addr[XLEN-1:TagLsb];
 
   // ---------------------------------------------------------------------
   // Read FSM
@@ -492,16 +503,11 @@ module rapt_l2 #(
                 rs <= R_IDLE;
               end else begin
                 r_len  <= r_len - 8'd1;
-                r_word <= r_word + 1'b1;
-                r_addr <= r_addr + (XLEN / 8);
-                // INCR burst that crosses a line boundary: re-lookup.
-                // Detect: next-word overflows current line. Since
-                // L2_LINE_LEN bits roll over to 0, just check.
-                if (r_word == L2_LINE_LEN'(LineSize - 1)) begin
-                  // Stay in R_HIT -- r_addr_q updates and re-evaluates
-                  // r_hit_q automatically next cycle. If next line
-                  // misses, the next-cycle branch below catches it.
-                end
+                // AXI beat size is independent of the SRAM word width.
+                // RV64 instruction reads can request two 32-bit beats from
+                // the same 64-bit word. FIXED bursts retain their address.
+                r_word <= r_next_addr[WordOffsetMsb:WordOffsetLsb];
+                r_addr <= r_next_addr;
               end
             end
           end else begin
@@ -578,6 +584,11 @@ module rapt_l2 #(
                       && (axi_m.rresp == 2'b00) && (r_resp == 2'b00)
                       && (!rs_rvalid || axi_s.rready))) begin
                 rs <= R_IDLE;
+              end else if (axi_m.rresp != 2'b00 || r_resp != 2'b00) begin
+                // The refill has drained, but no line was installed. Going
+                // through R_HIT here would miss again and retry forever.
+                // Complete the remaining upstream beats with the saved error.
+                rs <= R_ERROR;
               end else begin
                 rs <= R_INSTALL_WAIT;  // allow SRAM install/read to settle
               end
@@ -597,6 +608,18 @@ module rapt_l2 #(
           // allow one read edge to refresh line_data_r before R_HIT consumes
           // it on the following edge.
           rs <= R_HIT;
+        end
+
+        R_ERROR: begin
+          if (!rs_rvalid || axi_s.rready) begin
+            rs_rvalid <= 1'b1;
+            rs_rdata  <= '0;
+            rs_rresp  <= r_resp;
+            rs_rid    <= r_id;
+            rs_rlast  <= (r_len == 8'd0);
+            if (r_len == 8'd0) rs <= R_IDLE;
+            else r_len <= r_len - 8'd1;
+          end
         end
 
         // -----------------------------------------------------------------
@@ -650,6 +673,17 @@ module rapt_l2 #(
       // ---------------------------------------------------------------
       if (w_hit_update && !w_full_strobe) begin
         line_valid[0][w_idx_q] <= 1'b0;
+      end
+      // Snoop updates precede the downstream response. A failed full-word
+      // write must not leave its value cached after software observes B.
+      // Typed writes also invalidate aliases: an error can have partial effects.
+      // Do not invalidate a different tag installed at the same index now.
+      if (write_response_error
+          && ((cache_install && install_idx == write_error_idx)
+              ? install_tag == write_error_tag
+              : (line_valid[0][write_error_idx]
+                 && line_tag[0][write_error_idx] == write_error_tag))) begin
+        line_valid[0][write_error_idx] <= 1'b0;
       end
     end
   end

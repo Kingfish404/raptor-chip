@@ -1224,6 +1224,18 @@ uvm-csr-sret: ## UVM: stress Linux-shaped U-ecall/SRET and mtvec contamination
 	xsim tb_rapt_csr_uvm_sim -testplusarg UVM_NO_RELNOTES -testplusarg ntb_random_seed=1 -runall; \
 	! grep -Eq "UVM_(ERROR|FATAL) *: *[1-9]|FAIL:" xsim.log
 
+.PHONY: uvm-chip uvm-chip-rv32 uvm-chip-rv64 uvm-chip-rnp uvm-chip-regress
+uvm-chip: ## UVM: run complete-chip scenarios (AXI, CLINT/PLIC, debug, faults)
+	$(MAKE) -C "$(UVM_DIR)" chip RAPT_CONFIG=$(UVM_RAPT_CONFIG)
+uvm-chip-rv32: ## UVM: run complete-chip RV32 scenarios
+	$(MAKE) -C "$(UVM_DIR)" chip-rv32 RAPT_CONFIG=$(UVM_RAPT_CONFIG)
+uvm-chip-rv64: ## UVM: run complete-chip RV64 scenarios
+	$(MAKE) -C "$(UVM_DIR)" chip-rv64 RAPT_CONFIG=$(UVM_RAPT_CONFIG)
+uvm-chip-rnp: ## UVM: run RV32 RNP package-pin verification
+	$(MAKE) -C "$(UVM_DIR)" chip-rnp RAPT_CONFIG=$(UVM_RAPT_CONFIG)
+uvm-chip-regress: ## UVM: run preset/XLEN/RNP matrix and checker negative tests
+	$(MAKE) -C "$(UVM_DIR)" chip-regress
+
 uvm-clean: ## UVM: clean module-level UVM artifacts
 	rm -rf $(UVM_BUILD_DIR)
 
@@ -3150,3 +3162,19 @@ verilator-csr-identity-time-rv32 verilator-csr-identity-time-rv64:
 .PHONY: verilator-csr-tvec-routes-rv32 verilator-csr-tvec-routes-rv64
 verilator-csr-tvec-routes-rv32 verilator-csr-tvec-routes-rv64:
 	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_csr_contract,$(XSIM_CSR_SOURCES) "$(RAPTOR_HOME)/hdl/backend/ieu/rapt_ieu_alu.sv" "$(RAPTOR_HOME)/hdl/backend/ieu/rapt_ieu_pipe_alu_csr.sv",$(if $(findstring rv64,$@),-d RAPT_RV64),+CASE=tvec_routes)
+
+.PHONY: verilator-l2-response-error-rv32 verilator-l2-response-error-rv64
+verilator-l2-response-error-rv32: ## Check failed L2 refills complete, drain and retry in RV32
+	$(call VERILATOR_DIRECTED_RUN,l2_response_error_rv32,tb_l2_response_error,$(XSIM_L2_SOURCES),-d RAPT_L2_EN -d RAPT_ASSERT_EN,)
+verilator-l2-response-error-rv64: ## Check failed L2 refills complete, drain and retry in RV64
+	$(call VERILATOR_DIRECTED_RUN,l2_response_error_rv64,tb_l2_response_error,$(XSIM_L2_SOURCES),-d RAPT_L2_EN -d RAPT_ASSERT_EN -d RAPT_RV64,)
+
+.PHONY: verilator-router-early-write-rv32 verilator-router-early-write-rv64
+verilator-router-early-write-rv32: ## Check W-before-AW routing and response ownership in RV32
+	$(call VERILATOR_DIRECTED_RUN,router_early_write_rv32,tb_chip_router_early_write,"$(RAPTOR_HOME)/hdl/rapt_pkg.sv" "$(RAPTOR_HOME)/hdl/rapt_router.sv",-d RAPT_ASSERT_EN,)
+verilator-router-early-write-rv64: ## Check W-before-AW routing and response ownership in RV64
+	$(call VERILATOR_DIRECTED_RUN,router_early_write_rv64,tb_chip_router_early_write,"$(RAPTOR_HOME)/hdl/rapt_pkg.sv" "$(RAPTOR_HOME)/hdl/rapt_router.sv",-d RAPT_ASSERT_EN -d RAPT_RV64,)
+
+.PHONY: verilator-rnp-handshake-rv32
+verilator-rnp-handshake-rv32: ## Check RNP AW/W serialization, IDs and response stalls
+	$(call VERILATOR_DIRECTED_RUN,rnp_handshake_rv32,tb_rnp_handshake,"$(RAPTOR_HOME)/hdl/rapt_pkg.sv" "$(RAPTOR_HOME)/hdl/perip/wrap_rnp.sv",-d RAPT_ASSERT_EN,)
