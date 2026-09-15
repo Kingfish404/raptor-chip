@@ -28,7 +28,8 @@ module rapt_ieu_pipe_alu_csr #(
   logic [XLEN-1:0] jump_target;
   logic [XLEN-1:0] csr_wdata;
   logic csr_write_enable;
-  assign jump_target = ((iss.uop.execute.branch.indirect ? iss.op1 : iss.uop.pc) + iss.uop.imm) & ~'b1;
+  assign jump_target = ((iss.uop.execute.branch.indirect ? iss.op1 : iss.uop.pc)
+      + iss.uop.imm) & ~'b1;
   assign exu_csr.raddr = iss.uop.imm[11:0];
   // Write suppression depends on the encoded rs1/uimm field, not its value.
   // A non-x0 register containing zero still writes CSRRS/CSRRC (for example,
@@ -48,7 +49,8 @@ module rapt_ieu_pipe_alu_csr #(
   // correction therefore made every rdinstret result at least one too large.
   assign wb_alu_csr.result = iss.uop.execute.sys.valid ? exu_csr.rdata
     : iss.uop.execute.branch.jump ? iss.uop.pc + (iss.uop.c ? 2 : 4) : alu_result;
-  assign wb_alu_csr.npc = (iss.uop.execute.sys.ecall || iss.uop.execute.sys.ebreak) ? csr_bcast.mtvec
+  assign wb_alu_csr.npc = (iss.uop.execute.sys.ecall || iss.uop.execute.sys.ebreak)
+      ? csr_bcast.mtvec
     : iss.uop.trap ? csr_bcast.tvec
     : iss.uop.execute.sys.mret ? exu_csr.mepc
     : iss.uop.execute.sys.sret ? exu_csr.sepc

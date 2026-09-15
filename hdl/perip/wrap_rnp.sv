@@ -68,36 +68,61 @@ module axi2rnp #(
     output logic [1:0] rnp_rwstate
 );
 
-  // The shared payload pins carry one address or one data word at a time.
-  // Keep exactly one transaction in flight and retain its AXI response ID.
+  // One AXI owner at a time. Split an INCR/FIXED burst into single-word
+  // RNP transactions; retain RID and emit RLAST/B only at the AXI boundary.
   typedef enum logic [2:0] {
-    IDLE, READ_ADDR, READ_DATA, WRITE_ADDR, WRITE_DATA, WRITE_RESP
+    IDLE,
+    READ_ADDR,
+    READ_DATA,
+    WRITE_ADDR,
+    WRITE_DATA,
+    WRITE_RESP
   } state_t;
   state_t state;
-  logic [3:0] read_id, write_id;
+  logic [3:0] owner_id;
+  logic [XLEN-1:0] beat_addr;
+  logic [7:0] beats_left;
+  logic [2:0] beat_size;
+  logic [1:0] burst_kind;
+  logic [XLEN-1:0] next_addr;
+  assign next_addr = burst_kind == 2'b01
+      ? (beat_addr & ~((XLEN'(1) << beat_size)-1)) + (XLEN'(1) << beat_size) : beat_addr;
 
   always_ff @(posedge clk) begin
     if (reset) begin
       state <= IDLE;
-      read_id <= '0;
-      write_id <= '0;
+      owner_id <= '0;
+      beats_left <= '0;
     end else begin
       case (state)
         IDLE: begin
-          if (axi_awvalid) state <= WRITE_ADDR;
-          else if (axi_arvalid) state <= READ_ADDR;
+          if (axi_awvalid && axi_awready) begin
+            owner_id <= axi_awid;
+            beat_addr <= axi_awaddr;
+            beats_left <= axi_awlen;
+            beat_size <= axi_awsize;
+            burst_kind <= axi_awburst;
+            state <= WRITE_ADDR;
+          end else if (axi_arvalid && axi_arready) begin
+            owner_id <= axi_arid;
+            beat_addr <= axi_araddr;
+            beats_left <= axi_arlen;
+            beat_size <= axi_arsize;
+            burst_kind <= axi_arburst;
+            state <= READ_ADDR;
+          end
         end
-        READ_ADDR: if (axi_arvalid && axi_arready) begin
-          read_id <= axi_arid;
-          state <= READ_DATA;
+        READ_ADDR: if (rnp_arvalid && rnp_arready) state <= READ_DATA;
+        READ_DATA: if (axi_rvalid && axi_rready) begin
+          if (beats_left == 0) state <= IDLE;
+          else begin beats_left <= beats_left-1; beat_addr <= next_addr; state <= READ_ADDR; end
         end
-        READ_DATA: if (axi_rvalid && axi_rready) state <= IDLE;
-        WRITE_ADDR: if (axi_awvalid && axi_awready) begin
-          write_id <= axi_awid;
-          state <= WRITE_DATA;
-        end
+        WRITE_ADDR: if (rnp_awvalid && rnp_awready) state <= WRITE_DATA;
         WRITE_DATA: if (axi_wvalid && axi_wready) state <= WRITE_RESP;
-        WRITE_RESP: if (axi_bvalid && axi_bready) state <= IDLE;
+        WRITE_RESP: if (rnp_bvalid && rnp_bready) begin
+          if (beats_left == 0) state <= IDLE;
+          else begin beats_left <= beats_left-1; beat_addr <= next_addr; state <= WRITE_ADDR; end
+        end
         default: state <= IDLE;
       endcase
     end
@@ -106,25 +131,24 @@ module axi2rnp #(
   assign rnp_rwstate = (state == READ_ADDR || state == READ_DATA) ? 2'b01
                     : (state == WRITE_ADDR || state == WRITE_DATA || state == WRITE_RESP) ? 2'b10
                     : 2'b00;
-  assign rnp_cdata = state == READ_ADDR ? axi_araddr
-                  : state == WRITE_ADDR ? axi_awaddr : axi_wdata;
-  assign rnp_arvalid = !reset && state == READ_ADDR && axi_arvalid;
-  assign axi_arready = !reset && state == READ_ADDR && rnp_arready;
+  assign rnp_cdata = (state == READ_ADDR || state == WRITE_ADDR) ? beat_addr : axi_wdata;
+  assign rnp_arvalid = !reset && state == READ_ADDR;
+  assign axi_arready = !reset && state == IDLE && !axi_awvalid;
   assign rnp_rready = !reset && state == READ_DATA && axi_rready;
   assign axi_rvalid = !reset && state == READ_DATA && rnp_rvalid;
-  assign axi_rid = read_id;
-  assign axi_rlast = 1'b1;
+  assign axi_rid = owner_id;
+  assign axi_rlast = beats_left == 0;
   assign axi_rdata = rnp_mdata;
   assign axi_rresp = 2'b00;
 
-  assign rnp_awvalid = !reset && state == WRITE_ADDR && axi_awvalid;
-  assign axi_awready = !reset && state == WRITE_ADDR && rnp_awready;
+  assign rnp_awvalid = !reset && state == WRITE_ADDR;
+  assign axi_awready = !reset && state == IDLE;
   assign rnp_wvalid = !reset && state == WRITE_DATA && axi_wvalid;
   assign axi_wready = !reset && state == WRITE_DATA && rnp_wready;
   assign rnp_wstrb = axi_wstrb;
-  assign rnp_bready = !reset && state == WRITE_RESP && axi_bready;
-  assign axi_bvalid = !reset && state == WRITE_RESP && rnp_bvalid;
-  assign axi_bid = write_id;
+  assign rnp_bready = !reset && state == WRITE_RESP && (beats_left != 0 || axi_bready);
+  assign axi_bvalid = !reset && state == WRITE_RESP && beats_left == 0 && rnp_bvalid;
+  assign axi_bid = owner_id;
   assign axi_bresp = 2'b00;
 
 endmodule

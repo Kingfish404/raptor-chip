@@ -47,9 +47,12 @@ module rapt_cmu #(
   assign bcast_inst = rou_cmu.slot[branch_index].inst;
   assign cmu_bcast.rpc = rou_cmu.slot[branch_valid?branch_index : youngest].pc;
   assign cmu_bcast.cpc = rou_cmu.next_pc;
-  assign cmu_bcast.ben = branch_valid && !rou_cmu.slot[branch_index].trap && rou_cmu.slot[branch_index].ben;
-  assign cmu_bcast.jen = branch_valid && !rou_cmu.slot[branch_index].trap && rou_cmu.slot[branch_index].jen;
-  assign cmu_bcast.jren = branch_valid && !rou_cmu.slot[branch_index].trap && rou_cmu.slot[branch_index].jren;
+  assign cmu_bcast.ben = branch_valid && !rou_cmu.slot[branch_index].trap
+      && rou_cmu.slot[branch_index].ben;
+  assign cmu_bcast.jen = branch_valid && !rou_cmu.slot[branch_index].trap
+      && rou_cmu.slot[branch_index].jen;
+  assign cmu_bcast.jren = branch_valid && !rou_cmu.slot[branch_index].trap
+      && rou_cmu.slot[branch_index].jren;
   // Only successful retirement preserves address identity; a trapping atomic
   // must follow normal context invalidation just like any other exception.
   assign cmu_bcast.atomic_retired = atomic_valid;
@@ -63,6 +66,8 @@ module rapt_cmu #(
   assign cmu_bcast.rvc = rou_cmu.slot[branch_index].c;
   assign cmu_bcast.time_trap = rou_cmu.time_trap;
   assign cmu_bcast.fence_time = rou_cmu.fence_time;
+  assign cmu_bcast.cbo_inval = rou_cmu.cbo_inval;
+  assign cmu_bcast.cbo_block = rou_cmu.cbo_block;
   assign cmu_bcast.fence_i = rou_cmu.fence_i;
   assign cmu_bcast.flush_pipe = rou_cmu.flush_pipe;
   assign cmu_bcast.flush_redirect = rou_cmu.flush_redirect;

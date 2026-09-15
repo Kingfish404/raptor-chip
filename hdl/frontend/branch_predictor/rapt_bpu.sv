@@ -16,7 +16,7 @@ module rapt_bpu #(
     parameter int PHT_SIZE = `RAPT_PHT_SIZE,
     parameter int PHT_LEN = $clog2(PHT_SIZE),
     parameter int BTB_SIZE = `RAPT_BTB_SIZE,
-    parameter int BTB_WAYS = 2,
+    parameter int BTB_WAYS = `RAPT_BTB_WAYS,
     parameter int BTB_LEN = $clog2(BTB_SIZE / BTB_WAYS),
     parameter int BTB_TAG_LEN = 7,
     // GHR_LEN widened to feed TAGE's longest geometric history (64 bits).
@@ -62,8 +62,6 @@ module rapt_bpu #(
   logic [PHR_LEN-1:0] rphr;
   logic [BTB_LEN-1:0] rbtb_idx;
   logic [BTB_TAG_LEN-1:0] rbtb_tag;
-  logic is_b;
-  logic btaken;
   logic btb_tag_match;
   logic taken;
   logic rbtaken;
@@ -208,11 +206,12 @@ module rapt_bpu #(
   logic                   idu_grant;
   assign idu_grant     = idu_wen && !cmu_wen_entry;
   assign wen_entry_mux = cmu_wen_entry || idu_grant;
-  assign wen_type_mux  = (cmu_wen_type && !idu_grant) || idu_grant;
-  assign waddr_mux     = cmu_wen_entry ? cmu_waddr : idu_grant ? idu_waddr : cmu_waddr;
+  assign wen_type_mux  = cmu_wen_type || idu_grant;
+  // idu_grant already excludes a commit entry write.
+  assign waddr_mux     = idu_grant ? idu_waddr : cmu_waddr;
   assign wd_target_mux = cmu_wen_entry ? cmu_wd_full : idu_bpu.train_target[XLEN-1:1];
-  assign wd_tag_mux    = cmu_wen_entry ? cmu_wd_tag : idu_grant ? idu_wd_tag : cmu_wd_tag;
-  assign wd_type_mux   = cmu_wen_entry ? cmu_wd_type : idu_grant ? idu_bpu.train_type : cmu_wd_type;
+  assign wd_tag_mux    = idu_grant ? idu_wd_tag : cmu_wd_tag;
+  assign wd_type_mux   = idu_grant ? idu_bpu.train_type : cmu_wd_type;
 
   rapt_bpu_btb #(
       .DEPTH(BTB_SIZE / BTB_WAYS),
@@ -241,10 +240,8 @@ module rapt_bpu #(
 
   // Prediction logic: all inputs are registered sub-module outputs,
   // NO combinational dependency on pc_ifu/fpc.
-  assign is_b = (btb_rd_type == COND);
-  assign btaken = (btb_rd_type == COND && dirp_taken);
   assign btb_tag_match = btb_rd_tag_match;
-  assign taken = (btb_tag_match && ((btb_rd_type != COND) || btaken));
+  assign taken = btb_tag_match && ((btb_rd_type != COND) || dirp_taken);
 
   // Fetch and decode represent different instruction-stream positions. Never
   // override a fetch target with the decode RAS's live top: a preceding return

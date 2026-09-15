@@ -68,6 +68,7 @@ module formal_bus #(
   assign l1i_bus.arburst = l1i_arburst;
   assign l1i_bus.ar_ptw = 1'b0;
   assign l1i_bus.rpbmt = 2'b00;
+  assign l1i_bus.noallocate = 0;
   assign l1i_bus.awvalid = 1'b0;
   assign l1i_bus.awaddr = '0;
   assign l1i_bus.aw_ptw = 1'b0;
@@ -79,6 +80,8 @@ module formal_bus #(
   assign l1d_bus.arvalid = l1d_arvalid;
   assign l1d_bus.araddr = l1d_araddr;
   assign l1d_bus.rstrb = l1d_rstrb;
+  assign l1d_bus.arlen = 0;
+  assign l1d_bus.noallocate = 0;
   assign l1d_bus.rpbmt = 2'b00;
   assign l1d_bus.wpbmt = 2'b00;
   assign l1d_bus.ar_ptw = 1'b0;
@@ -88,6 +91,7 @@ module formal_bus #(
   assign l1d_bus.wvalid = l1d_wvalid;
   assign l1d_bus.wdata = l1d_wdata;
   assign l1d_bus.wstrb = l1d_wstrb;
+  assign l1d_bus.wzero = 0;
 
   // Tie off csr_bcast inputs (not used in bus formal check)
   assign csr_bcast.priv = 2'b11;
@@ -114,6 +118,8 @@ module formal_bus #(
   assign cmu_bcast.ret = 1'b0;
   assign cmu_bcast.rvc = 1'b0;
   assign cmu_bcast.fence_time = 1'b0;
+  assign cmu_bcast.cbo_inval = 1'b0;
+  assign cmu_bcast.cbo_block = '0;
   assign cmu_bcast.fence_i = 1'b0;
   assign cmu_bcast.flush_pipe = 1'b0;
   assign cmu_bcast.time_trap = 1'b0;

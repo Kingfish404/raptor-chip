@@ -49,6 +49,16 @@ module rapt_openram_1rw_32x32 (
 endmodule
 
 (* blackbox *)
+module rapt_openram_1rw_64x32 (
+    input wire clk0, csb0, web0,
+    input wire [3:0] wmask0,
+    input wire [5:0] addr0,
+    input wire [31:0] din0,
+    output wire [31:0] dout0
+);
+endmodule
+
+(* blackbox *)
 module rapt_openram_1rw_16x32 (
     input  wire        clk0,
     input  wire        csb0,

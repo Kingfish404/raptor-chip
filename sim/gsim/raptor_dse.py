@@ -40,6 +40,57 @@ SUPPORTED_BP_KINDS: tuple[str, ...] = (
     "mpp_tage_64kb",
 )
 
+# RTL direction-predictor flavour (RAPT_BPU_DIRP_*) → gem5 BP kind.  The RTL
+# default preset selects TAGE (`define RAPT_BPU_DIRP_TAGE), so the unqualified
+# gem5 run must follow it rather than the simulator's historical `local`
+# default.  RAPT_BPU_DIRP_STATIC (always-not-taken) has no gem5 O3 analogue;
+# it falls back to the PC-indexed bimodal table and is flagged as an
+# approximation in the run log.
+_RTL_DIRP_TO_BP: dict[str, str] = {
+    "RAPT_BPU_DIRP_TAGE": "tage",
+    "RAPT_BPU_DIRP_GSHARE": "gshare",
+    "RAPT_BPU_DIRP_BIMODAL": "local",
+    "RAPT_BPU_DIRP_STATIC": "local",
+}
+
+# Canonical gem5 TAGE geometry mirroring hdl/frontend/branch_predictor/
+# rapt_bpu_tage.sv: 256-entry bimodal base + 3 tagged tables of 128 entries
+# (tag widths 7/7/8, history lengths 8/16/64, 3-bit signed counters, 1-bit
+# useful bits).  Applied automatically whenever the selected preset's
+# RAPT_BPU_DIRP_* resolves to `tage`; a JSON overlay may refine individual
+# keys.  The loop/statistical-corrector sections are intentionally absent:
+# gem5's plain TAGE wrapper has neither unit, matching the RTL.
+RTL_TAGE_PARAMS: dict = {
+    "n_history_tables": 3,
+    "min_history": 8,
+    "max_history": 64,
+    "tag_table_tag_widths": [0, 7, 7, 8],
+    "log_table_sizes": [8, 7, 7, 7],
+    "log_ratio_bimodal_hyst_entries": 0,
+    "counter_bits": 3,
+    "u_bits": 1,
+    "hist_buffer_size": 2048,
+    "path_history_bits": 8,
+    "log_u_reset_period": 12,
+    "num_use_alt_on_na": 1,
+    "initial_t_counter_value": 2048,
+    "use_alt_on_na_bits": 4,
+    "max_allocations": 1,
+}
+
+
+def detect_rtl_dirp(cfg: dict) -> str:
+    """Map the preset's RAPT_BPU_DIRP_* define onto a gem5 BP kind.
+
+    Falls back to `local` (PC-indexed 2-bit table) when the preset declares no
+    direction-predictor flavour, preserving the historical default for
+    out-of-tree configs.
+    """
+    for define, kind in _RTL_DIRP_TO_BP.items():
+        if cfg.get(define):
+            return kind
+    return "local"
+
 
 def _parse_int(tok: str) -> int:
     """Accept decimal, hex (0x..), and Verilog literals like 'h1, 'h40141105."""
@@ -233,6 +284,12 @@ def derive_uarch(cfg: dict) -> dict:
     phys_int = int(cfg["RAPT_PHY_SIZE"])
     phys_fp = max(phys_int, 64)
 
+    # RIQ (rename-input queue) is the RTL's fetch→rename decoupling buffer;
+    # gem5's fetch→decode queue (fetchQueueSize, default 32) is its closest
+    # analogue.  IIQ (dispatch-input queue) has no gem5 O3 counterpart
+    # (gem5 decodes/renames/dispatches in lockstep per cycle).
+    fetch_q = int(cfg.get("RAPT_RIQ_SIZE", 8))
+
     return dict(
         l1i_size=f"{l1i_size}B",
         l1i_assoc=l1i_assoc,
@@ -240,6 +297,7 @@ def derive_uarch(cfg: dict) -> dict:
         l1d_assoc=l1d_assoc,
         line_bytes=line_bytes,
         fetch_buffer_size=line_bytes,
+        fetch_q=fetch_q,
         rob=int(cfg["RAPT_ROB_SIZE"]),
         iq=iq_entries,
         sq=int(cfg["RAPT_SQ_SIZE"]),
@@ -286,7 +344,10 @@ DEFAULT_SIM_CFG: dict = {
     "with_l2": False,
     "cpu": "o3",
     "rv64": False,
-    "equalize_budget": True,
+    # Alignment-first default: every BP family keeps the SVH's RAPT_PHT_SIZE.
+    # Cross-family storage-budget equalization is opt-in (e.g. bp-study's
+    # same-budget-gshare point) via --set sim.equalize_budget=true.
+    "equalize_budget": False,
 }
 
 
@@ -299,6 +360,7 @@ _UARCH_TYPES: dict = {
     "l1d_assoc": int,
     "line_bytes": int,
     "fetch_buffer_size": int,
+    "fetch_q": int,
     "rob": int,
     "iq": int,
     "sq": int,
@@ -753,6 +815,8 @@ def dump_effective_config(path: Path, u: dict, sim: dict, meta: dict) -> None:
 # magnitude. BTB / RAS / indirect predictor sizing is shared across all BPs
 # (driven by `u[btb_*]`, `u[rsb_size]`, `sim[indirect_*]`) and is NOT touched
 # here -- only the conditional-branch direction predictor is equalized.
+# Equalization is OPT-IN (sim.equalize_budget=true): the alignment-first
+# default keeps the SVH's RAPT_PHT_SIZE for every family.
 #
 # gem5 classes with fixed internal table geometry (`tage_sc_l_8kb`,
 # `tage_sc_l_64kb`, `mpp_64kb`, `mpp_tage_64kb`) cannot be shrunk via Python

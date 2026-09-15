@@ -70,29 +70,44 @@ module rapt_l1i_access #(
       || (Lookahead && !rapt_pkg::addr_executable(lookahead_n2_addr, 4'd3));
   for (genvar port_idx = 0; port_idx < 4; port_idx++) begin : g_check
     if (port_idx < Checks) begin : g_active
-      rapt_pmp #(
-          .XLEN(XLEN)
-      ) u_pmp (
-          .addr(addr[port_idx]),
-          .size_m1(port_idx == 1 ? 4'(XLEN / 8 - 1)
-              : (port_idx == 0 && sram_data_ready && is_c ? 4'd1 : 4'd3)),
-          .priv(csr_bcast.priv),
-          .op_r(port_idx == 1),
-          .op_w(1'b0),
-          .op_x(port_idx != 1),
-          .pmp_raw_addr(pmp_state.pmp_raw_addr),
-          .pmp_napot_mask(pmp_state.pmp_napot_mask),
-          .pmp_cfg_r(pmp_state.pmp_cfg_r),
-          .pmp_cfg_w(pmp_state.pmp_cfg_w),
-          .pmp_cfg_x(pmp_state.pmp_cfg_x),
-          .pmp_cfg_l(pmp_state.pmp_cfg_l),
-          .pmp_mode_off(pmp_state.pmp_mode_off),
-          .pmp_mode_tor(pmp_state.pmp_mode_tor),
-          .pmp_mode_na4(pmp_state.pmp_mode_na4),
-          .pmp_mode_napot(pmp_state.pmp_mode_napot),
-          .fault(fault[port_idx]),
-          .fault_lo_o(fault_lo[port_idx])
-      );
+      // SRAM readiness and instruction length arrive after the address. Do
+      // not put that late select ahead of the PMP end-address arithmetic and
+      // comparisons: check both fetch lengths, then select the result.
+      localparam int Sizes = port_idx == 0 ? 2 : 1;
+      wire [Sizes-1:0] size_fault, size_fault_lo;
+      if (port_idx == 0) begin : g_fetch_select
+        assign fault[port_idx] = sram_data_ready && is_c ? size_fault[0] : size_fault[1];
+        assign fault_lo[port_idx] = sram_data_ready && is_c
+            ? size_fault_lo[0] : size_fault_lo[1];
+      end else begin : g_fixed_select
+        assign fault[port_idx] = size_fault[0];
+        assign fault_lo[port_idx] = size_fault_lo[0];
+      end
+      for (genvar size_idx = 0; size_idx < Sizes; size_idx++) begin : g_size
+        rapt_pmp #(
+            .XLEN(XLEN)
+        ) u_pmp (
+            .addr(addr[port_idx]),
+            .size_m1(port_idx == 1 ? 4'(XLEN / 8 - 1)
+                : (port_idx == 0 && size_idx == 0 ? 4'd1 : 4'd3)),
+            .priv(csr_bcast.priv),
+            .op_r(port_idx == 1),
+            .op_w(1'b0),
+            .op_x(port_idx != 1),
+            .pmp_raw_addr(pmp_state.pmp_raw_addr),
+            .pmp_napot_mask(pmp_state.pmp_napot_mask),
+            .pmp_cfg_r(pmp_state.pmp_cfg_r),
+            .pmp_cfg_w(pmp_state.pmp_cfg_w),
+            .pmp_cfg_x(pmp_state.pmp_cfg_x),
+            .pmp_cfg_l(pmp_state.pmp_cfg_l),
+            .pmp_mode_off(pmp_state.pmp_mode_off),
+            .pmp_mode_tor(pmp_state.pmp_mode_tor),
+            .pmp_mode_na4(pmp_state.pmp_mode_na4),
+            .pmp_mode_napot(pmp_state.pmp_mode_napot),
+            .fault(size_fault[size_idx]),
+            .fault_lo_o(size_fault_lo[size_idx])
+        );
+      end
     end else begin : g_unused
       assign fault[port_idx] = 1'b0;
       assign fault_lo[port_idx] = 1'b0;

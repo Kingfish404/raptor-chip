@@ -13,11 +13,9 @@ module rapt_axi_master #(
     axi4_if.master axi
 );
   localparam int ReadCountW = $clog2(MAX_READ_OUTSTANDING + 1);
-  localparam int IdCount = 1 << ID_W;
-  localparam int AddrLsbW = $clog2(XLEN / 8);
+  localparam int AddrLsbW   = $clog2(XLEN / 8);
 
   logic [ReadCountW-1:0] read_outstanding;
-  logic [ReadCountW-1:0] read_id_outstanding[IdCount];
   logic read_capacity;
   logic read_request_fire;
   logic read_response_fire;
@@ -29,7 +27,8 @@ module rapt_axi_master #(
   assign axi.arsize = mem.rd_req_size;
   assign axi.arlen = mem.rd_req_len;
   assign axi.arburst = mem.rd_req_burst;
-  assign axi.arcache = rapt_pkg::axi_cache_attr(mem.rd_req_addr, mem.rd_req_pbmt);
+  assign axi.arcache = rapt_pkg::axi_cache_attr(mem.rd_req_addr, mem.rd_req_pbmt)
+      & (mem.rd_req_noallocate ? 4'b0011 : 4'b1111);
   assign mem.rd_req_ready = axi.arready && read_capacity;
   assign read_request_fire = mem.rd_req_valid && mem.rd_req_ready;
 
@@ -44,9 +43,6 @@ module rapt_axi_master #(
   always_ff @(posedge clock) begin
     if (reset) begin
       read_outstanding <= '0;
-      for (int id = 0; id < IdCount; id++) begin
-        read_id_outstanding[id] <= '0;
-      end
     end else begin
       unique case ({
         read_request_fire, read_response_fire
@@ -55,7 +51,18 @@ module rapt_axi_master #(
         2'b01: read_outstanding <= read_outstanding - 1'b1;
         default: read_outstanding <= read_outstanding;
       endcase
+    end
+  end
 
+`ifndef SYNTHESIS
+  // Response-ownership observer only. The aggregate read_outstanding above
+  // remains functional hardware because it controls admission capacity.
+  localparam int IdCount = 1 << ID_W;
+  logic [ReadCountW-1:0] read_id_outstanding[IdCount];
+  always_ff @(posedge clock) begin
+    if (reset) begin
+      for (int id = 0; id < IdCount; id++) read_id_outstanding[id] <= '0;
+    end else begin
       for (int id = 0; id < IdCount; id++) begin
         unique case ({
           read_request_fire && (mem.rd_req_id == ID_W'(id)),
@@ -68,7 +75,11 @@ module rapt_axi_master #(
       end
     end
   end
+`endif
 
+  localparam int ZeroBeats = 64 / (XLEN / 8);
+  logic write_zero;
+  logic [$clog2(ZeroBeats)-1:0] write_beat;
   logic write_busy;
   logic write_aw_pending;
   logic write_w_pending;
@@ -81,23 +92,46 @@ module rapt_axi_master #(
   logic write_request_fire;
   logic write_response_fire;
   logic [AddrLsbW-1:0] write_addr_offset;
+  logic [AddrLsbW-1:0] write_last_byte;
+  logic [AddrLsbW:0] write_last_lane;
+  logic [2:0] write_cover_size;
 
   assign mem.wr_req_ready = !write_busy;
   assign write_request_fire = mem.wr_req_valid && mem.wr_req_ready;
   assign write_addr_offset = mem.wr_req_addr[AddrLsbW-1:0];
+
+  // WSTRB is right-aligned at mem.wr_req_addr. An unaligned AXI beat ends
+  // at the next *size-aligned* boundary, not at AWADDR + (1 << AWSIZE).
+  // For example, SW at byte offset 1 has lanes 1..4: AWSIZE=2 only permits
+  // lanes 1..3. Widen that beat to cover lane 4, keeping its address and
+  // exact strobes. Already aligned/narrow writes (including MMIO) retain
+  // their requested size. The upstream store splitter owns bus-word spans.
+  always_comb begin
+    write_last_byte = '0;
+    for (int byte_idx = 0; byte_idx < XLEN / 8; byte_idx++) begin
+      if (mem.wr_req_strb[byte_idx]) write_last_byte = AddrLsbW'(byte_idx);
+    end
+    write_last_lane = {1'b0, write_addr_offset} + {1'b0, write_last_byte};
+    write_cover_size = mem.wr_req_size;
+    for (int level = 0; level < AddrLsbW; level++) begin
+      if ((write_last_lane >> level) != ({1'b0, write_addr_offset} >> level)
+          && write_cover_size < 3'(level + 1))
+        write_cover_size = 3'(level + 1);
+    end
+  end
 
   assign axi.awvalid = write_busy && write_aw_pending;
   assign axi.awid = write_id;
   assign axi.awaddr = write_addr;
   assign axi.awsize = write_size;
   assign axi.awcache = write_cache;
-  assign axi.awlen = 8'h00;
-  assign axi.awburst = 2'b00;
+  assign axi.awlen = write_zero ? 8'(ZeroBeats - 1) : 8'h00;
+  assign axi.awburst = write_zero ? 2'b01 : 2'b00;
 
   assign axi.wvalid = write_busy && write_w_pending;
   assign axi.wdata = write_data;
   assign axi.wstrb = write_strb;
-  assign axi.wlast = axi.wvalid;
+  assign axi.wlast = !write_zero || write_beat == $clog2(ZeroBeats)'(ZeroBeats - 1);
 
   assign mem.wr_rsp_valid = write_busy && !write_aw_pending && !write_w_pending && axi.bvalid;
   assign mem.wr_rsp_id = axi.bid;
@@ -107,6 +141,8 @@ module rapt_axi_master #(
 
   always_ff @(posedge clock) begin
     if (reset) begin
+      write_zero <= 1'b0;
+      write_beat <= '0;
       write_busy <= 1'b0;
       write_aw_pending <= 1'b0;
       write_w_pending <= 1'b0;
@@ -121,23 +157,26 @@ module rapt_axi_master #(
         write_busy <= 1'b1;
         write_aw_pending <= 1'b1;
         write_w_pending <= 1'b1;
+        write_zero <= mem.wr_req_zero;
+        write_beat <= '0;
         write_id <= mem.wr_req_id;
-        write_addr <= mem.wr_req_addr;
-        write_size <= mem.wr_req_size;
+        write_addr <= mem.wr_req_zero ? {mem.wr_req_addr[XLEN-1:6], 6'b0} : mem.wr_req_addr;
+        write_size <= mem.wr_req_zero ? 3'($clog2(XLEN/8)) : write_cover_size;
         // The SQ/MBERR path must observe the real downstream B response.
         // Allowing an intermediate cache to acknowledge a bufferable write
         // early loses a later error (there is no separate late-error channel).
         // Retain normal cache/allocation attributes, but require completion
         // at the final destination rather than a posted intermediate B.
         write_cache <= rapt_pkg::axi_cache_attr(mem.wr_req_addr, mem.wr_req_pbmt) & 4'b1110;
-        write_data <= mem.wr_req_data << (write_addr_offset * 8);
-        write_strb <= mem.wr_req_strb << write_addr_offset;
+        write_data <= mem.wr_req_zero ? '0 : mem.wr_req_data << (write_addr_offset * 8);
+        write_strb <= mem.wr_req_zero ? '1 : mem.wr_req_strb << write_addr_offset;
       end else begin
         if (axi.awvalid && axi.awready) begin
           write_aw_pending <= 1'b0;
         end
         if (axi.wvalid && axi.wready) begin
-          write_w_pending <= 1'b0;
+          if (axi.wlast) write_w_pending <= 1'b0;
+          else write_beat <= write_beat + 1'b1;
         end
         if (write_response_fire) begin
           write_busy <= 1'b0;
@@ -152,5 +191,12 @@ module rapt_axi_master #(
   `RAPT_SVA_IMPLY(clock, reset, AXI_WRITE_RESPONSE_OWNED, axi.bvalid,
                   write_busy && !write_aw_pending && !write_w_pending)
   `RAPT_SVA_IMPLY(clock, reset, AXI_WRITE_RESPONSE_ID, axi.bvalid, axi.bid == write_id)
+  `RAPT_SVA_IMPLY(clock, reset, AXI_WRITE_REQUEST_FITS_WORD, write_request_fire && !mem.wr_req_zero,
+                  write_last_lane < (AddrLsbW + 1)'(XLEN / 8) && mem.wr_req_size <= 3'(AddrLsbW))
+  for (genvar lane = 0; lane < XLEN / 8; lane++) begin : g_write_lane_check
+    `RAPT_SVA_IMPLY(clock, reset, AXI_WRITE_STROBE_WITHIN_SIZE, axi.wvalid && write_strb[lane],
+                    lane >= int'(write_addr[AddrLsbW-1:0])
+                    && (lane >> write_size) == (int'(write_addr[AddrLsbW-1:0]) >> write_size))
+  end
 
 endmodule

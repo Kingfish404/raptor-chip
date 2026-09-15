@@ -19,7 +19,7 @@ def main():
     p.add_argument('--reference', type=Path, required=True)
     p.add_argument('--output', type=Path, required=True)
     p.add_argument('--mcountinhibit', choices=('absent', 'zero'), default='zero',
-                   help='Expected optional CSR policy: profile preset zero, legacy absent')
+                   help='Expected optional CSR policy: standalone profile zero, Raptor reference absent')
     a = p.parse_args()
     ref = Reference(a.reference, a.xlen)
     s, x, mask = ref.state, a.xlen, ref.mask
@@ -118,10 +118,16 @@ def main():
             pc=ref.run([0x32009073,0x320021f3])
             check('profile-mcountinhibit-warl-zero',[s.gpr[3],s.pc[0],s.minstret[0]],[0,pc+8,102])
         else:
-            pc=ref.run([0x32009073])
-            check('legacy-mcountinhibit-absent',
-                  [s.mcause[0],s.mtval[0],s.mepc[0],s.minstret[0]],
-                  [2,0x32009073,pc,100])
+            # Include the exact OpenSBI read probe, not only a CSR write:
+            # neither may silently succeed when the target lacks this CSR.
+            for insn in (0x32002573,0x32009073,0x3200a1f3,0x3200b1f3,
+                         0x3200d1f3,0x3200e1f3,0x3200f1f3):
+                ref.reset();s.gpr[1]=mask;s.gpr[3]=123;s.gpr[10]=456
+                pc=ref.run([insn])
+                check('mcountinhibit-absent',
+                      [s.mcause[0],s.mtval[0],s.mepc[0],s.minstret[0],
+                       s.pc[0],s.gpr[3],s.gpr[10]],
+                      [2,insn,pc,100,0x80ff0000,123,456])
     # Ordinary RAM misalignment and AMO arithmetic (aq/rl combinations).
     address=0x81000000
     for width in ((4,8) if x==64 else (4,)):

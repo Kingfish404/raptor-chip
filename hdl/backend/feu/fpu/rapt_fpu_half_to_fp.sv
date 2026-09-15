@@ -85,8 +85,8 @@ module rapt_fpu_half_to_fp (
   always_ff @(posedge clock) begin
     if (reset || flush) begin
       valid_q <= 1'b0;
-      result_q <= '0;
-      flags_q <= '0;
+      // Result/flags are meaningful only with result_valid; keep payload
+      // unreset so reset/flush only cancels the valid pipeline.
     end else begin
       valid_q <= valid && ready;
       if (valid && ready) begin

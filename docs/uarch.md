@@ -1,8 +1,16 @@
 # Microarchitecture
 
-Raptor is an out-of-order, super-scalar RISC-V processor core with register renaming, a reorder buffer (ROB), per-class issue queues (a parameterized multi-port ALQ plus BRQ / MDQ / FPQ / IOQ), scalar F/D floating-point execution, and virtual memory support.
+Raptor is an out-of-order, super-scalar RISC-V processor core with register renaming, a reorder buffer (ROB), per-class issue queues (a parameterized multi-port ALQ plus BRQ / MDQ / FPQ / IOQ), scalar F/D plus Zfhmin floating-point execution, and virtual memory support.
 
 ## Pipeline
+
+`rapt_core` composes `rapt_frontend`, `rapt_backend`, the instruction/data caches,
+and the memory interconnect. The frontend owns prediction, fetch, FQU and decode.
+The backend owns rename/checkpoints, ROB, dispatch, physical registers,
+issue/execute, completion validation, LSU/SQ, CSR and retirement. Decoded uops,
+memory requests/responses, recovery and control broadcasts cross these boundaries;
+the grouping itself introduces no pipeline register. FPGA fixed-vector adapters
+and checkpoint build/link commands are described in [the OOC flow](../fpga/ooc/README.md).
 
 The ordered front/back-end stream has independent `DecodeWidth`, `RenameWidth`,
 `DispatchWidth`, and `CommitWidth`. Queue entries are instructions, not fixed pairs.
@@ -11,10 +19,11 @@ Local design notes: `docs.agent/architecture/superscalar-widths.md`
 (agent working documents are not part of the published manual).
 
 ```text
-L1I/BPU -> IFU held suffix -> FQU -> IDU input register + decode
+L1I/BPU -> IFU response register -> IFU held suffix -> FQU -> IDU input register + decode
         -> RNQ -> rename -> renamed output queue -> UOQ (PRF pre-read)
         -> ROB allocation -> K-entry candidate scan -> W-entry DPU compact
-        -> winner payload read -> issue queues -> FUs -> completion
+        -> winner payload read -> issue queues -> FUs -> ownership/arbitration
+        -> completion register
         -> ROB ready-prefix retirement -> RAT / PRF / CSR / CMU
 ```
 
@@ -22,11 +31,23 @@ The queues and registered payload boundaries are explicit. This diagram is not
 an exact-cycle latency model; no IPC, mispredict-penalty or Fmax improvement is
 claimed from the width refactor alone.
 
+The default fetch response boundary (`RAPT_FETCH_RESPONSE_STAGE=1`) adds one
+frontend register stage to the previous organization. Backend timing decoupling
+uses registered IQ vacancy (`RAPT_IQ_RECLAIM_ON_ISSUE=0`); it does not add a
+fixed-latency execution stage. Variable-latency queues and functional units still
+prevent a universal instruction latency from being inferred from a stage count.
+
 ### Store & Load Ordering
 
 - **Stores**: IOQ computes address+data and allocates one unified SQ entry; ROB commit marks the existing entry committed; committed head entries drain to L1D/BUS in program order.
 - **Store-to-load forwarding**: loads CAM the unified SQ by virtual word address; youngest matching full-width store forwards data.
 - **Load issue**: IOQ supports out-of-order load issue when older stores are resolved and non-conflicting. Atomics and uncacheable/MMIO requests remain ordered at the ROB/IOQ head.
+
+IOQ short-range alias checks use a symmetric overlap matrix. Each word address
+is split into a two-bit offset and an upper chunk; a range of up to four words
+can cross at most one chunk boundary. The upper successor is shared across
+comparisons. Translated accesses compare page offsets, preserving wraparound
+aliases even when adjacent virtual pages map to noncontiguous physical pages.
 
 ### Branch Misprediction Recovery
 
@@ -91,10 +112,22 @@ system/atomic/trap instructions block further fetch until recovery.
 from ordered stage widths. The fixed cache byte window may supply fewer than
 DecodeWidth instructions.
 
-**Read-ahead**: every accepted packet supplies its exact next PC (sequential
-stride, predicted target, or redirect target) to L1I as a side-effect-free
-data-SRAM hint. A completion-time recovery redirect clears the held suffix and
-starts the target read, but `recovery.pending` prevents returned data and
+The response register captures the request PC, raw instruction window, lookahead
+validity, fault metadata and primary prediction together. Prefix assembly,
+decompression and auxiliary branch prediction use this registered response.
+The request address advances using the primary prediction or a provisional
+packet boundary derived from raw instruction lengths and control opcodes;
+lookahead permission and auxiliary prediction do not feed this calculation.
+A different resolved packet boundary cancels the younger request and corrects
+its PC before another response can be captured. Backpressure holds the response;
+normal streaming can consume one response and capture the next on the same edge.
+Redirect and recovery clear both the response and held suffix. A pending response
+also prevents the instruction IO guard from treating the pipeline as empty,
+including when successive dynamic requests have the same PC.
+
+**Read-ahead**: ordinary SRAM reads follow the registered request PC. A
+completion-time recovery redirect clears both IFU buffers and supplies a
+side-effect-free target data-SRAM hint, but `recovery.pending` prevents returned data and
 prediction history from being accepted until precise cleanup. This hides some
 synchronous SRAM latency without creating a cache request or modifying cache
 state.
@@ -140,7 +173,7 @@ Local proof, cost and regression notes are in
 
 #### L1I (`rapt_l1i.sv`)
 
-N-way set-associative I-cache (`L1I_N_WAYS`, default 2). `2^L1I_LEN` sets (32), `2^L1I_LINE_LEN` words/line (16 RV32 words = 64 B). Default capacity is 4 KiB. 7-state FSM (`IDLE`, `PTWAIT`, `TRAP`, `RD_A`, `RD_0`, `RD_1`, `FINA`).
+N-way set-associative I-cache (`L1I_N_WAYS`, default 4). `2^L1I_LEN` sets (64), `2^L1I_LINE_LEN` words/line (16 RV32 words = 64 B). Default capacity is 16 KiB. 7-state FSM (`IDLE`, `PTWAIT`, `TRAP`, `RD_A`, `RD_0`, `RD_1`, `FINA`).
 
 | Storage | Implementation                                                                       |
 | ------- | ------------------------------------------------------------------------------------ |
@@ -148,7 +181,7 @@ N-way set-associative I-cache (`L1I_N_WAYS`, default 2). `2^L1I_LEN` sets (32), 
 | Tags    | Banked `rapt_sram_1rw` per way per word (combinational compare from SRAM output)     |
 | Valid   | Register arrays per way (`l1i_valid[way][set]`) for fast `fence.i` bulk invalidation |
 
-3-tier pre-read uses the IFU's exact next-PC hint: current bank reads the hinted word, next bank reads `+2`, and remaining banks read `+4`. This provides `inst_n1` and `inst_n2` for the parameterized instruction-prefix walker while hiding hit-path target/stride transitions. Cache lines retain per-word valid bits; on the default non-SDRAM AR path, `RAPT_L1I_REFILL_WORDS=8` refills one 32 B sector per miss through an 8-entry AR FIFO. The value is capped by the configured line length and may be overridden for experiments; SDRAM burst targets retain their dedicated two-beat burst refill path. Way replacement: first invalid, then toggle `replace_bit` per set. ITLB + IPTW support Sv32/Sv39 translation.
+3-tier pre-read uses the IFU's exact next-PC hint: current bank reads the hinted word, next bank reads `+2`, and remaining banks read `+4`. This provides `inst_n1` and `inst_n2` for the parameterized instruction-prefix walker while hiding hit-path target/stride transitions. Cache lines retain per-word valid bits; on the default non-SDRAM AR path, `RAPT_L1I_REFILL_WORDS=8` refills one 32 B sector per miss through an 8-entry AR FIFO. The value is capped by the configured line length and may be overridden for experiments; SDRAM burst targets retain their dedicated two-beat burst refill path. Way replacement reuses a matching partial line, then chooses an invalid candidate, then a per-set tree-PLRU victim for more than two ways (two-way configurations retain their toggle). ITLB + IPTW support Sv32/Sv39 translation.
 
 Cache-response ownership is separate from request acceptance. Recovery and
 invalidation detach refill ownership while already accepted reads drain; their
@@ -237,8 +270,9 @@ Dispatch queue + reorder buffer + commit logic.
 - **UOQ**: instruction ring with RenameWidth enqueue and DispatchWidth dequeue; no pair grouping.
 - **Admission**: `rapt_dispatch_admit` owns the ordered UOQ-to-ROB allocation prefix, serializing barriers, registered recovery fence and ROB capacity acceptance. Execution-domain capacity is a later, independent handshake when buffered dispatch is enabled. Registered first-stop reason/count/domain probes describe the allocation boundary, not rename enqueue readiness.
 - **ROB dispatch steering**: allocated owners enter `ROB_DP` until an execution-domain queue accepts them. `rapt_rob_dispatch_select` rotates the circular pending bitmap into age order and uses the shared hierarchical rank tree to expose the oldest `SteerScanEntries=K` owners, independently of `DispatchWidth=W`. Unused candidate lanes fall through from same-cycle ROB allocations. The selector exports only lightweight domain/token identities; after capacity-aware compaction, ROU reads and forwards full payloads for the W winners. Recovery eligibility excludes owners younger than the pending recovery owner.
-- **ROB**: `rob_entry_t[]`, `ROB_SIZE` entries (64). States: `ROB_DP`->`ROB_EX`->`ROB_WB`->`ROB_CM`; the common ready path may perform allocation and `ROB_DP`->`ROB_EX` on the same edge. Allocation remains a contiguous prefix of up to DispatchWidth entries, while endpoint acceptance may be sparse.
+- **ROB**: `rob_entry_t[]`, `ROB_SIZE` entries (32). States: `ROB_DP`->`ROB_EX`->`ROB_WB`->`ROB_CM`; the common ready path may perform allocation and `ROB_DP`->`ROB_EX` on the same edge. Allocation remains a contiguous prefix of up to DispatchWidth entries, while endpoint acceptance may be sparse.
 - **Completion ownership**: allocation identity is `(ROB slot, generation)`. A read-only ROB owner directory validates each physical completion and early-wakeup producer before shared arbitration or architectural/speculative side effects. Immutable `prd/rd` payload is checked by simulation assertions rather than duplicated production muxes. ROU consumes this accepted fabric; its optional strict-input mode is retained for standalone hostile-input tests.
+- **Completion register**: each arbitrated port captures a full accepted packet before ROB/PRF/IQ broadcast, adding one cycle of result visibility without reducing per-port throughput. Producer acceptance and FPR writes remain at capture. The full fast-load wake/confirm/rebusy protocol is delayed by the same cycle. Precise flush clears stage validity; early recovery does not free ROB owners, which remain executing until registered completion. Any future selective ROB reclamation must revisit this lifetime contract. Physical timing improvement requires a new implementation result, not merely this added RTL boundary.
 - **Recovery transaction**: a registered oldest-wins reducer holds owner/generation/target atomically and publishes one-shot redirects with a generation-qualified live checkpoint and a level `pending` fence. Both held requests and incoming candidates must match the live ROB generation; publication compares the full held identity, not a generation reconstructed from the current slot. `rapt_rob_age_mask` limits pending dispatch owners to the circular interval strictly before the recovery owner using two prefix comparisons and a shared wrap bit, without per-entry modulo arithmetic. Correct checkpoint releases remain an independent completion-width array. This does not implement selective cancellation acknowledgements or guarantee safety across generation wrap; the conservative fence and retirement-time cleanup remain necessary.
 - **Operand bypass**: UOQ pre-read > LSU/IOQ broadcast > CDB broadcast. Forwarding continues during UOQ and `ROB_DP` residence. The dispatch output also merges a completion arriving on the exact endpoint-accept edge, so a one-cycle broadcast cannot be lost between resident-state update and queue sampling.
 - **Commit**: scans up to CommitWidth ready entries in order. Special effects retire alone; at most one control-flow event per group; a store requires SQ readiness and terminates the group. BPU trains on the actual branch position.
@@ -261,7 +295,7 @@ bypass, not an arbitrary full-ROB scheduler.
 #### IEU (`ieu/rapt_ieu.sv`)
 
 - **Generic IQ** (`rapt_iq.sv`): shared parameterized data-capture scheduler. IEU instantiates the ALQ (8 entries, `RAPT_INTEGER_ISSUE_PORTS` issue ports) and BRQ (4 entries); FEU instantiates FPQ separately. Operands wake from the typed completion array plus the **fast load-use** tag path. Payload-independent `rapt_issue_select` consumes the age matrix, readiness and local port masks. Default selection remains port-first oldest-ready; optional one-hop port rebalancing never evicts a selected uop. Reset/flush suppress selection before the execution boundary. Local policy-cost and proof-scope notes: `docs.agent/evaluation/issue-selection-evaluation.md` and `docs.agent/evaluation/integer-issue-port-evaluation.md`.
-- **Issue-slot reclaim**: when enabled, IQ admission uses already-free slots first, then slots selected to issue on the same edge. Old payload is consumed before the edge, while replacement allocation takes priority over issue-clear and receives a new age. `RAPT_IQ_RECLAIM_ON_ISSUE` defaults to 1 and can be disabled for timing comparisons. This adds select-to-admission combinational dependence; local evaluation notes are in `docs.agent/evaluation/dispatch-admission-evaluation.md`, not a physical timing signoff.
+- **Issue-slot reclaim**: `RAPT_IQ_RECLAIM_ON_ISSUE` defaults to 0, so admission uses registered free slots and a slot released by issue becomes available on the following cycle. This removes the issue-select-to-admission feedback dependence. Setting it to 1 restores same-edge reuse: already-free slots have priority, old payload is consumed before the edge, and replacement allocation takes priority over issue-clear and receives a new age.
 - **ALU-CSR pipe** (`ieu/rapt_ieu_pipe_alu_csr.sv`): full ALU + CSR/system/trap redirect semantics. `RAPT_INTEGER_SYSTEM_PORT` chooses which member of the integer-port array instantiates it and shares its completion endpoint with FP.
 - **Generated simple-ALU pipes** (`ieu/rapt_ieu_pipe_alu.sv`): every integer port other than `RAPT_INTEGER_SYSTEM_PORT` instantiates a simple ALU + JAL/JALR link path. Dispatch slots never own a port; the ALQ selects from all resident compatible uops each cycle. A one-port configuration contains only the full ALU-CSR pipe.
 - **Branch pipe** (`ieu/rapt_ieu_pipe_branch.sv`): one conditional-branch resolution path; checks both next PC and retained predicted direction and never writes PRF data.
@@ -271,7 +305,8 @@ bypass, not an arbitrary full-ROB scheduler.
 
 #### FEU (`feu/rapt_feu.sv`)
 
-Owns the four-entry in-order FPQ and scalar F/D arithmetic, FMA,
+Owns the four-entry in-order FPQ and scalar F/D arithmetic plus Zfhmin
+half-precision conversion, FMA,
 divide/square-root, conversions, comparison/classification, sign injection and
 move operations under `feu/fpu/`. It reads/writes the architectural FPR bank
 and produces the FPU candidate for the configured shared completion endpoint.
@@ -314,11 +349,19 @@ faulting instructions. Rename recovery consumes typed per-slot PRF identities.
 
 #### CSR (`rapt_csr.sv`)
 
-32-entry register file, M/S-mode. Trap entry/exit (`ecall`/`ebreak`/`mret`/`sret`), privilege transitions (M/S/U), delegation (`medeleg`/`mideleg`), `MSTATUS`<->`SSTATUS` mirroring, `mcycle`/`time` counters. Broadcasts: `priv`, `satp`, MMU enables, `tvec`, and `pmpcfg`/`pmpaddr` shadow arrays for PMP.
+64-slot CSR storage array (42 named `csr_t` entries in the default
+configuration), M/S-mode. Trap entry/exit (`ecall`/`ebreak`/`mret`/`sret`), privilege transitions (M/S/U), delegation (`medeleg`/`mideleg`), `MSTATUS`<->`SSTATUS` mirroring, `mcycle`/`time` counters. Broadcasts: `priv`, `satp`, MMU enables, `tvec`, and `pmpcfg`/`pmpaddr` shadow arrays for PMP.
 
 #### PMP (`rapt_pmp.sv`)
 
-16 PMP entries (`RAPT_PMP_NUM=16`). Combinational match logic supporting TOR / NA4 / NAPOT modes, with locked (`L` bit) entries enforced even in M-mode. CSR file owns the architectural `pmpcfg[0..3]` / `pmpaddr[0..15]` registers (WARL on reserved A-mode encodings) and broadcasts them through `csr_bcast_if`. Checks are wired into three sites: IFU instruction fetch (raises instruction access-fault, `mtval` = faulting byte address for cross-boundary fetches), L1D load/store (raises load/store access-fault, MPRV-aware effective privilege), and PTW PTE-load path (raises access-fault on the failing PTE address). Empty PMP table allows all accesses in M-mode and denies all accesses in S/U-mode, matching the privileged spec.
+16 PMP entries (`RAPT_PMP_NUM=16`). Combinational match logic supports TOR / NA4 / NAPOT modes, with locked (`L` bit) entries enforced even in M-mode. The CSR file owns the architectural PMP registers and sends updates through `pmp_update_if` to local `rapt_pmp_state` copies. Checks cover instruction fetch, load/store accesses and implicit PTW PTE reads. Empty PMP tables allow M-mode accesses and deny S/U-mode accesses.
+
+`rapt_pmp_permissions` shares range matching and first-entry selection across
+read/write permission results for the same address and byte footprint. L1D uses
+three parallel address checks (load, store/CMO, PTW); CMO read and store write
+permission checks share the store footprint. Partial matches, locked entries,
+effective privilege and complete-byte coverage retain the same fault semantics.
+`rapt_pmp` remains the single-request compatibility interface.
 
 ### Memory Subsystem
 
@@ -326,9 +369,9 @@ faulting instructions. Rename recovery consumes typed per-slot PRF identities.
 
 - **IOQ / AGU** (`lsu/rapt_lsu_ioq.sv`): `IOQ_SIZE` entries (default 8) for loads, stores and atomics. A younger ready load may issue ahead of older work only after older stores have resolved and are known non-conflicting. With translation enabled, unequal 4 KiB page word offsets are sufficient to prove non-aliasing before the physical address is available; equal offsets remain conservatively ordered. `oo_pending` retains the selected entry across a multicycle L1D request; atomics and uncacheable/MMIO accesses remain ordered. The IOQ drives `completion[IntegerIssuePorts+1]` (port 3 in the default configuration) and the independent early `load_fast_if` wakeup path to IEU/FEU.
 - **Unified SQ**: `SQ_SIZE` entries (default 16). One ring stores each store from execute/writeback through commit and drain. `[head,cmt)` entries are committed and survive flush; `[cmt,tail)` entries are speculative and are discarded on flush.
-- Store FSM: six states (`LS_S_V`/`LS_S_R`, `LS_S_HI_V`/`LS_S_HI_R`,
-  `LS_S_X_V`/`LS_S_X_R`) handle aligned drains, split misaligned drains, and
-  the third RV32D FSD beat.
+- Store FSM: seven states (`LS_S_V`/`LS_S_R`, `LS_S_HI_V`/`LS_S_HI_R`,
+  `LS_S_X_V`/`LS_S_X_R`, `LS_S_CBO_R`) handle aligned drains, split misaligned
+drains, the third RV32D FSD beat, and the final CBO.ZERO beat.
 - Store-to-load forwarding: a shared SQ CAM gives every query port the same youngest-possible-alias priority. A younger partial store, unresolved synonym, or same-cycle allocation blocks an older forwarding candidate; CBO.ZERO also blocks forwarding. An exact, aligned, full-width store may forward only while its saved virtual address belongs to the current translation context.
 - Retained stores carry a per-entry stale-context bit. System/exception flushes and fences conservatively invalidate their virtual forwarding identity, including when the next load runs in Bare mode; different page word offsets can still bypass. Ordinary non-trapping branch/jump recovery preserves the context, while interrupt/fence indications take priority. Allocation clears the reused entry's bit. These rules affect forwarding, not the committed store's saved physical drain address.
 - The best-effort B load path reports completion only from an eligible SQ forwarding hit or an admitted L1D request with a matching ready response; locally blocked queries cannot inherit downstream ready.
@@ -363,12 +406,16 @@ remain separate microarchitecture projects, now rooted at their owning module:
 
 #### L1D (`rapt_l1d.sv`)
 
-2-way set-associative. `2^L1D_LEN` sets (16), `2^L1D_LINE_LEN` words/line (16 RV32 words or 8 RV64 words = 64 B). Default capacity is 2 KiB. 5-state FSM (`IDLE`, `PTWAIT`, `TRAP`, `LD_A`, `LD_D`).
+4-way set-associative. `2^L1D_LEN` sets (64), `2^L1D_LINE_LEN` words/line (16 RV32 words or 8 RV64 words = 64 B). Default capacity is 16 KiB. 6-state FSM (`IDLE`, `PTWAIT`, `TRAP`, `LD_CHECK`, `LD_A`, `LD_D`).
 
 | Storage   | Implementation                                                                      |
 | --------- | ----------------------------------------------------------------------------------- |
 | Data      | Banked `rapt_sram_1rw` wide subarrays (single-port, sync read, write bypass)        |
-| Tag/Valid | Per-word register arrays for simultaneous ld/st hit check + fast fence invalidation |
+| Tag/Valid | Per-line tags and per-word valid register arrays for simultaneous ld/st checks + set invalidation |
+
+Each default L1 has 64 sets × 64 B × 4 ways = 16 KiB, with tree-PLRU replacement. The 4 KiB per-way span keeps every index bit within the page offset for both Sv32 and Sv39.
+
+Cacheable main-memory misses issue one aligned full-line INCR read. The demanded word returns as its beat arrives; the accepted transaction retains ownership through RLAST, including after flush or an error. Good beats populate per-word valid state. A demand error faults after the burst drains; errors on other beats leave those words invalid. Refill is restricted to one translated page, a supported RAM range and a uniform PMP region. PMP boundaries, PBMT NC/IO and narrow ROM/SRAM/device paths retain word accesses; no-allocation metadata also prevents optional L2 from widening these requests or PTW reads. Ordinary stores wait while the full-line refill drains.
 
 Write-through policy. Partial stores (SB/SH): read-modify-write (RMW) 2-cycle merge in IDLE. Speculative SRAM read: VIPT-safe virtual index in IDLE. Separate DTLB + DSTLB instances; shared DPTW for both. Reservation register for LR/SC. Cacheability via `addr_cacheable()`.
 
@@ -377,15 +424,28 @@ effective address is translated and checked as a CMO access before retirement:
 load or store permission is sufficient, the PTE A bit is required, the D bit is
 not, and failures use store/AMO page- or access-fault causes. M/S/U execution is
 gated by the corresponding `menvcfg`/`senvcfg` CBIE and CBCFE controls. After the
-unified SQ drains, the existing `fence_time` maintenance path invalidates every
-L1D valid entry and flushes the data-side TLBs. This is a conservative whole-L1D
-implementation; because L1D is write-through, it is architecturally at least as
-strong as cleaning or invalidating the selected 64-byte architectural block.
+unified SQ drains, INVAL/FLUSH invalidate every way of the VA-selected L1D set
+(default: one 64-byte line per way). The commit broadcast carries only VA
+`[11:6]`, reusing the accepted IOQ completion address stored in the ROB. No
+maintenance tag comparator is needed. Smaller-line presets clear every set
+covered by the aligned 64-byte CBO block; custom geometries extending beyond
+the page offset clear all possible physical index colors. CLEAN only drains
+the write-through SQ. CBO does not flush instruction/data TLBs or the I-cache.
+Faulting and stale-generation completions cannot initiate set maintenance.
+Optional L2 receives the same VA block broadcast, queues all matching physical
+set colors, and holds new requests until accepted reads/writes and pending
+installs drain and the selected sets are invalidated. This prevents an older
+refill from restoring a line after maintenance.
 
 Zicboz `cbo.zero` uses the same checked effective-address path with ordinary
 store permissions, including PTE A and D checks and CBZE gating. At commit, the
-SQ expands it into eight 64-bit writes in RV64 (sixteen 32-bit writes in RV32),
-zeroing exactly the naturally aligned 64-byte architectural cache block. This
+SQ retains one aligned block descriptor through the final memory B response.
+The AXI adapter emits one AW, eight 64-bit W beats in RV64 (sixteen 32-bit
+beats in RV32), and one B, zeroing exactly the naturally aligned 64-byte block.
+L1D invalidates the touched block on completion, including error completion.
+Optional L2 streams the burst, invalidates touched sets, and holds reads
+until the real downstream B. The RV32 RNP bridge splits the burst into its
+existing word transactions while retaining the core-side owner and final B. This
 also implements Zic64b on physical configurations whose cache lines are only
 16 bytes. Zicbop prefetch encodings are accepted as non-faulting HINTs.
 
@@ -395,7 +455,9 @@ Reusable fully-associative Sv32/Sv39 TLB. `ENTRIES` is configured independently 
 
 #### PTW (`rapt_ptw.sv`)
 
-Reusable page-table walker. RV32 uses a Sv32 two-level FSM (`IDLE`->`LVL1`->`LVL0`); RV64 uses a Sv39 three-level FSM (`IDLE`->`LVL2`->`LVL1`->`LVL0`). Leaf detection follows `PTE.R||PTE.X`. Svade is implemented: A=0, or D=0 for a store, produces a page fault and the walker never modifies a PTE. Instantiated as: `u_iptw` (L1I), `u_dptw` (L1D).
+Reusable page-table walker. RV32 uses a Sv32 two-level FSM
+(`IDLE`->`LVL1_REQ`/`LVL1_WAIT`->`LVL0_REQ`/`LVL0_WAIT`); RV64 uses a Sv39
+three-level FSM (`IDLE`->`LVL2_REQ`/`LVL2_WAIT`->`LVL1_REQ`/`LVL1_WAIT`->`LVL0_REQ`/`LVL0_WAIT`). Leaf detection follows `PTE.R||PTE.X`. Svade is implemented: A=0, or D=0 for a store, produces a page fault and the walker never modifies a PTE. Instantiated as: `u_iptw` (L1I), `u_dptw` (L1D).
 
 #### BUS (`rapt_bus.sv`)
 
@@ -479,17 +541,17 @@ A/B lane APIs anywhere in the active ordered frontend/backend pipeline.
 | `RAPT_XLEN`          | 32        | Register width (64 with `RAPT_RV64`)       |
 | `RAPT_M_FAST`        | 1         | Single-cycle mul/div (sim mode)            |
 | `RAPT_L1I_LINE_LEN`  | 4         | L1I line: 2⁴ = 16 words (64 B in RV32)     |
-| `RAPT_L1I_LEN`       | 5         | L1I sets: 2⁵ = 32                          |
-| `RAPT_L1I_N_WAYS`    | 2         | L1I ways (2-way SA)                        |
+| `RAPT_L1I_LEN`       | 6         | L1I sets: 2⁶ = 64                          |
+| `RAPT_L1I_N_WAYS`    | 4         | L1I ways (4-way SA)                        |
 | `RAPT_L1I_REFILL_WORDS` | 8      | Words per L1I sector refill (capped at line size) |
 | `RAPT_PHT_SIZE`      | 256       | PHT entries                                |
 | `RAPT_BTB_SIZE`      | 128       | BTB entries (64 sets × 2 ways)             |
-| `RAPT_BTB_WAYS`      | 2         | BTB associativity                          |
+| `RAPT_BTB_WAYS`      | 2         | BTB associativity (single LRU bit per set requires exactly 2) |
 | `RAPT_RSB_SIZE`      | 4         | Return stack entries                       |
 | `RAPT_BPU_DIRP_TAGE` | defined   | Default direction predictor                |
 | `RAPT_RIQ_SIZE`      | 8         | Rename queue (RNQ) entries                 |
 | `RAPT_IIQ_SIZE`      | 8         | Dispatch queue (UOQ) entries               |
-| `RAPT_ROB_SIZE`      | 64        | Reorder buffer entries                     |
+| `RAPT_ROB_SIZE`      | 32        | Reorder buffer entries                     |
 | `RAPT_ROB_GENERATION_BITS` | 4 | Per-slot allocation generation width; not a standalone cancellation protocol |
 | `RAPT_BRANCH_CHECKPOINTS` | 16 | Independent control-flow rename snapshots; exhaustion backpressures rename |
 | `RAPT_RS_SIZE`       | 8         | ALU issue queue (ALQ) entries, shared by ALU-CSR/ALU |
@@ -498,8 +560,9 @@ A/B lane APIs anywhere in the active ordered frontend/backend pipeline.
 | `MDQ_SIZE` (param)   | 4         | MUL/DIV issue queue entries                |
 | `RAPT_SQ_SIZE`       | 16        | Unified store queue entries                |
 | `RAPT_L1D_LINE_LEN`  | 4 / 3     | RV32: 16 words/line; RV64: 8 words/line    |
-| `RAPT_L1D_LEN`       | 4         | L1D sets: 2⁴ = 16                          |
-| `RAPT_L1D_N_WAYS`    | 2         | L1D ways (2-way SA)                        |
+| `RAPT_L1D_LEN`       | 6         | L1D sets: 2⁶ = 64                          |
+| `RAPT_L1D_N_WAYS`    | 4         | L1D ways (4-way SA)                        |
+| `RAPT_CACHE_SRAMLEN` | 128       | Cache data-SRAM subarray width in bits     |
 | `RAPT_ITLB_ENTRIES`   | 16        | Fully-associative ITLB entries             |
 | `RAPT_DTLB_ENTRIES`   | 16        | Entries in each L1D DTLB lookup replica    |
 | `RAPT_L2_EN`         | undefined | Optional L2 defaults to passthrough        |
@@ -507,8 +570,8 @@ A/B lane APIs anywhere in the active ordered frontend/backend pipeline.
 | `RAPT_L2_N_WAYS`     | 1         | L2 ways when enabled                       |
 | `RAPT_COMMIT_WIDTH` | 2 | Maximum ready-prefix retirement width |
 | `RAPT_DECODE_WIDTH` | 2 | Decode / frontend slot width |
-| `RAPT_RENAME_WIDTH` | DecodeWidth | Rename / PRF pre-read width |
-| `RAPT_DISPATCH_WIDTH` | RenameWidth | ROB / execution-queue allocation width |
+| `RAPT_RENAME_WIDTH` | 2 | Rename / PRF pre-read width (`ifndef` fallback: DecodeWidth) |
+| `RAPT_DISPATCH_WIDTH` | 2 | ROB / execution-queue allocation width (`ifndef` fallback: RenameWidth) |
 | `RAPT_INTEGER_ISSUE_PORTS` | 2 | Number of physical integer issue/FU ports |
 | `RAPT_INTEGER_SYSTEM_PORT` | 0 | Integer-port index owning CSR/system capability and the FP-shared completion endpoint |
 | `RAPT_PHY_SIZE`      | 128       | Physical registers                         |
@@ -517,10 +580,10 @@ A/B lane APIs anywhere in the active ordered frontend/backend pipeline.
 
 | Type               | Description                                                                                   |
 | ------------------ | --------------------------------------------------------------------------------------------- |
-| `uop_t`            | Micro-op: alu, branch, mem, CSR, trap, pc, inst, imm                                          |
+| `uop_t`            | Micro-op: typed `schedule` (domain + issue-port mask) and `execute` payload (int/branch/memory/fp/sys), rd/imm, pc/pnpc, inst, trap/cause/tval |
 | `prd_t`            | Physical register descriptor: op1/op2 + pr1/pr2/prd/prs                                       |
-| `rob_state_t`      | ROB state: `ROB_CM` (committed), `ROB_WB` (written-back), `ROB_EX` (executing)                |
-| `rob_entry_t`      | Full ROB entry: phys regs, arch rd, state, branch, memory, atomics, CSR, trap, fence, inst/PC |
-| `addr_cacheable()` | Returns true for cacheable regions (mrom, flash, psram, sdram)                                |
+| `rob_state_t`      | ROB state: `ROB_DP` (allocated, pending dispatch), `ROB_EX` (executing), `ROB_WB` (written-back), `ROB_CM` (committed / empty) |
+| `rob_entry_t`      | Retirement state: phys regs, arch rd, state/generation, branch result + next PC, store flag, CSR/FP-flag snapshot, trap/tval/cause, difftest skip (store payload lives in the unified SQ) |
+| `addr_cacheable()` | Returns true for cacheable regions (SRAM, mrom, flash, PMEM, sdram)                            |
 | `addr_mapped()`    | Returns true for any mapped memory or MMIO region                                             |
 | `addr_mmio()`      | Returns true for MMIO regions that difftest should skip                                       |

@@ -1,8 +1,9 @@
 {
   "_comment": [
     "ChampSim-style DSE config for raptor_se.py.",
-    "Aligned to hdl/configs/default/rapt_config.svh and hdl/frontend/branch_predictor/* as of 2026-05-17.",
+    "Aligned to hdl/configs/default/rapt_config.svh and hdl/frontend/branch_predictor/* as of 2026-09-14.",
     "Default BPU mirrors the RTL TAGE flavor (RAPT_BPU_DIRP_TAGE): 256-entry bimodal base + 3 tagged tables of 128 entries (tag widths 7/7/8, histories 8/16/64, 3-bit signed counter, 1-bit useful).",
+    "Default caches mirror the current preset: L1I 64 B x 64 sets x 4-way = 16 KiB, L1D 64 B x 64 sets x 4-way = 16 KiB.",
     "Unspecified keys keep the .svh-derived/default simulator value.",
     "Examples: --set ooo_cpu.0.rob_size=32 --set L1I.ways=2 --set ooo_cpu.0.branch_predictor=gshare.",
     "Advanced BP capacity knobs live under branch_predictor.{btb,pht,ras,tage,loop,statistical_corrector,perceptron}.",
@@ -19,7 +20,7 @@
       "frequency": 1000,
       "ifetch_buffer_size": 64,
       "register_file_size": 128,
-      "rob_size": 64,
+      "rob_size": 32,
       "lq_size": 16,
       "sq_size": 16,
       "fetch_width": 2,
@@ -32,13 +33,13 @@
       "squash_width": 2,
       "scheduler_size": 16,
       "m_fast": true,
-      "branch_predictor": "local",
+      "branch_predictor": "tage",
       "btb": "simple_btb"
     }
   ],
   "L1I": {
-    "sets": 32,
-    "ways": 2,
+    "sets": 64,
+    "ways": 4,
     "rq_size": 1,
     "wq_size": 1,
     "pq_size": 0,
@@ -51,8 +52,8 @@
     "prefetcher": "no"
   },
   "L1D": {
-    "sets": 16,
-    "ways": 2,
+    "sets": 64,
+    "ways": 4,
     "rq_size": 1,
     "wq_size": 1,
     "pq_size": 0,
@@ -89,7 +90,7 @@
     "hash_targets": true
   },
   "branch_predictor": {
-    "_comment": "Defaults mirror hdl/frontend/branch_predictor/rapt_bpu_tage.sv: 3 tagged tables of 128 entries with tag widths 7/7/8 and history lengths 8/16/64 over a 256-entry 2-bit bimodal base. ~5.4 Kbit hardware TAGE budget. hist_buffer_size is the gem5 speculative-history rollback buffer, not hardware state.",
+    "_comment": "Defaults mirror hdl/frontend/branch_predictor/rapt_bpu_tage.sv: 3 tagged tables of 128 entries with tag widths 7/7/8 and history lengths 8/16/64 over a 256-entry 2-bit bimodal base. ~5.4 Kbit hardware TAGE budget. hist_buffer_size is the gem5 speculative-history rollback buffer, not hardware state. The RTL has no loop predictor or statistical corrector; gem5's plain TAGE wrapper models neither, so those sections are omitted.",
     "kind": "tage",
     "btb": {
       "entries": 128,
@@ -133,21 +134,6 @@
       "initial_t_counter_value": 2048,
       "use_alt_on_na_bits": 4,
       "max_allocations": 1
-    },
-    "loop": {
-      "log_size": 3,
-      "age_bits": 4,
-      "confidence_bits": 2,
-      "tag_bits": 10,
-      "iter_bits": 10,
-      "assoc_log": 1,
-      "initial_loop_age": 7,
-      "initial_loop_iter": 0
-    },
-    "statistical_corrector": {
-      "num_entries_first_local_histories": 64,
-      "log_bias": 7,
-      "log_size_up": 5
     },
     "perceptron": {
       "budget_bits": 12288,

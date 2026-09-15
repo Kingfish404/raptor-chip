@@ -19,6 +19,7 @@ module tb_superscalar_widths;
     return c;
   endfunction
   localparam core_config_t Cfg = extended_config();
+  localparam int unsigned TestIssuePorts = Cfg.integer_issue_ports;
   localparam execution_domain_t CustomDomain = execution_domain_t'(5);
 
   typedef struct packed {
@@ -38,7 +39,7 @@ module tb_superscalar_widths;
   logic clock = 0;
   logic reset = 1;
   always #5 clock = ~clock;
-  logic [1:0] issue_enable;
+  logic [TestIssuePorts-1:0] issue_enable;
   idu_rnu_if #(.UopT(extended_uop_t)) idu_rnu ();
   rnu_rou_if #(.UopT(extended_uop_t)) rnu_rou ();
   rapt_recovery_if #(.RobEntries(Cfg.rob_entries)) recovery ();
@@ -53,10 +54,7 @@ module tb_superscalar_widths;
   rob_completion_owner_if #(.ENTRIES(Cfg.rob_entries)) completion_owner ();
   dispatch_capacity_t capacity[Cfg.execution_domains];
   dispatch_grant_t grant[Cfg.execution_domains];
-  extended_issue_t iss, iss_b;
-  extended_issue_t issue[2];
-  assign iss   = issue[0];
-  assign iss_b = issue[1];
+  extended_issue_t issue[TestIssuePorts];
   dpu_iq_if #(.RS_SIZE(8)) queue ();
   load_fast_if load_fast ();
   exu_prf_if prf_rd ();
@@ -166,7 +164,7 @@ module tb_superscalar_widths;
   rapt_iq #(
       .Cfg(Cfg),
       .IQ_SIZE(8),
-      .NumIssuePorts(2),
+      .NumIssuePorts(TestIssuePorts),
       .UopT(extended_uop_t),
       .SlotT(extended_slot_t),
       .IssueT(extended_issue_t)
@@ -217,7 +215,7 @@ module tb_superscalar_widths;
     if (!reset) begin
       automatic int count;
       cycle++;
-      for (int p = 0; p < 2; p++)
+      for (int p = 0; p < TestIssuePorts; p++)
       if (issue[p].valid) begin
         automatic int id = int'((issue[p].uop.pc - 'h8000_0000) >> 2);
         assert (issue[p].op1 + issue[p].op2 == xlen_t'(2 + id / 7))
@@ -255,7 +253,7 @@ module tb_superscalar_widths;
   // Finite bursts force completed instructions to accumulate for wide commit;
   // periodic issue pauses force partial dispatch and queue full/reclaim cases.
   always @(negedge clock) begin
-    issue_enable = cycle % 11 < 4 ? 2'b00 : 2'b11;
+    issue_enable = cycle % 11 < 4 ? '0 : '1;
     for (int p = 0; p < Cfg.completion_ports; p++) completion[p] = '0;
     if (!reset && cycle % 5 == 0) begin
       for (int p = 0; p < Cfg.completion_ports; p++)
@@ -327,9 +325,9 @@ module tb_superscalar_widths;
       assert (max_commit > 1)
       else $fatal(1, "commit never multi-slot");
     $display(
-        "PASS: widths decode=%0d rename=%0d dispatch=%0d commit=%0d; max=%0d/%0d/%0d; %0d uops",
-        DecodeWidth, RenameWidth, DispatchWidth, CommitWidth, max_rename, max_dispatch, max_commit,
-        retired);
+        "PASS: widths decode=%0d rename=%0d dispatch=%0d commit=%0d issue_ports=%0d; max=%0d/%0d/%0d; %0d uops",
+        DecodeWidth, RenameWidth, DispatchWidth, CommitWidth, TestIssuePorts, max_rename,
+        max_dispatch, max_commit, retired);
     $finish;
   end
   initial begin

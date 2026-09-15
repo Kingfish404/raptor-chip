@@ -18,7 +18,9 @@ module tb_l1d_byte_rom;
   lsu_l1d_mmu_if exu_l1d ();
   rou_cmu_if rou_cmu ();
 
-  rapt_l1d dut (
+  rapt_l1d #(
+      .LineRefill(0)
+  ) dut (
       .clock(clock),
       .cmu_bcast(cmu_bcast),
       .lsu_l1d(lsu_l1d),
@@ -26,7 +28,6 @@ module tb_l1d_byte_rom;
       .csr_bcast(csr_bcast),
       .pmp_update(pmp_update),
       .exu_l1d(exu_l1d),
-      .rou_cmu(rou_cmu),
       .reset(reset)
   );
 
@@ -149,7 +150,9 @@ module tb_l1d_cmo_permissions;
   lsu_l1d_mmu_if exu_l1d ();
   rou_cmu_if rou_cmu ();
 
-  rapt_l1d dut (
+  rapt_l1d #(
+      .LineRefill(0)
+  ) dut (
       .external_write_valid_i(1'b0),
       .external_write_pending_i(1'b0),
       .external_write_first_i('0),
@@ -163,8 +166,8 @@ module tb_l1d_cmo_permissions;
   task automatic install_store_tlb(input logic [6:0] pte);
     begin
       dut.u_dstlb.valid[0] = 1'b1;
-      dut.u_dstlb.vtags[0] = Vaddr[63:12];
-      dut.u_dstlb.ptags[0] = 64'(Paddr >> 12);
+      dut.u_dstlb.vtags[0] = $bits(dut.u_dstlb.vtags[0])'(Vaddr >> 12);
+      dut.u_dstlb.ptags[0] = $bits(dut.u_dstlb.ptags[0])'(Paddr >> 12);
       dut.u_dstlb.asids[0] = '0;
       dut.u_dstlb.ptes[0] = pte;
     end
@@ -374,7 +377,9 @@ module tb_l1d_flush_ordered;
   lsu_l1d_mmu_if exu_l1d ();
   rou_cmu_if rou_cmu ();
 
-  rapt_l1d dut (
+  rapt_l1d #(
+      .LineRefill(0)
+  ) dut (
       .clock(clock),
       .cmu_bcast(cmu_bcast),
       .lsu_l1d(lsu_l1d),
@@ -382,7 +387,6 @@ module tb_l1d_flush_ordered;
       .csr_bcast(csr_bcast),
       .pmp_update(pmp_update),
       .exu_l1d(exu_l1d),
-      .rou_cmu(rou_cmu),
       .reset(reset)
   );
 
@@ -413,10 +417,13 @@ module tb_l1d_flush_ordered;
 
     begin_load(MmioAddr, 1'b0);
     check(!l1d_bus.arvalid, "unordered MMIO load issued a bus request");
-    tick(3);
-    check(!l1d_bus.arvalid, "unordered MMIO load did not remain blocked");
-    lsu_l1d.ordered = 1'b1;
-    #1;
+    for (int c = 0; c < 20 && !lsu_l1d.rretry; c++) tick(1);
+    check(lsu_l1d.rretry && !lsu_l1d.rready && !l1d_bus.arvalid,
+          "unordered MMIO did not retry without completion or bus side effect");
+    tick(1);
+    lsu_l1d.rvalid = 0;
+    tick(1);
+    begin_load(MmioAddr, 1'b1);
     check(l1d_bus.arvalid, "ordered MMIO load did not become issuable");
 
     lsu_l1d.rvalid = 1'b0;
@@ -532,7 +539,9 @@ module tb_l1d_io_size;
   pmp_update_if pmp_update ();
   lsu_l1d_mmu_if exu_l1d ();
   rou_cmu_if rou_cmu ();
-  rapt_l1d dut (
+  rapt_l1d #(
+      .LineRefill(0)
+  ) dut (
       .external_write_valid_i(1'b0),
       .external_write_pending_i(1'b0),
       .external_write_first_i('0),
@@ -672,7 +681,9 @@ module tb_l1d_load_pbmt;
   pmp_update_if pmp_update ();
   lsu_l1d_mmu_if exu_l1d ();
   rou_cmu_if rou_cmu ();
-  rapt_l1d dut (
+  rapt_l1d #(
+      .LineRefill(0)
+  ) dut (
       .external_write_valid_i(1'b0),
       .external_write_pending_i(1'b0),
       .external_write_first_i('0),
@@ -771,14 +782,14 @@ module tb_l1d_load_pbmt;
     lsu_l1d.ordered = 0;
     lsu_l1d.rvalid = 1;
     allow_data = 0;
-    tick(30);
+    for (int c = 0; c < 100 && !lsu_l1d.rretry; c++) tick(1);
+    check(lsu_l1d.rretry, "typed unordered request did not release ownership");
     check(ptw_reads == before_ptw + 1, "test did not perform one real page walk");
     check(data_reads == before_data && !l1d_bus.arvalid && !lsu_l1d.rready,
           "unretired typed request accessed memory or hit a cached alias");
-    // Change live inputs after the completed translation; accepted request
-    // and TLB payload must retain the original type.
-    pte_pbmt = 2'(3-attr);
-    csr_bcast.menvcfg_pbmte = 0;
+    // A deferred request has no data-side effect. Its TLB payload retains
+    // the original type even if the backing PTE changes before replay.
+    pte_pbmt = 2'(3 - attr);
     if (cancel) begin
       cmu_bcast.flush_pipe = 1;
       tick(1);
@@ -788,13 +799,22 @@ module tb_l1d_load_pbmt;
       check(data_reads == before_data, "cancelled IO request caused a data read");
       return;
     end
+    tick(1);
+    lsu_l1d.rvalid = 0;
+    tick(1);
     lsu_l1d.ordered = 1;
+    lsu_l1d.rvalid = 1;
+    for (int c = 0; c < 20 && !l1d_bus.arvalid; c++) tick(1);
+    // Change the live enable only after the replay captured translation.
+    csr_bcast.menvcfg_pbmte = 0;
     for (int c = 0; c < 5; c++) begin
       #1;
       check(
           l1d_bus.arvalid && !l1d_bus.ar_ptw && l1d_bus.rpbmt == 2'(attr)
             && l1d_bus.araddr == PA && l1d_bus.rstrb == (byte_load ? 8'h01 : 8'hff),
           "held request lost PBMT, PA or access size");
+      l1d_bus.arlen = 0;
+      l1d_bus.noallocate = 0;
       tick(1);
     end
     data_value = 64'h99;
@@ -835,7 +855,9 @@ module tb_l1d_load_footprint;
   pmp_update_if pmp_update ();
   lsu_l1d_mmu_if exu_l1d ();
   rou_cmu_if rou_cmu ();
-  rapt_l1d dut (
+  rapt_l1d #(
+      .LineRefill(0)
+  ) dut (
       .external_write_valid_i(1'b0),
       .external_write_pending_i(1'b0),
       .external_write_first_i('0),
@@ -871,7 +893,7 @@ module tb_l1d_load_footprint;
       pmp_update.cfg_we=0;
       if (translated != 0) begin
         dut.u_dtlb.valid[0]=1;
-        dut.u_dtlb.vtags[0]=va[XLEN-1:12];
+        dut.u_dtlb.vtags[0]=$bits(dut.u_dtlb.vtags[0])'(va>>12);
         dut.u_dtlb.ptags[0]=$bits(dut.u_dtlb.ptags[0])'(beat_pa>>12);
         dut.u_dtlb.asids[0]=0;
         dut.u_dtlb.ptes[0]=7'b1100011;
@@ -924,6 +946,7 @@ module tb_l1d_page_permissions;
       .load_addr(XLEN'('h80000000)),
       .store_addr(XLEN'('h80000000)),
       .ptw_addr(XLEN'('h80001000)),
+      .ptw_check_active(1'b0),
       .load_size_m1(4'd1),
       .store_walu(8'(`RAPT_SH_WSTRB)),
       .cmo_mgmt(1'b0),
@@ -1026,7 +1049,7 @@ module tb_l1d_permission_stage;
   pmp_update_if pmp_update ();
   lsu_l1d_mmu_if exu_l1d ();
   rou_cmu_if rou_cmu ();
-  rapt_l1d dut (.*);
+  rapt_l1d #(.LineRefill(0)) dut (.*);
   `include "tb_common.svh"
   `include "tb_l1d_defaults.svh"
   localparam logic [XLEN-1:0] PA = XLEN'('h80001000);
@@ -1071,20 +1094,54 @@ module tb_l1d_permission_stage;
   endtask
   initial begin
     for (int bytes = 4; bytes <= XLEN / 8; bytes += 4) begin
-      for (int scenario = 0; scenario < 3; scenario++) begin
+      for (int scenario = 0; scenario < 5; scenario++) begin
         boot();
+        if (scenario >= 3) begin
+          // Deny a locked eight-byte region at zero while leaving PA
+          // accessible to M-mode; the two read requests must not be confused.
+          pmp_update.cfg_we = 'b1;
+          pmp_update.cfg_l = 'b1;
+          pmp_update.mode_off = '0;
+          pmp_update.mode_napot = 'b1;
+          tick(1);
+          pmp_update.cfg_we = '0;
+        end
         lsu_l1d.raddr=PA;
         lsu_l1d.ralu=bytes==8 ? 5'b00011 : 5'b00010;
         lsu_l1d.atomic_lock=1;
         lsu_l1d.rvalid=1;
         tick(1);
-        check(dut.l1d_state == dut.LD_CHECK, "request did not reach permission stage");
+        // Use the explicit state encoding: hierarchical enum-item references
+        // trigger an internal error in Verilator 5.052 for this forced test.
+        check(dut.l1d_state == 3'b011, $sformatf(
+              "request did not reach permission stage: state=%0d scenario=%0d",
+              dut.l1d_state,
+              scenario
+              ));
         check(!l1d_bus.arvalid && !lsu_l1d.rready,
               "permission stage exposed a request or completion");
-        if (scenario == 2) begin
+        if (scenario >= 3) begin
+          // Inject a pending denied PTW request to exercise arbitration even
+          // before recovery clears that request. Real PTW sequencing is
+          // covered by the separate PTW error/kill tests.
+          force dut.ptw_arvalid = 1'b1;
+          force dut.ptw_araddr = '0;
+          #1;
+          check(dut.pmp_load_fault, "shared read checker did not select denied PTW");
+          repeat (3) begin
+            tick(1);
+            check(dut.l1d_state == 3'b011 && !lsu_l1d.rready && !lsu_l1d.trap,
+                  "PTW permission result escaped into load completion");
+          end
+        end
+        if (scenario == 2 || scenario == 4) begin
           cmu_bcast.flush_pipe=1;
           lsu_l1d.rvalid=0;
           tick(1);
+          if (scenario == 4) begin
+            release dut.ptw_arvalid;
+            release dut.ptw_araddr;
+          end
           cmu_bcast.flush_pipe=0;
           lsu_l1d.atomic_lock=0;
           repeat (3) begin
@@ -1093,6 +1150,11 @@ module tb_l1d_permission_stage;
             tick(1);
           end
         end else begin
+          if (scenario == 3) begin
+            release dut.ptw_arvalid;
+            release dut.ptw_araddr;
+            #1;
+          end
           // A one-cycle event must be remembered after it is withdrawn,
           // even though no memory request has yet left the permission stage.
           event_at(scenario == 0 ? PA : PA + 64, scenario == 0 ? PA : PA + 64);
@@ -1105,7 +1167,7 @@ module tb_l1d_permission_stage;
           l1d_bus.rready = 0;
           finish_lr();
           #1;
-          check(exu_l1d.reservation_valid == (scenario == 1),
+          check(exu_l1d.reservation_valid == (scenario != 0),
                 "permission-stage interference was lost or overmatched");
         end
         tick(3);
@@ -1138,7 +1200,9 @@ module tb_l1d_plic_width;
   pmp_update_if pmp_update ();
   lsu_l1d_mmu_if exu_l1d ();
   rou_cmu_if rou_cmu ();
-  rapt_l1d dut (
+  rapt_l1d #(
+      .LineRefill(0)
+  ) dut (
       .external_write_valid_i(1'b0),
       .external_write_pending_i(1'b0),
       .external_write_first_i('0),
@@ -1172,7 +1236,7 @@ module tb_l1d_plic_width;
         pmp_update.addr_we=0;
         pmp_update.cfg_we=0;
         dut.u_dtlb.valid[0]=1;
-        dut.u_dtlb.vtags[0]=va[XLEN-1:12];
+        dut.u_dtlb.vtags[0]=$bits(dut.u_dtlb.vtags[0])'(va>>12);
         dut.u_dtlb.ptags[0]=$bits(dut.u_dtlb.ptags[0])'(pa>>12);
         dut.u_dtlb.asids[0]=0;
         dut.u_dtlb.ptes[0]=7'b1100011;
@@ -1226,7 +1290,9 @@ module tb_l1d_pma;
   pmp_update_if pmp_update ();
   lsu_l1d_mmu_if exu_l1d ();
   rou_cmu_if rou_cmu ();
-  rapt_l1d dut (
+  rapt_l1d #(
+      .LineRefill(0)
+  ) dut (
       .external_write_valid_i(1'b0),
       .external_write_pending_i(1'b0),
       .external_write_first_i('0),
@@ -1271,14 +1337,14 @@ module tb_l1d_pma;
       if (translated) begin
         csr_bcast.priv=`RAPT_PRIV_S;
         dut.u_dtlb.valid[0]=1;
-        dut.u_dtlb.vtags[0]=va[XLEN-1:12];
-        dut.u_dtlb.ptags[0]=pa>>12;
+        dut.u_dtlb.vtags[0]=$bits(dut.u_dtlb.vtags[0])'(va>>12);
+        dut.u_dtlb.ptags[0]=$bits(dut.u_dtlb.ptags[0])'(pa>>12);
         dut.u_dtlb.asids[0]='0;
         dut.u_dtlb.ptes[0]=7'b1100011;
         if (sram_path) begin
           dut.u_dstlb.valid[0]=1;
-          dut.u_dstlb.vtags[0]=va[XLEN-1:12];
-          dut.u_dstlb.ptags[0]=pa>>12;
+          dut.u_dstlb.vtags[0]=$bits(dut.u_dstlb.vtags[0])'(va>>12);
+          dut.u_dstlb.ptags[0]=$bits(dut.u_dstlb.ptags[0])'(pa>>12);
           dut.u_dstlb.asids[0]='0;
           dut.u_dstlb.ptes[0]=7'b1100011;
         end
@@ -1341,7 +1407,9 @@ module tb_l1d_ptw_axi_error;
       .XLEN(XLEN),
       .ID_W(4)
   ) axi ();
-  rapt_l1d dut (
+  rapt_l1d #(
+      .LineRefill(0)
+  ) dut (
       .external_write_valid_i(1'b0),
       .external_write_pending_i(1'b0),
       .external_write_first_i('0),
@@ -1435,6 +1503,7 @@ module tb_l1d_ptw_axi_error;
     lsu_l1d.waddr=0;
     lsu_l1d.wpbmt=0;
     lsu_l1d.walu=0;
+    lsu_l1d.wzero = 0;
     lsu_l1d.wvalid=0;
     lsu_l1d.wdata=0;
     exu_l1d.valid=0;
@@ -1447,12 +1516,15 @@ module tb_l1d_ptw_axi_error;
     rou_cmu.slot[0].valid=0;
     rou_cmu.atomic_sc=0;
     rou_cmu.fence_time=0;
+    rou_cmu.cbo_inval = 0;
+    rou_cmu.cbo_block = '0;
     rou_cmu.flush_pipe=0;
     l1i_bus.arvalid=0;
     l1i_bus.araddr=0;
     l1i_bus.arburst=0;
     l1i_bus.ar_ptw=0;
     l1i_bus.rpbmt=0;
+    l1i_bus.noallocate = 0;
     l1i_bus.awvalid=0;
     l1i_bus.awaddr=0;
     l1i_bus.aw_ptw=0;
@@ -1582,7 +1654,9 @@ module tb_l1d_ptw_error;
   pmp_update_if pmp_update ();
   lsu_l1d_mmu_if exu_l1d ();
   rou_cmu_if rou_cmu ();
-  rapt_l1d dut (
+  rapt_l1d #(
+      .LineRefill(0)
+  ) dut (
       .external_write_valid_i(1'b0),
       .external_write_pending_i(1'b0),
       .external_write_first_i('0),
@@ -1754,7 +1828,9 @@ module tb_l1d_ptw_pma;
   pmp_update_if pmp_update ();
   lsu_l1d_mmu_if exu_l1d ();
   rou_cmu_if rou_cmu ();
-  rapt_l1d dut (
+  rapt_l1d #(
+      .LineRefill(0)
+  ) dut (
       .external_write_valid_i(1'b0),
       .external_write_pending_i(1'b0),
       .external_write_first_i('0),
@@ -1834,7 +1910,9 @@ module tb_l1d_read_error;
   pmp_update_if pmp_update ();
   lsu_l1d_mmu_if exu_l1d ();
   rou_cmu_if rou_cmu ();
-  rapt_l1d dut (
+  rapt_l1d #(
+      .LineRefill(0)
+  ) dut (
       .external_write_valid_i(1'b0),
       .external_write_pending_i(1'b0),
       .external_write_first_i('0),
@@ -1898,8 +1976,8 @@ module tb_l1d_read_error;
       csr_bcast.dmmu_en=1;
       csr_bcast.menvcfg_pbmte=1;
       dut.u_dtlb.valid[0]=1;
-      dut.u_dtlb.vtags[0]=VA[XLEN-1:12];
-      dut.u_dtlb.ptags[0]=PA>>12;
+      dut.u_dtlb.vtags[0]=$bits(dut.u_dtlb.vtags[0])'(VA>>12);
+      dut.u_dtlb.ptags[0]=$bits(dut.u_dtlb.ptags[0])'(PA>>12);
       dut.u_dtlb.asids[0]=0;
       dut.u_dtlb.ptes[0]=7'b1100011;
       dut.u_dtlb.pbmts[0]=2'(attr);
@@ -2041,12 +2119,12 @@ module tb_l1d_replacement;
     l1d_update = 0;
     #1;
     if (ld_fill_way != 2 || store_fill_way != 2) $fatal(1, "fill did not update its own set/way");
-    // Unfilled offset 1: invalid way zero wins even though policy victim is 2.
+    // Unfilled offset 1: all lines remain occupied, so retain PLRU victim 2.
     addr_offset = 1;
     waddr_offset = 1;
     #1;
-    if (ld_fill_way != 0 || store_fill_way != 0)
-      $fatal(1, "invalid way zero overwritten by policy");
+    if (ld_fill_way != 2 || store_fill_way != 2)
+      $fatal(1, "missing word incorrectly treated as an empty line");
     // A partial matching line must be reused instead of another invalid way.
     addr_tag = 3;
     waddr_tag = 2;
@@ -2087,7 +2165,7 @@ module tb_l1d_reservation_external;
   pmp_update_if pmp_update ();
   lsu_l1d_mmu_if exu_l1d ();
   rou_cmu_if rou_cmu ();
-  rapt_l1d dut (.*);
+  rapt_l1d #(.LineRefill(0)) dut (.*);
   `include "tb_common.svh"
   `include "tb_l1d_defaults.svh"
   localparam logic [XLEN-1:0] PA = XLEN'('h80001000);
@@ -2231,8 +2309,8 @@ module tb_l1d_reservation_external;
       csr_bcast.dmmu_en=1;
       csr_bcast.priv=`RAPT_PRIV_S;
       dut.u_dtlb.valid[0]=1;
-      dut.u_dtlb.vtags[0]=(XLEN-12)'('h40000);
-      dut.u_dtlb.ptags[0]=(XLEN-10)'(PA>>12);
+      dut.u_dtlb.vtags[0]=$bits(dut.u_dtlb.vtags[0])'('h40000);
+      dut.u_dtlb.ptags[0]=$bits(dut.u_dtlb.ptags[0])'(PA>>12);
       dut.u_dtlb.asids[0]='0;
       dut.u_dtlb.ptes[0]=7'b1100011;
       start_lr(XLEN'('h40000000), bytes);
@@ -2327,9 +2405,8 @@ endmodule
 module tb_l1d_store_coherence;
   localparam int XLEN = 32;
   localparam logic [31:0] TestAddr = 32'h8000_0000;
-  localparam logic [31:0] ConflictAddr1 = TestAddr + 32'h0000_0400;
-  localparam logic [31:0] ConflictAddr2 = TestAddr + 32'h0000_0800;
-  localparam logic [31:0] ConflictAddr3 = TestAddr + 32'h0000_0c00;
+  localparam int ConflictShift = `RAPT_L1D_LEN + `RAPT_L1D_LINE_LEN + 2;
+  localparam int ConflictLines = `RAPT_L1D_N_WAYS + 2;
   localparam int RandomOps = 2000;
 
   logic clock = 1'b0;
@@ -2337,8 +2414,8 @@ module tb_l1d_store_coherence;
   logic bus_rd_pending;
   logic [31:0] bus_rd_addr;
   int bus_rd_delay;
-  logic [31:0] mem_word[4][4];
-  logic [31:0] expected_word[4][4];
+  logic [31:0] mem_word[ConflictLines][4];
+  logic [31:0] expected_word[ConflictLines][4];
   int bus_read_count;
   int configured_seed = 32'h1d5a_2026;
   int rng_state;
@@ -2359,7 +2436,9 @@ module tb_l1d_store_coherence;
   lsu_l1d_mmu_if exu_l1d ();
   rou_cmu_if rou_cmu ();
 
-  rapt_l1d dut (
+  rapt_l1d #(
+      .LineRefill(0)
+  ) dut (
       .clock(clock),
       .cmu_bcast(cmu_bcast),
       .lsu_l1d(lsu_l1d),
@@ -2367,7 +2446,6 @@ module tb_l1d_store_coherence;
       .csr_bcast(csr_bcast),
       .pmp_update(pmp_update),
       .exu_l1d(exu_l1d),
-      .rou_cmu(rou_cmu),
       .reset(reset)
   );
 
@@ -2406,6 +2484,7 @@ module tb_l1d_store_coherence;
       @(negedge clock);
       lsu_l1d.waddr = addr;
       lsu_l1d.walu = walu;
+      lsu_l1d.wzero = 0;
       lsu_l1d.wdata = data;
       lsu_l1d.wvalid = 1'b1;
       for (int wait_cycle = 0; wait_cycle < 64; wait_cycle++) begin
@@ -2428,7 +2507,7 @@ module tb_l1d_store_coherence;
   endtask
 
   function automatic int backing_line(input logic [31:0] addr);
-    return int'(addr[11:10]);
+    return int'((addr - TestAddr) >> ConflictShift);
   endfunction
 
   function automatic logic [31:0] merge_store(input logic [31:0] old_data,
@@ -2453,17 +2532,11 @@ module tb_l1d_store_coherence;
       mem_word[0][1] <= 32'h5566_7788;
       mem_word[0][2] <= 32'h99aa_bbcc;
       mem_word[0][3] <= 32'hddee_ff00;
-      mem_word[1][0] <= 32'h1111_1111;
-      mem_word[2][0] <= 32'h2222_2222;
-      mem_word[3][0] <= 32'h3333_3333;
-      for (int line_idx = 1; line_idx < 4; line_idx++) begin
-        for (int word_idx = 1; word_idx < 4; word_idx++) begin
-          mem_word[line_idx][word_idx] <= '0;
+      for (int line_idx = 1; line_idx < ConflictLines; line_idx++) begin
+        for (int word_idx = 0; word_idx < 4; word_idx++) begin
+          mem_word[line_idx][word_idx] <= 32'h1111_1111 * line_idx;
         end
       end
-      mem_word[1][2] <= 32'h1111_1111;
-      mem_word[2][2] <= 32'h2222_2222;
-      mem_word[3][2] <= 32'h3333_3333;
       bus_read_count <= 0;
       bus_rd_pending <= 1'b0;
       bus_rd_addr <= '0;
@@ -2489,7 +2562,8 @@ module tb_l1d_store_coherence;
       end
       if (l1d_bus.arvalid && l1d_bus.rready) begin
         automatic int selected_bus_read_delay = $urandom_range(0, configured_bus_delay_max);
-        check(l1d_bus.araddr[31:12] == TestAddr[31:12], "unexpected read address");
+        check(l1d_bus.araddr >= TestAddr && backing_line(l1d_bus.araddr) < ConflictLines,
+              "unexpected read address");
         bus_rd_addr <= l1d_bus.araddr;
         bus_rd_pending <= 1'b1;
         bus_rd_delay <= selected_bus_read_delay;
@@ -2499,7 +2573,8 @@ module tb_l1d_store_coherence;
         bus_read_count <= bus_read_count + 1;
       end
       if (l1d_bus.wvalid && l1d_bus.wready) begin
-        check(l1d_bus.awaddr[31:12] == TestAddr[31:12], "unexpected write address");
+        check(l1d_bus.awaddr >= TestAddr && backing_line(l1d_bus.awaddr) < ConflictLines,
+              "unexpected write address");
         for (int byte_idx = 0; byte_idx < 4; byte_idx++) begin
           if (l1d_bus.wstrb[byte_idx] && (byte_idx + l1d_bus.awaddr[1:0]) < 4) begin
             mem_word[backing_line(l1d_bus.awaddr)][l1d_bus.awaddr[3:2]]
@@ -2520,6 +2595,7 @@ module tb_l1d_store_coherence;
     init_l1d_inputs();
     lsu_l1d.ralu = `RAPT_ALU_LW__;
     lsu_l1d.walu = `RAPT_SW_WSTRB;
+    lsu_l1d.wzero = 0;
     tick(5);
     reset = 1'b0;
     tick(2);
@@ -2554,16 +2630,15 @@ module tb_l1d_store_coherence;
     read_word(TestAddr, 32'hbeef_4681);
 
     // A SLUB object's embedded next-pointer is a full word at cache->offset.
-    // Force the line out through three same-set conflicts, then require the
+    // Force the line out through more than Ways same-set conflicts, then require the
     // pointer to be refilled from backing memory without losing bit 30.
     cmu_bcast.fence_time = 1'b1;
     tick(1);
     cmu_bcast.fence_time = 1'b0;
     tick(1);
     write_word(TestAddr + 32'd8, 32'hc4aa_4680);
-    read_word(ConflictAddr1 + 32'd8, 32'h1111_1111);
-    read_word(ConflictAddr2 + 32'd8, 32'h2222_2222);
-    read_word(ConflictAddr3 + 32'd8, 32'h3333_3333);
+    for (int line_idx = 1; line_idx < ConflictLines; line_idx++)
+    read_word(TestAddr + (line_idx << ConflictShift) + 32'd8, 32'h1111_1111 * line_idx);
     begin
       automatic int reads_before_refill = bus_read_count;
       read_word(TestAddr + 32'd8, 32'hc4aa_4680);
@@ -2578,21 +2653,21 @@ module tb_l1d_store_coherence;
     tick(1);
     cmu_bcast.fence_time = 1'b0;
     tick(1);
-    for (int line_idx = 0; line_idx < 4; line_idx++) begin
+    for (int line_idx = 0; line_idx < ConflictLines; line_idx++) begin
       for (int word_idx = 0; word_idx < 4; word_idx++) begin
         automatic
         logic [31:0]
         init_data = 32'hc000_0000 | (line_idx << 12) | (word_idx << 4) | line_idx;
         expected_word[line_idx][word_idx] = init_data;
-        write_word(TestAddr + (line_idx << 10) + (word_idx << 2), init_data);
+        write_word(TestAddr + (line_idx << ConflictShift) + (word_idx << 2), init_data);
       end
     end
 
     for (int operation = 0; operation < RandomOps; operation++) begin
-      automatic int line_idx = $urandom_range(0, 3);
+      automatic int line_idx = $urandom_range(0, ConflictLines - 1);
       automatic int word_idx = $urandom_range(0, 3);
       automatic int op_kind = $urandom_range(0, 4);
-      automatic logic [31:0] word_addr = TestAddr + (line_idx << 10) + (word_idx << 2);
+      automatic logic [31:0] word_addr = TestAddr + (line_idx << ConflictShift) + (word_idx << 2);
       automatic logic [31:0] store_data = $urandom | 32'h4000_0000;
       automatic logic [1:0] byte_offset;
       automatic logic [4:0] store_alu;
@@ -2660,7 +2735,9 @@ module tb_l1d_store_pbmt;
   pmp_update_if pmp_update ();
   lsu_l1d_mmu_if exu_l1d ();
   rou_cmu_if rou_cmu ();
-  rapt_l1d dut (
+  rapt_l1d #(
+      .LineRefill(0)
+  ) dut (
       .external_write_valid_i(1'b0),
       .external_write_pending_i(1'b0),
       .external_write_first_i('0),
@@ -2730,6 +2807,7 @@ module tb_l1d_store_pbmt;
           lsu_l1d.waddr = Addr;
           lsu_l1d.wpbmt = 2'(attr);
           lsu_l1d.walu = partial != 0 ? 8'h1 : (XLEN == 64 ? 8'hff : 8'h0f);
+          lsu_l1d.wzero = 0;
           lsu_l1d.wdata = 'h55667788;
           lsu_l1d.wvalid = 1;
           #1;
@@ -2916,7 +2994,9 @@ module tb_l1d_trap_owner;
   pmp_update_if pmp_update ();
   lsu_l1d_mmu_if exu_l1d ();
   rou_cmu_if rou_cmu ();
-  rapt_l1d dut (
+  rapt_l1d #(
+      .LineRefill(0)
+  ) dut (
       .external_write_valid_i(1'b0),
       .external_write_pending_i(1'b0),
       .external_write_first_i('0),
@@ -3043,7 +3123,9 @@ module tb_l1d_write_error;
   pmp_update_if pmp_update ();
   lsu_l1d_mmu_if exu_l1d ();
   rou_cmu_if rou_cmu ();
-  rapt_l1d dut (
+  rapt_l1d #(
+      .LineRefill(0)
+  ) dut (
       .external_write_valid_i(1'b0),
       .external_write_pending_i(1'b0),
       .external_write_first_i('0),
@@ -3094,6 +3176,7 @@ module tb_l1d_write_error;
       lsu_l1d.wdata='hdeadbeef;
       lsu_l1d.wpbmt=2'(attr);
       lsu_l1d.walu=partial ? 8'h01 : (XLEN==64 ? 8'hff : 8'h0f);
+      lsu_l1d.wzero = 0;
       lsu_l1d.wvalid=1;
       // Error without B completion must not consume or mutate the write.
       l1d_bus.werr=1;

@@ -25,8 +25,11 @@ module rapt_dispatch_admit #(
         && !reset && !flush && !halt && !recovery_pending && !serial_in_flight
         && (!serial[s] || (s == 0 && rob_empty));
     wire offer, fire;
-    if (s == 0) assign offer = candidate;
-    else assign offer = candidate && g_slot[s-1].fire && !serial[s-1];
+    if (s == 0) begin : g_first_slot
+      assign offer = candidate;
+    end else begin : g_chain_slot
+      assign offer = candidate && g_slot[s-1].fire && !serial[s-1];
+    end
     assign fire = offer && endpoint_ready[s];
     assign eligible[s] = offer;
     assign accepted[s] = fire;

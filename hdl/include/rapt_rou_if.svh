@@ -108,14 +108,16 @@ interface rou_cmu_if #(
   logic [XLEN-1:0] next_pc, redirect_pc;
   logic btaken, ben, jen, jren, atomic_sc;
   logic fence_time, fence_i, flush_pipe, flush_redirect, sys_resume, time_trap;
+  logic cbo_inval;
+  logic [11:6] cbo_block;
   logic [$clog2(`RAPT_ROB_SIZE)-1:0] rob_head;
   modport out(
       output slot, next_pc, redirect_pc, btaken, ben, jen, jren, atomic_sc,
-      fence_time, fence_i, flush_pipe, flush_redirect, sys_resume, time_trap, rob_head
+      fence_time, fence_i, cbo_inval, cbo_block, flush_pipe, flush_redirect, sys_resume, time_trap, rob_head
   );
   modport in(
       input slot, next_pc, redirect_pc, btaken, ben, jen, jren, atomic_sc,
-      fence_time, fence_i, flush_pipe, flush_redirect, sys_resume, time_trap, rob_head
+      fence_time, fence_i, cbo_inval, cbo_block, flush_pipe, flush_redirect, sys_resume, time_trap, rob_head
   );
 endinterface
 

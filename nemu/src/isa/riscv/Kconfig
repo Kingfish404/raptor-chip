@@ -44,9 +44,17 @@ config RV_RVA22S64
   help
     Enable the existing RVA22S64 execution-environment support by default
     for RV64. This does not imply full profile certification.
+
+config RV_MCOUNTINHIBIT
+  bool "Optional mcountinhibit CSR (read-only zero)"
+  default y if RV_RVA22S64
+  default n
+  help
     Expose the optional mcountinhibit CSR as read-only zero so firmware
     such as OpenSBI can discover privileged architecture 1.12 through
     mcounteren, mcountinhibit and menvcfg. Counters always run.
+    Disable when using NEMU as a reference for a core without this CSR,
+    including the current Raptor RTL. This is independent of RVA22S64.
 
 config RV_EBREAK_HOST_EXIT
   bool "Legacy EBREAK host-exit convention"

@@ -29,9 +29,15 @@ module rapt_tlb #(
     input logic [      1:0] fill_pbmt
 );
 
+  // Store translation-format bits, not the XLEN-wide transport padding.
+  // Sv39: VA[38:12], 44-bit PPN. Sv32: VA[31:12], 22-bit PPN.
+  // Retain the full architectural PPN even on a narrower physical platform:
+  // unsupported PA bits must reach the access checker, not alias low memory.
+  localparam int VAddrBits  = XLEN == 64 ? 39 : 32;
+  localparam int PtePpnBits = XLEN == 64 ? 44 : 22;
   logic [        ENTRIES-1:0] valid;
-  logic [          XLEN-1:12] vtags     [ENTRIES];
-  logic [          XLEN-1:10] ptags     [ENTRIES];
+  logic [     VAddrBits-1:12] vtags     [ENTRIES];
+  logic [      PtePpnBits-1:0] ptags    [ENTRIES];
   logic [                8:0] asids     [ENTRIES];
   logic [                6:0] ptes      [ENTRIES];
   logic [                1:0] pbmts     [ENTRIES];
@@ -51,19 +57,30 @@ module rapt_tlb #(
   logic [        EntryIdxW-1:0] fill_match_idx;
   logic [        EntryIdxW-1:0] first_invalid_idx;
   logic                         has_invalid;
+  logic lookup_canonical, fill_canonical, fill_encodable;
+  // A non-canonical lookup must miss so the PTW reports the original VA's
+  // page fault. Comparing only the compact VPN would otherwise create aliases.
+  assign lookup_canonical = lookup_vtag
+      == (XLEN-12)'($signed(lookup_vtag[VAddrBits-1:12]));
+  assign fill_canonical = fill_vtag
+      == (XLEN-12)'($signed(fill_vtag[VAddrBits-1:12]));
+  assign fill_encodable = fill_canonical
+      && fill_ptag == (XLEN-10)'(PtePpnBits'(fill_ptag));
 
   generate
     for (genvar i = 0; i < ENTRIES; i++) begin : gen_tlb_match
       // A global mapping is shared by every ASID. Local mappings retain the
       // normal ASID tag comparison.
-      assign match_vec[i] = valid[i] && (vtags[i] == lookup_vtag)
+      assign match_vec[i] = valid[i] && lookup_canonical
+                          && (vtags[i] == lookup_vtag[VAddrBits-1:12])
                           && (ptes[i][4] || (asids[i] == lookup_asid));
-      assign match_ptag[i] = match_vec[i] ? ptags[i] : '0;
+      assign match_ptag[i] = match_vec[i] ? (XLEN-10)'(ptags[i]) : '0;
       assign match_pte[i]  = match_vec[i] ? ptes[i]  : '0;
 
       // Fill duplicate detection must use the fill address, not the unrelated
       // live lookup port. This matters when replicated DTLBs cross-fill.
-      assign fill_match_vec[i] = valid[i] && (vtags[i] == fill_vtag)
+      assign fill_match_vec[i] = valid[i] && fill_encodable
+                               && (vtags[i] == fill_vtag[VAddrBits-1:12])
                                && ((ptes[i][4] && fill_pte[4])
                                    || (!ptes[i][4] && !fill_pte[4]
                                        && (asids[i] == fill_asid)));
@@ -100,28 +117,28 @@ module rapt_tlb #(
     if (reset || flush) begin
       valid  <= '0;
       rr_ptr <= '0;
-    end else if (fill_valid) begin
+    end else if (fill_valid && fill_encodable) begin
       if (fill_hit) begin
         // Refresh the payload as well as the global/ASID attributes. Software
         // normally fences after changing a PTE, but making refill idempotent
         // also prevents duplicate entries after cross-filling replicas.
         valid[fill_match_idx] <= 1'b1;
-        vtags[fill_match_idx] <= fill_vtag;
-        ptags[fill_match_idx] <= fill_ptag;
+        vtags[fill_match_idx] <= fill_vtag[VAddrBits-1:12];
+        ptags[fill_match_idx] <= PtePpnBits'(fill_ptag);
         asids[fill_match_idx] <= fill_asid;
         ptes[fill_match_idx]  <= fill_pte;
         pbmts[fill_match_idx] <= fill_pbmt;
       end else if (has_invalid) begin
         valid[first_invalid_idx] <= 1'b1;
-        vtags[first_invalid_idx] <= fill_vtag;
-        ptags[first_invalid_idx] <= fill_ptag;
+        vtags[first_invalid_idx] <= fill_vtag[VAddrBits-1:12];
+        ptags[first_invalid_idx] <= PtePpnBits'(fill_ptag);
         asids[first_invalid_idx] <= fill_asid;
         ptes[first_invalid_idx]  <= fill_pte;
         pbmts[first_invalid_idx] <= fill_pbmt;
       end else begin
         valid[rr_ptr] <= 1'b1;
-        vtags[rr_ptr] <= fill_vtag;
-        ptags[rr_ptr] <= fill_ptag;
+        vtags[rr_ptr] <= fill_vtag[VAddrBits-1:12];
+        ptags[rr_ptr] <= PtePpnBits'(fill_ptag);
         asids[rr_ptr] <= fill_asid;
         ptes[rr_ptr]  <= fill_pte;
         pbmts[rr_ptr] <= fill_pbmt;

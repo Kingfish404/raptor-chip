@@ -7,6 +7,12 @@ import subprocess
 
 
 CONTRACTS = {
+    'ioq-overlap': dict(
+        description='Prove shared IOQ short-range overlap against circular subtraction.',
+        top='formal_ioq_overlap', source='hdl/backend/lsu/rapt_ioq_overlap.sv', option='rtl',
+        option_help='Optional isolated overlap module under test',
+        scope='Combinational pair matrix; all RV32/RV64 addresses, spans 0..3, full/page wrap',
+        label='IOQ circular overlap equivalence'),
     'pma-capabilities': dict(
         description='Prove the platform storage-region capability contract for all addresses.',
         top='formal_pma_capabilities', source='hdl/rapt_pkg.sv', option='package',

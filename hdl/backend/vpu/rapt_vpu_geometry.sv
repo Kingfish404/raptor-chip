@@ -38,7 +38,8 @@ module rapt_vpu_geometry #(
     return (int'(regno) & (count - 1)) == 0 && int'(regno) + count <= 32;
   endfunction
   function automatic logic overlap_ok(input logic [4:0] source, input int unsigned sg,
-                                      input int signed ssize, exponent, dest_size);
+                                      input int signed ssize, input int signed exponent,
+                                      input int signed dest_size);
     if (int'(vd) + dg <= int'(source) || int'(source) + sg <= int'(vd)) return 1;
     if (dest_size == ssize) return 1;
     if (dest_size < ssize) return vd == source;

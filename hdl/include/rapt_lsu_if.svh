@@ -25,6 +25,8 @@ interface lsu_pipe_if #(
   logic [XLEN-1:0] tval;
   logic difftest_skip;
   logic rready;
+  // Request released, not completed: replay only at IOQ and ROB head.
+  logic rretry;
   logic stq_ready;
   logic rvalid_b;
   logic [XLEN-1:0] raddr_b;
@@ -35,13 +37,13 @@ interface lsu_pipe_if #(
   modport master(
       output rvalid, raddr, ralu, atomic_lock, atomic_release, ordered, pc,
       output fp_rdata64_req,
-      input rdata, fp_rdata64, fp_rdata64_valid, trap, cause, tval, difftest_skip, rready, stq_ready,
+      input rdata, fp_rdata64, fp_rdata64_valid, trap, cause, tval, difftest_skip, rready, rretry, stq_ready,
       output rvalid_b, raddr_b, ralu_b,
       input rdata_b, rready_b
   );
   modport slave(
       input rvalid, raddr, ralu, atomic_lock, atomic_release, ordered, pc,
-      output rdata, fp_rdata64, fp_rdata64_valid, trap, cause, tval, difftest_skip, rready, stq_ready,
+      output rdata, fp_rdata64, fp_rdata64_valid, trap, cause, tval, difftest_skip, rready, rretry, stq_ready,
       input fp_rdata64_req,
       input rvalid_b, raddr_b, ralu_b,
       output rdata_b, rready_b

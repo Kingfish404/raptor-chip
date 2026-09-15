@@ -67,6 +67,8 @@ module tb_ras_pipeline;
     rou_cmu.jren = 0;
     rou_cmu.atomic_sc = 0;
     rou_cmu.fence_time = 0;
+    rou_cmu.cbo_inval = 0;
+    rou_cmu.cbo_block = '0;
     rou_cmu.fence_i = 0;
     rou_cmu.flush_pipe = 0;
     rou_cmu.flush_redirect = 0;
@@ -182,6 +184,8 @@ module tb_ras_pipeline;
     rou_cmu.fence_time = 1;
     tick(1);
     rou_cmu.fence_time = 0;
+    rou_cmu.cbo_inval = 0;
+    rou_cmu.cbo_block = '0;
     check(!idu_bpu.ras_valid, "security predictor clear");
     // Non-first decode call owns the only action, including wider groups.
     ifu_idu.slot = '{default:'0};

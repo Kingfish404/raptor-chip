@@ -2,11 +2,12 @@
 # Raptor CPU — LiteX integration
 #
 # Dual-issue out-of-order RISC-V core (RV32/RV64 IMAC + Zb* extensions).
-# AXI4 master bus, single external interrupt input.
+# AXI4 master bus, 31 external PLIC interrupt sources.
 
 import os
 import re
 import subprocess
+import sys
 
 from migen import *
 from litex.gen import *
@@ -76,10 +77,7 @@ class Raptor(CPU):
             self.gcc_triple = CPU_GCC_TRIPLE_RISCV32
             self.linker_output_format = "elf32-littleriscv"
         self.reset = Signal()
-        # Debug-only extra CPU reset (e.g. wired to the J23 button) so an ILA
-        # can be armed while the core is held in reset and then released to
-        # capture the boot.  Defaults to 0 (no effect) when left unconnected.
-        self.dbg_reset = Signal()
+        self.pmem_size = None  # Optional board-specific PMA window, in bytes.
         self.interrupt = Signal(32)
 
         # AXI4 master peripheral bus (connected to main SoC bus).
@@ -93,10 +91,13 @@ class Raptor(CPU):
         self.cpu_params = dict(
             # Clock / Reset.
             i_clock=ClockSignal("sys"),
-            i_reset=ResetSignal("sys") | self.reset | self.dbg_reset,
+            i_reset=ResetSignal("sys") | self.reset,
             # Interrupt.
-            i_io_interrupt=self.interrupt[0],
-            i_ext_irq_i=0,
+            # LiteX IRQ n maps to PLIC source n+1 (source 0 is reserved).
+            # Raptor's ext_irq_i[31:1] packs source 1 into its low bit.
+            # Route all sources: forwarding only bit 0 loses SDCard/Ethernet.
+            i_io_interrupt=0,
+            i_ext_irq_i=self.interrupt[:31],
             # AXI4 Master — Write Address Channel.
             o_io_master_awvalid=axi_if.aw.valid,
             i_io_master_awready=axi_if.aw.ready,
@@ -146,7 +147,7 @@ class Raptor(CPU):
         self.reset_address = reset_address
 
     @staticmethod
-    def add_sources(platform, variant="linux32"):
+    def add_sources(platform, variant="linux32", pmem_size=None):
         raptor_home = os.environ.get(
             "RAPTOR_HOME",
             os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", ".."),
@@ -154,46 +155,64 @@ class Raptor(CPU):
         raptor_home = os.path.abspath(raptor_home)
         rtl_dir = os.path.join(raptor_home, "hdl")
 
-        # Pack all SV into a single preprocessed file for synthesis tools.
-        # sim/Makefile scopes its build outputs per RAPT_CONFIG, so mirror
-        # that layout here when locating the packed RTL.
-        env_config_for_path = os.environ.get("RAPT_CONFIG", "") or "default"
-        pack_dir = os.path.join(raptor_home, "sim", "build", env_config_for_path)
-        pack_sv = os.path.join(pack_dir, "rapt_pack.sv")
+        # Do not invoke sim/Makefile: its Kconfig includes and shared exports
+        # are not independent of concurrent simulator/other-XLEN builds.
+        scripts = os.path.join(raptor_home, "fpga", "litex", "scripts")
+        if scripts not in sys.path:
+            sys.path.insert(0, scripts)
+        from isolated_pack import pack
+        from pathlib import Path
 
-        # Allow the integrator (e.g. FPGA target) to override RTL preprocessor
-        # defines via env. sim/Makefile auto-invalidates the pack when VFLAGS
-        # changes, so switching presets just works.
+        # The Make prerequisite and direct Python entry share this isolated
+        # preset/defines cache, without modifying simulator configuration.
         env_vflags = os.environ.get("RAPT_PACK_VFLAGS", "")
+        if not any(flag == "-DRAPT_FPGA_DSP" or flag.startswith("-DRAPT_FPGA_DSP=")
+                   for flag in env_vflags.split()):
+            env_vflags = (env_vflags + " -DRAPT_FPGA_DSP=1").strip()
+        if variant == "linux32" and any(
+            flag == "-DRAPT_RV64" or flag.startswith("-DRAPT_RV64=")
+            for flag in env_vflags.split()
+        ):
+            raise ValueError("VARIANT=linux32 conflicts with RAPT_PACK_VFLAGS defining RAPT_RV64")
+        if pmem_size is not None:
+            if not 0 < pmem_size <= 0x40000000 or pmem_size & (pmem_size - 1):
+                raise ValueError("PMEM size must be a power of two up to 1 GiB (MMIO starts at 0xc0000000)")
+            # Board geometry is authoritative, including for direct Python builds.
+            wanted = f"-DRAPT_PMEM_BYTES={pmem_size}"
+            if [f for f in env_vflags.split() if f.startswith("-DRAPT_PMEM_BYTES=")] != [wanted]:
+                env_vflags = " ".join(f for f in env_vflags.split() if not f.startswith("-DRAPT_PMEM_BYTES="))
+                env_vflags += " " + wanted
         if variant in ("linux32", "linux64") and "-DRAPT_LINUX" not in env_vflags:
             env_vflags = (env_vflags + " -DRAPT_LINUX").strip()
         if variant == "linux64" and "-DRAPT_RV64" not in env_vflags:
             env_vflags = (env_vflags + " -DRAPT_RV64").strip()
 
         # Allow the integrator to pick an RTL config preset (hdl/configs/<name>/).
-        env_config = os.environ.get("RAPT_CONFIG", "")
-
-        # Always re-invoke the pack rule; the underlying Makefile uses file
-        # mtimes plus a VFLAGS / RAPT_CONFIG stamp to skip the no-op case.
-        os.makedirs(pack_dir, exist_ok=True)
-        # Use subprocess instead of os.system: avoids shell injection on the
-        # VFLAGS / RAPT_CONFIG pass-through and silences the Pylance
-        # `os.system is deprecated` notice.
-        cmd = ["make", "-C", os.path.join(raptor_home, "sim"), "pack"]
-        if env_vflags:
-            cmd.append(f"VFLAGS={env_vflags}")
-        if env_config:
-            cmd.append(f"RAPT_CONFIG={env_config}")
-        try:
-            subprocess.run(cmd, check=True)
-        except subprocess.CalledProcessError as exc:
-            raise RuntimeError(f"Failed to pack RTL (exit code {exc.returncode})") from exc
-        if not os.path.exists(pack_sv):
-            raise RuntimeError(f"Pack succeeded but {pack_sv} missing")
-
-        platform.add_source(pack_sv)
+        env_config = os.environ.get("RAPT_CONFIG", "") or "default"
+        root = Path(os.environ.get("RAPT_PACK_ROOT", os.path.join(raptor_home, "fpga/litex/build/rtl")))
+        pack_sv = pack(Path(raptor_home), root, env_config, env_vflags)
+        platform.add_source(str(pack_sv))
 
     def add_software_packages(self, builder):
+        private = os.environ.get("RAPT_LITEX_SOFTWARE_DIR", "")
+        if private:
+            private = os.path.abspath(private)
+            if not os.path.isfile(os.path.join(private, "common.mak")):
+                raise RuntimeError(f"Private LiteX software missing: {private}")
+            builder.software_packages = [
+                (name, os.path.join(private, name) if os.path.isfile(os.path.join(private, name, "Makefile")) else src)
+                for name, src in builder.software_packages
+            ]
+            # Builder has no per-instance SOC_DIRECTORY override. Wrap only
+            # this instance's emitter, not the shared builder module/global.
+            original = builder._get_variables_contents
+            def private_variables():
+                content, count = re.subn(r"^SOC_DIRECTORY=.*$", lambda _: "SOC_DIRECTORY=" + os.path.dirname(private),
+                                         original(), flags=re.MULTILINE)
+                if count != 1:
+                    raise RuntimeError("Cannot isolate LiteX SOC_DIRECTORY")
+                return content
+            builder._get_variables_contents = private_variables
         # Linux's embedded stage0/DTB belongs to this build, not to a shared
         # patched LiteX checkout (another preset can have a different CBOM size).
         bios_dir = os.environ.get("RAPT_BIOS_SOURCE_DIR", "")
@@ -260,5 +279,6 @@ class Raptor(CPU):
 
     def do_finalize(self):
         assert hasattr(self, "reset_address")
-        self.add_sources(self.platform, self.variant)
+        self.add_sources(self.platform, self.variant,
+                         pmem_size=self.pmem_size)
         self.specials += Instance("rapt", **self.cpu_params)

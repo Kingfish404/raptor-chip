@@ -62,7 +62,7 @@ module rapt_vpu_mask_write #(
         end
         READ_REQ: if (vr_valid && vr_ready) state <= READ_RSP;
         READ_RSP: if (vr_rsp_valid && vr_rsp_ready) begin
-        data_q <= (vr_rdata & ~(8'b1 << bit_q)) | (8'(value_q) << bit_q);
+        data_q <= (vr_rdata & ~(8'd1 << bit_q)) | (8'(value_q) << bit_q);
         state <= WRITE_REQ;
       end
         WRITE_REQ: if (vr_valid && vr_ready) state <= WRITE_RSP;

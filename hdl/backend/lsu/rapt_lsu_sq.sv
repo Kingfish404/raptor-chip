@@ -36,10 +36,11 @@ module rapt_lsu_sq #(
   localparam int WordOffBits = $clog2(XLEN / 8);
   localparam int PageOffBits = 12;
   localparam int SQLen = $clog2(SQ_SIZE);
+`ifndef SYNTHESIS
   localparam int ROBLen = $clog2(`RAPT_ROB_SIZE);
+`endif
   localparam int CboBlockBytes = 64;
   localparam int CboBeats = CboBlockBytes / (XLEN / 8);
-  localparam int CboBeatBits = $clog2(CboBeats);
 `ifdef RAPT_RV64
   localparam logic [7:0] FullStoreWstrb = `RAPT_SD_WSTRB;
 `else
@@ -54,12 +55,10 @@ module rapt_lsu_sq #(
     LS_S_HI_R = 3'b011, // hi beat retired; SQ entry released next cycle
     LS_S_X_V   = 3'b100, // RV32D FSD: present the third beat
     LS_S_X_R   = 3'b101, // third beat retired; SQ entry released next cycle
-    LS_S_CBO_V = 3'b110, // CBO.ZERO: present remaining cache-block beats
     LS_S_CBO_R = 3'b111  // final zero beat retired; release next cycle
   } state_store_t;
 
   state_store_t state_store;
-  logic [CboBeatBits-1:0] cbo_zero_beat;
 
   logic raddr_valid;
   logic [XLEN-1:0] raddr;
@@ -118,13 +117,19 @@ module rapt_lsu_sq #(
   logic sq_has_acquire;
   assign sq_has_acquire = |(sq_valid & sq_acquire_q);
   logic [4:0] sq_alu[SQ_SIZE];
+`ifndef SYNTHESIS
   /* verilator lint_off UNUSEDSIGNAL */
   logic [ROBLen-1:0] sq_dest[SQ_SIZE];  // ROB id: assertions/debug only
   /* verilator lint_on UNUSEDSIGNAL */
+`endif
   logic [XLEN-1:0] sq_vaddr[SQ_SIZE];  // virtual : forwarding comparison
   logic [XLEN-1:0] sq_paddr[SQ_SIZE];  // physical: bus write-through
-  logic [XLEN-1:0] sq_paddr_hi[SQ_SIZE]; // translated PA for a cross-page high beat
-  logic [XLEN-1:0] sq_paddr_third[SQ_SIZE];
+  // IOQ supplies word-aligned later beats, including across page boundaries.
+  // Store only their word addresses; reconstruct constant byte-offset bits
+  // at each consumer without merging any address drivers. Preserve all upper
+  // bits: the platform also accepts RV64 all-ones upper-half address aliases.
+  logic [XLEN-1:WordOffBits] sq_paddr_hi[SQ_SIZE];
+  logic [XLEN-1:WordOffBits] sq_paddr_third[SQ_SIZE];
   logic [2:0][1:0] sq_pbmt[SQ_SIZE];
   logic [XLEN-1:0] sq_wdata[SQ_SIZE];
   logic [63:0] sq_wdata64[SQ_SIZE];
@@ -191,7 +196,8 @@ module rapt_lsu_sq #(
 `else
   // NEMU records the second 32-bit write of RV32 FSD, which is its final
   // vaddr_write() call for the instruction.
-  assign difftest_store_addr  = sq_fp64[sq_cmt] ? sq_paddr_hi[sq_cmt] + XLEN'(sq_paddr[sq_cmt][1:0])
+  assign difftest_store_addr  = sq_fp64[sq_cmt] ? {sq_paddr_hi[sq_cmt], {WordOffBits{1'b0}}}
+                                  + XLEN'(sq_paddr[sq_cmt][1:0])
                                               : sq_paddr[sq_cmt];
   assign difftest_store_data  = sq_fp64[sq_cmt] ? sq_wdata64[sq_cmt][63:32]
                                               : sq_wdata[sq_cmt];
@@ -274,11 +280,13 @@ module rapt_lsu_sq #(
         if (sq_alloc_fire) begin
           sq_alu[sq_tail]   <= exu_ioq_bcast.alu[4:0];
           sq_acquire_q[sq_tail] <= sq_acquire;
-          sq_dest[sq_tail]  <= exu_ioq_bcast.dest;
+`ifndef SYNTHESIS
+          sq_dest[sq_tail] <= exu_ioq_bcast.dest;
+`endif
           sq_vaddr[sq_tail] <= exu_ioq_bcast.tval;      // virtual (forwarding)
           sq_paddr[sq_tail] <= exu_ioq_bcast.sq_waddr;  // physical (drain)
-          sq_paddr_hi[sq_tail] <= sq_waddr_hi;
-          sq_paddr_third[sq_tail] <= sq_waddr_third;
+          sq_paddr_hi[sq_tail] <= sq_waddr_hi[XLEN-1:WordOffBits];
+          sq_paddr_third[sq_tail] <= sq_waddr_third[XLEN-1:WordOffBits];
           sq_pbmt[sq_tail] <= sq_wpbmt;
           sq_wdata[sq_tail] <= exu_ioq_bcast.sq_wdata;
           sq_wdata64[sq_tail] <= exu_ioq_bcast.sq_wdata64;
@@ -457,7 +465,8 @@ module rapt_lsu_sq #(
   assign lr_alignment_fault = raddr_valid && exu_lsu.atomic_lock
       && |(raddr & XLEN'(lsu_load_size_m1));
   logic ma_load_req;
-  assign ma_load_req = !lr_alignment_fault && raddr_valid && ma_span && !fwd_hit && !load_in_sq && !pmp_load_fault_lsu;
+  assign ma_load_req = !lr_alignment_fault && raddr_valid && ma_span && !fwd_hit
+      && !load_in_sq && !pmp_load_fault_lsu;
 
   // ==========================================================================
   //  Hit-under-miss B channel (Phase A2, RAPT_LSU_HUM)
@@ -534,8 +543,8 @@ module rapt_lsu_sq #(
   ));
 
   logic fwd_hit_b;
-  assign fwd_hit_b = exu_lsu.rvalid_b && !sq_has_acquire && !ma_span_b && !mmio_ordered_b && !sq_has_typed_store
-                  && !b_bare_fault && load_in_sq_b && sq_fwd_ok_b;
+  assign fwd_hit_b = exu_lsu.rvalid_b && !sq_has_acquire && !ma_span_b && !mmio_ordered_b
+                  && !sq_has_typed_store && !b_bare_fault && load_in_sq_b && sq_fwd_ok_b;
 
   // Pass to L1D only when nothing local blocks it.
   assign lsu_l1d.rvalid_b = exu_lsu.rvalid_b && !sq_has_acquire && !fwd_hit_b && !load_in_sq_b
@@ -767,18 +776,18 @@ module rapt_lsu_sq #(
                        || (ma_state == MA_DONE)
                        || (lsu_l1d.rvalid && lsu_l1d.rready
                                         && !ma_load_req && ma_state == MA_IDLE);
+  assign exu_lsu.rretry = lsu_l1d.rvalid && lsu_l1d.rretry
+      && !cmu_bcast.flush_pipe;
 
   always_ff @(posedge clock) begin
     if (reset) begin
       state_store <= LS_S_V;
-      cbo_zero_beat <= '0;
     end else begin
       if (lsu_l1d.wvalid && lsu_l1d.wready && lsu_l1d.werr) begin
         // The store already retired. Consume its failed beat and release
         // only this owner; do not issue the remaining split/zero beats.
         // Earlier beats cannot be rolled back. Platform notification of
         // this imprecise error is separate from architectural load traps.
-        cbo_zero_beat <= '0;
         state_store <= LS_S_R;
       end else
         unique case (state_store)
@@ -786,10 +795,9 @@ module rapt_lsu_sq #(
             if (wvalid) begin
               if (lsu_l1d.wready) begin
                 if (walu == `RAPT_CBO_ZERO_WALU) begin
-                  // Beat zero is accepted directly from LS_S_V.  Continue over
-                  // every naturally aligned XLEN-wide word in the 64-byte block.
-                  cbo_zero_beat <= CboBeatBits'(1);
-                  state_store <= LS_S_CBO_V;
+                  // A single descriptor remains resident through the final
+                  // burst B response, including errors and pipeline flushes.
+                  state_store <= LS_S_CBO_R;
                 end else begin
                   // Lo beat accepted. If the store straddles a word/dword boundary
                   // we still owe a high beat; otherwise retire.
@@ -817,17 +825,7 @@ module rapt_lsu_sq #(
           LS_S_X_R: begin
             state_store <= LS_S_V;
           end
-          LS_S_CBO_V: begin
-            if (lsu_l1d.wready) begin
-              if (cbo_zero_beat == CboBeatBits'(CboBeats - 1)) begin
-                state_store <= LS_S_CBO_R;
-              end else begin
-                cbo_zero_beat <= cbo_zero_beat + 1'b1;
-              end
-            end
-          end
           LS_S_CBO_R: begin
-            cbo_zero_beat <= '0;
             state_store <= LS_S_V;
           end
           default: begin
@@ -856,8 +854,12 @@ module rapt_lsu_sq #(
       ma_state <= MA_IDLE;
       ma_fault <= 1'b0;
       ma_skip <= 1'b0;
-      ma_fault_cause <= '0;
-    end else if (cmu_bcast.flush_pipe) begin
+      // Cause is selected only in MA_DONE with ma_fault. Every beat that
+      // can enter MA_DONE captures cause together with the fault indication.
+    end else if (cmu_bcast.flush_pipe || exu_lsu.rretry) begin
+      // Replay the whole instruction, discarding incomplete merged data.
+      // Prior unordered beats cannot have device side effects: L1D gates
+      // each device beat on ordered and faults misaligned device accesses.
       ma_state <= MA_IDLE;
       ma_fault <= 1'b0;
       ma_skip <= 1'b0;
@@ -915,12 +917,12 @@ module rapt_lsu_sq #(
       .XLEN(XLEN)
   ) u_store_beats (
       .waddr(waddr),
-      .waddr_hi(sq_paddr_hi[sq_head]),
+      .waddr_hi({sq_paddr_hi[sq_head], {WordOffBits{1'b0}}}),
       .wdata(wdata),
       .wdata64(wdata64),
       .wfp64(wfp64),
       .walu(walu),
-      .waddr_third(sq_paddr_third[sq_head]),
+      .waddr_third({sq_paddr_third[sq_head], {WordOffBits{1'b0}}}),
       .ma_store_span(ma_store_span),
       .ma_store_third(ma_store_third),
       .ma_waddr_lo(ma_waddr_lo),
@@ -936,11 +938,9 @@ module rapt_lsu_sq #(
 
   logic cbo_zero_active;
   logic [XLEN-1:0] cbo_zero_addr;
-  assign cbo_zero_active = walu == `RAPT_CBO_ZERO_WALU
-                        && (state_store == LS_S_V || state_store == LS_S_CBO_V);
-  assign cbo_zero_addr = {waddr[XLEN-1:6], 6'b0}
-                       + ((state_store == LS_S_CBO_V ? XLEN'(cbo_zero_beat) : XLEN'(0))
-                              * XLEN'(XLEN / 8));
+  assign cbo_zero_active = walu == `RAPT_CBO_ZERO_WALU && state_store == LS_S_V;
+  assign cbo_zero_addr = {waddr[XLEN-1:6], 6'b0};
+  assign lsu_l1d.wzero = cbo_zero_active;
 
   // L1D drive muxing.
   assign lsu_l1d.wpbmt = (state_store == LS_S_HI_V) ? sq_pbmt[sq_head][1]
@@ -955,8 +955,7 @@ module rapt_lsu_sq #(
                        : (state_store == LS_S_X_V)  ? ma_walu_third : ma_walu_lo;
   assign lsu_l1d.wvalid = (state_store == LS_S_V && wvalid)
                        || (state_store == LS_S_HI_V)
-                       || (state_store == LS_S_X_V)
-                       || (state_store == LS_S_CBO_V);
+                       || (state_store == LS_S_X_V);
   assign lsu_l1d.wdata  = cbo_zero_active ? '0
                        : (state_store == LS_S_HI_V) ? ma_wdata_hi
                        : (state_store == LS_S_X_V)  ? ma_wdata_third
@@ -969,6 +968,11 @@ module rapt_lsu_sq #(
   //    HANDSHAKE      : queue capacity / ready-valid contract
   //    FLUSH_ROLLBACK : flush drops exactly the speculative region
   // ==========================================================================
+
+  // Only accepted, non-flushed allocations consume these producer addresses.
+  `RAPT_SVA_IMPLY(clock, reset, LSU_SQ_LATER_BEATS_ALIGNED,
+                  sq_alloc_fire && !cmu_bcast.flush_pipe && !cmu_bcast.fence_time,
+                  sq_waddr_hi[WordOffBits-1:0] == '0 && sq_waddr_third[WordOffBits-1:0] == '0)
 
   // COMMIT_ORDER: if a store commit coincides with a flush (AMO/f_time), the
   // store being retired is the current commit-boundary entry and survives the
@@ -986,12 +990,21 @@ module rapt_lsu_sq #(
   // COMMIT_ORDER: the alloc-time vaddr of the entry being committed must
   // describe the same word as the ROB's durable copy.  With DMMU enabled
   // only the page offset is invariant across translation.
-  `RAPT_SVA_IMPLY(
-      clock, reset, LSU_SQ_COMMIT_ADDR_PAGE_OFFSET, (sq_commit_fire && !$isunknown
-      (rou_lsu.sq_vaddr) && !$isunknown(sq_vaddr[sq_cmt])),
-      (csr_bcast.dmmu_en ? (sq_vaddr[sq_cmt][PageOffBits-1:WordOffBits] == rou_lsu.sq_vaddr[PageOffBits-1:WordOffBits]) : (sq_vaddr[sq_cmt][XLEN-1:WordOffBits] == rou_lsu.sq_vaddr[XLEN-1:WordOffBits])))
+  // Consequent extracted so the SVA macro argument stays short and the
+  // formatter cannot rejoin it past the column limit.
+  logic sq_commit_addr_page_offset_ok;
+  assign sq_commit_addr_page_offset_ok = csr_bcast.dmmu_en
+      ? (sq_vaddr[sq_cmt][PageOffBits-1:WordOffBits]
+          == rou_lsu.sq_vaddr[PageOffBits-1:WordOffBits])
+      : (sq_vaddr[sq_cmt][XLEN-1:WordOffBits]
+          == rou_lsu.sq_vaddr[XLEN-1:WordOffBits]);
+  `RAPT_SVA_IMPLY(clock, reset, LSU_SQ_COMMIT_ADDR_PAGE_OFFSET, (sq_commit_fire && !$isunknown
+                  (rou_lsu.sq_vaddr) && !$isunknown(sq_vaddr[sq_cmt])),
+                  sq_commit_addr_page_offset_ok)
 
   // HANDSHAKE: the SQ drain target slot must be a valid committed entry.
+  `RAPT_SVA_IMPLY(clock, reset, LSU_RETRY_NOT_COMPLETION, exu_lsu.rretry,
+                  !exu_lsu.rready && !exu_lsu.trap)
   `RAPT_SVA_IMPLY(clock, reset, LSU_SQ_DRAIN_VALID,
                   (state_store == LS_S_R || state_store == LS_S_CBO_R),
                   (sq_valid[sq_head] && sq_committed[sq_head]))

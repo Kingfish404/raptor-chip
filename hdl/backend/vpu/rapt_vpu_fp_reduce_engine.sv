@@ -5,11 +5,11 @@
 // VRF services must reset/drain with the engine before reuse.
 module rapt_vpu_fp_reduce_engine #(
     parameter int XLEN=64,
-    VLEN=128,
-    ELEN=64,
+    parameter int VLEN=128,
+    parameter int ELEN=64,
     parameter bit CacheMask=1,
     parameter int AddrBits=$clog2(32*VLEN/8),
-    IndexBits=$clog2(VLEN)+1
+    parameter int IndexBits=$clog2(VLEN)+1
 ) (
     input logic clock,
     reset,
@@ -160,10 +160,12 @@ module rapt_vpu_fp_reduce_engine #(
   );
   assign cmd_ready = !reset && state == IDLE;
   assign done_valid = !reset && state == DONE;
-  assign vr_valid = !reset && (state == SEED_REQ || state == MASK_REQ || state == DATA_REQ || state == WRITE_REQ);
+  assign vr_valid = !reset && (state == SEED_REQ || state == MASK_REQ
+      || state == DATA_REQ || state == WRITE_REQ);
   assign vr_write = state == WRITE_REQ;
   assign vr_wdata = result_q;
-  assign vr_rsp_ready = !reset && (state == SEED_RSP || state == MASK_RSP || state == DATA_RSP || state == WRITE_RSP);
+  assign vr_rsp_ready = !reset && (state == SEED_RSP || state == MASK_RSP
+      || state == DATA_RSP || state == WRITE_RSP);
   always_comb begin
     vr_size = output_size;
     vr_addr = AddrBits'(int'(insn_q[11:7])*(VLEN/8));

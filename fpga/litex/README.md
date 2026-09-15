@@ -21,6 +21,17 @@ make coremark
 positive build limit: LiteX's omitted job count otherwise produces unlimited
 `make -j`. `SIM_TIMEOUT` applies to simulation execution, not compilation.
 
+FPGA packs enable integer-multiply DSP inference with `RAPT_FPGA_DSP=1`.
+To compare fabric mapping, pass `RAPT_PACK_VFLAGS=-DRAPT_FPGA_DSP=0`; the override
+is included in the build identity. The arithmetic and valid/tag pipeline have
+the same latency in both modes. Generic simulator/ASIC builds default to fabric
+inference unless the define is supplied.
+
+For separate frontend/backend/cache synthesis and checkpoint linking, see
+[the coarse OOC flow](../ooc/README.md). It exports fixed-preset vector interfaces
+and checks checkpoint freshness. Full board synthesis, placement and routing
+remain necessary to assess the final SoC.
+
 ## Tang Mega 138K Pro Hardware Flow
 
 ```bash
@@ -60,6 +71,215 @@ KU15P bitstream cannot accidentally be assigned to an AU15P.
 inputs or its stamp is missing, then continues loading the existing bitstream.
 Missing bitstream files and failed timing checks still stop loading.
 `fpga-flash` requires a matching input hash.
+
+## CM005 Ethernet on CU07/CU08
+
+For **LiteX BIOS TFTP network boot** (without replacing the SD card), see
+[netboot preparation](NETBOOT.md). Its standalone `netboot.mk` checks/packages
+finished firmware without parsing the FPGA Makefile or touching the board;
+TFTP service activation and board acceptance remain separate steps.
+
+For the opt-in CU08 RV64 Buildroot + DHCP + SD automatic-boot profile, see
+[RV64 network preparation](RV64-NETWORK.md). Its read-only preflight does not
+start a build or touch the board; existing RV32 defaults are unchanged.
+
+For the opt-in RV32 gigabit profile, run `scripts/rv32_network.py check` with
+the LiteX venv Python, then `scripts/rv32_network.py build`. It uses CU08
+FMC_C/ETHA, default/50 MHz, MIG, SD autoboot and a validated RV32 Buildroot
+package in the separate `build/rv32-network` directory. See
+[FMC_C integration guide](CM005-FMC-C.md); preflight success is not routed
+timing or board validation. Neither named profile changes generic defaults.
+
+CU08 defaults to the short-edge **FMC_C/ETHA** connector; CU07 defaults to
+FMCA/ETHA. Both require 1.8 V I/O power (check the CU08 adjustable-bank supply
+before use). The CU08 C mapping is checked against baseboard schematic sheet 7:
+ETHA RX clock lands on L19, a non-global-clock input. The receiver samples
+RX_CLK, RXD and RX_CTL as data using six ISERDESE3 lanes at 1.25 GS/s (625 MHz
+DDR, 156.25 MHz word processing). It does not route L19 as an FPGA clock or
+use `CLOCK_DEDICATED_ROUTE FALSE`. RX_CLK has a calibrated 460 ps extra input
+delay; the decoder selects the preceding data sample and recovers RX_ER.
+Sampling-clock root and delay-group constraints select the buffer output pins;
+the original divided-clock net name can disappear during synthesis.
+The first-stage inputs are asynchronous: routed path budgets and a separate
+`cm005_aperture.rpt` sampling-window gate replace the direct-clock RX checks.
+Core/TX timing checks remain enabled. Fresh full-SoC STA and board traffic
+validation are still required; peripheral tests do not establish either.
+See [FMC_C integration and validation](CM005-FMC-C.md) for the sampling bounds
+and required board-level checks.
+The old FMCA/ETHA mapping remains selectable with `FMC_SLOT=a`.
+Ethernet defaults
+to fixed **1000 Mb/s full duplex**, with a 125 MHz RGMII clock:
+
+```bash
+make fpga-build FPGA_BOARD=mlk_cu08_ku15p VARIANT=linux32 \
+    WITH_ETHERNET=1 ETH_SPEED=1000 FMC_SLOT=c ETH_PORT=a
+make fpga-load FPGA_BOARD=mlk_cu08_ku15p VARIANT=linux32 \
+    WITH_ETHERNET=1 ETH_SPEED=1000 FMC_SLOT=c ETH_PORT=a
+```
+
+### CU08 RV32/RV64 netboot build and load
+
+#### Recommended: fixed current board-validation profile
+
+For the full default configuration, use these paired targets from `fpga/litex`:
+
+```sh
+make fpga-netboot-rv32-build
+make fpga-netboot-rv32-load
+
+# Alternative: replaces RV32 in FPGA SRAM, not in flash.
+make fpga-netboot-rv64-build
+make fpga-netboot-rv64-load
+```
+
+Run load only after a successful build and when the board is available. This
+profile fixes CU08, RV32/RV64 `default`, 50 MHz, and uses the unchanged default
+microarchitecture (ROB 32, 128 physical registers, dual-wide ordered stages and
+integer issue), MIG DDR, SD autoboot,
+CM005 FMC_C/ETHA gigabit, full Linux initialization, Vivado 8 threads and Explore
+routing. DTB offset/address are `0x04000000`/`0x83f00000`. Both targets use the
+same parameters; load requires the matching build stamp and an existing,
+passing timing report. It does not rebuild or program flash.
+
+Outputs are isolated at `build/netboot-default/rv32/{build,soc}` and
+`build/netboot-default/rv64/{build,soc}`; they do not reuse the earlier compact
+temporary candidates. Use `make fpga-netboot-rv32-info` (or `rv64-info`) to see
+resolved paths. Do **not** substitute bare `make fpga-load` for the paired target.
+
+The default payloads are downloaded by the paired `build` target when absent:
+`linux/build/linux-riscv-rv32-qemu-rv32-buildroot-v6.18.50/fw_payload.bin` and
+`linux/build/linux-riscv-rv64-qemu-rv64-fast-buildroot-v6.18.50/fw_payload.bin`.
+Supported location/tool overrides are `NETBOOT_BUILD_ROOT`,
+`NETBOOT_PAYLOAD_RV32`, `NETBOOT_PAYLOAD_RV64`, and `VIVADO`; use absolute paths
+for custom build/payload locations and repeat them for
+all workflow steps, or put them in ignored `netboot.local.mk`. Other command-line profile overrides are intentionally not
+forwarded. Use the manual flow below for a different hardware configuration.
+Do not mix fixed-profile and ordinary targets in the same Make invocation.
+For the complete flow, including explicit host setup, namespaced TFTP deployment,
+automatic BIOS interruption, full Linux startup and network checks, see
+[NETBOOT.md](NETBOOT.md#fixed-cu08-end-to-end-targets). In short, after build use
+`make fpga-netboot-host-setup`, `make fpga-netboot-rv64-serve`,
+`make fpga-netboot-rv64-run`, then `make fpga-netboot-rv64-test` (substitute
+`rv32` throughout as needed). Restore recorded host changes with
+`make fpga-netboot-host-restore` when finished. Never boot an RV32 SD payload on RV64.
+
+#### Manual configurable flow
+
+Ethernet itself is **opt-in**: `WITH_ETHERNET=0` is the default, even with
+`VARIANT=linux32` or `linux64`. The 1000 Mb/s default above applies only when
+Ethernet is enabled. BIOS registers `netboot` only when its generated CSR header
+defines `CSR_ETHMAC_BASE`. A BIOS without that command cannot be repaired by
+connecting a cable or starting a TFTP server.
+
+Run the following in one Bash or Zsh session, starting at the repository root.
+Complete `make setup` once and put Vivado on `PATH` first. Reserve the board
+before loading it; do not run this against another session's active build or
+board test. These commands use the CU08 FMC_C / ETHA connection, 50 MHz CPU,
+MIG DDR, SD support and the `default` RTL preset; they do not write flash or SD.
+
+```sh
+cd fpga/litex
+
+# Keep all build-identifying arguments identical for every operation.
+cu08_net() {
+    make FPGA_BOARD=mlk_cu08_ku15p FPGA_AUTO_DETECT=0 \
+        VARIANT="$fpga_variant" RAPT_CONFIG=default BOOT_MODE=bios \
+        SYS_CLK=50000000 WITH_MIG=1 WITH_LITEDRAM=0 WITH_SDCARD=1 \
+        WITH_ETHERNET=1 ETH_SPEED=1000 FMC_SLOT=c ETH_PORT=a "$@"
+}
+
+# RV32: build, inspect the printed paths, check freshness/timing, then load.
+fpga_variant=linux32
+cu08_net fpga-build && cu08_net info && \
+    cu08_net fpga-bitstream-current && cu08_net fpga-timing-ok && \
+    cu08_net fpga-load
+
+# RV64 alternative: run when ready to replace the RV32 image on the board.
+# fpga_variant=linux64
+# cu08_net fpga-build && cu08_net info && \
+#     cu08_net fpga-bitstream-current && cu08_net fpga-timing-ok && \
+#     cu08_net fpga-load
+```
+
+Do not continue if the build fails, freshness differs, or timing is unverified.
+Require an existing matching timing report that explicitly meets constraints;
+`fpga-timing-ok` currently warns and returns success when its report is missing.
+The helper only holds command arguments in your shell; in a new terminal,
+define it and select `fpga_variant` again. If you change a preset, clock,
+`RAPT_PACK_VFLAGS`, `EXTRA_FLAGS`, route directive or other build setting, keep
+that change identical throughout build/check/load. Do not replace the final
+command with bare `make fpga-load`: it can select a different configuration's
+existing image. Enabling Ethernet only at load time cannot change an old image.
+
+#### Custom build directories or an existing bitstream
+
+By default, `info` prints a configuration-specific `FPGA_DIR` and bitstream
+path. For a custom directory, pass the **same absolute paths on every command**.
+For example, using the helper above and new, unused directories:
+
+```sh
+fpga_variant=linux32
+fpga_work_dir=/absolute/path/to/new-rv32-build
+fpga_soc_dir=/absolute/path/to/new-rv32-soc
+cu08_custom() {
+    cu08_net BUILD_DIR="$fpga_work_dir" FPGA_DIR="$fpga_soc_dir" "$@"
+}
+cu08_custom fpga-build && cu08_custom info && \
+    cu08_custom fpga-bitstream-current && cu08_custom fpga-timing-ok && \
+    cu08_custom fpga-load
+```
+
+Replace both example paths before running. To reuse an existing build, use its
+recorded configuration and directories instead; do not guess them from XLEN
+alone. A bare `FPGA_BITSTREAM=/path/to/file.bit` override selects a file but does
+not automatically select its matching build stamp or timing report. Prefer the
+matching `FPGA_DIR` and full configuration. Loading is SRAM-only: after power
+cycling, an older flash image may return.
+
+#### Confirm BIOS support, then prepare TFTP
+
+Open the UART console (`make fpga-console UART_PORT=/dev/serial/by-id/<your-UART>`;
+replace the device path). Interrupt automatic boot if enabled and run:
+
+```text
+litex> help
+```
+
+Expect `netboot` with the description `Boot via Ethernet (TFTP)`. If absent:
+
+1. Check the exact build/load commands for `WITH_ETHERNET=1` and identical board,
+   variant, preset and directory settings. Read any stale-bitstream warning.
+2. Inspect `<FPGA_DIR>/software/include/generated/csr.h` for
+   `#define CSR_ETHMAC_BASE`. If absent, that generated SoC has no Ethernet MAC
+   exposed to BIOS. Rebuild with Ethernet enabled; regenerating BIOS alone does
+   not update the ROM in the existing `.bit`.
+3. If the macro exists but the running BIOS lacks `netboot`, verify that you
+   loaded the matching new `.bit`, not an older/default-directory image or the
+   flash image restored by a power cycle. Keep the build and UART logs.
+
+Once the command exists, follow [NETBOOT.md](NETBOOT.md) to prepare and verify
+matching RV32/RV64 firmware, configure the board-facing host/TFTP service, and
+run `netboot boot.json`. BIOS IPs are separate from Linux DHCP. Do not stop an
+existing TFTP service or change a shared host interface without coordinating its
+use. Successful TFTP transfer is not Linux network acceptance: verify Linux
+reaches its shell, obtains the intended IP, and passes actual bidirectional
+traffic tests. Gateware build success alone proves neither boot nor networking.
+
+### CM005 PHY behavior and validation scope
+
+After every PHY reset, gateware waits 10 ms and advertises only 1000BASE-T
+full duplex without pause, and restarts auto-negotiation. The link partner
+must support auto-negotiation. Software MDIO access becomes available after
+these initialization writes; the existing CSR offsets are unchanged.
+The reset gate is shared by ETHA/ETHB, so either reset also affects ETHB.
+
+CU08 FMC_C/ETHA uses the oversampled gigabit receiver and serialized transmitter.
+Routed timing and reliable board traffic remain separate acceptance requirements;
+selecting gigabit does not establish either. Explicit `ETH_SPEED=100` is retained
+for legacy peripheral tests and requires a 100 Mb/s-capable link partner; it is
+not the current board-validation route. The 100M gateware and Linux firmware
+outputs have a separate `-100m` suffix. Loading remains subject to the normal
+timing gate; functional tests alone do not establish routed timing or a link.
 
 ## ALINX AXAU15 Hardware Flow (Xilinx Vivado)
 
@@ -220,7 +440,7 @@ make coremark-fpga FPGA_BOARD=mlk_cu07_ku15p UART_PORT=/dev/ttyUSB0 COREMARK_ITE
 make fpga-flash FPGA_BOARD=mlk_cu07_ku15p BOOT_MODE=bios RAPT_CONFIG=small
 ```
 
-Expected: `fpga-build` writes `build/mlk_cu07_ku15p/bios/gateware/mlk_cu07_ku15p.bit` plus a zero-error report dashboard (`.../index.html`); BIOS reaches `litex>` after a passing memtest; `main-fpga` reports `memtest: PASS`; `coremark-fpga` prints `Correct operation validated` + an `Iterations/Sec` line.
+Expected: `fpga-build` writes `mlk_cu07_ku15p.bit` under the configuration-specific `FPGA_DIR/gateware/` printed by `make info`, plus a zero-error report dashboard (`.../index.html`); BIOS reaches `litex>` after a passing memtest; `main-fpga` reports `memtest: PASS`; `coremark-fpga` prints `Correct operation validated` + an `Iterations/Sec` line.
 
 Notes:
 - `RAPT_CONFIG` defaults to `default`; override it explicitly when reproducing a build made with another preset.
@@ -230,7 +450,7 @@ Notes:
 
 ## KU15P Linux FPGA Flow (Vivado MIG)
 
-Linux-oriented KU15P bitstream: `VARIANT=linux32`, LiteX BIOS, on-board 4 GB DDR4 via Xilinx MIG mapped as `main_ram` at `0x80000000` (1 GiB AXI window). On the KU15P, the board-aware Linux profile selects `BOOT_MODE=bios WITH_MIG=1 WITH_SDCARD=1 INTEGRATED_MAIN_RAM_SIZE=0`, `SYS_CLK=50000000` (50 MHz), `UART_BAUD=115200`, and the `default` Raptor preset. Linux currently sees 256 MiB because the core's PMEM classifier accepts `0x80000000..0x8fffffff`; `LINUX_FPGA_RAM_SIZE` must not exceed that window until the classifier is widened. The legacy LiteDRAM path is still available via `WITH_LITEDRAM=1`. `make fpga-build VARIANT=linux32 FPGA_BOARD=mlk_cu07_ku15p` only succeeds if the Vivado timing report meets constraints; the default bitstream lands under `build/mlk_cu07_ku15p/bios-linux32-mig-sdcard-default/gateware/`.
+Linux-oriented KU15P bitstream: `VARIANT=linux32`, LiteX BIOS, on-board 4 GB DDR4 via Xilinx MIG mapped as `main_ram` at `0x80000000` (1 GiB AXI window). On the KU15P, the board-aware Linux profile selects `BOOT_MODE=bios WITH_MIG=1 WITH_SDCARD=1 INTEGRATED_MAIN_RAM_SIZE=0`, `SYS_CLK=50000000` (50 MHz), `UART_BAUD=115200`, and the `default` Raptor preset. The KU15P external-DDR build sets `RAPT_PMEM_BYTES` to the mapped DDR size and defaults `LINUX_FPGA_RAM_SIZE` to that size (1 GiB, `0x80000000..0xbfffffff`). Other platforms retain the default 256 MiB PMEM classifier. MMIO still starts at `0xc0000000`; DDR windows larger than 1 GiB are rejected. Rebuild both gateware and the Linux boot artifacts when upgrading from the old 256 MiB map: a new DTB must not be used with the old classifier. This configuration does not by itself establish board-level 1 GiB memory-test or Linux stress-test success. The legacy LiteDRAM path is still available via `WITH_LITEDRAM=1`. `make fpga-build VARIANT=linux32 FPGA_BOARD=mlk_cu07_ku15p` only succeeds if the Vivado timing report meets constraints; the default bitstream lands under `build/mlk_cu07_ku15p/bios-linux32-mig-sdcard-default-<config-hash>/gateware/`.
 
 ```bash
 source /opt/Xilinx/2025.2/Vivado/settings64.sh
@@ -272,7 +492,7 @@ the host-to-FPGA path is not reliable at higher rates.
 
 ### DMA Cache Maintenance
 
-LiteSDCard DMA is not coherent with Raptor's write-through L1D. The CPU implements standard Zicbom encodings for `cbo.inval`, `cbo.clean`, and `cbo.flush`; each instruction waits for the unified store queue to drain and then conservatively invalidates the whole L1D. The current hardware therefore ignores the encoded block address for cache selection. LiteX's legacy no-argument `flush_cpu_dcache()` hook emits `cbo.flush 0(x0)` as a full-cache trigger, which is valid for this Raptor implementation but must not be treated as portable per-block Zicbom software. The Linux DT advertises `zicbom` plus a `riscv,cbom-block-size` derived from the selected `RAPT_CONFIG` cache-line size.
+LiteSDCard DMA is not coherent with Raptor's write-through L1D. Current `cbo.inval` and `cbo.flush` invalidate all ways of the addressed set; `cbo.clean` only drains write-through stores. LiteX's legacy no-argument `flush_cpu_dcache()` hook sweeps a mapped 4 KiB SRAM page in 64-byte CBO blocks, covering every set under Raptor's VA-bit-11:6 selection contract (higher physical colors are cleared together). A single `cbo.flush 0(x0)` is not a whole-cache operation, and address zero is unmapped on KU15P. This sweep is Raptor-specific, not a portable generic Zicbom whole-cache algorithm. The Linux DT advertises `zicbom` and the configured `riscv,cbom-block-size`.
 
 ### SD Card Boot Image
 
@@ -441,7 +661,8 @@ fpga/litex/
 +-- setup_env.sh        # Environment setup (venv + LiteX install)
 +-- raptor_soc.py       # Verilator simulation SoC entry point
 +-- tang_mega_138k_pro.py         # Tang Mega 138K Pro FPGA SoC entry point
-+-- mlk_cu07_ku15p.py             # MLK-CU07-KU15P Vivado/MIG FPGA SoC entry point
++-- ku15p_soc.py                  # Shared KU15P SoC and build flow; explicit immutable board config
++-- mlk_cu07_ku15p.py             # MLK-CU07-KU15P platform/config entry point
 +-- mlk_cu08_ku15p.py              # MLK-CU08-KU15P Vivado/MIG entry point
 +-- mlk_cu08_ku15p_platform.py     # MLK-CU08-KU15P local pin/platform definition
 +-- alinx_axau15.py                # ALINX AXAU15 MIG/SDCard target
@@ -464,6 +685,30 @@ fpga/litex/
 ## CPU Variants
 
 Raptor's microarchitecture preset is selected separately with `RAPT_CONFIG=<name>`, which maps to `hdl/configs/<name>/rapt_config.svh` during RTL packing. The LiteX CPU `VARIANT` still selects SoC/software defaults, but Linux variants also add RTL preprocessor defines through `RAPT_PACK_VFLAGS` (`-DRAPT_LINUX`, and `-DRAPT_RV64` for `linux64`).
+
+### Independent build configurations
+
+RTL exports live in `build/rtl/<preset>-<defines-hash>/`, shared by the Make
+prerequisite and CPU adapter. Packing does not invoke `sim/Makefile`, alter
+`sim/.config`, or overwrite `sim/build/<preset>/rapt_pack.sv`. Each cache entry
+is locked and published only after both preprocessor outputs succeed.
+
+FPGA directories use `build/<board>/<flavor>-<config-hash>/`; simulation and
+Linux boot artifacts also have configuration-specific directories. The hashes
+include the resolved preset, variant, clocks, memory settings, debug flags and
+boot settings, so changing only `SYS_CLK` or `RAPT_PACK_VFLAGS` no longer
+overwrites another build. BIOS/picolibc patches apply to a private software
+copy inside that output directory, not to the shared third-party checkout.
+
+Use the same configuration arguments for build and load; `make info` prints
+the exact `FPGA_DIR` and bitstream path. Older un-hashed output directories are
+left intact and are not automatically reused. Two simultaneous invocations
+targeting the *same* full output configuration should still be avoided.
+
+```bash
+make pack VARIANT=linux64 FPGA_BOARD=mlk_cu08_ku15p RAPT_CONFIG=default
+make fpga-build VARIANT=linux64 FPGA_BOARD=mlk_cu08_ku15p RAPT_CONFIG=default
+```
 
 | Variant   | Use Case                |
 | --------- | ----------------------- |

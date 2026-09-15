@@ -199,7 +199,8 @@ module rapt_vpu_memory #(
   assign response_dropped = mem_rsp_valid && mem_rsp_ready && !accepted_response;
 
   always_comb begin
-    vr_valid = !reset && (state == MASK_REQ || state == INDEX_REQ || state == STORE_REQ || state == LOAD_REQ);
+    vr_valid = !reset && (state == MASK_REQ || state == INDEX_REQ
+        || state == STORE_REQ || state == LOAD_REQ);
     vr_write = state == LOAD_REQ;
     vr_size = data_size_q;
     vr_addr = AddrBits'((int'(insn_q[11:7]) + int'(field_q)*int'(group_q))*(VLEN/8)
@@ -212,7 +213,8 @@ module rapt_vpu_memory #(
       vr_size = index_size_q;
       vr_addr = AddrBits'(int'(insn_q[24:20])*(VLEN/8) + (int'(index_q) << index_size_q));
     end
-    vr_rsp_ready = state == MASK_RSP || state == INDEX_RSP || state == STORE_RSP || state == LOAD_RSP;
+    vr_rsp_ready = state == MASK_RSP || state == INDEX_RSP || state == STORE_RSP
+        || state == LOAD_RSP;
   end
 
   logic fault_event, trim_fault;

@@ -176,18 +176,24 @@ module rapt_feu #(
   assign fpr.alu_raddr_c = iss.uop.execute.fp.rs3;
   assign fp_s1 = fpr.alu_rdata_a[31:0];
   assign fp_d1 = fpr.alu_rdata_a;
-  assign fp_addsub_s = iss.uop.execute.fp.op == `RAPT_FP_OP_FADD_S || iss.uop.execute.fp.op == `RAPT_FP_OP_FSUB_S;
-  assign fp_addsub_d = iss.uop.execute.fp.op == `RAPT_FP_OP_FADD_D || iss.uop.execute.fp.op == `RAPT_FP_OP_FSUB_D;
+  assign fp_addsub_s = iss.uop.execute.fp.op == `RAPT_FP_OP_FADD_S
+      || iss.uop.execute.fp.op == `RAPT_FP_OP_FSUB_S;
+  assign fp_addsub_d = iss.uop.execute.fp.op == `RAPT_FP_OP_FADD_D
+      || iss.uop.execute.fp.op == `RAPT_FP_OP_FSUB_D;
   assign fp_mul_s = iss.uop.execute.fp.op == `RAPT_FP_OP_FMUL_S;
   assign fp_mul_d = iss.uop.execute.fp.op == `RAPT_FP_OP_FMUL_D;
   assign fp_fma_s = iss.uop.execute.fp.op == `RAPT_FP_OP_FMADD_S || iss.uop.execute.fp.op ==
       `RAPT_FP_OP_FMSUB_S
-      || iss.uop.execute.fp.op == `RAPT_FP_OP_FNMSUB_S || iss.uop.execute.fp.op == `RAPT_FP_OP_FNMADD_S;
+      || iss.uop.execute.fp.op == `RAPT_FP_OP_FNMSUB_S
+      || iss.uop.execute.fp.op == `RAPT_FP_OP_FNMADD_S;
   assign fp_fma_d = iss.uop.execute.fp.op == `RAPT_FP_OP_FMADD_D || iss.uop.execute.fp.op ==
       `RAPT_FP_OP_FMSUB_D
-      || iss.uop.execute.fp.op == `RAPT_FP_OP_FNMSUB_D || iss.uop.execute.fp.op == `RAPT_FP_OP_FNMADD_D;
-  assign fp_divide = iss.uop.execute.fp.op == `RAPT_FP_OP_FDIV_S || iss.uop.execute.fp.op == `RAPT_FP_OP_FDIV_D;
-  assign fp_sqrt = iss.uop.execute.fp.op == `RAPT_FP_OP_FSQRT_S || iss.uop.execute.fp.op == `RAPT_FP_OP_FSQRT_D;
+      || iss.uop.execute.fp.op == `RAPT_FP_OP_FNMSUB_D
+      || iss.uop.execute.fp.op == `RAPT_FP_OP_FNMADD_D;
+  assign fp_divide = iss.uop.execute.fp.op == `RAPT_FP_OP_FDIV_S
+      || iss.uop.execute.fp.op == `RAPT_FP_OP_FDIV_D;
+  assign fp_sqrt = iss.uop.execute.fp.op == `RAPT_FP_OP_FSQRT_S
+      || iss.uop.execute.fp.op == `RAPT_FP_OP_FSQRT_D;
   assign fp_divsqrt = fp_divide || fp_sqrt;
   assign fp_minmax = iss.uop.execute.fp.op == `RAPT_FP_OP_FMIN_S || iss.uop.execute.fp.op ==
       `RAPT_FP_OP_FMAX_S
@@ -197,7 +203,8 @@ module rapt_feu #(
       || iss.uop.execute.fp.op == `RAPT_FP_OP_FEQ_S || iss.uop.execute.fp.op ==
       `RAPT_FP_OP_FLE_D
       || iss.uop.execute.fp.op == `RAPT_FP_OP_FLT_D || iss.uop.execute.fp.op == `RAPT_FP_OP_FEQ_D;
-  assign fp_classify = iss.uop.execute.fp.op == `RAPT_FP_OP_FCLASS_S || iss.uop.execute.fp.op == `RAPT_FP_OP_FCLASS_D;
+  assign fp_classify = iss.uop.execute.fp.op == `RAPT_FP_OP_FCLASS_S
+      || iss.uop.execute.fp.op == `RAPT_FP_OP_FCLASS_D;
   assign fp_single_to_int_w = iss.uop.execute.fp.op ==
       `RAPT_FP_OP_FCVT_W_S
       || iss.uop.execute.fp.op == `RAPT_FP_OP_FCVT_WU_S;
@@ -237,7 +244,8 @@ module rapt_feu #(
       && iss.uop.inst[24:20] == 5'b00001;
   assign fp_half_to_fp = fp_fcvt_s_h || fp_fcvt_d_h;
   assign fp_fp_to_half = fp_fcvt_h_s || fp_fcvt_h_d;
-  assign fp_double = iss.uop.execute.fp.op == `RAPT_FP_OP_FDIV_D || iss.uop.execute.fp.op == `RAPT_FP_OP_FSQRT_D;
+  assign fp_double = iss.uop.execute.fp.op == `RAPT_FP_OP_FDIV_D
+      || iss.uop.execute.fp.op == `RAPT_FP_OP_FSQRT_D;
   assign fp_rounding_mode = iss.uop.execute.fp.rm == 3'b111 ? csr_bcast.frm : iss.uop.execute.fp.rm;
   assign fp_rm_invalid = (fp_fma_s || fp_fma_d || fp_divsqrt || fp_convert_widen
     || fp_convert_narrow || fp_int_to_double_w || fp_int_to_single_w

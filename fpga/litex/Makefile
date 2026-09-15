@@ -1,5 +1,11 @@
 # fpga/litex/Makefile — Raptor LiteX SoC build system. Run `make help` for targets/vars.
 
+# Fixed netboot entry points bypass normal profile parsing until the recursive
+# invocation has supplied the complete board configuration.
+ifneq ($(filter fpga-netboot-%,$(MAKECMDGOALS)),)
+include mk/netboot-profile.mk
+else
+
 # ============================================================================
 # fpga/litex/Makefile — Raptor LiteX SoC build system
 # ============================================================================
@@ -20,6 +26,8 @@ TIMEOUT_BIN := $(shell command -v timeout 2>/dev/null || command -v gtimeout 2>/
 NPROC       := $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 
 export RAPTOR_HOME
+_shell_quote = '$(subst ','"'"',$(1))'
+_build_identity = $(shell $(HOST_PYTHON) $(LITEX_DIR)/scripts/build_identity.py $(foreach v,$(1),$(call _shell_quote,$(v)=$(strip $($(v))))))
 
 ifeq ($(strip $(TIMEOUT_BIN)),)
 	ifeq ($(strip $(HOST_PYTHON)),)
@@ -189,13 +197,21 @@ MEMSPEED_TRACE ?= 0 ## (linux FPGA profile) add LiteX BIOS memspeed phase trace 
 EXTRA_FLAGS := $(strip $(EXTRA_FLAGS) $(if $(filter 1 yes true on,$(MEMSPEED_TRACE)),--rapt-memspeed-trace,))
 endif
 RAPT_PACK_VFLAGS ?= ## Extra defines passed to the sim RTL pack rule
-RAPT_PACK_VFLAGS := $(strip $(RAPT_PACK_VFLAGS))
+override RAPT_PACK_VFLAGS := $(strip $(RAPT_PACK_VFLAGS))
+ifeq (,$(filter -DRAPT_FPGA_DSP -DRAPT_FPGA_DSP=%,$(RAPT_PACK_VFLAGS)))
+override RAPT_PACK_VFLAGS := $(strip $(RAPT_PACK_VFLAGS) -DRAPT_FPGA_DSP=1)
+endif
+ifeq ($(VARIANT),linux32)
+ifneq (,$(filter -DRAPT_RV64 -DRAPT_RV64=%,$(RAPT_PACK_VFLAGS)))
+$(error VARIANT=linux32 conflicts with RAPT_PACK_VFLAGS defining RAPT_RV64)
+endif
+endif
 RAPT_PACK_SYS_CLK_MHZ := $(shell awk 'BEGIN { printf "%d", ($(SYS_CLK) + 500000) / 1000000 }')
 ifeq (,$(findstring -DRAPT_CORE_CLOCK_MHZ=,$(RAPT_PACK_VFLAGS)))
-RAPT_PACK_VFLAGS := $(strip $(RAPT_PACK_VFLAGS) -DRAPT_CORE_CLOCK_MHZ=$(RAPT_PACK_SYS_CLK_MHZ))
+override RAPT_PACK_VFLAGS := $(strip $(RAPT_PACK_VFLAGS) -DRAPT_CORE_CLOCK_MHZ=$(RAPT_PACK_SYS_CLK_MHZ))
 endif
 ifeq (,$(findstring -DRAPT_MTIME_FREQ_MHZ=,$(RAPT_PACK_VFLAGS)))
-RAPT_PACK_VFLAGS := $(strip $(RAPT_PACK_VFLAGS) -DRAPT_MTIME_FREQ_MHZ=$(RAPT_PACK_SYS_CLK_MHZ))
+override RAPT_PACK_VFLAGS := $(strip $(RAPT_PACK_VFLAGS) -DRAPT_MTIME_FREQ_MHZ=$(RAPT_PACK_SYS_CLK_MHZ))
 endif
 # Keep the prerequisite pack and the LiteX CPU's finalize-time pack on the same
 # variant defines.  Otherwise an FPGA build first packs without the Linux
@@ -203,13 +219,25 @@ endif
 # and the next identical invocation incorrectly treats the bitstream as stale.
 ifneq (,$(filter linux32 linux64,$(VARIANT)))
 ifeq (,$(findstring -DRAPT_LINUX,$(RAPT_PACK_VFLAGS)))
-RAPT_PACK_VFLAGS := $(strip $(RAPT_PACK_VFLAGS) -DRAPT_LINUX)
+override RAPT_PACK_VFLAGS := $(strip $(RAPT_PACK_VFLAGS) -DRAPT_LINUX)
 endif
 endif
 ifeq ($(VARIANT),linux64)
 ifeq (,$(findstring -DRAPT_RV64,$(RAPT_PACK_VFLAGS)))
-RAPT_PACK_VFLAGS := $(strip $(RAPT_PACK_VFLAGS) -DRAPT_RV64)
+override RAPT_PACK_VFLAGS := $(strip $(RAPT_PACK_VFLAGS) -DRAPT_RV64)
 endif
+endif
+# Match the shared KU15P target's PMA override before packing/hashing RTL.
+KU15P_PMEM_SIZE :=
+ifneq (,$(filter mlk_cu07_ku15p mlk_cu08_ku15p,$(FPGA_BOARD)))
+ifneq (,$(filter 1 yes true on,$(WITH_MIG)))
+KU15P_PMEM_SIZE := $(MIG_SIZE)
+else ifneq (,$(filter 1 yes true on,$(WITH_LITEDRAM)))
+KU15P_PMEM_SIZE := $(LITEDRAM_SIZE)
+endif
+endif
+ifneq ($(KU15P_PMEM_SIZE),)
+override RAPT_PACK_VFLAGS := $(filter-out -DRAPT_PMEM_BYTES=%,$(RAPT_PACK_VFLAGS)) -DRAPT_PMEM_BYTES=$(shell printf '%d' $(KU15P_PMEM_SIZE))
 endif
 export RAPT_PACK_VFLAGS
 
@@ -239,7 +267,10 @@ setup-skip: ## Activate venv without reinstalling
 # RTL Packing
 # ==============================================================================
 
-PACK_SV := $(NSIM_DIR)/build/$(or $(RAPT_CONFIG),default)/rapt_pack.sv
+RAPT_PACK_ROOT ?= $(BUILD_DIR)/rtl
+export RAPT_PACK_ROOT
+_ISOLATED_PACK = $(HOST_PYTHON) $(LITEX_DIR)/scripts/isolated_pack.py --repo "$(RAPTOR_HOME)" --root "$(RAPT_PACK_ROOT)" --config "$(RAPT_CONFIG)" $(call _shell_quote,--flags=$(RAPT_PACK_VFLAGS))
+PACK_SV := $(shell $(_ISOLATED_PACK) --path-only)
 
 NSIM_RTL_DIR := $(RAPTOR_HOME)/sim/rtl
 CHISEL_DIR := $(RTL_DIR)/chisel
@@ -249,25 +280,8 @@ CHISEL_INPUTS := $(shell find $(CHISEL_DIR)/src $(CHISEL_DIR)/project -type f 2>
 	$(CHISEL_DIR)/build.sbt $(CHISEL_DIR)/Makefile
 RTL_SOURCES := $(sort $(shell find $(RTL_DIR) $(NSIM_RTL_DIR) -type f \( -name '*.sv' -o -name '*.svh' -o -name '*.v' -o -name '*.vh' \) 2>/dev/null) $(CHISEL_GENERATED_SRCS))
 
-RAPT_CONFIG_STAMP := $(BUILD_DIR)/.rapt_config_stamp
-RAPT_CONFIG_PREV  := $(shell cat $(RAPT_CONFIG_STAMP) 2>/dev/null)
-RAPT_CONFIG_STAMP_EXISTS := $(wildcard $(RAPT_CONFIG_STAMP))
-ifneq ($(RAPT_CONFIG),$(RAPT_CONFIG_PREV))
-$(shell mkdir -p $(BUILD_DIR) && printf '%s' '$(RAPT_CONFIG)' > $(RAPT_CONFIG_STAMP))
-$(info [litex] RAPT_CONFIG changed: '$(RAPT_CONFIG_PREV)' -> '$(RAPT_CONFIG)', re-packing...)
-else ifeq ($(RAPT_CONFIG_STAMP_EXISTS),)
-$(shell mkdir -p $(BUILD_DIR) && printf '%s' '$(RAPT_CONFIG)' > $(RAPT_CONFIG_STAMP))
-endif
-
-RAPT_PACK_VFLAGS_STAMP := $(BUILD_DIR)/.rapt_pack_vflags_stamp
-RAPT_PACK_VFLAGS_PREV  := $(shell cat $(RAPT_PACK_VFLAGS_STAMP) 2>/dev/null)
-RAPT_PACK_VFLAGS_STAMP_EXISTS := $(wildcard $(RAPT_PACK_VFLAGS_STAMP))
-ifneq ($(RAPT_PACK_VFLAGS),$(RAPT_PACK_VFLAGS_PREV))
-$(shell mkdir -p $(BUILD_DIR) && printf '%s' '$(RAPT_PACK_VFLAGS)' > $(RAPT_PACK_VFLAGS_STAMP))
-$(info [litex] RAPT_PACK_VFLAGS changed: '$(RAPT_PACK_VFLAGS_PREV)' -> '$(RAPT_PACK_VFLAGS)', re-packing...)
-else ifeq ($(RAPT_PACK_VFLAGS_STAMP_EXISTS),)
-$(shell mkdir -p $(BUILD_DIR) && printf '%s' '$(RAPT_PACK_VFLAGS)' > $(RAPT_PACK_VFLAGS_STAMP))
-endif
+# No parse-time config stamps: the packer keys on preset + defines and checks
+# source contents under its own lock. It never enters sim/Makefile/Kconfig.
 
 pack: ## Pack all RTL into single preprocessed SV file
 
@@ -377,7 +391,7 @@ OPENSBI_FW_DIR  := $(LINUX_DIR)/opensbi/build-rv$(LINUX_XLEN)/platform/generic/f
 OPENSBI_BIN     := $(OPENSBI_FW_DIR)/fw_payload.bin
 LINUX_IMG        = $(if $(filter 64,$(LINUX_XLEN)),$(LINUX_RV64_PAYLOAD),$(LINUX_RV32GC_FPGA_PAYLOAD))
 
-LINUX_FPGA_RAM_SIZE ?= 0x10000000 ## DTB RAM size: matches Raptor's 0x80000000..0x8fffffff PMEM window
+LINUX_FPGA_RAM_SIZE ?= $(or $(KU15P_PMEM_SIZE),0x10000000) ## KU15P external DDR: 1 GiB by default; other platforms retain 256 MiB
 LINUX_FPGA_INIT ?= full ## Startup: full (default Buildroot services), prepared-shell (runtime mounts), shell (bare legacy diagnostics)
 ifneq (,$(filter-out shell prepared-shell full,$(LINUX_FPGA_INIT)))
 $(error LINUX_FPGA_INIT must be shell, prepared-shell or full, got '$(LINUX_FPGA_INIT)')
@@ -385,6 +399,12 @@ endif
 LINUX_FPGA_BOOTARGS_BASE ?= console=liteuart0,115200 earlycon=sbi unaligned_scalar_speed=fast cryptomgr.notests=1 random.trust_bootloader=on
 LINUX_FPGA_BOOTARGS ?= $(LINUX_FPGA_BOOTARGS_BASE) $(if $(filter full,$(LINUX_FPGA_INIT)),rdinit=/init,$(if $(filter prepared-shell,$(LINUX_FPGA_INIT)),rdinit=/sbin/raptor-shell,rdinit=/bin/sh)) ## Linux FPGA kernel command line
 LINUX_FPGA_MODEL ?= Raptor LiteX SoC on $(FPGA_BOARD) ## Linux model string reported from the generated DTB
+WITH_ETHERNET ?= 0
+FMC_SLOT ?= $(if $(filter mlk_cu08_ku15p,$(FPGA_BOARD)),c,a)
+ETH_PORT ?= a
+ETH_SPEED ?= 1000
+ETH_SPEED := $(strip $(ETH_SPEED))
+LINUX_FPGA_ETH_CSR ?= $(if $(filter 1 yes true on,$(WITH_ETHERNET)),$(FPGA_DIR)/ethernet-csr.json,)## Matching CSR export; automatically generated with WITH_ETHERNET=1
 LINUX_FPGA_PAYLOAD ?= $(LINUX_IMG) ## Legacy stage0-bundled payload for fpga-img
 LINUX_FPGA_OPENSBI_PAYLOAD ?= $(OPENSBI_BIN) ## Standalone linux/opensbi fw_payload.bin for fpga-opensbi-upload
 LINUX_FPGA_PAYLOAD_OFFSET ?= 0x00100000 ## Offset of fw_payload source inside uploaded image
@@ -416,7 +436,19 @@ RAPT_CACHE_LINE_BYTES := $(word 3,$(shell grep '^`define RAPT_CACHE_LINE_BYTES '
 
 
 FW_LINUX_FPGA_SRC    := $(FW_BASE)/linux-fpga
-FW_LINUX_FPGA_DIR    := $(BUILD_DIR)/firmware/linux-fpga/rv$(LINUX_XLEN)
+_FW_LINUX_CONFIG_VARS := FPGA_BOARD VARIANT RAPT_CONFIG RAPT_PACK_VFLAGS SYS_CLK UART_BAUD \
+	LINUX_FPGA_RAM_SIZE LINUX_FPGA_BOOTARGS LINUX_FPGA_MODEL MAIN_RAM_BASE \
+	LINUX_FPGA_PAYLOAD LINUX_FPGA_OPENSBI_PAYLOAD LINUX_FPGA_PAYLOAD_OFFSET \
+	LINUX_FPGA_DTB_OFFSET LINUX_FPGA_OPENSBI_DTB_OFFSET LINUX_FPGA_DTB_ADDR \
+	LINUX_FPGA_STAGE0_SRAM LINUX_FPGA_UART_BASE RAPT_CACHE_LINE_BYTES CROSS \
+	WITH_ETHERNET FMC_SLOT ETH_PORT ETH_SPEED
+# The automatically derived CSR path includes FPGA_DIR; only an explicit
+# override belongs in this earlier identity (otherwise it would be circular).
+ifneq (,$(filter command line environment,$(origin LINUX_FPGA_ETH_CSR)))
+_FW_LINUX_CONFIG_VARS += LINUX_FPGA_ETH_CSR
+endif
+FW_LINUX_CONFIG_ID := $(call _build_identity,$(_FW_LINUX_CONFIG_VARS))
+FW_LINUX_FPGA_DIR    = $(BUILD_DIR)/firmware/linux-fpga/rv$(LINUX_XLEN)-$(FPGA_BOARD)-$(RAPT_CONFIG)-$(FW_LINUX_CONFIG_ID)
 FW_LINUX_FPGA_BIN    := $(FW_LINUX_FPGA_DIR)/stage0.bin
 FW_LINUX_FPGA_ELF    := $(FW_LINUX_FPGA_DIR)/stage0.elf
 FW_LINUX_FPGA_DTB    := $(FW_LINUX_FPGA_DIR)/litex-soc.dtb
@@ -504,7 +536,11 @@ LITEX_PATH := $(RAPTOR_HOME)/third_party/enjoy-digital/litex
 LITEX_CONFIG_PHASE := sim
 include $(LITEX_DIR)/mk/config.mk
 
-SIM_DIR    := $(BUILD_DIR)/sim/$(VARIANT)-$(ROM)-$(SOC)
+_SIM_CONFIG_VARS := VARIANT RAPT_CONFIG RAPT_PACK_VFLAGS ROM SOC SYS_CLK \
+	SIM_JOBS SIM_THREADS TRACE TRACE_START TRACE_END EXTRA_FLAGS \
+	SIM_ROM_BIN SIM_PAYLOAD_BIN INTEGRATED_MAIN_RAM_SIZE
+SIM_CONFIG_ID := $(call _build_identity,$(_SIM_CONFIG_VARS))
+SIM_DIR    := $(BUILD_DIR)/sim/$(VARIANT)-$(ROM)-$(SOC)-$(RAPT_CONFIG)-$(SIM_CONFIG_ID)
 SIM_BUILD_DIR := $(SIM_DIR)/gateware
 
 _BASE_FLAGS = --sys-clk-freq=$(SYS_CLK) --jobs=$(SIM_JOBS) --threads=$(SIM_THREADS) $(TRACE_FLAGS)
@@ -717,6 +753,28 @@ bios: ## Alias: make sim ROM=bios (run LiteX BIOS in sim) {SOC,PAYLOAD,TRACE,SIM
 # FPGA Targets
 # ==============================================================================
 
+# Help declarations only; invoking these selects mk/netboot-profile.mk above.
+fpga-netboot-rv32-build: ## Build fixed CU08 RV32 Linux BIOS with gigabit Ethernet/netboot
+fpga-netboot-rv32-load: ## Load matching fixed RV32 netboot bitstream after freshness/timing checks
+fpga-netboot-rv32-info: ## Show fixed RV32 netboot configuration and output paths
+fpga-netboot-rv64-build: ## Build fixed CU08 RV64 Linux BIOS with gigabit Ethernet/netboot
+fpga-netboot-rv64-load: ## Load matching fixed RV64 netboot bitstream after freshness/timing checks
+fpga-netboot-rv64-info: ## Show fixed RV64 netboot configuration and output paths
+fpga-netboot-rv32-check: ## Check RV32 netboot tools, payload, UART and dedicated interface
+fpga-netboot-rv64-check: ## Check RV64 netboot tools, payload, UART and dedicated interface
+fpga-netboot-rv32-bundle: ## Verify/package matching RV32 firmware into a content-addressed bundle
+fpga-netboot-rv64-bundle: ## Verify/package matching RV64 firmware into a content-addressed bundle
+fpga-netboot-rv32-serve: ## Deploy RV32 bundle; reuse verified TFTP or serve in foreground
+fpga-netboot-rv64-serve: ## Deploy RV64 bundle; reuse verified TFTP or serve in foreground
+fpga-netboot-rv32-run: ## Load current timing-clean RV32 bitstream and netboot to Linux login
+fpga-netboot-rv64-run: ## Load current timing-clean RV64 bitstream and netboot to Linux login
+fpga-netboot-rv32-test: ## Verify running RV32 Linux LAN with bidirectional 1 MiB checksums
+fpga-netboot-rv64-test: ## Verify running RV64 Linux LAN with bidirectional 1 MiB checksums
+fpga-netboot-rv32-console: ## Open fixed-profile RV32 UART console (Ctrl-C exits)
+fpga-netboot-rv64-console: ## Open fixed-profile RV64 UART console (Ctrl-C exits)
+fpga-netboot-host-setup: ## Journal temporary dedicated-interface addresses and local DHCP
+fpga-netboot-host-restore: ## Restore only recorded host changes; leave existing services alone
+
 BOOT_MODE      ?= $(if $(LINUX_FPGA_PROFILE),bios,custom) ## FPGA boot ROM source (custom=firmware/fpga, bios=LiteX BIOS; linux FPGA profile: bios)
 FPGA_FLAVOR_SUFFIX ?= ## Optional suffix for diagnostic FPGA builds, e.g. bimodal or ioq-in-order
 
@@ -839,3 +897,5 @@ include $(LITEX_DIR)/mk/recipes.mk
 	lint info clean clean-all
 
 FORCE:
+
+endif # fixed netboot entry points / normal Makefile

@@ -795,6 +795,36 @@ rapt_cmu dut_cmu (
     end
   endtask
 
+  task automatic expect_recovery_announcement_warm_reset;
+    // Reset reuses the same slot/generation/target tuple. A retained payload
+    // must not suppress the first redirect of the new transaction.
+    for (int trial = 0; trial < 3; trial++) begin
+      reset_dut();
+      check(!recovery.redirect_valid && !dut_rou.recovery_announced,
+            "reset retained recovery announcement validity");
+      dispatch_one(make_alu_uop(XLEN'('h8004_0000), 32'h0010_0093, 5'd1), PLEN'(33), PLEN'(1),
+                   RobW'(0));
+      dispatch_one(make_branch_uop(XLEN'('h8004_0004), 32'h0000_0863), '0, '0, RobW'(1));
+      exu_rou_b.dest = RobW'(1);
+      exu_rou_b.npc = XLEN'('h8004_0100);
+      exu_rou_b.btaken = 1;
+      exu_rou_b.mispredict = 1;
+      exu_rou_b.trap = 0;
+      exu_rou_b.valid = 1;
+      tick(1);
+      clear_writebacks();
+      check(
+          recovery.redirect_valid && recovery.owner == RobW'(1)
+            && recovery.target == XLEN'('h8004_0100),
+          "stale announcement suppressed fresh same-identity recovery");
+      tick(1);
+      check(dut_rou.recovery_announced && recovery.pending && !recovery.redirect_valid,
+            "unchanged announcement repeated redirect");
+      tick(2);
+      check(!recovery.redirect_valid, "held announcement repeated redirect");
+    end
+  endtask
+
   task automatic expect_registered_recovery_fence;
     begin
       // A resolved younger branch must stop new UOQ->ROB allocation while
@@ -1027,6 +1057,8 @@ rapt_cmu dut_cmu (
             "CBO.ZERO waits for its own uncommitted SQ resident to drain");
       check(rou_cmu.flush_pipe && !rou_cmu.slot[1].valid,
             "CBO.ZERO must still retire alone and resume fetch through recovery");
+      check(!cmu_bcast.cbo_inval && !cmu_bcast.fence_time,
+            "CBO.ZERO must not invalidate cache or TLB");
       tick(1);
 
       // A real fence does not own an SQ resident and must still drain stores.
@@ -1045,6 +1077,8 @@ rapt_cmu dut_cmu (
       tick(1);
     end
   endtask
+
+  `include "tb_rou_cbo.svh"
 
   task automatic expect_full_width_retirement;
     localparam logic [XLEN-1:0] Pc = XLEN'(64'h1234_5678_8009_0000);
@@ -1144,28 +1178,33 @@ rapt_cmu dut_cmu (
 
   task automatic expect_debug_halt_discards_queued_operands;
     reset_dut();
-    dispatch_one(make_alu_uop(32'h8000_1000,32'h0010_0093,5'd1),6'd33,6'd1,RobW'(0));
+    dispatch_one(make_alu_uop(32'h8000_1000, 32'h0010_0093, 5'd1), 6'd33, 6'd1, RobW'(0));
     rnu_rou.slot[0]='0;
     rnu_rou.slot[0].uop=make_alu_uop(32'h8000_1004,32'h0020_0113,5'd2);
     rnu_rou.slot[0].prd=6'd34;
     rnu_rou.slot[0].prs=6'd2;
     rnu_rou.valid[0]=1;
-    tick(1); rnu_rou.valid[0]=0; dm_haltreq=1;
-    check(!halted && |dut_rou.uoq_valid,"halt drain setup did not retain queued uop");
-    writeback_alu_one(RobW'(0),32'h8000_1004);
     tick(1);
-    check(cmu_bcast.flush_pipe && !halted,"debug halt reported before flushing cached operands");
-    check(rou_cmu.next_pc==XLEN'('h80001004),"halt flush did not use committed frontier");
-    tick(1);
-    check(halted && !(|dut_rou.uoq_valid),"halt did not discard queued operand snapshots");
-    check(cmu_bcast.flush_redirect && cmu_bcast.redirect_pc==XLEN'('h80001004),"halt frontier not redirected");
-    rnu_rou.valid[0]=1;
-    tick(3);
-    check(!rnu_rou.ready[0] && !(|dut_rou.uoq_valid),"halted queue recaptured stale operands");
     rnu_rou.valid[0]=0;
-    check(halted && !cmu_bcast.flush_pipe && !commit_fire,"held halt repeated flush or committed work");
-    dm_haltreq=0; tick(2);
-    check(!halted && !dispatch_valid[0],"stale pre-debug uop survived resume");
+    dm_haltreq=1;
+    check(!halted && |dut_rou.uoq_valid, "halt drain setup did not retain queued uop");
+    writeback_alu_one(RobW'(0), 32'h8000_1004);
+    tick(1);
+    check(cmu_bcast.flush_pipe && !halted, "debug halt reported before flushing cached operands");
+    check(rou_cmu.next_pc == XLEN'('h80001004), "halt flush did not use committed frontier");
+    tick(1);
+    check(halted && !(|dut_rou.uoq_valid), "halt did not discard queued operand snapshots");
+    check(cmu_bcast.flush_redirect && cmu_bcast.redirect_pc == XLEN'('h80001004),
+          "halt frontier not redirected");
+    rnu_rou.valid[0] = 1;
+    tick(3);
+    check(!rnu_rou.ready[0] && !(|dut_rou.uoq_valid), "halted queue recaptured stale operands");
+    rnu_rou.valid[0] = 0;
+    check(halted && !cmu_bcast.flush_pipe && !commit_fire,
+          "held halt repeated flush or committed work");
+    dm_haltreq = 0;
+    tick(2);
+    check(!halted && !dispatch_valid[0], "stale pre-debug uop survived resume");
   endtask
 
   initial begin
@@ -1194,6 +1233,7 @@ rapt_cmu dut_cmu (
     expect_correct_branch_releases_checkpoint();
     expect_cross_domain_dispatch_bypass();
     expect_dispatch_edge_writeback_merge();
+    expect_recovery_announcement_warm_reset();
     expect_registered_recovery_fence();
     expect_recovery_identity_reuse();
     expect_stale_generation_is_rejected();
@@ -1201,6 +1241,7 @@ rapt_cmu dut_cmu (
     expect_stale_csr_wen_is_not_exposed();
     expect_full_width_retirement();
     expect_cbo_zero_commit_with_resident_sq();
+    expect_cbo_maintenance();
     expect_bus_error_interrupt();
 
     if (CheckOperandIndependence) begin

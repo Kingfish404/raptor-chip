@@ -39,6 +39,8 @@ module tb_pmp_reset_napot;
       .fault_lo_o(fault_lo)
   );
   int checks = 0;
+  localparam int AW = `RAPT_PADDR_BITS - 2;
+  logic [AW-1:0] expected_raw[N], expected_mask[N];
   task automatic tick;
     @(posedge clock);
     #1;
@@ -133,6 +135,44 @@ module tb_pmp_reset_napot;
     for (int writable = 0; writable < 2; writable++) run_case(i, mode, locked, writable);
     assert (checks == N * 3 * 2 * 2 * 3 * 2 * 4 * 10)
     else $fatal(1, "coverage count");
+    // Exercise every entry and every payload bit through the address decoder.
+    @(negedge clock);
+    reset = 1;
+    update.cfg_we = '0;
+    tick();
+    for (int j = 0; j < N; j++) begin
+      expected_raw[j] = '0;
+      expected_mask[j] = 1;
+    end
+    for (int b = 0; b < AW; b++) begin
+      for (int i = 0; i < N; i++) begin
+        @(negedge clock);
+        reset = 0;
+        update.addr_we = 1;
+        update.addr_idx = $clog2(N)'(i);
+        update.raw_addr = AW'(1) << b;
+        update.napot_mask = ~(AW'(1) << b);
+        expected_raw[i] = update.raw_addr;
+        expected_mask[i] = update.napot_mask;
+        tick();
+        for (int j = 0; j < N; j++) begin
+          assert (state.pmp_raw_addr[j] == expected_raw[j]
+              && state.pmp_napot_mask[j] == expected_mask[j])
+          else $fatal(1, "PMP indexed write bit=%0d selected=%0d observed=%0d", b, i, j);
+        end
+        @(negedge clock);
+        update.addr_we = 0;
+        update.raw_addr = ~update.raw_addr;
+        update.napot_mask = ~update.napot_mask;
+        tick();
+        for (int j = 0; j < N; j++) begin
+          assert (state.pmp_raw_addr[j] == expected_raw[j]
+              && state.pmp_napot_mask[j] == expected_mask[j])
+          else $fatal(1, "PMP disabled write changed entry %0d", j);
+        end
+      end
+    end
+    $display("PASS: PMP indexed state writes XLEN=%0d entries=%0d bits=%0d", XLEN, N, AW);
     $display("PASS: PMP reset NAPOT XLEN=%0d checks=%0d", XLEN, checks);
     $finish;
   end

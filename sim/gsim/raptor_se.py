@@ -26,10 +26,11 @@ Param mapping (raptor → gem5 O3)
 * numPhysFloatRegs       = max(PHY_SIZE, 64)        (gem5 needs >= 32 archregs)
 * IQ numEntries          = RS_SIZE + IOQ_SIZE
 * LQ/SQEntries           = SQ_SIZE
-* fetch..commitWidth     = ISSUE_WIDTH
+* fetchWidth..commitWidth = independent RAPT_*_WIDTH defines
+* fetchQueueSize         = RIQ_SIZE (fetch→rename decoupling queue)
 * BTB                    = SimpleBTB(numEntries=BTB_SIZE, assoc=BTB_WAYS)
-* Conditional pred       = BiModeBP(globalPredictorSize=PHT_SIZE,
-                                    choicePredictorSize=PHT_SIZE)
+* Conditional pred       = preset RAPT_BPU_DIRP_* (default preset: TAGE with
+                           the RTL geometry; BIMODAL/GSHARE map to local/gshare)
 * RAS                    = ReturnAddrStack(numEntries=RSB_SIZE)
 
 Usage
@@ -98,6 +99,7 @@ from m5.objects import (
     L2XBar,
     LTAGE,
     LocalBP,
+    OpDesc,
     FP_ALU,
     FP_MultDiv,
     Matrix_Unit,
@@ -112,6 +114,7 @@ from m5.objects import (
     ReadPort,
     ReturnAddrStack,
     RiscvO3CPU,
+    RiscvAtomicSimpleCPU,
     RiscvISA,
     RiscvSystem,
     RiscvRTC,
@@ -137,12 +140,14 @@ from m5.params import NULL
 
 from raptor_dse import (
     DEFAULT_SIM_CFG,
+    RTL_TAGE_PARAMS,
     SUPPORTED_BP_INPUTS,
     SUPPORTED_BP_KINDS,
     _die,
     apply_overrides,
     canonical_bp_name,
     derive_uarch,
+    detect_rtl_dirp,
     dump_effective_config,
     equalize_bp_budget,
     load_json_config,
@@ -402,11 +407,10 @@ def build_branch_pred(u: dict, sim: dict) -> BranchPredictor:
             f"[raptor_se] unsupported bp={sim['bp']!r} (canonical={bp_kind!r}); "
             f"choose from {SUPPORTED_BP_INPUTS}"
         )
-    # Equalize directional-predictor storage budget across BP families so
-    # bimodal / gshare / ltage / perceptron / ... runs are area-comparable
-    # to the default TAGE configuration (~5.4 Kbit). Disable via
-    # `--set sim.equalize_budget=false`. See raptor_dse.equalize_bp_budget
-    # for the per-family sizing rules.
+    # Cross-family directional-storage budget equalization is opt-in
+    # (`--set sim.equalize_budget=true`): the alignment-first default keeps
+    # every family at the SVH's RAPT_PHT_SIZE. See
+    # raptor_dse.equalize_bp_budget for the per-family sizing rules.
     equalize_bp_budget(u, sim)
     bp_params = sim.get("bp_params", {})
     ctr_bits = max(1, int(u.get("pht_ctr_bits", 2)))
@@ -575,6 +579,12 @@ def build_o3_cpu(
     cpu.wbWidth = u["wb_w"]
     cpu.commitWidth = u["commit_w"]
     cpu.squashWidth = u["squash_w"]
+    # RIQ_SIZE is the RTL's fetch→rename decoupling buffer; use it as the
+    # fetch→decode queue depth unless explicitly overridden.
+    if fetch_queue_size is not None:
+        cpu.fetchQueueSize = fetch_queue_size
+    else:
+        cpu.fetchQueueSize = u.get("fetch_q", 32)
     cpu.numROBEntries = u["rob"]
     cpu.numPhysIntRegs = u["phys_int"]
     cpu.numPhysFloatRegs = u["phys_fp"]
@@ -583,14 +593,21 @@ def build_o3_cpu(
     cpu.instQueues = [IQUnit(numEntries=u["iq"])]
     if rtl_execution_resources:
         # Preserve the default pool's non-integer capabilities, while matching
-        # Raptor's two ALU pipes, one MULDIV pipe, and one L1D request path.
+        # Raptor's RAPT_INTEGER_ISSUE_PORTS ALU pipes, one MULDIV pipe, and one
+        # L1D request path.  RAPT_M_FAST (one-cycle pipelined multiplier) maps
+        # to IntMult opLat=1; division keeps gem5's unpipelined 20-cycle
+        # latency, which the RTL's iterative divider approximates.
+        mdiv_ops = [
+            OpDesc(opClass="IntMult", opLat=1 if u.get("m_fast") else 3),
+            OpDesc(opClass="IntDiv", opLat=20, pipelined=False),
+        ]
         cpu.instQueues = [
             IQUnit(
                 numEntries=u["iq"],
                 fuPool=FUPool(
                     FUList=[
                         IntALU(count=u["integer_issue_ports"]),
-                        IntMultDiv(count=1),
+                        IntMultDiv(opList=mdiv_ops, count=1),
                         FP_ALU(),
                         FP_MultDiv(),
                         ReadPort(),
@@ -735,9 +752,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--rv64", action="store_true", help="select RV64 ELF + ISA")
     ap.add_argument(
         "--cpu",
-        choices=("o3", "timing"),
+        choices=("o3", "timing", "atomic"),
         default="o3",
-        help="o3 = full Raptor uarch model; timing = simple in-order baseline",
+        help="o3 = full Raptor uarch model; timing/atomic = in-order baselines",
     )
     ap.add_argument(
         "--benchmark",
@@ -771,8 +788,9 @@ def main(argv: list[str] | None = None) -> int:
         "--rtl-execution-resources",
         action="store_true",
         help=(
-            "use 2 integer ALUs, 1 MULDIV, and one load/store request port "
-            "instead of gem5's broader default FUPool"
+            "use RAPT_INTEGER_ISSUE_PORTS integer ALUs, one MULDIV (RAPT_M_FAST"
+            " timing when enabled), and one load/store request port instead of"
+            " gem5's broader default FUPool"
         ),
     )
     ap.add_argument(
@@ -854,6 +872,20 @@ def main(argv: list[str] | None = None) -> int:
     u = derive_uarch(cfg)
     sim = DEFAULT_SIM_CFG.copy()
     sim["rv64"] = args.rv64
+
+    # ---- 1a. Direction-predictor default from the preset --------------------
+    # The RTL selects its direction predictor via RAPT_BPU_DIRP_*; the
+    # simulator must follow it so an unqualified run models the same BPU as
+    # the HDL (default preset: TAGE). JSON/SET/--bp layers below still win.
+    sim["bp"] = detect_rtl_dirp(cfg)
+    if sim["bp"] == "tage":
+        sim["bp_params"]["tage"] = dict(RTL_TAGE_PARAMS)
+    if cfg.get("RAPT_BPU_DIRP_STATIC") and sim["bp"] == "local":
+        print(
+            "[raptor_se] note: RAPT_BPU_DIRP_STATIC has no gem5 O3 analogue; "
+            "modelling the PC-indexed bimodal table instead",
+            file=sys.stderr,
+        )
 
     # ---- 1b. Layer JSON config (ChampSim-style DSE file) ---------------------
     if args.json_config is not None:
@@ -947,7 +979,7 @@ def main(argv: list[str] | None = None) -> int:
     system.clk_domain = SrcClockDomain(
         clock=args.clk_freq, voltage_domain=VoltageDomain()
     )
-    system.mem_mode = "timing"
+    system.mem_mode = "atomic" if args.cpu == "atomic" else "timing"
     system.mem_ranges = [AddrRange(args.mem_size)]
     system.cache_line_size = u["line_bytes"]
 
@@ -960,6 +992,11 @@ def main(argv: list[str] | None = None) -> int:
             storeset=args.storeset,
             rtl_execution_resources=args.rtl_execution_resources,
             fetch_queue_size=args.fetch_queue_size,
+        )
+    elif args.cpu == "atomic":
+        system.cpu = RiscvAtomicSimpleCPU(
+            cpu_id=0,
+            isa=[RiscvISA(riscv_type=("RV64" if args.rv64 else "RV32"))],
         )
     else:
         system.cpu = RiscvTimingSimpleCPU(

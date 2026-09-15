@@ -28,25 +28,25 @@ extern long long int max_timeout;
 bool cpu_read_sq_snapshot_control(uint32_t *valid, uint32_t *committed,
                                   uint8_t *capacity, uint8_t *head)
 {
-  *valid = uint32_t(VERILOG_CPU(lsu__DOT__u_sq__DOT__sq_valid));
-  *committed = uint32_t(VERILOG_CPU(lsu__DOT__u_sq__DOT__sq_committed));
-  *capacity = uint8_t(VERILOG_CPU(lsu__DOT__u_sq__DOT__sq_paddr).size());
-  *head = uint8_t(VERILOG_CPU(lsu__DOT__u_sq__DOT__sq_head));
+  *valid = uint32_t(VERILOG_BACKEND(lsu__DOT__u_sq__DOT__sq_valid));
+  *committed = uint32_t(VERILOG_BACKEND(lsu__DOT__u_sq__DOT__sq_committed));
+  *capacity = uint8_t(VERILOG_BACKEND(lsu__DOT__u_sq__DOT__sq_paddr).size());
+  *head = uint8_t(VERILOG_BACKEND(lsu__DOT__u_sq__DOT__sq_head));
   if (*capacity == 0 || *capacity > 32)
     return false;
   for (uint8_t entry = 0; entry < *capacity; ++entry)
   {
     if ((*valid & (1u << entry)) == 0)
       continue;
-    uint8_t alu = VERILOG_CPU(lsu__DOT__u_sq__DOT__sq_alu)[entry];
+    uint8_t alu = VERILOG_BACKEND(lsu__DOT__u_sq__DOT__sq_alu)[entry];
     unsigned size = alu == 0x01 ? 1 : alu == 0x03 ? 2 :
                     alu == 0x0f ? 4 : alu == 0x1f ? 8 : 0;
     // The overlay holds one native word at a contiguous physical address.
     // Let RTL finish FP64/split/CBO stores, including separately translated
     // high beats, instead of inventing their remaining data or addresses.
     if (size == 0 || size > sizeof(word_t)
-        || VERILOG_CPU(lsu__DOT__u_sq__DOT__sq_fp64)[entry]
-        || (VERILOG_CPU(lsu__DOT__u_sq__DOT__sq_paddr)[entry] & (size - 1)))
+        || VERILOG_BACKEND(lsu__DOT__u_sq__DOT__sq_fp64)[entry]
+        || (VERILOG_BACKEND(lsu__DOT__u_sq__DOT__sq_paddr)[entry] & (size - 1)))
       return false;
   }
   return true;
@@ -84,7 +84,7 @@ static void dump_pipeline_stall_state()
   Log("stall state: IFU buffered=%u L1I=%u IPTW=%u; L1D=%u DPTW=%u; "
       "AXI rd_out=%u req=%u resp=%u; bus l1d_busy=%u issued=%u "
       "mmio=%u skid=%u source=%u",
-      (unsigned)VERILOG_CPU(ifu__DOT__held_count),
+      (unsigned)VERILOG_FRONTEND(ifu__DOT__held_count),
       (unsigned)VERILOG_CPU(l1i_cache__DOT__l1i_state),
       (unsigned)VERILOG_CPU(l1i_cache__DOT__u_iptw__DOT__state),
       (unsigned)VERILOG_CPU(l1d_cache__DOT__l1d_state),
@@ -100,41 +100,41 @@ static void dump_pipeline_stall_state()
   Log("stall state: IOQ valid=%02x complete=%02x mmu=%02x head=%u tail=%u "
       "issue=%u req_valid=%u req_idx=%u at_rob_head=%u; "
       "ALQ valid=%02x ready=%02x p1busy=%02x p2busy=%02x; BRQ valid=%x",
-      (unsigned)VERILOG_CPU(lsu__DOT__u_ioq__DOT__ioq_valid),
-      (unsigned)VERILOG_CPU(lsu__DOT__u_ioq__DOT__ioq_complete),
-      (unsigned)VERILOG_CPU(lsu__DOT__u_ioq__DOT__ioq_mmu_en),
-      (unsigned)VERILOG_CPU(lsu__DOT__u_ioq__DOT__ioq_head),
-      (unsigned)VERILOG_CPU(lsu__DOT__u_ioq__DOT__ioq_tail_a),
-      (unsigned)VERILOG_CPU(lsu__DOT__u_ioq__DOT__ioq_issue_found),
-      (unsigned)VERILOG_CPU(lsu__DOT__u_ioq__DOT__load_req_valid_q),
-      (unsigned)VERILOG_CPU(lsu__DOT__u_ioq__DOT__load_req_idx_q),
-      (unsigned)VERILOG_CPU(lsu__DOT__u_ioq__DOT__ioq_at_rob_head),
-      (unsigned)VERILOG_CPU(ieu__DOT__u_alq__DOT__iq_valid),
-      (unsigned)VERILOG_CPU(ieu__DOT__u_alq__DOT__iq_ready_vec),
-      (unsigned)VERILOG_CPU(ieu__DOT__u_alq__DOT__iq_pr1_busy),
-      (unsigned)VERILOG_CPU(ieu__DOT__u_alq__DOT__iq_pr2_busy),
-      (unsigned)VERILOG_CPU(ieu__DOT__u_brq__DOT__iq_valid));
-  const size_t ioq_entries = sizeof(VERILOG_CPU(lsu__DOT__u_ioq__DOT__ioq_pc)) /
-                             sizeof(VERILOG_CPU(lsu__DOT__u_ioq__DOT__ioq_pc)[0]);
+      (unsigned)VERILOG_BACKEND(lsu__DOT__u_ioq__DOT__ioq_valid),
+      (unsigned)VERILOG_BACKEND(lsu__DOT__u_ioq__DOT__ioq_complete),
+      (unsigned)VERILOG_BACKEND(lsu__DOT__u_ioq__DOT__ioq_mmu_en),
+      (unsigned)VERILOG_BACKEND(lsu__DOT__u_ioq__DOT__ioq_head),
+      (unsigned)VERILOG_BACKEND(lsu__DOT__u_ioq__DOT__ioq_tail_a),
+      (unsigned)VERILOG_BACKEND(lsu__DOT__u_ioq__DOT__ioq_issue_found),
+      (unsigned)VERILOG_BACKEND(lsu__DOT__u_ioq__DOT__load_req_valid_q),
+      (unsigned)VERILOG_BACKEND(lsu__DOT__u_ioq__DOT__load_req_idx_q),
+      (unsigned)VERILOG_BACKEND(lsu__DOT__u_ioq__DOT__ioq_at_rob_head),
+      (unsigned)VERILOG_BACKEND(ieu__DOT__u_alq__DOT__iq_valid),
+      (unsigned)VERILOG_BACKEND(ieu__DOT__u_alq__DOT__iq_ready_vec),
+      (unsigned)VERILOG_BACKEND(ieu__DOT__u_alq__DOT__iq_pr1_busy),
+      (unsigned)VERILOG_BACKEND(ieu__DOT__u_alq__DOT__iq_pr2_busy),
+      (unsigned)VERILOG_BACKEND(ieu__DOT__u_brq__DOT__iq_valid));
+  const size_t ioq_entries = sizeof(VERILOG_BACKEND(lsu__DOT__u_ioq__DOT__ioq_pc)) /
+                             sizeof(VERILOG_BACKEND(lsu__DOT__u_ioq__DOT__ioq_pc)[0]);
   for (size_t i = 0; i < ioq_entries; i++)
   {
-    if (VERILOG_CPU(lsu__DOT__u_ioq__DOT__ioq_valid) & (1u << i))
+    if (VERILOG_BACKEND(lsu__DOT__u_ioq__DOT__ioq_valid) & (1u << i))
       Log("stall IOQ[%zu]: pc=" FMT_WORD_NO_PREFIX " dest=%u pr1=%u pr2=%u",
-          i, (word_t)VERILOG_CPU(lsu__DOT__u_ioq__DOT__ioq_pc)[i],
-          (unsigned)VERILOG_CPU(lsu__DOT__u_ioq__DOT__ioq_dest)[i],
-          (unsigned)VERILOG_CPU(lsu__DOT__u_ioq__DOT__ioq_pr1)[i],
-          (unsigned)VERILOG_CPU(lsu__DOT__u_ioq__DOT__ioq_pr2)[i]);
+          i, (word_t)VERILOG_BACKEND(lsu__DOT__u_ioq__DOT__ioq_pc)[i],
+          (unsigned)VERILOG_BACKEND(lsu__DOT__u_ioq__DOT__ioq_dest)[i],
+          (unsigned)VERILOG_BACKEND(lsu__DOT__u_ioq__DOT__ioq_pr1)[i],
+          (unsigned)VERILOG_BACKEND(lsu__DOT__u_ioq__DOT__ioq_pr2)[i]);
   }
-  const size_t alq_entries = sizeof(VERILOG_CPU(ieu__DOT__u_alq__DOT__iq_pc)) /
-                             sizeof(VERILOG_CPU(ieu__DOT__u_alq__DOT__iq_pc)[0]);
+  const size_t alq_entries = sizeof(VERILOG_BACKEND(ieu__DOT__u_alq__DOT__iq_pc)) /
+                             sizeof(VERILOG_BACKEND(ieu__DOT__u_alq__DOT__iq_pc)[0]);
   for (size_t i = 0; i < alq_entries; i++)
   {
-    if (VERILOG_CPU(ieu__DOT__u_alq__DOT__iq_valid) & (1u << i))
+    if (VERILOG_BACKEND(ieu__DOT__u_alq__DOT__iq_valid) & (1u << i))
       Log("stall ALQ[%zu]: pc=" FMT_WORD_NO_PREFIX " dest=%u pr1=%u pr2=%u",
-          i, (word_t)VERILOG_CPU(ieu__DOT__u_alq__DOT__iq_pc)[i],
-          (unsigned)VERILOG_CPU(ieu__DOT__u_alq__DOT__iq_dest)[i],
-          (unsigned)VERILOG_CPU(ieu__DOT__u_alq__DOT__iq_pr1)[i],
-          (unsigned)VERILOG_CPU(ieu__DOT__u_alq__DOT__iq_pr2)[i]);
+          i, (word_t)VERILOG_BACKEND(ieu__DOT__u_alq__DOT__iq_pc)[i],
+          (unsigned)VERILOG_BACKEND(ieu__DOT__u_alq__DOT__iq_dest)[i],
+          (unsigned)VERILOG_BACKEND(ieu__DOT__u_alq__DOT__iq_pr1)[i],
+          (unsigned)VERILOG_BACKEND(ieu__DOT__u_alq__DOT__iq_pr2)[i]);
   }
 #if !defined(RAPT_SOC) && !defined(CONFIG_wrapBus)
   Log("stall AXI model: AR v/r=%u/%u addr=%08x; R busy=%u v/r=%u/%u "
@@ -292,12 +292,12 @@ void cpu_exec(uint64_t n)
     // instruction and dropped both the final cycle and slot A when ebreak was
     // in any position of a multi-instruction commit.
     perf_sample_per_cycle();
-    uint8_t cmu_valid = *(uint8_t *)&VERILOG_CPU(cmu__DOT__valid);
-    uint32_t cmu_retire_count = VERILOG_CPU(cmu__DOT__retire_count);
+    uint8_t cmu_valid = *(uint8_t *)&VERILOG_BACKEND(cmu__DOT__valid);
+    uint32_t cmu_retire_count = VERILOG_BACKEND(cmu__DOT__retire_count);
     if (cmu_valid)
     {
       for (uint32_t slot = 0; slot < cmu_retire_count; ++slot)
-        perf_sample_per_inst(VERILOG_CPU(cmu__DOT__inst_slots)[slot]);
+        perf_sample_per_inst(VERILOG_BACKEND(cmu__DOT__inst_slots)[slot]);
       cur_inst_cycle = 0;
     }
     else
@@ -361,8 +361,8 @@ void cpu_exec(uint64_t n)
       bool checkpoint_resumed = false;
       for (uint32_t slot = 0; slot < cmu_retire_count; ++slot)
       {
-        word_t slot_pc = VERILOG_CPU(cmu__DOT__rpc_slots)[slot];
-        word_t slot_next = VERILOG_CPU(cmu__DOT__npc_slots)[slot];
+        word_t slot_pc = VERILOG_BACKEND(cmu__DOT__rpc_slots)[slot];
+        word_t slot_next = VERILOG_BACKEND(cmu__DOT__npc_slots)[slot];
         checkpoint_resumed |= checkpoint_load_post_trampoline_tick(slot_pc);
         checkpoint_note_commit(slot_pc);
         flow_check_commit(slot_pc, slot_next, char('0' + slot));
@@ -373,8 +373,8 @@ void cpu_exec(uint64_t n)
 #ifdef CONFIG_ITRACE
       for (uint32_t slot = 0; slot < cmu_retire_count; ++slot)
       {
-        iringbuf_rpc[iringhead] = VERILOG_CPU(cmu__DOT__rpc_slots)[slot];
-        iringbuf_inst[iringhead] = VERILOG_CPU(cmu__DOT__inst_slots)[slot];
+        iringbuf_rpc[iringhead] = VERILOG_BACKEND(cmu__DOT__rpc_slots)[slot];
+        iringbuf_inst[iringhead] = VERILOG_BACKEND(cmu__DOT__inst_slots)[slot];
         iringhead = (iringhead + 1) % MAX_IRING_SIZE;
       }
 #endif
@@ -440,7 +440,7 @@ void cpu_exec(uint64_t n)
 #ifdef CONFIG_ISA64
           bool stce = npc.menvcfg != NULL && (((uint64_t)*npc.menvcfg >> 63) & 1u);
 #else
-          bool stce = (VERILOG_CPU(csrs__DOT__csr)[MENVCFGH] >> 31) & 1u;
+          bool stce = (VERILOG_BACKEND(csrs__DOT__csr)[MENVCFGH] >> 31) & 1u;
 #endif
           if (ref_difftest_set_stip && stce)
           {

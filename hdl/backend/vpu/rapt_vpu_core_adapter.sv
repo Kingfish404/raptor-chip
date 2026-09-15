@@ -11,10 +11,10 @@
 // result fields into the scalar completion type.
 module rapt_vpu_core_adapter #(
     parameter int RobBits=6,
-    GenerationBits=4,
+    parameter int GenerationBits=4,
     parameter int CommandBits=160,
-    ResultBits=128,
-    MetadataBits=64,
+    parameter int ResultBits=128,
+    parameter int MetadataBits=64,
     parameter int TagBits=RobBits+GenerationBits
 ) (
     input logic clock,

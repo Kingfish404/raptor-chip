@@ -54,6 +54,8 @@ module tb_sq_atomic_context;
       rou_cmu.slot = '{default:'0};
       rou_cmu.time_trap = 0;
       rou_cmu.fence_time = 0;
+      rou_cmu.cbo_inval = 0;
+      rou_cmu.cbo_block = '0;
       rou_cmu.flush_pipe = 0;
       exu_lsu.rvalid = 1;
       exu_lsu.raddr = Addr;
@@ -156,6 +158,8 @@ module tb_sq_branch_context;
       rou_cmu.slot = '{default:'0};
       rou_cmu.time_trap = 0;
       rou_cmu.fence_time = 0;
+      rou_cmu.cbo_inval = 0;
+      rou_cmu.cbo_block = '0;
       rou_cmu.flush_pipe = 0;
       exu_lsu.rvalid = 1;
       exu_lsu.raddr = Addr;
@@ -661,13 +665,15 @@ endmodule
 // ---- tb_sq_store_pbmt ----
 `include "rapt.svh"
 `include "rapt_if.svh"
-module tb_sq_store_pbmt;
+module tb_sq_store_pbmt #(
+    parameter bit HighAlias = 1'b0
+);
   localparam int XLEN = `RAPT_XLEN;
   localparam int LsuTbSqSize = 4;
   `include "tb_lsu_harness.svh"
   localparam logic [XLEN-1:0] PageVA = 'h40000000;
-  localparam logic [XLEN-1:0] PagePA = 'h80000000;
-  localparam logic [XLEN-1:0] NextPA = 'h81002000;
+  localparam logic [XLEN-1:0] PagePA = XLEN'(HighAlias ? 64'hffffffff80000000 : 64'h80000000);
+  localparam logic [XLEN-1:0] NextPA = XLEN'(HighAlias ? 64'hffffffff81002000 : 64'h81002000);
   localparam logic [63:0] Data = 64'hfedcba9876543210;
 
   task automatic run_store(input int offset, input int size, input int attr0, input int attr1,
@@ -686,7 +692,7 @@ module tb_sq_store_pbmt;
     va = PageVA + XLEN'(offset);
     beats = ((offset % (XLEN/8)) + size + XLEN/8 - 1) / (XLEN/8);
     for (int b = 0; b < 3; b++) begin
-      bva = (va & ~XLEN'(XLEN/8-1)) + XLEN'(b*(XLEN/8));
+      bva = (va & ~((XLEN'(XLEN) / 8) - 1)) + XLEN'(b)*(XLEN'(XLEN) / 8);
       pa[b] = (bva[XLEN-1:12] == va[XLEN-1:12] ? PagePA : NextPA) + XLEN'(bva[11:0]);
       attrs[b] = 2'(bva[XLEN-1:12] == va[XLEN-1:12] ? attr0 : attr1);
       sq_wpbmt[b] = attrs[b];
@@ -765,6 +771,8 @@ module tb_sq_store_pbmt;
     end
   endtask
   initial begin
+    check($bits(dut.sq_paddr_hi[0]) == XLEN - $clog2(XLEN / 8) && $bits(dut.sq_paddr_third[0]
+          ) == XLEN - $clog2(XLEN / 8), "later-beat storage retained constant offset bits");
     for (int size = 1; size <= 8; size *= 2)
     for (int offset = 4088; offset < 4096; offset++)
     for (int a = 0; a < 3; a++) for (int b = 0; b < 3; b++) run_store(offset, size, a, b, 0);
@@ -813,12 +821,8 @@ module tb_sq_write_error;
   endtask
   initial begin
     for (int kind = 0; kind < 3; kind++) begin
-      for (
-          int bad = -1;
-          bad < (kind == 2 ? 64 / (XLEN / 8) : kind == 1 ? (XLEN == 32 ? 3 : 2) : 1);
-          bad++
-      ) begin
-        automatic int beats=kind==2 ? 64/(XLEN/8) : kind==1 ? (XLEN==32 ? 3 : 2) : 1;
+      for (int bad = -1; bad < (kind == 2 ? 1 : kind == 1 ? (XLEN == 32 ? 3 : 2) : 1); bad++) begin
+        automatic int beats=kind==2 ? 1 : kind==1 ? (XLEN==32 ? 3 : 2) : 1;
         automatic logic [XLEN-1:0] addr=Base+(kind==1 ? 1 : kind==2 ? 61 : 0);
         reset = 1;
         init_lsu_inputs(1, 0, 0);

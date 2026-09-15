@@ -13,7 +13,8 @@ module rapt_l1i #(
     parameter int L1I_LINE_LEN = `RAPT_L1I_LINE_LEN,
     parameter int unsigned L1I_LINE_SIZE = 2 ** L1I_LINE_LEN,
     parameter int L1I_LEN = `RAPT_L1I_LEN,
-    parameter unsigned L1I_N_WAYS = `RAPT_L1I_N_WAYS
+    parameter unsigned L1I_N_WAYS = `RAPT_L1I_N_WAYS,
+    parameter int PADDR_BITS = `RAPT_PADDR_BITS
 ) (
     input clock,
 
@@ -79,7 +80,10 @@ module rapt_l1i #(
   logic [XLEN-1:0] fetch_addr;
   // Cache size/tag parameters and per-way line-level tag arrays.
   localparam unsigned L1iSize = 2 ** L1I_LEN;
-  localparam unsigned L1iTagW = XLEN - L1I_LEN - L1I_LINE_LEN - 2;  // 2 = $clog2(4), word size
+  localparam unsigned L1iTagW = PADDR_BITS - L1I_LEN - L1I_LINE_LEN - 2;
+  if (PADDR_BITS > XLEN || PADDR_BITS <= L1I_LEN + L1I_LINE_LEN + 2) begin : g_invalid_paddr_width
+    $error("L1I physical address width must fit its request and cache geometry");
+  end
   localparam unsigned L1iWayW = L1I_N_WAYS > 1 ? $clog2(L1I_N_WAYS) : 1;
   logic [L1I_LINE_SIZE-1:0] l1i_valid[L1I_N_WAYS][L1iSize];
 
@@ -152,7 +156,9 @@ module rapt_l1i #(
   logic [$clog2(IFQ_SIZE)-1:0] ifq_head;
   logic [$clog2(IFQ_SIZE)-1:0] ifq_tail;
   logic [IFQ_SIZE-1:0] ifq_valid;
-  logic [XLEN-1:0] ifq_raddr[IFQ_SIZE];
+  // Refill ownership compares word addresses. Byte offsets are never used;
+  // retain the upper transport bits for exact error/owner matching.
+  logic [XLEN-1:2] ifq_raddr[IFQ_SIZE];
   /* verilator lint_on UNUSEDSIGNAL */
 
   // PTW instance signals
@@ -212,17 +218,17 @@ module rapt_l1i #(
 
   assign tlb_offset = ifu_l1i.pc[11:0];
 
-  assign addr_tag = pc_ifu[XLEN-1:L1I_LEN+L1I_LINE_LEN+2];
+  assign addr_tag = pc_ifu[PADDR_BITS-1:L1I_LEN+L1I_LINE_LEN+2];
   assign addr_idx = pc_ifu[L1I_LEN+L1I_LINE_LEN+2-1:L1I_LINE_LEN+2];
   assign addr_offset = pc_ifu[L1I_LINE_LEN+2-1:2];
 
-  assign addr_tag_next = pc_ifu_next[XLEN-1:L1I_LEN+L1I_LINE_LEN+2];
+  assign addr_tag_next = pc_ifu_next[PADDR_BITS-1:L1I_LEN+L1I_LINE_LEN+2];
   assign addr_idx_next = pc_ifu_next[L1I_LEN+L1I_LINE_LEN+2-1:L1I_LINE_LEN+2];
   assign addr_offset_next = pc_ifu_next[L1I_LINE_LEN+2-1:2];
-  assign addr_tag_next4 = pc_ifu_next4[XLEN-1:L1I_LEN+L1I_LINE_LEN+2];
+  assign addr_tag_next4 = pc_ifu_next4[PADDR_BITS-1:L1I_LEN+L1I_LINE_LEN+2];
 
-  assign fetch_addr = ifq_raddr[ifq_tail];
-  assign tag_fetch = fetch_addr[XLEN-1:L1I_LEN+L1I_LINE_LEN+2];
+  assign fetch_addr = {ifq_raddr[ifq_tail], 2'b00};
+  assign tag_fetch = fetch_addr[PADDR_BITS-1:L1I_LEN+L1I_LINE_LEN+2];
   assign offset_fetch = fetch_addr[L1I_LINE_LEN+2-1:2];
   assign idx_fetch = fetch_addr[L1I_LEN+L1I_LINE_LEN+2-1:L1I_LINE_LEN+2];
 
@@ -413,6 +419,25 @@ module rapt_l1i #(
   );
 
   // Bus mux: PTW takes priority over cache fill
+`ifdef RAPT_L2_EN
+`ifdef RAPT_L2_LINE_LEN
+  localparam int DownstreamLineOffset = `RAPT_L2_LINE_LEN + $clog2(XLEN / 8);
+`else
+  localparam int DownstreamLineOffset = $clog2(`RAPT_CACHE_LINE_BYTES);
+`endif
+  logic downstream_pmp_uniform;
+  rapt_pmp_line_uniform #(
+      .XLEN(XLEN),
+      .LineOffset(DownstreamLineOffset)
+  ) u_l2_pmp (
+      .addr(l1i_bus.araddr),
+      .state(pmp_state),
+      .uniform_o(downstream_pmp_uniform)
+  );
+  assign l1i_bus.noallocate = l1i_bus.ar_ptw || !downstream_pmp_uniform;
+`else
+  assign l1i_bus.noallocate = l1i_bus.ar_ptw;
+`endif
   assign l1i_bus.araddr = slow_active ? (slow_ptw ? slow_ptw_addr : slow_read_addr) : ptw_arvalid
     ? ptw_araddr
     : (RefillWords == 2)
@@ -460,7 +485,8 @@ module rapt_l1i #(
   always_ff @(posedge clock) begin
     if (reset) begin
       second_error_pending <= 1'b0;
-      second_error_pc <= '0;
+      // Both PC comparisons are pending-gated; a new pending error records
+      // its PC on the same edge. Retaining stale payload cannot raise a trap.
     end else if (cache_cancel || cache_error_current) begin
       second_error_pending <= 1'b0;
     end else begin
@@ -731,15 +757,17 @@ module rapt_l1i #(
     && (is_c || (data_bank_rvalid_d1[hit_next_way_sel][addr_offset_next]
                  && data_bank_raddr_d1[hit_next_way_sel][addr_offset_next] == addr_idx_next));
 
-  assign ifu_l1i.inst_n0 = slow_active ? slow_inst : (l1i_state == TRAP) ? 'h00000013 : {{inst_hi}, {inst_lo}};
+  assign ifu_l1i.inst_n0 = slow_active ? slow_inst : (l1i_state == TRAP)
+      ? 'h00000013 : {{inst_hi}, {inst_lo}};
   assign ifu_l1i.trap = slow_active ? slow_fault : (l1i_state == TRAP && rec_addr == ifu_l1i.pc);
   assign ifu_l1i.cause = slow_active ? slow_cause : cause;
   assign ifu_l1i.tval = slow_active ? slow_tval : rec_tval;
   // PMP must gate cache-hit delivery as well: without this, a hit in IDLE
   // streams the instruction to IFU the same cycle the FSM transitions to
   // TRAP, letting the forbidden fetch execute.
-  assign ifu_l1i.valid = slow_active ? slow_result_valid : slow_select ? 1'b0 : l1i_state == TRAP ? rec_addr == ifu_l1i.pc
-    : (!pmp_fetch_fault && hit && sram_data_ready && (hit_next || is_c) && !wait_invalid);
+  assign ifu_l1i.valid = slow_active ? slow_result_valid : slow_select ? 1'b0
+      : l1i_state == TRAP ? rec_addr == ifu_l1i.pc
+      : (!pmp_fetch_fault && hit && sram_data_ready && (hit_next || is_c) && !wait_invalid);
 
 `ifdef RAPT_FETCH_LOOKAHEAD
   // --- Word lookahead, independent of frontend instruction-slot count ---
@@ -810,26 +838,29 @@ module rapt_l1i #(
          && (data_bank_raddr_d1[hit_next_way_sel][addr_offset_next] == addr_idx_next))
       : (hit_n1 && sram_n1_ready));
   assign ifu_l1i.inst_n2 = l1i_word_n2;
-  assign ifu_l1i.inst_n2_valid = !slow_active && !slow_select && !pmp_n2_fetch_fault && n2_same_line_as_next4
-                               && (!mmu_en || lookahead_n2_addr[XLEN-1:12] == pc_ifu[XLEN-1:12])
-                               && hit_n2 && sram_n2_ready;
+  assign ifu_l1i.inst_n2_valid = !slow_active && !slow_select && !pmp_n2_fetch_fault
+      && n2_same_line_as_next4
+      && (!mmu_en || lookahead_n2_addr[XLEN-1:12] == pc_ifu[XLEN-1:12])
+      && hit_n2 && sram_n2_ready;
 `endif
 
   // Virtual address zero is valid: resolve every enabled-MMU TLB miss through
   // the page tables, then apply physical execute permissions to the result.
-  assign ptw_req = !slow_active && !slow_select && !cache_orphan && (l1i_state == IDLE) && mmu_en && !tlb_hit
+  assign ptw_req = !slow_active && !slow_select && !cache_orphan && (l1i_state == IDLE)
+      && mmu_en && !tlb_hit
       && !invalid_l1i && !wait_invalid
       && !cmu_bcast.flush_pipe && !cmu_bcast.flush_redirect
       && !ptw_busy;
 
-  // Check the complete instruction with one PMP instance. Before SRAM data is
-  // ready, conservatively check four bytes; once decoded, compressed
-  // instructions narrow the checked range to two bytes.
+  // Before SRAM data is ready, conservatively check four bytes; once decoded,
+  // compressed instructions narrow the checked range to two bytes. Like PMP
+  // in u_access, compute the fixed-size PMA checks before the late size select.
   // Physical execute permission is independent of PMP and PTE.X. Device
   // regions must fault even in Bare mode instead of endlessly retrying.
   logic fetch_unmapped_fault;
-  assign fetch_unmapped_fault = !rapt_pkg::addr_executable(pc_ifu,
-      sram_data_ready && is_c ? 4'd1 : 4'd3);
+  assign fetch_unmapped_fault = sram_data_ready && is_c
+      ? !rapt_pkg::addr_executable(pc_ifu, 4'd1)
+      : !rapt_pkg::addr_executable(pc_ifu, 4'd3);
   assign pmp_fetch_fault = pmp_fetch_pmp_fault || fetch_unmapped_fault;
 
 
@@ -1054,7 +1085,7 @@ module rapt_l1i #(
       end
 
       if (ifq_push_en && i == int'(ifq_head)) begin
-        ifq_raddr[i] <= l1i_bus.araddr;
+        ifq_raddr[i] <= l1i_bus.araddr[XLEN-1:2];
       end
     end
   end

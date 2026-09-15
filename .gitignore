@@ -73,7 +73,9 @@ Makefile.local
 obj_dir/
 **/obj_dir/
 build
+build.*
 __pycache__
+tmp
 
 # ---- OS artifacts ----
 .DS_Store

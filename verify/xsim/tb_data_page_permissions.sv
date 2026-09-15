@@ -17,6 +17,7 @@ module tb_data_page_permissions;
       .load_addr(XLEN'('h80000000)),
       .store_addr(XLEN'('h80001000)),
       .ptw_addr(XLEN'('h80002000)),
+      .ptw_check_active(1'b0),
       .load_size_m1(4'd3),
       .store_walu(8'h0f),
       .cmo_mgmt(1'b0),

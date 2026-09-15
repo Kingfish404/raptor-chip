@@ -75,6 +75,8 @@ module tb_bus_l1d_rlast;
 
     l1d_bus.araddr = 32'h8000_1000;
     l1d_bus.rstrb = 8'h0f;
+    l1d_bus.arlen = 0;
+    l1d_bus.noallocate = 0;
     l1d_bus.rpbmt = 2'b00;
     l1d_bus.wpbmt = 2'b00;
     l1d_bus.arvalid = 1'b1;

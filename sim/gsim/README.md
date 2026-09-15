@@ -40,7 +40,10 @@ If you need OS-level workloads on raptor-chip, run them on
 | `RAPT_RENAME_WIDTH`       | `renameWidth`                                    |
 | `RAPT_DISPATCH_WIDTH`     | `dispatchWidth`; also approximates global `issueWidth`/`wbWidth` |
 | `RAPT_COMMIT_WIDTH`       | `commitWidth`                                    |
+| `RAPT_RIQ_SIZE`           | `fetchQueueSize` (fetch→rename decoupling queue; gem5 has no IIQ analogue) |
+| `RAPT_BPU_DIRP_*`         | selects the gem5 conditional predictor by default: TAGE→`tage` (RTL TAGE geometry), GSHARE→`gshare`, BIMODAL→`local`, STATIC→`local` (approximation) |
 | `RAPT_INTEGER_ISSUE_PORTS`| `IntALU.count` with `--rtl-execution-resources`  |
+| `RAPT_M_FAST`             | `IntMult` opLat=1 (pipelined MUL) with `--rtl-execution-resources` |
 | `RAPT_INTEGER_SYSTEM_PORT`| Validated against the RTL port count; physical index has no gem5 O3 analogue |
 | `RAPT_BTB_SIZE/WAYS`      | `SimpleBTB(numEntries, associativity)`           |
 | `RAPT_PHT_SIZE`           | `BiModeBP(globalPredictorSize, choicePredictorSize)` |
@@ -48,9 +51,15 @@ If you need OS-level workloads on raptor-chip, run them on
 
 L1I stores 32-bit instruction words; L1D stores XLEN-bit data words. Current
 presets derive both from `RAPT_CACHE_LINE_BYTES`, so byte capacities stay
-constant across RV32/RV64. Default lines are 64 B, L1I is 4 KiB and L1D is
-2 KiB; large has 32 KiB L1I and 8 KiB L1D. The model uses the larger derived
-line size as gem5's global cache line size for historical unequal-line presets.
+constant across RV32/RV64. Default lines are 64 B with 16 KiB L1I (64 sets ×
+4-way) and 16 KiB L1D (64 sets × 4-way); `large` has 32 KiB L1I (1-way) and
+8 KiB L1D (2-way); `small` 512 B/256 B and `middle` 256 B/256 B on 16 B lines.
+The model uses the larger derived line size as gem5's global cache line size
+for historical unequal-line presets. gem5's default L1 MSHR count is 1,
+modelling the RTL's single-outstanding-miss FSM; hits during a refill
+approximate `RAPT_LSU_HUM`'s best-effort B channel (a second concurrent *miss*
+is not modelled). `RAPT_L1I_REFILL_WORDS` (32 B sector refill) has no gem5
+cache-level analogue — gem5 refills a full line on a miss.
 The FP register count is a gem5 OoO modeling choice: RTL has a separate
 32 × 64-bit architectural FPR bank, not a renamed FP register file.
 RV64 DSE results produced before the XLEN-aware cache fix used half the
@@ -66,7 +75,18 @@ approximation rather than a structural equivalence.
 ```sh
 # 1. Build gem5 RISC-V (one time)
 cd <gem5-root>
-scons build/RISCV/gem5.opt -j$(sysctl -n hw.ncpu)
+scons build/RISCV/gem5.opt -j$(nproc)
+
+# Host notes (Linux):
+#   - If the host's default python3 lacks a shared library, force the
+#     embedded interpreter: env PYTHON_CONFIG=python3.12-config scons ...
+#   - Keep the system protoc on PATH (a Homebrew/standalone protoc may emit
+#     .pb.h requiring newer protobuf headers than the installed libprotobuf).
+#   - Bare-metal Embench stubs call times(NULL); the SE model needs a
+#     one-line fix in src/sim/syscall_emul.hh (timesFunc returns -EFAULT on
+#     a NULL buffer) or Embench runs panic with a page-table fault at vaddr 0.
+#     Linux behaves identically (EFAULT), so the patch only removes a
+#     guest-programming-error panic, not a modelling difference.
 
 # 2. Build the raptor-chip bare-metal ELF you want to run
 cd <raptor-chip>/app
@@ -78,9 +98,13 @@ make embench                  # all of Embench-IoT
 ## Configuration precedence
 
 The default Makefile run derives widths, capacities and execution-resource
-counts from the selected preset without a JSON overlay. Simulator-only
-settings retain script defaults (including the local predictor); select
-`BP=tage` explicitly for a TAGE experiment.
+counts from the selected preset without a JSON overlay. The conditional
+branch predictor follows the preset's `RAPT_BPU_DIRP_*` define (default
+preset: RTL-flavoured TAGE). `RTL_EXEC=1` (default) matches the RTL
+execution resources: `RAPT_INTEGER_ISSUE_PORTS` integer ALUs, one MULDIV
+(`RAPT_M_FAST` timing), one load/store request port. Set `RTL_EXEC=0` to use
+gem5's broader default FUPool; select `BP=local` explicitly for a bimodal
+experiment.
 Use `JSON_CONFIG=dse-config.json` explicitly for the provided TAGE study
 configuration; its cache, width and window settings override the preset.
 `SET` overrides are applied after JSON. Output names retain the preset and
@@ -110,11 +134,17 @@ make embench-matmult-int
 # AM-Kernels algorithms. Its optional workload argument is test/train/ref/huge.
 make microbench
 
+# Microarchitecture grid search (rob/iq/sq/cache/width/bpu x CoreMark + Embench)
+# Writes sim/build/gsim/results/grid-*.csv; analyse with sweet_spot.py.
+make grid
+make grid GRID_ARGS="--resume"            # reuse existing stats.txt
+make grid GRID_ARGS="--phase rob"         # one axis only
+
 # Branch-predictor study: RTL-size TAGE, equal-budget gshare,
 # a practical 8 KiB TAGE-SC point, and a 64 KiB upper bound
 make bp-study
 
-# In-order TimingSimpleCPU baseline (pure ISA throughput, no uarch)
+# In-order TimingSimpleCPU / functional AtomicSimpleCPU baselines
 make timing BENCH=coremark
 
 # Sweep small/default/large × {timing, o3} for one workload
@@ -165,6 +195,7 @@ build/RISCV/gem5.opt \
 Useful flags:
 
 * `--config-svh <path>` — point at a custom `rapt_config.svh` (skips `--preset`).
+* `--cpu timing|atomic` — in-order timing / functional no-cache baselines for triage.
 * `--no-l2` — drop the model L2; L1s connect directly to membus
   (closer to raptor-chip's RTL today, which has no L2).
 * `--rtl-execution-resources` — use the configured integer-ALU port count,
@@ -204,10 +235,10 @@ Useful flags:
 * RTL IOQ schedules loads, stores and atomics, with conditional out-of-order
   load issue; its capacity is folded into gem5's unified IQ.
   An IOQ-specific stall in raptor will not appear in gem5 stats.
-* `RAPT_M_FAST` is parsed as metadata; the runner does not apply it to
-  gem5 operation latency. The optional RTL-resource pool uses gem5's
-  `IntMultDiv` timing defaults. RTL multiply/divide timing and queue behavior
-  require separate calibration; this knob does not establish cycle parity.
+* `RAPT_M_FAST` is parsed as metadata; with `--rtl-execution-resources` it
+  sets the MULDIV unit's `IntMult` opLat to 1 (pipelined, matching the RTL).
+  Division keeps gem5's unpipelined 20-cycle latency, an approximation of the
+  RTL's iterative divider; queue behaviour requires separate calibration.
 * RV32 SE is supported by gem5 but is less battle-tested than RV64; if
   you hit a decoder gap, retry with `--rv64` after building the rv64
   ELF (`make -C app coremark ISA64=1`).

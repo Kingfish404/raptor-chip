@@ -5,7 +5,9 @@ DTM and debug module. No pipeline or peripheral is replaced by a model. The
 second top instantiates `rng_chip` and the real board-side `rnp2axi` bridge,
 so transactions cross the RV32 package's RNP pins.
 
-Latest completed validation: [396 positive and 20 negative checks](RESULTS.md).
+Run the matrix below for the current source revision. Per-run counts, logs and
+source fingerprints belong to the generated regression report; historical
+results do not certify a later working tree.
 
 ## Run
 

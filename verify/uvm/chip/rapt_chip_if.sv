@@ -1,6 +1,8 @@
 `include "rapt.svh"
 `include "rapt_soc.svh"
-interface rapt_chip_if(input bit clock);
+interface rapt_chip_if (
+    input bit clock
+);
   localparam int X = `RAPT_XLEN;
   logic reset = 1;
   logic [3:0] arcache, awcache, arid, rid, awid, bid;

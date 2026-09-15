@@ -35,7 +35,7 @@ module rapt_vpu_fma #(
   logic [63:0] value;
   logic [4:0] exceptions;
   always_comb begin
-    case ({
+    unique case ({
       negate_product, negate_addend
     })
       0: op = Double ? `RAPT_FP_OP_FMADD_D : `RAPT_FP_OP_FMADD_S;

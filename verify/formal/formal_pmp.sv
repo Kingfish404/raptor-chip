@@ -157,19 +157,19 @@ module formal_pmp #(
     end
 `ifdef RAPT_PMP_PROVE_RANGES
     if (RangeIndex < 0) begin
-      assert (dut.entry_overlap == ref_entry_any);
-      assert (dut.entry_contains_all == ref_entry_all);
+      assert (dut.check_permissions.entry_overlap == ref_entry_any);
+      assert (dut.check_permissions.entry_contains_all == ref_entry_all);
     end else begin
-      assert (dut.entry_overlap[RangeIndex] == ref_entry_any[RangeIndex]);
-      assert (dut.entry_contains_all[RangeIndex] == ref_entry_all[RangeIndex]);
+      assert (dut.check_permissions.entry_overlap[RangeIndex] == ref_entry_any[RangeIndex]);
+      assert (dut.check_permissions.entry_contains_all[RangeIndex] == ref_entry_all[RangeIndex]);
     end
 `else
 `ifdef RAPT_PMP_USE_RANGE_LEMMAS
     // Valid only as a composed proof with PROVE_RANGES passing under the
     // same configuration and input assumptions. These are not new platform
     // constraints: they are the separately proved interval/byte identities.
-    assume (dut.entry_overlap == ref_entry_any);
-    assume (dut.entry_contains_all == ref_entry_all);
+    assume (dut.check_permissions.entry_overlap == ref_entry_any);
+    assume (dut.check_permissions.entry_contains_all == ref_entry_all);
 `endif
     assert (dut_fault_lo == ref_fault_lo);
     assert (dut_fault == ref_fault);

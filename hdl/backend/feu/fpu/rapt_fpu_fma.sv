@@ -27,8 +27,8 @@ module rapt_fpu_prefix_adder #(
 );
   localparam int LEVELS = $clog2(WIDTH);
   wire [WIDTH-1:0] bit_propagate;
-  wire [WIDTH-1:0] prefix_generate[0:LEVELS];
-  wire [WIDTH-1:0] prefix_propagate[0:LEVELS];
+  wire [WIDTH-1:0] prefix_generate[LEVELS+1];
+  wire [WIDTH-1:0] prefix_propagate[LEVELS+1];
 
   assign bit_propagate = lhs ^ rhs;
   assign prefix_generate[0] = lhs & rhs;
@@ -683,8 +683,8 @@ module rapt_fpu_fma_pipeline #(
       s3_valid_q <= 1'b0;
       s4_valid_q <= 1'b0;
       s5_valid_q <= 1'b0;
-      result_q <= '0;
-      flags_q <= '0;
+      // Result/flags are meaningful only with result_valid; keep payload
+      // unreset so reset/flush only cancels the valid pipeline.
     end else begin
       s5_valid_q <= s4_valid_q;
       s4_valid_q <= s3_valid_q;

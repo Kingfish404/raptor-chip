@@ -272,7 +272,7 @@ class RaptorAlinxAXAU15SoC(SoCCore):
             mig_ready_sys = Signal()
             self.specials += MultiReg(self.ddr4_mig.init_done, mig_ready_sys, "sys")
             self.cpu.cpu_params["i_reset"] = (
-                ResetSignal("sys") | self.cpu.reset | self.cpu.dbg_reset
+                ResetSignal("sys") | self.cpu.reset
                 | ~mig_ready_sys
             )
 

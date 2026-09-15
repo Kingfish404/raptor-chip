@@ -31,7 +31,8 @@ module rapt_ieu_pipe_alu #(
   );
 
   logic [XLEN-1:0] jump_target;
-  assign jump_target = ((iss.uop.execute.branch.indirect ? iss.op1 : iss.uop.pc) + iss.uop.imm) & ~'b1;
+  assign jump_target = ((iss.uop.execute.branch.indirect ? iss.op1 : iss.uop.pc)
+      + iss.uop.imm) & ~'b1;
 
   // === Writeback ===
   assign wb_alu.valid = iss.valid;

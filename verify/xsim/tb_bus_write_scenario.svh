@@ -2,7 +2,7 @@ task automatic run_bus_write_scenario;
   begin
     l1d_bus.awaddr = 32'h8000_2000;
     l1d_bus.wdata = 32'h1122_3344;
-    l1d_bus.wstrb = 8'h0f;
+    l1d_bus.wstrb = 8'h0f; l1d_bus.wzero = 0;
     l1d_bus.awvalid = 1'b1;
     l1d_bus.wvalid = 1'b1;
 
@@ -53,7 +53,7 @@ task automatic run_bus_write_scenario;
 
     l1d_bus.awaddr = 32'h8000_2004;
     l1d_bus.wdata = 32'hc4aa_4680;
-    l1d_bus.wstrb = 8'h0f;
+    l1d_bus.wstrb = 8'h0f; l1d_bus.wzero = 0;
     l1d_bus.awvalid = 1'b1;
     l1d_bus.wvalid = 1'b1;
     axi.awready = 1'b1;

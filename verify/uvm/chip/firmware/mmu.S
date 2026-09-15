@@ -53,6 +53,10 @@ test_main:
   csrs mstatus,a0
   li a2,0x40000000
   lw a3,0(a2)
+  .word 0x0016200f // cbo.clean (a2), checked through MPRV translation
+  .word 0x0006200f // cbo.inval (a2)
+  .word 0x0026200f // cbo.flush (a2)
+  lw a3,0(a2)
   li a0,0x20000
   csrc mstatus,a0
   li a4,0x12345678
@@ -65,6 +69,10 @@ test_main:
   sfence.vma
   li a0,0x20800
   csrs mstatus,a0
+  lw a3,0(a2)
+  .word 0x0016200f // cbo.clean (a2), checked through MPRV translation
+  .word 0x0006200f // cbo.inval (a2)
+  .word 0x0026200f // cbo.flush (a2)
   lw a3,0(a2)
   li a0,0x20000
   csrc mstatus,a0

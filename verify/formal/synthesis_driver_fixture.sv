@@ -1,6 +1,8 @@
 // Tool-flow regression fixture, not production RTL.
 module synthesis_driver_good (
-    input logic clock, reset, data,
+    input logic clock,
+    reset,
+    data,
     output logic result
 );
   always_ff @(posedge clock)
@@ -9,7 +11,9 @@ module synthesis_driver_good (
 endmodule
 
 module synthesis_driver_missing (
-    input logic clock, reset, data,
+    input logic clock,
+    reset,
+    data,
     output wire result
 );
   // Deliberately missing a functional output driver. The production synthesis

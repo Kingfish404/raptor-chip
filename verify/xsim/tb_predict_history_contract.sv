@@ -124,6 +124,8 @@ module tb_predict_history_pipeline;
     rou_cmu.jren = 0;
     rou_cmu.atomic_sc = 0;
     rou_cmu.fence_time = 0;
+    rou_cmu.cbo_inval = 0;
+    rou_cmu.cbo_block = '0;
     rou_cmu.fence_i = 0;
     rou_cmu.flush_pipe = 0;
     rou_cmu.flush_redirect = 0;
@@ -215,6 +217,8 @@ module tb_predict_history_pipeline;
     rou_cmu.fence_time = 1;
     tick(1);
     rou_cmu.fence_time = 0;
+    rou_cmu.cbo_inval = 0;
+    rou_cmu.cbo_block = '0;
     check(
         bpu.gshare == 0 && bpu.phr == 0 && bpu.rgshare == 0 && bpu.rphr == 0
         && bpu.u_history.decode_ghr == 0,

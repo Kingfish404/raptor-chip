@@ -14,7 +14,7 @@
 
 Welcome to the Raptor Project! Here is an all-in-one repository for exploring, developing, optimizing, and verifying a RISC-V core. Aiming at high quality, full Linux support, FPGA implementation, and ASIC readiness.
 
-Core description: **Super-scalar, out-of-order RISC-V core** with register renaming, a 64-entry ROB, six execution paths fed by five scheduler classes over five unified writeback CDB ports, TAGE branch prediction, and a unified speculative/committed store queue. The scalar F/D unit has a dedicated FPQ and architectural 32 x 64-bit FPR bank, and shares CDB0 with the ALU-CSR pipe. The RTL is described by `SystemVerilog` with `Chisel` (`Scala`) used only for decoder generation. Features Sv32 (RV32) / Sv39 (RV64) virtual memory (MMU/TLB/PTW), 16-entry PMP (TOR/NA4/NAPOT), LR/SC + AMO atomics, compressed instructions (RVC), CLINT/PLIC interrupts, a RISC-V Debug Module / JTAG DTM bring-up path, and Linux v6.18.x flows via OpenSBI. Supports configurable **RV32** and **RV64** modes via compile-time switch.
+Core description: **Super-scalar, out-of-order RISC-V core** with register renaming, a 32-entry ROB, six execution paths fed by five scheduler classes over five unified writeback CDB ports, TAGE branch prediction, and a unified speculative/committed store queue. The scalar F/D unit has a dedicated FPQ and architectural 32 x 64-bit FPR bank, and shares CDB0 with the ALU-CSR pipe. The RTL is described by `SystemVerilog` with `Chisel` (`Scala`) used only for decoder generation. Features Sv32 (RV32) / Sv39 (RV64) virtual memory (MMU/TLB/PTW), 16-entry PMP (TOR/NA4/NAPOT), LR/SC + AMO atomics, compressed instructions (RVC), CLINT/PLIC interrupts, a RISC-V Debug Module / JTAG DTM bring-up path, and Linux v6.18.x flows via OpenSBI. Supports configurable **RV32** and **RV64** modes via compile-time switch.
 
 ```
 Core name:  raptor-falcon (M/S/U + Sv32/Sv39 + PMP, Linux-capable)
@@ -24,12 +24,23 @@ MMU:        riscv,sv32 (RV32) / riscv,sv39 (RV64) / riscv,none (Bare)
 PMP:        16 entries, TOR / NA4 / NAPOT, L-bit lockable
 Interrupts: CLINT (mtime, mtimecmp, msip) + PLIC (31 sources, M/S contexts)
 Profiles:   RVI20U32; RVA22S64 supported (default config, RV64)
+RV64/default extensions: Zkt, Svinval, Svpbmt (required by RVA22S64)
 
 Bus Interface:  AXI4, XLEN-bit data/addr, 4-bit ID; burst-capable reads (up to 8 outstanding), one outstanding single-beat write with independent AW/W handshakes
-Default uarch: dual issue / dual commit, ROB=64, ALQ=8 (2 issue ports), BRQ=4, MDQ=4, FPQ=4, IOQ=8, SQ=16, integer PRF=128, FPR=32 x 64-bit, L1I=4 KiB, L1D=2 KiB, 64 B cache lines, optional L2 passthrough/cache stage
+Default uarch: dual issue / dual commit, ROB=32, ALQ=8 (2 issue ports), BRQ=4, MDQ=4, FPQ=4, IOQ=8, SQ=16, integer PRF=128, FPR=32 x 64-bit, L1I=16 KiB, L1D=16 KiB (both 4-way), 64 B cache lines, optional L2 passthrough/cache stage
 
 Verifying:  RISCOF (riscv-arch-test), full-core F/D directed/differential tests, RVFI, SVA
 ```
+
+The shared RV32/RV64 ISA list above is not a complete profile inventory.
+For RV64/default, Zkt provides data-independent execution latency for the
+instructions covered by its specification; it does not imply AES/SHA instruction
+support. Svinval implements translation invalidation using a conservative full
+SFENCE.VMA operation, and Svpbmt carries page-based memory types through the
+Sv39 translation, cache, and bus paths. The three extensions are declared in the
+[RV64 supervisor verification configuration](verify/riscof/raptor-rv64s/raptor-rv64s.yaml).
+Validation results apply to their recorded source snapshots and configurations;
+they do not automatically transfer to later RTL changes or other presets.
 
 The F/D/Zfhmin implementation covers scalar floating-point load/store, arithmetic,
 FMA, divide/square-root, conversion, comparison/classification, rounding modes,
@@ -57,10 +68,10 @@ flowchart TD
     RNU["RNU (RenameWidth slots, integrated MAP/RAT/free bitmap + checkpoints)"]
   end
   subgraph BE["Backend (default dispatch/commit widths: 2/2)"]
-    ROU["ROU (UOQ + ROB 64)"]
+    ROU["ROU (UOQ + ROB 32)"]
     DPU{{"DPU dispatch router"}}
     IEU["IEU: ALQ 8 + BRQ 4 + MDQ 4"]
-    FEU["FEU: FPQ 4 + scalar F/D"]
+    FEU["FEU: FPQ 4 + scalar F/D/Zfhmin"]
     LSU["LSU: IOQ 8 + SQ 16"]
     CDB(("CDB ×5"))
     PRF["PRF (2 × RenameWidth reads, CompletionPorts writes; default 4R/5W)"]
@@ -71,12 +82,12 @@ flowchart TD
   subgraph MEM["Memory Subsystem"]
     direction TD
     subgraph IMEM["I-side · IF0 (0-bubble seq fetch)"]
-      L1I["L1I 4 KiB 2-way (banked SRAM)"]
+      L1I["L1I 16 KiB 4-way (banked SRAM)"]
       ITLB["ITLB (default 16 entries, FA)"]
       IPTW["IPTW (Sv32 2-lvl / Sv39 3-lvl)"]
     end
     subgraph DMEM["D-side · IS/EX-WB (2-cyc hit, 3-cyc load-use)"]
-      L1D["L1D 2 KiB 2-way (banked SRAM, VIPT, write-through)"]
+      L1D["L1D 16 KiB 4-way (banked SRAM, VIPT, write-through)"]
       DTLB["DTLB (default 16 entries, replicated load/store views)"]
       DPTW["DPTW (Sv32/Sv39, Svade)"]
     end
@@ -262,6 +273,20 @@ make verify-all
 
 ### 7. FPGA
 
+For **MLK-CU08 RV32/RV64 Linux with Ethernet and BIOS `netboot`**, follow the
+[paired build/load quick start](fpga/litex/README.md#cu08-rv32rv64-netboot-build-and-load)
+and then [TFTP bundle preparation](fpga/litex/NETBOOT.md).
+Ethernet is **disabled by default** (`WITH_ETHERNET=0`), including Linux CPU
+variants. A plain build therefore does not provide BIOS `netboot`. Build and
+load must use the same Ethernet settings and output directory; `fpga-load`
+loads an existing bitstream and does not rebuild it.
+
+For the fixed current CU08 netboot configuration, run from `fpga/litex`:
+`make fpga-netboot-rv32-build`, then `make fpga-netboot-rv32-load`.
+Replace `rv32` with `rv64` for RV64. These paired targets preserve the same
+Ethernet/CPU settings and use isolated output directories; see the linked
+guide for prerequisites, payload paths and TFTP setup.
+
 ```shell
 # --- LiteX SoC ---
 cd fpga/litex
@@ -270,7 +295,7 @@ make pack                           # pack RTL into single .sv
 make sim                            # Verilator sim with LiteX BIOS
 make coremark                       # build + run CoreMark in sim
 make embench                        # build + run all Embench-IoT benches
-make linux                          # build + run Linux payload in sim
+make linux32                        # build + run Linux payload in sim (make linux64 for RV64)
 
 # Tang Mega 138K Pro hardware flow
 make fpga-build                     # synth + P&R bitstream
@@ -279,9 +304,10 @@ make fpga-flash                     # write to external SPI flash
 make fpga-console                   # open UART console
 
 # MLK-CU07-KU15P OpenSBI/Linux over MIG DDR and BIOS serialboot
-make opensbi-fpga-e2e UART_PORT=/dev/ttyUSB0  # build/load, then standalone OpenSBI
-make linux-fpga-e2e UART_PORT=/dev/ttyUSB0    # build/load, then OpenSBI + Linux
-make linux-fpga-run UART_PORT=/dev/ttyUSB0    # reuse an existing bitstream
+make opensbi-fpga-rv32-e2e UART_PORT=/dev/ttyUSB0  # build/load, then standalone OpenSBI
+make linux-fpga-rv32-e2e UART_PORT=/dev/ttyUSB0    # build/load, then OpenSBI + Linux
+make linux-fpga-rv32-run UART_PORT=/dev/ttyUSB0    # reuse an existing bitstream
+# Replace rv32 with rv64 for the RV64 profile.
 # See fpga/litex/README.md for full target/variant matrix
 ```
 

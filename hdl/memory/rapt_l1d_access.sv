@@ -5,13 +5,17 @@
 // fault sequencing remain in rapt_l1d; no pipeline stages are added here.
 /* verilator lint_off PINCONNECTEMPTY */
 module rapt_l1d_access #(
-    parameter int XLEN = `RAPT_XLEN
+    parameter int XLEN = `RAPT_XLEN,
+    parameter bit ShareLoadWalk = 1'b0
 ) (
     csr_bcast_if.in csr_bcast,
     pmp_state_if.in pmp_state,
     input logic [XLEN-1:0] load_addr,
     input logic [XLEN-1:0] store_addr,
     input logic [XLEN-1:0] ptw_addr,
+    // With sharing enabled, the PTW owns the read checker while active.
+    // The controller must not consume the load result during that interval.
+    input logic ptw_check_active,
     input logic [3:0] load_size_m1,
     input logic [7:0] store_walu,
     input logic cmo_mgmt,
@@ -125,27 +129,33 @@ module rapt_l1d_access #(
 
   // Sv32 reads four-byte PTEs; Sv39 reads eight-byte PTEs. PMP must cover
   // the complete implicit read, including its upper half on RV64.
-  // Four independent checks share wiring, not an arbitrated execution unit.
-  localparam int LoadCheck = 0, StoreCheck = 1, CmoReadCheck = 2, WalkCheck = 3;
-  logic [XLEN-1:0] check_addr[4];
-  logic [3:0] check_size_m1[4];
-  logic [3:0] check_fault;
-  assign check_addr[LoadCheck] = load_addr;
+  // Store remains independent: its TLB-hit response may complete while a
+  // load or PTW is active. Load/PTW may share only with controller arbitration.
+  localparam int LoadCheck = 0, StoreCheck = 1, WalkCheck = 2;
+  localparam int NumChecks = ShareLoadWalk ? 2 : 3;
+  logic [XLEN-1:0] check_addr[3];
+  logic [3:0] check_size_m1[3];
+  logic [2:0] check_fault, check_read_fault;
+  assign check_addr[LoadCheck] = ShareLoadWalk && ptw_check_active ? ptw_addr : load_addr;
   assign check_addr[StoreCheck] = store_addr;
-  assign check_addr[CmoReadCheck] = store_addr;
   assign check_addr[WalkCheck] = ptw_addr;
-  assign check_size_m1[LoadCheck] = load_size_m1;
+  assign check_size_m1[LoadCheck] = ShareLoadWalk && ptw_check_active
+      ? 4'(XLEN / 8 - 1) : load_size_m1;
   assign check_size_m1[StoreCheck] = store_size_m1;
-  assign check_size_m1[CmoReadCheck] = store_size_m1;
   assign check_size_m1[WalkCheck] = 4'(XLEN / 8 - 1);
   assign pmp_load_fault = check_fault[LoadCheck];
   assign pmp_store_fault_mmu_w = check_fault[StoreCheck];
-  assign pmp_store_fault_mmu_r = check_fault[CmoReadCheck];
+  assign pmp_store_fault_mmu_r = check_read_fault[StoreCheck];
   assign pmp_ptw_fault = check_fault[WalkCheck]
       || !rapt_pkg::addr_ptw_readable(ptw_addr, 4'(XLEN / 8 - 1));
 
-  for (genvar port_idx = 0; port_idx < 4; port_idx++) begin : g_pmp
-    rapt_pmp #(
+  if (ShareLoadWalk) begin : g_shared_read
+    assign check_fault[WalkCheck] = check_fault[LoadCheck];
+    assign check_read_fault[WalkCheck] = check_read_fault[LoadCheck];
+  end
+
+  for (genvar port_idx = 0; port_idx < NumChecks; port_idx++) begin : g_pmp
+    rapt_pmp_permissions #(
         .XLEN(XLEN)
     ) u_check (
         .addr(check_addr[port_idx]),
@@ -165,7 +175,9 @@ module rapt_l1d_access #(
         .pmp_mode_na4(pmp_state.pmp_mode_na4),
         .pmp_mode_napot(pmp_state.pmp_mode_napot),
         .fault(check_fault[port_idx]),
-        .fault_lo_o()
+        .fault_lo_o(),
+        .fault_read_o(check_read_fault[port_idx]),
+        .fault_write_o()
     );
   end
 

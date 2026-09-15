@@ -1,5 +1,5 @@
 // Independent word banks let a fetch window straddle adjacent cache sets.
-// Every bank owns its accepted-read address/validity beside the 1RW SRAM.
+// Ways share the presented read address; each bank owns its read validity.
 module rapt_l1i_data #(
     parameter int SetBits = 4,
     parameter int WordBits = 2,
@@ -19,10 +19,18 @@ module rapt_l1i_data #(
     output logic [SetBits-1:0] read_index[Ways][Words],
     output logic read_valid[Ways][Words]
 );
+  // A write invalidates only its bank's read result. While read_valid is zero
+  // its index is irrelevant, so all ways can use one index register per word
+  // instead of keeping Ways copies with different write/hold enables.
+  logic [SetBits-1:0] read_index_q[Words];
+  for (genvar word_idx = 0; word_idx < Words; word_idx++) begin : g_read_index
+    always_ff @(posedge clock) read_index_q[word_idx] <= read_addr[word_idx];
+  end
   for (genvar way = 0; way < Ways; way++) begin : g_way
     for (genvar word_idx = 0; word_idx < Words; word_idx++) begin : g_word
       wire write_bank = write_valid && write_way == WayBits'(way)
                         && write_word == WordBits'(word_idx);
+      assign read_index[way][word_idx] = read_index_q[word_idx];
       rapt_sram_1rw #(
           .ADDR_WIDTH(SetBits),
           .DATA_WIDTH(32)
@@ -38,7 +46,6 @@ module rapt_l1i_data #(
       always_ff @(posedge clock) begin
         if (reset || write_bank) read_valid[way][word_idx] <= 1'b0;
         else begin
-          read_index[way][word_idx] <= read_addr[word_idx];
           read_valid[way][word_idx] <= 1'b1;
         end
       end

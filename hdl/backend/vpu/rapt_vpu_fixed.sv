@@ -22,7 +22,7 @@ module rapt_vpu_fixed (
     logic [127:0] low_mask;
     logic discarded, half, lower, increment;
     logic signed [127:0] q;
-    low_mask = (128'b1 << amount)-1'b1;
+    low_mask = (128'd1 << amount)-1'b1;
     q = v >>> amount;
     discarded = |(v & low_mask);
     half = amount != 0 && v[amount-1'b1];

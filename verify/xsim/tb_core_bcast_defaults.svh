@@ -11,6 +11,8 @@ task automatic init_cmu_bcast_defaults;
     cmu_bcast.ret = 1'b0;
     cmu_bcast.rvc = 1'b0;
     cmu_bcast.fence_time = 1'b0;
+    cmu_bcast.cbo_inval = 1'b0;
+    cmu_bcast.cbo_block = '0;
     cmu_bcast.fence_i = 1'b0;
     cmu_bcast.flush_pipe = 1'b0;
     cmu_bcast.flush_redirect = 1'b0;

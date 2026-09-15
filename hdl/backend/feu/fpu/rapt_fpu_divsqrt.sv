@@ -43,7 +43,7 @@ module rapt_fpu_divsqrt #(
     output logic        result_valid
 );
 
-  localparam int CNT_W = 7;
+  localparam int CntW = 7;
 
   typedef enum logic [0:0] {
     ST_IDLE = 1'b0,
@@ -51,7 +51,7 @@ module rapt_fpu_divsqrt #(
   } state_e;
 
   state_e           state_q;
-  logic [CNT_W-1:0] cnt_q;          // iterations remaining
+  logic [CntW-1:0] cnt_q;          // iterations remaining
   logic             do_divide_q;    // 1 = divide, 0 = sqrt
   logic             is_double_q;
   logic [2:0]       rm_q;
@@ -95,15 +95,15 @@ module rapt_fpu_divsqrt #(
   assign frac_b = src_is_double ? operand_b[51:0]
       : b_boxed ? {29'b0, operand_b[22:0]} : {29'b0, 23'h40_0000};
 
-  localparam logic [10:0] EXP_ALL1_DP = 11'h7ff;
-  localparam logic [10:0] EXP_ALL1_SP = 11'h0ff;
+  localparam logic [10:0] ExpAll1Dp = 11'h7ff;
+  localparam logic [10:0] ExpAll1Sp = 11'h0ff;
 
-  assign a_nan  = (exp_a == (src_is_double ? EXP_ALL1_DP : EXP_ALL1_SP)) && (frac_a != '0);
-  assign b_nan  = (exp_b == (src_is_double ? EXP_ALL1_DP : EXP_ALL1_SP)) && (frac_b != '0);
+  assign a_nan  = (exp_a == (src_is_double ? ExpAll1Dp : ExpAll1Sp)) && (frac_a != '0);
+  assign b_nan  = (exp_b == (src_is_double ? ExpAll1Dp : ExpAll1Sp)) && (frac_b != '0);
   assign a_snan = a_nan && !(src_is_double ? frac_a[51] : frac_a[22]);
   assign b_snan = b_nan && !(src_is_double ? frac_b[51] : frac_b[22]);
-  assign a_inf  = (exp_a == (src_is_double ? EXP_ALL1_DP : EXP_ALL1_SP)) && (frac_a == '0);
-  assign b_inf  = (exp_b == (src_is_double ? EXP_ALL1_DP : EXP_ALL1_SP)) && (frac_b == '0);
+  assign a_inf  = (exp_a == (src_is_double ? ExpAll1Dp : ExpAll1Sp)) && (frac_a == '0);
+  assign b_inf  = (exp_b == (src_is_double ? ExpAll1Dp : ExpAll1Sp)) && (frac_b == '0);
   assign a_zero = (exp_a == '0) && (frac_a == '0);
   assign b_zero = (exp_b == '0) && (frac_b == '0);
 
@@ -205,7 +205,7 @@ module rapt_fpu_divsqrt #(
   logic signed [13:0] exp_launch;
   logic [191:0] d_launch;
   logic [191:0] rem_launch;
-  logic [CNT_W-1:0] cnt_launch;
+  logic [CntW-1:0] cnt_launch;
 
   // Unbiased exponent of an input field (subnormal handled via adj).
   function automatic int unbias(input logic [10:0] e, input logic dbl, input int adj);
@@ -247,7 +247,7 @@ module rapt_fpu_divsqrt #(
       // -> 56 bits -> 55 fraction iterations; single p=24 -> 27 bits -> 26.
       d_launch   = 192'({11'b0, mb_n});
       rem_launch = 192'({11'b0, ma_n - mb_n});   // ma - d, in [0, d)
-      cnt_launch = CNT_W'(src_is_double ? 55 : 26);
+      cnt_launch = CntW'(src_is_double ? 55 : 26);
     end else begin
       // sqrt: exponent must be even. When odd, the radicand is ma*2 in [2,4).
       // That shift needs a 54-bit container (the implicit 1 moves to bit 53),
@@ -272,7 +272,7 @@ module rapt_fpu_divsqrt #(
         d_launch   = 192'(ma_sqrt) << 138;      // fixed-point radicand supply
         rem_launch = '0;                        // residual starts at 0
       end
-      cnt_launch = CNT_W'(src_is_double ? 56 : 27);
+      cnt_launch = CntW'(src_is_double ? 56 : 27);
     end
   end
 
@@ -542,13 +542,13 @@ module rapt_fpu_divsqrt #(
             d_q     <= sqrt_rad_n;
             sroot_q <= sqrt_root_n;
           end
-          if (cnt_q == CNT_W'(1)) begin
+          if (cnt_q == CntW'(1)) begin
             state_q  <= ST_IDLE;
             result_q <= final_result;
             flags_q  <= final_flags;
             done_q   <= 1'b1;
           end else begin
-            cnt_q <= cnt_q - CNT_W'(1);
+            cnt_q <= cnt_q - CntW'(1);
           end
         end
         default: state_q <= ST_IDLE;

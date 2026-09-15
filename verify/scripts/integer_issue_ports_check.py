@@ -17,8 +17,11 @@ SOURCES = [
     ROOT / "hdl/include/rapt.svh",
     ROOT / "hdl/rapt_pkg.sv",
     ROOT / "hdl/rapt_core.sv",
+    ROOT / "hdl/frontend/rapt_frontend.sv",
+    ROOT / "hdl/backend/rapt_backend.sv",
     ROOT / "hdl/backend/ieu/rapt_ieu.sv",
     ROOT / "hdl/backend/rapt_cdb_arb.sv",
+    ROOT / "hdl/backend/rapt_completion_stage.sv",
     ROOT / "hdl/backend/rapt_iq.sv",
     ROOT / "hdl/common/rapt_issue_select.sv",
 ]

@@ -39,6 +39,23 @@ int main(int argc,char**argv){
   const uint64_t centers32[]={0x38800000ULL,0x387fe000ULL,0x387ff000ULL,0x477fe000ULL,0x33000000ULL};
   for(int c=0;c<5;c++)for(int delta=-32;delta<=32;delta++)for(int sign=0;sign<2;sign++)
    check(uint64_t(int64_t((narrow?centers64:centers32)[c])+delta) | (sign?(narrow?0x8000000000000000ULL:0x80000000ULL):0),narrow,rm);
+  // Sweep every finite exponent across the normal/tiny/overflow boundaries.
+  // Include sparse and dense source subnormals: these may use a sticky-only
+  // implementation, but must retain the directed-rounding sign and UF/NX.
+  const int fraction_bits=narrow?52:23;
+  const uint64_t fraction_mask=(uint64_t(1)<<fraction_bits)-1;
+  const uint64_t sign_mask=uint64_t(1)<<(narrow?63:31);
+  for(int sign=0;sign<2;sign++) {
+   for(int bit=0;bit<fraction_bits;bit++) {
+    check((uint64_t(1)<<bit)|(sign?sign_mask:0),narrow,rm);
+    check(((uint64_t(1)<<(bit+1))-1)|(sign?sign_mask:0),narrow,rm);
+   }
+   for(int exponent=1;exponent<(narrow?2047:255);exponent++)
+    for(uint64_t fraction:{uint64_t(0),fraction_mask>>1,fraction_mask})
+     check((uint64_t(exponent)<<fraction_bits)|fraction|(sign?sign_mask:0),narrow,rm);
+   for(int i=0;i<2000;i++)
+    check((random64()&fraction_mask)|(sign?sign_mask:0),narrow,rm);
+  }
   for(int i=0;i<5000;i++)check(random64(),narrow,rm);
   std::printf("BUCKET narrow=%d rm=%d cases=%d\n",narrow,rm,total-before);
  }

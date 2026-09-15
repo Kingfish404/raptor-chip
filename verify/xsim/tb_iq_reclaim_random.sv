@@ -5,6 +5,7 @@ module tb_iq_reclaim_random #(
     parameter bit Rebalance = 0,
     parameter bit InOrder = 0,
     parameter bit CheckOperandIndependence = 0,
+    parameter bit ReclaimOnIssue = 1,
     parameter int Ports = rapt_pkg::IntegerIssuePorts
 );
   import rapt_pkg::*;
@@ -23,7 +24,7 @@ module tb_iq_reclaim_random #(
       .NumIssuePorts(Ports),
       .IN_ORDER_ISSUE(InOrder),
       .RebalancePorts(Rebalance),
-      .ReclaimOnIssue(1)
+      .ReclaimOnIssue(ReclaimOnIssue)
   ) dut (
       .cancel_valid(1'b0),
       .cancel_head('0),
@@ -53,7 +54,7 @@ module tb_iq_reclaim_random #(
         .NumIssuePorts(Ports),
         .IN_ORDER_ISSUE(InOrder),
         .RebalancePorts(Rebalance),
-        .ReclaimOnIssue(1)
+        .ReclaimOnIssue(ReclaimOnIssue)
     ) shadow (
         .cancel_valid(1'b0),
         .cancel_head('0),
@@ -221,7 +222,7 @@ module tb_iq_reclaim_random #(
           issued_per_port[p]++;
         end
       end
-      reusable = selected;
+      reusable = ReclaimOnIssue ? selected : '0;
       // The free identity contract prefers old free entries over issuing ones.
       for (int s = 0; s < DispatchWidth; s++) begin
         free_index = -1;
@@ -243,7 +244,7 @@ module tb_iq_reclaim_random #(
       end else begin
         for (int s = 0; s < DispatchWidth; s++)
         if (disp.accept[s] && model[disp.rs_idx[s]].valid) begin
-          assert (selected[disp.rs_idx[s]])
+          assert (ReclaimOnIssue && selected[disp.rs_idx[s]])
           else $fatal(1, "overwrote non-issuing resident");
           reclaims++;
         end
@@ -369,8 +370,9 @@ module tb_iq_reclaim_random #(
     disp.accept = '{default: 0};
     @(posedge clock);
     #2;
-    assert(issued_count>1000 && reclaimed_count>100 &&
-        ((Ports == 1 || Entries == 1 || DispatchWidth == 1) || multi_reclaimed>10) &&
+    assert(issued_count>1000 &&
+        (ReclaimOnIssue ? reclaimed_count>100 : reclaimed_count == 0) &&
+        (!ReclaimOnIssue || (Ports == 1 || Entries == 1 || DispatchWidth == 1) || multi_reclaimed>10) &&
         wake_count>100 && flush_count>20)
     else $fatal(1, "insufficient random lifecycle coverage");
     foreach (issued_per_port[p]) begin
@@ -379,7 +381,7 @@ module tb_iq_reclaim_random #(
       $display("COVER: issue port %0d issued=%0d", p, issued_per_port[p]);
     end
     if (Rebalance && !InOrder && Ports > 1) begin
-      assert (repair_count > 10 && repair_reclaim_cycles > 10)
+      assert (repair_count > 10 && (!ReclaimOnIssue || repair_reclaim_cycles > 10))
       else $fatal(1, "insufficient repair/reclaim overlap coverage");
     end
     if (InOrder && Ports == 1) begin

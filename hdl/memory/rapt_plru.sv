@@ -28,7 +28,7 @@ module rapt_plru #(
     output logic [NUMWAYS-1:0]   victim_way,
     input  logic [SETLEN-1:0]    cache_set,
     input  logic                 lru_write_en,
-    input  logic [SETLEN-1:0]    paddr_set,       // unused in this design; kept for CVW compatibility
+    input  logic [SETLEN-1:0]    paddr_set,  // unused here; kept for CVW compatibility
     input  logic                 invalidate_cache,
 `ifdef FORMAL
     input  logic                 invalidate_flush,

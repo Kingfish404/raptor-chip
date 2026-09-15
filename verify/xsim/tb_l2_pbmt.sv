@@ -158,7 +158,8 @@ module tb_l2_pbmt;
           end
           return_l2_downstream_b(2, error ? 2'b10 : 2'b00);
           for (int c = 0; c < 20 && !axi_s.bvalid; c++) tick(1);
-          check(axi_s.bvalid && axi_s.bresp == (error ? 2'b10 : 2'b00), "typed write lost downstream response");
+          check(axi_s.bvalid && axi_s.bresp == (error ? 2'b10 : 2'b00),
+                "typed write lost downstream response");
           axi_s.bready = 1;
           tick(1);
           axi_s.bready = 0;

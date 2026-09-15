@@ -18,7 +18,7 @@ task automatic init_bus_inputs;
     l1i_bus.araddr = '0;
     l1i_bus.arburst = 1'b0;
     l1i_bus.ar_ptw = 1'b0;
-    l1i_bus.rpbmt = 2'b00;
+    l1i_bus.rpbmt = 2'b00; l1i_bus.noallocate = 0;
     l1i_bus.awvalid = 1'b0;
     l1i_bus.awaddr = '0;
     l1i_bus.aw_ptw = 1'b0;
@@ -28,7 +28,7 @@ task automatic init_bus_inputs;
 
     l1d_bus.arvalid = 1'b0;
     l1d_bus.araddr = '0;
-    l1d_bus.rstrb = 8'h0f;
+    l1d_bus.rstrb = 8'h0f; l1d_bus.arlen = 0; l1d_bus.noallocate = 0;
     l1d_bus.rpbmt = 2'b00;
     l1d_bus.wpbmt = 2'b00;
     l1d_bus.ar_ptw = 1'b0;
@@ -37,7 +37,7 @@ task automatic init_bus_inputs;
     l1d_bus.aw_ptw = 1'b0;
     l1d_bus.wvalid = 1'b0;
     l1d_bus.wdata = '0;
-    l1d_bus.wstrb = '0;
+    l1d_bus.wstrb = '0; l1d_bus.wzero = 0;
 
     init_csr_bcast_defaults('0, '0, 1'b0);
     init_cmu_bcast_defaults();

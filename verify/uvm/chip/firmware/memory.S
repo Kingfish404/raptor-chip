@@ -103,5 +103,35 @@ test_main:
   ld a2,0(a0)
   CHECK a1,a2
 #endif
+  // Real decoded CBOs, with unaligned rs1 and older writes still in flight.
+  li a0,0x80030000
+  li a1,0x3456789
+  li a2,0
+5:
+  add a3,a0,a2
+  sw a1,0(a3)
+  addi a2,a2,4
+  li a4,128
+  blt a2,a4,5b
+  addi a0,a0,31
+  .word 0x0015200f // cbo.clean (a0)
+  .word 0x0005200f // cbo.inval (a0)
+  .word 0x0025200f // cbo.flush (a0)
+  addi a0,a0,-31
+  lw a2,0(a0)
+  CHECK a1,a2
+  addi a0,a0,63
+  .word 0x0045200f // cbo.zero (a0)
+  addi a0,a0,-63
+  li a2,0
+6:
+  add a3,a0,a2
+  lw a4,0(a3)
+  bnez a4,fail
+  lw a4,64(a3)
+  CHECK a1,a4
+  addi a2,a2,4
+  li a5,64
+  blt a2,a5,6b
   STAGE
   j pass

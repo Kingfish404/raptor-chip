@@ -150,8 +150,10 @@ package rapt_pkg;
   localparam int unsigned DispatchStopCount = 11;
   typedef logic [index_bits(DispatchStopCount)-1:0] dispatch_stop_t;
   localparam int unsigned QueueIndexBits = index_bits(
-      (CoreConfig.iq_entries > CoreConfig.ioq_entries ? CoreConfig.iq_entries : CoreConfig.ioq_entries) > 4
-      ? (CoreConfig.iq_entries > CoreConfig.ioq_entries ? CoreConfig.iq_entries : CoreConfig.ioq_entries) : 4
+      (CoreConfig.iq_entries > CoreConfig.ioq_entries ? CoreConfig.iq_entries
+          : CoreConfig.ioq_entries) > 4
+      ? (CoreConfig.iq_entries > CoreConfig.ioq_entries ? CoreConfig.iq_entries
+          : CoreConfig.ioq_entries) : 4
   );
   typedef logic [IntegerIssuePorts-1:0] integer_port_mask_t;
   function automatic integer_port_mask_t integer_system_port_mask();
@@ -244,7 +246,8 @@ package rapt_pkg;
     return (u.execute.int_op.alu[5:4] == 2'b01)
         && !u.execute.memory.store && !u.execute.memory.load && !u.execute.memory.atomic
         && !u.execute.sys.valid && !u.trap && !u.execute.sys.ecall && !u.execute.sys.ebreak
-        && !u.execute.sys.mret && !u.execute.sys.sret && !u.execute.sys.fence_i && !u.execute.sys.fence
+        && !u.execute.sys.mret && !u.execute.sys.sret && !u.execute.sys.fence_i
+        && !u.execute.sys.fence
         && !u.execute.branch.conditional && !u.execute.branch.jump && !u.execute.branch.indirect
         && (u.execute.sys.csr_csw == '0);
   endfunction
@@ -260,7 +263,8 @@ package rapt_pkg;
   // branch resolves on the Branch pipe as before, with trap info already in the
   // ROB from dispatch.)
   function automatic logic uop_requires_alu_csr(input rapt_pkg::uop_t u);
-    return u.execute.sys.valid || u.trap || u.execute.sys.ecall || u.execute.sys.ebreak || u.execute.sys.mret || u.execute.sys.sret || (u.execute.sys.csr_csw != '0);
+    return u.execute.sys.valid || u.trap || u.execute.sys.ecall || u.execute.sys.ebreak
+        || u.execute.sys.mret || u.execute.sys.sret || (u.execute.sys.csr_csw != '0);
   endfunction
   /* verilator lint_on UNUSEDSIGNAL */
   // Decode policy is centralized here, not replicated by queues or router.
@@ -347,6 +351,12 @@ package rapt_pkg;
   // implement an 8 KiB SRAM. Do not grant PMAs to the old 64 KiB decode tail.
   localparam logic [31:0] SramBase  = 32'h0f000000;
   localparam logic [31:0] SramBytes = 32'h00002000;
+  // Platform override; NPC and other boards retain their 256 MiB PMEM map.
+`ifdef RAPT_PMEM_BYTES
+  localparam logic [31:0] PmemBytes = `RAPT_PMEM_BYTES;
+`else
+  localparam logic [31:0] PmemBytes = 32'h10000000;
+`endif
   function automatic logic [XLENPkg-1:0] canonical_addr(input logic [XLENPkg-1:0] addr);
     return (XLENPkg == 64) ? XLENPkg'({32'b0, addr[31:0]}) : addr;
   endfunction
@@ -373,7 +383,7 @@ package rapt_pkg;
     || (a >= XLENPkg'(SramBase) && a < XLENPkg'(SramBase + SramBytes))
     || (a >= 'h20000000 && a < 'h20010000)  // mrom (64KB)
     || (a >= 'h30000000 && a < 'h40000000)  // flash
-    || (a >= XLENPkg'(32'h80000000) && a < XLENPkg'(32'h90000000))  // psram (cacheable)
+    || (a >= XLENPkg'(32'h80000000) && a < XLENPkg'(32'h80000000 + PmemBytes))  // PMEM
     || (a >= XLENPkg'(32'ha0000000) && a < XLENPkg'(32'ha2000000))  // sdram
     );
   endfunction
@@ -437,7 +447,7 @@ package rapt_pkg;
     || (a >= 'h20000000 && a < 'h20010000)  // MROM
     || (a >= 'h21000000 && a < 'h21200000)  // VGA
     || (a >= 'h30000000 && a < 'h40000000)  // FLASH
-    || (a >= XLENPkg'(32'h80000000) && a < XLENPkg'(32'h90000000))  // PMEM / PSRAM
+    || (a >= XLENPkg'(32'h80000000) && a < XLENPkg'(32'h80000000 + PmemBytes))  // PMEM
     || (a >= XLENPkg'(32'ha0000000) && a < XLENPkg'(32'ha2000000))  // SDRAM
     || (a >= XLENPkg'(32'hf0008000) && a < XLENPkg'(32'hf0008100))  // LiteX SPI SD-card controller
     || (a >= XLENPkg'(32'hf0001000) && a < XLENPkg'(32'hf0001100))  // LiteX UART (egos HARDWARE)

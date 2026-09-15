@@ -1,0 +1,3 @@
+# Track the OOC flow together with its usage guide; generated outputs stay ignored.
+!/*.py
+!/*.tcl

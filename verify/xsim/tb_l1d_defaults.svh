@@ -14,7 +14,7 @@ task automatic init_l1d_inputs;
     lsu_l1d.ordered = 1'b1;
     lsu_l1d.waddr = '0;
     lsu_l1d.wpbmt = '0;
-    lsu_l1d.walu = '0;
+    lsu_l1d.walu = '0; lsu_l1d.wzero = 0;
     lsu_l1d.wvalid = 1'b0;
     lsu_l1d.wdata = '0;
 
@@ -57,7 +57,7 @@ task automatic init_l1d_inputs;
 
     rou_cmu.slot[0].valid = 1'b0;
     rou_cmu.atomic_sc = 1'b0;
-    rou_cmu.fence_time = 1'b0;
+    rou_cmu.fence_time = 1'b0; rou_cmu.cbo_inval = 0; rou_cmu.cbo_block = '0;
     rou_cmu.flush_pipe = 1'b0;
   end
 endtask

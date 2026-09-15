@@ -27,6 +27,11 @@ interface pmp_state_if #(
   logic [AW-1:0] pmp_raw_addr[N], pmp_napot_mask[N];
   logic [N-1:0] pmp_cfg_r, pmp_cfg_w, pmp_cfg_x, pmp_cfg_l;
   logic [N-1:0] pmp_mode_off, pmp_mode_tor, pmp_mode_na4, pmp_mode_napot;
+  modport in(
+      input pmp_raw_addr, pmp_napot_mask, pmp_cfg_r, pmp_cfg_w,
+            pmp_cfg_x, pmp_cfg_l, pmp_mode_off, pmp_mode_tor,
+            pmp_mode_na4, pmp_mode_napot
+  );
   modport out(
       output pmp_raw_addr, pmp_napot_mask, pmp_cfg_r, pmp_cfg_w,
               pmp_cfg_x, pmp_cfg_l, pmp_mode_off, pmp_mode_tor,

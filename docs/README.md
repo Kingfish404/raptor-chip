@@ -22,14 +22,14 @@ Repository: <https://github.com/Kingfish404/raptor-chip>
 | -------------------- | ------------------------------------------------------------------------------------------------------- |
 | ISA                  | `rv32/64imafdc_zba_zbb_zbs_zfhmin_zicbom_zicbop_zicboz_zicntr_zicond_zicsr_zifencei_zihintntl_zihintpause_zihpm_zimop_zca_zcb_zcmop` |
 | Privilege modes      | M, S, U                                                                                                 |
-| MMU                  | Sv32 (RV32) / Sv39 PTW path (RV64 xv6 bring-up) / Bare                                                  |
+| MMU                  | Sv32 (RV32) / Sv39 (RV64) / Bare                                                                        |
 | Interrupts           | CLINT (`mtime`, `mtimecmp`, `msip`) + PLIC (31 sources, M/S contexts)                                   |
 | Ordered widths       | Decode 2 / Rename 2 / Dispatch 2 / Commit 2 by default; independently parameterized                    |
-| Integer execution    | 2 physical ALQ/ALU ports by default; count and CSR/system-capable port independently parameterized      |
-| ROB / RS / IOQ / SQ  | 64 / 8 / 8 / 16                                                                                         |
+| Integer execution    | 2 physical integer issue/ALU ports by default; count and CSR/system-capable port independently parameterized        |
+| ROB / RS / IOQ / SQ  | 32 / 8 / 8 / 16                                                                                         |
 | Register state       | 128-entry renamed integer PRF + separate 32 x 64-bit architectural FPR bank                            |
 | BPU                  | TAGE direction predictor + 2-way BTB + 4-entry RSB                                                      |
-| L1I / L1D            | 4 KiB 2-way L1I / 2 KiB 2-way write-through L1D, banked SRAM, 64 B lines                                |
+| L1I / L1D            | default RV32/RV64: 16 KiB 4-way L1I / 16 KiB 4-way write-through L1D, banked SRAM, 64 B lines             |
 | L2                   | Optional 16 KiB direct-mapped unified cache; default config disables it as passthrough                  |
 | Bus                  | AXI4, XLEN-bit data/addr, 4-bit ID; up to 8 reads, one single-beat write                                |
 | Debug                | RISC-V Debug Module / JTAG DTM bring-up ports at cluster top                                            |
@@ -67,6 +67,7 @@ for detailed numbers and the change history.
 - [Performance Iterations](./perf-iterations.md) — IPC history per commit.
 - [Ecosystem](./ecosystem.md) — simulators, SoC memory maps, FPGA, tools.
 - [Linux Kernel Boot](./linux_kernel.md) — OpenSBI + Linux on NEMU / NPC.
+- [Standalone VPU](./vpu.md) — RVV 1.0 component delivery; not yet integrated into the scalar core.
 - [Reference](./REFERENCE.md) — AXI4, PPA references.
 
 ## Repository Layout

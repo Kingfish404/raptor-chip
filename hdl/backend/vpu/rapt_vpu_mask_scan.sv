@@ -5,9 +5,9 @@
 // One source byte (and at most one predicate byte) is fetched per eight bits.
 module rapt_vpu_mask_scan #(
     parameter int XLEN=64,
-    VLEN=128,
+    parameter int VLEN=128,
     parameter int AddrBits=$clog2(32*VLEN/8),
-    IndexBits=$clog2(VLEN)+1
+    parameter int IndexBits=$clog2(VLEN)+1
 ) (
     input logic clock,
     reset,

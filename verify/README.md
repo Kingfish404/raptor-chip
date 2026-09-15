@@ -25,6 +25,82 @@ harnesses. Existing Make target names and output locations are preserved.
 
 ## Maintaining verification drivers
 
+`make -C verify verilator-btb-storage-rv32 verilator-btb-storage-rv64`
+checks two-way BTB storage against a transaction-level reference at three
+set counts, including the default and a non-power-of-two depth. It exercises
+simultaneous reads/writes, updates while the read address is held, matching
+and missing type-only writes, LRU replacement, and reset/init priority.
+The read latency and write-visible behavior must remain unchanged when the
+payload arrays infer distributed RAM. These are behavioral checks, not a
+guarantee of RAM inference or whole-chip FPGA timing.
+
+Binary16 conversion checks use `make -C verify/xsim/fpu/half run flush`.
+Use separate absolute `BUILD_DIR` paths with `XLEN=32` and `XLEN=64` to
+avoid stale tool-version caches. `run-softfloat SOFTFLOAT_DIR=/absolute/path`
+expects `include/softfloat.h` and a built `softfloat.a` in that directory.
+The reference test covers five rounding modes, every finite source exponent,
+sparse/dense and random source subnormals, normal/subnormal rounding boundaries,
+overflow and exception flags. These are component checks, not full-core or
+FPGA timing acceptance.
+
+`make -C verify verilator-completion-stage-rv32 verilator-completion-stage-rv64`
+checks the accepted-completion register with distinct full-width packets on
+every port, sustained traffic, bubbles, repeated flushes and midstream resets.
+It also exercises each instance's packet-history assertion. These local checks
+do not replace full-core fast-load/FP/recovery differential tests or FPGA STA.
+
+`make -C verify verilator-cbo-set-rv32 verilator-cbo-set-rv64`
+checks CBO set scope across every resident word/way, VA page aliases, pending
+refill cancellation, and retained global maintenance. Repeat with
+`XSIM_RAPT_CONFIG=small` to check a 64-byte CBO spanning four 16-byte cache lines.
+`verilator-cbo-tlb-rv32` / `verilator-cbo-tlb-rv64` use real Sv32/Sv39 PTW fills
+and verify that CBO preserves both DTLB replicas. The ROU dual-commit tests also
+cover CBO SQ drain, completion generation, fault/wrong-path suppression and ZERO
+retirement; UVM `memory` and `mmu` exercise decoded CBOs through the complete core.
+
+`make -C verify verilator-ifu-response-stage-rv32 verilator-ifu-response-stage-rv64`
+checks response capture, sustained delivery, mixed 16/32-bit instruction streams,
+branch/history event conservation, randomized cache availability and downstream
+backpressure, fault metadata stability, and recovery with both IFU buffers full.
+It also checks that a buffered response blocks instruction IO authorization when
+successive dynamic requests have the same PC. The address-driven scoreboard
+supports width overrides and `RAPT_FETCH_RESPONSE_STAGE=0` comparisons.
+
+`make -C verify verilator-iq-deferred-reclaim-rv32 verilator-iq-deferred-reclaim-rv64`
+checks registered vacancy admission with randomized allocation, wakeup, issue and
+flush. It rejects same-edge reuse of a resident issue slot. The existing reclaim
+tests retain coverage of the optional `RAPT_IQ_RECLAIM_ON_ISSUE=1` mode.
+
+`make -C verify verilator-hum-request-stage-rv32 verilator-hum-request-stage-rv64`
+checks the registered hit-under-miss B request with the default preset
+(`XSIM_RAPT_CONFIG=default`, HUM enabled). It covers capture latency, payload and
+owner stability while an older candidate wakes, simultaneous A/B responses,
+flush/late response rejection, fallback after A completes, and FLD fallback
+through A with a full 64-bit FPR write. These are IOQ contract tests, not Linux
+or FPGA timing acceptance.
+
+Translated MMIO replay regressions use `make -C verify` with these RV32/RV64 pairs:
+
+- `verilator-ioq-mmio-retry-rv32` / `-rv64`: younger request deferral, older load
+  progress, and replay only after both IOQ and ROB heads reach the owner.
+- `verilator-translated-mmio-retry-rv32` / `-rv64`: real IOQ/SQ/L1D and Sv32/Sv39
+  walks, delayed responses, no speculative device read, and exactly one ordered
+  device read. The resulting `tb_translated_mmio_retry` binary also accepts
+  `+FLUSH_RETRY` and `+FLUSH_DEFERRED` for retry/flush collision and deferred-owner
+  cancellation checks.
+- `verilator-split-load-retry-rv32` / `-rv64`: retry at every LW/FLD split beat,
+  including RV32's third beat, an intervening aligned load, and fresh merged data.
+
+These tests cover the retry contract, not FPGA timing or Linux networking acceptance.
+
+`make -C verify verilator-l1i-access-sizes-rv32 verilator-l1i-access-sizes-rv64`
+compares the fixed 2/4-byte fetch permission checks and late result select with
+the original dynamic-size PMP interface. Each XLEN checks 20,000 cases with
+fixed seed `9e3779b9`, both lookahead settings, all SRAM-ready/instruction-length
+combinations, boundary addresses, fault ownership, and unchanged PTW/PTE checks.
+This is combinational equivalence regression coverage, not a timing benchmark
+or a formal proof. The targets are also part of `verilator-directed`.
+
 The PMA capability/span and instruction-word proofs use the subcommands
 `pma-capabilities`, `pma-span` and `ifetch-word-atomic` of
 `scripts/formal_contract.py` for execution and evidence reporting. Each entry
@@ -620,3 +696,69 @@ forms, all eight C.MOP.n controls, HINTs and representative legal arithmetic.
 Set `RVA22S64_TEST_CPPFLAGS=-DC_IMMEDIATE_TEST_PRIV=0`, `1`, or `3`, with the
 selected XLEN, frozen NPC and corrected reference. Zcmop remains an existing
 extra implementation; these checks do not make it mandatory for RVA22.
+
+### Optional CSR policy in the NEMU reference
+
+The current Raptor RTL traps accesses to the optional `mcountinhibit` CSR
+(`0x320`). `nemu/configs/riscv64_ref_defconfig` therefore disables
+`CONFIG_RV_MCOUNTINHIBIT` while retaining RVA22S64 and F/D. Standalone NEMU
+RVA22 presets retain their WARL-zero CSR default. Do not skip OpenSBI CSR
+probes in difftest to hide a mismatch between these policies.
+
+After `make config-nemu64-ref` from the repository root, check the reference:
+
+```sh
+python3 verify/scripts/nemu_rva22s64_check.py --xlen 64 \
+    --reference nemu/build/riscv64-nemu-interpreter-so \
+    --mcountinhibit absent --output /tmp/raptor-nemu64-csr-check.json
+```
+
+The absent-CSR checks include OpenSBI's exact `csrr a0, 0x320` probe and
+register/immediate CSR writes; they require precise illegal-instruction trap
+state, unchanged destinations and no instruction retirement. This reference
+regression does not substitute for a Linux boot on the DUT or FPGA.
+
+### Default 16 KiB four-way L1 capacity checks
+
+The default preset uses 64 sets × 64 B × 4 ways for each L1, with tree-PLRU
+replacement and a 4 KiB per-way span for Sv32/Sv39 page-offset indexing.
+
+```sh
+make -C verify verilator-l1i-16k-rv32 verilator-l1i-16k-rv64 \
+  verilator-l1d-16k-rv32 verilator-l1d-16k-rv64
+```
+
+These checks fill and read every word of each cache, require all four same-set
+lines to remain resident without external reads, introduce a fifth conflicting
+tag, check neighboring-set preservation, and invalidate/refill all sets. They
+require the default 16 KiB geometry and enable assertions with fatal warnings.
+The store-coherence test derives its conflict stride and working-set size from
+the selected preset, preserving eviction coverage as associativity changes.
+These are functional checks; FPGA utilization and timing require synthesis and
+implementation of the chosen SoC configuration.
+
+### Streaming cache transactions
+
+`make -C verify verilator-cache-stream-rv32 verilator-cache-stream-rv64
+verilator-cache-stream-l2-rv32 verilator-cache-stream-l2-rv64` runs the complete
+L1D/bus/AXI/optional-L2 path with randomized ready stalls. Tests check early
+critical-word completion, every resident word across full L1D capacity, CBO set
+colors and pending fills, 64-byte ZERO AW/W/B counts and delayed/error B,
+cancelled/error refills, and NA4/TOR/NAPOT boundary word fallback at both cache
+levels. Repeat with `XSIM_RAPT_CONFIG=small` to cover 16-byte lines.
+`verilator-cache-stream-rnp-rv32` checks the word-serial RNP bridge: the core
+keeps one burst owner, while the external RNP side uses one transaction per
+word and has no error-response encoding.
+
+Legacy word-response L1D fixtures explicitly select `.LineRefill(0)` to retain
+their individual-word and partial-line scenarios; production defaults to full
+line refill. The streaming tests above exercise the production default.
+
+The UVM runner accepts `--l2` with `--top axi`, separating build directories and
+result names from L2-disabled runs. For example:
+
+```sh
+python3 verify/uvm/run.py --uvm-home "$UVM_HOME" --preset default --xlen 64 \
+  --top axi --l2 --cases memory pipeline mmu ifetch_mmu pmp faults \
+  --seeds 42 --delays 0 7
+```

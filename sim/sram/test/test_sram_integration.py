@@ -40,6 +40,7 @@ SHAPES = [
     ("rapt_openram_1rw_2x32", 2, 32, 8),
     ("rapt_openram_1rw_8x32", 8, 32, 8),
     ("rapt_openram_1rw_32x32", 32, 32, 8),
+    ("rapt_openram_1rw_64x32", 64, 32, 8),
     ("rapt_openram_1rw_16x32", 16, 32, 8),
     ("rapt_openram_1rw_16x64", 16, 64, 8),
     ("rapt_openram_1rw_512x32", 512, 32, 8),
@@ -299,6 +300,22 @@ def test_cross_consistency():
     check(declared == expected,
           f"blackbox V module set == expected set "
           f"(extra={declared - expected}, missing={expected - declared})")
+
+    # Keep the build/library lists and the current default cache geometry in
+    # this contract: matching obsolete lists alone would miss a new bank size.
+    makefile = read(SRAM / "Makefile")
+    for name, depth, width, ws in SHAPES:
+        check(f"{name},{depth},{width},{ws}" in makefile,
+              f"{name}: registered for stub generation")
+        config = name.replace("rapt_openram_1rw_", "rapt_sram_") + "_1rw"
+        check(config in makefile, f"{name}: registered for macro/library generation")
+    preset = read(RAPTOR / "hdl/configs/default/rapt_config.svh")
+    sets = re.search(r"`define\s+RAPT_L1I_LEN\s+(\d+)", preset)
+    check(sets is not None, "default L1I set geometry found")
+    if sets:
+        depth = 1 << int(sets.group(1))
+        check(f"rapt_openram_1rw_{depth}x32" in expected,
+              f"default L1I {depth}x32 word banks have a macro")
 
 
 # ---------------------------------------------------------------------------

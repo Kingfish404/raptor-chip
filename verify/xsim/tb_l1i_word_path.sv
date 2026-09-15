@@ -115,6 +115,7 @@ module tb_l1i_word_path #(
       else expected = 'h80001000;
       check(l1i_bus.ar_ptw && l1i_bus.araddr == expected && l1i_bus.rpbmt == 0 && !l1i_bus.arburst,
             "wrong per-page PTE request");
+      l1i_bus.noallocate = 0;
       l1i_bus.rready = 1;
       tick(1);
       l1i_bus.rready = 0;
@@ -152,6 +153,7 @@ module tb_l1i_word_path #(
     pa = piece == 0 ? (XLEN'('h81000000) | (ifu_l1i.pc & XLEN'('hffc))) : XLEN'('h82000000);
     check(!l1i_bus.ar_ptw && !l1i_bus.arburst && l1i_bus.rpbmt == 2'(attr) && l1i_bus.araddr == pa,
           "word read expanded or lost physical/type ownership");
+    l1i_bus.noallocate = 0;
     l1i_bus.rready = 1;
     tick(1);
     l1i_bus.rready=0;

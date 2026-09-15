@@ -91,7 +91,7 @@ def build(args, directory: Path, preset: str, xlen: int, top: str) -> tuple[Path
     top_name = "tb_rapt_chip" if top == "axi" else "tb_rapt_chip_rnp"
     rtl = [hdl / "rapt_pkg.sv"] + sorted(p for p in hdl.rglob("*.sv") if p.name != "rapt_pkg.sv")
     if top == "rnp":
-        if xlen != 32 or re.search(r"^`define\s+RAPT_L2_EN\b", (hdl / "configs" / preset / "rapt_config.svh").read_text(), re.M):
+        if xlen != 32 or args.l2 or re.search(r"^`define\s+RAPT_L2_EN\b", (hdl / "configs" / preset / "rapt_config.svh").read_text(), re.M):
             # The wrapper has one 32-bit word per transfer and cannot carry L2 bursts.
             raise RuntimeError("RNP requires RV32 and a preset without RAPT_L2_EN")
         rtl.append(ROOT / "sim/rtl/wrap_rnp_soc.sv")
@@ -102,6 +102,8 @@ def build(args, directory: Path, preset: str, xlen: int, top: str) -> tuple[Path
     command = [verilator, "--binary", "--timing", "--assert", "-j", str(args.jobs),
                "--top-module", top_name, "-Wno-fatal", "-Wno-TIMESCALEMOD",
                "+define+UVM_NO_DPI", "+define+RAPT_ASSERT_EN"]
+    if args.l2:
+        command += ["+define+RAPT_L2_EN"]
     if xlen == 64:
         command += ["+define+RAPT_RV64"]
     command += ["-I" + str(p) for p in includes]
@@ -152,7 +154,7 @@ def firmware(args, directory: Path, xlen: int, case: str) -> tuple[Path, dict]:
 
 
 def run_config(args, preset: str, xlen: int, top: str) -> dict:
-    directory = Path(args.output).resolve() / f"chip-{preset}-rv{xlen}-{top}"
+    directory = Path(args.output).resolve() / f"chip-{preset}-rv{xlen}-{top}{'-l2' if args.l2 else ''}"
     allowed = CASES if top == "axi" else RNP_CASES
     selected = allowed if args.cases == ["all"] else tuple(args.cases)
     if any(c not in allowed for c in selected):
@@ -218,6 +220,7 @@ def main() -> int:
     parser.add_argument("--preset", default="default")
     parser.add_argument("--xlen", type=int, choices=(32, 64), default=32)
     parser.add_argument("--top", choices=("axi", "rnp"), default="axi")
+    parser.add_argument("--l2", action="store_true", help="enable optional L2 with the selected preset")
     parser.add_argument("--matrix", action="store_true", help="default RV32/RV64, small RV32, large RV64, RNP RV32")
     parser.add_argument("--cases", nargs="+", default=["all"], choices=("all",) + CASES)
     parser.add_argument("--seeds", nargs="+", type=int, default=[1, 42])
@@ -248,7 +251,7 @@ def main() -> int:
         report["error"] = str(exc)
         print(f"ERROR: {exc}",file=sys.stderr)
     report["passed"] = "error" not in report and all(r["passed"] for c in report["configurations"] for r in c["runs"])
-    name = "regression.json" if args.matrix else f"regression-{args.preset}-rv{args.xlen}-{args.top}.json"
+    name = "regression.json" if args.matrix else f"regression-{args.preset}-rv{args.xlen}-{args.top}{'-l2' if args.l2 else ''}.json"
     output = Path(args.output).resolve() / name
     output.parent.mkdir(parents=True,exist_ok=True)
     output.write_text(json.dumps(report,indent=2) + "\n")

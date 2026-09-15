@@ -5,8 +5,8 @@
 // scalar ROB/CSR update implementation is hidden inside this wrapper.
 module rapt_vpu_core #(
     parameter int RobBits = 6,
-    GenerationBits = 4,
-    MetadataBits = 64,
+    parameter int GenerationBits = 4,
+    parameter int MetadataBits = 64,
     parameter int XLEN = 64,
     parameter int VLEN = 128,
     parameter int ELEN = 64,
@@ -237,8 +237,11 @@ module rapt_vpu_core #(
       .host_rsp_ready(host_rsp_ready),
       .host_rdata(host_rdata)
   );
-  `RAPT_SVA(
-      clock, reset, VPU_CORE_LIFETIME,
-      (!adapter_busy || inner_busy) && cancelled == inner_cancelled && kill_blocked == inner_blocked)
+  // Lifetime condition extracted so the SVA macro argument stays short and
+  // the formatter cannot rejoin it past the column limit.
+  logic vpu_core_lifetime;
+  assign vpu_core_lifetime = (!adapter_busy || inner_busy)
+      && cancelled == inner_cancelled && kill_blocked == inner_blocked;
+  `RAPT_SVA(clock, reset, VPU_CORE_LIFETIME, vpu_core_lifetime)
   `RAPT_SVA_IMPLY(clock, reset, VPU_CORE_NO_UNEXPECTED_RESPONSE, 1'b1, !response_dropped)
 endmodule

@@ -1,5 +1,7 @@
+`include "rapt.svh"
 module ras_case #(
-    parameter int Depth = 3
+    parameter int Depth = 3,
+    parameter int Xlen = `RAPT_XLEN
 ) (
     output bit done
 );
@@ -7,12 +9,17 @@ module ras_case #(
   always #5 clock = ~clock;
   logic reset = 1, clear = 0, flush = 0;
   logic spec_push = 0, spec_pop = 0, commit_push = 0, commit_pop = 0;
-  logic [31:0] spec_addr = 0, commit_addr = 0, top_addr;
+  logic [Xlen-1:0] spec_addr = 0, commit_addr = 0, top_addr;
   logic top_valid;
-  bit [31:0] spec_model[$], commit_model[$];
+  bit [Xlen-1:0] spec_model[$], commit_model[$];
   int unsigned rng;
   int seed;
-  rapt_ras #(.Depth(Depth)) dut (.*);
+  rapt_ras #(
+      .Depth(Depth),
+      .Xlen(Xlen)
+  ) dut (
+      .*
+  );
 
   function automatic int unsigned random_word();
     rng ^= rng << 13;
@@ -22,7 +29,8 @@ module ras_case #(
   endfunction
 
   // Independent ordered list model: no DUT circular pointers/index arithmetic.
-  task automatic advance_model(ref bit [31:0] stack[$], input bit push, pop, input bit [31:0] addr);
+  task automatic advance_model(ref bit [Xlen-1:0] stack[$], input bit push, pop,
+                               input bit [Xlen-1:0] addr);
     if (pop && stack.size() != 0) void'(stack.pop_back());
     if (push) begin
       if (stack.size() == Depth) void'(stack.pop_front());
@@ -38,8 +46,12 @@ module ras_case #(
     commit_pop = co;
     flush = fl;
     clear = cl;
-    spec_addr = random_word();
-    commit_addr = random_word();
+    spec_addr = Xlen'(random_word());
+    commit_addr = Xlen'(random_word());
+    if (Xlen > 32) begin
+      spec_addr = (spec_addr << 32) | Xlen'(random_word());
+      commit_addr = (commit_addr << 32) | Xlen'(random_word());
+    end
     if (reset || clear) begin
       spec_model.delete();
       commit_model.delete();
@@ -76,7 +88,8 @@ module ras_case #(
       step(controls[0], controls[1], controls[2], controls[3], controls[6:4] == 0,
            controls[12:7] == 0);
     end
-    $display("PASS: RAS depth=%0d seed=%0d 10000 random transitions + boundaries", Depth, seed);
+    $display("PASS: RAS depth=%0d XLEN=%0d seed=%0d 10000 random transitions + boundaries", Depth,
+             Xlen, seed);
     done = 1;
   end
 endmodule

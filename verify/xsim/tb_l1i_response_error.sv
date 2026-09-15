@@ -156,8 +156,16 @@ module tb_l1i_response_error #(
           cmu_bcast.flush_redirect=cancel_mode==2;
           ifu_l1i.invalid=cancel_mode==3;
           if (cancel_mode == 4) ifu_l1i.pc = XLEN'(translated ? 'h40000022 : 'h80000022);
+          if (cancel_mode == 5) begin
+            // Reset both ends of this fixture with an occupied error record.
+            // Re-fetch the identical PC, keeping the old PC payload in DUT.
+            reset = 1;
+            pending.delete();
+            tick(4);
+          end
           tick(1);
           check(!dut.second_error_pending, "cancel/PC change retained old second-word error");
+          reset = 0;
           cmu_bcast.flush_pipe=0;
           cmu_bcast.flush_redirect=0;
           ifu_l1i.invalid=0;
@@ -229,7 +237,7 @@ module tb_l1i_response_error #(
         scenario(1, 1, 0, 1'(early), 1'(translated), 0);
         scenario(1, 0, 1, 1'(early), 1'(translated), 0);
         scenario(1, 1, 2, 1'(early), 1'(translated), 0);
-        for (int cancel_mode = 1; cancel_mode <= 4; cancel_mode++)
+        for (int cancel_mode = 1; cancel_mode <= 5; cancel_mode++)
         scenario(1, 0, 1, 1'(early), 1'(translated), cancel_mode);
       end
     if (!$test$plusargs("SPECULATIVE"))

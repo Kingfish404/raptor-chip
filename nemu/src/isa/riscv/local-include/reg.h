@@ -115,7 +115,7 @@ typedef enum
 static inline CSR_status check_csr_exist(uint16_t csr)
 {
   csr = csr & 0xfff;
-#ifdef CONFIG_RV_RVA22S64
+#ifdef CONFIG_RV_MCOUNTINHIBIT
   if (csr == CSR_MCOUNTINHIBIT) return CSR_EXIST;
 #endif
 #ifdef CONFIG_RAPTOR_MEMORY_MAP

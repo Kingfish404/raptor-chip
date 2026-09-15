@@ -51,12 +51,12 @@
 //   RAPT_BPU_DIRP_STATIC   — always-not-taken (control reference)
 `define RAPT_BPU_DIRP_TAGE
 
-// OoO window sizing (Phase B: grow toward a classic large-window OoO).
+// Shared RV32/RV64 OoO window sizing for simulation and FPGA.
 // ROB is the primary in-flight window; PHY must cover 32 arch regs plus the
 // worst case of ROB_SIZE in-flight register writers (power of 2 required).
 `define RAPT_RIQ_SIZE 8
 `define RAPT_IIQ_SIZE 8
-`define RAPT_ROB_SIZE 64
+`define RAPT_ROB_SIZE 32
 
 // Scheduler: RS / IOQ to feed both ALU pipes plus pipelined MUL.
 `define RAPT_RS_SIZE 8
@@ -120,27 +120,32 @@
 
 `define RAPT_REG_LEN $clog2(`RAPT_REG_SIZE) // Register Length
 
+// Shared simulation/FPGA default. Explicit overrides remain available for
+// parameterized verification; PHY must still cover the configured ROB.
+`ifndef RAPT_PHY_SIZE
 `define RAPT_PHY_SIZE 128 // physical register number (must be power of 2)
+`endif
 `define RAPT_PHY_LEN $clog2(`RAPT_PHY_SIZE)
 
 // Cache line size is a byte-level configuration. Keep it invariant across
 // RV32/RV64; individual caches derive XLEN-word counts.
 `define RAPT_CACHE_LINE_BYTES 64
 
-// L1I (64 B line * 32 sets * 2-way = 4 KiB)
+// L1I (64 B line * 64 sets * 4-way = 16 KiB).
+// Each way spans one 4 KiB page: virtual and physical indices coincide.
 `define RAPT_L1I_LINE_LEN $clog2(`RAPT_CACHE_LINE_BYTES / 4)
-`define RAPT_L1I_LEN 5
-`define RAPT_L1I_N_WAYS 2
+`define RAPT_L1I_LEN 6
+`define RAPT_L1I_N_WAYS 4
 // Refill 32 B per L1I miss (8 x RV32 words). This covers most sequential
 // fetch sectors while avoiding the request pressure of a full-line refill.
 `ifndef RAPT_L1I_REFILL_WORDS
 `define RAPT_L1I_REFILL_WORDS 8
 `endif
 
-// L1D (64 B line * 16 sets * 2-way = 2 KiB, VIPT-safe)
+// L1D (64 B line * 64 sets * 4-way = 16 KiB, VIPT-safe for RV32/RV64).
 `define RAPT_L1D_LINE_LEN $clog2(`RAPT_CACHE_LINE_BYTES / (`RAPT_XLEN / 8))
-`define RAPT_L1D_LEN 4
-`define RAPT_L1D_N_WAYS 2
+`define RAPT_L1D_LEN 6
+`define RAPT_L1D_N_WAYS 4
 
 // Fully-associative translation caches.  The data-side arrays are replicated
 // for simultaneous load/store lookup and receive the same fills.

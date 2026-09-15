@@ -9,6 +9,10 @@
 !*.dts.in
 !*.html
 !Makefile
+!/netboot.mk
+!/NETBOOT.md
+!/RV64-NETWORK.md
+!/CM005-FMC-C.md
 !mk/
 !mk/*.mk
 !scripts/*.tcl

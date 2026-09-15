@@ -219,7 +219,7 @@ void perf_sample_per_cycle()
       ++recovery_head.waiting[domain];
     }
   }
-  recovery_metrics.sample(VERILOG_ROU(pmu_cf_events), VERILOG_CPU(cmu__DOT__flush_pipe_r));
+  recovery_metrics.sample(VERILOG_ROU(pmu_cf_events), VERILOG_BACKEND(cmu__DOT__flush_pipe_r));
   const unsigned dispatch_count = VERILOG_ROU(pmu_dispatch_count);
   const unsigned dispatch_reason = VERILOG_ROU(pmu_dispatch_reason);
   assert(dispatch_count <= RtlConfig::DispatchWidth && dispatch_reason < RtlConfig::DispatchStopCount);
@@ -268,49 +268,49 @@ void perf_sample_per_cycle()
     if (domain == BranchDomain)
     {
       // Both observations capture the same pre-edge queue/candidate state.
-      const unsigned reason = VERILOG_CPU(ieu__DOT__u_brq__DOT__pmu_capacity_reason);
+      const unsigned reason = VERILOG_BACKEND(ieu__DOT__u_brq__DOT__pmu_capacity_reason);
       assert(reason > 0 && reason < branch_capacity_reasons.size());
       branch_capacity_reasons[reason]++;
     }
   }
-  pmu.alq_ready_entry_cycles += VERILOG_CPU(ieu__DOT__u_alq__DOT__pmu_select_ready);
-  const unsigned alq_issue_count = VERILOG_CPU(ieu__DOT__u_alq__DOT__pmu_select_issued);
+  pmu.alq_ready_entry_cycles += VERILOG_BACKEND(ieu__DOT__u_alq__DOT__pmu_select_ready);
+  const unsigned alq_issue_count = VERILOG_BACKEND(ieu__DOT__u_alq__DOT__pmu_select_issued);
   assert(alq_issue_count <= RtlConfig::IntegerIssuePorts);
   pmu.alq_issued += alq_issue_count;
   alq_issue_histogram[alq_issue_count]++;
-  pmu.alq_rebalance_gain += VERILOG_CPU(ieu__DOT__u_alq__DOT__pmu_select_gain);
-  pmu.alq_reclaim_allocations += VERILOG_CPU(ieu__DOT__u_alq__DOT__pmu_reclaim_allocations);
-  pmu.alq_extra_port_issues += VERILOG_CPU(ieu__DOT__pmu_alq_extra_port_count);
+  pmu.alq_rebalance_gain += VERILOG_BACKEND(ieu__DOT__u_alq__DOT__pmu_select_gain);
+  pmu.alq_reclaim_allocations += VERILOG_BACKEND(ieu__DOT__u_alq__DOT__pmu_reclaim_allocations);
+  pmu.alq_extra_port_issues += VERILOG_BACKEND(ieu__DOT__pmu_alq_extra_port_count);
   // Sample every registered retirement, independently of physical issue ports.
-  bool wb_valid = *(uint8_t *)&VERILOG_CPU(cmu__DOT__valid);
-  const uint32_t retire_count = VERILOG_CPU(cmu__DOT__retire_count);
+  bool wb_valid = *(uint8_t *)&VERILOG_BACKEND(cmu__DOT__valid);
+  const uint32_t retire_count = VERILOG_BACKEND(cmu__DOT__retire_count);
   for (uint32_t slot = 0; slot < retire_count; ++slot)
-    sample_branch(true, VERILOG_CPU(cmu__DOT__ben_slots)[slot],
-                  VERILOG_CPU(cmu__DOT__jen_slots)[slot],
-                  VERILOG_CPU(cmu__DOT__jren_slots)[slot],
-                  VERILOG_CPU(cmu__DOT__mispredict_slots)[slot]);
-  bool ifu_hazard = *(uint8_t *)&VERILOG_CPU(ifu__DOT__ifu_hazard);
-  bool ifu_fetch_fire = *(uint8_t *)&VERILOG_CPU(ifu__DOT__pmu_fetch_fire);
-  uint32_t ifu_fetch_slots = VERILOG_CPU(ifu__DOT__pmu_fetch_slots);
-  bool ifu_fetch_response_consume = *(uint8_t *)&VERILOG_CPU(ifu__DOT__pmu_fetch_response_consume);
+    sample_branch(true, VERILOG_BACKEND(cmu__DOT__ben_slots)[slot],
+                  VERILOG_BACKEND(cmu__DOT__jen_slots)[slot],
+                  VERILOG_BACKEND(cmu__DOT__jren_slots)[slot],
+                  VERILOG_BACKEND(cmu__DOT__mispredict_slots)[slot]);
+  bool ifu_hazard = *(uint8_t *)&VERILOG_FRONTEND(ifu__DOT__ifu_hazard);
+  bool ifu_fetch_fire = *(uint8_t *)&VERILOG_FRONTEND(ifu__DOT__pmu_fetch_fire);
+  uint32_t ifu_fetch_slots = VERILOG_FRONTEND(ifu__DOT__pmu_fetch_slots);
+  bool ifu_fetch_response_consume = *(uint8_t *)&VERILOG_FRONTEND(ifu__DOT__pmu_fetch_response_consume);
   bool ifu_fetch_multi = ifu_fetch_slots > 1;
-  bool ifu_fetch_bpu_taken = *(uint8_t *)&VERILOG_CPU(ifu__DOT__pmu_fetch_bpu_taken);
-  bool ifu_fetch_first_control = *(uint8_t *)&VERILOG_CPU(ifu__DOT__pmu_fetch_first_control);
-  bool ifu_fetch_aux_conditional = *(uint8_t *)&VERILOG_CPU(ifu__DOT__pmu_fetch_aux_conditional);
-  bool ifu_fetch_nonfirst_jal_pack = *(uint8_t *)&VERILOG_CPU(ifu__DOT__pmu_fetch_nonfirst_jal_pack);
-  bool ifu_fetch_nonfirst_cond_pack = *(uint8_t *)&VERILOG_CPU(ifu__DOT__pmu_fetch_nonfirst_cond_pack);
-  bool ifu_fetch_n1_unavailable = *(uint8_t *)&VERILOG_CPU(ifu__DOT__pmu_fetch_n1_unavailable);
-  bool ifu_fetch_n1_unavailable_unaligned = *(uint8_t *)&VERILOG_CPU(ifu__DOT__pmu_fetch_n1_unavailable_unaligned);
-  bool ifu_fetch_n1_unavailable_l1i = *(uint8_t *)&VERILOG_CPU(ifu__DOT__pmu_fetch_n1_unavailable_l1i);
-  bool ifu_fetch_downstream_blocked = *(uint8_t *)&VERILOG_CPU(ifu__DOT__pmu_fetch_downstream_blocked);
-  bool ifu_fetch_target_steer = *(uint8_t *)&VERILOG_CPU(ifu__DOT__pmu_fetch_target_steer);
-  bool ifu_stall = *(uint8_t *)&VERILOG_CPU(ifu__DOT__pmu_ifu_stall);
-  bool ifu_icache_stall = *(uint8_t *)&VERILOG_CPU(ifu__DOT__pmu_ifu_icache_stall);
-  bool ifu_flush_stall = *(uint8_t *)&VERILOG_CPU(ifu__DOT__pmu_ifu_flush_stall);
-  bool ifu_empty_stall = *(uint8_t *)&VERILOG_CPU(ifu__DOT__pmu_ifu_empty_stall);
-  bool ifu_response_after_redirect = *(uint8_t *)&VERILOG_CPU(ifu__DOT__pmu_ifu_response_after_redirect);
-  bool ifu_response_after_l1i_gap = *(uint8_t *)&VERILOG_CPU(ifu__DOT__pmu_ifu_response_after_l1i_gap);
-  bool ifu_response_bypass_candidate = *(uint8_t *)&VERILOG_CPU(ifu__DOT__pmu_ifu_response_bypass_candidate);
+  bool ifu_fetch_bpu_taken = *(uint8_t *)&VERILOG_FRONTEND(ifu__DOT__pmu_fetch_bpu_taken);
+  bool ifu_fetch_first_control = *(uint8_t *)&VERILOG_FRONTEND(ifu__DOT__pmu_fetch_first_control);
+  bool ifu_fetch_aux_conditional = *(uint8_t *)&VERILOG_FRONTEND(ifu__DOT__pmu_fetch_aux_conditional);
+  bool ifu_fetch_nonfirst_jal_pack = *(uint8_t *)&VERILOG_FRONTEND(ifu__DOT__pmu_fetch_nonfirst_jal_pack);
+  bool ifu_fetch_nonfirst_cond_pack = *(uint8_t *)&VERILOG_FRONTEND(ifu__DOT__pmu_fetch_nonfirst_cond_pack);
+  bool ifu_fetch_n1_unavailable = *(uint8_t *)&VERILOG_FRONTEND(ifu__DOT__pmu_fetch_n1_unavailable);
+  bool ifu_fetch_n1_unavailable_unaligned = *(uint8_t *)&VERILOG_FRONTEND(ifu__DOT__pmu_fetch_n1_unavailable_unaligned);
+  bool ifu_fetch_n1_unavailable_l1i = *(uint8_t *)&VERILOG_FRONTEND(ifu__DOT__pmu_fetch_n1_unavailable_l1i);
+  bool ifu_fetch_downstream_blocked = *(uint8_t *)&VERILOG_FRONTEND(ifu__DOT__pmu_fetch_downstream_blocked);
+  bool ifu_fetch_target_steer = *(uint8_t *)&VERILOG_FRONTEND(ifu__DOT__pmu_fetch_target_steer);
+  bool ifu_stall = *(uint8_t *)&VERILOG_FRONTEND(ifu__DOT__pmu_ifu_stall);
+  bool ifu_icache_stall = *(uint8_t *)&VERILOG_FRONTEND(ifu__DOT__pmu_ifu_icache_stall);
+  bool ifu_flush_stall = *(uint8_t *)&VERILOG_FRONTEND(ifu__DOT__pmu_ifu_flush_stall);
+  bool ifu_empty_stall = *(uint8_t *)&VERILOG_FRONTEND(ifu__DOT__pmu_ifu_empty_stall);
+  bool ifu_response_after_redirect = *(uint8_t *)&VERILOG_FRONTEND(ifu__DOT__pmu_ifu_response_after_redirect);
+  bool ifu_response_after_l1i_gap = *(uint8_t *)&VERILOG_FRONTEND(ifu__DOT__pmu_ifu_response_after_l1i_gap);
+  bool ifu_response_bypass_candidate = *(uint8_t *)&VERILOG_FRONTEND(ifu__DOT__pmu_ifu_response_bypass_candidate);
   bool l1i_refill_active = *(uint8_t *)&VERILOG_CPU(l1i_cache__DOT__pmu_l1i_refill_active);
   bool l1i_sram_warmup = *(uint8_t *)&VERILOG_CPU(l1i_cache__DOT__pmu_l1i_sram_warmup);
   bool l1i_tag_miss = *(uint8_t *)&VERILOG_CPU(l1i_cache__DOT__pmu_l1i_tag_miss);
@@ -319,23 +319,23 @@ void perf_sample_per_cycle()
   bool l1i_refill_start_current_hole = *(uint8_t *)&VERILOG_CPU(l1i_cache__DOT__pmu_l1i_refill_start_current_hole);
   bool l1i_refill_start_next_line_miss = *(uint8_t *)&VERILOG_CPU(l1i_cache__DOT__pmu_l1i_refill_start_next_line_miss);
   bool l1i_refill_start_next_hole = *(uint8_t *)&VERILOG_CPU(l1i_cache__DOT__pmu_l1i_refill_start_next_hole);
-  bool fqu_full = *(uint8_t *)&VERILOG_CPU(fqu__DOT__pmu_full);
-  uint8_t fqu_count = *(uint8_t *)&VERILOG_CPU(fqu__DOT__pmu_count);
+  bool fqu_full = *(uint8_t *)&VERILOG_FRONTEND(fqu__DOT__pmu_full);
+  uint8_t fqu_count = *(uint8_t *)&VERILOG_FRONTEND(fqu__DOT__pmu_count);
 
   bool rou_ready = VERILOG_ROU(pmu_enqueue_ready);
   // OoO scheduler stall: any ALU-class IQ holds pending work but no IEU pipe
   // issued this cycle. The IOQ is owned by the LSU.
-  bool exu_ooo_valid = *(uint8_t *)&VERILOG_CPU(ieu__DOT__pmu_ooo_valid);
-  bool exu_ooo_valid_found = *(uint8_t *)&VERILOG_CPU(ieu__DOT__pmu_ooo_valid_found);
-  bool exu_ioq_valid = *(uint8_t *)&VERILOG_CPU(lsu__DOT__u_ioq__DOT__pmu_ioq_any_valid);
-  bool exu_ioq_full = *(uint8_t *)&VERILOG_CPU(lsu__DOT__u_ioq__DOT__pmu_ioq_all_full);
-  bool exu_ioq_valid_found = *(uint8_t *)&VERILOG_CPU(lsu__DOT__u_ioq__DOT__ioq_valid_found);
+  bool exu_ooo_valid = *(uint8_t *)&VERILOG_BACKEND(ieu__DOT__pmu_ooo_valid);
+  bool exu_ooo_valid_found = *(uint8_t *)&VERILOG_BACKEND(ieu__DOT__pmu_ooo_valid_found);
+  bool exu_ioq_valid = *(uint8_t *)&VERILOG_BACKEND(lsu__DOT__u_ioq__DOT__pmu_ioq_any_valid);
+  bool exu_ioq_full = *(uint8_t *)&VERILOG_BACKEND(lsu__DOT__u_ioq__DOT__pmu_ioq_all_full);
+  bool exu_ioq_valid_found = *(uint8_t *)&VERILOG_BACKEND(lsu__DOT__u_ioq__DOT__ioq_valid_found);
   uint8_t l1d_state = *(uint8_t *)&VERILOG_CPU(l1d_cache__DOT__l1d_state);
   bool lsu_l1d_hit = *(uint8_t *)&VERILOG_CPU(l1d_cache__DOT__tag_hit);
-  bool lsu_fwd_hit = *(uint8_t *)&VERILOG_CPU(lsu__DOT__u_sq__DOT__fwd_hit);
-  bool lsu_load_in_sq = *(uint8_t *)&VERILOG_CPU(lsu__DOT__u_sq__DOT__load_in_sq);
-  bool lsu_raddr_valid = *(uint8_t *)&VERILOG_CPU(lsu__DOT__u_sq__DOT__raddr_valid);
-  bool wbu_valid = *(uint8_t *)&VERILOG_CPU(cmu__DOT__valid);
+  bool lsu_fwd_hit = *(uint8_t *)&VERILOG_BACKEND(lsu__DOT__u_sq__DOT__fwd_hit);
+  bool lsu_load_in_sq = *(uint8_t *)&VERILOG_BACKEND(lsu__DOT__u_sq__DOT__load_in_sq);
+  bool lsu_raddr_valid = *(uint8_t *)&VERILOG_BACKEND(lsu__DOT__u_sq__DOT__raddr_valid);
+  bool wbu_valid = *(uint8_t *)&VERILOG_BACKEND(cmu__DOT__valid);
   uint8_t l1i_state = *(uint8_t *)&VERILOG_CPU(l1i_cache__DOT__l1i_state);
   if (ifu_fetch_fire)
   {
@@ -360,13 +360,13 @@ void perf_sample_per_cycle()
   // ROU structural hazard: RNU has renamed work but the dispatch path cannot
   // accept it. Ordered UOQ readiness is space based, so this is not a
   // ROB-full probe.
-  bool rnu_valid = VERILOG_CPU(rnu__DOT__pmu_pending);
+  bool rnu_valid = VERILOG_BACKEND(rnu__DOT__pmu_pending);
   pmu.rou_hazard_cycle += (rnu_valid && !rou_ready) ? 1 : 0;
-  const bool checkpoint_full = VERILOG_CPU(rnu__DOT__pmu_checkpoint_full);
-  const bool checkpoint_stall = VERILOG_CPU(rnu__DOT__pmu_checkpoint_stall);
-  const bool rename_recovery_fence = VERILOG_CPU(rnu__DOT__pmu_recovery_fence);
+  const bool checkpoint_full = VERILOG_BACKEND(rnu__DOT__pmu_checkpoint_full);
+  const bool checkpoint_stall = VERILOG_BACKEND(rnu__DOT__pmu_checkpoint_stall);
+  const bool rename_recovery_fence = VERILOG_BACKEND(rnu__DOT__pmu_recovery_fence);
   const bool recovery_early_redirect = VERILOG_ROU(pmu_recovery_redirect);
-  const uint32_t checkpoint_occupancy = VERILOG_CPU(rnu__DOT__pmu_checkpoint_occupancy);
+  const uint32_t checkpoint_occupancy = VERILOG_BACKEND(rnu__DOT__pmu_checkpoint_occupancy);
   assert(checkpoint_occupancy <= RtlConfig::BranchCheckpoints);
   pmu.rename_checkpoint_full_cycle += checkpoint_full;
   pmu.rename_checkpoint_stall_cycle += checkpoint_stall;
@@ -388,7 +388,7 @@ void perf_sample_per_cycle()
   bool rou_sq_stall = *(uint8_t *)&VERILOG_ROU(pmu_sq_stall);
   pmu.lsu_sq_stall_cycle += rou_sq_stall ? 1 : 0;
   // IDU early resteer: static decode or speculative RAS target correction.
-  bool early_resteer = *(uint8_t *)&VERILOG_CPU(idu__DOT__pmu_early_resteer);
+  bool early_resteer = *(uint8_t *)&VERILOG_FRONTEND(idu__DOT__pmu_early_resteer);
   pmu.early_resteer_cnt += early_resteer ? 1 : 0;
 
   // Measure the end-to-end frontend recovery after an exact branch-caused
@@ -397,12 +397,12 @@ void perf_sample_per_cycle()
   // The ROU head/flush classification is combinational and has advanced by
   // the time the C++ sampler runs after the clock edge.  Use CMU's registered
   // flush and per-slot commit snapshots, which are aligned with `wb_valid`.
-  bool flush_pipe_r = *(uint8_t *)&VERILOG_CPU(cmu__DOT__flush_pipe_r);
+  bool flush_pipe_r = *(uint8_t *)&VERILOG_BACKEND(cmu__DOT__flush_pipe_r);
   bool branch_flush = flush_pipe_r && wb_valid
-      && VERILOG_CPU(cmu__DOT__mispredict_slots)[0]
-      && (VERILOG_CPU(cmu__DOT__ben_slots)[0]
-          || VERILOG_CPU(cmu__DOT__jen_slots)[0]
-          || VERILOG_CPU(cmu__DOT__jren_slots)[0]);
+      && VERILOG_BACKEND(cmu__DOT__mispredict_slots)[0]
+      && (VERILOG_BACKEND(cmu__DOT__ben_slots)[0]
+          || VERILOG_BACKEND(cmu__DOT__jen_slots)[0]
+          || VERILOG_BACKEND(cmu__DOT__jren_slots)[0]);
   bool nonbranch_flush = flush_pipe_r && !branch_flush;
   if (branch_flush)
   {
@@ -463,7 +463,7 @@ void perf_sample_per_cycle()
   //    UOQ-blocked: rnu has a renamed uop but the dispatch path cannot accept it.
   //    True ROB-full is the rapt_rou all-entry-busy event pulse.
   //    SQ-full: width-stable 1-bit probe from the LSU (&sq_valid).
-  bool rs_full = *(uint8_t *)&VERILOG_CPU(ieu__DOT__pmu_ooo_full);
+  bool rs_full = *(uint8_t *)&VERILOG_BACKEND(ieu__DOT__pmu_ooo_full);
   bool ioq_full = exu_ioq_full;
   bool uoq_blocked = rnu_valid && !rou_ready;
   bool rob_full_event = *(uint8_t *)&VERILOG_ROU(pmu_rob_full);

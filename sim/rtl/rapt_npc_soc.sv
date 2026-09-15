@@ -86,16 +86,16 @@ module raptSoC #(
       // Correlate wrong-path queue residency with actual recovery and commit.
       // These hierarchical probes are test observations, never control inputs.
       for (int q = 0; q < rapt_pkg::CoreConfig.ioq_entries; q++) begin
-        if (cpu.core.lsu.u_ioq.ioq_valid[q] && cpu.core.lsu.u_ioq.ioq_ren[q]
-            && cpu.core.lsu.u_ioq.ioq_pr1[q] == 0
-            && cpu.core.lsu.u_ioq.ioq_pr2[q] == 0)
+        if (cpu.core.backend.lsu.u_ioq.ioq_valid[q] && cpu.core.backend.lsu.u_ioq.ioq_ren[q]
+            && cpu.core.backend.lsu.u_ioq.ioq_pr1[q] == 0
+            && cpu.core.backend.lsu.u_ioq.ioq_pr2[q] == 0)
           $display(
               "SPEC_OBS %0d Q %h %h %h %h %h",
               axi_observe_cycle,
-              cpu.core.lsu.u_ioq.ioq_pc[q],
-              cpu.core.lsu.u_ioq.ioq_eff_addr[q],
-              cpu.core.lsu.u_ioq.ioq_dest[q],
-              cpu.core.lsu.u_ioq.ioq_generation[q],
+              cpu.core.backend.lsu.u_ioq.ioq_pc[q],
+              cpu.core.backend.lsu.u_ioq.ioq_eff_addr[q],
+              cpu.core.backend.lsu.u_ioq.ioq_dest[q],
+              cpu.core.backend.lsu.u_ioq.ioq_generation[q],
               cpu.core.cmu_bcast.rob_head
           );
       end
@@ -103,17 +103,17 @@ module raptSoC #(
         $display(
             "SPEC_OBS %0d REDIRECT %h %h",
             axi_observe_cycle,
-            cpu.core.rou.uop_pl[cpu.core.recovery.owner].pc,
+            cpu.core.backend.rou.uop_pl[cpu.core.recovery.owner].pc,
             cpu.core.recovery.target
         );
       if (cpu.core.cmu_bcast.flush_pipe) $display("SPEC_OBS %0d FLUSH", axi_observe_cycle);
       for (int c = 0; c < rapt_pkg::CommitWidth; c++)
-      if (cpu.core.rou_cmu.slot[c].valid)
+      if (cpu.core.backend.rou_cmu.slot[c].valid)
         $display(
             "SPEC_OBS %0d COMMIT %h %h",
             axi_observe_cycle,
-            cpu.core.rou_cmu.slot[c].pc,
-            cpu.core.rou_cmu.slot[c].npc
+            cpu.core.backend.rou_cmu.slot[c].pc,
+            cpu.core.backend.rou_cmu.slot[c].npc
         );
 `endif
       if (auto_master_out_arvalid && auto_master_out_arready)
@@ -477,13 +477,12 @@ module rapt_npc_soc #(
         end else begin
           // Advance to next beat in burst (same cycle issuance of DPI read).
           automatic logic [XLEN-1:0] na = r_next_addr;
-          automatic logic [XLEN-1:0] tmp;
+          automatic logic [XLEN-1:0] tmp = '0;
           if (addr_valid(na)) begin
             `RAPT_DPI_C_PMEM_READ(na, {5'b0, r_size_q}, tmp);
             r_data_q <= tmp;
             r_resp_q <= AXIRespOKAY;
           end else begin
-            tmp = '0;
             r_data_q <= '0;
             r_resp_q <= AXIRespDecerr;
           end
@@ -497,13 +496,11 @@ module rapt_npc_soc #(
       // (2) Accept new AR if slot is free. Note: when r_last_q + rready fires,
       //     r_slot_free is high and we can overwrite r_busy in the SAME cycle.
       if (accept_ar) begin
-        automatic logic [XLEN-1:0] tmp;
-        automatic logic            v;
-        v = addr_valid(araddr);
+        automatic logic [XLEN-1:0] tmp = '0;
+        automatic logic v = addr_valid(araddr);
         if (v) begin
           `RAPT_DPI_C_PMEM_READ(araddr, {5'b0, arsize}, tmp);
         end else begin
-          tmp = '0;
           $display("NPC_SOC: AXI read decode error addr=%0h, arid=%0d", araddr, arid);
         end
         r_busy       <= 1'b1;

@@ -33,7 +33,8 @@ module rapt_predict_history #(
     logic [PhrBits-1:0] phr;
   } history_t;
   history_t fetched, decoded, committed, next_fetch, next_decode, next_commit;
-  function automatic history_t append(input history_t old, input logic valid, taken, pc_bit);
+  function automatic history_t append(input history_t old, input logic valid, input logic taken,
+                                      input logic pc_bit);
     history_t result;
     result = old;
     if (valid) begin

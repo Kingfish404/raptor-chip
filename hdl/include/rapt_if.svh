@@ -42,6 +42,10 @@ interface lsu_l1d_if #(
   logic difftest_skip;
   logic rready;
 
+  // Release the held read without completion or device side effects.
+  // Mutually exclusive with rready; retry this instruction with ordered=1.
+  logic rretry;
+
   // Hit-under-miss B channel (Phase A2, RAPT_LSU_HUM): a second best-effort
   // load request served ONLY from the cache while the A channel waits on a
   // miss refill (LD_D).  Held-request protocol like A; completes on a clean
@@ -59,6 +63,7 @@ interface lsu_l1d_if #(
   // Unshifted byte-enable mask.  Eight bits are required for arbitrary
   // RV64 misaligned-store spill sizes (for example, 5--7 bytes of SD).
   logic [7:0] walu;
+  logic wzero; // One aligned 64-byte ZERO descriptor; wready means final B.
   logic wvalid;
   logic [XLEN-1:0] wdata;
   logic wready;
@@ -66,18 +71,18 @@ interface lsu_l1d_if #(
 
   modport master(
       output raddr, ralu, rvalid, rmisaligned, rcheck_valid, rcheck_offset, rcheck_size_m1, rorig_size_m1, atomic_lock, ordered,
-      input idle, rdata, trap, cause, difftest_skip, rready,
+      input idle, rdata, trap, cause, difftest_skip, rready, rretry,
       output raddr_b, ralu_b, rvalid_b,
       input rdata_b, rready_b,
-      output waddr, wpbmt, walu, wvalid, wdata,
+      output waddr, wpbmt, walu, wzero, wvalid, wdata,
       input wready, werr
   );
   modport slave(
       input raddr, ralu, rvalid, rmisaligned, rcheck_valid, rcheck_offset, rcheck_size_m1, rorig_size_m1, atomic_lock, ordered,
-      output idle, rdata, trap, cause, difftest_skip, rready,
+      output idle, rdata, trap, cause, difftest_skip, rready, rretry,
       input raddr_b, ralu_b, rvalid_b,
       output rdata_b, rready_b,
-      input waddr, wpbmt, walu, wvalid, wdata,
+      input waddr, wpbmt, walu, wzero, wvalid, wdata,
       output wready, werr
   );
 endinterface
@@ -88,6 +93,7 @@ interface l1i_bus_if #(
 );
   // load
   logic arvalid;
+  logic noallocate;
   logic [1:0] rpbmt;
   logic [XLEN-1:0] araddr;
   logic arburst;  // request 2-beat INCR burst (SDRAM)
@@ -116,13 +122,13 @@ interface l1i_bus_if #(
   logic ptw_werr;
 
   modport master(
-      output arvalid, rpbmt, araddr, arburst, ar_ptw,
+      output arvalid, noallocate, rpbmt, araddr, arburst, ar_ptw,
       input rready, rdata, rvalid, ptw_rvalid, ptw_rerr, rlast, rerr,
       output awvalid, awaddr, wvalid, wdata, wstrb, aw_ptw,
       input wready, werr, ptw_wready, ptw_werr
   );
   modport slave(
-      input arvalid, rpbmt, araddr, arburst, ar_ptw,
+      input arvalid, noallocate, rpbmt, araddr, arburst, ar_ptw,
       output rready, rdata, rvalid, ptw_rvalid, ptw_rerr, rlast, rerr,
       input awvalid, awaddr, wvalid, wdata, wstrb, aw_ptw,
       output wready, werr, ptw_wready, ptw_werr
@@ -138,6 +144,8 @@ interface l1d_bus_if #(
   logic idle; // D-side reads and all writes have completed at mem_link.
   logic [XLEN-1:0] araddr;
   logic [7:0] rstrb;
+  logic [7:0] arlen;
+  logic noallocate; // Do not widen this request into a downstream line fill.
   logic [1:0] rpbmt;
   logic ar_ptw;
   logic rready;
@@ -156,6 +164,7 @@ interface l1d_bus_if #(
   logic awvalid;
   logic [XLEN-1:0] awaddr;
   logic wvalid;
+  logic wzero;
   logic [XLEN-1:0] wdata;
   logic [7:0] wstrb;
   logic [1:0] wpbmt;
@@ -171,19 +180,19 @@ interface l1d_bus_if #(
   logic ptw_werr;
 
   modport master(
-      output arvalid, araddr, rstrb, rpbmt, ar_ptw,
+      output arvalid, araddr, arlen, noallocate, rstrb, rpbmt, ar_ptw,
       input rready,
       input idle, rdata, rvalid, ptw_rvalid, ptw_rerr, rlast, difftest_skip, rerr,
 
-      output awvalid, awaddr, wvalid, wdata, wstrb, wpbmt, aw_ptw,
+      output awvalid, awaddr, wvalid, wzero, wdata, wstrb, wpbmt, aw_ptw,
       input wready, werr, ptw_wready, ptw_werr
   );
   modport slave(
-      input arvalid, araddr, rstrb, rpbmt, ar_ptw,
+      input arvalid, araddr, arlen, noallocate, rstrb, rpbmt, ar_ptw,
       output rready,
       output idle, rdata, rvalid, ptw_rvalid, ptw_rerr, rlast, difftest_skip, rerr,
 
-      input awvalid, awaddr, wvalid, wdata, wstrb, wpbmt, aw_ptw,
+      input awvalid, awaddr, wvalid, wzero, wdata, wstrb, wpbmt, aw_ptw,
       output wready, werr, ptw_wready, ptw_werr
   );
 endinterface
@@ -338,6 +347,9 @@ interface cmu_bcast_if #(
 
   logic fence_time;
   logic fence_i;
+  // CBO block within the 4 KiB page; translation preserves these VA bits.
+  logic cbo_inval;
+  logic [11:6] cbo_block;
 
   logic flush_pipe;
   logic flush_redirect;
@@ -354,13 +366,13 @@ interface cmu_bcast_if #(
 
   modport in(
       input rpc, cpc, ben, jen, jren, btaken, atomic_retired, call, ret, rvc,
-      input fence_time, fence_i, flush_pipe, flush_redirect, sys_resume, time_trap,
+      input fence_time, fence_i, cbo_inval, cbo_block, flush_pipe, flush_redirect, sys_resume, time_trap,
       input redirect_pc,
       input rob_head
   );
   modport out(
       output rpc, cpc, ben, jen, jren, btaken, atomic_retired, call, ret, rvc,
-      output fence_time, fence_i, flush_pipe, flush_redirect, sys_resume, time_trap,
+      output fence_time, fence_i, cbo_inval, cbo_block, flush_pipe, flush_redirect, sys_resume, time_trap,
       output redirect_pc,
       output rob_head
   );

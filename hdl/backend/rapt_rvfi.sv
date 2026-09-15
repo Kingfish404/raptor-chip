@@ -121,7 +121,8 @@ module rapt_rvfi #(
     assign rvfi_rd_wdata[c*XLEN+:XLEN] = rd_wdata[c];
     assign rvfi_pc_rdata[c*XLEN+:XLEN] = rou_cmu.slot[c].pc;
     assign rvfi_pc_wdata[c*XLEN+:XLEN] = rou_cmu.slot[c].npc;
-    assign rvfi_mem_addr[c*XLEN+:XLEN] = (load_op || store_op || atomic_op) ? rou_cmu.slot[c].rvfi_sq_waddr : '0;
+    assign rvfi_mem_addr[c*XLEN+:XLEN] = (load_op || store_op || atomic_op)
+        ? rou_cmu.slot[c].rvfi_sq_waddr : '0;
     assign rvfi_mem_rmask[c*(XLEN/8)+:(XLEN/8)] = reads_mem ? mask : '0;
     assign rvfi_mem_wmask[c*(XLEN/8)+:(XLEN/8)] = writes_mem ? mask : '0;
     assign rvfi_mem_rdata[c*XLEN+:XLEN] = reads_mem ? rd_wdata[c] : '0;

@@ -49,9 +49,13 @@ module tb_bus_pbmt;
 
   `include "tb_common.svh"
   `include "tb_bus_defaults.svh"
-  task automatic read_case(input bit instruction, input bit ptw, input int attr);
+  task automatic read_case(input bit instruction, input bit ptw, input int attr,
+                           input bit noallocate = 0);
     logic [3:0] expected, owner;
-    expected = ptw || attr == 0 ? 4'hf : attr == 1 ? 4'h2 : 4'h0;
+    expected = (ptw || attr == 0 ? 4'hf : attr == 1 ? 4'h2 : 4'h0)
+        & (ptw || noallocate ? 4'h3 : 4'hf);
+    l1i_bus.noallocate=noallocate;
+    l1d_bus.noallocate=noallocate;
     owner = instruction ? (ptw ? 3 : 1) : (ptw ? 4 : 2);
     axi.arready = 0;
     if (instruction) begin
@@ -71,6 +75,8 @@ module tb_bus_pbmt;
     l1i_bus.arvalid = 0;
     l1d_bus.arvalid = 0;
     l1i_bus.rpbmt = 3;
+    l1i_bus.noallocate=!noallocate;
+    l1d_bus.noallocate=!noallocate;
     l1d_bus.rpbmt = 3;
     tick(2);
     repeat (5) begin
@@ -101,6 +107,7 @@ module tb_bus_pbmt;
     l1d_bus.awaddr = 'h80000000;
     l1d_bus.wdata = 'h12345678;
     l1d_bus.wstrb = 8'h0f;
+    l1d_bus.wzero = 0;
     l1d_bus.wpbmt = 2'(attr);
     l1d_bus.awvalid = 1;
     l1d_bus.wvalid = 1;
@@ -144,6 +151,7 @@ module tb_bus_pbmt;
     l1i_bus.araddr = 'h80001000;
     l1i_bus.ar_ptw = 0;
     l1i_bus.rpbmt = 2;
+    l1i_bus.noallocate = 0;
     l1i_bus.arvalid = 1;
     tick(1);
     l1i_bus.arvalid = 0;
@@ -186,6 +194,8 @@ module tb_bus_pbmt;
     for (int attr = 0; attr < 3; attr++) begin
       read_case(0, 0, attr);
       read_case(1, 0, attr);
+      read_case(0, 0, attr, 1);
+      read_case(1, 0, attr, 1);
       write_case(attr, 0);
       write_case(attr, 1);
     end

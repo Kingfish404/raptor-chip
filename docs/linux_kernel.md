@@ -8,8 +8,8 @@ reset/MROM -> OpenSBI (M-mode) -> Linux (S-mode) -> init/userspace
 
 The top-level Makefile is the preferred entry point. It downloads prebuilt
 OpenSBI + Linux payloads from `Kingfish404/linux-build` and keeps NEMU/NPC
-configuration in sync. By default it fetches `v6.18.49` assets from the
-[`rv-v6.18.49` release](https://github.com/Kingfish404/linux-build/releases/tag/rv-v6.18.49).
+configuration in sync. By default it fetches `v6.18.50` assets from the
+[`rv-v6.18.50` release](https://github.com/Kingfish404/linux-build/releases/tag/rv-v6.18.50).
 
 ## Quick Commands
 
@@ -22,7 +22,7 @@ make linux-boot-nemu32 ARGS="-b -n"
 make linux-boot-rv32 ARGS="-b -n"
 
 # RV32 Linux on the KU15P FPGA through LiteX BIOS + MIG DDR4
-make -C fpga/litex linux-fpga-e2e UART_PORT=/dev/ttyUSB0
+make -C fpga/litex linux-fpga-rv32-e2e UART_PORT=/dev/ttyUSB0
 
 # RV64 prebuilt payload and NPC paths
 make linux-download-rv64
@@ -40,7 +40,7 @@ make linux-download-rv32gc-fpga
 Useful overrides:
 
 ```shell
-make linux-boot-rv32 LINUX_BUILD_RELEASE=rv-v6.18.49 LINUX_BUILD_VERSION=v6.18.49 MAX_INST=100000000 ARGS="-b -n"
+make linux-boot-rv32 LINUX_BUILD_RELEASE=rv-v6.18.50 LINUX_BUILD_VERSION=v6.18.50 MAX_INST=100000000 ARGS="-b -n"
 make linux-boot-rv32 LINUX_RV32_PAYLOAD=/path/to/fw_payload.bin ARGS="-b -n"
 ```
 
@@ -113,10 +113,10 @@ Buildroot then sees `virtio_rng.0` as `/dev/hwrng`.
 Get the Linux Kernel source code from [The Linux Kernel Archives](https://www.kernel.org/):
 
 ```shell
-wget https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.18.22.tar.xz
+wget https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.18.50.tar.xz
 
-tar -xf linux-6.18.22.tar.xz
-cd linux-6.18.22
+tar -xf linux-6.18.50.tar.xz
+cd linux-6.18.50
 ```
 
 See more details in [linux/README.md](../linux/README.md).

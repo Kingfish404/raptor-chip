@@ -9,7 +9,7 @@ module rapt_l1d_tags #(
     parameter int L1D_SIZE = 2 ** L1D_LEN,
     parameter int L1D_LINE_SIZE = 2 ** L1D_LINE_LEN,
     parameter int L1D_N_WAYS = `RAPT_L1D_N_WAYS,
-    parameter int L1dTagW = `RAPT_XLEN - L1D_LEN - L1D_LINE_LEN - $clog2(`RAPT_XLEN / 8),
+    parameter int L1dTagW = `RAPT_PADDR_BITS - L1D_LEN - L1D_LINE_LEN - $clog2(`RAPT_XLEN / 8),
     parameter int L1dWayW = L1D_N_WAYS > 1 ? $clog2(L1D_N_WAYS) : 1
 ) (
     input logic clock,
@@ -64,13 +64,13 @@ module rapt_l1d_tags #(
   endgenerate
   logic [L1D_N_WAYS-1:0] way_wtag_match;
   logic [L1D_N_WAYS-1:0] load_live_match, store_live_match;
-  logic [L1D_N_WAYS-1:0] load_word_valid, store_word_valid;
+  logic [L1D_N_WAYS-1:0] load_line_valid, store_line_valid;
   logic [L1dWayW-1:0] victims[2];
   for (genvar way = 0; way < L1D_N_WAYS; way++) begin : g_candidates
     assign load_live_match[way] = way_tag_match[way] && |l1d_valid[way][addr_idx];
     assign store_live_match[way] = way_wtag_match[way] && |l1d_valid[way][waddr_idx];
-    assign load_word_valid[way] = l1d_valid[way][addr_idx][addr_offset];
-    assign store_word_valid[way] = l1d_valid[way][waddr_idx][waddr_offset];
+    assign load_line_valid[way] = |l1d_valid[way][addr_idx];
+    assign store_line_valid[way] = |l1d_valid[way][waddr_idx];
   end
   if (L1D_N_WAYS > 2) begin : g_replacement
     logic [L1D_LEN-1:0] read_set[2], update_set[2];
@@ -128,7 +128,7 @@ module rapt_l1d_tags #(
       .Ways(L1D_N_WAYS)
   ) u_load_fill (
       .match_way(load_live_match),
-      .valid_way(load_word_valid),
+      .valid_way(load_line_valid),
       .victim(victims[0]),
       .selected(ld_fill_way)
   );
@@ -136,7 +136,7 @@ module rapt_l1d_tags #(
       .Ways(L1D_N_WAYS)
   ) u_store_fill (
       .match_way(store_live_match),
-      .valid_way(store_word_valid),
+      .valid_way(store_line_valid),
       .victim(victims[1]),
       .selected(store_fill_way)
   );

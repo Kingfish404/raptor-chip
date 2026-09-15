@@ -26,11 +26,13 @@ module rapt_pmp_state #(
       state.pmp_mode_na4   <= '0;
       state.pmp_mode_napot <= '0;
     end else begin
-      if (update.addr_we) begin
-        state.pmp_raw_addr[update.addr_idx]   <= update.raw_addr;
-        state.pmp_napot_mask[update.addr_idx] <= update.napot_mask;
-      end
       for (int i = 0; i < N; i++) begin
+        // Fixed destinations expose a shared entry write-enable decoder,
+        // avoiding dynamic writes into an unpacked interface array.
+        if (update.addr_we && int'(update.addr_idx) == i) begin
+          state.pmp_raw_addr[i]   <= update.raw_addr;
+          state.pmp_napot_mask[i] <= update.napot_mask;
+        end
         if (update.cfg_we[i]) begin
           state.pmp_cfg_r[i]      <= update.cfg_r[i];
           state.pmp_cfg_w[i]      <= update.cfg_w[i];
@@ -72,7 +74,7 @@ endmodule
 //   cfg_r/w/x/l[i]               : per-entry permission bit-vectors
 //   mode_off/tor/na4/napot[i]    : per-entry mode one-hot vectors
 
-module rapt_pmp #(
+module rapt_pmp_permissions #(
     parameter int XLEN = `RAPT_XLEN,
     parameter int PADDR_BITS = `RAPT_PADDR_BITS
 ) (
@@ -100,7 +102,9 @@ module rapt_pmp #(
     input logic [`RAPT_PMP_NUM-1:0] pmp_mode_napot,
 
     output logic fault,
-    output logic fault_lo_o
+    output logic fault_lo_o,
+    output logic fault_read_o,
+    output logic fault_write_o
 );
   localparam int N = `RAPT_PMP_NUM;
   localparam int PMPAddrBits = PADDR_BITS - 2;
@@ -136,6 +140,20 @@ module rapt_pmp #(
         && start_word[2:0] <= addr_hi_w[2:0];
     return same_block ? (in_first && in_last) : (in_first || in_last);
   endfunction
+  // Each TOR boundary serves its own upper bound and the next entry's lower
+  // bound. Reuse the first-word comparison for the last word: without wrap,
+  // last < boundary iff first < boundary and boundary is outside the access.
+  logic [N-1:0] tor_before_lo, tor_before_hi, raw_start_inside;
+  for (genvar i = 0; i < N; i++) begin : gen_tor_boundary
+    assign tor_before_lo[i] = addr_lo_w < pmp_raw_addr[i];
+    assign raw_start_inside[i] = start_inside(pmp_raw_addr[i]);
+    // A wrapping access of at most sixteen bytes ends at byte 0..14, so
+    // its last word is at most three. Keep physical wrap fully supported.
+    assign tor_before_hi[i] = addr_end[PADDR_BITS]
+        ? ((|pmp_raw_addr[i][PMPAddrBits-1:2])
+            || addr_hi_w[1:0] < pmp_raw_addr[i][1:0])
+        : (tor_before_lo[i] && !raw_start_inside[i]);
+  end
   for (genvar i = 0; i < N; i++) begin : gen_entry
     logic [PMPAddrBits-1:0] tor_lo;
     logic [PMPAddrBits-1:0] napot_base;
@@ -144,14 +162,14 @@ module rapt_pmp #(
     logic tor_start_inside, na4_start_inside, napot_start_inside;
     if (i == 0) begin : gen_first_tor
       assign tor_lo = '0;
+      assign match_tor_lo = tor_before_lo[i];
+      assign match_tor_hi = tor_before_hi[i];
     end else begin : gen_next_tor
       assign tor_lo = pmp_raw_addr[i-1];
+      assign match_tor_lo = !tor_before_lo[i-1] && tor_before_lo[i];
+      assign match_tor_hi = !tor_before_hi[i-1] && tor_before_hi[i];
     end
     assign napot_base = pmp_raw_addr[i] & ~pmp_napot_mask[i];
-    /* verilator lint_off UNSIGNED */
-    assign match_tor_lo = (addr_lo_w >= tor_lo) && (addr_lo_w < pmp_raw_addr[i]);
-    assign match_tor_hi = (addr_hi_w >= tor_lo) && (addr_hi_w < pmp_raw_addr[i]);
-    /* verilator lint_on UNSIGNED */
     assign match_na4_lo = (addr_lo_w == pmp_raw_addr[i]);
     assign match_na4_hi = (addr_hi_w == pmp_raw_addr[i]);
     assign match_napot_lo = ((addr_lo_w & ~pmp_napot_mask[i]) == napot_base);
@@ -167,9 +185,9 @@ module rapt_pmp #(
       assign tor_start_inside = (pmp_raw_addr[i] != '0)
           && ((addr_lo_w == '0) || addr_end[PADDR_BITS]);
     end else begin : gen_nonzero_tor_start
-      assign tor_start_inside = (tor_lo < pmp_raw_addr[i]) && start_inside(tor_lo);
+      assign tor_start_inside = (tor_lo < pmp_raw_addr[i]) && raw_start_inside[i-1];
     end
-    assign na4_start_inside = start_inside(pmp_raw_addr[i]);
+    assign na4_start_inside = raw_start_inside[i];
     assign napot_start_inside = start_inside(napot_base);
 
     // OR-of-AND with mode one-hot vectors.  Equivalent to the previous
@@ -225,9 +243,10 @@ module rapt_pmp #(
   //   match + L=0 + M  -> allow (M-mode bypasses unlocked entries)
   //   match + (L=1 or !M) -> require requested permission
   function automatic logic byte_fault(input logic any_match, input logic perm_r, input logic perm_w,
-                                      input logic perm_x, input logic perm_l);
+                                      input logic perm_x, input logic perm_l, input logic req_r,
+                                      input logic req_w, input logic req_x);
     logic perm_ok;
-    perm_ok = (!op_r || perm_r) && (!op_w || perm_w) && (!op_x || perm_x);
+    perm_ok = (!req_r || perm_r) && (!req_w || perm_w) && (!req_x || perm_x);
     if (!any_match) begin
       return ~is_m;
     end else if (is_m && !perm_l) begin
@@ -239,13 +258,115 @@ module rapt_pmp #(
 
   logic fault_lo, fault_hi;
   logic data_partial_match_fault;
-  assign fault_lo = byte_fault(any_match_lo, perm_r_lo, perm_w_lo, perm_x_lo, perm_l_lo);
-  assign fault_hi = byte_fault(any_match_hi, perm_r_hi, perm_w_hi, perm_x_hi, perm_l_hi);
+  assign fault_lo = byte_fault(any_match_lo, perm_r_lo, perm_w_lo, perm_x_lo,
+      perm_l_lo, op_r, op_w, op_x);
+  assign fault_hi = byte_fault(any_match_hi, perm_r_hi, perm_w_hi, perm_x_hi,
+      perm_l_hi, op_r, op_w, op_x);
   // The highest-priority entry matching ANY byte must cover ALL bytes,
   // even for unlocked M-mode accesses and even if every region permits R/W.
-  assign data_partial_match_fault = (op_r || op_w) && (|entry_overlap)
+  assign data_partial_match_fault = (|entry_overlap)
       && !(|(fm_any & entry_contains_all));
   assign fault_lo_o = fault_lo;
-  assign fault = fault_lo | fault_hi | data_partial_match_fault;
+  assign fault = fault_lo | fault_hi | ((op_r || op_w) && data_partial_match_fault);
+  // CMO read-or-write permission uses the same address, size and privilege.
+  // Share the expensive range comparisons and select R/W only at the leaves.
+  assign fault_read_o = data_partial_match_fault
+      | byte_fault(any_match_lo, perm_r_lo, perm_w_lo, perm_x_lo, perm_l_lo, 1'b1, 1'b0, 1'b0)
+      | byte_fault(any_match_hi, perm_r_hi, perm_w_hi, perm_x_hi, perm_l_hi, 1'b1, 1'b0, 1'b0);
+  assign fault_write_o = data_partial_match_fault
+      | byte_fault(any_match_lo, perm_r_lo, perm_w_lo, perm_x_lo, perm_l_lo, 1'b0, 1'b1, 1'b0)
+      | byte_fault(any_match_hi, perm_r_hi, perm_w_hi, perm_x_hi, perm_l_hi, 1'b0, 1'b1, 1'b0);
 
+endmodule
+
+// Compatibility request interface; unused permission outputs are pruned.
+module rapt_pmp #(
+    parameter int XLEN = `RAPT_XLEN,
+    parameter int PADDR_BITS = `RAPT_PADDR_BITS
+) (
+    /* verilator lint_off UNUSEDSIGNAL */
+    input logic [XLEN-1:0] addr,
+    input logic [     3:0] size_m1,
+    /* verilator lint_on UNUSEDSIGNAL */
+    input logic [     1:0] priv,
+    input logic            op_r,
+    input logic            op_w,
+    input logic            op_x,
+
+    // Decoded inputs from pmp_state_if
+    input logic [PADDR_BITS-3:0] pmp_raw_addr[`RAPT_PMP_NUM],
+    input logic [PADDR_BITS-3:0] pmp_napot_mask[`RAPT_PMP_NUM],
+    input logic [`RAPT_PMP_NUM-1:0] pmp_cfg_r,
+    input logic [`RAPT_PMP_NUM-1:0] pmp_cfg_w,
+    input logic [`RAPT_PMP_NUM-1:0] pmp_cfg_x,
+    input logic [`RAPT_PMP_NUM-1:0] pmp_cfg_l,
+    /* verilator lint_off UNUSEDSIGNAL */
+    input logic [`RAPT_PMP_NUM-1:0] pmp_mode_off,
+    /* verilator lint_on UNUSEDSIGNAL */
+    input logic [`RAPT_PMP_NUM-1:0] pmp_mode_tor,
+    input logic [`RAPT_PMP_NUM-1:0] pmp_mode_na4,
+    input logic [`RAPT_PMP_NUM-1:0] pmp_mode_napot,
+
+    output logic fault,
+    output logic fault_lo_o
+);
+  rapt_pmp_permissions #(
+      .XLEN(XLEN),
+      .PADDR_BITS(PADDR_BITS)
+  ) check_permissions (
+      .addr(addr),
+      .size_m1(size_m1),
+      .priv(priv),
+      .op_r(op_r),
+      .op_w(op_w),
+      .op_x(op_x),
+      .pmp_raw_addr(pmp_raw_addr),
+      .pmp_napot_mask(pmp_napot_mask),
+      .pmp_cfg_r(pmp_cfg_r),
+      .pmp_cfg_w(pmp_cfg_w),
+      .pmp_cfg_x(pmp_cfg_x),
+      .pmp_cfg_l(pmp_cfg_l),
+      .pmp_mode_off(pmp_mode_off),
+      .pmp_mode_tor(pmp_mode_tor),
+      .pmp_mode_na4(pmp_mode_na4),
+      .pmp_mode_napot(pmp_mode_napot),
+      .fault(fault),
+      .fault_lo_o(fault_lo_o),
+      .fault_read_o(),
+      .fault_write_o()
+  );
+endmodule
+
+// A demand access has already passed PMP. A line refill may extend that
+// access only when no enabled PMP region boundary lies inside the line.
+// This needs block equality/mask tests, not a second full permission CAM.
+module rapt_pmp_line_uniform #(
+    parameter int XLEN = `RAPT_XLEN,
+    parameter int PADDR_BITS = `RAPT_PADDR_BITS,
+    parameter int LineOffset = 6
+) (
+    input logic [XLEN-1:0] addr,
+    pmp_state_if.in state,
+    output logic uniform_o
+);
+  localparam int WordBits = PADDR_BITS - 2;
+  localparam int LowBits  = LineOffset - 2;
+  logic [`RAPT_PMP_NUM-1:0] boundary;
+  function automatic logic inside_line(input logic [WordBits-1:0] word_addr);
+    return word_addr[WordBits-1:LowBits] == addr[PADDR_BITS-1:LineOffset]
+        && |word_addr[LowBits-1:0];
+  endfunction
+  for (genvar i = 0; i < `RAPT_PMP_NUM; i++) begin : g_boundary
+    wire [WordBits-1:0] low = i == 0 ? '0 : state.pmp_raw_addr[i > 0 ? i-1 : 0];
+    wire [WordBits-1:0] base = state.pmp_raw_addr[i] & ~state.pmp_napot_mask[i];
+    assign boundary[i] = (state.pmp_mode_tor[i] && (inside_line(
+        low
+    ) || inside_line(
+        state.pmp_raw_addr[i]
+    ))) || (state.pmp_mode_na4[i] &&
+            state.pmp_raw_addr[i][WordBits-1:LowBits] == addr[PADDR_BITS-1:LineOffset]) ||
+        (state.pmp_mode_napot[i] && !(&state.pmp_napot_mask[i][LowBits-1:0]) &&
+         base[WordBits-1:LowBits] == addr[PADDR_BITS-1:LineOffset]);
+  end
+  assign uniform_o = !(|boundary);
 endmodule

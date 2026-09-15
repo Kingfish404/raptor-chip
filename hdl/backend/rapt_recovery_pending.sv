@@ -76,7 +76,8 @@ module rapt_recovery_pending #(
     assign tree_valid[node] = tree_valid[2*node] || tree_valid[2*node+1];
     assign tree_owner[node] = choose_left ? tree_owner[2*node] : tree_owner[2*node+1];
     assign tree_target[node] = choose_left ? tree_target[2*node] : tree_target[2*node+1];
-    assign tree_generation[node] = choose_left ? tree_generation[2*node] : tree_generation[2*node+1];
+    assign tree_generation[node] = choose_left ? tree_generation[2*node]
+        : tree_generation[2*node+1];
     assign tree_age[node] = choose_left ? tree_age[2*node] : tree_age[2*node+1];
   end
 

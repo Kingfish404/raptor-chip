@@ -14,6 +14,9 @@ ROOT = Path(__file__).resolve().parents[2]
 # ordered frontend/backend path whose widths are architectural parameters.
 ACTIVE_PIPELINE = (
     "hdl/rapt_core.sv",
+    "hdl/frontend/rapt_frontend.sv",
+    "hdl/backend/rapt_backend.sv",
+    "hdl/backend/rapt_completion_stage.sv",
     "hdl/include/rapt_idu_if.svh",
     "hdl/include/rapt_rnu_if.svh",
     "hdl/include/rapt_rou_if.svh",

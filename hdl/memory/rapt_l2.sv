@@ -62,10 +62,13 @@ module rapt_l2 #(
     parameter int ID_W = 4,
     parameter int L2_LEN = `RAPT_L2_LEN,
     parameter int L2_LINE_LEN = `RAPT_L2_LINE_LEN,
-    parameter int L2_N_WAYS = `RAPT_L2_N_WAYS
+    parameter int L2_N_WAYS = `RAPT_L2_N_WAYS,
+    parameter int PADDR_BITS = `RAPT_PADDR_BITS
 ) (
     input clock,
     input reset,
+    input logic cbo_inval_i = 1'b0,
+    input logic [11:6] cbo_block_i = '0,
 
     // CPU / rapt_bus side
     axi4_if.slave  axi_s,
@@ -127,13 +130,36 @@ module rapt_l2 #(
   localparam int WordBytes = XLEN / 8;
   localparam int OffsetBits = L2_LINE_LEN + $clog2(WordBytes);
   localparam int IndexBits = L2_LEN;
-  localparam int TagBits = XLEN - IndexBits - OffsetBits;
+  localparam int TagBits = PADDR_BITS - IndexBits - OffsetBits;
+  if (PADDR_BITS > XLEN || PADDR_BITS <= IndexBits + OffsetBits) begin : g_invalid_paddr_width
+    $error("L2 physical address width must fit its request and cache geometry");
+  end
   localparam int ByteOffsetBits = $clog2(WordBytes);
   localparam int WordOffsetLsb = ByteOffsetBits;
   localparam int WordOffsetMsb = ByteOffsetBits + L2_LINE_LEN - 1;
   localparam int IndexLsb = OffsetBits;
   localparam int IndexMsb = OffsetBits + IndexBits - 1;
   localparam int TagLsb = OffsetBits + IndexBits;
+
+  // Queue CBO set masks while accepted AXI work drains. Blocking new
+  // requests through the clear edge prevents an older fill from resurrecting
+  // a line and makes the next demand observe the completed maintenance.
+  localparam logic [11:0] CboIndexMask = 12'((NSets - 1) << OffsetBits) & 12'hfc0;
+  logic [NSets-1:0] cbo_pending, cbo_mask;
+  logic cbo_busy, cbo_apply;
+  logic burst_active, burst_aw_pending, burst_w_done;
+  logic [XLEN-1:0] burst_start, burst_addr;
+  logic [ID_W-1:0] burst_id;
+  logic [7:0] burst_len;
+  logic [2:0] burst_size;
+  logic [1:0] burst_kind;
+  logic [3:0] burst_cache;
+  logic burst_write_fire;
+  for (genvar s = 0; s < NSets; s++) begin : g_cbo_set
+    assign cbo_mask[s] = cbo_inval_i
+        && ((12'(s << OffsetBits) & CboIndexMask) == ({cbo_block_i, 6'b0} & CboIndexMask));
+  end
+  assign cbo_busy = cbo_inval_i || |cbo_pending;
 
   // ---------------------------------------------------------------------
   // Storage. L2_N_WAYS > 1 reserved for future use; current logic only walks
@@ -156,8 +182,16 @@ module rapt_l2 #(
   // ROM/SRAM/flash single-beat through the LiteX fabric and reserve L2 line
   // fills for external main memory where Linux/app payloads execute.
   function automatic logic cacheable(input logic [XLEN-1:0] a);
-    return (0) || (a >= 'h80000000 && a < 'h90000000)  // FPGA main RAM / PMEM window.
-    || (a >= 'ha0000000 && a < 'ha2000000);  // legacy SDRAM window.
+    logic [XLEN-1:0] physical;
+    physical = rapt_pkg::canonical_addr(a);
+    return rapt_pkg::addr_upper_valid(
+        a
+    ) && ((physical >= XLEN'('h80000000) && physical < XLEN'('h80000000) + XLEN'(rapt_pkg::PmemBytes
+           )) || (physical >= XLEN'('ha0000000) && physical < XLEN'('ha2000000)));
+  endfunction
+
+  function automatic logic cacheable_line(input logic [XLEN-1:0] a);
+    return cacheable(a) && cacheable(a | XLEN'((1 << OffsetBits) - 1));
   endfunction
 
   // =====================================================================
@@ -195,7 +229,7 @@ module rapt_l2 #(
   logic [TagBits-1:0] r_tag_q;
   logic r_hit_q;
   assign r_idx_q = r_addr[IndexMsb:IndexLsb];
-  assign r_tag_q = r_addr[XLEN-1:TagLsb];
+  assign r_tag_q = r_addr[PADDR_BITS-1:TagLsb];
   assign r_hit_q = line_valid[0][r_idx_q] && (line_tag[0][r_idx_q] == r_tag_q);
 
   // ---------------------------------------------------------------------
@@ -219,7 +253,8 @@ module rapt_l2 #(
   logic [IndexBits-1:0] data_sram_raddr;
   assign r_hit_beat_fire = (rs == R_HIT) && r_hit_q && (!rs_rvalid || axi_s.rready);
   assign data_sram_raddr =
-      (rs == R_IDLE && axi_s.arvalid && axi_s.arready && (cacheable(axi_s.araddr) && |axi_s.arcache[3:2]))
+      (rs == R_IDLE && axi_s.arvalid && axi_s.arready
+          && (cacheable_line(axi_s.araddr) && |axi_s.arcache[3:2]))
         ? axi_s.araddr[IndexMsb:IndexLsb]
       : (r_hit_beat_fire && (r_len != 8'd0))
           ? r_next_addr[IndexMsb:IndexLsb]
@@ -230,7 +265,8 @@ module rapt_l2 #(
   // ---------------------------------------------------------------------
   // An early-restarted refill can return to IDLE before its registered
   // install pulse writes SRAM. A new lookup needs a real read edge.
-  assign axi_s.arready = (rs == R_IDLE) && !cache_install;
+  assign axi_s.arready = (rs == R_IDLE) && !cache_install && !cbo_busy && !burst_active
+      && !(axi_s.awvalid && axi_s.awlen != 0);
 
   // ---------------------------------------------------------------------
   // Master-side AR (issued during R_MISS_AR or R_BYPASS_AR).
@@ -323,7 +359,7 @@ module rapt_l2 #(
   // models may reorder AR vs same- or other-line AW).
   logic any_write_in_flight;
   logic read_bypass_in_progress;
-  assign any_write_in_flight = wbuf[0].busy || wbuf[1].busy;
+  assign any_write_in_flight = wbuf[0].busy || wbuf[1].busy || burst_active;
   assign read_bypass_in_progress = (rs == R_BYPASS_WAIT) || (rs == R_BYPASS_AR)
                                  || (rs == R_BYPASS_R);
 
@@ -338,7 +374,7 @@ module rapt_l2 #(
   logic w_full_strobe;
   assign w_snoop_addr = wbuf[w_wptr].addr;
   assign w_idx_q = w_snoop_addr[IndexMsb:IndexLsb];
-  assign w_tag_q = w_snoop_addr[XLEN-1:TagLsb];
+  assign w_tag_q = w_snoop_addr[PADDR_BITS-1:TagLsb];
   assign w_hit_q = line_valid[0][w_idx_q] && (line_tag[0][w_idx_q] == w_tag_q);
   assign w_word_now = w_snoop_addr[WordOffsetMsb:WordOffsetLsb];
   assign w_full_strobe = &axi_s.wstrb;
@@ -394,9 +430,10 @@ module rapt_l2 #(
   logic write_response_error;
   logic [IndexBits-1:0] write_error_idx;
   logic [TagBits-1:0] write_error_tag;
-  assign write_response_error = axi_m.bvalid && axi_m.bready && axi_m.bresp != 2'b00;
+  assign write_response_error = !burst_active && axi_m.bvalid && axi_m.bready
+      && axi_m.bresp != 2'b00;
   assign write_error_idx = wbuf[d_rptr].addr[IndexMsb:IndexLsb];
-  assign write_error_tag = wbuf[d_rptr].addr[XLEN-1:TagLsb];
+  assign write_error_tag = wbuf[d_rptr].addr[PADDR_BITS-1:TagLsb];
 
   // ---------------------------------------------------------------------
   // Read FSM
@@ -457,14 +494,14 @@ module rapt_l2 #(
             r_cache <= axi_s.arcache;
             r_word  <= axi_s.araddr[WordOffsetMsb:WordOffsetLsb];
             r_resp  <= 2'b00;
-            if ((cacheable(axi_s.araddr) && |axi_s.arcache[3:2])) begin
+            if ((cacheable_line(axi_s.araddr) && |axi_s.arcache[3:2])) begin
               // Lookup is combinational on r_addr_next; but since we
               // sample on the same edge we must wait one cycle for
               // r_addr to be latched, then decide. Use a transient state:
               rs <= R_HIT;
             end else begin
               // Forward AR straight through.
-              if (any_write_in_flight || axi_s.awvalid) begin
+              if (any_write_in_flight || (axi_s.awvalid && axi_s.awready)) begin
                 rs <= R_BYPASS_WAIT;
               end else begin
                 m_arvalid <= 1'b1;
@@ -524,7 +561,7 @@ module rapt_l2 #(
             //  3) Any write activity at all (worst-case fallback): the
             //     bus-level model may reorder AR vs AW for different
             //     addresses too, so be conservative.
-            if (any_write_in_flight || axi_s.awvalid) begin
+            if (any_write_in_flight || (axi_s.awvalid && axi_s.awready)) begin
               // hold in R_HIT; re-evaluate next cycle
             end else begin
               r_fill_cnt <= '0;
@@ -685,6 +722,13 @@ module rapt_l2 #(
                  && line_tag[0][write_error_idx] == write_error_tag))) begin
         line_valid[0][write_error_idx] <= 1'b0;
       end
+      // Burst writes invalidate each touched physical set. Reads are held
+      // until the real B, so no partially written block can be observed here.
+      if (burst_write_fire) line_valid[0][burst_addr[IndexMsb:IndexLsb]] <= 1'b0;
+      if (cbo_apply) begin
+        for (int set_idx = 0; set_idx < NSets; set_idx++)
+        if (cbo_pending[set_idx] || cbo_mask[set_idx]) line_valid[0][set_idx] <= 1'b0;
+      end
     end
   end
 
@@ -698,7 +742,7 @@ module rapt_l2 #(
   // ---- Snoop hit/update (fires same cycle as W capture) ----
   always_comb begin
     w_hit_update = 1'b0;
-    if (axi_s.wvalid && axi_s.wready && cacheable(
+    if (!burst_active && axi_s.wvalid && axi_s.wready && cacheable(
             w_snoop_addr
         ) && |wbuf[w_wptr].cache[3:2] && w_hit_q) begin
       w_hit_update = 1'b1;
@@ -712,40 +756,80 @@ module rapt_l2 #(
   logic l2_aw_same_line;
   assign l2_fill_in_progress = (rs == R_MISS_AR) || (rs == R_MISS_R);
   assign l2_aw_same_line = (axi_s.awaddr[XLEN-1:OffsetBits] == r_addr[XLEN-1:OffsetBits]);
-  assign axi_s.awready = !wbuf[aw_wptr].busy && !bq_full && !read_bypass_in_progress
-                       && !(l2_fill_in_progress && l2_aw_same_line);
+  assign axi_s.awready = !cbo_busy && !burst_active
+      && (axi_s.awlen != 0
+          ? (!any_write_in_flight && b_count == 0 && rs == R_IDLE && !rs_rvalid && !cache_install)
+          : (!wbuf[aw_wptr].busy && !bq_full && !read_bypass_in_progress
+              && !(l2_fill_in_progress && l2_aw_same_line)));
 
   // W: accept when the W-target slot has an AW captured but no W yet.
   // (For single-beat stores w_wptr always points at the right slot.)
   logic wbuf_w_pending;
   assign wbuf_w_pending = wbuf[w_wptr].busy && !wbuf[w_wptr].has_w;
-  assign axi_s.wready = wbuf_w_pending && !cache_install;
+  assign axi_s.wready = burst_active
+      ? (!burst_aw_pending && !burst_w_done && axi_m.wready)
+      : wbuf_w_pending && !cache_install;
 
   // B: cacheable main-memory writes are posted; non-cacheable writes wait for
   // the real downstream B so CSR/MMIO polling remains strictly ordered.
-  assign axi_s.bvalid = (b_count != 0) && b_ready_q[b_rptr];
-  assign axi_s.bid    = b_id_q[b_rptr];
-  assign axi_s.bresp  = b_resp_q[b_rptr];
+  assign axi_s.bvalid = burst_active ? (!burst_aw_pending && burst_w_done && axi_m.bvalid)
+      : (b_count != 0) && b_ready_q[b_rptr];
+  assign axi_s.bid    = burst_active ? axi_m.bid : b_id_q[b_rptr];
+  assign axi_s.bresp  = burst_active ? axi_m.bresp : b_resp_q[b_rptr];
 
   // ---- Downstream (master) drives ----
   // AW/W issued combinationally from the drain head. axi_m.awvalid is
   // gated on ws==W_IDLE (no AW in flight) AND head ready.
-  assign axi_m.awvalid = (ws == W_IDLE)
-                         && wbuf[d_rptr].busy
-                         && wbuf[d_rptr].has_w;
-  assign axi_m.awaddr  = wbuf[d_rptr].addr;
-  assign axi_m.awid    = wbuf[d_rptr].id;
-  assign axi_m.awlen   = wbuf[d_rptr].len;
-  assign axi_m.awsize  = wbuf[d_rptr].size;
-  assign axi_m.awburst = wbuf[d_rptr].burst;
-  assign axi_m.awcache = wbuf[d_rptr].cache;
+  assign axi_m.awvalid = burst_active ? burst_aw_pending
+      : (ws == W_IDLE) && wbuf[d_rptr].busy && wbuf[d_rptr].has_w;
+  assign axi_m.awaddr  = burst_active ? burst_start : wbuf[d_rptr].addr;
+  assign axi_m.awid    = burst_active ? burst_id : wbuf[d_rptr].id;
+  assign axi_m.awlen   = burst_active ? burst_len : wbuf[d_rptr].len;
+  assign axi_m.awsize  = burst_active ? burst_size : wbuf[d_rptr].size;
+  assign axi_m.awburst = burst_active ? burst_kind : wbuf[d_rptr].burst;
+  assign axi_m.awcache = burst_active ? burst_cache : wbuf[d_rptr].cache;
+  // Burst W streams without collecting a line in registers. The upstream
+  // master holds payload under backpressure; B remains the real memory B.
+  assign axi_m.wvalid = burst_active
+      ? (!burst_aw_pending && !burst_w_done && axi_s.wvalid) : ws == W_W;
+  assign axi_m.wdata = burst_active ? axi_s.wdata : wbuf[d_rptr].wdata;
+  assign axi_m.wstrb = burst_active ? axi_s.wstrb : wbuf[d_rptr].wstrb;
+  assign axi_m.wlast = burst_active ? axi_s.wlast : wbuf[d_rptr].wlast;
+  assign axi_m.bready = burst_active
+      ? (!burst_aw_pending && burst_w_done && axi_s.bready) : ws == W_B;
+  assign burst_write_fire = burst_active && axi_s.wvalid && axi_s.wready;
 
-  assign axi_m.wvalid  = (ws == W_W);
-  assign axi_m.wdata   = wbuf[d_rptr].wdata;
-  assign axi_m.wstrb   = wbuf[d_rptr].wstrb;
-  assign axi_m.wlast   = wbuf[d_rptr].wlast;
-
-  assign axi_m.bready  = (ws == W_B);
+  assign cbo_apply = cbo_busy && rs == R_IDLE && !rs_rvalid && !cache_install
+      && !any_write_in_flight && b_count == 0;
+  always_ff @(posedge clock) begin
+    if (reset) begin
+      cbo_pending <= '0;
+      burst_active <= 0;
+      burst_aw_pending <= 0;
+      burst_w_done <= 0;
+    end else begin
+      cbo_pending <= cbo_apply ? '0 : cbo_pending | cbo_mask;
+      if (axi_s.awvalid && axi_s.awready && axi_s.awlen != 0) begin
+        burst_active <= 1;
+        burst_aw_pending <= 1;
+        burst_w_done <= 0;
+        burst_start <= axi_s.awaddr;
+        burst_addr <= axi_s.awaddr;
+        burst_id <= axi_s.awid;
+        burst_len <= axi_s.awlen;
+        burst_size <= axi_s.awsize;
+        burst_kind <= axi_s.awburst;
+        burst_cache <= axi_s.awcache;
+      end
+      if (burst_active && axi_m.awvalid && axi_m.awready) burst_aw_pending <= 0;
+      if (burst_write_fire) begin
+        if (axi_s.wlast) burst_w_done <= 1;
+        if (burst_kind == 2'b01)
+          burst_addr <= (burst_addr & ~((XLEN'(1) << burst_size) - 1)) + (XLEN'(1) << burst_size);
+      end
+      if (burst_active && axi_s.bvalid && axi_s.bready) burst_active <= 0;
+    end
+  end
 
   // ---- Combined capture + drain FSM ----
   always_ff @(posedge clock) begin
@@ -770,7 +854,7 @@ module rapt_l2 #(
       unique case (ws)
         W_IDLE: begin
           // axi_m.awvalid is combinational; transition when accepted.
-          if (axi_m.awvalid && axi_m.awready) ws <= W_W;
+          if (!burst_active && axi_m.awvalid && axi_m.awready) ws <= W_W;
         end
         W_W: begin
           if (axi_m.wready) ws <= W_B;
@@ -795,7 +879,7 @@ module rapt_l2 #(
       // wraparound cycle (drain freeing slot S while a new AW also
       // targets slot S because aw_wptr == d_rptr), the AW capture wins
       // and the slot is immediately re-used. NBA semantics preserved.
-      if (axi_s.awvalid && axi_s.awready) begin
+      if (axi_s.awvalid && axi_s.awready && axi_s.awlen == 0) begin
         wbuf[aw_wptr].busy  <= 1'b1;
         wbuf[aw_wptr].has_w <= 1'b0;
         wbuf[aw_wptr].addr  <= axi_s.awaddr;
@@ -812,7 +896,7 @@ module rapt_l2 #(
       end
 
       // ---- W capture (slave) ----
-      if (axi_s.wvalid && axi_s.wready) begin
+      if (!burst_active && axi_s.wvalid && axi_s.wready) begin
         wbuf[w_wptr].wdata <= axi_s.wdata;
         wbuf[w_wptr].wstrb <= axi_s.wstrb;
         wbuf[w_wptr].wlast <= axi_s.wlast;
@@ -830,7 +914,7 @@ module rapt_l2 #(
       end
 
       // ---- Upstream B consume ----
-      if (axi_s.bvalid && axi_s.bready) begin
+      if (!burst_active && axi_s.bvalid && axi_s.bready) begin
         b_ready_q[b_rptr] <= 1'b0;
         b_resp_q [b_rptr] <= 2'b00;
         b_rptr <= (b_rptr == WbufPtrW'(WbufDepth - 1)) ? '0 : (b_rptr + 1'b1);
@@ -839,8 +923,8 @@ module rapt_l2 #(
       // ---- B credit counter ----
       // Net delta: +1 on W-beat last capture, -1 on upstream B handshake.
       b_count <= b_count
-                 + WbufCntW'((axi_s.wvalid && axi_s.wready && axi_s.wlast) ? 1 : 0)
-                 - WbufCntW'((axi_s.bvalid && axi_s.bready) ? 1 : 0);
+                 + WbufCntW'((!burst_active && axi_s.wvalid && axi_s.wready && axi_s.wlast) ? 1 : 0)
+                 - WbufCntW'((!burst_active && axi_s.bvalid && axi_s.bready) ? 1 : 0);
     end
   end
 

@@ -62,19 +62,19 @@ module tb_half_flush;
       case (datum)
         0: begin
           half_operand=64'hffffffffffff7c01;
-          fp_operand=d?64'h7ff0000000000001:64'hffffffff7f800001;
+          fp_operand=(d != 0)?64'h7ff0000000000001:64'hffffffff7f800001;
         end
         1: begin
           half_operand=64'hffffffffffff0001;
-          fp_operand=d?64'h3f0ffc0000000000:64'hffffffff387fe000;
+          fp_operand=(d != 0)?64'h3f0ffc0000000000:64'hffffffff387fe000;
         end
         2: begin
           half_operand=64'hffffffffffff8001;
-          fp_operand=d?64'hbf0ffc0000000000:64'hffffffffb87fe000;
+          fp_operand=(d != 0)?64'hbf0ffc0000000000:64'hffffffffb87fe000;
         end
         3: begin
           half_operand=64'hffffffffffff7bff;
-          fp_operand=d?64'h7fefffffffffffff:64'hffffffff7f7fffff;
+          fp_operand=(d != 0)?64'h7fefffffffffffff:64'hffffffff7f7fffff;
         end
         4: begin
           half_operand=64'h0000000000007c01;
@@ -82,15 +82,15 @@ module tb_half_flush;
         end
         5: begin
           half_operand=64'hffffffffffff7e55;
-          fp_operand=d?64'h7ff8000000000055:64'hffffffff7fc00055;
+          fp_operand=(d != 0)?64'h7ff8000000000055:64'hffffffff7fc00055;
         end
         6: begin
           half_operand=64'hffffffffffff8000;
-          fp_operand=d?64'h8000000000000000:64'hffffffff80000000;
+          fp_operand=(d != 0)?64'h8000000000000000:64'hffffffff80000000;
         end
         default: begin
           half_operand=64'hffffffffffff0000;
-          fp_operand=d?64'h0000000000000000:64'hffffffff00000000;
+          fp_operand=(d != 0)?64'h0000000000000000:64'hffffffff00000000;
         end
       endcase
       valid = 1;
@@ -114,13 +114,13 @@ module tb_half_flush;
       end
       // Immediate reuse and a valid numerical control after cancellation.
       half_operand=64'hffffffffffff3c00;
-      fp_operand=d?64'h3ff0000000000000:64'hffffffff3f800000;
+      fp_operand=(d != 0)?64'h3ff0000000000000:64'hffffffff3f800000;
       valid=1;
       tick();
       valid = 0;
       if(!widen_valid || !narrow_valid || widen_flags!=0 || narrow_flags!=0
           || narrow_result!=64'hffffffffffff3c00
-          || widen_result!=(d?64'h3ff0000000000000:64'hffffffff3f800000))
+          || widen_result!=((d != 0)?64'h3ff0000000000000:64'hffffffff3f800000))
         $fatal(1, "reuse result/flags corrupted scenario%0d", scenarios);
       tick();
       empty();

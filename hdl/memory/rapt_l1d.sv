@@ -4,12 +4,14 @@
 
 /* verilator lint_off PINCONNECTEMPTY */
 module rapt_l1d #(
+    parameter bit LineRefill = 1,
     parameter int L1D_LINE_LEN = `RAPT_L1D_LINE_LEN,
     parameter int unsigned L1D_LINE_SIZE = 2 ** L1D_LINE_LEN,
     parameter int L1D_LEN = `RAPT_L1D_LEN,
     parameter int unsigned L1D_SIZE = 2 ** L1D_LEN,
     parameter int XLEN = `RAPT_XLEN,
-    parameter unsigned L1D_N_WAYS = `RAPT_L1D_N_WAYS
+    parameter unsigned L1D_N_WAYS = `RAPT_L1D_N_WAYS,
+    parameter int PADDR_BITS = `RAPT_PADDR_BITS
 ) (
     input clock,
     // Device writes are reported before a later SC may complete. Pending
@@ -28,7 +30,6 @@ module rapt_l1d #(
     csr_bcast_if.in csr_bcast,
     pmp_update_if.in pmp_update,
     lsu_l1d_mmu_if.slave exu_l1d,
-    rou_cmu_if.in rou_cmu,
 
     input reset
 );
@@ -76,18 +77,77 @@ module rapt_l1d #(
   // don't require whole-line eviction.  When a new tag is installed in a
   // line (tag mismatch), all valid bits except the new target are cleared.
   localparam unsigned L1dOffsetBits = $clog2(XLEN / 8);  // 2 for RV32, 3 for RV64
-  localparam unsigned L1dTagW = XLEN - L1D_LEN - L1D_LINE_LEN - L1dOffsetBits;
+  localparam unsigned L1dTagW = PADDR_BITS - L1D_LEN - L1D_LINE_LEN - L1dOffsetBits;
+  if (PADDR_BITS > XLEN || PADDR_BITS <= L1D_LEN + L1D_LINE_LEN + L1dOffsetBits)
+    begin : g_invalid_paddr_width
+    $error("L1D physical address width must fit its request and cache geometry");
+  end
   localparam unsigned L1dWayW = L1D_N_WAYS > 1 ? $clog2(L1D_N_WAYS) : 1;
   logic [L1D_SIZE-1:0] fence_clear_set;
+  logic [L1D_SIZE-1:0] maintenance_set;
   logic fence_clear_busy;
+  logic zero_complete;
+  // Maintenance and refill logic reference these before the address logic.
+  logic [L1D_LEN-1:0] waddr_idx;
+  logic [L1D_LINE_LEN-1:0] addr_offset;
+  assign zero_complete = lsu_l1d.wvalid && lsu_l1d.wready && lsu_l1d.wzero;
 
-  assign fence_clear_busy = cmu_bcast.fence_time || |fence_clear_set;
+  // No tag lookup: invalidate every way of the VA-selected set. A CBO block
+  // is 64 bytes even for presets with smaller cache lines, so ignore index
+  // bits below bit 6. Index bits above the page offset are also ignored: a
+  // larger custom geometry clears all possible physical colors safely.
+  localparam unsigned L1dLineOffset = L1D_LINE_LEN + L1dOffsetBits;
+  localparam logic [11:0] CboIndexMask = 12'((L1D_SIZE - 1) << L1dLineOffset) & 12'hfc0;
+  for (genvar s = 0; s < L1D_SIZE; s++) begin : g_maintenance_set
+    assign maintenance_set[s] = cmu_bcast.fence_time || (cmu_bcast.cbo_inval
+        && (12'(s << L1dLineOffset) & CboIndexMask)
+            == ({cmu_bcast.cbo_block, 6'b0} & CboIndexMask))
+        || (zero_complete && ((s >> (L1dLineOffset < 6 ? 6-L1dLineOffset : 0))
+            == (int'(waddr_idx) >> (L1dLineOffset < 6 ? 6-L1dLineOffset : 0))));
+  end
+  assign fence_clear_busy = cmu_bcast.fence_time || cmu_bcast.cbo_inval || |fence_clear_set;
+
+  logic refill_safe, refill_pmp_uniform;
+  logic refill_line, demand_done;
+  logic [L1D_LINE_LEN-1:0] refill_word;
+  logic demand_beat, line_read_request;
+  logic [XLEN-1:0] refill_base, refill_last;
+  assign refill_base = {l1d_addr[XLEN-1:L1dLineOffset], {L1dLineOffset{1'b0}}};
+  assign refill_last = refill_base | XLEN'((1 << L1dLineOffset)-1);
+  assign line_read_request = LineRefill && refill_safe;
+  assign demand_beat = !refill_line || refill_word == addr_offset;
+`ifdef RAPT_L2_EN
+`ifdef RAPT_L2_LINE_LEN
+  localparam int DownstreamLineOffset = `RAPT_L2_LINE_LEN + $clog2(XLEN / 8);
+`else
+  localparam int DownstreamLineOffset = $clog2(`RAPT_CACHE_LINE_BYTES);
+`endif
+`else
+  localparam int DownstreamLineOffset = L1dLineOffset;
+`endif
+  localparam int GuardOffset = DownstreamLineOffset > L1dLineOffset
+      ? DownstreamLineOffset : L1dLineOffset;
+  rapt_pmp_line_uniform #(
+      .XLEN(XLEN),
+      .LineOffset(GuardOffset)
+  ) u_refill_pmp (
+      .addr(l1d_addr),
+      .state(pmp_state),
+      .uniform_o(refill_pmp_uniform)
+  );
+  // Keep narrow ROM/SRAM/device bridges on their established word protocol.
+  // A RAM burst stays in one physical PMA range and one translated page.
+  function automatic logic refill_ram(input logic [XLEN-1:0] first, input logic [XLEN-1:0] last);
+    return (rapt_pkg::canonical_addr(first) >= XLEN'('h80000000) &&
+            rapt_pkg::canonical_addr(last) < XLEN'('h80000000) + XLEN'(rapt_pkg::PmemBytes)) ||
+        (rapt_pkg::canonical_addr(first) >= XLEN'('ha0000000) &&
+         rapt_pkg::canonical_addr(last) < XLEN'('ha2000000));
+  endfunction
 
   logic [7:0] rstrb;
 
   logic [L1dTagW-1:0] addr_tag;
   logic [L1D_LEN-1:0] addr_idx;
-  logic [L1D_LINE_LEN-1:0] addr_offset;
   logic tag_hit;   // tag comparison result (combinational, from register arrays)
   logic data_hit;  // SRAM data ready after 1-cycle read latency
   logic [XLEN-1:0] l1d_data;
@@ -95,7 +155,6 @@ module rapt_l1d #(
   logic cacheable_w;
 
   logic [L1dTagW-1:0] waddr_tag;
-  logic [L1D_LEN-1:0] waddr_idx;
   logic [L1D_LINE_LEN-1:0] waddr_offset;
   logic hit_w;
 
@@ -172,7 +231,7 @@ module rapt_l1d #(
   logic [L1D_LINE_LEN-1:0] l1d_off;
   logic [L1dWayW-1:0] l1d_way;           // which way for pending l1d_update
   logic [L1dWayW-1:0] ld_fill_way_r;     // registered fill way for load miss
-  logic [L1D_SIZE-1:0] d_replace_bit;      // random replacement toggle per set (used for 2-way only)
+  logic [L1D_SIZE-1:0] d_replace_bit;  // random replacement toggle per set (2-way only)
 
   assign lsu_l1d.idle = l1d_state == IDLE && !ptw_busy && !l1d_update
       && !fence_clear_busy && !lsu_l1d.rvalid && !lsu_l1d.rvalid_b
@@ -220,7 +279,7 @@ module rapt_l1d #(
       && (l1d_state == IDLE)  // Only in IDLE; PTWAIT/LD_D would steal read port
       && !load_speculate  // load speculation uses SRAM read port
       && lsu_l1d.wvalid && l1d_bus.wready && !l1d_bus.werr && cacheable_w && hit_w
-      && (lsu_l1d.walu != FullStoreWstrb);  // partial-store RMW: SRAM read port is free in IDLE, capture the
+      && (lsu_l1d.walu != FullStoreWstrb);  // partial-store RMW: SRAM read port is free in IDLE,
   // hit-line for byte-lane merge on next cycle. wready is gated by
   // `!l1d_rmw` so an incoming store on the merge-write cycle is
   // held one cycle (preventing silent drop).
@@ -406,7 +465,7 @@ module rapt_l1d #(
     | rstrb_rv64
     );
 
-  assign addr_tag = l1d_addr[XLEN-1:L1D_LEN+L1D_LINE_LEN+L1dOffsetBits];
+  assign addr_tag = l1d_addr[PADDR_BITS-1:L1D_LEN+L1D_LINE_LEN+L1dOffsetBits];
   assign addr_idx = l1d_addr[L1D_LEN+L1D_LINE_LEN+L1dOffsetBits-1:L1D_LINE_LEN+L1dOffsetBits];
   assign addr_offset = l1d_addr[L1D_LINE_LEN+L1dOffsetBits-1:L1dOffsetBits];
 
@@ -503,9 +562,10 @@ module rapt_l1d #(
 `ifdef RAPT_LSU_HUM
   logic b_armed;
   logic [XLEN-1:0] b_addr_r;
-  assign b_idx_in = lsu_l1d.raddr_b[L1D_LEN+L1D_LINE_LEN+L1dOffsetBits-1:L1D_LINE_LEN+L1dOffsetBits];
+  assign b_idx_in
+      = lsu_l1d.raddr_b[L1D_LEN+L1D_LINE_LEN+L1dOffsetBits-1:L1D_LINE_LEN+L1dOffsetBits];
   assign b_arm_ok = (l1d_state == LD_D) && lsu_l1d.rvalid_b && !mmu_en
-                  && !l1d_rmw && !l1d_update
+                  && !l1d_rmw && !l1d_update && !fence_clear_busy
                   && rapt_pkg::addr_cacheable(lsu_l1d.raddr_b)
                   && !cmu_bcast.flush_pipe;
 
@@ -520,7 +580,7 @@ module rapt_l1d #(
   end
 
   // B-side decode + tag compare (parallel to A's, on the registered B addr)
-  assign b_tag = b_addr_r[XLEN-1:L1D_LEN+L1D_LINE_LEN+L1dOffsetBits];
+  assign b_tag = b_addr_r[PADDR_BITS-1:L1D_LEN+L1D_LINE_LEN+L1dOffsetBits];
   assign b_idx = b_addr_r[L1D_LEN+L1D_LINE_LEN+L1dOffsetBits-1:L1D_LINE_LEN+L1dOffsetBits];
   assign b_off = b_addr_r[L1D_LINE_LEN+L1dOffsetBits-1:L1dOffsetBits];
 
@@ -541,7 +601,7 @@ module rapt_l1d #(
                          && lsu_l1d.rvalid_b
                          && (lsu_l1d.raddr_b == b_addr_r)
                          && |b_way_hit
-                         && !l1d_rmw && !l1d_update
+                         && !l1d_rmw && !l1d_update && !fence_clear_busy
                          && !cmu_bcast.flush_pipe;
   assign lsu_l1d.rdata_b = b_data;
 `else
@@ -553,7 +613,7 @@ module rapt_l1d #(
   /* verilator lint_on UNUSEDSIGNAL */
 `endif
 
-  assign waddr_tag = lsu_l1d.waddr[XLEN-1:L1D_LEN+L1D_LINE_LEN+L1dOffsetBits];
+  assign waddr_tag = lsu_l1d.waddr[PADDR_BITS-1:L1D_LEN+L1D_LINE_LEN+L1dOffsetBits];
   assign waddr_idx = lsu_l1d.waddr[L1D_LEN+L1D_LINE_LEN+L1dOffsetBits-1:L1D_LINE_LEN+L1dOffsetBits];
   assign waddr_offset = lsu_l1d.waddr[L1D_LINE_LEN+L1dOffsetBits-1:L1dOffsetBits];
 
@@ -574,13 +634,15 @@ module rapt_l1d #(
   logic pmp_store_fault_mmu, store_unmapped_fault_mmu, pmp_ptw_fault;
   logic pf_load_tlb, pf_store_tlb, pf_load_ptw, pf_store_ptw;
   rapt_l1d_access #(
-      .XLEN(XLEN)
+      .XLEN(XLEN),
+      .ShareLoadWalk(1'b1)
   ) u_access (
       .csr_bcast(csr_bcast),
       .pmp_state(pmp_state),
       .load_addr(l1d_addr + (l1d_check_valid ? XLEN'(l1d_check_offset) : XLEN'(0))),
       .store_addr(exu_l1d.paddr),
       .ptw_addr(ptw_araddr),
+      .ptw_check_active(ptw_arvalid),
       .load_size_m1(l1d_check_valid ? l1d_check_size_m1
           : ((4'd1 << l1d_ralu[1:0]) - 4'd1)),
       .store_walu(8'(exu_l1d.walu)),
@@ -619,8 +681,9 @@ module rapt_l1d #(
       && !tag_hit
       && !l1d_sram_busy
       && (cacheable_r || lsu_l1d.ordered)
-      && !cmu_bcast.flush_pipe;
-  assign l1d_bus.araddr = ptw_arvalid ? ptw_araddr : l1d_addr;
+      && !cmu_bcast.flush_pipe
+      && (!line_read_request || !lsu_l1d.wvalid);
+  assign l1d_bus.araddr = ptw_arvalid ? ptw_araddr : line_read_request ? refill_base : l1d_addr;
   assign l1d_bus.rstrb = (cacheable_r || ptw_arvalid) ? 8'($unsigned({XLEN/8{1'b1}})) : rstrb;
   assign l1d_bus.ar_ptw = ptw_arvalid;
   assign l1d_bus.rpbmt = ptw_arvalid ? 2'b00 : l1d_pbmt;
@@ -636,23 +699,33 @@ module rapt_l1d #(
   assign lsu_l1d.cause = cause;
   // LD_A is reached only after LD_CHECK accepted the complete access.
   // Keep live permission decoding out of the ready/fast-wakeup path.
+  // A translated device load may be younger than a not-yet-ready RAM load.
+  // Parking here would occupy their only request channel indefinitely.
+  // No load AR has been accepted in LD_A; return ownership without data.
+  assign lsu_l1d.rretry = (l1d_state == LD_A) && lsu_l1d.rvalid
+      && (rec_addr == lsu_l1d.raddr) && !cacheable_r && !lsu_l1d.ordered
+      && !load_killed && !cmu_bcast.flush_pipe;
   assign lsu_l1d.rready = !load_killed && !cmu_bcast.flush_pipe && ((lsu_l1d.rvalid && lsu_l1d.trap)
       || (data_hit
         && lsu_l1d.rvalid
         && rec_addr == lsu_l1d.raddr)
       || ((l1d_state == LD_D)
           && (lsu_l1d.rvalid)
-          && (l1d_bus.rvalid)
+          && (l1d_bus.rvalid) && demand_beat && !demand_done
           && !l1d_bus.rerr
           && (rec_addr == lsu_l1d.raddr)));
 
   // write channel
-  assign l1d_bus.awvalid = ptw_awvalid ? 1'b1 : lsu_l1d.wvalid;
+  assign l1d_bus.wzero = !ptw_wvalid && lsu_l1d.wzero;
+  assign l1d_bus.noallocate = ptw_arvalid || !refill_safe;
+  assign l1d_bus.arlen = !ptw_arvalid && line_read_request ? 8'(L1D_LINE_SIZE-1) : 8'd0;
+  assign l1d_bus.awvalid = ptw_awvalid ? 1'b1
+      : lsu_l1d.wvalid && !(l1d_state == LD_D && refill_line);
   assign l1d_bus.awaddr = ptw_awvalid ? ptw_awaddr : lsu_l1d.waddr;
   assign l1d_bus.aw_ptw = ptw_awvalid;
   assign l1d_bus.wpbmt = ptw_awvalid ? 2'b00 : lsu_l1d.wpbmt;
   assign l1d_bus.wstrb = ptw_wvalid ? ptw_wstrb : lsu_l1d.walu;
-  assign l1d_bus.wvalid = ptw_wvalid ? 1'b1 : lsu_l1d.wvalid;
+  assign l1d_bus.wvalid = ptw_wvalid ? 1'b1 : lsu_l1d.wvalid && !(l1d_state == LD_D && refill_line);
   assign l1d_bus.wdata = ptw_wvalid ? ptw_wdata : lsu_l1d.wdata;
 
   assign ptw_wready = ptw_wvalid && l1d_bus.ptw_wready;
@@ -662,7 +735,8 @@ module rapt_l1d #(
   // and would be silently dropped if wready had fired. Stalling the store
   // for one cycle lets the merge-write complete and the next-cycle SET will
   // re-evaluate the new store.
-  assign lsu_l1d.wready = !ptw_wvalid && l1d_bus.wready && !l1d_rmw && !fence_clear_busy;
+  assign lsu_l1d.wready = !ptw_wvalid && l1d_bus.wready && !l1d_rmw && !fence_clear_busy
+      && !(l1d_state == LD_D && refill_line);
   assign lsu_l1d.werr = lsu_l1d.wready && l1d_bus.werr;
 
   // store address translation: stlb_hit uses TLB, otherwise wait for PTW
@@ -710,8 +784,13 @@ module rapt_l1d #(
       reservation_size_m1 <= 4'd3;
       l1d_atomic_lock <= 1'b0;
       load_killed <= 1'b0;
+      refill_safe <= 0;
+      refill_line <= 0;
+      refill_word <= '0;
+      demand_done <= 0;
+
     end else begin
-      fence_clear_set <= {L1D_SIZE{cmu_bcast.fence_time}};
+      fence_clear_set <= maintenance_set;
       if (external_hits_reservation) begin
         reservation_valid <= 1'b0;
       end
@@ -734,7 +813,8 @@ module rapt_l1d #(
                   cause <= `RAPT_CAUSE_STORE_PAGE_FAULT;
                   rec_addr <= exu_l1d.vaddr;
                   l1d_state <= TRAP;
-                end else if (stlb_hit && (pmp_store_fault_mmu || store_unmapped_fault_mmu || store_io_size_fault)) begin
+                end else if (stlb_hit && (pmp_store_fault_mmu || store_unmapped_fault_mmu
+                    || store_io_size_fault)) begin
                   // PMP violation on translated store address.
                   cause <= `RAPT_CAUSE_STORE_ACC_FAULT;
                   rec_addr <= exu_l1d.vaddr;
@@ -829,7 +909,8 @@ module rapt_l1d #(
               if (pf_store_ptw) begin
                 cause <= `RAPT_CAUSE_STORE_PAGE_FAULT;
                 l1d_state <= TRAP;
-              end else if (pmp_store_fault_mmu || store_unmapped_fault_mmu || store_io_size_fault) begin
+              end else if (pmp_store_fault_mmu || store_unmapped_fault_mmu
+                  || store_io_size_fault) begin
                 // PMP denies store on the freshly-translated PA.
                 cause <= `RAPT_CAUSE_STORE_ACC_FAULT;
                 l1d_state <= TRAP;
@@ -861,9 +942,17 @@ module rapt_l1d #(
           l1d_state <= IDLE;
         end
         LD_CHECK: begin
+          refill_safe <= cacheable_r && refill_pmp_uniform && L1dLineOffset <= 12 && refill_ram(
+              refill_base, refill_last
+          );
           if (cmu_bcast.flush_pipe) begin
             l1d_addr <= '0;
             l1d_state <= IDLE;
+          end else if (ptw_arvalid) begin
+            // A PTW request can survive until trap recovery after a denied
+            // PTE read. It owns the shared read checker, so keep this load
+            // captured without consuming the PTW's permission result.
+            l1d_state <= LD_CHECK;
           end else if (pmp_load_fault || load_unmapped_fault || load_io_size_fault) begin
             // PMP denies load at this physical address for eff_priv,
             // or the address is unmapped (bus error -> access fault).
@@ -878,7 +967,8 @@ module rapt_l1d #(
             l1d_addr <= '0;
             l1d_state <= IDLE;
           end else if (!cacheable_r && !lsu_l1d.ordered) begin
-            l1d_state <= LD_A;
+            l1d_addr <= '0;
+            l1d_state <= IDLE;
           end else if (l1d_atomic_lock) begin
             if (tag_hit) begin
               reservation <= l1d_addr;
@@ -895,6 +985,9 @@ module rapt_l1d #(
               if (l1d_bus.rready && !ptw_arvalid) begin
                 l1d_state <= LD_D;
                 ld_fill_way_r <= ld_fill_way;
+                refill_line <= line_read_request;
+                refill_word <= '0;
+                demand_done <= 0;
               end
             end
           end else if (tag_hit) begin
@@ -909,30 +1002,34 @@ module rapt_l1d #(
             if (l1d_bus.rready && !ptw_arvalid) begin
               l1d_state <= LD_D;
               ld_fill_way_r <= ld_fill_way;
+              refill_line <= line_read_request;
+              refill_word <= '0;
+              demand_done <= 0;
             end
           end
         end
         LD_D: begin
-          if (cmu_bcast.flush_pipe) begin
-            load_killed <= 1'b1;
-          end
+          if (cmu_bcast.flush_pipe) load_killed <= 1'b1;
           if (l1d_bus.rvalid) begin
-            // Bus error on the response beat -> load access-fault. Gated
-            // on `rvalid` (the same condition that consumes the beat), so
-            // transient `rerr` in unrelated cycles is ignored.
-            if (load_killed || cmu_bcast.flush_pipe) begin
-              // Accepted reads still drain after cancellation, including an
-              // error response. They must not fault a newer same-VA owner.
-              l1d_state <= IDLE;
-            end else if (l1d_bus.rerr) begin
-              cause     <= `RAPT_CAUSE_LOAD_ACC_FAULT;
-              l1d_state <= TRAP;
-            end else begin
-              l1d_state <= IDLE;
-              if (l1d_atomic_lock && !load_killed && !cmu_bcast.flush_pipe) begin
+            if (demand_beat && !demand_done) begin
+
+              demand_done <= !l1d_bus.rerr;
+              if (!l1d_bus.rerr && l1d_atomic_lock && !load_killed && !cmu_bcast.flush_pipe) begin
                 reservation <= l1d_addr;
                 reservation_valid <= !lr_interfered && !external_hits_lr;
                 reservation_size_m1 <= l1d_ralu[1:0] == 2'b11 ? 4'd7 : 4'd3;
+              end
+            end
+            refill_word <= refill_word + 1'b1;
+            if (!refill_line || l1d_bus.rlast) begin
+              // Early demand completion does not release the bus owner. Drain
+              // through RLAST even after cancellation or an errored demand beat.
+              if (load_killed || cmu_bcast.flush_pipe || demand_done
+                  || (demand_beat && !l1d_bus.rerr))
+                l1d_state <= IDLE;
+              else begin
+                cause <= `RAPT_CAUSE_LOAD_ACC_FAULT;
+                l1d_state <= TRAP;
               end
             end
           end
@@ -953,7 +1050,13 @@ module rapt_l1d #(
       // next cycle while l1d_update is still high), the SET's NBA wins and the
       // new update is not lost.
       if (|fence_clear_set) begin
-        l1d_rmw <= 0;
+        // Never replay a pending fill into a set just invalidated. Updates
+        // to other sets remain pending while the tag clear port is occupied.
+        if (fence_clear_set[l1d_idx]) begin
+          l1d_rmw <= 0;
+          l1d_update <= 0;
+          l1d_inv_all_ways <= 0;
+        end
       end else if (l1d_update) begin
         // u_tags consumes the same pending update on this edge.
         l1d_update <= 0;
@@ -963,7 +1066,9 @@ module rapt_l1d #(
 
       // l1d_update SET: request a new SRAM + tag/valid write next cycle.
       // Textually last so its NBA to l1d_update wins over the CLEAR above.
-      if (l1d_rmw) begin
+      if (|fence_clear_set) begin
+        // Clear takes priority over every new tag/data update below.
+      end else if (l1d_rmw) begin
         // RMW phase 2: SRAM data available from previous cycle read,
         // compute byte-lane merge and schedule the write-back.
         l1d_rmw <= 0;
@@ -971,6 +1076,9 @@ module rapt_l1d #(
         l1d_data_u <= rmw_merged_data;
         l1d_valid_u <= 1'b1;
         // l1d_idx, l1d_off, l1d_tag_u already set at RMW trigger
+      end else if (zero_complete) begin
+        // The ZERO descriptor updates memory as a burst. Its complete block
+        // is invalidated through maintenance_set, including on a failed B.
       end else if (lsu_l1d.wvalid && lsu_l1d.wready && l1d_bus.werr) begin
         // An errored posted write may have modified some external bytes.
         // Do not install the intended value or retain a potentially stale
@@ -982,7 +1090,7 @@ module rapt_l1d #(
         l1d_idx <= waddr_idx;
         l1d_off <= waddr_offset;
         l1d_way <= store_hit_way;
-      end else if (lsu_l1d.wvalid && l1d_bus.wready && cacheable_w) begin
+      end else if (lsu_l1d.wvalid && l1d_bus.wready && cacheable_w && !lsu_l1d.wzero) begin
         // Treat any full-width request at an unaligned cache offset as
         // partial. Split stores normally arrive aligned with an already
         // lane-shifted mask/data pair; unsplit requests may still rely on
@@ -1023,7 +1131,7 @@ module rapt_l1d #(
           end
         end
       end else if (l1d_state == LD_D) begin
-        if (lsu_l1d.rvalid && l1d_bus.rvalid && !l1d_bus.rerr
+        if ((refill_line || lsu_l1d.rvalid) && l1d_bus.rvalid && !l1d_bus.rerr
             && !load_killed && !cmu_bcast.flush_pipe) begin
           if (cacheable_r) begin
             l1d_update <= 1'b1;
@@ -1031,7 +1139,7 @@ module rapt_l1d #(
             l1d_valid_u <= 1'b1;
             l1d_tag_u <= addr_tag;
             l1d_idx <= addr_idx;
-            l1d_off <= addr_offset;
+            l1d_off <= refill_line ? refill_word : addr_offset;
             l1d_way <= ld_fill_way_r;
             if (L1D_N_WAYS == 2) d_replace_bit[addr_idx] <= ~d_replace_bit[addr_idx];
           end
@@ -1040,26 +1148,48 @@ module rapt_l1d #(
     end
   end
 
+  `RAPT_SVA_IMPLY(clock, reset, L1D_REFILL_LAST, l1d_state == LD_D && refill_line && l1d_bus.rvalid,
+                  l1d_bus.rlast == (refill_word == L1D_LINE_LEN'(L1D_LINE_SIZE - 1)))
+  `RAPT_SVA_IMPLY(clock, reset, L1D_REFILL_STORE_EXCLUSION, l1d_state == LD_D && refill_line,
+                  !lsu_l1d.wready && !(l1d_bus.awvalid && !l1d_bus.aw_ptw))
   `RAPT_SVA_IMPLY(clock, reset, L1D_MMIO_READ_REQUIRES_ORDER,
                   l1d_bus.arvalid && !l1d_bus.ar_ptw && !cacheable_r, lsu_l1d.ordered)
+  `RAPT_SVA_IMPLY(clock, reset, L1D_RETRY_NO_COMPLETION_OR_READ, lsu_l1d.rretry,
+                  !lsu_l1d.rready && !lsu_l1d.trap && !(l1d_bus.arvalid && !l1d_bus.ar_ptw))
   `RAPT_SVA_IMPLY(clock, reset, L1D_FLUSH_BLOCKS_NEW_READ, cmu_bcast.flush_pipe, !l1d_bus.arvalid)
   `RAPT_SVA_IMPLY(clock, reset, L1D_PERMISSION_STAGE_BLOCKS_ACCESS, l1d_state == LD_CHECK,
                   !lsu_l1d.rready && !(l1d_bus.arvalid && !l1d_bus.ar_ptw))
-  `RAPT_SVA_NEXT(
-      clock, reset, L1D_PERMISSION_STAGE_DENIED,
-      l1d_state == LD_CHECK && !cmu_bcast.flush_pipe && (pmp_load_fault || load_unmapped_fault || load_io_size_fault),
-      l1d_state == TRAP)
-  `RAPT_SVA_NEXT(
-      clock, reset, L1D_LR_HIT_ESTABLISHES_RESERVATION,
-      (l1d_state == LD_A) && tag_hit && l1d_atomic_lock && !cmu_bcast.flush_pipe && !exu_l1d.reservation_clear && !external_hits_lr && !lr_interfered,
-      reservation_valid && reservation == $past(l1d_addr))
-  `RAPT_SVA_NEXT(
-      clock, reset, L1D_LR_RESPONSE_ESTABLISHES_RESERVATION,
-      (l1d_state == LD_D) && l1d_bus.rvalid && !l1d_bus.rerr && l1d_atomic_lock && !load_killed && !cmu_bcast.flush_pipe && !exu_l1d.reservation_clear && !external_hits_lr && !lr_interfered,
-      reservation_valid && reservation == $past(l1d_addr))
-  `RAPT_SVA_NEXT(
-      clock, reset, L1D_KILLED_LR_RESPONSE_NO_NEW_RESERVATION,
-      (l1d_state == LD_D) && l1d_bus.rvalid && l1d_atomic_lock && !reservation_valid && (load_killed || cmu_bcast.flush_pipe),
-      !reservation_valid)
+  // Antecedents extracted so the SVA macro arguments stay short and the
+  // formatter cannot rejoin them past the column limit.
+  logic l1d_permission_stage_denied;
+  assign l1d_permission_stage_denied = l1d_state == LD_CHECK && !cmu_bcast.flush_pipe
+      && !ptw_arvalid && (pmp_load_fault || load_unmapped_fault
+          || load_io_size_fault);
+  `RAPT_SVA_NEXT(clock, reset, L1D_PERMISSION_STAGE_DENIED, l1d_permission_stage_denied,
+                 l1d_state == TRAP)
+  `RAPT_SVA_NEXT(clock, reset, L1D_PERMISSION_STAGE_WAITS_FOR_PTW,
+                 l1d_state == LD_CHECK && ptw_arvalid && !cmu_bcast.flush_pipe,
+                 l1d_state == LD_CHECK)
+  logic l1d_lr_hit_establishes_reservation;
+  assign l1d_lr_hit_establishes_reservation = (l1d_state == LD_A) && tag_hit
+      && l1d_atomic_lock && !cmu_bcast.flush_pipe
+      && !exu_l1d.reservation_clear && !external_hits_lr && !lr_interfered;
+  `RAPT_SVA_NEXT(clock, reset, L1D_LR_HIT_ESTABLISHES_RESERVATION,
+                 l1d_lr_hit_establishes_reservation, reservation_valid && reservation == $past
+                 (l1d_addr))
+  logic l1d_lr_response_establishes_reservation;
+  assign l1d_lr_response_establishes_reservation = (l1d_state == LD_D)
+      && l1d_bus.rvalid && demand_beat && !demand_done && !l1d_bus.rerr
+      && l1d_atomic_lock && !load_killed && !cmu_bcast.flush_pipe
+      && !exu_l1d.reservation_clear && !external_hits_lr && !lr_interfered;
+  `RAPT_SVA_NEXT(clock, reset, L1D_LR_RESPONSE_ESTABLISHES_RESERVATION,
+                 l1d_lr_response_establishes_reservation, reservation_valid && reservation == $past
+                 (l1d_addr))
+  logic l1d_killed_lr_response_no_new_reservation;
+  assign l1d_killed_lr_response_no_new_reservation = (l1d_state == LD_D)
+      && l1d_bus.rvalid && l1d_atomic_lock && !reservation_valid
+      && (load_killed || cmu_bcast.flush_pipe);
+  `RAPT_SVA_NEXT(clock, reset, L1D_KILLED_LR_RESPONSE_NO_NEW_RESERVATION,
+                 l1d_killed_lr_response_no_new_reservation, !reservation_valid)
 endmodule
 /* verilator lint_on PINCONNECTEMPTY */

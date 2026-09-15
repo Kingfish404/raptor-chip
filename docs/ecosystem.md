@@ -23,11 +23,12 @@ NPC is the primary development simulator. NEMU acts as the difftest reference fo
 
 ## FPGA Targets
 
-| Board / Flow                   | Status                                          | Entry                                        |
-| ------------------------------ | ----------------------------------------------- | -------------------------------------------- |
-| **Gowin Tang Nano 20K**        | Supported (synth + P&R)                         | `fpga/gowin-tang-nano-20k/`, `make fpga-syn` |
-| **Tang Mega 138K Pro / LiteX** | Supported Gowin LiteX FPGA flow                 | `fpga/litex/`                                |
-| **MLK-CU07-KU15P / LiteX**     | Vivado, BIOS, MIG DDR4, SDCard, RV32 Linux boot | `fpga/litex/`                                |
+| Board / Flow                   | Status                                                                  | Entry                                        |
+| ------------------------------ | ----------------------------------------------------------------------- | -------------------------------------------- |
+| **Gowin Tang Nano 20K**        | Supported (synth + P&R)                                                 | `fpga/gowin-tang-nano-20k/`, `make fpga-syn` |
+| **Tang Mega 138K Pro / LiteX** | Supported Gowin LiteX FPGA flow                                         | `fpga/litex/`                                |
+| **MLK-CU07-KU15P / LiteX**     | Vivado, BIOS, MIG DDR4, SDCard, RV32 Linux boot                         | `fpga/litex/`                                |
+| **MLK-CU08-KU15P / LiteX**     | Vivado, BIOS, MIG DDR4, SDCard, CM005 Ethernet, RV32/RV64 Linux/netboot | `fpga/litex/`                                |
 
 See [`fpga/litex/README.md`](../fpga/litex/README.md) for the LiteX BIOS + Linux flow.
 
@@ -52,7 +53,7 @@ measurements, and
 | App        | CoreMark, MicroBench, Embench-IoT, busybox, demos            | `app/`, `abstract-machine/app/`                    |
 | User OS    | nanos-lite (simple OS), Linux v6.18 userspace                | `abstract-machine/app/nanos-lite`                  |
 | ABI / libc | riscv-pk (proxy kernel), AM runtime, newlib, glibc           | `app/pk/`, `abstract-machine/`                     |
-| Kernel     | Linux v6.18.22 prebuilt by default; v6.12/v6.18 paths tested | `linux/`, see [linux_kernel.md](./linux_kernel.md) |
+| Kernel     | Linux v6.18.50 prebuilt by default; v6.12/v6.18 paths tested | `linux/`, see [linux_kernel.md](./linux_kernel.md) |
 | Firmware   | OpenSBI (v1.8.1)                                             | `linux/opensbi/`                                   |
 | Bootrom    | NPC / raptSoC reset vector                                   | `nemu/src/memory/rom/`                             |
 
@@ -65,10 +66,12 @@ measurements, and
 | Finisher           | `0x0010_0000 – 0x0010_0fff` |
 | CLINT              | `0x0200_0000 – 0x020b_ffff` |
 | PLIC               | `0x0c00_0000 – 0x0cff_ffff` |
+| SRAM               | `0x0f00_0000 – 0x0f00_1fff` |
 | UART / peripherals | `0x1000_0000 – 0x1001_1fff` |
 | MROM               | `0x2000_0000 – 0x2000_ffff` |
 | Flash              | `0x3000_0000 – 0x3fff_ffff` |
-| PMEM / PSRAM       | `0x8000_0000 – 0x8fff_ffff` |
+| PMEM (main memory) | `0x8000_0000 – 0x8fff_ffff` |
+| SDRAM              | `0xa000_0000 – 0xa1ff_ffff` |
 
 Reset vector `PC_INIT` = `0x2000_0000` (MROM).
 

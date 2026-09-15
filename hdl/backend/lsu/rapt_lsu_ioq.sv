@@ -142,6 +142,7 @@ module rapt_lsu_ioq #(
   // across LSU backpressure, this is the timing boundary between the IOQ's
   // age/hazard arbitration and the L1D/PMP/fast-wakeup response cone.
   logic                load_req_valid_q;
+  logic [IOQ_SIZE-1:0] ioq_needs_ordered;
   logic [  IOQLen-1:0] load_req_idx_q;
   logic [    XLEN-1:0] load_req_addr_q;
   logic [         4:0] load_req_alu_q;
@@ -161,8 +162,9 @@ module rapt_lsu_ioq #(
 
   int alloc_slot[IOQ_SIZE];
   int unsigned allocation_count;
-  for (genvar r = 0; r < NumSlots; r++)
+  for (genvar r = 0; r < NumSlots; r++) begin : g_disp_ready
     assign disp.ready[r] = !ioq_valid[(int'(ioq_tail_a)+r)%IOQ_SIZE];
+  end
   always_comb begin
     allocation_count = 0;
     for (int e = 0; e < IOQ_SIZE; e++) alloc_slot[e] = -1;
@@ -179,22 +181,18 @@ module rapt_lsu_ioq #(
   // ioq_valid/complete; see older-store blocker and issue vectors below).
   logic [XLEN-1:0] ioq_eff_addr[IOQ_SIZE];
   logic [1:0] ioq_span_words[IOQ_SIZE];
-  function automatic logic memory_words_overlap(
-      input logic [XLEN-1:0] a, b, input logic [1:0] a_span, b_span, input logic page_only);
-    logic [XLEN-WordOffBits-1:0] ab, ba;
-    logic [PageOffBits-WordOffBits-1:0] page_ab, page_ba;
-    ab = a[XLEN-1:WordOffBits] - b[XLEN-1:WordOffBits];
-    ba = b[XLEN-1:WordOffBits] - a[XLEN-1:WordOffBits];
-    page_ab = a[PageOffBits-1:WordOffBits] - b[PageOffBits-1:WordOffBits];
-    page_ba = b[PageOffBits-1:WordOffBits] - a[PageOffBits-1:WordOffBits];
-    // Either access may straddle a word/page boundary. Modular distances
-    // preserve aliases across page-offset wrap without assuming contiguous PA.
-    return page_only
-        ? (page_ab <= (PageOffBits-WordOffBits)'(b_span)
-           || page_ba <= (PageOffBits-WordOffBits)'(a_span))
-        : (ab <= (XLEN-WordOffBits)'(b_span)
-           || ba <= (XLEN-WordOffBits)'(a_span));
-  endfunction
+  logic [IOQ_SIZE-1:0] ioq_overlap[IOQ_SIZE];
+  rapt_ioq_overlap #(
+      .Xlen(XLEN),
+      .Entries(IOQ_SIZE),
+      .WordOffBits(WordOffBits),
+      .PageOffBits(PageOffBits)
+  ) overlap_check (
+      .addr(ioq_eff_addr),
+      .span(ioq_span_words),
+      .page_only(csr_bcast.dmmu_en),
+      .overlap(ioq_overlap)
+  );
   always_comb begin
     for (int i = 0; i < IOQ_SIZE; i++) begin
       automatic logic [3:0] size_m1;
@@ -237,13 +235,7 @@ module rapt_lsu_ioq #(
           // translation only disjoint page-offset footprints prove non-aliasing.
           if (|ioq_pr1[j] || ioq_alu[j][4:0] ==
               `RAPT_CBO_ZERO_WALU
-              || (ioq_valid[i] && memory_words_overlap(
-                  ioq_eff_addr[j],
-                  ioq_eff_addr[i],
-                  ioq_span_words[j],
-                  ioq_span_words[i],
-                  csr_bcast.dmmu_en
-              ))) begin
+              || (ioq_valid[i] && ioq_overlap[j][i])) begin
             ioq_older_memory_blk[i] = 1'b1;
           end
         end
@@ -270,6 +262,7 @@ module rapt_lsu_ioq #(
           && (ioq_pr1[i] == 0) && (ioq_pr2[i] == 0)
           && !ioq_atom[i]
           && !ioq_older_memory_blk[i]
+          && (!ioq_needs_ordered[i] || (i == int'(ioq_head) && ioq_at_rob_head))
           && (!translated_ordered || (i == int'(ioq_head) && ioq_at_rob_head))
           && (csr_bcast.dmmu_en
               || (ioq_valid[i] && rapt_pkg::addr_cacheable(ioq_eff_addr[i])) ||
@@ -317,6 +310,8 @@ module rapt_lsu_ioq #(
       ? ioq_vj[load_req_sel_idx]
       : ioq_vj[load_req_sel_idx] + ioq_imm[load_req_sel_idx];
   assign load_req_sel_valid = (head_is_atomic_ready || ioq_issue_found)
+      && (!ioq_needs_ordered[load_req_sel_idx]
+          || (load_req_sel_idx == ioq_head && ioq_at_rob_head))
       && (!translated_ordered || (load_req_sel_idx == ioq_head && ioq_at_rob_head))
       && ioq_valid[load_req_sel_idx]
       && ioq_ren[load_req_sel_idx]
@@ -346,28 +341,56 @@ module rapt_lsu_ioq #(
   // While the A channel is parked on a miss (oo_pending), offer the next
   // eligible load (in age order, skipping the pending entry) on the B
   // channel.  B is best-effort: it completes only on a clean L1D hit or SQ
-  // forward; anything else just leaves the entry to retry via A later, so
-  // no extra state is held here.  ioq_load_issue_vec already enforces
-  // operand readiness, non-atomic, and older-store disambiguation.
+  // forward; anything else leaves the entry to retry via A later.
+  // Register the candidate before the SQ/PMP/cache probe, as on A: otherwise
+  // address generation, disambiguation, selection and cache admission form
+  // one combinational path. Hold its identity and payload until B completes
+  // or the A miss ends. ioq_load_issue_vec enforces operand readiness,
+  // non-atomic issue and older-store disambiguation before capture.
 `ifdef RAPT_LSU_HUM
   logic [$clog2(IOQ_SIZE)-1:0] b_issue_idx;
   logic b_issue_found;
+  logic b_req_valid_q;
+  logic [IOQLen-1:0] b_req_idx_q;
+  logic [XLEN-1:0] b_req_addr_q;
+  logic [4:0] b_req_alu_q;
   always_comb begin
     b_issue_idx   = ioq_head;
     b_issue_found = 1'b0;
     for (int k = 0; k < IOQ_SIZE; k++) begin
       automatic logic [$clog2(IOQ_SIZE)-1:0] idx;
       idx = ioq_head + k[$clog2(IOQ_SIZE)-1:0];
-      if (!b_issue_found && ioq_load_issue_vec[idx]
-          && idx != oo_pending_idx && !ioq_atom[idx]) begin
+      if (!b_issue_found && ioq_load_issue_vec[idx] && idx != oo_pending_idx && !ioq_atom[idx]
+          // B has no FP64 response payload/capture. Keep FLD on A in both
+          // XLENs rather than completing it with an unwritten FPR payload.
+          && !(ioq_fp_valid[idx] && ioq_fp_op[idx] == `RAPT_FP_OP_FLD)) begin
         b_issue_idx   = idx;
         b_issue_found = 1'b1;
       end
     end
   end
-  assign exu_lsu.rvalid_b = oo_pending && b_issue_found;
-  assign exu_lsu.raddr_b  = ioq_vj[b_issue_idx] + ioq_imm[b_issue_idx];
-  assign exu_lsu.ralu_b   = ioq_alu[b_issue_idx][4:0];
+  always_ff @(posedge clock) begin
+    if (reset || cmu_bcast.flush_pipe || !oo_pending) begin
+      b_req_valid_q <= 1'b0;
+    end else if (b_req_valid_q) begin
+      if (exu_lsu.rready_b) b_req_valid_q <= 1'b0;
+    end else if (b_issue_found) begin
+      b_req_valid_q <= 1'b1;
+      b_req_idx_q <= b_issue_idx;
+      b_req_addr_q <= ioq_eff_addr[b_issue_idx];
+      b_req_alu_q <= ioq_alu[b_issue_idx][4:0];
+    end
+  end
+  assign exu_lsu.rvalid_b = oo_pending && b_req_valid_q;
+  assign exu_lsu.raddr_b  = b_req_addr_q;
+  assign exu_lsu.ralu_b   = b_req_alu_q;
+  // Antecedent extracted so the SVA macro argument stays short and the
+  // formatter cannot rejoin it past the column limit.
+  logic ioq_b_request_stable;
+  assign ioq_b_request_stable = exu_lsu.rvalid_b && !exu_lsu.rready_b
+      && !(exu_lsu.rvalid && (exu_lsu.rready || exu_lsu.rretry));
+  `RAPT_SVA_NEXT(clock, reset || cmu_bcast.flush_pipe, IOQ_B_REQUEST_STABLE, ioq_b_request_stable,
+                 exu_lsu.rvalid_b && $stable({b_req_idx_q, b_req_addr_q, b_req_alu_q}))
 `else
   assign exu_lsu.rvalid_b = 1'b0;
   assign exu_lsu.raddr_b  = '0;
@@ -448,8 +471,9 @@ module rapt_lsu_ioq #(
       ioq_paddr[ioq_head], head_store_size - 4'd1) ? 4'd0 : rapt_pkg::addr_data_span_fault_offset(
       ioq_paddr[ioq_head], head_store_lo_bytes - 4'd1, 1'b1);
   assign head_data_pma_hi_offset = !rapt_pkg::addr_device_width_capable(
-      ioq_paddr_hi[ioq_head], head_store_size - 4'd1) ? 4'd0 : rapt_pkg::addr_data_span_fault_offset(
-      ioq_paddr_hi[ioq_head], head_store_hi_bytes - 4'd1, 1'b1);
+      ioq_paddr_hi[ioq_head], head_store_size - 4'd1) ? 4'd0
+      : rapt_pkg::addr_data_span_fault_offset(
+          ioq_paddr_hi[ioq_head], head_store_hi_bytes - 4'd1, 1'b1);
   assign head_data_pma_lo_ok = head_data_pma_lo_offset == 8;
   assign head_data_pma_hi_ok = !head_store_cross_page || head_data_pma_hi_offset == 8;
   assign head_data_pma_fault = head_data_pma_check
@@ -808,6 +832,7 @@ module rapt_lsu_ioq #(
       ioq_head          <= '0;
       ioq_tail_a        <= '0;
       ioq_complete      <= '0;
+      ioq_needs_ordered <= '0;
       ioq_load_trap     <= '0;
       ioq_mmu_fault     <= '0;
       ioq_load_skip     <= '0;
@@ -873,14 +898,12 @@ module rapt_lsu_ioq #(
               && (ioq_rd[load_req_sel_idx] != '0);
           load_req_prd_q <= ioq_prd[load_req_sel_idx];
         end
-      end else if (exu_lsu.rready) begin
+      end else if (exu_lsu.rready || exu_lsu.rretry) begin
         load_req_valid_q <= 1'b0;
       end
-      // A translated MMU load can turn out to be MMIO even though its virtual
-      // address looked like an ordinary kernel mapping when it was selected
-      // out of order.  L1D parks such a request until `ordered` is asserted.
-      // Promote the held request once it reaches both queue heads; otherwise
-      // its issue-time ordered=0 snapshot can deadlock forever in L1D LD_A.
+      // Promote a held translation as soon as both heads catch up. If L1D
+      // discovers a device before then, rretry releases this request and
+      // ioq_needs_ordered prevents it from blocking older ready loads again.
       if (load_req_valid_q && (load_req_idx_q == ioq_head) && ioq_at_rob_head)
         load_req_ordered_q <= 1'b1;
       // ---- Static per-entry enqueue mux (B > A on any selector alias) ----
@@ -923,6 +946,7 @@ module rapt_lsu_ioq #(
           ioq_trap[i]         <= dispatch[alloc_slot[i]].uop.trap;
           ioq_mmu_fault[i]    <= 1'b0;
           ioq_complete[i]     <= 1'b0;
+          ioq_needs_ordered[i] <= 1'b0;
           ioq_load_trap[i]    <= 1'b0;
           ioq_load_skip[i]    <= 1'b0;
         end
@@ -965,6 +989,10 @@ module rapt_lsu_ioq #(
           ioq_fp_dep2_busy[i] <= 1'b0;
         end
 
+        if (exu_lsu.rvalid && exu_lsu.rretry && i == int'(active_idx)) begin
+          ioq_needs_ordered[i] <= 1'b1;
+        end
+
         if (exu_lsu.rvalid && exu_lsu.rready && i == int'(active_idx)) begin
           ioq_rdata[i] <= exu_lsu.rdata;
           if (ioq_fp_valid[i] && ioq_fp_op[i] == `RAPT_FP_OP_FLD)
@@ -979,9 +1007,9 @@ module rapt_lsu_ioq #(
         end
 `ifdef RAPT_LSU_HUM
         if (exu_lsu.rvalid_b && exu_lsu.rready_b
-            && b_issue_idx != active_idx
-            && !(ioq_valid_found && b_issue_idx == ioq_head)
-            && i == int'(b_issue_idx)) begin
+            && b_req_idx_q != active_idx
+            && !(ioq_valid_found && b_req_idx_q == ioq_head)
+            && i == int'(b_req_idx_q)) begin
           ioq_rdata[i]      <= exu_lsu.rdata_b;
           ioq_complete[i]   <= 1'b1;
           ioq_load_trap[i]  <= 1'b0;
@@ -1017,7 +1045,7 @@ module rapt_lsu_ioq #(
       // `oo_pending` means the registered A request has survived at least one
       // cycle without a response; only then may the optional HUM B port probe
       // a younger load.
-      if (!load_req_valid_q || (exu_lsu.rvalid && exu_lsu.rready)) begin
+      if (!load_req_valid_q || (exu_lsu.rvalid && (exu_lsu.rready || exu_lsu.rretry))) begin
         oo_pending <= 1'b0;
       end else if (!oo_pending && exu_lsu.rvalid && !exu_lsu.rready) begin
         oo_pending     <= 1'b1;
@@ -1036,6 +1064,11 @@ module rapt_lsu_ioq #(
   assign load_fast.confirmed_generation = exu_ioq_bcast.generation;
   assign load_fast.confirmed_rd = exu_ioq_bcast.rd;
   assign load_fast.result = exu_ioq_bcast.result;
+  `RAPT_SVA_IMPLY(clock, reset, IOQ_RETRY_NOT_COMPLETION, exu_lsu.rvalid && exu_lsu.rretry,
+                  !exu_lsu.rready && !fast_load_fire)
+  `RAPT_SVA_IMPLY(clock, reset, IOQ_REPLAY_REQUIRES_HEAD,
+                  !load_req_valid_q && load_req_sel_valid && ioq_needs_ordered[load_req_sel_idx],
+                  load_req_sel_idx == ioq_head && ioq_at_rob_head)
   `RAPT_SVA_IMPLY(clock, reset, IOQ_STORE_COMPLETION_CHECKED,
                   exu_ioq_bcast.valid && ioq_wen[ioq_head], head_store_check_valid_q)
   `RAPT_SVA_IMPLY(clock, reset, IOQ_STORE_MMU_ADDRESS_CAPTURED, exu_l1d.mmu_en,

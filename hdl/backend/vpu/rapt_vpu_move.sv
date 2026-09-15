@@ -6,7 +6,7 @@
 module rapt_vpu_move #(
     parameter int VLEN=128,
     parameter int AddrBits=$clog2(32*VLEN/8),
-    OffsetBits=$clog2(VLEN)+4
+    parameter int OffsetBits=$clog2(VLEN)+4
 ) (
     input logic clock,
     reset,
@@ -47,7 +47,8 @@ module rapt_vpu_move #(
   logic [4:0] count_mask;
   assign count_mask = insn_q[19:15];
   assign limit = (OffsetBits'(count_mask)+1'b1)*OffsetBits'(VLEN/8);
-  assign legal = !vill_q && insn_q[6:0] == 7'h57 && insn_q[14:12] == 3 && insn_q[31:25] == 7'b1001111
+  assign legal = !vill_q && insn_q[6:0] == 7'h57 && insn_q[14:12] == 3
+      && insn_q[31:25] == 7'b1001111
       && (count_mask == 0 || count_mask == 1 || count_mask == 3 || count_mask == 7)
       && (insn_q[24:20] & count_mask) == 0 && (insn_q[11:7] & count_mask) == 0;
   assign cmd_ready = !reset && state == IDLE;
@@ -55,7 +56,8 @@ module rapt_vpu_move #(
   assign vr_valid = !reset && (state == READ_REQ || state == WRITE_REQ);
   assign vr_write = state == WRITE_REQ;
   assign vr_size = sew_q;
-  assign vr_addr = AddrBits'((vr_write ? int'(insn_q[11:7]) : int'(insn_q[24:20]))*(VLEN/8)+int'(offset_q));
+  assign vr_addr = AddrBits'((vr_write ? int'(insn_q[11:7]) : int'(insn_q[24:20]))
+      *(VLEN/8)+int'(offset_q));
   assign vr_wdata = data_q;
   assign vr_rsp_ready = state == READ_RSP || state == WRITE_RSP;
   always_ff @(posedge clock) begin
@@ -85,7 +87,10 @@ module rapt_vpu_move #(
         end else if (offset_q >= limit || insn_q[11:7] == insn_q[24:20]) state <= DONE;
         else state <= READ_REQ;
         READ_REQ: if (vr_valid && vr_ready) state <= READ_RSP;
-        READ_RSP: if (vr_rsp_valid && vr_rsp_ready) begin data_q <= vr_rdata; state <= WRITE_REQ; end
+        READ_RSP: if (vr_rsp_valid && vr_rsp_ready) begin
+          data_q <= vr_rdata;
+          state <= WRITE_REQ;
+        end
         WRITE_REQ: if (vr_valid && vr_ready) state <= WRITE_RSP;
         WRITE_RSP: if (vr_rsp_valid && vr_rsp_ready) begin
         offset_q <= offset_q+(OffsetBits'(1) << sew_q);

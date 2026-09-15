@@ -257,6 +257,20 @@ $(error Invalid BOOT_MODE='$(BOOT_MODE)'. Use BOOT_MODE=custom or BOOT_MODE=bios
 endif
 endif
 
+WITH_ETHERNET ?= 0
+FMC_SLOT ?= $(if $(filter mlk_cu08_ku15p,$(FPGA_BOARD)),c,a)
+ETH_PORT ?= a
+ETH_SPEED ?= 1000
+ifneq (,$(filter 1 yes true on,$(WITH_ETHERNET)))
+ifeq (,$(filter 100 1000,$(ETH_SPEED)))
+$(error ETH_SPEED must be 100 or 1000 Mb/s)
+endif
+ifeq (,$(filter mlk_cu07_ku15p mlk_cu08_ku15p,$(FPGA_BOARD)))
+$(error CM005 Ethernet currently requires an MLK KU15P target)
+endif
+endif
+WITH_ETHERNET_FLAG = $(if $(filter 1 yes true on,$(WITH_ETHERNET)),--with-ethernet --fmc-slot=$(FMC_SLOT) --eth-port=$(ETH_PORT) --eth-speed=$(ETH_SPEED),)
+
 FPGA_FLAVOR := $(BOOT_MODE)
 FPGA_FLAVOR := $(FPGA_FLAVOR)-$(VARIANT)
 ifneq (,$(filter 1 yes true on,$(WITH_LITEDRAM)))
@@ -269,12 +283,25 @@ ifneq (,$(filter 1 yes true on,$(WITH_SDCARD)))
 FPGA_FLAVOR := $(FPGA_FLAVOR)-sdcard
 endif
 FPGA_FLAVOR := $(FPGA_FLAVOR)-$(RAPT_CONFIG)
+ifneq (,$(filter 1 yes true on,$(WITH_ETHERNET)))
+FPGA_FLAVOR := $(FPGA_FLAVOR)-cm005-$(FMC_SLOT)-$(ETH_PORT)
+ifeq ($(ETH_SPEED),100)
+FPGA_FLAVOR := $(FPGA_FLAVOR)-100m
+endif
+endif
 FPGA_FLAVOR_SUFFIX := $(strip $(FPGA_FLAVOR_SUFFIX))
 ifneq ($(FPGA_FLAVOR_SUFFIX),)
 FPGA_FLAVOR := $(FPGA_FLAVOR)-$(FPGA_FLAVOR_SUFFIX)
 endif
 
-FPGA_DIR       := $(BUILD_DIR)/$(FPGA_BOARD)/$(FPGA_FLAVOR)
+_FPGA_CONFIG_VARS := FPGA_BOARD VARIANT RAPT_CONFIG RAPT_PACK_VFLAGS BOOT_MODE \
+	SYS_CLK UART_BAUD INTEGRATED_MAIN_RAM_SIZE WITH_LED_CHASER \
+	WITH_LITEDRAM LITEDRAM_SIZE WITH_MIG MIG_SIZE WITH_SDCARD \
+	WITH_ETHERNET FMC_SLOT ETH_PORT ETH_SPEED EXTRA_FLAGS \
+	VIVADO_JOBS VIVADO_INCREMENTAL VIVADO_ROUTE_DIRECTIVE \
+	FW_FPGA_BIN FW_LINUX_CONFIG_ID
+FPGA_CONFIG_ID := $(call _build_identity,$(_FPGA_CONFIG_VARS))
+FPGA_DIR       := $(BUILD_DIR)/$(FPGA_BOARD)/$(FPGA_FLAVOR)-$(FPGA_CONFIG_ID)
 FPGA_BUILD_DIR := $(FPGA_DIR)/gateware
 _FPGA_REPORTS_INDEX_ARGS = FPGA_BUILD_DIR="$(FPGA_BUILD_DIR)" FPGA_BOARD="$(FPGA_BOARD)" BOOT_MODE="$(BOOT_MODE)"
 FPGA_BITSTREAM := $(FPGA_BUILD_DIR)/$(BOARD_$(FPGA_BOARD)_BITNAME)
@@ -330,15 +357,17 @@ _FPGA_FLAGS = --output-dir=$(FPGA_DIR) \
 	$(_FPGA_BOOT_FLAGS) \
 	$(_MAIN_RAM_FLAG) \
 	$(WITH_LED_CHASER_FLAG) $(WITH_LITEDRAM_FLAG) $(LITEDRAM_SIZE_FLAG) \
-	$(WITH_MIG_FLAG) $(MIG_SIZE_FLAG) $(WITH_SDCARD_FLAG) $(EXTRA_FLAGS)
+	$(WITH_MIG_FLAG) $(MIG_SIZE_FLAG) $(WITH_SDCARD_FLAG) $(WITH_ETHERNET_FLAG) $(EXTRA_FLAGS)
 
 FPGA_STAMP := $(FPGA_DIR)/.bitstream_stamp
 _FPGA_HASH_COMMON_INPUTS = $(PACK_SV) $(FPGA_PY) $(LITEX_DIR)/Makefile \
+	$(LITEX_DIR)/scripts/isolated_pack.py $(LITEX_DIR)/scripts/build_identity.py \
+	$(if $(filter 1 yes true on,$(WITH_ETHERNET)),$(LITEX_DIR)/cm005.py $(LITEX_DIR)/cm005_oversample.py $(LITEX_DIR)/scripts/check_cm005_aperture.tcl,) \
 	$(LITEX_DIR)/mk/config.mk $(LITEX_DIR)/mk/recipes.mk \
 	$(LITEX_DIR)/cores/cpu/raptor/core.py \
 	$(wildcard $(LITEX_DIR)/cores/cpu/raptor/*.h $(LITEX_DIR)/cores/cpu/raptor/*.S) \
-	$(if $(filter mlk_cu07_ku15p mlk_cu08_ku15p,$(FPGA_BOARD)),$(LITEX_DIR)/scripts/vivado_retry_timing.tcl,) \
-	$(if $(filter mlk_cu08_ku15p,$(FPGA_BOARD)),$(LITEX_DIR)/mlk_cu07_ku15p.py $(LITEX_DIR)/mlk_cu08_ku15p_platform.py,) \
+	$(if $(filter mlk_cu07_ku15p mlk_cu08_ku15p,$(FPGA_BOARD)),$(LITEX_DIR)/ku15p_soc.py $(LITEX_DIR)/scripts/vivado_retry_timing.tcl,) \
+	$(if $(filter mlk_cu08_ku15p,$(FPGA_BOARD)),$(LITEX_DIR)/mlk_cu08_ku15p_platform.py,) \
 	$(if $(WITH_MIG_FLAG),$(LITEX_DIR)/$(BOARD_$(FPGA_BOARD)_MIG_TCL),)
 ifeq ($(BOOT_MODE),custom)
 _FPGA_HASH_INPUTS = $(_FPGA_HASH_COMMON_INPUTS) $(FW_FPGA_BIN)
@@ -350,6 +379,7 @@ _FPGA_HASH_INPUTS = $(_FPGA_HASH_COMMON_INPUTS) \
 	$(wildcard $(_FPGA_BIOS_DIR)/*.c $(_FPGA_BIOS_DIR)/*.h $(_FPGA_BIOS_DIR)/*.S $(_FPGA_BIOS_DIR)/*.ld $(_FPGA_BIOS_DIR)/cmds/*.c) \
 	$(_FPGA_BIOS_DIR)/Makefile \
 	$(LITEX_DIR)/scripts/patch_litex_picolibc.py \
+	$(LITEX_DIR)/scripts/prepare_private_bios.py \
 	$(LITEX_DIR)/scripts/patch_litex_sdcard_linux_override.py \
 	$(if $(filter 1,$(LINUX_FPGA_PROFILE)),$(FW_LINUX_FPGA_BIN) $(FW_LINUX_FPGA_SEEDED_DTB) $(FW_LINUX_FPGA_RNG_SEED) $(LINUX_FPGA_PAYLOAD),)
 endif

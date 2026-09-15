@@ -2,7 +2,8 @@
 
 module rapt_ieu_mul #(
     parameter int XLEN = `RAPT_XLEN,
-    parameter unsigned TAG_W = 1
+    parameter unsigned TAG_W = 1,
+    parameter bit UseDsp = `RAPT_FPGA_DSP
 ) (
     input clock,
     input reset,
@@ -131,14 +132,22 @@ module rapt_ieu_mul #(
 
   logic signed [XLEN:0]     mul_ext_a;
   logic signed [XLEN:0]     mul_ext_b;
-  // Keep the combinational multiplier in fabric; the Vivado DSP48 mapping can
-  // move data independently of the valid/tag pipeline for this shared unit.
+  // Select FPGA mapping independently of the arithmetic and valid/tag stages.
+  // Both implementations retain the same two-edge acceptance-to-result path.
   /* verilator lint_off UNUSEDSIGNAL */
-  (* use_dsp = "no" *) logic signed [2*XLEN+1:0] mul_full;
+  logic signed [2*XLEN+1:0] mul_full;
   /* verilator lint_on UNUSEDSIGNAL */
   assign mul_ext_a = $signed({m1_sext_a & m1_s1[XLEN-1], m1_s1});
   assign mul_ext_b = $signed({m1_sext_b & m1_s2[XLEN-1], m1_s2});
-  assign mul_full  = mul_ext_a * mul_ext_b;
+  if (UseDsp) begin : g_dsp
+    (* use_dsp = "yes" *) wire signed [2*XLEN+1:0] product;
+    assign product = mul_ext_a * mul_ext_b;
+    assign mul_full = product;
+  end else begin : g_fabric
+    (* use_dsp = "no" *) wire signed [2*XLEN+1:0] product;
+    assign product = mul_ext_a * mul_ext_b;
+    assign mul_full = product;
+  end
 
   logic [XLEN-1:0] mul_r_comb;
   always_comb begin

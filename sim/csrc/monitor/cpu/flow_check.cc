@@ -61,9 +61,9 @@ void flow_check_redirect_gap()
     flow_check_expected_valid = 0;
     return;
   }
-  if (*(uint8_t *)&VERILOG_CPU(cmu__DOT__valid))
+  if (*(uint8_t *)&VERILOG_BACKEND(cmu__DOT__valid))
     return;
-  if (*(uint8_t *)&VERILOG_CPU(cmu__DOT__flush_pipe_r))
+  if (*(uint8_t *)&VERILOG_BACKEND(cmu__DOT__flush_pipe_r))
     flow_check_expected_valid = 0;
 }
 

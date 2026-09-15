@@ -9,10 +9,9 @@
 #include CONCAT_HEAD(CONCAT(TOP_NAME, ___024root))
 #include CONCAT_HEAD(CONCAT(TOP_NAME, __Dpi))
 
-// As of the rapt cluster split (rapt.sv = cluster, rapt_core.sv = single
-// hart), the per-core sub-cells (rou, cmu, csrs, ...) live one extra level
-// deeper inside the `core` instance of `rapt_core` instantiated in `rapt`.
-// All hierarchical accessors below thread through that extra `core->` step.
+// The core composes frontend, backend and caches. Keep observation paths
+// explicit so difftest and PMU follow the same architectural state after
+// hierarchy changes; these accessors do not participate in RTL behavior.
 #ifdef RAPT_SOC
 // Verilator 5.x hierarchical cell access:
 //   rootp -> ysyxSoCFull -> asic -> cpu -> cpu -> adapter -> cpu (rapt) -> core
@@ -24,9 +23,12 @@
 #include CONCAT_HEAD(CONCAT(TOP_NAME, _wrap_ysyxsoc))
 #include CONCAT_HEAD(CONCAT(TOP_NAME, _rapt__M1))
 #include CONCAT_HEAD(CONCAT(TOP_NAME, _rapt_core__M1))
+#include CONCAT_HEAD(CONCAT(TOP_NAME, _rapt_backend))
 #include CONCAT_HEAD(CONCAT(TOP_NAME, _rapt_rou))
 #define VERILOG_CPU(m) (top->rootp->ysyxSoCFull->asic->cpu->cpu->adapter->cpu->core->m)
-#define VERILOG_ROU(m) (top->rootp->ysyxSoCFull->asic->cpu->cpu->adapter->cpu->core->rou->m)
+#define VERILOG_BACKEND(m) (top->rootp->ysyxSoCFull->asic->cpu->cpu->adapter->cpu->core->backend->m)
+#define VERILOG_FRONTEND(m) VERILOG_CPU(CONCAT(frontend__DOT__, m))
+#define VERILOG_ROU(m) (top->rootp->ysyxSoCFull->asic->cpu->cpu->adapter->cpu->core->backend->rou->m)
 // CLINT lives at the cluster level (rapt). Verilator inlines the small
 // rapt_clint module, so its registers are reached via the __DOT__ name
 // from the parent `rapt` cell rather than a dedicated cell pointer.
@@ -38,7 +40,9 @@
 
 #ifdef CONFIG_wrapBus
 #define VERILOG_CPU(m) CONCAT(top->rootp->wrapSoC__DOT__chip__DOT__cpu__DOT__core__DOT__, m)
-#define VERILOG_ROU(m) CONCAT(top->rootp->wrapSoC__DOT__chip__DOT__cpu__DOT__core__DOT__rou__DOT__, m)
+#define VERILOG_BACKEND(m) CONCAT(top->rootp->wrapSoC__DOT__chip__DOT__cpu__DOT__core__DOT__backend__DOT__, m)
+#define VERILOG_FRONTEND(m) VERILOG_CPU(CONCAT(frontend__DOT__, m))
+#define VERILOG_ROU(m) CONCAT(top->rootp->wrapSoC__DOT__chip__DOT__cpu__DOT__core__DOT__backend__DOT__rou__DOT__, m)
 #define VERILOG_CLINT(m) CONCAT(top->rootp->wrapSoC__DOT__chip__DOT__cpu__DOT__clint_inst__DOT__, m)
 #define VERILOG_PLIC(m) CONCAT(top->rootp->wrapSoC__DOT__chip__DOT__cpu__DOT__plic__DOT__, m)
 #define VERILOG_CLUSTER(m) CONCAT(top->rootp->wrapSoC__DOT__chip__DOT__cpu__DOT__, m)
@@ -52,9 +56,12 @@
 #include CONCAT_HEAD(CONCAT(TOP_NAME, _raptSoC))
 #include CONCAT_HEAD(CONCAT(TOP_NAME, _rapt))
 #include CONCAT_HEAD(CONCAT(TOP_NAME, _rapt_core))
+#include CONCAT_HEAD(CONCAT(TOP_NAME, _rapt_backend))
 #include CONCAT_HEAD(CONCAT(TOP_NAME, _rapt_rou))
 #define VERILOG_CPU(m) (top->rootp->raptSoC->cpu->core->m)
-#define VERILOG_ROU(m) (top->rootp->raptSoC->cpu->core->rou->m)
+#define VERILOG_BACKEND(m) (top->rootp->raptSoC->cpu->core->backend->m)
+#define VERILOG_FRONTEND(m) VERILOG_CPU(CONCAT(frontend__DOT__, m))
+#define VERILOG_ROU(m) (top->rootp->raptSoC->cpu->core->backend->rou->m)
 #define VERILOG_CLINT(m) CONCAT(top->rootp->raptSoC->cpu->clint_inst__DOT__, m)
 #define VERILOG_PLIC(m) CONCAT(top->rootp->raptSoC->cpu->plic__DOT__, m)
 #define VERILOG_CLUSTER(m) (top->rootp->raptSoC->cpu->m)
@@ -66,14 +73,14 @@
 static inline void verilog_connect(TOP_NAME *top, NPCState *npc)
 {
   // for difftest
-  npc->inst = (uint32_t *)&VERILOG_CPU(cmu__DOT__inst);
+  npc->inst = (uint32_t *)&VERILOG_BACKEND(cmu__DOT__inst);
 
-  npc->gpr = (word_t *)&VERILOG_CPU(rf);
-  npc->rpc = (word_t *)&VERILOG_CPU(cmu__DOT__rpc);
+  npc->gpr = (word_t *)&VERILOG_BACKEND(rf);
+  npc->rpc = (word_t *)&VERILOG_BACKEND(cmu__DOT__rpc);
   npc->ret = npc->gpr + reg_str2idx("a0");
-  npc->pc = (word_t *)&VERILOG_CPU(cmu__DOT__npc);
-  npc->priv = (char *)&VERILOG_CPU(csrs__DOT__priv_mode);
-  word_t *csr = (word_t *)&VERILOG_CPU(csrs__DOT__csr);
+  npc->pc = (word_t *)&VERILOG_BACKEND(cmu__DOT__npc);
+  npc->priv = (char *)&VERILOG_BACKEND(csrs__DOT__priv_mode);
+  word_t *csr = (word_t *)&VERILOG_BACKEND(csrs__DOT__csr);
 
   npc->state = NPC_RUNNING;
 
@@ -95,8 +102,8 @@ static inline void verilog_connect(TOP_NAME *top, NPCState *npc)
   // sie/sip and mip have architectural combinational views in RTL; difftest
   // reads them from dedicated shadows kept in sync within the same eval
   // (csr[SIE____]/csr[SIP____] storage slots are not maintained per-cycle).
-  npc->sie____ = (word_t *)&VERILOG_CPU(csrs__DOT__csr_sie_shadow);
-  npc->sip____ = (word_t *)&VERILOG_CPU(csrs__DOT__csr_sip_shadow);
+  npc->sie____ = (word_t *)&VERILOG_BACKEND(csrs__DOT__csr_sie_shadow);
+  npc->sip____ = (word_t *)&VERILOG_BACKEND(csrs__DOT__csr_sip_shadow);
   npc->misa___ = csr + MISA___;
   npc->medeleg = csr + MEDELEG;
   npc->mideleg = csr + MIDELEG;
@@ -104,25 +111,25 @@ static inline void verilog_connect(TOP_NAME *top, NPCState *npc)
   npc->mtvec__ = csr + MTVEC__;
   npc->menvcfg = csr + MENVCFG;
   npc->menvcfgh = csr + MENVCFGH;
-  npc->stimecmp = (uint64_t *)&VERILOG_CPU(csrs__DOT__stimecmp);
-  npc->bus_error_pending = (uint8_t *)&VERILOG_CPU(csrs__DOT__bus_error_pending);
-  npc->bus_error_overflow = (uint8_t *)&VERILOG_CPU(csrs__DOT__bus_error_overflow);
-  npc->bus_error_strb = (uint8_t *)&VERILOG_CPU(csrs__DOT__bus_error_strb);
-  npc->bus_error_addr = (word_t *)&VERILOG_CPU(csrs__DOT__bus_error_addr);
+  npc->stimecmp = (uint64_t *)&VERILOG_BACKEND(csrs__DOT__stimecmp);
+  npc->bus_error_pending = (uint8_t *)&VERILOG_BACKEND(csrs__DOT__bus_error_pending);
+  npc->bus_error_overflow = (uint8_t *)&VERILOG_BACKEND(csrs__DOT__bus_error_overflow);
+  npc->bus_error_strb = (uint8_t *)&VERILOG_BACKEND(csrs__DOT__bus_error_strb);
+  npc->bus_error_addr = (word_t *)&VERILOG_BACKEND(csrs__DOT__bus_error_addr);
 
   npc->mstatush = csr + MSTATUSH;
   npc->mscratch = csr + MSCRATCH;
   npc->mepc___ = csr + MEPC___;
   npc->mcause_ = csr + MCAUSE_;
   npc->mtval__ = csr + MTVAL__;
-  npc->mip____ = (word_t *)&VERILOG_CPU(csrs__DOT__csr_mip_shadow);
+  npc->mip____ = (word_t *)&VERILOG_BACKEND(csrs__DOT__csr_mip_shadow);
 
   npc->mcycle_ = csr + MCYCLE_;
   npc->mcycleh = csr + MCYCLEH;
   npc->minstret = csr + MINSTRET;
   npc->minstreth = csr + MINSTRETH;
 
-  npc->fpr = (uint64_t *)&VERILOG_CPU(fpr_bank__DOT__regs);
+  npc->fpr = (uint64_t *)&VERILOG_BACKEND(fpr_bank__DOT__regs);
   npc->fcsr = (uint32_t *)(csr + FCSR);
 
   npc->clint_mtime = (uint64_t *)&VERILOG_CLINT(mtime);
@@ -136,23 +143,23 @@ static inline void verilog_connect(TOP_NAME *top, NPCState *npc)
   npc->plic_threshold = (uint8_t *)&VERILOG_PLIC(threshold_q)[0];
   npc->plic_ext_irq = (uint32_t *)&VERILOG_PLIC(ext_irq_q);
 
-  npc->pmpcfg = (uint8_t *)&VERILOG_CPU(csrs__DOT__pmpcfg_r);
-  npc->pmpaddr = (word_t *)&VERILOG_CPU(csrs__DOT__pmpaddr_r);
+  npc->pmpcfg = (uint8_t *)&VERILOG_BACKEND(csrs__DOT__pmpcfg_r);
+  npc->pmpaddr = (word_t *)&VERILOG_BACKEND(csrs__DOT__pmpaddr_r);
 
   /* Pipeline quiesce probes (for checkpoint save: defer until SQ/ROB are
    * empty so in-flight stores don't get truncated by host-side memory dump).
    * Phase A unified SQ: 1-bit sq_all_empty/sq_all_full probes are width-
    * stable -- host code never depends on SQ_SIZE's bit width. */
   npc->rob_empty = (uint8_t *)&VERILOG_ROU(rob_empty);
-  npc->sq_empty = (uint8_t *)&VERILOG_CPU(lsu__DOT__u_sq__DOT__sq_all_empty);
-  npc->sq_full = (uint8_t *)&VERILOG_CPU(lsu__DOT__u_sq__DOT__sq_all_full);
-  npc->sq_snapshot_capacity = (uint8_t *)&VERILOG_CPU(lsu__DOT__u_sq__DOT__sq_snapshot_capacity);
-  npc->sq_snapshot_head = (uint8_t *)&VERILOG_CPU(lsu__DOT__u_sq__DOT__sq_snapshot_head);
-  npc->sq_snapshot_valid = (uint32_t *)&VERILOG_CPU(lsu__DOT__u_sq__DOT__sq_snapshot_valid);
-  npc->sq_snapshot_committed = (uint32_t *)&VERILOG_CPU(lsu__DOT__u_sq__DOT__sq_snapshot_committed);
-  npc->sq_snapshot_alu = (uint8_t *)&VERILOG_CPU(lsu__DOT__u_sq__DOT__sq_alu)[0];
-  npc->sq_snapshot_paddr = (word_t *)&VERILOG_CPU(lsu__DOT__u_sq__DOT__sq_paddr)[0];
-  npc->sq_snapshot_wdata = (word_t *)&VERILOG_CPU(lsu__DOT__u_sq__DOT__sq_wdata)[0];
+  npc->sq_empty = (uint8_t *)&VERILOG_BACKEND(lsu__DOT__u_sq__DOT__sq_all_empty);
+  npc->sq_full = (uint8_t *)&VERILOG_BACKEND(lsu__DOT__u_sq__DOT__sq_all_full);
+  npc->sq_snapshot_capacity = (uint8_t *)&VERILOG_BACKEND(lsu__DOT__u_sq__DOT__sq_snapshot_capacity);
+  npc->sq_snapshot_head = (uint8_t *)&VERILOG_BACKEND(lsu__DOT__u_sq__DOT__sq_snapshot_head);
+  npc->sq_snapshot_valid = (uint32_t *)&VERILOG_BACKEND(lsu__DOT__u_sq__DOT__sq_snapshot_valid);
+  npc->sq_snapshot_committed = (uint32_t *)&VERILOG_BACKEND(lsu__DOT__u_sq__DOT__sq_snapshot_committed);
+  npc->sq_snapshot_alu = (uint8_t *)&VERILOG_BACKEND(lsu__DOT__u_sq__DOT__sq_alu)[0];
+  npc->sq_snapshot_paddr = (word_t *)&VERILOG_BACKEND(lsu__DOT__u_sq__DOT__sq_paddr)[0];
+  npc->sq_snapshot_wdata = (word_t *)&VERILOG_BACKEND(lsu__DOT__u_sq__DOT__sq_wdata)[0];
 }
 
 #endif // __NPC_VERILOG_H__

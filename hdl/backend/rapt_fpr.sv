@@ -45,8 +45,8 @@ module rapt_fpr (
     if (reset) begin
       regs_valid         <= '0;
       alu_bypass_valid_q <= 1'b0;
-      alu_bypass_addr_q  <= '0;
-      alu_bypass_data_q  <= '0;
+      // Bypass payload is selected only with alu_bypass_valid_q. The next
+      // valid write captures address/data together; no payload reset needed.
     end else begin
       alu_bypass_valid_q <= fpr.alu_wvalid;
       alu_bypass_addr_q  <= fpr.alu_waddr;

@@ -69,8 +69,14 @@ module rapt_ptw #(
   ptw_state_t state;
 
   logic [8:0] vpn1, vpn0;
-  logic [XLEN-1:12] vtag_q;
-  logic [XLEN-1:0] pte_addr;
+  // One canonical Sv39 VPN owns the walk. Lower-level VPNs are views of it,
+  // not separately stored copies; the upper VA bits are sign extension.
+  logic [38:12] vtag_q;
+  assign vpn1 = vtag_q[29:21];
+  assign vpn0 = vtag_q[20:12];
+  // Sv39 PTE addresses are 56-bit physical addresses aligned to eight bytes.
+  // Keep the page number and PTE index, not XLEN padding or constant offset.
+  logic [55:3] pte_word_addr;
   logic req_store_q;
   logic pbmte_q;
   logic killed;
@@ -123,13 +129,13 @@ module rapt_ptw #(
   assign busy = (state != IDLE);
   assign bus_arvalid = !kill
                      && (state == LVL2_REQ || state == LVL1_REQ || state == LVL0_REQ);
-  assign bus_araddr = pte_addr;
+  assign bus_araddr = XLEN'({pte_word_addr, 3'b000});
   assign bus_awvalid = 1'b0;
   assign bus_awaddr = '0;
   assign bus_wvalid = 1'b0;
   assign bus_wdata = '0;
   assign bus_wstrb = '0;
-  assign result_vtag = vtag_q;
+  assign result_vtag = (XLEN-12)'($signed(vtag_q));
 
   // SBE is WARL-zero in rapt today. Keep the port so the requester interface
   // stays uniform across RV32/RV64.
@@ -160,11 +166,9 @@ module rapt_ptw #(
             if (vaddr[63:39] != {25{vaddr[38]}}) begin
               fault <= 1'b1;
             end else begin
-              vpn1 <= vaddr[29:21];
-              vpn0 <= vaddr[20:12];
-              vtag_q <= vaddr[XLEN-1:12];
+              vtag_q <= vaddr[38:12];
               req_store_q <= req_store;
-              pte_addr <= XLEN'({satp_ppn, 12'b0}) + (XLEN'(vaddr[38:30]) << 3);
+              pte_word_addr <= {satp_ppn, vaddr[38:30]};
               state <= LVL2_REQ;
             end
           end
@@ -201,7 +205,7 @@ module rapt_ptw #(
                 state <= IDLE;
               end else begin
                 global_q <= global_q | pte_data[5];
-                pte_addr <= XLEN'({pte_data[53:10], 12'b0}) + (XLEN'(vpn1) << 3);
+                pte_word_addr <= {pte_data[53:10], vpn1};
                 state <= LVL1_REQ;
               end
             end
@@ -239,7 +243,7 @@ module rapt_ptw #(
                 state <= IDLE;
               end else begin
                 global_q <= global_q | pte_data[5];
-                pte_addr <= XLEN'({pte_data[53:10], 12'b0}) + (XLEN'(vpn0) << 3);
+                pte_word_addr <= {pte_data[53:10], vpn0};
                 state <= LVL0_REQ;
               end
             end
@@ -303,10 +307,11 @@ module rapt_ptw #(
   ptw_state_t state;
 
   logic [9:0] vpn1, vpn0;
-  // Sv32 PA is 34 bits; keep all 34 bits so addition can't overflow. The
-  // upper two bits are truncated at bus_araddr because the host bus is XLEN.
+  // Sv32's 34-bit PTE address is word aligned. The existing XLEN-wide bus
+  // still truncates its upper two bits; this storage cleanup does not change
+  // that platform interface or pretend to add 34-bit RV32 bus support.
   /* verilator lint_off UNUSEDSIGNAL */
-  logic [XLEN+1:0] ppn_a;
+  logic [33:2] pte_word_addr;
   /* verilator lint_on UNUSEDSIGNAL */
 
   logic [31:0] pte_raw;
@@ -324,7 +329,7 @@ module rapt_ptw #(
 
   assign busy = (state != IDLE);
   assign bus_arvalid = !kill && (state == LVL1_REQ || state == LVL0_REQ);
-  assign bus_araddr = ppn_a[XLEN-1:0];
+  assign bus_araddr = XLEN'({pte_word_addr, 2'b00});
   assign bus_awvalid = 1'b0;
   assign bus_awaddr = '0;
   assign bus_wvalid = 1'b0;
@@ -376,7 +381,7 @@ module rapt_ptw #(
             vpn1  <= vaddr[31:22];
             vpn0  <= vaddr[21:12];
             req_store_q <= req_store;
-            ppn_a <= {satp_ppn, 12'b0} + (vaddr[31:22] * 4);
+            pte_word_addr <= {satp_ppn, vaddr[31:22]};
             state <= LVL1_REQ;
           end
         end
@@ -412,7 +417,7 @@ module rapt_ptw #(
                 state <= IDLE;
               end else begin
                 global_q <= global_q | pte_data[5];
-                ppn_a <= {pte_data[31:10], 12'b0} + (vpn0 * 4);
+                pte_word_addr <= {pte_data[31:10], vpn0};
                 state <= LVL0_REQ;
               end
             end

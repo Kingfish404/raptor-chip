@@ -35,7 +35,8 @@ module tb_ifu_l1i_stream;
       .ifu_bpu,
       .ifu_l1i,
       .ifu_idu,
-      .ifu_hazard()
+      .ifu_hazard(),
+      .response_pending_o()
   );
   function automatic logic [15:0] half_at(input int unsigned addr);
     case ((addr >> 1) & 3)

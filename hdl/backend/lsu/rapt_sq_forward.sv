@@ -42,8 +42,9 @@ module rapt_sq_forward #(
     if (fp64) size_m1 = 7;
     return 2'((4'(offset) + size_m1) >> OffsetBits);
   endfunction
-  function automatic logic word_in_store(input logic [Xlen-1:0] store_va, load_va,
-                                         input logic [1:0] span, load_span, input logic page_only);
+  function automatic logic word_in_store(input logic [Xlen-1:0] store_va,
+                                         input logic [Xlen-1:0] load_va, input logic [1:0] span,
+                                         input logic [1:0] load_span, input logic page_only);
     logic [Xlen-OffsetBits-1:0] word_delta, reverse_word_delta;
     logic [11-OffsetBits:0] page_delta, reverse_page_delta;
     // Modular subtraction also covers XLEN wrap and 4 KiB offset wrap.

@@ -109,7 +109,7 @@ static inline bool csrw_satp_accept(word_t v)
 static inline word_t csrw_warl(uint16_t c, word_t v)
 {
   c &= 0xfff;
-#ifdef CONFIG_RV_RVA22S64
+#ifdef CONFIG_RV_MCOUNTINHIBIT
   if (c == CSR_MCOUNTINHIBIT) return 0;
 #endif
   if (c == CSR_MTVEC || c == CSR_STVEC)

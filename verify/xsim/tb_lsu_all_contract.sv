@@ -263,7 +263,9 @@ l1d_bus_if l1d_bus ();
   pmp_update_if pmp_update ();
   lsu_l1d_mmu_if exu_l1d ();
   rou_cmu_if rou_cmu ();
-  rapt_l1d cache_dut (
+  rapt_l1d #(
+      .LineRefill(0)
+  ) cache_dut (
       .clock,
       .reset,
       .cmu_bcast,
@@ -271,8 +273,7 @@ l1d_bus_if l1d_bus ();
       .l1d_bus,
       .csr_bcast,
       .pmp_update,
-      .exu_l1d,
-      .rou_cmu
+      .exu_l1d
   );
   task automatic init_inputs;
     begin
@@ -347,6 +348,8 @@ l1d_bus_if l1d_bus ();
       rou_cmu.slot[0].valid = 1'b0;
       rou_cmu.atomic_sc = 1'b0;
       rou_cmu.fence_time = 1'b0;
+      rou_cmu.cbo_inval = 0;
+      rou_cmu.cbo_block = '0;
       rou_cmu.flush_pipe = 1'b0;
       exu_lsu.fp_rdata64_req = 0;
     end
@@ -414,6 +417,7 @@ l1d_bus_if l1d_bus ();
     l1i_bus.arburst=0;
     l1i_bus.ar_ptw=0;
     l1i_bus.rpbmt=0;
+    l1i_bus.noallocate = 0;
     l1i_bus.awvalid=0;
     l1i_bus.awaddr=0;
     l1i_bus.aw_ptw=0;
@@ -665,23 +669,28 @@ module tb_lsu_cbo_zero;
     rou_lsu.valid = 1'b0;
     rou_lsu.store = 1'b0;
 
-    lsu_l1d.wready = 1'b1;
-    for (int beat = 0; beat < 8; beat++) begin
+    // Hold the final memory B while a committed ZERO survives a flush.
+    lsu_l1d.wready = 1'b0;
+    for (int cycle = 0; cycle < 20; cycle++) begin
+      cmu_bcast.flush_pipe = cycle == 7;
       #1;
-      check(lsu_l1d.wvalid, "CBO.ZERO omitted a cache-block write beat");
-      check(lsu_l1d.waddr == BlockBase + 64'(beat * 8),
-            "CBO.ZERO emitted an incorrect aligned beat address");
-      check(lsu_l1d.walu == 8'hff, "CBO.ZERO beat was not a full dword store");
-      check(lsu_l1d.wdata == 64'b0, "CBO.ZERO emitted nonzero data");
+      check(lsu_l1d.wvalid && lsu_l1d.wzero, "CBO.ZERO lost its burst descriptor");
+      check(lsu_l1d.waddr == BlockBase && lsu_l1d.wdata == 0,
+            "CBO.ZERO descriptor did not retain its aligned block");
+      check(!dut.sq_all_empty, "ZERO SQ entry freed before final B");
       tick(1);
     end
+    cmu_bcast.flush_pipe = 0;
+    lsu_l1d.wready = 1;
+    tick(1);
+    lsu_l1d.wready = 0;
 
     #1;
     check(!lsu_l1d.wvalid, "CBO.ZERO emitted more than one 64-byte block");
     tick(2);
     check(dut.sq_all_empty, "CBO.ZERO did not release its SQ entry");
 
-    $display("PASS: Zicboz clears exactly one 64-byte cache block");
+    $display("PASS: Zicboz one 64-byte descriptor retained through delayed B and flush");
     $finish;
   end
 endmodule
@@ -839,7 +848,9 @@ l1d_bus_if l1d_bus ();
   pmp_update_if pmp_update ();
   lsu_l1d_mmu_if exu_l1d ();
   rou_cmu_if rou_cmu ();
-  rapt_l1d cache_dut (
+  rapt_l1d #(
+      .LineRefill(0)
+  ) cache_dut (
       .clock,
       .reset,
       .cmu_bcast,
@@ -847,8 +858,7 @@ l1d_bus_if l1d_bus ();
       .l1d_bus,
       .csr_bcast,
       .pmp_update,
-      .exu_l1d,
-      .rou_cmu
+      .exu_l1d
   );
   task automatic init_inputs;
     begin
@@ -934,6 +944,8 @@ l1d_bus_if l1d_bus ();
       rou_cmu.slot[0].valid = 1'b0;
       rou_cmu.atomic_sc = 1'b0;
       rou_cmu.fence_time = 1'b0;
+      rou_cmu.cbo_inval = 0;
+      rou_cmu.cbo_block = '0;
       rou_cmu.flush_pipe = 1'b0;
       exu_lsu.fp_rdata64_req = 0;
     end
@@ -1564,6 +1576,7 @@ module tb_lsu_sq_random;
         check(lsu_l1d.waddr == model_paddr[model_head], "SQ drain address/order mismatch");
         check(lsu_l1d.wdata == model_data[model_head], "SQ drain data mismatch");
         check(lsu_l1d.walu == 8'(model_alu[model_head]), "SQ drain width mismatch");
+        lsu_l1d.wzero = 0;
       end else begin
         check(!lsu_l1d.wvalid, "SQ presented an uncommitted or invalid store");
       end
@@ -1884,7 +1897,7 @@ module tb_lsu_store_observation;
       exu_ioq_bcast.dest = rapt_pkg::rob_index_t'(owner);
       exu_ioq_bcast.tval = addr;
       exu_ioq_bcast.sq_waddr = addr;
-      sq_waddr_hi = addr + XLEN'(4);
+      sq_waddr_hi = addr + XLEN'(XLEN/8);
       exu_ioq_bcast.sq_wdata = fp64 ? XLEN'(FpData) : data;
       exu_ioq_bcast.sq_wdata64 = FpData;
       exu_ioq_bcast.sq_fp64 = fp64;

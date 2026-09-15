@@ -194,17 +194,24 @@ module rapt_bpu_tage #(
   // ---------------- Read path (synchronous) ----------------
   // Register raddr / r_ghr / r_phr on `ren`, then read combinationally next
   // cycle.
-  logic [   XLEN-1:0] r_pc_q;
+  // Only these PC bits participate in the base index or any tagged hash.
+  // Keep the sampling boundary unchanged; zero-filled unused bits are wires.
+  localparam int ReadPcMsb = BIM_LEN > IDX_LEN + TagLen3 ? BIM_LEN : IDX_LEN + TagLen3;
+  logic [ReadPcMsb:1] r_pc_bits_q;
+  wire [XLEN-1:0] r_pc_q = XLEN'({r_pc_bits_q, 1'b0});
+  if (ReadPcMsb >= XLEN) begin : g_invalid_read_pc_width
+    $error("TAGE PC hash exceeds XLEN");
+  end
   logic [GHR_LEN-1:0] r_ghr_q;
   logic [PHR_LEN-1:0] r_phr_q;
 
   always_ff @(posedge clock) begin
     if (reset || init) begin
-      r_pc_q  <= '0;
+      r_pc_bits_q <= '0;
       r_ghr_q <= '0;
       r_phr_q <= '0;
     end else if (ren) begin
-      r_pc_q  <= raddr;
+      r_pc_bits_q <= raddr[ReadPcMsb:1];
       r_ghr_q <= r_ghr;
       r_phr_q <= r_phr;
     end

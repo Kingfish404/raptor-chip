@@ -17,7 +17,9 @@ module rapt_idu #(
 );
   rapt_pkg::fetch_slot_t slots[Width], next_slots[Width];
   rapt_pkg::decoded_slot_t decoded[Width];
-  int unsigned count, next_count, consumed, incoming;
+  localparam int CountBits = (Width > 0) ? $clog2(Width + 1) : 1;
+  logic [CountBits-1:0] count;
+  int unsigned next_count, consumed, incoming;
   logic accept[Width];
   logic redirect, prefix;
   logic [XLEN-1:0] redirect_pc;
@@ -64,7 +66,7 @@ module rapt_idu #(
         corrected = (idu_bpu.ras_addr + decoded[s].uop.imm) & ~XLEN'(1);
       idu_rnu.slot[s] = decoded[s];
       idu_rnu.slot[s].uop.pnpc = corrected;
-      idu_rnu.valid[s] = prefix && s < count;
+      idu_rnu.valid[s] = prefix && s < 32'(count);
       accept[s] = idu_rnu.valid[s] && idu_rnu.ready[s];
       if (accept[s]) begin
         consumed++;
@@ -88,15 +90,15 @@ module rapt_idu #(
     for (int s = 0; s < Width; s++) begin
       ifu_idu.ready[s] = !reset && !cmu_bcast.flush_pipe && !cmu_bcast.sys_resume
           && !recovery.pending
-          && !redirect && s < Width - count + consumed;
+          && !redirect && s < Width - 32'(count) + consumed;
       if (s == incoming && ifu_idu.valid[s] && ifu_idu.ready[s]) incoming++;
     end
-    next_count = count - consumed + incoming;
+    next_count = 32'(count) - consumed + incoming;
     for (int s = 0; s < Width; s++) begin
       next_slots[s] = '0;
-      if (s < count - consumed) next_slots[s] = slots[s+consumed];
+      if (s < 32'(count) - consumed) next_slots[s] = slots[s+consumed];
       for (int i = 0; i < Width; i++)
-      if (i < incoming && s == count - consumed + i) next_slots[s] = ifu_idu.slot[i];
+      if (i < incoming && s == 32'(count) - consumed + i) next_slots[s] = ifu_idu.slot[i];
     end
     if (redirect) next_count = 0;
   end
@@ -120,11 +122,15 @@ module rapt_idu #(
       count <= 0;
       pmu_early_resteer <= 1'b0;
     end else begin
-      count <= next_count;
+      count <= CountBits'(next_count);
       pmu_early_resteer <= redirect;
       for (int s = 0; s < Width; s++) slots[s] <= next_slots[s];
     end
   end
+  if ((Width & (Width + 1)) != 0) begin : g_count_range
+    `RAPT_SVA(clock, reset, IDU_RESIDENT_COUNT_BOUND, 32'(count) <= Width)
+  end
+  `RAPT_SVA(clock, reset, IDU_COUNT_BOUNDS, consumed <= 32'(count) && next_count <= Width)
   `RAPT_SVA_IMPLY(
       clock, reset, IDU_RECOVERY_NO_ACCEPT_OR_OUTPUT, recovery.pending,
       !ifu_idu.ready[0] && !idu_rnu.valid[0] && !idu_bpu.history_valid && !idu_bpu.train_en)

@@ -32,7 +32,7 @@ module rapt_ras #(
     return ptr == 0 ? IndexBits'(Depth - 1) : ptr - 1'b1;
   endfunction
 
-  function automatic state_t advance(input state_t old_state, input logic push, pop,
+  function automatic state_t advance(input state_t old_state, input logic push, input logic pop,
                                      input logic [Xlen-1:0] addr);
     state_t result;
     result = old_state;
@@ -53,12 +53,16 @@ module rapt_ras #(
   assign top_valid = speculative.count != 0;
   assign top_addr = top_valid ? speculative.data[previous(speculative.next_index)] : '0;
   always_ff @(posedge clock) begin
+    // Payload is intentionally unreset. Count hides every dead entry, and a
+    // push writes its address before making it live. Keep both complete data
+    // images: pointer-only recovery cannot repair wrong-path overwrites.
+    committed <= next_committed;
+    speculative <= flush ? next_committed : advance(speculative, spec_push, spec_pop, spec_addr);
     if (reset || clear) begin
-      speculative <= '0;
-      committed <= '0;
-    end else begin
-      committed <= next_committed;
-      speculative <= flush ? next_committed : advance(speculative, spec_push, spec_pop, spec_addr);
+      speculative.next_index <= '0;
+      speculative.count <= '0;
+      committed.next_index <= '0;
+      committed.count <= '0;
     end
   end
   if (!(Depth > 0 && Xlen > 0)) begin : g_invalid_config_0

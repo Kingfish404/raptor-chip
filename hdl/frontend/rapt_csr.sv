@@ -358,7 +358,8 @@ module rapt_csr #(
                                  pmpcfg_r[3], pmpcfg_r[2], pmpcfg_r[1], pmpcfg_r[0]})
                         : XLEN'({pmpcfg_r[3], pmpcfg_r[2], pmpcfg_r[1], pmpcfg_r[0]});
         end else if (raddr == `RAPT_CSR_PMPCFG1) begin
-          exu_csr.rdata = (XLEN == 64) ? '0 : XLEN'({pmpcfg_r[7], pmpcfg_r[6], pmpcfg_r[5], pmpcfg_r[4]});
+          exu_csr.rdata = (XLEN == 64) ? '0
+              : XLEN'({pmpcfg_r[7], pmpcfg_r[6], pmpcfg_r[5], pmpcfg_r[4]});
         end else if (raddr == `RAPT_CSR_PMPCFG2) begin
           exu_csr.rdata = (XLEN == 64)
                         ? XLEN'({pmpcfg_r[15], pmpcfg_r[14], pmpcfg_r[13], pmpcfg_r[12],

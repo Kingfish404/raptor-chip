@@ -8,6 +8,7 @@ extern "C"
 
 #include <csr-defs.h>
 #include <generated/soc.h>
+#include <generated/mem.h>
 
   __attribute__((unused)) static void flush_cpu_icache(void)
   {
@@ -19,8 +20,19 @@ extern "C"
   __attribute__((unused)) static void flush_cpu_dcache(void)
   {
 #if defined(CONFIG_CPU_HAS_DCACHE)
-    /* cbo.flush 0(x0); Raptor conservatively maintains the whole L1D. */
-    asm volatile("cbo.flush 0(x0)" ::: "memory");
+    /* Legacy LiteX whole-cache hook. Raptor CBO clears all ways selected
+     * by VA bits 11:6, including higher physical colors. Sweep a mapped
+     * SRAM page in 64-byte CBO blocks to cover every set. This relies on
+     * Raptor's set-wide implementation, not generic Zicbom semantics.
+     * Address zero is unmapped and must not be used as a flush trigger.
+     */
+#if !defined(SRAM_BASE) || !defined(SRAM_SIZE) || SRAM_SIZE < 4096
+#error "Raptor whole-cache maintenance requires a mapped 4 KiB SRAM page"
+#endif
+    asm volatile("fence iorw,iorw" ::: "memory");
+    for (unsigned long addr = SRAM_BASE; addr < SRAM_BASE + 4096UL; addr += 64)
+      asm volatile("cbo.flush 0(%0)" :: "r"(addr) : "memory");
+    asm volatile("fence iorw,iorw" ::: "memory");
 #endif
   }
 

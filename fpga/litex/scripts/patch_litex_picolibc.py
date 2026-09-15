@@ -8,8 +8,8 @@ stdio implementation lives in ``libc/stdio``. LiteX's vendored Makefiles still
 assume the legacy layout, so BIOS builds can fail with missing sources or with
 ``FDEV_SETUP_STREAM``/TLS stdio conflicts.
 
-This script patches the vendored LiteX files in place. The surrounding Makefile
-restores them with ``git checkout -- <path>`` after the BIOS build.
+This script patches the supplied LiteX tree in place. Build wrappers use a
+private software copy, never patch/restore the shared third-party checkout.
 """
 from __future__ import annotations
 

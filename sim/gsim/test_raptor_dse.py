@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
 
-from raptor_dse import derive_uarch, parse_rapt_config
+from raptor_dse import derive_uarch, detect_rtl_dirp, parse_rapt_config
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -35,12 +36,23 @@ def minimal_cfg(**widths: int) -> dict:
 
 
 class WidthMappingTest(unittest.TestCase):
+    def test_default_rob_is_32_for_both_xlens(self) -> None:
+        dse = json.loads((ROOT / "sim/gsim/dse-config.json").read_text())
+        self.assertEqual(dse["ooo_cpu"][0]["rob_size"], 32)
+        for rv64 in (False, True):
+            with self.subTest(rv64=rv64):
+                cfg = parse_rapt_config(
+                    ROOT / "hdl/configs/default/rapt_config.svh", rv64
+                )
+                self.assertEqual(cfg["RAPT_ROB_SIZE"], 32)
+                self.assertEqual(cfg["RAPT_PHY_SIZE"], 128)
+
     def test_cache_capacity_is_invariant_across_xlen(self) -> None:
         # Byte capacities from the shipped presets, independent of the
         # bridge's LINE_LEN arithmetic. RV64 data words must not halve L1D.
         expected = {
             "small": (512, 256, 16),
-            "default": (4096, 2048, 64),
+            "default": (16384, 16384, 64),
             "middle": (256, 256, 16),
             "large": (32768, 8192, 64),
             "formal": (32, 32, 16),
@@ -184,6 +196,47 @@ class WidthMappingTest(unittest.TestCase):
                          'dse-config.json|small.dse-config')
         self.assertNotEqual(tag('PRESET=small', 'JSON_CONFIG=dse-config.json'),
                             tag('PRESET=large', 'JSON_CONFIG=dse-config.json'))
+
+    def test_direction_predictor_follows_preset_dirp(self) -> None:
+        # The RTL presets select their direction predictor via RAPT_BPU_DIRP_*;
+        # the gem5 default must follow it, not the historical `local` default.
+        expected = {
+            "small": "local",    # RAPT_BPU_DIRP_BIMODAL
+            "default": "tage",   # RAPT_BPU_DIRP_TAGE
+            "middle": "tage",    # RAPT_BPU_DIRP_TAGE
+            "large": "tage",     # RAPT_BPU_DIRP_TAGE
+            "formal": "local",   # RAPT_BPU_DIRP_BIMODAL
+        }
+        for preset, kind in expected.items():
+            with self.subTest(preset=preset):
+                cfg = parse_rapt_config(
+                    ROOT / "hdl" / "configs" / preset / "rapt_config.svh", False
+                )
+                self.assertEqual(detect_rtl_dirp(cfg), kind)
+
+    def test_static_dirp_falls_back_to_bimodal(self) -> None:
+        self.assertEqual(
+            detect_rtl_dirp({"RAPT_BPU_DIRP_STATIC": True}), "local"
+        )
+        self.assertEqual(
+            detect_rtl_dirp({"RAPT_BPU_DIRP_GSHARE": True}), "gshare"
+        )
+        self.assertEqual(detect_rtl_dirp({}), "local")
+
+    def test_fetch_queue_maps_to_riq_size(self) -> None:
+        expected = {
+            "small": 2,
+            "default": 8,
+            "middle": 2,
+            "large": 16,
+        }
+        for preset, fetch_q in expected.items():
+            with self.subTest(preset=preset):
+                cfg = parse_rapt_config(
+                    ROOT / "hdl" / "configs" / preset / "rapt_config.svh", False
+                )
+                u = derive_uarch(cfg)
+                self.assertEqual(u["fetch_q"], fetch_q)
 
     def test_parser_handles_direct_and_rv64_conditional_widths(self) -> None:
         source = """\

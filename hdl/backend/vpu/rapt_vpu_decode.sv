@@ -101,7 +101,8 @@ module rapt_vpu_decode (
         is_integer = 1;
         iota = 1;
         src_vector = 0;
-      end else if (insn[31:26] == 6'h14 && insn[14:12] == 2 && insn[19:15] >= 1 && insn[19:15] <= 3) begin
+      end else if (insn[31:26] == 6'h14 && insn[14:12] == 2 && insn[19:15] >= 1
+          && insn[19:15] <= 3) begin
         is_integer = 1;
         mask_prefix = 1;
         mask_result = 1;
@@ -200,6 +201,7 @@ module rapt_vpu_decode (
         endcase
       end
     end
-    illegal = !(is_config || is_csr || is_integer || is_memory || is_reduce || is_move || is_scalar_move || is_mask_scan);
+    illegal = !(is_config || is_csr || is_integer || is_memory || is_reduce || is_move
+        || is_scalar_move || is_mask_scan);
   end
 endmodule

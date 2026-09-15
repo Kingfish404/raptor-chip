@@ -58,6 +58,7 @@ module rapt_bus #(
   logic [XLEN-1:0] l1i_q_addr                                     [L1iARDepth];
   logic            l1i_q_burst                                    [L1iARDepth];
   logic [1:0]      l1i_q_pbmt [L1iARDepth];
+  logic l1i_q_noallocate[L1iARDepth];
   logic            l1i_q_ptw                                      [L1iARDepth];
   logic [L1iARPtrW-1:0] l1i_q_rdptr;
   logic [L1iARPtrW-1:0] l1i_q_wrptr;
@@ -72,6 +73,8 @@ module rapt_bus #(
   logic            l1d_slot_issued;  // AR handshake completed with downstream
   logic [XLEN-1:0] l1d_slot_addr;
   logic [     2:0] l1d_slot_size;
+  logic [7:0] l1d_slot_len;
+  logic l1d_slot_noallocate, rd_skid_noallocate, source_noallocate;
   logic            l1d_slot_mmio;
   logic            l1d_slot_ptw;
   logic [1:0]      l1d_slot_pbmt;
@@ -173,8 +176,10 @@ module rapt_bus #(
 `endif
   assign source_size = source_l1d ? l1d_slot_size
                                   : (l1i_q_ptw[l1i_q_rdptr] ? PtwReadSize : 3'b010);
-  assign source_burst = (source_l1i && l1i_q_head_burst) ? 2'b01 : 2'b00;
-  assign source_len = (source_l1i && l1i_q_head_burst) ? 8'h01 : 8'h00;
+  assign source_burst = ((source_l1d && l1d_slot_len != 0) || (source_l1i
+      && l1i_q_head_burst)) ? 2'b01 : 2'b00;
+  assign source_len = source_l1d ? l1d_slot_len : (source_l1i && l1i_q_head_burst)
+      ? 8'h01 : 8'h00;
 
   // Bypass when the skid entry is empty; use only registered payload while
   // stalled.  This is the only driver of the downstream AR channel.
@@ -184,6 +189,8 @@ module rapt_bus #(
   assign mem.rd_req_size = rd_skid_valid ? rd_skid_size : source_size;
   assign mem.rd_req_burst = rd_skid_valid ? rd_skid_burst : source_burst;
   assign mem.rd_req_pbmt = rd_skid_valid ? rd_skid_pbmt : source_pbmt;
+  assign source_noallocate = source_l1d ? l1d_slot_noallocate : l1i_q_noallocate[l1i_q_rdptr];
+  assign mem.rd_req_noallocate = rd_skid_valid ? rd_skid_noallocate : source_noallocate;
   assign mem.rd_req_len = rd_skid_valid ? rd_skid_len : source_len;
   assign rd_output_fire = mem.rd_req_valid && mem.rd_req_ready;
   assign rd_capture_source = rd_skid_available && source_valid
@@ -201,12 +208,8 @@ module rapt_bus #(
   always_ff @(posedge clock) begin
     if (reset) begin
       rd_skid_valid <= 1'b0;
-      rd_skid_id    <= '0;
-      rd_skid_addr  <= '0;
-      rd_skid_size  <= '0;
-      rd_skid_len   <= '0;
-      rd_skid_burst <= '0;
-      rd_skid_pbmt <= '0;
+      // Invalid skid payload is never selected. Capture rewrites every
+      // field together with valid, including PBMT/noallocate attributes.
     end else if (rd_skid_available) begin
       rd_skid_valid <= rd_capture_source;
       if (rd_capture_source) begin
@@ -216,6 +219,7 @@ module rapt_bus #(
         rd_skid_len   <= source_len;
         rd_skid_burst <= source_burst;
         rd_skid_pbmt <= source_pbmt;
+        rd_skid_noallocate <= source_noallocate;
       end
     end
   end
@@ -231,8 +235,8 @@ module rapt_bus #(
       // with the pointer/count update.  l1d_slot_mmio/ptw are cleared on
       // slot free.
       l1i_captured       <= 1'b0;
-      l1i_last_push_addr <= '0;
-      l1i_last_push_ptw  <= 1'b0;
+      // !l1i_captured accepts the first request regardless of old identity.
+      // A capture rewrites address/PTW together before comparisons matter.
       l1d_slot_busy      <= 1'b0;
       l1d_slot_held      <= 1'b0;
       l1d_slot_issued    <= 1'b0;
@@ -243,6 +247,7 @@ module rapt_bus #(
         l1i_q_addr[l1i_q_wrptr]  <= l1i_bus.araddr;
         l1i_q_burst[l1i_q_wrptr] <= l1i_bus.arburst;
         l1i_q_ptw[l1i_q_wrptr]   <= l1i_bus.ar_ptw;
+        l1i_q_noallocate[l1i_q_wrptr] <= l1i_bus.ar_ptw || l1i_bus.noallocate;
         l1i_q_pbmt[l1i_q_wrptr] <= l1i_bus.ar_ptw ? 2'b00 : l1i_bus.rpbmt;
         l1i_q_wrptr              <= l1i_q_wrptr + 1'b1;
         l1i_captured             <= 1'b1;
@@ -272,6 +277,8 @@ module rapt_bus #(
         l1d_slot_issued <= 1'b0;
         l1d_slot_addr   <= l1d_bus.araddr;
         l1d_slot_size   <= l1d_arsize_enc;
+        l1d_slot_len <= l1d_bus.ar_ptw ? 8'd0 : l1d_bus.arlen;
+        l1d_slot_noallocate <= l1d_bus.ar_ptw || l1d_bus.noallocate;
         l1d_slot_mmio   <= rapt_pkg::addr_mmio(l1d_bus.araddr);
         l1d_slot_ptw    <= l1d_bus.ar_ptw;
         l1d_slot_pbmt <= l1d_bus.ar_ptw ? 2'b00 : l1d_bus.rpbmt;
@@ -319,13 +326,15 @@ module rapt_bus #(
       && write_state == WR_IDLE && !store_awvalid && !store_wvalid;
 
   assign mem.wr_req_valid = (write_state == WR_IDLE) && store_awvalid && store_wvalid;
+  assign mem.wr_req_zero = store_bridge == L1D && l1d_bus.wzero;
   assign mem.wr_req_id = 4'(store_bridge);
   assign mem.wr_req_addr = store_awaddr;
   assign mem.wr_req_pbmt = store_bridge == L1D ? l1d_bus.wpbmt : 2'b00;
   // Right-aligned one- and two-byte requests can use narrow AXI transfers.
   // Wider or lane-shifted partial masks come from aligned misaligned-store
   // beats; cover the highest asserted lane with a 4- or 8-byte transfer and
-  // let WSTRB select the architectural bytes.
+  // let WSTRB select the architectural bytes. The AXI master also accounts
+  // for AWADDR's byte offset when sizing the final bus-lane transfer span.
   assign mem.wr_req_size = (store_wstrb == 8'h01) ? 3'b000
                          : (store_wstrb == 8'h03) ? 3'b001
                          : (store_wstrb[7:4] == 4'h0) ? 3'b010

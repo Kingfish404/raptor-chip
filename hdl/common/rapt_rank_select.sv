@@ -13,7 +13,8 @@ module rapt_rank_select #(
   localparam int Leaves = 2 ** $clog2(Entries);
   localparam int CountBits = $clog2(NumSelect + 1);
   logic [CountBits-1:0] count[2*Leaves], before_count[2*Leaves];
-  function automatic logic [CountBits-1:0] capped_add(input logic [CountBits-1:0] left, right);
+  function automatic logic [CountBits-1:0] capped_add(input logic [CountBits-1:0] left,
+                                                      input logic [CountBits-1:0] right);
     logic [CountBits:0] sum;
     sum = {1'b0, left} + {1'b0, right};
     return sum > (CountBits + 1)'(NumSelect) ? CountBits'(NumSelect) : CountBits'(sum);
@@ -22,8 +23,11 @@ module rapt_rank_select #(
   assign before_count[0] = '0;
   assign before_count[1] = '0;
   for (genvar e = 0; e < Leaves; e++) begin : g_leaf
-    if (e < Entries) assign count[Leaves+e] = CountBits'(available[e]);
-    else assign count[Leaves+e] = '0;
+    if (e < Entries) begin : g_available
+      assign count[Leaves+e] = CountBits'(available[e]);
+    end else begin : g_pad
+      assign count[Leaves+e] = '0;
+    end
   end
   for (genvar n = 1; n < Leaves; n++) begin : g_tree
     assign count[n] = capped_add(count[2*n], count[2*n+1]);
@@ -35,7 +39,8 @@ module rapt_rank_select #(
     always_comb begin
       index[s] = '0;
       for (int e = 0; e < Entries; e++)
-      index[s] |= IndexBits'(e) & {IndexBits{available[e] && before_count[Leaves+e] == CountBits'(s)}};
+      index[s] |= IndexBits'(e)
+          & {IndexBits{available[e] && before_count[Leaves+e] == CountBits'(s)}};
     end
   end
   if (!(Entries > 0 && NumSelect > 0)) begin : g_invalid_config_0

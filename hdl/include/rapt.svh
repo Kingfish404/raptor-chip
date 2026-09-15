@@ -3,6 +3,12 @@
 `include "rapt_config.svh"
 `include "rapt_sva.svh"
 
+// FPGA builds may map the integer product into DSPs. Generic/ASIC builds
+// retain the fabric inference policy; arithmetic and valid/tag latency agree.
+`ifndef RAPT_FPGA_DSP
+`define RAPT_FPGA_DSP 0
+`endif
+
 // Bounded port reassignment policy; independent of ordered stage widths.
 // Off by default: current CSR/system operations serialize, and the
 // measured workloads do not justify the extra select-path logic. Custom
@@ -11,7 +17,16 @@
 `define RAPT_ISSUE_REBALANCE 0
 `endif
 `ifndef RAPT_IQ_RECLAIM_ON_ISSUE
-`define RAPT_IQ_RECLAIM_ON_ISSUE 1
+// Keep execution readiness out of dispatch capacity. An issued entry becomes
+// available on the following cycle; override to 1 for the throughput ablation.
+`define RAPT_IQ_RECLAIM_ON_ISSUE 0
+`endif
+
+// Register cache responses before instruction packing and auxiliary prediction.
+// The request side predicts the next packet independently so sequential hits
+// can still deliver a packet every cycle. Override to 0 for latency/PPA studies.
+`ifndef RAPT_FETCH_RESPONSE_STAGE
+`define RAPT_FETCH_RESPONSE_STAGE 1
 `endif
 
 // Physical integer issue topology is independent of every ordered pipeline
@@ -65,6 +80,13 @@
 `define RAPT_BRANCH_CHECKPOINTS 16
 `endif
 
+// Cache data-SRAM subarray width in bits. The L1D data banks clamp their
+// per-bank word count so each `rapt_sram_1rw` instance is at most this wide;
+// presets that do not set it keep the historical 128-bit subarray.
+`ifndef RAPT_CACHE_SRAMLEN
+`define RAPT_CACHE_SRAMLEN 128
+`endif
+
 // Stage widths are independent elaboration choices. Current presets declare
 // them directly; the legacy issue-width fallback exists only for out-of-tree
 // configurations. Ordered slot-control algorithms never select A/B variants.
@@ -95,8 +117,12 @@
 `endif
 `endif
 
-// Physical-address comparison width. Preserve every implemented pmpaddr bit
-// through broadcast and range matching; mapped regions remain defined by PMA.
+// Implemented physical-address width, independent of register/data XLEN.
+// Cache tags omit bits above this width as well as their index/line offset.
+// Keep full request VAs until translation/PMA checks have rejected invalid
+// addresses; narrowing a tag must never turn an unmapped address into a hit.
+// Preserve every implemented pmpaddr bit through broadcast/range matching;
+// mapped regions remain defined by PMA (not by this width alone).
 `ifndef RAPT_PADDR_BITS
 `ifdef RAPT_RV64
 `define RAPT_PADDR_BITS 56

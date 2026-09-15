@@ -18,7 +18,8 @@ module rapt_vpu_fp_misc #(
 );
   localparam int Width = Double ? 64 : 32;
   localparam int Fraction = Double ? 52 : 23;
-  localparam logic [Width-1:0] CanonicalNaN = Width'(Double ? 64'h7ff8000000000000 : 64'h000000007fc00000);
+  localparam logic [Width-1:0] CanonicalNaN = Width'(Double ? 64'h7ff8000000000000
+      : 64'h000000007fc00000);
   logic [Width-1:0] x, y, value;
   logic sx, sy, nan_x, nan_y, snan_x, snan_y, zero_x, zero_y;
   logic exp_zero_x, exp_ones_x, fraction_zero_x, equal_value, less_value;

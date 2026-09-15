@@ -23,7 +23,7 @@ module rapt_l1d_data #(
     output wire [Xlen-1:0] read_data[Ways][LineWords]
 );
   localparam int WordBytes = Xlen / 8;
-  localparam int MaxSubarrayWords = 128 / Xlen;
+  localparam int MaxSubarrayWords = `RAPT_CACHE_SRAMLEN / Xlen;
   localparam int SubarrayWords = LineWords < MaxSubarrayWords ? LineWords : MaxSubarrayWords;
   localparam int SubarrayBytes = SubarrayWords * WordBytes;
   localparam int Subarrays = LineWords / SubarrayWords;

@@ -9,7 +9,6 @@ cmu_bcast_if cmu_bcast();
 csr_bcast_if csr_bcast();
 pmp_state_if pmp_state();
 rapt_pkg::dispatch_slot_t dispatch[rapt_pkg::DispatchWidth];
-  logic dispatch_ready[rapt_pkg::DispatchWidth];
 dpu_ioq_if disp();
 rapt_pkg::completion_t exu_rou;
 rapt_pkg::completion_t exu_rou_b;
@@ -18,18 +17,18 @@ lsu_pipe_if exu_lsu();
 lsu_l1d_mmu_if exu_l1d();
 fpr_if fpr();
 rapt_pkg::completion_t exu_ioq_bcast;
-  rapt_pkg::completion_t completion[rapt_pkg::CompletionPorts];
-  assign completion[0] = exu_rou;
-  assign completion[1] = exu_rou_b;
-  assign completion[2] = '0;
-  assign completion[3] = exu_ioq_bcast;
-  assign completion[4] = exu_wb_mul;
+rapt_pkg::completion_t completion[rapt_pkg::CompletionPorts];
+assign completion[0] = exu_rou;
+assign completion[1] = exu_rou_b;
+assign completion[2] = '0;
+assign completion[3] = exu_ioq_bcast;
+assign completion[4] = exu_wb_mul;
 
 load_fast_if load_fast();
 
 rapt_lsu_ioq dut (
     .completion(completion),
-      .clock(clock),
+    .clock(clock),
     .reset(reset),
     .cmu_bcast(cmu_bcast),
     .csr_bcast(csr_bcast),
@@ -87,7 +86,6 @@ task automatic init_ioq_inputs(input logic dmmu_en);
 `endif
     disp.accept[0] = 1'b0;
     disp.accept[1] = 1'b0;
-    disp.accept[1] = 1'b0;
     exu_rou.pc = '0;
     exu_rou.npc = '0;
     exu_rou.btaken = 1'b0;
@@ -122,6 +120,7 @@ task automatic init_ioq_inputs(input logic dmmu_en);
     exu_lsu.tval = '0;
     exu_lsu.difftest_skip = 1'b0;
     exu_lsu.rready = 1'b0;
+    exu_lsu.rretry = 1'b0;
     exu_lsu.rdata_b = '0;
     exu_lsu.rready_b = 1'b0;
     exu_lsu.stq_ready = 1'b1;

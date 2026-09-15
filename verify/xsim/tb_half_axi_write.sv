@@ -89,6 +89,7 @@ module tb_half_axi_write;
       l1d_bus.awaddr=expected_addr;
       l1d_bus.wdata=XLEN'('h55aa);
       l1d_bus.wstrb=3;
+      l1d_bus.wzero = 0;
       l1d_bus.awvalid=1;
       l1d_bus.wvalid=1;
       for (int c = 0; c < 128 && (aw_count == 0 || w_count == 0); c++) begin

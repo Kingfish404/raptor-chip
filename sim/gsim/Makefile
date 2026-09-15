@@ -4,6 +4,7 @@ RAPTOR_HOME ?= $(abspath $(CURDIR)/../..)
 GEM5_ROOT   ?= $(RAPTOR_HOME)/third_party/gem5
 GEM5        ?= $(GEM5_ROOT)/build/RISCV/gem5.opt
 PYTHON      ?= python3
+SHELL       := /bin/bash
 
 CPU_ORIGIN   := $(origin CPU)
 BP_ORIGIN    := $(origin BP)
@@ -16,12 +17,21 @@ BENCH   ?= coremark ## Benchmark name or explicit ELF path
 OPTIONS ?= ## Benchmark argv, semicolon-separated
 ARGS    ?= ## Extra args forwarded verbatim to raptor_se.py
 # Microarchitecture-fidelity knobs (forwarded to raptor_se.py).
-# Simulator defaults: no L2, one L1 MSHR, local predictor, no StoreSet.
-# RTL defaults to TAGE; choose BP=tage or an explicit study JSON to compare.
+# Simulator defaults: no L2, one L1 MSHR, no StoreSet. The direction predictor
+# now follows the preset's RAPT_BPU_DIRP_* (default preset: RTL TAGE) unless
+# BP is explicitly overridden.
+# RTL_EXEC=1 (default) additionally matches the RTL execution resources:
+# RAPT_INTEGER_ISSUE_PORTS integer ALUs, one MULDIV (RAPT_M_FAST timing),
+# and one load/store request port. Set RTL_EXEC=0 to fall back to gem5's
+# broader default FUPool (useful to isolate execution-resource effects).
 BP          ?= local ## Branch predictor flavor (local|bimodal|bimode|gshare|tage|ltage|...)
 MSHRS       ?= 1 ## L1 MSHRs per cache (RTL default: 1)
 MEM_LATENCY ?= ## Override raptor_se.py default --mem-latency (e.g. 30ns)
 WITH_L2     ?= 0 ## Set to 1 to re-enable gem5's optional 64KiB L2
+RTL_EXEC    ?= 1 ## 1 = RTL execution resources (RAPT_INTEGER_ISSUE_PORTS ALUs, 1 MULDIV, 1 LSU port)
+GRID_BENCHES ?= coremark,embench-subset ## Workloads for `make grid`
+GRID_JOBS   ?= 16 ## Parallel gem5 processes for `make grid`
+GRID_ARGS   ?= ## Extra grid_search.py args (e.g. --resume --phase rob --max-insts N)
 
 # DSE config overrides (applied on top of PRESET's rapt_config.svh).
 # JSON_CONFIG: path to a ChampSim-style JSON file (ooo_cpu/L1I/L1D/BTB/...).
@@ -45,6 +55,10 @@ BP          := $(strip $(BP))
 MSHRS       := $(strip $(MSHRS))
 MEM_LATENCY := $(strip $(MEM_LATENCY))
 WITH_L2     := $(strip $(WITH_L2))
+RTL_EXEC    := $(strip $(RTL_EXEC))
+GRID_BENCHES := $(strip $(GRID_BENCHES))
+GRID_JOBS   := $(strip $(GRID_JOBS))
+GRID_ARGS   := $(strip $(GRID_ARGS))
 JSON_CONFIG := $(strip $(JSON_CONFIG))
 SET         := $(strip $(SET))
 DSE_DIR     := $(strip $(DSE_DIR))
@@ -57,6 +71,7 @@ FIDELITY_ARGS := \
 	$(if $(_BP_FROM_USER),--bp $(BP),) \
 	$(if $(_MSHRS_FROM_USER),--mshrs $(MSHRS),) \
 	$(if $(filter 1 y yes true,$(WITH_L2)),--with-l2,) \
+	$(if $(filter 1 y yes true,$(RTL_EXEC)),--rtl-execution-resources,) \
 	$(if $(MEM_LATENCY),--mem-latency $(MEM_LATENCY),)
 
 # JSON / --set forwarding
@@ -120,6 +135,8 @@ COREMARK_OPTS := $(strip $(COREMARK_OPTS))
 BP_STUDY_BENCHES ?= coremark microbench ## SE-compatible workloads for bp-study
 BP_STUDY_BENCHES := $(strip $(BP_STUDY_BENCHES))
 
+GRID_PY      ?= $(CURDIR)/grid_search.py ## Grid-search driver script
+
 # ============================================================================
 # Examples
 # ============================================================================
@@ -141,7 +158,7 @@ BP_STUDY_BENCHES := $(strip $(BP_STUDY_BENCHES))
 
 .PHONY: help test check-gem5 build-coremark build-microbench build-embench \
 	coremark microbench embench-% timing run summary sweep aggregate \
-		bp-study dse-sweep dse-aggregate print-config clean
+		bp-study dse-sweep dse-aggregate grid print-config clean
 
 
 # ============================================================================
@@ -277,7 +294,7 @@ bp-study: check-gem5 build-coremark build-microbench ## Compare BPU designs on S
 	    for label in rtl-tage same-budget-gshare practical-tage-sc upper-tage-sc; do \
 	      case "$$label" in \
 	        rtl-tage) set_args='';; \
-	        same-budget-gshare) set_args='ooo_cpu.0.branch_predictor=gshare';; \
+	        same-budget-gshare) set_args='ooo_cpu.0.branch_predictor=gshare,sim.equalize_budget=true';; \
 	        practical-tage-sc) set_args='ooo_cpu.0.branch_predictor=tage_sc_l_8kb,sim.equalize_budget=false';; \
 	        upper-tage-sc) set_args='ooo_cpu.0.branch_predictor=tage_sc_l_64kb,sim.equalize_budget=false';; \
 	      esac; \
@@ -346,6 +363,9 @@ dse-aggregate: ## Re-aggregate existing DSE runs under $(DSE_OUTDIR) into $(DSE_
 	done
 	@echo "[dse-aggregate] $(DSE_CSV)"
 	@column -t -s, $(DSE_CSV) 2>/dev/null || cat $(DSE_CSV)
+
+grid: ## Microarchitecture grid search (rob/iq/sq/cache/width/bpu) via $(GRID_PY)
+	$(PYTHON) $(GRID_PY) --benches "$(GRID_BENCHES)" --workers $(GRID_JOBS) $(GRID_ARGS)
 
 # ============================================================================
 # Configuration inspection

@@ -81,25 +81,25 @@ module rapt_router #(
   // Forward-compatibility: removing the single-outstanding restriction
   // means the upstream `axi4_if` (rapt_bus) can be extended to issue
   // L1I and L1D ARs concurrently with no router change. The internal
-  // FIFO depth (`INT_RESP_DEPTH`, default 2) sets how many internal
+  // FIFO depth (`IntRespDepth`, default 2) sets how many internal
   // reads may queue while an offchip burst is in flight; raise it if
   // additional internal slaves are added.
   // -------------------------------------------------------------------
-  localparam int INT_RESP_DEPTH = 2;
-  localparam int INT_RESP_IDX_W = $clog2(INT_RESP_DEPTH);
-  localparam int INT_RESP_CNT_W = $clog2(INT_RESP_DEPTH + 1);
+  localparam int IntRespDepth = 2;
+  localparam int IntRespIdxW  = $clog2(IntRespDepth);
+  localparam int IntRespCntW  = $clog2(IntRespDepth + 1);
 
   typedef struct packed {
     logic [3:0]      id;
     logic [XLEN-1:0] data;
   } int_resp_t;
 
-  int_resp_t int_resp_q[INT_RESP_DEPTH];
-  logic [INT_RESP_IDX_W-1:0] int_resp_head, int_resp_tail;
-  logic [INT_RESP_CNT_W-1:0] int_resp_count;
+  int_resp_t int_resp_q[IntRespDepth];
+  logic [IntRespIdxW-1:0] int_resp_head, int_resp_tail;
+  logic [IntRespCntW-1:0] int_resp_count;
   logic int_resp_empty, int_resp_full;
   assign int_resp_empty = (int_resp_count == '0);
-  assign int_resp_full  = (int_resp_count == INT_RESP_CNT_W'(INT_RESP_DEPTH));
+  assign int_resp_full  = (int_resp_count == IntRespCntW'(IntRespDepth));
 
   // Tracks whether we're partway through forwarding an offchip burst.
   // Set when an offchip beat handshakes that is NOT rlast; cleared on
@@ -179,11 +179,11 @@ module rapt_router #(
               internal_rdata_to_axi(plic_bus.rdata, core_axi.araddr[IntByteOffW-1:0]);
           default: int_resp_q[int_resp_tail].data <= '0;
         endcase
-        int_resp_tail <= (int_resp_tail == INT_RESP_IDX_W'(INT_RESP_DEPTH - 1))
+        int_resp_tail <= (int_resp_tail == IntRespIdxW'(IntRespDepth - 1))
                        ? '0 : int_resp_tail + 1'b1;
       end
       if (pop_int_resp) begin
-        int_resp_head <= (int_resp_head == INT_RESP_IDX_W'(INT_RESP_DEPTH - 1))
+        int_resp_head <= (int_resp_head == IntRespIdxW'(IntRespDepth - 1))
                        ? '0 : int_resp_head + 1'b1;
       end
       unique case ({
@@ -333,10 +333,8 @@ module rapt_router #(
       offchip_w_done_q <= 1'b0;
     end else begin
       w_state <= w_state_next;
-      if (w_state == W_IDLE && core_axi.awvalid && core_axi.awready)
-        offchip_w_done_q <= 1'b0;
-      else if (w_state == W_IDLE && offchip_axi.wvalid
-               && offchip_axi.wready && offchip_axi.wlast)
+      if (w_state == W_IDLE && core_axi.awvalid && core_axi.awready) offchip_w_done_q <= 1'b0;
+      else if (w_state == W_IDLE && offchip_axi.wvalid && offchip_axi.wready && offchip_axi.wlast)
         offchip_w_done_q <= 1'b1;
       if (w_state == W_IDLE && core_axi.awvalid && core_axi.awready && aw_is_int) begin
         w_int_target <= aw_int;

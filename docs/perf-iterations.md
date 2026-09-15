@@ -5,7 +5,7 @@ Legacy Version: [PROFILE.md](./PROFILE.md)
 Tracks microarchitecture changes and their impact on IPC, cycle count, and stall breakdown.
 
 - Benchmark: `make coremark-rv32 ARGS="-b -n"` and `make microbench-rv32 ARGS="-b -n"` (RV32EM, npc standalone)
-- Config: unless a row or footnote says otherwise, benchmark rows use the historical two-wide NPC path. Current default RTL/config independently declares `DECODE/RENAME/DISPATCH/COMMIT_WIDTH=2/2/2/2`, `ROB_SIZE=64`, `RS_SIZE=8`, `RIQ/IIQ=8`, `IOQ_SIZE=8`, `SQ_SIZE=16`, `PHY_SIZE=128`, `L1I: 32 sets × 16 instruction words × 2 ways` (4 KiB, 64-byte lines), `L1D: 16 sets × 16 RV32 words / 8 RV64 words × 2 ways` (2 KiB, 64-byte lines), TAGE direction predictor, and `RAPT_L2_EN` disabled by default (the instantiated L2 stage is passthrough unless that macro is defined).
+- Config: unless a row or footnote says otherwise, benchmark rows use the historical two-wide NPC path. Current default RTL/config independently declares `DECODE/RENAME/DISPATCH/COMMIT_WIDTH=2/2/2/2`, `ROB_SIZE=32`, `RS_SIZE=8`, `RIQ/IIQ=8`, `IOQ_SIZE=8`, `SQ_SIZE=16`, `PHY_SIZE=128`, L1I and L1D each 16 KiB (64 sets × 4 ways, 64-byte lines), TAGE direction predictor, and `RAPT_L2_EN` disabled by default (the instantiated L2 stage is passthrough unless that macro is defined). These current settings do not retroactively describe the historical measurements below.
 
 ## Benchmark Results
 

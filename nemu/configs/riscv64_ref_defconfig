@@ -15,6 +15,8 @@ CONFIG_RV_F=y
 CONFIG_RV_D=y
 # CONFIG_RVE is not set
 CONFIG_RV_SVADE=y
+# Raptor traps accesses to the optional 0x320 CSR; keep probe results identical.
+# CONFIG_RV_MCOUNTINHIBIT is not set
 # end of ISA-dependent Options for riscv
 
 CONFIG_ENGINE_INTERPRETER=y

@@ -22,17 +22,15 @@ module rapt_fpu_fp_to_half (
   logic sign;
   logic boxed;
   logic is_zero, is_inf, is_nan, is_snan;
-  logic found;
-  integer leading;
   integer scan;
-  integer unbiased;
-  integer shift_count;
+  logic signed [11:0] unbiased;
+  logic [5:0] shift_count;
   logic [52:0] significand;
   logic [10:0] retained;
   logic guard_bit, sticky_bit, inexact, round_up;
   logic precision_guard, precision_sticky, precision_round_up, tiny;
   logic [11:0] rounded;
-  integer rounded_exp;
+  logic signed [11:0] rounded_exp;
   logic overflow_to_inf;
   logic [15:0] half_result;
 
@@ -43,8 +41,6 @@ module rapt_fpu_fp_to_half (
     is_inf = 1'b0;
     is_nan = 1'b0;
     is_snan = 1'b0;
-    found = 1'b0;
-    leading = 0;
     unbiased = 0;
     significand = '0;
 
@@ -59,16 +55,13 @@ module rapt_fpu_fp_to_half (
       end else if (operand[62:52] == 0 && operand[51:0] == 0) begin
         is_zero = 1'b1;
       end else if (operand[62:52] == 0) begin
-        for (scan = 51; scan >= 0; scan = scan - 1) begin
-          if (!found && operand[scan]) begin
-            leading = scan;
-            found = 1'b1;
-          end
-        end
-        unbiased = leading - 1074;
-        significand = {1'b0, operand[51:0]} << (52 - leading);
+        // Every nonzero binary64 subnormal is below half of binary16's
+        // minimum subnormal. Only sign and a sticky bit affect rounding;
+        // normalization would add a priority encoder and wide barrel shifter.
+        unbiased = -12'sd26;
+        significand = 53'd1;
       end else begin
-        unbiased = integer'(operand[62:52]) - 1023;
+        unbiased = $signed({1'b0, operand[62:52]}) - 12'sd1023;
         significand = {1'b1, operand[51:0]};
       end
     end else begin
@@ -79,16 +72,11 @@ module rapt_fpu_fp_to_half (
       end else if (operand[30:23] == 0 && operand[22:0] == 0) begin
         is_zero = 1'b1;
       end else if (operand[30:23] == 0) begin
-        for (scan = 22; scan >= 0; scan = scan - 1) begin
-          if (!found && operand[scan]) begin
-            leading = scan;
-            found = 1'b1;
-          end
-        end
-        unbiased = leading - 149;
-        significand = {30'b0, operand[22:0]} << (52 - leading);
+        // The same sticky-only reduction holds for binary32 subnormals.
+        unbiased = -12'sd26;
+        significand = 53'd1;
       end else begin
-        unbiased = integer'(operand[30:23]) - 127;
+        unbiased = $signed({4'b0, operand[30:23]}) - 12'sd127;
         significand = {1'b1, operand[22:0], 29'b0};
       end
     end
@@ -113,13 +101,16 @@ module rapt_fpu_fp_to_half (
     sticky_bit = 1'b0;
     shift_count = 0;
     if (!(is_zero || is_inf || is_nan)) begin
-      shift_count = (unbiased >= -14) ? 42 : (28 - unbiased);
+      // Shifts beyond the 53-bit significand are indistinguishable: all
+      // retained/guard bits are zero and only sticky remains. Bound the
+      // selector instead of building a 32-bit variable shift/index path.
+      shift_count = (unbiased >= -14) ? 6'd42 : (unbiased < -25) ? 6'd54 : 6'(12'sd28 - unbiased);
       if (shift_count <= 52) retained = 11'(significand >> shift_count);
-      if (shift_count > 0 && shift_count <= 53) guard_bit = significand[shift_count-1];
+      if (shift_count > 0 && shift_count <= 53) guard_bit = significand[shift_count-6'd1];
       if (shift_count > 53) sticky_bit = |significand;
       else if (shift_count > 1)
         for (scan = 0; scan < 53; scan = scan + 1)
-        if (scan < shift_count - 1) sticky_bit |= significand[scan];
+        if (6'(scan) < shift_count - 6'd1) sticky_bit |= significand[scan];
     end
 
     inexact = guard_bit | sticky_bit;
@@ -133,7 +124,7 @@ module rapt_fpu_fp_to_half (
       default: round_up = 1'b0;
     endcase
     rounded = {1'b0, retained} + round_up;
-    rounded_exp = unbiased + rounded[11];
+    rounded_exp = unbiased + $signed({11'b0, rounded[11]});
     overflow_to_inf = rounding_mode == 3'b000 || rounding_mode == 3'b100
         || (rounding_mode == 3'b010 && sign)
         || (rounding_mode == 3'b011 && !sign);
@@ -172,8 +163,8 @@ module rapt_fpu_fp_to_half (
   always_ff @(posedge clock) begin
     if (reset || flush) begin
       valid_q <= 1'b0;
-      result_q <= '0;
-      flags_q <= '0;
+      // Result/flags are meaningful only with result_valid; keep payload
+      // unreset so reset/flush only cancels the valid pipeline.
     end else begin
       valid_q <= valid && ready;
       if (valid && ready) begin

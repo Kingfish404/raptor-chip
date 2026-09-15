@@ -858,7 +858,9 @@ module tb_ioq_pending_lock;
     #1;
     check(dut.ioq_valid[1], "second MMU load was not resident in IOQ entry 1");
     check(dut.ioq_load_issue_vec[1], "second MMU load was not issue-eligible");
-    check(exu_lsu.rvalid_b, "HUM B request missing immediately after second MMU load enqueue");
+    check(!exu_lsu.rvalid_b, "HUM B request bypassed its request register");
+    tick(1);
+    check(exu_lsu.rvalid_b, "registered HUM B request missing after capture");
 `endif
     for (int i = 0; i < 8; i++) begin
       expect_pending_addr(32'hc000_1000);

@@ -80,9 +80,11 @@ module rapt_vpu_fp_reduce #(
   );
   assign service_req_ready = service_op == 0 ? sum_ready[service_double] : 1'b1;
   assign service_rsp_valid = service_op == 0 ? sum_valid[service_double] : service_req_valid;
-  assign service_result = service_op == 0 ? sum_result[service_double] : misc_result[service_double];
+  assign service_result = service_op == 0 ? sum_result[service_double]
+      : misc_result[service_double];
   assign service_flags = service_op == 0 ? sum_flags[service_double] : misc_flags[service_double];
-  assign service_illegal = service_op == 0 ? sum_illegal[service_double] : misc_illegal[service_double];
+  assign service_illegal = service_op == 0 ? sum_illegal[service_double]
+      : misc_illegal[service_double];
   for (genvar precision = 0; precision < 2; precision++) begin : gen_precision
     if (precision == 0 || ELEN >= 64) begin : gen_supported
       rapt_vpu_fp_arith #(

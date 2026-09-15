@@ -285,7 +285,8 @@ module rapt_vpu #(
   assign cmd_ready = owner_ready && !host_pending && !host_valid;
   assign busy = owner_busy || host_pending;
   assign engine_ready = state == IDLE;
-  assign {rsp_trap, rsp_cause, rsp_tval, rsp_rd, rsp_result, rsp_dirty, rsp_fflags, rsp_fp_dirty, rsp_fp_write, rsp_fp_result} = response;
+  assign {rsp_trap, rsp_cause, rsp_tval, rsp_rd, rsp_result, rsp_dirty, rsp_fflags, rsp_fp_dirty,
+      rsp_fp_write, rsp_fp_result} = response;
   rapt_vpu_owner #(
       .TagBits(TagBits),
       .CommandBits($bits(command_t)),
@@ -520,7 +521,8 @@ module rapt_vpu #(
       : if_integer_size == 3 ? 3'd2 : if_integer_size == 2 ? 3'd1 : 3'd0;
   for (genvar pair_index = 0; pair_index < 5; pair_index++) begin : gen_int_fp
     if (pair_index < 2 || ELEN >= 64) begin : gen_supported
-      localparam int IntegerBits = pair_index == 0 ? 16 : (pair_index == 1 || pair_index == 3) ? 32 : 64;
+      localparam int IntegerBits = pair_index == 0 ? 16
+          : (pair_index == 1 || pair_index == 3) ? 32 : 64;
       rapt_vpu_int_fp #(
           .FloatDouble(pair_index >= 3),
           .IntBits(IntegerBits)
@@ -581,7 +583,9 @@ module rapt_vpu #(
       ) u_arith (
           .clock(clock),
           .reset(reset),
-          .req_valid((fr_active && fr_req_valid && fr_op == 0 && fr_double == 1'(precision)) || (state == FP_START && !if_recognized && !fp_divsqrt && !fp_misc && !fp_convert && d_size_q == 2'(precision+2))),
+          .req_valid((fr_active && fr_req_valid && fr_op == 0 && fr_double == 1'(precision))
+              || (state == FP_START && !if_recognized && !fp_divsqrt && !fp_misc
+                  && !fp_convert && d_size_q == 2'(precision+2))),
           .req_ready(fp_ready[precision]),
           .operation(fr_active ? 2'd1 : fp_operation),
           .a(fr_active ? fr_a : fp_exec_a),
@@ -591,7 +595,9 @@ module rapt_vpu #(
           .negate_addend(!fr_active && fp_neg_addend),
           .rm(fr_active ? fr_rm : command_q.frm),
           .rsp_valid(fp_valid[precision]),
-          .rsp_ready((fr_active && fr_rsp_ready && fr_op == 0 && fr_double == 1'(precision)) || (state == FP_RUN && !if_recognized && !fp_divsqrt && !fp_misc && !fp_convert && d_size_q == 2'(precision+2))),
+          .rsp_ready((fr_active && fr_rsp_ready && fr_op == 0 && fr_double == 1'(precision))
+              || (state == FP_RUN && !if_recognized && !fp_divsqrt && !fp_misc
+                  && !fp_convert && d_size_q == 2'(precision+2))),
           .result(fp_result[precision]),
           .flags(fp_flags[precision]),
           .illegal(fp_illegal[precision])
@@ -610,7 +616,8 @@ module rapt_vpu #(
   always_comb begin
     element_lm = int'($signed(vtype[2:0]));
     element_capacity = VLEN >> (int'(vtype[5:3])+3);
-    element_vlmax = IndexBits'(element_lm >= 0 ? element_capacity << element_lm : element_capacity >> (-element_lm));
+    element_vlmax = IndexBits'(element_lm >= 0 ? element_capacity << element_lm
+        : element_capacity >> (-element_lm));
   end
   rapt_vpu_slide #(
       .XLEN(XLEN),
@@ -730,12 +737,19 @@ module rapt_vpu #(
     assign convert_result = 0;
     assign convert_flags = 0;
   end
-  assign selected_fp_ready = if_recognized ? if_ready[if_select] : fp_convert ? convert_ready : fp_divsqrt ? div_ready : fp_ready[d_size_q[0]];
-  assign selected_fp_valid = if_recognized ? if_valid[if_select] : fp_convert ? convert_valid : fp_divsqrt ? div_valid : fp_valid[d_size_q[0]];
-  assign selected_fp_illegal = if_recognized ? if_illegal[if_select] : fp_convert ? convert_illegal : fp_divsqrt ? div_illegal : fp_illegal[d_size_q[0]];
-  assign selected_fp_result = if_recognized ? if_result[if_select] : fp_convert ? convert_result : fp_divsqrt ? div_result : fp_result[d_size_q[0]];
-  assign selected_fp_flags = if_recognized ? if_flags[if_select] : fp_convert ? convert_flags : fp_divsqrt ? div_flags : fp_flags[d_size_q[0]];
-  assign execute_state = ft_recognized ? FT_ROUTE : fp_recognized ? (fp_old ? OLD_REQ : FP_START) : d_mask_result ? MASK_WRITE_START : d_mac ? OLD_REQ : d_muldiv ? MULDIV_START : WRITE_REQ;
+  assign selected_fp_ready = if_recognized ? if_ready[if_select] : fp_convert
+      ? convert_ready : fp_divsqrt ? div_ready : fp_ready[d_size_q[0]];
+  assign selected_fp_valid = if_recognized ? if_valid[if_select] : fp_convert
+      ? convert_valid : fp_divsqrt ? div_valid : fp_valid[d_size_q[0]];
+  assign selected_fp_illegal = if_recognized ? if_illegal[if_select] : fp_convert
+      ? convert_illegal : fp_divsqrt ? div_illegal : fp_illegal[d_size_q[0]];
+  assign selected_fp_result = if_recognized ? if_result[if_select] : fp_convert
+      ? convert_result : fp_divsqrt ? div_result : fp_result[d_size_q[0]];
+  assign selected_fp_flags = if_recognized ? if_flags[if_select] : fp_convert
+      ? convert_flags : fp_divsqrt ? div_flags : fp_flags[d_size_q[0]];
+  assign execute_state = ft_recognized ? FT_ROUTE : fp_recognized ? (fp_old ? OLD_REQ
+      : FP_START) : d_mask_result ? MASK_WRITE_START : d_mac ? OLD_REQ : d_muldiv
+      ? MULDIV_START : WRITE_REQ;
   assign prefix_value = !prefix_seen_q && (command_q.insn[16:15] == 3
       || (command_q.insn[16:15] == 2 ? a_q[0] : !a_q[0]));
   rapt_vpu_mask_write #(
@@ -785,7 +799,8 @@ module rapt_vpu #(
           || command_q.insn[31:26] == 6'h29 || d_narrow || (d_fixed && d_fixed_op >= 8))
         scalar_b = 64'(command_q.insn[19:15]);
     end
-    bad_group = !geometry_legal || ((d_iota || d_compress) && vstart != 0) || (d_mask_prefix && (vstart != 0
+    bad_group = !geometry_legal || ((d_iota || d_compress) && vstart != 0)
+        || (d_mask_prefix && (vstart != 0
         || command_q.insn[11:7] == command_q.insn[24:20]
         || (!command_q.insn[25] && command_q.insn[11:7] == 0)));
     cfg_type = XLEN'(command_q.insn[30:20]);
@@ -996,31 +1011,40 @@ module rapt_vpu #(
     elem_write = state == WRITE_REQ;
     elem_size = d_size_q;
     elem_addr = '0;
-    elem_wdata = fp_recognized ? fp_result_q : (d_compress || d_slide || d_gather) ? a_q : d_iota ? 64'(iota_count_q) : d_element_index ? 64'(index_q) : d_fixed ? fixed_result : d_extend ? a_q : d_muldiv ? md_result_q : alu_result;
-    elem_rsp_ready = state == MASK_RSP || state == A_RSP || state == B_RSP || state == OLD_RSP || state == WRITE_RSP || state == SCALAR_RSP || state == FT_RSP;
+    elem_wdata = fp_recognized ? fp_result_q : (d_compress || d_slide || d_gather) ? a_q
+        : d_iota ? 64'(iota_count_q) : d_element_index ? 64'(index_q) : d_fixed
+        ? fixed_result : d_extend ? a_q : d_muldiv ? md_result_q : alu_result;
+    elem_rsp_ready = state == MASK_RSP || state == A_RSP || state == B_RSP
+        || state == OLD_RSP || state == WRITE_RSP || state == SCALAR_RSP
+        || state == FT_RSP;
     case (state)
       FT_REQ: begin
         elem_valid = 1;
         elem_write = 0;
         elem_size = sew_q;
-        elem_addr = AddrBits'(int'(command_q.insn[24:20])*(VLEN/8) + (int'(ft_source_index) << sew_q));
+        elem_addr = AddrBits'(int'(command_q.insn[24:20])*(VLEN/8)
+            + (int'(ft_source_index) << sew_q));
       end
       SCALAR_REQ: begin
         elem_valid = 1;
         elem_write = command_q.insn[14];
         elem_size = sew_q;
-        elem_addr = AddrBits'((command_q.insn[14] ? int'(command_q.insn[11:7]) : int'(command_q.insn[24:20]))*(VLEN/8));
+        elem_addr = AddrBits'((command_q.insn[14] ? int'(command_q.insn[11:7])
+            : int'(command_q.insn[24:20]))*(VLEN/8));
         elem_wdata = 64'($signed(command_q.rs1));
       end
       MASK_REQ: begin
         elem_valid = 1;
         elem_size = 0;
-        elem_addr = AddrBits'((d_compress ? int'(command_q.insn[19:15])*(VLEN/8) : 0)+(int'(index_q) >> 3));
+        elem_addr = AddrBits'((d_compress ? int'(command_q.insn[19:15])*(VLEN/8)
+            : 0)+(int'(index_q) >> 3));
       end
       A_REQ: begin
         elem_valid = 1;
         elem_addr = AddrBits'(int'(command_q.insn[24:20])*(VLEN/8)
-            + ((d_mask_logic || d_iota) ? (int'(index_q) >> 3) : ((d_gather ? int'(gather_index) : d_slide ? int'(slide_index) : int'(index_q)) << a_size_q)));
+            + ((d_mask_logic || d_iota) ? (int'(index_q) >> 3)
+                : ((d_gather ? int'(gather_index) : d_slide ? int'(slide_index)
+                    : int'(index_q)) << a_size_q)));
         elem_size = (d_mask_logic || d_iota) ? 0 : a_size_q;
       end
       B_REQ: begin
@@ -1031,7 +1055,9 @@ module rapt_vpu #(
       end
       OLD_REQ, WRITE_REQ: begin
         elem_valid = 1;
-        elem_addr = AddrBits'(int'(command_q.insn[11:7])*(VLEN/8) + ((ft_recognized ? int'(ft_destination_index) : d_compress ? int'(iota_count_q) : int'(index_q)) << d_size_q));
+        elem_addr = AddrBits'(int'(command_q.insn[11:7])*(VLEN/8)
+            + ((ft_recognized ? int'(ft_destination_index) : d_compress
+                ? int'(iota_count_q) : int'(index_q)) << d_size_q));
       end
       default: ;
     endcase
@@ -1221,7 +1247,8 @@ module rapt_vpu #(
         SCALAR_RSP: if (elem_rsp_valid && elem_rsp_ready) begin
           if (!command_q.insn[14]) begin
             result_q.rd <= command_q.insn[11:7];
-            result_q.value <= command_q.insn[11:7] == 0 ? '0 : XLEN'(resize_operand(elem_rdata,sew_q,1'b1));
+            result_q.value <= command_q.insn[11:7] == 0 ? '0
+                : XLEN'(resize_operand(elem_rdata,sew_q,1'b1));
           end
           state <= FINISH;
         end
@@ -1252,13 +1279,15 @@ module rapt_vpu #(
         MASK_REQ: if (elem_valid && elem_ready) state <= MASK_RSP;
         MASK_RSP: if (elem_rsp_valid) begin
           mask_q <= elem_rdata[{3'b0, index_q[2:0]}];
-          if (!elem_rdata[{3'b0, index_q[2:0]}] && !d_merge && !d_carry && !(ft_recognized && ft_operation == 0)) begin
+          if (!elem_rdata[{3'b0, index_q[2:0]}] && !d_merge && !d_carry
+              && !(ft_recognized && ft_operation == 0)) begin
             index_q <= index_q + 1'b1;
             state <= NEXT_ELEMENT;
           end else if (ft_recognized) state <= FT_ROUTE;
           else if (OptimizeOperandReads && d_merge && elem_rdata[{3'b0, index_q[2:0]}])
             state <= d_src_vector ? B_REQ : execute_state;
-          else state <= d_gather ? (d_src_vector ? B_REQ : GATHER_ROUTE) : d_slide ? SLIDE_ROUTE : d_vs2 ? A_REQ : (d_src_vector ? B_REQ : execute_state);
+          else state <= d_gather ? (d_src_vector ? B_REQ : GATHER_ROUTE) : d_slide
+              ? SLIDE_ROUTE : d_vs2 ? A_REQ : (d_src_vector ? B_REQ : execute_state);
         end
         GATHER_ROUTE: begin
           if (gather_index < 64'(element_vlmax)) state <= A_REQ;
@@ -1273,7 +1302,8 @@ module rapt_vpu #(
         A_RSP: if (elem_rsp_valid) begin
           a_q <= a_input;
           if (d_gather) state <= WRITE_REQ;
-          else if (OptimizeOperandReads && d_src_vector && a_size_q == sew_q && command_q.insn[24:20] == command_q.insn[19:15]) begin
+          else if (OptimizeOperandReads && d_src_vector && a_size_q == sew_q
+              && command_q.insn[24:20] == command_q.insn[19:15]) begin
             b_q <= b_input;
             state <= execute_state;
           end else if (OptimizeOperandReads && d_merge && !mask_q) state <= execute_state;
@@ -1285,7 +1315,10 @@ module rapt_vpu #(
           state <= d_gather ? GATHER_ROUTE : execute_state;
         end
         OLD_REQ: if (elem_valid && elem_ready) state <= OLD_RSP;
-        OLD_RSP: if (elem_rsp_valid) begin old_q <= elem_rdata; state <= fp_recognized ? FP_START : MULDIV_START; end
+        OLD_RSP: if (elem_rsp_valid) begin
+          old_q <= elem_rdata;
+          state <= fp_recognized ? FP_START : MULDIV_START;
+        end
         FT_ROUTE: begin
           fp_element_flags <= 0;
           if (ft_read_source) state <= FT_REQ;
@@ -1295,7 +1328,9 @@ module rapt_vpu #(
         FT_REQ: if (elem_valid && elem_ready) state <= FT_RSP;
         FT_RSP: if (elem_rsp_valid && elem_rsp_ready) begin
           if (ft_write_scalar) begin
-            result_q.rd <= command_q.insn[11:7]; result_q.fp_write <= 1; result_q.fp_value <= ft_result;
+            result_q.rd <= command_q.insn[11:7];
+            result_q.fp_write <= 1;
+            result_q.fp_value <= ft_result;
             state <= FINISH;
           end else begin fp_result_q <= ft_result; state <= WRITE_REQ; end
         end
@@ -1310,7 +1345,8 @@ module rapt_vpu #(
         MULDIV_START: if (md_ready) state <= MULDIV_RUN;
         MULDIV_RUN: if (md_valid) begin
           if (d_fraction) fixed_product_q <= md_full_product;
-          md_result_q <= d_mac ? (!d_widen && command_q.insn[27] ? md_addend-md_result : md_addend+md_result) : md_result;
+          md_result_q <= d_mac ? (!d_widen && command_q.insn[27] ? md_addend-md_result
+              : md_addend+md_result) : md_result;
           state <= WRITE_REQ;
         end
         MASK_WRITE_START: if (mw_ready) state <= MASK_WRITE_RUN;
@@ -1325,11 +1361,16 @@ module rapt_vpu #(
         end
         WRITE_RSP: if (elem_rsp_valid) begin
           if (fp_recognized) result_q.fflags <= result_q.fflags | fp_element_flags;
-          if (d_iota || d_compress) iota_count_q <= iota_count_q+(d_compress ? IndexBits'(1) : IndexBits'(a_q[0]));
+          if (d_iota || d_compress) iota_count_q <= iota_count_q
+              +(d_compress ? IndexBits'(1) : IndexBits'(a_q[0]));
           index_q <= index_q + 1'b1;
           state <= ft_scalar ? FINISH : NEXT_ELEMENT;
         end
-        FINISH: begin result_q.dirty <= csr_dirty; result_q.fp_dirty <= fp_recognized; state <= COMPLETE; end
+        FINISH: begin
+          result_q.dirty <= csr_dirty;
+          result_q.fp_dirty <= fp_recognized;
+          state <= COMPLETE;
+        end
         SCAN_START: if (s_ready) state <= SCAN_RUN;
         SCAN_RUN: if (s_done) begin
           result_q.trap <= s_trap;
@@ -1383,9 +1424,14 @@ module rapt_vpu #(
                   fp_misc ? !fp_misc_illegal[sew_q[0]] : !selected_fp_illegal)
   `RAPT_SVA(clock, reset, VPU_NO_DROPPED_INTERNAL_RESULT, !dropped)
   `RAPT_SVA_IMPLY(clock, reset, VPU_EXCLUDES_HOST, owner_busy, !host_ready && !host_rsp_valid)
-  `RAPT_SVA_IMPLY(
-      clock, reset, VPU_WRITES_AUTHORIZED, elem_valid && elem_ready && elem_write && owner_busy,
-      state == WRITE_REQ || state == MEMORY_RUN || state == MASK_WRITE_RUN || state == REDUCE_RUN || state == FR_RUN || state == MOVE_RUN || state == SCALAR_REQ)
+  // Consequent extracted so the SVA macro argument stays short and the
+  // formatter cannot rejoin it past the column limit.
+  logic vpu_writes_authorized;
+  assign vpu_writes_authorized = state == WRITE_REQ || state == MEMORY_RUN
+      || state == MASK_WRITE_RUN || state == REDUCE_RUN || state == FR_RUN
+      || state == MOVE_RUN || state == SCALAR_REQ;
+  `RAPT_SVA_IMPLY(clock, reset, VPU_WRITES_AUTHORIZED,
+                  elem_valid && elem_ready && elem_write && owner_busy, vpu_writes_authorized)
   `RAPT_SVA_IMPLY(clock, reset, VPU_MEMORY_AUTHORIZED, mem_valid, owner_busy && state == MEMORY_RUN)
   `RAPT_SVA_IMPLY(clock, reset, VPU_FPR_COMPLETION_KIND, rsp_valid && rsp_fp_write,
                   !rsp_trap && rsp_fp_dirty && rsp_result == 0)

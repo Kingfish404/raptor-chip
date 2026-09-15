@@ -67,7 +67,9 @@ module rapt_iq #(
   // Stable, unpacked debug view for the simulator's hang diagnostics. This
   // is a read-only projection, not separately stored execution payload.
   logic [XLEN-1:0] iq_pc[IQ_SIZE];
-  for (genvar i = 0; i < IQ_SIZE; i++) assign iq_pc[i] = iq_uop[i].pc;
+  for (genvar i = 0; i < IQ_SIZE; i++) begin : g_iq_pc_probe
+    assign iq_pc[i] = iq_uop[i].pc;
+  end
 `endif
 
   // Reject inconsistent type/value configurations rather than truncating tags
@@ -306,8 +308,9 @@ module rapt_iq #(
   // remain local to IQ, so arbitration policy can evolve independently.
   logic [IQ_SIZE-1:0] selected[NumIssuePorts];
   logic [NumIssuePorts-1:0] port_mask[IQ_SIZE];
-  for (genvar e = 0; e < IQ_SIZE; e++)
+  for (genvar e = 0; e < IQ_SIZE; e++) begin : g_port_mask
     assign port_mask[e] = NumIssuePorts'(iq_uop[e].schedule.issue_ports);
+  end
   assign select_valid = iq_valid & ~cancelled & {IQ_SIZE{!reset && !cmu_bcast.flush_pipe}};
   rapt_issue_select #(
       .Entries(IQ_SIZE),
@@ -388,8 +391,9 @@ module rapt_iq #(
       assign resident = iq_valid & ~cancelled;
       for (genvar e = 0; e < IQ_SIZE; e++) begin : g_head
         logic [IQ_SIZE-1:0] predecessors;
-        for (genvar o = 0; o < IQ_SIZE; o++)
+        for (genvar o = 0; o < IQ_SIZE; o++) begin : g_predecessor
           assign predecessors[o] = o != e && age_mat[o][e] && resident[o];
+        end
         assign head[e] = resident[e] && !(|predecessors);
       end
       assign data_select = (|head) ? head : IQ_SIZE'(1);
@@ -402,7 +406,9 @@ module rapt_iq #(
     assign index = oh2bin(data_select);
     for (genvar b = 0; b < StoredPayloadBits; b++) begin : g_payload_bit
       logic [IQ_SIZE-1:0] column;
-      for (genvar e = 0; e < IQ_SIZE; e++) assign column[e] = stored_payload[e][b];
+      for (genvar e = 0; e < IQ_SIZE; e++) begin : g_column_entry
+        assign column[e] = stored_payload[e][b];
+      end
       assign payload[b] = |(data_select & column);
     end
     assign {issue[p].uop, stored_op1, stored_op2, issue[p].dest,

@@ -48,7 +48,9 @@ l1d_bus_if l1d_bus ();
   pmp_update_if pmp_update ();
   lsu_l1d_mmu_if exu_l1d ();
   rou_cmu_if rou_cmu ();
-  rapt_l1d cache_dut (
+  rapt_l1d #(
+      .LineRefill(0)
+  ) cache_dut (
       .clock,
       .reset,
       .cmu_bcast,
@@ -56,8 +58,7 @@ l1d_bus_if l1d_bus ();
       .l1d_bus,
       .csr_bcast,
       .pmp_update,
-      .exu_l1d,
-      .rou_cmu
+      .exu_l1d
   );
   task automatic init_inputs;
     begin
@@ -143,6 +144,8 @@ l1d_bus_if l1d_bus ();
       rou_cmu.slot[0].valid = 1'b0;
       rou_cmu.atomic_sc = 1'b0;
       rou_cmu.fence_time = 1'b0;
+      rou_cmu.cbo_inval = 0;
+      rou_cmu.cbo_block = '0;
       rou_cmu.flush_pipe = 1'b0;
       exu_lsu.fp_rdata64_req = 0;
     end
@@ -185,6 +188,7 @@ l1d_bus_if l1d_bus ();
       if (l1d_bus.wvalid && l1d_bus.wready) begin
         check(l1d_bus.awaddr == store_address && l1d_bus.wstrb == 3,
               "aligned half store changed address or split its byte mask");
+        l1d_bus.wzero = 0;
         check(l1d_bus.wdata[15:0] == 16'h55aa, "half store payload corrupted");
         writes <= writes+1;
         total_writes <= total_writes+1;

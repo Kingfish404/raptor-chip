@@ -143,7 +143,9 @@ module rapt_rnu #(
   if (!(recovery.CheckpointBits == CheckpointBits)) begin : g_invalid_config_5
     $error("Invalid rapt_rnu configuration");
   end
-  for (genvar s = 0; s < DecodeWidth; s++) assign decoded[s] = idu_rnu.slot[s];
+  for (genvar s = 0; s < DecodeWidth; s++) begin : g_decode_copy
+    assign decoded[s] = idu_rnu.slot[s];
+  end
   rapt_stream_queue #(
       .ItemT(decoded_t),
       .Depth(RIQ_SIZE),
@@ -178,7 +180,7 @@ module rapt_rnu #(
       .out_ready(rnu_rou.ready),
       .occupancy(renamed_count)
   );
-  for (genvar s = 0; s < RenameWidth; s++) begin
+  for (genvar s = 0; s < RenameWidth; s++) begin : g_rnu_slot_out
     always_comb begin
       rnu_rou.slot[s] = '0;
       rnu_rou.slot[s].uop = buffered[s].uop;

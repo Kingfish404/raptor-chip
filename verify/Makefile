@@ -1315,6 +1315,7 @@ XSIM_CSR_SOURCES := \
 	"$(RAPTOR_HOME)/hdl/frontend/rapt_csr.sv"
 
 XSIM_IOQ_SOURCES := \
+	"$(RAPTOR_HOME)/hdl/backend/lsu/rapt_ioq_overlap.sv" \
 	"$(RAPTOR_HOME)/hdl/backend/lsu/rapt_ioq_store_check.sv" \
 	"$(RAPTOR_HOME)/hdl/rapt_pkg.sv" \
 	"$(RAPTOR_HOME)/hdl/memory/rapt_pmp.sv" \
@@ -1378,7 +1379,7 @@ XSIM_TARGETS := \
 	xsim-rou-dual-commit
 
 define SHARED_TB_SOURCE
-$(if $(filter tb_idu_%,$(1)),tb_idu_contract.sv,$(if $(filter tb_router_%,$(1)),tb_router_all_contract.sv,$(if $(filter tb_ptw_%,$(1)),tb_ptw_all_contract.sv,$(if $(filter tb_sq_%,$(1)),tb_sq_all_contract.sv,$(if $(filter tb_l1d_%,$(1)),tb_l1d_all_contract.sv,$(if $(filter tb_ioq_%,$(1)),tb_ioq_all_contract.sv,$(if $(filter tb_lsu_%,$(1)),tb_lsu_all_contract.sv,$(if $(filter tb_csr_%,$(1)),tb_csr_all_contract.sv,$(if $(filter tb_csr_pmp_%,$(1)),tb_csr_pmp_contract.sv,$(if $(filter tb_predict_history%,$(1)),tb_predict_history_contract.sv,$(if $(filter tb_lsu_atomic_%,$(1)),tb_lsu_atomic_contract.sv,$(if $(filter tb_ioq_atomic_%,$(1)),tb_ioq_atomic_contract.sv,$(if $(filter tb_issue_select%,$(1)),tb_issue_select_contract.sv,$(if $(filter tb_l1d_load_%,$(1)),tb_l1d_load_contract.sv,$(if $(filter tb_l1d_store_%,$(1)),tb_l1d_store_contract.sv,$(if $(filter tb_ioq_store_%,$(1)),tb_ioq_store_contract.sv,$(if $(filter tb_rename_checkpoint%,$(1)),tb_rename_checkpoint_contract.sv,$(if $(filter tb_lsu_lr_%,$(1)),tb_lsu_lr_contract.sv,$(1).sv))))))))))))))))))
+$(if $(filter tb_idu_%,$(1)),tb_idu_contract.sv,$(if $(filter tb_router_%,$(1)),tb_router_all_contract.sv,$(if $(filter tb_ptw_%,$(1)),tb_ptw_all_contract.sv,$(if $(filter tb_sq_%,$(1)),tb_sq_all_contract.sv,$(if $(filter-out tb_l1d_16k tb_l1d_pmp_shared,$(filter tb_l1d_%,$(1))),tb_l1d_all_contract.sv,$(if $(filter tb_ioq_%,$(1)),tb_ioq_all_contract.sv,$(if $(filter tb_lsu_%,$(1)),tb_lsu_all_contract.sv,$(if $(filter tb_csr_%,$(1)),tb_csr_all_contract.sv,$(if $(filter tb_csr_pmp_%,$(1)),tb_csr_pmp_contract.sv,$(if $(filter tb_predict_history%,$(1)),tb_predict_history_contract.sv,$(if $(filter tb_lsu_atomic_%,$(1)),tb_lsu_atomic_contract.sv,$(if $(filter tb_ioq_atomic_%,$(1)),tb_ioq_atomic_contract.sv,$(if $(filter tb_issue_select%,$(1)),tb_issue_select_contract.sv,$(if $(filter tb_l1d_load_%,$(1)),tb_l1d_load_contract.sv,$(if $(filter tb_l1d_store_%,$(1)),tb_l1d_store_contract.sv,$(if $(filter tb_ioq_store_%,$(1)),tb_ioq_store_contract.sv,$(if $(filter tb_rename_checkpoint%,$(1)),tb_rename_checkpoint_contract.sv,$(if $(filter tb_lsu_lr_%,$(1)),tb_lsu_lr_contract.sv,$(1).sv))))))))))))))))))
 endef
 
 define XSIM_RUN
@@ -1529,7 +1530,13 @@ VERILATOR_DIRECTED_TARGETS := \
 	verilator-l1d-store-coherence \
 	verilator-l1d-flush-ordered \
 	verilator-l1d-cmo-permissions \
+	verilator-l1d-pmp-shared-rv32 \
+	verilator-l1d-pmp-shared-rv64 \
+	verilator-l1d-permission-stage-rv32 \
+	verilator-l1d-permission-stage-rv64 \
 	verilator-l1i-sret-priv-epoch \
+	verilator-l1i-access-sizes-rv32 \
+	verilator-l1i-access-sizes-rv64 \
 	verilator-ptw-kill-drain \
 	verilator-ptw-profile-negative \
 	verilator-ptw-global-rv32 \
@@ -1541,6 +1548,8 @@ VERILATOR_DIRECTED_TARGETS := \
 	verilator-idu-privileged-rv64 \
 	verilator-tlb-flush-asid \
 	verilator-bus-axi \
+	verilator-axi-write-lanes-rv32 \
+	verilator-axi-write-lanes-rv64 \
 	verilator-bus-read-ownership \
 	verilator-csr-sret-roundtrip-rv32 \
 	verilator-csr-sret-roundtrip-rv64 \
@@ -1576,9 +1585,13 @@ VERILATOR_DIRECTED_TARGETS := \
 	verilator-dispatch-compact \
 	verilator-recovery-pending \
 	verilator-completion-guard \
+	verilator-completion-stage-rv32 \
+	verilator-completion-stage-rv64 \
 	verilator-iq-reclaim-random \
 	verilator-ras \
 	verilator-ras-pipeline \
+	verilator-btb-storage-rv32 \
+	verilator-btb-storage-rv64 \
 	verilator-predict-history \
 	verilator-predict-history-pipeline
 
@@ -1940,6 +1953,16 @@ verilator-l1d-flush-ordered:
 	$(call VERILATOR_DIRECTED_RUN,l1d_flush_ordered,tb_l1d_flush_ordered,$(XSIM_L1D_SOURCES),-d RAPT_ASSERT_EN,)
 verilator-l1d-cmo-permissions:
 	$(call VERILATOR_DIRECTED_RUN,l1d_cmo_permissions,tb_l1d_cmo_permissions,$(XSIM_L1D_SOURCES),-d RAPT_RV64 -d RAPT_ASSERT_EN,)
+
+.PHONY: verilator-cbo-set-rv32 verilator-cbo-set-rv64
+verilator-cbo-set-rv32 verilator-cbo-set-rv64: VERILATOR_DIRECTED_FLAGS = --binary --timing --assert -j 1
+verilator-cbo-set-rv32 verilator-cbo-set-rv64:
+	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_cbo_set,$(XSIM_L1D_SOURCES),-d RAPT_ASSERT_EN $(if $(findstring rv64,$@),-d RAPT_RV64),)
+
+.PHONY: verilator-cbo-tlb-rv32 verilator-cbo-tlb-rv64
+verilator-cbo-tlb-rv32 verilator-cbo-tlb-rv64: VERILATOR_DIRECTED_FLAGS = --binary --timing --assert -j 1
+verilator-cbo-tlb-rv32 verilator-cbo-tlb-rv64:
+	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_cbo_tlb,$(XSIM_L1D_SOURCES),-d RAPT_ASSERT_EN $(if $(findstring rv64,$@),-d RAPT_RV64),)
 verilator-l1i-sret-priv-epoch:
 	$(call VERILATOR_DIRECTED_RUN,l1i_sret_priv_epoch,tb_l1i_sret_priv_epoch,$(XSIM_L1I_SOURCES),-d RAPT_ASSERT_EN,)
 
@@ -2070,8 +2093,21 @@ rva22s64-compressed-zero-immediate-run rva22s64-compressed-register-legality-run
 		--image "$(BUILD_DIR)/$(patsubst rva22s64-%-run,%,$@)/test.bin" --output "$(BUILD_DIR)/$(patsubst rva22s64-%-run,%,$@)/runs"
 verilator-bus-axi:
 	$(call VERILATOR_DIRECTED_RUN,bus_axi,tb_bus_l1d_rlast,$(XSIM_BUS_SOURCES),,)
+.PHONY: verilator-axi-storage-rv32 verilator-axi-storage-rv64 verilator-axi-storage-synthesis-rv32 verilator-axi-storage-synthesis-rv64
+verilator-axi-storage-rv32 verilator-axi-storage-rv64 verilator-axi-storage-synthesis-rv32 verilator-axi-storage-synthesis-rv64:
+	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_axi_master_storage,$(XSIM_BUS_SOURCES),-d RAPT_ASSERT_EN $(if $(findstring rv64,$@),-d RAPT_RV64) $(if $(findstring synthesis,$@),-d SYNTHESIS),)
+.PHONY: verilator-axi-write-lanes-rv32 verilator-axi-write-lanes-rv64
+verilator-axi-write-lanes-rv32 verilator-axi-write-lanes-rv64: ## Check AXI byte-lane spans, independent AW/W stalls and B errors
+	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_axi_write_lanes,$(XSIM_BUS_SOURCES),-d RAPT_ASSERT_EN $(if $(findstring rv64,$@),-d RAPT_RV64),)
 verilator-bus-read-ownership:
 	$(call VERILATOR_DIRECTED_RUN,bus_read_ownership,tb_bus_read_ownership,$(XSIM_BUS_SOURCES),,)
+
+.PHONY: verilator-bus-read-ownership-rv32 verilator-bus-read-ownership-rv64 \
+	verilator-fpr-payload-reset-rv32 verilator-fpr-payload-reset-rv64
+verilator-bus-read-ownership-rv32 verilator-bus-read-ownership-rv64:
+	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_bus_read_ownership,$(XSIM_BUS_SOURCES),-d RAPT_ASSERT_EN $(if $(findstring rv64,$@),-d RAPT_RV64),)
+verilator-fpr-payload-reset-rv32 verilator-fpr-payload-reset-rv64:
+	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_fpr_payload_reset,"$(RAPTOR_HOME)/hdl/rapt_pkg.sv" "$(RAPTOR_HOME)/hdl/backend/rapt_fpr.sv",$(if $(findstring rv64,$@),-d RAPT_RV64),)
 verilator-csr-sret-roundtrip-rv32:
 	$(call VERILATOR_DIRECTED_RUN,csr_sret_roundtrip_rv32,tb_csr_sret_roundtrip,$(XSIM_CSR_SOURCES),,)
 verilator-csr-sret-roundtrip-rv64:
@@ -2090,9 +2126,22 @@ verilator-addr-classification-rv32:
 	$(call VERILATOR_DIRECTED_RUN,addr_classification_rv32,tb_addr_classification,"$(RAPTOR_HOME)/hdl/rapt_pkg.sv",,)
 verilator-addr-classification:
 	$(call VERILATOR_DIRECTED_RUN,addr_classification,tb_addr_classification,"$(RAPTOR_HOME)/hdl/rapt_pkg.sv",-d RAPT_RV64,)
+
+.PHONY: verilator-addr-classification-ku15p-rv32 verilator-addr-classification-ku15p-rv64
+verilator-addr-classification-ku15p-rv32 verilator-addr-classification-ku15p-rv64: VERILATOR_DIRECTED_FLAGS = --binary --timing --assert -j 1
+verilator-addr-classification-ku15p-rv32:
+	$(call VERILATOR_DIRECTED_RUN,addr_classification_ku15p_rv32,tb_addr_classification,"$(RAPTOR_HOME)/hdl/rapt_pkg.sv",-d RAPT_PMEM_BYTES=1073741824,)
+verilator-addr-classification-ku15p-rv64:
+	$(call VERILATOR_DIRECTED_RUN,addr_classification_ku15p_rv64,tb_addr_classification,"$(RAPTOR_HOME)/hdl/rapt_pkg.sv",-d RAPT_RV64 -d RAPT_PMEM_BYTES=1073741824,)
 verilator-pmp-endpoint:
 	$(call VERILATOR_DIRECTED_RUN,pmp_endpoint,tb_pmp_endpoint,"$(RAPTOR_HOME)/hdl/rapt_pkg.sv" "$(RAPTOR_HOME)/hdl/memory/rapt_pmp.sv",,)
+.PHONY: verilator-pmp-permissions-rv32 verilator-pmp-permissions-rv64
+verilator-pmp-permissions-rv32 verilator-pmp-permissions-rv64:
+	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_pmp_permissions,"$(RAPTOR_HOME)/hdl/rapt_pkg.sv" "$(RAPTOR_HOME)/hdl/memory/rapt_pmp.sv",$(if $(findstring rv64,$@),-d RAPT_RV64),)
 .PHONY: verilator-l1d-page-permissions-rv32 verilator-l1d-page-permissions-rv64
+.PHONY: verilator-l1d-pmp-shared-rv32 verilator-l1d-pmp-shared-rv64
+verilator-l1d-pmp-shared-rv32 verilator-l1d-pmp-shared-rv64:
+	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_l1d_pmp_shared,"$(RAPTOR_HOME)/hdl/rapt_pkg.sv" "$(RAPTOR_HOME)/hdl/memory/rapt_pmp.sv" "$(RAPTOR_HOME)/hdl/memory/rapt_l1d_access.sv",$(if $(findstring rv64,$@),-d RAPT_RV64),)
 verilator-l1d-page-permissions-rv32:
 	$(call VERILATOR_DIRECTED_RUN,l1d_page_permissions_rv32,tb_l1d_page_permissions,"$(RAPTOR_HOME)/hdl/rapt_pkg.sv" "$(RAPTOR_HOME)/hdl/memory/rapt_pmp.sv" "$(RAPTOR_HOME)/hdl/memory/rapt_l1d_access.sv",,)
 verilator-l1d-page-permissions-rv64:
@@ -2111,6 +2160,38 @@ verilator-lsu-sq-random:
 	$(call VERILATOR_DIRECTED_RUN,lsu_sq_random,tb_lsu_sq_random,$(XSIM_LSU_SOURCES),-d RAPT_ASSERT_EN,+SEED=$(VERILATOR_DIRECTED_SEED))
 verilator-ioq:
 	$(call VERILATOR_DIRECTED_RUN,ioq,tb_ioq_pending_lock,$(XSIM_IOQ_SOURCES),,)
+.PHONY: verilator-hum-request-stage-rv32 verilator-hum-request-stage-rv64
+verilator-hum-request-stage-rv32 verilator-hum-request-stage-rv64: VERILATOR_DIRECTED_FLAGS = --binary --timing --assert -j 1
+verilator-hum-request-stage-rv32:
+	$(call VERILATOR_DIRECTED_RUN,hum_request_stage_rv32,tb_hum_request_stage,$(XSIM_IOQ_SOURCES),-d RAPT_ASSERT_EN,)
+verilator-hum-request-stage-rv64:
+	$(call VERILATOR_DIRECTED_RUN,hum_request_stage_rv64,tb_hum_request_stage,$(XSIM_IOQ_SOURCES),-d RAPT_RV64 -d RAPT_ASSERT_EN,)
+.PHONY: verilator-ioq-mmio-retry-rv32 verilator-ioq-mmio-retry-rv64
+verilator-ioq-mmio-retry-rv32:
+	$(call VERILATOR_DIRECTED_RUN,ioq_mmio_retry_rv32,tb_mmio_load_retry,$(XSIM_IOQ_SOURCES),-d RAPT_ASSERT_EN,)
+verilator-ioq-mmio-retry-rv64:
+	$(call VERILATOR_DIRECTED_RUN,ioq_mmio_retry_rv64,tb_mmio_load_retry,$(XSIM_IOQ_SOURCES),-d RAPT_RV64 -d RAPT_ASSERT_EN,)
+.PHONY: verilator-translated-mmio-retry-rv32 verilator-translated-mmio-retry-rv64
+MMIO_RETRY_SOURCES = $(XSIM_L1D_SOURCES) \
+	"$(RAPTOR_HOME)/hdl/backend/lsu/rapt_ioq_overlap.sv" \
+	"$(RAPTOR_HOME)/hdl/backend/lsu/rapt_ioq_store_check.sv" \
+	"$(RAPTOR_HOME)/hdl/backend/lsu/rapt_lsu_ioq.sv" \
+	"$(RAPTOR_HOME)/hdl/backend/lsu/rapt_store_beats.sv" \
+	"$(RAPTOR_HOME)/hdl/backend/lsu/rapt_sq_forward.sv" \
+	"$(RAPTOR_HOME)/hdl/backend/lsu/rapt_lsu_sq.sv" \
+	"$(RAPTOR_HOME)/hdl/backend/lsu/rapt_lsu.sv"
+verilator-translated-mmio-retry-rv32:
+	$(call VERILATOR_DIRECTED_RUN,translated_mmio_retry_rv32,tb_translated_mmio_retry,$(MMIO_RETRY_SOURCES),-d RAPT_ASSERT_EN,)
+verilator-translated-mmio-retry-rv64:
+	$(call VERILATOR_DIRECTED_RUN,translated_mmio_retry_rv64,tb_translated_mmio_retry,$(MMIO_RETRY_SOURCES),-d RAPT_RV64 -d RAPT_ASSERT_EN,)
+.PHONY: verilator-split-load-retry-rv32 verilator-split-load-retry-rv64
+.PHONY: verilator-split-load-fault-reset-rv32 verilator-split-load-fault-reset-rv64
+verilator-split-load-fault-reset-rv32 verilator-split-load-fault-reset-rv64:
+	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_split_load_fault_reset,$(XSIM_LSU_SOURCES),-d RAPT_ASSERT_EN $(if $(findstring rv64,$@),-d RAPT_RV64),)
+verilator-split-load-retry-rv32:
+	$(call VERILATOR_DIRECTED_RUN,split_load_retry_rv32,tb_split_load_retry,$(XSIM_LSU_SOURCES),-d RAPT_ASSERT_EN,)
+verilator-split-load-retry-rv64:
+	$(call VERILATOR_DIRECTED_RUN,split_load_retry_rv64,tb_split_load_retry,$(XSIM_LSU_SOURCES),-d RAPT_RV64 -d RAPT_ASSERT_EN,)
 .PHONY: verilator-ioq-store-pbmt-rv32 verilator-ioq-store-pbmt-rv64
 verilator-ioq-store-pbmt-rv32:
 	$(call VERILATOR_DIRECTED_RUN,ioq_store_pbmt_rv32,tb_ioq_store_pbmt,$(XSIM_IOQ_SOURCES),-d RAPT_ASSERT_EN,)
@@ -2172,6 +2253,13 @@ verilator-mdq-zkt-rv32 verilator-mdq-zkt-rv64:
 .PHONY: verilator-muldiv-stream verilator-muldiv-stream-rv64
 verilator-muldiv-stream verilator-muldiv-stream-rv64:
 	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_muldiv_stream,"$(RAPTOR_HOME)/hdl/backend/ieu/rapt_ieu_mul.sv",$(if $(findstring rv64,$@),-d RAPT_RV64),)
+.PHONY: verilator-muldiv-fpga-rv32 verilator-muldiv-fpga-rv64
+verilator-muldiv-fpga-rv32 verilator-muldiv-fpga-rv64:
+	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_muldiv_fpga,"$(RAPTOR_HOME)/hdl/backend/ieu/rapt_ieu_mul.sv",$(if $(findstring rv64,$@),-d RAPT_RV64),)
+
+.PHONY: ioq-overlap-check
+ioq-overlap-check:
+	$(PYTHON) scripts/formal_contract.py ioq-overlap --output "$(BUILD_DIR)/ioq-overlap"
 verilator-div-iterations verilator-div-iterations-rv64:
 	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_div_word_iterations,"$(RAPTOR_HOME)/hdl/backend/ieu/rapt_ieu_mul.sv",$(if $(findstring rv64,$@),-d RAPT_RV64),)
 verilator-rou-dual-commit:
@@ -2273,6 +2361,9 @@ verilator-ifu-stream-events:
 verilator-ifu-stream-events-rv32: verilator-ifu-stream-events
 verilator-ifu-stream-events-rv64:
 	$(call VERILATOR_DIRECTED_RUN,ifu_stream_events_rv64,tb_ifu_stream_events,"$(RAPTOR_HOME)/hdl/rapt_pkg.sv" "$(RAPTOR_HOME)/hdl/frontend/rapt_ifu.sv" "$(RAPTOR_HOME)/hdl/generated/rapt_idu_decoder_c.sv",-d RAPT_ASSERT_EN -d RAPT_DECODE_WIDTH=4 -d RAPT_RV64,)
+.PHONY: verilator-ifu-response-stage-rv32 verilator-ifu-response-stage-rv64
+verilator-ifu-response-stage-rv32 verilator-ifu-response-stage-rv64:
+	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_ifu_response_stage,"$(RAPTOR_HOME)/hdl/rapt_pkg.sv" "$(RAPTOR_HOME)/hdl/frontend/rapt_ifu.sv" "$(RAPTOR_HOME)/hdl/frontend/rapt_ifetch_io_guard.sv" "$(RAPTOR_HOME)/hdl/generated/rapt_idu_decoder_c.sv",-d RAPT_ASSERT_EN $(if $(findstring rv64,$@),-d RAPT_RV64),)
 verilator-frontend-recovery:
 	$(call VERILATOR_DIRECTED_RUN,frontend_recovery,tb_frontend_recovery,"$(RAPTOR_HOME)/hdl/rapt_pkg.sv" "$(RAPTOR_HOME)/hdl/common/rapt_stream_queue.sv" "$(RAPTOR_HOME)/hdl/frontend/rapt_ifu.sv" "$(RAPTOR_HOME)/hdl/frontend/rapt_fqu.sv" "$(RAPTOR_HOME)/hdl/frontend/rapt_decode_slot.sv" "$(RAPTOR_HOME)/hdl/frontend/rapt_idu.sv" "$(RAPTOR_HOME)/hdl/generated/rapt_idu_decoder.sv" "$(RAPTOR_HOME)/hdl/generated/rapt_idu_decoder_c.sv",-d RAPT_ASSERT_EN -d RAPT_DECODE_WIDTH=4,)
 verilator-rename-random:
@@ -2374,6 +2465,10 @@ rename-checkpoint-prove:
 
 verilator-completion-guard:
 	$(call VERILATOR_DIRECTED_RUN,completion_guard,tb_completion_guard,"$(RAPTOR_HOME)/hdl/backend/rapt_completion_guard.sv",,+SEED=$(VERILATOR_DIRECTED_SEED))
+.PHONY: verilator-completion-stage-rv32 verilator-completion-stage-rv64
+verilator-completion-stage-rv32 verilator-completion-stage-rv64: VERILATOR_DIRECTED_FLAGS = --binary --timing --assert -j 2
+verilator-completion-stage-rv32 verilator-completion-stage-rv64:
+	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_completion_stage,"$(RAPTOR_HOME)/hdl/rapt_pkg.sv" "$(RAPTOR_HOME)/hdl/backend/rapt_completion_stage.sv",-d RAPT_ASSERT_EN $(if $(findstring rv64,$@),-d RAPT_RV64),)
 .PHONY: completion-guard-check
 completion-guard-check:
 	python3 "$(RAPTOR_HOME)/verify/scripts/completion_guard_check.py"
@@ -2398,6 +2493,10 @@ verilator-iq-recovery-window: ## Measure resident wrong-path issue before precis
 verilator-iq-reclaim-random verilator-iq-reclaim-random-rv64 verilator-iq-type-family: VERILATOR_DIRECTED_FLAGS = --binary --timing --assert -j 1
 verilator-iq-reclaim-random-rv64:
 	$(call VERILATOR_DIRECTED_RUN,iq_reclaim_random_rv64,tb_iq_reclaim_random,"$(RAPTOR_HOME)/hdl/rapt_pkg.sv" "$(RAPTOR_HOME)/hdl/common/rapt_issue_select.sv" "$(RAPTOR_HOME)/hdl/backend/rapt_iq.sv",-d RAPT_ASSERT_EN -d RAPT_RV64 -d RAPT_DISPATCH_WIDTH=3,+SEED=$(VERILATOR_DIRECTED_SEED))
+.PHONY: verilator-iq-deferred-reclaim-rv32 verilator-iq-deferred-reclaim-rv64
+verilator-iq-deferred-reclaim-rv32 verilator-iq-deferred-reclaim-rv64: VERILATOR_DIRECTED_FLAGS = --binary --timing --assert -j 1
+verilator-iq-deferred-reclaim-rv32 verilator-iq-deferred-reclaim-rv64:
+	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_iq_reclaim_random,$(IQ_RECLAIM_SOURCES),-d RAPT_ASSERT_EN -d RAPT_DISPATCH_WIDTH=3 -GReclaimOnIssue=0 $(if $(findstring rv64,$@),-d RAPT_RV64),+SEED=$(VERILATOR_DIRECTED_SEED))
 .PHONY: verilator-iq-reclaim-single verilator-iq-reclaim-three verilator-iq-reclaim-six-rv64 iq-reclaim-width-matrix
 IQ_RECLAIM_WIDTH_TARGETS := verilator-iq-reclaim-single verilator-iq-reclaim-three verilator-iq-reclaim-six-rv64
 $(IQ_RECLAIM_WIDTH_TARGETS): VERILATOR_DIRECTED_FLAGS = --binary --timing --assert -j 1
@@ -2478,6 +2577,18 @@ width-evaluate-parser-test:
 	python3 "$(RAPTOR_HOME)/verify/scripts/test_width_evaluate_evidence.py"
 verilator-ras:
 	$(call VERILATOR_DIRECTED_RUN,ras,tb_ras,"$(RAPTOR_HOME)/hdl/rapt_pkg.sv" "$(RAPTOR_HOME)/hdl/frontend/branch_predictor/rapt_ras.sv",-d RAPT_ASSERT_EN,+SEED=$(VERILATOR_DIRECTED_SEED))
+.PHONY: verilator-ras-rv64 verilator-tage-read-storage-rv32 verilator-tage-read-storage-rv64
+verilator-ras-rv64:
+	$(call VERILATOR_DIRECTED_RUN,ras_rv64,tb_ras,"$(RAPTOR_HOME)/hdl/rapt_pkg.sv" "$(RAPTOR_HOME)/hdl/frontend/branch_predictor/rapt_ras.sv",-d RAPT_ASSERT_EN -d RAPT_RV64,+SEED=$(VERILATOR_DIRECTED_SEED))
+.PHONY: verilator-btb-storage-rv32 verilator-btb-storage-rv64
+verilator-btb-storage-rv32 verilator-btb-storage-rv64:
+	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_btb_storage,"$(RAPTOR_HOME)/hdl/frontend/branch_predictor/rapt_bpu_btb.sv",$(if $(findstring rv64,$@),-d RAPT_RV64),)
+
+verilator-tage-read-storage-rv32 verilator-tage-read-storage-rv64:
+	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_tage_read_storage,"$(RAPTOR_HOME)/hdl/frontend/branch_predictor/rapt_bpu_tage.sv",-d RAPT_ASSERT_EN $(if $(findstring rv64,$@),-d RAPT_RV64),)
+.PHONY: verilator-frontend-count-rv32 verilator-frontend-count-rv64
+verilator-frontend-count-rv32 verilator-frontend-count-rv64:
+	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_frontend_count,$(XSIM_IDU_SOURCES),-d RAPT_ASSERT_EN $(if $(findstring rv64,$@),-d RAPT_RV64),)
 verilator-ras-pipeline:
 	$(call VERILATOR_DIRECTED_RUN,ras_pipeline,tb_ras_pipeline,$(XSIM_IDU_SOURCES) "$(RAPTOR_HOME)/hdl/backend/rapt_cmu.sv" $(wildcard $(RAPTOR_HOME)/hdl/frontend/branch_predictor/*.sv),-d RAPT_ASSERT_EN,)
 	$(call VERILATOR_DIRECTED_RUN,ras_pipeline4,tb_ras_pipeline,$(XSIM_IDU_SOURCES) "$(RAPTOR_HOME)/hdl/backend/rapt_cmu.sv" $(wildcard $(RAPTOR_HOME)/hdl/frontend/branch_predictor/*.sv),-d RAPT_ASSERT_EN -d RAPT_DECODE_WIDTH=4 -d RAPT_COMMIT_WIDTH=4,)
@@ -2606,6 +2717,10 @@ verilator-ptw-pmp-span-rv64:
 	$(call VERILATOR_DIRECTED_RUN,ptw_pmp_span_rv64,tb_ptw_pmp_span,$(XSIM_PTW_PMP_SPAN_SOURCES),-d RAPT_RV64,)
 
 .PHONY: verilator-l1i-word-path-rv32 verilator-l1i-word-path-rv64
+.PHONY: verilator-l1i-access-sizes-rv32 verilator-l1i-access-sizes-rv64
+verilator-l1i-access-sizes-rv32 verilator-l1i-access-sizes-rv64:
+	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_l1i_access_sizes,"$(RAPTOR_HOME)/hdl/rapt_pkg.sv" "$(RAPTOR_HOME)/hdl/memory/rapt_pmp.sv" "$(RAPTOR_HOME)/hdl/memory/rapt_l1i_access.sv",$(if $(findstring rv64,$@),-d RAPT_RV64),)
+
 verilator-l1i-word-path-rv32:
 	$(call VERILATOR_DIRECTED_RUN,l1i_word_path_rv32,tb_l1i_word_path,$(XSIM_L1I_SOURCES),-d RAPT_ASSERT_EN,)
 verilator-l1i-word-path-rv64:
@@ -3178,3 +3293,15 @@ verilator-router-early-write-rv64: ## Check W-before-AW routing and response own
 .PHONY: verilator-rnp-handshake-rv32
 verilator-rnp-handshake-rv32: ## Check RNP AW/W serialization, IDs and response stalls
 	$(call VERILATOR_DIRECTED_RUN,rnp_handshake_rv32,tb_rnp_handshake,"$(RAPTOR_HOME)/hdl/rapt_pkg.sv" "$(RAPTOR_HOME)/hdl/perip/wrap_rnp.sv",-d RAPT_ASSERT_EN,)
+
+# Full-capacity checks intentionally require the default 16 KiB, four-way L1s.
+.PHONY: verilator-l1i-16k-rv32 verilator-l1i-16k-rv64 verilator-l1d-16k-rv32 verilator-l1d-16k-rv64
+verilator-l1i-16k-rv32 verilator-l1i-16k-rv64 verilator-l1d-16k-rv32 verilator-l1d-16k-rv64: VERILATOR_DIRECTED_FLAGS = --binary --timing --assert -j 1
+verilator-l1i-16k-rv32 verilator-l1i-16k-rv64:
+	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_l1i_16k,$(XSIM_L1I_SOURCES),-d RAPT_ASSERT_EN $(if $(findstring rv64,$@),-d RAPT_RV64),)
+verilator-l1d-16k-rv32 verilator-l1d-16k-rv64:
+	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_l1d_16k,$(XSIM_L1D_SOURCES),-d RAPT_ASSERT_EN $(if $(findstring rv64,$@),-d RAPT_RV64),)
+
+.PHONY: verilator-cache-stream-rv32 verilator-cache-stream-rv64 verilator-cache-stream-l2-rv32 verilator-cache-stream-l2-rv64 verilator-cache-stream-rnp-rv32
+verilator-cache-stream-rv32 verilator-cache-stream-rv64 verilator-cache-stream-l2-rv32 verilator-cache-stream-l2-rv64 verilator-cache-stream-rnp-rv32:
+	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_cache_stream,$(XSIM_L1D_SOURCES) "$(RAPTOR_HOME)/hdl/memory/rapt_bus.sv" "$(RAPTOR_HOME)/hdl/memory/rapt_axi_master.sv" "$(RAPTOR_HOME)/hdl/memory/rapt_l2.sv" "$(RAPTOR_HOME)/hdl/perip/wrap_rnp.sv",-d RAPT_ASSERT_EN $(if $(findstring -rnp-,$@),-d RAPT_TEST_RNP) $(if $(findstring rv64,$@),-d RAPT_RV64) $(if $(findstring -l2-,$@),-d RAPT_L2_EN),)

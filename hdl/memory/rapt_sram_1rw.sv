@@ -91,6 +91,16 @@ module rapt_sram_1rw #(
           .din0(wdata),
           .dout0(rdata)
       );
+    end else if (DEPTH == 64 && DATA_WIDTH == 32) begin : g_64x32
+      rapt_openram_1rw_64x32 u_sram (
+          .clk0(clock),
+          .csb0(~en),
+          .web0(~wen),
+          .wmask0(USE_BWE ? bwe : {(DATA_WIDTH/8){1'b1}}),
+          .addr0(addr),
+          .din0(wdata),
+          .dout0(rdata)
+      );
     end else if (DEPTH == 16 && DATA_WIDTH == 32) begin : g_16x32
       rapt_openram_1rw_16x32 u_sram (
           .clk0(clock),

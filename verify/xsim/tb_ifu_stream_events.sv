@@ -28,12 +28,22 @@ module tb_ifu_stream_events;
       .ifu_bpu,
       .ifu_l1i,
       .ifu_idu,
-      .ifu_hazard()
+      .ifu_hazard(),
+      .response_pending_o()
   );
   `include "tb_core_bcast_defaults.svh"
   task automatic tick;
     @(posedge clock);
     #1;
+  endtask
+  // Offer one cache response, then withdraw valid while the optional response
+  // register feeds packing. This mock must not invent a second response at the
+  // speculative request PC using the first packet's data.
+  task automatic accept_packet;
+    ifu_l1i.valid = 1;
+    tick();
+    ifu_l1i.valid = 0;
+    if (`RAPT_FETCH_RESPONSE_STAGE) tick();
   endtask
   initial begin
     init_cmu_bcast_defaults();
@@ -57,7 +67,7 @@ module tb_ifu_stream_events;
     ifu_l1i.inst_n2_valid = 1;
     repeat (3) tick();
     reset = 0;
-    tick();
+    accept_packet();
     assert (dut.held_count == 1 && dut.pmu_fetch_response_consume && dut.pmu_fetch_first_control)
     else $fatal(1, "registered fetch/control event was lost after PC advanced");
     assert (history_events == 1 && !last_history_taken && !ifu_idu.slot[0].predicted_taken)
@@ -77,7 +87,7 @@ module tb_ifu_stream_events;
     ifu_idu.ready   = '{default: 0};
     ifu_l1i.valid   = 1;
     ifu_l1i.inst_n0 = 32'h00010001;
-    tick();
+    accept_packet();
     assert (dut.held_count == 4)
     else $fatal(1, "four-slot compressed assembly");
     begin
@@ -103,7 +113,7 @@ module tb_ifu_stream_events;
     ifu_l1i.inst_n0 = 32'h00000263; // BEQ target == fall-through
     ifu_bpu.taken = 1;
     ifu_bpu.npc = 'h80001004;
-    tick();
+    accept_packet();
     assert (history_events == 2 && last_history_taken && ifu_idu.slot[0].predicted_taken
         && ifu_idu.slot[0].pnpc == ifu_idu.slot[0].pc + 4)
     else $fatal(1, "taken direction cannot be inferred from next PC");
@@ -116,7 +126,7 @@ module tb_ifu_stream_events;
     // C.NOP; BEQ +4 at PC+2; C.NOP -- secondary conditional terminates group.
     ifu_l1i.inst_n0 = 32'h02630001;
     ifu_l1i.inst_n1 = 32'h00010000;
-    tick();
+    accept_packet();
     assert (history_events == 3 && last_history_taken && last_history_pc_bit
         && dut.held_count == 2 && ifu_idu.slot[1].predicted_taken)
     else $fatal(1, "secondary branch must use same history event contract");
@@ -125,7 +135,7 @@ module tb_ifu_stream_events;
     cmu_bcast.flush_pipe = 0;
     ifu_l1i.inst_n0 = 32'h00000263;
     ifu_l1i.trap = 1;
-    tick();
+    accept_packet();
     assert (history_events == 3)
     else $fatal(1, "fetch fault fabricated branch history");
     cmu_bcast.flush_pipe = 1;
@@ -133,7 +143,7 @@ module tb_ifu_stream_events;
     cmu_bcast.flush_pipe = 0;
     ifu_l1i.trap = 0;
     ifu_l1i.inst_n0 = 32'h00002063; // Reserved branch funct3.
-    tick();
+    accept_packet();
     assert (history_events == 3)
     else $fatal(1, "illegal branch fabricated history");
     cmu_bcast.flush_pipe = 1;
@@ -141,7 +151,7 @@ module tb_ifu_stream_events;
     cmu_bcast.flush_pipe = 0;
     ifu_l1i.inst_n0 = 32'h00000013;
     ifu_bpu.taken = 1;
-    tick();
+    accept_packet();
     assert (history_events == 3)
     else $fatal(1, "BTB alias on ALU instruction fabricated history");
 
@@ -183,18 +193,23 @@ module tb_ifu_stream_events;
     ifu_l1i.inst_n0 = 32'h18000073;
     ifu_l1i.inst_n1 = 32'h18100073;
     ifu_l1i.inst_n2 = 32'h00000013;
-    tick();
+    accept_packet();
     assert (!dut.blocked && dut.held_count == 3)
     else $fatal(1, "Svinval ordering fences incorrectly block fetch awaiting sys_resume");
     ifu_l1i.inst_n0 = 32'h00000013;
+    ifu_l1i.valid = 1;
     tick();
-    assert (!dut.blocked && dut.pmu_fetch_slots == 3 && dut.held_count == 3)
+    assert (dut.pmu_fetch_slots == 3)
+    else $fatal(1, "Svinval ordering packet was not delivered");
+    ifu_l1i.valid = 0;
+    if (`RAPT_FETCH_RESPONSE_STAGE) tick();
+    assert (!dut.blocked && dut.held_count == 3)
     else $fatal(1, "fetch failed to progress past Svinval ordering fences");
     cmu_bcast.flush_pipe = 1;
     tick();
     cmu_bcast.flush_pipe = 0;
     ifu_l1i.inst_n0 = 32'h16000073;
-    tick();
+    accept_packet();
     assert (dut.blocked && dut.held_count == 1)
     else $fatal(1, "SINVAL.VMA must retain its serializing fetch behavior");
     // AMOs terminate the fetched prefix, including when a younger AMO is
@@ -218,8 +233,8 @@ module tb_ifu_stream_events;
         ifu_l1i.inst_n1 = position == 1 ? atomic_inst : 32'h18b5232f;
         if (position == 2) ifu_l1i.inst_n1 = 32'h00000013;
         ifu_l1i.inst_n2 = position == 2 ? atomic_inst : 32'h18b5232f;
-        tick();
-        assert (dut.blocked && dut.held_count == position + 1
+        accept_packet();
+        assert (dut.blocked && 32'(dut.held_count) == position + 1
             && ifu_idu.slot[position].inst == atomic_inst)
         else $fatal(1, "atomic failed to terminate fetch prefix");
         ifu_idu.ready = '{default: 1};
@@ -239,7 +254,7 @@ module tb_ifu_stream_events;
         ifu_l1i.inst_n0 = 32'h00000013;
         ifu_l1i.inst_n1 = 32'h00000013;
         ifu_l1i.inst_n2 = 32'h00000013;
-        tick();
+        accept_packet();
         assert (!dut.blocked && dut.held_count == 3 && ifu_idu.slot[0].pc == cmu_bcast.cpc)
         else $fatal(1, "retirement redirect did not resume sequential fetch");
       end

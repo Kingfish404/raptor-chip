@@ -233,7 +233,8 @@ module rapt_vpu_fp_decode #(
         negate_addend = insn[26] ^ insn[27];
       end else begin
         a = reverse_subtract ? operand : vs2;
-        b = (square_root || classify || estimate || conversion) ? 64'b0 : reverse_subtract ? vs2 : operand;
+        b = (square_root || classify || estimate || conversion) ? 64'b0 : reverse_subtract
+            ? vs2 : operand;
       end
       if (sew == 2) begin
         if (!wide_input && !narrowing) a = {32'b0, a[31:0]};

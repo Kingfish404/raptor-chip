@@ -51,8 +51,9 @@ module rapt_issue_select #(
     end else begin : g_later
       assign used_before = g_greedy[p-1].used_after;
     end
-    for (genvar e = 0; e < Entries; e++)
+    for (genvar e = 0; e < Entries; e++) begin : g_candidate
       assign candidates[e] = valid[e] && ready[e] && !used_before[e] && compatible[e][p];
+    end
     assign grant = !enabled[p] ? '0 : InOrder ? oldest(
         valid & ~used_before
     ) & candidates : oldest(
@@ -68,10 +69,10 @@ module rapt_issue_select #(
       // stage array obscures the acyclic dependency for event simulators.
       logic [Entries-1:0] previous[Ports], next_selection[Ports];
       logic [Entries-1:0] previous_used, next_used;
-      if (p == 0) begin
+      if (p == 0) begin : g_first
         assign previous = greedy;
         assign previous_used = g_greedy[Ports-1].used_after;
-      end else begin
+      end else begin : g_chain
         assign previous = g_idle_port[p-1].next_selection;
         assign previous_used = g_idle_port[p-1].next_used;
       end
@@ -109,10 +110,14 @@ module rapt_issue_select #(
         end
       end
     end
-    for (genvar p = 0; p < Ports; p++) assign selected[p] = g_idle_port[Ports-1].next_selection[p];
+    for (genvar p = 0; p < Ports; p++) begin : g_select
+      assign selected[p] = g_idle_port[Ports-1].next_selection[p];
+    end
     assign claimed = g_idle_port[Ports-1].next_used;
   end else begin : g_no_rebalance
-    for (genvar p = 0; p < Ports; p++) assign selected[p] = greedy[p];
+    for (genvar p = 0; p < Ports; p++) begin : g_select
+      assign selected[p] = greedy[p];
+    end
     assign claimed = g_greedy[Ports-1].used_after;
   end
   if (!(Entries > 0 && Ports > 0)) begin : g_invalid_config_0

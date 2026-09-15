@@ -31,7 +31,8 @@ module tb_frontend_recovery;
       .ifu_bpu,
       .ifu_l1i,
       .ifu_idu(ifu_fqu),
-      .ifu_hazard()
+      .ifu_hazard(),
+      .response_pending_o()
   );
 
   rapt_fqu #(

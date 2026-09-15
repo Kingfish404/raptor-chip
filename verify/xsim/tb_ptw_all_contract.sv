@@ -499,6 +499,7 @@ module tb_ptw_pmp_span;
       .load_addr(PteAddr),
       .store_addr(PteAddr),
       .ptw_addr(PteAddr),
+      .ptw_check_active(1'b0),
       .load_size_m1(4'd3),
       .store_walu(8'h0f),
       .cmo_mgmt(1'b0),

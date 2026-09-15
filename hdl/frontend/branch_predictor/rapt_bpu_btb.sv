@@ -37,11 +37,15 @@ module rapt_bpu_btb #(
     // Bulk init (fence_time)
     input logic init
 );
-  // Storage arrays: [way][set]
-  logic [    XLEN-1:1] target        [WAYS] [DEPTH];
-  logic [ TAG_LEN-1:0] tag           [WAYS] [DEPTH];
-  logic [         1:0] itype         [WAYS] [DEPTH];
+  // Replacement is a single LRU bit per set, which is only correct for two
+  // ways. Reject other associativities instead of silently never replacing
+  // ways beyond the first two.
+  if (WAYS != 2) begin : g_invalid_ways
+    $error("rapt_bpu_btb replacement policy supports exactly 2 ways");
+  end
   logic [   DEPTH-1:0] valid         [WAYS];
+  logic [    XLEN-1:1] way_target    [WAYS];
+  logic [         1:0] way_type      [WAYS];
 
   // LRU tracking: lru[set] = next victim way for replacement
   logic [   DEPTH-1:0] lru;
@@ -68,21 +72,39 @@ module rapt_bpu_btb #(
   logic [    WAYS-1:0] way_hit;
   logic                hit_way;
 
-  for (genvar w = 0; w < WAYS; w++) begin : g_way_hit
-    assign way_hit[w] = valid[w][r_raddr_valid[w]] && (r_rtag_cmp[w] == tag[w][r_raddr_tag[w]]);
-  end
-
   assign hit_way      = way_hit[1];
   assign rd_tag_match = |way_hit;
-  assign rd_target    = target[hit_way][r_raddr_target[hit_way]];
-  assign rd_type      = itype[hit_way][r_raddr_itype[hit_way]];
+  assign rd_target    = hit_way ? way_target[1] : way_target[0];
+  assign rd_type      = hit_way ? way_type[1] : way_type[0];
 
   // --- Write path: update matching way, or replace LRU victim ---
   logic [WAYS-1:0] w_way_match;
   logic w_sel;
 
-  for (genvar w = 0; w < WAYS; w++) begin : g_w_match
-    assign w_way_match[w] = valid[w][waddr] && (wd_tag == tag[w][waddr]);
+  // A fixed way owns each one-dimensional memory and its write enable.
+  // Selecting the way only AFTER reading both banks avoids a cross-way
+  // address mux and exposes the native asynchronous-read RAM template.
+  // Reads still use the captured address: a write to the held read set is
+  // visible immediately after that edge, even when ren is low. Do not turn
+  // this into a registered-data/read-first port without an explicit bypass.
+  for (genvar w = 0; w < WAYS; w++) begin : g_way_storage
+    logic [XLEN-1:1] target[DEPTH];
+    logic [TAG_LEN-1:0] tag[DEPTH];
+    logic [1:0] itype[DEPTH];
+    assign way_target[w] = target[r_raddr_target[w]];
+    assign way_type[w] = itype[r_raddr_itype[w]];
+    assign way_hit[w] = valid[w][r_raddr_valid[w]]
+        && (r_rtag_cmp[w] == tag[r_raddr_tag[w]]);
+    assign w_way_match[w] = valid[w][waddr] && (wd_tag == tag[waddr]);
+    always_ff @(posedge clock) begin
+      if (!reset && !init) begin
+        if (wen_entry && w_sel == 1'(w)) begin
+          tag[waddr] <= wd_tag;
+          target[waddr] <= wd_target;
+        end
+        if (wen_type && (wen_entry || |w_way_match) && w_sel == 1'(w)) itype[waddr] <= wd_type;
+      end
+    end
   end
 
   assign w_sel = |w_way_match ? w_way_match[1] : lru[waddr];
@@ -112,15 +134,10 @@ module rapt_bpu_btb #(
       // Write-entry LRU takes priority when both fire (same-set R/W).
       if (wen_entry) begin
         valid[w_sel][waddr]  <= 1'b1;
-        tag[w_sel][waddr]    <= wd_tag;
-        target[w_sel][waddr] <= wd_target;
         lru[waddr] <= ~w_sel;
       end else if (rd_tag_match) begin
         lru[r_raddr_lru] <= ~hit_way;
       end
-      // Write type: only if entry exists (matching tag) or new entry being created.
-      // Prevents type corruption of unrelated entries via non-flushing wen_type writes.
-      if (wen_type && (wen_entry || |w_way_match)) itype[w_sel][waddr] <= wd_type;
     end
   end
 endmodule

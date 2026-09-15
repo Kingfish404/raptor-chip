@@ -98,6 +98,7 @@ interface mem_link_if #(
   logic [       7:0] rd_req_len;
   logic [       1:0] rd_req_burst;
   logic [       1:0] rd_req_pbmt;
+  logic              rd_req_noallocate;
 
   logic              rd_rsp_valid;
   logic              rd_rsp_ready;
@@ -107,6 +108,7 @@ interface mem_link_if #(
   logic              rd_rsp_error;
 
   logic                wr_req_valid;
+  logic                wr_req_zero; // Generate a 64-byte INCR zero burst.
   logic                wr_req_ready;
   logic [    ID_W-1:0] wr_req_id;
   logic [    XLEN-1:0] wr_req_addr;
@@ -121,24 +123,24 @@ interface mem_link_if #(
   logic              wr_rsp_error;
 
   modport master(
-      output rd_req_valid, rd_req_id, rd_req_addr, rd_req_size, rd_req_len, rd_req_burst, rd_req_pbmt,
+      output rd_req_valid, rd_req_id, rd_req_addr, rd_req_size, rd_req_len, rd_req_burst, rd_req_pbmt, rd_req_noallocate,
       input rd_req_ready,
       input rd_rsp_valid, rd_rsp_id, rd_rsp_data, rd_rsp_last, rd_rsp_error,
       output rd_rsp_ready,
 
-      output wr_req_valid, wr_req_id, wr_req_addr, wr_req_size, wr_req_pbmt, wr_req_data, wr_req_strb,
+      output wr_req_valid, wr_req_zero, wr_req_id, wr_req_addr, wr_req_size, wr_req_pbmt, wr_req_data, wr_req_strb,
       input wr_req_ready,
       input wr_rsp_valid, wr_rsp_id, wr_rsp_error,
       output wr_rsp_ready
   );
 
   modport slave(
-      input rd_req_valid, rd_req_id, rd_req_addr, rd_req_size, rd_req_len, rd_req_burst, rd_req_pbmt,
+      input rd_req_valid, rd_req_id, rd_req_addr, rd_req_size, rd_req_len, rd_req_burst, rd_req_pbmt, rd_req_noallocate,
       output rd_req_ready,
       output rd_rsp_valid, rd_rsp_id, rd_rsp_data, rd_rsp_last, rd_rsp_error,
       input rd_rsp_ready,
 
-      input wr_req_valid, wr_req_id, wr_req_addr, wr_req_size, wr_req_pbmt, wr_req_data, wr_req_strb,
+      input wr_req_valid, wr_req_zero, wr_req_id, wr_req_addr, wr_req_size, wr_req_pbmt, wr_req_data, wr_req_strb,
       output wr_req_ready,
       output wr_rsp_valid, wr_rsp_id, wr_rsp_error,
       input wr_rsp_ready
