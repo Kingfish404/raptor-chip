@@ -1,8 +1,6 @@
 # SRAM integration tests
 
-These tests validate that the four moving parts of the OpenRAM SRAM
-integration stay in sync, and that the STA evaluation actually exercises
-the macro pins:
+These tests validate that the four moving parts of the OpenRAM SRAM integration stay in sync, and that the STA evaluation actually exercises the macro pins:
 
 | Layer                 | File                                           |
 | --------------------- | ---------------------------------------------- |
@@ -11,9 +9,7 @@ the macro pins:
 | Stub `.lib` generator | `sim/sram/scripts/gen_stub_lib.py`            |
 | RTL instantiation     | `hdl/memory/rapt_sram_1rw.sv`                 |
 
-If any of these drift (e.g. port width change in the blackbox without a
-matching Liberty update) STA will either fail to elaborate or silently
-mis-map the pins. The tests catch that early.
+If any of these drift (e.g. port width change in the blackbox without a matching Liberty update) STA will either fail to elaborate or silently mis-map the pins. The tests catch that early.
 
 ## Targets
 
@@ -25,50 +21,25 @@ make -C sim/sram/test clean
 
 ## What `make check` verifies (no external tools)
 
-1. **Configs** — Each macro shape in `SHAPES` has a `rapt_sram_*_1rw_sky130.py`
-   declaring the right `word_size` / `num_words` / `write_size`.
-2. **Blackbox V** — Each shape has one `(* blackbox *) module` whose port
-   widths match the shape (addr = ⌈log₂(depth)⌉, wmask = width/write_size).
-3. **RTL macro path** — The `RAPT_USE_SRAM_MACRO` branch in
-   `rapt_sram_1rw.sv` instantiates each single-port shape with all seven
-   ports (`clk0/csb0/web0/wmask0/addr0/din0/dout0`) connected, under the
-   correct `DEPTH=={D} && DATA_WIDTH=={W}` guard, and falls back to
-   `$fatal` on unsupported shapes.
-4. **Stub Liberty** — `gen_stub_lib.py` produces parseable `.lib` files
-   with: `is_macro_cell:true`, `dont_touch:true`, all required pins/buses
-   at the right widths, ≥6 setup arcs and ≥6 hold arcs on the inputs,
-   and a `cell_rise`/`cell_fall` arc from `clk1` to `dout1`. Area is
-   positive and within a factor of two of `depth × width × 2.0 × 1.3`.
-5. **Cross-consistency** — The set of macro names declared in the
-   blackbox V matches `SHAPES` exactly (no orphans, no missing).
+1. **Configs** — Each macro shape in `SHAPES` has a `rapt_sram_*_1rw_sky130.py` declaring the right `word_size` / `num_words` / `write_size`.
+2. **Blackbox V** — Each shape has one `(* blackbox *) module` whose port widths match the shape (addr = ⌈log₂(depth)⌉, wmask = width/write_size).
+3. **RTL macro path** — The `RAPT_USE_SRAM_MACRO` branch in `rapt_sram_1rw.sv` instantiates each single-port shape with all seven ports (`clk0/csb0/web0/wmask0/addr0/din0/dout0`) connected, under the correct `DEPTH=={D} && DATA_WIDTH=={W}` guard, and falls back to `$fatal` on unsupported shapes.
+4. **Stub Liberty** — `gen_stub_lib.py` produces parseable `.lib` files with: `is_macro_cell:true`, `dont_touch:true`, all required pins/buses at the right widths, ≥6 setup arcs and ≥6 hold arcs on the inputs, and a `cell_rise`/`cell_fall` arc from `clk1` to `dout1`. Area is positive and within a factor of two of `depth × width × 2.0 × 1.3`.
+5. **Cross-consistency** — The set of macro names declared in the blackbox V matches `SHAPES` exactly (no orphans, no missing).
 
 ## What `make sta-smoke` verifies (needs yosys + slang + OpenSTA)
 
-Generates stubs if needed, preprocesses `fixtures/rapt_sram_test_top.sv`
-(a 1-instance wrapper around the L1I 32×32 shape), and drives the
-`third_party/yosys-opensta` flow with `EXTRA_LIB_FILES` set to the stub
-Liberty. The flow imports macro port definitions from Liberty before reading
-RTL; loading the same macro again as a Verilog blackbox would duplicate the
-module. Then it asserts:
+Generates stubs if needed, preprocesses `fixtures/rapt_sram_test_top.sv` (a 1-instance wrapper around the L1I 32×32 shape), and drives the `third_party/yosys-opensta` flow with `EXTRA_LIB_FILES` set to the stub Liberty. The flow imports macro port definitions from Liberty before reading RTL; loading the same macro again as a Verilog blackbox would duplicate the module. Then it asserts:
 
 - Yosys produced a synthesised netlist.
-- The macro instance (`rapt_openram_1rw_32x32`) survives synthesis
-  (i.e. the blackbox was preserved, not flattened).
-- The OpenSTA timing report is non-empty and references the macro's
-  `clk0` pin (proving the `.lib` arcs were actually used).
+- The macro instance (`rapt_openram_1rw_32x32`) survives synthesis (i.e. the blackbox was preserved, not flattened).
+- The OpenSTA timing report is non-empty and references the macro's `clk0` pin (proving the `.lib` arcs were actually used).
 - The flow's `sta.log` contains no STA error diagnostics.
 
-`STA_SMOKE_BUILD_DIR` overrides the packed-input and driver-log directory.
-`YOSYS_OPENSTA` selects an alternate flow tree (and its result directory) for
-isolated runs. Stub timing validates integration, not SRAM physical signoff.
+`STA_SMOKE_BUILD_DIR` overrides the packed-input and driver-log directory. `YOSYS_OPENSTA` selects an alternate flow tree (and its result directory) for isolated runs. Stub timing validates integration, not SRAM physical signoff.
 
-If `yosys-slang` is missing on the host (e.g. on macOS without the
-plugin) the smoke target exits with a clear `FAIL: yosys-slang plugin
-not installed` message. Run the smoke target inside the colima VM or a
-container where slang is available.
+If `yosys-slang` is missing on the host (e.g. on macOS without the plugin) the smoke target exits with a clear `FAIL: yosys-slang plugin not installed` message. Run the smoke target inside the colima VM or a container where slang is available.
 
 ## CI hookup
 
-`make check` here is fast and has no external dependencies, so it is
-suitable for the default CI lane. `sta-smoke` is gated on the heavier
-toolchain and should run on a separate lane (or nightly).
+`make check` here is fast and has no external dependencies, so it is suitable for the default CI lane. `sta-smoke` is gated on the heavier toolchain and should run on a separate lane (or nightly).

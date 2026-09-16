@@ -3,6 +3,7 @@ import contextlib
 import io
 import json
 from pathlib import Path
+import shlex
 import shutil
 import struct
 import subprocess
@@ -90,7 +91,7 @@ mmu-type = "riscv,sv{39 if bits == 64 else 32}"; }}; }}; }};
                 (root / 'soc.dts').write_text(dts)
                 netboot.run('dtc', '-I', 'dts', '-O', 'dtb', '-o', root / 'litex-soc-seeded.dtb', root / 'soc.dts')
                 dtb_size = (root / 'litex-soc-seeded.dtb').stat().st_size
-                netboot.run('riscv64-linux-gnu-gcc', f'-march=rv{bits}i_zifencei',
+                netboot.run('riscv64-linux-gnu-gcc', f'-march=rv{bits}i_zicsr_zifencei',
                             '-mabi=' + ('lp64' if bits == 64 else 'ilp32'), '-nostdlib', '-static',
                             '-fno-pic', '-no-pie', '-Wl,--build-id=none',
                             '-DRAPT_PAYLOAD_SIZE=256', f'-DRAPT_DTB_SIZE={dtb_size}',
@@ -114,6 +115,23 @@ mmu-type = "riscv,sv{39 if bits == 64 else 32}"; }}; }}; }};
                 with contextlib.redirect_stdout(io.StringIO()) as captured:
                     netboot.serve_plan(out, '192.0.2.100', 69)
                 self.assertIn('PLAN ONLY', captured.getvalue())
+                # Execute only the printed export preparation, never the daemon.
+                lines = captured.getvalue().splitlines()
+                staging = next(line for line in lines if 'import json,pathlib,shutil,sys;' in line)
+                command = shlex.split(staging)
+                export = root / 'export'
+                export.mkdir()
+                self.assertEqual(command[-1], '$netboot_export')
+                command[-1] = str(export)
+                subprocess.run(command, check=True)
+                manifest_name = lines[-1].split('At litex>: netboot ')[1]
+                self.assertTrue(manifest_name.startswith(f'raptor-netboot/rv{bits}/'))
+                manifest = json.loads((export / manifest_name).read_text())
+                self.assertFalse((export / 'boot.json').exists())
+                for name in ('fw_payload.bin', 'soc.dtb', 'stage0.bin'):
+                    remote = str(Path(manifest_name).parent / name)
+                    self.assertIn(remote, manifest)
+                    self.assertEqual((export / remote).read_bytes(), (out / name).read_bytes())
                 (out / 'soc.dtb').chmod(0o644)
                 (out / 'soc.dtb').write_bytes(b'corrupt')
                 with self.assertRaisesRegex(ValueError, 'SHA256'):

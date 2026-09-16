@@ -48,11 +48,12 @@ def save(path, value):
 
 
 @contextlib.contextmanager
-def lock(path):
+def lock(path, wait=False, shared=False):
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open('a') as stream:
         try:
-            fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            mode = fcntl.LOCK_SH if shared else fcntl.LOCK_EX
+            fcntl.flock(stream, mode | (0 if wait else fcntl.LOCK_NB))
         except BlockingIOError:
             raise RuntimeError(f'Busy: {path}') from None
         yield
@@ -164,6 +165,22 @@ def tftp_get(address, name, timeout=5):
 class Console:
     def __init__(self, device, log):
         import serial
+        # pyserial's advisory lock cannot detect a pre-existing litex_term
+        # which did not take that lock. Do not split its UART stream.
+        target = os.stat(device).st_rdev
+        for process in Path('/proc').glob('[0-9]*'):
+            if process.name == str(os.getpid()):
+                continue
+            try:
+                for descriptor in (process / 'fd').iterdir():
+                    try:
+                        info = descriptor.stat()
+                    except OSError:
+                        continue
+                    require(not target or info.st_rdev != target,
+                            f'UART {device} is already open by PID {process.name}; close that console first')
+            except (PermissionError, FileNotFoundError):
+                continue
         self.port = serial.Serial(device, 115200, timeout=0.2, exclusive=True)
         self.log = log.open('ab')
         self.pending = ''
@@ -248,10 +265,33 @@ def bios_ip_commands(soc, server_ip):
     return []
 
 
+LOGIN = r'(?:buildroot|raptor) login:\s*'
+ASKFIRST = r'Please press Enter to activate this console\.'
+SHELL = r'(?:\r*\n)[^\r\n]*# '
+
+
 def wait_linux_login(port, timeout):
-    output = port.wait(r'buildroot login:\s*|litex>\s*|Kernel panic - not syncing', timeout)
-    require(re.search(r'buildroot login:\s*$', output),
+    output = port.wait(LOGIN + '|' + ASKFIRST + r'|litex>\s*|Kernel panic - not syncing', timeout)
+    require(re.search('(?:' + LOGIN + '|' + ASKFIRST + ')$', output),
             'Netboot returned to BIOS or Linux panicked; inspect the UART log')
+    return output
+
+
+def enter_linux(port, prompt):
+    if 'login:' in prompt:
+        port.send('root')
+        port.wait(SHELL, 60)
+    elif 'Please press Enter' in prompt:
+        port.send('')
+        port.wait(SHELL, 60)
+
+
+
+def running_boot_id(port):
+    output = port.command('cat /proc/sys/kernel/random/boot_id')
+    match = re.search(r'(?:^|[\r\n])([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:[\r\n]|$)', output)
+    require(match, 'Cannot identify running Linux boot; manually netboot to a shell first')
+    return match[1]
 
 
 def validate_timing_coverage(report):
@@ -279,11 +319,17 @@ class DropTrace:
         self.mounted = False
         self.created = False
         self.enabled = False
+        self.available = True
 
     def __enter__(self):
         return self
 
     def start(self):
+        available = self.port.command("if grep -qw tracefs /proc/filesystems; then echo RAPT_TRACE_AVAILABLE; else echo RAPT_TRACE_ABSENT; fi")
+        if re.search(r'\nRAPT_TRACE_ABSENT\r*\n', available):
+            self.available = False
+            print('Kernel has no tracefs; network acceptance requires zero RX drops')
+            return
         self.port.command(f'mkdir {self.path}')
         self.started = True
         self.port.command(f'mount -t tracefs tracefs {self.path}')
@@ -298,6 +344,8 @@ class DropTrace:
         self.enabled = True
 
     def sample(self, extra=''):
+        if not self.available:
+            return network_stats(self.port.command('cat /proc/net/dev' + extra)), 0
         # Bracket the statistics read with two trace snapshots. Retry if an
         # event crosses the sample boundary, so it cannot cancel an unrelated
         # RX drop inside the measured interval.
@@ -330,21 +378,34 @@ class DropTrace:
         commands.append(f'rmdir {self.path}')
         self.port.command(' && '.join(commands))
         self.port.send('exit')
-        self.port.wait(r'buildroot login:\s*', 30)
+        self.port.wait(LOGIN + '|' + ASKFIRST, 30)
 
 
 class Flow:
     def __init__(self, args):
         self.args = args
         self.root = args.root.resolve()
+        self.state_root = args.state_root.resolve()
         self.work = self.root / f'rv{args.xlen}' / 'netboot'
         self.make_args = list(args.make_args)
         require(all('=' in a and not a.startswith('-') for a in self.make_args), 'Invalid Make profile arguments')
         for index, value in enumerate(self.make_args):
-            if value.startswith('VIVADO=') and args.action in ('check', 'build', 'load', 'run', 'test'):
+            if value.startswith('VIVADO=') and args.action in ('check', 'build', 'load'):
                 self.make_args[index] = 'VIVADO=' + vivado(value.split('=', 1)[1])
-        self.context = json.loads(self.make('netboot-flow-context', capture=True).stdout)
-        require(int(self.context['xlen']) == args.xlen, 'Profile XLEN mismatch')
+        # Restoring host networking must work even if the FPGA toolchain or
+        # source tree can no longer resolve the build profile.
+        published_load = args.action == 'load' and (self.work / 'ready.json').is_file()
+        reference = getattr(args, 'hardware_reference', None)
+        if reference and args.action != 'test' and not args.action.startswith('host-'):
+            require(args.action != 'build', 'A hardware reference is for software updates; omit it for a new RTL build')
+            self.reference = json.loads(reference.read_text())
+            self.context = dict(self.reference['bitstream_manifest']['context'])
+            if getattr(args, 'base_dtb', None):
+                self.context['dtb'] = str(args.base_dtb.resolve())
+            self.verify_reference()
+        elif args.action != 'test' and not args.action.startswith('host-') and not published_load:
+            self.context = json.loads(self.make('netboot-flow-context', capture=True).stdout)
+            require(int(self.context['xlen']) == args.xlen, 'Profile XLEN mismatch')
         for address in (args.server_ip, args.host_ip):
             ip = ipaddress.IPv4Address(address)
             require(not (ip.is_unspecified or ip.is_multicast or ip.is_loopback), 'Invalid board-facing address')
@@ -356,6 +417,9 @@ class Flow:
         return execute(['make', '--no-print-directory', '-s', '-C', LITEX, target, *self.make_args], capture)
 
     def gate(self, building=False):
+        if hasattr(self, 'reference'):
+            self.verify_reference()
+            return
         self.idle_output()
         report = Path(self.context['soc']) / 'gateware/mlk_cu08_ku15p_timing.rpt'
         require(report.is_file(),
@@ -371,7 +435,119 @@ class Flow:
             require(record['bit_sha256'] == self.bit_hash(), 'Bitstream changed since workflow build')
 
     def bit_hash(self):
+        if hasattr(self, 'reference'):
+            self.verify_reference()
+            return self.reference['bitstream_manifest']['files']['mlk_cu08_ku15p.bit']
         return netboot.digest((Path(self.context['soc']) / 'gateware/mlk_cu08_ku15p.bit').read_bytes())
+
+    def verify_reference(self):
+        """Explicit software-only update against a previously accepted hardware snapshot."""
+        record = self.reference['bitstream_manifest']
+        generation = netboot.digest(json.dumps(record, sort_keys=True).encode())
+        require(record['xlen'] == self.args.xlen, 'Hardware reference XLEN mismatch')
+        directory = self.work / 'bitstreams' / generation
+        require(json.loads((directory / 'manifest.json').read_text()) == record, 'Hardware manifest changed')
+        for name in ('mlk_cu08_ku15p.bit', 'mlk_cu08_ku15p_timing.rpt'):
+            require(netboot.digest((directory / name).read_bytes()) == record['files'][name],
+                    'Published hardware artifact changed: ' + name)
+        report = (directory / 'mlk_cu08_ku15p_timing.rpt').read_text()
+        validate_timing_coverage(report)
+        require('Timing constraints are not met' not in report and
+                re.search(r'(?:All user specified )?Timing constraints are met', report, re.I), 'Timing failed')
+        accepted = self.reference['bundle']
+        for path, key in ((Path(self.context.get('dtb', str(Path(self.context['firmware']) / 'litex-soc-seeded.dtb'))), 'source_dtb_sha256'),
+                          (Path(self.context['soc']) / 'csr.json', 'sd_csr_sha256')):
+            require(netboot.digest(path.read_bytes()) == accepted[key], 'Hardware DTB/CSR changed: ' + str(path))
+
+    def publish_bitstream(self, source, expected_bit=None):
+        """Publish a private, verified generation; never overwrite a loaded file."""
+        archive = self.work / 'bitstreams'
+        archive.mkdir(parents=True, exist_ok=True)
+        names = ('mlk_cu08_ku15p.bit', 'mlk_cu08_ku15p_timing.rpt')
+        live = Path(self.context['soc']) / 'gateware'
+        with lock(self.work / 'publish.lock', wait=True):
+            with tempfile.TemporaryDirectory(prefix='.publish-', dir=archive) as temporary:
+                staging = Path(temporary)
+                hashes = {}
+                for name in names:
+                    shutil.copyfile(live / name, staging / name)
+                    hashes[name] = netboot.digest((staging / name).read_bytes())
+                require(expected_bit is None or hashes[names[0]] == expected_bit,
+                        'Legacy bitstream changed while archiving')
+                report = (staging / names[1]).read_text()
+                validate_timing_coverage(report)
+                require('Timing constraints are not met' not in report and
+                        re.search(r'(?:All user specified )?Timing constraints are met', report, re.I),
+                        'Cannot publish bitstream without passing final timing')
+                require(all(netboot.digest((live / n).read_bytes()) == hashes[n] for n in names),
+                        'Build outputs changed while archiving; previous published bitstream retained')
+                record = {'source': source, 'xlen': self.args.xlen,
+                          'context': self.context, 'files': hashes}
+                generation = netboot.digest(json.dumps(record, sort_keys=True).encode())
+                save(staging / 'manifest.json', record)
+                destination = archive / generation
+                if not destination.exists():
+                    staging.rename(destination)
+                else:
+                    require(json.loads((destination / 'manifest.json').read_text()) == record and
+                            all(netboot.digest((destination / n).read_bytes()) == hashes[n] for n in names),
+                            'Existing published generation is corrupt; previous selection retained')
+                # A reader observes either the previous complete generation or
+                # this one. Generations remain available for in-flight loads.
+                save(self.work / 'ready.json', {'generation': generation})
+        return destination
+
+    def preserve_existing_bitstream(self):
+        """Migrate a completed legacy output before a new build can replace it."""
+        if (self.work / 'ready.json').exists():
+            return
+        live = Path(self.context['soc'])
+        if not (live / 'gateware/mlk_cu08_ku15p.bit').is_file():
+            return
+        self.idle_output()
+        receipt = self.work / 'build.json'
+        if receipt.is_file():
+            record = json.loads(receipt.read_text())
+            require(record['bit_sha256'] == self.bit_hash(), 'Legacy bitstream differs from completed receipt')
+            source = record['source']
+            expected_bit = record['bit_sha256']
+        else:
+            stamp = live / '.bitstream_stamp'
+            require(stamp.is_file() and stamp.read_text().strip(),
+                    'No completed legacy build stamp; refusing to archive an unfinished bitstream')
+            source = stamp.read_text().strip()
+            expected_bit = self.bit_hash()
+        self.publish_bitstream(source, expected_bit=expected_bit)
+
+    def load_bitstream(self):
+        ready = self.work / 'ready.json'
+        if not ready.is_file() and not hasattr(self, 'reference'):
+            # Only first-time migration needs an idle build directory. Normal
+            # loads never touch the mutable output or acquire its build lock.
+            with lock(self.work / 'build.lock', shared=True):
+                self.preserve_existing_bitstream()
+        require(ready.is_file() or hasattr(self, 'reference'), 'No published bitstream; complete the matching -build target first')
+        if hasattr(self, 'reference'):
+            self.verify_reference()
+            generation = netboot.digest(json.dumps(self.reference['bitstream_manifest'], sort_keys=True).encode())
+        else:
+            generation = json.loads(ready.read_text())['generation']
+        require(re.fullmatch(r'[0-9a-f]{64}', generation), 'Invalid published generation')
+        directory = self.work / 'bitstreams' / generation
+        record = json.loads((directory / 'manifest.json').read_text())
+        require(netboot.digest(json.dumps(record, sort_keys=True).encode()) == generation,
+                'Published manifest changed')
+        require(record['xlen'] == self.args.xlen, 'Published bitstream XLEN mismatch')
+        names = {'mlk_cu08_ku15p.bit', 'mlk_cu08_ku15p_timing.rpt'}
+        require(set(record['files']) == names, 'Incomplete published bitstream manifest')
+        for name, digest in record['files'].items():
+            require(netboot.digest((directory / name).read_bytes()) == digest,
+                    f'Published artifact changed: {name}')
+        tool = dict(v.split('=', 1) for v in self.make_args).get('VIVADO', 'vivado')
+        print(f'Loading published RV{record["xlen"]} bitstream: {directory} (source {record["source"]})', flush=True)
+        execute([vivado(tool), '-mode', 'batch', '-nojournal', '-nolog',
+                 '-source', LITEX / 'scripts/vivado_load.tcl', '-tclargs',
+                 directory / 'mlk_cu08_ku15p.bit', 'xcku15p'])
 
     def idle_output(self):
         expected = ('--output-dir=' + self.context['soc']).encode()
@@ -384,16 +560,20 @@ class Flow:
 
     def ensure_payload(self):
         payload = Path(self.context['payload'])
-        if payload.is_file():
-            return
-        names = {32: 'linux-riscv-rv32-qemu-rv32-buildroot-v6.18.50',
-                 64: 'linux-riscv-rv64-qemu-rv64-fast-buildroot-v6.18.50'}
+        version = getattr(self.args, 'version', 'v6.18.51')
+        names = {32: 'linux-riscv-rv32-qemu-rv32-buildroot-' + version,
+                 64: 'linux-riscv-rv64-qemu-rv64-fast-buildroot-' + version}
         linux = LITEX.parents[1] / 'linux'
-        require(payload == linux / 'build' / names[self.args.xlen] / 'fw_payload.bin',
-                'Custom payload is missing; no automatic download to custom locations')
+        if payload != linux / 'build' / names[self.args.xlen] / 'fw_payload.bin':
+            require(payload.is_file(), 'Custom payload is missing; no automatic download to custom locations')
+            return
         target = 'download-rv32gc-fpga' if self.args.xlen == 32 else 'download-rv64gc'
-        with lock(self.root / 'release.lock'):
-            execute(['make', '-C', linux, target])
+        # All presets/custom output roots acquire the same release archive.
+        # Wait only for this shared prerequisite, then reuse the completed copy.
+        with lock(linux / 'build' / ('.netboot-' + names[self.args.xlen] + '.lock'), wait=True):
+            if not payload.is_file():
+                execute(['make', '-C', linux, target, 'LINUX_BUILD_VERSION=' + version,
+                         'LINUX_BUILD_RELEASE=' + getattr(self.args, 'release', 'rv-v6.18.51')])
         require(payload.is_file(), 'Release target did not produce the fixed profile payload')
 
     def serial_device(self):
@@ -424,8 +604,8 @@ class Flow:
         return name, current
 
     def host(self, restore=False):
-        state = self.root / 'host-state.json'
-        with lock(self.root / 'host.lock'):
+        state = self.state_root / 'host-state.json'
+        with lock(self.state_root / 'host.lock'):
             if restore:
                 if not state.exists():
                     print('No saved host setup; nothing changed')
@@ -501,7 +681,7 @@ class Flow:
             if not shared:
                 daemon = shutil.which('dnsmasq') or '/usr/sbin/dnsmasq'
                 require(Path(daemon).is_file(), 'Install dnsmasq or provide a DHCP service, then restore/retry')
-                pidfile = self.root / ('netboot-dnsmasq-' + os.urandom(8).hex() + '.pid')
+                pidfile = self.state_root / ('netboot-dnsmasq-' + os.urandom(8).hex() + '.pid')
                 require(not pidfile.exists() and not pidfile.is_symlink(), 'Existing DHCP pidfile needs inspection')
                 network = ipaddress.IPv4Network(self.args.host_ip + '/24', strict=False)
                 require(ipaddress.IPv4Address(self.args.host_ip) not in (network.network_address, network.broadcast_address), 'Invalid DHCP host address')
@@ -513,7 +693,7 @@ class Flow:
                          '--interface=' + name, '--listen-address=' + self.args.host_ip,
                          f'--dhcp-range={network.network_address + 10},{network.network_address + 200},255.255.255.0,1h',
                          '--dhcp-option=3', '--dhcp-option=6', '--pid-file=' + str(pidfile),
-                         '--dhcp-leasefile=' + str(self.root / 'netboot-dnsmasq.leases')])
+                         '--dhcp-leasefile=' + str(self.state_root / 'netboot-dnsmasq.leases')])
                 pid = int(pidfile.read_text().strip())
                 process = Path('/proc') / str(pid)
                 record = json.loads(state.read_text())
@@ -528,12 +708,23 @@ class Flow:
 
     def prepare_bundle(self):
         with lock(self.work / 'bundle.lock'):
-            path = bundle(self.context, self.work / 'bundles')
+            if getattr(self.args, 'distro', 'legacy') == 'legacy':
+                path = bundle(self.context, self.work / 'bundles')
+            else:
+                from netboot_default import prepare
+                path = prepare(self.context, self.work / 'bundles', self.args)
         print(f'BUNDLE={path}')
         return path
 
     def deployment(self, path):
+        if json.loads((path / 'bundle.json').read_text()).get('schema') == 'raptor-distro-netboot-v1':
+            from netboot_distro_publish import verify
+            record = verify(path)
+            require(record['xlen'] == self.args.xlen, 'Bundle XLEN mismatch')
+            return Path(record['tftp_path']), (path / 'boot.json').read_bytes(), record
         record = netboot.verify_bundle(path)
+        require(record.get('xlen') == self.args.xlen,
+                f'Bundle XLEN {record.get("xlen")} does not match requested RV{self.args.xlen}')
         relative = Path('raptor-netboot') / f'rv{self.args.xlen}' / path.name
         boot = json.loads((path / 'boot.json').read_text())
         served = {str(relative / name) if name != 'addr' else name: value for name, value in boot.items()}
@@ -542,15 +733,17 @@ class Flow:
     def serve(self):
         self.interface()
         path = self.prepare_bundle()
-        relative, boot, _ = self.deployment(path)
+        relative, boot, record = self.deployment(path)
         root = self.args.tftp_root.resolve()
         require(root == Path('/srv/tftp'), 'Only the dedicated /srv/tftp deployment root is supported')
         destination = root / relative
         for parent in [root, *list(destination.parents)[:-1], destination]:
             require(not parent.is_symlink(), f'Refusing symlink deployment: {parent}')
-        with lock(self.root / 'tftp.lock'):
+        with lock(self.state_root / 'tftp.lock'):
             execute(['sudo', 'install', '-d', '-m', '0755', destination])
-            for name in ('fw_payload.bin', 'soc.dtb', 'stage0.bin'):
+            for name in ([n for n in record['files'] if n != 'boot.json'] + ['bundle.json', 'kernel.config']
+                         if record.get('schema') == 'raptor-distro-netboot-v1'
+                         else ('fw_payload.bin', 'soc.dtb', 'stage0.bin')):
                 target = destination / name
                 require(not target.is_symlink(), 'Refusing a symlink served file')
                 if target.exists():
@@ -563,6 +756,8 @@ class Flow:
             require(not target.exists() or target.read_bytes() == boot, 'Existing served manifest differs')
             require(not target.is_symlink(), 'Refusing a symlink manifest')
             execute(['sudo', 'install', '-m', '0444', manifest, target])
+        print(f'At litex>: netboot {relative / "boot.json"}', flush=True)
+        print('Do not use bare netboot or the global boot.json; they may select another XLEN.', flush=True)
         try:
             require(tftp_get(self.args.server_ip, str(relative / 'boot.json')) == boot, 'Served manifest mismatch')
         except (OSError, RuntimeError) as exc:
@@ -587,38 +782,7 @@ class Flow:
         finally:
             port.close()
 
-    def boot(self):
-        self.gate()
-        path = self.prepare_bundle()
-        relative, boot, _ = self.deployment(path)
-        require(tftp_get(self.args.server_ip, str(relative / 'boot.json')) == boot, 'Run serve for this exact bundle first')
-        with self.console() as port:
-            load_to_bios(port, lambda: self.make('fpga-load'))
-            # BIOS IPs are independent of Linux DHCP. Configure them explicitly
-            # using the compiled BIOS commands, with no gateware rebuild needed.
-            for command in bios_ip_commands(Path(self.context['soc']), self.args.server_ip):
-                port.send(command)
-                reply = port.wait(r'litex>\s*', 20)
-                require('Command not found' not in reply, 'BIOS lacks Ethernet IP commands')
-            port.send('netboot ' + str(relative / 'boot.json'))
-            wait_linux_login(port, self.args.timeout)
-            port.send('root')
-            port.wait(r'(?:\r*\n)# ', 60)
-            session = os.urandom(16).hex()
-            port.command("printf '%s\\n' " + session + ' > /tmp/raptor-netboot-session')
-            port.send('exit')
-            port.wait(r'buildroot login:\s*', 30)
-        save(self.work / 'boot.json', {'bundle': path.name, 'time': time.time(),
-                                      'session': session,
-                                      'bit_sha256': netboot.digest((Path(self.context['soc']) / 'gateware/mlk_cu08_ku15p.bit').read_bytes())})
-        print('PASS: uninterrupted Linux initialization reached login; serial released')
-
     def test(self):
-        self.gate()
-        boot_record = self.work / 'boot.json'
-        require(boot_record.exists(), 'Run this profile successfully before testing')
-        require(json.loads(boot_record.read_text())['bit_sha256'] == netboot.digest(
-            (Path(self.context['soc']) / 'gateware/mlk_cu08_ku15p.bit').read_bytes()), 'Boot record is stale')
         expected = bytes(range(256)) * 4096
         expected_hash = hashlib.sha256(expected).hexdigest()
         class Handler(http.server.BaseHTTPRequestHandler):
@@ -637,12 +801,9 @@ class Flow:
         try:
             with self.console() as port, DropTrace(port) as drops:
                 port.send('')
-                prompt = port.wait(r'buildroot login:\s*|(?:\r*\n)# ', 20)
-                if 'buildroot login:' in prompt:
-                    port.send('root')
-                    port.wait(r'(?:\r*\n)# ', 60)
-                session = port.command('cat /tmp/raptor-netboot-session')
-                require(json.loads(boot_record.read_text())['session'] in session, 'Board was rebooted/replaced since run')
+                prompt = port.wait(LOGIN + '|' + ASKFIRST + '|' + SHELL, 20)
+                enter_linux(port, prompt)
+                boot_id = running_boot_id(port)
                 info = port.command('uname -m; ip -4 addr show eth0')
                 require(f'riscv{self.args.xlen}' in info, 'Running Linux XLEN differs')
                 match = re.search(r'inet (\d+\.\d+\.\d+\.\d+)/', info)
@@ -687,9 +848,12 @@ class Flow:
                     require(after[key] - before[key] >= len(expected), f'Insufficient traffic: {key}')
                 if self.args.internet:
                     port.command('wget -O /tmp/raptor-internet-test.html http://example.com/', 120)
+                require(running_boot_id(port) == boot_id, 'Linux rebooted during network test')
             save(self.work / 'test.json', {'xlen': self.args.xlen, 'address': address,
                                           'download_bytes': len(expected), 'upload_bytes': len(received), 'sha256': expected_hash,
-                                          'before': before, 'after': after, 'boot': json.loads(boot_record.read_text()),
+                                          'before': before, 'after': after, 'boot_id': boot_id,
+                                          'boot_method': 'manual', 'image_identity_verified': False,
+                                          'bitstream_identity_verified': False,
                                           'lldp_protocol_discards': lldp_after - lldp_before,
                                           'internet': self.args.internet, 'time': time.time()})
         finally:
@@ -712,23 +876,21 @@ class Flow:
             print('PASS: preflight only; not a bitstream/network acceptance result')
         elif action == 'build':
             self.idle_output()
+            self.preserve_existing_bitstream()
             self.ensure_payload()
             before = source_identity(self.make_args)
             self.make('fpga-build')
             self.gate(building=True)
             require(before == source_identity(self.make_args), 'Sources changed during build; receipt withheld, rebuild stable sources')
+            self.publish_bitstream(before)
             self.prepare_bundle()
             save(self.work / 'build.json', {'source': before, 'bit_sha256': self.bit_hash(), 'time': time.time()})
         elif action == 'bundle':
             self.prepare_bundle()
         elif action == 'load':
-            self.gate()
-            with self.console():
-                self.make('fpga-load')
+            self.load_bitstream()
         elif action == 'serve':
             self.serve()
-        elif action == 'run':
-            self.boot()
         elif action == 'test':
             self.test()
         elif action.startswith('host-'):
@@ -751,26 +913,46 @@ class Flow:
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=('info', 'check', 'build', 'bundle', 'load', 'serve', 'run', 'test', 'console', 'host-setup', 'host-restore'))
+    parser.add_argument('action', choices=('info', 'check', 'build', 'bundle', 'load', 'serve', 'test', 'console', 'host-setup', 'host-restore'))
     parser.add_argument('--xlen', type=int, choices=(32, 64), required=True)
     parser.add_argument('--root', type=Path, required=True)
+    parser.add_argument('--state-root', type=Path, default=LITEX / 'build/netboot-default')
     parser.add_argument('--interface', default='')
     parser.add_argument('--uart', default='')
     parser.add_argument('--server-ip', default='192.168.1.100')
     parser.add_argument('--host-ip', default='192.168.50.1')
     parser.add_argument('--tftp-root', type=Path, default=Path('/srv/tftp'))
-    parser.add_argument('--timeout', type=int, default=2400)
     parser.add_argument('--internet', action='store_true')
+    parser.add_argument('--distro', choices=('buildroot', 'alpine', 'debian', 'legacy'), default=None)
+    parser.add_argument('--release', default='rv-v6.18.51')
+    parser.add_argument('--version', default='v6.18.51')
+    parser.add_argument('--data-selector', default='LABEL=RAPTOR_DATA')
+    parser.add_argument('--persist-logs', action='store_true')
+    parser.add_argument('--initramfs-compression', choices=('gzip', 'none'), default='none')
+    parser.add_argument('--hardware-reference', type=Path)
+    parser.add_argument('--base-dtb', type=Path)
     arguments = list(sys.argv[1:] if argv is None else argv)
     separator = arguments.index('--')
     args = parser.parse_args(arguments[:separator])
+    require(not args.base_dtb or args.hardware_reference, '--base-dtb requires a matching hardware reference')
+    args.distro = args.distro or ('alpine' if args.xlen == 64 else 'buildroot')
+    require(args.xlen == 64 or args.distro in ('buildroot', 'legacy'), 'Alpine/Debian require RV64')
     args.make_args = arguments[separator + 1:]
     flow = Flow(args)
-    if args.action in ('check', 'info', 'serve') or args.action.startswith('host-'):
+    if args.action in ('load', 'test'):
+        with lock(flow.state_root / 'board.lock'):
+            flow.run()
+    elif args.action in ('check', 'info', 'serve', 'console') or args.action.startswith('host-'):
         flow.run()
     else:
-        with lock(flow.work / 'workflow.lock'):
-            flow.run()
+        # Readers of completed artifacts may coexist. Only a build rewrites
+        # gateware/receipts; UART and bundle ownership have their own locks.
+        # Do not inherit the old workflow-wide lock held by interactive tools.
+        with lock(flow.work / 'build.lock', shared=args.action != 'build'):
+            board = (lock(flow.state_root / 'board.lock')
+                     if args.action in ('load', 'test') else contextlib.nullcontext())
+            with board:
+                flow.run()
 
 
 if __name__ == '__main__':

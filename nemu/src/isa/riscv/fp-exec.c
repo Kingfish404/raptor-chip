@@ -38,6 +38,7 @@ static inline unsigned fp_rm_resolve(unsigned rm)
 static inline void fp_mark_dirty(void)
 {
     CSR(CSR_MSTATUS) = (CSR(CSR_MSTATUS) & ~CSR_MSTATUS_FS_MASK) | ((word_t)3 << 13);
+    cpu.csr_dirty = true;
 }
 
 static inline void fp_merge_flags(uint32_t flags)

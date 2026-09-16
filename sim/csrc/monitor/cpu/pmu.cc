@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <array>
 #include <recovery_metrics.h>
+#include <string>
 
 #include <unistd.h>
 #include <fcntl.h>
@@ -63,6 +64,20 @@ struct RecoveryHeadMetrics {
 };
 static RecoveryHeadMetrics recovery_head;
 
+// One histogram per line keeps the periodic perf dump readable:
+// [bin0 bin1 ...].
+template <std::size_t N>
+static std::string compact_histogram(const std::array<uint64_t, N> &bins, std::size_t count = N)
+{
+  std::string text;
+  for (std::size_t i = 0; i < count && i < N; ++i)
+  {
+    if (i) text += ' ';
+    text += std::to_string(bins[i]);
+  }
+  return text;
+}
+
 static void report_recovery_metrics()
 {
   const auto &m = recovery_metrics;
@@ -73,9 +88,8 @@ static void report_recovery_metrics()
       u(m.allocated), u(m.resolved), u(m.retired), u(m.trap_retired), u(m.killed_unresolved),
       u(m.killed_correct), u(m.wrong_killed.count), u(m.reset_discarded), u(m.live_count()));
   const auto latency = [&](const char *name, const ControlRecoveryMetrics::Latency &v) {
-    Log("Control latency %s: count %llu, cycles %llu, max %llu", name, u(v.count), u(v.cycles), u(v.maximum));
-    for (unsigned bucket = 0; bucket < v.histogram.size(); ++bucket)
-      Log("Control histogram %s bucket %u: count %llu", name, bucket, u(v.histogram[bucket]));
+    Log("Control latency %s: count %llu, cycles %llu, max %llu, histogram [%s]",
+        name, u(v.count), u(v.cycles), u(v.maximum), compact_histogram(v.histogram).c_str());
   };
   latency("correct_retire", m.correct_retire);
   latency("wrong_retire", m.wrong_retire);
@@ -87,10 +101,10 @@ static void report_recovery_metrics()
   uint64_t head_total = recovery_head.ready + recovery_head.empty;
   for (unsigned domain = 0; domain < recovery_head.waiting.size(); ++domain) {
     head_total += recovery_head.waiting[domain];
-    Log("Control pending head domain %u: waiting cycles %llu", domain, u(recovery_head.waiting[domain]));
   }
   assert(head_total == m.pending_wrong_cycles);
-  Log("Control pending head: ready cycles %llu, empty cycles %llu", u(recovery_head.ready), u(recovery_head.empty));
+  Log("Control pending head: ready cycles %llu, empty cycles %llu; waiting_domains=[%s] (cycles, domain index from 0)",
+      u(recovery_head.ready), u(recovery_head.empty), compact_histogram(recovery_head.waiting).c_str());
 }
 
 static const char *dispatch_reason_name(unsigned reason)
@@ -825,34 +839,36 @@ void perf()
   // Rename / dispatch status mix.
   // -------------------------------------------------------------------
   Log("======== Rename/Dispatch Status ========");
-  Log("ALQ selection: ready-entry cycles %lld, issued %lld, rebalance extra issues %lld",
-      pmu.alq_ready_entry_cycles, pmu.alq_issued, pmu.alq_rebalance_gain);
-  Log("ALQ issue-slot reclaim: allocations %lld", pmu.alq_reclaim_allocations);
-  for (unsigned n = 0; n <= RtlConfig::IntegerIssuePorts; ++n)
-    Log("ALQ issue histogram %u: cycles %llu", n,
-        static_cast<unsigned long long>(alq_issue_histogram[n]));
-  Log("ALQ extra physical ports (index >= 2): issues %lld", pmu.alq_extra_port_issues);
+  Log("ALQ selection: ready-entry cycles %lld, issued %lld, rebalance extra issues %lld; "
+      "reclaim_allocations=%lld; issue_histogram=[%s]; extra_port_issues_ge2=%lld",
+      pmu.alq_ready_entry_cycles, pmu.alq_issued, pmu.alq_rebalance_gain,
+      pmu.alq_reclaim_allocations, compact_histogram(alq_issue_histogram).c_str(),
+      pmu.alq_extra_port_issues);
   uint64_t dispatch_cycles = 0, unfilled_slots = 0, zero_progress_cycles = 0;
   uint64_t histogram_cycles = 0, histogram_instructions = 0, endpoint_cycles = 0;
+  std::string dispatch_stops;
   for (unsigned r = 0; r < RtlConfig::DispatchStopCount; r++)
   {
     dispatch_cycles += dispatch_metrics.cycles[r];
     unfilled_slots += dispatch_metrics.unfilled_slots[r];
     zero_progress_cycles += dispatch_metrics.zero_progress_cycles[r];
-    Log("Dispatch stop %s: cycles %" PRIu64 ", unfilled slots %" PRIu64 ", zero-progress cycles %" PRIu64,
-        dispatch_reason_name(r), dispatch_metrics.cycles[r], dispatch_metrics.unfilled_slots[r],
-        dispatch_metrics.zero_progress_cycles[r]);
+    if (r) dispatch_stops += ' ';
+    dispatch_stops += std::string(dispatch_reason_name(r)) + "="
+        + std::to_string(dispatch_metrics.cycles[r]) + "/"
+        + std::to_string(dispatch_metrics.unfilled_slots[r]) + "/"
+        + std::to_string(dispatch_metrics.zero_progress_cycles[r]);
   }
+  Log("Dispatch stops (cycles/unfilled_slots/zero_progress_cycles): %s", dispatch_stops.c_str());
   for (unsigned n = 0; n <= RtlConfig::DispatchWidth; n++)
   {
     histogram_cycles += dispatch_metrics.histogram[n];
     histogram_instructions += n * dispatch_metrics.histogram[n];
-    Log("Dispatch histogram %u: cycles %" PRIu64, n, dispatch_metrics.histogram[n]);
   }
+  Log("Dispatch histogram: [%s]", compact_histogram(dispatch_metrics.histogram).c_str());
+  Log("Dispatch endpoint domains: cycles [%s] (index from 0)", compact_histogram(dispatch_metrics.endpoint_cycles).c_str());
   for (unsigned d = 0; d < RtlConfig::ExecutionDomains; d++)
   {
     endpoint_cycles += dispatch_metrics.endpoint_cycles[d];
-    Log("Dispatch endpoint domain %u: cycles %" PRIu64, d, dispatch_metrics.endpoint_cycles[d]);
   }
   assert(dispatch_cycles == (uint64_t)pmu.active_cycle && histogram_cycles == dispatch_cycles);
   assert(histogram_instructions == dispatch_metrics.accepted);
@@ -870,19 +886,17 @@ void perf()
           ? static_cast<double>(rob_dispatch_metrics.pending_sum) / pmu.active_cycle : 0.0,
       rob_dispatch_metrics.pending_peak);
   uint64_t steer_blocked_cycles = 0;
+  Log("ROB dispatch blocked domains: cycles [%s] (index from 0)", compact_histogram(rob_dispatch_metrics.blocked_domains).c_str());
   for (unsigned d = 0; d < RtlConfig::ExecutionDomains; d++)
   {
     steer_blocked_cycles += rob_dispatch_metrics.blocked_domains[d];
-    Log("ROB dispatch blocked domain %u: cycles %" PRIu64,
-        d, rob_dispatch_metrics.blocked_domains[d]);
   }
   assert(steer_blocked_cycles == rob_dispatch_metrics.oldest_blocked_cycles);
   uint64_t branch_classified = 0;
+  Log("ROB branch capacity reasons: cycles [%s] (index from 0)", compact_histogram(branch_capacity_reasons).c_str());
   for (unsigned reason = 0; reason < branch_capacity_reasons.size(); ++reason)
   {
     branch_classified += branch_capacity_reasons[reason];
-    Log("ROB branch capacity reason %u: cycles %" PRIu64,
-        reason, branch_capacity_reasons[reason]);
   }
   assert(branch_classified == rob_dispatch_metrics.blocked_domains[BranchDomain]);
   uint64_t steer_histogram_cycles = 0, steer_histogram_pending = 0;
@@ -893,8 +907,9 @@ void perf()
     steer_histogram_cycles += cycles;
     steer_histogram_pending += n * cycles;
     if (cycles) steer_histogram_peak = n;
-    Log("ROB dispatch pending histogram %u: cycles %" PRIu64, n, cycles);
   }
+  Log("ROB dispatch pending histogram 0..%u: [%s]", RtlConfig::ROBEntries,
+      compact_histogram(rob_dispatch_metrics.pending_histogram).c_str());
   assert(steer_histogram_cycles == static_cast<uint64_t>(pmu.active_cycle));
   assert(steer_histogram_pending == rob_dispatch_metrics.pending_sum);
   assert(steer_histogram_peak == rob_dispatch_metrics.pending_peak);
@@ -902,17 +917,17 @@ void perf()
   for (unsigned d = 0; d < RtlConfig::ExecutionDomains; d++)
   {
     steer_pending_domain_sum += rob_dispatch_metrics.pending_domain_sum[d];
-    Log("ROB dispatch pending domain %u: instruction-cycles %" PRIu64 ", peak %" PRIu64,
-        d, rob_dispatch_metrics.pending_domain_sum[d], rob_dispatch_metrics.pending_domain_peak[d]);
   }
+  Log("ROB dispatch pending domains 0..%u: instruction-cycles [%s], peak [%s]",
+      RtlConfig::ExecutionDomains - 1,
+      compact_histogram(rob_dispatch_metrics.pending_domain_sum).c_str(),
+      compact_histogram(rob_dispatch_metrics.pending_domain_peak).c_str());
   assert(steer_pending_domain_sum == rob_dispatch_metrics.pending_sum);
-  Log("|%13s, %%|%13s, %%|%13s, %%|%13s, %%|",
-      "Running", "Blocked", "Idle", "Squashing");
-  Log("|%12.0e,%3.0f|%12.0e,%3.0f|%12.0e,%3.0f|%12.0e,%3.0f|",
-      (double)pmu.dispatch_running_cycle, percentage(pmu.dispatch_running_cycle, pmu.active_cycle),
-      (double)pmu.dispatch_blocked_cycle, percentage(pmu.dispatch_blocked_cycle, pmu.active_cycle),
-      (double)pmu.dispatch_idle_cycle, percentage(pmu.dispatch_idle_cycle, pmu.active_cycle),
-      (double)pmu.dispatch_squash_cycle, percentage(pmu.dispatch_squash_cycle, pmu.active_cycle));
+  Log("Dispatch status (cycles, pct_active): running=%lld,%.1f%% blocked=%lld,%.1f%% idle=%lld,%.1f%% squashing=%lld,%.1f%%",
+      pmu.dispatch_running_cycle, percentage(pmu.dispatch_running_cycle, pmu.active_cycle),
+      pmu.dispatch_blocked_cycle, percentage(pmu.dispatch_blocked_cycle, pmu.active_cycle),
+      pmu.dispatch_idle_cycle, percentage(pmu.dispatch_idle_cycle, pmu.active_cycle),
+      pmu.dispatch_squash_cycle, percentage(pmu.dispatch_squash_cycle, pmu.active_cycle));
   assert(
       pmu.instr_cnt ==
       (pmu.ld_inst_cnt + pmu.st_inst_cnt + pmu.alu_inst_cnt +
@@ -933,34 +948,22 @@ void perf()
   // L1D cache (load path only; stores are write-through and don't stall)
   long long int l1d_total = pmu.l1d_cache_hit_cnt + pmu.l1d_cache_miss_cnt;
   long long int l1d_hit_cycle = pmu.l1d_cache_hit_cnt; // ~1 SRAM cycle per hit
-  Log("|%6s, %%|%8s, %%|%8s, %%|%8s,  %%|%13s|%13s|%13s|",
-      "L1D HIT", "L1D MISS", "HIT CYC", "MISS CYC", "HIT Cost AVG", "MISS Cost AVG", "AMAT");
   double l1d_hit_rate = percentage(pmu.l1d_cache_hit_cnt, l1d_total);
+  double l1d_miss_rate = percentage(pmu.l1d_cache_miss_cnt, l1d_total);
   double l1d_access_time = pmu.l1d_cache_hit_cnt > 0 ? (double)l1d_hit_cycle / pmu.l1d_cache_hit_cnt : 0;
   double l1d_miss_penalty = pmu.l1d_cache_miss_cnt > 0 ? (double)pmu.l1d_cache_miss_cycle / pmu.l1d_cache_miss_cnt : 0;
-  Log("|%6.0e,%3.0f|%8.0e,%2.0f|%8.0e,%2.0f|%8.0e,%3.0f|%13lld|%13lld|%13.1f|",
-      (double)pmu.l1d_cache_hit_cnt, l1d_hit_rate,
-      (double)pmu.l1d_cache_miss_cnt, 100 - l1d_hit_rate,
-      (double)l1d_hit_cycle,
-      percentage(l1d_hit_cycle, l1d_hit_cycle + pmu.l1d_cache_miss_cycle),
-      (double)pmu.l1d_cache_miss_cycle,
-      percentage(pmu.l1d_cache_miss_cycle, l1d_hit_cycle + pmu.l1d_cache_miss_cycle),
-      (long long)l1d_access_time, (long long)l1d_miss_penalty,
-      l1d_access_time + (100 - l1d_hit_rate) / 100.0 * l1d_miss_penalty);
-  // tlb & page table walk
-  Log("|======= TLB & Page Table Walk Analysis ========");
-  Log("|%9s|%9s|%9s|%8s, %%|%8s, %%|%8s, %%|",
-      "ITLB miss", "STLB miss", "LTLB miss", "ITLB PTW", "STLB PTW", "LTLB PTW");
-  Log("|%9lld|%9lld|%9lld|%8lld,%4.1f|%8lld,%4.1f|%8lld,%4.1f|",
-      pmu.itlb_ptw_count,
-      pmu.stlb_ptw_count,
-      pmu.ltlb_ptw_count,
-      pmu.itlb_ptw_cycle,
-      percentage(pmu.itlb_ptw_cycle, pmu.active_cycle),
-      pmu.stlb_ptw_cycle,
-      percentage(pmu.stlb_ptw_cycle, pmu.active_cycle),
-      pmu.ltlb_ptw_cycle,
-      percentage(pmu.ltlb_ptw_cycle, pmu.active_cycle));
+  Log("L1D load: hits=%lld(%.1f%%) misses=%lld(%.1f%%) hit_cycles=%lld(%.1f%%) miss_cycles=%lld(%.1f%%) "
+      "hit_avg=%.2f miss_avg=%.2f amat=%.2f (cycles/access)",
+      pmu.l1d_cache_hit_cnt, l1d_hit_rate,
+      pmu.l1d_cache_miss_cnt, l1d_miss_rate,
+      l1d_hit_cycle, percentage(l1d_hit_cycle, l1d_hit_cycle + pmu.l1d_cache_miss_cycle),
+      pmu.l1d_cache_miss_cycle, percentage(pmu.l1d_cache_miss_cycle, l1d_hit_cycle + pmu.l1d_cache_miss_cycle),
+      l1d_access_time, l1d_miss_penalty,
+      l1d_access_time + l1d_miss_rate / 100.0 * l1d_miss_penalty);
+  Log("TLB (misses/ptw_cycles/pct_active): ITLB=%lld/%lld/%.1f%% STLB=%lld/%lld/%.1f%% LTLB=%lld/%lld/%.1f%%",
+      pmu.itlb_ptw_count, pmu.itlb_ptw_cycle, percentage(pmu.itlb_ptw_cycle, pmu.active_cycle),
+      pmu.stlb_ptw_count, pmu.stlb_ptw_cycle, percentage(pmu.stlb_ptw_cycle, pmu.active_cycle),
+      pmu.ltlb_ptw_count, pmu.ltlb_ptw_cycle, percentage(pmu.ltlb_ptw_cycle, pmu.active_cycle));
 }
 
 void statistic()

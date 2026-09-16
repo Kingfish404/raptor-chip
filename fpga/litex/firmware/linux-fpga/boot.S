@@ -59,9 +59,11 @@
     ori     \reg, \reg, ((\val) & 0xff)
 .endm
 
+#include "cmo_init.h"
 .section .text.init, "ax"
 .global _start
 _start:
+    raptor_enable_cmo
     la      a0, msg_boot
     jal     ra, puts
 

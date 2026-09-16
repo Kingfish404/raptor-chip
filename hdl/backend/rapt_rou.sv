@@ -1246,3 +1246,61 @@ module rapt_rou #(
     end
   end
 endmodule
+
+
+// Fixed-position rename packet register before the asynchronous PRF read.
+// Unlike a ring head mux, output PR tags are driven directly by registers.
+// Partial consumption compacts the remaining suffix; refill is accepted only
+// when the old batch is fully consumed, preserving an ordered prefix.
+module rapt_operand_stage #(
+    parameter int Width = rapt_pkg::RenameWidth
+) (
+    input logic clock, reset, flush,
+    rnu_rou_if.slave upstream,
+    rnu_rou_if.master downstream
+);
+  localparam int CountBits = $clog2(Width + 1);
+  logic [CountBits-1:0] count;
+  // Use the interface's type/parameter, not a hierarchical signal in $bits.
+  typedef upstream.slot_t SlotT;
+  SlotT slot_q[Width];
+  logic checkpoint_valid_q[Width];
+  logic [upstream.CheckpointBits-1:0] checkpoint_q[Width];
+  int consumed, accepted;
+  assign downstream.empty = upstream.empty && count == 0;
+  for (genvar s = 0; s < Width; s++) begin : g_output
+    assign downstream.slot[s] = slot_q[s];
+    assign downstream.checkpoint_valid[s] = checkpoint_valid_q[s];
+    assign downstream.checkpoint[s] = checkpoint_q[s];
+    assign downstream.valid[s] = !reset && !flush && int'(count) > s;
+    assign upstream.ready[s] = !reset && !flush && consumed == int'(count);
+  end
+  always_comb begin
+    consumed = 0;
+    accepted = 0;
+    for (int s = 0; s < Width; s++)
+      if (s == consumed && downstream.valid[s] && downstream.ready[s]) consumed++;
+    for (int s = 0; s < Width; s++)
+      if (s == accepted && upstream.valid[s] && upstream.ready[s]) accepted++;
+  end
+  always_ff @(posedge clock) begin
+    if (reset || flush) count <= '0;
+    else begin
+      count <= CountBits'(int'(count) - consumed + accepted);
+      if (consumed == int'(count)) begin
+        for (int s = 0; s < Width; s++) if (s < accepted) begin
+          slot_q[s] <= upstream.slot[s];
+          checkpoint_valid_q[s] <= upstream.checkpoint_valid[s];
+          checkpoint_q[s] <= upstream.checkpoint[s];
+        end
+      end else if (consumed != 0) begin
+        for (int s = 0; s < Width; s++) if (s + consumed < int'(count)) begin
+          slot_q[s] <= slot_q[s + consumed];
+          checkpoint_valid_q[s] <= checkpoint_valid_q[s + consumed];
+          checkpoint_q[s] <= checkpoint_q[s + consumed];
+        end
+      end
+    end
+  end
+  `RAPT_SVA(clock, reset, OPERAND_STAGE_CAPACITY, int'(count) <= Width)
+endmodule

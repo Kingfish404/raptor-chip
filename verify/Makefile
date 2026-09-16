@@ -11,6 +11,14 @@
 SHELL := /bin/bash
 .DEFAULT_GOAL := help
 
+.PHONY: sta-dff-flow-check
+sta-dff-flow-check: ## Check isolated DFF STA runner contracts (no PDK/tool installation)
+	python3 scripts/test_sta_dff.py
+
+.PHONY: sim-build-isolation-check
+sim-build-isolation-check: ## Check build-local Kconfig and non-destructive model cache selection
+	python3 "$(VERIFY_HOME)/scripts/test_sim_build_isolation.py"
+
 .PHONY: pma-span-check
 pma-span-check: ## Prove RV32/RV64 scalar PMA first-fault offsets against bytewise decoding
 	$(PYTHON) scripts/formal_contract.py pma-span --output "$(BUILD_DIR)/pma-span"
@@ -516,9 +524,8 @@ riscof-gen: ## Generate self-checking ELFs via ACT4 framework
 riscof-build-npc: ## Build the selected XLEN NPC for ACT4 self-checking ELFs
 	@# ACT4 binaries report their own result and run without a NEMU -d argument.
 	@# The simulator supports this even when CONFIG_DIFFTEST is enabled.
-	@if [ ! -f $(NSIM_HOME)/.config ]; then \
-		$(MAKE) -C $(NSIM_HOME) o2_defconfig; \
-	fi
+	@$(MAKE) -C $(NSIM_HOME) o2_defconfig RAPT_CONFIG=$(RAPT_CONFIG) \
+		BUILD_PROFILE=$(ACT4_BUILD_PROFILE) VFLAGS="$(ACT4_VFLAGS)"
 	@$(MAKE) -C $(NSIM_HOME) $(SUBMAKE_JOBS) RAPT_CONFIG=$(RAPT_CONFIG) \
 		BUILD_PROFILE=$(ACT4_BUILD_PROFILE) VFLAGS="$(ACT4_VFLAGS)"
 	@test -f $(ACT4_NPC_BIN) || { echo "[act4] ERROR: NPC build failed: $(ACT4_NPC_BIN)"; exit 1; }
@@ -582,12 +589,8 @@ riscof-classic-build-npc: ## (Re)build NPC simulator without difftest for RISCOF
 	@# RISCOF's DUT plugin invokes sim without `--diff`, so the simulator
 	@# must be built with the plain (non-difftest) config; otherwise
 	@# init_difftest aborts with `ref_so_file != NULL`.
-	@if [ ! -f $(RISCOF_NPC_BIN_32) ] || grep -q '^CONFIG_DIFFTEST=y' $(NSIM_HOME)/.config 2>/dev/null; then \
-		echo "[riscof-classic] (Re)building NPC without difftest (RAPT_CONFIG=$(RAPT_CONFIG), BUILD_PROFILE=$(RISCOF_BUILD_PROFILE))..."; \
-		$(MAKE) -C $(NSIM_HOME) o2_defconfig; \
-	else \
-		echo "[riscof-classic] NPC config OK (no difftest)."; \
-	fi
+	@$(MAKE) -C $(NSIM_HOME) o2_defconfig RAPT_CONFIG=$(RAPT_CONFIG) \
+		BUILD_PROFILE=$(RISCOF_BUILD_PROFILE) VFLAGS=""
 	@$(MAKE) -C $(NSIM_HOME) $(SUBMAKE_JOBS) RAPT_CONFIG=$(RAPT_CONFIG) \
 		BUILD_PROFILE=$(RISCOF_BUILD_PROFILE) VFLAGS=""
 	@test -f $(RISCOF_NPC_BIN_32) || { echo "[riscof-classic] ERROR: NPC build failed: $(RISCOF_NPC_BIN_32)"; exit 1; }
@@ -795,9 +798,8 @@ COV_NPC_BIN         := $(NSIM_HOME)/build/$(COV_BUILD_PROFILE)/$(if $(filter rv6
 define RUN_AND_SAVE_COVERAGE
 	@echo "[coverage] Running $(1) workload..."
 	@set -o pipefail; \
-		raw_dir="$(COV_DIR)/raw/$(1)"; status=0; \
-		rm -rf "$$raw_dir"; mkdir -p "$$raw_dir"; \
-		rm -f $(NSIM_HOME)/coverage*.dat $(VERIFY_HOME)/coverage*.dat; \
+		mkdir -p "$(COV_DIR)/raw"; \
+		raw_dir=$$(mktemp -d "$(COV_DIR)/raw/$(1).XXXXXX") || exit 1; status=0; \
 		RAPT_COVERAGE_DIR="$$raw_dir" $(2) 2>&1 \
 			| tee "$(COV_DIR)/$(1).log" || status=$$?; \
 		shopt -s nullglob; coverage_files=("$$raw_dir"/*.dat); \
@@ -808,12 +810,6 @@ define RUN_AND_SAVE_COVERAGE
 			else \
 				echo "[coverage] ERROR: failed to merge $(1) data"; status=1; \
 			fi; \
-		elif [ -f "$(NSIM_HOME)/coverage.dat" ]; then \
-			cp "$(NSIM_HOME)/coverage.dat" "$(COV_DIR)/coverage_$(1).dat"; \
-			echo "[coverage] Saved: $(COV_DIR)/coverage_$(1).dat"; \
-		elif [ -f "$(VERIFY_HOME)/coverage.dat" ]; then \
-			cp "$(VERIFY_HOME)/coverage.dat" "$(COV_DIR)/coverage_$(1).dat"; \
-			echo "[coverage] Saved: $(COV_DIR)/coverage_$(1).dat"; \
 		else \
 			echo "[coverage] ERROR: $(1) did not produce coverage data"; status=1; \
 		fi; \
@@ -837,8 +833,8 @@ COV_VERILATOR_EXTRA := --coverage-line -Wno-UNOPTFLAT
 
 coverage-build: ## Build NPC with coverage instrumentation
 	@echo "[coverage] Building NPC with --coverage-line..."
-	@rm -rf $(NSIM_HOME)/build/$(COV_BUILD_PROFILE)/obj_dir* $(NSIM_HOME)/build/$(COV_BUILD_PROFILE)/riscv*-npc-*
-	$(MAKE) -C $(NSIM_HOME) o2_difftest_defconfig RAPT_CONFIG=$(RAPT_CONFIG)
+	$(MAKE) -C $(NSIM_HOME) o2_difftest_defconfig RAPT_CONFIG=$(RAPT_CONFIG) \
+		BUILD_PROFILE=$(COV_BUILD_PROFILE) VFLAGS="$(VFLAGS)"
 	# Coverage build: disable RTL SVA (RAPT_SIM_ASSERT=0) and use line-only
 	# coverage. `--coverage-toggle` was observed to crash the simulator on CI
 	# during microbench (queen) due to combined memory pressure with toggle
@@ -1522,6 +1518,8 @@ VERILATOR_DIRECTED_TARGETS := \
 	verilator-cache-replacement \
 	verilator-sq-forward-ports \
 	verilator-sq-forward-ports-rv64 \
+	verilator-sq-forward-ring-rv32 \
+	verilator-sq-forward-ring-rv64 \
 	verilator-l1d-data \
 	verilator-l1d-tags \
 	verilator-alu-zbb-strlen \
@@ -1587,6 +1585,8 @@ VERILATOR_DIRECTED_TARGETS := \
 	verilator-completion-guard \
 	verilator-completion-stage-rv32 \
 	verilator-completion-stage-rv64 \
+	verilator-fmax-boundaries-rv32 \
+	verilator-fmax-boundaries-rv64 \
 	verilator-iq-reclaim-random \
 	verilator-ras \
 	verilator-ras-pipeline \
@@ -1598,20 +1598,24 @@ VERILATOR_DIRECTED_TARGETS := \
 # $(1)=build/log stem, $(2)=top/testbench, $(3)=DUT sources,
 # $(4)=XSim-style defines (`-d NAME`, translated to `-DNAME`),
 # $(5)=runtime plusargs.
+_verify_quote = '$(subst ','"'"',$(1))'
 define VERILATOR_DIRECTED_RUN
 	+@set -e -o pipefail; \
 	command -v $(VERILATOR) >/dev/null 2>&1 || { \
 		echo "[verilator-directed] ERROR: $(VERILATOR) not found"; exit 1; }; \
-	rm -rf "$(VERILATOR_DIRECTED_BUILD_DIR)/$(1)"; \
 	mkdir -p "$(VERILATOR_DIRECTED_BUILD_DIR)/$(1)"; \
+	build_key=$$(python3 "$(VERIFY_HOME)/../sim/scripts/build_cache.py" fingerprint --config /dev/null -- \
+		$(call _verify_quote,$(VERILATOR) $(VERILATOR_DIRECTED_FLAGS)) \
+		$(call _verify_quote,$(2) $(3) $(4) $(XSIM_COMMON_INCLUDES))); \
+	model_dir="$(VERILATOR_DIRECTED_BUILD_DIR)/$(1)/obj-$$build_key"; \
 	$(VERILATOR) $(VERILATOR_DIRECTED_FLAGS) \
 		--timescale 1ns/1ps --top-module $(2) \
 		$(subst -d ,-D,$(4)) \
 		$(addprefix -I,$(patsubst -i%,%,$(XSIM_COMMON_INCLUDES))) \
 		$(3) "$(XSIM_DIR)/$(call SHARED_TB_SOURCE,$(2))" \
-		--Mdir "$(VERILATOR_DIRECTED_BUILD_DIR)/$(1)/obj" -o $(2) \
+		--Mdir "$$model_dir" -o $(2) \
 		>"$(VERILATOR_DIRECTED_BUILD_DIR)/$(1)/build.log" 2>&1; \
-	"$(VERILATOR_DIRECTED_BUILD_DIR)/$(1)/obj/$(2)" $(5) \
+	"$$model_dir/$(2)" $(5) \
 		2>&1 | tee "$(VERILATOR_DIRECTED_BUILD_DIR)/$(1)/run.log"; \
 	grep -q "PASS:" "$(VERILATOR_DIRECTED_BUILD_DIR)/$(1)/run.log" || { \
 		echo "[verilator-directed] ERROR: $(2) did not report PASS"; exit 1; }; \
@@ -1937,10 +1941,17 @@ verilator-l1i-width-window-4way:
 verilator-l1i-width-window-8way: VERILATOR_DIRECTED_FLAGS += -GWays=8
 verilator-l1i-width-window-8way:
 	$(call VERILATOR_DIRECTED_RUN,l1i_width_window_8way,tb_l1i_width_window,$(XSIM_L1I_SOURCES),-d RAPT_ASSERT_EN,)
+.PHONY: yosys-sq-span-equivalence
+yosys-sq-span-equivalence:
+	python3 "$(VERIFY_HOME)/scripts/check_sq_span_equivalence.py" --rtl "$(RAPTOR_HOME)/hdl/backend/lsu/rapt_sq_forward.sv" --build-dir "$(BUILD_DIR)/sq-span-equivalence"
+
 verilator-sq-forward-ports:
 	$(call VERILATOR_DIRECTED_RUN,sq_forward_ports,tb_sq_forward_ports,"$(RAPTOR_HOME)/hdl/backend/lsu/rapt_sq_forward.sv",,)
 verilator-sq-forward-ports-rv64:
 	$(call VERILATOR_DIRECTED_RUN,sq_forward_ports_rv64,tb_sq_forward_ports,"$(RAPTOR_HOME)/hdl/backend/lsu/rapt_sq_forward.sv",-d RAPT_RV64,)
+verilator-sq-forward-ring-rv32 verilator-sq-forward-ring-rv64: VERILATOR_DIRECTED_FLAGS = --binary --timing --assert -j 1
+verilator-sq-forward-ring-rv32 verilator-sq-forward-ring-rv64:
+	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_store_queue_forward_ring,"$(RAPTOR_HOME)/hdl/backend/lsu/rapt_sq_forward.sv",$(if $(findstring rv64,$@),-d RAPT_RV64),)
 verilator-l1d-data:
 	$(call VERILATOR_DIRECTED_RUN,l1d_data,tb_l1d_data,"$(RAPTOR_HOME)/hdl/memory/rapt_sram_1rw.sv" "$(RAPTOR_HOME)/hdl/memory/rapt_l1d_data.sv",,)
 verilator-l1d-tags:
@@ -3294,7 +3305,7 @@ verilator-router-early-write-rv64: ## Check W-before-AW routing and response own
 verilator-rnp-handshake-rv32: ## Check RNP AW/W serialization, IDs and response stalls
 	$(call VERILATOR_DIRECTED_RUN,rnp_handshake_rv32,tb_rnp_handshake,"$(RAPTOR_HOME)/hdl/rapt_pkg.sv" "$(RAPTOR_HOME)/hdl/perip/wrap_rnp.sv",-d RAPT_ASSERT_EN,)
 
-# Full-capacity checks intentionally require the default 16 KiB, four-way L1s.
+# Full-capacity checks follow the configured default L1 geometry (sets/ways/line).
 .PHONY: verilator-l1i-16k-rv32 verilator-l1i-16k-rv64 verilator-l1d-16k-rv32 verilator-l1d-16k-rv64
 verilator-l1i-16k-rv32 verilator-l1i-16k-rv64 verilator-l1d-16k-rv32 verilator-l1d-16k-rv64: VERILATOR_DIRECTED_FLAGS = --binary --timing --assert -j 1
 verilator-l1i-16k-rv32 verilator-l1i-16k-rv64:
@@ -3305,3 +3316,13 @@ verilator-l1d-16k-rv32 verilator-l1d-16k-rv64:
 .PHONY: verilator-cache-stream-rv32 verilator-cache-stream-rv64 verilator-cache-stream-l2-rv32 verilator-cache-stream-l2-rv64 verilator-cache-stream-rnp-rv32
 verilator-cache-stream-rv32 verilator-cache-stream-rv64 verilator-cache-stream-l2-rv32 verilator-cache-stream-l2-rv64 verilator-cache-stream-rnp-rv32:
 	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_cache_stream,$(XSIM_L1D_SOURCES) "$(RAPTOR_HOME)/hdl/memory/rapt_bus.sv" "$(RAPTOR_HOME)/hdl/memory/rapt_axi_master.sv" "$(RAPTOR_HOME)/hdl/memory/rapt_l2.sv" "$(RAPTOR_HOME)/hdl/perip/wrap_rnp.sv",-d RAPT_ASSERT_EN $(if $(findstring -rnp-,$@),-d RAPT_TEST_RNP) $(if $(findstring rv64,$@),-d RAPT_RV64) $(if $(findstring -l2-,$@),-d RAPT_L2_EN),)
+
+.PHONY: verilator-ioq-address-stage-rv32 verilator-ioq-address-stage-rv64
+verilator-ioq-address-stage-rv32 verilator-ioq-address-stage-rv64: VERILATOR_DIRECTED_FLAGS = --binary --timing --assert -j 1
+verilator-ioq-address-stage-rv32 verilator-ioq-address-stage-rv64:
+	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_ioq_address_stage,$(XSIM_IOQ_SOURCES),-d RAPT_ASSERT_EN $(if $(findstring rv64,$@),-d RAPT_RV64),)
+
+.PHONY: verilator-fmax-boundaries-rv32 verilator-fmax-boundaries-rv64
+verilator-fmax-boundaries-rv32 verilator-fmax-boundaries-rv64: VERILATOR_DIRECTED_FLAGS = --binary --timing --assert -j 1
+verilator-fmax-boundaries-rv32 verilator-fmax-boundaries-rv64:
+	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_fmax_boundaries,"$(RAPTOR_HOME)/hdl/rapt_pkg.sv" "$(RAPTOR_HOME)/hdl/backend/rapt_rou.sv" "$(RAPTOR_HOME)/hdl/backend/rapt_iq.sv" "$(RAPTOR_HOME)/hdl/backend/rapt_cdb_arb.sv",-d RAPT_ASSERT_EN $(if $(findstring rv64,$@),-d RAPT_RV64),)

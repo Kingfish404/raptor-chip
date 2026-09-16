@@ -16,6 +16,34 @@ from prepare_private_bios import prepare
 
 
 class BuildIsolationTest(unittest.TestCase):
+    def test_selected_vivado_used_for_build_and_load(self):
+        with tempfile.TemporaryDirectory(prefix='raptor-chip-vivado-', dir='/tmp') as tmp:
+            root = Path(tmp)
+            selected = root / 'selected tool/vivado'
+            fallback = root / 'fallback/vivado'
+            for executable, label in ((selected, 'selected'), (fallback, 'wrong')):
+                executable.parent.mkdir()
+                executable.write_text(f'#!/bin/sh\necho {label}\n')
+                executable.chmod(0o755)
+            (root / 'venv/bin').mkdir(parents=True)
+            (root / 'venv/bin/activate').write_text('# fake environment\n')
+            board = root / 'board.py'
+            board.write_text('import subprocess\nsubprocess.run(["vivado"], check=True)\n')
+            extra = ('.PHONY: tool-selection\ntool-selection:\n'
+                     '\t@$(call _run_litex_target,)\n'
+                     '\t@$(FPGA_LOAD_TOOL_CHECK)\n'
+                     '\t@$(FPGA_LOAD_CMD)\n')
+            env = {k: v for k, v in os.environ.items() if not k.startswith(('RAPT_', 'MAKE'))}
+            env['PATH'] = str(fallback.parent) + os.pathsep + env['PATH']
+            result = subprocess.run(['make', '--no-print-directory', '-f', 'Makefile', '-f', '-',
+                                     'tool-selection', 'FPGA_BOARD=mlk_cu08_ku15p', 'FPGA_AUTO_DETECT=0',
+                                     'VARIANT=linux64', 'BOOT_MODE=custom', f'BUILD_DIR={root}/build',
+                                     f'VENV_DIR={root}/venv', f'PYTHON={sys.executable}',
+                                     f'FPGA_PY={board}', f'VIVADO={selected}'],
+                                    cwd=LITEX, input=extra, text=True, capture_output=True, env=env)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(result.stdout.splitlines(), ['selected', 'selected'])
+
     def config(self, root, **changes):
         values = dict(FPGA_BOARD="mlk_cu08_ku15p", FPGA_AUTO_DETECT="0",
                       VARIANT="linux32", RAPT_CONFIG="default", SYS_CLK="50000000",
@@ -41,6 +69,7 @@ class BuildIsolationTest(unittest.TestCase):
             for changes in (dict(VARIANT="linux64"), dict(RAPT_CONFIG="small"),
                             dict(SYS_CLK="75000000"), dict(RAPT_PACK_VFLAGS="-DRAPT_ROB_SIZE=32"),
                             dict(MIG_SIZE="0x20000000"),
+                            dict(LINUX_ISA="rv32imac_zicsr_zifencei"),
                             dict(WITH_ETHERNET="1"), dict(LINUX_FPGA_INIT="shell")):
                 with self.subTest(changes=changes):
                     other = self.config(root, **changes)
@@ -131,6 +160,8 @@ class BuildIsolationTest(unittest.TestCase):
             (software / "libc").mkdir(parents=True)
             (software / "common.mak").write_text("# user edit\n# Toolchain options\n")
             (software / "libc/Makefile").write_text("# original libc\n")
+            (software / "bios").mkdir()
+            (software / "bios/boot.c").write_text('void netboot(int nb_params, char **params)\n{\n}\n')
             first = prepare(source, root / "rv32")
             second = prepare(source, root / "rv64")
             (first / "common.mak").write_text("rv32 only")

@@ -86,18 +86,89 @@ static inline void pmp_addr_set(int i, word_t v)
 
 static bool pmp_any_active = false;
 
-static void pmp_rebuild_active(void)
+/* Decoded PMP entries: rebuilt only when a PMP CSR changes. Avoids the
+ * per-lookup shift/mask and NAPOT trailing-ones loops. */
+struct pmp_decoded
+{
+  uint8_t cfg;
+  uint8_t a;      /* PMP_A_OFF / TOR / NA4 / NAPOT */
+  word_t lo_w;    /* TOR: lower bound (inclusive), in 4-byte words */
+  word_t hi_w;    /* TOR: upper bound (exclusive), in 4-byte words */
+  word_t base_w;  /* NA4/NAPOT: base, in 4-byte words */
+  word_t mask_w;  /* NAPOT: size mask, in 4-byte words; 0 otherwise */
+};
+
+static struct pmp_decoded pmp_dec[PMP_N];
+
+/* Per-word match cache: the lowest-numbered matching entry is a pure
+ * function of (pmpcfg, pmpaddr, word address), so a generation counter
+ * invalidates the whole cache on any PMP update. Direct-mapped. */
+#define PMP_WCACHE_BITS 13
+#define PMP_WCACHE_SIZE (1u << PMP_WCACHE_BITS)
+struct pmp_wcache_entry
+{
+  paddr_t word;
+  int entry; /* -1: no matching entry */
+  uint8_t cfg;
+  uint32_t gen;
+};
+static struct pmp_wcache_entry pmp_wcache[PMP_WCACHE_SIZE];
+static uint32_t pmp_gen = 1;
+
+static inline word_t pmp_napot_mask(word_t pa)
+{
+  /* Trailing ones in pmpaddr define the region size (in 4-byte words). */
+  word_t mask = 1;
+  for (int j = 1; j < (int)sizeof(word_t) * 8; j++)
+  {
+    if (pa & ((word_t)1 << (j - 1)))
+      mask |= ((word_t)1 << j);
+    else
+      break;
+  }
+  return mask;
+}
+
+static void pmp_rebuild_decoded(void)
 {
   pmp_any_active = false;
   for (int i = 0; i < PMP_N; i++)
   {
     uint8_t cfg = pmp_cfg(i);
     int a = (cfg >> PMPCFG_A_LSB) & 0x3;
+    struct pmp_decoded *d = &pmp_dec[i];
+    d->cfg = cfg;
+    d->a = (uint8_t)a;
+    word_t pa = pmp_addr(i);
     if (a != PMP_A_OFF)
-    {
       pmp_any_active = true;
-      return;
+    if (a == PMP_A_TOR)
+    {
+      d->lo_w = (i == 0) ? 0 : pmp_addr(i - 1);
+      d->hi_w = pa;
+      d->base_w = 0;
+      d->mask_w = 0;
     }
+    else if (a == PMP_A_NA4)
+    {
+      d->base_w = pa;
+      d->mask_w = 0;
+    }
+    else if (a == PMP_A_NAPOT)
+    {
+      d->mask_w = pmp_napot_mask(pa);
+      d->base_w = pa & ~d->mask_w;
+    }
+    else
+    {
+      d->base_w = 0;
+      d->mask_w = 0;
+    }
+  }
+  if (unlikely(++pmp_gen == 0))
+  {
+    memset(pmp_wcache, 0, sizeof(pmp_wcache));
+    pmp_gen = 1;
   }
 }
 
@@ -108,7 +179,7 @@ void pmp_restore_checkpoint(const uint8_t *cfg, const word_t *addr)
     pmp_cfg_set(i, cfg[i]);
     pmp_addr_set(i, addr[i]);
   }
-  pmp_rebuild_active();
+  pmp_rebuild_decoded();
   soft_tlb_flush();
 }
 
@@ -135,7 +206,7 @@ int pmp_csr_write(uint16_t csr, word_t val)
       if ((nb & 3u) == 2u) nb &= (uint8_t)~7u; /* reserved RW: clear RWX */
       pmp_cfg_set(base + pi, nb);
     }
-    pmp_rebuild_active();
+    pmp_rebuild_decoded();
     soft_tlb_flush();
     return 1;
   }
@@ -155,6 +226,7 @@ int pmp_csr_write(uint16_t csr, word_t val)
       }
     }
     pmp_addr_set(i, val);
+    pmp_rebuild_decoded();
     soft_tlb_flush();
     return 1;
   }
@@ -173,77 +245,43 @@ struct pmp_match
 
 static void pmp_byte_lookup(paddr_t addr_bytes, struct pmp_match *m)
 {
-  paddr_t addr_w = addr_bytes >> 2;
-  m->any_match = false;
-  m->entry = -1;
-  m->cfg = 0;
+  const paddr_t addr_w = addr_bytes >> 2;
+  struct pmp_wcache_entry *c =
+      &pmp_wcache[(addr_w ^ (addr_w >> 13)) & (PMP_WCACHE_SIZE - 1)];
+  if (likely(c->gen == pmp_gen && c->word == addr_w))
+  {
+    m->any_match = c->entry >= 0;
+    m->entry = c->entry;
+    m->cfg = c->cfg;
+    return;
+  }
+
+  int found = -1;
+  uint8_t found_cfg = 0;
   for (int i = 0; i < PMP_N; i++)
   {
-    uint8_t cfg = pmp_cfg(i);
-    int a = (cfg >> PMPCFG_A_LSB) & 0x3;
-    if (a == PMP_A_OFF)
+    const struct pmp_decoded *d = &pmp_dec[i];
+    if (d->a == PMP_A_OFF)
       continue;
-    word_t pa = pmp_addr(i);
-    bool match = false;
-    if (a == PMP_A_TOR)
-    {
-      word_t lo = (i == 0) ? 0 : pmp_addr(i - 1);
-      match = (addr_w >= lo) && (addr_w < pa);
-    }
-    else if (a == PMP_A_NA4)
-    {
-      match = (addr_w == pa);
-    }
+    bool match;
+    if (d->a == PMP_A_TOR)
+      match = (addr_w >= d->lo_w) && (addr_w < d->hi_w);
     else
-    { /* NAPOT */
-      /* Compute mask: trailing ones in pa define region size (in words). */
-      paddr_t mask = 1;
-      for (int j = 1; j < (int)sizeof(word_t) * 8; j++)
-      {
-        if (pa & ((word_t)1 << (j - 1)))
-          mask |= ((word_t)1 << j);
-        else
-          break;
-      }
-      paddr_t base = pa & ~mask;
-      match = ((addr_w & ~mask) == base);
-    }
+      match = ((addr_w & ~d->mask_w) == d->base_w);
     if (match)
     {
-      m->any_match = true;
-      m->entry = i;
-      m->cfg = cfg;
-      return;
+      found = i;
+      found_cfg = d->cfg;
+      break;
     }
   }
-}
-
-static bool pmp_entry_matches(int entry, paddr_t addr_bytes)
-{
-  uint8_t cfg = pmp_cfg(entry);
-  int a = (cfg >> PMPCFG_A_LSB) & 0x3;
-  paddr_t addr_w = addr_bytes >> 2;
-  word_t pa = pmp_addr(entry);
-  if (a == PMP_A_TOR)
-  {
-    word_t lo = (entry == 0) ? 0 : pmp_addr(entry - 1);
-    return addr_w >= lo && addr_w < pa;
-  }
-  if (a == PMP_A_NA4)
-    return addr_w == pa;
-  if (a == PMP_A_NAPOT)
-  {
-    paddr_t mask = 1;
-    for (int j = 1; j < (int)sizeof(word_t) * 8; j++)
-    {
-      if (pa & ((word_t)1 << (j - 1)))
-        mask |= (word_t)1 << j;
-      else
-        break;
-    }
-    return (addr_w & ~mask) == (pa & ~mask);
-  }
-  return false;
+  c->word = addr_w;
+  c->entry = found;
+  c->cfg = found_cfg;
+  c->gen = pmp_gen;
+  m->any_match = found >= 0;
+  m->entry = found;
+  m->cfg = found_cfg;
 }
 
 /* Last PMP fault address — reports which byte of a possibly-straddling access
@@ -271,31 +309,68 @@ bool pmp_check(paddr_t addr, int size, uint32_t priv,
   if (size <= 0)
     size = 1;
   paddr_t addr_hi = addr + (paddr_t)(size - 1);
+  const bool same_word = (addr_hi >> 2) == (addr >> 2);
+
+  /* Fast path: the entire access lies inside one 4-byte grain. PMP region
+   * boundaries are grain-aligned, so the lowest-numbered entry matching that
+   * grain also covers every byte of the access. This resolves the dominant
+   * fetch / word load / word store cases with a single wcache probe. */
+  if (likely(same_word))
+  {
+    struct pmp_match one;
+    pmp_byte_lookup(addr, &one);
+    if (!one.any_match)
+    {
+      if (priv == PRV_M)
+        return false;
+      pmp_last_fault_addr = addr;
+      return true;
+    }
+    const uint8_t cfg = one.cfg;
+    if (priv == PRV_M && !((cfg >> PMPCFG_L_BIT) & 1))
+      return false; /* M-mode bypasses unlocked entries */
+    bool ok = (!op_r || ((cfg >> PMPCFG_R_BIT) & 1))
+           && (!op_w || ((cfg >> PMPCFG_W_BIT) & 1))
+           && (!op_x || ((cfg >> PMPCFG_X_BIT) & 1));
+    if (ok)
+      return false;
+    pmp_last_fault_addr = addr;
+    return true;
+  }
+
   struct pmp_match lo, hi;
   pmp_byte_lookup(addr, &lo);
   pmp_byte_lookup(addr_hi, &hi);
+
   bool is_m = (priv == PRV_M);
 
-  /* Priority is over ANY byte, not just the first byte. A low-priority
-   * background region covering the first byte cannot hide an earlier NA4,
-   * TOR or NAPOT entry that intersects only the middle/end of this access.
-   * PMP boundaries are four-byte aligned, so inspect each touched grain. */
+  /* Covering rule (privileged spec 3.7): the lowest-numbered entry matching
+   * ANY byte of the access must cover EVERY byte, else the access faults.
+   * pmp_byte_lookup returns the lowest-numbered entry for a grain, so that
+   * condition holds iff every touched grain resolves to the same entry.
+   * This replaces an explicit per-endpoint region re-match with integer
+   * compares, which matters because 8-byte RV64 accesses dominate here. */
   if (!op_x)
   {
-    for (int offset = 4 - (int)(addr & 3); offset < size; offset += 4)
+    const int e0 = lo.entry;
+    bool covered = (hi.entry == e0);
+    for (int offset = 4 - (int)(addr & 3); covered && offset < size; offset += 4)
     {
+      paddr_t g = addr + (paddr_t)offset;
+      if ((g >> 2) == (addr_hi >> 2))
+        continue; /* hi grain already known */
       struct pmp_match part;
-      pmp_byte_lookup(addr + (paddr_t)offset, &part);
-      if (part.any_match && (!lo.any_match || part.entry < lo.entry))
-        lo = part;
+      pmp_byte_lookup(g, &part);
+      if (part.entry != e0)
+        covered = false;
     }
-  }
-  if (!op_x && lo.any_match &&
-      (!pmp_entry_matches(lo.entry, addr) ||
-       !pmp_entry_matches(lo.entry, addr_hi)))
-  {
-    pmp_last_fault_addr = addr;
-    return true;
+    /* covered with e0 < 0 means no grain matched at all; leave the pass
+     * loop below to apply the M-mode-vs-S/U no-match rule. */
+    if ((lo.any_match || hi.any_match) && !covered)
+    {
+      pmp_last_fault_addr = addr;
+      return true;
+    }
   }
 
   for (int pass = 0; pass < 2; pass++)
@@ -327,13 +402,3 @@ bool pmp_check(paddr_t addr, int size, uint32_t priv,
   return false;
 }
 
-/* Effective privilege for loads/stores: MPRV + MPP override when in M-mode. */
-uint32_t pmp_effective_priv_ls(void)
-{
-  word_t ms = cpu.sr[CSR_MSTATUS];
-  if ((ms & CSR_MSTATUS_MPRV) && cpu.priv == PRV_M)
-  {
-    return (uint32_t)((ms & CSR_MSTATUS_MPP) >> 11);
-  }
-  return cpu.priv;
-}

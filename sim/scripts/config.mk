@@ -13,53 +13,27 @@
 # See the Mulan PSL v2 for more details.
 #**************************************************************************************/
 
-COLOR_RED := $(shell echo "\033[1;31m")
-COLOR_END := $(shell echo "\033[0m")
-
-ifeq ($(wildcard .config),)
-$(warning $(COLOR_RED)Warning: .config does not exists!$(COLOR_END))
-$(warning $(COLOR_RED)To build the project, first run 'make menuconfig'.$(COLOR_END))
+# Kconfig itself still uses relative scratch/dependency paths internally, so
+# changing KCONFIG_CONFIG alone is insufficient. Run it inside SIM_CONFIG_ROOT.
+SIM_CONFIG_DRIVER = python3 "$(NSIM_HOME)/scripts/configure.py" --source "$(NSIM_HOME)" --output "$(SIM_CONFIG_ROOT)" --default "$(strip $(NPC_DEFCONFIG))"
+SIM_CONFIG_GOALS := $(if $(MAKECMDGOALS),$(filter all run run_log sim print-npc-exec print-jtag-bin jtag-selftest jtag-openocd,$(MAKECMDGOALS)),all)
+ifneq ($(SIM_CONFIG_GOALS),)
+ifneq ($(filter %defconfig menuconfig,$(MAKECMDGOALS)),)
+$(error Configure and build in separate make invocations using the same BUILD_PROFILE/VFLAGS)
+endif
+$(SIM_AUTOCONFIG) $(SIM_AUTOHEADER) &: $(NSIM_HOME)/Kconfig $(wildcard $(SIM_CONFIG_FILE))
+	@$(SIM_CONFIG_DRIVER)
 endif
 
-Q            := @
-KCONFIG_PATH := ./tools/kconfig
-FIXDEP_PATH  := ./tools/fixdep
-Kconfig      := ./Kconfig
-rm-distclean += include/generated include/config .config .config.old
-silent := -s
+menuconfig: ## Edit only the selected build profile/XLEN configuration
+	@$(SIM_CONFIG_DRIVER) --menu
 
-CONF   := $(KCONFIG_PATH)/build/conf
-MCONF  := $(KCONFIG_PATH)/build/mconf
-FIXDEP := $(FIXDEP_PATH)/build/fixdep
+savedefconfig: ## Save the selected configuration into its build directory
+	@$(SIM_CONFIG_DRIVER) --save "$(SIM_CONFIG_ROOT)/defconfig"
 
-$(CONF):
-	$(Q)$(MAKE) $(silent) -C $(KCONFIG_PATH) NAME=conf
+%defconfig:
+	@$(SIM_CONFIG_DRIVER) --defconfig "$@"
 
-$(MCONF):
-	$(Q)$(MAKE) $(silent) -C $(KCONFIG_PATH) NAME=mconf
-
-$(FIXDEP):
-	$(Q)$(MAKE) $(silent) -C $(FIXDEP_PATH)
-
-menuconfig: $(MCONF) $(CONF) $(FIXDEP) ## Update current config utilising a menu based program
-	$(Q)$(MCONF) $(Kconfig)
-	$(Q)$(CONF) $(silent) --syncconfig $(Kconfig)
-
-savedefconfig: $(CONF) ## Save current config as configs/defconfig (minimal config)
-	$(Q)$< $(silent) --$@=configs/defconfig $(Kconfig)
-
-%defconfig: $(CONF) $(FIXDEP)
-	$(Q)$< $(silent) --defconfig=configs/$@ $(Kconfig)
-	$(Q)$< $(silent) --syncconfig $(Kconfig)
-
-.PHONY: menuconfig savedefconfig defconfig
-
-distclean:: clean
-	-@rm -rf $(rm-distclean)
-
-.PHONY: distclean
-
-define call_fixdep
-	@$(FIXDEP) $(1) $(2) unused > $(1).tmp
-	@mv $(1).tmp $(1)
-endef
+.PHONY: menuconfig savedefconfig defconfig print-config
+print-config: ## Show the build-local Kconfig and generated-header paths
+	@printf '%s\n' '$(SIM_CONFIG_FILE)' '$(SIM_AUTOHEADER)'

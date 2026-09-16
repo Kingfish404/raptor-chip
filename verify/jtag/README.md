@@ -1,20 +1,10 @@
 # JTAG / RISC-V Debug Verification
 
-This subdirectory provides verification entry points for
-[rapt_dtm](../../hdl/perip/rapt_dtm.sv) and
-[rapt_dm](../../hdl/perip/rapt_dm.sv), with the
-[remote-bitbang host](../../sim/csrc/jtag/jtag_rbb_server.cc).
+This subdirectory provides verification entry points for [rapt_dtm](../../hdl/perip/rapt_dtm.sv) and [rapt_dm](../../hdl/perip/rapt_dm.sv), with the [remote-bitbang host](../../sim/csrc/jtag/jtag_rbb_server.cc).
 
 ## Implementation boundary
 
-The DM supports drained-core halt/resume, a sticky halt state and abstract
-32-bit transfers for GPRs and selected DM-local CSRs. `dcsr`, `dpc` and scratch
-registers are stored in the DM; commit-based stepping supports bring-up.
-This is not a complete architectural Debug Mode implementation.
-Memory access/SBA, program-buffer execution, 64-bit abstract transfers and
-Debug Mode fetch redirect/`dret` remain unsupported. `debug-tests` still exits
-nonzero with this gap list; available smoke targets are not upstream-suite
-acceptance evidence.
+The DM supports drained-core halt/resume, a sticky halt state and abstract 32-bit transfers for GPRs and selected DM-local CSRs. `dcsr`, `dpc` and scratch registers are stored in the DM; commit-based stepping supports bring-up. This is not a complete architectural Debug Mode implementation. Memory access/SBA, program-buffer execution, 64-bit abstract transfers and Debug Mode fetch redirect/`dret` remain unsupported. `debug-tests` still exits nonzero with this gap list; available smoke targets are not upstream-suite acceptance evidence.
 
 ## Quick start
 
@@ -44,18 +34,9 @@ make -C verify jtag                       # = jtag-selftest
 
 ## Build selection and isolation
 
-Smoke runners support RV32 abstract transfers. `RAPT_CONFIG` and
-`BUILD_PROFILE` are forwarded to `sim/Makefile`; the executable path is
-resolved there, including SoC mode and profiling suffixes. Set `NSIM_BIN`
-explicitly to use an existing executable without rebuilding, and supply its
-matching `RAPT_CONFIG`. Custom defines changing MISA need a matching preset.
+Smoke runners support RV32 abstract transfers. `RAPT_CONFIG` and `BUILD_PROFILE` are forwarded to `sim/Makefile`; the executable path is resolved there, including SoC mode and profiling suffixes. Set `NSIM_BIN` explicitly to use an existing executable without rebuilding, and supply its matching `RAPT_CONFIG`. Custom defines changing MISA need a matching preset.
 
-`JTAG_PORT` is passed to both simulator and OpenOCD. `GDB_PORT` is passed to
-OpenOCD and GDB; choose distinct values for concurrent sessions. TCL and
-Telnet listeners are disabled. Each run preserves logs in a unique directory
-under `verify/jtag/build/runs/` and terminates only processes it started.
-Missing tools, nonzero client exits and readiness timeouts fail the check.
-The halt test derives expected MISA from the selected RV32 preset.
+`JTAG_PORT` is passed to both simulator and OpenOCD. `GDB_PORT` is passed to OpenOCD and GDB; choose distinct values for concurrent sessions. TCL and Telnet listeners are disabled. Each run preserves logs in a unique directory under `verify/jtag/build/runs/` and terminates only processes it started. Missing tools, nonzero client exits and readiness timeouts fail the check. The halt test derives expected MISA from the selected RV32 preset.
 
 For a manually launched server on a custom port:
 

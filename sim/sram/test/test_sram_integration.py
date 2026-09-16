@@ -47,6 +47,7 @@ SHAPES = [
     ("rapt_openram_1rw_2x128", 2, 128, 8),
     ("rapt_openram_1rw_8x128", 8, 128, 8),
     ("rapt_openram_1rw_16x128", 16, 128, 8),
+    ("rapt_openram_1rw_32x128", 32, 128, 8),
     ("rapt_openram_1rw_64x128", 64, 128, 8),
     ("rapt_openram_1rw_2048x32", 2048, 32, 8),
     ("rapt_openram_1rw_2048x64", 2048, 64, 8),
@@ -199,8 +200,8 @@ def test_stub_lib():
     check(STUB_GEN.is_file(), f"generator exists: {STUB_GEN.name}")
     if not STUB_GEN.is_file():
         return
-    out = HERE / "_tmp_libs"
-    out.mkdir(exist_ok=True)
+    out = Path(os.environ.get("SRAM_TEST_BUILD_DIR", HERE / "_tmp_libs"))
+    out.mkdir(parents=True, exist_ok=True)
     for name, depth, width, ws in SHAPES:
         macro_dir = out / name
         rc = subprocess.run(
@@ -316,6 +317,20 @@ def test_cross_consistency():
         depth = 1 << int(sets.group(1))
         check(f"rapt_openram_1rw_{depth}x32" in expected,
               f"default L1I {depth}x32 word banks have a macro")
+    l1d_geometry = {}
+    for macro in ("RAPT_L1D_LEN", "RAPT_CACHE_LINE_BYTES", "RAPT_CACHE_SRAMLEN"):
+        value = re.search(rf"`define\s+{macro}\s+(\d+)", preset)
+        check(value is not None, f"default {macro} geometry found")
+        if value:
+            l1d_geometry[macro] = int(value.group(1))
+    if len(l1d_geometry) == 3:
+        depth = 1 << l1d_geometry["RAPT_L1D_LEN"]
+        for xlen in (32, 64):
+            line_words = l1d_geometry["RAPT_CACHE_LINE_BYTES"] // (xlen // 8)
+            subarray_words = min(line_words, l1d_geometry["RAPT_CACHE_SRAMLEN"] // xlen)
+            width = subarray_words * xlen
+            check(f"rapt_openram_1rw_{depth}x{width}" in expected,
+                  f"default RV{xlen} L1D {depth}x{width} banks have a macro")
 
 
 # ---------------------------------------------------------------------------

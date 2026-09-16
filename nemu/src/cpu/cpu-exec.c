@@ -46,9 +46,25 @@ uint64_t iringhead = 0;
 extern bool log_enable(void);
 #endif
 
-void device_update();
+void device_update_slow();
+/* Fast path: almost every call is a no-op, so keep the skip counter at the
+ * call site and only enter device_update_slow() once per 65536 instructions. */
+static inline void device_update(void)
+{
+  static uint64_t device_update_skip = 0;
+  if (++device_update_skip < 65536)
+    return;
+  device_update_skip = 0;
+  device_update_slow();
+}
 
 bool wp_check_changed();
+#ifdef CONFIG_WATCHPOINT
+extern bool wp_present;
+#endif
+#ifdef CONFIG_DIFFTEST
+extern bool difftest_ref_loaded;
+#endif
 
 uint64_t get_time();
 
@@ -133,20 +149,21 @@ static int nemu_save_uarch_state(const char *filename)
 
 static void nemu_periodic_save(void)
 {
-  /* Dump status / uarch JSON every 100M guest instructions. The fopen +
-   * multi-fprintf path was a top-5 host hotspot at the prior 1M cadence;
-   * 100M reduces it to noise while still giving periodic checkpoints. */
-  if ((g_nr_guest_inst % 100000000ULL) == 0)
-  {
-    const char *home = getenv("NEMU_HOME");
-    if (!home)
-      return;
-    char path[512];
-    snprintf(path, sizeof(path), "%s/build/nemu-status.log", home);
-    nemu_save_status_to_file(path);
-    snprintf(path, sizeof(path), "%s/build/nemu-uarch_state.json", home);
-    nemu_save_uarch_state(path);
-  }
+  /* Dump status / uarch JSON every 100M guest instructions. A countdown is
+   * used instead of a 64-bit modulo because this runs every instruction. */
+  static uint64_t save_countdown = 100000000ULL;
+  if (--save_countdown != 0)
+    return;
+  save_countdown = 100000000ULL;
+
+  const char *home = getenv("NEMU_HOME");
+  if (!home)
+    return;
+  char path[512];
+  snprintf(path, sizeof(path), "%s/build/nemu-status.log", home);
+  nemu_save_status_to_file(path);
+  snprintf(path, sizeof(path), "%s/build/nemu-uarch_state.json", home);
+  nemu_save_uarch_state(path);
 }
 
 #ifdef CONFIG_ITRACE
@@ -211,9 +228,9 @@ static void trace_and_difftest(Decode *_this, vaddr_t dnpc)
   {
     IFDEF(CONFIG_ITRACE, puts(_this->logbuf));
   }
-  IFDEF(CONFIG_DIFFTEST, difftest_step(_this->pc, dnpc));
+  IFDEF(CONFIG_DIFFTEST, if (difftest_ref_loaded) difftest_step(_this->pc, dnpc));
 #ifdef CONFIG_WATCHPOINT
-  if (wp_check_changed())
+  if (wp_present && wp_check_changed())
   {
     set_nemu_state(NEMU_STOP, cpu.pc, -1);
     printf("wp changed at " FMT_WORD ", pc: " FMT_WORD "\n",
@@ -294,16 +311,20 @@ static void execute(uint64_t n)
   Decode s;
   for (; n > 0; n--)
   {
-    word_t intr = isa_query_intr();
-    if (intr != INTR_EMPTY)
+    word_t intr = INTR_EMPTY;
+    if (riscv_intr_may_pending())
     {
-      // Log("nemu: intr %x at pc = " FMT_WORD, intr, cpu.pc);
-      cpu.pc = isa_raise_intr(intr, cpu.pc);
-      /* ref_difftest_raise_intr is only resolved when a --diff reference
-       * .so is loaded; standalone runs (e.g. linux-boot-nemu32 without
-       * difftest, RISCOF) leave it NULL and would segfault on the first
-       * timer interrupt. Guard the call. */
-      IFDEF(CONFIG_DIFFTEST, if (ref_difftest_raise_intr) ref_difftest_raise_intr(intr));
+      intr = isa_query_intr();
+      if (intr != INTR_EMPTY)
+      {
+        // Log("nemu: intr %x at pc = " FMT_WORD, intr, cpu.pc);
+        cpu.pc = isa_raise_intr(intr, cpu.pc);
+        /* ref_difftest_raise_intr is only resolved when a --diff reference
+         * .so is loaded; standalone runs (e.g. linux-boot-nemu32 without
+         * difftest, RISCOF) leave it NULL and would segfault on the first
+         * timer interrupt. Guard the call. */
+        IFDEF(CONFIG_DIFFTEST, if (ref_difftest_raise_intr) ref_difftest_raise_intr(intr));
+      }
     }
     exec_once(&s, cpu.pc);
 

@@ -23,6 +23,33 @@
 static IOMap maps[NR_MAP] = {};
 static int nr_map = 0;
 
+/* Negative page cache: RAM workloads repeatedly probe addresses that are
+ * not MMIO. Without it every paddr access walks all maps. */
+#define MMIO_MISS_SLOTS 64
+static struct
+{
+  paddr_t page;
+  uint32_t epoch;
+} mmio_miss[MMIO_MISS_SLOTS];
+static uint32_t mmio_epoch = 1;
+
+/* Set when a map overlaps a RAM span; see mmio_overlaps_ram(). */
+static bool mmio_ram_overlap = false;
+
+static bool range_overlaps_ram(paddr_t l, paddr_t r)
+{
+  return (l <= PMEM_RIGHT && r >= PMEM_LEFT)
+      || (l <= (paddr_t)(CONFIG_SDRAM_BASE + CONFIG_SDRAM_SIZE - 1)
+          && r >= (paddr_t)CONFIG_SDRAM_BASE)
+      || (l <= (paddr_t)(CONFIG_SRAM_BASE + CONFIG_SRAM_SIZE - 1)
+          && r >= (paddr_t)CONFIG_SRAM_BASE);
+}
+
+bool mmio_overlaps_ram(void)
+{
+  return mmio_ram_overlap;
+}
+
 static IOMap *fetch_mmio_map(paddr_t addr)
 {
   int mapid = find_mapid_by_addr(maps, nr_map, addr);
@@ -31,6 +58,11 @@ static IOMap *fetch_mmio_map(paddr_t addr)
 
 bool mmio_map_contains(paddr_t addr)
 {
+  const unsigned idx = (unsigned)((addr >> 12) & (MMIO_MISS_SLOTS - 1));
+  if (mmio_miss[idx].epoch == mmio_epoch && mmio_miss[idx].page == (addr >> 12))
+  {
+    return false;
+  }
   /* Single-entry hint: UART polling, CLINT mtime reads, etc. tend to
    * hammer the same MMIO region back-to-back. Caching the last-hit map
    * index turns the common case from O(nr_map) to one compare. */
@@ -47,6 +79,8 @@ bool mmio_map_contains(paddr_t addr)
       return true;
     }
   }
+  mmio_miss[idx].page = addr >> 12;
+  mmio_miss[idx].epoch = mmio_epoch;
   return false;
 }
 
@@ -109,10 +143,15 @@ void add_mmio_map(const char *name, paddr_t addr, void *space, uint32_t len, io_
   }
 
   maps[nr_map] = (IOMap){.name = name, .low = addr, .high = addr + len - 1, .space = space, .callback = callback};
+  if (range_overlaps_ram(left, right))
+  {
+    mmio_ram_overlap = true;
+  }
   Log("Add mmio map '%s' at [" FMT_PADDR ", " FMT_PADDR "]",
       maps[nr_map].name, maps[nr_map].low, maps[nr_map].high);
 
   nr_map++;
+  mmio_epoch++; /* invalidate the negative page cache */
 }
 
 /* bus interface */

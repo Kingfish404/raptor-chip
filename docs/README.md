@@ -1,18 +1,10 @@
 # Raptor — RISC-V Processor Core
 
-[![Benchmark](https://github.com/Kingfish404/raptor-chip/actions/workflows/benchmark.yaml/badge.svg)](https://github.com/Kingfish404/raptor-chip/actions/workflows/benchmark.yaml)
-[![App](https://github.com/Kingfish404/raptor-chip/actions/workflows/app.yaml/badge.svg)](https://github.com/Kingfish404/raptor-chip/actions/workflows/app.yaml)
-[![STA](https://github.com/Kingfish404/raptor-chip/actions/workflows/sta.yaml/badge.svg)](https://github.com/Kingfish404/raptor-chip/actions/workflows/sta.yaml)
+[![Benchmark](https://github.com/Kingfish404/raptor-chip/actions/workflows/benchmark.yaml/badge.svg)](https://github.com/Kingfish404/raptor-chip/actions/workflows/benchmark.yaml) [![App](https://github.com/Kingfish404/raptor-chip/actions/workflows/app.yaml/badge.svg)](https://github.com/Kingfish404/raptor-chip/actions/workflows/app.yaml) [![STA](https://github.com/Kingfish404/raptor-chip/actions/workflows/sta.yaml/badge.svg)](https://github.com/Kingfish404/raptor-chip/actions/workflows/sta.yaml)
 
-Raptor is a parameterized superscalar, out-of-order RISC-V core with register renaming, a
-reorder buffer, reservation stations, branch prediction, and Sv32/Sv39 virtual
-memory support for RV32/RV64. The RTL is written in hand-written SystemVerilog;
-Chisel is used only to generate instruction decoders.
+Raptor is a parameterized superscalar, out-of-order RISC-V core with register renaming, a reorder buffer, reservation stations, branch prediction, and Sv32/Sv39 virtual memory support for RV32/RV64. The RTL is written in hand-written SystemVerilog; Chisel is used only to generate instruction decoders.
 
-The repository also bundles the NEMU software ISS (used as a difftest
-reference), a Verilator-based simulator (NPC), an AbstractMachine runtime,
-Linux kernel build scripts, and FPGA integration (Gowin Tang boards and Xilinx
-KU15P through LiteX).
+The repository also bundles the NEMU software ISS (used as a difftest reference), a Verilator-based simulator (NPC), an AbstractMachine runtime, Linux kernel build scripts, and FPGA integration (Gowin Tang boards and Xilinx KU15P through LiteX).
 
 Repository: <https://github.com/Kingfish404/raptor-chip>
 
@@ -29,7 +21,7 @@ Repository: <https://github.com/Kingfish404/raptor-chip>
 | ROB / RS / IOQ / SQ  | 32 / 8 / 8 / 16                                                                                         |
 | Register state       | 128-entry renamed integer PRF + separate 32 x 64-bit architectural FPR bank                            |
 | BPU                  | TAGE direction predictor + 2-way BTB + 4-entry RSB                                                      |
-| L1I / L1D            | default RV32/RV64: 16 KiB 4-way L1I / 16 KiB 4-way write-through L1D, banked SRAM, 64 B lines             |
+| L1I / L1D            | default RV32/RV64: 8 KiB 4-way L1I / 8 KiB 4-way write-through L1D, banked SRAM, 64 B lines              |
 | L2                   | Optional 16 KiB direct-mapped unified cache; default config disables it as passthrough                  |
 | Bus                  | AXI4, XLEN-bit data/addr, 4-bit ID; up to 8 reads, one single-beat write                                |
 | Debug                | RISC-V Debug Module / JTAG DTM bring-up ports at cluster top                                            |
@@ -39,25 +31,15 @@ See [Microarchitecture](./uarch.md) for the complete pipeline description.
 
 ## Performance (Verilator, RV32EM, bare-metal)
 
-See [PROFILE](./PROFILE.md) and [Performance Iterations](./perf-iterations.md)
-for detailed numbers and the change history.
+See [PROFILE](./PROFILE.md) and [Performance Iterations](./perf-iterations.md) for detailed numbers and the change history.
 
 ## Verification
 
-- Difftest — retired instructions can be compared against NEMU, including the
-  full-core directed/differential RV32/RV64 F/D test suite under `app/tests/fp`.
+- Difftest — retired instructions can be compared against NEMU, including the full-core directed/differential RV32/RV64 F/D test suite under `app/tests/fp`.
 - Architectural tests — `cpu-tests` supplies RV32/RV64 smoke coverage; historical pass counts do not certify the current working tree.
-- [RISCOF](https://github.com/riscv-software-src/riscof) running
-  [riscv-arch-test](https://github.com/riscv-non-isa/riscv-arch-test):
-  classic test entry points compare signatures with Sail for the RTL DUT
-  (`make verify-riscof-classic`) and NEMU (`make verify-riscof-classic-nemu`).
-  The classic profile declares RV32 I/M/A/F/D/C/S/U plus the listed Z
-  extensions. ACT4 has separate RV32GC, RV64GC M-mode and RV64 supervisor
-  configurations; see [verification](../verify/README.md). The riscv-dv target
-  is an RV32 I/M/C, M-mode, Bare smoke configuration.
+- [RISCOF](https://github.com/riscv-software-src/riscof) running [riscv-arch-test](https://github.com/riscv-non-isa/riscv-arch-test): classic test entry points compare signatures with Sail for the RTL DUT (`make verify-riscof-classic`) and NEMU (`make verify-riscof-classic-nemu`). The classic profile declares RV32 I/M/A/F/D/C/S/U plus the listed Z extensions. ACT4 has separate RV32GC, RV64GC M-mode and RV64 supervisor configurations; see [verification](../verify/README.md). The riscv-dv target is an RV32 I/M/C, M-mode, Bare smoke configuration.
 - Benchmarks: CoreMark, MicroBench, Embench-IoT, and RLLMBench/LLM-style fixed-point workloads under NPC/NEMU and selected native/LiteX paths.
-- System software: nanos-lite, riscv-pk, OpenSBI + Linux boot
-  (see [Linux Kernel Boot](./linux_kernel.md)); upstream xv6-riscv and egos-2000 CLI smoke paths are available through `app/tinyos`.
+- System software: nanos-lite, riscv-pk, OpenSBI + Linux boot (see [Linux Kernel Boot](./linux_kernel.md)); upstream xv6-riscv and egos-2000 CLI smoke paths are available through `app/tinyos`.
 
 ## Documentation
 
@@ -97,5 +79,4 @@ raptor-chip/
 ```
 
 
-The project is licensed under the [Apache License 2.0](../LICENSE). Third-party
-components retain their original licenses; see [NOTICE](../NOTICE).
+The project is licensed under the [Apache License 2.0](../LICENSE). Third-party components retain their original licenses; see [NOTICE](../NOTICE).

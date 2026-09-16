@@ -31,6 +31,9 @@ extern word_t g_vaddr;
 
 word_t isa_raise_intr(word_t NO, vaddr_t epc)
 {
+  /* Traps and xRETs rewrite mstatus (MPP/SPP/MIE/...); force the CSR commit
+   * tail so the sstatus/SD/sie views are re-derived this instruction. */
+  cpu.csr_dirty = true;
   if (!(NO & MCA_INTR_BIT)) cpu.instruction_trapped = true;
 #ifdef CONFIG_ETRACE
   printf("ETRACE | NO: %d at epc: " FMT_WORD " trap-handler base address: " FMT_WORD,

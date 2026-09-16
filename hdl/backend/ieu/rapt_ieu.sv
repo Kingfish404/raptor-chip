@@ -33,6 +33,7 @@ module rapt_ieu #(
 
     load_fast_if.sink load_fast,
     input logic integer_system_issue_enable,
+    output logic integer_system_inflight,
     exu_csr_if.master exu_csr,
     output CompletionT wb_integer_raw[NumIntegerPorts],
     output CompletionT wb_branch,
@@ -43,6 +44,16 @@ module rapt_ieu #(
 );
   IssueT iss_branch;
   IssueT alq_issue[NumIntegerPorts];
+  IssueT alq_execute[NumIntegerPorts];
+  logic [NumIntegerPorts-1:0] execute_occupied;
+  assign integer_system_inflight = execute_occupied[IntegerSystemPort];
+  for (genvar p = 0; p < NumIntegerPorts; p++) begin : g_execute_stage
+    rapt_execute_stage #(.IssueT(IssueT), .ROB_SIZE(ROB_SIZE)) stage (
+        .clock, .reset, .flush(cmu_bcast.flush_pipe),
+        .cancel_valid, .cancel_head, .cancel_owner,
+        .selected(alq_issue[p]), .execute(alq_execute[p]), .occupied(execute_occupied[p])
+    );
+  end
   IssueT brq_issue[1];
   logic [NumIntegerPorts-1:0] integer_issue_enable;
   localparam int unsigned IssueCountBits = $clog2(NumIntegerPorts + 1);
@@ -145,7 +156,7 @@ module rapt_ieu #(
           .XLEN    (XLEN)
       ) u_pipe_alu_csr (
           .cmu_bcast (cmu_bcast),
-          .iss       (alq_issue[p]),
+          .iss       (alq_execute[p]),
           .csr_bcast (csr_bcast),
           .exu_csr   (exu_csr),
           .wb_alu_csr(wb_integer_raw[p])
@@ -154,7 +165,7 @@ module rapt_ieu #(
       rapt_ieu_pipe_alu #(
           .XLEN(XLEN)
       ) u_pipe_alu (
-          .iss   (alq_issue[p]),
+          .iss   (alq_execute[p]),
           .wb_alu(wb_integer_raw[p])
       );
     end

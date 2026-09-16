@@ -29,7 +29,8 @@ class RV64NetworkTest(unittest.TestCase):
             self.assertEqual(args["ETH_SPEED"], "1000")
             self.assertEqual(args["FMC_SLOT"], "c")
             self.assertEqual(args["ETH_PORT"], "a")
-            self.assertEqual(args["EXTRA_FLAGS"], "--sdcard-autoboot")
+            self.assertEqual(args["EXTRA_FLAGS"], "")
+            self.assertEqual(args["FPGA_FLAVOR_SUFFIX"], "manualboot")
             self.assertTrue(args["LINUX_ISA"].startswith("rv64imafdc_"))
             self.assertEqual(int(args["LINUX_FPGA_DTB_OFFSET"], 0), 64 * 1024**2)
             self.assertTrue(args["BUILD_DIR"].endswith("/build/rv64-network"))
@@ -77,6 +78,7 @@ class RV64NetworkTest(unittest.TestCase):
                         Builder(soc, output_dir=tmp, compile_software=False).build(run=False)
                     csr = json.loads((Path(tmp) / "csr.json").read_text())
                     self.assertEqual("sdcard_boot_disable" in csr["constants"], not automatic)
+                    self.assertEqual("config_bios_no_boot" in csr["constants"], not automatic)
                     self.assertIn("ethmac", csr["csr_bases"])
                     self.assertEqual(csr["constants"]["cm005_eth_speed"], 100)
 

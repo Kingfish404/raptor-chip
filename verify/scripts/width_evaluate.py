@@ -20,6 +20,12 @@ def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def compact_counts(output, label, fallback):
+    """Read an ordered integer vector; index zero is always included."""
+    rows = re.findall(re.escape(label) + r"\[([0-9 ]+)\]", output)
+    return dict(enumerate(map(int, rows[-1].split()))) if rows else fallback
+
+
 def parse_dispatch(output):
     """Read the final registered admission snapshot and reject inconsistent totals."""
     last_report = output.rfind("======== Rename/Dispatch Status ========")
@@ -27,7 +33,7 @@ def parse_dispatch(output):
         output = output[last_report:]
     totals = re.findall(r"Dispatch accounting: cycles (\d+), width (\d+), accepted (\d+), unfilled (\d+)", output)
     if not totals:
-        if "Dispatch stop " in output:
+        if "Dispatch stop " in output or "Dispatch stops " in output:
             raise ValueError("incomplete dispatch accounting report")
         return None  # Older simulators do not have the new probes.
     cycles, width, accepted, unfilled = map(int, totals[-1])
@@ -39,8 +45,21 @@ def parse_dispatch(output):
         stops[name] = {"cycles": int(count), "unfilled_slots": int(slots)}
         if zero:
             stops[name]["zero_progress_cycles"] = int(zero)
+    compact_stops = re.findall(r"Dispatch stops \(cycles/unfilled_slots/zero_progress_cycles\): ([^\n]+)", output)
+    if compact_stops:
+        stops = {}
+        for token in compact_stops[-1].split():
+            row = re.fullmatch(r"([a-z_]+)=(\d+)/(\d+)/(\d+)", token)
+            if row is None or row[1] in stops:
+                raise ValueError("invalid or duplicate compact dispatch stop")
+            stops[row[1]] = dict(zip(("cycles", "unfilled_slots", "zero_progress_cycles"),
+                                     map(int, row.groups()[1:])))
     histogram = {int(n): int(c) for n, c in re.findall(r"Dispatch histogram (\d+): cycles (\d+)", output)}
+    compact_histogram = re.findall(r"Dispatch histogram: \[([0-9 ]+)\]", output)
+    if compact_histogram:
+        histogram = {n: int(c) for n, c in enumerate(compact_histogram[-1].split())}
     domains = {int(d): int(c) for d, c in re.findall(r"Dispatch endpoint domain (\d+): cycles (\d+)", output)}
+    domains = compact_counts(output, "Dispatch endpoint domains: cycles ", domains)
     checks = [
         sum(r["cycles"] for r in stops.values()) == cycles,
         sum(r["unfilled_slots"] for r in stops.values()) == unfilled,
@@ -63,6 +82,9 @@ def parse_dispatch(output):
 
 def parse_rob_dispatch(output):
     """Parse the ROB-allocation/endpoint-steering decoupling metrics."""
+    start = output.rfind("ROB dispatch steering:")
+    if start >= 0:
+        output = output[start:]
     reports = re.findall(
         r"ROB dispatch steering: candidates (\d+), accepted (\d+), bypass (\d+), "
         r"oldest blocked (\d+), pending avg ([0-9]+(?:\.[0-9]+)?), peak (\d+)", output)
@@ -71,6 +93,7 @@ def parse_rob_dispatch(output):
     candidates, accepted, bypass, blocked, average, peak = reports[-1]
     domains = {int(d): int(c) for d, c in re.findall(
         r"ROB dispatch blocked domain (\d+): cycles (\d+)", output)}
+    domains = compact_counts(output, "ROB dispatch blocked domains: cycles ", domains)
     result = {
         "candidates": int(candidates),
         "accepted": int(accepted),
@@ -81,6 +104,11 @@ def parse_rob_dispatch(output):
         "blocked_domains": domains,
     }
     reason_rows = re.findall(r"ROB branch capacity reason (\d+): cycles (\d+)", output)
+    compact_reasons = compact_counts(output, "ROB branch capacity reasons: cycles ", None)
+    if compact_reasons is not None:
+        reason_rows = [(str(r), str(c)) for r, c in compact_reasons.items()]
+        if len(reason_rows) != 7:
+            raise ValueError("ROB branch capacity reason count mismatch")
     if reason_rows:
         # Select one complete final seven-bin report, never merge partial bins
         # across multiple periodic PMU dumps.
@@ -92,6 +120,13 @@ def parse_rob_dispatch(output):
         result["branch_capacity_reasons"] = reasons
     histogram = {int(n): int(cycles) for n, cycles in re.findall(
         r"ROB dispatch pending histogram (\d+): cycles (\d+)", output)}
+    compact_histogram = re.findall(
+        r"ROB dispatch pending histogram 0\.\.(\d+): \[([0-9 ]+)\]", output)
+    if compact_histogram:
+        last_bin, values = compact_histogram[-1]
+        histogram = {n: int(c) for n, c in enumerate(values.split())}
+        if len(histogram) != int(last_bin) + 1:
+            raise ValueError("ROB dispatch pending histogram bin count mismatch")
     if histogram:
         histogram_cycles = sum(histogram.values())
         histogram_pending = sum(n * cycles for n, cycles in histogram.items())
@@ -108,6 +143,16 @@ def parse_rob_dispatch(output):
                                      "peak": int(peak)}
                        for domain, instruction_cycles, peak in re.findall(
         r"ROB dispatch pending domain (\d+): instruction-cycles (\d+), peak (\d+)", output)}
+    compact_domains = re.findall(
+        r"ROB dispatch pending domains 0\.\.(\d+): instruction-cycles \[([0-9 ]+)\], peak \[([0-9 ]+)\]",
+        output)
+    if compact_domains:
+        last_domain, sums, peaks = compact_domains[-1]
+        sums, peaks = list(map(int, sums.split())), list(map(int, peaks.split()))
+        if len(sums) != int(last_domain) + 1 or len(peaks) != len(sums):
+            raise ValueError("ROB dispatch pending-domain count mismatch")
+        pending_domains = {d: {"instruction_cycles": total, "peak": peak}
+                           for d, (total, peak) in enumerate(zip(sums, peaks))}
     if pending_domains:
         if (not histogram
                 or sum(row["instruction_cycles"] for row in pending_domains.values())
@@ -192,7 +237,12 @@ def parse_alq_selection(output):
     result = {"ready_entry_cycles": ready, "issued": issued, "rebalance_extra": gain}
     histogram = {int(n): int(cycles) for n, cycles in re.findall(
         r"ALQ issue histogram (\d+): cycles (\d+)", tail)}
+    compact_histogram = re.findall(r"ALQ issue histogram: \[([0-9 ]+)\]", tail)
+    if compact_histogram:
+        histogram = {n: int(c) for n, c in enumerate(compact_histogram[-1].split())}
+    histogram = compact_counts(tail, "issue_histogram=", histogram)
     extra = re.search(r"ALQ extra physical ports \(index >= 2\): issues (\d+)", tail)
+    extra = re.search(r"extra_port_issues_ge2=(\d+)", tail) or extra
     if histogram:
         if set(histogram) != set(range(max(histogram) + 1)):
             raise ValueError("incomplete ALQ issue histogram")
@@ -219,6 +269,8 @@ def parse_recovery(output):
     keys = ["allocated", "resolved", "retired", "traps", "killed_unresolved", "killed_correct",
             "killed_wrong", "reset_discarded", "live"]
     result = dict(zip(keys, map(int, lifecycle.groups())))
+    compact_latency = {name: bins for name, bins in re.findall(
+        r"Control latency (\w+): count \d+, cycles \d+, max \d+, histogram \[([0-9 ]+)\]", output)}
     latency = {}
     for name, count, cycles, maximum in re.findall(
             r"Control latency (\w+): count (\d+), cycles (\d+), max (\d+)", output):
@@ -226,6 +278,8 @@ def parse_recovery(output):
             raise ValueError("duplicate control latency")
         hist = {int(b): int(n) for b, n in re.findall(
             rf"Control histogram {name} bucket (\d+): count (\d+)", output)}
+        if name in compact_latency:
+            hist = {n: int(c) for n, c in enumerate(compact_latency[name].split())}
         count, cycles, maximum = int(count), int(cycles), int(maximum)
         lower = [0, 1, 2, 4, 8, 16, 32, 64]
         if (set(hist) != set(range(8)) or sum(hist.values()) != count
@@ -259,6 +313,7 @@ def parse_recovery(output):
     if "Control pending head" in output:
         waiting = {int(d): int(n) for d, n in re.findall(
             r"Control pending head domain (\d+): waiting cycles (\d+)", output)}
+        waiting = compact_counts(output, "waiting_domains=", waiting)
         head = re.search(r"Control pending head: ready cycles (\d+), empty cycles (\d+)", output)
         if head is None or not waiting:
             raise ValueError("missing pending head report")
@@ -352,7 +407,7 @@ def main():
             selection = parse_alq_selection(output)
             if selection is not None:
                 row["alq_selection"] = selection
-            reclaim = re.findall(r"ALQ issue-slot reclaim: allocations (\d+)", output)
+            reclaim = re.findall(r"(?:ALQ issue-slot reclaim: allocations |reclaim_allocations=)(\d+)", output)
             if reclaim:
                 row["alq_reclaim_allocations"] = int(reclaim[-1])
             admission = parse_dispatch(output)

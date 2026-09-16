@@ -32,11 +32,27 @@ module rapt_feu #(
     fpr_if.alu fpr,
     output CompletionT wb_fpu,
     input logic wb_accept,
+    input logic completion_ready = 1'b1,
     output logic issue_enable
 );
   IssueT iss;
   IssueT fp_issue[1];
-  assign iss = fp_issue[0];
+  logic execute_occupied;
+  logic fpq_issue_enable;
+  logic [63:0] fp_operand_a, fp_operand_b, fp_operand_c;
+  rapt_execute_stage #(.IssueT(IssueT), .ROB_SIZE(ROB_SIZE)) execute_stage (
+      .clock, .reset, .flush(cmu_bcast.flush_pipe),
+      .cancel_valid, .cancel_head, .cancel_owner,
+      .selected(fp_issue[0]), .execute(iss), .occupied(execute_occupied)
+  );
+  // FPR addresses come from the selected packet; data and identity cross
+  // the same boundary, before any floating-point arithmetic.
+  always_ff @(posedge clock) if (fp_issue[0].valid) begin
+    fp_operand_a <= fpr.alu_rdata_a;
+    fp_operand_b <= fpr.alu_rdata_b;
+    fp_operand_c <= fpr.alu_rdata_c;
+  end
+  assign fpq_issue_enable = issue_enable && completion_ready;
   logic [$clog2(FPQ_SIZE):0] fpq_occ_unused;
   logic pmu_fpq_full_unused;
 
@@ -65,7 +81,7 @@ module rapt_feu #(
       .disp         (disp_fpq),
 
       .load_fast    (load_fast),
-      .issue_enable (issue_enable),
+      .issue_enable (fpq_issue_enable),
       .issue        (fp_issue),
       .occ_o        (fpq_occ_unused),
       .pmu_iq_full  (pmu_fpq_full_unused)
@@ -171,11 +187,11 @@ module rapt_feu #(
   logic [4:0] fp_pending_frd_q;
 
   assign fp_rd = iss.uop.execute.fp.rd;
-  assign fpr.alu_raddr_a = iss.uop.execute.fp.rs1;
-  assign fpr.alu_raddr_b = iss.uop.execute.fp.rs2;
-  assign fpr.alu_raddr_c = iss.uop.execute.fp.rs3;
-  assign fp_s1 = fpr.alu_rdata_a[31:0];
-  assign fp_d1 = fpr.alu_rdata_a;
+  assign fpr.alu_raddr_a = fp_issue[0].uop.execute.fp.rs1;
+  assign fpr.alu_raddr_b = fp_issue[0].uop.execute.fp.rs2;
+  assign fpr.alu_raddr_c = fp_issue[0].uop.execute.fp.rs3;
+  assign fp_s1 = fp_operand_a[31:0];
+  assign fp_d1 = fp_operand_a;
   assign fp_addsub_s = iss.uop.execute.fp.op == `RAPT_FP_OP_FADD_S
       || iss.uop.execute.fp.op == `RAPT_FP_OP_FSUB_S;
   assign fp_addsub_d = iss.uop.execute.fp.op == `RAPT_FP_OP_FADD_D
@@ -420,7 +436,7 @@ module rapt_feu #(
   end
 
   assign fp_complete  = fp_pending_q && fp_pending_result_valid && !cmu_bcast.flush_pipe;
-  assign issue_enable = !fp_pending_q && (fp_release_q == 0);
+  assign issue_enable = !execute_occupied && !fp_pending_q && (fp_release_q == 0);
 
   rapt_fpu_divsqrt #(
       .XLEN(XLEN)
@@ -428,7 +444,7 @@ module rapt_feu #(
       .clock(clock),
       .reset(reset),
       .operand_a(fp_d1),
-      .operand_b(fpr.alu_rdata_b),
+      .operand_b(fp_operand_b),
       .rounding_mode(fp_rounding_mode),
       .src_is_double(fp_double),
       .dst_is_double(fp_double),
@@ -469,19 +485,19 @@ module rapt_feu #(
 
   rapt_fpu_sgnj u_fpu_sgnj (
       .op(iss.uop.execute.fp.op),
-      .operand_a(fpr.alu_rdata_a),
-      .operand_b(fpr.alu_rdata_b),
+      .operand_a(fp_operand_a),
+      .operand_b(fp_operand_b),
       .result(fp_sgnj_result)
   );
   rapt_fpu_classify u_fpu_classify (
       .is_double(iss.uop.execute.fp.op == `RAPT_FP_OP_FCLASS_D),
-      .operand(fpr.alu_rdata_a),
+      .operand(fp_operand_a),
       .result(fp_classify_result)
   );
   rapt_fpu_compare u_fpu_compare (
       .op(iss.uop.execute.fp.op),
-      .operand_a(fpr.alu_rdata_a),
-      .operand_b(fpr.alu_rdata_b),
+      .operand_a(fp_operand_a),
+      .operand_b(fp_operand_b),
       .result(fp_compare_result),
       .flags(fp_compare_flags)
   );
@@ -491,7 +507,7 @@ module rapt_feu #(
       .flush(cmu_bcast.flush_pipe),
       .valid(fp_convert_widen_launch),
       .ready(fp_convert_widen_ready),
-      .operand(fpr.alu_rdata_a),
+      .operand(fp_operand_a),
       .result(fp_convert_widen_result),
       .flags(fp_convert_widen_flags),
       .result_valid(fp_convert_widen_valid)
@@ -502,7 +518,7 @@ module rapt_feu #(
       .flush(cmu_bcast.flush_pipe),
       .valid(fp_convert_narrow_launch),
       .ready(fp_convert_narrow_ready),
-      .operand(fpr.alu_rdata_a),
+      .operand(fp_operand_a),
       .rounding_mode(fp_rounding_mode),
       .result(fp_convert_narrow_result),
       .flags(fp_convert_narrow_flags),
@@ -514,7 +530,7 @@ module rapt_feu #(
       .flush(cmu_bcast.flush_pipe),
       .valid(fp_half_to_fp_launch),
       .ready(fp_half_to_fp_ready),
-      .operand(fpr.alu_rdata_a),
+      .operand(fp_operand_a),
       .target_double(fp_fcvt_d_h),
       .result(fp_half_to_fp_result),
       .flags(fp_half_to_fp_flags),
@@ -526,7 +542,7 @@ module rapt_feu #(
       .flush(cmu_bcast.flush_pipe),
       .valid(fp_fp_to_half_launch),
       .ready(fp_fp_to_half_ready),
-      .operand(fpr.alu_rdata_a),
+      .operand(fp_operand_a),
       .source_double(fp_fcvt_h_d),
       .rounding_mode(fp_rounding_mode),
       .result(fp_fp_to_half_result),
@@ -606,8 +622,8 @@ module rapt_feu #(
       .valid(fp_addsub_launch && fp_addsub_s),
       .ready(fp_addsub_s_ready),
       .op(iss.uop.execute.fp.op),
-      .operand_a(fpr.alu_rdata_a),
-      .operand_b(fpr.alu_rdata_b),
+      .operand_a(fp_operand_a),
+      .operand_b(fp_operand_b),
       .rounding_mode(fp_rounding_mode),
       .result(fp_addsub_s_result),
       .flags(fp_addsub_s_flags),
@@ -622,8 +638,8 @@ module rapt_feu #(
       .valid(fp_addsub_launch && fp_addsub_d),
       .ready(fp_addsub_d_ready),
       .op(iss.uop.execute.fp.op),
-      .operand_a(fpr.alu_rdata_a),
-      .operand_b(fpr.alu_rdata_b),
+      .operand_a(fp_operand_a),
+      .operand_b(fp_operand_b),
       .rounding_mode(fp_rounding_mode),
       .result(fp_addsub_d_result),
       .flags(fp_addsub_d_flags),
@@ -649,9 +665,9 @@ module rapt_feu #(
       .is_fma(fp_fma_s),
       .ready(fp_mul_s_ready),
       .op(iss.uop.execute.fp.op),
-      .operand_a(fpr.alu_rdata_a),
-      .operand_b(fpr.alu_rdata_b),
-      .operand_c(fpr.alu_rdata_c),
+      .operand_a(fp_operand_a),
+      .operand_b(fp_operand_b),
+      .operand_c(fp_operand_c),
       .rounding_mode(fp_rounding_mode),
       .result(fp_mul_s_result),
       .flags(fp_mul_s_flags),
@@ -667,9 +683,9 @@ module rapt_feu #(
       .is_fma(fp_fma_d),
       .ready(fp_mul_d_ready),
       .op(iss.uop.execute.fp.op),
-      .operand_a(fpr.alu_rdata_a),
-      .operand_b(fpr.alu_rdata_b),
-      .operand_c(fpr.alu_rdata_c),
+      .operand_a(fp_operand_a),
+      .operand_b(fp_operand_b),
+      .operand_c(fp_operand_c),
       .rounding_mode(fp_rounding_mode),
       .result(fp_mul_d_result),
       .flags(fp_mul_d_flags),
@@ -681,7 +697,7 @@ module rapt_feu #(
       .flush(cmu_bcast.flush_pipe),
       .valid(fp_to_int_launch && fp_single_to_int_w),
       .ready(fp_single_to_int_w_ready),
-      .operand(fpr.alu_rdata_a),
+      .operand(fp_operand_a),
       .unsigned_result(iss.uop.execute.fp.op == `RAPT_FP_OP_FCVT_WU_S),
       .int64_target(1'b0),
       .rounding_mode(fp_rounding_mode),
@@ -695,7 +711,7 @@ module rapt_feu #(
       .flush(cmu_bcast.flush_pipe),
       .valid(fp_to_int_launch && fp_single_to_int_l),
       .ready(fp_single_to_int_l_ready),
-      .operand(fpr.alu_rdata_a),
+      .operand(fp_operand_a),
       .unsigned_result(iss.uop.execute.fp.op == `RAPT_FP_OP_FCVT_LU_S),
       .int64_target(1'b1),
       .rounding_mode(fp_rounding_mode),
@@ -709,7 +725,7 @@ module rapt_feu #(
       .flush(cmu_bcast.flush_pipe),
       .valid(fp_to_int_launch && fp_double_to_int_w),
       .ready(fp_double_to_int_w_ready),
-      .operand(fpr.alu_rdata_a),
+      .operand(fp_operand_a),
       .unsigned_result(iss.uop.execute.fp.op == `RAPT_FP_OP_FCVT_WU_D),
       .int64_target(1'b0),
       .rounding_mode(fp_rounding_mode),
@@ -723,7 +739,7 @@ module rapt_feu #(
       .flush(cmu_bcast.flush_pipe),
       .valid(fp_to_int_launch && fp_double_to_int_l),
       .ready(fp_double_to_int_l_ready),
-      .operand(fpr.alu_rdata_a),
+      .operand(fp_operand_a),
       .unsigned_result(iss.uop.execute.fp.op == `RAPT_FP_OP_FCVT_LU_D),
       .int64_target(1'b1),
       .rounding_mode(fp_rounding_mode),
@@ -751,7 +767,7 @@ module rapt_feu #(
         ? (fp_pending_to_gpr_q ? fp_pending_result[XLEN-1:0] : '0)
     : (iss.uop.execute.fp.op == `RAPT_FP_OP_FMV_X_W ? {{(XLEN-32){fp_s1[31]}}, fp_s1}
      : iss.uop.execute.fp.op == `RAPT_FP_OP_FMV_X_D ? fp_d1[XLEN-1:0]
-    : fp_fmv_x_h ? {{(XLEN-16){fpr.alu_rdata_a[15]}}, fpr.alu_rdata_a[15:0]}
+    : fp_fmv_x_h ? {{(XLEN-16){fp_operand_a[15]}}, fp_operand_a[15:0]}
     : fp_compare ? fp_compare_result[XLEN-1:0]
     : fp_classify ? {{(XLEN-10){1'b0}}, fp_classify_result}
     : fp_single_to_int_w ? fp_single_to_int_w_result[XLEN-1:0]

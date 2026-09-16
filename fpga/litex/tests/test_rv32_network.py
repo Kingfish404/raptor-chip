@@ -23,7 +23,7 @@ class RV32NetworkTest(unittest.TestCase):
                 self.assertEqual(args["FMC_SLOT"], "c")
                 self.assertEqual(args["ETH_PORT"], "a")
                 self.assertEqual(args["LINUX_FPGA_INIT"], "full")
-                self.assertEqual(args["EXTRA_FLAGS"], "--sdcard-autoboot")
+                self.assertEqual(args["EXTRA_FLAGS"], "")  # BIOS awaits explicit boot selection.
                 self.assertEqual(args["LINUX_IMG"], args["LINUX_FPGA_PAYLOAD"])
                 self.assertTrue(args["LINUX_ISA"].startswith("rv32imafdc_"))
                 self.assertTrue(args["BUILD_DIR"].endswith("/build/rv32-network"))

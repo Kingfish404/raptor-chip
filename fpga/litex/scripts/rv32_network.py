@@ -10,7 +10,7 @@ import sys
 
 import rv64_network as shared
 
-DEFAULT_PACKAGE = shared.REPO / "linux/build/linux-riscv-rv32-qemu-rv32-buildroot-v6.18.50"
+DEFAULT_PACKAGE = shared.REPO / "linux/build/linux-riscv-rv32-qemu-rv32-buildroot-v6.18.51"
 check_package = partial(shared.check_package, bits=32)
 make_command = partial(shared.make_command, bits=32)
 main = partial(shared.main, bits=32, default_package=DEFAULT_PACKAGE)

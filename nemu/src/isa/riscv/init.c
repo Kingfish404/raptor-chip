@@ -51,6 +51,9 @@ static void restart()
   cpu.priv = PRV_M;
   cpu.raise_intr = INTR_EMPTY;
   cpu.last_inst_priv = PRV_M;
+  cpu.last_csr_wr = 0;
+  cpu.csr_dirty = false;
+  cpu.instruction_trapped = false;
   cpu.reservation = 0;
   cpu.reservation_bytes = 0;
   cpu.mtimecmp = ~(uint64_t)0;

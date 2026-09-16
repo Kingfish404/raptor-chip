@@ -18,9 +18,6 @@ export VERILATOR_ROOT
 VERILATOR = $(VERILATOR_ROOT)/bin/verilator
 endif
 
--include ./include/config/auto.conf
--include ./include/config/auto.conf.cmd
-
 NSIM_HOME = $(abspath .)
 VSRC_PATH ?= $(abspath ../hdl)
 
@@ -39,8 +36,27 @@ $(error RAPT_CONFIG='$(RAPT_CONFIG)' but $(CONFIG_DIR)/rapt_config.svh does not 
 Available: $(notdir $(wildcard $(RAPTOR_HOME)/hdl/configs/*)))
 endif
 
+# Each profile/XLEN owns its Kconfig state, generated headers and run output.
+# No source-tree .config or generated header is read or rewritten.
+SIM_PLATFORM ?= sim
+SIM_PLATFORM := $(strip $(SIM_PLATFORM))
+BUILD_ROOT ?= ./build
+BUILD_PROFILE ?= $(RAPT_CONFIG)$(if $(filter ysyxsoc,$(SIM_PLATFORM)),-ysyxsoc,)
+BUILD_PROFILE := $(strip $(BUILD_PROFILE))
+BUILD_DIR = $(BUILD_ROOT)/$(BUILD_PROFILE)
+ISA_NAME = $(if $(findstring DRAPT_RV64,$(VFLAGS)),riscv64,riscv32)
+SIM_CONFIG_ROOT ?= $(abspath $(BUILD_DIR)/config-$(ISA_NAME))
+SIM_CONFIG_FILE := $(SIM_CONFIG_ROOT)/.config
+SIM_AUTOCONFIG := $(SIM_CONFIG_ROOT)/include/config/auto.conf
+SIM_AUTOHEADER := $(SIM_CONFIG_ROOT)/include/generated/autoconf.h
+NPC_DEFCONFIG ?= o2_difftest_defconfig
+DATA_DIR ?= $(abspath $(BUILD_DIR)/run-$(ISA_NAME)/data)
+RUN_DIR ?= $(abspath $(BUILD_DIR)/run-$(ISA_NAME))
+-include $(SIM_AUTOCONFIG)
+-include $(SIM_AUTOCONFIG).cmd
+
 # Config dir MUST come before hdl/include so its rapt_config.svh wins.
-INC_PATH ?= $(CONFIG_DIR) $(abspath ./include) $(abspath $(VSRC_PATH)/include)
+INC_PATH ?= $(CONFIG_DIR) $(SIM_CONFIG_ROOT)/include $(abspath ./include) $(abspath $(VSRC_PATH)/include)
 
 remove_quote = $(patsubst "%",%,$(1))
 NPROC ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
@@ -54,6 +70,15 @@ VERILATOR_JOBS ?= $(shell awk 'BEGIN { n=$(NPROC); print (n < 4 ? n : 4) }')
 # More, smaller groups retain compile parallelism while bounding each cc1plus
 # process's working set.
 VERILATOR_OUTPUT_GROUPS ?= 16
+# Verilator multi-threaded evaluation.  1 (default) keeps the historical
+# single-threaded model and artifact names.  Verilator partitions the RTL into
+# independent mtasks, so values >1 produce bit-identical results while cutting
+# wall-clock time roughly linearly with the cores actually available.  Keep the
+# count modest (2-4) on shared machines: a count above the free cores
+# oversubscribes the spin-based thread pool and can slow the run down.
+VERILATOR_THREADS ?= 1
+VERILATOR_THREADS := $(strip $(VERILATOR_THREADS))
+VERILATOR_THREADS := $(if $(VERILATOR_THREADS),$(VERILATOR_THREADS),1)
 
 SIM_PLATFORM ?= sim
 SIM_PLATFORM := $(strip $(SIM_PLATFORM))
@@ -87,17 +112,15 @@ endif
 # different simulator configuration (for example, plain RISCOF versus a
 # difftest/coverage build) can select a separate artifact directory without
 # inventing a non-existent hdl/configs preset.
-BUILD_ROOT = ./build
-BUILD_PROFILE ?= $(RAPT_CONFIG)$(if $(filter ysyxsoc,$(SIM_PLATFORM)),-ysyxsoc,)
-BUILD_PROFILE := $(strip $(BUILD_PROFILE))
-BUILD_DIR = $(BUILD_ROOT)/$(BUILD_PROFILE)
-DATA_DIR = ./data
-ISA_NAME = $(if $(findstring DRAPT_RV64,$(VFLAGS)),riscv64,riscv32)
 RAPT_SIM_PROFILE ?= 0## Enable Verilator C profiling instrumentation (1=on, 0=off)
 RAPT_SIM_PROFILE := $(strip $(RAPT_SIM_PROFILE))
 PROFILE_SUFFIX = $(if $(filter 1,$(RAPT_SIM_PROFILE)),-profile,)
-OBJ_DIR = $(BUILD_DIR)/obj_dir$(PROFILE_SUFFIX)-$(ISA_NAME)
-BIN = $(BUILD_DIR)/$(ISA_NAME)-npc-$(if $(filter ysyxsoc,$(SIM_PLATFORM)),soc,sim)$(PROFILE_SUFFIX)
+# Give each thread count its own model/binary so a model built with one mtask
+# schedule is never reused for another.  Threads=1 keeps the historical names.
+THREADS_SUFFIX = $(if $(filter-out 1,$(VERILATOR_THREADS)),-t$(VERILATOR_THREADS),)
+OBJ_DIR = $(BUILD_DIR)/obj_dir$(PROFILE_SUFFIX)-$(ISA_NAME)$(THREADS_SUFFIX)-$(SIM_BUILD_KEY)
+BIN = $(BUILD_DIR)/$(ISA_NAME)-npc-$(if $(filter ysyxsoc,$(SIM_PLATFORM)),soc,sim)$(PROFILE_SUFFIX)$(THREADS_SUFFIX)
+MODEL_BIN = $(OBJ_DIR)/$(notdir $(BIN))
 VERILATOR_PROFILE_FLAGS :=
 ifeq ($(RAPT_SIM_PROFILE),1)
 VERILATOR_PROFILE_FLAGS := --prof-c --prof-cfuncs
@@ -169,51 +192,6 @@ endif
 FILELIST_MK = $(shell find -L ./csrc -name "filelist.mk")
 include $(FILELIST_MK)
 
-$(shell mkdir -p $(BUILD_DIR))
-$(shell mkdir -p $(DATA_DIR))
-
-# Auto-invalidate simulator build when effective simulation RTL flags change
-# (e.g., switching RV32/RV64 or enabling/disabling default assertions). Only do
-# this for Verilator simulator goals; pack/STA use raw VFLAGS and must not mark
-# the simulator binary as having been rebuilt with SIM_VFLAGS.
-SIM_STAMP_GOALS := all run run_log sim print-npc-exec lint
-SIM_STAMP_ACTIVE := $(if $(MAKECMDGOALS),$(filter $(SIM_STAMP_GOALS),$(MAKECMDGOALS)),all)
-SIM_STAMP_QUIET := $(filter print-npc-exec,$(MAKECMDGOALS))
-VFLAGS_STAMP := $(BUILD_DIR)/.vflags_stamp-$(ISA_NAME)
-VERILATOR_EXTRA_STAMP := $(BUILD_DIR)/.verilator_extra_stamp-$(ISA_NAME)
-ifneq ($(SIM_STAMP_ACTIVE),)
-VFLAGS_PREV  := $(shell cat $(VFLAGS_STAMP) 2>/dev/null)
-ifneq ($(SIM_BUILD_SIGNATURE),$(VFLAGS_PREV))
-$(shell rm -rf $(OBJ_DIR) $(BIN) $(VFLAGS_STAMP))
-ifeq ($(SIM_STAMP_QUIET),)
-$(info [sim] RTL build signature changed: '$(VFLAGS_PREV)' -> '$(SIM_BUILD_SIGNATURE)', rebuilding...)
-endif
-endif
-$(shell printf '%s' '$(SIM_BUILD_SIGNATURE)' > $(VFLAGS_STAMP))
-VERILATOR_EXTRA_PREV := $(shell cat $(VERILATOR_EXTRA_STAMP) 2>/dev/null)
-ifneq ($(strip $(VERILATOR_EXTRA_EFFECTIVE)),$(VERILATOR_EXTRA_PREV))
-$(shell rm -rf $(OBJ_DIR) $(BIN) $(VERILATOR_EXTRA_STAMP))
-ifeq ($(SIM_STAMP_QUIET),)
-$(info [sim] Verilator code-generation options changed: '$(VERILATOR_EXTRA_PREV)' -> '$(strip $(VERILATOR_EXTRA_EFFECTIVE))', rebuilding...)
-endif
-endif
-$(shell printf '%s' '$(strip $(VERILATOR_EXTRA_EFFECTIVE))' > $(VERILATOR_EXTRA_STAMP))
-endif
-
-# Auto-invalidate build when Kconfig changes (e.g., switching between o2/o2linux)
-CONFIG_STAMP := $(BUILD_DIR)/.config_stamp
-CONFIG_SIG   := $(shell md5sum .config 2>/dev/null || md5 -q .config 2>/dev/null || echo none)
-CONFIG_PREV  := $(shell cat $(CONFIG_STAMP) 2>/dev/null)
-SKIP_CONFIG_INVALIDATION ?= 0## Reuse an isolated, already-built simulator profile
-ifneq ($(SKIP_CONFIG_INVALIDATION),1)
-ifneq ($(CONFIG_SIG),$(CONFIG_PREV))
-$(shell rm -rf $(BUILD_DIR)/obj_dir* $(BUILD_DIR)/riscv*-npc-* $(CONFIG_STAMP))
-ifeq ($(SIM_STAMP_QUIET),)
-$(info [sim] Config changed, rebuilding...)
-endif
-endif
-$(shell printf '%s' '$(CONFIG_SIG)' > $(CONFIG_STAMP))
-endif
 
 # sim-owned RTL: TB-only top-level wrappers (raptSoC / wrap_rnp_soc /
 # rapt_npc_soc) live under $(NSIM_HOME)/rtl/ so the simulation/test harness
@@ -241,11 +219,11 @@ VSRCS = $(VSRCS_PKG) $(filter-out %/rapt_pkg.sv, $(VSRCS_RAW)) $(SOC_SOURCE)
 VHSRCS = $(shell find $(VSRC_PATH) $(NSIM_RTL_PATH) -name "*.svh")
 CSRCS = $(shell find $(abspath ./csrc) -name "*.c")
 CCSRCS = $(shell find $(abspath ./csrc) -name "*.cc" -or -name "*.cpp")
-CHSRCS = $(shell find $(abspath ./csrc) $(abspath ./include) -name "*.h" -or -name "*.hpp")
+CHSRCS = $(filter-out $(abspath ./include/generated/autoconf.h),$(shell find $(abspath ./csrc) $(abspath ./include) -name "*.h" -or -name "*.hpp")) $(SIM_AUTOHEADER)
 
 MROM_DT_SOURCE := $(if $(DT_SOURCE),$(DT_SOURCE),$(if $(filter 1,$(ISA64)),spike-rv64ima.dts,spike-rv32ima.dts))
 MROM_BUILD_TAG := rv$(if $(filter 1,$(ISA64)),64,32)-$(basename $(notdir $(MROM_DT_SOURCE)))
-MROM_BUILD_DIR := $(NSIM_HOME)/csrc/mem/mrom-data/build/$(MROM_BUILD_TAG)
+MROM_BUILD_DIR := $(abspath $(BUILD_DIR)/mrom/$(MROM_BUILD_TAG))
 MROM_IMG ?= $(MROM_BUILD_DIR)/mrom-data.bin
 MROM_DT_PATH := $(if $(filter /%,$(MROM_DT_SOURCE)),$(MROM_DT_SOURCE),$(RAPTOR_HOME)/linux/dts/$(MROM_DT_SOURCE))
 MROM_INPUTS := $(NSIM_HOME)/csrc/mem/mrom-data/Makefile \
@@ -274,15 +252,32 @@ else
 INC_PATH += $(abspath $(VSRC_PATH)/include/dpic)
 endif
 
-$(BIN): $(VSRCS) $(VHSRCS) $(CCSRCS) $(CHSRCS)
+# Read-only fingerprinting at parse time; changing options selects another
+# object directory instead of deleting an existing build or stale-config stamp.
+_sim_quote = '$(subst ','"'"',$(1))'
+SIM_BUILD_KEY := $(shell python3 $(NSIM_HOME)/scripts/build_cache.py fingerprint \
+    --config $(call _sim_quote,$(SIM_CONFIG_FILE)) \
+    -- \
+    $(call _sim_quote,$(SIM_BUILD_SIGNATURE)) \
+    $(call _sim_quote,$(VERILATOR_FLAG) $(SIM_ASSERT_FLAGS) $(VERILATOR_EXTRA_EFFECTIVE)) \
+    $(call _sim_quote,$(CXXFLAGS) $(LDFLAGS)) $(call _sim_quote,$(VERILATOR_THREADS)))
+
+$(MODEL_BIN): $(VSRCS) $(VHSRCS) $(CCSRCS) $(CHSRCS)
+	@mkdir -p "$(OBJ_DIR)"
 	+$(VERILATOR) --trace-fst -cc --exe --build -j $(VERILATOR_JOBS) $(VERILATOR_FLAG) $(SIM_ASSERT_FLAGS) $(VERILATOR_EXTRA_EFFECTIVE) $(filter-out $(CHSRCS) $(VHSRCS),$^) \
-		--threads 1 \
+		--threads $(VERILATOR_THREADS) \
 		--top-module $(VTARGET) \
 		-MAKEFLAGS "CXX=$(CXX)" \
 		$(addprefix -CFLAGS , $(CXXFLAGS)) $(addprefix -LDFLAGS , $(LDFLAGS)) \
 		$(addprefix -I, $(INC_PATH)) \
 		$(SIM_VFLAGS) \
-		--Mdir $(OBJ_DIR) --exe -o $(abspath $(BIN))
+		--Mdir $(OBJ_DIR) --exe -o $(abspath $(MODEL_BIN))
+
+.PHONY: sim-publish-force
+sim-publish-force:
+
+$(BIN): $(MODEL_BIN) sim-publish-force
+	@python3 "$(NSIM_HOME)/scripts/build_cache.py" publish "$(MODEL_BIN)" "$@"
 
 ifeq ($(ISA64),1)
 NEMU_REF_DEFCONFIG := riscv64_ref_defconfig
@@ -310,20 +305,22 @@ $(NEMU_REF_SO):
 IMG ?= ## Custom image to load
 DISK ?= ## Virtio block disk image to load with --disk
 SDCARD ?= ## LiteX SPI SD-card image to load with --sdcard
-NPC_EXEC := $(BIN) $(ARGS) $(if $(DISK),--disk $(DISK),) $(if $(SDCARD),--sdcard $(SDCARD),) $(DIFF_REF_SO) -r $(MROM_IMG) $(IMG)
+NPC_EXEC = $(abspath $(MODEL_BIN)) $(ARGS) $(if $(DISK),--disk $(abspath $(DISK)),) $(if $(SDCARD),--sdcard $(abspath $(SDCARD)),) $(DIFF_REF_SO) -r $(abspath $(MROM_IMG)) $(if $(IMG),$(abspath $(IMG)))
 
 verilog: ## Generate SystemVerilog from Chisel
 	$(MAKE) -C $(RAPTOR_HOME)/hdl/chisel verilog
 
 run: $(BIN) $(MROM_IMG) $(NEMU_REF_DEP) ## Run NPC simulation
-	$(NPC_EXEC)
+	@mkdir -p "$(RUN_DIR)/data"
+	cd "$(RUN_DIR)" && $(NPC_EXEC)
 
 
 print-npc-exec: $(BIN) $(MROM_IMG) $(NEMU_REF_DEP) ## Print NPC run command (without ARGS/IMG/DISK, for parallel callers)
 	@echo $(abspath $(BIN)) $(DIFF_REF_SO) -r $(abspath $(MROM_IMG))
 
 run_log: $(BIN) $(MROM_IMG) $(NEMU_REF_DEP) ## Run NPC and log output
-	$(NPC_EXEC) 2>&1 | tee $(DATA_DIR)/npc.log
+	@mkdir -p "$(RUN_DIR)/data" "$(DATA_DIR)"
+	cd "$(RUN_DIR)" && $(NPC_EXEC) 2>&1 | tee "$(DATA_DIR)/npc.log"
 
 sim: $(BIN) ## Run NPC binary directly
 	@$^
@@ -441,13 +438,22 @@ pack-synth-check: synth-frontend-check pack ## Check packed RTL with native Slan
 	yosys -Q -T -m slang -l $(BUILD_DIR)/pack-synth-check.log -p \
 		'read_slang --top rapt $(abspath $(BUILD_DIR)/rapt_pack.sv); hierarchy -check -top rapt; select -assert-none t:$$check t:$$assert t:$$assume t:$$cover'
 
-sta-flops: pack-synth-check sta-deps ## STA with behavioral memories expanded to flops
-	echo $(MAKECMDGOALS)
-	make -C $(YOSYS_OPENSTA) sta show \
-		DESIGN=rapt \
-		PLATFORM=$(STA_PLATFORM) \
-		CLK_FREQ_MHZ=$(CLK_FREQ_MHZ) \
-		RTL_FILES="$(abspath $(BUILD_DIR)/rapt_pack.sv)"
+# Keep DFF exports and backend results separate from SRAM and other presets.
+# No sta-deps prerequisite: a timing run must not update shared tools/PDKs.
+STA_DFF_DIR ?= $(abspath $(BUILD_DIR))/sta-dff/$(RAPT_CONFIG)/$(ISA_NAME)/$(STA_PLATFORM)/$(CLK_FREQ_MHZ)MHz
+.PHONY: sta-dff sta-dff-detail sta-dff-check sta-flops sta-dff-rv64
+sta-dff-check: ## Elaborate the DFF-only export without running synthesis/STA
+	$(MAKE) pack-synth-check BUILD_DIR="$(STA_DFF_DIR)/rtl" VFLAGS="$(VFLAGS) -URAPT_USE_SRAM_MACRO"
+
+sta-dff sta-dff-detail: sta-dff-check ## STA with all behavioral memories mapped to DFFs
+	python3 "$(NSIM_HOME)/scripts/sta_dff.py" --backend "$(YOSYS_OPENSTA)" \
+		--work-dir "$(STA_DFF_DIR)/backend" --rtl "$(STA_DFF_DIR)/rtl/rapt_pack.sv" \
+		--platform "$(STA_PLATFORM)" --frequency "$(CLK_FREQ_MHZ)" \
+		$(if $(filter sta-dff-detail,$@),--detail,)
+
+sta-flops: sta-dff ## Compatibility alias for sta-dff
+sta-dff-rv64: VFLAGS := -DRAPT_RV64
+sta-dff-rv64: sta-dff ## DFF-only RV64 STA
 
 sta-detail: pack-synth-check sta-deps ## Detailed static timing analysis
 	make -C $(YOSYS_OPENSTA) sta-detail show \
@@ -585,8 +591,10 @@ help: ## Show this help message
 				printf "  %-20s %s\n", a[1], a[2] } }'
 
 maintainer-copy::
-clean mostlyclean distclean maintainer-clean:: ## Clean build artifacts (all configs)
-	-rm -rf obj_dir *.log *.dmp *.vpd core $(BUILD_ROOT)
+clean mostlyclean distclean maintainer-clean:: ## Explicitly clean only the selected build profile
+	@case "$(abspath $(BUILD_DIR))" in "$(abspath $(BUILD_ROOT))"/*) ;; *) echo "Refusing to clean outside BUILD_ROOT" >&2; exit 1;; esac
+	@test "$(abspath $(BUILD_DIR))" != / && test "$(abspath $(BUILD_DIR))" != "$(NSIM_HOME)" && test "$(abspath $(BUILD_DIR))" != "$(RAPTOR_HOME)" && test "$(abspath $(BUILD_DIR))" != "$(HOME)"
+	rm -rf -- "$(abspath $(BUILD_DIR))"
 
 include ./scripts/config.mk
 

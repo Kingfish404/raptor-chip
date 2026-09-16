@@ -19,7 +19,7 @@ import sys
 
 LITEX = Path(__file__).resolve().parents[1]
 REPO = LITEX.parents[1]
-PACKAGE_NAME = "linux-riscv-rv64-qemu-rv64-fast-buildroot-v6.18.50"
+PACKAGE_NAME = "linux-riscv-rv64-qemu-rv64-fast-buildroot-v6.18.51"
 DEFAULT_PACKAGE = REPO / "linux/build" / PACKAGE_NAME
 ISA = "rv64imafdc_zicbom_zicntr_zicond_zicsr_zifencei_zcb_zba_zbb_zbc_zbs"
 PAYLOAD_OFFSET = 0x100000
@@ -102,12 +102,12 @@ def make_command(action, package, *, bits=64):
             "CROSS=riscv64-linux-gnu-",
             "WITH_LITEDRAM=0", "WITH_SDCARD=1", "WITH_ETHERNET=1",
             "ETH_SPEED=1000", "FMC_SLOT=c", "ETH_PORT=a", "BOOT_MODE=bios",
-            "EXTRA_FLAGS=--sdcard-autoboot", "LINUX_FPGA_INIT=full",
+            "EXTRA_FLAGS=", "LINUX_FPGA_INIT=full",
             # Command-line overrides keep BIOS DTB and image recipes consistent
             # without changing normal simulation/default payloads.
             f"LINUX_ISA={ISA.replace('rv64', f'rv{bits}', 1)}", f"LINUX_IMG={payload}", f"LINUX_FPGA_PAYLOAD={payload}",
             f"LINUX_FPGA_DTB_OFFSET={DTB_OFFSET:#x}", f"LINUX_FPGA_DTB_ADDR={DTB_ADDRESS:#x}",
-            f"BUILD_DIR={LITEX / f'build/rv{bits}-network'}", "FPGA_FLAVOR_SUFFIX=autoboot",
+            f"BUILD_DIR={LITEX / f'build/rv{bits}-network'}", "FPGA_FLAVOR_SUFFIX=manualboot",
             "VIVADO_JOBS=8"]
 
 
@@ -128,7 +128,7 @@ def main(*, bits=64, default_package=DEFAULT_PACKAGE):
             raise ValueError("LiteX venv missing; install separately with make setup")
         print(f"PASS: RV{bits} Buildroot payload {manifest['files']['fw_payload.bin']}")
         print("PASS: LiteEth/FPU, eth0 DHCP, gateway/DNS, image layout and BIOS hook")
-        print(f"Profile: CU08 FMC_C/ETHA (oversampling RX), RV{bits} default, 50 MHz, 1000 Mb/s, SD autoboot")
+        print(f"Profile: CU08 FMC_C/ETHA (oversampling RX), RV{bits} default, 50 MHz, 1000 Mb/s, manual BIOS boot")
         print("Not validated: routed timing, SD contents, PHY link or board Linux networking.")
         if args.action == "check":
             return 0

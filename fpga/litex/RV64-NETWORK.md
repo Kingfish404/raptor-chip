@@ -1,4 +1,4 @@
-# CU08 RV64 automatic Linux/network profile
+# CU08 RV64 Linux/network profile
 
 This opt-in profile prepares RV64 Linux with CM005 FMC_C/ETHA Ethernet. It does
 not change the normal RV32 or tiny-shell RV64 defaults. Hardware acceptance is
@@ -10,7 +10,7 @@ still required: no RV64 routed-timing or board-network PASS is implied.
 - CM005 FMC_C/ETHA (CU08 short edge), fixed 1000 Mb/s full-duplex advertisement.
   This uses the gigabit oversampling receiver and common-source-clock DDR TX; full-SoC timing and board
   traffic validation are required. Confirm the FMC IO supply is 1.8 V.
-- BIOS SD automatic boot via the new optional `--sdcard-autoboot` flag.
+- BIOS stops at `litex>` after initialization. Select `sdcardboot` or `netboot` manually.
 - RV64 **Buildroot** release `linux-riscv-rv64-qemu-rv64-fast-buildroot-v6.18.50`,
   not the tiny-shell image. “fast” describes the kernel preset; this package
   still contains the normal Buildroot `/init` and network services.
@@ -56,7 +56,7 @@ Make level. Image and bitstream outputs are isolated under:
 ```text
 fpga/litex/build/rv64-network/
   firmware/linux-fpga/rv64-mlk_cu08_ku15p-default-<firmware-config-id>/linux-fpga.img
-  mlk_cu08_ku15p/bios-linux64-mig-sdcard-default-cm005-c-a-autoboot-<fpga-config-id>/
+  mlk_cu08_ku15p/bios-linux64-mig-sdcard-default-cm005-c-a-manualboot-<fpga-config-id>/
     gateware/mlk_cu08_ku15p.bit
 ```
 
@@ -72,8 +72,8 @@ after independently confirming its device/mount and obtaining approval to
 replace that file; sync, verify the destination checksum, and unmount before
 insertion. The script never writes an SD card or flash. Do not reuse an RV32
 boot.bin: the BIOS embeds stage0/DTB, **not** the full Linux payload. Loading the
-bitstream then permits BIOS to boot the matching SD image automatically, after
-which Buildroot attempts DHCP. Missing SD/payload/network infrastructure is
+bitstream stops at the BIOS prompt. Enter `sdcardboot` to boot the matching SD
+image, after which Buildroot attempts DHCP. Missing SD/payload/network infrastructure is
 not repaired by loading the bitstream.
 
 ## Acceptance still needed

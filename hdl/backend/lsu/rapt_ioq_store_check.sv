@@ -27,9 +27,15 @@ module rapt_ioq_store_check #(
   // Use the architectural width supplied by the owner: RV32 FSD is eight
   // bytes even though its integer store encoding is SW. CMO passes one byte
   // for its operand permission check; block-zero capability is checked by IOQ.
-  rapt_pmp #(
+  //
+  // Zicbom management is permitted when either an ordinary load or an
+  // ordinary store is permitted. Both predicates share one address, size and
+  // privilege, and rapt_pmp_permissions already derives R-only and W-only
+  // faults from one range-match tree, so a single instance replaces the two
+  // full rapt_pmp CAMs used previously.
+  rapt_pmp_permissions #(
       .XLEN(XLEN)
-  ) u_pmp_store_bare (
+  ) u_pmp_store_cbo (
       .addr          (store_addr),
       .size_m1       (store_size_m1),
       .priv          (ioq_store_eff_priv),
@@ -47,32 +53,9 @@ module rapt_ioq_store_check #(
       .pmp_mode_na4  (pmp_state.pmp_mode_na4),
       .pmp_mode_napot(pmp_state.pmp_mode_napot),
       .fault         (pmp_store_bare_fault),
-      .fault_lo_o    ()
-  );
-  // Zicbom management operations are permitted when either an ordinary load
-  // or an ordinary store is permitted.  Keep the two PMP predicates separate
-  // so a read-only or write-only region is accepted as required.
-  rapt_pmp #(
-      .XLEN(XLEN)
-  ) u_pmp_load_for_cbo (
-      .addr          (store_addr),
-      .size_m1       (store_size_m1),
-      .priv          (ioq_store_eff_priv),
-      .op_r          (1'b1),
-      .op_w          (1'b0),
-      .op_x          (1'b0),
-      .pmp_raw_addr  (pmp_state.pmp_raw_addr),
-      .pmp_napot_mask(pmp_state.pmp_napot_mask),
-      .pmp_cfg_r     (pmp_state.pmp_cfg_r),
-      .pmp_cfg_w     (pmp_state.pmp_cfg_w),
-      .pmp_cfg_x     (pmp_state.pmp_cfg_x),
-      .pmp_cfg_l     (pmp_state.pmp_cfg_l),
-      .pmp_mode_off  (pmp_state.pmp_mode_off),
-      .pmp_mode_tor  (pmp_state.pmp_mode_tor),
-      .pmp_mode_na4  (pmp_state.pmp_mode_na4),
-      .pmp_mode_napot(pmp_state.pmp_mode_napot),
-      .fault         (pmp_load_bare_fault),
-      .fault_lo_o    ()
+      .fault_lo_o    (),
+      .fault_read_o  (pmp_load_bare_fault),
+      .fault_write_o ()
   );
   logic [3:0] pma_fault_offset;
   logic device_alignment_fault;

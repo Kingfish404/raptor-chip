@@ -95,6 +95,10 @@ void clint_update_mip(void)
     cpu.sr[CSR_MIP] |= MIP_MSIP_BIT;
   else
     cpu.sr[CSR_MIP] &= ~MIP_MSIP_BIT;
+
+  // Keep the stored sip view consistent with mip; the per-instruction CSR
+  // commit tail no longer mirrors it unconditionally.
+  cpu.sr[CSR_SIP] = riscv_mip_value() & cpu.sr[CSR_MIDELEG] & (word_t)0x222;
 #endif
 }
 

@@ -142,6 +142,13 @@ module rapt_l1d_tags #(
   );
 
 
+  // Only one set can be updated per cycle. Select its tags before comparing,
+  // rather than broadcasting the incoming tag into one comparator per set.
+  logic [L1D_N_WAYS-1:0] update_tag_match;
+  for (genvar way = 0; way < L1D_N_WAYS; way++) begin : g_update_match
+    assign update_tag_match[way] = l1d_tag[way][l1d_idx] == l1d_tag_u;
+  end
+
   // Each line has one state writer. Clear dominates install/invalidate;
   // installing a different tag clears the other words in the target line.
   for (genvar way = 0; way < L1D_N_WAYS; way++) begin : g_way_state
@@ -152,9 +159,9 @@ module rapt_l1d_tags #(
         end else if (!(|clear_set) && l1d_update && l1d_idx == L1D_LEN'(set_idx)) begin
           if (l1d_valid_u) begin
             if (l1d_way == L1dWayW'(way)) begin
-              if (l1d_tag[way][set_idx] == l1d_tag_u) l1d_valid[way][set_idx][l1d_off] <= 1'b1;
+              if (update_tag_match[way]) l1d_valid[way][set_idx][l1d_off] <= 1'b1;
               else l1d_valid[way][set_idx] <= L1D_LINE_SIZE'(1) << l1d_off;
-            end else if (l1d_tag[way][set_idx] == l1d_tag_u) begin
+            end else if (update_tag_match[way]) begin
               // Scrub the entire duplicate line, including other offsets.
               l1d_valid[way][set_idx] <= '0;
             end

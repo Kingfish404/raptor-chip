@@ -257,21 +257,21 @@ module tb_ioq_atomic_pma;
       reset = 0;
       tick(1);
       dispatch[0]='0;
-      dispatch[0].uop.pc='h80000000;
-      dispatch[0].uop.pnpc='h80000004;
+      dispatch[0].uop.pc=XLEN'('h80000000);
+      dispatch[0].uop.pnpc=XLEN'('h80000004);
       dispatch[0].uop.execute.memory.store=1;
-      dispatch[0].uop.execute.memory.load=!sc;
+      dispatch[0].uop.execute.memory.load=(sc == 0);
       dispatch[0].uop.execute.memory.atomic=1;
-      dispatch[0].uop.execute.int_op.alu=sc ? `RAPT_ATO_SC__ : `RAPT_ATO_ADD_;
+      dispatch[0].uop.execute.int_op.alu=(sc != 0) ? `RAPT_ATO_SC__ : `RAPT_ATO_ADD_;
       dispatch[0].uop.execute.int_op.word=1;
-      dispatch[0].op1=translated ? XLEN'('h40000000) : XLEN'('h02000000);
+      dispatch[0].op1=(translated != 0) ? XLEN'('h40000000) : XLEN'('h02000000);
       dispatch[0].op2=1;
       dispatch[0].dest=3;
       cmu_bcast.rob_head=3;
       disp.accept[0]=1;
       tick(1);
       disp.accept[0] = 0;
-      if (translated) begin
+      if (translated != 0) begin
         repeat (3) begin
           check(!exu_lsu.rvalid, "AMO read before store translation");
           tick(1);
@@ -492,6 +492,11 @@ module tb_ioq_overlap;
       disp.accept[1]=0;
       #1;
       check(dut.ioq_valid[0] && dut.ioq_valid[1], "pair not allocated");
+      check(!dut.ioq_addr_ready[0] && !dut.ioq_addr_ready[1]
+            && !exu_lsu.rvalid, "unprepared address issued");
+      check(dut.ioq_older_memory_blk[1], "unprepared older store must block");
+      tick(1);
+      check(dut.ioq_addr_ready[0] && dut.ioq_addr_ready[1], "address preparation stalled");
       if (dut.ioq_older_memory_blk[1] !== overlaps)
         $fatal(
             1,
@@ -523,8 +528,8 @@ module tb_ioq_pbmt_order;
   `include "tb_ioq_harness.svh"
   task automatic enqueue_load(input int owner, input logic [XLEN-1:0] addr, input bit atomic_lr);
     dispatch[0] = '0;
-    dispatch[0].uop.pc = 'h80000000;
-    dispatch[0].uop.pnpc = 'h80000004;
+    dispatch[0].uop.pc = XLEN'('h80000000);
+    dispatch[0].uop.pnpc = XLEN'('h80000004);
     dispatch[0].uop.execute.memory.load = 1;
     dispatch[0].uop.execute.memory.atomic = atomic_lr;
     dispatch[0].uop.execute.int_op.alu = atomic_lr ? `RAPT_ATO_LR__ : `RAPT_ALU_LW__;
@@ -608,7 +613,7 @@ module tb_ioq_pending_lock;
       dispatch[0].uop.rd = 5'd3;
       dispatch[0].op1 = addr;
       dispatch[0].op2 = data;
-      dispatch[0].prd = 6'd3;
+      dispatch[0].prd = 3;
       dispatch[0].dest = 5'd3;
 
       disp.accept[0] = 1'b1;
@@ -639,7 +644,7 @@ module tb_ioq_pending_lock;
       dispatch[0].op2 = '0;
       dispatch[0].pr1 = '0;
       dispatch[0].pr2 = '0;
-      dispatch[0].prd = prd;
+      dispatch[0].prd = $bits(dispatch[0].prd)'(prd);
       dispatch[0].prs = '0;
       dispatch[0].dest = dest;
 
@@ -736,7 +741,7 @@ module tb_ioq_pending_lock;
           #1;
           check(load_fast.valid, "head integer load did not emit fast wake");
           check(!load_fast.rebusy, "head integer load emitted rebusy on return");
-          check(load_fast.prd == expected_prd, "fast-wake physical destination mismatch");
+          check(load_fast.prd == $bits(load_fast.prd)'(expected_prd), "fast-wake physical destination mismatch");
           tick(1);
           exu_lsu.rready = 1'b0;
           return;
@@ -781,7 +786,7 @@ module tb_ioq_pending_lock;
       complete_fast_load(32'h1234_abcd, 6'd10);
       expect_load_broadcast(32'h1234_abcd, "post-flush reused load");
       check(exu_ioq_bcast.dest == 5'd8, "post-flush reused load broadcast a stale ROB destination");
-      check(exu_ioq_bcast.prd == 6'd10,
+      check(exu_ioq_bcast.prd == 10,
             "post-flush reused load broadcast a stale physical destination");
     end
   endtask
@@ -857,6 +862,9 @@ module tb_ioq_pending_lock;
 `ifdef RAPT_LSU_HUM
     #1;
     check(dut.ioq_valid[1], "second MMU load was not resident in IOQ entry 1");
+    check(!dut.ioq_load_issue_vec[1] && !exu_lsu.rvalid_b,
+          "unprepared MMU load became issue-eligible");
+    tick(1);
     check(dut.ioq_load_issue_vec[1], "second MMU load was not issue-eligible");
     check(!exu_lsu.rvalid_b, "HUM B request bypassed its request register");
     tick(1);
@@ -1343,7 +1351,7 @@ module tb_ioq_store_stage;
     check(exu_ioq_bcast.valid && !exu_ioq_bcast.trap && exu_ioq_bcast.wen,
           "captured store failed to complete");
     check(exu_ioq_bcast.sq_waddr == addr, "store address belongs to another head");
-    check(exu_ioq_bcast.dest == dest && exu_ioq_bcast.generation == generation,
+    check(int'(exu_ioq_bcast.dest) == dest && int'(exu_ioq_bcast.generation) == generation,
           "store completion lost slot/generation identity");
     tick(1);
   endtask
@@ -1455,6 +1463,93 @@ module tb_ioq_zero_pma;
     end
     $display(
         "PASS: CBO.ZERO device denial and last RAM block acceptance, Bare/translated PBMT 0/1/2");
+    $finish;
+  end
+endmodule
+
+
+// Address preparation must not consume stale data on wakeup or slot reuse.
+module tb_ioq_address_stage;
+  localparam int XLEN = `RAPT_XLEN;
+  `include "tb_ioq_harness.svh"
+  task automatic enqueue(input int dependency, input logic [XLEN-1:0] base_addr);
+    dispatch[0] = '0;
+    dispatch[0].uop.execute.memory.load = 1;
+    dispatch[0].uop.execute.int_op.alu = `RAPT_ALU_LW__;
+    dispatch[0].uop.imm = 12;
+    dispatch[0].op1 = base_addr;
+    dispatch[0].pr1 = $bits(dispatch[0].pr1)'(dependency);
+    dispatch[0].dest = 3;
+    cmu_bcast.rob_head = 3;
+    disp.accept[0] = 1;
+    tick(1);
+    disp.accept[0] = 0;
+  endtask
+  task automatic expect_request(input logic [XLEN-1:0] addr);
+    for (int n = 0; n < 8 && !exu_lsu.rvalid; n++) tick(1);
+    check(exu_lsu.rvalid && exu_lsu.raddr == addr, "prepared request address incorrect");
+    repeat (4) begin
+      tick(1);
+      check(exu_lsu.rvalid && exu_lsu.raddr == addr, "request changed under backpressure");
+    end
+  endtask
+  task automatic flush_queue;
+    cmu_bcast.flush_pipe = 1;
+    tick(1);
+    cmu_bcast.flush_pipe = 0;
+    check(dut.ioq_addr_ready == '0 && !exu_lsu.rvalid, "flush retained prepared address");
+  endtask
+  initial begin
+    init_ioq_inputs(0);
+    tick(3);
+    reset = 0;
+    enqueue(7, XLEN'('hdead0000));
+    tick(3);
+    check(dut.ioq_addr_ready == '0 && !exu_lsu.rvalid, "unresolved operand issued");
+    exu_rou.valid = 1;
+    exu_rou.prd = 7;
+    exu_rou.result = XLEN'('h80000040);
+    tick(1);
+    exu_rou.valid = 0;
+    check(dut.ioq_addr_ready == '0, "wakeup bypassed address stage");
+    tick(1);
+    check(dut.ioq_addr_ready[0], "woken operand failed address preparation");
+    expect_request(XLEN'('h8000004c));
+    flush_queue();
+    // Reuse slot zero with a dispatch-time completion and a different base.
+    exu_rou.valid = 1;
+    exu_rou.prd = 9;
+    exu_rou.result = XLEN'('h80000100);
+    enqueue(9, XLEN'('hdead0000));
+    exu_rou.valid = 0;
+    check(!dut.ioq_addr_ready[0], "reallocated slot inherited ready state");
+    expect_request(XLEN'('h8000010c));
+    flush_queue();
+    enqueue(0, XLEN'('h80000200));
+    // Flush on the edge that would prepare the address.
+    flush_queue();
+    tick(4);
+    check(!exu_lsu.rvalid && dut.ioq_addr_ready == '0, "flushed preparation issued");
+    enqueue(0, XLEN'('h80000300));
+    expect_request(XLEN'('h8000030c));
+    flush_queue();
+    // Wrap the queue through normal completion, without reset/flush reuse.
+    for (int n = 0; n <= `RAPT_IOQ_SIZE; n++) begin
+      automatic int owner;
+      owner = int'(dut.ioq_tail_a);
+      enqueue(0, XLEN'('h80000400 + n*16));
+      check(!dut.ioq_addr_ready[owner], "completed slot retained address readiness");
+      expect_request(XLEN'('h8000040c + n*16));
+      exu_lsu.rready = 1;
+      exu_lsu.rdata = XLEN'(n);
+      tick(1);
+      exu_lsu.rready = 0;
+      for (int c = 0; c < 8 && !exu_ioq_bcast.valid; c++) tick(1);
+      check(exu_ioq_bcast.valid && exu_ioq_bcast.result == XLEN'(n), "completion missing");
+      tick(1);
+      check(!dut.ioq_valid[owner] && !dut.ioq_addr_ready[owner], "completion retained address owner");
+    end
+    $display("PASS: IOQ address preparation wakeup, dispatch snoop, flush, reuse and backpressure XLEN=%0d", XLEN);
     $finish;
   end
 endmodule

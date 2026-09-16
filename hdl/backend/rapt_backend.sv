@@ -68,6 +68,7 @@ module rapt_backend #(
   logic pmu_ooo_valid_found_unused;
   logic pmu_ooo_full_unused;
   // RNU stage
+  rnu_rou_if rnu_operand ();
   rnu_rou_if rnu_rou ();  // Re-naming => Issue
   checkpoint_release_if checkpoint_release ();  // accepted correct resolutions
 
@@ -271,6 +272,7 @@ module rapt_backend #(
                     completion_candidate_payload_match[p])
   end
   logic integer_system_issue_enable;
+  logic integer_system_inflight, fpu_completion_ready;
   logic fpu_issue_enable;
 
   exu_prf_if exu_prf ();
@@ -360,12 +362,17 @@ module rapt_backend #(
   );
 
   // ROU (Re-Order Unit)
+  rapt_operand_stage operand_read_stage (
+      .clock, .reset, .flush(cmu_bcast.flush_pipe || recovery.pending),
+      .upstream(rnu_rou), .downstream(rnu_operand)
+  );
+
   rapt_rou rou (
       .completion(completion),
       .completion_owner(completion_owner),
       .clock(clock),
 
-      .rnu_rou(rnu_rou),
+      .rnu_rou(rnu_operand),
       .recovery(recovery),
       .checkpoint_release(checkpoint_release),
 
@@ -500,6 +507,7 @@ module rapt_backend #(
 
       .load_fast(load_fast),
       .integer_system_issue_enable(integer_system_issue_enable),
+      .integer_system_inflight(integer_system_inflight),
       .exu_csr(exu_csr),
       .wb_integer_raw(wb_integer_raw),
       .wb_branch(wb_branch),
@@ -525,10 +533,16 @@ module rapt_backend #(
       .fpr(fpr),
       .wb_fpu(wb_fpu),
       .wb_accept(completion_candidate_accept[CandidateFpu]),
+      .completion_ready(fpu_completion_ready),
       .issue_enable(fpu_issue_enable)
   );
 
   rapt_cdb_arb cdb_arb (
+      .flush(cmu_bcast.flush_pipe),
+      .cancel_valid(recovery.redirect_valid),
+      .cancel_head(recovery.head), .cancel_owner(recovery.owner),
+      .integer_system_inflight(integer_system_inflight),
+      .fpu_completion_ready(fpu_completion_ready),
       .clock(clock),
       .reset(reset),
       .integer_system_pipe_enable(1'b1),
@@ -638,6 +652,6 @@ module rapt_backend #(
   );
 `endif
 
-  assign empty_o = !(|completion_owner.live) && rnu_rou.empty;
+  assign empty_o = !(|completion_owner.live) && rnu_operand.empty;
   assign sq_empty_o = rou_lsu.sq_empty;
 endmodule

@@ -58,6 +58,15 @@ def configure_ku15p_timing(platform, board, with_litedram=False, with_mig=False)
     hold = 0.050 if with_litedram or with_mig else board.bare_hold_uncertainty
     platform.toolchain.pre_optimize_commands.add(
         f"set_clock_uncertainty -hold {hold:.3f} [all_clocks]")
+    # LiteX MultiReg CDC synchronizers are emitted as plain
+    # xilinxmultiregimpl* flop pairs and carry no ASYNC_REG attribute. Mark
+    # them so the placer keeps each synchronizer stage together; each domain
+    # pair also has an explicit asynchronous clock group.
+    platform.add_platform_command(
+        "set raptor_cdc_cells [get_cells -hier -quiet -filter "
+        "{{NAME =~ *xilinxmultiregimpl*}}]; "
+        "if {{[llength $raptor_cdc_cells] > 0}} "
+        "{{set_property ASYNC_REG TRUE $raptor_cdc_cells}}")
     if with_litedram:
         platform.add_platform_command(
             "set_property CLOCK_DELAY_GROUP raptor_ddr_phy_clkgrp "
@@ -527,6 +536,11 @@ class RaptorKU15PSoC(SoCCore):
                     rxclk=clocks.rx)
             platform.add_false_path_constraints(self.crg.cd_sys.clk, self.ethphy.crg.cd_eth_rx.clk)
             platform.add_false_path_constraints(self.crg.cd_cm005_tx.clk, self.ethphy.crg.cd_eth_rx.clk)
+            # LiteEth's TX CDC is an AsyncFIFO (gray-coded pointers) written on
+            # sys_clk and read on the 125 MHz cm005_tx_clk. Without this group
+            # the FIFO's dual-clock LUTRAM path is timed as a synchronous
+            # 4 ns path and becomes the reported SoC WNS.
+            platform.add_false_path_constraints(self.crg.cd_sys.clk, self.crg.cd_cm005_tx.clk)
             # YT8531 datasheet table 95: delayed RX clock guarantees 1 ns
             # setup/hold. Constrain both DDR edges, including 0.2 ns PCB margin.
             # Describe the NEXT transition after each sampling edge. STA then
@@ -632,6 +646,12 @@ class RaptorKU15PSoC(SoCCore):
                 size=litedram_size,
                 l2_cache_size=kwargs.get("l2_size", 8192),
             )
+
+        # BOOT_MODE=bios selects the firmware, not its startup policy. Stop at
+        # litex> by default; CONFIG_BIOS_NO_BOOT skips only main.c's automatic
+        # sequence and leaves the interactive boot commands available.
+        if not sdcard_autoboot:
+            self.add_config("BIOS_NO_BOOT")
 
         if with_sdcard:
             self.add_sdcard(name="sdcard", mode="read+write")

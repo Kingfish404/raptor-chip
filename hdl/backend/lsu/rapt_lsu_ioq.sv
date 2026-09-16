@@ -25,7 +25,8 @@ module rapt_lsu_ioq #(
     parameter unsigned ROB_SIZE = Cfg.rob_entries,
     parameter unsigned PLEN     = rapt_pkg::index_bits(Cfg.phys_regs),
     parameter unsigned RLEN     = rapt_pkg::index_bits(Cfg.arch_regs),
-    parameter unsigned XLEN     = Cfg.xlen
+    parameter unsigned XLEN     = Cfg.xlen,
+    parameter bit RegisterAddresses = 1'b1
 ) (
     input CompletionT completion[NumCompletions],
     input clock,
@@ -177,9 +178,29 @@ module rapt_lsu_ioq #(
 
 
   // === IOQ effective address & older-store blocker ===
-  // ioq_eff_addr is meaningful only for valid entries (all readers gate with
-  // ioq_valid/complete; see older-store blocker and issue vectors below).
+  // Prepared virtual addresses are owned by queue entries. An unprepared
+  // older store blocks loads; both load issue channels require addr_ready.
   logic [XLEN-1:0] ioq_eff_addr[IOQ_SIZE];
+  logic [IOQ_SIZE-1:0] ioq_addr_ready;
+  for (genvar e = 0; e < IOQ_SIZE; e++) begin : g_address
+    if (RegisterAddresses) begin : g_registered
+      // Address generation precedes dependence checking and request selection.
+      // Consume the stored operand only after wakeup has cleared its tag, so
+      // the completion data mux is not chained into this stage's adder.
+      always_ff @(posedge clock) begin
+        if (reset || cmu_bcast.flush_pipe || alloc_slot[e] >= 0
+            || (ioq_valid_found && ioq_head == IOQLen'(e))) begin
+          ioq_addr_ready[e] <= 1'b0;
+        end else if (ioq_valid[e] && !ioq_addr_ready[e] && ioq_pr1[e] == '0) begin
+          ioq_eff_addr[e] <= ioq_atom[e] ? ioq_vj[e] : ioq_vj[e] + ioq_imm[e];
+          ioq_addr_ready[e] <= 1'b1;
+        end
+      end
+    end else begin : g_combinational
+      assign ioq_eff_addr[e] = ioq_atom[e] ? ioq_vj[e] : ioq_vj[e] + ioq_imm[e];
+      assign ioq_addr_ready[e] = ioq_valid[e] && ioq_pr1[e] == '0;
+    end
+  end
   logic [1:0] ioq_span_words[IOQ_SIZE];
   logic [IOQ_SIZE-1:0] ioq_overlap[IOQ_SIZE];
   rapt_ioq_overlap #(
@@ -196,7 +217,6 @@ module rapt_lsu_ioq #(
   always_comb begin
     for (int i = 0; i < IOQ_SIZE; i++) begin
       automatic logic [3:0] size_m1;
-      ioq_eff_addr[i] = ioq_atom[i] ? ioq_vj[i] : ioq_vj[i] + ioq_imm[i];
       size_m1 = (4'd1 << ioq_alu[i][1:0]) - 4'd1;
       if (ioq_wen[i]) begin
         case (ioq_alu[i][4:0])
@@ -233,7 +253,7 @@ module rapt_lsu_ioq #(
         if (ioq_valid[j] && ioq_wen[j] && age_j < age_i) begin
           // Compare all touched words, not just the starting words. Under
           // translation only disjoint page-offset footprints prove non-aliasing.
-          if (|ioq_pr1[j] || ioq_alu[j][4:0] ==
+          if (!ioq_addr_ready[j] || ioq_alu[j][4:0] ==
               `RAPT_CBO_ZERO_WALU
               || (ioq_valid[i] && ioq_overlap[j][i])) begin
             ioq_older_memory_blk[i] = 1'b1;
@@ -258,6 +278,7 @@ module rapt_lsu_ioq #(
   always_comb begin
     for (int i = 0; i < IOQ_SIZE; i++) begin
       ioq_load_issue_vec[i] = ioq_valid[i] && ioq_ren[i]
+          && ioq_addr_ready[i]
           && !ioq_complete[i]
           && (ioq_pr1[i] == 0) && (ioq_pr2[i] == 0)
           && !ioq_atom[i]
@@ -296,6 +317,7 @@ module rapt_lsu_ioq #(
   logic head_data_pma_fault, head_data_pma_fault_hi;
   logic [3:0] store_bare_fault_offset;
   assign head_is_atomic_ready = ioq_valid[ioq_head] && ioq_atom[ioq_head]
+      && ioq_addr_ready[ioq_head]
       && !ioq_complete[ioq_head]
       && head_store_addr_valid_q
       // AMO reads follow a successful write-side translation/PMP check.
@@ -306,14 +328,13 @@ module rapt_lsu_ioq #(
   logic [XLEN-1:0] load_req_sel_addr;
   logic load_req_sel_valid;
   assign load_req_sel_idx = head_is_atomic_ready ? ioq_head : ioq_issue_idx;
-  assign load_req_sel_addr = ioq_atom[load_req_sel_idx]
-      ? ioq_vj[load_req_sel_idx]
-      : ioq_vj[load_req_sel_idx] + ioq_imm[load_req_sel_idx];
+  assign load_req_sel_addr = ioq_eff_addr[load_req_sel_idx];
   assign load_req_sel_valid = (head_is_atomic_ready || ioq_issue_found)
       && (!ioq_needs_ordered[load_req_sel_idx]
           || (load_req_sel_idx == ioq_head && ioq_at_rob_head))
       && (!translated_ordered || (load_req_sel_idx == ioq_head && ioq_at_rob_head))
       && ioq_valid[load_req_sel_idx]
+      && ioq_addr_ready[load_req_sel_idx]
       && ioq_ren[load_req_sel_idx]
       && !ioq_complete[load_req_sel_idx]
       && ioq_pr1[load_req_sel_idx] == 0 && ioq_pr2[load_req_sel_idx] == 0

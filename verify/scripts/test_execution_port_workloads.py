@@ -34,10 +34,7 @@ class OutputValidationTest(unittest.TestCase):
 class MetricsTest(unittest.TestCase):
     REPORT = """#inst: 8, cycle: 6, IPC: 1.333
 ALQ selection: ready-entry cycles 4, issued 8, rebalance extra issues 0
-ALQ issue histogram 0: cycles 1
-ALQ issue histogram 1: cycles 3
-ALQ issue histogram 2: cycles 1
-ALQ issue histogram 3: cycles 1
+ALQ issue histogram: [1 3 1 1]
 ALQ extra physical ports (index >= 2): issues 1
 """
 

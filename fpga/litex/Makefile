@@ -437,6 +437,7 @@ RAPT_CACHE_LINE_BYTES := $(word 3,$(shell grep '^`define RAPT_CACHE_LINE_BYTES '
 
 FW_LINUX_FPGA_SRC    := $(FW_BASE)/linux-fpga
 _FW_LINUX_CONFIG_VARS := FPGA_BOARD VARIANT RAPT_CONFIG RAPT_PACK_VFLAGS SYS_CLK UART_BAUD \
+	LINUX_ISA \
 	LINUX_FPGA_RAM_SIZE LINUX_FPGA_BOOTARGS LINUX_FPGA_MODEL MAIN_RAM_BASE \
 	LINUX_FPGA_PAYLOAD LINUX_FPGA_OPENSBI_PAYLOAD LINUX_FPGA_PAYLOAD_OFFSET \
 	LINUX_FPGA_DTB_OFFSET LINUX_FPGA_OPENSBI_DTB_OFFSET LINUX_FPGA_DTB_ADDR \
@@ -766,8 +767,6 @@ fpga-netboot-rv32-bundle: ## Verify/package matching RV32 firmware into a conten
 fpga-netboot-rv64-bundle: ## Verify/package matching RV64 firmware into a content-addressed bundle
 fpga-netboot-rv32-serve: ## Deploy RV32 bundle; reuse verified TFTP or serve in foreground
 fpga-netboot-rv64-serve: ## Deploy RV64 bundle; reuse verified TFTP or serve in foreground
-fpga-netboot-rv32-run: ## Load current timing-clean RV32 bitstream and netboot to Linux login
-fpga-netboot-rv64-run: ## Load current timing-clean RV64 bitstream and netboot to Linux login
 fpga-netboot-rv32-test: ## Verify running RV32 Linux LAN with bidirectional 1 MiB checksums
 fpga-netboot-rv64-test: ## Verify running RV64 Linux LAN with bidirectional 1 MiB checksums
 fpga-netboot-rv32-console: ## Open fixed-profile RV32 UART console (Ctrl-C exits)

@@ -1,10 +1,9 @@
 `ifndef RAPT_CONFIG_SVH
 `define RAPT_CONFIG_SVH
 //
-// Middle preset: KU15P Linux/MIG hardware-passing configuration.
-// This keeps the useful default-size frontend/ROB/cache footprint while
-// hardening the current FPGA path: single issue, single commit, no L2,
-// and a 4-entry store queue.
+// Middle preset: dual-width frontend/backend with TAGE and no L2.
+// Capacity and scan parameters must not be smaller than the small preset.
+// Changes to this preset require fresh FPGA timing and hardware validation.
 //
 
 // ---------- Architecture (arch) ----------
@@ -30,19 +29,18 @@
 `define RAPT_RSB_SIZE 2
 `define RAPT_BPU_DIRP_TAGE
 
-// Default-size OoO window, validated on KU15P with single issue/commit.
+// Compact OoO window, with queue depths at least as large as small.
 `define RAPT_RIQ_SIZE 2
 `define RAPT_IIQ_SIZE 2
-`define RAPT_ROB_SIZE 2
-// The capacity-minimized profile cannot expose more candidates than ROB slots.
-`define RAPT_STEER_SCAN_ENTRIES 2
+`define RAPT_ROB_SIZE 4
+// Match small's common default without exceeding the ROB capacity.
+`define RAPT_STEER_SCAN_ENTRIES 4
 
-`define RAPT_RS_SIZE 2
-`define RAPT_IOQ_SIZE 2
+`define RAPT_RS_SIZE 4
+`define RAPT_IOQ_SIZE 4
 
-// Unified SQ (Phase A): one queue from execute to drain (committed coloring),
-// replacing the former split STQ(4)+SQ(4); 8 preserves aggregate capacity.
-`define RAPT_SQ_SIZE 2
+// Unified SQ: one queue from execute to drain, matching small's capacity.
+`define RAPT_SQ_SIZE 4
 
 // Authoritative ordered-stage widths and independent cache lookahead.
 `ifndef RAPT_INTEGER_ISSUE_PORTS
@@ -90,15 +88,15 @@
 
 `define RAPT_CACHE_LINE_BYTES 16
 
-// L1I: 64B line * 16 sets * 2-way = 2 KiB.
+// L1I: 16B line * 32 sets * 2-way = 1 KiB.
 `define RAPT_L1I_LINE_LEN $clog2(`RAPT_CACHE_LINE_BYTES / 4)
-`define RAPT_L1I_LEN 3
+`define RAPT_L1I_LEN 5
 `define RAPT_L1I_N_WAYS 2
 `ifndef RAPT_L1I_REFILL_WORDS
 `define RAPT_L1I_REFILL_WORDS 4
 `endif
 
-// L1D: default-size 2-way cache, with RV64 line sizing preserved.
+// L1D: 16B line * 8 sets * 2-way = 256 B, matching small.
 `define RAPT_L1D_LINE_LEN $clog2(`RAPT_CACHE_LINE_BYTES / (`RAPT_XLEN / 8))
 `define RAPT_L1D_LEN 3
 `define RAPT_L1D_N_WAYS 2
@@ -106,7 +104,7 @@
 `define RAPT_ITLB_ENTRIES 8
 `define RAPT_DTLB_ENTRIES 8
 
-// No L2 in the current KU15P passing profile.
+// No L2 in this preset.
 // `define RAPT_L2_EN
 `define RAPT_L2_LINE_LEN $clog2(`RAPT_CACHE_LINE_BYTES / (`RAPT_XLEN / 8))
 `define RAPT_L2_LEN 8

@@ -7,7 +7,7 @@ rv64_cover rv64 cover
 [options]
 check: mode bmc
 cover: mode cover
-depth 1
+depth 12
 
 [engines]
 smtbmc boolector

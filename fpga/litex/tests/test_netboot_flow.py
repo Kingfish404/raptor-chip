@@ -17,6 +17,39 @@ import netboot_flow as flow
 
 
 class NetbootFlowTest(unittest.TestCase):
+    def test_host_restore_does_not_resolve_build_context(self):
+        with tempfile.TemporaryDirectory(prefix='raptor-chip-netboot-', dir='/tmp') as tmp:
+            with patch.object(flow, 'execute') as execute:
+                flow.main(['host-restore', '--xlen', '64', '--root', tmp + '/small',
+                           '--state-root', tmp + '/host', '--'])
+            execute.assert_not_called()
+
+    def test_release_lock_shared_across_build_roots(self):
+        with tempfile.TemporaryDirectory(prefix='raptor-chip-netboot-', dir='/tmp') as tmp:
+            repo = Path(tmp)
+            litex = repo / 'fpga/litex'
+            payload = repo / 'linux/build/linux-riscv-rv64-qemu-rv64-fast-buildroot-v6.18.51/fw_payload.bin'
+            lock_paths = []
+            @contextlib.contextmanager
+            def release_lock(path, wait=False):
+                self.assertTrue(wait)
+                lock_paths.append(path)
+                yield
+            def download(argv):
+                payload.parent.mkdir(parents=True)
+                payload.write_bytes(b'complete release')
+            with patch.object(flow, 'LITEX', litex), patch.object(flow, 'lock', release_lock), \
+                    patch.object(flow, 'execute', side_effect=download) as execute:
+                for config in ('default', 'small'):
+                    item = object.__new__(flow.Flow)
+                    item.root = repo / config
+                    item.args = argparse.Namespace(xlen=64)
+                    item.context = {'payload': str(payload)}
+                    item.ensure_payload()
+            execute.assert_called_once()
+            self.assertEqual(lock_paths[0], lock_paths[1])
+            self.assertEqual(lock_paths[0].parent, repo / 'linux/build')
+
     def test_unique_devices(self):
         self.assertEqual(flow.choose(['b', 'b'], '', 'UART'), 'b')
         self.assertEqual(flow.choose(['a', 'b'], '/explicit', 'UART'), '/explicit')
@@ -33,6 +66,71 @@ class NetbootFlowTest(unittest.TestCase):
                         pass
             with flow.lock(path):
                 pass
+
+    def test_artifact_readers_coexist_but_exclude_build(self):
+        with tempfile.TemporaryDirectory(prefix='raptor-chip-netboot-', dir='/tmp') as tmp:
+            path = Path(tmp) / 'build.lock'
+            with flow.lock(path, shared=True), flow.lock(path, shared=True):
+                with self.assertRaisesRegex(RuntimeError, 'Busy:'):
+                    with flow.lock(path):
+                        pass
+            with flow.lock(path):
+                with self.assertRaisesRegex(RuntimeError, 'Busy:'):
+                    with flow.lock(path, shared=True):
+                        pass
+
+    def test_load_ignores_workflow_and_build_locks(self):
+        with tempfile.TemporaryDirectory(prefix='raptor-chip-netboot-', dir='/tmp') as tmp:
+            item = Mock()
+            item.work = Path(tmp) / 'rv64/netboot'
+            item.state_root = Path(tmp) / 'host'
+            argv = ['load', '--xlen', '64', '--root', tmp, '--']
+            with patch.object(flow, 'Flow', return_value=item):
+                with flow.lock(item.work / 'workflow.lock'):
+                    flow.main(argv)
+                item.run.assert_called_once()
+                item.run.reset_mock()
+                with flow.lock(item.work / 'build.lock'):
+                    flow.main(argv)
+                item.run.assert_called_once()
+
+    def test_manual_network_test_ignores_build_lock(self):
+        with tempfile.TemporaryDirectory(prefix='raptor-chip-netboot-', dir='/tmp') as tmp:
+            item = Mock()
+            item.work = Path(tmp) / 'rv64/netboot'
+            item.state_root = Path(tmp) / 'host'
+            with patch.object(flow, 'Flow', return_value=item), flow.lock(item.work / 'build.lock'):
+                flow.main(['test', '--xlen', '64', '--root', tmp, '--'])
+            item.run.assert_called_once()
+
+    def test_board_operation_excludes_load(self):
+        with tempfile.TemporaryDirectory(prefix='raptor-chip-netboot-', dir='/tmp') as tmp:
+            item = Mock()
+            item.work = Path(tmp) / 'rv64/netboot'
+            item.state_root = Path(tmp) / 'host'
+            with patch.object(flow, 'Flow', return_value=item), flow.lock(item.state_root / 'board.lock'):
+                with self.assertRaisesRegex(RuntimeError, 'board.lock'):
+                    flow.main(['load', '--xlen', '64', '--root', tmp, '--'])
+            item.run.assert_not_called()
+
+    def test_published_load_does_not_parse_current_make_context(self):
+        with tempfile.TemporaryDirectory(prefix='raptor-chip-netboot-', dir='/tmp') as tmp:
+            work = Path(tmp) / 'rv64/netboot'
+            work.mkdir(parents=True)
+            (work / 'ready.json').write_text('{}')
+            with patch.object(flow.Flow, 'make', side_effect=RuntimeError('current build unavailable')) as make, \
+                    patch.object(flow.Flow, 'run') as run:
+                flow.main(['load', '--xlen', '64', '--root', tmp, '--state-root', tmp + '/host', '--'])
+            make.assert_not_called()
+            run.assert_called_once()
+
+    def test_console_does_not_own_artifact_lock(self):
+        with tempfile.TemporaryDirectory(prefix='raptor-chip-netboot-', dir='/tmp') as tmp:
+            item = Mock()
+            item.work = Path(tmp) / 'rv64/netboot'
+            with patch.object(flow, 'Flow', return_value=item), flow.lock(item.work / 'build.lock'):
+                flow.main(['console', '--xlen', '64', '--root', tmp, '--'])
+            item.run.assert_called_once()
 
     def test_atomic_state(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -59,16 +157,124 @@ class NetbootFlowTest(unittest.TestCase):
                 rtl.write_text('module core; wire changed; endmodule')
                 self.assertNotEqual(before, flow.source_identity([]))
 
-    def test_gate_before_load(self):
+    def published_fixture(self, tmp):
         item = object.__new__(flow.Flow)
-        item.args = argparse.Namespace(action='load')
-        item.gate = Mock(side_effect=RuntimeError('timing'))
-        item.make = Mock()
-        item.console = Mock()
-        with self.assertRaisesRegex(RuntimeError, 'timing'):
-            item.run()
-        item.make.assert_not_called()
-        item.console.assert_not_called()
+        item.args = argparse.Namespace(action='load', xlen=64)
+        item.work = Path(tmp) / 'netboot'
+        item.context = {'soc': str(Path(tmp) / 'soc'), 'xlen': '64'}
+        item.make_args = ['VIVADO=vivado']
+        live = Path(item.context['soc']) / 'gateware'
+        live.mkdir(parents=True)
+        (live / 'mlk_cu08_ku15p.bit').write_bytes(b'completed bitstream A')
+        (live / 'mlk_cu08_ku15p_timing.rpt').write_text(
+            'All user specified timing constraints are met\n'
+            '1. checking no_clock (0)\n4. checking unconstrained_internal_endpoints (0)\n')
+        return item, live
+
+    def test_published_load_survives_active_build_and_source_changes(self):
+        with tempfile.TemporaryDirectory(prefix='raptor-chip-netboot-', dir='/tmp') as tmp:
+            item, live = self.published_fixture(tmp)
+            original = item.publish_bitstream('old-source')
+            (live / 'mlk_cu08_ku15p.bit').write_bytes(b'incomplete new build')
+            (live / 'mlk_cu08_ku15p_timing.rpt').write_text('incomplete report')
+            item.idle_output = Mock(side_effect=RuntimeError('active build'))
+            item.gate = Mock(side_effect=RuntimeError('sources changed'))
+            item.console = Mock(side_effect=RuntimeError('UART occupied'))
+            with flow.lock(item.work / 'build.lock'), patch.object(flow, 'execute') as execute, \
+                    patch.object(flow, 'vivado', return_value='/tools/vivado'):
+                item.run()
+            argv = execute.call_args.args[0]
+            self.assertEqual(argv[-2], original / 'mlk_cu08_ku15p.bit')
+            self.assertEqual(argv[-1], 'xcku15p')
+            self.assertEqual(argv[-2].read_bytes(), b'completed bitstream A')
+            item.idle_output.assert_not_called()
+            item.gate.assert_not_called()
+            item.console.assert_not_called()
+
+    def test_failed_publication_keeps_previous_and_success_creates_generation(self):
+        with tempfile.TemporaryDirectory(prefix='raptor-chip-netboot-', dir='/tmp') as tmp:
+            item, live = self.published_fixture(tmp)
+            first = item.publish_bitstream('A')
+            pointer = (item.work / 'ready.json').read_bytes()
+            timing = live / 'mlk_cu08_ku15p_timing.rpt'
+            good = timing.read_text()
+            timing.write_text(good.replace('are met', 'are not met'))
+            with self.assertRaisesRegex(RuntimeError, 'passing final timing'):
+                item.publish_bitstream('failed')
+            self.assertEqual((item.work / 'ready.json').read_bytes(), pointer)
+            timing.write_text(good)
+            (live / 'mlk_cu08_ku15p.bit').write_bytes(b'completed bitstream B')
+            second = item.publish_bitstream('B')
+            self.assertNotEqual(first, second)
+            self.assertEqual((first / 'mlk_cu08_ku15p.bit').read_bytes(), b'completed bitstream A')
+            self.assertEqual(json.loads((item.work / 'ready.json').read_text())['generation'], second.name)
+
+    def test_published_corruption_blocks_programming(self):
+        with tempfile.TemporaryDirectory(prefix='raptor-chip-netboot-', dir='/tmp') as tmp:
+            item, _ = self.published_fixture(tmp)
+            directory = item.publish_bitstream('A')
+            (directory / 'mlk_cu08_ku15p.bit').write_bytes(b'corrupt')
+            with patch.object(flow, 'execute') as execute:
+                with self.assertRaisesRegex(RuntimeError, 'Published artifact changed'):
+                    item.run()
+            execute.assert_not_called()
+
+    def test_changing_output_cannot_replace_published_generation(self):
+        with tempfile.TemporaryDirectory(prefix='raptor-chip-netboot-', dir='/tmp') as tmp:
+            item, live = self.published_fixture(tmp)
+            item.publish_bitstream('A')
+            pointer = (item.work / 'ready.json').read_bytes()
+            copy = flow.shutil.copyfile
+            def changing_copy(src, dst):
+                copy(src, dst)
+                if src.suffix == '.bit':
+                    src.write_bytes(b'concurrent writer')
+            with patch.object(flow.shutil, 'copyfile', side_effect=changing_copy):
+                with self.assertRaisesRegex(RuntimeError, 'outputs changed'):
+                    item.publish_bitstream('B')
+            self.assertEqual((item.work / 'ready.json').read_bytes(), pointer)
+
+    def test_failed_rebuild_retains_loadable_generation(self):
+        with tempfile.TemporaryDirectory(prefix='raptor-chip-netboot-', dir='/tmp') as tmp:
+            item, live = self.published_fixture(tmp)
+            original = item.publish_bitstream('A')
+            item.args.action = 'build'
+            item.idle_output = Mock()
+            item.ensure_payload = Mock()
+            def failed_build(target):
+                (live / 'mlk_cu08_ku15p.bit').write_bytes(b'failed output')
+                raise RuntimeError('route failed')
+            item.make = Mock(side_effect=failed_build)
+            with patch.object(flow, 'source_identity', return_value='B'):
+                with self.assertRaisesRegex(RuntimeError, 'route failed'):
+                    item.run()
+            self.assertEqual(json.loads((item.work / 'ready.json').read_text())['generation'], original.name)
+            self.assertEqual((original / 'mlk_cu08_ku15p.bit').read_bytes(), b'completed bitstream A')
+
+    def test_first_migration_refuses_active_writer(self):
+        with tempfile.TemporaryDirectory(prefix='raptor-chip-netboot-', dir='/tmp') as tmp:
+            item, _ = self.published_fixture(tmp)
+            with flow.lock(item.work / 'build.lock'), patch.object(flow, 'execute') as execute:
+                with self.assertRaisesRegex(RuntimeError, 'build.lock'):
+                    item.run()
+            execute.assert_not_called()
+
+    def test_legacy_completed_output_migrates_without_current_source_gate(self):
+        with tempfile.TemporaryDirectory(prefix='raptor-chip-netboot-', dir='/tmp') as tmp:
+            item, live = self.published_fixture(tmp)
+            item.idle_output = Mock()
+            (live.parent / '.bitstream_stamp').write_text('legacy-build-hash')
+            item.preserve_existing_bitstream()
+            self.assertTrue((item.work / 'ready.json').is_file())
+            item.idle_output.assert_called_once()
+
+    def test_legacy_incomplete_output_is_not_published(self):
+        with tempfile.TemporaryDirectory(prefix='raptor-chip-netboot-', dir='/tmp') as tmp:
+            item, _ = self.published_fixture(tmp)
+            item.idle_output = Mock()
+            with self.assertRaisesRegex(RuntimeError, 'completed legacy build stamp'):
+                item.preserve_existing_bitstream()
+            self.assertFalse((item.work / 'ready.json').exists())
 
     def test_failed_build_never_packages(self):
         item = object.__new__(flow.Flow)
@@ -76,6 +282,7 @@ class NetbootFlowTest(unittest.TestCase):
         item.make = Mock(side_effect=RuntimeError('route failed'))
         item.idle_output = Mock()
         item.ensure_payload = Mock()
+        item.preserve_existing_bitstream = Mock()
         item.make_args = []
         item.gate = Mock()
         item.prepare_bundle = Mock()
@@ -146,7 +353,7 @@ class NetbootFlowTest(unittest.TestCase):
         port = Mock()
         observer = flow.DropTrace(port)
         self.assertNotEqual(observer.instance, flow.DropTrace(port).instance)
-        port.command.side_effect = [None, RuntimeError('mount failed'), None]
+        port.command.side_effect = ['\nRAPT_TRACE_AVAILABLE\n', None, RuntimeError('mount failed'), None]
         with self.assertRaisesRegex(RuntimeError, 'mount failed'):
             with observer:
                 observer.start()
@@ -174,7 +381,7 @@ class NetbootFlowTest(unittest.TestCase):
     def test_host_restore_preserves_original_addresses(self):
         with tempfile.TemporaryDirectory() as tmp:
             item = object.__new__(flow.Flow)
-            item.root = Path(tmp)
+            item.root = item.state_root = Path(tmp)
             item.args = argparse.Namespace(interface='')
             item.interface = Mock(return_value=('board', {'address': 'aa', 'addr_info': [
                 {'local': '192.168.1.100', 'prefixlen': 24}, {'local': '192.168.50.1', 'prefixlen': 24}]}))
@@ -189,7 +396,7 @@ class NetbootFlowTest(unittest.TestCase):
     def test_host_restore_identity_mismatch_is_nonmutating(self):
         with tempfile.TemporaryDirectory() as tmp:
             item = object.__new__(flow.Flow)
-            item.root = Path(tmp)
+            item.root = item.state_root = Path(tmp)
             item.args = argparse.Namespace(interface='')
             item.interface = Mock(return_value=('board', {'address': 'bb'}))
             flow.save(item.root / 'host-state.json', {'interface': 'board', 'mac': 'aa'})
@@ -200,7 +407,7 @@ class NetbootFlowTest(unittest.TestCase):
     def test_host_setup_journals_before_mutation_and_reuses_dhcp(self):
         with tempfile.TemporaryDirectory() as tmp:
             item = object.__new__(flow.Flow)
-            item.root = Path(tmp)
+            item.root = item.state_root = Path(tmp)
             item.args = argparse.Namespace(interface='board', server_ip='192.168.1.100', host_ip='192.168.50.1')
             current = {'address': 'aa', 'flags': ['UP'], 'addr_info': []}
             item.interface = Mock(return_value=('board', current))
@@ -402,9 +609,13 @@ class NetbootFlowTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / 'fingerprint'
             root.mkdir()
+            (root / 'bundle.json').write_text('{}')
             (root / 'boot.json').write_text(json.dumps({'stage0.bin': '0x80000000', 'addr': '0x80000000'}))
-            with patch.object(flow.netboot, 'verify_bundle', return_value={}):
+            with patch.object(flow.netboot, 'verify_bundle', return_value={'xlen': 64}):
                 relative, raw, _ = item.deployment(root)
+            with patch.object(flow.netboot, 'verify_bundle', return_value={'xlen': 32}):
+                with self.assertRaisesRegex(RuntimeError, 'XLEN'):
+                    item.deployment(root)
             self.assertEqual(str(relative), 'raptor-netboot/rv64/fingerprint')
             self.assertEqual(json.loads(raw), {'raptor-netboot/rv64/fingerprint/stage0.bin': '0x80000000', 'addr': '0x80000000'})
 

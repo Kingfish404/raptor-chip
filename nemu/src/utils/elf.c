@@ -38,6 +38,9 @@ typedef struct Ftrace
 Ftrace ftracebuf[MAX_FTRACE_SIZE];
 int ftracehead = 0;
 int ftracedepth = 0;
+/* Hot-path gate: the per-instruction ftrace bookkeeping is pointless until
+ * an ELF is supplied for symbol resolution or call/return display. */
+bool ftrace_enabled = false;
 int ftracedepth_max = 0;
 char elfbuf[MAX_ELF_SIZE];
 
@@ -63,6 +66,7 @@ void isa_parser_elf(char *filename)
   ret = fread(elfbuf, size, 1, fp);
   assert(ret == 1);
   fclose(fp);
+  ftrace_enabled = true;
 
   printf("e_ident: ");
   for (size_t i = 0; i < SELFMAG; i++)

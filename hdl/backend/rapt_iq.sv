@@ -251,7 +251,7 @@ module rapt_iq #(
   end
 
   int alloc_slot[IQ_SIZE];
-  logic [IQ_SIZE-1:0] claimed, baseline_claimed, select_valid;
+  logic [IQ_SIZE-1:0] claimed, baseline_claimed, select_valid, select_valid_nc;
   always_comb begin
     automatic logic [IQ_SIZE-1:0] remaining;
     automatic logic [IQ_SIZE-1:0] reclaimed;
@@ -311,14 +311,21 @@ module rapt_iq #(
   for (genvar e = 0; e < IQ_SIZE; e++) begin : g_port_mask
     assign port_mask[e] = NumIssuePorts'(iq_uop[e].schedule.issue_ports);
   end
-  assign select_valid = iq_valid & ~cancelled & {IQ_SIZE{!reset && !cmu_bcast.flush_pipe}};
+  // The selector sees architectural validity only: the recovery transaction
+  // must not fan into the wide payload mux through the selected identity.
+  // Cancellation is applied by the one-bit issue-valid gate below, so an
+  // entry younger than the redirect owner is suppressed for the event cycle
+  // and cleared at the edge instead of steering the payload. select_valid
+  // keeps the cancel-aware view used by the PMU/capacity observations.
+  assign select_valid_nc = iq_valid & {IQ_SIZE{!reset && !cmu_bcast.flush_pipe}};
+  assign select_valid = select_valid_nc & ~cancelled;
   rapt_issue_select #(
       .Entries(IQ_SIZE),
       .Ports(NumIssuePorts),
       .InOrder(IN_ORDER_ISSUE),
       .Rebalance(RebalancePorts)
   ) selector (
-      .valid(select_valid),
+      .valid(select_valid_nc),
       .ready(pr_ready),
       .older(age_mat),
       .compatible(port_mask),
@@ -360,8 +367,11 @@ module rapt_iq #(
   end
   always_ff @(posedge clock) begin
     pmu_select_ready <= 32'($countones(select_valid & pr_ready));
-    pmu_select_issued <= 32'($countones(claimed));
-    pmu_select_gain <= 32'($countones(claimed) - $countones(baseline_claimed));
+    // Selected-but-cancelled entries are suppressed by the issue valid
+    // gate, so they do not count as issued.
+    pmu_select_issued <= 32'($countones(claimed & ~cancelled));
+    pmu_select_gain <= 32'($countones(claimed & ~cancelled) - $countones(
+        baseline_claimed & ~cancelled));
     pmu_reclaim_allocations <= reset || cmu_bcast.flush_pipe ? 0 : reclaim_allocations;
   end
   // Keep stored payload selection separate from fast-confirm bypass. The
@@ -379,16 +389,18 @@ module rapt_iq #(
     logic [StoredPayloadBits-1:0] payload;
     logic [XLEN-1:0] stored_op1, stored_op2;
     if (IN_ORDER_ISSUE && NumIssuePorts == 1) begin : g_ordered_head_data
-      // A single ordered port can only issue the oldest surviving resident.
-      // Preselect its payload independently of wakeup/port readiness. Otherwise
-      // a late load confirmation selects the entire uop, including FPR read
-      // addresses, before the floating-point first-stage arithmetic can start.
-      // Validity still comes from the unchanged issue selector. Idle data is
-      // the waiting head (or slot zero when empty), never an accepted transfer.
+      // A single ordered port can only issue the oldest resident. The
+      // payload view below is deliberately independent of readiness, port
+      // enable and the recovery transaction: cancellation is applied at the
+      // issue-valid gate, so a cancelled head can steer the mux for at most
+      // the event cycle without ever being issued. Because the redirect is
+      // oldest-wins, a cancelled head implies every younger resident is also
+      // cancelled; suppressing the cycle therefore loses no legal issue.
+      // Validity still comes from the unchanged issue selector.
       // Reset/flush suppress transfers, not this unqualified data view. Their
       // combinational fanout must not select FPR addresses ahead of arithmetic.
       logic [IQ_SIZE-1:0] head, resident;
-      assign resident = iq_valid & ~cancelled;
+      assign resident = iq_valid;
       for (genvar e = 0; e < IQ_SIZE; e++) begin : g_head
         logic [IQ_SIZE-1:0] predecessors;
         for (genvar o = 0; o < IQ_SIZE; o++) begin : g_predecessor
@@ -413,7 +425,9 @@ module rapt_iq #(
     end
     assign {issue[p].uop, stored_op1, stored_op2, issue[p].dest,
         issue[p].generation, issue[p].prd} = payload;
-    assign issue[p].valid = |selected[p];
+    // Cancellation gates only this valid bit; the selected identity and
+    // payload above do not depend on the recovery transaction.
+    assign issue[p].valid = |selected[p] && !cancelled[index];
     assign issue[p].op1 = pr1_fast_confirm[index] ? fast_confirm_value(
         iq_pr1[index], iq_pr1_fast_dest[index], iq_pr1_fast_generation[index]
     ) : stored_op1;
@@ -599,4 +613,33 @@ module rapt_iq #(
 
   // HANDSHAKE: the router must never allocate into an occupied slot.
 
+endmodule
+
+
+// One-cycle execution boundary. The queue has transferred ownership on
+// capture; selective recovery must also kill a resident execution packet.
+module rapt_execute_stage #(
+    parameter type IssueT = rapt_pkg::issue_packet_t,
+    parameter int ROB_SIZE = rapt_pkg::CoreConfig.rob_entries
+) (
+    input logic clock, reset, flush,
+    input logic cancel_valid,
+    input logic [$clog2(ROB_SIZE)-1:0] cancel_head, cancel_owner,
+    input IssueT selected,
+    output IssueT execute,
+    output logic occupied
+);
+  IssueT packet_q;
+  logic younger;
+  assign younger = ((packet_q.dest < cancel_head) == (cancel_owner < cancel_head))
+      ? packet_q.dest > cancel_owner : packet_q.dest < cancel_head;
+  assign occupied = packet_q.valid;
+  always_comb begin
+    execute = packet_q;
+    execute.valid = packet_q.valid && !reset && !flush && !(cancel_valid && younger);
+  end
+  always_ff @(posedge clock) begin
+    packet_q <= selected;
+    if (reset || flush) packet_q.valid <= 1'b0;
+  end
 endmodule

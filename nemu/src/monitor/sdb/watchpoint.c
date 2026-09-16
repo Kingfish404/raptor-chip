@@ -33,6 +33,9 @@ typedef struct watchpoint
 
 static WP wp_pool[NR_WP] = {};
 static WP *head = NULL, *free_ = NULL;
+/* Exported to cpu-exec so the per-instruction wp_check_changed() call is
+ * skipped entirely when no watchpoint is set. */
+bool wp_present = false;
 
 void init_wp_pool()
 {
@@ -47,6 +50,7 @@ void init_wp_pool()
 
   head = NULL;
   free_ = wp_pool;
+  wp_present = false;
 }
 
 WP *new_wp()
@@ -61,6 +65,7 @@ WP *new_wp()
     head->prev_alloc = p;
   }
   head = p;
+  wp_present = true;
   return p;
 }
 
@@ -79,6 +84,7 @@ void free_wp(WP *wp)
   wp->next_alloc = NULL;
   wp->alloc = false;
   free_ = wp;
+  wp_present = (head != NULL);
 }
 
 void wp_add(const char *e, bool *success)

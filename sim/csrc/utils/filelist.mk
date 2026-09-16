@@ -11,7 +11,8 @@ endif
 
 LIBCAPSTONE = $(RAPTOR_HOME)/nemu/tools/capstone/repo/libcapstone.$(suffix)
 CXXFLAGS += -I $(RAPTOR_HOME)/nemu/tools/capstone/repo/include
-$(RAPTOR_HOME)/sim/csrc/utils/disasm.cc: $(LIBCAPSTONE)
+CXXFLAGS += -DRAPT_CAPSTONE_PATH=$(LIBCAPSTONE)
+$(NSIM_HOME)/csrc/utils/disasm.cc: $(LIBCAPSTONE)
 $(LIBCAPSTONE):
 	$(MAKE) -C $(RAPTOR_HOME)/nemu/tools/capstone
 endif

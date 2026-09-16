@@ -142,13 +142,13 @@ recovery transaction cancel resident instructions and same-cycle acceptance.
 
 #### BPU (`rapt_bpu.sv`)
 
-| Component                   | Implementation                                                 | Key details                                           |
-| --------------------------- | -------------------------------------------------------------- | ----------------------------------------------------- |
-| **DIRP**                    | Default TAGE; alternatives: gshare, bimodal/PHT, static        | Selected by `RAPT_BPU_DIRP_*` macros                  |
-| **PHT** (`rapt_bpu_pht.sv`) | 2-bit saturating, `PHT_SIZE` entries (256)                     | Used by bimodal/PHT mode and as local predictor base  |
-| **BTB** (`rapt_bpu_btb.sv`) | 2-way SA, `BTB_SIZE` entries (128), 7-bit tag                  | `(* keep_hierarchy *)`, sync read, XOR-hash, LRU      |
-| **History** (`rapt_predict_history.sv`) | 64-bit GHR plus 8-bit PHR at fetch, decode and commit boundaries | Accepted conditional events; post-decode/post-commit repair |
-| **RAS** (`rapt_ras.sv`)      | `RSB_SIZE` entries per image (4)                               | Independent committed/speculative data, bounded count, decode-order actions |
+| Component                               | Implementation                                                   | Key details                                                                 |
+| --------------------------------------- | ---------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| **DIRP**                                | Default TAGE; alternatives: gshare, bimodal/PHT, static          | Selected by `RAPT_BPU_DIRP_*` macros                                        |
+| **PHT** (`rapt_bpu_pht.sv`)             | 2-bit saturating, `PHT_SIZE` entries (256)                       | Used by bimodal/PHT mode and as local predictor base                        |
+| **BTB** (`rapt_bpu_btb.sv`)             | 2-way SA, `BTB_SIZE` entries (128), 7-bit tag                    | `(* keep_hierarchy *)`, sync read, XOR-hash, LRU                            |
+| **History** (`rapt_predict_history.sv`) | 64-bit GHR plus 8-bit PHR at fetch, decode and commit boundaries | Accepted conditional events; post-decode/post-commit repair                 |
+| **RAS** (`rapt_ras.sv`)                 | `RSB_SIZE` entries per image (4)                                 | Independent committed/speculative data, bounded count, decode-order actions |
 
 BTB entry types: `COND`, `DIRE`, `INDR`, `RETU`. Direction predictor state is trained from committed branch outcomes; BTB updates occur on flushes (including JALR). Predictor structures are invalidated or repaired on `fence_time` / flush paths as appropriate.
 
@@ -173,7 +173,7 @@ Local proof, cost and regression notes are in
 
 #### L1I (`rapt_l1i.sv`)
 
-N-way set-associative I-cache (`L1I_N_WAYS`, default 4). `2^L1I_LEN` sets (64), `2^L1I_LINE_LEN` words/line (16 RV32 words = 64 B). Default capacity is 16 KiB. 7-state FSM (`IDLE`, `PTWAIT`, `TRAP`, `RD_A`, `RD_0`, `RD_1`, `FINA`).
+N-way set-associative I-cache (`L1I_N_WAYS`, default 4). `2^L1I_LEN` sets (32), `2^L1I_LINE_LEN` words/line (16 RV32 words = 64 B). Default capacity is 8 KiB. 7-state FSM (`IDLE`, `PTWAIT`, `TRAP`, `RD_A`, `RD_0`, `RD_1`, `FINA`).
 
 | Storage | Implementation                                                                       |
 | ------- | ------------------------------------------------------------------------------------ |
@@ -406,14 +406,14 @@ remain separate microarchitecture projects, now rooted at their owning module:
 
 #### L1D (`rapt_l1d.sv`)
 
-4-way set-associative. `2^L1D_LEN` sets (64), `2^L1D_LINE_LEN` words/line (16 RV32 words or 8 RV64 words = 64 B). Default capacity is 16 KiB. 6-state FSM (`IDLE`, `PTWAIT`, `TRAP`, `LD_CHECK`, `LD_A`, `LD_D`).
+4-way set-associative. `2^L1D_LEN` sets (32), `2^L1D_LINE_LEN` words/line (16 RV32 words or 8 RV64 words = 64 B). Default capacity is 8 KiB. 6-state FSM (`IDLE`, `PTWAIT`, `TRAP`, `LD_CHECK`, `LD_A`, `LD_D`).
 
-| Storage   | Implementation                                                                      |
-| --------- | ----------------------------------------------------------------------------------- |
-| Data      | Banked `rapt_sram_1rw` wide subarrays (single-port, sync read, write bypass)        |
+| Storage   | Implementation                                                                                    |
+| --------- | ------------------------------------------------------------------------------------------------- |
+| Data      | Banked `rapt_sram_1rw` wide subarrays (single-port, sync read, write bypass)                      |
 | Tag/Valid | Per-line tags and per-word valid register arrays for simultaneous ld/st checks + set invalidation |
 
-Each default L1 has 64 sets × 64 B × 4 ways = 16 KiB, with tree-PLRU replacement. The 4 KiB per-way span keeps every index bit within the page offset for both Sv32 and Sv39.
+Each default L1 has 32 sets × 64 B × 4 ways = 8 KiB, with tree-PLRU replacement. The 2 KiB per-way span keeps every index bit within the page offset for both Sv32 and Sv39.
 
 Cacheable main-memory misses issue one aligned full-line INCR read. The demanded word returns as its beat arrives; the accepted transaction retains ownership through RLAST, including after flush or an error. Good beats populate per-word valid state. A demand error faults after the burst drains; errors on other beats leave those words invalid. Refill is restricted to one translated page, a supported RAM range and a uniform PMP region. PMP boundaries, PBMT NC/IO and narrow ROM/SRAM/device paths retain word accesses; no-allocation metadata also prevents optional L2 from widening these requests or PTW reads. Ordinary stores wait while the full-line refill drains.
 
@@ -493,37 +493,37 @@ NPC differential interrupt synchronization observes the driving PLIC `seip_q` bi
 
 ### Inter-module (`rapt_if.svh`, `rapt_*_if.svh`)
 
-| Interface        | Direction               | Description                                               |
-| ---------------- | ----------------------- | --------------------------------------------------------- |
-| `ifu_bpu_if`     | IFU<->BPU               | PC for prediction; NPC + taken back                       |
-| `ifu_l1i_if`     | IFU<->L1I               | PC fetch request; `inst_n0` + `inst_n1` + trap response   |
-| `ifu_idu_if`     | IFU<->FQU / FQU<->IDU   | fetch slot[] with per-instruction metadata; valid/ready[]   |
-| `idu_rnu_if`     | IDU->RNU                | slot[DecodeWidth] with uop, operands and arch IDs                         |
-| `rnu_rou_if`     | RNU->ROU                | slot[RenameWidth] with uop, physical mappings and control-flow checkpoint identity |
-| `rapt_recovery_if` | ROU->IFU/FQU/IDU/RNU | One oldest-mispredict transaction: pending, one-shot redirect, owner/generation, target and checkpoint |
-| `checkpoint_release_if` | ROU->RNU       | Completion-width correct-control releases; independent of recovery ownership |
-| `{domain,token} candidate[K]` | ROU->DPU | Age-ordered lightweight steering candidates; identity does not depend on endpoint ready |
-| `token winner[W]` | DPU->ROU               | Oldest capacity-admissible candidate identities            |
-| `SlotT dispatch[W]` | ROU->EUs            | Winner uop/operands/ROB tag; full payload remains DispatchWidth-wide |
-| `rou_lsu_if`     | ROU->LSU                | Store commit (addr/data/alu)                              |
-| `rou_csr_if`     | ROU->CSR                | CSR write + trap/system on commit                         |
-| `rou_cmu_if`     | ROU->CMU                | slot[CommitWidth] events plus scalar recovery effects           |
-| `dpu_iq_if`      | DPU<->IEU/FEU           | Queue allocation and free-slot backpressure               |
-| `dpu_ioq_if`     | DPU<->LSU               | IOQ capacity and accepted global slot mask               |
-| `CompletionT completion[]` | EUs->ROU/PRF/LSU/IQs | Guarded effects/results with ROB slot + allocation generation identity |
-| `rob_completion_owner_if` | ROU->core guards | Read-only live/executing/generation/destination ownership directory |
-| `load_fast_if`   | LSU->IEU/FEU            | Guarded early-load identity, rebusy, and full-identity confirmation data |
-| `IssueT issue[]` | IQ->pipe                | Whole-uop issue packets; per-port availability/capability |
-| `exu_prf_if`     | ROU->PRF                | Operand pre-read (2 per rename position)                        |
-| `fpr_if`         | FEU/LSU<->FPR           | FP register reads and arithmetic/load writeback          |
-| `lsu_pipe_if`    | LSU internal            | IOQ/AGU to SQ load request and response                   |
-| `exu_csr_if`     | IEU->CSR                | CSR read port                                             |
-| `lsu_l1d_mmu_if` | LSU->L1D                | Store MMU + SC reservation check                          |
-| `cmu_bcast_if`   | CMU->all                | Retire broadcast (flush, fence, branch, call/ret)         |
-| `csr_bcast_if`   | CSR->all                | Priv, SATP, MMU enable, tvec                              |
-| `lsu_l1d_if`     | LSU->L1D                | Load/store data path                                      |
-| `l1i_bus_if`     | L1I->BUS                | I-cache miss read                                         |
-| `l1d_bus_if`     | L1D->BUS                | D-cache miss read + write-through                         |
+| Interface                     | Direction             | Description                                                                                            |
+| ----------------------------- | --------------------- | ------------------------------------------------------------------------------------------------------ |
+| `ifu_bpu_if`                  | IFU<->BPU             | PC for prediction; NPC + taken back                                                                    |
+| `ifu_l1i_if`                  | IFU<->L1I             | PC fetch request; `inst_n0` + `inst_n1` + trap response                                                |
+| `ifu_idu_if`                  | IFU<->FQU / FQU<->IDU | fetch slot[] with per-instruction metadata; valid/ready[]                                              |
+| `idu_rnu_if`                  | IDU->RNU              | slot[DecodeWidth] with uop, operands and arch IDs                                                      |
+| `rnu_rou_if`                  | RNU->ROU              | slot[RenameWidth] with uop, physical mappings and control-flow checkpoint identity                     |
+| `rapt_recovery_if`            | ROU->IFU/FQU/IDU/RNU  | One oldest-mispredict transaction: pending, one-shot redirect, owner/generation, target and checkpoint |
+| `checkpoint_release_if`       | ROU->RNU              | Completion-width correct-control releases; independent of recovery ownership                           |
+| `{domain,token} candidate[K]` | ROU->DPU              | Age-ordered lightweight steering candidates; identity does not depend on endpoint ready                |
+| `token winner[W]`             | DPU->ROU              | Oldest capacity-admissible candidate identities                                                        |
+| `SlotT dispatch[W]`           | ROU->EUs              | Winner uop/operands/ROB tag; full payload remains DispatchWidth-wide                                   |
+| `rou_lsu_if`                  | ROU->LSU              | Store commit (addr/data/alu)                                                                           |
+| `rou_csr_if`                  | ROU->CSR              | CSR write + trap/system on commit                                                                      |
+| `rou_cmu_if`                  | ROU->CMU              | slot[CommitWidth] events plus scalar recovery effects                                                  |
+| `dpu_iq_if`                   | DPU<->IEU/FEU         | Queue allocation and free-slot backpressure                                                            |
+| `dpu_ioq_if`                  | DPU<->LSU             | IOQ capacity and accepted global slot mask                                                             |
+| `CompletionT completion[]`    | EUs->ROU/PRF/LSU/IQs  | Guarded effects/results with ROB slot + allocation generation identity                                 |
+| `rob_completion_owner_if`     | ROU->core guards      | Read-only live/executing/generation/destination ownership directory                                    |
+| `load_fast_if`                | LSU->IEU/FEU          | Guarded early-load identity, rebusy, and full-identity confirmation data                               |
+| `IssueT issue[]`              | IQ->pipe              | Whole-uop issue packets; per-port availability/capability                                              |
+| `exu_prf_if`                  | ROU->PRF              | Operand pre-read (2 per rename position)                                                               |
+| `fpr_if`                      | FEU/LSU<->FPR         | FP register reads and arithmetic/load writeback                                                        |
+| `lsu_pipe_if`                 | LSU internal          | IOQ/AGU to SQ load request and response                                                                |
+| `exu_csr_if`                  | IEU->CSR              | CSR read port                                                                                          |
+| `lsu_l1d_mmu_if`              | LSU->L1D              | Store MMU + SC reservation check                                                                       |
+| `cmu_bcast_if`                | CMU->all              | Retire broadcast (flush, fence, branch, call/ret)                                                      |
+| `csr_bcast_if`                | CSR->all              | Priv, SATP, MMU enable, tvec                                                                           |
+| `lsu_l1d_if`                  | LSU->L1D              | Load/store data path                                                                                   |
+| `l1i_bus_if`                  | L1I->BUS              | I-cache miss read                                                                                      |
+| `l1d_bus_if`                  | L1D->BUS              | D-cache miss read + write-through                                                                      |
 
 ### Legacy RNU harness interfaces
 
@@ -536,54 +536,54 @@ A/B lane APIs anywhere in the active ordered frontend/backend pipeline.
 
 ## Configuration (`rapt_config.svh`)
 
-| Parameter            | Default   | Description                                |
-| -------------------- | --------- | ------------------------------------------ |
-| `RAPT_XLEN`          | 32        | Register width (64 with `RAPT_RV64`)       |
-| `RAPT_M_FAST`        | 1         | Single-cycle mul/div (sim mode)            |
-| `RAPT_L1I_LINE_LEN`  | 4         | L1I line: 2⁴ = 16 words (64 B in RV32)     |
-| `RAPT_L1I_LEN`       | 6         | L1I sets: 2⁶ = 64                          |
-| `RAPT_L1I_N_WAYS`    | 4         | L1I ways (4-way SA)                        |
-| `RAPT_L1I_REFILL_WORDS` | 8      | Words per L1I sector refill (capped at line size) |
-| `RAPT_PHT_SIZE`      | 256       | PHT entries                                |
-| `RAPT_BTB_SIZE`      | 128       | BTB entries (64 sets × 2 ways)             |
-| `RAPT_BTB_WAYS`      | 2         | BTB associativity (single LRU bit per set requires exactly 2) |
-| `RAPT_RSB_SIZE`      | 4         | Return stack entries                       |
-| `RAPT_BPU_DIRP_TAGE` | defined   | Default direction predictor                |
-| `RAPT_RIQ_SIZE`      | 8         | Rename queue (RNQ) entries                 |
-| `RAPT_IIQ_SIZE`      | 8         | Dispatch queue (UOQ) entries               |
-| `RAPT_ROB_SIZE`      | 32        | Reorder buffer entries                     |
-| `RAPT_ROB_GENERATION_BITS` | 4 | Per-slot allocation generation width; not a standalone cancellation protocol |
-| `RAPT_BRANCH_CHECKPOINTS` | 16 | Independent control-flow rename snapshots; exhaustion backpressures rename |
-| `RAPT_RS_SIZE`       | 8         | ALU issue queue (ALQ) entries, shared by ALU-CSR/ALU |
-| `RAPT_IOQ_SIZE`      | 8         | In-order memory queue entries              |
-| `BRQ_SIZE` (param)   | 4         | Branch issue queue entries                 |
-| `MDQ_SIZE` (param)   | 4         | MUL/DIV issue queue entries                |
-| `RAPT_SQ_SIZE`       | 16        | Unified store queue entries                |
-| `RAPT_L1D_LINE_LEN`  | 4 / 3     | RV32: 16 words/line; RV64: 8 words/line    |
-| `RAPT_L1D_LEN`       | 6         | L1D sets: 2⁶ = 64                          |
-| `RAPT_L1D_N_WAYS`    | 4         | L1D ways (4-way SA)                        |
-| `RAPT_CACHE_SRAMLEN` | 128       | Cache data-SRAM subarray width in bits     |
-| `RAPT_ITLB_ENTRIES`   | 16        | Fully-associative ITLB entries             |
-| `RAPT_DTLB_ENTRIES`   | 16        | Entries in each L1D DTLB lookup replica    |
-| `RAPT_L2_EN`         | undefined | Optional L2 defaults to passthrough        |
-| `RAPT_L2_LEN`        | 8         | L2 sets: 2⁸ = 256 when enabled             |
-| `RAPT_L2_N_WAYS`     | 1         | L2 ways when enabled                       |
-| `RAPT_COMMIT_WIDTH` | 2 | Maximum ready-prefix retirement width |
-| `RAPT_DECODE_WIDTH` | 2 | Decode / frontend slot width |
-| `RAPT_RENAME_WIDTH` | 2 | Rename / PRF pre-read width (`ifndef` fallback: DecodeWidth) |
-| `RAPT_DISPATCH_WIDTH` | 2 | ROB / execution-queue allocation width (`ifndef` fallback: RenameWidth) |
-| `RAPT_INTEGER_ISSUE_PORTS` | 2 | Number of physical integer issue/FU ports |
-| `RAPT_INTEGER_SYSTEM_PORT` | 0 | Integer-port index owning CSR/system capability and the FP-shared completion endpoint |
-| `RAPT_PHY_SIZE`      | 128       | Physical registers                         |
+| Parameter                  | Default   | Description                                                                           |
+| -------------------------- | --------- | ------------------------------------------------------------------------------------- |
+| `RAPT_XLEN`                | 32        | Register width (64 with `RAPT_RV64`)                                                  |
+| `RAPT_M_FAST`              | 1         | Single-cycle mul/div (sim mode)                                                       |
+| `RAPT_L1I_LINE_LEN`        | 4         | L1I line: 2⁴ = 16 words (64 B in RV32)                                                |
+| `RAPT_L1I_LEN`             | 5         | L1I sets: 2⁵ = 32                                                                     |
+| `RAPT_L1I_N_WAYS`          | 4         | L1I ways (4-way SA)                                                                   |
+| `RAPT_L1I_REFILL_WORDS`    | 8         | Words per L1I sector refill (capped at line size)                                     |
+| `RAPT_PHT_SIZE`            | 256       | PHT entries                                                                           |
+| `RAPT_BTB_SIZE`            | 128       | BTB entries (64 sets × 2 ways)                                                        |
+| `RAPT_BTB_WAYS`            | 2         | BTB associativity (single LRU bit per set requires exactly 2)                         |
+| `RAPT_RSB_SIZE`            | 4         | Return stack entries                                                                  |
+| `RAPT_BPU_DIRP_TAGE`       | defined   | Default direction predictor                                                           |
+| `RAPT_RIQ_SIZE`            | 8         | Rename queue (RNQ) entries                                                            |
+| `RAPT_IIQ_SIZE`            | 8         | Dispatch queue (UOQ) entries                                                          |
+| `RAPT_ROB_SIZE`            | 32        | Reorder buffer entries                                                                |
+| `RAPT_ROB_GENERATION_BITS` | 4         | Per-slot allocation generation width; not a standalone cancellation protocol          |
+| `RAPT_BRANCH_CHECKPOINTS`  | 16        | Independent control-flow rename snapshots; exhaustion backpressures rename            |
+| `RAPT_RS_SIZE`             | 8         | ALU issue queue (ALQ) entries, shared by ALU-CSR/ALU                                  |
+| `RAPT_IOQ_SIZE`            | 8         | In-order memory queue entries                                                         |
+| `BRQ_SIZE` (param)         | 4         | Branch issue queue entries                                                            |
+| `MDQ_SIZE` (param)         | 4         | MUL/DIV issue queue entries                                                           |
+| `RAPT_SQ_SIZE`             | 16        | Unified store queue entries                                                           |
+| `RAPT_L1D_LINE_LEN`        | 4 / 3     | RV32: 16 words/line; RV64: 8 words/line                                               |
+| `RAPT_L1D_LEN`             | 5         | L1D sets: 2⁵^5 = 32                                                                   |
+| `RAPT_L1D_N_WAYS`          | 4         | L1D ways (4-way SA)                                                                   |
+| `RAPT_CACHE_SRAMLEN`       | 128       | Cache data-SRAM subarray width in bits                                                |
+| `RAPT_ITLB_ENTRIES`        | 16        | Fully-associative ITLB entries                                                        |
+| `RAPT_DTLB_ENTRIES`        | 16        | Entries in each L1D DTLB lookup replica                                               |
+| `RAPT_L2_EN`               | undefined | Optional L2 defaults to passthrough                                                   |
+| `RAPT_L2_LEN`              | 8         | L2 sets: 2⁸ = 256 when enabled                                                        |
+| `RAPT_L2_N_WAYS`           | 1         | L2 ways when enabled                                                                  |
+| `RAPT_COMMIT_WIDTH`        | 2         | Maximum ready-prefix retirement width                                                 |
+| `RAPT_DECODE_WIDTH`        | 2         | Decode / frontend slot width                                                          |
+| `RAPT_RENAME_WIDTH`        | 2         | Rename / PRF pre-read width (`ifndef` fallback: DecodeWidth)                          |
+| `RAPT_DISPATCH_WIDTH`      | 2         | ROB / execution-queue allocation width (`ifndef` fallback: RenameWidth)               |
+| `RAPT_INTEGER_ISSUE_PORTS` | 2         | Number of physical integer issue/FU ports                                             |
+| `RAPT_INTEGER_SYSTEM_PORT` | 0         | Integer-port index owning CSR/system capability and the FP-shared completion endpoint |
+| `RAPT_PHY_SIZE`            | 128       | Physical registers                                                                    |
 
 ## Key Types (`rapt_pkg.sv`)
 
-| Type               | Description                                                                                   |
-| ------------------ | --------------------------------------------------------------------------------------------- |
-| `uop_t`            | Micro-op: typed `schedule` (domain + issue-port mask) and `execute` payload (int/branch/memory/fp/sys), rd/imm, pc/pnpc, inst, trap/cause/tval |
-| `prd_t`            | Physical register descriptor: op1/op2 + pr1/pr2/prd/prs                                       |
-| `rob_state_t`      | ROB state: `ROB_DP` (allocated, pending dispatch), `ROB_EX` (executing), `ROB_WB` (written-back), `ROB_CM` (committed / empty) |
+| Type               | Description                                                                                                                                                                               |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `uop_t`            | Micro-op: typed `schedule` (domain + issue-port mask) and `execute` payload (int/branch/memory/fp/sys), rd/imm, pc/pnpc, inst, trap/cause/tval                                            |
+| `prd_t`            | Physical register descriptor: op1/op2 + pr1/pr2/prd/prs                                                                                                                                   |
+| `rob_state_t`      | ROB state: `ROB_DP` (allocated, pending dispatch), `ROB_EX` (executing), `ROB_WB` (written-back), `ROB_CM` (committed / empty)                                                            |
 | `rob_entry_t`      | Retirement state: phys regs, arch rd, state/generation, branch result + next PC, store flag, CSR/FP-flag snapshot, trap/tval/cause, difftest skip (store payload lives in the unified SQ) |
-| `addr_cacheable()` | Returns true for cacheable regions (SRAM, mrom, flash, PMEM, sdram)                            |
-| `addr_mapped()`    | Returns true for any mapped memory or MMIO region                                             |
-| `addr_mmio()`      | Returns true for MMIO regions that difftest should skip                                       |
+| `addr_cacheable()` | Returns true for cacheable regions (SRAM, mrom, flash, PMEM, sdram)                                                                                                                       |
+| `addr_mapped()`    | Returns true for any mapped memory or MMIO region                                                                                                                                         |
+| `addr_mmio()`      | Returns true for MMIO regions that difftest should skip                                                                                                                                   |

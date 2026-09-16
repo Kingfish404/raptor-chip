@@ -319,9 +319,9 @@ OFL := $(strip $(OFL))
 OFL_CABLE := $(strip $(OFL_CABLE))
 
 ifeq ($(FPGA_VENDOR),vivado)
-FPGA_LOAD_TOOL_CHECK = command -v $(VIVADO) >/dev/null 2>&1 || { echo "[ERR] $(VIVADO) not found on PATH — source settings64.sh"; exit 1; }
-FPGA_LOAD_CMD  = $(VIVADO) -mode batch -nojournal -nolog -source $(LITEX_DIR)/scripts/vivado_load.tcl -tclargs $(FPGA_BITSTREAM) $(FPGA_DEVICE)
-FPGA_FLASH_CMD = $(VIVADO) -mode batch -nojournal -nolog -source $(LITEX_DIR)/scripts/vivado_flash.tcl -tclargs $(FPGA_BITSTREAM) $(FPGA_BUILD_DIR) $(FPGA_DEVICE)
+FPGA_LOAD_TOOL_CHECK = command -v "$(VIVADO)" >/dev/null 2>&1 || { echo "[ERR] $(VIVADO) not found on PATH — source settings64.sh"; exit 1; }
+FPGA_LOAD_CMD  = "$(VIVADO)" -mode batch -nojournal -nolog -source "$(LITEX_DIR)/scripts/vivado_load.tcl" -tclargs "$(FPGA_BITSTREAM)" "$(FPGA_DEVICE)"
+FPGA_FLASH_CMD = "$(VIVADO)" -mode batch -nojournal -nolog -source "$(LITEX_DIR)/scripts/vivado_flash.tcl" -tclargs "$(FPGA_BITSTREAM)" "$(FPGA_BUILD_DIR)" "$(FPGA_DEVICE)"
 else
 FPGA_LOAD_TOOL_CHECK = command -v $(OFL) >/dev/null 2>&1 || { echo "[ERR] openFPGALoader not found"; exit 1; }
 FPGA_LOAD_CMD  = $(OFL) --cable $(OFL_CABLE) --bitstream $(FPGA_BITSTREAM)

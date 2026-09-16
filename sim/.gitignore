@@ -13,6 +13,8 @@
 !*.mk
 !configs/*
 !scripts/*.sh
+!scripts/configure.py
+!scripts/build_cache.py
 !*.sv
 !gsim/*.json
 !ysyxsoc/setup.py

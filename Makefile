@@ -289,7 +289,7 @@ config-nemu64-difftest: build-spike-diff64 ## Configure NEMU RV64 binary with sp
 # ============================================================================
 # NPC Simulation Targets
 # ============================================================================
-NPC_DEFCONFIG ?= o2_defconfig ## NPC simulator defconfig profile
+NPC_DEFCONFIG ?= o2_difftest_defconfig ## NPC simulator defconfig profile
 NPC_ARCH ?= riscv32-npc ## Override ARCH for AM targets
 
 # RV64 mode: set via `make run-rv64` or explicitly `make run-rv32 VFLAGS="-DRAPT_RV64"`.
@@ -301,13 +301,13 @@ RAPT_SIM_ASSERT := $(strip $(RAPT_SIM_ASSERT))
 export RAPT_SIM_ASSERT
 
 config-rv32: ## Configure NPC simulator (o2 default)
-	$(MAKE) -C $(NSIM_HOME) o2_difftest_defconfig
+	$(MAKE) -C $(NSIM_HOME) $(NPC_DEFCONFIG) VFLAGS="$(VFLAGS)"
 	@$(MAKE) --no-print-directory -C $(NSIM_HOME) VFLAGS="$(VFLAGS)"
 
 config-rv32-difftest: config-rv32 ## Configure NPC simulator with difftest
 
 config-rv32-linux:
-	$(MAKE) -C $(NSIM_HOME) o2linux_difftest_defconfig
+	$(MAKE) -C $(NSIM_HOME) o2linux_difftest_defconfig VFLAGS="$(VFLAGS)"
 	$(MAKE) -C $(NSIM_HOME) $(SUBMAKE_JOBS) VFLAGS="$(VFLAGS)"
 
 
@@ -318,8 +318,6 @@ $(GENERATED_DIR):
 	$(MAKE) verilog
 
 build-rv32: config-rv32 | $(GENERATED_DIR) ## Build NPC simulator
-	@$(MAKE) --no-print-directory -q -C $(NSIM_HOME) VFLAGS="$(VFLAGS)" 2>/dev/null \
-		|| $(MAKE) --no-print-directory -C $(NSIM_HOME) $(SUBMAKE_JOBS) VFLAGS="$(VFLAGS)"
 
 run-rv32: build-rv32 ## Build and run NPC simulator
 	$(MAKE) -C $(NSIM_HOME) run ARGS="$(ARGS)" VFLAGS="$(VFLAGS)" $(if $(IMG),IMG=$(IMG)) $(if $(DISK),DISK=$(DISK)) $(if $(SDCARD),SDCARD=$(SDCARD))
@@ -541,8 +539,8 @@ coremark-random-rv32 coremark-random-rv64: ## Run CoreMark on sim with random AX
 microbench-random-rv32 microbench-random-rv64: ## Run MicroBench on sim with random AXI memory delays
 	$(MAKE) --no-print-directory $(subst -random,,$@) ARGS="$(ARGS) $(SIM_RANDOM_ARGS)"
 
-# Build and run in separate recursive calls: sim/.config is shared even with
-# BUILD_PROFILE isolation, so the runner must not overlap configuration/build.
+# Build the selected profile before launching its test binaries. Distinct
+# BUILD_PROFILE/XLEN combinations have independent simulator configurations.
 cpu-tests-random-rv32 cpu-tests-random-rv64: ## Run AM cpu-tests on sim with random AXI memory delays
 	$(MAKE) --no-print-directory build-$(lastword $(subst -, ,$@))
 	$(MAKE) --no-print-directory $(subst -random,,$@)-run ARGS="$(ARGS) $(SIM_RANDOM_ARGS)"
@@ -704,13 +702,13 @@ linux-download: ## Download pre-built Linux (RV32 + RV64)
 # $(5) = optional extra variables propagated to BOTH the `make -C sim` build
 #        and the `make -C sim run` invocation (e.g. DT_SOURCE=...).
 define linux_boot_npc
-	$(MAKE) -C $(LINUX_HOME) download-$(1)
+	+@if ! test -f "$(2)"; then $(MAKE) -C $(LINUX_HOME) download-$(1); fi
 	+$(MAKE) -C $(NSIM_HOME) $(SUBMAKE_JOBS) VFLAGS="$(VFLAGS)" $(5)
 	+@set -o pipefail; $(MAKE) -C $(NSIM_HOME) run IMG=$(2) ARGS="$(LINUX_NPC_ARGS) $(ARGS) $(if $(MAX_INST),-m $(MAX_INST))" VFLAGS="$(VFLAGS)" $(4) $(5) $(call tee_npc,$(3))
 endef
 
 define linux_boot_nemu
-	$(MAKE) -C $(LINUX_HOME) download-$(1)
+	+@if ! test -f "$(2)"; then $(MAKE) -C $(LINUX_HOME) download-$(1); fi
 	@set -o pipefail; $(MAKE) -C $(NEMU_HOME) run IMG=$(2) ARGS="$(ARGS) $(if $(MAX_INST),-m $(MAX_INST))" $(call tee_nemu,$(3))
 endef
 
@@ -913,6 +911,13 @@ sta: ## Static timing analysis (VFLAGS="-DRAPT_RV64" for RV64)
 sta-detail: ## Detailed static timing analysis (VFLAGS="-DRAPT_RV64" for RV64)
 	$(MAKE) -C $(NSIM_HOME) sta-detail STA_PLATFORM=$(STA_PLATFORM) CLK_FREQ_MHZ=$(CLK_FREQ_MHZ) VFLAGS="$(VFLAGS)"
 
+.PHONY: sta-dff sta-dff-detail sta-dff-check sta-flops sta-dff-rv64
+sta-dff sta-dff-detail sta-dff-check sta-flops: ## DFF-only STA (RAPT_CONFIG, STA_PLATFORM, CLK_FREQ_MHZ, VFLAGS)
+	$(MAKE) -C $(NSIM_HOME) $@ RAPT_CONFIG=$(RAPT_CONFIG) STA_PLATFORM=$(STA_PLATFORM) CLK_FREQ_MHZ=$(CLK_FREQ_MHZ) VFLAGS="$(VFLAGS)"
+
+sta-dff-rv64: VFLAGS := -DRAPT_RV64
+sta-dff-rv64: sta-dff ## DFF-only RV64 STA (default 50 MHz; overridable)
+
 # RV64 convenience targets for STA (half clock target — RV64 datapath is wider/slower)
 sta-rv64: VFLAGS := -DRAPT_RV64
 sta-rv64: CLK_FREQ_MHZ := 25
@@ -1049,9 +1054,9 @@ verify-memory-stress-rv32: ## RaptOS: randomized Sv32 memory/atomic integration 
 
 # --------------------------------------------------------------------------
 # Portable server gate: every DUT simulation below is Verilator based.  The
-# phase barriers are deliberate: sim/.config and NEMU's selected ISA are
-# shared mutable state, so RV32, RV64, compliance, and Linux builds must not
-# overlap.  Within a stable phase, independent test families run concurrently.
+# phase barriers still protect NEMU's legacy selected ISA and other shared
+# test assets. Simulator Kconfig/model caches are now profile/XLEN-local.
+# Within a stable phase, independent test families run concurrently.
 # --------------------------------------------------------------------------
 .PHONY: verify-verilator \
 	_verify-verilator-directed _verify-verilator-rv32-build \

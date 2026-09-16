@@ -2,11 +2,7 @@
 
 Standalone RISC-V programs that compile to standard ELFs and run on any RISC-V Linux environment (real hardware, QEMU user-mode, or via Raptor's riscv-pk proxy kernel).
 
-`tests/baremetal/` contains freestanding architectural and platform regression
-programs, including their shared assembly headers. `tests/host/` contains native
-C/C++ tests for the simulator and reference model. These suites are built and
-run by `verify/Makefile` and `verify/scripts`; they are separate from the
-user-space `tests-build` flow. For example, from the repository root:
+`tests/baremetal/` contains freestanding architectural and platform regression programs, including their shared assembly headers. `tests/host/` contains native C/C++ tests for the simulator and reference model. These suites are built and run by `verify/Makefile` and `verify/scripts`; they are separate from the user-space `tests-build` flow. For example, from the repository root:
 
 ```sh
 make -C verify rva22s64-csr-architectural-run
@@ -109,9 +105,7 @@ Instruction-level tests using inline assembly. Each test verifies correct behavi
 
 ### Bare-Metal Payloads (`tests/fp/`, `tests/zbb/`)
 
-Directed assembly payloads live with the other application tests even when
-their execution is orchestrated by NEMU, NPC, or the verification Makefiles.
-Generated ELF, binary, and log files are written below `app/build/`.
+Directed assembly payloads live with the other application tests even when their execution is orchestrated by NEMU, NPC, or the verification Makefiles. Generated ELF, binary, and log files are written below `app/build/`.
 
 ## Demo Programs (`demos/`)
 
@@ -181,11 +175,7 @@ make app-demos-nemu32 ARGS="-b"
 
 ## RLLMBench
 
-`benchmarks/llm` contains RLLMBench, a fixed-point AI benchmark suite inspired
-by the operator mix in Karpathy's `llama2.c` and `llm.c`: q8 matmul, causal
-attention, RMSNorm, AdamW-style updates, tiny decoder inference, and tiny
-next-token training. It avoids model files, malloc, and floating point so RV32IMAC
-and FPGA payload runs stay practical.
+`benchmarks/llm` contains RLLMBench, a fixed-point AI benchmark suite inspired by the operator mix in Karpathy's `llama2.c` and `llm.c`: q8 matmul, causal attention, RMSNorm, AdamW-style updates, tiny decoder inference, and tiny next-token training. It avoids model files, malloc, and floating point so RV32IMAC and FPGA payload runs stay practical.
 
 ```bash
 make llm-bench-build
@@ -203,34 +193,15 @@ ls build/native/benchmarks/llm/reports/
 make llm-bench-report-rv32 LLM_OP_ITERS=16 LLM_GEN_TOKENS=16 LLM_TRAIN_STEPS=8
 ```
 
-The profile name encodes the workload knobs as
-`ops<LLM_OP_ITERS>-gen<LLM_GEN_TOKENS>-train<LLM_TRAIN_STEPS>`; the default
-comparable profile is `ops8-gen12-train4`. `make llm-bench-report-rv32` and
-`make llm-bench-report-nemu` keep per-run logs
-and emits Markdown/CSV/JSON reports. The headline metric is `score_per_sec`:
-benchmark work items per physical second, higher is better. Reports use only
-elapsed physical seconds and do not expose cycles, implementation-specific
-ticks, or IPC. When a core clock is supplied, reports also include
-`score_per_mhz = score_per_sec / core_clock_mhz`, a CoreMark/MHz-style metric
-equivalent to work items per million core cycles. Deterministic checksums are emitted for each mode. The benchmark itself emits stable
-`RLLMBENCH_RESULT` / `RLLMBENCH_SCORE` lines so results are easy to grep, paste
-into issue reports, or compare with CoreMark and Embench dashboards.
+The profile name encodes the workload knobs as `ops<LLM_OP_ITERS>-gen<LLM_GEN_TOKENS>-train<LLM_TRAIN_STEPS>`; the default comparable profile is `ops8-gen12-train4`. `make llm-bench-report-rv32` and `make llm-bench-report-nemu` keep per-run logs and emits Markdown/CSV/JSON reports. The headline metric is `score_per_sec`: benchmark work items per physical second, higher is better. Reports use only elapsed physical seconds and do not expose cycles, implementation-specific ticks, or IPC. When a core clock is supplied, reports also include `score_per_mhz = score_per_sec / core_clock_mhz`, a CoreMark/MHz-style metric equivalent to work items per million core cycles. Deterministic checksums are emitted for each mode. The benchmark itself emits stable `RLLMBENCH_RESULT` / `RLLMBENCH_SCORE` lines so results are easy to grep, paste into issue reports, or compare with CoreMark and Embench dashboards.
 
-For native host comparisons, use a larger profile so the timed regions are long
-enough on modern CPUs:
+For native host comparisons, use a larger profile so the timed regions are long enough on modern CPUs:
 
 ```bash
 make llm-native-test LLM_OP_ITERS=8192 LLM_GEN_TOKENS=16 LLM_TRAIN_STEPS=4096
 ```
 
-The port layer is the single header `benchmarks/llm/rllmbench_port.h`. New
-bare-metal RISC-V ports normally only set `RLLMBENCH_TIMEBASE_HZ` to the real
-`time` CSR rate; unusual platforms can override `RLLMBENCH_READ_TIME_US()` to
-return monotonic physical microseconds.
-For NPC comparisons, `make llm-bench-report-rv32` defaults to `RLLMBENCH_TIMEBASE_HZ=10000000`
-and `RLLMBENCH_CORE_CLOCK_MHZ=1000`, matching the current RTL timer/core-clock
-model. Override `RLLMBENCH_CORE_CLOCK_MHZ` for FPGA or ASIC reports when the
-core frequency differs.
+The port layer is the single header `benchmarks/llm/rllmbench_port.h`. New bare-metal RISC-V ports normally only set `RLLMBENCH_TIMEBASE_HZ` to the real `time` CSR rate; unusual platforms can override `RLLMBENCH_READ_TIME_US()` to return monotonic physical microseconds. For NPC comparisons, `make llm-bench-report-rv32` defaults to `RLLMBENCH_TIMEBASE_HZ=10000000` and `RLLMBENCH_CORE_CLOCK_MHZ=1000`, matching the current RTL timer/core-clock model. Override `RLLMBENCH_CORE_CLOCK_MHZ` for FPGA or ASIC reports when the core frequency differs.
 
 The same source can also be linked as a LiteX-native flat binary:
 
@@ -238,24 +209,13 @@ The same source can also be linked as a LiteX-native flat binary:
 make llm-litex-build
 ```
 
-From `fpga/litex`, use `make app-llm-infer` for LiteX simulation or
-`make app-llm-infer-fpga UART_PORT=/dev/tty.usbserial-...` to upload via BIOS
-serialboot.
+From `fpga/litex`, use `make app-llm-infer` for LiteX simulation or `make app-llm-infer-fpga UART_PORT=/dev/tty.usbserial-...` to upload via BIOS serialboot.
 
 ## RAgentBench
 
-`benchmarks/agent` contains RAgentBench, an agentic-workload CPU benchmark that
-stresses the irregular-control-flow regime typical of LLM-agent runtimes (tool
-dispatch, retrieval scoring, multi-turn policy loops). It is **complementary**
-to RLLMBench: RLLMBench measures dense int8/int16 GEMM-like behavior; RAgentBench
-measures branch-heavy switch-table dispatch, BM25-lite scoring, and FSM-driven
-agent loops. A core that wins one can lose the other.
+`benchmarks/agent` contains RAgentBench, an agentic-workload CPU benchmark that stresses the irregular-control-flow regime typical of LLM-agent runtimes (tool dispatch, retrieval scoring, multi-turn policy loops). It is **complementary** to RLLMBench: RLLMBench measures dense int8/int16 GEMM-like behavior; RAgentBench measures branch-heavy switch-table dispatch, BM25-lite scoring, and FSM-driven agent loops. A core that wins one can lose the other.
 
-Like RLLMBench, RAgentBench is single-file C99, no malloc, no FP, deterministic,
-and portable across host-native, pk/NPC, NEMU, LiteX baremetal, and FPGA. Three
-modes: `tools`, `rag`, `workflow`. Headline metric `score_per_sec`. Log lines
-use the `RAGENTBENCH_*` prefix; profile string is
-`tools<N>-rag<N>-flow<N>` (default `tools16-rag16-flow16` on NPC).
+Like RLLMBench, RAgentBench is single-file C99, no malloc, no FP, deterministic, and portable across host-native, pk/NPC, NEMU, LiteX baremetal, and FPGA. Three modes: `tools`, `rag`, `workflow`. Headline metric `score_per_sec`. Log lines use the `RAGENTBENCH_*` prefix; profile string is `tools<N>-rag<N>-flow<N>` (default `tools16-rag16-flow16` on NPC).
 
 ```bash
 make agent-bench-build      # cross-compile pk ELFs
@@ -299,8 +259,4 @@ sudo apt install gcc-riscv64-linux-gnu    # glibc
 
 ## LiteX-Native App Payloads
 
-For FPGA-facing app code, prefer a dual-build pattern: keep the algorithm in
-ordinary C, then add a Makefile path that links it with `app/lib/litex/start.S`,
-`app/lib/litex/link.ld`, and `app/lib/litex/runtime.c`. That produces a flat
-`.bin` loaded at `0x80000000`, avoiding pk/newlib and avoiding a bitstream
-rebuild for every test. The LLM benchmark Makefile is the reference pattern.
+For FPGA-facing app code, prefer a dual-build pattern: keep the algorithm in ordinary C, then add a Makefile path that links it with `app/lib/litex/start.S`, `app/lib/litex/link.ld`, and `app/lib/litex/runtime.c`. That produces a flat `.bin` loaded at `0x80000000`, avoiding pk/newlib and avoiding a bitstream rebuild for every test. The LLM benchmark Makefile is the reference pattern.

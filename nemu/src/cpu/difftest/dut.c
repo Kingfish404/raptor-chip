@@ -26,6 +26,9 @@ void (*ref_difftest_regcpy)(void *dut, bool direction) = NULL;
 void (*ref_difftest_exec)(uint64_t n) = NULL;
 void (*ref_difftest_raise_intr)(uint64_t NO) = NULL;
 uint32_t (*ref_difftest_state_version)(void) = NULL;
+/* Set once a reference .so is loaded; lets the per-instruction caller skip
+ * the difftest_step() call entirely in standalone runs. */
+bool difftest_ref_loaded = false;
 
 #ifdef CONFIG_DIFFTEST
 
@@ -101,6 +104,7 @@ void init_difftest(char *ref_so_file, long img_size, int port) {
       "If it is not necessary, you can turn it off in menuconfig.", ref_so_file);
 
   ref_difftest_init(port);
+  difftest_ref_loaded = true;
   ref_difftest_memcpy(RESET_VECTOR, guest_to_host(RESET_VECTOR), img_size, DIFFTEST_TO_REF);
   ref_difftest_regcpy(&cpu, DIFFTEST_TO_REF);
 }

@@ -2,6 +2,13 @@
 `include "rapt_if.svh"
 module tb_l1d_16k;
   localparam int XLEN = `RAPT_XLEN;
+  localparam int Sets = 2 ** `RAPT_L1D_LEN;
+  localparam int Ways = `RAPT_L1D_N_WAYS;
+  localparam int LineBytes = `RAPT_CACHE_LINE_BYTES;
+  // One index wrap; also the address stride between ways of the same set.
+  localparam int SetStrideBytes = Sets * LineBytes;
+  localparam int CapacityBytes = Sets * Ways * LineBytes;
+  localparam int CapacityLines = Sets * Ways;
   logic clock = 0, reset = 1;
   always #5 clock = ~clock;
   cmu_bcast_if cmu_bcast ();
@@ -22,6 +29,11 @@ module tb_l1d_16k;
   );
   `include "tb_l1d_defaults.svh"
   int reads = 0;
+  // Explicit widen keeps RV64 builds warning-clean: the 32-bit byte offset is
+  // cast before the XLEN-wide add instead of being implicitly widened.
+  function automatic logic [XLEN-1:0] load_addr(input int unsigned offset);
+    return XLEN'('h80000000) + XLEN'(offset);
+  endfunction
   function automatic logic [XLEN-1:0] word_at(input logic [XLEN-1:0] addr);
     return (addr * XLEN'('h1020305)) ^ XLEN'('hfedcba9876543210);
   endfunction
@@ -96,28 +108,28 @@ module tb_l1d_16k;
             XLEN / 8
         ))
       $fatal(1, "D tag must exclude non-physical, index and offset bits");
-    if (`RAPT_CACHE_LINE_BYTES != 64 || `RAPT_L1D_LEN != 6 || `RAPT_L1D_N_WAYS != 4)
-      $fatal(1, "test requires 16 KiB / four-way / 64 B default geometry");
-    for (int offset = 0; offset < 16384; offset += XLEN / 8) load(XLEN'('h80000000 + offset), 0);
-    for (int offset = 0; offset < 16384; offset += XLEN / 8) load(XLEN'('h80000000 + offset), 1);
+    if (`RAPT_CACHE_LINE_BYTES != 64 || Sets < 2 || Ways < 2)
+      $fatal(1, "test requires 64 B lines and at least two sets and ways");
+    for (int offset = 0; offset < CapacityBytes; offset += XLEN / 8) load(load_addr(offset), 0);
+    for (int offset = 0; offset < CapacityBytes; offset += XLEN / 8) load(load_addr(offset), 1);
     begin
       int before_reads;
       before_reads = reads;
-      load(XLEN'('h80004000), 0);
-      if (reads == before_reads) $fatal(1, "fifth conflicting D tag did not miss");
-      load(XLEN'('h80004000), 1);
-      for (int way = 0; way < 4; way++) load(XLEN'('h80000040 + 4096 * way), 1);
+      load(load_addr(SetStrideBytes * Ways), 0);
+      if (reads == before_reads) $fatal(1, "conflicting D tag did not miss");
+      load(load_addr(SetStrideBytes * Ways), 1);
+      for (int way = 0; way < Ways; way++) load(load_addr(LineBytes + SetStrideBytes * way), 1);
       @(negedge clock);
       cmu_bcast.fence_time = 1;
       @(negedge clock);
       cmu_bcast.fence_time = 0;
       repeat (3) @(negedge clock);
       // Every formerly resident line must miss after the whole-cache fence.
-      for (int line = 0; line < 256; line++) begin
+      for (int line = 0; line < CapacityLines; line++) begin
         before_reads = reads;
-        load(XLEN'('h80000000 + 64 * line), 0);
+        load(load_addr(LineBytes * line), 0);
         if (reads != before_reads + 1) $fatal(1, "fence left D line %0d valid", line);
-        load(XLEN'('h80000000 + 64 * line), 1);
+        load(load_addr(LineBytes * line), 1);
       end
     end
     if (XLEN == 64) begin
@@ -126,8 +138,8 @@ module tb_l1d_16k;
       load(XLEN'('h80000040), 1);
     end
     $display(
-        "PASS: L1D RV%0d PA%0d compact tags, 16 KiB capacity, replacement, fence/refill, invalid aliases",
-        XLEN, `RAPT_PADDR_BITS);
+        "PASS: L1D RV%0d PA%0d compact tags, %0d sets x %0d ways = %0d KiB capacity, replacement, fence/refill, invalid aliases",
+        XLEN, `RAPT_PADDR_BITS, Sets, Ways, CapacityBytes / 1024);
     $finish;
   end
   initial begin

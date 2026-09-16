@@ -27,7 +27,6 @@ extern FILE *mem_trace;
 /* PMP check (implemented in src/isa/<isa>/system/pmp.c) */
 bool pmp_check(paddr_t addr, int size, uint32_t priv,
                bool op_r, bool op_w, bool op_x);
-uint32_t pmp_effective_priv_ls(void);
 extern word_t pmp_last_fault_addr;
 
 word_t g_vaddr = 0;
@@ -147,6 +146,12 @@ word_t vaddr_ifetch(vaddr_t addr, int len)
  * parts before issuing data accesses, retaining the faulting virtual page. */
 static void check_data_pma(paddr_t pa, int len, bool store)
 {
+  /* Fast path: a contiguous DRAM span has no PMA holes and is writable,
+   * so the per-byte walk (and its paddr_is_mapped/readonly calls) is only
+   * needed for devices and read-only backing. */
+  if (likely(paddr_is_ram_span(pa, len)))
+    return;
+
   /* Probe without MMIO/skip side effects before any host access. A mapped
    * first byte does not authorize an unaligned access past its backing. */
   bool allowed = len > 0;

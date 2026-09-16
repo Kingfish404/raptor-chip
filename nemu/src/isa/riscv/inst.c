@@ -229,6 +229,7 @@ bool clint_wfi_advance(void);
 extern uint64_t g_nr_guest_inst;
 
 void ftrace_add(word_t pc, word_t npc, word_t inst);
+extern bool ftrace_enabled;
 
 enum cbo_kind
 {
@@ -924,6 +925,7 @@ static int decode_exec(Decode *s)
       reg.mstatus.mpie = 1;
       reg.mstatus.mpp = PRV_U;
       CSR(CSR_MSTATUS) = reg.val;
+      cpu.csr_dirty = true;
       soft_tlb_flush();
     }
   });
@@ -942,6 +944,7 @@ static int decode_exec(Decode *s)
       /* sret returning to priv != M clears MPRV (spec). */
       if (cpu.priv != PRV_M) reg.mstatus.mprv = 0;
       CSR(CSR_MSTATUS) = reg.val;
+      cpu.csr_dirty = true;
       /* SSTATUS view will be re-derived by post-instruction code. */
       soft_tlb_flush();
     }
@@ -1017,6 +1020,22 @@ static int decode_exec(Decode *s)
   });
   INSTPAT_SWITCH_END();
 
+  /* Fast path: normalizing mstatus/misa/medeleg/mideleg WARL fields and
+   * re-deriving the sstatus/sie/sip architectural views is only necessary
+   * when this instruction changed them: any Zicsr write (cpu.last_csr_wr),
+   * a trap or xRET (isa_raise_intr), or an FP-dirty mark. Everything else
+   * leaves those registers already coherent, so skip the whole block. */
+#if defined(CONFIG_TARGET_SHARE)
+  const bool csr_commit = true;
+#else
+  const bool csr_commit = (cpu.last_csr_wr != 0) || cpu.csr_dirty;
+#endif
+  const uint16_t last_csr_wr = cpu.last_csr_wr;
+  cpu.last_csr_wr = 0;
+  cpu.csr_dirty = false;
+
+  if (csr_commit)
+  {
   // mstatus write mask: clear non-writable bits.
   // SD (bit 31/63) is read-only (computed below); VS (bits 10:9) hardwired 0 (no V ext).
   // RV64: SXL[35:34] and UXL[33:32] are WARL fields that hold XLEN==2 and are
@@ -1050,42 +1069,29 @@ static int decode_exec(Decode *s)
    * write targeted SSTATUS/SIE, propagate the (masked) value into the real
    * MSTATUS/MIE.  Otherwise, SSTATUS/SIE are always re-derived below from
    * MSTATUS/MIE, so there is nothing else to sync. */
-  if (cpu.last_csr_wr == CSR_SSTATUS)
+  if (last_csr_wr == CSR_SSTATUS)
   {
     word_t ms_bits = CSR(CSR_SSTATUS) & SSTATUS_RMASK;
     CSR(CSR_MSTATUS) = (CSR(CSR_MSTATUS) & ~SSTATUS_RMASK) | ms_bits;
     CSR(CSR_MSTATUS) &= MSTATUS_WMASK;
   }
-  if (cpu.last_csr_wr == CSR_SIE)
+  if (last_csr_wr == CSR_SIE)
   {
     word_t mask = CSR(CSR_MIDELEG) & SIE_RMASK;
     word_t mie_bits = CSR(CSR_SIE) & mask;
     CSR(CSR_MIE) = (CSR(CSR_MIE) & ~mask) | mie_bits;
   }
-  if (cpu.last_csr_wr == CSR_SIP)
+  if (last_csr_wr == CSR_SIP)
   {
     word_t mask = CSR(CSR_MIDELEG) & SIP_WMASK;
     word_t mip_bits = CSR(CSR_SIP) & mask;
     CSR(CSR_MIP) = (CSR(CSR_MIP) & ~mask) | mip_bits;
   }
 #if !defined(CONFIG_TARGET_SHARE) && defined(CONFIG_DEVICE)
-  if (cpu.last_csr_wr == 0x14d || cpu.last_csr_wr == 0x15d ||
-      cpu.last_csr_wr == CSR_MENVCFG || cpu.last_csr_wr == CSR_MENVCFGH)
+  if (last_csr_wr == 0x14d || last_csr_wr == 0x15d ||
+      last_csr_wr == CSR_MENVCFG || last_csr_wr == CSR_MENVCFGH)
     clint_update_mip();
 #endif
-  /* Explicit writes to either half override this instruction's increment
-   * of the underlying 64-bit counter, including non-x0 zero-mask RMWs. */
-  const bool wrote_mcycle = cpu.last_csr_wr == CSR_MCYCLE
-#ifndef CONFIG_RV64
-      || cpu.last_csr_wr == CSR_MCYCLEH
-#endif
-      ;
-  const bool wrote_minstret = cpu.last_csr_wr == CSR_MINSTRET
-#ifndef CONFIG_RV64
-      || cpu.last_csr_wr == CSR_MINSTRETH
-#endif
-      ;
-  cpu.last_csr_wr = 0;
   if (((CSR(CSR_MSTATUS) >> 11) & 3) == 2)
     CSR(CSR_MSTATUS) &= ~((word_t)3 << 11);
 #ifdef CONFIG_RV64
@@ -1106,15 +1112,27 @@ static int decode_exec(Decode *s)
       CSR(CSR_MSTATUS) |= 0x80000000u;
 #endif
   }
-  // Derive sstatus/sie from mstatus/mie
-#ifdef CONFIG_RV64
+  // Derive sstatus/sie/sip from mstatus/mie/mip
   CSR(CSR_SSTATUS) = CSR(CSR_MSTATUS) & SSTATUS_RMASK;
   CSR(CSR_SIE) = CSR(CSR_MIE) & CSR(CSR_MIDELEG) & SIE_RMASK;
-#else
-  CSR(CSR_SSTATUS) = CSR(CSR_MSTATUS) & SSTATUS_RMASK;
-  CSR(CSR_SIE) = CSR(CSR_MIE) & CSR(CSR_MIDELEG) & SIE_RMASK;
-#endif
+  // sip is a restricted view of mip per the privileged spec. mip changes
+  // outside a CSR write (clint_update_mip, external SEIP) refresh the stored
+  // sip themselves, so it is sufficient to mirror here on csr_commit.
+  CSR(CSR_SIP) = riscv_mip_value() & CSR(CSR_MIDELEG) & SIP_RMASK;
+  } // csr_commit
 
+  /* Explicit writes to either half override this instruction's increment
+   * of the underlying 64-bit counter, including non-x0 zero-mask RMWs. */
+  const bool wrote_mcycle = last_csr_wr == CSR_MCYCLE
+#ifndef CONFIG_RV64
+      || last_csr_wr == CSR_MCYCLEH
+#endif
+      ;
+  const bool wrote_minstret = last_csr_wr == CSR_MINSTRET
+#ifndef CONFIG_RV64
+      || last_csr_wr == CSR_MINSTRETH
+#endif
+      ;
   word_t inst_advance = 1;
 #ifndef CONFIG_RV64
   word_t old_mcycle = CSR(CSR_MCYCLE);
@@ -1143,16 +1161,15 @@ static int decode_exec(Decode *s)
     clint_update_mip();
 #endif
   }
-  // sip is a restricted view of mip per the privileged spec; this mirror
-  // must run unconditionally (also under CONFIG_TARGET_SHARE difftest builds)
-  // so that M-mode writes to mip.STIP/SSIP/SEIP become visible via sip.
-  CSR(CSR_SIP) = riscv_mip_value() & CSR(CSR_MIDELEG) & SIP_RMASK;
 #undef TIMER_TICK_INTERVAL
 
   R(0) = 0; // reset $zero to 0
 
 #if !defined(CONFIG_TARGET_SHARE)
-  ftrace_add(s->pc, s->dnpc, s->isa.inst);
+  /* Skip the per-instruction call/return bookkeeping unless an ELF is loaded
+   * or an interrupt entry still needs classifying. */
+  if (ftrace_enabled || cpu.raise_intr != INTR_EMPTY)
+    ftrace_add(s->pc, s->dnpc, s->isa.inst);
 #endif
   s->pc = s->dnpc;
   return 0;
@@ -1165,7 +1182,8 @@ int isa_exec_once(Decode *s)
 {
   cpu.instruction_trapped = false;
   cpu.last_csr_wr = 0;
-  // instruction fetch (skipped on decode-cache hit)
+  /* One longjmp target per instruction: fetch and decode faults share the
+   * same trap entry, so a second _setjmp() only adds hot-path overhead. */
   int jmp_value = nemu_setjmp(exec_jmp_buf);
   if (jmp_value)
   {
@@ -1193,14 +1211,6 @@ int isa_exec_once(Decode *s)
   }
   cpu.inst = s->isa.inst;
 
-  // instruction decode and execute
-  jmp_value = nemu_setjmp(exec_jmp_buf);
-  if (jmp_value)
-  {
-    s->pc = isa_raise_intr(cause, s->pc);
-    s->isa.inst = 0x13; // addi x0, x0, 0; a.k.a. NOP
-    return 0;
-  }
   vaddr_t fill_pc = s->pc; // decode_exec will clobber s->pc <- dnpc
   const uint32_t fetch_epoch = icache_epoch;
   int ret = decode_exec(s);

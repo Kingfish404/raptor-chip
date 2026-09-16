@@ -96,6 +96,30 @@ word_t paddr_read(paddr_t addr, int len);
 void paddr_write(paddr_t addr, int len, word_t data);
 bool paddr_is_mapped(paddr_t addr);
 bool paddr_is_readonly(paddr_t addr);
+/* Contiguous writable DRAM (pmem/sram/sdram) with no MMIO overlap. Inlined:
+ * this is on the hot path of every load/store (check_data_pma/type). */
+#ifdef CONFIG_DEVICE
+bool mmio_overlaps_ram(void);
+bool mmio_map_contains(paddr_t addr);
+#endif
+static inline bool paddr_is_ram_span(paddr_t addr, int len)
+{
+  if (len <= 0) return false;
+  paddr_t last = addr + len - 1;
+  if (last < addr) return false;
+  if (!((in_pmem(addr) && in_pmem(last))
+        || (in_sram(addr) && in_sram(last))
+        || (in_sdram(addr) && in_sdram(last))))
+    return false;
+#ifdef CONFIG_DEVICE
+  /* Only probe the map when an MMIO region actually overlaps RAM; otherwise
+   * the static partition makes the checks provably false and they would cost
+   * two map lookups on every load/store. */
+  if (mmio_overlaps_ram()
+      && (mmio_map_contains(addr) || mmio_map_contains(last))) return false;
+#endif
+  return true;
+}
 bool paddr_supports_atomic(paddr_t addr, int len);
 bool paddr_supports_zero(paddr_t addr);
 

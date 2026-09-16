@@ -49,6 +49,8 @@ module tb_hum_request_stage;
     enqueue(2, XLEN'('h80003000));
     check(!exu_lsu.rvalid_b, "B bypassed its request register");
     tick(1);
+    check(!exu_lsu.rvalid_b, "B bypassed address preparation");
+    tick(1);
     check(exu_lsu.rvalid_b && exu_lsu.raddr_b == XLEN'('h80003000),
           "B did not capture the ready younger load");
 
@@ -109,7 +111,7 @@ module tb_hum_request_stage;
       enqueue(0, XLEN'('h80004000));
       await_a(XLEN'('h80004000));
       enqueue(1, XLEN'('h80005000));
-      tick(1);
+      tick(2);
       check(exu_lsu.rvalid_b, "second B request missing");
       if (scenario == 0) cmu_bcast.flush_pipe = 1;
       else exu_lsu.rready = 1;

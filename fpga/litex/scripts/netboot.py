@@ -164,7 +164,9 @@ def verify_bundle(out):
 
 
 def serve_plan(out, address, port):
-    verify_bundle(out)
+    record = verify_bundle(out)
+    require(record.get('xlen') in (32, 64), 'invalid bundle XLEN')
+    relative = Path('raptor-netboot') / f'rv{record["xlen"]}' / digest((out / 'bundle.json').read_bytes())
     ip = ipaddress.IPv4Address(address)
     require(not (ip.is_unspecified or ip.is_multicast or ip.is_reserved or int(ip) == 0xffffffff),
             'specify the host board-facing unicast IPv4 address, not a wildcard')
@@ -173,10 +175,26 @@ def serve_plan(out, address, port):
     print('PLAN ONLY: no server, sudo, network or firewall changes are performed.')
     if not Path(daemon).is_file():
         print('MISSING: tftpd-hpa (install separately; do not alter an active network session).')
-    print(shlex.join([daemon, '--foreground', '--ipv4', '--address', f'{ip}:{port}',
-                     '--secure', '--blocksize', '512', str(out.resolve())]))
+    # A dedicated export tree keeps root boot.json out of the boot protocol.
+    # These are printed instructions only; serve-plan remains read-only.
+    staging = (
+        'import json,pathlib,shutil,sys; '
+        'source=pathlib.Path(sys.argv[1]); root=pathlib.Path(sys.argv[2]); '
+        f'relative=pathlib.Path({str(relative)!r}); '
+        'dest=root/relative; dest.mkdir(parents=True); '
+        '[shutil.copyfile(source/name,dest/name) for name in '
+        '("fw_payload.bin","soc.dtb","stage0.bin")]; '
+        'boot=json.loads((source/"boot.json").read_text()); '
+        '(dest/"boot.json").write_text(json.dumps('
+        '{str(relative/name) if name!="addr" else name:value for name,value in boot.items()})); '
+        '[p.chmod(0o444) for p in dest.iterdir()]; root.chmod(0o755)'
+    )
+    print('netboot_export=$(mktemp -d /tmp/raptor-netboot-export.XXXXXX)')
+    print(shlex.join([sys.executable, '-c', staging, str(out.resolve())]) + ' "$netboot_export"')
+    print(shlex.join([daemon, '--listen', '--foreground', '--ipv4', '--address', f'{ip}:{port}',
+                     '--secure', '--blocksize', '512']) + ' "$netboot_export"')
     print('Review privileges for chroot/port binding; allow only the board on the lab interface.')
-    print('BIOS must use this server IP/port. At litex>: netboot boot.json')
+    print(f'BIOS must use this server IP/port. At litex>: netboot {relative}/boot.json')
 
 
 def main():

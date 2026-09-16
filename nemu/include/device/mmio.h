@@ -20,6 +20,10 @@
 #include <stdio.h>
 
 bool mmio_map_contains(paddr_t addr);
+/* True once any registered MMIO map overlaps a RAM span (pmem/sdram/sram).
+ * Lets the RAM fast paths skip the mmio_map_contains() probes when the
+ * address space is statically partitioned (the normal case). */
+bool mmio_overlaps_ram(void);
 word_t mmio_read(paddr_t addr, int len);
 void mmio_write(paddr_t addr, int len, word_t data);
 int mmio_map_count(void);

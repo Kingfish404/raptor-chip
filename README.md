@@ -1,14 +1,8 @@
 # Raptor Project
 
-[![Benchmark](https://github.com/Kingfish404/raptor-chip/actions/workflows/benchmark.yaml/badge.svg)](https://github.com/Kingfish404/raptor-chip/actions/workflows/benchmark.yaml)
-[![App](https://github.com/Kingfish404/raptor-chip/actions/workflows/app.yaml/badge.svg)](https://github.com/Kingfish404/raptor-chip/actions/workflows/app.yaml)
-[![STA](https://github.com/Kingfish404/raptor-chip/actions/workflows/sta.yaml/badge.svg)](https://github.com/Kingfish404/raptor-chip/actions/workflows/sta.yaml)
+[![Benchmark](https://github.com/Kingfish404/raptor-chip/actions/workflows/benchmark.yaml/badge.svg)](https://github.com/Kingfish404/raptor-chip/actions/workflows/benchmark.yaml) [![App](https://github.com/Kingfish404/raptor-chip/actions/workflows/app.yaml/badge.svg)](https://github.com/Kingfish404/raptor-chip/actions/workflows/app.yaml) [![STA](https://github.com/Kingfish404/raptor-chip/actions/workflows/sta.yaml/badge.svg)](https://github.com/Kingfish404/raptor-chip/actions/workflows/sta.yaml)
 
-[![ISA](https://img.shields.io/badge/ISA-RV32%2F64IMAFDC__Zb*-192f60?longCache=true&style=flat&logo=riscv&logoColor=white&colorA=192f60&colorB=660874)](./docs/uarch.md)
-[![marchID](https://img.shields.io/badge/marchID-0x32-660874?longCache=true&style=flat&colorA=192f60&colorB=660874)](https://github.com/riscv/riscv-isa-manual)
-[![Privilege](https://img.shields.io/badge/Priv-M%2FS%2FU%20%2B%20Sv32%2FSv39%20%2B%20PMP-660874?longCache=true&style=flat&colorA=192f60&colorB=660874)](./docs/uarch.md)
-[![FPGA](https://img.shields.io/badge/FPGA-LiteX-192f60?longCache=true&style=flat&colorA=192f60&colorB=660874)](./fpga/)
-[![License](https://img.shields.io/github/license/Kingfish404/raptor-chip?label=License&longCache=true&style=flat&logo=apache&logoColor=white&colorA=192f60&colorB=660874)](./LICENSE)
+[![ISA](https://img.shields.io/badge/ISA-RV32%2F64IMAFDC__Zb*-192f60?longCache=true&style=flat&logo=riscv&logoColor=white&colorA=192f60&colorB=660874)](./docs/uarch.md) [![marchID](https://img.shields.io/badge/marchID-0x32-660874?longCache=true&style=flat&colorA=192f60&colorB=660874)](https://github.com/riscv/riscv-isa-manual) [![Privilege](https://img.shields.io/badge/Priv-M%2FS%2FU%20%2B%20Sv32%2FSv39%20%2B%20PMP-660874?longCache=true&style=flat&colorA=192f60&colorB=660874)](./docs/uarch.md) [![FPGA](https://img.shields.io/badge/FPGA-LiteX-192f60?longCache=true&style=flat&colorA=192f60&colorB=660874)](./fpga/) [![License](https://img.shields.io/github/license/Kingfish404/raptor-chip?label=License&longCache=true&style=flat&logo=apache&logoColor=white&colorA=192f60&colorB=660874)](./LICENSE)
 
 > It is possible to invent a single machine which can be used to compute any computable sequence. — Alan Turing, 1936
 
@@ -27,26 +21,14 @@ Profiles:   RVI20U32; RVA22S64 supported (default config, RV64)
 RV64/default extensions: Zkt, Svinval, Svpbmt (required by RVA22S64)
 
 Bus Interface:  AXI4, XLEN-bit data/addr, 4-bit ID; burst-capable reads (up to 8 outstanding), one outstanding single-beat write with independent AW/W handshakes
-Default uarch: dual issue / dual commit, ROB=32, ALQ=8 (2 issue ports), BRQ=4, MDQ=4, FPQ=4, IOQ=8, SQ=16, integer PRF=128, FPR=32 x 64-bit, L1I=16 KiB, L1D=16 KiB (both 4-way), 64 B cache lines, optional L2 passthrough/cache stage
+Default uarch: dual issue / dual commit, ROB=32, ALQ=8 (2 issue ports), BRQ=4, MDQ=4, FPQ=4, IOQ=8, SQ=16, integer PRF=128, FPR=32 x 64-bit, L1I=8 KiB, L1D=8 KiB (both 4-way), 64 B cache lines, optional L2 passthrough/cache stage
 
 Verifying:  RISCOF (riscv-arch-test), full-core F/D directed/differential tests, RVFI, SVA
 ```
 
-The shared RV32/RV64 ISA list above is not a complete profile inventory.
-For RV64/default, Zkt provides data-independent execution latency for the
-instructions covered by its specification; it does not imply AES/SHA instruction
-support. Svinval implements translation invalidation using a conservative full
-SFENCE.VMA operation, and Svpbmt carries page-based memory types through the
-Sv39 translation, cache, and bus paths. The three extensions are declared in the
-[RV64 supervisor verification configuration](verify/riscof/raptor-rv64s/raptor-rv64s.yaml).
-Validation results apply to their recorded source snapshots and configurations;
-they do not automatically transfer to later RTL changes or other presets.
+The shared RV32/RV64 ISA list above is not a complete profile inventory. For RV64/default, Zkt provides data-independent execution latency for the instructions covered by its specification; it does not imply AES/SHA instruction support. Svinval implements translation invalidation using a conservative full SFENCE.VMA operation, and Svpbmt carries page-based memory types through the Sv39 translation, cache, and bus paths. The three extensions are declared in the [RV64 supervisor verification configuration](verify/riscof/raptor-rv64s/raptor-rv64s.yaml). Validation results apply to their recorded source snapshots and configurations; they do not automatically transfer to later RTL changes or other presets.
 
-The F/D/Zfhmin implementation covers scalar floating-point load/store, arithmetic,
-FMA, divide/square-root, conversion, comparison/classification, rounding modes,
-accrued exception flags, and binary16 load/store, transfer, and conversion. The compressed subset includes the C-extension
-floating-point memory forms required with F/D (C.FLW/C.FSW on RV32 and
-C.FLD/C.FSD plus their stack-pointer forms on RV32/RV64).
+The F/D/Zfhmin implementation covers scalar floating-point load/store, arithmetic, FMA, divide/square-root, conversion, comparison/classification, rounding modes, accrued exception flags, and binary16 load/store, transfer, and conversion. The compressed subset includes the C-extension floating-point memory forms required with F/D (C.FLW/C.FSW on RV32 and C.FLD/C.FSD plus their stack-pointer forms on RV32/RV64).
 
 See [documentation](./docs/README.md) for more details.
 
@@ -82,12 +64,12 @@ flowchart TD
   subgraph MEM["Memory Subsystem"]
     direction TD
     subgraph IMEM["I-side · IF0 (0-bubble seq fetch)"]
-      L1I["L1I 16 KiB 4-way (banked SRAM)"]
+      L1I["L1I 8 KiB 4-way (banked SRAM)"]
       ITLB["ITLB (default 16 entries, FA)"]
       IPTW["IPTW (Sv32 2-lvl / Sv39 3-lvl)"]
     end
     subgraph DMEM["D-side · IS/EX-WB (2-cyc hit, 3-cyc load-use)"]
-      L1D["L1D 16 KiB 4-way (banked SRAM, VIPT, write-through)"]
+      L1D["L1D 8 KiB 4-way (banked SRAM, VIPT, write-through)"]
       DTLB["DTLB (default 16 entries, replicated load/store views)"]
       DPTW["DPTW (Sv32/Sv39, Svade)"]
     end
@@ -246,10 +228,7 @@ make linux-boot-rv32
 # docs/linux_kernel.md, linux/README.md
 ```
 
-The two GC NEMU targets enable a virtio-mmio NIC by default. It uses libslirp
-for unprivileged outbound NAT (guest DHCP `10.0.2.15`, gateway `10.0.2.2`, DNS
-`10.0.2.3`); install the libslirp development package if it is not already
-available (`libslirp-dev` on Debian/Ubuntu).
+The two GC NEMU targets enable a virtio-mmio NIC by default. It uses libslirp for unprivileged outbound NAT (guest DHCP `10.0.2.15`, gateway `10.0.2.2`, DNS `10.0.2.3`); install the libslirp development package if it is not already available (`libslirp-dev` on Debian/Ubuntu).
 
 ### 6. Verification
 
@@ -273,19 +252,9 @@ make verify-all
 
 ### 7. FPGA
 
-For **MLK-CU08 RV32/RV64 Linux with Ethernet and BIOS `netboot`**, follow the
-[paired build/load quick start](fpga/litex/README.md#cu08-rv32rv64-netboot-build-and-load)
-and then [TFTP bundle preparation](fpga/litex/NETBOOT.md).
-Ethernet is **disabled by default** (`WITH_ETHERNET=0`), including Linux CPU
-variants. A plain build therefore does not provide BIOS `netboot`. Build and
-load must use the same Ethernet settings and output directory; `fpga-load`
-loads an existing bitstream and does not rebuild it.
+For **MLK-CU08 RV32/RV64 Linux with Ethernet and BIOS `netboot`**, follow the [paired build/load quick start](fpga/litex/README.md#cu08-rv32rv64-netboot-build-and-load) and then [TFTP bundle preparation](fpga/litex/NETBOOT.md). Ethernet is **disabled by default** (`WITH_ETHERNET=0`), including Linux CPU variants. A plain build therefore does not provide BIOS `netboot`. Build and load must use the same Ethernet settings and output directory; `fpga-load` loads an existing bitstream and does not rebuild it.
 
-For the fixed current CU08 netboot configuration, run from `fpga/litex`:
-`make fpga-netboot-rv32-build`, then `make fpga-netboot-rv32-load`.
-Replace `rv32` with `rv64` for RV64. These paired targets preserve the same
-Ethernet/CPU settings and use isolated output directories; see the linked
-guide for prerequisites, payload paths and TFTP setup.
+For the fixed current CU08 netboot configuration, run from `fpga/litex`: `make fpga-netboot-rv32-build`, then `make fpga-netboot-rv32-load`. Replace `rv32` with `rv64` for RV64. These paired targets preserve the same Ethernet/CPU settings and use isolated output directories; see the linked guide for prerequisites, payload paths and TFTP setup.
 
 ```shell
 # --- LiteX SoC ---

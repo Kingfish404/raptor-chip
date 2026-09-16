@@ -47,13 +47,8 @@ void serial_poll_stdin(void);
 void virtio_net_poll(void);
 #endif
 
-void device_update()
+void device_update_slow()
 {
-  static uint64_t skip_count = 0;
-  if (++skip_count < 65536)
-    return;
-  skip_count = 0;
-
   static uint64_t last = 0;
   uint64_t now = get_time();
   if (now - last < 1000000 / TIMER_HZ)

@@ -323,28 +323,15 @@ bool paddr_is_readonly(paddr_t addr)
   return in_rom(addr) || in_mrom(addr) || in_flash(addr);
 }
 
-static bool paddr_is_writable_ram_span(paddr_t addr, int len)
-{
-  if (len <= 0) return false;
-  paddr_t last = addr + len - 1;
-  if (last < addr) return false;
-#ifdef CONFIG_DEVICE
-  if (mmio_map_contains(addr) || mmio_map_contains(last)) return false;
-#endif
-  return (in_pmem(addr) && in_pmem(last))
-      || (in_sram(addr) && in_sram(last))
-      || (in_sdram(addr) && in_sdram(last));
-}
-
 bool paddr_supports_atomic(paddr_t addr, int len)
 {
   return (len == 4 || len == 8) && !(addr & (len - 1))
-      && paddr_is_writable_ram_span(addr, len);
+      && paddr_is_ram_span(addr, len);
 }
 
 bool paddr_supports_zero(paddr_t addr)
 {
-  return paddr_is_writable_ram_span(addr & ~(paddr_t)63, 64);
+  return paddr_is_ram_span(addr & ~(paddr_t)63, 64);
 }
 
 word_t paddr_read(paddr_t addr, int len)

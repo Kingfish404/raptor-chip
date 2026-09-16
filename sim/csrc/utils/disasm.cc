@@ -32,11 +32,17 @@ static csh handle;
 #error "Unsupported platform"
 #endif
 
+#ifdef RAPT_CAPSTONE_PATH
+#define RAPT_CAPSTONE_LIBRARY STRINGIZE(RAPT_CAPSTONE_PATH)
+#else
+#define RAPT_CAPSTONE_LIBRARY "libcapstone." CS_LIB_SUFFIX
+#endif
+
 void init_disasm()
 {
   void *dl_handle;
-  dl_handle = dlopen("../nemu/tools/capstone/repo/libcapstone." CS_LIB_SUFFIX, RTLD_LAZY);
-  assert(dl_handle);
+  dl_handle = dlopen(RAPT_CAPSTONE_LIBRARY, RTLD_LAZY);
+  Assert(dl_handle, "Cannot load Capstone %s: %s", RAPT_CAPSTONE_LIBRARY, dlerror());
 
   cs_err (*cs_open_dl)(cs_arch arch, cs_mode mode, csh *handle) = NULL;
   // cs_open_dl = dlsym(dl_handle, "cs_open");

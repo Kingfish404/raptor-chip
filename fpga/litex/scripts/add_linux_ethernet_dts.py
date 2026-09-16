@@ -4,6 +4,7 @@
 import argparse
 import json
 from pathlib import Path
+from add_linux_sdcard_dts import sdcard_node
 
 
 def ethernet_node(csr):
@@ -48,7 +49,10 @@ def main():
     parser.add_argument("dts", type=Path)
     args = parser.parse_args()
     try:
-        node = ethernet_node(json.loads(args.csr.read_text()))
+        csr = json.loads(args.csr.read_text())
+        node = ethernet_node(csr)
+        if 'sdcard_phy_card_detect' in csr.get('csr_registers', {}):
+            node += sdcard_node(csr)
         text = args.dts.read_text()
         if '"litex,liteeth"' in text:
             raise ValueError("DTS already contains Ethernet; regenerate the base DTS first")

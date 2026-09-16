@@ -25,7 +25,6 @@ extern int cause;
 
 bool pmp_check(paddr_t addr, int size, uint32_t priv,
                bool op_r, bool op_w, bool op_x);
-uint32_t pmp_effective_priv_ls(void);
 
 #define SV32_MODE 1
 #define SV39_MODE 8

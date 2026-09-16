@@ -53,7 +53,11 @@ endef
 # $(call _run_litex_target,arguments)
 define _run_litex_target
 if [ "$(BOOT_MODE)" = "bios" ]; then $(call _litex_bios_patches_apply) || exit 1; fi; \
-source $(VENV_DIR)/bin/activate && \
+source $(VENV_DIR)/bin/activate || exit $$?; \
+if [ "$(FPGA_VENDOR)" = "vivado" ]; then \
+  vivado_executable=$$(command -v "$(VIVADO)") && \
+  export PATH="$$(dirname "$$vivado_executable"):$$PATH"; \
+fi; \
 RAPT_LITEX_SOFTWARE_DIR="$(if $(filter bios,$(BOOT_MODE)),$(FPGA_DIR)/software-src/litex/soc/software,)" \
 RAPT_BIOS_SOURCE_DIR="$(if $(and $(filter bios,$(BOOT_MODE)),$(filter 1,$(LINUX_FPGA_PROFILE))),$(FPGA_DIR)/bios-src,)" \
 $(PYTHON) $(FPGA_PY) $(1)
@@ -244,7 +248,7 @@ $(FW_LINUX_FPGA_SEEDED_DTB): $(FW_LINUX_FPGA_DTB) $(FW_LINUX_FPGA_RNG_SEED) $(LI
 fpga-linux-dtb-check: $(FW_LINUX_FPGA_DTB)
 	$(HOST_PYTHON) $(LITEX_DIR)/scripts/check_linux_dts.py $(FW_LINUX_FPGA_DTS)
 
-$(FW_LINUX_FPGA_ELF): $(FW_LINUX_FPGA_SRC)/boot.S $(FW_LINUX_FPGA_SRC)/link.ld $(FW_LINUX_FPGA_DTB) $(LINUX_FPGA_PAYLOAD) | $(FW_LINUX_FPGA_DIR)
+$(FW_LINUX_FPGA_ELF): $(FW_LINUX_FPGA_SRC)/boot.S $(FW_LINUX_FPGA_SRC)/cmo_init.h $(FW_LINUX_FPGA_SRC)/link.ld $(FW_LINUX_FPGA_DTB) $(LINUX_FPGA_PAYLOAD) | $(FW_LINUX_FPGA_DIR)
 	@if [ -z "$(LINUX_FPGA_PAYLOAD)" ] || [ ! -f "$(LINUX_FPGA_PAYLOAD)" ]; then \
 		echo "[ERR] Linux FPGA payload not found after $(LINUX_VARIANT)-build: $(LINUX_FPGA_PAYLOAD)"; exit 1; fi
 	$(CROSS)gcc $(FW_LINUX_FPGA_CFLAGS) -T $(FW_LINUX_FPGA_SRC)/link.ld -o $@ $(FW_LINUX_FPGA_SRC)/boot.S
@@ -726,7 +730,7 @@ ifeq ($(FPGA_VENDOR),gowin)
 	@if [ ! -x "$(GOWIN_BIN_DIR)/gw_sh" ]; then \
 		echo "[ERR] gw_sh not found at $(GOWIN_BIN_DIR)/gw_sh"; exit 1; fi
 else
-	@command -v $(VIVADO) >/dev/null 2>&1 || { \
+	@command -v "$(VIVADO)" >/dev/null 2>&1 || { \
 		echo "[ERR] $(VIVADO) not found on PATH — source the Vivado settings64.sh first"; exit 1; }
 endif
 	@mkdir -p $(FPGA_DIR)
@@ -742,7 +746,7 @@ endif
 	rm -f "$(FPGA_STAMP)"; \
 	echo "[INFO] Bitstream stale (old=$${OLD_HASH:0:12} new=$${NEW_HASH:0:12}); running $(FPGA_VENDOR)..."; \
 	if [ "$(FPGA_VENDOR)" = "vivado" ]; then \
-		$(VIVADO) -mode batch -nojournal -nolog -notrace \
+		"$(VIVADO)" -mode batch -nojournal -nolog -notrace \
 			-source $(LITEX_DIR)/scripts/vivado_check_part.tcl -tclargs $(FPGA_PART) || exit 1; \
 	fi; \
 	$(call _run_litex_target,$(_FPGA_FLAGS) --build) && \

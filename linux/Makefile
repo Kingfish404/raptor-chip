@@ -1,6 +1,7 @@
 PWD_DIR=$(abspath .)
 RAPTOR_HOME ?= $(abspath ..)
-KERNEL_VERSION:=6.18.50
+KERNEL_VERSION = $(patsubst v%,%,$(LINUX_BUILD_VERSION))
+.DEFAULT_GOAL := help
 NPROC := $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 
 # ==============================================================================
@@ -95,7 +96,7 @@ download: download-rv32 download-rv64 ## Download pre-built Linux (RV32 + RV64)
 	@echo "  RV64: $(LINUX_RV64_DIR)/"
 	@cat $(LINUX_RV32_DIR)/README.md
 
-download-all: download download-gc download-rv32gc-fpga ## Download every Linux release asset used by Raptor
+download-all: download download-gc download-rv32gc-fpga download-rv64-alpine download-rv64-debian ## Download every Linux release asset used by Raptor
 	@echo "All Linux assets are available under $(LINUX_BUILD_DIR)"
 
 # Helper targets for querying paths from other Makefiles (e.g. fpga/litex/Makefile).
@@ -265,3 +266,47 @@ print-opensbi-payload: ## Print OpenSBI fw_payload.bin path
 
 clean: ## Clean all build artifacts
 	rm -rf linux initramfs initramfs.cpio.gz opensbi payload/build
+
+.PHONY: download-rv64-alpine
+download-rv64-alpine: $(LINUX_RV64_ALPINE_DIR)/manifest.json ## Download RV64 alpine disk package for netboot
+$(LINUX_RV64_ALPINE_DIR)/manifest.json:
+	$(call download_release_asset,$(LINUX_RV64_ALPINE_NAME),$(LINUX_RV64_ALPINE_SHA256))
+	@test -f $@
+
+.PHONY: download-rv64-debian
+download-rv64-debian: $(LINUX_RV64_DEBIAN_DIR)/manifest.json ## Download RV64 debian disk package for netboot
+$(LINUX_RV64_DEBIAN_DIR)/manifest.json:
+	$(call download_release_asset,$(LINUX_RV64_DEBIAN_NAME),$(LINUX_RV64_DEBIAN_SHA256))
+	@test -f $@
+
+# Project-owned builds. sim and NEMU share a 256 MiB, embedded-rootfs payload;
+# FPGA uses an external rootfs and an exact board DTB supplied by netboot.
+LINUX_PYTHON ?= python3
+LINUX_CROSS ?= riscv64-linux-gnu-
+LINUX_DISTRO ?= $(if $(filter 32,$(_linux_bits)),buildroot,alpine)
+LINUX_OUTPUT ?= $(LINUX_BUILD_DIR)/raptor/$(LINUX_BUILD_VERSION)/rv$(_linux_bits)-$(LINUX_DISTRO)-$(_linux_profile)
+LINUX_PACKAGE ?= $(if $(filter buildroot,$(LINUX_DISTRO)),$(if $(filter 32,$(_linux_bits)),$(LINUX_RV32GC_DIST_DIR),$(LINUX_RV64GC_DIST_DIR)),$(LINUX_BUILD_DIR)/linux-riscv-qemu-rv64-$(LINUX_DISTRO)-$(LINUX_BUILD_VERSION))
+_linux_download = $(if $(filter buildroot,$(LINUX_DISTRO)),download-rv$(_linux_bits)gc,download-rv64-$(LINUX_DISTRO))
+_linux_build_targets := build-rv32-sim build-rv64-sim build-rv32-fpga build-rv64-fpga
+.PHONY: $(_linux_build_targets) run-rv32-sim run-rv64-sim run-rv32-nemu run-rv64-nemu
+build-rv32-sim build-rv32-fpga run-rv32-sim run-rv32-nemu: _linux_bits := 32
+build-rv64-sim build-rv64-fpga run-rv64-sim run-rv64-nemu: _linux_bits := 64
+build-rv32-sim build-rv64-sim run-rv32-sim run-rv64-sim run-rv32-nemu run-rv64-nemu: _linux_profile := sim
+build-rv32-fpga build-rv64-fpga: _linux_profile := fpga
+build-rv32-sim: ## Build RV32 Buildroot payload for sim and NEMU (256 MiB)
+build-rv64-sim: ## Build RV64 Alpine payload for sim and NEMU (LINUX_DISTRO=debian/buildroot optional)
+build-rv32-fpga: ## Build RV32 kernel and RAM rootfs with LiteX Ethernet/SD drivers
+build-rv64-fpga: ## Build RV64 Alpine kernel and RAM rootfs for LiteX netboot
+$(_linux_build_targets):
+	@test "$(_linux_bits)" = 64 -o "$(LINUX_DISTRO)" = buildroot || { echo 'Alpine/Debian require RV64'; exit 1; }
+	$(if $(filter command line environment,$(origin LINUX_PACKAGE)),@test -f "$(LINUX_PACKAGE)/manifest.json",$(MAKE) $(_linux_download))
+	$(LINUX_PYTHON) $(LINUX_HOME)/build_linux.py --package "$(LINUX_PACKAGE)" \
+		--xlen $(_linux_bits) --distro $(LINUX_DISTRO) --profile $(_linux_profile) \
+		--output "$(LINUX_OUTPUT)" --cross "$(LINUX_CROSS)"
+
+run-rv32-sim run-rv32-nemu: build-rv32-sim
+run-rv64-sim run-rv64-nemu: build-rv64-sim
+run-rv32-sim run-rv64-sim: ## Build and boot on RTL sim using existing GC configuration targets
+	$(MAKE) -C $(RAPTOR_HOME) linux-boot-rv$(_linux_bits)gc LINUX_RV$(_linux_bits)GC_PAYLOAD="$(LINUX_OUTPUT)/fw_payload.bin"
+run-rv32-nemu run-rv64-nemu: ## Build and boot on NEMU using existing GC configuration targets
+	$(MAKE) -C $(RAPTOR_HOME) linux-boot-nemu$(_linux_bits)gc LINUX_RV$(_linux_bits)GC_PAYLOAD="$(LINUX_OUTPUT)/fw_payload.bin"

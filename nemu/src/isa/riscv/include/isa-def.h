@@ -386,6 +386,7 @@ typedef struct
   word_t raise_intr;
   uint32_t last_inst_priv;
   uint16_t last_csr_wr;
+  bool csr_dirty;           // mstatus/mie/mip changed outside a Zicsr write
   bool instruction_trapped; // Synchronous trap: this attempt did not retire.
   uint64_t mtimecmp;
   bool stip; // Hardware Sstc level; separate from software-writable mip.STIP.
@@ -409,6 +410,33 @@ typedef struct
 } riscv_CPU_state;
 
 word_t riscv_mip_value(void);
+
+extern riscv_CPU_state cpu;
+/* Cheap interrupt pre-filter for the execute loop. Only a raw MIP source that
+ * is also enabled in mie can ever produce a pending interrupt, so the common
+ * case (nothing asserted) can skip the full isa_query_intr() call. */
+static inline bool riscv_intr_may_pending(void)
+{
+  if (likely(cpu.sr[CSR_MIE] == 0))
+    return false;
+  word_t sources = cpu.sr[CSR_MIP] | (cpu.seip ? (word_t)0x200 : 0) |
+                   (cpu.stip ? (word_t)0x20 : 0);
+#ifdef CONFIG_RAPTOR_MEMORY_MAP
+  sources |= (cpu.sr[CSR_MBERR_STATUS] & 1) << 16;
+#endif
+  return sources != 0;
+}
+
+/* Effective privilege for loads/stores: MPRV + MPP override while in M-mode.
+ * Inlined here because it sits on every data access path (two calls per load
+ * /store via vaddr.c); as a cross-TU extern it could not be inlined. */
+static inline uint32_t pmp_effective_priv_ls(void)
+{
+  word_t ms = cpu.sr[CSR_MSTATUS];
+  if ((ms & CSR_MSTATUS_MPRV) && cpu.priv == PRV_M)
+    return (uint32_t)((ms & CSR_MSTATUS_MPP) >> 11);
+  return cpu.priv;
+}
 
 // decode
 typedef struct

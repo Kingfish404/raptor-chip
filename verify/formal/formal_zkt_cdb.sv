@@ -17,7 +17,32 @@ module formal_zkt_cdb (
     fp1
 );
   rapt_pkg::completion_t i0, i1, f0, f1, out0, out1, control0, control1;
-  wire enable0, enable1;
+  wire enable0, enable1, fp_ready0, fp_ready1;
+  logic past_valid = 0;
+  logic integer_occupied, fp_occupied;
+  always_ff @(posedge clock) begin
+    past_valid <= 1;
+    if (!past_valid) assume(reset);
+    if (reset) begin
+      integer_occupied <= 0;
+      fp_occupied <= 0;
+    end else begin
+      if (!fp_occupied) integer_occupied <= 0;
+      fp_occupied <= fp_public.valid && wb_fpu_accept;
+      if (integer_public.valid && wb_integer_system_accept) integer_occupied <= 1;
+    end
+    if (past_valid && !reset) begin
+      assume(!(integer_public.valid && wb_integer_system_accept) || !integer_occupied);
+      assume(!(fp_public.valid && wb_fpu_accept) || !fp_occupied);
+      assert(enable0 == enable1);
+      assert(fp_ready0 == fp_ready1);
+      assert(out0.valid == out1.valid);
+      if (out0.valid) assert(control0 == control1);
+      cover(out0.valid && out0.result != out1.result);
+      cover(integer_occupied && fp_occupied);
+      cover(enable0 && !out0.valid);
+    end
+  end
   always_comb begin
     i0 = integer_public;
     i0.result = int0;
@@ -31,17 +56,7 @@ module formal_zkt_cdb (
     control0.result = '0;
     control1 = out1;
     control1.result = '0;
-    assert (enable0 == enable1);
-    assert (control0 == control1);
-    assert(out0.valid == ((integer_public.valid && wb_integer_system_accept)
-        || (fp_public.valid && wb_fpu_accept)));
-    assert (enable0 == (integer_system_pipe_enable && !fp_public.valid && fpu_issue_enable));
-    cover (out0.valid && !fp_public.valid && int0 != int1);
-    cover (out0.valid && fp_public.valid && wb_fpu_accept && fp0 != fp1);
-    // Raw but rejected FP occupancy blocks issue, not an accepted integer WB.
-    cover(fp_public.valid && !wb_fpu_accept && integer_public.valid
-        && wb_integer_system_accept && out0.valid && !enable0);
-    cover (enable0 && !out0.valid);
+
   end
   rapt_cdb_arb left_dut (
       .clock,
@@ -53,7 +68,7 @@ module formal_zkt_cdb (
       .wb_integer_system_accept,
       .wb_fpu_accept,
       .wb_shared(out0),
-      .integer_system_issue_enable(enable0)
+      .integer_system_issue_enable(enable0), .fpu_completion_ready(fp_ready0)
   );
   rapt_cdb_arb right_dut (
       .clock,
@@ -65,6 +80,6 @@ module formal_zkt_cdb (
       .wb_integer_system_accept,
       .wb_fpu_accept,
       .wb_shared(out1),
-      .integer_system_issue_enable(enable1)
+      .integer_system_issue_enable(enable1), .fpu_completion_ready(fp_ready1)
   );
 endmodule

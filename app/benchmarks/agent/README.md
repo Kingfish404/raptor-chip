@@ -1,9 +1,6 @@
 # RAgentBench — agentic-workload CPU benchmark
 
-RAgentBench measures how well the Raptor RISC-V core (and any other RV32/RV64
-target reachable via pk, NEMU, LiteX BIOS, or host-native) executes the
-*compute pattern* that LLM-agent runtimes spend most of their wall time on:
-function-call dispatch, retrieval scoring, and multi-turn policy loops.
+RAgentBench measures how well the Raptor RISC-V core (and any other RV32/RV64 target reachable via pk, NEMU, LiteX BIOS, or host-native) executes the *compute pattern* that LLM-agent runtimes spend most of their wall time on: function-call dispatch, retrieval scoring, and multi-turn policy loops.
 
 > **Scope.** RAgentBench evaluates the **CPU/SoC**, not the LLM. There is no
 > language model, no tokenizer, no network. All inputs are deterministic and
@@ -20,8 +17,7 @@ function-call dispatch, retrieval scoring, and multi-turn policy loops.
 | memory pattern         | contiguous tensor sweeps         | scattered small-state mutation |
 | representative of      | model inference / training       | tool-calling agent runtime     |
 
-The two benchmarks are complementary; a core that wins on RLLMBench can still
-lose on RAgentBench (and vice versa) because the bottlenecks differ.
+The two benchmarks are complementary; a core that wins on RLLMBench can still lose on RAgentBench (and vice versa) because the bottlenecks differ.
 
 ## Modes
 
@@ -31,9 +27,7 @@ lose on RAgentBench (and vice versa) because the bottlenecks differ.
 | `rag`      | term-frequency scoring + heap-free top-k selection  | tau-bench domain knowledge / GAIA file Q&A |
 | `workflow` | multi-turn policy loop with subcheckpoint validation | tau-bench / TheAgentCompany subchecks     |
 
-All three include intentional "augmented" branches (missing tool, missing
-parameter, force-termination on step cap) modelled after BFCL v3's augmented
-categories so branch-predictor pressure matches a real agent runtime.
+All three include intentional "augmented" branches (missing tool, missing parameter, force-termination on step cap) modelled after BFCL v3's augmented categories so branch-predictor pressure matches a real agent runtime.
 
 ## Log contract
 
@@ -48,11 +42,9 @@ RAGENTBENCH_SCORE   mode=... work=... seconds=... score_per_sec=... checksum=0x.
 RAGENTBENCH_END     mode=... status=PASS sink=0x...
 ```
 
-Headline metric: **`score_per_sec`** (work units per physical second).
-Frequency-normalized metric: `score_per_mhz = score_per_sec / core_clock_mhz`.
+Headline metric: **`score_per_sec`** (work units per physical second). Frequency-normalized metric: `score_per_mhz = score_per_sec / core_clock_mhz`.
 
-The deterministic `checksum` lets you cross-check that a port did not silently
-change behavior — e.g. RV32 vs RV64, NPC vs NEMU, native vs LiteX.
+The deterministic `checksum` lets you cross-check that a port did not silently change behavior — e.g. RV32 vs RV64, NPC vs NEMU, native vs LiteX.
 
 ## Profile knobs
 
@@ -92,13 +84,10 @@ Reports land under `app/build/rv$XLEN/benchmarks/agent/{logs,reports}/`.
 - No `malloc`, no floating point, no syscalls beyond `printf`.
 - All state arrays are statically sized and zero-initialized at mode entry.
 - Seeds are fixed compile-time constants in `agent_bench.c`.
-- The `RAGENTBENCH_RESULT` `checksum` field is FNV-style mixed over every state
-  mutation; identical builds on identical XLEN must produce identical checksums.
+- The `RAGENTBENCH_RESULT` `checksum` field is FNV-style mixed over every state mutation; identical builds on identical XLEN must produce identical checksums.
 
 ## Non-goals
 
-- Not an LLM agent capability benchmark (use BFCL / tau-bench / SWE-bench /
-  WebArena for that).
-- Not a replacement for CoreMark or MicroBench — RAgentBench specifically
-  targets the irregular-control-flow regime that those two miss.
+- Not an LLM agent capability benchmark (use BFCL / tau-bench / SWE-bench / WebArena for that).
+- Not a replacement for CoreMark or MicroBench — RAgentBench specifically targets the irregular-control-flow regime that those two miss.
 - Not a marketing claim that Raptor is AI-infrastructure silicon.
