@@ -22,6 +22,7 @@ extern VerilatedFstC *tfp;
 void serial_tick();
 unsigned serial_rx_pending();
 const char *serial_input_source();
+bool serial_console_line_open();
 
 extern long long int max_timeout;
 
@@ -268,6 +269,7 @@ void cpu_exec(uint64_t n)
   }
 
   uint64_t now = get_time();
+  uint64_t last_progress_time = now;
   uint64_t cur_inst_cycle = 0;
   uint64_t progress_cycle = 0;
   uint64_t timeout_us = (max_timeout > 0) ? (uint64_t)max_timeout * 1000000 : 0;
@@ -317,16 +319,31 @@ void cpu_exec(uint64_t n)
       break;
     }
     progress_cycle++;
+    bool timed_progress = false;
     if ((progress_cycle & 0x3ffu) == 0)
     {
         serial_tick();
+        // Poll the host clock in batches, independently of the much less
+        // frequent LightSSS snapshots. Slow simulations still report life.
+        timed_progress = get_time() - last_progress_time >= 5000000;
     }
-    if (progress_cycle % progress_interval == 0)
+    const bool snapshot_progress = progress_cycle % progress_interval == 0;
+    // The guest console and these diagnostics share the merged CI log, but the
+    // console is written through an independent unbuffered stream. Emitting a
+    // heartbeat while the guest is mid-line, or letting a buffered heartbeat
+    // flush later, splits guest lines and breaks log parsers. Only log on a
+    // guest line boundary and push the message out immediately.
+    if ((timed_progress || snapshot_progress) && !serial_console_line_open())
     {
+        last_progress_time = get_time();
         Log("progress: %016llu cycles, %016llu insts, pc=" FMT_WORD_NO_PREFIX
           ", uart_rx=%u, input=%s",
           (unsigned long long)progress_cycle, (unsigned long long)pmu.instr_cnt,
           (word_t)(*npc.pc), serial_rx_pending(), serial_input_source());
+        fflush(stdout);
+    }
+    if (snapshot_progress)
+    {
       // LightSSS: fork a COW snapshot at this rewind point. The previous
       // snapshot (window was clean) is reaped here.
       lightsss_fork_at_progress();

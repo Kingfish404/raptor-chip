@@ -53,6 +53,7 @@ def prepare(context, root, args):
               'dtb': distro.sha(soc), 'csr': distro.sha(csr), 'runtime': distro.sha(RUNTIME),
               'selector': args.data_selector, 'logs': args.persist_logs, 'compression': args.initramfs_compression,
               'packer': distro.sha(LINUX / 'pack_netboot.py'),
+              'naming': distro.sha(distro.LITEX / 'scripts/netboot_names.py'),
               'sd_dts': distro.sha(distro.LITEX / 'scripts/add_linux_sdcard_dts.py'),
               'orchestrator': distro.sha(Path(__file__)),
               'compiler': distro.run(context['cross'] + 'gcc', '--version').decode(),

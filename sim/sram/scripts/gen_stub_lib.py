@@ -2,7 +2,7 @@
 """Generate a hand-written behavioral Liberty .lib and a synthesizable .v
 for a raptor-chip 1R1W cache SRAM macro.
 
-This is a *placeholder* for OpenRAM output. It lets `make sta-sram` close
+This is a *placeholder* for OpenRAM output. It lets `make sta MEMORY=sram` close
 the loop (Yosys keeps the macro as a black box; OpenSTA reads timing from
 the .lib) without requiring a full PDK / OpenRAM install. The numbers are
 deliberately conservative single-cycle access models; replace with the

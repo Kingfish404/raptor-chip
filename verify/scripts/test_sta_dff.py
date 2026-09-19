@@ -7,7 +7,7 @@ import sys
 import tempfile
 import unittest
 
-RUNNER = Path(__file__).resolve().parents[2] / "sim/scripts/sta_dff.py"
+RUNNER = Path(__file__).resolve().parents[2] / "sim/scripts/sta.py"
 FAKE_MAKE = """.PHONY: sta sta-detail show
 sta sta-detail show:
 	@echo 'goal=$@ platform=$(PLATFORM) frequency=$(CLK_FREQ_MHZ) design=$(DESIGN) libs=[$(EXTRA_LIB_FILES)] blackboxes=[$(EXTRA_BLACKBOX_V_FILES)]'
@@ -54,6 +54,15 @@ class DffFlowTest(unittest.TestCase):
         self.assertIn("goal=sta platform=custom22 frequency=80", result.stdout)
         self.assertIn("goal=sta-detail", result.stdout)
         self.assertLess(result.stdout.index("goal=sta "), result.stdout.index("goal=sta-detail"))
+
+    def test_sram_requires_and_passes_explicit_libraries(self):
+        self.assertNotEqual(self.run_flow("--memory", "sram").returncode, 0)
+        lib = self.root / "macro.lib"
+        lib.write_text("library(macro) {}\n")
+        result = self.run_flow("--memory", "sram", "--lib", str(lib))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn(f"libs=[{lib}] blackboxes=[]", result.stdout)
+        self.assertNotEqual(self.run_flow("--memory", "dff", "--lib", str(lib)).returncode, 0)
 
     def test_unknown_platform_rejected_without_creating_workspace(self):
         result = self.run_flow("--platform", "missing")

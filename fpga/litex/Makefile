@@ -192,10 +192,6 @@ ifneq ($(TRACE),none)
 endif
 
 EXTRA_FLAGS ?= ## Extra flags passed to raptor_soc.py
-ifeq ($(LINUX_FPGA_PROFILE),1)
-MEMSPEED_TRACE ?= 0 ## (linux FPGA profile) add LiteX BIOS memspeed phase trace markers
-EXTRA_FLAGS := $(strip $(EXTRA_FLAGS) $(if $(filter 1 yes true on,$(MEMSPEED_TRACE)),--rapt-memspeed-trace,))
-endif
 RAPT_PACK_VFLAGS ?= ## Extra defines passed to the sim RTL pack rule
 override RAPT_PACK_VFLAGS := $(strip $(RAPT_PACK_VFLAGS))
 ifeq (,$(filter -DRAPT_FPGA_DSP -DRAPT_FPGA_DSP=%,$(RAPT_PACK_VFLAGS)))
@@ -556,10 +552,6 @@ sim: sim-build ## Build + run sim {ROM,SOC,PAYLOAD,VARIANT,IMG,TRACE,SIM_TIMEOUT
 
 sim-run: ## Run already-built sim (no rebuild) {ROM,SOC,PAYLOAD,VARIANT,SIM_TIMEOUT}
 
-sim-trace: ## Alias: make sim TRACE=fst
-
-sim-trace-vcd: ## Alias: make sim TRACE=vcd (slower/larger than FST)
-
 # ==============================================================================
 # Payload aliases
 # ==============================================================================
@@ -671,7 +663,6 @@ EGOS_KU15P_BIN ?= $(LINUX_FPGA_EGOS_KU15P_IMAGE) ## egos-ku15p.bin path (default
 
 egos-ku15p-sim: fpga-egos-prepare ## Simulate egos-ku15p in LiteX Verilator SoC {TRACE,SIM_TIMEOUT,EGOS_KU15P_BIN}
 
-egos-ku15p-sim-trace: fpga-egos-prepare ## Simulate egos-ku15p with FST waveform dump {TRACE_START,TRACE_END}
 
 raptos-bios-sim-rv32: ## Simulate RV32 RaptOS booting through LiteX BIOS (boot 0x80000000)
 raptos-bios-sim-rv64: ## Simulate RV64 RaptOS booting through LiteX BIOS (boot 0x80000000)
@@ -786,7 +777,6 @@ include $(LITEX_DIR)/mk/config.mk
 
 fpga-detect: ## Refresh and show connected FPGA count, target info, and board mapping {FPGA_AUTO_DETECT,VIVADO,FPGA_DETECT_CACHE}
 
-fpga-info: fpga-detect ## Alias for fpga-detect: list all FPGAs visible through Vivado Hardware Manager
 
 fpga-gen: $(PACK_SV) $(_FPGA_FW_DEP) ## Generate FPGA SoC sources only (no PnR) {BOOT_MODE,FPGA_BOARD,RAPT_CONFIG,INTEGRATED_MAIN_RAM_SIZE}
 
@@ -811,11 +801,7 @@ fpga: fpga-build fpga-load ## Build + load (volatile) in one shot
 
 mlk-cu07-ku15p: ## Build + load on MLK-CU07-KU15P (Vivado) {BOOT_MODE,RAPT_CONFIG}
 
-mlk-cu07-ku15p-build: ## Build bitstream only on MLK-CU07-KU15P (Vivado) {BOOT_MODE,RAPT_CONFIG}
-
 xilinx-vcu118: ## Build + load on Xilinx VCU118 (Vivado) {BOOT_MODE,RAPT_CONFIG}
-
-xilinx-vcu118-build: ## Build bitstream only on Xilinx VCU118 (Vivado) {BOOT_MODE,RAPT_CONFIG}
 
 fpga-console: ## Open serial terminal on the FPGA UART at fixed 115200 baud; board selection is optional (Ctrl-A K to quit) {UART_PORT}
 
@@ -863,7 +849,7 @@ include $(LITEX_DIR)/mk/recipes.mk
 .PHONY: FORCE help setup setup-skip \
 	pack \
 	firmware firmware-sim firmware-fpga firmware-clean \
-	sim-gen sim-build sim sim-run sim-trace sim-trace-vcd sim-clean \
+	sim-gen sim-build sim sim-run   sim-clean \
 	fpga-img-rv32 fpga-img-rv64 fpga-smoke-img-rv32 fpga-smoke-img-rv64 fpga-opensbi-img-rv32 fpga-opensbi-img-rv64 \
 	fpga-linux-dtb-check fpga-linux-dtb-check-rv32 fpga-linux-dtb-check-rv64 \
 	coremark coremark-build coremark-clean coremark-fpga \
@@ -890,9 +876,9 @@ include $(LITEX_DIR)/mk/recipes.mk
 	fpga-raptos-rv64-build fpga-raptos-rv64-upload fpga-raptos-rv64-run \
 	fpga-tinyos-prepare fpga-tinyos-check fpga-tinyos-upload \
 	tang-mega-138k-pro \
-	mlk-cu08-ku15p mlk-cu08-ku15p-build \
-	mlk-cu07-ku15p mlk-cu07-ku15p-build \
-	xilinx-vcu118 xilinx-vcu118-build \
+	mlk-cu08-ku15p  \
+	mlk-cu07-ku15p  \
+	xilinx-vcu118  \
 	lint info clean clean-all
 
 FORCE:

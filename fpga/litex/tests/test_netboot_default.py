@@ -27,13 +27,8 @@ class DefaultTest(unittest.TestCase):
     def test_distro_console_and_buildroot_login(self):
         for prompt, sent in (('Please press Enter to activate this console.', ''), ('buildroot login: ', 'root')):
             port = Mock()
-            port.wait.return_value = prompt
-            flow.enter_linux(port, flow.wait_linux_login(port, 10))
+            flow.enter_linux(port, prompt)
             port.send.assert_called_once_with(sent)
-        for bad in ('litex> ', 'Kernel panic - not syncing'):
-            port.wait.return_value = bad
-            with self.assertRaises(RuntimeError):
-                flow.wait_linux_login(port, 10)
 
     def test_manual_boot_identity_requires_guest_uuid(self):
         port = Mock()

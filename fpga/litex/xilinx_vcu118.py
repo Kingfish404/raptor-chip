@@ -116,6 +116,7 @@ class RaptorVCU118SoC(SoCCore):
             )
 
         SoCCore.__init__(self, platform, sys_clk_freq, **kwargs)
+        self.add_config("BIOS_NO_BOOT")
         self.crg = _CRG(platform, sys_clk_freq, with_litedram=with_litedram)
 
         if with_litedram:

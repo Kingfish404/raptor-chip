@@ -1,4 +1,10 @@
+---
+title: Microarchitecture
+---
+
 # Microarchitecture
+
+The [explorer](./explore.html) replays a cycle-accurate model of this document's pipeline contracts (stage widths, registered queues, IQ reclaim, completion register, L1D hit latency) on CoreMark instruction bytes. It is not NPC/Verilator and branches do not redirect.
 
 Raptor is an out-of-order, super-scalar RISC-V processor core with register renaming, a reorder buffer (ROB), per-class issue queues (a parameterized multi-port ALQ plus BRQ / MDQ / FPQ / IOQ), scalar F/D plus Zfhmin floating-point execution, and virtual memory support.
 
@@ -173,7 +179,7 @@ Local proof, cost and regression notes are in
 
 #### L1I (`rapt_l1i.sv`)
 
-N-way set-associative I-cache (`L1I_N_WAYS`, default 4). `2^L1I_LEN` sets (32), `2^L1I_LINE_LEN` words/line (16 RV32 words = 64 B). Default capacity is 8 KiB. 7-state FSM (`IDLE`, `PTWAIT`, `TRAP`, `RD_A`, `RD_0`, `RD_1`, `FINA`).
+N-way set-associative I-cache (`L1I_N_WAYS`, default 4). `2^L1I_LEN` sets (64), `2^L1I_LINE_LEN` words/line (16 RV32 words = 64 B). Default capacity is 16 KiB. 7-state FSM (`IDLE`, `PTWAIT`, `TRAP`, `RD_A`, `RD_0`, `RD_1`, `FINA`).
 
 | Storage | Implementation                                                                       |
 | ------- | ------------------------------------------------------------------------------------ |
@@ -349,12 +355,18 @@ faulting instructions. Rename recovery consumes typed per-slot PRF identities.
 
 #### CSR (`rapt_csr.sv`)
 
-64-slot CSR storage array (42 named `csr_t` entries in the default
-configuration), M/S-mode. Trap entry/exit (`ecall`/`ebreak`/`mret`/`sret`), privilege transitions (M/S/U), delegation (`medeleg`/`mideleg`), `MSTATUS`<->`SSTATUS` mirroring, `mcycle`/`time` counters. Broadcasts: `priv`, `satp`, MMU enables, `tvec`, and `pmpcfg`/`pmpaddr` shadow arrays for PMP.
+64-slot CSR storage array (42 `csr_t` enum members in the default
+configuration: 41 named CSRs plus the `MNONE__` sentinel), M/S-mode. Trap entry/exit (`ecall`/`ebreak`/`mret`/`sret`), privilege transitions (M/S/U), delegation (`medeleg`/`mideleg`), `MSTATUS`<->`SSTATUS` mirroring, `mcycle`/`time` counters. Broadcasts: `priv`, `satp`, MMU enables, `tvec`, and `pmpcfg`/`pmpaddr` shadow arrays for PMP.
 
 #### PMP (`rapt_pmp.sv`)
 
-16 PMP entries (`RAPT_PMP_NUM=16`). Combinational match logic supports TOR / NA4 / NAPOT modes, with locked (`L` bit) entries enforced even in M-mode. The CSR file owns the architectural PMP registers and sends updates through `pmp_update_if` to local `rapt_pmp_state` copies. Checks cover instruction fetch, load/store accesses and implicit PTW PTE reads. Empty PMP tables allow M-mode accesses and deny S/U-mode accesses.
+8 usable PMP entries (`RAPT_PMP_NUM=8`) across all presets and both XLENs, with 16 architectural CSR slots (`RAPT_PMP_CSR_NUM=16`). Slots 8–15 are read-only zero: their address/configuration writes are ignored and never update the 8-entry permission replicas. RV32 uses `pmpcfg0/1` for the usable entries; RV64 uses `pmpcfg0`, while odd configuration CSRs remain illegal. The remaining legal configuration banks read zero. This retains the architectural CSR numbering while eliminating the upper entries' storage and comparators. Verification declarations distinguish `NUM_PMP_ENTRIES=16` from `NUM_USABLE_PMP_ENTRIES=8`.
+
+Combinational match logic supports TOR / NA4 / NAPOT modes, with locked (`L` bit) entries enforced even in M-mode. The CSR file owns the architectural PMP registers and sends updates through `pmp_update_if` to local `rapt_pmp_state` copies. Checks cover instruction fetch, load/store accesses and implicit PTW PTE reads. Empty PMP tables allow M-mode accesses and deny S/U-mode accesses. Entry 7 remains writable unless it locks itself; the read-only-zero entry 8 cannot lock entry 7 as a TOR predecessor.
+
+Eight entries reduce the available firmware/domain isolation regions; software requiring more must be reconfigured. Existing 16-entry FPGA/boot/profile results do not validate this revision. Area/timing improvement and OpenSBI/Linux/network operation require fresh synthesis and board validation. Directed checks: `make -C verify verilator-csr-pmp-warl-rv32 verilator-csr-pmp-warl-rv64 verilator-csr-pmp-lock-rv32 verilator-csr-pmp-lock-rv64 verilator-pmp-permissions-rv32 verilator-pmp-permissions-rv64`.
+
+**RVA22S64 compatibility:** the [ratified RVA22S64 v1.0 requirements](https://docs.riscv.org/reference/rva20-rvi20-rva22/v1.0/rva22.html) specify the supervisor execution environment and Ss1p12, but do not mandate 16 usable PMP regions. The [RISC-V architectural parameter model](https://riscv.github.io/riscv-unified-db/manual/html/isa/isa_20240411/exts/Sm) distinguishes implemented CSR slots from usable entries and permits read-only-zero entries. Therefore, retaining 16 CSR slots with 8 usable entries does not itself invalidate the default/RV64 RVA22S64 support statement. This is a compatibility assessment of the capacity change, not renewed whole-profile certification or a guarantee for firmware requiring more regions. Preserve M-only CSR access, illegal RV64 odd configuration CSRs, upper-slot read-zero/write-ignore behavior, lower-entry priority, full-access coverage, locks and PTW checks; `make -C verify pmp-capacity-check` covers the directed capacity contracts, not all profile obligations.
 
 `rapt_pmp_permissions` shares range matching and first-entry selection across
 read/write permission results for the same address and byte footprint. L1D uses
@@ -393,10 +405,10 @@ remain separate microarchitecture projects, now rooted at their owning module:
   [`lsu/rapt_lsu_ioq.sv`](../hdl/backend/lsu/rapt_lsu_ioq.sv) with violation
   detection, replay, and eventually a load-PC-to-store-set predictor. IOQ and
   SQ now share the LSU hierarchy; possible aliases remain ordered.
-- **P1-2 — multiple outstanding L1D misses**: extract the single-miss state in
-  [`memory/rapt_l1d.sv`](../hdl/memory/rapt_l1d.sv) into a small MSHR file and
-  return completions to the per-entry IOQ completion storage. The current L1D
-  remains single-outstanding apart from its hit-under-miss B channel.
+- **P1-2 — multiple outstanding L1D misses**: default now has two physical-line
+  MSHRs with refill buffers and IOQ replay. Further work includes direct tagged
+  completion, background whole-line installation, and less conservative store
+  concurrency; the current implementation does not provide these features.
 - **P1-3 — scalable issue selection**: replace the data-capture age matrix in
   [`rapt_iq.sv`](../hdl/backend/rapt_iq.sv) with position-based oldest-first
   selection and PRF read-after-select. ALQ, BRQ, and FPQ deliberately retain
@@ -406,14 +418,35 @@ remain separate microarchitecture projects, now rooted at their owning module:
 
 #### L1D (`rapt_l1d.sv`)
 
-4-way set-associative. `2^L1D_LEN` sets (32), `2^L1D_LINE_LEN` words/line (16 RV32 words or 8 RV64 words = 64 B). Default capacity is 8 KiB. 6-state FSM (`IDLE`, `PTWAIT`, `TRAP`, `LD_CHECK`, `LD_A`, `LD_D`).
+4-way set-associative. `2^L1D_LEN` sets (64), `2^L1D_LINE_LEN` words/line (16 RV32 words or 8 RV64 words = 64 B). Default capacity is 16 KiB. 6-state FSM (`IDLE`, `PTWAIT`, `TRAP`, `LD_CHECK`, `LD_A`, `LD_D`).
 
 | Storage   | Implementation                                                                                    |
 | --------- | ------------------------------------------------------------------------------------------------- |
 | Data      | Banked `rapt_sram_1rw` wide subarrays (single-port, sync read, write bypass)                      |
 | Tag/Valid | Per-line tags and per-word valid register arrays for simultaneous ld/st checks + set invalidation |
 
-Each default L1 has 32 sets × 64 B × 4 ways = 8 KiB, with tree-PLRU replacement. The 2 KiB per-way span keeps every index bit within the page offset for both Sv32 and Sv39.
+Each default L1 has 64 sets × 64 B × 4 ways = 16 KiB, with tree-PLRU replacement. The 4 KiB per-way span keeps every index bit within the page offset for both Sv32 and Sv39.
+
+`RAPT_L1D_MSHRS=2` enables two ordinary RAM miss owners in the default preset;
+0 selects the blocking path, and the miss table supports 1–4 entries. Each entry
+holds one physical line, per-word data/error state and its outstanding bus owner.
+Same-line requests share a refill. A miss returns `rmiss` rather than a completion;
+IOQ excludes that instruction until a refill/capacity wake, then replays it through
+translation, permission checks and cache lookup. Wake does not write registers.
+The initial replay waits for RLAST; critical-word-first wakeup is not implemented.
+Completed lines are protected from replacement until a replay consumes them.
+Replay installs only the demanded word into L1D; remaining words stay in the
+small refill buffer until replacement or invalidation. There is no background
+whole-line installation or BOOM-style per-MSHR replay queue in this version.
+
+AXI IDs 8–11 belong to MSHRs; legacy data/PTW remain on IDs 2/4. Flush kills
+unissued misses immediately and drains issued owners through RLAST without
+publishing their data. Stores wait for pending refills and invalidate buffered
+lines before writing. MMIO, atomics, split loads and the full-width FP load path
+keep the blocking protocol. Existing PBMT/IOQ ordering restrictions remain.
+External slave and optional L2 serialization can limit memory-level parallelism
+even when both MSHRs are occupied.
+
 
 Cacheable main-memory misses issue one aligned full-line INCR read. The demanded word returns as its beat arrives; the accepted transaction retains ownership through RLAST, including after flush or an error. Good beats populate per-word valid state. A demand error faults after the burst drains; errors on other beats leave those words invalid. Refill is restricted to one translated page, a supported RAM range and a uniform PMP region. PMP boundaries, PBMT NC/IO and narrow ROM/SRAM/device paths retain word accesses; no-allocation metadata also prevents optional L2 from widening these requests or PTW reads. Ordinary stores wait while the full-line refill drains.
 
@@ -541,7 +574,7 @@ A/B lane APIs anywhere in the active ordered frontend/backend pipeline.
 | `RAPT_XLEN`                | 32        | Register width (64 with `RAPT_RV64`)                                                  |
 | `RAPT_M_FAST`              | 1         | Single-cycle mul/div (sim mode)                                                       |
 | `RAPT_L1I_LINE_LEN`        | 4         | L1I line: 2⁴ = 16 words (64 B in RV32)                                                |
-| `RAPT_L1I_LEN`             | 5         | L1I sets: 2⁵ = 32                                                                     |
+| `RAPT_L1I_LEN`             | 6         | L1I sets: 2⁶ = 64                                                                     |
 | `RAPT_L1I_N_WAYS`          | 4         | L1I ways (4-way SA)                                                                   |
 | `RAPT_L1I_REFILL_WORDS`    | 8         | Words per L1I sector refill (capped at line size)                                     |
 | `RAPT_PHT_SIZE`            | 256       | PHT entries                                                                           |
@@ -560,7 +593,7 @@ A/B lane APIs anywhere in the active ordered frontend/backend pipeline.
 | `MDQ_SIZE` (param)         | 4         | MUL/DIV issue queue entries                                                           |
 | `RAPT_SQ_SIZE`             | 16        | Unified store queue entries                                                           |
 | `RAPT_L1D_LINE_LEN`        | 4 / 3     | RV32: 16 words/line; RV64: 8 words/line                                               |
-| `RAPT_L1D_LEN`             | 5         | L1D sets: 2⁵^5 = 32                                                                   |
+| `RAPT_L1D_LEN`             | 6         | L1D sets: 2⁶ = 64                                                                     |
 | `RAPT_L1D_N_WAYS`          | 4         | L1D ways (4-way SA)                                                                   |
 | `RAPT_CACHE_SRAMLEN`       | 128       | Cache data-SRAM subarray width in bits                                                |
 | `RAPT_ITLB_ENTRIES`        | 16        | Fully-associative ITLB entries                                                        |
@@ -574,7 +607,11 @@ A/B lane APIs anywhere in the active ordered frontend/backend pipeline.
 | `RAPT_DISPATCH_WIDTH`      | 2         | ROB / execution-queue allocation width (`ifndef` fallback: RenameWidth)               |
 | `RAPT_INTEGER_ISSUE_PORTS` | 2         | Number of physical integer issue/FU ports                                             |
 | `RAPT_INTEGER_SYSTEM_PORT` | 0         | Integer-port index owning CSR/system capability and the FP-shared completion endpoint |
-| `RAPT_PHY_SIZE`            | 128       | Physical registers                                                                    |
+| `RAPT_PHY_SIZE`            | 64        | Physical registers, including architectural mappings                                  |
+| `RAPT_PMP_NUM`             | 8         | Usable PMP comparators (all presets, both XLENs)                                      |
+| `RAPT_PMP_CSR_NUM`         | 16        | Architectural PMP CSR slots; indices 8–15 are read-only zero                          |
+| `RAPT_STEER_SCAN_ENTRIES`  | 4         | ROB dispatch age-window K (`DispatchWidth ≤ K ≤ ROB_SIZE`)                            |
+| `RAPT_CACHE_LINE_BYTES`    | 64        | Software-visible CMO / cache line size                                                |
 
 ## Key Types (`rapt_pkg.sv`)
 

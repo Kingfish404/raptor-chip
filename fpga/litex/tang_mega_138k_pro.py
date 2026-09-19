@@ -130,6 +130,7 @@ class RaptorTangMega138KSoC(SoCCore):
         kwargs.setdefault("bus_timeout", 4096)
 
         SoCCore.__init__(self, platform, sys_clk_freq, **kwargs)
+        self.add_config("BIOS_NO_BOOT")
 
         self.crg = _CRG(platform, sys_clk_freq)
 

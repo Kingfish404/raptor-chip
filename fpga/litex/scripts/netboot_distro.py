@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Build an immutable RV64 Alpine/Debian RAM-root bundle; no board/host setup."""
+from netboot_names import name_bundle
+
 import argparse
 import gzip
 import hashlib
@@ -11,7 +13,7 @@ import shutil
 import struct
 import stat
 import subprocess
-from add_linux_sdcard_dts import sdcard_node
+from add_linux_sdcard_dts import ensure_sdcard_dtb
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "linux"))
 from raptor_linux import background_services, export_rootfs
@@ -101,11 +103,7 @@ def build(package, kernel, soc, output, work, sd_csr=None, persistence_runtime=N
     require((files / 'fw_dynamic.bin').stat().st_size < 0x200000, 'OpenSBI overlaps kernel')
     dtb = files / 'soc.dtb'
     if sd_csr:
-        source = run('dtc', '-q', '-I', 'dtb', '-O', 'dts', dtb).decode()
-        require('"litex,mmc"' not in source, 'input DTB already has MMC; use original base DTB')
-        dts = work / 'sd-soc.dts'
-        dts.write_text(source + sdcard_node(json.loads(sd_csr.read_text())))
-        run('dtc', '-q', '-I', 'dts', '-O', 'dtb', '-o', dtb, dts)
+        ensure_sdcard_dtb(soc, json.loads(sd_csr.read_text()), dtb)
     run('fdtput', '-t', 'x', dtb, '/chosen', 'linux,initrd-start', '88000000')
     run('fdtput', '-t', 'x', dtb, '/chosen', 'linux,initrd-end', f'{0x88000000 + size:x}')
     bootargs = ('console=liteuart0,115200 earlycon=sbi rdinit=/sbin/raptor-init pty.legacy_count=0 '
@@ -131,8 +129,8 @@ def build(package, kernel, soc, output, work, sd_csr=None, persistence_runtime=N
         record.update(persistent_directories=['/data', '/home', '/root'] + (['/var/log'] if persist_logs else []),
                       data_selector=data_selector, sd_csr_sha256=sha(sd_csr),
                       persistence_runtime_sha256=sha(persistence_runtime))
-    identity = hashlib.sha256(json.dumps(record, sort_keys=True).encode()).hexdigest()
-    relative = Path('raptor-netboot/rv64') / (manifest['variant'] + '-' + identity[:20])
+    record['kernel_version'] = manifest['kernel_version']
+    relative = Path(name_bundle(record))
     record['tftp_path'] = str(relative)
     boot = {str(relative / name): hex(address) for name, address in addresses.items()}
     boot['addr'] = hex(ADDRESSES['stage0.bin'])

@@ -428,7 +428,8 @@ __attribute__((__unused__)) static void serial_io_handler_ns16550(uint32_t offse
 // Shares the host stdin FIFO with the ns16550 model so a single keypress
 // is consumed by exactly one reader.
 // ---------------------------------------------------------------------------
-#define LITEX_UART_BASE   0xF0001000u
+#define LITEX_UART_BASE   0xF0001800u  // CU08 LiteX UART CSR bank
+#define LITEX_UART_EGOS_BASE 0xF0001000u  // legacy egos alias, not CU08 timer0
 #define LITEX_UART_SIZE   0x100u
 #define LITEX_UART_RXTX        0x00u
 #define LITEX_UART_TXFULL      0x04u
@@ -532,6 +533,8 @@ static void init_litex_uart(void) {
   litex_uart_ev_pending = 0;
   litex_uart_ev_enable = 0;
   add_mmio_map("litex-uart", LITEX_UART_BASE, litex_uart_space,
+               LITEX_UART_SIZE, litex_uart_io_handler);
+  add_mmio_map("litex-uart-egos", LITEX_UART_EGOS_BASE, litex_uart_space,
                LITEX_UART_SIZE, litex_uart_io_handler);
 }
 

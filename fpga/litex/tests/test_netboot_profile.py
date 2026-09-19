@@ -77,6 +77,22 @@ class NetbootProfileTest(unittest.TestCase):
             with self.subTest(config=config), self.assertRaises(subprocess.CalledProcessError):
                 self.expand('fpga-netboot-rv64-build', f'RAPT_CONFIG={config}')
 
+    def test_netboot_build_cannot_enable_autoboot(self):
+        for bits in (32, 64):
+            target = f'fpga-netboot-rv{bits}-build'
+            for config in ('small', 'middle', 'default'):
+                with self.subTest(bits=bits, config=config):
+                    calls = self.expand(target, f'RAPT_CONFIG={config}')
+                    self.assertEqual(len(calls), 1)
+                    operation, settings = calls[0]
+                    self.assertEqual(operation, 'build')
+                    self.assertEqual(settings['BOOT_MODE'], 'bios')
+                    self.assertEqual(settings['EXTRA_FLAGS'], '')
+                    with self.assertRaises(subprocess.CalledProcessError) as error:
+                        self.expand(target, f'RAPT_CONFIG={config}',
+                                    'EXTRA_FLAGS=--sdcard-autoboot')
+                    self.assertIn('conflicts with netboot', error.exception.stderr)
+
     def test_conflicting_fixed_settings_fail(self):
         for setting in ('FPGA_BOARD=xilinx_vcu118', 'BOARD=mlk_cu07_ku15p',
                         'VARIANT=linux32', 'VARIANT=', 'SYS_CLK=75000000',

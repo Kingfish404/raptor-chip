@@ -34,7 +34,7 @@
     j     boot_terminate;                     \
   boot_end:
 
-#define RVMODEL_NUM_PMPS 16
+#define RVMODEL_NUM_PMPS 8
 #define RVMODEL_PMP_GRAIN 0
 
 #define RVMODEL_DATA_BEGIN                    \

@@ -1,3 +1,7 @@
+---
+title: Reference
+---
+
 # Reference
 
 ## AXI(4) Interface

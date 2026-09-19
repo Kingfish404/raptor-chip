@@ -1,5 +1,6 @@
 !assets/**
 !_layouts/**
+!_includes/**
 
 # Jekyll / local preview artifacts
 _site/

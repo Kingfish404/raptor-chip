@@ -176,7 +176,8 @@ static void sdhci_handle(paddr_t addr, word_t wdata, char wmask, bool is_write, 
 // egos-2000 HARDWARE platform peripherals (LiteX-style).
 #define LITEX_SPI_HW_BASE 0xf0008000u
 #define LITEX_SPI_HW_SIZE 0x100u
-#define LITEX_UART_HW_BASE 0xf0001000u
+#define LITEX_UART_HW_BASE 0xf0001800u
+#define LITEX_UART_EGOS_BASE 0xf0001000u
 #define LITEX_UART_HW_SIZE 0x100u
 #define CLINT_HW_BASE 0xf0010000u
 #define CLINT_HW_SIZE 0x10000u
@@ -189,16 +190,16 @@ static void litex_spi_hw_handle(paddr_t addr, word_t wdata, char wmask, bool is_
 
 static void litex_uart_hw_handle(paddr_t addr, word_t wdata, char wmask, bool is_write, word_t *data)
 {
-  (void)wmask;
+  const paddr_t base = addr >= LITEX_UART_HW_BASE ? LITEX_UART_HW_BASE : LITEX_UART_EGOS_BASE;
   void mmio_litex_uart_handle(paddr_t offset, word_t wdata, bool is_write, word_t *data);
   if (!is_write) {
-    mmio_litex_uart_handle(addr - LITEX_UART_HW_BASE, wdata, false, data);
+    mmio_litex_uart_handle(addr - base, wdata, false, data);
     return;
   }
   // LiteX UART CSRs carry an 8-bit value in the low byte of each 32-bit word.
   for (unsigned i = 0; i < sizeof(word_t); i++)
     if (((uint8_t)wmask & (1u << i)) && ((addr + i) & 3u) == 0)
-      mmio_litex_uart_handle(addr - LITEX_UART_HW_BASE + i,
+      mmio_litex_uart_handle(addr - base + i,
                             (wdata >> (8*i)) & 0xff, true, nullptr);
 }
 
@@ -215,9 +216,11 @@ static mmio_map_t mmio_maps[] = {
     // does not model the device, so loads/stores must be skipped on REF.
     {"litex-spi", LITEX_SPI_HW_BASE, LITEX_SPI_HW_SIZE,
      "egos-2000 HARDWARE LiteX SPI SD controller", true, litex_spi_hw_handle},
-    // egos-2000 HARDWARE platform: minimal LiteX UART. Skip on REF (no model in NEMU).
+    // CU08 and legacy egos share one UART state. Keep REF skip for host input.
     {"litex-uart-hw", LITEX_UART_HW_BASE, LITEX_UART_HW_SIZE,
-     "egos-2000 HARDWARE LiteX UART", true, litex_uart_hw_handle},
+     "CU08 LiteX UART", true, litex_uart_hw_handle},
+    {"litex-uart-egos", LITEX_UART_EGOS_BASE, LITEX_UART_HW_SIZE,
+     "legacy egos LiteX UART alias", true, litex_uart_hw_handle},
     // egos-2000 HARDWARE platform: CLINT alias at 0xf0010000. We don't model
     // it (the real CLINT lives at QEMU_CLINT_BASE) but accesses must be
     // silently absorbed and skipped on REF.

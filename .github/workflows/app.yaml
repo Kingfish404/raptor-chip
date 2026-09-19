@@ -104,7 +104,7 @@ jobs:
       - name: Build (no difftest) and MROM image
         shell: bash -l {0}
         run: |
-          make config-rv32
+          make build-rv32
           make -C sim -j$(nproc)
           make -C sim/csrc/mem/mrom-data
 
@@ -200,8 +200,8 @@ jobs:
       - name: Build with difftest and NEMU-Ref
         shell: bash -l {0}
         run: |
-          make config-rv32-difftest
-          make config-nemu32-ref
+          make build-rv32
+          make build-nemu32-ref
       # - name: Random instruction fuzz tests
       #   shell: bash -l {0}
       #   run: make -C verify fuzz SEED=42 FUZZ_NUM=20 FUZZ_LEN=200 TIMEOUT=10
@@ -326,7 +326,7 @@ jobs:
         run: make -C third_party/riscv-software-src/opensbi PLATFORM_RISCV_ISA=rv32imac_zicntr_zicond_zicsr_zifencei_zba_zbb_zbs CROSS_COMPILE=riscv64-linux-gnu- PLATFORM_RISCV_XLEN=32 PLATFORM=generic -j$(nproc)
       - name: Build NEMU (Linux config)
         shell: bash -l {0}
-        run: make config-nemu32-linux
+        run: make build-nemu32-linux
       - name: Test OpenSBI on NEMU
         shell: bash -l {0}
         run: make -C nemu run IMG=../third_party/riscv-software-src/opensbi/build/platform/generic/firmware/fw_payload.bin ARGS="-b -m 10000000 --log ./build/nemu-log.txt"

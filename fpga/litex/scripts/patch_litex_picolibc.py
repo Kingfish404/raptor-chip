@@ -147,22 +147,6 @@ def patch_libc_mk(path: pathlib.Path) -> bool:
             "$(CURDIR)/picolibc.h: $(LIBC_DIRECTORY)/picolibc-minimal.h",
         )
     text = text.replace(
-        "$(PICOLIBC_SRC_DIR)/newlib/libc/tinystdio/strtoul.c",
-        "$(PICOLIBC_SRC_DIR)/libc/tinystdio/strtoul.c",
-    )
-    text = text.replace(
-        "$(PICOLIBC_SRC_DIR)/newlib/libc/stdlib/strtoul.c",
-        "$(PICOLIBC_SRC_DIR)/libc/stdlib/strtoul.c",
-    )
-    text = text.replace(
-        "$(PICOLIBC_SRC_DIR)/newlib/libc/tinystdio/strtoull.c",
-        "$(PICOLIBC_SRC_DIR)/libc/tinystdio/strtoull.c",
-    )
-    text = text.replace(
-        "$(PICOLIBC_SRC_DIR)/newlib/libc/stdlib/strtoull.c",
-        "$(PICOLIBC_SRC_DIR)/libc/stdlib/strtoull.c",
-    )
-    text = text.replace(
         "$(MINIMAL_PICOLIBC_SRCS): | $(PICOLIBC_SRC_DIR)",
         "$(MINIMAL_PICOLIBC_SRCS): | $(PICOLIBC_SRC_STAMP)",
     )

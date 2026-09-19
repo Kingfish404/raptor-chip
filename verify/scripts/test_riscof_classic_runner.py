@@ -17,6 +17,16 @@ spec.loader.exec_module(module)
 
 
 class RunnerTest(unittest.TestCase):
+    def test_sail_pmp_capacity_matches_model_headers(self):
+        for suite, config_name in (("classic", "raptor.json"), ("classic-nemu", "nemu.json")):
+            with self.subTest(suite=suite):
+                plugin = ROOT / "verify/riscof" / suite / "plugins/sail_cSim"
+                pmp = json.loads((plugin / config_name).read_text())["memory"]["pmp"]
+                self.assertEqual(pmp["count"], 16)
+                self.assertEqual(pmp["usable_count"], 8)
+                self.assertRegex((plugin / "env/model_test.h").read_text(),
+                                 r"#define\s+RVMODEL_NUM_PMPS\s+8\b")
+
     def test_shards_partition_the_selected_suite(self):
         script = ROOT / "verify/scripts/filter_riscof_testlist.py"
         with tempfile.TemporaryDirectory() as directory:

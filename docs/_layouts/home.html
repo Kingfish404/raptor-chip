@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="{{ site.lang | default: 'en-US' }}" class="home">
+<head>
+  {% include head.html %}
+</head>
+<body class="is-home" data-portal="{{ '/assets/generated/portal-data.json' | relative_url }}">
+  {% include nav.html %}
+  <main id="content" class="home-main">
+    <section class="hero">
+      <div class="hero-copy">
+        <p class="eyebrow">raptor-falcon · marchID 0x32</p>
+        <h1>Out-of-order RISC-V for Linux and FPGA.</h1>
+        <p class="lede">
+          Dual-issue, dual-commit register renaming with TAGE, Sv32/Sv39, PMP,
+          and a Linux path through NEMU, Verilator, and LiteX FPGA.
+        </p>
+        <div class="hero-actions">
+          <a class="btn btn-primary" href="{{ '/getting-started.html' | relative_url }}">Quick Start</a>
+          <a class="btn" href="{{ '/explore.html' | relative_url }}">Open explorer</a>
+          <a class="btn" href="{{ '/uarch.html' | relative_url }}">Read the µarch</a>
+          <a class="btn" href="https://github.com/Kingfish404/raptor-chip" rel="external">GitHub</a>
+        </div>
+        <p class="hero-note">
+          Pipeline on top, memory and peripherals on the bottom.
+          Occupancy is a contract-cycle replay of CoreMark instruction bytes
+          in listing order. Branches do not redirect — this is not NPC IPC.
+        </p>
+      </div>
+      <div class="hero-stage" id="explore">
+        <div id="uarch-diagram" class="uarch-frame"></div>
+        <div class="stage-controls">
+          <button type="button" data-uarch-flow>Pause</button>
+          <span class="muted">pipeline block diagram</span>
+        </div>
+        <div class="stage-legend" id="uarch-legend"></div>
+        <aside class="stage-inspect" id="uarch-inspect">
+          <p class="muted">Click a block for its source. Tokens are RV32 CoreMark (matrix / list / CRC / UART MMIO).</p>
+        </aside>
+      </div>
+    </section>
+    <section class="spec-strip" aria-label="Default configuration">
+      <p class="spec-kicker">Default preset · parsed from <code>hdl/configs/default/rapt_config.svh</code></p>
+      <dl id="spec-grid" class="spec-grid"></dl>
+    </section>
+    <section class="home-term-wrap" aria-label="Documentation shell">
+      {% include terminal.html %}
+    </section>
+    <section class="doc-index">
+      <div class="section-head">
+        <h2>Manual</h2>
+        <p>The same Markdown tree GitHub Pages has always served, now behind a product surface.</p>
+      </div>
+      <div class="doc-grid" id="doc-grid"></div>
+    </section>
+  </main>
+  <footer class="site-footer">
+    <p>
+      Licensed under the
+      <a href="https://github.com/Kingfish404/raptor-chip/blob/master/LICENSE">Apache License 2.0</a>.
+      Topology extracted from <code>hdl/</code>; commands from the root <code>Makefile</code>.
+    </p>
+  </footer>
+  {% include scripts.html %}
+</body>
+</html>

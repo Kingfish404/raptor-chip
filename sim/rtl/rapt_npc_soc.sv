@@ -339,7 +339,8 @@ module rapt_npc_soc #(
     || (a >= 32'h30000000 && a < 32'h40000000)  // FLASH
     || (a >= 32'h80000000 && a < 32'h90000000)  // PMEM (main memory, 256 MiB)
     || (a >= 32'ha0000000 && a < 32'ha2000000)  // SDRAM
-    || (a >= 32'hf0001000 && a < 32'hf0001100)  // LiteX UART (egos HARDWARE)
+    || (a >= 32'hf0001800 && a < 32'hf0001900)  // LiteX UART (CU08 CSR map)
+    || (a >= 32'hf0001000 && a < 32'hf0001100)  // LiteX UART (legacy egos alias)
     || (a >= 32'hf0008000 && a < 32'hf0008100)  // LiteX SPI SD-card controller
     || (a >= 32'hf0010000 && a < 32'hf0020000));  // CLINT alias (egos HARDWARE)
   endfunction

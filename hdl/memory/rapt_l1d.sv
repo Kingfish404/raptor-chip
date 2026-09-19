@@ -33,15 +33,8 @@ module rapt_l1d #(
 
     input reset
 );
-  pmp_state_if pmp_state ();
-
-  rapt_pmp_state pmp_state_regs (
-      .clock(clock),
-      .reset(reset),
-      .update(pmp_update),
-      .state(pmp_state)
-  );
-
+  localparam unsigned L1dOffsetBits = $clog2(XLEN / 8);
+  localparam unsigned L1dTagW = PADDR_BITS - L1D_LEN - L1D_LINE_LEN - L1dOffsetBits;
   typedef enum logic [2:0] {
     IDLE   = 3'b000,
     PTWAIT = 3'b100,  // waiting for PTW to complete
@@ -52,10 +45,112 @@ module rapt_l1d #(
   } l1d_state_t;
 
   l1d_state_t l1d_state;
-
-  logic [XLEN-1:0] l1d_addr;
-  logic [1:0] l1d_pbmt;
+  // Shared state used by MSHR eligibility and invalidation below.
+  logic fence_clear_busy;
+  logic refill_safe, refill_pmp_uniform;
+  logic l1d_atomic_lock;
   logic l1d_orig_misaligned;
+
+  // Declare shared lookup signals before the generate instance. Otherwise
+  // synthesis can bind a forward port reference to an implicit scalar net.
+  logic [XLEN-1:0] l1d_addr;
+  logic tag_hit;
+  logic [L1D_N_WAYS-1:0] load_way_hit;
+  logic mshr_busy, mshr_wake, mshr_ready, mshr_error, mshr_wait;
+  logic mshr_lookup, mshr_eligible, mshr_complete, mshr_release, mshr_buffered;
+  logic mshr_req_valid, mshr_req_ready, mshr_select, legacy_arvalid;
+  logic [1:0] mshr_req_id;
+  logic [XLEN-1:0] mshr_req_addr, mshr_data;
+  logic legacy_rvalid, legacy_rready;
+  logic mshr_invalidate, mshr_invalidate_line;
+  logic mshr_fill_valid, mshr_fill_ready;
+  logic [XLEN-1:0] mshr_fill_addr;
+  logic [L1D_LINE_SIZE-1:0] mshr_fill_mask, line_update_mask;
+  logic [L1D_LINE_SIZE*XLEN-1:0] mshr_fill_data, line_update_data;
+  logic line_update;
+  logic [L1D_LEN-1:0] tag_read_idx;
+  logic [L1dTagW-1:0] tag_read_tag;
+  assign legacy_rvalid = l1d_bus.rvalid && !l1d_bus.r_mshr;
+  assign legacy_rready = l1d_bus.rready && !l1d_bus.ar_mshr;
+  assign mshr_invalidate = cmu_bcast.flush_pipe || fence_clear_busy
+      || external_write_valid_i;
+  assign mshr_invalidate_line = lsu_l1d.wvalid && !mshr_busy;
+  // Only requests which can replay as a whole may release LSU ownership.
+  // Permission and physical-line footprint checks have completed in LD_CHECK.
+  assign mshr_eligible = (`RAPT_L1D_MSHRS > 0) && LineRefill && refill_safe
+      && lsu_l1d.replay_allowed && !l1d_atomic_lock && !l1d_orig_misaligned;
+  // Miss allocation needs the tag result, not SRAM read data. A valid cache
+  // word without a matching buffer waits for its array read; an absent word
+  // can allocate while a different refill is writing the array.
+  assign mshr_lookup = mshr_eligible && l1d_state == LD_A
+      && !lsu_l1d.wvalid && !mshr_invalidate;
+  assign mshr_complete = mshr_lookup && mshr_ready;
+  assign mshr_release = mshr_lookup && mshr_wait;
+  assign lsu_l1d.rmiss = mshr_release && lsu_l1d.rvalid;
+  assign lsu_l1d.miss_wake = mshr_wake;
+  if (`RAPT_L1D_MSHRS > 0) begin : g_mshr
+    rapt_l1d_mshr #(
+        .Xlen(XLEN),
+        .Entries(`RAPT_L1D_MSHRS),
+        .LineBytes(L1D_LINE_SIZE * (XLEN / 8))
+    ) misses (
+        .clock,
+        .reset,
+        .invalidate(mshr_invalidate),
+        .invalidate_line(mshr_invalidate_line),
+        .invalidate_addr(lsu_l1d.waddr),
+        .fill_valid(mshr_fill_valid),
+        .fill_ready(mshr_fill_ready),
+        .fill_addr(mshr_fill_addr),
+        .fill_mask(mshr_fill_mask),
+        .fill_data(mshr_fill_data),
+        .lookup_valid(mshr_lookup),
+        .cache_hit(tag_hit || (!mshr_buffered && |load_way_hit)),
+        .lookup_addr(l1d_addr),
+        .lookup_ready(mshr_ready),
+        .lookup_error(mshr_error),
+        .lookup_buffered(mshr_buffered),
+        .lookup_wait(mshr_wait),
+        .lookup_data(mshr_data),
+        .busy(mshr_busy),
+        .wake(mshr_wake),
+        .req_valid(mshr_req_valid),
+        .req_id(mshr_req_id),
+        .req_addr(mshr_req_addr),
+        .req_ready(mshr_req_ready),
+        .rsp_valid(l1d_bus.rvalid && l1d_bus.r_mshr),
+        .rsp_id(l1d_bus.r_mshr_id),
+        .rsp_data(l1d_bus.rdata),
+        .rsp_error(l1d_bus.rerr),
+        .rsp_last(l1d_bus.rlast)
+    );
+  end else begin : g_no_mshr
+    assign mshr_ready = 0;
+    assign mshr_buffered = 0;
+    assign mshr_error = 0;
+    assign mshr_wait = 0;
+    assign mshr_data = '0;
+    assign mshr_busy = 0;
+    assign mshr_wake = 0;
+    assign mshr_req_valid = 0;
+    assign mshr_req_id = '0;
+    assign mshr_req_addr = '0;
+    assign mshr_fill_valid = 0;
+    assign mshr_fill_addr = '0;
+    assign mshr_fill_mask = '0;
+    assign mshr_fill_data = '0;
+  end
+
+  pmp_state_if pmp_state ();
+
+  rapt_pmp_state pmp_state_regs (
+      .clock(clock),
+      .reset(reset),
+      .update(pmp_update),
+      .state(pmp_state)
+  );
+
+  logic [1:0] l1d_pbmt;
   logic l1d_check_valid;
   logic [2:0] l1d_check_offset;
   logic [3:0] l1d_check_size_m1;
@@ -76,8 +171,6 @@ module rapt_l1d #(
   // cache line has independent valid tracking so partial fills / invalidates
   // don't require whole-line eviction.  When a new tag is installed in a
   // line (tag mismatch), all valid bits except the new target are cleared.
-  localparam unsigned L1dOffsetBits = $clog2(XLEN / 8);  // 2 for RV32, 3 for RV64
-  localparam unsigned L1dTagW = PADDR_BITS - L1D_LEN - L1D_LINE_LEN - L1dOffsetBits;
   if (PADDR_BITS > XLEN || PADDR_BITS <= L1D_LEN + L1D_LINE_LEN + L1dOffsetBits)
     begin : g_invalid_paddr_width
     $error("L1D physical address width must fit its request and cache geometry");
@@ -85,7 +178,6 @@ module rapt_l1d #(
   localparam unsigned L1dWayW = L1D_N_WAYS > 1 ? $clog2(L1D_N_WAYS) : 1;
   logic [L1D_SIZE-1:0] fence_clear_set;
   logic [L1D_SIZE-1:0] maintenance_set;
-  logic fence_clear_busy;
   logic zero_complete;
   // Maintenance and refill logic reference these before the address logic.
   logic [L1D_LEN-1:0] waddr_idx;
@@ -107,7 +199,6 @@ module rapt_l1d #(
   end
   assign fence_clear_busy = cmu_bcast.fence_time || cmu_bcast.cbo_inval || |fence_clear_set;
 
-  logic refill_safe, refill_pmp_uniform;
   logic refill_line, demand_done;
   logic [L1D_LINE_LEN-1:0] refill_word;
   logic demand_beat, line_read_request;
@@ -148,7 +239,6 @@ module rapt_l1d #(
 
   logic [L1dTagW-1:0] addr_tag;
   logic [L1D_LEN-1:0] addr_idx;
-  logic tag_hit;   // tag comparison result (combinational, from register arrays)
   logic data_hit;  // SRAM data ready after 1-cycle read latency
   logic [XLEN-1:0] l1d_data;
   logic cacheable_r;
@@ -174,7 +264,6 @@ module rapt_l1d #(
   // atomic support
   logic [XLEN-1:0] reservation;
   logic reservation_valid;
-  logic l1d_atomic_lock;
   logic [3:0] reservation_size_m1;
   logic lr_interfered;
   logic external_hits_reservation, external_hits_lr;
@@ -233,7 +322,7 @@ module rapt_l1d #(
   logic [L1dWayW-1:0] ld_fill_way_r;     // registered fill way for load miss
   logic [L1D_SIZE-1:0] d_replace_bit;  // random replacement toggle per set (2-way only)
 
-  assign lsu_l1d.idle = l1d_state == IDLE && !ptw_busy && !l1d_update
+  assign lsu_l1d.idle = !mshr_busy && l1d_state == IDLE && !ptw_busy && !l1d_update
       && !fence_clear_busy && !lsu_l1d.rvalid && !lsu_l1d.rvalid_b
       && !lsu_l1d.wvalid && !exu_l1d.valid;
 
@@ -321,6 +410,9 @@ module rapt_l1d #(
       .write_word(l1d_off),
       .write_way(l1d_way),
       .write_data(l1d_data_u),
+      .write_line(line_update),
+      .write_mask(line_update_mask),
+      .write_line_data(line_update_data),
       .read_valid(sram_read_valid_r),
       .read_index(sram_read_idx_r),
       .read_data(data_bank_rdata)
@@ -430,7 +522,7 @@ module rapt_l1d #(
       .req_store(store_tlb_miss && !exu_l1d.cmo_mgmt),
       .bus_arvalid(ptw_arvalid),
       .bus_araddr(ptw_araddr),
-      .bus_arready(l1d_bus.rready),
+      .bus_arready(legacy_rready),
       .bus_rvalid(l1d_bus.ptw_rvalid),
       .bus_rdata(l1d_bus.rdata),
       .bus_awvalid(ptw_awvalid),
@@ -469,7 +561,6 @@ module rapt_l1d #(
   assign addr_idx = l1d_addr[L1D_LEN+L1D_LINE_LEN+L1dOffsetBits-1:L1D_LINE_LEN+L1dOffsetBits];
   assign addr_offset = l1d_addr[L1D_LINE_LEN+L1dOffsetBits-1:L1dOffsetBits];
 
-  logic [L1D_N_WAYS-1:0] load_way_hit;
   logic [L1dWayW-1:0] store_hit_way, store_fill_way, ld_fill_way;
   rapt_l1d_tags #(
       .L1D_LEN(L1D_LEN),
@@ -483,9 +574,9 @@ module rapt_l1d #(
       .reset(reset),
       .fence_time(cmu_bcast.fence_time),
       .clear_set(fence_clear_set),
-      .addr_idx(addr_idx),
+      .addr_idx(tag_read_idx),
       .addr_offset(addr_offset),
-      .addr_tag(addr_tag),
+      .addr_tag(tag_read_tag),
       .waddr_idx(waddr_idx),
       .waddr_offset(waddr_offset),
       .waddr_tag(waddr_tag),
@@ -501,7 +592,7 @@ module rapt_l1d #(
       .probe_way_hit(),
 `endif
       .load_hit(tag_hit),
-      .load_replace(d_replace_bit[addr_idx]),
+      .load_replace(d_replace_bit[tag_read_idx]),
       .store_replace(d_replace_bit[waddr_idx]),
       .load_way_hit(load_way_hit),
       .hit_w(hit_w),
@@ -510,12 +601,26 @@ module rapt_l1d #(
       .ld_fill_way(ld_fill_way),
       .l1d_update(l1d_update),
       .l1d_valid_u(l1d_valid_u),
+      .line_update(line_update),
+      .line_mask(line_update_mask),
       .l1d_inv_all_ways(l1d_inv_all_ways),
       .l1d_tag_u(l1d_tag_u),
       .l1d_idx(l1d_idx),
       .l1d_off(l1d_off),
       .l1d_way(l1d_way)
   );
+
+  // Install a completed buffer in one array write. Each subarray already
+  // has byte enables, so all words can share this cycle without extra ports.
+  // Borrow the tag lookup only outside LD_A; a concurrent incoming load is
+  // held by the existing SRAM read-valid interlock until a fresh read occurs.
+  assign mshr_fill_ready = mshr_fill_valid && !mshr_invalidate
+      && !mshr_invalidate_line && !lsu_l1d.wvalid && !l1d_rmw && !l1d_update
+      && (l1d_state == IDLE || l1d_state == LD_CHECK);
+  assign tag_read_idx = mshr_fill_ready
+      ? mshr_fill_addr[L1D_LEN+L1D_LINE_LEN+L1dOffsetBits-1:L1D_LINE_LEN+L1dOffsetBits] : addr_idx;
+  assign tag_read_tag = mshr_fill_ready
+      ? mshr_fill_addr[PADDR_BITS-1:L1D_LEN+L1D_LINE_LEN+L1dOffsetBits] : addr_tag;
 
   // A load may consume SRAM data only when every way/subarray completed a
   // read for its index. Writes invalidate that shared correspondence; LD_A
@@ -525,7 +630,7 @@ module rapt_l1d #(
                        || !sram_read_valid_r
                        || (sram_read_idx_r != addr_idx);
   assign tag_hit = (l1d_state == LD_A)
-    && cacheable_r
+    && cacheable_r && !(l1d_atomic_lock && mshr_busy)
     && !l1d_sram_busy
     && |load_way_hit;
   // data_hit: SRAM data ready in LD_A: the speculative read in the preceding
@@ -675,25 +780,31 @@ module rapt_l1d #(
   assign mis_align_store = 1'b0;
 
   // read channel: PTW takes priority over cache miss reads
-  assign l1d_bus.arvalid = ptw_arvalid
+  assign legacy_arvalid = ptw_arvalid
     ? !pmp_ptw_fault
     : (l1d_state == LD_A)
-      && !tag_hit
+      && !tag_hit && !mshr_eligible && !mshr_busy
       && !l1d_sram_busy
       && (cacheable_r || lsu_l1d.ordered)
       && !cmu_bcast.flush_pipe
       && (!line_read_request || !lsu_l1d.wvalid);
-  assign l1d_bus.araddr = ptw_arvalid ? ptw_araddr : line_read_request ? refill_base : l1d_addr;
-  assign l1d_bus.rstrb = (cacheable_r || ptw_arvalid) ? 8'($unsigned({XLEN/8{1'b1}})) : rstrb;
-  assign l1d_bus.ar_ptw = ptw_arvalid;
-  assign l1d_bus.rpbmt = ptw_arvalid ? 2'b00 : l1d_pbmt;
+  assign mshr_select = !legacy_arvalid && mshr_req_valid;
+  assign l1d_bus.arvalid = legacy_arvalid || mshr_select;
+  assign l1d_bus.ar_mshr = mshr_select;
+  assign l1d_bus.ar_mshr_id = mshr_req_id;
+  assign mshr_req_ready = mshr_select && l1d_bus.rready;
+  assign l1d_bus.araddr = mshr_select ? mshr_req_addr
+      : ptw_arvalid ? ptw_araddr : line_read_request ? refill_base : l1d_addr;
+  assign l1d_bus.rstrb = (mshr_select || cacheable_r || ptw_arvalid) ? 8'($unsigned({XLEN/8{1'b1}})) : rstrb;
+  assign l1d_bus.ar_ptw = ptw_arvalid && !mshr_select;
+  assign l1d_bus.rpbmt = (mshr_select || ptw_arvalid) ? 2'b00 : l1d_pbmt;
 
-  assign lsu_l1d.rdata = data_hit ? l1d_data : l1d_bus.rdata;
+  assign lsu_l1d.rdata = mshr_complete ? mshr_data : data_hit ? l1d_data : l1d_bus.rdata;
   // Difftest skip propagation for MMIO loads: cache-hit loads (data_hit=1) are
   // by construction cacheable (and thus non-MMIO), so they don't need to skip
   // the reference model. For misses that go to bus, mirror the bus-side mmio
   // bit so the commit-time DPI can skip REF on the owning instruction.
-  assign lsu_l1d.difftest_skip = (data_hit || lsu_l1d.trap) ? 1'b0 : l1d_bus.difftest_skip;
+  assign lsu_l1d.difftest_skip = (mshr_complete || data_hit || lsu_l1d.trap) ? 1'b0 : l1d_bus.difftest_skip;
   assign lsu_l1d.trap = (l1d_state == TRAP) && !rec_store && (rec_addr == lsu_l1d.raddr)
       && !load_killed && !cmu_bcast.flush_pipe;
   assign lsu_l1d.cause = cause;
@@ -705,27 +816,28 @@ module rapt_l1d #(
   assign lsu_l1d.rretry = (l1d_state == LD_A) && lsu_l1d.rvalid
       && (rec_addr == lsu_l1d.raddr) && !cacheable_r && !lsu_l1d.ordered
       && !load_killed && !cmu_bcast.flush_pipe;
-  assign lsu_l1d.rready = !load_killed && !cmu_bcast.flush_pipe && ((lsu_l1d.rvalid && lsu_l1d.trap)
+  assign lsu_l1d.rready = !load_killed && !cmu_bcast.flush_pipe && ((mshr_complete && !mshr_error && lsu_l1d.rvalid && rec_addr == lsu_l1d.raddr)
+      || (lsu_l1d.rvalid && lsu_l1d.trap)
       || (data_hit
         && lsu_l1d.rvalid
         && rec_addr == lsu_l1d.raddr)
       || ((l1d_state == LD_D)
           && (lsu_l1d.rvalid)
-          && (l1d_bus.rvalid) && demand_beat && !demand_done
+          && (legacy_rvalid) && demand_beat && !demand_done
           && !l1d_bus.rerr
           && (rec_addr == lsu_l1d.raddr)));
 
   // write channel
   assign l1d_bus.wzero = !ptw_wvalid && lsu_l1d.wzero;
-  assign l1d_bus.noallocate = ptw_arvalid || !refill_safe;
-  assign l1d_bus.arlen = !ptw_arvalid && line_read_request ? 8'(L1D_LINE_SIZE-1) : 8'd0;
+  assign l1d_bus.noallocate = mshr_select || ptw_arvalid || !refill_safe;
+  assign l1d_bus.arlen = (mshr_select || (!ptw_arvalid && line_read_request)) ? 8'(L1D_LINE_SIZE-1) : 8'd0;
   assign l1d_bus.awvalid = ptw_awvalid ? 1'b1
-      : lsu_l1d.wvalid && !(l1d_state == LD_D && refill_line);
+      : lsu_l1d.wvalid && !mshr_busy && !(l1d_state == LD_D && refill_line);
   assign l1d_bus.awaddr = ptw_awvalid ? ptw_awaddr : lsu_l1d.waddr;
   assign l1d_bus.aw_ptw = ptw_awvalid;
   assign l1d_bus.wpbmt = ptw_awvalid ? 2'b00 : lsu_l1d.wpbmt;
   assign l1d_bus.wstrb = ptw_wvalid ? ptw_wstrb : lsu_l1d.walu;
-  assign l1d_bus.wvalid = ptw_wvalid ? 1'b1 : lsu_l1d.wvalid && !(l1d_state == LD_D && refill_line);
+  assign l1d_bus.wvalid = ptw_wvalid ? 1'b1 : lsu_l1d.wvalid && !mshr_busy && !(l1d_state == LD_D && refill_line);
   assign l1d_bus.wdata = ptw_wvalid ? ptw_wdata : lsu_l1d.wdata;
 
   assign ptw_wready = ptw_wvalid && l1d_bus.ptw_wready;
@@ -735,7 +847,7 @@ module rapt_l1d #(
   // and would be silently dropped if wready had fired. Stalling the store
   // for one cycle lets the merge-write complete and the next-cycle SET will
   // re-evaluate the new store.
-  assign lsu_l1d.wready = !ptw_wvalid && l1d_bus.wready && !l1d_rmw && !fence_clear_busy
+  assign lsu_l1d.wready = !ptw_wvalid && l1d_bus.wready && !mshr_busy && !l1d_rmw && !fence_clear_busy
       && !(l1d_state == LD_D && refill_line);
   assign lsu_l1d.werr = lsu_l1d.wready && l1d_bus.werr;
 
@@ -773,6 +885,7 @@ module rapt_l1d #(
       rec_store <= 1'b0;
       fence_clear_set <= '0;
       l1d_update <= 0;
+      line_update <= 0;
       l1d_inv_all_ways <= 0;
       l1d_rmw    <= 0;
       d_replace_bit <= '0;
@@ -966,6 +1079,13 @@ module rapt_l1d #(
           if (cmu_bcast.flush_pipe) begin
             l1d_addr <= '0;
             l1d_state <= IDLE;
+          end else if (mshr_complete) begin
+            if (mshr_error) begin
+              cause <= `RAPT_CAUSE_LOAD_ACC_FAULT;
+              l1d_state <= TRAP;
+            end else l1d_state <= IDLE;
+          end else if (mshr_release) begin
+            l1d_state <= IDLE;
           end else if (!cacheable_r && !lsu_l1d.ordered) begin
             l1d_addr <= '0;
             l1d_state <= IDLE;
@@ -979,10 +1099,10 @@ module rapt_l1d #(
             end else begin
               // Only advance on OUR OWN cache-miss AR acceptance. The PTW
               // shares this bus with read priority (see l1d_bus.arvalid mux),
-              // so an `l1d_bus.rready` (= AR-capture) pulse while ptw_arvalid
+              // so an `legacy_rready` (= AR-capture) pulse while ptw_arvalid
               // is high belongs to the PTW, not this load. Advancing on it
               // would make LD_D consume the PTW's read beat as fill data.
-              if (l1d_bus.rready && !ptw_arvalid) begin
+              if (legacy_rready && !ptw_arvalid) begin
                 l1d_state <= LD_D;
                 ld_fill_way_r <= ld_fill_way;
                 refill_line <= line_read_request;
@@ -999,7 +1119,7 @@ module rapt_l1d #(
             // cycle the SRAM holds the merged value and tag_hit can fire.
             l1d_state <= LD_A;
           end else begin
-            if (l1d_bus.rready && !ptw_arvalid) begin
+            if (legacy_rready && !ptw_arvalid) begin
               l1d_state <= LD_D;
               ld_fill_way_r <= ld_fill_way;
               refill_line <= line_read_request;
@@ -1010,7 +1130,7 @@ module rapt_l1d #(
         end
         LD_D: begin
           if (cmu_bcast.flush_pipe) load_killed <= 1'b1;
-          if (l1d_bus.rvalid) begin
+          if (legacy_rvalid) begin
             if (demand_beat && !demand_done) begin
 
               demand_done <= !l1d_bus.rerr;
@@ -1055,11 +1175,13 @@ module rapt_l1d #(
         if (fence_clear_set[l1d_idx]) begin
           l1d_rmw <= 0;
           l1d_update <= 0;
+          line_update <= 0;
           l1d_inv_all_ways <= 0;
         end
       end else if (l1d_update) begin
         // u_tags consumes the same pending update on this edge.
         l1d_update <= 0;
+        line_update <= 0;
         l1d_inv_all_ways <= 0;
       end
 
@@ -1130,8 +1252,19 @@ module rapt_l1d #(
             end
           end
         end
+      end else if (mshr_fill_ready) begin
+        l1d_update <= 1'b1;
+        line_update <= 1'b1;
+        line_update_mask <= mshr_fill_mask;
+        line_update_data <= mshr_fill_data;
+        l1d_valid_u <= 1'b1;
+        l1d_tag_u <= tag_read_tag;
+        l1d_idx <= tag_read_idx;
+        l1d_off <= '0;
+        l1d_way <= ld_fill_way;
+        if (L1D_N_WAYS == 2) d_replace_bit[tag_read_idx] <= ~d_replace_bit[tag_read_idx];
       end else if (l1d_state == LD_D) begin
-        if ((refill_line || lsu_l1d.rvalid) && l1d_bus.rvalid && !l1d_bus.rerr
+        if ((refill_line || lsu_l1d.rvalid) && legacy_rvalid && !l1d_bus.rerr
             && !load_killed && !cmu_bcast.flush_pipe) begin
           if (cacheable_r) begin
             l1d_update <= 1'b1;
@@ -1148,17 +1281,17 @@ module rapt_l1d #(
     end
   end
 
-  `RAPT_SVA_IMPLY(clock, reset, L1D_REFILL_LAST, l1d_state == LD_D && refill_line && l1d_bus.rvalid,
+  `RAPT_SVA_IMPLY(clock, reset, L1D_REFILL_LAST, l1d_state == LD_D && refill_line && legacy_rvalid,
                   l1d_bus.rlast == (refill_word == L1D_LINE_LEN'(L1D_LINE_SIZE - 1)))
   `RAPT_SVA_IMPLY(clock, reset, L1D_REFILL_STORE_EXCLUSION, l1d_state == LD_D && refill_line,
                   !lsu_l1d.wready && !(l1d_bus.awvalid && !l1d_bus.aw_ptw))
   `RAPT_SVA_IMPLY(clock, reset, L1D_MMIO_READ_REQUIRES_ORDER,
-                  l1d_bus.arvalid && !l1d_bus.ar_ptw && !cacheable_r, lsu_l1d.ordered)
+                  legacy_arvalid && !l1d_bus.ar_ptw && !cacheable_r, lsu_l1d.ordered)
   `RAPT_SVA_IMPLY(clock, reset, L1D_RETRY_NO_COMPLETION_OR_READ, lsu_l1d.rretry,
-                  !lsu_l1d.rready && !lsu_l1d.trap && !(l1d_bus.arvalid && !l1d_bus.ar_ptw))
+                  !lsu_l1d.rready && !lsu_l1d.trap && !(legacy_arvalid && !l1d_bus.ar_ptw))
   `RAPT_SVA_IMPLY(clock, reset, L1D_FLUSH_BLOCKS_NEW_READ, cmu_bcast.flush_pipe, !l1d_bus.arvalid)
   `RAPT_SVA_IMPLY(clock, reset, L1D_PERMISSION_STAGE_BLOCKS_ACCESS, l1d_state == LD_CHECK,
-                  !lsu_l1d.rready && !(l1d_bus.arvalid && !l1d_bus.ar_ptw))
+                  !lsu_l1d.rready && !(legacy_arvalid && !l1d_bus.ar_ptw))
   // Antecedents extracted so the SVA macro arguments stay short and the
   // formatter cannot rejoin them past the column limit.
   logic l1d_permission_stage_denied;
@@ -1179,7 +1312,7 @@ module rapt_l1d #(
                  (l1d_addr))
   logic l1d_lr_response_establishes_reservation;
   assign l1d_lr_response_establishes_reservation = (l1d_state == LD_D)
-      && l1d_bus.rvalid && demand_beat && !demand_done && !l1d_bus.rerr
+      && legacy_rvalid && demand_beat && !demand_done && !l1d_bus.rerr
       && l1d_atomic_lock && !load_killed && !cmu_bcast.flush_pipe
       && !exu_l1d.reservation_clear && !external_hits_lr && !lr_interfered;
   `RAPT_SVA_NEXT(clock, reset, L1D_LR_RESPONSE_ESTABLISHES_RESERVATION,
@@ -1187,7 +1320,7 @@ module rapt_l1d #(
                  (l1d_addr))
   logic l1d_killed_lr_response_no_new_reservation;
   assign l1d_killed_lr_response_no_new_reservation = (l1d_state == LD_D)
-      && l1d_bus.rvalid && l1d_atomic_lock && !reservation_valid
+      && legacy_rvalid && l1d_atomic_lock && !reservation_valid
       && (load_killed || cmu_bcast.flush_pipe);
   `RAPT_SVA_NEXT(clock, reset, L1D_KILLED_LR_RESPONSE_NO_NEW_RESERVATION,
                  l1d_killed_lr_response_no_new_reservation, !reservation_valid)

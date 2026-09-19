@@ -70,8 +70,8 @@ PLIC supported-access checks use `scripts/plic_access_width.py`. Supply `--xlen 
 ```bash
 # Prerequisites: ensure simulator + NEMU are built
 make -C .. build-rv32              # Build NPC simulator
-make -C .. config-rv32-difftest    # Enable difftest config
-make -C .. config-nemu32-ref        # Build NEMU reference SO
+make -C .. build-rv32    # Enable difftest config
+make -C .. build-nemu32-ref        # Build NEMU reference SO
 
 # Run all lightweight tests
 make all                            # fuzz + sigtest
@@ -126,8 +126,8 @@ Raptor ships inline SVA guarded by `RAPT_ASSERT_EN` for zero default overhead. T
 
 ```shell
 # Enable assertions for any simulation target
-make sim-rv32                VFLAGS="-DRAPT_ASSERT_EN"
-make microbench-random-rv32 SIM_RANDOM_DELAY=31 SIM_RANDOM_SEED=42 VFLAGS="-DRAPT_ASSERT_EN"
+make run-rv32                VFLAGS="-DRAPT_ASSERT_EN"
+make microbench-rv32 SIM_RANDOM_DELAY=31 SIM_RANDOM_SEED=42 VFLAGS="-DRAPT_ASSERT_EN"
 make cpu-tests-rv32 ARGS="-b -n" VFLAGS="-DRAPT_ASSERT_EN"
 ```
 
@@ -198,6 +198,10 @@ verify/build/riscof-classic-venv/bin/python verify/scripts/test_riscof_classic_r
 ```
 
 The classic Sail plugin uses `raptor.json` to check page-local misaligned accesses as a whole before splitting, matching Raptor's PMP policy. It keeps Sail 0.13.1's ROM/IO/RAM regions but disables its default MAG and Zama16b declaration; otherwise the RAM MAG overrides the page-local split setting. The `pmpm_misaligned_{na4,napot,tor}` tests use a 16-byte region offset on both DUT and reference: this retains the PMP crossings while separating them from Sail's mandatory page split. These tests remain in the comparison; cross-page behavior is covered separately by the split-page and PMP span regressions.
+
+PMP capacity is now 8 usable entries in 16 architectural CSR slots (upper eight read-only zero), for RV32/RV64 and every preset. ACT4 declares `NUM_PMP_ENTRIES=16`, `NUM_USABLE_PMP_ENTRIES=8`; test headers use `RVMODEL_NUM_PMPS=8`. Historical 16-usable-entry results do not validate this configuration. Classic test headers constrain generated tests to usable entries; they do not by themselves reconfigure Sail's CSR implementation or prove upper-slot read-only-zero behavior.
+
+Run `make -C verify pmp-capacity-check` for RV32/RV64 CSR WARL/upper-slot alias prevention, own/TOR predecessor locks, permission checks, reset/NAPOT, CSR legality, shared L1D checks and NEMU capacity tests. For isolated output, pass `BUILD_DIR=/tmp/<task-directory>`. This is directed component coverage, not full-core, FPGA timing, boot or complete profile validation. The separate `nemu-pmp-priority-check` interval oracle currently reports 216 RV32 partial-overlap discrepancies in both the original 16-entry baseline and this 8-entry revision; that pre-existing issue is not fixed or hidden by the capacity suite.
 
 Each test's `dut/` directory retains `dut.log` and `dut-run.json`. Only a successful simulator termination with a complete, well-formed signature is passed to the signature comparison. On execution failure, partial output is kept as `*.signature.partial` and the comparison signature is empty so the test still fails. This distinguishes execution timeouts from completed architectural mismatches; it does not suppress either failure or change the test selection.
 
@@ -362,7 +366,7 @@ From the project root:
 ```bash
 make verify-fuzz          # Shortcut for fuzz
 make verify-sigtest       # Shortcut for sigtest
-make verify-all           # Run all verify targets
+make verify-light           # Run all verify targets
 ```
 
 ## RV64 Support
@@ -414,7 +418,7 @@ The M privilege/edge test also rejects all five RV64 M word operations in RV32, 
 
 The current Raptor RTL traps accesses to the optional `mcountinhibit` CSR (`0x320`). `nemu/configs/riscv64_ref_defconfig` therefore disables `CONFIG_RV_MCOUNTINHIBIT` while retaining RVA22S64 and F/D. Standalone NEMU RVA22 presets retain their WARL-zero CSR default. Do not skip OpenSBI CSR probes in difftest to hide a mismatch between these policies.
 
-After `make config-nemu64-ref` from the repository root, check the reference:
+After `make build-nemu64-ref` from the repository root, check the reference:
 
 ```sh
 python3 verify/scripts/nemu_rva22s64_check.py --xlen 64 \
@@ -466,3 +470,131 @@ make -C verify verilator-fmax-boundaries-rv32 verilator-fmax-boundaries-rv64 RAP
 These assertion-enabled tests cover the integer/FP shared completion buffers, issue-to-execute registers, and the fixed-position rename packet stage before PRF reads. Checks include simultaneous completions without loss, capacity reservation, rejected completions, generation payloads, wrapped ROB selective cancellation, flush, and three-lane partial consumption with checkpoint retention. The shared endpoint accepts results only into previously reserved empty slots; it does not grant same-cycle dequeue credit. This adds latency and can insert system-port bubbles. The operand stage accepts a new batch when the old batch fully drains, and compacts a partially consumed suffix while preserving order.
 
 `verilator-rou-fp-irq-compose-rv32/rv64` exercises the actual FP queue, execution, FPR writeback and recovery composition. `formal/zkt_cdb.sby` checks control independence from result data across the buffered arbiter using 12-step BMC; this is a bounded check, not an unbounded proof.
+
+### UART 平台一致性
+
+```sh
+python3 verify/scripts/test_uart_platform.py
+# 或 make -C verify uart-platform-check
+```
+
+独立编译生产 NEMU/sim 串口模型，覆盖 RV32/RV64 的 NS16550 RX IRQ10、CU08
+LiteUART `0xf0001800` 与旧 egos `0xf0001000` alias 的收发和共享状态、sim CSR 写掩码。
+同时编译规范 DTS，检查 NS16550 interrupt cell 与 NEMU Linux presets 一致。
+仅提供宿主环境/MMIO 注册/IRQ 接收端桩，不修改共享 `.config`，不加载 FPGA。
+这不是完整 Linux/RTL/PLIC 集成回归，也不验证 LiteUART 完整事件中断仿真。
+
+整核入口 `mmio-transaction-check` 同时检查 LiteUART 新旧地址，每个地址覆盖
+总线延迟 0/7/63、随机种子 1/42，核对 AXI 响应及实际发送字节；
+`mmio-uart-read-check` 检查 NS16550 byte lane 和 read-to-clear 副作用。
+`mmio-uart-irq-check` 向 stdin 注入 `K`，由裸机程序检查 M-mode 外部中断、
+PLIC claim=10、收到的字符与 completion，然后打印成功标记并写 finisher。
+IRQ 测试使用不启用 difftest 的 sim，避免参考模型的异步输入时序干扰。
+这些入口需要 `RAPT_AXI_OBSERVE` 构建的 sim；可用脚本直接指定独立构建产物：
+
+```sh
+python3 verify/scripts/mmio_transaction_check.py \
+  --npc /path/to/riscv64-npc-sim --no-difftest \
+  --mrom /path/to/mrom-data.bin --xlen 64 --output /tmp/raptor-chip-mmio64
+# 添加 --uart-read 或 --uart-irq 分别运行读副作用或中断测试；RV32 使用对应产物和 --xlen 32。
+```
+
+`--no-difftest` 表示仅检查端点/整核测试结果，要求传入关闭 difftest 的 sim，
+不会替调用者重建模型。构建开启 difftest 的模型时应传入 `--reference`。
+
+
+### L1D MSHR 与重放
+
+```sh
+make -C verify verilator-mshr-cache-rv32 verilator-mshr-cache-rv64 \
+  verilator-mshr-ioq-rv32 verilator-mshr-ioq-rv64 \
+  verilator-bus-read-ownership-rv32 verilator-bus-read-ownership-rv64
+```
+
+Cache 测试覆盖两行在途、同一行合并、表满重放、不同 ID 反序返回、逐 beat 错误、
+权限重检、store/refill 排序及取消后排空；IOQ 测试检查不提前完成、年轻 load 前进、
+同周期 wake 与 park、flush 清理。Cache 测试强制双 MSHR；bus 测试使用 default。
+
+整核定向程序校验独立 load、同一行多个消费者、store 后读取和拆分访问：
+
+```sh
+python3 verify/scripts/mshr_check.py --npc /path/to/riscv64-npc-sim \
+  --mrom /path/to/mrom-data.bin --xlen 64 --output /tmp/raptor-chip-mshr-core64
+```
+
+要求 sim 启用 `RAPT_AXI_OBSERVE`、双 MSHR，关闭 difftest。脚本检查实际运算结果、
+AXI 响应和 cache→bus 两个同时存活的 miss owner；单独记录外部 AXI 是否重叠，
+不把串行 slave 的行为当成并行 DRAM 性能证据。`MSHR_OBS` 仅在仿真观测构建中生成。
+
+## Whole-project regression
+
+From the repository root:
+
+```sh
+make regression-plan                         # commands only; no submake or formatting
+make regression REGRESSION_BOARD=mlk_cu08_ku15p
+make regression REGRESSION_JOBS=3 REGRESSION_TOOL_JOBS=4
+make regression REGRESSION_SUITES="coremark sta" REGRESSION_XLENS=32
+make regression-test                         # scheduler/validation tests, no EDA tools
+```
+
+`regression` first runs **`format FORMAT_SCOPE=all`**, covering HDL and testbenches
+in one pass. It edits tracked sources in place and finishes before any build starts. A formatting failure
+blocks the build lanes. To leave formatting out of a run, omit `format` from
+`REGRESSION_SUITES`; the default is `format coremark sta fpga`.
+
+After formatting, up to `REGRESSION_JOBS` independent lanes run concurrently:
+
+- **CoreMark:** NEMU RV32, sim RV32 with NEMU difftest, NEMU RV64, sim RV64 with
+  NEMU difftest. These run serially because NEMU configuration/generated headers
+  and AM libraries are shared. Each target gets its own Make invocation, avoiding
+  RV32/RV64 target-specific variable inheritance on a shared prerequisite.
+- **STA:** SRAM-macro `sta` for each requested XLEN, serially. Each has its own
+  packed RTL and yosys-opensta workspace/results; installed scripts, platforms
+  and tools are linked read-only by convention, without copying the toolchain.
+  SRAM libraries retain the existing shared tool-managed location.
+- **FPGA:** `fpga-build` followed by `fpga-timing-ok`, using the selected board
+  and a private build directory. It does not load or flash hardware. Explicit
+  board selection disables hardware auto-detection. The current strict timing
+  gate supports Vivado boards; missing reports or unsupported vendor timing
+  checks fail rather than silently pass.
+
+Defaults: `REGRESSION_XLENS="32 64"`, `REGRESSION_BOARD=mlk_cu08_ku15p`,
+`REGRESSION_JOBS=3`, `REGRESSION_TOOL_JOBS=4`, `REGRESSION_TIMEOUT=14400`
+(seconds per target), `REGRESSION_ITERATIONS=2`. `RAPT_CONFIG`, `STA_PLATFORM`
+and `CLK_FREQ_MHZ` select the preset and STA operating point (50 MHz by default
+for both XLENs). FPGA uses its existing board/profile clock and boot defaults;
+`REGRESSION_XLENS` selects CoreMark/STA variants, not an FPGA XLEN matrix.
+
+The runner owns parallelism independently of parent `make -j`. Each child Make
+gets `-jREGRESSION_TOOL_JOBS` (STA uses `-j1`; its backend also runs timing and summary in order). Verilator compilation uses the worker limit, simulation
+uses one thread, and Vivado receives the same worker limit. This bounds the
+requested concurrency, not total RAM use or every EDA tool's internal threads.
+Do not run another NEMU configuration, AM build, formatter, or RTL generator in
+the same checkout during this regression. A checkout lock prevents two instances
+of this runner from overlapping; existing standalone Make targets do not use it.
+Dependencies/toolchains must already be provisioned through the existing setup
+flows. This command does not run toolchain installation targets.
+
+A new `/tmp/raptor-chip-regression-*` directory holds independent logs, build
+outputs, `summary.txt`, `summary.json`, the post-format tracked source diff and
+Git status. Set `REGRESSION_OUTPUT=/absolute/new/directory` to retain outputs in
+another location; an existing directory is rejected to avoid mixing runs.
+NEMU and AM retain their normal shared build directories. `/tmp` can be cleaned
+by the OS, so copy reports elsewhere for long-term retention.
+
+Independent cases continue after failures. A failed FPGA build skips its timing
+check. Any failure/skip produces a nonzero overall exit status. CoreMark checks
+all three official CRCs and GOOD TRAP; the two-iteration default is a functional
+regression, **not a valid EEMBC performance score** (the 10-second duration notice
+alone is allowed). STA requires a timing report and rejects reported errors or
+violated slack. SRAM placeholder timing retains its existing limitations; a
+passing flow is not physical signoff. `summary.json` records commands, status,
+exit code, duration, reason, log path, Git HEAD, tracked-diff hash and untracked-file hashes.
+
+### Make interface checks
+
+`make -C verify make-targets-test` checks removed aliases, formatting scopes and
+benchmark flag invalidation. `make -C verify sta-flow-check sta-entrypoints-test`
+checks the isolated SRAM/DFF runner and offline STA preflight. These checks do
+not run synthesis, simulation workloads or FPGA builds.

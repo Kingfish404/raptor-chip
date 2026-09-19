@@ -119,7 +119,7 @@ _IS_FPGA_GOAL := $(strip \
 	$(filter $(_FPGA_ALIAS_GOALS),$(MAKECMDGOALS)))
 _IS_LINUX_PROFILE_DEFAULT_GOAL := $(strip $(_IS_FPGA_GOAL) $(filter $(_LINUX_PROFILE_BENCH_GOALS),$(MAKECMDGOALS)))
 _FPGA_BOARD_EXPLICIT := $(filter command line environment override,$(origin FPGA_BOARD))
-_FPGA_DETECT_GOAL := $(filter fpga-detect fpga-info,$(MAKECMDGOALS))
+_FPGA_DETECT_GOAL := $(filter fpga-detect,$(MAKECMDGOALS))
 _FPGA_BOARD_REQUIRED_GOALS := fpga-gen fpga-build fpga-build-force fpga-load fpga-flash fpga fpga-timing-ok \
 	linux-fpga-build linux-fpga-rv32-build linux-fpga-rv64-build \
 	linux-fpga-load linux-fpga-rv32-load linux-fpga-rv64-load \

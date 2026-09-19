@@ -43,7 +43,7 @@ CLASSIC_INCOMPAT_TESTS = {
     "vm_reserved_rwx_pte_U_mode.S",
 }
 
-# Raptor implements 16 PMP entries (pmpaddr0..15).  These classic tests are
+# Raptor exposes 16 PMP CSR slots (8 usable, upper 8 read-only zero). These tests are
 # explicitly generated for the 64-entry PMP profile and access pmpaddr62/63.
 UNSUPPORTED_PROFILE_TESTS = {
     "pmpm_all_entries_check-01.S",

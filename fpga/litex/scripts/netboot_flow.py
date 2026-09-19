@@ -2,7 +2,6 @@
 """Fixed-profile orchestration; no flash, SD writes, or implicit network setup."""
 import argparse
 import contextlib
-from concurrent.futures import ThreadPoolExecutor
 import fcntl
 import hashlib
 import http.server
@@ -192,10 +191,9 @@ class Console:
     def send(self, command):
         self.port.write(command.encode() + b'\r')
 
-    def wait(self, pattern, timeout, on_data=None, cancel=None):
+    def wait(self, pattern, timeout):
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            require(cancel is None or not cancel.is_set(), 'UART wait cancelled after loader failure')
             match = re.search(pattern, self.pending)
             if match:
                 result = self.pending[:match.end()]
@@ -211,8 +209,6 @@ class Console:
                 # Match the terminal text, retaining raw bytes in the log.
                 # Strip after accumulation so split CSI sequences also work.
                 self.pending = re.sub(r'\x1b\[[0-?]*[ -/]*[@-~]', '', self.pending)
-                if on_data:
-                    on_data(self.pending)
         raise TimeoutError(f'UART timeout waiting for {pattern}; see capture log, do not infer a deadlock')
 
     def command(self, command, timeout=120):
@@ -223,58 +219,9 @@ class Console:
         return output
 
 
-def load_to_bios(port, load):
-    """Read/respond during programming: autoboot may expire before Vivado exits."""
-    port.port.reset_input_buffer()
-    port.pending = ''
-    interrupted = False
-    cancelled = threading.Event()
-    def interrupt(text):
-        nonlocal interrupted
-        if not interrupted and 'Press Q or ESC' in text:
-            port.port.write(b'Q')
-            interrupted = True
-    with ThreadPoolExecutor(max_workers=1) as reader:
-        prompt = reader.submit(port.wait, r'litex>\s*', 180, interrupt, cancelled)
-        try:
-            load()
-            prompt.result()
-        finally:
-            cancelled.set()
-
-
-def bios_ip_commands(soc, server_ip):
-    """Use dynamic commands only when compiled in; validate static BIOS IPs."""
-    network = ipaddress.IPv4Network(server_ip + '/24', strict=False)
-    local_ip = str(network.network_address + (50 if server_ip != str(network.network_address + 50) else 51))
-    header = (soc / 'software/include/generated/soc.h').read_text()
-    if re.search(r'^#define ETH_DYNAMIC_IP\b', header, re.MULTILINE):
-        return ['eth_local_ip ' + local_ip, 'eth_remote_ip ' + server_ip]
-    source = (soc / 'bios-src/boot.c').read_text()
-    for name, macro, expected in (('local_ip', 'LOCALIP', local_ip), ('remote_ip', 'REMOTEIP', server_ip)):
-        parts = [re.search(r'^#define ' + macro + str(i) + r'\s+(\d+)\s*$', header, re.MULTILINE)
-                 for i in range(1, 5)]
-        if any(parts):
-            require(all(parts), 'Incomplete compiled BIOS IP constants')
-            actual = '.'.join(p[1] for p in parts)
-        else:
-            match = re.search(name + r'\[4\]\s*=\s*\{(\d+,\s*\d+,\s*\d+,\s*\d+)\}', source)
-            require(match, 'Cannot identify static BIOS IP; enable ETH_DYNAMIC_IP')
-            actual = '.'.join(p.strip() for p in match[1].split(','))
-        require(actual == expected, f'Static BIOS {name} is {actual}, requested {expected}; rebuild with dynamic IP support')
-    return []
-
-
 LOGIN = r'(?:buildroot|raptor) login:\s*'
 ASKFIRST = r'Please press Enter to activate this console\.'
 SHELL = r'(?:\r*\n)[^\r\n]*# '
-
-
-def wait_linux_login(port, timeout):
-    output = port.wait(LOGIN + '|' + ASKFIRST + r'|litex>\s*|Kernel panic - not syncing', timeout)
-    require(re.search('(?:' + LOGIN + '|' + ASKFIRST + ')$', output),
-            'Netboot returned to BIOS or Linux panicked; inspect the UART log')
-    return output
 
 
 def enter_linux(port, prompt):
@@ -284,7 +231,6 @@ def enter_linux(port, prompt):
     elif 'Please press Enter' in prompt:
         port.send('')
         port.wait(SHELL, 60)
-
 
 
 def running_boot_id(port):

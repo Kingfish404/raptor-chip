@@ -1664,7 +1664,7 @@ module tb_csr_pmp_lock;
     iss = '0;
     clear_commit();
     init_cmu_bcast_defaults();
-    for (int entry = 0; entry < 16; entry++)
+    for (int entry = 0; entry < `RAPT_PMP_CSR_NUM; entry++)
     for (int mode = 0; mode < 4; mode++)
     for (int locked = 0; locked < 2; locked++) begin
       reset = 1;
@@ -1680,10 +1680,14 @@ module tb_csr_pmp_lock;
       // Probe all addresses: only self and a locked TOR's predecessor freeze.
       for (int a = 0; a < 16; a++) begin
         write_csr(12'h3b0 + 12'(a), XLEN'('h2007 + a * 16));
-        expected=XLEN'((locked && (a==entry || (mode==1 && a+1==entry)))
+        expected=XLEN'((entry < `RAPT_PMP_NUM && locked != 0 && (a==entry || (mode==1 && a+1==entry)))
                    ? 'h1003+a*16 : 'h2007+a*16);
+        if (a >= `RAPT_PMP_NUM) begin
+          expect_csr(12'h3b0 + 12'(a), '0);
+          continue;
+        end
         expect_csr(12'h3b0 + 12'(a), expected);
-        if (replica.pmp_raw_addr[a] !== `RAPT_PMPADDR_BITS'(expected))
+        if (replica.pmp_raw_addr[a] !== (`RAPT_PADDR_BITS-2)'(expected))
           $fatal(
               1,
               "PMP address replica mismatch entry=%0d mode=%0d lock=%0d addr=%0d",
@@ -1710,7 +1714,7 @@ module tb_csr_pmp_lock;
     reset = 0;
     for (int a = 0; a < 16; a++) begin
       write_csr(12'h3b0 + 12'(a), XLEN'('h3000 + a * 16));
-      expect_csr(12'h3b0 + 12'(a), XLEN'('h3000 + a * 16));
+      expect_csr(12'h3b0 + 12'(a), a < `RAPT_PMP_NUM ? XLEN'('h3000 + a * 16) : '0);
     end
     if (cases != 128) $fatal(1, "PMP lock matrix incomplete");
     $display("PASS: RV%0d PMP own/TOR predecessor locks cases=128 address_probes=2048", XLEN);
@@ -1919,6 +1923,17 @@ module tb_csr_pmp_warl;
             repeat (2) @(negedge clock);
             reset = 0;
             write_csr(12'h3a0 + 12'(bank), XLEN'(raw) << (lane * 8));
+            if (entry >= `RAPT_PMP_NUM) begin
+              expect_csr(12'h3a0 + 12'(bank), '0);
+              write_csr(12'h3b0 + 12'(entry), '1);
+              expect_csr(12'h3b0 + 12'(entry), '0);
+              // A truncated update index must not alias the upper slots to 0..7.
+              for (int active = 0; active < `RAPT_PMP_NUM; active++) begin
+                if (replica.pmp_raw_addr[active] !== '0 || !replica.pmp_mode_off[active])
+                  $fatal(1, "read-only-zero PMP write changed usable entry");
+              end
+              continue;
+            end
             expect_csr(12'h3a0 + 12'(bank), XLEN'(expected) << (lane * 8));
             if({replica.pmp_cfg_l[entry],replica.pmp_cfg_x[entry],
                 replica.pmp_cfg_w[entry],replica.pmp_cfg_r[entry]}
@@ -1944,7 +1959,7 @@ module tb_csr_pmp_warl;
         end
       end
     end
-    if (access_checks != 16 * 256 * 3 * 2 * 5) $fatal(1, "PMP access coverage count");
+    if (access_checks != `RAPT_PMP_NUM * 256 * 3 * 2 * 5) $fatal(1, "PMP access coverage count");
     $display("PASS: CSR-to-PMP reset/cfg-only half accesses RV%0d checks=%0d", XLEN, access_checks);
     $display("PASS: RV%0d all PMP cfg bytes, CSR/replica WARL and locks", XLEN);
     $finish;

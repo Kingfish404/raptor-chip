@@ -13,9 +13,10 @@ from raptor_linux import HOME, identity, require, run, sha
 
 LITEX = HOME.parent / 'fpga/litex'
 sys.path.insert(0, str(LITEX / 'scripts'))
-from add_linux_sdcard_dts import sdcard_node
+from add_linux_sdcard_dts import ensure_sdcard_dtb
 from netboot_distro import ADDRESSES, persistence_bootargs
 from netboot_distro_publish import verify as verify_bundle
+from netboot_names import name_bundle
 
 
 def pack(artifacts, soc, csr, output, cross='riscv64-linux-gnu-', selector='LABEL=RAPTOR_DATA',
@@ -29,7 +30,8 @@ def pack(artifacts, soc, csr, output, cross='riscv64-linux-gnu-', selector='LABE
     require(run('fdtget', '-t', 's', soc, '/cpus/cpu@0', 'riscv,isa-base').strip() == f'rv{bits}i'.encode(), 'DTB XLEN mismatch')
     require(run('fdtget', '-t', 'x', soc, '/memory@80000000', 'reg').strip() == b'80000000 40000000', 'requires 1 GiB LiteX RAM')
     config = (artifacts / 'kernel.config').read_text()
-    for option in ('MMC_LITEX', 'MMC_BLOCK', 'EXT4_FS', 'REGULATOR_FIXED_VOLTAGE', 'SERIAL_LITEUART_CONSOLE', 'LITEX_LITEETH', 'BLK_DEV_INITRD'):
+    for option in ('MMC_LITEX', 'MMC_BLOCK', 'EXT4_FS', 'REGULATOR_FIXED_VOLTAGE', 'SERIAL_LITEUART_CONSOLE', 'LITEX_LITEETH', 'BLK_DEV_INITRD',
+                   'RISCV_ISA_ZICBOM', 'RISCV_DMA_NONCOHERENT'):
         require(f'CONFIG_{option}=y\n' in config, 'kernel lacks ' + option)
     require('CONFIG_INITRAMFS_SOURCE=""\n' in config, 'FPGA kernel must use external rootfs')
     rootfs = 'rootfs.cpio' if compression == 'none' else 'rootfs.cpio.gz'
@@ -40,6 +42,9 @@ def pack(artifacts, soc, csr, output, cross='riscv64-linux-gnu-', selector='LABE
             'kernel load alignment does not match XLEN')
     extensions = run('fdtget', '-t', 's', soc, '/cpus/cpu@0', 'riscv,isa-extensions').decode().split()
     require({'f', 'd'} <= set(extensions), 'hard-float userspace requires F/D in the DTB')
+    require('zicbom' in extensions, 'noncoherent SD DMA requires Zicbom in the DTB')
+    block_size = int(run('fdtget', '-t', 'u', soc, '/cpus/cpu@0', 'riscv,cbom-block-size').strip())
+    require(block_size > 0 and block_size & (block_size - 1) == 0, 'invalid DTB cache block size')
     limit = addresses['soc.dtb'] - addresses['Image']
     require(image[56:60] == b'RSC\x05' and struct.unpack_from('<Q', image, 16)[0] < limit,
             'kernel runtime overlaps DTB')
@@ -54,10 +59,7 @@ def pack(artifacts, soc, csr, output, cross='riscv64-linux-gnu-', selector='LABE
         work = Path(tmp)
         for name in ('Image', 'fw_dynamic.bin', 'kernel.config', rootfs):
             shutil.copyfile(artifacts / name, work / name)
-        dts = run('dtc', '-q', '-I', 'dtb', '-O', 'dts', soc).decode()
-        require('"litex,mmc"' not in dts, 'use the original base DTB without MMC')
-        (work / 'soc.dts').write_text(dts + sdcard_node(json.loads(csr.read_text())))
-        run('dtc', '-q', '-I', 'dts', '-O', 'dtb', '-o', work / 'soc.dtb', work / 'soc.dts')
+        ensure_sdcard_dtb(soc, json.loads(csr.read_text()), work / 'soc.dtb')
         for name, value in [('linux,initrd-start', 0x88000000), ('linux,initrd-end', 0x88000000 + size)]:
             run('fdtput', '-t', 'x', work / 'soc.dtb', '/chosen', name, f'{value:x}')
         run('fdtput', '-t', 's', work / 'soc.dtb', '/chosen', 'bootargs', bootargs)
@@ -76,7 +78,7 @@ def pack(artifacts, soc, csr, output, cross='riscv64-linux-gnu-', selector='LABE
                   'data_selector': selector, 'initramfs_file': rootfs, 'bootargs': bootargs,
                   'persistent_directories': ['/data', '/home', '/root'] + (['/var/log'] if persist_logs else []),
                   'files': {name: sha(work / name) for name in addresses}}
-        relative = f'raptor-netboot/rv{bits}/{source["distro"]}-' + identity(record)[:20]
+        relative = name_bundle(record)
         record['tftp_path'] = relative
         boot = {relative + '/' + name: hex(addr) for name, addr in addresses.items()}
         boot['addr'] = hex(addresses['stage0.bin'])

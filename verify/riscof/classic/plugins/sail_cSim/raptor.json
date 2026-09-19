@@ -5,6 +5,10 @@
     }
   },
   "memory": {
+    "pmp": {
+      "count": 16,
+      "usable_count": 8
+    },
     "regions": [
       {
         "base": {

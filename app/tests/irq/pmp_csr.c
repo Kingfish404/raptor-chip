@@ -63,8 +63,17 @@ int main(void)
 
     TEST_ASSERT(csr_read_num(CSR_PMPCFG0) == cfg0, "pmpcfg0 readback");
     TEST_ASSERT(csr_read_num(CSR_PMPCFG1) == cfg1, "pmpcfg1 RV32 readback");
-    TEST_ASSERT(csr_read_num(CSR_PMPCFG2) == cfg2, "pmpcfg2 readback");
-    TEST_ASSERT(csr_read_num(CSR_PMPCFG3) == cfg3, "pmpcfg3 RV32 readback");
+    /* Raptor implements eight PMP entries. The architectural CSR slots for
+     * entries 8..15 exist, but are read-only zero rather than usable entries. */
+    TEST_ASSERT(csr_read_num(CSR_PMPCFG2) == 0, "pmpcfg2 unimplemented entries");
+    TEST_ASSERT(csr_read_num(CSR_PMPCFG3) == 0, "pmpcfg3 unimplemented entries");
+#define CHECK_PMPADDR_ZERO(n) \
+    TEST_ASSERT(csr_read_num(CSR_PMPADDR0 + n) == 0, "unimplemented pmpaddr" #n)
+    CHECK_PMPADDR_ZERO(8);  CHECK_PMPADDR_ZERO(9);
+    CHECK_PMPADDR_ZERO(10); CHECK_PMPADDR_ZERO(11);
+    CHECK_PMPADDR_ZERO(12); CHECK_PMPADDR_ZERO(13);
+    CHECK_PMPADDR_ZERO(14); CHECK_PMPADDR_ZERO(15);
+#undef CHECK_PMPADDR_ZERO
 
     /* Locked TOR entry 6 locks both its own address and entry 5's lower
      * bound. It also ignores later writes to its configuration byte. */

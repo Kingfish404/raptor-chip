@@ -5,6 +5,7 @@ Run with fpga/litex/.venv/bin/python fpga/litex/tests/test_cm005.py.
 import json
 import ast
 import inspect
+import os
 import pathlib
 import re
 import sys
@@ -30,6 +31,13 @@ from add_linux_ethernet_dts import ethernet_node
 
 
 class CM005Test(unittest.TestCase):
+    def setUp(self):
+        # SoC construction injects clock defines into the process environment.
+        # Do not leak those overrides into subsequent fixed-profile Make tests.
+        environment = patch.dict(os.environ)
+        environment.start()
+        self.addCleanup(environment.stop)
+
     def test_gigabit_defaults(self):
         root = pathlib.Path(shared.__file__).resolve().parent
         for cls, parameter in ((shared._CRG, "eth_speed"),

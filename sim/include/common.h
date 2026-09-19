@@ -99,9 +99,18 @@ typedef word_t vaddr_t;
   _Log(FMT_RED("%s:%3d %s ") format "\n", \
        __FILENAME__, __LINE__, __func__, ##__VA_ARGS__)
 
-#define Assert(cond, format, ...) \
-  Error(format, ##__VA_ARGS__);   \
-  assert(cond)
+// Evaluate the condition once; diagnostics (including dlerror()) only on failure.
+// Keep runtime checks and panic() fatal even in builds with NDEBUG.
+#define Assert(cond, format, ...)       \
+  do                                   \
+  {                                    \
+    if (!(cond))                       \
+    {                                  \
+      Error(format, ##__VA_ARGS__);     \
+      fflush(stdout);                  \
+      abort();                         \
+    }                                  \
+  } while (0)
 
 enum
 {

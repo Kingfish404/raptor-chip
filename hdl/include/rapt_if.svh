@@ -45,6 +45,8 @@ interface lsu_l1d_if #(
   // Release the held read without completion or device side effects.
   // Mutually exclusive with rready; retry this instruction with ordered=1.
   logic rretry;
+  logic replay_allowed; // Only complete, non-atomic loads may release ownership.
+  logic rmiss, miss_wake;  // Miss replay, distinct from ordered MMIO retry.
 
   // Hit-under-miss B channel (Phase A2, RAPT_LSU_HUM): a second best-effort
   // load request served ONLY from the cache while the A channel waits on a
@@ -70,16 +72,16 @@ interface lsu_l1d_if #(
   logic werr; // Failed committed write beat, qualified by wready.
 
   modport master(
-      output raddr, ralu, rvalid, rmisaligned, rcheck_valid, rcheck_offset, rcheck_size_m1, rorig_size_m1, atomic_lock, ordered,
-      input idle, rdata, trap, cause, difftest_skip, rready, rretry,
+      output raddr, ralu, rvalid, rmisaligned, rcheck_valid, rcheck_offset, rcheck_size_m1, rorig_size_m1, atomic_lock, ordered, replay_allowed,
+      input idle, rdata, trap, cause, difftest_skip, rready, rretry, rmiss, miss_wake,
       output raddr_b, ralu_b, rvalid_b,
       input rdata_b, rready_b,
       output waddr, wpbmt, walu, wzero, wvalid, wdata,
       input wready, werr
   );
   modport slave(
-      input raddr, ralu, rvalid, rmisaligned, rcheck_valid, rcheck_offset, rcheck_size_m1, rorig_size_m1, atomic_lock, ordered,
-      output idle, rdata, trap, cause, difftest_skip, rready, rretry,
+      input raddr, ralu, rvalid, rmisaligned, rcheck_valid, rcheck_offset, rcheck_size_m1, rorig_size_m1, atomic_lock, ordered, replay_allowed,
+      output idle, rdata, trap, cause, difftest_skip, rready, rretry, rmiss, miss_wake,
       input raddr_b, ralu_b, rvalid_b,
       output rdata_b, rready_b,
       input waddr, wpbmt, walu, wzero, wvalid, wdata,
@@ -141,6 +143,10 @@ interface l1d_bus_if #(
 );
   // load
   logic arvalid;
+  logic ar_mshr;
+  logic [1:0] ar_mshr_id;
+  logic r_mshr;
+  logic [1:0] r_mshr_id;
   logic idle; // D-side reads and all writes have completed at mem_link.
   logic [XLEN-1:0] araddr;
   logic [7:0] rstrb;
@@ -180,17 +186,17 @@ interface l1d_bus_if #(
   logic ptw_werr;
 
   modport master(
-      output arvalid, araddr, arlen, noallocate, rstrb, rpbmt, ar_ptw,
+      output arvalid, ar_mshr, ar_mshr_id, araddr, arlen, noallocate, rstrb, rpbmt, ar_ptw,
       input rready,
-      input idle, rdata, rvalid, ptw_rvalid, ptw_rerr, rlast, difftest_skip, rerr,
+      input idle, rdata, rvalid, r_mshr, r_mshr_id, ptw_rvalid, ptw_rerr, rlast, difftest_skip, rerr,
 
       output awvalid, awaddr, wvalid, wzero, wdata, wstrb, wpbmt, aw_ptw,
       input wready, werr, ptw_wready, ptw_werr
   );
   modport slave(
-      input arvalid, araddr, arlen, noallocate, rstrb, rpbmt, ar_ptw,
+      input arvalid, ar_mshr, ar_mshr_id, araddr, arlen, noallocate, rstrb, rpbmt, ar_ptw,
       output rready,
-      output idle, rdata, rvalid, ptw_rvalid, ptw_rerr, rlast, difftest_skip, rerr,
+      output idle, rdata, rvalid, r_mshr, r_mshr_id, ptw_rvalid, ptw_rerr, rlast, difftest_skip, rerr,
 
       input awvalid, awaddr, wvalid, wzero, wdata, wstrb, wpbmt, aw_ptw,
       output wready, werr, ptw_wready, ptw_werr

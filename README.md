@@ -8,19 +8,19 @@
 
 Welcome to the Raptor Project! Here is an all-in-one repository for exploring, developing, optimizing, and verifying a RISC-V core. Aiming at high quality, full Linux support, FPGA implementation, and ASIC readiness.
 
-Core description: **Super-scalar, out-of-order RISC-V core** with register renaming, a 32-entry ROB, six execution paths fed by five scheduler classes over five unified writeback CDB ports, TAGE branch prediction, and a unified speculative/committed store queue. The scalar F/D unit has a dedicated FPQ and architectural 32 x 64-bit FPR bank, and shares CDB0 with the ALU-CSR pipe. The RTL is described by `SystemVerilog` with `Chisel` (`Scala`) used only for decoder generation. Features Sv32 (RV32) / Sv39 (RV64) virtual memory (MMU/TLB/PTW), 16-entry PMP (TOR/NA4/NAPOT), LR/SC + AMO atomics, compressed instructions (RVC), CLINT/PLIC interrupts, a RISC-V Debug Module / JTAG DTM bring-up path, and Linux v6.18.x flows via OpenSBI. Supports configurable **RV32** and **RV64** modes via compile-time switch.
+Core description: **Super-scalar, out-of-order RISC-V core** with register renaming, a 32-entry ROB, six execution paths fed by five scheduler classes over five unified writeback CDB ports, TAGE branch prediction, and a unified speculative/committed store queue. The scalar F/D unit has a dedicated FPQ and architectural 32 x 64-bit FPR bank, and shares CDB0 with the ALU-CSR pipe. The RTL is described by `SystemVerilog` with `Chisel` (`Scala`) used only for decoder generation. Features Sv32 (RV32) / Sv39 (RV64) virtual memory (MMU/TLB/PTW), 8 usable PMP entries (TOR/NA4/NAPOT; 16 CSR slots, upper eight read-only zero), LR/SC + AMO atomics, compressed instructions (RVC), CLINT/PLIC interrupts, a RISC-V Debug Module / JTAG DTM bring-up path, and Linux v6.18.x flows via OpenSBI. Supports configurable **RV32** and **RV64** modes via compile-time switch.
 
 ```
 Core name:  raptor-falcon (M/S/U + Sv32/Sv39 + PMP, Linux-capable)
 ISA:        rv32/rv64 imafdc_zba_zbb_zbs_zfhmin_zicbom_zicbop_zicboz_zicntr_zicond_zicsr_zifencei_zihintntl_zihintpause_zihpm_zimop_zca_zcb_zcmop
 Modes:      Machine, Supervisor, User
 MMU:        riscv,sv32 (RV32) / riscv,sv39 (RV64) / riscv,none (Bare)
-PMP:        16 entries, TOR / NA4 / NAPOT, L-bit lockable
+PMP:        8 usable entries, TOR / NA4 / NAPOT, L-bit lockable
 Interrupts: CLINT (mtime, mtimecmp, msip) + PLIC (31 sources, M/S contexts)
 Profiles:   RVI20U32; RVA22S64 supported (default config, RV64)
 RV64/default extensions: Zkt, Svinval, Svpbmt (required by RVA22S64)
 
-Bus Interface:  AXI4, XLEN-bit data/addr, 4-bit ID; burst-capable reads (up to 8 outstanding), one outstanding single-beat write with independent AW/W handshakes
+Bus Interface:  AXI4, XLEN-bit data/addr, 4-bit ID; burst-capable reads (up to 8 outstanding), one outstanding write with independent AW/W handshakes (single-beat ordinary stores, multi-beat Zicboz `CBO.ZERO`)
 Default uarch: dual issue / dual commit, ROB=32, ALQ=8 (2 issue ports), BRQ=4, MDQ=4, FPQ=4, IOQ=8, SQ=16, integer PRF=128, FPR=32 x 64-bit, L1I=8 KiB, L1D=8 KiB (both 4-way), 64 B cache lines, optional L2 passthrough/cache stage
 
 Verifying:  RISCOF (riscv-arch-test), full-core F/D directed/differential tests, RVFI, SVA
@@ -73,7 +73,7 @@ flowchart TD
       DTLB["DTLB (default 16 entries, replicated load/store views)"]
       DPTW["DPTW (Sv32/Sv39, Svade)"]
     end
-    PMPC["PMP ×16 (TOR/NA4/NAPOT): fetch + ld/st + PTW checks"]
+    PMPC["PMP ×8 (TOR/NA4/NAPOT): fetch + ld/st + PTW checks"]
     BUS["BUS (mem_link arbiter, request IDs, L1D > L1I)"]
     AXIM["AXI4 master (up to 8 reads, independent AW/W)"]
     L2["L2 (optional, 16 KiB DM / passthrough)"]
@@ -126,7 +126,7 @@ make help
 make verilog pack
 
 # Setup for IDE/LSP support
-make ide-setup
+make compile-commands
 ```
 
 ### 1. NEMU (Software Emulator)
@@ -136,8 +136,7 @@ make ide-setup
 make run-nemu32
 
 # Or step by step
-make config-nemu32          # configure (riscv32_defconfig)
-make build-nemu32           # build
+make build-nemu32           # configure and build
 make run-nemu32             # run
 
 # Interactive menuconfig
@@ -148,11 +147,11 @@ make menuconfig-nemu32
 
 ```shell
 # Full pipeline: generate RTL -> configure -> build -> run
-make sim-rv32
+make run-rv32
 
 # Or step by step
 make verilog              # Chisel -> SystemVerilog
-make config-rv32         # configure (o2_defconfig)
+make configure-rv32      # apply simulator configuration only
 make build-rv32          # build Verilator simulator
 make run-rv32            # run simulation
 
@@ -184,12 +183,12 @@ make run-rv32 VFLAGS="-DRAPT_RV64" ARGS="-b -n"
 make coremark-rv32 ARGS="-b -n"
 make microbench-rv32 ARGS="-b -n"
 # Run with difftest (vs NEMU reference)
-make coremark-rv32-difftest ARGS="-b -n"
-make microbench-rv32-difftest ARGS="-b -n"
+make coremark-rv32 DIFFTEST=1 ARGS="-b -n"
+make microbench-rv32 DIFFTEST=1 ARGS="-b -n"
 # Run sim with reproducible random AXI memory delays (also supports -rv64)
-make coremark-random-rv32 SIM_RANDOM_DELAY=31 SIM_RANDOM_SEED=1
-make microbench-random-rv32 SIM_RANDOM_DELAY=31 SIM_RANDOM_SEED=42
-make cpu-tests-random-rv64 SIM_RANDOM_DELAY=31 SIM_RANDOM_SEED=1
+make coremark-rv32 SIM_RANDOM_DELAY=31 SIM_RANDOM_SEED=1
+make microbench-rv32 SIM_RANDOM_DELAY=31 SIM_RANDOM_SEED=42
+make cpu-tests-rv64 SIM_RANDOM_DELAY=31 SIM_RANDOM_SEED=1
 # Run on ysyxSoC
 make coremark-ysyxsoc ARGS="-b -n"
 make microbench-ysyxsoc ARGS="-b -n"
@@ -246,7 +245,7 @@ make verify-riscof
 # Verilator line/toggle coverage
 make verify-coverage
 # Run everything
-make verify-all
+make verify-light
 # See verify/README.md for SVA, formal (RVFI), and ACT4 details
 ```
 

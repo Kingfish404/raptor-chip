@@ -14,7 +14,9 @@ module tb_superscalar_widths;
 `ifdef RAPT_TEST_ODD_DEPTHS
     c.rename_entries = 7;
     c.dispatch_entries = 7;
-    c.rob_entries = 47;
+    // Keep the odd capacity representable by the preset's shared ROB index
+    // types (default now uses 32 entries rather than 64).
+    c.rob_entries = CoreConfig.rob_entries - 1;
 `endif
     return c;
   endfunction

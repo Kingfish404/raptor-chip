@@ -6,7 +6,7 @@
  * behaviour for difftest and RISCOF.
  *
  * Configuration:
- *   - 16 entries, granularity G=0 (4-byte grain), NA4 supported.
+ *   - 8 implemented entries, 16 CSR slots, G=0 (4-byte grain), NA4 supported.
  *   - Backing store lives in cpu.sr[0x3a0..0x3a3] (packed pmpcfg bytes) and
  *     cpu.sr[0x3b0..0x3bf] (raw pmpaddr values).
  *   - L-bit lockdown and WARL masking of reserved cfg bits are applied via
@@ -26,7 +26,8 @@
 #include <memory/tlb.h>
 #include "../local-include/reg.h"
 
-#define PMP_N 16
+#define PMP_N 8
+#define PMP_CSR_N 16
 
 /* pmpcfg byte field positions (match hdl/include/rapt.svh). */
 #define PMPCFG_R_BIT 0
@@ -174,10 +175,10 @@ static void pmp_rebuild_decoded(void)
 
 void pmp_restore_checkpoint(const uint8_t *cfg, const word_t *addr)
 {
-  for (int i = 0; i < PMP_N; i++)
+  for (int i = 0; i < PMP_CSR_N; i++)
   {
-    pmp_cfg_set(i, cfg[i]);
-    pmp_addr_set(i, addr[i]);
+    pmp_cfg_set(i, i < PMP_N ? cfg[i] : 0);
+    pmp_addr_set(i, i < PMP_N ? addr[i] : 0);
   }
   pmp_rebuild_decoded();
   soft_tlb_flush();
@@ -199,6 +200,7 @@ int pmp_csr_write(uint16_t csr, word_t val)
     for (int pi = 0; pi < 4; pi++)
 #endif
     {
+      if (base + pi >= PMP_N) continue; /* upper CSR slots are read-only zero */
       uint8_t old = pmp_cfg(base + pi);
       if (old & (1u << PMPCFG_L_BIT))
         continue;                                        /* locked */
@@ -210,9 +212,10 @@ int pmp_csr_write(uint16_t csr, word_t val)
     soft_tlb_flush();
     return 1;
   }
-  if (csr >= CSR_PMPADDR0 && csr <= CSR_PMPADDR0 + PMP_N - 1)
+  if (csr >= CSR_PMPADDR0 && csr <= CSR_PMPADDR0 + PMP_CSR_N - 1)
   {
     int i = csr - CSR_PMPADDR0;
+    if (i >= PMP_N) return 1; /* consume write, never fall through to CSR storage */
     uint8_t self_cfg = pmp_cfg(i);
     if (self_cfg & (1u << PMPCFG_L_BIT))
       return 1; /* self locked */
@@ -401,4 +404,3 @@ bool pmp_check(paddr_t addr, int size, uint32_t priv,
   }
   return false;
 }
-

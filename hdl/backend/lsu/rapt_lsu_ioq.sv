@@ -11,7 +11,7 @@
 //   * Drive `exu_ioq_bcast` writeback when head load/store completes
 //
 // Design notes:
-//   * Single L1D outstanding load (`oo_pending` FSM)
+//   * One held lookup; cacheable misses may park in MSHRs and replay after wake
 //   * Atomics and uncached MMIO loads serialize at head only
 //   * Stores always wait at head (no speculative writes)
 /* verilator lint_off PINCONNECTEMPTY */
@@ -86,6 +86,13 @@ module rapt_lsu_ioq #(
   /* verilator lint_off UNUSEDSIGNAL */
   logic                ioq_word         [IOQ_SIZE];  // reserved for RV64 sub-word
   /* verilator lint_on UNUSEDSIGNAL */
+  // Request ownership is also consulted by replay tracking and selection.
+`ifdef RAPT_LSU_HUM
+  logic b_req_valid_q;
+  logic [IOQLen-1:0] b_req_idx_q;
+`endif
+  logic [$clog2(IOQ_SIZE)-1:0] active_idx;
+
   logic [         5:0] ioq_alu          [IOQ_SIZE];
   logic [    XLEN-1:0] ioq_vj           [IOQ_SIZE];
   logic [    XLEN-1:0] ioq_vk           [IOQ_SIZE];
@@ -144,6 +151,15 @@ module rapt_lsu_ioq #(
   // age/hazard arbitration and the L1D/PMP/fast-wakeup response cone.
   logic                load_req_valid_q;
   logic [IOQ_SIZE-1:0] ioq_needs_ordered;
+  logic [IOQ_SIZE-1:0] ioq_miss_wait;
+  always_ff @(posedge clock) begin
+    if (reset || cmu_bcast.flush_pipe) ioq_miss_wait <= '0;
+    else begin
+      if (exu_lsu.miss_wake) ioq_miss_wait <= '0;
+      if (exu_lsu.rvalid && exu_lsu.rmiss)
+        ioq_miss_wait[active_idx] <= !exu_lsu.miss_wake;
+    end
+  end
   logic [  IOQLen-1:0] load_req_idx_q;
   logic [    XLEN-1:0] load_req_addr_q;
   logic [         4:0] load_req_alu_q;
@@ -184,16 +200,23 @@ module rapt_lsu_ioq #(
   logic [IOQ_SIZE-1:0] ioq_addr_ready;
   for (genvar e = 0; e < IOQ_SIZE; e++) begin : g_address
     if (RegisterAddresses) begin : g_registered
-      // Address generation precedes dependence checking and request selection.
-      // Consume the stored operand only after wakeup has cleared its tag, so
-      // the completion data mux is not chained into this stage's adder.
+      // Zero-offset/atomic addresses need no adder or second register stage.
+      // The operand is still registered by wakeup; nonzero offsets retain
+      // the timing boundary before dependence checking and request selection.
+      logic prepared;
+      logic [XLEN-1:0] prepared_addr;
+      logic direct_address;
+      assign direct_address = ioq_atom[e] || ioq_imm[e] == '0;
+      assign ioq_eff_addr[e] = direct_address ? ioq_vj[e] : prepared_addr;
+      assign ioq_addr_ready[e] = ioq_valid[e] && ioq_pr1[e] == '0
+          && (direct_address || prepared);
       always_ff @(posedge clock) begin
         if (reset || cmu_bcast.flush_pipe || alloc_slot[e] >= 0
             || (ioq_valid_found && ioq_head == IOQLen'(e))) begin
-          ioq_addr_ready[e] <= 1'b0;
-        end else if (ioq_valid[e] && !ioq_addr_ready[e] && ioq_pr1[e] == '0) begin
-          ioq_eff_addr[e] <= ioq_atom[e] ? ioq_vj[e] : ioq_vj[e] + ioq_imm[e];
-          ioq_addr_ready[e] <= 1'b1;
+          prepared <= 1'b0;
+        end else if (ioq_valid[e] && !prepared && ioq_pr1[e] == '0) begin
+          prepared_addr <= ioq_vj[e] + ioq_imm[e];
+          prepared <= 1'b1;
         end
       end
     end else begin : g_combinational
@@ -277,7 +300,7 @@ module rapt_lsu_ioq #(
 
   always_comb begin
     for (int i = 0; i < IOQ_SIZE; i++) begin
-      ioq_load_issue_vec[i] = ioq_valid[i] && ioq_ren[i]
+      ioq_load_issue_vec[i] = ioq_valid[i] && !ioq_miss_wait[i] && ioq_ren[i]
           && ioq_addr_ready[i]
           && !ioq_complete[i]
           && (ioq_pr1[i] == 0) && (ioq_pr2[i] == 0)
@@ -297,7 +320,12 @@ module rapt_lsu_ioq #(
     for (int k = 0; k < IOQ_SIZE; k++) begin
       automatic logic [$clog2(IOQ_SIZE)-1:0] idx;
       idx = ioq_head + k[$clog2(IOQ_SIZE)-1:0];
-      if (!ioq_issue_found && ioq_load_issue_vec[idx]) begin
+      if (!ioq_issue_found && ioq_load_issue_vec[idx]
+          && !(load_req_valid_q && idx == load_req_idx_q)
+`ifdef RAPT_LSU_HUM
+          && !(b_req_valid_q && idx == b_req_idx_q)
+`endif
+      ) begin
         ioq_issue_idx   = idx;
         ioq_issue_found = 1'b1;
       end
@@ -306,7 +334,6 @@ module rapt_lsu_ioq #(
 
   // Atomics preempt ordinary loads at the request-stage input.  Completed
   // atomics must not be restaged during the cycle before head writeback.
-  logic [$clog2(IOQ_SIZE)-1:0] active_idx;
   logic head_is_atomic_ready;
   logic head_store_addr_valid_q, head_store_check_valid_q;
   logic head_store_check_fault_q;
@@ -330,9 +357,11 @@ module rapt_lsu_ioq #(
   assign load_req_sel_idx = head_is_atomic_ready ? ioq_head : ioq_issue_idx;
   assign load_req_sel_addr = ioq_eff_addr[load_req_sel_idx];
   assign load_req_sel_valid = (head_is_atomic_ready || ioq_issue_found)
+      && !(load_req_valid_q && load_req_sel_idx == load_req_idx_q)
       && (!ioq_needs_ordered[load_req_sel_idx]
           || (load_req_sel_idx == ioq_head && ioq_at_rob_head))
       && (!translated_ordered || (load_req_sel_idx == ioq_head && ioq_at_rob_head))
+      && !ioq_miss_wait[load_req_sel_idx]
       && ioq_valid[load_req_sel_idx]
       && ioq_addr_ready[load_req_sel_idx]
       && ioq_ren[load_req_sel_idx]
@@ -371,8 +400,6 @@ module rapt_lsu_ioq #(
 `ifdef RAPT_LSU_HUM
   logic [$clog2(IOQ_SIZE)-1:0] b_issue_idx;
   logic b_issue_found;
-  logic b_req_valid_q;
-  logic [IOQLen-1:0] b_req_idx_q;
   logic [XLEN-1:0] b_req_addr_q;
   logic [4:0] b_req_alu_q;
   always_comb begin
@@ -409,7 +436,7 @@ module rapt_lsu_ioq #(
   // formatter cannot rejoin it past the column limit.
   logic ioq_b_request_stable;
   assign ioq_b_request_stable = exu_lsu.rvalid_b && !exu_lsu.rready_b
-      && !(exu_lsu.rvalid && (exu_lsu.rready || exu_lsu.rretry));
+      && !(exu_lsu.rvalid && (exu_lsu.rready || exu_lsu.rretry || exu_lsu.rmiss));
   `RAPT_SVA_NEXT(clock, reset || cmu_bcast.flush_pipe, IOQ_B_REQUEST_STABLE, ioq_b_request_stable,
                  exu_lsu.rvalid_b && $stable({b_req_idx_q, b_req_addr_q, b_req_alu_q}))
 `else
@@ -455,21 +482,16 @@ module rapt_lsu_ioq #(
     if ((XLEN == 32) && ioq_fp_valid[ioq_head] && ioq_fp_op[ioq_head] == `RAPT_FP_OP_FSD)
       head_store_size_sel = 4'd8;
   end
-  // The resident head owns these fields through translation, access checking
-  // and completion. Capture LR metadata too, since its completion uses the
-  // same atomic width encoding. Flush/head removal invalidate both stages.
-  always_ff @(posedge clock) begin
-    if (reset || cmu_bcast.flush_pipe || ioq_valid_found) begin
-      head_store_addr_valid_q <= 1'b0;
-    end else if (!head_store_addr_valid_q && ioq_valid[ioq_head]
-        && (ioq_wen[ioq_head] || ioq_atom[ioq_head])
-        && ioq_pr1[ioq_head] == 0 && ioq_pr2[ioq_head] == 0) begin
-      head_store_addr_valid_q <= 1'b1;
-      head_store_vaddr <= ioq_vj[ioq_head] + ioq_imm[ioq_head];
-      head_store_walu <= head_store_walu_sel;
-      head_store_size <= head_store_size_sel;
-    end
-  end
+  // Addresses are already prepared per IOQ entry. Reuse that stable value
+  // at the head rather than recomputing and registering it a second time.
+  // Permission/translation checking and its result register remain intact.
+  assign head_store_addr_valid_q = !reset && !cmu_bcast.flush_pipe
+      && ioq_valid[ioq_head] && ioq_addr_ready[ioq_head]
+      && (ioq_wen[ioq_head] || ioq_atom[ioq_head])
+      && ioq_pr1[ioq_head] == 0 && ioq_pr2[ioq_head] == 0;
+  assign head_store_vaddr = ioq_eff_addr[ioq_head];
+  assign head_store_walu = head_store_walu_sel;
+  assign head_store_size = head_store_size_sel;
   assign head_store_last_vaddr = head_store_vaddr + XLEN'(head_store_size - 1'b1);
   // Stores are at most eight bytes: only the page-offset carry decides
   // whether a second translation is needed, including virtual-address wrap.
@@ -892,10 +914,10 @@ module rapt_lsu_ioq #(
 
       // ---- Registered load-request pipeline ----
       // An occupied stage is held verbatim until the LSU response handshake.
-      // Deliberately do not refill it on the handshake edge: ioq_complete for
-      // the returning entry is written on that same edge, so the one-cycle
-      // bubble also prevents the just-completed entry from being reselected.
-      if (!load_req_valid_q) begin
+      // The selector excludes both in-flight owners, so a response can
+      // replace the stage on the same edge without reissuing the old entry.
+      if (!load_req_valid_q || exu_lsu.rready || exu_lsu.rretry || exu_lsu.rmiss) begin
+        load_req_valid_q <= 1'b0;
         if (load_req_sel_valid) begin
           load_req_valid_q <= 1'b1;
           load_req_idx_q   <= load_req_sel_idx;
@@ -919,13 +941,12 @@ module rapt_lsu_ioq #(
               && (ioq_rd[load_req_sel_idx] != '0);
           load_req_prd_q <= ioq_prd[load_req_sel_idx];
         end
-      end else if (exu_lsu.rready || exu_lsu.rretry) begin
-        load_req_valid_q <= 1'b0;
       end
       // Promote a held translation as soon as both heads catch up. If L1D
       // discovers a device before then, rretry releases this request and
       // ioq_needs_ordered prevents it from blocking older ready loads again.
-      if (load_req_valid_q && (load_req_idx_q == ioq_head) && ioq_at_rob_head)
+      if (load_req_valid_q && !(exu_lsu.rready || exu_lsu.rretry || exu_lsu.rmiss)
+          && (load_req_idx_q == ioq_head) && ioq_at_rob_head)
         load_req_ordered_q <= 1'b1;
       // ---- Static per-entry enqueue mux (B > A on any selector alias) ----
       for (int i = 0; i < IOQ_SIZE; i++) begin
@@ -1066,7 +1087,7 @@ module rapt_lsu_ioq #(
       // `oo_pending` means the registered A request has survived at least one
       // cycle without a response; only then may the optional HUM B port probe
       // a younger load.
-      if (!load_req_valid_q || (exu_lsu.rvalid && (exu_lsu.rready || exu_lsu.rretry))) begin
+      if (!load_req_valid_q || (exu_lsu.rvalid && (exu_lsu.rready || exu_lsu.rretry || exu_lsu.rmiss))) begin
         oo_pending <= 1'b0;
       end else if (!oo_pending && exu_lsu.rvalid && !exu_lsu.rready) begin
         oo_pending     <= 1'b1;

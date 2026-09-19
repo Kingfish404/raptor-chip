@@ -1,3 +1,4 @@
+`include "rapt.svh"
 // L1D word-write / line-read data array, built from <=128-bit 1RW SRAMs.
 // A write reserves the entire array's port for the cycle, even though only
 // one way/subarray is enabled. Read data is usable only when read_valid is
@@ -18,6 +19,9 @@ module rapt_l1d_data #(
     input logic [WordBits-1:0] write_word,
     input logic [WayBits-1:0] write_way,
     input logic [Xlen-1:0] write_data,
+    input logic write_line = 1'b0,
+    input logic [LineWords-1:0] write_mask = '0,
+    input logic [LineWords*Xlen-1:0] write_line_data = '0,
     output logic read_valid,
     output logic [SetBits-1:0] read_index,
     output wire [Xlen-1:0] read_data[Ways][LineWords]
@@ -53,7 +57,7 @@ module rapt_l1d_data #(
     for (genvar bank = 0; bank < Subarrays; bank++) begin : g_bank
       localparam int BaseWord = bank * SubarrayWords;
       wire [SubarrayBytes-1:0] byte_enable;
-      wire [SubarrayBytes*8-1:0] bank_data;
+      wire [SubarrayBytes*8-1:0] bank_data, bank_wdata;
       wire bank_write = |byte_enable;
 
       // Each generated word owns its byte-enable and read-data slice.
@@ -61,7 +65,10 @@ module rapt_l1d_data #(
       for (genvar word_idx = 0; word_idx < SubarrayWords; word_idx++) begin : g_word
         assign byte_enable[word_idx*WordBytes+:WordBytes] =
             {WordBytes{write_valid && write_way == WayBits'(way)
-                       && write_word == WordBits'(BaseWord + word_idx)}};
+                       && (write_line ? write_mask[BaseWord+word_idx]
+                           : write_word == WordBits'(BaseWord + word_idx))}};
+        assign bank_wdata[word_idx*Xlen+:Xlen] = write_line
+            ? write_line_data[(BaseWord+word_idx)*Xlen+:Xlen] : write_data;
         assign read_data[way][BaseWord+word_idx] = bank_data[word_idx*Xlen+:Xlen];
       end
 
@@ -75,7 +82,7 @@ module rapt_l1d_data #(
           .wen(bank_write),
           .addr(bank_write ? write_addr : read_addr),
           .rdata(bank_data),
-          .wdata({SubarrayWords{write_data}}),
+          .wdata(bank_wdata),
           .bwe(byte_enable)
       );
     end

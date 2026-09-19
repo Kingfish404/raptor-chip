@@ -161,10 +161,12 @@ module rapt_csr #(
 `endif
   assign stime_irq = sstc_en && (time64 >= stimecmp);
 
-  // PMP state: 16 entries, packed according to XLEN.
+  // PMP CSR slots are packed according to XLEN; only RAPT_PMP_NUM are usable.
   // Reserved bits [6:5] of each cfg byte are WARL-zero (mask 8'h9F).
   // pmpaddr is stored in its raw CSR form (byte_addr >> 2).
   localparam int PMPAddrW = `RAPT_PMPADDR_BITS;
+  // Match pmp_update_if.IDX_W without a hierarchical constant expression.
+  localparam int PMPIndexW = $clog2(`RAPT_PMP_NUM);
   localparam int PMPCheckAddrW = `RAPT_PADDR_BITS - 2;
   localparam logic [11:0] PMPAddrBase = `RAPT_CSR_PMPADDR0;
   localparam logic [11:0] PMPAddrLast = `RAPT_CSR_PMPADDR15;
@@ -181,8 +183,12 @@ module rapt_csr #(
   for (genvar lane = 0; lane < XLEN / 8; lane++) begin : g_pmpcfg_legal
     assign pmpcfg_legal_wdata[lane*8+:8] = legalize_pmpcfg(rou_csr.csr_wdata[lane*8+:8]);
   end
-  logic [7:0]          pmpcfg_r [`RAPT_PMP_NUM];
-  logic [PMPAddrW-1:0] pmpaddr_r[`RAPT_PMP_NUM];
+  logic [7:0]          pmpcfg_r [`RAPT_PMP_CSR_NUM];
+  logic [PMPAddrW-1:0] pmpaddr_r[`RAPT_PMP_CSR_NUM];
+  for (genvar i = `RAPT_PMP_NUM; i < `RAPT_PMP_CSR_NUM; i++) begin : g_pmp_roz
+    assign pmpcfg_r[i] = '0;
+    assign pmpaddr_r[i] = '0;
+  end
 
   // trap handle
   logic [XLEN-1:0] cause_idx;
@@ -351,7 +357,8 @@ module rapt_csr #(
       default: begin
         // PMP CSR reads. RV32: pmpcfg0..3 each packs 4 cfg bytes (entries 4*i..4*i+3).
         // RV64: pmpcfg0 packs entries 0..7 (8 bytes), pmpcfg2 packs entries 8..15;
-        //       pmpcfg1/pmpcfg3 are reserved (read as 0).
+        //       pmpcfg1/pmpcfg3 are illegal (rejected before CSR execution).
+        // Upper read-only-zero slots are supplied by g_pmp_roz.
         if (raddr == `RAPT_CSR_PMPCFG0) begin
           exu_csr.rdata = (XLEN == 64)
                         ? XLEN'({pmpcfg_r[7], pmpcfg_r[6], pmpcfg_r[5], pmpcfg_r[4],
@@ -629,9 +636,11 @@ module rapt_csr #(
     if (rou_csr.valid && rou_csr.csr_wen
       && rou_csr.csr_addr >= PMPAddrBase
       && rou_csr.csr_addr <= PMPAddrLast
+      && int'(pidx) <
+        `RAPT_PMP_NUM
         && !self_locked && !tor_locked) begin
       pmp_update.addr_we    = 1'b1;
-      pmp_update.addr_idx   = pidx;
+      pmp_update.addr_idx   = PMPIndexW'(pidx);
       pmp_update.raw_addr   = rou_csr.csr_wdata[PMPCheckAddrW-1:0];
       pmp_update.napot_mask = pmp_update.raw_addr
             ^ (pmp_update.raw_addr + PMPCheckAddrW'(1));
@@ -712,28 +721,28 @@ module rapt_csr #(
             // L-bit locked cfgs ignore further writes (until reset).
             // Reserved bits [6:5] are WARL-zero (mask 8'h9F).
             for (int pi = 0; pi < (XLEN == 64 ? 8 : 4); pi++) begin
-              if (!pmpcfg_r[pi][`RAPT_PMPCFG_L_]) begin
+              if (pi < `RAPT_PMP_NUM && !pmpcfg_r[pi][`RAPT_PMPCFG_L_]) begin
                 pmpcfg_r[pi] <= legalize_pmpcfg(rou_csr.csr_wdata[pi*8+:8]);
               end
             end
           end else if (rou_csr.csr_addr == `RAPT_CSR_PMPCFG1 && XLEN == 32) begin
             // pmpcfg1 only exists on RV32. On RV64 it is reserved; ignore writes.
             for (int pi = 0; pi < 4; pi++) begin
-              if (!pmpcfg_r[pi+4][`RAPT_PMPCFG_L_]) begin
+              if (pi + 4 < `RAPT_PMP_NUM && !pmpcfg_r[pi+4][`RAPT_PMPCFG_L_]) begin
                 pmpcfg_r[pi+4] <= legalize_pmpcfg(rou_csr.csr_wdata[pi*8+:8]);
               end
             end
           end else if (rou_csr.csr_addr == `RAPT_CSR_PMPCFG2) begin
             // pmpcfg2: RV32 packs entries 8..11 (4 bytes); RV64 packs entries 8..15 (8 bytes).
             for (int pi = 0; pi < (XLEN == 64 ? 8 : 4); pi++) begin
-              if (!pmpcfg_r[pi+8][`RAPT_PMPCFG_L_]) begin
+              if (pi + 8 < `RAPT_PMP_NUM && !pmpcfg_r[pi+8][`RAPT_PMPCFG_L_]) begin
                 pmpcfg_r[pi+8] <= legalize_pmpcfg(rou_csr.csr_wdata[pi*8+:8]);
               end
             end
           end else if (rou_csr.csr_addr == `RAPT_CSR_PMPCFG3 && XLEN == 32) begin
             // pmpcfg3 only exists on RV32.
             for (int pi = 0; pi < 4; pi++) begin
-              if (!pmpcfg_r[pi+12][`RAPT_PMPCFG_L_]) begin
+              if (pi + 12 < `RAPT_PMP_NUM && !pmpcfg_r[pi+12][`RAPT_PMPCFG_L_]) begin
                 pmpcfg_r[pi+12] <= legalize_pmpcfg(rou_csr.csr_wdata[pi*8+:8]);
               end
             end
@@ -746,7 +755,7 @@ module rapt_csr #(
                 ? (pmpcfg_r[pidx + 4'd1][`RAPT_PMPCFG_L_]
                    && (pmpcfg_r[pidx + 4'd1][`RAPT_PMPCFG_A_] == `RAPT_PMP_A_TOR))
                 : 1'b0;
-            if (!self_locked && !tor_locked) begin
+            if (int'(pidx) < `RAPT_PMP_NUM && !self_locked && !tor_locked) begin
               pmpaddr_r[pidx] <= rou_csr.csr_wdata[PMPAddrW-1:0];
             end
           end else if (waddr_reg == MEDELEG) begin
@@ -921,10 +930,6 @@ module rapt_csr #(
             csr[MEPC___] <= rou_csr.pc;
             csr[MTVAL__] <= rou_csr.tval;
             priv_mode <= `RAPT_PRIV_M;
-`ifdef RAPT_DEBUG_PMP
-            $display("[%0t] CSR_TRAP_M cause=%h mepc=%h mtval=%h", $time, rou_csr.cause,
-                     rou_csr.pc, rou_csr.tval);
-`endif
           end
         end
       end

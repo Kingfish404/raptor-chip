@@ -1,3 +1,7 @@
+---
+title: Performance Profile
+---
+
 # Performance Profile
 
 > Legacy performance archive. These tables preserve early NPC/SoC measurements and do not describe the current default RTL configuration. For benchmark history of the current default two-wide parameterized OoO configuration, cache/window sizes, and STA baselines, use [Performance Iterations](./perf-iterations.md).

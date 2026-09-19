@@ -285,6 +285,7 @@ module tb_l1d_data;
             .WordBits(WordBits),
             .Ways(Ways)
         ) dut (
+            .write_line(1'b0), .write_mask('0), .write_line_data('0),
             .*
         );
 
@@ -2080,6 +2081,7 @@ module tb_l1d_replacement;
       .L1D_N_WAYS(4),
       .L1dTagW(4)
   ) dut (
+      .line_update(1'b0), .line_mask('0),
       .*
   );
   task automatic tick;
@@ -2878,6 +2880,7 @@ module tb_l1d_tags;
           .L1dTagW(2)
       ) dut (
           .fence_time(|clear_set),
+          .line_update(1'b0), .line_mask('0),
           .*
       );
 

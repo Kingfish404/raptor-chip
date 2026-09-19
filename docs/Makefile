@@ -47,16 +47,18 @@ endif
 
 BUNDLE_PATH_DIR := vendor/bundle
 
-.PHONY: help doctor check-ruby install serve build clean
+.PHONY: help doctor check-ruby install serve build clean portal-data portal-test
 
 help:
-	@echo "Raptor docs — local preview (native Ruby + Bundler)"
+	@echo "Raptor docs — product portal + manual (native Ruby + Bundler)"
 	@echo ""
 	@echo "  make install  Install gem dependencies into $(BUNDLE_PATH_DIR)/"
-	@echo "  make serve    Start live-reload preview at http://$(HOST):$(PORT)"
+	@echo "  make serve    Start live-reload preview at http://$(HOST):$(PORT)/raptor-chip/"
 	@echo "  make build    Build static site into _site/"
 	@echo "  make clean    Remove _site/, vendor/, caches"
 	@echo "  make doctor   Print the Ruby/Bundler actually used"
+	@echo "  make portal-data  Extract RTL/Makefile JSON for the homepage explorer"
+	@echo "  make portal-test  Run extractor unit tests"
 	@echo ""
 	@echo "Variables: PORT=$(PORT) HOST=$(HOST) RUBY_BIN_DIR=$(RUBY_BIN_DIR)"
 
@@ -90,10 +92,20 @@ install: check-ruby Gemfile
 	$(BUNDLE) config set --local path '$(BUNDLE_PATH_DIR)'
 	$(BUNDLE) install
 
-serve: install
+serve: install portal-data
 	$(BUNDLE) exec jekyll serve --host $(HOST) --port $(PORT) --livereload --incremental
 
-build: install
+PYTHON ?= python3
+
+portal-data:
+	$(PYTHON) scripts/extract_portal_data.py
+
+portal-test:
+	$(PYTHON) scripts/test_pipeline_model.py
+	$(PYTHON) scripts/test_extract_portal_data.py
+	$(PYTHON) scripts/test_uarch_view_2d.py
+
+build: install portal-data
 	$(BUNDLE) exec jekyll build
 
 clean:

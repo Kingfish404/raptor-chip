@@ -179,7 +179,7 @@ params:
       false, false, false, false, false, false, false, false, false, false,
       false, false, false]
   MCOUNTINHIBIT_IMPLEMENTED: false
-  NUM_USABLE_PMP_ENTRIES: 16
+  NUM_USABLE_PMP_ENTRIES: 8
   PMP_TOR_SUPPORTED: true
   PMP_NA4_SUPPORTED: true
   PMP_NAPOT_SUPPORTED: true

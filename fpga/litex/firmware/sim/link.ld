@@ -29,6 +29,8 @@ SECTIONS {
     } > sram
 
     /DISCARD/ : {
+        /* Raw ROM images start at the reset vector, not the ELF entry field. */
+        *(.note*)
         *(.eh_frame)
         *(.comment)
         *(.riscv.attributes)
@@ -36,3 +38,4 @@ SECTIONS {
 }
 
 ENTRY(_start)
+ASSERT(_start == ORIGIN(rom), "ROM entry must match the CPU reset vector")

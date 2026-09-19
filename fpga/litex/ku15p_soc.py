@@ -55,6 +55,11 @@ class KU15PBoard:
 
 def configure_ku15p_timing(platform, board, with_litedram=False, with_mig=False):
     """Shared implementation policy for CLI builds and peripheral STA."""
+    # A scalar implicit net on a cache lookup port can silently discard the
+    # address. Reject that mismatch without changing unrelated width warnings.
+    platform.toolchain.pre_synthesis_commands.add(
+        "set_msg_config -id \"Synth 8-689\" -string \"port connection 'lookup_addr'\" "
+        "-new_severity ERROR")
     hold = 0.050 if with_litedram or with_mig else board.bare_hold_uncertainty
     platform.toolchain.pre_optimize_commands.add(
         f"set_clock_uncertainty -hold {hold:.3f} [all_clocks]")
@@ -390,9 +395,10 @@ class RaptorKU15PSoC(SoCCore):
         fmc_slot=None,
         eth_port="a",
         with_led_chaser=False,
-        rapt_memspeed_trace=False,
         **kwargs,
     ):
+        if sdcard_autoboot:
+            raise ValueError("Automatic boot is disabled; enter sdcardboot or netboot manually at litex>")
         fmc_slot = (fmc_slot or board.default_fmc_slot).lower()
         eth_port = eth_port.lower()
         oversampled_rx = (board.name, fmc_slot, eth_port) == ("mlk_cu08_ku15p", "c", "a")
@@ -425,9 +431,6 @@ class RaptorKU15PSoC(SoCCore):
             self.cpu.pmem_size = mig_size if with_mig else litedram_size
             if not 0 < self.cpu.pmem_size <= 0x40000000 or self.cpu.pmem_size & (self.cpu.pmem_size - 1):
                 raise ValueError("KU15P DDR window must be a power of two up to 1 GiB; MMIO starts at 0xc0000000")
-
-        if rapt_memspeed_trace:
-            self.add_config("RAPT_MEMSPEED_TRACE")
 
         if eth_speed not in (100, 1000):
             raise ValueError("CM005 speed must be 100 or 1000 Mb/s")
@@ -471,6 +474,7 @@ class RaptorKU15PSoC(SoCCore):
             # while retaining its 32-bit Wishbone packet SRAM interface.
             self.add_ethernet(phy=self.ethphy,
                               data_width=8 if oversampled_rx and eth_speed == 1000 else 32,
+                              nrxslots=8,
                               with_timing_constraints=False)
             self.add_constant("CM005_ETH_SPEED", eth_speed)
             self.add_constant("CM005_RX_OVERSAMPLE", int(oversampled_rx))
@@ -648,18 +652,13 @@ class RaptorKU15PSoC(SoCCore):
             )
 
         # BOOT_MODE=bios selects the firmware, not its startup policy. Stop at
-        # litex> by default; CONFIG_BIOS_NO_BOOT skips only main.c's automatic
+        # litex> unconditionally; CONFIG_BIOS_NO_BOOT skips only main.c's automatic
         # sequence and leaves the interactive boot commands available.
-        if not sdcard_autoboot:
-            self.add_config("BIOS_NO_BOOT")
+        self.add_config("BIOS_NO_BOOT")
 
         if with_sdcard:
             self.add_sdcard(name="sdcard", mode="read+write")
-            # Preserve manual boot unless an integration profile opts in.
-            if not sdcard_autoboot:
-                self.add_constant("SDCARD_BOOT_DISABLE")
-        elif sdcard_autoboot:
-            raise ValueError("SD automatic boot requires --with-sdcard")
+            self.add_constant("SDCARD_BOOT_DISABLE")
 
         if with_led_chaser:
             try:
@@ -723,7 +722,7 @@ def main(board):
     parser.add_target_argument("--with-ethernet", action="store_true",
                                help="Enable the CM005 YT8531 Ethernet MAC.")
     parser.add_target_argument("--sdcard-autoboot", action="store_true",
-                               help="Include SD in the BIOS automatic boot sequence (requires --with-sdcard).")
+                               help="Unsupported legacy option; automatic boot is rejected.")
     parser.add_target_argument("--eth-speed", type=int, choices=[100, 1000], default=1000,
                                help="Fixed CM005 link speed in Mb/s (default: 1000).")
     parser.add_target_argument("--export-ethernet-csr", metavar="PATH",
@@ -732,11 +731,6 @@ def main(board):
                                help="Physical FMC connector (mapping must be verified).")
     parser.add_target_argument("--eth-port", default="a", choices=["a", "b", "c", "d"],
                                help="CM005 RJ45 port (mapping must be verified).")
-    parser.add_target_argument(
-        "--rapt-memspeed-trace",
-        action="store_true",
-        help="Enable Raptor LiteX BIOS memspeed phase trace markers.",
-    )
     parser.add_target_argument(
         "--uart-polling",
         action="store_true",
@@ -795,7 +789,6 @@ def main(board):
         fmc_slot=args.fmc_slot,
         eth_port=args.eth_port,
         with_led_chaser=args.with_led_chaser,
-        rapt_memspeed_trace=args.rapt_memspeed_trace,
         **soc_kwargs,
     )
 

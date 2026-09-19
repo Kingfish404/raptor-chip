@@ -15,7 +15,7 @@ class StaEntrypointsTest(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory(prefix="rapt-sta-entry-")
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
-        for name in ("Makefile", "sim/Makefile", "sim/Kconfig", "sim/scripts/config.mk",
+        for name in ("Makefile", "sim/Makefile", "sim/Kconfig", "sim/scripts/config.mk", "sim/scripts/build_cache.py", "sim/scripts/sta.py",
                      "lspd/syn/Makefile", "lspd/modules.mk"):
             dest = self.root / name
             dest.parent.mkdir(parents=True, exist_ok=True)
@@ -24,6 +24,8 @@ class StaEntrypointsTest(unittest.TestCase):
                      "hdl/configs/default/rapt_config.svh", "hdl/chisel/Makefile"):
             self.file(name)
         (self.root / "hdl/chisel/src").mkdir()
+        for name in ("sim/csrc", "sim/rtl"):
+            (self.root / name).mkdir()
         (self.root / "bin").mkdir()
         self.file("bin/yosys", "#!/bin/sh\nexit 0\n", executable=True)
         # Any accidental network/tool setup is a test failure, even if a caller
@@ -73,12 +75,16 @@ class StaEntrypointsTest(unittest.TestCase):
                 self.assertIn("tools and sky130 libraries are ready", run.stdout)
 
     def test_sky130_alias_reaches_sta_flow(self):
-        self.file(f"{self.flow}/Makefile",
-                  '.PHONY: sta show\nsta show:\n\t@test "$(PLATFORM)" = sky130hd\n')
-        # Skip RTL packing only: exercise the real preflight and flow recipe.
-        run = self.run_check("STA_PLATFORM=sky130", "-o", "pack-synth-check",
-                             target="sta-flops")
+        from test_sta_dff import FAKE_MAKE
+        self.file(f"{self.flow}/Makefile", FAKE_MAKE)
+        self.file(f"{self.flow}/platforms/sky130hd/platform.mk")
+        self.file(f"{self.flow}/scripts/.fixture")
+        self.file("work/rtl/rapt_pack.sv", "module rapt; endmodule\n")
+        # Skip elaboration only; exercise preflight, alias normalization and runner.
+        run = self.run_check("STA_PLATFORM=sky130", "MEMORY=dff", "-o", "sta-check",
+                             f"STA_WORK_DIR={self.root}/work", target="sta")
         self.assertEqual(run.returncode, 0, run.stdout)
+        self.assertIn("goal=sta platform=sky130hd", run.stdout)
 
     def test_missing_sky130_config_is_not_masked_by_alias(self):
         (self.root / self.flow / "platforms/sky130hd/config.tcl").unlink()
@@ -103,7 +109,7 @@ class StaEntrypointsTest(unittest.TestCase):
         self.file("bin/yosys", "#!/bin/sh\nexit 1\n", executable=True)
         run = self.run_check()
         self.assertNotEqual(run.returncode, 0)
-        self.assertIn("slang plugin is unavailable", run.stdout)
+        self.assertIn("cannot load its slang frontend", run.stdout)
 
 
 if __name__ == "__main__":

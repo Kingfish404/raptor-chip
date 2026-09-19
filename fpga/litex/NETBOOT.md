@@ -1,5 +1,29 @@
 # LiteX BIOS netboot (RV32 / RV64)
 
+## 可读的 bundle 名称
+
+新发行版 bundle 使用 `<distro>-linux<version>-<UTC时间>-<8位校验码>`，例如：
+
+```text
+netboot raptor-netboot/rv64/alpine-linux6_18_51-20260916T102205Z-ad6ce74b/boot.json
+```
+
+版本号中的点以 `_` 代替，兼容已有 BIOS 的路径字符限制。时间是 bundle 打包构建时间，`Z` 表示 UTC；上述时间对应北京时间 2026-09-16 18:22:05。重复使用同一缓存 bundle 不改变名称。短校验码区分同一秒内不同配置，manifest 保留完整 SHA256，发布仍拒绝覆盖不同内容。内部构建缓存继续使用内容哈希。
+
+2026-09-17 清理后保留的发行版启动入口：
+
+| XLEN | 系统 | bundle 名称 |
+| --- | --- | --- |
+| RV64 | Alpine（原镜像已实板验证） | `alpine-linux6_18_51-20260916T102205Z-ad6ce74b` |
+| RV64 | Debian（QEMU 验证，未实板验证） | `debian-linux6_18_51-20260916T100454Z-2c0cad36` |
+| RV32 | Buildroot（QEMU 验证，未实板验证） | `buildroot-linux6_18_51-20260916T074319Z-c7d5bb59` |
+
+这些存量镜像没有原始打包时间字段，迁移使用旧 manifest 的文件时间，记录 `bundle_time_source=legacy-manifest-mtime`，不声称重新编译。重命名仅修改 `boot.json` 与 manifest，内核、DTB、固件及 rootfs 字节保持不变；`renamed_from` 绑定原始路径和 manifest 哈希。新名称通过 TFTP 读取校验，未重复实板启动。
+
+25 个旧实验镜像目录已移至 TFTP 根目录之外的 `/srv/raptor-netboot-archive/20260917-semantic-names/`，`plan.json` 保存原路径和文件哈希，可按原路径恢复。仍被引用的两个硬件基础包、`mmc-recovery` 及其原 Alpine 依赖保留原路径。当前引用和持有构建锁的本地缓存不清理；本地清理清单在 `build/netboot-bundle-archive/20260917/manifest.json`。
+
+可用 `scripts/netboot_relabel.py SOURCE --output-root OUTPUT` 将旧发行版 bundle 复制为新名称，再用 `scripts/netboot_distro_publish.py OUTPUT/BUNDLE` 发布。该命令不自动归档源目录，不加载 FPGA，也不执行 netboot。
+
 ## Fixed CU08 end-to-end targets
 
 Run from `fpga/litex` with the CU08 UART/JTAG available and FMC_C/ETHA connected to a dedicated host Ethernet interface:
@@ -66,6 +90,29 @@ Before rebuilding, a completed legacy output can be imported using its matching 
 The current fixed BIOS uses `192.168.1.50` locally and `192.168.1.100` for TFTP. For a BIOS built with `ETH_DYNAMIC_IP`, you can manually use `eth_local_ip` and `eth_remote_ip` to change these. Static BIOS addresses require a matching server.
 
 Network acceptance uses a temporary private tracefs instance on the board (`skb/kfree_skb` with `UNHANDLED_PROTO` support is required in the kernel). Some links deliver periodic LLDP frames even when host packet capture does not show them. The test records raw counters and accounts only for LLDP (`0x88cc`) protocol discards actually observed by the kernel. Unexplained RX drops, RX/TX errors, TX drops, trace overflow, or checksum mismatches still fail. The instance and temporary mount are removed before the success receipt is written; no host NIC offload or LLDP setting is changed.
+
+## Updating RV32 netboot software without resynthesis
+
+After a successful hardware build, refresh the Buildroot/kernel/DTB bundle with:
+
+```sh
+make fpga-netboot-rv32-bundle FPGA_BOARD=mlk_cu08_ku15p
+```
+
+This does not run Vivado or load the board. Hardware-generated DTBs may already
+contain MMC: the packer validates that description against the CSR map rather
+than adding a duplicate. FPGA kernels must enable `CONFIG_RISCV_ISA_ZICBOM=y`
+and `CONFIG_RISCV_DMA_NONCOHERENT=y`; the DTB must advertise Zicbom and its cache
+block size. DMA support without cache maintenance is insufficient for LiteSDCard.
+Changed software inputs select a new cache/bundle identity; existing bundles are
+not overwritten.
+
+The local bundle is not automatically copied to TFTP. Run the matching
+`fpga-netboot-rv32-serve` target when the dedicated host network is ready, then
+use the exact new `netboot raptor-netboot/rv32/.../boot.json` it prints. Do not
+reuse a historical command: it still selects the historical software.
+Successful packing or a QEMU boot is not FPGA network acceptance; manually boot
+the matching RV32 bitstream and run `fpga-netboot-rv32-test` for that final step.
 
 ## Low-level standalone packer
 
@@ -153,7 +200,7 @@ Before starting a server, confirm:
 
 ## Board handoff and acceptance (not run by these targets)
 
-When the board is available, load/confirm the intended RV32 or RV64 bitstream through its matching workflow. Interrupt SD autoboot if enabled; do not attempt to run the RV32 SD payload on an RV64 core. At the BIOS prompt:
+When the board is available, load/confirm the intended RV32 or RV64 bitstream through its matching workflow. Boot selection is manual; do not attempt to run the RV32 SD payload on an RV64 core. At the BIOS prompt:
 
 ```text
 litex> netboot raptor-netboot/rv64/<bundle-id>/boot.json

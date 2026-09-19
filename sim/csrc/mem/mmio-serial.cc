@@ -93,6 +93,7 @@ static bool tty_fallback_attempted;
 static bool tty_termios_saved;
 static struct termios tty_saved_termios;
 static bool serial_lf_to_cr;
+static bool serial_console_line_pending;
 static std::string serial_exit_pattern;
 static std::string serial_tx_window;
 
@@ -235,6 +236,10 @@ static void serial_write_host_byte(uint8_t ch)
 {
     if (fputc((int)ch, stderr) != EOF)
         fflush(stderr);
+
+    // Track guest console line framing so simulator diagnostics (e.g. periodic
+    // progress heartbeats) can avoid splitting a guest line in merged logs.
+    serial_console_line_pending = (ch != '\n');
 
     if (serial_exit_pattern.empty() || npc.state != NPC_RUNNING)
         return;
@@ -463,8 +468,13 @@ const char *serial_input_source()
     return isatty(STDIN_FILENO) ? "stdin-tty" : "stdin-pipe";
 }
 
+bool serial_console_line_open()
+{
+    return serial_console_line_pending;
+}
+
 // ----------------------------------------------------------------------------
-// LiteX UART model (used by egos-2000 HARDWARE platform at 0xf000_1000).
+// LiteX UART model: CU08 0xf0001800, legacy egos alias 0xf0001000.
 // Register layout (from litex/soc/cores/uart.py and egos dev_tty.c):
 //   0x00 RXTX     : R=pop RX byte / W=push TX byte
 //   0x04 TXFULL   : R=1 if TX FIFO full

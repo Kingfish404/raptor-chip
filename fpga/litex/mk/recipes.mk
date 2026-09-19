@@ -306,12 +306,6 @@ sim: sim-build
 sim-run:
 	$(call _run_vsim,$(SIM_BUILD_DIR))
 
-sim-trace:
-	@$(call _make,sim TRACE=fst)
-
-sim-trace-vcd:
-	@$(call _make,sim TRACE=vcd)
-
 coremark-build:
 	$(MAKE) -C $(COREMARK_BENCH) build ITERATIONS=$(COREMARK_ITERATIONS) SYS_CLK_HZ=$(SYS_CLK)
 
@@ -467,8 +461,6 @@ egos-ku15p-sim: fpga-egos-prepare
 	@echo "[INFO] Use TRACE=fst to capture waveform: make egos-ku15p-sim TRACE=fst"
 	@$(call _make,sim PAYLOAD=img IMG=$(EGOS_KU15P_BIN) SIM_TIMEOUT=$(SIM_TIMEOUT))
 
-egos-ku15p-sim-trace: fpga-egos-prepare
-	@$(call _make,egos-ku15p-sim TRACE=fst)
 
 raptos-bios-sim-rv32: fpga-raptos-rv32-build
 	@echo "[INFO] BIOS-mode sim boot: preload RV32 RaptOS at $(MAIN_RAM_BASE), then issue 'boot $(MAIN_RAM_BASE)'."
@@ -655,7 +647,7 @@ fpga-tinyos-check:
 		echo "        - UART/CLINT/PLIC/virtio-blk map compatible with xv6, or an xv6 LiteX port"; \
 		echo "        - $(LINUX_FPGA_XV6_DISK) exposed as the xv6 block device"; \
 		echo "      Simulator validation command:"; \
-		echo "        make -C $(RAPTOR_HOME)/app/tinyos xv6-cli-nsim ARGS='-b -n'"; \
+		echo "        make -C $(RAPTOR_HOME)/app/tinyos cli-nsim OS=xv6 ARGS='-b -n'"; \
 		exit 2; \
 		;; \
 	  *) echo "[ERR] Unsupported TinyOS OS '$$os' (use OS=egos or OS=xv6)"; exit 1 ;; \
@@ -856,20 +848,11 @@ fpga-flash: fpga-bitstream-current
 mlk-cu07-ku15p:
 	@$(call _make,fpga FPGA_BOARD=mlk_cu07_ku15p)
 
-mlk-cu07-ku15p-build:
-	@$(call _make,fpga-build FPGA_BOARD=mlk_cu07_ku15p)
-
 mlk-cu08-ku15p:
 	@$(call _make,fpga FPGA_BOARD=mlk_cu08_ku15p)
 
-mlk-cu08-ku15p-build:
-	@$(call _make,fpga-build FPGA_BOARD=mlk_cu08_ku15p)
-
 xilinx-vcu118:
 	@$(call _make,fpga FPGA_BOARD=xilinx_vcu118)
-
-xilinx-vcu118-build:
-	@$(call _make,fpga-build FPGA_BOARD=xilinx_vcu118)
 
 .PHONY: netboot-flow-context
 netboot-flow-context:

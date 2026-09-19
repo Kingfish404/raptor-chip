@@ -158,6 +158,8 @@ module tb_bus_pbmt;
     tick(2);
     l1d_bus.araddr = 'h80002000;
     l1d_bus.ar_ptw = 0;
+    l1d_bus.ar_mshr = 1'b0;
+    l1d_bus.ar_mshr_id = '0;
     l1d_bus.rpbmt = 1;
     l1d_bus.arvalid = 1;
     tick(1);

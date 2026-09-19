@@ -10,6 +10,7 @@ task automatic init_l1d_inputs;
     lsu_l1d.rcheck_size_m1 = 0;
     lsu_l1d.rorig_size_m1 = 0;
     lsu_l1d.rvalid = 1'b0;
+    lsu_l1d.replay_allowed = 1'b0;
     lsu_l1d.atomic_lock = 1'b0;
     lsu_l1d.ordered = 1'b1;
     lsu_l1d.waddr = '0;
@@ -20,6 +21,8 @@ task automatic init_l1d_inputs;
 
     l1d_bus.rdata = '0;
     l1d_bus.rvalid = 1'b0;
+    l1d_bus.r_mshr = 1'b0;
+    l1d_bus.r_mshr_id = '0;
     l1d_bus.ptw_rvalid = 1'b0;
     l1d_bus.ptw_rerr = 1'b0;
     l1d_bus.rlast = 1'b1;

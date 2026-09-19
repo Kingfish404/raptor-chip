@@ -1,6 +1,6 @@
 # sim/sram/Makefile — drive OpenRAM to compile cache SRAM macros for the
 # raptor-chip STA flow. Outputs land in build/<PLATFORM>/macro/<name>/ and
-# are picked up by `make -C sim sta-sram` (see ../Makefile).
+# are picked up by `make -C sim sta MEMORY=sram` (see ../Makefile).
 
 ifneq ($(words $(CURDIR)),1)
   $(error Unsupported: GNU Make cannot build in directories containing spaces, build elsewhere: '$(CURDIR)')
@@ -217,7 +217,7 @@ test-sta: ## Opt-in: yosys+OpenSTA smoke against the stub macros (needs slang)
 LIB_FILES := $(foreach m,$(MACRO_NAMES),$(MACRO_DIR)/$(m)/$(m).lib)
 V_FILES   := $(foreach m,$(MACRO_NAMES),$(MACRO_DIR)/$(m)/$(m).v)
 
-print-libs: ## Print space-separated list of Liberty files (for sta-sram)
+print-libs: ## Print space-separated list of Liberty files (for sta MEMORY=sram)
 	@echo "$(LIB_FILES)"
 
 print-vs: ## Print space-separated list of macro Verilog files

@@ -53,7 +53,7 @@ jobs:
       - name: Build NEMU (ref) and rv32
         shell: bash -l {0}
         run: |
-          make config-nemu32-ref
+          make build-nemu32-ref
           make build-rv32
 
       - name: Run microbench rv32
@@ -127,8 +127,8 @@ jobs:
       - name: Build RV32 with difftest and NEMU-Ref
         shell: bash -l {0}
         run: |
-          make config-rv32-difftest
-          make config-nemu32-ref
+          make build-rv32
+          make build-nemu32-ref
       - name: cpu-tests rv32e
         shell: bash -l {0}
         run: make cpu-tests-rv32 NPC_ARCH=riscv32e-npc ARGS="-b -n"
@@ -161,8 +161,8 @@ jobs:
       - name: Build simulator (ysyxSoC config) and NEMU-Ref
         shell: bash -l {0}
         run: |
-          make config-rv32-ysyxsoc
-          make config-nemu32-ref
+          make build-rv32-ysyxsoc
+          make build-nemu32-ref
       - name: Run microbench riscv32-ysyxsoc
         shell: bash -l {0}
         run: make microbench-ysyxsoc MAINARGS=test ARGS="-b -n" 2>&1 | tee /tmp/mb-soc.log
@@ -229,8 +229,8 @@ jobs:
       - name: Build simulator (ysyxSoC config) and NEMU-Ref
         shell: bash -l {0}
         run: |
-          make config-rv32-ysyxsoc
-          make config-nemu32-ref
+          make build-rv32-ysyxsoc
+          make build-nemu32-ref
       - name: cpu-tests riscv32-ysyxsoc
         shell: bash -l {0}
         run: make -C $RAPTOR_HOME/abstract-machine/app/am-kernels/tests/cpu-tests
@@ -260,24 +260,24 @@ jobs:
         run: ./setup.sh
       - name: Build NEMU reference
         shell: bash -l {0}
-        run: make config-nemu${{ matrix.xlen }}-ref
+        run: make build-nemu${{ matrix.xlen }}-ref
       - name: CPU tests with random memory delays
         shell: bash -l {0}
         run: |
           set -o pipefail
-          make cpu-tests-random-rv${{ matrix.xlen }} ARGS="-b -n -t 120" 2>&1 | tee /tmp/cpu-random.log
+          make cpu-tests-rv${{ matrix.xlen }} SIM_RANDOM_DELAY=31 ARGS="-b -n -t 120" 2>&1 | tee /tmp/cpu-random.log
       - name: MicroBench with random memory delays
         shell: bash -l {0}
         run: |
           set -o pipefail
-          make microbench-random-rv${{ matrix.xlen }} ARGS="-b -n -t 900" 2>&1 | tee /tmp/microbench-random.log
+          make microbench-rv${{ matrix.xlen }} SIM_RANDOM_DELAY=31 ARGS="-b -n -t 900" 2>&1 | tee /tmp/microbench-random.log
       - name: CoreMark with random memory delays
         shell: bash -l {0}
         run: |
           set -o pipefail
           # This is a CRC-checked functional stress run. The AM port uses
           # compile-time ITERATIONS (mainargs=test does not reduce its default 10).
-          make coremark-random-rv${{ matrix.xlen }} ITERATIONS=1 ARGS="-b -n -t 900" 2>&1 | tee /tmp/coremark-random.log
+          make coremark-rv${{ matrix.xlen }} SIM_RANDOM_DELAY=31 ITERATIONS=1 ARGS="-b -n -t 900" 2>&1 | tee /tmp/coremark-random.log
           python3 - <<'PY'
           import re
           from pathlib import Path
@@ -344,7 +344,7 @@ jobs:
       - name: Build NEMU reference and simulator
         shell: bash -l {0}
         run: |
-          make config-nemu32-ref
+          make build-nemu32-ref
           make build-rv32
 
       - name: Build pk
@@ -396,7 +396,7 @@ jobs:
       - name: Build NEMU reference and simulator
         shell: bash -l {0}
         run: |
-          make config-nemu32-ref
+          make build-nemu32-ref
           make build-rv32
 
       # ---- Embench-IoT ----
@@ -441,7 +441,7 @@ jobs:
       - name: Build NEMU reference, simulator, and pk
         shell: bash -l {0}
         run: |
-          make config-nemu32-ref
+          make build-nemu32-ref
           make build-rv32
           make --no-print-directory -C app pk-build
 

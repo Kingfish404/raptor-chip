@@ -151,7 +151,7 @@ make pk-run USER_ELF=app/build/rv32/tests/isa/rv_add.elf
 make tests-sim ARGS="-b -n"
 
 # Run all tests on NPC with difftest (from project root)
-make app-tests-rv32-difftest ARGS="-b -n"
+make app-tests-rv32 DIFFTEST=1 ARGS="-b -n"
 ```
 
 ## Running on NEMU (via pk)
@@ -170,7 +170,7 @@ make app-tests-nemu32 ARGS="-b"
 make app-demos-nemu32 ARGS="-b"
 ```
 
-> **Note:** NEMU must be configured first (e.g., `make config-nemu32` from project root).
+> **Note:** NEMU must be configured first (e.g., `make build-nemu32` from project root).
 > Tests running on NEMU can optionally use Spike as a difftest reference (via NEMU's own Kconfig).
 
 ## RLLMBench

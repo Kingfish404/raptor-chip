@@ -1,6 +1,6 @@
 # Raptor instruction decoder generator
 
-This directory generates instruction decoders for the hand-written SystemVerilog core. It is not the processor's top-level implementation.
+This directory generates instruction decoders for the SystemVerilog core. It is not the processor's top-level implementation.
 
 From the repository root:
 

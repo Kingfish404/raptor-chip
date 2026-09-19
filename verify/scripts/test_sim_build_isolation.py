@@ -54,6 +54,16 @@ out.chmod(0o755)
     def config(self, profile="test", xlen=32):
         return self.build / profile / f"config-riscv{xlen}"
 
+    def test_root_parallel_builds_and_configure_only(self):
+        self.make("-j2", "configure-rv32", "configure-rv64", "DIFFTEST=0", root=True)
+        self.assertFalse(list(self.build.rglob("compile-count")))
+        for xlen in (32, 64):
+            self.assertNotIn("CONFIG_DIFFTEST=y", (self.config(xlen=xlen) / ".config").read_text())
+        self.make("-j2", "build-rv32", "build-rv64", "DIFFTEST=1", root=True)
+        for xlen in (32, 64):
+            self.assertIn("CONFIG_DIFFTEST=y", (self.config(xlen=xlen) / ".config").read_text())
+            self.assertTrue((self.build / f"test/riscv{xlen}-npc-sim").exists())
+
     def test_parallel_xlen_configurations(self):
         with ThreadPoolExecutor(max_workers=2) as pool:
             a = pool.submit(self.make, "o2_defconfig", "VFLAGS=", profile="parallel")
@@ -99,7 +109,7 @@ out.chmod(0o755)
         self.assertTrue(other.exists())
 
     def test_root_forwards_rv64_config_selection(self):
-        self.make("config-rv32", "VFLAGS=-DRAPT_RV64", root=True)
+        self.make("build-rv32", "VFLAGS=-DRAPT_RV64", root=True)
         self.assertTrue((self.config(xlen=64) / ".config").exists())
         self.assertFalse(self.config(xlen=32).exists())
         self.assertTrue((self.build / "test/riscv64-npc-sim").exists())

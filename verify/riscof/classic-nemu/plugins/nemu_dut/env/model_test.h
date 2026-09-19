@@ -71,8 +71,8 @@
 #define RVMODEL_IO_ASSERT_SFPR_EQ(_F, _R, _I)
 #define RVMODEL_IO_ASSERT_DFPR_EQ(_D, _R, _I)
 
-/* PMP capability: 16 entries, grain = 4 bytes (G=0). */
-#define RVMODEL_NUM_PMPS  16
+/* PMP capability: 8 usable entries, 16 CSR slots, grain = 4 bytes (G=0). */
+#define RVMODEL_NUM_PMPS  8
 #define RVMODEL_PMP_GRAIN 0
 
 /* Interrupt set/clear hooks - CLINT mtime-based, unused for arch-tests. */

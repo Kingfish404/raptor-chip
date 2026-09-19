@@ -54,6 +54,18 @@ def patch_netboot(path):
     path.write_text(source.replace(anchor, NETBOOT_GUARD + '\n' + anchor + NETBOOT_ENTRY))
 
 
+def patch_manual_boot(path):
+    """Disable startup dispatch, not the interactive boot commands in boot.c."""
+    source = path.read_text()
+    anchor = '#ifndef CONFIG_BIOS_NO_BOOT'
+    guard = '#if 0 /* Raptor: boot only through explicit BIOS console commands. */'
+    if source.count(guard) == 2 and anchor not in source:
+        return
+    if source.count(anchor) != 2 or guard in source:
+        raise ValueError('unsupported LiteX startup sequence; refusing an automatic-boot BIOS')
+    path.write_text(source.replace(anchor, guard))
+
+
 def prepare(source, dest):
     if dest.resolve().is_relative_to(source.resolve()):
         raise ValueError("private software must not be inside the LiteX source tree")
@@ -62,6 +74,7 @@ def prepare(source, dest):
     patch_common_mak(software / "common.mak")
     patch_libc_mk(software / "libc/Makefile")
     patch_netboot(software / "bios/boot.c")
+    patch_manual_boot(software / "bios/main.c")
     return software
 
 

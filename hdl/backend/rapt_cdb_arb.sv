@@ -51,14 +51,14 @@ module rapt_cdb_arb #(
     end else begin
       if (!fp_live || killed(integer_q)) integer_q.valid <= 1'b0;
       fp_q.valid <= 1'b0;
-      if (wb_integer_system_raw.valid && wb_integer_system_accept
-          && !killed(wb_integer_system_raw)) integer_q <= wb_integer_system_raw;
+      if (wb_integer_system_raw.valid && wb_integer_system_accept && !killed(wb_integer_system_raw))
+        integer_q <= wb_integer_system_raw;
       if (wb_fpu.valid && wb_fpu_accept && !killed(wb_fpu)) fp_q <= wb_fpu;
     end
   end
   // An accepted producer must own a reserved slot, even when both finish.
   `RAPT_SVA_IMPLY(clock, reset || flush, CDB_INTEGER_CAPACITY,
-      wb_integer_system_raw.valid && wb_integer_system_accept, !integer_q.valid)
-  `RAPT_SVA_IMPLY(clock, reset || flush, CDB_FP_CAPACITY,
-      wb_fpu.valid && wb_fpu_accept, !fp_q.valid)
+                  wb_integer_system_raw.valid && wb_integer_system_accept, !integer_q.valid)
+  `RAPT_SVA_IMPLY(clock, reset || flush, CDB_FP_CAPACITY, wb_fpu.valid && wb_fpu_accept,
+                  !fp_q.valid)
 endmodule

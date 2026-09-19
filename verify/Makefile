@@ -11,8 +11,12 @@
 SHELL := /bin/bash
 .DEFAULT_GOAL := help
 
-.PHONY: sta-dff-flow-check
-sta-dff-flow-check: ## Check isolated DFF STA runner contracts (no PDK/tool installation)
+.PHONY: make-targets-test
+make-targets-test: ## Check consolidated Make entry points, formatting scopes and benchmark rebuilds
+	python3 scripts/test_make_targets.py
+
+.PHONY: sta-flow-check
+sta-flow-check: ## Check isolated SRAM/DFF STA runner contracts (no PDK/tool installation)
 	python3 scripts/test_sta_dff.py
 
 .PHONY: sim-build-isolation-check
@@ -79,7 +83,7 @@ RISCOF_BUILD_PROFILE ?= $(RAPT_CONFIG)-riscof
 RISCOF_NPC_BIN_32 := $(NSIM_HOME)/build/$(RISCOF_BUILD_PROFILE)/riscv32-npc-sim
 NEMU_SO_32  := $(NEMU_HOME)/build/riscv32-nemu-interpreter-so
 NEMU_SO_64  := $(NEMU_HOME)/build/riscv64-nemu-interpreter-so
-MROM_IMG    := $(NSIM_HOME)/csrc/mem/mrom-data/build/mrom-data.bin
+MROM_IMG    = $(BUILD_DIR)/mrom-rv$(ISA_XLEN)/mrom-data.bin
 
 # --- Configuration ---
 SEED     ?= $(shell date +%s)	## Random seed for fuzz
@@ -181,25 +185,26 @@ help: ## Show this help message
 # ============================================================================
 $(NPC_BIN):
 	@echo "[verify] Building NPC simulator (difftest enabled)..."
-	+$(MAKE) -C $(RAPTOR_HOME) config-rv32-difftest
+	+$(MAKE) -C $(RAPTOR_HOME) build-rv32
 	+$(MAKE) -C $(NSIM_HOME) $(SUBMAKE_JOBS) RAPT_CONFIG=$(RAPT_CONFIG) VFLAGS="$(VFLAGS)"
 
 $(NEMU_SO):
 	@echo "[verify] Building NEMU reference SO..."
 ifeq ($(ISA),rv64)
-	$(MAKE) -C $(RAPTOR_HOME) config-nemu64-ref
+	$(MAKE) -C $(RAPTOR_HOME) build-nemu64-ref
 else
-	$(MAKE) -C $(RAPTOR_HOME) config-nemu32-ref
+	$(MAKE) -C $(RAPTOR_HOME) build-nemu32-ref
 endif
 
 $(MROM_IMG):
-	$(MAKE) -C $(NSIM_HOME)/csrc/mem/mrom-data
+	$(MAKE) -C $(NSIM_HOME)/csrc/mem/mrom-data \
+		BUILD_DIR=$(abspath $(dir $(MROM_IMG))) ISA64=$(if $(filter rv64,$(ISA)),1,0)
 
 .PHONY: check-prereqs
 check-prereqs: $(NPC_BIN) $(NEMU_SO) $(MROM_IMG) ## Verify all prerequisites are built
 	@echo "[verify] Checking prerequisites..."
 	@test -f $(NPC_BIN)  || (echo "ERROR: NPC binary not found: $(NPC_BIN)"  && echo "  Run: make -C $(RAPTOR_HOME) build-rv32" && exit 1)
-	@test -f $(NEMU_SO)  || (echo "ERROR: NEMU SO not found: $(NEMU_SO)"    && echo "  Run: make -C $(RAPTOR_HOME) config-nemu32-ref" && exit 1)
+	@test -f $(NEMU_SO)  || (echo "ERROR: NEMU SO not found: $(NEMU_SO)"    && echo "  Run: make -C $(RAPTOR_HOME) build-nemu32-ref" && exit 1)
 	@echo "[verify] All prerequisites OK."
 
 # ============================================================================
@@ -702,7 +707,7 @@ endif
 
 $(NEMU_BIN_32):
 	@echo "[riscof-classic-nemu] Building NEMU standalone executable (rv32)..."
-	$(MAKE) -C $(RAPTOR_HOME) config-nemu32
+	$(MAKE) -C $(RAPTOR_HOME) build-nemu32
 
 $(NEMU_BIN_64):
 	@echo "[riscof-classic-nemu] Building NEMU standalone executable (rv64)..."
@@ -1256,6 +1261,7 @@ XSIM_L2_SOURCES := \
 	"$(RAPTOR_HOME)/hdl/memory/rapt_l2.sv"
 
 XSIM_L1D_SOURCES := \
+	"$(RAPTOR_HOME)/hdl/memory/rapt_l1d_mshr.sv" \
 	"$(RAPTOR_HOME)/hdl/memory/rapt_cache_fill_select.sv" \
 	"$(RAPTOR_HOME)/hdl/memory/rapt_cache_plru.sv" \
 	"$(RAPTOR_HOME)/hdl/rapt_pkg.sv" \
@@ -2032,7 +2038,7 @@ rva22s64-privileged-run-rv64:
 	$(MAKE) rva22s64-privileged-run RVA22S64_XLEN=64
 rva22s64-privileged-build:
 	$(MAKE) -C "$(RAPTOR_HOME)" verilog
-	$(MAKE) -C "$(RAPTOR_HOME)" config-nemu$(RVA22S64_XLEN)-ref
+	$(MAKE) -C "$(RAPTOR_HOME)" build-nemu$(RVA22S64_XLEN)-ref
 	$(MAKE) -C "$(NSIM_HOME)" RAPT_CONFIG=default BUILD_PROFILE="$(RVA22S64_CORE_PROFILE)" VFLAGS="$(if $(filter 64,$(RVA22S64_XLEN)),-DRAPT_RV64,)"
 rva22s64-privileged-run: $(MROM_IMG)
 	@mkdir -p "$(RVA22S64_PRIV_DIR)"
@@ -2628,9 +2634,9 @@ verilator-directed-clean: ## Clean portable Verilator directed-check artifacts
 # ============================================================================
 # All-in-one
 # ============================================================================
-.PHONY: all clean
+.PHONY: light clean
 
-all: fuzz sigtest ## Run all lightweight verification
+light: fuzz sigtest ## Run all lightweight verification
 
 clean: fuzz-clean riscof-clean coverage-clean sigtest-clean formal-clean jtag-clean uvm-clean xsim-clean verilator-directed-clean ## Clean all verify artifacts
 	rm -rf $(BUILD_DIR)
@@ -2876,6 +2882,20 @@ mmio-alignment-check: $(MROM_IMG)
 		--mrom "$(MROM_IMG)" --xlen "$(RVA22S64_XLEN)" \
 		--output "$(BUILD_DIR)/mmio-alignment-rv$(RVA22S64_XLEN)"
 .PHONY: mmio-transaction-check mmio-virtio-mask-check mmio-uart-read-check
+.PHONY: sim-assert-check
+sim-assert-check: ## Check host Assert semantics and real Capstone startup in RV32/RV64
+	$(PYTHON) "$(VERIFY_HOME)/scripts/test_sim_assert.py"
+
+.PHONY: uart-platform-check mmio-uart-irq-check
+uart-platform-check:
+	$(PYTHON) "$(VERIFY_HOME)/scripts/test_uart_platform.py"
+
+mmio-uart-irq-check: $(MROM_IMG)
+	$(PYTHON) "$(VERIFY_HOME)/scripts/mmio_transaction_check.py" --uart-irq \
+		--npc "$(RVA22S64_NPC)" --no-difftest \
+		--mrom "$(MROM_IMG)" --xlen "$(RVA22S64_XLEN)" \
+		--output "$(BUILD_DIR)/mmio-uart-irq-rv$(RVA22S64_XLEN)"
+
 .PHONY: mmio-spi-read-mask-check
 mmio-spi-read-mask-check:
 	@mkdir -p "$(BUILD_DIR)"
@@ -3051,6 +3071,19 @@ rva22s64-ifetch-superpage-replace-run: RVA22S64_TEST_MARCH = rv64imafdc_zicsr_zi
 .PHONY: nemu-sv39-superpage-check
 .PHONY: nemu-satp-warl-check
 .PHONY: nemu-pmp-priority-check
+.PHONY: nemu-pmp-capacity-check pmp-capacity-check
+nemu-pmp-capacity-check:
+	$(PYTHON) "$(VERIFY_HOME)/scripts/nemu_pmp_priority_check.py" \
+		--test-source "$(RAPTOR_HOME)/app/tests/host/nemu_pmp_capacity.c"
+
+pmp-capacity-check: nemu-pmp-capacity-check \
+	verilator-csr-pmp-warl-rv32 verilator-csr-pmp-warl-rv64 \
+	verilator-csr-pmp-lock-rv32 verilator-csr-pmp-lock-rv64 \
+	verilator-pmp-permissions-rv32 verilator-pmp-permissions-rv64 \
+	verilator-pmp-reset-napot-rv32 verilator-pmp-reset-napot-rv64 \
+	verilator-idu-csr-addresses-rv32 verilator-idu-csr-addresses-rv64 \
+	verilator-l1d-pmp-shared-rv32 verilator-l1d-pmp-shared-rv64
+
 nemu-pmp-priority-check:
 	$(PYTHON) "$(VERIFY_HOME)/scripts/nemu_pmp_priority_check.py"
 
@@ -3326,3 +3359,12 @@ verilator-ioq-address-stage-rv32 verilator-ioq-address-stage-rv64:
 verilator-fmax-boundaries-rv32 verilator-fmax-boundaries-rv64: VERILATOR_DIRECTED_FLAGS = --binary --timing --assert -j 1
 verilator-fmax-boundaries-rv32 verilator-fmax-boundaries-rv64:
 	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_fmax_boundaries,"$(RAPTOR_HOME)/hdl/rapt_pkg.sv" "$(RAPTOR_HOME)/hdl/backend/rapt_rou.sv" "$(RAPTOR_HOME)/hdl/backend/rapt_iq.sv" "$(RAPTOR_HOME)/hdl/backend/rapt_cdb_arb.sv",-d RAPT_ASSERT_EN $(if $(findstring rv64,$@),-d RAPT_RV64),)
+
+.PHONY: verilator-mshr-cache-rv32 verilator-mshr-cache-rv64
+verilator-mshr-cache-rv32 verilator-mshr-cache-rv64: VERILATOR_DIRECTED_FLAGS = --binary --timing --assert -j 1
+verilator-mshr-cache-rv32 verilator-mshr-cache-rv64:
+	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_mshr_cache,$(XSIM_L1D_SOURCES),-d RAPT_ASSERT_EN -d RAPT_L1D_MSHRS=2 $(if $(findstring rv64,$@),-d RAPT_RV64),)
+
+.PHONY: verilator-mshr-ioq-rv32 verilator-mshr-ioq-rv64
+verilator-mshr-ioq-rv32 verilator-mshr-ioq-rv64:
+	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_mshr_ioq,$(XSIM_IOQ_SOURCES),-d RAPT_ASSERT_EN $(if $(findstring rv64,$@),-d RAPT_RV64),)

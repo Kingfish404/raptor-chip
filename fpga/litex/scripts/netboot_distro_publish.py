@@ -3,11 +3,11 @@
 import argparse
 import json
 from pathlib import Path
-import re
 import shutil
 import tempfile
 
 from netboot_distro import ADDRESSES, require, sha
+from netboot_names import valid_namespace
 
 
 def verify(bundle):
@@ -17,8 +17,7 @@ def verify(bundle):
     require(record.get('distro') in ('alpine', 'debian', 'buildroot') and
             (record['xlen'] == 64 or record['distro'] == 'buildroot'), 'distro/XLEN mismatch')
     relative = record['tftp_path']
-    require(re.fullmatch(rf'raptor-netboot/rv{record["xlen"]}/{record["distro"]}-[0-9a-f]{{20}}', relative),
-            'invalid TFTP namespace')
+    require(valid_namespace(record), 'invalid TFTP namespace')
     require(record.get('startup_cmo_policy') == 'menvcfg-cbie3-cbcfe1',
             'bundle lacks S-mode CMO initialization; rebuild with current packer')
     rootfs_name = record.get('initramfs_file', 'rootfs.cpio.gz')

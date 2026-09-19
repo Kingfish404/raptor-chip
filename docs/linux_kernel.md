@@ -1,3 +1,7 @@
+---
+title: Linux Kernel Boot
+---
+
 # Linux Kernel Boot
 
 Raptor boots Linux through an OpenSBI `fw_payload.bin` image:
@@ -8,8 +12,8 @@ reset/MROM -> OpenSBI (M-mode) -> Linux (S-mode) -> init/userspace
 
 The top-level Makefile is the preferred entry point. It downloads prebuilt
 OpenSBI + Linux payloads from `Kingfish404/linux-build` and keeps NEMU/NPC
-configuration in sync. By default it fetches `v6.18.50` assets from the
-[`rv-v6.18.50` release](https://github.com/Kingfish404/linux-build/releases/tag/rv-v6.18.50).
+configuration in sync. By default it fetches `v6.18.51` assets from the
+[`rv-v6.18.51` release](https://github.com/Kingfish404/linux-build/releases/tag/rv-v6.18.51).
 
 ## Quick Commands
 
@@ -40,7 +44,7 @@ make linux-download-rv32gc-fpga
 Useful overrides:
 
 ```shell
-make linux-boot-rv32 LINUX_BUILD_RELEASE=rv-v6.18.50 LINUX_BUILD_VERSION=v6.18.50 MAX_INST=100000000 ARGS="-b -n"
+make linux-boot-rv32 LINUX_BUILD_RELEASE=rv-v6.18.51 LINUX_BUILD_VERSION=v6.18.51 MAX_INST=100000000 ARGS="-b -n"
 make linux-boot-rv32 LINUX_RV32_PAYLOAD=/path/to/fw_payload.bin ARGS="-b -n"
 ```
 
@@ -66,13 +70,14 @@ See [linux/README.md](../linux/README.md) and [app/tinyos/README.md](../app/tiny
 
 ## Payload Paths
 
-The downloaded payloads live under `linux/build/`:
+Prebuilt qemu/NEMU payloads live under `linux/build/`. Distro/sim kernels from
+`make -C linux build-rv*` land under `linux/build/raptor/<version>/`:
 
 ```text
 linux/build/linux-riscv-qemu-rv32-fast-<version>/fw_payload.bin
 linux/build/linux-riscv-qemu-rv64-m-<version>/fw_payload.bin
-linux/build/linux-riscv-rv32-qemu-rv32-fast-buildroot-<version>/Image
-linux/build/linux-riscv-rv32-qemu-rv32-buildroot-<version>/fw_payload.bin
+linux/build/raptor/v6.18.51/rv32-buildroot-sim/
+linux/build/raptor/v6.18.51/rv64-alpine-sim/
 ```
 
 Use the `linux/Makefile` helpers when another flow needs the exact path:
@@ -113,10 +118,10 @@ Buildroot then sees `virtio_rng.0` as `/dev/hwrng`.
 Get the Linux Kernel source code from [The Linux Kernel Archives](https://www.kernel.org/):
 
 ```shell
-wget https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.18.50.tar.xz
+wget https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.18.51.tar.xz
 
-tar -xf linux-6.18.50.tar.xz
-cd linux-6.18.50
+tar -xf linux-6.18.51.tar.xz
+cd linux-6.18.51
 ```
 
 See more details in [linux/README.md](../linux/README.md).

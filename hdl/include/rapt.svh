@@ -3,6 +3,10 @@
 `include "rapt_config.svh"
 `include "rapt_sva.svh"
 
+`ifndef RAPT_L1D_MSHRS
+`define RAPT_L1D_MSHRS 0
+`endif
+
 // FPGA builds may map the integer product into DSPs. Generic/ASIC builds
 // retain the fabric inference policy; arithmetic and valid/tag latency agree.
 `ifndef RAPT_FPGA_DSP
@@ -497,9 +501,11 @@
 `define RAPT_CSR_PMPADDR0 'h3b0
 `define RAPT_CSR_PMPADDR15 'h3bf
 
-// PMP parameters: 16 entries (pmpcfg0/1/2/3 all active).
-// pmp_granularity = 4 bytes -> G=0, NA4 legal, all pmpaddr bits writable.
-`define RAPT_PMP_NUM 16
+// Eight usable PMP entries; retain 16 architectural CSR slots. Slots 8..15
+// are WARL read-only zero, without storage or permission comparators.
+// pmp_granularity = 4 bytes -> G=0, NA4 legal; usable pmpaddr fields are WARL.
+`define RAPT_PMP_NUM 8
+`define RAPT_PMP_CSR_NUM 16
 // pmpcfg byte field positions
 `define RAPT_PMPCFG_R_ 0
 `define RAPT_PMPCFG_W_ 1

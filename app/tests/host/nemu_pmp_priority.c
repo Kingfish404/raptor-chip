@@ -6,6 +6,7 @@ CPU_state cpu;
 void soft_tlb_flush(void) {}
 void pmp_restore_checkpoint(const uint8_t *, const word_t *);
 bool pmp_check(paddr_t, int, uint32_t, bool, bool, bool);
+int pmp_csr_write(uint16_t, word_t);
 
 struct region { paddr_t first, end; unsigned permissions; bool active, locked; };
 
@@ -13,7 +14,7 @@ struct region { paddr_t first, end; unsigned permissions; bool active, locked; }
  * then require full containment before applying privilege/permissions. */
 static bool denied(const struct region *regions, paddr_t first, int size,
                    unsigned priv, unsigned permission) {
-  for (int i = 0; i < 16; ++i) {
+  for (int i = 0; i < 8; ++i) {
     const struct region *r = &regions[i];
     if (!r->active || first >= r->end || first + size <= r->first) continue;
     if (first < r->first || first + size > r->end) return true;
@@ -29,6 +30,15 @@ int main(void) {
   const unsigned operations[] = {1, 2, 3};
   const int sizes[] = {1, 2, 4, 8};
   unsigned cases = 0, failures = 0;
+  /* Upper CSR slots accept access, but cannot store state or alias entry 7. */
+  for (unsigned i = 8; i < 16; ++i) {
+    if (!pmp_csr_write(0x3b0 + i, ~(word_t)0) || cpu.sr[0x3b0 + i] != 0)
+      ++failures;
+  }
+  for (unsigned bank = 2; bank < 4; ++bank) {
+    if (!pmp_csr_write(0x3a0 + bank, ~(word_t)0) || cpu.sr[0x3a0 + bank] != 0)
+      ++failures;
+  }
   for (unsigned high = 0; high < 2; ++high)
   for (unsigned kind = 0; kind < 4; ++kind)
   for (unsigned background = 0; background < 3; ++background)
@@ -46,7 +56,7 @@ int main(void) {
                  (start >> 2) | (length / 8 - 1);
     regions[4] = (struct region){start, start + length, permissions[perm], true, locked};
     if (background) {
-      unsigned i = background == 1 ? 15 : 0;
+      unsigned i = background == 1 ? 7 : 0;
       cfg[i] = 0x9f; address[i] = ~(word_t)0;
       regions[i] = (struct region){0, (paddr_t)1 << (XLEN == 32 ? 34 : 56), 7, true, true};
     }

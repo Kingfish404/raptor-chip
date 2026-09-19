@@ -57,7 +57,17 @@ def kernel(package, cache, cross, profile='fpga', rootfs=None, init='/sbin/rapto
                'BINFMT_SCRIPT', 'DEVTMPFS', 'TMPFS', 'BLK_DEV_INITRD', 'RD_GZIP',
                'NET', 'INET', 'UNIX', 'PACKET', 'NETDEVICES', 'VIRTIO_MENU', 'VIRTIO_MMIO', 'VIRTIO_NET',
                'HW_RANDOM', 'HW_RANDOM_VIRTIO', 'SERIAL_8250', 'SERIAL_8250_CONSOLE', 'SERIAL_OF_PLATFORM']
-    disabled = ['LEGACY_PTYS', 'FTRACE', 'BLK_DEV_IO_TRACE', 'BPF_EVENTS']
+    if profile == 'fpga':
+        # LiteSDCard DMA is noncoherent. Generic DMA support alone cannot
+        # clean/invalidate Raptor's cache without the Zicbom implementation.
+        options += ['RISCV_ALTERNATIVE', 'RISCV_ISA_ZICBOM',
+                    'FTRACE', 'ENABLE_DEFAULT_TRACERS']
+    # FPGA network acceptance traces skb drop reasons. Keep event tracing
+    # available without instrumenting every function; simulators omit both.
+    disabled = ['LEGACY_PTYS', 'BLK_DEV_IO_TRACE', 'BPF_EVENTS',
+                'FUNCTION_TRACER', 'FUNCTION_GRAPH_TRACER']
+    if profile == 'sim':
+        disabled += ['FTRACE']
     build_vars = ['KBUILD_BUILD_USER=raptor', 'KBUILD_BUILD_HOST=netboot',
                   'KBUILD_BUILD_TIMESTAMP=1970-01-01 00:00:00 +0000', 'KBUILD_BUILD_VERSION=1']
     large_rootfs = bool(rootfs and rootfs.stat().st_size > 64 * 1024 * 1024)
@@ -101,6 +111,9 @@ def kernel(package, cache, cross, profile='fpga', rootfs=None, init='/sbin/rapto
         make = ['make', '-C', str(tree), 'O=' + str(obj), 'ARCH=riscv', 'CROSS_COMPILE=' + cross, *build_vars]
         subprocess.run(make + ['olddefconfig'], check=True)
         config = (obj / '.config').read_text()
+        if profile == 'fpga':
+            for option in ('RISCV_ISA_ZICBOM', 'RISCV_DMA_NONCOHERENT', 'EVENT_TRACING'):
+                require(f'CONFIG_{option}=y\n' in config, 'resolved FPGA kernel lacks ' + option)
         for option in ('BINFMT_SCRIPT', 'LITEX_LITEETH', 'MMC_LITEX', 'EXT4_FS', 'VIRTIO_NET', 'SERIAL_8250_CONSOLE'):
             require(f'CONFIG_{option}=y\n' in config, 'resolved kernel lacks ' + option)
         subprocess.run(make + ['-j8', 'Image'], check=True)

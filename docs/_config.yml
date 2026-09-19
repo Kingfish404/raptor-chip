@@ -1,5 +1,9 @@
 title: Raptor
 description: A super-scalar, out-of-order RISC-V processor core
+url: https://kingfish404.github.io
+# Project Pages live under /raptor-chip. `relative_url` then prefixes assets
+# and in-site links. Local preview is http://localhost:4000/raptor-chip/.
+baseurl: "/raptor-chip"
 # Jekyll processing is enabled by default; set `markdown: kramdown` for tables etc.
 markdown: kramdown
 kramdown:
@@ -37,3 +41,4 @@ exclude:
   - Gemfile.lock
   - vendor
   - .bundle
+  - scripts

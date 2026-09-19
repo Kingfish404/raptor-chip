@@ -18,6 +18,17 @@ export VERILATOR_ROOT
 VERILATOR = $(VERILATOR_ROOT)/bin/verilator
 endif
 
+XLEN ?= $(if $(findstring DRAPT_RV64,$(VFLAGS)),64,32)
+XLEN := $(strip $(XLEN))
+ifeq ($(filter $(XLEN),32 64),)
+$(error XLEN must be 32 or 64)
+endif
+ifeq ($(XLEN),64)
+ifeq ($(findstring DRAPT_RV64,$(VFLAGS)),)
+override VFLAGS += -DRAPT_RV64
+endif
+endif
+
 NSIM_HOME = $(abspath .)
 VSRC_PATH ?= $(abspath ../hdl)
 
@@ -49,7 +60,12 @@ SIM_CONFIG_ROOT ?= $(abspath $(BUILD_DIR)/config-$(ISA_NAME))
 SIM_CONFIG_FILE := $(SIM_CONFIG_ROOT)/.config
 SIM_AUTOCONFIG := $(SIM_CONFIG_ROOT)/include/config/auto.conf
 SIM_AUTOHEADER := $(SIM_CONFIG_ROOT)/include/generated/autoconf.h
-NPC_DEFCONFIG ?= o2_difftest_defconfig
+DIFFTEST ?= 1
+DIFFTEST := $(strip $(DIFFTEST))
+ifeq ($(filter $(DIFFTEST),0 1),)
+$(error DIFFTEST must be 0 or 1)
+endif
+NPC_DEFCONFIG ?= $(if $(filter 1,$(DIFFTEST)),o2_difftest_defconfig,o2_defconfig)
 DATA_DIR ?= $(abspath $(BUILD_DIR)/run-$(ISA_NAME)/data)
 RUN_DIR ?= $(abspath $(BUILD_DIR)/run-$(ISA_NAME))
 -include $(SIM_AUTOCONFIG)
@@ -293,19 +309,28 @@ ifeq ($(SIM_PLATFORM),ysyxsoc)
 DIFF_REF_SO ?=
 endif
 
-ifeq ($(origin DIFF_REF_SO), undefined)
-DIFF_REF_SO := -d $(NEMU_REF_SO)
-NEMU_REF_DEP := $(NEMU_REF_SO)
+ifeq ($(DIFFTEST),0)
+override DIFF_REF_SO :=
 endif
 
-$(NEMU_REF_SO):
+ifeq ($(origin DIFF_REF_SO), undefined)
+DIFF_REF_SO := -d $(NEMU_REF_SO)
+NEMU_REF_DEP := nemu-reference
+endif
+
+.PHONY: nemu-reference
+nemu-reference:
 	+$(MAKE) -C $(NEMU_HOME) $(NEMU_REF_DEFCONFIG)
 	+$(MAKE) -C $(NEMU_HOME) $(SUBMAKE_JOBS)
+
+SIM_RANDOM_DELAY ?= 0
+SIM_RANDOM_SEED ?= 1
+SIM_RANDOM_ARGS = $(if $(filter-out 0,$(strip $(SIM_RANDOM_DELAY))),--mem-random-delay=$(strip $(SIM_RANDOM_DELAY)) --mem-random-seed=$(strip $(SIM_RANDOM_SEED)),)
 
 IMG ?= ## Custom image to load
 DISK ?= ## Virtio block disk image to load with --disk
 SDCARD ?= ## LiteX SPI SD-card image to load with --sdcard
-NPC_EXEC = $(abspath $(MODEL_BIN)) $(ARGS) $(if $(DISK),--disk $(abspath $(DISK)),) $(if $(SDCARD),--sdcard $(abspath $(SDCARD)),) $(DIFF_REF_SO) -r $(abspath $(MROM_IMG)) $(if $(IMG),$(abspath $(IMG)))
+NPC_EXEC = $(abspath $(MODEL_BIN)) $(ARGS) $(SIM_RANDOM_ARGS) $(if $(DISK),--disk $(abspath $(DISK)),) $(if $(SDCARD),--sdcard $(abspath $(SDCARD)),) $(DIFF_REF_SO) -r $(abspath $(MROM_IMG)) $(if $(IMG),$(abspath $(IMG)))
 
 verilog: ## Generate SystemVerilog from Chisel
 	$(MAKE) -C $(RAPTOR_HOME)/hdl/chisel verilog
@@ -316,7 +341,7 @@ run: $(BIN) $(MROM_IMG) $(NEMU_REF_DEP) ## Run NPC simulation
 
 
 print-npc-exec: $(BIN) $(MROM_IMG) $(NEMU_REF_DEP) ## Print NPC run command (without ARGS/IMG/DISK, for parallel callers)
-	@echo $(abspath $(BIN)) $(DIFF_REF_SO) -r $(abspath $(MROM_IMG))
+	@echo $(abspath $(BIN)) $(SIM_RANDOM_ARGS) $(DIFF_REF_SO) -r $(abspath $(MROM_IMG))
 
 run_log: $(BIN) $(MROM_IMG) $(NEMU_REF_DEP) ## Run NPC and log output
 	@mkdir -p "$(RUN_DIR)/data" "$(DATA_DIR)"
@@ -338,7 +363,7 @@ jtag-server: ## Build & launch sim as an OpenOCD remote_bitbang server
 	$(BIN) --jtag-server --jtag-port=$(JTAG_PORT)
 
 perf: ## Run MicroBench with reproducible random sim memory delays
-	$(MAKE) -C $(RAPTOR_HOME) microbench-random-rv32
+	$(MAKE) -C $(RAPTOR_HOME) microbench-rv32 SIM_RANDOM_DELAY=31
 
 YOSYS_OPENSTA = $(RAPTOR_HOME)/third_party/yosys-opensta
 YOSYS_SLANG = $(YOSYS_OPENSTA)/yosys-slang
@@ -438,36 +463,23 @@ pack-synth-check: synth-frontend-check pack ## Check packed RTL with native Slan
 	yosys -Q -T -m slang -l $(BUILD_DIR)/pack-synth-check.log -p \
 		'read_slang --top rapt $(abspath $(BUILD_DIR)/rapt_pack.sv); hierarchy -check -top rapt; select -assert-none t:$$check t:$$assert t:$$assume t:$$cover'
 
-# Keep DFF exports and backend results separate from SRAM and other presets.
-# No sta-deps prerequisite: a timing run must not update shared tools/PDKs.
-STA_DFF_DIR ?= $(abspath $(BUILD_DIR))/sta-dff/$(RAPT_CONFIG)/$(ISA_NAME)/$(STA_PLATFORM)/$(CLK_FREQ_MHZ)MHz
-.PHONY: sta-dff sta-dff-detail sta-dff-check sta-flops sta-dff-rv64
-sta-dff-check: ## Elaborate the DFF-only export without running synthesis/STA
-	$(MAKE) pack-synth-check BUILD_DIR="$(STA_DFF_DIR)/rtl" VFLAGS="$(VFLAGS) -URAPT_USE_SRAM_MACRO"
+MEMORY ?= sram
+MEMORY := $(strip $(MEMORY))
+ifeq ($(filter $(MEMORY),sram dff),)
+$(error MEMORY must be sram or dff)
+endif
+STA_WORK_DIR ?= $(abspath $(BUILD_DIR))/sta/$(MEMORY)/$(RAPT_CONFIG)/$(ISA_NAME)/$(STA_PLATFORM)/$(CLK_FREQ_MHZ)MHz
+STA_PACK_NAME = $(if $(filter sram,$(MEMORY)),rapt_pack_sram.sv,rapt_pack.sv)
+.PHONY: sta sta-detail sta-check
+sta-check: ## Elaborate the selected memory implementation (MEMORY=sram|dff)
+	$(MAKE) $(if $(filter sram,$(MEMORY)),pack-sram-synth-check,pack-synth-check) BUILD_DIR="$(STA_WORK_DIR)/rtl" VFLAGS="$(VFLAGS) $(if $(filter dff,$(MEMORY)),-URAPT_USE_SRAM_MACRO,)"
 
-sta-dff sta-dff-detail: sta-dff-check ## STA with all behavioral memories mapped to DFFs
-	python3 "$(NSIM_HOME)/scripts/sta_dff.py" --backend "$(YOSYS_OPENSTA)" \
-		--work-dir "$(STA_DFF_DIR)/backend" --rtl "$(STA_DFF_DIR)/rtl/rapt_pack.sv" \
-		--platform "$(STA_PLATFORM)" --frequency "$(CLK_FREQ_MHZ)" \
-		$(if $(filter sta-dff-detail,$@),--detail,)
-
-sta-flops: sta-dff ## Compatibility alias for sta-dff
-sta-dff-rv64: VFLAGS := -DRAPT_RV64
-sta-dff-rv64: sta-dff ## DFF-only RV64 STA
-
-sta-detail: pack-synth-check sta-deps ## Detailed static timing analysis
-	make -C $(YOSYS_OPENSTA) sta-detail show \
-		DESIGN=rapt \
-		PLATFORM=$(STA_PLATFORM) \
-		CLK_FREQ_MHZ=$(CLK_FREQ_MHZ) \
-		RTL_FILES="$(abspath $(BUILD_DIR)/rapt_pack.sv)"
-
-sta_show: pack-synth-check sta-deps ## Show timing analysis results
-	make -C $(YOSYS_OPENSTA) show \
-		DESIGN=rapt \
-		PLATFORM=$(STA_PLATFORM) \
-		CLK_FREQ_MHZ=$(CLK_FREQ_MHZ) \
-		RTL_FILES="$(abspath $(BUILD_DIR)/rapt_pack.sv)"
+sta sta-detail: sta-check sta-deps $(if $(filter sram,$(MEMORY)),sram-ensure-libs,) ## Isolated STA (MEMORY=sram|dff XLEN=32|64)
+	python3 "$(NSIM_HOME)/scripts/sta.py" --backend "$(YOSYS_OPENSTA)" \
+		--work-dir "$(STA_WORK_DIR)/backend" --rtl "$(STA_WORK_DIR)/rtl/$(STA_PACK_NAME)" \
+		--platform "$(STA_PLATFORM)" --frequency "$(CLK_FREQ_MHZ)" --memory "$(MEMORY)" \
+		$(if $(filter sram,$(MEMORY)),$(foreach lib,$(RAPT_SRAM_LIBS),--lib "$(lib)"),) \
+		$(if $(filter sta-detail,$@),--detail,)
 
 # =====================================================================
 #  STA with OpenRAM SRAM macros (rapt_sram_1rw -> OpenRAM 1RW blackbox)
@@ -475,8 +487,8 @@ sta_show: pack-synth-check sta-deps ## Show timing analysis results
 # =====================================================================
 RAPT_SRAM_DIR    := $(abspath $(NSIM_HOME)/sram)
 SRAM_PLATFORM    ?= $(STA_PLATFORM) ## SRAM timing model platform; defaults to the standard-cell platform
-RAPT_SRAM_LIBS    = $(shell $(MAKE) -s -C $(RAPT_SRAM_DIR) print-libs PLATFORM=$(SRAM_PLATFORM))
-RAPT_SRAM_BB_V    = $(shell $(MAKE) -s -C $(RAPT_SRAM_DIR) print-blackbox)
+RAPT_SRAM_LIBS    = $(shell $(MAKE) --no-print-directory -s -C $(RAPT_SRAM_DIR) print-libs PLATFORM=$(SRAM_PLATFORM))
+RAPT_SRAM_BB_V    = $(shell $(MAKE) --no-print-directory -s -C $(RAPT_SRAM_DIR) print-blackbox)
 
 sram-macros: ## Compile OpenRAM SRAM macros (see sim/sram/README.md)
 	$(MAKE) -C $(RAPT_SRAM_DIR) all PLATFORM=$(SRAM_PLATFORM)
@@ -512,40 +524,6 @@ pack-sram: $(PACK_VSRCS) $(VHSRCS)
 pack-sram-synth-check: synth-frontend-check pack-sram ## Check packed RTL against SRAM blackbox port contracts
 	yosys -Q -T -m slang -l $(BUILD_DIR)/pack-sram-synth-check.log -p \
 		'read_slang --top rapt $(abspath $(BUILD_DIR)/rapt_pack_sram.sv) $(RAPT_SRAM_BB_V); hierarchy -check -top rapt; select -assert-none t:$$check t:$$assert t:$$assume t:$$cover'
-
-sta-sram: pack-sram-synth-check sta-deps sram-ensure-libs ## STA with SRAM macros and platform-matched timing models
-	@echo ">>> EXTRA_LIB_FILES        = $(RAPT_SRAM_LIBS)"
-	@echo ">>> SRAM_PLATFORM         = $(SRAM_PLATFORM)"
-	@for lib in $(RAPT_SRAM_LIBS); do \
-	  if [ ! -f "$$lib" ]; then \
-	    echo "ERROR: $$lib missing."; \
-	    echo "  Fast path (no OpenRAM/PDK needed, placeholder timing):"; \
-	    echo "    make sram-stubs SRAM_PLATFORM=$(SRAM_PLATFORM)"; \
-	    echo "  Real OpenRAM-compiled macros (needs sky130A PDK + ngspice/klayout, or USE_DOCKER=1):"; \
-	    echo "    make sram-macros SRAM_PLATFORM=$(SRAM_PLATFORM)"; \
-	    echo "  Diagnose prerequisites:"; \
-	    echo "    make sram-doctor SRAM_PLATFORM=$(SRAM_PLATFORM)"; \
-	    exit 1; \
-	  fi; \
-	done
-	EXTRA_LIB_FILES="$(RAPT_SRAM_LIBS)" \
-	$(MAKE) -C $(YOSYS_OPENSTA) sta show \
-		DESIGN=rapt \
-		PLATFORM=$(STA_PLATFORM) \
-		CLK_FREQ_MHZ=$(CLK_FREQ_MHZ) \
-		SYNTH_HIERARCHICAL=1 \
-		RTL_FILES="$(abspath $(BUILD_DIR)/rapt_pack_sram.sv)"
-
-sta: sta-sram ## Static timing analysis with SRAM macro timing models
-
-sta-sram-detail: pack-sram-synth-check sta-deps sram-ensure-libs ## Detailed STA with SRAM macros
-	EXTRA_LIB_FILES="$(RAPT_SRAM_LIBS)" \
-	$(MAKE) -C $(YOSYS_OPENSTA) sta-detail show \
-		DESIGN=rapt \
-		PLATFORM=$(STA_PLATFORM) \
-		CLK_FREQ_MHZ=$(CLK_FREQ_MHZ) \
-		SYNTH_HIERARCHICAL=1 \
-		RTL_FILES="$(abspath $(BUILD_DIR)/rapt_pack_sram.sv)"
 
 lint: ## Lint RTL with Verilator
 	$(VERILATOR) --lint-only -Wall $(LINT_EXTRA) $(SIM_ASSERT_FLAGS) $(VSRCS) $(INCFLAGS) $(SIM_VFLAGS) --top-module $(VTARGET)

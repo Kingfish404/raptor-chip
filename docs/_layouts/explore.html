@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="{{ site.lang | default: 'en-US' }}" class="explore">
+<head>
+  {% include head.html %}
+</head>
+<body class="is-explore" data-portal="{{ '/assets/generated/portal-data.json' | relative_url }}">
+  {% include nav.html %}
+  <div class="explore-app" id="content">
+    <section class="explore-stage">
+      <div id="uarch-diagram" class="uarch-frame"></div>
+      <div class="stage-controls">
+        <button type="button" data-cycle-play>Pause</button>
+        <button type="button" data-cycle-step="-1">−1</button>
+        <button type="button" data-cycle-step="1">+1</button>
+        <label class="cycle-readout" id="cycle-readout">cycle 0</label>
+        <input type="range" id="cycle-slider" min="0" max="0" value="0" aria-label="Pipeline cycle">
+      </div>
+      <div class="stage-legend" id="uarch-legend"></div>
+    </section>
+    <aside class="explore-side">
+      <header class="explore-head">
+        <p class="eyebrow">Explorer</p>
+        <h1>Pipeline, queues, and PMA windows</h1>
+        <p class="muted">
+          Occupancy is a cycle-accurate replay of the published pipeline
+          contracts (widths, registered queues, IQ reclaim, completion
+          register, L1D hit=2) on CoreMark instruction bytes in listing order.
+          Branches do not redirect — this is not NPC IPC.
+        </p>
+      </header>
+      <aside class="stage-inspect" id="uarch-inspect">
+        <p class="muted">Click a tile. Capacities come from <code>hdl/configs/default</code>.</p>
+      </aside>
+      <section>
+        <h2>Payload</h2>
+        <ol class="payload-list" id="payload-list"></ol>
+      </section>
+      <section>
+        <h2>Model</h2>
+        <ul class="model-notes" id="model-notes"></ul>
+      </section>
+    </aside>
+  </div>
+  {% include terminal.html %}
+  {% include scripts.html %}
+</body>
+</html>

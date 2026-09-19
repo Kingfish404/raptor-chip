@@ -34,20 +34,21 @@ module rapt_bus #(
   // =========================================================================
   // Multi-outstanding read AR pipeline.
   //
-  // The bus exposes two independent AR slots so L1I and L1D can have ARs in
+  // The bus exposes independent I, legacy D/PTW and MSHR slots for reads in
   // flight simultaneously. The downstream router/SoC handle multi-outstanding
   // responses via request IDs; per-master response de-mux is by ID below.
   //
   //   - L1I slot: refill-depth FIFO. The L1I miss FSM can issue sequential
   //     ARs gated only on `l1i_bus.rready` pulses, so the bus must accept a
   //     complete refill without waiting for its first response.
-  //   - L1D slot: 1-deep, held until the response's `rlast` so the captured
+  //   - Legacy L1D/PTW slot: 1-deep, held until `rlast` so the captured
   //     `l1d_load_is_mmio` flag stays valid across the round trip.
   //
   //   - `*_bus.rready` pulses for one cycle on FIFO push: this preserves the
   //     master-side "AR accepted, advance" semantic that the L1I FSM relies on.
   //
-  //   - Arbiter: L1D priority over L1I (matches the original FSM order).
+  //   - MSHRs: dedicated IDs 8..11, with ownership retained through RLAST.
+  //   - Arbiter: legacy D/PTW, then MSHRs, then L1I.
   //     Downstream requests are registered/stable until `rd_req_ready`.
   // =========================================================================
   localparam int L1iARDepth = `RAPT_L1I_REFILL_WORDS;
@@ -79,6 +80,56 @@ module rapt_bus #(
   logic            l1d_slot_ptw;
   logic [1:0]      l1d_slot_pbmt;
 
+  logic rd_output_fire;
+  logic [2:0] l1d_arsize_enc;
+
+  // Dedicated MSHR IDs 8..11, independent of legacy D/PTW IDs 2/4.
+  // Ownership lasts through RLAST even across pipeline cancellation.
+  logic [3:0] miss_busy, miss_held, miss_issued;
+  logic [XLEN-1:0] miss_addr[4];
+  logic [7:0] miss_len[4];
+  logic [2:0] miss_size[4];
+  logic miss_push, miss_available, source_miss, take_miss, miss_response;
+  logic [1:0] miss_select;
+  always_comb begin
+    miss_available = 0;
+    miss_select = 0;
+    for (int i = 3; i >= 0; i--)
+    if (miss_busy[i] && !miss_held[i]) begin
+      miss_available = 1;
+      miss_select = 2'(i);
+    end
+  end
+  assign miss_push = (`RAPT_L1D_MSHRS > 0) && l1d_bus.arvalid && l1d_bus.ar_mshr
+      && !miss_busy[l1d_bus.ar_mshr_id];
+  assign miss_response = mem.rd_rsp_valid && mem.rd_rsp_id[3:2] == 2'b10
+      && miss_issued[mem.rd_rsp_id[1:0]];
+  assign l1d_bus.r_mshr = miss_response;
+  assign l1d_bus.r_mshr_id = mem.rd_rsp_id[1:0];
+  always_ff @(posedge clock) begin
+    if (reset) begin
+      miss_busy <= '0;
+      miss_held <= '0;
+      miss_issued <= '0;
+    end else begin
+      if (miss_push) begin
+        miss_busy[l1d_bus.ar_mshr_id] <= 1;
+        miss_held[l1d_bus.ar_mshr_id] <= 0;
+        miss_issued[l1d_bus.ar_mshr_id] <= 0;
+        miss_addr[l1d_bus.ar_mshr_id] <= l1d_bus.araddr;
+        miss_len[l1d_bus.ar_mshr_id] <= l1d_bus.arlen;
+        miss_size[l1d_bus.ar_mshr_id] <= l1d_arsize_enc;
+      end
+      if (take_miss) miss_held[miss_select] <= 1;
+      if (rd_output_fire && mem.rd_req_id[3:2] == 2'b10) miss_issued[mem.rd_req_id[1:0]] <= 1;
+      if (miss_response && mem.rd_rsp_last) begin
+        miss_busy[mem.rd_rsp_id[1:0]] <= 0;
+        miss_held[mem.rd_rsp_id[1:0]] <= 0;
+        miss_issued[mem.rd_rsp_id[1:0]] <= 0;
+      end
+    end
+  end
+
   // Master-side capture handshakes (each pulses *_bus.rready for one cycle).
   //
   // The L1I bus does not expose an arready back to the masters (L1I refill FSM
@@ -95,9 +146,9 @@ module rapt_bus #(
                          || (l1i_bus.araddr != l1i_last_push_addr)
                          || (l1i_bus.ar_ptw != l1i_last_push_ptw);
   assign l1i_push       = l1i_bus.arvalid && !l1i_q_full && l1i_new_request;
-  assign l1d_push       = l1d_bus.arvalid && !l1d_slot_busy;
+  assign l1d_push       = l1d_bus.arvalid && !l1d_bus.ar_mshr && !l1d_slot_busy;
   assign l1i_bus.rready = l1i_push;
-  assign l1d_bus.rready = l1d_push;
+  assign l1d_bus.rready = l1d_push || miss_push;
 
   // Downstream AR fall-through skid buffer (L1D priority).
   //
@@ -120,13 +171,15 @@ module rapt_bus #(
   logic [7:0] source_len;
   logic [1:0] source_burst;
   logic [1:0] source_pbmt;
-  logic rd_skid_available, rd_capture_source, rd_output_fire;
+  logic rd_skid_available, rd_capture_source;
   logic take_l1d, take_l1i, l1i_pop;
 
   assign rd_skid_available = !rd_skid_valid || mem.rd_req_ready;
   assign source_l1d = l1d_slot_busy && !l1d_slot_held;
-  assign source_l1i = !source_l1d && !l1i_q_empty;
-  assign source_valid = source_l1d || source_l1i;
+  assign source_miss = !source_l1d && miss_available;
+  assign source_l1i = !source_l1d && !source_miss && !l1i_q_empty;
+  assign source_valid = source_l1d || source_miss || source_l1i;
+  assign take_miss = rd_skid_available && source_miss;
   assign take_l1d = rd_skid_available && source_l1d;
   assign take_l1i = rd_skid_available && source_l1i;
   assign l1i_pop = take_l1i;
@@ -150,21 +203,20 @@ module rapt_bus #(
   // responses that arrive
   // before our request has been issued.
   assign l1d_bus.rdata = mem.rd_rsp_data;
-  assign l1d_bus.rvalid = l1d_slot_issued && !l1d_slot_ptw
-                       && (mem.rd_rsp_id == L1D) && mem.rd_rsp_valid;
+  assign l1d_bus.rvalid = miss_response || (l1d_slot_issued && !l1d_slot_ptw
+                       && (mem.rd_rsp_id == L1D) && mem.rd_rsp_valid);
   assign l1d_bus.ptw_rvalid = l1d_slot_issued && l1d_slot_ptw
                            && (mem.rd_rsp_id == TLBD) && mem.rd_rsp_valid;
-  assign l1d_bus.rlast = l1d_slot_issued && !l1d_slot_ptw
-                      && (mem.rd_rsp_id == L1D) && mem.rd_rsp_last;
-  assign l1d_bus.difftest_skip = l1d_slot_busy && l1d_slot_mmio;
-  assign l1d_bus.rerr = l1d_slot_issued && !l1d_slot_ptw && (mem.rd_rsp_id == L1D)
-                     && mem.rd_rsp_valid && mem.rd_rsp_error;
+  assign l1d_bus.rlast = mem.rd_rsp_last && (miss_response || (l1d_slot_issued && !l1d_slot_ptw
+                      && (mem.rd_rsp_id == L1D)));
+  assign l1d_bus.difftest_skip = !miss_response && l1d_slot_busy && l1d_slot_mmio;
+  assign l1d_bus.rerr = l1d_bus.rvalid && mem.rd_rsp_error;
   assign l1d_bus.ptw_rerr = l1d_bus.ptw_rvalid && mem.rd_rsp_error;
 
   assign source_id = source_l1d ? (l1d_slot_ptw ? 4'(TLBD) : 4'(L1D))
-                                : (l1i_q_ptw[l1i_q_rdptr] ? 4'(TLBI) : 4'(L1I));
-  assign source_pbmt = source_l1d ? l1d_slot_pbmt : l1i_q_pbmt[l1i_q_rdptr];
-  assign source_addr = source_l1d ? l1d_slot_addr : l1i_q_head_addr;
+                                : source_miss ? {2'b10, miss_select} : (l1i_q_ptw[l1i_q_rdptr] ? 4'(TLBI) : 4'(L1I));
+  assign source_pbmt = source_l1d ? l1d_slot_pbmt : source_miss ? 2'b00 : l1i_q_pbmt[l1i_q_rdptr];
+  assign source_addr = source_l1d ? l1d_slot_addr : source_miss ? miss_addr[miss_select] : l1i_q_head_addr;
   // RV64 page-table entries are 64 bits.  L1I/PTW requests share the L1I
   // queue, but only ordinary instruction refills are 32-bit reads. Sending
   // a 4-byte PTW read through LiteX's AXI64->AXI32 converter returns only one
@@ -175,10 +227,10 @@ module rapt_bus #(
   localparam logic [2:0] PtwReadSize = 3'b010;
 `endif
   assign source_size = source_l1d ? l1d_slot_size
-                                  : (l1i_q_ptw[l1i_q_rdptr] ? PtwReadSize : 3'b010);
-  assign source_burst = ((source_l1d && l1d_slot_len != 0) || (source_l1i
+                                  : source_miss ? miss_size[miss_select] : (l1i_q_ptw[l1i_q_rdptr] ? PtwReadSize : 3'b010);
+  assign source_burst = (source_miss || (source_l1d && l1d_slot_len != 0) || (source_l1i
       && l1i_q_head_burst)) ? 2'b01 : 2'b00;
-  assign source_len = source_l1d ? l1d_slot_len : (source_l1i && l1i_q_head_burst)
+  assign source_len = source_l1d ? l1d_slot_len : source_miss ? miss_len[miss_select] : (source_l1i && l1i_q_head_burst)
       ? 8'h01 : 8'h00;
 
   // Bypass when the skid entry is empty; use only registered payload while
@@ -189,7 +241,7 @@ module rapt_bus #(
   assign mem.rd_req_size = rd_skid_valid ? rd_skid_size : source_size;
   assign mem.rd_req_burst = rd_skid_valid ? rd_skid_burst : source_burst;
   assign mem.rd_req_pbmt = rd_skid_valid ? rd_skid_pbmt : source_pbmt;
-  assign source_noallocate = source_l1d ? l1d_slot_noallocate : l1i_q_noallocate[l1i_q_rdptr];
+  assign source_noallocate = source_l1d ? l1d_slot_noallocate : source_miss ? 1'b1 : l1i_q_noallocate[l1i_q_rdptr];
   assign mem.rd_req_noallocate = rd_skid_valid ? rd_skid_noallocate : source_noallocate;
   assign mem.rd_req_len = rd_skid_valid ? rd_skid_len : source_len;
   assign rd_output_fire = mem.rd_req_valid && mem.rd_req_ready;
@@ -198,7 +250,6 @@ module rapt_bus #(
   assign mem.rd_rsp_ready = 1'b1;
 
   // L1D arsize from rstrb (matches original encoding).
-  logic [2:0] l1d_arsize_enc;
   assign l1d_arsize_enc =
       ({3{l1d_bus.rstrb == 8'h01}} & 3'b000) |
       ({3{l1d_bus.rstrb == 8'h03}} & 3'b001) |
@@ -322,7 +373,7 @@ module rapt_bus #(
   assign store_awvalid = (store_bridge inside {L1I, TLBI}) ? l1i_bus.awvalid : l1d_bus.awvalid;
   assign store_wvalid = (store_bridge inside {L1I, TLBI}) ? l1i_bus.wvalid : l1d_bus.wvalid;
 
-  assign l1d_bus.idle = !l1d_slot_busy && !l1d_bus.arvalid
+  assign l1d_bus.idle = !(|miss_busy) && !l1d_slot_busy && !l1d_bus.arvalid
       && write_state == WR_IDLE && !store_awvalid && !store_wvalid;
 
   assign mem.wr_req_valid = (write_state == WR_IDLE) && store_awvalid && store_wvalid;

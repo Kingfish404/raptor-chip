@@ -1,3 +1,7 @@
+---
+title: Standalone VPU
+---
+
 # Standalone Raptor VPU
 
 Status: standalone implementation and selected verification complete, 2026-09-06.

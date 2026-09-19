@@ -1,3 +1,7 @@
+---
+title: Quick Start
+---
+
 # Quick Start
 
 Build and simulate Raptor in a few commands. Run everything from the
@@ -36,8 +40,7 @@ make run-nemu32                 # configure + build + run, RV32
 Or step by step:
 
 ```shell
-make config-nemu32              # riscv32_defconfig
-make build-nemu32
+make build-nemu32               # configure and build
 make run-nemu32
 make menuconfig-nemu32          # interactive Kconfig
 ```
@@ -46,11 +49,11 @@ make menuconfig-nemu32          # interactive Kconfig
 
 ```shell
 # Full pipeline: Chisel -> SystemVerilog -> configure -> build -> run
-make sim-rv32
+make run-rv32
 
 # Or step by step
 make verilog                    # Chisel -> SystemVerilog
-make config-rv32               # o2_defconfig
+make configure-rv32            # configure only (difftest enabled by default)
 make build-rv32
 make run-rv32
 
@@ -81,13 +84,13 @@ make coremark-rv32        ARGS="-b -n"
 make microbench-rv32      ARGS="-b -n"
 
 # NPC with difftest (vs NEMU reference model)
-make coremark-rv32-difftest     ARGS="-b -n"
-make microbench-rv32-difftest   ARGS="-b -n"
+make coremark-rv32 DIFFTEST=1     ARGS="-b -n"
+make microbench-rv32 DIFFTEST=1   ARGS="-b -n"
 
 # Reproducible random memory-delay simulation (also supports -rv64)
-make coremark-random-rv32 SIM_RANDOM_DELAY=31 SIM_RANDOM_SEED=1
-make microbench-random-rv32 SIM_RANDOM_DELAY=31 SIM_RANDOM_SEED=42
-make cpu-tests-random-rv64 SIM_RANDOM_DELAY=31 SIM_RANDOM_SEED=1
+make coremark-rv32 SIM_RANDOM_DELAY=31 SIM_RANDOM_SEED=1
+make microbench-rv32 SIM_RANDOM_DELAY=31 SIM_RANDOM_SEED=42
+make cpu-tests-rv64 SIM_RANDOM_DELAY=31 SIM_RANDOM_SEED=1
 
 # ysyxSoC (RV32)
 make coremark-ysyxsoc      ARGS="-b -n"
@@ -98,7 +101,7 @@ make coremark-nemu32       ARGS="-b -n"
 make microbench-nemu32     ARGS="-b -n"
 ```
 
-Detailed results: **[PROFILE](./PROFILE.md)**.
+Recorded IPC history: **[Performance Iterations](./perf-iterations.md)**. Early PPA tables: **[PROFILE](./PROFILE.md)** (legacy archive).
 
 ## 5. Apps on riscv-pk
 
@@ -121,11 +124,21 @@ Details: **[Linux Kernel Boot](./linux_kernel.md)**.
 
 ## 7. FPGA
 
+LiteX is the supported board flow (KU15P, AXAU15, VCU118, Tang Mega 138K Pro):
+
 ```shell
-make fpga-syn                       # synth (Gowin Tang Nano 20K)
-make fpga-pnr                       # place & route
-# See fpga/gowin-tang-nano-20k/README.md and fpga/litex/README.md
+make -C fpga/litex help
+make -C fpga/litex fpga-detect          # detect attached Xilinx parts
 ```
+
+The Gowin Tang Nano 20K path remains as a small open-toolchain target:
+
+```shell
+make fpga-syn                       # synth
+make fpga-pnr                       # place & route
+```
+
+See [`fpga/litex/README.md`](../fpga/litex/README.md) and [`fpga/gowin-tang-nano-20k/README.md`](../fpga/gowin-tang-nano-20k/README.md).
 
 ## 8. Utilities
 
@@ -144,7 +157,7 @@ make clean    # clean all build artifacts
 | Setup environment               | `make setup`                           |
 | Generate RTL                    | `make verilog`                         |
 | Build & run NEMU                | `make run-nemu32`                      |
-| Full NPC simulation             | `make sim-rv32`                        |
+| Full NPC simulation             | `make run-rv32`                        |
 | NPC simulation (batch, no wave) | `make run-rv32 ARGS="-b -n"`           |
 | NPC RV64 mode                   | `make run-rv64 ARGS="-b -n"`           |
 | CPU tests on NPC                | `make cpu-tests-rv32 ARGS="-b -n"`     |
@@ -153,7 +166,8 @@ make clean    # clean all build artifacts
 | Run nanos-lite on NEMU          | `make nanos-nemu32`                    |
 | Boot Linux on NEMU              | `make linux-boot-nemu32`               |
 | Boot Linux on NPC w/ difftest   | `make linux-boot-rv32`                 |
-| FPGA synthesis                  | `make fpga-syn`                        |
+| FPGA (LiteX)                    | `make -C fpga/litex help`              |
+| FPGA (Tang Nano 20K)            | `make fpga-syn` / `make fpga-pnr`      |
 | Pack SV / Lint / STA            | `make pack` / `make lint` / `make sta` |
 | Clean all                       | `make clean`                           |
 
@@ -172,7 +186,7 @@ cd $NEMU_HOME && make riscv32_defconfig && make && make run
 
 # 2. NPC
 cd $RAPTOR_HOME/hdl/chisel && make verilog
-cd $NSIM_HOME && make o2_defconfig && make && make run
+cd $NSIM_HOME && make o2_difftest_defconfig && make && make run
 
 # 3. nanos-lite on NEMU (with VME)
 cd $RAPTOR_HOME/abstract-machine/app/nanos-lite \

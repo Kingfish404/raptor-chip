@@ -121,9 +121,10 @@
 `define RAPT_REG_LEN $clog2(`RAPT_REG_SIZE) // Register Length
 
 // Shared simulation/FPGA default. Explicit overrides remain available for
-// parameterized verification; PHY must still cover the configured ROB.
+// parameterized verification. Match default: 32 architectural mappings plus
+// 32 additional rename destinations; stall allocation when exhausted.
 `ifndef RAPT_PHY_SIZE
-`define RAPT_PHY_SIZE 128 // physical register number (must be power of 2)
+`define RAPT_PHY_SIZE 64 // total physical registers, including architectural mappings
 `endif
 `define RAPT_PHY_LEN $clog2(`RAPT_PHY_SIZE)
 

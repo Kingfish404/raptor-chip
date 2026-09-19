@@ -92,6 +92,7 @@ class RaptorSoC(SoCCore):
 
         # SoCCore (includes CPU, bus, SRAM, UART, timer).
         SoCCore.__init__(self, platform, sys_clk_freq, **kwargs)
+        self.add_config("BIOS_NO_BOOT")
 
         # Sim CRG.
         self.crg = CRG(platform.request("sys_clk"))

@@ -188,20 +188,27 @@ module rapt_backend #(
     load_fast_accepted.confirmed_rd = load_fast_raw.confirmed_rd;
     load_fast_accepted.result = load_fast_raw.result;
   end
-  // Break producer/owner-table/arbitration -> operand-wakeup/dispatch into
-  // separate cycles. Producer acceptance (including FPR writes) stays at
-  // capture; all ROB/PRF/IQ consumers observe the same registered packet.
+  // Non-integer producers retain the completion timing boundary. Integer
+  // producers already register execution below. All ROB/PRF/IQ consumers
+  // observe the same accepted packet; no unvalidated early forwarding.
   // An accepted owner remains ROB_EX until this packet arrives. Early
   // recovery does not free owners; precise flush clears both ROB and stage.
   // Only validity needs reset, keeping wide payloads out of the reset tree.
   for (genvar p = 0; p < rapt_pkg::CompletionPorts; p++) begin : g_completion_stage
-    rapt_completion_stage stage (
-        .clock(clock),
-        .reset(reset),
-        .flush(cmu_bcast.flush_pipe),
-        .accepted(completion_accepted[p]),
-        .completion(completion[p])
-    );
+    if (p < IntegerIssuePorts) begin : g_integer
+      // Integer execute already registers the full completion packet. Keep
+      // acceptance/owner validation, but avoid registering it a second time
+      // before all ROB/PRF/IQ consumers see the same accepted result.
+      assign completion[p] = completion_accepted[p];
+    end else begin : g_registered
+      rapt_completion_stage stage (
+          .clock(clock),
+          .reset(reset),
+          .flush(cmu_bcast.flush_pipe),
+          .accepted(completion_accepted[p]),
+          .completion(completion[p])
+      );
+    end
   end
   // Delay the complete fast-load protocol, not just confirmed/result: an
   // early wake must retain its one-cycle lead over its confirm or rebusy.
@@ -279,14 +286,7 @@ module rapt_backend #(
   fpr_if fpr ();
   exu_csr_if exu_csr ();
 
-  // CMU
-
-  // LSU
-
-  // L1D Cache
-
-  // CSR
-
+`ifndef SYNTHESIS
 `ifdef VERILATOR
   typedef enum logic [1:0] {
     P_EMPTY,
@@ -324,6 +324,7 @@ module rapt_backend #(
       = $clog2(rapt_pkg::CompletionPorts+1)'($countones(pipe_cdb_valid_mask));
   assign pipe_cdb_multi_valid = $countones(pipe_cdb_valid_mask) > 1;
   assign pipe_result_wb_multi_valid = $countones(pipe_result_wb_valid_mask) > 1;
+`endif
 `endif
 
   logic clint_timer_trap;
@@ -363,8 +364,11 @@ module rapt_backend #(
 
   // ROU (Re-Order Unit)
   rapt_operand_stage operand_read_stage (
-      .clock, .reset, .flush(cmu_bcast.flush_pipe || recovery.pending),
-      .upstream(rnu_rou), .downstream(rnu_operand)
+      .clock,
+      .reset,
+      .flush(cmu_bcast.flush_pipe || recovery.pending),
+      .upstream(rnu_rou),
+      .downstream(rnu_operand)
   );
 
   rapt_rou rou (
@@ -540,7 +544,8 @@ module rapt_backend #(
   rapt_cdb_arb cdb_arb (
       .flush(cmu_bcast.flush_pipe),
       .cancel_valid(recovery.redirect_valid),
-      .cancel_head(recovery.head), .cancel_owner(recovery.owner),
+      .cancel_head(recovery.head),
+      .cancel_owner(recovery.owner),
       .integer_system_inflight(integer_system_inflight),
       .fpu_completion_ready(fpu_completion_ready),
       .clock(clock),

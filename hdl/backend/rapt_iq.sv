@@ -63,6 +63,7 @@ module rapt_iq #(
   localparam unsigned GenBits = $bits(dispatch[0].generation);
 
   UopT iq_uop[IQ_SIZE];
+`ifndef SYNTHESIS
 `ifdef VERILATOR
   // Stable, unpacked debug view for the simulator's hang diagnostics. This
   // is a read-only projection, not separately stored execution payload.
@@ -70,6 +71,7 @@ module rapt_iq #(
   for (genvar i = 0; i < IQ_SIZE; i++) begin : g_iq_pc_probe
     assign iq_pc[i] = iq_uop[i].pc;
   end
+`endif
 `endif
 
   // Reject inconsistent type/value configurations rather than truncating tags
@@ -622,9 +624,12 @@ module rapt_execute_stage #(
     parameter type IssueT = rapt_pkg::issue_packet_t,
     parameter int ROB_SIZE = rapt_pkg::CoreConfig.rob_entries
 ) (
-    input logic clock, reset, flush,
+    input logic clock,
+    reset,
+    flush,
     input logic cancel_valid,
-    input logic [$clog2(ROB_SIZE)-1:0] cancel_head, cancel_owner,
+    input logic [$clog2(ROB_SIZE)-1:0] cancel_head,
+    cancel_owner,
     input IssueT selected,
     output IssueT execute,
     output logic occupied

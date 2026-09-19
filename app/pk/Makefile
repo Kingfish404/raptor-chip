@@ -165,7 +165,7 @@ ifeq ($(strip $(USER_ELF)),)
 	$(error Usage: make nemu-run USER_ELF=<path-to-elf> [ARGS="..."])
 endif
 	@test -x $(NEMU_BIN) || { echo "ERROR: NEMU executable not found: $(NEMU_BIN)"; \
-		echo "  Run 'make config-nemu32' from project root first."; exit 1; }
+		echo "  Run 'make build-nemu32' from project root first."; exit 1; }
 	@echo "=== Embedding $(notdir $(_ABS_USER_ELF)) into pk ==="
 	@cp $(_ABS_USER_ELF) $(PK_BUILD)/payload.elf
 	@rm -f $(PK_BUILD)/pk_payload.o $(PK_BUILD)/pk

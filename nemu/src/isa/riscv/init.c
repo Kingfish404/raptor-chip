@@ -66,6 +66,9 @@ static void restart()
   mstatus.mstatus.sxl = 2;
   mstatus.mstatus.uxl = 2;
   cpu.sr[CSR_MSTATUS] = mstatus.val;
+  // SSTATUS is the supervisor view of MSTATUS, including the read-only UXL.
+  // Initialize it before the first instruction/difftest synchronization.
+  cpu.sr[CSR_SSTATUS] = (word_t)2 << 32;
 #endif
 
   cpu.intr = false;

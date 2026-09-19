@@ -2,10 +2,13 @@
 import copy
 from pathlib import Path
 import sys
+import shutil
+import subprocess
+import tempfile
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
-from add_linux_sdcard_dts import sdcard_node
+from add_linux_sdcard_dts import ensure_sdcard_dtb, sdcard_node
 
 
 def csr_fixture():
@@ -23,6 +26,42 @@ def csr_fixture():
 
 
 class SdcardDtsTest(unittest.TestCase):
+    @unittest.skipUnless(shutil.which('dtc') and shutil.which('fdtget'), 'requires device-tree tools')
+    def test_dtb_add_validate_and_reject_mismatches(self):
+        with tempfile.TemporaryDirectory(prefix='raptor-chip-sd-test-', dir='/tmp') as tmp:
+            work = Path(tmp)
+            for bits in (32, 64):
+                with self.subTest(bits=bits):
+                    dts, base = work / 'base.dts', work / 'base.dtb'
+                    dts.write_text('/dts-v1/; / { #address-cells = <1>; #size-cells = <1>; '
+                                   f'cpus {{ cpu@0 {{ riscv,isa-base = "rv{bits}i"; }}; }}; '
+                                   'soc { #address-cells = <1>; #size-cells = <1>; }; };')
+                    subprocess.run(['dtc', '-q', '-I', 'dts', '-O', 'dtb', '-o', str(base), str(dts)], check=True)
+                    original = base.read_bytes()
+                    added, reused = work / 'added.dtb', work / 'reused.dtb'
+                    ensure_sdcard_dtb(base, csr_fixture(), added)
+                    ensure_sdcard_dtb(added, csr_fixture(), reused)
+                    self.assertEqual(base.read_bytes(), original)
+                    self.assertEqual(added.read_bytes(), reused.read_bytes())
+                    for change in ('clock', 'address'):
+                        csr = csr_fixture()
+                        if change == 'clock':
+                            csr['constants']['config_clock_frequency'] = 25000000
+                        else:
+                            for register in csr['csr_registers'].values():
+                                register['addr'] += 0x1000
+                        with self.assertRaisesRegex(ValueError, 'MMC'):
+                            ensure_sdcard_dtb(added, csr, reused)
+                    for node, prop, value in (
+                        ('/soc/mmc@f0002000', 'dma-coherent', []),
+                        ('/soc/mmc@f0002000', 'clocks', ['dead']),
+                        ('/sd-regulator', 'regulator-min-microvolt', ['1']),
+                    ):
+                        shutil.copyfile(added, reused)
+                        subprocess.run(['fdtput', '-t', 'x', str(reused), node, prop, *value], check=True)
+                        with self.assertRaisesRegex(ValueError, 'MMC'):
+                            ensure_sdcard_dtb(reused, csr_fixture(), work / 'rejected.dtb')
+
     def test_current_layout_polling_and_separate_dma_resources(self):
         node = sdcard_node(csr_fixture())
         self.assertIn('<0xf0002048 0x20>, <0xf0002068 0x20>', node)

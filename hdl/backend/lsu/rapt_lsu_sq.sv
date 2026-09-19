@@ -49,13 +49,9 @@ module rapt_lsu_sq #(
   localparam logic [7:0] CboBusWstrb = (XLEN == 64) ? 8'hff : 8'h0f;
 
   typedef enum logic [2:0] {
-    LS_S_V    = 3'b000,  // present lo beat, wait for wready
-    LS_S_R    = 3'b001,  // lo beat retired; aligned case completes here
-    LS_S_HI_V = 3'b010,  // misaligned: present hi beat, wait for wready
-    LS_S_HI_R = 3'b011, // hi beat retired; SQ entry released next cycle
-    LS_S_X_V   = 3'b100, // RV32D FSD: present the third beat
-    LS_S_X_R   = 3'b101, // third beat retired; SQ entry released next cycle
-    LS_S_CBO_R = 3'b111  // final zero beat retired; release next cycle
+    LS_S_V    = 3'b000,  // present lo/zero descriptor, wait for response
+    LS_S_HI_V = 3'b010,  // misaligned: present hi beat
+    LS_S_X_V  = 3'b100   // RV32D FSD: present third/final beat
   } state_store_t;
 
   state_store_t state_store;
@@ -219,10 +215,18 @@ module rapt_lsu_sq #(
   assign raddr = exu_lsu.raddr;
   assign ralu = exu_lsu.ralu;
 
-  // Drain completion: FSM signals release of the head entry.
-  assign sq_drain_fire = (state_store == LS_S_R || state_store == LS_S_HI_R
-                       || state_store == LS_S_X_R || state_store == LS_S_CBO_R)
-                       && sq_valid[sq_head];
+  logic ma_store_span;
+  logic ma_store_third;
+
+  // Release the owner on its final write response, not in an extra idle
+  // state one cycle later. The next committed entry can then reach the bus
+  // as soon as the previous transaction has returned B. Split stores retain
+  // ownership until their final beat; an error cancels remaining beats.
+  assign sq_drain_fire = lsu_l1d.wvalid && lsu_l1d.wready
+      && (lsu_l1d.werr
+          || (state_store == LS_S_V && (!ma_store_span || walu == `RAPT_CBO_ZERO_WALU))
+          || (state_store == LS_S_HI_V && !ma_store_third)
+          || state_store == LS_S_X_V);
 
   logic [SQ_SIZE-1:0] sq_alloc_oh;
   logic [SQ_SIZE-1:0] sq_commit_oh;
@@ -607,8 +611,6 @@ module rapt_lsu_sq #(
   //    the AXI transfer itself never crosses a 4-KiB boundary.  Beat 1 drives
   //    the next aligned address with the spilled bytes shifted down to byte 0.
   // ==========================================================================
-  logic ma_store_span;
-  logic ma_store_third;
   logic [XLEN-1:0] ma_waddr_lo;
   logic [XLEN-1:0] ma_waddr_hi;
   logic [XLEN-1:0] ma_waddr_third;
@@ -776,6 +778,10 @@ module rapt_lsu_sq #(
                        || (ma_state == MA_DONE)
                        || (lsu_l1d.rvalid && lsu_l1d.rready
                                         && !ma_load_req && ma_state == MA_IDLE);
+  assign exu_lsu.rmiss = lsu_l1d.rvalid && lsu_l1d.rmiss && !cmu_bcast.flush_pipe;
+  assign exu_lsu.miss_wake = lsu_l1d.miss_wake;
+  assign lsu_l1d.replay_allowed = !ma_load_req && ma_state == MA_IDLE
+      && !exu_lsu.atomic_lock && !exu_lsu.fp_rdata64_req;
   assign exu_lsu.rretry = lsu_l1d.rvalid && lsu_l1d.rretry
       && !cmu_bcast.flush_pipe;
 
@@ -788,7 +794,7 @@ module rapt_lsu_sq #(
         // only this owner; do not issue the remaining split/zero beats.
         // Earlier beats cannot be rolled back. Platform notification of
         // this imprecise error is separate from architectural load traps.
-        state_store <= LS_S_R;
+        state_store <= LS_S_V;
       end else
         unique case (state_store)
           LS_S_V: begin
@@ -797,36 +803,24 @@ module rapt_lsu_sq #(
                 if (walu == `RAPT_CBO_ZERO_WALU) begin
                   // A single descriptor remains resident through the final
                   // burst B response, including errors and pipeline flushes.
-                  state_store <= LS_S_CBO_R;
+                  state_store <= LS_S_V;
                 end else begin
                   // Lo beat accepted. If the store straddles a word/dword boundary
                   // we still owe a high beat; otherwise retire.
-                  state_store <= ma_store_span ? LS_S_HI_V : LS_S_R;
+                  state_store <= ma_store_span ? LS_S_HI_V : LS_S_V;
                 end
               end
             end
           end
-          LS_S_R: begin
-            state_store <= LS_S_V;
-          end
           LS_S_HI_V: begin
             if (lsu_l1d.wready) begin
-              state_store <= ma_store_third ? LS_S_X_V : LS_S_HI_R;
+              state_store <= ma_store_third ? LS_S_X_V : LS_S_V;
             end
-          end
-          LS_S_HI_R: begin
-            state_store <= LS_S_V;
           end
           LS_S_X_V: begin
             if (lsu_l1d.wready) begin
-              state_store <= LS_S_X_R;
+              state_store <= LS_S_V;
             end
-          end
-          LS_S_X_R: begin
-            state_store <= LS_S_V;
-          end
-          LS_S_CBO_R: begin
-            state_store <= LS_S_V;
           end
           default: begin
             state_store <= LS_S_V;
@@ -1005,8 +999,7 @@ module rapt_lsu_sq #(
   // HANDSHAKE: the SQ drain target slot must be a valid committed entry.
   `RAPT_SVA_IMPLY(clock, reset, LSU_RETRY_NOT_COMPLETION, exu_lsu.rretry,
                   !exu_lsu.rready && !exu_lsu.trap)
-  `RAPT_SVA_IMPLY(clock, reset, LSU_SQ_DRAIN_VALID,
-                  (state_store == LS_S_R || state_store == LS_S_CBO_R),
+  `RAPT_SVA_IMPLY(clock, reset, LSU_SQ_DRAIN_VALID, sq_drain_fire,
                   (sq_valid[sq_head] && sq_committed[sq_head]))
 
   // HANDSHAKE: a load/AMO blocked by an older partial store must not complete

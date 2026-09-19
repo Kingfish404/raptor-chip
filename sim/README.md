@@ -48,31 +48,31 @@ Kconfig contents and effective compiler/Verilator options select the model cache
 
 ## DFF-only static timing analysis
 
-`make sta` retains the SRAM-macro flow. From the repository root (or with `make -C sim`), use these separate targets for behavioral memories expanded into standard-cell flip-flops and selection logic:
+`make sta` retains the SRAM-macro flow. From the repository root (or with `make -C sim`), use the memory-model parameter for behavioral memories expanded into standard-cell flip-flops and selection logic:
 
 ```sh
-make sta-dff
-make sta-dff RAPT_CONFIG=small STA_PLATFORM=nangate45 CLK_FREQ_MHZ=100
-make sta-dff-rv64 RAPT_CONFIG=default STA_PLATFORM=sky130 CLK_FREQ_MHZ=50
-make sta-dff-detail RAPT_CONFIG=small STA_PLATFORM=asap7 VFLAGS=-DRAPT_RV64
-make sta-dff-check RAPT_CONFIG=default VFLAGS=-DRAPT_RV64
+make sta MEMORY=dff
+make sta MEMORY=dff RAPT_CONFIG=small STA_PLATFORM=nangate45 CLK_FREQ_MHZ=100
+make sta MEMORY=dff XLEN=64 RAPT_CONFIG=default STA_PLATFORM=sky130 CLK_FREQ_MHZ=50
+make sta-detail MEMORY=dff RAPT_CONFIG=small STA_PLATFORM=asap7 VFLAGS=-DRAPT_RV64
+make sta-check MEMORY=dff RAPT_CONFIG=default VFLAGS=-DRAPT_RV64
 ```
 
-`sta-dff-check` only preprocesses and elaborates the full core; it does not run technology mapping or STA. `sta-flops` is a compatibility alias for `sta-dff`. The SRAM-macro define is explicitly disabled, and no extra macro Liberty or blackbox files are supplied to the backend. Standard-cell timing still comes from the selected PDK. Supported in-tree platforms are `nangate45`, `asap7`, and `sky130hd` (`sky130` is an alias). A proprietary PDK such as TSMC 22 nm requires licensed libraries and a corresponding platform configuration in the `YOSYS_OPENSTA` backend; these targets do not provide that PDK.
+`sta-check MEMORY=dff` only preprocesses and elaborates the full core; it does not run technology mapping or STA. The SRAM-macro define is explicitly disabled, and no extra macro Liberty or blackbox files are supplied to the backend. Standard-cell timing still comes from the selected PDK. Supported in-tree platforms are `nangate45`, `asap7`, and `sky130hd` (`sky130` is an alias). A proprietary PDK such as TSMC 22 nm requires licensed libraries and a corresponding platform configuration in the `YOSYS_OPENSTA` backend; these targets do not provide that PDK.
 
 Outputs are isolated by build profile, HDL preset, XLEN, PDK, and frequency:
 
 ```text
-sim/build/<profile>/sta-dff/<preset>/<riscv32|riscv64>/<platform>/<frequency>MHz/
+sim/build/<profile>/sta/dff/<preset>/<riscv32|riscv64>/<platform>/<frequency>MHz/
   rtl/rapt_pack.sv
   rtl/pack-synth-check.log
   backend/result/<platform>-rapt-<frequency>MHz/...
 ```
 
-Use an absolute `BUILD_ROOT` or `STA_DFF_DIR` to relocate outputs. Use distinct directories for concurrent runs with other differing `VFLAGS`/RTL inputs. Backend scripts and libraries are linked into the isolated workspace; output does not overwrite the backend's shared SRAM reports. Prepare tools and PDKs before running: the DFF targets do not fetch, update, or install dependencies. Large DFF caches substantially increase synthesis cost. These are pre-layout STA results, not SRAM-macro estimates or post-route signoff.
+Use an absolute `BUILD_ROOT` or `STA_WORK_DIR` to relocate outputs. Use distinct directories for concurrent runs with other differing `VFLAGS`/RTL inputs. Backend scripts and libraries are linked into the isolated workspace; output does not overwrite the backend's shared SRAM reports. Prepare tools and PDKs before running: the DFF targets do not fetch, update, or install dependencies. Large DFF caches substantially increase synthesis cost. These are pre-layout STA results, not SRAM-macro estimates or post-route signoff.
 
 ## Remaining shared resources and checks
 
-This isolates the **simulator**, not every external tool. NEMU's legacy config and some software/Chisel generation workflows still have shared state. Prepare references with `make config-nemu32-ref` then `make config-nemu64-ref` before parallel simulator runs; do not concurrently reconfigure NEMU. Likewise, do not regenerate Chisel decoders while building simulators that read them. Concurrent incompatible configurations must not share the same profile/XLEN directory.
+This isolates the **simulator**, not every external tool. NEMU's legacy config and some software/Chisel generation workflows still have shared state. The default sim run refreshes its NEMU reference. For parallel runs, first build references sequentially, then pass explicit `DIFF_REF_SO="-d /absolute/reference.so"` paths to bypass reference rebuilding. Do not concurrently reconfigure NEMU. Likewise, do not regenerate Chisel decoders while building simulators that read them. Concurrent incompatible configurations must not share the same profile/XLEN directory.
 
 `make -C verify sim-build-isolation-check` checks real Kconfig generation, parallel profile/XLEN isolation, idempotence, cache switching, read-only help, and profile-local cleanup. Its cache tests use a fake compiler; they do not replace an actual `make run-rv32` smoke test. Directed Verilator checks also retain option-keyed object caches instead of deleting the whole test directory on every run. Explicit clean targets remain available.

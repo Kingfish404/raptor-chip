@@ -36,6 +36,8 @@ module rapt_l1d_tags #(
     output logic [L1dWayW-1:0] ld_fill_way,
     input logic l1d_update,
     input logic l1d_valid_u,
+    input logic line_update = 1'b0,
+    input logic [L1D_LINE_SIZE-1:0] line_mask = '0,
     input logic l1d_inv_all_ways,
     input logic [L1dTagW-1:0] l1d_tag_u,
     input logic [L1D_LEN-1:0] l1d_idx,
@@ -159,7 +161,8 @@ module rapt_l1d_tags #(
         end else if (!(|clear_set) && l1d_update && l1d_idx == L1D_LEN'(set_idx)) begin
           if (l1d_valid_u) begin
             if (l1d_way == L1dWayW'(way)) begin
-              if (update_tag_match[way]) l1d_valid[way][set_idx][l1d_off] <= 1'b1;
+              if (line_update) l1d_valid[way][set_idx] <= line_mask;
+              else if (update_tag_match[way]) l1d_valid[way][set_idx][l1d_off] <= 1'b1;
               else l1d_valid[way][set_idx] <= L1D_LINE_SIZE'(1) << l1d_off;
             end else if (update_tag_match[way]) begin
               // Scrub the entire duplicate line, including other offsets.

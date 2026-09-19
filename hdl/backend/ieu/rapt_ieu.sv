@@ -48,10 +48,19 @@ module rapt_ieu #(
   logic [NumIntegerPorts-1:0] execute_occupied;
   assign integer_system_inflight = execute_occupied[IntegerSystemPort];
   for (genvar p = 0; p < NumIntegerPorts; p++) begin : g_execute_stage
-    rapt_execute_stage #(.IssueT(IssueT), .ROB_SIZE(ROB_SIZE)) stage (
-        .clock, .reset, .flush(cmu_bcast.flush_pipe),
-        .cancel_valid, .cancel_head, .cancel_owner,
-        .selected(alq_issue[p]), .execute(alq_execute[p]), .occupied(execute_occupied[p])
+    rapt_execute_stage #(
+        .IssueT(IssueT),
+        .ROB_SIZE(ROB_SIZE)
+    ) stage (
+        .clock,
+        .reset,
+        .flush(cmu_bcast.flush_pipe),
+        .cancel_valid,
+        .cancel_head,
+        .cancel_owner,
+        .selected(alq_issue[p]),
+        .execute(alq_execute[p]),
+        .occupied(execute_occupied[p])
     );
   end
   IssueT brq_issue[1];

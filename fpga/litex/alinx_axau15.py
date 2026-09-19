@@ -265,6 +265,7 @@ class RaptorAlinxAXAU15SoC(SoCCore):
             raise ValueError("--with-mig requires --integrated-main-ram-size=0")
 
         SoCCore.__init__(self, platform, sys_clk_freq, **kwargs)
+        self.add_config("BIOS_NO_BOOT")
         self.crg = _CRG(platform, sys_clk_freq)
 
         if with_mig:

@@ -1,6 +1,7 @@
 """RV64 network profile checks; no shared RTL pack, synthesis or board access."""
 import gzip
 import json
+import os
 from pathlib import Path
 import sys
 import tempfile
@@ -17,6 +18,11 @@ from litex.soc.integration.builder import Builder
 
 
 class RV64NetworkTest(unittest.TestCase):
+    def setUp(self):
+        environment = patch.dict(os.environ)
+        environment.start()
+        self.addCleanup(environment.stop)
+
     def test_commands_keep_profile_in_recursive_make(self):
         for action, target in (("image", "fpga-img-rv64"), ("build", "fpga-build"), ("load", "fpga-load")):
             cmd = profile.make_command(action, Path("/tmp/release"))
@@ -59,28 +65,27 @@ class RV64NetworkTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "Buildroot"):
                 profile.check_package(package)
 
-    def test_sd_autoboot_requires_controller(self):
-        with self.assertRaisesRegex(ValueError, "requires --with-sdcard"):
-            cu08.RaptorMLKCU08SoC(sys_clk_freq=50e6, sdcard_autoboot=True,
-                                 integrated_main_ram_size=0x10000)
+    def test_sd_autoboot_always_rejected(self):
+        for controller in (False, True):
+            with self.assertRaisesRegex(ValueError, "Automatic boot is disabled"):
+                cu08.RaptorMLKCU08SoC(sys_clk_freq=50e6, sdcard_autoboot=True,
+                                     with_sdcard=controller, integrated_main_ram_size=0x10000)
 
     def test_rv32_rv64_sd_boot_policy(self):
         # Production peripheral elaboration, CPU collection intentionally
         # disabled: this must never call sim/Makefile or alter shared stamps.
         for variant in ("linux32", "linux64"):
-            for automatic in (False, True):
-                with self.subTest(variant=variant, automatic=automatic), tempfile.TemporaryDirectory() as tmp:
-                    with patch.object(shared.Raptor, "add_sources", lambda *args, **kwargs: None):
-                        soc = cu08.RaptorMLKCU08SoC(sys_clk_freq=50e6,
-                            cpu_variant=variant, with_sdcard=True,
-                            sdcard_autoboot=automatic, with_ethernet=True,
-                            eth_speed=100, integrated_main_ram_size=0x10000)
-                        Builder(soc, output_dir=tmp, compile_software=False).build(run=False)
-                    csr = json.loads((Path(tmp) / "csr.json").read_text())
-                    self.assertEqual("sdcard_boot_disable" in csr["constants"], not automatic)
-                    self.assertEqual("config_bios_no_boot" in csr["constants"], not automatic)
-                    self.assertIn("ethmac", csr["csr_bases"])
-                    self.assertEqual(csr["constants"]["cm005_eth_speed"], 100)
+            with self.subTest(variant=variant), tempfile.TemporaryDirectory() as tmp:
+                with patch.object(shared.Raptor, "add_sources", lambda *args, **kwargs: None):
+                    soc = cu08.RaptorMLKCU08SoC(sys_clk_freq=50e6,
+                        cpu_variant=variant, with_sdcard=True, with_ethernet=True,
+                        eth_speed=100, integrated_main_ram_size=0x10000)
+                    Builder(soc, output_dir=tmp, compile_software=False).build(run=False)
+                csr = json.loads((Path(tmp) / "csr.json").read_text())
+                self.assertIn("sdcard_boot_disable", csr["constants"])
+                self.assertIn("config_bios_no_boot", csr["constants"])
+                self.assertIn("ethmac", csr["csr_bases"])
+                self.assertEqual(csr["constants"]["cm005_eth_speed"], 100)
 
 
 if __name__ == "__main__":

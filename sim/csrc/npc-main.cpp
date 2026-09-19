@@ -36,6 +36,9 @@ namespace
 
 int main(int argc, char *argv[])
 {
+  // make run commonly pipes stdout through tee. Keep startup/progress messages
+  // visible while the simulator is running, not just when its buffer fills.
+  std::setvbuf(stdout, nullptr, _IOLBF, 0);
   for (int i = 1; i < argc; ++i)
   {
     if (std::strcmp(argv[i], "--help-modes") == 0)

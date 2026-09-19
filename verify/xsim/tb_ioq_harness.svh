@@ -121,6 +121,8 @@ task automatic init_ioq_inputs(input logic dmmu_en);
     exu_lsu.difftest_skip = 1'b0;
     exu_lsu.rready = 1'b0;
     exu_lsu.rretry = 1'b0;
+    exu_lsu.rmiss = 1'b0;
+    exu_lsu.miss_wake = 1'b0;
     exu_lsu.rdata_b = '0;
     exu_lsu.rready_b = 1'b0;
     exu_lsu.stq_ready = 1'b1;

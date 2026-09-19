@@ -1,3 +1,7 @@
+---
+title: Ecosystem
+---
+
 # Ecosystem
 
 Simulators, FPGA boards, ASIC flow, software stack, and memory maps.
@@ -8,7 +12,7 @@ Simulators, FPGA boards, ASIC flow, software stack, and memory maps.
 | ----------- | --------------------------------- | ------------------------------------------------------------- |
 | NEMU        | Software ISS (difftest reference) | `nemu/README.md`                                              |
 | NPC         | Verilator simulator               | `sim/`                                                        |
-| FPGA        | Gowin boards and LiteX KU15P      | `fpga/gowin-tang-nano-20k/README.md`, `fpga/litex/README.md`  |
+| FPGA        | LiteX boards + Gowin Tang Nano    | `fpga/litex/README.md`, `fpga/gowin-tang-nano-20k/README.md`  |
 | ASIC (open) | Yosys + OpenSTA flow              | [yosys-opensta](https://github.com/Kingfish404/yosys-opensta) |
 
 ## Simulators
@@ -16,7 +20,7 @@ Simulators, FPGA boards, ASIC flow, software stack, and memory maps.
 | Simulator   | Role                                     | Entry                      |
 | ----------- | ---------------------------------------- | -------------------------- |
 | **NEMU**    | Software ISS, reference model            | `make run-nemu32`, `nemu/` |
-| **NPC**     | Verilator, cycle-accurate, waveform      | `make sim-rv32`, `sim/`    |
+| **NPC**     | Verilator, cycle-accurate, waveform      | `make run-rv32`, `sim/`    |
 | **raptSoC** | SystemVerilog NPC top + AXI memory model | `sim/rtl/rapt_npc_soc.sv`  |
 
 NPC is the primary development simulator. NEMU acts as the difftest reference for every commit.
@@ -25,10 +29,13 @@ NPC is the primary development simulator. NEMU acts as the difftest reference fo
 
 | Board / Flow                   | Status                                                                  | Entry                                        |
 | ------------------------------ | ----------------------------------------------------------------------- | -------------------------------------------- |
-| **Gowin Tang Nano 20K**        | Supported (synth + P&R)                                                 | `fpga/gowin-tang-nano-20k/`, `make fpga-syn` |
-| **Tang Mega 138K Pro / LiteX** | Supported Gowin LiteX FPGA flow                                         | `fpga/litex/`                                |
+| **MLK-CU08-KU15P / LiteX**     | Primary: Vivado, MIG DDR4, SD, CM005 Ethernet, RV32/RV64 Linux/netboot  | `fpga/litex/`                                |
 | **MLK-CU07-KU15P / LiteX**     | Vivado, BIOS, MIG DDR4, SDCard, RV32 Linux boot                         | `fpga/litex/`                                |
-| **MLK-CU08-KU15P / LiteX**     | Vivado, BIOS, MIG DDR4, SDCard, CM005 Ethernet, RV32/RV64 Linux/netboot | `fpga/litex/`                                |
+| **Alinx AXAU15 / LiteX**       | Vivado AU15P, auto-detected when that part is on the cable              | `fpga/litex/`                                |
+| **Xilinx VCU118 / LiteX**      | Vivado VU9P, auto-detected when that part is on the cable               | `fpga/litex/`                                |
+| **Tang Mega 138K Pro / LiteX** | Gowin LiteX FPGA flow                                                   | `fpga/litex/`                                |
+| **Gowin Tang Nano 20K**        | Open-toolchain synth + P&R                                              | `fpga/gowin-tang-nano-20k/`, `make fpga-syn` |
+| **OOC partitions**             | Frontend/backend/cache checkpoints, not a board flow                    | `fpga/ooc/README.md`                         |
 
 See [`fpga/litex/README.md`](../fpga/litex/README.md) for the LiteX BIOS + Linux flow.
 
@@ -53,8 +60,8 @@ measurements, and
 | App        | CoreMark, MicroBench, Embench-IoT, busybox, demos            | `app/`, `abstract-machine/app/`                    |
 | User OS    | nanos-lite (simple OS), Linux v6.18 userspace                | `abstract-machine/app/nanos-lite`                  |
 | ABI / libc | riscv-pk (proxy kernel), AM runtime, newlib, glibc           | `app/pk/`, `abstract-machine/`                     |
-| Kernel     | Linux v6.18.50 prebuilt by default; v6.12/v6.18 paths tested | `linux/`, see [linux_kernel.md](./linux_kernel.md) |
-| Firmware   | OpenSBI (v1.8.1)                                             | `linux/opensbi/`                                   |
+| Kernel     | Linux v6.18.51 prebuilt by default (`linux/vars.mk`)         | `linux/`, see [linux_kernel.md](./linux_kernel.md) |
+| Firmware   | OpenSBI v1.8 (in-tree `third_party/.../opensbi`)             | `linux/opensbi/`                                   |
 | Bootrom    | NPC / raptSoC reset vector                                   | `nemu/src/memory/rom/`                             |
 
 ## NPC Memory Map
@@ -77,9 +84,9 @@ Reset vector `PC_INIT` = `0x2000_0000` (MROM).
 
 ## Random Memory-Delay Simulation
 
-Use `make microbench-random-rv32` or `make coremark-random-rv64` with
+Use `make microbench-rv32 SIM_RANDOM_DELAY=31` or `make coremark-rv64 SIM_RANDOM_DELAY=31` with
 `SIM_RANDOM_DELAY=31 SIM_RANDOM_SEED=42` to exercise reproducible AXI memory
-wait states. `cpu-tests-random-rv32` / `cpu-tests-random-rv64` run AM CPU tests
+wait states. `cpu-tests-rv32` / `cpu-tests-rv64` run AM CPU tests
 under the same delay model. These targets use the NPC memory map above.
 
 ## Reference Device Trees

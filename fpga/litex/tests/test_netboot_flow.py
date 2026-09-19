@@ -467,25 +467,6 @@ class NetbootFlowTest(unittest.TestCase):
             os.close(master)
             os.close(slave)
 
-    def test_bios_static_and_dynamic_ip_configuration(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            soc = Path(tmp)
-            header = soc / 'software/include/generated/soc.h'
-            header.parent.mkdir(parents=True)
-            source = soc / 'bios-src/boot.c'
-            source.parent.mkdir()
-            source.write_text('local_ip[4] = {192, 168, 1, 50}; remote_ip[4] = {192, 168, 1, 100};')
-            header.write_text('')
-            self.assertEqual(flow.bios_ip_commands(soc, '192.168.1.100'), [])
-            with self.assertRaisesRegex(RuntimeError, 'Static BIOS'):
-                flow.bios_ip_commands(soc, '192.168.1.101')
-            header.write_text('#define REMOTEIP1 10\n#define REMOTEIP2 0\n#define REMOTEIP3 0\n#define REMOTEIP4 1\n')
-            with self.assertRaisesRegex(RuntimeError, 'Static BIOS'):
-                flow.bios_ip_commands(soc, '192.168.1.100')
-            header.write_text('#define ETH_DYNAMIC_IP\n')
-            self.assertEqual(flow.bios_ip_commands(soc, '192.168.2.100'),
-                             ['eth_local_ip 192.168.2.50', 'eth_remote_ip 192.168.2.100'])
-
     def test_console_colored_prompt_split_across_reads(self):
         port = object.__new__(flow.Console)
         port.pending = ''
@@ -496,44 +477,6 @@ class NetbootFlowTest(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(port.wait(r'litex>\s*', 1), 'litex> ')
         self.assertEqual(port.log.getvalue(), b''.join(chunks))
-
-    def test_autoboot_reader_runs_during_load(self):
-        port = Mock()
-        started, interrupted = threading.Event(), threading.Event()
-        port.port.write.side_effect = lambda data: interrupted.set()
-        def receive(pattern, timeout, callback, cancel):
-            self.assertTrue(started.wait(2))
-            callback('Press Q or ESC to abort boot completely')
-            callback('Press Q or ESC to abort boot completely\nlitex>')
-            return 'litex>'
-        port.wait.side_effect = receive
-        def load():
-            started.set()
-            self.assertTrue(interrupted.wait(2), 'Q must be sent while loader is still running')
-        flow.load_to_bios(port, load)
-        port.port.write.assert_called_once_with(b'Q')
-        port.port.reset_input_buffer.assert_called_once()
-
-    def test_failed_loader_cancels_uart_reader(self):
-        port = Mock()
-        stopped = threading.Event()
-        def receive(pattern, timeout, callback, cancel):
-            self.assertTrue(cancel.wait(2))
-            stopped.set()
-            raise RuntimeError('cancelled')
-        port.wait.side_effect = receive
-        with self.assertRaisesRegex(RuntimeError, 'JTAG failed'):
-            flow.load_to_bios(port, Mock(side_effect=RuntimeError('JTAG failed')))
-        self.assertTrue(stopped.is_set())
-
-    def test_netboot_failure_does_not_wait_for_full_init_timeout(self):
-        port = Mock()
-        for output in ('TFTP failed\r\nlitex> ', 'Kernel panic - not syncing'):
-            port.wait.return_value = output
-            with self.assertRaisesRegex(RuntimeError, 'Netboot returned'):
-                flow.wait_linux_login(port, 2400)
-        port.wait.return_value = 'normal full init\r\nbuildroot login: '
-        flow.wait_linux_login(port, 2400)
 
     def test_no_receipt_blocks_legacy_build(self):
         with tempfile.TemporaryDirectory() as tmp:

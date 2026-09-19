@@ -105,6 +105,8 @@ task automatic init_lsu_inputs(
     lsu_l1d.difftest_skip = 1'b0;
     lsu_l1d.rready = 1'b0;
     lsu_l1d.rretry = 1'b0;
+    lsu_l1d.rmiss = 1'b0;
+    lsu_l1d.miss_wake = 1'b0;
     lsu_l1d.rdata_b = '0;
     lsu_l1d.rready_b = 1'b0;
     lsu_l1d.wready = 1'b0;

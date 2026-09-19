@@ -113,3 +113,11 @@ make opensbi-fpga-rv64-upload
 The image targets run the matching OpenSBI build as needed and write `fpga/litex/build/firmware/linux-fpga/rv32/linux-fpga-opensbi.img` or `fpga/litex/build/firmware/linux-fpga/rv64/linux-fpga-opensbi.img` with stage0 at `0x80000000`, OpenSBI's `fw_payload.bin` staged at `0x80100000`, and the LiteX DTB staged at `0x80800000` by default. Stage0 copies OpenSBI back to `0x80000000`, copies the DTB to `0x83f00000`, then jumps with `a0=0` and `a1=0x83f00000`. Override `LINUX_FPGA_OPENSBI_DTB_OFFSET` if you build a larger custom OpenSBI payload that needs more than the default 8 MiB staging window.
 
 This path uses OpenSBI's standalone `fw_payload.bin`. `fw_dynamic.bin` would need an `fw_dynamic_info` handoff block from stage0, and `fw_jump.bin` needs a defined next-stage address/payload convention, so they are not direct replacements for `fpga-opensbi-upload`.
+
+发行版 netboot bundle 名称包含发行版、Linux 版本、UTC 打包时间和短校验码；现有镜像与清理说明见 [可读 bundle 名称](../fpga/litex/NETBOOT.md#可读的-bundle-名称)。
+
+UART 平台约定：规范 Spike 派生 DTS 与 QEMU virt 均使用 NS16550 IRQ10，NEMU
+Linux presets 显式选择 `CONFIG_SERIAL_PLIC_IRQ=10`。更新后需重新配置/构建 NEMU
+及 ROM/DTB，已有二进制不会自动改变。自定义旧平台需要 IRQ1 时必须显式设置，
+并匹配其专用 DTB。sim/NEMU 的 CU08 LiteUART 地址为 `0xf0001800`；`0xf0001000`
+仅作为旧 egos 兼容 alias，不能据此把实际 FPGA 的 timer0 当作 UART。

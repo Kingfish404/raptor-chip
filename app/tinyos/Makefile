@@ -129,7 +129,7 @@ help: ## Show this help
 		/^# =+$$/ { if (state==0) state=1; else if (state==2) { pending=section; state=0 } else state=0; next } \
 		state==1 && /^# .+/ { section=substr($$0,3); state=2; next } \
 		{ if (state==1) state=0 } \
-		/^[a-zA-Z0-9_-]+:.*## / { \
+		/^[a-zA-Z0-9][a-zA-Z0-9_-]*:.*## / { \
 			if (pending!="") { printf "\n%s:\n", pending; pending="" } \
 			else if (first) printf "\nTargets:\n"; \
 			first=0; \
@@ -224,8 +224,8 @@ egos-ku15p-image: egos-nsim-prepare ## Build egos KU15P RAM-disk image (embedded
 	@test -f "$(EGOS_KU15P_IMAGE)" || { echo "[ERR] Missing $(EGOS_KU15P_IMAGE)"; exit 1; }
 	@sz=$$(stat -c%s "$(EGOS_KU15P_IMAGE)" 2>/dev/null); echo "Built KU15P egos image: $(EGOS_KU15P_IMAGE) ($$sz bytes)"
 
-egos-cli-nsim: egos-sim-image ## Boot egos on NPC/sim [RV32/Sv32]
-	@echo "[egos-cli-nsim] RV32 / Sv32 (egos-2000)"
+_egos-cli-nsim: egos-sim-image ## Boot egos on NPC/sim [RV32/Sv32]
+	@echo "[_egos-cli-nsim] RV32 / Sv32 (egos-2000)"
 	@$(MAKE) $(Q) -C $(APP_HOME)/.. run-rv32 \
 		IMG=$(EGOS_SIM_IMAGE) SDCARD=$(EGOS_SIM_SDCARD) \
 		ARGS="$(ARGS) --serial-lf-to-cr $(SIM_LIMIT_ARGS)"
@@ -234,20 +234,14 @@ egos-cli-nsim: egos-sim-image ## Boot egos on NPC/sim [RV32/Sv32]
 # sim with o2_difftest_defconfig and built the NEMU reference shared object.
 # Bypasses run-rv32 (which would clobber the difftest config) by invoking
 # sim's run target directly.
-egos-cli-nsim-difftest: egos-sim-image ## Boot egos on NPC/sim with NEMU difftest [RV32/Sv32]
-	@echo "[egos-cli-nsim-difftest] RV32 / Sv32 (egos-2000) + NEMU difftest"
-	@$(MAKE) $(Q) -C $(NSIM_HOME) run \
-		IMG=$(EGOS_SIM_IMAGE) SDCARD=$(EGOS_SIM_SDCARD) \
-		ARGS="$(ARGS) --serial-lf-to-cr $(SIM_LIMIT_ARGS)"
-
-egos-cli-nemu: egos-sim-image ## Boot egos on NEMU [RV32/Sv32]
-	@echo "[egos-cli-nemu] RV32 / Sv32 (egos-2000)"
+_egos-cli-nemu: egos-sim-image ## Boot egos on NEMU [RV32/Sv32]
+	@echo "[_egos-cli-nemu] RV32 / Sv32 (egos-2000)"
 	@$(MAKE) $(Q) -C $(APP_HOME)/.. run-nemu32 \
 		NEMU_DEFCONFIG=riscv32_tinyos_defconfig \
 		IMG=$(EGOS_SIM_IMAGE) SDCARD=$(EGOS_SIM_SDCARD) \
 		ARGS="$(ARGS) --serial-lf-to-cr $(NEMU_LIMIT_ARGS)"
 
-egos-cli-qemu: ## Boot egos on QEMU [RV32/Sv32]
+_egos-cli-qemu: ## Boot egos on QEMU [RV32/Sv32]
 	@$(MAKE) $(Q) egos-toolchain-check || exit $$?
 	@$(MAKE) $(Q) -C $(TINYOS_DIR)/egos-2000 qemu \
 		$(if $(QEMU),QEMU=$(QEMU),) \
@@ -258,8 +252,8 @@ egos-cli-qemu: ## Boot egos on QEMU [RV32/Sv32]
 # ============================================================================
 # xv6 — RV64 / Sv39
 # ============================================================================
-xv6-cli-nsim: xv6-nsim-prepare ## Boot xv6-riscv on NPC/sim [RV64/Sv39]
-	$(call xv6-run-body,xv6-cli-nsim,xv6-sim-fs,run-rv64,,$(SIM_LIMIT_ARGS))
+_xv6-cli-nsim: xv6-nsim-prepare ## Boot xv6-riscv on NPC/sim [RV64/Sv39]
+	$(call xv6-run-body,_xv6-cli-nsim,xv6-sim-fs,run-rv64,,$(SIM_LIMIT_ARGS))
 
 xv6-sim-image: xv6-nsim-prepare ## Build xv6 kernel.bin and fs.img without running a simulator
 	@[ -n "$(XV6_OBJCOPY)" ] || { \
@@ -278,31 +272,10 @@ xv6-sim-image: xv6-nsim-prepare ## Build xv6 kernel.bin and fs.img without runni
 # sim with o2_difftest_defconfig (rebuilt with VFLAGS=-DRAPT_RV64) and
 # built the NEMU RV64 reference shared object. Bypasses run-rv64 (which
 # would clobber the difftest config) by invoking sim's run target directly.
-xv6-cli-nsim-difftest: xv6-nsim-prepare ## Boot xv6-riscv on NPC/sim with NEMU difftest [RV64/Sv39]
-	@[ -n "$(XV6_OBJCOPY)" ] || { \
-		echo "[ERR] Cannot find RV64 objcopy for xv6"; \
-		echo "      Minimal Debian/Ubuntu install:"; \
-		echo "        sudo apt update"; \
-		 echo "        sudo apt install -y build-essential gcc-riscv64-unknown-elf"; \
-		echo "      Or override: XV6_OBJCOPY=/path/to/riscv64-unknown-elf-objcopy TOOLPREFIX=/path/to/riscv64-unknown-elf-"; \
-		exit 1; }
-	@$(MAKE) $(Q) -C "$(XV6_SIM_DIR)" kernel/kernel fs.img
-	@$(XV6_OBJCOPY) -O binary "$(XV6_SIM_DIR)/kernel/kernel" "$(XV6_SIM_DIR)/kernel/kernel.bin"
-	@tmp_fs=$$(mktemp "$${TMPDIR:-/tmp}/xv6-sim-fs.XXXXXX"); \
-	cp "$(XV6_SIM_DIR)/fs.img" "$$tmp_fs"; \
-	echo "[xv6-cli-nsim-difftest] RV64 / Sv39 (xv6-riscv) + NEMU difftest"; \
-	echo "[xv6-cli-nsim-difftest] kernel=$(XV6_SIM_DIR)/kernel/kernel.bin"; \
-	echo "[xv6-cli-nsim-difftest] disk copy=$$tmp_fs"; \
-	trap 'rm -f "$$tmp_fs"' EXIT INT TERM; \
-	$(MAKE) $(Q) -C $(NSIM_HOME) run VFLAGS="-DRAPT_RV64" \
-			IMG="$(XV6_SIM_DIR)/kernel/kernel.bin" DISK="$$tmp_fs" \
-		ARGS="$(ARGS) $(SIM_LIMIT_ARGS)"; \
-	rc=$$?; rm -f "$$tmp_fs"; exit $$rc
+_xv6-cli-nemu: xv6-nsim-prepare ## Boot xv6-riscv on NEMU [RV64/Sv39]
+	$(call xv6-run-body,_xv6-cli-nemu,xv6-nemu-fs,run-nemu64,NEMU64_DEFCONFIG=riscv64_tinyos_defconfig,$(NEMU_LIMIT_ARGS))
 
-xv6-cli-nemu: xv6-nsim-prepare ## Boot xv6-riscv on NEMU [RV64/Sv39]
-	$(call xv6-run-body,xv6-cli-nemu,xv6-nemu-fs,run-nemu64,NEMU64_DEFCONFIG=riscv64_tinyos_defconfig,$(NEMU_LIMIT_ARGS))
-
-xv6-cli-qemu: ## Boot xv6-riscv on QEMU [RV64/Sv39]
+_xv6-cli-qemu: ## Boot xv6-riscv on QEMU [RV64/Sv39]
 	@xv6_dir="$(TINYOS_DIR)/xv6-riscv"; xv6_fs="$$xv6_dir/fs.img"; \
 	if lsof "$$xv6_fs" >/dev/null 2>&1; then \
 		tmp_fs=$$(mktemp "$${TMPDIR:-/tmp}/xv6-fs.XXXXXX"); \
@@ -321,15 +294,15 @@ xv6-cli-qemu: ## Boot xv6-riscv on QEMU [RV64/Sv39]
 # ============================================================================
 cli-nsim: ## Boot OS on NPC/sim — OS=egos|xv6 {ARGS,MAX_INST,TIMEOUT}
 	@[ -n "$(OS)" ] || { echo "[ERR] Set OS=egos|xv6"; exit 1; }
-	@$(MAKE) $(Q) $(OS)-$@ ARGS="$(ARGS)" MAX_INST="$(MAX_INST)" TIMEOUT="$(TIMEOUT)"
+	@$(MAKE) $(Q) _$(OS)-$@ ARGS="$(ARGS)" MAX_INST="$(MAX_INST)" TIMEOUT="$(TIMEOUT)"
 
 cli-nemu: ## Boot OS on NEMU — OS=egos|xv6 {ARGS,MAX_INST}
 	@[ -n "$(OS)" ] || { echo "[ERR] Set OS=egos|xv6"; exit 1; }
-	@$(MAKE) $(Q) $(OS)-$@ ARGS="$(ARGS)" MAX_INST="$(MAX_INST)"
+	@$(MAKE) $(Q) _$(OS)-$@ ARGS="$(ARGS)" MAX_INST="$(MAX_INST)"
 
 cli-qemu: ## Boot OS on QEMU — OS=egos|xv6 {QEMU}
 	@[ -n "$(OS)" ] || { echo "[ERR] Set OS=egos|xv6"; exit 1; }
-	@$(MAKE) $(Q) $(OS)-$@ $(if $(QEMU),QEMU=$(QEMU),)
+	@$(MAKE) $(Q) _$(OS)-$@ $(if $(QEMU),QEMU=$(QEMU),)
 
 clean: ## Clean tinyos build artifacts
 	rm -rf $(SIM_SRC_DIR)
@@ -337,6 +310,6 @@ clean: ## Clean tinyos build artifacts
 .PHONY: help sync \
 	egos-clone xv6-clone \
 	egos-toolchain-check egos-nsim-prepare xv6-nsim-prepare egos-sim-image \
-	egos-cli-nsim egos-cli-nsim-difftest egos-cli-nemu egos-cli-qemu \
-	xv6-sim-image xv6-cli-nsim xv6-cli-nsim-difftest xv6-cli-nemu xv6-cli-qemu \
+	_egos-cli-nsim  _egos-cli-nemu _egos-cli-qemu \
+	xv6-sim-image _xv6-cli-nsim  _xv6-cli-nemu _xv6-cli-qemu \
 	cli-nsim cli-nemu cli-qemu clean

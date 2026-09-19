@@ -162,8 +162,17 @@ class BuildIsolationTest(unittest.TestCase):
             (software / "libc/Makefile").write_text("# original libc\n")
             (software / "bios").mkdir()
             (software / "bios/boot.c").write_text('void netboot(int nb_params, char **params)\n{\n}\n')
+            (software / "bios/main.c").write_text(
+                '#ifndef CONFIG_BIOS_NO_BOOT\nvoid boot_sequence(void) {}\n#endif\n'
+                'int main(void) {\n#ifndef CONFIG_BIOS_NO_BOOT\nboot_sequence();\n#endif\n}\n')
             first = prepare(source, root / "rv32")
             second = prepare(source, root / "rv64")
+            for private in (first, second):
+                main = (private / "bios/main.c").read_text()
+                self.assertNotIn('#ifndef CONFIG_BIOS_NO_BOOT', main)
+                self.assertEqual(main.count('#if 0 /* Raptor: boot only'), 2)
+            self.assertEqual((software / "bios/main.c").read_text().count(
+                '#ifndef CONFIG_BIOS_NO_BOOT'), 2)
             (first / "common.mak").write_text("rv32 only")
             self.assertEqual((software / "common.mak").read_text(), "# user edit\n# Toolchain options\n")
             self.assertNotEqual((first / "common.mak").read_text(), (second / "common.mak").read_text())

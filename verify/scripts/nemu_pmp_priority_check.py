@@ -10,6 +10,8 @@ import tempfile
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", type=Path)
+    parser.add_argument("--test-source", type=Path,
+                        help="Alternative host harness (e.g. PMP CSR capacity checks)")
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[2]
     for xlen in (32, 64):
@@ -26,7 +28,8 @@ def main():
                        "-I" + str(root / "nemu/src/isa/riscv/include"),
                        "-I" + str(root / "nemu/src/isa/riscv/system"),
                        str(args.source or root / "nemu/src/isa/riscv/system/pmp.c"),
-                       str(root / "app/tests/host/nemu_pmp_priority.c"), "-o", str(work / "test")]
+                       str(args.test_source or root / "app/tests/host/nemu_pmp_priority.c"),
+                       "-o", str(work / "test")]
             subprocess.run(command, check=True)
             subprocess.run([str(work / "test")], check=True)
     return 0

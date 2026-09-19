@@ -1504,7 +1504,8 @@ module tb_lsu_sq_random;
   int model_cmt;
   int model_tail;
   int next_dest;
-  bit drain_pending;
+  bit previous_accepted;
+  int cover_back_to_back=0;
 
   int cover_wrap;
   int cover_full;
@@ -1563,15 +1564,13 @@ module tb_lsu_sq_random;
       model_cmt = 0;
       model_tail = 0;
       next_dest = 1;
-      drain_pending = 1'b0;
+      previous_accepted = 1'b0;
     end
   endtask
 
   task automatic check_store_output;
     begin
-      if (drain_pending) begin
-        check(!lsu_l1d.wvalid, "SQ presented a second store while retiring an accepted store");
-      end else if (model_valid[model_head] && model_committed[model_head]) begin
+      if (model_valid[model_head] && model_committed[model_head]) begin
         check(lsu_l1d.wvalid, "committed SQ head was not presented to L1D");
         check(lsu_l1d.waddr == model_paddr[model_head], "SQ drain address/order mismatch");
         check(lsu_l1d.wdata == model_data[model_head], "SQ drain data mismatch");
@@ -1739,7 +1738,7 @@ module tb_lsu_sq_random;
       check_store_output();
       accepted_store = lsu_l1d.wvalid && lsu_l1d.wready;
 
-      do_flush = !drain_pending && ($urandom_range(0, 63) == 0);
+      do_flush = ($urandom_range(0, 63) == 0);
       do_alloc = !do_flush && !model_valid[model_tail] && ($urandom_range(0, 2) != 0);
       do_commit = !do_flush && model_valid[model_cmt] && !model_committed[model_cmt]
                   && ($urandom_range(0, 2) != 0);
@@ -1778,7 +1777,7 @@ module tb_lsu_sq_random;
       if ((cycle & 3) == 0) drive_load_probe($urandom_range(0, 4));
       else #1;
 
-      if (do_alloc && do_commit && (drain_pending || accepted_store)) cover_concurrent++;
+      if (do_alloc && do_commit && accepted_store) cover_concurrent++;
       if (valid_count() == SQ_SIZE) cover_full++;
 
       old_tail = model_tail;
@@ -1813,19 +1812,20 @@ module tb_lsu_sq_random;
         end
       end
 
-      if (drain_pending) begin
+      if (accepted_store) begin
         model_valid[old_head] = 1'b0;
         model_committed[old_head] = 1'b0;
         model_head = next_index(old_head);
         drain_count++;
       end
-      drain_pending = accepted_store;
+      if (previous_accepted && accepted_store) cover_back_to_back++;
+      previous_accepted = accepted_store;
     end
 
     exu_lsu.rvalid = 1'b0;
     csr_bcast.dmmu_en = 1'b0;
     cmu_bcast.flush_pipe = 1'b0;
-    while (valid_count() != 0 || drain_pending) begin
+    while (valid_count() != 0) begin
       @(negedge clock);
       exu_ioq_bcast.valid = 1'b0;
       exu_ioq_bcast.wen = 1'b0;
@@ -1849,15 +1849,17 @@ module tb_lsu_sq_random;
         model_committed[old_cmt] = 1'b1;
         model_cmt = next_index(old_cmt);
       end
-      if (drain_pending) begin
+      if (accepted_store) begin
         model_valid[old_head] = 1'b0;
         model_committed[old_head] = 1'b0;
         model_head = next_index(old_head);
         drain_count++;
       end
-      drain_pending = accepted_store;
+      if (previous_accepted && accepted_store) cover_back_to_back++;
+      previous_accepted = accepted_store;
     end
 
+    check(cover_back_to_back > 0, "no back-to-back store responses exercised");
     check(cover_wrap > 20, "insufficient SQ wrap coverage");
     check(cover_full > 0, "SQ full state was not covered");
     check(cover_flush > 20, "insufficient flush coverage");

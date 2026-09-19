@@ -147,6 +147,8 @@ module tb_bus_read_ownership;
     l1d_bus.rpbmt = 2'b00;
     l1d_bus.wpbmt = 2'b00;
     l1d_bus.ar_ptw = 1'b0;
+    l1d_bus.ar_mshr = 1'b0;
+    l1d_bus.ar_mshr_id = '0;
     l1d_bus.awvalid = 1'b0;
     l1d_bus.awaddr = '0;
     l1d_bus.wvalid = 1'b0;
@@ -384,6 +386,32 @@ module tb_bus_read_ownership;
     reset = 1;
     l1i_bus.arvalid = 0;
     tick(2);
+    if (`RAPT_L1D_MSHRS > 0) begin
+      @(negedge clock); reset = 0; mem.rd_req_ready = 0;
+      l1d_bus.ar_mshr = 1;
+      l1d_bus.ar_mshr_id = 0;
+      submit_l1d(XLEN'('h80008000), 0);
+      l1d_bus.ar_mshr_id = 1;
+      submit_l1d(XLEN'('h80009000), 0);
+      mem.rd_req_ready = 1;
+      expect_issue(4'd8, XLEN'('h80008000));
+      expect_issue(4'd9, XLEN'('h80009000));
+      @(negedge clock); mem.rd_req_ready = 0;
+      // A flush cannot drop issued bus owners; responses may return out of order.
+      cmu_bcast.flush_pipe = 1;
+      tick(1);
+      cmu_bcast.flush_pipe = 0;
+      drive_response(4'd9, XLEN'('h9999));
+      check(l1d_bus.rvalid && l1d_bus.r_mshr && l1d_bus.r_mshr_id == 1,
+            "MSHR 1 response ownership lost");
+      finish_response();
+      check(!l1d_bus.idle, "MSHR 0 still outstanding");
+      drive_response(4'd8, XLEN'('h8888));
+      check(l1d_bus.rvalid && l1d_bus.r_mshr && l1d_bus.r_mshr_id == 0,
+            "MSHR 0 response ownership lost");
+      finish_response();
+      check(l1d_bus.idle, "MSHR bus did not drain");
+    end
     $display("PASS: bus read ownership and ID-interleaving checks passed");
     $finish;
   end

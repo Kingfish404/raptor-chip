@@ -14,6 +14,11 @@ from cpu.raptor.core import Raptor
 
 
 class DDRPMATest(unittest.TestCase):
+    def test_mig_accepts_narrow_litex_transfers(self):
+        source = (LITEX / "scripts/ku15p_ddr4_mig.tcl").read_text()
+        self.assertIn("CONFIG.C0.DDR4_AxiDataWidth {512}", source)
+        self.assertIn("CONFIG.C0.DDR4_AxiNarrowBurst {true}", source)
+
     def test_pack_override(self):
         for variant in ("linux32", "linux64"):
             with self.subTest(variant=variant), patch.dict(os.environ, {

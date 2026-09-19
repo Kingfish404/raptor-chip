@@ -630,7 +630,8 @@ module tb_ioq_pending_lock;
     end
   endtask
 
-  task automatic drive_load(input logic [31:0] addr, input logic [4:0] dest, input logic [5:0] prd);
+  task automatic drive_load(input logic [31:0] addr, input logic [4:0] dest,
+                            input logic [5:0] prd, input logic [31:0] offset = '0);
     begin
       dispatch[0].uop = '0;
       dispatch[0].uop.pc = 32'h2000_0100 + {25'h0, dest, 2'b00};
@@ -639,8 +640,8 @@ module tb_ioq_pending_lock;
       dispatch[0].uop.execute.memory.store = 1'b0;
       dispatch[0].uop.execute.int_op.alu = `RAPT_ALU_LW__;
       dispatch[0].uop.rd = dest;
-      dispatch[0].uop.imm = '0;
-      dispatch[0].op1 = addr;
+      dispatch[0].uop.imm = offset;
+      dispatch[0].op1 = addr - offset;
       dispatch[0].op2 = '0;
       dispatch[0].pr1 = '0;
       dispatch[0].pr2 = '0;
@@ -858,7 +859,9 @@ module tb_ioq_pending_lock;
     tick(1);
     expect_pending_addr(32'hc000_1000);
 
-    drive_load(32'hc000_2000, 5'd1, 6'd2);
+    // Nonzero offsets require the registered adder stage. Zero-offset loads
+    // deliberately use the already-registered operand directly.
+    drive_load(32'hc000_2000, 5'd1, 6'd2, 32'd4);
 `ifdef RAPT_LSU_HUM
     #1;
     check(dut.ioq_valid[1], "second MMU load was not resident in IOQ entry 1");

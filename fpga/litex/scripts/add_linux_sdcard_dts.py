@@ -3,6 +3,9 @@
 import argparse
 import json
 from pathlib import Path
+import shutil
+import subprocess
+import tempfile
 
 
 def sdcard_node(csr):
@@ -66,6 +69,60 @@ def sdcard_node(csr):
     }};
 }};
 '''
+
+
+def ensure_sdcard_dtb(source, csr, output):
+    """Add MMC to a legacy DTB, or validate the hardware-generated description.
+
+    Compare compiled properties so formatting and phandle allocation do not
+    matter. Unknown resources/properties fail closed instead of being replaced.
+    The source DTB is never modified (output must be a separate path).
+    """
+    if source.resolve() == output.resolve():
+        raise ValueError('SD DTB output must differ from input')
+
+    def run(*args):
+        return subprocess.check_output([str(arg) for arg in args], stderr=subprocess.PIPE)
+
+    def tree(path, node='/'):
+        result = {node: {name: run('fdtget', '-t', 'bx', path, node, name).split()
+                         for name in run('fdtget', '-p', path, node).decode().split()}}
+        for child in run('fdtget', '-l', path, node).decode().split():
+            result.update(tree(path, node.rstrip('/') + '/' + child))
+        return result
+
+    overlay = sdcard_node(csr)  # Validate the CSR layout even for existing MMC.
+    with tempfile.TemporaryDirectory(prefix='raptor-chip-sd-dtb-', dir='/tmp') as tmp:
+        work = Path(tmp)
+        dts, expected = work / 'expected.dts', work / 'expected.dtb'
+        dts.write_text('/dts-v1/; / { #address-cells = <1>; #size-cells = <1>; '
+                       'soc { #address-cells = <1>; #size-cells = <1>; }; };' + overlay)
+        run('dtc', '-q', '-I', 'dts', '-O', 'dtb', '-o', expected, dts)
+        actual_tree, expected_tree = tree(source), tree(expected)
+        mmc = '/soc/mmc@' + format(csr['csr_registers']['sdcard_phy_card_detect']['addr'], 'x')
+        compatible = expected_tree[mmc]['compatible']
+        existing = [node for node, props in actual_tree.items() if props.get('compatible') == compatible]
+        if not existing:
+            # Do not silently merge with a conflicting node at the expected paths.
+            if any(node in actual_tree for node in (mmc, '/sd-reference-clock', '/sd-regulator')):
+                raise ValueError('conflicting SD nodes in base DTB')
+            dts.write_text(run('dtc', '-q', '-I', 'dtb', '-O', 'dts', source).decode() + overlay)
+            run('dtc', '-q', '-I', 'dts', '-O', 'dtb', '-o', output, dts)
+            return
+        if existing != [mmc]:
+            raise ValueError('MMC nodes do not match CSR map')
+        references = {'clocks': '/sd-reference-clock', 'vmmc-supply': '/sd-regulator'}
+        for prop, provider in references.items():
+            handle = actual_tree.get(provider, {}).get('phandle')
+            if not handle or actual_tree[mmc].get(prop) != handle:
+                raise ValueError('MMC provider mismatch: ' + prop)
+        for node in (mmc, *references.values()):
+            ignored = {'phandle', 'linux,phandle'} | (set(references) if node == mmc else set())
+            actual = {k: v for k, v in actual_tree[node].items() if k not in ignored}
+            wanted = {k: v for k, v in expected_tree[node].items() if k not in ignored}
+            if actual != wanted or run('fdtget', '-l', source, node).strip():
+                raise ValueError('MMC description does not match CSR policy: ' + node)
+        shutil.copyfile(source, output)
 
 
 if __name__ == '__main__':

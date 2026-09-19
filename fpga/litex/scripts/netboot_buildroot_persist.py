@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Add an external runtime overlay to a verified RV32/RV64 Buildroot release."""
+from netboot_names import name_bundle
+
 import argparse
 import gzip
 import hashlib
@@ -83,8 +85,8 @@ def build(package, soc, csr, runtime, output, work, data_selector='LABEL=RAPTOR_
               'rootfs_persistent': False, 'persistent_directories': ['/data', '/home', '/root'] + (['/var/log'] if persist_logs else []),
               'data_selector': data_selector, 'bootargs': bootargs,
               'files': {name: sha(files / name) for name in addresses}}
-    identity = hashlib.sha256(json.dumps(record, sort_keys=True).encode()).hexdigest()[:20]
-    relative = Path(f'raptor-netboot/rv{bits}/buildroot-{identity}')
+    record['kernel_version'] = manifest['kernel_version']
+    relative = Path(name_bundle(record))
     record['tftp_path'] = str(relative)
     boot = {str(relative / name): hex(address) for name, address in addresses.items()}
     boot['addr'] = hex(addresses['stage0.bin'])

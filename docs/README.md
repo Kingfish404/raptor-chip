@@ -1,8 +1,15 @@
+---
+title: Overview
+permalink: /overview.html
+---
+
 # Raptor — RISC-V Processor Core
 
 [![Benchmark](https://github.com/Kingfish404/raptor-chip/actions/workflows/benchmark.yaml/badge.svg)](https://github.com/Kingfish404/raptor-chip/actions/workflows/benchmark.yaml) [![App](https://github.com/Kingfish404/raptor-chip/actions/workflows/app.yaml/badge.svg)](https://github.com/Kingfish404/raptor-chip/actions/workflows/app.yaml) [![STA](https://github.com/Kingfish404/raptor-chip/actions/workflows/sta.yaml/badge.svg)](https://github.com/Kingfish404/raptor-chip/actions/workflows/sta.yaml)
 
-Raptor is a parameterized superscalar, out-of-order RISC-V core with register renaming, a reorder buffer, reservation stations, branch prediction, and Sv32/Sv39 virtual memory support for RV32/RV64. The RTL is written in hand-written SystemVerilog; Chisel is used only to generate instruction decoders.
+The published homepage is an interactive product surface: a 2D pipeline block diagram extracted from the SystemVerilog tree, plus a documentation shell whose `make` commands come from the repository Makefile. This page is the written overview.
+
+Raptor is a parameterized superscalar, out-of-order RISC-V core with register renaming, a reorder buffer, reservation stations, branch prediction, and Sv32/Sv39 virtual memory support for RV32/RV64.
 
 The repository also bundles the NEMU software ISS (used as a difftest reference), a Verilator-based simulator (NPC), an AbstractMachine runtime, Linux kernel build scripts, and FPGA integration (Gowin Tang boards and Xilinx KU15P through LiteX).
 
@@ -13,16 +20,19 @@ Repository: <https://github.com/Kingfish404/raptor-chip>
 | Item                 | Value                                                                                                   |
 | -------------------- | ------------------------------------------------------------------------------------------------------- |
 | ISA                  | `rv32/64imafdc_zba_zbb_zbs_zfhmin_zicbom_zicbop_zicboz_zicntr_zicond_zicsr_zifencei_zihintntl_zihintpause_zihpm_zimop_zca_zcb_zcmop` |
+| RV64 extras          | Zkt, Svinval, Svpbmt on the default RV64 / RVA22S64 path                                                |
 | Privilege modes      | M, S, U                                                                                                 |
 | MMU                  | Sv32 (RV32) / Sv39 (RV64) / Bare                                                                        |
+| PMP                  | 8 usable entries (TOR / NA4 / NAPOT); 16 CSR slots, upper eight read-only zero                          |
 | Interrupts           | CLINT (`mtime`, `mtimecmp`, `msip`) + PLIC (31 sources, M/S contexts)                                   |
 | Ordered widths       | Decode 2 / Rename 2 / Dispatch 2 / Commit 2 by default; independently parameterized                    |
-| Integer execution    | 2 physical integer issue/ALU ports by default; count and CSR/system-capable port independently parameterized        |
-| ROB / RS / IOQ / SQ  | 32 / 8 / 8 / 16                                                                                         |
-| Register state       | 128-entry renamed integer PRF + separate 32 x 64-bit architectural FPR bank                            |
-| BPU                  | TAGE direction predictor + 2-way BTB + 4-entry RSB                                                      |
-| L1I / L1D            | default RV32/RV64: 8 KiB 4-way L1I / 8 KiB 4-way write-through L1D, banked SRAM, 64 B lines              |
-| L2                   | Optional 16 KiB direct-mapped unified cache; default config disables it as passthrough                  |
+| Integer execution    | 2 physical integer issue/ALU ports by default; CSR/system on port 0                                     |
+| Queues               | ROB 32, ALQ 8, BRQ 4, MDQ 4, FPQ 4, IOQ 8, unified SQ 16                                               |
+| Register state       | 64-entry integer PRF (including 32 architectural mappings) + 32 × 64-bit FPR bank                        |
+| Writeback            | CDB ×5 (integer ports + branch + memory + MUL/DIV)                                                      |
+| BPU                  | TAGE direction predictor + 2-way BTB (128) + 4-entry RSB                                                |
+| L1I / L1D            | 16 KiB 4-way each (64 sets × 64 B × 4), banked SRAM; L1D write-through                                    |
+| L2                   | Optional 16 KiB direct-mapped; default preset leaves the stage as passthrough                           |
 | Bus                  | AXI4, XLEN-bit data/addr, 4-bit ID; up to 8 reads, one single-beat write                                |
 | Debug                | RISC-V Debug Module / JTAG DTM bring-up ports at cluster top                                            |
 | Verification         | Difftest against NEMU; RVFI/riscv-formal; SVA                                                           |
@@ -31,7 +41,7 @@ See [Microarchitecture](./uarch.md) for the complete pipeline description.
 
 ## Performance (Verilator, RV32EM, bare-metal)
 
-See [PROFILE](./PROFILE.md) and [Performance Iterations](./perf-iterations.md) for detailed numbers and the change history.
+See [Performance Iterations](./perf-iterations.md) for the recorded IPC history of the current two-wide configuration. [PROFILE](./PROFILE.md) is a legacy archive and does not describe the default RTL.
 
 ## Verification
 
@@ -58,7 +68,7 @@ See [PROFILE](./PROFILE.md) and [Performance Iterations](./perf-iterations.md) f
 raptor-chip/
 ├── Makefile              top-level driver
 ├── env.sh                environment variables (auto-sourced by Makefile)
-├── hdl/                   hand-written SystemVerilog RTL
+├── hdl/                   SystemVerilog RTL
 │   ├── chisel/            Chisel decoder generator
 │   ├── rapt.sv           cluster-level top (core + CLINT + PLIC + router + debug)
 │   ├── rapt_core.sv      single-hart CPU body

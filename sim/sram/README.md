@@ -43,10 +43,10 @@ make -C sim/sram setup
 make -C sim/sram all PLATFORM=sky130
 
 # 3. run STA with real SRAM macros in the loop
-make -C sim sta-sram STA_PLATFORM=sky130hd CLK_FREQ_MHZ=50
+make -C sim sta MEMORY=sram STA_PLATFORM=sky130hd CLK_FREQ_MHZ=50
 ```
 
-The `sta-sram` target defines `RAPT_USE_SRAM_MACRO`, so [rapt_sram_1rw.sv](../../hdl/memory/rapt_sram_1rw.sv) instantiates the OpenRAM blackbox declared in [wrappers/rapt_sram_blackbox.v](wrappers/rapt_sram_blackbox.v) instead of the flop array. Yosys then leaves the macros as blackboxes; OpenSTA picks up the OpenRAM-produced `.lib` files and reports real cache timing.
+The `sta MEMORY=sram` target defines `RAPT_USE_SRAM_MACRO`, so [rapt_sram_1rw.sv](../../hdl/memory/rapt_sram_1rw.sv) instantiates the OpenRAM blackbox declared in [wrappers/rapt_sram_blackbox.v](wrappers/rapt_sram_blackbox.v) instead of the flop array. Yosys then leaves the macros as blackboxes; OpenSTA picks up the OpenRAM-produced `.lib` files and reports real cache timing.
 
 With `RAPT_USE_SRAM_MACRO`, unregistered shapes intentionally fail elaboration through `rapt_unsupported_sram_shape`; add the matching macro contract rather than hiding the error with another blackbox. Without this define, the wrapper uses its synchronous behavioral model. Generated placeholder Liberty files allow flow checks but do not constitute characterized SRAM timing.
 

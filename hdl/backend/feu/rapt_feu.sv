@@ -40,18 +40,28 @@ module rapt_feu #(
   logic execute_occupied;
   logic fpq_issue_enable;
   logic [63:0] fp_operand_a, fp_operand_b, fp_operand_c;
-  rapt_execute_stage #(.IssueT(IssueT), .ROB_SIZE(ROB_SIZE)) execute_stage (
-      .clock, .reset, .flush(cmu_bcast.flush_pipe),
-      .cancel_valid, .cancel_head, .cancel_owner,
-      .selected(fp_issue[0]), .execute(iss), .occupied(execute_occupied)
+  rapt_execute_stage #(
+      .IssueT(IssueT),
+      .ROB_SIZE(ROB_SIZE)
+  ) execute_stage (
+      .clock,
+      .reset,
+      .flush(cmu_bcast.flush_pipe),
+      .cancel_valid,
+      .cancel_head,
+      .cancel_owner,
+      .selected(fp_issue[0]),
+      .execute(iss),
+      .occupied(execute_occupied)
   );
   // FPR addresses come from the selected packet; data and identity cross
   // the same boundary, before any floating-point arithmetic.
-  always_ff @(posedge clock) if (fp_issue[0].valid) begin
-    fp_operand_a <= fpr.alu_rdata_a;
-    fp_operand_b <= fpr.alu_rdata_b;
-    fp_operand_c <= fpr.alu_rdata_c;
-  end
+  always_ff @(posedge clock)
+    if (fp_issue[0].valid) begin
+      fp_operand_a <= fpr.alu_rdata_a;
+      fp_operand_b <= fpr.alu_rdata_b;
+      fp_operand_c <= fpr.alu_rdata_c;
+    end
   assign fpq_issue_enable = issue_enable && completion_ready;
   logic [$clog2(FPQ_SIZE):0] fpq_occ_unused;
   logic pmu_fpq_full_unused;

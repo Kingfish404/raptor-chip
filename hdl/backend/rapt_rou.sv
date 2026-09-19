@@ -1255,7 +1255,9 @@ endmodule
 module rapt_operand_stage #(
     parameter int Width = rapt_pkg::RenameWidth
 ) (
-    input logic clock, reset, flush,
+    input logic clock,
+    reset,
+    flush,
     rnu_rou_if.slave upstream,
     rnu_rou_if.master downstream
 );
@@ -1279,22 +1281,24 @@ module rapt_operand_stage #(
     consumed = 0;
     accepted = 0;
     for (int s = 0; s < Width; s++)
-      if (s == consumed && downstream.valid[s] && downstream.ready[s]) consumed++;
+    if (s == consumed && downstream.valid[s] && downstream.ready[s]) consumed++;
     for (int s = 0; s < Width; s++)
-      if (s == accepted && upstream.valid[s] && upstream.ready[s]) accepted++;
+    if (s == accepted && upstream.valid[s] && upstream.ready[s]) accepted++;
   end
   always_ff @(posedge clock) begin
     if (reset || flush) count <= '0;
     else begin
       count <= CountBits'(int'(count) - consumed + accepted);
       if (consumed == int'(count)) begin
-        for (int s = 0; s < Width; s++) if (s < accepted) begin
+        for (int s = 0; s < Width; s++)
+        if (s < accepted) begin
           slot_q[s] <= upstream.slot[s];
           checkpoint_valid_q[s] <= upstream.checkpoint_valid[s];
           checkpoint_q[s] <= upstream.checkpoint[s];
         end
       end else if (consumed != 0) begin
-        for (int s = 0; s < Width; s++) if (s + consumed < int'(count)) begin
+        for (int s = 0; s < Width; s++)
+        if (s + consumed < int'(count)) begin
           slot_q[s] <= slot_q[s + consumed];
           checkpoint_valid_q[s] <= checkpoint_valid_q[s + consumed];
           checkpoint_q[s] <= checkpoint_q[s + consumed];

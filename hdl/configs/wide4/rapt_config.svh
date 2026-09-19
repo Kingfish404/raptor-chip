@@ -15,8 +15,8 @@
  * (Decode/Rename/Dispatch/Commit 4/4/4/4 elaborated and NEMU-diffed with
  * execution resources unchanged).
  *
- * ROB stays 32 and PHY 128: RTL requires PHY >= 32 arch + ROB in-flight
- * writers (power of two), so 4-wide does not need a wider PRF here.
+ * ROB stays 32; PHY remains 128 (default now uses 64). The larger free
+ * pool also covers renamed writers buffered before ROB allocation.
  */
 /**
  * Architecture (arch) Parameters

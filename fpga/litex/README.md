@@ -36,7 +36,7 @@ make fpga-console
 
 ## FPGA Auto-Detection
 
-For FPGA targets, the Makefile asks Vivado Hardware Manager for attached Xilinx device parts and maps a recognized part to `FPGA_BOARD`. An attached `xcau15p` selects `alinx_axau15`; an attached `xcvu9p` selects `xilinx_vcu118`. The `xcku15p` part is shared by `mlk_cu08_ku15p` and `mlk_cu07_ku15p`, so builds require an explicit board selection to avoid programming the wrong pinout. An explicit `FPGA_BOARD=...` always wins. If no supported Xilinx device is found, the existing profile default is used. Set `FPGA_AUTO_DETECT=0` to skip probing, and run `make fpga-info` to refresh and inspect the connected FPGA count and target details. Detection is cached in `build/.fpga_detect_parts` and related `.fpga_detect_*` files, so later commands do not restart Vivado. Use `FPGA_DETECT_REFRESH=1` on any FPGA command when the connected board has changed. Commands that only use the already-loaded image, such as `make fpga-console` and `make fpga-upload`, do not require `FPGA_BOARD`; set `UART_PORT` when automatic UART selection is ambiguous. Build, load, flash, and timing-gate commands still require an explicit board when multiple boards share the same FPGA part.
+For FPGA targets, the Makefile asks Vivado Hardware Manager for attached Xilinx device parts and maps a recognized part to `FPGA_BOARD`. An attached `xcau15p` selects `alinx_axau15`; an attached `xcvu9p` selects `xilinx_vcu118`. The `xcku15p` part is shared by `mlk_cu08_ku15p` and `mlk_cu07_ku15p`, so builds require an explicit board selection to avoid programming the wrong pinout. An explicit `FPGA_BOARD=...` always wins. If no supported Xilinx device is found, the existing profile default is used. Set `FPGA_AUTO_DETECT=0` to skip probing, and run `make fpga-detect` to refresh and inspect the connected FPGA count and target details. Detection is cached in `build/.fpga_detect_parts` and related `.fpga_detect_*` files, so later commands do not restart Vivado. Use `FPGA_DETECT_REFRESH=1` on any FPGA command when the connected board has changed. Commands that only use the already-loaded image, such as `make fpga-console` and `make fpga-upload`, do not require `FPGA_BOARD`; set `UART_PORT` when automatic UART selection is ambiguous. Build, load, flash, and timing-gate commands still require an explicit board when multiple boards share the same FPGA part.
 
 Vivado load and flash scripts require exactly one JTAG device matching the board's registered part. They never fall back to the first device in the chain, so a KU15P bitstream cannot accidentally be assigned to an AU15P.
 
@@ -46,9 +46,9 @@ Vivado load and flash scripts require exactly one JTAG device matching the board
 
 For **LiteX BIOS TFTP network boot** (without replacing the SD card), see [netboot preparation](NETBOOT.md). Its standalone `netboot.mk` checks/packages finished firmware without parsing the FPGA Makefile or touching the board; TFTP service activation and board acceptance remain separate steps.
 
-For the opt-in CU08 RV64 Buildroot + DHCP + SD automatic-boot profile, see [RV64 network preparation](RV64-NETWORK.md). Its read-only preflight does not start a build or touch the board; existing RV32 defaults are unchanged.
+For the opt-in CU08 RV64 Buildroot + DHCP + SD manual-boot profile, see [RV64 network preparation](RV64-NETWORK.md). Its read-only preflight does not start a build or touch the board; existing RV32 defaults are unchanged.
 
-For the opt-in RV32 gigabit profile, run `scripts/rv32_network.py check` with the LiteX venv Python, then `scripts/rv32_network.py build`. It uses CU08 FMC_C/ETHA, default/50 MHz, MIG, SD autoboot and a validated RV32 Buildroot package in the separate `build/rv32-network` directory. See [FMC_C integration guide](CM005-FMC-C.md); preflight success is not routed timing or board validation. Neither named profile changes generic defaults.
+For the opt-in RV32 gigabit profile, run `scripts/rv32_network.py check` with the LiteX venv Python, then `scripts/rv32_network.py build`. It uses CU08 FMC_C/ETHA, default/50 MHz, MIG, manual SD boot and a validated RV32 Buildroot package in the separate `build/rv32-network` directory. See [FMC_C integration guide](CM005-FMC-C.md); preflight success is not routed timing or board validation. Neither named profile changes generic defaults.
 
 CU08 defaults to the short-edge **FMC_C/ETHA** connector; CU07 defaults to FMCA/ETHA. Both require 1.8 V I/O power (check the CU08 adjustable-bank supply before use). The CU08 C mapping is checked against baseboard schematic sheet 7: ETHA RX clock lands on L19, a non-global-clock input. The receiver samples RX_CLK, RXD and RX_CTL as data using six ISERDESE3 lanes at 1.25 GS/s (625 MHz DDR, 156.25 MHz word processing). It does not route L19 as an FPGA clock or use `CLOCK_DEDICATED_ROUTE FALSE`. RX_CLK has a calibrated 460 ps extra input delay; the decoder selects the preceding data sample and recovers RX_ER. Sampling-clock root and delay-group constraints select the buffer output pins; the original divided-clock net name can disappear during synthesis. The first-stage inputs are asynchronous: routed path budgets and a separate `cm005_aperture.rpt` sampling-window gate replace the direct-clock RX checks. Core/TX timing checks remain enabled. Fresh full-SoC STA and board traffic validation are still required; peripheral tests do not establish either. See [FMC_C integration and validation](CM005-FMC-C.md) for the sampling bounds and required board-level checks. The old FMCA/ETHA mapping remains selectable with `FMC_SLOT=a`. Ethernet defaults to fixed **1000 Mb/s full duplex**, with a 125 MHz RGMII clock:
 
@@ -74,7 +74,7 @@ make fpga-netboot-rv64-build
 make fpga-netboot-rv64-load
 ```
 
-Run load only after a successful build and when the board is available. This profile fixes CU08 and 50 MHz, defaults to `RAPT_CONFIG=default`, and supports other presets through e.g. `RAPT_CONFIG=small`. It uses MIG DDR, SD autoboot, CM005 FMC_C/ETHA gigabit, full Linux initialization, Vivado 8 threads and Explore routing. DTB offset/address are `0x04000000`/`0x83f00000`. Both targets use the same parameters; load requires the matching build stamp and an existing, passing timing report. It does not rebuild or program flash.
+Run load only after a successful build and when the board is available. This profile fixes CU08 and 50 MHz, defaults to `RAPT_CONFIG=default`, and supports other presets through e.g. `RAPT_CONFIG=small`. It uses MIG DDR, manual SD boot, CM005 FMC_C/ETHA gigabit, full Linux initialization, Vivado 8 threads and Explore routing. DTB offset/address are `0x04000000`/`0x83f00000`. Both targets use the same parameters; load requires the matching build stamp and an existing, passing timing report. It does not rebuild or program flash.
 
 Outputs and workflow locks are isolated by preset and XLEN at `build/netboot-<RAPT_CONFIG>/rv32/{build,soc,netboot}` and `build/netboot-<RAPT_CONFIG>/rv64/{build,soc,netboot}`; they do not reuse the earlier compact temporary candidates. Use `make fpga-netboot-rv32-info` (or `rv64-info`) to see resolved paths. Do **not** substitute bare `make fpga-load` for the paired target.
 
@@ -132,7 +132,7 @@ Replace both example paths before running. To reuse an existing build, use its r
 
 #### Confirm BIOS support, then prepare TFTP
 
-Open the UART console (`make fpga-console UART_PORT=/dev/serial/by-id/<your-UART>`; replace the device path). Interrupt automatic boot if enabled and run:
+Open the UART console (`make fpga-console UART_PORT=/dev/serial/by-id/<your-UART>`; replace the device path). At the BIOS prompt, run:
 
 ```text
 litex> help
@@ -206,7 +206,7 @@ MiLianKe MLK-CU08-KU15P (Kintex UltraScale+ `xcku15p-ffva1156-2-e`). The board h
 
 ```bash
 # List all FPGA targets visible through Vivado Hardware Manager:
-make fpga-info FPGA_DETECT_REFRESH=1
+make fpga-detect FPGA_DETECT_REFRESH=1
 
 # Build and load the unified 4 GB DDR4/MIG BIOS bitstream:
 make fpga-build FPGA_BOARD=mlk_cu08_ku15p
@@ -269,7 +269,7 @@ Notes:
 
 Linux-oriented KU15P bitstream: `VARIANT=linux32`, LiteX BIOS, on-board 4 GB DDR4 via Xilinx MIG mapped as `main_ram` at `0x80000000` (1 GiB AXI window). On the KU15P, the board-aware Linux profile selects `BOOT_MODE=bios WITH_MIG=1 WITH_SDCARD=1 INTEGRATED_MAIN_RAM_SIZE=0`, `SYS_CLK=50000000` (50 MHz), `UART_BAUD=115200`, and the `default` Raptor preset. The KU15P external-DDR build sets `RAPT_PMEM_BYTES` to the mapped DDR size and defaults `LINUX_FPGA_RAM_SIZE` to that size (1 GiB, `0x80000000..0xbfffffff`). Other platforms retain the default 256 MiB PMEM classifier. MMIO still starts at `0xc0000000`; DDR windows larger than 1 GiB are rejected. Rebuild both gateware and the Linux boot artifacts when upgrading from the old 256 MiB map: a new DTB must not be used with the old classifier. This configuration does not by itself establish board-level 1 GiB memory-test or Linux stress-test success. The legacy LiteDRAM path is still available via `WITH_LITEDRAM=1`. `make fpga-build VARIANT=linux32 FPGA_BOARD=mlk_cu07_ku15p` only succeeds if the Vivado timing report meets constraints; the default bitstream lands under `build/mlk_cu07_ku15p/bios-linux32-mig-sdcard-default-<config-hash>/gateware/`.
 
-KU15P BIOS builds now stop at `litex>` after hardware initialization. Enter `sdcardboot` to boot from SD, the namespaced `netboot` command from `serve` for Ethernet, or `serialboot` for a serial upload. This applies to the fixed netboot and RV64 network profiles as well. `BOOT_MODE=bios` selects the firmware; `CONFIG_BIOS_NO_BOOT` disables its automatic startup sequence while preserving these commands. Ordinary builds can explicitly opt back in with `EXTRA_FLAGS=--sdcard-autoboot` and SD enabled. Rebuild and load the matching bitstream to apply this policy: an existing `.bit` embeds the old BIOS and does not change when only the Python/Makefile sources do.
+KU15P BIOS builds now stop at `litex>` after hardware initialization. Enter `sdcardboot` to boot from SD, the namespaced `netboot` command from `serve` for Ethernet, or `serialboot` for a serial upload. This applies to the fixed netboot and RV64 network profiles as well. `BOOT_MODE=bios` selects the firmware; `CONFIG_BIOS_NO_BOOT` disables its automatic startup sequence while preserving these commands. Automatic boot cannot be enabled: `--sdcard-autoboot` is rejected. Private BIOS sources also disable startup dispatch regardless of generated constants, while preserving interactive boot commands. Rebuild and load the matching bitstream to apply this policy: an existing `.bit` embeds the old BIOS and does not change when only the Python/Makefile sources do.
 
 ```bash
 source /opt/Xilinx/2025.2/Vivado/settings64.sh
@@ -392,7 +392,7 @@ sudo blkid -p /dev/sdX1
 sudo fsck.fat -n /dev/sdX1
 ```
 
-Insert the card into the KU15P board, load its Linux bitstream, and open the console (`make linux-fpga-rv32-load FPGA_BOARD=mlk_cu08_ku15p`, then `make fpga-console FPGA_BOARD=mlk_cu08_ku15p UART_PORT=/dev/ttyUSB1`). BIOS waits at the `litex>` prompt after serialboot times out, even with an SD card inserted. Run `sdcardboot` to start from SD manually. The KU15P flow is verified through an interactive BusyBox root shell. Other boards still need their own end-to-end validation.
+Insert the card into the KU15P board, load its Linux bitstream, and open the console (`make linux-fpga-rv32-load FPGA_BOARD=mlk_cu08_ku15p`, then `make fpga-console FPGA_BOARD=mlk_cu08_ku15p UART_PORT=/dev/ttyUSB1`). BIOS waits at the `litex>` prompt after initialization, even with an SD card inserted. Run `sdcardboot` to start from SD manually. The KU15P flow is verified through an interactive BusyBox root shell. Other boards still need their own end-to-end validation.
 
 Key conventions:
 - The bitstream knobs `BOOT_MODE=bios INTEGRATED_MAIN_RAM_SIZE=0 WITH_MIG=1` are all auto-set by the Linux FPGA profile (`VARIANT=linux32`). The board-specific MIG IP maps external DDR4 at `0x80000000`.

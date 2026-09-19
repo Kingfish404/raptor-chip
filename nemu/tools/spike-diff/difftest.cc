@@ -86,6 +86,14 @@ public:
   {
     p = get_core(0);
     state = p->get_state();
+    // NEMU's optional CSR advertises continuously running counters (WARL 0),
+    // not Spike's writable inhibit bits. Preserve that platform contract.
+#ifdef CONFIG_RV_MCOUNTINHIBIT
+    state->csrmap[CSR_MCOUNTINHIBIT] =
+        std::make_shared<const_csr_t>(p, CSR_MCOUNTINHIBIT, 0);
+#else
+    state->csrmap.erase(CSR_MCOUNTINHIBIT);
+#endif
     // Set CLINT mtimecmp to UINT64_MAX so MTIP starts deasserted (mtime < mtimecmp)
     uint64_t max_timecmp = UINT64_MAX;
     static_cast<simif_t *>(this)->mmio_store(CLINT_BASE + 0x4000, 8, (uint8_t *)&max_timecmp);
@@ -120,6 +128,10 @@ public:
     ctx->sr[CSR_STVAL] = state->stval->read();
     ctx->sr[CSR_SIP] = state->csrmap[CSR_SIP]->read();
     ctx->sr[CSR_SATP] = state->satp->read();
+    ctx->sr[0x14d] = state->csrmap[0x14d]->read();  // stimecmp
+#ifndef CONFIG_RV64
+    ctx->sr[0x15d] = state->csrmap[0x15d]->read();  // stimecmph
+#endif
 
     ctx->sr[CSR_MSTATUSH] = state->mstatush ? state->mstatush->read() : 0;
     ctx->sr[CSR_MSTATUS] = state->mstatus->read();
@@ -159,6 +171,11 @@ public:
     state->stval->write(ctx->sr[CSR_STVAL]);
     state->csrmap[CSR_SIP]->write(ctx->sr[CSR_SIP]);
     state->satp->write(ctx->sr[CSR_SATP]);
+    // Preserve timer-compare reset values and resynchronization state too.
+    state->csrmap[0x14d]->write(ctx->sr[0x14d]);  // stimecmp
+#ifndef CONFIG_RV64
+    state->csrmap[0x15d]->write(ctx->sr[0x15d]);  // stimecmph
+#endif
 
     if (state->mstatush) state->mstatush->write(ctx->sr[CSR_MSTATUSH]);
     state->mstatus->write(ctx->sr[CSR_MSTATUS]);
@@ -234,13 +251,15 @@ extern "C"
               "A"
               MUXDEF(CONFIG_RV_F, "F", "")
               MUXDEF(CONFIG_RV_D, "D", "")
-              "C_zicbop_zicclsm_zicntr_zicond_zicsr_zifencei_zihintntl_zihintpause_zimop_zcb_zcmop_zba_zbb_zbc_zbs";
+              "C_zicbop_zicclsm_zicntr_zicond_zicsr_zifencei_zihintntl_zihintpause_zimop_zcb_zcmop_zba_zbb_zbc_zbs_sstc";
     cfg.initrd_bounds = std::make_pair((reg_t)0, (reg_t)0);
     cfg.bootargs = nullptr;
     cfg.isa = isa;
     cfg.priv = DEFAULT_PRIV;
     cfg.endianness = endianness_little;
-    cfg.pmpregions = 16;
+    // Match Raptor and NEMU's eight implemented PMP entries. Upper CSR
+    // slots remain read-only zero and are probed by OpenSBI at startup.
+    cfg.pmpregions = 8;
     cfg.mem_layout = std::vector<mem_cfg_t>();
     cfg.hartids = std::vector<size_t>(1);
     cfg.real_time_clint = false;

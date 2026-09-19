@@ -32,6 +32,8 @@ task automatic init_bus_inputs;
     l1d_bus.rpbmt = 2'b00;
     l1d_bus.wpbmt = 2'b00;
     l1d_bus.ar_ptw = 1'b0;
+    l1d_bus.ar_mshr = 1'b0;
+    l1d_bus.ar_mshr_id = '0;
     l1d_bus.awvalid = 1'b0;
     l1d_bus.awaddr = '0;
     l1d_bus.aw_ptw = 1'b0;
